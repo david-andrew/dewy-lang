@@ -98,3 +98,31 @@ Implementation gates: seven alternating baseline/candidate fresh single-worker s
 6. **Diagnostics and milestone integration.** Own fact diagnostics, new goldens and ladder integration; judged budget 3–5 days excluding surface decisions. Stabilize witness goldens, complete application extractions and cost gates; adopt approved prototype scope only after David decides. Run focused/quick per compiler commit; full suite, independent bootstrap and fixed point at batch boundary. Never count unsupported-feature rejection as a soundness pass. Milestone 22 remains incomplete until its strict harness and approved prototype acceptance are satisfied.
 
 The critical prerequisites are deferred symbolic assertions, one evaluation-order adapter, alias-normalized places, and checked-summary publication. Highest soundness risks are invariant laundering through `@`, stale actual/source substitution, cleanup changing postconditions, loops retaining speculative facts, and conflating storage with length. Outside scope: strict/prototype spelling decisions and general invariant authority remain coordinator/David work; program 30's sort API is a separate capability.
+
+## Decided rules
+
+Moved here from the decisions ledger ([decisions.md](decisions.md)), which keeps
+a pointer to each rule. The wording is David's.
+
+*Later than this document's "ordinary code retains runtime checks" (no traps by
+default, 2026-10-21; see [no_traps.md](no_traps.md)): unproven obligations are
+compile errors unless `$runtime_checks` is on.*
+
+### Invariants and brands
+
+- Invariants: types declare invariants; construction proves them (or checks
+  them under `$runtime_checks`) and mutating methods re-establish them. Richer
+  properties ("sorted", "validated") are brands minted only by trusted
+  validators; later, user-defined validators via compile-time code. Public
+  interfaces use written contracts; inferred facts stay private.
+
+### Deferred
+
+- Index-typed refinements: deferred until real code needs them.
+
+### Partial operators (2026-10-23)
+
+- Refinements prefer partial operators (decided 2026-10-23): where a refinement
+  is a single comparison or test against the value, the idiomatic spelling is
+  the reference's partial operator (`b:int64<(>=? a)>`), not a lambda
+  (`b:int64<v => a <=? v>`); docs, examples, diagnostics and fix-its use it.

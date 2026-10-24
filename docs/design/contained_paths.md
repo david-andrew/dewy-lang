@@ -63,6 +63,12 @@ a symbolic link at `a` could take it elsewhere. A link inside the base can still
 point outside. Closing that gap is `root.open_beneath(rel)` (below), not part of
 this design.
 
+Soft preconditions (decided 2026-10-23): `$warn_if <condition> "message"` is a
+warn-strength assertion; at a call site it warns when the compiler cannot prove
+the condition false. The sink design that used it before this one (and its
+meaning for command-line and environment input) is replaced by the scoped
+rule above.
+
 ## The traversal fact
 
 A path's text, or text a path is made of, is a *traversal* when it is built by

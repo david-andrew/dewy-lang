@@ -328,3 +328,35 @@ step 2 relative to concurrent work. Pass deletion, root-only ceilings and persis
 index/explicit-game-import remedies are superseded. Conditional convergence now
 reaches 1,450/N; budget plausibility remains contingent on measured unit costs,
 densities and the fresh scanner, not asserted by the residual table.
+
+## Decided rules
+
+Moved here from the decisions ledger ([decisions.md](decisions.md)), which keeps
+a pointer to each rule. The wording is David's.
+
+### Library loading
+
+- No library image: fresh compiles only. Hello-world is a ~50 ms guardrail.
+  Library floor (confirmed 2026-10-21): lazy loading only. Parse and check only
+  the declarations and the bodies a program reaches; no precomputed library
+  summaries and no images.
+
+*The hello-world guardrail is tightened to 20 ms or less by the compile-speed
+metric (decisions.md, 2026-10-22), which this document's contract section
+states.*
+
+### Compile speed framing (A, 2026-10-21)
+
+- Compile speed framing (A, 2026-10-21): the north star is 200–250k lines/s
+  single-threaded on real code (the flagships, not synthetic), default build;
+  parallel workers are measured but secondary. It takes a different compiler
+  architecture, not tuning, via a strangler-fig migration (not a rewrite).
+  Track A: the five structural fixes (milestone: flagship median ≥ 50k lines/s
+  single-thread). Track B: B0 per-phase per-node cost budgets gated on the
+  flagship panel (~1.2k instructions/node total); B1 an architecture design
+  (docs/design/compiler_architecture.md; Astra designs, Sol audits; internal
+  architecture needs no sign-off, so B2 starts once the audit agrees the budgets
+  can plausibly reach the goal); B2 phase-by-phase migration behind stable interfaces, most
+  expensive first; B3 new import-cycle-leaf modules written in Dewy. Track C:
+  capability work continues. No precomputed library summaries or images
+  without David's explicit approval.

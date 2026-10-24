@@ -157,3 +157,26 @@ Candidate designs should make clear which guarantees are compiler-checked, which
 - [GCC instrumentation options](https://gcc.gnu.org/onlinedocs/gcc/Instrumentation-Options.html) distinguish stack checking and stack-clash protection from a recovery contract.
 
 Evaluate candidate designs against small object-heavy helpers, bounded and unbounded parsers, recursive tree traversal, big-integer arithmetic, reusable library callbacks, concurrent tasks, and foreign entry points. Compare source noise, inferred proofs, failure visibility, generated checks, reserved memory, and behavior across build modes and targets. Reporting stack use and unknown boundaries could be useful before any particular language policy is chosen.
+
+## Decided rules
+
+Moved here from the decisions ledger ([decisions.md](decisions.md)), which keeps
+a pointer to each rule. The wording is David's.
+
+### Allocation (Q4)
+
+- Allocation (Q4): an implicit pushed context allocator (Jai-style), heap by
+  default. Ordinary allocation is infallible; true OOM ends the process with a
+  report (an environmental failure, outside no-traps).
+  `$explicit_allocation_failure` (top level) makes every allocating function
+  return `T | OutOfMemory`. Under `$no_hidden_costs`, capacity is acquired
+  explicitly (an arena returns `Arena | OutOfMemory`); use proven within
+  acquired capacity can't fail (resource_exhaustion.md).
+
+### Resources
+
+- Resources: no blanket guarantee; practical tools (size-limited input APIs,
+  default parser depth limits, `within` deadlines, static stack bounds where
+  provable) and specific error values for failures that can't be ruled out.
+  Goal: the highest-safety configuration handles every resource-exhaustion case
+  (heap and stack), as a future bundle on top of `$explicit_allocation_failure`.

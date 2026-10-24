@@ -49,3 +49,28 @@ visible where it can be handled. History: the first refined-parameter slice
 (2026-08-27) briefly introduced `_trap` fallbacks in the rational and fixed
 libraries; David rejected them on sight and they were replaced the next day
 (see `dewy/status.md`, "No runtime traps").
+
+## Decided rules
+
+Moved here from the decisions ledger ([decisions.md](decisions.md)), which keeps
+a pointer to each rule. The wording is David's.
+
+### No traps by default (2026-10-21)
+
+- No traps by default (10-21; supersedes "ordinary code keeps runtime
+  checks"): every partial operation is proven, handled as a value
+  (`xs.get(i)` → `T | none`) or checked with `$runtime_assert`; unproven is a
+  compile error with a fix-it. `$runtime_checks` (module/function/block) is the
+  production opt-in: unproven obligations become reporting checks, listable via
+  `check --obligations` and an LSP hint. `$prototype` keeps its archived
+  semantics (runtime deferral with a `prototype:` warning per site).
+
+### Runtime failures do not leak data (2026-10-23)
+
+- Runtime failures don't leak data: a missing-key panic reports only that the
+  key is missing (did-you-mean hints are compile-time only); an error reaching
+  `main` prints its type and `message` (full payloads in debug builds only).
+  Dictionaries hash with a per-process seeded keyed hash and iterate in
+  insertion order. `min`/`max` follow IEEE 754-2019 minimum/maximum (NaN
+  propagates); float sorting uses totalOrder; float dictionary keys carry a
+  not-NaN obligation. `main`'s `exit_code` is constrained to 1–100.

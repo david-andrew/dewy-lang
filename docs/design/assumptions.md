@@ -25,3 +25,38 @@ row here in the same change.
 `$bulletproof` (library bundle) turns every row off together with
 `$no_hidden_costs`, `$explicit_allocation_failure`, `$finite_floats` and
 `$no_deadlocks`.
+
+## Decided rules
+
+Moved here from the decisions ledger ([decisions.md](decisions.md)), which keeps
+a pointer to each rule. The wording is David's.
+
+### Safety configuration (2026-10-21)
+
+- Safety configuration: orthogonal boolean metatags plus purpose-named,
+  library-defined bundles. Docs present a loosest-to-strictest ladder:
+  `$prototype`, `$runtime_checks`, the default (no traps), `$explicit_copies`,
+  `$no_hidden_costs`, `$explicit_allocation_failure`. No numbered levels.
+- Strict lane is `$no_hidden_costs`: a library-defined module bundle over
+  function rows (`& no allocates`, …) plus `$explicit_copies` semantics; forbids
+  hidden allocation, detach, implicit costly copies and `$runtime_checks`/
+  `$prototype`; `$no_hidden_costs = false` opts a scope out. `$realtime` is
+  reserved for a future stronger bundle (no blocks, bounded stack).
+
+### Metatag names and the bundle (2026-10-23)
+
+- Metatag names: `$no_assumed_bounds` disables the 64-bit counter progress
+  axiom and any similar "can't happen in practice" bound, demanding real
+  proofs. `$bulletproof` is the strictest-everything library bundle:
+  `$no_hidden_costs`, `$explicit_allocation_failure`, `$finite_floats`,
+  `$no_deadlocks`, `$no_assumed_bounds`, and every future opt-out listed in
+  [assumptions.md](assumptions.md).
+
+### Counter progress axiom and `$no_nan` (2026-10-23)
+
+- Counter progress axiom: default on. A 64-bit counter or accumulator that
+  grows by a bounded amount per iteration or allocation cannot overflow;
+  32-bit and narrower counters get no axiom. An opt-out metatag (spelling
+  pending David) disables it and requires a real proof.
+- `$no_nan` does not assume incoming values: callers prove not-NaN, or it is
+  checked under `$runtime_checks`.

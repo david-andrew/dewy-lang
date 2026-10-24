@@ -230,8 +230,8 @@ Returned places are enabled for methods lending a field route of their object
 
 ## Returned places
 
-Implemented 2026-10-24 (compiler/place_methods.jo), per decisions round 6,
-batch 13 and the small batch. A method whose body gives `@member`, or written
+Implemented 2026-10-24 (compiler/place_methods.jo), per the places-from-handles
+rules in "Decided rules" below. A method whose body gives `@member`, or written
 `:> @T`, lends that place. Nothing lifetime-bearing reaches the lowering: the
 method's function returns its guard (a record of the locals declared before the
 place is given, or `true`), and its route from the receiver is recorded. The
@@ -361,3 +361,39 @@ archived `values.md`, `objects.md`, `arrays-and-containers.md` and approved
 `dewy/PHASE1_DESIGN_PROPOSALS.md` protocol; ladder REPORT questions 3–6 and 13–17;
 prior refinement/effects designs; current lower/copies/check/expr/types and rt.
 
+## Decided rules
+
+Moved here from the decisions ledger ([decisions.md](decisions.md)), which keeps
+a pointer to each rule. The wording is David's.
+
+### Lifecycle hooks
+
+- Lifecycle hooks: copy and move hooks preserve the abstract value; move hooks
+  cannot fail. No explicit `move` syntax for now.
+
+### Closures and captures
+
+- A closure inside a method changes the object's fields only through an
+  explicit `@` capture.
+- Closure capture writes: writing an implicitly captured variable is a
+  compile error with two fix-its, `$capture name` (the closure's own private
+  state) or `$capture @name` (share the outer variable).
+
+### Places from handles (round 6, 2026-10-23)
+
+- Places from handles (round 6): `lock` is a method; under the whole-route `@`
+  rule `@shared.lock` is the method handle, and `@(m.method())` takes the place a
+  method returns (grouping makes the call happen). Legal only when the method
+  is declared to return a place; `@` of an ordinary temporary stays an error.
+  Derived places are checked lexically (no lifetime annotations); replacing or
+  releasing the handle while such a place is live is a compile error; the guard
+  releases after the place's last use (`let a = @(shared.lock())`; `a.balance += 10`;
+  `saved = @a` is an error).
+- Idiom: when taking the place returned by a zero-argument method, write the
+  optional parentheses: `let a = @(acct.lock())`, not `@(acct.lock)`.
+- Place-returning methods: the place result is inferred from a body that
+  returns `@something`; call sites write `@(m.lock())`. The explicit
+  definition-side annotation is pending David.
+- Place-returning methods may be annotated `:>@T`, written with a space after
+  the arrow in idiomatic style (`lock = () :> @T => …`); unannotated, the
+  place result is inferred from the body.

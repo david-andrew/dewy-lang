@@ -138,3 +138,55 @@ string-literal union as its enum. Still open: the intern table (`hash_bytes`) as
 costs +0.5–0.8% on the panel (lex+parse +2%): a new name needs a byte-range substring
 Dewy lacks (copy loop, UTF-8 check, conversion: ~600 instructions against Sloppy's ~250), and
 Sloppy retains a string passed beside a `mut` place (~20 instructions a call).
+
+## Decided rules
+
+Moved here from the decisions ledger ([decisions.md](decisions.md)), which keeps
+a pointer to each rule. The wording is David's.
+
+### FFI (Q12/Q24)
+
+- FFI (Q12/Q24): `$extern` is a body-position metatag with optional keyword
+  arguments (`=> $extern`, `=> $extern(name='Sleep' lib='kernel32')`). It
+  replaces the `extern` keyword, which is un-reserved. `$export` (provisional)
+  makes a function callable from C, Rust and Python. Calling `$extern` or
+  dereferencing a raw `ptr<T>` (provisional; `ptr<T>?` nullable) needs an
+  unsafe boundary. The goal is batteries-included Dewy with seamless,
+  bidirectional FFI (C, C++, Rust, Python, JS/wasm); header bindgen comes
+  later. A blocking-style `net` module returns `| NetError | Canceled`, over
+  FFI for now.
+- C interop: `$export` may share the line with its definition (a metatag
+  applies to the next thing). `$unsafe` applies to the next expression, on the
+  same line or the next (`$unsafe strlen(msg.ptr)`); several expressions use
+  `$unsafe { ... }`. This replaces the provisional "own line, rest of the
+  block" form.
+
+### `$target` and `$build`
+
+*The canonical target names below (and the `$build`/`$target` namespaces,
+2026-10-23) are later than the value list under "`$target` in the design, and
+what is now implemented" above (`x86_64`, `riscv`, `arm`, `c`, `wasm32`) and
+supersede it. Q24's splat import (`import p"x.dewy"` with no selection) is
+decided; the table row above that calls it undecided predates it.*
+
+- `$target` keeps its spelling. Canonical names with only the fields they need
+  (`x86_64`, `aarch64-linux`, `riscv64-freestanding`, `c-linux`, `aarch64-mac`,
+  `x86_64-windows`, `wasm32`, …; not LLVM triples), per the archived
+  status.md list. OS and arch are selected by compile-time conditions on
+  `$target`.
+- `$build`: a compile-time record like `$target` (`$build.mode =? 'release'`;
+  `$build.debug` was removed 2026-10-23). Project flags (e.g. BOOTSTRAP) are ordinary consts in a build
+  module the entry module overrides; no CLI `-D` flags.
+- `$build` and `$target` (decided 2026-10-23): namespaces with members (a
+  deliberate exception for build facets). Statement position sets, expression
+  position checks, as for every metatag: `$build.mode = 'release'`,
+  `$target = 'aarch64-linux'`, `if $build.mode =? 'debug' {...}`,
+  `if $target.os =? 'windows' {...}`. Boolean members take the bare form for
+  true and `=false`. One member per fact: `$build.mode` is `'debug'` (the
+  default, what plain `dewy FILE` builds) or `'release'`; `$build.debug` is
+  removed. The file is the preferred place to set them; command-line flags
+  (`--release`/`--debug`, `--target …`) override the file, and an override that
+  contradicts a value set explicitly in the file builds with a warning naming
+  both. Only build mode and target can be overridden from the command line;
+  safety and semantic metatags (`$runtime_checks`, `$no_hidden_costs`,
+  `$bulletproof`, …) are never settable from the command line.

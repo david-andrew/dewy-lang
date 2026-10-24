@@ -1,52 +1,72 @@
 # Decisions
 
-David's standing decisions on Dewy's surface and semantics, newest last within
-each topic. ROADMAP.md lists them in one line each; this is the full text.
+David's standing decisions on Dewy's surface and semantics. This file is the
+ledger: a decision that has an owning design doc keeps one or two lines here
+(the decision, its date, a link), and the full rule lives in that doc, in the
+section linked. ROADMAP.md lists them in one line each.
 
-- `int`: arbitrary precision with word storage where proven. `intN`/`uintN` wrap.
+## Owned by a design doc
+
+- No traps by default (2026-10-21; supersedes "ordinary code keeps runtime
+  checks"): every partial operation is proven, handled as a value, or checked
+  with `$runtime_assert`; `$runtime_checks` is the production opt-in; runtime
+  failures leak no data (2026-10-23).
+  [no_traps.md](no_traps.md#decided-rules)
+- Safety configuration (2026-10-21, 2026-10-23): orthogonal boolean metatags and
+  library bundles on a loosest-to-strictest ladder; `$no_hidden_costs` is the
+  strict lane; `$bulletproof` is the strictest bundle; the counter progress
+  axiom and `$no_nan`. [assumptions.md](assumptions.md#decided-rules)
+- The `panics` effect (2026-10-23): inferred, visible in rows, forbidden by
+  `& no panics`. [effects.md](effects.md#decided-rules)
+- Concurrency (2026-10-21; spellings provisional), `Send`/`Sync`, `secret<T>`
+  and the multi-lock spelling (2026-10-23):
+  [safety_and_concurrency.md](safety_and_concurrency.md#decided-rules).
+  Deadlock freedom (adopted direction, 2026-10-23):
+  [safety_and_concurrency.md](safety_and_concurrency.md#deadlock-freedom-adopted-direction-2026-10-23).
+- Tensors (Q7, 2026-10-21): one `array` type with shape in the type, dot
+  broadcasting, contiguous N-d literals; `end`/`new` reserved; `\` continues a
+  line (2026-10-23); GPU placement is explicit and mixing devices is an error.
+  [tensors.md](tensors.md#decided-rules)
+- Allocation (Q4) and resources: an implicit context allocator, infallible
+  unless `$explicit_allocation_failure`; no blanket exhaustion guarantee.
+  [resource_exhaustion.md](resource_exhaustion.md#decided-rules)
+- Fixed-width integers (2026-10-22; supersedes "`intN`/`uintN` wrap"):
+  arithmetic is exact, storing is the proven narrowing, overflow policy is a
+  type parameter; `transmute` for reinterpretation.
+  [precision_inference.md](precision_inference.md#fixed-width-integers-2026-10-22)
+- Inference precision: decimal literals adapt to context, exact rationals stay
+  the default (2026-10-23), unannotated bindings keep the covering type
+  (uniform precision, common parent).
+  [precision_inference.md](precision_inference.md#decided-rules)
+- Multi-expressions (2026-10-23; restores the reference), substitution
+  invariance, unpacking, parameter patterns, `:>(int64 int64)`.
+  [multi_expressions.md](multi_expressions.md)
+- Juxtaposition multiplication (2026-10-23; restricted, type-directed rule,
+  replaces the reference's general one; no spaced units).
+  [juxtaposition.md](juxtaposition.md)
+- Contained paths (2026-10-23): `SafePath`, `root.confine(p)` and the bool
+  guard `root.contains(p)`, traversal warnings scoped by construction, no
+  source/sink markers. [contained_paths.md](contained_paths.md)
+- Refinements and invariants: partial operators are the idiom (2026-10-23);
+  index-typed refinements deferred. [refinement.md](refinement.md#decided-rules)
+- Ownership, places and closures: lifecycle hooks, places from handles
+  (round 6), place-returning methods `:>@T`, closure capture writes
+  (`$capture`). [ownership.md](ownership.md#decided-rules)
+- FFI (`$extern`, `$export`, `$unsafe`), `$target` names and the `$build`
+  namespace (2026-10-23). [self_hosting.md](self_hosting.md#decided-rules)
+- Compiler architecture: lazy loading with no library image, and the compile
+  speed framing (A: strangler-fig migration, tracks A to C).
+  [compiler_architecture.md](compiler_architecture.md#decided-rules)
+- Time: `month`/`year` combine only with real dates; long-term direction in
+  [time.md](time.md).
+
+## Standing decisions without a design doc
+
+
+- `int`: arbitrary precision with word storage where proven. `intN`/`uintN` arithmetic is exact (see Fixed-width integers above).
 - Zero-argument calls may omit or include the parentheses.
 - A bare function name calls; `@fn` is the handle.
-- No traps by default (10-21; supersedes "ordinary code keeps runtime
-  checks"): every partial operation is proven, handled as a value
-  (`xs.get(i)` → `T | none`) or checked with `$runtime_assert`; unproven is a
-  compile error with a fix-it. `$runtime_checks` (module/function/block) is the
-  production opt-in: unproven obligations become reporting checks, listable via
-  `check --obligations` and an LSP hint. `$prototype` keeps its archived
-  semantics (runtime deferral with a `prototype:` warning per site).
 - Boolean metatags accept `$tag`, `$tag = true`, `$tag = false`.
-- Strict lane is `$no_hidden_costs`: a library-defined module bundle over
-  function rows (`& no allocates`, …) plus `$explicit_copies` semantics; forbids
-  hidden allocation, detach, implicit costly copies and `$runtime_checks`/
-  `$prototype`; `$no_hidden_costs = false` opts a scope out. `$realtime` is
-  reserved for a future stronger bundle (no blocks, bounded stack).
-- Compile speed: 250k lines/s single-threaded in the default build (200k
-  minimum), on representative code. Parallelism is a bonus.
-- Concurrency direction (docs/design/safety_and_concurrency.md, "Adopted
-  direction"): no coloured functions, groups-only spawn, level-triggered
-  `Canceled`, first failure cancels siblings, two lanes, deterministic
-  reductions, bounded channels, explicit atomic orders, no language actors.
-  The parallel loop is the keyword `parallel` (`parallel i in [0..10) {…}`,
-  `[parallel x in xs x*x]`).
-- Concurrency spellings (provisional until seen in real programs):
-  `concurrent { let a = spawn f() … }` joins at the brace; `concurrent g {…}` with
-  `spawn(g) expr` for longer-lived groups. `blocks` is an inferred effect,
-  written only as `& no blocks`. `Canceled` (US spelling; `Cancelled` gets a
-  fix-it error, not an alias). `within(2s @get(url))` (tentative) and `race(…)`
-  are library helpers. `Atomic<T>` ops take an optional compile-time
-  `MemoryOrder` literal ('relaxed'|'acquire'|'release'|'acq_rel'|'seq_cst',
-  default 'seq_cst').
-- GPU: computation follows data with explicit placement (`x.to(dev)`,
-  `.to('best')` or a pushed device context); mixing devices is a compile error,
-  tracked as a device-equality fact. A `parallel` body with no blocks, allocates
-  or syscalls over arrays and scalars is GPU-eligible. Designs stay
-  device-agnostic; nothing to build yet.
-- No library image: fresh compiles only. Hello-world is a ~50 ms guardrail.
-  Library floor (confirmed 2026-10-21): lazy loading only. Parse and check only
-  the declarations and the bodies a program reaches; no precomputed library
-  summaries and no images.
-- Decimal literals adapt to context: exact unless next to a float64 operand, in
-  a float64 parameter or field, or the binding is later written a float; then
-  float64 at compile time (`0.1+0.2 =? 0.3` stays true).
 - Follow the reference: `+` never concatenates (strings use interpolation or
   `join`; containers `[xs... ys...]`; array `+` is reserved for elementwise
   math); bindings must be initialized before reads; `d.keys` is an
@@ -61,49 +81,11 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
   unseen); `loop x in @xs` iterates the place live (worklists). Changing the
   length of a by-value iterated container is a compile error with both fix-its.
   Steerable traversal belongs in the iterator protocol.
-- Inference keeps the most precise type it knows; only an explicit wider
-  annotation widens (literal unions; integers keep range facts).
-- `end` and `new` are reserved: `end` is the last index inside an index; `new`
-  inserts a singleton axis (NumPy `newaxis`): `xs[new ..]`, `xs[.. new]`.
-- Versions: the language stays 0.0.0; the extension gets patch bumps only, at
-  most one release a day.
-- Tensors (Q7): one `array` type with shape in the type
-  (`array<T length=[m n]>`, symbolic dims checked by the fact engine); no
-  `.shape`, `.length` is the source of truth; Julia/MATLAB dot broadcasting
-  (`a .* b`, `f.(xs)`) plus plain `a + b` (same shape) and `A * B` (matmul);
-  NumPy broadcast rules; orientation-free 1-D; contiguous N-d literals
-  (newline rows, blank-line blocks, standalone `;`); `m[i j]` indexing. Full
-  text: [tensors.md](tensors.md). Queued after concurrency stage 1.
-- Safety configuration: orthogonal boolean metatags plus purpose-named,
-  library-defined bundles. Docs present a loosest-to-strictest ladder:
-  `$prototype`, `$runtime_checks`, the default (no traps), `$explicit_copies`,
-  `$no_hidden_costs`, `$explicit_allocation_failure`. No numbered levels.
-- Allocation (Q4): an implicit pushed context allocator (Jai-style), heap by
-  default. Ordinary allocation is infallible; true OOM ends the process with a
-  report (an environmental failure, outside no-traps).
-  `$explicit_allocation_failure` (top level) makes every allocating function
-  return `T | OutOfMemory`. Under `$no_hidden_costs`, capacity is acquired
-  explicitly (an arena returns `Arena | OutOfMemory`); use proven within
-  acquired capacity can't fail (resource_exhaustion.md).
 - Floats (Q8): strict IEEE 754 by default (NaN, ±Inf, signed zero and
   subnormals are values; no reassociation or FMA contraction; deterministic
   reduction order; value-preserving float→int; sorting by totalOrder).
   Orthogonal opt-ins: `$fast_math`, `$no_nan`, `$no_inf`, and the bundle
   `$finite_floats`.
-- FFI (Q12/Q24): `$extern` is a body-position metatag with optional keyword
-  arguments (`=> $extern`, `=> $extern(name='Sleep' lib='kernel32')`). It
-  replaces the `extern` keyword, which is un-reserved. `$export` (provisional)
-  makes a function callable from C, Rust and Python. Calling `$extern` or
-  dereferencing a raw `ptr<T>` (provisional; `ptr<T>?` nullable) needs an
-  unsafe boundary. The goal is batteries-included Dewy with seamless,
-  bidirectional FFI (C, C++, Rust, Python, JS/wasm); header bindgen comes
-  later. A blocking-style `net` module returns `| NetError | Canceled`, over
-  FFI for now.
-- `$target` keeps its spelling. Canonical names with only the fields they need
-  (`x86_64`, `aarch64-linux`, `riscv64-freestanding`, `c-linux`, `aarch64-mac`,
-  `x86_64-windows`, `wasm32`, …; not LLVM triples), per the archived
-  status.md list. OS and arch are selected by compile-time conditions on
-  `$target`.
 - Imports (Q24, following the reference): `import p"x.dewy"` with no selection
   splats the module's top-level bindings (collisions are errors);
   `import p"x.dewy" as name` gives a namespace; selective imports pick names.
@@ -137,13 +119,10 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
 - No separate tuple concept: `[int64 string]` is an array type with per-position
   element types; a const array is a "tuple".
 - Byte literals: `b'a'` is a `uint8`, `b"abc"` a byte array.
-- `%` stays floored, with no mode metatag; alternatives are explicit, e.g.
-  `a.rem(b kind='euclid')` (exact spelling to propose).
+- `%` stays floored, with no mode metatag; alternatives are explicit: `mod(a b kind=…)` (below).
 - Rounding: human-oriented types (rational, decimal, int division results)
   round half away from zero (`round(2.5)=3`, `round(-2.5)=-3`); floats follow
   IEEE ties-to-even. Both take `ties=` to override.
-- Lifecycle hooks: copy and move hooks preserve the abstract value; move hooks
-  cannot fail. No explicit `move` syntax for now.
 - Units (round 5): display is automatic, picking a sensible unit per kind, with
   likely display units chosen for derived expressions; `x as unit` overrides
   and converts (`l as inches`). Offset units do what people expect: `20°C` is a
@@ -152,25 +131,27 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
   unit. `(20°C as °F)` converts as a point (68°F), but as a delta (36°F) when
   used as a delta: infer delta-ness from use, or document the rule. Rational
   dimension exponents are allowed (V/√Hz), so `sqrt` of odd powers is valid.
-- Time: `month`/`year` combine only with real dates. Long-term direction in
-  [time.md](time.md).
-- Invariants: types declare invariants; construction proves them (or checks
-  them under `$runtime_checks`) and mutating methods re-establish them. Richer
-  properties ("sorted", "validated") are brands minted only by trusted
-  validators; later, user-defined validators via compile-time code. Public
-  interfaces use written contracts; inferred facts stay private.
-- Resources: no blanket guarantee; practical tools (size-limited input APIs,
-  default parser depth limits, `within` deadlines, static stack bounds where
-  provable) and specific error values for failures that can't be ruled out.
-  Goal: the highest-safety configuration handles every resource-exhaustion case
-  (heap and stack), as a future bundle on top of `$explicit_allocation_failure`.
-- Index-typed refinements: deferred until real code needs them.
-- `Send`/`Sync` are inferred structurally; `$send = false`/`$sync = false` on a type
-  is a safe opt-out; claiming either for a type the compiler can't verify needs
-  an unsafe boundary.
-- Conversions: `uint8<overflow='wrap'>(x)` keeps the low bits; same-size reinterpretation
-  is the infix word `f transmute uint64` (like `as`). No `.bitcast`/`.wrap`
-  method spellings.
+- Offset units (amends round 5's "infer delta-ness from use"): a temperature
+  written directly as an operand next to a point is a difference
+  (`t + 20°C`). Computed and input values (readings, parsed or loaded
+  values, results involving points) are points; adding two, comparing a
+  point with a difference, and scaling a point are compile errors with
+  fix-its (for averages: `mean[t1 t2]`; or subtract to form a difference).
+  Point versus difference lives in the type, so `as °F` converts each
+  correctly (a 20° difference is 36°F). Named differences have no dedicated
+  spelling (no `Δ`): a difference is a subtraction of two points
+  (`25°C - 5°C`) or plain kelvin (`5K`).
+- Literal-only temperature bindings (amended 2026-10-23): a binding holding
+  only temperature literals (`let rise = 20°C`) takes its kind from all of its
+  uses, decided once per binding as in precision inference, so a use site
+  never reinterprets it. A use only a difference allows (`t + rise`,
+  `t -= rise`, `rise*2`, comparing with a difference) makes it a difference
+  when no use needs a point (`rise <? t`, `rise - t`); uses either kind
+  allows (`t - rise`) don't decide, and an undecided binding is a point.
+  Conflicting uses warn, naming both; the binding stays a point (what a
+  temperature written in a unit is, and what an undecided one is) and each
+  difference use reads it as a difference, as it would the literal.
+- Quantities print without a space: `1500m`, `20°C`.
 - Iterator control: bind the iterator and loop over its place:
   `let w = tree.walk` then `loop node in @w { if skip?(node) w.skip_children }`;
   also `w.seek(i)`. A one-line binding form may come later (`as` is conversion).
@@ -178,69 +159,71 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
   `'euclid'` or `'trunc'`. Not `rem`, not a method.
 - Indexed iteration is always `loop i in 0.. and x in xs`: no `enumerate`, no
   `indexed`.
-- `$build`: a compile-time record like `$target` (`$build.mode =? 'release'`;
-  `$build.debug` was removed 2026-10-23). Project flags (e.g. BOOTSTRAP) are ordinary consts in a build
-  module the entry module overrides; no CLI `-D` flags.
 - File helpers are `Path` methods: `p.copy_to(q)`, `p.rename(q)`, `p.make_dirs`,
   `p.walk`, `p.glob"*.dewy"`, `p.size`, `p.modified`, `p.chmod(...)`; `env`
   stays in the prelude.
 - An ambiguous partial application of an overloaded function is a compile error
   asking for an annotation.
-- A closure inside a method changes the object's fields only through an
-  explicit `@` capture.
 - Printing details: approved as provisionally implemented.
 - Tests: one process per `$test`; `--json` stays provisional.
 - Escapes: an unknown escape of a letter or digit (`\N`) is an error; any ASCII
   punctuation may be escaped to itself (`\}`, `\{`, `\'`, `\"`, `\\`).
 - `and=`/`or=` short-circuit: `a and= f()` means `a = a and f()`.
-- Places from handles (round 6): `lock` is a method; under the whole-route `@`
-  rule `@shared.lock` is the method handle, and `@(m.method())` takes the place a
-  method returns (grouping makes the call happen). Legal only when the method
-  is declared to return a place; `@` of an ordinary temporary stays an error.
-  Derived places are checked lexically (no lifetime annotations); replacing or
-  releasing the handle while such a place is live is a compile error; the guard
-  releases after the place's last use (`let a = @(shared.lock())`; `a.balance += 10`;
-  `saved = @a` is an error).
-- Common parent: literals of sibling types infer the most precise type:
-  `[Circle[...] Square[...]]` is the positional `[Circle Square]`, accepted where
-  `array<Shape>` is expected. After writes the binding's type becomes the
-  covering element type `array<Circle|Square>`; flow-sensitive facts keep exact
-  statically known contents and length (`shapes[2]` is a `Circle` after a known
-  push) and fade when knowledge runs out (loops, a small position cap).
-- Uniform precision: an unannotated binding's type covers every value written.
-  Strings are discrete literal unions (`'quiet'|'normal'|'verbose'`); ints are
-  ranges (`1..2`, which equals `1|2`); `n += 1` widens the covering set; an
-  unbounded written set (loops, `count += 1`, `mode="{mode}!"`) widens to the base
-  type. This supersedes "ints widen to the base type".
 - `main` is optional: without it a file runs top to bottom as a script; with it,
   `main` runs automatically exactly once; an explicit top-level `main()` call is
   an error (recursion inside `main` is fine).
-- `transmute` (`f transmute uint64`) is Dewy's original spelling, restored in
-  place of `bitcast`.
-- The open-question pass is complete (2026-10-21). Anything not covered follows
-  the provisional-default rule: a recommendation plus reversibility,
-  implemented provisionally and flagged.
-- Approved provisional calls (2026-10-21): bundle definitions
-  `$name = { $setting … }` with `$default_row` inside bundles; every failed
-  runtime check (`$runtime_checks` and `$prototype`) exits 101, and `main`'s
-  sequential error exit codes are capped at 100 so they never collide; `sorted`
-  on sets returns an array; module-level `let x:T` with no value is allowed when
-  `main` provably assigns it before any read; forbid-only rows check the body
-  while callers see the inferred effects; distinct `@` parameters are disjoint
-  for the solver; regex `find` returns `Match | Missing`.
-- Compile speed framing (A, 2026-10-21): the north star is 200–250k lines/s
-  single-threaded on real code (the flagships, not synthetic), default build;
-  parallel workers are measured but secondary. It takes a different compiler
-  architecture, not tuning, via a strangler-fig migration (not a rewrite).
-  Track A: the five structural fixes (milestone: flagship median ≥ 50k lines/s
-  single-thread). Track B: B0 per-phase per-node cost budgets gated on the
-  flagship panel (~1.2k instructions/node total); B1 an architecture design
-  (docs/design/compiler_architecture.md; Astra designs, Sol audits; internal
-  architecture needs no sign-off, so B2 starts once the audit agrees the budgets
-  can plausibly reach the goal); B2 phase-by-phase migration behind stable interfaces, most
-  expensive first; B3 new import-cycle-leaf modules written in Dewy. Track C:
-  capability work continues. No precomputed library summaries or images
-  without David's explicit approval.
+- A splat import that shadows a prelude name warns, naming both sources; the
+  warning goes away when the name is selected explicitly or the module is
+  imported `as`. Splat imports stay.
+- Big-int parsing limit: `to_int(s max_digits=…)`, default about 1M digits,
+  returns an error value beyond it (as Python did for CVE-2020-10735);
+  conversion in both directions is subquadratic.
+- The current compiler's implementation language is Sloppy (`.jo` is its file
+  extension); docs and diagnostics name it accurately, never "Jo".
+- Follow-ups (decided 2026-10-23): the site tagline is "Python-like ease.
+  C-like speed. Safer than Rust.", backed by a page of concrete differences. The
+  game library's vector magnitude is `v.norm` (MATLAB/Julia/NumPy term;
+  extends to `v.norm(p=1)` and matrix norms); the free `length(v)` is removed,
+  and `.length` means element count everywhere.
+- Decided 2026-10-23 (answers, corrections, batch 13 and the small batch; the
+  multi-expression, juxtaposition, path, place, metatag and fixed-width rules are
+  in the owning docs above):
+  - `regex(p)` returns `Regex | RegexError`; literal patterns are checked at
+    compile time.
+  - `s.byte_slice(a b)` (proven char boundaries) and `b.read<uint64>(i)`
+    (proven in bounds, no `$unsafe`).
+  - The float and net provisional sets are approved.
+  - Delimited-argument calls `f[…]` and `printl'…'` are approved.
+  - `to_int` returns a specific error kind saying why it failed (unparsable, too
+    many digits, …) instead of `none`.
+  - `??` defaults any exception value as well as `none` (`to_int(s) ?? 0`); the
+    editor hover shows which failures a `??` covers.
+  - Defaulting specific errors: `x ??<Missing|ParseError> 0` defaults only the
+    listed exception types (and `none` if listed); other errors pass through.
+    Plain `x ?? 0` defaults any exception and `none`.
+  - Loops have exactly one form, `loop <condition> <body>`, and are not
+    whitespace sensitive; an infinite loop is `loop true <body>`. The
+    provisional "`loop { … }` loops forever" rule is removed.
+  - No local precedence exception for `loop c in s as array<uint8>`. Operator
+    precedence starts from the archived Python implementation's table, adjusted
+    only where it would confuse; deviations are reported to David.
+  - Precedence of `as` versus `in` is exactly the archived Python parser's; no
+    special case for `loop c in s as …` (write `loop c in (s as array<uint8>)`).
+  - Enums: string-literal unions are unordered from the user's perspective;
+    internal numbering is a representation detail and must not leak across
+    subset/superset unions.
+
+## Ledger
+
+
+- Bulletproof principle (David, 2026-10-23): "I want to be able to write an
+  actually bulletproof program that accounts for every eventuality, with the
+  compiler enforcing it." Every convenience axiom or assumption has a metatag
+  that turns it off and demands the proof instead. They are tracked in one list
+  ([assumptions.md](assumptions.md)) so the strictest configuration can be a
+  library bundle.
+- Compile speed: 250k lines/s single-threaded in the default build (200k
+  minimum), on representative code. Parallelism is a bonus.
 - Compile-speed metric (decided 2026-10-22): the goal stands at 200–250k lines/s
   single-threaded, default build, for every flagship (dunes and 101 included).
   Throughput counts EVERY source line the compiler processes for the build: the
@@ -273,327 +256,16 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
   conformance suite (acceptance ladder and test suite) for a stated version,
   named in the claim. Use in the name or branding of another language,
   implementation, distribution or product needs written permission.
-- Fixed-width integers (decided 2026-10-22; supersedes "`intN`/`uintN` wrap"):
-  arithmetic on `intN`/`uintN` is exact, like `int`; the width is a storage
-  property plus facts. Storing into an `intN`/`uintN` binding, field, parameter
-  or return is the proven narrowing: free when proven, a compile error with
-  fix-its (guard, overflow policy, `$runtime_checks`) when not, a runtime check
-  under `$runtime_checks`, always an error under `$no_hidden_costs`.
-  Intermediates never overflow spuriously; the compiler picks a wide enough
-  machine width (widening multiply for `int64*int64`), never a bigint. The
-  overflow policy is a keyword type parameter: `uint32<overflow='wrap'>` wraps
-  modulo 2^N (hashes, RNGs, checksums, crypto), `uint8<overflow='saturate'>`
-  clamps. Types are callable conversions: `uint8<overflow='wrap'>(x)` keeps the
-  low bits and replaces `wrap<uint8>(x)` (removed, no alias);
-  `uint8<overflow='saturate'>(x)` clamps; `transmute` stays for same-size
-  reinterpretation. `//`, `%`, negation and `abs` follow the same rule
-  (`int64.min // -1` is a narrowing obligation); plain `int` `MIN // -1`
-  promotes.
-- Safety-audit decisions (2026-10-23):
-  - `panics` effect: "may fail a runtime check" (and any other possible panic)
-    is an inferred effect visible in rows. A no-traps scope cannot call code
-    that `panics` unless it opts in with `$runtime_checks`; `& no panics`
-    forbids it outright; `$no_hidden_costs` includes `no panics`. A dependency
-    built with `$runtime_checks` cannot crash inside a caller that did not opt
-    in.
-  - Closure capture writes: writing an implicitly captured variable is a
-    compile error with two fix-its, `$capture name` (the closure's own private
-    state) or `$capture @name` (share the outer variable).
-  - A later assignment that changes a binding's initially inferred type (e.g. a
-    decimal literal adapting to float64) is a warning plus an editor squiggle,
-    not an error. For decimals the diagnostic focuses on exact equality checks
-    (`=?`, `not=?`) whose result the adaptation affects. Idiomatic code states
-    the representation; relying on implicit adaptation is unidiomatic.
-  - Offset units (amends round 5's "infer delta-ness from use"): a temperature
-    written directly as an operand next to a point is a difference
-    (`t + 20°C`). Computed and input values (readings, parsed or loaded
-    values, results involving points) are points; adding two, comparing a
-    point with a difference, and scaling a point are compile errors with
-    fix-its (for averages: `mean[t1 t2]`; or subtract to form a difference).
-    Point versus difference lives in the type, so `as °F` converts each
-    correctly (a 20° difference is 36°F). Named differences have no dedicated
-    spelling (no `Δ`): a difference is a subtraction of two points
-    (`25°C - 5°C`) or plain kelvin (`5K`).
-  - Literal-only temperature bindings (amended 2026-10-23): a binding holding
-    only temperature literals (`let rise = 20°C`) takes its kind from all of its
-    uses, decided once per binding as in precision inference, so a use site
-    never reinterprets it. A use only a difference allows (`t + rise`,
-    `t -= rise`, `rise*2`, comparing with a difference) makes it a difference
-    when no use needs a point (`rise <? t`, `rise - t`); uses either kind
-    allows (`t - rise`) don't decide, and an undecided binding is a point.
-    Conflicting uses warn, naming both; the binding stays a point (what a
-    temperature written in a unit is, and what an undecided one is) and each
-    difference use reads it as a difference, as it would the literal.
-  - A splat import that shadows a prelude name warns, naming both sources; the
-    warning goes away when the name is selected explicitly or the module is
-    imported `as`. Splat imports stay.
-  - Big-int parsing limit: `to_int(s max_digits=…)`, default about 1M digits,
-    returns an error value beyond it (as Python did for CVE-2020-10735);
-    conversion in both directions is subquadratic.
-  - `secret<T>`: a zero-cost compile-time wrapper (representation is just `T`)
-    whose value cannot reach any output or formatting path (interpolation and
-    printing, error messages and payloads, runtime-check reports, `main`'s error
-    output, debugger and LSP hovers, where it shows `<redacted>`), except
-    through one explicit, visible reveal operation (spelling pending David's
-    approval). Later it can drive constant-time checks in crypto code.
-  - Runtime failures don't leak data: a missing-key panic reports only that the
-    key is missing (did-you-mean hints are compile-time only); an error reaching
-    `main` prints its type and `message` (full payloads in debug builds only).
-    Dictionaries hash with a per-process seeded keyed hash and iterate in
-    insertion order. `min`/`max` follow IEEE 754-2019 minimum/maximum (NaN
-    propagates); float sorting uses totalOrder; float dictionary keys carry a
-    not-NaN obligation. `main`'s `exit_code` is constrained to 1–100.
-- Path guard (decided 2026-10-23; amends contained paths): `root.contains(p)`
-  returns `bool` and works as a guard; the solver narrows `p` to `SafePath` in
-  the true branch (`if root.contains(f) { serve_file(f) }`), as
-  `if i <? xs.length` proves an index. `root.contain(p)` stays the expression
-  form returning `SafePath | PathEscape` for `or_throw`.
-- Multi-expressions (decided 2026-10-23; restores the reference): an expression
-  may produce one value, several values for a surrounding collector, `void`, or
-  `never`. A block evaluates its expressions in source order and expresses each
-  non-`void` result; a context requiring one value rejects a block that can
-  produce an incompatible number of values. This holds in every construct
-  (blocks, function bodies, `if`/`match`/`loop` arms, loop capture, collectors),
-  so `pair = () => { 1 2 }; [pair()]` is `[1 2]`. Full semantics in
-  [multi_expressions.md](multi_expressions.md).
-- Refinements prefer partial operators (decided 2026-10-23): where a refinement
-  is a single comparison or test against the value, the idiomatic spelling is
-  the reference's partial operator (`b:int64<(>=? a)>`), not a lambda
-  (`b:int64<v => a <=? v>`); docs, examples, diagnostics and fix-its use it.
-- The current compiler's implementation language is Sloppy (`.jo` is its file
-  extension); docs and diagnostics name it accurately, never "Jo".
-- Follow-ups (decided 2026-10-23): the site tagline is "Python-like ease.
-  C-like speed. Safer than Rust.", backed by a page of concrete differences. The
-  game library's vector magnitude is `v.norm` (MATLAB/Julia/NumPy term;
-  extends to `v.norm(p=1)` and matrix norms); the free `length(v)` is removed,
-  and `.length` means element count everywhere. Type-directed juxtaposition
-  multiplication (reference operators-and-precedence.md:24-35) is on hold pending
-  David's review of its readability and safety; literal coefficients keep
-  today's behavior and the docs stay neutral. The boolean path guard stays
-  `root.contains(p)`; the value-returning validator is being renamed (too easy to
-  confuse with `contains`), name pending.
-- Decimal default (decided 2026-10-23): exact rationals stay the default; no
-  decimal-float default. Principle: an expression's value never depends on
-  whether the compiler folded it, so `a = 0.1 b = 0.2; a+b =? 0.3` and
-  `x = 1/3; x*3 =? 1` are true everywhere. Costs addressed: an exact value carried
-  around a loop through `*` or `/` (size can grow each iteration) gets a warning
-  with a fix-it to annotate `float64` or another explicit representation, never
-  an automatic switch; values print the way they were written (decimals as
-  decimals, with a repeating marker when non-terminating; written fractions as
-  fractions), with the exact display rule reported to David.
-- Contained paths and untrusted input (decided 2026-10-23; design in
-  [contained_paths.md](contained_paths.md)): `Path` stays the everyday type and
-  flows freely. `SafePath` is a `Path` with a proven brand ("does not escape its
-  base"); only trusted validators create brands, and the compiler applies it
-  automatically to paths built from hardcoded text, other `SafePath`s, or
-  components proven safe (one component, no `/`, not `.`/`..`, not empty).
-  Untrusted is a tracked fact, not a kind of value: text from external input
-  (network, stdin, file contents, environment, command line) carries an
-  untrusted brand; a path built from it is a plain `Path`, not a `SafePath`, and
-  passes through `Path` code freely (`UntrustedPath` may name it in signatures;
-  it is not an exception type). `root.contain(p)` returns
-  `SafePath | PathEscape`; functions that care take `SafePath`, and passing an
-  unvalidated path is a compile error with a `root.contain(p) or_throw` fix-it.
-  Safety net: a warning when an untrusted-derived path reaches a filesystem
-  operation without `contain`. Later: `root.open_beneath(rel)` for symlink
-  escapes (openat2 RESOLVE_BENEATH or equivalent); the same untrusted brand can
-  guard process spawning, SQL and HTML sinks. This is the first user of the
-  untrusted-input brand in safety_and_concurrency.md, built generally.
-- Path validator name (decided 2026-10-23): `root.confine(p)` returns
-  `SafePath | PathEscape`; `root.contains(p)` is the bool guard narrowing `p` to
-  `SafePath`. The name `contain` is gone.
-- Deadlock freedom (adopted direction, 2026-10-23; full text in
-  [safety_and_concurrency.md](safety_and_concurrency.md#deadlock-freedom-adopted-direction-2026-10-23)):
-  inferred lock order with no user-written ranks; compile errors only for
-  demonstrated deadlocks, warnings for undecided cases; a multi-lock in canonical
-  order (`DuplicateLock` on a repeated handle; spelling pending); `try_lock`
-  returns a place or `Busy`; `$no_deadlocks` requires a compositional certificate
-  for every wait, under stated assumptions (fair scheduler, terminating local
-  computation, cooperating peers). Monitored `Deadlock` scopes and STM come later,
-  only when needed. Timeouts are recovery, not proofs. Juxtaposition
-  multiplication remains on hold.
-- Juxtaposition multiplication (decided 2026-10-23; replaces the reference's
-  fully general rule; full text in [juxtaposition.md](juxtaposition.md)): a
-  restricted, type-directed rule with no whitespace between the parts. Eligible:
-  a numeric literal before a name/member term or group (`2x`, `2sin(x)`,
-  `3(a+b)`); a named numeric value or field route before a group (`a(x)`,
-  `material.k(T)`); a parenthesized scalar before a group (`(a+1)(a-1)`). The
-  left side must be a statically known, non-callable numeric scalar or quantity,
-  and the group supplies exactly one value. The head is classified once, before
-  any implicit zero-argument call; a failed call never falls back to
-  multiplication. Precedence: member/call/index > `^` > juxtaposition >
-  `* / // %` > unary `+ -` > `+ -` > comparisons. Whitespace products, call or
-  index results as coefficients, tensors, numeric `@a(x)` and string-literal
-  calls are excluded with diagnostics. No spaced units anywhere (`9.81m/s^2`;
-  `9.81 m` is two expressions).
-- Multi-lock spelling (decided 2026-10-23):
-  `let [a b] = @(lock_all(from to)) or_throw` acquires in canonical order
-  (`from == to` gives `DuplicateLock`); each lock is released after its place's
-  last use. `try_lock` is a method returning a place or `Busy`
-  (`match @(m.try_lock()) {...}`).
-- Idiom: when taking the place returned by a zero-argument method, write the
-  optional parentheses: `let a = @(acct.lock())`, not `@(acct.lock)`.
-- Bulletproof principle (David, 2026-10-23): "I want to be able to write an
-  actually bulletproof program that accounts for every eventuality, with the
-  compiler enforcing it." Every convenience axiom or assumption has a metatag
-  that turns it off and demands the proof instead. They are tracked in one list
-  ([assumptions.md](assumptions.md)) so the strictest configuration can be a
-  library bundle.
-- Answers on pending items (decided 2026-10-23):
-  - Counter progress axiom: default on. A 64-bit counter or accumulator that
-    grows by a bounded amount per iteration or allocation cannot overflow;
-    32-bit and narrower counters get no axiom. An opt-out metatag (spelling
-    pending David) disables it and requires a real proof.
-  - Multi-value function type: `:>(int64 int64)`; parentheses group several
-    result values.
-  - `secret<T>` reveal: `s.reveal`. Sealed secrets (reveal requiring a key or
-    capability) may come later.
-  - `$runtime_assert` makes its function `panics` for callers in other modules,
-    not within its own module.
-  - `regex(p)` returns `Regex | RegexError`; literal patterns are checked at
-    compile time.
-  - Quantities print without a space: `1500m`, `20°C`.
-  - `s.byte_slice(a b)` (proven char boundaries) and `b.read<uint64>(i)`
-    (proven in bounds, no `$unsafe`).
-  - The float and net provisional sets are approved.
-  - `$no_nan` does not assume incoming values: callers prove not-NaN, or it is
-    checked under `$runtime_checks`.
-  - Delimited-argument calls `f[…]` and `printl'…'` are approved.
-  - `to_int` returns a specific error kind saying why it failed (unparsable, too
-    many digits, …) instead of `none`.
-  - Paths from command-line arguments or the environment do not warn at
-    filesystem operations, but stay untrusted for other sinks.
-- Corrections (decided 2026-10-23):
-  - Loops have exactly one form, `loop <condition> <body>`, and are not
-    whitespace sensitive; an infinite loop is `loop true <body>`. The
-    provisional "`loop { … }` loops forever" rule is removed.
-  - No local precedence exception for `loop c in s as array<uint8>`. Operator
-    precedence starts from the archived Python implementation's table, adjusted
-    only where it would confuse; deviations are reported to David.
-  - Multi-expressions: a `:>void` function whose body expresses values is an
-    error (attach `;` or change the return type). `void | E` expresses `E` when
-    it fails and nothing on success. `[1 2; 3 4]` is valid (the attached `;`
-    discards `2`, giving `[1 3 4]`), with a warning and a ` ; ` fix-it when it
-    looks like a mistaken row separator.
-  - Juxtaposition: `]x` stays a parse error. A parenthesized numeric expression
-    followed by a name or number multiplies (`(5)x`, `(x)2`). A parenthesized
-    callable followed by a delimited argument is a call (`(p)r"..."`,
-    `(f)[1 2]`, `(f)(x)`). Any expression immediately followed by an empty
-    `()` is a call. `a(x).abs()` and `a(x)[i]` are rejected only when `a` is
-    numeric (idiomatic: `abs(a(x))`).
-  - Unpacking: `[a b] = …` and `(a b) = …` both unpack whenever the right side
-    provides a compatible number of values, including multi-valued calls, rest
-    (`(a b ...c) = (1 2 3 4 5 6)`), nested patterns and renaming, following
-    resources/discussion_points.md "Unpack syntax". Call-argument and signature
-    destructuring is undecided.
-  - Untrusted-input markers are metatags, not `@` (which means places):
-    `$sink(path)` and `$guard(SafePath)` on library declarations, and a source
-    marker in place of `__untrusted(x)` (exact forms proposed to David).
-- Batch 13 (decided 2026-10-23):
-  - Metatag names: `$no_assumed_bounds` disables the 64-bit counter progress
-    axiom and any similar "can't happen in practice" bound, demanding real
-    proofs. `$bulletproof` is the strictest-everything library bundle:
-    `$no_hidden_costs`, `$explicit_allocation_failure`, `$finite_floats`,
-    `$no_deadlocks`, `$no_assumed_bounds`, and every future opt-out listed in
-    [assumptions.md](assumptions.md).
-  - Place-returning methods: the place result is inferred from a body that
-    returns `@something`; call sites write `@(m.lock())`. The explicit
-    definition-side annotation is pending David.
-  - `??` defaults any exception value as well as `none` (`to_int(s) ?? 0`); the
-    editor hover shows which failures a `??` covers. Defaulting only specific
-    error kinds is pending David.
-  - Line continuation: a `\` at the end of a line cancels that newline
-    everywhere: in array and matrix literals (`[2 3 5 \` + newline + `7 11]` is
-    one row), in strings (removes the newline) and in ordinary code. This
-    replaces the provisional "1-D receiving type flattens rows" rule; a 2-D
-    literal assigned to a 1-D type is an error suggesting `\`.
-  - C interop: `$export` may share the line with its definition (a metatag
-    applies to the next thing). `$unsafe` applies to the next expression, on the
-    same line or the next (`$unsafe strlen(msg.ptr)`); several expressions use
-    `$unsafe { ... }`. This replaces the provisional "own line, rest of the
-    block" form.
-  - Sibling literals: after `let s = Circle[...]` and a later `s = Square[...]`,
-    the exact type is tracked flow-sensitively (a `Circle` until the write, a
-    `Square` after); the binding's covering type stays the union, with a warning
-    suggesting an annotation (either type or the union).
-  - Juxtaposition warns when the coefficient is a numeric or array local
-    shadowing a function name (`let sin=0.5` then `sin(x)^2`).
-  - Shifts with an unbounded intermediate (`(a << n) >> n`, `n` unproven) are a
-    compile error with fix-its (bound `n`, compute in `int`, or an overflow
-    policy).
-  - Unpacking: rename with `as`, with the type on the source name
-    (`[apple:int64  banana:int64 as b] = o`; nested
-    `[apple  banana as [carrot durian]] = o2`). `=` inside patterns is reserved
-    for future defaults (deferred). `...rest` may appear anywhere in a pattern,
-    once per level (`[first ...mid last]`); a bare `...` drops the remaining
-    values (`[first ...] = xs`). Both `[...] =` and `(...) =`. `[local=field]`
-    renaming becomes `[field as local]`, with no alias.
-  - Multi-values into calls: a multi-valued expression is never reduced to its
-    last value and never needs `...`. `add(pair())` passes both values to
-    `add`'s two parameters; the target must accept that many, or it is a
-    compile error naming the counts. `...` only expands an actual container
-    (`add([20 22]...)`, positional, exact length proven). `[pair()]` collects.
-    Arity comes from the declared or inferred result type `:>(int64 int64)`;
-    overloads see the expanded shape. Mitigation for shifted arguments: an LSP
-    inlay hint showing which parameter each value fills, and a warning when a
-    multi-valued argument is followed by further positional arguments.
-  - Parameter patterns: each parameter takes one argument and destructures it on
-    entry (`area = ([w h]:Size) => w*h`). Pattern names are not part of the
-    function type. Patterns must be proven to fit. `((a b)) =>` declares one
-    patterned parameter, `(a b) =>` two. Deferred: record-to-keyword spreading
-    `f(opts...)`, place patterns `@[a b]`, pattern defaults.
-  - Precedence of `as` versus `in` is exactly the archived Python parser's; no
-    special case for `loop c in s as …` (write `loop c in (s as array<uint8>)`).
-  - Enums: string-literal unions are unordered from the user's perspective;
-    internal numbering is a representation detail and must not leak across
-    subset/superset unions.
-- Small batch (decided 2026-10-23):
-  - Place-returning methods may be annotated `:>@T`, written with a space after
-    the arrow in idiomatic style (`lock = () :> @T => …`); unannotated, the
-    place result is inferred from the body.
-  - Defaulting specific errors: `x ??<Missing|ParseError> 0` defaults only the
-    listed exception types (and `none` if listed); other errors pass through.
-    Plain `x ?? 0` defaults any exception and `none`.
-  - Soft preconditions: `$warn_if <condition> "message"` is a warn-strength
-    assertion; at a call site it warns when the compiler cannot prove the
-    condition false. The sink design that uses it (and its meaning for
-    command-line and environment input) is pending.
-- Substitution invariance for multi-values (decided 2026-10-23; supersedes the
-  provisional "one-value contexts take the last" and "call arguments take one
-  value each"): if a literal works somewhere, anything producing the same values
-  works there unchanged. `(a b)` is not a container but the syntax for several
-  values; `[ … ]` arrays and records are containers, and a container is one
-  value. `add(1 2)`, `fn = () => (1 2); add(fn)`, `pair = (a b); add(pair)` all
-  fill both parameters; a container must be spread (`add([1 2]...)`,
-  `add(fn2...)` when `fn2` returns `[1 2]`). Bindings can hold several values,
-  typed `(int64 int64)` like multi-value results. Several values are never cut
-  down to one: a context that needs exactly one value (operand, index, single
-  parameter) given several is a compile error naming the counts. Several values
-  are not indexable (`pair[0]` is an error suggesting `[pair][0]` or
-  `(x y) = pair`). `[…]` collects several values into a container; `xs...`
-  spreads a container into several values. Mitigation kept: an LSP inlay hint
-  showing which parameter each value fills, and a warning when a multi-valued
-  argument is followed by further positional arguments.
-- Path safety, scoped by construction (decided 2026-10-23; replaces source-trust
-  markers and the args/env exemption): warn when unproven text is interpolated
-  into a base path and the result reaches a filesystem operation without
-  `confine`/`contains`, the traversal pattern. A whole path taken as-is from
-  arguments, environment, input or anywhere else has no base to escape and does
-  not warn. Libraries express this with `$warn_if p isnt? SafePath "…"`;
-  `SafePath` is a minted type only the path library can create, so there are no
-  `$guard`/`$sink` metatags and no `__untrusted` source markers. Under
-  `$bulletproof`, an opt-in makes every external path require confinement or
-  explicit acknowledgment.
-- `$build` and `$target` (decided 2026-10-23): namespaces with members (a
-  deliberate exception for build facets). Statement position sets, expression
-  position checks, as for every metatag: `$build.mode = 'release'`,
-  `$target = 'aarch64-linux'`, `if $build.mode =? 'debug' {...}`,
-  `if $target.os =? 'windows' {...}`. Boolean members take the bare form for
-  true and `=false`. One member per fact: `$build.mode` is `'debug'` (the
-  default, what plain `dewy FILE` builds) or `'release'`; `$build.debug` is
-  removed. The file is the preferred place to set them; command-line flags
-  (`--release`/`--debug`, `--target …`) override the file, and an override that
-  contradicts a value set explicitly in the file builds with a warning naming
-  both. Only build mode and target can be overridden from the command line;
-  safety and semantic metatags (`$runtime_checks`, `$no_hidden_costs`,
-  `$bulletproof`, …) are never settable from the command line.
+- Versions: the language stays 0.0.0; the extension gets patch bumps only, at
+  most one release a day.
+- The open-question pass is complete (2026-10-21). Anything not covered follows
+  the provisional-default rule: a recommendation plus reversibility,
+  implemented provisionally and flagged.
+- Approved provisional calls (2026-10-21): bundle definitions
+  `$name = { $setting … }` with `$default_row` inside bundles; every failed
+  runtime check (`$runtime_checks` and `$prototype`) exits 101, and `main`'s
+  sequential error exit codes are capped at 100 so they never collide; `sorted`
+  on sets returns an array; module-level `let x:T` with no value is allowed when
+  `main` provably assigns it before any read; forbid-only rows check the body
+  while callers see the inferred effects; distinct `@` parameters are disjoint
+  for the solver; regex `find` returns `Match | Missing`.

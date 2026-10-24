@@ -3,7 +3,7 @@
 David's decision on open question 7. It replaces the earlier provisional tensor
 notes. Not built yet: it is queued after concurrency stage 1. Keep it
 device-agnostic. A GPU is placement context (`x.to(dev)`), not a type change, and
-mixing devices is a compile error ([decisions](decisions.md)).
+mixing devices is a compile error (see "Decided rules" below).
 
 ## One array type, shape in the type
 
@@ -53,3 +53,29 @@ Loop capture can produce shaped N-d arrays; simple loop captures are 1-D.
 Indexing is `m[i j]`, with one space-separated index per dimension
 (resources/discussion_points.md). Shape mismatches follow no-traps: a compile
 error unless proven, or checked under `$runtime_checks`.
+
+## Decided rules
+
+Moved here from the decisions ledger ([decisions.md](decisions.md)), which keeps
+a pointer to each rule. The wording is David's.
+
+### GPU placement
+
+- GPU: computation follows data with explicit placement (`x.to(dev)`,
+  `.to('best')` or a pushed device context); mixing devices is a compile error,
+  tracked as a device-equality fact. A `parallel` body with no blocks, allocates
+  or syscalls over arrays and scalars is GPU-eligible. Designs stay
+  device-agnostic; nothing to build yet.
+
+### `end` and `new`
+
+- `end` and `new` are reserved: `end` is the last index inside an index; `new`
+  inserts a singleton axis (NumPy `newaxis`): `xs[new ..]`, `xs[.. new]`.
+
+### Line continuation (2026-10-23)
+
+- Line continuation: a `\` at the end of a line cancels that newline
+  everywhere: in array and matrix literals (`[2 3 5 \` + newline + `7 11]` is
+  one row), in strings (removes the newline) and in ordinary code. This
+  replaces the provisional "1-D receiving type flattens rows" rule; a 2-D
+  literal assigned to a 1-D type is an error suggesting `\`.

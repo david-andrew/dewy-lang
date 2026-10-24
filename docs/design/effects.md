@@ -89,3 +89,24 @@ Implementers establish a fresh matching baseline, then seven alternating single-
 Dependency order: refinement slice 1's evaluation/capture interface and this design's slice 1 place identities come first; coordinate that small shared extraction. Then effects slices 2–3 feed refinement slice 4's precise call invalidation. Refinement slices 2–4's boundary/bounds proofs precede effects slice 5; they do not block direct rows. Share callable contracts when either slice first needs them. Neither design requires the architecture's full inference/layout/parallel refactor.
 
 Sources inspected: archived `site/reference/src/refinements-and-effects.md` effects section; the three named design notes and GOALS; scratch `sol-ladder3` programs 01/02/10/11/12/29/30 and their acceptance notes; `sol-refine/DESIGN.md`; `astra-design/DESIGN.md` §2 and measurements; `sol-review/REVIEW.md` §2–5; current `isolation.jo`, `copies.jo`, `types.jo`, `check.jo`, `expr.jo`, `lower.jo` and `main.jo`. No repository artifacts or evidence files were written.
+
+## Decided rules
+
+Moved here from the decisions ledger ([decisions.md](decisions.md)), which keeps
+a pointer to each rule. The wording is David's.
+
+### The `panics` effect (2026-10-23)
+
+*Later than this document's "ordinary code retains safe runtime checks" and "do
+not invent surface spellings" for `Panic/Terminate` (no traps by default,
+2026-10-21; see [no_traps.md](no_traps.md)): `panics` is an inferred effect
+visible in rows.*
+
+- `panics` effect: "may fail a runtime check" (and any other possible panic)
+  is an inferred effect visible in rows. A no-traps scope cannot call code
+  that `panics` unless it opts in with `$runtime_checks`; `& no panics`
+  forbids it outright; `$no_hidden_costs` includes `no panics`. A dependency
+  built with `$runtime_checks` cannot crash inside a caller that did not opt
+  in.
+- `$runtime_assert` makes its function `panics` for callers in other modules,
+  not within its own module.

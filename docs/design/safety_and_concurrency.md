@@ -215,10 +215,9 @@ Step 5 is the ergonomic and performance win, and it is where the partition-first
 
 David accepted this direction on 2026-10-21. Decided spelling: the parallel loop
 is the keyword `parallel`, used like `loop`: `parallel i in [0..10) { … }`, and
-`[parallel x in xs x*x]`. Not yet decided: the task-group form, `blocks`,
-`Canceled` and the `Atomic` order spellings. Keep tensor and `parallel` designs
+`[parallel x in xs x*x]`. The task-group form, `blocks`, `Canceled` and the `Atomic` order
+spellings are provisional (see "Decided rules" below). Keep tensor and `parallel` designs
 device-agnostic: a GPU is placement/representation context, not a type change.
-
 
 ### (a) The parallelism lane: asynchrony, which is free to run sequentially
 
@@ -314,7 +313,7 @@ Undecided cases are warnings in ordinary code.
 **Multi-lock.** One operation acquires any set of locks, including a dynamic
 set, in one canonical order, and releases everything on failure or
 cancellation. Holding the same handle twice is `DuplicateLock`; it never yields
-two places into one payload. The spelling is pending.
+two places into one payload. The spelling is decided (see "Decided rules" below).
 
 **`try_lock`** returns a place or `Busy`.
 
@@ -354,3 +353,49 @@ Their spellings go to David then.
 
 Measure the false-rejection rate on the corpus and the compile cost on the
 flagship panel.
+
+## Decided rules
+
+Moved here from the decisions ledger ([decisions.md](decisions.md)), which keeps
+a pointer to each rule. The wording is David's.
+
+### Concurrency direction and spellings (2026-10-21)
+
+- Concurrency direction (see "Adopted direction (2026-10-21)" above): no
+  coloured functions, groups-only spawn, level-triggered `Canceled`, first failure cancels siblings, two lanes, deterministic
+  reductions, bounded channels, explicit atomic orders, no language actors.
+  The parallel loop is the keyword `parallel` (`parallel i in [0..10) {…}`,
+  `[parallel x in xs x*x]`).
+- Concurrency spellings (provisional until seen in real programs):
+  `concurrent { let a = spawn f() … }` joins at the brace; `concurrent g {…}` with
+  `spawn(g) expr` for longer-lived groups. `blocks` is an inferred effect,
+  written only as `& no blocks`. `Canceled` (US spelling; `Cancelled` gets a
+  fix-it error, not an alias). `within(2s @get(url))` (tentative) and `race(…)`
+  are library helpers. `Atomic<T>` ops take an optional compile-time
+  `MemoryOrder` literal ('relaxed'|'acquire'|'release'|'acq_rel'|'seq_cst',
+  default 'seq_cst').
+
+### `Send` and `Sync`
+
+- `Send`/`Sync` are inferred structurally; `$send = false`/`$sync = false` on a type
+  is a safe opt-out; claiming either for a type the compiler can't verify needs
+  an unsafe boundary.
+
+### `secret<T>` (2026-10-23)
+
+- `secret<T>`: a zero-cost compile-time wrapper (representation is just `T`)
+  whose value cannot reach any output or formatting path (interpolation and
+  printing, error messages and payloads, runtime-check reports, `main`'s error
+  output, debugger and LSP hovers, where it shows `<redacted>`), except
+  through one explicit, visible reveal operation (spelling pending David's
+  approval). Later it can drive constant-time checks in crypto code.
+- `secret<T>` reveal: `s.reveal`. Sealed secrets (reveal requiring a key or
+  capability) may come later.
+
+### Multi-lock spelling (2026-10-23)
+
+- Multi-lock spelling (decided 2026-10-23):
+  `let [a b] = @(lock_all(from to)) or_throw` acquires in canonical order
+  (`from == to` gives `DuplicateLock`); each lock is released after its place's
+  last use. `try_lock` is a method returning a place or `Busy`
+  (`match @(m.try_lock()) {...}`).
