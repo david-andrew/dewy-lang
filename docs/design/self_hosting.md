@@ -32,7 +32,7 @@ that the code generator is not the obstacle. The obstacles are surface and boots
 | `when not BOOTSTRAP:` | dropped: stage0 never compiles Dewy, so the gate is meaningless here | see `$target` |
 | closure capturing loop locals | works (snapshots) | A |
 | `mut u8[]` | `@b:array<uint8>` / `put16(@h v)`, also across Sloppy<->Dewy | A |
-| `len(str)`, `loop c in str` (bytes) | `s as array<uint8>` (specified view; measured zero-copy). `loop c in s as array<uint8>` converts the source | A |
+| `len(str)`, `loop c in str` (bytes) | `s as array<uint8>` (specified view; measured zero-copy). `loop c in (s as array<uint8>)` converts the source | A |
 | `data(out)+n`, `mem_copy` | the literal form compiles via undocumented Sloppy prelude leakage; `out.extend(src)` is documented and costs the same | A |
 | `deflate` (lib/game/image.jo) | `from p"@lib/game/image.jo" import deflate` (it also leaks in unimported) | A |
 | `write_bytes -> bool` | `write_bytes(path out) is? int64` | A |
@@ -132,8 +132,8 @@ Open gaps from these leaves, by cost:
 - Sloppy's style, `int64` with `& 0xFFFFFFFF` masks, costs 3x: the mask's bound does not
   reach the exact additions through array elements.
 
-Gaps met on the way, and since closed: a conversion ending a loop header converts the last source; `bytes as string ?? ""`
-converts to `string | none` and falls back; `fill(v n)` is documented; Sloppy takes a Dewy
+Gaps met on the way, and since closed: `bytes as string ?? ""` converts to
+`string | none` and falls back; `fill(v n)` is documented; Sloppy takes a Dewy
 string-literal union as its enum. Still open: the intern table (`hash_bytes`) as a leaf
 costs +0.5–0.8% on the panel (lex+parse +2%): a new name needs a byte-range substring
 Dewy lacks (copy loop, UTF-8 check, conversion: ~600 instructions against Sloppy's ~250), and

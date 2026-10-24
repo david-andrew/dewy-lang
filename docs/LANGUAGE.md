@@ -969,6 +969,48 @@ floating math library. `bigint` powers remain exact for nonnegative exponents;
 `rational` supports signed exponents. All these types define zero to the zero
 power as one.
 
+Operators bind from tightest to loosest:
+
+| Operators | Grouping |
+|---|---|
+| `@` (it covers the whole place: `@items[i].x`) | prefix |
+| member `.`, call `f(x)`, index `xs[i]`, `f"..."`, `f<T>`, spread `xs...` | left |
+| `~`, effect `no` | prefix |
+| `?` (optional type) | postfix |
+| `^` | right |
+| juxtaposition (`2x`, `a(x)`) | left |
+| `*` `/` `//` `%` | left |
+| `+` `-` | prefix |
+| `+` `-` | left |
+| `<<` `>>` | left |
+| `,` | flat |
+| `..` | range |
+| iterator `in` | |
+| `type of` | prefix |
+| `&` | left |
+| `\|` | left |
+| `??` | right |
+| `=?` `not =?` `<?` `<=?` `>?` `>=?` `is?` `isnt?` `in?` | chain |
+| `not` | prefix |
+| `and` `nand` | left |
+| `xor` `xnor` | left |
+| `or` `nor` | left |
+| `as` `transmute` | left |
+| `or_throw` | postfix |
+| `:` | |
+| `:>` | left |
+| `=>` | right |
+| `\|>` | left |
+| `<\|` | right |
+| `->` | |
+| `=` and compound assignment | |
+| attached `;` | postfix |
+
+Broadcast operators (`.+`, `.*`, `.<?`, ...) bind like their scalar forms. So
+`~x^2` is `(~x)^2`, `-x^2` is `-(x^2)`, `not x =? y` is `not (x =? y)`,
+`x as int64 + 1` is `x as (int64 + 1)` (write `(x as int64) + 1`) and
+`f(x) * 2 or_throw` is `(f(x) * 2) or_throw`.
+
 Compound updates `//=`, `%=`, `/=` and `^=` use the same operations as their
 ordinary forms. The destination keeps its type; fixed-width integer results wrap
 back to that width. `let x = 7; x //= 2` stores `3`, while `let x = 7/1; x /= 2` stores
@@ -3107,9 +3149,9 @@ Inputs and range bounds are evaluated once, in source order. Conditions run
 from left to right and can refer to earlier bindings. An `or` group accepts
 iterator bindings; ordinary boolean `or` still works in a condition.
 
-A conversion ending a header converts the last source, since a header itself
-has no type: `loop byte in text as array<uint8> { ... }` iterates
-`text as array<uint8>`, as does `loop i in 0.. and byte in text as array<uint8>`.
+`as` binds more loosely than `in`, so a converted source is parenthesized:
+`loop byte in (text as array<uint8>) { ... }`; without the parentheses the
+conversion would take the whole header, which is an error.
 
 A loop has one form, `loop condition body`, wherever its line breaks fall. A
 loop that runs until `break` or `return` leaves it is `loop true { ... }`. A

@@ -1052,9 +1052,12 @@ dn_atom = () -> int:
     token = dn_tokens[dn_at]
     symbol = token.symbol
     # Effect negation is contextual; ordinary bindings named `no` remain valid.
+    effect_no = false
     if token.kind == .identifier and (token.name == i32(dn_no_id) or token.name == 0 and dn_payload(token) == "no") and dn_at + 1 < dn_tokens.len():
         following = dn_payload(dn_tokens[dn_at + 1])
-        if following == "reads" or following == "mutates" or following == "allocates" or following == "blocks" or following == "panics": symbol = .kw_not
+        if following == "reads" or following == "mutates" or following == "allocates" or following == "blocks" or following == "panics":
+            symbol = .kw_not
+            effect_no = true
     if token.kind == .eof: return dn_error(token.start, "expected an expression")
     # (`(... amount:int64)`: a bare `...` opening a parameter list)
     if symbol == .ellipsis and dn_at > 0 and dn_tokens[dn_at - 1].symbol == .lparen and dn_at + 1 < dn_tokens.len() and (dn_tokens[dn_at + 1].symbol == .rparen or dn_tokens[dn_at + 1].kind == .identifier and dn_at + 2 < dn_tokens.len() and dn_tokens[dn_at + 2].symbol == .colon):
@@ -1072,7 +1075,10 @@ dn_atom = () -> int:
         power = 125
         # A reference covers the full postfix place: @point.x, @items[i].x.
         if symbol == .at: power = 160
-        if symbol == .kw_not: power = 75
+        # (`~` and effect `no` bind above `?` and `^`: `~x^2` is `(~x)^2`, `no reads & no blocks`
+        # is `(no reads) & (no blocks)`; word `not` sits below the comparisons)
+        if symbol == .tilde or effect_no: power = 150
+        else if symbol == .kw_not: power = 75
         return dn_op_node(.prefix, symbol, token.start, [0, dn_expr(power)])
     if symbol == .range:
         dots = dn_node(.identifier, "..", token.start)
@@ -1231,13 +1237,10 @@ dn_expr = (minimum: int) -> int:
         value_rhs = dn_token_assignment(op) or (op == .assign and dw_name(left) != "")
         right = if value_rhs: dn_value(power + 1) else: dn_expr(if op == .function or op == .caret or op == .dot_caret or op == .coalesce or op == .pipe_left: power else: power + 1)
         if op == .kw_as or op == .kw_transmute:
-            # `loop c in text as array<uint8>`: a loop header converts no type, so
-            # the conversion takes the last `in`'s source, as `loop c in (text as array<uint8>)`
+            # (`loop c in text as array<uint8>`: `as` binds more loosely than `in`)
             last = left
-            loop dewy_syntax[last].kind == .binary and dw_op(last) == .kw_and: last = dewy_syntax[last].child_right
-            if dewy_syntax[last].kind == .binary and dw_op(last) == .kw_in:
-                dewy_syntax[last].child_right = dn_operator(.binary, op, dewy_syntax[last].child_right, right)
-                continue
+            loop dewy_syntax[last].kind == .binary and (dw_op(last) == .kw_and or dw_op(last) == .kw_or): last = dewy_syntax[last].child_right
+            if dewy_syntax[last].kind == .binary and dw_op(last) == .kw_in: return dn_error(token.start, "`{dn_token_text(op)}` binds more loosely than `in`, so this converts the whole loop header: parenthesize the source, as in `loop c in (text {dn_token_text(op)} array<uint8>)`")
             # `bytes as string ?? ""`: no type has a fallback, so this converts to an
             # optional and falls back, as `(bytes as string | none) ?? ""`
             if op == .kw_as and dewy_syntax[right].kind == .binary and dw_op(right) == .coalesce:

@@ -1,3 +1,8 @@
+# quick
+# A conversion of a loop source is parenthesized: `as` binds more loosely than `in`.
 main=()=>{
     loop c in ("aé" as array<uint8>) {printl(c)}
+    loop i in 0.. and c in ("é" as array<uint8>) {printl"{i} {c}"}
+    let doubled=[loop c in ("ab" as array<uint8>) int64(c)*2]
+    printl(doubled)
 }

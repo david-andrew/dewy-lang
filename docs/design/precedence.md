@@ -1,10 +1,10 @@
 # Operator precedence — adjustments
 
 Proposed and landed 2026-08-31 (all four moves; `as` left in place). Kept as
-the rationale. The live table is `operator_groups` in
-`dewy/parser/p0.py`; the user-facing copy is
-`site/reference/src/operators-and-precedence.md` (slightly behind: it omits
-`or_throw`).
+the rationale. The archived table (`operator_groups` in `dewy/parser/p0.py`)
+is the starting point (decided 2026-10-23); the live table is `dn_power` and
+the prefix powers in `compiler/dewy_fast.jo`, and the user-facing copy is the
+table in docs/LANGUAGE.md.
 
 The skeleton is sound: arithmetic, then scale/shift, then compose (`&` `|`),
 then ask (`=?` `is?` …), then combine answers (`and`/`or`), then annotate /
