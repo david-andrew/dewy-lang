@@ -947,7 +947,9 @@ name or a number (`(a+1)(a-1)`, `(5)x`, `(x)2`). At `head(...)` the head
 decides, once, before anything is called: a function is called, and a number or quantity multiplies, with exactly
 one value in the parentheses (for a number `a`, `a(x y)` is an error: write
 `a * (x * y)`). A failed call never becomes a product, and a head that may be a
-function or a number (a union of both) must be narrowed first. A call result,
+function or a number (a union of both) must be narrowed first. A number or array
+named like a function (`let sin=0.5`, then `sin(x)^2`) warns that it hides the
+function. A call result,
 an indexed element or an array is never a coefficient: write `f(x) * g(x)`,
 `xs[i] * j`, `A*x` (or `A[x]` to index). `@a(x)` needs a function. An empty
 `()` after any expression calls it, and a delimited argument after a function or

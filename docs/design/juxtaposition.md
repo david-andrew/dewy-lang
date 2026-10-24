@@ -35,7 +35,9 @@ call:
 - a union of callable and numeric, an unresolved category, or an object that is
   both requires narrowing or an explicit operator.
 
-A failed call never falls back to multiplication.
+A failed call never falls back to multiplication. A numeric or array value
+named like a function (`let sin=0.5` then `sin(x)^2`) warns that it hides the
+function (decided 2026-10-23).
 
 Calls (corrected 2026-10-23):
 

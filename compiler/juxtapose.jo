@@ -100,6 +100,7 @@ juxt_head_numeric = (r: int) -> bool:
         # (`$`-names are the compiler's own, as `end` in brackets: never a coefficient)
         text = name_of(int(nodes[h].name))
         if len(text) > 0 and text[0] == '$': return false
+        juxt_shadow_check(r, h, t)
     else:
         # (a parenthesized group: its value decides)
         t = prune(check_expr(h, 0))
@@ -248,3 +249,16 @@ juxt_group_product = (n: int):
     if juxt_numeric(t) or tk == .var or tk == .param: return
     if juxt_callable(t): fatal(nodes[n].pos, "this group is a function, and a name or number after its parentheses does not call it: give it a delimited argument, `(f)(x)`")
     fatal(nodes[n].pos, "a group multiplies a name or number after it only when it is a number, and this one is {a_type(t)}: write `*`")
+
+# `let sin=0.5` then `sin(x)^2`: a number or an array named like a function makes the
+# call a product (or an error); say which the name means here.
+juxt_shadow_check = (r: int, h: int, t: int):
+    tk = types[t].kind
+    if not (juxt_numeric(t) or tk == .array or tk == .fixed or is_nd(t)): return
+    if pos_in_lib(nodes[r].pos): return
+    fns_: int[]
+    collect_fns(int(nodes[h].name), fns_)
+    if fns_.len() == 0: return
+    nm = name_of(int(nodes[h].name))
+    if juxt_numeric(t): warn(nodes[h].pos, "`{nm}` here is {a_type(t)}, which hides the function `{nm}`, so `{nm}(...)` multiplies by it instead of calling the function: rename the value, or write `{nm} * (...)` to keep the product")
+    else: warn(nodes[h].pos, "`{nm}` here is {a_type(t)}, which hides the function `{nm}`, so `{nm}(...)` is not a call of the function: rename the value, or index it, `{nm}[...]`")
