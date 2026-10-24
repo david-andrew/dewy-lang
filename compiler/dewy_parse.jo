@@ -12,6 +12,7 @@ use 'oom.jo'
 use 'check.jo'
 use 'decimals.jo'
 use 'dewy_tokens.dewy'
+use 'dewy_syntax.dewy'
 use 'refine.jo'
 use 'proofs.jo'
 use 'dewy_methods.jo'
@@ -27,41 +28,6 @@ use 'concurrency.jo'
 use 'place_methods.jo'
 use 'place_split.jo'
 
-dw_kind_name = (kind: DewyKind) -> str:
-    match kind:
-        unknown: "Unknown"
-        op: "op"
-        identifier: "Identifier"
-        boolean: "Bool"
-        metatag: "Metatag"
-        based_string: "BasedString"
-        integer: "Integer"
-        source_integer: "Integer"
-        source_real: "Real"
-        quoted: "quoted"
-        rawquoted: "rawquoted"
-        eof: "eof"
-        atom: "Atom"
-        ambiguous: "Ambiguous"
-        binary: "BinOp"
-        block: "Block"
-        combined_assignment: "CombinedAssignmentOp"
-        flat: "Flat"
-        flow: "Flow"
-        interpolated_string: "IString"
-        inverted_comparison: "InvertedComparisonOp"
-        keyword: "Keyword"
-        keyword_expr: "KeywordExpr"
-        operator: "Operator"
-        postfix: "Postfix"
-        prefix: "Prefix"
-        string: "String"
-        string_chunk: "StringChunk"
-        directive: "Directive"
-        compact_expr: "CompactExpression"
-        compact_stmt: "CompactStatement"
-        lazy_body: "LazyBody"
-
 # whether the source just before pos is `...` attached to it (`...rest`)
 dw_rest_attached = (pos: int) -> bool:
     o = pos_off(pos)
@@ -74,60 +40,28 @@ dw_param_name_node = (p: int) -> int:
     if dewy_syntax[p].kind == .binary and dw_op(p) == .colon: return dw_child(p, 1)
     p
 
-struct DewySyntax:
-    kind: DewyKind
-    text: str
-    pos: int
-    children: int[]
-    symbol: DewyToken = .none
-    name: i32 = 0
-    # Binary nodes keep their sentinel and operands inline; other nodes use children.
-    child_mode: int = 0
-    child_left: int = 0
-    child_right: int = 0
-
 dewy_syntax: DewySyntax[]
 dw_index_context: int[]  # enclosing index nodes, for contextual `end`
 
-dw_child = (id: int, at: int) -> int:
-    mode = dewy_syntax[id].child_mode
-    if mode == 0: return dewy_syntax[id].children[at]
-    if at == 0: return mode - 1
-    if at == 1: return dewy_syntax[id].child_left
-    dewy_syntax[id].child_right
+# (the tree's shape and the folds are dewy_syntax.dewy's)
+dw_child = (id: int, at: int) -> int: syntax_child(dewy_syntax, id, at)
+dw_children = (id: int) -> int[]: syntax_children(dewy_syntax, id)
+dw_nchildren = (id: int) -> int: syntax_count(dewy_syntax, id)
 
-dw_children = (id: int) -> int[]:
-    if dewy_syntax[id].child_mode == 0: return dewy_syntax[id].children
-    [dewy_syntax[id].child_mode - 1, dewy_syntax[id].child_left, dewy_syntax[id].child_right]
-
-dw_nchildren = (id: int) -> int:
-    if dewy_syntax[id].child_mode != 0: return 3
-    dewy_syntax[id].children.len()
-
-dw_multiplications = (id: int) -> int:
-    score = if dewy_syntax[id].text == "MultiplyJuxtapose": 1 else: 0
-    loop child in dw_children(id): score += dw_multiplications(child)
-    score
-
+# (most nodes are no group and not ambiguous: that test stays inline)
 dw_unwrap = (id: int) -> int:
-    let id = id
-    loop true:
-        if dewy_syntax[id].kind == .atom: id = dw_child(id, 0)
-        else if dewy_syntax[id].kind == .ambiguous:
-            best = -1
-            score = 1000000000
-            tied = false
-            loop child in dw_children(id):
-                next = dw_multiplications(child)
-                if next < score:
-                    best = child
-                    score = next
-                    tied = false
-                else if next == score: tied = true
-            if best < 0 or tied: return dw_fail(id, "an ambiguous expression; use explicit multiplication or parentheses")
-            id = best
-        else: return id
-    id
+    k = dewy_syntax[id].kind
+    if k != .atom and k != .ambiguous: return id
+    u = syntax_unwrap(dewy_syntax, id)
+    if u < 0: return dw_fail(0 - u - 1, "an ambiguous expression; use explicit multiplication or parentheses")
+    u
+
+# (a mistake dewy_syntax.dewy found: it stops here)
+dw_problem = (p: SyntaxProblem):
+    if len(p.message) == 0: return
+    if p.unsupported: dw_fail_pos(p.at, p.message)
+    fatal(p.at, p.message)
+
 dw_name = (id: int) -> str:
     let id = dw_unwrap(id)
     if dewy_syntax[id].kind == .identifier: return dewy_syntax[id].text
@@ -244,16 +178,7 @@ dw_add_receiver = (fn_: int, receiver: int, receiver_type: int):
     nodes[param].a = i32(receiver_type)
     set_list(fn_, [param] + kids(fn_))
 
-dw_op = (id: int) -> DewyToken:
-    let id = dw_unwrap(id)
-    kind = dewy_syntax[id].kind
-    if kind != .binary and kind != .prefix and kind != .postfix and kind != .flat: return .none
-    symbol = dewy_syntax[id].symbol
-    if symbol != .none: return symbol
-    # Otherwise the operator is represented as a child node.
-    if kind == .binary and dewy_syntax[dw_child(id, 0)].kind == .combined_assignment:
-        return dn_token_kind(dewy_syntax[dw_child(dw_child(id, 0), 0)].text + "=")
-    dewy_syntax[dw_child(id, 0)].symbol
+dw_op = (id: int) -> DewyToken: syntax_op(dewy_syntax, dw_unwrap(id))
 
 dw_fail = (id: int, what: str) -> int:
     dw_fail_pos(dewy_syntax[id].pos, what)
@@ -283,117 +208,50 @@ dw_target_name = () -> str:
     if target_windows: return "x86_64-windows"
     "x86_64-linux"
 
-dw_is_target = (id: int) -> bool:
-    let id = dw_unwrap(id)
-    dewy_syntax[id].kind == .metatag and dewy_syntax[id].text == "target"
+dw_build_mode = () -> str:
+    if release_build: return "release"
+    "debug"
 
-dw_is_build = (id: int) -> bool:
-    let id = dw_unwrap(id)
-    dewy_syntax[id].kind == .metatag and dewy_syntax[id].text == "build"
+dw_is_target = (id: int) -> bool:
+    p = SyntaxProblem("", 0, false)
+    yes = syntax_is_target(dewy_syntax, p, id)
+    dw_problem(p)
+    yes
 
 # `$target` (0), `$target.arch` (1), `$target.os` (2) or `$build.mode` (3); -1 for
-# anything else. `$build` is the compile-time record of how the program is built: its
-# mode, 'debug' or 'release'.
+# anything else.
 dw_target_field = (id: int) -> int:
-    let id = dw_unwrap(id)
-    if dw_is_target(id): return 0
-    if dw_op(id) != .dot or dw_nchildren(id) != 3: return -1
-    member = dw_name(dw_child(id, 2))
-    if dw_is_build(dw_child(id, 1)):
-        if member == "mode": return 3
-        if member == "debug": fatal(dewy_syntax[id].pos, "`$build` has `mode` ('debug' or 'release'), not `debug`: test `$build.mode =? 'debug'`")
-        fatal(dewy_syntax[id].pos, "`$build` has `mode` ('debug' or 'release'), not `{member}`")
-    if not dw_is_target(dw_child(id, 1)): return -1
-    if member == "arch": return 1
-    if member == "os": return 2
-    -1
+    p = SyntaxProblem("", 0, false)
+    field = syntax_target_field(dewy_syntax, p, id)
+    dw_problem(p)
+    field
 
-# The value of a `$target` or `$build` field.
-dw_target_field_value = (field: int) -> str:
-    if field == 1: return target_arch_of(dw_target_name())
-    if field == 2: return target_os_of(dw_target_name())
-    if field == 3: return if release_build: "release" else: "debug"
-    dw_target_name()
+dw_target_field_value = (field: int) -> str: syntax_target_field_value(field, dw_target_name(), dw_build_mode())
 
-# A target name (field 0), processor (1) or system (2) written as a string literal,
-# checked against the names the design gives.
-dw_target_literal = (id: int, field: int = 0) -> str?:
-    let id = dw_unwrap(id)
-    if dewy_syntax[id].kind != .string: return none
-    name = dewy_syntax[id].text
-    pos = dewy_syntax[id].pos
-    if field == 3:
-        if name != "release" and name != "debug": fatal(pos, "unknown build mode \"{name}\": `$build.mode` is \"release\" or \"debug\"")
-        return name
-    if field == 1:
-        if not (name in target_arches()): fatal(pos, "unknown processor \"{name}\": `$target.arch` is one of {join(target_arches(), ", ")}")
-        return name
-    if field == 2:
-        if not (name in target_oses()): fatal(pos, "unknown system \"{name}\": `$target.os` is one of {join(target_oses(), ", ")}")
-        return name
-    if not (name in target_names()): fatal(pos, "unknown target \"{name}\": `$target` is one of {join(target_names(), ", ")}")
-    if target_os_of(name) == "none" and name != "wasm32" and name != "c89": fatal(pos, "`$target` is a full target name, never \"{name}\" alone (which asks for the current machine): test the processor with `$target.arch =? \"{name}\"`, or name the system too, as \"{name}-linux\"")
+# A target name (field 0), processor (1), system (2) or build mode (3) written as a string
+# literal, checked against the names the design gives ("": not a string literal).
+dw_target_literal = (id: int, field: int = 0) -> str:
+    p = SyntaxProblem("", 0, false)
+    name = syntax_target_literal(dewy_syntax, p, id, field)
+    dw_problem(p)
     name
 
-# A condition made only of `$target`, `$target.arch` or `$target.os` compared with
-# string literals (`=?`, `not =?`, and `in?`/`not in?` a literal list), joined by
-# `not`, `and` and `or`, folds here: 1 true, 0 false, -1 any other condition (an
-# ordinary runtime test).
-dw_target_condition = (id0: int) -> int:
-    id = dw_unwrap(id0)
-    kind = dewy_syntax[id].kind
-    if kind == .block and dewy_syntax[id].text == "():" and dw_nchildren(id) == 1: return dw_target_condition(dw_child(id, 0))
-    op = dw_op(id)
-    if kind == .prefix and op == .kw_not:
-        inner = dw_target_condition(dw_child(id, 1))
-        return if inner < 0: -1 else: 1 - inner
-    if kind != .binary: return -1
-    if op == .kw_and or op == .kw_or:
-        left = dw_target_condition(dw_child(id, 1))
-        if left < 0: return -1
-        right = dw_target_condition(dw_child(id, 2))
-        if right < 0: return -1
-        return if op == .kw_and: left & right else: left | right
-    inverted = dewy_syntax[dw_child(id, 0)].kind == .inverted_comparison or op == .not_eq or op == .not_contains
-    left = dw_child(id, 1)
-    right = dw_child(id, 2)
-    found = false
-    if op == .eq or op == .not_eq:
-        if dw_target_field(right) >= 0:
-            right = left
-            left = dw_child(id, 2)
-        field = dw_target_field(left)
-        if field < 0 or field == 4: return -1
-        name = dw_target_literal(right, field) ?? ""
-        if len(name) == 0: return -1
-        found = name == dw_target_field_value(field)
-    else if op == .contains or op == .not_contains:
-        field = dw_target_field(left)
-        if field < 0: return -1
-        list = dw_unwrap(right)
-        if dewy_syntax[list].kind != .block or dewy_syntax[list].text != "[]:": return -1
-        loop entry in dw_children(list):
-            name = dw_target_literal(entry, field) ?? ""
-            if len(name) == 0: return -1
-            if name == dw_target_field_value(field): found = true
-    else: return -1
-    if inverted: found = not found
-    if found: 1 else: 0
+# A condition made only of `$target`, its fields or `$build.mode` compared with string
+# literals folds here: 1 true, 0 false, -1 any other condition (an ordinary runtime test).
+dw_target_condition = (id: int) -> int:
+    p = SyntaxProblem("", 0, false)
+    fold = syntax_target_condition(dewy_syntax, p, id, dw_target_name(), dw_build_mode())
+    dw_problem(p)
+    fold
 
 # An `if` chain whose every condition is a folded `$target` test: the syntax of the
 # compiled arm's body (0 when no arm is compiled), or -1. The other arms are never
 # lowered or checked, so they may name declarations and imports of other targets.
-dw_target_live = (id0: int) -> int:
-    id = dw_unwrap(id0)
-    if dewy_syntax[id].kind != .flow: return -1
-    items = dw_children(id)
-    loop arm in items:
-        if dewy_syntax[arm].kind != .keyword_expr: return arm
-        if dewy_syntax[dw_child(arm, 0)].text != "if" or dw_nchildren(arm) != 3: return -1
-        fold = dw_target_condition(dw_child(arm, 1))
-        if fold < 0: return -1
-        if fold == 1: return dw_child(arm, 2)
-    0
+dw_target_live = (id: int) -> int:
+    p = SyntaxProblem("", 0, false)
+    live = syntax_target_live(dewy_syntax, p, id, dw_target_name(), dw_build_mode())
+    dw_problem(p)
+    live
 
 # The names an arm a `$target` or `$build` test leaves out uses, by position: what they
 # name is not unused (check.jo's unused_local_warnings).
@@ -436,7 +294,7 @@ dw_supported_targets = (tag: int, declaration: int):
     if dewy_syntax[list].kind != .block or dewy_syntax[list].text != "[]:": fatal(dewy_syntax[list].pos, "`$supported_targets` takes a literal list of target names: `[\"x86_64-linux\" \"wasm32\"]`")
     names: str[]
     loop entry in dw_children(list):
-        name = dw_target_literal(entry) ?? ""
+        name = dw_target_literal(entry)
         if len(name) == 0: fatal(dewy_syntax[entry].pos, "`$supported_targets` lists target names as string literals")
         names.push(name)
     file = pos_file(pos)
@@ -448,16 +306,16 @@ dw_supported_targets = (tag: int, declaration: int):
 
 # `$target`, or `$build` or one of its members (`$target.arch` too: setting it is an error).
 dw_setting_place = (id: int) -> bool:
-    let id = dw_unwrap(id)
-    if dw_is_target(id) or dw_is_build(id): return true
-    dw_op(id) == .dot and dw_nchildren(id) == 3 and (dw_is_build(dw_child(id, 1)) or dw_is_target(dw_child(id, 1)))
+    p = SyntaxProblem("", 0, false)
+    yes = syntax_setting_place(dewy_syntax, p, id)
+    dw_problem(p)
+    yes
 
 dw_setting_text = (id: int) -> str:
-    let id = dw_unwrap(id)
-    if dw_is_target(id): return "$target"
-    if dw_is_build(id): return "$build"
-    base = if dw_is_build(dw_child(id, 1)): "$build" else: "$target"
-    "{base}.{dw_name(dw_child(id, 2))}"
+    p = SyntaxProblem("", 0, false)
+    text = syntax_setting_text(dewy_syntax, p, id)
+    dw_problem(p)
+    text
 
 # A top-level statement setting how the program is built (docs/LANGUAGE.md, "Targets"):
 # `$build.mode = 'release'` or `$target = 'aarch64-linux'`, in the program's main file. In

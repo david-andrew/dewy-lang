@@ -1,0 +1,56 @@
+# One driver over the compiler's dewy_syntax.jo (the frozen twin) or, with this line naming
+# dewy_syntax.dewy, over the leaf: `dewy_syntax_jo file` reads the file's lines, tab-separated.
+#   N kind text symbol mode left right children   a node (kind and symbol by number,
+#                                                  children comma-separated)
+#   Q what id [field | target mode]                a question, answered on a line of its own
+# The tree starts afresh at each `T` line. A mistake prints as `! at unsupported message`.
+use '../../../compiler/dewy_tokens.dewy'
+use '../../../compiler/dewy_syntax.jo'
+
+ints = (s: str) -> int[]:
+    out: int[]
+    if len(s) == 0: return out
+    loop x in split(s, ","): out.push(to_int(x) ?? 0)
+    out
+
+# (value first: the problem is filled while it is found)
+answer = (value: str, p: SyntaxProblem) -> str:
+    if len(p.message) > 0: return "! {p.at} {p.unsupported} {p.message}"
+    value
+
+main = ():
+    text = read_file(args()[1]) ?? ""
+    tree: DewySyntax[]
+    loop line in split(text, "\n"):
+        f = split(line, "\t")
+        if f[0] == "T":
+            tree = []
+            continue
+        if f[0] == "N":
+            node = DewySyntax(DewyKind(to_int(f[1]) ?? 0), f[2], tree.len() * 10 + 1, ints(f[7]), DewyToken(to_int(f[3]) ?? 0))
+            node.child_mode = to_int(f[4]) ?? 0
+            node.child_left = to_int(f[5]) ?? 0
+            node.child_right = to_int(f[6]) ?? 0
+            tree.push(node)
+            continue
+        if f[0] != "Q": continue
+        what = f[1]
+        id = to_int(f[2]) ?? 0
+        p = SyntaxProblem("", 0, false)
+        if what == "kind": print(dw_kind_name(DewyKind(id)))
+        else if what == "shape":
+            n = syntax_count(tree, id)
+            kids: str[]
+            loop i in [0..n): kids.push("{syntax_child(tree, id, i)}")
+            print("{n} {join(kids, ",")} {syntax_children(tree, id).len()} {syntax_multiplications(tree, id)}")
+        else if what == "unwrap":
+            u = syntax_unwrap(tree, id)
+            if u >= 0: print("{u} {syntax_op(tree, u)}")
+            else: print("{u}")
+        else if what == "field": print(answer("{syntax_target_field(tree, p, id)}", p))
+        else if what == "literal": print(answer(syntax_target_literal(tree, p, id, to_int(f[3]) ?? 0), p))
+        else if what == "value": print(syntax_target_field_value(id, f[3], f[4]))
+        else if what == "condition": print(answer("{syntax_target_condition(tree, p, id, f[3], f[4])}", p))
+        else if what == "live": print(answer("{syntax_target_live(tree, p, id, f[3], f[4])}", p))
+        else if what == "place": print(answer("{syntax_setting_place(tree, p, id)}", p))
+        else if what == "text": print(answer(syntax_setting_text(tree, p, id), p))

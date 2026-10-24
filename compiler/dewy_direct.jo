@@ -15,6 +15,7 @@ use 'util.jo'
 use 'ast.jo'
 use 'lex.jo'
 use 'dewy_tokens.dewy'
+use 'dewy_syntax.dewy'
 use 'dewy_parse.jo'
 use 'dewy_fast.jo'
 use 'par.jo'
@@ -153,7 +154,7 @@ dc_force_body = (d: int):
     else: dn_tokens = dc_lazy_tokens[dn_file]
     dn_at = first
     dc_depth = 2
-    dewy_syntax = [DewySyntax(), DewySyntax(.inverted_comparison)]
+    dewy_syntax = [DewySyntax(.unknown, "", 0, []), DewySyntax(.inverted_comparison, "", 0, [])]
     node_start = nodes.len()
     list_start = lists.len()
     body = dc_body()

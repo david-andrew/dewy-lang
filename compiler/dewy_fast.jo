@@ -9,6 +9,7 @@ use 'dewy_parse.jo'
 use 'oom.jo'
 use 'proofs.jo'
 use 'dewy_tokens.dewy'
+use 'dewy_syntax.dewy'
 use 'dewy_direct.jo'
 use 'dewy_directives.jo'
 use 'directives.jo'
@@ -1225,7 +1226,7 @@ dewy_fast_file = (file: int) -> int[]:
     dn_at = 0
     dn_angles = 0
     dn_depth = 0
-    dewy_syntax = [DewySyntax(), DewySyntax(.inverted_comparison)]
+    dewy_syntax = [DewySyntax(.unknown, "", 0, []), DewySyntax(.inverted_comparison, "", 0, [])]
     declarations: int[]
     marked = 0
     shadowable_pos = 0

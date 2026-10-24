@@ -303,6 +303,26 @@ stem, directory and `use` path) take 2.545 G instructions against the twin's 2.8
   there (an error in Dewy) surfaced only in a Windows build of the compiler. That arm's work is
   `windows_path`, which the test runs on every system.
 
+`dewy_syntax.dewy` (the Dewy parser's syntax tree: the node record `DewySyntax`, a node's
+children, the reading an ambiguous node takes, the operator a node applies, the kind names, and
+the `$target` and `$build` conditions that fold while the tree is projected, with the settings'
+places) is the first leaf over the parser's output, and the first to recurse over a union: the
+fold is `bool | none` (none: not a target condition). dewy_fast.jo builds the nodes into Sloppy's
+global array, which every query takes by place (`@tree`); dewy_parse.jo's `dw_child`, `dw_op`,
+`dw_target_live`, ... (about 700 call sites) are one-line calls into it. A mistake (an ambiguous
+expression, an unknown target, `$build.debug`) is kept in a `SyntaxProblem` by place, the first
+one only, and the leaf gives up; the caller reports it where `fatal` was. The differential test
+builds 160 random trees of the parser's shapes (operands inline or listed, an operator as a
+child, combined assignments, groups, ambiguous readings) and asks 124 k questions; its oracle
+stops at the first mistake by raising, so it checks that giving up never changes which mistake
+is reported. It compiled as first written. Panel: every item -0.06% to +0.05%; 684 builds
+identical. What it met:
+- Calling the leaf's `syntax_unwrap` for every node cost the panel's lex+parse +0.85% (96_ct_crypto
+  +0.30%): a call per node where most are neither a group nor ambiguous. That test stays inline in
+  `dw_unwrap`, which is now cheaper than master's.
+- A Dewy record whose fields have no defaults has no `T()` in Sloppy (see `json_doc.dewy`):
+  the tree's two sentinels are written out.
+
 The whole lexer was ported first (dn_lex's loop, keywords found by their bytes, names
 interned by the caller): lexing took +11% (+28 instructions a lexeme; synthetic-22k +0.74%,
 lex+parse +0.83%), so the loop stays in Sloppy. Its loop alone matched Sloppy's; the cost was
