@@ -3768,6 +3768,9 @@ dewy_arithmetic_call = (n: int, name: int, args: int[], expected: int) -> int:
             callee = bc_field(bc_ident("$dewy_rational", pos), "_fraction", pos)
             nodes[n] = Node(kind = .call, pos = pos, a = i32(callee))
             set_list(n, checked)
+            # (a nonzero divisor is the caller's obligation, as an integer
+            # division's: the fraction's only failure)
+            if fact_policy == .RequireStatic: fact_divisors[n] = 1
         else:
             nodes[n] = Node(kind = .binary, pos = pos, op = i32(int(Tok.slash)), a = i32(a), b = i32(b))
         return check_expr(n, expected)
