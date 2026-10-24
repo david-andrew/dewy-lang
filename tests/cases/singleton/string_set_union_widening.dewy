@@ -1,0 +1,37 @@
+# quick
+# A union holding a string set widens to a union holding a superset (members are
+# unordered sets: each member keeps its text, whatever word either set gives it).
+ABC:type='a'|'b'|'c'
+BC:type='b'|'c'
+CA:type='c'|'a'
+f=(v:ABC|int64)=>match v {
+    <'a'> => "A"
+    <'b'> => "B"
+    <'c'> => "C"
+    n:int64 => "{n}"
+}
+widen=(u:BC|int64):>ABC|int64 => u
+twice=(k:int64):>string => {
+    let u:CA|int64 = if k =? 0 'a' else if k =? 1 'c' else k
+    let w:ABC|int64 = u
+    return f(w)
+}
+main=()=>{
+    loop s in ['b' 'c'] {
+        let q:BC=s
+        let u:BC|int64=q
+        printl("{f(u)} {f(widen(u))}")
+        let w:ABC|int64=u
+        printl("{f(w)} {w}")
+        let p:ABC='a'
+        w = p
+        printl(f(w))
+        w = u
+        printl(f(w))
+    }
+    let n:BC|int64=7
+    printl(f(n))
+    printl("{twice(0)} {twice(1)} {twice(9)}")
+    $assert twice(1) =? "C"
+    $assert twice(0) =? "A"
+}

@@ -514,7 +514,7 @@ program_fn_named = (name: int) -> bool:
 # every member of union a is one of union b's
 union_within = (a: int, b: int) -> bool:
     loop m in union_members(a):
-        if union_index(b, m) < 0: return false
+        if union_holder(b, m, true) < 0: return false
     true
 
 # the member of union u a value of type `from` becomes (an exact match first), or -1

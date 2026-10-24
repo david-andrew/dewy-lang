@@ -365,7 +365,15 @@ ct_convert = (e: int, v: int) -> int:
         return ct_add(x)
     if cv == .union_:
         member = union_members(x.type)[x.i]
-        x.i = union_index(t, member)
+        x.i = union_holder(t, member, false)
+        if x.i < 0: ct_fail(e, "the value is not a member of {dt(t)}")
+        held = union_members(t)[x.i]
+        if not type_eq(held, member):
+            # (a string set's word in the wider set: the same member's)
+            word = ct_values[x.items[0]]
+            k = str_sets[str_set_of(held)].index_of(str_sets[str_set_of(member)][word.i])
+            if k < 0: ct_fail(e, "the value is not a member of {dt(t)}")
+            x.items = [ct_add(CTValue(type = held, i = k))]
     else if cv == .arr2fixed:
         if x.items.len() != fixed_len(t): ct_fail(e, "array length does not match fixed array")
     else if cv != .none_ and cv != .explicit_copy and cv != .fixed2arr and cv != .quantity_const:

@@ -1035,6 +1035,22 @@ union_index = (u: int, m: int) -> int:
         if type_eq(struct_targ(si, i), m): return i
     -1
 
+# the member of union u that holds union member m: m itself, or else u's string set when
+# m is one too (a union has at most one), holding all of m's members when `whole`
+# (`'b'|'c'` in `'a'|'b'|'c' | int64`); -1 if none
+union_holder = (u: int, m: int, whole: bool) -> int:
+    i = union_index(u, m)
+    ms = str_set_of(m)
+    if i >= 0 or ms == 0: return i
+    loop j in 0.. and x in union_members(u):
+        xs = str_set_of(x)
+        if xs != 0:
+            if whole:
+                loop value in str_sets[ms]:
+                    if not str_sets[xs].contains(value): return -1
+            return j
+    -1
+
 mk_union = (ms0: int[]) -> int:
     ms: int[]
     has_none = false

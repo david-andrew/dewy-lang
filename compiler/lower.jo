@@ -4639,6 +4639,29 @@ json_field = (ba: int, f: int, t: int, addr: int, indent: int, level: int):
     e_call4(lf_of_inst(f), ba, load_val(t, addr, 0), indent, level, -1)
 
 # ---------------- conversions ----------------
+# a string set's word w as the word of the same member in set type `to` (members are
+# unordered: one set's word for a member is not another's); a member `to` lacks panics
+set_word_moved = (w: int, from: int, to: int, pos: int) -> int:
+    fs = str_set_of(from)
+    ts = str_set_of(to)
+    d = vreg(VI)
+    e_mov(d, w)
+    lacks = false
+    loop k in 0.. and value in str_sets[fs]:
+        j = str_sets[ts].index_of(value)
+        if j < 0: lacks = true
+        else if j != k:
+            iff(e_bin(.eq, VI, w, e_iconst(k)))
+            e_mov(d, e_iconst(j))
+            endc()
+    if lacks:
+        loop k in 0.. and value in str_sets[fs]:
+            if not str_sets[ts].contains(value):
+                iff(e_bin(.eq, VI, w, e_iconst(k)))
+                e_call_nr1(rt("__panic_narrow"), e_daddr(loc_data(pos)), -1)
+                endc()
+    d
+
 gen_conv = (e: int) -> Val:
     to = prune(ntype(e))
     a = int(nodes[e].a)
@@ -4805,13 +4828,15 @@ gen_conv = (e: int) -> Val:
         tsi = int(types[to].st)
         loop i in 0.. and m in union_members(from):
             iff(e_bin(.eq, VI, tag, e_iconst(i)))
-            j = union_index(to, m)
+            j = union_holder(to, m, false)
             if j < 0: e_call_nr1(rt("__panic_narrow"), e_daddr(loc_data(nodes[e].pos)), -1)
             else:
                 e_store(d, 0, e_iconst(j), 4)
                 fo = int(fields[int(variants[int(structs[fsi].variants) + i].fields)].offset)
                 to_off = int(fields[int(variants[int(structs[tsi].variants) + j].fields)].offset)
-                if tsize(m) > 0: e_copy(e_addi(d, to_off), e_addi(src, fo), tsize(m))
+                tm = union_members(to)[j]
+                if not type_eq(tm, m): e_store(d, to_off, set_word_moved(e_load(VI, src, fo, tsize(m)), m, tm, nodes[e].pos), tsize(tm))
+                else if tsize(m) > 0: e_copy(e_addi(d, to_off), e_addi(src, fo), tsize(m))
             endc()
         return Val(d, true, s)
     if cv == .arr2fixed:
