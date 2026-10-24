@@ -434,22 +434,6 @@ lx_init_classes = ():
         else if c >= '0' and c <= '9': k = 2
         lx_cls[c] = u8(k)
 
-# Dewy's nestable block comment #{ ... }# starting at i: the offset after its last }#, or -1 when
-# it does not end before stop. Its text is not code: strings and line comments inside it are not.
-dewy_block_comment_end = (src: str, i0: int, stop: int) -> int:
-    i = i0 + 2
-    depth = 1
-    loop i + 1 < stop:
-        if src[i] == '#' and src[i + 1] == '{{':
-            depth += 1
-            i += 2
-        else if src[i] == '}}' and src[i + 1] == '#':
-            depth -= 1
-            i += 2
-            if depth == 0: return i
-        else: i += 1
-    -1
-
 is_ident_start = (c: u8) -> bool: (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or c == '_' or c >= 0x80
 is_ident_char = (c: u8) -> bool: is_ident_start(c) or (c >= '0' and c <= '9')
 

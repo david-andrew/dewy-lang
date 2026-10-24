@@ -11,7 +11,7 @@ from tests.test_core import lexer_span_helpers
 @pytest.mark.parametrize('release', [False, True])
 def test_punctuation_dispatch(compiler, tmp_path, release):
     source = tmp_path / 'punctuation.jo'
-    source.write_text(lexer_span_helpers(compiler) + '''
+    source.write_text(lexer_span_helpers(compiler, tmp_path) + '''
 main = () -> int:
     # Every operator spelling, every truncated prefix, and every next byte.
     # Longer spellings continue through the reference scanner. The next byte

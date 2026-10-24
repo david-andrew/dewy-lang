@@ -1,0 +1,36 @@
+# The compiler's dewy_lex.dewy: `dewy_lex_dewy list` reads the list's lines, each a source file,
+# and prints what the scanners give at each of its quotes, braces and block comments (see
+# tests/test_selfhost_dewy_lex.py), one line each.
+$runtime_checks
+from p"../../../compiler/dewy_lex.dewy" import DewyLexer, dn_quote_end, dn_quote_width, dn_interpolation_end, dn_lazy_end, dewy_block_comment_end
+
+scan=(@lx:DewyLexer src:string):>void=>{
+    let b=src as array<uint8>
+    let n=b.length
+    loop i in [0..n) {
+        let c=b[i]
+        if c =? b'"' or c =? b'\'' {
+            let raw=i >? 0 and b[i - 1] =? b'r'
+            let e=dn_quote_end(@lx src i n 0 raw false)
+            printl("q {i} {e} {dn_quote_width(src i n)} {dn_quote_end(@lx src i n 0 raw true)} {dn_quote_end(@lx src i n 1 false true)}")
+            if e <? 0 {printl("! {lx.problem_at} {lx.note_at} {lx.problem}")}
+        }
+        if c =? b'\{' {
+            let e=dn_interpolation_end(@lx src i + 1 n 0 false)
+            printl("b {i} {e} {dn_interpolation_end(@lx src i + 1 n 2 true)} {dn_lazy_end(src i n)}")
+            if e <? 0 {printl("! {lx.problem_at} {lx.note_at} {lx.problem}")}
+        }
+        if c =? b'#' {printl("c {i} {dewy_block_comment_end(src i n)}")}
+    }
+    printl("s {lx.suspect_brace} {lx.interpolation_open}")
+}
+
+main=():>void=>{
+    let list=read_text(args()[1]) ?? ""
+    loop path in list.lines {
+        if path.is_empty {continue}
+        let lx=DewyLexer[-1 -1 "" -1 -1]
+        scan(@lx read_text(path) ?? "")
+        printl("=")
+    }
+}

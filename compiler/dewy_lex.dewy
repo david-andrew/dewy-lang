@@ -1,0 +1,329 @@
+# The Dewy lexer's scanners and state: a quoted string's end (its interpolations, nested
+# strings and comments skipped), an interpolation's closing brace, a block comment's end, and
+# the end of a library function's body the lexer skips (dewy_fast.jo dn_lex), with the state
+# they keep: the braces a mistake notes, and the mistake. The parser, the prompt and the editor
+# share the scanners.
+#
+# A module of the compiler written in Dewy. dewy_lex.jo is its frozen twin for the compilers
+# without the Dewy frontend (tools/compiler/build.py); the two keep the same interface and
+# give the same answers (tests/test_selfhost_dewy_lex.py). The state is the caller's
+# (dewy_fast.jo keeps one) and comes in by place. A mistake is recorded in it, the scanner
+# gives -1, and the caller reports it.
+#
+# The scanners read bytes through a pointer: each entry point checks its span against the
+# text once, and every read below is guarded by `stop` (or, looking back, by `start`).
+
+DewyLexer:type=[
+    # the first `"{`-shaped brace (an interpolation that begins with the quote that began its
+    # string, where a literal brace was most likely meant), and the `{` that began the
+    # outermost interpolation being scanned; -1: none
+    suspect_brace:int64
+    interpolation_open:int64
+    # the mistake, at a byte offset, and a brace to note beside it (-1: none)
+    problem:string
+    problem_at:int64
+    note_at:int64
+]
+
+# Byte classes (dewy_fast.jo dn_classes'): 1 starts a name (a letter, `_` or any byte from
+# 0x80), 2 continues an ASCII name, 4 a decimal digit or `_`, 8 a digit of any base (ASCII
+# letters, digits and `_`), 16 space, 32 a non-ASCII name byte
+const DX_CLASSES:array<uint8 length=256>=[
+    0 0 0 0 0 0 0 0 0 16 16 0 0 16 0 0
+    0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+    16 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+    14 14 14 14 14 14 14 14 14 14 0 0 0 0 0 0
+    0 11 11 11 11 11 11 11 11 11 11 11 11 11 11 11
+    11 11 11 11 11 11 11 11 11 11 11 0 0 0 0 15
+    0 11 11 11 11 11 11 11 11 11 11 11 11 11 11 11
+    11 11 11 11 11 11 11 11 11 11 11 0 0 0 0 0
+    33 33 33 33 33 33 33 33 33 33 33 33 33 33 33 33
+    33 33 33 33 33 33 33 33 33 33 33 33 33 33 33 33
+    33 33 33 33 33 33 33 33 33 33 33 33 33 33 33 33
+    33 33 33 33 33 33 33 33 33 33 33 33 33 33 33 33
+    33 33 33 33 33 33 33 33 33 33 33 33 33 33 33 33
+    33 33 33 33 33 33 33 33 33 33 33 33 33 33 33 33
+    33 33 33 33 33 33 33 33 33 33 33 33 33 33 33 33
+    33 33 33 33 33 33 33 33 33 33 33 33 33 33 33 33
+]
+
+# What a skipped body's scan stops at: 1 a name, 2 a digit, 3 `{`, 4 `}`, 5 `#`, 6 a quote,
+# 7 `$`, 8 `=`, 9 `?`; 0 goes by
+const DX_LAZY:array<uint8 length=256>=[
+    0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+    0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+    0 0 6 5 7 0 0 6 0 0 0 0 0 0 0 0
+    2 2 2 2 2 2 2 2 2 2 0 0 0 8 0 9
+    0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1
+    1 1 1 1 1 1 1 1 1 1 1 0 0 0 0 1
+    0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1
+    1 1 1 1 1 1 1 1 1 1 1 3 0 4 0 0
+    1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1
+    1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1
+    1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1
+    1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1
+    1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1
+    1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1
+    1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1
+    1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1
+]
+
+DX_BRACE_HINT="`\{...}` in a string holds an expression: write `\\\{` and `\\\}` for literal braces, or use a raw string `r\"...\"`"
+
+# (the mistake; -1 for the scanners to return)
+dx_fail=(@lx:DewyLexer at:int64 message:string):>int64=>{
+    lx.problem=message
+    lx.problem_at=at
+    lx.note_at=-1
+    -1
+}
+
+# an unterminated string or interpolation inside an interpolation: the brace that began it
+dx_unterminated=(@lx:DewyLexer start:int64 message:string):>int64=>{
+    let suspect=lx.suspect_brace
+    let open=lx.interpolation_open
+    if open >=? 0 and open <? start {
+        dx_fail(@lx open "unterminated string: this `\{` starts a string interpolation that does not end ({DX_BRACE_HINT})");
+    } else {dx_fail(@lx start message);}
+    if suspect >=? 0 and suspect <? start and suspect not=? open {lx.note_at=suspect}
+    -1
+}
+
+dx_block_comment_error=(@lx:DewyLexer start:int64):>int64=>{
+    dx_fail(@lx start "unterminated block comment: `#\{` needs a matching `\}#` (block comments nest)")
+}
+
+# (a span of text's bytes: their pointer, after checking 0 <= start <= stop <= its length)
+dx_bytes=(source:string start:int64 stop:int64):>ptr<uint8>=>{
+    $runtime_assert 0 <=? start and start <=? stop and stop <=? (source as array<uint8>).length
+    # (the pointer of a view, not of a variable: a variable's would be its own copy)
+    (source as array<uint8>).ptr
+}
+
+dx_ident_part=(c:uint8):>bool=>DX_CLASSES[c] & 3 not=? 0
+
+# Dewy's nestable block comment #{ ... }# starting at i0: the offset after its last }#, or -1
+# when it does not end before stop. Its text is not code: strings and line comments inside
+# it are not.
+dx_block_comment_end=(p:ptr<uint8> i0:int64 stop:int64):>int64=>$unsafe {
+    let i=i0 + 2
+    let depth:int64=1
+    loop i + 1 <? stop {
+        if p[i] =? b'#' and p[i + 1] =? b'\{' {
+            depth+=1
+            i+=2
+        } else if p[i] =? b'\}' and p[i + 1] =? b'#' {
+            depth-=1
+            i+=2
+            if depth =? 0 {return i}
+        } else {i+=1}
+    }
+    -1
+}
+
+dewy_block_comment_end=(src:string i0:int64 stop:int64):>int64=>{
+    if i0 <? 0 or i0 >? stop {return -1}
+    dx_block_comment_end(dx_bytes(src i0 stop) i0 stop)
+}
+
+dx_quote_width=(p:ptr<uint8> start:int64 stop:int64):>int64=>$unsafe {
+    if start + 2 <? stop and p[start + 1] =? p[start] and p[start + 2] =? p[start] {return 3}
+    1
+}
+
+# A quote's width: 3 for `"""` and `'''`, else 1
+dn_quote_width=(source:string start:int64 stop:int64):>int64=>dx_quote_width(dx_bytes(source start stop) start stop)
+
+# Find a closing interpolation brace, skipping nested strings and comments: its offset, or -1
+# (a mistake, or with incomplete, text that ends first)
+dx_interpolation_end=(@lx:DewyLexer p:ptr<uint8> start:int64 stop:int64 nesting:int64 incomplete:bool):>int64=>$unsafe {
+    let i=start
+    let depth:int64=1
+    let parens:int64=0
+    let spec=false   # (in a format spec, `{n:#06x}`: its `#` is no comment)
+    loop i <? stop {
+        let c=p[i]
+        if c =? b'#' and spec {
+            i+=1
+            continue
+        }
+        if c =? b':' and depth =? 1 and parens =? 0 {spec=true}
+        else if c =? b' ' or c =? b'\t' or c =? b'\n' {spec=false}
+        else if c =? b'(' or c =? b'[' {parens+=1}
+        else if c =? b')' or c =? b']' {parens-=1}
+        if c =? b'#' and i + 1 <? stop and p[i + 1] =? b'\{' {
+            let e=dx_block_comment_end(p i stop)
+            if e <? 0 {
+                if incomplete {return -1}
+                return dx_block_comment_error(@lx i)
+            }
+            i=e
+            continue
+        }
+        if c =? b'#' {
+            loop i <? stop and p[i] not=? b'\n' {i+=1}
+            continue
+        }
+        if c =? b'r' and i + 1 <? stop and (p[i + 1] =? b'"' or p[i + 1] =? b'\'') and (i =? start or not dx_ident_part(p[i - 1])) {
+            i=dx_quote_end(@lx p i + 1 stop nesting true incomplete)
+            if i <? 0 {return -1}
+            continue
+        }
+        if c =? b'"' or c =? b'\'' {
+            i=dx_quote_end(@lx p i stop nesting false incomplete)
+            if i <? 0 {return -1}
+            continue
+        }
+        if c =? b'\{' {depth+=1}
+        else if c =? b'\}' {
+            depth-=1
+            if depth =? 0 {return i}
+        }
+        i+=1
+    }
+    if incomplete {return -1}
+    dx_unterminated(@lx start "unterminated string interpolation")
+}
+
+# Skip a quoted lexeme, including nested quoted strings inside interpolation: the offset
+# past it, or -1
+dx_quote_end=(@lx:DewyLexer p:ptr<uint8> start:int64 stop:int64 nesting:int64 raw:bool incomplete:bool):>int64=>$unsafe {
+    if nesting >=? 256 {
+        if incomplete {return -1}
+        return dx_fail(@lx start "string interpolation is nested too deeply")
+    }
+    let quote=p[start]
+    let width=dx_quote_width(p start stop)
+    let i=start + width
+    let first_brace:int64=-1
+    if nesting =? 0 {lx.interpolation_open=-1}
+    loop i <? stop {
+        let c=p[i]
+        if not raw and c =? b'\\' {
+            i+=2
+            continue
+        }
+        if c =? quote {
+            if width =? 1 {return i + 1}
+            if i + 2 <? stop and p[i + 1] =? quote and p[i + 2] =? quote {return i + 3}
+        }
+        if not raw and c =? b'\{' {
+            if first_brace <? 0 {first_brace=i}
+            if nesting =? 0 {lx.interpolation_open=first_brace}
+            if lx.suspect_brace <? 0 and i + 1 <? stop and p[i + 1] =? quote {lx.suspect_brace=i}
+            let close=dx_interpolation_end(@lx p i + 1 stop nesting + 1 incomplete)
+            if close <? 0 {return -1}
+            i=close + 1
+            continue
+        }
+        i+=1
+    }
+    if incomplete {return -1}
+    if nesting =? 0 and first_brace >=? 0 {return dx_unterminated(@lx first_brace + 1 "unterminated string")}
+    dx_unterminated(@lx start "unterminated string")
+}
+
+# The scanners over source[start..stop): the closing brace of an interpolation and the end
+# of a quoted string (raw: an `r` string, whose quote is at start). -1: a mistake (recorded
+# in lx), or with incomplete, text that ends first. The dx_ forms take the text's bytes, for
+# the lexer's loop, which has checked its span.
+dn_interpolation_end=(@lx:DewyLexer source:string start:int64 stop:int64 nesting:int64 incomplete:bool):>int64=>{
+    dx_interpolation_end(@lx dx_bytes(source start stop) start stop nesting incomplete)
+}
+
+dn_quote_end=(@lx:DewyLexer source:string start:int64 stop:int64 nesting:int64 raw:bool incomplete:bool):>int64=>{
+    if start >=? stop {
+        if incomplete {return -1}
+        return dx_unterminated(@lx start "unterminated string")
+    }
+    dx_quote_end(@lx dx_bytes(source start stop) start stop nesting raw incomplete)
+}
+
+# Past the `}` closing the body whose `{` is at i0; -1: lex it (it does not close, or it holds
+# a metatag, a function, an import, `??`, a based or long literal, or a string with a brace)
+dx_lazy_end=(p:ptr<uint8> i0:int64 stop:int64):>int64=>$unsafe {
+    let i=i0 + 1
+    let depth:int64=1
+    loop true {
+        loop i <? stop and DX_LAZY[p[i]] =? 0 {i+=1}
+        if i >=? stop {return -1}
+        let c=p[i]
+        let k=DX_LAZY[c]
+        if k =? 1 {
+            let j=i + 1
+            loop j <? stop and DX_CLASSES[p[j]] & 34 not=? 0 {j+=1}
+            if j - i =? 6 and c =? b'i' and p[i + 1] =? b'm' and p[i + 2] =? b'p' and p[i + 3] =? b'o' and p[i + 4] =? b'r' and p[i + 5] =? b't' {return -1}
+            if j - i =? 4 and c =? b'f' and p[i + 1] =? b'r' and p[i + 2] =? b'o' and p[i + 3] =? b'm' {return -1}
+            i=j
+        } else if k =? 2 {
+            if c =? b'0' and i + 1 <? stop and dx_base_letter(p[i + 1]) {return -1}
+            let j=i
+            loop j <? stop and DX_CLASSES[p[j]] & 4 not=? 0 {j+=1}
+            if j - i >? 18 {return -1}
+            # (and what follows a number in it: `1.5`, `2e10`)
+            loop j <? stop and DX_CLASSES[p[j]] & 34 not=? 0 {j+=1}
+            i=j
+        } else if k =? 3 {
+            depth+=1
+            i+=1
+        } else if k =? 4 {
+            depth-=1
+            i+=1
+            if depth =? 0 {return i}
+        } else if k =? 5 {
+            if i + 1 <? stop and p[i + 1] =? b'\{' {
+                let e=dx_block_comment_end(p i stop)
+                if e <? 0 {return -1}
+                i=e
+            } else {
+                loop i <? stop and p[i] not=? b'\n' {i+=1}
+            }
+        } else if k =? 6 {
+            let raw=i >? 0 and p[i - 1] =? b'r' and (i <? 2 or not dx_ident_part(p[i - 2]))
+            let width=dx_quote_width(p i stop)
+            i+=width
+            loop true {
+                if i >=? stop {return -1}
+                let d=p[i]
+                if d =? b'\{' or d =? b'\}' {return -1}
+                if d =? b'\\' and not raw {
+                    i+=2
+                    continue
+                }
+                if d =? c and (width =? 1 or i + 2 <? stop and p[i + 1] =? c and p[i + 2] =? c) {
+                    i+=width
+                    break
+                }
+                i+=1
+            }
+        } else if k =? 7 {return -1}
+        else if k =? 8 {
+            if i + 1 <? stop and p[i + 1] =? b'>' {return -1}
+            i+=1
+        } else {
+            if i + 1 <? stop and p[i + 1] =? b'?' {return -1}
+            i+=1
+        }
+    }
+    -1
+}
+
+# (the letter after a `0` that makes a base prefix: `0x`, `0b`, ...)
+dx_base_letter=(c:uint8):>bool=>match c {
+    <b'b'> => true
+    <b't'> => true
+    <b'q'> => true
+    <b's'> => true
+    <b'o'> => true
+    <b'd'> => true
+    <b'z'> => true
+    <b'x'> => true
+    <b'u'> => true
+    <b'g'> => true
+    _ => false
+}
+
+dn_lazy_end=(source:string i0:int64 stop:int64):>int64=>{
+    if i0 <? 0 or i0 >=? stop {return -1}
+    dx_lazy_end(dx_bytes(source i0 stop) i0 stop)
+}

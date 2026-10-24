@@ -268,10 +268,38 @@ dewy_tokens.dewy) and lays out independently. What it met:
   lexer takes as a name. Bytes moved as bytes need no boundaries, and cost 13% less.
 - dewy_fmt.jo is a bootstrap module, so step 1 has no user of the leaf: `use_frozen_twins`
   skips such a module there (`stubbed`).
-- `T('member')` on a union of string literals is not a conversion, and the hint for it is
-  wrong: `let c=Color('red')`, with `Color` imported, says it is in a.dewy, "which this file
-  does not import", or that it is the importing module's own (`main.Color(...)`). A typed
-  `let c:Color='red'` works.
+- `T('member')` on a union of string literals was not a conversion, and its hint was wrong;
+  `let c=Color('red')` converts since 5c97ea170.
+
+`dewy_lex.dewy` (the Dewy lexer's scanners: a quoted string's end past its interpolations,
+nested strings and comments, an interpolation's closing brace, a block comment's end and a
+skipped library body's end, with the state they keep, the brace a mistake notes and the
+mistake) is the first leaf the lexer's loop calls, and the first that reads source through a
+pointer: each entry point checks its span once, and `dx_` forms take the bytes for dn_lex, which
+has checked its own. A mistake is recorded in the state (`DewyLexer`, a Sloppy global passed by
+place) and the scanner gives -1; dewy_fast.jo reports it. The parser (a string's
+interpolations, a format spec's colon), the prompt and the editor's comment scan share the
+scanners; lex.jo's copy of the block-comment scan is gone. It compiled as first written but for
+`end`, which is reserved. Panel: within +0.06% on every item (lex+parse +0.08%); lexing the
+repository's Dewy sources ten times takes 0.512 G against master's 0.525 G.
+
+The whole lexer was ported first (dn_lex's loop, keywords found by their bytes, names
+interned by the caller): lexing took +11% (+28 instructions a lexeme; synthetic-22k +0.74%,
+lex+parse +0.83%), so the loop stays in Sloppy. Its loop alone matched Sloppy's; the cost was
+around it, in codegen gaps (all open):
+- Indexing an array keeps its bounds check where the index is proven, even with `--release`:
+  `loop i <? n {... b[i] ...}` with `n=b.length`. A pointer read under `$unsafe` drops it.
+- A `const` table's address is loaded again in every iteration of a loop that indexes it
+  (`DX_CLASSES[p[i]]`), and an `array<T length=N>` has no `.ptr`; passing the table as a
+  parameter keeps it in a register.
+- `out.push(Lexeme[...])` zero-fills the slot, then stores every field: about 14 instructions
+  a lexeme over Sloppy's stores into a presized array. Presizing with `fill` and storing
+  through `.data()` or by index spilled more.
+- A small function returning early still saves and restores its callee-saved registers
+  (`dx_word`, the keyword test: about 12 of its 35 instructions a word).
+- The interning table is Sloppy's, so names were interned in a pass after the leaf (about 8
+  instructions a lexeme); a function-typed parameter (`intern:<(s:string at:int64 n:int64):>int64>`)
+  cost more than the pass.
 
 Open gaps from these leaves, by cost:
 - A literal beside a policy-typed operand (`w + 1`, `w & 0xFF`, `w xor 0xFFFFFFFF`) goes

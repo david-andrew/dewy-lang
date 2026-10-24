@@ -1,0 +1,231 @@
+# The frozen implementation-language twin of dewy_lex.dewy, for the compilers without the
+# Dewy frontend (tools/compiler/build.py). Change both, or neither.
+
+struct DewyLexer:
+    suspect_brace: int
+    interpolation_open: int
+    problem: str
+    problem_at: int
+    note_at: int
+
+DX_CLASSES: u8[]
+DX_LAZY: u8[]
+DX_BRACE_HINT = "`{{...}}` in a string holds an expression: write `\\{{` and `\\}}` for literal braces, or use a raw string `r\"...\"`"
+
+dx_bytes = (source: str, start: int, stop: int) -> *u8:
+    assert(0 <= start and start <= stop and stop <= len(source))
+    if DX_CLASSES.len() == 0:
+        DX_CLASSES = fill(u8(0), 256)
+        DX_LAZY = fill(u8(0), 256)
+        loop c in [0..256):
+            bits = 0
+            lazy = 0
+            if c >= 0x80: bits = 33
+            else if (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z'): bits = 11
+            else if c == '_': bits = 15
+            else if c >= '0' and c <= '9': bits = 14
+            else if c == ' ' or c == '\t' or c == '\r' or c == '\n': bits = 16
+            if bits & 1 != 0: lazy = 1
+            else if c >= '0' and c <= '9': lazy = 2
+            else if c == '{{': lazy = 3
+            else if c == '}}': lazy = 4
+            else if c == '#': lazy = 5
+            else if c == '"' or c == '\'': lazy = 6
+            else if c == '$': lazy = 7
+            else if c == '=': lazy = 8
+            else if c == '?': lazy = 9
+            DX_CLASSES[c] = u8(bits)
+            DX_LAZY[c] = u8(lazy)
+    source.data()
+
+dx_fail = (lx: mut DewyLexer, at: int, message: str) -> int:
+    lx.problem = message
+    lx.problem_at = at
+    lx.note_at = -1
+    -1
+
+dx_unterminated = (lx: mut DewyLexer, start: int, message: str) -> int:
+    suspect = lx.suspect_brace
+    open = lx.interpolation_open
+    if open >= 0 and open < start: dx_fail(lx, open, "unterminated string: this `{{` starts a string interpolation that does not end ({DX_BRACE_HINT})")
+    else: dx_fail(lx, start, message)
+    if suspect >= 0 and suspect < start and suspect != open: lx.note_at = suspect
+    -1
+
+dx_block_comment_error = (lx: mut DewyLexer, start: int) -> int:
+    dx_fail(lx, start, "unterminated block comment: `#{{` needs a matching `}}#` (block comments nest)")
+
+# (the tables are made on first use: dx_bytes)
+dx_ident_part = (c: u8) -> bool:
+    if DX_CLASSES.len() == 0: dx_bytes("", 0, 0)
+    DX_CLASSES[c] & 3 != 0
+
+dx_block_comment_end = (p: *u8, i0: int, stop: int) -> int:
+    i = i0 + 2
+    depth = 1
+    loop i + 1 < stop:
+        if p[i] == '#' and p[i + 1] == '{{':
+            depth += 1
+            i += 2
+        else if p[i] == '}}' and p[i + 1] == '#':
+            depth -= 1
+            i += 2
+            if depth == 0: return i
+        else: i += 1
+    -1
+
+dewy_block_comment_end = (src: str, i0: int, stop: int) -> int:
+    if i0 < 0 or i0 > stop: return -1
+    dx_block_comment_end(dx_bytes(src, i0, stop), i0, stop)
+
+dx_quote_width = (p: *u8, start: int, stop: int) -> int:
+    if start + 2 < stop and p[start + 1] == p[start] and p[start + 2] == p[start]: return 3
+    1
+
+dn_quote_width = (source: str, start: int, stop: int) -> int: dx_quote_width(dx_bytes(source, start, stop), start, stop)
+
+dx_interpolation_end = (lx: mut DewyLexer, p: *u8, start: int, stop: int, nesting: int, incomplete: bool) -> int:
+    i = start
+    depth = 1
+    parens = 0
+    spec = false
+    loop i < stop:
+        c = p[i]
+        if c == '#' and spec:
+            i += 1
+            continue
+        if c == ':' and depth == 1 and parens == 0: spec = true
+        else if c == ' ' or c == '\t' or c == '\n': spec = false
+        else if c == '(' or c == '[': parens += 1
+        else if c == ')' or c == ']': parens -= 1
+        if c == '#' and i + 1 < stop and p[i + 1] == '{{':
+            e = dx_block_comment_end(p, i, stop)
+            if e < 0:
+                if incomplete: return -1
+                return dx_block_comment_error(lx, i)
+            i = e
+            continue
+        if c == '#':
+            loop i < stop and p[i] != '\n': i += 1
+            continue
+        if c == 'r' and i + 1 < stop and (p[i + 1] == '"' or p[i + 1] == '\'') and (i == start or not dx_ident_part(p[i - 1])):
+            i = dx_quote_end(lx, p, i + 1, stop, nesting, true, incomplete)
+            if i < 0: return -1
+            continue
+        if c == '"' or c == '\'':
+            i = dx_quote_end(lx, p, i, stop, nesting, false, incomplete)
+            if i < 0: return -1
+            continue
+        if c == '{{': depth += 1
+        else if c == '}}':
+            depth -= 1
+            if depth == 0: return i
+        i += 1
+    if incomplete: return -1
+    dx_unterminated(lx, start, "unterminated string interpolation")
+
+dx_quote_end = (lx: mut DewyLexer, p: *u8, start: int, stop: int, nesting: int, raw: bool, incomplete: bool) -> int:
+    if nesting >= 256:
+        if incomplete: return -1
+        return dx_fail(lx, start, "string interpolation is nested too deeply")
+    quote = p[start]
+    width = dx_quote_width(p, start, stop)
+    i = start + width
+    first_brace = -1
+    if nesting == 0: lx.interpolation_open = -1
+    loop i < stop:
+        c = p[i]
+        if not raw and c == '\\':
+            i += 2
+            continue
+        if c == quote:
+            if width == 1: return i + 1
+            if i + 2 < stop and p[i + 1] == quote and p[i + 2] == quote: return i + 3
+        if not raw and c == '{{':
+            if first_brace < 0: first_brace = i
+            if nesting == 0: lx.interpolation_open = first_brace
+            if lx.suspect_brace < 0 and i + 1 < stop and p[i + 1] == quote: lx.suspect_brace = i
+            close = dx_interpolation_end(lx, p, i + 1, stop, nesting + 1, incomplete)
+            if close < 0: return -1
+            i = close + 1
+            continue
+        i += 1
+    if incomplete: return -1
+    if nesting == 0 and first_brace >= 0: return dx_unterminated(lx, first_brace + 1, "unterminated string")
+    dx_unterminated(lx, start, "unterminated string")
+
+dn_interpolation_end = (lx: mut DewyLexer, source: str, start: int, stop: int, nesting: int, incomplete: bool) -> int:
+    dx_interpolation_end(lx, dx_bytes(source, start, stop), start, stop, nesting, incomplete)
+
+dn_quote_end = (lx: mut DewyLexer, source: str, start: int, stop: int, nesting: int, raw: bool, incomplete: bool) -> int:
+    if start >= stop:
+        if incomplete: return -1
+        return dx_unterminated(lx, start, "unterminated string")
+    dx_quote_end(lx, dx_bytes(source, start, stop), start, stop, nesting, raw, incomplete)
+
+dx_lazy_end = (p: *u8, i0: int, stop: int) -> int:
+    if DX_CLASSES.len() == 0: dx_bytes("", 0, 0)
+    i = i0 + 1
+    depth = 1
+    loop true:
+        loop i < stop and DX_LAZY[p[i]] == 0: i += 1
+        if i >= stop: return -1
+        c = p[i]
+        k = DX_LAZY[c]
+        if k == 1:
+            j = i + 1
+            loop j < stop and DX_CLASSES[p[j]] & 34 != 0: j += 1
+            if j - i == 6 and c == 'i' and p[i + 1] == 'm' and p[i + 2] == 'p' and p[i + 3] == 'o' and p[i + 4] == 'r' and p[i + 5] == 't': return -1
+            if j - i == 4 and c == 'f' and p[i + 1] == 'r' and p[i + 2] == 'o' and p[i + 3] == 'm': return -1
+            i = j
+        else if k == 2:
+            if c == '0' and i + 1 < stop and dx_base_letter(p[i + 1]): return -1
+            j = i
+            loop j < stop and DX_CLASSES[p[j]] & 4 != 0: j += 1
+            if j - i > 18: return -1
+            loop j < stop and DX_CLASSES[p[j]] & 34 != 0: j += 1
+            i = j
+        else if k == 3:
+            depth += 1
+            i += 1
+        else if k == 4:
+            depth -= 1
+            i += 1
+            if depth == 0: return i
+        else if k == 5:
+            if i + 1 < stop and p[i + 1] == '{{':
+                e = dx_block_comment_end(p, i, stop)
+                if e < 0: return -1
+                i = e
+            else:
+                loop i < stop and p[i] != '\n': i += 1
+        else if k == 6:
+            raw = i > 0 and p[i - 1] == 'r' and (i < 2 or not dx_ident_part(p[i - 2]))
+            width = dx_quote_width(p, i, stop)
+            i += width
+            loop true:
+                if i >= stop: return -1
+                d = p[i]
+                if d == '{{' or d == '}}': return -1
+                if d == '\\' and not raw:
+                    i += 2
+                    continue
+                if d == c and (width == 1 or i + 2 < stop and p[i + 1] == c and p[i + 2] == c):
+                    i += width
+                    break
+                i += 1
+        else if k == 7: return -1
+        else if k == 8:
+            if i + 1 < stop and p[i + 1] == '>': return -1
+            i += 1
+        else:
+            if i + 1 < stop and p[i + 1] == '?': return -1
+            i += 1
+    -1
+
+dx_base_letter = (c: u8) -> bool:
+    c == 'b' or c == 't' or c == 'q' or c == 's' or c == 'o' or c == 'd' or c == 'z' or c == 'x' or c == 'u' or c == 'g'
+
+dn_lazy_end = (source: str, i0: int, stop: int) -> int:
+    if i0 < 0 or i0 >= stop: return -1
+    dx_lazy_end(dx_bytes(source, i0, stop), i0, stop)

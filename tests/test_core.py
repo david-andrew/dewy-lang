@@ -4691,20 +4691,22 @@ main = () -> int:
     assert ran.returncode == 42, ran.stdout + ran.stderr
 
 
-def lexer_span_helpers(compiler):
+def lexer_span_helpers(compiler, out):
     directory = compiler.parent.parent / 'compiler'
     if not directory.exists():
         directory = Path(__file__).resolve().parents[1] / 'compiler'
-    # Compile the actual lexer and its intern/token helpers in a small probe.
-    # Diagnostics are stubbed; malformed-source integration tests use the compiler.
+    # Compile the actual lexer and its intern/token helpers in a small probe in out, beside
+    # the Dewy modules it uses. Diagnostics are stubbed; malformed-source integration tests
+    # use the compiler.
+    for module in ('dewy_tokens.dewy', 'dewy_lex.dewy'):
+        shutil.copy2(directory / module, out / module)
     fast = (directory / 'dewy_fast.jo').read_text(encoding='utf-8')
     util = (directory / 'util.jo').read_text(encoding='utf-8')
-    tokens = (directory / 'dewy_tokens.jo').read_text(encoding='utf-8')
     lex = (directory / 'lex.jo').read_text(encoding='utf-8')
     return '\n'.join([
+        "use 'dewy_tokens.dewy'\nuse 'dewy_lex.dewy'",
         lex[lex.index('lx_cls:'):lex.index('is_ident_start =')],
         util[util.index('struct SrcFile:'):util.index("# a file's name")],
-        tokens[tokens.index('enum DewyToken:'):],
         'mkpos = (file: int, off: int) -> int: (file << 40) | off\n'
         'fatal = (pos: int, message: str): panic(message)\n'
         'err_notes: (int, str)[]',
@@ -4775,7 +4777,7 @@ def test_core_lexer_bounded_spans(compiler, tmp_path, release):
                 previous_stop = end
     body += ['    42']
     source = tmp_path / 'lexer-spans.jo'
-    source.write_text(lexer_span_helpers(compiler) + '\n' + '\n'.join(body) + '\n', encoding='utf-8')
+    source.write_text(lexer_span_helpers(compiler, tmp_path) + '\n' + '\n'.join(body) + '\n', encoding='utf-8')
     binary = tmp_path / 'lexer-spans'
     built = subprocess.run([compiler, 'build', source, *(['--release'] if release else []), '-o', binary],
                            capture_output=True, text=True, timeout=30)

@@ -36,7 +36,7 @@ dw_dir_lexed = (file: int):
     # (the lexed source waits while the bundles are parsed)
     tokens = dn_tokens
     at_file = dn_file
-    suspect = dn_suspect_brace
+    suspect = dn_lexer.suspect_brace
     interpolation = dn_in_interpolation
     bigint = dw_bigint_import
     # (and the lexer's state: lazily lexed bodies left to expand, metatags seen)
@@ -49,7 +49,7 @@ dw_dir_lexed = (file: int):
     dn_block_comments = comments
     dn_tokens = tokens
     dn_file = at_file
-    dn_suspect_brace = suspect
+    dn_lexer.suspect_brace = suspect
     dn_in_interpolation = interpolation
     dw_bigint_import = bigint
     dw_dir_dollars = true

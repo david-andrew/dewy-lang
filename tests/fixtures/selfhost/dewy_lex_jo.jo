@@ -1,0 +1,26 @@
+# The compiler's frozen dewy_lex.jo, with the same command line as dewy_lex_dewy.dewy.
+use '../../../compiler/dewy_lex.jo'
+
+scan = (lx: mut DewyLexer, src: str):
+    n = len(src)
+    loop i in [0..n):
+        c = src[i]
+        if c == '"' or c == '\'':
+            raw = i > 0 and src[i - 1] == 'r'
+            e = dn_quote_end(lx, src, i, n, 0, raw, false)
+            print("q {i} {e} {dn_quote_width(src, i, n)} {dn_quote_end(lx, src, i, n, 0, raw, true)} {dn_quote_end(lx, src, i, n, 1, false, true)}")
+            if e < 0: print("! {lx.problem_at} {lx.note_at} {lx.problem}")
+        if c == '{':
+            e = dn_interpolation_end(lx, src, i + 1, n, 0, false)
+            print("b {i} {e} {dn_interpolation_end(lx, src, i + 1, n, 2, true)} {dn_lazy_end(src, i, n)}")
+            if e < 0: print("! {lx.problem_at} {lx.note_at} {lx.problem}")
+        if c == '#': print("c {i} {dewy_block_comment_end(src, i, n)}")
+    print("s {lx.suspect_brace} {lx.interpolation_open}")
+
+main = ():
+    listed = read_file(args()[1]) ?? ""
+    loop path in lines(listed):
+        if len(path) == 0: continue
+        lx = DewyLexer(-1, -1, "", -1, -1)
+        scan(lx, read_file(path) ?? "")
+        print("=")
