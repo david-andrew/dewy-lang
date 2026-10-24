@@ -5852,7 +5852,11 @@ check_call = (n: int, expected: int) -> int:
                     return value_call(n, callee, args, expected)
         if (name_of(fname) == "wrap" or name_of(fname) == "bitcast") and args.len() == 1 and (is_numeric(rt) or rt == T_MATH_INT) and dewy_at(nodes[n].pos):
             fatal(nodes[n].pos, "numbers have no `.{name_of(fname)}` member: `uint8<overflow='wrap'>(x)` keeps the low bits of an integer, and `x transmute float64` reads its bits as another type of the same width")
-        if files[pos_file(nodes[n].pos)].is_dewy: fname = dewy_member_name(callee, rt, fname, args)
+        if files[pos_file(nodes[n].pos)].is_dewy:
+            if str_sets.len() > 1:
+                keyed = method_str_set_key(n, recv, rt, fname, args, expected)
+                if keyed != 0: return keyed
+            fname = dewy_member_name(callee, rt, fname, args)
         # uniform call syntax
         add_flag(recv, NF_CHECKED)
         nl = [recv]
@@ -6809,7 +6813,9 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         # (inside a structure, a container as it is on its own: a call, which copies a
         # fixed-size array into the T[] the library's overload takes)
         writer = "__fmt"
-        if elem: writer = "__dewy_fmt"
+        # (a matrix in a list: on one line, as the library writes one inside a structure, not
+        # as a T[], which it is only when 1-D)
+        if elem: writer = if is_nd(t): "__fmt_elem" else: "__dewy_fmt"
         # (refined elements are written as their base: the library's overloads take the base)
         plain = representation_deep(t)
         if not type_eq(plain, t): wrap_conv(args[1], .none_, plain)
@@ -7151,6 +7157,75 @@ membership_str_set = (n: int) -> int:
     add_flag(n, NF_CHECKED)
     last_checked = n
     T_BOOL
+
+# `d.get(word)` with d:dict<Op V> (or a set or array of Op) and a plain string: as for `in?`, a
+# text that is no member is no key, so it is tested first and the method's result for an
+# absent key given: none, the default, false, 0 or Missing. The receiver, the key and the rest
+# are evaluated once each, in that order. 0: not this case (the key converts as before).
+method_str_set_key = (n: int, recv: int, rt: int, fname: int, args: mut int[], expected: int) -> int:
+    u = membership_str_set_of(rt)
+    if u == 0 or args.len() == 0 or args.len() > 2 or nodes[args[0]].kind == .namedarg or nodes[args[0]].kind == .str_lit: return 0
+    name = name_of(fname)
+    one = args.len() == 1
+    keyed = is_map_type(rt) or is_dewy_set_type(rt)
+    k = types[prune(rt)].kind
+    listed = k == .array or k == .fixed
+    # (what an absent key gives: 1 none, 2 the default, 3 false, 4 zero, 5 Missing)
+    miss = 0
+    if is_map_type(rt) and name == "get": miss = if one: 1 else: 2
+    else if keyed and name == "pop" and not one: miss = 2
+    else if keyed and one and (name == "contains" or name == "has" or name == "remove"): miss = 3
+    else if listed and one and name == "contains": miss = 3
+    else if listed and one and name == "count": miss = 4
+    else if listed and one and name == "index_of": miss = 5
+    if miss == 0 or program_fn_named(fname): return 0
+    changes = name == "pop" or name == "remove"
+    if changes and not dewy_plain_route(recv): return 0
+    pos = nodes[n].pos
+    tk = prune(check_expr(args[0], 0))
+    args[0] = last_checked
+    add_flag(args[0], NF_CHECKED)
+    if tk != T_STR: return 0
+    statements: int[]
+    # (a receiver changed in place is a variable or field, read where it is used)
+    target = recv
+    if not changes: target = capture_value(recv, rt, statements)
+    held = int(nodes[capture_value(args[0], T_STR, statements)].sym)
+    # (in the test's true branch the text is a member: converted, it is no string)
+    key = mk_ident_local(held, pos)
+    add_flag(key, NF_CHECKED)
+    str_set_coerce(key, u)
+    rest: int[] = [key]
+    absent = 0
+    if not one:
+        rest.push(args[1])
+        absent = clone(unnamed(args[1]))
+    if miss == 1: absent = mk(.none_lit, pos)
+    else if miss == 3: absent = bc_bool(false, pos)
+    else if miss == 4: absent = bc_int(0, pos)
+    else if miss == 5: absent = bc_call("Missing", [], pos)
+    call = mk(.call, pos)
+    callee = mk(.field, pos)
+    nodes[callee].a = i32(target)
+    nodes[callee].name = i32(fname)
+    nodes[call].a = i32(callee)
+    set_list(call, rest)
+    rt_call = check_expr(call, expected)
+    call = last_checked
+    check_expr(absent, rt_call)
+    absent = last_checked
+    coerce(absent, rt_call)
+    choice = str_set_choice(shape_is(mk_ident_local(held, pos), u, pos), call, absent, pos)
+    check_expr(choice, rt_call)
+    result = mk(.exprstmt, pos)
+    nodes[result].a = i32(last_checked)
+    statements.push(result)
+    nodes[n] = Node(kind = .block, pos = pos, type = i32(rt_call))
+    nodes[n].aux = 1
+    set_list(n, statements)
+    add_flag(n, NF_CHECKED)
+    last_checked = n
+    rt_call
 
 check_binary = (n: int, expected: int) -> int:
     op = nodes[n].op as Tok

@@ -170,6 +170,7 @@ lx_err = (off: int, msg: str): fatal(mkpos(lx_file, lx_base + off), msg)
 # Tokens go straight into lx_toks's zeroed slots (lx_cap of them, lx_count used): only the fields
 # that are not zero are written, and the array is cut to lx_count at the end.
 lx_slots: *Token = null
+const LX_SPARE = 8
 lx_count = 0
 lx_cap = 0
 
@@ -906,6 +907,11 @@ lex = (file: int, src: str, from: int = 0, to: int = -1) -> Token[]:
         lx_indents.pop()
         lx_emit(.dedent, lx_i, 0)
     lx_emit(.eof, lx_i, 0)
+    # (the parser looks up to LX_SPARE tokens ahead without bounds checks: zeroed slots after
+    # the eof read as more eofs, also when the tokens fill the array exactly)
+    if lx_cap - lx_count < LX_SPARE:
+        lx_cap = lx_count + LX_SPARE
+        lx_toks.resize(lx_cap)
     lx_toks.truncate(lx_count)
     lx_slots = null
     out = lx_toks

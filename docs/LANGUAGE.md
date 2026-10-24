@@ -2364,6 +2364,9 @@ fit the supported array size. A zero dimension produces an empty array.
 independent array values. `transpose` reverses the axes. `size(matrix)` counts
 all elements; `rows` and `cols` inspect a two-dimensional shape. Use these
 constructors rather than changing `shape` independently of `data`.
+`linspace(start stop count)` is a 1-D `array<float64>` of `count` evenly
+spaced values from `start` to `stop`, both included: `linspace(0 1 5)` is
+`[0.0 0.25 0.5 0.75 1.0]`; a count of 1 gives `[start]` and 0 an empty array.
 
 For matrices, `a*b` is the matrix product; `a*values` multiplies a matrix by a
 column vector. `a+b` and `a-b` require matching shapes. `sum`, `mean`, `min` and

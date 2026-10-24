@@ -1,0 +1,21 @@
+# quick
+# Matrices inside a list, a dictionary or a record print on one line each, as a
+# matrix inside a structure does, rather than being taken for 1-D arrays.
+Holder:type = [cells:array<int64 length=[2 2]> name:string]
+main = () => {
+    let a = [1 2 3 4]
+    let m = reshape(a 2 2)
+    printl([m])
+    let ms = [m m]
+    printl(ms)
+    printl"{ms}"
+    let f = reshape([1.5 2.5 3.5 4.5 5.5 6.5] 2 3)
+    printl([f f])
+    let byname = ["m"->m]
+    printl(byname)
+    let v = reshape(a [4])
+    printl([v])
+    let b:array<int64> = [1 2 3 4]
+    printl([Holder(reshape(b 2 2) "x")])
+    printl([reshape([1 2 3 4 5 6 7 8] 2 2 2)])
+}

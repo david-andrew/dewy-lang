@@ -1,0 +1,30 @@
+# quick
+# A plain string given as the key of a method on a container of literal-union members: a
+# text that is no member is an absent key (none, the default, false, 0, Missing), not a
+# conversion failure; receiver, key and the rest evaluate once, in order.
+Op:type = 'push' | 'load'
+main = () => {
+    let d:dict<Op int64> = ['push'->1 'load'->2]
+    let pushes:array<Op> = ['push']
+    let s = set(pushes)
+    let ops:array<Op> = ['push' 'load' 'push']
+    loop v in ["push" "zzz"] {
+        printl"{v}: {d.get(v)} {d.get(v 5)} {d.contains(v)} {s.contains(v)} {ops.count(v)} {ops.index_of(v)} {ops.contains(v)}"
+    }
+    let v:string = "zzz"
+    printl(d.get(v) ?? 0)
+    printl(d.pop(v default=7))
+    printl(d.remove(v))
+    printl(s.remove(v))
+    printl(s.pop(v default=none))
+    printl(d)
+    let w = "push"
+    printl(d.pop(w default=7))
+    printl(d.remove("load"))
+    printl(d)
+    let order:array<string> = []
+    let key = ($capture @order) => { order.push("key"); "zzz" }
+    let dflt = ($capture @order) => { order.push("default"); 9 }
+    printl(d.get(key() dflt()))
+    printl(order)
+}

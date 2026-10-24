@@ -9,6 +9,8 @@ use 'literals.dewy'
 toks: Token[]
 # A parse unit owns its EOF-terminated stream. Borrow once on entry; recursive
 # interpolation and demanded-unit parsing restore the borrow with the owning array.
+# Look-ahead past the eof (`p_toks[j + 4]`) reads the zeroed spare slots lex leaves
+# after it (LX_SPARE of them), which are eofs too.
 p_toks: *Token = null
 p_ntoks = 0
 ti = 0
