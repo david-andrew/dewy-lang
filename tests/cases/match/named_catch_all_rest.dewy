@@ -1,0 +1,41 @@
+# quick
+# A bare-name catch-all binds what the arms above leave, as `_` narrows the scrutinee.
+Oops:type = type of error & [message:string]
+get = (n:int64):>int64 | bool | Oops | none => {
+    if n =? 0 return Oops["bad"]
+    if n =? 1 return none
+    if n =? 2 return true
+    n
+}
+plain = (n:int64):>int64 | bool | Oops => {
+    if n =? 0 return Oops["bad"]
+    if n =? 2 return true
+    n
+}
+count = (n:int64):>int64? => if n =? 1 none else n
+maybe = (v:int64 | bool | none):>string => "maybe {v}"
+sure = (v:int64 | bool):>string => "sure {v}"
+whole = (v:int64):>string => "int {v}"
+main = () => {
+    loop i in [0..4) {
+        let v = get(i)
+        match v {
+            e:Oops => printl(e.message)
+            rest => printl(maybe(rest))
+        }
+        match v {
+            <none> => printl("nothing")
+            <Oops> => printl("oops")
+            rest => printl(sure(rest))
+        }
+        match plain(i) {
+            <Oops> => printl("oops")
+            <bool> => printl("bool")
+            rest => printl(whole(rest))
+        }
+        match count(i) {
+            <none> => printl("nothing")
+            rest => printl(whole(rest))
+        }
+    }
+}

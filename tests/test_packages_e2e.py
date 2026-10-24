@@ -208,6 +208,32 @@ def test_unknown_tag_is_an_error_and_writes_no_lock(box):
     assert not (box.prog / 'dewy.lock').exists()
 
 
+def test_a_ref_takes_the_ref_of_exactly_that_name(box):
+    # (git ls-remote's pattern v2 also matches refs/heads/a/v2, listed before refs/tags/v2)
+    src = box.repo('src', {'lib.jo': 'greet = () -> str: "v2"\n'})
+    box.git(src, 'tag', 'v2')
+    box.git(src, 'checkout', '-q', '-b', 'a/v2')
+    box.commit(src, {'lib.jo': 'greet = () -> str: "a/v2"\n'}, 'other')
+    ran = box.run(box.program({'lib': f'{url(src)}, "v2"'}))
+    assert ran.stdout == 'v2\n', ran.stderr
+    assert box.lock()[0].split(' ')[3] == box.git(src, 'rev-parse', 'v2')
+
+
+def test_a_tag_and_a_branch_of_one_name_are_an_error_naming_both(box):
+    src = box.repo('src', {'lib.jo': 'greet = () -> str: "tag"\n'})
+    box.git(src, 'checkout', '-q', '-b', 'v1')
+    box.commit(src, {'lib.jo': 'greet = () -> str: "branch"\n'}, 'branch')
+    ran = box.run(box.program({'lib': f'{url(src)}, "v1"'}))
+    assert ran.returncode != 0
+    assert 'refs/heads/v1' in ran.stderr and 'refs/tags/v1' in ran.stderr, ran.stderr
+    assert not (box.prog / 'dewy.lock').exists()
+    # the whole name picks one
+    ran = box.run(box.program({'lib': f'{url(src)}, "refs/tags/v1"'}))
+    assert ran.stdout == 'tag\n', ran.stderr
+    ran = box.run(box.program({'lib': f'{url(src)}, "refs/heads/v1"'}))
+    assert ran.stdout == 'branch\n', ran.stderr
+
+
 @pytest.fixture
 def pinned(box):
     """A program with a git package, built once: (box, source, the lock text, the commit)."""

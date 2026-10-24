@@ -95,16 +95,29 @@ def default_name(src):
     return n.replace(b'-', b'_')
 
 
-def remote_commit(out):
-    found = b''
+def remote_lines(out):
     for line in out.split(b'\n'):
         sha, tab, rest = line.partition(b'\t')
-        if not tab or not is_commit(sha):
-            continue
-        if rest.strip(SPACE).endswith(b'^{}'):
-            return sha
-        found = found or sha
-    return found
+        if tab and is_commit(sha):
+            yield sha, rest.strip(SPACE)
+
+
+def remote_names(out, want):
+    names = []
+    for _, ref in remote_lines(out):
+        name = ref[:-3] if ref.endswith(b'^{}') else ref
+        if name in (want, b'refs/' + want, b'refs/tags/' + want, b'refs/heads/' + want) and name not in names:
+            names.append(name)
+    return names
+
+
+def remote_commit(out, want):
+    names = remote_names(out, want)
+    if len(names) != 1:
+        return b''
+    lines = list(remote_lines(out))
+    peeled = [sha for sha, ref in lines if ref == names[0] + b'^{}']
+    return (peeled or [sha for sha, ref in lines if ref == names[0]])[0]
 
 
 def lock_key(name, u, ref):
@@ -154,7 +167,7 @@ def expected(texts):
             b(is_commit(t)), dir_name(t), default_name(t)))
         if is_commit(t):
             out.append(b'  commit %s /cache/%s@%s' % (t[:12], dir_name(b'https://h/x'), t[:12]))
-        out.append(b'  remote ' + remote_commit(t))
+        out.append(b'  remote %s %s %s' % (remote_commit(t, b'v1.2'), remote_commit(t, b'HEAD'), b'|'.join(remote_names(t, b'v1.2'))))
         locked = lock_read(t)
         out.append(b'  locked %d' % len(locked))
         for line in t.split(b'\n'):
@@ -232,7 +245,8 @@ def remote(rng):
     lines = []
     for _ in range(rng.randrange(0, 5)):
         sha = rng.choice(COMMITS)
-        ref = rng.choice(['HEAD', 'refs/heads/main', 'refs/tags/v1.2', 'refs/tags/v1.2^{}', 'refs/tags/x^{} '])
+        ref = rng.choice(['HEAD', 'refs/heads/main', 'refs/tags/v1.2', 'refs/tags/v1.2^{}', 'refs/tags/x^{} ',
+                         'refs/heads/v1.2', 'refs/heads/a/v1.2', 'v1.2', 'refs/v1.2', 'refs/tags/v1.2 '])
         lines.append(sha + rng.choice(['\t', '\t', ' ', '\t\t']) + ref)
     return '\n'.join(lines)
 
@@ -243,6 +257,9 @@ FIXED = [
     '    c = package("not/in/block")\n',
     'build:', 'build:\n', '\nbuild:\n\tt = package("https://t")', 'no block here', '', ' ', 'build:\r\n    w = package("https://w")\r\n',
     '0123456789abcdef0123456789abcdef01234567\tHEAD\n0123456789abcdef0123456789abcdef01234568\trefs/tags/v1^{}',
+    '0123456789abcdef0123456789abcdef01234567\trefs/heads/a/v1.2\nfedcba9876543210fedcba9876543210fedcba98\trefs/tags/v1.2\n'
+    '0123456789abcdef0123456789abcdef01234568\trefs/tags/v1.2^{}',
+    '0123456789abcdef0123456789abcdef01234567\trefs/heads/v1.2\nfedcba9876543210fedcba9876543210fedcba98\trefs/tags/v1.2',
     '0123456789abcdef0123456789abcdef01234567', 'https://github.com/ann/dewy-physics.git///', 'dewy-', '/', ':', '.git',
     'p https://p - 0123456789abcdef0123456789abcdef01234567\nq https://q v1 fedcba9876543210fedcba9876543210fedcba98',
     'p https://p v1 zzzz\nq https://q - 0123456789ABCDEF0123456789abcdef01234567\nr https://r v2 fedcba9876543210fedcba9876543210fedcba98',

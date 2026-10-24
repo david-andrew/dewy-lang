@@ -91,17 +91,34 @@ pkg_dir_name = (url: str) -> str:
 # where a package's commit is kept in cache
 pkg_fetch_dir = (cache: str, url: str, commit: str) -> str: "{cache}/{pkg_dir_name(url)}@{pkg_short(commit)}"
 
-# the commit `git ls-remote` output names: an annotated tag's commit (its ^{} line), else
-# the first one ("": none)
-pkg_ls_remote_commit = (out: str) -> str:
+# the refs in `git ls-remote` output named exactly want: want itself, or it after refs/,
+# refs/tags/ or refs/heads/ (not refs/heads/a/v1 for v1), each once, in order
+pkg_ls_remote_names = (out: str, want: str) -> str[]:
+    refs: str[]
+    loop line in split(out, "\n"):
+        tab = find(line, "\t")
+        if tab < 0: continue
+        if not pkg_is_commit(line[..tab)): continue
+        name = trim(line[tab + 1..])
+        if ends_with(name, "^\{}"): name = name[..len(name) - 3)
+        exact = name == want or name == "refs/" + want or name == "refs/tags/" + want or name == "refs/heads/" + want
+        if exact and not refs.contains(name): refs.push(name)
+    refs
+
+# the commit `git ls-remote` output names for want: the one ref named exactly want's, an
+# annotated tag's commit (its ^{} line) before the tag ("": none, or several refs are named want)
+pkg_ls_remote_commit = (out: str, want: str) -> str:
+    refs = pkg_ls_remote_names(out, want)
+    if refs.len() != 1: return ""
     found = ""
     loop line in split(out, "\n"):
         tab = find(line, "\t")
         if tab < 0: continue
         sha = line[..tab)
         if not pkg_is_commit(sha): continue
-        if ends_with(trim(line[tab + 1..]), "^\{}"): return sha
-        if len(found) == 0: found = sha
+        name = trim(line[tab + 1..])
+        if name == refs[0] + "^\{}": return sha
+        if name == refs[0] and len(found) == 0: found = sha
     found
 
 # dewy.lock: a line a package, its name, URL, the tag, branch or commit asked for (- for

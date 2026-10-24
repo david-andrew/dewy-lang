@@ -4049,6 +4049,18 @@ ci = (slot: int, s: str) -> int:
     ci_ids[slot] = id
     id
 
+# `p"a/b.txt"` (a `p` written against its quote) is a path literal in Dewy: its `p` is the
+# library's, whatever the program binds to p (`let p = r` below it). The library module that
+# declares it, or -1 for any other call. O(1).
+path_literal_module = (n: int, callee: int, args: int[]) -> int:
+    if int(nodes[callee].name) != ci(43, "p") or args.len() != 1 or not dewy_at(nodes[n].pos): return -1
+    src = files[pos_file(nodes[callee].pos)].src
+    off = pos_off(nodes[callee].pos) + 1
+    if off >= len(src) or (src[off] != '"' and src[off] != '\''): return -1
+    s = prelude.get(int(nodes[callee].name)) ?? dewy_prelude_lookup(int(nodes[callee].name))
+    if s == 0 or syms[s].decl == 0: return -1
+    int(nodes[int(syms[s].decl)].mod)
+
 call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, ufcs: bool) -> int:
     if ide_sentinel != 0 and name == ide_sentinel:
         if ufcs and args.len() > 0:
@@ -5693,6 +5705,8 @@ check_call = (n: int, expected: int) -> int:
             if lookup(id_len) == 0 or syms[lookup(id_len)].kind == .builtin or decl_in_prelude(int(syms[lookup(id_len)].decl)): dewy_len_check(callee, false, at, args[0])
             if is_soa(at): return check_soa_method(n, args[0], int(nodes[callee].name), [], expected)
         if not pos_in_lib(nodes[n].pos): habit_call_check(n, int(nodes[callee].name), args)
+        lm = path_literal_module(n, callee, args)
+        if lm >= 0: return call_by_name(n, int(nodes[callee].name), lm, args, expected, false)
         return call_by_name(n, int(nodes[callee].name), -1, args, expected, false)
     if ck == .dotname:
         if ide_sentinel != 0 and int(nodes[callee].name) == ide_sentinel: ide_complete_variants(expected)
@@ -8134,6 +8148,52 @@ bare_arm_warning = (p: int, name: int):
     what = if k == .struct_ or k == .enum_ or k == .type_ or k == .alias_ or k == .builtin: ", shadowing the type '{w}': `<{w}>` matches the type" else if s != 0: ", shadowing the value '{w}' (an arm does not compare with it)" else: ""
     warn(p, "the bare name '{w}' matches every value and binds it{what}; `_` is the catch-all, `{w}:T` binds with a type")
 
+# The value a bare-name catch-all arm binds: the scrutinee (hidden local h, of type st) narrowed
+# to what the arms above leave, as `_` narrows it (`e:Oops => ...  other => ...`: other is
+# not an Oops). seen: the union members covered above; finite: bit 1 the optional's value
+# covered, bit 2 its none; opt_ms: the members of an optional union matched above. O(members).
+catch_all_value = (h: int, st: int, seen: bool[], finite: int, opt_ms: int[], pos: int) -> int:
+    whole = mk_ident_local(h, pos)
+    if types[st].kind == .opt:
+        if finite & 1 != 0: return whole
+        u = prune(telem(st))
+        keep: int[]
+        if opt_ms.len() > 0 and is_union(u):
+            loop m in union_members(u):
+                if not opt_ms.contains(m): keep.push(m)
+        if keep.len() == 0:
+            if finite & 2 == 0: return whole
+            keep.push(u)
+        if finite & 2 == 0: return opt_rest_expr(h, keep, pos)
+        e = mk(.unwrap, pos)
+        nodes[e].a = i32(whole)
+        nodes[e].type = i32(u)
+        add_flag(e, NF_CHECKED)
+        if keep.len() == 1 and type_eq(keep[0], u): return e
+        return union_part(e, u, keep, pos)
+    if not is_union(st): return whole
+    keep: int[]
+    loop vi in 0.. and um in union_members(st):
+        if vi >= seen.len() or not seen[vi]: keep.push(um)
+    if keep.len() == 0 or keep.len() == union_members(st).len(): return whole
+    union_part(whole, st, keep, pos)
+
+# e (a value of union u) as its members keep, all of which it is known to hold
+union_part = (e: int, u: int, keep: int[], pos: int) -> int:
+    r = 0
+    t = keep[0]
+    if keep.len() == 1:
+        r = mk(.narrow, pos)
+        nodes[r].aux = i32(union_index(u, keep[0]))
+    else:
+        t = mk_union(keep)
+        r = mk(.conv, pos)
+        nodes[r].aux = i32(int(CV.union_))
+    nodes[r].a = i32(e)
+    nodes[r].type = i32(t)
+    add_flag(r, NF_CHECKED)
+    r
+
 check_match = (m: int, expected: int) -> int:
     if nodes[int(nodes[m].a)].kind == .call and nodes[int(nodes[m].a)].aux2 == i32(AUX2_PLACE): return place_match(m, expected)
     if files[pos_file(nodes[m].pos)].is_dewy and shape_match_wanted(m): return check_shaped_match(m, expected)
@@ -8200,7 +8260,9 @@ check_match = (m: int, expected: int) -> int:
                 binding = int(nodes[p].name)
                 nodes[p].name = 0
                 if binding != 0: value = mk_ident_local(hidden, nodes[p].pos)
-                if pk == .pwild and binding != 0: bare_arm_warning(nodes[p].pos, binding)
+                if pk == .pwild and binding != 0:
+                    bare_arm_warning(nodes[p].pos, binding)
+                    value = catch_all_value(hidden, st, seen_before, finite_before, opt_members, nodes[p].pos)
             if pk == .ptype:
                 pt = prune(resolve_type(int(nodes[p].a)))
                 # (`e:error`: the error kinds the value may hold)

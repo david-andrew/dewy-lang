@@ -124,15 +124,32 @@ pkg_dir_name=(url:string):>string=>{
 # where a package's commit is kept in cache
 pkg_fetch_dir=(cache:string url:string commit:string):>string=>"{cache}/{pkg_dir_name(url)}@{pkg_short(commit)}"
 
-# the commit `git ls-remote` output names: an annotated tag's commit (its ^{} line), else
-# the first one ("": none)
-pkg_ls_remote_commit=(out:string):>string=>{
+# the refs in `git ls-remote` output named exactly want: want itself, or it after refs/,
+# refs/tags/ or refs/heads/ (not refs/heads/a/v1 for v1), each once, in order
+pkg_ls_remote_names=(out:string want:string):>array<string>=>{
+    let refs:array<string>=[]
+    loop line in out.split("\n") {
+        let sides=line.split("\t" 1)
+        if sides.length <? 2 or not pkg_is_commit(sides[0]) {continue}
+        let name=sides[1].trim.remove_suffix("^\{}")
+        let exact=name =? want or name =? "refs/{want}" or name =? "refs/tags/{want}" or name =? "refs/heads/{want}"
+        if exact and name not in? refs {refs.push(name)}
+    }
+    refs
+}
+
+# the commit `git ls-remote` output names for want: the one ref named exactly want's, an
+# annotated tag's commit (its ^{} line) before the tag ("": none, or several refs are named want)
+pkg_ls_remote_commit=(out:string want:string):>string=>{
+    let refs=pkg_ls_remote_names(out want)
+    if refs.length not=? 1 {return ""}
     let found=""
     loop line in out.split("\n") {
         let sides=line.split("\t" 1)
         if sides.length <? 2 or not pkg_is_commit(sides[0]) {continue}
-        if sides[1].trim.endswith("^\{}") {return sides[0]}
-        if found.is_empty {found=sides[0]}
+        let name=sides[1].trim
+        if name =? "{refs[0]}^\{}" {return sides[0]}
+        if name =? refs[0] and found.is_empty {found=sides[0]}
     }
     found
 }

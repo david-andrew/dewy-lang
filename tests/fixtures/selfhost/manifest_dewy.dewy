@@ -3,7 +3,7 @@
 # its quoted strings, what its URL and lock functions make of it, and the text after
 # `dewy-core add` puts a package in it.
 $runtime_checks
-from p"../../../compiler/manifest.dewy" import PkgSpec, pkg_block_at, pkg_scan_at, pkg_strings, pkg_is_git, pkg_url, pkg_unsafe_git, pkg_is_commit, pkg_short, pkg_dir_name, pkg_fetch_dir, pkg_ls_remote_commit, pkg_lock_read, pkg_lock_key, pkg_pin, pkg_lock_text, pkg_default_name, pkg_declares, pkg_insert
+from p"../../../compiler/manifest.dewy" import PkgSpec, pkg_block_at, pkg_scan_at, pkg_strings, pkg_is_git, pkg_url, pkg_unsafe_git, pkg_is_commit, pkg_short, pkg_dir_name, pkg_fetch_dir, pkg_ls_remote_commit, pkg_ls_remote_names, pkg_lock_read, pkg_lock_key, pkg_pin, pkg_lock_text, pkg_default_name, pkg_declares, pkg_insert
 
 main=():>void=>{
     let words=args()
@@ -21,7 +21,7 @@ main=():>void=>{
         printl"  strings {pkg_strings(t).join("|")}"
         printl"  git {pkg_is_git(t)} {pkg_url(t)} {pkg_unsafe_git(t "")} {pkg_unsafe_git("x" t)} {pkg_is_commit(t)} {pkg_dir_name(t)} {pkg_default_name(t)}"
         if pkg_is_commit(t) {printl"  commit {pkg_short(t)} {pkg_fetch_dir("/cache" "https://h/x" t)}"}
-        printl"  remote {pkg_ls_remote_commit(t)}"
+        printl"  remote {pkg_ls_remote_commit(t "v1.2")} {pkg_ls_remote_commit(t "HEAD")} {pkg_ls_remote_names(t "v1.2").join("|")}"
         let locked=pkg_lock_read(t)
         printl"  locked {locked.length}"
         loop line in t.split("\n") {

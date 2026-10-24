@@ -69,9 +69,11 @@ pkg_resolve = (url: str, ref: str) -> str:
     if code != 0:
         pkg_why = "git could not reach {url}"
         return ""
-    found = pkg_ls_remote_commit(out)
+    found = pkg_ls_remote_commit(out, want)
     if len(found) == 0:
+        refs = pkg_ls_remote_names(out, want)
         pkg_why = "{url} has no '{want}' (a tag, a branch, or a whole 40-character commit)"
+        if refs.len() > 1: pkg_why = "'{want}' at {url} names both {refs[0]} and {refs[1]}: ask for one by its whole name, as '{refs[0]}'"
     found
 
 # the commit's files, fetched into dir (a marker last: a half-fetched one is fetched again)

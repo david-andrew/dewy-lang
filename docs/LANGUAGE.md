@@ -583,6 +583,15 @@ Calling a callable saved under `const` uses a temporary copy of its private
 state; explicit shared captures still refer to their shared bindings. Captured
 `const` locals remain read-only inside the closure.
 
+A closure captures its environment by value: it holds a copy, made when the
+closure is, and never sees a later change to what it copied. An interpreter
+written in Dewy meets the same rule in its own data: an environment record that
+holds its parent environment holds a copy of it, so a function value built over
+it never sees a `define` made afterwards, including the function's own (its
+recursion). Keep the environments as frames in one array and refer to a frame,
+and to its parent, by index (`Frame:type = [vars:dict<string Value> parent:int64]`);
+a lookup walks the parent indices through that array.
+
 A binary operator with its right operand can be used as a function:
 `(* 2)` doubles its input, `(<? limit)` compares it, and `(.x)` reads a field.
 Normal precedence applies: `(* 2 + 2)` means `x => x * 2 + 2`.

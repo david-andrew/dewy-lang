@@ -17,7 +17,7 @@ main = ():
         print("  strings {join(pkg_strings(t), "|")}")
         print("  git {pkg_is_git(t)} {pkg_url(t)} {pkg_unsafe_git(t, "")} {pkg_unsafe_git("x", t)} {pkg_is_commit(t)} {pkg_dir_name(t)} {pkg_default_name(t)}")
         if pkg_is_commit(t): print("  commit {pkg_short(t)} {pkg_fetch_dir("/cache", "https://h/x", t)}")
-        print("  remote {pkg_ls_remote_commit(t)}")
+        print("  remote {pkg_ls_remote_commit(t, "v1.2")} {pkg_ls_remote_commit(t, "HEAD")} {join(pkg_ls_remote_names(t, "v1.2"), "|")}")
         locked = pkg_lock_read(t)
         print("  locked {locked.len()}")
         loop line in split(t, "\n"):
