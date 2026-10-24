@@ -246,7 +246,9 @@ validated on the Linux compiler host.
 ## Functions and values
 
 Arguments and array elements are separated by whitespace. Calls use adjacent
-parentheses. A function's final expression is its result; `return` exits early.
+parentheses. A single delimited argument may also follow a function directly:
+`total[1 2 3]` passes the array `[1 2 3]`, and `printl"hi"` and `printl'hi'`
+pass the string. A function's final expression is its result; `return` exits early.
 A function declared `:>never` never returns: every path ends in `exit(...)`, a
 panic or an endless loop, and a call to it ends its branch like `exit` does.
 
