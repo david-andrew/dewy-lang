@@ -3,59 +3,59 @@
 # Negative: compilation must reject the marked operation, before execution.
 $explicit_copies
 
-checksum=(xs:array<int64>):>int64=>{
-    let total:int64=0
+checksum = (xs:array<int64>):>int64 => {
+    let total:int64 = 0
     loop x in xs {
-        total+=x
+        total += x
     }
     return total
 }
-make=(n:int64):>array<int64>=>{
-    let xs:array<int64>=[]
+make = (n:int64):>array<int64> => {
+    let xs:array<int64> = []
     loop i in [0..n) {
         xs.push(i*3+1)
     }
     return xs
 }
-verify=():>int64=>{
-    let xs=make(4)
-    let saved=xs.copy()
-    xs[0]=99
+verify = ():>int64 => {
+    let xs = make(4)
+    let saved = xs.copy()
+    xs[0] = 99
     $runtime_assert saved[0] =? 1
     $runtime_assert checksum(saved) =? 22
-    let total:int64=0
+    let total:int64 = 0
     loop n in [1..12) {
-        let values=make(n)
+        let values = make(n)
         $runtime_assert values.length =? n
-        total+=checksum(values)
+        total += checksum(values)
     }
     return total
 }
 
-forbidden=(xs:array<int64>):>int64=>{
+forbidden = (xs:array<int64>):>int64 => {
     # REJECT: both runtime-sized mutable values remain live.
-    let saved=xs
-    xs[0]=99
+    let saved = xs
+    xs[0] = 99
     return checksum(saved)+checksum(xs)
 }
 
-control=():>int64=>{
-    let empty:array<int64>=[]
+control = ():>int64 => {
+    let empty:array<int64> = []
     $runtime_assert checksum(empty) =? 0
     $runtime_assert make(1)[0] =? 1
     $runtime_assert make(2)[1] =? 4
     $runtime_assert make(3)[2] =? 7
     $runtime_assert make(4)[3] =? 10
-    let first=make(5)
-    let second=first.copy()
+    let first = make(5)
+    let second = first.copy()
     $runtime_assert checksum(first) =? 35
     $runtime_assert checksum(second) =? 35
-    first[0]=0
+    first[0] = 0
     $runtime_assert second[0] =? 1
     return verify()
 }
-main=():>void=>{
-    let witness=control()
+main = ():>void => {
+    let witness = control()
     forbidden(make(3))
     $runtime_assert witness >? 0
 }

@@ -1,40 +1,40 @@
 # Current-dialect algorithm projection; does not establish removed design contracts.
 # Tier 3 / 68_positive_divisors / milestone 22
 # Acceptance: Prove positive divisors and nonempty indexing through helpers and guards.
-positive:type=int64
-quotient=(n:int64 d:positive):>int64=>{
+positive:type = int64
+quotient = (n:int64 d:positive):>int64 => {
     $runtime_assert d >? 0
     $runtime_assert d >? 0
     return n//d
 }
-first=(xs:array<int64>):>int64=>{
+first = (xs:array<int64>):>int64 => {
     $runtime_assert xs.length >? 0
     return xs[0]
 }
-share=(n:int64 d:int64):>int64=>{
+share = (n:int64 d:int64):>int64 => {
     if d >? 0 {
         return quotient(n d)
     }
     return 0
 }
-triangular=(n:int64):>int64=>{
-    let total:int64=0
+triangular = (n:int64):>int64 => {
+    let total:int64 = 0
     loop i in [0..n) {
         $runtime_assert i >=? 0
         $runtime_assert i <? 100
-        total+=i
+        total += i
     }
     return total
 }
-main=():>void=>{
-    let total:int64=0
+main = ():>void => {
+    let total:int64 = 0
     loop d in [1..17) {
         $runtime_assert d >? 0
-        total+=quotient(1000 d)
+        total += quotient(1000 d)
     }
-    let xs:array<int64>=[31 7 9]
+    let xs:array<int64> = [31 7 9]
     if xs.length >? 0 {
-        total+=first(xs)
+        total += first(xs)
     }
     $runtime_assert share(12 0) =? 0
     $runtime_assert share(12 -1) =? 0

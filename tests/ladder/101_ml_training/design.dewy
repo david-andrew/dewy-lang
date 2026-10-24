@@ -17,69 +17,69 @@ $runtime_checks
 
 from p"data.dewy" import Rng, Sample, CLASSES, make_dataset, shuffled, uniform
 
-const EPOCHS:int64=30
-const BATCH:int64=20
-const HIDDEN:int64=12
-const NOISE:float64=0.8
+const EPOCHS:int64 = 30
+const BATCH:int64 = 20
+const HIDDEN:int64 = 12
+const NOISE:float64 = 0.8
 
 # Inputs as rows, one-hot targets beside them.
-features=(data:array<Sample>):>array<float64 length=[data.length 2]>=>{
-    let x=zeros(data.length 2)
+features = (data:array<Sample>):>array<float64 length=[data.length 2]> => {
+    let x = zeros(data.length 2)
     loop i in 0.. and s in data {
-        x[i [..]]=[s.x0 s.x1]
+        x[i [..]] = [s.x0 s.x1]
     }
     return x
 }
-onehot=(data:array<Sample>):>array<float64 length=[data.length CLASSES]>=>{
-    let t=zeros(data.length CLASSES)
+onehot = (data:array<Sample>):>array<float64 length=[data.length CLASSES]> => {
+    let t = zeros(data.length CLASSES)
     loop i in 0.. and s in data {
-        t[i s.label]=1.0
+        t[i s.label] = 1.0
     }
     return t
 }
 
-glorot=(@r:Rng rows:int64 cols:int64):>array<float64 length=[rows cols]>=>{
-    let limit=sqrt(6.0/float64(rows+cols))
+glorot = (@r:Rng rows:int64 cols:int64):>array<float64 length=[rows cols]> => {
+    let limit = sqrt(6.0/float64(rows+cols))
     return reshape([loop i in [0..rows*cols) (2.0*uniform(@r)-1.0)*limit] rows cols)
 }
 
-Model:type=[
+Model:type = [
     w1:array<float64 length=[2 HIDDEN]> b1:array<float64 length=[HIDDEN]>
     w2:array<float64 length=[HIDDEN HIDDEN]> b2:array<float64 length=[HIDDEN]>
     w3:array<float64 length=[HIDDEN CLASSES]> b3:array<float64 length=[CLASSES]>
 ]
 
-init=(@r:Rng):>Model=>{
-    let w1=glorot(@r 2 HIDDEN)
-    let w2=glorot(@r HIDDEN HIDDEN)
-    let w3=glorot(@r HIDDEN CLASSES)
+init = (@r:Rng):>Model => {
+    let w1 = glorot(@r 2 HIDDEN)
+    let w2 = glorot(@r HIDDEN HIDDEN)
+    let w3 = glorot(@r HIDDEN CLASSES)
     return [w1=w1 b1=zeros(HIDDEN) w2=w2 b2=zeros(HIDDEN) w3=w3 b3=zeros(CLASSES)]
 }
 
 # The layers of a batch of n rows.
-Activations:type=[h1:array<float64 length=[n HIDDEN]> h2:array<float64 length=[n HIDDEN]> y:array<float64 length=[n CLASSES]>]
+Activations:type = [h1:array<float64 length=[n HIDDEN]> h2:array<float64 length=[n HIDDEN]> y:array<float64 length=[n CLASSES]>]
 
 # A batch of rows through the network: each bias row broadcasts over the
 # batch through a `new` leading axis.
-forward=(m:Model x:array<float64 length=[n 2]>):>Activations=>{
-    let h1=max.(x*m.w1 .+ m.b1[new ..] 0.0)
-    let h2=max.(h1*m.w2 .+ m.b2[new ..] 0.0)
-    let y=h2*m.w3 .+ m.b3[new ..]
+forward = (m:Model x:array<float64 length=[n 2]>):>Activations => {
+    let h1 = max.(x*m.w1 .+ m.b1[new ..] 0.0)
+    let h2 = max.(h1*m.w2 .+ m.b2[new ..] 0.0)
+    let y = h2*m.w3 .+ m.b3[new ..]
     return [h1=h1 h2=h2 y=y]
 }
 
 # Column sums: a row of ones times the matrix.
-column_sums=(a:array<float64 length=[n k]>):>array<float64 length=[k]>=>(ones(1 n)*a)[0 [..]]
+column_sums = (a:array<float64 length=[n k]>):>array<float64 length=[k]> => (ones(1 n)*a)[0 [..]]
 
-Grads:type=Model
+Grads:type = Model
 
 # Gradients of the mean half squared error over the batch. Masks come from
 # the activations: a unit passes gradient where it was positive.
-backward=(m:Model x:array<float64 length=[batch 2]> t:array<float64 length=[batch CLASSES]> a:Activations):>Grads=>{
-    let n=float64(batch)
-    let dy=a.y .- t
-    let dz2=(dy*transpose(m.w3)) .* (a.h2 .>? 0.0)
-    let dz1=(dz2*transpose(m.w2)) .* (a.h1 .>? 0.0)
+backward = (m:Model x:array<float64 length=[batch 2]> t:array<float64 length=[batch CLASSES]> a:Activations):>Grads => {
+    let n = float64(batch)
+    let dy = a.y .- t
+    let dz2 = (dy*transpose(m.w3)) .* (a.h2 .>? 0.0)
+    let dz1 = (dz2*transpose(m.w2)) .* (a.h1 .>? 0.0)
     return [
         w1=(transpose(x)*dz1) ./ n b1=column_sums(dz1) ./ n
         w2=(transpose(a.h1)*dz2) ./ n b2=column_sums(dz2) ./ n
@@ -87,21 +87,21 @@ backward=(m:Model x:array<float64 length=[batch 2]> t:array<float64 length=[batc
     ]
 }
 
-Adam:type=[m:Model v:Model decay1:float64 decay2:float64]
+Adam:type = [m:Model v:Model decay1:float64 decay2:float64]
 
 # Zero moments shaped like the model.
-still=(m:Model):>Model=>[w1=m.w1 .* 0.0 b1=m.b1 .* 0.0 w2=m.w2 .* 0.0 b2=m.b2 .* 0.0 w3=m.w3 .* 0.0 b3=m.b3 .* 0.0]
+still = (m:Model):>Model => [w1=m.w1 .* 0.0 b1=m.b1 .* 0.0 w2=m.w2 .* 0.0 b2=m.b2 .* 0.0 w3=m.w3 .* 0.0 b3=m.b3 .* 0.0]
 
 # Weights and biases alike: any shape, the same for the four arrays.
-adam_step=<A>(@p:A @mo:A @ve:A g:A decay1:float64 decay2:float64):>void=>{
-    mo=0.9 .* mo .+ (1.0-0.9) .* g
-    ve=0.999 .* ve .+ (1.0-0.999) .* (g .* g)
+adam_step = <A>(@p:A @mo:A @ve:A g:A decay1:float64 decay2:float64):>void => {
+    mo = 0.9 .* mo .+ (1.0-0.9) .* g
+    ve = 0.999 .* ve .+ (1.0-0.999) .* (g .* g)
     p .-= 0.01 .* (mo ./ (1.0-decay1)) ./ (sqrt.(ve ./ (1.0-decay2)) .+ 0.00000001)
 }
 
-train_step=(@m:Model @opt:Adam g:Grads):>void=>{
-    opt.decay1*=0.9
-    opt.decay2*=0.999
+train_step = (@m:Model @opt:Adam g:Grads):>void => {
+    opt.decay1 *= 0.9
+    opt.decay2 *= 0.999
     adam_step(@m.w1 @opt.m.w1 @opt.v.w1 g.w1 opt.decay1 opt.decay2)
     adam_step(@m.b1 @opt.m.b1 @opt.v.b1 g.b1 opt.decay1 opt.decay2)
     adam_step(@m.w2 @opt.m.w2 @opt.v.w2 g.w2 opt.decay1 opt.decay2)
@@ -111,66 +111,66 @@ train_step=(@m:Model @opt:Adam g:Grads):>void=>{
 }
 
 # Row-wise argmax: the first index of each row's largest value.
-predict=(y:array<float64 length=[n classes]>):>array<int64>=>[loop r in [0..n) {
-    let row=y[r [..]]
-    let best:int64=0
+predict = (y:array<float64 length=[n classes]>):>array<int64> => [loop r in [0..n) {
+    let row = y[r [..]]
+    let best:int64 = 0
     loop k in [0..classes) {
-        if row[k] >? row[best] best=k
+        if row[k] >? row[best] best = k
     }
     best
 }]
 
-two=(n:int64):>string=>if n <? 10 "0{n}" else "{n}"
+two = (n:int64):>string => if n <? 10 "0{n}" else "{n}"
 
-main=():>void=>{
-    let device='best'
-    let train=make_dataset(2026 120 NOISE)
-    let test=make_dataset(99 60 NOISE)
-    let x=features(train).to(device)
-    let t=onehot(train).to(device)
-    let init_rng:Rng=[state=7]
-    let m=init(@init_rng).to(device)
-    let opt:Adam=[m=still(m) v=still(m) decay1=1.0 decay2=1.0]
-    let rng:Rng=[state=77]
+main = ():>void => {
+    let device = 'best'
+    let train = make_dataset(2026 120 NOISE)
+    let test = make_dataset(99 60 NOISE)
+    let x = features(train).to(device)
+    let t = onehot(train).to(device)
+    let init_rng:Rng = [state=7]
+    let m = init(@init_rng).to(device)
+    let opt:Adam = [m=still(m) v=still(m) decay1=1.0 decay2=1.0]
+    let rng:Rng = [state=77]
     printl("train {train.length} samples, test {test.length}, batch {BATCH}, {EPOCHS} epochs")
     loop epoch in [1..EPOCHS] {
-        let order=shuffled(@rng train.length)
-        let loss:float64=0.0
-        let correct:int64=0
-        loop start in [0,BATCH..order.length) {
-            let picked=order[$clamp start..start+BATCH)
-            let xb=x[picked [..]]
-            let tb=t[picked [..]]
-            let a=forward(m xb)
-            loss+=sum(0.5 .* (a.y .- tb) .^ 2)
-            let hits=predict(a.y) .=? predict(tb)
-            correct+=[loop hit in hits if hit hit].length
+        let order = shuffled(@rng train.length)
+        let loss:float64 = 0.0
+        let correct:int64 = 0
+        loop start in [0, BATCH..order.length) {
+            let picked = order[$clamp start..start+BATCH)
+            let xb = x[picked [..]]
+            let tb = t[picked [..]]
+            let a = forward(m xb)
+            loss += sum(0.5 .* (a.y .- tb) .^ 2)
+            let hits = predict(a.y) .=? predict(tb)
+            correct += [loop hit in hits if hit hit].length
             train_step(@m @opt backward(m xb tb a))
         }
         printl("epoch {two(epoch)} loss {format(loss/float64(train.length) ".6f")} train {correct}/{train.length}")
     }
     # Evaluation in parallel batches of the held-out set.
-    let tx=features(test).to(device)
-    let guesses=[parallel b in [0,BATCH..test.length) predict(forward(m tx[[b..b+BATCH) [..]]).y)]
-    let counts=zeros<int64>(CLASSES CLASSES)
-    let i=0
+    let tx = features(test).to(device)
+    let guesses = [parallel b in [0, BATCH..test.length) predict(forward(m tx[[b..b+BATCH) [..]]).y)]
+    let counts = zeros<int64>(CLASSES CLASSES)
+    let i = 0
     loop batch in guesses {
         loop guess in batch {
-            let s=test.get(i)
-            if s is? Sample counts[s.label guess]+=1
-            i+=1
+            let s = test.get(i)
+            if s is? Sample counts[s.label guess] += 1
+            i += 1
         }
     }
-    let right=[loop c in [0..CLASSES) counts[c c]]
+    let right = [loop c in [0..CLASSES) counts[c c]]
     printl("test {sum(right)}/{test.length}")
     loop c in [0..CLASSES) {
         printl("  class {c}: {[loop p in [0..CLASSES) string(counts[c p])].join(" ")}")
     }
-    let probes:array<float64 length=[4 2]>=[(-1.0) (-1.0) ; 1.0 (-1.0) ; 0.0 0.0 ; 0.5 0.5]
-    let y=forward(m probes.to(device)).y
-    let classes=predict(y)
+    let probes:array<float64 length=[4 2]> = [(-1.0) (-1.0); 1.0 (-1.0); 0.0 0.0; 0.5 0.5]
+    let y = forward(m probes.to(device)).y
+    let classes = predict(y)
     loop r in 0.. and guess in classes {
-        let shown=[loop k in [0..CLASSES) format(y[r k] ".3f")]
+        let shown = [loop k in [0..CLASSES) format(y[r k] ".3f")]
         printl("probe ({format(probes[r 0] ".1f")}, {format(probes[r 1] ".1f")}) -> {shown.join(" ")} class {guess}")
     }
 }

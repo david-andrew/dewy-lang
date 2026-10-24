@@ -1,33 +1,33 @@
-work=(n:int64):>int64=>{
-    let sum=0
+work = (n:int64):>int64 => {
+    let sum = 0
     loop i in [0..1000) {
-        sum+=(n+i)%97
+        sum += (n+i)%97
     }
     return sum
 }
-main=():>void=>{
-    let input=[loop i in [0..128) i]
-    let output=parallel_map(input (n)=>work(n))
-    let total=0
-    let results=output
+main = ():>void => {
+    let input = [loop i in [0..128) i]
+    let output = parallel_map(input (n) => work(n))
+    let total = 0
+    let results = output
     loop i in [0..results.length) {
         $runtime_assert (results[i] =? work(input[i]))
-        total+=results[i]
+        total += results[i]
     }
-    let saved=output
-    parallel_update(@output (n)=>n+1)
-    let updated=output
+    let saved = output
+    parallel_update(@output (n) => n+1)
+    let updated = output
     $runtime_assert updated.length =? saved.length
     loop i in [0..updated.length) {
         $runtime_assert (updated[i] =? saved[i]+1)
     }
-    let nested=parallel_range(8 (i:int64)=>{
-        let inner=parallel_range(4 (j:int64)=>i+j)
+    let nested = parallel_range(8 (i:int64) => {
+        let inner = parallel_range(4 (j:int64) => i+j)
         return inner[0]+inner[3]
     })
     $runtime_assert (nested[7] =? 17)
-    let serial=0
-    loop i in input {serial+=work(i)}
+    let serial = 0
+    loop i in input { serial += work(i) }
     $runtime_assert (serial =? total)
     printl("{output.length} {total} {nested[7]}")
 }

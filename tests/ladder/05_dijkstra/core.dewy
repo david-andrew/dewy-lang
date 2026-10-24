@@ -1,34 +1,34 @@
-Edge:type=[src:int64 dst:int64 cost:int64]
-shortest=(n:int64 edges:array<Edge> source:int64<0 <=? source and source <? n>):>array<int64>=>{
-    let dist=fill(int64(1000000) n)
-    let done=fill(false n)
-    dist[source]=0
+Edge:type = [src:int64 dst:int64 cost:int64]
+shortest = (n:int64 edges:array<Edge> source:int64<0 <=? source and source <? n>):>array<int64> => {
+    let dist = fill(int64(1000000) n)
+    let done = fill(false n)
+    dist[source] = 0
     loop step in [0..n) {
-        let u=-1
-        let best=dist[0]
+        let u = -1
+        let best = dist[0]
         loop i in [0..dist.length) {
-            if not done[i] and (u <? 0 or dist[i] <? best) {u=i best=dist[i]}
+            if not done[i] and (u <? 0 or dist[i] <? best) { u = i best = dist[i] }
         }
-        if u <? 0 {break}
+        if u <? 0 { break }
         $runtime_assert u <? dist.length
-        done[u]=true
+        done[u] = true
         loop edge in edges {
-            if edge.src not=? u or edge.dst <? 0 or edge.dst >=? dist.length {continue}
-            let next=best+edge.cost
-            if next <? dist[edge.dst] {dist[edge.dst]=next}
+            if edge.src not=? u or edge.dst <? 0 or edge.dst >=? dist.length { continue }
+            let next = best+edge.cost
+            if next <? dist[edge.dst] { dist[edge.dst] = next }
         }
     }
     return dist
 }
-main=():>void=>{
-    let edges=[Edge[0 1 4] Edge[0 2 1] Edge[2 1 2] Edge[1 3 1] Edge[2 3 8]]
-    let distance=shortest(5 edges 0)
+main = ():>void => {
+    let edges = [Edge[0 1 4] Edge[0 2 1] Edge[2 1 2] Edge[1 3 1] Edge[2 3 8]]
+    let distance = shortest(5 edges 0)
     $runtime_assert(distance =? [0 3 1 4 1000000])
-    let reverse=shortest(5 edges 3)
+    let reverse = shortest(5 edges 3)
     $runtime_assert(reverse[0] =? 1000000)
     $runtime_assert(reverse[3] =? 0)
-    let snapshot=distance
-    distance[0]=9
+    let snapshot = distance
+    distance[0] = 9
     $runtime_assert(snapshot[0] =? 0)
     printl(snapshot)
 }

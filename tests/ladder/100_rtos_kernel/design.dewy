@@ -14,7 +14,7 @@
 # image (a `$target`, a timer interrupt through `extern` and a pointer to the
 # device page, no host printing), which needs the self-hosting surface.
 
-$runtime_checks=false
+$runtime_checks = false
 
 from p"defs.dewy" import Kernel, Event, Op, NTASK, NCODE, NBLOCK, ARENA, NBOX, NIRQ, NONE
 from p"kernel.dewy" import boot, admit, tick
@@ -24,80 +24,80 @@ from p"script.dewy" import Script, ScriptError, parse_script
 from p"report.dewy" import describe, pad
 
 # Copy one program word into the kernel's code table.
-load_word=(@k:Kernel op:Op):>bool & no allocates & no blocks=>{
-    let at=k.ncode
+load_word = (@k:Kernel op:Op):>bool & no allocates & no blocks => {
+    let at = k.ncode
     if at <? 0 or at >=? NCODE return false
-    k.code[at]=op
-    k.ncode=at+1
+    k.code[at] = op
+    k.ncode = at+1
     return true
 }
 
 # Names resolve to task numbers and mailboxes stay numeric.
-task_number=(names:array<string> name:string):>int64=>{
+task_number = (names:array<string> name:string):>int64 => {
     loop i in 0.. and n in names {
         if n =? name return i
     }
     return NONE
 }
 
-install=(@k:Kernel script:Script):>array<string>|ScriptError=>{
-    let names:array<string>=[]
+install = (@k:Kernel script:Script):>array<string>|ScriptError => {
+    let names:array<string> = []
     loop spec in script.tasks {
-        let entry=k.ncode
+        let entry = k.ncode
         loop op in spec.ops {
             if not load_word(@k op) return ScriptError[0 "programs exceed {NCODE} words"]
         }
-        let t=admit(@k spec.prio entry spec.ops.length)
+        let t = admit(@k spec.prio entry spec.ops.length)
         if t =? NONE return ScriptError[0 "more than {NTASK} tasks"]
         names.push(spec.name)
     }
     loop v in script.vectors {
-        let line=v.line
+        let line = v.line
         if line <? 0 or line >=? NIRQ return ScriptError[0 "no interrupt line {line}"]
-        let target=if v.action =? 'signal' task_number(names v.target) else to_int(v.target) ?? NONE
+        let target = if v.action =? 'signal' task_number(names v.target) else to_int(v.target) ?? NONE
         if target =? NONE return ScriptError[0 "vector {line}: unknown target '{v.target}'"]
-        k.vectors[line]=[action=v.action target=int64(target) value=v.value]
+        k.vectors[line] = [action=v.action target=int64(target) value=v.value]
     }
     return names
 }
 
-drain=(@k:Kernel names:array<string>):>void=>{
+drain = (@k:Kernel names:array<string>):>void => {
     loop true {
-        let event=take(@k)
+        let event = take(@k)
         if event is? none break
         printl("{pad(string(event.tick) 4)} {describe(event names)}")
     }
 }
 
-summary=(k:Kernel names:array<string>):>void=>{
+summary = (k:Kernel names:array<string>):>void => {
     printl("summary at tick {k.now}")
     printl("  {pad("task" 8)} {pad("state" 9)} prio eff  ran")
     loop t in [0..NTASK) {
         if t >=? k.ntasks break
-        let tcb=k.tasks[t]
-        let name=names.get(t) ?? "?"
+        let tcb = k.tasks[t]
+        let name = names.get(t) ?? "?"
         printl("  {pad(name 8)} {pad(string(tcb.state) 9)} {pad(string(tcb.base) 4)} {pad(string(tcb.eff) 4)} {tcb.ran}")
     }
-    let s=k.stats
+    let s = k.stats
     printl("switches {s.switches}, idle {s.idle}, interrupts {s.irqs}, overruns {s.overruns}, boosts {s.boosts}, faults {s.faults}")
-    let peaks=[loop b in [0..NBOX) string(k.boxes[b].peak)]
+    let peaks = [loop b in [0..NBOX) string(k.boxes[b].peak)]
     printl("pool {k.pool.available}/{NBLOCK} free, arena peak {k.arena.peak}/{ARENA}, mailbox peaks {peaks.join(" ")}, trace dropped {k.log.dropped}")
 }
 
-main=():>void=>{
-    let lines:array<string>=[]
+main = ():>void => {
+    let lines:array<string> = []
     loop true {
-        let line=read_line()
+        let line = read_line()
         if line is? none break
         if line is? (Canceled|FileError) exit(1)
         lines.push(line)
     }
-    let script=parse_script(lines)
+    let script = parse_script(lines)
     if script is? ScriptError {
         printl("script line {script.line}: {script.message}")
         exit(1)
     }
-    let k:Kernel=[
+    let k:Kernel = [
         now=0 tasks=[] ntasks=0 code=[] ncode=0 mutexes=[] boxes=[]
         wheel=[head=[] tail=[]] pool=[next=[] free=0 available=0] arena=[top=0 peak=0]
         vectors=[] pending=[] masked=[] current=NONE seq=0
@@ -105,7 +105,7 @@ main=():>void=>{
         stats=[switches=0 idle=0 irqs=0 overruns=0 boosts=0 faults=0]
     ]
     boot(@k)
-    let names=install(@k script)
+    let names = install(@k script)
     if names is? ScriptError {
         printl("script: {names.message}")
         exit(1)

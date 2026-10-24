@@ -1,65 +1,65 @@
-Settings:type=[workers:int64 limit:int64 mode:int64]
-Point:type=[x:int64 y:int64]
-describe=(v:Settings):>string=>"workers={v.workers};limit={v.limit};mode={v.mode};"
-describe=(v:Point):>string=>"x={v.x};y={v.y};"
-differences=(a:Settings b:Settings):>int64=> {
-    let n=0
-    if a.workers not=? b.workers  {
-        n+=1
+Settings:type = [workers:int64 limit:int64 mode:int64]
+Point:type = [x:int64 y:int64]
+describe = (v:Settings):>string => "workers={v.workers};limit={v.limit};mode={v.mode};"
+describe = (v:Point):>string => "x={v.x};y={v.y};"
+differences = (a:Settings b:Settings):>int64 => {
+    let n = 0
+    if a.workers not=? b.workers {
+        n += 1
     }
-    if a.limit not=? b.limit  {
-        n+=1
+    if a.limit not=? b.limit {
+        n += 1
     }
-    if a.mode not=? b.mode  {
-        n+=1
-    }
-    return n
-}
-differences=(a:Point b:Point):>int64=> {
-    let n=0
-    if a.x not=? b.x  {
-        n+=1
-    }
-    if a.y not=? b.y  {
-        n+=1
+    if a.mode not=? b.mode {
+        n += 1
     }
     return n
 }
-reset=(v:Settings):>Settings=>Settings[0 0 0]
-reset=(v:Point):>Point=>Point[0 0]
-main=():>void=> {
-    let settings=Settings[4 16 3]
-    let point=Point[20 22]
+differences = (a:Point b:Point):>int64 => {
+    let n = 0
+    if a.x not=? b.x {
+        n += 1
+    }
+    if a.y not=? b.y {
+        n += 1
+    }
+    return n
+}
+reset = (v:Settings):>Settings => Settings[0 0 0]
+reset = (v:Point):>Point => Point[0 0]
+main = ():>void => {
+    let settings = Settings[4 16 3]
+    let point = Point[20 22]
     $runtime_assert(describe(settings) =? "workers=4;limit=16;mode=3;")
     $runtime_assert(describe(point) =? "x=20;y=22;")
-    let saved=settings
-    settings.workers=8
-    settings.mode=1
+    let saved = settings
+    settings.workers = 8
+    settings.mode = 1
     $runtime_assert(differences(saved settings) =? 2)
     $runtime_assert(differences(point point) =? 0)
-    let restored=reset(settings)
+    let restored = reset(settings)
     $runtime_assert(restored.workers =? 0)
     $runtime_assert(restored.limit =? 0)
     $runtime_assert(restored.mode =? 0)
     $runtime_assert(saved.workers =? 4)
-    let zero=reset(point)
+    let zero = reset(point)
     $runtime_assert(zero.x =? 0)
     $runtime_assert(zero.y =? 0)
-    let count=0
-    let checksum=0
-    loop i in [0..100)  {
-        let item=Settings[i i*2 i%3]
-        let clear=reset(item)
+    let count = 0
+    let checksum = 0
+    loop i in [0..100) {
+        let item = Settings[i i*2 i%3]
+        let clear = reset(item)
         $runtime_assert(clear.workers =? 0)
         $runtime_assert(clear.limit =? 0)
         $runtime_assert(clear.mode =? 0)
-        count+=differences(item clear)
-        checksum+=describe(item).length
+        count += differences(item clear)
+        checksum += describe(item).length
     }
-    let copy=point
-    copy.x=0
+    let copy = point
+    copy.x = 0
     $runtime_assert(differences(point copy) =? 1)
-    let named=Settings[workers=4 limit=16 mode=3]
+    let named = Settings[workers=4 limit=16 mode=3]
     $runtime_assert(describe(named) =? describe(saved))
     printl(describe(saved))
     printl("{count} {checksum} {differences(point copy)}")

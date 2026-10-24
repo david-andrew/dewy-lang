@@ -1,22 +1,22 @@
 import net
-respond=(request:string):>string=>{
-    let body=if request.startswith("GET /hello ") "hello\n" else "missing\n"
-    let status=if request.startswith("GET /hello ") "200 OK" else "404 Not Found"
+respond = (request:string):>string => {
+    let body = if request.startswith("GET /hello ") "hello\n" else "missing\n"
+    let status = if request.startswith("GET /hello ") "200 OK" else "404 Not Found"
     return "HTTP/1.1 {status}\r\nContent-Length: {bytes(body).length}\r\nConnection: close\r\n\r\n{body}"
 }
-request=(path:string):>string | net.NetError | Canceled=>{
-    let server=net.tcp_listen(0) or_throw
+request = (path:string):>string | net.NetError | Canceled => {
+    let server = net.tcp_listen(0) or_throw
     $runtime_assert(server.port >? 0)
-    let client=net.tcp_connect("127.0.0.1" server.port) or_throw
-    let peer=net.tcp_accept(server) or_throw
+    let client = net.tcp_connect("127.0.0.1" server.port) or_throw
+    let peer = net.tcp_accept(server) or_throw
     net.tcp_send(client "GET {path} HTTP/1.1\r\nHost: localhost\r\n\r\n") or_throw
-    let text=str_from_bytes((net.tcp_receive(peer) ?? []) or_throw)
+    let text = str_from_bytes((net.tcp_receive(peer) ?? []) or_throw)
     net.tcp_send(peer respond(text)) or_throw
     net.tcp_close(peer)
     # (the server closed the connection: read to the end)
-    let response:array<uint8>=[]
+    let response:array<uint8> = []
     loop true {
-        let got=net.tcp_receive(client)
+        let got = net.tcp_receive(client)
         if got is? none break
         response.extend(got or_throw)
     }
@@ -24,9 +24,9 @@ request=(path:string):>string | net.NetError | Canceled=>{
     net.tcp_close(server)
     return str_from_bytes(response)
 }
-main=():>void | net.NetError | Canceled=>{
-    let found=request("/hello") or_throw
-    let missing=request("/missing") or_throw
+main = ():>void | net.NetError | Canceled => {
+    let found = request("/hello") or_throw
+    let missing = request("/missing") or_throw
     $runtime_assert(found.startswith("HTTP/1.1 200 OK"))
     $runtime_assert("Content-Length: 6" in? found)
     $runtime_assert(found.endswith("hello\n"))

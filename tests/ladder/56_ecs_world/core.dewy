@@ -1,80 +1,80 @@
 # Structure-of-arrays ECS, stable IDs, dense swap removal and a sparse map.
-World:type=[ids:array<int64> x:array<int64> y:array<int64> vx:array<int64> vy:array<int64> slot:dict<int64 int64>]
-spawn_entity=(@w:World id:int64):>void=> {
-    w.slot[id]=w.ids.length
+World:type = [ids:array<int64> x:array<int64> y:array<int64> vx:array<int64> vy:array<int64> slot:dict<int64 int64>]
+spawn_entity = (@w:World id:int64):>void => {
+    w.slot[id] = w.ids.length
     w.ids.push(id)
     w.x.push(id%101)
     w.y.push(id%79)
     w.vx.push(id%7-3)
     w.vy.push(id%5-2)
 }
-despawn=(@w:World id:int64):>bool=> {
-    let index=w.slot.get(id)
-    if index is? none  {
+despawn = (@w:World id:int64):>bool => {
+    let index = w.slot.get(id)
+    if index is? none {
         return false
     }
-    let n=w.ids.length
+    let n = w.ids.length
     $runtime_assert 0 <=? index and index <? n and n <=? w.x.length and n <=? w.y.length and n <=? w.vx.length and n <=? w.vy.length
-    let last=n-1
-    let moved=w.ids[last]
-    if index not=? last  {
-        w.ids[index]=moved
-        w.x[index]=w.x[last]
-        w.y[index]=w.y[last]
-        w.vx[index]=w.vx[last]
-        w.vy[index]=w.vy[last]
+    let last = n-1
+    let moved = w.ids[last]
+    if index not=? last {
+        w.ids[index] = moved
+        w.x[index] = w.x[last]
+        w.y[index] = w.y[last]
+        w.vx[index] = w.vx[last]
+        w.vy[index] = w.vy[last]
     }
     w.ids.pop();
     w.x.pop();
     w.y.pop();
     w.vx.pop();
     w.vy.pop();
-    if index not=? last  {w.slot[moved]=index}
+    if index not=? last { w.slot[moved] = index }
     w.slot.remove(id);
     return true
 }
-tick=(@w:World):>void=> {
-    let n=w.ids.length
+tick = (@w:World):>void => {
+    let n = w.ids.length
     $runtime_assert n <=? w.x.length and n <=? w.y.length and n <=? w.vx.length and n <=? w.vy.length
-    loop i in [0..n)  {
-        w.x[i]+=w.vx[i]
-        w.y[i]+=w.vy[i]
-        if w.x[i] <? 0 or w.x[i] >? 100  {
-            w.vx[i]=-w.vx[i]
-            w.x[i]+=2*w.vx[i]
+    loop i in [0..n) {
+        w.x[i] += w.vx[i]
+        w.y[i] += w.vy[i]
+        if w.x[i] <? 0 or w.x[i] >? 100 {
+            w.vx[i] = -w.vx[i]
+            w.x[i] += 2*w.vx[i]
         }
-        if w.y[i] <? 0 or w.y[i] >? 78  {
-            w.vy[i]=-w.vy[i]
-            w.y[i]+=2*w.vy[i]
+        if w.y[i] <? 0 or w.y[i] >? 78 {
+            w.vy[i] = -w.vy[i]
+            w.y[i] += 2*w.vy[i]
         }
     }
 }
-checksum=(w:World):>int64=> {
-    let result=0
-    let n=w.ids.length
+checksum = (w:World):>int64 => {
+    let result = 0
+    let n = w.ids.length
     $runtime_assert n <=? w.x.length and n <=? w.y.length and n <=? w.vx.length and n <=? w.vy.length
-    loop i in [0..n)  {
-        result+=w.ids[i]*13+w.x[i]*7+w.y[i]*3+w.vx[i]+w.vy[i]
+    loop i in [0..n) {
+        result += w.ids[i]*13+w.x[i]*7+w.y[i]*3+w.vx[i]+w.vy[i]
     }
     return result
 }
-main=():>void=> {
-    let world=World[[] [] [] [] [] []]
-    loop id in [0..4096)  {
+main = ():>void => {
+    let world = World[[] [] [] [] [] []]
+    loop id in [0..4096) {
         spawn_entity(@world id)
     }
-    let snapshot=world
-    loop frame in [0..60)  {
+    let snapshot = world
+    loop frame in [0..60) {
         tick(@world)
-        if frame =? 20  {
-            loop id in [0..4096)  {
-                if id%3 =? 0  {
+        if frame =? 20 {
+            loop id in [0..4096) {
+                if id%3 =? 0 {
                     $runtime_assert(despawn(@world id))
                 }
             }
         }
-        if frame =? 30  {
-            loop id in [4096..4608)  {
+        if frame =? 30 {
+            loop id in [4096..4608) {
                 spawn_entity(@world id)
             }
         }
@@ -82,10 +82,10 @@ main=():>void=> {
     $runtime_assert(snapshot.ids.length =? 4096)
     $runtime_assert(world.ids.length =? 3242)
     $runtime_assert(not despawn(@world 99999))
-    let w=world
-    let n=w.ids.length
+    let w = world
+    let n = w.ids.length
     $runtime_assert n <=? w.x.length and n <=? w.y.length
-    loop i in [0..n)  {
+    loop i in [0..n) {
         $runtime_assert(w.slot.get(w.ids[i]) =? i)
         $runtime_assert(w.x[i] >=? 0 and w.x[i] <=? 100)
         $runtime_assert(w.y[i] >=? 0 and w.y[i] <=? 78)

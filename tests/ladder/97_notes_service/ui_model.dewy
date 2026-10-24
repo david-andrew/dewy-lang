@@ -4,11 +4,11 @@
 from p"http.dewy" import Response, Header, header
 from p"client.dewy" import ApiCall, quote
 
-NoteView:type=[id:int64 title:string body:string="" tags:array<string>=[] done:bool=false revision:int64=0]
-PageView:type=[total:int64 items:array<NoteView>]
-ErrorView:type=[error:string="" detail:string=""]
+NoteView:type = [id:int64 title:string body:string="" tags:array<string>=[] done:bool=false revision:int64=0]
+PageView:type = [total:int64 items:array<NoteView>]
+ErrorView:type = [error:string="" detail:string=""]
 
-Ui:type=[
+Ui:type = [
     items:array<NoteView>=[]
     total:int64=0
     tag:string=""
@@ -23,164 +23,164 @@ Ui:type=[
 
 # Events --------------------------------------------------------------------
 
-Event:type=type of any
-Boot:type=type of Event
-TypeTitle:type=type of Event & [text:string]
-TypeTags:type=type of Event & [text:string]
-Submit:type=type of Event
-MoveCursor:type=type of Event & [by:int64]
-Toggle:type=type of Event
-Open:type=type of Event
-Rename:type=type of Event & [title:string]
-Remove:type=type of Event
-FilterTag:type=type of Event & [tag:string]
-Search:type=type of Event & [text:string]
-ClearFilters:type=type of Event
+Event:type = type of any
+Boot:type = type of Event
+TypeTitle:type = type of Event & [text:string]
+TypeTags:type = type of Event & [text:string]
+Submit:type = type of Event
+MoveCursor:type = type of Event & [by:int64]
+Toggle:type = type of Event
+Open:type = type of Event
+Rename:type = type of Event & [title:string]
+Remove:type = type of Event
+FilterTag:type = type of Event & [tag:string]
+Search:type = type of Event & [text:string]
+ClearFilters:type = type of Event
 
-list_call=(ui:Ui):>ApiCall=>{
-    let path="/api/notes?sort=title&limit=20"
-    if ui.tag.length >? 0 path="{path}&tag={quote(ui.tag)}"
-    if ui.search.length >? 0 path="{path}&q={quote(ui.search)}"
+list_call = (ui:Ui):>ApiCall => {
+    let path = "/api/notes?sort=title&limit=20"
+    if ui.tag.length >? 0 path = "{path}&tag={quote(ui.tag)}"
+    if ui.search.length >? 0 path = "{path}&q={quote(ui.search)}"
     return ApiCall["list" "GET" path]
 }
 
-current=(ui:Ui):>NoteView?=>{
+current = (ui:Ui):>NoteView? => {
     if 0 <=? ui.cursor <? ui.items.length return ui.items[ui.cursor]
     return none
 }
 
-Draft:type=[title:string tags:array<string> done:bool=false]
-TitleChange:type=[title:string]
-DoneChange:type=[done:bool]
+Draft:type = [title:string tags:array<string> done:bool=false]
+TitleChange:type = [title:string]
+DoneChange:type = [done:bool]
 
-split_tags=(text:string):>array<string>=>[loop t in text.split(" ") if t.length >? 0 t]
+split_tags = (text:string):>array<string> => [loop t in text.split(" ") if t.length >? 0 t]
 
-send=(@ui:Ui call:ApiCall):>void=>{
+send = (@ui:Ui call:ApiCall):>void => {
     ui.outbox.push(call)
 }
 
-dispatch=(@ui:Ui event:Event):>void=>{
+dispatch = (@ui:Ui event:Event):>void => {
     if event is? Boot or event is? ClearFilters {
-        ui.tag=""
-        ui.search=""
+        ui.tag = ""
+        ui.search = ""
         send(@ui list_call(ui))
     } else if event is? TypeTitle {
-        ui.title=event.text
+        ui.title = event.text
     } else if event is? TypeTags {
-        ui.tags=event.text
+        ui.tags = event.text
     } else if event is? Submit {
-        let draft=Draft[ui.title split_tags(ui.tags)]
+        let draft = Draft[ui.title split_tags(ui.tags)]
         send(@ui ApiCall["create" "POST" "/api/notes" to_json(draft)])
     } else if event is? MoveCursor {
         if ui.items.length >? 0 {
-            ui.cursor=max(0 min(ui.items.length-1 ui.cursor+event.by))
+            ui.cursor = max(0 min(ui.items.length-1 ui.cursor+event.by))
         }
     } else if event is? Toggle {
-        let note=current(ui)
+        let note = current(ui)
         if note isnt? none {
-            let path="/api/notes/{note.id}"
+            let path = "/api/notes/{note.id}"
             send(@ui ApiCall["save" "PATCH" path to_json(DoneChange[not note.done]) "\"{note.id}.{note.revision}\""])
         }
     } else if event is? Rename {
-        let note=current(ui)
+        let note = current(ui)
         if note isnt? none {
-            let path="/api/notes/{note.id}"
+            let path = "/api/notes/{note.id}"
             send(@ui ApiCall["save" "PATCH" path to_json(TitleChange[event.title]) "\"{note.id}.{note.revision}\""])
         }
     } else if event is? Open {
-        let note=current(ui)
+        let note = current(ui)
         if note isnt? none send(@ui ApiCall["open" "GET" "/api/notes/{note.id}"])
     } else if event is? Remove {
-        let note=current(ui)
+        let note = current(ui)
         if note isnt? none send(@ui ApiCall["remove" "DELETE" "/api/notes/{note.id}"])
     } else if event is? FilterTag {
-        ui.tag=event.tag
+        ui.tag = event.tag
         send(@ui list_call(ui))
     } else if event is? Search {
-        ui.search=event.text
+        ui.search = event.text
         send(@ui list_call(ui))
     }
 }
 
 # Responses -------------------------------------------------------------------
 
-problem=(response:Response):>string=>{
-    let body=from_json<ErrorView>(response.body)
+problem = (response:Response):>string => {
+    let body = from_json<ErrorView>(response.body)
     if body is? TextError return "HTTP {response.status}"
     return body.detail
 }
 
-note_from=(response:Response):>NoteView?=>{
-    let note=from_json<NoteView>(response.body)
+note_from = (response:Response):>NoteView? => {
+    let note = from_json<NoteView>(response.body)
     if note is? TextError return none
     return note
 }
 
 # The note at `id` in the list, replaced by `note`.
-refresh_item=(@ui:Ui note:NoteView):>void=>{
+refresh_item = (@ui:Ui note:NoteView):>void => {
     loop @item in ui.items {
-        if item.id =? note.id item=note
+        if item.id =? note.id item = note
     }
-    if ui.detail isnt? none and ui.detail.id =? note.id ui.detail=note
+    if ui.detail isnt? none and ui.detail.id =? note.id ui.detail = note
 }
 
-receive=(@ui:Ui call:ApiCall response:Response):>void=>{
-    let status=response.status
+receive = (@ui:Ui call:ApiCall response:Response):>void => {
+    let status = response.status
     if call.purpose =? "list" {
         if status not=? 200 {
-            ui.banner="Cannot load notes: {problem(response)}"
+            ui.banner = "Cannot load notes: {problem(response)}"
             return
         }
-        let page=from_json<PageView>(response.body)
+        let page = from_json<PageView>(response.body)
         if page is? TextError {
-            ui.banner="Cannot read the note list"
+            ui.banner = "Cannot read the note list"
             return
         }
-        ui.items=page.items
-        ui.total=page.total
-        ui.cursor=max(0 min(ui.cursor ui.items.length-1))
+        ui.items = page.items
+        ui.total = page.total
+        ui.cursor = max(0 min(ui.cursor ui.items.length-1))
         if ui.detail isnt? none {
-            let open_id=ui.detail.id
-            let still=[loop n in ui.items if n.id =? open_id n]
-            if still.length =? 0 ui.detail=none
+            let open_id = ui.detail.id
+            let still = [loop n in ui.items if n.id =? open_id n]
+            if still.length =? 0 ui.detail = none
         }
     } else if call.purpose =? "create" {
         if status =? 201 {
-            let note=note_from(response)
-            ui.banner=if note isnt? none "Created #{note.id}" else "Created"
-            ui.title=""
-            ui.tags=""
+            let note = note_from(response)
+            ui.banner = if note isnt? none "Created #{note.id}" else "Created"
+            ui.title = ""
+            ui.tags = ""
             send(@ui list_call(ui))
         } else {
-            ui.banner="Cannot save: {problem(response)}"
+            ui.banner = "Cannot save: {problem(response)}"
         }
     } else if call.purpose =? "save" {
         if status =? 200 {
-            let note=note_from(response)
+            let note = note_from(response)
             if note isnt? none {
                 refresh_item(@ui note)
-                ui.banner="Saved #{note.id} (rev {note.revision})"
+                ui.banner = "Saved #{note.id} (rev {note.revision})"
             }
             send(@ui list_call(ui))
         } else if status =? 412 {
-            ui.banner="Changed elsewhere; reloaded"
+            ui.banner = "Changed elsewhere; reloaded"
             send(@ui list_call(ui))
         } else {
-            ui.banner="Cannot save: {problem(response)}"
+            ui.banner = "Cannot save: {problem(response)}"
         }
     } else if call.purpose =? "open" {
         if status =? 200 {
-            ui.detail=note_from(response)
+            ui.detail = note_from(response)
         } else {
-            ui.banner="Cannot open: {problem(response)}"
+            ui.banner = "Cannot open: {problem(response)}"
         }
     } else if call.purpose =? "remove" {
         if status =? 204 {
-            ui.banner="Deleted"
+            ui.banner = "Deleted"
         } else if status =? 404 {
-            ui.banner="Already gone"
+            ui.banner = "Already gone"
         } else {
-            ui.banner="Cannot delete: {problem(response)}"
+            ui.banner = "Cannot delete: {problem(response)}"
         }
         send(@ui list_call(ui))
     }

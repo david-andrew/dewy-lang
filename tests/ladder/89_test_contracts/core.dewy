@@ -1,35 +1,35 @@
 # Current-dialect algorithm projection; does not establish removed design contracts.
 # Tier 3 / 89_test_contracts / milestone 28
 # Acceptance: Discover 10 case-expanded tests, report one failed helper expectation, continue the test and retain ordinary main.
-identity=(x:int64):>int64=>x
-first=(xs:array<int64>):>void=>{
+identity = (x:int64):>int64 => x
+first = (xs:array<int64>):>void => {
 }
-identity_cases=(x:int64):>void=>{
+identity_cases = (x:int64):>void => {
 }
-narrowing=():>void=>{
-    let value:int64?=7
+narrowing = ():>void => {
+    let value:int64? = 7
     first([7])
 }
-snapshots=():>void=>{
-    let values:array<int64>=[1 2 3]
-    let saved=values.copy()
-    values[0]=9
+snapshots = ():>void => {
+    let values:array<int64> = [1 2 3]
+    let saved = values.copy()
+    values[0] = 9
 }
-expect_stops_helper=():>void=>{
+expect_stops_helper = ():>void => {
     first([])
     # Failed helper expectation must return only from the helper.
     printl("continued")
 }
-commutes=(a:int64 b:int64):>void=>{
+commutes = (a:int64 b:int64):>void => {
 }
-control=():>int64=>{
-    let total:int64=0
+control = ():>int64 => {
+    let total:int64 = 0
     loop i in [0..16) {
-        total+=identity(i)
+        total += identity(i)
     }
     return total
 }
-main=():>void=>{
+main = ():>void => {
     # Ordinary main is preserved when the separate test entry is generated.
     $runtime_assert control() =? 120
     $runtime_assert identity(1) =? 1

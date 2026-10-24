@@ -1,33 +1,33 @@
-Entry:type=[key:string value:string deleted:bool=false]
-append=(path:string entry:Entry):>int64|error|Canceled=>append_file(path "{to_json(entry)}\n")
-recover=(path:string):>dict<string string>=>{
-    let state:dict<string string>=[]
-    let loaded=read_text(path)
-    let text=if loaded is? string loaded else ""
+Entry:type = [key:string value:string deleted:bool=false]
+append = (path:string entry:Entry):>int64|error|Canceled => append_file(path "{to_json(entry)}\n")
+recover = (path:string):>dict<string string> => {
+    let state:dict<string string> = []
+    let loaded = read_text(path)
+    let text = if loaded is? string loaded else ""
     loop line in text.split("\n") {
-        if line.length =? 0 {continue}
-        let record=from_json<Entry>(line)
-        if record is? TextError {continue}
-        if record.deleted {state.remove(record.key);}
-        else {state[record.key]=record.value}
+        if line.length =? 0 { continue }
+        let record = from_json<Entry>(line)
+        if record is? TextError { continue }
+        if record.deleted { state.remove(record.key); }
+        else { state[record.key] = record.value }
     }
     return state
 }
-main=():>void=>{
-    let path="kv.log"
+main = ():>void => {
+    let path = "kv.log"
     $runtime_assert(write_text(path "") isnt? (error|Canceled))
     $runtime_assert(append(path Entry["a" "one"]) isnt? (error|Canceled))
     $runtime_assert(append(path Entry["b" "two"]) isnt? (error|Canceled))
     $runtime_assert(append(path Entry["a" "three"]) isnt? (error|Canceled))
     $runtime_assert(append(path Entry["b" "" true]) isnt? (error|Canceled))
-    let first=recover(path)
+    let first = recover(path)
     $runtime_assert(first.length =? 1)
     $runtime_assert(first["a"] =? "three")
     $runtime_assert(append_file(path "partial-record") isnt? (error|Canceled))
-    let second=recover(path)
+    let second = recover(path)
     $runtime_assert(second["a"] =? "three")
     $runtime_assert(second.length =? first.length)
-    let persisted=read_text(path)
-    if persisted is? (error|Canceled) {exit(1)}
+    let persisted = read_text(path)
+    if persisted is? (error|Canceled) { exit(1) }
     printl("{second.length} {second["a"]} {persisted.split("\n").length}")
 }

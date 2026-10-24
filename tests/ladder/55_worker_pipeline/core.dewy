@@ -1,60 +1,60 @@
-Job:type=[id:int64 text:string]
-Parsed:type=[id:int64 value:int64]
-Product:type=[id:int64 value:int64]
-Failure:type=type of error & [id:int64]
-parse_job=(job:Job):>Parsed|Failure=> {
-    let value=to_int(job.text)
-    if value is? none  {
+Job:type = [id:int64 text:string]
+Parsed:type = [id:int64 value:int64]
+Product:type = [id:int64 value:int64]
+Failure:type = type of error & [id:int64]
+parse_job = (job:Job):>Parsed|Failure => {
+    let value = to_int(job.text)
+    if value is? none {
         return Failure[job.id]
     }
     return Parsed[job.id value]
 }
-compute=(job:Parsed):>Product=> {
-    let total=0
-    loop i in [0..300)  {
-        total+=(job.value+i)%97
+compute = (job:Parsed):>Product => {
+    let total = 0
+    loop i in [0..300) {
+        total += (job.value+i)%97
     }
     return Product[job.id total]
 }
-pipeline=(jobs:array<Job>):>array<Product>=> {
+pipeline = (jobs:array<Job>):>array<Product> => {
     # Owned value batches between stages. No implicit shared queue or globals.
-    let parsed=parallel_map(jobs @parse_job)
-    let valid:array<Parsed>=[]
-    loop item in parsed  {
-        if item is? Parsed  {
+    let parsed = parallel_map(jobs @parse_job)
+    let valid:array<Parsed> = []
+    loop item in parsed {
+        if item is? Parsed {
             valid.push(item)
         }
     }
     return parallel_map(valid @compute)
 }
-main=():>void=> {
-    let jobs:array<Job>=[]
-    loop i in [0..200)  {
-        if i%11 =? 0  {
+main = ():>void => {
+    let jobs:array<Job> = []
+    loop i in [0..200) {
+        if i%11 =? 0 {
             jobs.push(Job[i "bad"])
         }
-        else  {
+        else {
             jobs.push(Job[i "{i*3}"])
         }
     }
-    let saved=jobs
-    let results=pipeline(jobs)
-    let failures=0
-    let total=0
-    let previous=-1
-    loop job in saved  {
-        if parse_job(job) is? Failure  {
-            failures+=1
+    let saved = jobs
+    let results = pipeline(jobs)
+    let failures = 0
+    let total = 0
+    let previous = -1
+    loop job in saved {
+        if parse_job(job) is? Failure {
+            failures += 1
         }
     }
-    loop item in results  {
+    loop item in results {
         $runtime_assert(item.id >? previous)
-        previous=item.id
-        total+=item.value
-        let job=saved.get(item.id)
+        previous = item.id
+        total += item.value
+        let job = saved.get(item.id)
         if job is? none exit(1)
-        let parsed=parse_job(job)
-        if parsed is? Failure  {
+        let parsed = parse_job(job)
+        if parsed is? Failure {
             exit(1)
         }
         $runtime_assert(compute(parsed).value =? item.value)
@@ -62,13 +62,13 @@ main=():>void=> {
     $runtime_assert(results.length+failures =? jobs.length)
     $runtime_assert(pipeline([]).length =? 0)
     $runtime_assert(pipeline([Job[0 "bad"]]).length =? 0)
-    jobs[1].text="999"
+    jobs[1].text = "999"
     $runtime_assert(saved[1].text =? "3")
-    let again=pipeline(saved)
+    let again = pipeline(saved)
     $runtime_assert(again =? results)
-    let ids=0
-    loop item in results  {
-        ids+=item.id
+    let ids = 0
+    loop item in results {
+        ids += item.id
     }
     printl("{results.length} {failures} {total} {ids}")
 }

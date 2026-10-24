@@ -1,28 +1,28 @@
 # Current-dialect algorithm projection; does not establish removed design contracts.
 # Tier 3 / 73_place_effects / milestone 23
 # Acceptance: Translate reads/writes on place parameters through swapped arguments and sibling fields.
-Pair:type=[left:int64 right:int64]
-read=(@x:int64):>int64=>x
-increment=(@x:int64):>void=>{
-    x+=1
+Pair:type = [left:int64 right:int64]
+read = (@x:int64):>int64 => x
+increment = (@x:int64):>void => {
+    x += 1
 }
-write=(@x:int64 value:int64):>void=>{
-    x=value
+write = (@x:int64 value:int64):>void => {
+    x = value
 }
-advance=(@pair:Pair):>void=>{
+advance = (@pair:Pair):>void => {
     increment(@pair.left)
     increment(@pair.right)
 }
-forward=(@destination:int64 @source:int64):>void=>{
+forward = (@destination:int64 @source:int64):>void => {
     write(@destination read(@source))
 }
-quiet=(x:int64):>int64=>x*2
-main=():>void=>{
-    let pair=Pair[0 10]
+quiet = (x:int64):>int64 => x*2
+main = ():>void => {
+    let pair = Pair[0 10]
     loop i in [0..64) {
         advance(@pair)
     }
-    let saved=pair.copy()
+    let saved = pair.copy()
     forward(@pair.right @pair.left)
     $runtime_assert pair.left =? 64
     $runtime_assert pair.right =? 64

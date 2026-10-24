@@ -1,77 +1,77 @@
-Deque:type=<T>[storage:array<T> head:int64 count:int64]
-make_deque=<T>(capacity:int64 fill:T):>Deque<T>=>Deque<T>[[loop i in [0..capacity) fill] 0 0]
-push_back=<T>(@q:Deque<T> value:T):>bool=> {
-    if q.count =? q.storage.length or q.storage.length =? 0  {
+Deque:type = <T>[storage:array<T> head:int64 count:int64]
+make_deque = <T>(capacity:int64 fill:T):>Deque<T> => Deque<T>[[loop i in [0..capacity) fill] 0 0]
+push_back = <T>(@q:Deque<T> value:T):>bool => {
+    if q.count =? q.storage.length or q.storage.length =? 0 {
         return false
     }
-    q.storage[(q.head+q.count)%q.storage.length]=value
-    q.count+=1
+    q.storage[(q.head+q.count)%q.storage.length] = value
+    q.count += 1
     return true
 }
-push_front=<T>(@q:Deque<T> value:T):>bool=> {
-    if q.count =? q.storage.length or q.storage.length =? 0  {
+push_front = <T>(@q:Deque<T> value:T):>bool => {
+    if q.count =? q.storage.length or q.storage.length =? 0 {
         return false
     }
-    q.head=(q.head+q.storage.length-1)%q.storage.length
-    q.storage[q.head]=value
-    q.count+=1
+    q.head = (q.head+q.storage.length-1)%q.storage.length
+    q.storage[q.head] = value
+    q.count += 1
     return true
 }
-pop_front=<T>(@q:Deque<T>):>T|none=> {
-    if q.count =? 0 or q.head <? 0 or q.head >=? q.storage.length  {
+pop_front = <T>(@q:Deque<T>):>T|none => {
+    if q.count =? 0 or q.head <? 0 or q.head >=? q.storage.length {
         return none
     }
-    let value=q.storage[q.head]
-    q.head=(q.head+1)%q.storage.length
-    q.count-=1
+    let value = q.storage[q.head]
+    q.head = (q.head+1)%q.storage.length
+    q.count -= 1
     return value
 }
-pop_back=<T>(@q:Deque<T>):>T|none=> {
-    if q.count =? 0 or q.storage.length =? 0  {
+pop_back = <T>(@q:Deque<T>):>T|none => {
+    if q.count =? 0 or q.storage.length =? 0 {
         return none
     }
-    q.count-=1
+    q.count -= 1
     return q.storage[(q.head+q.count)%q.storage.length]
 }
-length=<T>(q:Deque<T>):>int64=>q.count
-__index__=<T>(q:Deque<T> i:int64):>T=> {
+length = <T>(q:Deque<T>):>int64 => q.count
+__index__ = <T>(q:Deque<T> i:int64):>T => {
     $runtime_assert(q.storage.length >? 0)
     return q.storage[(q.head+i)%q.storage.length]
 }
-main=():>void=> {
-    let q=make_deque(16 0)
-    let total=0
-    let count=0
-    loop round in [0..100)  {
-        loop i in [0..8)  {
+main = ():>void => {
+    let q = make_deque(16 0)
+    let total = 0
+    let count = 0
+    loop round in [0..100) {
+        loop i in [0..8) {
             $runtime_assert(push_back(@q round*10+i))
         }
-        loop i in [0..4)  {
+        loop i in [0..4) {
             $runtime_assert(push_front(@q -i))
         }
-        let snapshot=q
-        loop value in q  {
-            total+=value
-            count+=1
+        let snapshot = q
+        loop value in q {
+            total += value
+            count += 1
         }
-        loop i in [0..6)  {
+        loop i in [0..6) {
             $runtime_assert(pop_front(@q) isnt? none)
         }
-        loop i in [0..6)  {
+        loop i in [0..6) {
             $runtime_assert(pop_back(@q) isnt? none)
         }
         $runtime_assert(q.count =? 0)
         $runtime_assert(snapshot.length =? 12)
     }
-    let words=make_deque(3 "")
+    let words = make_deque(3 "")
     $runtime_assert(push_back(@words "alpha"))
     $runtime_assert(push_front(@words "beta"))
-    let collected=[loop word in words word]
+    let collected = [loop word in words word]
     $runtime_assert(collected =? ["beta" "alpha"])
     $runtime_assert(pop_back(@words) =? "alpha")
     $runtime_assert(pop_front(@words) =? "beta")
     $runtime_assert(pop_front(@words) is? none)
-    let zero=make_deque(0 0)
+    let zero = make_deque(0 0)
     $runtime_assert(not push_back(@zero 1))
     $runtime_assert(pop_back(@zero) is? none)
     printl("{count} {total} {collected.length}")

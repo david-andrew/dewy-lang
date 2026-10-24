@@ -1,12 +1,12 @@
 # Reject overlapping writes in a scoped fork, before executing either child.
-walk=(@a:array<int64>):>void=>{
- let n=a.length
- if n <? 2 return
- let mid=n//2
- let joined=parallel_range(2 ($capture @a i:int64):>int64=>{
-  if i =? 0 {walk(@a[..mid+1))}
-  else {walk(@a[mid..])}
-  return 0
- })
+walk = (@a:array<int64>):>void => {
+    let n = a.length
+    if n <? 2 return
+    let mid = n//2
+    let joined = parallel_range(2 ($capture @a i:int64):>int64 => {
+        if i =? 0 { walk(@a[..mid+1)) }
+        else { walk(@a[mid..]) }
+        return 0
+    })
 }
-main=()=>{let xs:array<int64>=[1 2 3 4] walk(@xs)}
+main = () => { let xs:array<int64> = [1 2 3 4] walk(@xs) }

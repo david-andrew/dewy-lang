@@ -1,28 +1,28 @@
-Cache:type=[values:dict<string int64> order:array<string> capacity:int64]
-touch=(@cache:Cache key:string):>void=>{
-    let next:array<string>=[]
+Cache:type = [values:dict<string int64> order:array<string> capacity:int64]
+touch = (@cache:Cache key:string):>void => {
+    let next:array<string> = []
     loop item in cache.order {
-        if item not=? key {next.push(item)}
+        if item not=? key { next.push(item) }
     }
     next.push(key)
-    cache.order=next
+    cache.order = next
 }
-put=(@cache:Cache key:string value:int64):>void=>{
-    cache.values[key]=value
+put = (@cache:Cache key:string value:int64):>void => {
+    cache.values[key] = value
     touch(@cache key)
     if cache.order.length >? cache.capacity and cache.order.length >? 0 {
-        let victim=cache.order[0]
+        let victim = cache.order[0]
         cache.order.pop(0)
         cache.values.pop(victim)
     }
 }
-get=(@cache:Cache key:string):>int64?=>{
-    let value=cache.values.get(key)
-    if value isnt? none {touch(@cache key)}
+get = (@cache:Cache key:string):>int64? => {
+    let value = cache.values.get(key)
+    if value isnt? none { touch(@cache key) }
     return value
 }
-main=():>void=>{
-    let c:Cache=[values=[] order=[] capacity=2]
+main = ():>void => {
+    let c:Cache = [values=[] order=[] capacity=2]
     put(@c "a" 1)
     put(@c "b" 2)
     $runtime_assert (get(@c "a") =? 1)

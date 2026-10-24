@@ -10,15 +10,15 @@ from p"chacha.dewy" import Key, Nonce
 from p"curve.dewy" import Bytes32, x25519, public_key
 from p"aead.dewy" import Sealed, Forged, seal, open
 
-Replayed:type=type of error
-TooOld:type=type of error
-HandshakeFailed:type=type of error
+Replayed:type = type of error
+TooOld:type = type of error
+HandshakeFailed:type = type of error
 
-const WINDOW:uint64=64
+const WINDOW:uint64 = 64
 
-Packet:type=[sequence:uint64 sealed:Sealed]
+Packet:type = [sequence:uint64 sealed:Sealed]
 
-Channel:type=[
+Channel:type = [
     send_key:Key
     receive_key:Key
     next_send:uint64=0
@@ -28,59 +28,59 @@ Channel:type=[
     seen:uint64=0
     accepted:int64=0
 
-    send=(plaintext:array<uint8>):>Packet=>{
-        let sequence=next_send
-        next_send+=1
+    send = (plaintext:array<uint8>):>Packet => {
+        let sequence = next_send
+        next_send += 1
         return Packet[sequence seal(send_key nonce_for(sequence) header(sequence) plaintext)]
     }
 
-    receive=(packet:Packet):>array<uint8>|Forged|Replayed|TooOld=>{
-        let s=packet.sequence
-        let fresh=accepted =? 0 or s >? highest
+    receive = (packet:Packet):>array<uint8>|Forged|Replayed|TooOld => {
+        let s = packet.sequence
+        let fresh = accepted =? 0 or s >? highest
         if not fresh {
-            let age=highest-s
+            let age = highest-s
             if age >=? WINDOW return TooOld
             if ((seen >> age) and 1) =? 1 return Replayed
         }
-        let opened=open(receive_key nonce_for(s) header(s) packet.sealed) or_throw
+        let opened = open(receive_key nonce_for(s) header(s) packet.sealed) or_throw
         # Authentic: record it in the window.
         if accepted =? 0 {
-            highest=s
-            seen=1
+            highest = s
+            seen = 1
         } else if s >? highest {
-            let shift=s-highest
-            seen=if shift >=? WINDOW 1 else (seen << shift) or 1
-            highest=s
+            let shift = s-highest
+            seen = if shift >=? WINDOW 1 else (seen << shift) or 1
+            highest = s
         } else {
-            seen=seen or (1 << (highest-s))
+            seen = seen or (1 << (highest-s))
         }
-        accepted+=1
+        accepted += 1
         return opened
     }
 ]
 
-nonce_for=(sequence:uint64):>Nonce=>{
-    let n:array<uint8>=[0 0 0 0]
+nonce_for = (sequence:uint64):>Nonce => {
+    let n:array<uint8> = [0 0 0 0]
     store64(@n sequence)
     return n
 }
 
-header=(sequence:uint64):>array<uint8>=>{
-    let h:array<uint8>=[]
+header = (sequence:uint64):>array<uint8> => {
+    let h:array<uint8> = []
     store64(@h sequence)
     return h
 }
 
 # Both sides derive the same pair of keys; the initiator sends with the first.
-handshake=(secret:Bytes32 own_public:Bytes32 peer_public:Bytes32 initiator:bool):>Channel|HandshakeFailed=>{
-    let shared=x25519(secret peer_public)
-    let first=if initiator own_public else peer_public
-    let second=if initiator peer_public else own_public
-    let info=[bytes("dewy channel v1")... (first as array<uint8>)... (second as array<uint8>)...]
-    let keys=hkdf([] shared as array<uint8> info 64)
+handshake = (secret:Bytes32 own_public:Bytes32 peer_public:Bytes32 initiator:bool):>Channel|HandshakeFailed => {
+    let shared = x25519(secret peer_public)
+    let first = if initiator own_public else peer_public
+    let second = if initiator peer_public else own_public
+    let info = [bytes("dewy channel v1")... (first as array<uint8>)... (second as array<uint8>)...]
+    let keys = hkdf([] shared as array<uint8> info 64)
     if keys is? error return HandshakeFailed
     $runtime_assert keys.length =? 64
-    let a:Key=keys[0..32)
-    let b:Key=keys[32..64)
+    let a:Key = keys[0..32)
+    let b:Key = keys[32..64)
     return if initiator Channel[a b] else Channel[b a]
 }

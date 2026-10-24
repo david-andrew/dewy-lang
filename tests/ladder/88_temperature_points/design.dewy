@@ -1,10 +1,10 @@
 # Tier 3 / 88_temperature_points / milestone 28
 # Acceptance: Temperature point-minus-point and point-plus-delta, exact C/F/K conversions and requested display units.
 from units import K, °C, °F
-main=():>void=>{
-    let freezing=0°C
-    let boiling=100°C
-    let delta=boiling-freezing
+main = ():>void => {
+    let freezing = 0°C
+    let boiling = 100°C
+    let delta = boiling-freezing
     $runtime_assert freezing/K =? 273.15
     $runtime_assert boiling/K =? 373.15
     $runtime_assert delta/K =? 100
@@ -15,20 +15,20 @@ main=():>void=>{
     $runtime_assert (-40°F)/°C =? -40
     $runtime_assert 20°C/°F =? 68
     $runtime_assert "{boiling} {boiling as °F} {boiling as K} {delta} {delta as °F}" =? "100°C 212°F 7463/20 K 100°C 180°F"
-    let checksum:rational=0
+    let checksum:rational = 0
     loop c in [-20..41) {
-        let p=c*°C
-        let f=p/°F
+        let p = c*°C
+        let f = p/°F
         $runtime_assert f*°F =? p
-        checksum+=p/K
+        checksum += p/K
     }
     # A literal added to or taken from a point is a difference.
-    let start=20°C
+    let start = 20°C
     $runtime_assert start+20°C =? 40°C
     $runtime_assert start-20°C =? freezing
     $runtime_assert "{20°C as °F} {start+(25°C-5°C)} {(start+20°C-start) as °F}" =? "68°F 40°C 36°F"
-    let saved=freezing
-    freezing=0K
+    let saved = freezing
+    freezing = 0K
     $runtime_assert saved/K =? 273.15
     $runtime_assert boiling-saved =? 100K
     $runtime_assert saved-boiling =? -100K
@@ -39,9 +39,9 @@ main=():>void=>{
     $runtime_assert freezing/°C =? -273.15
     $runtime_assert 68°F =? 293.15K
     $runtime_assert saved+delta =? boiling
-    let warm=start
-    warm+=5°C
-    warm-=20K
+    let warm = start
+    warm += 5°C
+    warm -= 20K
     $runtime_assert "{warm} {mean[start warm]} {start-40°C}" =? "5°C 25/2°C -20°C"
     printl("{delta/K} {checksum}")
 }

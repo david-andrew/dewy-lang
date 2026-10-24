@@ -3,89 +3,89 @@
 # backward pass for one sample. Every sum runs in index order, so a batch's
 # gradient is reproducible bit for bit wherever its samples were computed.
 
-$runtime_checks=false
+$runtime_checks = false
 
 from p"data.dewy" import Rng, Sample, uniform
 
-const INPUTS:int64=2
-const HIDDEN:int64=12
-const OUTPUTS:int64=3
+const INPUTS:int64 = 2
+const HIDDEN:int64 = 12
+const OUTPUTS:int64 = 3
 
 # Weights `w[i*cols+j]` connect input i to unit j.
-Mlp:type=[
+Mlp:type = [
     w1:array<float64> b1:array<float64>
     w2:array<float64> b2:array<float64>
     w3:array<float64> b3:array<float64>
 ]
 
-zeros_like=(n:int64):>array<float64>=>[loop i in [0..n) 0.0]
+zeros_like = (n:int64):>array<float64> => [loop i in [0..n) 0.0]
 
-empty_mlp=():>Mlp=>[
+empty_mlp = ():>Mlp => [
     w1=zeros_like(INPUTS*HIDDEN) b1=zeros_like(HIDDEN)
     w2=zeros_like(HIDDEN*HIDDEN) b2=zeros_like(HIDDEN)
     w3=zeros_like(HIDDEN*OUTPUTS) b3=zeros_like(OUTPUTS)
 ]
 
 # Glorot-uniform weights, zero biases.
-glorot=(@r:Rng fan_in:int64 fan_out:int64):>array<float64>=>{
-    let limit=sqrt(6.0/float64(fan_in+fan_out))
+glorot = (@r:Rng fan_in:int64 fan_out:int64):>array<float64> => {
+    let limit = sqrt(6.0/float64(fan_in+fan_out))
     return [loop i in [0..fan_in*fan_out) (2.0*uniform(@r)-1.0)*limit]
 }
 
-init_mlp=(@r:Rng):>Mlp=>{
-    let model=empty_mlp()
-    model.w1=glorot(@r INPUTS HIDDEN)
-    model.w2=glorot(@r HIDDEN HIDDEN)
-    model.w3=glorot(@r HIDDEN OUTPUTS)
+init_mlp = (@r:Rng):>Mlp => {
+    let model = empty_mlp()
+    model.w1 = glorot(@r INPUTS HIDDEN)
+    model.w2 = glorot(@r HIDDEN HIDDEN)
+    model.w3 = glorot(@r HIDDEN OUTPUTS)
     return model
 }
 
 # One dense layer: out[j] = bias[j] + sum_i x[i]*w[i*cols+j].
-dense=(x:array<float64> w:array<float64> bias:array<float64> cols:int64):>array<float64>=>{
-    let out:array<float64>=[]
+dense = (x:array<float64> w:array<float64> bias:array<float64> cols:int64):>array<float64> => {
+    let out:array<float64> = []
     loop j in [0..cols) {
-        let acc=bias.get(j) ?? 0.0
+        let acc = bias.get(j) ?? 0.0
         loop i in 0.. and xi in x {
-            acc+=xi*(w.get(i*cols+j) ?? 0.0)
+            acc += xi*(w.get(i*cols+j) ?? 0.0)
         }
         out.push(acc)
     }
     return out
 }
 
-active=(v:float64):>float64=>if v >? 0.0 v else 0.0
-relu=(z:array<float64>):>array<float64>=>[loop v in z active(v)]
+active = (v:float64):>float64 => if v >? 0.0 v else 0.0
+relu = (z:array<float64>):>array<float64> => [loop v in z active(v)]
 
-Pass:type=[x:array<float64> h1:array<float64> h2:array<float64> y:array<float64>]
+Pass:type = [x:array<float64> h1:array<float64> h2:array<float64> y:array<float64>]
 
-forward=(model:Mlp s:Sample):>Pass=>{
-    let x:array<float64>=[s.x0 s.x1]
-    let h1=relu(dense(x model.w1 model.b1 HIDDEN))
-    let h2=relu(dense(h1 model.w2 model.b2 HIDDEN))
-    let y=dense(h2 model.w3 model.b3 OUTPUTS)
+forward = (model:Mlp s:Sample):>Pass => {
+    let x:array<float64> = [s.x0 s.x1]
+    let h1 = relu(dense(x model.w1 model.b1 HIDDEN))
+    let h2 = relu(dense(h1 model.w2 model.b2 HIDDEN))
+    let y = dense(h2 model.w3 model.b3 OUTPUTS)
     return [x=x h1=h1 h2=h2 y=y]
 }
 
-target=(label:int64 k:int64):>float64=>if k =? label 1.0 else 0.0
+target = (label:int64 k:int64):>float64 => if k =? label 1.0 else 0.0
 
 # Half the squared distance to the one-hot target.
-loss=(y:array<float64> label:int64):>float64=>{
-    let acc:float64=0.0
+loss = (y:array<float64> label:int64):>float64 => {
+    let acc:float64 = 0.0
     loop k in 0.. and yk in y {
-        let d=yk-target(label k)
-        acc+=d*d
+        let d = yk-target(label k)
+        acc += d*d
     }
     return 0.5*acc
 }
 
 # The first index of the largest output.
-argmax=(y:array<float64>):>int64=>{
-    let best:int64=0
-    let top=y.get(0) ?? 0.0
+argmax = (y:array<float64>):>int64 => {
+    let best:int64 = 0
+    let top = y.get(0) ?? 0.0
     loop k in 0.. and yk in y {
         if yk >? top {
-            best=k
-            top=yk
+            best = k
+            top = yk
         }
     }
     return best
@@ -93,12 +93,12 @@ argmax=(y:array<float64>):>int64=>{
 
 # Back through one dense layer: the gradient for its inputs, given the
 # gradient for its outputs, through the weights `w` with `cols` outputs.
-back=(dz:array<float64> w:array<float64> rows:int64 cols:int64):>array<float64>=>{
-    let out:array<float64>=[]
+back = (dz:array<float64> w:array<float64> rows:int64 cols:int64):>array<float64> => {
+    let out:array<float64> = []
     loop i in [0..rows) {
-        let acc:float64=0.0
+        let acc:float64 = 0.0
         loop j in 0.. and dzj in dz {
-            acc+=(w.get(i*cols+j) ?? 0.0)*dzj
+            acc += (w.get(i*cols+j) ?? 0.0)*dzj
         }
         out.push(acc)
     }
@@ -106,8 +106,8 @@ back=(dz:array<float64> w:array<float64> rows:int64 cols:int64):>array<float64>=
 }
 
 # The outer product a ⊗ b, row-major.
-outer=(a:array<float64> b:array<float64>):>array<float64>=>{
-    let out:array<float64>=[]
+outer = (a:array<float64> b:array<float64>):>array<float64> => {
+    let out:array<float64> = []
     loop ai in a {
         loop bj in b {
             out.push(ai*bj)
@@ -117,18 +117,18 @@ outer=(a:array<float64> b:array<float64>):>array<float64>=>{
 }
 
 # Gate a gradient by the units that were active.
-passes=(d:float64 h:float64):>float64=>if h >? 0.0 d else 0.0
-gate=(dh:array<float64> h:array<float64>):>array<float64>=>[loop i in 0.. and d in dh passes(d h.get(i) ?? 0.0)]
+passes = (d:float64 h:float64):>float64 => if h >? 0.0 d else 0.0
+gate = (dh:array<float64> h:array<float64>):>array<float64> => [loop i in 0.. and d in dh passes(d h.get(i) ?? 0.0)]
 
-Step:type=[grad:Mlp loss:float64 correct:bool]
+Step:type = [grad:Mlp loss:float64 correct:bool]
 
 # Loss and gradient for one sample.
-backprop=(model:Mlp s:Sample):>Step=>{
-    let p=forward(model s)
-    let dy=[loop k in 0.. and yk in p.y yk-target(s.label k)]
-    let dz2=gate(back(dy model.w3 HIDDEN OUTPUTS) p.h2)
-    let dz1=gate(back(dz2 model.w2 HIDDEN HIDDEN) p.h1)
-    let grad:Mlp=[
+backprop = (model:Mlp s:Sample):>Step => {
+    let p = forward(model s)
+    let dy = [loop k in 0.. and yk in p.y yk-target(s.label k)]
+    let dz2 = gate(back(dy model.w3 HIDDEN OUTPUTS) p.h2)
+    let dz1 = gate(back(dz2 model.w2 HIDDEN HIDDEN) p.h1)
+    let grad:Mlp = [
         w1=outer(p.x dz1) b1=dz1
         w2=outer(p.h1 dz2) b2=dz2
         w3=outer(p.h2 dy) b3=dy

@@ -2,16 +2,16 @@
 # literals; results leave as hex text. The digit-table lookup indexes by the byte
 # value, so `hex` is for public outputs (digests, ciphertexts, tags) only.
 
-const DIGITS:array<uint8 length=16>=bytes("0123456789abcdef")
+const DIGITS:array<uint8 length=16> = bytes("0123456789abcdef")
 
 # Lowercase hex text of the bytes.
-hex=(data:array<uint8>):>string=>{
-    let out:array<uint8>=[]
+hex = (data:array<uint8>):>string => {
+    let out:array<uint8> = []
     out.reserve(2*data.length)
     loop b in data {
         out.push(DIGITS[(b >> 4) as int64])
         out.push(DIGITS[(b and 15) as int64])
     }
-    let text=out as string | none
+    let text = out as string | none
     return text ?? ""
 }

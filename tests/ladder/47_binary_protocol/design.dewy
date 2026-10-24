@@ -1,76 +1,76 @@
-BadPacket:type=type of error & [offset:int64]
-Packet:type=[kind:int64<0 <=? kind and kind <=? 255> sequence:int64<0 <=? sequence and sequence <=? 65535> payload:array<uint8 length <=? 65535>]
-encode=(packet:Packet):>array<uint8>=> {
-    let size=packet.payload.length
-    let bytes:array<uint8>=[68 87 (packet.kind as uint8) (packet.sequence//256 as uint8) (packet.sequence & 0xff as uint8) (size//256 as uint8) (size & 0xff as uint8)]
-    let checksum=0
-    loop byte in bytes  {
-        checksum=(checksum+(byte as int64))%256
+BadPacket:type = type of error & [offset:int64]
+Packet:type = [kind:int64<0 <=? kind and kind <=? 255> sequence:int64<0 <=? sequence and sequence <=? 65535> payload:array<uint8 length <=? 65535>]
+encode = (packet:Packet):>array<uint8> => {
+    let size = packet.payload.length
+    let bytes:array<uint8> = [68 87 (packet.kind as uint8) (packet.sequence//256 as uint8) (packet.sequence & 0xff as uint8) (size//256 as uint8) (size & 0xff as uint8)]
+    let checksum = 0
+    loop byte in bytes {
+        checksum = (checksum+(byte as int64))%256
     }
-    loop byte in packet.payload  {
+    loop byte in packet.payload {
         bytes.push(byte)
-        checksum=(checksum+(byte as int64))%256
+        checksum = (checksum+(byte as int64))%256
     }
     bytes.push(checksum as uint8)
     return bytes
 }
-decode=(bytes:array<uint8>):>Packet|BadPacket=> {
-    if bytes.length <? 8  {
+decode = (bytes:array<uint8>):>Packet|BadPacket => {
+    if bytes.length <? 8 {
         return BadPacket[bytes.length]
     }
-    if bytes[0] not=? 68 or bytes[1] not=? 87  {
+    if bytes[0] not=? 68 or bytes[1] not=? 87 {
         return BadPacket[0]
     }
-    let size=(bytes[5] as int64)*256+(bytes[6] as int64)
-    if size not=? bytes.length-8  {
+    let size = (bytes[5] as int64)*256+(bytes[6] as int64)
+    if size not=? bytes.length-8 {
         return BadPacket[5]
     }
-    let sum=0
-    loop i in [0..bytes.length-1)  {
-        sum=(sum+(bytes[i] as int64))%256
+    let sum = 0
+    loop i in [0..bytes.length-1) {
+        sum = (sum+(bytes[i] as int64))%256
     }
-    if sum not=? (bytes[bytes.length-1] as int64)  {
+    if sum not=? (bytes[bytes.length-1] as int64) {
         return BadPacket[bytes.length-1]
     }
-    let payload:array<uint8>=[]
-    loop i in [0..size)  {
+    let payload:array<uint8> = []
+    loop i in [0..size) {
         payload.push(bytes[i+7])
     }
     return Packet[bytes[2] as int64 (bytes[3] as int64)*256+(bytes[4] as int64) payload]
 }
-main=():>void=> {
-    let packet=Packet[3 65530 [0 1 127 128 255]]
-    let bytes=encode(packet)
-    let decoded=decode(bytes)
-    if decoded is? BadPacket  {
+main = ():>void => {
+    let packet = Packet[3 65530 [0 1 127 128 255]]
+    let bytes = encode(packet)
+    let decoded = decode(bytes)
+    if decoded is? BadPacket {
         exit(1)
     }
     $runtime_assert (decoded.sequence =? 65530)
     $runtime_assert (decoded.payload =? packet.payload)
-    let rejected=0
-    loop cut in [0..bytes.length)  {
-        let prefix:array<uint8>=[]
-        loop i in [0..cut)  {
+    let rejected = 0
+    loop cut in [0..bytes.length) {
+        let prefix:array<uint8> = []
+        loop i in [0..cut) {
             prefix.push(bytes[i])
         }
-        if decode(prefix) is? BadPacket  {
-            rejected+=1
+        if decode(prefix) is? BadPacket {
+            rejected += 1
         }
     }
-    loop i in [0..bytes.length)  {
-        let bad=bytes
-        bad[i]=bad[i] xor 1
+    loop i in [0..bytes.length) {
+        let bad = bytes
+        bad[i] = bad[i] xor 1
         $runtime_assert (decode(bad) is? BadPacket)
-        rejected+=1
+        rejected += 1
     }
-    let empty=decode(encode(Packet[0 0 []]))
-    if empty is? BadPacket  {
+    let empty = decode(encode(Packet[0 0 []]))
+    if empty is? BadPacket {
         exit(2)
     }
     $runtime_assert (empty.payload.length =? 0)
-    let sum=0
-    loop byte in bytes  {
-        sum+=byte as int64
+    let sum = 0
+    loop byte in bytes {
+        sum += byte as int64
     }
     printl("{bytes.length} {rejected} {sum}")
 }

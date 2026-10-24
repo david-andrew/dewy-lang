@@ -7,73 +7,73 @@
 
 # A finite-only kernel: an operation that could produce NaN or an infinity is
 # proven not to, or checked where it runs.
-mean=(xs:array<float64>):>float64=>{
+mean = (xs:array<float64>):>float64 => {
     $finite_floats
     $runtime_checks
-    let total=0.0
+    let total = 0.0
     loop x in xs {
-        total+=x
+        total += x
     }
     if xs.length =? 0 return 0.0
     return total/float64(xs.length)
 }
 # The scale is proven finite: a bounded factor of a bounded value.
-scaled=(x:float64):>float64=>{
+scaled = (x:float64):>float64 => {
     $finite_floats
     if -1e300 <? x <? 1e300 return x*0.5+1.0
     return 0.0
 }
 # Left to right, as written.
-in_order=(xs:array<float64>):>float64=>{
-    let total=0.0
+in_order = (xs:array<float64>):>float64 => {
+    let total = 0.0
     loop x in xs {
-        total+=x
+        total += x
     }
     return total
 }
-main=():>void=>{
-    let zero:float64=0.0
-    let one:float64=1.0
+main = ():>void => {
+    let zero:float64 = 0.0
+    let one:float64 = 1.0
     # Signed zero: equal to zero, but its reciprocal is negative infinity.
-    let nz=-zero
+    let nz = -zero
     $runtime_assert nz =? zero
     $runtime_assert one/nz <? 0.0
     printl"{nz} {one/zero} {one/nz} {zero*(-one)}"
     # Subnormals are values; underflow rounds to the nearest, ties to even.
-    let tiny:float64=5e-324
-    let normal:float64=2.2250738585072014e-308
+    let tiny:float64 = 5e-324
+    let normal:float64 = 2.2250738585072014e-308
     $runtime_assert tiny >? 0.0
     $runtime_assert tiny/2.0 =? 0.0
     $runtime_assert normal/2.0 >? 0.0
     printl"{tiny} {tiny*3.0} {normal/4.0 >? 0.0}"
     # Overflow gives a signed infinity; adding below half an ulp keeps the value.
-    let big:float64=1.7976931348623157e308
+    let big:float64 = 1.7976931348623157e308
     printl"{big*2.0} {-big*2.0} {big+1.0 =? big} {big+big =? big*2.0}"
     # NaN is unordered: unequal to itself, neither less nor greater.
-    let nan=abs(zero/zero)
+    let nan = abs(zero/zero)
     $runtime_assert not (nan =? nan)
     $runtime_assert nan not=? nan
     $runtime_assert not (nan <? one) and not (nan >=? one)
-    let inf=one/zero
+    let inf = one/zero
     printl"{inf-inf =? inf-inf} {zero*inf} {(inf-inf) <? 0.0}"
     # Deterministic reduction order: the same sum on every run and target.
-    let xs:array<float64>=[1e16 1.0 -1e16 1.0]
-    let ys:array<float64>=[1e16 -1e16 1.0 1.0]
+    let xs:array<float64> = [1e16 1.0 -1e16 1.0]
+    let ys:array<float64> = [1e16 -1e16 1.0 1.0]
     printl"{in_order(xs)} {in_order(ys)} {sum(xs)} {sum(ys)}"
     # totalOrder: -NaN, -inf, negatives, -0.0, 0.0, positives, inf, NaN.
-    let values:array<float64>=[3.0 nan -0.0 0.0 -1.5 -nan inf -inf tiny]
-    let sorted=values.sorted()
+    let values:array<float64> = [3.0 nan -0.0 0.0 -1.5 -nan inf -inf tiny]
+    let sorted = values.sorted()
     printl"{sorted}"
     $runtime_assert sorted.length =? values.length
     $runtime_assert (1.0/sorted[3]) <? 0.0
     $runtime_assert (1.0/sorted[4]) >? 0.0
     # Rounding: ties to even; floor, ceil and round keep the sign of zero.
-    let half:float64=2.5
-    let neg:float64=-0.4
+    let half:float64 = 2.5
+    let neg:float64 = -0.4
     printl"{round(half)} {round(-half)} {round(half ties='away')} {neg.ceil()} {round(neg)}"
     # Float-to-integer conversion keeps the value (truncating toward zero).
-    let f:float64=-2.75
-    let g:float64=1e20
+    let f:float64 = -2.75
+    let g:float64 = 1e20
     printl"{int64(f)} {int(g)} {uint8(255.5*one)}"
     # The finite kernels.
     printl"{mean([1.0 2.0 4.5])} {mean([])} {scaled(3.0)}"

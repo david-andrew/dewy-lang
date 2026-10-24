@@ -7,41 +7,41 @@
 from p"crc32.dewy" import crc32
 from p"disk.dewy" import Disk, DiskError
 
-Manifest:type=[generation:int64 log:string]
+Manifest:type = [generation:int64 log:string]
 
-log_name=(generation:int64):>string=>"log-{generation}.dkv"
-slot_name=(generation:int64):>string=>"MANIFEST-{generation%2}"
+log_name = (generation:int64):>string => "log-{generation}.dkv"
+slot_name = (generation:int64):>string => "MANIFEST-{generation%2}"
 
-encode_manifest=(m:Manifest):>array<uint8>=>{
-    let body="dewykv {m.generation} {m.log}"
+encode_manifest = (m:Manifest):>array<uint8> => {
+    let body = "dewykv {m.generation} {m.log}"
     return bytes("{format(crc32(bytes(body)) "08x")} {body}\n")
 }
 
-decode_manifest=(data:array<uint8>):>Manifest?=>{
-    let text=data as string | none
+decode_manifest = (data:array<uint8>):>Manifest? => {
+    let text = data as string | none
     if text is? none or text.length =? 0 or not text.endswith("\n") return none
-    let words=text[0..text.length-1).split(" ")
+    let words = text[0..text.length-1).split(" ")
     if words.length not=? 4 or words[1] not=? "dewykv" return none
-    let checksum=words[0]
-    let log=words[3]
-    let body="dewykv {words[2]} {log}"
-    let generation=to_int(words[2])
+    let checksum = words[0]
+    let log = words[3]
+    let body = "dewykv {words[2]} {log}"
+    let generation = to_int(words[2])
     if format(crc32(bytes(body)) "08x") not=? checksum return none
     if generation is? none or generation <? 1 return none
     return Manifest[generation log]
 }
 
 # The newest valid manifest, or none for a fresh directory.
-load_manifest=(disk:Disk):>Manifest?|DiskError=>{
-    let best:Manifest?=none
+load_manifest = (disk:Disk):>Manifest?|DiskError => {
+    let best:Manifest? = none
     loop slot in ["MANIFEST-0" "MANIFEST-1"] {
-        let data=disk.read(slot) or_throw
-        let found=decode_manifest(data)
-        if found isnt? none and (best is? none or found.generation >? best.generation) best=found
+        let data = disk.read(slot) or_throw
+        let found = decode_manifest(data)
+        if found isnt? none and (best is? none or found.generation >? best.generation) best = found
     }
     return best
 }
 
-save_manifest=(@disk:Disk m:Manifest):>void|DiskError=>{
+save_manifest = (@disk:Disk m:Manifest):>void|DiskError => {
     disk.write(slot_name(m.generation) encode_manifest(m)) or_throw
 }

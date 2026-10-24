@@ -1,20 +1,20 @@
 # Tier 3 / 90_stack_repl / milestone 29
 # Acceptance: Interactive stdin RPN interpreter: variables, arithmetic, rollback on parse/stack/divisor errors, EOF and quit; bounded integer parser.
-Machine:type=[stack:array<int64> names:dict<string int64> halted:bool errors:int64]
-fresh=():>Machine=>{
+Machine:type = [stack:array<int64> names:dict<string int64> halted:bool errors:int64]
+fresh = ():>Machine => {
     return Machine[[] [] false 0]
 }
-words=(text:string):>array<string>=>{
-    let result:array<string>=[]
-    let word=""
+words = (text:string):>array<string> => {
+    let result:array<string> = []
+    let word = ""
     loop ch in text {
         if ch =? ' ' {
             if word.length >? 0 {
                 result.push(word)
-                word=""
+                word = ""
             }
         } else {
-            word="{word}{ch}"
+            word = "{word}{ch}"
         }
     }
     if word.length >? 0 {
@@ -22,34 +22,34 @@ words=(text:string):>array<string>=>{
     }
     return result
 }
-digit_index=(text:string):>int64?=>{
+digit_index = (text:string):>int64? => {
     loop digit in [0..10) {
         if text =? "{digit}" return digit
     }
     return none
 }
-number=(text:string):>int64?=>{
+number = (text:string):>int64? => {
     if text.length =? 0 return none
-    let sign:int64=1
-    let start:int64=0
+    let sign:int64 = 1
+    let start:int64 = 0
     if text[0] =? '-' {
-        sign=-1
-        start=1
+        sign = -1
+        start = 1
     }
     if start =? text.length return none
-    let value:int64=0
+    let value:int64 = 0
     loop i in [start..text.length) {
-        let digit=digit_index("{text[i]}")
+        let digit = digit_index("{text[i]}")
         if digit is? none return none
         if value >? 1000000 return none
-        value=value*10+digit
+        value = value*10+digit
     }
     return value*sign
 }
-binary=(@state:Machine op:string):>bool=>{
+binary = (@state:Machine op:string):>bool => {
     if state.stack.length <? 2 return false
-    let b=state.stack.pop()
-    let a=state.stack.pop()
+    let b = state.stack.pop()
+    let a = state.stack.pop()
     if op =? "+" {
         state.stack.push(a+b)
     } else if op =? "-" {
@@ -66,18 +66,18 @@ binary=(@state:Machine op:string):>bool=>{
     }
     return true
 }
-execute=(@state:Machine tokens:array<string>):>bool=>{
-    let cursor:int64=0
+execute = (@state:Machine tokens:array<string>):>bool => {
+    let cursor:int64 = 0
     loop cursor <? tokens.length {
-        let token=tokens[cursor]
-        cursor+=1
-        let value=number(token)
+        let token = tokens[cursor]
+        cursor += 1
+        let value = number(token)
         if value is? int64 {
             state.stack.push(value)
             continue
         }
         if token =? "quit" {
-            state.halted=true
+            state.halted = true
             return true
         }
         if token =? "clear" {
@@ -86,14 +86,14 @@ execute=(@state:Machine tokens:array<string>):>bool=>{
         }
         if token =? "dup" {
             if state.stack.length =? 0 return false
-            let last=state.stack[state.stack.length-1]
+            let last = state.stack[state.stack.length-1]
             state.stack.push(last)
             continue
         }
         if token =? "swap" {
             if state.stack.length <? 2 return false
-            let b=state.stack.pop()
-            let a=state.stack.pop()
+            let b = state.stack.pop()
+            let a = state.stack.pop()
             state.stack.push(b)
             state.stack.push(a)
             continue
@@ -106,9 +106,9 @@ execute=(@state:Machine tokens:array<string>):>bool=>{
         if token =? "let" {
             if cursor >=? tokens.length return false
             if state.stack.length =? 0 return false
-            let name=tokens[cursor]
-            cursor+=1
-            state.names[name]=state.stack.pop()
+            let name = tokens[cursor]
+            cursor += 1
+            state.names[name] = state.stack.pop()
             continue
         }
         if token in? state.names {
@@ -119,24 +119,24 @@ execute=(@state:Machine tokens:array<string>):>bool=>{
     }
     return true
 }
-line=(@state:Machine source:string):>bool=>{
-    let transaction=state.copy()
+line = (@state:Machine source:string):>bool => {
+    let transaction = state.copy()
     if execute(@transaction words(source)) {
-        state=transaction
+        state = transaction
         return true
     }
-    state.errors+=1
+    state.errors += 1
     return false
 }
-describe=(state:Machine):>string=>{
-    let result="stack"
+describe = (state:Machine):>string => {
+    let result = "stack"
     loop value in state.stack {
-        result="{result} {value}"
+        result = "{result} {value}"
     }
     return result
 }
-selfcheck=():>void=>{
-    let state=fresh()
+selfcheck = ():>void => {
+    let state = fresh()
     $runtime_assert line(@state "2 3 +")
     $runtime_assert state.stack =? [5]
     $runtime_assert line(@state "dup *")
@@ -167,8 +167,8 @@ selfcheck=():>void=>{
     $runtime_assert state.halted
 }
 
-boundaries=():>void=>{
-    let state=fresh()
+boundaries = ():>void => {
+    let state = fresh()
     $runtime_assert number("") is? none
     $runtime_assert number("-") is? none
     $runtime_assert number("a") is? none
@@ -190,23 +190,23 @@ boundaries=():>void=>{
     $runtime_assert not line(@state "1 + 0 /")
     $runtime_assert state.stack =? [49]
     $runtime_assert state.errors =? 2
-    let saved=state.copy()
+    let saved = state.copy()
     $runtime_assert line(@state "clear 9 let total")
     $runtime_assert saved.names["total"] =? 7
     $runtime_assert state.names["total"] =? 9
 }
 
-main=():>void=>{
+main = ():>void => {
     boundaries()
     selfcheck()
-    let state=fresh()
-    let lines:int64=0
+    let state = fresh()
+    let lines:int64 = 0
     loop not state.halted {
-        let source=read_line()
+        let source = read_line()
         if source is? none break
         if source is? (Canceled|FileError) exit(1)
-        lines+=1
-        let accepted=line(@state source)
+        lines += 1
+        let accepted = line(@state source)
         if accepted {
             printl("ok {describe(state)}")
         } else {

@@ -1,38 +1,38 @@
 # Tier 3 / 86_exact_energy / milestone 27
 # Acceptance: Exact irregular energy integration, decimal tariffs, split invariance and denominator growth.
-Reading:type=[start:int64 finish:int64 watts:int64]
-energy=(reading:Reading):>rational=>{
+Reading:type = [start:int64 finish:int64 watts:int64]
+energy = (reading:Reading):>rational => {
     $runtime_assert reading.finish >=? reading.start
     return reading.watts*(reading.finish-reading.start)/3600000
 }
-report=(readings:array<Reading> tariff:rational):>rational=>{
-    let total:rational=0
+report = (readings:array<Reading> tariff:rational):>rational => {
+    let total:rational = 0
     loop reading in readings {
-        total+=energy(reading)
+        total += energy(reading)
     }
     return total*tariff
 }
-main=():>void=>{
-    let input:array<Reading>=[Reading[0 1200 1500] Reading[1200 3600 500]]
-    let tariff:rational=0.24
-    let cost=report(input tariff)
-    let e:rational=0
+main = ():>void => {
+    let input:array<Reading> = [Reading[0 1200 1500] Reading[1200 3600 500]]
+    let tariff:rational = 0.24
+    let cost = report(input tariff)
+    let e:rational = 0
     loop reading in input {
-        e+=energy(reading)
+        e += energy(reading)
     }
     $runtime_assert e =? 5/6
     $runtime_assert cost =? 1/5
-    let split:array<Reading>=[Reading[0 600 1500] Reading[600 1200 1500] Reading[1200 3600 500]]
+    let split:array<Reading> = [Reading[0 600 1500] Reading[600 1200 1500] Reading[1200 3600 500]]
     $runtime_assert report(split tariff) =? cost
-    let cents:rational=0
+    let cents:rational = 0
     loop i in [0..1000) {
-        cents+=0.01
+        cents += 0.01
     }
     $runtime_assert cents =? 10
-    let cancel:rational=1/3+1/7-10/21
+    let cancel:rational = 1/3+1/7-10/21
     $runtime_assert cancel =? 0
-    let saved=input.copy()
-    input[0].watts=0
+    let saved = input.copy()
+    input[0].watts = 0
     $runtime_assert report(saved tariff) =? 1/5
     $runtime_assert report(input tariff) =? 2/25
     $runtime_assert report([] tariff) =? 0
@@ -42,11 +42,11 @@ main=():>void=>{
     $runtime_assert 1/3+2/3 =? 1
     $runtime_assert 5/6-1/2 =? 1/3
     $runtime_assert (2/3)*(9/4) =? 3/2
-    let growth:rational=1
+    let growth:rational = 1
     loop d in [2..18) {
-        growth+=1/d
+        growth += 1/d
     }
-    let mean=e/(3600/3600)
+    let mean = e/(3600/3600)
     $runtime_assert mean =? 5/6
     $runtime_assert 1/7+2/7 =? 3/7
     $runtime_assert (1/3)/(2/3) =? 1/2

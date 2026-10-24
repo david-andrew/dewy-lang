@@ -1,66 +1,66 @@
-Settings:type=[workers:int64 limit:int64 mode:int64]
-Point:type=[x:int64 y:int64]
-Mixed:type=[count:int64 title:string enabled:bool]
-copy_fields=<T>(value:T)=>[loop f in fields(T) $field(f.name)=value.$field(f.name)]
-describe=<T>(value:T):>string=> {
-    let result=""
-    loop field in fields(T)  {
-        result="{result}{field.name}={value.$field(field.name)};"
+Settings:type = [workers:int64 limit:int64 mode:int64]
+Point:type = [x:int64 y:int64]
+Mixed:type = [count:int64 title:string enabled:bool]
+copy_fields = <T>(value:T) => [loop f in fields(T) $field(f.name)=value.$field(f.name)]
+describe = <T>(value:T):>string => {
+    let result = ""
+    loop field in fields(T) {
+        result = "{result}{field.name}={value.$field(field.name)};"
     }
     return result
 }
-differences=<T>(left:T right:T):>int64=> {
-    let count=0
-    loop field in fields(T)  {
-        if left.$field(field.name) not=? right.$field(field.name)  {
-            count+=1
+differences = <T>(left:T right:T):>int64 => {
+    let count = 0
+    loop field in fields(T) {
+        if left.$field(field.name) not=? right.$field(field.name) {
+            count += 1
         }
     }
     return count
 }
-reset=<T>(value:T):>T=> {
-    let result=value
-    loop field in fields(T)  {
-        result.$field(field.name)=0
+reset = <T>(value:T):>T => {
+    let result = value
+    loop field in fields(T) {
+        result.$field(field.name) = 0
     }
     return result
 }
-main=():>void=> {
-    let settings=Settings[4 16 3]
-    let point=Point[20 22]
-    let mixed=Mixed[42 "ready" true]
-    let generated=copy_fields(mixed)
+main = ():>void => {
+    let settings = Settings[4 16 3]
+    let point = Point[20 22]
+    let mixed = Mixed[42 "ready" true]
+    let generated = copy_fields(mixed)
     $runtime_assert generated.count =? 42 and generated.title =? "ready" and generated.enabled
     $runtime_assert (describe(settings) =? "workers=4;limit=16;mode=3;")
     $runtime_assert (describe(point) =? "x=20;y=22;")
-    let saved=settings
-    settings.workers=8
-    settings.mode=1
+    let saved = settings
+    settings.workers = 8
+    settings.mode = 1
     $runtime_assert (differences(saved settings) =? 2)
     $runtime_assert (differences(point point) =? 0)
-    let restored=reset(settings)
+    let restored = reset(settings)
     $runtime_assert (restored.workers =? 0)
     $runtime_assert (restored.limit =? 0)
     $runtime_assert (restored.mode =? 0)
     $runtime_assert (saved.workers =? 4)
-    let zero=reset(point)
+    let zero = reset(point)
     $runtime_assert (zero.x =? 0)
     $runtime_assert (zero.y =? 0)
-    let count=0
-    let checksum=0
-    loop i in [0..100)  {
-        let item=Settings[i i*2 i%3]
-        let clear=reset(item)
+    let count = 0
+    let checksum = 0
+    loop i in [0..100) {
+        let item = Settings[i i*2 i%3]
+        let clear = reset(item)
         $runtime_assert (clear.workers =? 0)
         $runtime_assert (clear.limit =? 0)
         $runtime_assert (clear.mode =? 0)
-        count+=differences(item clear)
-        checksum+=describe(item).length
+        count += differences(item clear)
+        checksum += describe(item).length
     }
-    let copy=point
-    copy.x=0
+    let copy = point
+    copy.x = 0
     $runtime_assert (differences(point copy) =? 1)
-    let named=Settings[workers=4 limit=16 mode=3]
+    let named = Settings[workers=4 limit=16 mode=3]
     $runtime_assert (describe(named) =? describe(saved))
     printl(describe(saved))
     printl("{count} {checksum} {differences(point copy)}")

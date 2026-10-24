@@ -1,30 +1,30 @@
-Stack:type=<T>[values:array<T>]
-push=<T>(@stack:Stack<T> value:T):>void=>{
+Stack:type = <T>[values:array<T>]
+push = <T>(@stack:Stack<T> value:T):>void => {
     stack.values.push(value)
 }
-pop=<T>(@stack:Stack<T>):>T|none=>{
-    if stack.values.length =? 0 {return none}
+pop = <T>(@stack:Stack<T>):>T|none => {
+    if stack.values.length =? 0 { return none }
     return stack.values.pop
 }
-peek=<T>(stack:Stack<T>):>T|none=>{
-    if stack.values.length =? 0 {return none}
+peek = <T>(stack:Stack<T>):>T|none => {
+    if stack.values.length =? 0 { return none }
     return stack.values[end]
 }
-main=():>void=>{
-    let ints:Stack<int64>=[values=[]]
-    loop n in [0..4) {push(@ints n)}
-    let snapshot=ints
+main = ():>void => {
+    let ints:Stack<int64> = [values=[]]
+    loop n in [0..4) { push(@ints n) }
+    let snapshot = ints
     $runtime_assert (pop(@ints) =? 3)
     $runtime_assert (peek(ints) =? 2)
     $runtime_assert (peek(snapshot) =? 3)
-    let strings:Stack<string>=[values=[]]
+    let strings:Stack<string> = [values=[]]
     push(@strings "alpha")
     push(@strings "beta")
     $runtime_assert (pop(@strings) =? "beta")
     $runtime_assert (pop(@strings) =? "alpha")
     $runtime_assert (pop(@strings) is? none)
-    let sum=0
-    loop ints.values.length >? 0 {sum+=pop(@ints) ?? 0}
+    let sum = 0
+    loop ints.values.length >? 0 { sum += pop(@ints) ?? 0 }
     $runtime_assert (sum =? 3)
     printl("{sum} {snapshot.values.length} {strings.values.length}")
 }

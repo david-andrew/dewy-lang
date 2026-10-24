@@ -13,7 +13,7 @@ from p"manifest.dewy" import Manifest, log_name, load_manifest, save_manifest
 from p"disk.dewy" import Disk, DiskError, Crashed
 
 # What opening the store found on disk.
-Recovery:type=[
+Recovery:type = [
     keys:int64=0
     txns:int64=0
     records:int64=0
@@ -23,7 +23,7 @@ Recovery:type=[
     removed:array<string>=[]
 ]
 
-Store:type=[
+Store:type = [
     disk:Disk
     manifest:Manifest
     index:BTree=BTree()
@@ -32,25 +32,25 @@ Store:type=[
     log_txns:int64=0
     recovery:Recovery=Recovery()
 
-    get=(key:string):>string?=>index.get(key)
+    get = (key:string):>string? => index.get(key)
 
-    range=(low:Bound? high:Bound? limit:int64=-1):>array<Entry>=>index.range(low high limit)
+    range = (low:Bound? high:Bound? limit:int64=-1):>array<Entry> => index.range(low high limit)
 
-    length=():>int64=>index.count
+    length = ():>int64 => index.count
 
     # Make a batch of changes durable, then visible. Empty batches write nothing.
-    commit=(changes:array<Change>):>void|Crashed|DiskError=>{
+    commit = (changes:array<Change>):>void|Crashed|DiskError => {
         if changes.length =? 0 return
-        let txn=Txn[next_txn changes]
-        let text=encode_txn(txn)
+        let txn = Txn[next_txn changes]
+        let text = encode_txn(txn)
         disk.append(manifest.log text) or_throw
-        next_txn+=1
-        log_bytes+=bytes(text).length
-        log_txns+=1
+        next_txn += 1
+        log_bytes += bytes(text).length
+        log_txns += 1
         apply(changes)
     }
 
-    apply=(changes:array<Change>):>void=>{
+    apply = (changes:array<Change>):>void => {
         loop change in changes {
             if change.op =? 'put' {
                 index.put(change.key change.value)
@@ -61,44 +61,44 @@ Store:type=[
     }
 
     # Rewrite the live data into the next log generation.
-    compact=():>void|Crashed|DiskError=>{
-        let next=Manifest[manifest.generation+1 log_name(manifest.generation+1)]
-        let entries=index.entries
-        let snapshot=Txn[next_txn [loop e in entries Change['put' e.key e.value]]]
-        let text=encode_txn(snapshot)
+    compact = ():>void|Crashed|DiskError => {
+        let next = Manifest[manifest.generation+1 log_name(manifest.generation+1)]
+        let entries = index.entries
+        let snapshot = Txn[next_txn [loop e in entries Change['put' e.key e.value]]]
+        let text = encode_txn(snapshot)
         disk.write(next.log bytes(text)) or_throw
         disk.step('before_manifest') or_throw
         save_manifest(@disk next) or_throw
         disk.step('before_cleanup') or_throw
         disk.remove(manifest.log) or_throw
-        manifest=next
-        next_txn+=1
-        log_bytes=bytes(text).length
-        log_txns=1
-        index=from_sorted(entries)
+        manifest = next
+        next_txn += 1
+        log_bytes = bytes(text).length
+        log_txns = 1
+        index = from_sorted(entries)
     }
 ]
 
 # Open (or create) the store in `disk`, recovering from whatever a crash left.
-open_store=(disk:Disk):>Store|DiskError=>{
-    let manifest=Manifest[1 log_name(1)]
+open_store = (disk:Disk):>Store|DiskError => {
+    let manifest = Manifest[1 log_name(1)]
     match load_manifest(disk) {
         failure:DiskError => return failure
-        found:Manifest => {manifest=found}
+        found:Manifest => { manifest = found }
         _ => save_manifest(@disk manifest) or_throw
     }
-    let data=disk.read(manifest.log) or_throw
-    let replay=scan(data)
-    let store=Store[disk manifest]
-    let last_txn:int64=0
+    let data = disk.read(manifest.log) or_throw
+    let replay = scan(data)
+    let store = Store[disk manifest]
+    let last_txn:int64 = 0
     loop txn in replay.txns {
         store.apply(txn.changes)
-        last_txn=txn.id
+        last_txn = txn.id
     }
-    store.next_txn=last_txn+1
-    store.log_bytes=replay.valid
-    store.log_txns=replay.txns.length
-    let recovery=Recovery[
+    store.next_txn = last_txn+1
+    store.log_bytes = replay.valid
+    store.log_txns = replay.txns.length
+    let recovery = Recovery[
         keys=store.index.count
         txns=replay.txns.length
         records=replay.records
@@ -109,15 +109,15 @@ open_store=(disk:Disk):>Store|DiskError=>{
     # Cut the log back to its intact prefix so new appends follow a clean record.
     if replay.valid <? data.length store.disk.write(manifest.log data[0..replay.valid)) or_throw
     # Logs other than the live one are leftovers of an interrupted compaction.
-    let names=store.disk.list() or_throw
+    let names = store.disk.list() or_throw
     loop name in names {
         if name.startswith("log-") and name not=? manifest.log {
             store.disk.remove(name) or_throw
             recovery.removed.push(name)
         }
     }
-    store.recovery=recovery
+    store.recovery = recovery
     # Rebuild the index at full occupancy.
-    store.index=from_sorted(store.index.entries)
+    store.index = from_sorted(store.index.entries)
     return store
 }

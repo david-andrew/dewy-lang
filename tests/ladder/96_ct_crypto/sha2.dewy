@@ -8,11 +8,11 @@ $explicit_copies
 
 from p"ct.dewy" import load32
 
-Words8:type=array<uint32 length=8>
-Schedule:type=array<uint32 length=64>
+Words8:type = array<uint32 length=8>
+Schedule:type = array<uint32 length=64>
 
 # First 32 bits of the fractional parts of the cube roots of the first 64 primes.
-const K:Schedule=[
+const K:Schedule = [
     0x428a2f98 0x71374491 0xb5c0fbcf 0xe9b5dba5 0x3956c25b 0x59f111f1 0x923f82a4 0xab1c5ed5
     0xd807aa98 0x12835b01 0x243185be 0x550c7dc3 0x72be5d74 0x80deb1fe 0x9bdc06a7 0xc19bf174
     0xe49b69c1 0xefbe4786 0x0fc19dc6 0x240ca1cc 0x2de92c6f 0x4a7484aa 0x5cb0a9dc 0x76f988da
@@ -24,70 +24,70 @@ const K:Schedule=[
 ]
 
 # First 32 bits of the fractional parts of the square roots of the first 8 primes.
-const IV:Words8=[0x6a09e667 0xbb67ae85 0x3c6ef372 0xa54ff53a 0x510e527f 0x9b05688c 0x1f83d9ab 0x5be0cd19]
+const IV:Words8 = [0x6a09e667 0xbb67ae85 0x3c6ef372 0xa54ff53a 0x510e527f 0x9b05688c 0x1f83d9ab 0x5be0cd19]
 
-const BLOCK:int64=64
-const DIGEST:int64=32
+const BLOCK:int64 = 64
+const DIGEST:int64 = 32
 
-rotr=(x:uint32 n:int64):>uint32 & no_effects=>(x >> n) or (x << (32-n))
-big_sigma0=(x:uint32):>uint32 & no_effects=>rotr(x 2) xor rotr(x 13) xor rotr(x 22)
-big_sigma1=(x:uint32):>uint32 & no_effects=>rotr(x 6) xor rotr(x 11) xor rotr(x 25)
-small_sigma0=(x:uint32):>uint32 & no_effects=>rotr(x 7) xor rotr(x 18) xor (x >> 3)
-small_sigma1=(x:uint32):>uint32 & no_effects=>rotr(x 17) xor rotr(x 19) xor (x >> 10)
-choose=(e:uint32 f:uint32 g:uint32):>uint32 & no_effects=>(e and f) xor ((not e) and g)
-majority=(a:uint32 b:uint32 c:uint32):>uint32 & no_effects=>(a and b) xor (a and c) xor (b and c)
+rotr = (x:uint32 n:int64):>uint32 & no_effects => (x >> n) or (x << (32-n))
+big_sigma0 = (x:uint32):>uint32 & no_effects => rotr(x 2) xor rotr(x 13) xor rotr(x 22)
+big_sigma1 = (x:uint32):>uint32 & no_effects => rotr(x 6) xor rotr(x 11) xor rotr(x 25)
+small_sigma0 = (x:uint32):>uint32 & no_effects => rotr(x 7) xor rotr(x 18) xor (x >> 3)
+small_sigma1 = (x:uint32):>uint32 & no_effects => rotr(x 17) xor rotr(x 19) xor (x >> 10)
+choose = (e:uint32 f:uint32 g:uint32):>uint32 & no_effects => (e and f) xor ((not e) and g)
+majority = (a:uint32 b:uint32 c:uint32):>uint32 & no_effects => (a and b) xor (a and c) xor (b and c)
 
 # Fold one 64-byte block starting at `at` into the chaining value.
-compress=(@h:Words8 data:array<uint8> at:int64<0 <=? at and at+64 <=? data.length>):>void=>{
-    let w:Schedule=[]
+compress = (@h:Words8 data:array<uint8> at:int64<0 <=? at and at+64 <=? data.length>):>void => {
+    let w:Schedule = []
     # Big-endian words: each byte shifts into its word from the right.
     loop j in [at..at+BLOCK) and i in [0..BLOCK) {
-        w[i//4]=(w[i//4] << 8) or (data[j] as uint32)
+        w[i//4] = (w[i//4] << 8) or (data[j] as uint32)
     }
     loop i in [16..64) {
-        w[i]=small_sigma1(w[i-2])+w[i-7]+small_sigma0(w[i-15])+w[i-16]
+        w[i] = small_sigma1(w[i-2])+w[i-7]+small_sigma0(w[i-15])+w[i-16]
     }
-    let [a b c d e f g z]=h
+    let [a b c d e f g z] = h
     loop i in [0..64) {
-        let t1=z+big_sigma1(e)+choose(e f g)+K[i]+w[i]
-        let t2=big_sigma0(a)+majority(a b c)
-        z=g
-        g=f
-        f=e
-        e=d+t1
-        d=c
-        c=b
-        b=a
-        a=t1+t2
+        let t1 = z+big_sigma1(e)+choose(e f g)+K[i]+w[i]
+        let t2 = big_sigma0(a)+majority(a b c)
+        z = g
+        g = f
+        f = e
+        e = d+t1
+        d = c
+        c = b
+        b = a
+        a = t1+t2
     }
-    h[0]+=a
-    h[1]+=b
-    h[2]+=c
-    h[3]+=d
-    h[4]+=e
-    h[5]+=f
-    h[6]+=g
-    h[7]+=z
+    h[0] += a
+    h[1] += b
+    h[2] += c
+    h[3] += d
+    h[4] += e
+    h[5] += f
+    h[6] += g
+    h[7] += z
 }
 
 # An incremental hasher: feed any number of pieces, then `finish`.
-Sha256:type=[
+Sha256:type = [
     h:Words8=IV
     pending:array<uint8>=[]
     length:uint64=0
 
-    update=(data:array<uint8>):>void=>{
-        length+=data.length as uint64
-        let at=0
+    update = (data:array<uint8>):>void => {
+        length += data.length as uint64
+        let at = 0
         # Top up a partial block first.
-        let held=pending.length
+        let held = pending.length
         if held >? 0 {
             $runtime_assert held <? BLOCK
-            let take=BLOCK-held
-            if take >? data.length take=data.length
-            let piece=data[0..take).copy
+            let take = BLOCK-held
+            if take >? data.length take = data.length
+            let piece = data[0..take).copy
             pending.extend(piece)
-            at=take
+            at = take
             if pending.length =? BLOCK {
                 compress(@h pending 0)
                 pending.clear()
@@ -97,17 +97,17 @@ Sha256:type=[
         $runtime_assert at >=? 0
         loop at <=? data.length-BLOCK {
             compress(@h data at)
-            at+=BLOCK
+            at += BLOCK
         }
         if at <? data.length {
-            let piece=data[at..data.length).copy
+            let piece = data[at..data.length).copy
             pending.extend(piece)
         }
     }
 
-    finish=():>array<uint8>=>{
-        let bits=length*8
-        let tail=pending.copy
+    finish = ():>array<uint8> => {
+        let bits = length*8
+        let tail = pending.copy
         tail.push(0x80)
         loop tail.length%BLOCK not=? 56 {
             tail.push(0)
@@ -115,13 +115,13 @@ Sha256:type=[
         loop i in [0..8) {
             tail.push(((bits >> (56-8*i)) and 255) as uint8)
         }
-        let state=h
-        let at=0
+        let state = h
+        let at = 0
         loop at <=? tail.length-BLOCK {
             compress(@state tail at)
-            at+=BLOCK
+            at += BLOCK
         }
-        let out:array<uint8>=[]
+        let out:array<uint8> = []
         loop word in state {
             out.push((word >> 24) as uint8)
             out.push(((word >> 16) and 255) as uint8)
@@ -132,51 +132,51 @@ Sha256:type=[
     }
 ]
 
-sha256=(data:array<uint8>):>array<uint8>=>{
-    let hasher=Sha256()
+sha256 = (data:array<uint8>):>array<uint8> => {
+    let hasher = Sha256()
     hasher.update(data)
     return hasher.finish
 }
 
 # HMAC-SHA-256. The key is secret; its length is public.
-hmac_sha256=(key:array<uint8> message:array<uint8>):>array<uint8>=>{
-    let block_key=if key.length >? BLOCK sha256(key) else key.copy
+hmac_sha256 = (key:array<uint8> message:array<uint8>):>array<uint8> => {
+    let block_key = if key.length >? BLOCK sha256(key) else key.copy
     loop block_key.length <? BLOCK {
         block_key.push(0)
     }
-    let inner_pad:array<uint8>=[loop b in block_key b xor 0x36]
-    let outer_pad:array<uint8>=[loop b in block_key b xor 0x5c]
-    let inner=Sha256()
+    let inner_pad:array<uint8> = [loop b in block_key b xor 0x36]
+    let outer_pad:array<uint8> = [loop b in block_key b xor 0x5c]
+    let inner = Sha256()
     inner.update(inner_pad)
     inner.update(message)
-    let outer=Sha256()
+    let outer = Sha256()
     outer.update(outer_pad)
     outer.update(inner.finish)
     return outer.finish
 }
 
 # HKDF (RFC 5869): extract a pseudorandom key, then expand it to `length` bytes.
-hkdf_extract=(salt:array<uint8> ikm:array<uint8>):>array<uint8>=>{
-    let key=if salt.length =? 0 [loop i in [0..DIGEST) 0 as uint8] else salt
+hkdf_extract = (salt:array<uint8> ikm:array<uint8>):>array<uint8> => {
+    let key = if salt.length =? 0 [loop i in [0..DIGEST) 0 as uint8] else salt
     return hmac_sha256(key ikm)
 }
 
-HkdfTooLong:type=type of error & [requested:int64]
+HkdfTooLong:type = type of error & [requested:int64]
 
-hkdf_expand=(prk:array<uint8> info:array<uint8> length:int64):>array<uint8>|HkdfTooLong=>{
+hkdf_expand = (prk:array<uint8> info:array<uint8> length:int64):>array<uint8>|HkdfTooLong => {
     if length <? 0 or length >? 255*DIGEST return HkdfTooLong[length]
-    let okm:array<uint8>=[]
-    let previous:array<uint8>=[]
-    let counter=1
+    let okm:array<uint8> = []
+    let previous:array<uint8> = []
+    let counter = 1
     loop okm.length <? length {
-        let input=[previous... info... (counter as uint8)]
-        previous=hmac_sha256(prk input)
+        let input = [previous... info... (counter as uint8)]
+        previous = hmac_sha256(prk input)
         okm.extend(previous)
-        counter+=1
+        counter += 1
     }
     okm.truncate(length)
     return okm
 }
 
-hkdf=(salt:array<uint8> ikm:array<uint8> info:array<uint8> length:int64):>array<uint8>|HkdfTooLong=>
+hkdf = (salt:array<uint8> ikm:array<uint8> info:array<uint8> length:int64):>array<uint8>|HkdfTooLong =>
     hkdf_expand(hkdf_extract(salt ikm) info length)

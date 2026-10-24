@@ -1,50 +1,50 @@
 # Tier 3 / 93_table_queries / milestone 30
 # Acceptance: SQLite-like in-memory table, parsed insert/update/delete/select, primary keys, ordered queries and begin/commit/rollback; independent SQLite oracle.
-Row:type=[id:int64 name:string score:int64]
-Database:type=[rows:array<Row> saved:array<Row> active:bool]
-Query:type=[kind:string id:int64 name:string value:int64]
-words=(text:string):>array<string>=>{
-    let result:array<string>=[]
-    let token=""
+Row:type = [id:int64 name:string score:int64]
+Database:type = [rows:array<Row> saved:array<Row> active:bool]
+Query:type = [kind:string id:int64 name:string value:int64]
+words = (text:string):>array<string> => {
+    let result:array<string> = []
+    let token = ""
     loop ch in text {
         if ch =? ' ' {
             if token.length >? 0 {
                 result.push(token)
-                token=""
+                token = ""
             }
         } else {
-            token="{token}{ch}"
+            token = "{token}{ch}"
         }
     }
     if token.length >? 0 result.push(token)
     return result
 }
-digit_index=(text:string):>int64?=>{
+digit_index = (text:string):>int64? => {
     loop digit in [0..10) {
         if text =? "{digit}" return digit
     }
     return none
 }
-integer=(text:string):>int64?=>{
+integer = (text:string):>int64? => {
     if text.length =? 0 return none
-    let start:int64=0
-    let sign:int64=1
+    let start:int64 = 0
+    let sign:int64 = 1
     if text[0] =? '-' {
-        sign=-1
-        start=1
+        sign = -1
+        start = 1
     }
     if start =? text.length return none
-    let total:int64=0
+    let total:int64 = 0
     loop i in [start..text.length) {
-        let digit=digit_index("{text[i]}")
+        let digit = digit_index("{text[i]}")
         if digit is? none return none
         if total >? 100000 return none
-        total=total*10+digit
+        total = total*10+digit
     }
     return sign*total
 }
-parse=(source:string):>Query?=>{
-    let t=words(source)
+parse = (source:string):>Query? => {
+    let t = words(source)
     if t.length =? 0 return none
     if t.length =? 1 {
         if t[0] in? ["BEGIN" "COMMIT" "ROLLBACK"] {
@@ -53,71 +53,71 @@ parse=(source:string):>Query?=>{
         return none
     }
     if t[0] =? "INSERT" and t.length =? 4 {
-        let id=integer(t[1])
-        let score=integer(t[3])
+        let id = integer(t[1])
+        let score = integer(t[3])
         if id is? none or score is? none return none
         return Query["INSERT" id t[2] score]
     }
     if t[0] =? "DELETE" and t.length =? 2 {
-        let id=integer(t[1])
+        let id = integer(t[1])
         if id is? none return none
         return Query["DELETE" id "" 0]
     }
     if t[0] =? "UPDATE" and t.length =? 3 {
-        let id=integer(t[1])
-        let score=integer(t[2])
+        let id = integer(t[1])
+        let score = integer(t[2])
         if id is? none or score is? none return none
         return Query["UPDATE" id "" score]
     }
     if t.length =? 6 and t[0] =? "SELECT" {
         if t[1] not=? "score" or t[2] not=? ">=" return none
         if t[4] not=? "ORDER" or t[5] not=? "id" return none
-        let score=integer(t[3])
+        let score = integer(t[3])
         if score is? none return none
         return Query["SELECT" 0 "" score]
     }
     return none
 }
-find=(db:Database id:int64):>int64?=>{
+find = (db:Database id:int64):>int64? => {
     loop i in [0..db.rows.length) {
         if db.rows[i].id =? id return i
     }
     return none
 }
-select=(db:Database minimum:int64):>string=>{
-    let selected:array<Row>=[]
+select = (db:Database minimum:int64):>string => {
+    let selected:array<Row> = []
     loop row in db.rows {
         if row.score >=? minimum selected.push(row)
     }
-    selected.sort(key=(r:Row)=>r.id)
-    let result="rows"
+    selected.sort(key=(r:Row) => r.id)
+    let result = "rows"
     loop row in selected {
-        result="{result} {row.id}:{row.name}:{row.score}"
+        result = "{result} {row.id}:{row.name}:{row.score}"
     }
     return result
 }
-execute=(@db:Database q:Query):>string=>{
+execute = (@db:Database q:Query):>string => {
     if q.kind =? "BEGIN" {
         if db.active return "error transaction"
-        db.saved=db.rows.copy()
-        db.active=true
+        db.saved = db.rows.copy()
+        db.active = true
         return "begin"
     }
     if q.kind =? "ROLLBACK" {
         if not db.active return "error transaction"
-        db.rows=db.saved
-        db.saved=[]
-        db.active=false
+        db.rows = db.saved
+        db.saved = []
+        db.active = false
         return "rollback"
     }
     if q.kind =? "COMMIT" {
         if not db.active return "error transaction"
-        db.saved=[]
-        db.active=false
+        db.saved = []
+        db.active = false
         return "commit"
     }
     if q.kind =? "SELECT" return select(db q.value)
-    let index=find(db q.id)
+    let index = find(db q.id)
     if q.kind =? "INSERT" {
         if index is? int64 return "error duplicate"
         db.rows.push(Row[q.id q.name q.value])
@@ -126,7 +126,7 @@ execute=(@db:Database q:Query):>string=>{
     if index is? none return "changed 0"
     if q.kind =? "UPDATE" {
         if index <? 0 or index >=? db.rows.length return "changed 0"
-        db.rows[index].score=q.value
+        db.rows[index].score = q.value
         return "changed 1"
     }
     if q.kind =? "DELETE" {
@@ -136,13 +136,13 @@ execute=(@db:Database q:Query):>string=>{
     }
     return "error query"
 }
-run=(@db:Database source:string):>string=>{
-    let q=parse(source)
+run = (@db:Database source:string):>string => {
+    let q = parse(source)
     if q is? none return "error syntax"
     return execute(@db q)
 }
-selfcheck=():>void=>{
-    let db=Database[[] [] false]
+selfcheck = ():>void => {
+    let db = Database[[] [] false]
     $runtime_assert run(@db "INSERT 1 one 5") =? "insert 1"
     $runtime_assert run(@db "INSERT 1 one 6") =? "error duplicate"
     $runtime_assert run(@db "BEGIN") =? "begin"
@@ -160,8 +160,8 @@ selfcheck=():>void=>{
     $runtime_assert db.rows.length =? 1
 }
 
-boundaries=():>void=>{
-    let db=Database[[] [] false]
+boundaries = ():>void => {
+    let db = Database[[] [] false]
     $runtime_assert integer("-") is? none
     $runtime_assert integer("+1") is? none
     $runtime_assert integer("-9") =? -9
@@ -186,11 +186,11 @@ boundaries=():>void=>{
     $runtime_assert db.rows.length =? 0
 }
 
-main=():>void=>{
+main = ():>void => {
     boundaries()
     selfcheck()
-    let db=Database[[] [] false]
-    let script:array<string>=[
+    let db = Database[[] [] false]
+    let script:array<string> = [
         "INSERT 3 cy 70"
         "INSERT 1 al 40"
         "INSERT 2 be 60"

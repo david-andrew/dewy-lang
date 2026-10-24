@@ -1,41 +1,41 @@
 # Tier 3 / 87_big_arithmetic / milestone 27
 # Acceptance: Runtime bigint modular exponentiation, 100!, binomial exact division and big rational intermediates; arithmetic only, no cryptographic security claim.
-modpow=(base:int exponent:int modulus:int<(>? 0)>):>int=>{
-    let result:int=1
-    let power=base%modulus
-    let remaining=exponent
+modpow = (base:int exponent:int modulus:int<(>? 0)>):>int => {
+    let result:int = 1
+    let power = base%modulus
+    let remaining = exponent
     loop remaining >? 0 {
         if remaining%2 =? 1 {
-            result=result*power%modulus
+            result = result*power%modulus
         }
-        remaining=remaining//2
-        power=power*power%modulus
+        remaining = remaining//2
+        power = power*power%modulus
     }
     return result
 }
-factorial=(n:int64):>int=>{
-    let result:int=1
+factorial = (n:int64):>int => {
+    let result:int = 1
     loop i in [1..n+1) {
-        result*=i
+        result *= i
     }
     return result
 }
-choose=(n:int64 k:int64):>int=>{
-    let result:int=1
+choose = (n:int64 k:int64):>int => {
+    let result:int = 1
     loop i in [1..k+1) {
-        result=result*(n-i+1)//i
+        result = result*(n-i+1)//i
     }
     return result
 }
-main=():>void=>{
-    let p:int=32416190071
-    let q:int=32416187567
-    let modulus=p*q
-    let message:int=12345678901234567890
+main = ():>void => {
+    let p:int = 32416190071
+    let q:int = 32416187567
+    let modulus = p*q
+    let message:int = 12345678901234567890
     $runtime_assert modulus >? 0
-    let encrypted=modpow(message 65537 modulus)
-    let fact=factorial(100)
-    let binomial=choose(100 50)
+    let encrypted = modpow(message 65537 modulus)
+    let fact = factorial(100)
+    let binomial = choose(100 50)
     $runtime_assert modpow(2 0 modulus) =? 1
     $runtime_assert modpow(2 10 1000) =? 24
     $runtime_assert modpow(0 7 modulus) =? 0
@@ -46,8 +46,8 @@ main=():>void=>{
     $runtime_assert choose(10 5) =? 252
     $runtime_assert choose(20 10) =? 184756
     $runtime_assert binomial*101 =? choose(101 50)*51
-    let numerator:int=factorial(50)
-    let ratio:rational=numerator/(numerator+1)
+    let numerator:int = factorial(50)
+    let ratio:rational = numerator/(numerator+1)
     $runtime_assert ratio <? 1
     $runtime_assert ratio >? 0
     $runtime_assert factorial(2) =? 2

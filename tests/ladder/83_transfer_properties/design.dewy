@@ -1,7 +1,7 @@
 # Reject a non-atomic shared-storage handle nested inside ordinary values.
 from p"non_atomic.jo" import local_handle, read
-main=()=>{
- let message=[sequence=1 handle=local_handle()]
- let results=[parallel i in [0..2) read(message.handle)+i]
- printl(results)
+main = () => {
+    let message = [sequence=1 handle=local_handle()]
+    let results = [parallel i in [0..2) read(message.handle)+i]
+    printl(results)
 }

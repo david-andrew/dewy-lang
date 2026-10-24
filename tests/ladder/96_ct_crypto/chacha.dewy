@@ -8,50 +8,50 @@ $explicit_copies
 
 from p"ct.dewy" import load32
 
-Key:type=array<uint8 length=32>
-Nonce:type=array<uint8 length=12>
-State:type=array<uint32 length=16>
+Key:type = array<uint8 length=32>
+Nonce:type = array<uint8 length=12>
+State:type = array<uint32 length=16>
 
 # "expand 32-byte k"
-const SIGMA:array<uint32 length=4>=[0x61707865 0x3320646e 0x79622d32 0x6b206574]
-const BLOCK:int64=64
+const SIGMA:array<uint32 length=4> = [0x61707865 0x3320646e 0x79622d32 0x6b206574]
+const BLOCK:int64 = 64
 
-rotl=(x:uint32 n:int64):>uint32 & no_effects=>(x << n) or (x >> (32-n))
+rotl = (x:uint32 n:int64):>uint32 & no_effects => (x << n) or (x >> (32-n))
 
-quarter=(@s:State a:int64<0 <=? a <? 16> b:int64<0 <=? b <? 16> c:int64<0 <=? c <? 16> d:int64<0 <=? d <? 16>):>void=>{
-    s[a]+=s[b]
-    s[d]=rotl(s[d] xor s[a] 16)
-    s[c]+=s[d]
-    s[b]=rotl(s[b] xor s[c] 12)
-    s[a]+=s[b]
-    s[d]=rotl(s[d] xor s[a] 8)
-    s[c]+=s[d]
-    s[b]=rotl(s[b] xor s[c] 7)
+quarter = (@s:State a:int64<0 <=? a <? 16> b:int64<0 <=? b <? 16> c:int64<0 <=? c <? 16> d:int64<0 <=? d <? 16>):>void => {
+    s[a] += s[b]
+    s[d] = rotl(s[d] xor s[a] 16)
+    s[c] += s[d]
+    s[b] = rotl(s[b] xor s[c] 12)
+    s[a] += s[b]
+    s[d] = rotl(s[d] xor s[a] 8)
+    s[c] += s[d]
+    s[b] = rotl(s[b] xor s[c] 7)
 }
 
 # The input state of block `counter`: constants, key, counter, nonce.
-setup=(key:Key counter:uint32 nonce:Nonce):>State=>{
-    let s:State=[]
+setup = (key:Key counter:uint32 nonce:Nonce):>State => {
+    let s:State = []
     loop i in [0..4) {
-        s[i]=SIGMA[i]
+        s[i] = SIGMA[i]
     }
-    let k=key as array<uint8>
+    let k = key as array<uint8>
     $runtime_assert k.length =? 32
     loop i in [0..8) {
-        s[4+i]=load32(k 4*i)
+        s[4+i] = load32(k 4*i)
     }
-    s[12]=counter
-    let n=nonce as array<uint8>
+    s[12] = counter
+    let n = nonce as array<uint8>
     $runtime_assert n.length =? 12
     loop i in [0..3) {
-        s[13+i]=load32(n 4*i)
+        s[13+i] = load32(n 4*i)
     }
     return s
 }
 
 # Twenty rounds: ten column/diagonal double rounds.
-rounds=(input:State):>State=>{
-    let s=input
+rounds = (input:State):>State => {
+    let s = input
     loop round in [0..10) {
         quarter(@s 0 4 8 12)
         quarter(@s 1 5 9 13)
@@ -66,18 +66,18 @@ rounds=(input:State):>State=>{
 }
 
 # The block function: the rounds, then the feed-forward of the input.
-permute=(input:State):>State=>{
-    let s=rounds(input)
+permute = (input:State):>State => {
+    let s = rounds(input)
     loop i in [0..16) {
-        s[i]+=input[i]
+        s[i] += input[i]
     }
     return s
 }
 
 # The 64 keystream bytes of one block, serialized little-endian.
-block=(key:Key counter:uint32 nonce:Nonce):>array<uint8>=>{
-    let words=permute(setup(key counter nonce))
-    let out:array<uint8>=[]
+block = (key:Key counter:uint32 nonce:Nonce):>array<uint8> => {
+    let words = permute(setup(key counter nonce))
+    let out:array<uint8> = []
     out.reserve(BLOCK)
     loop w in words {
         out.push((w and 255) as uint8)
@@ -89,26 +89,26 @@ block=(key:Key counter:uint32 nonce:Nonce):>array<uint8>=>{
 }
 
 # Encrypt or decrypt: XOR the data with the keystream starting at block `counter`.
-xor_stream=(key:Key counter:uint32 nonce:Nonce data:array<uint8>):>array<uint8>=>{
+xor_stream = (key:Key counter:uint32 nonce:Nonce data:array<uint8>):>array<uint8> => {
     # A nonce has only 2^32 counter blocks. Refuse reuse before emitting data.
     $runtime_assert data.length <=? (4294967296-(counter as int64))*BLOCK
-    let out:array<uint8>=[]
+    let out:array<uint8> = []
     out.reserve(data.length)
-    let state=setup(key counter nonce)
-    let at=0
+    let state = setup(key counter nonce)
+    let at = 0
     loop at <? data.length {
-        let words=permute(state)
-        let stop=at+BLOCK
-        if stop >? data.length stop=data.length
+        let words = permute(state)
+        let stop = at+BLOCK
+        if stop >? data.length stop = data.length
         loop j in [at..stop) and i in [0..BLOCK) {
-            let word=words[i//4]
-            let byte=((word >> (8*(i%4))) and 255) as uint8
+            let word = words[i//4]
+            let byte = ((word >> (8*(i%4))) and 255) as uint8
             out.push(data[j] xor byte)
         }
-        at=stop
+        at = stop
         if at <? data.length {
             $runtime_assert state[12] <? uint32.max
-            state[12]+=1
+            state[12] += 1
         }
     }
     return out
@@ -117,27 +117,27 @@ xor_stream=(key:Key counter:uint32 nonce:Nonce data:array<uint8>):>array<uint8>=
 # HChaCha20 (draft-irtf-cfrg-xchacha section 2.2): a subkey from a key and the
 # first 16 bytes of `nonce`, the first and last rows of the rounds without the
 # feed-forward.
-NonceX:type=array<uint8 length=24>
+NonceX:type = array<uint8 length=24>
 
-hchacha20=(key:Key nonce:array<uint8>):>Key=>{
+hchacha20 = (key:Key nonce:array<uint8>):>Key => {
     $runtime_assert nonce.length >=? 16
-    let s:State=[]
+    let s:State = []
     loop i in [0..4) {
-        s[i]=SIGMA[i]
+        s[i] = SIGMA[i]
     }
-    let k=key as array<uint8>
+    let k = key as array<uint8>
     $runtime_assert k.length =? 32
     loop i in [0..8) {
-        s[4+i]=load32(k 4*i)
+        s[4+i] = load32(k 4*i)
     }
     loop i in [0..4) {
-        s[12+i]=load32(nonce 4*i)
+        s[12+i] = load32(nonce 4*i)
     }
-    let r=rounds(s)
-    let out:array<uint8>=[]
+    let r = rounds(s)
+    let out:array<uint8> = []
     loop row in [0..2) {
         loop i in [0..4) {
-            let w=r[12*row+i]
+            let w = r[12*row+i]
             out.push((w and 255) as uint8)
             out.push(((w >> 8) and 255) as uint8)
             out.push(((w >> 16) and 255) as uint8)

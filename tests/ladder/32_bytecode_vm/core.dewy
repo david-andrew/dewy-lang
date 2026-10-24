@@ -1,86 +1,86 @@
-Fault:type=type of error & [pc:int64]
-State:type=[stack:array<int64> locals:array<int64> pc:int64 steps:int64]
-run=(code:array<int64> limit:int64):>State|Fault=> {
-    let s=State[[] [0 0] 0 0]
-    loop s.pc >=? 0 and s.pc <? code.length  {
-        if s.steps >=? limit  {
+Fault:type = type of error & [pc:int64]
+State:type = [stack:array<int64> locals:array<int64> pc:int64 steps:int64]
+run = (code:array<int64> limit:int64):>State|Fault => {
+    let s = State[[] [0 0] 0 0]
+    loop s.pc >=? 0 and s.pc <? code.length {
+        if s.steps >=? limit {
             return Fault[s.pc]
         }
-        s.steps+=1
-        let op=code[s.pc]
-        s.pc+=1
-        if op =? 0  {
+        s.steps += 1
+        let op = code[s.pc]
+        s.pc += 1
+        if op =? 0 {
             return s
         }
-        if op =? 1 or op =? 4 or op =? 5 or op =? 6 or op =? 7  {
-            if s.pc >=? code.length  {
+        if op =? 1 or op =? 4 or op =? 5 or op =? 6 or op =? 7 {
+            if s.pc >=? code.length {
                 return Fault[s.pc]
             }
-            let arg=code[s.pc]
-            s.pc+=1
-            if op =? 1  {
+            let arg = code[s.pc]
+            s.pc += 1
+            if op =? 1 {
                 s.stack.push(arg)
             }
-            if op =? 4 or op =? 5  {
-                if arg <? 0 or arg >=? s.locals.length  {
+            if op =? 4 or op =? 5 {
+                if arg <? 0 or arg >=? s.locals.length {
                     return Fault[s.pc]
                 }
-                if op =? 4  {
+                if op =? 4 {
                     s.stack.push(s.locals[arg])
                 }
-                else  {
-                    if s.stack.length =? 0  {
+                else {
+                    if s.stack.length =? 0 {
                         return Fault[s.pc]
                     }
-                    s.locals[arg]=s.stack.pop()
+                    s.locals[arg] = s.stack.pop()
                 }
             }
-            if op =? 6  {
-                s.pc=arg
+            if op =? 6 {
+                s.pc = arg
             }
-            if op =? 7  {
-                if s.stack.length =? 0  {
+            if op =? 7 {
+                if s.stack.length =? 0 {
                     return Fault[s.pc]
                 }
-                let test=s.stack.pop()
-                if test =? 0  {
-                    s.pc=arg
+                let test = s.stack.pop()
+                if test =? 0 {
+                    s.pc = arg
                 }
             }
         }
-        else  {
-            if s.stack.length <? 2  {
+        else {
+            if s.stack.length <? 2 {
                 return Fault[s.pc]
             }
-            let b=s.stack.pop()
-            let a=s.stack.pop()
-            if op =? 2  {
+            let b = s.stack.pop()
+            let a = s.stack.pop()
+            if op =? 2 {
                 s.stack.push(a+b)
             }
-            else if op =? 3  {
+            else if op =? 3 {
                 s.stack.push(a*b)
             }
-            else  {
+            else {
                 return Fault[s.pc]
             }
         }
     }
     return Fault[s.pc]
 }
-main=():>void=> {
+main = ():>void => {
     # factorial loop: local 0 is counter, local 1 accumulator.
-    let code:array<int64>=[1 6 5 0 1 1 5 1 4 0 7 28 4 1 4 0 3 5 1 4 0 1 -1 2 5 0 6 8 4 1 0]
-    let result=run(code 200)
-    if result is? Fault  {
+    let code:array<int64> = [1 6 5 0 1 1 5 1 4 0 7 28 4 1 4 0 3 5 1 4 0 1 -1 2 5 0 6 8 4 1 0]
+    let result = run(code 200)
+    if result is? Fault {
         exit(1)
     }
     $runtime_assert(result.stack.length >? 0 and result.stack[0] =? 720)
-    let snapshot=result
-    result.stack[0]=0
+    let snapshot = result
+    result.stack[0] = 0
     $runtime_assert(snapshot.stack.length >? 0 and snapshot.stack[0] =? 720)
-    let truncated=run([1] 20)
-    let underflow=run([2 0] 20)
-    let runaway=run([6 0] 10)
+    let truncated = run([1] 20)
+    let underflow = run([2 0] 20)
+    let runaway = run([6 0] 10)
     $runtime_assert(truncated is? Fault)
     $runtime_assert(underflow is? Fault)
     $runtime_assert(runaway is? Fault)

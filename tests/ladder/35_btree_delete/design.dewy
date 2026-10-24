@@ -1,109 +1,109 @@
 # Minimum degree 2: at most three keys, at least one except the root.
-Node:type=[keys:array<int64> children:array<Node>]
-leaf=():>Node=>Node[[] []]
-split=(@parent:Node i:int64):>void=> {
+Node:type = [keys:array<int64> children:array<Node>]
+leaf = ():>Node => Node[[] []]
+split = (@parent:Node i:int64):>void => {
     $runtime_assert (0 <=? i and i <? parent.children.length)
-    let child=parent.children[i]
+    let child = parent.children[i]
     $runtime_assert (child.keys.length =? 3)
-    let right=leaf()
-    right.keys=[child.keys[2]]
-    let middle=child.keys[1]
+    let right = leaf()
+    right.keys = [child.keys[2]]
+    let middle = child.keys[1]
     child.keys.truncate(1)
-    if child.children.length >? 0  {
+    if child.children.length >? 0 {
         $runtime_assert (child.children.length =? 4)
-        right.children=[child.children[2] child.children[3]]
+        right.children = [child.children[2] child.children[3]]
         child.children.truncate(2)
     }
     $runtime_assert (0 <=? i and i <? parent.children.length)
-    parent.children[i]=child
+    parent.children[i] = child
     parent.keys.insert(middle i)
     parent.children.insert(right i+1)
 }
-insert_nonfull=(@node:Node key:int64):>void=> {
-    let i=0
-    loop i <? node.keys.length and key >? node.keys[i]  {
-        i+=1
+insert_nonfull = (@node:Node key:int64):>void => {
+    let i = 0
+    loop i <? node.keys.length and key >? node.keys[i] {
+        i += 1
     }
-    if i <? node.keys.length  {
-        if key =? node.keys[i]  {
+    if i <? node.keys.length {
+        if key =? node.keys[i] {
             return
         }
     }
-    if node.children.length =? 0  {
+    if node.children.length =? 0 {
         node.keys.insert(key i)
         return
     }
     $runtime_assert (i <=? node.keys.length and node.children.length =? node.keys.length+1)
-    if node.children[i].keys.length =? 3  {
+    if node.children[i].keys.length =? 3 {
         split(@node i)
         $runtime_assert (i <? node.keys.length and node.children.length =? node.keys.length+1)
-        if key =? node.keys[i]  {
+        if key =? node.keys[i] {
             return
         }
-        if key >? node.keys[i]  {
-            i+=1
+        if key >? node.keys[i] {
+            i += 1
         }
     }
     $runtime_assert (i <? node.children.length)
     insert_nonfull(@node.children[i] key)
 }
-insert=(@root:Node key:int64):>void=> {
-    if root.keys.length =? 3  {
-        root=Node[[] [root]]
+insert = (@root:Node key:int64):>void => {
+    if root.keys.length =? 3 {
+        root = Node[[] [root]]
         split(@root 0)
     }
     insert_nonfull(@root key)
 }
-merge=(@node:Node i:int64):>void=> {
+merge = (@node:Node i:int64):>void => {
     $runtime_assert (0 <=? i and i <? node.children.length-1 and i <? node.keys.length)
-    let left=node.children[i]
-    let right=node.children[i+1]
+    let left = node.children[i]
+    let right = node.children[i+1]
     left.keys.push(node.keys.pop(i))
-    loop key in right.keys  {
+    loop key in right.keys {
         left.keys.push(key)
     }
-    loop child in right.children  {
+    loop child in right.children {
         left.children.push(child)
     }
     $runtime_assert (i+1 <? node.children.length)
-    node.children[i]=left
+    node.children[i] = left
     node.children.pop(i+1)
 }
-extreme=(node:Node last:bool):>int64=> {
-    if node.children.length =? 0  {
+extreme = (node:Node last:bool):>int64 => {
+    if node.children.length =? 0 {
         $runtime_assert (node.keys.length >? 0)
-        if last  {
+        if last {
             return node.keys[node.keys.length-1]
         }
         return node.keys[0]
     }
-    if last  {
+    if last {
         return extreme(node.children[node.children.length-1] last)
     }
     return extreme(node.children[0] last)
 }
-erase=(@node:Node key:int64):>bool=> {
-    let i=0
-    loop i <? node.keys.length and key >? node.keys[i]  {
-        i+=1
+erase = (@node:Node key:int64):>bool => {
+    let i = 0
+    loop i <? node.keys.length and key >? node.keys[i] {
+        i += 1
     }
-    if i <? node.keys.length  {
-        if node.keys[i] =? key  {
-            if node.children.length =? 0  {
+    if i <? node.keys.length {
+        if node.keys[i] =? key {
+            if node.children.length =? 0 {
                 node.keys.pop(i);
                 return true
             }
             $runtime_assert (node.children.length =? node.keys.length+1)
-            if node.children[i].keys.length >=? 2  {
-                let replacement=extreme(node.children[i] true)
+            if node.children[i].keys.length >=? 2 {
+                let replacement = extreme(node.children[i] true)
                 $runtime_assert (i <? node.keys.length and node.children.length =? node.keys.length+1)
-                node.keys[i]=replacement
+                node.keys[i] = replacement
                 return erase(@node.children[i] replacement)
             }
-            if node.children[i+1].keys.length >=? 2  {
-                let replacement=extreme(node.children[i+1] false)
+            if node.children[i+1].keys.length >=? 2 {
+                let replacement = extreme(node.children[i+1] false)
                 $runtime_assert (i <? node.keys.length and node.children.length =? node.keys.length+1)
-                node.keys[i]=replacement
+                node.keys[i] = replacement
                 return erase(@node.children[i+1] replacement)
             }
             merge(@node i)
@@ -111,42 +111,42 @@ erase=(@node:Node key:int64):>bool=> {
             return erase(@node.children[i] key)
         }
     }
-    if node.children.length =? 0  {
+    if node.children.length =? 0 {
         return false
     }
     $runtime_assert (i <=? node.keys.length and node.children.length =? node.keys.length+1)
-    if node.children[i].keys.length =? 1  {
-        if i >? 0 and node.children[i-1].keys.length >=? 2  {
-            let sibling=node.children[i-1]
-            let child=node.children[i]
+    if node.children[i].keys.length =? 1 {
+        if i >? 0 and node.children[i-1].keys.length >=? 2 {
+            let sibling = node.children[i-1]
+            let child = node.children[i]
             child.keys.insert(node.keys[i-1] 0)
-            if sibling.children.length >? 0  {
+            if sibling.children.length >? 0 {
                 child.children.insert(sibling.children.pop() 0)
             }
-            let moved=sibling.keys.pop()
-            let left=i-1
+            let moved = sibling.keys.pop()
+            let left = i-1
             $runtime_assert (0 <=? left and left <? node.keys.length and left <? node.children.length and i <? node.children.length)
-            node.children[left]=sibling
-            node.children[i]=child
-            node.keys[left]=moved
+            node.children[left] = sibling
+            node.children[i] = child
+            node.keys[left] = moved
         }
-        else if i+1 <? node.children.length and node.children[i+1].keys.length >=? 2  {
-            let sibling=node.children[i+1]
-            let child=node.children[i]
+        else if i+1 <? node.children.length and node.children[i+1].keys.length >=? 2 {
+            let sibling = node.children[i+1]
+            let child = node.children[i]
             child.keys.push(node.keys[i])
-            node.keys[i]=sibling.keys.pop(0)
-            if sibling.children.length >? 0  {
+            node.keys[i] = sibling.keys.pop(0)
+            if sibling.children.length >? 0 {
                 child.children.push(sibling.children.pop(0))
             }
-            node.children[i]=child
-            node.children[i+1]=sibling
+            node.children[i] = child
+            node.children[i+1] = sibling
         }
-        else  {
-            if i+1 <? node.children.length  {
+        else {
+            if i+1 <? node.children.length {
                 merge(@node i)
             }
-            else  {
-                i-=1
+            else {
+                i -= 1
                 merge(@node i)
             }
         }
@@ -154,93 +154,93 @@ erase=(@node:Node key:int64):>bool=> {
     $runtime_assert (0 <=? i and i <? node.children.length)
     return erase(@node.children[i] key)
 }
-remove=(@root:Node key:int64):>bool=> {
-    let found=erase(@root key)
-    if root.keys.length =? 0 and root.children.length >? 0  {
-        root=root.children[0]
+remove = (@root:Node key:int64):>bool => {
+    let found = erase(@root key)
+    if root.keys.length =? 0 and root.children.length >? 0 {
+        root = root.children[0]
     }
     return found
 }
-walk=(node:Node):>array<int64>=> {
-    let result:array<int64>=[]
-    if node.children.length =? 0  {
-        loop key in node.keys  {
+walk = (node:Node):>array<int64> => {
+    let result:array<int64> = []
+    if node.children.length =? 0 {
+        loop key in node.keys {
             result.push(key)
         }
         return result
     }
     $runtime_assert (node.children.length =? node.keys.length+1)
-    loop i in [0..node.keys.length)  {
-        loop key in walk(node.children[i])  {
+    loop i in [0..node.keys.length) {
+        loop key in walk(node.children[i]) {
             result.push(key)
         }
         result.push(node.keys[i])
     }
-    loop key in walk(node.children[node.keys.length])  {
+    loop key in walk(node.children[node.keys.length]) {
         result.push(key)
     }
     return result
 }
-height=(node:Node):>int64=>{
-    if node.children.length =? 0 {return 0}
+height = (node:Node):>int64 => {
+    if node.children.length =? 0 { return 0 }
     return 1+height(node.children[0])
 }
-valid=(node:Node root:bool):>bool=> {
-    if node.keys.length >? 3  {
+valid = (node:Node root:bool):>bool => {
+    if node.keys.length >? 3 {
         return false
     }
-    if not root and node.keys.length <? 1  {
+    if not root and node.keys.length <? 1 {
         return false
     }
-    loop i in [1..node.keys.length)  {
-        if node.keys[i-1] >=? node.keys[i]  {
+    loop i in [1..node.keys.length) {
+        if node.keys[i-1] >=? node.keys[i] {
             return false
         }
     }
-    if node.children.length >? 0  {
-        if node.children.length not=? node.keys.length+1  {
+    if node.children.length >? 0 {
+        if node.children.length not=? node.keys.length+1 {
             return false
         }
-        loop child in node.children  {
-            if not valid(child false)  {
+        loop child in node.children {
+            if not valid(child false) {
                 return false
             }
         }
     }
-    let ordered=walk(node)
+    let ordered = walk(node)
     loop i in [1..ordered.length) {
-        if ordered[i-1] >=? ordered[i] {return false}
+        if ordered[i-1] >=? ordered[i] { return false }
     }
     if node.children.length >? 0 {
-        let depth=height(node.children[0])
+        let depth = height(node.children[0])
         loop child in node.children {
-            if height(child) not=? depth {return false}
+            if height(child) not=? depth { return false }
         }
     }
     return true
 }
-main=():>void=> {
-    let tree=leaf()
-    loop i in [0..64)  {
+main = ():>void => {
+    let tree = leaf()
+    loop i in [0..64) {
         insert(@tree (i*37)%64)
     }
-    loop i in [0..64) {insert(@tree i)}
+    loop i in [0..64) { insert(@tree i) }
     $runtime_assert (walk(tree).length =? 64)
     $runtime_assert (valid(tree true))
-    let saved=tree
-    loop i in [0..48)  {
+    let saved = tree
+    loop i in [0..48) {
         $runtime_assert (remove(@tree (i*19)%64))
         $runtime_assert (valid(tree true))
     }
     $runtime_assert (not remove(@tree 999))
-    let remaining=walk(tree)
-    let sum=0
-    loop key in remaining  {
-        sum+=key
+    let remaining = walk(tree)
+    let sum = 0
+    loop key in remaining {
+        sum += key
     }
     $runtime_assert (walk(saved).length =? 64)
     $runtime_assert (remaining.length =? 16)
-    loop key in remaining  {
+    loop key in remaining {
         $runtime_assert (remove(@tree key))
     }
     $runtime_assert (tree.keys.length =? 0)

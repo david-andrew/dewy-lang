@@ -6,9 +6,9 @@
 from p"tokens.dewy" import Symbol, power, invert, assignment, right_assoc
 from p"lexer.dewy" import Token, Kind, LexError, lex, interpolation_end, text_of, quote_width
 
-Node:type=[kind:string op:string="" text:string="" start:int64 kids:array<int64>=[]]
+Node:type = [kind:string op:string="" text:string="" start:int64 kids:array<int64>=[]]
 
-Parser:type=[
+Parser:type = [
     source:array<uint8>
     tokens:array<Token>
     at:int64=0
@@ -19,78 +19,78 @@ Parser:type=[
     interpolating:int64=0
 ]
 
-ParseError:type=type of error & [offset:int64 message:string]
+ParseError:type = type of error & [offset:int64 message:string]
 
-const MAX_DEPTH:int64=256
-const ABSENT:int64=0
+const MAX_DEPTH:int64 = 256
+const ABSENT:int64 = 0
 
-fail=(p:Parser offset:int64 message:string):>ParseError=>{
+fail = (p:Parser offset:int64 message:string):>ParseError => {
     if p.interpolating >? 0 return ParseError[offset "{message}, inside a string interpolation"]
     return ParseError[offset message]
 }
 
-add=(@p:Parser node:Node):>int64=>{
+add = (@p:Parser node:Node):>int64 => {
     p.nodes.push(node)
     return p.nodes.length-1
 }
 
 # The parser never moves past the eof token.
-token=(p:Parser):>Token=>{
+token = (p:Parser):>Token => {
     $runtime_assert 0 <=? p.at and p.at <? p.tokens.length
     return p.tokens[p.at]
 }
-peek=(p:Parser):>Symbol?=>token(p).symbol
+peek = (p:Parser):>Symbol? => token(p).symbol
 # The token `offset` places from the current one, if there is one.
-nearby=(p:Parser offset:int64):>Token?=>p.tokens.get(p.at+offset)
+nearby = (p:Parser offset:int64):>Token? => p.tokens.get(p.at+offset)
 # Node indexes come from `add`.
-node=(p:Parser id:int64):>Node=>{
+node = (p:Parser id:int64):>Node => {
     $runtime_assert 0 <=? id and id <? p.nodes.length
     return p.nodes[id]
 }
-text=(p:Parser t:Token):>string=>text_of(p.source t.start t.stop)
+text = (p:Parser t:Token):>string => text_of(p.source t.start t.stop)
 
-accept=(@p:Parser symbol:Symbol):>bool=>{
+accept = (@p:Parser symbol:Symbol):>bool => {
     if peek(p) =? symbol {
-        p.at+=1
+        p.at += 1
         return true
     }
     return false
 }
 
-expect=(@p:Parser symbol:Symbol):>void|ParseError=>{
+expect = (@p:Parser symbol:Symbol):>void|ParseError => {
     if not accept(@p symbol) return fail(p token(p).start "expected '{symbol}'")
 }
 
-can_start=(p:Parser):>bool=>{
-    let t=token(p)
+can_start = (p:Parser):>bool => {
+    let t = token(p)
     if t.kind =? 'eof' return false
-    let s=t.symbol
+    let s = t.symbol
     if s isnt? none and s in? [')' ']' '\}' '>' '>>' 'else' ';' ','] return false
     return true
 }
 
-range_bound=(p:Parser):>bool=>{
+range_bound = (p:Parser):>bool => {
     if not can_start(p) return false
-    let s=peek(p)
+    let s = peek(p)
     if s isnt? none and s in? ['\{' 'let' 'const' 'return' 'break' 'continue' 'if' 'loop' 'match'] return false
     return power(s) =? 0 or s =? '+' or s =? '-'
 }
 
-operator=(@p:Parser op:string left:int64 right:int64):>int64=>{
-    let start=node(p left).start
+operator = (@p:Parser op:string left:int64 right:int64):>int64 => {
+    let start = node(p left).start
     return add(@p Node["binary" op "" start [left right]])
 }
 
 # Strings ---------------------------------------------------------------------
 
-hex=(c:uint8):>int64=>{
+hex = (c:uint8):>int64 => {
     if b'0' <=? c <=? b'9' return int64(c-b'0')
     if b'a' <=? c <=? b'f' return int64(c-b'a')+10
     if b'A' <=? c <=? b'F' return int64(c-b'A')+10
     return -1
 }
 
-utf8=(@out:array<uint8> scalar:int64<0 <=? scalar and scalar <=? 0x10FFFF>):>void=>{
+utf8 = (@out:array<uint8> scalar:int64<0 <=? scalar and scalar <=? 0x10FFFF>):>void => {
     if scalar <? 0x80 {
         out.push(uint8(scalar))
     } else if scalar <? 0x800 {
@@ -108,27 +108,27 @@ utf8=(@out:array<uint8> scalar:int64<0 <=? scalar and scalar <=? 0x10FFFF>):>voi
     }
 }
 
-Escape:type=[scalar:int64<0 <=? scalar and scalar <=? 0x10FFFF> next:int64<(>=? 0)>]
+Escape:type = [scalar:int64<0 <=? scalar and scalar <=? 0x10FFFF> next:int64<(>=? 0)>]
 
 # `\uXXXX` or `\u{X…}`: `at` is the `u`.
-unicode_escape=(p:Parser source:array<uint8> at:int64<(>=? 0)> stop:int64<at <? stop and stop <=? source.length>):>Escape|ParseError=>{
-    let i=at+1
-    let braced=i <? stop and source[i] =? b'\{'
-    if braced i+=1
-    let first=i
-    let value=0
+unicode_escape = (p:Parser source:array<uint8> at:int64<(>=? 0)> stop:int64<at <? stop and stop <=? source.length>):>Escape|ParseError => {
+    let i = at+1
+    let braced = i <? stop and source[i] =? b'\{'
+    if braced i += 1
+    let first = i
+    let value = 0
     loop i <? stop {
         if braced and source[i] =? b'\}' break
         if not braced and i-first =? 4 break
-        let digit=hex(source[i])
+        let digit = hex(source[i])
         if digit <? 0 return fail(p i "expected hexadecimal digits in Unicode escape")
         if i-first >=? 6 return fail(p at "Unicode escape has too many digits")
-        value=value*16+digit
-        i+=1
+        value = value*16+digit
+        i += 1
     }
     if braced {
         if i =? first or i >=? stop or source[i] not=? b'\}' return fail(p at "expected 1–6 hex digits and '\}' in Unicode escape")
-        i+=1
+        i += 1
     } else if i-first not=? 4 {
         return fail(p at "Unicode escape needs four hex digits")
     }
@@ -138,106 +138,106 @@ unicode_escape=(p:Parser source:array<uint8> at:int64<(>=? 0)> stop:int64<at <? 
     return Escape[value i]
 }
 
-chunk=(@p:Parser data:array<uint8> start:int64):>int64=>{
-    let value=(data as string | none) ?? "\u{FFFD}"
+chunk = (@p:Parser data:array<uint8> start:int64):>int64 => {
+    let value = (data as string | none) ?? "\u{FFFD}"
     return add(@p Node["chunk" "" value start])
 }
 
-escape_byte=(c:uint8):>int64=>match c {
-    <b'n'>=>10
-    <b'r'>=>13
-    <b't'>=>9
-    <b'0'>=>0
-    <b'a'>=>7
-    <b'b'>=>8
-    <b'v'>=>11
-    <b'f'>=>12
-    <b'\\'>=>int64(c)
-    <b'"'>=>int64(c)
-    <b'\''>=>int64(c)
-    <b'\{'>=>int64(c)
-    <b'\}'>=>int64(c)
-    _=>-1
+escape_byte = (c:uint8):>int64 => match c {
+    <b'n'> => 10
+    <b'r'> => 13
+    <b't'> => 9
+    <b'0'> => 0
+    <b'a'> => 7
+    <b'b'> => 8
+    <b'v'> => 11
+    <b'f'> => 12
+    <b'\\'> => int64(c)
+    <b'"'> => int64(c)
+    <b'\''> => int64(c)
+    <b'\{'> => int64(c)
+    <b'\}'> => int64(c)
+    _ => -1
 }
 
 # The text of a quoted token, with each `{expression}` parsed by a nested
 # parser over the same source.
-string_node=(@p:Parser t:Token):>int64|ParseError=>{
+string_node = (@p:Parser t:Token):>int64|ParseError => {
     $runtime_checks
-    let source=p.source
-    let raw=t.kind =? 'rawquoted'
-    let opening=t.start
-    if raw opening+=1
+    let source = p.source
+    let raw = t.kind =? 'rawquoted'
+    let opening = t.start
+    if raw opening += 1
     # (the lexer made the token: a whole quoted string inside the source)
-    let ending=t.stop
+    let ending = t.stop
     $runtime_assert 0 <=? opening and opening <? ending and ending <=? source.length
-    let width=quote_width(source opening ending)
-    let i=opening+width
-    let stop=ending-width
+    let width = quote_width(source opening ending)
+    let i = opening+width
+    let stop = ending-width
     if raw return add(@p Node["string" "" text_of(source i stop) t.start])
-    let parts:array<int64>=[]
-    let data:array<uint8>=[]
-    let chunk_start=i
-    let interpolated=false
+    let parts:array<int64> = []
+    let data:array<uint8> = []
+    let chunk_start = i
+    let interpolated = false
     loop i <? stop {
-        let c=source[i]
+        let c = source[i]
         if c =? b'\\' {
-            i+=1
+            i += 1
             if i >=? stop return fail(p i "incomplete string escape")
-            let e=source[i]
+            let e = source[i]
             if e =? b'\n' {
-                i+=1
+                i += 1
                 continue
             }
             if e =? b'u' or e =? b'U' {
-                let scalar=unicode_escape(p source i stop) or_throw
+                let scalar = unicode_escape(p source i stop) or_throw
                 utf8(@data scalar.scalar)
-                i=scalar.next
+                i = scalar.next
                 continue
             }
-            let b=escape_byte(e)
+            let b = escape_byte(e)
             if b <? 0 return fail(p i "unsupported string escape")
             data.push(uint8(b))
-            i+=1
+            i += 1
             continue
         }
         if c =? b'\{' {
-            interpolated=true
+            interpolated = true
             if data.length >? 0 {
                 parts.push(chunk(@p data chunk_start))
-                data=[]
+                data = []
             }
-            let first=i+1
-            let close=interpolation_end(source first stop 0)
+            let first = i+1
+            let close = interpolation_end(source first stop 0)
             if close is? LexError return fail(p close.offset close.message)
-            let inner=lex(source first close)
+            let inner = lex(source first close)
             if inner is? LexError return fail(p inner.offset inner.message)
-            let saved_tokens=p.tokens
-            let saved_at=p.at
-            let saved_angles=p.angles
-            let saved_comma=p.comma_stop
-            p.tokens=inner
-            p.at=0
-            p.angles=0
-            p.comma_stop=false
-            p.interpolating+=1
-            let value=expression(@p 0) or_throw
+            let saved_tokens = p.tokens
+            let saved_at = p.at
+            let saved_angles = p.angles
+            let saved_comma = p.comma_stop
+            p.tokens = inner
+            p.at = 0
+            p.angles = 0
+            p.comma_stop = false
+            p.interpolating += 1
+            let value = expression(@p 0) or_throw
             if token(p).kind not=? 'eof' return fail(p token(p).start "expected one interpolation expression")
-            p.interpolating-=1
-            p.tokens=saved_tokens
-            p.at=saved_at
-            p.angles=saved_angles
-            p.comma_stop=saved_comma
+            p.interpolating -= 1
+            p.tokens = saved_tokens
+            p.at = saved_at
+            p.angles = saved_angles
+            p.comma_stop = saved_comma
             parts.push(value)
-            i=close+1
-            chunk_start=i
+            i = close+1
+            chunk_start = i
             continue
         }
         data.push(c)
-        i+=1
+        i += 1
     }
     if not interpolated {
-        let value=(data as string | none) ?? "\u{FFFD}"
+        let value = (data as string | none) ?? "\u{FFFD}"
         return add(@p Node["string" "" value t.start])
     }
     if data.length >? 0 parts.push(chunk(@p data chunk_start))
@@ -246,84 +246,84 @@ string_node=(@p:Parser t:Token):>int64|ParseError=>{
 
 # Brackets and blocks ------------------------------------------------------------
 
-partial_operator=(s:Symbol?):>bool=>{
+partial_operator = (s:Symbol?):>bool => {
     if s is? none return false
     return s in? ['=?' 'not=?' '<?' 'not<?' '>?' 'not>?' '<=?' 'not<=?' '>=?' 'not>=?' 'is?' 'isnt?'
         'in?' 'not in?' '.' 'as' 'transmute' '*' '/' '//' '%' '^']
 }
 
-closer=(s:Symbol):>Symbol=>match s {
-    <'('>=>')'
-    <'['>=>']'
-    <'<'>=>'>'
-    _=>'\}'
+closer = (s:Symbol):>Symbol => match s {
+    <'('> => ')'
+    <'['> => ']'
+    <'<'> => '>'
+    _ => '\}'
 }
 
-bracketed=(@p:Parser):>int64|ParseError=>{
+bracketed = (@p:Parser):>int64|ParseError => {
     $runtime_checks
-    let opening=token(p)
-    p.at+=1
-    let open=opening.symbol ?? '('
+    let opening = token(p)
+    p.at += 1
+    let open = opening.symbol ?? '('
     if open =? '(' {
-        let op=peek(p)
-        let next=nearby(p 1)
-        let inverted=op =? 'not' and next isnt? none and invert(next.symbol ?? ',') isnt? none
+        let op = peek(p)
+        let next = nearby(p 1)
+        let inverted = op =? 'not' and next isnt? none and invert(next.symbol ?? ',') isnt? none
         if partial_operator(op) or inverted {
             # `(* 2)`: the operator and its right operand make a function.
-            let place=add(@p Node["identifier" "" "_" opening.start])
-            let body=continue_expression(@p place 0) or_throw
+            let place = add(@p Node["identifier" "" "_" opening.start])
+            let body = continue_expression(@p place 0) or_throw
             expect(@p ')') or_throw
             return add(@p Node["partial" "" "" opening.start [body]])
         }
     }
-    if open =? '<' p.angles+=1
-    let close=closer(open)
-    let kids:array<int64>=[]
-    let saved_comma=p.comma_stop
-    p.comma_stop=false
+    if open =? '<' p.angles += 1
+    let close = closer(open)
+    let kids:array<int64> = []
+    let saved_comma = p.comma_stop
+    p.comma_stop = false
     loop true {
-        let t=token(p)
+        let t = token(p)
         if t.kind =? 'eof' return fail(p opening.start "expected '{close}' before end of file")
         # `>>` and `>?` written against a type argument close one angle at a time.
-        let s=t.symbol
+        let s = t.symbol
         if close =? '>' and (s =? '>>' or s =? '>>=' or (s =? '>?' and not t.space)) {
-            let rest=text_of(p.source t.start+1 t.stop)
-            let at=p.at
+            let rest = text_of(p.source t.start+1 t.stop)
+            let at = p.at
             $runtime_assert 0 <=? at and at <? p.tokens.length
-            p.tokens[at]=Token['op' (if rest =? ">" '>' else if rest =? ">=" '>=' else '?') t.start+1 t.stop t.space t.newline]
+            p.tokens[at] = Token['op' (if rest =? ">" '>' else if rest =? ">=" '>=' else '?') t.start+1 t.stop t.space t.newline]
             break
         }
         if accept(@p close) break
         # `[0..n)` and `(0..n]`: a lone range may close with the other bracket.
         if ((open =? '[' and s =? ')') or (open =? '(' and s =? ']')) and kids.length =? 1 and node(p kids[0]).op =? ".." {
-            close=s ?? close
-            p.at+=1
+            close = s ?? close
+            p.at += 1
             break
         }
-        let before=p.at
+        let before = p.at
         kids.push(statement(@p) or_throw)
         if p.at =? before return fail(p token(p).start "expected a block element")
     }
-    p.comma_stop=saved_comma
-    if open =? '<' p.angles-=1
+    p.comma_stop = saved_comma
+    if open =? '<' p.angles -= 1
     return add(@p Node["block" "{open}{close}" "" opening.start kids])
 }
 
 # if / loop / match, with `else` chains.
-flow=(@p:Parser):>int64|ParseError=>{
-    let start=token(p).start
-    let arms:array<int64>=[]
+flow = (@p:Parser):>int64|ParseError => {
+    let start = token(p).start
+    let arms:array<int64> = []
     loop true {
-        let keyword=token(p)
-        p.at+=1
-        let word=keyword.symbol ?? 'if'
-        let condition=expression(@p 0) or_throw
+        let keyword = token(p)
+        p.at += 1
+        let word = keyword.symbol ?? 'if'
+        let condition = expression(@p 0) or_throw
         if not can_start(p) {
-            let next=peek(p)
-            let habit=if next isnt? none and next in? ['>' '<' '>=?' '<=?'] " (comparisons end with `?`: `x >? y`, `x <=? y`)" else ""
+            let next = peek(p)
+            let habit = if next isnt? none and next in? ['>' '<' '>=?' '<=?'] " (comparisons end with `?`: `x >? y`, `x <=? y`)" else ""
             return fail(p token(p).start "expected a body after '{word}'{habit}")
         }
-        let body=expression(@p 0) or_throw
+        let body = expression(@p 0) or_throw
         arms.push(add(@p Node["arm" "{word}" "" keyword.start [condition body]]))
         if not accept(@p 'else') break
         if peek(p) =? 'if' or peek(p) =? 'match' continue
@@ -333,7 +333,7 @@ flow=(@p:Parser):>int64|ParseError=>{
     return add(@p Node["flow" "" "" start arms])
 }
 
-directive_form=(name:string):>int64=>{
+directive_form = (name:string):>int64 => {
     if name in? ["$assert" "$runtime_assert" "$expect" "$unsafe_assume"] return 1
     if name =? "$fail" return 2
     if name =? "$breakpoint" return 3
@@ -341,38 +341,38 @@ directive_form=(name:string):>int64=>{
 }
 
 # `$assert condition, "message"`: a directive with its own argument grammar.
-directive=(@p:Parser t:Token form:int64):>int64|ParseError=>{
-    p.at+=1
-    let name=text(p t)
-    let next=token(p)
-    let present=not next.newline and can_start(p)
+directive = (@p:Parser t:Token form:int64):>int64|ParseError => {
+    p.at += 1
+    let name = text(p t)
+    let next = token(p)
+    let present = not next.newline and can_start(p)
     if form =? 3 or not present {
         if form =? 1 return fail(p t.start "`{name}` needs a condition: `{name} condition` or `{name} condition, \"message\"`")
         return add(@p Node["directive" name "" t.start [ABSENT ABSENT]])
     }
-    let saved=p.comma_stop
-    p.comma_stop=true
-    let condition=ABSENT
-    let message=ABSENT
+    let saved = p.comma_stop
+    p.comma_stop = true
+    let condition = ABSENT
+    let message = ABSENT
     if form =? 1 {
-        let listed=next.symbol =? '(' and not next.space
-        if listed p.at+=1
-        condition=expression(@p 0) or_throw
-        if accept(@p ',') message=expression(@p 0) or_throw
+        let listed = next.symbol =? '(' and not next.space
+        if listed p.at += 1
+        condition = expression(@p 0) or_throw
+        if accept(@p ',') message = expression(@p 0) or_throw
         if listed expect(@p ')') or_throw
     } else {
-        message=expression(@p 0) or_throw
+        message = expression(@p 0) or_throw
     }
-    p.comma_stop=saved
+    p.comma_stop = saved
     return add(@p Node["directive" name "" t.start [condition message]])
 }
 
 # Other languages' operators, where an expression stopped.
-habit=(p:Parser found:string):>string=>{
-    let before=nearby(p -2)
-    let last=nearby(p -1)
-    let previous=if before isnt? none before.symbol else none
-    let adjacent=before isnt? none and last isnt? none and not last.space
+habit = (p:Parser found:string):>string => {
+    let before = nearby(p -2)
+    let last = nearby(p -1)
+    let previous = if before isnt? none before.symbol else none
+    let adjacent = before isnt? none and last isnt? none and not last.space
     if found =? "!" return " (`not x` negates, and `x not=? y` asks whether two values differ)"
     if found =? "&" and previous =? '&' and adjacent return " (`and` joins conditions: `a and b`)"
     if found =? "|" and previous =? '|' and adjacent return " (`or` joins conditions: `a or b`)"
@@ -382,12 +382,12 @@ habit=(p:Parser found:string):>string=>{
     return ""
 }
 
-atom=(@p:Parser):>int64|ParseError=>{
-    let t=token(p)
-    let s=t.symbol
+atom = (@p:Parser):>int64|ParseError => {
+    let t = token(p)
+    let s = t.symbol
     if t.kind =? 'eof' return fail(p t.start "expected an expression")
     if t.kind =? 'metatag' {
-        let form=directive_form(text(p t))
+        let form = directive_form(text(p t))
         if form not=? 0 return directive(@p t form) or_throw
     }
     if s isnt? none {
@@ -395,27 +395,27 @@ atom=(@p:Parser):>int64|ParseError=>{
         if s in? ['if' 'loop' 'match'] return flow(@p) or_throw
         if s in? ['let' 'const' 'return' 'break' 'continue' 'import' 'from'] return statement(@p) or_throw
     }
-    p.at+=1
+    p.at += 1
     if t.kind =? 'quoted' or t.kind =? 'rawquoted' return string_node(@p t) or_throw
     if s isnt? none and s in? ['~' '+' '-' '.+' '.-' '@' 'not'] {
         # A reference covers the whole postfix place: @point.x, @items[i].x.
-        let strength=if s =? '@' 160 else if s =? 'not' 75 else 125
-        let operand=expression(@p strength) or_throw
+        let strength = if s =? '@' 160 else if s =? 'not' 75 else 125
+        let operand = expression(@p strength) or_throw
         return add(@p Node["prefix" s "" t.start [operand]])
     }
     if s =? '..' {
         if not range_bound(p) return add(@p Node["identifier" "" ".." t.start])
-        let bound=expression(@p 101) or_throw
+        let bound = expression(@p 101) or_throw
         return add(@p Node["range" ".." "" t.start [ABSENT bound]])
     }
-    let word=text(p t)
+    let word = text(p t)
     if word =? "type" and accept(@p 'of') {
-        let parent=expression(@p 91) or_throw
+        let parent = expression(@p 91) or_throw
         return add(@p Node["prefix" "type of" "" t.start [parent]])
     }
     if t.kind =? 'op' {
-        let before=nearby(p -2)
-        let after_colon=s =? ':' or (before isnt? none and before.symbol =? ':')
+        let before = nearby(p -2)
+        let after_colon = s =? ':' or (before isnt? none and before.symbol =? ':')
         if after_colon and (s =? ':' or s =? ']') {
             return fail(p t.start "expected an expression, found '{word}' (a slice is a range in the brackets: `xs[1..]`, `xs[..n)`, `xs[a..b)`; `xs.reversed()` reverses; `:` gives a type)")
         }
@@ -424,129 +424,129 @@ atom=(@p:Parser):>int64|ParseError=>{
     return add(@p Node[t.kind "" word t.start])
 }
 
-numeric=(kind:string):>bool=>kind in? ["source_integer" "integer" "source_real"]
+numeric = (kind:string):>bool => kind in? ["source_integer" "integer" "source_real"]
 
-expression=(@p:Parser minimum:int64):>int64|ParseError=>{
-    p.depth+=1
+expression = (@p:Parser minimum:int64):>int64|ParseError => {
+    p.depth += 1
     if p.depth >? MAX_DEPTH return fail(p token(p).start "expression is nested too deeply")
-    let left=atom(@p) or_throw
-    let result=continue_expression(@p left minimum) or_throw
-    p.depth-=1
+    let left = atom(@p) or_throw
+    let result = continue_expression(@p left minimum) or_throw
+    p.depth -= 1
     return result
 }
 
 # The infix and postfix loop of the Pratt parser, from an existing left operand.
-continue_expression=(@p:Parser first:int64 minimum:int64):>int64|ParseError=>{
-    let left=first
+continue_expression = (@p:Parser first:int64 minimum:int64):>int64|ParseError => {
+    let left = first
     loop true {
-        let t=token(p)
-        let op=t.symbol
+        let t = token(p)
+        let op = t.symbol
         if t.kind =? 'eof' break
         if t.newline and power(op) =? 0 and op not=? 'not' break
         if p.angles >? 0 and (op =? '>>' or op =? '>>=' or op =? '>=' or (op =? '>?' and not t.space)) break
         if op =? 'or_throw' and minimum <=? 48 {
-            p.at+=1
-            left=add(@p Node["postfix" "or_throw" "" node(p left).start [left]])
+            p.at += 1
+            left = add(@p Node["postfix" "or_throw" "" node(p left).start [left]])
             continue
         }
         if op =? '...' and minimum <=? 170 {
-            p.at+=1
-            left=add(@p Node["postfix" "..." "" node(p left).start [left]])
+            p.at += 1
+            left = add(@p Node["postfix" "..." "" node(p left).start [left]])
             continue
         }
         # Literal coefficients: 2x and 2(x + 1).
         if not t.space and minimum <=? 135 and numeric(node(p left).kind) and (t.kind =? 'identifier' or op =? '(') {
-            let right=expression(@p 136) or_throw
-            left=operator(@p "mul" left right)
+            let right = expression(@p 136) or_throw
+            left = operator(@p "mul" left right)
             continue
         }
         if op =? '.' and minimum <=? 170 {
-            p.at+=1
+            p.at += 1
             if peek(p) =? '(' and not token(p).space {
-                let args=bracketed(@p) or_throw
-                left=operator(@p "bcall" left args)
+                let args = bracketed(@p) or_throw
+                left = operator(@p "bcall" left args)
                 continue
             }
-            let member=token(p)
-            p.at+=1
+            let member = token(p)
+            p.at += 1
             if member.kind not=? 'identifier' return fail(p member.start "expected a member name")
-            let name=add(@p Node["identifier" "" text(p member) member.start])
-            left=operator(@p "." left name)
+            let name = add(@p Node["identifier" "" text(p member) member.start])
+            left = operator(@p "." left name)
             continue
         }
         if not t.space and (op =? '(' or op =? '[') and minimum <=? 170 {
-            let args=bracketed(@p) or_throw
-            left=operator(@p (if op =? '(' "call" else "index") left args)
+            let args = bracketed(@p) or_throw
+            left = operator(@p (if op =? '(' "call" else "index") left args)
             continue
         }
         if not t.space and (t.kind =? 'quoted' or t.kind =? 'rawquoted') and minimum <=? 170 {
-            p.at+=1
-            let arg=string_node(@p t) or_throw
-            left=operator(@p "call" left arg)
+            p.at += 1
+            let arg = string_node(@p t) or_throw
+            left = operator(@p "call" left arg)
             continue
         }
         if not t.space and op =? '<' and minimum <=? 160 {
-            let args=bracketed(@p) or_throw
-            left=operator(@p "tapp" left args)
+            let args = bracketed(@p) or_throw
+            left = operator(@p "tapp" left args)
             continue
         }
         if op =? '?' and minimum <=? 140 {
-            p.at+=1
-            left=add(@p Node["postfix" "?" "" node(p left).start [left]])
+            p.at += 1
+            left = add(@p Node["postfix" "?" "" node(p left).start [left]])
             continue
         }
         # An inverted comparison may be written with a space after `not`.
-        let spaced_not=false
-        let next=nearby(p 1)
+        let spaced_not = false
+        let next = nearby(p 1)
         if op =? 'not' and next isnt? none {
-            let inverted=invert(next.symbol ?? ',')
+            let inverted = invert(next.symbol ?? ',')
             if inverted isnt? none {
-                op=inverted
-                spaced_not=true
+                op = inverted
+                spaced_not = true
             }
         }
         if op =? ',' and p.comma_stop break
-        let strength=power(op)
+        let strength = power(op)
         if strength =? 0 or strength <? minimum break
         if (op =? '+' or op =? '-') and t.space and next isnt? none and not next.space break
-        p.at+=1
-        if spaced_not p.at+=1
-        let symbol=op ?? ','
+        p.at += 1
+        if spaced_not p.at += 1
+        let symbol = op ?? ','
         if symbol =? '..' {
-            let bound=if range_bound(p) expression(@p strength+1) or_throw else ABSENT
-            left=add(@p Node["range" ".." "" node(p left).start [left bound]])
+            let bound = if range_bound(p) expression(@p strength+1) or_throw else ABSENT
+            left = add(@p Node["range" ".." "" node(p left).start [left bound]])
             continue
         }
-        let next_minimum=if right_assoc(symbol) strength else strength+1
-        let right=expression(@p next_minimum) or_throw
+        let next_minimum = if right_assoc(symbol) strength else strength+1
+        let right = expression(@p next_minimum) or_throw
         if symbol =? ',' {
-            let n=node(p left)
+            let n = node(p left)
             if n.kind =? "comma" {
                 $runtime_assert 0 <=? left and left <? p.nodes.length
                 p.nodes[left].kids.push(right)
             } else {
-                left=add(@p Node["comma" "," "" n.start [left right]])
+                left = add(@p Node["comma" "," "" n.start [left right]])
             }
         } else if symbol in? ['nand' 'nor' 'xnor'] {
             # `a nand b` is `not (a and b)`, as `nor` and `xnor` are of `or` and `xor`.
-            let base=if symbol =? 'nand' "and" else if symbol =? 'nor' "or" else "xor"
-            let inner=operator(@p base left right)
-            left=add(@p Node["prefix" "not" "" t.start [inner]])
+            let base = if symbol =? 'nand' "and" else if symbol =? 'nor' "or" else "xor"
+            let inner = operator(@p base left right)
+            left = add(@p Node["prefix" "not" "" t.start [inner]])
         } else {
-            left=operator(@p symbol left right)
+            left = operator(@p symbol left right)
         }
     }
     return left
 }
 
 # Statements: keyword forms, then an expression with an optional `;`.
-statement=(@p:Parser):>int64|ParseError=>{
-    let t=token(p)
-    let s=t.symbol
-    let result=ABSENT
+statement = (@p:Parser):>int64|ParseError => {
+    let t = token(p)
+    let s = t.symbol
+    let result = ABSENT
     if s isnt? none and s in? ['let' 'const' 'return' 'break' 'continue' 'import' 'from'] {
-        p.at+=1
-        let kids:array<int64>=[]
+        p.at += 1
+        let kids:array<int64> = []
         if s not=? 'break' and s not=? 'continue' {
             if s not=? 'return' or (can_start(p) and not token(p).newline) {
                 kids.push(expression(@p 0) or_throw)
@@ -558,25 +558,25 @@ statement=(@p:Parser):>int64|ParseError=>{
             expect(@p 'import') or_throw
             kids.push(expression(@p 0) or_throw)
         }
-        result=add(@p Node["keyword" s "" t.start kids])
+        result = add(@p Node["keyword" s "" t.start kids])
     } else {
-        result=expression(@p 0) or_throw
+        result = expression(@p 0) or_throw
     }
     if peek(p) =? ';' and not token(p).space {
-        p.at+=1
-        result=add(@p Node["binary" ";" "" node(p result).start [result ABSENT]])
+        p.at += 1
+        result = add(@p Node["binary" ";" "" node(p result).start [result ABSENT]])
     }
     return result
 }
 
 # A whole source: statements until the end.
-Parsed:type=[nodes:array<Node> roots:array<int64>]
+Parsed:type = [nodes:array<Node> roots:array<int64>]
 
-parse=(source:array<uint8> tokens:array<Token>):>Parsed|ParseError=>{
-    let p=Parser[source tokens]
-    let roots:array<int64>=[]
+parse = (source:array<uint8> tokens:array<Token>):>Parsed|ParseError => {
+    let p = Parser[source tokens]
+    let roots:array<int64> = []
     loop token(p).kind not=? 'eof' {
-        let before=p.at
+        let before = p.at
         roots.push(statement(@p) or_throw)
         if p.at =? before return fail(p token(p).start "expected a declaration")
     }

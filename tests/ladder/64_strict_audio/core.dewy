@@ -3,40 +3,40 @@
 # Acceptance: 64 allocation-free fixed-buffer audio blocks; no hidden copy, detach or panic in the kernel.
 # OPEN: Module strict-lane directive and the distinct no-panic/no-detach vocabulary are unspecified; no_effects alone does not certify the full lane.
 # This executable projection does not establish the OPEN obligation.
-mix=(a:int64 b:int64 gain:int64):>int64=>{
+mix = (a:int64 b:int64 gain:int64):>int64 => {
     return (a+b)*gain
 }
-block=(seed:int64):>int64=>{
-    let left:array<int64 length=8>=[1 2 3 4 5 6 7 8]
-    let right:array<int64 length=8>=[8 7 6 5 4 3 2 1]
-    let sum:int64=seed
+block = (seed:int64):>int64 => {
+    let left:array<int64 length=8> = [1 2 3 4 5 6 7 8]
+    let right:array<int64 length=8> = [8 7 6 5 4 3 2 1]
+    let sum:int64 = seed
     loop i in [0..8) {
         $runtime_assert i >=? 0
         $runtime_assert i <? left.length
         $runtime_assert i <? right.length
-        left[i]=mix(left[i] right[i] 2)
-        sum+=left[i]
+        left[i] = mix(left[i] right[i] 2)
+        sum += left[i]
     }
     return sum
 }
-silence=():>int64=>{
-    let values:array<int64 length=4>=[0 0 0 0]
-    let total:int64=0
+silence = ():>int64 => {
+    let values:array<int64 length=4> = [0 0 0 0]
+    let total:int64 = 0
     loop i in [0..4) {
         $runtime_assert i <? values.length
-        total+=values[i]
+        total += values[i]
     }
     return total
 }
-clamp=(x:int64):>int64=>{
+clamp = (x:int64):>int64 => {
     if x <? -100 return -100
     if x >? 100 return 100
     return x
 }
-main=():>void=>{
-    let checksum:int64=0
+main = ():>void => {
+    let checksum:int64 = 0
     loop frame in [0..64) {
-        checksum+=block(frame)
+        checksum += block(frame)
     }
     $runtime_assert checksum =? 11232
     $runtime_assert silence() =? 0

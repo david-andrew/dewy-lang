@@ -2,37 +2,37 @@
 # Acceptance: Copies escaping nested allocator scopes survive reset and preserve independent aggregates.
 # OPEN: Typed allocation capabilities and allocator exhaustion result contract remain provisional.
 # This executable projection does not establish the OPEN obligation.
-Packet:type=[id:int64 values:array<int64>]
-build=(n:int64):>Packet=>{
-    let values:array<int64>=[]
+Packet:type = [id:int64 values:array<int64>]
+build = (n:int64):>Packet => {
+    let values:array<int64> = []
     loop i in [0..n) {
         values.push(i*i)
     }
     return Packet[n values]
 }
-sum=(xs:array<int64>):>int64=>{
-    let total:int64=0
+sum = (xs:array<int64>):>int64 => {
+    let total:int64 = 0
     loop x in xs {
-        total+=x
+        total += x
     }
     return total
 }
-main=():>void=>{
-    let arena=Arena[]
-    let other=Arena[]
-    let kept:array<Packet>=[]
-    let total:int64=0
+main = ():>void => {
+    let arena = Arena[]
+    let other = Arena[]
+    let kept:array<Packet> = []
+    let total:int64 = 0
     loop round in [1..17) {
-        let packet=$allocator(@arena) {
-            let temporary=build(round)
+        let packet = $allocator(@arena) {
+            let temporary = build(round)
             temporary
         }
         kept.push(packet)
-        total+=sum(packet.values)
+        total += sum(packet.values)
         arena.reset()
     }
-    let nested=$allocator(@arena) {
-        let inside=$allocator(@other) {
+    let nested = $allocator(@arena) {
+        let inside = $allocator(@other) {
             build(5)
         }
         inside
@@ -46,9 +46,9 @@ main=():>void=>{
     $runtime_assert kept[0].values.get(0) =? 0
     $runtime_assert kept[15].id =? 16
     $runtime_assert kept[15].values.get(15) =? 225
-    let saved=kept.copy()
+    let saved = kept.copy()
     $runtime_assert kept[0].values.length >? 0
-    kept[0].values[0]=99
+    kept[0].values[0] = 99
     $runtime_assert saved[0].values.get(0) =? 0
     $runtime_assert sum(saved[3].values) =? 14
     $runtime_assert sum(saved[7].values) =? 140

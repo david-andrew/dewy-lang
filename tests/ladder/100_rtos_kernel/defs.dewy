@@ -7,29 +7,29 @@
 
 $no_hidden_costs
 
-const NTASK:int64=8       # task control blocks
-const NCODE:int64=160     # program words shared by all tasks
-const NMUTEX:int64=4
-const NBOX:int64=4        # mailboxes
-const BOXCAP:int64=4      # messages per mailbox
-const WHEEL:int64=8       # timer wheel slots
-const NBLOCK:int64=8      # fixed-size blocks in the pool
-const HOLD:int64=4        # blocks one task may hold
-const ARENA:int64=64      # bump arena words
-const NIRQ:int64=4        # interrupt lines
-const LOGCAP:int64=64     # trace events between drains
-const QUANTUM:int64=3     # ticks before an equal-priority task yields its turn
-const NONE:int64=-1       # no task, mutex owner or timer
+const NTASK:int64 = 8       # task control blocks
+const NCODE:int64 = 160     # program words shared by all tasks
+const NMUTEX:int64 = 4
+const NBOX:int64 = 4        # mailboxes
+const BOXCAP:int64 = 4      # messages per mailbox
+const WHEEL:int64 = 8       # timer wheel slots
+const NBLOCK:int64 = 8      # fixed-size blocks in the pool
+const HOLD:int64 = 4        # blocks one task may hold
+const ARENA:int64 = 64      # bump arena words
+const NIRQ:int64 = 4        # interrupt lines
+const LOGCAP:int64 = 64     # trace events between drains
+const QUANTUM:int64 = 3     # ticks before an equal-priority task yields its turn
+const NONE:int64 = -1       # no task, mutex owner or timer
 
-State:type='free'|'ready'|'sleeping'|'lock'|'send'|'recv'|'wait'|'done'
+State:type = 'free'|'ready'|'sleeping'|'lock'|'send'|'recv'|'wait'|'done'
 
-OpKind:type='work'|'sleep'|'lock'|'unlock'|'send'|'recv'|'alloc'|'free'|'bump'|'reset'|'yield'|'mask'|'unmask'|'wait'|'repeat'|'exit'
+OpKind:type = 'work'|'sleep'|'lock'|'unlock'|'send'|'recv'|'alloc'|'free'|'bump'|'reset'|'yield'|'mask'|'unmask'|'wait'|'repeat'|'exit'
 
 # One program word: an operation and up to two operands. `send` with
 # `use_reg` forwards the value the task last received.
-Op:type=[kind:OpKind a:int64 b:int64 use_reg:bool]
+Op:type = [kind:OpKind a:int64 b:int64 use_reg:bool]
 
-Tcb:type=[
+Tcb:type = [
     state:State
     base:int64          # assigned priority
     eff:int64           # effective priority, raised by inheritance
@@ -52,29 +52,29 @@ Tcb:type=[
     ran:int64           # ticks on the CPU
 ]
 
-Mutex:type=[owner:int64]
+Mutex:type = [owner:int64]
 
-Mailbox:type=[items:array<int64 length=4> head:int64 count:int64 peak:int64]
+Mailbox:type = [items:array<int64 length=4> head:int64 count:int64 peak:int64]
 
-Wheel:type=[head:array<int64 length=8> tail:array<int64 length=8>]
+Wheel:type = [head:array<int64 length=8> tail:array<int64 length=8>]
 
 # A free list threaded through the blocks themselves, LIFO.
-Pool:type=[next:array<int64 length=8> free:int64 available:int64]
+Pool:type = [next:array<int64 length=8> free:int64 available:int64]
 
-Arena:type=[top:int64 peak:int64]
+Arena:type = [top:int64 peak:int64]
 
-Action:type='none'|'post'|'signal'
-Vector:type=[action:Action target:int64 value:int64]
+Action:type = 'none'|'post'|'signal'
+Vector:type = [action:Action target:int64 value:int64]
 
-EvKind:type='wake'|'irq'|'isr_post'|'isr_deliver'|'overrun'|'isr_signal'|'isr_wake'|'switch'|'idle'|'sleep'|'lock'|'block_lock'|'prio'|'unlock'|'handoff'|'bad_unlock'|'send'|'deliver'|'block_send'|'recv'|'block_recv'|'unblock_send'|'alloc'|'alloc_fail'|'free'|'free_none'|'bump'|'arena_full'|'reset'|'yield'|'mask'|'unmask'|'wait'|'block_wait'|'exit'|'reclaim'|'fault'
+EvKind:type = 'wake'|'irq'|'isr_post'|'isr_deliver'|'overrun'|'isr_signal'|'isr_wake'|'switch'|'idle'|'sleep'|'lock'|'block_lock'|'prio'|'unlock'|'handoff'|'bad_unlock'|'send'|'deliver'|'block_send'|'recv'|'block_recv'|'unblock_send'|'alloc'|'alloc_fail'|'free'|'free_none'|'bump'|'arena_full'|'reset'|'yield'|'mask'|'unmask'|'wait'|'block_wait'|'exit'|'reclaim'|'fault'
 
-Event:type=[tick:int64 kind:EvKind a:int64 b:int64 c:int64]
+Event:type = [tick:int64 kind:EvKind a:int64 b:int64 c:int64]
 
-Log:type=[items:array<Event length=64> head:int64 count:int64 dropped:int64]
+Log:type = [items:array<Event length=64> head:int64 count:int64 dropped:int64]
 
-Stats:type=[switches:int64 idle:int64 irqs:int64 overruns:int64 boosts:int64 faults:int64]
+Stats:type = [switches:int64 idle:int64 irqs:int64 overruns:int64 boosts:int64 faults:int64]
 
-Kernel:type=[
+Kernel:type = [
     now:int64
     tasks:array<Tcb length=8>
     ntasks:int64

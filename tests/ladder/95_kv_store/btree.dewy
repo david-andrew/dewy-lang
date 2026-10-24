@@ -8,9 +8,9 @@
 # empty leaves stay in the chain and are skipped. The store rebuilds the tree
 # from scratch on recovery and compaction, which restores full occupancy.
 
-const ORDER:int64=32
+const ORDER:int64 = 32
 
-Node:type=[
+Node:type = [
     leaf:bool=true
     keys:array<string>=[]
     values:array<string>=[]
@@ -18,24 +18,24 @@ Node:type=[
     next:int64=-1
 ]
 
-Entry:type=[key:string value:string]
+Entry:type = [key:string value:string]
 
 # One end of a key range.
-Bound:type=[key:string inclusive:bool=true]
+Bound:type = [key:string inclusive:bool=true]
 
-Split:type=[separator:string right:int64]
+Split:type = [separator:string right:int64]
 
 # Index of the first key >= key.
-lower_bound=(keys:array<string> key:string):>int64<r => 0 <=? r and r <=? keys.length>=>{
-    let low:int64=0
-    let high=keys.length
+lower_bound = (keys:array<string> key:string):>int64<r => 0 <=? r and r <=? keys.length> => {
+    let low:int64 = 0
+    let high = keys.length
     loop low <? high {
-        let mid=(low+high)//2
+        let mid = (low+high)//2
         $runtime_assert mid <? keys.length
         if keys[mid] <? key {
-            low=mid+1
+            low = mid+1
         } else {
-            high=mid
+            high = mid
         }
     }
     $runtime_assert 0 <=? low and low <=? keys.length
@@ -43,55 +43,55 @@ lower_bound=(keys:array<string> key:string):>int64<r => 0 <=? r and r <=? keys.l
 }
 
 # Index of the first key > key: the child of an internal node that covers key.
-upper_bound=(keys:array<string> key:string):>int64<r => 0 <=? r and r <=? keys.length>=>{
-    let low:int64=0
-    let high=keys.length
+upper_bound = (keys:array<string> key:string):>int64<r => 0 <=? r and r <=? keys.length> => {
+    let low:int64 = 0
+    let high = keys.length
     loop low <? high {
-        let mid=(low+high)//2
+        let mid = (low+high)//2
         $runtime_assert mid <? keys.length
         if keys[mid] <=? key {
-            low=mid+1
+            low = mid+1
         } else {
-            high=mid
+            high = mid
         }
     }
     $runtime_assert 0 <=? low and low <=? keys.length
     return low
 }
 
-above=(key:string low:Bound?):>bool=>{
+above = (key:string low:Bound?):>bool => {
     if low is? none return true
     return if low.inclusive key >=? low.key else key >? low.key
 }
 
-below=(key:string high:Bound?):>bool=>{
+below = (key:string high:Bound?):>bool => {
     if high is? none return true
     return if high.inclusive key <=? high.key else key <? high.key
 }
 
-BTree:type=[
+BTree:type = [
     nodes:array<Node>=[Node()]
     root:int64=0
     count:int64=0
 
     # The leaf that holds key, if anywhere.
-    leaf_for=(key:string):>int64=>{
-        let id=root
+    leaf_for = (key:string):>int64 => {
+        let id = root
         loop true {
             $runtime_assert 0 <=? id and id <? nodes.length
-            let node=nodes[id]
+            let node = nodes[id]
             if node.leaf return id
-            let slot=upper_bound(node.keys key)
+            let slot = upper_bound(node.keys key)
             $runtime_assert slot <? node.children.length
-            id=node.children[slot]
+            id = node.children[slot]
         }
     }
 
-    get=(key:string):>string?=>{
-        let id=leaf_for(key)
+    get = (key:string):>string? => {
+        let id = leaf_for(key)
         $runtime_assert 0 <=? id and id <? nodes.length
-        let node=nodes[id]
-        let at=lower_bound(node.keys key)
+        let node = nodes[id]
+        let at = lower_bound(node.keys key)
         if at <? node.keys.length and node.keys[at] =? key {
             $runtime_assert at <? node.values.length
             return node.values[at]
@@ -99,169 +99,169 @@ BTree:type=[
         return none
     }
 
-    has=(key:string):>bool=>get(key) isnt? none
+    has = (key:string):>bool => get(key) isnt? none
 
     # Split an overfull node in two; the new right half goes at the end of the arena.
-    split=(id:int64):>Split=>{
+    split = (id:int64):>Split => {
         $runtime_assert 0 <=? id and id <? nodes.length
-        let node=nodes[id]
-        let half=node.keys.length//2
+        let node = nodes[id]
+        let half = node.keys.length//2
         $runtime_assert 0 <=? half and half <? node.keys.length
-        let right=nodes.length
+        let right = nodes.length
         if node.leaf {
             $runtime_assert node.values.length =? node.keys.length
-            nodes[id]=Node[leaf=true keys=node.keys[..half) values=node.values[..half) next=right]
+            nodes[id] = Node[leaf=true keys=node.keys[..half) values=node.values[..half) next=right]
             nodes.push(Node[leaf=true keys=node.keys[half..] values=node.values[half..] next=node.next])
             return Split[node.keys[half] right]
         }
         # The middle separator moves up rather than being copied.
         $runtime_assert node.children.length =? node.keys.length+1
-        nodes[id]=Node[leaf=false keys=node.keys[..half) children=node.children[..half+1)]
+        nodes[id] = Node[leaf=false keys=node.keys[..half) children=node.children[..half+1)]
         nodes.push(Node[leaf=false keys=node.keys[half+1..] children=node.children[half+1..]])
         return Split[node.keys[half] right]
     }
 
     # Insert or replace; true when the key was new.
-    put=(key:string value:string):>bool=>{
-        let path:array<int64>=[]
-        let id=root
+    put = (key:string value:string):>bool => {
+        let path:array<int64> = []
+        let id = root
         loop true {
             $runtime_assert 0 <=? id and id <? nodes.length
-            let node=nodes[id]
+            let node = nodes[id]
             if node.leaf break
             path.push(id)
-            let slot=upper_bound(node.keys key)
+            let slot = upper_bound(node.keys key)
             $runtime_assert slot <? node.children.length
-            id=node.children[slot]
+            id = node.children[slot]
         }
-        let at=lower_bound(nodes[id].keys key)
+        let at = lower_bound(nodes[id].keys key)
         $runtime_assert id <? nodes.length
         if at <? nodes[id].keys.length and nodes[id].keys[at] =? key {
             $runtime_assert id <? nodes.length and at <? nodes[id].values.length
-            nodes[id].values[at]=value
+            nodes[id].values[at] = value
             return false
         }
         $runtime_assert id <? nodes.length
         nodes[id].keys.insert(key at)
         $runtime_assert id <? nodes.length
         nodes[id].values.insert(value at)
-        count+=1
+        count += 1
         # Splits propagate up the recorded path; a root split grows the tree.
-        let child=id
+        let child = id
         loop true {
             $runtime_assert 0 <=? child and child <? nodes.length
             if nodes[child].keys.length <=? ORDER break
-            let promoted=split(child)
+            let promoted = split(child)
             if path.length =? 0 {
                 nodes.push(Node[leaf=false keys=[promoted.separator] children=[child promoted.right]])
-                root=nodes.length-1
+                root = nodes.length-1
                 break
             }
-            let parent=path.pop()
+            let parent = path.pop()
             $runtime_assert 0 <=? parent and parent <? nodes.length
-            let slot=upper_bound(nodes[parent].keys promoted.separator)
+            let slot = upper_bound(nodes[parent].keys promoted.separator)
             $runtime_assert parent <? nodes.length
             nodes[parent].keys.insert(promoted.separator slot)
             $runtime_assert parent <? nodes.length
             nodes[parent].children.insert(promoted.right slot+1)
-            child=parent
+            child = parent
         }
         return true
     }
 
     # Remove a key; true when it was present.
-    remove=(key:string):>bool=>{
-        let id=leaf_for(key)
+    remove = (key:string):>bool => {
+        let id = leaf_for(key)
         $runtime_assert 0 <=? id and id <? nodes.length
-        let at=lower_bound(nodes[id].keys key)
+        let at = lower_bound(nodes[id].keys key)
         $runtime_assert id <? nodes.length
         if at >=? nodes[id].keys.length or nodes[id].keys[at] not=? key return false
         $runtime_assert id <? nodes.length and at <? nodes[id].keys.length and at <? nodes[id].values.length
         nodes[id].keys.pop(at);
         nodes[id].values.pop(at);
-        count-=1
+        count -= 1
         return true
     }
 
     # The leftmost leaf, for scans with no lower bound.
-    first_leaf=():>int64=>{
-        let id=root
+    first_leaf = ():>int64 => {
+        let id = root
         loop true {
             $runtime_assert 0 <=? id and id <? nodes.length
-            let node=nodes[id]
+            let node = nodes[id]
             if node.leaf return id
             $runtime_assert node.children.length >? 0
-            id=node.children[0]
+            id = node.children[0]
         }
     }
 
     # Entries with low <= key <= high (either end optional, each inclusive or not),
     # in key order, at most `limit` of them when limit is not negative.
-    range=(low:Bound? high:Bound? limit:int64=-1):>array<Entry>=>{
-        let out:array<Entry>=[]
+    range = (low:Bound? high:Bound? limit:int64=-1):>array<Entry> => {
+        let out:array<Entry> = []
         if limit =? 0 return out
-        let leaf=if low is? none first_leaf() else leaf_for(low.key)
+        let leaf = if low is? none first_leaf() else leaf_for(low.key)
         $runtime_assert 0 <=? leaf and leaf <? nodes.length
-        let at=if low is? none 0 else lower_bound(nodes[leaf].keys low.key)
+        let at = if low is? none 0 else lower_bound(nodes[leaf].keys low.key)
         loop leaf >=? 0 {
             $runtime_assert leaf <? nodes.length
-            let node=nodes[leaf]
+            let node = nodes[leaf]
             $runtime_assert node.values.length =? node.keys.length
             loop i in [at..node.keys.length) {
-                let key=node.keys[i]
+                let key = node.keys[i]
                 if not above(key low) continue
                 if not below(key high) return out
                 out.push(Entry[key node.values[i]])
                 if out.length =? limit return out
             }
-            leaf=node.next
-            at=0
+            leaf = node.next
+            at = 0
         }
         return out
     }
 
-    entries=():>array<Entry>=>range(none none)
+    entries = ():>array<Entry> => range(none none)
 
-    height=():>int64=>{
-        let levels:int64=1
-        let id=root
+    height = ():>int64 => {
+        let levels:int64 = 1
+        let id = root
         loop true {
             $runtime_assert 0 <=? id and id <? nodes.length
-            let node=nodes[id]
+            let node = nodes[id]
             if node.leaf return levels
             $runtime_assert node.children.length >? 0
-            id=node.children[0]
-            levels+=1
+            id = node.children[0]
+            levels += 1
         }
     }
 
     # Verify the structure: separators bound their subtrees, keys strictly
     # increase along the leaf chain, and the chain holds exactly `count` keys.
     # Returns the first violation found, or "" when the tree is sound.
-    check=():>string=>{
-        let problem=check_node(root none none)
+    check = ():>string => {
+        let problem = check_node(root none none)
         if problem.length >? 0 return problem
-        let seen:int64=0
-        let previous:string?=none
-        let leaf=first_leaf()
+        let seen:int64 = 0
+        let previous:string? = none
+        let leaf = first_leaf()
         loop leaf >=? 0 {
             $runtime_assert leaf <? nodes.length
-            let node=nodes[leaf]
+            let node = nodes[leaf]
             if node.keys.length not=? node.values.length return "leaf {leaf} has {node.keys.length} keys but {node.values.length} values"
             loop key in node.keys {
                 if previous isnt? none and key <=? previous return "keys out of order at {key}"
-                previous=key
-                seen+=1
+                previous = key
+                seen += 1
             }
-            leaf=node.next
+            leaf = node.next
         }
         if seen not=? count return "chain holds {seen} keys, count is {count}"
         return ""
     }
 
-    check_node=(id:int64 low:string? high:string?):>string=>{
+    check_node = (id:int64 low:string? high:string?):>string => {
         $runtime_assert 0 <=? id and id <? nodes.length
-        let node=nodes[id]
+        let node = nodes[id]
         if node.keys.length >? ORDER return "node {id} overfull"
         loop key in node.keys {
             if low isnt? none and key <? low return "node {id}: {key} below its separator"
@@ -270,9 +270,9 @@ BTree:type=[
         if node.leaf return ""
         if node.children.length not=? node.keys.length+1 return "node {id} has {node.children.length} children for {node.keys.length} keys"
         loop i in [0..node.children.length) {
-            let child_low=if i =? 0 low else node.keys[i-1]
-            let child_high=if i >=? node.keys.length high else node.keys[i]
-            let problem=check_node(node.children[i] child_low child_high)
+            let child_low = if i =? 0 low else node.keys[i-1]
+            let child_high = if i >=? node.keys.length high else node.keys[i]
+            let problem = check_node(node.children[i] child_low child_high)
             if problem.length >? 0 return problem
         }
         return ""
@@ -280,8 +280,8 @@ BTree:type=[
 ]
 
 # A full tree from entries already in strictly increasing key order.
-from_sorted=(entries:array<Entry>):>BTree=>{
-    let tree=BTree()
+from_sorted = (entries:array<Entry>):>BTree => {
+    let tree = BTree()
     loop entry in entries {
         tree.put(entry.key entry.value);
     }

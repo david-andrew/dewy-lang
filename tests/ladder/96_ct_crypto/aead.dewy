@@ -10,41 +10,41 @@ from p"ct.dewy" import equal, store64
 from p"chacha.dewy" import Key, Nonce, NonceX, block, xor_stream, hchacha20
 from p"poly.dewy" import Tag, OneTimeKey, poly1305_init
 
-Forged:type=type of error
+Forged:type = type of error
 
-Sealed:type=[ciphertext:array<uint8> tag:Tag]
+Sealed:type = [ciphertext:array<uint8> tag:Tag]
 
 # The one-time Poly1305 key: the first 32 bytes of keystream block 0.
-poly_key=(key:Key nonce:Nonce):>OneTimeKey=>{
-    let stream=block(key 0 nonce)
+poly_key = (key:Key nonce:Nonce):>OneTimeKey => {
+    let stream = block(key 0 nonce)
     stream.truncate(32)
     return stream
 }
 
-zeros_to_16=(n:int64):>array<uint8>=>[loop i in [0..(16-n%16)%16) 0 as uint8]
+zeros_to_16 = (n:int64):>array<uint8> => [loop i in [0..(16-n%16)%16) 0 as uint8]
 
 # The authenticated transcript: aad, padding, ciphertext, padding, both lengths.
-tag_for=(key:Key nonce:Nonce aad:array<uint8> ciphertext:array<uint8>):>Tag=>{
-    let mac=poly1305_init(poly_key(key nonce))
+tag_for = (key:Key nonce:Nonce aad:array<uint8> ciphertext:array<uint8>):>Tag => {
+    let mac = poly1305_init(poly_key(key nonce))
     mac.update(aad)
     mac.update(zeros_to_16(aad.length))
     mac.update(ciphertext)
     mac.update(zeros_to_16(ciphertext.length))
-    let lengths:array<uint8>=[]
+    let lengths:array<uint8> = []
     store64(@lengths aad.length as uint64)
     store64(@lengths ciphertext.length as uint64)
     mac.update(lengths)
     return mac.finish
 }
 
-seal=(key:Key nonce:Nonce aad:array<uint8> plaintext:array<uint8>):>Sealed=>{
-    let ciphertext=xor_stream(key 1 nonce plaintext)
-    let tag=tag_for(key nonce aad ciphertext)
+seal = (key:Key nonce:Nonce aad:array<uint8> plaintext:array<uint8>):>Sealed => {
+    let ciphertext = xor_stream(key 1 nonce plaintext)
+    let tag = tag_for(key nonce aad ciphertext)
     return Sealed[ciphertext tag]
 }
 
-open=(key:Key nonce:Nonce aad:array<uint8> sealed:Sealed):>array<uint8>|Forged=>{
-    let expected=tag_for(key nonce aad sealed.ciphertext)
+open = (key:Key nonce:Nonce aad:array<uint8> sealed:Sealed):>array<uint8>|Forged => {
+    let expected = tag_for(key nonce aad sealed.ciphertext)
     if not equal(expected as array<uint8> sealed.tag as array<uint8>) return Forged
     return xor_stream(key 1 nonce sealed.ciphertext)
 }
@@ -52,23 +52,23 @@ open=(key:Key nonce:Nonce aad:array<uint8> sealed:Sealed):>array<uint8>|Forged=>
 # XChaCha20-Poly1305 (draft-irtf-cfrg-xchacha): a 24-byte nonce, long enough to
 # pick at random. HChaCha20 turns the first 16 nonce bytes into a subkey; the
 # last 8 become the ChaCha20 nonce.
-extended=(key:Key nonce:NonceX):>[key:Key nonce:Nonce]=>{
-    let n=nonce as array<uint8>
+extended = (key:Key nonce:NonceX):>[key:Key nonce:Nonce] => {
+    let n = nonce as array<uint8>
     $runtime_assert n.length =? 24
-    let subkey=hchacha20(key n)
-    let short:Nonce=[]
+    let subkey = hchacha20(key n)
+    let short:Nonce = []
     loop i in [0..8) {
-        short[4+i]=n[16+i]
+        short[4+i] = n[16+i]
     }
     return [key=subkey nonce=short]
 }
 
-seal_x=(key:Key nonce:NonceX aad:array<uint8> plaintext:array<uint8>):>Sealed=>{
-    let [key nonce]=extended(key nonce)
+seal_x = (key:Key nonce:NonceX aad:array<uint8> plaintext:array<uint8>):>Sealed => {
+    let [key nonce] = extended(key nonce)
     return seal(key nonce aad plaintext)
 }
 
-open_x=(key:Key nonce:NonceX aad:array<uint8> sealed:Sealed):>array<uint8>|Forged=>{
-    let [key nonce]=extended(key nonce)
+open_x = (key:Key nonce:NonceX aad:array<uint8> sealed:Sealed):>array<uint8>|Forged => {
+    let [key nonce] = extended(key nonce)
     return open(key nonce aad sealed)
 }

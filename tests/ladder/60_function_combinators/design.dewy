@@ -1,60 +1,60 @@
-map_values=<T U>(values:array<T> f:<(x:T):>U>):>array<U>=> {
-    let output:array<U>=[]
-    loop value in values  {
+map_values = <T U>(values:array<T> f:<(x:T):>U>):>array<U> => {
+    let output:array<U> = []
+    loop value in values {
         output.push(f(value))
     }
     return output
 }
-filter_values=<T>(values:array<T> predicate:<(x:T):>bool>):>array<T>=> {
-    let output:array<T>=[]
-    loop value in values  {
-        if predicate(value)  {
+filter_values = <T>(values:array<T> predicate:<(x:T):>bool>):>array<T> => {
+    let output:array<T> = []
+    loop value in values {
+        if predicate(value) {
             output.push(value)
         }
     }
     return output
 }
-fold_values=<T U>(values:array<T> initial:U combine:<(a:U b:T):>U>):>U=> {
-    let result=initial
-    loop value in values  {
-        result=combine(result value)
+fold_values = <T U>(values:array<T> initial:U combine:<(a:U b:T):>U>):>U => {
+    let result = initial
+    loop value in values {
+        result = combine(result value)
     }
     return result
 }
-double=(x:int64):>int64=>2*x
-square=(x:int64):>int64=>x*x
-even=(x:int64):>bool=>x%2 =? 0
-add_int=(a:int64 b:int64):>int64=>a+b
-counter=(start:int64)=> {
-    let value=start
-    return (x:int64 $capture value):>int64=> {
-        value+=x
+double = (x:int64):>int64 => 2*x
+square = (x:int64):>int64 => x*x
+even = (x:int64):>bool => x%2 =? 0
+add_int = (a:int64 b:int64):>int64 => a+b
+counter = (start:int64) => {
+    let value = start
+    return (x:int64 $capture value):>int64 => {
+        value += x
         return value
     }
 }
-main=():>void=> {
-    let source:array<int64>=[loop i in [0..20) i]
-    let handlers:dict<string <(x:int64):>int64>>=["double"->@double "square"->@square]
-    let transformed=map_values(source handlers["square"])
-    let selected=filter_values(transformed @even)
-    let sum=fold_values<int64 int64>(selected 0 @add_int)
+main = ():>void => {
+    let source:array<int64> = [loop i in [0..20) i]
+    let handlers:dict<string <(x:int64):>int64>>= ["double"->@double "square"->@square]
+    let transformed = map_values(source handlers["square"])
+    let selected = filter_values(transformed @even)
+    let sum = fold_values<int64 int64>(selected 0 @add_int)
     $runtime_assert (sum =? 1140)
-    let running=counter(0)
-    let saved=@running
-    let cumulative=map_values([1 2 3 4] @running)
+    let running = counter(0)
+    let saved = @running
+    let cumulative = map_values([1 2 3 4] @running)
     $runtime_assert (cumulative =? [1 3 6 10])
     $runtime_assert (running(1) =? 1)
     $runtime_assert (saved(2) =? 2)
-    let bias=7
-    let shifted=map_values(source (x:int64)=>x+bias)
-    bias=100
+    let bias = 7
+    let shifted = map_values(source (x:int64) => x+bias)
+    bias = 100
     $runtime_assert (shifted[0] =? 7)
-    let words=map_values<int64 string>([1 2 3] (x:int64):>string=>"v{x}")
+    let words = map_values<int64 string>([1 2 3] (x:int64):>string => "v{x}")
     $runtime_assert (words =? ["v1" "v2" "v3"])
     $runtime_assert (filter_values([] @even).length =? 0)
     $runtime_assert (fold_values<int64 int64>([] 9 @add_int) =? 9)
-    let tablecopy=handlers
-    handlers["square"]=@double
+    let tablecopy = handlers
+    handlers["square"] = @double
     $runtime_assert (tablecopy["square"](9) =? 81)
     $runtime_assert (handlers["square"](9) =? 18)
     printl("{sum} {cumulative[3]} {shifted[19]} {words.length}")

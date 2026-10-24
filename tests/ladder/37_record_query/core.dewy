@@ -1,65 +1,65 @@
-Order:type=[customer:int64 region:string units:int64 price:int64]
-Customer:type=[id:int64 active:bool]
-Aggregate:type=[region:string revenue:int64 count:int64]
-evaluate=(orders:array<Order> customers:array<Customer> minimum:int64):>array<Aggregate>=> {
-    let active:dict<int64 bool>=[]
-    loop customer in customers  {
-        active[customer.id]=customer.active
+Order:type = [customer:int64 region:string units:int64 price:int64]
+Customer:type = [id:int64 active:bool]
+Aggregate:type = [region:string revenue:int64 count:int64]
+evaluate = (orders:array<Order> customers:array<Customer> minimum:int64):>array<Aggregate> => {
+    let active:dict<int64 bool> = []
+    loop customer in customers {
+        active[customer.id] = customer.active
     }
-    let groups:dict<string Aggregate>=[]
-    loop order in orders  {
-        if not active.get(order.customer false)  {
+    let groups:dict<string Aggregate> = []
+    loop order in orders {
+        if not active.get(order.customer false) {
             continue
         }
-        if order.units <? minimum  {
+        if order.units <? minimum {
             continue
         }
-        let group=groups.get(order.region Aggregate[order.region 0 0])
-        group.revenue+=order.units*order.price
-        group.count+=1
-        groups[order.region]=group
+        let group = groups.get(order.region Aggregate[order.region 0 0])
+        group.revenue += order.units*order.price
+        group.count += 1
+        groups[order.region] = group
     }
-    let output:array<Aggregate>=[]
-    loop [region group] in groups  {
-        if group.revenue >=? 20  {
+    let output:array<Aggregate> = []
+    loop [region group] in groups {
+        if group.revenue >=? 20 {
             output.push(group)
         }
     }
     # Stable insertion sort: descending revenue, lexical region tie break.
-    loop i in [1..output.length)  {
-        let item=output[i]
-        let j=i
-        loop j >? 0 and j <? output.length  {
-            let before=output[j-1]
-            if before.revenue >? item.revenue  {
+    loop i in [1..output.length) {
+        let item = output[i]
+        let j = i
+        loop j >? 0 and j <? output.length {
+            let before = output[j-1]
+            if before.revenue >? item.revenue {
                 break
             }
-            if before.revenue =? item.revenue and before.region <=? item.region  {
+            if before.revenue =? item.revenue and before.region <=? item.region {
                 break
             }
-            output[j]=before
-            output[j-1]=item
-            j-=1
+            output[j] = before
+            output[j-1] = item
+            j -= 1
         }
     }
     return output
 }
-main=():>void=> {
-    let customers=[Customer[1 true] Customer[2 false] Customer[3 true]]
-    let orders=[Order[1 "N" 3 10] Order[3 "S" 2 20] Order[2 "N" 9 99] Order[1 "N" 1 7] Order[3 "E" 5 8] Order[9 "W" 9 99] Order[1 "S" 4 5]]
-    let original=orders
-    let result=evaluate(orders customers 2)
+main = ():>void => {
+    let customers = [Customer[1 true] Customer[2 false] Customer[3 true]]
+    let orders = [Order[1 "N" 3 10] Order[3 "S" 2 20] Order[2 "N" 9 99] Order[1 "N" 1 7] Order[3 "E" 5 8] Order[9 "W" 9 99] Order[1 "S" 4 5]]
+    let original = orders
+    let result = evaluate(orders customers 2)
     $runtime_assert(result.length =? 3)
     $runtime_assert(result[0].region =? "S")
     $runtime_assert(result[1].region =? "E")
     $runtime_assert(result[2].region =? "N")
-    let revenue=0
-    let count=0
-    loop group in result  {
-        revenue+=group.revenue
-        count+=group.count
+    let revenue = 0
+    let count = 0
+    loop group in result {
+        revenue += group.revenue
+        count += group.count
     }
-    orders[0].price=999
+    orders[0].price = 999
     $runtime_assert(original[0].price =? 10)
     $runtime_assert(evaluate([] customers 2).length =? 0)
     $runtime_assert(evaluate(original [] 2).length =? 0)

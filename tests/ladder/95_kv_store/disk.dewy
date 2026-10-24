@@ -11,100 +11,100 @@
 # synced, then renamed over it, so a crash leaves the old file or the new one, never
 # a mixture. A crash can still cut an append short at any byte.
 
-Crashed:type=type of error & [step:string]
-DiskError:type=type of error & [message:string]
+Crashed:type = type of error & [step:string]
+DiskError:type = type of error & [message:string]
 
 # Where the next crash happens. `append` lets only `thousandths`/1000 of the next
 # append's bytes reach the disk (always less than all of it); the compaction
 # steps crash just before that step starts.
-FaultKind:type='append' | 'before_manifest' | 'before_cleanup'
-Fault:type=[kind:FaultKind thousandths:int64<i => 0 <=? i <? 1000>=0]
+FaultKind:type = 'append' | 'before_manifest' | 'before_cleanup'
+Fault:type = [kind:FaultKind thousandths:int64<i => 0 <=? i <? 1000>=0]
 
-Disk:type=[
+Disk:type = [
     root:string
     fault:Fault?=none
     appends:int64=0
     writes:int64=0
 
-    path=(name:string):>string=>"{root}/{name}"
+    path = (name:string):>string => "{root}/{name}"
 
     # Crash here if the armed fault is this step.
-    step=(kind:FaultKind):>void|Crashed=>{
-        let armed=fault
+    step = (kind:FaultKind):>void|Crashed => {
+        let armed = fault
         if armed isnt? none and armed.kind =? kind and kind not=? 'append' {
-            fault=none
+            fault = none
             return Crashed["{kind}"]
         }
     }
 
-    append=(name:string text:string):>void|Crashed|DiskError=>{
-        let armed=fault
+    append = (name:string text:string):>void|Crashed|DiskError => {
+        let armed = fault
         if armed isnt? none and armed.kind =? 'append' {
-            fault=none
+            fault = none
             # Only a prefix of the bytes reaches the disk.
-            let data=bytes(text)
-            let keep=data.length*armed.thousandths//1000
+            let data = bytes(text)
+            let keep = data.length*armed.thousandths//1000
             $runtime_assert 0 <=? keep and keep <=? data.length
-            let prefix=data[0..keep)
-            let existing=read(name)
+            let prefix = data[0..keep)
+            let existing = read(name)
             if existing is? (error|Canceled) return DiskError["cannot reread {name}"]
-            let written=p(path(name)).write_bytes([existing... prefix...])
+            let written = p(path(name)).write_bytes([existing... prefix...])
             if written is? (error|Canceled) return DiskError["cannot write {name}"]
             return Crashed["append"]
         }
-        let file=p(path(name))
-        let written=file.append_bytes(bytes(text))
+        let file = p(path(name))
+        let written = file.append_bytes(bytes(text))
         if written is? (error|Canceled) return DiskError["cannot append to {name}"]
-        let synced=file.sync
+        let synced = file.sync
         if synced is? (error|Canceled) return DiskError["cannot sync {name}"]
-        appends+=1
+        appends += 1
     }
 
     # Replace a whole file atomically: the new bytes go to a side file, reach the
     # disk, then take the name in one rename, which the directory's sync makes last.
-    write=(name:string data:array<uint8>):>void|DiskError=>{
-        let side=p(path("{name}.tmp"))
-        let written=side.write_bytes(data)
+    write = (name:string data:array<uint8>):>void|DiskError => {
+        let side = p(path("{name}.tmp"))
+        let written = side.write_bytes(data)
         if written is? (error|Canceled) return DiskError["cannot write {name}"]
-        let synced=side.sync
+        let synced = side.sync
         if synced is? (error|Canceled) return DiskError["cannot sync {name}"]
-        let renamed=side.replace(p(path(name)))
+        let renamed = side.replace(p(path(name)))
         if renamed is? (error|Canceled) return DiskError["cannot replace {name}"]
-        let settled=p(root).sync
+        let settled = p(root).sync
         if settled is? (error|Canceled) return DiskError["cannot sync {root}"]
-        writes+=1
+        writes += 1
     }
 
     # The bytes of a file; a missing file reads as empty.
-    read=(name:string):>array<uint8>|DiskError=>{
-        let file=p(path(name))
+    read = (name:string):>array<uint8>|DiskError => {
+        let file = p(path(name))
         if not file.exists return []
-        let data=file.read_bytes
+        let data = file.read_bytes
         if data is? (error|Canceled) return DiskError["cannot read {name}"]
         return data
     }
 
-    exists=(name:string):>bool=>p(path(name)).exists
+    exists = (name:string):>bool => p(path(name)).exists
 
-    remove=(name:string):>void|DiskError=>{
-        let file=p(path(name))
+    remove = (name:string):>void|DiskError => {
+        let file = p(path(name))
         if not file.exists return
-        let removed=file.unlink
+        let removed = file.unlink
         if removed is? (error|Canceled) return DiskError["cannot remove {name}"]
     }
 
-    list=():>array<string>|DiskError=>{
-        let names=p(root).list
+    list = ():>array<string>|DiskError => {
+        let names = p(root).list
         if names is? (error|Canceled) return DiskError["cannot list {root}"]
         names.sort()
         return names
     }
 ]
 
-open_disk=(root:string):>Disk|DiskError=>{
-    let dir=p(root)
+open_disk = (root:string):>Disk|DiskError => {
+    let dir = p(root)
     if not dir.exists {
-        let made=dir.mkdir
+        let made = dir.mkdir
         if made is? (error|Canceled) return DiskError["cannot create {root}"]
     }
     return Disk[root]

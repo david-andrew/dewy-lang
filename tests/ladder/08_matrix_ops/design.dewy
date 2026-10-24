@@ -1,30 +1,30 @@
-close=(x:float64 y:float64):>bool=>abs(x-y) <? 1e-9
-residual=(matrix:NDArray<float64> x:array<float64> b:array<float64>):>float64=>{
-    let predicted=matrix*x
-    let total=0.0
+close = (x:float64 y:float64):>bool => abs(x-y) <? 1e-9
+residual = (matrix:NDArray<float64> x:array<float64> b:array<float64>):>float64 => {
+    let predicted = matrix*x
+    let total = 0.0
     $runtime_assert predicted.length =? b.length
     loop i in [0..b.length) {
-        total+=abs(predicted[i]-b[i])
+        total += abs(predicted[i]-b[i])
     }
     return total
 }
-main=():>void=>{
-    let a=reshape<float64>([3.0 1.0 1.0 2.0] 2 2)
-    let b:array<float64>=[9.0 8.0]
-    let solution=solve(a b)
+main = ():>void => {
+    let a = reshape<float64>([3.0 1.0 1.0 2.0] 2 2)
+    let b:array<float64> = [9.0 8.0]
+    let solution = solve(a b)
     $runtime_assert (close(solution[0] 2.0))
     $runtime_assert (close(solution[1] 3.0))
     $runtime_assert (residual(a solution b) <? 1e-9)
-    let product=a*eye(2)
+    let product = a*eye(2)
     $runtime_assert (product.data =? a.data)
-    let inverse_a=inverse(a)
-    let identity=a*inverse_a
+    let inverse_a = inverse(a)
+    let identity = a*inverse_a
     $runtime_assert (close(identity[0 0] 1.0))
     $runtime_assert (close(identity[1 1] 1.0))
-    let saved=a
-    a[0 0]=99.0
+    let saved = a
+    a[0 0] = 99.0
     $runtime_assert (saved[0 0] =? 3.0)
-    let transposed=transpose(saved)
+    let transposed = transpose(saved)
     $runtime_assert (transposed.data =? saved.data)
     $runtime_assert (close(det(saved) 5.0))
     printl("{solution} {det(saved)}")

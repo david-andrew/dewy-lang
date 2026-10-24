@@ -1,63 +1,63 @@
 # Deterministic synthetic data: a 64-bit LCG, uniform floats from its high
 # bits, and a three-class XOR-like point cloud that no linear model separates.
 
-$runtime_checks=false
+$runtime_checks = false
 
-Rng:type=[state:uint64]
+Rng:type = [state:uint64]
 
 # The high 31 bits of the next state.
-next=(@r:Rng):>int64=>{
-    r.state=r.state*6364136223846793005+1442695040888963407
+next = (@r:Rng):>int64 => {
+    r.state = r.state*6364136223846793005+1442695040888963407
     return int64<overflow='wrap'>(r.state >> 33)
 }
 
 # A float in [0, 1) from 31 random bits.
-uniform=(@r:Rng):>float64=>float64(next(@r))/2147483648.0
+uniform = (@r:Rng):>float64 => float64(next(@r))/2147483648.0
 
 # A whole number in [0, n); 0 when the range is empty.
-below=(@r:Rng n:int64):>int64=>{
-    let draw=next(@r)
+below = (@r:Rng n:int64):>int64 => {
+    let draw = next(@r)
     if n <=? 0 return 0
     return draw%n
 }
 
-Sample:type=[x0:float64 x1:float64 label:int64]
+Sample:type = [x0:float64 x1:float64 label:int64]
 
-const CLASSES:int64=3
+const CLASSES:int64 = 3
 
 # Class 0 sits at (-1,-1) and (1,1), class 1 at (1,-1) and (-1,1), class 2 at
 # the origin; every point is jittered by up to `noise` on each axis.
-center=(label:int64 side:int64):>[x:float64 y:float64]=>{
+center = (label:int64 side:int64):>[x:float64 y:float64] => {
     if label =? 2 return [x=0.0 y=0.0]
-    let flip:float64=if side =? 0 -1.0 else 1.0
+    let flip:float64 = if side =? 0 -1.0 else 1.0
     if label =? 0 return [x=flip y=flip]
     return [x=0.0-flip y=flip]
 }
 
-make_dataset=(seed:uint64 count:int64 noise:float64):>array<Sample>=>{
-    let rng:Rng=[state=seed]
-    let out:array<Sample>=[]
+make_dataset = (seed:uint64 count:int64 noise:float64):>array<Sample> => {
+    let rng:Rng = [state=seed]
+    let out:array<Sample> = []
     loop i in [0..count) {
-        let label=i%CLASSES
-        let c=center(label (i//CLASSES)%2)
-        let x0=c.x+(2.0*uniform(@rng)-1.0)*noise
-        let x1=c.y+(2.0*uniform(@rng)-1.0)*noise
+        let label = i%CLASSES
+        let c = center(label (i//CLASSES)%2)
+        let x0 = c.x+(2.0*uniform(@rng)-1.0)*noise
+        let x1 = c.y+(2.0*uniform(@rng)-1.0)*noise
         out.push([x0=x0 x1=x1 label=label])
     }
     return out
 }
 
-# A Fisher-Yates permutation of [0, n) 
+# A Fisher-Yates permutation of [0, n)
 # (the forward form: each j swaps with a place at or before it), for any n a dataset can have.
-shuffled=(@r:Rng n:int64):>array<int64>=>{
-    let order=[loop i in [0..n) i]
+shuffled = (@r:Rng n:int64):>array<int64> => {
+    let order = [loop i in [0..n) i]
     loop j in [1..n) {
         if j >=? order.length continue
-        let pick=below(@r j+1)
+        let pick = below(@r j+1)
         if pick <? 0 or pick >? j continue
-        let held=order[j]
-        order[j]=order[pick]
-        order[pick]=held
+        let held = order[j]
+        order[j] = order[pick]
+        order[pick] = held
     }
     return order
 }

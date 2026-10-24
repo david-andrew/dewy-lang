@@ -1,64 +1,64 @@
 # Tier 3 / 67_reject_unproved_index / milestone 22
 # Acceptance: Reject indexing with unknown bounds rather than insert a panic.
 # Negative: compilation must reject the marked operation, before execution.
-checksum=(xs:array<int64>):>int64=>{
-    let total:int64=0
+checksum = (xs:array<int64>):>int64 => {
+    let total:int64 = 0
     loop x in xs {
-        total+=x
+        total += x
     }
     return total
 }
-make=(n:int64):>array<int64>=>{
-    let xs:array<int64>=[]
+make = (n:int64):>array<int64> => {
+    let xs:array<int64> = []
     loop i in [0..n) {
         xs.push(i*3+1)
     }
     return xs
 }
-verify=():>int64=>{
-    let xs=make(4)
-    let saved=xs.copy()
-    xs[0]=99
+verify = ():>int64 => {
+    let xs = make(4)
+    let saved = xs.copy()
+    xs[0] = 99
     $runtime_assert saved[0] =? 1
     $runtime_assert checksum(saved) =? 22
-    let total:int64=0
+    let total:int64 = 0
     loop n in [1..12) {
-        let values=make(n)
+        let values = make(n)
         $runtime_assert values.length =? n
-        total+=checksum(values)
+        total += checksum(values)
     }
     return total
 }
 
-forbidden=(xs:array<int64> i:int64):>int64=>{
-    $runtime_checks=false
+forbidden = (xs:array<int64> i:int64):>int64 => {
+    $runtime_checks = false
     # REJECT: no lower or upper bound is known for i.
     return xs[i]
 }
 
-control=():>int64=>{
-    let empty:array<int64>=[]
+control = ():>int64 => {
+    let empty:array<int64> = []
     $runtime_assert checksum(empty) =? 0
     $runtime_assert make(1)[0] =? 1
     $runtime_assert make(2)[1] =? 4
     $runtime_assert make(3)[2] =? 7
     $runtime_assert make(4)[3] =? 10
-    let first=make(5)
-    let second=first.copy()
+    let first = make(5)
+    let second = first.copy()
     $runtime_assert checksum(first) =? 35
     $runtime_assert checksum(second) =? 35
-    first[0]=0
+    first[0] = 0
     $runtime_assert second[0] =? 1
     $runtime_assert make(5).length =? 5
     $runtime_assert checksum(make(0)) =? 0
     $runtime_assert checksum(make(1)) =? 1
     return verify()
 }
-main=():>void=>{
-    let witness=control()
-    let source=read_line() ?? "1"
+main = ():>void => {
+    let witness = control()
+    let source = read_line() ?? "1"
     if source is? (Canceled|FileError) exit(1)
-    let index=to_int(source) ?? 0
+    let index = to_int(source) ?? 0
     forbidden(make(3) index)
     $runtime_assert witness >? 0
 }

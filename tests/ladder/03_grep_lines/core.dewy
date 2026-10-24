@@ -1,27 +1,27 @@
-find_lines=(text:string pattern:string):>array<string>=>{
-    let matcher=regex(pattern)
-    let found:array<string>=[]
-    let number=0
+find_lines = (text:string pattern:string):>array<string> => {
+    let matcher = regex(pattern)
+    let found:array<string> = []
+    let number = 0
     loop line in text.split("\n") {
-        number+=1
-        let hit=line.find(matcher)
+        number += 1
+        let hit = line.find(matcher)
         if hit isnt? Missing {
             found.push("{number}:{line}")
         }
     }
     return found
 }
-join_lines=(lines:array<string>):>string=>{
-    let out=""
+join_lines = (lines:array<string>):>string => {
+    let out = ""
     loop line in lines {
-        if out.length >? 0 {out="{out}|"}
-        out="{out}{line}"
+        if out.length >? 0 { out = "{out}|" }
+        out = "{out}{line}"
     }
     return out
 }
-main=():>void=>{
-    let input="INFO boot\nERROR disk\nWARN hot\nERROR network\n"
-    let results=find_lines(input "^ERROR")
+main = ():>void => {
+    let input = "INFO boot\nERROR disk\nWARN hot\nERROR network\n"
+    let results = find_lines(input "^ERROR")
     $runtime_assert(results.length =? 2)
     $runtime_assert(find_lines(input "^DEBUG").length =? 0)
     $runtime_assert(find_lines("café" "caf.").length =? 1)

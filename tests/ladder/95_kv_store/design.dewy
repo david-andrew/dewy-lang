@@ -20,16 +20,16 @@ from p"store.dewy" import Store, Recovery, open_store
 from p"session.dewy" import Session
 from p"workload.dewy" import run_workload, fingerprint, Tally, WorkloadError
 
-describe=(r:Recovery):>string=>{
-    let tail=if r.truncated >? 0 "dropped" else "clean"
+describe = (r:Recovery):>string => {
+    let tail = if r.truncated >? 0 "dropped" else "clean"
     return "recovered keys={r.keys} tail={tail} removed={r.removed.length}"
 }
 
 # Remove every file in a scratch directory, and the directory itself.
-clear=(root:string):>void=>{
-    let dir=p(root)
+clear = (root:string):>void => {
+    let dir = p(root)
     if not dir.exists return
-    let names=dir.list
+    let names = dir.list
     if names isnt? (error|Canceled) {
         loop name in names {
             p"{root}/{name}".unlink;
@@ -38,51 +38,51 @@ clear=(root:string):>void=>{
     dir.rmdir;
 }
 
-restart=(@session:Session):>void|DiskError=>{
-    let store=open_store(Disk[session.store.disk.root]) or_throw
-    session=Session[store]
+restart = (@session:Session):>void|DiskError => {
+    let store = open_store(Disk[session.store.disk.root]) or_throw
+    session = Session[store]
     printl(describe(store.recovery))
 }
 
 # Run one line of the session script.
-step=(@session:Session line:string):>void|DiskError=>{
-    let words=line.split(" ")
-    let command=words.get(0) ?? ""
+step = (@session:Session line:string):>void|DiskError => {
+    let words = line.split(" ")
+    let command = words.get(0) ?? ""
     if command =? ".crash" {
         restart(@session) or_throw
     } else if command =? ".tear" {
-        let n=to_int(words.get(1) ?? "") ?? 500
+        let n = to_int(words.get(1) ?? "") ?? 500
         if n <? 0 or n >=? 1000 {
             printl("tear takes thousandths in [0..1000)")
             return
         }
-        session.store.disk.fault=Fault['append' thousandths=n]
+        session.store.disk.fault = Fault['append' thousandths=n]
     } else if command =? ".damage" {
-        let disk=session.store.disk
-        let log=session.store.manifest.log
-        let image=disk.read(log) or_throw
+        let disk = session.store.disk
+        let log = session.store.manifest.log
+        let image = disk.read(log) or_throw
         damage_last(@image);
         disk.write(log image) or_throw
         restart(@session) or_throw
     } else if command =? ".compact" {
-        let done=session.store.compact()
+        let done = session.store.compact()
         if done is? (error|Canceled) {
             printl("compaction failed")
         } else {
             printl("compacted keys={session.store.length()} generation={session.store.manifest.generation}")
         }
     } else if command =? ".crash-compact" {
-        session.store.disk.fault=if words.get(1) ?? "" =? "before_cleanup" Fault['before_cleanup'] else Fault['before_manifest']
-        let done=session.store.compact()
+        session.store.disk.fault = if words.get(1) ?? "" =? "before_cleanup" Fault['before_cleanup'] else Fault['before_manifest']
+        let done = session.store.compact()
         printl(if done is? Crashed "crashed {done.step}" else "compaction finished")
         restart(@session) or_throw
     } else if command =? ".check" {
-        let problem=session.store.index.check()
-        let replayed=open_store(Disk[session.store.disk.root]) or_throw
-        let same=replayed.index.entries =? session.store.index.entries
+        let problem = session.store.index.check()
+        let replayed = open_store(Disk[session.store.disk.root]) or_throw
+        let same = replayed.index.entries =? session.store.index.entries
         printl(if problem.length =? 0 and same "check ok keys={session.store.length()}" else "check failed {problem}")
     } else {
-        let result=session.execute(line)
+        let result = session.execute(line)
         match result {
             text:string => printl(text)
             failure:Crashed => {
@@ -94,36 +94,36 @@ step=(@session:Session line:string):>void|DiskError=>{
     }
 }
 
-main=():>void=>{
+main = ():>void => {
     clear("kvdata")
     clear("kvwork")
-    let disk=open_disk("kvdata")
+    let disk = open_disk("kvdata")
     if disk is? DiskError {
         printl(disk.message)
         exit(1)
     }
-    let opened=open_store(disk)
+    let opened = open_store(disk)
     if opened is? DiskError {
         printl(opened.message)
         exit(1)
     }
-    let session=Session[opened]
+    let session = Session[opened]
     loop true {
-        let line=read_line()
+        let line = read_line()
         if line is? none break
         if line is? (Canceled|FileError) exit(1)
         if line.length =? 0 or line.startswith("--") continue
         printl("> {line}")
-        let done=step(@session line)
+        let done = step(@session line)
         if done is? DiskError {
             printl(done.message)
             exit(1)
         }
     }
 
-    let work=open_disk("kvwork")
+    let work = open_disk("kvwork")
     if work is? DiskError exit(1)
-    let tally=run_workload("kvwork" 20261021 3000)
+    let tally = run_workload("kvwork" 20261021 3000)
     match tally {
         failure:DiskError => {
             printl(failure.message)
@@ -138,7 +138,7 @@ main=():>void=>{
             printl("workload compactions={t.compactions} interrupted={t.interrupted} recoveries={t.recoveries} mismatches={t.mismatches}")
         }
     }
-    let final=open_store(Disk["kvwork"])
+    let final = open_store(Disk["kvwork"])
     if final is? DiskError exit(1)
     printl("workload keys={final.length()} fingerprint={fingerprint(final.index.entries)}")
     clear("kvdata")

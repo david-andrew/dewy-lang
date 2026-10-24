@@ -6,77 +6,77 @@ from p"store.dewy" import Store, Note, NoteInput, NotePatch, Filter, Page, TagCo
     create, get, replace, patch, remove, list, tag_counts, apply_batch, etag, describe, status_of
 from p"assets.dewy" import find_asset, asset_etag
 
-Service:type=[
+Service:type = [
     store:Store=Store()
     limits:Limits=Limits()
     requests:int64=0
     errors:int64=0
 ]
 
-ErrorBody:type=[error:string detail:string]
-Health:type=[ok:bool notes:int64]
-Tags:type=[tags:array<TagCount>]
-Stats:type=[requests:int64 errors:int64 notes:int64]
+ErrorBody:type = [error:string detail:string]
+Health:type = [ok:bool notes:int64]
+Tags:type = [tags:array<TagCount>]
+Stats:type = [requests:int64 errors:int64 notes:int64]
 
-json=(status:int64 body:string extra:array<Header>=[]):>Response=>{
-    let headers=[Header["Content-Type" "application/json"] extra...]
+json = (status:int64 body:string extra:array<Header>=[]):>Response => {
+    let headers = [Header["Content-Type" "application/json"] extra...]
     return Response[status headers body]
 }
 
-fail=(status:int64 code:string detail:string extra:array<Header>=[]):>Response=>{
+fail = (status:int64 code:string detail:string extra:array<Header>=[]):>Response => {
     return json(status to_json(ErrorBody[code detail]) extra)
 }
 
-store_failure=(failure:Invalid|NotFound|Stale):>Response=>{
-    let code=match failure {
-        <Invalid>=>"invalid"
-        <NotFound>=>"missing"
-        <Stale>=>"stale"
+store_failure = (failure:Invalid|NotFound|Stale):>Response => {
+    let code = match failure {
+        <Invalid> => "invalid"
+        <NotFound> => "missing"
+        <Stale> => "stale"
     }
     return fail(status_of(failure) code describe(failure))
 }
 
-note_response=(status:int64 note:Note):>Response=>{
-    let extra=[Header["ETag" etag(note)]]
+note_response = (status:int64 note:Note):>Response => {
+    let extra = [Header["ETag" etag(note)]]
     if status =? 201 extra.push(Header["Location" "/api/notes/{note.id}"])
     return json(status to_json(note) extra)
 }
 
 # A small decimal for ids and paging: 1–6 digits, no sign.
-small_number=(text:string):>int64?=>{
+small_number = (text:string):>int64? => {
     if text.length =? 0 or text.length >? 6 return none
-    let value:int64=0
+    let value:int64 = 0
     loop b in bytes(text) {
         if not (0x30 <=? b <=? 0x39) return none
-        value=value*10+(int64(b)-0x30)
+        value = value*10+(int64(b)-0x30)
     }
     return value
 }
 
-BadQuery:type=type of error & [detail:string]
+BadQuery:type = type of error & [detail:string]
 
-parse_filter=(query:dict<string string>):>Filter|BadQuery=>{
-    let filter=Filter()
+parse_filter = (query:dict<string string>):>Filter|BadQuery => {
+    let filter = Filter()
     loop [key value] in query {
         if key =? "tag" {
-            filter.tag=value.trim().lower()
+            filter.tag = value.trim().lower()
         } else if key =? "done" {
-            if value =? "true" filter.done=true
-            else if value =? "false" filter.done=false
+            if value =? "true" filter.done = true
+            else if value =? "false" filter.done = false
             else return BadQuery["done must be true or false"]
         } else if key =? "q" {
-            filter.text=value
+            filter.text = value
         } else if key =? "sort" {
             if value not in? ["id" "title" "updated"] return BadQuery["sort must be id, title or updated"]
-            filter.sort=value
+            filter.sort = value
         } else if key =? "limit" {
-            let n=small_number(value)
+            let n = small_number(value)
             if n is? none or n <? 1 or n >? 50 return BadQuery["limit must be 1 to 50"]
-            filter.limit=n
+            filter.limit = n
         } else if key =? "offset" {
-            let n=small_number(value)
+            let n = small_number(value)
             if n is? none return BadQuery["offset must be a whole number"]
-            filter.offset=n
+            filter.offset = n
         } else {
             return BadQuery["unknown parameter '{key}'"]
         }
@@ -84,33 +84,33 @@ parse_filter=(query:dict<string string>):>Filter|BadQuery=>{
     return filter
 }
 
-wants_json=(request:Request):>bool=>{
-    let kind=header(request.headers "content-type") ?? ""
+wants_json = (request:Request):>bool => {
+    let kind = header(request.headers "content-type") ?? ""
     return kind =? "application/json" or kind.startswith("application/json;")
 }
 
 # Handlers -----------------------------------------------------------------
 
-health=(@service:Service _request:Request _id:int64):>Response=>{
+health = (@service:Service _request:Request _id:int64):>Response => {
     return json(200 to_json(Health[true service.store.notes.length]))
 }
 
-notes_get=(@service:Service request:Request _id:int64):>Response=>{
-    let filter=parse_filter(request.query)
+notes_get = (@service:Service request:Request _id:int64):>Response => {
+    let filter = parse_filter(request.query)
     if filter is? BadQuery return fail(400 "query" filter.detail)
     return json(200 to_json(list(service.store filter)))
 }
 
-notes_post=(@service:Service request:Request _id:int64):>Response=>{
-    let input=from_json<NoteInput>(request.body)
+notes_post = (@service:Service request:Request _id:int64):>Response => {
+    let input = from_json<NoteInput>(request.body)
     if input is? TextError return fail(400 "json" "invalid JSON body")
-    let created=create(@service.store input)
+    let created = create(@service.store input)
     if created is? Invalid return store_failure(created)
     return note_response(201 created)
 }
 
-note_get=(@service:Service request:Request id:int64):>Response=>{
-    let note=get(service.store id)
+note_get = (@service:Service request:Request id:int64):>Response => {
+    let note = get(service.store id)
     if note is? NotFound return store_failure(note)
     if header(request.headers "if-none-match") =? etag(note) {
         return Response[304 [Header["ETag" etag(note)]]]
@@ -118,55 +118,55 @@ note_get=(@service:Service request:Request id:int64):>Response=>{
     return note_response(200 note)
 }
 
-note_put=(@service:Service request:Request id:int64):>Response=>{
-    let input=from_json<NoteInput>(request.body)
+note_put = (@service:Service request:Request id:int64):>Response => {
+    let input = from_json<NoteInput>(request.body)
     if input is? TextError return fail(400 "json" "invalid JSON body")
-    let updated=replace(@service.store id input header(request.headers "if-match") ?? "")
+    let updated = replace(@service.store id input header(request.headers "if-match") ?? "")
     if updated is? Note return note_response(200 updated)
     return store_failure(updated)
 }
 
-note_patch=(@service:Service request:Request id:int64):>Response=>{
-    let change=from_json<NotePatch>(request.body)
+note_patch = (@service:Service request:Request id:int64):>Response => {
+    let change = from_json<NotePatch>(request.body)
     if change is? TextError return fail(400 "json" "invalid JSON body")
-    let updated=patch(@service.store id change header(request.headers "if-match") ?? "")
+    let updated = patch(@service.store id change header(request.headers "if-match") ?? "")
     if updated is? Note return note_response(200 updated)
     return store_failure(updated)
 }
 
-note_delete=(@service:Service request:Request id:int64):>Response=>{
-    let removed=remove(@service.store id header(request.headers "if-match") ?? "")
+note_delete = (@service:Service request:Request id:int64):>Response => {
+    let removed = remove(@service.store id header(request.headers "if-match") ?? "")
     if removed is? NotFound or removed is? Stale return store_failure(removed)
     return Response[204]
 }
 
-batch_post=(@service:Service request:Request _id:int64):>Response=>{
-    let ops=from_json<array<BatchOp>>(request.body)
+batch_post = (@service:Service request:Request _id:int64):>Response => {
+    let ops = from_json<array<BatchOp>>(request.body)
     if ops is? TextError return fail(400 "json" "invalid JSON body")
     if ops.length =? 0 or ops.length >? 8 return fail(422 "batch" "a batch has 1 to 8 ops")
-    let outcome=apply_batch(@service.store ops)
+    let outcome = apply_batch(@service.store ops)
     if outcome is? BatchFailed {
         return fail(outcome.status "batch" "op {outcome.index}: {outcome.detail}")
     }
     return json(200 to_json(outcome))
 }
 
-tags_get=(@service:Service _request:Request _id:int64):>Response=>{
+tags_get = (@service:Service _request:Request _id:int64):>Response => {
     return json(200 to_json(Tags[tag_counts(service.store)]))
 }
 
-stats_get=(@service:Service _request:Request _id:int64):>Response=>{
-    let stats=Stats[service.requests service.errors service.store.notes.length]
+stats_get = (@service:Service _request:Request _id:int64):>Response => {
+    let stats = Stats[service.requests service.errors service.store.notes.length]
     return json(200 to_json(stats))
 }
 
 # The route table -----------------------------------------------------------
 
-Handler:type=<(@service:Service request:Request id:int64):>Response>
-Method:type=[name:string run:Handler needs_json:bool=false]
-Route:type=[pattern:string methods:array<Method>]
+Handler:type = <(@service:Service request:Request id:int64):>Response>
+Method:type = [name:string run:Handler needs_json:bool=false]
+Route:type = [pattern:string methods:array<Method>]
 
-routes=():>array<Route>=>[
+routes = ():>array<Route> => [
     Route["/api/health" [Method["GET" @health]]]
     Route["/api/notes" [Method["GET" @notes_get] Method["POST" @notes_post true]]]
     Route["/api/notes/batch" [Method["POST" @batch_post true]]]
@@ -181,16 +181,16 @@ routes=():>array<Route>=>[
 ]
 
 # The id bound by `{id}`, 0 for a literal match, or none.
-match_route=(pattern:string path:string):>int64?=>{
-    let want=pattern.split("/")
-    let have=path.split("/")
+match_route = (pattern:string path:string):>int64? => {
+    let want = pattern.split("/")
+    let have = path.split("/")
     if want.length not=? have.length return none
-    let id:int64=0
+    let id:int64 = 0
     loop w in want and h in have {
         if w =? r"{id}" {
-            let n=small_number(h)
+            let n = small_number(h)
             if n is? none or n =? 0 return none
-            id=n
+            id = n
         } else if w not=? h {
             return none
         }
@@ -198,8 +198,8 @@ match_route=(pattern:string path:string):>int64?=>{
     return id
 }
 
-allow=(methods:array<Method>):>string=>{
-    let names:array<string>=[]
+allow = (methods:array<Method>):>string => {
+    let names:array<string> = []
     loop m in methods {
         names.push(m.name)
         if m.name =? "GET" names.push("HEAD")
@@ -207,10 +207,10 @@ allow=(methods:array<Method>):>string=>{
     return names.join(", ")
 }
 
-static_file=(request:Request):>Response?=>{
-    let asset=find_asset(request.path)
+static_file = (request:Request):>Response? => {
+    let asset = find_asset(request.path)
     if asset is? none return none
-    let tag=asset_etag(asset)
+    let tag = asset_etag(asset)
     if request.method not=? "GET" and request.method not=? "HEAD" {
         return fail(405 "method" "{request.method} is not allowed" [Header["Allow" "GET, HEAD"]])
     }
@@ -218,14 +218,14 @@ static_file=(request:Request):>Response?=>{
     return Response[200 [Header["Content-Type" asset.content_type] Header["ETag" tag]] asset.body]
 }
 
-dispatch=(@service:Service request:Request):>Response=>{
+dispatch = (@service:Service request:Request):>Response => {
     if ".." in? request.path.split("/") return fail(400 "path" "dot segments are not allowed")
-    let file=static_file(request)
+    let file = static_file(request)
     if file isnt? none return file
     loop route in routes() {
-        let id=match_route(route.pattern request.path)
+        let id = match_route(route.pattern request.path)
         if id is? none continue
-        let wanted=if request.method =? "HEAD" "GET" else request.method
+        let wanted = if request.method =? "HEAD" "GET" else request.method
         loop m in route.methods {
             if m.name =? wanted {
                 if m.needs_json and not wants_json(request) {
@@ -240,9 +240,9 @@ dispatch=(@service:Service request:Request):>Response=>{
 }
 
 # Every request is counted, failures included.
-route=(@service:Service request:Request):>Response=>{
-    let response=dispatch(@service request)
-    service.requests+=1
-    if response.status >=? 400 service.errors+=1
+route = (@service:Service request:Request):>Response => {
+    let response = dispatch(@service request)
+    service.requests += 1
+    if response.status >=? 400 service.errors += 1
     return response
 }

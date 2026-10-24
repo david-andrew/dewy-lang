@@ -1,45 +1,45 @@
-Page:type=[keys:array<int64> values:array<string>]
-Index:type=[pages:array<Page>]
+Page:type = [keys:array<int64> values:array<string>]
+Index:type = [pages:array<Page>]
 # Places key in its page; a full page moves its upper half to right.
-place=(@p:Page @right:Page key:int64 value:string):>void=>{
-    let pos=0
-    loop pos <? p.keys.length and p.keys[pos] <? key {pos+=1}
+place = (@p:Page @right:Page key:int64 value:string):>void => {
+    let pos = 0
+    loop pos <? p.keys.length and p.keys[pos] <? key { pos += 1 }
     p.keys.insert(key pos)
     p.values.insert(value pos)
-    if p.keys.length <=? 4 {return}
+    if p.keys.length <=? 4 { return }
     $runtime_assert p.values.length =? p.keys.length
-    right=Page[p.keys[2..] p.values[2..]]
+    right = Page[p.keys[2..] p.values[2..]]
     p.keys.truncate(2)
     p.values.truncate(2)
 }
-insert=(@index:Index key:int64 value:string):>void=>{
-    if index.pages.length =? 0 {index.pages.push(Page[[] []])}
-    let page=0
+insert = (@index:Index key:int64 value:string):>void => {
+    if index.pages.length =? 0 { index.pages.push(Page[[] []]) }
+    let page = 0
     loop i in [1..index.pages.length) {
-        if index.pages[i].keys.length =? 0 or key <? index.pages[i].keys[0] {break}
-        page=i
+        if index.pages[i].keys.length =? 0 or key <? index.pages[i].keys[0] { break }
+        page = i
     }
     $runtime_assert 0 <=? page and page <? index.pages.length
-    let right=Page[[] []]
+    let right = Page[[] []]
     place(@index.pages[page] @right key value)
-    if right.keys.length >? 0 {index.pages.insert(right page+1)}
+    if right.keys.length >? 0 { index.pages.insert(right page+1) }
 }
-lookup=(index:Index key:int64):>string?=>{
+lookup = (index:Index key:int64):>string? => {
     loop page in index.pages {
         $runtime_assert page.values.length =? page.keys.length
         loop i in [0..page.keys.length) {
-            if page.keys[i] =? key {return page.values[i]}
+            if page.keys[i] =? key { return page.values[i] }
         }
     }
     return none
 }
-main=():>void=>{
-    let index:Index=[pages=[]]
-    loop key in [9 1 7 3 5 2 8 4 6 0] {insert(@index key "v{key}")}
-    loop key in [0..10) {$runtime_assert(lookup(index key) =? "v{key}")}
+main = ():>void => {
+    let index:Index = [pages=[]]
+    loop key in [9 1 7 3 5 2 8 4 6 0] { insert(@index key "v{key}") }
+    loop key in [0..10) { $runtime_assert(lookup(index key) =? "v{key}") }
     $runtime_assert(lookup(index 99) is? none)
-    let all:array<int64>=[]
-    loop page in index.pages {loop key in page.keys {all.push(key)}}
+    let all:array<int64> = []
+    loop page in index.pages { loop key in page.keys { all.push(key) } }
     $runtime_assert(all =? [0 1 2 3 4 5 6 7 8 9])
     printl("{index.pages.length} {lookup(index 7)}")
 }

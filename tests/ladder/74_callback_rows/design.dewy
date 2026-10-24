@@ -1,33 +1,33 @@
 # Tier 3 / 74_callback_rows / milestone 23
 # Acceptance: Forward nonlocal callback rows while remapping explicit place permissions.
-Action:type=<E:Effect>(<(x:int64):>int64 & E>)
-map_one=<E:Effect>(f:Action<E> value:int64):>int64 & E=>{
+Action:type = <E:Effect>(<(x:int64):>int64 & E>)
+map_one = <E:Effect>(f:Action<E> value:int64):>int64 & E => {
     return f(value)
 }
-forward=<E:Effect>(f:<(@x:int64):>void & mutates<x> & E> @y:int64):>void & mutates<y> & E=>{
+forward = <E:Effect>(f:<(@x:int64):>void & mutates<x> & E> @y:int64):>void & mutates<y> & E => {
     f(@y)
 }
-square=(x:int64):>int64 & no_effects=>x*x
-negate=(x:int64):>int64 & no_effects=>-x
-set_seven=(@x:int64):>void & mutates<x>=>{
-    x=7
+square = (x:int64):>int64 & no_effects => x*x
+negate = (x:int64):>int64 & no_effects => -x
+set_seven = (@x:int64):>void & mutates<x> => {
+    x = 7
 }
-quiet=(x:int64):>int64 & no_effects=>{
+quiet = (x:int64):>int64 & no_effects => {
     return map_one(@square x)+map_one(@negate x)
 }
-fold=<E:Effect>(xs:array<int64> f:Action<E>):>int64 & E=>{
-    let total:int64=0
+fold = <E:Effect>(xs:array<int64> f:Action<E>):>int64 & E => {
+    let total:int64 = 0
     loop x in xs {
-        total+=f(x)
+        total += f(x)
     }
     return total
 }
-main=():>void=>{
-    let total:int64=0
+main = ():>void => {
+    let total:int64 = 0
     loop n in [0..32) {
-        total+=quiet(n)
+        total += quiet(n)
     }
-    let cell:int64=0
+    let cell:int64 = 0
     forward(@set_seven @cell)
     $runtime_assert cell =? 7
     $runtime_assert quiet(0) =? 0

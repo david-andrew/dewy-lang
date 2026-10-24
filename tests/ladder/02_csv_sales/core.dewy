@@ -1,30 +1,30 @@
-Sale:type=[region:string units:int64 price:float64]
-summarize=(text:string):>float64=>{
-    let rows=csv_rows(text)
-    let total:float64=0.0
+Sale:type = [region:string units:int64 price:float64]
+summarize = (text:string):>float64 => {
+    let rows = csv_rows(text)
+    let total:float64 = 0.0
     loop i in [1..rows.length) {
-        let fields=rows[i]
-        if fields.length not=? 3 {continue}
-        let units=to_int(fields[1]) ?? 0
-        let price=to_float(fields[2]) ?? 0.0
-        total+=(units as float64)*price
+        let fields = rows[i]
+        if fields.length not=? 3 { continue }
+        let units = to_int(fields[1]) ?? 0
+        let price = to_float(fields[2]) ?? 0.0
+        total += (units as float64)*price
     }
     return total
 }
-roundtrip=(text:string):>bool=>{
-    let rows=csv_rows(text)
-    let encoded=to_csv(rows)
+roundtrip = (text:string):>bool => {
+    let rows = csv_rows(text)
+    let encoded = to_csv(rows)
     return csv_rows(encoded) =? rows
 }
-main=():>void=>{
-    let input="region,units,price\nNorth,2,3.5\nSouth,4,1.25\n"
-    let quoted="name,value\n\"east, coast\",7\n"
+main = ():>void => {
+    let input = "region,units,price\nNorth,2,3.5\nSouth,4,1.25\n"
+    let quoted = "name,value\n\"east, coast\",7\n"
     $runtime_assert(roundtrip(input))
     $runtime_assert(roundtrip(quoted))
-    let rows=csv_rows(quoted)
+    let rows = csv_rows(quoted)
     $runtime_assert(rows.length >? 1 and rows[1].length >? 0 and rows[1][0] =? "east, coast")
     $runtime_assert(summarize(input) =? 12.0)
     $runtime_assert(summarize("region,units,price\n") =? 0.0)
-    let rows=csv_rows(input)
+    let rows = csv_rows(input)
     printl("{rows.length-1} {summarize(input)}")
 }

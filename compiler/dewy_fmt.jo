@@ -16,7 +16,7 @@ df_assignment = (s: DewyToken) -> bool:
 # In particular, preserve calls/indexing, coefficients, generic applications,
 # optional suffixes and the distinction between a-b and [a -b].
 df_free_gap = (left: DewyToken, right: DewyToken) -> bool:
-    df_assignment(left) or df_assignment(right) or left == .colon or left == .comma or left == .semi or left == .lbrace or right == .colon or right == .comma or right == .semi or right == .rbrace
+    df_assignment(left) or df_assignment(right) or left == .colon or left == .comma or left == .semi or left == .lbrace or right == .colon or right == .comma or right == .rbrace
 
 # Whether the `=` at tokens[at] is followed by a function literal: `x =>`, `(...) =>`,
 # `(...):>T =>` or `<T>(...) =>`.
@@ -48,7 +48,7 @@ df_function_value = (tokens: DewyLexeme[], at: int) -> bool:
 # `:` and `:>` have none. `inside`: the innermost open delimiter is a ( or a [. `function`: the `=`
 # defines a function member.
 df_gap = (left: DewyLexeme, right: DewyLexeme, inside: bool, function: bool) -> str:
-    if right.symbol == .colon or right.symbol == .comma or right.symbol == .semi: return ""
+    if right.symbol == .colon or right.symbol == .comma: return ""
     if left.symbol == .colon or left.symbol == .returns or right.symbol == .returns: return ""
     if left.symbol == .lbrace and right.symbol == .rbrace: return ""
     # (`a:array<array<int64>>=[]`: the `>>=` or `>=` closes the angle brackets)

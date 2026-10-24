@@ -4,24 +4,24 @@
 # type, a row and a column stretch over a matrix through `new` axes, and the
 # signature's shape variables reject a row or column of the wrong length.
 
-make=(rows:int64 cols:int64):>array<int64 length=[rows cols]>=>{
-    let cells=zeros<int64>(rows cols)
+make = (rows:int64 cols:int64):>array<int64 length=[rows cols]> => {
+    let cells = zeros<int64>(rows cols)
     loop r in [0..rows) {
         loop c in [0..cols) {
-            cells[r c]=r*10+c
+            cells[r c] = r*10+c
         }
     }
     return cells
 }
 
 # The row runs along each of the m rows, the column down each of the n columns.
-broadcast=(matrix:array<int64 length=[m n]> row:array<int64 length=[n]> column:array<int64 length=[m]>):>array<int64 length=[m n]>=>matrix .+ row[new ..] .+ column[.. new]
+broadcast = (matrix:array<int64 length=[m n]> row:array<int64 length=[n]> column:array<int64 length=[m]>):>array<int64 length=[m n]> => matrix .+ row[new ..] .+ column[.. new]
 
-main=():>void=>{
-    let a=make(3 4)
-    let b=broadcast(a [1 2 3 4] [100 200 300])
-    let t=transpose(b)
-    let restored=transpose(t)
+main = ():>void => {
+    let a = make(3 4)
+    let b = broadcast(a [1 2 3 4] [100 200 300])
+    let t = transpose(b)
+    let restored = transpose(t)
     $runtime_assert restored =? b
     $runtime_assert a[0 0] =? 0
     $runtime_assert b[0 0] =? 101
@@ -31,9 +31,9 @@ main=():>void=>{
     $runtime_assert make(0 4).length =? [0 4]
     $runtime_assert make(3 0).length =? [3 0]
     # A row taken out is a snapshot: changing the matrix leaves it as it was.
-    let first=b[0 [..]]
-    let changed=b
-    changed[0 [..]]=0
+    let first = b[0 [..]]
+    let changed = b
+    changed[0 [..]] = 0
     $runtime_assert first =? [101 103 105 107]
     $runtime_assert changed[0 3] =? 0
     $runtime_assert b[0 3] =? 107

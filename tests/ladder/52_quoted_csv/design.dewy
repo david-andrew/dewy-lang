@@ -1,74 +1,74 @@
-CsvError:type=type of error & [at:int64]
-parse_csv=(text:string):>array<array<string>>|CsvError=> {
-    let rows:array<array<string>>=[]
-    let row:array<string>=[]
-    let field=""
-    let quoted=false
-    let closed=false
-    let i=0
-    loop i <? text.length  {
-        let ch=text[i]
-        if quoted  {
-            if ch =? "\""  {
-                if i+1 <? text.length and text[i+1] =? "\""  {
-                    field="{field}\""
-                    i+=1
+CsvError:type = type of error & [at:int64]
+parse_csv = (text:string):>array<array<string>>|CsvError => {
+    let rows:array<array<string>>= []
+    let row:array<string> = []
+    let field = ""
+    let quoted = false
+    let closed = false
+    let i = 0
+    loop i <? text.length {
+        let ch = text[i]
+        if quoted {
+            if ch =? "\"" {
+                if i+1 <? text.length and text[i+1] =? "\"" {
+                    field = "{field}\""
+                    i += 1
                 }
-                else  {
-                    quoted=false
-                    closed=true
+                else {
+                    quoted = false
+                    closed = true
                 }
             }
-            else  {
-                field="{field}{ch}"
+            else {
+                field = "{field}{ch}"
             }
         }
-        else  {
-            if ch =? ","  {
+        else {
+            if ch =? "," {
                 row.push(field)
-                field=""
-                closed=false
+                field = ""
+                closed = false
             }
-            else if ch =? "\n" or ch =? "\r\n"  {
+            else if ch =? "\n" or ch =? "\r\n" {
                 row.push(field)
                 rows.push(row)
-                row=[]
-                field=""
-                closed=false
+                row = []
+                field = ""
+                closed = false
             }
-            else if ch =? "\r"  {
-                if i+1 >=? text.length or text[i+1] not=? "\n"  {
+            else if ch =? "\r" {
+                if i+1 >=? text.length or text[i+1] not=? "\n" {
                     return CsvError[i]
                 }
             }
-            else if ch =? "\""  {
-                if field not=? "" or closed  {
+            else if ch =? "\"" {
+                if field not=? "" or closed {
                     return CsvError[i]
                 }
-                quoted=true
+                quoted = true
             }
-            else  {
-                if closed  {
+            else {
+                if closed {
                     return CsvError[i]
                 }
-                field="{field}{ch}"
+                field = "{field}{ch}"
             }
         }
-        i+=1
+        i += 1
     }
-    if quoted  {
+    if quoted {
         return CsvError[i]
     }
-    if field not=? "" or row.length >? 0 or closed  {
+    if field not=? "" or row.length >? 0 or closed {
         row.push(field)
         rows.push(row)
     }
     return rows
 }
-main=():>void=> {
-    let text="name,note,amount\r\nAda,\"a,b\",12\r\n\"B\"\"ob\",\"two\nlines\",7\r\n,empty,0\r\n"
-    let result=parse_csv(text)
-    if result is? CsvError  {
+main = ():>void => {
+    let text = "name,note,amount\r\nAda,\"a,b\",12\r\n\"B\"\"ob\",\"two\nlines\",7\r\n,empty,0\r\n"
+    let result = parse_csv(text)
+    if result is? CsvError {
         exit(1)
     }
     $runtime_assert (result.length =? 4)
@@ -76,24 +76,24 @@ main=():>void=> {
     $runtime_assert (result[2].length >? 0 and result[2][0] =? "B\"ob")
     $runtime_assert (result[2].length >? 1 and result[2][1] =? "two\nlines")
     $runtime_assert (result[3].length >? 0 and result[3][0] =? "")
-    let amount=0
-    let cells=0
-    loop i in [1..result.length)  {
-        amount+=to_int(result[i].get(2) ?? "") ?? -999
+    let amount = 0
+    let cells = 0
+    loop i in [1..result.length) {
+        amount += to_int(result[i].get(2) ?? "") ?? -999
     }
-    loop row in result  {
-        cells+=row.length
+    loop row in result {
+        cells += row.length
     }
-    loop bad in ["\"open" "a\"b,c" "\"ok\"bad" "a\rb"]  {
+    loop bad in ["\"open" "a\"b,c" "\"ok\"bad" "a\rb"] {
         $runtime_assert (parse_csv(bad) is? CsvError)
     }
-    let empty=parse_csv("")
-    if empty is? CsvError  {
+    let empty = parse_csv("")
+    if empty is? CsvError {
         exit(2)
     }
     $runtime_assert (empty.length =? 0)
-    let trailing=parse_csv("a,,")
-    if trailing is? CsvError  {
+    let trailing = parse_csv("a,,")
+    if trailing is? CsvError {
         exit(3)
     }
     $runtime_assert (trailing.length >? 0 and trailing[0].length =? 3)

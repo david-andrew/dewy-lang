@@ -1,53 +1,53 @@
 # Fixed slots with generation-tagged handles: no growable storage in the allocator.
-Pool:type=[used:array<bool length=16> generation:array<int64 length=16> data:array<int64 length=16>]
-Handle:type=[slot:int64 generation:int64]
-allocate=(@p:Pool value:int64):>Handle?=> {
-    loop i in [0..16)  {
-        if not p.used[i]  {
-            p.used[i]=true
-            p.data[i]=value
+Pool:type = [used:array<bool length=16> generation:array<int64 length=16> data:array<int64 length=16>]
+Handle:type = [slot:int64 generation:int64]
+allocate = (@p:Pool value:int64):>Handle? => {
+    loop i in [0..16) {
+        if not p.used[i] {
+            p.used[i] = true
+            p.data[i] = value
             return Handle[i p.generation[i]]
         }
     }
     return none
 }
-valid=(p:Pool h:Handle):>bool=> {
-    if h.slot <? 0 or h.slot >=? 16  {
+valid = (p:Pool h:Handle):>bool => {
+    if h.slot <? 0 or h.slot >=? 16 {
         return false
     }
     return p.used[h.slot] and p.generation[h.slot] =? h.generation
 }
-release=(@p:Pool h:Handle):>bool=> {
-    if h.slot <? 0 or h.slot >=? 16 or not valid(p h)  {
+release = (@p:Pool h:Handle):>bool => {
+    if h.slot <? 0 or h.slot >=? 16 or not valid(p h) {
         return false
     }
-    p.used[h.slot]=false
-    p.generation[h.slot]+=1
+    p.used[h.slot] = false
+    p.generation[h.slot] += 1
     return true
 }
-read=(p:Pool h:Handle):>int64?=> {
-    if h.slot <? 0 or h.slot >=? 16 or not valid(p h)  {
+read = (p:Pool h:Handle):>int64? => {
+    if h.slot <? 0 or h.slot >=? 16 or not valid(p h) {
         return none
     }
     return p.data[h.slot]
 }
-main=():>void=> {
-    let pool=Pool[[false false false false false false false false false false false false false false false false] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]]
-    let handles:array<Handle>=[]
-    loop i in [0..16)  {
-        let h=allocate(@pool i*10)
-        if h is? none  {
+main = ():>void => {
+    let pool = Pool[[false false false false false false false false false false false false false false false false] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]]
+    let handles:array<Handle> = []
+    loop i in [0..16) {
+        let h = allocate(@pool i*10)
+        if h is? none {
             exit(1)
         }
         handles.push(h)
     }
     $runtime_assert(allocate(@pool 999) is? none)
-    let saved=pool
-    let stale=handles[3]
+    let saved = pool
+    let stale = handles[3]
     $runtime_assert(release(@pool stale))
     $runtime_assert(not release(@pool stale))
-    let fresh=allocate(@pool 777)
-    if fresh is? none  {
+    let fresh = allocate(@pool 777)
+    if fresh is? none {
         exit(2)
     }
     $runtime_assert(fresh.slot =? stale.slot)
@@ -55,11 +55,11 @@ main=():>void=> {
     $runtime_assert(read(pool stale) is? none)
     $runtime_assert(read(saved stale) =? 30)
     $runtime_assert(read(pool fresh) =? 777)
-    let total=0
-    loop h in handles  {
-        let value=read(pool h)
-        if value is? int64  {
-            total+=value
+    let total = 0
+    loop h in handles {
+        let value = read(pool h)
+        if value is? int64 {
+            total += value
         }
     }
     $runtime_assert(not release(@pool Handle[-1 0]))

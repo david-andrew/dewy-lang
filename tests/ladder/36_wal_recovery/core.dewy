@@ -1,81 +1,81 @@
 # Length, key, value, checksum; a record commits only after its checksum.
-encode=(key:int64<0 <=? key and key <=? 255> value:int64<0 <=? value and value <=? 255>):>array<uint8>=> {
+encode = (key:int64<0 <=? key and key <=? 255> value:int64<0 <=? value and value <=? 255>):>array<uint8> => {
     return [4 (key as uint8) (value as uint8) (((key+value+4) and 255) as uint8)]
 }
-recover=(bytes:array<uint8>):>dict<int64 int64>=> {
-    let store:dict<int64 int64>=[]
-    let offset=0
-    loop offset <? bytes.length  {
-        let length=bytes[offset] as int64
-        if length not=? 4  {
+recover = (bytes:array<uint8>):>dict<int64 int64> => {
+    let store:dict<int64 int64> = []
+    let offset = 0
+    loop offset <? bytes.length {
+        let length = bytes[offset] as int64
+        if length not=? 4 {
             break
         }
-        if offset+length >? bytes.length  {
+        if offset+length >? bytes.length {
             break
         }
-        let key=bytes[offset+1] as int64
-        let value=bytes[offset+2] as int64
-        let checksum=bytes[offset+3] as int64
-        if checksum not=? (key+value+4)%256  {
+        let key = bytes[offset+1] as int64
+        let value = bytes[offset+2] as int64
+        let checksum = bytes[offset+3] as int64
+        if checksum not=? (key+value+4)%256 {
             break
         }
-        if value =? 255  {
+        if value =? 255 {
             store.remove(key);
         }
-        else  {
-            store[key]=value
+        else {
+            store[key] = value
         }
-        offset+=length
+        offset += length
     }
     return store
 }
-main=():>void=> {
-    let log:array<uint8>=[]
-    loop record in [encode(1 10) encode(2 20) encode(1 30) encode(2 255) encode(3 40)]  {
-        loop byte in record  {
+main = ():>void => {
+    let log:array<uint8> = []
+    loop record in [encode(1 10) encode(2 20) encode(1 30) encode(2 255) encode(3 40)] {
+        loop byte in record {
             log.push(byte)
         }
     }
-    let cases=0
-    let total=0
+    let cases = 0
+    let total = 0
     # Every possible crash cut, including exactly at transaction boundaries.
-    loop cut in [0..log.length+1)  {
-        let prefix:array<uint8>=[]
-        loop i in [0..cut)  {
+    loop cut in [0..log.length+1) {
+        let prefix:array<uint8> = []
+        loop i in [0..cut) {
             prefix.push(log[i])
         }
-        let path="crash.wal"
-        let written=write_bytes(path prefix)
-        if written is? (error|Canceled)  {
+        let path = "crash.wal"
+        let written = write_bytes(path prefix)
+        if written is? (error|Canceled) {
             exit(1)
         }
-        let loaded=read_bytes(path)
-        if loaded is? (error|Canceled)  {
+        let loaded = read_bytes(path)
+        if loaded is? (error|Canceled) {
             exit(2)
         }
-        let state=recover(loaded)
-        cases+=1
-        loop [key value] in state  {
-            total+=key*100+value
+        let state = recover(loaded)
+        cases += 1
+        loop [key value] in state {
+            total += key*100+value
         }
-        if cut <? 4  {
+        if cut <? 4 {
             $runtime_assert(state.length =? 0)
         }
-        if cut >=? 16  {
+        if cut >=? 16 {
             $runtime_assert(state.get(2) is? none)
         }
     }
-    let full=recover(log)
+    let full = recover(log)
     $runtime_assert(full.get(1) =? 30)
     $runtime_assert(full.get(3) =? 40)
-    let corrupt=log
+    let corrupt = log
     $runtime_assert corrupt.length >? 11
-    corrupt[11]=0
-    let recovered=recover(corrupt)
+    corrupt[11] = 0
+    let recovered = recover(corrupt)
     $runtime_assert(recovered.get(1) =? 10)
     $runtime_assert(recovered.get(2) =? 20)
-    let removed=remove_file("crash.wal")
-    if removed is? (error|Canceled)  {
+    let removed = remove_file("crash.wal")
+    if removed is? (error|Canceled) {
         exit(3)
     }
     printl("{cases} {total} {full.length}")

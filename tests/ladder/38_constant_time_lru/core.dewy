@@ -1,108 +1,108 @@
 # Hash map + index-linked list. No scan or shift in get/put/evict.
-Link:type=[key:int64 value:int64 prev:int64 next:int64]
-Cache:type=[index:dict<int64 int64> links:array<Link> free:array<int64> head:int64 tail:int64 capacity:int64]
-unlink=(@c:Cache i:int64):>void=> {
+Link:type = [key:int64 value:int64 prev:int64 next:int64]
+Cache:type = [index:dict<int64 int64> links:array<Link> free:array<int64> head:int64 tail:int64 capacity:int64]
+unlink = (@c:Cache i:int64):>void => {
     $runtime_assert(0 <=? i and i <? c.links.length)
-    let left=c.links[i].prev
-    let right=c.links[i].next
+    let left = c.links[i].prev
+    let right = c.links[i].next
     $runtime_assert(left <? c.links.length and right <? c.links.length)
-    if left >=? 0  {
-        c.links[left].next=right
+    if left >=? 0 {
+        c.links[left].next = right
     }
-    else  {
-        c.head=right
+    else {
+        c.head = right
     }
-    if right >=? 0  {
-        c.links[right].prev=left
+    if right >=? 0 {
+        c.links[right].prev = left
     }
-    else  {
-        c.tail=left
+    else {
+        c.tail = left
     }
 }
-touch=(@c:Cache i:int64):>void=> {
-    if c.tail =? i  {
+touch = (@c:Cache i:int64):>void => {
+    if c.tail =? i {
         return
     }
     unlink(@c i)
     $runtime_assert(0 <=? i and i <? c.links.length and c.tail <? c.links.length)
-    c.links[i].prev=c.tail
-    c.links[i].next=-1
-    if c.tail >=? 0  {
-        c.links[c.tail].next=i
+    c.links[i].prev = c.tail
+    c.links[i].next = -1
+    if c.tail >=? 0 {
+        c.links[c.tail].next = i
     }
-    else  {
-        c.head=i
+    else {
+        c.head = i
     }
-    c.tail=i
+    c.tail = i
 }
-get=(@c:Cache key:int64):>int64?=> {
-    let slot=c.index.get(key)
-    if slot is? none or slot <? 0 or slot >=? c.links.length  {
+get = (@c:Cache key:int64):>int64? => {
+    let slot = c.index.get(key)
+    if slot is? none or slot <? 0 or slot >=? c.links.length {
         return none
     }
-    let value=c.links[slot].value
+    let value = c.links[slot].value
     touch(@c slot)
     return value
 }
-put=(@c:Cache key:int64 value:int64):>void=> {
-    if c.capacity =? 0  {
+put = (@c:Cache key:int64 value:int64):>void => {
+    if c.capacity =? 0 {
         return
     }
-    let existing=c.index.get(key)
-    if existing is? int64  {
+    let existing = c.index.get(key)
+    if existing is? int64 {
         $runtime_assert(0 <=? existing and existing <? c.links.length)
-        c.links[existing].value=value
+        c.links[existing].value = value
         touch(@c existing)
         return
     }
-    let slot=0
-    if c.index.length =? c.capacity  {
-        slot=c.head
+    let slot = 0
+    if c.index.length =? c.capacity {
+        slot = c.head
         $runtime_assert(0 <=? slot and slot <? c.links.length)
         c.index.remove(c.links[slot].key)
         unlink(@c slot)
     }
-    else  {
-        slot=c.links.length
+    else {
+        slot = c.links.length
         c.links.push(Link[0 0 -1 -1])
     }
     $runtime_assert(0 <=? slot and slot <? c.links.length and c.tail <? c.links.length)
-    c.links[slot]=Link[key value c.tail -1]
-    if c.tail >=? 0  {
-        c.links[c.tail].next=slot
+    c.links[slot] = Link[key value c.tail -1]
+    if c.tail >=? 0 {
+        c.links[c.tail].next = slot
     }
-    else  {
-        c.head=slot
+    else {
+        c.head = slot
     }
-    c.tail=slot
-    c.index[key]=slot
+    c.tail = slot
+    c.index[key] = slot
 }
-main=():>void=> {
-    let c=Cache[[] [] [] -1 -1 8]
-    let hits=0
-    let checksum=0
-    loop i in [0..2000)  {
-        let key=(i*17)%23
+main = ():>void => {
+    let c = Cache[[] [] [] -1 -1 8]
+    let hits = 0
+    let checksum = 0
+    loop i in [0..2000) {
+        let key = (i*17)%23
         put(@c key i)
-        let value=get(@c (i*7)%23)
-        if value is? int64  {
-            hits+=1
-            checksum+=value
+        let value = get(@c (i*7)%23)
+        if value is? int64 {
+            hits += 1
+            checksum += value
         }
     }
-    let keys:array<int64>=[]
-    let cursor=c.head
-    loop cursor >=? 0  {
+    let keys:array<int64> = []
+    let cursor = c.head
+    loop cursor >=? 0 {
         $runtime_assert(cursor <? c.links.length)
         keys.push(c.links[cursor].key)
-        cursor=c.links[cursor].next
+        cursor = c.links[cursor].next
     }
     $runtime_assert(keys.length =? 8)
     $runtime_assert(c.links.length =? 8)
-    let saved=c
+    let saved = c
     put(@c 999 5)
     $runtime_assert(saved.index.get(999) is? none)
-    let zero=Cache[[] [] [] -1 -1 0]
+    let zero = Cache[[] [] [] -1 -1 0]
     put(@zero 1 2)
     $runtime_assert(get(@zero 1) is? none)
     printl("{hits} {checksum} {keys[0]} {keys[7]}")

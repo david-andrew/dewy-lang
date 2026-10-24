@@ -13,46 +13,46 @@
 $explicit_copies
 
 # All ones when `bit` is 1, zero when it is 0.
-mask32=(bit:uint32):>uint32 & no_effects=>0-bit
-mask64=(bit:uint64):>uint64 & no_effects=>0-bit
+mask32 = (bit:uint32):>uint32 & no_effects => 0-bit
+mask64 = (bit:uint64):>uint64 & no_effects => 0-bit
 
 # `a` where the mask is all ones, `b` where it is zero.
-select32=(m:uint32 a:uint32 b:uint32):>uint32 & no_effects=>(a and m) or (b and (not m))
-select64=(m:uint64 a:uint64 b:uint64):>uint64 & no_effects=>(a and m) or (b and (not m))
+select32 = (m:uint32 a:uint32 b:uint32):>uint32 & no_effects => (a and m) or (b and (not m))
+select64 = (m:uint64 a:uint64 b:uint64):>uint64 & no_effects => (a and m) or (b and (not m))
 
 # 1 when x is zero, else 0, without a branch: x-1 borrows into bit 63 only for zero.
-is_zero64=(x:uint64):>uint64 & no_effects=>((not x) and (x-1)) >> 63
-is_zero32=(x:uint32):>uint32 & no_effects=>((not x) and (x-1)) >> 31
+is_zero64 = (x:uint64):>uint64 & no_effects => ((not x) and (x-1)) >> 63
+is_zero32 = (x:uint32):>uint32 & no_effects => ((not x) and (x-1)) >> 31
 
 # Compare two byte strings of public length in time independent of their contents.
 # The lengths are public (a tag is always 16 bytes); only the final verdict leaves.
-equal=(a:array<uint8> b:array<uint8>):>bool & no_effects=>{
+equal = (a:array<uint8> b:array<uint8>):>bool & no_effects => {
     if a.length not=? b.length return false
-    let diff:uint32=0
+    let diff:uint32 = 0
     loop i in [0..a.length) {
-        diff=diff or ((a[i] xor b[i]) as uint32)
+        diff = diff or ((a[i] xor b[i]) as uint32)
     }
     return is_zero32(diff) =? 1
 }
 
 # Overwrite a secret buffer before it is released.
-wipe=(@buffer:array<uint8>):>void=>{
+wipe = (@buffer:array<uint8>):>void => {
     loop @b in buffer {
-        b=0
+        b = 0
     }
 }
 
 # Little-endian word loads and stores at public offsets.
-load32=(b:array<uint8> at:int64<0 <=? at and at+4 <=? b.length>):>uint32=>(b[at] as uint32) or ((b[at+1] as uint32) << 8) or ((b[at+2] as uint32) << 16) or ((b[at+3] as uint32) << 24)
+load32 = (b:array<uint8> at:int64<0 <=? at and at+4 <=? b.length>):>uint32 => (b[at] as uint32) or ((b[at+1] as uint32) << 8) or ((b[at+2] as uint32) << 16) or ((b[at+3] as uint32) << 24)
 
-store32=(@out:array<uint8> word:uint32):>void=>{
+store32 = (@out:array<uint8> word:uint32):>void => {
     out.push((word and 255) as uint8)
     out.push(((word >> 8) and 255) as uint8)
     out.push(((word >> 16) and 255) as uint8)
     out.push((word >> 24) as uint8)
 }
 
-store64=(@out:array<uint8> word:uint64):>void=>{
+store64 = (@out:array<uint8> word:uint64):>void => {
     loop i in [0..8) {
         out.push(((word >> (8*i)) and 255) as uint8)
     }

@@ -1,78 +1,78 @@
 from units import rad
-Complex:type=[re:float64 im:float64]
-add_c=(a:Complex b:Complex):>Complex=>Complex[a.re+b.re a.im+b.im]
-sub_c=(a:Complex b:Complex):>Complex=>Complex[a.re-b.re a.im-b.im]
-mul_c=(a:Complex b:Complex):>Complex=>Complex[a.re*b.re-a.im*b.im a.re*b.im+a.im*b.re]
-fft=(input:array<Complex> inverse:bool):>array<Complex>=> {
-    let data=input
-    let n=data.length
-    let j=0
-    loop i in [1..n)  {
-        let bit=n//2
-        loop (j and bit) not=? 0  {
-            j=j xor bit
-            bit=bit//2
+Complex:type = [re:float64 im:float64]
+add_c = (a:Complex b:Complex):>Complex => Complex[a.re+b.re a.im+b.im]
+sub_c = (a:Complex b:Complex):>Complex => Complex[a.re-b.re a.im-b.im]
+mul_c = (a:Complex b:Complex):>Complex => Complex[a.re*b.re-a.im*b.im a.re*b.im+a.im*b.re]
+fft = (input:array<Complex> inverse:bool):>array<Complex> => {
+    let data = input
+    let n = data.length
+    let j = 0
+    loop i in [1..n) {
+        let bit = n//2
+        loop (j and bit) not=? 0 {
+            j = j xor bit
+            bit = bit//2
         }
-        j=j xor bit
-        if i <? j  {
+        j = j xor bit
+        if i <? j {
             $runtime_assert j <? data.length
-            let temp=data[i]
-            data[i]=data[j]
-            data[j]=temp
+            let temp = data[i]
+            data[i] = data[j]
+            data[j] = temp
         }
     }
-    let width=2
-    loop width <=? n  {
-        let angle=-2.0*3.141592653589793/(width as float64)
-        if inverse  {
-            angle=-angle
+    let width = 2
+    loop width <=? n {
+        let angle = -2.0*3.141592653589793/(width as float64)
+        if inverse {
+            angle = -angle
         }
-        let root=Complex[cos(angle*rad) sin(angle*rad)]
-        let start=0
-        loop start <? n  {
-            let factor=Complex[1.0 0.0]
-            loop offset in [0..width//2)  {
-                let low=start+offset
-                let high=low+width//2
+        let root = Complex[cos(angle*rad) sin(angle*rad)]
+        let start = 0
+        loop start <? n {
+            let factor = Complex[1.0 0.0]
+            loop offset in [0..width//2) {
+                let low = start+offset
+                let high = low+width//2
                 $runtime_assert 0 <=? low and low <? data.length and 0 <=? high and high <? data.length
-                let even=data[low]
-                let odd=mul_c(data[high] factor)
-                data[low]=add_c(even odd)
-                data[high]=sub_c(even odd)
-                factor=mul_c(factor root)
+                let even = data[low]
+                let odd = mul_c(data[high] factor)
+                data[low] = add_c(even odd)
+                data[high] = sub_c(even odd)
+                factor = mul_c(factor root)
             }
-            start+=width
+            start += width
         }
-        width*=2
+        width *= 2
     }
-    if inverse  {
-        loop i in [0..n)  {
-            data[i].re/=(n as float64)
-            data[i].im/=(n as float64)
+    if inverse {
+        loop i in [0..n) {
+            data[i].re /= (n as float64)
+            data[i].im /= (n as float64)
         }
     }
     return data
 }
-main=():>void=> {
-    let input=[loop i in [0..64) Complex[((i*7)%13) as float64 0.0]]
-    let spectrum=fft(input false)
-    let restored=fft(spectrum true)
-    let energy:float64=0.0
-    let spectral:float64=0.0
-    loop i in [0..64)  {
+main = ():>void => {
+    let input = [loop i in [0..64) Complex[((i*7)%13) as float64 0.0]]
+    let spectrum = fft(input false)
+    let restored = fft(spectrum true)
+    let energy:float64 = 0.0
+    let spectral:float64 = 0.0
+    loop i in [0..64) {
         $runtime_assert(abs(restored[i].re-input[i].re) <? 1e-9)
         $runtime_assert(abs(restored[i].im) <? 1e-9)
-        energy+=input[i].re^2
-        spectral+=spectrum[i].re^2+spectrum[i].im^2
+        energy += input[i].re^2
+        spectral += spectrum[i].re^2+spectrum[i].im^2
     }
     $runtime_assert(abs(energy-spectral/64.0) <? 1e-7)
-    let impulse=[loop i in [0..8) Complex[0.0 0.0]]
-    impulse[0].re=1.0
-    let flat=fft(impulse false)
-    loop item in flat  {
+    let impulse = [loop i in [0..8) Complex[0.0 0.0]]
+    impulse[0].re = 1.0
+    let flat = fft(impulse false)
+    loop item in flat {
         $runtime_assert(abs(item.re-1.0) <? 1e-12)
     }
-    let singleton=fft([Complex[3.0 4.0]] false)
+    let singleton = fft([Complex[3.0 4.0]] false)
     $runtime_assert(singleton[0].im =? 4.0)
     printl("{format(spectrum[0].re ".3f")} {format(energy ".3f")} {format(spectrum[1].re ".3f")}")
 }

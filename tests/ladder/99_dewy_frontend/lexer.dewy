@@ -7,99 +7,99 @@ from p"tokens.dewy" import Symbol, spelling, is_word, PUNCTUATION
 Kind:type = 'op' | 'identifier' | 'boolean' | 'quoted' | 'rawquoted' | 'based_string' |
     'metatag' | 'source_integer' | 'integer' | 'source_real' | 'eof'
 
-Token:type=[kind:Kind symbol:Symbol?=none start:int64 stop:int64 space:bool=false newline:bool=false]
+Token:type = [kind:Kind symbol:Symbol?=none start:int64 stop:int64 space:bool=false newline:bool=false]
 
-LexError:type=type of error & [offset:int64 message:string]
+LexError:type = type of error & [offset:int64 message:string]
 
-const MAX_NESTING:int64=256
+const MAX_NESTING:int64 = 256
 
-is_digit=(c:uint8):>bool=>b'0' <=? c <=? b'9'
-is_alpha=(c:uint8):>bool=>(b'a' <=? c <=? b'z') or (b'A' <=? c <=? b'Z')
-ident_start=(c:uint8):>bool=>is_alpha(c) or c =? b'_' or c >=? 0x80
-ident_part=(c:uint8):>bool=>ident_start(c) or is_digit(c)
+is_digit = (c:uint8):>bool => b'0' <=? c <=? b'9'
+is_alpha = (c:uint8):>bool => (b'a' <=? c <=? b'z') or (b'A' <=? c <=? b'Z')
+ident_start = (c:uint8):>bool => is_alpha(c) or c =? b'_' or c >=? 0x80
+ident_part = (c:uint8):>bool => ident_start(c) or is_digit(c)
 # (`$name` and the ASCII run of a name)
-ascii_part=(c:uint8):>bool=>is_alpha(c) or is_digit(c) or c =? b'_'
-is_space=(c:uint8):>bool=>c =? b' ' or c =? b'\t' or c =? b'\r' or c =? b'\n'
-is_quote=(c:uint8):>bool=>c =? b'"' or c =? b'\''
+ascii_part = (c:uint8):>bool => is_alpha(c) or is_digit(c) or c =? b'_'
+is_space = (c:uint8):>bool => c =? b' ' or c =? b'\t' or c =? b'\r' or c =? b'\n'
+is_quote = (c:uint8):>bool => c =? b'"' or c =? b'\''
 
-text_of=(source:array<uint8> start:int64 stop:int64):>string=>{
+text_of = (source:array<uint8> start:int64 stop:int64):>string => {
     if start <? 0 or start >? stop or stop >? source.length return "\u{FFFD}"
     return (source[start..stop) as string | none) ?? "\u{FFFD}"
 }
 
-lex_error=(offset:int64 message:string):>LexError=>LexError[offset message]
+lex_error = (offset:int64 message:string):>LexError => LexError[offset message]
 
-quote_width=(source:array<uint8> start:int64<0 <=? start and start <=? source.length> stop:int64<start <? stop and stop <=? source.length>):>int64=>{
-    let q=source[start]
+quote_width = (source:array<uint8> start:int64<0 <=? start and start <=? source.length> stop:int64<start <? stop and stop <=? source.length>):>int64 => {
+    let q = source[start]
     if start+2 <? stop and source[start+1] =? q and source[start+2] =? q return 3
     return 1
 }
 
 # The end of a nested `#{ ... }#` comment, or -1.
-block_comment_end=(source:array<uint8> start:int64<0 <=? start and start <=? source.length> stop:int64<(<=? source.length)>):>int64<r => -1 <=? r and r <=? source.length>=>{
-    let i=start+2
-    let depth=1
+block_comment_end = (source:array<uint8> start:int64<0 <=? start and start <=? source.length> stop:int64<(<=? source.length)>):>int64<r => -1 <=? r and r <=? source.length> => {
+    let i = start+2
+    let depth = 1
     loop i <? stop and i+1 <? stop {
         if source[i] =? b'#' and source[i+1] =? b'\{' {
-            depth+=1
-            i+=2
+            depth += 1
+            i += 2
         } else if source[i] =? b'\}' and source[i+1] =? b'#' {
-            depth-=1
-            i+=2
+            depth -= 1
+            i += 2
             if depth =? 0 return i
         } else {
-            i+=1
+            i += 1
         }
     }
     return -1
 }
 
 # The closing brace of an interpolation, skipping nested strings and comments.
-interpolation_end=(source:array<uint8> start:int64<0 <=? start and start <=? source.length> stop:int64<(<=? source.length)> nesting:int64):>int64<r => 0 <=? r and r <? stop>|LexError=>{
-    let i=start
-    let depth=1
+interpolation_end = (source:array<uint8> start:int64<0 <=? start and start <=? source.length> stop:int64<(<=? source.length)> nesting:int64):>int64<r => 0 <=? r and r <? stop>|LexError => {
+    let i = start
+    let depth = 1
     loop i <? stop {
-        let c=source[i]
+        let c = source[i]
         if c =? b'#' and i+1 <? stop and source[i+1] =? b'\{' {
-            let e=block_comment_end(source i stop)
+            let e = block_comment_end(source i stop)
             if e <? 0 return lex_error(i "unterminated block comment")
-            i=e
+            i = e
             continue
         }
         if c =? b'#' {
-            loop i <? stop and source[i] not=? b'\n' {i+=1}
+            loop i <? stop and source[i] not=? b'\n' { i += 1 }
             continue
         }
         if c =? b'r' and i+1 <? stop and is_quote(source[i+1]) and (i <=? start or not ident_part(source[i-1])) {
-            i=quote_end(source i+1 stop nesting true) or_throw
+            i = quote_end(source i+1 stop nesting true) or_throw
             continue
         }
         if is_quote(c) {
-            i=quote_end(source i stop nesting false) or_throw
+            i = quote_end(source i stop nesting false) or_throw
             continue
         }
         if c =? b'\{' {
-            depth+=1
+            depth += 1
         } else if c =? b'\}' {
-            depth-=1
+            depth -= 1
             if depth =? 0 return i
         }
-        i+=1
+        i += 1
     }
     return lex_error(start "unterminated string interpolation")
 }
 
 # Just past a quoted token, including nested strings inside interpolations.
-quote_end=(source:array<uint8> start:int64<0 <=? start and start <=? source.length> stop:int64<start <? stop and stop <=? source.length> nesting:int64=0 raw:bool=false):>int64<r => 0 <=? r and r <=? source.length>|LexError=>{
+quote_end = (source:array<uint8> start:int64<0 <=? start and start <=? source.length> stop:int64<start <? stop and stop <=? source.length> nesting:int64=0 raw:bool=false):>int64<r => 0 <=? r and r <=? source.length>|LexError => {
     $runtime_checks
     if nesting >=? MAX_NESTING return lex_error(start "string interpolation is nested too deeply")
-    let quote=source[start]
-    let width=quote_width(source start stop)
-    let i=start+width
+    let quote = source[start]
+    let width = quote_width(source start stop)
+    let i = start+width
     loop i <? stop {
-        let c=source[i]
+        let c = source[i]
         if not raw and c =? b'\\' {
-            i+=2
+            i += 2
             continue
         }
         if c =? quote {
@@ -107,11 +107,11 @@ quote_end=(source:array<uint8> start:int64<0 <=? start and start <=? source.leng
             if i+2 <? stop and source[i+1] =? quote and source[i+2] =? quote return i+3
         }
         if not raw and c =? b'\{' {
-            let e=interpolation_end(source i+1 stop nesting+1) or_throw
-            i=e+1
+            let e = interpolation_end(source i+1 stop nesting+1) or_throw
+            i = e+1
             continue
         }
-        i+=1
+        i += 1
     }
     return lex_error(start "unterminated string")
 }
@@ -119,18 +119,18 @@ quote_end=(source:array<uint8> start:int64<0 <=? start and start <=? source.leng
 # Maximal munch over the punctuation spellings that begin with this byte.
 # (`>=` is not lexed: a lone `>` closes a type argument before `=`; and
 # nested generic closers before `=>` are `>>` then `=>`, not `>>=` then `>`.)
-punctuation=(source:array<uint8> at:int64<0 <=? at and at <=? source.length> stop:int64<at <? stop and stop <=? source.length>):>Symbol?=>{
+punctuation = (source:array<uint8> at:int64<0 <=? at and at <=? source.length> stop:int64<at <? stop and stop <=? source.length>):>Symbol? => {
     $runtime_checks
-    let options=PUNCTUATION.get(source[at])
+    let options = PUNCTUATION.get(source[at])
     if options is? none return none
     loop text in options {
-        let raw=bytes(text)
+        let raw = bytes(text)
         if at+raw.length >? stop continue
         if text =? ">=" continue
-        let same=true
+        let same = true
         loop k in [0..raw.length) {
             if source[at+k] not=? raw[k] {
-                same=false
+                same = false
                 break
             }
         }
@@ -142,10 +142,10 @@ punctuation=(source:array<uint8> at:int64<0 <=? at and at <=? source.length> sto
 }
 
 # `and=`, `or=`, `xor=`: a word operator directly followed by `=` (not `=?`, `=>` or `==`).
-word_assign=(word:Symbol? source:array<uint8> at:int64<0 <=? at and at <=? source.length> stop:int64<(<=? source.length)>):>Symbol?=>{
+word_assign = (word:Symbol? source:array<uint8> at:int64<0 <=? at and at <=? source.length> stop:int64<(<=? source.length)>):>Symbol? => {
     if word is? none or at >=? stop or source[at] not=? b'=' return none
     if at+1 <? stop {
-        let next=source[at+1]
+        let next = source[at+1]
         if next =? b'?' or next =? b'>' or next =? b'=' return none
     }
     if word =? 'and' return 'and='
@@ -155,117 +155,117 @@ word_assign=(word:Symbol? source:array<uint8> at:int64<0 <=? at and at <=? sourc
 }
 
 # Just past a punctuation symbol found at `at`.
-symbol_end=(source:array<uint8> at:int64<0 <=? at and at <=? source.length> symbol:Symbol):>int64<r => 0 <=? r and r <=? source.length>=>{
-    let r=at+symbol.length
+symbol_end = (source:array<uint8> at:int64<0 <=? at and at <=? source.length> symbol:Symbol):>int64<r => 0 <=? r and r <=? source.length> => {
+    let r = at+symbol.length
     $runtime_assert 0 <=? r and r <=? source.length
     return r
 }
 
-lex=(source:array<uint8> begin:int64<0 <=? begin and begin <=? source.length>=0 finish:int64<(<=? source.length)>=-1):>array<Token>|LexError=>{
+lex = (source:array<uint8> begin:int64<0 <=? begin and begin <=? source.length>=0 finish:int64<(<=? source.length)>=-1):>array<Token>|LexError => {
     $runtime_checks
-    let stop=source.length
-    if finish >=? 0 stop=finish
-    let out:array<Token>=[]
-    let i=begin
-    let spaced=false
-    let newline=false
-    let bases=b"btqsodzxug"
+    let stop = source.length
+    if finish >=? 0 stop = finish
+    let out:array<Token> = []
+    let i = begin
+    let spaced = false
+    let newline = false
+    let bases = b"btqsodzxug"
     loop i <? stop {
-        let c=source[i]
+        let c = source[i]
         if is_space(c) {
-            spaced=true
+            spaced = true
             loop i <? stop and is_space(source[i]) {
-                if source[i] =? b'\n' newline=true
-                i+=1
+                if source[i] =? b'\n' newline = true
+                i += 1
             }
             continue
         }
         if c =? b'#' and i+1 <? stop and source[i+1] =? b'\{' {
-            let e=block_comment_end(source i stop)
+            let e = block_comment_end(source i stop)
             if e <? 0 return lex_error(i "unterminated block comment: `#\{` needs a matching `\}#` (block comments nest)")
             # (a comment over several lines separates like a line break)
             loop k in [i..e) {
-                if source[k] =? b'\n' newline=true
+                if source[k] =? b'\n' newline = true
             }
-            spaced=true
-            i=e
+            spaced = true
+            i = e
             continue
         }
         if c =? b'#' {
-            loop i <? stop and source[i] not=? b'\n' {i+=1}
-            spaced=true
+            loop i <? stop and source[i] not=? b'\n' { i += 1 }
+            spaced = true
             continue
         }
-        let start=i
-        let kind:Kind='op'
-        let symbol:Symbol?=none
+        let start = i
+        let kind:Kind = 'op'
+        let symbol:Symbol? = none
         if c =? b'r' and i+1 <? stop and is_quote(source[i+1]) {
-            i=quote_end(source i+1 stop 0 true) or_throw
-            kind='rawquoted'
+            i = quote_end(source i+1 stop 0 true) or_throw
+            kind = 'rawquoted'
         } else if ident_start(c) {
-            i+=1
-            loop i <? stop and ident_part(source[i]) {i+=1}
-            kind='identifier'
-            let value=text_of(source start i)
-            if value =? "true" or value =? "false" kind='boolean'
+            i += 1
+            loop i <? stop and ident_part(source[i]) { i += 1 }
+            kind = 'identifier'
+            let value = text_of(source start i)
+            if value =? "true" or value =? "false" kind = 'boolean'
             if value in? ["is" "isnt" "in"] and i <? stop and source[i] =? b'?' {
-                value="{value}?"
-                i+=1
-                kind='op'
+                value = "{value}?"
+                i += 1
+                kind = 'op'
             }
-            if kind not=? 'boolean' and (is_word(value) or kind =? 'op') symbol=spelling(value)
-            let combined=word_assign(symbol source i stop)
+            if kind not=? 'boolean' and (is_word(value) or kind =? 'op') symbol = spelling(value)
+            let combined = word_assign(symbol source i stop)
             if combined isnt? none {
-                symbol=combined
-                kind='op'
-                i+=1
+                symbol = combined
+                kind = 'op'
+                i += 1
             }
         } else if c =? b'$' {
-            i+=1
-            loop i <? stop and ascii_part(source[i]) {i+=1}
+            i += 1
+            loop i <? stop and ascii_part(source[i]) { i += 1 }
             if i =? start+1 return lex_error(start "expected a name after $")
-            kind='metatag'
+            kind = 'metatag'
         } else if is_digit(c) {
-            let decimal=true
-            let digits=start
+            let decimal = true
+            let digits = start
             if c =? b'0' and i+1 <? stop and source[i+1] in? bases {
-                decimal=source[i+1] =? b'd'
-                i+=2
-                digits=i
+                decimal = source[i+1] =? b'd'
+                i += 2
+                digits = i
             }
             if i <? stop and is_quote(source[i]) {
-                i=quote_end(source i stop) or_throw
-                kind='based_string'
+                i = quote_end(source i stop) or_throw
+                kind = 'based_string'
             } else {
-                loop i <? stop and (is_digit(source[i]) or source[i] =? b'_' or (not decimal and ascii_part(source[i]))) {i+=1}
+                loop i <? stop and (is_digit(source[i]) or source[i] =? b'_' or (not decimal and ascii_part(source[i]))) { i += 1 }
                 if i =? digits return lex_error(start "expected digits after the base prefix")
-                kind=if decimal 'source_integer' else 'integer'
+                kind = if decimal 'source_integer' else 'integer'
                 if decimal and i+1 <? stop and source[i] =? b'.' and is_digit(source[i+1]) {
-                    i+=1
-                    loop i <? stop and (is_digit(source[i]) or source[i] =? b'_') {i+=1}
-                    kind='source_real'
+                    i += 1
+                    loop i <? stop and (is_digit(source[i]) or source[i] =? b'_') { i += 1 }
+                    kind = 'source_real'
                 }
                 if decimal and i+1 <? stop and (source[i] =? b'e' or source[i] =? b'E')
                     and (is_digit(source[i+1]) or source[i+1] =? b'+' or source[i+1] =? b'-') {
-                    i+=1
-                    if i <? stop and (source[i] =? b'+' or source[i] =? b'-') i+=1
-                    let first=i
-                    loop i <? stop and (is_digit(source[i]) or source[i] =? b'_') {i+=1}
-                    if i =? first return lex_error(start "expected exponent digits")
-                    kind='source_real'
-                }
+                        i += 1
+                        if i <? stop and (source[i] =? b'+' or source[i] =? b'-') i += 1
+                        let first = i
+                        loop i <? stop and (is_digit(source[i]) or source[i] =? b'_') { i += 1 }
+                        if i =? first return lex_error(start "expected exponent digits")
+                        kind = 'source_real'
+                    }
             }
         } else if is_quote(c) {
-            i=quote_end(source i stop) or_throw
-            kind='quoted'
+            i = quote_end(source i stop) or_throw
+            kind = 'quoted'
         } else {
-            symbol=punctuation(source start stop)
+            symbol = punctuation(source start stop)
             if symbol is? none return lex_error(start "unexpected character in Dewy source")
-            i=symbol_end(source start symbol)
+            i = symbol_end(source start symbol)
         }
         out.push(Token[kind symbol start i spaced newline])
-        spaced=false
-        newline=false
+        spaced = false
+        newline = false
     }
     out.push(Token['eof' none stop stop spaced newline])
     return out

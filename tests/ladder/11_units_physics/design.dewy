@@ -1,30 +1,30 @@
 from units import m, kg
-height=(speed gravity)=>{
-    let duration=speed/gravity
+height = (speed gravity) => {
+    let duration = speed/gravity
     return speed*duration-gravity*duration^2/2
 }
-kinetic=(mass speed)=>mass*speed^2/2
-potential=(mass gravity altitude)=>mass*gravity*altitude
-main=():>void=>{
-    let mass=2kg
-    let launch=20m/s
-    let gravity=10m/s^2
-    let altitude=height(launch gravity)
-    let energy=kinetic(mass launch)
-    let stored=potential(mass gravity altitude)
+kinetic = (mass speed) => mass*speed^2/2
+potential = (mass gravity altitude) => mass*gravity*altitude
+main = ():>void => {
+    let mass = 2kg
+    let launch = 20m/s
+    let gravity = 10m/s^2
+    let altitude = height(launch gravity)
+    let energy = kinetic(mass launch)
+    let stored = potential(mass gravity altitude)
     $runtime_assert (altitude/m =? 20)
     $runtime_assert (energy =? stored)
-    let duration=launch/gravity
+    let duration = launch/gravity
     $runtime_assert (duration/s =? 2)
-    let higher=height(2launch gravity)
+    let higher = height(2launch gravity)
     $runtime_assert (higher =? 4altitude)
-    let heavier=kinetic(2mass launch)
+    let heavier = kinetic(2mass launch)
     $runtime_assert (heavier =? 2energy)
-    let zero=height(0m/s gravity)
+    let zero = height(0m/s gravity)
     $runtime_assert (zero/m =? 0)
-    let energy_unit=kg*m^2/s^2
-    let reported_height=altitude/m
-    let reported_energy=energy/energy_unit
-    let reported_time=duration/s
+    let energy_unit = kg*m^2/s^2
+    let reported_height = altitude/m
+    let reported_energy = energy/energy_unit
+    let reported_time = duration/s
     printl("{reported_height} {reported_energy} {reported_time}")
 }

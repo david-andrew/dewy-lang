@@ -1,60 +1,60 @@
 from units import m, km, kg
-Position:type=float64*Length
-Velocity:type=float64*Length/Time
-Acceleration:type=float64*Length/Time^2
-Body:type=[height:Position speed:Velocity mass:float64*Mass]
-step=(body:Body dt:float64*Time gravity:Acceleration):>Body=> {
-    let next=body
-    next.height+=body.speed*dt-gravity*dt^2/2
-    next.speed-=gravity*dt
+Position:type = float64*Length
+Velocity:type = float64*Length/Time
+Acceleration:type = float64*Length/Time^2
+Body:type = [height:Position speed:Velocity mass:float64*Mass]
+step = (body:Body dt:float64*Time gravity:Acceleration):>Body => {
+    let next = body
+    next.height += body.speed*dt-gravity*dt^2/2
+    next.speed -= gravity*dt
     return next
 }
-energy=(body:Body gravity:Acceleration)=>body.mass*body.speed^2/2+body.mass*gravity*body.height
-travel=(speed elapsed)=>speed*elapsed
-main=():>void=> {
-    let gravity:Acceleration=10m/s^2
-    let body=Body[0m 72km/hour 2kg]
-    let saved=body
-    let initial=energy(body gravity)
-    let dt:float64*Time=50ms
-    let maximum:Position=0m
-    loop frame in [0..80)  {
-        body=step(body dt gravity)
-        if body.height >? maximum  {
-            maximum=body.height
+energy = (body:Body gravity:Acceleration) => body.mass*body.speed^2/2+body.mass*gravity*body.height
+travel = (speed elapsed) => speed*elapsed
+main = ():>void => {
+    let gravity:Acceleration = 10m/s^2
+    let body = Body[0m 72km/hour 2kg]
+    let saved = body
+    let initial = energy(body gravity)
+    let dt:float64*Time = 50ms
+    let maximum:Position = 0m
+    loop frame in [0..80) {
+        body = step(body dt gravity)
+        if body.height >? maximum {
+            maximum = body.height
         }
-        let drift=(energy(body gravity)-initial)/(kg*m^2/s^2)
+        let drift = (energy(body gravity)-initial)/(kg*m^2/s^2)
         $runtime_assert (abs(drift) <? 1e-7)
     }
     $runtime_assert (abs(body.height/m) <? 1e-9)
     $runtime_assert (abs(body.speed/(m/s)+20.0) <? 1e-9)
     $runtime_assert (abs(maximum/m-20.0) <? 1e-9)
     $runtime_assert (saved.speed =? 20m/s)
-    let distance=travel(90km/hour 2minute)
+    let distance = travel(90km/hour 2minute)
     $runtime_assert (distance/m =? 3000)
-    let durations:array<float64*Time>=[100ms 1s 1minute]
-    let sum_time:float64*Time=0*s
-    loop duration in durations  {
-        sum_time+=duration
+    let durations:array<float64*Time> = [100ms 1s 1minute]
+    let sum_time:float64*Time = 0*s
+    loop duration in durations {
+        sum_time += duration
     }
     $runtime_assert (sum_time/ms =? 61100)
-    let impulse=body.mass*(saved.speed-body.speed)
-    let reported_impulse=impulse/(kg*m/s)
-    let mean_speed=distance/(2minute)
+    let impulse = body.mass*(saved.speed-body.speed)
+    let reported_impulse = impulse/(kg*m/s)
+    let mean_speed = distance/(2minute)
     $runtime_assert (mean_speed =? 25m/s)
-    let twice=step(saved 100ms gravity)
-    let half=step(step(saved 50ms gravity) 50ms gravity)
+    let twice = step(saved 100ms gravity)
+    let half = step(step(saved 50ms gravity) 50ms gravity)
     $runtime_assert (abs((twice.height-half.height)/m) <? 1e-12)
-    let empty=travel(0m/s 9hour)
+    let empty = travel(0m/s 9hour)
     $runtime_assert (empty/m =? 0)
-    let one_step=step(saved 0ms gravity)
+    let one_step = step(saved 0ms gravity)
     $runtime_assert (one_step =? saved)
-    let second_body=Body[1km 0m/s 500kg]
-    let second_energy=energy(second_body gravity)
+    let second_body = Body[1km 0m/s 500kg]
+    let second_energy = energy(second_body gravity)
     $runtime_assert (second_energy/(kg*m^2/s^2) =? 5000000.0)
-    let acceleration=1km/(10s)^2
+    let acceleration = 1km/(10s)^2
     $runtime_assert (acceleration =? 10m/s^2)
-    let momentum=saved.mass*saved.speed
+    let momentum = saved.mass*saved.speed
     $runtime_assert (momentum/(kg*m/s) =? 40.0)
     printl("{format(maximum/m ".3f")} {format(initial/(kg*m^2/s^2) ".3f")} {format(reported_impulse ".3f")} {distance/m}")
 }

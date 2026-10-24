@@ -1,27 +1,27 @@
-Counts:type=[lines:int64 words:int64 graphemes:int64]
-count_text=(text:string):>Counts=>{
-    let lines=0
-    let words=0
-    let inside=false
+Counts:type = [lines:int64 words:int64 graphemes:int64]
+count_text = (text:string):>Counts => {
+    let lines = 0
+    let words = 0
+    let inside = false
     loop c in text {
-        if c =? "\n" {lines+=1}
-        let space=c =? " " or c =? "\n" or c =? "\t"
-        if not space and not inside {words+=1}
-        inside=not space
+        if c =? "\n" { lines += 1 }
+        let space = c =? " " or c =? "\n" or c =? "\t"
+        if not space and not inside { words += 1 }
+        inside = not space
     }
-    if text.length >? 0 and text[end] not=? "\n" {lines+=1}
+    if text.length >? 0 and text[end] not=? "\n" { lines += 1 }
     return Counts[lines words text.length]
 }
-show=(c:Counts):>string=>"{c.lines} {c.words} {c.graphemes}"
-main=():>void=>{
-    let input="hello world\nhello café\n"
-    let argv=args()
+show = (c:Counts):>string => "{c.lines} {c.words} {c.graphemes}"
+main = ():>void => {
+    let input = "hello world\nhello café\n"
+    let argv = args()
     if argv.length >? 1 {
-        let loaded=read_text(argv[1])
-        if loaded is? (error|Canceled) {exit(1)}
-        input=loaded
+        let loaded = read_text(argv[1])
+        if loaded is? (error|Canceled) { exit(1) }
+        input = loaded
     }
-    let result=count_text(input)
+    let result = count_text(input)
     $runtime_assert(result.words >=? 0)
     $runtime_assert(count_text("").words =? 0)
     $runtime_assert(count_text("one").lines =? 1)

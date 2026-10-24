@@ -1,75 +1,75 @@
 from p"invoice.dewy" import Invoice, invoice
 from p"parse.dewy" import BadNumber
 from p"policy.dewy" import BadQuantity
-summarize=(lines:array<string>):>Invoice|BadNumber|BadQuantity=> {
-    let total=0
-    let count=0
-    loop line in lines  {
-        let item=invoice(line) or_throw
-        total+=item.total
-        count+=item.count
+summarize = (lines:array<string>):>Invoice|BadNumber|BadQuantity => {
+    let total = 0
+    let count = 0
+    loop line in lines {
+        let item = invoice(line) or_throw
+        total += item.total
+        count += item.count
     }
     return Invoice[total count]
 }
-main=():>void=> {
-    let good=summarize(["2" "3" "0" "10"])
-    if good is? error  {
+main = ():>void => {
+    let good = summarize(["2" "3" "0" "10"])
+    if good is? error {
         exit(1)
     }
     $runtime_assert (good.total =? 105)
     $runtime_assert (good.count =? 4)
-    let bad=summarize(["2" "oops" "3"])
+    let bad = summarize(["2" "oops" "3"])
     $runtime_assert (bad is? BadNumber)
-    if bad is? BadNumber  {
+    if bad is? BadNumber {
         $runtime_assert (bad.text =? "oops")
     }
-    else  {
+    else {
         exit(2)
     }
-    let negative=summarize(["1" "-4"])
+    let negative = summarize(["1" "-4"])
     $runtime_assert (negative is? BadQuantity)
-    if negative is? BadQuantity  {
+    if negative is? BadQuantity {
         $runtime_assert (negative.value =? -4)
     }
-    else  {
+    else {
         exit(3)
     }
-    let maximum=summarize(["100" "0"])
-    if maximum is? error  {
+    let maximum = summarize(["100" "0"])
+    if maximum is? error {
         exit(4)
     }
     $runtime_assert (maximum.total =? 700)
-    let excessive=summarize(["101"])
-    if excessive is? BadQuantity  {
+    let excessive = summarize(["101"])
+    if excessive is? BadQuantity {
         $runtime_assert (excessive.value =? 101)
     }
-    else  {
+    else {
         exit(5)
     }
-    let empty=summarize([])
-    if empty is? error  {
+    let empty = summarize([])
+    if empty is? error {
         exit(6)
     }
     $runtime_assert (empty.total =? 0)
     $runtime_assert (empty.count =? 0)
     # Member forwarding preserves the imported concrete error payload.
-    let forwarded=invoice("bad").total
+    let forwarded = invoice("bad").total
     $runtime_assert (forwarded is? BadNumber)
-    if forwarded is? BadNumber  {
+    if forwarded is? BadNumber {
         $runtime_assert (forwarded.text =? "bad")
     }
-    let saved=good
-    good.total=0
+    let saved = good
+    good.total = 0
     $runtime_assert (saved.total =? 105)
-    let successes=0
-    let failures=0
-    loop text in ["0" "1" "100" "-1" "101" "x"]  {
-        let result=invoice(text)
-        if result is? error  {
-            failures+=1
+    let successes = 0
+    let failures = 0
+    loop text in ["0" "1" "100" "-1" "101" "x"] {
+        let result = invoice(text)
+        if result is? error {
+            failures += 1
         }
-        else  {
-            successes+=1
+        else {
+            successes += 1
         }
     }
     $runtime_assert (successes =? 3)

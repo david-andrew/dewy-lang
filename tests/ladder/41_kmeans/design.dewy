@@ -1,59 +1,59 @@
-Point:type=[x:float64 y:float64]
-squared=(a:Point b:Point):>float64=>(a.x-b.x)^2+(a.y-b.y)^2
-nearest=(point:Point centers:array<Point length >? 0>):>int64<r => 0 <=? r and r <? centers.length>=> {
-    let best=0
-    let distance=squared(point centers[0])
-    loop i in [1..centers.length)  {
-        let candidate=squared(point centers[i])
-        if candidate <? distance  {
-            distance=candidate
-            best=i
+Point:type = [x:float64 y:float64]
+squared = (a:Point b:Point):>float64 => (a.x-b.x)^2+(a.y-b.y)^2
+nearest = (point:Point centers:array<Point length >? 0>):>int64<r => 0 <=? r and r <? centers.length> => {
+    let best = 0
+    let distance = squared(point centers[0])
+    loop i in [1..centers.length) {
+        let candidate = squared(point centers[i])
+        if candidate <? distance {
+            distance = candidate
+            best = i
         }
     }
     return best
 }
-fit=(points:array<Point> seeds:array<Point> rounds:int64):>array<Point>=> {
-    let centers=seeds
+fit = (points:array<Point> seeds:array<Point> rounds:int64):>array<Point> => {
+    let centers = seeds
     if centers.length =? 0 return centers
-    loop round in [0..rounds)  {
-        let sums=[loop c in centers Point[0.0 0.0]]
-        let counts=[loop c in centers 0]
-        loop point in points  {
-            let cluster=nearest(point centers)
-            sums[cluster].x+=point.x
-            sums[cluster].y+=point.y
-            counts[cluster]+=1
+    loop round in [0..rounds) {
+        let sums = [loop c in centers Point[0.0 0.0]]
+        let counts = [loop c in centers 0]
+        loop point in points {
+            let cluster = nearest(point centers)
+            sums[cluster].x += point.x
+            sums[cluster].y += point.y
+            counts[cluster] += 1
         }
-        loop i in [0..centers.length)  {
-            if counts[i] >? 0  {
-                centers[i].x=sums[i].x/(counts[i] as float64)
-                centers[i].y=sums[i].y/(counts[i] as float64)
+        loop i in [0..centers.length) {
+            if counts[i] >? 0 {
+                centers[i].x = sums[i].x/(counts[i] as float64)
+                centers[i].y = sums[i].y/(counts[i] as float64)
             }
         }
     }
     return centers
 }
-main=():>void=> {
-    let points:array<Point>=[]
-    loop cluster in [0..3)  {
-        loop i in [0..40)  {
+main = ():>void => {
+    let points:array<Point> = []
+    loop cluster in [0..3) {
+        loop i in [0..40) {
             points.push(Point[(cluster*20+i%5-2) as float64 (cluster*10+i%4-1) as float64])
         }
     }
-    let seeds=[Point[-1.0 0.0] Point[19.0 10.0] Point[39.0 20.0] Point[999.0 999.0]]
-    let result=fit(points seeds 12)
-    let counts=[0 0 0 0]
-    let loss:float64=0.0
-    loop point in points  {
-        let c=nearest(point result)
-        counts[c]+=1
-        loss+=squared(point result[c])
+    let seeds = [Point[-1.0 0.0] Point[19.0 10.0] Point[39.0 20.0] Point[999.0 999.0]]
+    let result = fit(points seeds 12)
+    let counts = [0 0 0 0]
+    let loss:float64 = 0.0
+    loop point in points {
+        let c = nearest(point result)
+        counts[c] += 1
+        loss += squared(point result[c])
     }
     $runtime_assert (counts =? [40 40 40 0])
     $runtime_assert (result[3].x =? 999.0)
     $runtime_assert (seeds[0].x =? -1.0)
     $runtime_assert (fit([] seeds 2) =? seeds)
-    let again=fit(points result 2)
+    let again = fit(points result 2)
     $runtime_assert (again =? result)
     $runtime_assert (nearest(Point[0.0 0.0] [Point[-1.0 0.0] Point[1.0 0.0]]) =? 0)
     $runtime_assert (fit(points seeds 0) =? seeds)

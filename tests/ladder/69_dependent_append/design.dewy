@@ -1,34 +1,34 @@
 # Tier 3 / 69_dependent_append / milestone 22
 # Acceptance: Carry returned index evidence across a mutable append and a search result.
-append=(@xs:array<int64> value:int64):>addr<(<? xs.length)>=>{
-    let i=xs.length
+append = (@xs:array<int64> value:int64):>addr<(<? xs.length)> => {
+    let i = xs.length
     xs.push(value)
     return i
 }
-find=(xs:array<int64> needle:int64):>addr<(<? xs.length)> | none=>{
+find = (xs:array<int64> needle:int64):>addr<(<? xs.length)> | none => {
     loop i in [0..xs.length) {
         if xs[i] =? needle return i
     }
     return none
 }
-read_found=(xs:array<int64> needle:int64):>int64=>{
-    let index=find(xs needle)
+read_found = (xs:array<int64> needle:int64):>int64 => {
+    let index = find(xs needle)
     if index is? addr {
         return xs[index]
     }
     return -1
 }
-main=():>void=>{
-    let xs:array<int64>=[]
-    let signature:int64=0
+main = ():>void => {
+    let xs:array<int64> = []
+    let signature:int64 = 0
     loop n in [0..32) {
-        let i=append(@xs n*n)
+        let i = append(@xs n*n)
         $assert i <? xs.length
-        signature+=xs[i]
+        signature += xs[i]
     }
     $runtime_assert xs.length =? 32
-    let saved=xs.copy()
-    let index=append(@xs 999)
+    let saved = xs.copy()
+    let index = append(@xs 999)
     $assert index <? xs.length
     $runtime_assert xs[index] =? 999
     $runtime_assert saved.length =? 32

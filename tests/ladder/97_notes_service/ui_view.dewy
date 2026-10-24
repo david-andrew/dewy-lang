@@ -2,26 +2,26 @@
 # tests compare them, so what is checked is what is shown.
 from p"ui_model.dewy" import Ui, NoteView
 
-const WIDTH:int64=44
+const WIDTH:int64 = 44
 
-rule=(label:string):>string=>{
-    let text="── {label} "
-    let fill=max(0 WIDTH-text.length)
+rule = (label:string):>string => {
+    let text = "── {label} "
+    let fill = max(0 WIDTH-text.length)
     return "{text}{"─" * fill}"
 }
 
-row=(note:NoteView selected:bool):>string=>{
-    let mark=if selected ">" else " "
-    let box=if note.done "[x]" else "[ ]"
-    let title=if note.title.length >? 20 "{note.title[0..19)}…" else note.title
+row = (note:NoteView selected:bool):>string => {
+    let mark = if selected ">" else " "
+    let box = if note.done "[x]" else "[ ]"
+    let title = if note.title.length >? 20 "{note.title[0..19)}…" else note.title
     return "{mark}{box} #{note.id} {format(title "<20")} {note.tags.join(" ")}".trim_end()
 }
 
-render=(ui:Ui):>array<string>=>{
-    let lines:array<string>=[]
-    let shown=if ui.items.length =? ui.total "{ui.total}" else "{ui.items.length} of {ui.total}"
+render = (ui:Ui):>array<string> => {
+    let lines:array<string> = []
+    let shown = if ui.items.length =? ui.total "{ui.total}" else "{ui.items.length} of {ui.total}"
     lines.push(rule("Dewy Notes: {shown}"))
-    let tag=if ui.tag.length >? 0 ui.tag else "any"
+    let tag = if ui.tag.length >? 0 ui.tag else "any"
     lines.push("filter: tag={tag} search=\"{ui.search}\"")
     lines.push("new: \"{ui.title}\" tags=\"{ui.tags}\"")
     if ui.items.length =? 0 lines.push("  (no notes)")
@@ -29,7 +29,7 @@ render=(ui:Ui):>array<string>=>{
         lines.push(row(note i =? ui.cursor))
     }
     if ui.detail isnt? none {
-        let note=ui.detail
+        let note = ui.detail
         lines.push(rule("#{note.id} rev {note.revision}"))
         lines.push(note.title)
         if note.body.length >? 0 {

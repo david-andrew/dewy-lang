@@ -1,18 +1,18 @@
 # Host-side formatting of trace events.
 
-$runtime_checks=false
+$runtime_checks = false
 
 from p"defs.dewy" import Event, NONE
 
-pad=(text:string width:int64):>string=>{
-    let fill=width-text.length
+pad = (text:string width:int64):>string => {
+    let fill = width-text.length
     if fill <=? 0 return text
     return "{text}{" ".repeat(fill)}"
 }
 
-describe=(e:Event names:array<string>):>string=>{
-    let who=(t:int64):>string=>if t =? NONE "-" else names.get(t) ?? "task{t}"
-    let a=who(e.a)
+describe = (e:Event names:array<string>):>string => {
+    let who = (t:int64):>string => if t =? NONE "-" else names.get(t) ?? "task{t}"
+    let a = who(e.a)
     return match e.kind {
         <'wake'> => "{a} wakes (timer)"
         <'irq'> => if e.b =? 1 "irq {e.a} raised while masked" else "irq {e.a} raised"

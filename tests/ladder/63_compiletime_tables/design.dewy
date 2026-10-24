@@ -1,96 +1,96 @@
 # Ordinary Dewy algorithms evaluated for compile-time constants in design.
-reverse_table=():>array<int64>=> {
-    let output:array<int64>=[]
-    loop value in [0..256)  {
-        let bits=value
-        let reversed=0
-        loop bit in [0..8)  {
-            reversed=reversed*2+bits%2
-            bits=bits//2
+reverse_table = ():>array<int64> => {
+    let output:array<int64> = []
+    loop value in [0..256) {
+        let bits = value
+        let reversed = 0
+        loop bit in [0..8) {
+            reversed = reversed*2+bits%2
+            bits = bits//2
         }
         output.push(reversed)
     }
     return output
 }
-prime_table=():>array<bool>=> {
-    let primes=[loop i in [0..128) true]
-    primes[0]=false
-    primes[1]=false
-    loop p in [2..12)  {
-        if primes[p]  {
-            let multiple=p*p
+prime_table = ():>array<bool> => {
+    let primes = [loop i in [0..128) true]
+    primes[0] = false
+    primes[1] = false
+    loop p in [2..12) {
+        if primes[p] {
+            let multiple = p*p
             $runtime_assert multiple >=? 0
-            loop multiple <? 128  {
-                primes[multiple]=false
-                multiple+=p
+            loop multiple <? 128 {
+                primes[multiple] = false
+                multiple += p
             }
         }
     }
     return primes
 }
-const REVERSE=reverse_table()
-const PRIME=prime_table()
-valid_tables=():>bool=> {
-    if REVERSE.length not=? 256 or PRIME.length not=? 128  {
+const REVERSE = reverse_table()
+const PRIME = prime_table()
+valid_tables = ():>bool => {
+    if REVERSE.length not=? 256 or PRIME.length not=? 128 {
         return false
     }
-    loop i in [0..256)  {
-        let r=REVERSE[i]
-        if r <? 0 or r >=? 256 or REVERSE[r] not=? i  {
+    loop i in [0..256) {
+        let r = REVERSE[i]
+        if r <? 0 or r >=? 256 or REVERSE[r] not=? i {
             return false
         }
     }
-    if REVERSE[1] not=? 128 or REVERSE[255] not=? 255  {
+    if REVERSE[1] not=? 128 or REVERSE[255] not=? 255 {
         return false
     }
-    let count=0
-    loop prime in PRIME  {
-        if prime  {
-            count+=1
+    let count = 0
+    loop prime in PRIME {
+        if prime {
+            count += 1
         }
     }
     return count =? 31
 }
 $assert (valid_tables())
-main=():>void=> {
+main = ():>void => {
     $runtime_assert (valid_tables())
     $runtime_assert REVERSE =? reverse_table()
     $runtime_assert PRIME =? prime_table()
-    let primes:array<int64>=[]
-    let checksum=0
-    loop i in 0.. and prime in PRIME  {
-        if prime  {
+    let primes:array<int64> = []
+    let checksum = 0
+    loop i in 0.. and prime in PRIME {
+        if prime {
             primes.push(i)
-            checksum+=i
+            checksum += i
         }
     }
     $runtime_assert (primes.length =? 31)
     $runtime_assert (primes[0] =? 2)
     $runtime_assert (primes[primes.length-1] =? 127)
-    let reverse_sum=0
-    loop i in [0..REVERSE.length)  {
-        reverse_sum+=REVERSE[i]
+    let reverse_sum = 0
+    loop i in [0..REVERSE.length) {
+        reverse_sum += REVERSE[i]
     }
     $runtime_assert (reverse_sum =? 32640)
-    let copied=REVERSE
+    let copied = REVERSE
     $runtime_assert (copied.length =? 256 and REVERSE.length =? 256)
-    copied[1]=0
+    copied[1] = 0
     $runtime_assert (REVERSE[1] =? 128)
-    let word=0
-    loop byte in [1..5)  {
-        word=word*256+REVERSE[byte]
+    let word = 0
+    loop byte in [1..5) {
+        word = word*256+REVERSE[byte]
     }
     $runtime_assert (word =? 2151727136)
-    let trial_count=0
-    loop n in [2..128)  {
-        let prime=true
-        loop divisor in [2..n)  {
-            if n%divisor =? 0  {
-                prime=false
+    let trial_count = 0
+    loop n in [2..128) {
+        let prime = true
+        loop divisor in [2..n) {
+            if n%divisor =? 0 {
+                prime = false
             }
         }
-        if prime  {
-            trial_count+=1
+        if prime {
+            trial_count += 1
         }
     }
     $runtime_assert (trial_count =? primes.length)

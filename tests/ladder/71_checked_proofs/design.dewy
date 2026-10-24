@@ -1,35 +1,35 @@
 # Tier 3 / 71_checked_proofs / milestone 22
 # Acceptance: Check and erase proof calls; retain transitive result facts at callers.
 $proof
-transitive=(a:int64 b:int64<(>=? a)> c:int64<(>=? b)>):> <a <=? c>=>{
+transitive = (a:int64 b:int64<(>=? a)> c:int64<(>=? b)>):><a <=? c> => {
     $assert a <=? b
     $assert b <=? c
     $assert a <=? c
 }
 $proof
-nonnegative=(a:int64<(>=? 0)> b:int64<(>=? a)>):> <b >=? 0>=>{
+nonnegative = (a:int64<(>=? 0)> b:int64<(>=? a)>):><b >=? 0> => {
     $assert a >=? 0
     $assert a <=? b
     $assert b >=? 0
 }
-width=(start:int64<(>=? 0)> stop:int64<(>=? start)>):>int64=>{
+width = (start:int64<(>=? 0)> stop:int64<(>=? start)>):>int64 => {
     transitive(0 start stop)
     nonnegative(start stop)
     $assert start <=? stop
     $assert stop >=? 0
     return stop-start
 }
-chain=(a:int64<i => i >=? 0 and i <=? 100>):>int64=>{
-    let b=a+1
-    let c=b+1
+chain = (a:int64<i => i >=? 0 and i <=? 100>):>int64 => {
+    let b = a+1
+    let c = b+1
     transitive(a b c)
     $assert a <=? c
     return width(a c)
 }
-main=():>void=>{
-    let total:int64=0
+main = ():>void => {
+    let total:int64 = 0
     loop a in [0..64) {
-        total+=chain(a)
+        total += chain(a)
     }
     transitive(0 0 0)
     transitive(-9 -3 4)

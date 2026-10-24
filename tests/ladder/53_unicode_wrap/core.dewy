@@ -1,74 +1,74 @@
 # Width counts extended grapheme clusters, not terminal cells or UTF-8 bytes.
-wrap=(text:string width:int64):>array<string>=> {
-    let lines:array<string>=[]
-    let line=""
-    loop word in text.split(" ")  {
-        if word =? ""  {
+wrap = (text:string width:int64):>array<string> => {
+    let lines:array<string> = []
+    let line = ""
+    loop word in text.split(" ") {
+        if word =? "" {
             continue
         }
-        if line not=? ""  {
-            if line.length+1+word.length <=? width  {
-                line="{line} {word}"
+        if line not=? "" {
+            if line.length+1+word.length <=? width {
+                line = "{line} {word}"
                 continue
             }
             lines.push(line)
-            line=""
+            line = ""
         }
-        let fragment=""
-        loop grapheme in word  {
-            if fragment.length =? width  {
+        let fragment = ""
+        loop grapheme in word {
+            if fragment.length =? width {
                 lines.push(fragment)
-                fragment=""
+                fragment = ""
             }
-            fragment="{fragment}{grapheme}"
+            fragment = "{fragment}{grapheme}"
         }
-        line=fragment
+        line = fragment
     }
-    if line not=? ""  {
+    if line not=? "" {
         lines.push(line)
     }
     return lines
 }
-join_lines=(lines:array<string>):>string=> {
-    let result=""
-    let first=true
-    loop line in lines  {
-        if not first  {
-            result="{result}|"
+join_lines = (lines:array<string>):>string => {
+    let result = ""
+    let first = true
+    loop line in lines {
+        if not first {
+            result = "{result}|"
         }
-        result="{result}{line}"
-        first=false
+        result = "{result}{line}"
+        first = false
     }
     return result
 }
-main=():>void=> {
-    let text="café 👩‍💻 tools αβγδε 世界 hello"
-    let lines=wrap(text 5)
-    loop line in lines  {
+main = ():>void => {
+    let text = "café 👩‍💻 tools αβγδε 世界 hello"
+    let lines = wrap(text 5)
+    loop line in lines {
         $runtime_assert(line.length <=? 5)
     }
     $runtime_assert("é".length =? 1)
     $runtime_assert("👩‍💻".length =? 1)
     $runtime_assert("🇺🇸".length =? 1)
     $runtime_assert(lines.length >? 0 and lines[0] =? "café")
-    let long=wrap("αβγδεζηθ" 3)
+    let long = wrap("αβγδεζηθ" 3)
     $runtime_assert(long =? ["αβγ" "δεζ" "ηθ"])
     $runtime_assert(wrap("  a   b " 3) =? ["a b"])
     $runtime_assert(wrap("" 5).length =? 0)
-    let ones=wrap("ééé" 1)
+    let ones = wrap("ééé" 1)
     $runtime_assert(ones.length =? 3)
-    loop line in ones  {
+    loop line in ones {
         $runtime_assert(line =? "é")
     }
-    let saved=lines
-    lines[0]="changed"
+    let saved = lines
+    lines[0] = "changed"
     $runtime_assert(saved.length >? 0 and saved[0] =? "café")
-    let flags=wrap("🇺🇸🇨🇦 🇯🇵" 2)
+    let flags = wrap("🇺🇸🇨🇦 🇯🇵" 2)
     $runtime_assert(flags.length =? 2)
     $runtime_assert(flags[0].length =? 2)
-    let count=0
-    loop line in saved  {
-        count+=line.length
+    let count = 0
+    loop line in saved {
+        count += line.length
     }
     printl(join_lines(saved))
     printl("{saved.length} {count} {long.length}")

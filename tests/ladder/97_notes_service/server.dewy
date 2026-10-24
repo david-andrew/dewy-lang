@@ -5,46 +5,46 @@
 from p"http.dewy" import Request, Response, HttpError, Incomplete, Framed, Header, frame, encode, keeps_alive
 from p"router.dewy" import Service, route, fail
 
-Connection:type=[pending:array<uint8>=[] closed:bool=false answered:int64=0]
+Connection:type = [pending:array<uint8>=[] closed:bool=false answered:int64=0]
 
-framing_error=(@service:Service error:HttpError):>Response=>{
-    service.requests+=1
-    service.errors+=1
+framing_error = (@service:Service error:HttpError):>Response => {
+    service.requests += 1
+    service.errors += 1
     return fail(error.status "http" error.detail)
 }
 
-feed=(@service:Service @conn:Connection chunk:array<uint8>):>array<uint8>=>{
-    let out:array<uint8>=[]
+feed = (@service:Service @conn:Connection chunk:array<uint8>):>array<uint8> => {
+    let out:array<uint8> = []
     if conn.closed return out
     conn.pending.extend(chunk)
     loop not conn.closed {
-        let framed=frame(conn.pending service.limits)
+        let framed = frame(conn.pending service.limits)
         if framed is? Incomplete break
         if framed is? HttpError {
             out.extend(encode(framing_error(@service framed) close=true))
-            conn.pending=[]
-            conn.closed=true
+            conn.pending = []
+            conn.closed = true
             break
         }
-        let request=framed.request
+        let request = framed.request
         $runtime_assert 0 <=? framed.consumed and framed.consumed <=? conn.pending.length
-        conn.pending=conn.pending[framed.consumed..]
-        let response=route(@service request)
-        let close=not keeps_alive(request)
+        conn.pending = conn.pending[framed.consumed..]
+        let response = route(@service request)
+        let close = not keeps_alive(request)
         out.extend(encode(response head_only=request.method =? "HEAD" close=close))
-        conn.answered+=1
-        if close conn.closed=true
+        conn.answered += 1
+        if close conn.closed = true
     }
     return out
 }
 
 # The peer finished sending: a partial request left behind is answered 400.
-finish=(@service:Service @conn:Connection):>array<uint8>=>{
+finish = (@service:Service @conn:Connection):>array<uint8> => {
     if conn.closed or conn.pending.length =? 0 {
-        conn.closed=true
+        conn.closed = true
         return []
     }
-    conn.closed=true
-    conn.pending=[]
+    conn.closed = true
+    conn.pending = []
     return encode(framing_error(@service HttpError[400 "incomplete request"]) close=true)
 }

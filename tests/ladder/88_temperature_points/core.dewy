@@ -1,47 +1,47 @@
 # Core: explicit point/delta wrappers over bounded exact word rationals.
 # Bounded word-rational helper for core projections only; fixtures fit int64.
-Rat:type=[n:int64 d:int64]
-gcd=(a:int64 b:int64):>int64=>{
-    a=abs(a)
-    b=abs(b)
+Rat:type = [n:int64 d:int64]
+gcd = (a:int64 b:int64):>int64 => {
+    a = abs(a)
+    b = abs(b)
     loop b not=? 0 {
-        let remainder=a%b
-        a=b
-        b=remainder
+        let remainder = a%b
+        a = b
+        b = remainder
     }
     return a
 }
-ratio=(n:int64 d:int64):>Rat=>{
+ratio = (n:int64 d:int64):>Rat => {
     $runtime_assert d not=? 0
     if n =? 0 return Rat[0 1]
     if d <? 0 {
-        n=-n
-        d=-d
+        n = -n
+        d = -d
     }
-    let divisor=gcd(n d)
+    let divisor = gcd(n d)
     $runtime_assert divisor >? 0
     return Rat[n//divisor d//divisor]
 }
-plus=(a:Rat b:Rat):>Rat=>ratio(a.n*b.d+b.n*a.d a.d*b.d)
-minus=(a:Rat b:Rat):>Rat=>ratio(a.n*b.d-b.n*a.d a.d*b.d)
-times=(a:Rat b:Rat):>Rat=>ratio(a.n*b.n a.d*b.d)
-equal=(a:Rat b:Rat):>bool=>a.n =? b.n and a.d =? b.d
-show=(q:Rat):>string=>{
+plus = (a:Rat b:Rat):>Rat => ratio(a.n*b.d+b.n*a.d a.d*b.d)
+minus = (a:Rat b:Rat):>Rat => ratio(a.n*b.d-b.n*a.d a.d*b.d)
+times = (a:Rat b:Rat):>Rat => ratio(a.n*b.n a.d*b.d)
+equal = (a:Rat b:Rat):>bool => a.n =? b.n and a.d =? b.d
+show = (q:Rat):>string => {
     if q.d =? 1 return "{q.n}"
     return "{q.n}/{q.d}"
 }
-Point:type=[kelvin:Rat]
-Delta:type=[kelvin:Rat]
-from_celsius=(c:Rat):>Point=>Point[plus(c ratio(27315 100))]
-from_fahrenheit=(f:Rat):>Point=>from_celsius(times(minus(f ratio(32 1)) ratio(5 9)))
-difference=(a:Point b:Point):>Delta=>Delta[minus(a.kelvin b.kelvin)]
-shift=(p:Point d:Delta):>Point=>Point[plus(p.kelvin d.kelvin)]
-celsius=(p:Point):>Rat=>minus(p.kelvin ratio(27315 100))
-fahrenheit=(p:Point):>Rat=>plus(times(celsius(p) ratio(9 5)) ratio(32 1))
-main=():>void=>{
-    let freezing=from_celsius(ratio(0 1))
-    let boiling=from_celsius(ratio(100 1))
-    let delta=difference(boiling freezing)
+Point:type = [kelvin:Rat]
+Delta:type = [kelvin:Rat]
+from_celsius = (c:Rat):>Point => Point[plus(c ratio(27315 100))]
+from_fahrenheit = (f:Rat):>Point => from_celsius(times(minus(f ratio(32 1)) ratio(5 9)))
+difference = (a:Point b:Point):>Delta => Delta[minus(a.kelvin b.kelvin)]
+shift = (p:Point d:Delta):>Point => Point[plus(p.kelvin d.kelvin)]
+celsius = (p:Point):>Rat => minus(p.kelvin ratio(27315 100))
+fahrenheit = (p:Point):>Rat => plus(times(celsius(p) ratio(9 5)) ratio(32 1))
+main = ():>void => {
+    let freezing = from_celsius(ratio(0 1))
+    let boiling = from_celsius(ratio(100 1))
+    let delta = difference(boiling freezing)
     $runtime_assert equal(freezing.kelvin ratio(27315 100))
     $runtime_assert equal(boiling.kelvin ratio(37315 100))
     $runtime_assert equal(delta.kelvin ratio(100 1))
@@ -51,15 +51,15 @@ main=():>void=>{
     $runtime_assert equal(fahrenheit(from_celsius(ratio(-40 1))) ratio(-40 1))
     $runtime_assert equal(celsius(from_fahrenheit(ratio(-40 1))) ratio(-40 1))
     $runtime_assert equal(fahrenheit(from_celsius(ratio(20 1))) ratio(68 1))
-    let checksum=ratio(0 1)
+    let checksum = ratio(0 1)
     loop c in [-20..41) {
-        let p=from_celsius(ratio(c 1))
-        let f=fahrenheit(p)
+        let p = from_celsius(ratio(c 1))
+        let f = fahrenheit(p)
         $runtime_assert equal(from_fahrenheit(f).kelvin p.kelvin)
-        checksum=plus(checksum p.kelvin)
+        checksum = plus(checksum p.kelvin)
     }
-    let saved=freezing.copy()
-    freezing.kelvin=ratio(0 1)
+    let saved = freezing.copy()
+    freezing.kelvin = ratio(0 1)
     $runtime_assert equal(saved.kelvin ratio(27315 100))
     $runtime_assert equal(difference(boiling saved).kelvin ratio(100 1))
     $runtime_assert equal(difference(saved boiling).kelvin ratio(-100 1))
@@ -76,9 +76,9 @@ main=():>void=>{
     $runtime_assert equal(celsius(Point[ratio(0 1)]) ratio(-27315 100))
     $runtime_assert equal(celsius(from_celsius(ratio(100 1))) ratio(100 1))
     $runtime_assert equal(fahrenheit(from_celsius(ratio(100 1))) ratio(212 1))
-    let zero=Delta[ratio(0 1)]
-    let unit=Delta[ratio(1 1)]
-    let shifted=shift(saved unit)
+    let zero = Delta[ratio(0 1)]
+    let unit = Delta[ratio(1 1)]
+    let shifted = shift(saved unit)
     $runtime_assert equal(difference(shifted saved).kelvin unit.kelvin)
     $runtime_assert equal(difference(saved saved).kelvin zero.kelvin)
     $runtime_assert equal(shift(shifted Delta[ratio(-1 1)]).kelvin saved.kelvin)

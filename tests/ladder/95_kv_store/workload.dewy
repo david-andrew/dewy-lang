@@ -14,16 +14,16 @@ from p"store.dewy" import Store, open_store
 from p"disk.dewy" import Disk, DiskError, Crashed, Fault
 from p"wal.dewy" import damage_last
 
-Rng:type=[
+Rng:type = [
     state:uint64
-    next=():>uint64<(<? 2147483648)>=>{
-        state=state*6364136223846793005+1442695040888963407
+    next = ():>uint64<(<? 2147483648)> => {
+        state = state*6364136223846793005+1442695040888963407
         return state >> 33
     }
-    below=(n:int64<(>? 0)>):>int64<r => 0 <=? r and r <? n>=>(next() as int64) % n
+    below = (n:int64<(>? 0)>):>int64<r => 0 <=? r and r <? n> => (next() as int64) % n
 ]
 
-Tally:type=[
+Tally:type = [
     steps:int64=0
     commits:int64=0
     rollbacks:int64=0
@@ -37,36 +37,36 @@ Tally:type=[
 ]
 
 # FNV-1a over the sorted contents: a compact fingerprint for the expected output.
-fingerprint=(entries:array<Entry>):>string=>{
-    let h:uint64=0xcbf29ce484222325
+fingerprint = (entries:array<Entry>):>string => {
+    let h:uint64 = 0xcbf29ce484222325
     loop entry in entries {
         loop b in bytes("{entry.key}={entry.value}\n") {
-            h=(h xor (b as uint64))*0x100000001b3
+            h = (h xor (b as uint64))*0x100000001b3
         }
     }
     return format(h "016x")
 }
 
-model_entries=(model:dict<string string>):>array<Entry>=>{
-    let keys=[model.keys...]
+model_entries = (model:dict<string string>):>array<Entry> => {
+    let keys = [model.keys...]
     keys.sort()
     return [loop key in keys Entry[key model[key]]]
 }
 
-apply_model=(@model:dict<string string> changes:array<Change>):>void=>{
+apply_model = (@model:dict<string string> changes:array<Change>):>void => {
     loop change in changes {
         if change.op =? 'put' {
-            model[change.key]=change.value
+            model[change.key] = change.value
         } else {
             model.remove(change.key);
         }
     }
 }
 
-random_changes=(@rng:Rng count:int64 step:int64):>array<Change>=>{
-    let changes:array<Change>=[]
+random_changes = (@rng:Rng count:int64 step:int64):>array<Change> => {
+    let changes:array<Change> = []
     loop i in [0..count) {
-        let key="w{rng.below(400)}"
+        let key = "w{rng.below(400)}"
         if rng.below(4) =? 0 {
             changes.push(Change['del' key])
         } else {
@@ -76,81 +76,81 @@ random_changes=(@rng:Rng count:int64 step:int64):>array<Change>=>{
     return changes
 }
 
-WorkloadError:type=type of error & [message:string]
+WorkloadError:type = type of error & [message:string]
 
 # Reopen from disk, as a restarted process would, and compare with the model.
-reopen=(@store:Store @tally:Tally model:dict<string string>):>void|DiskError=>{
-    store=open_store(Disk[store.disk.root]) or_throw
-    tally.recoveries+=1
-    let problem=store.index.check()
-    if problem.length >? 0 or store.index.entries not=? model_entries(model) tally.mismatches+=1
+reopen = (@store:Store @tally:Tally model:dict<string string>):>void|DiskError => {
+    store = open_store(Disk[store.disk.root]) or_throw
+    tally.recoveries += 1
+    let problem = store.index.check()
+    if problem.length >? 0 or store.index.entries not=? model_entries(model) tally.mismatches += 1
 }
 
-run_workload=(root:string seed:uint64 steps:int64):>Tally|WorkloadError|DiskError=>{
-    let rng=Rng[seed]
-    let tally=Tally()
-    let disk=Disk[root]
-    let store=open_store(disk) or_throw
-    let model:dict<string string>=[]
+run_workload = (root:string seed:uint64 steps:int64):>Tally|WorkloadError|DiskError => {
+    let rng = Rng[seed]
+    let tally = Tally()
+    let disk = Disk[root]
+    let store = open_store(disk) or_throw
+    let model:dict<string string> = []
     # The model before the newest transaction in the live log, while known.
-    let undo:dict<string string>?=none
+    let undo:dict<string string>? = none
 
     loop step in [0..steps) {
-        tally.steps+=1
-        let action=rng.below(100)
+        tally.steps += 1
+        let action = rng.below(100)
         if action <? 70 {
             # One autocommit change, or a transaction of several.
-            let count=if action <? 55 1 else 2+rng.below(5)
-            let changes=random_changes(@rng count step)
+            let count = if action <? 55 1 else 2+rng.below(5)
+            let changes = random_changes(@rng count step)
             if action >=? 55 and rng.below(8) =? 0 {
-                tally.rollbacks+=1
+                tally.rollbacks += 1
                 continue
             }
-            let before=model
-            let done=store.commit(changes)
+            let before = model
+            let done = store.commit(changes)
             if done is? (error|Canceled) return WorkloadError["commit failed at step {step}"]
             apply_model(@model changes)
-            undo=before
-            tally.commits+=1
+            undo = before
+            tally.commits += 1
         } else if action <? 80 {
             # Power fails partway through the append: the transaction never happened.
-            let changes=random_changes(@rng 2+rng.below(4) step)
-            store.disk.fault=Fault['append' thousandths=rng.below(1000)]
-            let done=store.commit(changes)
+            let changes = random_changes(@rng 2+rng.below(4) step)
+            store.disk.fault = Fault['append' thousandths=rng.below(1000)]
+            let done = store.commit(changes)
             if done isnt? Crashed return WorkloadError["torn append did not crash at step {step}"]
-            tally.torn+=1
+            tally.torn += 1
             reopen(@store @tally model) or_throw
         } else if action <? 88 {
-            tally.crashes+=1
+            tally.crashes += 1
             reopen(@store @tally model) or_throw
         } else if action <? 92 {
-            let known=undo
+            let known = undo
             if known is? none {
-                tally.crashes+=1
+                tally.crashes += 1
             } else {
                 # The newest record fails its checksum: its transaction is lost.
-                let image=store.disk.read(store.manifest.log) or_throw
+                let image = store.disk.read(store.manifest.log) or_throw
                 damage_last(@image);
                 store.disk.write(store.manifest.log image) or_throw
-                model=known
-                undo=none
-                tally.damaged+=1
+                model = known
+                undo = none
+                tally.damaged += 1
             }
             reopen(@store @tally model) or_throw
         } else if action <? 96 {
-            let done=store.compact()
+            let done = store.compact()
             if done is? (error|Canceled) return WorkloadError["compaction failed at step {step}"]
-            undo=none
-            tally.compactions+=1
+            undo = none
+            tally.compactions += 1
         } else {
             # Crash inside a compaction: before the manifest switch the old log
             # stays live; after it, the new one does. Either way nothing is lost.
-            let after_switch=rng.below(2) =? 1
-            store.disk.fault=if after_switch Fault['before_cleanup'] else Fault['before_manifest']
-            let done=store.compact()
+            let after_switch = rng.below(2) =? 1
+            store.disk.fault = if after_switch Fault['before_cleanup'] else Fault['before_manifest']
+            let done = store.compact()
             if done isnt? Crashed return WorkloadError["compaction crash not injected at step {step}"]
-            if after_switch undo=none
-            tally.interrupted+=1
+            if after_switch undo = none
+            tally.interrupted += 1
             reopen(@store @tally model) or_throw
         }
     }

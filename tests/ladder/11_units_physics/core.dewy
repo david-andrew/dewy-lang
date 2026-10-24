@@ -1,30 +1,30 @@
-Flight:type=[height:float64 speed:float64 energy:float64]
-simulate=(mass:float64 speed:float64 gravity:float64):>Flight=>{
-    let time=speed/gravity
-    let height=speed*time-gravity*time*time/2.0
-    let energy=mass*speed*speed/2.0
+Flight:type = [height:float64 speed:float64 energy:float64]
+simulate = (mass:float64 speed:float64 gravity:float64):>Flight => {
+    let time = speed/gravity
+    let height = speed*time-gravity*time*time/2.0
+    let energy = mass*speed*speed/2.0
     return Flight[height speed energy]
 }
-check_energy=(mass:float64 height:float64 gravity:float64 kinetic:float64):>bool=>{
-    let potential=mass*gravity*height
+check_energy = (mass:float64 height:float64 gravity:float64 kinetic:float64):>bool => {
+    let potential = mass*gravity*height
     return abs(potential-kinetic) <? 1e-9
 }
-main=():>void=>{
-    let mass:float64=2.0
-    let launch:float64=20.0
-    let gravity:float64=10.0
-    let result=simulate(mass launch gravity)
-    let fall=simulate(mass 0.0 gravity)
+main = ():>void => {
+    let mass:float64 = 2.0
+    let launch:float64 = 20.0
+    let gravity:float64 = 10.0
+    let result = simulate(mass launch gravity)
+    let fall = simulate(mass 0.0 gravity)
     $runtime_assert(result.height =? 20.0)
     $runtime_assert(result.energy =? 400.0)
     $runtime_assert(check_energy(mass result.height gravity result.energy))
     $runtime_assert(fall.height =? 0.0)
-    let double_speed=simulate(mass 2.0*launch gravity)
+    let double_speed = simulate(mass 2.0*launch gravity)
     $runtime_assert(double_speed.height =? 4.0*result.height)
-    let double_mass=simulate(2.0*mass launch gravity)
+    let double_mass = simulate(2.0*mass launch gravity)
     $runtime_assert(double_mass.height =? result.height)
     $runtime_assert(double_mass.energy =? 2.0*result.energy)
-    let duration=launch/gravity
+    let duration = launch/gravity
     $runtime_assert(duration =? 2.0)
     # Report integral counts like the design's exact rational arithmetic.
     printl("{int64(result.height)} {int64(result.energy)} {int64(duration)}")

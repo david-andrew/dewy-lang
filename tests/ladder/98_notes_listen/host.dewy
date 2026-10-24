@@ -12,19 +12,19 @@ import net
 from p"../97_notes_service/router.dewy" import Service
 from p"../97_notes_service/server.dewy" import Connection, feed, finish
 
-Host:type=[service:Service=Service() accepted:int64=0]
+Host:type = [service:Service=Service() accepted:int64=0]
 
 # One connection until it closes: the connection buffers partial reads, answers
 # pipelined requests in order, and answers a partial request left at the end.
-serve_connection=(@service:Service socket:net.TcpStream):>void | net.NetError | Canceled=>{
-    let conn=Connection()
+serve_connection = (@service:Service socket:net.TcpStream):>void | net.NetError | Canceled => {
+    let conn = Connection()
     loop not conn.closed {
-        let data=net.tcp_receive(socket)
-        let reply:array<uint8>=[]
+        let data = net.tcp_receive(socket)
+        let reply:array<uint8> = []
         if data is? none {
-            reply=finish(@service @conn)
+            reply = finish(@service @conn)
         } else {
-            reply=feed(@service @conn data or_throw)
+            reply = feed(@service @conn data or_throw)
         }
         if reply.length >? 0 net.tcp_send(socket reply) or_throw
     }
@@ -32,11 +32,11 @@ serve_connection=(@service:Service socket:net.TcpStream):>void | net.NetError | 
 
 # Accepts connections one at a time, counting them, until canceled. A failed
 # connection is closed and the server goes on.
-serve=(@host:Host listener:net.TcpListener):>void | net.NetError | Canceled=>{
+serve = (@host:Host listener:net.TcpListener):>void | net.NetError | Canceled => {
     loop true {
-        let socket=net.tcp_accept(listener) or_throw
-        host.accepted+=1
-        let served=serve_connection(@host.service socket)
+        let socket = net.tcp_accept(listener) or_throw
+        host.accepted += 1
+        let served = serve_connection(@host.service socket)
         net.tcp_close(socket)
         if served is? Canceled return Canceled
     }
@@ -45,16 +45,16 @@ serve=(@host:Host listener:net.TcpListener):>void | net.NetError | Canceled=>{
 # Answers the WebSocket peers' requests that have arrived; one message carries
 # one request and each peer keeps its own framing state. Returns whether
 # anything happened, so a caller can sleep when idle.
-relay=(@host:Host @peers:dict<int64 Connection>):>bool=>{
-    let busy=false
+relay = (@host:Host @peers:dict<int64 Connection>):>bool => {
+    let busy = false
     loop event in net.receive() {
-        busy=true
+        busy = true
         if event.kind =? net.NetKind.joined {
-            peers[event.peer]=Connection()
+            peers[event.peer] = Connection()
         } else if event.kind =? net.NetKind.left {
             peers.remove(event.peer);
         } else if event.peer in? peers {
-            let reply=feed(@host.service @peers[event.peer] event.data)
+            let reply = feed(@host.service @peers[event.peer] event.data)
             if reply.length >? 0 net.send(event.peer reply)
         }
     }

@@ -1,35 +1,35 @@
-Entry:type=[key:string value:string deleted:bool=false]
-append=(path:string entry:Entry):>int64|error|Canceled=>append_file(path "{to_json(entry)}\n")
-recover=(path:string):>dict<string string>|error|Canceled=>{
-    let state:dict<string string>=[]
-    let text=read_text(path) or_throw
+Entry:type = [key:string value:string deleted:bool=false]
+append = (path:string entry:Entry):>int64|error|Canceled => append_file(path "{to_json(entry)}\n")
+recover = (path:string):>dict<string string>|error|Canceled => {
+    let state:dict<string string> = []
+    let text = read_text(path) or_throw
     loop line in text.split("\n") {
-        if line.length =? 0 {continue}
-        let record=from_json<Entry>(line)
-        if record is? TextError {continue}
-        if record.deleted {if record.key in? state {state.pop(record.key);}}
-        else {state[record.key]=record.value}
+        if line.length =? 0 { continue }
+        let record = from_json<Entry>(line)
+        if record is? TextError { continue }
+        if record.deleted { if record.key in? state { state.pop(record.key); } }
+        else { state[record.key] = record.value }
     }
     return state
 }
-main=():>void=>{
-    let path="kv.log"
-    let initialized=write_text(path "")
-    if initialized is? (error|Canceled) {exit(1)}
+main = ():>void => {
+    let path = "kv.log"
+    let initialized = write_text(path "")
+    if initialized is? (error|Canceled) { exit(1) }
     $runtime_assert (append(path Entry["a" "one"]) isnt? (error|Canceled))
     $runtime_assert (append(path Entry["b" "two"]) isnt? (error|Canceled))
     $runtime_assert (append(path Entry["a" "three"]) isnt? (error|Canceled))
     $runtime_assert (append(path Entry["b" "" true]) isnt? (error|Canceled))
-    let first=recover(path)
-    if first is? (error|Canceled) {exit(2)}
+    let first = recover(path)
+    if first is? (error|Canceled) { exit(2) }
     $runtime_assert (first.length =? 1)
     $runtime_assert (first["a"] =? "three")
     $runtime_assert (append_file(path "partial-record") isnt? (error|Canceled))
-    let second=recover(path)
-    if second is? (error|Canceled) {exit(3)}
+    let second = recover(path)
+    if second is? (error|Canceled) { exit(3) }
     $runtime_assert (second["a"] =? "three")
     $runtime_assert (second.length =? first.length)
-    let persisted=read_text(path)
-    if persisted is? (error|Canceled) {exit(4)}
+    let persisted = read_text(path)
+    if persisted is? (error|Canceled) { exit(4) }
     printl("{second.length} {second["a"]} {persisted.split("\n").length}")
 }

@@ -3,9 +3,9 @@
 # Acceptance: Contiguous rank-2 arrays, row/column broadcast, transpose, snapshot rows, and reject mismatched shapes.
 # OPEN: General multidimensional literals/types, axis broadcasting and view layout are provisional; flat Matrix is an algorithm projection, not the tensor feature.
 # This executable projection does not establish the OPEN obligation.
-Matrix:type=[rows:int64 cols:int64 cells:array<int64>]
-make=(rows:int64 cols:int64):>Matrix=>{
-    let cells:array<int64>=[]
+Matrix:type = [rows:int64 cols:int64 cells:array<int64>]
+make = (rows:int64 cols:int64):>Matrix => {
+    let cells:array<int64> = []
     loop r in [0..rows) {
         loop c in [0..cols) {
             cells.push(r*10+c)
@@ -13,34 +13,34 @@ make=(rows:int64 cols:int64):>Matrix=>{
     }
     return Matrix[rows cols cells]
 }
-broadcast=(matrix:Matrix row:array<int64> column:array<int64>):>Matrix=>{
+broadcast = (matrix:Matrix row:array<int64> column:array<int64>):>Matrix => {
     $runtime_assert row.length =? matrix.cols
     $runtime_assert column.length =? matrix.rows
     loop r in [0..matrix.rows) {
         loop c in [0..matrix.cols) {
-            let i=r*matrix.cols+c
+            let i = r*matrix.cols+c
             $runtime_assert 0 <=? i and i <? matrix.cells.length
-            matrix.cells[i]+=row[c]+column[r]
+            matrix.cells[i] += row[c]+column[r]
         }
     }
     return matrix
 }
-transpose=(matrix:Matrix):>Matrix=>{
-    let cells:array<int64>=[]
+transpose = (matrix:Matrix):>Matrix => {
+    let cells:array<int64> = []
     loop c in [0..matrix.cols) {
         loop r in [0..matrix.rows) {
-            let i=r*matrix.cols+c
+            let i = r*matrix.cols+c
             $runtime_assert 0 <=? i and i <? matrix.cells.length
             cells.push(matrix.cells[i])
         }
     }
     return Matrix[matrix.cols matrix.rows cells]
 }
-main=():>void=>{
-    let a=make(3 4)
-    let b=broadcast(a [1 2 3 4] [100 200 300])
-    let t=transpose(b)
-    let restored=transpose(t)
+main = ():>void => {
+    let a = make(3 4)
+    let b = broadcast(a [1 2 3 4] [100 200 300])
+    let t = transpose(b)
+    let restored = transpose(t)
     $runtime_assert restored.cells =? b.cells
     $runtime_assert a.cells.length =? 12 and b.cells.length =? 12 and t.cells.length =? 12
     $runtime_assert a.cells[0] =? 0
@@ -51,9 +51,9 @@ main=():>void=>{
     $runtime_assert t.cells[1] =? 211
     $runtime_assert make(0 4).cells.length =? 0
     $runtime_assert make(3 0).cells.length =? 0
-    let total:int64=0
+    let total:int64 = 0
     loop value in b.cells {
-        total+=value
+        total += value
     }
     $runtime_assert transpose(make(0 4)).rows =? 4
     $runtime_assert transpose(make(0 4)).cols =? 0
