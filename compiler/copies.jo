@@ -314,10 +314,6 @@ copy_live = (n: int, live: mut {int: bool}):
         loop l, unused in right: live[l] = true
         copy_live(int(nodes[n].a), live)
         return
-    # Named arguments can be evaluated in a different order to their slots.
-    if k == .call and nodes[n].c != 0:
-        copy_mentions(n, live)
-        return
     if k == .call:
         # Earlier arguments can borrow a root through the whole call, even
         # though their evaluation precedes its lexical last read. Transferring
@@ -331,6 +327,16 @@ copy_live = (n: int, live: mut {int: bool}):
             loop l, unused in here:
                 if seen.has(l): live[l] = true
                 seen[l] = true
+        # (named arguments and a record's fields, evaluated in written order, not their
+        # slots': `[w=w held=held]` makes held's field first; backward in that order)
+        if nodes[n].c != 0:
+            order = call_eval_order(n)
+            i = order.len() - 1
+            loop i >= 0:
+                copy_live(kid(n, order[i]), live)
+                i -= 1
+            copy_live(int(nodes[n].a), live)
+            return
     cs = copy_children(n)
     i = cs.len() - 1
     loop i >= 0:

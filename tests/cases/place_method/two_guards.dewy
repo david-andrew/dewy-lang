@@ -1,0 +1,29 @@
+# quick
+# A method holding two locals while it lends its place, a word before the guard: the guard
+# record is written `[word=... held=...]`, its fields in another order, and still moves them.
+Held = type of [id:int64
+    $__drop__
+    release = ():>void => printl"released"
+]
+word = (x:int64):>int64 => x + 0
+Account:type = [
+    balance:int64
+    lock = () :> @int64 => {
+        let w = word(7)
+        let held = Held[w]
+        return @balance
+    }
+]
+pair = () => {
+    let w = word(3)
+    let held = Held[w]
+    return [w=w held=held]
+}
+main = () => {
+    let acct = Account[10]
+    let a = @(acct.lock())
+    a += 5
+    printl"{acct.balance}"
+    let p = pair()
+    printl"{p.w} {p.held.id}"
+}
