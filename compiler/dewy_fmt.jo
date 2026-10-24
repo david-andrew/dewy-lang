@@ -85,7 +85,8 @@ df_track = (tokens: DewyLexeme[], stop: int) -> bool:
         df_tracked += 1
         if t.kind != .op: continue
         if t.symbol == .langle: df_angles += 1
-        else if t.symbol == .rangle and df_angles > 0: df_angles -= 1
+        else if df_angles > 0 and (t.symbol == .rangle or t.symbol == .gt and not t.space): df_angles -= 1
+        else if df_angles > 1 and t.symbol == .shr: df_angles -= 2
         if t.symbol == .lparen or t.symbol == .lbrack or t.symbol == .lbrace:
             df_stack.push(t.symbol)
             if df_stack.len() > 256: return false
@@ -175,6 +176,7 @@ df_text = (src: str) -> str?:
         # Strings can span physical lines, including closing quotes followed by
         # code. Their contents stay untouched, but following delimiters count.
         if not df_track(tokens, stop): return none
+        df_angles = 0       # (a type's angle brackets end on their line, even when a `>?` or `>>` closes them)
         lines.push(newline)
         at = stop
         start = end + 1
