@@ -2275,6 +2275,12 @@ fact_map_receiver = (s: mut FactState, n: int, value: int) -> int:
 
 fact_map_check = (n: int, s: mut FactState, values: int[]):
     if fact_speculating != 0 or not (fact_policy == .RequireStatic or fact_query): return
+    # (a totaldict has every key its type admits)
+    e = kid(n, 0)
+    loop e > 0:
+        if is_total_dict(ntype(e)) or refine_active and is_total_dict(refine_storage(e, ntype(e))): return
+        if nodes[e].kind != .conv and nodes[e].kind != .narrow and nodes[e].kind != .addr: break
+        e = int(nodes[e].a)
     member = fact_map_member(s, n, fact_map_receiver(s, n, values[0]), values[1])
     proven = fact_truth(s, member) == 1
     if fact_probe_on:
