@@ -1,0 +1,48 @@
+# quick
+# A string-literal union is unordered: its stored word is a detail, and a value keeps its
+# member across subset and superset unions (arms, equality, keys, hashing, printing).
+ABC:type='a'|'b'|'c'
+BC:type='b'|'c'
+CA:type='c'|'a'
+show=(p:ABC)=>match p {
+    <'a'> => "A"
+    <'b'> => "B"
+    <'c'> => "C"
+}
+kind=(p:ABC)=>match p {
+    x:BC => "bc {x}"
+    <'a'> => "a"
+}
+kind2=(p:ABC)=>match p {
+    x:CA => "ca {x}"
+    <'b'> => "b"
+}
+pick=<T>(a:T b:T)=>b
+main=()=>{
+    let q:BC='c'
+    let p:ABC='b'
+    printl(show(q))
+    printl("{show(p)} {p =? q} {q =? p} {p <? q} {max(p q)}")
+    let wide:ABC=q
+    printl("{show(wide)} {wide =? q} {hash(wide) =? hash(q)} {hash(q) =? hash("c")}")
+    loop s in ['a' 'b' 'c'] {
+        let v:ABC=s
+        printl("{kind(v)} / {kind2(v)} / {v is? BC} / {v is? CA}")
+    }
+    let m:dict<ABC int64>=['a'->1 'b'->2 'c'->3]
+    printl(m[q])
+    let held:set<ABC>=set[]
+    held.push(q)
+    printl("{held.has(p)} {held.has(wide)}")
+    let o:ABC?=q
+    printl("{o} {o =? p}")
+    let u:BC|int64=q
+    printl(match u {
+        y:BC => show(y)
+        n:int64 => "{n}"
+    })
+    let c=true
+    printl(show(if c q else p))
+    printl(show(pick(p q)))
+    printl(show([p q][1]))
+}

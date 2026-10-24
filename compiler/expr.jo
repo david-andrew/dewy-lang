@@ -481,6 +481,11 @@ str_set_coerced = (n: int, to: int) -> bool:
         if not fits: str_set_text_of(n)
     false
 
+# `int(p)`, p of a string-literal union: its members are unordered words, as text is, with
+# no number (how one is stored is a detail: one set's word for a member is not another's)
+str_set_unnumbered = (pos: int, t: int):
+    fatal(pos, "{dt(t)} has no numbers: the members of a union of string literals are unordered, as text is; compare one (`p =? '{str_sets[str_set_of(t)][0]}'`), `match` it, or keep a number for each member in a dictionary")
+
 # a plain string or a string set (not yet optional)
 str_text_or_set = (t: int) -> bool: prune(t) == T_STR or str_set_of(t) != 0
 
@@ -3487,7 +3492,9 @@ conversion = (n: int, to0: int, args: int[]) -> int:
             cv = int(CV.float2int)
             # (a checked conversion's failure report: demanded by its first use)
             if to != T_MATH_INT and dewy_at(nodes[n].pos): float_int_demanded = true
-        else if fk == .enum_ and simple_enum(ft): cv = int(CV.int_)
+        else if fk == .enum_ and simple_enum(ft):
+            if str_set_of(ft) != 0 and dewy_at(nodes[n].pos) and not pos_in_lib(nodes[n].pos): str_set_unnumbered(nodes[n].pos, ft)
+            cv = int(CV.int_)
         else if fk == .ptr: cv = int(CV.ptr)
     else if tk == .float_:
         if fk == .int_: cv = int(CV.int2float)
@@ -10217,6 +10224,10 @@ check_expr_other = (n: int, expected: int) -> int:
                 fatal(nodes[n].pos, "`as` between a whole number and a float keeps the bits, not the number: {conv} converts the value ({bits} for the bits themselves)")
         if fk == .enum_ and not is_union(ft) and tk == .int_: ok = true
         if fk == .int_ and tk == .enum_ and not is_union(tt): ok = true
+        # (a string-literal union's word is its member's place in one spelling of the set)
+        if ok and (fk == .enum_ or tk == .enum_) and dewy_at(nodes[n].pos) and not pos_in_lib(nodes[n].pos):
+            set = if fk == .enum_: ft else: tt
+            if str_set_of(set) != 0: str_set_unnumbered(nodes[n].pos, set)
         if fk == .bool_ and tk == .int_: ok = true
         if (fk == .str_ or fk == .array) and tk == .ptr:
             # (the runtime's: the header; a program means the bytes, which data(x) gives)

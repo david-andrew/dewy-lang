@@ -844,9 +844,12 @@ A string literal in a type position is likewise its singleton, and a union of
 them is an enumeration: `BasePrefix:type = '0b' | '0t' | '0x'`. Its value is one
 word at run time, so `p =? '0x'`, `p is? '0x'` and `match` compare words, and
 its text appears only where it meets a string (printing, interpolation, a
-`string` parameter, string methods such as `p.upper()`). A member literal stores
-as it is, another literal is a compile error, and any other string is checked
-when the program runs. On a string, `head is? BasePrefix` compares it with each
+`string` parameter, string methods such as `p.upper()`). The members are
+unordered, as text is: a value keeps its member in any union that contains it
+(`'b'|'c'` passed where `'a'|'b'|'c'` is expected, compared, matched or used as a
+key), comparisons and sorting order the text, and `int(p)` is an error. A member
+literal stores as it is, another literal is a compile error, and any other string
+is checked when the program runs. On a string, `head is? BasePrefix` compares it with each
 member. Literal unions mix with each other and with other types
 (`<1 | 2 | "fast" | "slow">`, `'auto' | int64`): `m is? 1` and `m is? "fast"`
 test the member and its value. A literal-typed parameter specializes an overload: `((n:int64 d:0):>DivZero => ...)
