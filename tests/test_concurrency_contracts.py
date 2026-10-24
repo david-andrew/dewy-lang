@@ -24,7 +24,7 @@ def test_parallel_rejects_waiting(compiler, tmp_path, body):
     assert 'parallel body may block' in result.stderr, result.stderr
 
 
-@pytest.mark.parametrize('body', ['sleep(1ms)', 'waiter()', 'printl"blocked"'])
+@pytest.mark.parametrize('body', ['sleep(1ms);', 'waiter();', 'printl"blocked"'])
 def test_no_blocks_transitive(compiler, tmp_path, body):
     result = check(compiler, tmp_path,
                    f'waiter=()=>sleep(1ms)\nbad=():>void & no blocks=>{{{body}}}\nmain=()=>{{bad()}}')

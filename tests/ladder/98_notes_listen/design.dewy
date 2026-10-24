@@ -52,7 +52,7 @@ main = ():>void | net.NetError | Canceled => {
     concurrent server {
         spawn(server) visit(server listener.port);
         # (this thread serves until the client's task cancels the group)
-        serve(@host listener)
+        serve(@host listener);
     }
     printl("accepted {host.accepted}")
     net.tcp_close(listener)

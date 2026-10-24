@@ -584,7 +584,7 @@ update=(dt:float64):>void=>{
 root.value+=1
 if root.next is?none return
 if frame_number()%10 =?0 printl"tick={root.value} child={root.next.value}"
-sleep(5ms)}
+sleep(5ms);}
 draw=():>void=>clear(BLACK)
 '''
     save(source, program)

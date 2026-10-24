@@ -55,7 +55,7 @@ main=(args:array<string>):>void=>exit(entry(args)) entry=(args:array<string>):>i
                 return 5
             }
         }
-        sleep(1ms)
+        sleep(1ms);
     }
     return 6
 }

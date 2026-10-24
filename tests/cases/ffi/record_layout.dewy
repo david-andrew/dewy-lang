@@ -14,6 +14,6 @@ main=():>void=>{
     # (uint32 after uint8: three bytes of padding, as in C)
     let raw:array<uint8>=[7 0 0 0 1 2 0 0]
     let pairs:array<Pair>=[Pair[0 0]]
-    memcpy(pairs.ptr as ptr<uint8> raw.ptr 8)
+    memcpy(pairs.ptr as ptr<uint8> raw.ptr 8);
     printl(pairs[0].small pairs[0].wide)
 }

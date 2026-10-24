@@ -324,7 +324,7 @@ main = ():>void | net.NetError | Canceled => {
     concurrent server {
         spawn(server) fetch_all(server listener.port requests)
         # (this thread serves until the client's task cancels the group)
-        listen(@service listener)
+        listen(@service listener);
     }
     net.tcp_close(listener)
     $runtime_assert service.values.length =? 1

@@ -7,12 +7,12 @@ main=():>void=>{
     if made is? error exit(1)
     let secret=p"{dir}/secret.txt"
     if secret.write_text("hidden") is? error exit(2)
-    chmod(secret.path 0)
+    chmod(secret.path 0);
     let denied=secret.read_text
     printl(denied is? FileAccessDenied)
     printl(denied is? error)
     printl(secret.write_text("again") is? FileAccessDenied)
-    chmod(secret.path 420)
+    chmod(secret.path 420);
     printl(secret.read_text)
     printl(p"{dir}/no/such/file.txt".write_text("x") is? FileNotFound)
     printl(p"{dir}/no/such".mkdir is? FileNotFound)

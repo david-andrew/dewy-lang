@@ -57,11 +57,11 @@ bad=(a:Key b:Key):>bool & no allocates=>a =? b
 hash=(a:Key):>uint64=>{let xs:array<int64>=[a.value] return xs.length as uint64}
 bad=(a:array<Key>):>uint64 & no allocates=>a.hash()
 ''',
-    'capture': '''bad=(x:int64):>void & no allocates=>{let f=($capture x):>int64=>x f()}
+    'capture': '''bad=(x:int64):>void & no allocates=>{let f=($capture x):>int64=>x f();}
 ''',
     'copy': '''bad=(xs:array<int64>):>array<int64> & no allocates=>xs.copy()
 ''',
-    'closure_copy': '''bad=(f:<():>int64>):>void & no allocates=>{let g=f.copy() g()}
+    'closure_copy': '''bad=(f:<():>int64>):>void & no allocates=>{let g=f.copy() g();}
 ''',
     'sort_key': '''key=(x:int64):>int64=>{let xs:array<int64>=[x] return xs.length}
 bad=(@xs:array<int64>):>void & no allocates=>{xs.sort(key=@key)}

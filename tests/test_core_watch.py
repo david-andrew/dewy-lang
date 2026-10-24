@@ -163,7 +163,7 @@ def test_core_watch_tests_cancel_child(compiler, tmp_path, stop):
 $test
 waiting = () => {
     write_text("child.pid" "{pid()}")
-    loop true { sleep(50ms) }
+    loop true { sleep(50ms); }
 }
 ''')
 
@@ -229,7 +229,7 @@ pick=()=>values[1]
 update=(dt:float64):>void=>{
     state.count+=1
     if frame_number()%10 =? 0 printl"tick count={state.count} label={label()} value={pick()}"
-    sleep(5ms)
+    sleep(5ms);
 }
 draw=():>void=>clear(BLACK)
 '''
@@ -376,7 +376,7 @@ def test_core_watch_new_missing_asset_preserves_game(compiler, tmp_path):
     source = tmp_path / 'game.dewy'
     program = '''let label="original"
 let count:int64=0
-update=(dt:float64):>void=>{count+=1 if frame_number()%10 =? 0 printl"tick {count} {label}" sleep(5ms)}
+update=(dt:float64):>void=>{count+=1 if frame_number()%10 =? 0 printl"tick {count} {label}" sleep(5ms);}
 draw=():>void=>clear(BLACK)
 '''
     save(source, program)
@@ -419,7 +419,7 @@ def test_core_watch_derived_asset(compiler, tmp_path, imported, indirect):
     save(source, declaration + f'let decoded={decoded}\n' + '''
 let label="asset={decoded}"
 let count:int64=0
-update=(dt:float64):>void=>{count+=1 if frame_number()%10 =? 0 printl"tick {count} {label} allocations={alloc_count()}" sleep(5ms)}
+update=(dt:float64):>void=>{count+=1 if frame_number()%10 =? 0 printl"tick {count} {label} allocations={alloc_count()}" sleep(5ms);}
 draw=():>void=>clear(BLACK)
 ''')
     watcher = Watch(compiler, source, game=True)
@@ -456,7 +456,7 @@ def test_core_watch_closure_asset_keeps_capture(compiler, tmp_path, generic):
     program = '''make=()=>{let count:int64=0
 return ($capture count)=>{count+=1 return "{count}:{str_from_bytes($include_bytes(p\"label.txt\"))}"}}
 let next=make()
-update=(dt:float64):>void=>{if frame_number()%10 =? 0 printl(next()) sleep(5ms)}
+update=(dt:float64):>void=>{if frame_number()%10 =? 0 printl(next()) sleep(5ms);}
 draw=():>void=>clear(BLACK)
 '''
     if generic:
@@ -492,7 +492,7 @@ let program=make_shader(shading)
 let triangle=mesh([V(vec2(-1 -1)) V(vec2(3 -1)) V(vec2(-1 3))])
 let count:int64=0
 main=():>void=>window("Shader reload" 64 64)
-update=(dt:float64):>void=>{count+=1 sleep(5ms)}
+update=(dt:float64):>void=>{count+=1 sleep(5ms);}
 draw=():>void=>{
 clear(BLACK) program.draw(triangle U(1))
 if count%10 =? 0 {
@@ -523,9 +523,9 @@ def test_core_watch_generic_closure_layout_keeps_old_cleanup(compiler, tmp_path)
 return <T>(unused:T $capture count)=>{count+=1; "{word}:{count}"}}
 let next=make()<int64>
 update=(dt:float64):>void=>{
-next(0)
+next(0);
 if frame_number()%10 =? 0 {let copy=@next printl(copy(0))}
-sleep(5ms)
+sleep(5ms);
 }
 draw=():>void=>clear(BLACK)
 '''

@@ -25,8 +25,8 @@ serve_file=(f:SafePath):>Response | FileError=>{
 }
 handle=(req:Request):>void | PathEscape | FileError=>{
     let f=p"{root}/{req.name}"
-    serve_file(root.confine(f) or_throw) or_throw
-    if root.contains(f) { serve_file(f) or_throw }
+    serve_file(root.confine(f) or_throw) or_throw;
+    if root.contains(f) { serve_file(f) or_throw; }
     let n=f.read_text   # warning
     printl(n is? error)
 }

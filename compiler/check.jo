@@ -2616,6 +2616,7 @@ const SINK_ONE = 1        # one value: the block's last expression; another is a
 const SINK_BODY = 2       # an inferred function body: one value, or a pack of several
 const SINK_ARM = 3        # an arm of the `if`/`match` ending a BODY (or ARM): expresses into the BODY
 const SINK_COLLECTOR = 4  # loop capture, `[...]` with blocks: pushes onto its accumulator
+const SINK_VOID = 5       # a body written `:>void` (or `:>void | E`): expressing a value is an error
 
 struct Sink:
     mode: int
@@ -2646,11 +2647,39 @@ sink_root = (i: int) -> int: if sinks[i].mode == SINK_ARM: int(sinks[i].root) el
 
 # A function body's sink: an inferred result may be a pack, a written one is one value,
 # and `:>void | E` (like `:>void`) gives no value, so what its body expresses is dropped.
-sink_body_kind = (body: int, infer: bool, want: bool, ret: int) -> int:
-    if not files[pos_file(nodes[body].pos)].is_dewy or not want: return SINK_NONE
+sink_body_kind = (body: int, infer: bool, want: bool, ret: int, written: bool) -> int:
+    if not files[pos_file(nodes[body].pos)].is_dewy: return SINK_NONE
+    if not want: return if written: SINK_VOID else: SINK_NONE
     if infer: return SINK_BODY
-    if union_has_void(prune(ret)): return SINK_NONE
+    if union_has_void(prune(ret)): return if written: SINK_VOID else: SINK_NONE
     SINK_ONE
+
+# (a function's result written as a type: `:>void`, `:>void | E`)
+sink_written = (d: int) -> bool: d != 0 and (has_flag(d, NF_WRITTEN_VOID) or nodes[d].a != 0)
+
+# The members of t other than void, for "this expresses E when it fails".
+sink_failures = (t: int) -> str:
+    out = ""
+    loop m in union_members(t):
+        if tkind(m) == .void_: continue
+        if len(out) > 0: out += " | "
+        out += dt(m)
+    out
+
+# Exprstmt s gives t, in a statement where nothing may be expressed (SINK_VOID), or t is
+# `void | E`, which expresses its failure: say how to keep the statement.
+sink_void_error = (s: int, t: int):
+    v = int(nodes[s].a)
+    fname = "this function"
+    if sink_fn >= 0:
+        d = int(fns[int(ctxs[cx].inst)].decl)
+        if d != 0 and nodes[d].kind == .fn_ and nodes[d].name > 0: fname = "'{name_of(int(nodes[d].name))}'"
+    if union_has_void(t):
+        e = sink_failures(t)
+        fatal(nodes[v].pos, "this gives nothing when it succeeds and expresses {e} when it fails, which is not taken here: propagate the failure with `or_throw`, handle it (`match`, `is?`), or attach `;` to discard it, as in `f();`")
+    rt = prune(int(ctxs[cx].ret))
+    gives = if union_has_void(rt): "nothing, or the errors it returns" else: "nothing"
+    fatal(nodes[v].pos, "this expresses {a_type(t)}, and {fname} is written `:>{dt(rt)}`, so its body gives {gives}: attach `;` to discard the value, as in `f();`, or change the result type")
 
 # `return value` in a body: a BODY that becomes a pack cannot also return one.
 sink_return = (pos: int):
@@ -2721,6 +2750,7 @@ sink_express = (s: int, t: int, pack: bool, final: bool):
     i = sinks.len() - 1
     mode = sinks[i].mode
     v = int(nodes[s].a)
+    if mode == SINK_VOID: sink_void_error(s, t)
     if mode == SINK_ONE:
         fatal(nodes[v].pos, "this gives a value, and here the block gives one, its last expression: attach `;` to discard this value, as in `f();`")
     if mode == SINK_COLLECTOR:
@@ -4675,7 +4705,11 @@ check_stmt = (s: int):
             fatal(nodes[e].pos, "'{nm}' is a function and is not called here: `{nm}()` calls it")
         nodes[s].a = i32(last_checked)
         # (a Dewy block expresses the value: multi_expressions.md)
-        if not dropped and sinks.len() > 0 and sinks[sinks.len() - 1].mode != SINK_NONE and t != T_NEVER and tkind(t) != .void_ and not union_has_void(t):
+        # (a `spawn` statement hands its task to the group and expresses nothing)
+        spawned = raw.kind == .call and raw.aux2 == 17
+        if not dropped and not spawned and sinks.len() > 0 and sinks[sinks.len() - 1].mode != SINK_NONE and t != T_NEVER and tkind(t) != .void_:
+            # (`void | E` expresses E when it fails, and nothing when it succeeds)
+            if union_has_void(t): sink_void_error(s, t)
             sink_express(s, t, pack, false)
             return
         unused_result(last_checked, nodes[e].pos)
@@ -4884,7 +4918,7 @@ check_body_now = (f: int):
         exp = 0
         if not infer: exp = int(ctxs[cx].ret)
         if want and nkids(body) > 0 and nodes[kid(body, nkids(body) - 1)].kind == .exprstmt: returned_place(int(nodes[kid(body, nkids(body) - 1)].a))
-        sink_body_mode = sink_body_kind(body, infer, want, int(ctxs[cx].ret))
+        sink_body_mode = sink_body_kind(body, infer, want, int(ctxs[cx].ret), not infer and sink_written(decl))
         sink_fn = sinks.len()
         bt = check_block(body, exp, want)
         sink_fn = saved_sink
@@ -5134,7 +5168,7 @@ check_lambda_body = (f: int, lam: int, ret_hint: int):
     if not infer: exp = int(ctxs[cx].ret)
     if want and nkids(body) > 0 and nodes[kid(body, nkids(body) - 1)].kind == .exprstmt: returned_place(int(nodes[kid(body, nkids(body) - 1)].a))
     saved_sink = sink_fn
-    sink_body_mode = sink_body_kind(body, infer and types[prune(int(ctxs[cx].ret))].kind == .var, want, int(ctxs[cx].ret))
+    sink_body_mode = sink_body_kind(body, infer and types[prune(int(ctxs[cx].ret))].kind == .var, want, int(ctxs[cx].ret), not infer and sink_written(lam))
     sink_fn = sinks.len()
     bt = check_block(body, exp, want)
     sink_fn = saved_sink

@@ -58,6 +58,6 @@ control = ():>int64 => {
 main = ():>void => {
     let witness = control()
     let items:array<int64> = [1]
-    forbidden(@items)
+    forbidden(@items);
     $runtime_assert witness >? 0
 }

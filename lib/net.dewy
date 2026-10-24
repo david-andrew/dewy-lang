@@ -208,7 +208,7 @@ if $target.os =? "windows" {
         __ioctlsocket(s -2147195266 on.ptr);             # FIONBIO
         return s
     }
-    __close=(s:int64):>void=>{__closesocket(s)}
+    __close=(s:int64):>void=>{__closesocket(s);}
     __reuse_address=(s:int64):>void=>{}
     __accept=(s:int64):>int64=>{
         let got=__accept_c(s none none)
@@ -268,7 +268,7 @@ if $target.os =? "windows" {
     # names no descriptor: -1, which every call refuses as a bad descriptor.
     __fd=(handle:int64):>int32=>if handle >=? 0 and handle <=? 2147483647 int32(handle) else -1
 
-    __close=(fd:int64):>void=>{__close_c(__fd(fd))}
+    __close=(fd:int64):>void=>{__close_c(__fd(fd));}
     __bind=(fd:int64 address:ptr<uint8> length:int32):>int32=>if length <? 0 -1 else __bind_c(__fd(fd) address uint32(length))
     __listen=(fd:int64 backlog:int32):>int32=>__listen_c(__fd(fd) backlog)
     __connect=(fd:int64 address:ptr<uint8> length:int32):>int32=>if length <? 0 -1 else __connect_c(__fd(fd) address uint32(length))
@@ -282,7 +282,7 @@ if $target.os =? "windows" {
     }
     __reuse_address=(fd:int64):>void=>{
         let on:array<int32>=[1]
-        __setsockopt(__fd(fd) __SOL_SOCKET __SO_REUSEADDR on.ptr 4)
+        __setsockopt(__fd(fd) __SOL_SOCKET __SO_REUSEADDR on.ptr 4);
     }
     __socket_error=(fd:int64):>int32=>{
         let code:array<int32>=[0]
@@ -367,8 +367,8 @@ if $target.os =? "windows" {
 __prepare=(handle:int64):>void=>{
     let on:array<int32>=[1]
     if $target.os =? "windows" {
-        __setsockopt(handle 6 1 on.ptr 4)
+        __setsockopt(handle 6 1 on.ptr 4);
     } else {
-        __setsockopt(__fd(handle) 6 1 on.ptr 4)
+        __setsockopt(__fd(handle) 6 1 on.ptr 4);
     }
 }

@@ -127,9 +127,9 @@ main=():>void=>{exit(f(2)+f(-2)-1)}
 
 
 @pytest.mark.parametrize('source', [
-    'bad=(a:int64):>true & <a >? 0> | false=>true\nmain=():>void=>{bad(1)}',
-    'bad=(a:int64):>true & <a >? 0> | false=>{a=1; return true}\nmain=():>void=>{bad(1)}',
-    'Yes:type=[]\nNo:type=[]\nbad=(a:int64):>Yes & <a >? 0> | No=>Yes[]\nmain=():>void=>{bad(1)}',
+    'bad=(a:int64):>true & <a >? 0> | false=>true\nmain=():>void=>{bad(1);}',
+    'bad=(a:int64):>true & <a >? 0> | false=>{a=1; return true}\nmain=():>void=>{bad(1);}',
+    'Yes:type=[]\nNo:type=[]\nbad=(a:int64):>Yes & <a >? 0> | No=>Yes[]\nmain=():>void=>{bad(1);}',
 ])
 def test_conditional_exit_obligation(compiler, tmp_path, source):
     result = check(compiler, tmp_path, source + '\n')
@@ -189,8 +189,8 @@ f=(a:int64)=>{''' + body + '}\nmain=()=>f(4)\n')
     ('$proof\nmain=():>void=>{}', 'proof cannot be a runtime entry point'),
     ('$proof\np=(a:int64):><a >? 0>=>{}\nmain=()=>{}', 'cannot prove proof exit proposition'),
     ('$proof\np=():><0 =? 0>=>{$unsafe_assume true}\nmain=()=>{p()}', '$unsafe_assume'),
-    ('bad=(a:int64):>true & <a >? 0>=>false\nmain=():>void=>{bad(1)}', 'declared boolean result arm'),
-    ('bad=():>true=>false\nmain=():>void=>{bad()}', 'declared boolean result arm'),
+    ('bad=(a:int64):>true & <a >? 0>=>false\nmain=():>void=>{bad(1);}', 'declared boolean result arm'),
+    ('bad=():>true=>false\nmain=():>void=>{bad();}', 'declared boolean result arm'),
 ])
 def test_proof_and_result_boundaries(compiler, tmp_path, source, diagnostic):
     result = check(compiler, tmp_path, source + '\n')

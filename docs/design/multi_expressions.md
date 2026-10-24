@@ -33,11 +33,15 @@ printl([squares(3)])        # [0 1 4 9]
 expressed. A `never` result (`return`, `break`, `exit(...)`) ends its path, so it
 contributes nothing either.
 
-A result that is `void` or an error (`void | E`, as from `sleep(1ms)`) is not
-expressed in statement position either. Its error is forwarded or handled
-through the error rules, not counted as a value. A `spawn` statement in a
+A result that is `void` or an error (`void | E`, as from `sleep(1ms)`) expresses
+`E` when it fails and nothing when it succeeds (decided 2026-10-23). In statement
+position that is a value that may appear, so the sink rules apply: the last
+statement of a `:>void | E` body gives it as the result; anywhere else it is an
+error naming the fixes (`or_throw` to propagate, `match`/`is?` to handle, an
+attached `;` to discard). Module code still drops it. A `spawn` statement in a
 `concurrent` block hands its task to the group and expresses nothing.
-*Flagged: both keep today's behavior. The reference doesn't address either one.*
+*Flagged: collecting failures (`[loop x in xs risky(x)]` giving the errors) is
+not implemented; it is the same error for now.*
 
 ## Suppressing values: the attached `;`
 
@@ -59,11 +63,12 @@ punctuation. Inside an array literal it selects the next dimension, standing in
 for a row break (tensors.md): `[1 2 ; 3 4]` is a 2×2 matrix and `[1 2 ;; 3 4]`
 starts a new 2-D block. Anywhere else a standalone `;` is an error.
 
-So `[f(); 7]` is `[7]` after calling `f`, never a matrix. Because
-`[1 2; 3 4]` (attached) would silently discard `2`, an attached `;` that discards
-a value with no effect (a literal, a name, arithmetic of them) inside an array
-literal is a compile error. The message points to the standalone spelling.
-*Flagged: this diagnostic is our addition. It's reversible.*
+So `[f(); 7]` is `[7]` after calling `f`, never a matrix, and `[1 2; 3 4]` is
+`[1 3 4]`: the attached `;` discards `2` (decided 2026-10-23). Because that
+usually means a row break, an attached `;` that discards a value with no effect
+(a literal, a name, arithmetic of them) inside an array literal warns, with an
+editor fix-it that makes it the standalone ` ;`. In a literal that has rows, an
+attached `;` is an error, since rows hold only values.
 
 ## Contexts
 
@@ -93,13 +98,16 @@ spread, and its rest/spread forwarding for calls is still provisional.
 *Flagged: once `...rest` forwarding lands, a call expressing several values may
 supply several positional arguments; until then it's an error.*
 
-**Statement contexts drop values.** Module-level code and the body of a function
-whose contract is `:>void` or `:>void | E` drop what they express. The old
-"value is not used" warning stays only here, for values that are discarded and
+**Statement contexts drop values.** Module-level code drops what it expresses.
+The old "value is not used" warning stays here, for values that are discarded and
 do nothing (`x == 6`, `speed + 1`).
-*Flagged: the reference does not say whether a `:>void` body rejects or drops
-expressed values. Dropping follows the contract ("gives nothing"). Rejecting
-would be the stricter alternative.*
+
+**A written `:>void` body expresses nothing** (decided 2026-10-23). A value its
+body expresses (`xs.pop()`, `5`) is an error: attach `;` to discard it, or change
+the result type. A `:>void | E` body is the same, except that its last statement
+may give the `E`. A function whose result is `void` only by context (a callback
+passed where `:>void` is expected, a game's `update`) still drops its values.
+*Flagged: the context-typed exception keeps callbacks Python-like; reversible.*
 
 ## Functions
 
@@ -181,7 +189,8 @@ collector's array, as loop capture always has.
 ## Implementation (compiler, 2026-10-23)
 
 - Each block the checker checks has a *sink*. Its kinds: drop (module code and
-  `:>void` bodies), one (one-value contexts and written contracts), body (an
+  bodies void by context), void (written `:>void` and `:>void | E` bodies: a
+  value is an error), one (one-value contexts and written contracts), body (an
   inferred function result), arm (an arm of the `if`/`match` ending a body, whose
   values belong to the body), and collector (loop capture and `[...]` with block
   or flow elements, which the frontend builds as an accumulator and pushes, as

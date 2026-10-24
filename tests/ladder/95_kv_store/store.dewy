@@ -53,9 +53,9 @@ Store:type = [
     apply = (changes:array<Change>):>void => {
         loop change in changes {
             if change.op =? 'put' {
-                index.put(change.key change.value)
+                index.put(change.key change.value);
             } else {
-                index.remove(change.key)
+                index.remove(change.key);
             }
         }
     }

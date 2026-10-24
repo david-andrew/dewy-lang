@@ -264,9 +264,12 @@ every iteration. A place for one value (a binding, an operand, an argument, a
 result written `:>T`) takes a block's last expression, and an earlier value
 there is an error. A function without a written result may express several
 values: `pair = () => { 1 2 }` makes `[pair()]` `[1 2]`, while `x = pair()` is an error.
-Module code and `:>void` (or `:>void | E`) bodies drop what they express. An attached `;`
-discards a value, `xs.pop();`. See the
-[design](design/multi_expressions.md).
+Module code drops what it expresses. A body written `:>void` expresses nothing:
+a value there (`xs.pop()` as a statement) is an error, so attach `;` to discard
+it, `xs.pop();`, or change the result type. A result that is `void | E` expresses
+`E` when it fails: as the last statement of a `:>void | E` body it is the result,
+and elsewhere it is an error unless it is propagated (`or_throw`), handled, or
+discarded with `;`. See the [design](design/multi_expressions.md).
 
 One bare parameter name may omit the parentheses: `x => x+1`, as in
 `apply(x => x*2 21)`, where the lambda ends at the next argument. The name is
@@ -2148,8 +2151,9 @@ Write a matrix literal with a standalone `;` (a space before it) between rows an
 `;;` between 2-D blocks: `[1 2 ; 3 4]` has shape `[2 2]`,
 `[1 2 ; 3 4 ;; 5 6 ; 7 8]` shape `[2 2 2]` and `[1 2 3 ;]` shape `[1 3]`.
 Rows must have the same length. `[xs ; ys]` stacks two arrays as rows. An
-attached `;` discards the value before it instead, so `[f(); 7]` is `[7]`, and
-`[1 2; 3 4]` is an error that points to the standalone spelling.
+attached `;` discards the value before it instead, so `[f(); 7]` is `[7]` and
+`[1 2; 3 4]` is `[1 3 4]`, with a warning (and an editor fix-it) suggesting the
+standalone ` ;` it probably meant.
 
 The shape belongs in the type: `array<float64 length=[m n]>` is a 2-D array,
 `array<float64 length=[n]>` a 1-D one. In a parameter, a dimension named by a
@@ -2748,8 +2752,8 @@ let root = p"/srv/site/static"
 serve_file = (f:SafePath):>Response | FileError => { ... }
 handle = (req:Request):>void | PathEscape | FileError => {
     let f = p"{root}/{req.name}"
-    serve_file(root.confine(f) or_throw) or_throw
-    if root.contains(f) { serve_file(f) or_throw }
+    serve_file(root.confine(f) or_throw) or_throw;
+    if root.contains(f) { serve_file(f) or_throw; }
     let n = f.read_text   # warning: f holds untrusted input
 }
 ```

@@ -266,7 +266,7 @@ NATIVE_DIAGNOSTICS = {
     'text-plus-number': ('main = () => { let s = "a" + 1 }', 'interpolate, `"a{1}"`'),
     'empty-array': ('main = () => { let m = [] }', '`let m:array<int64> = []`'),
     'real-to-integer': ('main = () => { let x:float64 = 1.5\nlet y:int64 = x }', 'int64(x) makes it a whole number'),
-    'union-cast': ('f = (x:int64|string):>int64 => x as int64\nmain = ():>void => { f(1) }', 'inside `if x is? int64 { }`'),
+    'union-cast': ('f = (x:int64|string):>int64 => x as int64\nmain = ():>void => { f(1); }', 'inside `if x is? int64 { }`'),
     'array-habit': ('main = () => { let xs = [1 2]\nprintl"{xs.size()}" }', "no 'size' for array<int> (use `.length`)"),
     'dict-habit': ('main = () => { let d:dict<string int64> = ["a"->1]\nprintl"{d.size()}" }', '(use `m.length`)'),
     'type-habit': ('main = () => { let x:float = 1.0 }', "unknown type 'float' (use `float64`"),

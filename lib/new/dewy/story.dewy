@@ -53,7 +53,7 @@ advance = (@reading:Reading):>void => {
             let at = "center"
             if words.length>?3 and words[end-1]=?"at" at = words[end]
             reading.shown[words[1]] = at
-        } else if words[0]=?"hide" reading.shown.remove(words[1])
+        } else if words[0]=?"hide" reading.shown.remove(words[1]);
     }
 }
 fresh = ():>Reading => {
@@ -133,7 +133,7 @@ draw = ():>void => {
             if reading.step.color.length>?0 color = hex(reading.step.color)
             text(reading.step.speaker vec2(90 486) 28 color)
         }
-        text_rich(reading.step.text vec2(90 530) 28 WHITE width = 1100 chars = int64(typed))
+        text_rich(reading.step.text vec2(90 530) 28 WHITE width = 1100 chars = int64(typed));
         text("Space / Enter / click to continue" vec2(90 650) 18 rgba(1 1 1 0.5))
     } else if reading.step.kind=?StoryKind.choice {
         loop i in 0.. and choice in reading.step.choices {

@@ -13,7 +13,7 @@ put = (@cache:Cache key:string value:int64):>void => {
     if cache.order.length >? cache.capacity and cache.order.length >? 0 {
         let victim = cache.order[0]
         cache.order = cache.order[1..]
-        cache.values.remove(victim)
+        cache.values.remove(victim);
     }
 }
 get = (@cache:Cache key:string):>int64? => {

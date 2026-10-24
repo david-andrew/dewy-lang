@@ -71,7 +71,7 @@ merge = (@node:Node i:int64):>void => {
     }
     $runtime_assert(i <? node.children.length)
     node.children[i] = left
-    take(@node.children i+1)
+    take(@node.children i+1);
 }
 extreme = (node:Node last:bool):>int64 => {
     if node.children.length =? 0 {

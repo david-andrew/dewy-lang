@@ -85,7 +85,7 @@ main=()=>{
 def test_cancellation_is_level_triggered(compiler, tmp_path):
     run(compiler, tmp_path, """
 Bad:type=type of error
-fail=()=>{sleep(2ms) return Bad}
+fail=()=>{sleep(2ms); return Bad}
 observe=(hits:Atomic<int64>)=>{
  let first=sleep(1s)
  if first is? Canceled {hits.add(1);}
@@ -140,11 +140,11 @@ def test_group_does_not_leak_native_tasks(compiler, tmp_path):
     (tmp_path / 'threads.jo').write_text('live = () -> int: list_dir("/proc/self/task").len()\n')
     run(compiler, tmp_path, """
 from p"threads.jo" import live
-work=()=>{sleep(1ms) return 1}
+work=()=>{sleep(1ms); return 1}
 main=()=>{
  let before=live()
  loop i in [0..20) {concurrent {spawn work() spawn work()}}
- loop i in [0..100) {if live() =? before break sleep(1ms)}
+ loop i in [0..100) {if live() =? before break sleep(1ms);}
  $runtime_assert(live() =? before)
 }
 """)
@@ -226,7 +226,7 @@ main=()=>{
 
 def test_return_cancels_and_joins_children(compiler, tmp_path):
     run(compiler, tmp_path, '''
-work=()=>{sleep(1s) return 1}
+work=()=>{sleep(1s); return 1}
 early=()=>{concurrent {spawn work() return 7} return 8}
 main=()=>{$runtime_assert(early() =? 7)}
 ''')
@@ -261,7 +261,7 @@ def test_output_is_not_a_cancellation_point(compiler, tmp_path):
 
 def test_void_tasks_and_race(compiler, tmp_path):
     run(compiler, tmp_path, """
-work=(hits:Atomic<int64>):>void=>{hits.add(1)}
+work=(hits:Atomic<int64>):>void=>{hits.add(1);}
 main=()=>{
  let hits=atomic(0)
  concurrent {let a=spawn work(hits)}
@@ -277,8 +277,8 @@ def test_first_failure_survives_later_sibling_failure(compiler, tmp_path):
     run(compiler, tmp_path, """
 First:type=type of error & [message:string]
 Later:type=type of error & [message:string]
-fail=()=>{sleep(2ms) return First["original"]}
-late=()=>{sleep(1s) return Later["after cancellation"]}
+fail=()=>{sleep(2ms); return First["original"]}
+late=()=>{sleep(1s); return Later["after cancellation"]}
 main=()=>{
  let joined=concurrent {spawn late() spawn fail()}
  $runtime_assert(joined is? First and joined.message =? "original")

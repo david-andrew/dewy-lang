@@ -176,13 +176,13 @@ update = (dt:float64):>void => {
     let pad = Pad[move = axis.x pressed = action_pressed("Jump") held = action_down("Jump") drop = axis.y>?0.5]
     let step = tick(player level start pad dt)
     player = step.player
-    if step.jumped play(snd_jump)
-    if step.impact>?1300.0 { shake.add(0.35); play(snd_land 0.5) }
+    if step.jumped play(snd_jump);
+    if step.impact>?1300.0 { shake.add(0.35); play(snd_land 0.5); }
     let box = player.box
     let center = vec2(box.x+box.w/2.0 box.y+box.h/2.0)
     let taken = collect(@coins center dt)
     got += taken
-    if taken>?0 play(snd_coin)
+    if taken>?0 play(snd_coin);
     let size = tilemap_size(level)
     cam = follow(cam center dt 6.0 vec2(140 90))
     cam = clamp(cam vec2(640 360) vec2(max(size.x-640.0 640.0) max(size.y-360.0 360.0)))

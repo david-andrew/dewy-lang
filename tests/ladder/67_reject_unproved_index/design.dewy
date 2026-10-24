@@ -59,6 +59,6 @@ main = ():>void => {
     let source = read_line() ?? "1"
     if source is? (Canceled|FileError) exit(1)
     let index = to_int(source) ?? 0
-    forbidden(make(3) index)
+    forbidden(make(3) index);
     $runtime_assert witness >? 0
 }

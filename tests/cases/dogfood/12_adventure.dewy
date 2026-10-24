@@ -66,14 +66,14 @@ do_command = (@w:World line:string):>void => {
                 printl("There is no {noun} here.")
                 return
             }
-            w.rooms[w.here].items.pop(i)
+            w.rooms[w.here].items.pop(i);
             w.inventory.push(noun)
             printl("Taken: {noun}.")
         }
         <"drop"> => {
             let i = w.inventory.index_of(noun)
             if i is? Missing { printl("You don't have {noun}.") return }
-            w.inventory.pop(i)
+            w.inventory.pop(i);
             w.rooms[w.here].items.push(noun)
             printl("Dropped: {noun}.")
         }
@@ -116,5 +116,5 @@ main = ():>void => {
         if world.done { break }
     }
     printl("Game over after {world.moves} moves.")
-    if argv.length <=? 1 { remove_file(path) }
+    if argv.length <=? 1 { remove_file(path); }
 }

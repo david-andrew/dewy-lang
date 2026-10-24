@@ -1212,7 +1212,7 @@ dc_function_literal = (name_id: i32, opening: DewyLexeme) -> int:
     if dn_accept(.returns):
         if dn_tokens[dn_at].kind == .identifier and int(dn_tokens[dn_at].name) == dn_void_id:
             dn_at += 1
-            add_flag(n, NF_VOID)
+            add_flag(n, NF_VOID | NF_WRITTEN_VOID)
         else:
             dc_effects_follow = true
             result = dc_annotation(30)

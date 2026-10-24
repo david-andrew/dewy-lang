@@ -1522,7 +1522,7 @@ dw_function = (id: int, name: str) -> int:
         result = 0
     if result != 0:
         result = dw_effect_suffix(n, result)
-        if dw_name(result) == "void": add_flag(n, NF_VOID)
+        if dw_name(result) == "void": add_flag(n, NF_VOID | NF_WRITTEN_VOID)
         else: nodes[n].a = i32(dw_result_type(n, result))
     ps: int[]
     captures: int[]
@@ -2171,11 +2171,15 @@ dw_pure = (id: int) -> bool:
     if k == .binary and (op == .plus or op == .minus or op == .star or op == .slash or op == .caret or op == .multiply_apply): return dw_pure(dw_child(id, 1)) and dw_pure(dw_child(id, 2))
     false
 
-# `[1 2; 3 4]` written for a matrix: the attached `;` discards the 2, which does nothing.
-dw_discard_check = (item: int):
+# `[1 2; 3 4]` written for a matrix: the attached `;` discards the 2, which does nothing,
+# so `[1 3 4]` is meant only rarely (the editor's fix-it puts a space before the `;`).
+DW_ROW_HINT = "a row break is a standalone `;`, with a space before it, as in `[1 2 ; 3 4]`"
+
+dw_discard_check = (item: int, rows: bool = false):
     value = dw_child(item, 1)
     if not dw_pure(value): return
-    fatal(dewy_syntax[item].pos, "this `;` is attached to the value before it, which discards that value and does nothing here: a row break is a standalone `;`, with a space before it, as in `[1 2 ; 3 4]`")
+    if rows: fatal(dewy_syntax[item].pos, "this `;` is attached to the value before it, which discards that value and does nothing here: {DW_ROW_HINT}")
+    warn(dewy_syntax[item].pos, "this `;` is attached to the value before it, which discards that value, so `[1 2; 3 4]` is `[1 3 4]`: {DW_ROW_HINT}; to drop the value, leave it out")
 
 # Whether an array literal collects multiple expressions: a block or flow among
 # its elements (`[{1 2} 3]`, `[if c 1]`), or a value discarded by an attached `;`.
@@ -2271,8 +2275,8 @@ dw_rows_literal = (id: int, children: int[]) -> int:
         item = dw_unwrap(child)
         after = 0
         if dw_op(item) == .statement_end:
-            dw_discard_check(item)
-            fatal(dewy_syntax[item].pos, "an attached `;` discards a value, and an array with rows holds only values: a row break is a standalone `;`, with a space before it, as in `[1 2 ; 3 4]`")
+            dw_discard_check(item, true)
+            fatal(dewy_syntax[item].pos, "an attached `;` discards a value, and an array with rows holds only values: {DW_ROW_HINT}")
         op = dw_op(item)
         if op == .assign or op == .arrow or (dewy_syntax[item].kind == .postfix and op == .ellipsis):
             fatal(dewy_syntax[item].pos, "rows separated by `;` hold plain values; records, dictionaries and spreads don't split into rows")

@@ -12,8 +12,8 @@ put = (@cache:Cache key:string value:int64):>void => {
     touch(@cache key)
     if cache.order.length >? cache.capacity and cache.order.length >? 0 {
         let victim = cache.order[0]
-        cache.order.pop(0)
-        cache.values.remove(victim)
+        cache.order.pop(0);
+        cache.values.remove(victim);
     }
 }
 get = (@cache:Cache key:string):>int64? => {

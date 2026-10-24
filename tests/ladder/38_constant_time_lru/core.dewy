@@ -59,7 +59,7 @@ put = (@c:Cache key:int64 value:int64):>void => {
     if c.index.length =? c.capacity {
         slot = c.head
         $runtime_assert(0 <=? slot and slot <? c.links.length)
-        c.index.remove(c.links[slot].key)
+        c.index.remove(c.links[slot].key);
         unlink(@c slot)
     }
     else {

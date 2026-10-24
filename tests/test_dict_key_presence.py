@@ -20,7 +20,7 @@ main=():>void=>{
     d["y"]=5
     printl(d["x"])
     let y=d["x"]+d["y"]
-    if "a" in? c {printl(c["a"]) c.pop("a")}
+    if "a" in? c {printl(c["a"]) c.pop("a");}
     let k="b"
     if k in? c {printl(c.pop(k))}
     printl"{y} {c.pop("q" default=0)} {c.get("q")}"
@@ -29,11 +29,11 @@ main=():>void=>{
 
 REJECTED = {
     'missing': 'main=():>void=>{\n    let d:dict<string int64>=["a"->1]\n    printl(d["b"])\n}\n',
-    'popped': 'main=():>void=>{\n    let d:dict<string int64>=["a"->1]\n    if "a" in? d {d.pop("a") printl(d["a"])}\n}\n',
+    'popped': 'main=():>void=>{\n    let d:dict<string int64>=["a"->1]\n    if "a" in? d {d.pop("a"); printl(d["a"])}\n}\n',
     'other_key': 'f=(d:dict<string int64> a:string b:string):>int64=>{\n    if a in? d return d[b]\n    return 0\n}\nmain=():>void=>printl(f(["a"->1] "a" "b"))\n',
     # (a fact about one iteration's key does not reach the next)
     'loop_order': 'f=(ws:array<string> d:dict<string int64>):>int64=>{\n    let t=0\n    loop w in ws {\n        t+=d[w]\n        if not (w in? d) return 0\n    }\n    return t\n}\nmain=():>void=>printl(f(["a" "b"] ["a"->1]))\n',
-    'removed': 'f=(d:dict<string int64> k:string):>void=>{\n    if k in? d {d.remove(k) printl(d[k])}\n}\nmain=():>void=>f(["a"->1] "a")\n',
+    'removed': 'f=(d:dict<string int64> k:string):>void=>{\n    if k in? d {d.remove(k); printl(d[k])}\n}\nmain=():>void=>f(["a"->1] "a")\n',
 }
 
 

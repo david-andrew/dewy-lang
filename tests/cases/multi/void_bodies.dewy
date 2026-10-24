@@ -1,0 +1,24 @@
+# quick
+# A `:>void` body expresses nothing: an attached `;` discards a value. `void | E`
+# expresses E when it fails: the last statement of a `:>void | E` body gives it.
+Oops:type=type of error
+risky=(n:int64):>void|Oops=>{
+    if n >? 2 return Oops
+}
+trim=(@xs:array<int64>):>void=>{
+    xs.pop();
+    loop xs.length >? 2 xs.pop();
+}
+checked=(n:int64):>void|Oops=>{
+    risky(n - 1) or_throw
+    risky(n)
+}
+main=()=>{
+    let xs:array<int64>=[1 2 3 4 5]
+    trim(@xs)
+    printl(xs)
+    risky(9);
+    printl(checked(1) is? Oops)
+    printl(checked(3) is? Oops)
+    printl(checked(4) is? Oops)
+}

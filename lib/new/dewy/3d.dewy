@@ -63,7 +63,7 @@ let snd_jump = sfx_jump()
 
 let walls:array<Vertex3D> = []
 add_wall = (center:vec3 size:vec3 color:vec4):>void => {
-    world.add_box(center size kind = physics3d.BodyKind.fixed)
+    world.add_box(center size kind = physics3d.BodyKind.fixed);
     add_box(@walls center size color)
 }
 world.add_box(vec3(0 -0.5 0) vec3(40 1 40) kind = physics3d.BodyKind.fixed)
@@ -106,7 +106,7 @@ forward = ():>vec3 => view_direction(yaw pitch)
 eye = ():>vec3 => player.feet+vec3(0 EYE 0)
 
 shoot = ():>void => {
-    play(snd_shot 0.4)
+    play(snd_shot 0.4);
     flash = 1.0
     let origin = eye()
     let direction = forward()
@@ -116,7 +116,7 @@ shoot = ():>void => {
     if best>=?0 and best<?orbs.length {
         orbs[best].pop = 0.001
         hits += 1
-        play(snd_pop 0.6 pitch = 1.0+0.1*hits)
+        play(snd_pop 0.6 pitch = 1.0+0.1*hits);
         if hits=?ORBS done = true
     } else {
         match hit {
@@ -132,9 +132,9 @@ update = (dt:float64):>void => {
     if not done run_time += dt
     flash = max(flash-dt*8.0 0.0)
     loop @orb in orbs { if orb.pop>?0.0 orb.pop += dt }
-    if mouse_pressed(Mouse.left) and not is_mouse_locked() mouse_lock()
+    if mouse_pressed(Mouse.left) and not is_mouse_locked() mouse_lock();
     else if mouse_pressed(Mouse.left) or gamepad_pressed(PadButton.rb) or (gamepad_axis(5)>?0.5 and frame_number()%8=?0) shoot()
-    if key_pressed(Key.escape) mouse_lock(false)
+    if key_pressed(Key.escape) mouse_lock(false);
     if done and (key_pressed(Key.r) or gamepad_pressed(PadButton.start)) start()
     let look = right_stick()*3.0*dt
     if is_mouse_locked() look += mouse_delta()*LOOK
@@ -148,7 +148,7 @@ update = (dt:float64):>void => {
     let jump:float64 = 0.0
     if player.on_ground and (key_pressed(Key.space) or gamepad_pressed(PadButton.a)) {
         jump = JUMP
-        play(snd_jump 0.3)
+        play(snd_jump 0.3);
     }
     world.walk(@player move*WALK dt jump = jump)
     world.step(dt)

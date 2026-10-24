@@ -43,7 +43,7 @@ LRU:type = <K V>[
         }
         if entries.length >=? capacity {
             let oldest = order.pop(0)
-            entries.remove(oldest)
+            entries.remove(oldest);
         }
         entries[key] = value
         order.push(key)
@@ -51,7 +51,7 @@ LRU:type = <K V>[
     touch = (key:K):>void => {
         let i = order.index_of(key)
         if i isnt? Missing {
-            order.pop(i)
+            order.pop(i);
             order.push(key)
         }
     }
