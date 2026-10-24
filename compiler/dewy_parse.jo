@@ -2618,7 +2618,10 @@ dw_spread_item = (child: int) -> int:
 
 # An unpacking pattern: `[a b]`, or `(a b)` (two or more names in parentheses).
 dw_is_pattern = (id: int) -> bool:
-    dewy_syntax[id].kind == .block and (dewy_syntax[id].text == "[]:" or dewy_syntax[id].text == "():" and dw_nchildren(id) >= 2)
+    if dewy_syntax[id].kind != .block: return false
+    if dewy_syntax[id].text == "[]:": return true
+    # (`(a b)`, or `(a ...)`: one name and a drop)
+    dewy_syntax[id].text == "():" and (dw_nchildren(id) >= 2 or dw_nchildren(id) == 1 and dw_spread_at(dw_child(id, 0)))
 
 dw_bindings = (id: int) -> int[]:
     seen: {str: bool} = {}

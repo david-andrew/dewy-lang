@@ -514,6 +514,56 @@ class MultiLit(Expr):
 
 
 @dataclass(frozen=True)
+class Unpack(Stmt):
+    """Several values taken apart (substitution invariance, unpacking): `let p=(a b c)` (held)
+    then `let (x ...y z)=p`, or a group or array unpacked directly. `...name` collects what the
+    names leave (an array from an array, several values from several values, printed collected),
+    a bare `...` drops it. Then the values pass to a call, `max(p)`, or a collector, `[p]`."""
+    names: tuple         # each a name, '...' (drop) or '...name' (rest)
+    items: tuple         # the values
+    group: bool          # `(a b)` several values; else `[a b]` an array
+    paren: bool          # the pattern written `(x y)`; else `[x y]`
+    held: str = ''       # bound to this name first (a binding holding several values)
+    use: str = ''        # 'max' or 'collect': what the held values are then passed to
+
+    def render(self, typed=False):
+        source = ('(' if self.group else '[') + ' '.join(render(x, True) for x in self.items) + (')' if self.group else ']')
+        lines = []
+        if self.held:
+            lines.append(f'let {self.held}={source}')
+            source = self.held
+        pattern = ' '.join(self.names)
+        lines.append(f'let {"(" if self.paren else "["}{pattern}{")" if self.paren else "]"}={source}')
+        for name in self.names:
+            if name == '...':
+                continue
+            rest = name[3:]
+            lines.append((f'printl([{rest}])' if self.group else f'printl({rest})') if name.startswith('...') else f'printl({name})')
+        if self.use == 'max':
+            lines.append(f'printl(max({self.held}))')
+        elif self.use == 'collect':
+            lines.append(f'printl([{self.held}])')
+        return '\n'.join(lines)
+
+    def run(self, m, env):
+        values = [copy.deepcopy(m.eval(x, env)) for x in self.items]
+        rest = next((i for i, n in enumerate(self.names) if n.startswith('...')), -1)
+        after = len(self.names) - 1 - rest if rest >= 0 else 0
+        for i, name in enumerate(self.names):
+            if i == rest:
+                if name != '...':
+                    m.output.append(show(values[rest:len(values) - after]) + '\n')
+                continue
+            value = values[len(values) - (len(self.names) - i)] if rest >= 0 and i > rest else values[i]
+            env.vars[name] = value
+            m.output.append(show(value) + '\n')
+        if self.use == 'max':
+            m.output.append(show(max(values)) + '\n')
+        elif self.use == 'collect':
+            m.output.append(show(values) + '\n')
+
+
+@dataclass(frozen=True)
 class RecLit(Expr):
     ty: Ty
     items: tuple  # ((field, Expr), ...) in written order
@@ -1313,6 +1363,8 @@ class Machine:
             raise Jumped(s.word)
         elif isinstance(s, Return):
             raise Returned(None if s.value is None else self.eval(s.value, env))
+        elif isinstance(s, Unpack):
+            s.run(self, env)
         elif isinstance(s, Assert):
             value = self.eval(s.expr, env)
             if s.expected is None:
@@ -1418,6 +1470,11 @@ def effects(node, functions, shared=frozenset()):
             reads.add(n.name)
         elif isinstance(n, Let):
             writes.add(n.name)
+        elif isinstance(n, Unpack):
+            writes.update(name for name in n.names if not name.startswith('...'))
+            if n.held:
+                writes.add(n.held)
+            output = True
         elif isinstance(n, Assign):
             writes.add(root(n.target))
         elif isinstance(n, Ref):
@@ -1510,6 +1567,10 @@ def scope_errors(program) -> list[str]:
             if isinstance(s, Let):
                 expr(s.value, visible)
                 visible.add(s.name)
+            elif isinstance(s, Unpack):
+                for item in s.items:
+                    expr(item, visible)
+                visible.update(n for n in s.names if not n.startswith('...'))
             elif isinstance(s, Loop):
                 expr(s.source, visible)
                 stmts(s.body, visible | set(s.names))
@@ -2478,8 +2539,11 @@ class Generator:
         return flatten(out) + [self.print_value(Var(I, acc))]
 
     def block_multi(self):
-        """A collector of blocks and `if` arms expressing differing numbers of values."""
+        """A collector of blocks and `if` arms expressing differing numbers of values; or
+        several values held, unpacked and passed on (substitution invariance)."""
         r = self.r
+        if self.chance(.4):
+            return [self.values_unpack()]
         ty, array = r.choice(((I, AI), (I, AI), (S, AS)))
         values = lambda: tuple(self.expr(ty, 2) for _ in range(r.randint(0, 3)))
         items = [self.expr(ty, 2)]
@@ -2492,6 +2556,29 @@ class Generator:
             else:
                 items.append(MultiIf(MULTI, self.expr(B, 1), values(), values() if self.chance(.6) else None))
         return [self.print_value(MultiLit(array, tuple(items)))]
+
+    def values_unpack(self):
+        r = self.r
+        ty = r.choice((I, I, S))
+        group = self.chance(.6)
+        count = r.randint(2, 4)
+        items = tuple(self.expr(ty, 1) for _ in range(count))
+        # (the names, and perhaps one rest or drop anywhere; several values' rest is kept
+        # nonempty, since `[rest]` of none has no element type to print)
+        names = [self.fresh('v') for _ in range(count)]
+        if self.chance(.5):
+            named = r.randint(0, count - 1) if group else r.randint(0, count)
+            names = names[:named]
+            names.insert(r.randint(0, named), '...' if self.chance(.3) else '...' + self.fresh('rest'))
+        for name in names:
+            if not name.startswith('...'):
+                self.declare(name, ty, True)
+        held = self.fresh('p') if group and self.chance(.7) else ''
+        use = ''
+        if held:
+            use = r.choice(('max', 'collect', '')) if ty == I and count == 2 else r.choice(('collect', ''))
+        paren = len(names) >= 2 and self.chance(.5)
+        return Unpack(tuple(names), items, group, paren, held, use)
 
     def block_comprehensions(self):
         r = self.r
