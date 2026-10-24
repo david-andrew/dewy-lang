@@ -121,6 +121,18 @@ dw_dir_node_last = (n: int) -> int:
     if pos_file(last) != pos_file(nodes[n].pos): return nodes[n].pos
     last
 
+# (the names compact syntax n uses, in an arm a `$target` test leaves out: dw_target_dropped)
+dw_target_dropped_node = (n: int):
+    if n <= 0 or n >= nodes.len(): return
+    if nodes[n].kind == .ident: dw_target_dropped_name(int(nodes[n].name), nodes[n].pos)
+    mask = isolation_children(nodes[n].kind)
+    if mask < 0: mask = 1 | 2 | 4 | 16
+    if mask & 1 != 0: dw_target_dropped_node(int(nodes[n].a))
+    if mask & 2 != 0: dw_target_dropped_node(int(nodes[n].b))
+    if mask & 4 != 0: dw_target_dropped_node(int(nodes[n].c))
+    if mask & 16 != 0:
+        loop c in kids(n): dw_target_dropped_node(c)
+
 # A block's settings hold throughout the block, wherever they are written.
 dw_dir_block = (block: int, children: int[]) -> int[]:
     if not dw_dir_dollars: return children

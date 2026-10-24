@@ -5447,6 +5447,25 @@ dewy_unused_name_hint = (name: str, module: int) -> str:
             return " (did you mean the visible variable '{candidate}'?)"
     ""
 
+# Names used in arms a `$target` or `$build` test left out, by position (dw_target_dropped).
+dewy_target_dropped: {int: int[]}
+
+# (local l of function f is named in an arm its target or build mode leaves out: a
+# parameter only a debug build reads is not unused; f spans to the next declaration)
+target_dropped_use = (f: int, l: int) -> bool:
+    uses = dewy_target_dropped.get(int(locals[l].name)) ?? []
+    if uses.len() == 0 or fns[f].decl == 0: return false
+    start = nodes[int(fns[f].decl)].pos
+    file = pos_file(start)
+    end = -1
+    if int(fns[f].mod) >= 0:
+        loop d in modules[int(fns[f].mod)].decls:
+            p = nodes[d].pos
+            if pos_file(p) == file and p > start and (end < 0 or p < end): end = p
+    loop u in uses:
+        if pos_file(u) == file and u > start and (end < 0 or u < end): return true
+    false
+
 # (scor = 1 in a function, for the global score: a variable of its own, made and never read)
 unused_local_warnings = (f: int):
     skip = LF_READ | LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_ALIAS | LF_BYREF | LF_ELEMALIAS | LF_SOAELEM | LF_SHARED | LF_QUIET
@@ -5457,6 +5476,7 @@ unused_local_warnings = (f: int):
         # Dewy desugaring uses reserved $ names for evaluation-order captures.
         # Their values may be overridden; they are not bindings the user can fix.
         if len(nm) == 0 or starts_with(nm, "_") or starts_with(nm, "#") or starts_with(nm, "$") or pos_in_lib(locals[l].pos): continue
+        if dewy_target_dropped.len() > 0 and target_dropped_use(f, l): continue
         near = ""
         if files[pos_file(locals[l].pos)].is_dewy:
             m = int(fns[f].mod)

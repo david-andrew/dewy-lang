@@ -403,6 +403,20 @@ dw_target_live = (id0: int) -> int:
         if fold == 1: return dw_child(arm, 2)
     0
 
+# The names an arm a `$target` or `$build` test leaves out uses, by position: what they
+# name is not unused (check.jo's unused_local_warnings).
+dw_target_dropped = (id: int):
+    if id <= 0: return
+    k = dewy_syntax[id].kind
+    if k == .identifier: dw_target_dropped_name(intern(dewy_syntax[id].text), dewy_syntax[id].pos)
+    # (a compact statement or expression holds its syntax as nodes)
+    if k == .compact_stmt or k == .compact_expr: dw_target_dropped_node(dewy_syntax[id].child_left)
+    loop child in dw_children(id): dw_target_dropped(child)
+
+dw_target_dropped_name = (nm: int, pos: int):
+    if not dewy_target_dropped.has(nm): dewy_target_dropped[nm] = []
+    dewy_target_dropped[nm].push(pos)
+
 # Statements with each `$target` chain replaced by its compiled arm's statements,
 # which bind in the enclosing scope.
 dw_target_splice = (items: int[]) -> int[]:
@@ -412,6 +426,8 @@ dw_target_splice = (items: int[]) -> int[]:
         if live < 0:
             out.push(item)
             continue
+        loop arm in dw_children(item):
+            if arm != live and (dewy_syntax[arm].kind != .keyword_expr or dw_child(arm, 2) != live): dw_target_dropped(arm)
         if live == 0: continue
         body = dw_unwrap(live)
         inner = [live]
@@ -3523,8 +3539,11 @@ dw_flow = (id: int, at: int, accumulator: int = 0, map: bool = false) -> int:
     if dw_nchildren(arm) != 3: return dw_fail(arm, "this flow arm")
     if word == "if":
         fold = dw_target_condition(dw_child(arm, 1))
-        if fold == 1: return dw_block(dw_child(arm, 2), accumulator, map)
+        if fold == 1:
+            loop i in [at + 1..items.len()): dw_target_dropped(items[i])
+            return dw_block(dw_child(arm, 2), accumulator, map)
         if fold == 0:
+            dw_target_dropped(dw_child(arm, 2))
             if at + 1 < items.len(): return dw_flow(id, at + 1, accumulator, map)
             return mk(.block, dewy_syntax[arm].pos)
     n = mk(if word == "if": NK.if_ else: NK.while_, dewy_syntax[arm].pos)
@@ -3592,6 +3611,9 @@ dw_block = (id0: int, accumulator: int = 0, map: bool = false) -> int:
             statements.push(statement)
         if label != 0: dw_label_fail(label_pos, label)
     else if accumulator != 0: statements.push(dw_collect(id, accumulator, map))
+    # (`=> if $target.os =? 'windows' "\r\n" else "\n"`: the compiled arm is the body)
+    else if dw_target_live(id) >= 0:
+        loop child in dw_target_splice([id]): statements.push(dw_stmt(child))
     else: statements.push(dw_stmt(id))
     if scoped: dw_siblings = outer_siblings
     set_list(n, statements)

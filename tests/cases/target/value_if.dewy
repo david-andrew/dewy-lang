@@ -1,0 +1,12 @@
+# modes: native native-release
+# A value `if` on `$target` or `$build` folds to its live arm, as a body or a value.
+newline = ():>string => if $target.os =? 'windows' "\r\n" else "\n"
+word_bits = ():>int => if $target.arch in? ['x86_64' 'aarch64' 'riscv64'] 64 else 32
+label = ():>string => {
+    let os = $target.os
+    if $target =? 'wasm32' "browser" else if $target.os =? 'linux' "linux {os}" else "other"
+}
+main = () => {
+    let mode_ok = if $build.mode =? 'debug' $build.mode =? 'debug' else $build.mode =? 'release'
+    printl"{newline().length} {word_bits()} {label()} {mode_ok}"
+}
