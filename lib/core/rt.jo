@@ -968,12 +968,15 @@ __arr_concat = (a: *u8, b: *u8, es: int) -> *u8:
     q
 
 # ---------------- strings ----------------
+# Every string's bytes are followed by a 0 (the lexers read up to it, C reads a string's data):
+# whatever makes or shortens one writes it.
 __str_new = (n: int) -> *u8:
     p = __alloc(24 + n + 1)
     h = p as *int
     h[0] = 1
     h[1] = n
     h[2] = n + 1
+    p[24 + n] = 0
     p
 
 __str_concat = (a: str, b: str) -> str:
@@ -1049,6 +1052,7 @@ __str_append = (slot: *str, t: str):
     qh[2] = cap
     mem_copy(q + 24, p + 24, n)
     mem_copy(q + 24 + n, data(t), lt)
+    q[24 + n + lt] = 0
     __rc_dec(p)
     ps[0] = q
 

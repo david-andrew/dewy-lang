@@ -1,0 +1,6 @@
+# A uint8 match is exhaustive only when its arms cover 0 through 255.
+e = (x:uint8):>string => match x {
+    <0|1> => "bit"
+    m:uint8<m in? 2..200> => "mid {m}"
+}
+main = () => printl(e(3))

@@ -1,0 +1,14 @@
+# A write to the field in the else branch forgets its narrowing.
+Oops:type = type of error & [message:string]
+Box:type = [v:int64 | bool | Oops | none]
+maybe = (v:int64 | bool | none):>string => "maybe {v}"
+f = (@b:Box):>string => {
+    if b.v is? Oops return "oops" else {
+        b.v = Oops["again"]
+        return maybe(b.v)
+    }
+}
+main = () => {
+    let b:Box = [3]
+    printl(f(@b))
+}

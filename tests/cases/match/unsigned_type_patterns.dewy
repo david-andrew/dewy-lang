@@ -1,0 +1,47 @@
+# Grouped literal and refinement-guard arms on unsigned values, uint64's above int64's range too.
+h = (x:uint64):>string => match x {
+    <0> => "zero"
+    big:uint64<big >? 100> => "big {big}"
+    _ => "other {x}"
+}
+k = (x:uint64):>string => match x {
+    <18446744073709551615> => "max"
+    top:uint64<top >=? 9223372036854775808> => "top {top}"
+    _ => "low"
+}
+e = (x:uint8):>string => match x {
+    <0|1> => "bit"
+    m:uint8<m in? 2..254> => "mid {m}"
+    <255> => "max"
+}
+w = (x:uint16):>string => match x {
+    n:uint16<n >=? 1000> => "wide {n}"
+    _ => "narrow"
+}
+lim = uint64<i => i <=? 10>
+r = (x:lim):>string => match x {
+    <0|1|2|3|4> => "low"
+    <5|6|7> => "mid"
+    hi:uint64<hi >=? 8> => "high {hi}"
+}
+g = (x:uint64):>string => match x {
+    <2|3> => "two or three"
+    small:uint64<small <? 10> => "small {small}"
+    _ => "big"
+}
+main = () => {
+    loop v in [0 5 101] { printl(h(uint64(v))) }
+    printl(h(18446744073709551615))
+    printl(h(9223372036854775808))
+    printl(k(18446744073709551615))
+    printl(k(18446744073709551614))
+    printl(k(9223372036854775808))
+    printl(k(1))
+    loop v in [0 1 2 255] { printl(e(uint8(v))) }
+    printl(w(uint16(65535)))
+    printl(w(uint16(3)))
+    printl(r(3))
+    printl(r(6))
+    printl(r(10))
+    loop v in [3 9 10] { printl(g(uint64(v))) }
+}

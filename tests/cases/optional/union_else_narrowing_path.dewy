@@ -1,0 +1,36 @@
+# `if x is? C ... else ...` over an optional union in a field or a global: the else branch knows
+# x is none or one of the other members, as it does for a variable; a write there forgets that.
+Oops:type = type of error & [message:string]
+Box:type = [v:int64 | bool | Oops | none]
+Outer:type = [box:Box]
+let latest:int64 | bool | Oops | none = none
+maybe = (v:int64 | bool | none):>string => "maybe {v}"
+just = (v:int64 | none):>string => "just {v}"
+field = (o:Outer):>string => {
+    if o.box.v is? Oops return o.box.v.message else return maybe(o.box.v)
+}
+two = (b:Box):>string => {
+    if b.v is? Oops or b.v is? bool return "no" else return just(b.v)
+}
+global = ():>string => {
+    if latest is? Oops { return latest.message } else { return maybe(latest) }
+}
+statement = (b:Box):>string => {
+    let text = "?"
+    if b.v is? Oops { text = b.v.message } else { text = maybe(b.v) }
+    text
+}
+replace = (@b:Box):>string => {
+    if b.v is? int64 return "int" else {
+        b.v = Oops["replaced"]
+        return "{b.v}"
+    }
+}
+main = () => {
+    let values:array<int64 | bool | Oops | none> = [7 true Oops["bad"] none]
+    loop v in values {
+        let b:Box = [v]
+        latest = v
+        printl"{field(Outer[b])} | {two(b)} | {global()} | {statement(b)} | {replace(@b)}"
+    }
+}

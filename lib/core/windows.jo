@@ -272,6 +272,7 @@ when TARGET == "windows":
             if ReadFile(h, p + 24 + got, u32(min(size[0] - got, 1 << 30)), data(r), null) == 0 or r[0] == 0: break
             got += int(r[0])
         (p as *int)[1] = got
+        p[24 + got] = 0
         p as str
 
     __w32_write_file = (path: str, contents: str) -> bool:

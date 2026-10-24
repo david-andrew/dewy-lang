@@ -177,6 +177,7 @@ read_file = (path: str) -> str?:
             if r <= 0: break
             got += r
         (p as *int)[1] = got
+        p[24 + got] = 0
         p as str
 
 __stdin_buf: u8[]
