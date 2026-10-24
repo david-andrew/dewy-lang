@@ -2006,6 +2006,21 @@ syntactic_void = (body: int) -> bool:
     if (k == .if_ or k == .iflet) and nodes[last].c != 0: return false
     not has_value_return(body)
 
+# (Dewy: an `or_throw` outside a nested function, whose failures a body expressing
+# nothing still gives back, as `void | E`; one walk of the body)
+has_propagate = (n: int) -> bool:
+    if n == 0: return false
+    nd = nodes[n]
+    k = nd.kind
+    if k == .propagate: return true
+    if k == .lambda: return false
+    if nd.a != 0 and has_propagate(int(nd.a)): return true
+    if nd.b != 0 and has_propagate(int(nd.b)): return true
+    if k != .for_ and nd.c != 0 and has_propagate(int(nd.c)): return true
+    loop i in [0..int(nd.nlist)):
+        if has_propagate(int(lists[int(nd.list) + i])): return true
+    false
+
 # (Dewy: a statement that may express a value, `xs.pop()` in a loop, so that what the
 # body gives is inferred: multi_expressions.md)
 may_express = (n: int) -> bool:
@@ -2096,7 +2111,7 @@ get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
     if sig.ret != 0: fns[f].ret = i32(subst(int(sig.ret), zt))
     pack_written(f, int(nodes[decl].a))
     if sig.ret != 0: pass
-    else if nodes[decl].b != 0 and syntactic_void(int(nodes[decl].b)) and not (files[pos_file(nodes[decl].pos)].is_dewy and may_express(int(nodes[decl].b))): fns[f].ret = i32(T_VOID)
+    else if nodes[decl].b != 0 and syntactic_void(int(nodes[decl].b)) and not (files[pos_file(nodes[decl].pos)].is_dewy and (may_express(int(nodes[decl].b)) or has_propagate(int(nodes[decl].b)))): fns[f].ret = i32(T_VOID)
     if refine_active and sig.generic: ref_validate_signature(fns[f].ptypes, int(fns[f].ret), int(sig.mutmask), use_pos)
     if sig.generic and pl_on: pl_inst_decls.push(decl)
     if sig.generic: fns[f].body = i32(clone(int(nodes[decl].b)))
