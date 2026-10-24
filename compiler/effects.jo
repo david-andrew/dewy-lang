@@ -1856,10 +1856,13 @@ panic_map_obligation = (n: int) -> bool:
 
 # A literal argument the library's one failure cannot happen with: a range
 # without a step (or with a literal step that is not zero), a power with a
-# literal exponent >= 0, a rational with a literal nonzero denominator.
+# literal exponent >= 0 (every library `pow` and `__pow__` fails only for a
+# negative one), a rational with a literal nonzero denominator.
 panic_name_range = 0
 panic_name_power = 0
 panic_name_rational = 0
+panic_name_pow = 0
+panic_name_pow_op = 0
 panic_literal = (e0: int) -> int:
     e = e0
     loop e > 0 and nodes[e].kind == .conv: e = int(nodes[e].a)
@@ -1874,6 +1877,8 @@ panic_literal_safe = (n: int) -> bool:
         panic_name_range = intern("__dewy_range")
         panic_name_power = intern("__dewy_power")
         panic_name_rational = intern("rational")
+        panic_name_pow = intern("pow")
+        panic_name_pow_op = intern("__pow__")
     name = int(nodes[d].name)
     if name == panic_name_range and nkids(n) == 5:
         stepped = panic_literal(kid(n, 3))
@@ -1881,7 +1886,7 @@ panic_literal_safe = (n: int) -> bool:
         a = panic_literal(kid(n, 0))
         b = panic_literal(kid(n, 1))
         return a != 0 and b != 0 and nodes[a].ival != nodes[b].ival
-    if name == panic_name_power and nkids(n) == 2:
+    if (name == panic_name_power or name == panic_name_pow or name == panic_name_pow_op) and nkids(n) == 2:
         e = panic_literal(kid(n, 1))
         return e != 0 and nodes[e].ival >= 0
     if name == panic_name_rational and nkids(n) == 2:
