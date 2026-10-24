@@ -473,6 +473,11 @@ wit_key = (n: int):
     relation = if base != "" and key != "": "{key} in? {base}" else: ""
     wit_context(0)
     wit_help(relation)
+    if is_dewy_set_type(representation_type(ntype(kid(n, 0)))):
+        if base != "" and key != "": err_notes.push((-1, "help: or take a missing member as a value: `{base}.pop({key} default=none)` gives none for it"))
+        if dir_defer(n, "cannot prove the value is in the set", true): return
+        wit_fail(nodes[n].pos, "cannot prove the value is in the set")
+        return
     if base != "" and key != "": err_notes.push((-1, "help: or take the missing key as a value: `{base}.get({key})` gives none for it"))
     if dir_defer(n, "cannot prove the key is in the dictionary", true): return
     wit_fail(nodes[n].pos, "cannot prove the key is in the dictionary")

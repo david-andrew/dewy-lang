@@ -1,0 +1,11 @@
+$runtime_checks=false
+# (no traps: `d.pop(k)` and `s.pop(v)` need the key or member, proven by a guard)
+main=():>void=>{
+let d=["a"->1 "b"->2]
+let k="a"
+if k in? d printl(d.pop(k))
+let s=set[20 22]
+let v=20
+if v in? s printl(s.pop(v))
+printl(s.pop(99 default=none))
+}

@@ -2360,7 +2360,7 @@ fact_put_slice_kind = (n: int) -> int:
     if vk == .array or vk == .fixed: 31 else: 30
 
 # Dictionary key presence (no traps): `d[k]`, `d[k] += 1` and `d.pop(k)` need
-# k in d, an obligation of the call as an index is. `k in? d` is a projection
+# k in d, an obligation of the call as an index is; so does a set's `s.pop(v)`. `k in? d` is a projection
 # of d's value on k's (an element projection: a dictionary has no other), true
 # after a guard or a store into d[k]; any other change of d gives d a new
 # value. O(1) per call. 1 `in?`, 2 read, 3 changed entry, 4 pop, 5 stored
@@ -2386,7 +2386,11 @@ fact_map_call = (n: int) -> int:
         fact_name_store = intern("[]=")
     name = int(nodes[d].name)
     k = if name == fact_name_contains or name == fact_name_has: 1 else if name == fact_name_read: 2 else if name == fact_name_present: 3 else if name == fact_name_pop: 4 else if name == fact_name_entry or name == fact_name_store: 5 else: 0
-    if k == 0 or k != 5 and nkids(n) != 2 or not pos_in_lib(nodes[d].pos) or not is_map_type(representation_type(ntype(kid(n, 0)))): return 0
+    if k == 0 or k != 5 and nkids(n) != 2 or not pos_in_lib(nodes[d].pos): return 0
+    # (a set's membership is its entries' keys: `v in? s` and `s.pop(v)`)
+    t = representation_type(ntype(kid(n, 0)))
+    if is_dewy_set_type(t): return if k == 1 or k == 4: k else: 0
+    if not is_map_type(t): return 0
     k
 
 # The key's value; a plain string literal is one value however often written,
