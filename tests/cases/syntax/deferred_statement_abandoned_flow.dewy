@@ -1,0 +1,16 @@
+# A braced `if` body whose statement takes the reference grammar, then an
+# `else` the direct grammar abandons: the `if` value retry must not leave
+# that statement deferred into a discarded block
+f=(x:int64):>int64=>{
+    if x >? 0 {
+        match x {
+            <1> => printl("one")
+            _ => printl("many")
+        }
+    } else printl(match x {<0>=>"zero" _=>"negative"})
+    return x
+}
+main=():>void=>{
+    printl(f(1))
+    printl(f(0))
+}

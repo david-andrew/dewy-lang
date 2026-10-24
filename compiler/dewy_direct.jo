@@ -883,10 +883,15 @@ dc_project_deferred = ():
         statement = dw_stmt(dc_deferred_syntax[k])
         dw_fn_result = outer
         block = dc_deferred_block[k]
-        loop i in [0..nkids(block)):
-            if kid(block, i) == -(k + 1):
-                set_kid(block, i, statement)
-                break
+        placed = false
+        if block > 0 and block < nodes.len() and nodes[block].kind == .block:
+            loop i in [0..nkids(block)):
+                if kid(block, i) == -(k + 1):
+                    set_kid(block, i, statement)
+                    placed = true
+                    break
+        # (a statement deferred in an attempt that was abandoned would have no block left)
+        if not placed: ice("deferred statement {k} has no placeholder in block {block}")
     dc_deferred_clear()
 
 dc_deferred_clear = (): dc_deferred_truncate(0)
@@ -927,6 +932,10 @@ dc_body = () -> int:
             value = dc_expr(0)
             dc_depth = depth
             if value == 0:
+                # (an `if` value attempt may have deferred statements of its own bodies: they
+                # go with it, before the whole statement is deferred)
+                dc_deferred_truncate(deferred)
+                dewy_syntax.truncate(syntax_start)
                 statement = if braced: dc_defer_statement(start, node_start, list_start, n) else: 0
                 if statement == 0: return 0
                 statements.push(statement)
