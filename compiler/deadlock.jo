@@ -1,0 +1,667 @@
+# Deadlock freedom, stage 1 (docs/design/safety_and_concurrency.md, "Deadlock freedom"): with no
+# annotations, the compiler infers lock identities, held-lock sets and the order locks are taken
+# in, across the program. Errors only for what it demonstrates:
+#   - a lock-order cycle (two paths taking the same locks in opposite orders), with a fix-it to
+#     take them together with `lock_all`;
+#   - waiting for a lock the task already holds (directly, through a call or a callback, or
+#     through a copied handle);
+#   - holding a lock across a join of tasks, or a `parallel` loop, whose work takes it;
+#   - a `parallel` iteration polling an atomic that only a sibling iteration sets.
+# Undecided cases (elements of one array taken in an order the indexes decide, a lock held
+# across a call of a function value, polling an atomic set elsewhere) are warnings.
+#
+# Identities. A lock is named by an abstract location: a root and a route of fields and
+# elements. Roots are a global, a local's declaration (where its handle was made; copies
+# `let m2 = m` and places `@m` follow to it, captures to the enclosing function's local), a
+# parameter of the function (symbolic, replaced by the argument's location at each call), or
+# unknown. Two locations with the same root and route and no element step are one lock; with an
+# element step they may be.
+#
+# Demand and cost. Nothing runs unless the checker saw a lock taken (deadlock_fns, filled by
+# place_methods.jo). Then: one scan of the checked function bodies for the call graph (O(N)),
+# the upward closure of the functions taking locks (the only ones whose summaries are not
+# empty), and summaries iterated to a fixed point over that set (acquired locations, symbolic
+# order edges, callbacks called under a lock), each pass O(N_rel + E_rel * K) with K the
+# distinct locations (indexed by key), at most DL_PASSES passes; then one reporting pass and a
+# cycle search over the location graph (Tarjan, O(V + E)).
+use 'ast.jo'
+use 'types.jo'
+use 'check.jo'
+use 'expr.jo'
+use 'util.jo'
+use 'lower.jo'
+use 'isolation.jo'
+use 'concurrency.jo'
+use 'effects.jo'
+
+deadlock_fns: {int: bool}       # functions whose bodies take a lock (place_methods.jo)
+deadlock_parallel = false        # the program runs `parallel` work (a cycle is reachable by tasks)
+deadlock_atomics = false         # the program uses an atomic (concurrency_atomic_call)
+
+const DL_PASSES = 8
+
+struct DlLoc:
+    root: int        # 0 unknown, 1 global, 2 declaration, 3 parameter, 4 a local itself
+    id: int          # the global, the declaration node, or the function (parameter)
+    k: int           # the parameter's index
+    route: str       # ".balance", "[]"
+    exact: bool      # no element step, root known: one lock
+
+struct DlAcq:
+    loc: DlLoc
+    site: int        # where it is taken (the wait)
+    wait: bool       # waits for it (lock, lock_all), or only holds it (try_lock)
+    via: str         # "" or the chain of calls that takes it
+
+struct DlEdge:
+    held: DlLoc
+    taken: DlLoc
+    held_site: int
+    taken_site: int
+    via: str
+
+struct DlCallback:
+    param: int       # the parameter called
+    held: DlLoc[]
+    sites: int[]
+    site: int        # the call
+
+struct DlSummary:
+    acqs: DlAcq[]
+    acq_keys: {str: bool}
+    edges: DlEdge[]
+    edge_keys: {str: bool}
+    callbacks: DlCallback[]
+    cb_keys: {str: bool}
+
+struct DlHeld:
+    loc: DlLoc
+    site: int
+    guard: int       # the guard's local (released at its place's last use), 0 for none
+
+dl_summaries: {int: DlSummary}
+dl_relevant: {int: bool}
+dl_changed = false
+dl_report = false
+dl_global_edges: DlEdge[]
+dl_global_keys: {str: bool}
+dl_param_index: {int: int}       # parameter local -> its index
+dl_inits: {int: int}             # local -> its declaration (the relevant functions')
+dl_groups: {int: int[]}          # a task group's local -> the functions spawned into it
+dl_fn = 0                        # the function being walked
+dl_cur: DlSummary
+
+dl_lib = () -> str: lib_dir + "/prelude/locks.dewy"
+
+dl_key = (l: DlLoc) -> str: "{l.root}:{l.id}:{l.k}{l.route}"
+
+dl_name = (l: DlLoc) -> str:
+    base = "a lock"
+    if l.root == 1: base = name_of(int(globals[l.id].name))
+    else if l.root == 2: base = name_of(int(nodes[l.id].name))
+    else if l.root == 4: base = name_of(int(locals[l.id].name))
+    else if l.root == 3:
+        d = int(fns[l.id].decl)
+        if l.k < fns[l.id].params.len(): base = name_of(int(locals[fns[l.id].params[l.k]].name))
+    if starts_with(base, "$"): base = "a lock"
+    "'{base}{l.route}'"
+
+dl_line = (p: int) -> str:
+    l, c = line_col(p)
+    "line {l}"
+
+# ---------------- the program's call graph and the relevant functions ----------------
+
+dl_callers: {int: int[]}
+dl_givens: {int: int[]}          # function -> the function values its calls are given
+
+dl_scan_calls = (f: int, n: int):
+    if n == 0: return
+    k = nodes[n].kind
+    if (k == .call and nodes[n].aux == 0 or k == .lambda or k == .fnref) and nodes[n].sym > 0:
+        g = int(nodes[n].sym)
+        if g != f and g < fns.len():
+            list = dl_callers.get(g) ?? []
+            list.push(f)
+            dl_callers[g] = list
+        # (a function given a function value: what it calls back is part of what it takes)
+        if k == .call:
+            loop a in kids(n):
+                if is_fn_type(ntype(a)):
+                    list = dl_givens.get(g) ?? []
+                    list.push(a)
+                    dl_givens[g] = list
+    if k == .vardecl and nodes[n].sym > 0 and nkids(n) == 0 and not has_flag(n, NF_GLOBAL): dl_inits[int(nodes[n].sym)] = n
+    if k != .lambda and k != .fnref:
+        loop g in value_helper_calls(n):
+            list = dl_callers.get(g) ?? []
+            list.push(f)
+            dl_callers[g] = list
+    if k == .lambda: return
+    if k == .propagate or k == .parallel_region:
+        dl_scan_calls(f, int(nodes[n].a))
+        return
+    mask = isolation_children(k)
+    if mask < 0:
+        dl_scan_calls(f, int(nodes[n].a))
+        dl_scan_calls(f, int(nodes[n].b))
+        dl_scan_calls(f, int(nodes[n].c))
+        loop c in kids(n): dl_scan_calls(f, c)
+        return
+    if mask & 1 != 0: dl_scan_calls(f, int(nodes[n].a))
+    if mask & 2 != 0: dl_scan_calls(f, int(nodes[n].b))
+    if mask & 4 != 0: dl_scan_calls(f, int(nodes[n].c))
+    if mask & 16 != 0:
+        loop c in kids(n): dl_scan_calls(f, c)
+    if mask & 32 != 0:
+        loop c in kids2(n): dl_scan_calls(f, c)
+
+# ---------------- locations ----------------
+
+dl_unknown = () -> DlLoc: DlLoc(0, 0, 0, "", false)
+
+dl_extend = (l: DlLoc, step: str, exact: bool) -> DlLoc: DlLoc(l.root, l.id, l.k, l.route + step, l.exact and exact)
+
+# The location of a lock expression in function f.
+dl_resolve = (e0: int, f: int, depth: int = 0) -> DlLoc:
+    e = e0
+    loop e != 0 and (nodes[e].kind == .conv or nodes[e].kind == .addr or nodes[e].kind == .narrow): e = int(nodes[e].a)
+    if e == 0 or depth > 32: return dl_unknown()
+    k = nodes[e].kind
+    if k == .field: return dl_extend(dl_resolve(int(nodes[e].a), f, depth + 1), ".{name_of(int(nodes[e].name))}", true)
+    if k == .index: return dl_extend(dl_resolve(int(nodes[e].a), f, depth + 1), "[]", false)
+    if k != .ident: return dl_unknown()
+    if nodes[e].aux == i32(int(SK.global)): return DlLoc(1, int(nodes[e].sym), 0, "", true)
+    if nodes[e].aux != i32(int(SK.local)) or nodes[e].sym <= 0: return dl_unknown()
+    dl_resolve_local(int(nodes[e].sym), f, depth)
+
+dl_resolve_local = (l: int, f: int, depth: int) -> DlLoc:
+    r = dl_resolve_local_once(l, f, depth)
+    # (a variable given another handle after it was made or copied names either: perhaps one lock)
+    if int(locals[l].flags) & LF_ASSIGNED != 0: r.exact = false
+    r
+
+dl_resolve_local_once = (l: int, f: int, depth: int) -> DlLoc:
+    flags = int(locals[l].flags)
+    if flags & LF_ALIAS != 0 and locals[l].alias > 0: return dl_resolve(int(locals[l].alias), f, depth + 1)
+    if flags & LF_CAPTURE != 0:
+        if locals[l].outer <= 0: return dl_unknown()
+        return dl_resolve_local(int(locals[l].outer), int(locals[int(locals[l].outer)].owner), depth + 1)
+    if let i = dl_param_index.get(l): return DlLoc(3, int(locals[l].owner), i, "", true)
+    if let d = dl_inits.get(l):
+        init = int(nodes[d].b)
+        loop init != 0 and nodes[init].kind == .conv: init = int(nodes[init].a)
+        # (a copy of another handle, or a value parameter's binding: the same lock)
+        if init != 0 and (nodes[init].kind == .ident or nodes[init].kind == .field or nodes[init].kind == .index):
+            return dl_resolve(init, f, depth + 1)
+        return DlLoc(2, d, 0, "", true)
+    # (a local whose making is not in view: itself)
+    DlLoc(4, l, 0, "", true)
+
+# The same lock for certain, or perhaps (one array's elements)
+dl_must = (a: DlLoc, b: DlLoc) -> bool: a.exact and b.exact and a.root != 0 and dl_key(a) == dl_key(b)
+dl_may = (a: DlLoc, b: DlLoc) -> bool: a.root != 0 and dl_key(a) == dl_key(b)
+
+dl_symbolic = (l: DlLoc) -> bool: l.root == 3
+
+# A callee's location seen from the call n in function f
+dl_subst = (l: DlLoc, g: int, n: int, f: int) -> DlLoc:
+    if l.root != 3 or l.id != g: return l
+    if n == 0 or l.k >= nkids(n): return dl_unknown()
+    a = kid(n, l.k)
+    if nodes[a].kind == .namedarg: a = int(nodes[a].a)
+    base = dl_resolve(a, f)
+    if base.root == 0: return base
+    DlLoc(base.root, base.id, base.k, base.route + l.route, base.exact and l.exact)
+
+# ---------------- summaries ----------------
+
+dl_add_acq = (a: DlAcq):
+    mode = if a.wait: "w" else: "h"
+    key = dl_key(a.loc) + mode
+    if dl_cur.acq_keys.has(key): return
+    dl_cur.acq_keys[key] = true
+    dl_cur.acqs.push(a)
+    dl_changed = true
+
+dl_add_edge = (e: DlEdge):
+    if dl_symbolic(e.held) or dl_symbolic(e.taken):
+        key = "{dl_key(e.held)}>{dl_key(e.taken)}"
+        if dl_cur.edge_keys.has(key): return
+        dl_cur.edge_keys[key] = true
+        dl_cur.edges.push(e)
+        dl_changed = true
+        return
+    if not dl_report or e.held.root == 0 or e.taken.root == 0: return
+    key = "{dl_key(e.held)}>{dl_key(e.taken)}"
+    if dl_global_keys.has(key): return
+    dl_global_keys[key] = true
+    dl_global_edges.push(e)
+
+# A wait for loc at site while holding held: the self-deadlock check and the order edges.
+dl_wait = (held: DlHeld[], loc: DlLoc, site: int, via: str, report_site: int):
+    loop h in held:
+        if dl_report and dl_must(h.loc, loc):
+            how = if len(via) > 0: " ({via}, takes it at {dl_line(site)})" else: ""
+            fatal(report_site, "this waits for {dl_name(loc)}, which this task already holds since {dl_line(h.site)}{how}: it would wait forever. Use the place already held, or let it end before taking the lock again")
+        if dl_report and dl_may(h.loc, loc) and not dl_must(h.loc, loc):
+            warn(report_site, "this may wait for {dl_name(loc)} while holding another of the same ({dl_line(h.site)}): two tasks taking them in opposite orders would wait forever. Take them together, in one order: `let [a b] = @(lock_all(x y)) or_throw`")
+            continue
+        dl_add_edge(DlEdge(h.loc, loc, h.site, site, via))
+
+dl_drop = (held: mut DlHeld[], mark: int):
+    loop held.len() > mark: held.pop()
+
+dl_summary = (f: int) -> DlSummary:
+    if let s = dl_summaries.get(f): return s
+    DlSummary([], {}, [], {}, [], {})
+
+# The lock method a call n reaches: "lock", "try_lock$acquire", "__take", "__lock_all", a
+# release ("...$release"), or "".
+dl_lock_call = (n: int) -> str:
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0: return ""
+    d = int(fns[int(nodes[n].sym)].decl)
+    if d == 0 or files[pos_file(nodes[d].pos)].path != dl_lib(): return ""
+    nm = name_of(int(nodes[d].name))
+    if nm == "lock" or nm == "try_lock$acquire" or nm == "__take" or nm == "__lock_all" or ends_with(nm, "$release"): return nm
+    ""
+
+# The receiver of a method call
+dl_receiver = (n: int) -> int: if nkids(n) > 0: kid(n, 0) else: 0
+
+# ---------------- the walk ----------------
+
+dl_walk_fn = (f: int):
+    dl_fn = f
+    dl_cur = dl_summary(f)
+    held: DlHeld[]
+    dl_groups = {}
+    dl_walk(int(fns[f].body), held)
+    dl_summaries[f] = dl_cur
+
+dl_walk = (n: int, held: mut DlHeld[]):
+    if n == 0: return
+    k = nodes[n].kind
+    if k == .lambda or k == .fnref: return
+    if k == .block:
+        mark = held.len()
+        loop c in kids(n): dl_walk(c, held)
+        if nodes[n].aux != 5: dl_drop(held, mark)
+        return
+    if k == .vardecl:
+        init = int(nodes[n].b)
+        loop init != 0 and nodes[init].kind == .conv: init = int(nodes[init].a)
+        if init != 0 and nodes[init].kind == .call:
+            what = dl_lock_call(init)
+            if what == "lock" or what == "try_lock$acquire" or what == "__take":
+                loc = dl_resolve(dl_receiver(init), dl_fn)
+                if what == "lock":
+                    dl_wait(held, loc, nodes[init].pos, "", nodes[init].pos)
+                    dl_add_acq(DlAcq(loc, nodes[init].pos, true, ""))
+                else: dl_add_acq(DlAcq(loc, nodes[init].pos, false, ""))
+                held.push(DlHeld(loc, nodes[init].pos, int(nodes[n].sym)))
+                return
+            # (a task group: what is spawned into it is joined at its end)
+        dl_walk(int(nodes[n].b), held)
+        return
+    if k == .if_ or k == .iflet:
+        dl_walk(int(nodes[n].a), held)
+        mark = held.len()
+        dl_walk(int(nodes[n].b), held)
+        dl_drop(held, mark)
+        dl_walk(int(nodes[n].c), held)
+        dl_drop(held, mark)
+        return
+    if k == .call: dl_call(n, held)
+    else if k == .propagate or k == .parallel_region:
+        dl_walk(int(nodes[n].a), held)
+        return
+    loop g in value_helper_calls(n): dl_callee(g, 0, held, nodes[n].pos)
+    if k == .call: return
+    mask = isolation_children(k)
+    if mask < 0:
+        dl_walk(int(nodes[n].a), held)
+        dl_walk(int(nodes[n].b), held)
+        dl_walk(int(nodes[n].c), held)
+        loop c in kids(n): dl_walk(c, held)
+        return
+    if mask & 1 != 0: dl_walk(int(nodes[n].a), held)
+    if mask & 2 != 0: dl_walk(int(nodes[n].b), held)
+    if mask & 4 != 0: dl_walk(int(nodes[n].c), held)
+    if mask & 16 != 0:
+        mark = held.len()
+        loop c in kids(n):
+            dl_walk(c, held)
+            if k == .match_ or k == .arm: dl_drop(held, mark)
+    if mask & 32 != 0:
+        loop c in kids2(n): dl_walk(c, held)
+
+# The parameter a local is, or is bound from (Dewy binds value parameters to locals), or -1
+dl_param_of = (l0: int) -> int:
+    l = l0
+    loop depth in [0..8):
+        if let i = dl_param_index.get(l): return i
+        d = dl_inits.get(l) ?? 0
+        if d == 0: return -1
+        init = int(nodes[d].b)
+        loop init != 0 and nodes[init].kind == .conv: init = int(nodes[init].a)
+        if init == 0 or nodes[init].kind != .ident or nodes[init].aux != i32(int(SK.local)): return -1
+        l = int(nodes[init].sym)
+    -1
+
+# The function a callable argument names, or 0
+dl_fn_arg = (a0: int, depth: int = 0) -> int:
+    a = a0
+    loop nodes[a].kind == .conv or nodes[a].kind == .namedarg: a = int(nodes[a].a)
+    if (nodes[a].kind == .lambda or nodes[a].kind == .fnref or nodes[a].kind == .partial) and nodes[a].sym > 0: return int(nodes[a].sym)
+    # (a local holding a function literal, or a copy of one)
+    if nodes[a].kind == .ident and nodes[a].aux == i32(int(SK.local)) and nodes[a].sym > 0 and depth < 8:
+        l = int(nodes[a].sym)
+        if int(locals[l].flags) & LF_CAPTURE != 0 and locals[l].outer > 0: l = int(locals[l].outer)
+        if let d = dl_inits.get(l): return dl_fn_arg(int(nodes[d].b), depth + 1)
+    0
+
+dl_call = (n: int, held: mut DlHeld[]):
+    what = dl_lock_call(n)
+    pos = nodes[n].pos
+    if what == "__lock_all":
+        # (lock_all: every lock at once, after the receivers' words are read)
+        words = kid(n, 1)
+        if nodes[words].kind == .namedarg: words = int(nodes[words].a)
+        loop c in kids(words):
+            call = c
+            loop nodes[call].kind == .conv: call = int(nodes[call].a)
+            if nodes[call].kind != .call: continue
+            loc = dl_resolve(dl_receiver(call), dl_fn)
+            dl_wait(held, loc, pos, "", pos)
+            dl_add_acq(DlAcq(loc, pos, true, ""))
+        return
+    if ends_with(what, "$release"):
+        if nkids(n) >= 2:
+            g = kid(n, 1)
+            if nodes[g].kind == .ident and nodes[g].sym > 0:
+                loop i in [0..held.len()):
+                    if held[i].guard == int(nodes[g].sym):
+                        held.remove(i)
+                        break
+        return
+    if len(what) > 0: return
+    loop c in kids(n): dl_walk(c, held)
+    if nodes[n].aux == 1 or nodes[n].aux == 4:
+        dl_walk(int(nodes[n].a), held)
+        # (a function value called while holding a lock: what it takes is known at the calls
+        # that give it, for a parameter; otherwise undecided)
+        callee = int(nodes[n].a)
+        if nodes[callee].kind == .ident and nodes[callee].aux == i32(int(SK.local)):
+            i = dl_param_of(int(nodes[callee].sym))
+            if i >= 0:
+                locs: DlLoc[]
+                sites: int[]
+                loop h in held:
+                    locs.push(h.loc)
+                    sites.push(h.site)
+                key = "{i}:{pos}"
+                if not dl_cur.cb_keys.has(key):
+                    dl_cur.cb_keys[key] = true
+                    dl_cur.callbacks.push(DlCallback(i, locs, sites, pos))
+                    dl_changed = true
+                return
+        if held.len() > 0 and dl_report: warn(pos, "this calls a function value while holding {dl_name(held[held.len() - 1].loc)} (since {dl_line(held[held.len() - 1].site)}): if it takes that lock, it waits forever. Call it after the place's last use, or pass a function the compiler can see")
+        return
+    if nodes[n].aux != 0 or nodes[n].sym <= 0: return
+    g = int(nodes[n].sym)
+    d = int(fns[g].decl)
+    gname = if d != 0: name_of(int(nodes[d].name)) else: ""
+    # Task groups: spawned work runs beside the spawner, joined at the group's end.
+    if gname == "__task_spawn" and nkids(n) == 2:
+        h = dl_fn_arg(kid(n, 1))
+        grp = kid(n, 0)
+        if h > 0 and nodes[grp].kind == .ident and nodes[grp].sym > 0:
+            list = dl_groups.get(int(nodes[grp].sym)) ?? []
+            list.push(h)
+            dl_groups[int(nodes[grp].sym)] = list
+        if h > 0: dl_spawned(h)
+        return
+    # (the join waits for what its tasks take: the caller of this function holding a lock they
+    # take waits forever too)
+    if gname == "__task_join" and nkids(n) == 1:
+        grp = kid(n, 0)
+        if nodes[grp].kind == .ident and nodes[grp].sym > 0:
+            loop h in dl_groups.get(int(nodes[grp].sym)) ?? []:
+                if held.len() > 0: dl_join(h, held, pos, "its tasks")
+                dl_callee(h, 0, held, pos, "a task joined at {dl_line(pos)}")
+        return
+    # Parallel work: its iterations run while the caller waits for them all.
+    if fns[g].parallel:
+        deadlock_parallel = true
+        loop c in kids(n):
+            h = dl_fn_arg(c)
+            if h <= 0: continue
+            if held.len() > 0: dl_join(h, held, pos, "its parallel iterations")
+            dl_callee(h, 0, held, pos, "the parallel iterations at {dl_line(pos)}")
+        return
+    dl_callee(g, n, held, pos)
+    # (callbacks the callee calls, possibly under its locks: what they take, here)
+    s = dl_summary(g)
+    loop cb in s.callbacks:
+        if cb.param >= nkids(n): continue
+        h = dl_fn_arg(kid(n, cb.param))
+        if h <= 0: continue
+        inner: DlHeld[]
+        loop i in [0..cb.held.len()): inner.push(DlHeld(dl_subst(cb.held[i], g, n, dl_fn), cb.sites[i], 0))
+        loop h2 in held: inner.push(h2)
+        dl_callee(h, 0, inner, pos, "the function given to {effect_name(g)}, called back at {dl_line(cb.site)}")
+
+# How a call reads in a diagnostic's chain: the library's helpers are "the library", and lines
+# are given only in the program's own files.
+dl_callee_name = (g: int, n: int, pos: int, named: str) -> str:
+    if len(named) > 0: return named
+    d = int(fns[g].decl)
+    nm = effect_name(g)
+    if d != 0 and pos_in_lib(nodes[d].pos) and starts_with(nm, "__"): nm = "the library"
+    if n != 0 and not pos_in_lib(pos): return "{nm} at {dl_line(pos)}"
+    nm
+
+# A call of g (n: the call, for its arguments; 0 for a hidden call) while holding held.
+dl_callee = (g: int, n: int, held: mut DlHeld[], pos: int, named: str = ""):
+    if not dl_relevant.has(g): return
+    s = dl_summary(g)
+    gname = dl_callee_name(g, n, pos, named)
+    loop a in s.acqs:
+        loc = dl_subst(a.loc, g, n, dl_fn)
+        via = if len(a.via) > 0: "{gname} -> {a.via}" else: gname
+        if a.wait: dl_wait(held, loc, a.site, via, pos)
+        dl_add_acq(DlAcq(loc, a.site, a.wait, via))
+    loop e in s.edges:
+        dl_add_edge(DlEdge(dl_subst(e.held, g, n, dl_fn), dl_subst(e.taken, g, n, dl_fn), e.held_site, e.taken_site, if len(e.via) > 0: "{gname} -> {e.via}" else: gname))
+
+# Work run beside the caller (a spawned task, parallel iterations): its own order edges count,
+# in the caller's terms; what it takes does not wait while the caller holds anything.
+dl_spawned = (h: int):
+    if not dl_relevant.has(h): return
+    s = dl_summary(h)
+    loop e in s.edges: dl_add_edge(e)
+
+# Holding a lock across a join of work that takes it.
+dl_join = (h: int, held: DlHeld[], pos: int, what: str):
+    if not dl_relevant.has(h) or not dl_report: return
+    s = dl_summary(h)
+    loop a in s.acqs:
+        if not a.wait: continue
+        loop hd in held:
+            if dl_must(hd.loc, a.loc):
+                fatal(pos, "this holds {dl_name(hd.loc)} (since {dl_line(hd.site)}) while waiting for {what}, which take it ({dl_line(a.site)}): neither can go on. Let the place end before the join, or take the lock inside the work only")
+            if dl_may(hd.loc, a.loc):
+                warn(pos, "this holds {dl_name(hd.loc)} (since {dl_line(hd.site)}) while waiting for {what}, which may take the same lock ({dl_line(a.site)})")
+
+# ---------------- parallel iterations waiting on siblings ----------------
+
+# A loop polling an atomic in a parallel body (`loop flag.load() =? 0 {}`): an error when
+# another part of the same body sets that atomic (a sibling iteration must run first, and the
+# runtime may run iterations one after another), a warning when it is set elsewhere.
+dl_polling = (h: int):
+    body = int(fns[h].body)
+    loops: int[]
+    dl_find_loops(body, loops)
+    loop lp in loops:
+        cond = int(nodes[lp].a)
+        polled: DlLoc[]
+        dl_atomic_reads(cond, h, polled)
+
+        if polled.len() == 0: continue
+        loop p in polled:
+            if dl_atomic_written(int(nodes[lp].b), h, p): continue
+            if dl_atomic_written(body, h, p):
+                fatal(nodes[lp].pos, "this parallel iteration waits for {dl_name(p)}, which a sibling iteration sets: iterations may run one after another on one thread, so it may wait forever. Use `concurrent` and `spawn` for work that waits on other work")
+            warn(nodes[lp].pos, "this parallel iteration polls {dl_name(p)}: iterations may run one after another on one thread, so it waits for whatever sets it")
+
+dl_find_loops = (n: int, out: mut int[]):
+    if n == 0 or nodes[n].kind == .lambda: return
+    if nodes[n].kind == .while_: out.push(n)
+    loop c in [int(nodes[n].a), int(nodes[n].b), int(nodes[n].c)]: dl_find_loops(c, out)
+    loop c in kids(n): dl_find_loops(c, out)
+
+dl_atomic_name = (n: int, names: str[]) -> bool:
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) == 0: return false
+    d = int(fns[int(nodes[n].sym)].decl)
+    if d == 0 or not concurrency_builtin_type(ntype(kid(n, 0)), "Atomic"): return false
+    names.contains(name_of(int(nodes[d].name)))
+
+dl_atomic_reads = (n: int, f: int, out: mut DlLoc[]):
+    if n == 0 or nodes[n].kind == .lambda: return
+
+    if dl_atomic_name(n, ["load", "get"]):
+        loc = dl_resolve(kid(n, 0), f)
+        if loc.root != 0: out.push(loc)
+    loop c in [int(nodes[n].a), int(nodes[n].b), int(nodes[n].c)]: dl_atomic_reads(c, f, out)
+    loop c in kids(n): dl_atomic_reads(c, f, out)
+
+dl_atomic_written = (n: int, f: int, loc: DlLoc) -> bool:
+    if n == 0 or nodes[n].kind == .lambda: return false
+    if dl_atomic_name(n, ["store", "set", "add", "compare_swap", "set_max"]) and dl_may(dl_resolve(kid(n, 0), f), loc): return true
+    loop c in [int(nodes[n].a), int(nodes[n].b), int(nodes[n].c)]:
+        if dl_atomic_written(c, f, loc): return true
+    loop c in kids(n):
+        if dl_atomic_written(c, f, loc): return true
+    false
+
+# ---------------- order cycles ----------------
+
+dl_cycles = ():
+    if dl_global_edges.len() == 0: return
+    ids: {str: int} = {}
+    names_: str[]
+    adj: int[][]
+    out_edges: int[][]
+    loop i in [0..dl_global_edges.len()):
+        e = dl_global_edges[i]
+        loop key in [dl_key(e.held), dl_key(e.taken)]:
+            if not ids.has(key):
+                ids[key] = names_.len()
+                names_.push(key)
+                adj.push([])
+                out_edges.push([])
+        a = ids[dl_key(e.held)]
+        adj[a].push(ids[dl_key(e.taken)])
+        out_edges[a].push(i)
+    # (the first edge whose target reaches its source: a breadth-first search back, O(V + E) each,
+    # stopping at the first cycle found, which is reported)
+    loop i in [0..dl_global_edges.len()):
+        e = dl_global_edges[i]
+        a = ids[dl_key(e.held)]
+        b = ids[dl_key(e.taken)]
+        if a == b: continue
+        prev = fill(-1, names_.len())
+        prev[b] = i
+        queue = [b]
+        q = 0
+        found = false
+        loop q < queue.len() and not found:
+            v = queue[q]
+            q += 1
+            loop j in out_edges[v]:
+                w = ids[dl_key(dl_global_edges[j].taken)]
+                if prev[w] >= 0: continue
+                prev[w] = j
+                if w == a:
+                    found = true
+                    break
+                queue.push(w)
+        if not found: continue
+        # the path back from b to a
+        back: int[]
+        v = a
+        loop v != b:
+            j = prev[v]
+            back.insert(0, j)
+            v = ids[dl_key(dl_global_edges[j].held)]
+        dl_report_cycle(e, back)
+        return
+
+dl_path = (e: DlEdge) -> str:
+    who = if len(e.via) > 0: " (in {e.via})" else: ""
+    "takes {dl_name(e.held)} ({dl_line(e.held_site)}) and then {dl_name(e.taken)} ({dl_line(e.taken_site)}){who}"
+
+dl_report_cycle = (e: DlEdge, back: int[]):
+    msg = "lock order cycle: one path {dl_path(e)}"
+    loop j in back: msg += "; another {dl_path(dl_global_edges[j])}"
+    msg += ". Two tasks on these paths can each hold one lock and wait forever for the other. Take the locks together, in one order: `let [a b] = @(lock_all(x y)) or_throw`"
+    if concurrency_tasks.len() == 0 and not deadlock_parallel:
+        warn(e.taken_site, msg + " (no task runs them at once yet)")
+        return
+    loop j in back: err_notes.push((dl_global_edges[j].taken_site, "note: the other path takes {dl_name(dl_global_edges[j].taken)} here"))
+    fatal(e.taken_site, msg)
+
+# ---------------- the driver ----------------
+
+deadlock_finalize = ():
+    # (parallel iterations polling an atomic: only the parallel bodies of a program using atomics)
+    if deadlock_atomics:
+        dl_report = true
+        loop n in concurrency_calls:
+            if in_lib(nodes[n].pos): continue
+            loop a in kids(n):
+                h = dl_fn_arg(a)
+                if h > 0 and fns[h].body != 0: dl_polling(h)
+        dl_report = false
+    if deadlock_fns.len() == 0: return
+    # (the call graph, the owners of locals and the parameters' indexes: one scan)
+    loop f in [1..fns.len()):
+        if fns[f].state != 2 or fns[f].body == 0: continue
+        loop i in [0..fns[f].params.len()): dl_param_index[fns[f].params[i]] = i
+        dl_scan_calls(f, int(fns[f].body))
+    # (Dewy's value parameters are bound to locals that lead the body: the binding is the
+    # parameter)
+    work: int[]
+    loop f, on in deadlock_fns:
+        if not dl_relevant.has(f):
+            dl_relevant[f] = true
+            work.push(f)
+    # (callers of a function taking locks, and functions given one as a value; indexed by
+    # what they are given, each looked at once)
+    given_to: {int: int[]} = {}
+    loop g, values in dl_givens:
+        loop a in values:
+            h = dl_fn_arg(a)
+            if h > 0:
+                list = given_to.get(h) ?? []
+                list.push(g)
+                given_to[h] = list
+    i = 0
+    loop i < work.len():
+        f = work[i]
+        i += 1
+        loop c in (dl_callers.get(f) ?? []) + (given_to.get(f) ?? []):
+            if not dl_relevant.has(c):
+                dl_relevant[c] = true
+                work.push(c)
+    passes = 0
+    dl_changed = true
+    loop dl_changed and passes < DL_PASSES:
+        dl_changed = false
+        passes += 1
+        # (callees before callers: the closure's order)
+        loop f in work: dl_walk_fn(f)
+    dl_report = true
+    loop f in work: dl_walk_fn(f)
+    dl_cycles()

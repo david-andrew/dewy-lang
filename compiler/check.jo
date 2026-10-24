@@ -11,6 +11,7 @@ use 'growth.jo'
 use 'safe_paths.jo'
 use 'warn_if.jo'
 use 'place_methods.jo'
+use 'deadlock.jo'
 use 'errors.jo'
 use 'settings.jo'
 use 'targets.dewy'
@@ -6620,6 +6621,9 @@ check_program = (main_path: str):
     dewy_resolve_inherited()
     if dewy_methods.len() > 0: dc_force_all()
     dewy_infer_methods()
+    # (the locks prelude declares nominal errors, `Busy` and `DuplicateLock`, so it loads before
+    # they close when a Dewy program names it: a probe of five names, nothing otherwise)
+    if ts_dewy and locks_named(): dewy_prelude_module(intern("mutex"))
     prepare_nominals()
     check_build_block()
     # (native programs report crashes as they do panics: lib/std/backtrace.jo)
@@ -6994,8 +6998,22 @@ check_program = (main_path: str):
         ic_switch(IC_EFFECTS, IC_SHARED)
         concurrency_finalize()
         concurrency_claims_finalize()
+        deadlock_finalize()
         effects_finalize()
         ic_restore(icb)
+
+# Whether a Dewy program names the locks prelude (a name some source has, and that no module of
+# the program declares itself, as a program's own `Mutex` type): five probes, then a lookup per
+# module only for a name some source has.
+locks_named = () -> bool:
+    loop nm in ["mutex", "Mutex", "lock_all", "Busy", "DuplicateLock"]:
+        if not name_known(nm): continue
+        id = intern(nm)
+        own = false
+        loop m in [0..modules.len()):
+            if not modules[m].is_prelude and modules[m].names.get(id) != none: own = true
+        if not own: return true
+    false
 
 # ---------------- Dewy's main ----------------
 # Dewy's main gives back void or the errors that reach it (`void | E`, declared or

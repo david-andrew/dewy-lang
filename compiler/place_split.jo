@@ -121,7 +121,7 @@ place_method_split = (fn_: int, receiver: int, name: str) -> int[]:
         loop p in params: own.push(clone(p))
         nodes[acquire].b = i32(bc_block(own + suffix + [give], pos))
         if let kinds = dewy_param_kinds.get(fn_): dewy_param_kinds[acquire] = kinds
-        place_methods[acquire] = PlaceMethod(route, written, false, guards.len(), intern("{name}$release"))
+        place_methods[acquire] = PlaceMethod(route, written, false, guards.len(), intern("{name}$release"), pos)
         out.push(acquire)
         decided = mk(.return_, pos)
         nodes[decided].a = i32(bc_bool(true, pos))
@@ -142,6 +142,6 @@ place_method_split = (fn_: int, receiver: int, name: str) -> int[]:
         nodes[param].a = i32(ht)
         dw_finish_function(release, [param], bc_block([], pos), "{name}$release")
         out.push(release)
-    place_methods[fn_] = PlaceMethod(route, written, fails, guards.len(), intern("{name}$release"))
+    place_methods[fn_] = PlaceMethod(route, written, fails, guards.len(), intern("{name}$release"), pos)
     out
 

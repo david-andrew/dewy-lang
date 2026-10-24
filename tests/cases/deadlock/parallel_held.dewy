@@ -1,0 +1,12 @@
+add_all = (total:Mutex<int64>):>void => {
+    parallel i in [0..100) {
+        let t = @(total.lock())
+        t += i
+    }
+}
+main = () => {
+    let total = mutex<int64>(0)
+    let held = @(total.lock())
+    add_all(total)
+    held += 1
+}

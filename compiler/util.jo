@@ -69,6 +69,22 @@ intern_sub = (s: str, start: int, n: int) -> int:
 
 name_of = (id: int) -> str: names[id]
 
+# Whether s is an interned name already, without interning it
+name_known = (s: str) -> bool:
+    if name_tab.len() == 0: return false
+    n = len(s)
+    p = data(s)
+    h = hash_bytes(p, n)
+    mask = name_tab.len() - 1
+    i = h & mask
+    loop true:
+        e = int(name_tab[i])
+        if e == 0: return false
+        id = e - 1
+        if name_hash[id] == h and len(names[id]) == n and __mem_eq(data(names[id]), p, n): return true
+        i = (i + 1) & mask
+    false
+
 # a file's name without its extension, whatever it is ("dir/game.jo" -> "dir/game"; ".x" stays)
 strip_ext = (path: str) -> str:
     dot = rfind(path, ".")
