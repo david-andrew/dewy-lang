@@ -162,8 +162,8 @@ word_rational_source = (n: int, from0: int) -> bool:
     int_widens(from, T_INT)
 
 # An exact division's only failure is a zero divisor: the caller's obligation,
-# as an integer division's (facts.jo fact_divisor), where the facts can carry
-# it: an integer divisor, or a rational one constructed in place (a constant).
+# as an integer division's (facts.jo fact_divisor): an integer divisor, or a
+# rational one, whose numerator a constant or a guard (`b not=? 0`) gives.
 rational_divisor = (n: int):
     if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) != 2: return
     d = int(fns[int(nodes[n].sym)].decl)
@@ -171,7 +171,7 @@ rational_divisor = (n: int):
     e = kid(n, 1)
     loop nodes[e].kind == .conv: e = int(nodes[e].a)
     t = prune(ntype(e))
-    if is_int(t) or t == T_MATH_INT or rational_constants.has(e): fact_divisors[n] = 1
+    if is_int(t) or t == T_MATH_INT or rational_constants.has(e) or bundled_rational_type(t): fact_divisors[n] = 1
 
 # (node n, replaced by the bundled rational module's fname applied to its old content)
 rational_wrap = (n: int, fname: str, to: int) -> int:

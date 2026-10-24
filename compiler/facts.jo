@@ -2158,6 +2158,24 @@ fact_extremum = (s: mut FactState, n: int, a: int, b: int, lower: bool) -> int:
         fact_difference(s, b, v, 0, n)
     v
 
+# `b =? 0` for an exact rational b (the library's `__eq__` with a rational
+# constant zero, expr.jo rational_constants): b's numerator is zero, the
+# projection an exact division's divisor obligation reads (fact_divisor).
+# The other operand's position, or -1.
+fact_name_rational_eq = 0
+fact_rational_zero_test = (n: int) -> int:
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) != 2 or rational_constants.len() == 0: return -1
+    d = int(fns[int(nodes[n].sym)].decl)
+    if d == 0: return -1
+    if fact_name_rational_eq == 0: fact_name_rational_eq = intern("__eq__")
+    if int(nodes[d].name) != fact_name_rational_eq or files[pos_file(nodes[d].pos)].path != lib_dir + "/rational.dewy": return -1
+    loop i in [0..2):
+        e = kid(n, i)
+        loop nodes[e].kind == .conv: e = int(nodes[e].a)
+        if let parts = rational_constants.get(e):
+            if parts.0 == 0: return 1 - i
+    -1
+
 # A library integer or rational power, `x^n` with an integer n: every one fails
 # only for a negative exponent (a rational's for a zero base as well), so n >= 0
 # is the caller's obligation.
@@ -3367,6 +3385,9 @@ fact_slice_prepare = (f: int, summary: bool = false):
                         forks.push(arg)
             if result_active or proof_active or fact_divisors.has(n): values.push(n)
             else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and fact_string_call(n) >= 2: values.push(n)
+            else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and fact_rational_zero_test(n) >= 0:
+                values.push(n)
+                values.push(kid(n, fact_rational_zero_test(n)))
             else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and fact_power_call(n):
                 values.push(n)
                 values.push(kid(n, 1))
@@ -4257,6 +4278,10 @@ fact_capture = (n: int, s: mut FactState) -> int:
                     loop key in keys: fact_assume(s, fact_project(s, after, key, true, T_BOOL), true)
                 fact_assume(s, fact_map_member(s, n, after, values[1]), true)
             return fact_new(s, fact_domain(ntype(n), .call, n), FactTerm(type = ntype(n)))
+        zero_test = fact_rational_zero_test(n)
+        if zero_test >= 0 and values[zero_test] != 0:
+            numerator = fact_project(s, values[zero_test], intern("numerator"), false, T_MATH_INT)
+            return fact_new(s, fact_domain(T_BOOL), FactTerm(.eq, numerator, fact_constant(s, 0)))
         string = fact_string_call(n)
         if string == 4: return fact_byte_slice(n, s, values)
         if string != 0:

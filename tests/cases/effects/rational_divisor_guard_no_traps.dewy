@@ -1,0 +1,10 @@
+$runtime_checks=false
+# (no traps: a rational divisor computed at run time is proven nonzero by a guard)
+ratio=(a:rational b:rational):>rational=>if b not=? 0 a/b else 0
+safe=(a:rational b:rational):>rational=>if b =? 0 0 else a/b
+main=():>void=>{
+    let r:rational=2/3
+    printl(ratio(1 r))
+    printl(safe(r 0))
+    printl(1/r)
+}
