@@ -918,7 +918,7 @@ when TARGET != "wasm" and TARGET != "macos":
         if (env("SLOPPY_VULKAN") ?? "") == "1": eprint("note: {msg}")
 
     __vk_check = (r: i32, what: str):
-        if r != 0: panic("Vulkan: {what} failed ({r})")
+        if r != 0: __environment_failure("Vulkan: {what} failed ({r})")
 
     # ---------------- instance, device ----------------
     __vk_has_layer = (name: str) -> bool:
@@ -1428,7 +1428,7 @@ when TARGET != "wasm" and TARGET != "macos":
 
     __vk_alloc = (req: VkMemoryRequirements, want: u32, like: u32, kind: int) -> int:
         t = __vk_memory_type(req.type_bits, want, like)
-        if t < 0: panic("Vulkan: no suitable memory")
+        if t < 0: __environment_failure("Vulkan: no suitable memory")
         n = int(req.size)
         align = max(int(req.alignment), 1)
         host = want & u32(VK_MEM_HOST_VISIBLE) != 0
@@ -1689,7 +1689,7 @@ when TARGET != "wasm" and TARGET != "macos":
             vkDeviceWaitIdle(__vk_dev)
             __vk_make_swapchain(__win_w, __win_h)
             r = vkAcquireNextImageKHR(__vk_dev, __vk_swapchain, u64(0) - u64(1), f.acquired, 0, &idx)
-        if r != 0 and r != VK_SUBOPTIMAL: panic("Vulkan: vkAcquireNextImageKHR failed ({r})")
+        if r != 0 and r != VK_SUBOPTIMAL: __environment_failure("Vulkan: vkAcquireNextImageKHR failed ({r})")
         sc_img = __vk_sc_images[int(idx)]
         __vk_barrier(cb, __vk_screen, u32(VK_LAYOUT_TRANSFER_SRC), VK_STAGE_ALL, VK_ACCESS_MEMORY_WRITE, VK_STAGE_TRANSFER, VK_ACCESS_TRANSFER_READ)
         __vk_barrier_raw(cb, sc_img, 1, u32(VK_LAYOUT_UNDEFINED), u32(VK_LAYOUT_TRANSFER_DST), VK_STAGE_TRANSFER, 0, VK_STAGE_TRANSFER, VK_ACCESS_TRANSFER_WRITE)
@@ -1730,7 +1730,7 @@ when TARGET != "wasm" and TARGET != "macos":
         if r == VK_OUT_OF_DATE or r == VK_SUBOPTIMAL:
             vkDeviceWaitIdle(__vk_dev)
             __vk_make_swapchain(__win_w, __win_h)
-        else if r != 0: panic("Vulkan: vkQueuePresentKHR failed ({r})")
+        else if r != 0: __environment_failure("Vulkan: vkQueuePresentKHR failed ({r})")
         __vk_frame = (__vk_frame + 1) % __VK_FRAMES
 
     # run what this frame has recorded so far and wait for it (for reading results back); the

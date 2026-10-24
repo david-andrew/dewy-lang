@@ -1072,7 +1072,7 @@ __test_begin = (name: str) -> bool:
         # (its output and errors into one pipe, in the order written; its output copied into another)
         both = [0]
         outs = [0]
-        if syscall(293, data(both), 0x80000) != 0 or syscall(293, data(outs), 0x80000) != 0: panic("could not make pipes for the test's output")   # pipe2(O_CLOEXEC)
+        if syscall(293, data(both), 0x80000) != 0 or syscall(293, data(outs), 0x80000) != 0: __environment_failure("could not make pipes for the test's output")   # pipe2(O_CLOEXEC)
         pid = syscall(57)
         if pid == 0:
             syscall(33, both[0] >> 32, 1)            # dup2

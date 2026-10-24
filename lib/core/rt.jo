@@ -251,6 +251,12 @@ __out_of_memory = ():
     __write_err("fatal: out of memory\n")
     __exit(1)
 
+# A failure of the environment the library cannot carry on from (a graphics
+# driver refusing a call, the system out of pipes): like running out of memory,
+# outside no traps (docs/design/assumptions.md), as all of this file is.
+__environment_failure = (msg: str):
+    panic(msg)
+
 # smallest c with 32 << c >= n (the exponent of float(n - 1) is floor(log2(n - 1)))
 __size_class = (n: int) -> int:
     if n <= 32: return 0
