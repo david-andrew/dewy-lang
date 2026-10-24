@@ -4071,7 +4071,10 @@ fact_capture = (n: int, s: mut FactState) -> int:
         if wi_fact_calls.len() > 0 and wi_fact_calls.has(n): wi_fact_check(n, values, s)
         if fact_speculating == 0:
             floor_probe = fact_probe_on and nkids(n) == 2 and (fact_floor_call(n) == 1 or fact_floor_call(n) == 2)
-            if let obligation = fact_divisors.get(n):
+            # (a divisor's call keeps its two operands: a wrapper takes the
+            # obligation along, expr.jo move_divisor)
+            obligation = if values.len() == 2: fact_divisors.get(n) ?? 0 else: 0
+            if obligation != 0:
                 proven = fact_divisor(s, n, values[0], values[1], obligation == 2)
                 if floor_probe: fact_probe_record(n, proven)
             else if floor_probe: fact_probe_divisor(n, s, values[1], kid(n, 1))

@@ -172,6 +172,7 @@ rational_divisor = (n: int):
 rational_wrap = (n: int, fname: str, to: int) -> int:
     source = nodes.len()
     nodes.push(nodes[n])
+    move_divisor(n, source)
     add_flag(source, NF_CHECKED)
     pos = nodes[n].pos
     ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
@@ -274,6 +275,7 @@ exact_decimal = (n: int) -> int:
 wrap_conv = (n: int, cv: CV, to: int):
     inner = nodes.len()
     nodes.push(nodes[n])
+    move_divisor(n, inner)
     nodes[n] = Node(kind = .conv, pos = nodes[inner].pos, a = i32(inner), aux = i32(int(cv)), type = i32(to), flags = i32(NF_CHECKED))
 
 # ---------------- coercion ----------------
@@ -513,10 +515,18 @@ union_target = (n: int, from: int, u: int) -> int:
         if can_coerce(n, from, m): return i
     -1
 
+# (a wrapper replaces node n and the old content moves to inner: the divisor
+# obligation belongs to the moved call)
+move_divisor = (n: int, inner: int):
+    if let kind = fact_divisors.get(n):
+        fact_divisors.remove(n)
+        fact_divisors[inner] = kind
+
 # replace node n by the union value holding it as member vi
 wrap_union = (n: int, vi: int, to: int):
     inner = nodes.len()
     nodes.push(nodes[n])
+    move_divisor(n, inner)
     nodes[n] = Node(kind = .call, pos = nodes[inner].pos, aux = 3, aux2 = i32(vi), type = i32(to), flags = i32(NF_CHECKED))
     set_list(n, [inner])
 
@@ -632,6 +642,7 @@ coerce = (n: int, target: int) -> int:
     if tk == .float_ and bundled_rational_type(from):
         source = nodes.len()
         nodes.push(nodes[n])
+        move_divisor(n, source)
         name = if to == T_F32: "to_float32" else: "to_float64"
         callee = bc_field(source, name, nodes[n].pos)
         nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(callee))
