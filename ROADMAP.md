@@ -7,49 +7,43 @@ day; keep it under 150 lines. Accepted designs live in [docs/design](docs/design
 
 ## North star
 
-| Measure | Now (2026-10-22) | Goal |
+| Measure | Now (2026-10-24) | Goal |
 |---|---|---|
-| Acceptance ladder, design surface | 92/101 (9 decided, awaiting implementation) | all |
-| Tier-4 flagship programs (1–5k lines each) | 7/7 written; 4 design versions pass, 3 partly held | all pass |
-| Programs passing under no-traps (`require-static`) | ladder 92/175, examples 17/29 | all, then flip the default |
-| Compile throughput, single thread, default build, every processed line (`speed --corpus`) | flagships 134k lines/s (104–197k); user-only 13.6k | 200–250k on every flagship |
-| Instructions per processed node (all phases) | 6.2k (check 2.1k, lower+codegen 1.8k, optimizer 0.9k) | ~3.2k |
-| Library fan-out (library + instance lines per user line) | 8.9 | down (closure diet) |
-| Hello-world compile | 22.4 ms (instruction-derived) | ≤20 ms |
-| Kernels vs C -O2 (time, default) | literal callbacks 4.6×, callbacks 2.3×, params 1.75×, graph 1.7×, game 1.6× | ≤1.2× |
-| Quick / full suite | ~20 s / ~4 min | ≤30 s / ≤5 min |
+| Acceptance ladder, design surface | 101/101 (no open rungs; new rungs needed) | all |
+| Tier-4 flagship programs (1–5k lines each) | 7/7 pass | all pass |
+| No traps by default (`require-static`, no opt-ins) | ~272/372 programs; flip commit on `wt/flip4` | flip the default |
+| Compile throughput, single thread, default build, every processed line | flagships 139k lines/s (min 99_dewy_frontend 93k) | 200–250k on every flagship |
+| Hello-world compile | 7.9 ms (instruction-derived) | ≤20 ms |
+| Kernels vs C -O2 (time, default) | broadcast 3.8×, arena 4.4× | ≤1.2× |
+| Quick / full suite | ~20–33 s / ~4 min (loaded machine) | ≤30 s / ≤5 min |
 
 Ladder: `python3 -m tools.core ladder` (`tests/ladder/ladder.json`). Compile:
-`speed --corpus` and `speed` (single-thread instructions; the gate);
-`--critical` is secondary. Wall clock only on a quiet pinned machine or a CI
-runner, never on the shared box. Kernels: `bench`.
+`speed` (single-thread instructions; the gate) and `speed --cycles` for layout
+changes. Wall clock only on a quiet pinned machine or a CI runner. Kernels:
+`bench`.
 
 ## Next
 
-1. **Compile speed** (decisions.md: every processed line counts; 200–250k
-   lines/s single-thread on every flagship). Migration per the adopted
-   [architecture](docs/design/compiler_architecture.md), cuts in order:
-   C check unit cost; A closure diet (fan-out, hello ≤20 ms); 6+G lower/codegen
-   per IR op; 8 optimizer per IR op; 2 call footprints; 4+9 near-free index and
-   frontend. Each cut lands only with measured flagship progress; Dewy leaf
-   modules where possible (B3).
-2. **The decided-but-unimplemented frontier** (9 ladder programs): concurrency
-   stages 2–3 (81–83, integrating); IEEE policy (85); allocator and arenas
-   (76); a blocking `net` module (92, 98); tensors (84, 101; after concurrency).
-3. **Round 5/6 follow-through:** `wrap<T>(x)` and infix `transmute` (no
-   `.wrap`/`.bitcast`); iterator control via `loop x in @w`; escapes; short-
-   circuit `and=`/`or=`; ambiguous-partial error; closure `@` capture; `$build`;
-   `Path` methods; optional `main`; `@(m.method)` handle places; uniform
-   precision (string unions, int ranges); sibling-literal positional types.
-4. **Decimal follow-ups:** REPL top-level statements, lambda-only bindings.
-5. **No traps by default:** prove idioms, fix the corpus, then flip the default.
-6. **Self-hosting** ([readiness](docs/design/self_hosting.md)): new leaf compiler
-   modules start in Dewy.
-7. **Runtime gaps** (upper bound first): mergesort, callback traversal, graph
-   layout, float compare/negate, outer-target SIMD, destination passing.
-8. **Small items:** swap primitive for refined arrays; result-length facts for
-   `make(n)`; runtime `type<T>` statics; effects slice 4 follow-ups; the
-   `@obj.method()` heuristic; name hooks behind `mod`/`round`/`rational`.
+1. **No traps by default** (top capability). Blockers before the flip lands:
+   facts/effects compile cost with facts everywhere (facts +111%, effects
+   +231%), codegen regressions under the flip (bench `arrays`, lost stencil
+   vectorization), remaining unproven library ops.
+2. **Compile speed** (200–250k lines/s single-thread on every flagship; every
+   processed line counts). Next: obligation-heavy facts cost (99_dewy_frontend's
+   contracts), then the native code-quality gap vs GCC (frame/allocation,
+   instruction selection). Layout changes need cycle measurements.
+3. **Exact fixed-width integers** (decided): overflow policies landed; store
+   obligations and exact intermediates at gate-neutral cost (Astra).
+4. **Decided surface still to build:** deadlock freedom (`lock_all`,
+   `try_lock`, `$no_deadlocks`, inferred lock order); place-returning methods;
+   `$bulletproof`/`$no_assumed_bounds`; the time system (redesign pending).
+5. **Runtime speed vs C:** loop and `push` codegen (broadcast, arena), register
+   allocation, vectorization under checks.
+6. **Self-hosting** ([readiness](docs/design/self_hosting.md)): next leaves
+   `targets.jo`, the intern table (after the flip removes proven-read checks).
+7. **Hygiene at quiet points:** the internal Sloppy comment sweep and
+   `SLOPPY_*` names; moving implemented rounds out of decisions.md into their
+   design docs.
 
 ## Decided (David; full text in [docs/design/decisions.md](docs/design/decisions.md))
 
