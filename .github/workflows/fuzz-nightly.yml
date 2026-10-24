@@ -8,6 +8,9 @@ name: Nightly fuzz
       minutes:
         description: 'Minutes of fuzzing'
         default: '25'
+      targeted_minutes:
+        description: 'Minutes of targeted fuzzing'
+        default: '10'
 
 permissions:
   contents: read
@@ -19,7 +22,7 @@ concurrency:
 jobs:
   dewy-programs:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -29,6 +32,7 @@ jobs:
         with:
           node-version: '22'
       - name: Bootstrap the complete compiler from C
+        id: bootstrap
         run: python -m tools.compiler.build --bootstrap --output "$RUNNER_TEMP/dewy-core"
       - name: Fuzz Dewy programs against the oracle (native/web, default/release)
         env:
@@ -37,6 +41,14 @@ jobs:
           # A different seed range every night; the summary names any failures.
           python -m tools.core fuzz --compiler "$RUNNER_TEMP/dewy-core/bin/dewy-core" \
             --seed "$(( GITHUB_RUN_NUMBER * 100000 ))" --minutes "$MINUTES" \
+            --failures "$RUNNER_TEMP/fuzz-failures"
+      - name: Targeted fuzz (match tables, fixed widths, loops, text) against the oracle
+        if: ${{ !cancelled() && steps.bootstrap.outcome == 'success' }}
+        env:
+          MINUTES: ${{ github.event.inputs.targeted_minutes || '10' }}
+        run: |
+          python -m tools.compiler.dewy_fuzz_targeted --compiler "$RUNNER_TEMP/dewy-core/bin/dewy-core" \
+            --seed "$(( GITHUB_RUN_NUMBER * 1000000 ))" --minutes "$MINUTES" \
             --failures "$RUNNER_TEMP/fuzz-failures"
       - name: Upload minimized failures
         if: failure()
