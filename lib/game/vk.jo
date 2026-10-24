@@ -1169,7 +1169,7 @@ when TARGET != "wasm" and TARGET != "macos":
     # Pipelines (made the first time a shader is drawn with some state, or a compute function
     # dispatched) are kept in a VkPipelineCache, saved between runs: making one again takes the
     # driver a fraction of the time (on NVIDIA, Breakwater's take 10 ms instead of 70). The file
-    # is the program's in ~/.cache/sloppy ($XDG_CACHE_HOME; %LOCALAPPDATA%\sloppy on Windows),
+    # is the program's in ~/.cache/dewy ($XDG_CACHE_HOME; %LOCALAPPDATA%\dewy on Windows),
     # saved after a frame that made pipelines; DEWY_VK_PIPELINE_CACHE=0 leaves it out.
     __vk_pcache = 0
     __vk_pcache_dirty = false
@@ -1180,7 +1180,7 @@ when TARGET != "wasm" and TARGET != "macos":
         when TARGET == "windows":
             dir = env("LOCALAPPDATA") ?? ""
             if len(dir) == 0: return ""
-            dir = "{dir}\\sloppy"
+            dir = "{dir}\\dewy"
         else:
             if let x = env("XDG_CACHE_HOME"): dir = x
             if len(dir) == 0:
@@ -1188,7 +1188,7 @@ when TARGET != "wasm" and TARGET != "macos":
                 if len(home) == 0: return ""
                 dir = "{home}/.cache"
                 mkdir(dir)
-            dir = "{dir}/sloppy"
+            dir = "{dir}/dewy"
         if not mkdir(dir): return ""
         exe = exe_path()
         name = exe[max(rfind(exe, "/"), rfind(exe, "\\")) + 1..]
