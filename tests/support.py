@@ -170,3 +170,13 @@ def build_exit_batch(compiler, directory, cases, release, target):
     body.extend(f'if argv[1] =? "{i}" {{case_{i}() return}}' for i in range(len(cases)))
     body.append('panic("invalid test selector")')
     return build_case_batch(compiler, directory, cases, body, release, target, arguments=True)
+
+
+def patience(seconds):
+    """The limit for a wait that ends as soon as its event arrives: it bounds only a hang.
+    A shared machine's load stretches every rebuild, so the limit grows with the load per CPU."""
+    try:
+        load = os.getloadavg()[0] / (os.cpu_count() or 1)
+    except (AttributeError, OSError):
+        load = 0.0
+    return seconds * (1 + max(load, 0.0))

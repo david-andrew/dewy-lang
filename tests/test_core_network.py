@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.support import patience
+
 # (programs that keep runtime checks for their unproven obligations)
 RUNTIME_CHECKS = '\n$runtime_checks\n'
 
@@ -109,7 +111,7 @@ def stop(process):
 def build(compiler, source, binary, release=False):
     flags = ['--release'] if release else []
     result = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
-                            capture_output=True, text=True, timeout=30, check=False,
+                            capture_output=True, text=True, timeout=patience(30), check=False,
                             env=environment())
     assert result.returncode == 0, result.stdout + result.stderr
 
@@ -250,7 +252,7 @@ def room_server(binary, work):
     try:
         with selectors.DefaultSelector() as selector:
             selector.register(server.stdout, selectors.EVENT_READ)
-            assert selector.select(10), 'room server did not become ready'
+            assert selector.select(patience(10)), 'room server did not become ready'
         line = server.stdout.readline()
         assert line.startswith(f'rendezvous on port {port}: 1 rooms kept'), line
         yield port
@@ -341,7 +343,7 @@ def test_core_room_fragmented_messages(room_binaries, tmp_path):
 def test_core_online_starter_room(compiler, room_binaries, tmp_path):
     project = tmp_path / 'race'
     made = subprocess.run([compiler, 'new', project, 'online'], capture_output=True,
-                          text=True, timeout=5, check=False, env=environment())
+                          text=True, timeout=patience(5), check=False, env=environment())
     assert made.returncode == 0, made.stdout + made.stderr
     path = project / 'race.dewy'
     source = path.read_text().replace('1280 720)', '320 200)')
@@ -371,9 +373,9 @@ update=(dt:float64)=>{
         reported=time()
     }
     if reported>?0.0 and time()-reported>?0.25 quit()
-    if time()-started>?10.0 {printl("timeout") exit(2)}
+    if time()-started>?PATIENCE {printl("timeout") exit(2)}
 }
-'''
+'''.replace('PATIENCE', f'{patience(10):.1f}')
     path.write_text(source)  # (the starter carries its own `$runtime_checks`)
     binary = project / 'main'
     build(compiler, path, binary, room_binaries[2])
@@ -393,11 +395,11 @@ update=(dt:float64)=>{
             host = start_peer('host')
             with selectors.DefaultSelector() as selector:
                 selector.register(host.stdout, selectors.EVENT_READ)
-                assert selector.select(10), 'starter host did not open a room'
+                assert selector.select(patience(10)), 'starter host did not open a room'
             line = host.stdout.readline().strip()
             assert line.startswith('room '), line
             start_peer('guest', line.split()[1])
-            outputs = [p.communicate(timeout=15) for p in processes]
+            outputs = [p.communicate(timeout=patience(15)) for p in processes]
             for process, (out, err) in zip(processes, outputs, strict=True):
                 assert process.returncode == 0, out + err
             assert outputs[0][0].startswith('state '), outputs

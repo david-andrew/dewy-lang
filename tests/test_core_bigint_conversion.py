@@ -2,11 +2,13 @@
 divide and conquer over powers of 10^9 with Barrett division), and `to_int` refuses more
 decimal digits than `max_digits=` (a million by default) as Python does since CVE-2020-10735."""
 import random
+import resource
 import subprocess
 import sys
-import time
 
 from tests.support import compiler
+from tools.compiler import speed
+from tools.filelock import lock_exclusive
 
 PROGRAM = r'''
 main=(args:array<string>)=>{
@@ -18,11 +20,10 @@ main=(args:array<string>)=>{
         printl"{a*b}"
     } else if mode =? "int" {
         let text=read_text(args[2]) or_throw
-        let started=time_ns()
         let v=to_int(text max_digits=0)
         if v is? error {printl"none" return}
         let back="{v}"
-        printl"{back =? text.trim()} {(time_ns()-started)//1000000}"
+        printl"{back =? text.trim()}"
     } else if mode =? "limit" {
         let digits:array<string>=[]
         loop i in [0..1000001) digits.push("7")
@@ -60,19 +61,42 @@ def test_products_and_text_match_python(compiler, tmp_path):
         assert ran.stdout.strip() == str(a * b), (da, db)
 
 
+# Convert and print 300,000 digits: about 54 G user-space instructions today (digit by digit,
+# about 300 G; the work is the same whatever the machine's load). Without perf counters, CPU
+# seconds stand in (about 8 s today, about 50 s digit by digit): less exact, but not wall time.
+INSTRUCTION_LIMIT = 100e9
+CPU_SECONDS_LIMIT = 25
+
+
+def _cost(binary, *arguments):
+    """(stdout, cost, limit, unit) of running the binary: its instructions, else its CPU seconds."""
+    try:
+        speed.CACHE.mkdir(parents=True, exist_ok=True)
+        with (speed.CACHE / 'speed.lock').open('w') as lock:
+            lock_exclusive(lock)
+            counter = speed.Counter('perf')
+    except (RuntimeError, OSError, subprocess.CalledProcessError):
+        counter = None
+    if counter is not None:
+        instructions, out = counter.run([str(binary), *arguments], speed.clean_env())
+        return out, instructions, INSTRUCTION_LIMIT, 'instructions'
+    before = resource.getrusage(resource.RUSAGE_CHILDREN)
+    ran = subprocess.run([binary, *arguments], capture_output=True, text=True, timeout=300, check=False)
+    assert ran.returncode == 0, ran.stderr
+    after = resource.getrusage(resource.RUSAGE_CHILDREN)
+    seconds = after.ru_utime + after.ru_stime - before.ru_utime - before.ru_stime
+    return ran.stdout, seconds, CPU_SECONDS_LIMIT, 'CPU seconds'
+
+
 def test_long_decimal_text_converts_quickly(compiler, tmp_path):
     sys.set_int_max_str_digits(0)
     binary = _build(compiler, tmp_path)
     digits = ''.join(random.Random(5).choice('0123456789') for _ in range(300_000))
     text = tmp_path / 'digits.txt'
     text.write_text('9' + digits)
-    started = time.perf_counter()
-    ran = subprocess.run([binary, 'int', text], capture_output=True, text=True, timeout=120, check=False)
-    seconds = time.perf_counter() - started
-    assert ran.returncode == 0, ran.stderr
-    assert ran.stdout.split()[0] == 'true'
-    # (digit by digit, this took about a minute; divide and conquer, about a second)
-    assert seconds < 10, seconds
+    out, cost, limit, unit = _cost(binary, 'int', str(text))
+    assert out.split()[0] == 'true'
+    assert cost < limit, f'{cost:.3g} {unit} (limit {limit:.3g})'
 
 
 def test_max_digits(compiler, tmp_path):

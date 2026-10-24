@@ -12,15 +12,7 @@ from pathlib import Path
 
 import pytest
 
-
-def patience(seconds):
-    """The limit for a wait that ends as soon as its event arrives: it bounds only a hang.
-    A shared machine's load stretches every rebuild, so the limit grows with the load per CPU."""
-    try:
-        load = os.getloadavg()[0] / (os.cpu_count() or 1)
-    except (AttributeError, OSError):
-        load = 0.0
-    return seconds * (1 + max(load, 0.0))
+from tests.support import patience
 
 
 class Watch:
