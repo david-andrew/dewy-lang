@@ -1,0 +1,11 @@
+# modes: native native-release
+# `$no_deadlocks`: a pipeline whose results may be none or Closed. They come back as results,
+# never taken for the channel closing.
+$no_deadlocks
+half = (n:int64):>int64 | none | Closed => if n =? 0 Closed else if n % 2 =? 1 none else n // 2
+none_back = (_:int64 | none | Closed):>array<int64> => []
+main = ():>void | Canceled => {
+    let seeds:array<int64> = [4 3 0 8]
+    let out = pipeline(2 seeds @half @none_back) or_throw
+    loop r in out printl(if r is? none "none" else if r is? Closed "closed" else "{r}")
+}

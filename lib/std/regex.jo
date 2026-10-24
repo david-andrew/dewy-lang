@@ -8,9 +8,10 @@
 # Patterns: . (any character but a line break) [abc] [a-z] [^0-9] \d \w \s (and \D \W \S) ^ $
 # \b \B, x* x+ x? x{2} x{2,} x{2,5} (and lazy x*? x+? x?? x{2,5}?), a|b, (group) (?:group),
 # \ before any of .[]{}()*+?^$|\ for itself, \n \t \r; (?i) at the start ignores case (in ASCII).
-# \w takes letters of any script ("Zürich" is one word). A pattern a user typed is checked first
-# with regex_error(pattern) (regex(pattern) stops the program when it is wrong). A pattern too
-# big to match in reasonable time is wrong too: one whose repeats written out are over 50000
+# \w takes letters of any script ("Zürich" is one word). regex(pattern) gives RegexError for a
+# pattern it cannot read, and regex_error(pattern) says what is wrong; a literal pattern is
+# checked while compiling, so it is simply a Regex (or a compile error). A pattern too big to
+# match in reasonable time is wrong too: one whose repeats written out are over 50000
 # instructions, or that nests groups or repeats over 200 deep.
 # Matching takes time in proportion to the text's length times the pattern's (it never
 # backtracks without end), and works on characters (code points), not bytes. Make a Regex once
@@ -74,30 +75,34 @@ const __RE_NWORDB = 10
 
 # ---------------- using one ----------------
 
-# what is wrong with a pattern, or none when regex() can read it: for a pattern a user typed,
-# asked before regex(), which stops the program at one it cannot read
+# what is wrong with a pattern, or none when regex() can read it
 #   if let why = regex_error(pat): fail("bad pattern: {why}")
 regex_error = (pattern: str) -> str?:
-    p = __ReParser(pattern, chars(pattern), soft = true)
-    p.nodes.push(__ReNode(0))         # (a node for what a failure gives back to point at)
-    if p.cs.len() >= 4 and p.cs[0] == '(' and p.cs[1] == '?' and p.cs[2] == 'i' and p.cs[3] == ')': p.i = 4
-    ast = __re_alt(p)
-    if len(p.err) == 0 and p.i < p.cs.len(): __re_fail(p, "unexpected ')'")
-    if len(p.err) == 0: __re_check_size(p, ast)
+    p = __ReParser(pattern, chars(pattern))
+    __re_read(p)
     if len(p.err) == 0: return none
     p.err
 
-# a pattern made ready to match (a pattern it cannot read panics, saying where: regex_error
-# asks first)
-regex = (pattern: str) -> Regex:
-    p = __ReParser(pattern, chars(pattern))
-    r = Regex(pattern, [], [], 0)
+# (the pattern read into p's nodes: its root, or p.err says what is wrong)
+__re_read = (p: mut __ReParser) -> int:
+    p.nodes.push(__ReNode(0))         # (a node for what a failure gives back to point at)
     if p.cs.len() >= 4 and p.cs[0] == '(' and p.cs[1] == '?' and p.cs[2] == 'i' and p.cs[3] == ')':
-        r.icase = true
+        p.icase = true
         p.i = 4
     ast = __re_alt(p)
-    if p.i < p.cs.len(): __re_fail(p, "unexpected ')'")
-    __re_check_size(p, ast)
+    if len(p.err) == 0 and p.i < p.cs.len(): __re_fail(p, "unexpected ')'")
+    if len(p.err) == 0: __re_check_size(p, ast)
+    ast
+
+# a pattern made ready to match, or RegexError when it cannot be read (regex_error says why). A
+# literal pattern is checked while compiling: it is a Regex, or a compile error.
+@check_constant(regex_error(pattern), "not a valid pattern")
+regex = (pattern: str) -> Regex | RegexError:
+    p = __ReParser(pattern, chars(pattern))
+    ast = __re_read(p)
+    if len(p.err) > 0: return RegexError()
+    r = Regex(pattern, [], [], 0)
+    r.icase = p.icase
     r.groups = p.groups
     r.classes = p.classes
     # (where the whole match starts and ends is kept with each thread, not in its captures)
@@ -823,8 +828,8 @@ struct __ReParser:
     src: str
     cs: int[]
     i = 0
-    soft = false        # (regex_error: a failure is kept in err, not a panic)
-    err = ""
+    icase = false       # ((?i) at the start)
+    err = ""            # (the first failure: what is wrong, and where)
     groups = 0
     depth = 0           # (groups inside groups: reading, writing out and sizing go that deep)
     nodes: __ReNode[]
@@ -841,12 +846,9 @@ struct __ReNode:
     greedy = true
 
 __re_fail = (p: mut __ReParser, why: str):
-    if p.soft:
-        # (the first failure is what is wrong; the rest of the pattern is skipped)
-        if len(p.err) == 0: p.err = "{why} (at character {p.i + 1})"
-        p.i = p.cs.len()
-        return
-    panic("regex \"{p.src}\": {why} (at character {p.i + 1})")
+    # (the first failure is what is wrong; the rest of the pattern is skipped)
+    if len(p.err) == 0: p.err = "{why} (at character {p.i + 1})"
+    p.i = p.cs.len()
 
 __re_new = (p: mut __ReParser, nd: __ReNode) -> int:
     p.nodes.push(nd)

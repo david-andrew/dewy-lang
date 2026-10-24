@@ -1,5 +1,6 @@
-find_lines = (text:string pattern:string):>array<string> => {
-    let matcher = regex(pattern)
+# A pattern known only at run time may not be one regex can read: RegexError.
+find_lines = (text:string pattern:string):>array<string> | RegexError => {
+    let matcher = regex(pattern) or_throw
     let found:array<string> = []
     let number = 0
     loop line in text.split("\n") {
@@ -19,11 +20,13 @@ join_lines = (lines:array<string>):>string => {
     }
     return out
 }
-main = ():>void => {
+main = ():>void | RegexError => {
     let input = "INFO boot\nERROR disk\nWARN hot\nERROR network\n"
-    let results = find_lines(input "^ERROR")
+    let results = find_lines(input "^ERROR") or_throw
+    let debug = find_lines(input "^DEBUG") or_throw
+    let accented = find_lines("café" "caf.") or_throw
     $runtime_assert(results.length =? 2)
-    $runtime_assert(find_lines(input "^DEBUG").length =? 0)
-    $runtime_assert(find_lines("café" "caf.").length =? 1)
+    $runtime_assert(debug.length =? 0)
+    $runtime_assert(accented.length =? 1)
     printl(join_lines(results))
 }

@@ -19,6 +19,7 @@ use 'types.jo'
 use 'check.jo'
 use 'facts.jo'
 use 'warn_if.jo'
+use 'check_constant.jo'
 use 'directives.jo'
 use 'refine.jo'
 use 'proofs.jo'
@@ -2838,6 +2839,9 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
         return finish_partial(n, fns[f].ptypes, int(cd.sig.mutmask), int(fns[f].ret))
     if not capture_defaults: save_call_order(n, args, fin)
     nodes[n].type = i32(representation_type(int(fns[f].ret)))
+    if cc_any and nodes[decl].c != 0 and closure == 0 and not capture_defaults:
+        narrowed = cc_call(n, f, decl)
+        if narrowed != 0: return narrowed
     if capture_defaults:
         call = nodes.len()
         nodes.push(nodes[n])

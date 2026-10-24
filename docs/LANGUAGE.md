@@ -3782,9 +3782,11 @@ if at isnt? Missing { printl(at) }       # 3
 printl([3 1 4].index_of(9))            # Missing
 ```
 
-`regex(pattern)` prepares a reusable regular expression (it panics on a pattern
-that cannot be read today; decided, not built yet: it returns `Regex | RegexError`,
-and a literal pattern is checked while compiling). `text.find(pattern)`
+`regex(pattern)` prepares a reusable regular expression, or gives `RegexError`
+(an error) for a pattern it cannot read: it returns `Regex | RegexError`. A literal
+pattern (or a constant holding one) is checked while compiling, so
+`regex(r"\d+")` is simply a `Regex`, and a literal it cannot read is a compile
+error saying what is wrong. `text.find(pattern)`
 returns `Match|Missing`; `find_all` returns nonoverlapping matches, `contains` tests
 for any match, and `matches` requires the whole string to match. A `Match` has
 `text`, `groups`, `start` and `end`. **Match offsets and the optional `find`
@@ -3801,8 +3803,18 @@ let fields = "a, b;c".split(regex(r"[,;]\s*"))
 
 Patterns support character classes, alternatives, captured and `(?:...)`
 uncaptured groups, greedy/lazy repetitions, line anchors `^`/`$`, and word
-boundaries. `(?i)` at the start folds ASCII case. Use `regex_error(pattern)`
-to check user-supplied patterns before preparing them. A pattern whose repeats
+boundaries. `(?i)` at the start folds ASCII case. A pattern known only at run
+time is handled like any fallible value, and `regex_error(pattern)` says what is
+wrong with one (or gives `none`):
+
+```dewy
+match regex(user_pattern) {
+    r:Regex => printl(text.matches(r))
+    <RegexError> => printl"bad pattern: {regex_error(user_pattern) ?? ""}"
+}
+```
+
+A pattern whose repeats
 written out exceed 50,000 instructions (`(a{1000}){1000}`), or that nests groups
 or repeats over 200 deep, is refused like one that cannot be read. An empty match advances
 one code point before the next search; unmatched capture groups contain `""`.

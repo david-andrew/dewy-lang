@@ -1,6 +1,6 @@
-# exit: 101
 # modes: native
-# regex() refuses a pattern too big to match in reasonable time, as it refuses one it cannot read.
+# A literal pattern is checked while compiling: one too big to match in reasonable time is
+# refused there, as one it cannot read is.
 main=()=>{
     let r=regex(r"(a{1000}){1000}")
     printl("aaa".contains(r))

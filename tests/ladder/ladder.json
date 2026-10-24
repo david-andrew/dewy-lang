@@ -489,13 +489,11 @@
   },
   "109_log_pipeline": {
    "milestone": 43,
-   "note": "Access-log report as a reader -> parser -> classifier -> aggregator pipeline over channel(4) with backpressure, close propagation and a task result for the malformed count, in a $no_deadlocks module.",
-   "open": "Decided (deadlock freedom, 2026-10-23): $no_deadlocks, every wait certified (here a bounded-channel pipeline). Awaiting implementation: `$no_deadlocks` is an unknown directive; the program runs and matches without it."
+   "note": "Access-log report in a $no_deadlocks module: reader -> parser -> classifier -> aggregator through the certified pipeline(window seeds work feedback) protocol, parser and classifier composed into its stage task, a window of 4 for backpressure, optional results counted as malformed."
   },
   "110_config_loader": {
    "milestone": 44,
-   "note": "Config from stdin: `??` defaults any failure, `??<NotAnInteger>` defaults only that kind while TooManyDigits reaches a match, to_int(max_digits=) failure kinds explained, literal regexes as Regex, and a user-supplied pattern through regex(p) giving Regex | RegexError.",
-   "open": "Decided (2026-10-23): regex(p) returns Regex | RegexError for a pattern known only at run time. Awaiting implementation: regex(p) gives Regex, so the RegexError arm is unreachable (the program matches with regex_error(p) instead)."
+   "note": "Config from stdin: `??` defaults any failure, `??<NotAnInteger>` defaults only that kind while TooManyDigits reaches a match, to_int(max_digits=) failure kinds explained, literal regexes checked while compiling as Regex, and a user-supplied pattern through regex(p) giving Regex | RegexError."
   },
   "111_build_aware": {
    "milestone": 45,
@@ -524,7 +522,9 @@
   "106_login_vault",
   "107_static_files",
   "108_bank_ledger",
+  "109_log_pipeline",
   "10_statistics",
+  "110_config_loader",
   "111_build_aware",
   "112_bulletproof_sensor",
   "11_units_physics",

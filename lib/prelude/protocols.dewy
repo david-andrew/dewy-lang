@@ -46,20 +46,24 @@ serve = <Q R T>(handler:<(q:Q):>R> body:<(s:Service<Q R>):>T>):>T => {
     result
 }
 
+# (an item in flight, boxed so that a T or R that may itself be none, Closed or
+# Canceled is never taken for the channel's own Closed or Canceled)
+__Flight:type = <V>[value:V]
+
 # (the stage: works through what it receives until the input closes)
-__pipeline_stage = <T R>(input:Channel<T> output:Channel<R> work:<(item:T):>R>):>void => {
+__pipeline_stage = <T R>(input:Channel<__Flight<T>> output:Channel<__Flight<R>> work:<(item:T):>R>):>void => {
     loop true {
         let item = input.receive()
         if item is? Closed break
         if item is? Canceled break
-        output.send(work(item));
+        output.send(__Flight<R>[work(item.value)]);
     }
     output.close()
 }
 
 pipeline = <T R>(window:int64<(>? 0)> seeds:array<T> work:<(item:T):>R> feedback:<(result:R):>array<T>>):>array<R> | Canceled => {
-    let input = channel<T>(window)
-    let output = channel<R>(window)
+    let input = channel<__Flight<T>>(window)
+    let output = channel<__Flight<R>>(window)
     let results:array<R> = []
     let pending:array<T> = []
     loop item in seeds { pending.push(item) }
@@ -70,7 +74,7 @@ pipeline = <T R>(window:int64<(>? 0)> seeds:array<T> work:<(item:T):>R> feedback
         let flight:int64 = 0
         loop true {
             loop flight <? window and next <? pending.length {
-                input.send(pending[next]);
+                input.send(__Flight<T>[pending[next]]);
                 next += 1
                 flight += 1
             }
@@ -81,8 +85,8 @@ pipeline = <T R>(window:int64<(>? 0)> seeds:array<T> work:<(item:T):>R> feedback
                 break
             }
             flight -= 1
-            loop item in feedback(r) { pending.push(item) }
-            results.push(r)
+            loop item in feedback(r.value) { pending.push(item) }
+            results.push(r.value)
         }
         input.close()
     }

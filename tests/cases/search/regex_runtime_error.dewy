@@ -1,0 +1,13 @@
+# modes: native native-release
+# A pattern known only at run time gives Regex | RegexError: a value, not a panic.
+describe=(p:string):>string=>match regex(p) {
+    r:Regex => "{p}: {r.groups} groups, matches abc: {"abc".matches(r)}"
+    <RegexError> => "{p}: {regex_error(p) ?? "?"}"
+}
+main=()=>{
+    let n=1000
+    loop p in ["(a\{{n}\})\{{n}\}" "[a-c]+" "(" "a\{4,2\}" "(?x)a" "(a)(b)c"] printl(describe(p))
+    # (a literal is just a Regex)
+    let word:Regex=regex(r"\w+")
+    printl("hi there".find_all(word).length)
+}

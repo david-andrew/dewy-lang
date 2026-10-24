@@ -1,0 +1,107 @@
+# Constant arguments checked while compiling (docs/design/decisions.md: `regex(p)` returns
+# `Regex | RegexError`, and a literal pattern is checked at compile time). A library function
+# says `@check_constant(validator(param), "message")`: where a call gives `param` a compile-time
+# constant string, `validator(argument)` runs at compile time (comptime.jo), the library's own
+# code, not a copy of it. Text back is a compile error at the argument ("message: text"); none
+# means the call cannot fail, so its result drops its exception members (a `Regex | RegexError`
+# is a `Regex`). Any other argument leaves the call as it is.
+# Demand-driven: nothing is read unless a declaration has one. Cost: O(1) per declaration, O(1)
+# per call of one, and one compile-time run of the validator per call with a constant argument.
+use 'util.jo'
+use 'ast.jo'
+use 'lex.jo'
+use 'types.jo'
+use 'check.jo'
+use 'expr.jo'
+use 'errors.jo'
+use 'comptime.jo'
+use 'warn_if.jo'
+
+struct CheckConstant:
+    param: int          # the parameter checked
+    validator: int      # the validator's declaration: (text) -> text?, none when it is fine
+    message: str
+
+cc_decls: {int: CheckConstant} = {}
+cc_any = false
+
+cc_reset = ():
+    cc_decls = {}
+    cc_any = false
+
+# fn_sig, in the declaration's scope: its check, read once.
+cc_read_decl = (decl: int):
+    if nodes[decl].c == 0 or cc_decls.has(decl): return
+    loop at in kids(int(nodes[decl].c)):
+        if name_of(int(nodes[at].name)) != "check_constant": continue
+        call = int(nodes[at].a)
+        msg = int(nodes[at].b)
+        bad = "a constant check names a validator, a parameter and a message: `@check_constant(validator(param), \"message\")`"
+        if call == 0 or msg == 0 or nodes[msg].kind != .str_lit or nodes[call].kind != .call or nkids(call) != 1: fatal(nodes[at].pos, bad)
+        callee = int(nodes[call].a)
+        if callee == 0 or nodes[callee].kind != .ident: fatal(nodes[at].pos, bad)
+        param = wi_param(decl, kid(call, 0))
+        if param < 0: fatal(nodes[at].pos, bad)
+        s = lookup(int(nodes[callee].name))
+        if s == 0 or syms[s].kind != .fns: fatal(nodes[callee].pos, "the validator of a constant check is a function: `{name_of(int(nodes[callee].name))}` is none")
+        cc_decls[decl] = CheckConstant(param, int(syms[s].decl), name_of(int(nodes[msg].sval)))
+        cc_any = true
+
+# (the constant string an argument is, or -1 when it is not one)
+cc_constant = (x0: int) -> int:
+    x = x0
+    loop i in [0..16):
+        if nodes[x].kind == .conv and nodes[x].a != 0 and prune(ntype(int(nodes[x].a))) == T_STR: x = int(nodes[x].a)
+        else: break
+    if nodes[x].kind == .str_lit: return int(nodes[x].sval)
+    if nodes[x].kind != .ident: return -1
+    k = nodes[x].aux as SK
+    if k != .const_ and k != .global and k != .local: return -1
+    initial = binding_const_init(k, int(nodes[x].sym), nodes[x].pos)
+    if initial != 0 and nodes[initial].kind == .str_lit: return int(nodes[initial].sval)
+    -1
+
+# expr.jo, a call n of f (declaration decl) whose type is set: its narrowed type, or 0 when it
+# stays as it is
+cc_call = (n: int, f: int, decl: int) -> int:
+    if not cc_decls.has(decl): return 0
+    c = cc_decls[decl]
+    if c.param >= nkids(n): return 0
+    x = kid(n, c.param)
+    text = cc_constant(x)
+    if text < 0: return 0
+    pos = nodes[x].pos
+    v = get_fn_inst(c.validator, [], pos)
+    arg = mk(.str_lit, pos)
+    nodes[arg].sval = i32(text)
+    nodes[arg].type = i32(T_STR)
+    add_flag(arg, NF_CHECKED)
+    run = mk(.call, pos)
+    nodes[run].sym = i32(v)
+    nodes[run].type = fns[v].ret
+    add_flag(run, NF_CHECKED)
+    set_list(run, [arg])
+    why = ct_values[ct_run(run)]
+    if tkind(why.type) == .opt and why.i != 0: fatal(pos, "{c.message}: {ct_values[why.items[0]].s}")
+    if tkind(why.type) == .str_: fatal(pos, "{c.message}: {why.s}")
+    # (it cannot fail: what is left of the result once its exceptions are gone)
+    rt = prune(ntype(n))
+    if not is_union(rt): return 0
+    kept: int[]
+    loop m in union_members(rt):
+        if not exception_member(m): kept.push(m)
+    if kept.len() == 0 or kept.len() == union_members(rt).len(): return 0
+    inner = nodes.len()
+    nodes.push(nodes[n])
+    e = mk(.narrow, nodes[n].pos)
+    t = kept[0]
+    if kept.len() == 1: nodes[e].aux = i32(union_index(rt, t))
+    else:
+        t = mk_union(kept)
+        nodes[e].kind = .conv
+        nodes[e].aux = i32(int(CV.union_))
+    nodes[e].a = i32(inner)
+    nodes[e].type = i32(t)
+    add_flag(e, NF_CHECKED)
+    nodes[n] = nodes[e]
+    t
