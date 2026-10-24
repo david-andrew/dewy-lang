@@ -3556,6 +3556,12 @@ Text takes alignment, fill and minimum width, optionally ending in `s`. Its
 width counts grapheme clusters; it does not truncate. Use a string slice to
 truncate explicitly. Invalid specs or options for the wrong value type panic.
 
+`bytes.read<uint64>(i)` loads the eight bytes at offset `i` of an `array<uint8>` as one
+little-endian `uint64`, at any alignment and without `$unsafe`; `read<uint32>` and
+`read<uint16>` load four and two. The offset is an obligation, `0 <=? i` and
+`i + 8 <=? bytes.length` (4, 2): proven (`loop i + 8 <=? b.length {... b.read<uint64>(i) ...}`)
+or checked at run time under `$runtime_checks`.
+
 Use `bytes(text)` for explicit UTF-8 bytes; binary literals such as `0x"ff00"`
 also produce bytes. Byte literals spell them directly: `b'a'` is the `uint8` 97
 (one byte, escapes allowed: `b'\n'`, `b'\{'`) and works as a constant and a

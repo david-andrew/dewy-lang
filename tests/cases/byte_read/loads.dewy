@@ -1,0 +1,8 @@
+# quick
+main=():>void=>{
+    let b:array<uint8>=[1 2 3 4 5 6 7 8 9]
+    printl(b.read<uint64>(1))
+    printl(b.read<uint32>(0))
+    printl(b.read<uint16>(7))
+    printl(("abcdefghij" as array<uint8>).read<uint64>(2) =? 0x6a69686766656463)
+}

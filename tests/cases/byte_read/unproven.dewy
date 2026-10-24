@@ -1,0 +1,6 @@
+$runtime_checks=false
+at=(b:array<uint8> i:int64):>uint64=>{
+    if i >=? 0 and i <? b.length {return b.read<uint64>(i)}
+    0
+}
+main=():>void=>printl(at([1 2 3 4 5 6 7 8 9] 0))

@@ -1,0 +1,14 @@
+# quick
+$runtime_checks=false
+sum=(b:array<uint8>):>uint64=>{
+    let total:uint64<overflow='wrap'>=0
+    let i:int64=0
+    loop i + 8 <=? b.length {
+        total+=b.read<uint64>(i)
+        i+=8
+    }
+    if b.length >=? 4 {total+=b.read<uint32>(b.length - 4)}
+    if b.length >=? 2 {total+=b.read<uint16>(0)}
+    uint64(total)
+}
+main=():>void=>printl(sum([1 2 3 4 5 6 7 8 9]))

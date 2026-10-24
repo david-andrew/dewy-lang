@@ -4941,6 +4941,23 @@ dewy_console_call = (n: int, member: str, args: int[], expected: int) -> int:
     nodes[n] = nodes[bc_call("__console_line", [bc_int(2, pos), text, bc_str(color, pos)], pos)]
     check_expr(n, expected)
 
+# `bytes.read<uint64>(i)` (also uint32, uint16): the word at byte offset i of an
+# array<uint8>, little-endian, without `$unsafe`. `0 <=? i` and `i + 8 <=? bytes.length`
+# are the caller's obligation (facts.jo), proven or checked in the library's helper.
+# 0 when the receiver is not an array<uint8> (the call is an ordinary one).
+dewy_byte_read = (n: int, callee: int, base: int, args: int[], expected: int) -> int:
+    recv = int(nodes[base].a)
+    rt = prune(check_expr(recv, 0))
+    recv = last_checked
+    add_flag(recv, NF_CHECKED)
+    nodes[base].a = i32(recv)
+    if tkind(rt) != .array or prune(int(types[rt].elem)) != T_U8: return 0
+    t = prune(resolve_type(kid(callee, 0)))
+    helper = if t == T_U64: "__dewy_read_u64" else if t == T_U32: "__dewy_read_u32" else if t == T_U16: "__dewy_read_u16" else: ""
+    if helper == "": fatal(nodes[callee].pos, "read<T> loads a uint64, uint32 or uint16 (found {dt(t)})")
+    nodes[n] = nodes[bc_call(helper, [recv, args[0]], nodes[n].pos)]
+    check_expr(n, expected)
+
 # the member a Dewy program wrote, for a library function standing for it
 shown_fn_name = (name: str) -> str:
     if name == "__dewy_find": return "find"
@@ -4948,6 +4965,9 @@ shown_fn_name = (name: str) -> str:
     if name == "__dewy_index_of": return "index_of"
     if name == "__dewy_insert": return "insert"
     if name == "__dewy_byte_slice": return "byte_slice"
+    if name == "__dewy_read_u64": return "read<uint64>"
+    if name == "__dewy_read_u32": return "read<uint32>"
+    if name == "__dewy_read_u16": return "read<uint16>"
     if name == "__dewy_keys": return "keys"
     name
 
@@ -5396,6 +5416,9 @@ check_call = (n: int, expected: int) -> int:
                 pos = nodes[n].pos
                 nodes[n].a = i32(bc_field(bc_ident("$dewy_rational", pos), "_word_rational", pos))
                 return check_expr(n, expected)
+        if nodes[base].kind == .field and nkids(callee) == 1 and args.len() == 1 and dewy_at(nodes[n].pos) and name == ci(42, "read"):
+            r = dewy_byte_read(n, callee, base, args, expected)
+            if r != 0: return r
         s = 0
         mod = -1
         if nodes[base].kind == .ident: s = lookup(name)

@@ -2250,17 +2250,23 @@ fact_string_index = (n: int, s: mut FactState, index: int, length: int):
 # `xs.swap(i j)` needs both indexes in bounds and `xs.insert(value i)` a
 # position 0 <=? i <=? xs.length: obligations of the call, as an index is (the
 # library's helper checks them where they are deferred). 4 swap, 5 insert, or 0.
+# `bytes.read<uint64>(i)` needs 0 <=? i and i + 8 <=? bytes.length (4 for uint32, 2 for
+# uint16): 10 plus the width here.
 fact_name_swap = 0
 fact_name_insert = 0
+fact_name_reads: int[]
 fact_array_call = (n: int) -> int:
-    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) != 3: return 0
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) < 2 or nkids(n) > 3: return 0
     d = int(fns[int(nodes[n].sym)].decl)
     if d == 0: return 0
     if fact_name_swap == 0:
         fact_name_swap = intern("swap")
         fact_name_insert = intern("__dewy_insert")
+        fact_name_reads = [intern("__dewy_read_u64"), intern("__dewy_read_u32"), intern("__dewy_read_u16")]
     name = int(nodes[d].name)
-    k = if name == fact_name_swap: 4 else if name == fact_name_insert: 5 else: 0
+    k = 0
+    if nkids(n) == 3: k = if name == fact_name_swap: 4 else if name == fact_name_insert: 5 else: 0
+    else: k = if name == fact_name_reads[0]: 18 else if name == fact_name_reads[1]: 14 else if name == fact_name_reads[2]: 12 else: 0
     if k == 0 or not pos_in_lib(nodes[d].pos) or tkind(representation_type(ntype(kid(n, 0)))) != .array: return 0
     k
 
@@ -2341,6 +2347,20 @@ fact_array_call_check = (n: int, s: mut FactState, values: int[], kind: int):
     base = if held.len() > 0: held[held.len() - 1] else: values[0]
     length = fact_project(s, base, -1, false, T_INT)
     zero = fact_constant(s, 0)
+    if kind > 10:
+        # (i + width <=? length: i - length <=? -width)
+        width = kind - 10
+        index = values[1]
+        lo = fact_compare(s, .le, zero, index)
+        hi = fact_entails(s, index, length, -width)
+        if fact_probe_on: fact_probe_record(n, lo == 1 and hi)
+        else if lo != 1 or not hi:
+            i = wit_text(kid(n, 1))
+            upper = "{i} + {width} <=? {wit_text(kid(n, 0))}.length"
+            relation = if lo == 1: upper else if hi: "0 <=? {i}" else: "0 <=? {i} and {upper}"
+            missing = if lo == 1: "upper bound" else if hi: "lower bound" else: "lower and upper bounds"
+            wit_unknown(n, fact_bound(s, index), "read<uint{width * 8}> is in bounds", 0, relation, missing)
+        return
     positions = if kind == 4: [1, 2] else: [2]
     loop i in positions:
         index = values[i]
