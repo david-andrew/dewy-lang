@@ -1075,9 +1075,9 @@ A quantity prints with a unit chosen from its dimension and magnitude:
 
 ```dewy
 from units import m, kg, J
-printl"{1500m} {3000m} {300ms} {4500J} {20m/s} {2kg*m/s}"  # 1500 m 3 km 300 ms 4500 J 20 m/s 2 N*s
+printl"{1500m} {3000m} {300ms} {4500J} {20m/s} {2kg*m/s}"  # 1500m 3km 300ms 4500J 20m/s 2N*s
 let d:float64 * Length = 1500m
-printl"{d} {d/1000}"  # 1.5 km 1.5 m
+printl"{d} {d/1000}"  # 1.5km 1.5m
 ```
 
 Each kind has a list of candidate units: time `ns µs ms s min h`, length
@@ -1085,16 +1085,17 @@ Each kind has a list of candidate units: time `ns µs ms s min h`, length
 moles and the named units `Hz N Pa J W C V Ω`; temperatures print in `K`,
 angles in `°` and luminosity in `cd`. A float prints in the largest candidate
 not above its magnitude. An exact value prints in the largest such candidate
-that keeps a whole count (`2.5m` is `2500 mm`), and otherwise in the candidate
-with the simplest fraction (`m/3` is `1/3 m`). Zero prints in the kind's own
-unit (`0 s`). Other dimensions print in canonical units, using one named unit
+that keeps a whole count (`2.5m` is `2500mm`), and otherwise in the candidate
+with the simplest fraction (`m/3` is `1/3m`). Zero prints in the kind's own
+unit (`0s`). The unit attaches to the number, as it is written; a unit with
+nothing above the line puts the number there (`1/s^2`, not `1 1/s^2`). Other dimensions print in canonical units, using one named unit
 where that needs fewer factors (`m/s^2`, `N*s`, `kg/m^3`, `V/Hz^(1/2)`,
 `°/s`). Text from `string(x)` is the same. A format spec such as `{x:.2f}`
 formats the canonical number alone.
 
 `x as unit` converts a quantity to a constant unit of the same dimension:
-`30cm as inches` prints `1500/127 inches` and `25m/s as km/hour` prints
-`90 km/hour`. It changes only how the value prints: comparisons and counts are
+`30cm as inches` prints `1500/127inches` and `25m/s as km/hour` prints
+`90km/hour`. It changes only how the value prints: comparisons and counts are
 unaffected. The unit stays through scaling and sums (`(l as mm)*2`), but not
 through products of quantities.
 

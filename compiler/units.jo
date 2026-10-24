@@ -1074,10 +1074,6 @@ quantity_ladder = (dim: int) -> QuantityLadder:
         return quantity_one_unit(quantity_composite_text("", rest) + "/°", 360, 1)
     quantity_one_unit(best, 1, 1)
 
-# (the text after the number: " km", but "°C" and "°" attach)
-quantity_shown_symbol = (sym: str) -> str:
-    if starts_with(sym, "°"): return sym
-    " " + sym
 
 # The text of the checked quantity x, as a checked string expression; 0 for a number
 # Dewy cannot divide exactly or in floating point (it then prints as a plain number).
@@ -1102,7 +1098,11 @@ quantity_display = (x: int) -> int:
     nums: int[]
     dens: int[]
     loop u in ladder.units:
-        syms.push(bc_str(quantity_shown_symbol(quantity_units[u].sym), pos))
+        # (the symbol attaches to the number: 1500m, 20°C; a unit 1/s^2 drops its 1, so the
+        # number is its numerator: 1/s^2, not 11/s^2)
+        sym = quantity_units[u].sym
+        if starts_with(sym, "1/"): sym = sym[1..len(sym))
+        syms.push(bc_str(sym, pos))
         nums.push(bc_int(quantity_units[u].num, pos))
         dens.push(bc_int(quantity_units[u].den, pos))
     number = quantity_number(x)

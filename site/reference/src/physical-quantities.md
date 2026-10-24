@@ -45,4 +45,4 @@ Addition, subtraction, and comparison require identical dimensions and are other
 
 ## Provisional Scope
 
-The type-product model, representation parameterization, the base-dimension algebra with canonical scales, and erasure are settled. Provisional: a quantity's display unit (printing `4500 J` rather than the canonical number) and `x as km` to select one, declaring base dimensions in library code, offset scales such as Celsius and their point/delta semantics, calendar-relative durations, and catalog organization.
+The type-product model, representation parameterization, the base-dimension algebra with canonical scales, and erasure are settled. Provisional: a quantity's display unit (printing `4500J` rather than the canonical number) and `x as km` to select one, declaring base dimensions in library code, offset scales such as Celsius and their point/delta semantics, calendar-relative durations, and catalog organization.
