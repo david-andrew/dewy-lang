@@ -1,0 +1,23 @@
+# exit: 101
+# `$no_nan` does not assume what enters it: a parameter is proven by each
+# caller (or checked there), and a field read in the scope is tested first or
+# checked where it is used.
+Reading:type=[value:float64]
+half=(x:float64):>float64=>{
+    $no_nan
+    x*0.5
+}
+scaled=(r:Reading):>float64=>{
+    $no_nan
+    let v=r.value
+    if v =? v return v*2.0
+    0.0
+}
+main=()=>{
+    let zero:float64=0.0
+    let nan=zero/zero
+    printl(half(3.0))
+    printl(scaled(Reading[nan]))
+    printl(scaled(Reading[1.5]))
+    printl(half(nan))
+}

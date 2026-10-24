@@ -1,11 +1,16 @@
-# Literals, records built from them and elements under `$no_nan` need no check
+# Literals, records built from them and elements built under `$no_nan` from
+# tested values need no check
 $runtime_checks=false
 P:type=[x:float64 y:float64]
 Q:type=[p:P n:int64]
 add=(xs:array<P>):>set<P>=>{
     $no_nan
     let s:set<P>=set[]
-    loop x in xs {s.push(x)}
+    loop p in xs {
+        let a=p.x
+        let b=p.y
+        if a =? a and b =? b {s.push(P[x=a y=b])}
+    }
     s
 }
 main=():>void=>{

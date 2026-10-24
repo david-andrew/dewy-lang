@@ -759,9 +759,17 @@ in its scope that could produce a NaN (`∞-∞`, `0*∞`, `0/0`, `∞/∞`, `sq
 `log` of a negative number, `sin` of an infinity, `pow`) an obligation, and
 `$no_inf` does the same for infinities (an overflowing `+`, `-`, `*` or `/`, a
 possibly zero divisor, `log(0)`, `exp`, `pow`, a `float32` narrowing, a large
-`int` converted). `$finite_floats` (lib/directives.dewy) is both. Values that
-enter the scope (parameters, fields, elements, call results) are taken to obey
-it. Guards on locals and constant operands prove most obligations:
+`int` converted). `$finite_floats` (lib/directives.dewy) is both. Under
+`$no_nan`, values that enter the scope are not assumed free of NaN. A
+parameter of a function whose body is in the scope is proven by each caller: a
+float argument the caller cannot prove is an obligation there, under the
+caller's own settings (a runtime check by default). A field, element, global,
+loop variable, the result of a call from outside the scope, or a parameter of a
+lambda or of a function used as a value, may be NaN: using it (in arithmetic, a
+math function, a `return`, a reassignment, a dictionary key or set element) is
+an obligation, which a comparison that holds proves (`let v = r.value` then
+`if v =? v` or `if 0.0 <=? v`). `$no_inf` still takes entering values as finite.
+Guards on locals and constant operands prove most obligations:
 
 ```dewy
 $finite_floats
@@ -2021,7 +2029,8 @@ written in a literal) is an obligation. The same holds for set elements (pushed,
 looked up, removed, written in a set literal or given to `set(values)`), and for
 keys and elements that are records or tuples with float fields, unless the record
 defines its own `__eq__`. Literals, converted integers, records built from them
-and keys under `$no_nan` are proven; any other follows the obligation settings.
+and keys computed or tested under `$no_nan` are proven; any other follows the
+obligation settings.
 
 Straight-line `[loop i in [0..n) expression]` comprehensions over an `int64`
 bound and `[loop x in values expression]` over ordinary or fixed arrays reserve

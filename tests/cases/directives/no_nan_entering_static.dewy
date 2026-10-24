@@ -1,0 +1,9 @@
+# Where unproven obligations are compile errors, a value entering `$no_nan`
+# (here a field) must be tested before it is used.
+$runtime_checks=false
+Reading:type=[value:float64]
+doubled=(r:Reading):>float64=>{
+    $no_nan
+    r.value*2.0
+}
+main=()=>printl(doubled(Reading[1.0]))
