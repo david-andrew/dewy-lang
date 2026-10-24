@@ -1,0 +1,12 @@
+# A refined alias called on a value converts to it, as `as` does; its contract is an obligation.
+Reading:type = int32<r => -1000 <=? r and r <=? 1000>
+Small:type = int64<(<? 10)>
+parse = (n:int):>Reading | none => {
+    if n <? -1000 or n >? 1000 return none
+    Reading(n)
+}
+main = () => {
+    let zero = Reading(0)
+    let readings = [loop n in [5 2000 -7] parse(n) ?? zero]
+    printl"{readings} {Small(4)} {Small(zero)}"
+}

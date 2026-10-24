@@ -1,0 +1,19 @@
+# A row that rules allocation out keeps the function's result: no | OutOfMemory to handle.
+$explicit_allocation_failure
+const capacity = 4
+Log:type = [values:array<int32 length=4> count:int64<c => 0 <=? c and c <=? capacity>]
+record = (@log:Log value:int32):>bool & no allocates & no panics => {
+    let at = log.count
+    if at >=? capacity return false
+    log.values[at] = value
+    log.count = at + 1
+    true
+}
+main = ():>void | OutOfMemory => {
+    let log = Log[[0 0 0 0] 0]
+    loop n in [5 6 7 8 9] {
+        let ok:bool = record(@log n)
+        if not ok printl"full"
+    }
+    printl"{log.count}"
+}

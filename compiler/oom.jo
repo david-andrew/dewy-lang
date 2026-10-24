@@ -21,6 +21,7 @@ use 'check.jo'
 use 'arena.jo'
 use 'ownership.jo'
 use 'settings.jo'
+use 'effects.jo'
 
 oom_files: {int: bool} = {}
 
@@ -57,10 +58,21 @@ oom_body_allocates = (n: int) -> bool:
     false
 
 oom_allocates = (n: int) -> bool:
+    # (`& no allocates` or `& no_effects`: the effect check proves the body allocates nothing)
+    if oom_row_excludes(n): return false
     loop p in kids(n):
         if not oom_fixed_type(int(nodes[p].a)): return true
     if not has_flag(n, NF_VOID) and not oom_fixed_type(int(nodes[n].a)): return true
     oom_body_allocates(int(nodes[n].b))
+
+# (n's written effect row rules allocation out)
+oom_row_excludes = (n: int) -> bool:
+    syntax = int(nodes[n].sval)
+    if syntax <= 0 or syntax >= effect_syntax.len(): return false
+    if effect_syntax[syntax].len() == 0: return true
+    loop entry in effect_syntax[syntax]:
+        if entry.kind == .alloc and entry.negative: return true
+    false
 
 # The declarations a module function projects to: itself, or its frame and its body.
 oom_declarations = (n: int) -> int[]:

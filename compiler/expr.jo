@@ -4214,6 +4214,13 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
         if hs != 0 and syms[hs].kind == .alias_ and nkids2(int(syms[hs].ref)) == 0:
             at = resolve_alias(int(syms[hs].ref), [], nodes[n].pos)
             if is_int(at): return conversion(n, at, args)
+            # (Reading(n), Reading a refined alias: the conversion `n as Reading`, its
+            # refinement an obligation)
+            if tkind(at) == .refined and dewy_at(nodes[n].pos) and args.len() == 1 and nodes[args[0]].kind != .namedarg:
+                target = mk(.tname, nodes[n].pos)
+                nodes[target].name = i32(name)
+                nodes[n] = Node(kind = .cast, pos = nodes[n].pos, a = i32(args[0]), b = i32(target))
+                return check_expr(n, expected)
             if is_union(at):
                 ms: str[]
                 loop m in union_members(at): ms.push(dt(m))
