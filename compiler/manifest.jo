@@ -1,0 +1,156 @@
+# The frozen implementation-language twin of manifest.dewy, for the compilers without
+# the Dewy frontend (tools/compiler/build.py). Change both, or neither.
+
+struct PkgSpec:
+    name: str
+    src: str        # a git URL, or a directory
+    ref: str        # (git) a tag, branch or commit; "": the default branch
+    dir: str        # where the build block naming it is (relative directories are from there)
+
+# where the build block starts: a line `build:` (-1: none)
+pkg_block_at = (src: str) -> int:
+    if starts_with(src, "build:"): return 0
+    k = find(src, "\nbuild:")
+    if k >= 0: return k + 1
+    -1
+
+# the package specs in the build block at byte at of file path's text src (at < 0: none)
+pkg_scan_at = (specs: mut PkgSpec[], path: str, src: str, at: int):
+    if at < 0: return
+    d = "."
+    s = max(rfind(path, "/"), rfind(path, "\\"))
+    if s >= 0: d = path[..s)
+    i = find_byte(src, '\n', at)
+    loop i >= 0 and i < len(src):
+        j = find_byte(src, '\n', i + 1)
+        if j < 0: j = len(src)
+        line = src[i + 1..j)
+        i = j
+        t = trim(line)
+        if len(t) == 0 or t[0] == '#': continue
+        if line[0] != ' ' and line[0] != '\t': break
+        eq = find(t, "=")
+        if eq < 0: continue
+        val = trim(t[eq + 1..])
+        if not starts_with(val, "package("): continue
+        args = pkg_strings(val[8..])
+        if args.len() == 0: continue
+        ref = ""
+        if args.len() > 1: ref = args[1]
+        pkg_add(specs, PkgSpec(trim(t[..eq)), args[0], ref, d))
+
+# the "quoted" strings in s, up to its closing parenthesis
+pkg_strings = (s: str) -> str[]:
+    out: str[]
+    i = 0
+    loop i < len(s) and s[i] != ')':
+        if s[i] == '"':
+            e = find(s, "\"", i + 1)
+            if e < 0: break
+            out.push(s[i + 1..e))
+            i = e
+        i += 1
+    out
+
+# p, unless a spec of that name came first
+pkg_add = (specs: mut PkgSpec[], p: PkgSpec):
+    loop q in specs:
+        if q.name == p.name: return
+    specs.push(p)
+
+pkg_is_git = (src: str) -> bool: find(src, "://") >= 0 or starts_with(src, "git@") or starts_with(src, "github.com/") or starts_with(src, "gitlab.com/") or starts_with(src, "codeberg.org/")
+
+pkg_url = (src: str) -> str:
+    if find(src, "://") < 0 and not starts_with(src, "git@"): return "https://" + src
+    src
+
+# (git takes what starts with - as an option: --upload-pack runs a command)
+pkg_unsafe_git = (url: str, ref: str) -> bool: starts_with(url, "-") or starts_with(ref, "-") or find(url, " ") >= 0 or find(ref, " ") >= 0
+
+# a whole commit: 40 hexadecimal digits, lowercase
+pkg_is_commit = (ref: str) -> bool:
+    if len(ref) != 40: return false
+    loop c in ref.bytes():
+        if not (c >= '0' and c <= '9' or c >= 'a' and c <= 'f'): return false
+    true
+
+# a commit as directories and messages show it: its first 12 digits
+pkg_short = (commit: str) -> str: commit[..min(len(commit), 12))
+
+# a URL as a directory name: what is not a letter, digit, '_', '.', '-' or beyond ASCII is '_'
+pkg_dir_name = (url: str) -> str:
+    out = ""
+    u = url
+    k = find(u, "://")
+    if k >= 0: u = u[k + 3..]
+    loop c in u.bytes():
+        if (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9') or c == '_' or c == '.' or c == '-' or c >= 0x80: out = out + str_from_bytes([c])
+        else: out = out + "_"
+    out
+
+# where a package's commit is kept in cache
+pkg_fetch_dir = (cache: str, url: str, commit: str) -> str: "{cache}/{pkg_dir_name(url)}@{pkg_short(commit)}"
+
+# the commit `git ls-remote` output names: an annotated tag's commit (its ^{} line), else
+# the first one ("": none)
+pkg_ls_remote_commit = (out: str) -> str:
+    found = ""
+    loop line in split(out, "\n"):
+        tab = find(line, "\t")
+        if tab < 0: continue
+        sha = line[..tab)
+        if not pkg_is_commit(sha): continue
+        if ends_with(trim(line[tab + 1..]), "^\{}"): return sha
+        if len(found) == 0: found = sha
+    found
+
+# dewy.lock: a line a package, its name, URL, the tag, branch or commit asked for (- for
+# none) and the commit it is pinned to. The pins by lock key; lines with no commit are not pins.
+pkg_lock_read = (text: str) -> {str: str}:
+    locked: {str: str} = {}
+    loop line in split(text, "\n"):
+        t = trim(line)
+        if len(t) == 0 or t[0] == '#': continue
+        parts = split(t, " ")
+        if parts.len() == 4 and pkg_is_commit(parts[3]):
+            ref = parts[2]
+            if ref == "-": ref = ""
+            locked[pkg_lock_key(parts[0], parts[1], ref)] = parts[3]
+    locked
+
+pkg_lock_key = (name: str, url: str, ref: str) -> str: "{name} {url} {ref}"
+
+# a package's line in dewy.lock
+pkg_pin = (name: str, url: str, ref: str, commit: str) -> str:
+    shown = ref
+    if len(shown) == 0: shown = "-"
+    "{name} {url} {shown} {commit}"
+
+# dewy.lock's text: its pins in order
+pkg_lock_text = (pins: str[]) -> str:
+    "# the commits of the packages in this program's build block (dewy-core build writes this: keep it\n# with the program; delete a line to take the newest commit again)\n" + join(sorted(pins), "\n") + "\n"
+
+# the name `dewy-core add` gives a package: its URL's or directory's last part, without
+# .git or a leading dewy- (dewy-physics.git: physics)
+pkg_default_name = (src: str) -> str:
+    n = src
+    loop ends_with(n, "/"): n = n[..len(n) - 1)
+    n = n[max(rfind(n, "/"), rfind(n, ":")) + 1..]
+    if ends_with(n, ".git"): n = n[..len(n) - 4)
+    if starts_with(n, "dewy-"): n = n[5..]
+    n.replace("-", "_")
+
+# whether text's build block has a package named name
+pkg_declares = (text: str, name: str) -> bool: find(text, "\n    {name} = package(") >= 0 or find(text, "\n\t{name} = package(") >= 0
+
+# text with a package line for src named name, first in its build block (made when it has none)
+pkg_insert = (text: str, name: str, src: str) -> str:
+    # (the file's own line ends: \r\n on Windows)
+    nl = "\n"
+    if find(text, "\r\n") >= 0: nl = "\r\n"
+    line = "    {name} = package(\"{src}\"){nl}"
+    at = pkg_block_at(text)
+    if at < 0: return "build:" + nl + line + nl + text
+    e = find_byte(text, '\n', at)
+    if e < 0: return text + nl + line
+    text[..e + 1) + line + text[e + 1..]

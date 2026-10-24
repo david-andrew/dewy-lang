@@ -1,0 +1,39 @@
+# The compiler's manifest.dewy: `manifest text...` prints, for each text, its build block's
+# offset and specs, and the specs it adds to one list for the run (with the text as the path),
+# its quoted strings, what its URL and lock functions make of it, and the text after
+# `dewy-core add` puts a package in it.
+$runtime_checks
+from p"../../../compiler/manifest.dewy" import PkgSpec, pkg_block_at, pkg_scan_at, pkg_strings, pkg_is_git, pkg_url, pkg_unsafe_git, pkg_is_commit, pkg_short, pkg_dir_name, pkg_fetch_dir, pkg_ls_remote_commit, pkg_lock_read, pkg_lock_key, pkg_pin, pkg_lock_text, pkg_default_name, pkg_declares, pkg_insert
+
+main=():>void=>{
+    let words=args()
+    let all:array<PkgSpec>=[]
+    loop i in [1..words.length) {
+        let t=words[i]
+        let at=pkg_block_at(t)
+        let specs:array<PkgSpec>=[]
+        pkg_scan_at(@specs "pkgs/a\\b/main.jo" t at)
+        let had=all.length
+        pkg_scan_at(@all t t at)
+        printl"<{at} {all.length - had}"
+        loop s in specs {printl"  spec {s.name}|{s.src}|{s.ref}|{s.dir}"}
+        loop s in all {printl"  all {s.name}|{s.src}|{s.ref}|{s.dir}"}
+        printl"  strings {pkg_strings(t).join("|")}"
+        printl"  git {pkg_is_git(t)} {pkg_url(t)} {pkg_unsafe_git(t "")} {pkg_unsafe_git("x" t)} {pkg_is_commit(t)} {pkg_dir_name(t)} {pkg_default_name(t)}"
+        if pkg_is_commit(t) {printl"  commit {pkg_short(t)} {pkg_fetch_dir("/cache" "https://h/x" t)}"}
+        printl"  remote {pkg_ls_remote_commit(t)}"
+        let locked=pkg_lock_read(t)
+        printl"  locked {locked.length}"
+        loop line in t.split("\n") {
+            let parts=line.trim.split(" ")
+            if parts.length =? 4 {
+                let ref=if parts[2] =? "-" "" else parts[2]
+                printl"  lock {pkg_lock_key(parts[0] parts[1] ref)} {locked.get(pkg_lock_key(parts[0] parts[1] ref)) ?? "none"} {pkg_pin(parts[0] parts[1] ref parts[3])}"
+            }
+        }
+        printl(pkg_lock_text(t.split("\n")))
+        printl"  declares {pkg_declares(t "physics")} {pkg_declares(t "x")}"
+        printl(pkg_insert(t "physics" "https://github.com/ann/dewy-physics"))
+        printl">"
+    }
+}

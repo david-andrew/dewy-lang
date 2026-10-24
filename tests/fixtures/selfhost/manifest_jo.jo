@@ -1,0 +1,32 @@
+# The compiler's frozen manifest.jo, with the same command line as manifest_dewy.dewy.
+use '../../../compiler/manifest.jo'
+
+main = ():
+    words = args()
+    all: PkgSpec[]
+    loop i in [1..words.len()):
+        t = words[i]
+        at = pkg_block_at(t)
+        specs: PkgSpec[]
+        pkg_scan_at(specs, "pkgs/a\\b/main.jo", t, at)
+        had = all.len()
+        pkg_scan_at(all, t, t, at)
+        print("<{at} {all.len() - had}")
+        loop s in specs: print("  spec {s.name}|{s.src}|{s.ref}|{s.dir}")
+        loop s in all: print("  all {s.name}|{s.src}|{s.ref}|{s.dir}")
+        print("  strings {join(pkg_strings(t), "|")}")
+        print("  git {pkg_is_git(t)} {pkg_url(t)} {pkg_unsafe_git(t, "")} {pkg_unsafe_git("x", t)} {pkg_is_commit(t)} {pkg_dir_name(t)} {pkg_default_name(t)}")
+        if pkg_is_commit(t): print("  commit {pkg_short(t)} {pkg_fetch_dir("/cache", "https://h/x", t)}")
+        print("  remote {pkg_ls_remote_commit(t)}")
+        locked = pkg_lock_read(t)
+        print("  locked {locked.len()}")
+        loop line in split(t, "\n"):
+            parts = split(trim(line), " ")
+            if parts.len() == 4:
+                ref = parts[2]
+                if ref == "-": ref = ""
+                print("  lock {pkg_lock_key(parts[0], parts[1], ref)} {locked.get(pkg_lock_key(parts[0], parts[1], ref)) ?? "none"} {pkg_pin(parts[0], parts[1], ref, parts[3])}")
+        print(pkg_lock_text(split(t, "\n")))
+        print("  declares {pkg_declares(t, "physics")} {pkg_declares(t, "x")}")
+        print(pkg_insert(t, "physics", "https://github.com/ann/dewy-physics"))
+        print(">")

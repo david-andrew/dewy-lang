@@ -100,7 +100,7 @@ compiler module; its twin defines no name it lacks; each `.jo` module calling it
 pair has a differential test (`tests/test_selfhost_*.py`) against an independent
 Python oracle in default and release builds. Compiler output stayed byte-identical
 (734 builds: examples and ladder, native, `--release`, `-g`, wasm32, aarch64-mac,
-x86_64-windows).
+x86_64-windows; `python3 -m tools.compiler.same_output` checks this against a base commit).
 
 `line_table.dewy` (each file's line starts and the last line found: `line_col`) is
 the first stateful leaf. A leaf owns its state type (`LineTable`) and takes it by place
@@ -149,6 +149,31 @@ without moving on. That is now no value, which ends the list. What it met:
   (`at:int64<at >=? 0>`) leaves 44, but then each `r.at+=1` gets a wrap check, and after
   `let start=r.at` and a scan, `r.text.byte_slice(start r.at)` cannot prove
   `start <=? r.at`. A local scan position, copied back, would prove them.
+
+`manifest.dewy` (a program's packages as text: the build block's specs, dewy.lock's pins,
+a URL's cache directory and default name; pkg.jo keeps git, the cache and the files) is the
+first leaf with a dictionary (`pkg_lock_read` gives a `dict<string string>`, a `{str: str}`
+to Sloppy) and records pushed by place (`@specs:array<PkgSpec>`), and the first to cut text
+with the library's members (`split` with a limit, `trim`, `remove_prefix`, `replace`,
+`contains`, `sorted`, `join`). It compiled as first written, but for a parenthesis the
+compiler asked for (`loop c in (s as array<uint8>)`). Panel: +0.00% on every item; 684 builds
+identical. Reading 200 specs is +35% on its twin (release +31%), the lock file +1%. What it met:
+- Malformed UTF-8: both frontends take it in sources and Sloppy slices it anywhere, but
+  `byte_slice` panics when a slice starts on a continuation byte, as one after an ASCII
+  delimiter can in malformed text. `split`, `trim`, `remove_prefix` and `replace` pass such
+  bytes through unchecked, so the leaf cuts with them and keeps `byte_slice` to ASCII ends.
+  With no unchecked byte range (`bytes as string` validates), the slice's check and the
+  library's pass-through disagree about what a string may hold.
+- A byte loop (`b[i] =? 10 and b[i + 1] =? b'b' ...`) takes 9.2 instructions a byte
+  (release 11.2) against the library `find`'s 2.4: the bounds checks stay in the loop though
+  `check --obligations` reports none, and release spills the length. `pkg_block_at` scans
+  every main file, so it asks `contains` first, which matches the twin.
+- Facts (cold here, so checked at run time): `if xs.is_empty {return}` then `xs[0]`;
+  `parts[parts.length - 1]` of a `split` (never empty); `s.byte_slice(0 if n <? 12 n else 12)`
+  (an `if` expression's bound); `j <=? n` after `let j=i + 1 loop j <? n and b[j] not=? 10 {j+=1}`.
+- Both readers of commits (the lock file's, `git ls-remote`'s) now keep only whole commits
+  (40 lowercase hexadecimal digits), so a pin's 12-digit form cuts ASCII; a garbled pin is
+  resolved again instead of fetched.
 
 Open gaps from these leaves, by cost:
 - A literal beside a policy-typed operand (`w + 1`, `w & 0xFF`, `w xor 0xFFFFFFFF`) goes

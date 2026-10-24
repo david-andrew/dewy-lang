@@ -13,12 +13,7 @@
 
 use 'util.jo'
 use 'lex.jo'
-
-struct PkgSpec:
-    name: str
-    src: str        # a git URL, or a directory
-    ref: str        # (git) a tag, branch or commit; "": the default branch
-    dir: str        # where the build block naming it is (relative directories are from there)
+use 'manifest.dewy'
 
 pkg_specs: PkgSpec[]
 pkg_dirs: {str: str} = {}       # package name -> its directory
@@ -26,62 +21,7 @@ pkg_errs: {str: str} = {}       # package name -> why it has no directory
 pkg_fetch = false               # (sloppy build, run, test, watch: fetch what is missing; the language server does not)
 
 # the package specs in the build block of file path (text: read before the program is parsed)
-pkg_scan = (path: str, src: str): pkg_scan_at(path, src, pkg_block_at(src))
-
-# where the build block starts (-1: none)
-pkg_block_at = (src: str) -> int:
-    if starts_with(src, "build:"): return 0
-    k = find(src, "\nbuild:")
-    if k >= 0: return k + 1
-    -1
-
-pkg_scan_at = (path: str, src: str, at: int):
-    if at < 0: return
-    d = "."
-    s = max(rfind(path, "/"), rfind(path, "\\"))
-    if s >= 0: d = path[..s)
-    i = find_byte(src, '\n', at)
-    loop i >= 0 and i < len(src):
-        j = find_byte(src, '\n', i + 1)
-        if j < 0: j = len(src)
-        line = src[i + 1..j)
-        i = j
-        t = trim(line)
-        if len(t) == 0 or t[0] == '#': continue
-        if line[0] != ' ' and line[0] != '\t': break
-        eq = find(t, "=")
-        if eq < 0: continue
-        val = trim(t[eq + 1..])
-        if not starts_with(val, "package("): continue
-        args = pkg_strings(val[8..])
-        if args.len() == 0: continue
-        ref = ""
-        if args.len() > 1: ref = args[1]
-        pkg_add(PkgSpec(trim(t[..eq)), args[0], ref, d))
-
-# the "quoted" strings in s, up to its closing parenthesis
-pkg_strings = (s: str) -> str[]:
-    out: str[]
-    i = 0
-    loop i < len(s) and s[i] != ')':
-        if s[i] == '"':
-            e = find(s, "\"", i + 1)
-            if e < 0: break
-            out.push(s[i + 1..e))
-            i = e
-        i += 1
-    out
-
-pkg_add = (p: PkgSpec):
-    loop q in pkg_specs:
-        if q.name == p.name: return
-    pkg_specs.push(p)
-
-pkg_is_git = (src: str) -> bool: find(src, "://") >= 0 or starts_with(src, "git@") or starts_with(src, "github.com/") or starts_with(src, "gitlab.com/") or starts_with(src, "codeberg.org/")
-
-pkg_url = (src: str) -> str:
-    if find(src, "://") < 0 and not starts_with(src, "git@"): return "https://" + src
-    src
+pkg_scan = (path: str, src: str): pkg_scan_at(pkg_specs, path, src, pkg_block_at(src))
 
 # the user's cache directory (not temporary: /tmp may be a small memory-backed file system)
 user_cache_dir = () -> str:
@@ -112,29 +52,13 @@ pkg_mkdirs = (d: str):
     if s > 0: pkg_mkdirs(d[..s))
     mkdir(d)
 
-# a URL as a directory name
-pkg_dir_name = (url: str) -> str:
-    out = ""
-    u = url
-    k = find(u, "://")
-    if k >= 0: u = u[k + 3..]
-    loop c in u.bytes():
-        if is_ident_char(c) or c == '.' or c == '-': out = out + from_char(c)
-        else: out = out + "_"
-    out
-
-from_char = (c: u8) -> str: str_from_bytes([c])
-
 # git, run with these arguments: its exit code and output (-1: git is not there)
 pkg_git = (args: str[]) -> (int, str): run_program("git", args)
 
 # the commit ref names at url (ref "": the default branch), or "" (with the reason in pkg_why)
 pkg_why = ""
 pkg_resolve = (url: str, ref: str) -> str:
-    hex = len(ref) == 40
-    loop c in ref.bytes():
-        if not (c >= '0' and c <= '9' or c >= 'a' and c <= 'f'): hex = false
-    if hex: return ref
+    if pkg_is_commit(ref): return ref
     want = ref
     if len(want) == 0: want = "HEAD"
     code, out = pkg_git(["ls-remote", url, want])
@@ -144,15 +68,7 @@ pkg_resolve = (url: str, ref: str) -> str:
     if code != 0:
         pkg_why = "git could not reach {url}"
         return ""
-    found = ""
-    loop line in split(out, "\n"):
-        tab = find(line, "\t")
-        if tab < 0: continue
-        sha = line[..tab)
-        name = trim(line[tab + 1..])
-        # (an annotated tag: the commit it names, ^{})
-        if ends_with(name, "^\{}"): return sha
-        if len(found) == 0: found = sha
+    found = pkg_ls_remote_commit(out)
     if len(found) == 0:
         pkg_why = "{url} has no '{want}' (a tag, a branch, or a whole 40-character commit)"
     found
@@ -182,17 +98,7 @@ pkg_resolve_all = (main_path: str):
     s = rfind(main_path, "/")
     if s >= 0: d = main_path[..s)
     lock_path = d + "/dewy.lock"
-    locked: {str: str} = {}             # "name url ref" -> commit
-    if let text = read_file(lock_path):
-        loop line in split(text, "\n"):
-            t = trim(line)
-            if len(t) == 0 or t[0] == '#': continue
-            # (name, URL, tag/branch/commit asked for or -, the commit it is pinned to)
-            parts = split(t, " ")
-            if parts.len() == 4:
-                ref = parts[2]
-                if ref == "-": ref = ""
-                locked["{parts[0]} {parts[1]} {ref}"] = parts[3]
+    locked = pkg_lock_read(read_file(lock_path) ?? "")
     pins: str[]
     changed = false
     k = 0
@@ -212,12 +118,10 @@ pkg_resolve_all = (main_path: str):
             pkg_scan_main(p.name, dir)
             continue
         url = pkg_url(p.src)
-        # (git takes what starts with - as an option: --upload-pack runs a command)
-        if starts_with(url, "-") or starts_with(p.ref, "-") or find(url, " ") >= 0 or find(p.ref, " ") >= 0:
+        if pkg_unsafe_git(url, p.ref):
             pkg_errs[p.name] = "package '{p.name}': '{p.src}' is not a git URL (or the tag, branch or commit is not one)"
             continue
-        key = "{p.name} {url} {p.ref}"
-        commit = locked.get(key) ?? ""
+        commit = locked.get(pkg_lock_key(p.name, url, p.ref)) ?? ""
         if len(commit) == 0:
             if not pkg_fetch:
                 pkg_errs[p.name] = "package '{p.name}' is not fetched yet (`dewy-core build` fetches it)"
@@ -227,23 +131,19 @@ pkg_resolve_all = (main_path: str):
                 pkg_errs[p.name] = "package '{p.name}': {pkg_why}"
                 continue
             changed = true
-        shown = p.ref
-        if len(shown) == 0: shown = "-"
-        pins.push("{p.name} {url} {shown} {commit}")
-        dir = "{pkg_cache()}/{pkg_dir_name(url)}@{commit[..min(len(commit), 12))}"
+        pins.push(pkg_pin(p.name, url, p.ref, commit))
+        dir = pkg_fetch_dir(pkg_cache(), url, commit)
         if not file_exists(dir + "/.dewy-fetched"):
             if not pkg_fetch:
                 pkg_errs[p.name] = "package '{p.name}' is not fetched yet (`dewy-core build` fetches it)"
                 continue
-            eprint("fetching {p.name} ({url} at {commit[..min(len(commit), 12))})")
+            eprint("fetching {p.name} ({url} at {pkg_short(commit)})")
             if not pkg_get(url, commit, dir):
                 pkg_errs[p.name] = "package '{p.name}': git could not fetch commit {commit} of {url}"
                 continue
         pkg_dirs[p.name] = dir
         pkg_scan_main(p.name, dir)
-    if changed and pkg_fetch:
-        pins.sort()
-        write_file(lock_path, "# the commits of the packages in this program's build block (dewy-core build writes this: keep it\n# with the program; delete a line to take the newest commit again)\n" + join(pins, "\n") + "\n")
+    if changed and pkg_fetch: write_file(lock_path, pkg_lock_text(pins))
 
 # a package's own packages: those in the build blocks of the files at its root
 pkg_scan_main = (name: str, dir: str):
@@ -274,14 +174,7 @@ pkg_add_main = (a: str[]):
     loop x in a[3..):
         if ends_with(x, ".jo"): file = x
         else: name = x
-    if len(name) == 0:
-        # (from its last part: dewy-physics.git -> physics)
-        n = src
-        loop ends_with(n, "/"): n = n[..len(n) - 1)
-        n = n[max(rfind(n, "/"), rfind(n, ":")) + 1..]
-        if ends_with(n, ".git"): n = n[..len(n) - 4)
-        if starts_with(n, "dewy-"): n = n[5..]
-        name = n.replace("-", "_")
+    if len(name) == 0: name = pkg_default_name(src)
     if len(file) == 0:
         found: str[]
         loop f in list_dir("."):
@@ -291,19 +184,10 @@ pkg_add_main = (a: str[]):
             exit(1)
         file = found[0]
     text = read_file(file) ?? ""
-    if find(text, "\n    {name} = package(") >= 0 or find(text, "\n\t{name} = package(") >= 0:
+    if pkg_declares(text, name):
         eprint("error: {file} has a package named '{name}' already (give it another name: dewy-core add {src} other_name)")
         exit(1)
-    # (the file's own line ends: \r\n on Windows)
-    nl = "\n"
-    if find(text, "\r\n") >= 0: nl = "\r\n"
-    line = "    {name} = package(\"{src}\"){nl}"
-    at = pkg_block_at(text)
-    if at >= 0:
-        e = find_byte(text, '\n', at)
-        if e < 0: text = text + nl + line
-        else: text = text[..e + 1) + line + text[e + 1..]
-    else: text = "build:" + nl + line + nl + text
+    text = pkg_insert(text, name, src)
     pkg_specs = []
     pkg_scan(file, text)
     pkg_fetch = true

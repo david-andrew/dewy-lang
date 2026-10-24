@@ -1,0 +1,189 @@
+# A program's packages as text: the specs in its build block, the pins of dewy.lock
+# beside it, and the names and directories made from a package's URL (pkg.jo fetches
+# them and finds their files):
+#
+#   build:
+#       physics = package("https://github.com/ann/dewy-physics")
+#       tween = package("https://github.com/bob/tween", "v1.2")      # a tag, a branch or a commit
+#       shared = package("../shared")                                # a directory
+#
+# Offsets are byte offsets. A module of the compiler written in Dewy. manifest.jo is its
+# frozen twin for the compilers without the Dewy frontend (tools/compiler/build.py); the
+# two keep the same interface and give the same answers (tests/test_selfhost_manifest.py).
+# The specs are the caller's (pkg.jo keeps them) and come in by place.
+
+PkgSpec:type=[
+    name:string
+    src:string      # a git URL, or a directory
+    ref:string      # (git) a tag, branch or commit; "": the default branch
+    dir:string      # where the build block naming it is (relative directories are from there)
+]
+
+# where the build block starts: a line `build:` (-1: none)
+pkg_block_at=(src:string):>int64=>{
+    if src.startswith("build:") {return 0}
+    # (most files have none, which the library's search finds a word at a time)
+    if not src.contains("\nbuild:") {return -1}
+    let b=src as array<uint8>
+    let n:int64=b.length
+    let i:int64=0
+    loop i + 7 <=? n {
+        if b[i] =? 10 and b[i + 1] =? b'b' and b[i + 2] =? b'u' and b[i + 3] =? b'i' and b[i + 4] =? b'l' and b[i + 5] =? b'd' and b[i + 6] =? b':' {return i + 1}
+        i+=1
+    }
+    -1
+}
+
+# the package specs in the build block at byte at of file path's text src (at < 0: none)
+pkg_scan_at=(@specs:array<PkgSpec> path:string src:string at:int64):>void=>{
+    if at <? 0 {return}
+    let p=path as array<uint8>
+    let s:int64=p.length - 1
+    loop s >=? 0 and p[s] not=? b'/' and p[s] not=? b'\\' {s-=1}
+    let d=if s >=? 0 path.byte_slice(0 s) else "."
+    let b=src as array<uint8>
+    let n:int64=b.length
+    let i:int64=at
+    loop i <? n and b[i] not=? 10 {i+=1}
+    loop i <? n {
+        let j:int64=i + 1
+        loop j <? n and b[j] not=? 10 {j+=1}
+        # (a line starting beyond ASCII is not blank, a comment or indented: the block
+        # ends, and in malformed text the line could start inside a character)
+        if j >? i + 1 and b[i + 1] >=? 0x80 {break}
+        let line=src.byte_slice(i + 1 j)
+        i=j
+        let t=line.trim
+        if t.is_empty or t.startswith("#") {continue}
+        if not (line.startswith(" ") or line.startswith("\t")) {break}
+        let sides=t.split("=" 1)
+        if sides.length <? 2 {continue}
+        let val=sides[1].trim
+        if not val.startswith("package(") {continue}
+        let args=pkg_strings(val.remove_prefix("package("))
+        if args.is_empty {continue}
+        pkg_add(@specs [name=sides[0].trim src=args[0] ref=if args.length >? 1 args[1] else "" dir=d])
+    }
+}
+
+# the "quoted" strings in s, up to its closing parenthesis: the odd parts between quotes,
+# each closed, until an even one (outside quotes) has the parenthesis
+pkg_strings=(s:string):>array<string>=>{
+    let parts=s.split("\"")
+    let out:array<string>=[]
+    loop k in [0..parts.length) {
+        if k % 2 =? 0 {
+            if parts[k].contains(")") {break}
+        } else if k + 1 <? parts.length {out.push(parts[k])}
+    }
+    out
+}
+
+# p, unless a spec of that name came first
+pkg_add=(@specs:array<PkgSpec> p:PkgSpec):>void=>{
+    loop q in specs {
+        if q.name =? p.name {return}
+    }
+    specs.push(p)
+}
+
+pkg_is_git=(src:string):>bool=>src.contains("://") or src.startswith("git@") or src.startswith("github.com/") or src.startswith("gitlab.com/") or src.startswith("codeberg.org/")
+
+pkg_url=(src:string):>string=>if src.contains("://") or src.startswith("git@") src else "https://{src}"
+
+# (git takes what starts with - as an option: --upload-pack runs a command)
+pkg_unsafe_git=(url:string ref:string):>bool=>url.startswith("-") or ref.startswith("-") or url.contains(" ") or ref.contains(" ")
+
+# a whole commit: 40 hexadecimal digits, lowercase
+pkg_is_commit=(ref:string):>bool=>{
+    let b=ref as array<uint8>
+    if b.length not=? 40 {return false}
+    loop c in b {
+        if not (c >=? b'0' and c <=? b'9' or c >=? b'a' and c <=? b'f') {return false}
+    }
+    true
+}
+
+# a commit as directories and messages show it: its first 12 digits
+pkg_short=(commit:string):>string=>{
+    let n=(commit as array<uint8>).length
+    commit.byte_slice(0 if n <? 12 n else 12)
+}
+
+# a URL as a directory name: each ASCII byte not a letter, digit, '_', '.' or '-' is '_'
+pkg_dir_name=(url:string):>string=>{
+    let parts=url.split("://" 1)
+    let out=parts[parts.length - 1]
+    loop c in (out as array<uint8>) {
+        let keep=c >=? b'a' and c <=? b'z' or c >=? b'A' and c <=? b'Z' or c >=? b'0' and c <=? b'9' or c =? b'_' or c =? b'.' or c =? b'-' or c >=? 0x80
+        if not keep {out=out.replace([c] as string ?? "" "_")}
+    }
+    out
+}
+
+# where a package's commit is kept in cache
+pkg_fetch_dir=(cache:string url:string commit:string):>string=>"{cache}/{pkg_dir_name(url)}@{pkg_short(commit)}"
+
+# the commit `git ls-remote` output names: an annotated tag's commit (its ^{} line), else
+# the first one ("": none)
+pkg_ls_remote_commit=(out:string):>string=>{
+    let found=""
+    loop line in out.split("\n") {
+        let sides=line.split("\t" 1)
+        if sides.length <? 2 or not pkg_is_commit(sides[0]) {continue}
+        if sides[1].trim.endswith("^\{}") {return sides[0]}
+        if found.is_empty {found=sides[0]}
+    }
+    found
+}
+
+# dewy.lock: a line a package, its name, URL, the tag, branch or commit asked for (- for
+# none) and the commit it is pinned to. The pins by lock key; lines with no commit are not pins.
+pkg_lock_read=(text:string):>dict<string string>=>{
+    let locked:dict<string string>=[]
+    loop line in text.split("\n") {
+        let t=line.trim
+        if t.is_empty or t.startswith("#") {continue}
+        let parts=t.split(" ")
+        if parts.length =? 4 and pkg_is_commit(parts[3]) {
+            locked[pkg_lock_key(parts[0] parts[1] if parts[2] =? "-" "" else parts[2])]=parts[3]
+        }
+    }
+    locked
+}
+
+pkg_lock_key=(name:string url:string ref:string):>string=>"{name} {url} {ref}"
+
+# a package's line in dewy.lock
+pkg_pin=(name:string url:string ref:string commit:string):>string=>"{name} {url} {if ref.is_empty "-" else ref} {commit}"
+
+# dewy.lock's text: its pins in order
+pkg_lock_text=(pins:array<string>):>string=>{
+    let lines=pins.sorted
+    "# the commits of the packages in this program's build block (dewy-core build writes this: keep it\n# with the program; delete a line to take the newest commit again)\n{lines.join("\n")}\n"
+}
+
+# the name `dewy-core add` gives a package: its URL's or directory's last part, without
+# .git or a leading dewy- (dewy-physics.git: physics)
+pkg_default_name=(src:string):>string=>{
+    let n=src
+    loop n.endswith("/") {n=n.remove_suffix("/")}
+    let path=n.split("/")
+    let parts=path[path.length - 1].split(":")
+    parts[parts.length - 1].remove_suffix(".git").remove_prefix("dewy-").replace("-" "_")
+}
+
+# whether text's build block has a package named name
+pkg_declares=(text:string name:string):>bool=>text.contains("\n    {name} = package(") or text.contains("\n\t{name} = package(")
+
+# text with a package line for src named name, first in its build block (made when it has none)
+pkg_insert=(text:string name:string src:string):>string=>{
+    # (the file's own line ends: \r\n on Windows)
+    let nl=if text.contains("\r\n") "\r\n" else "\n"
+    let line="    {name} = package(\"{src}\"){nl}"
+    let at=pkg_block_at(text)
+    if at <? 0 {return "build:{nl}{line}{nl}{text}"}
+    let sides=text.byte_slice(at (text as array<uint8>).length).split("\n" 1)
+    if sides.length <? 2 {return "{text}{nl}{line}"}
+    "{text.byte_slice(0 at)}{sides[0]}\n{line}{sides[1]}"
+}
