@@ -91,7 +91,7 @@ def test_owner_closure(compiler, tmp_path, release, case):
 NEGATIVES = {
     'capture-live-owner': 'let owner=Handle[7] let callback=()=>owner.value printl"{callback()} {owner.value}"',
     'closure-live-after-transfer': 'let owner=Handle[7] let callback=()=>owner.value let moved=@callback printl"{moved()} {callback()}"',
-    'explicit-copy': 'let owner=Handle[7] let callback=()=>owner.value let moved=callback.copy() printl"{moved()}"',
+    'explicit-copy': 'let owner=Handle[7] let callback=()=>owner.value let moved=(@callback).copy() printl"{moved()}"',
     'two-captures': 'let owner=Handle[7] let first=()=>owner.value let second=()=>owner.value printl"{first()} {second()}"',
     'generic-copy': 'let owner=Handle[7] let callback=()=>owner.value let both=duplicate(@callback) printl"{both.first()}"',
     'erased-callable': 'let owner=Handle[7] let callback=()=>owner.value let erased:<():>int64>=@callback printl"{erased()}"',
@@ -128,7 +128,7 @@ main=()=>{
     let first=Handle[1]
     let second=Handle[2]
     let callback=()=>first.value+second.value
-    let snapshot=callback.copy()
+    let snapshot=(@callback).copy()
     $runtime_assert snapshot()=?3 and callback()=?3
     panic("done")
 }

@@ -61,7 +61,7 @@ bad=(a:array<Key>):>uint64 & no allocates=>a.hash()
 ''',
     'copy': '''bad=(xs:array<int64>):>array<int64> & no allocates=>xs.copy()
 ''',
-    'closure_copy': '''bad=(f:<():>int64>):>void & no allocates=>{let g=f.copy() g();}
+    'closure_copy': '''bad=(f:<():>int64>):>void & no allocates=>{let g=(@f).copy() g();}
 ''',
     'sort_key': '''key=(x:int64):>int64=>{let xs:array<int64>=[x] return xs.length}
 bad=(@xs:array<int64>):>void & no allocates=>{xs.sort(key=@key)}

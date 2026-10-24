@@ -8669,7 +8669,9 @@ dewy_bare_type_value = (n: int, tt: int, is_callee: bool, expected: int) -> bool
 capture_decl = 0 # a `$capture name` being checked: names a binding, never calls it
 
 dewy_bare_fn = (n: int, is_callee: bool) -> bool:
-    if is_callee or has_flag(n, NF_MUT) or n == assign_root or n == capture_decl: return false
+    # (a member call's receiver is marked as a place it may change: `names.join(", ")` still calls names)
+    receiver = n == type_receiver_at and not has_flag(n, NF_AT)
+    if is_callee or (has_flag(n, NF_MUT) and not receiver) or n == assign_root or n == capture_decl: return false
     if nodes[n].kind == .ident:
         # A synthesized parameter copy or temporary.
         if nodes[n].aux2 == 1 or starts_with(name_of(int(nodes[n].name)), "$"): return false

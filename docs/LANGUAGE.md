@@ -361,7 +361,9 @@ parameter of `seven` has a default, and a name whose function needs arguments
 is an error. `@name` is the function itself, a value that can be passed,
 stored and called later. This holds for named functions, function-valued
 locals and parameters, and function-valued record fields (`w.on_event` calls
-it; `@w.on_event` selects it):
+it; `@w.on_event` selects it). A member applies to the result:
+`names.join(", ")` joins what `names` gives, and `(@f).copy()` copies the
+function itself:
 
 ```dewy
 double = (x:int64):>int64 => x*2
