@@ -37,6 +37,7 @@ item_here = (room:Room item:string):>bool => {
     return false
 }
 look = (world:World map:dict<string Room>):>string => {
+    if world.room not in? map return "nowhere"
     let room = map[world.room]
     let output = room.title
     loop item in room.items {
@@ -47,6 +48,7 @@ look = (world:World map:dict<string Room>):>string => {
     return output
 }
 move = (@world:World map:dict<string Room> direction:string):>string => {
+    if world.room not in? map return "nowhere"
     let room = map[world.room]
     if direction not in? room.exits return "blocked"
     let next = room.exits[direction]
@@ -66,6 +68,7 @@ move = (@world:World map:dict<string Room> direction:string):>string => {
 }
 take = (@world:World map:dict<string Room> item:string):>string => {
     if item in? world.inventory return "already held"
+    if world.room not in? map return "nowhere"
     if not item_here(map[world.room] item) return "not here"
     world.inventory.push(item)
     $runtime_assert world.score <=? int64.max-5

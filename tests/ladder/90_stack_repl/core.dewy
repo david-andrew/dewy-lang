@@ -143,7 +143,7 @@ selfcheck = ():>void => {
     $runtime_assert state.stack =? [25]
     $runtime_assert line(@state "let x")
     $runtime_assert state.stack.length =? 0
-    $runtime_assert state.names["x"] =? 25
+    $runtime_assert state.names.get("x") =? 25
     $runtime_assert line(@state "x 5 /")
     $runtime_assert state.stack =? [5]
     $runtime_assert not line(@state "0 /")
@@ -180,10 +180,10 @@ boundaries = ():>void => {
     $runtime_assert words("").length =? 0
     $runtime_assert words("  a  b  ") =? ["a" "b"]
     $runtime_assert line(@state "3 4 + let total")
-    $runtime_assert state.names["total"] =? 7
+    $runtime_assert state.names.get("total") =? 7
     $runtime_assert not line(@state "5 let changed missing")
     $runtime_assert "changed" not in? state.names
-    $runtime_assert state.names["total"] =? 7
+    $runtime_assert state.names.get("total") =? 7
     $runtime_assert state.stack.length =? 0
     $runtime_assert line(@state "total dup *")
     $runtime_assert state.stack =? [49]
@@ -192,8 +192,8 @@ boundaries = ():>void => {
     $runtime_assert state.errors =? 2
     let saved = state.copy()
     $runtime_assert line(@state "clear 9 let total")
-    $runtime_assert saved.names["total"] =? 7
-    $runtime_assert state.names["total"] =? 9
+    $runtime_assert saved.names.get("total") =? 7
+    $runtime_assert state.names.get("total") =? 9
 }
 
 main = ():>void => {

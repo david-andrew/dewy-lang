@@ -50,7 +50,7 @@ fingerprint = (entries:array<Entry>):>string => {
 model_entries = (model:dict<string string>):>array<Entry> => {
     let keys = [model.keys...]
     keys.sort()
-    return [loop key in keys Entry[key model[key]]]
+    return [loop key in keys Entry[key model.get(key) ?? ""]]
 }
 
 apply_model = (@model:dict<string string> changes:array<Change>):>void => {

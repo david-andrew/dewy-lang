@@ -30,7 +30,7 @@ despawn = (@w:World id:int64):>bool => {
     w.vx.pop();
     w.vy.pop();
     if index not=? last { w.slot[moved] = index }
-    w.slot.pop(id);
+    w.slot.remove(id);
     return true
 }
 tick = (@w:World):>void => {

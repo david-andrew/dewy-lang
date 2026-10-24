@@ -157,10 +157,10 @@ selfcheck = ():>void => {
     $runtime_assert service.writes =? 0
     let created = serve(@service wire("PUT" "/items/a" "\{\"value\":7\}"))
     $runtime_assert created.status =? 201
-    $runtime_assert service.values["a"] =? 7
+    $runtime_assert service.values.get("a") =? 7
     let saved = service.copy()
     $runtime_assert serve(@service wire("DELETE" "/items/a")).status =? 204
-    $runtime_assert saved.values["a"] =? 7
+    $runtime_assert saved.values.get("a") =? 7
     $runtime_assert service.values.length =? 0
     $runtime_assert service.writes =? 2
     $runtime_assert json_value("\{\"value\":-3\}") =? -3
@@ -198,8 +198,8 @@ boundaries = ():>void => {
     $runtime_assert serve(@service wire("PUT" "/items/x" "\{\"value\":0\}")).status =? 201
     let saved = service.copy()
     $runtime_assert serve(@service wire("PUT" "/items/x" "\{\"value\":-1\}")).status =? 200
-    $runtime_assert saved.values["x"] =? 0
-    $runtime_assert service.values["x"] =? -1
+    $runtime_assert saved.values.get("x") =? 0
+    $runtime_assert service.values.get("x") =? -1
     $runtime_assert service.writes =? 2
     $runtime_assert serve(@service wire("DELETE" "/items/x")).status =? 204
     $runtime_assert service.writes =? 3
@@ -328,7 +328,7 @@ main = ():>void | net.NetError | Canceled => {
     }
     net.tcp_close(listener)
     $runtime_assert service.values.length =? 1
-    $runtime_assert service.values["pear"] =? -4
+    $runtime_assert service.values.get("pear") =? -4
     $runtime_assert service.writes =? 4
     printl("{service.values.length} {service.writes}")
 }

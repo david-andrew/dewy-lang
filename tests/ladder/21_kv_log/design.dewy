@@ -23,13 +23,13 @@ main = ():>void => {
     let first = recover(path)
     if first is? (error|Canceled) { exit(2) }
     $runtime_assert (first.length =? 1)
-    $runtime_assert (first["a"] =? "three")
+    $runtime_assert (first.get("a") =? "three")
     $runtime_assert (append_file(path "partial-record") isnt? (error|Canceled))
     let second = recover(path)
     if second is? (error|Canceled) { exit(3) }
-    $runtime_assert (second["a"] =? "three")
+    $runtime_assert (second.get("a") =? "three")
     $runtime_assert (second.length =? first.length)
     let persisted = read_text(path)
     if persisted is? (error|Canceled) { exit(4) }
-    printl("{second.length} {second["a"]} {persisted.split("\n").length}")
+    printl("{second.length} {second.get("a") ?? ""} {persisted.split("\n").length}")
 }

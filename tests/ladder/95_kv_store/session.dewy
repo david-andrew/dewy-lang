@@ -39,7 +39,7 @@ Session:type = [
         }
         let keys = [merged.keys...]
         keys.sort()
-        return [loop key in keys Entry[key merged[key]]]
+        return [loop key in keys Entry[key merged.get(key) ?? ""]]
     }
 
     selected = (statement:Statement):>array<Entry> => {

@@ -33,7 +33,7 @@ token_line = (source:array<uint8> tokens:array<Token>):>string => {
     loop t in tokens {
         if t.kind =? 'eof' break
         let mark = if t.newline "^" else if t.space "_" else ""
-        let tag = KIND_TAGS[t.kind]
+        let tag = KIND_TAGS.get(t.kind) ?? ""
         let word = text_of(source t.start t.stop)
         let keyword = t.kind =? 'identifier' and t.symbol isnt? none
         let label = if tag.length =? 0 word else if keyword "kw:{word}" else "{tag}:{word}"

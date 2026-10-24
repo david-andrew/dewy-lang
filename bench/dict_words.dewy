@@ -21,9 +21,9 @@ kernel = (words:array<string> count:int64):>int64 => {
         if (id+1) in? ids {hits+=1}
     }
     let result=hits
-    loop word in counts.keys() {result=mix(result counts[word])}
+    loop [word count] in counts {result=mix(result count)}
     loop [word value] in counts {result=mix(result value+word.length as int64)}
-    loop id in ids.keys() {result=mix(result id%1000+ids[id])}
+    loop [id value] in ids {result=mix(result id%1000+value)}
     loop [id value] in ids {result=mix(result id%1000+value)}
     return result
 }

@@ -79,7 +79,7 @@ $test
 a_resumed_line_keeps_its_scene_and_characters = () => {
     let reading = fresh()
     advance(@reading)
-    $expect reading.step.speaker=?"Mira" and reading.shown["mira"]=?"left"
+    $expect reading.step.speaker=?"Mira" and reading.shown.get("mira")=?"left"
     let loaded = resume(reading.bookmark)
     $expect loaded.step=?reading.step and loaded.background=?reading.background and loaded.shown=?reading.shown
 }

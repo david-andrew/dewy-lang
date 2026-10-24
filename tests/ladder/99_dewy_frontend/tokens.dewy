@@ -43,11 +43,11 @@ make_punctuation = ():>dict<uint8 array<string>> => {
         let first = raw[0]
         let letter = (b'a' <=? first <=? b'z') or (b'A' <=? first <=? b'Z') or first =? b'_'
         if not letter {
-            if first not in? table table[first] = []
-            table[first].push(s)
+            if first in? table table[first].push(s) else table[first] = [s]
         }
     }
     loop first in table.keys() {
+        $runtime_assert first in? table
         table[first].sort(key=(s:string) => -bytes(s).length)
     }
     return table

@@ -3969,7 +3969,11 @@ fact_capture = (n: int, s: mut FactState) -> int:
         if map >= 2 and map <= 4: fact_map_check(n, s, values)
         if map != 0:
             before = fact_map_receiver(s, n, values[0])
-            fact_path_call_effects(n, s)
+            # (asking for a builtin key reads the dictionary and nothing else:
+            # an exposed one is not forgotten, as its summary, through the
+            # hashing's generic calls, would have it)
+            kt = representation_type(ntype(kid(n, 1)))
+            if map > 2 or not (fact_scalar(kt) or kt == T_STR): fact_path_call_effects(n, s)
             if map == 1: return fact_map_member(s, n, before, values[1])
             # (the entry is there now, in d's value after the change, and so is
             # every key known there before: a store removes none)
@@ -4069,11 +4073,16 @@ fact_capture = (n: int, s: mut FactState) -> int:
         return fact_new(s, result)
     if k == .map_lit:
         # (each entry is inserted by a call: an unknown callee's effects)
+        keys: (int, int)[]
         loop p in kids(n):
-            fact_capture(int(nodes[p].a), s)
+            keys.push((int(nodes[p].a), fact_capture(int(nodes[p].a), s)))
             fact_capture(int(nodes[p].b), s)
             fact_forget(s, n, .call)
-        return fact_new(s, fact_domain(ntype(n)))
+        result = fact_new(s, fact_domain(ntype(n)))
+        # (every key written is in it: fact_map_check)
+        if is_map_type(representation_type(ntype(n))):
+            loop key in keys: fact_assume(s, fact_project(s, result, fact_map_key(s, key.0, key.1), true, T_BOOL), true)
+        return result
     if k == .match_:
         # Arms are tried in order: each sees its predecessors' pattern
         # operands and failed tags, and a matched arm knows its tag.

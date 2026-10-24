@@ -25,6 +25,6 @@ main = ():>void => {
         seen[fnv1a(word)] = word
     }
     $runtime_assert (seen.length =? 4)
-    $runtime_assert (seen[fnv1a("hello")] =? "hello")
+    $runtime_assert (seen.get(fnv1a("hello")) =? "hello")
     printl(actual)
 }

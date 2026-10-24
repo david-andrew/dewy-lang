@@ -16,10 +16,8 @@ build_grid = (bodies:array<Body>):>dict<int64 array<int64>> => {
     loop i in [0..bodies.length) {
         let body = bodies[i]
         let bucket = key(cell(body.x) cell(body.y))
-        if bucket not in? grid {
-            grid[bucket] = []
-        }
-        grid[bucket].push(i)
+        if bucket in? grid { grid[bucket].push(i) }
+        else { grid[bucket] = [i] }
     }
     return grid
 }

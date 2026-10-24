@@ -27,7 +27,7 @@ main = ():>void => {
     printl"Filtered comprehension: {selected[0]}"
 
     let lengths = [loop word in ["café" "🙂"] word->word.length]
-    printl"Graphemes: {lengths["café"]} {lengths["🙂"]}"
+    printl"Graphemes: {lengths.get("café") ?? 0} {lengths.get("🙂") ?? 0}"
 
     let found = lengths.get("café")
     let size = match found { n:int64 => n <none> => 0 }
