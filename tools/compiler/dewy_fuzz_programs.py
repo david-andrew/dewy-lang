@@ -27,7 +27,7 @@ import copy
 import math
 import random
 import zlib
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass, fields, is_dataclass, replace
 from decimal import Decimal
 from fractions import Fraction
 from typing import Any
@@ -270,8 +270,10 @@ JUXT_NUMBERS = (I, U, F, INT)
 
 
 def juxtaposed(lnode, rnode, left, right):
-    """`2x` (a literal coefficient) or `x(e)` (a named number before a group), or ''."""
-    if isinstance(rnode, Var) and rnode.ty in JUXT_NUMBERS and left.isdigit():
+    """`2x` (a literal coefficient) or `x(e)` (a named number before a group), or ''. Not
+    where the text would read as one number: `0` and a letter is a base prefix (`0x`), and a
+    name starting with `e` an exponent (`4e29`)."""
+    if isinstance(rnode, Var) and rnode.ty in JUXT_NUMBERS and left.isdigit() and left[0] != '0' and right[0] not in 'eE':
         return f'({left}{right})'
     if isinstance(lnode, Var) and lnode.ty in JUXT_NUMBERS:
         return f'({left}({right}))'
@@ -513,6 +515,15 @@ class MultiLit(Expr):
         return out
 
 
+def wraps(node):
+    """Whether a conversion with the wrap policy is somewhere in node."""
+    if isinstance(node, Conv) and node.wrap:
+        return True
+    if isinstance(node, Node) and is_dataclass(node):
+        return any(wraps(getattr(node, f.name)) for f in fields(node))
+    return isinstance(node, tuple) and any(wraps(x) for x in node)
+
+
 @dataclass(frozen=True)
 class Unpack(Stmt):
     """Several values taken apart (substitution invariance, unpacking): `let p=(a b c)` (held)
@@ -527,7 +538,13 @@ class Unpack(Stmt):
     use: str = ''        # 'max' or 'collect': what the held values are then passed to
 
     def render(self, typed=False):
-        source = ('(' if self.group else '[') + ' '.join(render(x, True) for x in self.items) + (')' if self.group else ']')
+        # (no annotation gives the values a type: each literal spells its own, so the names
+        # unpacked hold the type they are declared with, not a bare literal's `int`)
+        # A value converted with a policy, `int64<overflow='wrap'>(x)`, has that policy's type,
+        # and so does arithmetic on it with literals: converted back, it is int64.
+        def item(x):
+            return f'{x.ty}({render(x)})' if x.ty == I and wraps(x) else render(x)
+        source = ('(' if self.group else '[') + ' '.join(item(x) for x in self.items) + (')' if self.group else ']')
         lines = []
         if self.held:
             lines.append(f'let {self.held}={source}')

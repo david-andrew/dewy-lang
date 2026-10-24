@@ -32,6 +32,26 @@ SCRATCH = Path.home() / 'dev' / 'tmp' / 'dewy-fuzz-work'
 RUN_TIMEOUT = 20
 
 
+@dataclass(frozen=True)
+class Tracked:
+    """Wrong code this fuzzer found, tracked by a strict xfail (tests/test_dewy_fuzz_nightly.py)
+    until it is fixed. A failure in these modes alone whose minimized program has this shape and
+    passes in the default build is reported as tracked, and does not fail the run. Remove the
+    entry with the fix."""
+    name: str
+    kind: str
+    modes: tuple
+    shape: re.Pattern
+
+
+TRACKED = (
+    # A record's float field updated, the record replaced by a call's result, then that field
+    # updated again: release builds add to the field's value from before the call.
+    Tracked('release_record_field_after_call', 'mismatch', ('native-release', 'web-release'),
+            re.compile(r'^ *(\w+)\.(\w+) [-+*/]?= .*\n(?:.*\n)*? *\1 = \w+\(.*\n(?:.*\n)*? *\1\.\2 [-+*/]= ', re.M)),
+)
+
+
 @dataclass
 class Case:
     seed: int
@@ -222,10 +242,24 @@ class Fuzzer:
                     break
         return current
 
-    def save(self, group: list[Failure], program: gen.Program, root: Path) -> Path:
+    def tracked_candidates(self, group: list[Failure]) -> list[Tracked]:
+        modes = {f.mode for f in group}
+        return [t for t in TRACKED if all(f.kind == t.kind for f in group) and modes <= set(t.modes)]
+
+    def tracked(self, group: list[Failure], program: gen.Program) -> Tracked | None:
+        """The tracked issue this failure is, judged on its minimized program."""
+        for issue in self.tracked_candidates(group):
+            if not issue.shape.search(program.source()):
+                continue
+            plain = next((m for m in self.modes if m not in issue.modes), None)
+            if plain is None or self.outcome(program, plain, *program.outcome())[0] == 'pass':
+                return issue
+        return None
+
+    def save(self, group: list[Failure], program: gen.Program, root: Path, issue: Tracked | None = None) -> Path:
         failure = group[0]
         case = failure.case
-        target = root / f'{failure.kind}-seed{case.seed}'
+        target = root / (f'tracked-{issue.name}-seed{case.seed}' if issue else f'{failure.kind}-seed{case.seed}')
         number = 1
         while target.exists() and (target / 'signature').read_text() != repr(failure.signature or failure.detail):
             number += 1
@@ -247,6 +281,7 @@ class Fuzzer:
         modes = [m for m in (*MODES, 'oracle') if any(f.mode == m for f in group)]
         (target / 'info.txt').write_text(
             f'{failure.kind} in {failure.mode}: {failure.detail}\n'
+            + (f'tracked: {issue.name} (tests/test_dewy_fuzz_nightly.py)\n' if issue else '') +
             f'seed {case.seed}; variants: {" ".join(variants)}; modes: {" ".join(modes)}\n'
             f'expected exit {exit}' + (' (or a compile-time integer overflow error)' if exit == 101 else '') + '\n'
             f'program.dewy ({case.variant}, {"minimized" if program is not case.program else "not minimized"}): '
@@ -319,6 +354,7 @@ def fuzz(compiler: Path, *, seed: int = 1, count: int | None = None, minutes: fl
         pool.shutdown()
     elapsed = time.monotonic() - started
     saved = []
+    tracked: dict[tuple, Tracked] = {}
     groups: dict[tuple, list[Failure]] = {}
     for failure in stats.failures:
         detail = failure.case.variant if failure.kind == 'variant' else failure.signature or failure.detail
@@ -326,26 +362,34 @@ def fuzz(compiler: Path, *, seed: int = 1, count: int | None = None, minutes: fl
     if groups:
         failures_dir.mkdir(parents=True, exist_ok=True)
         shrunk = set()
-        for group in groups.values():
-            # Minimize the plainest member: the original program, in the cheapest mode.
+        for key, group in groups.items():
+            # Minimize the plainest member: the original program, in the cheapest mode. One that
+            # may be a tracked issue is always minimized, to tell.
             group.sort(key=lambda f: (f.case.variant != 'original', MODES.index(f.mode) if f.mode in MODES else 0))
             failure, program = group[0], group[0].case.program
-            if failure.kind in ('reject', 'crash', 'mismatch') and len(shrunk) < shrink \
-                    and failure.signature not in shrunk:
-                shrunk.add(failure.signature)
+            candidate = bool(fuzzer.tracked_candidates(group))
+            if failure.kind in ('reject', 'crash', 'mismatch') and (candidate or len(shrunk) < shrink
+                                                                  and failure.signature not in shrunk):
+                if not candidate:
+                    shrunk.add(failure.signature)
                 program = fuzzer.shrink(failure, budget=90)
-            saved.append(fuzzer.save(group, program, failures_dir))
+            issue = fuzzer.tracked(group, program) if candidate else None
+            if issue:
+                tracked[key] = issue
+            saved.append(fuzzer.save(group, program, failures_dir, issue))
     builds, runs = fuzzer.runner.builds, fuzzer.runner.runs
     kinds = {}
-    for kind, *_ in (key[1:] for key in groups):
+    for kind, *_ in (key[1:] for key in groups if key not in tracked):
         kinds[kind] = kinds.get(kind, 0) + 1
     detail = ', '.join(f'{n} {k}' for k, n in sorted(kinds.items()))
+    known = ', '.join(sorted({issue.name for issue in tracked.values()}))
     print(f'fuzz: {stats.programs} programs (+{stats.variants} variants, {stats.discarded} discarded) from seed {seed}, '
-          f'{len(modes)} modes, {builds} builds, {runs} runs: {len(groups)} failure(s)'
-          + (f' ({detail})' if detail else '') + f' in {elapsed:.0f} s, {stats.programs / max(elapsed, 1e-9):.2f} programs/s'
+          f'{len(modes)} modes, {builds} builds, {runs} runs: {len(groups) - len(tracked)} failure(s)'
+          + (f' ({detail})' if detail else '') + (f', {len(tracked)} tracked ({known})' if tracked else '')
+          + f' in {elapsed:.0f} s, {stats.programs / max(elapsed, 1e-9):.2f} programs/s'
           + (f'; see {failures_dir}' if saved else ''), flush=True)
     shutil.rmtree(scratch, ignore_errors=True)
-    return 1 if stats.failures else 0
+    return 1 if len(groups) > len(tracked) else 0
 
 
 def arguments(argv):

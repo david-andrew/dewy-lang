@@ -1,0 +1,14 @@
+# `-(-9223372036854775808)` is the int 2^63: a binding keeps the negation (it took the
+# inner literal alone, int64.min), in a function and at the top level.
+let top = -(-9223372036854775808)
+printl(top)
+
+main = ():>void => {
+    let a = -(-9223372036854775808)
+    printl(a)
+    let b = a
+    let u:uint64 = b
+    printl(u)
+    let c = -(-9223372036854775807 - 1)
+    printl(c)
+}

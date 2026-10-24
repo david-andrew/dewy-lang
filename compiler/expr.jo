@@ -9446,7 +9446,9 @@ check_call_expr = (n: int, expected: int) -> int:
         vt = values_call(n, expected)
         if vt >= 0: return ce_finish(n, vt, expected)
     t = check_call(n, expected)
-    if nodes[n].kind == .call and nodes[n].aux == 2 and nkids(n) > 1 and not dewy_at(nodes[n].pos): dewy_data_after_give(n)
+    # (a call the check replaced, `int64(x)` of an int64 now x itself: its sym is not a function)
+    if nodes[n].kind != .call: return ce_finish(n, t, expected)
+    if nodes[n].aux == 2 and nkids(n) > 1 and not dewy_at(nodes[n].pos): dewy_data_after_give(n)
     if nodes[n].aux == 0 and nodes[n].sym > 0:
         if fns[int(nodes[n].sym)].atomic_api: concurrency_atomic_call(n)
         if fns[int(nodes[n].sym)].task_api:
@@ -9457,7 +9459,7 @@ check_call_expr = (n: int, expected: int) -> int:
         parallel_prepare(n)
     if nodes[n].aux == 0 and nodes[n].sym > 0 and nkids(n) >= 1 and dewy_at(nodes[n].pos): map_float_key(n)
     if nodes[n].aux == 0 and nodes[n].sym > 0 and fns[int(nodes[n].sym)].pack != 0: sink_pack_call(n)
-    else if nodes[n].aux == 1 and nodes[n].kind == .call and fn_type_pack(callable_base(prune(ntype(int(nodes[n].a))))): sink_pack_call(n)
+    else if nodes[n].aux == 1 and fn_type_pack(callable_base(prune(ntype(int(nodes[n].a))))): sink_pack_call(n)
     ce_finish(n, t, expected)
 
 check_str_expr = (n: int, expected: int) -> int:
@@ -10075,8 +10077,9 @@ check_expr_other = (n: int, expected: int) -> int:
                 # fold -literal into a literal (keeps it untyped, e.g. -PI or -1)
                 if nodes[a].kind == .int_lit:
                     if lit_default(n) == T_MATH_INT and not has_flag(a, NF_U64) and nodes[a].ival == -9223372036854775807 - 1:
-                        coerce(a, T_MATH_INT)
+                        nodes[n].a = i32(coerce(a, T_MATH_INT))
                         nodes[n].type = i32(T_MATH_INT)
+                        last_checked = n
                         return T_MATH_INT
                     nodes[n] = Node(kind = .int_lit, pos = nodes[n].pos, ival = -nodes[a].ival, flags = i32(NF_LITERAL | NF_CHECKED), type = nodes[a].type)
                     last_checked = n
