@@ -7450,7 +7450,9 @@ check_binary = (n: int, expected: int) -> int:
             nodes[n].a = i32(coerce(a, tb))
             a = int(nodes[n].a)
             ta = tb
-    if str_sets.len() > 1 and (str_set_of(ta) != 0 or str_set_of(tb) != 0):
+    # (Sloppy orders a set's members as its enum's: by position, as its frozen twin does)
+    sloppy_order = ta == tb and op != .eq and op != .ne and not dewy_at(nodes[n].pos)
+    if str_sets.len() > 1 and (str_set_of(ta) != 0 or str_set_of(tb) != 0) and not sloppy_order:
         # (a set's word against a member literal or the same set: compared as words; else as text)
         same = ta == tb
         if (op == .eq or op == .ne) and not same:

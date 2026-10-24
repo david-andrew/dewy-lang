@@ -1,0 +1,15 @@
+# Sloppy code ordering enum_phase.dewy's Phase (or, with its use line changed, its twin's): by
+# position (lex, parse, check, emit), not by the members' names (check, emit, lex, parse).
+use 'enum_phase.dewy'
+
+earliest = (xs: Phase[]) -> Phase:
+    best = xs[0]
+    loop x in xs:
+        if x < best: best = x
+    best
+
+main = ():
+    p: Phase = .parse
+    q: Phase = .check
+    print("{p < q} {p <= q} {p > q} {p >= q} {Phase.emit > Phase.lex} {q < .emit}")
+    print("{earliest([Phase.emit, .check, .parse])} {earliest([Phase.check, .lex])}")
