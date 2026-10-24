@@ -3669,7 +3669,8 @@ count = ():>int64 | OutOfMemory => {
 Ordinary allocation is infallible: when the system refuses memory the program
 ends with a report. `$explicit_allocation_failure`, written alone at the top of
 a module, makes each of its functions that may allocate return
-`T | OutOfMemory` (functions over fixed-width numbers only keep their result).
+`T | OutOfMemory` (functions over fixed-width numbers only, and functions whose
+effect row excludes allocation, keep their result).
 A refusal while such a function runs, from the system or from a fixed arena,
 drops the resource owners made since it began and makes it return
 `OutOfMemory`; memory the interrupted work held is not freed. An `OutOfMemory`
@@ -4056,7 +4057,13 @@ Writing `$careful` holds every setting in the bundle throughout that scope.
 Inside it, a setting that contradicts the bundle is an error; `$careful = false`
 opts a nested scope out of the whole bundle first. `$default_row = <effect row>`
 in a bundle gives each function declared in its scope without an effect row
-of its own that row (see "Functions and values").
+of its own that row (see "Functions and values"). A bundle may include other
+bundles, defined before or after it, by naming them (`$finite_floats`); their
+settings join its own. Members that disagree on a setting, two default rows, a
+bundle that includes itself (directly or through others) and an unknown member
+are errors. A bundle may also hold `$explicit_allocation_failure`; it is a module
+policy, so such a bundle goes at the top of a module, and opting a nested scope
+out leaves the policy in place.
 
 The library defines `$no_hidden_costs`, the strict lane (lib/directives.dewy):
 `$explicit_copies`, `$runtime_checks = false`, `$prototype = false` and
@@ -4067,6 +4074,12 @@ cannot use `$runtime_checks` or `$prototype`. A function that needs more opts ou
 `$no_hidden_costs = false` in its body, or declares a row of its own. The effect
 inventory is still partial (see "Functions and values"): an operation it does
 not classify is rejected there. `$realtime` is reserved for a stronger future bundle.
+
+`$bulletproof`, at the top of a module, is the strictest of everything:
+`$no_hidden_costs`, `$explicit_allocation_failure`, `$finite_floats`,
+`$no_deadlocks`, and each assumption the compiler can be told not to make
+(`$assume_local_asserts = false`, `$confine_external_paths`; the list is
+docs/design/assumptions.md).
 
 ## Modules and games
 

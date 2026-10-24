@@ -74,7 +74,7 @@ cli_option_refused = (x: str):
     loop c in name: tag += if c == '-': "_" else: byte_str(int(c))
     # (the metatags the compiler knows, and the bundles of lib/directives.dewy)
     bundles = read_file("{lib_dir}/directives.dewy") ?? ""
-    known = len(tag) > 0 and (dw_dir_known(tag) or tag in ["bulletproof", "default_row"] or starts_with(bundles, "${tag} ") or find(bundles, "\n${tag} ") >= 0)
+    known = len(tag) > 0 and (dw_dir_known(tag) or tag == "default_row" or starts_with(bundles, "${tag} ") or find(bundles, "\n${tag} ") >= 0)
     if known and tag != "target" and tag != "build":
         eprint("dewy-core: `${tag}` cannot be set from the command line; write it in the program's source (the command line sets only the build mode, --release or --debug, and the target, --target)")
         exit(2)

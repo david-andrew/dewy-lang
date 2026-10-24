@@ -9,6 +9,7 @@ use 'dewy_parse.jo'
 use 'dewy_fast.jo'
 use 'dewy_direct.jo'
 use 'isolation.jo'
+use 'oom.jo'
 
 dw_dir_ident = (c: u8) -> bool:
     c >= 'a' and c <= 'z' or c >= 'A' and c <= 'Z' or c >= '0' and c <= '9' or c == '_'
@@ -92,7 +93,18 @@ dw_dir_statement = (statement: int, start: int, end: int, module: bool) -> bool:
         dw_dir_define(name, tag, value)
         return true
     if not dw_dir_name(name): return false
-    dir_set(intern(name), dw_dir_boolean(name, value), start, end, dewy_syntax[tag].pos)
+    enabled = dw_dir_boolean(name, value)
+    # (a bundle with `$explicit_allocation_failure` sets that module policy too; opting a
+    # nested scope out leaves the module's policy in place)
+    b = dir_bundle_index(intern(name))
+    if b >= 0 and enabled == 1:
+        chain: int[]
+        dir_bundle_resolve(b, chain)
+        if dir_bundles[b].allocation_failure:
+            at = dewy_syntax[tag].pos
+            if not module: fatal(at, "`${name}` includes `$explicit_allocation_failure`, a module policy: put it at the top of a module")
+            if not oom_files.has(pos_file(at)): oom_module(pos_file(at), at)
+    dir_set(intern(name), enabled, start, end, dewy_syntax[tag].pos)
     true
 
 # The last source position inside a syntax tree (a scope's end).
@@ -153,7 +165,7 @@ dw_dir_define = (name: str, tag: int, block: int):
     at = dewy_syntax[tag].pos
     if dir_builtin(name) or name == "realtime": fatal(at, "`${name}` is a builtin setting, not a bundle")
     if dir_bundle_index(intern(name)) >= 0: fatal(at, "the bundle `${name}` is already defined")
-    bundle = DirBundle(intern(name), [], [], 0, at)
+    bundle = DirBundle(intern(name), [], [], 0, at, [], [])
     loop child in dw_children(block):
         parts = dw_dir_parts(child)
         member = parts.0
@@ -173,7 +185,17 @@ dw_dir_define = (name: str, tag: int, block: int):
             continue
         if text == "unsafe": fatal(dewy_syntax[member].pos, "`$unsafe` cannot be bundled: write it where the unsafe code is, so each boundary is visible")
         if text == "audited_wait": fatal(dewy_syntax[member].pos, "`$audited_wait` cannot be bundled: write it in each audited adapter, so each audit is visible")
-        if not dir_builtin(text): fatal(dewy_syntax[member].pos, "a bundle lists builtin settings (`$runtime_checks`, `$prototype`, `$prototype_warnings`, `$explicit_copies`) and `$default_row`, not `${text}`")
+        if text == "explicit_allocation_failure":
+            if dw_dir_boolean(text, value) != 1: fatal(dewy_syntax[member].pos, "a bundle can turn `$explicit_allocation_failure` on, not off: it is a module policy")
+            bundle.allocation_failure = true
+            continue
+        # (any other name is a bundle it includes, defined before or after: dir_bundle_resolve)
+        if not dir_builtin(text):
+            if dw_dir_known(text): fatal(dewy_syntax[member].pos, "a bundle lists builtin settings (`$runtime_checks`, `$explicit_copies`, `$no_nan`, …), other bundles and `$default_row`, not `${text}`")
+            if dw_dir_boolean(text, value) != 1: fatal(dewy_syntax[member].pos, "a bundle includes another bundle whole: `${text}`, not `${text}=false`")
+            bundle.includes.push(intern(text))
+            bundle.include_at.push(dewy_syntax[member].pos)
+            continue
         bundle.settings.push(intern(text))
         bundle.values.push(dw_dir_boolean(text, value))
     dir_bundles.push(bundle)

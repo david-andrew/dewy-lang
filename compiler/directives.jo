@@ -28,6 +28,10 @@ struct DirBundle:
     values: int[]
     row: int = 0      # effect_syntax index of the row its functions default to
     at: int = 0
+    includes: int[]   # the bundles it includes (names), merged in by dir_bundle_resolve
+    include_at: int[]
+    state: int = 0    # 0 its includes not merged yet, 1 merging (a cycle if met again), 2 merged
+    allocation_failure: bool = false   # it sets `$explicit_allocation_failure` (a module policy)
 
 struct DirSite:
     at: int
@@ -120,6 +124,55 @@ dir_bundle_index = (name: int) -> int:
         if dir_bundles[i].name == name: return i
     -1
 
+# A bundle's included bundles, merged into its own settings and row, transitively, once.
+# O(bundles x settings): a handful of each.
+dir_bundle_resolve = (b: int, chain: mut int[]):
+    if dir_bundles[b].state == 2: return
+    name = dir_bundles[b].name
+    if dir_bundles[b].state == 1:
+        cycle = ""
+        on = false
+        loop c in chain:
+            if c == name: on = true
+            if on: cycle += "`${name_of(c)}` includes "
+        fatal(dir_bundles[b].at, "bundles include each other: {cycle}`${name_of(name)}`")
+    dir_bundles[b].state = 1
+    chain.push(name)
+    loop k in [0..dir_bundles[b].includes.len()):
+        member = dir_bundles[b].includes[k]
+        at = dir_bundles[b].include_at[k]
+        inner = dir_bundle_index(member)
+        if inner < 0: fatal(at, "unknown member `${name_of(member)}` in the bundle `${name_of(name)}`: a bundle lists builtin settings, other bundles and `$default_row`")
+        dir_bundle_resolve(inner, chain)
+        included = dir_bundles[inner]
+        loop i in [0..included.settings.len()):
+            dir_bundle_merge(b, included.settings[i], included.values[i], member, at)
+        if included.allocation_failure: dir_bundles[b].allocation_failure = true
+        if included.row != 0:
+            if dir_bundles[b].row != 0 and dir_bundles[b].row != included.row: fatal(at, "the bundle `${name_of(name)}` gets a second `$default_row` from `${name_of(member)}`: a bundle has one default effect row")
+            dir_bundles[b].row = included.row
+    chain.pop()
+    dir_bundles[b].state = 2
+
+# One setting an included bundle brings; two members may not disagree on it.
+dir_bundle_merge = (b: int, setting: int, value: int, member: int, at: int):
+    loop i in [0..dir_bundles[b].settings.len()):
+        if dir_bundles[b].settings[i] != setting: continue
+        if dir_bundles[b].values[i] == value: return
+        spelled = if value == 0: "=false" else: ""
+        other = if value == 0: "on" else: "off"
+        fatal(at, "`${name_of(member)}` sets `${name_of(setting)}{spelled}` in the bundle `${name_of(dir_bundles[b].name)}`, which already sets it {other}")
+    dir_bundles[b].settings.push(setting)
+    dir_bundles[b].values.push(value)
+
+# Every bundle defined so far, resolved: an unknown member or a cycle is reported where it is
+# defined, used or not.
+dir_bundles_resolve = ():
+    loop b in [0..dir_bundles.len()):
+        if dir_bundles[b].state != 2:
+            chain: int[]
+            dir_bundle_resolve(b, chain)
+
 # Unproven obligations are analyzed when some scope needs them decided.
 dir_force = ():
     if dir_forced: return
@@ -197,6 +250,9 @@ dir_set = (name: int, value: int, start: int, end: int, at: int):
         return
     b = dir_bundle_index(name)
     if b < 0: fatal(at, "unknown directive `${text}`")
+    if dir_bundles[b].state != 2:
+        chain: int[]
+        dir_bundle_resolve(b, chain)
     bundle = dir_bundles[b]
     dir_push(DirScope(start, end, name, value, 0, at))
     loop i in [0..bundle.settings.len()):

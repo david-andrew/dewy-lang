@@ -18,7 +18,9 @@ __oom_frame = () -> *u8:
         s = __os_raw_pages(8 + __OOM_DEPTH * __OOM_FRAME * 8) as *int
         t[__TS_OOM] = s as int
     d = s[0]
-    if d == __OOM_DEPTH: panic("functions under $explicit_allocation_failure nest more than {__OOM_DEPTH} deep")
+    # (no room for another frame: a refused allocation, so the innermost running frame returns
+    # OutOfMemory)
+    if d == __OOM_DEPTH: __out_of_memory()
     s[0] = d + 1
     f = s + 1 + d * __OOM_FRAME
     f[24] = t[__TS_OWNERS]

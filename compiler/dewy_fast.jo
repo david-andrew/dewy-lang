@@ -11,6 +11,7 @@ use 'proofs.jo'
 use 'dewy_tokens.jo'
 use 'dewy_direct.jo'
 use 'dewy_directives.jo'
+use 'directives.jo'
 use 'dewy_ffi.jo'
 
 struct DewyLexeme:
@@ -1448,6 +1449,7 @@ dewy_fast_file = (file: int) -> int[]:
         dewy_syntax.truncate(2)
         if dn_at == before: dn_error(dn_tokens[dn_at].start, "expected a declaration")
     if proof_pending: dn_error(dn_tokens[dn_at].start, "$proof requires a following function declaration")
+    if dir_bundles.len() > 0: dir_bundles_resolve()
     if dw_export_pos != 0: fatal(dw_export_pos, "`$export` marks a module-level function: put it before one, on its line or the line above")
     if marked != 0: fatal(nodes[marked].pos, "`$test` marks a module-level function: put it on the line just before one")
     if shadowable_pos != 0: fatal(shadowable_pos, "`$shadowable` marks a module-level const: put it just before one")

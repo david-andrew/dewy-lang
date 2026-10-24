@@ -116,8 +116,7 @@ the file-system operations there ask every path to be proven a `SafePath`, the w
 ones included. The warning then reads "is not proven to stay inside a base, which
 `$confine_external_paths` asks of every path a file-system operation gets", with the
 same fixes. The acknowledgment for a path the program means to take as given is
-`$confine_external_paths=false` around its use. `$bulletproof` includes it once the
-bundle exists.
+`$confine_external_paths=false` around its use. `$bulletproof` includes it.
 
 ## Cost and demand
 

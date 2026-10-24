@@ -20,3 +20,22 @@ $finite_floats = {
     $no_nan
     $no_inf
 }
+
+# The strictest of everything (docs/design/assumptions.md): every strict lane, and
+# every assumption the compiler makes turned off so its proof is demanded instead.
+# `$explicit_allocation_failure` is a module policy, so this bundle goes at the top
+# of a module; `$bulletproof=false` opts a nested scope out of the rest.
+# Not yet enforceable (no opt-out metatag yet; assumptions.md marks them pending):
+# library asserts as invariants, the runtime core as environmental, library
+# environment failures, library obligations as runtime checks, the library's
+# raw memory in arenas, the library's drop hooks, values entering `$no_inf` as
+# finite, and the certified protocols `serve` and `pipeline`.
+$bulletproof = {
+    $no_hidden_costs
+    $explicit_allocation_failure
+    $finite_floats
+    $no_deadlocks
+    # TODO: $no_assumed_bounds, once the metatag lands (the fixed-width work)
+    $assume_local_asserts=false
+    $confine_external_paths
+}

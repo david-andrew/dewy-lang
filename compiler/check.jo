@@ -7084,7 +7084,9 @@ dewy_main_result = (decl: int, rt: int):
     nodes[d].mod = nodes[decl].mod
     nodes[d].a = i32(type_node_of(T_INT, pos))
     result = "$main_result"
-    stmts = [bc_let(result, bc_call("main", [], pos), pos)]
+    # (the call stands in main's body, in its scopes: main's own settings judge what it may do)
+    at = if nodes[decl].b != 0: nodes[int(nodes[decl].b)].pos else: pos
+    stmts = [bc_let(result, bc_call("main", [], at), pos)]
     loop i in 0.. and k in main_exit_kinds:
         message = mk(.str_lit, pos)
         if tkind(k) == .struct_ and structs[int(types[prune(k)].st)].nfields == 0:

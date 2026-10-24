@@ -22,6 +22,7 @@ use 'arena.jo'
 use 'ownership.jo'
 use 'settings.jo'
 use 'effects.jo'
+use 'directives.jo'
 
 oom_files: {int: bool} = {}
 
@@ -58,21 +59,13 @@ oom_body_allocates = (n: int) -> bool:
     false
 
 oom_allocates = (n: int) -> bool:
-    # (`& no allocates` or `& no_effects`: the effect check proves the body allocates nothing)
-    if oom_row_excludes(n): return false
+    # (a row that rules allocation out, its own or its scope's: the effect check proves the body
+    # allocates nothing)
+    if oom_row_excludes_alloc(oom_row(n)): return false
     loop p in kids(n):
         if not oom_fixed_type(int(nodes[p].a)): return true
     if not has_flag(n, NF_VOID) and not oom_fixed_type(int(nodes[n].a)): return true
     oom_body_allocates(int(nodes[n].b))
-
-# (n's written effect row rules allocation out)
-oom_row_excludes = (n: int) -> bool:
-    syntax = int(nodes[n].sval)
-    if syntax <= 0 or syntax >= effect_syntax.len(): return false
-    if effect_syntax[syntax].len() == 0: return true
-    loop entry in effect_syntax[syntax]:
-        if entry.kind == .alloc and entry.negative: return true
-    false
 
 # The declarations a module function projects to: itself, or its frame and its body.
 oom_declarations = (n: int) -> int[]:
@@ -83,6 +76,8 @@ oom_declarations = (n: int) -> int[]:
     inner = "__eaf_{name}"
     w = mk(.fn_, pos)
     nodes[w].name = nodes[n].name
+    # (the frame answers to the function's own row, as its body does)
+    nodes[w].sval = nodes[n].sval
     nodes[n].name = i32(intern(inner))
     if nkids2(n) > 0 and has_flag(n, NF_GENERIC):
         type_params: int[]
@@ -101,22 +96,44 @@ oom_declarations = (n: int) -> int[]:
         args.push(arg)
     set_list(w, params)
     if let kinds = dewy_param_kinds.get(n): dewy_param_kinds[w] = kinds
-    failed = mk(.return_, pos)
-    nodes[failed].a = i32(bc_ident("OutOfMemory", pos))
-    call = bc_stmt(bc_call(inner, args, pos), pos)
+    # (the frame stands where the body does: in its scopes, with the row they give it)
+    at = if nodes[n].b != 0: nodes[int(nodes[n].b)].pos else: pos
+    failed = mk(.return_, at)
+    nodes[failed].a = i32(bc_ident("OutOfMemory", at))
+    call = bc_stmt(bc_call(inner, args, at), at)
     body = 0
     if target_wasm:
         # (WebAssembly cannot return to a frame: a refusal there ends the program, and the
         # function keeps its result type, so the program means the same everywhere)
-        body = bc_block([bc_if(bc_call("__oom_unsupported", [], pos), [failed], [], pos), call], pos)
+        body = bc_block([bc_if(bc_call("__oom_unsupported", [], at), [failed], [], at), call], at)
     else:
-        frame = bc_call("__setjmp", [bc_call("__oom_frame", [], pos)], pos)
-        check = bc_if(bc_bin(.ne, frame, bc_int(0, pos), pos), [bc_stmt(bc_call("__oom_caught", [], pos), pos), failed], [], pos)
-        release = mk(.defer_, pos)
-        nodes[release].a = i32(bc_stmt(bc_call("__oom_release", [], pos), pos))
-        body = bc_block([check, release, call], pos)
+        frame = bc_call("__setjmp", [bc_call("__oom_frame", [], at)], at)
+        check = bc_if(bc_bin(.ne, frame, bc_int(0, at), at), [bc_stmt(bc_call("__oom_caught", [], at), at), failed], [], at)
+        release = mk(.defer_, at)
+        nodes[release].a = i32(bc_stmt(bc_call("__oom_release", [], at), at))
+        body = bc_block([check, release, call], at)
     nodes[w].b = i32(body)
     [w, n]
+
+# A function's row: its own, or the one its scope gives it (`$default_row`, directives.jo).
+oom_row = (n: int) -> int:
+    if nodes[n].sval != 0: return int(nodes[n].sval)
+    if not dir_rows_any: return 0
+    body = int(nodes[n].b)
+    p = if body != 0: nodes[body].pos else: nodes[n].pos
+    i = dir_find(dir_name_row, p)
+    if i < 0 or dir_scopes[i].value <= 0: return 0
+    dir_scopes[i].value
+
+# (a closed row without `allocates`, or one with `no allocates`; a row variable may allow it)
+oom_row_excludes_alloc = (row: int) -> bool:
+    if row <= 0 or row >= effect_syntax.len(): return false
+    positive = effect_syntax[row].len() == 0
+    loop entry in effect_syntax[row]:
+        if entry.variable: return false
+        if entry.kind == .alloc and entry.path.len() == 0: return entry.negative
+        if not entry.negative: positive = true
+    positive
 
 oom_wrap_all = (made: int[]) -> int[]:
     out: int[]
