@@ -8162,6 +8162,7 @@ check_match = (m: int, expected: int) -> int:
     covered: int[]
     str_domain = 0
     str_covered: str[]
+    member_arms: int[]          # (literal arms naming a member of a union of string literals)
     str_patterns = dewy and str_sets.len() > 1
     int_dom = dewy and st == T_MATH_INT
     union_lits: str[]
@@ -8352,7 +8353,9 @@ check_match = (m: int, expected: int) -> int:
                     text = str_sets[str_domain][int(nodes[e].aux)]
                     if str_covered.contains(text): fatal(nodes[p].pos, "this arm is unreachable: an earlier arm already matches '{text}'")
                     str_covered.push(text)
-                if types[st].kind == .enum_ and nodes[e].kind == .dotname: seen[int(nodes[e].aux)] = true
+                if types[st].kind == .enum_ and nodes[e].kind == .dotname:
+                    seen[int(nodes[e].aux)] = true
+                    if str_domain != 0: member_arms.push(p)
                 if (domain_known or int_dom) and nodes[kid_lit(e)].kind == .int_lit: arm_values += [nodes[kid_lit(e)].ival, nodes[kid_lit(e)].ival]
                 continue
             if pk == .prange:
@@ -8441,6 +8444,7 @@ check_match = (m: int, expected: int) -> int:
     # (an enum's or a union's match names each of its variants, or has `_:`; a statement too, so
     # that a state added later is not left out quietly)
     if is_stmt and (exhaustive or (not dewy and types[st].kind != .enum_)):
+        member_arms_as_variants(member_arms, T_VOID)
         nodes[m].type = i32(T_VOID)
         return T_VOID
     if not exhaustive:
@@ -8468,8 +8472,21 @@ check_match = (m: int, expected: int) -> int:
             if nodes[b].aux != 0:
                 finalize_literal(block_value(b))
                 coerce(block_value(b), result)
+    member_arms_as_variants(member_arms, result)
     nodes[m].type = i32(result)
     result
+
+# A literal arm naming a member of a union of string literals (`<'lparen'>`) becomes the variant
+# pattern a Sloppy enum's arm is, so the match dispatches through a table instead of comparing
+# with each arm in turn. Not for a match giving an `int`: lower.jo's lookup table writes its
+# constants as plain words, which an `int` does not hold.
+member_arms_as_variants = (ps: int[], result: int):
+    if prune(result) == T_MATH_INT: return
+    loop p in ps:
+        e = int(nodes[p].a)
+        if nodes[e].kind != .dotname: continue
+        nodes[p].kind = .pvariant
+        nodes[p].aux2 = nodes[e].aux
 
 # ---------------- lambdas ----------------
 check_lambda = (lam: int, expected: int) -> int:

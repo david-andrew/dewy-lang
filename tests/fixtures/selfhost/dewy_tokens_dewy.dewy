@@ -1,0 +1,16 @@
+# The compiler's dewy_tokens.dewy: `dewy_tokens word...` prints, for each word, the token
+# it spells and the token it is as a syntax label; then each byte's token alone; then each
+# token in order with its spelling, the tokens related to it and what it is.
+$runtime_checks
+from p"../../../compiler/dewy_tokens.dewy" import DewyToken, dn_single_token, dn_token_kind, dn_token_text, dn_token_invert, dn_syntax_token, dn_token_call, dn_token_undot, dn_token_uninvert, dn_token_assignment, dn_token_statement
+
+main=():>void=>{
+    let words=args()
+    loop w in [1..words.length) {printl"{dn_token_kind(words[w])} {dn_syntax_token(words[w])}"}
+    let singles:array<string>=[]
+    loop c in [0..256) {singles.push("{dn_single_token(c as uint8)}")}
+    printl(singles.join(" "))
+    loop t in members(DewyToken) {
+        printl"{t} [{dn_token_text(t)}] {dn_token_invert(t)} {dn_token_undot(t)} {dn_token_uninvert(t)} {dn_token_assignment(t)} {dn_token_statement(t)} {dn_token_call(t)}"
+    }
+}

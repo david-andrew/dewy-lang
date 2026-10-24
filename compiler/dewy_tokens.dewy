@@ -1,0 +1,403 @@
+# The tokens of the Dewy frontend (dewy_fast.jo lexes them, dewy_parse.jo and
+# dewy_direct.jo parse them): each one's spelling, the token a spelling is, and the
+# tokens related to one (`not=?` to `=?`, `.+` to `+`). Grammar dispatch compares
+# tokens, never allocated strings.
+#
+# A module of the compiler written in Dewy. dewy_tokens.jo is its frozen twin for the
+# compilers without the Dewy frontend (tools/compiler/build.py); the two keep the same
+# interface and give the same answers (tests/test_selfhost_dewy_tokens.py). Sloppy
+# code takes DewyToken as its enum, its members numbered as written here: the lexer's
+# tables are indexed by them.
+
+DewyToken:type='none' | 'lparen' | 'rparen' | 'lbrack' | 'rbrack' | 'lbrace' | 'rbrace' | 'langle' |
+    'rangle' | 'colon' | 'dot' | 'comma' | 'semi' | 'assign' | 'plus' | 'minus' |
+    'star' | 'slash' | 'percent' | 'at' | 'amp' | 'pipe' | 'caret' | 'question' |
+    'bang' | 'tilde' | 'not_ge' | 'not_le' | 'not_eq' | 'not_gt' | 'not_lt' | 'ge' |
+    'le' | 'floor_assign' | 'shl_assign' | 'shr_assign' | 'ellipsis' | 'function' | 'returns' | 'arrow' |
+    'eq' | 'gt' | 'lt' | 'plus_assign' | 'minus_assign' | 'star_assign' | 'slash_assign' | 'power_assign' |
+    'percent_assign' | 'coalesce' | 'floor' | 'shl' | 'shr' | 'range' | 'pipe_right' | 'pipe_left' |
+    'angle_assign' | 'is_type' | 'isnt_type' | 'contains' | 'not_contains' | 'kw_let' | 'kw_const' | 'kw_return' |
+    'kw_break' | 'kw_continue' | 'kw_import' | 'kw_from' | 'kw_else' | 'kw_if' | 'kw_loop' | 'kw_match' |
+    'kw_test' | 'kw_not' | 'kw_as' | 'kw_transmute' | 'kw_or' | 'kw_xor' | 'kw_and' | 'kw_in' |
+    'dot_not_ge' | 'dot_not_le' | 'dot_not_eq' | 'dot_not_gt' | 'dot_not_lt' | 'dot_ge' | 'dot_le' | 'dot_floor_assign' |
+    'dot_plus_assign' | 'dot_minus_assign' | 'dot_star_assign' | 'dot_slash_assign' | 'dot_percent_assign' | 'dot_power_assign' | 'dot_floor' | 'dot_eq' |
+    'dot_gt' | 'dot_lt' | 'dot_plus' | 'dot_minus' | 'dot_star' | 'dot_slash' | 'dot_percent' | 'dot_caret' |
+    'multiply_apply' | 'call' | 'broadcast_call' | 'index' | 'type_apply' | 'range_apply' | 'statement_end' | 'amp_assign' |
+    'pipe_assign' | 'and_assign' | 'or_assign' | 'xor_assign' | 'kw_of' | 'kw_or_throw' | 'kw_nand' | 'kw_nor' |
+    'kw_xnor' | 'kw_parallel' | 'kw_concurrent' | 'kw_spawn'
+
+# The token a byte spells alone
+dn_single_token=(c:uint8):>DewyToken=>match c {
+    <b'('> => 'lparen'
+    <b')'> => 'rparen'
+    <b'['> => 'lbrack'
+    <b']'> => 'rbrack'
+    <b'\{'> => 'lbrace'
+    <b'\}'> => 'rbrace'
+    <b'<'> => 'langle'
+    <b'>'> => 'rangle'
+    <b':'> => 'colon'
+    <b'.'> => 'dot'
+    <b','> => 'comma'
+    <b';'> => 'semi'
+    <b'='> => 'assign'
+    <b'+'> => 'plus'
+    <b'-'> => 'minus'
+    <b'*'> => 'star'
+    <b'/'> => 'slash'
+    <b'%'> => 'percent'
+    <b'@'> => 'at'
+    <b'&'> => 'amp'
+    <b'|'> => 'pipe'
+    <b'^'> => 'caret'
+    <b'?'> => 'question'
+    <b'!'> => 'bang'
+    <b'~'> => 'tilde'
+    _ => 'none'
+}
+
+# The token a spelling is (`none` for any other text). The lexer joins `not in?` and
+# `and=`, `or=` and `xor=` itself, so they are not spellings here.
+dn_token_kind=(text:string):>DewyToken=>{
+    if text =? "concurrent" {return 'kw_concurrent'}
+    if text =? "spawn" {return 'kw_spawn'}
+    let b=text as array<uint8>
+    if b.length =? 0 {return 'none'}
+    if b.length =? 1 {return dn_single_token(b[0])}
+    match b[0] {
+        <b'%'> => if text =? "%=" {'percent_assign'} else {'none'}
+        <b'*'> => if text =? "*=" {'star_assign'} else {'none'}
+        <b'+'> => if text =? "+=" {'plus_assign'} else {'none'}
+        <b'-'> => match text {
+            <"->"> => 'arrow'
+            <"-="> => 'minus_assign'
+            _ => 'none'
+        }
+        <b'.'> => match text {
+            <"..."> => 'ellipsis'
+            <".."> => 'range'
+            <".not>=?"> => 'dot_not_ge'
+            <".not<=?"> => 'dot_not_le'
+            <".not=?"> => 'dot_not_eq'
+            <".not>?"> => 'dot_not_gt'
+            <".not<?"> => 'dot_not_lt'
+            <".>=?"> => 'dot_ge'
+            <".<=?"> => 'dot_le'
+            <".//="> => 'dot_floor_assign'
+            <".+="> => 'dot_plus_assign'
+            <".-="> => 'dot_minus_assign'
+            <".*="> => 'dot_star_assign'
+            <"./="> => 'dot_slash_assign'
+            <".%="> => 'dot_percent_assign'
+            <".^="> => 'dot_power_assign'
+            <".//"> => 'dot_floor'
+            <".=?"> => 'dot_eq'
+            <".>?"> => 'dot_gt'
+            <".<?"> => 'dot_lt'
+            <".+"> => 'dot_plus'
+            <".-"> => 'dot_minus'
+            <".*"> => 'dot_star'
+            <"./"> => 'dot_slash'
+            <".%"> => 'dot_percent'
+            <".^"> => 'dot_caret'
+            _ => 'none'
+        }
+        <b'/'> => match text {
+            <"//="> => 'floor_assign'
+            <"/="> => 'slash_assign'
+            <"//"> => 'floor'
+            _ => 'none'
+        }
+        <b':'> => if text =? ":>" {'returns'} else {'none'}
+        <b'<'> => match text {
+            <"<=?"> => 'le'
+            <"<<="> => 'shl_assign'
+            <"<?"> => 'lt'
+            <"<<"> => 'shl'
+            <"<|"> => 'pipe_left'
+            _ => 'none'
+        }
+        <b'='> => match text {
+            <"=>"> => 'function'
+            <"=?"> => 'eq'
+            _ => 'none'
+        }
+        <b'>'> => match text {
+            <">=?"> => 'ge'
+            <">>="> => 'shr_assign'
+            <">?"> => 'gt'
+            <">>"> => 'shr'
+            <">="> => 'angle_assign'
+            _ => 'none'
+        }
+        <b'?'> => if text =? "??" {'coalesce'} else {'none'}
+        <b'^'> => if text =? "^=" {'power_assign'} else {'none'}
+        <b'a'> => match text {
+            <"as"> => 'kw_as'
+            <"and"> => 'kw_and'
+            _ => 'none'
+        }
+        <b'b'> => if text =? "break" {'kw_break'} else {'none'}
+        <b'c'> => match text {
+            <"const"> => 'kw_const'
+            <"continue"> => 'kw_continue'
+            _ => 'none'
+        }
+        <b'e'> => if text =? "else" {'kw_else'} else {'none'}
+        <b'f'> => if text =? "from" {'kw_from'} else {'none'}
+        <b'i'> => match text {
+            <"is?"> => 'is_type'
+            <"isnt?"> => 'isnt_type'
+            <"in?"> => 'contains'
+            <"import"> => 'kw_import'
+            <"if"> => 'kw_if'
+            <"in"> => 'kw_in'
+            _ => 'none'
+        }
+        <b'l'> => match text {
+            <"let"> => 'kw_let'
+            <"loop"> => 'kw_loop'
+            _ => 'none'
+        }
+        <b'm'> => if text =? "match" {'kw_match'} else {'none'}
+        <b'n'> => match text {
+            <"not>=?"> => 'not_ge'
+            <"not<=?"> => 'not_le'
+            <"not=?"> => 'not_eq'
+            <"not>?"> => 'not_gt'
+            <"not<?"> => 'not_lt'
+            <"not"> => 'kw_not'
+            <"nand"> => 'kw_nand'
+            <"nor"> => 'kw_nor'
+            _ => 'none'
+        }
+        <b'o'> => match text {
+            <"or"> => 'kw_or'
+            <"of"> => 'kw_of'
+            <"or_throw"> => 'kw_or_throw'
+            _ => 'none'
+        }
+        <b'p'> => if text =? "parallel" {'kw_parallel'} else {'none'}
+        <b'r'> => if text =? "return" {'kw_return'} else {'none'}
+        <b't'> => match text {
+            <"test"> => 'kw_test'
+            <"transmute"> => 'kw_transmute'
+            _ => 'none'
+        }
+        <b'x'> => match text {
+            <"xor"> => 'kw_xor'
+            <"xnor"> => 'kw_xnor'
+            _ => 'none'
+        }
+        <b'|'> => match text {
+            <"|>"> => 'pipe_right'
+            <"|="> => 'pipe_assign'
+            _ => 'none'
+        }
+        <b'&'> => if text =? "&=" {'amp_assign'} else {'none'}
+        _ => 'none'
+    }
+}
+
+# A token's spelling; the parser's labels for juxtapositions (`CallJuxtapose`) for the
+# tokens no source text spells
+dn_token_text=(token:DewyToken):>string=>match token {
+    <'lparen'> => "("
+    <'rparen'> => ")"
+    <'lbrack'> => "["
+    <'rbrack'> => "]"
+    <'lbrace'> => "\{"
+    <'rbrace'> => "\}"
+    <'langle'> => "<"
+    <'rangle'> => ">"
+    <'colon'> => ":"
+    <'dot'> => "."
+    <'comma'> => ","
+    <'semi'> => ";"
+    <'assign'> => "="
+    <'plus'> => "+"
+    <'minus'> => "-"
+    <'star'> => "*"
+    <'slash'> => "/"
+    <'percent'> => "%"
+    <'at'> => "@"
+    <'amp'> => "&"
+    <'pipe'> => "|"
+    <'caret'> => "^"
+    <'question'> => "?"
+    <'bang'> => "!"
+    <'tilde'> => "~"
+    <'not_ge'> => "not>=?"
+    <'not_le'> => "not<=?"
+    <'not_eq'> => "not=?"
+    <'not_gt'> => "not>?"
+    <'not_lt'> => "not<?"
+    <'ge'> => ">=?"
+    <'le'> => "<=?"
+    <'floor_assign'> => "//="
+    <'shl_assign'> => "<<="
+    <'shr_assign'> => ">>="
+    <'ellipsis'> => "..."
+    <'function'> => "=>"
+    <'returns'> => ":>"
+    <'arrow'> => "->"
+    <'eq'> => "=?"
+    <'gt'> => ">?"
+    <'lt'> => "<?"
+    <'plus_assign'> => "+="
+    <'minus_assign'> => "-="
+    <'star_assign'> => "*="
+    <'slash_assign'> => "/="
+    <'power_assign'> => "^="
+    <'percent_assign'> => "%="
+    <'coalesce'> => "??"
+    <'floor'> => "//"
+    <'shl'> => "<<"
+    <'shr'> => ">>"
+    <'range'> => ".."
+    <'pipe_right'> => "|>"
+    <'amp_assign'> => "&="
+    <'pipe_assign'> => "|="
+    <'and_assign'> => "and="
+    <'or_assign'> => "or="
+    <'xor_assign'> => "xor="
+    <'pipe_left'> => "<|"
+    <'angle_assign'> => ">="
+    <'is_type'> => "is?"
+    <'isnt_type'> => "isnt?"
+    <'contains'> => "in?"
+    <'not_contains'> => "not in?"
+    <'kw_of'> => "of"
+    <'kw_or_throw'> => "or_throw"
+    <'kw_let'> => "let"
+    <'kw_const'> => "const"
+    <'kw_return'> => "return"
+    <'kw_break'> => "break"
+    <'kw_continue'> => "continue"
+    <'kw_import'> => "import"
+    <'kw_from'> => "from"
+    <'kw_else'> => "else"
+    <'kw_if'> => "if"
+    <'kw_loop'> => "loop"
+    <'kw_parallel'> => "parallel"
+    <'kw_concurrent'> => "concurrent"
+    <'kw_spawn'> => "spawn"
+    <'kw_match'> => "match"
+    <'kw_test'> => "test"
+    <'kw_not'> => "not"
+    <'kw_as'> => "as"
+    <'kw_transmute'> => "transmute"
+    <'kw_or'> => "or"
+    <'kw_xor'> => "xor"
+    <'kw_and'> => "and"
+    <'kw_nand'> => "nand"
+    <'kw_nor'> => "nor"
+    <'kw_xnor'> => "xnor"
+    <'kw_in'> => "in"
+    <'dot_not_ge'> => ".not>=?"
+    <'dot_not_le'> => ".not<=?"
+    <'dot_not_eq'> => ".not=?"
+    <'dot_not_gt'> => ".not>?"
+    <'dot_not_lt'> => ".not<?"
+    <'dot_ge'> => ".>=?"
+    <'dot_le'> => ".<=?"
+    <'dot_floor_assign'> => ".//="
+    <'dot_plus_assign'> => ".+="
+    <'dot_minus_assign'> => ".-="
+    <'dot_star_assign'> => ".*="
+    <'dot_slash_assign'> => "./="
+    <'dot_percent_assign'> => ".%="
+    <'dot_power_assign'> => ".^="
+    <'dot_floor'> => ".//"
+    <'dot_eq'> => ".=?"
+    <'dot_gt'> => ".>?"
+    <'dot_lt'> => ".<?"
+    <'dot_plus'> => ".+"
+    <'dot_minus'> => ".-"
+    <'dot_star'> => ".*"
+    <'dot_slash'> => "./"
+    <'dot_percent'> => ".%"
+    <'dot_caret'> => ".^"
+    <'multiply_apply'> => "MultiplyJuxtapose"
+    <'call'> => "CallJuxtapose"
+    <'broadcast_call'> => "CallJuxtaposeBroadcast"
+    <'index'> => "IndexJuxtapose"
+    <'type_apply'> => "TypeParamJuxtapose"
+    <'range_apply'> => "RangeJuxtapose"
+    <'statement_end'> => "SemicolonJuxtapose"
+    _ => ""
+}
+
+# Spaced `not <?` has the same token as `not<?`, without joining strings.
+dn_token_invert=(token:DewyToken):>DewyToken=>match token {
+    <'eq'> => 'not_eq'
+    <'lt'> => 'not_lt'
+    <'gt'> => 'not_gt'
+    <'le'> => 'not_le'
+    <'ge'> => 'not_ge'
+    <'contains'> => 'not_contains'
+    _ => 'none'
+}
+
+# Only syntax operators use the nonlexical application/range spellings.
+dn_syntax_token=(text:string):>DewyToken=>{
+    if text =? "MultiplyJuxtapose" {return 'multiply_apply'}
+    if text =? "CallJuxtaposeBroadcast" {return 'broadcast_call'}
+    # Legacy calls can retain alternative juxtaposition labels in one payload.
+    if text.startswith("CallJuxtapose") {return 'call'}
+    if text =? "IndexJuxtapose" {return 'index'}
+    if text =? "TypeParamJuxtapose" {return 'type_apply'}
+    if text =? "RangeJuxtapose" {return 'range_apply'}
+    if text =? "SemicolonJuxtapose" {return 'statement_end'}
+    dn_token_kind(text)
+}
+
+dn_token_call=(token:DewyToken):>bool=>token =? 'call' or token =? 'broadcast_call'
+
+# The operator an elementwise one applies (`.+` to `+`), or `none`
+dn_token_undot=(token:DewyToken):>DewyToken=>match token {
+    <'dot_not_ge'> => 'not_ge'
+    <'dot_not_le'> => 'not_le'
+    <'dot_not_eq'> => 'not_eq'
+    <'dot_not_gt'> => 'not_gt'
+    <'dot_not_lt'> => 'not_lt'
+    <'dot_ge'> => 'ge'
+    <'dot_le'> => 'le'
+    <'dot_floor_assign'> => 'floor_assign'
+    <'dot_plus_assign'> => 'plus_assign'
+    <'dot_minus_assign'> => 'minus_assign'
+    <'dot_star_assign'> => 'star_assign'
+    <'dot_slash_assign'> => 'slash_assign'
+    <'dot_percent_assign'> => 'percent_assign'
+    <'dot_power_assign'> => 'power_assign'
+    <'dot_floor'> => 'floor'
+    <'dot_eq'> => 'eq'
+    <'dot_gt'> => 'gt'
+    <'dot_lt'> => 'lt'
+    <'dot_plus'> => 'plus'
+    <'dot_minus'> => 'minus'
+    <'dot_star'> => 'star'
+    <'dot_slash'> => 'slash'
+    <'dot_percent'> => 'percent'
+    <'dot_caret'> => 'caret'
+    _ => 'none'
+}
+
+# The comparison a negated one negates (`not=?` to `=?`); any other token is itself
+dn_token_uninvert=(token:DewyToken):>DewyToken=>match token {
+    <'not_eq'> => 'eq'
+    <'not_lt'> => 'lt'
+    <'not_gt'> => 'gt'
+    <'not_le'> => 'le'
+    <'not_ge'> => 'ge'
+    <'not_contains'> => 'contains'
+    _ => token
+}
+
+# A compound assignment (`+=`, `.+=`, `and=`), not `=` itself
+dn_token_assignment=(token:DewyToken):>bool=>match token {
+    <'plus_assign'|'minus_assign'|'star_assign'|'slash_assign'|'floor_assign'|'percent_assign'|'power_assign'|'shl_assign'|'shr_assign'|'dot_plus_assign'|'dot_minus_assign'|'dot_star_assign'|'dot_slash_assign'|'dot_floor_assign'|'dot_percent_assign'|'dot_power_assign'|'amp_assign'|'pipe_assign'|'and_assign'|'or_assign'|'xor_assign'> => true
+    _ => false
+}
+
+dn_token_statement=(token:DewyToken):>bool=>token =? 'statement_end' or token =? 'assign' or dn_token_assignment(token)

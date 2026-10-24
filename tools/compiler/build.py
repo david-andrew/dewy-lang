@@ -27,7 +27,7 @@ FROZEN_TWINS = {'zip.dewy': 'zip.jo', 'spelling.dewy': 'spelling.jo', 'leb128.de
                'base64.dewy': 'base64.jo', 'line_table.dewy': 'line_table.jo', 'sha.dewy': 'sha.jo',
                'icns.dewy': 'icns.jo', 'targets.dewy': 'targets.jo',
                'json_doc.dewy': 'json_doc.jo', 'manifest.dewy': 'manifest.jo',
-               'literals.dewy': 'literals.jo'}
+               'literals.dewy': 'literals.jo', 'dewy_tokens.dewy': 'dewy_tokens.jo'}
 
 
 def identity(path: Path) -> str:
@@ -88,13 +88,20 @@ def build(output: Path, *, seed: Path | None = None, bootstrap: bool = False) ->
             run(['make', '-s', '-C', str(output / 'stage0')], 'bootstrap-c.log')
             run([stage0, output / 'compiler/main.jo', '-o', seed], 'bootstrap-core.log')
         finally:
+            # (back to the compiler's own modules, still naming the twins: step 2 reads no Dewy)
             for name in bootstrap_modules:
-                shutil.copy2(ROOT / 'compiler' / name, output / 'compiler' / name)
+                path = output / 'compiler' / name
+                text = (ROOT / 'compiler' / name).read_text()
+                for module, twin in FROZEN_TWINS.items():
+                    text = text.replace(f"use '{module}'\n", f"use '{twin}'\n")
+                path.write_text(text)
         try:
             run([seed, 'build', output / 'compiler/main.jo', '-o', first_core], 'core-build.log')
         finally:
             for path, text in originals.items():
                 path.write_text(text)
+            for name in bootstrap_modules:
+                shutil.copy2(ROOT / 'compiler' / name, output / 'compiler' / name)
         bootstrap_hashes = [identity(p) for p in (stage0, seed, first_core)]
         seed = first_core
     if seed is None:

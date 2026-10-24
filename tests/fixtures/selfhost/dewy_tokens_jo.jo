@@ -1,0 +1,12 @@
+# The compiler's frozen dewy_tokens.jo, with the same command line as dewy_tokens_dewy.dewy.
+use '../../../compiler/dewy_tokens.jo'
+
+main = ():
+    words = args()
+    loop w in [1..words.len()): print("{dn_token_kind(words[w])} {dn_syntax_token(words[w])}")
+    singles: str[]
+    loop c in [0..256): singles.push("{dn_single_token(u8(c))}")
+    print(join(singles, " "))
+    loop i in [0..int(DewyToken.kw_spawn) + 1):
+        t = DewyToken(i)
+        print("{t} [{dn_token_text(t)}] {dn_token_invert(t)} {dn_token_undot(t)} {dn_token_uninvert(t)} {dn_token_assignment(t)} {dn_token_statement(t)} {dn_token_call(t)}")

@@ -203,6 +203,33 @@ about 37 (31) against a status record by place. What it met:
   alone, which made the message malformed too. Both twins now show the whole character, or
   `byte 128` for a byte inside one.
 
+`dewy_tokens.dewy` (the Dewy frontend's 124 tokens: each one's spelling, the token a
+spelling is, and the tokens related to one, `not=?` to `=?` and `.+` to `+`) is the first leaf
+whose enumeration Sloppy code names throughout: five modules (the lexer, both parsers, the
+formatter, the foreign-function spellings) write `.kw_xor`, `DewyToken(i)` and
+`int(DewyToken.kw_or_throw)`, and the lexer's tables are indexed by it. `dn_word_assign`,
+which reads the source through a pointer, moved to dewy_fast.jo, its one user. It compiled as
+first written. Panel: every item within 0.03% but 100_rtos_kernel, -0.21% (see below);
+684 builds identical. Called 12.4 M times from one Sloppy driver over either module, each
+function takes its twin's instructions (`dn_token_kind` +0.6%). What it met:
+- A Dewy `match` on an enumeration with literal arms (`<'lparen'> => "("`) compared the value
+  with each arm in turn, where Sloppy's arms on the same enum dispatch through a jump or
+  lookup table: `dn_token_text` took 118 instructions a call more than its twin,
+  `dn_token_undot` 57 and `dn_token_assignment` 43; the panel's lex+parse grew 0.5%. Such
+  an arm is now the variant pattern Sloppy's is (expr.jo `check_match`), so Dewy programs get
+  the tables too (`tests/test_match_enumeration_table.py`): compiling 100_rtos_kernel, whose
+  report matches on 37 such arms, takes 0.21% fewer instructions. No program of
+  same_output's corpus has one. A match giving an `int` keeps its compares: lower.jo's
+  lookup table (`gen_match_lookup`, taken when every arm is a constant) writes the constants
+  as plain words, which an `int` does not hold. It already gives wrong values on an integer
+  scrutinee: `let n=match x {<1> => 10 <2> => 20 <3> => 30 _ => 0}` with `x:int64` gives 5, 10
+  and 15 (open, the lowering's).
+- `members(DewyToken)` lists the members in text order, not as numbered, so the Dewy driver's
+  table is compared sorted; the numbering is checked through the Sloppy driver over the leaf.
+- It is the first leaf a bootstrap module uses (dewy_fmt.jo, which step 1 replaces with a
+  stub): build.py put the compiler's dewy_fmt.jo back for step 2 without its twins, so the
+  seed read the leaf. It now names the twin there, and the leaf again from step 3.
+
 Open gaps from these leaves, by cost:
 - A literal beside a policy-typed operand (`w + 1`, `w & 0xFF`, `w xor 0xFFFFFFFF`) goes
   through `int` and `__mi_low_word`, about 30 instructions in place of one. Plain `uint32`

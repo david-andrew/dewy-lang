@@ -8,7 +8,7 @@ use 'ast.jo'
 use 'dewy_parse.jo'
 use 'oom.jo'
 use 'proofs.jo'
-use 'dewy_tokens.jo'
+use 'dewy_tokens.dewy'
 use 'dewy_direct.jo'
 use 'dewy_directives.jo'
 use 'directives.jo'
@@ -443,6 +443,15 @@ dn_lazy_end = (source: str, i0: int, stop: int) -> int:
             if i + 1 < stop and bytes[i + 1] == '?': return -1
             i += 1
     -1
+
+# `and=` `or=` `xor=`: a word operator directly followed by `=` (not `=?` or `=>`).
+dn_word_assign = (word: DewyToken, bytes: *u8, at: int, stop: int) -> DewyToken:
+    if at >= stop or bytes[at] != '=': return .none
+    if at + 1 < stop and (bytes[at + 1] == '?' or bytes[at + 1] == '>' or bytes[at + 1] == '='): return .none
+    if word == .kw_and: return .and_assign
+    if word == .kw_or: return .or_assign
+    if word == .kw_xor: return .xor_assign
+    .none
 
 dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLexeme[]:
     if intern_names and dn_word_tokens.len() == 0: dn_init_words()

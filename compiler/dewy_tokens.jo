@@ -1,5 +1,5 @@
-# Numeric token spellings for the in-process Dewy parser. Keep textual payloads
-# for identifiers/literals; grammar dispatch must not compare allocated strings.
+# The frozen implementation-language twin of dewy_tokens.dewy, for the compilers without
+# the Dewy frontend (tools/compiler/build.py). Change both, or neither.
 use 'util.jo'
 
 enum DewyToken:
@@ -394,13 +394,3 @@ dn_token_assignment = (token: DewyToken) -> bool:
 
 dn_token_statement = (token: DewyToken) -> bool:
     token == .statement_end or token == .assign or dn_token_assignment(token)
-
-# `and=` `or=` `xor=`: a word operator directly followed by `=` (not `=?` or `=>`).
-dn_word_assign = (word: DewyToken, bytes: *u8, at: int, stop: int) -> DewyToken:
-    if at >= stop or bytes[at] != '=': return .none
-    if at + 1 < stop and (bytes[at + 1] == '?' or bytes[at + 1] == '>' or bytes[at + 1] == '='): return .none
-    if word == .kw_and: return .and_assign
-    if word == .kw_or: return .or_assign
-    if word == .kw_xor: return .xor_assign
-    .none
-
