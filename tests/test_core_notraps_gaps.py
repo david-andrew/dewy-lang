@@ -16,7 +16,7 @@ PROVED = {
     let t=0
     loop j in [0..min(32 n)) {t+=out[j]}
     loop j in [0..min(n xs.length)) {t+=xs[j]}
-    return t
+    return int64<overflow='wrap'>(t)
 }
 main=():>void=>exit(f([1 2 3] 2)-2)
 ''',
@@ -26,7 +26,7 @@ main=():>void=>exit(f([1 2 3] 2)-2)
     loop j in [0..xs.length) {if max(j k) <? xs.length {t+=xs[j]}}
     let i=max(0 k)
     if i <? xs.length {t+=xs[i]}
-    return t
+    return int64<overflow='wrap'>(t)
 }
 main=():>void=>exit(f([1 2 3] 1)-8)
 ''',
@@ -36,7 +36,7 @@ main=():>void=>exit(f([1 2 3] 1)-8)
     let t=0
     loop j in [0..n) {t+=a[first+j]}
     loop j in [1..n-1) {let p=first+j t+=a[p-1]+a[p+1]}
-    return t
+    return int64<overflow='wrap'>(t)
 }
 main=():>void=>exit(g([1 2 3 4] 1 3)-12)
 ''',
@@ -45,7 +45,7 @@ main=():>void=>exit(g([1 2 3 4] 1 3)-12)
     if col <? 0 or col >? n or n >? xs.length return 0
     let t=0
     loop j in [0..min(32 n-col)) {t+=xs[col+j]}
-    return t
+    return int64<overflow='wrap'>(t)
 }
 main=():>void=>exit(f([1 2 3] 3 1)-5)
 ''',

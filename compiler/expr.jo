@@ -778,6 +778,7 @@ coerce = (n: int, target: int) -> int:
         if from == T_MATH_INT or to == T_MATH_INT:
             check_integer_boundary(n, from, to)
             wrap_conv(n, .int_, to)
+            if from == T_MATH_INT and dewy_at(nodes[n].pos): int_domain_conversion(n, to)
             return n
         if int_widens(from, to):
             # (a + b with a, b: u8, put in an int: added as u8s first, so 200 + 200 is 144)
@@ -3556,6 +3557,7 @@ conversion = (n: int, to0: int, args: int[]) -> int:
         nodes[n] = nodes[a]
         return to
     nodes[n] = Node(kind = .conv, pos = nodes[n].pos, a = i32(a), aux = i32(cv), type = i32(to), flags = i32(NF_CHECKED))
+    if ft == T_MATH_INT and tk == .int_ and dewy_at(nodes[n].pos): int_domain_conversion(n, to)
     to
 
 # (Key(n): a simple enum's variant by its number, as int(Key.a) gives it, its variants numbered
@@ -3877,7 +3879,7 @@ dewy_arithmetic_call = (n: int, name: int, args: int[], expected: int) -> int:
             set_list(n, checked)
             # (a nonzero divisor is the caller's obligation, as an integer
             # division's: the fraction's only failure)
-            if fact_policy == .RequireStatic: fact_divisors[n] = 1
+            if dir_panics_demanded(): fact_divisors[n] = 1
         else:
             nodes[n] = Node(kind = .binary, pos = pos, op = i32(int(Tok.slash)), a = i32(a), b = i32(b))
         return check_expr(n, expected)
@@ -3943,7 +3945,7 @@ dewy_arithmetic_call = (n: int, name: int, args: int[], expected: int) -> int:
     result = resolve_fn_call(n, helper, declarations, checked, expected)
     # Internal scalar policy: retain the builtin operation's captured actuals.
     # Custom operators and the proven positive power-of-two path are separate.
-    if fact_policy == .RequireStatic and not power and helper == name and is_int(ntype(a)) and is_int(ntype(b)):
+    if dir_panics_demanded() and not power and helper == name and is_int(ntype(a)) and is_int(ntype(b)):
         fact_divisors[n] = if modulo: 2 else: 1
     result
 
@@ -6881,7 +6883,7 @@ op_overload = (n: int, opname: str) -> int:
     nodes[n] = Node(kind = .call, pos = nodes[n].pos)
     set_list(n, args)
     result = resolve_fn_call(n, nm, decls, args, 0)
-    if b != 0 and (opname == "/" or opname == "//" or opname == "%") and fact_policy == .RequireStatic: rational_divisor(n)
+    if b != 0 and (opname == "/" or opname == "//" or opname == "%") and dir_panics_demanded(): rational_divisor(n)
     if opname in ["==", "!=", "<", "<=", ">", ">="] and prune(result) != T_BOOL:
         fatal(nodes[n].pos, "comparison operator {opname} must return bool, found {dt(result)}")
     result

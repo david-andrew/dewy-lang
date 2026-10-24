@@ -55,7 +55,7 @@ install = (@k:Kernel script:Script):>array<string>|ScriptError => {
         let line = v.line
         if line <? 0 or line >=? NIRQ return ScriptError[0 "no interrupt line {line}"]
         let target = if v.action =? 'signal' task_number(names v.target) else to_int(v.target) ?? NONE
-        if target =? NONE return ScriptError[0 "vector {line}: unknown target '{v.target}'"]
+        if target <? 0 or target >? 1000000 return ScriptError[0 "vector {line}: unknown target '{v.target}'"]
         k.vectors[line] = [action=v.action target=int64(target) value=v.value]
     }
     return names

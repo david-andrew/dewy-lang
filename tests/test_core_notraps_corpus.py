@@ -15,7 +15,7 @@ PROVED = {
     let t=0
     loop i in [0..xs.length) {if ys[i] {t+=xs[i]}}
     loop i in [0..n) {t+=xs[i]}
-    return t
+    return int64<overflow='wrap'>(t)
 }
 main=():>void=>exit(pairs(3))
 ''',
@@ -37,7 +37,7 @@ total=(w:Soa):>int64=>{
     let t=0
     loop i in [0..w.ids.length) {t+=w.x[i]}
     loop i in [0..w.used) {t+=w.ids[i]}
-    return t
+    return int64<overflow='wrap'>(t)
 }
 main=():>void=>exit(total(Soa[[1 2] [3 4] 1]))
 ''',
@@ -50,7 +50,7 @@ scan=(src:array<uint8> start:int64<(>=? 0)> stop:int64<(<=? src.length)>):>int64
         if src[i] =? 35 and i+1 <? stop and src[i+1] =? 35 {n+=1}
         i+=1
     }
-    return n
+    return int64<overflow='wrap'>(n)
 }
 main=():>void=>{
     let xs:array<uint8>=[1 2 35 35 5]
@@ -67,7 +67,7 @@ main=():>void=>{
         t+=(b[i] as int64)+(b[i+1] as int64)+(b[i+2] as int64)
         i+=3
     }
-    return t
+    return int64<overflow='wrap'>(t)
 }
 main=():>void=>exit(triples([1 2 3 4]))
 ''',
@@ -121,7 +121,7 @@ main=():>void=>exit(nearest([3 1 2] 0)+argmin([3 1 2]))
     let output=parallel_map(input (n)=>n+1)
     let nested=parallel_range(8 (i:int64)=>i*2)
     let t=nested[7]
-    loop i in [0..input.length) {t+=output[i]}
+    loop i in [0..input.length) {t+=int64<overflow='wrap'>(output[i])}
     exit(t-150)
 }
 ''',

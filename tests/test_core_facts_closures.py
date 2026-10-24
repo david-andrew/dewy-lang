@@ -30,7 +30,7 @@ pick=():>int64=>{
     loop k in [0..3) {
         t+=xs[i]
     }
-    return t
+    return int64<overflow='wrap'>(t)
 }
 main=():>void=>exit(entry()) entry=():>int64=>pick()
 ''',

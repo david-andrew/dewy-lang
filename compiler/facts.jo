@@ -19,6 +19,7 @@ use 'ownership.jo'
 use 'witness.jo'
 use 'directives.jo'
 use 'warn_if.jo'
+use 'string_domains.jo'
 
 enum FactPolicy: RuntimeAllowed, RequireStatic
 enum FactReason: missing, write, call, join, loop_, unsupported, wrap, budget, callee
@@ -2229,6 +2230,57 @@ fact_power_check = (n: int, s: mut FactState, exponent: int):
         return
     wit_unknown(n, fact_bound(s, exponent), "the exponent is >= 0", 0, wit_relation_text(.ge, side, nil), missing)
 
+# The narrowing whose obligation the check around it answers: an array index
+# (in bounds, it fits) or a refinement bounded on both sides within the width.
+fact_covered = 0
+fact_refinement_covers = (r: int) -> int:
+    inner = int(nodes[r].a)
+    if nodes[inner].kind != .conv or nodes[inner].aux != i32(int(CV.int_)) or prune(ntype(int(nodes[inner].a))) != T_MATH_INT: return 0
+    known, allowed = int_intervals(zonk(int(nodes[r].aux2)))
+    if not known or allowed.len() == 0 or allowed[0] == FACT_MIN or allowed[allowed.len() - 1] == FACT_MAX: return 0
+    inner
+
+# An `int` converted to a fixed width (`int32(x)`, `x as int32`, a store into a
+# fixed-width place): x must fit, proven, an error or a check of its scope.
+# An `int`'s bounds at FACT_MIN or FACT_MAX are unbounded, so a 64-bit target
+# needs bounds strictly inside them. True when proven.
+fact_narrow_check = (n: int, s: mut FactState, value: int) -> bool:
+    to = representation_type(ntype(n))
+    bits = int(types[to].bits)
+    sign = types[to].sign
+    low = if not sign: 0 else if bits >= 64: FACT_MIN else: -(1 << (bits - 1))
+    high = if bits >= 64: FACT_MAX else if sign: (1 << (bits - 1)) - 1 else: (1 << bits) - 1
+    lo_op = if low == FACT_MIN: Tok.gt else: Tok.ge
+    hi_op = if high == FACT_MAX: Tok.lt else: Tok.le
+    lo = fact_constant(s, low)
+    hi = fact_constant(s, high)
+    lc = fact_compare(s, lo_op, value, lo)
+    hc = fact_compare(s, hi_op, value, hi)
+    # (a binding's covering set of written values: string_domains.jo)
+    proven = lc == 1 and hc == 1 or int_domain_proven.has(n)
+    if fact_speculating != 0: return proven
+    if fact_probe_on:
+        fact_probe_record(n, proven)
+        return proven
+    if proven or n == fact_covered or not s.live or not (fact_policy == .RequireStatic or fact_query): return proven
+    upper = hc != 1 and (lc != 0 or hc == 0)
+    side = wit_side(value, int(nodes[n].a))
+    limit = if upper: high else: low
+    bound = WitSide((if upper: hi else: lo), 0, "{limit}", false, true)
+    op = if upper: hi_op else: lo_op
+    refuted = (if upper: hc else: lc) == 0
+    missing = wit_relation(s, s, op, side, bound, refuted)
+    relation = wit_relation_text(op, side, bound)
+    wit_context(0)
+    if refuted:
+        wit_help(relation)
+        shown = if side.text != "": side.text else: "the value"
+        if dir_defer(n, "{shown} does not fit {dt(ntype(n))}", true): return false
+        wit_fail(nodes[n].pos, "{shown} does not fit {dt(ntype(n))}")
+        return false
+    wit_unknown(n, fact_bound(s, value), "`{relation}` for the conversion to {dt(ntype(n))}", 0, relation, missing)
+    false
+
 # The builtin floor helper a Dewy `//` or `%` resolved to (fact_floor's kind), or 0.
 fact_floor_call = (n: int) -> int:
     if nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) != 2: return 0
@@ -3545,8 +3597,8 @@ fact_slice_prepare = (f: int, summary: bool = false):
                 if types[representation_type(ntype(int(nodes[n].a)))].kind != .fixed: values.push(int(nodes[n].a))
         else if k == .conv:
             if nodes[n].aux == i32(int(CV.refinement)): values.push(n)
-            # (an `int` narrowed to a fixed width: effect_failure asks whether it fits)
-            else if fact_probe_on and not summary and nodes[n].aux == i32(int(CV.int_)) and prune(ntype(int(nodes[n].a))) == T_MATH_INT: values.push(n)
+            # (an `int` narrowed to a fixed width: an obligation, and effect_failure asks whether it fits)
+            else if (fact_probe_on or fact_policy == .RequireStatic) and not summary and nodes[n].aux == i32(int(CV.int_)) and prune(ntype(int(nodes[n].a))) == T_MATH_INT and prune(ntype(n)) != T_MATH_INT: values.push(n)
             else if ownership_decls.len() != 0 and nodes[n].aux == i32(int(CV.explicit_copy)) and ownership_fact_type(ntype(n)): opaque_writes.push(n)
             else if nodes[n].aux != i32(int(CV.int_)) and nodes[n].aux != i32(int(CV.none_)) and nodes[n].aux != i32(int(CV.fixed2arr)) and not fact_pure_conversion(n): exposed_writes.push(n)
         else if k == .binary:
@@ -3767,6 +3819,7 @@ fact_obliged = (n: int) -> bool:
     if k == .index and not has_flag(n, NF_INBOUNDS) and fact_bounded_index(n): return true
     if k == .binary and nodes[n].aux == 0 and (nodes[n].op == i32(int(Tok.slash)) or nodes[n].op == i32(int(Tok.percent))): return true
     if k == .conv and nodes[n].aux == i32(int(CV.refinement)): return true
+    if k == .conv and nodes[n].aux == i32(int(CV.int_)) and prune(ntype(int(nodes[n].a))) == T_MATH_INT and prune(ntype(n)) != T_MATH_INT: return true
     if k == .call and wi_fact_calls.len() > 0 and wi_fact_calls.has(n): return true
     if k == .call and (fact_divisors.has(n) or fact_floor_call(n) != 0 or fact_string_call(n) >= 2 or fact_array_call(n) != 0 or fact_power_call(n)): return true
     if k == .call and fact_map_call(n) >= 2 and fact_map_call(n) <= 4: return true
@@ -3901,12 +3954,17 @@ fact_capture = (n: int, s: mut FactState) -> int:
     if k == .index and nodes[n].b != 0:
         base = 0
         index = 0
+        # (an `int` index's narrowing is the index's own obligation: in bounds, it fits)
+        outer = fact_covered
+        kind = types[representation_type(ntype(int(nodes[n].a)))].kind
+        fact_covered = if kind == .array or kind == .fixed: int(nodes[n].b) else: 0
         if nodes[int(nodes[n].a)].kind == .ident:
             index = fact_capture(int(nodes[n].b), s)
             base = fact_capture(int(nodes[n].a), s)
         else:
             base = fact_capture(int(nodes[n].a), s)
             index = fact_capture(int(nodes[n].b), s)
+        fact_covered = outer
         t = representation_type(ntype(int(nodes[n].a)))
         if types[t].kind == .array or types[t].kind == .fixed:
             length = if types[t].kind == .fixed: fact_constant(s, fixed_len(t)) else: fact_project(s, base, -1, false, T_INT)
@@ -4127,7 +4185,10 @@ fact_capture = (n: int, s: mut FactState) -> int:
         if nodes[n].aux != 0 and not fact_pure_binary(n): fact_forget(s, n, .call)
         return fact_unmodeled(s, n, .unsupported)
     if k == .conv:
+        outer = fact_covered
+        if nodes[n].aux == i32(int(CV.refinement)): fact_covered = fact_refinement_covers(n)
         a = fact_capture(int(nodes[n].a), s)
+        fact_covered = outer
         if result_active and nodes[n].aux == i32(int(CV.opt)):
             value = fact_new(s, FactBound(), FactTerm(type = ntype(n)))
             if s.projections.len() + 2 < FACT_CAP:
@@ -4150,6 +4211,13 @@ fact_capture = (n: int, s: mut FactState) -> int:
         if (nodes[n].aux == i32(int(CV.wrap_int)) or nodes[n].aux == i32(int(CV.saturate_int))) and fact_scalar(ntype(n)) and representation_type(ntype(n)) != T_U64:
             if fact_scalar(ntype(int(nodes[n].a))) and representation_type(ntype(int(nodes[n].a))) != T_U64 and sa_fits(b.lo, ntype(n)) and sa_fits(b.hi, ntype(n)): return a
             return fact_new(s, fact_domain(ntype(n)), FactTerm(type = ntype(n)))
+        # (an `int` narrowed to a fixed width: the proven narrowing, an
+        # obligation; effect_failure asks whether it fits)
+        if nodes[n].aux == i32(int(CV.int_)) and prune(ntype(int(nodes[n].a))) == T_MATH_INT and prune(ntype(n)) != T_MATH_INT and fact_scalar(ntype(n)):
+            proven = fact_narrow_check(n, s, a)
+            if (proven or n == fact_covered) and representation_type(ntype(n)) != T_U64: return a
+            if not proven or b.lo < 0: return fact_unmodeled(s, n, .wrap)
+            return fact_new(s, FactBound(b.lo xor FACT_MIN, b.hi xor FACT_MIN), FactTerm(type = T_U64))
         if ntype(n) != ntype(int(nodes[n].a)) and (ntype(n) == T_U64 or ntype(int(nodes[n].a)) == T_U64):
             # (a value both types hold converts exactly: decode or encode its interval)
             if fact_scalar(ntype(n)) and fact_scalar(ntype(int(nodes[n].a))) and nodes[n].aux == i32(int(CV.int_)):
@@ -4161,8 +4229,6 @@ fact_capture = (n: int, s: mut FactState) -> int:
             return fact_unmodeled(s, n, .wrap)
         if fact_scalar(ntype(n)) and fact_scalar(ntype(int(nodes[n].a))) and (nodes[n].aux == i32(int(CV.int_)) or nodes[n].aux == i32(int(CV.none_))):
             fits = sa_fits(b.lo, ntype(n)) and sa_fits(b.hi, ntype(n))
-            # (an `int` narrowed to a fixed width: effect_failure asks whether it fits)
-            if fact_probe_on and fact_speculating == 0 and prune(ntype(int(nodes[n].a))) == T_MATH_INT: fact_probe_record(n, fits)
             if fits: return a
             return fact_unmodeled(s, n, .wrap)
         if not fact_pure_conversion(n): fact_forget(s, n, .call)
@@ -4331,7 +4397,11 @@ fact_capture = (n: int, s: mut FactState) -> int:
         values = fill(0, nkids(n))
         loop i in call_eval_order(n):
             arg = kid(n, i)
-            if nodes[arg].kind == .conv and nodes[arg].aux == i32(int(CV.refinement)): values[i] = fact_capture(int(nodes[arg].a), s)
+            if nodes[arg].kind == .conv and nodes[arg].aux == i32(int(CV.refinement)):
+                outer = fact_covered
+                fact_covered = fact_refinement_covers(arg)
+                values[i] = fact_capture(int(nodes[arg].a), s)
+                fact_covered = outer
             else: values[i] = fact_capture(arg, s)
             if ownership_decls.len() != 0: values[i] = fact_owner_value(arg, values[i], s)
         loop i in [0..nkids(n)):

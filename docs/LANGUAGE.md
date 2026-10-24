@@ -729,15 +729,16 @@ to `if` and `match` branch values, just as a binding annotation does. In `=?`
 and `not=?`, array, record and dictionary literals take their element or field
 types from the typed operand on either side. Mixed `int`/fixed-width arithmetic
 uses `int`; a literal beside a fixed-width operand can take that operand's type.
-Implicit conversions involving `int` preserve the value, checking narrowing at
-runtime (or diagnosing known constant failures). `as` and type calls use those
-same checks. Float-to-integer conversions (`int(f)`, `int64(f)`, `f as uint8`)
+Implicit conversions involving `int` preserve the value; narrowing an `int` to a
+fixed width is the same proven conversion as a narrowing between fixed widths
+(below), an `int` index's being its bounds check (a known constant failure is a
+compile error). `as` and type calls use those same checks. Float-to-integer conversions (`int(f)`, `int64(f)`, `f as uint8`)
 truncate toward zero and keep the value: NaN, an infinity or a value outside the
 target's range fails a check (`the float is above the int64 range`; a constant one is a
 compile error) and never saturates;
 exact decimal and fraction conversions to integers also truncate toward zero,
 without rounding through a float. `int`-to-float retains the usual rounding. Conversions keep the value:
-a narrowing between fixed widths, explicit (`uint64(x)`, `x as uint8`) or implicit
+a narrowing between fixed widths or from `int`, explicit (`uint64(x)`, `x as uint8`) or implicit
 (`let n:uint64 = xs.length`, `let b:int8 = w` after `if -128 <=? w <=? 127`, a
 `uint64` index or slice bound, an argument or result), is a proven conversion: the facts that
 prove a refinement prove it, an unproven one is checked when it runs (`value does not fit int8`),

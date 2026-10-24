@@ -21,7 +21,7 @@ guarded=(xs:array<int64> ys:array<int64>):>int64=>{
 }
 counted=(xs:array<int64> ys:array<int64>):>int64=>{
     let t:int64=0
-    loop i in 0.. and x in xs and y in ys { t=t+i*x*y }
+    loop i in 0.. and x in xs and y in ys { t=t+int64<overflow='wrap'>(i*x*y) }
     return t
 }
 indexed=(xs:array<int64>):>int64=>{
@@ -57,7 +57,7 @@ same=(a:string b:string):>int64=>{
 }
 mixed=(a:string xs:array<int64>):>int64=>{
     let t:int64=0
-    loop c in a and x in xs and i in 0.. { t=t+x*i }
+    loop c in a and x in xs and i in 0.. { t=t+int64<overflow='wrap'>(x*i) }
     return t
 }
 main=()=>{

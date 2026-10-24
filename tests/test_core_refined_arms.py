@@ -20,7 +20,7 @@ read=(xs:array<int64> needle:int64):>int64=>{
 main=():>void=>{
     let xs:array<int64>=[4 9 16]
     let total:int64=0
-    loop x in [9 5] {total+=read(xs x)}
+    loop x in [int64(9) int64(5)] {total+=read(xs x)}
     printl("{total} {xs.length}")
 }
 '''
@@ -57,7 +57,7 @@ pairs=(source:array<uint8> start:int64<0 <=? start and start <=? source.length>)
             i+=1
         }
     }
-    return n
+    return int64<overflow='wrap'>(n)
 }
 twice=(source:array<uint8>):>int64|Failure=>{
     let i=next(source 0) or_throw

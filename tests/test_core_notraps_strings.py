@@ -19,7 +19,7 @@ guarded=(text:string):>string=>{
 count_a=(text:string):>int64=>{
     let n=0
     loop i in [0..text.length) {if text[i] =? "a" n+=1}
-    return n
+    return int64<overflow='wrap'>(n)
 }
 last=(text:string):>string=>if text.length >? 2 text[end] else ""
 literal=():>string=>"hello"[4]

@@ -354,6 +354,8 @@ dir_print_obligations = ():
 # may not call (or hand out a handle to) code that may panic, and a row that
 # excludes panics holds. Only the program's own bodies are walked for sites;
 # effect_panics walks a callee once. O(reached nodes + call edges).
+# (also while checking: a row excluding panics, parsed before any body, needs a
+# divisor registered as the caller's obligation before facts force the policy)
 dir_panics_demanded = () -> bool: effect_panics_demanded or fact_policy == .RequireStatic
 
 dir_panics_finalize = ():

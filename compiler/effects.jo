@@ -1534,6 +1534,9 @@ effect_scan_node = (f: int, n: int):
     else if k == .conv and nodes[n].aux == i32(int(CV.int_)) and prune(ntype(int(nodes[n].a))) == T_MATH_INT and effect_scalar(ntype(n)) and effect_small(int(nodes[n].a)) < 0:
         supported = true
         effect_failure(f, n)
+    # (an `int` wrapped or saturated to a fixed width is total: a read of its
+    # low limbs, lib/math_runtime.jo __mi_low_word and __mi_clamp_word)
+    else if k == .conv and (nodes[n].aux == i32(int(CV.wrap_int)) or nodes[n].aux == i32(int(CV.saturate_int))) and prune(ntype(int(nodes[n].a))) == T_MATH_INT and effect_scalar(ntype(n)): supported = true
     # (a word to a float, or one float width to another: one instruction; a
     # float to an integer is checked, and a semantic integer's is a call)
     else if k == .conv and (nodes[n].aux == i32(int(CV.int2float)) and effect_scalar(ntype(int(nodes[n].a))) or nodes[n].aux == i32(int(CV.float_))): supported = effect_float(ntype(n))
