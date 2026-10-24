@@ -1349,6 +1349,12 @@ ctx_dependent = (a: int) -> bool:
     if k == .map_lit: return nd.nlist == 0 or (nd.type == 0 and int(nd.flags) & NF_CHECKED == 0 and files[pos_file(nd.pos)].is_dewy)
     false
 
+# `to_int(text max_digits=n)` with a literal n from 1 to 18 (lib/math_runtime.jo, __mi_parse_word).
+to_int_word_limit = (a0: int) -> bool:
+    if nodes[a0].kind == .namedarg and name_of(int(nodes[a0].name)) != "max_digits": return false
+    a = unnamed(a0)
+    nodes[a].kind == .int_lit and not has_flag(a, NF_U64) and nodes[a].ival >= 1 and nodes[a].ival <= 18
+
 unnamed = (a: int) -> int:
     if nodes[a].kind == .namedarg: return int(nodes[a].a)
     a
@@ -4165,6 +4171,8 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
             parser = ci(8, "__mi_parse")
             # (to_int(text max_digits=n): the limit as given; plain to_int keeps its one parameter)
             if args.len() > 1: parser = intern("__mi_parse_limited")
+            # (a literal limit of at most 18 digits: the result is always a word)
+            if args.len() == 2 and to_int_word_limit(args[1]): parser = intern("__mi_parse_word")
             demand_name(parser)
             decls = []
             collect_fns(parser, decls)

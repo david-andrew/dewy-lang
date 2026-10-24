@@ -1992,6 +1992,13 @@ fact_arithmetic = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
     low = fact_add_fits(x.lo, y.lo); high = fact_add_fits(x.hi, y.hi)
     if low: lo = x.lo + y.lo
     if high: hi = x.hi + y.hi
+    # (a difference of two related values: `high - low` with `low <=? high`
+    # is at least 0. Only for operands with rows: two bounded searches)
+    if op == .minus and a != b and a != 0 and b != 0 and x.lo != x.hi and fact_incident(s, a) >= 0 and fact_incident(s, b) >= 0:
+        d = fact_shortest(s, a, b)
+        if d != FACT_MAX and (not high or d < hi): hi = d; high = true
+        e = fact_shortest(s, b, a)
+        if e != FACT_MAX and e != FACT_MIN and (not low or -e > lo): lo = -e; low = true
     loop r in sums:
         if r.a == 0:
             c = fact_bound(s, r.b)
@@ -3107,6 +3114,93 @@ fact_counted_lengths = (n: int, s: mut FactState, pushes: (int, int)[], count: i
             fact_difference(s, count, total, -e.lo, n)
         if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(s.bindings[i].value, -1, false, total))
 
+# Relations a range loop keeps between scalars it changes (`low <=? high`
+# while tracking a minimum and maximum): pairs of changed scalar places whose
+# entry values a row (or one shared value) relates. Candidates only, to be
+# validated by fact_range_invariants. A value with one known value (a
+# constant start) is left to its interval. At most 8 places, 8 rows.
+fact_range_candidates = (pre: FactState, s: FactState) -> (PlaceIdentity, PlaceIdentity, int)[]:
+    out: (PlaceIdentity, PlaceIdentity, int)[]
+    places: PlaceIdentity[]
+    starts: int[]
+    loop binding in s.bindings:
+        if places.len() >= 8: break
+        if binding.place.root != .local: continue
+        i = fact_binding(pre, binding.place)
+        if i < 0 or pre.bindings[i].value == binding.value or not fact_scalar(int(locals[binding.place.declaration].type)): continue
+        start = pre.bindings[i].value
+        b = fact_bound(pre, start)
+        if b.lo == b.hi: continue
+        places.push(binding.place)
+        starts.push(start)
+    if places.len() < 2: return out
+    loop i in [0..places.len()):
+        loop j in [0..places.len()):
+            if i == j or out.len() >= 8: continue
+            d = fact_shortest(pre, starts[i], starts[j])
+            if d != FACT_MAX: out.push((places[i], places[j], d))
+    out
+
+fact_range_assume = (s: mut FactState, rows: (PlaceIdentity, PlaceIdentity, int)[], at: int):
+    loop row in rows:
+        i = fact_binding(s, row.0)
+        j = fact_binding(s, row.1)
+        if i >= 0 and j >= 0: fact_difference(s, s.bindings[i].value, s.bindings[j].value, row.2, at)
+
+# The candidates every backedge and break keeps (a state that is not live
+# keeps them all).
+fact_range_kept = (edges: FactLoop, rows: (PlaceIdentity, PlaceIdentity, int)[]) -> (PlaceIdentity, PlaceIdentity, int)[]:
+    out: (PlaceIdentity, PlaceIdentity, int)[]
+    loop row in rows:
+        held = true
+        loop t in [edges.back, edges.exits]:
+            if not t.live: continue
+            i = fact_binding(t, row.0)
+            j = fact_binding(t, row.1)
+            if i < 0 or j < 0 or not fact_distance(t, t.bindings[i].value, t.bindings[j].value, row.2): held = false
+        if held: out.push(row)
+    out
+
+# A range loop's body with its loop value bound and bounded by the range.
+fact_range_body = (n: int, s: FactState, lo: int, hi: int) -> FactState:
+    iterator = int(nodes[n].a)
+    body = s
+    l = int(nodes[n].sym)
+    v = fact_new(body, fact_domain(int(locals[l].type)))
+    fact_bind(body, PlaceIdentity(.local, int(locals[l].owner), l), v)
+    lower = fact_new(body, fact_domain(T_BOOL), FactTerm(.ge, v, lo))
+    upper = fact_new(body, fact_domain(T_BOOL), FactTerm((if has_flag(iterator, NF_INCLUSIVE): Tok.le else: Tok.lt), v, hi))
+    fact_assume(body, lower, true)
+    if nodes[iterator].b != 0: fact_assume(body, upper, true)
+    body
+
+# Houdini over the candidates: a speculative pass with all of them assumed at
+# the head drops those a backedge or break loses, and a second pass must keep
+# the rest, or none is kept. Each kept row holds at entry and is preserved, so
+# it holds at every head and at the exit. At most two extra body passes, only
+# for a loop with related changing scalars.
+fact_range_invariants = (n: int, pre: FactState, s: mut FactState, lo: int, hi: int):
+    if fact_loop_exhausted: return
+    rows = fact_range_candidates(pre, s)
+    if rows.len() == 0: return
+    outer = fact_speculating
+    fact_speculating += 1
+    settled = false
+    loop round in [0..2):
+        trial = s
+        fact_range_assume(trial, rows, n)
+        body = fact_range_body(n, trial, lo, hi)
+        edges = fact_loop_body(n, body)
+        if not edges.back.live and not edges.exits.live: break
+        kept = fact_range_kept(edges, rows)
+        if kept.len() == rows.len():
+            settled = true
+            break
+        rows = kept
+        if rows.len() == 0: break
+    fact_speculating = outer
+    if settled and not fact_loop_exhausted: fact_range_assume(s, rows, n)
+
 fact_range = (n: int, s: mut FactState):
     iterator = int(nodes[n].a)
     lo = fact_capture(int(nodes[iterator].a), s)
@@ -3122,6 +3216,7 @@ fact_range = (n: int, s: mut FactState):
             if i < 0: continue
             e = s.bindings[i].value
             kept.push((l, fact_bound(s, e), fact_entails(s, e, hi, -1)))
+    pre = s
     fact_changes(n, s, n)
     loop entry in kept:
         i = fact_binding(s, PlaceIdentity(.local, int(locals[entry.0].owner), entry.0))
@@ -3133,15 +3228,9 @@ fact_range = (n: int, s: mut FactState):
         if entry.2 and y.hi != FACT_MIN: b.hi = min(b.hi, max(entry.1.hi, y.hi - 1))
         fact_set_bound(s, v, b)
         if entry.2: fact_difference(s, v, hi, -1, n)
+    if s.live and int(nodes[n].sym) != 0: fact_range_invariants(n, pre, s, lo, hi)
     after = s
-    body = s
-    l = int(nodes[n].sym)
-    v = fact_new(body, fact_domain(int(locals[l].type)))
-    fact_bind(body, PlaceIdentity(.local, int(locals[l].owner), l), v)
-    lower = fact_new(body, fact_domain(T_BOOL), FactTerm(.ge, v, lo))
-    upper = fact_new(body, fact_domain(T_BOOL), FactTerm((if has_flag(iterator, NF_INCLUSIVE): Tok.le else: Tok.lt), v, hi))
-    fact_assume(body, lower, true)
-    if nodes[iterator].b != 0: fact_assume(body, upper, true)
+    body = fact_range_body(n, s, lo, hi)
     fact_loop_body(n, body)
     s = after
     if pushes.len() > 0 and nodes[iterator].b != 0:

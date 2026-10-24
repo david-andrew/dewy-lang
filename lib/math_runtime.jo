@@ -135,6 +135,25 @@ __mi_parse = (s: str) -> __dewy_int | NotAnInteger | TooManyDigits:
 # to_int(text max_digits=n) (the compiler sends a call with the limit here)
 __mi_parse_limited = (s: str, max_digits: int) -> __dewy_int | NotAnInteger | TooManyDigits: __mi_parse_slow(s, max_digits)
 
+# to_int(text max_digits=n) with a literal n from 1 to 18 (the compiler sends that call here):
+# the same answers as __mi_parse_slow, but at most 18 digits always fit the word payload, so
+# no big integer is made and nothing can fail.
+__mi_parse_word = (s: str, max_digits: int) -> __dewy_int | NotAnInteger | TooManyDigits:
+    p = data(s)
+    n = len(s)
+    i = 0
+    if n > 0 and (p[0] == '-' or p[0] == '+'): i = 1
+    if i >= n: return NotAnInteger()
+    value = 0
+    loop k in [i..n):
+        d = int(p[k]) - 48
+        if u64(d) > 9: return NotAnInteger()
+        # (counted after the check that they are digits, as __mi_parse_slow does)
+        if k - i >= max_digits: return TooManyDigits()
+        value = value * 10 + d
+    if p[0] == '-': value = -value
+    (value << 1) as __dewy_int
+
 # Dewy's to_int: an optional sign, then decimal digits; nothing else (no spaces, `_` or 0x).
 # More than max_digits digits (zero or less: no limit) give TooManyDigits: converting them
 # costs time that grows faster than their length (CVE-2020-10735). Anything else that is not

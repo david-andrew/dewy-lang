@@ -15,7 +15,7 @@ Log:type = [
     rejected:int64<c => 0 <=? c and c <=? max_lines>
 ]
 
-Summary:type = [count:int64<c => 0 <? c and c <=? capacity> low:Reading high:Reading total:int64 mean_tenths:int64 median:Reading]
+Summary:type = [count:int64<c => 0 <? c and c <=? capacity> low:Reading high:Reading<(>=? low)> total:int64 mean_tenths:int64 median:Reading]
 
 BadReading:type = type of error & [message:string]
 
@@ -85,7 +85,7 @@ degrees = (tenths:int64):>string & allocates => {
     "{sign}{magnitude // 10}.{magnitude % 10}"
 }
 
-main = ():>void | OutOfMemory => {
+main = ():>(void | OutOfMemory) & no panics => {
     let log = Log[[loop _ in [0..capacity) Reading(0)] 0 0]
     let lines:int64 = 0
     loop lines <? max_lines {

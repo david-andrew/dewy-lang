@@ -504,7 +504,7 @@
   "112_bulletproof_sensor": {
    "milestone": 46,
    "note": "Sensor-log summarizer under $bulletproof: fixed arrays, refined Reading and Log fields, rows on every function, OutOfMemory handled, every index, division, narrowing and loop bound proven, bad lines as values.",
-   "open": "Decided (2026-10-23): the $bulletproof bundle ($no_hidden_costs, $explicit_allocation_failure, $finite_floats, $no_deadlocks, $no_assumed_bounds). Awaiting implementation: $no_assumed_bounds (the bundle holds the rest); a Reading-annotated local loses its refinement after a loop."
+   "open": "Decided (2026-10-23): the $bulletproof bundle. Proven now: the Summary invariant (high >=? low) through the range loop, the histogram width, sort_prefix's inner loop, the mean's float division, and main's row (`& no panics`, as test_bulletproof writes it). Awaiting: closed `& allocates` rows over strings (parse_reading, degrees: managed values and library calls are still unclassified costs, effects slice 4); formatting an `int` (`{i}`) under no runtime checks (lib/bigint.dewy's divisions are unproven); $no_assumed_bounds."
   }
  },
  "design_passing": [

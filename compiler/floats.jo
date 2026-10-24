@@ -23,6 +23,8 @@ use 'lower.jo'
 use 'directives.jo'
 use 'isolation.jo'
 use 'units.jo'
+use 'facts.jo'
+use 'refine.jo'
 
 # ---------------- float-to-integer conversions ----------------
 
@@ -773,7 +775,13 @@ ff_conv = (n: int) -> FR:
             m = ff_mode_at(nodes[n].pos)
             if m & FF_INF != 0: ff_obligation(n, FF_INF, "the `int` fits a float")
             return ff_top()
-        return FR(-18446744073709551616.0, 18446744073709551616.0)
+        # (a narrow or refined integer converts within its bounds: a
+        # `count:int64<(>? 0)>` divides without making a NaN)
+        st = refine_storage(a, ntype(a))
+        b = ref_interval(st, fact_domain(st))
+        lo = if b.lo == FACT_MIN: -18446744073709551616.0 else: f64(b.lo)
+        hi = if b.hi == FACT_MAX: 18446744073709551616.0 else: f64(b.hi)
+        return FR(lo, hi)
     if cv == i32(int(CV.float2int)) and to != T_MATH_INT:
         # (a proven range drops the conversion's runtime check)
         tt = prune(to)
