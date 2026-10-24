@@ -1,3 +1,12 @@
+# Sparse panic sites collected only by a complete obligation-free body walk.
+fact_panic_sites: {int: int[]} = {}
+fact_panic_collect = false
+fact_panic_pending: int[]
+use 'ide.jo'
+fact_has_deferred = false
+fact_deferred: {int: bool} = {}
+fact_deferred_checks: {int: int[]} = {}
+fact_deferred_proving = false
 use 'exact.jo'
 use 'math_lower.jo'
 # Finite value facts and the cheap lowering domain. Places name storage;
@@ -720,6 +729,15 @@ fact_library_call = (n: int, name: str) -> bool:
     d = int(fns[int(nodes[n].sym)].decl)
     d != 0 and pos_in_lib(nodes[d].pos) and name_of(int(nodes[d].name)) == name
 
+# Reviewed array emptiness contract. O(1), only when a demanded expression
+# reads the result; mutation continues to invalidate the receiver normally.
+fact_empty_array_call = (n: int) -> bool:
+    if nkids(n) != 1 or not fact_library_call(n, "is_empty"): return false
+    t = fact_type(ntype(kid(n, 0)))
+    if types[t].kind != .array and types[t].kind != .fixed: return false
+    d = int(fns[int(nodes[n].sym)].decl)
+    files[pos_file(nodes[d].pos)].path == lib_dir + "/core/array.jo"
+
 # The fields of record value base, by ordinal, for a dependent field contract.
 # O(fields); each sibling is projected once per record value.
 fact_field_args = (s: mut FactState, base: int) -> int[]:
@@ -1078,7 +1096,10 @@ fact_summary = (f: int) -> FactSummary:
     fact_loops = []
     fact_summary_acc = FactSummary()
     state = FactState()
-    if refine_active: refine_fact_entry(f, state)
+    # Width conversions request refinements without enabling declared contracts.
+    # A summary/deferred walk still needs its own entry, never its caller's slots.
+    refine_entry = []
+    if refine_active or refine_owners.has(f): refine_fact_entry(f, state)
     fact_summary_entry = []
     if tkind(t) == .array:
         loop l in fns[f].params:
@@ -3994,7 +4015,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
         else if k == .for_ or k == .while_: values.push(int(nodes[n].a))
         # (a fork closure's creation reads its captures, pushed above, not its body)
         else if k == .lambda: pass
-        else if k == .call and nodes[n].aux == 0 and not result_active and not proof_active and not fact_divisors.has(n) and fact_floor_call(n) == 0 and fact_string_call(n) == 0 and not fact_extremum_call(n) and not ref_refined_result(int(fns[int(nodes[n].sym)].ret)):
+        else if k == .call and nodes[n].aux == 0 and not result_active and not proof_active and not fact_divisors.has(n) and fact_floor_call(n) == 0 and fact_string_call(n) == 0 and not fact_extremum_call(n) and not fact_empty_array_call(n) and not ref_refined_result(int(fns[int(nodes[n].sym)].ret)):
             # Ordinary summaries start from unknown formals: their return
             # facts do not depend on the actual values. Argument obligations
             # and effects remain separate roots of this slice.
@@ -4153,39 +4174,66 @@ fact_bounded_index = (n: int) -> bool:
 # a division, a refinement or narrowing, an assertion, a loan, a string
 # position. A syntactic walk of every operand (a place's route included), so
 # it cannot miss what the transfer would visit. O(body nodes).
+fact_obligation_node = (n: int) -> bool:
+    k = nodes[n].kind
+    if k == .index: return not has_flag(n, NF_INBOUNDS) and fact_bounded_index(n)
+    if k == .binary:
+        if nodes[n].aux == 0 and (nodes[n].op == i32(int(Tok.slash)) or nodes[n].op == i32(int(Tok.percent))) and is_int(ntype(int(nodes[n].b))) and not fact_literal_nonzero(int(nodes[n].b)): return true
+        return fact_shift_obliged(n)
+    if k == .assign: return fact_shift_obliged(n)
+    if k == .for_: return fact_stepped_loop(n) or fact_open_range(n)
+    if k == .conv:
+        if exact_has_store(n) and not exact_decided(n) or nodes[n].aux == i32(int(CV.refinement)): return true
+        return nodes[n].aux == i32(int(CV.int_)) and prune(ntype(int(nodes[n].a))) == T_MATH_INT and prune(ntype(n)) != T_MATH_INT
+    if k == .call:
+        if wi_fact_calls.has(n) or fact_divisors.has(n) or fact_range_call(n): return true
+        if (fact_floor_call(n) != 0 and not fact_literal_nonzero(kid(n, 1))) or fact_string_call(n) >= 2 or fact_array_call(n) != 0 or fact_power_call(n): return true
+        map = fact_map_call(n)
+        if map >= 2 and map <= 4: return true
+        # A fork closure's obligations start from its creator's facts.
+        if fact_library_call(n, "parallel_range") or fact_library_call(n, "parallel_map"):
+            loop arg in kids(n):
+                if nodes[arg].kind == .lambda:
+                    fact_panic_collect = false
+                    if fact_obliged(int(nodes[arg].b)): return true
+        return false
+    if k == .intrinsic:
+        id = nodes[n].aux as IN
+        return id == .static_assert or id == .runtime_assert or id == .assert or nodes[n].aux2 == i32(RANGE_EXHAUSTION) or id == .lend or id == .loan_length or id == .loan_store or id == .loan_address or id == .loan_load or id == .pop or id == .remove or id == .truncate
+    false
+
 fact_obliged = (n: int) -> bool:
     if n <= 0 or n >= nodes.len(): return false
     k = nodes[n].kind
+    if fact_panic_collect:
+        if k == .parallel_region: fact_panic_collect = false
+        else if k == .intrinsic or k == .call or k == .fnref or k == .lambda or k == .pair or k == .partial or k == .binary and nodes[n].aux == 1: fact_panic_pending.push(n)
     if k == .lambda: return false
-    # (an index the compiler made in bounds, as a loop's element read, is none)
-    if k == .index and not has_flag(n, NF_INBOUNDS) and fact_bounded_index(n): return true
-    if k == .binary and nodes[n].aux == 0 and (nodes[n].op == i32(int(Tok.slash)) or nodes[n].op == i32(int(Tok.percent))): return true
-    if (k == .binary or k == .assign) and fact_shift_obliged(n): return true
-    if k == .for_ and (fact_stepped_loop(n) or fact_open_range(n)) or k == .call and fact_range_call(n): return true
-    if fact_exact_demand(n): return true
-    if k == .conv and nodes[n].aux == i32(int(CV.refinement)): return true
-    if k == .conv and nodes[n].aux == i32(int(CV.int_)) and prune(ntype(int(nodes[n].a))) == T_MATH_INT and prune(ntype(n)) != T_MATH_INT: return true
-    if k == .call and wi_fact_calls.len() > 0 and wi_fact_calls.has(n): return true
-    if k == .call and (fact_divisors.has(n) or fact_floor_call(n) != 0 or fact_string_call(n) >= 2 or fact_array_call(n) != 0 or fact_power_call(n)): return true
-    if k == .call and fact_map_call(n) >= 2 and fact_map_call(n) <= 4: return true
-    # (a fork closure's obligations start from its creator's facts)
-    if k == .call and (fact_library_call(n, "parallel_range") or fact_library_call(n, "parallel_map")):
-        loop arg in kids(n):
-            if nodes[arg].kind == .lambda and fact_obliged(int(nodes[arg].b)): return true
-    if k == .intrinsic:
-        id = nodes[n].aux as IN
-        if id == .static_assert or id == .runtime_assert or id == .assert or nodes[n].aux2 == i32(RANGE_EXHAUSTION) or id == .lend or id == .loan_length or id == .loan_store or id == .loan_address or id == .loan_load or id == .pop or id == .remove or id == .truncate: return true
-    if k == .ident and nodes[n].aux == i32(int(SK.local)):
-        l = int(nodes[n].sym)
-        if l > 0 and int(locals[l].flags) & LF_ALIAS != 0 and locals[l].alias != 0 and fact_obliged(int(locals[l].alias)): return true
-    if fact_obliged(int(nodes[n].a)) or fact_obliged(int(nodes[n].b)): return true
-    if k != .for_:
-        if fact_obliged(int(nodes[n].c)): return true
-        if k != .partial and fact_obliged(int(nodes[n].d)): return true
-    loop i in [0..nkids(n)):
-        if fact_obliged(kid(n, i)): return true
-    loop i in [0..nkids2(n)):
-        if fact_obliged(kid2(n, i)): return true
+    if k == .ident:
+        if nodes[n].aux == i32(int(SK.local)):
+            l = int(nodes[n].sym)
+            if l > 0 and int(locals[l].flags) & LF_ALIAS != 0 and locals[l].alias != 0:
+                fact_panic_collect = false
+                return fact_obliged(int(locals[l].alias))
+        return false
+    mask = isolation_children(k)
+    if mask == 0: return false
+    # A finite lowering width is required even when runtime checks are allowed.
+    if n < exact_marks.len() and exact_marks[n] & 128 != 0: return true
+    if fact_obligation_node(n):
+        policy = dir_policy(nodes[n].pos)
+        if policy == DIR_STATIC or policy == DIR_PROTOTYPE or dir_obligations or ide_on or dir_forced: return true
+        fact_has_deferred = true
+    if mask < 0: mask = 7 | 16 | 32
+    if mask & 1 != 0 and fact_obliged(int(nodes[n].a)): return true
+    if mask & 2 != 0 and fact_obliged(int(nodes[n].b)): return true
+    if mask & 4 != 0 and fact_obliged(int(nodes[n].c)): return true
+    if mask & 16 != 0:
+        loop child in kids(n):
+            if fact_obliged(child): return true
+    if mask & 32 != 0:
+        loop i in [0..nkids2(n)):
+            if fact_obliged(kid2(n, i)): return true
     false
 
 # A block's own declarations go out of scope at its end: nothing can name
@@ -4808,6 +4856,10 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             else if floor_probe: fact_probe_divisor(n, s, values[1], kid(n, 1))
             if values.len() == 2 and fact_power_call(n): fact_power_check(n, s, values[1])
             if values.len() == 5 and fact_range_call(n): fact_step_check(n, s, values[0], values[1], kid(n, 0), kid(n, 1))
+        if fact_empty_array_call(n):
+            t = fact_type(ntype(kid(n, 0)))
+            length = if types[t].kind == .fixed: fact_constant(s, fixed_len(t)) else: fact_project(s, values[0], -1, false, T_INT)
+            return fact_new(s, fact_domain(T_BOOL), FactTerm(.eq, length, fact_constant(s, 0)))
         array = fact_array_call(n)
         if array != 0: fact_array_call_check(n, s, values, array)
         if array >= 30:
@@ -5241,27 +5293,36 @@ fact_progress_note = (assignment: int):
         exact_measure_sites[store] = site
 
 fact_exact_demand = (n: int) -> bool:
-    (exact_has_store(n) and not exact_decided(n) and dir_policy(nodes[n].pos) == DIR_STATIC) or (n >= 0 and n < exact_marks.len() and exact_marks[n] & 128 != 0)
+    (exact_has_store(n) and not exact_decided(n) and (fact_deferred_proving or dir_policy(nodes[n].pos) == DIR_STATIC)) or (n >= 0 and n < exact_marks.len() and exact_marks[n] & 128 != 0)
+
+# (Jo sources, the compiler's own, keep runtime checks: none is demanded)
+fn_dewy = (f: int) -> bool:
+    m = int(fns[f].mod)
+    if m >= 0 and m < modules.len():
+        file = int(modules[m].file)
+        return file >= 0 and file < files.len() and files[file].is_dewy
+    files[pos_file(nodes[int(fns[f].body)].pos)].is_dewy
 
 facts_finalize = ():
     if proof_active: proof_prepare()
     if loan_owners.len() == 0 and fact_requests.len() == 0 and refine_requests.len() == 0 and wi_fact_requests.len() == 0 and proof_calls.len() == 0 and not proof_active and not result_active and fact_policy == .RuntimeAllowed and exact_stores.len() == 0 and exact_owners.len() == 0: return
     demanded: {int: bool} = {}
     loop request in wi_fact_requests: demanded[request.owner] = true
-    loop f, _ in exact_proof_demands: demanded[f] = true
     loop f, _ in loan_owners: demanded[f] = true
     if proof_active:
         loop call in proof_calls: demanded[call.owner] = true
         loop f in [1..fns.len()):
             if proof_decls.has(int(fns[f].decl)): demanded[f] = true
     loop request in fact_requests: demanded[request.owner] = true
-    loop request in refine_requests: demanded[request.owner] = true
     if result_active:
         loop f in [1..fns.len()):
             if result_contracts.has(int(fns[f].decl)): demanded[f] = true
+    mandatory = demanded
+    loop request in refine_requests: demanded[request.owner] = true
+    loop f, _ in exact_proof_demands: demanded[f] = true
     if fact_policy == .RequireStatic:
         loop f in [1..fns.len()):
-            if fns[f].body != 0 and fns[f].state == 2 and not fn_in_lib(f): demanded[f] = true
+            if fns[f].body != 0 and fns[f].state == 2 and not fn_in_lib(f) and fn_dewy(f): demanded[f] = true
     # (closures after the functions that create them: a fork's entry facts)
     order: int[]
     loop f, _ in demanded:
@@ -5288,10 +5349,18 @@ facts_finalize = ():
         if proof_active and proof_decls.has(int(fns[f].decl)): fact_policy = .RequireStatic
         # (a body with no partial operation, assertion or contract has
         # nothing to decide: its loops and calls are not walked for it)
-        if not result_active and not (proof_active and proof_decls.has(int(fns[f].decl))) and ownership_decls.len() == 0 and not loan_owners.has(f) and not fact_obliged(int(fns[f].body)):
+        fact_has_deferred = false
+        fact_panic_collect = true
+        fact_panic_pending = []
+        uniform_defer = not dir_obligations and not ide_on and not dir_forced and not exact_proof_demands.has(f) and dir_uniform_runtime(nodes[int(fns[f].body)].pos)
+        if not mandatory.has(f) and not result_active and not (proof_active and proof_decls.has(int(fns[f].decl))) and ownership_decls.len() == 0 and not loan_owners.has(f) and (uniform_defer or not fact_obliged(int(fns[f].body))):
+            if not uniform_defer and fact_panic_collect: fact_panic_sites[f] = fact_panic_pending
+            fact_panic_collect = false
+            if uniform_defer or fact_has_deferred: fact_deferred[f] = true
             fact_policy = previous_policy
             ic_restore(icb)
             continue
+        fact_panic_collect = false
         if refine_active or refine_requests.len() > 0: refine_fact_entry(f, state)
         if fact_fork_entries.len() > 0 or fact_parallel_bounds.len() > 0: fact_fork_seed(f, state)
         fact_slice_prepare(f)
@@ -5342,6 +5411,12 @@ facts_reset = ():
     fact_fork_entries = {}
     fact_parallel_bounds = {}
     fact_decided = {}
+    fact_deferred = {}
+    fact_deferred_checks = {}
+    fact_deferred_proving = false
+    fact_panic_sites = {}
+    fact_panic_collect = false
+    fact_panic_pending = []
     fact_policy_default = false
     fact_probe_runs = {}
     fact_returns_cache = {}
@@ -5865,3 +5940,59 @@ fact_join_shared_rows = (s: mut FactState, a: FactState, b: FactState):
     loop i in [common..b.differences.len()):
         row = b.differences[i]
         if fact_slot(s, row.a) >= 0 and fact_slot(s, row.b) >= 0 and fact_distance(a, row.a, row.b, row.limit): fact_difference(s, row.a, row.b, row.limit, row.at)
+
+fact_literal_nonzero = (n0: int) -> bool:
+    n = n0
+    loop nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.none_)): n = int(nodes[n].a)
+    nodes[n].kind == .int_lit and nodes[n].ival != 0
+
+# Runtime-enabled bodies need no proof until a static caller asks whether
+# they can panic. Each deferred body is visited at most once on that demand.
+fact_complete_deferred = (f: int):
+    if not fact_deferred.has(f): return
+    fact_deferred.remove(f)
+    previous_proving = fact_deferred_proving
+    fact_deferred_proving = true
+    loop key in [0..16): fact_slice_cache.remove((f << 4) | key)
+    pending = fact_deferred_checks.get(f) ?? []
+    fact_deferred_checks.remove(f)
+    if pending.len() > 0:
+        # These were evidence-free fallback answers, not visits of the body.
+        # The full transfer below decides every path, then retries any omitted
+        # boundary. Never retain a provisional panic after its check is proved.
+        if effect_panic_pending.has(f):
+            effect_panic_nodes.remove(f)
+            effect_panic_texts.remove(f)
+            effect_panic_pending.remove(f)
+        loop n in pending:
+            if exact_has_store(n): exact_marks[n] &= 231
+            fact_validated.remove(n)
+    icb = ic_fn(IC_FACTS, f)
+    fact_owner = f
+    fact_terms = [FactTerm()]
+    state = FactState()
+    # Width conversions request refinements without enabling declared contracts.
+    # A summary/deferred walk still needs its own entry, never its caller's slots.
+    refine_entry = []
+    if refine_active or refine_owners.has(f): refine_fact_entry(f, state)
+    if fact_fork_entries.len() > 0 or fact_parallel_bounds.len() > 0: fact_fork_seed(f, state)
+    fact_slice_prepare(f)
+    fact_capture(int(fns[f].body), state)
+    # Evidence-free retries have no function entry to refresh, but retain
+    # their owner for any panic obligation they cannot prove.
+    fact_owner = 0
+    fact_retry_owner = f
+    loop n in pending:
+        fact_terms = [FactTerm()]
+        state = FactState()
+        if exact_has_store(n):
+            if not exact_decided(n): exact_fact_store(n, 0, state)
+        else if not fact_validated.has(n):
+            refine_entry = []
+            fact_capture(n, state)
+    fact_retry_owner = 0
+    fact_terms = []
+    fact_slice = FactSlice()
+    directives_after_facts()
+    fact_deferred_proving = previous_proving
+    ic_restore(icb)

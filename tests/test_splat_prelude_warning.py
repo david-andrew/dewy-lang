@@ -37,11 +37,11 @@ def test_splat_shadowing_the_prelude_warns(compiler, tmp_path):  # noqa: F811
 
 
 def test_selected_or_named_imports_are_quiet(compiler, tmp_path):  # noqa: F811
-    (tmp_path / 'helpers.dewy').write_text(HELPERS)
+    (tmp_path / 'helpers.dewy').write_text((HELPERS) + "\n$runtime_checks\n")
     selected = tmp_path / 'selected.dewy'
-    selected.write_text('import p"helpers.dewy"\nfrom p"helpers.dewy" import mean, first\nprintl"{mean([1 2])} {own()}"\n')
+    selected.write_text(('import p"helpers.dewy"\nfrom p"helpers.dewy" import mean, first\nprintl"{mean([1 2])} {own()}"\n') + "\n$runtime_checks\n")
     named = tmp_path / 'named.dewy'
-    named.write_text('import p"helpers.dewy" as h\nprintl"{h.mean([1 2])} {mean([1 2])}"\n')
+    named.write_text(('import p"helpers.dewy" as h\nprintl"{h.mean([1 2])} {mean([1 2])}"\n') + "\n$runtime_checks\n")
     assert warnings_of(compiler, selected) == []
     assert warnings_of(compiler, named) == []
 

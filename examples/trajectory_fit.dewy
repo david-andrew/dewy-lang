@@ -1,6 +1,7 @@
 # Fit height = c[0] + c[1]*time + c[2]*time*time from a few measurements.
 # Run: tools/dewy examples/trajectory_fit.dewy
 # Test: tools/dewy test examples/trajectory_fit.dewy
+$runtime_checks
 
 fit = (times:array<float64> heights:array<float64>):>array<float64 length=3> => {
     $runtime_assert(times.length =? heights.length and times.length >=? 3)

@@ -71,7 +71,10 @@ def test_string_obligations_runtime_checks(compiler, tmp_path):
     assert result.stdout == 'b\n' and result.returncode == 101 and 'string index out of bounds' in result.stderr
 
 
-def test_string_obligations_default_unchanged(compiler, tmp_path):
-    """Until the default flips, an unproven string index keeps its runtime check."""
-    result = run(compiler, tmp_path, 'first=(text:string):>string=>text[0]\nprintl(first("a"))\n', 'run')
+def test_string_obligations_by_default(compiler, tmp_path):
+    """By default an unproven string index is a compile error; `$runtime_checks` keeps a check."""
+    source = 'first=(text:string):>string=>text[0]\nprintl(first("a"))\n'
+    result = run(compiler, tmp_path, source, 'run')
+    assert result.returncode != 0 and 'cannot prove' in result.stderr, result.stderr
+    result = run(compiler, tmp_path, source + '$runtime_checks\n', 'run')
     assert result.returncode == 0 and result.stdout == 'a\n', result.stderr

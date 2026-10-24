@@ -30,7 +30,7 @@ main = () => {
 
 def test_assignment_end_infers_thrown_kinds(compiler, tmp_path):  # noqa: F811
     source = tmp_path / 'main.dewy'
-    source.write_text(SOURCE)
+    source.write_text((SOURCE) + "\n$runtime_checks\n")
     run = subprocess.run([compiler, 'run', source], capture_output=True, text=True, timeout=60, check=False)
     assert run.returncode == 1, run.stdout + run.stderr
     assert run.stdout.split('\n')[:3] == ['8', 'true', '8'], run.stdout

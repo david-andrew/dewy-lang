@@ -29,7 +29,7 @@ main=()=>printl(f([1 2 3]))
 
 def test_runtime_optout_retains_check_after_length_alias(compiler, tmp_path):
     source = tmp_path / 'alias.dewy'
-    source.write_text('''f=(xs:array<int64>):>int64=>{
+    source.write_text(('''f=(xs:array<int64>):>int64=>{
 let n=xs.length
 {
 $no_assumed_bounds
@@ -37,7 +37,7 @@ return n*16
 }
 }
 main=()=>printl(f([1 2 3]))
-''')
+''') + "\n$runtime_checks\n")
     result = subprocess.run([compiler, 'build', source, '--ir', '-o', tmp_path / 'alias'], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     body = next(b for b in re.split(r'^fn ', result.stdout, flags=re.M) if b.startswith('f_f_'))

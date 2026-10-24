@@ -7,14 +7,14 @@ from tests.support import compiler
 @pytest.mark.parametrize('release', [False, True])
 def test_secret_exact_cancellation(compiler, tmp_path, release):
     source = tmp_path / 'secret_exact.dewy'
-    source.write_text('''f=(a:secret<int64> b:int64 c:int64):>secret<int64>=>a*b+c
+    source.write_text(('''f=(a:secret<int64> b:int64 c:int64):>secret<int64>=>a*b+c
 main=(args:array<string>)=>{
 let a=int64(to_int(args[1]) ?? 0)
 let b=int64(to_int(args[2]) ?? 0)
 let c=int64(to_int(args[3]) ?? 0)
 printl(f(a b c).reveal)
 }
-''')
+''') + "\n$runtime_checks\n")
     binary = tmp_path / 'secret_exact'
     built = subprocess.run([compiler, 'build', source, '-o', binary,
                             *(['--release'] if release else [])], capture_output=True, text=True)

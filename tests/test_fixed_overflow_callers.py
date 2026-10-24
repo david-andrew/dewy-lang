@@ -6,6 +6,8 @@ import pytest
 
 from tests.support import compiler
 
+RUNTIME_CHECKS = '\n$runtime_checks\n'
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -21,7 +23,7 @@ main=(args:array<string>)=>{{
     loop i in [0..count) data.push(0)
     printl(xor_stream(key uint32.max nonce data).length)
 }}
-''')
+''' + RUNTIME_CHECKS)
     binary = tmp_path / 'counter'
     built = subprocess.run([compiler, 'build', source, '-o', binary] +
                            (['--release'] if release else []), capture_output=True, text=True)
@@ -42,7 +44,7 @@ def test_text_long_digit_run(compiler, tmp_path, release):
     source = tmp_path / 'digits.dewy'
     source.write_text(f'''import p"{prepared}" as text
 main=(args:array<string>)=>{{printl(text.kernel(args[1] as array<uint8>))}}
-''')
+''' + RUNTIME_CHECKS)
     binary = tmp_path / 'digits'
     built = subprocess.run([compiler, 'build', source, '-o', binary] +
                            (['--release'] if release else []), capture_output=True, text=True)

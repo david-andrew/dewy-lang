@@ -119,10 +119,10 @@ main=():>void=>exit(int64<overflow='wrap'>(nearest([3 1 2] 0)+argmin([3 1 2])))
     'parallel_lengths': '''main=():>void=>{
     let input=[loop i in [0..16) i]
     let output=parallel_map(input (n)=>n+1)
-    let nested=parallel_range(8 (i:int64)=>int64<overflow='wrap'>(i*2))
-    let t=nested[7]
-    loop i in [0..input.length) {t+=int64<overflow='wrap'>(output[i])}
-    exit(int64<overflow='wrap'>(t-150))
+    let nested=parallel_range(8 (i:int64)=>i*2)
+    let t:int=nested[7]
+    loop i in [0..input.length) {t+=output[i]}
+    if t =? 150 exit(0) else exit(1)
 }
 ''',
     # A push makes the length exactly one more: the old length indexes it.
@@ -225,7 +225,7 @@ main=(args:array<string>):>void=>{
 def test_offset_contract_runtime_check(compiler, tmp_path, name):
     source, message = RUNTIME[name]
     path = tmp_path / f'{name}.dewy'
-    path.write_text(source)
+    path.write_text(source + '\n$runtime_checks\n')
     result = subprocess.run([compiler, 'run', path], text=True, capture_output=True, timeout=60, cwd=tmp_path)
     assert result.returncode == 101, result.stdout + result.stderr
     assert result.stdout.splitlines() == ['2' if name == 'upper' else '1'], result.stdout

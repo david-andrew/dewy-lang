@@ -1,5 +1,6 @@
 # quick
 # Patterns whose repeats written out are too big, or nest too deep, are refused when made.
+$runtime_checks
 main=()=>{
     let e=regex_error("(a\{1000\})\{1000\}") printl(e ?? "ok")
     let e=regex_error("((a\{0,1000\})\{0,1000\})\{0,1000\}") printl(e ?? "ok")

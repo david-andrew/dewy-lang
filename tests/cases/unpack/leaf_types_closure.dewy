@@ -1,4 +1,6 @@
 # exit: 42
-make=([x:int64 y:float64])=>()=>if y is?float64 and x=?20 and y=?22.0 42 else 1
+make=([x:int64 y:float64]:array<int64 length=2>)=>()=>if y is?float64 and x=?20 and y=?22.0 42 else 1
 run=()=>{let f=make([20 22]) return f()}
 main=()=>exit(run())
+
+$runtime_checks

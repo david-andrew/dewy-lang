@@ -3,6 +3,7 @@
 # compiler/dewy_fast.jo). Nodes live in one array and refer to their children
 # by index, as the compiler's syntax arena does. Every parse step returns a
 # node index or a ParseError, and `or_throw` carries the first error out.
+$runtime_checks
 from p"tokens.dewy" import Symbol, power, invert, assignment, right_assoc
 from p"lexer.dewy" import Token, Kind, LexError, lex, interpolation_end, text_of, quote_width
 

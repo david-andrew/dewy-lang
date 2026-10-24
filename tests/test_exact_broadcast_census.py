@@ -9,7 +9,7 @@ from tests.support import compiler
 @pytest.mark.parametrize('release', [False, True])
 def test_repeated_census_paths_and_changed_inputs(compiler, tmp_path, release):
     source = tmp_path / 'census.dewy'
-    source.write_text('''
+    source.write_text(('''
 repeated=(xs:array<int64> first:bool):>array<int64>=>{
     let out:array<int64>=[]
     if first out=xs .* xs .- xs
@@ -31,7 +31,7 @@ main=(args:array<string>)=>{
     if args[2]=?"changed" printl(changed(value))
     else printl(repeated(xs args[2]=?"first"))
 }
-''')
+''') + "\n$runtime_checks\n")
     binaries = []
     for debug in [False, True]:
         binary = tmp_path / ('scalar' if debug else 'census')

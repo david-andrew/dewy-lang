@@ -78,6 +78,7 @@ MEMBERS = {
 @pytest.mark.parametrize('member', sorted(MEMBERS))
 def test_member_guarantee(compiler, tmp_path, member):
     body, diagnostic = MEMBERS[member]
+    if member == 'local_assert': diagnostic = 'may panic'
     result = run(compiler, tmp_path, '$bulletproof\n' + body)
     assert result.returncode != 0 and diagnostic in result.stderr, result.stderr
 
@@ -106,6 +107,7 @@ pick = (xs:array<int64> i:int64):>int64 => {
 }
 main = () => {
     $bulletproof=false
+    $runtime_checks
     printl(pick([1 2] 1))
 }
 '''

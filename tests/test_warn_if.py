@@ -48,7 +48,7 @@ def warned(stderr):
 
 def test_unproven_calls_warn(compiler, tmp_path):  # noqa: F811
     source = tmp_path / 'main.dewy'
-    source.write_text(SOURCE)
+    source.write_text((SOURCE) + "\n$runtime_checks\n")
     checked = subprocess.run([compiler, 'check', source], capture_output=True, text=True,
                              timeout=60, check=False)
     assert checked.returncode == 0, checked.stdout + checked.stderr
@@ -75,7 +75,7 @@ def test_editor_shows_the_warnings(tmp_path):
     if not value:
         pytest.skip('set DEWY_CORE_COMPILER for the editor checks')
     source = tmp_path / 'main.dewy'
-    source.write_text('main=():>void=>exit(0)')
+    source.write_text(('main=():>void=>exit(0)') + "\n$runtime_checks\n")
     client = Client(Path(value).resolve(strict=True), tmp_path)
     try:
         def found(diagnostics):
@@ -83,7 +83,7 @@ def test_editor_shows_the_warnings(tmp_path):
                           if d['severity'] == 2 and d['message'] in MESSAGES)
         # (a type test is decided while checking; the facts' warnings come when the editor
         # lowers the document, after a quiet moment)
-        diagnostics = client.set_text(source.as_uri(), SOURCE, 1)
+        diagnostics = client.set_text(source.as_uri(), SOURCE + '\n$runtime_checks\n', 1)
         assert (16, MESSAGES[1]) in found(diagnostics), diagnostics
         while len(found(diagnostics)) < 3:
             message = client.receive()

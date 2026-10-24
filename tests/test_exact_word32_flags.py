@@ -12,7 +12,7 @@ from tests.support import compiler
 @pytest.mark.parametrize('release', [False, True])
 def test_word32_flags(compiler, tmp_path, kind, release):
     source = tmp_path / 'words.dewy'
-    source.write_text(f'''add=(a:{kind} b:{kind}):>{kind}=>a+b
+    source.write_text((f'''add=(a:{kind} b:{kind}):>{kind}=>a+b
 sub=(a:{kind} b:{kind}):>{kind}=>a-b
 mul=(a:{kind} b:{kind}):>{kind}=>a*b
 main=(args:array<string>)=>{{
@@ -22,7 +22,7 @@ if args[1]=?"add" printl(add(a b))
 else if args[1]=?"sub" printl(sub(a b))
 else printl(mul(a b))
 }}
-''')
+''') + "\n$runtime_checks\n")
     binary = tmp_path / 'words'
     built = subprocess.run([compiler, 'build', source, '--ir', '-o', binary,
                             *(['--release'] if release else [])], capture_output=True, text=True)

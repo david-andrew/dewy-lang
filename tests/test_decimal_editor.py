@@ -25,6 +25,7 @@ main=()=>{
     printl(wide)
     printl(exact =? 0.3)
 }
+$runtime_checks
 '''
 
 

@@ -1,5 +1,6 @@
 # exit: 42
-update=<T>(@value:T divisor:T):>void=>{value//=divisor value%=divisor value^=3}
-run=()=>{let a=-17 update(@a 3) let b:bigint=123456789012345678901234567890 let expected=(b//3%3)^3 update(@b 3)
+adjust=<T>(@value:T divisor:T):>void=>{value//=divisor value%=divisor value^=3}
+$runtime_checks
+run=()=>{let a=-17 adjust(@a 3) let b:bigint=123456789012345678901234567890 let expected=(b//3%3)^3 adjust(@b 3)
 return if a =? 0 and b =? expected 42 else 1}
 main=()=>exit(run())

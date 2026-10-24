@@ -71,11 +71,16 @@ def build_case_batch(compiler, directory, cases, body, release, target, *, argum
     """Build independent source modules with a caller-supplied test entry point."""
     imports = []
     for i, (name, source) in enumerate(cases.items()):
+        # (batched programs test run-time behavior: they keep runtime checks
+        # for their unproven obligations unless they set the policy themselves)
+        if '$runtime_checks' not in source and '$prototype' not in source and '$no_hidden_costs' not in source:
+            source += '\n$runtime_checks\n'
         (directory / f'{name}.dewy').write_text(source)
         imports.append(f'from p"{name}.dewy" import (main as case_{i})')
     source = directory / 'batch.dewy'
     parameters = 'argv:array<string>' if arguments else ''
-    source.write_text('\n'.join(imports) + f'\nmain=({parameters}):>void=>{{\n'
+    # (the batch's own calls of its cases may fail their checks: it keeps them too)
+    source.write_text('\n'.join(imports) + f'\n$runtime_checks\nmain=({parameters}):>void=>{{\n'
                       + '\n'.join(body) + '\n}\n')
     binary = directory / 'batch'
     flags = ['--release'] if release else []

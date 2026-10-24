@@ -32,7 +32,7 @@ from tools.compiler.package import package, release_identity
 
 ROOT = Path(__file__).resolve().parents[1]
 DATE = '20261020'
-SAMPLE = 'main=():>void=>{let values=[20 22] exit(sum(values))}\n'
+SAMPLE = 'main=():>void=>{let values=[20 22] if sum(values) =? 42 exit(42) else exit(1)}\n'
 
 
 def host_platform() -> str | None:
@@ -617,7 +617,7 @@ def test_real_toolchain_over_http(world, real_toolchain):
         install(world, env=env)
         work = world.tmp / 'my project'
         work.mkdir()
-        (work / 'main.dewy').write_text(SAMPLE)
+        (work / 'main.dewy').write_text((SAMPLE) + "\n$runtime_checks\n")
         clean = {k: v for k, v in env.items() if k != 'PATH'} | {'PATH': '/usr/bin:/bin'}
         launch(world.prefix, 'build', 'main.dewy', '-o', 'main', env=clean, cwd=work)
         assert subprocess.run([str(work / 'main')], cwd=work).returncode == 42

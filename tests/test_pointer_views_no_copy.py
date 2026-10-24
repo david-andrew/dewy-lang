@@ -46,7 +46,7 @@ CALLEES = {'via_let': {'first'}, 'via_param': {'look'}, 'look': {'first', '__pan
 @pytest.mark.parametrize('flags', [[], ['--release']], ids=['default', 'release'])
 def test_pointer_views_copy_nothing(compiler, tmp_path, flags):
     path = tmp_path / 'views.dewy'
-    path.write_text(SOURCE)
+    path.write_text((SOURCE) + "\n$runtime_checks\n")
     binary = tmp_path / 'views'
     built = subprocess.run([compiler, 'build', path, '-o', binary, *flags], capture_output=True, text=True, timeout=120)
     assert built.returncode == 0, built.stdout + built.stderr

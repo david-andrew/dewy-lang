@@ -7,7 +7,7 @@ from tests.support import compiler  # noqa: F401
 
 def diagnostics(compiler, tmp_path, program):  # noqa: F811
     source = tmp_path / 'main.dewy'
-    source.write_text(program)
+    source.write_text(program + '\n$runtime_checks\n')
     checked = subprocess.run([compiler, 'check', source], capture_output=True, text=True, timeout=60, check=False)
     assert checked.returncode == 0, checked.stdout + checked.stderr
     return [line for line in checked.stderr.splitlines() if 'warning:' in line]

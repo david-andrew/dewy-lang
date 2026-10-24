@@ -8,6 +8,9 @@ from tests.support import ROOT, compiler
 from tests.test_core_fused_determinism import build, check, pytestmark
 from tools.compiler.speed import generate_dewy
 
+# (programs that keep runtime checks for their unproven obligations)
+RUNTIME_CHECKS = '\n$runtime_checks\n'
+
 
 def compile_result(compiler, source, output, workers, *options):
     env = {k: v for k, v in os.environ.items() if not k.startswith('DEWY_')}
@@ -48,7 +51,7 @@ def test_lazy_warning_order_and_bytes(compiler, tmp_path):
     text = generate_dewy(600)
     for i in (0, 20, 200, 400, 590):
         text = text.replace(f'let s="item {i}"', f'let unused_{i}=1\n    let s="item {i}"')
-    source.write_text(text)
+    source.write_text(text + RUNTIME_CHECKS)
     check(compiler, source, tmp_path, DEWY_EMIT_FORCE='1')
     _, err = build(compiler, source, tmp_path / 'warnings', 4, DEWY_EMIT_FORCE='1')
     lines = [line for line in err.splitlines() if 'unused_' in line]

@@ -1,6 +1,9 @@
 # exit: 42
 # quick
 run=()=>{
-let [[[_ [first second]]]]=[["point"->[20 22]]]
+let source:array<dict<string array<int64 length=2>>>=[["point"->[20 22]]]
+let [[[_ [first second]]]]=source
 return first+second}
 main=()=>exit(run())
+
+$runtime_checks

@@ -54,6 +54,7 @@ main=():>void=>{
     temporaries()
     squares()
 }
+$runtime_checks
 '''
 
 QUIET = '''main=():>void=>{
@@ -81,6 +82,7 @@ QUIET = '''main=():>void=>{
     }
     printl"{total} {doubled} {flip} {shifted} {annotated} {floating}"
 }
+$runtime_checks
 '''
 
 

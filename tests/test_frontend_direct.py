@@ -11,7 +11,7 @@ from tests.support import compiler  # noqa: F401
 @pytest.mark.parametrize('release', [False, True])
 def test_direct_expression_identity(compiler, tmp_path, release):
     source = tmp_path / 'expressions.dewy'
-    source.write_text('''Point:type=[x:int64 y:int64]
+    source.write_text(('''Point:type=[x:int64 y:int64]
 twice=(x:int64):>int64=>x*2
 main=():>void=>exit(entry()) entry=()=>{
     let point=Point[10 11]
@@ -28,7 +28,7 @@ main=():>void=>exit(entry()) entry=()=>{
     }
     return 0
 }
-''')
+''') + "\n$runtime_checks\n")
     output = tmp_path / 'expressions'
     images = []
     for mode in ('old', 'compare'):

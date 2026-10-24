@@ -152,6 +152,7 @@ class Fuzzer:
 
     def driver(self, batch: list[Case]) -> str:
         lines = [f'from p"{c.path.as_posix()}" import (main as case_{i})' for i, c in enumerate(batch)]
+        lines.append('$runtime_checks')
         lines.append('main=():>void=>{')
         for i in range(len(batch)):
             lines += [f'    printl"{MARK}B{i}"', f'    case_{i}()', f'    printl"{MARK}E{i}"']

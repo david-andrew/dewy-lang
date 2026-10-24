@@ -2,6 +2,7 @@
 # One listener, several connections: each accept gives the next connection in
 # the order they were made, and each stream carries its own bytes. Large sends
 # arrive whole, in pieces no bigger than asked for.
+$runtime_checks
 import net
 
 main=():>void | net.NetError | Canceled=>{

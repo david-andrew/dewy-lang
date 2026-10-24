@@ -24,13 +24,13 @@ main=()=>printl(advance(10))
 
 def test_inserted_counter_value_retains_check(compiler, tmp_path):
     source = tmp_path / 'insert.dewy'
-    source.write_text('''main=(args:array<string>)=>{
+    source.write_text(('''main=(args:array<string>)=>{
 let count=int64(to_int(args[1]) ?? 0)
 let xs:array<int64>=[]
 loop round in [0..2) {xs.push(count);count+=xs.pop()}
 printl(count)
 }
-''')
+''') + "\n$runtime_checks\n")
     binary = tmp_path / 'insert'
     built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True, text=True)
     assert built.returncode == 0, built.stderr

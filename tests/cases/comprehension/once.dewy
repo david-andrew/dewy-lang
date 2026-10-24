@@ -3,3 +3,5 @@ let calls:int64=0
 items=()=>{calls+=1 return [20 22]}
 run=()=>{let values=[loop x in items() x] return if calls =? 1 values[0]+values[1] else 1}
 main=()=>exit(run())
+
+$runtime_checks

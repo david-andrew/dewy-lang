@@ -9,3 +9,5 @@ make=():>Pack=>{
 read=(values:array<int64>):>int64=>if values.length>?1 values[0]+values[1] else 0
 take=():>array<int64>=>{let owner=make() return owner.values}
 main=():>void=>{let values=take() values.push(40) exit(read(values))}
+
+$runtime_checks

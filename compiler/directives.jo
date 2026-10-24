@@ -1,3 +1,4 @@
+use 'isolation.jo'
 # Scoped settings written as metatags: `$name`, `$name=true`, `$name=false`.
 # A setting holds throughout the scope it is written in (a module, a function
 # body or another block), position ranges standing for scopes. A bundle
@@ -42,12 +43,13 @@ struct DirSite:
 const DIR_STATIC = 0       # a compile error: no hidden trap
 const DIR_RUNTIME = 1      # `$runtime_checks`: a runtime check
 const DIR_PROTOTYPE = 2    # `$prototype`: a runtime check and a warning
-const DIR_IMPLICIT = 3     # the default, while it is still runtime checks
-# The policy outside `$runtime_checks`/`$prototype` scopes. DIR_STATIC makes
-# no traps the default.
-const DIR_DEFAULT = 3
+const DIR_IMPLICIT = 3     # the library's and Jo's own obligations: runtime checks
+# The policy outside `$runtime_checks`/`$prototype` scopes: no traps.
+const DIR_DEFAULT = 0
 
 dir_scopes: DirScope[]
+dir_mixed_files: {int: bool}
+dir_uniform_files: {int: bool}
 dir_bundles: DirBundle[]
 dir_sites: DirSite[]
 dir_proven: {int: bool}        # index node -> proven at every visit
@@ -78,6 +80,8 @@ dir_name_assumed_bounds = 0
 
 directives_reset = ():
     dir_scopes = []
+    dir_mixed_files = {}
+    dir_uniform_files = {}
     dir_bundles = []
     dir_sites = []
     dir_proven = {}
@@ -229,6 +233,9 @@ dir_conflict = (i: int):
 
 dir_push = (s: DirScope):
     dir_scopes.push(s)
+    if s.setting == dir_name_runtime or s.setting == dir_name_prototype:
+        dir_uniform_files.remove(pos_file(s.start))
+        if s.start != dir_module_start(pos_file(s.start)): dir_mixed_files[pos_file(s.start)] = true
     if s.setting == dir_name_assumed_bounds and s.value == 1: dir_assumed_bounds_any = true
     if s.setting == dir_name_copies and s.value == 1: dir_copies_any = true
     if s.setting == dir_name_row and s.value > 0: dir_rows_any = true
@@ -280,8 +287,9 @@ dir_policy = (p: int) -> int:
     if qv == 1: return DIR_PROTOTYPE
     # (the library's own obligations keep their checks unless it says otherwise,
     # however its function came to be analyzed: not every function is, and a
-    # library function analyzed for one request is no different)
-    if pos_in_lib(p): return DIR_IMPLICIT
+    # library function analyzed for one request is no different; so do the
+    # compiler's own Jo sources, which are not Dewy)
+    if pos_in_lib(p) or p > 0 and not files[pos_file(p)].is_dewy: return DIR_IMPLICIT
     if DIR_DEFAULT == DIR_STATIC: return DIR_STATIC
     static = if dir_forced: dir_prior_static else: fact_policy == .RequireStatic
     if static: DIR_STATIC else: DIR_IMPLICIT
@@ -302,7 +310,11 @@ dir_defer = (n: int, what: str, deferrable: bool) -> bool:
     dir_sites.push(DirSite(p, what, policy))
     owner = fact_retry_owner
     if fact_owner > 0: owner = fact_owner
-    if policy != DIR_IMPLICIT or not pos_in_lib(p): effect_panic_note(owner, n, what)
+    if policy != DIR_IMPLICIT or not pos_in_lib(p): effect_panic_note(owner, n, what, fact_deferred.has(owner))
+    if fact_deferred.has(owner):
+        pending = fact_deferred_checks.get(owner) ?? []
+        pending.push(n)
+        fact_deferred_checks[owner] = pending
     if policy == DIR_PROTOTYPE and dir_value(dir_name_warnings, p) != 0: warn(p, "prototype: {what}; it is checked at run time")
     if ide_on and policy == DIR_RUNTIME:
         hint = "runtime check: " + dir_obligation_text(what)
@@ -325,10 +337,12 @@ directives_after_facts = ():
         if proven: add_flag(n, NF_INBOUNDS)
     dir_proven = {}
 
-dir_policy_name = (policy: int) -> str:
+dir_policy_name = (policy: int, at: int) -> str:
     if policy == DIR_RUNTIME: return "$runtime_checks"
     if policy == DIR_PROTOTYPE: return "$prototype"
-    "default"
+    # (no traps is the default: only the library's own and Sloppy sources
+    # keep implicit checks)
+    if files[pos_file(at)].is_dewy: "library" else: "Sloppy source"
 
 # `check --obligations`: each unproven obligation that compiles to a runtime
 # check, in source order, with the setting that made it one.
@@ -352,7 +366,7 @@ dir_print_obligations = ():
     loop i in order:
         s = dir_sites[i]
         kind = if starts_with(s.what, "may panic: "): "" else: "runtime check: "
-        print("{pos_str(s.at)}: {kind}{dir_obligation_text(s.what)} ({dir_policy_name(s.policy)})")
+        print("{pos_str(s.at)}: {kind}{dir_obligation_text(s.what)} ({dir_policy_name(s.policy, s.at)})")
 
 # ---------------- panics ----------------
 # After facts settle which obligations became runtime checks: a no-traps scope
@@ -369,6 +383,7 @@ dir_panics_finalize = ():
     effect_panics_settled = true
     loop f in [1..fns.len()):
         if fns[f].body == 0 or fns[f].state != 2 or fn_in_lib(f): continue
+        if not dir_obligations and not ide_on and not dir_static_body(int(fns[f].body)): continue
         effect_panics(f)
         loop i in [0..(panic_edge_end[f] - panic_edge_at[f]) / 2):
             e = panic_edge_at[f] + 2 * i
@@ -498,3 +513,33 @@ dir_row_origin = (d: int) -> str:
     if i < 0: return ""
     b = name_of(dir_scopes[i].bundle)
     "; `${b}` gives functions without a row of their own this one (opt a function out with `${b}=false` in its body)"
+
+# Only bodies containing a no-traps scope demand the panic graph.
+# O(body nodes), stopping at the first such scope; nested lambdas own their bodies.
+dir_static_body = (n: int) -> bool:
+    if n <= 0: return false
+    if dir_uniform_runtime(nodes[n].pos): return false
+    if nodes[n].pos > 0 and dir_policy(nodes[n].pos) == DIR_STATIC: return true
+    if nodes[n].kind == .lambda: return false
+    mask = isolation_children(nodes[n].kind)
+    if mask < 0: return false
+    if mask & 1 != 0 and dir_static_body(int(nodes[n].a)): return true
+    if mask & 2 != 0 and dir_static_body(int(nodes[n].b)): return true
+    if mask & 4 != 0 and dir_static_body(int(nodes[n].c)): return true
+    if mask & 16 != 0:
+        loop child in kids(n):
+            if dir_static_body(child): return true
+    false
+
+# A module with no nested trap-policy override has one policy throughout.
+# Cache on first demand: O(scopes) once per file, O(1) thereafter. Updating
+# a setting invalidates its file, including lazily parsed declarations.
+dir_uniform_runtime = (p: int) -> bool:
+    if p <= 0: return false
+    file = pos_file(p)
+    if dir_mixed_files.has(file): return false
+    if let cached = dir_uniform_files.get(file): return cached
+    policy = dir_policy(p)
+    runtime = policy == DIR_RUNTIME or policy == DIR_IMPLICIT
+    dir_uniform_files[file] = runtime
+    runtime

@@ -70,6 +70,7 @@ main=(argv:array<string>)=>{
     if op=?"index" {let xs=[10 20 30] printl"{xs[x]} {xs.length}" return}
     panic("unknown operation")
 }
+$runtime_checks
 '''
 
 

@@ -1,6 +1,8 @@
 # exit: 42
 let calls:int64=0
-source=():>dict<uint64 array<int64>>=>{calls+=1 return [uint64.max->[20 22]]}
+source=():>dict<uint64 array<int64 length=2>>=>{calls+=1 return [uint64.max->[20 22]]}
 let [[key [left right]]]=source()
 run=()=>{return if calls=?1 and key=?uint64.max left+right else 1}
 main=()=>exit(run())
+
+$runtime_checks

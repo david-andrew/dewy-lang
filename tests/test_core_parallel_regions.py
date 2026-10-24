@@ -10,7 +10,8 @@ from tests.support import compiler
 
 def build(compiler, tmp_path, source, *, release=True):
     path = tmp_path / 'region.dewy'
-    path.write_text(source)
+    # (these programs test run-time behavior: they keep runtime checks)
+    path.write_text(source + '\n$runtime_checks\n')
     output = tmp_path / 'region'
     run = subprocess.run([compiler, 'build', path, '-o', output, '--ir',
                           *(['--release'] if release else [])],

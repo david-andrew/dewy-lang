@@ -4,3 +4,5 @@ read=(v:int64|string):>int64=>if v is? int64 v else v.length
 pick=(box:Envelope):>int64=>match box.value {<int64|string>=>read(box.value) _=>if box.value 2 else 0}
 run=()=>pick(Envelope[37])+pick(Envelope["abc"])+pick(Envelope[true])
 main=()=>exit(run())
+
+$runtime_checks

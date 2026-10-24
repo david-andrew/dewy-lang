@@ -27,11 +27,11 @@ main=():>void=>exit(0)
 @pytest.mark.parametrize('mode', ['check', 'default', 'release'])
 def test_effect_readonly_and_library_body(compiler, tmp_path, mode):
     source = tmp_path / 'read.dewy'
-    source.write_text('''Point:type=[x:int64 y:int64]
+    source.write_text(('''Point:type=[x:int64 y:int64]
 cell=(p:Point):>int64 & no_effects=>p.x//16+p.y
 inspect=(xs:array<int64>):>int64 & no_effects=>xs.length
 main=():>void=>{printl(cell(Point[-1 3])+inspect([1 2]))}
-''')
+''') + "\n$runtime_checks\n")
     result = compile_source(compiler, source, tmp_path, mode)
     assert result.returncode == 0, result.stderr
     if mode != 'check':

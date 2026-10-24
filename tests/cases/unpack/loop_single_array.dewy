@@ -1,3 +1,5 @@
 # exit: 42
-run=()=>{let total=0 loop [x] in [[20] [22]] {total+=x} return total}
+run=()=>{let total=0 let rows:array<array<int64 length=1>>=[[20] [22]] loop [x] in rows {total+=x} return total}
 main=()=>exit(run())
+
+$runtime_checks

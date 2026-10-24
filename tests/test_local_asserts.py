@@ -21,7 +21,7 @@ def run(compiler, tmp_path, files, *arguments):
 
 def test_same_module(compiler, tmp_path):
     # The module's own callers, transitively and through a handle, are not `panics`.
-    source = HELPER + 'apply=(f:<(x:int64):>int64> x:int64):>int64=>f(x)\nmain=():>void=>printl(twice(3) + apply(@checked 1))\n'
+    source = HELPER + 'apply=(f:<(x:int64):>int64> x:int64):>int64=>f(x)\nmain=():>void=>printl(int(twice(3)) + apply(@checked 1))\n'
     result = run(compiler, tmp_path, {'main.dewy': source}, 'run')
     assert result.returncode == 0 and result.stdout == '7\n', result.stdout + result.stderr
 

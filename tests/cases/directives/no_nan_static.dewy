@@ -10,4 +10,7 @@ bounded=(a:float64 b:float64):>float64=>{
     if -1e300 <? a <? 1e300 return a-b
     return 0.0
 }
-main=()=>printl(difference(1.0 2.0)+bounded(1.0 2.0))
+main=()=>{
+    $runtime_checks
+    printl(difference(1.0 2.0)+bounded(1.0 2.0))
+}

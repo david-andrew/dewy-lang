@@ -6,6 +6,9 @@ import pytest
 
 from tests.support import compiler
 
+# (programs that keep runtime checks for their unproven obligations)
+RUNTIME_CHECKS = '\n$runtime_checks\n'
+
 
 PROGRAM = '''
 read=(a:array<int64>):>int64=>sum(a)
@@ -41,7 +44,7 @@ main=():>void=>{
 @pytest.mark.parametrize('release', [False, True])
 def test_borrowed_row_snapshots(compiler, tmp_path, release):
     source = tmp_path / 'rows.dewy'
-    source.write_text(PROGRAM)
+    source.write_text(PROGRAM + RUNTIME_CHECKS)
     output = tmp_path / 'rows'
     build = subprocess.run([compiler, 'build', source, '-o', output,
                             *(['--release'] if release else [])], capture_output=True, text=True)

@@ -11,6 +11,7 @@ SOURCE = '''main = () => {
     let a = 3
     printl(a(x))
 }
+$runtime_checks
 '''
 
 

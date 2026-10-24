@@ -61,9 +61,9 @@ def test_partitioned_error_order(compiler, tmp_path):
 @pytest.mark.core_quick
 def test_partitioned_below_fused_gate(compiler, tmp_path):
     source = tmp_path / 'small.dewy'
-    source.write_text('\n'.join(f'f{i}=(x:int64):>int64=>x+{i}' for i in range(140)) +
+    source.write_text(('\n'.join(f'f{i}=(x:int64):>int64=>x+{i}' for i in range(140)) +
                       '\nlet sum:int64=0\n' + '\n'.join(f'sum+=f{i}({i})' for i in range(140)) +
-                      '\nprintl"{sum}"\n')
+                      '\nprintl"{sum}"\n') + "\n$runtime_checks\n")
     base, errors = build(compiler, source, tmp_path / 'one', 1)
     got, err = build(compiler, source, tmp_path / 'four', 4)
     assert (got, err) == (base, errors)
@@ -78,7 +78,7 @@ def test_partitioned_below_fused_gate(compiler, tmp_path):
 ])
 def test_partitioned_unsupported_program(compiler, tmp_path, addition):
     source = tmp_path / 'unsupported.dewy'
-    source.write_text(generate_dewy(600) + addition)
+    source.write_text((generate_dewy(600) + addition) + "\n$runtime_checks\n")
     base, errors = build(compiler, source, tmp_path / 'one', 1)
     got, err = build(compiler, source, tmp_path / 'four', 4)
     assert (got, err) == (base, errors)
@@ -89,9 +89,9 @@ def test_partitioned_unsupported_program(compiler, tmp_path, addition):
 @pytest.mark.core_quick
 def test_partitioned_cross_worker_inline(compiler, tmp_path):
     source = tmp_path / 'chain.dewy'
-    source.write_text('f0=(x:int64):>int64=>x\n' +
+    source.write_text(('f0=(x:int64):>int64=>x\n' +
                       '\n'.join(f'f{i}=(x:int64):>int64=>f{i-1}(x)+{i}' for i in range(1, 180)) +
-                      '\nprintl"{f179(1)}"\n')
+                      '\nprintl"{f179(1)}"\n') + "\n$runtime_checks\n")
     base, errors = build(compiler, source, tmp_path / 'one', 1, DEWY_EMIT_FORCE='1')
     for workers in (2, 4):
         got, err = build(compiler, source, tmp_path / f'w{workers}', workers, DEWY_EMIT_FORCE='1')

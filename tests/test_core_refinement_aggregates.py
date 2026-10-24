@@ -6,9 +6,9 @@ import pytest
 from tests.support import ROOT, compiler  # noqa: F401
 
 
-def build(compiler, tmp_path, source, *, strict=False, release=False):
+def build(compiler, tmp_path, source, *, strict=False, release=False, runtime=False):
     path = tmp_path / 'aggregate.dewy'
-    path.write_text(source)
+    path.write_text(source + ('\n$runtime_checks\n' if runtime else ''))
     return subprocess.run([compiler, *(['--internal-fact-policy=require-static'] if strict else []), 'build', path, '-o', tmp_path / 'aggregate',
                            *(['--release'] if release else [])], text=True, capture_output=True)
 
@@ -19,7 +19,7 @@ def build(compiler, tmp_path, source, *, strict=False, release=False):
     'f=(x:int64)=>{let xs:array<int64<i => i >? 0>>=[1]; xs[0]=x}\nmain=()=>f(0)',
 ])
 def test_runtime_store(compiler, tmp_path, source, release):
-    result = build(compiler, tmp_path, source, release=release)
+    result = build(compiler, tmp_path, source, release=release, runtime=True)
     assert result.returncode == 0, result.stderr
     ran = subprocess.run([tmp_path / 'aggregate'], capture_output=True, text=True)
     assert ran.returncode != 0 and ('integer overflow' if '9223372036854775807' in source else 'refinement failed') in ran.stderr, ran.stderr
@@ -74,7 +74,7 @@ def test_dependent_store(compiler, tmp_path, source, valid):
 @pytest.mark.parametrize('release', [False, True])
 def test_dynamic_length_runtime(compiler, tmp_path, release):
     source = 'f=(@xs:array<int64 length <? 3>)=>{xs.push(3)}\nmain=()=>{let xs:array<int64 length <? 3>=[1 2];f(@xs)}'
-    result = build(compiler, tmp_path, source, release=release)
+    result = build(compiler, tmp_path, source, release=release, runtime=True)
     assert result.returncode == 0, result.stderr
     ran = subprocess.run([tmp_path / 'aggregate'], capture_output=True, text=True)
     assert ran.returncode != 0 and 'refinement failed' in ran.stderr, ran.stderr
@@ -93,7 +93,7 @@ def test_invalidated_projection(compiler, tmp_path, source):
 
 def test_stale_index_lane_policy(compiler, tmp_path):
     source = 'f=(@xs:array<int64>):>int64=>{if xs.length =? 0 return 0;let i:int64=0;if i >=? xs.length return 0;xs.clear();return xs[i]}\nmain=()=>{let xs:array<int64>=[1];printl(f(@xs))}'
-    result = build(compiler, tmp_path, source)
+    result = build(compiler, tmp_path, source, runtime=True)
     assert result.returncode == 0, result.stderr
     ran = subprocess.run([tmp_path / 'aggregate'], capture_output=True, text=True)
     assert ran.returncode != 0 and 'bounds' in ran.stderr, ran.stderr
@@ -107,7 +107,7 @@ def test_stale_index_lane_policy(compiler, tmp_path):
     'change=(@xs:array<int64>):>int64=>{xs.clear();return 0}\nf=(saved:array<int64 length =? 2> ignored:int64)=>printl(saved.length)\nmain=()=>{let xs:array<int64>=[1 2];f(xs change(@xs))}',
 ])
 def test_operand_snapshots(compiler, tmp_path, source):
-    result = build(compiler, tmp_path, source)
+    result = build(compiler, tmp_path, source, runtime=True)
     assert result.returncode == 0, result.stderr
     ran = subprocess.run([tmp_path / 'aggregate'], capture_output=True, text=True)
     assert ran.returncode == 0, ran.stderr
@@ -146,7 +146,7 @@ def test_addr_target_bound(compiler, tmp_path):
 @pytest.mark.parametrize('source,success', [
     ('main=()=>{let xs:array<int64<i => i >? 0>>=[1];loop @x in xs {x=0}}', False),
     ('main=()=>{let xs:array<int64>=[1 2];let saved=xs.copy();xs[0]=8;$assert saved[0] =? 1;$assert xs.length =? 2}', True),
-    ('f=(saved:array<int64 length =? 2> ignored:int64)=>printl(saved.length)\nmain=()=>{let xs:array<int64>=[1 2];let change=($capture @xs)=>{xs.clear();return 0};f(xs change())}', True),
+    ('f=(saved:array<int64 length =? 2> ignored:int64)=>printl(saved.length)\nmain=()=>{let xs:array<int64>=[1 2];let change=($capture @xs):>int64=>{xs.clear();return 0};f(xs change())}', True),
 ])
 def test_alias_and_callback_authority(compiler, tmp_path, source, success):
     result = build(compiler, tmp_path, source)
@@ -169,7 +169,7 @@ def test_uninstantiated_authority_rejected(compiler, tmp_path, source, diagnosti
 
 def test_refined_compound_selector_once(compiler, tmp_path):
     source = 'next=(@i:int64):>int64=>{let old=i;i+=1;return old}\nmain=()=>{let i:int64=0;let xs:array<int64<n => n >? 0>>=[1 2];xs[next(@i)]+=1;$runtime_assert i =? 1;$runtime_assert xs[0] =? 2;$runtime_assert xs[1] =? 2}'
-    result = build(compiler, tmp_path, source)
+    result = build(compiler, tmp_path, source, runtime=True)
     assert result.returncode == 0, result.stderr
     ran = subprocess.run([tmp_path / 'aggregate'], capture_output=True, text=True)
     assert ran.returncode == 0, ran.stderr

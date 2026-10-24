@@ -8,10 +8,10 @@ from tests.support import compiler  # noqa: F401
 @pytest.mark.parametrize('index', [-1, 0, 1, 2])
 def test_native_bounds_header(compiler, tmp_path, values, index):
     source = tmp_path / 'bounds.dewy'
-    source.write_text(f'''$no_assumed_bounds
+    source.write_text((f'''$no_assumed_bounds
 read=(xs:array<int64> at:int64):>int64=>{{return xs[at]}}
 main=()=>{{let xs:array<int64>=[{values}]; printl(read(xs {index}))}}
-''')
+''') + "\n$runtime_checks\n")
     binary = tmp_path / 'bounds'
     built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True, text=True)
     assert built.returncode == 0, built.stdout + built.stderr

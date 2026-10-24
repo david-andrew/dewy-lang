@@ -24,6 +24,7 @@ pick = (o:@S<float64>?):>float64 => if o is? none 0.0 else o.@R * 2.0
 bump = (@k:@S<int64>):>void => { k += 1 }
 main = () => {
     let a = args()
+    if a.length <? 2 return
     let l = Login["ann" "pw"]
     printl(check(l.pass a[1]))
     printl(scale(a.length a.length).@R)
@@ -55,7 +56,7 @@ def test_secret_code_is_the_plain_code(compiler, tmp_path, flags):  # noqa: F811
     source = tmp_path / 'probe.dewy'
     built = []
     for secret in (False, True):
-        source.write_text(probe(secret))
+        source.write_text((probe(secret)) + "\n$runtime_checks\n")
         output = tmp_path / ('secret' if secret else 'plain')
         if 'wasm32' in flags:
             output = output.with_suffix('.html')

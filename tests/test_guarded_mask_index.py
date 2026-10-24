@@ -10,7 +10,7 @@ from tests.support import compiler  # noqa: F401
 @pytest.mark.parametrize('change', ['', 'xs.truncate(1)'])
 def test_guarded_mask_index(compiler, tmp_path, release, change):
     source = tmp_path / 'main.dewy'
-    source.write_text('''kernel=(xs:array<int64> count:int64):>int64=>{
+    source.write_text(('''kernel=(xs:array<int64> count:int64):>int64=>{
     if xs.length <? 4 return 0
     CHANGE
     let sum:int64=0
@@ -19,7 +19,7 @@ def test_guarded_mask_index(compiler, tmp_path, release, change):
 }
 printl(kernel([2 3] 8))
 printl(kernel([2 3 5 7] 8))
-'''.replace('CHANGE', change))
+'''.replace('CHANGE', change)) + "\n$runtime_checks\n")
     binary = tmp_path / 'main'
     built = subprocess.run([compiler, 'build', source, '--ir', '-o', binary,
                             *(['--release'] if release else [])], capture_output=True, text=True)

@@ -5,6 +5,8 @@ import pytest
 
 from tests.support import compiler
 
+RUNTIME_CHECKS = '\n$runtime_checks\n'
+
 
 @pytest.mark.parametrize('release', [False, True])
 def test_policy_conversions(compiler, tmp_path, release):
@@ -19,7 +21,7 @@ main=(args:array<string>)=>{
     let unsigned:uint64=uint64.max
     printl"{W(word)} {S(word)} {int64<overflow='saturate'>(unsigned)}"
 }
-''')
+''' + RUNTIME_CHECKS)
     binary = tmp_path / 'policy'
     built = subprocess.run([compiler, 'build', source, '-o', binary] +
                            (['--release'] if release else []), text=True, capture_output=True)
@@ -56,7 +58,7 @@ def test_mathematical_power_with_word_exponent(compiler, tmp_path, release):
     let e:int64=int64(to_int(args[2]) ?? 0)
     printl(b^e)
 }
-""")
+""" + RUNTIME_CHECKS)
     binary = tmp_path / 'power'
     built = subprocess.run([compiler, 'build', source, '-o', binary] +
                            (['--release'] if release else []), text=True, capture_output=True)
@@ -106,7 +108,7 @@ main=(args:array<string>)=>{
     let x=to_int(args[1]) ?? 0
     let y=to_int(args[2]) ?? 0
 ''' + '\n'.join(f'{name}_ops(x y)' for name in
-                [f'{prefix}{bits}' for prefix in ('uint', 'int') for bits in (8, 16, 32, 64)]) + '\n}\n')
+                [f'{prefix}{bits}' for prefix in ('uint', 'int') for bits in (8, 16, 32, 64)]) + '\n}\n' + RUNTIME_CHECKS)
     binary = tmp_path / ('saturate.html' if target == 'wasm' else 'saturate')
     built = subprocess.run([compiler, 'build', source, '-o', binary] +
                            (['--release'] if release else []) +
@@ -153,7 +155,7 @@ main=(args:array<string>)=>{
     let minimum:L=L(int64.min)
     printl"{a//b} {a%b} {a^e} {abs(a)} {x^e} {minimum//L(-1)} {abs(minimum)} {a<<e}"
 }
-""")
+""" + RUNTIME_CHECKS)
     binary = tmp_path / 'operators'
     built = subprocess.run([compiler, 'build', source, '-o', binary] +
                            (['--release'] if release else []), text=True, capture_output=True)

@@ -29,7 +29,8 @@ apply=(f:<(x:int64):>int64> x:int64):>int64=>f(x)
 main=():>void=>printl(apply(@check 2))
 ''', 'a handle to `check`, which may be called, may panic (check: `$runtime_assert`'),
     # A row excluding panics holds transitively, whatever the scope.
-    'row': ('''loose=(xs:array<int64> i:int64):>int64=>xs[i]
+    'row': ('''$runtime_checks
+loose=(xs:array<int64> i:int64):>int64=>xs[i]
 strict=(xs:array<int64>):>int64 & no panics=>loose(xs 0)
 main=():>void=>printl(strict([1]))
 ''', "error: effect contract violation in 'strict': it may panic, and its row excludes panics; strict -> loose: runtime check"),
@@ -131,7 +132,7 @@ def test_panics_listing(compiler, tmp_path):
 
 def test_first_runtime_check(compiler, tmp_path):
     # Where checks are allowed, an empty array fails the precondition at the call.
-    source = 'f=(xs:array<int64>)=>printl(xs.first)\nf([])\n'
+    source = '$runtime_checks\nf=(xs:array<int64>)=>printl(xs.first)\nf([])\n'
     result = run(compiler, tmp_path, source, 'run')
     assert result.returncode == 101 and 'refinement failed: `xs.length >? 0`' in result.stderr, result.stderr
 

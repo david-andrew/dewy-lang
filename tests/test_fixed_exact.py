@@ -8,7 +8,7 @@ from tests.support import compiler
 
 def build(compiler, tmp_path, body, release=False):
     source = tmp_path / 'exact.dewy'
-    source.write_text(body)
+    source.write_text((body) + "\n$runtime_checks\n")
     binary = tmp_path / 'exact'
     result = subprocess.run([compiler, 'build', source, '-o', binary] +
                             (['--release'] if release else []), capture_output=True, text=True)
@@ -56,7 +56,7 @@ main=(args:array<string>)=>{
 
 def test_exact_unbounded_shift_rejected(compiler, tmp_path):
     source = tmp_path / 'unbounded.dewy'
-    source.write_text('f=(a:int64 n:int64):>int64=>(a << n) >> n\nmain=()=>printl(f(1 3))\n')
+    source.write_text(('f=(a:int64 n:int64):>int64=>(a << n) >> n\nmain=()=>printl(f(1 3))\n') + "\n$runtime_checks\n")
     result = subprocess.run([compiler, 'check', source], capture_output=True, text=True)
     assert result.returncode != 0
     assert 'width' in result.stderr and 'guard' in result.stderr

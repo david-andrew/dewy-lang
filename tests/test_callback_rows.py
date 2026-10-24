@@ -34,14 +34,14 @@ FLOWS = {
 def test_inferred_callback_sources(compiler, tmp_path, mode, flow, forbidden):
     selected = 'bad' if forbidden else 'pure'
     source = tmp_path / 'flow.dewy'
-    source.write_text('''let shared:int64=0
+    source.write_text(('''let shared:int64=0
 pure=(x:int64):>int64=>x+1
 bad=(x:int64):>int64=>{shared+=x; return x+1}
 use_it=(f:<(x:int64):>int64 & no_effects>):>int64=>f(1)
 Holder:type=[f:<(x:int64):>int64>]
 ''' + f'make=():><(x:int64):>int64>=>@{selected}\n'
       + f'add=(a:int64 x:int64):>int64=>{{return {selected}(a+x)-1}}\n'
-      + 'main=():>void=>exit(entry()) entry=():>int64=>{\n' + FLOWS[flow].replace('FUNC', selected) + '\n}\n')
+      + 'main=():>void=>exit(entry()) entry=():>int64=>{\n' + FLOWS[flow].replace('FUNC', selected) + '\n}\n') + "\n$runtime_checks\n")
     result = compile_source(compiler, source, tmp_path, mode)
     assert (result.returncode != 0) == forbidden, result.stdout + result.stderr
     if forbidden:
@@ -55,20 +55,20 @@ Holder:type=[f:<(x:int64):>int64>]
 @pytest.mark.parametrize('mode', ['check', 'default', 'release'])
 @pytest.mark.parametrize('forbidden', [False, True])
 def test_imported_alias_and_resources(compiler, tmp_path, mode, forbidden):
-    (tmp_path / 'contracts.dewy').write_text('''Filesystem:type=[]
+    (tmp_path / 'contracts.dewy').write_text(('''Filesystem:type=[]
 Disk:type=Filesystem
 Action:type=<E:Effect>(<(x:int64):>int64 & E>)
 # Inner E shadows the importing function's E; substitution is positional.
 Forward:type=<T E:Effect>(Action<E>)
-''')
+''') + "\n$runtime_checks\n")
     effect = 'mutates' if forbidden else 'reads'
     source = tmp_path / 'main.dewy'
-    source.write_text('''from p"contracts.dewy" import Filesystem, Disk, Action, Forward
+    source.write_text(('''from p"contracts.dewy" import Filesystem, Disk, Action, Forward
 callback=(x:int64):>int64 & ''' + effect + '''<Filesystem>=>x+1
 invoke=<E:Effect>(f:Forward<int64 E>):>int64 & E=>f(1)
 restricted=(f:Action<no mutates<Disk>>):>int64 & no mutates<Filesystem>=>invoke(@f)
 main=():>void=>exit(entry()) entry=():>int64=>restricted(@callback)
-''')
+''') + "\n$runtime_checks\n")
     result = compile_source(compiler, source, tmp_path, mode)
     assert (result.returncode != 0) == forbidden, result.stdout + result.stderr
     if forbidden:
@@ -118,14 +118,14 @@ def test_callback_place_is_not_nonlocal_remainder(compiler, tmp_path, explicit_p
 @pytest.mark.parametrize('forbidden', [False, True])
 def test_nested_callback_contravariance(compiler, tmp_path, forbidden):
     source = tmp_path / 'nested.dewy'
-    source.write_text('''Pure:type=<(x:int64):>int64 & no_effects>
+    source.write_text(('''Pure:type=<(x:int64):>int64 & no_effects>
 Plain:type=<(x:int64):>int64>
 pure=(x:int64):>int64 & no_effects=>x+1
 accept_any=(cb:Plain):>int64=>cb(1)
 require_pure=(cb:Pure):>int64=>cb(1)
 with_pure=(f:<(cb:Pure):>int64>):>int64=>f(@pure)
 with_any=(f:<(cb:Plain):>int64>):>int64=>f(@pure)
-main=():>void=>exit(entry()) entry=():>int64=>''' + ('with_any(@require_pure)' if forbidden else 'with_pure(@accept_any)') + '\n')
+main=():>void=>exit(entry()) entry=():>int64=>''' + ('with_any(@require_pure)' if forbidden else 'with_pure(@accept_any)') + '\n') + "\n$runtime_checks\n")
     result = compile_source(compiler, source, tmp_path, 'default')
     assert (result.returncode != 0) == forbidden, result.stdout + result.stderr
     if not forbidden:
@@ -137,8 +137,8 @@ def test_closure_environment_inventory(compiler, tmp_path, captured):
     source = tmp_path / 'environment.dewy'
     capture = '($capture offset x:int64)' if captured else '(x:int64)'
     body = 'x+offset' if captured else 'x+1'
-    source.write_text('main=():>void=>{let offset:int64=1\nlet f=' + capture
-                      + ':>int64 & no_effects=>' + body + '\nexit(f(1))}\n')
+    source.write_text(('main=():>void=>{let offset:int64=1\nlet f=' + capture
+                      + ':>int64 & no_effects=>' + body + '\nexit(f(1))}\n') + "\n$runtime_checks\n")
     result = compile_source(compiler, source, tmp_path, 'default')
     assert (result.returncode != 0) == captured, result.stdout + result.stderr
     if captured:
@@ -150,12 +150,12 @@ def test_closure_environment_inventory(compiler, tmp_path, captured):
 @pytest.mark.parametrize('constrained', [False, True])
 def test_reassignment_joins_declared_rows(compiler, tmp_path, constrained):
     source = tmp_path / 'reassign.dewy'
-    source.write_text('''let shared:int64=0
+    source.write_text(('''let shared:int64=0
 pure=(x:int64):>int64 & no_effects=>x+1
 bad=(x:int64):>int64 & reads<shared> & mutates<shared>=>{shared+=x; return x+1}
 invoke=(f:<(x:int64):>int64 & no_effects>):>int64=>f(1)
 main=():>void=>exit(entry()) entry=():>int64=>{let f=@pure; f=@bad; return '''
-                      + ('invoke(@f)' if constrained else 'f(1)') + '}\n')
+                      + ('invoke(@f)' if constrained else 'f(1)') + '}\n') + "\n$runtime_checks\n")
     result = compile_source(compiler, source, tmp_path, 'default')
     assert (result.returncode != 0) == constrained, result.stdout + result.stderr
     if constrained:
@@ -166,11 +166,11 @@ main=():>void=>exit(entry()) entry=():>int64=>{let f=@pure; f=@bad; return '''
 
 def test_demanded_nested_handle_summary(compiler, tmp_path):
     source = tmp_path / 'nested_handle.dewy'
-    source.write_text('''leaf=(x:int64):>int64=>x+1
+    source.write_text(('''leaf=(x:int64):>int64=>x+1
 wrapper=(x:int64):>int64=>{let f=@leaf; return f(x)}
 invoke=(f:<(x:int64):>int64 & no_effects>):>int64=>f(1)
 main=():>void=>exit(entry()) entry=():>int64=>invoke(@wrapper)
-''')
+''') + "\n$runtime_checks\n")
     result = compile_source(compiler, source, tmp_path, 'default')
     assert result.returncode == 0, result.stdout + result.stderr
     assert subprocess.run([tmp_path / 'program'], timeout=10).returncode == 2
@@ -179,14 +179,14 @@ main=():>void=>exit(entry()) entry=():>int64=>invoke(@wrapper)
 @pytest.mark.parametrize('mode', ['check', 'default', 'release'])
 def test_shared_row_unions_callbacks(compiler, tmp_path, mode):
     source = tmp_path / 'join.dewy'
-    source.write_text('''Filesystem:type=[]
+    source.write_text(('''Filesystem:type=[]
 Database:type=[]
 Action:type=<E:Effect>(<():>int64 & E>)
 first=():>int64 & reads<Filesystem>=>20
 second=():>int64 & mutates<Database>=>22
 twice=<E:Effect>(a:Action<E> b:Action<E>):>int64 & E=>a()+b()
 main=():>void=>exit(entry()) entry=():>int64=>twice(@first @second)
-''')
+''') + "\n$runtime_checks\n")
     result = compile_source(compiler, source, tmp_path, mode)
     assert result.returncode == 0, result.stdout + result.stderr
     if mode != 'check':

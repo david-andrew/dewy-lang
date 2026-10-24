@@ -6,6 +6,7 @@
 # writes the live data as a single snapshot transaction into the next log
 # generation, switches the manifest to it, and only then deletes the old log, so
 # a crash at any step leaves one complete log named by a valid manifest.
+$runtime_checks
 
 from p"btree.dewy" import BTree, Bound, Entry, from_sorted
 from p"wal.dewy" import Change, Txn, Scan, encode_txn, scan

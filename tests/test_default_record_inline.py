@@ -8,6 +8,9 @@ import pytest
 from tests.support import Scripts, compiler, target_name
 from tools.compiler.bench import prepare_source
 
+# (programs that keep runtime checks for their unproven obligations)
+RUNTIME_CHECKS = '\n$runtime_checks\n'
+
 
 def function(ir, name):
     return next(body for body in re.split(r'^fn ', ir, flags=re.MULTILINE)
@@ -35,7 +38,7 @@ def test_default_game_inline(compiler, tmp_path, debug):
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 def test_record_inline_checks_and_loop_scope(compiler, tmp_path, target):
     source = tmp_path / 'checked.dewy'
-    source.write_text('''$no_assumed_bounds
+    source.write_text(('''$no_assumed_bounds
 Box:type=[value:int64]
 read=(box:Box at:int64):>Box=>{
  let table:array<int64 length=2>=[20 22]
@@ -54,7 +57,7 @@ probe=(at:int64):>int64=>{
  return final.value+original.value
 }
 main=(args:array<string>):>void=>{exit(probe(args.length-1))}
-''')
+''') + RUNTIME_CHECKS)
     binary = tmp_path / 'checked'
     built = subprocess.run([compiler, 'build', source, '--ir', '--target', target_name(target),
                             '-o', binary], capture_output=True, text=True, timeout=30)

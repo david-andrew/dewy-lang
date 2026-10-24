@@ -5,6 +5,9 @@ import pytest
 
 from tests.support import compiler  # noqa: F401
 
+# (programs that keep runtime checks for their unproven obligations)
+RUNTIME_CHECKS = '\n$runtime_checks\n'
+
 
 HEADER = '''drops:int64=0
 copies:int64=0
@@ -75,9 +78,9 @@ $runtime_assert outer()=?7''', '1 0\n'),
 def test_owner_closure(compiler, tmp_path, release, case):
     copyable, body, expected = CASES[case]
     source = tmp_path / 'closure.dewy'
-    source.write_text(HEADER.replace('COPY_HOOK', COPY_HOOK if copyable else '') +
+    source.write_text((HEADER.replace('COPY_HOOK', COPY_HOOK if copyable else '') +
                       'forward=<T>(value:T):>T=>value\nmake=(value:Handle)=>()=>value.value\nexercise=()=>{\n' + body +
-                      '\n}\nmain=()=>{exercise() printl"{drops} {copies}"}\n')
+                      '\n}\nmain=()=>{exercise() printl"{drops} {copies}"}\n') + RUNTIME_CHECKS)
     binary = tmp_path / 'closure'
     built = subprocess.run([compiler, 'build', source, '-o', binary,
                             *(['--release'] if release else [])],
@@ -118,7 +121,7 @@ def test_owner_closure_rejects(compiler, tmp_path, release, case):
 @pytest.mark.parametrize('release', [False, True])
 def test_owner_closure_panic_cleanup(compiler, tmp_path, release):
     source = tmp_path / 'panic.dewy'
-    source.write_text('''Handle=type of [value:int64
+    source.write_text(('''Handle=type of [value:int64
     $__drop__
     release=():>void=>{printl"drop"}
     $__copy__
@@ -132,7 +135,7 @@ main=()=>{
     $runtime_assert snapshot()=?3 and callback()=?3
     panic("done")
 }
-''')
+''') + "\n$runtime_checks\n")
     binary = tmp_path / 'panic'
     built = subprocess.run([compiler, 'build', source, '-o', binary,
                             *(['--release'] if release else [])],

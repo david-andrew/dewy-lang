@@ -1,6 +1,8 @@
 # exit: 42
 run=()=>{let total:int64=0
-let entries=["a"->[20 1] "b"->[2 19]]
+let entries:dict<string array<int64 length=2>>=["a"->[20 1] "b"->[2 19]]
 loop [key [x y]] in entries {if key =? "a" or key =? "b" total+=x+y}
 return total}
 main=()=>exit(run())
+
+$runtime_checks

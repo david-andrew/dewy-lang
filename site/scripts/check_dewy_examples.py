@@ -128,7 +128,10 @@ def validate(example: Example, compiler: Path, scratch: Path) -> dict:
         # Blank lines keep diagnostics aligned with the documentation source.
         prefix = data.get('prefix', '')
         padding = '\n' * max(0, example.line - 1 - prefix.count('\n'))
-        source.write_text(prefix + padding + example.source + data.get('suffix', ''))
+        # (the published examples predate no traps by default: they keep runtime checks)
+        text = prefix + padding + example.source + data.get('suffix', '')
+        if not any(tag in text for tag in ('$runtime_checks', '$no_hidden_costs', '$prototype')): text += '\n$runtime_checks\n'
+        source.write_text(text)
         def call(args):
             return subprocess.run(args, cwd=work, capture_output=True, timeout=60,
                                   env={k:v for k,v in os.environ.items() if not k.startswith('DEWY_') or k.startswith('DEWY_CORE_')})

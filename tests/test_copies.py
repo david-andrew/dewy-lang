@@ -5,6 +5,9 @@ import subprocess
 
 import pytest
 
+# (programs that keep runtime checks for their unproven obligations)
+RUNTIME_CHECKS = '\n$runtime_checks\n'
+
 
 @pytest.fixture(scope='module')
 def compiler():
@@ -46,16 +49,16 @@ def test_module_local_policy_and_owned_call(compiler, tmp_path, strict_caller):
 change=(values:array<int64>):>int64=>{values[0]=99 return values[0]}
 '''
         directive = ''
-    (tmp_path / 'library.dewy').write_text(library)
+    (tmp_path / 'library.dewy').write_text(library + RUNTIME_CHECKS)
     source = tmp_path / 'main.dewy'
-    source.write_text(directive + '''import p"library.dewy" as library
+    source.write_text((directive + '''import p"library.dewy" as library
 main=():>void=>exit(entry()) entry=():>int64=>{
     let xs:array<int64>=[42]
     $runtime_assert library.change(xs)=?99
     $runtime_assert xs[0]=?42
     return 0
 }
-''')
+''') + RUNTIME_CHECKS)
     program = tmp_path / 'program'
     result = subprocess.run([compiler, 'build', source, '-o', program],
                             capture_output=True, text=True, timeout=30)

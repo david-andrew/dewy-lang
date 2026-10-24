@@ -67,6 +67,7 @@ main=()=>{
  $runtime_assert(a.load() =? 42)
  $runtime_assert(sums.length =? 128)
 }
+$runtime_checks
 ''', 'build')
     assert result.returncode == 0, result.stderr
     for threads in (1, 2):

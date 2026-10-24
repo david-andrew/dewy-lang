@@ -2,6 +2,7 @@
 # answers every complete pipelined request in order, and closes after a
 # framing error or when the client asks. The transport (a socket, a test
 # harness, a WebSocket from the browser UI) only moves bytes.
+$runtime_checks
 from p"http.dewy" import Request, Response, HttpError, Incomplete, Framed, Header, frame, encode, keeps_alive
 from p"router.dewy" import Service, route, fail
 

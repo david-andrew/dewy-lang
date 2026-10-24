@@ -6,10 +6,14 @@ import pytest
 
 from tests.support import compiler
 
+# (programs that keep runtime checks for their unproven obligations)
+RUNTIME_CHECKS = '\n$runtime_checks\n'
+
 
 def build(compiler, tmp_path, source, suffix='dewy'):
     path = tmp_path / f'fork_join.{suffix}'
-    path.write_text(source)
+    # (these programs test run-time behavior: they keep runtime checks)
+    path.write_text(source + RUNTIME_CHECKS if suffix == 'dewy' and '$runtime_checks' not in source else source)
     binary = tmp_path / 'fork_join'
     result = subprocess.run([compiler, 'build', path, '--release', '-o', binary],
                             capture_output=True, text=True, timeout=60)
@@ -126,7 +130,7 @@ main=():>void=>{printl"{fork(25)}"}
 '''
     if managed:
         program = program.replace(':>int64=>', ':>array<int64>=>').replace('return n', 'return [n]').replace('return parts[0]+parts[1]', 'return [parts[0][0]+parts[1][0]]').replace('fork(25)}', 'fork(25)[0]}')
-    source.write_text(program)
+    source.write_text(program + RUNTIME_CHECKS)
     one, _ = fused_build(compiler, source, tmp_path / 'one', 1, DEWY_EMIT_FORCE='1')
     two, log = fused_build(compiler, source, tmp_path / 'two', 2,
                            DEWY_EMIT_FORCE='1', DEWY_PAR_TIME='1')

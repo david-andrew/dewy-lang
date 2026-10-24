@@ -1,6 +1,7 @@
 # Statement execution: autocommit by default, or an explicit transaction whose
 # writes stay in a private overlay until COMMIT makes them one durable batch.
 # Reads inside a transaction see its own uncommitted writes.
+$runtime_checks
 
 from p"btree.dewy" import Bound, Entry, above, below
 from p"wal.dewy" import Change

@@ -1,7 +1,9 @@
 # exit: 42
 let counter=0
-pair=()=>{counter+=1 return [counter 20]}
+pair=():>array<int64 length=2>=>{counter+=1 return [counter 20]}
 last=()=>{counter+=10 return counter}
-sum=([a b] tail:int64)=>if a=?1 and b=?20 and tail=?11 and counter=?11 42 else 1
+sum=([a b]:array<int64 length=2> tail:int64)=>if a=?1 and b=?20 and tail=?11 and counter=?11 42 else 1
 run=()=>sum(pair() last())
 main=()=>exit(run())
+
+$runtime_checks

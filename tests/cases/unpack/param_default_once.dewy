@@ -1,6 +1,8 @@
 # exit: 42
 let counter=0
-next=()=>{counter+=1 return [20 22]}
-sum=([a b]=next())=>a+b
+next=():>array<int64 length=2>=>{counter+=1 return [20 22]}
+sum=([a b]:array<int64 length=2>=next())=>a+b
 run=()=>{let answer=sum() if counter not=?1 return 1 return answer}
 main=()=>exit(run())
+
+$runtime_checks

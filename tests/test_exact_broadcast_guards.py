@@ -11,7 +11,7 @@ from tests.support import compiler
 @pytest.mark.parametrize('release', [False, True])
 def test_broadcast_range_guard_and_fallback(compiler, tmp_path, release):
     source = tmp_path / 'map.dewy'
-    source.write_text('''
+    source.write_text(('''
 f=(xs:array<int64> ys:array<int64>):>array<int64>=>xs .* ys .- xs
 main=(args:array<string>)=>{
 let x=int64(to_int(args[1]) ?? 0)
@@ -20,7 +20,7 @@ let xs:array<int64>=[loop i in [0..32) x]
 let ys:array<int64>=[loop i in [0..32) y]
 printl(f(xs ys))
 }
-''')
+''') + "\n$runtime_checks\n")
     binaries = []
     for debug in [False, True]:
         binary = tmp_path / ('scalar' if debug else 'guarded')
@@ -44,7 +44,7 @@ printl(f(xs ys))
 @pytest.mark.parametrize('release', [False, True])
 def test_broadcast_rows_preserve_cancellation(compiler, tmp_path, release):
     source = tmp_path / 'rows.dewy'
-    source.write_text('''
+    source.write_text(('''
 f=(m:array<int64 length=[4 4]> bias:array<int64> shift:array<int64> r:int64):>array<int64>=>{
     let h=max.(m .+ bias[new ..] .+ shift[.. new] .- r 0)
     return h.data
@@ -58,7 +58,7 @@ let b:array<int64>=[loop i in [0..4) y]
 let s:array<int64>=[loop i in [0..4) z]
 printl(f(m b s 3))
 }
-''')
+''') + "\n$runtime_checks\n")
     binaries = []
     for debug in [False, True]:
         binary = tmp_path / ('scalar' if debug else 'guarded')

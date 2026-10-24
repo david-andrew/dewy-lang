@@ -19,6 +19,7 @@ RUNNER = '''main=()=>{
     let status=run(args()[1] ["a&echo injected>marker.txt"])
     if status is? SpawnError { printl"refused" } else { printl"ran" }
 }
+$runtime_checks
 '''
 
 

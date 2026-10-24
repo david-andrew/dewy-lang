@@ -67,6 +67,7 @@ def test_writable_snapshot_and_early_exits(compiler, tmp_path, release):
     return (bytes[0] as int64)+(bytes[2] as int64)
 }
 main=()=>{printl("{probe(false)} {probe(true)}")}
+$runtime_checks
 '''
     result = run(compiler, tmp_path, source, 'run', release)
     assert result.returncode == 0, result.stderr
@@ -133,6 +134,7 @@ def test_dynamic_length_checked_in_release(compiler, tmp_path, release):
     $lend(@bytes) {bytes.set_length(n)}
 }
 main=()=>probe(3)
+$runtime_checks
 ''', 'run', release)
     assert result.returncode != 0
     assert 'scoped loan length exceeds reservation' in result.stderr, result.stderr

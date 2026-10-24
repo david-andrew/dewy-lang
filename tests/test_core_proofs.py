@@ -69,6 +69,7 @@ main=():>void=>{exit(f(1 2 3)-7)}
 def test_proof_fact_invalidation(compiler, tmp_path):
     result = check(compiler, tmp_path, ORDERED + '''f=(a:int64 b:int64<v=>a <=? v> c:int64<v=>b <=? v>)=>{
     ordered(a b c)
+    if a =? -9223372036854775808 return
     c=a-1
     $assert a <=? c
 }

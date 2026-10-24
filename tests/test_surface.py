@@ -49,7 +49,7 @@ def run(compiler, tmp_path, source, target='native', release=False):
         if runner is None:
             pytest.skip(f'runner unavailable for {target}')
     path = tmp_path / 'main.dewy'
-    path.write_text(source)
+    path.write_text(source + ('\n$runtime_checks\n' if '$runtime_checks' not in source and '$prototype' not in source else ''))
     binary = tmp_path / 'main'
     flags = ['--release'] if release else []
     if target != 'native':
@@ -110,7 +110,7 @@ main = () => printl"{check(-3)}"
 ''', 'negative -3', 101),
     'runtime-assert-call-message': ('''
 main = () => {
-    let x = 5
+    let x = args().length + 4
     $runtime_assert(x =? 4, "x is {x}")
 }
 ''', 'x is 5', 101),
@@ -229,7 +229,7 @@ main = () => {
 
 @quick
 def test_surface_member_calls(compiler, tmp_path):
-    ran = run(compiler, tmp_path, MEMBER_CALL_PROGRAM)
+    ran = run(compiler, tmp_path, MEMBER_CALL_PROGRAM + '\n$runtime_checks\n')
     assert ran.returncode == 0, ran.stdout + ran.stderr
     assert ran.stdout.splitlines() == ['2 2', '5 2', '0 1 3', '0', '6 12 18 6', 'field', '[hi] [hi] 6']
 

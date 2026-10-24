@@ -7,11 +7,11 @@ from tests.support import compiler
 @pytest.mark.parametrize('kind,maximum', [('int64', 2**63-1), ('uint64', 2**64-1)])
 def test_sum_storage_boundary(compiler, tmp_path, release, kind, maximum):
     source = tmp_path / 'sum.dewy'
-    source.write_text(f'''main=(args:array<string>)=>{{
+    source.write_text((f'''main=(args:array<string>)=>{{
 let a={kind}(to_int(args[1]) ?? 0)
 printl([a {kind}(1)].sum())
 }}
-''')
+''') + "\n$runtime_checks\n")
     binary = tmp_path / 'sum'
     built = subprocess.run([compiler, 'build', source, '-o', binary, *(['--release'] if release else [])], capture_output=True, text=True)
     assert built.returncode == 0, built.stderr

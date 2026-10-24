@@ -23,8 +23,8 @@ def test_module_variable_called(compiler, tmp_path):  # noqa: F811
 
 
 def test_module_function_beside_variable(compiler, tmp_path):  # noqa: F811
-    (tmp_path / 'm.dewy').write_text('double = (x:int64):>int64 => x * 2\n')
+    (tmp_path / 'm.dewy').write_text(('double = (x:int64):>int64 => x * 2\n') + "\n$runtime_checks\n")
     source = tmp_path / 'main.dewy'
-    source.write_text('import p"m.dewy" as m\nlet double:int64 = 5\nmain = () => printl(m.double(4) + double)\n')
+    source.write_text(('import p"m.dewy" as m\nlet double:int64 = 5\nmain = () => printl(m.double(4) + double)\n') + "\n$runtime_checks\n")
     ran = subprocess.run([compiler, 'run', source], capture_output=True, text=True, timeout=60, check=False)
     assert ran.returncode == 0 and ran.stdout == '13\n', ran.stderr

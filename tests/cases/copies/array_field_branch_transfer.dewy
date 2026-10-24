@@ -10,3 +10,5 @@ read=(values:array<int64>):>int64=>if values.length>?1 values[0]+values[1] else 
 take=(which:bool):>array<int64>=>{let owner=make() if which return owner.values return owner.values}
 main=():>void=>{let first=take(true) if first.length not=?1 return
  let values=take(false) values.push(40) exit(read(values))}
+
+$runtime_checks

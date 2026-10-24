@@ -94,10 +94,10 @@ main=()=>{
 @pytest.mark.parametrize('release', [False, True])
 def test_callback_specialization_resolves_body(compiler, tmp_path, release):
     source = tmp_path / 'known.dewy'
-    source.write_text(exit_main(CASES['multiple-identities']).replace(
+    source.write_text((exit_main(CASES['multiple-identities']).replace(
         'visit=(callback:Callback):>int64=>callback(3)',
         'visit=(callback:Callback):>int64=>{let total:int64=0 '
-        'loop i in [0..3) {total+=callback(i)} return total}'))
+        'loop i in [0..3) {total+=callback(i)} return total}')) + "\n$runtime_checks\n")
     ran = subprocess.run([compiler, 'build', source, '--ir', '-o', tmp_path / 'known',
                           *(['--release'] if release else [])],
                          capture_output=True, text=True, timeout=30)

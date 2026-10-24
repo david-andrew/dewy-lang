@@ -13,7 +13,7 @@ def test_loop_padding_stays_outside_backedge(compiler, tmp_path, release):
     if platform.machine().lower() not in ('x86_64', 'amd64') or not shutil.which('objdump'):
         pytest.skip('x86-64 disassembly test')
     source = tmp_path / 'gcd.dewy'
-    source.write_text('''gcd=(a:int64 b:int64):>int64=>{
+    source.write_text(('''gcd=(a:int64 b:int64):>int64=>{
 let x=a;let y=b
 loop y not=? 0 {let r=x%y;x=y;y=r}
 return x
@@ -23,7 +23,7 @@ let a=int64(to_int(args[1]) ?? 0)
 let b=int64(to_int(args[2]) ?? 0)
 printl(gcd(a b))
 }
-''')
+''') + "\n$runtime_checks\n")
     binary = tmp_path / 'gcd'
     built = subprocess.run([compiler, 'build', source, '-o', binary,
                             *(['--release'] if release else [])], capture_output=True, text=True)

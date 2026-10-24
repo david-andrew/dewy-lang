@@ -34,7 +34,7 @@ main = () => {
 @pytest.mark.core_quick
 def test_values_return_without_allocation(compiler, tmp_path):  # noqa: F811
     source = tmp_path / 'values.dewy'
-    source.write_text(SOURCE)
+    source.write_text((SOURCE) + "\n$runtime_checks\n")
     binary = tmp_path / 'values'
     built = subprocess.run([compiler, 'build', source, '--ir', '-o', binary],
                            capture_output=True, text=True, timeout=60, check=False)

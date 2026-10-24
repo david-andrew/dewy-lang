@@ -10,7 +10,7 @@ from tests.support import compiler
 @pytest.mark.parametrize('release', [False, True])
 def test_word_division_endpoints(compiler, tmp_path, release):
     source = tmp_path / 'division.dewy'
-    source.write_text('''half=(x:int64):>int64=>x//2
+    source.write_text(('''half=(x:int64):>int64=>x//2
 third=(x:int64):>int64=>x//(-3)
 remain=(x:int64 d:int64):>int64=>(x+0)%d
 main=(args:array<string>)=>{
@@ -20,7 +20,7 @@ printl(third(x))
 printl(remain(x -1))
 printl(remain(x 3))
 }
-''')
+''') + "\n$runtime_checks\n")
     binary = tmp_path / 'division'
     built = subprocess.run([compiler, 'build', source, '--ir', '-o', binary] +
                            (['--release'] if release else []), capture_output=True, text=True)

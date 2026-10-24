@@ -18,8 +18,11 @@ printl([nested()])
 printl([loop i in 0..1 { pair() }])
 quiet=()=>{ printl("hi") 5 }
 printl(quiet())
-let [a b]=[pair()]
-printl(a+b)
+let ps=[pair()]
+if ps.length =? 2 {
+    let [a b]=ps
+    printl(a+b)
+}
 run=()=>{
     pair();
     let xs=[1 2 3]
@@ -27,3 +30,5 @@ run=()=>{
     printl(xs)
 }
 run()
+
+$runtime_checks

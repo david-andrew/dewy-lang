@@ -17,7 +17,7 @@ SOURCE = '''main = () => {
 
 def test_coalesce_arithmetic_warning(compiler, tmp_path):  # noqa: F811
     source = tmp_path / 'main.dewy'
-    source.write_text(SOURCE)
+    source.write_text((SOURCE) + "\n$runtime_checks\n")
     checked = subprocess.run([compiler, 'check', source], capture_output=True, text=True,
                              timeout=30, check=False)
     assert checked.returncode == 0, checked.stdout + checked.stderr

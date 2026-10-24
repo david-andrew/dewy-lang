@@ -1,4 +1,6 @@
 # exit: 42
-make=(bias:int64)=>(([a b]:array<int64>)=>a+b+bias)
+make=(bias:int64)=>(([a b]:array<int64 length=2>)=>a+b+bias)
 run=()=>{let add=make(2) return add([20 20])}
 main=()=>exit(run())
+
+$runtime_checks

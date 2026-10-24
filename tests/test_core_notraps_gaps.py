@@ -11,14 +11,14 @@ from tests.support import compiler  # noqa: F401
 
 PROVED = {
     # min is below each operand; its interval is theirs combined.
-    'min_bounds': '''f=(xs:array<int64> n:int64):>int64=>{
+    'min_bounds': '''f=(xs:array<int64> n:int64):>int=>{
     let out:array<int64>=[loop i in [0..32) i]
-    let t=0
+    let t:int=0
     loop j in [0..min(32 n)) {t+=out[j]}
     loop j in [0..min(n xs.length)) {t+=xs[j]}
-    return int64<overflow='wrap'>(t)
+    return t
 }
-main=():>void=>exit(int64<overflow='wrap'>(f([1 2 3] 2)-2))
+main=():>void=>if f([1 2 3] 2) =? 2 exit(0) else exit(1)
 ''',
     # max is above each operand.
     'max_bounds': '''f=(xs:array<int64> k:int64):>int64=>{
@@ -115,7 +115,7 @@ main=():>void=>{
 REJECTED = {
     # max is not below its operands.
     'max_not_below': ('''f=(xs:array<int64> n:int64):>int64=>{
-    let t=0
+    let t:int64=0
     loop j in [0..max(n xs.length)) {t+=xs[j]}
     return t
 }
@@ -124,7 +124,7 @@ main=():>void=>exit(int64<overflow='wrap'>(f([1] 1)))
     # A loose guard on the shared operand's partner proves nothing.
     'sum_loose_partner': ('''g=(a:array<int64> first:int64 n:int64):>int64=>{
     if not (0 <=? first and first <? a.length and 0 <=? n and n <=? a.length and first+n <=? a.length) return 0
-    let t=0
+    let t:int64=0
     loop j in [0..n+1) {t+=a[first+j]}
     return t
 }
@@ -132,7 +132,7 @@ main=():>void=>exit(int64<overflow='wrap'>(g([1 2] 0 1)))
 ''', 'cannot prove index is in bounds'),
     # Its entry value itself is past the end.
     'decreasing_from_length': ('''f=(xs:array<int64>):>int64=>{
-    let t=0
+    let t:int64=0
     let high=xs.length
     loop high >? 0 {
         t+=xs[high]

@@ -3,10 +3,13 @@ import subprocess
 
 from tests.support import compiler  # noqa: F401
 
+# (programs that keep runtime checks for their unproven obligations)
+RUNTIME_CHECKS = '\n$runtime_checks\n'
+
 
 def test_int_main_backtrace_hides_entry_helper(compiler, tmp_path):
     source = tmp_path / 'bt.dewy'
-    source.write_text('main=():>void=>{\n    let xs=[1 2]\n    printl(xs[..5))\n}\n')
+    source.write_text(('main=():>void=>{\n    let xs=[1 2]\n    printl(xs[..5))\n}\n') + RUNTIME_CHECKS)
     binary = tmp_path / 'bt'
     built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True, text=True, timeout=120)
     assert built.returncode == 0, built.stderr

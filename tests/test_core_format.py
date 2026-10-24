@@ -73,13 +73,15 @@ main=():>void=>{printl(probe(20 21 22));}''',
 printl(0d4_2.0_0E+0_0) printl(2.1(10+10))
 printl(uint64(0d18_446_744_073_709_551_615)) printl(bigint(18_446_744_073_709_551_616))
 printl(-0d9_223_372_036_854_775_808)
-}''',
+}
+$runtime_checks''',
     'closure-captures': '''main=():>void=>{
 let n=0 let xs=[10]
 let next=($capture @n step:int64
 $capture xs extra:int64)=>{n+=step xs[0]+=extra; n+xs[0]}
 let other=@next printl(next(1 2)) printl(other(3 4)) printl(n)
-}''',
+}
+$runtime_checks''',
     'mutable-loop': """main=():>void=>{
 let values=[20 22] let saved=values
 loop @value in values {value+=1}
@@ -94,7 +96,8 @@ printl(square.(sqrt.(xs) .+ 1.0))
 printl(reshape([1 2 3 4] 2 2) .* [10 20])
 printl([1 2 3] .not<=? 2)
 printl(.-(xs .+ 1.0)) printl(.+xs) printl(.- .-xs)
-}''',
+}
+$runtime_checks''',
     'matrix-slices': '''main=():>void=>{
 let m=reshape([1 2 3 4 5 6] 2 3)
 let part:NDArray<int>=m[[0..end] [1..end]]
@@ -105,17 +108,18 @@ let rows=[1,0..0]
 printl(m[rows [2,0..0]].data)
 m[rows (0..2]] .+= [1 2]
 printl(m[[..] [end,end-1..]].data)
-}''',
+}
+$runtime_checks''',
     'unpack-leaf-types': 'main=():>void=>{const [x:int64 y:float64]=[20 22] printl(x+y)}',
     'record-spread': 'main=():>void=>{let base=[x=20 y=1] let next=[base... y=22] printl(next.x+next.y)}',
     'generic-value': 'identity=<T>(x:T):>T=>x\nmain=():>void=>{let f=@identity<int64> printl(f(42))}',
     'generic-return-adjacency': 'pair=():>array<array<int64>>=>[[20 22]]\nmain=():>void=>{printl(pair()[0])}',
     'spread': 'main=():>void=>{let xs=[20 22] printl([0 xs... 1 (xs)...])}',
     'sequence': 'Series:type=[count:int64]\nlength=(s:Series)=>s.count\n__index__=(s:Series i:int64)=>i\nmain=():>void=>{printl([loop x in Series[3] x])}',
-    'slice-update': 'main=():>void=>{let xs=[1 2 3 4] xs[1..2]=[20 22] printl(xs)}',
-    'range-index': 'main=():>void=>{let xs=[10 20 30 40 50] printl(xs[0,2..]) xs[4,2..]=[1 2 3] printl(xs[(0..4]])}',
+    'slice-update': 'main=():>void=>{let xs=[1 2 3 4] xs[1..2]=[20 22] printl(xs)}\n$runtime_checks',
+    'range-index': 'main=():>void=>{let xs=[10 20 30 40 50] printl(xs[0,2..]) xs[4,2..]=[1 2 3] printl(xs[(0..4]])}\n$runtime_checks',
     'coalesce': 'read=():>int64?=>none\nmain=():>void=>{printl"{read()??20+22}"}',
-    'compound': 'main=():>void=>{let x=-17 x//=3 x%=4 x^=2 let y=3/2 y/=3 printl"{x} {y}"}',
+    'compound': 'main=():>void=>{let x=-17 x//=3 x%=4 x^=2 let y=3/2 y/=3 printl"{x} {y}"}\n$runtime_checks',
     'loop-else': '''main=():>void=>{
 loop x in [0..0) {printl(x)}
 else loop c in "" {printl(c)}
@@ -161,7 +165,7 @@ printl(raw) printl(quoted) printl(0x"cafe")
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 def test_core_format_execution(compiler, tmp_path, name, target):
     path = tmp_path / 'main.dewy'
-    path.write_bytes(PROGRAMS[name].encode())
+    path.write_bytes((PROGRAMS[name] + ('\n$runtime_checks\n' if name != 'crlf' and '$runtime_checks' not in PROGRAMS[name] else '')).encode())
 
     def execute(label):
         output = tmp_path / label

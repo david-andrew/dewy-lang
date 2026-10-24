@@ -6,6 +6,9 @@ import pytest
 
 from tests.support import compiler  # noqa: F401
 
+# (programs that keep runtime checks for their unproven obligations)
+RUNTIME_CHECKS = '\n$runtime_checks\n'
+
 SOURCE = '''main=()=>{
     console.info("out")
     console.warn("careful")
@@ -26,7 +29,7 @@ def run(binary, **extra):
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_console_streams(compiler, tmp_path, release):  # noqa: F811
     source = tmp_path / 'console.dewy'
-    source.write_text(SOURCE)
+    source.write_text(SOURCE + RUNTIME_CHECKS)
     binary = tmp_path / 'console'
     flags = ['--release'] if release else []
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags], capture_output=True,

@@ -3,3 +3,5 @@ read=(v:int64|string):>int64=>if v is? int64 v else v.length
 pick=(v:int64|string|bool):>int64=>match v {<int64|string>=>read(v) _=>if v 2 else 0}
 run=()=>pick(37)+pick("abc")+pick(true)+pick(false)
 main=()=>exit(run())
+
+$runtime_checks

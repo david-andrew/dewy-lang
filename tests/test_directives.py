@@ -19,12 +19,14 @@ draft=(xs:array<int64> i:int64):>int64=>{
     $prototype
     return xs[i]
 }
-loose=(xs:array<int64> i:int64):>int64=>xs[i]
 main=()=>{
+    $runtime_checks
     let xs:array<int64>=[1 2 3]
-    printl(checked(xs 0) + guarded(xs 1) + draft(xs 2) + loose(xs 0))
+    printl(int(checked(xs 0)) + guarded(xs 1) + draft(xs 2))
 }
 '''
+# (outside those scopes an unproven index is a compile error: no hidden trap)
+LOOSE = 'loose=(xs:array<int64> i:int64):>int64=>xs[i]\nmain=()=>printl(loose([1] 0))\n'
 
 
 def run(compiler, tmp_path, source, *arguments, env=None):
@@ -42,13 +44,13 @@ def test_obligation_listing(compiler, tmp_path):
     assert result.stdout.splitlines() == [
         'sites.dewy:3:12: runtime check: index is in bounds: missing lower and upper bounds ($runtime_checks)',
         'sites.dewy:12:12: runtime check: index is in bounds: missing lower and upper bounds ($prototype)',
-        'sites.dewy:14:41: runtime check: index is in bounds: missing lower and upper bounds (default)',
-        'sites.dewy:17:12: runtime check: exact integer result fits int64 (default)',
     ]
     assert result.stderr.count('prototype: cannot prove index is in bounds') == 1, result.stderr
     assert 'sites.dewy:12:12: warning: prototype:' in result.stderr
     plain = run(compiler, tmp_path, SITES, 'check')
     assert plain.returncode == 0 and plain.stdout == '', plain.stderr
+    loose = run(compiler, tmp_path, LOOSE, 'check', '--obligations')
+    assert loose.returncode != 0 and 'sites.dewy:1:41: error: cannot prove index is in bounds' in loose.stderr, loose.stderr
 
 
 def test_prototype_warnings_silenced(compiler, tmp_path):

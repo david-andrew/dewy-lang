@@ -35,7 +35,7 @@ verify = ():>int64 => {
 forbidden = (xs:array<int64>):>int64 => {
     # REJECT: both runtime-sized mutable values remain live.
     let saved = xs
-    xs[0] = 99
+    if xs.length >? 0 { xs[0] = 99 }
     return checksum(saved)+checksum(xs)
 }
 
@@ -59,3 +59,5 @@ main = ():>void => {
     forbidden(make(3));
     $runtime_assert witness >? 0
 }
+
+$runtime_checks

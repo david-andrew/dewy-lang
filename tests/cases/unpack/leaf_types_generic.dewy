@@ -1,4 +1,4 @@
 # exit: 42
-combine=<T>([x:T y:float64]:array<T>)=>if y is?float64 and x=?20 and y=?22.0 42 else 1
+combine=<T>([x:T y:float64]:array<T length=2>)=>if y is?float64 and x=?20 and y=?22.0 42 else 1
 run=()=>combine<uint8>([20 22])
 main=()=>exit(run())

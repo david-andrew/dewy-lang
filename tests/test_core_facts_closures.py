@@ -22,17 +22,17 @@ pick=(words:array<string>):>int64=>{
 main=():>void=>exit(entry()) entry=():>int64=>pick(["a" "bb"])
 ''',
     'closure_never_called': '''# a closure that would write the index, made but never called
-pick=():>int64=>{
+pick=():>int=>{
     let xs=[1 2 3]
     let i=0
-    let t=0
+    let t:int=0
     let bump=($capture @i)=>{i=7}
     loop k in [0..3) {
         t+=xs[i]
     }
-    return int64<overflow='wrap'>(t)
+    return t
 }
-main=():>void=>exit(entry()) entry=():>int64=>pick()
+main=():>void=>{if pick() =? 3 exit(0) else exit(1)}
 ''',
 }
 
@@ -73,7 +73,7 @@ main=():>void=>exit(entry()) entry=():>int64=>pick()
 pick=():>int64=>{
     let xs=[1 2 3]
     let i=0
-    let t=0
+    let t:int64=0
     let bump=($capture @i)=>{i=7}
     loop k in [0..3) {
         t+=xs[i]

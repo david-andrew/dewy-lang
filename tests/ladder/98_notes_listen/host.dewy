@@ -8,6 +8,7 @@
 # net); `relay` answers them. A host runs one of the two: serving both at once
 # needs the service shared between tasks, and the router calls through
 # function values, which a spawned task cannot (its writes are race-checked).
+$runtime_checks
 import net
 from p"../97_notes_service/router.dewy" import Service
 from p"../97_notes_service/server.dewy" import Connection, feed, finish

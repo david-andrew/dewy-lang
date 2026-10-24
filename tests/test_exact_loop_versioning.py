@@ -27,7 +27,7 @@ kernel=(xs:array<int64> shift:int64):>int64<overflow='wrap'>=>{
     loop i in [int64(0)..int64(32)) {total+=xs[i+shift]}
     return total
 }
-main=(args:array<string>)=>{
+main=(args:array<string>)=>{$runtime_checks\n
     let xs:array<int64>=[loop i in [0..34) i]
     printl(kernel(xs int64(to_int(args[1]) ?? 0)))
 }
@@ -54,7 +54,7 @@ kernel=(@xs:array<int64> offset:int64)=>{
         xs[i]=i+offset
     }
 }
-main=(args:array<string>)=>{
+main=(args:array<string>)=>{$runtime_checks\n
     let xs:array<int64>=[0 0 0 0]
     kernel(@xs int64(to_int(args[1]) ?? 0))
 }
@@ -75,7 +75,7 @@ kernel=(xs:array<int64> offset:int64):>int64<overflow='wrap'>=>{
     }
     return total
 }
-main=(args:array<string>)=>{
+main=(args:array<string>)=>{$runtime_checks\n
     let xs:array<int64>=[1 2 3 4]
     printl(kernel(xs int64(to_int(args[1]) ?? 0)))
 }

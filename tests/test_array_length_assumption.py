@@ -11,7 +11,7 @@ main=()=>printl(f([1 2 3]))
 '''
     for disabled in [False, True]:
         source = tmp_path / 'length.dewy'
-        source.write_text(('$no_assumed_bounds\n' if disabled else '') + body)
+        source.write_text((('$no_assumed_bounds\n' if disabled else '') + body) + "\n$runtime_checks\n")
         binary = tmp_path / 'length'
         built = subprocess.run([compiler, 'build', source, '--ir', '-o', binary], capture_output=True, text=True)
         assert built.returncode == 0, built.stderr

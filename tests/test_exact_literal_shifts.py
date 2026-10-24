@@ -10,10 +10,10 @@ from tests.support import compiler
 def test_literal_multiword_shifts_roundtrip(compiler, tmp_path, release):
     shifts = [1, 31, 32, 63, 64, 65, 127]
     source = tmp_path / 'shifts.dewy'
-    source.write_text('\n'.join(f'f{s}=(x:int64):>int64=>(x << {s}) >> {s}' for s in shifts) + '''
-main=(args:array<string>)=>{
+    source.write_text(('\n'.join(f'f{s}=(x:int64):>int64=>(x << {s}) >> {s}' for s in shifts) + '''
+main=(args:array<string>)=>{$runtime_checks\n
 let x=int64(to_int(args[1]) ?? 0)
-''' + '\n'.join(f'printl(f{s}(x))' for s in shifts) + '\n}\n')
+''' + '\n'.join(f'printl(f{s}(x))' for s in shifts) + '\n}\n') + "\n$runtime_checks\n")
     binary = tmp_path / 'shifts'
     built = subprocess.run([compiler, 'build', source, '-o', binary] + (['--release'] if release else []), capture_output=True, text=True)
     assert built.returncode == 0, built.stderr
@@ -31,7 +31,7 @@ f=(x:int64 by:int64):>int64=>{
     if by >=? 64 and by <=? 127 {return (x << 64) >> by}
     return 0
 }
-main=(args:array<string>)=>printl(f(int64(to_int(args[1]) ?? 0) int64(to_int(args[2]) ?? 0)))
+main=(args:array<string>)=>{$runtime_checks\nprintl(f(int64(to_int(args[1]) ?? 0) int64(to_int(args[2]) ?? 0)))}
 ''')
     binary = tmp_path / 'dynamic'
     built = subprocess.run([compiler, 'build', source, '-o', binary] + (['--release'] if release else []), capture_output=True, text=True)

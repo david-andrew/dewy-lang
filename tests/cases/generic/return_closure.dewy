@@ -1,4 +1,5 @@
 # exit: 42
+$runtime_checks
 keep=<T>(value:T):><():>T>=>()=>value
 run=()=>{let original=[42] let retained=keep(original) original[0]=1
 let value=retained() value[0]=3 return if retained()[0] =? 42 and original[0] =? 1 42 else 1}

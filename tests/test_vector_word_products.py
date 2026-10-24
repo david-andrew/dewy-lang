@@ -13,7 +13,7 @@ def test_vector_word_products_and_tails(compiler, tmp_path, release):
     values = [0, 1, -1, 2**63-1, -2**63, 2**32+1, -(2**32+3), 0x123456789abcdef]
     sizes = [0, 1, 2, 3, 4, 5, 7, 8, 9, 31, 33]
     source = tmp_path / 'products.dewy'
-    source.write_text("""W:type=int64<overflow='wrap'>
+    source.write_text(("""W:type=int64<overflow='wrap'>
 kernel=(xs:array<W> ys:array<W>):>array<W>=>xs .* ys .- xs
 main=()=>{
     let values:array<W>=[""" + ' '.join('(' + str(x) + ')' for x in values) + """]
@@ -28,7 +28,7 @@ main=()=>{
         loop value in kernel(xs xs) printl(value)
     }
 }
-""")
+""") + "\n$runtime_checks\n")
     binary = tmp_path / 'products'
     built = subprocess.run([compiler, 'build', source, '--ir', '-o', binary,
                             *(['--release'] if release else [])], capture_output=True, text=True)

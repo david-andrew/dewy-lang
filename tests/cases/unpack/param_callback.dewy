@@ -1,4 +1,6 @@
 # exit: 42
-apply=(f:<(xs:array<int64>):>int64>)=>f([20 22])
-run=()=>apply(([a b])=>a+b)
+apply=(f:<(xs:array<int64 length=2>):>int64>)=>f([20 22])
+run=()=>apply(([a b]:array<int64 length=2>)=>a+b)
 main=()=>exit(run())
+
+$runtime_checks

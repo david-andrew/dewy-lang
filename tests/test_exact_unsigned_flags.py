@@ -17,7 +17,7 @@ def test_unsigned_store_flags(compiler, tmp_path, target, release):
     if target == 'wasm' and not shutil.which('node'):
         pytest.skip('Node is needed for web execution')
     source = tmp_path / 'unsigned.dewy'
-    source.write_text('''add=(a:uint64 b:uint64):>uint64=>a+b
+    source.write_text(('''add=(a:uint64 b:uint64):>uint64=>a+b
 sub=(a:uint64 b:uint64):>uint64=>a-b
 mul=(a:uint64 b:uint64):>uint64=>a*b
 main=(args:array<string>)=>{
@@ -27,7 +27,7 @@ if args[1]=?"add" printl(add(a b))
 else if args[1]=?"sub" printl(sub(a b))
 else printl(mul(a b))
 }
-''')
+''') + "\n$runtime_checks\n")
     binary = tmp_path / 'unsigned'
     flags = ['--release'] if release else []
     if target != 'native': flags += ['--target', 'aarch64-linux' if target == 'arm' else 'wasm32']

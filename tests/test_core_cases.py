@@ -43,7 +43,7 @@ def test_core_case_batch_fallbacks(compiler, tmp_path, monkeypatch):
     write(root, 'void', 'main=()=>{if false {return} printl"void"}\n', out='void\n')
     write(root, 'exits', '# modes: native web\n# exit: 3\nmain=():>void=>{exit(3)}\n')
     write(root, 'after', 'let g=7\nmain=():>void=>{printl"{g}"}\n', out='7\n')
-    write(root, 'panics', '# exit: 101\nmain=():>void=>exit(entry()) entry=():>int64=>{printl"before" let xs:array<int64>=[] return xs[1]}\n',
+    write(root, 'panics', '# exit: 101\n$runtime_checks\nmain=():>void=>exit(entry()) entry=():>int64=>{printl"before" let xs:array<int64>=[] return xs[1]}\n',
           out='before\n', err='out of bounds\n/index \\d+ out of bounds/\n')
     write(root, 'rejects', '# modes: native\nmain=():>void=>{let x:int64="no"}\n', err='type mismatch\n')
     write(root, 'arguments', '# modes: native native-release\n# args: a b\nmain=():>void=>{printl(args().length)}\n',

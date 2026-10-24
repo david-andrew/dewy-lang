@@ -17,7 +17,7 @@ main = () => {
 
 def test_values_followed_by_positional_arguments_warn(compiler, tmp_path):  # noqa: F811
     source = tmp_path / 'main.dewy'
-    source.write_text(SOURCE)
+    source.write_text((SOURCE) + "\n$runtime_checks\n")
     checked = subprocess.run([compiler, 'check', source], capture_output=True, text=True, timeout=60, check=False)
     assert checked.returncode == 0, checked.stdout + checked.stderr
     warnings = [line for line in checked.stderr.splitlines() if 'warning:' in line]

@@ -9,7 +9,7 @@ from tests.support import compiler
 @pytest.mark.parametrize('release', [False, True])
 def test_positive_modulus_narrows_without_runtime_check(compiler, tmp_path, release):
     source = tmp_path / 'mod.dewy'
-    source.write_text('''digit=(x:int64):>uint8=>uint8(48+x%10)
+    source.write_text(('''digit=(x:int64):>uint8=>uint8(48+x%10)
 cycle=(x:int64):>int64=>{
 let seed:int64=99
 loop i in [0..100) {seed=(seed*1103515245+12345)%2147483648}
@@ -20,7 +20,7 @@ let x=int64(to_int(args[1]) ?? 0)
 printl(digit(x))
 printl(cycle(x))
 }
-''')
+''') + "\n$runtime_checks\n")
     binary = tmp_path / 'mod'
     built = subprocess.run([compiler, 'build', source, '--ir', '-o', binary,
                             *(['--release'] if release else [])], capture_output=True, text=True)

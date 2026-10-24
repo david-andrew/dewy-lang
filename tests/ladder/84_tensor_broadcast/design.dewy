@@ -3,6 +3,7 @@
 # Tensors as decided (question 7, docs/design/tensors.md): the shape is in the
 # type, a row and a column stretch over a matrix through `new` axes, and the
 # signature's shape variables reject a row or column of the wrong length.
+$runtime_checks
 
 make = (rows:int64 cols:int64):>array<int64 length=[rows cols]> => {
     let cells = zeros<int64>(rows cols)

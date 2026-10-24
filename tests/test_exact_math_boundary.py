@@ -8,7 +8,7 @@ from tests.support import compiler  # noqa: F401
 @pytest.mark.parametrize('release', [False, True])
 def test_exact_math_boundary(compiler, tmp_path, release):
     source = tmp_path / 'boundary.dewy'
-    source.write_text('''add=(a:int64 b:int64):>int=>a+b
+    source.write_text(('''add=(a:int64 b:int64):>int=>a+b
 sub=(a:int64 b:int64):>int=>a-b
 mul=(a:int64 b:int64):>int=>a*b
 neg=(a:int64):>int=>-a
@@ -22,7 +22,7 @@ main=(args:array<string>)=>{
     let value:int=a+b
     printl(value)
 }
-''')
+''') + "\n$runtime_checks\n")
     binary = tmp_path / 'boundary'
     built = subprocess.run([compiler, 'build', source, '-o', binary,
                             *(['--release'] if release else [])], capture_output=True, text=True)

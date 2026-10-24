@@ -8,7 +8,7 @@ from tests.support import compiler
 @pytest.mark.parametrize('release', [False, True])
 def test_shift_then_add_is_statically_bounded(compiler, tmp_path, release):
     source = tmp_path / 'shift_bounds.dewy'
-    source.write_text('''f=(x:int64):>int64=>{
+    source.write_text(('''f=(x:int64):>int64=>{
 $no_hidden_costs
 return (x>>1)+108
 }
@@ -16,7 +16,7 @@ main=(args:array<string>)=>{
 let x=int64(to_int(args[1]) ?? 0)
 printl(f(x))
 }
-''')
+''') + "\n$runtime_checks\n")
     binary = tmp_path / 'shift_bounds'
     built = subprocess.run([compiler, 'build', source, '-o', binary,
                             *(['--release'] if release else [])], capture_output=True, text=True)

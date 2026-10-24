@@ -5,6 +5,9 @@ import pytest
 
 from tests.support import compiler  # noqa: F401
 
+# (programs that keep runtime checks for their unproven obligations)
+RUNTIME_CHECKS = '\n$runtime_checks\n'
+
 
 @pytest.mark.parametrize('body,success', [
     ('if a <? b and b <=? c {$assert a <? c}', True),
@@ -41,7 +44,7 @@ def test_difference_join(compiler, tmp_path, body, success):
 ])
 def test_loop_validation(compiler, tmp_path, body, success):
     source = tmp_path / 'loops.dewy'
-    source.write_text('probe=(flag:bool)=>{' + body + '}\nmain=()=>probe(false)\n')
+    source.write_text(('probe=(flag:bool)=>{' + body + '}\nmain=()=>probe(false)\n') + "\n$runtime_checks\n")
     result = subprocess.run([compiler, 'check', source], text=True, capture_output=True, timeout=30)
     assert (result.returncode == 0) == success, result.stdout + result.stderr
     if not success:
@@ -63,7 +66,7 @@ def test_loop_invalidations(compiler, tmp_path, body):
 @pytest.mark.parametrize('release', [False, True])
 def test_dependent_find(compiler, tmp_path, release):
     source = tmp_path / 'find.dewy'
-    source.write_text('''Row:type=[id:int64]
+    source.write_text(('''Row:type=[id:int64]
 Database:type=[rows:array<Row>]
 find=(db:Database id:int64):>int64<i => i <? db.rows.length> | none=>{
     loop i in [0..db.rows.length) {if db.rows[i].id =? id return i}
@@ -75,7 +78,7 @@ main=():>void=>exit(entry()) entry=():>int64=>{
     if found is? int64 {$runtime_assert db.rows[found].id =? 7; return 0}
     return 1
 }
-''')
+''') + RUNTIME_CHECKS)
     result = subprocess.run([compiler, 'build', source, '-o', tmp_path / 'program',
                              *(['--release'] if release else [])],
                             text=True, capture_output=True, timeout=30)
@@ -104,14 +107,17 @@ def test_strict_index_lane(compiler, tmp_path, stale, release):
             'if i >=? xs.length return 0; xs.clear(); return xs[i]' if stale else 'return xs[i]')
     params = '@xs:array<int64>' if stale else 'xs:array<int64> i:int64'
     actuals = '@xs' if stale else 'xs 0'
+    text = (f'forbidden=({params}):>int64=>{{{body}}}\n'
+            f'main=():>void=>exit(entry()) entry=()=>{{let xs:array<int64>=[1]; forbidden({actuals})}}\n')
+    checked = tmp_path / 'checked.dewy'
+    checked.write_text(text + RUNTIME_CHECKS)
     source = tmp_path / 'index.dewy'
-    source.write_text(f'forbidden=({params}):>int64=>{{{body}}}\n'
-                      f'main=():>void=>exit(entry()) entry=()=>{{let xs:array<int64>=[1]; forbidden({actuals})}}\n')
-    arguments = [compiler, 'build', source, '-o', tmp_path / 'program',
-                 *(['--release'] if release else [])]
-    ordinary = subprocess.run(arguments, text=True, capture_output=True, timeout=30)
+    source.write_text(text)
+    flags = ['-o', tmp_path / 'program', *(['--release'] if release else [])]
+    ordinary = subprocess.run([compiler, 'build', checked, *flags], text=True, capture_output=True, timeout=30)
     assert ordinary.returncode == 0, ordinary.stderr
-    strict = subprocess.run([arguments[0], '--internal-fact-policy=require-static', *arguments[1:]], text=True, capture_output=True, timeout=30)
+    # (the default is the strict lane for indexes: no hidden trap)
+    strict = subprocess.run([compiler, 'build', source, *flags], text=True, capture_output=True, timeout=30)
     assert strict.returncode != 0, strict.stdout
     assert ('index is not in bounds' if stale else 'cannot prove index is in bounds') in strict.stderr, strict.stderr
 

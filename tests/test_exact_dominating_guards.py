@@ -10,7 +10,7 @@ from tests.support import compiler
 @pytest.mark.parametrize('release', [False, True])
 def test_dominating_guard_and_invalidations(compiler, tmp_path, release):
     source = tmp_path / 'guards.dewy'
-    source.write_text('''$no_assumed_bounds
+    source.write_text(('''$no_assumed_bounds
 safe=(x:int64):>int64=>{if x <? 9223372036854775807 return x+1;return 0}
 changed=(x:int64):>int64=>{
     if x <? 9223372036854775807 {x=9223372036854775807;return x+1}
@@ -35,7 +35,7 @@ main=(args:array<string>)=>{
     else if args[1]=?"choice" printl(choice(x true))
     else printl(affine(x))
 }
-''')
+''') + "\n$runtime_checks\n")
     binary = tmp_path / 'guards'
     built = subprocess.run([compiler, 'build', source, '--ir', '-o', binary,
                             *(['--release'] if release else [])], capture_output=True, text=True)

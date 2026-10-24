@@ -1997,6 +1997,7 @@ effects_demand_late = (f: int) -> bool:
 # modules of a function that panics only so panics outright (answer 2).
 effect_panics_demanded = false
 effect_panics_settled = false         # deferred obligations are known: answers are final
+effect_panic_pending: {int: bool} = {}
 effect_panic_nodes: {int: int} = {}   # function -> a deferred obligation's node
 effect_panic_texts: {int: str} = {}   # and what it requires
 panic_index: int[]                    # Tarjan order (0: not visited)
@@ -2019,6 +2020,7 @@ effect_panics_reset = ():
     effect_panics_demanded = false
     effect_panics_settled = false
     effect_panic_nodes = {}
+    effect_panic_pending = {}
     effect_panic_texts = {}
     panic_index = []
     panic_low = []
@@ -2035,8 +2037,11 @@ effect_panics_reset = ():
 
 # A deferred obligation (`$runtime_checks`, `$prototype`, or the default while
 # it is still runtime checks) at n in f's body.
-effect_panic_note = (f: int, n: int, what: str):
-    if f <= 0 or effect_panic_nodes.has(f): return
+effect_panic_note = (f: int, n: int, what: str, provisional: bool = false):
+    if f <= 0: return
+    if effect_panic_nodes.has(f) and not (effect_panic_pending.has(f) and not provisional): return
+    if provisional: effect_panic_pending[f] = true
+    else: effect_panic_pending.remove(f)
     effect_panic_nodes[f] = n
     effect_panic_texts[f] = what
 
@@ -2166,6 +2171,7 @@ panic_name_power = 0
 panic_name_rational = 0
 panic_name_pow = 0
 panic_name_pow_op = 0
+panic_name_fraction = 0
 panic_literal = (e0: int) -> int:
     e = e0
     loop e > 0 and nodes[e].kind == .conv: e = int(nodes[e].a)
@@ -2182,6 +2188,7 @@ panic_literal_safe = (n: int) -> bool:
         panic_name_rational = intern("rational")
         panic_name_pow = intern("pow")
         panic_name_pow_op = intern("__pow__")
+        panic_name_fraction = intern("_fraction")
     name = int(nodes[d].name)
     if name == panic_name_range and nkids(n) == 5:
         stepped = panic_literal(kid(n, 3))
@@ -2192,7 +2199,7 @@ panic_literal_safe = (n: int) -> bool:
     if (name == panic_name_power or name == panic_name_pow or name == panic_name_pow_op) and nkids(n) == 2:
         e = panic_literal(kid(n, 1))
         return e != 0 and nodes[e].ival >= 0
-    if name == panic_name_rational and nkids(n) == 2:
+    if (name == panic_name_rational or name == panic_name_fraction) and nkids(n) == 2:
         e = panic_literal(kid(n, 1))
         return e != 0 and nodes[e].ival != 0
     false
@@ -2210,7 +2217,7 @@ panic_edge = (f: int, g: int, n: int):
     panic_edges.push(g)
     panic_edges.push(n)
 
-panic_node = (f: int, n: int):
+panic_site = (f: int, n: int):
     # (a library body's answer is settled by its first panic; its call sites are not checked)
     if n == 0 or panic_lib and panic_witness[f] != 0: return
     k = nodes[n].kind
@@ -2228,7 +2235,14 @@ panic_node = (f: int, n: int):
         # (a call whose precondition is the caller's obligation, as a string
         # index or a divisor: proven, an error, or a check of the caller's own)
         if nodes[n].sym > 0 and not (k == .call and (fact_string_call(n) >= 2 or fact_array_call(n) != 0 or fact_floor_call(n) != 0 or fact_divisors.has(n) or fact_power_call(n) or panic_format_literal(n) or panic_device_literal(n) or not panic_lib and (panic_map_obligation(n) or fact_range_call(n)) or panic_literal_safe(n))): panic_edge(f, int(nodes[n].sym), n)
-    loop g in value_helper_calls(n): panic_edge(f, g, n)
+    if k == .binary or k == .intrinsic:
+        loop g in value_helper_calls(n): panic_edge(f, g, n)
+
+# The full walk is needed only when fact demand did not inventory the body.
+panic_node = (f: int, n: int):
+    if n == 0 or panic_lib and panic_witness[f] != 0: return
+    panic_site(f, n)
+    k = nodes[n].kind
     if k == .parallel_region:
         panic_node(f, int(nodes[n].a))
         return
@@ -2241,6 +2255,7 @@ panic_node = (f: int, n: int):
         loop c in kids(n): panic_node(f, c)
 
 panic_scan = (f: int):
+    fact_complete_deferred(f)
     panic_edge_at[f] = panic_edges.len()
     panic_edge_end[f] = panic_edges.len()
     d = int(fns[f].decl)
@@ -2248,7 +2263,9 @@ panic_scan = (f: int):
     if fns[f].state != 2 or fns[f].body == 0 or d != 0 and has_flag(d, NF_EXTERN): return
     if d != 0 and modules[int(fns[f].mod)].is_prelude and files[pos_file(nodes[d].pos)].path == lib_dir + "/core/rt.jo": return
     panic_lib = fn_in_lib(f)
-    panic_node(f, int(fns[f].body))
+    if let sites = fact_panic_sites.get(f):
+        loop n in sites: panic_site(f, n)
+    else: panic_node(f, int(fns[f].body))
     panic_edge_end[f] = panic_edges.len()
 
 panic_visit = (f: int):

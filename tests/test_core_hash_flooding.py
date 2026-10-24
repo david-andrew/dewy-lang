@@ -55,6 +55,7 @@ main=(args:array<string>)=>{
     }
     printl"{d.length} {e.length}"
 }
+$runtime_checks
 '''
 
 RECORDS = r'''
@@ -70,6 +71,7 @@ main=(args:array<string>)=>{
     }
     printl"{d.length}"
 }
+$runtime_checks
 '''
 
 STABLE = r'''
@@ -81,6 +83,7 @@ main=()=>{
     loop k in d.keys() {keys.push(k)}
     printl"{hash(12345)} {hash("abc")} {hash(P[1 "x"])} {keys[0]} {keys[1]} {keys[49]}"
 }
+$runtime_checks
 '''
 
 

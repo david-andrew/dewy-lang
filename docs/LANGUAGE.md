@@ -405,8 +405,8 @@ The whole parameter can have a type or default, such as `([a b]=[20 22])`.
 Untyped patterns infer the argument type, including when used as callbacks.
 The argument evaluates once; extracted values remain independent of the
 caller. The pattern's length is an obligation on entry, like an index: a
-`array<int64 length=2>` parameter proves it; an `array<int64>` one is checked
-at run time, or is an error under `$runtime_checks = false`. `_` discards array or tuple elements;
+`array<int64 length=2>` parameter proves it; an `array<int64>` one needs a
+proof or an explicit `$runtime_checks` opt-in. `_` discards array or tuple elements;
 for records, leave unwanted fields out. Pattern bindings belong to the body,
 so defaults on later parameters cannot refer to them. Pass the whole argument
 positionally; other named parameters still work. Pattern names must be distinct
@@ -662,10 +662,10 @@ cannot classify (waits, sleeps, foreign calls). In a row `no` reaches to the nex
 `&`, so `& no allocates & no blocks` excludes both.
 
 `panics` is inferred the same way: a function may panic when its body keeps a
-runtime check (an unproven obligation in a `$runtime_checks`, `$prototype` or
-default scope), panics explicitly (`panic`, `$runtime_assert`), or calls or
+runtime check (an unproven obligation in a `$runtime_checks` or `$prototype`
+scope), panics explicitly (`panic`, `$runtime_assert`), or calls or
 takes a handle to a function that may panic. A scope without runtime checks
-(`$runtime_checks = false`, and so `$no_hidden_costs`) cannot call such code: the
+(the default, also `$runtime_checks = false` and `$no_hidden_costs`) cannot call such code: the
 error names the chain to the panic and offers both repairs, proving what the
 callee checks first or opting in with `$runtime_checks`. So a function built
 with `$runtime_checks` cannot fail inside a caller that did not opt in.
@@ -828,10 +828,9 @@ ratio = (a:float64 b:float64):>float64 => {
 average = (total:float64 n:float64):>float64 => total/n   # unproven
 ```
 
-An unproven one follows the obligation settings like any other: a runtime
-check of the result (“produced an infinity under `$no_inf`”, exit 101) under
-`$runtime_checks` and today's default, a compile error under
-`$runtime_checks = false`.
+An unproven one follows the obligation settings like any other: a compile
+error by default, a runtime check of the result (“produced an infinity under
+`$no_inf`”, exit 101) under `$runtime_checks`.
 
 `let cursor = @xs[i]` declares a local place: reads and writes of `cursor` read
 and write `xs[i]`, with `i` evaluated once at the declaration. A local place can
@@ -963,11 +962,9 @@ the array of those members in the same order, an `array<U>` unless its context g
 array a type (`let all = members(U)`, `f(members(U))`). Literal unions are
 ordinary type arguments: `Box<'tokens'|'ast'>`, `array<'a'|'b'>`.
 
-A refuted obligation is a compile error. Today, by default, an unproven
-obligation becomes an ordinary runtime check that panics on failure; a proven
-obligation emits no check. (No traps by default is decided but not built yet: an
-unproven obligation will be a compile error unless the scope opts in with
-`$runtime_checks`; see "Directives".) Annotated local initialization and replacement, arguments, and results
+A refuted obligation is a compile error. An unproven obligation is a compile
+error by default and a runtime check that panics on failure under
+`$runtime_checks` (see "Directives"); a proven obligation emits no check. Annotated local initialization and replacement, arguments, and results
 use these checks. Arguments are captured in evaluation order and checked before
 invocation. A result's references to value parameters describe their entry
 values, even when the function changes its private parameter copies. Generic
@@ -981,8 +978,8 @@ A field may depend on a sibling, as in `[low:int64 high:int64<(>=? low)>]`;
 a field's (or a `let`'s) own name in its refinement is its value, `high:int64<high >=? low>`;
 a dependent write checks a private candidate before replacing the record.
 Missing initialization must satisfy the contract too. Fixed-width increments
-retain runtime checks when overflow cannot be ruled out by proof or the enabled
-64-bit counter-progress assumption. `xs.swap(i j)` keeps an
+whose fit is not proven by facts or the enabled 64-bit counter-progress
+assumption are unproven like any other obligation. `xs.swap(i j)` keeps an
 element refinement without a proof per element.
 
 `array<int64 length <? 10>` is a dynamic array with a checked length contract;
@@ -4116,11 +4113,10 @@ string's counted in graphemes, as `text.length` counts), a nonzero divisor, a va
 parameter. A proven obligation has no runtime check. These settings decide what
 an unproven one does:
 
-- `$runtime_checks = false`: it is a compile error with the reason and a fix
-  (no hidden traps). This is the decided default (no traps by default,
-  2026-10-21) but not yet the compiler's: until the default flips, a scope
-  without a setting behaves as `$runtime_checks` does below, and this setting
-  selects the decided behavior.
+- By default, and under `$runtime_checks = false`: it is a compile error with the
+  reason and a fix (no hidden traps). Handle the case as a value
+  (`xs.get(i)` gives `T | none`), add a guard, or check it explicitly with
+  `$runtime_assert`.
 - `$runtime_checks`: it compiles to a runtime check, with no warning. A failing
   check names the requirement and the values it saw, as
   ``refinement failed: `d not=? 0` (observed: d was 0)`` or
@@ -4133,7 +4129,7 @@ an unproven one does:
 
 `dewy check --obligations file.dewy` lists every unproven obligation that
 compiles to a runtime check, one per line, with the setting responsible
-(`$runtime_checks`, `$prototype`, or `default`), and each library call that may
+(`$runtime_checks` or `$prototype`; outside them none compiles to a check), and each library call that may
 panic (``may panic: indexing with `[]` ``). Without runtime checks, calling code
 that may panic is an error too (the `panics` effect, "Functions and values"). The editor shows sites in
 `$runtime_checks` scopes as information hints.

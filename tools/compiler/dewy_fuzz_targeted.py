@@ -132,7 +132,7 @@ class Test:
         return '\n'.join(self.decls + lines + ['}'])
 
     def source(self) -> str:
-        return self.function() + f'\nmain = ():>void => {self.prefix}run()\n'
+        return self.function() + f'\nmain = ():>void => {self.prefix}run()\n$runtime_checks\n'
 
 
 def make(family, seed, prefix='t_') -> Test:
@@ -1102,7 +1102,7 @@ class Fuzzer:
             for i, t in enumerate(batch):
                 lines += [f'    printl"{MARK}B{i}"', f'    {t.prefix}run()', f'    printl"{MARK}E{i}"']
             source = work / 'batch.dewy'
-            source.write_text('\n'.join(lines) + '\n}\n')
+            source.write_text('\n'.join(lines) + '\n}\n$runtime_checks\n')
             output = work / 'batch'
             built = self.runner.build(source, output, mode)
             if built.returncode == 0:

@@ -1,5 +1,6 @@
 # exit: 42
 # modes: native native-release
+$runtime_checks
 run=()=>{let xs:array<int64>=[40] let original=xs
 let bump=($capture @xs)=>{xs[0]+=1} bump() bump() return if original[0]=?40 xs[0] else 1}
 main=()=>exit(run())

@@ -12,10 +12,10 @@ from tests.support import compiler, Scripts
 @pytest.mark.parametrize('policy', ['', "<overflow='wrap'>", "<overflow='saturate'>"])
 def test_atomic_store_boundary(compiler, tmp_path, payload, maximum, policy, target):
     source = tmp_path / 'atomic.dewy'
-    source.write_text(f'''main=()=>{{
+    source.write_text((f'''main=()=>{{
         let a=atomic<{payload}{policy}>({maximum})
         printl(a.add(1))
-    }}''')
+    }}''') + "\n$runtime_checks\n")
     binary = tmp_path / 'atomic'
     built = subprocess.run([compiler, 'build', source, '-o', binary] + (['--target', 'wasm32'] if target == 'wasm' else []), capture_output=True, text=True)
     assert built.returncode == 0, built.stderr

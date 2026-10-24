@@ -9,7 +9,7 @@ from tests.support import compiler
 @pytest.mark.parametrize('mode', [(), ('--release',), ('--target', 'web'), ('--release', '--target', 'web')])
 def test_bounded_dynamic_rotate(compiler, tmp_path, mode):
     source = tmp_path / 'rotates.dewy'
-    source.write_text('''W:type=uint32<overflow='wrap'>
+    source.write_text(('''W:type=uint32<overflow='wrap'>
 left=(x:W n:int64):>W=>{let k=n&31;return (x<<k)|(x>>(32-k))}
 right=(x:W n:int64):>W=>{let k=n&31;return (x>>k)|(x<<(32-k))}
 endpoints=(x:W n:int64):>W=>{let k=n&32;return (x<<k)|(x>>(32-k))}
@@ -20,7 +20,7 @@ loop n in [-1 0 1 7 31 32 33 64] {
  printl(left(x n));printl(right(x n));printl(endpoints(x n));printl(unbounded(x n))
 }
 }
-''')
+''') + "\n$runtime_checks\n")
     result = subprocess.run([compiler, 'run', source, *mode, '--ir'], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     numbers = [int(line) for line in result.stdout.splitlines() if re.fullmatch(r'\d+', line)]

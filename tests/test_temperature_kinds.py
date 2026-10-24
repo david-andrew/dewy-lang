@@ -15,6 +15,7 @@ let t=reading(25)
 let rise=20°C
 printl"{t + rise} {rise as °F}"
 printl"{rise <? t}"
+$runtime_checks
 '''
 
 

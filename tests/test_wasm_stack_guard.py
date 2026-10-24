@@ -12,7 +12,7 @@ def test_large_recursive_frames_trap_before_data(compiler, tmp_path):
     if node is None:
         pytest.skip('Node is needed to execute the web runner')
     source = tmp_path / 'frames.dewy'
-    source.write_text('''count=(n:int64):>int64=>{
+    source.write_text(('''count=(n:int64):>int64=>{
  let data:array<int64 length=32768>=[]
  data[0]=n
  if n =? 0 return data[0]
@@ -20,7 +20,7 @@ def test_large_recursive_frames_trap_before_data(compiler, tmp_path):
  return inner+data[0]
 }
 main=():>void=>exit(count(32))
-''')
+''') + "\n$runtime_checks\n")
     output = tmp_path / 'frames'
     built = subprocess.run([compiler, 'build', source, '--target', 'wasm32', '-o', output],
                            capture_output=True, text=True, timeout=30)

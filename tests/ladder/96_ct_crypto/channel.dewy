@@ -3,6 +3,7 @@
 # nonce. The receiver keeps a 64-record sliding window, so records may arrive
 # out of order but never twice. The sequence number is public (it travels in
 # the clear as associated data); only authenticated records move the window.
+$runtime_checks
 
 from p"ct.dewy" import store64
 from p"sha2.dewy" import hkdf

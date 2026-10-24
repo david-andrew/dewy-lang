@@ -8,6 +8,9 @@ import pytest
 
 from tests.support import Scripts, target_name
 
+# (programs that keep runtime checks for their unproven obligations)
+RUNTIME_CHECKS = '\n$runtime_checks\n'
+
 ROOT = Path(__file__).resolve().parents[1]
 MODEL = ROOT / 'examples/parallel_particles.dewy'
 
@@ -85,7 +88,7 @@ PROGRAMS['matrix-product-f32'] = PROGRAMS['matrix-product'].replace('float64', '
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 def test_core_parallel_values(compiler, tmp_path, name, release, target):
     source = tmp_path / 'main.dewy'
-    source.write_text(PROGRAMS[name])
+    source.write_text((PROGRAMS[name]) + RUNTIME_CHECKS)
     output = tmp_path / 'program'
     flags = ['--release'] if release else []
     env = {k: v for k, v in os.environ.items() if not k.startswith('DEWY_')}

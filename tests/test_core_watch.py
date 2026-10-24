@@ -134,6 +134,7 @@ selected_answer = () => {
 }
 $test
 excluded = () => panic("must not run excluded test")
+$runtime_checks
 '''
     save(source, program)
     save(helper, 'answer=()=>42')
@@ -242,6 +243,7 @@ update=(dt:float64):>void=>{
     sleep(5ms);
 }
 draw=():>void=>clear(BLACK)
+$runtime_checks
 '''
 
 
@@ -283,7 +285,7 @@ def test_core_watch_exact_division(compiler, tmp_path):
     watcher = Watch(compiler, source, game=True)
     try:
         before = int(watcher.expect(r'tick count=(\d+) label=0\.5 value=22').group(1))
-        save(helper, 'label=()=>"{1/2}"')
+        save(helper, 'label=()=>"{1/2}"\n$runtime_checks')
         watcher.expect(r'reloaded in \d+ ms:')
         after = int(watcher.expect(r'tick count=(\d+) label=1/2 value=22').group(1))
         assert after > before, watcher.output
@@ -511,6 +513,7 @@ let index=(32*64+32)*4
 printl"tick {count} program={program.prog} color={pixels[index]},{pixels[index+1]},{pixels[index+2]}"
 }
 }
+$runtime_checks
 ''')
     watcher = Watch(compiler, source, game=True)
     try:

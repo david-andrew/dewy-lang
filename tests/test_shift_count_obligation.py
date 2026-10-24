@@ -35,7 +35,7 @@ def test_unguarded_rejected_bulletproof(compiler, tmp_path, form):
 def test_unguarded_panics(compiler, tmp_path, scope, op):
     source = f'{scope}f = (x:int n:int):>int => x {op} n\nmain = ():>void & no panics => printl(f(1 3))\n'
     result = run(compiler, tmp_path, source)
-    assert result.returncode != 0 and 'may panic' in result.stderr, result.stdout + result.stderr
+    assert result.returncode != 0 and ('may panic' if scope else 'cannot prove') in result.stderr, result.stdout + result.stderr
     assert 'the shift count is >= 0' in result.stderr, result.stderr
 
 

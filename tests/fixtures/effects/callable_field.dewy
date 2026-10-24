@@ -1,5 +1,5 @@
 Holder:type=[f:<(x:int64):>int64 & no_effects>]
-quiet=(x:int64):>int64 & no_effects=>x+1
+quiet=(x:int64):>int64 & no_effects=>if x <? 9223372036854775807 x+1 else x
 main=():>void=>{
     let holder=Holder[f=@quiet]
     exit(holder.f(1))

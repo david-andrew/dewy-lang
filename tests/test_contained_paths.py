@@ -55,6 +55,7 @@ main=():>void=>{
     let paths=argv.map(x => p"{base}/{x}")
     loop q in paths { printl(q.exists) }
 }
+$runtime_checks
 '''
 
 # Nothing here warns: hardcoded paths, a helper given hardcoded text, a number joined to a base,
@@ -69,6 +70,7 @@ main=():>void=>{
     let argv=args()
     let count=argv.length
     printl(p"{base}/{count}.txt".exists)
+    if count =? 0 return
     let job=Job[argv[0] "/srv/jobs"]
     printl(p(job.root).is_dir)
     let f=p"{base}/{argv[0]}"
@@ -98,6 +100,7 @@ main=():>void=>{
     }
     printl(g)
 }
+$runtime_checks
 '''
 
 

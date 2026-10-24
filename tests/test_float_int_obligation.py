@@ -37,7 +37,7 @@ def test_unguarded_rejected_bulletproof(compiler, tmp_path, form):
 def test_unguarded_panics(compiler, tmp_path, scope, target):
     source = f'{scope}f = (x:float64):>{target} => {target}(x)\nmain = ():>void & no panics => printl(f(2.5))\n'
     result = run(compiler, tmp_path, source)
-    assert result.returncode != 0 and 'may panic' in result.stderr, result.stdout + result.stderr
+    assert result.returncode != 0 and ('may panic' if scope else 'cannot prove') in result.stderr, result.stdout + result.stderr
     assert 'for the conversion to ' + target in result.stderr, result.stderr
 
 
@@ -57,7 +57,7 @@ def test_negated_guard_does_not_exclude_nan(compiler, tmp_path):
     source = ('f = (x:float64):>uint8 => {\n    if x <? 0.0 or x >=? 256.0 return 0\n    x as uint8\n}\n'
               'main = ():>void & no panics => printl(f(2.5))\n')
     result = run(compiler, tmp_path, source)
-    assert result.returncode != 0 and 'may panic' in result.stderr, result.stdout + result.stderr
+    assert result.returncode != 0 and 'cannot prove' in result.stderr, result.stdout + result.stderr
     assert 'within the uint8 range' in result.stderr, result.stderr
     result = run(compiler, tmp_path, '$no_nan\n' + source)
     assert result.returncode == 0, result.stdout + result.stderr

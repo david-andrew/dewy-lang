@@ -41,10 +41,12 @@ main = () => {
     let x = @(plot.moved(7 @steps))
     x += steps
     printl"{plot.origin.value} {steps}"
-    let ms = [Mutex<int64>[1] Mutex<int64>[2]]
+    let ms:array<Mutex<int64> length=2> = [Mutex<int64>[1] Mutex<int64>[2]]
     let e = @(ms[1].lock())
     e += 40
     let o = @(plot.origin.lock())
     o.y = 9
     printl"{ms[1].value} {plot.origin.value} {holds}"
 }
+
+$runtime_checks

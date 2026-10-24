@@ -1,6 +1,7 @@
 # `xs[f()] = g()`: the destination's indices first, then the right side; a
 # right side that resizes the array or changes an index variable still writes
 # where the indices pointed (fuzz seed 301345).
+$runtime_checks
 mk=(start:int64)=>{
     let c:int64=start
     return ($capture c s:int64):>int64=>{

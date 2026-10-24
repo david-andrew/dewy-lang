@@ -10,14 +10,14 @@ from tests.support import compiler
 @pytest.mark.parametrize('disabled', [False, True])
 def test_masked_mathematical_increment(compiler, tmp_path, disabled):
     source = tmp_path / 'counter.dewy'
-    source.write_text(('$no_assumed_bounds\n' if disabled else '') + '''
+    source.write_text((('$no_assumed_bounds\n' if disabled else '') + '''
 f=(start:int64 increment:int):>int64=>{
     let total=start
     loop i in [0..2) {total+=increment and 65535}
     return total
 }
 main=(args:array<string>)=>printl(f(int64(to_int(args[1]) ?? 0) to_int(args[2]) ?? 0))
-''')
+''') + "\n$runtime_checks\n")
     binary = tmp_path / 'counter'
     built = subprocess.run([compiler, 'build', source, '--ir', '-o', binary], capture_output=True, text=True)
     assert built.returncode == 0, built.stderr

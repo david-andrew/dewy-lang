@@ -35,6 +35,7 @@ QUIET = '''main=()=>{
     exact+=0.2
     printl"{total} {stated =? 0.3} {exact =? 0.3}"
 }
+$runtime_checks
 '''
 
 

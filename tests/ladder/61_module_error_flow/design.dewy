@@ -2,8 +2,8 @@ from p"invoice.dewy" import Invoice, invoice
 from p"parse.dewy" import BadNumber
 from p"policy.dewy" import BadQuantity
 summarize = (lines:array<string>):>Invoice|BadNumber|BadQuantity => {
-    let total = 0
-    let count = 0
+    let total:int64 = 0
+    let count:int64 = 0
     loop line in lines {
         let item = invoice(line) or_throw
         total += item.total

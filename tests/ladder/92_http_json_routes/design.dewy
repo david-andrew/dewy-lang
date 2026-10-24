@@ -2,6 +2,7 @@
 # Acceptance: HTTP/1.1 request parser and JSON integer-schema CRUD routing with status codes and transactional validation; deterministic transport transcripts.
 # The handler is checked in-process, then main carries the same requests over a
 # loopback listener (net), one connection each, framed by Content-Length.
+$runtime_checks
 import net
 Request:type = [method:string target:string body:string]
 Response:type = [status:int64 body:string]

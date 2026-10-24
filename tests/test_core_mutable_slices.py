@@ -5,6 +5,9 @@ import pytest
 
 from tests.support import compiler
 
+# (programs that keep runtime checks for their unproven obligations)
+RUNTIME_CHECKS = '\n$runtime_checks\n'
+
 SWAP = '''
 swap=(@a:array<int64> @b:array<int64>):>void=>{
  loop i in [0..a.length) {let v=a[i] a[i]=b[i] b[i]=v}
@@ -16,7 +19,7 @@ swap=(@a:array<int64> @b:array<int64>):>void=>{
 @pytest.mark.parametrize('release', [False, True])
 def test_mutable_adjacent_slices(compiler, tmp_path, release):
     source = tmp_path / 'slices.dewy'
-    source.write_text(SWAP + '''
+    source.write_text((SWAP + '''
 main=():>void=>exit(entry()) entry=()=>{
  let a:array<int64>=[1 2 3 4]
  let saved=a
@@ -27,7 +30,7 @@ main=():>void=>exit(entry()) entry=()=>{
  $runtime_assert(a =? [3 4 1 2])
  return 0
 }
-''')
+''') + RUNTIME_CHECKS)
     output = tmp_path / 'slices'
     build = subprocess.run([compiler, 'build', source, '-o', output,
                             *(['--release'] if release else [])], capture_output=True, text=True)
@@ -89,7 +92,7 @@ main=():>void=>{
 def test_mutable_slice_fork(compiler, tmp_path, release):
     import os
     source = tmp_path / 'fork.dewy'
-    source.write_text(FORK)
+    source.write_text(FORK + RUNTIME_CHECKS)
     output = tmp_path / 'fork'
     build = subprocess.run([compiler, 'build', source, '-o', output,
                             *(['--release'] if release else [])], capture_output=True, text=True)
@@ -144,7 +147,7 @@ main=():>void=>{
 def test_readonly_input_shared_by_disjoint_fork(compiler, tmp_path, release):
     import os
     source = tmp_path / 'read_fork.dewy'
-    source.write_text(READ_FORK)
+    source.write_text(READ_FORK + RUNTIME_CHECKS)
     binary = tmp_path / 'read_fork'
     build = subprocess.run([compiler, 'build', source, '-o', binary,
                             *(['--release'] if release else [])], capture_output=True, text=True)
@@ -158,7 +161,7 @@ def test_readonly_input_shared_by_disjoint_fork(compiler, tmp_path, release):
 @pytest.mark.parametrize('change', ['src[0]=99', 'src.push(99)', 'let saved=src'])
 def test_readonly_borrow_cannot_be_mutated_or_copied(compiler, tmp_path, change):
     source = tmp_path / 'read_escape.dewy'
-    source.write_text(READ_FORK.replace('let n=out.length', change+'\n let n=out.length'))
+    source.write_text((READ_FORK.replace('let n=out.length', change+'\n let n=out.length')) + RUNTIME_CHECKS)
     result = subprocess.run([compiler, 'check', source], capture_output=True, text=True)
     assert result.returncode != 0
     assert 'mutable slice callee' in result.stderr, result.stderr
@@ -182,7 +185,7 @@ def test_borrowed_bounds_still_trap(compiler, tmp_path, release, body):
     source = tmp_path / 'bounds.dewy'
     source.write_text('copy=(@a:array<int64> @b:array<int64>):>void=>{' + body + '''}
 main=():>void=>{let a:array<int64>=[1 2 3] let b:array<int64>=[0] copy(@a[..] @b[..])}
-''')
+''' + RUNTIME_CHECKS)
     result = subprocess.run([compiler, *(['--release'] if release else []), source],
                             capture_output=True, text=True)
     assert result.returncode != 0

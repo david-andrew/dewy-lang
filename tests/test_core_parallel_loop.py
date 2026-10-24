@@ -7,6 +7,9 @@ import pytest
 
 from tests.support import Scripts, target_name
 
+# (programs that keep runtime checks for their unproven obligations)
+RUNTIME_CHECKS = '\n$runtime_checks\n'
+
 
 @pytest.fixture(scope='module')
 def compiler():
@@ -44,7 +47,7 @@ loop round in [0..20) {$runtime_assert(sum([parallel x in floats x]) =? sum(floa
 @pytest.mark.parametrize('release', [False, True])
 def test_parallel_syntax(compiler, tmp_path, target, release):
     source = tmp_path / 'main.dewy'
-    source.write_text(PROGRAM)
+    source.write_text(PROGRAM + RUNTIME_CHECKS)
     output = tmp_path / 'main'
     env = dict(os.environ, DEWY_THREADS='2', DEWY_EMIT_WORKERS='1')
     built = subprocess.run([compiler, 'build', source, '-o', output, '--target', target_name(target),
@@ -66,7 +69,7 @@ def test_parallel_syntax(compiler, tmp_path, target, release):
 
 @pytest.mark.parametrize('body,diagnostic', [
     ('let total=0 parallel i in [0..10) {total+=i}', 'captured'),
-    ('let xs=[0 0] parallel i in [0..2) {xs[0]=i}', 'captured'),
+    ('let xs=[0 0] parallel i in [0..2) {if xs.length >? 0 {xs[0]=i}}', 'captured'),
     ('parallel i in [0..10) {return i}', 'return cannot leave'),
     ('parallel i in [0..10) {break}', 'cannot leave'),
     ('parallel i in [0..10) {continue}', 'cannot leave'),
@@ -75,7 +78,7 @@ def test_parallel_syntax(compiler, tmp_path, target, release):
 ])
 def test_parallel_obligations(compiler, tmp_path, body, diagnostic):
     source = tmp_path / 'invalid.dewy'
-    source.write_text('main=():>void=>{' + body + '}')
+    source.write_text('main=():>void=>{' + body + '}' + RUNTIME_CHECKS)
     result = subprocess.run([compiler, 'check', source], capture_output=True,
                             text=True, timeout=30)
     assert result.returncode != 0

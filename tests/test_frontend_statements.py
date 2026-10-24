@@ -11,7 +11,7 @@ from tests.support import compiler  # noqa: F401
 @pytest.mark.parametrize('release', [False, True])
 def test_direct_statements(compiler, tmp_path, release):
     source = tmp_path / 'statements.dewy'
-    source.write_text('''main=():>void=>{
+    source.write_text(('''main=():>void=>{
     let value:int64=7
     value+=5
     value*=3
@@ -28,7 +28,7 @@ def test_direct_statements(compiler, tmp_path, release):
     }
     exit(value);
 }
-''')
+''') + "\n$runtime_checks\n")
     images = []
     for mode in ('old', 'compare'):
         output = tmp_path / mode

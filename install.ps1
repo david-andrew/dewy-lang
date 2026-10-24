@@ -192,7 +192,7 @@ function Test-Smoke([string]$dir) {
     try {
         $version = Invoke-Native $compiler @('--version')
         if ($version.Code -ne 0) { Write-Warning "dewy-core --version failed (exit $($version.Code)): $($version.Output -join "`n")"; return $false }
-        [IO.File]::WriteAllText((Join-Path $work 'smoke.dewy'), "main=():>void=>{let values=[20 22] exit(sum(values))}`n")
+        [IO.File]::WriteAllText((Join-Path $work 'smoke.dewy'), "main=():>void=>{let values=[20 22] if sum(values) =? 42 exit(42) else exit(1)}`n")
         $build = Invoke-Native $compiler @('build', (Join-Path $work 'smoke.dewy'), '-o', (Join-Path $work 'smoke.exe'))
         if ($build.Code -ne 0) { Write-Warning "the smoke build failed (exit $($build.Code)): $($build.Output -join "`n")"; return $false }
         $run = Invoke-Native (Join-Path $work 'smoke.exe') @()

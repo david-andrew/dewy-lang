@@ -10,7 +10,7 @@ from tests.support import compiler
 @pytest.mark.parametrize('release', [False, True])
 def test_wrap_literals_rotates_and_narrow_operations(compiler, tmp_path, release):
     source = tmp_path / 'words.dewy'
-    source.write_text('''W:type=uint32<overflow='wrap'>
+    source.write_text(('''W:type=uint32<overflow='wrap'>
 Q:type=uint64<overflow='wrap'>
 literals=(w:W):>W=>(w+1) xor (w&0xFF) xor (5 xor w)
 rotate=(x:W):>W=>(x<<7)|(x>>25)
@@ -26,7 +26,7 @@ main=(args:array<string>)=>{
  printl(product(x y))
  printl(wide_shift(x))
 }
-''')
+''') + "\n$runtime_checks\n")
     binary = tmp_path / 'words'
     built = subprocess.run([compiler, 'build', source, '--ir', '-o', binary,
                             *(['--release'] if release else [])], capture_output=True, text=True)

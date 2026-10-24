@@ -35,7 +35,7 @@ def test_unguarded_rejected_bulletproof(compiler, tmp_path, form):
 @pytest.mark.parametrize('form', ['loop', 'comprehension', 'stored'])
 def test_unguarded_panics(compiler, tmp_path, scope, form):
     result = run(compiler, tmp_path, scope + MAIN + FORMS[form] + '}\n')
-    assert result.returncode != 0 and 'may panic' in result.stderr, result.stdout + result.stderr
+    assert result.returncode != 0 and ('may panic' if scope else 'cannot prove') in result.stderr, result.stdout + result.stderr
     assert 'the range step is nonzero' in result.stderr, result.stderr
 
 

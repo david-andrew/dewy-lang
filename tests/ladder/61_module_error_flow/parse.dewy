@@ -4,5 +4,8 @@ parse_number = (text:string):>int64|BadNumber => {
     if number is? error {
         return BadNumber[text]
     }
-    return number
+    if number =? -9223372036854775808 {return -9223372036854775808}
+    if number =? 9223372036854775807 {return 9223372036854775807}
+    if number <=? -9223372036854775808 or number >=? 9223372036854775807 {return BadNumber[text]}
+    return int64(number)
 }

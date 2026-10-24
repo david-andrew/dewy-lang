@@ -46,7 +46,10 @@ def test_scalar_fact_check_diagnostics(compiler, name):
                                           ('policy_math_result', None),
                                           ('wrap_unknown', None)])
 def test_scalar_fact_internal_policy(compiler, tmp_path, command, name, expected):
-    arguments = [compiler, '--internal-fact-policy=require-static', command, CASES / f'{name}.dewy']
+    # (the golden case runs under `$runtime_checks`; the policy decides without it)
+    source = tmp_path / f'{name}.dewy'
+    source.write_text((CASES / f'{name}.dewy').read_text().replace('$runtime_checks\n', ''))
+    arguments = [compiler, command, source]
     if command == 'build':
         arguments += ['-o', tmp_path / 'program']
     result = subprocess.run(arguments,

@@ -18,7 +18,7 @@ from tests.support import compiler  # noqa: F401
 ])
 def test_checked_sum_census(compiler, tmp_path, release, kind, values, expected):
     path = tmp_path / 'sum.dewy'
-    path.write_text(f'main=()=>{{let xs:array<{kind}>=[{" ".join(map(str, values))}]; printl(xs.sum())}}\n')
+    path.write_text((f'main=()=>{{let xs:array<{kind}>=[{" ".join(map(str, values))}]; printl(xs.sum())}}\n') + "\n$runtime_checks\n")
     binary = tmp_path / 'sum'
     built = subprocess.run([compiler, 'build', path, '--ir', '-o', binary, *(['--release'] if release else [])], capture_output=True, text=True)
     assert built.returncode == 0, built.stderr

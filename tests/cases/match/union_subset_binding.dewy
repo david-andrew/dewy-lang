@@ -4,3 +4,5 @@ read=(v:TextOrCount):>int64=>if v is? int64 v else v.length
 pick=(v:TextOrCount|bool):>int64=>match v {part:TextOrCount=>read(part) <bool>=>2}
 run=()=>pick(37)+pick("abc")+pick(true)
 main=()=>exit(run())
+
+$runtime_checks

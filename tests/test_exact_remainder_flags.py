@@ -10,7 +10,7 @@ from tests.support import compiler
 @pytest.mark.parametrize('release', [False, True])
 def test_flag_remainder_matches_exact_arithmetic(compiler, tmp_path, release):
     source = tmp_path / 'remainder.dewy'
-    source.write_text('''add=(a:int64 b:int64):>int64=>(a+b)%1000000007
+    source.write_text(('''add=(a:int64 b:int64):>int64=>(a+b)%1000000007
 sub=(a:int64 b:int64):>int64=>(a-b)%1000000007
 mul=(a:int64 b:int64):>int64=>(a*b)%1000000007
 main=(args:array<string>)=>{
@@ -20,7 +20,7 @@ printl(add(a b))
 printl(sub(a b))
 printl(mul(a b))
 }
-''')
+''') + "\n$runtime_checks\n")
     binary = tmp_path / 'remainder'
     built = subprocess.run([compiler, 'build', source, '-o', binary] +
                            (['--release'] if release else []), capture_output=True, text=True)
@@ -42,9 +42,9 @@ printl(mul(a b))
 def test_induction_does_not_assume_wrapping_guard_or_two_steps(compiler, tmp_path, body):
     source = tmp_path / 'counter.dewy'
     start = 2**63-1 if 'i+2' in body else 2**63-2
-    source.write_text(f'''$no_assumed_bounds
+    source.write_text((f'''$no_assumed_bounds
 main=()=>{{let i:int64={start};{body};printl(i)}}
-''')
+''') + "\n$runtime_checks\n")
     binary = tmp_path / 'counter'
     built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True, text=True)
     assert built.returncode == 0, built.stderr
@@ -86,11 +86,11 @@ printl(n)
 @pytest.mark.parametrize('release', [False, True])
 def test_flag_chain_keeps_cancellation_and_overflow(compiler, tmp_path, release):
     source = tmp_path / 'chain.dewy'
-    source.write_text('''f=(a:int64 b:int64 c:int64):>int64=>a*b+c
+    source.write_text(('''f=(a:int64 b:int64 c:int64):>int64=>a*b+c
 main=(args:array<string>)=>{
 printl(f(int64(to_int(args[1]) ?? 0) int64(to_int(args[2]) ?? 0) int64(to_int(args[3]) ?? 0)))
 }
-''')
+''') + "\n$runtime_checks\n")
     binary = tmp_path / 'chain'
     built = subprocess.run([compiler, 'build', source, '-o', binary] + (['--release'] if release else []), capture_output=True, text=True)
     assert built.returncode == 0, built.stderr
@@ -110,9 +110,9 @@ printl(f(int64(to_int(args[1]) ?? 0) int64(to_int(args[2]) ?? 0) int64(to_int(ar
 @pytest.mark.parametrize('scale,offset', [(2, 1), (3, 1), (3, -1), (7, 2147483647), (7, -2147483647)])
 def test_affine_store_checks_exact_preimage(compiler, tmp_path, scale, offset):
     source = tmp_path / 'affine.dewy'
-    source.write_text(f'''f=(x:int64):>int64=>{scale}*x+({offset})
+    source.write_text((f'''f=(x:int64):>int64=>{scale}*x+({offset})
 main=(args:array<string>)=>printl(f(int64(to_int(args[1]) ?? 0)))
-''')
+''') + "\n$runtime_checks\n")
     binary = tmp_path / 'affine'
     built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True, text=True)
     assert built.returncode == 0, built.stderr

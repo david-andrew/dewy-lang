@@ -11,9 +11,13 @@ from pathlib import Path
 
 import pytest
 
+# (programs that keep runtime checks for their unproven obligations)
+RUNTIME_CHECKS = '\n$runtime_checks\n'
+
 ROOT = Path(__file__).resolve().parents[1]
 TEXT = 'Dewy café🙂\0' + 'x' * 200
-ECHO = '''import net
+ECHO = '''$runtime_checks
+import net
 payload=():>array<uint8>=>{
     let data:array<uint8>=[]
     loop i in [0..512) {data.push(uint8<overflow='wrap'>(int64(i)))}
@@ -346,6 +350,7 @@ def test_core_online_starter_room(compiler, room_binaries, tmp_path):
     source = source.replace('update = (dt:float64) => {', 'advance_game = (dt:float64) => {')
     source += '''
 import rtc
+
 rtc.rtc_stun_servers=[]
 if env("ROLE")=?"host" invite.start(reliable=false)
 let wrote=false
@@ -369,7 +374,7 @@ update=(dt:float64)=>{
     if time()-started>?10.0 {printl("timeout") exit(2)}
 }
 '''
-    path.write_text(source)
+    path.write_text(source)  # (the starter carries its own `$runtime_checks`)
     binary = project / 'main'
     build(compiler, path, binary, room_binaries[2])
     processes = []

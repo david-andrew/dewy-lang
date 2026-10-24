@@ -9,7 +9,7 @@ from tests.support import compiler
 @pytest.mark.parametrize('release', [False, True])
 def test_broadcast_singleton_axes_empty_and_evaluation(compiler, tmp_path, release):
     source = tmp_path / 'axes.dewy'
-    source.write_text('''make=(@calls:int64 xs:array<int64>):>array<int64>=>{calls+=1; return xs}
+    source.write_text(('''make=(@calls:int64 xs:array<int64>):>array<int64>=>{calls+=1; return xs}
 main=()=>{
  loop n in [0..10) {
   let calls:int64=0
@@ -27,7 +27,7 @@ main=()=>{
  }
  printl("ok")
 }
-''')
+''') + "\n$runtime_checks\n")
     binary = tmp_path / 'axes'
     built = subprocess.run([compiler, 'build', source, '-o', binary,
                             *(['--release'] if release else [])], capture_output=True, text=True)

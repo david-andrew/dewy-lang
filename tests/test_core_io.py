@@ -6,7 +6,7 @@ import pytest
 from tests.support import compiler
 
 
-PROGRAM = r'''
+PROGRAM = r'''$runtime_checks
 main=(args:array<string>):>void=>exit(entry(args)) entry=(args:array<string>):>int64=>{
 if args[1]=?"stdin" {
     let all=read_stdin()

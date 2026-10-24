@@ -71,13 +71,13 @@ main=()=>printl(f(1))
 
 def test_progress_optout_retains_overflow_trap(compiler, tmp_path):
     source = tmp_path / 'progress.dewy'
-    source.write_text('''$no_assumed_bounds
+    source.write_text(('''$no_assumed_bounds
 main=(args:array<string>)=>{
     let count=int64(to_int(args[1]) ?? 0)
     count+=1
     printl(count)
 }
-''')
+''') + "\n$runtime_checks\n")
     binary = tmp_path / 'progress'
     built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True, text=True)
     assert built.returncode == 0, built.stderr

@@ -33,6 +33,7 @@ main=(args:array<string>)=>{
         printl(format((one << 4001)+5 "x").length)
     }
 }
+$runtime_checks
 '''
 
 
