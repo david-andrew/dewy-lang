@@ -1010,8 +1010,8 @@ def test_core_word_power_arithmetic(compiler, tmp_path, target, release):
     exponents = [0, 1, 2, 3, 7, 16, 31, 32, 63, 64, 127, 255]
     source = tmp_path / 'powers.dewy'
     source.write_text(f'''main=():>void=>{{
-let signed:array<int64>=[{' '.join(map(str, signed))}]
-let unsigned:array<uint64>=[{' '.join(map(str, unsigned))}]
+let signed:array<int64<overflow='wrap'>>=[{' '.join(map(str, signed))}]
+let unsigned:array<uint64<overflow='wrap'>>=[{' '.join(map(str, unsigned))}]
 let exponents:array<int64>=[{' '.join(map(str, exponents))}]
 loop a in signed {{loop n in exponents {{printl"{{a^n}}"}}}}
 loop a in unsigned {{loop n in exponents {{printl"{{a^n}}"}}}}
@@ -1122,7 +1122,7 @@ def test_core_bounded_remainder_ir(compiler, tmp_path, target, release):
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 def test_core_constant_floor_ir(compiler, tmp_path, target):
     source = tmp_path / 'constant.dewy'
-    source.write_text('''probe=(a:int64):>int64=>a%3+a//3+a%8+a//8
+    source.write_text('''probe=(a:int64<overflow='wrap'>):>int64<overflow='wrap'>=>a%3+a//3+a%8+a//8
 main=():>void=>exit(entry()) entry=()=>probe(-7)
 ''')
     built = subprocess.run([compiler, 'build', source, '--ir', '--target', target_name(target),
@@ -1541,7 +1541,7 @@ def test_core_integer_select(compiler, tmp_path, target, release):
     rng = random.Random(42031)
     values += [rng.randrange(-(1 << 63), 1 << 63) for _ in range(128)]
     source = tmp_path / 'select.dewy'
-    source.write_text(f"""pick=(x:int64 y:int64 flag:bool):>int64=>
+    source.write_text(f"""pick=(x:int64<overflow='wrap'> y:int64<overflow='wrap'> flag:bool):>int64=>
 if flag (x xor y)+1 else (x-y)*3
 main=():>void=>{{
 let values:array<int64>=[{' '.join(map(str, values))}]
@@ -1677,8 +1677,8 @@ def test_core_signed_floor_arithmetic(compiler, tmp_path, target, release):
     constant_cases = '\n'.join(f'printl"{{a%{b}}} {{a//{b}}}"' for b in constants)
     source = tmp_path / 'floor.dewy'
     source.write_text(f'''main=():>void=>{{
-let numerators:array<int64>=[{' '.join(map(str, numerators))}]
-let denominators:array<int64>=[{' '.join(map(str, denominators))}]
+let numerators:array<int64<overflow='wrap'>>=[{' '.join(map(str, numerators))}]
+let denominators:array<int64<overflow='wrap'>>=[{' '.join(map(str, denominators))}]
 loop a in numerators {{
     loop b in denominators {{
         let remainder=a%b
@@ -2208,7 +2208,7 @@ let row=gpu([10.0 20.0 30.0]) let col=gpu(reshape<float64>([100.0 200.0] 2 1))
 let result=cpu(m .+ row .+ col)
 $runtime_assert(result.shape =? [2 3] and result.data =? [111.0 122.0 133.0 214.0 225.0 236.0])
 $runtime_assert(cpu(m ./ 2.0).data =? [0.5 1.0 1.5 2.0 2.5 3.0])
-let ints=gpu([-7 0 9])
+let ints=gpu([int32<overflow='wrap'>(-7) 0 9])
 $runtime_assert(cpu(ints .* 2 .+ 1).data =? [-13 1 19])
 $runtime_assert(cpu(.-ints).data =? [7 0 -9])
 $runtime_assert(cpu(.+ints).data =? [-7 0 9])
@@ -3679,10 +3679,19 @@ def assert_x64_compare_branch_layout(objdump, binary, symbol):
         match = re.match(r'^\s*([0-9a-f]+):\s+((?:[0-9a-f]{2}\s+)+)\s*(\S+)', line)
         if match:
             instructions.append((int(match[1], 16), len(match[2].split()), match[3]))
+    loops = []
+    for line in dumped.stdout.splitlines():
+        back = re.match(r"^\s*([0-9a-f]+):.*\s+j\w+\s+([0-9a-f]+)\s+<", line)
+        if back and int(back[2], 16) < int(back[1], 16):
+            loops.append((int(back[2], 16), int(back[1], 16)))
     pairs = [(left, right) for left, right in zip(instructions, instructions[1:])
              if left[2].startswith('cmp') and right[2].startswith('j') and right[2] != 'jmp']
     assert len(pairs) >= 8, dumped.stdout
     for compare, branch in pairs:
+        # Padding in a loop costs an instruction on every iteration. Loop
+        # entries are aligned instead; only outside pairs receive padding.
+        if any(start <= compare[0] <= end for start, end in loops):
+            continue
         # The fused pair must neither cross nor end on the 32-byte boundary.
         assert compare[0] // 32 == (branch[0] + branch[1]) // 32, dumped.stdout
     return dumped.stdout

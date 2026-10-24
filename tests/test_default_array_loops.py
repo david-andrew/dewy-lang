@@ -13,6 +13,10 @@ from tools.compiler.bench import CHECKSUMS_1000, prepare_source
 @pytest.mark.parametrize('debug', [False, True])
 def test_default_shifted_array_vectors(compiler, tmp_path, debug):
     source = prepare_source('shifted_arrays', tmp_path)
+    # The vectorization fixture explicitly requests modular reduction. The
+    # benchmark retains exact arithmetic and measures its required checks.
+    text = source.read_text().replace('array<int64>', "array<int64<overflow='wrap'>>")
+    source.write_text(text.replace('let total:int64=0', "let total:int64<overflow='wrap'>=0"))
     binary = tmp_path / 'shifted-arrays'
     built = subprocess.run([compiler, 'build', source, '--ir',
                             *(['-g'] if debug else []), '-o', binary],

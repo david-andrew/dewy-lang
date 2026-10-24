@@ -1,3 +1,4 @@
+use '../core/overflow.jo'
 # 3D rendering: camera, sun + sky lighting, fog, shadows, instancing and post effects.
 # Draw calls made during draw() are recorded and rendered (shadow pass, then the lit
 # pass) before any 2D drawing that follows them, so a HUD can be drawn on top.
@@ -83,10 +84,10 @@ lit_vs_inst = (v: Vertex3D, inst: Instance3D, u: LitParams) -> LitOut:
 lit_vs_skin = (v: SkinVertex3D, u: LitParams) -> LitOut:
     j = v.joints
     k = v.weights
-    a = i32(j.x) * 3
-    b = i32(j.y) * 3
-    c = i32(j.z) * 3
-    d = i32(j.w) * 3
+    a = int(j.x) * 3
+    b = int(j.y) * 3
+    c = int(j.z) * 3
+    d = int(j.w) * 3
     r0 = u.bones[a] * k.x + u.bones[b] * k.y + u.bones[c] * k.z + u.bones[d] * k.w
     r1 = u.bones[a + 1] * k.x + u.bones[b + 1] * k.y + u.bones[c + 1] * k.z + u.bones[d + 1] * k.w
     r2 = u.bones[a + 2] * k.x + u.bones[b + 2] * k.y + u.bones[c + 2] * k.z + u.bones[d + 2] * k.w
@@ -160,10 +161,10 @@ _shadow_vs_inst = (v: Vertex3D, inst: Instance3D, u: LitParams) -> _ShadowOut: _
 _shadow_vs_skin = (v: SkinVertex3D, u: LitParams) -> _ShadowOut:
     j = v.joints
     k = v.weights
-    a = i32(j.x) * 3
-    b = i32(j.y) * 3
-    c = i32(j.z) * 3
-    d = i32(j.w) * 3
+    a = int(j.x) * 3
+    b = int(j.y) * 3
+    c = int(j.z) * 3
+    d = int(j.w) * 3
     r0 = u.bones[a] * k.x + u.bones[b] * k.y + u.bones[c] * k.z + u.bones[d] * k.w
     r1 = u.bones[a + 1] * k.x + u.bones[b + 1] * k.y + u.bones[c + 1] * k.z + u.bones[d + 1] * k.w
     r2 = u.bones[a + 2] * k.x + u.bones[b + 2] * k.y + u.bones[c + 2] * k.z + u.bones[d + 2] * k.w
@@ -195,11 +196,11 @@ _sky_vs = (v: _SkyVertex, u: _SkyParams) -> _SkyOut: _SkyOut(vec4(v.pos, 0.9999,
 # a number in [0, 1) that looks random, made from the cell a 2D point is in (its whole parts:
 # noise, stars, sparkle in a shader). Integers, so every GPU and the CPU give the same one
 hash21 = (p: vec2) -> f32:
-    h = u32(int(floor(p.x))) * u32(0x8DA6B343) xor u32(int(floor(p.y))) * u32(0xD8163841)
-    h = (h xor (h >> 16)) * u32(0x7FEB352D)
-    h = (h xor (h >> 15)) * u32(0x846CA68B)
+    h = __wrap32(int(floor(p.x))) * __wrap32(0x8DA6B343) xor __wrap32(int(floor(p.y))) * __wrap32(0xD8163841)
+    h = (h xor (h >> 16)) * __wrap32(0x7FEB352D)
+    h = (h xor (h >> 15)) * __wrap32(0x846CA68B)
     h = h xor (h >> 16)
-    f32(h & u32(0xFFFFFF)) / 16777216.0
+    f32(h & __wrap32(0xFFFFFF)) / 16777216.0
 
 _sky_fs = (i: _SkyOut, u: _SkyParams) -> vec4:
     a = u.inv_view_proj * vec4(i.ndc, 1, 1)

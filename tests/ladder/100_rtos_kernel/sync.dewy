@@ -4,7 +4,7 @@
 
 $no_hidden_costs
 
-from p"defs.dewy" import Kernel, NTASK, NMUTEX, NBOX, BOXCAP, NONE
+from p"defs.dewy" import Kernel, NCODE, NTASK, NMUTEX, NBOX, BOXCAP, NONE
 from p"trace.dewy" import record
 from p"sched.dewy" import make_ready, first_waiter, inherit
 
@@ -19,7 +19,7 @@ block = (@k:Kernel t:int64 on:int64):>void & no allocates & no blocks => {
 # Finish the blocking word of a woken task and put it back in line.
 resume = (@k:Kernel t:int64):>void & no allocates & no blocks => {
     if t <? 0 or t >=? NTASK return
-    k.tasks[t].pc += 1
+    if k.tasks[t].pc <? NCODE k.tasks[t].pc += 1
     k.tasks[t].wait_on = NONE
     make_ready(@k t)
 }

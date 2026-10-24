@@ -8,7 +8,7 @@ first_over = (xs:array<int64> limit:int64):>uint64? => {
 printl(first_over([1 5 9] 4))
 printl(first_over([1 2] 4))
 
-twice = (n:uint64):>uint64 => n * 2
+twice = (n:uint64<(<=? 9223372036854775807)>):>uint64 => n * 2
 let xs = [10 20 30]
 let n:uint64 = xs.length
 printl(twice(xs.length) + n)

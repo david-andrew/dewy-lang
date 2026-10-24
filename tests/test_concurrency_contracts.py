@@ -81,7 +81,7 @@ def test_atomic_fixed_width_wrap(compiler, tmp_path, payload):
     expected = {'int8': -128, 'uint8': 0, 'int32': -2147483648, 'uint64': 0}[payload]
     result = check(compiler, tmp_path, f'''
 main=()=>{{
- let a=atomic<{payload}>({maximum})
+ let a=atomic<{payload}<overflow='wrap'>>({maximum})
  $runtime_assert(a.add(1) =? {expected})
  $runtime_assert(a.load() =? {expected})
  $runtime_assert(a.compare_swap({expected} 5))

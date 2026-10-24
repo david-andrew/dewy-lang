@@ -1,8 +1,8 @@
 fnv1a = (text:string):>uint64 => {
-    let hash:uint64 = 14695981039346656037
-    let prime:uint64 = 1099511628211
+    let hash:uint64<overflow='wrap'> = 14695981039346656037
+    let prime:uint64<overflow='wrap'> = 1099511628211
     loop byte in bytes(text) {
-        hash = (hash xor (byte as uint64))*prime
+        hash = (hash xor (byte as uint64<overflow='wrap'>))*prime
     }
     return hash
 }

@@ -38,7 +38,9 @@ main=():>void=>{
 }
 '''
 
-CALLEES = {'via_let': {'first'}, 'via_param': {'look'}, 'look': {'first', '__panic_bounds'}}
+# The exact sum crosses a fixed-width return boundary. Its overflow diagnostic
+# does not copy or detach either view.
+CALLEES = {'via_let': {'first'}, 'via_param': {'look'}, 'look': {'first', '__panic_bounds', '__int_overflow'}}
 
 
 @pytest.mark.parametrize('flags', [[], ['--release']], ids=['default', 'release'])

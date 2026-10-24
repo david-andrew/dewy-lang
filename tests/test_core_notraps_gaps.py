@@ -18,36 +18,36 @@ PROVED = {
     loop j in [0..min(n xs.length)) {t+=xs[j]}
     return int64<overflow='wrap'>(t)
 }
-main=():>void=>exit(f([1 2 3] 2)-2)
+main=():>void=>exit(int64<overflow='wrap'>(f([1 2 3] 2)-2))
 ''',
     # max is above each operand.
     'max_bounds': '''f=(xs:array<int64> k:int64):>int64=>{
-    let t=0
+    let t:int64=0
     loop j in [0..xs.length) {if max(j k) <? xs.length {t+=xs[j]}}
     let i=max(0 k)
     if i <? xs.length {t+=xs[i]}
-    return int64<overflow='wrap'>(t)
+    return t
 }
-main=():>void=>exit(f([1 2 3] 1)-8)
+main=():>void=>exit(int64<overflow='wrap'>(f([1 2 3] 1)-8))
 ''',
     # first+j against a guarded first+n: the shared operand's partner rows.
     'sum_shared_operand': '''g=(a:array<int64> first:int64 n:int64):>int64=>{
     if not (0 <=? first and first <? a.length and 0 <=? n and n <=? a.length and first+n <=? a.length) return 0
-    let t=0
+    let t:int64=0
     loop j in [0..n) {t+=a[first+j]}
-    loop j in [1..n-1) {let p=first+j t+=a[p-1]+a[p+1]}
-    return int64<overflow='wrap'>(t)
+    loop j in [1..n-1) {let p=first+j t+=a[p-1];t+=a[p+1]}
+    return t
 }
-main=():>void=>exit(g([1 2 3 4] 1 3)-12)
+main=():>void=>exit(int64<overflow='wrap'>(g([1 2 3 4] 1 3)-12))
 ''',
     # col+j with j below n-col: the difference term's rows bound the sum.
     'sum_complement': '''f=(xs:array<int64> n:int64 col:int64):>int64=>{
     if col <? 0 or col >? n or n >? xs.length return 0
-    let t=0
+    let t:int64=0
     loop j in [0..min(32 n-col)) {t+=xs[col+j]}
-    return int64<overflow='wrap'>(t)
+    return t
 }
-main=():>void=>exit(f([1 2 3] 3 1)-5)
+main=():>void=>exit(int64<overflow='wrap'>(f([1 2 3] 3 1)-5))
 ''',
     # A fork closure starts from what its creator knew of its snapshot
     # captures and of the lengths of the arrays it borrows by partition.
@@ -70,7 +70,7 @@ main=():>void=>{
     let a:array<int64>=[0 0 0 0]
     let t:array<int64>=[0 0 0 0]
     sort(@a @t)
-    exit(0)
+    exit(int64<overflow='wrap'>(0))
 }
 ''',
     # `% 128` is a mask: below 128 whatever the dividend.
@@ -79,9 +79,9 @@ main=():>void=>{
     if rows.length <? 128 return 0
     loop i in [0..count) {total+=rows[i%128]}
     let b:uint8=((count+1)%128) as uint8
-    return total+(b as int64)
+    return total+int64<overflow='wrap'>(b)
 }
-main=():>void=>exit(k([1] 3))
+main=():>void=>exit(int64<overflow='wrap'>(k([1] 3)))
 ''',
     # A counter that only moves down stays at most its entry value.
     'decreasing_counter': '''reverse=(@values:array<int64>):>void=>{
@@ -98,7 +98,7 @@ main=():>void=>exit(k([1] 3))
 main=():>void=>{
     let v:array<int64>=[1 2 3]
     reverse(@v)
-    exit(0)
+    exit(int64<overflow='wrap'>(0))
 }
 ''',
     # `pool[h].field -= x` indexes the pool's items at its own checked answer.
@@ -107,7 +107,7 @@ main=():>void=>{
     let enemies:Pool<Enemy>=[]
     let scout=enemies.add(Enemy[name="scout"])
     if enemies.has(scout) {enemies[scout].health-=10}
-    exit(0)
+    exit(int64<overflow='wrap'>(0))
 }
 ''',
 }
@@ -119,7 +119,7 @@ REJECTED = {
     loop j in [0..max(n xs.length)) {t+=xs[j]}
     return t
 }
-main=():>void=>exit(f([1] 1))
+main=():>void=>exit(int64<overflow='wrap'>(f([1] 1)))
 ''', 'cannot prove index is in bounds'),
     # A loose guard on the shared operand's partner proves nothing.
     'sum_loose_partner': ('''g=(a:array<int64> first:int64 n:int64):>int64=>{
@@ -128,7 +128,7 @@ main=():>void=>exit(f([1] 1))
     loop j in [0..n+1) {t+=a[first+j]}
     return t
 }
-main=():>void=>exit(g([1 2] 0 1))
+main=():>void=>exit(int64<overflow='wrap'>(g([1 2] 0 1)))
 ''', 'cannot prove index is in bounds'),
     # Its entry value itself is past the end.
     'decreasing_from_length': ('''f=(xs:array<int64>):>int64=>{
@@ -140,14 +140,14 @@ main=():>void=>exit(g([1 2] 0 1))
     }
     return t
 }
-main=():>void=>exit(f([1]))
+main=():>void=>exit(int64<overflow='wrap'>(f([1])))
 ''', 'cannot prove index is in bounds'),
     # A closure that is not a fork's runs later: its creator's facts say nothing.
     'stored_closure': ('''main=():>void=>{
     let xs:array<int64>=[1 2 3 4]
     let mid=xs.length//2
-    let later=(i:int64):>int64=>xs[..mid).length+i
-    exit(later(0)-2)
+    let later=(i:int64):>int64=>int64<overflow='wrap'>(xs[..mid).length)+int64<overflow='wrap'>(i)
+    exit(int64<overflow='wrap'>(later(0)-2))
 }
 ''', 'cannot prove slice is in bounds'),
 }

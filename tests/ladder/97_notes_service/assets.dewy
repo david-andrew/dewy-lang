@@ -26,9 +26,9 @@ assets = ():>array<Asset> => [
 
 # FNV-1a over the UTF-8 bytes, as a strong validator for If-None-Match.
 fnv1a = (text:string):>uint64 => {
-    let hash:uint64 = 14695981039346656037
+    let hash:uint64<overflow='wrap'> = 14695981039346656037
     loop b in bytes(text) {
-        hash = (hash xor uint64(b))*1099511628211
+        hash = (hash xor uint64<overflow='wrap'>(b))*1099511628211
     }
     return hash
 }

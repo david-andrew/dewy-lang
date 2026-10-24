@@ -149,19 +149,22 @@ load[T] = (a: Atomic[T], order: str = "seq_cst") -> T:
 
 get[T] = (a: Atomic[T], order: str = "seq_cst") -> T: load(a, order)
 
-# Add and return the new value, preserving the established atomic API.
+# Add and return the new value. Plain storage narrows before publishing;
+# policy payloads retain their modular/saturating arithmetic. The machine
+# fetch-add is valid only for a full-width modular payload.
 add[T] = (a: Atomic[T], v: T, order: str = "seq_cst") -> T:
-    when TARGET == "wasm":
-        a.__p[0] += (v as int)
-        return a.__p[0] as T
+    when TARGET != "wasm" and size_of(T) == 8 and __integer_mode(T) >= 2 and __integer_mode(T) <= 3:
+        return (__atomic_add(a.__p, (v as int)) + (v as int)) as T
     else:
-        when size_of(T) == 8:
-            return (__atomic_add(a.__p, (v as int)) + (v as int)) as T
-        else:
-            loop:
-                old = __atomic_add(a.__p, 0)
-                next = ((old as T) + v) as T
-                if __atomic_cas(a.__p, old, next as int) == old: return next
+        loop:
+            old = load(a)
+            next = old + v
+            when size_of(T) == 8 and __integer_mode(T) < 2:
+                when __integer_mode(T) == 1:
+                    if ((old xor next) & (v xor next)) < 0: panic("exact atomic result does not fit int64")
+                else:
+                    if next < old: panic("exact atomic result does not fit uint64")
+            if compare_swap(a, old, next): return next
 
 store[T] = (a: Atomic[T], v: T, order: str = "seq_cst"):
     loop:

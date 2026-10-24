@@ -5,7 +5,7 @@
 
 $no_hidden_costs
 
-from p"defs.dewy" import Kernel, NTASK, NIRQ, NONE
+from p"defs.dewy" import Kernel, NCODE, NTASK, NIRQ, NONE
 from p"trace.dewy" import record
 from p"sched.dewy" import make_ready
 from p"sync.dewy" import deliver
@@ -34,7 +34,7 @@ handle = (@k:Kernel line:int64):>void & no allocates & no blocks => {
         let t = v.target
         if t <? 0 or t >=? NTASK return
         if k.tasks[t].state =? 'wait' {
-            k.tasks[t].pc += 1
+            if k.tasks[t].pc <? NCODE k.tasks[t].pc += 1
             make_ready(@k t)
             record(@k 'isr_wake' line t 0)
         } else {

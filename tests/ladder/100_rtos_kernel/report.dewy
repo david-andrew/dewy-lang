@@ -5,8 +5,8 @@ $runtime_checks = false
 from p"defs.dewy" import Event, NONE
 
 pad = (text:string width:int64):>string => {
+    if width <=? text.length return text
     let fill = width-text.length
-    if fill <=? 0 return text
     return "{text}{" ".repeat(fill)}"
 }
 

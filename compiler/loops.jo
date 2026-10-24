@@ -7,6 +7,7 @@
 # them runs, else the original, which fails where it always did. The copy is what vectorizing
 # needs, and is faster anyway.
 
+use 'exact_loop.jo'
 use 'util.jo'
 use 'ir.jo'
 use 'opt.jo'
@@ -130,8 +131,9 @@ lx_decomp = (code: Ins[], L: CLoop, x: int, sgn: int, p: int, depth: int) -> boo
     q = lx_def_at(code, x, L.pl + 1, L.inc)
     if q < 0 or q > p: return false
     xi = code[q]
-    if xi.op == .add: return lx_decomp(code, L, int(xi.a), sgn, q, depth + 1) and lx_decomp(code, L, int(xi.b), sgn, q, depth + 1)
-    if xi.op == .sub: return lx_decomp(code, L, int(xi.a), sgn, q, depth + 1) and lx_decomp(code, L, int(xi.b), -sgn, q, depth + 1)
+    if (xi.op == .checked_add or xi.op == .checked_sub) and xi.c != 0: return false
+    if xi.op == .add or xi.op == .checked_add: return lx_decomp(code, L, int(xi.a), sgn, q, depth + 1) and lx_decomp(code, L, int(xi.b), sgn, q, depth + 1)
+    if xi.op == .sub or xi.op == .checked_sub: return lx_decomp(code, L, int(xi.a), sgn, q, depth + 1) and lx_decomp(code, L, int(xi.b), -sgn, q, depth + 1)
     if xi.op == .mov: return lx_decomp(code, L, int(xi.a), sgn, q, depth + 1)
     if lx_inv_made(code, L, x, p, depth):
         lx_terms.push(sgn * (x + 1))
@@ -170,6 +172,13 @@ lx_checks = (code: Ins[], ends: int[], L: CLoop) -> LCheck[]:
     out: LCheck[]
     loop p in [L.pl + 1..L.inc):
         ins = code[p]
+        if ins.op == .checked_add or ins.op == .checked_sub:
+            if not L.signed or ins.c != 0: continue
+            lx_terms = []; lx_tk = 0; lx_tc = 0
+            if lx_decomp(code, L, int(ins.a), 1, p, 0) and lx_decomp(code, L, int(ins.b), (if ins.op == .checked_sub: -1 else: 1), p, 0):
+                if lx_tc == 1 and lx_tk > -(1 << 40) and lx_tk < (1 << 40) and lx_terms.len() <= 4:
+                    out.push(LCheck(p, p, -1, 5, int(ins.dst), lx_tk, 0, lx_terms))
+            continue
         if ins.op != .if_: continue
         q = ends[p]
         # the body: argument setup and a call that never returns
@@ -213,6 +222,27 @@ lx_checks = (code: Ins[], ends: int[], L: CLoop) -> LCheck[]:
             out.push(LCheck(p, q, d, 2, int(cd.a), 0, 0, []))
     out
 
+# A proven access has no bounds-check branch left to identify its affine
+# index. Recognize that index directly, but guard its exact endpoints before
+# vectorizing: word wrap must not turn a contiguous vector into scalar jumps.
+# Only memory-index uses demand this bounded decomposition (at most 4 levels).
+lx_proven_indexes = (code: Ins[], L: CLoop, checks: LCheck[]) -> LCheck[]:
+    out: LCheck[]
+    seen: {int: bool} = {}
+    loop ch in checks:
+        if ch.kind == 3: seen[ch.x] = true
+    loop p in [L.pl + 1..L.inc):
+        ins = code[p]
+        if (ins.op != .load and ins.op != .store) or int(ins.c) & M_INDEX == 0: continue
+        x = mem_index(ins)
+        if x == L.ctr or seen.has(x): continue
+        seen[x] = true
+        lx_terms = []; lx_tk = 0; lx_tc = 0
+        if not lx_decomp(code, L, x, 1, p, 0) or lx_tc != 1: continue
+        if lx_tk <= -(1 << 40) or lx_tk >= (1 << 40) or lx_terms.len() > 4: continue
+        out.push(LCheck(-1, -1, -1, 6, x, lx_tk, 0, lx_terms))
+    out
+
 # o_regs.repl as the identity for every vreg made so far (it renames uses in copies)
 lx_known = 0
 lx_sync = ():
@@ -244,16 +274,26 @@ lx_bin = (out: mut Ins[], op: Op, a: int, b: int) -> int:
     out.push(Ins(op, VI, i32(d), i32(a), i32(b), 0, 0))
     d
 
-# Form an endpoint plus a constant only when that addition preserves the
-# counter's ordering. Wrapped endpoints cannot prove all intervening indexes
-# safe, even if the wrapped value itself happens to fit the array.
-lx_checked_offset = (out: mut Ins[], value: int, offset: int, signed: bool) -> int:
-    result = lx_bin(out, .add, value, k_vreg(offset))
-    overflow = Op.ltu
-    if signed: overflow = .lts
-    if offset < 0: overflow = if signed: Op.gts else: Op.gtu
-    lx_fail(out, lx_bin(out, overflow, result, value))
-    result
+# Endpoint obligations use two words: at most four invariant terms and a
+# counter fit in 128 bits. These guards also safely version machine-word Jo
+# and explicit policy loops: the fast path requires the mathematical endpoint
+# to be in bounds, while the original loop remains the fallback.
+lx_endpoint_add = (out: mut Ins[], lo: int, hi: int, value: int, signed: bool, subtract: bool) -> (int, int):
+    upper = if signed: lx_bin(out, .shrs, value, k_vreg(63)) else: k_vreg(0)
+    result = lx_bin(out, (if subtract: Op.sub else: Op.add), lo, value)
+    carry = lx_bin(out, .ltu, (if subtract: lo else: result), (if subtract: value else: lo))
+    high = lx_bin(out, (if subtract: Op.sub else: Op.add), hi, upper)
+    high = lx_bin(out, (if subtract: Op.sub else: Op.add), high, carry)
+    (result, high)
+
+lx_endpoint = (code: Ins[], L: CLoop, value: int, terms: int[], k: int, out: mut Ins[]) -> (int, int):
+    lo = value
+    hi = if L.signed: lx_bin(out, .shrs, value, k_vreg(63)) else: k_vreg(0)
+    if k != 0: (lo, hi) = lx_endpoint_add(out, lo, hi, k_vreg(k), true, false)
+    loop t in terms:
+        v = lx_mat(code, L, abs(t) - 1, out)
+        (lo, hi) = lx_endpoint_add(out, lo, hi, v, true, t < 0)
+    (lo, hi)
 
 # the instructions of loop [s, e] with branches leaving it pointing one construct further out
 # (`wrap` more: it is about to be wrapped in constructs); the checks are left out, `ren` renames vregs
@@ -263,13 +303,17 @@ lx_copy = (code: Ins[], s: int, e: int, checks: LCheck[], ren: int[], out: mut I
     loop p <= e:
         skipped = false
         loop ch in checks:
-            if p == ch.pi:
+            if p == ch.pi and ch.kind != 5:
                 p = ch.pend + 1
                 skipped = true
                 break
         if skipped: continue
         p += 1
         ins = code[p - 1]
+        loop ch in checks:
+            if ch.kind == 5 and ch.pi == p - 1:
+                ins.op = if ins.op == .checked_add: Op.add else: Op.sub
+                ins.imm = 0
         op = ins.op
         if ren.len() > 0:
             # (o_regs.repl holds the renaming of uses; definitions are renamed here; argument lists
@@ -376,7 +420,7 @@ lx_vec_index = (code: Ins[], L: CLoop, checks: LCheck[], p: int, depth: int = 0)
     if not lx_decomp(code, L, d, 1, p + 1, 0) or lx_tc != 1: return false
     checked = false
     loop ch in checks:
-        if ch.kind == 3 and ch.x == d: checked = true
+        if (ch.kind == 3 or ch.kind == 6) and ch.x == d: checked = true
     used = false
     loop q in [L.pl + 1..L.pe]:
         if q == p or lx_in_check(q, checks): continue
@@ -394,7 +438,7 @@ lx_vec_index = (code: Ins[], L: CLoop, checks: LCheck[], p: int, depth: int = 0)
 # the instructions a vector plan can take (outside the checks it drops)
 lx_vec_op = (op: Op) -> bool:
     match op:
-        block, end, nop, fconst, load, store, sext32, zext32, fneg: true
+        block, end, nop, iconst, fconst, load, store, sext32, zext32, fneg: true
         add, sub, mul, and_, or_, xor, fadd, fsub, fmul, fdiv, fmin, fmax: true
         _: false
 
@@ -408,7 +452,7 @@ lx_vec_plan = (code: Ins[], L: CLoop, checks: LCheck[]) -> VPlan:
         if not lx_vec_op(code[p].op) and not lx_in_check(p, checks): return no
     affine = false
     loop ch in checks:
-        if ch.kind == 3: affine = true
+        if ch.kind == 3 or ch.kind == 6: affine = true
     indexes: int[]
     kinds: {int: int}           # vreg made in the body -> element kind of its lanes
     loop p in [L.pl + 1..L.inc):
@@ -420,7 +464,7 @@ lx_vec_plan = (code: Ins[], L: CLoop, checks: LCheck[]) -> VPlan:
         if affine and (op == .add or op == .sub) and lx_vec_index(code, L, checks, p):
             indexes.push(d)
             continue
-        if op == .fconst:
+        if op == .fconst or op == .iconst:
             # (a constant: in every lane)
             if lx_after(code, d, L): return no
             kinds[d] = -1
@@ -501,7 +545,7 @@ lx_vec_plan = (code: Ins[], L: CLoop, checks: LCheck[]) -> VPlan:
         if fl and k >= 2: return no
         if il and k < 2: return no
         if op == .mul:
-            if k != 2: return no
+            if k != 2 and k != 3: return no
             plan.avx_only = true
         kinds[d] = k
     if plan.es == 0: return no
@@ -549,6 +593,10 @@ lx_vloop = (code: Ins[], L: CLoop, checks: LCheck[], plan: VPlan, bases: int[], 
     # near the integer limit; counter + lanes - 1 could overflow there.
     t = lx_bin(out, .sub, L.endv, L.ctr)
     out.push(Ins(.brif, 0, 0, i32(lx_bin(out, .ltu, t, k_vreg(lanes))), 0, 0, 0))
+    # A full first vector establishes end >= start + lanes. Thus end-lanes
+    # is representable in the counter's domain, including negative signed
+    # counters. Hoist this endpoint instead of subtracting on every backedge.
+    last = if is_kv(L.endv): k_vreg(kv_of(L.endv) - lanes) else: lx_bin(out, .sub, L.endv, k_vreg(lanes))
     vmap: {int: int}            # scalar vreg -> its vector
     kind: {int: int}
     pre: Ins[]
@@ -562,12 +610,11 @@ lx_vloop = (code: Ins[], L: CLoop, checks: LCheck[], plan: VPlan, bases: int[], 
         d = int(ins.dst)
         if op == .block or op == .end or op == .nop: continue
         if o_defines(op) and d != L.ctr and plan.index_defs.contains(d): continue
-        if op == .fconst:
-            # (made in front of the loop, in every lane)
+        if op == .fconst or op == .iconst:
+            # Constants are loop invariant; materialize once, then splat.
             c = vreg(int(ins.ty))
-            pre.push(Ins(.fconst, ins.ty, i32(c), 0, 0, 0, ins.imm))
-            k = 1
-            if int(ins.ty) == VS: k = 0
+            pre.push(Ins(op, ins.ty, i32(c), 0, 0, 0, ins.imm))
+            k = if op == .iconst: (if plan.es == 4: 2 else: 3) else if int(ins.ty) == VS: 0 else: 1
             v = vreg(ty)
             pre.push(Ins(.vsplat, i32(ty), i32(v), i32(c), 0, 0, k))
             vmap[d] = v
@@ -650,8 +697,7 @@ lx_vloop = (code: Ins[], L: CLoop, checks: LCheck[], plan: VPlan, bases: int[], 
     out.push(Ins(.loop, 0, 0, 0, 0, 0, 0))
     loop x in body: out.push(x)
     out.push(Ins(.add, VI, i32(L.ctr), i32(L.ctr), i32(k_vreg(lanes)), 0, 0))
-    t2 = lx_bin(out, .sub, L.endv, L.ctr)
-    out.push(Ins(.brif, 0, 0, i32(lx_bin(out, .geu, t2, k_vreg(lanes))), 0, 0, 0))
+    out.push(Ins(.brif, 0, 0, i32(lx_bin(out, (if L.signed: Op.les else: Op.leu), L.ctr, last)), 0, 0, 0))
     out.push(Ins(.end, 0, 0, 0, 0, 0, 0))
     # (the partial sums added into the sum, through memory: the rest of the loop goes on from there)
     loop ri in 0.. and acc in lx_reds:
@@ -685,7 +731,7 @@ lx_vec_emit = (code: Ins[], L: CLoop, checks: LCheck[], plan: VPlan, out: mut In
                 break
         if reused: continue
         loop ch in checks:
-            if ch.kind == 3 and ch.x == ix:
+            if (ch.kind == 3 or ch.kind == 6) and ch.x == ix:
                 offset = lx_sum(code, L, ch.terms, ch.k, out)
                 bases[i] = lx_bin(out, .add, plan.bases[i], lx_bin(out, .mul, offset, es))
                 break
@@ -719,7 +765,8 @@ lx_vec_emit = (code: Ins[], L: CLoop, checks: LCheck[], plan: VPlan, out: mut In
 # Default builds only consider short array/float loops with a vector plan. Bounds
 # and overlap guards retain the scalar path when a whole loop is not safe.
 fast_vectorize = ():
-    if not lx_vec_on or ir.code.len() > 400: return
+    if not lx_vec_on: return
+    if ir.code.len() > 400 and (ir.fn_index < 0 or ir.fn_index >= exact_map_functions.len() or not exact_map_functions[ir.fn_index]): return
     candidate = false
     has_loop = false
     loop ins in ir.code:
@@ -750,8 +797,24 @@ loop_versioning = (vector_only: bool = false):
     loop L in cl:
         if L.pe - L.pl > 400: continue
         checks = lx_checks(code, ends, L)
+        # Only affine overflow obligations demand this copy. The guarded
+        # operations become ordinary arithmetic for planning and vector emission;
+        # the original code remains the slow path, with its checks in order.
+        fast_code = code
+        vector_checks: LCheck[]
+        loop ch in checks:
+            if ch.kind == 5:
+                instruction = fast_code[ch.pi]
+                instruction.op = if instruction.op == .checked_add: Op.add else: Op.sub
+                instruction.imm = 0
+                fast_code[ch.pi] = instruction
+            else: vector_checks.push(ch)
         plan = VPlan(false, 0, false, [], [], [], [], [])
-        if lx_vec_on: plan = lx_vec_plan(code, L, checks)
+        if lx_vec_on:
+            index_checks = lx_proven_indexes(fast_code, L, vector_checks)
+            vector_checks += index_checks
+            plan = lx_vec_plan(fast_code, L, vector_checks)
+            if plan.ok: checks += index_checks
         if vector_only and not plan.ok: continue
         # (one check costs about as much as testing for it in front: not worth a copy)
         if not plan.ok and checks.len() < 2: continue
@@ -771,7 +834,7 @@ loop_versioning = (vector_only: bool = false):
         # the checked loop for a do-first shape whose initial counter is already
         # at/past its end; its first iteration still has to check its indexes.
         loop ch in checks:
-            if ch.kind == 0 or ch.kind == 3:
+            if ch.kind == 0 or ch.kind == 3 or ch.kind == 5 or ch.kind == 6:
                 ge = if L.signed: Op.ges else: Op.geu
                 lx_fail(out, lx_bin(out, ge, L.ctr, L.endv))
                 break
@@ -789,28 +852,26 @@ loop_versioning = (vector_only: bool = false):
                         kmin = min(kmin, c2.k)
                         kmax = max(kmax, c2.k)
                 if not (start_nonneg and kmin >= 0):
-                    lo = L.ctr
-                    if kmin != 0: lo = lx_checked_offset(out, L.ctr, kmin, L.signed)
-                    lx_fail(out, lx_bin(out, .lts, lo, k_vreg(0)))
-                hi = L.endv
-                if kmax != 0: hi = lx_checked_offset(out, L.endv, kmax, L.signed)
-                # Array lengths are nonnegative. An unsigned comparison also
-                # rejects limits above the signed range instead of reading them
-                # as negative and accidentally accepting an unbounded loop.
+                    (lo, high) = lx_endpoint(code, L, L.ctr, [], kmin, out)
+                    lx_fail(out, lx_bin(out, .ne, high, k_vreg(0)))
+                (hi, high) = lx_endpoint(code, L, L.endv, [], kmax, out)
+                lx_fail(out, lx_bin(out, .ne, high, k_vreg(0)))
                 lx_fail(out, lx_bin(out, .gtu, hi, ch.len))
             else if ch.kind == 3:
-                # Each index is counter + one invariant offset modulo 2^64.
-                # The entry guard proves a nonempty increasing counter interval.
-                # Its span is less than 2^64, so the index sequence cannot wrap
-                # if its unsigned first index is <= its unsigned last index.
-                # Checking the latter against len then proves every index safe,
-                # including valid offsets that wrap before the first iteration.
-                ov = lx_sum(code, L, ch.terms, ch.k, out)
-                lo = lx_bin(out, .add, L.ctr, ov)
+                # The entry guard establishes an increasing nonempty interval.
+                # Its exact first and last endpoints bound every index in it.
+                (lo, low_high) = lx_endpoint(code, L, L.ctr, ch.terms, ch.k, out)
                 upper = lx_bin(out, .sub, L.endv, k_vreg(1))
-                hi = lx_bin(out, .add, upper, ov)
-                lx_fail(out, lx_bin(out, .gtu, lo, hi))
+                (hi, high) = lx_endpoint(code, L, upper, ch.terms, ch.k, out)
+                lx_fail(out, lx_bin(out, .ne, low_high, k_vreg(0)))
+                lx_fail(out, lx_bin(out, .ne, high, k_vreg(0)))
                 lx_fail(out, lx_bin(out, .geu, hi, ch.len))
+            else if ch.kind == 5 or ch.kind == 6:
+                (lo, low_high) = lx_endpoint(code, L, L.ctr, ch.terms, ch.k, out)
+                upper = lx_bin(out, .sub, L.endv, k_vreg(1))
+                (hi, high) = lx_endpoint(code, L, upper, ch.terms, ch.k, out)
+                lx_fail(out, lx_bin(out, .ne, low_high, lx_bin(out, .shrs, lo, k_vreg(63))))
+                lx_fail(out, lx_bin(out, .ne, high, lx_bin(out, .shrs, hi, k_vreg(63))))
             else if ch.kind == 1: lx_fail(out, lx_bin(out, .geu, ch.x, ch.len))
             else if ch.kind == 4: lx_fail(out, lx_bin(out, .geu, lx_sum(code, L, ch.terms, ch.k, out), ch.len))
             else: lx_fail(out, lx_bin(out, .eq, ch.x, k_vreg(0)))
@@ -828,7 +889,7 @@ loop_versioning = (vector_only: bool = false):
         loop d in renamed: o_regs[d].repl = i32(ren[d])
         if plan.ok:
             # vectors first, then the rest one at a time (if any is left)
-            lx_vec_emit(code, L, checks, plan, out)
+            lx_vec_emit(fast_code, L, vector_checks, plan, out)
             out.push(Ins(.block, 0, 0, 0, 0, 0, 0))
             ge = Op.geu
             if L.signed: ge = .ges

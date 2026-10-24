@@ -1,8 +1,8 @@
 # Tier 3 / 64_strict_audio / milestone 21
 # Acceptance: 64 allocation-free fixed-buffer audio blocks; no hidden copy, detach or panic in the kernel.
 $no_hidden_costs
-mix = (a:int64 b:int64 gain:int64<i => i >=? 0 and i <=? 4>):>int64 & no_effects => {
-    return (a+b)*gain
+mix = (a:int64<overflow='wrap'> b:int64<overflow='wrap'> gain:int64<i => i >=? 0 and i <=? 4>):>int64 & no_effects => {
+    return (a+b)*int64<overflow='wrap'>(gain)
 }
 block = (seed:int64):>int64 & no_effects => {
     let left:array<int64 length=8> = [1 2 3 4 5 6 7 8]

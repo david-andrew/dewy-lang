@@ -1,3 +1,4 @@
+use 'overflow.jo'
 # Sloppy core runtime: memory, refcounted objects, arrays, strings.
 # Everything here is called by compiler-generated code. Heap objects (arrays, strings)
 # share one layout: [rc: int][len: int][cap: int][data...]. rc < 0 means immortal.
@@ -1074,10 +1075,10 @@ __str_hash = (s: str) -> u64: __hash_bytes(data(s), len(s))
 __str_khash = (s: str) -> u64: __hk_bytes(data(s), len(s))
 
 __hash_bytes = (p: *u8, n: int) -> u64:
-    h: u64 = 14695981039346656037
+    h: __wrap64 = 14695981039346656037
     i = 0
     loop i < n:
-        h = ((h xor u64(p[i]))) * 1099511628211
+        h = ((h xor __wrap64(p[i]))) * 1099511628211
         i += 1
     (h xor (h >> 29))
 
@@ -1169,3 +1170,6 @@ __owner_print = (s: str):
 __owner_start = ():
     __ts()
     pass
+
+__negative_integer_power = (loc: str):
+    panic("{loc}: negative integer exponent: use a rational or floating base")

@@ -88,6 +88,7 @@ const NF_EXCL_FIRST = 536870912 # Dewy range excludes its first specified value
 # index: written right after a call's parentheses; binary: a product written by juxtaposition
 const NF_JUXT = NF_EXCL_FIRST
 const NF_FLOW_RETURNS = 1073741824 # lowered loop/else block: every source path returns
+const NF_EXPLICIT_INTEGER = NF_RECORD # conv: a written fixed-width conversion narrows immediately
 const NF_AT = 2147483648        # (Dewy) a place written with a leading `@`: `@x`, `@r.a`, `@xs[i]`
 
 # (Dewy) a `.tuple` node with this aux is a group of several values, `(a b)`: not a
@@ -96,6 +97,7 @@ const TUPLE_VALUES = 7
 # (an `$assert` intrinsic with this aux2: an obligation the compiler made, an unpacking's or a
 # spread's length, which becomes a runtime check where the scope allows one)
 const UNPACK_OBLIGATION = 31
+const RANGE_EXHAUSTION = 32
 
 struct Node:
     kind: NK

@@ -40,7 +40,7 @@ def test_unguarded_panics(compiler, tmp_path, scope, op):
 
 
 def test_negative_count_refuted(compiler, tmp_path):
-    result = run(compiler, tmp_path, '$bulletproof\n' + MAIN + '    printl(x << (n - 10))\n}\n')
+    result = run(compiler, tmp_path, '$bulletproof\n' + MAIN + '    if n >=? 0 { printl(x << (n - 10)) }\n}\n')
     assert result.returncode != 0 and 'the shift count is negative' in result.stderr, result.stdout + result.stderr
 
 
@@ -58,7 +58,7 @@ h = (x:int n:uint8):>(int | OutOfMemory) & allocates => x >> n
         y <<= n
         printl(x << n)
     }
-    printl"{y} {x << 2} {g(3 4)} {g(3 (-1))} {h(256 4)} {int64(7) << n}"
+    printl"{y} {x << 2} {g(3 4)} {g(3 (-1))} {h(256 4)} {int64<overflow='wrap'>(7) << n}"
 }
 '''
 

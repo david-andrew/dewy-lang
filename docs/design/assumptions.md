@@ -7,7 +7,7 @@ bundle that turns every entry off. Spellings marked *pending* await David.
 
 | Assumption (default on) | Where | Opt-out metatag |
 |---|---|---|
-| A 64-bit counter or accumulator growing by a bounded amount per iteration or allocation cannot overflow | facts (fixed-width stores); a `parallel` range of 2^63 or more values runs as 2^63 - 1 (lib/std/thread.jo) | `$no_assumed_bounds` |
+| A 64-bit counter or accumulator growing by a bounded amount per iteration or allocation cannot overflow | facts (fixed-width stores and open ranges; range starts within ±2^56 and constant steps within ±2^16 only, never narrow counters); a `parallel` range of 2^63 or more values runs as 2^63 - 1 (lib/std/thread.jo) | `$no_assumed_bounds` |
 | An array's length fits in 2^56 bytes (the largest address space of any target) | facts (integer counters) | `$no_assumed_bounds` |
 | Library-internal `assert`/`unreachable` are trusted invariants, not `panics` | effects (`panics`) | *pending* |
 | Running out of memory (an array shape whose element count passes int64 included) and the runtime core (lib/core/rt.jo) are environmental, not `panics` | effects (`panics`) | *pending* (`$explicit_allocation_failure` covers allocation) |
@@ -27,10 +27,14 @@ row here in the same change.
 
 `$bulletproof` (library bundle, lib/directives.dewy) turns every row off together
 with `$no_hidden_costs`, `$explicit_allocation_failure`, `$finite_floats` and
-`$no_deadlocks`. Today it holds `$assume_local_asserts=false` and
+`$no_deadlocks`. Today it holds `$no_assumed_bounds`, `$assume_local_asserts=false` and
 `$confine_external_paths`. Not yet enforceable: the rows marked *pending* (no
-opt-out metatag exists to put in the bundle), and `$no_assumed_bounds` until that
-metatag lands.
+opt-out metatag exists to put in the bundle).
+
+`$no_assumed_bounds` removes the axiom, restoring an ordinary obligation. Its
+scope's policy decides an unproven site: `$runtime_checks` permits a check;
+`$no_hidden_costs` rejects it. Thus `$bulletproof` demands compile-time proofs
+by composition; the opt-out itself does not override the runtime-check policy.
 
 ## Decided rules
 

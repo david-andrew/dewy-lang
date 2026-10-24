@@ -1,5 +1,5 @@
 # Fixed binary merge tree, including an order-sensitive rolling digest.
-Summary:type = [sum:int64 count:int64 hash:uint64 power:uint64]
+Summary:type = [sum:int64 count:int64 hash:uint64<overflow='wrap'> power:uint64<overflow='wrap'>]
 leaf_summary = (chunk:array<int64>):>Summary => {
     let result = Summary[0 0 0 1]
     loop x in chunk {

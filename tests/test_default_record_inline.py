@@ -24,7 +24,7 @@ def test_default_game_inline(compiler, tmp_path, debug):
                            capture_output=True, text=True, timeout=30)
     assert built.returncode == 0, built.stdout + built.stderr
     simulate = function(built.stdout, 'simulate')
-    assert bool(re.search(r'\bcall a=', simulate)) == debug, simulate
+    assert bool(re.search(r'\bcall a=.*c=0 ', simulate)) == debug, simulate
     if not debug:
         assert not re.search(r'\bcopy .*imm=24\b', simulate), simulate
     ran = subprocess.run([binary, '1000'], capture_output=True, text=True, timeout=10)
@@ -35,7 +35,8 @@ def test_default_game_inline(compiler, tmp_path, debug):
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 def test_record_inline_checks_and_loop_scope(compiler, tmp_path, target):
     source = tmp_path / 'checked.dewy'
-    source.write_text('''Box:type=[value:int64]
+    source.write_text('''$no_assumed_bounds
+Box:type=[value:int64]
 read=(box:Box at:int64):>Box=>{
  let table:array<int64 length=2>=[20 22]
  let next=box
@@ -60,9 +61,11 @@ main=(args:array<string>):>void=>{exit(probe(args.length-1))}
     assert built.returncode == 0, built.stdout + built.stderr
     probe = function(built.stdout, 'probe')
     # Nested loops and conditional calls inline, but the call after the loop
-    # stays out of line. Every expanded access retains its own failure path.
+    # stays out of line. Two expanded bounds checks and three exact stores
+    # retain their own failure paths.
     assert len(re.findall(r'\bcall .* b=3 c=0 ', probe)) == 1, probe
     assert len(re.findall(r'\bcall .* c=1 ', probe)) == 2, probe
+    assert len(re.findall(r' = checked_add ', probe)) == 3, probe
     command = [binary]
     if target == 'wasm':
         node = shutil.which('node')

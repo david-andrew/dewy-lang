@@ -5,7 +5,7 @@ Slot:type=[state:State count:int64]
 mark=(@slots:array<Slot length=4> i:int64):>void=>{
     if i <? 0 or i >=? 4 return
     slots[i].state='ready'
-    slots[i].count+=1
+    if slots[i].count <? int64.max slots[i].count+=1
 }
 main=():>void=>{
     let slots:array<Slot length=4>=[[state='free' count=0] [state='free' count=0] [state='free' count=0] [state='free' count=0]]

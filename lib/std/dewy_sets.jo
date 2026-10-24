@@ -1,3 +1,4 @@
+use '../core/overflow.jo'
 # Insertion-ordered sets share the dictionary's hashing and COW value storage.
 struct Set[T]:
     _entries: {T: bool}
@@ -76,7 +77,7 @@ pop[T] = (s: mut Set[T], default: T?) -> T?:
 # Equal sets can have different insertion orders and capacities. Hash their
 # members commutatively so a set can itself be a dictionary key or set member.
 hash[T] = (s: Set[T]) -> u64:
-    total: u64 = 0
+    total: __wrap64 = 0
     loop value in __dewy_set_values(s): total += value.hash()
     hash(total xor u64(s.len()))
 

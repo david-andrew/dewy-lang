@@ -1,3 +1,4 @@
+use '../core/overflow.jo'
 # The GPU through Vulkan 1.3, in the style of mr_gpu (codeberg.org/games-by-Mason/mr_gpu): one
 # device with dynamic rendering, synchronization2, buffer device addresses and one bindless array
 # of every texture; a few large memory blocks; a frame's data written into a per-frame upload
@@ -1346,7 +1347,7 @@ when TARGET != "wasm" and TARGET != "macos":
         p = data(__vk_mem_props) as *u32
         loop i in [0..int(p[0])):
             flags = p[1 + 2 * i]
-            if bits & (u32(1) << u32(i)) != 0 and flags & want == want and flags & avoid != avoid: return i
+            if bits & (__wrap32(1) << u32(i)) != 0 and flags & want == want and flags & avoid != avoid: return i
         -1
 
     __vk_memory_type = (bits: u32, want: u32, like: u32) -> int:
@@ -1355,7 +1356,7 @@ when TARGET != "wasm" and TARGET != "macos":
         found = -1
         loop i in [0..n):
             flags = p[1 + 2 * i]
-            if bits & (u32(1) << u32(i)) == 0 or flags & want != want: continue
+            if bits & (__wrap32(1) << u32(i)) == 0 or flags & want != want: continue
             if flags & like == like: return i
             if found < 0: found = i
         found

@@ -61,11 +61,13 @@ b32 = (x: int):
     (x_bytes(4) as *u32)[0] = u32(x)
 b64 = (x: int):
     (x_bytes(8) as *int)[0] = x
+# Patch an already emitted four-byte field. Keep the byte buffer unique before
+# taking its address, just as x_bytes does for appended encodings.
 patch32 = (pos: int, v: int):
-    code[pos] = u8(v & 255)
-    code[pos + 1] = u8((v >> 8) & 255)
-    code[pos + 2] = u8((v >> 16) & 255)
-    code[pos + 3] = u8((v >> 24) & 255)
+    if pos < 0 or pos > code.len() - 4: panic("fixup outside code buffer")
+    slot = &code as **u8
+    __arr_make_unique(slot, 1)
+    ((slot[0] + 24 + pos) as *u32)[0] = u32(v)
 
 rip_kind = 0
 # index register for the next memory operand ([base + index << scale + disp]); -1: none
@@ -292,10 +294,68 @@ jcc32 = (cc: int) -> int:
     b(0x80 + cc)
     b32(0)
     code.len() - 4
-patch_here = (pos: int): patch32(pos, code.len() - (pos + 4))
+# Keep six-byte branch slots fixed. A short encoding avoids a decoder-boundary
+# crossing. Backedges at offsets 30/31 move within the slot using NOPs;
+# forward conditional branches keep their near encoding when entry NOPs are needed.
+patch_branch = (pos: int, target: int):
+    delta = target - pos
+    if code[pos - 1] == 0xE9:
+        offset = (pos - 1) & 31
+        pad = if offset >= 30: 32 - offset else: 0
+        short = delta - 1 - pad
+        if offset >= 27 and short >= -128 and short <= 127:
+            if pad == 1: code[pos - 1] = 0x90
+            else if pad == 2:
+                code[pos - 1] = 0x66
+                code[pos] = 0x90
+            code[pos - 1 + pad] = 0xEB
+            code[pos + pad] = u8(short & 255)
+            if pad == 0:
+                code[pos + 1] = 0x0F
+                code[pos + 2] = 0x1F
+                code[pos + 3] = 0
+            else if pad == 1:
+                code[pos + 2] = 0x66
+                code[pos + 3] = 0x90
+            else: code[pos + 3] = 0x90
+        else: patch32(pos, delta - 4)
+        return
+    offset = (pos - 2) & 31
+    pad = if offset >= 30: 32 - offset else: 0
+    short = delta - pad
+    if pos >= 2 and offset >= 26 and (offset < 30 or delta < 0) and short >= -128 and short <= 127 and code[pos - 2] == 0x0F and code[pos - 1] >= 0x80 and code[pos - 1] <= 0x8F:
+        cc = code[pos - 1] - 0x10
+        if pad == 1: code[pos - 2] = 0x90
+        else if pad == 2:
+            code[pos - 2] = 0x66
+            code[pos - 1] = 0x90
+        code[pos - 2 + pad] = cc
+        code[pos - 1 + pad] = u8(short & 255)
+        if pad == 0: patch32(pos, 0x00401F0F)
+        else if pad == 1:
+            code[pos + 1] = 0x0F
+            code[pos + 2] = 0x1F
+            code[pos + 3] = 0
+        else:
+            code[pos + 2] = 0x66
+            code[pos + 3] = 0x90
+        # Fold the unused suffix into a following scalar instruction. CS is
+        # ignored for these x86-64 operations; their end (including RIP-relative
+        # addressing) stays fixed. Four prefixes keep each encoding below 15 bytes.
+        next = pos + 4
+        if next + 1 < code.len() and code[next] & 0xF0 == 0x40:
+            op = int(code[next + 1])
+            if op == 0x89 or op == 0x8B or op == 0x8D or op == 0x85 or (op < 0x40 and (op & 7 == 1 or op & 7 == 3)) or (op >= 0xB8 and op <= 0xBF) or ((op == 0x81 or op == 0x83 or op == 0xC7) and next + 2 < code.len() and code[next + 2] >= 0xC0):
+                loop i in [pos + pad..pos + 4): code[i] = 0x2E
+    else: patch32(pos, delta - 4)
+# A forward entry inside a preceding encoding prevents growing it in place.
+x_padding_floor = 0
+patch_here = (pos: int):
+    x_padding_floor = code.len()
+    patch_branch(pos, code.len())
 jmp_back = (target: int):
-    b(0xE9)
-    b32(target - (code.len() + 4))
+    pos = jmp32()
+    patch_branch(pos, target)
 
 const CC_E = 4
 const CC_NE = 5
@@ -445,7 +505,11 @@ vop_operand = (x: int, v: int, splat: bool, n: int, scratch: int):
             sse_rm(0xF3, 0x10, 15, base, disp + 8)                       # movss
             sse_rr(0, 0x16, x, 15)                                       # movlhps x, xmm15
 
+x_has_narrow32 = false
+x_has_overflow_pair = false
 analyze = (plan_starts: bool = false):
+    x_has_narrow32 = false
+    x_has_overflow_pair = false
     nv = ir.vtypes.len()
     # Private backend scratch, borrowed until the next analyze. Grow only at a
     # new high-water mark; no pointer escapes into an IR or output fragment.
@@ -486,15 +550,18 @@ analyze = (plan_starts: bool = false):
             vloc[v] = LOC_CONST
             vcval[v] = ir.kval[v]
     depth = 0
+    cold_depth = 0
     w = 1
     instructions = data(ir.code)
     arguments = data(ir.args)
     layouts = data(ir_operand_layout)
+    features = 0
     # One indexed scan of the final instructions and their argument spans:
     # O(instructions + operands). No shared decoder state or per-op arrays.
     loop pos in [0..ir.code.len()):
         ins = &instructions[pos]
         mode = layouts[int(ins.op)]
+        features |= mode
         uses = &ins.a
         nuses = mode & 3
         extra = -1
@@ -556,7 +623,7 @@ analyze = (plan_starts: bool = false):
                     if pos < live.first: live.first = pos
                     live.last = pos
                     live.ndef += 2
-        if call_like(ins) and not call_ends_here(pos, ins):
+        if mode & IR_CALL != 0 and call_like(ins) and not call_ends_here(pos, ins):
             call_pos.push(pos)
             # (a call on a rarely taken path counts as if outside any loop)
             if ins.op == .call and ins.c == 2: call_w.push(1)
@@ -568,15 +635,19 @@ analyze = (plan_starts: bool = false):
                 loop_s.push(pos)
                 loop_e.push(0)
                 depth += 1
-                w = 1 << (3 * min(depth, 6))
+                if ins.imm != 0: cold_depth += 1
+                w = if cold_depth > 0: 1 else: 1 << (3 * min(depth, 6))
             else: starts.push(-1)
         else if ins.op == .end:
             k = kinds.pop()
             s = starts.pop()
             if k == int(Op.loop):
                 depth -= 1
-                w = 1 << (3 * min(depth, 6))
+                if instructions[loop_s[s]].imm != 0: cold_depth -= 1
+                w = if cold_depth > 0: 1 else: 1 << (3 * min(depth, 6))
                 loop_e[s] = pos
+    x_has_narrow32 = features & IR_NARROW32 != 0
+    x_has_overflow_pair = features & IR_OVERFLOW != 0
     # (sloppy build -g: each variable lives on to the end of the function, where debuggers can
     # read it, and not in a register a call changes: dbg_keep)
     if dbg_on:
@@ -629,7 +700,7 @@ analyze = (plan_starts: bool = false):
 
 hint_op = (op: Op) -> bool:
     match op:
-        mov, add, sub, mul, and_, or_, xor, shl, shrs, shru, neg, not_, load: true
+        mov, add, sub, mul, checked_add, checked_sub, checked_mul, and_, or_, xor, shl, shrs, shru, rot32, neg, not_, load: true
         fadd, fsub, fmul, fdiv, fmin, fmax, fneg, fabs: true
         sext8, sext16, sext32, zext8, zext16, zext32: true
         _: false
@@ -640,6 +711,7 @@ hint_operand = (v: int, pos: int) -> int:
     ins = ir.code[pos]
     if int(ins.dst) != v or not hint_op(ins.op): return -1
     a = int(ins.a)
+    if ins.op == .checked_sub and is_kv(a) and kv_of(a) == 0: a = int(ins.b)
     if a < 0 or a == v or vloc[a] < 0 or v_live[a].last != pos: return -1
     if (vloc[a] >= XMM) != (vtype(v) != VI): return -1
     a
@@ -840,7 +912,7 @@ ra_take = (r: int, s: int, e: int):
         ra_occ[base + w] = ra_occ[base + w] | ra_mask(lo, hi)
         w += 1
 
-# weight of the calls strictly inside s..e
+# Weight of calls strictly inside s..e; -1 means exactly one explicit cold call.
 ra_cross_w = (s: int, e: int) -> int:
     lo = 0
     hi = call_pos.len()
@@ -855,6 +927,9 @@ ra_cross_w = (s: int, e: int) -> int:
         if call_pos[mid] < e: lo = mid + 1
         else: hi = mid
     if lo <= a: return 0
+    if lo == a + 1:
+        call = ir.code[call_pos[a]]
+        if call.op == .call and call.c == 2: return -1
     ra_cw[lo] - ra_cw[a]
 
 allocate_release = ():
@@ -896,8 +971,10 @@ allocate_release = ():
         loop v >= 0:
             # (a value crossing just one call outside loops: a caller-saved register saved
             # around it costs the same when the call is made, and nothing on paths without it,
-            # where a callee-saved one is saved and restored on every path)
-            if cross[v] > 1 and vtype(v) == VI:
+            # where a callee-saved one is saved and restored on every path).
+            # A hot parameter crossing one explicit cold call is the exception:
+            # reserving a saved register avoids spilling it throughout nested loops.
+            if (cross[v] > 1 or cross[v] == -1 and v < ir.nparams and v_live[v].weight > 8 * v_live[v].nuse) and vtype(v) == VI:
                 reg = -1
                 loop r in callee_pool:
                     if free & (1 << r) != 0:
@@ -957,7 +1034,7 @@ allocate_release = ():
                 continue
             s = live_start(v) + 1
             e = v_live[v].last + 1
-            c = cross[v]
+            c = abs(cross[v])
             # a caller-saved register for a value living across calls: only if saving and
             # reloading it around them costs less than spilling it
             caller_ok = c == 0 or 4 * c < 2 * v_live[v].weight
@@ -1032,7 +1109,7 @@ allocate_release = ():
             if v_live[v].last < 0: continue
             tag = ""
             if placed[v]: tag = " (pass 1)"
-            eprint("v{v} {live_start(v)}..{v_live[v].last} w {v_live[v].weight} calls {cross[v]} -> {vloc[v]}{tag}")
+            eprint("v{v} {live_start(v)}..{v_live[v].last} w {v_live[v].weight} calls {abs(cross[v])} -> {vloc[v]}{tag}")
 
 layout_frame = ():
     off = 0
@@ -1270,6 +1347,7 @@ struct XCtl:
     ifx: int[]    # jumps to the else branch
 
 xctl: XCtl[]
+x_loop_depth = 0
 call_stack_bytes = 0
 
 uw_fo = 0                   # (Windows: the function's rbp is rsp + 16 uw_fo, its unwind codes at uw_at)
@@ -1510,7 +1588,9 @@ branch_target_jcc = (depth: int, cc: int):
         target = xctl[c].start
         b(0x0F)
         b(0x80 + cc)
-        b32(target - (code.len() + 4))
+        pos = code.len()
+        b32(0)
+        patch_branch(pos, target)
     else: xctl[c].fixups.push(jcc32(cc))
 
 # An end followed only by ends and an unconditional branch is the branch's
@@ -1530,8 +1610,8 @@ patch_control_end = (c: XCtl, pos: int):
     if target >= 0:
         if xctl[target].kind == 1:
             addr = xctl[target].start
-            loop f in c.fixups: patch32(f, addr - (f + 4))
-            loop f in c.ifx: patch32(f, addr - (f + 4))
+            loop f in c.fixups: patch_branch(f, addr)
+            loop f in c.ifx: patch_branch(f, addr)
         else:
             loop f in c.fixups: xctl[target].fixups.push(f)
             loop f in c.ifx: xctl[target].fixups.push(f)
@@ -1575,12 +1655,87 @@ int_bin = (opc_rr: int, ext: int, ins: Ins):
 
 pad_moves = false           # the function being emitted has a pad that depends on where it starts
 
+x_branch_pos = -1
+# Demand-only bounded lookahead at a crossing fused pair: O(24) IR entries.
+# Short forward branches can be repaired in place; reserve alignment for larger
+# regions. The structured control stack already indexes backward targets.
+x_far_if = (pos: int) -> bool:
+    if pos < 0: return false
+    branch = ir.code[pos]
+    if branch.op != .if_ and branch.op != .brif: return false
+    depth = 0
+    if branch.op == .brif:
+        depth = int(branch.imm)
+        if xctl[xctl.len() - 1 - depth].kind == 1: return false
+    loop p in [pos + 1..min(ir.code.len(), pos + 25)):
+        op = ir.code[p].op
+        if op == .block or op == .if_ or op == .loop: depth += 1
+        else if op == .end:
+            if depth == 0: return false
+            depth -= 1
+        else if op == .else_ and depth == 0 and branch.op == .if_: return false
+    true
+
+# A preceding register/immediate ALU can absorb ignored CS prefixes up to
+# the 15-byte encoding limit. A bounded O(8) query skips byte-free block/end
+# markers; the latest resolved destination prevents moving an entry point.
+# Verify the complete encoding, and keep no pointer across buffer growth.
+x_absorb_padding = (padding: int) -> bool:
+    if padding > 11 or x_branch_pos < 2 or dbg_on: return false
+    cmp = ir.code[x_branch_pos - 1]
+    if not is_icmp(cmp.op) or vloc[int(cmp.a)] < 0 or vloc[int(cmp.a)] >= XMM: return false
+    bv = vloc[int(cmp.b)]
+    if bv != LOC_CONST and (bv < 0 or bv >= XMM): return false
+    before = x_branch_pos - 2
+    limit = max(0, before - 8)
+    loop before > limit and (ir.code[before].op == .block or ir.code[before].op == .end): before -= 1
+    previous = ir.code[before]
+    op = previous.op
+    ext = if op == .add: 0 else if op == .or_: 1 else if op == .and_: 4 else if op == .sub: 5 else if op == .xor: 6 else: -1
+    if ext < 0: return false
+    r = vloc[int(previous.dst)]
+    bv = int(previous.b)
+    if r < 0 or r >= XMM or vloc[bv] != LOC_CONST: return false
+    value = vcval[bv]
+    if not fits32(value): return false
+    narrow = value >= -128 and value <= 127
+    width = if narrow: 4 else: 7
+    if width + padding > 15: return false
+    at = code.len() - width
+    if at < x_padding_floor: return false
+    p = data(code) + at
+    if p[0] != u8(0x48 | (r >> 3)) or p[1] != u8(if narrow: 0x83 else: 0x81) or p[2] != u8(0xC0 | (ext << 3) | (r & 7)): return false
+    if narrow:
+        if p[3] != u8(value): return false
+    else if ((p + 3) as *u32)[0] != u32(value): return false
+    first = (p as *u32)[0]
+    second = if narrow: u16(0) else: ((p + 4) as *u16)[0]
+    last = if narrow: u8(0) else: p[6]
+    x_bytes(padding)
+    p = data(code) + at
+    loop i in [0..padding): p[i] = 0x2E
+    ((p + padding) as *u32)[0] = first
+    if not narrow:
+        ((p + padding + 4) as *u16)[0] = second
+        p[padding + 6] = last
+    true
+
 cmp_branch_pad = (span: int):
+    # Most loop comparisons rely on aligned entries and fixed-size fixups.
+    # Crossing backedges may grow the preceding ALU without adding executed
+    # instructions. Larger forward regions also permit ordinary alignment.
+    if x_loop_depth > 0 and (code.len() & 31) + span < 32: return
+    if x_loop_depth > 0 and not x_far_if(x_branch_pos):
+        if x_branch_pos >= 0:
+            branch = ir.code[x_branch_pos]
+            if branch.op == .brif and xctl[xctl.len() - 1 - int(branch.imm)].kind == 1:
+                if x_absorb_padding(32 - (code.len() & 31)): pad_moves = true
+        return
     # Keep a fused integer comparison and its near conditional jump within a
     # 32-byte region, including the last byte. Some x86 CPUs are sensitive to
     # crossing or ending on this boundary; pad only an affected pair.
     offset = code.len() % 32
-    if offset + span >= 32: nop_pad(32 - offset)
+    if offset + span >= 32 and not x_absorb_padding(32 - offset): nop_pad(32 - offset)
     # (par.jo: were the function to start 16 bytes further, would this pad differ?)
     if offset + span >= 32 or (offset + 16) % 32 + span >= 32: pad_moves = true
 
@@ -1792,6 +1947,10 @@ x_unary = (prefix: int, opc: int, ins: Ins, src_ty: int, dst_ty: int):
 # its control-flow joins at every call site. No read crosses either byte span.
 emit_memeq = (d: int, a: int, bb: int, count: int, flags: bool = false, strings: bool = false):
     if vloc[d] == LOC_NONE: return
+    # This intrinsic contains its own comparison loops and short-size tree.
+    # Keep their fused branches aligned even inside a surrounding source loop.
+    enclosing_depth = x_loop_depth
+    x_loop_depth = 0
     mask = dreg(d, R11)
     saved = vloc[d] < 0
     if saved:
@@ -1903,6 +2062,7 @@ emit_memeq = (d: int, a: int, bb: int, count: int, flags: bool = false, strings:
         loop fix in unequal: patch_here(fix)
         if saved:
             b16(0x5B41)
+        x_loop_depth = enclosing_depth
         return
     setcc(4)
     done_result = jmp32()
@@ -1917,6 +2077,7 @@ emit_memeq = (d: int, a: int, bb: int, count: int, flags: bool = false, strings:
     if saved:
         b16(0x5B41)                       # pop r11
     st(d, RAX)
+    x_loop_depth = enclosing_depth
 
 # The first k in [i, n) whose byte p[k] is one of four (set: packed, low byte first), or n:
 # sixteen bytes at a time (pcmpeqb against each, pmovmskb, bsf), then byte by byte. With bit 32
@@ -2090,6 +2251,8 @@ emit_ins = (pos: int, ins: *Ins):
         emit_ins(pos, data(ir.code) + original)
     op = ins.op
     if pos == fuse_skip: return
+    if x_has_narrow32 and x_emit_narrow32(pos, ins): return
+    if x_has_overflow_pair and x_emit_overflow_pair(pos, ins): return
     match op:
         nop, assume: pass
         iconst: x_emit_iconst(pos, ins)
@@ -2105,7 +2268,7 @@ emit_ins = (pos: int, ins: *Ins):
         mul: x_emit_mul(pos, ins)
         mulhs, mulhu: x_emit_mulhs(pos, ins)
         divs, rems, divu, remu: x_emit_divs(pos, ins)
-        shl, shrs, shru: x_emit_shl(pos, ins)
+        shl, shrs, shru, rot32: x_emit_shl(pos, ins)
         neg, not_: x_emit_neg(pos, ins)
         eq, ne, lts, les, gts, ges, ltu, leu, gtu, geu: x_emit_eq(pos, ins)
         fadd: x_emit_fadd(pos, ins)
@@ -2193,6 +2356,46 @@ x_emit_mov = (pos: int, ins: *Ins):
         lds(x, a, vtype(d))
         sts(d, x, vtype(d))
 
+# Three-operand IMUL reads the original register or spill directly. Its
+# flags are identical to copying that source and multiplying in place.
+x_mul_immediate = (r: int, a: int, value: int):
+    if vloc[a] == LOC_SPILL:
+        rex(true, r, 0, RBP, false); b(0x69); mem(r, RBP, vspill[a])
+    else:
+        source = reg_of(a, RAX)
+        rex(true, r, 0, source, false); b(0x69); modrr(r, source)
+    b32(value)
+
+# Adjacent value/overflow operations with the same inputs share one flag-
+# producing instruction when the flag's only consumer is the following branch.
+x_emit_overflow_pair = (pos: int, ins: *Ins) -> bool:
+    op = ins.op
+    if op != .add and op != .sub and op != .mul or pos + 2 >= ir.code.len(): return false
+    flag = ir.code[pos + 1]
+    expected = if op == .add: Op.overflow_add else if op == .sub: Op.overflow_sub else: Op.overflow_mul
+    if flag.op != expected or flag.a != ins.a or flag.b != ins.b: return false
+    branch = ir.code[pos + 2]
+    if (branch.op != .if_ and branch.op != .brif) or branch.a != flag.dst or v_live[int(flag.dst)].nuse != 1: return false
+    d = int(ins.dst); a = int(ins.a); bb = int(ins.b)
+    # The overflow operation reads the original operands. A value that
+    # redefines one of them is not the same operation and cannot be fused.
+    if d == a or d == bb: return false
+    r = dreg(d, RAX)
+    if vloc[bb] == r and r != vloc[a]: r = RAX
+    if op == .mul and vloc[bb] == LOC_CONST and vcval[bb] >= -2147483648 and vcval[bb] <= 2147483647:
+        x_mul_immediate(r, a, vcval[bb])
+    else:
+        ld(r, a)
+        if op == .add: alu_v(0x01, 0, r, bb)
+        else if op == .sub: alu_v(0x29, 5, r, bb)
+        else:
+            rb = reg_of(bb, RCX)
+            rex(true, r, 0, rb, false); b(0x0F); b(0xAF); modrr(r, rb)
+    st(d, r)
+    fused_cc = 0
+    fuse_skip = pos + 1
+    true
+
 x_emit_overflow_add = (pos: int, ins: *Ins):
     op = ins.op
     d = int(ins.dst)
@@ -2210,29 +2413,128 @@ x_emit_overflow_add = (pos: int, ins: *Ins):
     setcc(0)  # OF from the tagged-word operation
     st(d, RAX)
 
+# Fuse a word operation with its sole adjacent unsigned-32 storage boundary.
+# x86 writes to r32 already clear the upper half. Keep the IR's word semantics
+# for every other use; only this one-use pair is emitted as a 32-bit operation.
+x_emit_narrow32 = (pos: int, ins: *Ins) -> bool:
+    op = ins.op
+    if op != .add and op != .sub and op != .mul and op != .and_ and op != .or_ and op != .xor and op != .shl and op != .neg and op != .not_: return false
+    d = int(ins.dst)
+    if pos + 1 >= ir.code.len() or v_live[d].ndef != 1 or v_live[d].nuse != 1: return false
+    next = ir.code[pos + 1]
+    if next.op != .zext32 or next.a != ins.dst: return false
+    a = int(ins.a); bb = int(ins.b)
+    if op == .shl and (vloc[bb] != LOC_CONST or vcval[bb] < 0 or vcval[bb] >= 32): return false
+    r = dreg(int(next.dst), RAX)
+    if op != .neg and op != .not_ and vloc[bb] == r and r != vloc[a]: r = RAX
+    ld(r, a)
+    if op == .shl:
+        rex(false, 0, 0, r, false); b(0xC1); modrr(4, r); b(vcval[bb])
+    else if op == .neg or op == .not_:
+        rex(false, 0, 0, r, false); b(0xF7); modrr((if op == .neg: 3 else: 2), r)
+    else if op == .mul:
+        if vloc[bb] == LOC_CONST:
+            rex(false, r, 0, r, false); b(0x69); modrr(r, r); b32(vcval[bb])
+        else:
+            rb = reg_of(bb, RCX)
+            rex(false, r, 0, rb, false); b(0x0F); b(0xAF); modrr(r, rb)
+    else:
+        opcode = if op == .add: 0x01 else if op == .sub: 0x29 else if op == .and_: 0x21 else if op == .or_: 0x09 else: 0x31
+        ext = if op == .add: 0 else if op == .sub: 5 else if op == .and_: 4 else if op == .or_: 1 else: 6
+        loc = vloc[bb]
+        if loc >= 0 and loc < XMM: op_rr(opcode, false, loc, r)
+        else if loc == LOC_CONST:
+            value = vcval[bb] << 32 >> 32
+            rex(false, 0, 0, r, false)
+            b(if value >= -128 and value <= 127: 0x83 else: 0x81); modrr(ext, r)
+            if value >= -128 and value <= 127: b(value)
+            else: b32(value)
+        else if loc == LOC_SPILL: op_rm(opcode + 2, false, r, RBP, vspill[bb])
+        else:
+            ld(RCX, bb); op_rr(opcode, false, RCX, r)
+    st(int(next.dst), r)
+    fuse_skip = pos + 1
+    true
+
+# Native 32-bit flags decide a 32-bit store without widening and comparing.
+# Signed results then extend to the IR's word; unsigned writes already zero it.
+x_emit_checked32 = (ins: *Ins):
+    op = ins.op
+    d = int(ins.dst); a = int(ins.a); bb = int(ins.b)
+    unsigned = int(ins.c) & 1 != 0
+    r = dreg(d, RAX)
+    if op == .checked_mul and unsigned:
+        ld(RAX, a)
+        rb = reg_of(bb, RCX)
+        rex(false, 0, 0, rb, false); b(0xF7); modrr(4, rb)
+        r = RAX
+    else:
+        if vloc[bb] == r and r != vloc[a]: r = RAX
+        ld(r, a)
+        if op == .checked_mul:
+            if vloc[bb] == LOC_CONST:
+                rex(false, r, 0, r, false); b(0x69); modrr(r, r); b32(vcval[bb])
+            else:
+                rb = reg_of(bb, RCX)
+                rex(false, r, 0, rb, false); b(0x0F); b(0xAF); modrr(r, rb)
+        else:
+            opcode = if op == .checked_add: 0x01 else: 0x29
+            ext = if op == .checked_add: 0 else: 5
+            loc = vloc[bb]
+            if loc >= 0 and loc < XMM: op_rr(opcode, false, loc, r)
+            else if loc == LOC_CONST:
+                value = vcval[bb] << 32 >> 32
+                rex(false, 0, 0, r, false)
+                b(if value >= -128 and value <= 127: 0x83 else: 0x81); modrr(ext, r)
+                if value >= -128 and value <= 127: b(value)
+                else: b32(value)
+            else if loc == LOC_SPILL: op_rm(opcode + 2, false, r, RBP, vspill[bb])
+            else: op_rr(opcode, false, reg_of(bb, RCX), r)
+    x_int_fail.push(jcc32(if unsigned: 2 else: 0))
+    x_int_fail_fn = int(ins.imm)
+    if not unsigned: rex(true, r, 0, r, false); b(0x63); modrr(r, r)
+    st(d, r)
+
 x_emit_checked_add = (pos: int, ins: *Ins):
+    if int(ins.c) & 32 != 0: x_emit_checked32(ins); return
     op = ins.op
     d = int(ins.dst)
     a = int(ins.a)
     bb = int(ins.b)
-    # No LEA/strength reduction: the immediately following JO consumes OF.
-    r = dreg(d, RAX)
-    if vloc[bb] == r and r != vloc[a]: r = RAX
-    ld(r, a)
-    if op == .checked_add: alu_v(0x01, 0, r, bb)
-    else if op == .checked_sub: alu_v(0x29, 5, r, bb)
-    else if vloc[bb] == LOC_CONST:
-        rex(true, r, 0, r, false)
-        b(0x69)
-        modrr(r, r)
-        b32(vcval[bb])
-    else:
+    # No LEA/strength reduction: JO consumes OF, JC consumes unsigned carry.
+    cc = if ins.c != 0: 2 else: 0
+    if op == .checked_mul and ins.c != 0:
+        ld(RAX, a)
         rb = reg_of(bb, RCX)
-        rex(true, r, 0, rb, false)
-        b(0x0F)
-        b(0xAF)
-        modrr(r, rb)
-    x_int_fail.push(jcc32(0))
+        rex(true, 0, 0, rb, false)
+        b(0xF7); modrr(4, rb)
+        x_int_fail.push(jcc32(2))
+        x_int_fail_fn = int(ins.imm)
+        st(d, RAX)
+        return
+    r = dreg(d, RAX)
+    if op == .checked_sub and vloc[a] == LOC_CONST and vcval[a] == 0:
+        ld(r, bb)
+        rex(true, 0, 0, r, false)
+        b(0xF7); modrr(3, r)
+        x_int_fail.push(jcc32(cc))
+        x_int_fail_fn = int(ins.imm)
+        st(d, r)
+        return
+    if vloc[bb] == r and r != vloc[a]: r = RAX
+    if op == .checked_mul and vloc[bb] == LOC_CONST and vcval[bb] >= -2147483648 and vcval[bb] <= 2147483647:
+        x_mul_immediate(r, a, vcval[bb])
+    else:
+        ld(r, a)
+        if op == .checked_add: alu_v(0x01, 0, r, bb)
+        else if op == .checked_sub: alu_v(0x29, 5, r, bb)
+        else:
+            rb = reg_of(bb, RCX)
+            rex(true, r, 0, rb, false)
+            b(0x0F)
+            b(0xAF)
+            modrr(r, rb)
+    x_int_fail.push(jcc32(cc))
     x_int_fail_fn = int(ins.imm)
     st(d, r)
 
@@ -2349,12 +2651,13 @@ x_emit_shl = (pos: int, ins: *Ins):
     bb = int(ins.b)
     if vloc[d] == LOC_NONE: return
     ext = 7
-    if op == .shl: ext = 4
+    if op == .rot32: ext = 0
+    else if op == .shl: ext = 4
     else if op == .shru: ext = 5
     if vloc[bb] == LOC_CONST:
         r = dreg(d, RAX)
         ld(r, a)
-        rex(true, 0, 0, r, false)
+        rex(op != .rot32, 0, 0, r, false)
         b(0xC1)
         modrr(ext, r)
         b(vcval[bb] & 63)
@@ -2364,11 +2667,9 @@ x_emit_shl = (pos: int, ins: *Ins):
     r = dreg(d, RAX)
     if r == RCX: r = RAX
     ld(r, a)
-    rex(true, 0, 0, r, false)
+    rex(op != .rot32, 0, 0, r, false)
     b(0xD3)
-    if op == .shl: modrr(4, r)
-    else if op == .shru: modrr(5, r)
-    else: modrr(7, r)
+    modrr(ext, r)
     st(d, r)
 
 x_emit_neg = (pos: int, ins: *Ins):
@@ -2401,16 +2702,24 @@ x_compare_fused = (pos: int, ins: *Ins) -> bool:
             return true
         if (nx.op == .if_ or nx.op == .brif) and int(nx.a) == d:
             if is_icmp(op):
+                x_branch_pos = pos + 1
                 cmp_ops(a, bb, true)
+                x_branch_pos = -1
                 fused_cc = icc(op)
             else: fused_cc = fcmp_flags(ins[0])
             return true
-        # a float comparison tested for false (c == 0): branch on the opposite flags
-        if is_fcmp(op) and nx.op == .eq and int(nx.a) == d and vloc[int(nx.b)] == LOC_CONST and vcval[int(nx.b)] == 0 and pos + 2 < ir.code.len():
+        # A comparison tested for false (c == 0): branch on opposite flags.
+        if (is_icmp(op) or is_fcmp(op)) and nx.op == .eq and int(nx.a) == d and vloc[int(nx.b)] == LOC_CONST and vcval[int(nx.b)] == 0 and pos + 2 < ir.code.len():
             t = int(nx.dst)
             n2 = ir.code[pos + 2]
             if v_live[t].nuse == 1 and (n2.op == .if_ or n2.op == .brif) and int(n2.a) == t:
-                cc = fcmp_flags(ins[0])
+                cc = 0
+                if is_icmp(op):
+                    x_branch_pos = pos + 2
+                    cmp_ops(a, bb, true)
+                    x_branch_pos = -1
+                    cc = icc(op)
+                else: cc = fcmp_flags(ins[0])
                 if cc == 100: cc = 101
                 else if cc == 101: cc = 100
                 else: cc = cc xor 1
@@ -2854,7 +3163,23 @@ x_emit_vbin = (pos: int, ins: *Ins):
     x = xdreg(d, 0)
     xa = xreg_of(a, 1, ty)
     xb = xreg_of(bb, 15, ty)
-    if ty == VY: vop3(vo, vk, x, xa, xb)
+    if ty == VY and vk == 3 and vo == 2:
+        # Low qword product: a0*b0 + ((a1*b0 + a0*b1) << 32).
+        # AVX2's unsigned dword products give the same low 64 bits for signed
+        # operands. Preserve both sources in reserved scratch registers before
+        # touching a potentially overlapping destination.
+        vmov_rr(1, xa, VY)
+        vmov_rr(15, xb, VY)
+        vex(2, 0, 1, 1, 1, 0, 1); b(0x73); modrr(2, 1); b(32)
+        vex(0, 0, 15, 1, 1, 0, 1); b(0xF4); modrr(0, 15)
+        vex(2, 15, 15, 1, 1, 0, 1); b(0x73); modrr(2, 15); b(32)
+        vex(15, 15, 1, 1, 1, 0, 1); b(0xF4); modrr(15, 1)
+        vop3(0, 3, 0, 0, 15)
+        vex(6, 0, 0, 1, 1, 0, 1); b(0x73); modrr(6, 0); b(32)
+        xb = xreg_of(bb, 15, VY)
+        vex(1, 1, xb, 1, 1, 0, 1); b(0xF4); modrr(1, xb)
+        vop3(0, 3, x, 1, 0)
+    else if ty == VY: vop3(vo, vk, x, xa, xb)
     else if x == xb and x != xa:
         if vec_commutes(vo): vop2(vo, vk, x, xa)
         else:
@@ -3097,12 +3422,13 @@ x_emit_block = (pos: int, ins: *Ins):
 
 x_emit_loop = (pos: int, ins: *Ins):
     a = int(ins.a)
-    # Default code needs a consistent loop entry before comparison
-    # padding. Release keeps its measured limited-padding policy.
+    # Keep loop layout independent of the containing function's half-line.
+    # Padding belongs before the target so the backedge never executes it.
     if ra_on:
-        if not opt_release or (16 - code.len() % 16) % 16 <= 10: nop_pad((16 - code.len() % 16) % 16)
-        else: nop_pad((8 - code.len() % 8) % 8)
+        pad_moves = true # moving a function by 16 changes this entry pad
+        nop_pad((32 - code.len() % 32) % 32)
     xctl.push(XCtl(1, code.len(), [], []))
+    x_loop_depth += 1
 
 x_emit_if_ = (pos: int, ins: *Ins):
     a = int(ins.a)
@@ -3113,6 +3439,9 @@ x_emit_if_ = (pos: int, ins: *Ins):
         jfalse(cc, fx)
     else:
         ra = reg_of(a, RAX)
+        x_branch_pos = pos
+        if x_loop_depth > 0: cmp_branch_pad(9)
+        x_branch_pos = -1
         rex(true, ra, 0, ra, false)
         b(0x85)
         modrr(ra, ra)                   # test r, r
@@ -3127,6 +3456,7 @@ x_emit_else_ = (pos: int, ins: *Ins):
 
 x_emit_end = (pos: int, ins: *Ins):
     c = xctl.pop()
+    if c.kind == 1: x_loop_depth -= 1
     patch_control_end(c, pos)
 
 x_emit_br = (pos: int, ins: *Ins):
@@ -3287,6 +3617,7 @@ x64_function = ():
     loop code.len() % align != 0: b(0xCC)
     fn_addr[ir.fn_index] = code.len()
     fn_start = code.len()
+    x_padding_floor = fn_start
     if ra_stat:
         ra_loop_visits = 0
         ra_expire_visits = 0
@@ -3299,6 +3630,7 @@ x64_function = ():
     else: allocate()
     layout_frame()
     xctl = []
+    x_loop_depth = 0
     fused_cc = -1
     cmp_load = -1
     cmp_reload = -1

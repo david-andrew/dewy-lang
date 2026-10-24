@@ -40,7 +40,9 @@ fast_inline_kind = (f: IrFn) -> int:
     # Small record leaves need expansion before SRA can keep caller state in
     # registers. Bound their raw size and expand only at loop call sites.
     record = f.slot_size.len() > 0
-    if f.code.len() > (if record: 96 else: 24): return 0
+    if f.code.len() > (if record: 96 else: 64): return 0
+    checked_leaf = not record and f.code.len() > 24
+    overflow_ops = 0
     if record:
         loop size in f.slot_size:
             if size > 32: return 0
@@ -48,12 +50,18 @@ fast_inline_kind = (f: IrFn) -> int:
     # A nonreturning failure path does not add a call to successful execution.
     # Retain it when expanding bounds-checked helpers, just as release does.
     loop ins in f.code:
+        if ins.op == .overflow_add or ins.op == .overflow_sub or ins.op == .overflow_mul: overflow_ops += 1
         if ins.op == .call and ins.c != 1:
             if ins.c != 0 or calls != 0: return 0
             calls += 1
         if ins.op == .calli or ins.op == .callc or ins.op == .syscall or ins.op == .intr or ins.op == .loop or ins.op == .streq: return 0
     if record:
         if calls != 0: return 0
+        return 3
+    # Exact arithmetic adds a cold fallback to a small scalar expression.
+    # Retain bounded leaf expansion in loops despite that fallback's size.
+    if checked_leaf:
+        if calls != 0 or overflow_ops == 0: return 0
         return 3
     1 + calls
 

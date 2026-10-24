@@ -20,7 +20,7 @@ MAIN = 'main = ():>(void | OutOfMemory) & no panics => {\n    let k = args().len
 FORMS = {
     'loop': '    loop i in [0, k..10] printl(i)\n',
     'descending': '    loop i in [10, 10 - k..0] printl(i)\n',
-    'comprehension': '    printl([loop i in [1, k..9] i * i])\n',
+    'comprehension': '    printl([loop i in [1, k..9] i])\n',
     'stored': '    let r = [0, k..10]\n    printl(r)\n',
 }
 

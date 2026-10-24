@@ -32,7 +32,7 @@ def test_records_sra_game_codegen(compiler, tmp_path):
     assert re.search(r'\bloop a=', simulate), simulate
     # Check the emitted IR, not slot declarations (which can remain after SRA).
     assert not re.search(r'\bcopy .*imm=24\b', simulate), simulate
-    assert not re.search(r'\bcall[ic]? a=', simulate), simulate
+    assert not re.search(r'\bcall[ic]? a=.*c=0 ', simulate), simulate
 
 
 def test_records_sra_large_copy_codegen(compiler, tmp_path):

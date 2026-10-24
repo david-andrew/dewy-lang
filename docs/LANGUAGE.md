@@ -722,17 +722,27 @@ containers and generic arguments. Unannotated integer literals default to `int`.
 Arithmetic is arbitrary precision: word-sized values promote to a big integer
 when their exact result exceeds the signed 64-bit range. `int` has no `.min` or `.max` members.
 
-Explicit `int8` through `int64` and `uint8` through `uint64` are fixed-width.
-Today their `+`, `-` and `*` wrap to the width, while `//`, `%` and `^` are
-computed exactly and storing the result is a checked narrowing; every compound
-update (`+=`, `//=`, `^=`, ...) wraps back to the width. *Decided, not built
-yet:* arithmetic on fixed-width integers becomes exact like `int`'s; storing
-into a fixed-width binding, field, parameter or result becomes the proven
-narrowing (free when proven, an error with fix-its otherwise, a runtime check
-under `$runtime_checks`); and wrapping is chosen by the type, as in
-`uint32<overflow='wrap'>`
-([design](design/precision_inference.md#fixed-width-integers-2026-10-22)).
-Floating types are `float32` and `float64`; text is `string`. The
+Explicit `int8` through `int64` and `uint8` through `uint64` have exact
+arithmetic; their widths describe storage. Intermediates use sufficiently wide
+machine words, including statically sized multiword values, without allocating
+big integers. A store into a binding, field, element, parameter or result narrows:
+a proven fit costs nothing; otherwise the current default emits a runtime check.
+`$runtime_checks=false` and `$no_hidden_costs` reject an unproven narrowing with
+suggestions to add a guard or choose an overflow policy. `$runtime_checks` permits
+the check except under `$no_hidden_costs`.
+
+By default, the counter-progress axiom assumes additive updates of 64-bit
+counters and accumulators by a bounded machine-word amount cannot overflow.
+A bounded mathematical increment, such as `value and 65535`, also qualifies.
+It does not cover 32-bit or narrower storage, multiplication, or a wider exact
+increment. `$no_assumed_bounds` disables this axiom and the array-length bound
+(at most 2^56 bytes) in its scope, requiring ordinary proofs or explicitly
+allowed runtime checks.
+
+An expression whose required width cannot be bounded by facts
+is a compile error. For a left shift or power, guard the count/exponent, compute
+in explicit `int`, or choose an overflow policy type. A bounded expression uses
+statically sized words even when its intermediate exceeds the eventual store. Floating types are `float32` and `float64`; text is `string`. The
 implementation's short names (`i64`, `u8`, `f64`, `str`, `byte`) are rejected. Literals in an explicit
 numeric context must fit that type exactly. A call parameter supplies that context
 to `if` and `match` branch values, just as a binding annotation does. In `=?`
@@ -963,16 +973,16 @@ invocation. A result's references to value parameters describe their entry
 values, even when the function changes its private parameter copies. Generic
 instances retain contracts. Callable conversion requires compatible
 preconditions and guarantees; it cannot silently strengthen a result promise.
-Today fixed-width `+`, `-` and `*` wrap before their result meets a refinement.
+Exact fixed-width arithmetic meets the refinement before the final storage narrowing.
 
 Refinements also apply to record fields and array elements. Constructors,
 defaults, structural record conversions and stores check the declared contracts.
 A field may depend on a sibling, as in `[low:int64 high:int64<(>=? low)>]`;
 a field's (or a `let`'s) own name in its refinement is its value, `high:int64<high >=? low>`;
 a dependent write checks a private candidate before replacing the record.
-Missing initialization must satisfy the contract too. An increment of a
-refined fixed-width field is checked against its contract when overflow cannot be
-ruled out. `xs.swap(i j)` keeps an
+Missing initialization must satisfy the contract too. Fixed-width increments
+retain runtime checks when overflow cannot be ruled out by proof or the enabled
+64-bit counter-progress assumption. `xs.swap(i j)` keeps an
 element refinement without a proof per element.
 
 `array<int64 length <? 10>` is a dynamic array with a checked length contract;
@@ -1112,7 +1122,7 @@ A `\` at the end of a line cancels that line break, everywhere: in code
 It binds above multiplication, literal coefficients and unary minus, so `2x^2`
 is `2*(x^2)` and `-2^2` is `-(2^2)`. Use `xor` for bitwise exclusive-or.
 Integer powers use a nonnegative integer exponent. `int` powers remain exact,
-including when the exponent is `int64`; a fixed-width power is exact and storing it is a checked narrowing. A negative constant
+including when the exponent is `int64`; fixed-width powers also compute exactly and require a bounded intermediate width. A negative constant
 exponent gives a `rational`, `2^(-2)` is `1/4`; a negative runtime exponent panics
 with guidance to use an explicit rational or floating base. Float powers use the inherited
 floating math library. `bigint` powers remain exact for nonnegative exponents;
@@ -1162,8 +1172,8 @@ Broadcast operators (`.+`, `.*`, `.<?`, ...) bind like their scalar forms. So
 `f(x) * 2 or_throw` is `(f(x) * 2) or_throw`.
 
 Compound updates `//=`, `%=`, `/=` and `^=` use the same operations as their
-ordinary forms. The destination keeps its type; a fixed-width compound update wraps
-back to that width today (see the fixed-width integers above). `let x = 7; x //= 2` stores `3`, while `let x = 7/1; x /= 2` stores
+ordinary forms. The destination keeps its type; fixed-width integer results
+undergo the same proven or checked narrowing as assignment. `let x = 7; x //= 2` stores `3`, while `let x = 7/1; x /= 2` stores
 `7/2`. Integer `/=` cannot store a fraction in an integer variable: use `//=`
 or start with a fractional value. Arrays, record fields, dictionary entries and
 custom indexed values support these updates; indices evaluate once, before the
@@ -1329,8 +1339,8 @@ return an optional word, never silently truncate. `.to_float32()` and
 produces signed infinity. Interpolation formats decimal text. Values are
 independent copies and can be dictionary keys.
 
-Today fixed-width `+`, `-` and `*` do not widen on overflow; they wrap. Convert a word
-variable with `bigint(word)` when exact arithmetic is needed.
+Fixed-width intermediates widen without allocating a big integer. Convert a word
+with `int(word)` when the calculation needs an unbounded intermediate width.
 The inherited `big` module is a separate approximate-number library for idle games.
 [The exact-integer example](../examples/exact_integers.dewy) computes
 100!, a binomial coefficient and signed long division.
@@ -2538,7 +2548,8 @@ so placement currently returns the value unchanged.
 
 `gpu(values)` uploads a numeric array or `NDArray`; `cpu(value)` downloads an
 independent `NDArray` with the same shape. Floating inputs become `float32`,
-integer inputs become `int32`, and arrays may have up to four dimensions:
+integer inputs become `int32<overflow='wrap'>` (the GPU's modular word format),
+and arrays may have up to four dimensions:
 
 ```dewy
 let xs = gpu([1.0 2.0 3.0])
@@ -3469,7 +3480,10 @@ prove it, and an unproven one is an error, or a check where the scope allows one
 the endpoint evaluate once in source order. Iteration uses counters without
 building an intermediate array. Bounded integer loops terminate safely at the integer type's limits, including
 an inclusive maximum endpoint. Open-ended ranges such as `[0..]` or `[1,3..]` panic if they exhaust their fixed-width
-integer type; `break` and `continue` work normally.
+integer type; `break` and `continue` work normally. Exhaustion is an obligation: prove that
+the loop stops first, or allow a runtime check and its `panics` effect. Narrow counters
+never use the 64-bit progress assumption; `$no_assumed_bounds` disables that assumption
+for 64-bit counters too.
 Signed-word stepped ranges, including open-ended counters, also work in combined
 headers: `loop i in [0,2..] and item in items { ... }`. A condition can bound the
 counter, and comprehensions use the same forms. `or` headers expose optional
@@ -3606,7 +3620,7 @@ symbolic operands. An erased assertion cannot introduce
 a new implicit closure capture; existing runtime captures remain usable.
 An unknown assertion reports `cannot prove assertion` with its reason
 (a missing bound, an invalidating call, assignment, resize or loop, a path
-lacking evidence, possible wrap, an unsupported operation or an exhausted
+lacking evidence, an unsupported operation or an exhausted
 budget). Notes point at the invalidating event and at the earlier guard whose
 fact described the replaced value, and may show a *possible* witness: values
 consistent with the known bounds, never a claim about a real execution. A false
@@ -4164,7 +4178,7 @@ not classify is rejected there. `$realtime` is reserved for a stronger future bu
 `$bulletproof`, at the top of a module, is the strictest of everything:
 `$no_hidden_costs`, `$explicit_allocation_failure`, `$finite_floats`,
 `$no_deadlocks`, and each assumption the compiler can be told not to make
-(`$assume_local_asserts = false`, `$confine_external_paths`; the list is
+(`$no_assumed_bounds`, `$assume_local_asserts = false`, `$confine_external_paths`; the list is
 docs/design/assumptions.md).
 
 ## Modules and games

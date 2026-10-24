@@ -2252,6 +2252,12 @@ lx_or_terms = (h: int, out: mut int[]):
         lx_or_terms(int(nodes[h].b), out)
     else: out.push(h)
 
+# The extra operand is compile-time metadata for the hidden exhaustion check.
+lx_range_exhausted = (condition: int, message: int, start: int, pos: int) -> int:
+    n = lx_call("$dewy_range_exhausted", [condition, message, clone(start)], pos)
+    nodes[n].aux2 = i32(RANGE_EXHAUSTION)
+    n
+
 # one binder; returns the name of its "has a value" flag (optional binders) or 0
 lx_binder = (t: int, tag: str, setup: mut int[], head: mut int[], tail: mut int[], optional: bool, pos: int) -> int:
     lx_bcount += 1
@@ -2313,11 +2319,11 @@ lx_binder = (t: int, tag: str, setup: mut int[], head: mut int[], tail: mut int[
             setup.push(lx_let(intern(wrapped), lx_bool(false, pos), pos))
             message = mk(.str_lit, pos)
             nodes[message].sval = i32(intern("range exhausted its integer type"))
-            head.push(lx_if(lx_ident(wrapped, pos), lx_expr_stmt(lx_call("$dewy_range_exhausted", [message], pos), pos), pos))
+            head.push(lx_expr_stmt(lx_range_exhausted(lx_not(lx_ident(wrapped, pos), pos), message, int(nodes[it].a), pos), pos))
             head.push(lx_let(v, lx_ident(cur, pos), pos))
-            tail.push(lx_let(intern(previous), lx_ident(cur, pos), pos))
-            tail.push(lx_assign(lx_ident(cur, pos), .pluseq, lx_int(1, pos), pos))
-            tail.push(lx_assign(lx_ident(wrapped, pos), .assign, lx_bin(.le, lx_ident(cur, pos), lx_ident(previous, pos), pos), pos))
+            last = lx_bin(.eq, lx_ident(cur, pos), lx_call("$dewy_range_max", [lx_ident(cur, pos)], pos), pos)
+            tail.push(lx_assign(lx_ident(wrapped, pos), .assign, last, pos))
+            tail.push(lx_if(lx_not(lx_ident(wrapped, pos), pos), lx_assign(lx_ident(cur, pos), .pluseq, lx_int(1, pos), pos), pos))
             return 0
         first = "$range_first" + id
         setup.push(lx_let(intern(first), lx_bool(true, pos), pos))
@@ -2343,13 +2349,11 @@ lx_binder = (t: int, tag: str, setup: mut int[], head: mut int[], tail: mut int[
             head.push(lx_if(lx_not(lx_ident(first, pos), pos), lx_if(lx_not(lx_ident(done, pos), pos), lx_block(advance, pos), pos), pos))
             cond = lx_ident(done, pos)
         else:
-            previous = "$range_previous" + id
-            advance.push(lx_let(intern(previous), lx_ident(cur, pos), pos))
-            advance.push(lx_assign(lx_ident(cur, pos), .pluseq, lx_int(1, pos), pos))
             message = mk(.str_lit, pos)
             nodes[message].sval = i32(intern("range exhausted its integer type"))
-            exhausted = lx_expr_stmt(lx_call("$dewy_range_exhausted", [message], pos), pos)
-            advance.push(lx_if(lx_bin(.le, lx_ident(cur, pos), lx_ident(previous, pos), pos), exhausted, pos))
+            last = lx_bin(.eq, lx_ident(cur, pos), lx_call("$dewy_range_max", [lx_ident(cur, pos)], pos), pos)
+            advance.push(lx_expr_stmt(lx_range_exhausted(lx_not(last, pos), message, int(nodes[it].a), pos), pos))
+            advance.push(lx_assign(lx_ident(cur, pos), .pluseq, lx_int(1, pos), pos))
             head.push(lx_if(lx_not(lx_ident(first, pos), pos), lx_block(advance, pos), pos))
         head.push(lx_assign(lx_ident(first, pos), .assign, lx_bool(false, pos), pos))
         if not optional:

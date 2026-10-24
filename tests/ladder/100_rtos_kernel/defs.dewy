@@ -42,7 +42,7 @@ Tcb:type = [
     ready_seq:int64     # FIFO order among equal priorities
     wait_on:int64       # mutex or mailbox a blocked task waits for
     wait_seq:int64      # FIFO order among equal-priority waiters
-    reg:int64           # last received message
+    reg:int64<overflow='wrap'>           # last received message
     outgoing:int64      # message a blocked sender holds
     signaled:bool       # an interrupt signaled before the task waited
     deadline:int64      # wake-up tick while sleeping

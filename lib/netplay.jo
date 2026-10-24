@@ -1,3 +1,4 @@
+use 'core/overflow.jo'
 import net
 
 # Rollback netplay: two or more players on different machines play one game as if it ran on
@@ -86,7 +87,7 @@ struct Session[S, I]:
     __jitter = 0.0
     __loss = 0.0
     __held: (f64, int, u8[])[]
-    __rand: u64 = 12345
+    __rand: __wrap64 = 12345
 
 struct __NpPacket[I]:
     from: int
@@ -501,7 +502,7 @@ struct Link:
     latency = 0.05
     jitter = 0.0
     loss = 0.0
-    seed: u64 = 1
+    seed: __wrap64 = 1
     __queue: (f64, int, u8[])[]
 
 send = (l: mut Link, to: int, data: u8[], now: f64):

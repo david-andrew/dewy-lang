@@ -71,7 +71,7 @@ edit=(@xs:array<int64> i:int64):>void=>{
     xs.insert(7 0)
     if xs.length >? 1 {xs.swap(0 xs.length-1)}
 }
-ends=(xs:array<int64>):>int64 & no panics=>if xs.length >? 0 xs.first+xs.last else 0
+ends=(xs:array<int64>):>int64 & no panics=>if xs.length >? 0 int64<overflow='wrap'>(xs.first)+int64<overflow='wrap'>(xs.last) else 0
 main=():>void=>{
     let a:array<int64>=[1]
     edit(@a 0)

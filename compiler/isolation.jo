@@ -68,7 +68,7 @@ isolation_children = (k: NK) -> int:
 # bookkeeping). Equality/hash user hooks are added separately below. Formatting,
 # raw memory, foreign callbacks, concurrency and reflective helpers are opaque.
 isolation_intrinsic = (id: IN) -> bool:
-    id == .len or id == .arrcap or id == .sizeof or id == .alignof or id == .sqrt or id == .mul_hi or id == .floor_ or id == .ceil_ or id == .fabs or id == .fmin or id == .fmax or id == .vec_ctor or id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .reserve or id == .resize or id == .truncate or id == .extend or id == .fill or id == .slice or id == .hash or id == .unreachable
+    id == .fixed_abs or id == .len or id == .arrcap or id == .sizeof or id == .alignof or id == .sqrt or id == .mul_hi or id == .floor_ or id == .ceil_ or id == .fabs or id == .fmin or id == .fmax or id == .vec_ctor or id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .reserve or id == .resize or id == .truncate or id == .extend or id == .fill or id == .slice or id == .hash or id == .unreachable
 
 # Hidden dependencies of one operation, not its evaluated children. Defaults
 # are already checked actuals; defers remain body children, so all exits count.
@@ -136,7 +136,7 @@ isolation_scan = (f: int) -> int[]:
     edges: int[]
     # (a reviewed library class is a summary of costs, not of the body's
     # ambient isolation: that body is walked here, as it always was)
-    if f < effect_summaries.len() and effect_summaries[f].done and effect_library_class(f) == .unclassified:
+    if f < effect_summaries.len() and effect_summaries[f].done and not effect_summaries[f].footprint_only and effect_library_class(f) == .unclassified:
         row = effect_summaries[f]
         if row.isolation != .none_: isolation_block(f, row.isolation, row.isolation_witness)
         loop edge in row.edges: edges.push(edge.callee)

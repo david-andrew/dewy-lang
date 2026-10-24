@@ -1,13 +1,14 @@
+use '../core/overflow.jo'
 # Common game helpers: noise, collision shapes, easing, timers and 2D particles.
 
 # ---------------- noise ----------------
 __hash2 = (x: int, y: int) -> f64:
     # (32 bits, as a shader's integers are: noise in a shader is the noise here)
-    h = u32(x) * u32(0x8DA6B343) xor u32(y) * u32(0xD8163841)
-    h = (h xor (h >> 16)) * u32(0x7FEB352D)
-    h = (h xor (h >> 15)) * u32(0x846CA68B)
+    h = __wrap32(x) * __wrap32(0x8DA6B343) xor __wrap32(y) * __wrap32(0xD8163841)
+    h = (h xor (h >> 16)) * __wrap32(0x7FEB352D)
+    h = (h xor (h >> 15)) * __wrap32(0x846CA68B)
     h = h xor (h >> 16)
-    f64(h & u32(0xFFFFFF)) / 16777216.0
+    f64(h & __wrap32(0xFFFFFF)) / 16777216.0
 
 # smooth value noise in [0, 1]
 noise = (x: f64, y: f64) -> f64:
@@ -45,11 +46,11 @@ noise = (x: f64, y: f64, z: f64) -> f64:
     lerp(a, b, w)
 
 __hash3 = (x: int, y: int, z: int) -> f64:
-    h = u32(x) * u32(0x8DA6B343) xor u32(y) * u32(0xD8163841) xor u32(z) * u32(0xCB1AB31F)
-    h = (h xor (h >> 16)) * u32(0x7FEB352D)
-    h = (h xor (h >> 15)) * u32(0x846CA68B)
+    h = __wrap32(x) * __wrap32(0x8DA6B343) xor __wrap32(y) * __wrap32(0xD8163841) xor __wrap32(z) * __wrap32(0xCB1AB31F)
+    h = (h xor (h >> 16)) * __wrap32(0x7FEB352D)
+    h = (h xor (h >> 15)) * __wrap32(0x846CA68B)
     h = h xor (h >> 16)
-    f64(h & u32(0xFFFFFF)) / 16777216.0
+    f64(h & __wrap32(0xFFFFFF)) / 16777216.0
 
 # fractal noise (several octaves) in roughly [0, 1]
 fbm = (x: f64, y: f64, octaves: int = 4) -> f64:

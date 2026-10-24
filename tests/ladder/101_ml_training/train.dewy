@@ -44,13 +44,14 @@ sum_grads = (steps:array<Step> count:int64):>Mlp => {
 Epoch:type = [loss:float64 correct:int64]
 
 train_epoch = (@model:Mlp @opt:Adam @rng:Rng data:array<Sample> batch:int64):>Epoch => {
+    if batch <=? 0 or batch >? data.length return [loss=0.0 correct=0]
     let order = shuffled(@rng data.length)
     let total_loss:float64 = 0.0
     let correct:int64 = 0
     let start:int64 = 0
-    loop start+batch <=? order.length {
+    loop start <=? order.length-batch {
         let picked:array<Sample> = []
-        loop i in [start..start+batch) {
+        loop i in [start..start+int64<overflow='wrap'>(batch)) {
             let sample = data.get(order.get(i) ?? 0)
             if sample is? Sample picked.push(sample)
         }
@@ -71,8 +72,11 @@ confusion = (model:Mlp data:array<Sample>):>array<int64> => {
     let counts:array<int64> = [loop i in [0..CLASSES*CLASSES) 0]
     let predicted = [parallel s in data argmax(forward(model s).y)]
     loop i in 0.. and s in data {
-        let cell = s.label*CLASSES+(predicted.get(i) ?? 0)
-        if cell >=? 0 and cell <? counts.length counts[cell] += 1
+        let label = s.label
+        let prediction = predicted.get(i) ?? 0
+        if label <? 0 or label >=? CLASSES or prediction <? 0 or prediction >=? CLASSES continue
+        let cell = label*CLASSES+prediction
+        if cell >=? 0 and cell <? counts.length counts[cell] = counts[cell]+1
     }
     return counts
 }

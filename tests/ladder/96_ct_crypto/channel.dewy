@@ -25,7 +25,7 @@ Channel:type = [
     # The highest sequence accepted so far, and which of the WINDOW sequences at
     # or below it have been seen (bit i is highest-i).
     highest:uint64=0
-    seen:uint64=0
+    seen:uint64<overflow='wrap'>=0
     accepted:int64=0
 
     send = (plaintext:array<uint8>):>Packet => {
@@ -36,8 +36,7 @@ Channel:type = [
 
     receive = (packet:Packet):>array<uint8>|Forged|Replayed|TooOld => {
         let s = packet.sequence
-        let fresh = accepted =? 0 or s >? highest
-        if not fresh {
+        if accepted not=? 0 and s <=? highest {
             let age = highest-s
             if age >=? WINDOW return TooOld
             if ((seen >> age) and 1) =? 1 return Replayed
@@ -52,7 +51,7 @@ Channel:type = [
             seen = if shift >=? WINDOW 1 else (seen << shift) or 1
             highest = s
         } else {
-            seen = seen or (1 << (highest-s))
+            seen = seen or (uint64<overflow='wrap'>(1) << (highest-s))
         }
         accepted += 1
         return opened

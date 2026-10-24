@@ -27,6 +27,7 @@ use 'types.jo'
 use 'check.jo'
 use 'spelling.dewy'
 use 'facts.jo'
+use 'exact.jo'
 use 'prelude.jo'
 use 'expr.jo'
 use 'ir.jo'
@@ -499,6 +500,7 @@ compile = (path: str, out0: str) -> str:
     want_cpu_flag = (opt_release or not dbg_on and not watch_build and not repl_image) and not target_wasm and not target_arm64 and not lower_only
     want_loop_watch = target_wasm and not opt_release and not lower_only
     mulh_ok = not target_wasm
+    rotate32_ok = not target_wasm and not target_arm64
     checked_flags = not target_wasm
     # (code made after lowering everything, except where code is patched in place as it is made)
     queue_emit = not watch_build and not repl_image and not lower_only

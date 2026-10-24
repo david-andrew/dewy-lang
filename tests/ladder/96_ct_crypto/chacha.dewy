@@ -10,13 +10,13 @@ from p"ct.dewy" import load32
 
 Key:type = array<uint8 length=32>
 Nonce:type = array<uint8 length=12>
-State:type = array<uint32 length=16>
+State:type = array<uint32<overflow='wrap'> length=16>
 
 # "expand 32-byte k"
-const SIGMA:array<uint32 length=4> = [0x61707865 0x3320646e 0x79622d32 0x6b206574]
+const SIGMA:array<uint32<overflow='wrap'> length=4> = [0x61707865 0x3320646e 0x79622d32 0x6b206574]
 const BLOCK:int64 = 64
 
-rotl = (x:uint32 n:int64):>uint32 & no_effects => (x << n) or (x >> (32-n))
+rotl = (x:uint32<overflow='wrap'> n:int64):>uint32<overflow='wrap'> & no_effects => (x << n) or (x >> (32-n))
 
 quarter = (@s:State a:int64<0 <=? a <? 16> b:int64<0 <=? b <? 16> c:int64<0 <=? c <? 16> d:int64<0 <=? d <? 16>):>void => {
     s[a] += s[b]
@@ -107,7 +107,7 @@ xor_stream = (key:Key counter:uint32 nonce:Nonce data:array<uint8>):>array<uint8
         }
         at = stop
         if at <? data.length {
-            $runtime_assert state[12] <? uint32.max
+            $runtime_assert state[12] <? uint32<overflow='wrap'>.max
             state[12] += 1
         }
     }

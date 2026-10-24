@@ -1,3 +1,9 @@
+@overflow("wrap")
+type WrapI32 = i32
+@overflow("wrap")
+type WrapU8 = u8
+@overflow("wrap")
+type WrapU32 = u32
 # loops, nested control flow, break/continue, integer edge cases
 total = 0
 loop i in [0..10):
@@ -29,15 +35,15 @@ loop i in [1..1000):
         arg = i
 print(arg, best)
 # integer types
-a: i32 = 2147483647
+a: WrapI32 = 2147483647
 a += 1
 print(a)
-b: u8 = 200
+b: WrapU8 = 200
 b = b + b
 print(b)
 c: i64 = -7
 print(c / 2, c % 2, -c >> 1, c >> 1, u64(c) >> 60)
-d: u32 = 0xFFFFFFFF
+d: WrapU32 = 0xFFFFFFFF
 print(d, d + 1, int(d) + 1)
 print(1 << 40, 255 & 15, 6 | 9, (6 xor 3), ~0)
 # floats

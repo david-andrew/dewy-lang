@@ -49,6 +49,8 @@ struct EffectEdge:
     origin: int
     actuals: PlaceIdentity[]
 struct EffectSummary:
+    footprint_only: bool = false
+    footprint_opaque: bool = false
     index: int
     low: int
     done: bool
@@ -68,6 +70,22 @@ struct EffectSummary:
     propagated_at: int = 0
 # Indexed event state: (function stamp, atom) -> present. A widened row takes
 # a fresh stamp, so its stale keys simply stop matching. O(1) expected per add.
+# Direct body inventories survive the bounds-settle restart. Only panic sites
+# change when proofs discharge bounds; edges, storage effects and isolation
+# witnesses are immutable during that restart.
+struct EffectBody:
+    events: EffectEvent[]
+    panics: EffectEvent[]
+    edges: EffectEdge[]
+    isolation: IsolationReason
+    witness: int
+
+effect_bodies: {int: EffectBody} = {}
+effect_body_cache = false
+effect_footprints_only = false
+effect_body_owner = 0
+effect_body_panics: EffectEvent[]
+
 struct EffectEventKey:
     stamp: int
     atom: EffectAtom
@@ -109,11 +127,12 @@ effect_for_marks: {int: int[]} = {}
 # (declarations, assignments through field/index selectors), scalar writes by
 # the local their root resolves to, and direct calls/references by function.
 # Ascending linked lists, used once checking is final (matching nodes no
-# longer change in place) and rebuilt in one O(nodes) pass whenever nodes or
-# locals grew; a query is then O(its sites).
+# longer change in place). Append-only growth extends them in O(new nodes +
+# new keys); graph/exact rewrites invalidate them. Queries cost O(their sites).
 effect_ix_nodes = 0
 effect_ix_locals = 0
 effect_ix_heads: int[][] = [[], [], []]
+effect_ix_tails: int[][] = [[], [], []]
 effect_ix_next: int[][] = [[], [], []]
 # effect_plain answers by representation type, for top-level queries.
 effect_plain_cache: {int: bool} = {}
@@ -129,6 +148,11 @@ effect_blocks_demanded = false
 effect_bounds_proven: {int: bool} = {}
 
 effects_reset = ():
+    effect_footprints_only = false
+    effect_bodies = {}
+    effect_body_cache = false
+    effect_body_owner = 0
+    effect_body_panics = []
     effect_panics_reset()
     concurrency_calls = []
     concurrency_tasks = []
@@ -460,18 +484,35 @@ effect_prepare = (f: int, seen: mut int[], depth: int):
     if fns[f].state == 0: check_fn_body(f)
     if fns[f].state == 2: effect_prepare_node(int(fns[f].body), seen, depth + 1)
 
-effect_graph_reset = ():
+effect_graph_reset = (reuse_bodies: bool = false):
+    effect_footprints_only = false
+    if not reuse_bodies:
+        effect_bodies = {}
+        effect_body_cache = false
+    effect_body_owner = 0
+    effect_body_panics = []
+    # Discharging bounds changes no write, use or declaration site.
+    if not reuse_bodies:
+        effect_ix_nodes = 0
+        effect_ix_locals = 0
     effect_limit = fns.len()
     effect_summaries = fill(EffectSummary(), effect_limit)
     effect_seen = fill(0, nodes.len())
     effect_event_index = {}
-    effect_for_marks = {}
-    effect_plain_cache = {}
-    effect_share_cache = {}
+    if not reuse_bodies:
+        effect_for_marks = {}
+        effect_plain_cache = {}
+        effect_share_cache = {}
     effect_stack = []
     effect_serial = 0
 
 effect_function_row = (f: int) -> int:
+    if effect_footprints_only:
+        # An indirect row discovered during footprint solving is conservatively
+        # opaque; never reset the active Tarjan stack. Contract roots ask again
+        # outside that traversal and receive the full graph.
+        if effect_stack.len() > 0: return effect_top()
+        effect_graph_reset()
     if f <= 0 or f >= fns.len(): return effect_top()
     if not effect_final and not effect_solving:
         if effect_inference_busy: return effect_top()
@@ -534,29 +575,38 @@ effect_site_key = (kind: int, q: int) -> int:
 
 effect_index_build = ():
     if effect_ix_nodes == nodes.len() and effect_ix_locals == locals.len(): return
-    effect_ix_nodes = nodes.len()
-    effect_ix_locals = locals.len()
-    # (heads indexed by key, a local or a function: keys are dense IDs, so
-    # arrays replace hashing; a key beyond them grows its array)
-    heads = [fill(0, locals.len() + 1), fill(0, locals.len() + 1), fill(0, fns.len() + 1)]
-    next = [fill(0, nodes.len()), fill(0, nodes.len()), fill(0, nodes.len())]
-    q = nodes.len() - 1
-    loop q >= 1:
+    # Finalized nodes do not change. Appended analysis/lowering nodes extend
+    # the index once, instead of rebuilding every earlier body's sites.
+    # O(new nodes + new keys), with ascending per-key chains maintained by tails.
+    if effect_ix_nodes == 0:
+        effect_ix_heads = [[], [], []]
+        effect_ix_tails = [[], [], []]
+        effect_ix_next = [[], [], []]
+    loop kind in [0..3):
+        limit = if kind == 2: fns.len() + 1 else: locals.len() + 1
+        if effect_ix_heads[kind].len() < limit:
+            effect_ix_heads[kind].resize(limit)
+            effect_ix_tails[kind].resize(limit)
+        effect_ix_next[kind].resize(nodes.len())
+    loop q in [max(1, effect_ix_nodes)..nodes.len()):
         k = nodes[q].kind
         if k == .vardecl or k == .assign:
-            effect_index_link(heads, next, 0, effect_site_key(0, q), q)
-            effect_index_link(heads, next, 1, effect_site_key(1, q), q)
+            effect_index_link(0, effect_site_key(0, q), q)
+            effect_index_link(1, effect_site_key(1, q), q)
         else if k == .call or k == .fnref:
-            effect_index_link(heads, next, 2, effect_site_key(2, q), q)
-        q -= 1
-    effect_ix_heads = heads
-    effect_ix_next = next
+            effect_index_link(2, effect_site_key(2, q), q)
+    effect_ix_nodes = nodes.len()
+    effect_ix_locals = locals.len()
 
-effect_index_link = (heads: mut int[][], next: mut int[][], kind: int, key: int, q: int):
+effect_index_link = (kind: int, key: int, q: int):
     if key <= 0: return
-    if key >= heads[kind].len(): heads[kind] += fill(0, key + 1 - heads[kind].len())
-    next[kind][q] = heads[kind][key]
-    heads[kind][key] = q
+    if key >= effect_ix_heads[kind].len():
+        effect_ix_heads[kind].resize(key + 1)
+        effect_ix_tails[kind].resize(key + 1)
+    tail = effect_ix_tails[kind][key]
+    if tail == 0: effect_ix_heads[kind][key] = q
+    else: effect_ix_next[kind][tail] = q
+    effect_ix_tails[kind][key] = q
 
 # Candidate nodes in ascending order; callers still test each one in full.
 # While checking is open, nodes change in place: scan them all.
@@ -852,6 +902,7 @@ effect_caller_obligation = (n: int) -> bool:
 # or user spelling. -1 means unclassified. Bits are residual may-costs, not
 # authority to mutate the actual; place access is collected independently.
 effect_intrinsic_cost = (id: IN) -> int:
+    if id == .fixed_abs: return 0
     if id == .len or id == .arrcap or id == .sizeof or id == .alignof or id == .zeroed or id == .mul_hi: return 0
     if id == .hash: return 0 # resolved value hooks are separate call edges
     if id == .static_assert: return 0 # erased
@@ -884,6 +935,7 @@ effect_lower_intrinsic = (f: int, n: int):
     if effect_library_class(f) != .unclassified: return
     # (an explicit-allocation-failure frame: counted as allocation by its scan)
     if effect_oom_frame(n): return
+    if nodes[n].aux2 == i32(RANGE_EXHAUSTION) and (effect_bounds_proven.has(n) or fact_range_assumed(n)): return
     mask = effect_intrinsic_cost(nodes[n].aux as IN)
     covered = 0
     loop event in effect_summaries[f].events:
@@ -928,6 +980,11 @@ effect_restamp = (f: int):
     loop old in effect_summaries[f].events: effect_event_index[EffectEventKey(effect_stamps, old.atom)] = true
 
 effect_add = (f: int, event: EffectEvent) -> bool:
+    if effect_footprints_only:
+        kind = event.atom.kind
+        if kind == .opaque or kind == .escape: effect_summaries[f].footprint_opaque = true
+        else if kind != .write and kind != .remainder: return false
+    if f == effect_body_owner and event.atom.kind == .panic: effect_body_panics.push(event)
     # (allocation proven within an arena's acquired capacity is not hidden: arena.jo)
     if arena_fns.len() > 0 and arena_capacity_exempt(event): return false
     covered = effect_place_atom(event.atom)
@@ -1076,7 +1133,7 @@ effect_bounds = (f: int, n: int):
 # A possible failure at n (an index, a divisor, a refinement check) unless the
 # owner body's facts discharge it; the facts probe answers each site.
 effect_failure = (f: int, n: int):
-    if effect_bounds_proven.has(n): return
+    if effect_bounds_proven.has(n) or fact_range_assumed(n): return
     effect_bound_sites.push((f, n))
     effect_add(f, EffectEvent(EffectAtom(.panic), n))
 
@@ -1290,7 +1347,7 @@ effect_oom_frame = (n: int) -> bool:
     name in ["__oom_frame", "__oom_caught", "__oom_release", "__oom_unsupported"]
 
 effect_scan_node = (f: int, n: int):
-    if n == 0: return
+    if n == 0 or effect_footprints_only and effect_summaries[f].footprint_opaque: return
     if effect_seen[n] == f: return
     effect_seen[n] = f
     k = nodes[n].kind
@@ -1321,6 +1378,9 @@ effect_scan_node = (f: int, n: int):
     # words are the allocator's own; it is allocation, not an external effect)
     if effect_oom_frame(n):
         effect_add(f, EffectEvent(EffectAtom(.alloc), n))
+        return
+    if k == .intrinsic and nodes[n].aux2 == i32(RANGE_EXHAUSTION):
+        effect_failure(f, n)
         return
     if k == .intrinsic:
         cost = effect_intrinsic_cost(nodes[n].aux as IN)
@@ -1439,7 +1499,7 @@ effect_scan_node = (f: int, n: int):
     if k == .for_ and effect_range_loop(n):
         loop c in [int(nodes[int(nodes[n].a)].a), int(nodes[int(nodes[n].a)].b), int(nodes[int(nodes[n].a)].c), int(nodes[n].b)]: effect_scan_node(f, c)
         # (a zero step fails unless the owner's facts show it is not: facts.jo fact_step_check)
-        if fact_stepped_loop(n) and not panic_literal_step(int(nodes[n].a)): effect_failure(f, n)
+        if fact_open_range(n) or fact_stepped_loop(n) and not panic_literal_step(int(nodes[n].a)): effect_failure(f, n)
         loop g in hidden: effect_summaries[f].edges.push(EffectEdge(g, n, []))
         return
     if effect_index_read(n):
@@ -1560,7 +1620,7 @@ effect_scan_node = (f: int, n: int):
     else if k == .conv and (nodes[n].aux == i32(int(CV.int2float)) and effect_scalar(ntype(int(nodes[n].a))) or nodes[n].aux == i32(int(CV.float_))): supported = effect_float(ntype(n))
 
     else if k == .conv:
-        supported = (effect_scalar(ntype(n)) and effect_word(int(nodes[n].a)) or effect_small(n) >= 0 or is_fn_type(ntype(n)) and effect_bare(int(nodes[n].a))) and (nodes[n].aux == i32(int(CV.none_)) or nodes[n].aux == i32(int(CV.int_)) or nodes[n].aux == i32(int(CV.wrap_int)) or nodes[n].aux == i32(int(CV.saturate_int)))
+        supported = (effect_scalar(ntype(n)) and effect_word(int(nodes[n].a)) or effect_small(n) >= 0 or is_fn_type(ntype(n)) and effect_bare(int(nodes[n].a))) and (nodes[n].aux == i32(int(CV.none_)) or nodes[n].aux == i32(int(CV.int_)) or nodes[n].aux == i32(int(CV.wrap_int)) or nodes[n].aux == i32(int(CV.saturate_int)) or nodes[n].aux == i32(int(CV.fixed_store)))
     if not supported: effect_opaque(f, n)
     # Hidden calls cannot be trusted by annotation or pathname. They remain
     # explicit dependencies for witnesses and legacy isolation even when this
@@ -1692,27 +1752,55 @@ effect_visit = (f: int):
     effect_summaries[f].index = effect_serial
     effect_summaries[f].low = effect_serial
     effect_stack.push(f)
-    d = int(fns[f].decl)
-    # (a foreign function is opaque unless it declares a closed row, which is
-    # trusted: the claim its unsafe callers rely on)
-    trusted = d != 0 and has_flag(d, NF_EXTERN) and effect_declared_row(f) != 0
-    if effect_blocks_demanded and not trusted and concurrency_fn_blocks(f): effect_add(f, EffectEvent(EffectAtom(.block), d))
-    library = effect_library_class(f)
-    if library != .unclassified: effect_library_summary(f, library, d)
-    else if fns[f].state != 2 or fns[f].body == 0 or fns[f].kind == FK_INIT or (d != 0 and has_flag(d, NF_EXTERN)) or effect_unavailable.has(f):
-        if not trusted: effect_opaque(f, d)
-        effect_isolation_block(f, .unavailable, d)
+    effect_summaries[f].footprint_only = effect_footprints_only
+    if effect_footprints_only and effect_signature_opaque(f):
+        # Numeric consumers already forget every exposed root for this row.
+        # Its body and callee graph cannot change that answer. Full contracts
+        # request a fresh full graph; isolation uses its own syntax fallback.
+        effect_opaque(f, int(fns[f].decl))
+    else if let body = effect_bodies.get(f):
+        effect_summaries[f].edges = body.edges
+        effect_summaries[f].isolation = body.isolation
+        effect_summaries[f].isolation_witness = body.witness
+        loop event in body.events:
+            if event.atom.kind != .panic: effect_add(f, event)
+        loop event in body.panics:
+            if not effect_bounds_proven.has(event.witness): effect_add(f, event)
     else:
-        if fns[f].caps.len() != 0 or fns[f].kind == FK_PARTIAL:
-            effect_opaque(f, int(fns[f].body))
-            effect_isolation_block(f, .capture, int(fns[f].body))
-        if fns[f].cabi: effect_opaque(f, d)
-        if not effect_value(int(fns[f].ret)) and int(fns[f].ret) != T_VOID: effect_opaque(f, d)
-        loop i in [0..fns[f].params.len()):
-            l = fns[f].params[i]
-            t = representation_type(int(locals[l].type))
-            if int(locals[l].flags) & LF_MUTPARAM == 0 and not effect_value(t) and not is_fn_type(t): effect_opaque(f, d)
-        effect_scan_node(f, int(fns[f].body))
+        old_owner = effect_body_owner
+        old_panics = effect_body_panics
+        if effect_body_cache:
+            effect_body_owner = f
+            effect_body_panics = []
+        d = int(fns[f].decl)
+        # (a foreign function is opaque unless it declares a closed row, which is
+        # trusted: the claim its unsafe callers rely on)
+        trusted = d != 0 and has_flag(d, NF_EXTERN) and effect_declared_row(f) != 0
+        if effect_blocks_demanded and not trusted and concurrency_fn_blocks(f): effect_add(f, EffectEvent(EffectAtom(.block), d))
+        library = effect_library_class(f)
+        if library != .unclassified: effect_library_summary(f, library, d)
+        else if fns[f].state != 2 or fns[f].body == 0 or fns[f].kind == FK_INIT or (d != 0 and has_flag(d, NF_EXTERN)) or effect_unavailable.has(f):
+            if not trusted: effect_opaque(f, d)
+            effect_isolation_block(f, .unavailable, d)
+        else:
+            if fns[f].caps.len() != 0 or fns[f].kind == FK_PARTIAL:
+                effect_opaque(f, int(fns[f].body))
+                effect_isolation_block(f, .capture, int(fns[f].body))
+            if fns[f].cabi: effect_opaque(f, d)
+            if not effect_value(int(fns[f].ret)) and int(fns[f].ret) != T_VOID: effect_opaque(f, d)
+            loop i in [0..fns[f].params.len()):
+                l = fns[f].params[i]
+                t = representation_type(int(locals[l].type))
+                if int(locals[l].flags) & LF_MUTPARAM == 0 and not effect_value(t) and not is_fn_type(t): effect_opaque(f, d)
+            effect_scan_node(f, int(fns[f].body))
+        if effect_body_cache:
+            direct = effect_summaries[f]
+            if not direct.capped and direct.events.len() < 32: effect_bodies[f] = EffectBody(direct.events, effect_body_panics, direct.edges, direct.isolation, direct.isolation_witness)
+            effect_body_owner = old_owner
+            effect_body_panics = old_panics
+    # An opaque footprint already invalidates every exposed root. No edge
+    # or remaining body can refine that answer; full effect users rebuild.
+    if effect_footprints_only and effect_summaries[f].footprint_opaque: effect_summaries[f].edges = []
     loop edge in effect_summaries[f].edges:
         g = edge.callee
         if g <= 0 or g >= effect_limit: continue
@@ -1788,6 +1876,7 @@ effect_root = (f: int) -> bool:
 # and the graph is solved again. Probe answers depend only on callees' write
 # footprints, which discharging a failure cannot change.
 effect_settle_bounds = ():
+    effect_body_cache = true
     effect_bound_sites = []
     loop obligation in effect_obligations: effect_source_row(obligation.source)
     loop f in [1..effect_limit):
@@ -1795,22 +1884,27 @@ effect_settle_bounds = ():
     sites = effect_bound_sites
     effect_bound_sites = []
     if sites.len() == 0: return
-    owners: {int: bool} = {}
-    proved = false
+    # Index the sites by owner once; each site's proof is consumed once.
+    by_owner: {int: int[]} = {}
+    owners: int[]
     loop site in sites:
-        if owners.has(site.0): continue
-        owners[site.0] = true
-        found = fact_probe_function(site.0)
+        if not by_owner.has(site.0): owners.push(site.0)
+        owned = by_owner.get(site.0) ?? []
+        owned.push(site.1)
+        by_owner[site.0] = owned
+    proved = false
+    loop f in owners:
+        found = fact_probe_function(f)
         floats: {int: bool} = {}
-        loop other in sites:
-            if other.0 == site.0 and nodes[other.1].kind == .conv and nodes[other.1].aux == i32(int(CV.float2int)):
-                floats = ff_probe_function(site.0)
+        loop n in by_owner[f]:
+            if nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.float2int)):
+                floats = ff_probe_function(f)
                 break
-        loop other in sites:
-            if other.0 == site.0 and ((found.get(other.1) ?? false) or (floats.get(other.1) ?? false)):
-                effect_bounds_proven[other.1] = true
+        loop n in by_owner[f]:
+            if (found.get(n) ?? false) or (floats.get(n) ?? false):
+                effect_bounds_proven[n] = true
                 proved = true
-    if proved: effect_graph_reset()
+    if proved: effect_graph_reset(true)
 
 effects_finalize = ():
     if not effects_active and effect_policy.prohibitions == 0: return
@@ -1857,9 +1951,11 @@ effects_finalize = ():
 
 # Facts request only summaries of calls they actually analyze. Ordinary code
 # with no refinement consumers pays neither an arena allocation nor a walk.
-effects_demand = (f: int) -> bool:
+effects_demand = (f: int, footprints: bool = false) -> bool:
+    if effect_footprints_only and not footprints: effect_graph_reset()
     effect_final = true
     if effect_limit == 0:
+        effect_footprints_only = footprints and not effects_active and effect_policy.prohibitions == 0
         effect_limit = fns.len()
         effect_summaries = fill(EffectSummary(), effect_limit)
         effect_seen = fill(0, nodes.len())
@@ -1957,12 +2053,12 @@ panic_grow = ():
     panic_edge_at += fill(0, extra)
     panic_edge_end += fill(0, extra)
 
-# Panics the compiler adds that cannot run: the fallback of an exhaustive
-# match, and a counter wrapping after 2^63 steps.
+# The exhaustive-match fallback cannot run. A marked range check is decided
+# by facts as an obligation; message text never exempts an exhaustion panic.
 panic_synthesized = (n: int) -> bool:
+    if nodes[n].aux2 == i32(RANGE_EXHAUSTION): return true
     if nkids(n) == 0 or nodes[kid(n, 0)].kind != .str_lit: return false
-    text = name_of(int(nodes[kid(n, 0)].sval))
-    text == "no match arm matched" or text == "range exhausted its integer type"
+    name_of(int(nodes[kid(n, 0)].sval)) == "no match arm matched"
 
 # A string argument's possible texts where the compiler knows them: a literal, a
 # binding written once by its declaration (its initial value), or a value whose
@@ -2160,7 +2256,9 @@ panic_visit = (f: int):
     panic_low[f] = panic_serial
     panic_stack.push(f)
     panic_scan(f)
+    library = fn_in_lib(f)
     loop i in [0..(panic_edge_end[f] - panic_edge_at[f]) / 2):
+        if library and panic_witness[f] != 0: break
         e = panic_edge_at[f] + 2 * i
         g = panic_edges[e]
         if panic_index[g] == 0:

@@ -27,12 +27,12 @@ def test_refinement_runtime_and_strict(compiler, tmp_path, release, source):
     assert result.returncode == 0, result.stderr
     ran = subprocess.run([binary], capture_output=True, text=True)
     assert ran.returncode != 0
-    assert 'refinement failed' in ran.stderr
+    assert ('integer overflow' if 'f(127)' in source else 'refinement failed') in ran.stderr
     for command in ('check', 'build'):
         result = subprocess.run([compiler, '--internal-fact-policy=require-static', command, path, *(['-o', binary] if command == 'build' else [])],
                                 capture_output=True, text=True)
         assert result.returncode != 0
-        assert 'cannot prove refinement' in result.stderr and 'help:' in result.stderr, result.stderr
+        assert ('cannot prove exact integer result fits' if 'f(127)' in source or 'return old-6' in source else 'cannot prove refinement') in result.stderr and 'help:' in result.stderr, result.stderr
 
 
 @pytest.mark.core_quick

@@ -74,14 +74,15 @@ histogram = (log:Log s:Summary):>array<int64 length=10> & no allocates & no pani
     loop i in [0..log.count) {
         let offset = int64(log.values[i]) - int64(s.low)
         let b = offset*10 // width
-        if 0 <=? b and b <? 10 buckets[b] += 1
+        if 0 <=? b and b <? 10 and buckets[b] <? capacity buckets[b] += 1
     }
     buckets
 }
 
 degrees = (tenths:int64):>string & allocates => {
     let sign = if tenths <? 0 "-" else ""
-    let magnitude = if tenths <? 0 -tenths else tenths
+    # Add the last unit in unsigned storage: int64.min has no signed magnitude.
+    let magnitude = if tenths <? 0 uint64(-(tenths+1))+uint64(1) else uint64(tenths)
     "{sign}{magnitude // 10}.{magnitude % 10}"
 }
 

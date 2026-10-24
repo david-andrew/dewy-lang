@@ -25,7 +25,7 @@ alloc_block = (@k:Kernel t:int64):>void & no allocates & no blocks => {
     }
     k.pool.free = k.pool.next[b]
     k.pool.next[b] = NONE
-    k.pool.available -= 1
+    if k.pool.available >? 0 k.pool.available -= 1
     k.tasks[t].held[n] = b
     k.tasks[t].nheld = n+1
     record(@k 'alloc' t b 0)
@@ -35,7 +35,7 @@ release_block = (@k:Kernel b:int64):>void & no allocates & no blocks => {
     if b <? 0 or b >=? NBLOCK return
     k.pool.next[b] = k.pool.free
     k.pool.free = b
-    k.pool.available += 1
+    if k.pool.available <? NBLOCK k.pool.available += 1
 }
 
 # The most recently allocated block a task holds goes back to the pool.
@@ -68,7 +68,7 @@ reclaim = (@k:Kernel t:int64):>void & no allocates & no blocks => {
 }
 
 bump = (@k:Kernel t:int64 words:int64):>void & no allocates & no blocks => {
-    if words <=? 0 or words >? ARENA - k.arena.top {
+    if k.arena.top <? 0 or k.arena.top >? ARENA or words <=? 0 or words >? ARENA - k.arena.top {
         record(@k 'arena_full' t words k.arena.top)
         return
     }

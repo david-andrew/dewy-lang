@@ -31,12 +31,12 @@ __mc_slow = (a: __CTMathRep, b: __CTMathRep, operation: int) -> __CTMathRep:
     if operation == 0: return __mc_pack(__ctbi.__add__(x, y))
     if operation == 1: return __mc_pack(__ctbi.__sub__(x, y))
     if operation == 2: return __mc_pack(__ctbi.__mul__(x, y))
-    if operation == 3 or operation == 4:
+    if operation == 3 or operation == 4 or operation == 8 or operation == 9:
         parts = __ctbi.divmod(x, y)
-        if x._sign != y._sign and parts.remainder._sign != 0:
+        if operation < 8 and x._sign != y._sign and parts.remainder._sign != 0:
             parts.quotient = __ctbi.__add__(parts.quotient, __ctbi._big(1))
             parts.remainder = __ctbi.__sub__(parts.remainder, y)
-        return __mc_pack(if operation == 3: parts.quotient else: parts.remainder)
+        return __mc_pack(if operation == 3 or operation == 8: parts.quotient else: parts.remainder)
     if operation == 5: return __mc_pack(__ctbi.__and__(x, y))
     if operation == 6: return __mc_pack(__ctbi.__or__(x, y))
     if operation == 7: return __mc_pack(__ctbi.__xor__(x, y))

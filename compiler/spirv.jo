@@ -1040,7 +1040,7 @@ sv_expr = (e: int) -> int:
         if cv == .float2int:
             if types[t].kind == .int_: return sv_float_to_int(v, t)
             return sv_val(110, sv_type(t, pos), [v])
-        if cv == .int_ and types[t].kind == .int_:
+        if (cv == .int_ or cv == .wrap_int) and types[t].kind == .int_:
             if types[from_].kind == .bool_: return sv_val(169, sv_i32(), [v, sv_ci(1), sv_ci(0)])
             return sv_narrow(v, t)
         if cv == .float_ or cv == .none_ or cv == .quantity_const: return v

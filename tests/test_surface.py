@@ -289,23 +289,23 @@ def test_surface_native_diagnostics(compiler, tmp_path, name):
 # ------------------------------------------------- fixed-width shift counts
 
 SHIFT_PROGRAM = '''
-left=(x:uint64 count:int64):>uint64=>x << count
-right=(x:uint64 count:int64):>uint64=>x >> count
+left=(x:uint64<overflow='wrap'> count:int64):>uint64=>x << count
+right=(x:uint64<overflow='wrap'> count:int64):>uint64=>x >> count
 signed=(x:int64 count:int64):>int64=>x >> count
-narrow=(x:uint8 count:int64):>uint8=>x << count
+narrow=(x:uint8<overflow='wrap'> count:int64):>uint8=>x << count
 nsigned=(x:int8 count:int64):>int8=>x >> count
-masked=(x:uint64 count:int64):>uint64=>x << (count and 63)
+masked=(x:uint64<overflow='wrap'> count:int64):>uint64=>x << (count and 63)
 main=():>void=>exit(entry()) entry=():>int64=>{
     loop c in [0 1 7 8 9 63 64 65 127 128 -1] {
         printl"{left(1 c)} {right(18446744073709551615 c)} {signed(-2 c)} {signed(2 c)} {narrow(3 c)} {nsigned(-100 c)} {masked(1 c)}"
     }
-    let x:uint64 = 1
+    let x:uint64<overflow='wrap'> = 1
     x <<= 64
     let y:int64 = -8
     y >>= 70
     let z:int64 = 5
     z <<= 2
-    printl"{x} {y} {z} {int64(1) << 64} {-2 >> 64} {1 << 3} {(1 << 62) >> 61}"
+    printl"{x} {y} {z} {int64<overflow='wrap'>(1) << 64} {-2 >> 64} {1 << 3} {(1 << 62) >> 61}"
     return 0
 }
 '''

@@ -1,28 +1,5 @@
-# Numeric operations whose Dewy contract differs from the implementation language.
-# Fixed-width powers wrap like multiplication; negative integer exponents require
-# an explicit rational or floating base, never silently truncate to zero.
-__dewy_power = (base: int, exponent: int) -> int:
-    if exponent < 0: panic("negative integer exponent: use a rational or floating base")
-    let base = base
-    let exponent = exponent
-    result = 1
-    loop exponent > 0:
-        if exponent & 1 == 1: result *= base
-        exponent = exponent >> 1
-        if exponent > 0: base *= base
-    result
-
-__dewy_power = (base: u64, exponent: int) -> u64:
-    if exponent < 0: panic("negative integer exponent: use a rational or floating base")
-    let base = base
-    let exponent = exponent
-    result: u64 = 1
-    loop exponent > 0:
-        if exponent & 1 == 1: result *= base
-        exponent = exponent >> 1
-        if exponent > 0: base *= base
-    result
-
+# Floating powers use the runtime math library. Exact fixed-width powers
+# are lowered directly; policy powers below preserve their declared policy.
 __dewy_power = (base: f64, exponent: f64) -> f64: pow(base, exponent)
 __dewy_power = (base: f32, exponent: f32) -> f32: pow(base, exponent)
 

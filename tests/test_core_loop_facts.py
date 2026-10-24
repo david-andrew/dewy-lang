@@ -11,53 +11,53 @@ from tests.support import compiler  # noqa: F401
 # input; every element read (hidden or written) must prove under strict.
 PROVED = '''pairs=(xs:array<int64> ys:array<int64>):>int64=>{
     let t:int64=0
-    loop x in xs and y in ys { t=t+x*y }
+    loop x in xs and y in ys { t=int64<overflow='wrap'>(t+x*y) }
     return t
 }
 guarded=(xs:array<int64> ys:array<int64>):>int64=>{
     let t:int64=0
-    loop x in xs and t <? 100 and y in ys { t=t+x*y }
+    loop x in xs and t <? 100 and y in ys { t=int64<overflow='wrap'>(t+x*y) }
     return t
 }
 counted=(xs:array<int64> ys:array<int64>):>int64=>{
     let t:int64=0
-    loop i in 0.. and x in xs and y in ys { t=t+int64<overflow='wrap'>(i*x*y) }
+    loop i in 0.. and x in xs and y in ys { t=int64<overflow='wrap'>(t+i*x*y) }
     return t
 }
 indexed=(xs:array<int64>):>int64=>{
     let t:int64=0
-    loop i in 0.. and x in xs { t=t+xs[i]*x }
+    loop i in 0.. and x in xs { t=int64<overflow='wrap'>(t+xs[i]*x) }
     return t
 }
 below=(xs:array<int64> ys:array<int64>):>int64=>{
     let t:int64=0
-    loop i in [0..xs.length) and y in ys { t=t+xs[i]*y }
+    loop i in [0..xs.length) and y in ys { t=int64<overflow='wrap'>(t+xs[i]*y) }
     return t
 }
 through=(xs:array<int64> ys:array<int64>):>int64=>{
     let t:int64=0
     if xs.length <? 1 return 0
-    loop i in [0..xs.length-1] and y in ys { t=t+xs[i]+y }
+    loop i in [0..xs.length-1] and y in ys { t=int64<overflow='wrap'>(t+xs[i]+y) }
     return t
 }
 snapshot=(@xs:array<int64> ys:array<int64>):>int64=>{
     let t:int64=0
-    loop x in xs and y in ys { xs.push(y); t=t+x }
-    return t+xs.length
+    loop x in xs and y in ys { xs.push(y); t=int64<overflow='wrap'>(t+x) }
+    return int64<overflow='wrap'>(t+xs.length)
 }
 either=(xs:array<int64> ys:array<int64>):>int64=>{
     let t:int64=0
-    loop x in xs or y in ys { t=t+1 }
+    loop x in xs or y in ys { t=int64<overflow='wrap'>(t+1) }
     return t
 }
 same=(a:string b:string):>int64=>{
     let t:int64=0
-    loop x in a and y in b { if x =? y t=t+1 }
+    loop x in a and y in b { if x =? y t=int64<overflow='wrap'>(t+1) }
     return t
 }
 mixed=(a:string xs:array<int64>):>int64=>{
     let t:int64=0
-    loop c in a and x in xs and i in 0.. { t=t+int64<overflow='wrap'>(x*i) }
+    loop c in a and x in xs and i in 0.. { t=int64<overflow='wrap'>(t+x*i) }
     return t
 }
 main=()=>{
@@ -178,19 +178,19 @@ def test_resizing_bodies_keep_runtime_checks(compiler, tmp_path, name):
 # hidden index; plain counters that step together do the same.
 LOCKSTEP = '''lockstep=(xs:array<int64> ys:array<int64>):>int64=>{
     let t:int64=0
-    loop i in 0.. and x in xs and y in ys { t=t+ys[i]*x+xs[i] }
+    loop i in 0.. and x in xs and y in ys { t=int64<overflow='wrap'>(t+ys[i]*x+xs[i]) }
     return t
 }
 later=(xs:array<int64> ys:array<int64>):>int64=>{
     let t:int64=0
-    loop x in xs and y in ys and i in 0.. { t=t+ys[i]+xs[i] }
+    loop x in xs and y in ys and i in 0.. { t=int64<overflow='wrap'>(t+ys[i]+xs[i]) }
     return t
 }
 manual=(ys:array<int64>):>int64=>{
     let t:int64=0
     let i:int64=0
     let j:int64=0
-    loop j <? ys.length { t=t+ys[i]; i=i+1; j=j+1 }
+    loop j <? ys.length { t=int64<overflow='wrap'>(t+ys[i]); i=i+1; j=j+1 }
     return t
 }
 main=()=>{
@@ -245,15 +245,15 @@ def test_broken_lockstep_does_not_prove(compiler, tmp_path, name):
 OPTIONAL = '''
 coalesced=(xs:array<int64> ys:array<int64>):>int64=>{
     let t:int64=0
-    loop x in xs or y in ys { t=t+(x ?? 0)*(y ?? 1) }
+    loop x in xs or y in ys { t=int64<overflow='wrap'>(t+(x ?? 0)*(y ?? 1)) }
     return t
 }
 matched=(xs:array<int64> ys:array<int64>):>int64=>{
     let t:int64=0
     loop x in xs or y in ys {
-        t=t+match x {n:int64=>n <none>=>0}
+        t=int64<overflow='wrap'>(t+(match x {n:int64=>n <none>=>0}))
         match y {
-            n:int64=>{ t=t+n }
+            n:int64=>{ t=int64<overflow='wrap'>(t+n) }
             <none>=>{}
         }
     }
@@ -261,14 +261,14 @@ matched=(xs:array<int64> ys:array<int64>):>int64=>{
 }
 tested=(xs:array<int64> ys:array<int64>):>int64=>{
     let t:int64=0
-    loop x in xs or y in ys { if y isnt? none { t=t+1 } }
+    loop x in xs or y in ys { if y isnt? none { t=int64<overflow='wrap'>(t+1) } }
     return t
 }
 kept=(xs:array<int64> o:int64? i:int64):>int64=>{
     if i <? 0 or i >=? xs.length return 0
     let d=o ?? 5
     let e=match o {n:int64=>n <none>=>1}
-    return xs[i]+d+e
+    return int64<overflow='wrap'>(xs[i]+d+e)
 }
 payload=(xs:array<int64> o:int64?):>int64=>{
     match o {
@@ -307,7 +307,7 @@ def guarded_case(statement):
 # A write in any arm or default still retires the guard.
 OPTIONAL_NEGATIVE = {
     'arm_resize': (guarded_case('match o {n:int64=>{ xs.pop(); } <none>=>{}}'), True),
-    'arm_rebind': (guarded_case('match o {n:int64=>{ i=i+n } <none>=>{}}'), True),
+    'arm_rebind': (guarded_case("match o {n:int64=>{ i=int64<overflow='wrap'>(i+n) } <none>=>{}}"), True),
     'arm_call': (guarded_case('let d=match o {n:int64=>n <none>=>popped(@xs)}; printl(d)'), False),
     'default_call': (guarded_case('let d=o ?? popped(@xs); printl(d)'), False),
 }
@@ -330,17 +330,17 @@ def test_optional_path_writes_kill_facts(compiler, tmp_path, name):
 MAPS = '''
 either=(m:dict<string int64> xs:array<int64>):>int64=>{
     let t:int64=0
-    loop k in m or x in xs { t=t+1 }
+    loop k in m or x in xs { t=int64<overflow='wrap'>(t+1) }
     return t
 }
 both=(m:dict<string int64> xs:array<int64>):>int64=>{
     let t:int64=0
-    loop k in m and x in xs { t=t+x }
+    loop k in m and x in xs { t=int64<overflow='wrap'>(t+x) }
     return t
 }
 counted=(m:dict<string int64>):>int64=>{
     let t:int64=0
-    loop i in 0.. and k in m { t=t+i }
+    loop i in 0.. and k in m { t=int64<overflow='wrap'>(t+i) }
     return t
 }
 main=()=>{

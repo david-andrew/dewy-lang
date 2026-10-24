@@ -565,7 +565,7 @@ refine_coerce = (n: int, target: int) -> int:
 # uint64 intervals use the signed ordering of (bits xor MIN), never signed
 # reinterpretation of an endpoint. Arithmetic remains unknown at this width.
 ref_encoded = (value: int, base: int) -> int:
-    if representation_type(base) == T_U64: return value xor FACT_MIN
+    if fact_type(base) == T_U64: return value xor FACT_MIN
     value
 
 ref_project = (term: RefTerm, value0: int, s: mut FactState) -> int:
@@ -597,8 +597,8 @@ ref_value = (term: RefTerm, self: int, args: int[], base: int, s: mut FactState)
     if value != 0 and term.offset != 0:
         # (a mathematical sum: exact rows, and an interval only where it fits)
         b = fact_bound(s, value)
-        shifted = FactBound()
-        if b.lo != FACT_MIN and b.hi != FACT_MAX and fact_add_fits(b.lo, term.offset) and fact_add_fits(b.hi, term.offset): shifted = FactBound(b.lo + term.offset, b.hi + term.offset)
+        shifted = FactBound(wide = true)
+        if not b.wide and b.lo != FACT_MIN and b.hi != FACT_MAX and fact_add_fits(b.lo, term.offset) and fact_add_fits(b.hi, term.offset): shifted = FactBound(b.lo + term.offset, b.hi + term.offset)
         sum = fact_new(s, shifted, FactTerm(type = T_INT))
         fact_difference(s, sum, value, term.offset, 0, 16)
         fact_difference(s, value, sum, -term.offset, 0, 16)

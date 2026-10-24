@@ -505,7 +505,7 @@ ml_expr = (e: int) -> str:
         if cv == .float2int:
             if types[t].kind != .int_: return "int({a})"
             return ml_float_to_int(a, t)
-        if cv == .int_ and types[t].kind == .int_:
+        if (cv == .int_ or cv == .wrap_int) and types[t].kind == .int_:
             if types[from_].kind == .bool_: return "int({a})"
             return gl_narrow(a, t)
         if cv == .float_ or cv == .none_ or cv == .quantity_const: return a

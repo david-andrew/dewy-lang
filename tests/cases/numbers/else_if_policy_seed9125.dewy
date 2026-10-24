@@ -1,0 +1,60 @@
+# quick
+$runtime_checks
+Item:type=[id:int64 tags:array<int64> label:string]
+Bad:type=type of error & [code:int64]
+rec4=(n5:int64 acc6:int64):>int64=>{
+    return (if (n5 <=? 0) acc6 else rec4((n5 - 2) (acc6 + (n5 * n5))))
+}
+h13=(@t14:array<int64> p15:int64):>void=>{
+    t14[0] += p15
+}
+chk16=(p17:int64):>int64|Bad=>{
+    if ((p17 % 3) >? 1) {
+        return Bad[p17]
+    }
+    return 1
+}
+main=():>void=>{
+    let r1:[value:int64 xs:array<int64>]=[value=(-17) xs=[(-18) (-13)]]
+    let f2:float64=float64(int64(6))
+    let n3:int64=r1.xs[((-16) % r1.xs.length)]
+    printl(rec4((r1.xs[0] % 10) 18))
+    let f7:float64=f2
+    let xs8:array<float64>=[(if (int64(-5) <? int64(16)) f2 else f2) (f2 + (-6.25)) (f7 / 0.5) (f2 + f7)]
+    printl(f7)
+    printl((r1 =? r1))
+    let st9:set<int64>=set[0 1 5 0]
+    st9.remove(3);
+    st9.remove(1);
+    st9.push((-1))
+    printl(st9)
+    let decimal10=(9704581408629628148715.0948e-6)
+    printl(decimal10)
+    printl((decimal10 + (1151385657657587624681.8463e-5)))
+    printl((decimal10 - (1151385657657587624681.8463e-5)))
+    printl((decimal10 * (1151385657657587624681.8463e-5)))
+    printl((decimal10 / (1151385657657587624681.8463e-5)))
+    printl((((0.1) + (0.2)) =? (0.3)))
+    let d11:dict<int64 int64>=[3->n3]
+    d11[2] = st9.length
+    d11[(-1)] = (if (not (n3 <? 12)) (-10) else (int64(0) << int64(30)))
+    printl(d11)
+    printl(d11.get(6))
+    printl(d11.keys())
+    let k12:int64=0
+    loop (k12 <? 1) {
+        k12 += 1
+        f7 += 0.2
+        h13(@r1.xs 0)
+    }
+    printl([int64(uint64(3)) (k12 >> 23) {k12 int64<overflow='wrap'>(uint64(13)) (n3 % 8)} (k12 % 8)])
+    let res18:int64|Bad=chk16((int64(-8) // int64(3)))
+    printl(res18)
+    printl((match res18 {m20:Bad=>(m20.code + 8) m19:int64=>(d11.get(n3) ?? (-11))}))
+    printl((res18 isnt? error))
+    printl(n3)
+    printl(xs8)
+    printl(d11)
+    printl(k12)
+    printl(res18)
+}

@@ -116,6 +116,7 @@ literal_magnitude=(text:string):>array<uint64>|LiteralError|LiteralUnsupported=>
 # string's bytes. Base 64 (`0g:`) takes `-` and `_` for 62 and 63 too, and `=` padding.
 literal_bytes=(text:string):>array<uint8>|LiteralError|LiteralUnsupported=>{
     let [alphabet width]=literal_packing(text) or_throw
+    if width <? 1 or width >? 6 {return LiteralUnsupported["this based-string packing"]}
     let a=alphabet as array<uint8>
     let b=text as array<uint8>
     let pending:int64=0
@@ -138,10 +139,12 @@ literal_bytes=(text:string):>array<uint8>|LiteralError|LiteralUnsupported=>{
         bits+=width
         if bits >=? 8 {
             bits-=8
+            $runtime_assert(bits >=? 0 and bits <? 8)
             packed.push((pending >> bits) as uint8)
             pending=pending & ((1 << bits) - 1)
         }
     }
+    $runtime_assert(bits >=? 0 and bits <? 8)
     if bits >? 0 {packed.push((pending << (8 - bits)) as uint8)}
     packed
 }

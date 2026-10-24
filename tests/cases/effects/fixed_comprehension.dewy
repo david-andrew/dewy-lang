@@ -4,15 +4,15 @@
 $no_hidden_costs
 const N:int64=4
 const W:int64=8
-Cell:type=[v:int64 w:int64]
-scaled=(k:int64 base:array<int64 length=4>):>array<int64 length=4>=>[loop i in [0..N) base[i]*k]
-cells=(k:int64):>array<Cell length=4>=>{
+Cell:type=[v:int64<overflow='wrap'> w:int64<overflow='wrap'>]
+scaled=(k:int64<overflow='wrap'> base:array<int64<overflow='wrap'> length=4>):>array<int64<overflow='wrap'> length=4>=>[loop i in [0..N) base[i]*k]
+cells=(k:int64<overflow='wrap'>):>array<Cell length=4>=>{
     let out:array<Cell length=4>=[loop i in [0..N) [v=i w=i*k]]
     return out
 }
-squares=(k:int64):>int64 & no_effects=>{
-    let xs:array<int64 length=8>=[loop i in [0..W) i*k]
-    let s:int64=0
+squares=(k:int64<overflow='wrap'>):>int64<overflow='wrap'> & no_effects=>{
+    let xs:array<int64<overflow='wrap'> length=8>=[loop i in [0..W) i*k]
+    let s:int64<overflow='wrap'>=0
     loop i in [0..8) { s+=xs[i] }
     return s
 }

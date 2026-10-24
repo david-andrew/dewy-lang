@@ -35,7 +35,7 @@ def test_difference_join(compiler, tmp_path, body, success):
     ('let i:int64=0; loop i <? 0 {i=9}; $assert i =? 0', True),
     ('let i:int64=0; loop i <? 10 {if flag {continue}; i+=1}; $assert i =? 10', True),
     ('let i:int64=0; loop i <? 10 {if flag {i=-1; continue}; $assert i >=? 0; i+=1}', False),
-    ('let i:int8=0; loop i <? 127 {$assert i >=? 0; i+=2}', False),
+    ('let i:int8=0; loop i <? 127 {$assert i >=? 0; i+=2}', True),
     ('let i:int64=0; loop i <? 10 {if flag {break}; i+=1}; $assert i =? 10', False),
     ('loop i in [0..10) {$assert i >=? 0; $assert i <? 10}', True),
 ])

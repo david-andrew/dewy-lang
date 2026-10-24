@@ -10,6 +10,7 @@ use 'util.jo'
 use 'ir.jo'
 use 'ownership.jo'
 use 'partition.jo'
+use 'facts.jo'
 
 struct ParallelRegion:
     call: int
@@ -69,7 +70,16 @@ parallel_region = (n0: int) -> ParallelRegion:
 # Register compiler-only runtime ABIs while checking the region, before the
 # checked program is frozen for emission. Ordinary bulk loops do not need them.
 parallel_prepare = (n: int):
-    if target_wasm or parallel_region(n).call == 0: return
+    region = parallel_region(n)
+    if region.call == 0: return
+    # Reuse the existing literal-region contract. These are actual iteration
+    # endpoints, not an assumed practical bound; the opt-out keeps this proof.
+    f = int(nodes[region.callback].sym)
+    bound = FactBound(region.first, region.first + region.count - 1)
+    if let previous = fact_parallel_bounds.get(f):
+        bound.lo = min(bound.lo, previous.lo); bound.hi = max(bound.hi, previous.hi)
+    fact_parallel_bounds[f] = bound
+    if target_wasm: return
     runtime_fn("__fj_split")
     runtime_fn("__fj_scalar")
 

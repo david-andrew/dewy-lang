@@ -29,15 +29,15 @@ generate = (count:int64):>array<uint8> => {
 
 # p[0..n) hashed eight bytes at a time, then byte by byte
 hash_bytes = (p:ptr<uint8> n:int64):>int64 => $unsafe {
-    let h:uint64=(n transmute uint64) * 0x9E3779B97F4A7C15
+    let h:uint64<overflow='wrap'>=(n transmute uint64<overflow='wrap'>) * 0x9E3779B97F4A7C15
     let i=0
     loop i + 8 <? n {
-        h=(h xor ((p + i) as ptr<uint64>)[0]) * 0xBF58476D1CE4E5B9
+        h=(h xor ((p + i) as ptr<uint64<overflow='wrap'>>)[0]) * 0xBF58476D1CE4E5B9
         h=h xor (h >> 31)
         i+=8
     }
     loop i <? n {
-        h=(h xor uint64(p[i])) * 0x100000001B3
+        h=(h xor uint64<overflow='wrap'>(p[i])) * 0x100000001B3
         i+=1
     }
     h=h * 0xBF58476D1CE4E5B9

@@ -2,9 +2,9 @@
 from units import m, km
 Length64:type=float64 * Length
 Length32:type=float32 * Length
-const tiny:int8 * Length=7m
-width=((value:int8 * Length):>int64=>8) & ((value:int64 * Length):>int64=>64)
-small=(value:int8 * Length):>(int8 * Length)=>value+1m
+const tiny:int8<overflow='wrap'> * Length=7m
+width=((value:int8<overflow='wrap'> * Length):>int64=>8) & ((value:int64 * Length):>int64=>64)
+small=(value:int8<overflow='wrap'> * Length):>(int8<overflow='wrap'> * Length)=>value+1m
 main=():>void=>{
     $runtime_assert (width(tiny) =? 8)
     let original=3m
@@ -13,7 +13,7 @@ main=():>void=>{
     $runtime_assert (narrow =? 3m)
     $runtime_assert ((2km as Length64) =? 2000m)
     $runtime_assert (small(127m) =? -128m)
-    let negative:int8 * Length = -120m
+    let negative:int8<overflow='wrap'> * Length = -120m
     negative-=10m
     $runtime_assert (negative =? 126m)
     printl"{wide} {narrow} {negative}"

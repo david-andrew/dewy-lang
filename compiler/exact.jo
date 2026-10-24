@@ -1,0 +1,1579 @@
+use 'exact_guards.jo'
+use 'exact_loop.jo'
+use 'pcheck.jo'
+use 'math_lower.jo'
+use 'lex.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'expr.jo'
+use 'check.jo'
+use 'ir.jo'
+use 'isolation.jo'
+use 'directives.jo'
+use 'effects.jo'
+use 'refine.jo'
+use 'util.jo'
+# Exact fixed-width values keep their source storage type in the checked tree.
+# Only a storage boundary narrows. Owner and node indexes make preparation
+# O(F log F + N + E) for F demanded owners and their N nodes/E edges.
+# Fact transfer uses the existing indexed, bounded-budget engine. Unrelated
+# bodies need no new walk. Multiword division states its separate width cost below.
+use 'facts.jo'
+use 'lower.jo'
+
+# Secret wrapping changes visibility, never an integer's arithmetic domain.
+exact_representation = (t0: int) -> int:
+    t = representation_type(t0)
+    loop types[t].kind == .secret: t = representation_type(int(types[t].elem))
+    t
+
+struct ExactMeasure:
+    owner: int
+    type: int
+    category: str
+    lo: int = 0
+    hi: int = 0
+
+exact_measure_on = false
+exact_measure_sites: {int: ExactMeasure} = {}
+
+exact_lower_active = false
+exact_owners: {int: bool} = {}
+exact_full_owners: {int: bool} = {}
+exact_candidate_heads: int[]
+exact_candidate_nodes: int[]
+exact_candidate_next: int[]
+exact_demands: {int: bool} = {}
+exact_proof_demands: {int: bool} = {}
+exact_progress_math: {int: bool} = {}
+exact_initializers: int[]
+exact_iteration_sources: int[]
+exact_progress_assignments: int[]
+exact_write_heads: int[]
+exact_write_values: int[]
+exact_write_targets: int[]
+exact_write_seen: int[]
+exact_write_controls: int[]
+exact_control_values: int[]
+exact_control_parents: int[]
+exact_control_head = 0
+exact_lower_sites: int[]
+exact_collect_writes = false
+exact_progress_opaque: bool[]
+exact_write_next: int[]
+exact_dependency_seen: int[]
+exact_dependency_epoch = 0
+exact_dependency_budget = 0
+exact_nodes: int[]
+exact_stores: {int: int} = {}
+exact_widths: int[]
+exact_shifts: {int: int} = {}
+# Dense membership for the fact-transfer hot path; maps retain sparse iteration.
+# Preparation allocates O(N) bits once and writes each demanded node once.
+exact_marks: u8[]
+exact_has_node = (n: int) -> bool: not exact_loop_fast and n >= 0 and n < exact_marks.len() and exact_marks[n] & 1 != 0
+exact_has_store = (n: int) -> bool: n >= 0 and n < exact_marks.len() and exact_marks[n] & 2 != 0
+exact_decided = (n: int) -> bool: exact_marks[n] & 8 != 0
+exact_proved = (n: int) -> bool: exact_marks[n] & 16 != 0
+exact_decide = (n: int, proven: bool):
+    exact_marks[n] = (exact_marks[n] & 239) | 8 | (if proven: 16 else: 0)
+exact_reserve = (n: int):
+    if n >= exact_marks.len(): exact_marks.resize(max(n + 1, exact_marks.len() * 2 + 64))
+exact_mark = (n: int):
+    exact_reserve(n)
+    if exact_marks[n] & 1 == 0: exact_nodes.push(n)
+    exact_marks[n] |= 1
+exact_unmark = (n: int):
+    exact_marks[n] &= 254
+
+exact_type = (t0: int, pos: int) -> bool:
+    # The common implementation words have no wrappers or overflow policy.
+    if t0 == T_INT or t0 == T_U64: return dewy_at(pos)
+    if t0 == T_MATH_INT: return false
+    t = exact_representation(t0)
+    if not is_int(t) or t == T_MATH_INT or int_policy(t) != 0: return false
+    # Jo's implementation word remains a machine word. Narrow Jo integers
+    # and every Dewy fixed-width integer have storage-only widths.
+    dewy_at(pos) or types[t].bits < 64
+
+exact_operation = (n: int) -> bool:
+    k = nodes[n].kind
+    if k == .intrinsic: return nodes[n].aux == i32(int(IN.fixed_abs))
+    if k == .unary:
+        if nodes[n].op != i32(int(Tok.minus)): return false
+    else if k == .binary and nodes[n].aux == 0:
+        op = nodes[n].op as Tok
+        if op != .plus and op != .minus and op != .star and op != .starstar and op != .slash and op != .shl: return false
+    else: return false
+    if nodes[n].type == 0 or not exact_type(ntype(n), nodes[n].pos): return false
+    k != .binary or nodes[n].op != i32(int(Tok.slash)) or types[exact_representation(ntype(n))].sign
+
+exact_note = (n: int):
+    if cx < 0: return
+    if not exact_operation(n) and not (nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.int2float)) and exact_potential(int(nodes[n].a))) and not (exact_measure_on and exact_measure_candidate(n)): return
+    f = int(ctxs[cx].inst)
+    if f > 0:
+        exact_owners[f] = true
+        if f >= exact_candidate_heads.len(): exact_candidate_heads.resize(max(f + 1, fns.len()))
+        exact_candidate_nodes.push(n)
+        exact_candidate_next.push(exact_candidate_heads[f])
+        exact_candidate_heads[f] = exact_candidate_nodes.len()
+
+# Context-free width facts are demanded only by a storage boundary. Cache one
+# signed width and a nonnegative bit per expression; 0 means not computed and
+# -1 means unknown. Each demanded edge is visited once: O(N+E) time/O(N) space.
+exact_type_widths: int[]
+exact_type_width = (n: int) -> int:
+    if n < exact_type_widths.len() and exact_type_widths[n] != 0: return exact_type_widths[n]
+    if n >= exact_type_widths.len(): exact_type_widths.resize(max(n + 1, nodes.len()))
+    t = exact_representation(ntype(n))
+    result = -1
+    k = nodes[n].kind
+    if k == .int_lit:
+        value = nodes[n].ival
+        if has_flag(n, NF_U64) and value < 0: result = 131
+        else:
+            magnitude = if value < 0: -(value + 1) else: value
+            bits = 1
+            loop shift in [32, 16, 8, 4, 2, 1]:
+                if magnitude >> shift != 0:
+                    magnitude = magnitude >> shift
+                    bits += shift
+            if magnitude != 0: bits += 1
+            result = bits * 2 + int(value >= 0)
+    else if not exact_has_node(n):
+        if is_int(t) and t != T_MATH_INT: result = (int(types[t].bits) + int(not types[t].sign)) * 2 + int(not types[t].sign)
+    else if k == .unary:
+        a = exact_type_width(int(nodes[n].a))
+        if a > 0: result = (a / 2 + 1) * 2
+    else if k == .binary:
+        a = exact_type_width(int(nodes[n].a)); b = exact_type_width(int(nodes[n].b))
+        op = nodes[n].op as Tok
+        if op == .amp:
+            if a > 0 and a & 1 != 0: result = a
+            if b > 0 and b & 1 != 0: result = if result < 0: b else: min(result, b)
+        else if a > 0 and b > 0:
+            if op == .plus or op == .minus: result = (max(a / 2, b / 2) + 1) * 2 + int(op == .plus and a & b & 1 != 0)
+            else if op == .star: result = (a / 2 + b / 2) * 2 + (a & b & 1)
+            else if op == .pipe or op == .caret: result = max(a / 2, b / 2) * 2 + (a & b & 1)
+        if op == .slash and a > 0:
+            known, divisor = integer_constant(int(nodes[n].b))
+            if known and divisor != 0 and divisor != -1: result = (a / 2) * 2 + int(divisor > 0 and a & 1 != 0)
+        if op == .percent and dewy_at(nodes[n].pos):
+            known, divisor = integer_constant(int(nodes[n].b))
+            if known and divisor > 0 and b > 0: result = b
+    # Stored remainders and masks still carry a small range into a wider
+    # surrounding expression, even when the operation itself needed no widening.
+    if k == .binary and nodes[n].aux == 0 and not exact_has_node(n) and dewy_at(nodes[n].pos) and is_int(t) and t != T_MATH_INT:
+        op = nodes[n].op as Tok
+        if op == .percent or op == .amp:
+            known, limit = integer_constant(int(nodes[n].b))
+            if known and limit > 0:
+                width = exact_type_width(int(nodes[n].b))
+                if width > 0: result = width
+    # A literal right shift consumes high signed bits even when its source
+    # is an ordinary stored word. Keep this fact at the demanded consumer.
+    if k == .binary and nodes[n].op == i32(int(Tok.shr)) and nodes[n].aux == 0 and dewy_at(nodes[n].pos) and is_int(t) and t != T_MATH_INT and int_policy(t) == 0:
+        known, count = integer_constant(int(nodes[n].b))
+        if known and count >= 0 and count < 64:
+            a = exact_type_width(int(nodes[n].a))
+            if a > 0: result = max(1, a / 2 - count) * 2 + (a & 1)
+    exact_type_widths[n] = result
+    result
+
+# A boundary wrapper has the same ABI and type as the value it stores.
+exact_store = (n: int, owner: int):
+    if not exact_has_node(n) or exact_has_store(n): return
+    t = ntype(n)
+    if not exact_type(t, nodes[n].pos): return
+    k = nodes[n].kind
+    if k == .block and nodes[n].aux != 0:
+        exact_store(block_value(n), owner)
+        exact_unmark(n)
+        return
+    if k == .if_ or k == .iflet or k == .match_:
+        if k == .match_:
+            loop arm in kids(n): exact_store(int(nodes[arm].b), owner)
+        else:
+            exact_store(int(nodes[n].b), owner)
+            exact_store(int(nodes[n].c), owner)
+        exact_unmark(n)
+        return
+    width = exact_type_width(n)
+    fits = width > 0 and (if types[exact_representation(t)].sign: width / 2 <= types[exact_representation(t)].bits else: width & 1 != 0 and width / 2 <= types[exact_representation(t)].bits + 1)
+    if fits:
+        if exact_measure_on: exact_measure_sites[n] = ExactMeasure(owner, t, "proven")
+        return
+    inner = nodes.len()
+    nodes.push(nodes[n])
+    if let shift = exact_shifts.get(n): exact_shifts[inner] = shift
+    exact_mark(inner)
+    nodes[n] = Node(kind = .conv, pos = nodes[inner].pos, a = i32(inner), aux = i32(int(CV.fixed_store)), type = i32(t), flags = i32(NF_CHECKED))
+    exact_unmark(n)
+    exact_stores[n] = owner
+    exact_marks[n] |= 2
+    if n < exact_type_widths.len(): exact_type_widths[n] = 0
+    if exact_measure_on: exact_measure_sites[n] = ExactMeasure(owner, t, "runtime-check")
+
+# Children of arithmetic and value controls remain intermediates. Other
+# consumers take stored values (including call actuals and aggregate fields).
+exact_prepare_node = (n: int, owner: int, store: bool):
+    if n <= 0: return
+    # Scalar leaves carry no arithmetic or writes. Strings may contain
+    # interpolation expressions, so retain their ordinary child traversal.
+    if (nodes[n].kind >= .int_lit and nodes[n].kind <= .ident) and nodes[n].kind != .str_lit: return
+    exact_reserve(n)
+    if exact_marks[n] & 4 != 0:
+        if store: exact_store(n, owner)
+        return
+    exact_marks[n] |= 4
+    # Reveal/wrap nodes around scalar arithmetic are representation identities.
+    # Keep the checked visibility type, but do not make them storage boundaries.
+    # Refinement conversions retain their own nodes and redacted diagnostics.
+    loop nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.none_)):
+        child = int(nodes[n].a)
+        t = ntype(n); ct = ntype(child)
+        if not is_int(exact_representation(t)) or exact_representation(t) != exact_representation(ct): break
+        kind = nodes[child].kind
+        if kind != .binary and kind != .unary and kind != .ident and kind != .int_lit and not (kind == .conv and nodes[child].aux == i32(int(CV.none_))): break
+        nodes[n] = nodes[child]
+        nodes[n].type = i32(t)
+    k = nodes[n].kind
+    if exact_collect_writes and (k == .vardecl or k == .assign or k == .for_ or k == .while_ or k == .lambda or k == .fn_ or k == .return_ or k == .break_ or k == .continue_): exact_lower_sites.push(n)
+    if k == .lambda or k == .fn_: return
+    if exact_measure_on:
+        if store: exact_measure_boundary(n, owner)
+        else: exact_measure_visit(n, owner, false)
+    math = exact_operation(n)
+    if math and nodes[n].kind == .binary and (nodes[n].op == i32(int(Tok.shl)) or nodes[n].op == i32(int(Tok.starstar))):
+        (known, count) = integer_constant(int(nodes[n].b))
+        if count < 0 and not types[exact_representation(ntype(int(nodes[n].b)))].sign: known = false
+        if known and count < 1048576: exact_shifts[n] = max(0, count)
+        else:
+            exact_demands[owner] = true
+            exact_count_nodes.push((n, owner))
+            exact_marks[n] |= 128
+    operator = k == .binary and nodes[n].aux == 0 and exact_type(ntype(n), nodes[n].pos)
+    cmp = k == .binary and nodes[n].aux == 0 and ntype(n) == T_BOOL
+    conversion = k == .conv and (nodes[n].aux == i32(int(CV.int_)) or nodes[n].aux == i32(int(CV.none_))) and exact_type(ntype(n), nodes[n].pos)
+    policy = k == .conv and (nodes[n].aux == i32(int(CV.wrap_int)) or nodes[n].aux == i32(int(CV.saturate_int)) or nodes[n].aux == i32(int(CV.int2float)) or ntype(n) == T_MATH_INT)
+    control = k == .if_ or k == .iflet or k == .block or k == .exprstmt or k == .match_ or k == .arm or k == .coalesce
+    previous_control = exact_control_head
+    if k == .while_ or k == .for_:
+        exact_control_values.push(int(nodes[n].a))
+        exact_control_parents.push(previous_control)
+        exact_control_head = exact_control_values.len()
+    mask = isolation_children(k)
+    if mask > 0:
+        if mask & 1 != 0: exact_prepare_node(int(nodes[n].a), owner, not (math or operator or cmp or conversion or policy or k == .exprstmt or k == .match_ and exact_match_literals(n)))
+        if mask & 2 != 0: exact_prepare_node(int(nodes[n].b), owner, not (math or operator or cmp or control))
+        if mask & 4 != 0: exact_prepare_node(int(nodes[n].c), owner, not control)
+        if mask & 16 != 0:
+            loop i in [0..nkids(n)): exact_prepare_node(kid(n, i), owner, not math and k != .block and k != .match_)
+    expanded = math or operator and (exact_has_node(int(nodes[n].a)) or exact_has_node(int(nodes[n].b)))
+    if conversion or k == .exprstmt: expanded = exact_has_node(int(nodes[n].a))
+    if k == .if_ or k == .iflet: expanded = exact_has_node(int(nodes[n].b)) or exact_has_node(int(nodes[n].c))
+    if k == .block and nodes[n].aux != 0: expanded = exact_has_node(block_value(n))
+    if k == .match_:
+        loop arm in kids(n):
+            if exact_has_node(int(nodes[arm].b)): expanded = true
+    if expanded and nodes[n].type != 0 and exact_type(ntype(n), nodes[n].pos): exact_mark(n)
+    if cmp and (exact_has_node(int(nodes[n].a)) or exact_has_node(int(nodes[n].b))): exact_mark(n)
+    if k == .coalesce and exact_has_node(int(nodes[n].b)) and exact_type(ntype(n), nodes[n].pos): exact_mark(n)
+    if store or k == .conv and has_flag(n, NF_EXPLICIT_INTEGER): exact_store(n, owner)
+    if k == .for_ and (nodes[n].aux == 0 or nodes[n].aux == 1) and nodes[n].sym > 0 and not has_flag(n, NF_MUT):
+        l = int(nodes[n].sym)
+        if l >= exact_iteration_sources.len(): exact_iteration_sources.resize(locals.len())
+        exact_iteration_sources[l] = int(nodes[n].a)
+    if k == .vardecl and nodes[n].sym > 0 and not has_flag(n, NF_GLOBAL):
+        l = int(nodes[n].sym)
+        if l >= exact_initializers.len(): exact_initializers.resize(max(l + 1, locals.len()))
+        exact_initializers[l] = int(nodes[n].b)
+    if k == .call and nodes[n].aux == 0 and nodes[n].sym > 0:
+        called = int(nodes[n].sym)
+        loop i in [0..min(nkids(n), fns[called].params.len())):
+            if int(locals[fns[called].params[i]].flags) & LF_MUTPARAM == 0: continue
+            root = fact_progress_root(kid(n, i))
+            if nodes[root].kind == .ident and nodes[root].aux == i32(int(SK.local)):
+                l = int(nodes[root].sym)
+                if l >= exact_progress_opaque.len(): exact_progress_opaque.resize(locals.len())
+                exact_progress_opaque[l] = true
+    if k == .intrinsic and nkids(n) > 0:
+        id = nodes[n].aux as IN
+        if id == .push or id == .insert or id == .extend or id == .fill or id == .resize or id == .truncate or id == .reserve:
+            root = fact_progress_root(kid(n, 0))
+            if nodes[root].kind == .ident and nodes[root].aux == i32(int(SK.local)):
+                l = int(nodes[root].sym)
+                if l >= exact_progress_opaque.len(): exact_progress_opaque.resize(locals.len())
+                exact_progress_opaque[l] = true
+    if k == .assign:
+        exact_progress_assignments.push(n)
+        target = int(nodes[n].a)
+        root = fact_progress_root(target)
+        if nodes[root].kind == .ident and nodes[root].aux == i32(int(SK.local)):
+            l = int(nodes[root].sym)
+            if l >= exact_write_heads.len(): exact_write_heads.resize(max(l + 1, locals.len()))
+            exact_write_values.push(int(nodes[n].b))
+            exact_write_targets.push(target)
+            exact_write_seen.push(0)
+            exact_write_controls.push(exact_control_head)
+            exact_write_next.push(exact_write_heads[l])
+            exact_write_heads[l] = exact_write_values.len()
+    if exact_collect_writes and (k == .while_ or k == .for_): exact_lower_sites.push(-1)
+    exact_control_head = previous_control
+
+# Pure conversions have no stores, control dependencies or write inventory.
+# The checker records each exact operation once per visit in an owner-indexed
+# chain. Prepare conversion roots, then require every recorded operation to be
+# covered; any other use falls back to the ordinary body walk. O(candidates +
+# demanded expression nodes/edges), with no new walk of unrelated statements.
+# Overlapping conversion roots share this node index. Preparation only
+# wraps/removes representation conversions, preserving this purity property.
+# The lazy node index uses O(all checked nodes) zeroed bytes.
+exact_float_purity: u8[]
+exact_pure_float_tree = (n: int) -> bool:
+    if n < exact_float_purity.len() and exact_float_purity[n] != 0: return exact_float_purity[n] == 2
+    k = nodes[n].kind
+    pure = k == .ident or k == .int_lit or k == .bool_lit
+    if k == .unary or k == .conv: pure = exact_pure_float_tree(int(nodes[n].a))
+    else if k == .binary and nodes[n].aux == 0: pure = exact_pure_float_tree(int(nodes[n].a)) and exact_pure_float_tree(int(nodes[n].b))
+    if n >= exact_float_purity.len(): exact_float_purity.resize(max(n + 1, nodes.len()))
+    exact_float_purity[n] = if pure: 2 else: 1
+    pure
+
+exact_prepare_floats = (f: int) -> bool:
+    if exact_measure_on or exact_full_owners.has(f) or f >= exact_candidate_heads.len() or exact_candidate_heads[f] == 0: return false
+    at = exact_candidate_heads[f]
+    loop at > 0:
+        n = exact_candidate_nodes[at - 1]
+        if nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.int2float)) and exact_pure_float_tree(n): exact_prepare_node(n, f, false)
+        at = exact_candidate_next[at - 1]
+    at = exact_candidate_heads[f]
+    loop at > 0:
+        n = exact_candidate_nodes[at - 1]
+        if n >= exact_marks.len() or exact_marks[n] & 4 == 0: return false
+        at = exact_candidate_next[at - 1]
+    true
+
+exact_prepare = ():
+    if exact_owners.len() > 0: exact_marks = fill(u8(0), nodes.len() * 2 + 64)
+    owners: int[]
+    loop f, _ in exact_owners: owners.push(f)
+    owners.sort()
+    loop f in owners:
+        # A checking worker reports this demand alongside its closed-state
+        # summary. Restore only demanded bodies before obligations are decided.
+        pc_restore(f)
+        if f <= 0 or f >= fns.len() or fns[f].state != 2 or effect_unavailable.has(f): continue
+        body = int(fns[f].body)
+        if exact_prepare_floats(f): continue
+        loop key in [0..16): fact_slice_cache.remove((f << 4) | key)
+        fact_probe_runs.remove(f)
+        # Reuse this demanded traversal for lowering's write inventory.
+        # Each write/control boundary is recorded once, O(N+E); lowering
+        # replays O(writes + controls) instead of walking the body again.
+        exact_collect_writes = not fns[f].writes_ready
+        exact_lower_sites = []
+        exact_prepare_node(body, f, false)
+        if exact_collect_writes:
+            fns[f].write_sites = exact_lower_sites
+            fns[f].writes_ready = true
+        exact_collect_writes = false
+        exact_lower_sites = []
+        if nodes[body].kind == .block and nodes[body].aux != 0:
+            if exact_measure_on: exact_measure_boundary(block_value(body), f)
+            exact_store(block_value(body), f)
+    loop candidate in exact_count_nodes:
+        original = candidate.0
+        n = if exact_has_store(original): int(nodes[original].a) else: original
+        bound = exact_count_bound(int(nodes[n].b))
+        if not bound.wide and bound.hi < 1048576:
+            exact_shifts[n] = max(0, bound.hi)
+            exact_marks[original] &= 127
+        else: exact_proof_demands[candidate.1] = true
+    loop assignment in exact_progress_assignments: fact_progress_note(assignment)
+    loop n, owner in exact_stores:
+        if not exact_decided(n):
+            exact_demands[owner] = true
+            if dir_policy(nodes[n].pos) == DIR_STATIC: exact_proof_demands[owner] = true
+    # Exact stores rewrite existing checked nodes as well as appending them.
+    effect_ix_nodes = 0
+    effect_ix_locals = 0
+    if effect_seen.len() > 0: effect_seen.resize(nodes.len())
+
+# Shift extents first ask immutable definitions and declared scalar contracts.
+# This sparse, demand-only interval cache visits each expression/dependency
+# once. Cycles and unsafe aliases stay unknown and request the ordinary facts
+# pass. No function body is walked just to bound a masked shift count.
+exact_count_nodes: (int, int)[]
+exact_count_bounds: {int: FactBound} = {}
+
+exact_count_refined = (t0: int) -> FactBound:
+    t = prune(t0)
+    out = FactBound(wide = true)
+    if types[t].kind != .refined: return out
+    loop atom in ref_predicates[int(types[t].st)]:
+        if atom.a.path.len() != 0 or atom.b.path.len() != 0 or atom.a.offset != 0 or atom.b.offset != 0 or atom.a.unsigned or atom.b.unsigned: continue
+        if atom.a.kind == 0 and atom.b.kind == 1:
+            if atom.op == .lt and atom.b.value > FACT_MIN: out.hi = min(out.hi, atom.b.value - 1)
+            else if atom.op == .le or atom.op == .eq: out.hi = min(out.hi, atom.b.value)
+            if atom.op == .eq: out.lo = max(out.lo, atom.b.value)
+        else if atom.a.kind == 1 and atom.b.kind == 0:
+            if atom.op == .lt and atom.a.value < FACT_MAX: out.lo = max(out.lo, atom.a.value + 1)
+            else if atom.op == .le or atom.op == .eq: out.lo = max(out.lo, atom.a.value)
+            if atom.op == .eq: out.hi = min(out.hi, atom.a.value)
+    out.wide = out.lo == FACT_MIN or out.hi == FACT_MAX
+    out
+
+exact_count_bound = (n: int) -> FactBound:
+    if n == 0: return FactBound(wide = true)
+    if let bound = exact_count_bounds.get(n): return bound
+    out = FactBound(wide = true)
+    exact_count_bounds[n] = out
+    k = nodes[n].kind
+    t = exact_representation(ntype(n))
+    if k == .int_lit and not (has_flag(n, NF_U64) and nodes[n].ival < 0): out = FactBound(nodes[n].ival, nodes[n].ival)
+    else if k == .ident and nodes[n].aux == i32(int(SK.local)):
+        l = int(nodes[n].sym)
+        flags = int(locals[l].flags)
+        if flags & (LF_ASSIGNED | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_EXPOSED) == 0:
+            if flags & LF_PARAM != 0:
+                f = int(locals[l].owner)
+                loop i in [0..fns[f].params.len()):
+                    if fns[f].params[i] == l: out = exact_count_refined(fns[f].ptypes[i])
+            else if l < exact_initializers.len(): out = exact_count_bound(exact_initializers[l])
+    else if k == .conv and nodes[n].aux == i32(int(CV.refinement)):
+        out = exact_count_refined(int(nodes[n].aux2))
+    else if k == .conv and (nodes[n].aux == i32(int(CV.int_)) or nodes[n].aux == i32(int(CV.none_)) or nodes[n].aux == i32(int(CV.fixed_store)) or nodes[n].aux == i32(int(CV.wrap_int))):
+        source = exact_count_bound(int(nodes[n].a))
+        if not source.wide and (t == T_MATH_INT or is_int(t) and (if types[t].sign: sa_fits(source.lo, t) and sa_fits(source.hi, t) else: source.lo >= 0 and (types[t].bits == 64 or source.hi < 1 << int(types[t].bits)))): out = source
+    else:
+        modulus = positive_modulus(n)
+        if modulus > 0: out = FactBound(0, modulus - 1)
+        else if k == .binary and nodes[n].aux == 0:
+            op = nodes[n].op as Tok
+            if op == .plus or op == .minus:
+                a = exact_count_bound(int(nodes[n].a)); b = exact_count_bound(int(nodes[n].b))
+                if not a.wide and not b.wide and (op != .minus or b.lo != FACT_MIN):
+                    if op == .minus:
+                        low = -b.hi; b.hi = -b.lo; b.lo = low
+                    if fact_add_fits(a.lo, b.lo) and fact_add_fits(a.hi, b.hi): out = FactBound(a.lo + b.lo, a.hi + b.hi)
+    if not out.wide and is_int(t) and t != T_MATH_INT and not exact_has_node(n):
+        fits = if types[t].sign: sa_fits(out.lo, t) and sa_fits(out.hi, t) else: out.lo >= 0 and (types[t].bits == 64 or out.hi < 1 << int(types[t].bits))
+        if not fits: out = FactBound(wide = true)
+    exact_count_bounds[n] = out
+    out
+
+exact_shift_fact = (n: int, value: int, s: FactState):
+    if fact_speculating > 0 or not exact_has_node(n) or (nodes[n].op != i32(int(Tok.shl)) and nodes[n].op != i32(int(Tok.starstar))): return
+    b = fact_bound(s, value)
+    hi = fact_relational(s, value, true)
+    bounded = not b.wide
+    if value != 0 and fact_type(fact_terms[value].type) == T_U64:
+        if b.lo < 0 and hi < 0:
+            b.lo = b.lo xor FACT_MIN
+            hi = hi xor FACT_MIN
+        else: bounded = false
+    limit = if bounded and hi < 1048576: max(0, hi) else: -1
+    # A slice may omit a count unrelated to its obligation. Preserve the
+    # independent immutable bound, including the extent used by power lowering.
+    if limit < 0:
+        bound = exact_count_bound(int(nodes[n].b))
+        if not bound.wide and bound.hi < 1048576:
+            exact_shifts[n] = max(0, bound.hi)
+            return
+    if let previous = exact_shifts.get(n):
+        if previous < 0 or limit < 0: limit = -1
+        else: limit = max(previous, limit)
+    exact_shifts[n] = limit
+
+exact_fact_store = (n: int, value: int, s: mut FactState) -> int:
+    if not s.live:
+        if not exact_decided(n): exact_decide(n, true)
+        return value
+    t = exact_representation(ntype(n))
+    b = fact_bound(s, value)
+    # Values outside the interval engine's signed word range remain unknown.
+    ok = not b.wide and b.reason != .unsupported and sa_fits(b.lo, t) and sa_fits(b.hi, t)
+    if t == T_U64: ok = not b.wide and value != 0 and fact_terms[value].type == T_U64 and b.reason != .unsupported
+    assumed = exact_marks[n] & 32 != 0
+    if assumed:
+        if ok: return value
+        # An assumed narrowing still supplies its storage domain downstream;
+        # it cannot leak an unknown wide intermediate into later proofs.
+        bounded = fact_domain(t)
+        if types[t].sign:
+            bounded.lo = max(bounded.lo, b.lo)
+            bounded.hi = min(bounded.hi, b.hi)
+        if value != 0:
+            fact_set_bound(s, value, bounded)
+            return value
+        return fact_new(s, bounded, FactTerm(type = t))
+    if not ok:
+        syntax_bound = positive_bound(int(nodes[n].a), false)
+        if syntax_bound >= 0 and sa_fits(syntax_bound, t): ok = true
+    if fact_speculating == 0:
+        if exact_decided(n): ok = ok and exact_proved(n)
+        exact_decide(n, ok)
+        if exact_measure_on:
+            site = exact_measure_sites[n]
+            site.category = if ok: "proven" else: "runtime-check"
+            site.lo = b.lo; site.hi = b.hi
+            exact_measure_sites[n] = site
+    if not ok and fact_speculating == 0:
+        what = "cannot prove exact integer result fits {dt(t)}"
+        if not dir_defer(n, what, true):
+            err_notes.push((-1, "help: bound the value with a guard or choose an overflow policy type; " + dir_panic_fix(nodes[n].pos)))
+            fatal(nodes[n].pos, what)
+    # The continuation is dominated by either a proof or its runtime check.
+    if ok: return value
+    bounded = fact_domain(t)
+    if value != 0 and fact_type(fact_terms[value].type) == fact_type(t):
+        bounded.lo = max(bounded.lo, b.lo)
+        bounded.hi = min(bounded.hi, b.hi)
+    fact_new(s, bounded, FactTerm(type = t))
+
+exact_bits = (n: int) -> int:
+    if n < exact_widths.len() and exact_widths[n] > 0: return exact_widths[n]
+    t = exact_representation(ntype(n))
+    width = if is_int(t): int(types[t].bits) + int(not types[t].sign) else: 1
+    if nodes[n].kind == .int_lit and has_flag(n, NF_U64) and nodes[n].ival < 0: width = 65
+    if exact_has_node(n):
+        k = nodes[n].kind
+        if k == .binary:
+            a = exact_bits(int(nodes[n].a)); b = exact_bits(int(nodes[n].b))
+            op = nodes[n].op as Tok
+            width = max(a, b)
+            if op == .plus or op == .minus: width += 1
+            else if op == .star: width = a + b
+            else if op == .slash: width = a + int(not (exact_range_flags(int(nodes[n].a)) & 2 != 0))
+            else if op == .percent: width = min(a, b)
+            else if op == .shr: width = a
+            else if op == .shl or op == .starstar:
+                limit = exact_shifts.get(n) ?? -1
+                if not exact_shifts.has(n):
+                    (known, literal) = integer_constant(int(nodes[n].b))
+                    if literal < 0 and not types[exact_representation(ntype(int(nodes[n].b)))].sign: known = false
+                    if known and literal < 1048576: limit = max(0, literal)
+                (fixed_base, base) = integer_constant(int(nodes[n].a))
+                independent = fixed_base and (op == .shl and base == 0 or op == .starstar and base >= -1 and base <= 1 and (base >= 0 or types[exact_representation(ntype(int(nodes[n].a)))].sign))
+                if limit < 0 and independent: limit = 0
+                if limit < 0:
+                    err_notes.push((-1, "help: bound the shift count or exponent with a guard, compute in explicit int, or choose an overflow policy type"))
+                    fatal(nodes[n].pos, "cannot prove a finite machine width for exact shift or power")
+                width = if op == .starstar: max(2, a * limit + 1) else: a + limit
+        else if k == .unary: width = exact_bits(int(nodes[n].a)) + 1
+        else if k == .intrinsic: width = exact_bits(kid(n, 0)) + 1
+        else if k == .conv or k == .exprstmt: width = exact_bits(int(nodes[n].a))
+        else if k == .if_ or k == .iflet: width = max(exact_bits(int(nodes[n].b)), exact_bits(int(nodes[n].c)))
+        else if k == .block: width = exact_bits(block_value(n))
+        else if k == .coalesce: width = max(width, exact_bits(int(nodes[n].b)))
+        else if k == .match_:
+            loop arm in kids(n): width = max(width, exact_bits(int(nodes[arm].b)))
+    syntax = exact_type_width(n)
+    if syntax > 0: width = min(width, syntax / 2)
+    if n < exact_ranges.len() and exact_ranges[n] > 0: width = min(width, exact_ranges[n])
+    if n >= exact_widths.len(): exact_widths.resize(max(n + 1, nodes.len()))
+    exact_widths[n] = width
+    width
+
+exact_finish = ():
+    loop n, owner in exact_stores:
+        if not exact_decided(n):
+            fact_retry_owner = owner
+            fact_terms = [FactTerm()]
+            s = FactState()
+            exact_fact_store(n, 0, s)
+        exact_bits(int(nodes[n].a))
+        if not exact_proved(n) and exact_representation(ntype(n)) == T_INT:
+            if owner >= eg_demanded.len(): eg_demanded.resize(fns.len())
+            eg_demanded[owner] = true
+    loop n in exact_nodes:
+        if exact_has_node(n): exact_bits(n)
+    fact_retry_owner = 0
+    if exact_measure_on: exact_measure_report()
+
+# Statically sized two's-complement words. These are compiler arrays of vregs,
+# never runtime arrays or heap objects. The last word is sign extended.
+exact_extend = (words: int[], count: int) -> int[]:
+    let words = words
+    if words.len() == 0: return fill(e_iconst(0), count) # unreachable arm
+    if words.len() < count:
+        sign = e_bin(.shrs, VI, words[words.len() - 1], e_iconst(63))
+        loop words.len() < count: words.push(sign)
+    if words.len() > count: words.truncate(count)
+    words
+
+exact_add = (a0: int[], b0: int[], count: int, subtract: bool = false) -> int[]:
+    a = exact_extend(a0, count); b = exact_extend(b0, count)
+    out: int[]
+    carry = -1
+    operation = if subtract: Op.sub else: Op.add
+    loop i in [0..count):
+        sum = e_bin(operation, VI, a[i], b[i])
+        value = if i == 0: sum else: e_bin(operation, VI, sum, carry)
+        if i + 1 < count:
+            first = if subtract: e_bin(.ltu, VI, a[i], b[i]) else: e_bin(.ltu, VI, sum, a[i])
+            if i == 0: carry = first
+            else:
+                second = if subtract: e_bin(.ltu, VI, sum, carry) else: e_bin(.ltu, VI, value, sum)
+                carry = e_bin(.or_, VI, first, second)
+        out.push(value)
+    out
+
+exact_neg = (a: int[], count: int) -> int[]: exact_add([e_iconst(0)], a, count, true)
+
+exact_compare = (op: Tok, a0: int[], b0: int[]) -> int:
+    count = max(a0.len(), b0.len())
+    a = exact_extend(a0, count); b = exact_extend(b0, count)
+    if count == 1:
+        operation = if op == .eq: Op.eq else if op == .ne: Op.ne else if op == .lt: Op.lts else if op == .le: Op.les else if op == .ge: Op.ges else: Op.gts
+        return e_bin(operation, VI, a[0], b[0])
+    equal = -1
+    less = -1
+    i = count - 1
+    loop i >= 0:
+        if op != .eq and op != .ne:
+            lt = e_bin((if i == count - 1: Op.lts else: Op.ltu), VI, a[i], b[i])
+            less = if i == count - 1: lt else: e_bin(.or_, VI, less, e_bin(.and_, VI, equal, lt))
+        if i > 0 or op == .eq or op == .ne or op == .le or op == .gt:
+            same = e_bin(.eq, VI, a[i], b[i])
+            equal = if i == count - 1: same else: e_bin(.and_, VI, equal, same)
+        i -= 1
+    if op == .eq: return equal
+    if op == .ne: return e_bin(.xor, VI, equal, e_iconst(1))
+    if op == .lt: return less
+    if op == .le: return e_bin(.or_, VI, less, equal)
+    if op == .ge: return e_bin(.xor, VI, less, e_iconst(1))
+    e_bin(.xor, VI, e_bin(.or_, VI, less, equal), e_iconst(1))
+
+exact_mul = (a0: int[], b0: int[], count: int) -> int[]:
+    if count == 1: return [e_bin(.mul, VI, a0[0], b0[0])]
+    if count == 2 and a0.len() == 1 and b0.len() == 1 and mulh_ok:
+        return [e_bin(.mul, VI, a0[0], b0[0]), e_bin(.mulhs, VI, a0[0], b0[0])]
+    a = exact_extend(a0, count); b = exact_extend(b0, count)
+    out = fill(e_iconst(0), count)
+    loop i in [0..count):
+        carry = e_iconst(0)
+        loop j in [0..count - i):
+            low = e_bin(.mul, VI, a[i], b[j])
+            high = if i + j + 1 < count: fixed_mul_high(a[i], b[j]) else: e_iconst(0)
+            sum = if i == 0: low else: e_bin(.add, VI, low, out[i + j])
+            word = if j == 0: sum else: e_bin(.add, VI, sum, carry)
+            if i + j + 1 < count:
+                carry = high
+                if i > 0: carry = e_bin(.add, VI, carry, e_bin(.ltu, VI, sum, low))
+                if j > 0: carry = e_bin(.add, VI, carry, e_bin(.ltu, VI, word, sum))
+            out[i + j] = word
+    out
+
+exact_select = (condition: int, yes: int[], no: int[], count: int) -> int[]:
+    a = exact_extend(yes, count); b = exact_extend(no, count)
+    out: int[]
+    loop i in [0..count): out.push(vreg(VI))
+    iff(condition)
+    loop i in [0..count): e_mov(out[i], a[i])
+    els()
+    loop i in [0..count): e_mov(out[i], b[i])
+    endc()
+    out
+
+exact_shift_one = (a: int[]) -> int[]:
+    out: int[]
+    carry = e_iconst(0)
+    loop word in a:
+        out.push(e_bin(.or_, VI, e_bin(.shl, VI, word, e_iconst(1)), carry))
+        carry = e_bin(.shru, VI, word, e_iconst(63))
+    out
+
+# Restoring division of fixed-size magnitudes. O(bits * words), no allocation.
+# Scalar division stays one machine operation whenever its selected width fits.
+exact_div = (n: int, a0: int[], b0: int[], count: int, modulo: bool) -> int[]:
+    a = exact_extend(a0, count); b = exact_extend(b0, count)
+    iff(exact_compare(.eq, b, [e_iconst(0)]))
+    e_call_nr1(rt("__div_zero"), e_daddr(loc_data(nodes[n].pos)), -1)
+    endc()
+    if count == 1:
+        # Remainder is defined for MIN % -1 even though x86 idiv traps on
+        # the unrepresentable quotient. Guard only that divisor; no widening
+        # or full multiword division is needed for a word remainder.
+        (known_divisor, divisor_value) = integer_constant(int(nodes[n].b))
+        guarded_remainder = modulo and (not known_divisor or divisor_value == -1)
+        remainder_result = 0
+        if guarded_remainder:
+            remainder_result = vreg(VI)
+            e_mov(remainder_result, e_iconst(0))
+            iff(e_bin(.ne, VI, b[0], e_iconst(-1)))
+        q = if modulo: e_iconst(0) else: e_bin(.divs, VI, a[0], b[0])
+        r = e_bin(.rems, VI, a[0], b[0])
+        result = vreg(VI)
+        e_mov(result, if modulo: r else: q)
+        if dewy_at(nodes[n].pos):
+            if known_divisor and divisor_value > 0:
+                changed = if modulo: e_bin(.add, VI, r, b[0]) else: e_addi(q, -1)
+                emit(.select, VI, result, e_bin(.lts, VI, r, e_iconst(0)), changed, (if modulo: r else: q), 0)
+            else:
+                iff(e_bin(.and_, VI, e_bin(.ne, VI, r, e_iconst(0)), e_bin(.lts, VI, e_bin(.xor, VI, r, b[0]), e_iconst(0))))
+                e_mov(result, if modulo: e_bin(.add, VI, r, b[0]) else: e_addi(q, -1))
+                endc()
+        if guarded_remainder:
+            e_mov(remainder_result, result)
+            endc()
+            return [remainder_result]
+        return [result]
+    out: int[]
+    loop i in [0..count): out.push(vreg(VI))
+    high = e_iconst(0)
+    loop i in [1..count): high = e_bin(.or_, VI, high, e_bin(.or_, VI, a[i], b[i]))
+    iff(e_bin(.eq, VI, high, e_iconst(0)))
+    e_mov(out[0], e_bin((if modulo: Op.remu else: Op.divu), VI, a[0], b[0]))
+    loop i in [1..count): e_mov(out[i], e_iconst(0))
+    els()
+    sign_a = e_bin(.shrs, VI, a[0], e_iconst(63))
+    sign_b = e_bin(.shrs, VI, b[0], e_iconst(63))
+    mismatch = e_iconst(0)
+    loop i in [1..count):
+        mismatch = e_bin(.or_, VI, mismatch, e_bin(.or_, VI, e_bin(.ne, VI, a[i], sign_a), e_bin(.ne, VI, b[i], sign_b)))
+    iff(e_bin(.eq, VI, mismatch, e_iconst(0)))
+    iff(e_bin(.eq, VI, b[0], e_iconst(-1)))
+    negated = if modulo: fill(e_iconst(0), count) else: exact_neg(a, count)
+    loop i in [0..count): e_mov(out[i], negated[i])
+    els()
+    native = exact_extend(exact_div(n, [a[0]], [b[0]], 1, modulo), count)
+    loop i in [0..count): e_mov(out[i], native[i])
+    endc()
+    els()
+    wide = exact_div_restoring(n, a, b, count, modulo)
+    loop i in [0..count): e_mov(out[i], wide[i])
+    endc()
+    endc()
+    out
+
+exact_div_restoring = (n: int, a: int[], b: int[], count: int, modulo: bool) -> int[]:
+    negative_a = e_bin(.lts, VI, a[count - 1], e_iconst(0))
+    negative_b = e_bin(.lts, VI, b[count - 1], e_iconst(0))
+    # An extra sign word keeps magnitude comparisons unsigned-safe.
+    size = count + 1
+    am = exact_select(negative_a, exact_neg(a, size), a, size)
+    bm = exact_select(negative_b, exact_neg(b, size), b, size)
+    quotient: int[]
+    remainder: int[]
+    input: int[]
+    loop i in [0..size):
+        quotient.push(vreg(VI)); e_mov(quotient[i], e_iconst(0))
+        remainder.push(vreg(VI)); e_mov(remainder[i], e_iconst(0))
+        input.push(vreg(VI)); e_mov(input[i], am[i])
+    remaining = vreg(VI)
+    e_mov(remaining, e_iconst(size * 64))
+    blk()
+    lop()
+    brif_to(e_bin(.eq, VI, remaining, e_iconst(0)), ctl - 1)
+    bit = e_bin(.shru, VI, input[size - 1], e_iconst(63))
+    shifted = exact_shift_one(remainder)
+    shifted[0] = e_bin(.or_, VI, shifted[0], bit)
+    enough = exact_compare(.ge, shifted, bm)
+    difference = exact_add(shifted, bm, size, true)
+    reduced = exact_select(enough, difference, shifted, size)
+    nextq = exact_shift_one(quotient)
+    nextq[0] = e_bin(.or_, VI, nextq[0], enough)
+    nextinput = exact_shift_one(input)
+    loop i in [0..size):
+        e_mov(remainder[i], reduced[i]); e_mov(quotient[i], nextq[i]); e_mov(input[i], nextinput[i])
+    e_mov(remaining, e_addi(remaining, -1))
+    br_to(ctl)
+    endc(); endc()
+    sign = e_bin(.xor, VI, negative_a, negative_b)
+    q = exact_select(sign, exact_neg(quotient, size), quotient, size)
+    r = exact_select(negative_a, exact_neg(remainder, size), remainder, size)
+    result = if modulo: r else: q
+    if dewy_at(nodes[n].pos):
+        adjust = e_bin(.and_, VI, sign, exact_compare(.ne, remainder, [e_iconst(0)]))
+        changed = if modulo: exact_add(r, b, size) else: exact_add(q, [e_iconst(1)], size, true)
+        result = exact_select(adjust, changed, result, size)
+    exact_extend(result, count)
+
+# A constant count selects word offsets while compiling, not a runtime barrel.
+# Retain every source word until shifting, even when the proven result narrows.
+exact_shift_literal = (a0: int[], by: int, count: int, right: bool) -> int[]:
+    if count == 1 and a0.len() == 1:
+        if by < 0 or by >= 64: return [if right: e_bin(.shrs, VI, a0[0], e_iconst(63)) else: e_iconst(0)]
+        return [e_bin((if right: Op.shrs else: Op.shl), VI, a0[0], e_iconst(by))]
+    size = max(count, a0.len())
+    a = exact_extend(a0, size)
+    sign = e_bin(.shrs, VI, a[size - 1], e_iconst(63))
+    if by < 0 or by >= size * 64: return fill((if right: sign else: e_iconst(0)), count)
+    words = by / 64
+    bits = by % 64
+    out: int[]
+    loop i in [0..count):
+        at = if right: i + words else: i - words
+        value = if at < 0: e_iconst(0) else if at >= size: sign else: a[at]
+        if bits != 0:
+            other = if right: at + 1 else: at - 1
+            neighbor = if other < 0: e_iconst(0) else if other >= size: sign else: a[other]
+            value = e_bin(.or_, VI, e_bin((if right: Op.shru else: Op.shl), VI, value, e_iconst(bits)), e_bin((if right: Op.shl else: Op.shru), VI, neighbor, e_iconst(64 - bits)))
+        out.push(value)
+    out
+
+# A bounded shift uses a logarithmic barrel shifter. Each stage is selected
+# once; excess right counts produce the sign continuation, never mask modulo 64.
+exact_shift = (a0: int[], by: int, count: int, right: bool) -> int[]:
+    if count == 1 and a0.len() == 1:
+        value = e_bin((if right: Op.shrs else: Op.shl), VI, a0[0], by)
+        continuation = if right: e_bin(.shrs, VI, a0[0], e_iconst(63)) else: e_iconst(0)
+        result = vreg(VI)
+        emit(.select, VI, result, e_bin(.geu, VI, by, e_iconst(64)), continuation, value, 0)
+        return [result]
+    size = max(count, a0.len())
+    a = exact_extend(a0, size)
+    step = 1
+    loop step < size * 64:
+        shifted: int[]
+        words = step / 64
+        bits = step % 64
+        sign = e_bin(.shrs, VI, a[size - 1], e_iconst(63))
+        loop i in [0..size):
+            at = if right: i + words else: i - words
+            value = if at < 0: e_iconst(0) else if at >= size: sign else: a[at]
+            if bits != 0:
+                other = if right: at + 1 else: at - 1
+                neighbor = if other < 0: e_iconst(0) else if other >= size: sign else: a[other]
+                value = e_bin(.or_, VI, e_bin((if right: Op.shru else: Op.shl), VI, value, e_iconst(bits)), e_bin((if right: Op.shl else: Op.shru), VI, neighbor, e_iconst(64 - bits)))
+            shifted.push(value)
+        a = exact_select(e_bin(.and_, VI, by, e_iconst(step)), shifted, a, size)
+        step *= 2
+    if right:
+        continuation = fill(e_bin(.shrs, VI, a[size - 1], e_iconst(63)), size)
+        a = exact_select(e_bin(.geu, VI, by, e_iconst(size * 64)), continuation, a, size)
+    exact_extend(a, count)
+
+exact_join_blocks: {int: int[]} = {}
+
+# Lowering already knows bounded induction variables and the range shared by
+# every write to a local. Reuse those facts rather than demand relational states
+# merely to choose the number of machine words in an exact expression.
+exact_lower_bits = (n: int) -> int:
+    width = exact_bits(n)
+    # Consumers select whole machine words. Once one word suffices, no
+    # induction/range query can change their representation.
+    if width <= 64: return width
+    bound = positive_bound(n, true)
+    if bound < 0: return width
+    bits = 1
+    loop shift in [32, 16, 8, 4, 2, 1]:
+        if bound >> shift != 0:
+            bound = bound >> shift
+            bits += shift
+    if bound != 0: bits += 1
+    min(width, bits)
+
+# A positive remainder of one potentially overflowing word operation has a
+# native fast path. Evaluate operands once; OF selects a shared exact fallback.
+exact_word_remainder = (n: int) -> int[]:
+    empty: int[]
+    if not checked_flags or not dewy_at(nodes[n].pos): return empty
+    known, divisor = integer_constant(int(nodes[n].b))
+    if not known or divisor <= 0 or divisor & (divisor - 1) == 0: return empty
+    source = int(nodes[n].a)
+    if nodes[source].kind != .binary or nodes[source].aux != 0 or not exact_has_node(source) or exact_lower_bits(source) <= 64: return empty
+    op = nodes[source].op as Tok
+    if op != .plus and op != .minus and op != .star: return empty
+    a = int(nodes[source].a); b = int(nodes[source].b)
+    if exact_lower_bits(a) > 64 or exact_lower_bits(b) > 64: return empty
+    av = exact_value(a); bv = exact_value(b)
+    if av.len() != 1 or bv.len() != 1: ice("word remainder width mismatch")
+    modulus = e_iconst(divisor)
+    result = vreg(VI)
+    value = e_bin((if op == .plus: Op.add else if op == .minus: Op.sub else: Op.mul), VI, av[0], bv[0])
+    overflow = e_bin((if op == .plus: Op.overflow_add else if op == .minus: Op.overflow_sub else: Op.overflow_mul), VI, av[0], bv[0])
+    iff(overflow)
+    cold = ir_cold
+    ir_cold = true
+    words = if op == .star: exact_mul(av, bv, 2) else: exact_add(av, bv, 2, op == .minus)
+    e_mov(result, e_call(rt("__exact_i128_mod_pos"), [words[0], words[1], modulus], VI))
+    ir_cold = cold
+    els()
+    e_mov(result, exact_div(n, [value], [modulus], 1, true)[0])
+    endc()
+    [result]
+
+# A consumer of only the low machine word needs no carries or high products.
+# Ring operations commute with reduction modulo 2^64. Other operations keep
+# their full exact operands, including division, comparisons and right shifts.
+exact_low_word = (n: int) -> int:
+    if exact_chain_active:
+        if let saved = exact_chain_saved.get(n): return saved
+    if nodes[n].kind != .block and not exact_has_node(n):
+        return freeze_scalar(gen_expr(n).v, exact_representation(ntype(n)))
+    if exact_has_node(n):
+        k = nodes[n].kind
+        if k == .binary:
+            op = nodes[n].op as Tok
+            if op == .plus or op == .minus or op == .star or op == .amp or op == .pipe or op == .caret:
+                a = exact_low_word(int(nodes[n].a))
+                b = exact_low_word(int(nodes[n].b))
+                return e_bin(int_op(op, true), VI, a, b)
+        if k == .unary and nodes[n].op == i32(int(Tok.minus)): return e_un(.neg, VI, exact_low_word(int(nodes[n].a)))
+        if k == .exprstmt or k == .conv and (nodes[n].aux == i32(int(CV.int_)) or nodes[n].aux == i32(int(CV.none_))): return exact_low_word(int(nodes[n].a))
+    exact_value(n)[0]
+
+exact_value = (n: int) -> int[]:
+    if exact_chain_active:
+        if let saved = exact_chain_saved.get(n): return [saved]
+    if nodes[n].kind == .block:
+        scope_push()
+        out: int[]
+        loop i in [0..nkids(n)):
+            statement = kid(n, i)
+            if i == nkids(n) - 1 and nodes[n].aux != 0:
+                stmt_begin()
+                words = exact_value(int(nodes[statement].a))
+                loop word in words:
+                    saved = vreg(VI)
+                    e_mov(saved, word)
+                    out.push(saved)
+                stmt_end()
+            else: gen_stmt(statement)
+        scope_pop()
+        return out
+    if not exact_has_node(n):
+        t = exact_representation(ntype(n))
+        word = freeze_scalar(gen_expr(n).v, t)
+        if is_int(t) and not types[t].sign and types[t].bits == 64 or nodes[n].kind == .int_lit and has_flag(n, NF_U64) and nodes[n].ival < 0: return [word, e_iconst(0)]
+        return [word]
+    count = (exact_lower_bits(n) + 63) / 64
+    k = nodes[n].kind
+    if k == .binary:
+        op = nodes[n].op as Tok
+        if count == 1 and (op == .plus or op == .minus or op == .star or op == .amp or op == .pipe or op == .caret): return [exact_low_word(n)]
+        if op == .percent:
+            known, divisor = integer_constant(int(nodes[n].b))
+            if dewy_at(nodes[n].pos) and known and divisor > 0 and divisor & (divisor - 1) == 0:
+                return [e_bin(.and_, VI, exact_low_word(int(nodes[n].a)), e_iconst(divisor - 1))]
+            word = exact_word_remainder(n)
+            if word.len() > 0: return word
+        a = exact_value(int(nodes[n].a))
+        if op == .shl or op == .shr:
+            count_node = int(nodes[n].b)
+            known_count, literal_count = integer_constant(count_node)
+            if known_count: return exact_shift_literal(a, literal_count, count, op == .shr)
+            by = 0
+            if exact_representation(ntype(count_node)) == T_MATH_INT: by = math_shift_count(count_node)
+            else:
+                words = exact_value(count_node)
+                by = words[0]
+                high = e_iconst(0)
+                loop i in [1..words.len()): high = e_bin(.or_, VI, high, words[i])
+                by = exact_select(e_bin(.ne, VI, high, e_iconst(0)), [e_iconst(-1)], [by], 1)[0]
+            return exact_shift(a, by, count, op == .shr)
+        if op == .starstar:
+            exponent_node = int(nodes[n].b)
+            exponent_type = exact_representation(ntype(exponent_node))
+            (fixed_base, constant) = integer_constant(int(nodes[n].a))
+            exponent = 0
+            parity = 0
+            negative = e_iconst(0)
+            zero = e_iconst(0)
+            if exponent_type == T_MATH_INT:
+                value = gen_borrowed(exponent_node).v
+                negative = e_bin(.lts, VI, e_call(rt("__mi_compare"), [value, e_iconst(0)], VI), e_iconst(0))
+                iff(negative)
+                e_call_nr1(rt("__negative_integer_power"), e_daddr(loc_data(nodes[n].pos)), -1)
+                endc()
+                exponent = e_call1(rt("__mi_count"), value, VI)
+                zero = e_bin(.eq, VI, exponent, e_iconst(0))
+                # Saturating a huge count preserves zero/nonzero, but not parity.
+                parity = if fixed_base and constant == -1: e_call1(rt("__mi_low_word"), value, VI) else: exponent
+            else:
+                words = exact_value(exponent_node)
+                exponent = words[0]
+                parity = exponent
+                zero = exact_compare(.eq, words, [e_iconst(0)])
+                negative = e_bin(.lts, VI, words[words.len() - 1], e_iconst(0))
+            if exponent_type != T_MATH_INT:
+                iff(negative)
+                e_call_nr1(rt("__negative_integer_power"), e_daddr(loc_data(nodes[n].pos)), -1)
+                endc()
+            if fixed_base and constant >= -1 and constant <= 1 and (constant >= 0 or types[exact_representation(ntype(int(nodes[n].a)))].sign):
+                if constant == 1: return [e_iconst(1)]
+                if constant == 0: return [zero]
+                return [e_bin(.sub, VI, e_iconst(1), e_bin(.shl, VI, e_bin(.and_, VI, parity, e_iconst(1)), e_iconst(1)))]
+            result = exact_extend([e_iconst(1)], count)
+            base = exact_extend(a, count)
+            maximum = exact_shifts.get(n) ?? 0
+            bit = 1
+            loop bit <= maximum:
+                result = exact_select(e_bin(.and_, VI, exponent, e_iconst(bit)), exact_mul(result, base, count), result, count)
+                bit *= 2
+                if bit <= maximum: base = exact_mul(base, base, count)
+            return result
+        b = exact_value(int(nodes[n].b))
+        if op == .plus or op == .minus: return exact_add(a, b, count, op == .minus)
+        if op == .star: return exact_mul(a, b, count)
+        if op == .slash or op == .percent:
+            (known, divisor) = integer_constant(int(nodes[n].b))
+            if dewy_at(nodes[n].pos) and known and divisor > 0 and divisor & (divisor - 1) == 0:
+                if op == .percent: return [e_bin(.and_, VI, a[0], e_iconst(divisor - 1))]
+                shift = 0
+                loop divisor > 1: divisor /= 2; shift += 1
+                return exact_extend(exact_shift_literal(a, shift, max(count, a.len()), true), count)
+            if known and divisor > 0 and (positive_bound(int(nodes[n].a), true) >= 0 or a.len() == 1 and (exact_range_flags(int(nodes[n].a)) & 1 != 0)):
+                return [e_bin((if op == .percent: Op.remu else: Op.divu), VI, a[0], b[0])]
+            work = max(count, max(a.len(), b.len()))
+            return exact_extend(exact_div(n, a, b, work, op == .percent), count)
+        if op == .amp or op == .pipe or op == .caret:
+            a = exact_extend(a, count); b = exact_extend(b, count)
+            out: int[]
+            loop i in [0..count): out.push(e_bin(int_op(op, true), VI, a[i], b[i]))
+            return out
+        return [exact_compare(op, a, b)]
+    if k == .coalesce:
+        a = int(nodes[n].a)
+        ot = prune(ntype(a))
+        inner = int(types[ot].elem)
+        pa = place_addr(gen_place(a, false), ot)
+        out: int[]
+        loop i in [0..count): out.push(vreg(VI))
+        iff(opt_has(pa, inner))
+        word = opt_value(pa, inner)
+        words = [word]
+        t = exact_representation(inner)
+        if not types[t].sign and types[t].bits == 64: words.push(e_iconst(0))
+        words = exact_extend(words, count)
+        loop i in [0..count): e_mov(out[i], words[i])
+        els()
+        enter_cond()
+        words = exact_extend(exact_value(int(nodes[n].b)), count)
+        loop i in [0..count): e_mov(out[i], words[i])
+        leave_cond()
+        endc()
+        return out
+    if k == .intrinsic and nodes[n].aux == i32(int(IN.fixed_abs)):
+        a = exact_value(kid(n, 0))
+        return exact_select(e_bin(.lts, VI, a[a.len() - 1], e_iconst(0)), exact_neg(a, count), a, count)
+    if k == .unary: return exact_neg(exact_value(int(nodes[n].a)), count)
+    if k == .conv or k == .exprstmt: return exact_value(int(nodes[n].a))
+    if k == .iflet or k == .match_:
+        out: int[]
+        loop i in [0..count): out.push(vreg(VI))
+        bodies: int[]
+        if k == .iflet: bodies = [int(nodes[n].b), int(nodes[n].c)]
+        else:
+            loop arm in kids(n): bodies.push(int(nodes[arm].b))
+        loop body in bodies: exact_join_blocks[body] = out
+        if k == .iflet: gen_iflet(n, ntype(n))
+        else: gen_match(n, true)
+        loop body in bodies: exact_join_blocks.remove(body)
+        return out
+    if k == .if_:
+        condition = gen_expr(int(nodes[n].a)).v
+        out: int[]
+        loop i in [0..count): out.push(vreg(VI))
+        iff(condition)
+        enter_cond()
+        yes = exact_extend(exact_value(int(nodes[n].b)), count)
+        loop i in [0..count): e_mov(out[i], yes[i])
+        leave_cond()
+        els()
+        enter_cond()
+        no = exact_extend(exact_value(int(nodes[n].c)), count)
+        loop i in [0..count): e_mov(out[i], no[i])
+        leave_cond()
+        endc()
+        return out
+    fatal(nodes[n].pos, "exact fixed-width value is not implemented for this control")
+    [e_iconst(0)]
+
+# Small pure arithmetic trees use native flags and share one cold exact path.
+# Leaves are evaluated once before either path. The bounded plan visits at most
+# 16 nodes; the saved leaf index exists only while emitting its exact fallback.
+exact_chain_active = false
+exact_chain_saved: {int: int} = {}
+
+exact_chain_leaf = (n: int, depth: int = 0) -> bool:
+    if depth > 4: return false
+    k = nodes[n].kind
+    if k == .ident: return nodes[n].aux == i32(int(SK.local))
+    if k == .int_lit: return true
+    if k == .conv and (nodes[n].aux == i32(int(CV.none_)) or nodes[n].aux == i32(int(CV.int_))):
+        return exact_chain_leaf(int(nodes[n].a), depth + 1)
+    if k == .index and nodes[n].aux == 0:
+        return exact_chain_leaf(int(nodes[n].a), depth + 1) and exact_chain_leaf(int(nodes[n].b), depth + 1)
+    false
+
+exact_chain_plan = (n: int, plan: mut int[]) -> bool:
+    if plan.len() >= 16: return false
+    k = nodes[n].kind
+    if not exact_has_node(n):
+        if not exact_chain_leaf(n): return false
+        if exact_bits(n) > 64: return false
+        plan.push(n)
+        return true
+    if k != .binary or nodes[n].aux != 0: return false
+    op = nodes[n].op as Tok
+    if op != .plus and op != .minus and op != .star: return false
+    if not exact_chain_plan(int(nodes[n].a), plan) or not exact_chain_plan(int(nodes[n].b), plan): return false
+    plan.push(n)
+    true
+
+# For c*x+d, check the exact preimage of the destination interval once. This
+# includes cancellation at the endpoints and lets constant multiplication use
+# LEA instead of a flag-producing multiply. Constants outside this cheap host
+# calculation keep the general exact path.
+exact_affine_store = (n: int) -> int:
+    source = int(nodes[n].a)
+    if nodes[source].kind != .binary or nodes[source].aux != 0: return -1
+    op = nodes[source].op as Tok
+    if op != .plus and op != .minus: return -1
+    known, offset = integer_constant(int(nodes[source].b))
+    if not known or offset < -2147483647 or offset > 2147483647: return -1
+    if op == .minus: offset = -offset
+    product = int(nodes[source].a)
+    if nodes[product].kind != .binary or nodes[product].op != i32(int(Tok.star)) or nodes[product].aux != 0 or not exact_has_node(product): return -1
+    leaf = int(nodes[product].a)
+    fixed, scale = integer_constant(int(nodes[product].b))
+    if not fixed:
+        fixed, scale = integer_constant(leaf)
+        leaf = int(nodes[product].b)
+    if not fixed or scale < 2 or scale > 2147483647 or exact_has_node(leaf) or exact_bits(leaf) > 64 or not exact_chain_leaf(leaf): return -1
+    low_rest = FACT_MIN % scale - offset
+    high_rest = FACT_MAX % scale - offset
+    low = FACT_MIN / scale + low_rest / scale + int(low_rest % scale > 0)
+    high = FACT_MAX / scale + high_rest / scale - int(high_rest % scale < 0)
+    value = exact_low_word(leaf)
+    lower, upper = eg_bound(leaf)
+    if lower >= low:
+        if upper > high: math_int_guard(e_bin(.gts, VI, value, e_iconst(high)))
+    else if upper <= high: math_int_guard(e_bin(.lts, VI, value, e_iconst(low)))
+    else:
+        distance = e_bin(.sub, VI, value, e_iconst(low))
+        math_int_guard(e_bin(.gtu, VI, distance, e_iconst(int(u64(high) - u64(low)))))
+    scaled = e_bin(.mul, VI, value, e_iconst(scale))
+    e_bin(.add, VI, scaled, e_iconst(offset))
+
+exact_chain_store = (n: int) -> int:
+    if target_wasm or target_arm64 or exact_chain_active: return -1
+    source = int(nodes[n].a)
+    plan: int[]
+    if not exact_chain_plan(source, plan): return -1
+    operations = 0
+    multiplies = 0
+    loop p in plan:
+        if exact_has_node(p):
+            operations += 1
+            if nodes[p].op == i32(int(Tok.star)): multiplies += 1
+    if operations < 2 or multiplies == 0: return -1
+    values: {int: int} = {}
+    exact_chain_saved = {}
+    loop p in plan:
+        if not exact_has_node(p):
+            value = freeze_scalar(gen_expr(p).v, ntype(p))
+            exact_chain_saved[p] = value
+            values[p] = value
+    result = vreg(VI)
+    e_block()
+    e_block()
+    loop p in plan:
+        if not exact_has_node(p): continue
+        op = nodes[p].op as Tok
+        a = values[int(nodes[p].a)]; b = values[int(nodes[p].b)]
+        value = e_bin((if op == .plus: Op.add else if op == .minus: Op.sub else: Op.mul), VI, a, b)
+        overflow = e_bin((if op == .plus: Op.overflow_add else if op == .minus: Op.overflow_sub else: Op.overflow_mul), VI, a, b)
+        e_brif(overflow, 0)
+        values[p] = value
+    e_mov(result, values[source])
+    e_br(1)
+    e_end()
+    cold = ir_cold
+    ir_cold = true
+    exact_chain_active = true
+    words = exact_value(source)
+    exact_chain_active = false
+    sign = e_bin(.shrs, VI, words[0], e_iconst(63))
+    bad = e_iconst(0)
+    loop i in [1..words.len()): bad = e_bin(.or_, VI, bad, e_bin(.ne, VI, words[i], sign))
+    math_int_guard(bad)
+    e_mov(result, words[0])
+    ir_cold = cold
+    e_end()
+    exact_chain_saved = {}
+    result
+
+exact_gen_store = (n: int) -> Val:
+    if exact_loop_fast: return gen_expr(int(nodes[n].a))
+    if exact_map_active and exact_map_stores.has(n):
+        exact_loop_fast = true
+        value = gen_expr(int(nodes[n].a))
+        exact_loop_fast = false
+        return value
+    t = exact_representation(ntype(n))
+    source = int(nodes[n].a)
+    proven = exact_proved(n)
+    if not proven:
+        bound = positive_bound(source, true)
+        proven = bound >= 0 and sa_fits(bound, t)
+    if not proven and t == T_INT and eg_fits(source): proven = true
+    if proven and types[t].bits <= 64: return V(exact_low_word(source), false)
+    if not proven and not target_wasm and not target_arm64 and types[t].bits == 32 and nodes[source].kind == .binary:
+        op = nodes[source].op as Tok
+        a = int(nodes[source].a); b = int(nodes[source].b)
+        aw = exact_type_width(a); bw = exact_type_width(b)
+        signed = types[t].sign
+        fits = aw > 0 and bw > 0 and (if signed: aw / 2 <= 32 and bw / 2 <= 32 else: aw & bw & 1 != 0 and aw / 2 <= 33 and bw / 2 <= 33)
+        if fits and (op == .plus or op == .minus or op == .star):
+            av = exact_low_word(a); bv = exact_low_word(b)
+            result = vreg(VI)
+            checked = if op == .plus: Op.checked_add else if op == .minus: Op.checked_sub else: Op.checked_mul
+            emit(checked, VI, result, av, bv, 32 | int(not signed), rt("__int_overflow"))
+            return V(result, false)
+    # Negation has the same single-word overflow obligation as 0 - operand.
+    # Keep a wide intermediate when the operand itself can exceed one word.
+    if types[t].bits == 64 and types[t].sign and nodes[source].kind == .unary and nodes[source].op == i32(int(Tok.minus)):
+        operand = int(nodes[source].a)
+        if exact_bits(operand) <= 64:
+            value = exact_low_word(operand)
+            if proven: return V(e_un(.neg, VI, value), false)
+            result = vreg(VI)
+            emit(.checked_sub, VI, result, e_iconst(0), value, 0, rt("__int_overflow"))
+            return V(result, false)
+    # At an immediate signed-word store, native overflow flags implement the
+    # narrowing directly. Intermediates that escape this store still widen.
+    if types[t].bits == 64 and types[t].sign and nodes[source].kind == .binary:
+        op = nodes[source].op as Tok
+        a = int(nodes[source].a); b = int(nodes[source].b)
+        if (op == .plus or op == .minus or op == .star) and exact_bits(a) <= 64 and exact_bits(b) <= 64:
+            av = exact_low_word(a); bv = exact_low_word(b)
+            if proven:
+                return V(e_bin((if op == .plus: Op.add else if op == .minus: Op.sub else: Op.mul), VI, av, bv), false)
+            result = vreg(VI)
+            checked = if op == .plus: Op.checked_add else if op == .minus: Op.checked_sub else: Op.checked_mul
+            emit(checked, VI, result, av, bv, 0, rt("__int_overflow"))
+            return V(result, false)
+    if types[t].bits == 64 and not types[t].sign and nodes[source].kind == .binary:
+        op = nodes[source].op as Tok
+        a = int(nodes[source].a); b = int(nodes[source].b)
+        aw = exact_type_width(a); bw = exact_type_width(b)
+        if (op == .plus or op == .minus or op == .star) and aw > 0 and bw > 0 and aw & bw & 1 != 0 and aw / 2 <= 65 and bw / 2 <= 65:
+            av = exact_low_word(a); bv = exact_low_word(b)
+            if proven: return V(e_bin((if op == .plus: Op.add else if op == .minus: Op.sub else: Op.mul), VI, av, bv), false)
+            result = vreg(VI)
+            checked = if op == .plus: Op.checked_add else if op == .minus: Op.checked_sub else: Op.checked_mul
+            emit(checked, VI, result, av, bv, 1, rt("__int_overflow"))
+            return V(result, false)
+    if not proven and types[t].bits == 64 and types[t].sign:
+        affine = exact_affine_store(n)
+        if affine >= 0: return V(affine, false)
+        fast = exact_chain_store(n)
+        if fast >= 0: return V(fast, false)
+    words = exact_value(source)
+    if not (proven):
+        normalized = norm(words[0], t)
+        bad = e_bin(.ne, VI, normalized, words[0])
+        sign = if types[t].sign: e_bin(.shrs, VI, normalized, e_iconst(63)) else: e_iconst(0)
+        loop i in [1..words.len()): bad = e_bin(.or_, VI, bad, e_bin(.ne, VI, words[i], sign))
+        # A signed single-word result stored unsigned must be nonnegative.
+        if not types[t].sign and words.len() == 1: bad = e_bin(.or_, VI, bad, e_bin(.lts, VI, words[0], e_iconst(0)))
+        math_int_guard(bad)
+    V(words[0], false)
+
+# Indexed facts: width, plus nonnegative/no-MIN/seen bits. One allocation per
+# demanded graph and O(1) joins/lookups; no hash work per expression visit.
+exact_ranges: int[]
+exact_range_meta: u8[]
+exact_range_flags = (n: int) -> int:
+    if n < 0 or n >= exact_range_meta.len(): return 0
+    int(exact_range_meta[n])
+exact_value_fact = (n: int, value: int, s: FactState):
+    if not s.live: return
+    if n >= exact_ranges.len():
+        exact_ranges.resize(max(n + 1, nodes.len()))
+        exact_range_meta.resize(exact_ranges.len())
+    if value == 0 or exact_representation(ntype(n)) == T_U64:
+        exact_ranges[n] = -1
+        exact_range_meta[n] = 4
+        return
+    b = fact_bound(s, value)
+    flags = (if not b.wide and b.lo >= 0: 1 else: 0) | (if not b.wide and b.lo > FACT_MIN: 2 else: 0)
+    old = int(exact_range_meta[n])
+    if old & 4 != 0: flags &= old
+    exact_range_meta[n] = u8(flags | 4)
+    if b.wide or b.reason == .unsupported:
+        exact_ranges[n] = -1
+        return
+    if exact_ranges[n] < 0: return
+    # Count the non-sign bits, with at most six tests per endpoint.
+    magnitude = max((if b.lo < 0: -(b.lo + 1) else: b.lo), (if b.hi < 0: -(b.hi + 1) else: b.hi))
+    width = 1
+    loop shift in [32, 16, 8, 4, 2, 1]:
+        if magnitude >> shift != 0:
+            magnitude = magnitude >> shift
+            width += shift
+    if magnitude != 0: width += 1
+    exact_ranges[n] = max(exact_ranges[n], width)
+
+exact_gen_policy = (n: int) -> Val:
+    a = exact_value(int(nodes[n].a))
+    t = exact_representation(ntype(n))
+    if nodes[n].aux == i32(int(CV.wrap_int)): return V(norm(a[0], t), false)
+    bits = int(types[t].bits)
+    hi = if bits == 64: -1 else: (1 << bits) - 1
+    lo = 0
+    if types[t].sign:
+        hi = int(u64(hi) >> 1)
+        lo = -hi - 1
+    high = if not types[t].sign and bits == 64: [e_iconst(hi), e_iconst(0)] else: [e_iconst(hi)]
+    out = exact_select(exact_compare(.lt, a, [e_iconst(lo)]), [e_iconst(lo)], a, max(a.len(), high.len()))
+    out = exact_select(exact_compare(.gt, a, high), high, out, out.len())
+    V(out[0], false)
+
+exact_unsigned_fact = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
+    x = fact_bound(s, a); y = fact_bound(s, b)
+    if x.wide or y.wide: return fact_unmodeled(s, n, .unsupported)
+    m = u64(18446744073709551615)
+    xl = u64(x.lo xor FACT_MIN); xh = u64(x.hi xor FACT_MIN)
+    yl = u64(y.lo xor FACT_MIN); yh = u64(y.hi xor FACT_MIN)
+    lo = u64(0); hi = u64(0)
+    if op == .plus:
+        if xh > m - yh:
+            xh = u64(fact_relational(s, a, true) xor FACT_MIN)
+        if xh > m - yh:
+            yh = u64(fact_relational(s, b, true) xor FACT_MIN)
+        if xh > m - yh:
+            return fact_unmodeled(s, n, .unsupported)
+        lo = xl + yl; hi = xh + yh
+    else if op == .minus:
+        if not (xl >= yh or fact_compare(s, .ge, a, b) == 1):
+            return fact_unmodeled(s, n, .unsupported)
+        lo = if xl >= yh: xl - yh else: u64(0)
+        hi = if xh >= yl: xh - yl else: u64(0)
+    else if op == .star:
+        if xh != 0 and yh > m / xh:
+            return fact_unmodeled(s, n, .unsupported)
+        lo = xl * yl; hi = xh * yh
+    else:
+        return fact_unmodeled(s, n, .unsupported)
+    v = fact_new(s, FactBound(int(lo) xor FACT_MIN, int(hi) xor FACT_MIN), FactTerm(type = T_U64))
+    small = u64(1) << u64(62)
+    if (op == .plus or op == .minus) and yl == yh and yl < small:
+        d = if op == .plus: int(yl) else: -int(yl)
+        fact_difference(s, v, a, d)
+        fact_difference(s, a, v, -d)
+    if op == .plus and xl == xh and xl < small:
+        fact_difference(s, v, b, int(xl))
+        fact_difference(s, b, v, -int(xl))
+    v
+
+
+# Before the boundary walk, identify conversions whose source is still an
+# arithmetic value. Its declared storage type is not an intermediate bound.
+exact_potential = (n: int) -> bool:
+    if n <= 0: return false
+    if exact_operation(n): return true
+    k = nodes[n].kind
+    if k == .conv and (nodes[n].aux == i32(int(CV.int_)) or nodes[n].aux == i32(int(CV.none_))): return exact_potential(int(nodes[n].a))
+    if k == .if_ or k == .iflet: return exact_potential(int(nodes[n].b)) or exact_potential(int(nodes[n].c))
+    if k == .coalesce: return exact_potential(int(nodes[n].b))
+    if k == .match_:
+        loop arm in kids(n):
+            if exact_potential(int(nodes[arm].b)): return true
+    if k == .block and nodes[n].aux != 0: return exact_potential(block_value(n))
+    if k == .exprstmt: return exact_potential(int(nodes[n].a))
+    false
+
+# A deliberate conversion to mathematical int is an allocation boundary;
+# evaluating the fixed-width source above it never allocated a bigint.
+exact_gen_math = (n: int) -> Val:
+    words = exact_value(n)
+    out = math_word(words[words.len() - 1])
+    i = words.len() - 2
+    loop i >= 0:
+        borrow(out, T_MATH_INT)
+        shifted = math_shift(.shl, out.v, e_iconst(64), true)
+        borrow(shifted, T_MATH_INT)
+        low = math_call("__mi_unsigned", [words[i]])
+        borrow(low, T_MATH_INT)
+        out = math_binary(.plus, shifted.v, low.v)
+        i -= 1
+    out
+
+# Round a static multiword integer directly to the destination float precision.
+# Reduction retains 63 bits plus a sticky bit (round-to-odd), so the hardware
+# conversion performs the only rounding. No mathematical-int allocation.
+exact_gen_float = (n: int, to: int) -> Val:
+    # Rounding a signed word commutes with positive power-of-two scaling.
+    # Scale is finite in either format; zero retains its positive sign. This
+    # avoids materializing a double word and calling its rounding helper.
+    if nodes[n].kind == .binary and nodes[n].op == i32(int(Tok.star)):
+        a = int(nodes[n].a); b = int(nodes[n].b)
+        known, scale = integer_constant(b)
+        if known and scale > 0 and scale & (scale - 1) == 0 and exact_lower_bits(a) <= 64:
+            ft = vt_of(to)
+            return V(e_bin(.fmul, ft, e_un(.i2f, ft, exact_low_word(a)), e_fconst(f64(scale), ft)), false)
+    source = exact_value(n)
+    if source.len() == 1: return V(e_un(.i2f, vt_of(to), source[0]), false)
+    if source.len() == 2:
+        helper = if to == T_F32: "__exact_i128_f32" else: "__exact_i128_f64"
+        return V(e_call(rt(helper), source, vt_of(to)), false)
+    size = source.len()
+    negative = e_bin(.lts, VI, source[size - 1], e_iconst(0))
+    magnitude = exact_select(negative, exact_neg(source, size), source, size)
+    words: int[]
+    loop word in magnitude:
+        saved = vreg(VI); e_mov(saved, word); words.push(saved)
+    shift = vreg(VI); e_mov(shift, e_iconst(0))
+    sticky = vreg(VI); e_mov(sticky, e_iconst(0))
+    step = 1
+    loop step < size * 64: step *= 2
+    loop step > 0:
+        cut = 62 + step
+        if cut < size * 64:
+            high = e_bin(.shru, VI, words[cut / 64], e_iconst(cut % 64))
+            loop i in [cut / 64 + 1..size): high = e_bin(.or_, VI, high, words[i])
+            iff(e_bin(.ne, VI, high, e_iconst(0)))
+            lost = e_iconst(0)
+            loop i in [0..step / 64): lost = e_bin(.or_, VI, lost, words[i])
+            if step % 64 != 0: lost = e_bin(.or_, VI, lost, e_bin(.and_, VI, words[step / 64], e_iconst((1 << (step % 64)) - 1)))
+            e_mov(sticky, e_bin(.or_, VI, sticky, lost))
+            next: int[]
+            loop i in [0..size):
+                at = i + step / 64
+                word = if at < size: words[at] else: e_iconst(0)
+                if step % 64 != 0:
+                    word = e_bin(.shru, VI, word, e_iconst(step % 64))
+                    if at + 1 < size: word = e_bin(.or_, VI, word, e_bin(.shl, VI, words[at + 1], e_iconst(64 - step % 64)))
+                saved = vreg(VI); e_mov(saved, word); next.push(saved)
+            loop i in [0..size): e_mov(words[i], next[i])
+            e_mov(shift, e_addi(shift, step))
+            endc()
+        step /= 2
+    significand = e_bin(.or_, VI, words[0], e_bin(.ne, VI, sticky, e_iconst(0)))
+    precision = vt_of(to)
+    bias = if to == T_F32: 127 else: 1023
+    fraction = if to == T_F32: 23 else: 52
+    exponent = vreg(VI); e_mov(exponent, e_addi(shift, bias))
+    iff(e_bin(.gts, VI, exponent, e_iconst(2 * bias + 1)))
+    e_mov(exponent, e_iconst(2 * bias + 1))
+    endc()
+    scale = e_un(.bits2f, precision, e_bin(.shl, VI, exponent, e_iconst(fraction)))
+    result = vreg(precision)
+    e_mov(result, e_bin(.fmul, precision, e_un(.u2f, precision, significand), scale))
+    iff(negative)
+    e_mov(result, e_un(.fneg, precision, result))
+    endc()
+    V(result, false)
+
+exact_reset = ():
+    eg_lo = []; eg_hi = []; eg_owner = []; eg_version = []; eg_stack = []; eg_demanded = []
+    exact_map_functions = []
+    exact_progress_assignments = []; exact_write_heads = []; exact_write_values = []; exact_write_next = []; exact_write_targets = []; exact_write_seen = []; exact_progress_opaque = []
+    exact_dependency_seen = []; exact_dependency_epoch = 0
+    positive_collecting_writes = false
+    positive_cache = []; positive_stamp = []; positive_epoch += 1
+    exact_measure_on = env("DEWY_NOWRAP_MEASURE") != none
+    exact_measure_sites = {}
+    exact_owners = {}
+    exact_full_owners = {}
+    exact_candidate_heads = []; exact_candidate_nodes = []; exact_candidate_next = []
+    exact_float_purity = []
+    exact_lower_sites = []; exact_collect_writes = false
+    exact_demands = {}
+    exact_proof_demands = {}
+    exact_progress_math = {}
+    exact_initializers = []
+    exact_iteration_sources = []
+    exact_nodes = []
+    exact_stores = {}
+    exact_widths = []
+    exact_type_widths = []
+    exact_shifts = {}
+    exact_count_nodes = []
+    exact_count_bounds = {}
+    exact_marks = []
+    exact_ranges = []
+    exact_range_meta = []
+    exact_join_blocks = {}
+
+# Optional measurement consumes the same demand/boundary index. It does not
+# force bodies or facts for the rest of the program. Explicit-policy bodies
+# are indexed only when requested; ordinary compilation pays no reporting walk.
+exact_measure_candidate = (n: int) -> bool:
+    k = nodes[n].kind
+    if k == .conv: return is_int(ntype(n)) and ntype(n) != T_MATH_INT
+    if k == .assign: return nodes[n].op != i32(int(Tok.assign))
+    if k != .binary and k != .unary: return false
+    t = exact_representation(ntype(n))
+    if not is_int(t) or t == T_MATH_INT: return false
+    op = nodes[n].op as Tok
+    op == .plus or op == .minus or op == .star or op == .shl or op == .starstar
+
+# Follow erased conversions and value arms to the operation stored at a
+# boundary, including implicit returns. Reporting uses node keys to deduplicate
+# shared expressions and does not alter ordinary demand or fact transfer.
+exact_measure_boundary = (n: int, owner: int):
+    if n <= 0: return
+    k = nodes[n].kind
+    exact_measure_visit(n, owner, true)
+    if k == .conv and (nodes[n].aux == i32(int(CV.none_)) or nodes[n].aux == i32(int(CV.int_))) or k == .exprstmt:
+        exact_measure_boundary(int(nodes[n].a), owner)
+    else if k == .block and nodes[n].aux != 0: exact_measure_boundary(block_value(n), owner)
+    else if k == .if_ or k == .iflet:
+        exact_measure_boundary(int(nodes[n].b), owner)
+        exact_measure_boundary(int(nodes[n].c), owner)
+    else if k == .match_:
+        loop arm in kids(n): exact_measure_boundary(int(nodes[arm].b), owner)
+
+exact_measure_visit = (n: int, owner: int, store: bool):
+    if not exact_measure_candidate(n): return
+    k = nodes[n].kind
+    t = ntype(n)
+    if k == .assign: t = ntype(int(nodes[n].a))
+    if not is_int(t) or t == T_MATH_INT: return
+    if k == .conv:
+        if nodes[n].aux == i32(int(CV.wrap_int)) or nodes[n].aux == i32(int(CV.saturate_int)):
+            exact_measure_sites[n] = ExactMeasure(owner, t, "explicit")
+    else if (store or k == .assign) and int_policy(t) != 0:
+        exact_measure_sites[n] = ExactMeasure(owner, t, "wrap")
+
+exact_measure_report = ():
+    order: int[]
+    loop n, _ in exact_measure_sites: order.push(n)
+    order.sort()
+    loop n in order:
+        site = exact_measure_sites[n]
+        source = if exact_has_store(n): int(nodes[n].a) else: n
+        op = nodes[source].op as Tok
+        f = site.owner
+        fname = if f > 0 and fns[f].decl != 0: name_of(int(nodes[int(fns[f].decl)].name)) else: "?"
+        status = if site.category == "runtime-check": "FAIL" else: "ok"
+        eprint("NOWRAP\t{pos_str(nodes[n].pos)}\t{status}\t{site.category}\t{op}\t{type_str(site.type, true)}\tstore\t{site.lo}\t{site.hi}\t{fname}")
+
+# Mixed signed/unsigned comparisons must not compare biased and plain bounds.
+# Rebase small unsigned intervals; larger ones exceed this interval engine.
+exact_fact_signed = (s: mut FactState, value: int) -> int:
+    b = fact_bound(s, value)
+    if b.wide or b.hi >= 0: return fact_new(s, FactBound(wide = true), FactTerm(type = T_INT))
+    b.lo = b.lo xor FACT_MIN
+    b.hi = b.hi xor FACT_MIN
+    fact_new(s, b, FactTerm(type = T_INT))
+
+exact_match_literals = (n: int) -> bool:
+    loop arm in kids(n):
+        loop pattern in kids(arm):
+            if nodes[pattern].kind != .plit and nodes[pattern].kind != .pwild: return false
+    true
+
+# Reuse the existing write-index induction proof for fixed counters as well as
+# mathematical ones. Only a demanded exact function's assigned scalar with a
+# nonnegative constant initializer requests it; all writes must fit the proof.
+exact_counter_bound = (s: int):
+    l = int(nodes[s].sym)
+    if l <= 0 or prune(int(locals[l].type)) != T_INT or not exact_owners.has(cur_fn): return
+    flags = int(locals[l].flags)
+    if flags & LF_ASSIGNED == 0 or flags & (LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_QUIET | LF_EXPOSED | LF_SOAELEM | LF_ELEMALIAS) != 0: return
+    init = int(nodes[s].b)
+    if init <= 0 or nodes[init].kind != .int_lit or has_flag(init, NF_U64) or nodes[init].ival < 0: return
+    math_prepare_writes()
+    writes = math_writes.get(l) ?? []
+    if writes.len() == 0: return
+    limit = math_length_counter_limit(s, writes)
+    if limit >= 0: math_word_limits[l] = limit

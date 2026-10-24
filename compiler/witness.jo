@@ -131,7 +131,6 @@ wit_reason = (b: FactBound) -> str:
     if b.reason == .join: return "a predecessor lacks the required evidence"
     if b.reason == .loop_: return "loop may change the tested value"
     if b.reason == .unsupported: return "unsupported symbolic operation"
-    if b.reason == .wrap: return "possible fixed-width wrap"
     if b.reason == .budget: return "fact budget exhausted"
     "missing scalar bound"
 
@@ -146,7 +145,6 @@ wit_cause = (b: FactBound, n: int):
     else if b.reason == .join: wit_note(nodes[w].pos, "a path into this {what} lacks the evidence")
     else if b.reason == .loop_: wit_note(nodes[w].pos, "this loop may change the value")
     else if b.reason == .unsupported: wit_note(nodes[w].pos, "this operation is outside the fact language")
-    else if b.reason == .wrap: wit_note(nodes[w].pos, "this fixed-width arithmetic may wrap")
     else if b.reason == .budget and (nodes[w].kind == .while_ or nodes[w].kind == .for_): wit_note(nodes[w].pos, "the loop analysis budget ran out at this loop; what it changes is unknown")
     else if b.reason == .budget: wit_note(nodes[w].pos, "the fact budget ran out here")
 
@@ -338,7 +336,7 @@ wit_comparison = (c: int, paths: FactPaths, refuted: bool) -> (str, str):
             a = wit_side(term.a, int(nodes[c].a))
             b = wit_side(term.b, int(nodes[c].b))
             relation = wit_relation_text(term.op, a, b)
-            if refuted or reason.reason != .unsupported and reason.reason != .wrap and reason.reason != .budget: missing = wit_relation((if paths.entry.live: paths.entry else: s), s, term.op, a, b, refuted)
+            if refuted or reason.reason != .unsupported and reason.reason != .budget: missing = wit_relation((if paths.entry.live: paths.entry else: s), s, term.op, a, b, refuted)
     (relation, missing)
 
 struct WitLeaf:
@@ -451,7 +449,7 @@ wit_index = (n: int, s: mut FactState, index: int, length: int, lo: int, hi: int
         wit_fail(nodes[n].pos, "{read} is not in bounds")
         return
     b = fact_bound(s, index)
-    if b.reason == .unsupported or b.reason == .wrap or b.reason == .budget or b.reason == .callee:
+    if b.reason == .unsupported or b.reason == .budget or b.reason == .callee:
         wit_unknown(n, b, "{read} is in bounds", 0, relation)
         return
     if lo != 1: wit_relation(s, s, .ge, i, zero, false, "lower bound")
@@ -494,7 +492,7 @@ wit_operation = (n: int, s: mut FactState, op: Tok, a: WitSide, b: WitSide, c: i
         wit_fail(nodes[n].pos, refuted)
         return
     bound = fact_bound(s, a.value)
-    if bound.reason == .unsupported or bound.reason == .wrap or bound.reason == .budget or bound.reason == .callee:
+    if bound.reason == .unsupported or bound.reason == .budget or bound.reason == .callee:
         wit_unknown(n, bound, what, 0, relation)
         return
     wit_relation(s, s, op, a, b, false, "lower bound")

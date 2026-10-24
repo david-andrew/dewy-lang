@@ -10,6 +10,7 @@ use 'expr.jo'
 use 'util.jo'
 use 'lower.jo'
 use 'math_comptime.jo'
+use 'exact.jo'
 
 struct CTValue:
     type: int
@@ -81,25 +82,53 @@ ct_zero = (t0: int) -> int:
         loop i in [0..fixed_len(t)): v.items.push(ct_zero(telem(t)))
     ct_add(v)
 
-ct_equal = (a: int, b: int) -> bool:
+ct_equal = (a: int, b: int, e: int = 0) -> bool:
     x = ct_values[a]
     y = ct_values[b]
+    if is_int(x.type) and is_int(y.type) and (x.type == T_MATH_INT or y.type == T_MATH_INT) and (x.items.len() > 0 or y.items.len() > 0):
+        return ct_values[ct_math_binary(e, .eq, ct_exact_operand(a, e), ct_exact_operand(b, e))].i != 0
     if x.i != y.i or x.s != y.s or x.items.len() != y.items.len(): return false
     if is_float(x.type) and x.f != y.f: return false
     loop i in [0..x.items.len()):
-        if not ct_equal(x.items[i], y.items[i]): return false
+        if not ct_equal(x.items[i], y.items[i], e): return false
     true
+
+# The evaluator can use its compile-time mathematical representation; emitted
+# fixed-width code uses only statically sized machine words.
+ct_fixed_internal = 0
+
+ct_exact_operand = (v: int, e: int) -> int:
+    x = ct_values[v]
+    if x.type == T_MATH_INT: return v
+    if not types[x.type].sign and x.i < 0: return ct_math_unpack(ct_math_runtime("__mi_unsigned", [v], e))
+    ct_int(T_MATH_INT, x.i)
+
+ct_store = (v: int, t0: int, e: int) -> int:
+    t = representation_type(t0)
+    if ct_fixed_internal > 0 or v == 0 or not exact_type(t, nodes[e].pos): return v
+    x = ct_values[v]
+    if x.type != T_MATH_INT: return v
+    word = x.i
+    if x.items.len() > 0:
+        checked = ct_math_runtime((if types[t].sign: "__mi_signed" else: "__mi_to_unsigned"), [ct_math_rep(v)], e)
+        word = ct_values[checked].i
+    else if not types[t].sign and word < 0: ct_fail(e, "exact integer result does not fit {dt(t)}")
+    if int(types[t].bits) < 64 and not int_fits(word, t): ct_fail(e, "exact integer result does not fit {dt(t)}")
+    ct_int(t, word)
 
 ct_binary = (e: int, op: Tok, a: int, b: int, t: int) -> int:
     x = ct_values[a]
     y = ct_values[b]
+    if (op == .slash or op == .percent) and is_int(y.type) and y.i == 0 and y.items.len() == 0: ct_fail(e, "division by zero")
+    if ct_fixed_internal == 0 and is_int(x.type) and is_int(y.type) and (exact_type(t, nodes[e].pos) or x.type == T_MATH_INT or y.type == T_MATH_INT) and int_policy(t) == 0:
+        return ct_math_binary(e, op, ct_exact_operand(a, e), ct_exact_operand(b, e))
     if x.type == T_MATH_INT and (x.items.len() > 0 or y.items.len() > 0): return ct_math_binary(e, op, a, b)
     if tkind(x.type) == .ptr:
         if tkind(t) != .ptr or (op != .plus and op != .minus): ct_fail(e, "pointer comparisons and host addresses are not allowed")
         x.i += (if op == .plus: y.i else: -y.i) * tsize(telem(x.type))
         return ct_add(x)
     if op == .eq or op == .ne:
-        eq = ct_equal(a, b)
+        eq = ct_equal(a, b, e)
         return ct_int(T_BOOL, int(if op == .eq: eq else: not eq))
     if tkind(x.type) == .str_:
         if op == .plus: return ct_add(CTValue(type = T_STR, s = x.s + y.s))
@@ -152,23 +181,13 @@ ct_binary = (e: int, op: Tok, a: int, b: int, t: int) -> int:
     p = x.i
     q = y.i
     r = 0
-    overflow = false
-    if op == .plus:
-        r = p + q
-        overflow = ((p xor r) & (q xor r)) < 0
-    else if op == .minus:
-        r = p - q
-        overflow = ((p xor q) & (p xor r)) < 0
-    else if op == .star:
-        r = p * q
-        if p != 0 and q != 0:
-            overflow = (p == -1 and q == -9223372036854775807 - 1) or (q == -1 and p == -9223372036854775807 - 1)
-            if not overflow: overflow = r / q != p
+    if op == .plus: r = p + q
+    else if op == .minus: r = p - q
+    else if op == .star: r = p * q
     else if op == .slash or op == .percent:
         if q == 0: ct_fail(e, "division by zero")
         if sg and p == -9223372036854775807 - 1 and q == -1:
             r = if op == .slash: p else: 0
-            overflow = op == .slash
         else if sg: r = if op == .slash: p / q else: p % q
         else: r = int(if op == .slash: u64(p) / u64(q) else: u64(p) % u64(q))
     else if op == .amp: r = p & q
@@ -180,9 +199,6 @@ ct_binary = (e: int, op: Tok, a: int, b: int, t: int) -> int:
         else if op == .shl: r = p << q
         else if sg: r = p >> q
         else: r = int(u64(p) >> q)
-        if t == T_MATH_INT and op == .shl:
-            if q < 0 or q >= 64: overflow = p != 0
-            else: overflow = (r >> q) != p
     else: ct_fail(e, "unsupported arithmetic operator")
     if nodes[e].kind == .binary and nodes[e].aux2 == -1 and sg and (op == .slash or op == .percent):
         if op == .slash and q == -1:
@@ -192,7 +208,6 @@ ct_binary = (e: int, op: Tok, a: int, b: int, t: int) -> int:
             if remainder != 0 and (remainder < 0) != (q < 0):
                 if op == .slash: r -= 1
                 else: r += q
-    if t == T_MATH_INT and overflow: return ct_math_binary(e, op, a, b)
     ct_int(t, r)
 
 ct_member = (e: int) -> int:
@@ -275,7 +290,7 @@ ct_call = (e: int) -> int:
             p = ct_place(kid(e, i))
             frame.refs[l] = ct_places.len()
             ct_places.push(p)
-        else: frame.values[l] = ct_expr(kid(e, i))
+        else: frame.values[l] = ct_store(ct_expr(kid(e, i)), int(locals[l].type), e)
         if ct_frames[ct_frame].signal != 0:
             ct_stack.pop()
             return ct_frames[ct_frame].result
@@ -284,6 +299,7 @@ ct_call = (e: int) -> int:
     ct_frame = ct_frames.len() - 1
     v = ct_block(int(fns[f].body))
     if ct_frames[ct_frame].signal == 1: v = ct_frames[ct_frame].result
+    v = ct_store(v, int(fns[f].ret), e)
     ct_frames.pop()
     ct_frame = saved
     ct_stack.pop()
@@ -293,6 +309,7 @@ ct_convert = (e: int, v: int) -> int:
     t = prune(ntype(e))
     x = ct_values[v]
     cv = nodes[e].aux as CV
+    if cv == .fixed_store: return ct_store(v, t, e)
     if cv == .math2big: return ct_math_runtime("__mi_big", [ct_math_rep(v)], e)
     if cv == .big2math: return ct_math_unpack(ct_math_runtime("__mi_pack", [v], e))
     if cv == .none_ and x.type == T_MATH_INT and math_rep_type(t): return ct_math_rep(v)
@@ -382,6 +399,10 @@ ct_convert = (e: int, v: int) -> int:
     ct_add(x)
 
 ct_intrinsic = (e: int) -> int:
+    if nodes[e].aux == i32(int(IN.fixed_abs)):
+        a = ct_exact_operand(ct_expr(kid(e, 0)), e)
+        if ct_values[ct_math_binary(e, .lt, a, ct_int(T_MATH_INT, 0))].i != 0: return ct_math_binary(e, .minus, ct_int(T_MATH_INT, 0), a)
+        return a
     id = nodes[e].aux as IN
     t = prune(ntype(e))
     if id == .static_assert: return 0
@@ -472,7 +493,7 @@ ct_pattern = (p: int, v: int) -> bool:
         if tkind(x.type) == .opt:
             if nodes[int(nodes[p].a)].kind == .none_lit: return x.i == 0
             return x.i != 0 and ct_pattern(p, x.items[0])
-        return ct_equal(v, ct_expr(int(nodes[p].a)))
+        return ct_equal(v, ct_expr(int(nodes[p].a)), p)
     if k == .prange:
         lo = ct_expr(int(nodes[p].a))
         hi = ct_expr(int(nodes[p].b))
@@ -527,7 +548,7 @@ ct_expr_impl = (e: int) -> int:
     if k == .array or k == .tuple:
         v = CTValue(type = t)
         loop child in kids(e):
-            v.items.push(ct_expr(child))
+            v.items.push(ct_store(ct_expr(child), ntype(child), e))
             if ct_frames[ct_frame].signal != 0: return ct_frames[ct_frame].result
         if nodes[e].b != 0:
             count = ct_values[ct_expr(int(nodes[e].b))].i
@@ -590,7 +611,7 @@ ct_expr_impl = (e: int) -> int:
                 loop i in [0..nkids(e)): order.push(i)
             loop i in order:
                 child = kid(e, i)
-                if child != 0: v.items[i] = ct_expr(child)
+                if child != 0: v.items[i] = ct_store(ct_expr(child), ntype(child), e)
                 else if nodes[e].aux == 2:
                     fi = int(structs[int(types[t].st)].fields) + i
                     v.items[i] = ct_zero(int(fields[fi].type))
@@ -701,7 +722,9 @@ ct_stmt = (s: int) -> int:
     k = nodes[s].kind
     if k == .vardecl:
         v = if nodes[s].b != 0: ct_expr(int(nodes[s].b)) else: ct_zero(int(locals[int(nodes[s].sym)].type))
-        if nkids(s) == 0: ct_frames[ct_frame].values[int(nodes[s].sym)] = v
+        if nkids(s) == 0:
+            value = ct_store(v, int(locals[int(nodes[s].sym)].type), s)
+            ct_frames[ct_frame].values[int(nodes[s].sym)] = value
         else:
             loop i in [0..nkids(s)):
                 if nodes[kid(s, i)].kind != .hole: ct_frames[ct_frame].values[int(nodes[kid(s, i)].sym)] = ct_values[v].items[i]
@@ -714,7 +737,7 @@ ct_stmt = (s: int) -> int:
         if nodes[s].op != i32(int(Tok.assign)):
             op = compound_op(int(nodes[s].op)) as Tok
             v = ct_binary(s, op, old, v, ntype(int(nodes[s].a)))
-        ct_write_place(p, v)
+        ct_write_place(p, ct_store(v, ntype(int(nodes[s].a)), s))
     else if k == .exprstmt: return ct_expr(int(nodes[s].a))
     else if k == .block: return ct_block(s)
     else if k == .if_ or k == .iflet: return ct_expr(s)

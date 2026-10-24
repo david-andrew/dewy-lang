@@ -6,7 +6,7 @@ output. It shares nothing with the compiler: wherever Dewy promises an
 independent value (let, assignment, arguments, captures, collection inserts)
 the oracle makes an eager deep copy instead of copy-on-write.
 
-Integers are mostly explicit `int64`/`uint64`, which wrap; the `checked` feature
+Fixed-width expressions compute exact integers; stores check their range. The `checked` feature
 adds unannotated arbitrary-precision `int`; fixed-width narrowing can fail (exit 101, or a
 compile-time error when provable). Conversions keep the value: `uint64(x)` stays only where
 every evaluation fits (a first oracle run decides); the rest keep the bits with
@@ -263,7 +263,7 @@ class Unary(Expr):
 
     def eval(self, m, env):
         x = m.eval(self.x, env)
-        return (not x) if self.op == 'not' else wrap(-x, self.ty)
+        return (not x) if self.op == 'not' else -x
 
 
 JUXT_NUMBERS = (I, U, F, INT)
@@ -325,7 +325,7 @@ class Bin(Expr):
         if op in ('<?', '>?', '<=?', '>=?'):
             return ordered(op, x, y)
         if op == 'in?':
-            return x in (y.items if isinstance(y, DSet) else y)
+            return store(x, self.left.ty) in (y.items if isinstance(y, DSet) else y)
         if self.ty == S:
             raise InvalidProgram('`+` never concatenates')
         if self.ty.kind == 'set':
@@ -348,7 +348,7 @@ class Bin(Expr):
                  '//': lambda: x // y, '%': lambda: x % y, '^': lambda: x ** y,
                  '<<': lambda: x << y, '>>': lambda: x >> y, 'and': lambda: x & y,
                  'or': lambda: x | y, 'xor': lambda: x ^ y}[op]()
-        return wrap(value, self.ty)
+        return value
 
 
 @dataclass(frozen=True)
@@ -461,7 +461,7 @@ class ArrayLit(Expr):
         return '[' + ' '.join(render(x, typed) for x in self.items) + ']'
 
     def eval(self, m, env):
-        return [copy.deepcopy(m.eval(x, env)) for x in self.items]
+        return [copy.deepcopy(store(m.eval(x, env), x.ty)) for x in self.items]
 
 
 @dataclass(frozen=True)
@@ -474,7 +474,7 @@ class MultiBlock(Expr):
         return '{' + ' '.join(render(x, typed) for x in self.items) + '}'
 
     def eval(self, m, env):
-        return [copy.deepcopy(m.eval(x, env)) for x in self.items]
+        return [copy.deepcopy(store(m.eval(x, env), x.ty)) for x in self.items]
 
 
 @dataclass(frozen=True)
@@ -493,7 +493,7 @@ class MultiIf(Expr):
 
     def eval(self, m, env):
         arm = self.then if m.eval(self.test, env) else (self.other or ())
-        return [copy.deepcopy(m.eval(x, env)) for x in arm]
+        return [copy.deepcopy(store(m.eval(x, env), x.ty)) for x in arm]
 
 
 @dataclass(frozen=True)
@@ -511,7 +511,7 @@ class MultiLit(Expr):
             if isinstance(x, (MultiBlock, MultiIf)):
                 out += m.eval(x, env)
             else:
-                out.append(copy.deepcopy(m.eval(x, env)))
+                out.append(copy.deepcopy(store(m.eval(x, env), x.ty)))
         return out
 
 
@@ -538,13 +538,10 @@ class Unpack(Stmt):
     use: str = ''        # 'max' or 'collect': what the held values are then passed to
 
     def render(self, typed=False):
-        # (no annotation gives the values a type: each literal spells its own, so the names
-        # unpacked hold the type they are declared with, not a bare literal's `int`)
-        # A value converted with a policy, `int64<overflow='wrap'>(x)`, has that policy's type,
-        # and so does arithmetic on it with literals: converted back, it is int64.
-        def item(x):
-            return f'{x.ty}({render(x)})' if x.ty == I and wraps(x) else render(x)
-        source = ('(' if self.group else '[') + ' '.join(item(x) for x in self.items) + (')' if self.group else ']')
+        # Patterns supply no destination type. Materialize the fixed-width
+        # stores modeled by run(), including when a count expression is int.
+        values = (f'int64({render(x, True)})' if x.ty == I else render(x, True) for x in self.items)
+        source = ('(' if self.group else '[') + ' '.join(values) + (')' if self.group else ']')
         lines = []
         if self.held:
             lines.append(f'let {self.held}={source}')
@@ -563,7 +560,7 @@ class Unpack(Stmt):
         return '\n'.join(lines)
 
     def run(self, m, env):
-        values = [copy.deepcopy(m.eval(x, env)) for x in self.items]
+        values = [copy.deepcopy(store(m.eval(x, env), x.ty)) for x in self.items]
         rest = next((i for i, n in enumerate(self.names) if n.startswith('...')), -1)
         after = len(self.names) - 1 - rest if rest >= 0 else 0
         for i, name in enumerate(self.names):
@@ -594,7 +591,7 @@ class RecLit(Expr):
         return f'{self.ty.name}[{body}]'
 
     def eval(self, m, env):
-        values = {n: copy.deepcopy(m.eval(e, env)) for n, e in self.items}
+        values = {n: copy.deepcopy(store(m.eval(e, env), dict(self.ty.args)[n])) for n, e in self.items}
         return Rec(self.ty.name, {n: values[n] for n, _ in self.ty.args})
 
 
@@ -609,8 +606,8 @@ class DictLit(Expr):
     def eval(self, m, env):
         result = {}
         for k, v in self.items:
-            key = m.eval(k, env)
-            result[key] = copy.deepcopy(m.eval(v, env))
+            key = store(m.eval(k, env), self.ty.args[0])
+            result[key] = copy.deepcopy(store(m.eval(v, env), self.ty.args[1]))
         return result
 
 
@@ -623,7 +620,7 @@ class SetLit(Expr):
         return 'set[' + ' '.join(render(x, typed) for x in self.items) + ']'
 
     def eval(self, m, env):
-        return DSet(m.eval(x, env) for x in self.items)
+        return DSet(store(m.eval(x, env), self.ty.args[0]) for x in self.items)
 
 
 @dataclass(frozen=True)
@@ -698,7 +695,7 @@ class Method(Expr):
 
     def eval(self, m, env):
         recv = m.eval(self.recv, env)
-        args = [m.eval(a, env) for a in self.args]
+        args = [store(m.eval(a, env), a.ty) for a in self.args]
         name = self.name
         if isinstance(recv, list):
             if name == 'push':
@@ -775,7 +772,7 @@ class Lambda(Expr):
         for name in sorted(free_names(self) - inner):
             if env.has(name):
                 captures[name] = env.place(name) if name in shared else copy.deepcopy(env.get(name, m))
-        return Closure(self.params, self.body, Scope(captures, None))
+        return Closure(self.params, self.body, Scope(captures, None), self.result)
 
 
 @dataclass(frozen=True)
@@ -787,7 +784,7 @@ class Interp(Expr):
         return '"' + ''.join(escape(p) if isinstance(p, str) else '{' + render(p) + '}' for p in self.parts) + '"'
 
     def eval(self, m, env):
-        return ''.join(p if isinstance(p, str) else show(m.eval(p, env)) for p in self.parts)
+        return ''.join(p if isinstance(p, str) else show(store(m.eval(p, env), p.ty)) for p in self.parts)
 
 
 @dataclass(frozen=True)
@@ -804,13 +801,13 @@ class Conv(Expr):
 
     def render(self, typed=False):
         if self.wrap:
-            return f"{self.ty}<overflow='wrap'>({render(self.x)})"
+            return f"{self.ty}({self.ty}<overflow='wrap'>({render(self.x)}))"
         return f'{self.ty}({render(self.x)})'
 
     def eval(self, m, env):
         value = m.eval(self.x, env)
         if self.ty == S:
-            return show(value)
+            return show(store(value, self.x.ty))
         if self.ty == F:
             return float(value)
         wrapped = wrap(value, self.ty)
@@ -1057,7 +1054,9 @@ class Program(Node):
         # (generated indexes, divisions and narrowings are not written to be
         # proven: a program opts into run-time checks, whose failures the
         # oracle predicts as exit 101)
-        parts = ['$runtime_checks', 'Item:type=[id:int64 tags:array<int64> label:string]', 'Bad:type=type of error & [code:int64]']
+        # Deliberate machine-limit overflows exercise ordinary obligations, not
+        # the default practical counter/array bounds.
+        parts = ['$runtime_checks', '$no_assumed_bounds', 'Item:type=[id:int64 tags:array<int64> label:string]', 'Bad:type=type of error & [code:int64]']
         parts += [render(f) for f in self.functions]
         parts.append('main=():>void=>{\n' + block(self.body) + '\n}')
         return '\n'.join(parts) + '\n'
@@ -1120,13 +1119,13 @@ class DSet:
 
 
 class Closure:
-    def __init__(self, params, body, scope):
-        self.params, self.body, self.scope = params, body, scope
+    def __init__(self, params, body, scope, result=I):
+        self.params, self.body, self.scope, self.result = params, body, scope, result
 
     def __deepcopy__(self, memo):
         # Copying a closure copies its private captured state; shared captures stay shared.
         state = {k: v if isinstance(v, Place) else copy.deepcopy(v, memo) for k, v in self.scope.vars.items()}
-        return Closure(self.params, self.body, Scope(state, None))
+        return Closure(self.params, self.body, Scope(state, None), self.result)
 
 
 class Place:
@@ -1192,6 +1191,22 @@ def wrap(value, ty):
         return int(value) & (2 ** 64 - 1)
     if ty == F:
         return float(value)
+    return value
+
+
+def store(value, ty):
+    """A fixed-width binding, argument, return or element is a checked narrowing."""
+    if ty is None:
+        return value
+    if ty.kind == 'opt':
+        return None if value is None else store(value, ty.args[0])
+    if ty.kind == 'union':
+        for arm in ty.args:
+            if member(value, arm):
+                return store(value, arm)
+        raise InvalidProgram('stored union member')
+    if ty in (I, U) and wrap(value, ty) != value:
+        raise Panicked('exact integer result does not fit')
     return value
 
 
@@ -1319,17 +1334,17 @@ class Machine:
                 raise InvalidProgram('not callable')
             if len(params) != len(arguments):
                 raise InvalidProgram('arity')
-            for (name, _, mutable), value in zip(params, arguments):
+            for (name, ty, mutable), value in zip(params, arguments):
                 if mutable != isinstance(value, Place):
                     raise InvalidProgram('reference argument')
-                scope.vars[name] = value if mutable else copy.deepcopy(value)
+                scope.vars[name] = value if mutable else copy.deepcopy(store(value, ty))
             try:
                 if isinstance(target, FuncDef) and target.expression:
-                    return copy.deepcopy(self.eval(target.body[0].value, scope))
+                    return copy.deepcopy(store(self.eval(target.body[0].value, scope), target.result))
                 self.execute(target.body, scope)
                 return None
             except Returned as result:
-                return copy.deepcopy(result.value)
+                return copy.deepcopy(store(result.value, target.result))
         finally:
             self.depth -= 1
 
@@ -1350,7 +1365,7 @@ class Machine:
         if isinstance(s, Let):
             if s.name in env.vars:
                 raise InvalidProgram('redefinition')
-            env.vars[s.name] = copy.deepcopy(self.eval(s.value, env))
+            env.vars[s.name] = copy.deepcopy(store(self.eval(s.value, env), s.ty))
         elif isinstance(s, Assign):
             place = self.place(s.target, env, store=not s.op)
             # (`x += f()` reads x before f runs, as `x + f()` does: a closure
@@ -1360,11 +1375,11 @@ class Machine:
             if s.op:
                 ty = s.target.ty
                 value = Bin(ty, s.op, Lit(ty, old), Lit(ty, value)).eval(self, env)
-            place.set(value)
+            place.set(store(value, s.target.ty))
         elif isinstance(s, Do):
             self.eval(s.expr, env)
         elif isinstance(s, Print):
-            self.output.append(show(self.eval(s.expr, env)) + '\n')
+            self.output.append(show(store(self.eval(s.expr, env), s.expr.ty)) + '\n')
         elif isinstance(s, If):
             self.execute(s.then if self.eval(s.test, env) else s.other, Scope({}, env))
         elif isinstance(s, Loop):
@@ -1481,8 +1496,10 @@ def effects(node, functions, shared=frozenset()):
     reads, writes, output = set(), set(), False
     printing = printing_functions(functions)
     for n in walk(node):
-        if isinstance(n, (Print, Assert, Narrow)) or isinstance(n, (Bin, Unary)) and n.ty == INT:
+        if isinstance(n, (Print, Assert, Narrow)) or isinstance(n, (Bin, Unary, Conv)) and n.ty in INTS:
             output = True  # observable: prints, or may stop the program
+        if isinstance(n, Assign) and n.op and n.target.ty in INTS:
+            output = True
         if isinstance(n, Var):
             reads.add(n.name)
         elif isinstance(n, Let):
@@ -1526,7 +1543,7 @@ def printing_functions(functions) -> set[str]:
             if f.name in result:
                 continue
             for n in walk(f):
-                if isinstance(n, Print) or (isinstance(n, Call) and not n.closure and n.callee in result):
+                if isinstance(n, Print) or isinstance(n, (Bin, Unary, Conv)) and n.ty in INTS or isinstance(n, Assign) and n.op and n.target.ty in INTS or (isinstance(n, Call) and not n.closure and n.callee in result):
                     result.add(f.name)
                     changed = True
                     break
@@ -2920,7 +2937,7 @@ def variant_outline(program: Program, r: random.Random) -> Program | None:
     for s in program.body:
         for n in walk(s):
             if (isinstance(n, Expr) and not isinstance(n, (Lit, Var, Range, Ref, Lambda)) and n.ty in VALUE_TYPES
-                    and id(n) not in places and pure(n)
+                    and n.ty not in INTS and id(n) not in places and pure(n)
                     and not any(isinstance(x, Is) or isinstance(x, (ArrayLit, DictLit, SetLit)) and not x.items
                                 for x in walk(n))):
                 candidates.append(n)

@@ -1,3 +1,4 @@
+use 'overflow.jo'
 # Hash map {K: V}: insertion ordered, open addressing over a dense entry list.
 # The first two fields must stay `__keys` and `vals` (the compiler iterates them in mutable loops).
 # A removed entry stays in place, marked gone (so the others keep theirs), its slot a tombstone
@@ -55,7 +56,7 @@ __map_pair_at[K, V] = (entries: __MapEntries[K, V], i: int) -> (K, V):
 hash = (x: int) -> u64: hash(u64(x))
 
 hash = (x: u64) -> u64:
-    h = (x xor (x >> 33))
+    h = __wrap64(x xor (x >> 33))
     h = h * 0xFF51AFD7ED558CCD
     h = (h xor (h >> 33))
     h = h * 0xC4CEB9FE1A85EC53
@@ -455,13 +456,13 @@ when not BOOTSTRAP:
     # on insertion order, capacity or removed slots. Keys and values use their
     # own hash methods, matching the equality operations below.
     hash[K, V] = (m: Map[K, V]) -> u64:
-        total: u64 = 0
+        total: __wrap64 = 0
         ng = m.gone.len()
         loop i in 0.. and k in m.__keys:
             if i < ng and __at(m.gone, i): continue
             kh = k.hash()
             vh = __at(m.vals, i).hash()
-            total += hash(kh xor ((vh << 1) | (vh >> 63)))
+            total += __wrap64(hash(kh xor ((vh << 1) | (vh >> 63))))
         hash(total xor u64(m.len()))
 
     (==)[K, V] = (a: Map[K, V], b: Map[K, V]) -> bool:

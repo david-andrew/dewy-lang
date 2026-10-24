@@ -16,7 +16,10 @@ ct_math_runtime = (name: str, args: int[], e: int) -> int:
     actual: int[]
     loop value in args: actual.push(ct_literal(value, nodes[e].pos))
     set_list(call, actual)
-    ct_call(call)
+    ct_fixed_internal += 1
+    result = ct_call(call)
+    ct_fixed_internal -= 1
+    result
 
 ct_math_rep = (value: int) -> int:
     x = ct_values[value]
@@ -33,6 +36,16 @@ ct_math_unpack = (value: int) -> int:
     ct_add(CTValue(type = T_MATH_INT, i = ct_values[x.items[0]].i, items = ct_values[x.items[1]].items))
 
 ct_math_binary = (e: int, op: Tok, a: int, b: int) -> int:
+    if op == .starstar:
+        exponent = ct_values[b].i
+        if exponent < 0 or ct_values[b].items.len() > 0: ct_fail(e, "power exponent must be a nonnegative bounded integer")
+        result = ct_int(T_MATH_INT, 1)
+        base = a
+        loop exponent > 0:
+            if exponent & 1 != 0: result = ct_math_binary(e, .star, result, base)
+            exponent = exponent >> 1
+            if exponent > 0: base = ct_math_binary(e, .star, base, base)
+        return result
     x = ct_math_rep(a)
     if op == .shl or op == .shr:
         count = ct_values[b].i
@@ -46,6 +59,7 @@ ct_math_binary = (e: int, op: Tok, a: int, b: int) -> int:
         result = ct_math_runtime("__mi_compare", [x, y], e)
         return ct_binary(e, op, result, ct_int(T_INT, 0), T_BOOL)
     operation = if op == .plus: 0 else if op == .minus: 1 else if op == .star: 2 else if op == .slash: 3 else if op == .percent: 4 else if op == .amp: 5 else if op == .pipe: 6 else: 7
+    if nodes[e].kind == .binary and nodes[e].aux2 == -1 and (op == .slash or op == .percent): operation += 5
     ct_math_unpack(ct_math_runtime("__mi_slow", [x, y, ct_int(T_INT, operation)], e))
 
 ct_math_for = (s: int):

@@ -6,9 +6,9 @@ kernel=(count:int64 d:int64):>int64=>{
     d=0
     $assert saved >? 0
     $assert d =? 0
-    let total:int64=0
+    let total:int64<overflow='wrap'>=0
     loop i in [0..count) {
-        total+=i//saved
+        total+=int64<overflow='wrap'>(i)//int64<overflow='wrap'>(saved)
         total=total*3+1
         total=total*5-3
         total=total%100003

@@ -9,7 +9,7 @@ HELPER = '''checked=(x:int64):>int64=>{
     $runtime_assert x >? 0
     return x
 }
-twice=(x:int64):>int64=>checked(x)*2
+twice=(x:int64):>int64=>(checked(x)%1000000)*2
 '''
 
 

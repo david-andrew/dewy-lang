@@ -20,7 +20,7 @@ total = (xs:array<int64 length=4>):>int64 => {
     let t:int64 = 0
     loop i in [0..4) {
         let v = xs[i]
-        if v >? -1000 and v <? 1000 t += v
+        if v >? -1000 and v <? 1000 and t >=? -4000 and t <=? 4000 t += v
     }
     t
 }
@@ -64,7 +64,7 @@ MEMBERS = {
     'nan': (MAIN + '    let x:float64 = float64(args().length) - 3.0\n    printl(sqrt(x))\n}\n',
             "main.dewy:4:12: error: cannot prove the square root's operand is not negative under `$no_nan`"),
     # $no_deadlocks
-    'deadlock': ('work = (n:int64):>int64 => n * 2\nmain = ():>void & no panics => {\n    let m = mutex<int64>(0)\n'
+    'deadlock': ('work = (n:int64):>int64 => n\nmain = ():>void & no panics => {\n    let m = mutex<int64>(0)\n'
                  '    let held = @(m.lock())\n    concurrent {\n        let a = spawn work(21)\n    }\n    held += 1\n}\n',
                  "main.dewy:6:5: error: this joins its tasks while holding 'm' (since line 5), and no certificate covers it (`$no_deadlocks`)"),
     # $assume_local_asserts=false: a `$runtime_assert` makes its own module's callers `panics`

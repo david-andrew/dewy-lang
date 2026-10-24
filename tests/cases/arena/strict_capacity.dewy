@@ -6,7 +6,7 @@ count=():>int64 | OutOfMemory=>{
     let a=arena(4096) or_throw
     let n=$allocator(@a) {
         let xs:array<int64>=[1 2 3]
-        let total:int64=0
+        let total:int64<overflow='wrap'>=0
         loop i in [0..10) {
             let ys:array<int64>=[i i+1]
             total+=ys[1]

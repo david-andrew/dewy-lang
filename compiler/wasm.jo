@@ -259,7 +259,7 @@ emit_wins = (ins: Ins):
     bb = int(ins.b)
     match o:
         nop, assume: pass
-        vld, vst, vbin, vsplat, vzu, mulhs, mulhu, memeq, streq, findb: ice("native-only instructions in wasm code")
+        vld, vst, vbin, vsplat, vzu, mulhs, mulhu, memeq, streq, findb, rot32: ice("native-only instructions in wasm code")
         iconst:
             i64c(ins.imm)
             lset(d)
@@ -281,7 +281,18 @@ emit_wins = (ins: Ins):
         checked_add, checked_sub, checked_mul:
             opcode = if o == .checked_add: 0x7C else if o == .checked_sub: 0x7D else: 0x7E
             bin64(opcode, ins)
-            if o == .checked_mul:
+            if ins.c != 0:
+                if o == .checked_mul:
+                    lget(a); i64c(0); op(0x52)
+                    op(0x04); op(0x7F)
+                    lget(d); lget(a); op(0x80) # unsigned quotient, guarded zero
+                    lget(bb); op(0x52)
+                    op(0x05); op(0x41); sleb(wb, 0); op(0x0B)
+                else:
+                    lget(if o == .checked_add: d else: a)
+                    lget(if o == .checked_add: a else: bb)
+                    op(0x54) # unsigned result < a, or a < b
+            else if o == .checked_mul:
                 # wasm has no overflow flags or high multiply. Check the quotient,
                 # guarding its own MIN/-1 trap and the zero divisor explicitly.
                 lget(a)

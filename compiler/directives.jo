@@ -61,6 +61,7 @@ dir_rows_any = false
 dir_floats_any = false         # some scope sets `$no_nan` or `$no_inf` (compiler/floats.jo)
 dir_deadlocks_any = false      # some scope sets `$no_deadlocks` (compiler/deadlock.jo, certificates)
 dir_bundles_loaded = false
+dir_assumed_bounds_any = false
 
 dir_name_runtime = 0
 dir_name_prototype = 0
@@ -73,6 +74,7 @@ dir_name_local_asserts = 0
 dir_name_confine = 0
 dir_name_deadlocks = 0
 dir_name_audited = 0
+dir_name_assumed_bounds = 0
 
 directives_reset = ():
     dir_scopes = []
@@ -88,6 +90,7 @@ directives_reset = ():
     dir_floats_any = false
     dir_deadlocks_any = false
     dir_bundles_loaded = false
+    dir_assumed_bounds_any = false
     dir_name_runtime = 0
     fact_policy_default = DIR_DEFAULT == DIR_STATIC and fact_policy == .RuntimeAllowed
     if DIR_DEFAULT == DIR_STATIC: fact_policy = .RequireStatic
@@ -107,17 +110,18 @@ dir_names = ():
     dir_name_confine = intern("confine_external_paths")
     dir_name_deadlocks = intern("no_deadlocks")
     dir_name_audited = intern("audited_wait")
+    dir_name_assumed_bounds = intern("no_assumed_bounds")
 
 # Metatags the compiler gives a meaning of its own; any other `$name` in a
 # source may be a bundle (or a loop label), so the bundles are read first.
 dw_dir_known = (name: str) -> bool:
-    name in ["assert", "runtime_assert", "expect", "fail", "breakpoint", "lend", "test", "proof", "capture", "include_bytes", "clamp", "target", "build", "supported_targets", "field", "unsafe_assume", "abstract", "allocator", "no_prelude", "runtime_checks", "prototype", "prototype_warnings", "explicit_copies", "fast_math", "no_nan", "no_inf", "unsafe", "assume_local_asserts", "extern", "intrinsic", "export", "realtime", "explicit_allocation_failure", "warn_if", "confine_external_paths", "no_deadlocks", "audited_wait", "__copy__", "__drop__", "__move__", "send", "sync"]
+    name in ["assert", "runtime_assert", "expect", "fail", "breakpoint", "lend", "test", "proof", "capture", "include_bytes", "clamp", "target", "build", "supported_targets", "field", "unsafe_assume", "abstract", "allocator", "no_prelude", "runtime_checks", "prototype", "prototype_warnings", "explicit_copies", "fast_math", "no_nan", "no_inf", "unsafe", "assume_local_asserts", "no_assumed_bounds", "extern", "intrinsic", "export", "realtime", "explicit_allocation_failure", "warn_if", "confine_external_paths", "no_deadlocks", "audited_wait", "__copy__", "__drop__", "__move__", "send", "sync"]
 
 # The builtin boolean settings. (`$fast_math` permits reassociation and FMA
 # contraction; the backends do neither yet, so it changes no code. `$unsafe` is
 # the unsafe boundary: compiler/ffi.jo.)
 dir_builtin = (name: str) -> bool:
-    name == "runtime_checks" or name == "prototype" or name == "prototype_warnings" or name == "explicit_copies" or name == "fast_math" or name == "no_nan" or name == "no_inf" or name == "unsafe" or name == "assume_local_asserts" or name == "confine_external_paths" or name == "no_deadlocks" or name == "audited_wait"
+    name == "runtime_checks" or name == "prototype" or name == "prototype_warnings" or name == "explicit_copies" or name == "fast_math" or name == "no_nan" or name == "no_inf" or name == "unsafe" or name == "assume_local_asserts" or name == "confine_external_paths" or name == "no_deadlocks" or name == "audited_wait" or name == "no_assumed_bounds"
 
 dir_bundle_index = (name: int) -> int:
     loop i in [0..dir_bundles.len()):
@@ -225,6 +229,7 @@ dir_conflict = (i: int):
 
 dir_push = (s: DirScope):
     dir_scopes.push(s)
+    if s.setting == dir_name_assumed_bounds and s.value == 1: dir_assumed_bounds_any = true
     if s.setting == dir_name_copies and s.value == 1: dir_copies_any = true
     if s.setting == dir_name_row and s.value > 0: dir_rows_any = true
     if (s.setting == dir_name_no_nan or s.setting == dir_name_no_inf) and s.value == 1: dir_floats_any = true
@@ -297,7 +302,7 @@ dir_defer = (n: int, what: str, deferrable: bool) -> bool:
     dir_sites.push(DirSite(p, what, policy))
     owner = fact_retry_owner
     if fact_owner > 0: owner = fact_owner
-    effect_panic_note(owner, n, what)
+    if policy != DIR_IMPLICIT or not pos_in_lib(p): effect_panic_note(owner, n, what)
     if policy == DIR_PROTOTYPE and dir_value(dir_name_warnings, p) != 0: warn(p, "prototype: {what}; it is checked at run time")
     if ide_on and policy == DIR_RUNTIME:
         hint = "runtime check: " + dir_obligation_text(what)

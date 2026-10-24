@@ -1,44 +1,45 @@
+use '../core/overflow.jo'
 # A bounded signed-word interval is a small value, never an array of its numbers.
 # count == 0 denotes 2^64 elements when empty is false.
 struct IntRange:
     _first: int
-    _stride: u64
-    _count: u64
+    _stride: __wrap64
+    _count: __wrap64
     _up: bool
     _empty: bool
 
 __dewy_range = (first: int, second: int, last: int, stepped: bool, inclusive: bool) -> IntRange:
     up = not stepped or second > first
-    stride: u64 = 1
+    stride: __wrap64 = 1
     if stepped:
         if second == first: panic("range step must be nonzero")
-        stride = if up: u64(second) - u64(first) else: u64(first) - u64(second)
+        stride = if up: __wrap64(second) - __wrap64(first) else: __wrap64(first) - __wrap64(second)
     empty = if up: first > last or (first == last and not inclusive) else: first < last or (first == last and not inclusive)
     if empty: return IntRange(first, stride, 0, up, true)
-    distance = if up: u64(last) - u64(first) else: u64(first) - u64(last)
+    distance = if up: __wrap64(last) - __wrap64(first) else: __wrap64(first) - __wrap64(last)
     if not inclusive: distance -= 1
     IntRange(first, stride, distance / stride + 1, up, false)
 
 __dewy_range_tail = (r: IntRange) -> IntRange:
     if r._empty or r._stride == 0: return r
-    first = int(if r._up: u64(r._first) + r._stride else: u64(r._first) - r._stride)
+    first = int(if r._up: __wrap64(r._first) + r._stride else: __wrap64(r._first) - r._stride)
     count = r._count - 1
     IntRange(first, r._stride, count, r._up, count == 0)
 
 contains = (r: IntRange, value: int) -> bool:
     if r._empty or r._stride == 0: return false
     if r._up and value < r._first or not r._up and value > r._first: return false
-    distance = if r._up: u64(value) - u64(r._first) else: u64(r._first) - u64(value)
+    distance = if r._up: __wrap64(value) - __wrap64(r._first) else: __wrap64(r._first) - __wrap64(value)
     distance % r._stride == 0 and (r._count == 0 or distance / r._stride < r._count)
 
 struct __DewyRangeIter:
     cursor: int
     delta: int
-    remaining: u64
+    remaining: __wrap64
     done: bool
 
 __dewy_range_iter = (r: IntRange) -> __DewyRangeIter:
-    delta = int(if r._up: r._stride else: u64(0) - r._stride)
+    delta = int(if r._up: r._stride else: __wrap64(0) - r._stride)
     __DewyRangeIter(r._first, delta, r._count, r._empty or r._stride == 0)
 
 __dewy_range_done = (it: __DewyRangeIter) -> bool: it.done
@@ -60,12 +61,12 @@ __dewy_fmt = (buf: mut u8[], r: IntRange):
         __fmt(buf, r._first)
         __buf_byte(buf, ')')
         return
-    delta = if r._up: r._stride else: u64(0) - r._stride
+    delta = if r._up: r._stride else: __wrap64(0) - r._stride
     if r._stride != 1 or not r._up:
         __buf_byte(buf, ',')
-        __fmt(buf, int(u64(r._first) + delta))
+        __fmt(buf, int(__wrap64(r._first) + delta))
     __buf_append_str(buf, "..")
-    __fmt(buf, int(u64(r._first) + (r._count - 1) * delta))
+    __fmt(buf, int(__wrap64(r._first) + (r._count - 1) * delta))
     __buf_byte(buf, ']')
 
 __dewy_fmt_elem = (buf: mut u8[], r: IntRange): __dewy_fmt(buf, r)
@@ -92,7 +93,7 @@ __dewy_open_range_value = (it: mut __DewyOpenRangeIter) -> int:
 __dewy_range_indices = (size: int, r: IntRange) -> int:
     if r._empty or r._stride == 0: return 0
     if r._first < 0 or r._first >= size: panic("range index {r._first} is out of bounds for {size} elements")
-    distance = if r._up: u64(size - 1 - r._first) else: u64(r._first)
+    distance = if r._up: __wrap64(size - 1 - r._first) else: __wrap64(r._first)
     if r._count == 0 or r._count - 1 > distance / r._stride:
         panic("range indexes are out of bounds for {size} elements")
     int(r._count)
@@ -102,7 +103,7 @@ __pick[A, T] = (xs: A, r: IntRange) -> T[]:
     out: T[]
     out.resize(count)
     index = r._first
-    delta = int(if r._up: r._stride else: u64(0) - r._stride)
+    delta = int(if r._up: r._stride else: __wrap64(0) - r._stride)
     loop j in [0..count):
         __at(out, j) = __at(xs, index)
         index += delta
@@ -111,7 +112,7 @@ __pick[A, T] = (xs: A, r: IntRange) -> T[]:
 __put[A, T] = (xs: mut A, r: IntRange, value: T):
     count = __dewy_range_indices(xs.len(), r)
     index = r._first
-    delta = int(if r._up: r._stride else: u64(0) - r._stride)
+    delta = int(if r._up: r._stride else: __wrap64(0) - r._stride)
     loop j in [0..count):
         __at(xs, index) = value
         index += delta
@@ -120,7 +121,7 @@ __put[A, T] = (xs: mut A, r: IntRange, values: T[]):
     count = __dewy_range_indices(xs.len(), r)
     if values.len() != count: panic("{values.len()} values for {count} range indexes")
     index = r._first
-    delta = int(if r._up: r._stride else: u64(0) - r._stride)
+    delta = int(if r._up: r._stride else: __wrap64(0) - r._stride)
     loop j in [0..count):
         __at(xs, index) = __at(values, j)
         index += delta
@@ -137,3 +138,8 @@ __dewy_put_slice[A, T] = (xs: mut A, first: int, second: int, last: int, inclusi
 
 __dewy_put_slice[A, T] = (xs: mut A, first: int, second: int, last: int, inclusive: bool, bounded: bool, stepped: bool, values: T[]):
     __put[A, T](xs, __dewy_slice_range(xs.len(), first, second, last, inclusive, bounded, stepped), values)
+
+# Internal counted-range state is modular: zero remaining represents 2^64.
+__dewy_range_cursor = (value: int) -> __wrapi64: __wrapi64(value)
+__dewy_range_remaining = (value: __wrap64) -> __wrap64: __wrap64(value)
+__dewy_range_word = (value: __wrapi64) -> int: int(value)

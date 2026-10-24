@@ -1,4 +1,5 @@
 use 'facts.jo'
+use 'exact.jo'
 use 'lower.jo'
 use 'lex.jo'
 use 'ast.jo'
@@ -188,6 +189,9 @@ math_main = (f: int):
 
 math_word_bound = (e: int) -> bool:
     if e == 0: return false
+    # An expanded fixed-width expression keeps its storage type in the AST.
+    # That type cannot justify discarding its high words at an int boundary.
+    if exact_has_node(e): return exact_bits(e) <= 64
     t = prune(ntype(e))
     if t != T_MATH_INT: return is_int(t) and (types[t].sign or int(types[t].bits) < 64)
     if nodes[e].kind == .int_lit: return not has_flag(e, NF_U64) or nodes[e].ival >= 0
@@ -424,6 +428,7 @@ math_prepare_writes = ():
     positive_bounds_fn = cur_fn
     positive_bounds.clear()
     enclosing: int[]
+    positive_collecting_writes = true
     # Finalization already visited these bodies. Replay only writes and
     # control boundaries, evaluating bounds with the current lowering state.
     if fns[cur_fn].writes_ready:
@@ -431,6 +436,7 @@ math_prepare_writes = ():
             if n < 0: enclosing.pop()
             else: math_index_site(n, enclosing)
     else: math_index_writes(int(fns[cur_fn].body), enclosing)
+    positive_collecting_writes = false
 
 math_index_writes = (n: int, enclosing: mut int[]):
     if n == 0: return
@@ -456,7 +462,7 @@ math_index_site = (n: int, enclosing: mut int[]):
     positive_write(n)
     if k == .vardecl and nkids(n) == 0 and not has_flag(n, NF_GLOBAL):
         l = int(nodes[n].sym)
-        if l > 0 and prune(int(locals[l].type)) == T_MATH_INT: math_decl_depth[l] = enclosing.len()
+        if l > 0 and (prune(int(locals[l].type)) == T_MATH_INT or prune(int(locals[l].type)) == T_INT): math_decl_depth[l] = enclosing.len()
     if k == .assign:
         a = int(nodes[n].a)
         if nodes[a].kind == .ident and nodes[a].aux == i32(int(SK.local)):
@@ -479,6 +485,7 @@ math_index_site = (n: int, enclosing: mut int[]):
 math_update_value = (s: int, l: int) -> int:
     if nodes[s].op != i32(int(Tok.assign)) or nodes[s].aux != 0: return 0
     e = int(nodes[s].b)
+    loop nodes[e].kind == .conv and (nodes[e].aux == i32(int(CV.fixed_store)) or nodes[e].aux == i32(int(CV.none_)) or nodes[e].aux == i32(int(CV.int_))): e = int(nodes[e].a)
     if nodes[e].kind != .binary or nodes[e].aux != 0 or not math_local_is(int(nodes[e].a), l): return 0
     e
 
@@ -598,7 +605,7 @@ math_guard_limit = (c: int, l: int) -> int:
     end = positive_bound(e, true)
     # (a fixed-width bound is at most its type's largest value)
     loop end < 0 and nodes[e].kind == .conv and nodes[e].aux == i32(int(CV.int_)): e = int(nodes[e].a)
-    if end < 0 and prune(ntype(e)) != T_MATH_INT: end = math_type_max(prune(ntype(e)))
+    if end < 0 and prune(ntype(e)) != T_MATH_INT and not exact_has_node(e): end = math_type_max(prune(ntype(e)))
     if end < 0: return -1
     end -= k
     if op == .lt: end -= 1
@@ -751,8 +758,11 @@ math_accumulator_for = (s: int) -> bool:
     math_word_limits = saved_limits
     math_word_updates = saved_updates
     els()
+    was_cold = ir_cold
+    ir_cold = true
     math_fresh_loop_regs(s)
     gen_for(s)
+    ir_cold = was_cold
     math_versioning = false
     math_word_regs = saved_regs
     math_word_limits = saved_limits

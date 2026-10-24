@@ -13,7 +13,7 @@ let names:totaldict<-1|0|1 string> = [-1 -> "neg" 0 -> "zero" 1 -> "pos"]
 names[1] = "plus"
 pick = (xs:array<int64> i:int64):>int64 => xs[i]
 main = ():>void | net.NetError => {
-    printl(RADIX['0x'] + pick([1 2 3] 1))
+    printl(int64<overflow='wrap'>(RADIX['0x']) + int64<overflow='wrap'>(pick([1 2 3] 1)))
     let server = net.tcp_listen(0) or_throw
     printl(server.port >? 0)
 }

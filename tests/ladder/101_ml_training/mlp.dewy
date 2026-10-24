@@ -27,7 +27,7 @@ empty_mlp = ():>Mlp => [
 ]
 
 # Glorot-uniform weights, zero biases.
-glorot = (@r:Rng fan_in:int64 fan_out:int64):>array<float64> => {
+glorot = (@r:Rng fan_in:int64<0 <=? fan_in and fan_in <=? 1000> fan_out:int64<0 <=? fan_out and fan_out <=? 1000>):>array<float64> => {
     let limit = sqrt(6.0/float64(fan_in+fan_out))
     return [loop i in [0..fan_in*fan_out) (2.0*uniform(@r)-1.0)*limit]
 }
@@ -42,6 +42,7 @@ init_mlp = (@r:Rng):>Mlp => {
 
 # One dense layer: out[j] = bias[j] + sum_i x[i]*w[i*cols+j].
 dense = (x:array<float64> w:array<float64> bias:array<float64> cols:int64):>array<float64> => {
+    if cols <? 0 or cols >? 1000 or x.length >? 1000 return []
     let out:array<float64> = []
     loop j in [0..cols) {
         let acc = bias.get(j) ?? 0.0
@@ -94,6 +95,7 @@ argmax = (y:array<float64>):>int64 => {
 # Back through one dense layer: the gradient for its inputs, given the
 # gradient for its outputs, through the weights `w` with `cols` outputs.
 back = (dz:array<float64> w:array<float64> rows:int64 cols:int64):>array<float64> => {
+    if rows <? 0 or rows >? 1000 or cols <? 0 or cols >? 1000 or dz.length >? 1000 return []
     let out:array<float64> = []
     loop i in [0..rows) {
         let acc:float64 = 0.0

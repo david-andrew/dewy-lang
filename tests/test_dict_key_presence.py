@@ -19,7 +19,7 @@ main=():>void=>{
     d["x"]=4
     d["y"]=5
     printl(d["x"])
-    let y=d["x"]+d["y"]
+    let y=int(d["x"])+int(d["y"])
     if "a" in? c {printl(c["a"]) c.pop("a");}
     let k="b"
     if k in? c {printl(c.pop(k))}

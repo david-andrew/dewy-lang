@@ -1,3 +1,4 @@
+use 'exact.jo'
 use 'lazy_bodies.jo'
 use 'frontend.jo'
 use 'ir.jo'
@@ -293,6 +294,7 @@ pc_check = (roots: int[], outfd: int, infd: int, parsefd: int):
         pw(out, fz_weight(f))
         pw(out, int(fz_small(f)))
         pw(out, int(fns[f].no_indexes))
+        pw(out, int(exact_owners.has(f)))
         pw(out, int(wr.all))
         pw_ints(out, wr.globals)
         pw_ints(out, wr.calls)
@@ -340,6 +342,7 @@ pc_merge = (b: u8[]):
             pc_weights[f] = pr(r)
             pc_smalls[f] = pr(r) != 0
             no_indexes = pr(r) != 0
+            if pr(r) != 0: exact_owners[f] = true
             all = pr(r) != 0
             gs = pr_ints(r)
             calls = pr_ints(r)

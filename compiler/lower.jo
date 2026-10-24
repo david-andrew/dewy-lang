@@ -1,3 +1,6 @@
+use 'exact_guards.jo'
+use 'exact_loop.jo'
+use 'exact.jo'
 use 'pcheck.jo'
 use 'icount.jo'
 use 'places.jo'
@@ -540,6 +543,7 @@ copy_ref = (v: int, t: int) -> int:
 new_temp = (t: int) -> int: new_slot(tsize(t), talign(t))
 
 reg_temp_slot = (s: int, t: int, stack_target: int = -1):
+    if stack_target >= 0 and closure_scalar_environment(stack_target): return
     if not is_managed(t) or tl_items.len() == 0: return
     tl_values.push(TempItem(true, s, t, cond_depth > tl_cond[tl_cond.len() - 1], stack_target))
 
@@ -608,6 +612,7 @@ gen_borrowed = (e: int) -> Val:
     Val(v.v, false, -1)
 
 stmt_begin = ():
+    positive_epoch += 1
     tl_items.push(tl_values.len())
     lower_mark_serial += 1
     tl_nop.push((ir.code.len() << 32) | lower_mark_serial)
@@ -752,7 +757,7 @@ emit_scope_exit = (i: int):
             target = if tkind(t) == .fn_ or tkind(t) == .polyfn: stack_closure_target(l) else: -1
             if target >= 0: drop_stack_closure(a, target)
             else: drop_at(a, t)
-            e_zero(a, tsize(t))
+            if target < 0 or not closure_scalar_environment(target): e_zero(a, tsize(t))
         else:
             release(int(locals[l].vreg), t)
             e_mov(int(locals[l].vreg), e_iconst(0))
@@ -979,7 +984,16 @@ bounds_check = (arr: int, idx: int, pos: int):
     # arr: array object pointer (may be null), idx: index
     loc = loc_data(pos)
     if not opt_release:
-        n = arr_len(arr)
+        n = 0
+        if target_wasm or target_arm64: n = arr_len(arr)
+        else:
+            # Select a real zero-length header for nil, without a hot branch.
+            # Keep the comparison next to select so native lowering reuses flags.
+            selected = vreg(VI)
+            empty = e_daddr(str_data(""))
+            condition = e_bin(.ne, VI, arr, e_iconst(0))
+            emit(.select, VI, selected, condition, arr, empty, 0)
+            n = hdr_load(selected, 8)
         iff(e_bin(.geu, VI, idx, n))
         e_call_nr3(rt("__panic_bounds"), idx, n, e_daddr(loc), -1)
         endc()
@@ -1905,6 +1919,9 @@ gen_map_presence = (call: int, f: int) -> int:
 # A positive floor remainder bounds its result even when its input wraps.
 # Recognize the bundled signed helper, never a user overload with this name.
 positive_modulus = (n: int) -> int:
+    if nodes[n].kind == .binary and nodes[n].aux == 0 and nodes[n].op == i32(int(Tok.percent)) and nodes[n].aux2 == -1:
+        known, divisor = integer_constant(int(nodes[n].b))
+        return if known and divisor > 0: divisor else: 0
     if nodes[n].kind != .call or nodes[n].aux != 0 or nkids(n) != 2: return 0
     f = int(nodes[n].sym)
     if prune(int(fns[f].ret)) != T_INT and prune(int(fns[f].ret)) != T_MATH_INT: return 0
@@ -2258,6 +2275,7 @@ closure_size = () -> int: 2 * ptr_size
 # reference is a direct invocation, or an immutable environment is passed to
 # an invocation-only parameter. Copies, returns, captures, rebinding and
 # address-taking retain the ordinary heap representation.
+lower_entry: Ins[]
 stack_closure_fn = -1
 stack_closure_locals: {int: bool} = {}
 stack_closure_targets: {int: int} = {}
@@ -2340,11 +2358,16 @@ stack_closure_target = (l: int) -> int:
 
 # Invocation pins have ended before scope cleanup. No value can retain this
 # environment, so only its managed captures need destruction, with no RC dispatch.
-drop_stack_closure = (addr: int, f: int):
-    managed = false
+closure_managed_captures = (f: int) -> bool:
     loop cap in fns[f].caps:
-        if is_managed(store_type(int(cap.inner))): managed = true
-    if not managed: return
+        if is_managed(store_type(int(cap.inner))): return true
+    false
+
+closure_scalar_environment = (f: int) -> bool:
+    ownership_callable_cap(int(fns[f].fntype)) == 0 and not closure_managed_captures(f)
+
+drop_stack_closure = (addr: int, f: int):
+    if not closure_managed_captures(f): return
     env = e_load(VI, addr, ptr_size, ptr_size)
     iff(env)
     e_call1(lf_helper(.stackenvdrop, 0, f), env, -1)
@@ -2400,28 +2423,49 @@ gen_lambda = (e: int, stack: bool = false) -> Val:
             fatal(nodes[e].pos, "mutable array parameter captures require a proven-disjoint scoped fork")
     if ownership_callable_cap(int(fns[f].fntype)) >= 3 and not stack:
         fatal(nodes[e].pos, "borrowed owner captures require a nonescaping directly invoked local closure")
+    hoist = stack and ownership_callable_cap(int(fns[f].fntype)) == 0
+    record_start = ir.code.len()
     s = new_slot(closure_size(), ptr_size)
     a = e_slot(s)
     e_store(a, 0, (if generic: e_iconst(0) else: e_faddr(lf_of_inst(f))), ptr_size)
     if fns[f].caps.len() == 0:
         e_store(a, ptr_size, e_iconst(0), ptr_size)
+        if hoist:
+            lower_entry += ir.code[record_start..]
+            ir.code.truncate(record_start)
         return Val(a, true, s)
     env = 0
-    if stack: env = e_slot(new_slot(int(fns[f].env_size), 8))
+    env_slot = -1
+    if stack:
+        env_slot = new_slot(int(fns[f].env_size), 8)
+        env = e_slot(env_slot)
     else: env = e_call1(rt("__alloc"), e_iconst(int(fns[f].env_size)), VI)
     e_store(a, ptr_size, env, ptr_size)
-    hdr_store(env, 0, e_iconst(1))
+    if not hoist: hdr_store(env, 0, e_iconst(1))
+    # A stack slot has one closure layout throughout this activation. Its
+    # destructor/copy pointers never change. Temporary retains are balanced
+    # before its next lifetime, so its refcount starts and ends at one too.
+    # Resource environments retain their ordinary construction protocol.
+    metadata_start = ir.code.len()
+    header = if hoist: e_slot(env_slot) else: env
+    if hoist: hdr_store(header, 0, e_iconst(1))
     drop_kind = if stack: HK.stackenvdrop else: HK.envdrop
-    hdr_store(env, 8, e_faddr(lf_helper(drop_kind, 0, f)))
+    hdr_store(header, 8, e_faddr(lf_helper(drop_kind, 0, f)))
     # Stack environments are never retained beyond the activation. Callback
     # parameters may temporarily retain an immutable one while invoking it.
     resource = ownership_callable_cap(int(fns[f].fntype)) != 0
     if resource and not ownership_copyable(int(fns[f].fntype)):
-        hdr_store(env, 16, e_iconst(0))
-    else: hdr_store(env, 16, e_faddr(lf_helper(.envcopy, 0, f)))
+        hdr_store(header, 16, e_iconst(0))
+    else: hdr_store(header, 16, e_faddr(lf_helper(.envcopy, 0, f)))
+    if hoist:
+        lower_entry += ir.code[metadata_start..]
+        ir.code.truncate(metadata_start)
     if resource:
         hdr_store(env, 24, e_iconst(0))
         owner_register(s, ntype(e))
+    if hoist and closure_scalar_environment(f):
+        lower_entry += ir.code[record_start..]
+        ir.code.truncate(record_start)
     ids: int[]
     if copies_on: ids = copy_capture_ids(e)
     index = 0
@@ -2557,6 +2601,10 @@ gen_interp = (e: int) -> Val:
 
 # ---------------- value blocks ----------------
 gen_value_block = (b: int, rs: int, rt_: int, rv: int = -1):
+    if let out = exact_join_blocks.get(b):
+        values = exact_extend(exact_value(b), out.len())
+        loop i in [0..out.len()): e_mov(out[i], values[i])
+        return
     scope_push()
     n = nkids(b)
     loop i in [0..n):
@@ -2709,7 +2757,7 @@ match_arm_constant = (arm: int) -> (bool, int):
     (false, 0)
 
 gen_match_lookup = (m: int, st: int, rs: int, rtp: int, vals: int[], arms: int[], wild: int, lo: int, span: int) -> bool:
-    if wild < 0: return false
+    if exact_has_node(m) or wild < 0: return false
     # Arbitrary-precision int results aren't plain words.
     if quantity_base(prune(rtp)) == T_MATH_INT: return false
     result_kind = types[prune(rtp)].kind
@@ -2851,14 +2899,17 @@ gen_match = (m: int, want: bool) -> Val:
         rs = new_temp(rtp)
         e_zero(e_slot(rs), tsize(rtp))
     scope_push()
-    if held_views.contains(hidden): e_mov(int(locals[hidden].vreg), held_value_addr(int(nodes[m].a)))
+    wide_subject: int[]
+    if exact_has_node(int(nodes[m].a)) and exact_match_literals(m): wide_subject = exact_value(int(nodes[m].a))
+    if wide_subject.len() > 0: store_val(st, e_slot(int(locals[hidden].offset)), 0, wide_subject[0])
+    else if held_views.contains(hidden): e_mov(int(locals[hidden].vreg), held_value_addr(int(nodes[m].a)))
     else:
         stmt_begin()
         sv = gen_owned(int(nodes[m].a))
         store_val(st, e_slot(int(locals[hidden].offset)), 0, sv.v)
         stmt_end()
         scope_add_local(hidden)
-    if gen_match_switch(m, st, rs, rtp, val):
+    if wide_subject.len() == 0 and gen_match_switch(m, st, rs, rtp, val):
         scope_pop()
         if val: return result_from_slot(rs, rtp)
         return V(-1, false)
@@ -2874,7 +2925,7 @@ gen_match = (m: int, want: bool) -> Val:
             p = kid(arm, k)
             ha = local_place(hidden, false).v
             enter_cond()
-            ok = gen_match_test(p, st, ha)
+            ok = if wide_subject.len() == 0: gen_match_test(p, st, ha) else if nodes[p].kind == .pwild: e_iconst(1) else: exact_compare(.eq, wide_subject, exact_value(int(nodes[p].a)))
             leave_cond()
             brif_to(ok, match_level)
         br_to(fail_level)
@@ -3220,6 +3271,7 @@ gen_binary = (e: int) -> Val:
             low = e_bin(.and_, VI, gen_expr(int(nodes[a].a)).v, e_iconst(nodes[m].ival - 1))
             return V(e_bin(int_op(op, false), VI, low, e_iconst(0)), false)
     va = freeze_scalar(gen_expr(a).v, lt)
+    if op == .shr and int_policy(lt) == 1 and not types[lt].sign and types[lt].bits == 32: va = e_un(.zext32, VI, va)
     vb = if op == .shl or op == .shr: math_shift_count(b) else: gen_expr(b).v
     sg = (types[lt].kind == .int_ and types[lt].sign)
     if int_policy(ntype(e)) == 2 and op == .shl: return V(saturate_shift(ntype(e), va, vb), false)
@@ -3230,29 +3282,44 @@ gen_binary = (e: int) -> Val:
         endc()
     if nodes[e].aux2 == -1 and (op == .slash or op == .percent):
         if not sg: return V(e_bin(int_op(op, false), VI, va, vb), false)
+        # Floor remainder by a positive power of two is its low bits, for
+        # negative inputs too. Floor division is the matching arithmetic shift.
+        known, divisor = integer_constant(b)
+        if known and divisor > 0 and divisor & (divisor - 1) == 0:
+            if op == .percent: return V(e_bin(.and_, VI, va, e_iconst(divisor - 1)), false)
+            shift = 0
+            loop divisor > 1:
+                divisor = divisor >> 1
+                shift += 1
+            return V(e_bin(.shrs, VI, va, e_iconst(shift)), false)
+        # Reuse the lowering range already computed for every write. A
+        # nonnegative dividend needs neither signed correction nor MIN/-1.
+        if known and divisor > 0 and positive_bound(a, true) >= 0:
+            return V(e_bin(int_op(op, false), VI, va, vb), false)
         result = vreg(VI)
         iff(e_bin(.eq, VI, vb, e_iconst(-1)))
         if op == .percent: e_mov(result, e_iconst(0))
         else if int_policy(lt) == 2: e_mov(result, saturate_binary(.minus, lt, e_iconst(0), va))
-        else: e_mov(result, norm(e_un(.neg, VI, va), lt))
+        else: e_mov(result, e_un(.neg, VI, va))
         els()
         quotient = e_bin(.divs, VI, va, vb)
         remainder = e_bin(.rems, VI, va, vb)
         e_mov(result, if op == .slash: quotient else: remainder)
-        iff(e_bin(.and_, VI, e_bin(.ne, VI, remainder, e_iconst(0)), e_bin(.lts, VI, e_bin(.xor, VI, remainder, vb), e_iconst(0))))
+        iff(e_bin(.ne, VI, remainder, e_iconst(0)))
+        iff(e_bin(.lts, VI, e_bin(.xor, VI, remainder, vb), e_iconst(0)))
         e_mov(result, if op == .slash: e_addi(quotient, -1) else: e_bin(.add, VI, remainder, vb))
+        endc()
         endc()
         endc()
         return V(result, false)
     if types[lt].kind == .bool_ and (op == .amp or op == .pipe or op == .caret):
         return V(e_bin(int_op(op, false), VI, va, vb), false)
     if sg and (op == .slash or op == .percent) and not (nodes[b].kind == .int_lit and nodes[b].ival != -1):
-        return V(norm(sdiv_wrap(op, va, vb, lt), ntype(e)), false)
-    if (op == .shl or op == .shr) and dewy_at(nodes[e].pos): return V(norm(wide_shift(op, sg, va, vb, b), ntype(e)), false)
+        return V(sdiv_wrap(op, va, vb, lt), false)
+    if (op == .shl or op == .shr) and dewy_at(nodes[e].pos): return V(wide_shift(op, sg, va, vb, b), false)
     r = e_bin(int_op(op, sg), VI, va, vb)
     if is_cmp: return V(r, false)
-    if op == .shl or op == .shr: return V(norm(r, ntype(e)), false)
-    V(norm(r, ntype(e)), false)
+    V(r, false)
 
 # A Dewy shift count is unsigned, and a count of at least the register width
 # reaches the shift's continuation bits: 0, or the sign for a signed right
@@ -3367,8 +3434,8 @@ assign_rhs_effects = (n: int) -> bool:
     false
 
 # does index n read the same before and after rhs runs, with nothing of its own to run or trap:
-# literals and plain locals rhs does not write, under fixed-width + - * and bit operations (which
-# wrap)? O(nodes of n x nodes of rhs)
+# literals and plain locals rhs does not write, under arithmetic with no storage check?
+# Checked exact stores are conversion nodes and must be captured. O(nodes of n x nodes of rhs)
 index_stable = (n: int, rhs: int) -> bool:
     k = nodes[n].kind
     if k == .int_lit: return true
@@ -4679,6 +4746,11 @@ gen_conv = (e: int) -> Val:
     a = int(nodes[e].a)
     from = prune(ntype(a))
     cv = nodes[e].aux as CV
+    if (cv == .wrap_int or cv == .saturate_int) and exact_has_node(a): return exact_gen_policy(e)
+    if (cv == .int_ or cv == .none_) and to == T_MATH_INT and exact_has_node(a): return exact_gen_math(a)
+    if cv == .fixed_store: return exact_gen_store(e)
+    if exact_progress_math.len() > 0 and exact_progress_math.has(e): return V(math_word_expr(a), false)
+    if cv == .int2float and exact_has_node(a): return exact_gen_float(a, to)
     if cv == .refinement: return refine_gen(e)
     if cv == .promote: return arena_gen_promote(e)
     if cv == .explicit_copy:
@@ -4704,6 +4776,7 @@ gen_conv = (e: int) -> Val:
         v = gen_borrowed(a).v
         if cv == .wrap_int:
             if from == T_MATH_INT: v = e_call1(rt("__mi_low_word"), v, VI)
+            else if types[from].bits == 32 and not types[from].sign and types[to].bits == 64: v = e_un(.zext32, VI, v)
             return V(norm(v, to), false)
         bits = int(types[to].bits)
         hi = if bits == 64: -1 else: (1 << bits) - 1
@@ -4942,6 +5015,7 @@ gen_expr = (e: int) -> Val:
 # Dispatch once by the checked AST kind. Case-local scratch is constructed
 # only in the selected handler; recursive children still lower exactly once.
 gen_expr_value = (e: int) -> Val:
+    if exact_lower_active and exact_has_node(e): return V(exact_low_word(e), false)
     match nodes[e].kind:
         int_lit: return gen_value_int_lit(e)
         float_lit: return gen_value_float_lit(e)
@@ -4964,7 +5038,10 @@ gen_expr_value = (e: int) -> Val:
         unary: return gen_value_unary(e)
         not_: return V(e_bin(.xor, VI, gen_expr(int(nodes[e].a)).v, e_iconst(1)), false)
         and_, or_: return gen_value_and_(e)
-        binary: return gen_binary(e)
+        binary:
+            value = gen_binary(e)
+            if int_policy(ntype(e)) == 1: value.v = norm(value.v, ntype(e))
+            return value
         conv: return gen_value_conv(e)
         cast: return gen_value_cast(e)
         coalesce: return gen_value_coalesce(e)
@@ -5070,6 +5147,16 @@ gen_value_istype = (e: int) -> Val:
 
 gen_value_call = (e: int) -> Val:
     t = prune(ntype(e))
+    # A guarded numeric map already proved every intermediate fits a word.
+    # Keep min/max as a value select so its inlined branch does not extend
+    # the live ranges of all the strided input cursors.
+    if exact_map_active and exact_representation(t) == T_INT and nkids(e) == 2 and (fact_library_call(e, "min") or fact_library_call(e, "max")):
+        a = gen_expr(kid(e, 0)).v; b = gen_expr(kid(e, 1)).v
+        condition = e_bin(.gts, VI, a, b)
+        result = vreg(VI)
+        maximum = fact_library_call(e, "max")
+        emit(.select, VI, result, condition, (if maximum: a else: b), (if maximum: b else: a), 0)
+        return V(result, false)
     # (a call that never comes back, as panic(...), where a value is wanted: "a" + panic("x"))
     if t != T_NEVER and vc(t) != VC_VOID and int(nodes[e].aux) == 0 and nodes[e].sym > 0 and prune(int(fns[int(nodes[e].sym)].ret)) == T_NEVER:
         saved_t = nodes[e].type
@@ -5206,7 +5293,9 @@ gen_value_unary = (e: int) -> Val:
     if nodes[e].op == i32(int(Tok.minus)):
         if vc(t) == VC_FLT: return V(e_un(.fneg, vt_of(t), v), false)
         if int_policy(t) == 2: return V(saturate_binary(.minus, t, e_iconst(0), v), false)
-        return V(norm(e_un(.neg, VI, v), t), false)
+        value = e_un(.neg, VI, v)
+        if int_policy(t) == 1: value = norm(value, t)
+        return V(value, false)
     return V(norm(e_un(.not_, VI, v), t), false)
 
 gen_value_and_ = (e: int) -> Val:
@@ -5802,12 +5891,15 @@ gen_if = (e: int, t: int) -> Val:
     else_level = ctl
     jump_if_false(int(nodes[e].a), else_level)
     enter_cond()
+    guard = if eg_active: eg_begin(int(nodes[e].a), true) else: 0
     if val: gen_value_block(int(nodes[e].b), rs, t, rv)
     else:
         scope_push()
         gen_block_stmts(int(nodes[e].b))
         scope_pop()
+    if eg_active: eg_end(guard)
     if has_else:
+        guard = if eg_active: eg_begin(int(nodes[e].a), false) else: 0
         br_to(end_level)
         endc()
         if val: gen_value_block(int(nodes[e].c), rs, t, rv)
@@ -5815,6 +5907,7 @@ gen_if = (e: int, t: int) -> Val:
             scope_push()
             gen_block_stmts(int(nodes[e].c))
             scope_pop()
+    if has_else and eg_active: eg_end(guard)
     leave_cond()
     endc()
     if rv >= 0: return V(rv, false)
@@ -6033,9 +6126,10 @@ gen_assign = (s: int):
         if int_policy(t) == 2 and op == .shl: r = saturate_shift(t, cur, rhs)
         else if int_policy(t) == 2 and (op == .plus or op == .minus or op == .star): r = saturate_binary(op, t, cur, rhs)
         else if types[t].kind == .bool_: r = e_bin(int_op(op, false), VI, cur, rhs)
-        else if sg and (op == .slash or op == .percent): r = norm(sdiv_wrap(op, cur, rhs, t), t)
-        else if (op == .shl or op == .shr) and dewy_at(nodes[s].pos): r = norm(wide_shift(op, sg, cur, rhs, int(nodes[s].b)), t)
-        else: r = norm(e_bin(int_op(op, sg), VI, cur, rhs), t)
+        else if sg and (op == .slash or op == .percent): r = sdiv_wrap(op, cur, rhs, t)
+        else if (op == .shl or op == .shr) and dewy_at(nodes[s].pos): r = wide_shift(op, sg, cur, rhs, int(nodes[s].b))
+        else: r = e_bin(int_op(op, sg), VI, cur, rhs)
+    if int_policy(t) == 1: r = norm(r, t)
     write_place(pl, t, r)
 
 gen_vardecl = (s: int):
@@ -6080,6 +6174,7 @@ gen_vardecl = (s: int):
     if copies_on and copy_shared_decl(s, l): return
     if view_decl(s, l): return
     if math_word_local_decl(s): return
+    if exact_lower_active: exact_counter_bound(s)
     if is_shared(l): new_cell(l)
     pl = local_place(l, true)
     if nodes[s].b != 0:
@@ -6093,7 +6188,8 @@ gen_vardecl = (s: int):
             stack = not has_flag(iv, NF_GENERIC) and closure_env_shareable(int(nodes[iv].sym))
         if stack: stack_closure_targets[l] = if has_flag(iv, NF_GENERIC): poly_families[int(nodes[iv].aux)].envfn else: int(nodes[iv].sym)
         val = if stack: gen_lambda(iv, true) else: gen_owned(iv)
-        write_place(pl, t, val.v)
+        if stack: locals[l].offset = i32(val.slot)
+        else: write_place(pl, t, val.v)
         if ownership_type(t): owner_forget_slot(val.slot)
     else:
         if pl.mem: e_zero(pl.v, tsize(t))
@@ -6680,14 +6776,14 @@ lm_resizing_call = (n: int, g: int) -> int:
 # ---- bounds checks that cannot fail ----
 # In `for j in K..A.len()` (K a non-negative literal; the bound may also be a variable declared
 # as `n := A.len()` and never changed) where A is never modified in the function, A[j] is in
-gen_loop_body = (b: int):
+gen_loop_body = (b: int) -> void:
     scope_push()
     gen_block_stmts(b)
     scope_pop()
 
 # Stepped ranges compare the original endpoint, without end+1 arithmetic.
-# Direction comes from the first two values, not their possibly wrapping
-# difference. The difference's bit pattern still gives the correct next value.
+# Open ranges retain the exact two-word step. Each next value has a storage
+# obligation; bounded ranges use a proven iteration count instead.
 stepped_done = (up: int, ctr: int, endv: int, inclusive: bool, signed: bool) -> int:
     above = if signed: Op.ges else: Op.geu
     below = if signed: Op.les else: Op.leu
@@ -6717,6 +6813,11 @@ gen_stepped_for = (s: int):
     second = math_count(int(nodes[it].c))
     up = e_bin(greater, VI, second, ctr)
     step = e_bin(.sub, VI, second, ctr)
+    step_high = e_iconst(0)
+    if open_end:
+        first_high = if signed: e_bin(.shrs, VI, ctr, e_iconst(63)) else: e_iconst(0)
+        second_high = if signed: e_bin(.shrs, VI, second, e_iconst(63)) else: e_iconst(0)
+        step_high = e_bin(.sub, VI, e_bin(.sub, VI, second_high, first_high), e_bin(.ltu, VI, second, ctr))
     if not open_end: e_mov(endv, math_count(int(nodes[it].b)))
     iff(e_bin(.eq, VI, step, e_iconst(0)))
     e_call_nr1(rt("__panic"), e_daddr(str_data("range step must be nonzero")), -1)
@@ -6758,18 +6859,12 @@ gen_stepped_for = (s: int):
     endc()
     next = e_bin(.add, VI, ctr, step)
     if open_end:
-        wrapped = e_bin(.or_, VI,
-            e_bin(.and_, VI, up, e_bin(less, VI, next, ctr)),
-            e_bin(.and_, VI, e_bin(.xor, VI, up, e_iconst(1)), e_bin(greater, VI, next, ctr)))
-        bits = int(types[lt].bits)
-        if bits < 64:
-            lo = 0
-            hi = (1 << bits) - 1
-            if signed:
-                lo = -(1 << (bits - 1))
-                hi = (1 << (bits - 1)) - 1
-            wrapped = e_bin(.or_, VI, wrapped, e_bin(.or_, VI, e_bin(.lts, VI, next, e_iconst(lo)), e_bin(.gts, VI, next, e_iconst(hi))))
-        iff(wrapped)
+        high = if signed: e_bin(.shrs, VI, ctr, e_iconst(63)) else: e_iconst(0)
+        high = e_bin(.add, VI, e_bin(.add, VI, high, step_high), e_bin(.ltu, VI, next, ctr))
+        stored = if lt == T_MATH_INT: next else: norm(next, lt)
+        expected = if signed: e_bin(.shrs, VI, stored, e_iconst(63)) else: e_iconst(0)
+        bad = e_bin(.or_, VI, e_bin(.ne, VI, high, expected), e_bin(.ne, VI, next, stored))
+        iff(bad)
         e_call_nr1(rt("__panic"), e_daddr(str_data("range exhausted its integer type")), -1)
         endc()
     e_mov(ctr, next)
@@ -6779,6 +6874,24 @@ gen_stepped_for = (s: int):
         brif_to(e_bin(.ne, VI, remaining, e_iconst(0)), top)
     endc()
     endc()
+
+# Element replacement can detach storage but cannot change its length. Reuse
+# the loop's storage inventory for this narrower question; an opaque use,
+# replacement, resize or an ambient call that can reach the root refuses it.
+bounded_array_length = (array: int, loop_: int) -> bool:
+    if not plain_read(array): return false
+    key = lpath_key(array)
+    if key == 0: return false
+    summary = fact_storage_loop(loop_)
+    if summary.opaque: return false
+    loop killed in summary.kill:
+        if path_within(key, killed): return false
+    root = lpath_root(array)
+    if nodes[root].aux == i32(int(SK.global)): return not summary.calls
+    l = int(nodes[root].sym)
+    flags = int(locals[l].flags)
+    if flags & (LF_ALIAS | LF_CAPTURE | LF_BYREF) != 0 or is_shared(l): return false
+    flags & LF_MUTPARAM == 0 or not summary.calls
 
 # A leading `if not (i < stop): break` on an open unit range is a bounded
 # range when stop cannot change. Combined Dewy loop headers produce exactly
@@ -6808,7 +6921,7 @@ bounded_open_for = (s: int) -> int:
         stable = stable_loop_index(end_local) and int(locals[end_local].flags) & LF_MUTPARAM == 0
     if not stable and nodes[stop].kind == .intrinsic and nodes[stop].aux == i32(int(IN.len)) and nkids(stop) == 1:
         array = kid(stop, 0)
-        stable = plain_read(array) and unchanged_by(array, body)
+        stable = bounded_array_length(array, s)
     if not stable: return 0
     exit = int(nodes[guard].b)
     if nodes[exit].kind == .block and nkids(exit) == 1: exit = kid(exit, 0)
@@ -6930,6 +7043,8 @@ gen_comprehension_reserve = (s: int, count: int):
     endc()
 
 gen_for = (s: int):
+    if eg_stack.len() > 0: eg_loop()
+    if exact_map_for(s): return
     if math_accumulator_for(s): return
     bounded = bounded_open_for(s)
     if bounded != 0:
@@ -7577,6 +7692,7 @@ simple_cond = (e: int) -> bool:
     false
 
 gen_while = (s: int):
+    if eg_stack.len() > 0: eg_loop()
     scope_push()
     rotate = nodes[s].aux != 1 and simple_cond(int(nodes[s].a))
     nfp = fp_begin(s, -1, 0, 0)
@@ -7619,7 +7735,9 @@ gen_while = (s: int):
         blk()
         cont = ctl
         loops.push(LoopInfo(brk, cont, scope_locals.len(), tl_items.len(), building.len()))
+        guard = if eg_active: eg_begin(int(nodes[s].a), true) else: 0
         gen_loop_body(int(nodes[s].b))
+        if eg_active: eg_end(guard)
         loops.pop()
         endc()
         c = int(nodes[s].a)
@@ -7640,6 +7758,7 @@ gen_stmt = (s: int):
     else if k == .assign:
         stmt_begin()
         gen_assign(s)
+        if eg_stack.len() > 0: eg_write(int(nodes[s].a))
         stmt_end()
     else if k == .exprstmt:
         a = int(nodes[s].a)
@@ -7682,15 +7801,21 @@ gen_stmt = (s: int):
     else if k == .const_: pass
     else: fatal(nodes[s].pos, "unsupported statement in codegen")
 
-gen_block_stmts = (b: int):
+gen_block_stmts = (b: int) -> void:
+    guarded = lower_length_guards.len()
     loop i in [0..nkids(b)):
         cur_block = b
         cur_block_i = i
         gen_stmt(kid(b, i))
+        lower_length_guard(kid(b, i))
+    lower_length_guards.truncate(guarded)
 
 # ---------------- functions ----------------
 begin_fn = (name: str, idx: int):
     ir_begin(name, idx)
+    exact_lower_active = exact_nodes.len() > 0
+    eg_active = false
+    lower_length_guards = []
     parallel_scalars.clear()
     parallel_owned.clear()
     stack_closure_fn = -1
@@ -7736,12 +7861,15 @@ find_bytes_set = (name: int) -> int:
     -1
 
 lower_inst = (lf: int, f: int):
+    positive_epoch += 1
     begin_fn(lfuncs[lf].name, lf)
     owner_begin()
     if fns[f].decl != 0:
         ir_set_pos(nodes[int(fns[f].decl)].pos)
         ir.decl_pos = ir_pos
     cur_fn = f
+    exact_lower_active = exact_owners.has(f)
+    eg_active = f < eg_demanded.len() and eg_demanded[f]
     cur_ret = int(fns[f].ret)
     ir.cabi = fns[f].cabi
     ir.noinline = fns[f].noinline
@@ -7839,6 +7967,31 @@ lower_inst = (lf: int, f: int):
             continue
         locals[l].vreg = i32(vreg(vt_of(t)))
         if is_managed(t): e_mov(int(locals[l].vreg), e_iconst(0))
+    exm_censuses = {}; lower_entry = []
+    exm_start = ir.code.len()
+    if exact_loop_plan(f, body):
+        guard = exact_loop_guard(body)
+        iff(guard)
+        exact_loop_fast = true
+        lower_inst_body(f, body)
+        exact_loop_fast = false
+        endc()
+    lower_inst_body(f, body)
+    if lower_entry.len() > 0:
+        loop i in [0..lower_zeros.len()):
+            if lower_zeros[i].mark >> 32 >= exm_start: lower_zeros[i].mark += lower_entry.len() << 32
+        ir.code = ir.code[..exm_start) + lower_entry + ir.code[exm_start..]
+    if vc(cur_ret) == VC_AGG: e_ret(sret_v)
+    else if vc(cur_ret) == VC_VOID: e_ret(-1)
+    else: e_trap()
+    owner_end()
+    if dbg_on:
+        loop l in fns[f].params: ir.dbg_locals.push(l)
+        loop l in fns[f].locals:
+            if int(locals[l].flags) & LF_PARAM == 0: ir.dbg_locals.push(l)
+
+lower_inst_body = (f: int, body: int) -> void:
+    guarded = lower_length_guards.len()
     scope_push()
     if ownership_decls.len() != 0 and fns[f].decl != 0 and not files[pos_file(nodes[int(fns[f].decl)].pos)].is_dewy:
         loop p in fns[f].params:
@@ -7859,15 +8012,9 @@ lower_inst = (lf: int, f: int):
                 gen_return(r)
                 continue
             gen_stmt(s)
+            lower_length_guard(s)
+    lower_length_guards.truncate(guarded)
     scope_pop()
-    if vc(cur_ret) == VC_AGG: e_ret(sret_v)
-    else if vc(cur_ret) == VC_VOID: e_ret(-1)
-    else: e_trap()
-    owner_end()
-    if dbg_on:
-        loop l in fns[f].params: ir.dbg_locals.push(l)
-        loop l in fns[f].locals:
-            if int(locals[l].flags) & LF_PARAM == 0: ir.dbg_locals.push(l)
 
 lop_watch = false       # (loops in this function count down to the web page's watchdog)
 

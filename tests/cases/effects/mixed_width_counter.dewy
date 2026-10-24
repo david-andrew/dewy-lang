@@ -2,7 +2,7 @@
 $no_hidden_costs
 Box:type=[xs:array<int64 length=8> n:int64]
 total=(b:Box):>int64=>{
-    let s:int64=0
+    let s:int64<overflow='wrap'>=0
     loop t in [0..8) {
         if t >=? b.n break
         s+=b.xs[t]

@@ -56,7 +56,9 @@ fetch = (k:Kernel t:int64):>(Op|none) & no allocates & no blocks => {
     if t <? 0 or t >=? NTASK return none
     let pc = k.tasks[t].pc
     if pc <? 0 or pc >=? k.tasks[t].size return none
-    let at = k.tasks[t].entry+pc
+    let entry = k.tasks[t].entry
+    if entry <? 0 or entry >=? NCODE or pc >=? NCODE return none
+    let at = entry+pc
     if at <? 0 or at >=? NCODE return none
     return k.code[at]
 }
@@ -76,18 +78,18 @@ step = (@k:Kernel t:int64):>void & no allocates & no blocks => {
     let next = true
     if op =? 'work' {
         if k.tasks[t].left <=? 0 k.tasks[t].left = a
-        k.tasks[t].left -= 1
+        if k.tasks[t].left >? 0 k.tasks[t].left -= 1
         next = k.tasks[t].left <=? 0
     } else if op =? 'sleep' {
         k.tasks[t].state = 'sleeping'
-        arm(@k t k.now+a)
-        record(@k 'sleep' t k.now+a 0)
+        arm(@k t k.now+int64<overflow='wrap'>(a))
+        record(@k 'sleep' t k.now+int64<overflow='wrap'>(a) 0)
     } else if op =? 'lock' {
         next = lock(@k t a)
     } else if op =? 'unlock' {
         unlock(@k t a)
     } else if op =? 'send' {
-        let value = if word.use_reg k.tasks[t].reg+word.b else word.b
+        let value = if word.use_reg k.tasks[t].reg+int64<overflow='wrap'>(word.b) else word.b
         next = send(@k t a value)
     } else if op =? 'recv' {
         next = recv(@k t a)
@@ -129,10 +131,10 @@ step = (@k:Kernel t:int64):>void & no allocates & no blocks => {
         finish(@k t)
         return
     }
-    if next k.tasks[t].pc += 1
+    if next and k.tasks[t].pc <? NCODE k.tasks[t].pc += 1
     # A task still on the CPU uses up its turn; then equals go first.
     if k.tasks[t].state =? 'ready' {
-        k.tasks[t].slice += 1
+        if k.tasks[t].slice <? QUANTUM k.tasks[t].slice += 1
         if k.tasks[t].slice >=? QUANTUM make_ready(@k t)
     }
 }

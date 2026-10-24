@@ -13,16 +13,16 @@
 $explicit_copies
 
 # All ones when `bit` is 1, zero when it is 0.
-mask32 = (bit:uint32):>uint32 & no_effects => 0-bit
-mask64 = (bit:uint64):>uint64 & no_effects => 0-bit
+mask32 = (bit:uint32<overflow='wrap'>):>uint32<overflow='wrap'> & no_effects => 0-bit
+mask64 = (bit:uint64<overflow='wrap'>):>uint64<overflow='wrap'> & no_effects => 0-bit
 
 # `a` where the mask is all ones, `b` where it is zero.
-select32 = (m:uint32 a:uint32 b:uint32):>uint32 & no_effects => (a and m) or (b and (not m))
-select64 = (m:uint64 a:uint64 b:uint64):>uint64 & no_effects => (a and m) or (b and (not m))
+select32 = (m:uint32<overflow='wrap'> a:uint32<overflow='wrap'> b:uint32<overflow='wrap'>):>uint32<overflow='wrap'> & no_effects => (a and m) or (b and (not m))
+select64 = (m:uint64<overflow='wrap'> a:uint64<overflow='wrap'> b:uint64<overflow='wrap'>):>uint64<overflow='wrap'> & no_effects => (a and m) or (b and (not m))
 
 # 1 when x is zero, else 0, without a branch: x-1 borrows into bit 63 only for zero.
-is_zero64 = (x:uint64):>uint64 & no_effects => ((not x) and (x-1)) >> 63
-is_zero32 = (x:uint32):>uint32 & no_effects => ((not x) and (x-1)) >> 31
+is_zero64 = (x:uint64<overflow='wrap'>):>uint64<overflow='wrap'> & no_effects => ((not x) and (x-1)) >> 63
+is_zero32 = (x:uint32<overflow='wrap'>):>uint32<overflow='wrap'> & no_effects => ((not x) and (x-1)) >> 31
 
 # Compare two byte strings of public length in time independent of their contents.
 # The lengths are public (a tag is always 16 bytes); only the final verdict leaves.

@@ -30,7 +30,7 @@ def test_scalar_fact_erasure(compiler, tmp_path, release):
 
 @pytest.mark.parametrize('name', ['unknown_parameter', 'write_after_guard', 'later_operand',
                                   'shared_capture', 'nonlinear', 'erased_call', 'join_one_sided',
-                                  'mutable_alias', 'match_arm', 'erased_message', 'budget', 'wrap_unknown'])
+                                  'mutable_alias', 'match_arm', 'erased_message', 'budget'])
 def test_scalar_fact_check_diagnostics(compiler, name):
     result = subprocess.run([compiler, 'check', CASES / f'{name}.dewy'],
                             text=True, capture_output=True, timeout=30)
@@ -43,7 +43,8 @@ def test_scalar_fact_check_diagnostics(compiler, name):
 @pytest.mark.parametrize('name,expected', [('guarded_division', None),
                                           ('policy_unknown', 'cannot prove divisor is nonzero: missing bound'),
                                           ('policy_refuted', 'divisor refuted: zero'),
-                                          ('policy_math_result', 'cannot prove division result: possible fixed-width wrap')])
+                                          ('policy_math_result', None),
+                                          ('wrap_unknown', None)])
 def test_scalar_fact_internal_policy(compiler, tmp_path, command, name, expected):
     arguments = [compiler, '--internal-fact-policy=require-static', command, CASES / f'{name}.dewy']
     if command == 'build':

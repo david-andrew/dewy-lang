@@ -950,14 +950,15 @@ arm64_ins = (pos: int, ins: Ins):
         checked_add, checked_sub, checked_mul:
             rn = a_src(a, 9)
             rd = a_dst(d, 11)
-            cc = 6                 # VS (signed overflow)
+            cc = if ins.c == 0: 6 else if op == .checked_sub: 3 else: 2 # VS / CC borrow / CS carry
             if op == .checked_mul:
                 rm = a_src(bb, 10)
-                w32(0x9B407C00 | (rm << 16) | (rn << 5) | 12) # smulh x12, rn, rm
+                w32((if ins.c != 0: 0x9BC07C00 else: 0x9B407C00) | (rm << 16) | (rn << 5) | 12)
                 a_mul(rd, rn, rm)
-                w32(0xEB00001F | (2 << 22) | (rd << 16) | (63 << 10) | (12 << 5)) # cmp x12, rd, asr #63
+                if ins.c != 0: w32(0xF100001F | (12 << 5)) # cmp x12, #0
+                else: w32(0xEB00001F | (2 << 22) | (rd << 16) | (63 << 10) | (12 << 5))
                 cc = AC_NE
-            else if vloc[bb] == LOC_CONST and vcval[bb] > -4096 and vcval[bb] < 4096:
+            else if vloc[bb] == LOC_CONST and vcval[bb] > -4096 and vcval[bb] < 4096 and (ins.c == 0 or vcval[bb] >= 0):
                 k = vcval[bb]
                 if op == .checked_sub: k = -k
                 base = 0xB1000000   # adds immediate

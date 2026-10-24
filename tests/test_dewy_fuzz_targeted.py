@@ -2,10 +2,6 @@
 
 The fuzzing itself is nightly (.github/workflows/fuzz-nightly.yml); these checks are cheap.
 """
-import subprocess
-
-import pytest
-
 from tests.support import compiler  # noqa: F401  (fixture)
 from tools.compiler import dewy_fuzz_targeted as targeted
 
@@ -29,31 +25,3 @@ def test_targeted_fuzz_smoke(compiler, tmp_path):  # noqa: F811
     status = targeted.fuzz(compiler, seed=1, count=18, modes=('native', 'native-release'), shrink=0, quiet=True,
                            failures_dir=tmp_path / 'failures', work=tmp_path / 'work')
     assert status == 0, sorted(p.name for p in (tmp_path / 'failures').iterdir())
-
-
-# Wrong output found by the targeted fuzzer, tracked until fixed. Each runs in the default
-# and release builds; a fix makes the strict xfail fail, so the repro moves to tests/cases.
-TRACKED = {
-    # docs/LANGUAGE.md: fixed-width `^` is computed exactly and storing the result is a checked
-    # narrowing; lib/std/dewy.jo's word power wraps instead, silently (int64 and narrower widths,
-    # which widen to the int64 word).
-    'fixed_width_power_wraps': (('main = ():>void => {\n    let a:int64 = 3037000500\n    printl(a ^ 2)\n'
-                                 '    let b:int32 = 2000000000\n    printl(b ^ 3)\n}\n'),
-                                '9223372037000250000\n8000000000000000000000000000\n'),
-}
-
-
-@pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
-@pytest.mark.parametrize('name', [pytest.param(n, marks=pytest.mark.xfail(
-    reason='fixed-width ^ wraps silently instead of the documented exact, checked result', strict=True))
-    for n in TRACKED])
-def test_tracked_wrong_output(compiler, tmp_path, name, release):  # noqa: F811
-    source, expected = TRACKED[name]
-    path = tmp_path / f'{name}.dewy'
-    path.write_text(source)
-    built = subprocess.run([compiler, 'build', path, '-o', tmp_path / name, *(['--release'] if release else [])],
-                           capture_output=True, text=True, timeout=60, check=False)
-    assert built.returncode == 0, built.stdout + built.stderr
-    ran = subprocess.run([tmp_path / name], capture_output=True, text=True, timeout=10, check=False)
-    # Either the exact value or a checked overflow failure is acceptable; a wrapped value is not.
-    assert ran.stdout == expected or ran.returncode == 101 and 'overflow' in ran.stderr + ran.stdout, ran.stdout

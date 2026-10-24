@@ -14,7 +14,8 @@ def run(compiler, tmp_path, source, command='check'):
 
 
 BODIES = {
-    'floor_int64': ('a:int64 b:int64', 'int64', 'a // b'),
+    # The wrap conversion isolates division by zero from MIN / -1 overflow.
+    'floor_int64': ('a:int64 b:int64', 'int64', "int64<overflow='wrap'>(a // b)"),
     'mod_int64': ('a:int64 b:int64', 'int64', 'a % b'),
     'floor_int': ('a:int b:int', 'int', 'a // b'),
     'exact': ('a:int b:int', 'float64', 'float64(a / b)'),
@@ -31,6 +32,6 @@ def test_unguarded_divisor_panics(compiler, tmp_path, name, scope):
 
 
 def test_guarded_divisor_no_panics(compiler, tmp_path):
-    source = 'f = (a:int64 b:int64):>int64 & no panics => if b not=? 0 a // b else 0\nmain = () => printl(f(7 2))\n'
+    source = "f = (a:int64 b:int64):>int64 & no panics => if b not=? 0 int64<overflow='wrap'>(a // b) else 0\nmain = () => printl(f(7 2))\n"
     out = run(compiler, tmp_path, source, 'run')
     assert out.returncode == 0 and out.stdout == '3\n', out.stdout + out.stderr

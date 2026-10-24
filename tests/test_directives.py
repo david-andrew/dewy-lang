@@ -43,6 +43,7 @@ def test_obligation_listing(compiler, tmp_path):
         'sites.dewy:3:12: runtime check: index is in bounds: missing lower and upper bounds ($runtime_checks)',
         'sites.dewy:12:12: runtime check: index is in bounds: missing lower and upper bounds ($prototype)',
         'sites.dewy:14:41: runtime check: index is in bounds: missing lower and upper bounds (default)',
+        'sites.dewy:17:12: runtime check: exact integer result fits int64 (default)',
     ]
     assert result.stderr.count('prototype: cannot prove index is in bounds') == 1, result.stderr
     assert 'sites.dewy:12:12: warning: prototype:' in result.stderr

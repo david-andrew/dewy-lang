@@ -22,7 +22,7 @@ def test_runtime_store(compiler, tmp_path, source, release):
     result = build(compiler, tmp_path, source, release=release)
     assert result.returncode == 0, result.stderr
     ran = subprocess.run([tmp_path / 'aggregate'], capture_output=True, text=True)
-    assert ran.returncode != 0 and 'refinement failed' in ran.stderr, ran.stderr
+    assert ran.returncode != 0 and ('integer overflow' if '9223372036854775807' in source else 'refinement failed') in ran.stderr, ran.stderr
 
 
 @pytest.mark.parametrize('source,diagnostic', [

@@ -37,7 +37,7 @@ main=(argv:array<string>)=>{
     if op=?"i32" {printl"{int32(x)}" return}
     if op=?"u32" {printl"{uint32(x)}" return}
     if op=?"zero-huge-shift" {printl"{int(0)<<uint64.max}" return}
-    if op=?"fixed-constants" {let v:int64=9223372036854775807+1 let u:uint64=WORD_MAX u+=1 printl"{v} {u}" return}
+    if op=?"fixed-constants" {let v=int64<overflow='wrap'>(9223372036854775807+1) let u:uint64<overflow='wrap'>=WORD_MAX u+=1 printl"{v} {u}" return}
     if op=?"i8" {let v:int8=x printl"{v}" return}
     if op=?"u8" {printl"{x as uint8}" return}
     if op=?"u64" {printl"{uint64(x)}" return}
@@ -52,12 +52,12 @@ main=(argv:array<string>)=>{
     if op=?"bigint" {let n:bigint=18446744073709551616 printl"{n}" return}
     if op=?"float-nan" {let f=float64(x) printl"{int(f/f)}" return}
     if op=?"compound" {let v=x v+=y printl"{v}" return}
-    if op=?"fixed-div" {printl"{int64(x)//int64(y)}" return}
-    if op=?"fixed-narrow-pow" {printl"{int32(x)^int32(y)}" return}
+    if op=?"fixed-div" {printl"{int64<overflow='wrap'>(x)//int64<overflow='wrap'>(y)}" return}
+    if op=?"fixed-narrow-pow" {printl"{int32<overflow='wrap'>(x)^int32(y)}" return}
     if op=?"fixed-narrow-floor" {printl"{kind(int32(x)//int32(y))}" return}
-    if op=?"fixed-pow" {printl"{int64(x)^int64(y)}" return}
-    if op=?"narrow-wrap" {let v:int8=127 v+=1 printl"{v}" return}
-    if op=?"wrap" {let v=int64(x) v+=int64(y) printl"{v}" return}
+    if op=?"fixed-pow" {printl"{int64<overflow='wrap'>(x)^int64(y)}" return}
+    if op=?"narrow-wrap" {let v:int8<overflow='wrap'>=127 v+=1 printl"{v}" return}
+    if op=?"wrap" {let v=int64<overflow='wrap'>(x) v+=int64(y) printl"{v}" return}
     if op=?"identity" {
         let a=1 let xs=[1 2] let fixed:int64=1
         printl"{kind(a)} {kind(xs[0])} {kind(identity(a))} {kind(fixed)}"
@@ -131,7 +131,7 @@ def run(program, op, x, y=0):
     ('parse', str(MIN), 0, str(MIN)), ('parse', 'invalid', 0, 'NotAnInteger'),
     ('bigint-context', 0, 0, '18446744073709551616'),
     ('bigint', 0, 0, '18446744073709551616'), ('bigint-word', 0, 0, '18446744073709551615'),
-    ('fixed-narrow-pow', 2, 63, MIN), ('fixed-narrow-floor', 7, 2, 'int64'),
+    ('fixed-narrow-pow', 2, 63, 0), ('fixed-narrow-floor', 7, 2, 'int64'),
     ('fixed-div', MIN, -1, MIN), ('fixed-pow', 2, 63, MIN), ('narrow-wrap', 0, 0, -128),
     ('compound', MAX-1, 1, MAX), ('wrap', MAX, 1, MIN),
     pytest.param('identity', 1, 2, 'int int int int64\nint int int', marks=pytest.mark.core_quick),

@@ -8,8 +8,8 @@ $explicit_copies
 
 from p"ct.dewy" import load32
 
-Words8:type = array<uint32 length=8>
-Schedule:type = array<uint32 length=64>
+Words8:type = array<uint32<overflow='wrap'> length=8>
+Schedule:type = array<uint32<overflow='wrap'> length=64>
 
 # First 32 bits of the fractional parts of the cube roots of the first 64 primes.
 const K:Schedule = [
@@ -29,20 +29,20 @@ const IV:Words8 = [0x6a09e667 0xbb67ae85 0x3c6ef372 0xa54ff53a 0x510e527f 0x9b05
 const BLOCK:int64 = 64
 const DIGEST:int64 = 32
 
-rotr = (x:uint32 n:int64):>uint32 & no_effects => (x >> n) or (x << (32-n))
-big_sigma0 = (x:uint32):>uint32 & no_effects => rotr(x 2) xor rotr(x 13) xor rotr(x 22)
-big_sigma1 = (x:uint32):>uint32 & no_effects => rotr(x 6) xor rotr(x 11) xor rotr(x 25)
-small_sigma0 = (x:uint32):>uint32 & no_effects => rotr(x 7) xor rotr(x 18) xor (x >> 3)
-small_sigma1 = (x:uint32):>uint32 & no_effects => rotr(x 17) xor rotr(x 19) xor (x >> 10)
-choose = (e:uint32 f:uint32 g:uint32):>uint32 & no_effects => (e and f) xor ((not e) and g)
-majority = (a:uint32 b:uint32 c:uint32):>uint32 & no_effects => (a and b) xor (a and c) xor (b and c)
+rotr = (x:uint32<overflow='wrap'> n:int64):>uint32<overflow='wrap'> & no_effects => (x >> n) or (x << (32-n))
+big_sigma0 = (x:uint32<overflow='wrap'>):>uint32<overflow='wrap'> & no_effects => rotr(x 2) xor rotr(x 13) xor rotr(x 22)
+big_sigma1 = (x:uint32<overflow='wrap'>):>uint32<overflow='wrap'> & no_effects => rotr(x 6) xor rotr(x 11) xor rotr(x 25)
+small_sigma0 = (x:uint32<overflow='wrap'>):>uint32<overflow='wrap'> & no_effects => rotr(x 7) xor rotr(x 18) xor (x >> 3)
+small_sigma1 = (x:uint32<overflow='wrap'>):>uint32<overflow='wrap'> & no_effects => rotr(x 17) xor rotr(x 19) xor (x >> 10)
+choose = (e:uint32<overflow='wrap'> f:uint32<overflow='wrap'> g:uint32<overflow='wrap'>):>uint32<overflow='wrap'> & no_effects => (e and f) xor ((not e) and g)
+majority = (a:uint32<overflow='wrap'> b:uint32<overflow='wrap'> c:uint32<overflow='wrap'>):>uint32<overflow='wrap'> & no_effects => (a and b) xor (a and c) xor (b and c)
 
 # Fold one 64-byte block starting at `at` into the chaining value.
 compress = (@h:Words8 data:array<uint8> at:int64<0 <=? at and at+64 <=? data.length>):>void => {
     let w:Schedule = []
     # Big-endian words: each byte shifts into its word from the right.
     loop j in [at..at+BLOCK) and i in [0..BLOCK) {
-        w[i//4] = (w[i//4] << 8) or (data[j] as uint32)
+        w[i//4] = (w[i//4] << 8) or (data[j] as uint32<overflow='wrap'>)
     }
     loop i in [16..64) {
         w[i] = small_sigma1(w[i-2])+w[i-7]+small_sigma0(w[i-15])+w[i-16]
@@ -106,7 +106,7 @@ Sha256:type = [
     }
 
     finish = ():>array<uint8> => {
-        let bits = length*8
+        let bits = uint64<overflow='wrap'>(length)*8
         let tail = pending.copy
         tail.push(0x80)
         loop tail.length%BLOCK not=? 56 {

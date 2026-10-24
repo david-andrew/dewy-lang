@@ -106,8 +106,7 @@ dn_expand_lazy = ():
     if k == dn_tokens.len():
         dn_lazy_left = false
         return
-    out: DewyLexeme[]
-    loop j in [0..k): out.push(dn_tokens[j])
+    out = dn_tokens[..k)
     saved_comments = dn_block_comments
     loop k < dn_tokens.len():
         t = dn_tokens[k]
@@ -123,9 +122,7 @@ dn_expand_lazy = ():
                 x.newline = t.newline
             out.push(x)
         if k >= dn_tokens.len() or dn_tokens[k].newline: break
-    loop k < dn_tokens.len():
-        out.push(dn_tokens[k])
-        k += 1
+    out.extend(dn_tokens[k..dn_tokens.len()))
     dn_block_comments = saved_comments
     dn_tokens = out
 
@@ -787,6 +784,8 @@ dc_type_spelled = (id: int) -> int:
     if id < dc_type_spelling.len(): dc_type_spelling[id] = i32(spelled)
     spelled
 
+dc_parameter_type = false
+
 dc_type_named = () -> int:
     token = dn_tokens[dn_at]
     if token.kind != .identifier or (token.symbol != .none and token.symbol != .kw_test) or token.name == 0: return 0
@@ -795,6 +794,12 @@ dc_type_named = () -> int:
     if spelled < 0: return 0
     word = dc_word(id)
     if word == DC_ADDR: refine_active = true
+    # Parameter refinements use the existing annotation parser. Keeping the
+    # declaration direct lets its body remain lazy instead of expanding it.
+    if dc_parameter_type and word == 0 and not dn_tokens[dn_at + 1].space and dn_tokens[dn_at + 1].symbol == .langle:
+        name = name_of(id)
+        if name in ["int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64"]:
+            return dw_type(dn_expr(160))
     dn_at += 1
     n = mk(.tname, mkpos(dn_file, token.start))
     nodes[n].name = i32(spelled)
@@ -1204,7 +1209,9 @@ dc_function_literal = (name_id: i32, opening: DewyLexeme) -> int:
         nodes[p].name = parameter.name
         if by_place: add_flag(p, NF_MUT)
         if dn_accept(.colon):
+            dc_parameter_type = true
             annotation = dc_annotation()
+            dc_parameter_type = false
             if annotation == 0: return 0
             nodes[p].a = i32(annotation)
         if dn_accept(.assign):

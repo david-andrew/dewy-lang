@@ -1,3 +1,6 @@
+@overflow("wrap")
+type __GpuInt = i32
+
 # GPU arrays: numbers kept in GPU memory and computed on by GPU programs.
 #
 #   g = gpu(xs)                       # upload (up to 4 dimensions)
@@ -111,13 +114,15 @@ gpu_available = () -> bool:
 # ---------------- moving data ----------------
 gpu = (xs: f32[]) -> GpuArray[f32]: __gpu_upload(xs, [xs.len()])
 gpu = (xs: f64[]) -> GpuArray[f32]: gpu(f32.(xs))
-gpu = (xs: i32[]) -> GpuArray[i32]: __gpu_upload(xs, [xs.len()])
-gpu = (xs: int[]) -> GpuArray[i32]: gpu(i32.(xs))
+gpu = (xs: __GpuInt[]) -> GpuArray[__GpuInt]: __gpu_upload(xs, [xs.len()])
+gpu = (xs: i32[]) -> GpuArray[__GpuInt]: gpu(__GpuInt.(xs))
+gpu = (xs: int[]) -> GpuArray[__GpuInt]: gpu(__GpuInt.(xs))
 gpu = (xs: bool[]) -> GpuArray[f32]: gpu(__to_f32.(xs))
 gpu = (m: f32[,]) -> GpuArray[f32]: __gpu_upload(m.data, m.shape)
 gpu = (m: f64[,]) -> GpuArray[f32]: __gpu_upload(f32.(m.data), m.shape)
-gpu = (m: i32[,]) -> GpuArray[i32]: __gpu_upload(m.data, m.shape)
-gpu = (m: int[,]) -> GpuArray[i32]: __gpu_upload(i32.(m.data), m.shape)
+gpu = (m: __GpuInt[,]) -> GpuArray[__GpuInt]: __gpu_upload(m.data, m.shape)
+gpu = (m: i32[,]) -> GpuArray[__GpuInt]: __gpu_upload(__GpuInt.(m.data), m.shape)
+gpu = (m: int[,]) -> GpuArray[__GpuInt]: __gpu_upload(__GpuInt.(m.data), m.shape)
 
 __gpu_upload[T] = (xs: T[], shape: int[]) -> GpuArray[T]:
     if shape.len() > 4: panic("GPU arrays have at most 4 dimensions (this one has shape {__shape_str(shape)})")
@@ -136,7 +141,7 @@ __gpu_upload[T] = (xs: T[], shape: int[]) -> GpuArray[T]:
     g
 
 __gpu_is_int = (xs: f32[]) -> bool: false
-__gpu_is_int = (xs: i32[]) -> bool: true
+__gpu_is_int = (xs: __GpuInt[]) -> bool: true
 
 # the values (an array of the GPU array's shape)
 cpu[T] = (g: GpuArray[T]) -> T[,]: NDArray(__gpu_values(g), g.shape)
@@ -169,16 +174,16 @@ sum = (g: GpuArray[f32]) -> f64:
     s = 0.0
     loop x in __gpu_reduced(g, 0): s += f64(x)
     s
-sum = (g: GpuArray[i32]) -> int:
+sum = (g: GpuArray[__GpuInt]) -> int:
     s = 0
     loop x in __gpu_values(g): s += int(x)
     s
 mean = (g: GpuArray[f32]) -> f64: sum(g) / f64(max(g.n, 1))
-mean = (g: GpuArray[i32]) -> f64: f64(sum(g)) / f64(max(g.n, 1))
+mean = (g: GpuArray[__GpuInt]) -> f64: f64(sum(g)) / f64(max(g.n, 1))
 min = (g: GpuArray[f32]) -> f32: min(__gpu_reduced(g, 1))
 max = (g: GpuArray[f32]) -> f32: max(__gpu_reduced(g, 2))
-min = (g: GpuArray[i32]) -> i32: min(__gpu_reduced_i(g, 1))
-max = (g: GpuArray[i32]) -> i32: max(__gpu_reduced_i(g, 2))
+min = (g: GpuArray[__GpuInt]) -> i32: min(__gpu_reduced_i(g, 1))
+max = (g: GpuArray[__GpuInt]) -> i32: max(__gpu_reduced_i(g, 2))
 
 __GPU_REDUCE = "#version 300 es
 precision highp float;
@@ -241,31 +246,31 @@ __gpu_reduced = (g: GpuArray[f32], op: int) -> f32[]:
 
 # the same for integers (min and max; their sums are made exactly on the CPU): on the GPU with
 # Vulkan, else all of the values
-__gpu_reduced_i = (g: GpuArray[i32], op: int) -> i32[]:
+__gpu_reduced_i = (g: GpuArray[__GpuInt], op: int) -> __GpuInt[]:
     when TARGET != "wasm":
         if g.tex != 0 and g.n > 256 and __gpu_vk:
             k = compute(__gvk_reduce_i)
-            src = GpuBuffer[i32](__gvk[g.tex].addr, g.n, 0, null, fill(u8(0), 1))
+            src = GpuBuffer[__GpuInt](__gvk[g.tex].addr, g.n, 0, null, fill(u8(0), 1))
             loop src.n > 256:
-                dst: GpuBuffer[i32] = gpu_buffer((src.n + 63) / 64)
+                dst: GpuBuffer[__GpuInt] = gpu_buffer((src.n + 63) / 64)
                 dispatch(k, dst.n, __GvkRedI(src, dst, op))
                 src = dst
             return cpu(src)
     __gpu_values(g)
 
 struct __GvkRedI:
-    src: GpuBuffer[i32]
-    dst: GpuBuffer[i32]
+    src: GpuBuffer[__GpuInt]
+    dst: GpuBuffer[__GpuInt]
     op: int
 __gvk_reduce_i = (id: int, u: __GvkRedI):
-    acc = i32(0x7FFFFFFF)
-    if u.op == 2: acc = i32(-0x80000000)
+    acc = __GpuInt(0x7FFFFFFF)
+    if u.op == 2: acc = __GpuInt(-0x80000000)
     n = len(u.src)
     loop k in [0..64):
         i = id * 64 + k
         if i < n:
-            if u.op == 1: acc = min(acc, u.src[i])
-            else: acc = max(acc, u.src[i])
+            if u.op == 1: acc = __GpuInt(min(acc, u.src[i]))
+            else: acc = __GpuInt(max(acc, u.src[i]))
     u.dst[id] = acc
 
 # (Vulkan) a step of a reduction: element id of dst combines 64 values of src
@@ -291,8 +296,9 @@ __gvk_reduce = (id: int, u: __GvkRed):
 __gpu_from = (m: f32[,]) -> GpuArray[f32]: gpu(m)
 __gpu_from = (m: f64[,]) -> GpuArray[f32]: gpu(m)
 __gpu_from = (m: bool[,]) -> GpuArray[f32]: gpu(ndarray(__to_f32.(m.data), m.shape))
-__gpu_from = (m: i32[,]) -> GpuArray[i32]: gpu(m)
-__gpu_from = (m: int[,]) -> GpuArray[i32]: gpu(m)
+__gpu_from = (m: __GpuInt[,]) -> GpuArray[__GpuInt]: gpu(m)
+__gpu_from = (m: i32[,]) -> GpuArray[__GpuInt]: gpu(m)
+__gpu_from = (m: int[,]) -> GpuArray[__GpuInt]: gpu(m)
 __to_f32 = (x: bool) -> f32:
     if x: return 1.0
     0.0
@@ -413,8 +419,8 @@ __gpu_run_f = (src: str, ins: __GpuIn[], fs: f32[], ints: i32[]) -> GpuArray[f32
     out = __gpu_alloc([] as f32[], __gpu_out_shape(ins))
     __gpu_run(src, ins, fs, ints, out.tex, out.w, out.h, out.shape)
     out
-__gpu_run_i = (src: str, ins: __GpuIn[], fs: f32[], ints: i32[]) -> GpuArray[i32]:
-    out = __gpu_alloc([] as i32[], __gpu_out_shape(ins))
+__gpu_run_i = (src: str, ins: __GpuIn[], fs: f32[], ints: i32[]) -> GpuArray[__GpuInt]:
+    out = __gpu_alloc([] as __GpuInt[], __gpu_out_shape(ins))
     __gpu_run(src, ins, fs, ints, out.tex, out.w, out.h, out.shape)
     out
 

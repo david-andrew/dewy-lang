@@ -3,19 +3,19 @@
 # writes only other fields of the receiver.
 $explicit_copies
 
-fold=(@h:array<uint32 length=2> data:array<uint8>):>void=>{
+fold=(@h:array<uint32<overflow='wrap'> length=2> data:array<uint8>):>void=>{
     loop b in data {
-        h[0]+=b as uint32
+        h[0]+=b as uint32<overflow='wrap'>
     }
     h[1]+=1
 }
 
 Hasher:type=[
-    h:array<uint32 length=2>=[]
+    h:array<uint32<overflow='wrap'> length=2>=[]
     pending:array<uint8>=[]
     absorb=(data:array<uint8>):>void=>{
         loop b in data {
-            h[0]+=b as uint32
+            h[0]+=b as uint32<overflow='wrap'>
         }
     }
     feed=(data:array<uint8>):>void=>{
@@ -28,8 +28,8 @@ Hasher:type=[
     }
 ]
 
-total=(key:array<uint8>):>uint32=>{
-    let sum:uint32=0
+total=(key:array<uint8>):>uint32<overflow='wrap'>=>{
+    let sum:uint32<overflow='wrap'>=0
     loop i in [0..3) {
         let piece=[key... (i as uint8)]
         let hasher=Hasher()

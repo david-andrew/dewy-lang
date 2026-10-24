@@ -34,9 +34,9 @@ def test_unpacked_values_keep_their_declared_type(compiler, tmp_path):  # noqa: 
     wrapped = gen.Bin(gen.I, '//', gen.Conv(gen.I, gen.Lit(gen.U, 29), wrap=True), gen.Lit(gen.I, 8))
     unpack = gen.Unpack(('v1', 'v2', 'v3'), (gen.Lit(gen.I, 15), gen.Lit(gen.I, 0), wrapped), False, True, 'p4')
     body = unpack.render().replace('\n', '\n    ')
-    source = f'h=(@t:int64):>void=>{{}}\nmain=():>void=>{{\n    {body}\n    h(@v1)\n    h(@v3)\n    printl(v1 << 62)\n}}\n'
+    source = f'h=(@t:int64):>void=>{{}}\nmain=():>void=>{{\n    {body}\n    h(@v1)\n    h(@v3)\n    printl(int(v1) << 62)\n}}\n'
     ran = build_and_run(compiler, tmp_path, 'unpack', source)
-    assert ran.returncode == 0 and ran.stdout == '15\n0\n3\n-4611686018427387904\n', source + ran.stdout + ran.stderr
+    assert ran.returncode == 0 and ran.stdout == '15\n0\n3\n69175290276410818560\n', source + ran.stdout + ran.stderr
 
 
 # Wrong code tracked until fixed: (source, expected stdout).

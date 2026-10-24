@@ -422,11 +422,9 @@ LITERALS = (0, 1, 2, 3, 5, 7, 8, 10, 15, 16, 31, 63, 64, 100, 127, 255, 256, 100
 def gen_arith(r, p):
     """Expressions over one fixed width (or `int`), with `int` mixed in.
 
-    `+ - *`, the bitwise operators, `not`, negation and shifts keep a fixed width and wrap;
-    `//`, `%` and `^` are exact, and on widths below 64 bits give an `int64` word (the narrower
-    operands widen), which then mixes with the width as an `int64`. Any `int` operand makes the
-    operation exact `int`. A power that would leave its 64-bit word is not generated: today it
-    wraps (lib/std/dewy.jo) where docs/LANGUAGE.md says it is exact and checked.
+    Explicit wrap conversions keep the fixed-width subexpressions at their modeled
+    widths; ordinary arithmetic inside each conversion is exact. Division, remainder
+    and power retain their widening model. Mathematical-int operands remain exact.
     """
     t = r.choice(FIXED + ('int', 'int64', 'int64', 'uint64'))
     names = [f'a{i}' for i in range(r.randint(2, 4))]
@@ -448,6 +446,9 @@ def gen_arith(r, p):
     def join(x, y):
         return 'int' if 'int' in (x, y) else x if x == y else 'int64'
 
+    def word(text, ty):
+        return text if ty == 'int' else f"{ty}({ty}<overflow='wrap'>({text}))"
+
     def leaf():
         if mixed and r.random() < .25:
             return 'z', zval, 'int'
@@ -465,9 +466,9 @@ def gen_arith(r, p):
         if op == 'big':
             return f'bigint({a[0]})', a[1], 'int'
         if op == 'not':
-            return f'(not {a[0]})', wrap(~a[1], ty), ty
+            return word(f'(not {a[0]})', ty), wrap(~a[1], ty), ty
         if op == 'neg' and (ty == 'int' or WIDTHS[ty][1]):
-            return f'(-{a[0]})', wrap(-a[1], ty), ty
+            return word(f'(-{a[0]})', ty), wrap(-a[1], ty), ty
         if op in ('<<', '>>'):
             k = r.randrange(bits + 3) if r.random() < .8 else r.choice((0, 1, bits - 1))
             count = str(k)
@@ -482,7 +483,8 @@ def gen_arith(r, p):
                 v = 0 if op == '<<' or x >= 0 else -1
             else:
                 v = wrap(x << k, ty) if op == '<<' else x >> k
-            return f'({a[0]} {op} {count})', v, ty
+            left = a[0] if ty == 'int' else f"{ty}<overflow='wrap'>({a[0]})"
+            return word(f'({left} {op} {count})', ty), v, ty
         if op in ('//', '%'):
             d = r.choice(DIVISORS)
             if ty != 'int' and WIDTHS.get(ty, (0, True))[1] and r.random() < .3:
@@ -494,14 +496,14 @@ def gen_arith(r, p):
             v = a[1] // b[1] if op == '//' else a[1] % b[1]
             if not fits(v, ty):
                 raise Discard
-            return f'({a[0]} {op} {b[0]})', v, ty
+            return f'{ty}({a[0]} {op} {b[0]})', v, ty
         if op == '^':
             k = r.randrange(4)
             ty = 'int' if ty == 'int' else exact_type if ty == t else ty
             v = a[1] ** k
             if not fits(v, ty):
                 raise Discard
-            return f'({a[0]} ^ {k})', v, ty
+            return f'{ty}({a[0]} ^ {k})', v, ty
         op = op if op in ('+', '-', '*', 'and', 'or', 'xor') else '+'
         b = expr(depth + 1)
         k = r.choice(LITERALS) * (-1 if r.random() < .3 else 1)
@@ -515,7 +517,7 @@ def gen_arith(r, p):
         ty = join(a[2], b[2])
         x, y = a[1], b[1]
         v = {'+': x + y, '-': x - y, '*': x * y, 'and': x & y, 'or': x | y, 'xor': x ^ y}[op]
-        return f'({a[0]} {op} {b[0]})', wrap(v, ty), ty
+        return word(f'({a[0]} {op} {b[0]})', ty), wrap(v, ty), ty
 
     checks = []
     for _ in range(r.randint(2, 6)):
@@ -539,7 +541,8 @@ def gen_arith(r, p):
             old = values[target]
             new = wrap({'+': old + v, '-': old - v, '*': old * v}[op], t)
             values[target] = new
-            checks.append((f'{target} {op}= {text}\nprintl({target})', f'{new}\n'))
+            update = word(f'{target} {op} {text}', t)
+            checks.append((f'{target} = {update}\nprintl({target})', f'{new}\n'))
         elif roll < .8:
             ops = r.choice((('<?', '<=?'), ('>?', '>=?'), ('=?',), ('not=?',)))
             n = 2 if ops == ('not=?',) else r.randint(2, 3)
@@ -917,7 +920,11 @@ def gen_kernels(r, p):
                            f'        if a >? b {name} += 1\n    }}\n}}\nprintl({name})'), f'{v}\n'))
     if not checks:
         raise Discard
-    return shell('kernels', [], setup, checks)
+    # These kernels deliberately exercise wrapping, now an explicit policy.
+    word = f'{p}Word'
+    render = lambda text: re.sub(rf'\b{t}\b', word, text)
+    return shell('kernels', [f"{word}:type = {t}<overflow='wrap'>"],
+                 [render(text) for text in setup], [(render(text), out) for text, out in checks])
 
 
 # Family: conversions -----------------------------------------------------------------------------

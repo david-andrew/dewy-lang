@@ -149,6 +149,7 @@ static void register_decls(Module *m, NodeList *decls, NodeList *init_stmts) {
     case N_FN:
       scope_add(m->scope, d->name, S_FNS, NULL, d);
       break;
+    case N_TYPEALIAS: scope_add(m->scope, d->name, S_TYPE, resolve_type(d->a, m->scope), d); break;
     case N_STRUCT: scope_add(m->scope, d->name, S_STRUCT, d, d); break;
     case N_ENUM: scope_add(m->scope, d->name, S_ENUM, d, d); break;
     case N_CONST: {
@@ -1012,7 +1013,7 @@ void check_stmt(FnCtx *c, Node **ps) {
   case N_BLOCK:
     check_block(c, s, NULL, false);
     break;
-  case N_FN: case N_STRUCT: case N_ENUM: case N_IMPORT:
+  case N_FN: case N_STRUCT: case N_ENUM: case N_IMPORT: case N_TYPEALIAS:
     fatal(s->pos, "declarations are only allowed at the top level");
   case N_TEST: case N_BUILD: break;
   default:

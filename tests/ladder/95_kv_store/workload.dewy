@@ -15,7 +15,7 @@ from p"disk.dewy" import Disk, DiskError, Crashed, Fault
 from p"wal.dewy" import damage_last
 
 Rng:type = [
-    state:uint64
+    state:uint64<overflow='wrap'>
     next = ():>uint64<(<? 2147483648)> => {
         state = state*6364136223846793005+1442695040888963407
         return state >> 33
@@ -38,10 +38,10 @@ Tally:type = [
 
 # FNV-1a over the sorted contents: a compact fingerprint for the expected output.
 fingerprint = (entries:array<Entry>):>string => {
-    let h:uint64 = 0xcbf29ce484222325
+    let h:uint64<overflow='wrap'> = 0xcbf29ce484222325
     loop entry in entries {
         loop b in bytes("{entry.key}={entry.value}\n") {
-            h = (h xor (b as uint64))*0x100000001b3
+            h = (h xor (b as uint64<overflow='wrap'>))*0x100000001b3
         }
     }
     return format(h "016x")

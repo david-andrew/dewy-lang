@@ -104,8 +104,8 @@ def test_partitioned_cross_worker_inline(compiler, tmp_path):
 
 def test_partitioned_static_policy_stays_serial(compiler, tmp_path):
     source = tmp_path / 'static.dewy'
-    source.write_text('\n'.join(f'f{i}=(x:int64):>int64=>x+{i}' for i in range(140)) +
-                      '\nlet sum:int64=0\n' + '\n'.join(f'sum+=f{i}({i})' for i in range(140)) +
+    source.write_text('\n'.join(f"f{i}=(x:int64):>int64=>int64<overflow='wrap'>(x+{i})" for i in range(140)) +
+                      '\nlet sum:int64=0\n' + '\n'.join(f"sum=int64<overflow='wrap'>(sum+f{i}({i}))" for i in range(140)) +
                       '\nprintl"{sum}"\n')
     strict = '--internal-fact-policy=require-static'
     base, errors = build(compiler, source, tmp_path / 'one', 1, strict, DEWY_EMIT_FORCE='1')

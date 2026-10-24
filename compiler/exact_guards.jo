@@ -1,0 +1,118 @@
+# Cheap facts already supplied by a dominating scalar guard. Only functions
+# with exact obligations enter this domain. Local-indexed intervals and write
+# generations cost O(L) space; entering/leaving a guard costs O(condition nodes),
+# bounded to 64 terms, and querying or invalidating a local is O(1).
+# A loop forgets incoming intervals before learning its own condition, so an
+# assignment on a backedge cannot reuse an entry-only fact on a later iteration.
+# That invalidation costs O(active guard depth) per loop.
+use 'ast.jo'
+use 'types.jo'
+use 'refine.jo'
+use 'check.jo'
+use 'expr.jo'
+use 'lower.jo'
+use 'facts.jo'
+use 'exact.jo'
+use 'math_lower.jo'
+use 'lex.jo'
+
+struct ExactGuard:
+    local: int
+    lo: int
+    hi: int
+    owner: int
+    version: int
+
+eg_active = false
+eg_lo: int[]
+eg_hi: int[]
+eg_owner: int[]
+eg_version: int[]
+eg_stack: ExactGuard[]
+eg_demanded: bool[]
+
+eg_local = (n: int) -> int:
+    if n <= 0 or nodes[n].kind != .ident or nodes[n].aux != i32(int(SK.local)) or exact_representation(ntype(n)) != T_INT: return 0
+    l = int(nodes[n].sym)
+    if l <= 0 or int(locals[l].flags) & (LF_MUTPARAM | LF_ALIAS | LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_ADDR | LF_BYREF | LF_EXPOSED) != 0: return 0
+    l
+
+eg_bound = (n: int) -> (int, int):
+    if nodes[n].kind == .int_lit and not has_flag(n, NF_U64): return (nodes[n].ival, nodes[n].ival)
+    l = eg_local(n)
+    if l > 0 and l < eg_owner.len() and eg_owner[l] == cur_fn: return (eg_lo[l], eg_hi[l])
+    (FACT_MIN, FACT_MAX)
+
+eg_constrain = (l: int, lo: int, hi: int):
+    let lo = lo; let hi = hi
+    if l >= eg_owner.len():
+        size = max(l + 1, locals.len())
+        eg_lo.resize(size); eg_hi.resize(size); eg_owner.resize(size); eg_version.resize(size)
+    eg_stack.push(ExactGuard(l, eg_lo[l], eg_hi[l], eg_owner[l], eg_version[l]))
+    if eg_owner[l] == cur_fn:
+        lo = max(lo, eg_lo[l]); hi = min(hi, eg_hi[l])
+    eg_lo[l] = lo; eg_hi[l] = hi; eg_owner[l] = cur_fn
+
+eg_condition = (n: int, yes: bool, budget: mut int):
+    budget -= 1
+    if budget < 0 or n <= 0: return
+    k = nodes[n].kind
+    if k == .not_: eg_condition(int(nodes[n].a), not yes, budget); return
+    if k == .and_ and yes or k == .or_ and not yes:
+        eg_condition(int(nodes[n].a), yes, budget); eg_condition(int(nodes[n].b), yes, budget)
+        return
+    if k != .binary or nodes[n].aux != 0: return
+    l = eg_local(int(nodes[n].a))
+    if l == 0: return
+    known, value = integer_constant(int(nodes[n].b))
+    if not known or has_flag(int(nodes[n].b), NF_U64): return
+    op = nodes[n].op as Tok
+    if not yes:
+        if op == .lt: op = .ge
+        else if op == .le: op = .gt
+        else if op == .gt: op = .le
+        else if op == .ge: op = .lt
+        else: return
+    if op == .gt and value < FACT_MAX: eg_constrain(l, value + 1, FACT_MAX)
+    else if op == .ge: eg_constrain(l, value, FACT_MAX)
+    else if op == .lt and value > FACT_MIN: eg_constrain(l, FACT_MIN, value - 1)
+    else if op == .le: eg_constrain(l, FACT_MIN, value)
+    else if op == .eq: eg_constrain(l, value, value)
+
+eg_begin = (condition: int, yes: bool) -> int:
+    mark = eg_stack.len()
+    if cur_fn > 0 and cur_fn < eg_demanded.len() and eg_demanded[cur_fn]:
+        budget = 64
+        eg_condition(condition, yes, budget)
+    mark
+
+eg_end = (mark: int):
+    loop eg_stack.len() > mark:
+        old = eg_stack.pop()
+        if eg_version[old.local] == old.version:
+            eg_lo[old.local] = old.lo; eg_hi[old.local] = old.hi; eg_owner[old.local] = old.owner
+
+eg_write = (n: int):
+    if eg_stack.len() == 0: return
+    if nodes[n].kind == .tuple:
+        loop child in kids(n): eg_write(child)
+        return
+    l = eg_local(n)
+    if l > 0 and l < eg_owner.len(): eg_owner[l] = 0; eg_version[l] += 1
+
+eg_loop = ():
+    loop entry in eg_stack:
+        eg_owner[entry.local] = 0; eg_version[entry.local] += 1
+
+# One signed-word operation can use the endpoints already established above;
+# no new relational state, recursive body walk or speculative proof is needed.
+eg_fits = (n: int) -> bool:
+    if eg_stack.len() == 0 or nodes[n].kind != .binary or nodes[n].aux != 0: return false
+    op = nodes[n].op as Tok
+    if op != .plus and op != .minus: return false
+    left = int(nodes[n].a); right = int(nodes[n].b)
+    if exact_has_node(left) or exact_has_node(right) or exact_bits(left) > 64 or exact_bits(right) > 64: return false
+    a, b = eg_bound(left); c, d = eg_bound(right)
+    if a > b or c > d: return false
+    if op == .plus: return not math_word_overflow(0, a, c) and not math_word_overflow(0, b, d)
+    not math_word_overflow(1, a, d) and not math_word_overflow(1, b, c)

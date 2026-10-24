@@ -28,8 +28,9 @@ enum Op:
     mulhs             # dst = the high 64 bits of a * b, signed (division by a constant: x86-64 and arm64)
     mulhu             # ... unsigned
     memeq           # compare c bytes at a and b (bounded reads, x86-64 only)
-    checked_add, checked_sub, checked_mul # signed word result, imm = nonreturning overflow helper
+    checked_add, checked_sub, checked_mul # word result, c bit 0 unsigned, bit 5 native 32-bit; imm = overflow helper
     overflow_add, overflow_sub, overflow_mul # bool: signed arithmetic overflow
+    rot32           # native unsigned 32-bit rotate left, b in 0..32
     streq           # compare runtime strings a and b, including nil (x86-64 only)
     findb           # dst = the first k in [b, c) whose byte a[k] is one of imm's four (packed, low byte first), or c (x86-64 only)
 
@@ -100,6 +101,7 @@ struct IrUsePlan:
     next_start: int = -1
 
 dbg_on = false        # debug information for debuggers: where variables are (sloppy build)
+rotate32_ok = true # x86-64 has the native 32-bit rotate selector
 checked_flags = true # native overflow checks may overwrite an input; wasm must keep both
 mulh_ok = true        # the target has mulhs (x86-64 and arm64; not WebAssembly)
 
@@ -328,7 +330,8 @@ e_calli = (fp: int, args: int[], rt: int, cabi: bool) -> int:
     d
 
 e_block = (): emit(.block, 0, 0, 0, 0, 0, 0)
-e_loop = (): emit(.loop, 0, 0, 0, 0, 0, 0)
+# A nonzero loop immediate marks a cold fallback for allocation weights only.
+e_loop = (): emit(.loop, 0, 0, 0, 0, 0, int(ir_cold))
 e_if = (c: int): emit(.if_, 0, 0, c, 0, 0, 0)
 e_else = (): emit(.else_, 0, 0, 0, 0, 0, 0)
 e_end = (): emit(.end, 0, 0, 0, 0, 0, 0)
@@ -449,7 +452,8 @@ ir_operands = (ins: Ins) -> int:
             return d
 
 # Fixed operand layouts for final-IR consumers. Low bits count contiguous
-# a/b/c uses; flags describe a definition or an exceptional operand layout.
+# a/b/c uses; flags describe definitions, exceptional operands, and opcode
+# features consumed by the backend. One lookup replaces repeated classification.
 # Build once, O(opcodes). The opcode names, rather than ordinal ranges, keep
 # the exceptions explicit when the IR grows.
 const IR_DEF = 8
@@ -458,6 +462,9 @@ const IR_INDEX = 32
 const IR_STORE = 64
 const IR_INDIRECT = 128
 const IR_RETURN = 256
+const IR_CALL = 512
+const IR_NARROW32 = 1024
+const IR_OVERFLOW = 2048
 ir_operand_layouts = () -> int[]:
     modes = fill(IR_DEF | 2, int(Op.findb) + 1)
     loop op in [Op.nop, Op.block, Op.loop, Op.end, Op.else_, Op.br, Op.trap, Op.zeroslots, Op.vzu]: modes[int(op)] = 0
@@ -473,6 +480,9 @@ ir_operand_layouts = () -> int[]:
     modes[int(Op.load)] = IR_DEF | IR_INDEX | 1
     modes[int(Op.store)] = IR_STORE | IR_INDEX | 2
     modes[int(Op.vst)] = IR_STORE | 2
+    loop op in [Op.intr, Op.call, Op.calli, Op.callc, Op.syscall, Op.memcpy, Op.memset, Op.findb, Op.copy, Op.zero]: modes[int(op)] |= IR_CALL
+    modes[int(Op.zext32)] |= IR_NARROW32
+    loop op in [Op.overflow_add, Op.overflow_sub, Op.overflow_mul]: modes[int(op)] |= IR_OVERFLOW
     modes
 
 ir_operand_layout: int[] = ir_operand_layouts()

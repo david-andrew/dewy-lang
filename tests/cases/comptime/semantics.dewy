@@ -1,9 +1,9 @@
 # quick
 bump=(@xs:array<int64> index:int64)=> { xs[index]+=5 }
 values=(n:int64):>array<int64>=> {
-    let x:uint8=250
+    let x:uint8<overflow='wrap'>=250
     x+=uint8(n)
-    let y:int8=120
+    let y:int8<overflow='wrap'>=120
     y+=int8(n)
     let xs:array<int64>=[10 20]
     bump(@xs 1)

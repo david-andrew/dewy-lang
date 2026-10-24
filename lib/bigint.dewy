@@ -447,7 +447,7 @@ _convert_tree=(k:int64 reciprocals:bool):>_ConvertTree=>{
 }
 
 # x's 2^k base-10^9 chunks, least significant first (x < 10^(9*2^k)), pushed onto out
-_mag_chunks_into=(@out:array<uint64> x:array<uint64> k:int64 tree:_ConvertTree):>void=>{
+_mag_chunks_into=(@out:array<uint64> x:array<uint64> k:int64<0 <=? k and k <? 63> tree:_ConvertTree):>void=>{
     if x.length <=? _CONVERT_BASE {
         let chunks=_bigint_decimal_chunks(x)
         let want:int64=1 << k
@@ -466,7 +466,7 @@ _mag_decimal_chunks=(limbs:array<uint64>):>array<uint64>=>{
     # (the smallest k whose 10^(9*2^k) is above the value)
     let k:int64=0
     let bits=limbs.length*32
-    loop (1 << k)*29 <? bits k=k+1       # (10^9 > 2^29.89: 2^k chunks hold 29*2^k bits)
+    loop k <? 63 and (1 << k)*29 <? bits k=k+1       # (10^9 > 2^29.89: 2^k chunks hold 29*2^k bits)
     let tree=_convert_tree(k true)
     let out:array<uint64>=[]
     _mag_chunks_into(@out limbs k tree)
@@ -475,7 +475,7 @@ _mag_decimal_chunks=(limbs:array<uint64>):>array<uint64>=>{
 }
 
 # the magnitude of base-10^9 chunks[lo..lo+2^k) (least significant first; past the end: zeros)
-_mag_from_chunks=(chunks:array<uint64> lo:int64 k:int64 tree:_ConvertTree):>array<uint64>=>{
+_mag_from_chunks=(chunks:array<uint64> lo:int64 k:int64<0 <=? k and k <? 63> tree:_ConvertTree):>array<uint64>=>{
     if lo >=? chunks.length return []
     let count:int64=1 << k
     if k <=? 4 {
@@ -514,7 +514,7 @@ _mag_from_digits=(digits:array<uint8>):>array<uint64>=>{
         stop=start
     }
     let k:int64=0
-    loop (1 << k) <? chunks.length k=k+1
+    loop k <? 63 and (1 << k) <? chunks.length k=k+1
     let tree=_convert_tree(k false)
     return _mag_from_chunks(chunks 0 k tree)
 }
@@ -661,7 +661,7 @@ to_int64=(value:BigInt):>int64|none=>{
 # Round the exact ratio once to an IEEE binary format. Keeping a quotient and
 # remainder avoids overflowing either part or losing a tie-breaking low bit.
 _ratio_float_bits=(negative:bool numerator:array<uint64> denominator:array<uint64>
-                   fraction_bits:int64 exponent_bits:int64):>uint64=>{
+                   fraction_bits:int64<0 <=? fraction_bits and fraction_bits <=? 52> exponent_bits:int64<2 <=? exponent_bits and exponent_bits <=? 11>):>uint64=>{
     # (the denominator is nonzero: a Rational's, or 1)
     let sign:uint64=0
     if negative sign=(1 as uint64) << (fraction_bits+exponent_bits)

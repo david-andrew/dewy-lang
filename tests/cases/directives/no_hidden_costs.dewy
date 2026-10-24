@@ -6,7 +6,7 @@ clamp=(x:int64):>int64=>{
     if x >? 100 return 100
     return x
 }
-mix=(a:int64 b:int64 gain:int64):>int64=>clamp((a+b)*gain)
+mix=(a:int64<overflow='wrap'> b:int64<overflow='wrap'> gain:int64<overflow='wrap'>):>int64=>clamp((a+b)*gain)
 main=()=>{
     $no_hidden_costs=false
     printl("{mix(30 40 2)} {mix(-7 3 1)}")

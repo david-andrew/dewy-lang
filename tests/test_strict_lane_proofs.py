@@ -105,8 +105,12 @@ parse = (text:string):>int64 & no panics => {
     if n <? -999 or n >? 999 return -3
     int64(n)
 }
-twice = (n:int64<(<? 1000)>):>int64 => n * 2
-grow = (n:int64<(<? 100)>):>int64 & allocates => twice(n) + 1
+twice = (n:int64<0 <=? n and n <? 1000>):>int64 => n * 2
+grow = (n:int64<0 <=? n and n <? 100>):>int64 & allocates => {
+    let value = twice(n)
+    if value <? 0 or value >? 2000 return 0
+    value + 1
+}
 ''' + MAIN + '''    let k = grow(3)
     if k is? OutOfMemory return OutOfMemory
     printl"{k} {parse("12")} {parse("-999")} {parse("+7")} {parse("1234")} {parse("12a")} {parse("123a")} {parse("")} {parse("-")} {parse("-0")}"

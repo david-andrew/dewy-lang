@@ -22,12 +22,17 @@ o_rewrite_mask = (op: Op) -> int:
         mov, neg, not_, fneg, fsqrt, fabs, ffloor, fceil, ftrunc, sext8, sext16, sext32, zext8, zext16, zext32, i2f, u2f, f2i, f2f, bits2f, f2bits, vsplat: 1
         _: 3
 
+o_boolean_op = (op: Op) -> bool:
+    match op:
+        eq, ne, lts, les, gts, ges, ltu, leu, gtu, geu: true
+        _: false
+
 o_simplify_kind = (op: Op) -> int:
     match op:
         iconst: 1
         mov: 2
         neg, not_, sext8, sext16, sext32, zext8, zext16, zext32: 3
-        overflow_add, overflow_sub, overflow_mul, add, sub, mul, divs, divu, rems, remu, and_, or_, xor, shl, shrs, shru, eq, ne, lts, les, gts, ges, ltu, leu, gtu, geu: 4
+        overflow_add, overflow_sub, overflow_mul, add, sub, mul, divs, divu, rems, remu, and_, or_, xor, shl, shrs, shru, rot32, eq, ne, lts, les, gts, ges, ltu, leu, gtu, geu: 4
         checked_add, checked_sub, checked_mul: 5
         select: 6
         calli: 7
@@ -122,7 +127,7 @@ o_pure_classify = (op: Op) -> bool:
     match op:
         select: true
         iconst, fconst, mov, slot, gaddr, daddr, faddr, load: true
-        add, sub, mul, divs, divu, rems, remu, and_, or_, xor, shl, shrs, shru, neg, not_, mulhs, mulhu, overflow_add, overflow_sub, overflow_mul: true
+        add, sub, mul, divs, divu, rems, remu, and_, or_, xor, shl, shrs, shru, rot32, neg, not_, mulhs, mulhu, overflow_add, overflow_sub, overflow_mul: true
         eq, ne, lts, les, gts, ges, ltu, leu, gtu, geu: true
         fadd, fsub, fmul, fdiv, fneg, fsqrt, fmin, fmax, ffloor, fceil, fabs, ftrunc: true
         feq, fne, flt, fle, fgt, fge: true
@@ -571,7 +576,7 @@ cse_arity_classify = (op: Op, mode: int) -> int:
         load: if mode & M_INDEX != 0: 2 else: 1
         neg, not_, fneg, fsqrt, ffloor, fceil, fabs, ftrunc: 1
         sext8, sext16, sext32, zext8, zext16, zext32, i2f, u2f, f2i, f2f, bits2f, f2bits: 1
-        add, sub, mul, divs, divu, rems, remu, and_, or_, xor, shl, shrs, shru, mulhs, mulhu, overflow_add, overflow_sub, overflow_mul: 2
+        add, sub, mul, divs, divu, rems, remu, and_, or_, xor, shl, shrs, shru, rot32, mulhs, mulhu, overflow_add, overflow_sub, overflow_mul: 2
         eq, ne, lts, les, gts, ges, ltu, leu, gtu, geu: 2
         fadd, fsub, fmul, fdiv, fmin, fmax, feq, fne, flt, fle, fgt, fge: 2
         _: -1
@@ -649,6 +654,71 @@ def_is = (v: int, op: Op) -> bool:
     if not reg.stable or reg.dop != i32(int(op)): return false
     o_regs[int(reg.da)].ver == reg.dva and o_regs[int(reg.db)].ver == reg.dvb
 
+# Bounded expression queries use CSE's operand-version checks, so a changed
+# loop variable cannot lend an old range or rotate identity to its new value.
+o_unsigned32 = (v: int, depth: int = 0) -> bool:
+    if is_k(v): return o_regs[v].cval >= 0 and o_regs[v].cval <= 4294967295
+    if def_is(v, .zext32) or def_is(v, .zext16) or def_is(v, .zext8) or def_is(v, .rot32): return true
+    if depth >= 4: return false
+    if def_is(v, .and_): return o_unsigned32(int(o_regs[v].da), depth + 1) or o_unsigned32(int(o_regs[v].db), depth + 1)
+    if def_is(v, .or_) or def_is(v, .xor): return o_unsigned32(int(o_regs[v].da), depth + 1) and o_unsigned32(int(o_regs[v].db), depth + 1)
+    if def_is(v, .shru): return o_unsigned32(int(o_regs[v].da), depth + 1)
+    false
+
+o_unwrap32 = (v: int) -> int: if def_is(v, .zext32): int(o_regs[v].da) else: v
+
+# A four-edge query only at shift/count consumers. CSE versions invalidate
+# stale operands; no function scan or new analysis state is needed.
+o_small_count = (v: int, depth: int = 0) -> int:
+    if is_k(v): return if o_regs[v].cval >= 0 and o_regs[v].cval <= 64: o_regs[v].cval else: -1
+    if depth >= 4: return -1
+    if def_is(v, .and_):
+        a = o_small_count(int(o_regs[v].da), depth + 1)
+        b = o_small_count(int(o_regs[v].db), depth + 1)
+        if a >= 0 and b >= 0: return min(a, b)
+        return max(a, b)
+    if def_is(v, .sub) and is_k(int(o_regs[v].da)):
+        a = o_regs[int(o_regs[v].da)].cval
+        b = o_small_count(int(o_regs[v].db), depth + 1)
+        if a >= 0 and a <= 64 and b >= 0 and b <= a: return a
+    -1
+
+o_rotate32 = (ins: mut Ins) -> bool:
+    if not rotate32_ok: return false
+    value = int(ins.a)
+    if ins.op == .zext32 and def_is(value, .or_) or ins.op == .or_ and o_unsigned32(int(ins.a)) and o_unsigned32(int(ins.b)):
+        left = o_unwrap32(if ins.op == .or_: int(ins.a) else: int(o_regs[value].da))
+        right = o_unwrap32(if ins.op == .or_: int(ins.b) else: int(o_regs[value].db))
+        if def_is(left, .shru):
+            saved = left; left = right; right = saved
+        if def_is(left, .shl) and def_is(right, .shru):
+            lc = int(o_regs[left].db); rc = int(o_regs[right].db)
+            x = int(o_regs[right].da)
+            complementary = is_k(lc) and is_k(rc) and o_regs[lc].cval >= 0 and o_regs[lc].cval <= 32 and o_regs[lc].cval + o_regs[rc].cval == 32
+            if def_is(rc, .sub) and is_k(int(o_regs[rc].da)) and o_regs[int(o_regs[rc].da)].cval == 32 and o_regs[rc].db == i32(lc):
+                limit = o_small_count(lc)
+                complementary = limit >= 0 and limit <= 32
+            if def_is(lc, .sub) and is_k(int(o_regs[lc].da)) and o_regs[int(o_regs[lc].da)].cval == 32 and o_regs[lc].db == i32(rc):
+                limit = o_small_count(rc)
+                complementary = limit >= 0 and limit <= 32
+            if complementary and o_unwrap32(int(o_regs[left].da)) == o_unwrap32(x) and o_unsigned32(x):
+                ins = Ins(.rot32, VI, ins.dst, i32(o_unwrap32(x)), i32(lc), 0, 0)
+                return true
+    if ins.op != .zext32: return false
+    # Duplication into both halves followed by a shift is the same rotation.
+    if def_is(value, .shru) and is_k(int(o_regs[value].db)):
+        count = o_regs[int(o_regs[value].db)].cval
+        dup = int(o_regs[value].da)
+        if count <= 0 or count >= 32 or not def_is(dup, .or_): return false
+        x = int(o_regs[dup].da); shifted = int(o_regs[dup].db)
+        if def_is(x, .shl):
+            saved = x; x = shifted; shifted = saved
+        if def_is(shifted, .shl) and o_regs[shifted].da == i32(x) and is_k(int(o_regs[shifted].db)) and o_regs[int(o_regs[shifted].db)].cval == 32 and o_unsigned32(x):
+            rotation = o_kconst(32 - count)
+            ins = Ins(.rot32, VI, ins.dst, i32(x), i32(rotation), 0, 0)
+            return true
+    false
+
 o_fits32 = (v: int) -> bool: v >= -2147483648 and v <= 2147483647
 
 o_emit = (ins0: Ins):
@@ -716,11 +786,26 @@ o_transfer = (ins: mut Ins, simplify: bool):
         a = int(ins.a)
         bb = int(ins.b)
         if kind == 5:
+            if op == .checked_sub and is_k(a) and o_regs[a].cval >= 0 and o_regs[a].cval <= 64:
+                limit = o_small_count(bb)
+                if limit >= 0 and limit <= o_regs[a].cval:
+                    ins = Ins(.sub, VI, i32(d), i32(a), i32(bb), 0, 0)
+                    continue
             raw = if op == .checked_add: Op.add else if op == .checked_sub: Op.sub else: Op.mul
             if is_k(a) and is_k(bb):
                 operation = if op == .checked_add: 0 else if op == .checked_sub: 1 else: 2
-                if math_word_overflow(operation, o_regs[a].cval, o_regs[bb].cval):
-                    fatal(ir_positions[int(ins.pos)], "integer overflow in constant expression (int64 representation of mathematical int)")
+                overflow = false
+                if int(ins.c) & 1 != 0:
+                    av = u64(o_regs[a].cval); bv = u64(o_regs[bb].cval)
+                    overflow = if operation == 0: av + bv < av else if operation == 1: av < bv else: bv != 0 and av > u64(18446744073709551615) / bv
+                else: overflow = math_word_overflow(operation, o_regs[a].cval, o_regs[bb].cval)
+                if int(ins.c) & 32 != 0:
+                    folded, value = fold(raw, o_regs[a].cval, o_regs[bb].cval)
+                    overflow = overflow or (if int(ins.c) & 1 != 0: value < 0 or value > 4294967295 else: value < -2147483648 or value > 2147483647)
+                if overflow:
+                    # A reachable store still fails at runtime under the default
+                    # policy, even when inlining exposes constant operands.
+                    break
                 ok, value = fold(raw, o_regs[a].cval, o_regs[bb].cval)
                 ins = Ins(.iconst, VI, i32(d), 0, 0, 0, value)
                 continue
@@ -756,11 +841,16 @@ o_transfer = (ins: mut Ins, simplify: bool):
                 ins = Ins(.mov, VI, i32(d), i32(value), 0, 0, 0)
                 continue
             break
-        # The bounded memory comparison already produces a canonical boolean.
-        # Inlined bool returns otherwise carry an unnecessary ABI byte extension.
-        if op == .zext8 and stable(a) and (o_regs[a].dop == i32(int(Op.memeq)) or o_regs[a].dop == i32(int(Op.streq))):
+        # Comparisons already produce a canonical boolean. Inlined bool
+        # returns otherwise leave an ABI extension between compare and branch.
+        if op == .zext8 and stable(a) and (o_regs[a].dop == i32(int(Op.memeq)) or o_regs[a].dop == i32(int(Op.streq)) or o_boolean_op(o_regs[a].dop as Op)):
             ins = Ins(.mov, VI, i32(d), i32(a), 0, 0, 0)
             continue
+        if op == .zext32:
+            if o_rotate32(ins): continue
+            if o_unsigned32(a):
+                ins = Ins(.mov, VI, i32(d), i32(a), 0, 0, 0)
+                continue
         # unary integer ops
         if kind == 3:
             if is_k(a):
@@ -770,6 +860,12 @@ o_transfer = (ins: mut Ins, simplify: bool):
                     continue
             break
         # binary integer ops
+        if op == .or_ and o_rotate32(ins): continue
+        if op == .shru and is_k(bb) and o_regs[bb].cval == 6:
+            limit = o_small_count(a)
+            if limit >= 0 and limit < 64:
+                ins = Ins(.iconst, VI, i32(d), 0, 0, 0, 0)
+                continue
         if is_k(a) and is_k(bb):
             ok, v = fold(op, o_regs[a].cval, o_regs[bb].cval)
             if ok:
@@ -803,6 +899,9 @@ o_transfer = (ins: mut Ins, simplify: bool):
                         continue
         # identities: result is a
         if (k == 0 and (op == .add or op == .sub or op == .or_ or op == .xor or op == .shl or op == .shrs or op == .shru)) or (k == 1 and (op == .mul or op == .divs or op == .divu)):
+            ins = Ins(.mov, VI, i32(d), i32(a), 0, 0, 0)
+            continue
+        if op == .and_ and k == -1:
             ins = Ins(.mov, VI, i32(d), i32(a), 0, 0, 0)
             continue
         if k == 0 and (op == .mul or op == .and_):
@@ -1306,7 +1405,10 @@ sra_escape = (value: int):
 # O(N + U + A + M + output): one definition index, one use walk, and a
 # worklist containing only M slot-memory operations. Address resolution visits
 # each of A demanded definitions once. The final rewrite runs only on success.
+sra_nested = false
+sra_retry = false
 o_sra = ():
+    sra_nested = false
     o_resize(ir.vtypes.len())
     ns = ir.slot_size.len()
     if ns == 0: return
@@ -1495,6 +1597,7 @@ o_sra = ():
                 sra_emit(out, Ins(conv, VI, i32(d), i32(sra_as_ty(out, x, VI)), 0, 0, 0))
             continue
         if op == .store and sra_is_p(a):
+            if sra_address(b) >= 0: sra_nested = true
             x = sra_lane_of(a, int((ins.imm >> sra_shift(sra_slots[sra_values[a].slot].width))))
             sra_emit(out, Ins(.mov, i32(vtype(x)), i32(x), i32(sra_as_ty(out, b, vtype(x))), 0, 0, 0))
             continue
@@ -1594,6 +1697,7 @@ o_input_use = (v: int, pos: int):
 
 optimize = ():
     o_sra()
+    nested = sra_nested
     nv = ir.vtypes.len()
     loop p in [0..ir.nparams):
         o_regs[p].ndef += 1
@@ -1869,6 +1973,12 @@ optimize = ():
                     o_regs[u].nuse -= 1
         i -= 1
     ir.code = o_cleanup(o_out, o_count)
+    # Replacing a local pointer container can expose its pointee to SRA.
+    # Retry only when that use was actually removed, at most once: O(IR).
+    if nested and not sra_retry:
+        sra_retry = true
+        optimize()
+        sra_retry = false
 
 # ---------------- returns ----------------
 # A branch to where the function returns (past ends only) returns there: `v = x; br out` then
@@ -2062,9 +2172,23 @@ o_if_select = (out: *Ins, start: int, n: int) -> int:
     yes = -1
     no = -1
     cost = 0
+    guard = -1
+    guard_yes = false
+    skip = -1
     loop j in [start + 2..n):
+        if j <= skip: continue
         ins = out[j]
         op = ins.op
+        # A single no-argument failure guard can be predicated by the arm's
+        # selection. Every other instruction in both arms remains pure.
+        if branch >= 0 and depth == 0 and guard < 0 and op == .if_ and j + 2 < n:
+            failure = out[j + 1]
+            if failure.op == .call and failure.c == 1 and failure.b == 0 and failure.dst < 0 and out[j + 2].op == .end:
+                guard = j
+                guard_yes = split < 0
+                skip = j + 2
+                cost += 2
+                continue
         if op == .block:
             depth += 1
             continue
@@ -2089,10 +2213,11 @@ o_if_select = (out: *Ins, start: int, n: int) -> int:
             if jump >= 0: return -1
             yes = j
         else: no = j
-    if depth != 0 or yes < 0 or no < 0 or split < 0: return -1
+    if depth != 0 or yes < 0 or no < 0 or split < 0 or cost > 8: return -1
     dst = int(out[yes].dst)
     cond = int(out[branch].a)
     if dst < 0 or out[no].dst != dst or vtype(dst) != VI: return -1
+    if guard >= 0 and out[guard].a == dst: return -1
     loop j in [branch + 1..n):
         ins = out[j]
         if not o_select_op(ins): continue
@@ -2109,9 +2234,34 @@ o_if_select = (out: *Ins, start: int, n: int) -> int:
     # saving vregs this leaves adjacent comparisons available to the emitter.
     y = if out[yes].op == .mov: int(out[yes].a) else: o_tmp()
     z = if out[no].op == .mov: int(out[no].a) else: o_tmp()
+    truth = -1
+    comparison = out[branch - 1]
+    if o_regs[cond].nuse == 1 and comparison.dst == cond and comparison.op == .ne and is_k(int(comparison.b)) and o_regs[int(comparison.b)].cval == 0:
+        source = int(comparison.a)
+        stable = source != dst
+        loop j in [branch + 1..n):
+            if out[j].dst == source: stable = false
+        if stable:
+            truth = branch - 1
+            cond = source
     replacement: Ins[]
     loop j in [start + 2..n):
+        if j == truth: continue
         ins = out[j]
+        if j == guard:
+            replacement.push(ins)
+            chosen = cond
+            if guard_yes:
+                zero = o_tmp()
+                chosen = o_tmp()
+                replacement.push(Ins(.iconst, VI, i32(zero), 0, 0, 0, 0))
+                replacement.push(Ins(.eq, VI, i32(chosen), i32(cond), i32(zero), 0, 0))
+            replacement.push(Ins(.if_, VI, -1, i32(chosen), 0, 0, 0))
+            replacement.push(out[j + 1])
+            replacement.push(out[j + 2])
+            replacement.push(out[j + 2])
+            continue
+        if guard >= 0 and (j == guard + 1 or j == guard + 2): continue
         if ins.op == .block or ins.op == .end or j == branch or j == jump: continue
         if (j == yes or j == no) and ins.op == .mov: continue
         if j == yes: ins.dst = i32(y)
@@ -2284,7 +2434,7 @@ o_retargetable_classify = (op: Op) -> bool:
         # Native flags consume the operands before assigning the result. Wasm
         # checks the saved operands afterwards, so it must retain a fresh local.
         checked_add, checked_sub, checked_mul: checked_flags
-        add, sub, mul, divs, divu, rems, remu, and_, or_, xor, shl, shrs, shru, neg, not_, load, mov, mulhs, mulhu, memeq, streq, overflow_add, overflow_sub, overflow_mul: true
+        add, sub, mul, divs, divu, rems, remu, and_, or_, xor, shl, shrs, shru, rot32, neg, not_, load, mov, mulhs, mulhu, memeq, streq, overflow_add, overflow_sub, overflow_mul: true
         eq, ne, lts, les, gts, ges, ltu, leu, gtu, geu: true
         fadd, fsub, fmul, fdiv, fneg, fsqrt, fmin, fmax, ffloor, fceil, fabs, ftrunc: true
         sext8, sext16, sext32, zext8, zext16, zext32, i2f, u2f, f2i, f2f, bits2f, f2bits, fconst, iconst: true

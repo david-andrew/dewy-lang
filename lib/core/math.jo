@@ -1,3 +1,4 @@
+use 'overflow.jo'
 # Math basics.
 
 const PI = 3.141592653589793
@@ -758,23 +759,23 @@ degrees = (rad: f64) -> f64: rad * 180.0 / PI
 
 # ---------------- random numbers (xoshiro256**) ----------------
 struct Rng:
-    s0: u64 = 0x9E3779B97F4A7C15
-    s1: u64 = 0xBF58476D1CE4E5B9
-    s2: u64 = 0x94D049BB133111EB
-    s3: u64 = 0x2545F4914F6CDD1D
+    s0: __wrap64 = 0x9E3779B97F4A7C15
+    s1: __wrap64 = 0xBF58476D1CE4E5B9
+    s2: __wrap64 = 0x94D049BB133111EB
+    s3: __wrap64 = 0x2545F4914F6CDD1D
 
-__rotl = (x: u64, k: int) -> u64: (x << u64(k)) | (x >> u64(64 - k))
+__rotl = (x: __wrap64, k: int) -> __wrap64: (x << u64(k)) | (x >> u64(64 - k))
 
 rng = (seed: int) -> Rng:
     r = Rng()
-    z = u64(seed) + 0x9E3779B97F4A7C15
+    z = __wrap64(seed) + 0x9E3779B97F4A7C15
     r.s0 = __splitmix(z)
     r.s1 = __splitmix(r.s0)
     r.s2 = __splitmix(r.s1)
     r.s3 = __splitmix(r.s2)
     r
 
-__splitmix = (x: u64) -> u64:
+__splitmix = (x: __wrap64) -> __wrap64:
     z = x + 0x9E3779B97F4A7C15
     z = ((z xor (z >> 30))) * 0xBF58476D1CE4E5B9
     z = ((z xor (z >> 27))) * 0x94D049BB133111EB
@@ -805,19 +806,19 @@ next_int = (r: mut Rng, lo: int, hi: int) -> int:
     __next_int_from(r, lo, hi)
 # (Lemire's multiply-and-reject: the high half of a 128-bit product of a random word and the
 # span, redrawn while the low half falls in the 2^64 mod span values that would favour some
-# results, so every number is equally likely. The span and the sum are counted in u64, which
-# wraps: [int.min..int.max) does not overflow.)
+# results, so every number is equally likely. The span and the sum are counted in explicit modular words, so
+# subtraction across the signed boundary is exact modulo 2^64: [int.min..int.max) does not overflow.)
 __next_int_from = (r: mut Rng, lo: int, hi: int) -> int:
-    span = u64(hi) - u64(lo)
-    x = next_u64(r)
+    span = __wrap64(hi) - __wrap64(lo)
+    x = __wrap64(next_u64(r))
     low = x * span
     if low < span:
-        reject = (u64(0) - span) % span
+        reject = (__wrap64(0) - span) % span
         loop low < reject:
-            x = next_u64(r)
+            x = __wrap64(next_u64(r))
             low = x * span
-    high = __random_mul_hi(x, span)
-    int(u64(lo) + high)
+    high = __wrap64(__random_mul_hi(x, span))
+    int(__wrap64(lo) + high)
 __random_mul_hi = (a: u64, b: u64) -> u64:
     when __MUL_HI:
         return __mul_hi(a, b)

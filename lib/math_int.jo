@@ -2,6 +2,70 @@
 # BigInt storage. Arithmetic never routes through a wrapping conversion.
 __int_overflow = (): panic("integer overflow: value does not fit the requested fixed width")
 
+
+# Positive floor remainder of a signed double word. The remainder remains
+# below a positive signed-word divisor, so its doubled unsigned value fits.
+# This allocation-free helper is the cold path of overflow-flag versioning.
+@noinline
+__exact_i128_mod_pos = (low: int, high: int, divisor: int) -> int:
+    negative = high < 0
+    lo = u64(low)
+    hi = u64(high)
+    if negative:
+        lo = u64(0) - lo
+        hi = ~hi + u64(lo == 0)
+    d = u64(divisor)
+    r: u64 = 0
+    bit = 127
+    loop bit >= 0:
+        digit = if bit >= 64: (hi >> (bit - 64)) & 1 else: (lo >> bit) & 1
+        r = (r << 1) | digit
+        if r >= d: r -= d
+        bit -= 1
+    if negative and r != 0: int(d - r) else: int(r)
+
+# Convert an exact two-word signed integer without allocating a bigint.
+# Retain a full word plus a sticky bit before the one floating conversion;
+# power-of-two scaling is exact. The common word-sized path needs no loop.
+__exact_i128_f64 = (low: int, high: int) -> f64:
+    negative = high < 0
+    lo = u64(low)
+    hi = u64(high)
+    if negative:
+        lo = u64(0) - lo
+        hi = ~hi + u64(lo == 0)
+    shift = 0
+    sticky: u64 = 0
+    loop hi != 0:
+        sticky |= lo & 1
+        lo = (lo >> 1) | (hi << 63)
+        hi = hi >> 1
+        shift += 1
+    lo |= u64(sticky != 0)
+    scale = f64_from_bits(u64(shift + 1023) << 52)
+    result = f64(lo) * scale
+    if negative: -result else: result
+
+__exact_i128_f32 = (low: int, high: int) -> f32:
+    negative = high < 0
+    lo = u64(low)
+    hi = u64(high)
+    if negative:
+        lo = u64(0) - lo
+        hi = ~hi + u64(lo == 0)
+    shift = 0
+    sticky: u64 = 0
+    loop hi != 0:
+        sticky |= lo & 1
+        lo = (lo >> 1) | (hi << 63)
+        hi = hi >> 1
+        shift += 1
+    lo |= u64(sticky != 0)
+    scale = f32_from_bits(u32(shift + 127) << 23)
+    result = f32(lo) * scale
+    if negative: -result else: result
+
+
 abs = (x: __dewy_int) -> __dewy_int: if x < 0: -x else: x
 min = (a: __dewy_int, b: __dewy_int) -> __dewy_int: if a < b: a else: b
 max = (a: __dewy_int, b: __dewy_int) -> __dewy_int: if a > b: a else: b

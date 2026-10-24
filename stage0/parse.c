@@ -1202,6 +1202,17 @@ static Node *parse_toplevel(void) {
     vpush(attrs, at);
     skip_newlines();
   }
+  if (pk() == TK_IDENT && peek()->len == 4 && memcmp(peek()->start, "type", 4) == 0) {
+    next();
+    d = new_node(N_TYPEALIAS, pos);
+    d->name = expect_ident("type name");
+    expect(TK_ASSIGN, NULL);
+    d->a = parse_type();
+    // The seed's machine arithmetic already wraps; overflow-policy attributes
+    // are interpreted by the independent Jo frontend on its next build.
+    end_stmt(d);
+    return d;
+  }
   switch (pk()) {
   case TK_FN: fatal(pos, "functions are written name = (a: T, b: T) -> R: body");
   case TK_EXTERN: next(); d = parse_fn_decl(true); break;

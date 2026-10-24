@@ -85,17 +85,62 @@ count[T] = (xs: T[], f: (T) -> bool) -> int:
 
 sum[T] = (xs: T[]) -> T:
     s: T
-    loop x in xs: s = s + x
+    when size_of(T) == 8 and __integer_mode(T) >= 0 and __integer_mode(T) < 2:
+        # A vectorizable census proves every scalar prefix fits, not merely
+        # the final sum (large cancelling terms must still take the checks).
+        # At most 2^31-1 terms of magnitude at most 2^31 fit in a signed word;
+        # the unsigned case admits terms up to 2^32-1 and also fits.
+        if xs.len() <= 2147483647:
+            bits: u64 = 0
+            candidate: T
+            loop x in xs:
+                candidate += x
+                when __integer_mode(T) == 1: bits |= u64(x) + u64(2147483648)
+                else: bits |= u64(x)
+            if bits <= u64(4294967295): return candidate
+    loop x in xs:
+        next = s + x
+        when size_of(T) == 8 and __integer_mode(T) >= 0 and __integer_mode(T) < 2:
+            when __integer_mode(T) == 1:
+                if ((s xor next) & (x xor next)) < 0: panic("exact sum does not fit int64")
+            else:
+                if next < s: panic("exact sum does not fit uint64")
+        s = next
     s
 
 # (through the two-value min and max: for floats, a NaN anywhere gives NaN)
 min[T] = (xs: T[]) -> T:
     if xs.len() == 0: panic("min of an empty array")
     m = xs[0]
-    loop x in xs: m = min(m, x)
+    loop x in xs: m = min[T](m, x)
     m
 
 max[T] = (xs: T[]) -> T:
+    if xs.len() == 0: panic("max of an empty array")
+    m = xs[0]
+    loop x in xs: m = max[T](m, x)
+    m
+
+# Floating array reductions retain scalar NaN and signed-zero semantics.
+min = (xs: f32[]) -> f32:
+    if xs.len() == 0: panic("min of an empty array")
+    m = xs[0]
+    loop x in xs: m = min(m, x)
+    m
+
+min = (xs: f64[]) -> f64:
+    if xs.len() == 0: panic("min of an empty array")
+    m = xs[0]
+    loop x in xs: m = min(m, x)
+    m
+
+max = (xs: f32[]) -> f32:
+    if xs.len() == 0: panic("max of an empty array")
+    m = xs[0]
+    loop x in xs: m = max(m, x)
+    m
+
+max = (xs: f64[]) -> f64:
     if xs.len() == 0: panic("max of an empty array")
     m = xs[0]
     loop x in xs: m = max(m, x)

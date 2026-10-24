@@ -1,0 +1,14 @@
+$runtime_checks
+Item:type=[id:int64 tags:array<int64> label:string]
+Bad:type=type of error & [code:int64]
+h17=(p18:array<int64>):>int64=>{
+    return int64(int64<overflow='wrap'>(uint64(0)))
+}
+main=():>void=>{
+    let n1:int64=7
+    let o11:int64?=n1
+    printl((o11 ?? (h17([17 (-19) n1]) << 48)))
+    let un22:int64|string=n1
+    printl((match un22 {m23:string=>un22 m24:int64=>"\{brace\}"}))
+    n1 -= (match un22 {m26:int64=>(-10) m27:string=>n1})
+}

@@ -1,5 +1,5 @@
 Player:type = [x:int64 velocity:int64 score:int64]
-Game:type = [players:array<Player> random:uint32 frame:int64]
+Game:type = [players:array<Player> random:uint32<overflow='wrap'> frame:int64]
 advance = (state:Game input:array<int64>):>Game => {
     let next = state
     $runtime_assert input.length >=? next.players.length

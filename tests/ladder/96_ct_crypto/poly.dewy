@@ -135,7 +135,7 @@ Poly1305:type = [
         let g3 = h3+c
         c = g3 >> 26
         g3 = g3 and LIMB
-        let g4 = h4+c-(1 << 26)
+        let g4 = uint64<overflow='wrap'>(h4+c)-(1 << 26)
 
         # All ones when g4 did not borrow (keep g), zero when it did (keep h).
         let keep_g = mask64((g4 >> 63) xor 1)

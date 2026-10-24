@@ -1,4 +1,4 @@
-"""A refined arm of an optional or union result (`addr<i => i <? xs.length> | none`)
+"""A refined arm of an optional or union result (`int64<i => 0 <=? i and i <? xs.length> | none`)
 is proven at each return, from loops too, and its predicate holds once a
 caller's test establishes that arm."""
 import subprocess
@@ -6,7 +6,7 @@ import subprocess
 from tests.support import compiler  # noqa: F401
 
 SOURCE = '''$runtime_checks=false
-find=(xs:array<int64> needle:int64):>addr<i => i <? xs.length> | none=>{
+find=(xs:array<int64> needle:int64):>int64<i => 0 <=? i and i <? xs.length> | none=>{
     loop i in [0..xs.length) {
         if xs[i] =? needle return i
     }
@@ -14,7 +14,7 @@ find=(xs:array<int64> needle:int64):>addr<i => i <? xs.length> | none=>{
 }
 read=(xs:array<int64> needle:int64):>int64=>{
     let index=find(xs needle)
-    if index is? addr return xs[index]
+    if index is? int64 return xs[index]
     return -1
 }
 main=():>void=>{
@@ -33,7 +33,7 @@ def test_refined_arm_facts(compiler, tmp_path):
 
 
 def test_refined_arm_needs_its_test(compiler, tmp_path):
-    source = SOURCE.replace('if index is? addr return xs[index]', 'return xs[index ?? 0]')
+    source = SOURCE.replace('if index is? int64 return xs[index]', 'return xs[index ?? 0]')
     (tmp_path / 'arms.dewy').write_text(source)
     result = subprocess.run([compiler, 'check', 'arms.dewy'], text=True, capture_output=True, timeout=60, cwd=tmp_path)
     assert result.returncode != 0 and 'cannot prove index is in bounds' in result.stderr, result.stderr
@@ -48,7 +48,7 @@ next=(source:array<uint8> start:int64<0 <=? start and start <=? source.length>):
 # (a counter guarded at an offset from a symbolic start, stepping unevenly)
 pairs=(source:array<uint8> start:int64<0 <=? start and start <=? source.length>):>int64=>{
     let i=start
-    let n=0
+    let n:int64=0
     loop i+1 <? source.length {
         if source[i] =? source[i+1] {
             n+=1
@@ -57,12 +57,12 @@ pairs=(source:array<uint8> start:int64<0 <=? start and start <=? source.length>)
             i+=1
         }
     }
-    return int64<overflow='wrap'>(n)
+    return n
 }
 twice=(source:array<uint8>):>int64|Failure=>{
     let i=next(source 0) or_throw
     let j=next(source i) or_throw
-    return j+pairs(source j)
+    return int64<overflow='wrap'>(j)+int64<overflow='wrap'>(pairs(source j))
 }
 main=():>void=>{
     let r=twice(bytes("aabb"))

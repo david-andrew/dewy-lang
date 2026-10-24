@@ -14,16 +14,16 @@ PROVED = {
     # A nonzero length is at least one: `xs[0]` and `xs[end]` after an early return.
     'nonzero_length': '''peek=(xs:array<int64>):>int64=>{
     if xs.length =? 0 return 0
-    return xs[0]+xs[end]+xs[xs.length-1]
+    return int64<overflow='wrap'>(xs[0])+int64<overflow='wrap'>(xs[end])+int64<overflow='wrap'>(xs[xs.length-1])
 }
-main=():>void=>exit(entry()) entry=():>int64=>peek([1 2])
+main=():>void=>exit(int64<overflow='wrap'>(entry())) entry=():>int64=>peek([1 2])
 ''',
     'nonzero_scalar': '''last=(xs:array<int64> k:int64):>int64=>{
     if k <? 0 or k not=? xs.length return 0
     if k =? 0 return 0
     return xs[k-1]
 }
-main=():>void=>exit(entry()) entry=():>int64=>last([1 2] 2)
+main=():>void=>exit(int64<overflow='wrap'>(entry())) entry=():>int64=>last([1 2] 2)
 ''',
     # Element and field writes in a loop body keep the lengths they cannot change.
     'element_writes_keep_length': '''shift=(xs:array<int64>):>array<int64>=>{
@@ -31,22 +31,22 @@ main=():>void=>exit(entry()) entry=():>int64=>last([1 2] 2)
     loop i in [1..out.length) {out[i]=out[i-1]}
     loop i in [0..xs.length) {
         let bad=xs
-        bad[i]=bad[i]+1
+        bad[i]=int64<overflow='wrap'>(bad[i])+1
     }
     return out
 }
-main=():>void=>exit(shift([1 2 3]).length)
+main=():>void=>exit(int64<overflow='wrap'>(shift([1 2 3]).length))
 ''',
     'field_writes_keep_length': '''World:type=[ids:array<int64> score:int64]
 tick=(w:World):>int64=>{
     let world=w
     loop i in [0..world.ids.length) {
-        world.ids[i]=world.ids[i]+1
-        world.score+=1
+        world.ids[i]=int64<overflow='wrap'>(world.ids[i])+1
+        world.score=int64<overflow='wrap'>(world.score)+1
     }
     return world.score
 }
-main=():>void=>exit(entry()) entry=():>int64=>tick(World[[1 2] 0])
+main=():>void=>exit(int64<overflow='wrap'>(entry())) entry=():>int64=>tick(World[[1 2] 0])
 ''',
     # A slice proves 0 <=? lo <=? hi <=? length and has hi-lo elements.
     'slice_bounds': '''tail=(xs:array<int64>):>int64=>{
@@ -55,9 +55,9 @@ main=():>void=>exit(entry()) entry=():>int64=>tick(World[[1 2] 0])
     let b=xs[..2]
     let c=xs[2..]
     let d=xs[..]
-    return a[1]+b[2]+c[0]+d[end]
+    return int64<overflow='wrap'>(a[1])+int64<overflow='wrap'>(b[2])+int64<overflow='wrap'>(c[0])+int64<overflow='wrap'>(d[end])
 }
-main=():>void=>exit(entry()) entry=():>int64=>tail([1 2 3])
+main=():>void=>exit(int64<overflow='wrap'>(entry())) entry=():>int64=>tail([1 2 3])
 ''',
     # A loan's capacity is the length plus the reservation.
     'loan_capacity': '''grow=():>int64=>{
@@ -65,7 +65,7 @@ main=():>void=>exit(entry()) entry=():>int64=>tail([1 2 3])
     $lend(@bytes reserve=2) {bytes.set_length(6)}
     return bytes.length
 }
-main=():>void=>exit(entry()) entry=():>int64=>grow()
+main=():>void=>exit(int64<overflow='wrap'>(entry())) entry=():>int64=>grow()
 ''',
     # Writing elements in place (`loop @x in xs`, or a counted loop's element
     # store) keeps the length, so the hidden index and the counter stay bounded.
@@ -73,11 +73,11 @@ main=():>void=>exit(entry()) entry=():>int64=>grow()
 tick=(values:array<int64> items:array<Item>):>int64=>{
     let xs=values
     let ys=items
-    loop @value in xs {value+=1}
-    loop @item in ys {item.hp-=1}
-    return xs.length+ys.length
+    loop @value in xs {value=int64<overflow='wrap'>(value)+1}
+    loop @item in ys {item.hp=int64<overflow='wrap'>(item.hp)-1}
+    return int64<overflow='wrap'>(xs.length)+int64<overflow='wrap'>(ys.length)
 }
-main=():>void=>exit(entry()) entry=():>int64=>tick([1 2] [])
+main=():>void=>exit(int64<overflow='wrap'>(entry())) entry=():>int64=>tick([1 2] [])
 ''',
     'counted_element_writes': '''bump=(values:array<int64>):>int64=>{
     let xs=values
@@ -85,11 +85,11 @@ main=():>void=>exit(entry()) entry=():>int64=>tick([1 2] [])
     loop true {
         k+=1
         if k >=? xs.length break
-        xs[k]+=1
+        xs[k]=int64<overflow='wrap'>(xs[k])+1
     }
     return xs.length
 }
-main=():>void=>exit(entry()) entry=():>int64=>bump([1 2])
+main=():>void=>exit(int64<overflow='wrap'>(entry())) entry=():>int64=>bump([1 2])
 ''',
     # `x % n` with a positive n lies in [0, n) (the remainder has the divisor's
     # sign); `n // 2` of a positive n is smaller than n.
@@ -107,26 +107,26 @@ middle=(xs:array<int64>):>int64=>{
     if n%2 =? 1 return xs[n//2]
     return 0
 }
-main=():>void=>exit(entry()) entry=():>int64=>{
+main=():>void=>exit(int64<overflow='wrap'>(entry())) entry=():>int64=>{
     let r=Ring[]
     push(@r 3)
-    return wrap([1] 5)+middle([1])
+    return int64<overflow='wrap'>(wrap([1] 5))+int64<overflow='wrap'>(middle([1]))
 }
 ''',
 }
 
 REJECTED = {
     'remainder_too_wide': ('''pick=(xs:array<int64 length=3> i:int64):>int64=>xs[i%4]
-main=():>void=>exit(entry()) entry=():>int64=>pick([1 2 3] 5)
+main=():>void=>exit(int64<overflow='wrap'>(entry())) entry=():>int64=>pick([1 2 3] 5)
 ''', 'cannot prove index is in bounds: missing upper bound'),
     'remainder_unknown_divisor': ('''pick=(xs:array<int64> i:int64 k:int64):>int64=>{
     if k <? 1 return 0
     return xs[i%k]
 }
-main=():>void=>exit(entry()) entry=():>int64=>pick([1] 5 1)
+main=():>void=>exit(int64<overflow='wrap'>(entry())) entry=():>int64=>pick([1] 5 1)
 ''', 'cannot prove index is in bounds: missing upper bound'),
     'half_of_empty': ('''middle=(xs:array<int64>):>int64=>xs[xs.length//2]
-main=():>void=>exit(entry()) entry=():>int64=>middle([1])
+main=():>void=>exit(int64<overflow='wrap'>(entry())) entry=():>int64=>middle([1])
 ''', 'cannot prove index is in bounds: missing upper bound'),
     'counted_pop': ('''bump=(values:array<int64>):>int64=>{
     let xs=values
@@ -135,11 +135,11 @@ main=():>void=>exit(entry()) entry=():>int64=>middle([1])
         k+=1
         if k >=? xs.length break
         if xs.length >? 0 {xs.pop();}
-        xs[k]+=1
+        xs[k]=int64<overflow='wrap'>(xs[k])+1
     }
     return xs.length
 }
-main=():>void=>exit(entry()) entry=():>int64=>bump([1 2])
+main=():>void=>exit(int64<overflow='wrap'>(entry())) entry=():>int64=>bump([1 2])
 ''', 'cannot prove index is in bounds'),
     'element_of_element': ('''Item:type=[parts:array<int64> hp:int64]
 tick=(items:array<Item>):>int64=>{
@@ -147,9 +147,9 @@ tick=(items:array<Item>):>int64=>{
     loop @item in ys {item.parts[0]+=1}
     return 0
 }
-main=():>void=>exit(entry()) entry=():>int64=>tick([])
+main=():>void=>exit(int64<overflow='wrap'>(entry())) entry=():>int64=>tick([])
 ''', 'cannot prove index is in bounds: missing upper bound'),
-    'slice_past_end': ('''main=():>void=>exit(entry()) entry=():>int64=>{
+    'slice_past_end': ('''main=():>void=>exit(int64<overflow='wrap'>(entry())) entry=():>int64=>{
     let xs:array<int64>=[1 2]
     return xs[1..3).length
 }
@@ -158,7 +158,7 @@ main=():>void=>exit(entry()) entry=():>int64=>tick([])
     if k >? xs.length return 0
     return xs[k..).length
 }
-main=():>void=>exit(entry()) entry=():>int64=>cut([1] 1)
+main=():>void=>exit(int64<overflow='wrap'>(entry())) entry=():>int64=>cut([1] 1)
 ''', 'cannot prove slice is in bounds: missing lower bound'),
     'slice_after_shrink': ('''cut=(xs:array<int64>):>int64=>{
     let ys=xs
@@ -166,13 +166,13 @@ main=():>void=>exit(entry()) entry=():>int64=>cut([1] 1)
     ys.pop();
     return ys[..1].length
 }
-main=():>void=>exit(entry()) entry=():>int64=>cut([1 2])
+main=():>void=>exit(int64<overflow='wrap'>(entry())) entry=():>int64=>cut([1 2])
 ''', 'cannot prove slice is in bounds: missing upper bound'),
     'guard_without_exit': ('''peek=(xs:array<int64>):>int64=>{
     if xs.length =? 0 {printl"empty"}
     return xs[0]
 }
-main=():>void=>exit(entry()) entry=():>int64=>peek([1])
+main=():>void=>exit(int64<overflow='wrap'>(entry())) entry=():>int64=>peek([1])
 ''', 'cannot prove index is in bounds: missing upper bound'),
     'pop_after_guard': ('''peek=(xs:array<int64>):>int64=>{
     let ys=xs
@@ -180,7 +180,7 @@ main=():>void=>exit(entry()) entry=():>int64=>peek([1])
     ys.pop();
     return ys[0]
 }
-main=():>void=>exit(entry()) entry=():>int64=>peek([1])
+main=():>void=>exit(int64<overflow='wrap'>(entry())) entry=():>int64=>peek([1])
 ''', 'cannot prove index is in bounds: missing upper bound'),
     'resize_in_loop': ('''drain=(xs:array<int64>):>int64=>{
     let ys=xs
@@ -191,7 +191,7 @@ main=():>void=>exit(entry()) entry=():>int64=>peek([1])
     }
     return t
 }
-main=():>void=>exit(entry()) entry=():>int64=>drain([1])
+main=():>void=>exit(int64<overflow='wrap'>(entry())) entry=():>int64=>drain([1])
 ''', 'cannot prove index is in bounds: missing upper bound'),
     'field_resize_in_loop': ('''World:type=[ids:array<int64> score:int64]
 tick=(w:World):>int64=>{
@@ -202,7 +202,7 @@ tick=(w:World):>int64=>{
     }
     return 0
 }
-main=():>void=>exit(entry()) entry=():>int64=>tick(World[[1 2] 0])
+main=():>void=>exit(int64<overflow='wrap'>(entry())) entry=():>int64=>tick(World[[1 2] 0])
 ''', 'index is not in bounds'),
     'record_replaced_in_loop': ('''World:type=[ids:array<int64> score:int64]
 tick=(w:World):>int64=>{
@@ -213,7 +213,7 @@ tick=(w:World):>int64=>{
     }
     return 0
 }
-main=():>void=>exit(entry()) entry=():>int64=>tick(World[[1 2] 0])
+main=():>void=>exit(int64<overflow='wrap'>(entry())) entry=():>int64=>tick(World[[1 2] 0])
 ''', 'index is not in bounds'),
 }
 
