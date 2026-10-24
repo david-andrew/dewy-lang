@@ -935,7 +935,9 @@ whose values hold it, ahead of a plain integer method, and the call has that
 method's result type; `(mode:'loud' ...)` and `(mode:'quiet' ...)` do the same for
 strings. `loop m in members(U)` unrolls over a literal
 union's members in one order whatever the spelling (the integers rising, then the
-strings in text order), each typed as its own singleton, so `if text =? m return m` returns a `U`. Literal unions are
+strings in text order), each typed as its own singleton, so `if text =? m return m` returns a `U`. As a value, `members(U)` is
+the array of those members in the same order, an `array<U>` unless its context gives the
+array a type (`let all = members(U)`, `f(members(U))`). Literal unions are
 ordinary type arguments: `Box<'tokens'|'ast'>`, `array<'a'|'b'>`.
 
 A refuted obligation is a compile error. Today, by default, an unproven

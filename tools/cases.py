@@ -10,7 +10,9 @@ fail at run time with matching output. See tests/cases/README.md.
 Ordinary cases of one mode compile together as modules of a single program and
 run in one process; panicking cases share one build and run once each. A batch
 that fails is split, and a failure that only reproduces in the combined program
-is reported for all of its cases.
+is reported for all of its cases. Output outside every case's markers (a module's
+top-level code runs before the batch's main) splits the batch until the case
+printing it runs alone, as it would unbatched.
 
 Quick (`# quick`, pytest's core_quick) is a smoke suite: one or two per subsystem.
 Exhaustive variants, slow builds, determinism loops beyond one smoke case and
@@ -336,7 +338,9 @@ class Runner:
         if not cases:
             return outcomes
         code, stdout, stderr = self.execute(command, timeout=RUN_TIMEOUT * 6)
-        finished, started = parse_batch(stdout)
+        finished, started, stray = parse_batch(stdout)
+        if stray:
+            return outcomes + self.isolate(cases, mode, self.value_batch)
         for index, (output, result) in finished.items():
             outcomes.append(self.judge(cases[index], mode, int(result) % 256, output))
         if len(finished) == len(cases):
@@ -365,15 +369,27 @@ class Runner:
                     for case in cases]
         return outcomes
 
+    def isolate(self, cases: list[Case], mode: str, batch) -> list[Outcome]:
+        """Output no case's markers hold: halve the batch until its printer runs alone."""
+        if len(cases) == 1:
+            return self.single(cases[0], mode)
+        middle = len(cases) // 2
+        return batch(cases[:middle], mode) + batch(cases[middle:], mode)
+
     def panic_batch(self, cases: list[Case], mode: str) -> list[Outcome]:
         command, cases, singles, failure = self.build_batch(cases, mode, select=True)
         outcomes = [outcome for case in singles for outcome in self.single(case, mode)]
         if failure:
             return outcomes + [outcome for case in cases for outcome in self.single(case, mode)]
+        judged = []
         for index, case in enumerate(cases):
             code, stdout, stderr = self.execute(command, select=index)
-            outcomes.append(self.judge(case, mode, code, stdout, stderr))
-        return outcomes
+            # (every run runs every module's top-level code before the selected case's marker)
+            before, marked, stdout = stdout.partition(f'{MARK}B{index}\n')
+            if before or not marked:
+                return outcomes + self.isolate(cases, mode, self.panic_batch)
+            judged.append(self.judge(case, mode, code, stdout, stderr))
+        return outcomes + judged
 
 
 MAIN = re.compile(r'^main\s*=\s*(?:<[^>]*>\s*)?\(\s*\)\s*(?::>\s*([\w<>]+))?\s*=>\s*(\S)', re.MULTILINE)
@@ -427,7 +443,7 @@ def batch_source(cases: list[Case], forms: list[str], select: bool) -> tuple[str
         void = {'guess': f'let h_{i}:<():>void>=@case_{i} h_{i}()', 'void': f'case_{i}()'}.get(form)
         if select:
             call = f'{void} return' if void else f'let r_{i}=case_{i}() exit(r_{i})'
-            lines.append(f'if selector =? "{i}" {{{call}}}')
+            lines.append(f'if selector =? "{i}" {{printl"{MARK}B{i}" {call}}}')
         else:
             lines.append(f'printl"{MARK}B{i}"')
             owners[len(lines) + 1] = i
@@ -460,18 +476,21 @@ def locate_error(stderr: str, work: Path, cases: list[Case], owners: dict[int, i
     return None
 
 
-def parse_batch(stdout: str) -> tuple[dict[int, tuple[str, str]], int | None]:
-    finished, started, position = {}, None, 0
+def parse_batch(stdout: str) -> tuple[dict[int, tuple[str, str]], int | None, bool]:
+    """Each finished case's output and result, the last case started, and whether any
+    output lies outside every case's markers (a module's top-level code, say)."""
+    finished, started, position, stray = {}, None, 0, False
     begin = re.compile(re.escape(MARK) + r'B(\d+)\n')
     while (opened := begin.search(stdout, position)) is not None:
+        stray = stray or opened.start() > position
         index = int(opened[1])
         started = index
         closed = re.compile('^' + re.escape(MARK) + rf'E{index}:(-?\d+)\n', re.MULTILINE).search(stdout, opened.end())
         if closed is None:
-            break
+            return finished, started, stray
         finished[index] = stdout[opened.end():closed.start()], closed[1]
         position = closed.end()
-    return finished, started
+    return finished, started, stray or position < len(stdout)
 
 
 def tail(text: str, lines: int = 25) -> str:

@@ -2011,6 +2011,8 @@ comprehension_self_typed = (n: int) -> bool:
 check_args_untyped = (args: int[]):
     loop a0 in args:
         a = unnamed(a0)
+        # (members(U) is the array literal of U's members, taking its type from the call as one does)
+        if nodes[a].kind == .call and members_named(a): members_argument(a)
         if dewy_set_literal(a):
             check_args_untyped(kids(a))
             continue
@@ -5417,6 +5419,7 @@ check_expr_in_module = (n: int, m: int, expected: int = 0) -> int:
 id_len = 0
 # (the object of `x.member` or `x[...]` being checked: a type there is the type)
 type_receiver_at = 0
+empty_index_receiver = 0      # the receiver of an empty index, `E[]`: a type there is constructed by it
 
 # A declared member wins over the synthesized value operation, including on
 # an alternative of a union. Leave those unions to ordinary member forwarding.
@@ -5611,7 +5614,9 @@ breakpoint_call = (n: int) -> int:
 check_call = (n: int, expected: int) -> int:
     if reflect_fields(n): fatal(nodes[n].pos, "fields(T) is a compile-time sequence; iterate over it with `loop field in fields(T)`")
     callee = int(nodes[n].a)
-    if nodes[callee].name == i32(id_members) and nodes[callee].kind == .ident and lookup(id_members) == 0 and string_domain_members(n): return ntype(n)
+    if nodes[callee].name == i32(id_members) and nodes[callee].kind == .ident and lookup(id_members) == 0:
+        if string_domain_members(n): return ntype(n)
+        if reflect_members(n): return members_array(n, expected)
     if id_breakpoint == 0: id_breakpoint = intern("$breakpoint")
     if nodes[callee].kind == .ident and int(nodes[callee].name) == id_breakpoint and nkids(n) == 0:
         breakpoint_call(n)
@@ -9224,7 +9229,8 @@ check_ident_expr = (n: int, expected: int) -> int:
         if nominal_parent.has(tt) and tt != error_type:
             si = int(types[tt].st)
             check_struct_fields(si)
-            if structs[si].nfields == 0:
+            # (`E[]` keeps the type, to construct it as any record type is)
+            if structs[si].nfields == 0 and n != empty_index_receiver:
                 return struct_ctor(n, tt, int(structs[si].decl), [], expected)
         # (a record type whose every field has a default, named where a value goes, is its
         # construction, as a function whose parameters all have defaults is called by its name;
@@ -9645,6 +9651,7 @@ check_index_expr = (n: int, expected: int) -> int:
         return check_expr(n, expected)
     saved_receiver = type_receiver_at
     type_receiver_at = int(nodes[n].a)
+    if nodes[n].b == 0 and nkids(n) == 0: empty_index_receiver = int(nodes[n].a)
     bt = prune(check_expr(int(nodes[n].a), 0))
     type_receiver_at = saved_receiver
     if is_dewy_set_type(bt) and dewy_at(nodes[n].pos):

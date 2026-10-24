@@ -1,0 +1,16 @@
+# members(U) as a value: an array of U's members in the loop's order, typed array<U>
+# unless the context gives the array a type
+Mode:type = 'slow' | 'fast' | 'auto'
+let modes = members(Mode)
+printl(modes.length)
+printl(modes)
+first = (xs:array<Mode>):>Mode => xs[0]
+printl(first(members(Mode)))
+printl(first(modes))
+count = (xs:array<string>):>int => xs.length
+printl(count(members('q' | 'r')))
+plain = <T>(values:array<T>):>T => values[0]
+printl(plain(members(<3|1|2>)))
+printl(members(<'fast' | 1 | 'slow' | -2>).length)
+loop v in members(<'fast' | 1 | 'slow' | -2>) print"{v} "
+printl("")

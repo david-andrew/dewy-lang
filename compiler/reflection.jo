@@ -110,6 +110,35 @@ members_type = (e: int) -> int:
     if parts.len() == 1: return parts[0]
     mk_union(parts)
 
+# members(U) used as a value is the array literal of U's members in the
+# loop's order: an array<U>, unless its context gives the array a type.
+members_literal = (n: int) -> int:
+    pos = nodes[n].pos
+    if nkids(n) != 1: fatal(pos, "members(U) needs one type")
+    u = members_type(kid(n, 0))
+    values: int[]
+    singletons: int[]
+    literal_members(u, pos, values, singletons)
+    items: int[]
+    loop value in values:
+        if nodes[value].kind == .str_lit: items.push(bc_str(name_of(int(nodes[value].sval)), pos))
+        else: items.push(bc_int(nodes[value].ival, pos))
+    nodes[n] = Node(kind = .array, pos = pos)
+    set_list(n, items)
+    u
+
+# (a call's callee may be `members`: a cheap test before reflect_members)
+members_named = (a: int) -> bool: id_members == 0 or nodes[int(nodes[a].a)].name == i32(id_members)
+
+# (an argument: the array literal, for the selected call's parameter to type)
+members_argument = (a: int):
+    if reflect_members(a) and not string_domain_members(a): members_literal(a)
+
+members_array = (n: int, expected: int) -> int:
+    u = members_literal(n)
+    if expected != 0 and (tkind(expected) == .array or tkind(expected) == .fixed): return check_expr(n, expected)
+    check_expr(n, mk_array(u))
+
 # Scope nodes carry either a field-table index or a checked constant value.
 reflect_sequence = (e: int, binder: int) -> int[]:
     let e = reflect_source(e)

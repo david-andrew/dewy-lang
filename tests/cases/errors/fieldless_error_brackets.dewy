@@ -1,0 +1,11 @@
+# a fieldless error type is constructed with [] as any record type is, or by its bare name
+Closed:type = type of error & []
+Busy:type = type of error
+take = (open:bool):>(int64 | Closed) => if open 1 else Closed[]
+printl(take(true))
+let r = take(false)
+printl(r is? Closed)
+let b = Busy[]
+let c = Busy
+printl(b is? Busy and c is? Busy)
+printl(Closed[] is? Closed)

@@ -7484,6 +7484,7 @@ values_call = (n: int, expected: int) -> int:
     some = false
     loop i in [0..nkids(n)):
         a = kid(n, i)
+        if nodes[a].kind == .call and members_named(a): members_argument(a)
         k = nodes[a].kind
         if k == .tuple and nodes[a].aux == i32(TUPLE_VALUES) or has_flag(a, NF_SPREAD) or values_hits.has(a):
             some = true

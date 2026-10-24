@@ -205,6 +205,8 @@ def stub_stages(monkeypatch):
     """Record the golden-case and ladder stages instead of running them."""
     from tools import cases, ladder
     calls = []
+    # (the interpreter probe runs subprocesses some of these tests intercept)
+    monkeypatch.setattr(core, 'pytest_python', lambda: Path(core.sys.executable))
     monkeypatch.setattr(cases, 'run', lambda binary, chosen, **options: calls.append(
         ('cases', len(chosen), options['workers'])) or 0)
     monkeypatch.setattr(ladder, 'run', lambda binary, **options: calls.append(

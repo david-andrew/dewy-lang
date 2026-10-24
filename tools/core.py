@@ -203,9 +203,35 @@ def gate_options(arguments: list[str]) -> tuple[str, int | None, bool, bool]:
     return keyword, workers, every, paths
 
 
+def has_pytest(python: Path) -> bool:
+    found = subprocess.run([str(python), '-c', 'import importlib.util\nraise SystemExit(importlib.util.find_spec("pytest") is None)'],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    return found.returncode == 0
+
+
+def pytest_python(root: Path = ROOT) -> Path | None:
+    """The checkout's .venv Python, the main checkout's for a worktree, else this one: the first with pytest."""
+    roots = [root]
+    common = subprocess.run(['git', 'rev-parse', '--path-format=absolute', '--git-common-dir'], cwd=root,
+                            capture_output=True, text=True, check=False).stdout.strip()
+    if common and Path(common).parent != root:
+        roots.append(Path(common).parent)
+    candidates = [r / '.venv/bin' / name for r in roots for name in ('python3', 'python')]
+    for python in [*(c for c in candidates if c.exists()), Path(sys.executable)]:
+        if has_pytest(python):
+            return python
+    return None
+
+
 def test(binary: Path, arguments: list[str], quick: bool) -> int:
     """Golden cases, then the ladder's core versions and ratchet, then pytest."""
     from tools import cases, ladder
+    # (before the cases, so a missing pytest never ends the gate silently after them)
+    python = pytest_python()
+    if python is None:
+        print('tools.core test: pytest is missing; run `uv sync` in the checkout to create .venv with the dev group',
+              file=sys.stderr)
+        return 2
     keyword, workers, every, paths = gate_options(arguments)
     if quick:
         print('Running the quick smoke suite (native/web, default/release).', file=sys.stderr)
@@ -234,9 +260,6 @@ def test(binary: Path, arguments: list[str], quick: bool) -> int:
             failed = site != 0 or failed
         if failed and not every:
             return 1
-    python = ROOT / '.venv/bin/python'
-    if not python.exists():
-        python = Path(sys.executable)
     env = {k: v for k, v in os.environ.items()
            if not k.startswith('DEWY_') or k == 'DEWY_GATE_SLOT_HELD'}
     env.update(DEWY_CORE_COMPILER=str(binary), PYTEST_DISABLE_PLUGIN_AUTOLOAD='1')

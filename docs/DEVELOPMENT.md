@@ -36,8 +36,9 @@ metadata rather than hashing every source. `--bootstrap` forces a fresh C build.
 The cache and build logs live in `__dewycache__/compact-core/`; removing that
 directory resets it.
 
-`test` uses the checkout's `.venv/bin/python` when available, otherwise the
-current Python. Install pytest, pytest-xdist and Pillow there (`uv sync` installs
+`test` runs pytest with the first of the checkout's `.venv` Python, the main
+checkout's (from a worktree) and the current Python that has pytest, and stops
+before the cases with a one-line instruction when none does. Install pytest, pytest-xdist and Pillow there (`uv sync` installs
 the dev group) and have Node available for the web checks. A full `test` uses up
 to four workers when pytest-xdist is available, grouping compilation batches by
 test function and build mode. Commands with extra pytest arguments stay serial
