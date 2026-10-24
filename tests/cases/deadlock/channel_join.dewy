@@ -1,0 +1,13 @@
+# modes: native
+# Draining a channel only after joining the task that fills it: the task waits for room once
+# the channel is full, and the join waits for the task.
+produce = (c:Channel<int64>):>void | Closed | Canceled => {
+    loop i in [0..100) { c.send(i) or_throw }
+}
+main = () => {
+    let c = channel<int64>(8)
+    concurrent {
+        spawn produce(c)
+    }
+    loop i in [0..100) { printl"{c.receive()}" }
+}

@@ -1,0 +1,20 @@
+# modes: native
+# A lock held across a channel wait the other side needs: one task receives while holding the
+# lock; the only sender takes the lock before it sends.
+main = () => {
+    let m = mutex<int64>(0)
+    let c = channel<int64>(1)
+    concurrent {
+        spawn {
+            let v = @(m.lock())
+            let x = c.receive()
+            if x is? int64 { v += x }
+        }
+        spawn {
+            let w = @(m.lock())
+            w += 1
+            c.send(1);
+        }
+    }
+    printl"done"
+}

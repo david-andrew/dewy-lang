@@ -6621,9 +6621,11 @@ check_program = (main_path: str):
     dewy_resolve_inherited()
     if dewy_methods.len() > 0: dc_force_all()
     dewy_infer_methods()
-    # (the locks prelude declares nominal errors, `Busy` and `DuplicateLock`, so it loads before
-    # they close when a Dewy program names it: a probe of five names, nothing otherwise)
-    if ts_dewy and locks_named(): dewy_prelude_module(intern("mutex"))
+    # (the locks and channels preludes declare nominal errors, `Busy`, `DuplicateLock` and
+    # `Closed`, so each loads before they close when a Dewy program names it: a probe per name,
+    # nothing otherwise)
+    if ts_dewy and prelude_named(["mutex", "Mutex", "lock_all", "Busy", "DuplicateLock"]): dewy_prelude_module(intern("mutex"))
+    if ts_dewy and prelude_named(["channel", "Channel", "Closed"]): dewy_prelude_module(intern("channel"))
     prepare_nominals()
     check_build_block()
     # (native programs report crashes as they do panics: lib/std/backtrace.jo)
@@ -7002,11 +7004,12 @@ check_program = (main_path: str):
         effects_finalize()
         ic_restore(icb)
 
-# Whether a Dewy program names the locks prelude (a name some source has, and that no module of
-# the program declares itself, as a program's own `Mutex` type): five probes, then a lookup per
-# module only for a name some source has.
-locks_named = () -> bool:
-    loop nm in ["mutex", "Mutex", "lock_all", "Busy", "DuplicateLock"]:
+# Whether a Dewy program names a prelude file that declares nominal errors (the locks' or the
+# channels': a name some source has, and that no module of the program declares itself, as a
+# program's own `Mutex` type): a probe per name, then a lookup per module only for a name some
+# source has.
+prelude_named = (probes: str[]) -> bool:
+    loop nm in probes:
         if not name_known(nm): continue
         id = intern(nm)
         own = false

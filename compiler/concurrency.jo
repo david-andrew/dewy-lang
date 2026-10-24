@@ -58,7 +58,8 @@ concurrency_transfer = (t0: int, seen: mut {int: bool}, sync: bool = false) -> b
     k = tkind(t)
     if concurrency_builtin_type(t, "Atomic") or concurrency_builtin_type(t, "TaskGroup") or concurrency_builtin_type(t, "Task"): return true
     # (a lock's shared state, Mutex<T>'s: Send and Sync when its payload is Send, which only a holder touches)
-    if concurrency_builtin_type(t, "__Lock"):
+    # (a channel's ring, Channel<T>'s: the same, as what crosses it is moved by a send)
+    if concurrency_builtin_type(t, "__Lock") or concurrency_builtin_type(t, "__Chan"):
         payload: {int: bool} = {}
         return concurrency_transfer(struct_targ(int(types[t].st), 0), payload, false)
     if k == .ptr or k == .fn_ or k == .cfn or k == .polyfn: return false
@@ -159,7 +160,8 @@ concurrency_blocks = (f: int, seen: mut {int: bool}, sharing: bool = false) -> b
         if name == "sleep" or name == "__sleep_ns" or name == "read_file" or name == "write_file" or name == "read_line" or name == "read_stdin" or name == "print" or name == "printl" or name == "__print_str" or name == "write" or name == "flush" or name == "__task_join" or name == "__group_join": return true
         # Runtime internals are trusted nonblocking unless classified here;
         # raw syscalls/foreign code in user modules remain conservative.
-        if files[pos_file(nodes[d].pos)].path == lib_dir + "/std/thread.jo": return false
+        # (a channel's waits are the waiting lane's: a parallel body must not wait on a sibling)
+        if files[pos_file(nodes[d].pos)].path == lib_dir + "/std/thread.jo": return name == "__chan_send_wait" or name == "__chan_receive_wait"
         # (the running task's state; its input operations wait)
         if files[pos_file(nodes[d].pos)].path == lib_dir + "/std/task_core.jo" and name in ["__task_slot", "__task_context", "__task_scope_canceled", "__task_canceled", "__task_shield_enter", "__task_shield_leave", "__task_file_code", "__task_file_begin", "__task_lock", "__task_unlock"]: return false
         if starts_with(name, "__fj_"): return false
@@ -354,7 +356,7 @@ concurrency_zeroable = (t0: int, seen: mut {int: bool}) -> bool:
     if seen.has(t): return true
     seen[t] = true
     k = tkind(t)
-    if concurrency_builtin_type(t, "Atomic") or concurrency_builtin_type(t, "TaskGroup") or concurrency_builtin_type(t, "Task"): return false
+    if concurrency_builtin_type(t, "Atomic") or concurrency_builtin_type(t, "TaskGroup") or concurrency_builtin_type(t, "Task") or concurrency_builtin_type(t, "__Chan"): return false
     if k == .fixed: return fixed_len(t) == 0 or concurrency_zeroable(telem(t), seen)
     if k == .box: return concurrency_zeroable(telem(t), seen)
     if k == .tuple:

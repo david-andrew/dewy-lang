@@ -33,10 +33,14 @@ use 'lower.jo'
 use 'isolation.jo'
 use 'concurrency.jo'
 use 'effects.jo'
+use 'prelude.jo'
+use 'errors.jo'
 
 deadlock_fns: {int: bool}       # functions whose bodies take a lock (place_methods.jo)
 deadlock_parallel = false        # the program runs `parallel` work (a cycle is reachable by tasks)
 deadlock_atomics = false         # the program uses an atomic (concurrency_atomic_call)
+dc_fns: {int: bool}              # functions calling a channel operation (dl_scan_calls)
+dc_mod = -1                      # the channels prelude's module, once loaded
 
 const DL_PASSES = 8
 
@@ -132,6 +136,7 @@ dl_scan_calls = (f: int, n: int):
                     list.push(a)
                     dl_givens[g] = list
     if k == .vardecl and nodes[n].sym > 0 and nkids(n) == 0 and not has_flag(n, NF_GLOBAL): dl_inits[int(nodes[n].sym)] = n
+    if dc_mod >= 0 and k == .call and nodes[n].aux == 0 and nodes[n].sym > 0 and int(fns[f].mod) != dc_mod and dc_chan_call(n) > 0: dc_fns[f] = true
     if k != .lambda and k != .fnref:
         loop g in value_helper_calls(n):
             list = dl_callers.get(g) ?? []
@@ -624,7 +629,10 @@ deadlock_finalize = ():
                 h = dl_fn_arg(a)
                 if h > 0 and fns[h].body != 0: dl_polling(h)
         dl_report = false
-    if deadlock_fns.len() == 0: return
+    # (channels: only once their prelude is loaded; the scan finds the functions calling them)
+    dc_mod = dc_module()
+    if dc_mod >= 0 and not dc_called(): dc_mod = -1
+    if deadlock_fns.len() == 0 and dc_mod < 0: return
     # (the call graph, the owners of locals and the parameters' indexes: one scan)
     loop f in [1..fns.len()):
         if fns[f].state != 2 or fns[f].body == 0: continue
@@ -632,8 +640,13 @@ deadlock_finalize = ():
         dl_scan_calls(f, int(fns[f].body))
     # (Dewy's value parameters are bound to locals that lead the body: the binding is the
     # parameter)
+    if deadlock_fns.len() == 0 and dc_fns.len() == 0: return
     work: int[]
     loop f, on in deadlock_fns:
+        if not dl_relevant.has(f):
+            dl_relevant[f] = true
+            work.push(f)
+    loop f, on in dc_fns:
         if not dl_relevant.has(f):
             dl_relevant[f] = true
             work.push(f)
@@ -655,13 +668,615 @@ deadlock_finalize = ():
             if not dl_relevant.has(c):
                 dl_relevant[c] = true
                 work.push(c)
-    passes = 0
-    dl_changed = true
-    loop dl_changed and passes < DL_PASSES:
-        dl_changed = false
-        passes += 1
-        # (callees before callers: the closure's order)
+    if deadlock_fns.len() > 0:
+        passes = 0
+        dl_changed = true
+        loop dl_changed and passes < DL_PASSES:
+            dl_changed = false
+            passes += 1
+            # (callees before callers: the closure's order)
+            loop f in work: dl_walk_fn(f)
+        dl_report = true
         loop f in work: dl_walk_fn(f)
-    dl_report = true
-    loop f in work: dl_walk_fn(f)
-    dl_cycles()
+        dl_cycles()
+    if dc_fns.len() > 0: dc_analyze()
+
+
+# ---------------- channel waits ----------------
+# A bounded channel's send waits while it is full and its receive while it is empty, so a task
+# waiting on a channel waits for another task's receive or send (or close). Each task (the
+# program's thread, and every task spawned, walked from where it is spawned with the calls it
+# makes inlined, so a channel handle given down calls or captured is the declaration that made
+# it) is read as its waits in order: sends, receives, closes, lock waits and joins, each with
+# the loops around it (their iteration counts when literal) and the locks held.
+#
+# Who holds what a wait needs:
+#   - room in channel c: its only drainer (the one spawn site that receives from or closes it)
+#     until its first receive; whatever it waits for before that keeps c full;
+#   - a value in c: its only filler (sends or closes it) until its first send;
+#   - a lock: its holder; a join: every task of the group, until it ends.
+# An edge "holding X, waits for Y" comes from each wait before the point a holder gives X up,
+# and from each wait while holding a lock. A send waits for certain when the values sent into
+# its channel by then (loops counted, the first iteration only for a loop around both) are more
+# than the capacity; when the counts or the capacity are not literal it may wait (undecided); when
+# they fit, it does not wait. A receive waits (for a filler held up) at the task's first receive
+# from that channel. A cycle through a channel or a join among certain edges is an error (a
+# demonstrated deadlock); one needing an undecided edge is a warning. Together with the lock
+# order edges of stage 1 (a lock held across a channel wait the other side needs).
+#
+# Demand and cost: nothing runs unless the channels prelude is loaded and a checked function
+# calls it. The walk inlines the relevant functions only (the upward closure above), at most
+# DC_DEPTH deep and DC_EVENTS waits; a walk cut short, a function value called, or a channel the
+# walk cannot name (in a container, given through a field) makes every edge undecided. The edges
+# are O(W^2) in a task's W waits; the cycle search is a breadth-first search per channel node,
+# O(V(V + E)).
+
+struct DcEvent:
+    kind: int        # 1 send, 2 receive, 3 close, 4 lock wait, 5 join
+    loc: DlLoc       # the channel, lock or task group
+    loops: int[]     # the loops around it, outermost first (indexes into dc_trips)
+    branch: bool     # under a condition
+    held: DlLoc[]    # the locks held
+    held_sites: int[]
+    site: int
+
+struct DcActor:
+    events: DcEvent[]
+    name: str
+    multi: bool      # spawned in a loop: several may run at once
+    group: str       # the key of the group that joins it ("" for the program's thread)
+    ret: int         # its result type (a failure cancels its group), 0 for the program's thread
+
+struct DcSpawn:
+    h: int
+    ffns: int[]
+    fcalls: int[]
+    multi: bool
+    group: str
+    site: int
+
+struct DcEdge:
+    src: str
+    dst: str
+    certain: bool
+    text: str
+    site: int
+
+const DC_EVENTS = 20000
+const DC_DEPTH = 16
+const DC_ACTORS = 256
+
+dc_actors: DcActor[]
+dc_trips: int[]                  # loop -> its iterations, -1 when not literal
+dc_complete = true               # every walk saw every wait it reached
+dc_precise = true                # every channel named by the declaration that made it
+dc_count = 0
+dc_closes = false                # some task closes a channel
+dc_cancels = false               # some task cancels a group by hand
+# (the walk of one task)
+dc_ev: DcEvent[]
+dc_ffns: int[]                   # the functions entered, outermost first
+dc_fcalls: int[]                 # the calls entering them (0 for a task's body)
+dc_loops: int[]
+dc_branch = 0
+dc_multi = false
+dc_held: DlHeld[]
+dc_pending: DcSpawn[]
+dc_edges: DcEdge[]
+dc_edge_at: {str: int}
+
+# The channels prelude's module, if a program loaded it (by its path among the prelude's files)
+dc_module = () -> int:
+    loop i in [0..dp_paths.len()):
+        if ends_with(dp_paths[i], "/prelude/channels.dewy"): return dp_mods[i]
+    -1
+
+# Whether the checker reached a channel operation (a program can load the prelude for a name it
+# uses otherwise, as a module of its own called `channel`): O(functions)
+dc_called = () -> bool:
+    loop f in [1..fns.len()):
+        if int(fns[f].mod) != dc_mod or fns[f].state != 2 or fns[f].decl == 0: continue
+        nm = name_of(int(nodes[int(fns[f].decl)].name))
+        if nm == "send" or nm == "receive" or nm == "close": return true
+    false
+
+# The channel operation a call is: 1 send, 2 receive, 3 close, 0 none
+dc_chan_call = (n: int) -> int:
+    if dc_mod < 0 or nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0: return 0
+    g = int(nodes[n].sym)
+    if int(fns[g].mod) != dc_mod or nkids(n) == 0: return 0
+    d = int(fns[g].decl)
+    if d == 0: return 0
+    nm = name_of(int(nodes[d].name))
+    if nm == "send": return 1
+    if nm == "receive": return 2
+    if nm == "close": return 3
+    0
+
+# A location in the function on top of the walk, with its parameters replaced by the arguments
+# of the calls that entered it
+dc_loc = (e: int) -> DlLoc: dc_concrete(dl_resolve(e, dc_ffns[dc_ffns.len() - 1]), dc_ffns.len() - 1)
+
+dc_concrete = (l: DlLoc, at: int) -> DlLoc:
+    if l.root != 3: return l
+    i = at
+    loop i >= 0 and dc_ffns[i] != l.id: i -= 1
+    if i <= 0 or dc_fcalls[i] == 0: return dl_unknown()
+    n = dc_fcalls[i]
+    if l.k >= nkids(n): return dl_unknown()
+    a = kid(n, l.k)
+    if nodes[a].kind == .namedarg: a = int(nodes[a].a)
+    base = dc_concrete(dl_resolve(a, dc_ffns[i - 1]), i - 1)
+    if base.root == 0: return base
+    DlLoc(base.root, base.id, base.k, base.route + l.route, base.exact and l.exact)
+
+dc_event = (kind: int, loc: DlLoc, site: int):
+    dc_count += 1
+    if dc_count > DC_EVENTS:
+        dc_complete = false
+        return
+    loops: int[]
+    loop x in dc_loops: loops.push(x)
+    locs: DlLoc[]
+    sites: int[]
+    loop h in dc_held:
+        locs.push(h.loc)
+        sites.push(h.site)
+    dc_ev.push(DcEvent(kind, loc, loops, dc_branch > 0, locs, sites, site))
+
+# An integer literal (through conversions), or none
+dc_const = (e0: int) -> int?:
+    e = e0
+    loop e != 0 and nodes[e].kind == .conv: e = int(nodes[e].a)
+    if e == 0 or nodes[e].kind != .int_lit or has_flag(e, NF_U64): return none
+    nodes[e].ival
+
+# How many times a loop's body runs: literal range bounds, else -1
+dc_trip_count = (n: int) -> int:
+    if nodes[n].kind != .for_: return -1
+    r = int(nodes[n].a)
+    if r == 0 or nodes[r].kind != .range or has_flag(r, NF_STEP) or has_flag(r, NF_EXCL_FIRST): return -1
+    lo = dc_const(int(nodes[r].a))
+    hi = dc_const(int(nodes[r].b))
+    if lo == none or hi == none: return -1
+    count = hi! - lo! + (if has_flag(r, NF_INCLUSIVE): 1 else: 0)
+    if count < 0: return 0
+    count
+
+# Whether a task's result may be a failure (an exception other than Canceled, which only follows
+# a cancellation, and Closed, which only follows a close: those are drainers and fillers): the
+# group's first failure cancels the rest, so a wait in it may end
+dc_may_fail = (t: int) -> bool:
+    loop m in value_members(t):
+        if not exception_member(m) or m == T_NONE: continue
+        if tkind(m) == .struct_:
+            d = int(structs[int(types[m].st)].decl)
+            nm = if d != 0: name_of(int(nodes[d].name)) else: ""
+            if nm == "Canceled" or nm == "Closed" and not dc_closes: continue
+        return true
+    false
+
+dc_drop = (mark: int):
+    loop dc_held.len() > mark: dc_held.pop()
+
+dc_walk = (n: int):
+    if n == 0 or dc_count > DC_EVENTS: return
+    k = nodes[n].kind
+    if k == .lambda or k == .fnref: return
+    if k == .block:
+        mark = dc_held.len()
+        loop c in kids(n): dc_walk(c)
+        if nodes[n].aux != 5: dc_drop(mark)
+        return
+    if k == .vardecl:
+        init = int(nodes[n].b)
+        loop init != 0 and nodes[init].kind == .conv: init = int(nodes[init].a)
+        if init != 0 and nodes[init].kind == .call:
+            what = dl_lock_call(init)
+            if what == "lock" or what == "try_lock$acquire" or what == "__take":
+                loc = dc_loc(dl_receiver(init))
+                if what == "lock": dc_event(4, loc, nodes[init].pos)
+                dc_held.push(DlHeld(loc, nodes[init].pos, int(nodes[n].sym)))
+                return
+        dc_walk(int(nodes[n].b))
+        return
+    if k == .if_ or k == .iflet:
+        dc_walk(int(nodes[n].a))
+        mark = dc_held.len()
+        dc_branch += 1
+        dc_walk(int(nodes[n].b))
+        dc_drop(mark)
+        dc_walk(int(nodes[n].c))
+        dc_drop(mark)
+        dc_branch -= 1
+        return
+    if k == .for_ or k == .while_:
+        trips = dc_trip_count(n)
+        if k == .for_: dc_walk(int(nodes[n].a))
+        cond = int(nodes[n].a)
+        # (a body that may not run: a loop on a condition, or an empty range)
+        maybe = trips == 0 or trips < 0 and not (k == .while_ and nodes[cond].kind == .bool_lit and nodes[cond].ival == 1)
+        dc_loops.push(dc_trips.len())
+        dc_trips.push(trips)
+        if maybe: dc_branch += 1
+        if k == .while_: dc_walk(cond)
+        mark = dc_held.len()
+        dc_walk(int(nodes[n].b))
+        dc_drop(mark)
+        if maybe: dc_branch -= 1
+        dc_loops.pop()
+        return
+    if k == .call:
+        dc_call(n)
+        return
+    if k == .propagate or k == .parallel_region:
+        dc_walk(int(nodes[n].a))
+        return
+    loop g in value_helper_calls(n): dc_enter(g, 0)
+    branches = k == .match_ or k == .arm
+    if branches: dc_branch += 1
+    mask = isolation_children(k)
+    if mask < 0:
+        dc_walk(int(nodes[n].a))
+        dc_walk(int(nodes[n].b))
+        dc_walk(int(nodes[n].c))
+        loop c in kids(n): dc_walk(c)
+    else:
+        if mask & 1 != 0: dc_walk(int(nodes[n].a))
+        if mask & 2 != 0: dc_walk(int(nodes[n].b))
+        if mask & 4 != 0: dc_walk(int(nodes[n].c))
+        if mask & 16 != 0:
+            mark = dc_held.len()
+            loop c in kids(n):
+                dc_walk(c)
+                if branches: dc_drop(mark)
+        if mask & 32 != 0:
+            loop c in kids2(n): dc_walk(c)
+    if branches: dc_branch -= 1
+
+dc_call = (n: int):
+    pos = nodes[n].pos
+    what = dl_lock_call(n)
+    if what == "__lock_all":
+        words = kid(n, 1)
+        if nodes[words].kind == .namedarg: words = int(nodes[words].a)
+        loop c in kids(words):
+            call = c
+            loop nodes[call].kind == .conv: call = int(nodes[call].a)
+            if nodes[call].kind == .call: dc_event(4, dc_loc(dl_receiver(call)), pos)
+        return
+    if ends_with(what, "$release"):
+        if nkids(n) >= 2:
+            g = kid(n, 1)
+            if nodes[g].kind == .ident and nodes[g].sym > 0:
+                loop i in [0..dc_held.len()):
+                    if dc_held[i].guard == int(nodes[g].sym):
+                        dc_held.remove(i)
+                        break
+        return
+    if len(what) > 0: return
+    op = dc_chan_call(n)
+    if op > 0:
+        loop i in [1..nkids(n)): dc_walk(kid(n, i))
+        loc = dc_loc(kid(n, 0))
+        if loc.root == 0 or not loc.exact or len(loc.route) > 0 or loc.root != 2 and loc.root != 1: dc_precise = false
+        if op == 3: dc_closes = true
+        dc_event(op, loc, pos)
+        return
+    loop c in kids(n): dc_walk(c)
+    if nodes[n].aux == 1 or nodes[n].aux == 4:
+        # (a function value: what it waits for is not in view)
+        dc_walk(int(nodes[n].a))
+        dc_complete = false
+        return
+    if nodes[n].aux != 0 or nodes[n].sym <= 0: return
+    g = int(nodes[n].sym)
+    d = int(fns[g].decl)
+    gname = if d != 0: name_of(int(nodes[d].name)) else: ""
+    if gname == "__task_spawn" and nkids(n) == 2:
+        h = dl_fn_arg(kid(n, 1))
+        if h > 0 and dl_relevant.has(h) and fns[h].body != 0:
+            if dc_pending.len() >= DC_ACTORS:
+                dc_complete = false
+                return
+            ffns: int[]
+            fcalls: int[]
+            loop x in dc_ffns: ffns.push(x)
+            loop x in dc_fcalls: fcalls.push(x)
+            ffns.push(h)
+            fcalls.push(0)
+            dc_pending.push(DcSpawn(h, ffns, fcalls, dc_multi or dc_loops.len() > 0, dl_key(dc_loc(kid(n, 0))), pos))
+        return
+    if gname == "cancel" and pos_in_lib(nodes[d].pos): dc_cancels = true
+    if gname == "cancel" and pos_in_lib(nodes[d].pos): dc_cancels = true
+    if gname == "__task_join" and nkids(n) == 1:
+        dc_event(5, dc_loc(kid(n, 0)), pos)
+        return
+    if fns[g].parallel: return
+    # (a function given as a value to a call not walked here, as a library helper's)
+    if not dl_relevant.has(g):
+        loop c in kids(n):
+            h = dl_fn_arg(c)
+            if h > 0 and dl_relevant.has(h): dc_complete = false
+        return
+    dc_enter(g, n)
+
+dc_enter = (g: int, n: int):
+    if not dl_relevant.has(g) or fns[g].body == 0: return
+    if dc_ffns.contains(g) or dc_ffns.len() > DC_DEPTH:
+        dc_complete = false
+        return
+    dc_ffns.push(g)
+    dc_fcalls.push(n)
+    dc_walk(int(fns[g].body))
+    dc_ffns.pop()
+    dc_fcalls.pop()
+
+# Every task's waits: the program's thread (top-level code, then main), then each task spawned,
+# where it was spawned.
+dc_collect = ():
+    dc_ev = []
+    loop f in init_fns + [main_fn]:
+        if f <= 0 or not dl_relevant.has(f): continue
+        dc_ffns = []
+        dc_fcalls = []
+        dc_enter(f, 0)
+    dc_actors.push(DcActor(dc_ev, "the program's thread", false, "", 0))
+    i = 0
+    loop i < dc_pending.len():
+        s = dc_pending[i]
+        i += 1
+        dc_ev = []
+        dc_ffns = s.ffns
+        dc_fcalls = s.fcalls
+        dc_loops = []
+        dc_held = []
+        dc_branch = 0
+        dc_multi = s.multi
+        dc_walk(int(fns[s.h].body))
+        dc_actors.push(DcActor(dc_ev, "the task spawned at {dl_line(s.site)}", s.multi, s.group, int(fns[s.h].ret)))
+
+# ---------------- what waits for what ----------------
+
+# The capacity a channel was made with, when a literal, else -1
+dc_capacity = (l: DlLoc) -> int:
+    decl = 0
+    if l.root == 2: decl = l.id
+    else if l.root == 1: decl = int(globals[l.id].decl)
+    if decl == 0 or len(l.route) > 0: return -1
+    init = int(nodes[decl].b)
+    loop init != 0 and nodes[init].kind == .conv: init = int(nodes[init].a)
+    if init == 0 or nodes[init].kind != .call or nodes[init].aux != 0 or nodes[init].sym <= 0: return -1
+    g = int(nodes[init].sym)
+    if int(fns[g].mod) != dc_mod or name_of(int(nodes[int(fns[g].decl)].name)) != "channel" or nkids(init) != 1: return -1
+    c = dc_const(kid(init, 0))
+    if c == none: return -1
+    c!
+
+# How many times an event at loops ev runs before the first run of one at loops at (loops around
+# both are in their first iteration): -1 when not literal
+dc_mult = (ev: int[], at: int[]) -> int:
+    k = 0
+    loop k < ev.len() and k < at.len() and ev[k] == at[k]: k += 1
+    m = 1
+    loop i in [k..ev.len()):
+        t = dc_trips[ev[i]]
+        if t < 0: return -1
+        m = min(m * t, 1 << 40)
+    m
+
+# Whether the sends into ch by actor a, those before event `upto` (all of event `upto`'s runs,
+# when through), wait: 2 for certain, 1 perhaps, 0 never.
+dc_send_waits = (a: int, ch: str, upto: int, through: bool) -> int:
+    evs = dc_actors[a].events
+    at: int[] = if through: [] else: evs[upto].loops
+    sure = 0
+    any = 0
+    unknown = false
+    last = if through: upto + 1 else: upto
+    cap = -1
+    loop j in [0..last):
+        e = evs[j]
+        if e.kind != 1 or dl_key(e.loc) != ch: continue
+        cap = dc_capacity(e.loc)
+        m = dc_mult(e.loops, at)
+        if m < 0: unknown = true
+        else:
+            any += m
+            if not e.branch: sure += m
+    if cap >= 0 and not unknown and any <= cap: return 0
+    if cap >= 0 and sure > cap and dc_precise and dc_complete: return 2
+    1
+
+# Whether event j of actor a is the first receive from its channel
+dc_first_receive = (a: int, j: int) -> bool:
+    evs = dc_actors[a].events
+    key = dl_key(evs[j].loc)
+    loop i in [0..j):
+        if evs[i].kind == 2 and dl_key(evs[i].loc) == key: return false
+    true
+
+# The node a wait (event j of actor a) waits for, and how it reads: ("", ...) when it does not
+# wait, or not in a way a cycle can show
+dc_wait_node = (a: int, j: int, upto: int, through: bool) -> (str, str, int):
+    e = dc_actors[a].events[j]
+    if e.loc.root == 0: return ("", "", 0)
+    key = dl_key(e.loc)
+    if e.kind == 1:
+        w = dc_send_waits(a, key, upto, through)
+        if w == 0: return ("", "", 0)
+        cap = dc_capacity(e.loc)
+        if w == 2: return ("S" + key, "sends more values into {dl_name(e.loc)} than the {cap} it holds ({dl_line(e.site)})", 2)
+        return ("S" + key, "may wait to send into {dl_name(e.loc)} ({dl_line(e.site)})", 1)
+    if e.kind == 2:
+        if not dc_first_receive(a, j): return ("", "", 0)
+        return ("R" + key, "waits to receive from {dl_name(e.loc)} ({dl_line(e.site)})", if e.loc.exact: 2 else: 1)
+    if e.kind == 4: return ("L" + key, "waits for the lock {dl_name(e.loc)} ({dl_line(e.site)})", if e.loc.exact: 2 else: 1)
+    if e.kind == 5: return ("J" + key, "waits for the tasks it spawned ({dl_line(e.site)})", 2)
+    ("", "", 0)
+
+dc_add_edge = (src: str, dst: str, certain0: bool, text: str, site: int):
+    # (that a holder is the only one, and that a count is all there is, needs every wait seen)
+    certain = certain0 and dc_precise and dc_complete
+    key = "{src}>{dst}"
+    if let i = dc_edge_at.get(key):
+        if certain and not dc_edges[i].certain: dc_edges[i] = DcEdge(src, dst, certain, text, site)
+        return
+    dc_edge_at[key] = dc_edges.len()
+    dc_edges.push(DcEdge(src, dst, certain, text, site))
+
+# The waits of actor a before event i (or through it) as edges from the node it holds
+dc_hold = (a: int, node: str, i: int, through: bool, how: str, ends: bool = false):
+    evs = dc_actors[a].events
+    last = if through: i + 1 else: i
+    loop j in [0..last):
+        up = if through: j else: i
+        w, text, sure = dc_wait_node(a, j, up, through)
+        if len(w) == 0: continue
+        dc_add_edge(node, w, sure == 2 and not ends, "{dc_actors[a].name} {text}{how}", evs[j].site)
+
+dc_edges_build = ():
+    # (each channel's drainers and fillers, by spawn site)
+    drainers: {str: int[]} = {}
+    fillers: {str: int[]} = {}
+    loop a in [0..dc_actors.len()):
+        loop e in dc_actors[a].events:
+            if e.kind > 3 or e.loc.root == 0: continue
+            key = dl_key(e.loc)
+            if e.kind == 2 or e.kind == 3:
+                list = drainers.get(key) ?? []
+                if not list.contains(a): list.push(a)
+                drainers[key] = list
+            if e.kind == 1 or e.kind == 3:
+                list = fillers.get(key) ?? []
+                if not list.contains(a): list.push(a)
+                fillers[key] = list
+    loop a in [0..dc_actors.len()):
+        evs = dc_actors[a].events
+        seen_drain: {str: bool} = {}
+        seen_fill: {str: bool} = {}
+        loop i in [0..evs.len()):
+            e = evs[i]
+            if e.kind <= 3 and e.loc.root != 0:
+                key = dl_key(e.loc)
+                # (the only drainer keeps the channel full until its first receive or close)
+                if (e.kind == 2 or e.kind == 3) and not seen_drain.has(key):
+                    seen_drain[key] = true
+                    if (drainers.get(key) ?? []).len() == 1:
+                        verb = if e.kind == 2: "receives from" else: "closes"
+                        dc_hold(a, "S" + key, i, false, " before it {verb} {dl_name(e.loc)} ({dl_line(e.site)})")
+                # (the only filler keeps it empty until its first send or close)
+                if (e.kind == 1 or e.kind == 3) and not seen_fill.has(key):
+                    seen_fill[key] = true
+                    if (fillers.get(key) ?? []).len() == 1:
+                        verb = if e.kind == 1: "sends into" else: "closes"
+                        dc_hold(a, "R" + key, i, false, " before it {verb} {dl_name(e.loc)} ({dl_line(e.site)})")
+            # (a wait while holding a lock)
+            if e.held.len() > 0 and e.kind != 3 and e.kind != 4:
+                w, text, sure = dc_wait_node(a, i, i, true)
+                if len(w) > 0:
+                    loop h in [0..e.held.len()):
+                        if e.held[h].root == 0: continue
+                        dc_add_edge("L" + dl_key(e.held[h]), w, sure == 2 and e.held[h].exact, "{dc_actors[a].name} {text} while holding {dl_name(e.held[h])} (since {dl_line(e.held_sites[h])})", e.site)
+        # (a spawned task holds its group's join until it ends)
+        if len(dc_actors[a].group) > 0 and evs.len() > 0:
+            dc_hold(a, "J" + dc_actors[a].group, evs.len() - 1, true, ", and the join of its group{dc_join_line(dc_actors[a].group)} waits for it", dc_cancelable(dc_actors[a].group))
+        # (what nothing drains or fills waits forever)
+        loop i in [0..evs.len()):
+            e = evs[i]
+            if e.kind > 2 or e.loc.root == 0: continue
+            key = dl_key(e.loc)
+            other = if e.kind == 1: drainers else: fillers
+            if other.has(key): continue
+            w, text, sure = dc_wait_node(a, i, i, true)
+            if len(w) == 0: continue
+            what = if e.kind == 1: "nothing receives from it or closes it" else: "nothing sends into it or closes it"
+            if sure == 2 and dc_precise and dc_complete: fatal(e.site, "{dc_actors[a].name} {text}, and {what}: it waits forever")
+            if dl_report_warn(e.site): warn(e.site, "{dc_actors[a].name} {text}, and {what}: it may wait forever")
+    # (stage 1's lock order: one lock taken while holding another)
+    loop e in dl_global_edges:
+        dc_add_edge("L" + dl_key(e.held), "L" + dl_key(e.taken), dl_must(e.held, e.held) and dl_must(e.taken, e.taken), dl_path(e), e.taken_site)
+
+# Whether a group may be canceled while its join waits (a task's failure, or a cancel by hand):
+# then its waits may end, and a cycle through the join is undecided
+dc_cancelable = (group: str) -> bool:
+    if dc_cancels: return true
+    loop actor in dc_actors:
+        if actor.group == group and actor.ret != 0 and dc_may_fail(actor.ret): return true
+    false
+
+# " at line N" of a group's join
+dc_join_line = (group: str) -> str:
+    loop actor in dc_actors:
+        loop e in actor.events:
+            if e.kind == 5 and dl_key(e.loc) == group: return " at {dl_line(e.site)}"
+    ""
+
+dc_warned: {int: bool} = {}
+dl_report_warn = (site: int) -> bool:
+    if dc_warned.has(site): return false
+    dc_warned[site] = true
+    true
+
+# A cycle through a channel or join node, among the certain edges (an error), or else among all
+# (a warning). Breadth-first from each such node's edges back to it.
+dc_cycles = ():
+    out: {str: int[]} = {}
+    loop i in [0..dc_edges.len()):
+        list = out.get(dc_edges[i].src) ?? []
+        list.push(i)
+        out[dc_edges[i].src] = list
+    loop round in [0..2):
+        sure = round == 0
+        starts: str[]
+        loop i in [0..dc_edges.len()):
+            s = dc_edges[i].src
+            if not starts_with(s, "L") and not starts.contains(s): starts.push(s)
+        loop s in starts:
+            prev: {str: int} = {}
+            queue: str[] = [s]
+            q = 0
+            found = false
+            loop q < queue.len() and not found:
+                v = queue[q]
+                q += 1
+                loop j in out.get(v) ?? []:
+                    if sure and not dc_edges[j].certain: continue
+                    w = dc_edges[j].dst
+                    if prev.has(w): continue
+                    prev[w] = j
+                    if w == s:
+                        found = true
+                        break
+                    queue.push(w)
+            if not found: continue
+            path: int[]
+            v = s
+            loop true:
+                j = prev[v]
+                path.insert(0, j)
+                v = dc_edges[j].src
+                if v == s: break
+            dc_report(path, sure)
+            return
+
+dc_report = (path: int[], sure: bool):
+    texts: str[]
+    loop j in path: texts.push(dc_edges[j].text)
+    first = dc_edges[path[0]]
+    fix = "Receive before sending more than a channel holds, give the channel room for what is sent first, or let a lock's place end before a channel wait"
+    undecided = " (the compiler cannot tell whether every wait does: a count or capacity that is not literal, a group that a failure or a cancel may end, or a channel or task it cannot follow)"
+    if path.len() == 1:
+        if sure: fatal(first.site, "{first.text}: it waits for itself forever. {fix}")
+        warn(first.site, "{first.text}: it may wait for itself forever{undecided}")
+        return
+    msg = "bounded channel cycle: " + join(texts, "; ") + ". Each waits for the next"
+    if sure:
+        loop k in [1..path.len()): err_notes.push((dc_edges[path[k]].site, "note: {dc_edges[path[k]].text}"))
+        fatal(first.site, "{msg}, so none goes on: the program waits forever. {fix}")
+    warn(first.site, "{msg}, so they may wait forever{undecided}")
+
+dc_analyze = ():
+    dc_collect()
+    dc_edges_build()
+    dc_cycles()

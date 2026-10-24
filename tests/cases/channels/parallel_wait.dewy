@@ -1,0 +1,6 @@
+# Channel waits are the waiting lane's; a parallel iteration may run inline, so it cannot wait
+# on a channel a sibling would fill or drain.
+main = () => {
+    let c = channel<int64>(4)
+    parallel i in [0..8) { c.send(i); }
+}

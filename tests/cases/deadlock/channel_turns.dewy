@@ -1,0 +1,20 @@
+# modes: native native-release
+# The same two tasks, taking turns (a send, then a receive) never hold more than a channel
+# holds, and run.
+ping = (out:Channel<int64> back:Channel<int64>):>int64 | Closed | Canceled => {
+    let total:int64 = 0
+    loop i in [0..1000) {
+        out.send(i) or_throw
+        total += back.receive() or_throw
+    }
+    total
+}
+main = () => {
+    let a = channel<int64>(1)
+    let b = channel<int64>(1)
+    concurrent {
+        let x = spawn ping(a b)
+        let y = spawn ping(b a)
+    }
+    printl"{x} {y}"
+}

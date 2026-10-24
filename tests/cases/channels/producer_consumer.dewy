@@ -1,0 +1,40 @@
+# modes: native native-release
+# Producers and a consumer share bounded channels by copying their handles. Three producers
+# fill one small channel, a stage turns numbers into text through a second, and the consumer
+# drains it until it is closed. Sends wait while a channel is full (backpressure).
+produce = (out:Channel<int64> first:int64 count:int64):>void | Closed | Canceled => {
+    loop i in [first..first + count) { out.send(i) or_throw }
+}
+render = (input:Channel<int64> out:Channel<string>):>void | Closed | Canceled => {
+    loop true {
+        let n = input.receive()
+        if n is? Closed break
+        out.send("<{n}>") or_throw
+    }
+    out.close()
+}
+main = () => {
+    let numbers = channel<int64>(2)
+    let texts = channel<string>(3)
+    let chars:int64 = 0
+    let seen:int64 = 0
+    concurrent {
+        spawn render(numbers texts)
+        spawn {
+            concurrent {
+                spawn produce(numbers 0 1000)
+                spawn produce(numbers 1000 1000)
+                spawn produce(numbers 2000 1000)
+            }
+            numbers.close()
+        }
+        loop true {
+            let t = texts.receive()
+            if t is? Closed break
+            if t is? Canceled break
+            chars += t.length
+            seen += 1
+        }
+    }
+    printl"received {seen} texts, {chars} characters"
+}

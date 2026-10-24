@@ -1,0 +1,39 @@
+# Dewy's prelude: channels. `channel<T>(capacity)` makes a bounded `Channel<T>`; tasks
+# share it by copying the handle. `send` waits while the channel is full and
+# `receive` while it is empty; both give `Canceled` when their task is canceled
+# while they wait, and `Closed` once the channel is closed (a receive first takes
+# what is still buffered):
+#
+#     let jobs = channel<int64>(16)
+#     concurrent {
+#         spawn {                                 # the producer
+#             loop i in [0..100) { jobs.send(i) or_throw }
+#             jobs.close()
+#         }
+#         loop { let n = jobs.receive()  if n is? Closed break  ... }
+#     }
+#
+# (compiler/deadlock.jo checks the channel waits of a program's tasks for cycles)
+
+Closed:type = type of exception
+
+# (the ring lives in the shared allocation, reached through the handle's pointer)
+$unsafe
+Channel:type = <T>[
+    __h:__Chan<T>
+    send = (value:T):>void | Closed | Canceled => {
+        let code = __chan_send_wait(__h)
+        if code =? 1 return Closed
+        if code =? 2 return Canceled
+        __chan_put(__h value)
+    }
+    receive = ():>T | Closed | Canceled => {
+        let code = __chan_receive_wait(__h)
+        if code =? 1 return Closed
+        if code =? 2 return Canceled
+        __chan_take(__h)
+    }
+    close = ():>void => __chan_close(__h)
+]
+
+channel = <T>(capacity:int64<(>? 0)>):>Channel<T> => Channel<T>[__chan_new<T>(capacity)]

@@ -1,0 +1,9 @@
+# modes: native
+# A channel moves its values between tasks, so its payload must be Send.
+Counter:type = [n:int64 $send = false]
+main = () => {
+    let c = channel<Counter>(2)
+    concurrent {
+        spawn c.send(Counter[1])
+    }
+}

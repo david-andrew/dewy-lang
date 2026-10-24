@@ -1,0 +1,46 @@
+# modes: native native-release
+# Closing. A send after close gives Closed (never a trap), a receive takes what is still
+# buffered and then gives Closed, closing twice is harmless, and closing wakes the tasks
+# waiting on the channel, so receivers on an empty one and senders on a full one get Closed.
+drain = (c:Channel<int64>):>int64 => {
+    let got:int64 = 0
+    loop true {
+        let v = c.receive()
+        if v is? Closed return got
+        if v is? Canceled return -1
+        got += 1
+    }
+    got
+}
+push = (c:Channel<int64>):>int64 => {
+    let sent:int64 = 0
+    loop true {
+        if c.send(sent) is? exception return sent
+        sent += 1
+    }
+    sent
+}
+main = () => {
+    let c = channel<string>(3)
+    c.send("a") or_throw
+    c.send("b") or_throw
+    c.close()
+    c.close()
+    printl"send after close: {c.send("c") is? Closed}"
+    printl"buffered: {c.receive()} {c.receive()}"
+    printl"then: {c.receive() is? Closed}"
+    let empty = channel<int64>(1)
+    let full = channel<int64>(2)
+    concurrent {
+        let waiting = spawn drain(empty)
+        let blocked = spawn push(full)
+        sleep(0.01s) or_throw
+        empty.close()
+        full.close()
+    }
+    printl"receivers woken: {waiting =? 0}"
+    # (the sender filled the channel, two values, if it ran before the close)
+    let sent = blocked or_throw
+    printl"senders woken: {sent <=? 2}"
+    printl"the full one held what was sent: {drain(full) =? sent}"
+}

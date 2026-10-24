@@ -243,3 +243,119 @@ __lock_all_words = (ws: int[]) -> int:
                     return 2
                 __task_pause()
     0
+
+# ---------------- channels ----------------
+# The shared state of Dewy's `Channel<T>` (lib/prelude/channels.dewy): a ring of `cap`
+# slots under one word lock. `seq` changes with every send, receive and close, and
+# waiters sleep on it (a futex), so a change wakes them; the 1 ms timeout and the
+# cancellation signal let a waiter see its task canceled. The allocation owns the
+# ring, and copied handles retain it.
+struct __ChanState[T]:
+    lock: int
+    seq: int
+    waiting: int
+    closed: int
+    head: int
+    count: int
+    cap: int
+    slots: T[]
+
+struct __Chan[T]:
+    __cell: __ChanState[T][]
+    __p: *__ChanState[T]
+
+__chan_new[T] = (capacity: int) -> __Chan[T]:
+    slots: T[]
+    slots.resize(max(capacity, 1))
+    cell: __ChanState[T][] = [__ChanState[T](0, 0, 0, 0, 0, 0, max(capacity, 1), slots)]
+    p = data(cell)
+    __Chan[T](cell, p)
+
+# (the web runs one thread: no other holder, no one to wake)
+__chan_lock = (p: *int):
+    when TARGET == "wasm": p[0] = 1
+    else: __task_lock(p)
+
+__chan_unlock = (p: *int):
+    when TARGET == "wasm": p[0] = 0
+    else: __task_unlock(p)
+
+# A change seen: the lock released and every waiter woken.
+__chan_changed = (seq: *int, lock: *int, waiting: *int):
+    when TARGET == "wasm":
+        seq[0] += 1
+        lock[0] = 0
+    else:
+        __atomic_add(seq, 1)
+        w = __atomic_add(waiting, 0)
+        __task_unlock(lock)
+        when TARGET == "linux":
+            if w != 0: syscall(202, seq, 129, 0x7FFFFFFF)
+
+# Sleeps until seq moves on from s (the lock released first), or 1 ms passes.
+__chan_park = (seq: *int, s: int, lock: *int, waiting: *int, spins: int):
+    when TARGET == "linux":
+        if spins < 16:
+            __chan_unlock(lock)
+            return
+        __atomic_add(waiting, 1)
+        __chan_unlock(lock)
+        timeout = (0, 1000000)
+        syscall(202, seq, 128, s, &timeout)
+        __atomic_add(waiting, -1)
+    else:
+        __chan_unlock(lock)
+        __task_pause()
+
+# 0: room for one more (the lock held, for __chan_put); 1: closed; 2: canceled.
+__chan_send_wait[T] = (c: __Chan[T]) -> int:
+    p = c.__p
+    spins = 0
+    loop:
+        if __task_canceled(): return 2
+        __chan_lock(&p.lock)
+        if p.closed != 0:
+            __chan_unlock(&p.lock)
+            return 1
+        if p.count < p.cap: return 0
+        __chan_park(&p.seq, p.seq, &p.lock, &p.waiting, spins)
+        spins += 1
+
+__chan_put[T] = (c: __Chan[T], v: T) -> void:
+    p = c.__p
+    i = p.head + p.count
+    if i >= p.cap: i -= p.cap
+    p.slots[i] = v
+    p.count += 1
+    __chan_changed(&p.seq, &p.lock, &p.waiting)
+
+# 0: a value to take (the lock held, for __chan_take); 1: closed and drained; 2: canceled.
+__chan_receive_wait[T] = (c: __Chan[T]) -> int:
+    p = c.__p
+    spins = 0
+    loop:
+        if __task_canceled(): return 2
+        __chan_lock(&p.lock)
+        if p.count > 0: return 0
+        if p.closed != 0:
+            __chan_unlock(&p.lock)
+            return 1
+        __chan_park(&p.seq, p.seq, &p.lock, &p.waiting, spins)
+        spins += 1
+
+__chan_take[T] = (c: __Chan[T]) -> T:
+    p = c.__p
+    h = p.head
+    v = p.slots[h]
+    empty: T
+    p.slots[h] = empty
+    p.head = if h + 1 == p.cap: 0 else: h + 1
+    p.count -= 1
+    __chan_changed(&p.seq, &p.lock, &p.waiting)
+    v
+
+__chan_close[T] = (c: __Chan[T]) -> void:
+    p = c.__p
+    __chan_lock(&p.lock)
+    p.closed = 1
+    __chan_changed(&p.seq, &p.lock, &p.waiting)

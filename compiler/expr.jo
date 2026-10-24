@@ -9256,7 +9256,7 @@ check_field_expr = (n: int, expected: int) -> int:
         add_flag(a0, NF_CHECKED)
         if types[lt].kind == .struct_:
             sd = int(structs[int(types[lt].st)].decl)
-            if (concurrency_builtin_type(lt, "Atomic") or concurrency_builtin_type(lt, "Task") or concurrency_builtin_type(lt, "TaskGroup") or concurrency_builtin_type(lt, "__Lock")) and dewy_at(nodes[n].pos): fatal(nodes[n].pos, "shared concurrency storage is private; use its checked operations")
+            if (concurrency_builtin_type(lt, "Atomic") or concurrency_builtin_type(lt, "Task") or concurrency_builtin_type(lt, "TaskGroup") or concurrency_builtin_type(lt, "__Lock") or concurrency_builtin_type(lt, "__Chan")) and dewy_at(nodes[n].pos): fatal(nodes[n].pos, "shared concurrency storage is private; use its checked operations")
             if sd != 0 and pos_in_lib(nodes[sd].pos): warn(nodes[n].pos, "{name_of(int(nodes[n].name))} is {structs[int(types[lt].st)].name}'s own, inside the library: it may change or go in any version (if something here is missing, it is worth asking for)")
     sl = soa_alias_of(a0)
     if sl != 0:

@@ -403,8 +403,6 @@ Built: the default analysis, the lock type and `lock_all`. Not built:
   - Formatting hooks are not counted.
   - Function values in fields or containers are undecided (warning).
   - Locks held by globals cannot lend places yet.
-  - Bounded-channel cycles wait for channels (stage 4): the analysis has no
-    channel waits to see.
 - **Acceptance** (`tests/cases/deadlock/`, `tests/test_deadlock_warnings.py`):
   - the grant-versus-cancel race (`grant_cancel`: no lock lost, totals kept);
   - cancellation during cleanup (`cancel_cleanup`);
@@ -415,10 +413,70 @@ Built: the default analysis, the lock type and `lock_all`. Not built:
   - recursive services (`recursive_service` runs; `recursive_service_held`:
     an error);
   - also `join_held`, `parallel_held`, `parallel_poll` and `self_copied_handle`.
-  - Bounded-channel cycles: not testable until channels exist.
+  - Bounded-channel cycles: see the channel waits below.
 - **False rejections.** None in the corpus. No existing program takes a lock,
   and the analysis does not run on programs that don't. None in the six
   lock-using acceptance programs that should compile.
+
+### Channels and channel waits (2026-10-24)
+
+Built: bounded channels and their waits in the default analysis. Not built:
+`select`, split send/receive ends, and `$no_deadlocks` certificates.
+
+- **Channel type.** `Channel<T>`, made by `channel<T>(capacity)`, with
+  `capacity >? 0` an obligation (no unbounded channel). It lives in
+  `lib/prelude/channels.dewy`, loaded only when a program names it; the ring is in
+  `lib/std/thread.jo`: one allocation holding a word lock, a futex sequence word
+  and `capacity` slots. Copied handles retain it. It is `Send`/`Sync` when `T` is
+  `Send`; zero-filling cannot make one.
+  - `send(value)` gives `void | Closed | Canceled`, `receive()` gives
+    `T | Closed | Canceled`, and `close()` gives `void`. Provisional spellings:
+    `channel`, `send`, `receive`, `close` and `Closed` (an `exception`, like
+    `Canceled`).
+  - Close semantics follow the adopted direction (no send-on-closed trap): a send
+    after a close gives `Closed`; a receive drains what is buffered, then gives
+    `Closed`; a close wakes every waiter; closing twice does nothing.
+  - Both waits are `blocks` (a `parallel` body cannot use them) and cancellation
+    points, level-triggered: in a canceled scope they give `Canceled` even when
+    they would not wait.
+- **Analysis** (`compiler/deadlock.jo`, "channel waits").
+  - Each task is read as its waits in order: the program's thread (top-level
+    code, then `main`) and every task spawned, walked where it is spawned with
+    the relevant calls inlined, so a handle given down calls or captured is the
+    declaration that made it. Waits are sends, receives, closes, lock waits and
+    joins, each with its loops (literal counts) and the locks held.
+  - Holders: a channel's only drainer (one spawn site receiving or closing it)
+    keeps it full until its first receive; its only filler keeps it empty until
+    its first send; a spawned task holds its group's join until it ends.
+  - A send waits for certain when the values sent before that point (the first
+    iteration of a loop around both) exceed the literal capacity; it may wait
+    when a count or the capacity is not literal; otherwise it does not wait. A
+    receive waits at a task's first receive from that channel.
+  - Edges "holding X, waits for Y", plus stage 1's lock order edges, form one
+    graph. A cycle through a channel or join among certain edges is an error;
+    one needing an undecided edge is a warning. Errors also for a send past
+    capacity or a receive with no task on the other side.
+  - Undecided: counts or capacities that are not literal; a group a task's
+    failure or a `cancel` may end (the waits are cancellation points); a walk cut
+    short (recursion, `DC_DEPTH`, `DC_EVENTS`), a function value called, or a
+    channel the walk cannot name (in a container or a field).
+  - Demand-driven: nothing runs unless the channels prelude is loaded and a
+    checked function calls it. Edges are O(W^2) in a task's W waits; the cycle
+    search is O(V(V + E)) per round.
+- **Not yet.** Holders after a first receive (a drainer that takes one value and
+  then waits) and several spawn sites draining one channel are not modeled, so
+  those cycles go unreported. `select` is not built.
+- **Acceptance** (`tests/cases/deadlock/channel_*`, `tests/cases/channels/`,
+  `tests/test_channel_warnings.py`):
+  - bounded-channel cycles (`channel_cycle`: an error naming both tasks;
+    `channel_turns` runs);
+  - a lock held across a channel wait (`channel_lock_held`);
+  - draining after the join (`channel_join`), self-waits (`channel_self`,
+    `channel_unfilled`);
+  - producers and consumers, cancellation of blocked sends and receives, close
+    behavior (`producer_consumer`, `cancel_blocked`, `close`).
+- **False rejections.** None in the corpus (no existing program uses channels);
+  pipelines, worker pools and request/reply loops are quiet.
 
 ## Decided rules
 

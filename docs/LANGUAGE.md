@@ -2675,6 +2675,52 @@ against the serial calculation. Run it on two threads:
 SLOPPY_THREADS=2 ./tools/dewy --release examples/parallel_particles.dewy
 ```
 
+## Channels
+
+A `Channel<T>` carries values between tasks, in the order they were sent.
+`channel<T>(capacity)` makes one that holds at most `capacity` values (an obligation,
+`capacity >? 0`; there is no unbounded channel). Tasks share it by copying the
+handle, like a `Mutex`, and its payload must be `Send`:
+
+```dewy
+produce = (out:Channel<int64> n:int64):>void | Closed | Canceled => {
+    loop i in [0..n) { out.send(i) or_throw }   # waits while out is full
+    out.close()
+}
+main = () => {
+    let numbers = channel<int64>(16)
+    let total:int64 = 0
+    concurrent {
+        spawn produce(numbers 1000)
+        loop true {
+            let n = numbers.receive()   # waits while numbers is empty
+            if n is? Closed break
+            total += n or_throw
+        }
+    }
+    printl"{total}"
+}
+```
+
+`c.send(value)` gives `void | Closed | Canceled` and waits while the channel is full;
+`c.receive()` gives `T | Closed | Canceled` and waits while it is empty. Both are
+blocking operations (`blocks`, so a `parallel` body cannot use them) and cancellation
+points: canceled while waiting, or in a canceled scope, they give `Canceled`.
+`c.close()` closes the channel; closing again does nothing. After a close, a send
+gives `Closed` (never a trap) and a receive takes what is still buffered, then gives
+`Closed`; tasks waiting on the channel wake with `Closed`. `Closed` is an
+`exception`, like `Canceled`.
+
+The compiler reads every task's channel waits, in order, with the loops around them
+(their counts when literal) and the locks it holds, and rejects waits it can show
+never end: tasks that each send more values than a channel holds before receiving
+from the channel the other fills, a lock held across a channel wait that the other
+side takes the lock to reach, a task's sends filling a channel that is drained only
+after the task is joined, one task filling a channel past its capacity before
+draining it itself, and a receive from a channel nothing sends into or closes. Where
+the counts or capacities are not literal, or a group's failure may cancel the wait,
+it warns instead.
+
 ## Settings and JSON
 
 `to_json(value)` writes a typed value directly to JSON. `from_json<T>(text)`

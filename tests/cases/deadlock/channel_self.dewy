@@ -1,0 +1,8 @@
+# modes: native web
+# One task filling a channel past its capacity before draining it, or receiving from one that
+# nothing fills, waits for itself.
+main = () => {
+    let c = channel<int64>(2)
+    loop i in [0..3) { c.send(i) or_throw }
+    printl"{c.receive()}"
+}

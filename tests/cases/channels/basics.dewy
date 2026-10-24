@@ -1,0 +1,16 @@
+# modes: native native-release web
+# One task alone, within capacity. Values come out in the order they went in, records and
+# text included, and a slot reused after a receive holds the next value.
+Point:type = [x:int64 y:int64 label:string]
+main = () => {
+    let c = channel<Point>(2)
+    loop round in [0..3) {
+        c.send(Point[round round * 2 "p{round}"]) or_throw
+        c.send(Point[10 + round 0 "q{round}"]) or_throw
+        let a = c.receive() or_throw
+        let b = c.receive() or_throw
+        printl"{a.label} {a.x} {a.y}, {b.label} {b.x}"
+    }
+    c.close()
+    printl"closed: {c.receive() is? Closed}"
+}

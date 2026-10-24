@@ -1,0 +1,16 @@
+# modes: native
+# Bounded-channel cycles. Each task sends ten values into a channel that holds four before it
+# receives from the other's, so each waits for room the other never makes.
+ping = (out:Channel<int64> back:Channel<int64>):>void | Closed | Canceled => {
+    loop i in [0..10) { out.send(i) or_throw }
+    loop i in [0..10) { back.receive() or_throw; }
+}
+main = () => {
+    let a = channel<int64>(4)
+    let b = channel<int64>(4)
+    concurrent {
+        spawn ping(a b)
+        spawn ping(b a)
+    }
+    printl"done"
+}
