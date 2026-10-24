@@ -4,11 +4,16 @@ One directory per run under the user's cache (`$XDG_CACHE_HOME/dewy/tests`, else
 `~/.cache/dewy/tests`; %LOCALAPPDATA% on Windows), named `run-PID-…`. Concurrent runs
 keep their own directories. A run removes its directory when it ends, pass or fail; the
 next run removes those whose process is gone (killed runs). A failed run's failing cases
-keep their outputs in `failures/run-…/`, for the newest KEEP_FAILURES failed runs."""
+keep their outputs in `failures/run-…/`, for the newest KEEP_FAILURES failed runs.
+
+Program run directories (the working directory of a compiled program, where it writes its
+data files) go to /dev/shm when that exists and is writable, so timings measure the
+program and not disk sync latency: `run_dir`. DEWY_RUN_ON_DISK=1 keeps them on the disk."""
 from __future__ import annotations
 
 import os
 import re
+import contextlib
 import shutil
 import sys
 import tempfile
@@ -18,6 +23,9 @@ from pathlib import Path
 KEEP_FAILURES = 5
 STALE_HOURS = 48  # a live process this old with a run's PID is a reused PID
 _NAMES = ('TMPDIR', 'TMP', 'TEMP')
+SHM = Path('/dev/shm')
+RUN_PREFIX = 'dewy-run-'
+_swept = False
 _run: Path | None = None
 _owned = False
 _saved = None
@@ -138,6 +146,38 @@ def finish(status: int):
         remove(_run)
         prune_failures()
     _run, _owned, _saved = None, False, None
+
+
+def sweep_shm():
+    """Once per process: remove /dev/shm run directories whose process is gone."""
+    global _swept
+    if _swept:
+        return
+    _swept = True
+    for entry in SHM.glob(RUN_PREFIX + '*'):
+        found = re.match(re.escape(RUN_PREFIX) + r'(\d+)-', entry.name)
+        if found is not None and not alive(int(found.group(1))):
+            remove(entry)
+
+
+@contextlib.contextmanager
+def run_dir(label: str, fallback: Path):
+    """A fresh working directory for running a program, removed afterwards (also when the
+    run fails): on /dev/shm when usable, else `fallback` (left in place for its owner)."""
+    if os.name == 'nt' or os.environ.get('DEWY_RUN_ON_DISK') or not os.access(SHM, os.W_OK | os.X_OK):
+        yield fallback
+        return
+    try:
+        sweep_shm()
+        name = re.sub(r'[^\w.-]', '_', label)
+        path = Path(tempfile.mkdtemp(prefix=f'{RUN_PREFIX}{os.getpid()}-{name}-', dir=SHM))
+    except OSError:
+        yield fallback
+        return
+    try:
+        yield path
+    finally:
+        remove(path)
 
 
 def lock_path(name: str) -> Path:

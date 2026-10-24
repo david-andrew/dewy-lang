@@ -228,9 +228,10 @@ class Runner:
         self.runs += 1
         env = self.env if select is None else {**self.env, 'DEWY_CASE': str(select)}
         try:
-            ran = subprocess.run([*command, *args], cwd=Path(command[-1]).parent, env=env,
-                                 input=stdin if stdin is not None else b'', capture_output=True,
-                                 timeout=timeout, check=False)
+            with scratch_space.run_dir('case', Path(command[-1]).parent) as cwd:
+                ran = subprocess.run([*command, *args], cwd=cwd, env=env,
+                                     input=stdin if stdin is not None else b'', capture_output=True,
+                                     timeout=timeout, check=False)
         except subprocess.TimeoutExpired as expired:
             return 'timeout', (expired.stdout or b'').decode('utf-8', 'replace'), \
                 (expired.stderr or b'').decode('utf-8', 'replace')

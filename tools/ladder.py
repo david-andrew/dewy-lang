@@ -38,7 +38,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from tools.cases import ROOT, clean_environment, default_workers, keyword_filter
-from tools.scratch import lock_path
+from tools.scratch import lock_path, run_dir
 
 LADDER = ROOT / 'tests' / 'ladder'
 RUN_TIMEOUT = 90  # loaded machines run two full gates at once
@@ -89,12 +89,12 @@ def evaluate(compiler: Path, directory: Path, version: str, scratch: Path, env: 
     source = directory / f'{version}.dewy'
     work = Path(tempfile.mkdtemp(prefix=f'{directory.name}-{version}-', dir=scratch))
 
-    def step(command, timeout=120, stdin: Path | None = None):
+    def step(command, timeout=120, stdin: Path | None = None, cwd: Path = work):
         try:
             if stdin is not None:
-                return subprocess.run(command, cwd=work, env=env, capture_output=True, text=True, errors='replace',
+                return subprocess.run(command, cwd=cwd, env=env, capture_output=True, text=True, errors='replace',
                                       timeout=timeout, check=False, input=stdin.read_text())
-            return subprocess.run(command, cwd=work, env=env, capture_output=True, text=True, errors='replace',
+            return subprocess.run(command, cwd=cwd, env=env, capture_output=True, text=True, errors='replace',
                                   timeout=timeout, check=False, stdin=subprocess.DEVNULL)
         except subprocess.TimeoutExpired:
             return subprocess.CompletedProcess(command, 'timeout', '', f'timed out after {timeout} s')
@@ -111,7 +111,8 @@ def evaluate(compiler: Path, directory: Path, version: str, scratch: Path, env: 
     if not binary.exists() and binary.with_suffix('.exe').exists():
         binary = binary.with_suffix('.exe')
     stdin = directory / 'stdin.txt'
-    ran = step([str(binary)], RUN_TIMEOUT, stdin if stdin.exists() else None)
+    with run_dir(f'{directory.name}-{version}', work) as cwd:
+        ran = step([str(binary)], RUN_TIMEOUT, stdin if stdin.exists() else None, cwd)
     expected = (directory / 'expected.out').read_text()
     if ran.returncode != 0:
         detail = first_error(ran.stderr + ran.stdout) if (ran.stderr + ran.stdout).strip() else ''
@@ -120,7 +121,8 @@ def evaluate(compiler: Path, directory: Path, version: str, scratch: Path, env: 
         return Result(directory.name, version, False, True,
                       f'printed {ran.stdout.strip()[:120]!r}, expected {expected.strip()[:120]!r}')
     if version == 'design' and scores_tests(entry):
-        tested = step([str(compiler), 'test', '--release', '--json', str(source)], RUN_TIMEOUT)
+        with run_dir(f'{directory.name}-tests', work) as cwd:
+            tested = step([str(compiler), 'test', '--release', '--json', str(source)], RUN_TIMEOUT, cwd=cwd)
         problem = test_mismatch(tested, json.loads((directory / 'expected-tests.json').read_text()), ran.stdout)
         if problem:
             return Result(directory.name, version, False, True, problem)
