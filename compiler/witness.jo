@@ -416,14 +416,16 @@ wit_assertion = (cond: int, message: int, paths: FactPaths, entry: FactState):
         relation = found.0
         missing = found.1
     if refuted:
+        if wit_obligation != 0 and message != 0:
+            err_notes = []
+            fatal(nodes[cond].pos, "{name_of(int(nodes[message].sval))}, and the length here is known to differ")
         wit_context(0)
         wit_help(relation)
-        if wit_obligation != 0 and message != 0: fatal(nodes[cond].pos, "{name_of(int(nodes[message].sval))}, and the length here is known to differ")
         assertion_refuted(cond, message)
     # (an unpacking's or a spread's length: an obligation, which a scope with runtime
     # checks keeps as one)
     if wit_obligation != 0 and message != 0:
-        wit_unknown(cond, reason, "that {name_of(int(nodes[message].sval))}", 0, relation, missing)
+        wit_unknown(cond, reason, "the length ({name_of(int(nodes[message].sval))})", 0, relation, missing)
         return
     wit_unknown(cond, reason, "assertion", 0, relation, missing)
 

@@ -1525,7 +1525,7 @@ dw_param = (id: int, kind: NK) -> int:
     if by_place: lhs = dw_child(lhs, 1)
     if dewy_syntax[dw_unwrap(lhs)].kind == .metatag: return dw_metatag_fail(dw_unwrap(lhs))
     name = dw_name(lhs)
-    pattern = kind == .param and dewy_syntax[lhs].kind == .block and dewy_syntax[lhs].text == "[]:"
+    pattern = kind == .param and dw_is_pattern(lhs)
     if name == "" and not pattern:
         if dw_has_comma(id): return dw_comma_fail(lhs)
         return dw_fail(lhs, "this parameter or field")
@@ -2582,7 +2582,7 @@ dw_stmt = (id: int, top: bool = false) -> int:
         dw_word_operator_name(dw_name(lhs), lhs)
         n = mk(.assign, pos)
         nodes[n].op = i32(int(Tok.assign))
-        if dewy_syntax[lhs].kind == .block and dewy_syntax[lhs].text == "[]:":
+        if dw_is_pattern(lhs):
             pattern = mk(.tuple, dewy_syntax[lhs].pos)
             set_list(pattern, dw_bindings(lhs))
             nodes[n].a = i32(pattern)
@@ -2626,29 +2626,81 @@ dw_bindings = (id: int) -> int[]:
 
 dw_binding_items = (id: int, seen: mut {str: bool}) -> int[]:
     bindings: int[]
-    loop child in dw_children(id):
-        let child = dw_unwrap(child)
-        annotation = 0
-        if dw_op(child) == .colon:
-            annotation = dw_child(child, 2)
-            child = dw_unwrap(dw_child(child, 1))
-        if dewy_syntax[child].kind == .block and dewy_syntax[child].text == "[]:":
-            if annotation != 0: return [dw_fail(child, "an annotated nested pattern; annotate its names or the whole declaration")]
-            n = mk(.tuple, dewy_syntax[child].pos)
-            set_list(n, dw_binding_items(child, seen))
+    children = dw_children(id)
+    rests = 0
+    loop i in [0..children.len()):
+        let child = dw_unwrap(children[i])
+        # (`...rest` collects what the others leave, `...` alone drops it: once per level)
+        rest = dw_rest_attached(dewy_syntax[child].pos)
+        drop = false
+        if dewy_syntax[child].kind == .identifier and dewy_syntax[child].text == "...":
+            if i + 1 < children.len() and dw_rest_attached(dewy_syntax[dw_unwrap(children[i + 1])].pos): continue
+            drop = true
+        else if dewy_syntax[child].kind == .postfix and dw_op(child) == .ellipsis:
+            inner = dw_unwrap(dw_child(child, 1))
+            name = dw_name(inner)
+            if name != "" and pos_off(dewy_syntax[inner].pos) + len(name) < len(files[pos_file(dewy_syntax[inner].pos)].src) and files[pos_file(dewy_syntax[inner].pos)].src[pos_off(dewy_syntax[inner].pos) + len(name)] == '.':
+                fatal(dewy_syntax[child].pos, "in a pattern, the rest is written before its name: `[first ...{name}]` (`...` alone drops it)")
+            if rest:
+                rests += 1
+                if rests > 1: fatal(dewy_syntax[child].pos - 3, "a pattern level has one `...`: the rest is what the other names leave")
+            loop b in dw_binding_one(inner, seen, rest): bindings.push(b)
+            if i + 1 < children.len() and dw_rest_attached(dewy_syntax[dw_unwrap(children[i + 1])].pos): continue
+            drop = true
+        if drop:
+            rests += 1
+            if rests > 1: fatal(dewy_syntax[child].pos, "a pattern level has one `...`: the rest is what the other names leave")
+            n = mk(.hole, dewy_syntax[child].pos)
+            add_flag(n, NF_SPREAD)
             bindings.push(n)
             continue
-        name = dw_name(child)
-        if name == "": return [dw_fail(child, "this unpacking target; use names or nested brackets")]
-        dw_reserved_name(name, child)
-        if name != "_" and seen.has(name): fatal(dewy_syntax[child].pos, "duplicate unpacking name '{name}'")
-        seen[name] = true
-        n = mk(if name == "_": NK.hole else: NK.ident, dewy_syntax[child].pos)
-        nodes[n].name = dw_name_id(child)
-        if annotation != 0: nodes[n].a = i32(dw_type(annotation))
-        bindings.push(n)
+        if rest:
+            rests += 1
+            if rests > 1: fatal(dewy_syntax[child].pos - 3, "a pattern level has one `...`: the rest is what the other names leave")
+        loop b in dw_binding_one(child, seen, rest): bindings.push(b)
     if bindings.len() == 0: return [dw_fail(id, "an empty unpacking target")]
     bindings
+
+# One item of a pattern: a name (`apple`, `apple:int64`), a renaming (`apple as a`, the type on
+# the source name: `apple:int64 as a`), a nested pattern (`[c d]`, `banana as [c d]`), `_`, or a
+# rest (`...rest`, rest set).
+dw_binding_one = (child0: int, seen: mut {str: bool}, rest: bool) -> int[]:
+    child = dw_unwrap(child0)
+    annotation = 0
+    source = 0
+    if dw_op(child) == .colon:
+        annotation = dw_child(child, 2)
+        child = dw_unwrap(dw_child(child, 1))
+        # (`apple:int64 as a`: `as` renames, after the source name's type)
+        if dw_op(dw_unwrap(annotation)) == .kw_as:
+            renamed = dw_unwrap(annotation)
+            annotation = dw_child(renamed, 1)
+            source = child
+            child = dw_unwrap(dw_child(renamed, 2))
+    else if dw_op(child) == .kw_as:
+        source = dw_unwrap(dw_child(child, 1))
+        child = dw_unwrap(dw_child(child, 2))
+    if source != 0 and dw_name(source) == "": return [dw_fail(source, "this renamed field; `as` follows a field's name, `[apple as a] = record`")]
+    if source != 0 and rest: fatal(dewy_syntax[source].pos, "the rest takes no field name: `...rest`")
+    if dw_is_pattern(child):
+        if annotation != 0: return [dw_fail(child, "an annotated nested pattern; annotate its names or the whole declaration")]
+        if rest: fatal(dewy_syntax[child].pos, "the rest is one name: `...rest`, unpacked after")
+        n = mk(.tuple, dewy_syntax[child].pos)
+        set_list(n, dw_binding_items(child, seen))
+        if source != 0: nodes[n].sval = dw_name_id(source)
+        return [n]
+    if dw_op(child) == .assign: fatal(dewy_syntax[child].pos, "`=` in a pattern is reserved for defaults, which are not implemented; rename a field with `as`: `[field as name] = record`")
+    name = dw_name(child)
+    if name == "": return [dw_fail(child, "this unpacking target; use names or nested brackets")]
+    dw_reserved_name(name, child)
+    if name != "_" and seen.has(name): fatal(dewy_syntax[child].pos, "duplicate unpacking name '{name}'")
+    seen[name] = true
+    n = mk(if name == "_": NK.hole else: NK.ident, dewy_syntax[child].pos)
+    nodes[n].name = dw_name_id(child)
+    if source != 0: nodes[n].sval = dw_name_id(source)
+    if annotation != 0: nodes[n].a = i32(dw_type(annotation))
+    if rest: add_flag(n, NF_SPREAD)
+    [n]
 
 # Pure scalar syntax can stay a compile-time expression. Anything that reads a
 # name, calls code or constructs a collection must retain one initialized value.
@@ -2695,7 +2747,7 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
     if dw_op(lhs) == .colon:
         annotation = dw_child(lhs, 2)
         lhs = dw_child(lhs, 1)
-    if dewy_syntax[lhs].kind == .block and dewy_syntax[lhs].text == "[]:":
+    if dw_is_pattern(lhs):
         if initial == 0: return dw_fail(lhs, "unpacking without a value")
         n = mk(.vardecl, dewy_syntax[id].pos)
         set_list(n, dw_bindings(lhs))

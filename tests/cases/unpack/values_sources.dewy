@@ -1,0 +1,21 @@
+# quick
+pair=():>(int64 int64)=>{ 3 4 }
+three=()=>{ 5 6 7 }
+gen=(n:int64)=>{ loop i in [0..n) i*10 }
+run=()=>{
+    let [a b]=pair()
+    printl(a+b)
+    let (c d)=(10 20)
+    printl(c+d)
+    let held=(1 2)
+    let (e f)=held
+    printl(e*f)
+    let (g ...h)=three()
+    printl(g)
+    printl([h])
+    let [i j]=gen(2)
+    printl(i+j)
+    (c d)=pair()
+    printl(c*d)
+}
+run()

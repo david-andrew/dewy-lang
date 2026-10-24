@@ -1075,7 +1075,11 @@ dn_atom = () -> int:
             effect_no = true
     if token.kind == .eof: return dn_error(token.start, "expected an expression")
     # (`(... amount:int64)`: a bare `...` opening a parameter list)
-    if symbol == .ellipsis and dn_at > 0 and dn_tokens[dn_at - 1].symbol == .lparen and dn_at + 1 < dn_tokens.len() and (dn_tokens[dn_at + 1].symbol == .rparen or dn_tokens[dn_at + 1].kind == .identifier and dn_at + 2 < dn_tokens.len() and dn_tokens[dn_at + 2].symbol == .colon):
+    # (`[...rest last] = xs`, `[... last] = xs`: a pattern's rest, or bare `...`, opening it)
+    if symbol == .ellipsis and dn_at > 0 and dn_tokens[dn_at - 1].symbol == .lbrack and dn_at + 1 < dn_tokens.len() and (dn_tokens[dn_at + 1].symbol == .rbrack or dn_tokens[dn_at + 1].kind == .identifier):
+        dn_at += 1
+        return dn_node(.identifier, "...", token.start)
+    if symbol == .ellipsis and dn_at > 0 and dn_tokens[dn_at - 1].symbol == .lparen and dn_at + 1 < dn_tokens.len() and (dn_tokens[dn_at + 1].symbol == .rparen or dn_tokens[dn_at + 1].kind == .identifier and dn_at + 2 < dn_tokens.len() and (dn_tokens[dn_at + 2].symbol == .colon or dn_tokens[dn_at + 2].kind == .identifier or dn_tokens[dn_at + 2].symbol == .rparen)):
         dn_at += 1
         return dn_node(.identifier, "...", token.start)
     if token.kind == .metatag:

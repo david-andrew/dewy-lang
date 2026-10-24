@@ -2800,7 +2800,7 @@ mv_count = 0
 
 # A binding's value `x = e` (or `let x = e`): one value, or several, which the binding holds
 # as one `(T T)`. A call giving a static number of values is held through its array.
-values_init = (e: int, expected: int) -> int:
+values_init = (e: int, expected: int, unpacking: bool = false) -> int:
     if not dewy_at(nodes[e].pos): return check_expr(e, expected)
     saved = sink_pack_site
     sink_pack_site = e
@@ -2812,6 +2812,8 @@ values_init = (e: int, expected: int) -> int:
     last_checked = v
     if not hit or is_values(t): return t
     k = values_count(v)
+    # (unpacked, a number known only when it runs is an array's: its length an obligation)
+    if k == 0 and unpacking: return t
     if k == 0: fatal(nodes[v].pos, "'{values_shown(v)}' gives a number of values known only when it runs, and a binding holds a fixed number: collect them, `[{values_shown(v)}]`")
     pre: int[]
     parts = values_parts(v, pre)
@@ -4264,7 +4266,7 @@ __check_assign = (s: int) -> int:
         if files[pos_file(nodes[s].pos)].is_dewy:
             loop binding in binding_leaves(kids(lhs)):
                 if nodes[binding].a != 0: fatal(nodes[binding].pos, "type annotations declare bindings; use let or const for typed unpacking")
-        t = prune(check_expr(int(nodes[s].b), 0))
+        t = prune(values_init(int(nodes[s].b), 0, true))
         nodes[s].b = i32(last_checked)
         unpacked = unpack_binding(int(nodes[s].b), t, kids(lhs), nodes[s].pos)
         t = unpacked.0
@@ -4594,7 +4596,7 @@ var_type_error = (lhs: int, lt: int, rt: int, at: int):
 check_binding_input = (s: int) -> int:
     expected = 0
     if nodes[s].a != 0: expected = resolve_type(int(nodes[s].a))
-    t = prune(check_expr(int(nodes[s].b), expected))
+    t = prune(values_init(int(nodes[s].b), expected, nodes[s].nlist > 0))
     nodes[s].b = i32(last_checked)
     if expected != 0:
         nodes[s].b = i32(coerce(int(nodes[s].b), expected))
@@ -6027,13 +6029,20 @@ order_modules = (m: int, out: mut int[]):
 # a, b = xs with an array: its elements, as a tuple (__unpack2(xs): the length checked)
 unpack_binding = (e: int, t: int, bindings: int[], pos: int) -> (int, int[]):
     if not files[pos_file(pos)].is_dewy: return (unpack_array(e, t, bindings.len(), pos), bindings)
-    leaves = binding_leaves(bindings)
+    leaves: int[]
+    # (a bare `...` drops values: it binds nothing)
+    loop leaf in binding_leaves(bindings):
+        if not (nodes[leaf].kind == .hole and has_flag(leaf, NF_SPREAD)): leaves.push(leaf)
     nested = false
     annotated = false
+    special = false
     loop b in bindings:
         if nodes[b].kind == .tuple: nested = true
         if nodes[b].a != 0: annotated = true
-    if not nested and not annotated and types[t].kind != .array and types[t].kind != .fixed and types[t].kind != .struct_: return (t, bindings)
+        if has_flag(b, NF_SPREAD) or nodes[b].sval != 0: special = true
+    if not nested and not annotated and not special and types[t].kind != .array and types[t].kind != .fixed and types[t].kind != .struct_:
+        if types[t].kind == .tuple and int(types[t].nargs) != bindings.len(): unpack_count_error(e, t, bindings.len(), false, pos)
+        return (t, bindings)
     statements: int[]
     values: int[]
     unpack_values(e, t, bindings, pos, statements, values)
@@ -6051,8 +6060,27 @@ unpack_binding = (e: int, t: int, bindings: int[], pos: int) -> (int, int[]):
     last_checked = block
     (result_type, leaves)
 
+# Several values or a `[T U]` of t's count, unpacked into a pattern taking `count` (at least
+# that many with a rest): a compile-time error naming both.
+unpack_count_error = (e: int, t: int, count: int, rest: bool, pos: int):
+    n = int(types[prune(t)].nargs)
+    takes = if rest: "at least {count}" else: "{count}"
+    if is_values(t):
+        what = if nodes[e].kind == .ident and nodes[e].name > 0: "'{name_of(int(nodes[e].name))}' holds" else: "this gives"
+        fatal(pos, "{what} {n} values, and the pattern takes {takes}")
+    fatal(pos, "{dt(t)} has {n} positions, and the pattern takes {takes}")
+
+# (the length of captured array src, a fresh read)
+unpack_length = (src: int, pos: int) -> int:
+    length = mk(.call, pos)
+    check_intrinsic(length, .len, [mk_ident_local(int(nodes[src].sym), pos)], 0)
+    add_flag(length, NF_CHECKED)
+    length
+
 # Read every leaf before any destination is written. Capturing each container
 # once preserves value snapshots and lets nested length checks precede writes.
+# A rest (`...rest`) takes what the other names leave, from anywhere in the pattern;
+# a bare `...` drops it. Positions after it count from the end.
 unpack_values = (e: int, t: int, bindings: int[], pos: int, statements: mut int[], values: mut int[]):
     if is_dewy_set_type(t):
         add_flag(e, NF_CHECKED)
@@ -6063,12 +6091,26 @@ unpack_values = (e: int, t: int, bindings: int[], pos: int, statements: mut int[
     is_array = types[t].kind == .array or is_fixed
     is_tuple = types[t].kind == .tuple
     is_map = is_map_type(t)
+    is_record = not is_array and not is_tuple and not is_map
     if not is_array and not is_tuple and types[t].kind != .struct_:
         fatal(pos, "unpacking needs an array, tuple, dictionary or record, found {dt(t)}")
-    if is_tuple and int(types[t].nargs) != bindings.len():
-        fatal(pos, "expected a tuple with {bindings.len()} elements, found {dt(t)}")
-    if is_fixed and fixed_len(t) != bindings.len():
-        fatal(pos, "unpacking requires exactly {bindings.len()} elements, found {dt(t)}")
+    r = -1
+    drop = false
+    loop i in 0.. and b in bindings:
+        if has_flag(b, NF_SPREAD):
+            r = i
+            drop = nodes[b].kind == .hole
+        if nodes[b].sval != 0 and not is_record: fatal(nodes[b].pos, "`as` renames a record's field; at a position, any name takes the value: `[a b] = values`")
+    count = bindings.len() - (if r >= 0: 1 else: 0)
+    after = if r >= 0: bindings.len() - 1 - r else: 0
+    if is_record and r >= 0: fatal(nodes[bindings[r]].pos, "a record's rest is not decided yet: name the fields to take and leave the others out")
+    if is_map and r >= 0 and not drop: fatal(nodes[bindings[r]].pos, "a dictionary's rest is not implemented yet: `...` alone drops the remaining entries")
+    if is_tuple:
+        n = int(types[t].nargs)
+        if r < 0 and n != count or r >= 0 and n < count: unpack_count_error(e, t, count, r >= 0, pos)
+    if is_fixed and (r < 0 and fixed_len(t) != count or r >= 0 and fixed_len(t) < count):
+        fatal(pos, "unpacking requires {if r >= 0: "at least" else: "exactly"} {count} elements, found {dt(t)}")
+    total = if is_tuple: int(types[t].nargs) else if is_fixed: fixed_len(t) else: -1
     input = e
     input_type = t
     if is_map:
@@ -6076,45 +6118,67 @@ unpack_values = (e: int, t: int, bindings: int[], pos: int, statements: mut int[
         input_type = prune(check_expr(bc_call("__map_entries", [input], pos), 0))
         input = last_checked
     source = capture_value(input, input_type, statements)
-    if (is_array and not is_fixed) or is_map:
+    exactly = if r >= 0: "at least" else: "exactly"
+    if is_array and not is_fixed:
+        # (an obligation: proven from what is known of the array, or checked where allowed)
+        statements.push(unpack_length_check(mk_ident_local(int(nodes[source].sym), pos), count, r < 0, pos, "unpacking requires {exactly} {count} element{if count == 1: "" else: "s"}"))
+    if is_map:
         length = mk(.call, pos)
-        length_source = source
-        if is_map: length_source = bc_map_keys(source, pos)
-        check_intrinsic(length, .len, [length_source], 0)
+        check_intrinsic(length, .len, [bc_map_keys(source, pos)], 0)
         add_flag(length, NF_CHECKED)
-        count = mk(.int_lit, pos)
-        nodes[count].ival = bindings.len()
+        wanted = mk(.int_lit, pos)
+        nodes[wanted].ival = count
         equal = mk(.binary, pos)
-        nodes[equal].op = i32(int(Tok.eq))
+        nodes[equal].op = i32(int(if r >= 0: Tok.ge else: Tok.eq))
         nodes[equal].a = i32(length)
-        nodes[equal].b = i32(count)
-        message = synth_str("unpacking requires exactly {bindings.len()} elements", pos)
+        nodes[equal].b = i32(wanted)
+        message = synth_str("unpacking requires {exactly} {count} element{if count == 1: "" else: "s"}", pos)
         guard = mk(.call, pos)
         check_intrinsic(guard, .assert, [equal, message], 0)
         statement = mk(.exprstmt, pos)
         nodes[statement].a = i32(guard)
         statements.push(statement)
     loop i in 0.. and binding in bindings:
+        if i == r:
+            if drop: continue
+            value = unpack_rest(source, t, r, after, total, nodes[binding].pos)
+            if nodes[binding].a != 0:
+                target = resolve_type(int(nodes[binding].a))
+                value = coerce(value, target)
+                add_flag(value, NF_CHECKED)
+            values.push(value)
+            continue
         value = mk(.field, nodes[binding].pos)
         if is_array: nodes[value].kind = .index
         nodes[value].a = i32(source)
+        # (after the rest: counted from the end)
+        back = if r >= 0 and i > r: bindings.len() - i else: 0
         if is_map:
-            index = mk(.int_lit, nodes[binding].pos)
-            nodes[index].ival = i
+            index = 0
+            if back > 0:
+                keys = mk(.call, pos)
+                check_intrinsic(keys, .len, [bc_map_keys(source, pos)], 0)
+                index = unpack_minus(keys, back, nodes[binding].pos)
+            else:
+                index = mk(.int_lit, nodes[binding].pos)
+                nodes[index].ival = i
             value = bc_call("__map_pair_at", [source, index], nodes[binding].pos)
         else if is_array:
-            index = mk(.int_lit, nodes[binding].pos)
-            nodes[index].ival = i
+            index = 0
+            if back > 0 and total < 0: index = unpack_minus(unpack_length(source, pos), back, nodes[binding].pos)
+            else:
+                index = mk(.int_lit, nodes[binding].pos)
+                nodes[index].ival = if back > 0: total - back else: i
             nodes[value].b = i32(index)
             # The length guard above dominates every element read.
             add_flag(value, NF_INBOUNDS)
         else if is_tuple:
             nodes[value].aux = -2
-            nodes[value].ival = i
+            nodes[value].ival = if back > 0: total - back else: i
         else:
             if nodes[binding].kind == .hole: fatal(nodes[binding].pos, "record unpacking names fields; leave unwanted fields out instead of using _")
-            if nodes[binding].kind == .tuple: fatal(nodes[binding].pos, "record unpacking needs field names at this level")
-            nodes[value].name = nodes[binding].name
+            if nodes[binding].kind == .tuple and nodes[binding].sval == 0: fatal(nodes[binding].pos, "record unpacking needs field names at this level: unpack a field with `as`, `[field as [a b]] = record`")
+            nodes[value].name = if nodes[binding].sval != 0: nodes[binding].sval else: nodes[binding].name
         if nodes[binding].kind == .tuple:
             inner = prune(check_expr(value, 0))
             unpack_values(last_checked, inner, kids(binding), nodes[binding].pos, statements, values)
@@ -6125,6 +6189,60 @@ unpack_values = (e: int, t: int, bindings: int[], pos: int, statements: mut int[
                 value = coerce(last_checked, target)
                 add_flag(value, NF_CHECKED)
             values.push(value)
+
+# `length - k`, checked: an index counted from the end.
+unpack_minus = (length: int, k: int, pos: int) -> int:
+    amount = mk(.int_lit, pos)
+    nodes[amount].ival = k
+    d = mk(.binary, pos)
+    nodes[d].op = i32(int(Tok.minus))
+    nodes[d].a = i32(length)
+    nodes[d].b = i32(amount)
+    check_expr(d, T_INT)
+    last_checked
+
+# What a rest takes, from position r with `after` names after it (total: a static count, or -1):
+# an array's slice, a fixed array's elements, or the remaining values or positions of a tuple
+# (several values stay several values).
+unpack_rest = (source: int, t: int, r: int, after: int, total: int, pos: int) -> int:
+    if types[t].kind == .array:
+        first = mk(.int_lit, pos)
+        nodes[first].ival = r
+        last = if after > 0: unpack_minus(unpack_length(source, pos), after, pos) else: unpack_length(source, pos)
+        zero = mk(.int_lit, pos)
+        exclusive = mk(.bool_lit, pos)
+        bounded = mk(.bool_lit, pos)
+        nodes[bounded].ival = 1
+        plain = mk(.bool_lit, pos)
+        call = dewy_array_selection_call("__dewy_pick_slice", [mk_ident_local(int(nodes[source].sym), pos), first, zero, last, exclusive, bounded, plain], t, pos)
+        check_expr(call, 0)
+        return last_checked
+    parts: int[]
+    ts: int[]
+    loop i in [r..total - after):
+        v = mk(.field, pos)
+        nodes[v].a = i32(mk_ident_local(int(nodes[source].sym), pos))
+        if types[t].kind == .fixed:
+            nodes[v].kind = .index
+            index = mk(.int_lit, pos)
+            nodes[index].ival = i
+            nodes[v].b = i32(index)
+            add_flag(v, NF_INBOUNDS)
+        else:
+            nodes[v].aux = -2
+            nodes[v].ival = i
+        check_expr(v, 0)
+        parts.push(last_checked)
+        ts.push(ntype(last_checked))
+    n = mk(.tuple, pos)
+    set_list(n, parts)
+    if types[t].kind == .fixed:
+        nodes[n].kind = .array
+        check_expr(n, mk_array(int(types[t].elem)))
+        return last_checked
+    nodes[n].type = i32(mk_tuple(ts, types[t].sign))
+    add_flag(n, NF_CHECKED)
+    n
 
 unpack_array = (e: int, t: int, n: int, pos: int) -> int:
     if types[t].kind != .array or n < 2 or n > 4: return t
@@ -7215,7 +7333,10 @@ unpack_length_check = (src: int, k: int, exact: bool, pos: int, message: str) ->
     nodes[cmp].b = i32(count)
     guard = mk(.call, pos)
     nodes[guard].aux2 = i32(UNPACK_OBLIGATION)
-    check_intrinsic(guard, .static_assert, [cmp, synth_str(message, pos)], 0)
+    check_intrinsic(guard, .assert, [cmp, synth_str(message, pos)], 0)
+    # (a runtime check until the facts prove it, as an index's: a body decided in another
+    # process keeps it)
+    fact_requests.push(FactRequest(guard, if cx >= 0: int(ctxs[cx].inst) else: 0))
     statement = mk(.exprstmt, pos)
     nodes[statement].a = i32(guard)
     add_flag(statement, NF_CHECKED)

@@ -1,0 +1,22 @@
+# quick
+run=()=>{
+    let [first ...mid last]=[1 2 3 4 5]
+    printl("{first} {mid} {last}")
+    let [head ...]=[9 8 7]
+    printl(head)
+    let [...init tail]=[9 8 7]
+    printl("{init} {tail}")
+    let [... final]=[9 8 7]
+    printl(final)
+    let [a b ...none_left]=[1 2]
+    printl("{a} {b} {none_left}")
+    let fixed:array<int64 length=4>=[1 2 3 4]
+    let [p ...q r]=fixed
+    printl("{p} {q} {r}")
+    let (u ...v w)=(1 2 3 4)
+    printl(u+w)
+    printl([v])
+    let [[x ...] ...rows]=[[1 2] [3 4] [5 6]]
+    printl("{x} {rows}")
+}
+run()

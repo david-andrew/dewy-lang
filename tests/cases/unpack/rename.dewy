@@ -1,0 +1,14 @@
+# quick
+Point:type=[x:int64 y:int64]
+Box:type=[apple:int64 banana:Point eggplant:int64]
+run=()=>{
+    let o=Point[x=1 y=2]
+    let [x as px  y:int64 as py]=o
+    printl(px+py)
+    let b=Box[apple=1 banana=Point[x=30 y=4] eggplant=5]
+    let [apple  banana as [x y]]=b
+    printl(apple+x+y)
+    let [banana as [y as tall]  eggplant as e]=b
+    printl(tall+e)
+}
+run()
