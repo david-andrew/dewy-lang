@@ -686,7 +686,14 @@ iteration, fixed arrays of such values (literals built in place, literal constan
 tables), counted loops over word ranges, and element reads and stores whose index
 is proven in bounds (a constant into a fixed array, or the function's own facts:
 `loop i in [0..16)`, a guard on `xs.length`). An unproven index is a possible
-failure. Reading a mutable parameter's elements reads that formal. Library bodies receive the same analysis as user functions. Intrinsic
+failure. Reading a mutable parameter's elements reads that formal. Text and
+`int` values are immutable shares: reading, binding, passing and returning them
+(alone, in arrays, or in records and unions of them) costs nothing. Text length,
+comparisons and prefix tests read; interpolation, `trim`, `split`, `join`,
+`replace`, case changes, `find` and `+ - *` on an `int` allocate. String indexing
+and slicing, and narrowing an `int` to a fixed width, may fail unless the
+function's facts prove them; a format specification may fail unless it is a
+literal one the value accepts (`{x:.2f}`). Library bodies receive the same analysis as user functions. Intrinsic
 costs use resolved compiler identities. Dynamic growth, formatting, managed
 copies, closure construction and recursive boxes retain allocation costs;
 unknown storage conditions remain conservative. Defaults, defers and known drop

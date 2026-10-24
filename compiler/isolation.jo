@@ -8,6 +8,7 @@ use 'expr.jo'
 use 'lower.jo'
 use 'effects.jo'
 use 'ownership.jo'
+use 'effect_library.jo'
 
 enum IsolationReason: none_, unavailable, global_, capture, indirect, raw, intrinsic, node
 
@@ -133,7 +134,9 @@ isolation_hooks = (t0: int, edges: mut int[], depth: int = 0) -> bool:
 
 isolation_scan = (f: int) -> int[]:
     edges: int[]
-    if f < effect_summaries.len() and effect_summaries[f].done:
+    # (a reviewed library class is a summary of costs, not of the body's
+    # ambient isolation: that body is walked here, as it always was)
+    if f < effect_summaries.len() and effect_summaries[f].done and effect_library_class(f) == .unclassified:
         row = effect_summaries[f]
         if row.isolation != .none_: isolation_block(f, row.isolation, row.isolation_witness)
         loop edge in row.edges: edges.push(edge.callee)

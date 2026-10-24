@@ -150,6 +150,8 @@ let _limb_leading_zeros = (limb:uint64):>int64 => {
 let _MagDivMod:type = [quotient:array<uint64> remainder:array<uint64>]
 
 let _mag_divmod_limb = (a:array<uint64> divisor:uint64):>_MagDivMod => {
+    # (a canonical divisor limb is nonzero: this answers nothing it is given)
+    if divisor =? 0 { return [quotient = [] remainder = a] }
     let quotient:array<uint64> = []
     let n:int64 = 0
     loop n <? a.length { quotient.push(0)  n = n + 1 }
@@ -193,6 +195,8 @@ let _mag_divmod = (a:array<uint64> b:array<uint64>):>_MagDivMod => {
     loop k <=? m { quotient.push(0)  k = k + 1 }
     let v_top:uint64 = v[n - 1]
     let v_next:uint64 = v[n - 2]
+    # (normalization puts v_top in [2^31, 2^32): never taken)
+    if v_top =? 0 { return [quotient = [] remainder = a] }
     let j:int64 = m
     loop j >=? 0 {
         # Estimate from the top two remainder limbs over the top divisor limb.

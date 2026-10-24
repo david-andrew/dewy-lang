@@ -1,0 +1,100 @@
+# Reviewed effect classes of the library's string and formatting operations
+# (docs/design/effects.md §3-4: reviewed primitive contracts, selected by
+# resolved declaration identity: the bundled library file declaring the
+# function, its name, and for formatting overloads the type each writes).
+# Their bodies are runtime bookkeeping the inventory does not model (raw
+# buffers, the allocator, refcounts), so a classified function's summary is its
+# class, never its body. A string value is an immutable share: reading,
+# passing or returning one copies nothing.
+#
+#   class               operations (Dewy spelling)
+#   reads               text.length, is_empty, startswith, endswith, count,
+#                       comparisons (=? <? ...), to_int(text max_digits=n)
+#                       with a literal n from 1 to 18
+#   allocates           interpolating text, a flag, a number or an `int`,
+#                       trim, trim_start, trim_end, split, lines, join,
+#                       replace, upper, lower, remove_prefix, remove_suffix,
+#                       find, rfind, to_int (big results), `+ - *` on `int`
+#   allocates, panics   indexing and slicing, byte_slice (each the caller's
+#                       obligation where a direct call states it: its facts
+#                       discharge it), find(part start), and a format
+#                       specification unless a literal one the library
+#                       accepts for the value (`{x:.2f}`)
+#
+# Anything else in the library is analyzed from its body. Demanded only by an
+# effect summary: programs without rows never ask.
+use 'ast.jo'
+use 'util.jo'
+use 'lex.jo'
+use 'types.jo'
+use 'check.jo'
+
+enum EffectClass: unclassified, reads, allocates, allocates_panics
+
+effect_class_cache: {int: EffectClass} = {}
+
+effect_library_reset = ():
+    effect_class_cache = {}
+
+effect_library_class = (g: int) -> EffectClass:
+    if let known = effect_class_cache.get(g): return known
+    c = effect_library_classify(g)
+    effect_class_cache[g] = c
+    c
+
+# What a formatting leaf writes without a hook: text, a flag, a number or `int`.
+effect_library_leaf = (t0: int) -> bool:
+    t = prune(t0)
+    if t == T_STR or t == T_MATH_INT: return true
+    k = types[t].kind
+    k == .int_ or k == .float_ or k == .bool_
+
+# A formatting function writing its leaf parameters into its buffer: the first
+# parameter a mutable byte array, the rest leaves (a specification is text).
+effect_library_formatter = (g: int) -> bool:
+    params = fns[g].params
+    if params.len() < 2: return false
+    b = prune(int(locals[params[0]].type))
+    if int(locals[params[0]].flags) & LF_MUTPARAM == 0 or types[b].kind != .array or prune(int(types[b].elem)) != T_U8: return false
+    loop i in [1..params.len()):
+        if not effect_library_leaf(int(locals[params[i]].type)): return false
+    true
+
+effect_library_classify = (g: int) -> EffectClass:
+    if g <= 0 or g >= fns.len(): return .unclassified
+    d = int(fns[g].decl)
+    if d == 0 or nodes[d].kind != .fn_ or len(lib_root) == 0: return .unclassified
+    path = files[pos_file(nodes[d].pos)].path
+    if not starts_with(path, lib_root): return .unclassified
+    file = path[len(lib_root)..]
+    name = name_of(int(nodes[d].name))
+    if file == "/core/fmt.jo" or file == "/math_int.jo":
+        if name in ["__fmt", "__dewy_fmt", "__fmt_elem", "__dewy_fmt_elem", "__fmt_u64", "__fmt_hex", "__fmt_float", "__fmt_fixed"]:
+            return if effect_library_formatter(g): .allocates else: .unclassified
+        if name == "__fmt_spec": return if effect_library_formatter(g): .allocates_panics else: .unclassified
+        if name == "format" and fns[g].params.len() == 2 and effect_library_leaf(int(locals[fns[g].params[0]].type)): return .allocates_panics
+        return .unclassified
+    if file == "/core/rt.jo":
+        if name in ["__str_eq", "__str_cmp", "__mem_eq", "__str_hash", "__str_khash", "__hash_bytes"]: return .reads
+        # (not __str_append or __buf_finish: they write through a raw pointer)
+        if name in ["__str_concat", "__str_from_bytes", "__str_new", "__buf_append_str", "__buf_append_raw", "__buf_byte", "__buf_reserve"]: return .allocates
+        return .unclassified
+    if file == "/core/str.jo":
+        if name in ["find", "rfind", "find_byte", "contains", "starts_with", "ends_with", "count", "hash", "__has_byte", "__memchr"]: return .reads
+        if name in ["trim", "trim_start", "trim_end", "split", "words", "lines", "join", "replace", "upper", "lower", "__str_from", "__buf_finish_val", "__case_text"]: return .allocates
+        return .unclassified
+    if file == "/math_runtime.jo":
+        if name == "__mi_parse_word": return .reads
+        if name in ["__mi_parse", "__mi_parse_limited", "__mi_parse_slow"]: return .allocates
+        return .unclassified
+    if file == "/std/graphemes.jo":
+        if name == "__dewy_string_length": return .reads
+        # (a search from a grapheme position fails for a negative one)
+        if name == "__dewy_find" or name == "__dewy_rfind": return if fns[g].params.len() == 2: .allocates else: .allocates_panics
+        if name == "__dewy_string_index" or name == "__dewy_string_slice": return .allocates_panics
+        return .unclassified
+    if file == "/std/dewy.jo":
+        if name == "is_empty" and fns[g].params.len() == 1 and prune(int(locals[fns[g].params[0]].type)) == T_STR: return .reads
+        if name == "remove_prefix" or name == "remove_suffix": return .allocates
+        if name == "__dewy_byte_slice": return .allocates_panics
+    .unclassified

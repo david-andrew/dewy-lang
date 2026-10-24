@@ -3545,6 +3545,8 @@ fact_slice_prepare = (f: int, summary: bool = false):
                 if types[representation_type(ntype(int(nodes[n].a)))].kind != .fixed: values.push(int(nodes[n].a))
         else if k == .conv:
             if nodes[n].aux == i32(int(CV.refinement)): values.push(n)
+            # (an `int` narrowed to a fixed width: effect_failure asks whether it fits)
+            else if fact_probe_on and not summary and nodes[n].aux == i32(int(CV.int_)) and prune(ntype(int(nodes[n].a))) == T_MATH_INT: values.push(n)
             else if ownership_decls.len() != 0 and nodes[n].aux == i32(int(CV.explicit_copy)) and ownership_fact_type(ntype(n)): opaque_writes.push(n)
             else if nodes[n].aux != i32(int(CV.int_)) and nodes[n].aux != i32(int(CV.none_)) and nodes[n].aux != i32(int(CV.fixed2arr)) and not fact_pure_conversion(n): exposed_writes.push(n)
         else if k == .binary:
@@ -4158,7 +4160,10 @@ fact_capture = (n: int, s: mut FactState) -> int:
                     return fact_new(s, r, FactTerm(type = ntype(n)))
             return fact_unmodeled(s, n, .wrap)
         if fact_scalar(ntype(n)) and fact_scalar(ntype(int(nodes[n].a))) and (nodes[n].aux == i32(int(CV.int_)) or nodes[n].aux == i32(int(CV.none_))):
-            if sa_fits(b.lo, ntype(n)) and sa_fits(b.hi, ntype(n)): return a
+            fits = sa_fits(b.lo, ntype(n)) and sa_fits(b.hi, ntype(n))
+            # (an `int` narrowed to a fixed width: effect_failure asks whether it fits)
+            if fact_probe_on and fact_speculating == 0 and prune(ntype(int(nodes[n].a))) == T_MATH_INT: fact_probe_record(n, fits)
+            if fits: return a
             return fact_unmodeled(s, n, .wrap)
         if not fact_pure_conversion(n): fact_forget(s, n, .call)
         return fact_new(s, FactBound(reason = .unsupported, witness = n))

@@ -20,6 +20,7 @@ use 'directives.jo'
 use 'concurrency.jo'
 use 'arena.jo'
 use 'lower.jo'
+use 'effect_library.jo'
 
 enum EffectKind: read, write, alloc, detach, costly_copy, panic, io, block, spawn, escape, opaque, remainder
 struct EffectAtom:
@@ -115,6 +116,7 @@ effect_ix_heads: int[][] = [[], [], []]
 effect_ix_next: int[][] = [[], [], []]
 # effect_plain answers by representation type, for top-level queries.
 effect_plain_cache: {int: bool} = {}
+effect_share_cache: {int: bool} = {}
 effect_serial = 0
 effect_limit = 0
 # Element accesses charged a possible failure in the current graph (owner,
@@ -156,6 +158,8 @@ effects_reset = ():
     effect_event_index = {}
     effect_for_marks = {}
     effect_plain_cache = {}
+    effect_share_cache = {}
+    effect_library_reset()
     effect_ix_nodes = 0
     effect_ix_locals = 0
     places_reset()
@@ -462,6 +466,7 @@ effect_graph_reset = ():
     effect_event_index = {}
     effect_for_marks = {}
     effect_plain_cache = {}
+    effect_share_cache = {}
     effect_stack = []
     effect_serial = 0
 
@@ -699,8 +704,10 @@ effect_infer_callable = (n: int, expected: int) -> int:
 
 # Residual implementation inventory used by check and both code generators.
 # No optimization-dependent capacity/uniqueness discharge in this slice.
-# Unsupported adapters and managed operations stay top, even with an Alloc
-# event: allocation permission alone never promises failure-free execution.
+# Immutable shares (text, `int`, records of them: effect_share) and reviewed
+# library string operations (effect_library.jo) are classified; unsupported
+# adapters and other managed operations stay top, even with an Alloc event:
+# allocation permission alone never promises failure-free execution.
 effect_scalar = (t0: int) -> bool:
     t = representation_type(t0)
     types[t].kind == .bool_ or types[t].kind == .int_ and t != T_MATH_INT
@@ -774,6 +781,72 @@ effect_simple_enum = (t0: int) -> bool:
     layout(t)
     structs[int(types[t].st)].simple_enum
 
+# An immutable share: a plain value, text, an `int` (a word, or an immutable
+# big payload), or an inline record, union, tuple or optional of shares with no
+# lifecycle hooks. Copying one costs at most a reference count, never an
+# allocation: reading, binding, passing, returning or building one inline is
+# free (a recursive box still allocates, effect_access).
+effect_share = (t0: int, depth: int = 0) -> bool:
+    t = representation_type(t0)
+    if effect_plain(t) or ownership_scalar(t): return true
+    if types[t].kind == .str_ or t == T_MATH_INT: return true
+    k = tkind(t)
+    if depth > 16 or k != .struct_ and k != .enum_ and k != .tuple and k != .opt: return false
+    if let known = effect_share_cache.get(t): return known
+    # (a recursive type is no share: its cycle goes through a box)
+    effect_share_cache[t] = false
+    answer = effect_share_type(t, depth)
+    effect_share_cache[t] = answer
+    answer
+
+effect_share_type = (t: int, depth: int) -> bool:
+    k = tkind(t)
+    if k == .opt: return effect_share(int(types[t].elem), depth + 1)
+    if k == .tuple:
+        loop i in [0..int(types[t].nargs)):
+            if not effect_share(targ(t, i), depth + 1): return false
+        return true
+    if ownership_type(t): return false
+    layout(t)
+    si = int(types[t].st)
+    if structs[si].drop_fn != 0: return false
+    if k == .enum_:
+        loop v in [0..int(structs[si].nvariants)):
+            vi = int(structs[si].variants) + v
+            loop j in [0..int(variants[vi].nfields)):
+                fi = int(variants[vi].fields) + j
+                if fields[fi].boxed or not effect_share(int(fields[fi].type), depth + 1): return false
+        return true
+    loop i in [0..int(structs[si].nfields)):
+        fi = int(structs[si].fields) + i
+        if fields[fi].boxed or not effect_share(int(fields[fi].type), depth + 1): return false
+    true
+
+# A value whose copy is a share: a share, or a dynamic array of shares (copy on
+# write: a copy shares the storage; a later write's detach is that write's own
+# cost, as the growth intrinsics and element stores classify it).
+effect_value = (t0: int) -> bool:
+    t = representation_type(t0)
+    if tkind(t) == .array: return effect_share(telem(t))
+    effect_share(t)
+
+# A reviewed library operation's class (effect_library.jo) as its summary: its
+# residual costs, and a write of each mutable parameter.
+effect_library_summary = (f: int, c: EffectClass, d: int):
+    if c == .allocates or c == .allocates_panics: effect_add(f, EffectEvent(EffectAtom(.alloc), d))
+    if c == .allocates_panics: effect_add(f, EffectEvent(EffectAtom(.panic), d))
+    loop i in [0..fns[f].params.len()):
+        if int(locals[fns[f].params[i]].flags) & LF_MUTPARAM != 0: effect_add(f, EffectEvent(EffectAtom(.write, PlaceIdentity(.formal, f, i + 1)), d))
+
+# A site that answers for its callee's one failure: a string index or slice
+# (the caller's obligation where the library states it: its facts discharge
+# it), or a format specification the library accepts for the value, written
+# as a literal (`{x:.2f}`, `format(x ".2f")`).
+effect_caller_obligation = (n: int) -> bool:
+    k = nodes[n].kind
+    if k == .call: return fact_string_call(n) >= 2 or nodes[n].aux == 0 and nodes[n].sym > 0 and panic_format_literal(n)
+    k == .pair and nodes[n].sval >= 0 and panic_format_spec(name_of(int(nodes[n].sval)), representation_type(ntype(int(nodes[n].a))))
+
 # Reviewed intrinsic identities, assigned by name resolution, never filenames
 # or user spelling. -1 means unclassified. Bits are residual may-costs, not
 # authority to mutate the actual; place access is collected independently.
@@ -806,6 +879,8 @@ effect_plan_cost = (f: int, n: int, mask: int):
 effect_lower_intrinsic = (f: int, n: int):
     if not effects_active and effect_policy.prohibitions == 0: return
     if f <= 0 or f >= effect_limit or not effect_summaries[f].done: return
+    # (a reviewed library class stands for its whole body)
+    if effect_library_class(f) != .unclassified: return
     # (an explicit-allocation-failure frame: counted as allocation by its scan)
     if effect_oom_frame(n): return
     mask = effect_intrinsic_cost(nodes[n].aux as IN)
@@ -940,11 +1015,17 @@ effect_place_inventory = (n: int, depth: int = 0) -> bool:
     l = int(nodes[n].sym)
     flags = int(locals[l].flags)
     if flags & LF_ALIAS != 0:
-        alias = int(locals[l].alias)
-        # (a binding narrowed by `is?` names its payload: the test proved the tag)
-        if nodes[alias].kind == .unwrap: alias = int(nodes[alias].a)
-        return effect_place_inventory(alias, depth + 1)
+        # (a binding narrowed by `is?` names its payload, or the union's
+        # remaining members: the test proved the tag)
+        return effect_place_inventory(effect_narrowed(int(locals[l].alias)), depth + 1)
     flags & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF | LF_EXPOSED) == 0
+
+# The value a narrowing alias reads: an optional's payload, a union's member,
+# or the union's remaining members re-tagged in place; n itself otherwise.
+effect_narrowed = (n: int) -> int:
+    k = nodes[n].kind
+    if k == .unwrap or k == .narrow or k == .conv and nodes[n].aux == i32(int(CV.union_)) and effect_share(ntype(n)) and effect_share(ntype(int(nodes[n].a))): return int(nodes[n].a)
+    n
 
 # `xs[i]`: one index. The checker keeps the written selector as the only kid
 # (a compound update reads a captured copy); scanning both is conservative.
@@ -958,13 +1039,13 @@ effect_fixed_index = (n: int) -> bool:
     t = representation_type(ntype(int(nodes[n].a)))
     tkind(t) == .fixed and effect_plain(int(types[t].elem)) and effect_word(int(nodes[n].b))
 
-# A read-only element read: a fixed array's, or an array of words' (a
+# A read-only element read: a fixed array's, or an array of shares' (a
 # shared immutable view; reading it neither detaches nor allocates).
 effect_index_read = (n: int) -> bool:
     if effect_fixed_index(n): return true
     if not effect_single_index(n): return false
     t = representation_type(ntype(int(nodes[n].a)))
-    tkind(t) == .array and effect_scalar(telem(t)) and effect_word(int(nodes[n].b))
+    tkind(t) == .array and effect_share(telem(t)) and effect_word(int(nodes[n].b))
 
 effect_route = (n: int, depth: int = 0) -> PlaceIdentity:
     if depth > 32: return PlaceIdentity(.local, 0, 0)
@@ -974,7 +1055,7 @@ effect_route = (n: int, depth: int = 0) -> PlaceIdentity:
     if k == .ident and nodes[n].aux == i32(int(SK.local)) and int(locals[int(nodes[n].sym)].flags) & LF_ALIAS != 0:
         # (a binding narrowed by `is?` reads the optional's or union's own storage)
         alias = int(locals[int(nodes[n].sym)].alias)
-        if nodes[alias].kind == .unwrap: return effect_route(int(nodes[alias].a), depth + 1)
+        if effect_narrowed(alias) != alias: return effect_route(effect_narrowed(alias), depth + 1)
     if k == .field or k == .ident and nodes[n].aux == i32(int(SK.local)) and int(locals[int(nodes[n].sym)].flags) & LF_ALIAS != 0: return place_route(n, depth)
     place_scalar_root(n)
 
@@ -1035,6 +1116,11 @@ effect_small = (n: int, depth: int = 0) -> int:
 # A word operand, or a semantic integer that stays a small immediate.
 effect_word = (n: int) -> bool: effect_scalar(ntype(n)) or effect_small(n) >= 0
 
+# An integer: a word or an `int`.
+effect_integer = (n: int) -> bool:
+    t = representation_type(ntype(n))
+    t == T_MATH_INT or effect_scalar(t) and types[t].kind == .int_
+
 # The word inside a value-preserving widening of a word to `int`, or n.
 effect_unwidened = (n: int) -> int:
     if nodes[n].kind == .conv and (nodes[n].aux == i32(int(CV.int_)) or nodes[n].aux == i32(int(CV.none_))) and prune(ntype(n)) == T_MATH_INT and effect_scalar(ntype(int(nodes[n].a))): return int(nodes[n].a)
@@ -1084,7 +1170,7 @@ effect_const_literal = (g: int) -> bool:
     true
 
 effect_access = (f: int, n: int, write: bool):
-    if not (effect_plain(ntype(n)) or ownership_scalar(ntype(n))) or not effect_place_inventory(n): effect_opaque(f, n)
+    if not effect_value(ntype(n)) or not effect_place_inventory(n): effect_opaque(f, n)
     if write and nodes[n].kind == .field:
         t = representation_type(ntype(int(nodes[n].a)))
         layout(t)
@@ -1242,6 +1328,11 @@ effect_scan_node = (f: int, n: int):
             effect_access(f, kid(n, 0), true)
     if k == .array and (nkids(n) > 0 or nodes[n].b != 0) and not effect_fixed_literal(n): effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
     if k == .str_lit and nkids(n) > 0: effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
+    # (an interpolated part: its formatter writes the interpolation's own buffer)
+    if k == .pair and nodes[n].sym > 0 and nodes[n].b == 0:
+        effect_summaries[f].edges.push(EffectEdge(int(nodes[n].sym), n, [PlaceIdentity(.local, f, n)]))
+        effect_scan_node(f, int(nodes[n].a))
+        return
     if k == .lambda and nodes[n].sym > 0 and fns[int(nodes[n].sym)].caps.len() != 0:
         effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
     if k == .partial: effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
@@ -1310,7 +1401,9 @@ effect_scan_node = (f: int, n: int):
                 effect_scan_node(f, a)
                 if ownership_decls.len() != 0: effect_owner_init(f, a, n)
         effect_summaries[f].edges.push(EffectEdge(g, n, routes))
-        if not effect_plain(int(fns[g].ret)) and not ownership_scalar(int(fns[g].ret)) and int(fns[g].ret) != T_VOID: effect_opaque(f, n)
+        if not effect_value(int(fns[g].ret)) and int(fns[g].ret) != T_VOID: effect_opaque(f, n)
+        # (a string index or slice: in bounds by the caller's facts, or a possible failure)
+        if fact_string_call(n) >= 2: effect_failure(f, n)
         return
     if k == .assign:
         effect_target_parts(f, int(nodes[n].a))
@@ -1332,7 +1425,7 @@ effect_scan_node = (f: int, n: int):
             if p.declaration != 0 and p.root == .formal:
                 effect_add(f, EffectEvent(EffectAtom(.read, p), n))
                 return
-        if effect_scalar(t) and int(locals[l].flags) & LF_BYREF != 0:
+        if effect_share(t) and int(locals[l].flags) & LF_BYREF != 0:
             loop q in effect_for_marks.get(l) ?? []:
                 if effect_seen[q] == f and nodes[q].kind == .for_ and nodes[q].sym == i32(l) and not has_flag(q, NF_MUT) and tkind(ntype(int(nodes[q].a))) == .array: return
         loop q in kids(int(fns[f].body)):
@@ -1352,18 +1445,21 @@ effect_scan_node = (f: int, n: int):
         return
     supported = false
     if k == .intrinsic: supported = effect_intrinsic_cost(nodes[n].aux as IN) >= 0
-    else if k == .call and nodes[n].aux == 2: supported = effect_plain(ntype(n)) or ownership_scalar(ntype(n))
-    # (a plain member into a plain union: `return Oops` from `:>(int64|Oops)`)
-    else if k == .call and nodes[n].aux == 3: supported = effect_plain(ntype(n))
+    else if k == .call and nodes[n].aux == 2: supported = effect_share(ntype(n))
+    # (a member into a union of shares: `return Oops` from `:>(int64|Oops)`)
+    else if k == .call and nodes[n].aux == 3: supported = effect_share(ntype(n))
+    # (a literal is static data; an interpolation's allocation is counted above)
+    else if k == .str_lit: supported = true
     else if k == .fnref or k == .lambda: supported = effect_bare(n)
-    else if k == .for_: supported = tkind(ntype(int(nodes[n].a))) == .array and effect_scalar(telem(ntype(int(nodes[n].a)))) and not has_flag(n, NF_MUT)
-    else if k == .int_lit or k == .bool_lit: supported = effect_scalar(ntype(n)) or effect_count_literal(n) or effect_small(n) >= 0
+    else if k == .for_: supported = tkind(ntype(int(nodes[n].a))) == .array and effect_share(telem(ntype(int(nodes[n].a)))) and not has_flag(n, NF_MUT)
+    # (an `int` literal is a constant, whatever its sign)
+    else if k == .int_lit or k == .bool_lit: supported = effect_scalar(ntype(n)) or effect_count_literal(n) or effect_small(n) >= 0 or k == .int_lit and prune(ntype(n)) == T_MATH_INT and not has_flag(n, NF_U64)
     else if k == .float_lit: supported = effect_float(ntype(n))
     else if k == .array: supported = effect_fixed_literal(n)
     # (a conditional loop is visible control flow, not a hidden cost: its
     # condition and body answer for their own operations)
     else if k == .block or k == .exprstmt or k == .return_ or k == .if_ or k == .while_ or k == .and_ or k == .or_ or k == .not_ or k == .defer_ or k == .break_ or k == .continue_: supported = true
-    else if k == .tuple: supported = effect_plain(ntype(n))
+    else if k == .tuple: supported = effect_share(ntype(n))
     else if k == .vardecl and nkids(n) > 0:
         # (unpacking plain components into private locals)
         supported = effect_plain(ntype(int(nodes[n].b))) and not has_flag(n, NF_GLOBAL)
@@ -1374,7 +1470,7 @@ effect_scan_node = (f: int, n: int):
     else if k == .vardecl:
         l = int(nodes[n].sym)
         if effect_readonly_binding(n): return
-        supported = l > 0 and (effect_plain(int(locals[l].type)) or ownership_scalar(int(locals[l].type)) or is_fn_type(int(locals[l].type)) and effect_bare(int(nodes[n].b))) and int(locals[l].flags) & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF) == 0
+        supported = l > 0 and (effect_value(int(locals[l].type)) or is_fn_type(int(locals[l].type)) and effect_bare(int(nodes[n].b))) and int(locals[l].flags) & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF) == 0
     else if k == .binary:
         shift = nodes[n].op == i32(int(Tok.shl)) or nodes[n].op == i32(int(Tok.shr))
         count_ok = effect_scalar(ntype(int(nodes[n].b))) or shift and effect_count_literal(int(nodes[n].b))
@@ -1401,20 +1497,43 @@ effect_scan_node = (f: int, n: int):
                 effect_scan_node(f, a)
                 effect_scan_node(f, b)
                 return
-    else if k == .dotname or k == .none_lit: supported = effect_plain(ntype(n))
-    # (an optional's or plain union's tag test, payload and fallback are inline reads)
-    else if k == .istype or k == .narrow or k == .coalesce: supported = effect_plain(ntype(int(nodes[n].a))) and (k == .istype or effect_plain(ntype(n)))
+        # (text compares by reading both, and the library's `+` on text
+        # allocates; `int`s compare as words or by reading a big payload, and
+        # `+ - *` on one may grow it into a big integer, which allocates)
+        if not supported and nodes[n].aux == 2 and types[representation_type(ntype(int(nodes[n].a)))].kind == .str_ and types[representation_type(ntype(int(nodes[n].b)))].kind == .str_:
+            supported = fact_comparison(nodes[n].op as Tok) or nodes[n].op == i32(int(Tok.plus))
+            if nodes[n].op == i32(int(Tok.plus)): effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
+        if not supported and nodes[n].aux == 0 and fact_comparison(nodes[n].op as Tok) and effect_integer(int(nodes[n].a)) and effect_integer(int(nodes[n].b)): supported = true
+        if not supported and nodes[n].aux == 0 and prune(ntype(n)) == T_MATH_INT and effect_integer(int(nodes[n].a)) and effect_integer(int(nodes[n].b)) and (nodes[n].op == i32(int(Tok.plus)) or nodes[n].op == i32(int(Tok.minus)) or nodes[n].op == i32(int(Tok.star))):
+            supported = true
+            effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
+    else if k == .dotname or k == .none_lit: supported = effect_share(ntype(n))
+    # (an optional's or union's tag test, payload and fallback are inline reads)
+    else if k == .istype or k == .narrow or k == .coalesce: supported = effect_share(ntype(int(nodes[n].a))) and (k == .istype or effect_share(ntype(n)))
     else if k == .unary:
         supported = effect_scalar(ntype(n)) and (nodes[n].op == i32(int(Tok.minus)) or nodes[n].op == i32(int(Tok.plus)) or nodes[n].op == i32(int(Tok.tilde)))
         supported = supported or effect_float(ntype(n)) and (nodes[n].op == i32(int(Tok.minus)) or nodes[n].op == i32(int(Tok.plus)))
+        # (negating an `int` may grow it: -(-2^63))
+        if not supported and prune(ntype(n)) == T_MATH_INT and (nodes[n].op == i32(int(Tok.minus)) or nodes[n].op == i32(int(Tok.plus))):
+            supported = true
+            effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
     else if k == .conv and nodes[n].aux == i32(int(CV.explicit_copy)) and ownership_scalar(ntype(n)): supported = true
     else if k == .conv and nodes[n].aux == i32(int(CV.refinement)):
         # A proven refinement check is erased; an unproven one may fail.
         supported = effect_plain(ntype(n))
         if supported and not type_eq(ntype(int(nodes[n].a)), int(nodes[n].aux2)): effect_failure(f, n)
-    # (wrapping a plain value as an optional fills the flag and payload in place)
-    else if k == .conv and nodes[n].aux == i32(int(CV.opt)): supported = effect_plain(ntype(n)) and effect_plain(ntype(int(nodes[n].a)))
+    # (wrapping a value as an optional, or one union as a wider one, fills the
+    # flag or tag and the payload in place)
+    else if k == .conv and (nodes[n].aux == i32(int(CV.opt)) or nodes[n].aux == i32(int(CV.union_))): supported = effect_share(ntype(n)) and effect_share(ntype(int(nodes[n].a)))
     else if k == .conv and nodes[n].aux == i32(int(CV.set_text)): supported = true
+    # (a word widened to an `int` may need a big payload: an allocation)
+    else if k == .conv and nodes[n].aux == i32(int(CV.int_)) and prune(ntype(n)) == T_MATH_INT and effect_scalar(ntype(int(nodes[n].a))):
+        supported = true
+        if effect_small(int(nodes[n].a)) < 0: effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
+    # (an `int` narrowed to a fixed width fails unless the owner's facts show it fits)
+    else if k == .conv and nodes[n].aux == i32(int(CV.int_)) and prune(ntype(int(nodes[n].a))) == T_MATH_INT and effect_scalar(ntype(n)) and effect_small(int(nodes[n].a)) < 0:
+        supported = true
+        effect_failure(f, n)
     # (a word to a float, or one float width to another: one instruction; a
     # float to an integer is checked, and a semantic integer's is a call)
     else if k == .conv and (nodes[n].aux == i32(int(CV.int2float)) and effect_scalar(ntype(int(nodes[n].a))) or nodes[n].aux == i32(int(CV.float_))): supported = effect_float(ntype(n))
@@ -1521,14 +1640,20 @@ effect_propagate = (f: int) -> bool:
             continue
         # Snapshot: self-edges can append to this same arena row.
         events = effect_summaries[g].events
+        obligation = -1
         loop event in events:
+            if event.atom.kind == .panic:
+                if obligation < 0: obligation = int(effect_caller_obligation(edge.origin))
+                if obligation == 1: continue
             e = effect_edge_event(f, edge, event)
             if (e.atom.kind == .read or e.atom.kind == .write) and e.atom.place.declaration != 0 and e.atom.place.root == .local: continue
             if effect_add(f, e): changed = true
     changed
 
-# Whether effect_visit's signature checks alone give f an opaque event. Its
-# row then holds one whatever its body and callees do (propagation keeps it).
+# Whether facts may treat a call of f as opaque by its signature alone, without
+# visiting its call tree: f takes or returns a value that is not plain. A
+# superset of effect_visit's signature checks, which accept shares
+# (effect_share) and reviewed library classes: forgetting more is sound.
 effect_signature_opaque = (f: int) -> bool:
     d = int(fns[f].decl)
     if fns[f].state != 2 or fns[f].body == 0 or fns[f].kind == FK_INIT or (d != 0 and has_flag(d, NF_EXTERN)):
@@ -1540,7 +1665,7 @@ effect_signature_opaque = (f: int) -> bool:
         if int(locals[l].flags) & LF_MUTPARAM == 0 and not effect_plain(t) and not is_fn_type(t) and not (tkind(t) == .array and effect_scalar(telem(t))): return true
     false
 
-# (keep its opaque conditions those of effect_signature_opaque)
+# (its opaque conditions imply effect_signature_opaque's)
 effect_visit = (f: int):
     effect_serial += 1
     effect_summaries[f].index = effect_serial
@@ -1551,7 +1676,9 @@ effect_visit = (f: int):
     # trusted: the claim its unsafe callers rely on)
     trusted = d != 0 and has_flag(d, NF_EXTERN) and effect_declared_row(f) != 0
     if effect_blocks_demanded and not trusted and concurrency_fn_blocks(f): effect_add(f, EffectEvent(EffectAtom(.block), d))
-    if fns[f].state != 2 or fns[f].body == 0 or fns[f].kind == FK_INIT or (d != 0 and has_flag(d, NF_EXTERN)) or effect_unavailable.has(f):
+    library = effect_library_class(f)
+    if library != .unclassified: effect_library_summary(f, library, d)
+    else if fns[f].state != 2 or fns[f].body == 0 or fns[f].kind == FK_INIT or (d != 0 and has_flag(d, NF_EXTERN)) or effect_unavailable.has(f):
         if not trusted: effect_opaque(f, d)
         effect_isolation_block(f, .unavailable, d)
     else:
@@ -1559,11 +1686,11 @@ effect_visit = (f: int):
             effect_opaque(f, int(fns[f].body))
             effect_isolation_block(f, .capture, int(fns[f].body))
         if fns[f].cabi: effect_opaque(f, d)
-        if not effect_plain(int(fns[f].ret)) and not ownership_scalar(int(fns[f].ret)) and int(fns[f].ret) != T_VOID: effect_opaque(f, d)
+        if not effect_value(int(fns[f].ret)) and int(fns[f].ret) != T_VOID: effect_opaque(f, d)
         loop i in [0..fns[f].params.len()):
             l = fns[f].params[i]
             t = representation_type(int(locals[l].type))
-            if int(locals[l].flags) & LF_MUTPARAM == 0 and not effect_plain(t) and not is_fn_type(t) and not (tkind(t) == .array and effect_scalar(telem(t))): effect_opaque(f, d)
+            if int(locals[l].flags) & LF_MUTPARAM == 0 and not effect_value(t) and not is_fn_type(t): effect_opaque(f, d)
         effect_scan_node(f, int(fns[f].body))
     loop edge in effect_summaries[f].edges:
         g = edge.callee
@@ -1713,6 +1840,7 @@ effects_demand = (f: int) -> bool:
         effect_event_index = {}
         effect_for_marks = {}
         effect_plain_cache = {}
+        effect_share_cache = {}
     if f <= 0 or f >= effect_limit: return false
     if effect_summaries[f].index == 0:
         icb = ic_phase(IC_EFFECTS)
