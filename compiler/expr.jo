@@ -8880,6 +8880,48 @@ dewy_partial = (n: int, expected: int) -> int:
     last_checked = n
     t
 
+# Sloppy: `S(cell, data(cell))` gives the array cell to the record, then data(cell) reads cell
+# after that move: it unshares the variable's own copy from the one given, so the pointer points
+# into storage the record does not hold (and that goes with the variable). The arguments in
+# their evaluation order; one walk of each.
+sloppy_data_after_give = (n: int):
+    given: int[]
+    order: int[]
+    meta = int(nodes[n].c)
+    if meta != 0:
+        loop e in kids(meta): order.push(nodes[e].ival)
+    else:
+        loop i in [0..nkids(n)): order.push(i)
+    loop i in order:
+        a = kid(n, i)
+        if a == 0: continue
+        a = unnamed(a)
+        v = a
+        loop nodes[v].kind == .conv: v = int(nodes[v].a)
+        if nodes[v].kind == .ident and (nodes[v].aux == i32(int(SK.local)) or nodes[v].aux == i32(int(SK.global))) and tkind(ntype(v)) == .array:
+            given.push(int(nodes[v].aux) * 1000000000 + int(nodes[v].sym))
+            continue
+        if given.len() > 0: sloppy_data_of_given(a, given, n)
+
+sloppy_data_of_given = (e: int, given: int[], call: int):
+    if e == 0: return
+    k = nodes[e].kind
+    if k == .lambda or k == .fn_: return
+    if k == .intrinsic and (nodes[e].aux as IN) == .arrdata and nkids(e) == 1:
+        x = kid(e, 0)
+        loop nodes[x].kind == .conv: x = int(nodes[x].a)
+        if nodes[x].kind == .ident and given.contains(int(nodes[x].aux) * 1000000000 + int(nodes[x].sym)):
+            nm = name_of(int(nodes[x].name))
+            what = dt(ntype(call))
+            fatal(nodes[e].pos, "data({nm}) reads '{nm}' after it was moved into the {what} (an earlier argument): it unshares the variable's own copy, so the pointer would not point into the array the {what} holds; take `p = data({nm})` before, and pass p")
+    mask = isolation_children(k)
+    if mask < 0: return
+    if mask & 1 != 0: sloppy_data_of_given(int(nodes[e].a), given, call)
+    if mask & 2 != 0: sloppy_data_of_given(int(nodes[e].b), given, call)
+    if mask & 4 != 0: sloppy_data_of_given(int(nodes[e].c), given, call)
+    if mask & 16 != 0:
+        loop c in kids(e): sloppy_data_of_given(c, given, call)
+
 # (could the arguments given in slots go to version d's parameters, by their types?)
 partial_args_fit = (d: int, slots: int[]) -> bool:
     sig = fn_sig(d)
@@ -9163,6 +9205,7 @@ check_call_expr = (n: int, expected: int) -> int:
         vt = values_call(n, expected)
         if vt >= 0: return ce_finish(n, vt, expected)
     t = check_call(n, expected)
+    if nodes[n].kind == .call and nodes[n].aux == 2 and nkids(n) > 1 and not dewy_at(nodes[n].pos): sloppy_data_after_give(n)
     if nodes[n].aux == 0 and nodes[n].sym > 0:
         if fns[int(nodes[n].sym)].atomic_api: concurrency_atomic_call(n)
         if fns[int(nodes[n].sym)].task_api:
