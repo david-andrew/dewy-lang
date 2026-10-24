@@ -20,4 +20,5 @@ def test_literals_rule_out_failures(compiler, tmp_path):
 
 def test_unknown_exponent_may_panic(compiler, tmp_path):
     result = run(compiler, tmp_path, 'f=(n:int64):>int=>2^n\nmain=():>void=>printl(f(3))\n', 'check')
-    assert result.returncode != 0 and 'calling `power` may panic' in result.stderr, result.stderr
+    # (a nonnegative exponent is the caller's obligation: unproven, a compile error)
+    assert result.returncode != 0 and 'cannot prove the exponent is >= 0' in result.stderr, result.stderr

@@ -1932,7 +1932,7 @@ panic_node = (f: int, n: int):
     else if k == .call and nodes[n].aux == 0 or k == .fnref or k == .lambda or k == .pair or k == .partial and nodes[n].aux == 0:
         # (a call whose precondition is the caller's obligation, as a string
         # index or a divisor: proven, an error, or a check of the caller's own)
-        if nodes[n].sym > 0 and not (k == .call and (fact_string_call(n) >= 2 or fact_array_call(n) != 0 or fact_floor_call(n) != 0 or fact_divisors.has(n) or panic_format_literal(n) or panic_device_literal(n) or not panic_lib and panic_map_obligation(n) or panic_literal_safe(n))): panic_edge(f, int(nodes[n].sym), n)
+        if nodes[n].sym > 0 and not (k == .call and (fact_string_call(n) >= 2 or fact_array_call(n) != 0 or fact_floor_call(n) != 0 or fact_divisors.has(n) or fact_power_call(n) or panic_format_literal(n) or panic_device_literal(n) or not panic_lib and panic_map_obligation(n) or panic_literal_safe(n))): panic_edge(f, int(nodes[n].sym), n)
     loop g in value_helper_calls(n): panic_edge(f, g, n)
     if k == .parallel_region:
         panic_node(f, int(nodes[n].a))

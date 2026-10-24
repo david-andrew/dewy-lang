@@ -1,0 +1,12 @@
+$runtime_checks=false
+# (no traps: an integer exponent >= 0 is the caller's obligation, for integer,
+# rational and big bases alike)
+power=(x:int n:int):>int=>if n >=? 0 x^n else 0
+main=():>void=>{
+    printl(power(2 10))
+    printl([2] .^ 3 .^ 2)
+    let r:rational=2/3
+    let k:int64=3
+    printl(r^k)
+    printl(7^k)
+}
