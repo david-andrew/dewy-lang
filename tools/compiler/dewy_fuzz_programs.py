@@ -2569,7 +2569,7 @@ class Generator:
         if self.chance(.5):
             named = r.randint(0, count - 1) if group else r.randint(0, count)
             names = names[:named]
-            names.insert(r.randint(0, named), '...' if self.chance(.3) else '...' + self.fresh('rest'))
+            names.insert(r.randint(0, named), '...' if named and self.chance(.3) else '...' + self.fresh('rest'))
         for name in names:
             if not name.startswith('...'):
                 self.declare(name, ty, True)

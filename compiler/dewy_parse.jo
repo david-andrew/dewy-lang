@@ -2662,6 +2662,7 @@ dw_binding_items = (id: int, seen: mut {str: bool}) -> int[]:
             if rests > 1: fatal(dewy_syntax[child].pos - 3, "a pattern level has one `...`: the rest is what the other names leave")
         loop b in dw_binding_one(child, seen, rest): bindings.push(b)
     if bindings.len() == 0: return [dw_fail(id, "an empty unpacking target")]
+    if bindings.len() == 1 and nodes[bindings[0]].kind == .hole and has_flag(bindings[0], NF_SPREAD): fatal(dewy_syntax[id].pos, "this pattern binds nothing: to run the value and drop it, attach `;`, as in `f();`")
     bindings
 
 # One item of a pattern: a name (`apple`, `apple:int64`), a renaming (`apple as a`, the type on
