@@ -1,13 +1,13 @@
 # Packages: other people's Sloppy code, by git URL (or a directory), named in the build block:
 #
 #   build:
-#       physics = package("https://github.com/ann/sloppy-physics")
+#       physics = package("https://github.com/ann/dewy-physics")
 #       tween = package("https://github.com/bob/tween", "v1.2")      # a tag, a branch or a commit
 #       shared = package("../shared")                                # a directory
 #
 # `import physics` loads the package's main file (the file at its root with the package's name,
 # or its only file there), `import 'physics/world.jo'` any other. A git package is pinned to a
-# commit in sloppy.lock beside the program (the first build writes it: commit it with the
+# commit in dewy.lock beside the program (the first build writes it: commit it with the
 # program, and every build after uses the same code) and fetched once, with git, into a cache
 # (pkg_cache). The packages a package names in its own build block come along.
 
@@ -172,16 +172,16 @@ pkg_get = (url: str, commit: str, dir: str) -> bool:
     else:
         code4, _ = pkg_git(["-C", dir, "-c", "advice.detachedHead=false", "checkout", "-q", "FETCH_HEAD"])
         if code4 != 0: return false
-    write_file(dir + "/.sloppy-fetched", commit)
+    write_file(dir + "/.dewy-fetched", commit)
 
-# the packages' directories (pkg_dirs), with sloppy.lock beside the program's main file: read,
+# the packages' directories (pkg_dirs), with dewy.lock beside the program's main file: read,
 # and written when a package was pinned (fetch: get what is missing)
 pkg_resolve_all = (main_path: str):
     if pkg_specs.len() == 0: return
     d = "."
     s = rfind(main_path, "/")
     if s >= 0: d = main_path[..s)
-    lock_path = d + "/sloppy.lock"
+    lock_path = d + "/dewy.lock"
     locked: {str: str} = {}             # "name url ref" -> commit
     if let text = read_file(lock_path):
         loop line in split(text, "\n"):
@@ -231,7 +231,7 @@ pkg_resolve_all = (main_path: str):
         if len(shown) == 0: shown = "-"
         pins.push("{p.name} {url} {shown} {commit}")
         dir = "{pkg_cache()}/{pkg_dir_name(url)}@{commit[..min(len(commit), 12))}"
-        if not file_exists(dir + "/.sloppy-fetched"):
+        if not file_exists(dir + "/.dewy-fetched"):
             if not pkg_fetch:
                 pkg_errs[p.name] = "package '{p.name}' is not fetched yet (`dewy-core build` fetches it)"
                 continue
@@ -275,12 +275,12 @@ pkg_add_main = (a: str[]):
         if ends_with(x, ".jo"): file = x
         else: name = x
     if len(name) == 0:
-        # (from its last part: sloppy-physics.git -> physics)
+        # (from its last part: dewy-physics.git -> physics)
         n = src
         loop ends_with(n, "/"): n = n[..len(n) - 1)
         n = n[max(rfind(n, "/"), rfind(n, ":")) + 1..]
         if ends_with(n, ".git"): n = n[..len(n) - 4)
-        if starts_with(n, "sloppy-"): n = n[7..]
+        if starts_with(n, "dewy-"): n = n[5..]
         name = n.replace("-", "_")
     if len(file) == 0:
         found: str[]
