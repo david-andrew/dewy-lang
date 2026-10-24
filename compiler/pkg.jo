@@ -61,7 +61,8 @@ pkg_resolve = (url: str, ref: str) -> str:
     if pkg_is_commit(ref): return ref
     want = ref
     if len(want) == 0: want = "HEAD"
-    code, out = pkg_git(["ls-remote", url, want])
+    # (git prints an annotated tag's commit, its ^{} line, only when that is asked for too)
+    code, out = pkg_git(["ls-remote", url, want, want + "^\{}"])
     if code < 0:
         pkg_why = "fetching it needs git (https://git-scm.com), which is not on the PATH"
         return ""

@@ -935,7 +935,7 @@ next_error_run = ():
 # function using it is left out too, unreported. The language server drops it as following.)
 never_cascade = (p: int, t: int):
     if t != T_NEVER or not ide_skipped_never: return
-    if ide_on: ide_fatal(p, "this follows from an earlier error: the value never exists")
+    if ide_on: ide_fatal(p, "this follows from an earlier error: the value never exists", true)
     if quiet_errors: stop(1)
     if more_errors: next_error_run()
     stop(1)
@@ -957,14 +957,18 @@ ide_find_file = (path: str) -> int:
         if ide_norm(f.path) == path: return i
     -1
 
-ide_fatal = (p: int, msg: str):
+# (cascade: the error only follows from a body left out after an earlier one, which the
+# language server drops)
+ide_fatal = (p: int, msg: str, cascade: bool = false):
     skip = -1
     if p >= 0: skip = ide_skippable()
     ps = "-1"
     if p >= 0: ps = ide_pos_str(p)
     sk = "-1"
     if skip >= 0: sk = ide_pos_str(skip)
-    ide_emit("E\t{ps}\t{ide_esc(msg)}\t{sk}")
+    tag = ""
+    if cascade: tag = "\tcascade"
+    ide_emit("E\t{ps}\t{ide_esc(msg)}\t{sk}{tag}")
     if ide_sentinel == 0: ide_finish()
     else: ide_flush()
     stop(0)

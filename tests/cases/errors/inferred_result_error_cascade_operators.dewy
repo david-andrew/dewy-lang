@@ -1,0 +1,17 @@
+# modes: native
+# An inferred result left out after an error is not reported again where an
+# operator, an index, a loop or a negation uses it.
+mk = (n:int64) => {
+    n.foo()
+    n
+}
+main = () => {
+    printl(mk(1) + 1)
+    printl(mk(2) =? 2)
+    printl(mk(3)[0])
+    loop x in mk(4) {printl(x)}
+    printl(-mk(5))
+}
+later = () => {
+    let w:int64 = "text"
+}

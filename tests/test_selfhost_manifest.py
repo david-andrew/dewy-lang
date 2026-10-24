@@ -245,6 +245,7 @@ FIXED = [
     '0123456789abcdef0123456789abcdef01234567\tHEAD\n0123456789abcdef0123456789abcdef01234568\trefs/tags/v1^{}',
     '0123456789abcdef0123456789abcdef01234567', 'https://github.com/ann/dewy-physics.git///', 'dewy-', '/', ':', '.git',
     'p https://p - 0123456789abcdef0123456789abcdef01234567\nq https://q v1 fedcba9876543210fedcba9876543210fedcba98',
+    'p https://p v1 zzzz\nq https://q - 0123456789ABCDEF0123456789abcdef01234567\nr https://r v2 fedcba9876543210fedcba9876543210fedcba98',
     'build:\n    é = package("https://ü/ñ", "β")\n    "q" = package("\\"")\n    e = package()\n    f = package(")")\n',
     '-', '--upload-pack=x', 'a b', 'git@x', 'https://a b',
 ]

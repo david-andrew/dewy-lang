@@ -3828,7 +3828,9 @@ check_for = (s: int):
             nodes[s].c = i32(idx)
             nodes[s].d = i32(snap)
             nodes[s].aux2 = i32(vl)
-        else: fatal(nodes[it].pos, "cannot iterate over a value of type {dt(t)}")
+        else:
+            never_cascade(nodes[it].pos, t)
+            fatal(nodes[it].pos, "cannot iterate over a value of type {dt(t)}")
     check_loop_enter(s)
     check_block(int(nodes[s].b), 0, false)
     value_loops.truncate(value_mark)

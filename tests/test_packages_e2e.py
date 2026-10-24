@@ -149,8 +149,6 @@ def test_git_package_pinned_by_tag_writes_a_lock_and_fills_the_cache(box):
     assert (entry / '.dewy-fetched').read_text() == commit
 
 
-@pytest.mark.xfail(reason='an annotated tag pins its tag object, not the commit it names (ls-remote prints no ^{} line)',
-                   strict=False)
 def test_annotated_tag_is_pinned_to_the_commit_it_names(box):
     src = box.repo('src', {'lib.jo': 'greet = () -> str: "v1"\n'})
     assert box.run(box.program({'lib': f'{url(src)}, "v1"'})).returncode == 0
@@ -242,8 +240,6 @@ def test_garbled_lock_resolves_against_the_current_tag(box, pinned):
     assert box.lock()[0].split(' ')[3] != commit
 
 
-@pytest.mark.xfail(reason='a 4-field pin whose commit is not hex is used as is: git fails on it, nothing re-resolves it',
-                   strict=False)
 def test_pin_with_a_malformed_commit_is_resolved_again(box, pinned):
     source, lock, commit = pinned
     (box.prog / 'dewy.lock').write_text(re.sub(r' [0-9a-f]{40}$', ' zzzz', lock, flags=re.M))

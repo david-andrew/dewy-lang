@@ -7275,6 +7275,8 @@ check_binary = (n: int, expected: int) -> int:
             why = " (a struct has the operators defined for it: `({opn}) = (a: {dt(ta)}, b: {dt(ta)}) -> ...`)"
             if op == .gt or op == .le or op == .ge: why = " (define `(<) = (a: {dt(ta)}, b: {dt(ta)}) -> bool: ...` and >, <= and >= come from it)"
             if dewy_at(nodes[n].pos): why = " (a record has the operators defined for it, such as `__add__ = (a:{dt(ta)} b:{dt(ta)}):>{dt(ta)} => ...` for + or `__lt__` for <?)"
+        never_cascade(nodes[n].pos, ta)
+        never_cascade(nodes[n].pos, tb)
         fatal(nodes[n].pos, "operator {opn} is not defined for {dt(ta)} and {dt(tb)}{why}")
     if is_shift and dewy_at(nodes[n].pos) and nodes[b].kind == .int_lit and nodes[b].ival < 0 and not has_flag(b, NF_U64):
         fatal(nodes[b].pos, "a shift count is unsigned, and {nodes[b].ival} is negative")
@@ -7399,6 +7401,8 @@ check_binary = (n: int, expected: int) -> int:
                     fnm = name_of(int(nodes[int(fns[int(nodes[x].sym)].decl)].name))
                     why = " ('{fnm}' gives nothing back (printing is not giving back): end it with the value it should give, and write {jd(nodes[n].pos, "`-> int`", "`:>int64`")} after its parameters)"
                     break
+        never_cascade(nodes[n].pos, ta)
+        never_cascade(nodes[n].pos, tb)
         fatal(nodes[n].pos, "operator {tok_text(op)} is not defined for {dt(ta)} and {dt(tb)}{why}")
     binary_numeric(n, op, a, b, ta, tb, is_cmp)
 
@@ -9781,6 +9785,7 @@ check_index_expr = (n: int, expected: int) -> int:
             if is_union(bt) and dewy_at(nodes[n].pos):
                 loop m in union_members(bt):
                     if m != T_NONE and exception_member(m): fatal(nodes[n].pos, "cannot index a value of type {dt(bt)}: it may be {dt(m)} (a member read through it forwards {dt(m)} too). Check the value first, `if x isnt? {dt(m)} \{ ... }`, which narrows x inside")
+            never_cascade(nodes[n].pos, bt)
             fatal(nodes[n].pos, "cannot index a value of type {dt(bt)}")
     ce_finish(n, t, expected)
 
@@ -9896,7 +9901,9 @@ check_expr_other = (n: int, expected: int) -> int:
                 if r != 0:
                     last_checked = n
                     return r
-            if not is_numeric(at) and not is_vec(at): fatal(nodes[n].pos, "cannot negate {dt(at)}")
+            if not is_numeric(at) and not is_vec(at):
+                never_cascade(nodes[n].pos, at)
+                fatal(nodes[n].pos, "cannot negate {dt(at)}")
             a = int(nodes[n].a)
             if is_lit(a):
                 # fold -literal into a literal (keeps it untyped, e.g. -PI or -1)

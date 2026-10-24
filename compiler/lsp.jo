@@ -290,6 +290,7 @@ struct Diag:
     msg: str
     warning: bool
     info: bool = false   # (a hint: a `$runtime_checks` obligation that is checked at run time)
+    cascade: bool = false   # (an error that only follows from a body left out: never shown)
 
 struct Hint:
     file: int
@@ -673,7 +674,8 @@ take_lines = (r: mut Result, lines_: str[]):
                 p = remap(fmap, f[1])
                 if p.0 >= 0 and p.0 < r.paths.len(): path = r.paths[p.0]
                 off = p.1
-            r.diags.push(Diag(path, off, f[2], k != "E", k == "I"))
+            cascade = k == "E" and f.len() >= 5 and f[4] == "cascade"
+            r.diags.push(Diag(path, off, f[2], k != "E", k == "I", cascade))
             if k == "E" and f.len() >= 4 and f[3] != "-1": r.skips.push(f[3])
 
 remap = (fmap: int[], s: str) -> (int, int):
@@ -770,7 +772,7 @@ check_doc = (path: str, completing: int, lower: bool, wide: bool) -> Result:
         if ei < 0: break
         e = r.diags[ei]
         # (errors that follow from leaving something out are not the program's)
-        follows = rnd > 0 and contains(e.msg, "never")
+        follows = e.cascade
         loop nm in blanked:
             if contains(e.msg, "'{nm}'"): follows = true
         if follows:
