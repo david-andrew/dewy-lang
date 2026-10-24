@@ -1140,6 +1140,13 @@ dn_atom = () -> int:
     if token.kind == .op:
         # (xs[1:], xs[::-1]: Python's slices)
         after_colon = symbol == .colon or dn_at >= 2 and dn_tokens[dn_at - 2].symbol == .colon
+        # (`(from:int64)`, `let loop = 1`: a keyword where a name was meant)
+        # (not `else:` or `loop:`, other languages' block colons)
+        if (symbol == .colon or symbol == .assign) and dn_at >= 2 and dn_tokens[dn_at - 2].symbol != .none and not dn_tokens[dn_at - 1].newline:
+            word = dn_token_text(dn_tokens[dn_at - 2].symbol)
+            named = symbol == .assign or dn_tokens[dn_at - 2].stop == token.start and not (word in ["else", "loop", "if", "match"])
+            if named and len(word) > 0 and word[0] >= 'a' and word[0] <= 'z':
+                return dn_error(dn_tokens[dn_at - 2].start, "`{word}` is a keyword, so it cannot name a variable, parameter or field: choose another name")
         if after_colon and (symbol == .colon or symbol == .rbrack): return dn_error(token.start, "expected an expression, found '{text}' (a slice is a range in the brackets: `xs[1..]`, `xs[..n)`, `xs[a..b)`; `xs.reversed()` reverses; `:` gives a type)")
         habit = dn_operator_habit(text)
         return dn_error(token.start, "expected an expression, found '{text}'{habit}")
@@ -1334,6 +1341,10 @@ dn_stmt = () -> int:
             keyword = dn_take()
             parts.push(dn_node(.keyword, "from", keyword.start))
             parts.push(dn_expr(0))
+        # (`from m import a b`: names listed without commas or parentheses; `import m n`: two modules)
+        if (symbol == .kw_import or symbol == .kw_from) and not dn_tokens[dn_at].newline and dn_can_start():
+            if parts.len() == 2: return dn_error(dn_tokens[dn_at].start, "an `import` line takes one module: put the next on a line of its own, or take names from a module with `from m import a, b`")
+            return dn_error(dn_tokens[dn_at].start, "imported names are separated by commas, `import a, b`, or listed in parentheses, `import (a b)`")
         result = dn_node(.keyword_expr, "", token.start, parts)
     else: result = dn_expr(0)
     if dn_accept_semi(): result = dn_operator(.binary, .statement_end, result, 0)
