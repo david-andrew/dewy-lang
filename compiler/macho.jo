@@ -32,7 +32,7 @@ const MACHO_WATCH_CODE = MACHO_WATCH_AT + 0x4000    # (after the page with the r
 macho_page_up = (x: int) -> int: (x + MACHO_PAGE - 1) & ~(MACHO_PAGE - 1)
 
 # (rodata's offset in the file: after the code, 16-aligned; then the functions and lines for
-# backtraces, __sloppy: x64.jo's pe_backtrace_info)
+# backtraces, __dewy: x64.jo's pe_backtrace_info)
 macho_layout = (text_len: int, ro_len: int, info_len: int) -> (int, int, int, int):
     ro_off = (MACHO_TEXT_OFF + text_len + 15) & ~15
     info_off = (ro_off + ro_len + 15) & ~15
@@ -172,7 +172,7 @@ write_macho = (path: str, text: u8[], entry_off: int, ro: u8[], info: u8[], data
     mseg(cmds, "__TEXT", MACHO_BASE, text_size, 0, text_size, 5, 3)
     msect(cmds, "__text", "__TEXT", MACHO_BASE + text_off, text.len(), text_off, 4, 0x80000400)
     msect(cmds, "__const", "__TEXT", MACHO_BASE + ro_off, ro.len(), ro_off, 4, 0)
-    msect(cmds, "__sloppy", "__TEXT", MACHO_BASE + info_off, info.len(), info_off, 4, 0)
+    msect(cmds, "__dewy", "__TEXT", MACHO_BASE + info_off, info.len(), info_off, 4, 0)
     ncmds += 1
     mseg(cmds, "__DATA", data_addr, data_vm, text_size, 0, 3, 1)
     msect(cmds, "__bss", "__DATA", data_addr, data_size, 0, 4, 1)       # S_ZEROFILL

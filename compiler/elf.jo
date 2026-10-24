@@ -31,7 +31,7 @@ elf_layout = (text_len: int, ro_len: int) -> (int, int, int):
 # function symbols for debuggers/profilers: (name, offset in text, size)
 elf_syms: (str, int, int)[]
 # sections not loaded, after .symtab and .strtab: the line table backtraces read
-# (.sloppy_lines: x64_line_table) and the debugging information (.debug_*: dwarf.jo)
+# (.dewy_lines: x64_line_table) and the debugging information (.debug_*: dwarf.jo)
 elf_extra: (str, u8[])[]
 
 write_elf = (path: str, text: u8[], entry_off: int, ro: u8[], data_size: int) -> bool:

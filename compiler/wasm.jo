@@ -1032,7 +1032,7 @@ wasm_module = (inits: int[], main_lf: int, frame_lf: int) -> u8[]:
     w_line_section(out, code_at, body_at, body_sites, body_names)
     out
 
-# the custom section "sloppy_lines": where the program's own calls are, so that a page can show a
+# the custom section "dewy_lines": where the program's own calls are, so that a page can show a
 # panic's call trace as a native program does (lib/web/runtime.js reads it). The files and the
 # functions (each a count, then a length and the bytes of each), then the calls: a count, then
 # for each the distance in the module from the one before, its file, line and function
@@ -1063,7 +1063,7 @@ w_line_section = (out: mut u8[], code_at: int, body_at: int[], body_sites: int[]
             j += 2
     if ents.len() == 0: return
     s: u8[]
-    nm = "sloppy_lines"
+    nm = "dewy_lines"
     uleb(s, len(nm))
     loop c in nm: s.push(c)
     uleb(s, fnames.len())

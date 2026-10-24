@@ -4,7 +4,7 @@
 # (pe_imports: what everything else is looked up with at run time, as on Linux, and what that
 # needs: lib/core/windows.jo) followed by the program's globals (zero at start, not in the
 # file). The import address table ends where the globals begin, so code finds its entries at
-# fixed offsets below them (pe_iat_off). Last, .sloppy: the functions' names and the line table,
+# fixed offsets below them (pe_iat_off). Last, .dewy: the functions' names and the line table,
 # for backtraces (x64.jo, pe_backtrace_info; lib/std/backtrace.jo reads it where it is loaded).
 
 use 'util.jo'
@@ -340,7 +340,7 @@ write_pe = (path: str, text: u8[], entry_off: int, ro: u8[], data_size: int, gui
     pe_section(out, ".text", text.len(), text_rva, text_raw, text_off, 0x60000020)
     pe_section(out, ".rdata", max(ro.len(), 1), ro_rva, ro_raw, ro_off, 0x40000040)
     pe_section(out, ".data", data_vsize, data_rva, data_raw, data_off, 0xC0000040)
-    pe_section(out, ".sloppy", max(info.len(), 1), info_rva, info_raw, info_off, 0x40000040)
+    pe_section(out, ".dewy", max(info.len(), 1), info_rva, info_raw, info_off, 0x40000040)
     pe_section(out, ".pdata", max(pdata.len(), 1), pdata_rva, pdata_raw, pdata_off, 0x40000040)
     if rsrc.len() > 0: pe_section(out, ".rsrc", rsrc.len(), rsrc_rva, rsrc_raw, rsrc_off, 0x40000040)
     pe_section_headers = out[sect_at..)

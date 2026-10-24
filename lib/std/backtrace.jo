@@ -1,7 +1,7 @@
 # Backtraces at a panic (called by __panic in lib/core/rt.jo).
 
 # where the functions on the call stack were called from: return addresses found through the
-# frame pointers, function names in the program file's .symtab, lines in its .sloppy_lines
+# frame pointers, function names in the program file's .symtab, lines in its .dewy_lines
 # (written by the compiler: compiler/x64.jo, x64_line_table)
 __in_backtrace = false
 
@@ -224,7 +224,7 @@ __backtrace_print = (rets: int[], counts: int[], exe: u8[]):
             sym_off = __u64_at(exe, h + 24)
             sym_size = __u64_at(exe, h + 32)
         else if nm == ".strtab": str_off = __u64_at(exe, h + 24)
-        else if nm == ".sloppy_lines": lines_off = __u64_at(exe, h + 24)
+        else if nm == ".dewy_lines": lines_off = __u64_at(exe, h + 24)
         else if nm == ".text": text_addr = __u64_at(exe, h + 16)
     if sym_off == 0 or lines_off == 0: return
     fnames: str[]
@@ -241,7 +241,7 @@ __backtrace_print = (rets: int[], counts: int[], exe: u8[]):
         fnames.push(fname)
     __backtrace_report(rets, counts, fnames, exe, lines_off, text_addr)
 
-# (Windows: the program's .sloppy section, where it is loaded: compiler/pe.jo, pe_backtrace_info)
+# (Windows: the program's .dewy section, where it is loaded: compiler/pe.jo, pe_backtrace_info)
 __backtrace_print_pe = (rets: int[], counts: int[]):
     base = 0x400000 as *u8
     pe = base + int(((base + 0x3C) as *u32)[0])
@@ -256,12 +256,12 @@ __backtrace_print_pe = (rets: int[], counts: int[]):
         rva = int(((h + 12) as *u32)[0])
         size = int(((h + 8) as *u32)[0])
         if nm == ".text": text_addr = 0x400000 + rva
-        else if nm == ".sloppy":
+        else if nm == ".dewy":
             info = fill(u8(0), size)
             mem_copy(data(info), base + rva, size)
     __backtrace_print_info(rets, counts, info, text_addr)
 
-# (macOS: the same in __TEXT's __sloppy section, found through the program's Mach-O header
+# (macOS: the same in __TEXT's __dewy section, found through the program's Mach-O header
 # where dyld put it: compiler/macho.jo)
 __backtrace_print_macho = (rets: int[], counts: int[]):
     when TARGET == "macos":
@@ -283,7 +283,7 @@ __backtrace_print_macho = (rets: int[], counts: int[]):
                     at = mh + (((sc + 32) as *int)[0] - vm)
                     size = ((sc + 40) as *int)[0]
                     if nm == "__text": text_addr = at as int
-                    else if nm == "__sloppy":
+                    else if nm == "__dewy":
                         info = fill(u8(0), size)
                         mem_copy(data(info), at, size)
             lc = lc + int(((lc + 4) as *u32)[0])

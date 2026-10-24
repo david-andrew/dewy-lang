@@ -732,7 +732,7 @@ compile = (path: str, out0: str) -> str:
         # (sloppy watch: after the first build, a patch for the program running)
         if watch_build and not watch_first: ok = watch_make_patch()
         else:
-            elf_extra = [(".sloppy_lines", x64_line_table())]
+            elf_extra = [(".dewy_lines", x64_line_table())]
             # (with -g only, as on macOS)
             dw_data_addr = img_data_addr
             if debug_vars: elf_extra = elf_extra + dwarf_sections(img_text_addr, code.len(), path, DEWY_CORE_VERSION)
@@ -751,7 +751,7 @@ compile = (path: str, out0: str) -> str:
         if watch_build and not watch_first: ok = watch_make_patch()
         else:
             # (backtraces always; debuggers and profilers get DWARF in what `sloppy build` writes)
-            elf_extra = [(".sloppy_lines", x64_line_table())]
+            elf_extra = [(".dewy_lines", x64_line_table())]
             dw_data_addr = img_data_addr
             if debug_info: elf_extra = elf_extra + dwarf_sections(img_text_addr, code.len(), path, DEWY_CORE_VERSION)
             ok = write_elf(out, code, entry, rodata, data_size + 8 + bss_reserve)

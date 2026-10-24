@@ -3703,7 +3703,7 @@ call_site = (ins: Ins):
     call_sites.push(code.len())
     call_sites.push(int(ins.pos))
 
-# the ".sloppy_lines" section: "SLN1", the files (u32 count, then u32 length and name each),
+# the ".dewy_lines" section: "SLN1", the files (u32 count, then u32 length and name each),
 # then u32 count and for each call site in address order: varints of the return address's
 # offset in .text since the previous one, the file and the line
 x64_line_table = () -> u8[]:
@@ -3745,7 +3745,7 @@ x64_line_table = () -> u8[]:
         k += 3
     out
 
-# (Windows programs: their .sloppy section, compiler/pe.jo) "SLS1", the number of functions,
+# (Windows programs: their .dewy section, compiler/pe.jo) "SLS1", the number of functions,
 # each as its offset in .text, size and name; then the line table (x64_line_table)
 pe_backtrace_info = () -> u8[]:
     out: u8[] = ['S', 'L', 'S', '1']
