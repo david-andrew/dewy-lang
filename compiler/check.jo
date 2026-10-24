@@ -7042,6 +7042,7 @@ values_expand = (items0: int[], pre: mut int[], call: int) -> int[]:
             else if types[t].kind == .fixed: k = fixed_len(t)
             else if types[t].kind == .tuple: k = int(types[t].nargs)
             else if types[t].kind == .array: k = -1
+            else if types[t].kind == .struct_ and not is_map_type(t): fatal(nodes[c].pos, "spreading a record's fields into named arguments is not implemented yet: pass them by name, `f(x=r.x)`")
             else: fatal(nodes[c].pos, "`...` spreads a container into arguments: an array, a fixed array or a `[int64 string]` (found {dt(t)})")
             info[i].count = k
             continue

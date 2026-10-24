@@ -1,0 +1,20 @@
+# quick
+Size:type=[w:int64 h:int64]
+area=([w h]:Size)=>w*h
+area2=((w h):array<int64>)=>w*h
+span=([first ...middle last]:array<int64>)=>last-first
+named=([w as width  h]:Size)=>width+h
+grouped=((a b))=>a+b
+fixed=([a b]:array<int64 length=2>)=>a*b
+run=()=>{
+    printl(area(Size[w=3 h=4]))
+    printl(area2([5 6]))
+    printl(span([1 5 9 20]))
+    printl(named(Size[w=1 h=2]))
+    printl(grouped([20 22]))
+    let local=((a b):array<int64>)=>a-b
+    printl(local([50 8]))
+    let xs:array<int64 length=2>=[6 7]
+    printl(fixed(xs))
+}
+run()
