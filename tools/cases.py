@@ -33,6 +33,8 @@ from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from pathlib import Path
 
+from tools import scratch as scratch_space
+
 ROOT = Path(__file__).resolve().parents[1]
 CASES = ROOT / 'tests' / 'cases'
 MODES = ('native', 'native-release', 'web', 'web-release')
@@ -554,11 +556,14 @@ def run(compiler: Path, cases: list[Case], *, workers: int = 2, update: bool = F
                f'({runs} case runs, {runner.builds} builds) in {elapsed:.1f} s')
     if verbose or failed:
         print(summary, flush=True)
+    shutil.rmtree(scratch, ignore_errors=True)
     if failed:
-        print(f'cases: build outputs kept in {scratch}')
+        kept = None
+        for case, results in failed:
+            kept = scratch_space.record_failure(case.name, ''.join(
+                f'[{o.mode}] {o.message}\n--- stdout\n{o.stdout or ""}\n' for o in results)).parent
+        print(f'cases: failing outputs kept in {kept}')
         print('cases: rerun with python3 -m tools.core cases -k NAME', flush=True)
-    else:
-        shutil.rmtree(scratch, ignore_errors=True)
     return 1 if failed else 0
 
 
