@@ -2488,7 +2488,7 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
                     if ai > 0: ats += ", "
                     if nodes[unnamed(a0)].type != 0: ats += dt(ntype(unnamed(a0)))
                 if nodes[n].aux2 == i32(AUX2_PARTIAL) and dewy_at(nodes[n].pos):
-                    fatal(nodes[n].pos, "ambiguous partial application of '{name_of(name)}': more than one overload takes these arguments (candidates at {pos_str(nodes[cands[best].decl].pos)} and {pos_str(nodes[cd.decl].pos)}); annotate the binding with the callable type it should have, as in `let f:<(b:string):>string>=@{name_of(name)}(...)`")
+                    fatal(nodes[n].pos, "ambiguous partial application of '{name_of(name)}': more than one overload takes these arguments (candidates at {pos_str(nodes[cands[best].decl].pos)} and {pos_str(nodes[cd.decl].pos)}); annotate the binding with the callable type it should have, as in `let f:<(b:string):>string> = @{name_of(name)}(...)`")
                 fatal(nodes[n].pos, "ambiguous call to '{name_of(name)}({ats})': candidates at {pos_str(nodes[cands[best].decl].pos)} and {pos_str(nodes[cd.decl].pos)}")
     if best < 0:
         # (f(e) with e a union and an overload of f for each of its members: chosen by what e holds)
@@ -5989,7 +5989,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
             check_to(args[0], mk_array(struct_targ(int(types[ex].st), 0)))
             add_flag(args[0], NF_CHECKED)
         else if nodes[args[0]].kind == .array and nkids(args[0]) == 0:
-            fatal(nodes[n].pos, "cannot infer the type of an empty set; add a type annotation: `let values:set<int64>=set[]`")
+            fatal(nodes[n].pos, "cannot infer the type of an empty set; add a type annotation: `let values:set<int64> = set[]`")
         nodes[n] = nodes[bc_call("__dewy_make_set", args, nodes[n].pos)]
         return check_expr(n, expected)
     else if id == .dewy_iter:
@@ -7208,7 +7208,7 @@ check_binary = (n: int, expected: int) -> int:
         else if type_eq(ta, tb) and types[ta].kind == .struct_ and not is_map_type(ta):
             why = " (a struct has the operators defined for it: `({opn}) = (a: {dt(ta)}, b: {dt(ta)}) -> ...`)"
             if op == .gt or op == .le or op == .ge: why = " (define `(<) = (a: {dt(ta)}, b: {dt(ta)}) -> bool: ...` and >, <= and >= come from it)"
-            if dewy_at(nodes[n].pos): why = " (a record has the operators defined for it, such as `__add__=(a:{dt(ta)} b:{dt(ta)}):>{dt(ta)}=>...` for + or `__lt__` for <?)"
+            if dewy_at(nodes[n].pos): why = " (a record has the operators defined for it, such as `__add__ = (a:{dt(ta)} b:{dt(ta)}):>{dt(ta)} => ...` for + or `__lt__` for <?)"
         fatal(nodes[n].pos, "operator {opn} is not defined for {dt(ta)} and {dt(tb)}{why}")
     if is_shift and dewy_at(nodes[n].pos) and nodes[b].kind == .int_lit and nodes[b].ival < 0 and not has_flag(b, NF_U64):
         fatal(nodes[b].pos, "a shift count is unsigned, and {nodes[b].ival} is negative")
@@ -8546,7 +8546,7 @@ fn_value = (n: int, expected: int, explicit_types: int[] = [], mod: int = -1, cl
     # (`@sin`: the trigonometry takes angles, so it is no function of a plain number)
     if mod < 0 and closure == 0 and dewy_quantity_name(int(nodes[n].name)) and nodes[n].name != i32(quantity_call_names[0]) and dewy_at(nodes[n].pos) and decls.len() > 0 and decl_in_prelude(decls[0]):
         fname = name_of(int(nodes[n].name))
-        fatal(nodes[n].pos, "{fname} takes an angle, so `@{fname}` is no function of a plain number: write `(x:float64)=>{fname}(x*rad)` for radians (`from units import rad`)")
+        fatal(nodes[n].pos, "{fname} takes an angle, so `@{fname}` is no function of a plain number: write `(x:float64) => {fname}(x * rad)` for radians (`from units import rad`)")
     et = callable_base(expected)
     if expected == 0: et = 0
     # Only inferred Dewy handles prefer a concrete program declaration.
@@ -10069,7 +10069,7 @@ check_expr_other = (n: int, expected: int) -> int:
                 coerce_hint = jd(nodes[n].pos, " (an array holds one kind of value, here {dt(elt)}; for values of several kinds, make a struct or a union)", " (an array holds one kind of value, here {dt(elt)}; for values of several kinds, use a record type or a union such as `array<int64|string>`)")
                 # ([Bool[true] Null]: siblings of a minted family are held as their parent)
                 if nominal_parent.get(prune(elt), 0) != 0 and dewy_at(nodes[n].pos):
-                    coerce_hint = " (an array holds one kind of value, here {dt(elt)}, taken from the first element; for any member of its family, name the parent: `let values:array<{dt(nominal_parent[prune(elt)])}>=[...]`)"
+                    coerce_hint = " (an array holds one kind of value, here {dt(elt)}, taken from the first element; for any member of its family, name the parent: `let values:array<{dt(nominal_parent[prune(elt)])}> = [...]`)"
                 loop i in [0..nkids(n)):
                     c = kid(n, i)
                     if has_flag(c, NF_SPREAD): coerce(c, mk_array(elt))

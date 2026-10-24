@@ -6640,7 +6640,7 @@ check_program = (main_path: str):
     if not has_upd and not has_drw:
         loop gn in ["_process", "_physics_process", "_ready", "_draw", "_input", "Awake", "FixedUpdate", "LateUpdate", "OnGUI"]:
             if let gs = modules[mainm].names.get(intern(gn)):
-                if syms[gs].decl != 0: callback_warn(gs, "nothing calls {gn}: a game is {jd(nodes[int(syms[gs].decl)].pos, "`update = (dt: f64): ...`", "`update=(dt:float64):>void=>\{...}`")}, called each frame, and {jd(nodes[int(syms[gs].decl)].pos, "`draw = (): ...`", "`draw=():>void=>\{...}`")} after it; what runs once goes at the top level")
+                if syms[gs].decl != 0: callback_warn(gs, "nothing calls {gn}: a game is {jd(nodes[int(syms[gs].decl)].pos, "`update = (dt: f64): ...`", "`update = (dt:float64):>void => \{...}`")}, called each frame, and {jd(nodes[int(syms[gs].decl)].pos, "`draw = (): ...`", "`draw = ():>void => \{...}`")} after it; what runs once goes at the top level")
     # (Draw = ():, updte = (dt: f64): a near miss of the name the game calls, and nothing runs)
     loop want in ["draw", "update"]:
         if modules[mainm].names.get(intern(want)) != none: continue
@@ -6931,7 +6931,7 @@ check_program = (main_path: str):
         loop d in modules[mainm].decls:
             if nodes[d].kind != .fn_ or fn_used.has(d) or has_flag(d, NF_EXTERN) or nodes[d].c != 0: continue
             fnm = name_of(int(nodes[d].name))
-            warn(nodes[d].pos, "nothing in this file runs: it only makes functions, and making {fnm} does not run it. Lines at the top of the file run when the program starts (`{fnm}()` there calls it); a game's {jd(nodes[d].pos, "`update = (dt: f64):` runs every frame, where `if key_pressed(.space): ...` checks a key. (A file that other files `use` is fine like this.)", "`update=(dt:float64):>void=>\{...}` runs every frame, where `if key_pressed(Key.space) ...` checks a key. (A file that other files import is fine like this.)")}")
+            warn(nodes[d].pos, "nothing in this file runs: it only makes functions, and making {fnm} does not run it. Lines at the top of the file run when the program starts (`{fnm}()` there calls it); a game's {jd(nodes[d].pos, "`update = (dt: f64):` runs every frame, where `if key_pressed(.space): ...` checks a key. (A file that other files `use` is fine like this.)", "`update = (dt:float64):>void => \{...}` runs every frame, where `if key_pressed(Key.space) ...` checks a key. (A file that other files import is fine like this.)")}")
             break
     if not ide_on and (not test_mode or check_all) and runs:
         # (a `$test` function: `dewy-core test` runs it)
@@ -6990,11 +6990,11 @@ check_program = (main_path: str):
 dewy_main_result = (decl: int, rt: int):
     if rt == T_VOID or rt == T_NEVER: return
     pos = nodes[decl].pos
-    if is_int(rt) or rt == T_MATH_INT: fatal(pos, "main gives back no exit code: it returns void, or the errors that reach it (`main=():>void|ParseError=>...`, inferred when not declared). End successfully with `return` (or by reaching the end), and call `exit(n)` for a particular code")
+    if is_int(rt) or rt == T_MATH_INT: fatal(pos, "main gives back no exit code: it returns void, or the errors that reach it (`main = ():>void|ParseError => ...`, inferred when not declared). End successfully with `return` (or by reaching the end), and call `exit(n)` for a particular code")
     kinds: int[]
     loop m in value_members(rt):
         if tkind(m) == .void_: continue
-        if m == T_NONE or not exception_member(m): fatal(pos, "main returns void or the errors that reach it, found {dt(rt)}: {dt(m)} is not an error. A last line giving a value gives it back: declare `main=():>void=>...` to drop it, print it, or end with `exit(n)` for a code")
+        if m == T_NONE or not exception_member(m): fatal(pos, "main returns void or the errors that reach it, found {dt(rt)}: {dt(m)} is not an error. A last line giving a value gives it back: declare `main = ():>void => ...` to drop it, print it, or end with `exit(n)` for a code")
         kinds.push(m)
     ordered = main_kind_order(decl, kinds)
     taken: {int: bool}

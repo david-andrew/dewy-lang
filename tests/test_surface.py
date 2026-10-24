@@ -262,7 +262,7 @@ NATIVE_DIAGNOSTICS = {
     'optional-arithmetic': ('f = (x:int64?) => x + 1\nmain = ():>void => { f(1) }', 'or check it first: `if x isnt? none { ... }`'),
     'optional-order': ('f = (x:int64?) => x <? 1\nmain = ():>void => { f(1) }', 'compared with <?, >?'),
     'union-arithmetic': ('f = (x:int64|string) => x + 1\nmain = ():>void => { f(1) }', '`if x is? int64 { ... }`'),
-    'record-operator': ('P:type=[a:int64]\nmain = () => { let p = P[1]\nlet q = p + p }', '`__add__=(a:P b:P):>P=>...`'),
+    'record-operator': ('P:type=[a:int64]\nmain = () => { let p = P[1]\nlet q = p + p }', '`__add__ = (a:P b:P):>P => ...`'),
     'text-plus-number': ('main = () => { let s = "a" + 1 }', 'interpolate, `"a{1}"`'),
     'empty-array': ('main = () => { let m = [] }', '`let m:array<int64> = []`'),
     'real-to-integer': ('main = () => { let x:float64 = 1.5\nlet y:int64 = x }', 'int64(x) makes it a whole number'),
