@@ -7012,6 +7012,7 @@ values_hint_pos: int[]      # (inlay hints: where an argument giving several val
 values_hint_first: int[]    # (... the first position its values fill ...)
 values_hint_label: str[]    # (... and the parameters they fill, once the call is resolved)
 values_hint_mark = 0        # (the first of the hints the arguments being expanded made)
+values_hits: {int: bool}    # (call arguments checked early that gave several values)
 
 values_expand = (items0: int[], pre: mut int[], call: int) -> int[]:
     items = values_flatten(items0)
@@ -7047,15 +7048,18 @@ values_expand = (items0: int[], pre: mut int[], call: int) -> int[]:
             else: fatal(nodes[c].pos, "`...` spreads a container into arguments: an array, a fixed array or a `[int64 string]` (found {dt(t)})")
             info[i].count = k
             continue
-        if not values_candidate(c): continue
-        saved = sink_pack_site
-        sink_pack_site = c
-        t = check_expr(c, 0)
-        sink_pack_site = saved
-        hit = sink_pack_hit != 0 and sink_pack_hit == c
-        sink_pack_hit = 0
-        items[i] = last_checked
-        add_flag(items[i], NF_CHECKED)
+        hit = false
+        if values_hits.has(c): hit = true
+        else:
+            if not values_candidate(c): continue
+            saved = sink_pack_site
+            sink_pack_site = c
+            check_expr(c, 0)
+            sink_pack_site = saved
+            hit = sink_pack_hit != 0 and sink_pack_hit == c
+            sink_pack_hit = 0
+            items[i] = last_checked
+            add_flag(items[i], NF_CHECKED)
         if not hit: continue
         k = values_count(items[i])
         if k == 0: values_dynamic(items[i])
@@ -7236,10 +7240,34 @@ values_call = (n: int, expected: int) -> int:
     if nodes[callee].kind == .ident:
         nm = name_of(int(nodes[callee].name))
         if len(nm) > 1 and (nm[0] == '_' and nm[1] == '_' or nm[0] == '$'): return -1
+    # (the common case, nothing to expand, decided without allocating: a call argument is
+    # checked here as an untyped argument would be anyway, its own pack noted)
     some = false
-    loop a in kids(n):
+    loop i in [0..nkids(n)):
+        a = kid(n, i)
         k = nodes[a].kind
-        if k == .call or k == .ident or k == .tuple or has_flag(a, NF_SPREAD): some = true
+        if k == .tuple and nodes[a].aux == i32(TUPLE_VALUES) or has_flag(a, NF_SPREAD) or values_hits.has(a):
+            some = true
+            break
+        if has_flag(a, NF_CHECKED): continue
+        if k == .ident:
+            if values_candidate(a):
+                some = true
+                break
+        else if k == .call and not ctx_dependent(a) and not sink_spread_calls.has(a):
+            saved = sink_pack_site
+            sink_pack_site = a
+            check_expr(a, 0)
+            sink_pack_site = saved
+            hit = sink_pack_hit != 0 and sink_pack_hit == a
+            sink_pack_hit = 0
+            v = last_checked
+            add_flag(v, NF_CHECKED)
+            if v != a: set_kid(n, i, v)
+            if hit:
+                values_hits[v] = true
+                some = true
+                break
     if not some: return -1
     pre: int[]
     values_hint_mark = values_hint_pos.len()
