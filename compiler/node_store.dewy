@@ -1,0 +1,138 @@
+# The compiler's node store: every syntax tree node, from either frontend and the checker,
+# is a Node in one array, and nodes refer to each other by index; node 0 is the "no node"
+# sentinel. A node's lists of children are runs of a second array of indices.
+#
+# A module of the compiler written in Dewy. node_store.jo is its frozen twin for the
+# compilers without the Dewy frontend (tools/compiler/build.py); the two keep the same
+# interface and give the same answers (tests/test_selfhost_node_store.py). The arrays are
+# Sloppy's globals (ast.jo `nodes` and `lists`), passed by place. Sloppy code takes NK as
+# its enum, its members numbered as written here.
+
+# A node's kind. In order: nil; expressions; those the checker makes (conv, fnref, partial,
+# intrinsic); statements (vardecl ... arm); declarations (fn_ ... build_); type expressions
+# (tname ... tfn); patterns (pwild ... pvariant); then those added with syntax revision 2:
+#   narrow: a: a union (or optional) value known to hold member aux (type is the member's)
+#   typealias: type Name[T] = a
+#   ptype: Dewy type pattern: a is the type, name is an optional value binding
+#   record_lit: Dewy [field=value ...], contextual or inferred structural record
+#   matrix: [1 2 ; 3 4]: the elements row by row; ival = elements per row
+#   trecord: Dewy inline structural type [field: Type ...]
+#   propagate: postfix or_throw; checker expands to a checked return
+#   unit_lit: exact built-in unit: ival numerator, aux denominator, aux2 dimension
+#   tquantity: type product/division/power: a and b type syntax (power b is expression)
+#   reflect_scope: internal: a specialized iteration's binding and body
+#   record_loop: literal fields expanded in a compile-time iteration scope
+#   trefined: a: base type, b: pure predicate, name: optional self binder
+#   typeapply: Dewy f<T> / Type<T>: a is the base, c the type syntax, kids the type arguments
+#   pshape: Dewy object pattern [f g:T h:1]: kids are field patterns named by their fields
+#   pseq: Dewy sequence pattern (p q r): kids are the element patterns
+#   parallel_region: a: checked library call; retains the scoped fork/join boundary
+#   new_axis: Dewy xs[new ..]: a is the receiver, kids the entries (`new` is the ident $new)
+NK:type='nil' |
+    'int_lit' | 'float_lit' | 'str_lit' | 'bool_lit' | 'none_lit' | 'null_lit' | 'ident' | 'field' |
+    'dotname' | 'call' | 'index' | 'unary' | 'binary' | 'and_' | 'or_' | 'not_' |
+    'coalesce' | 'unwrap' | 'lambda' | 'array' | 'map_lit' | 'tuple' | 'if_' | 'match_' |
+    'cast' | 'range' | 'addr' | 'hole' | 'namedarg' | 'pair' | 'block' | 'iflet' |
+    'conv' | 'fnref' | 'partial' | 'intrinsic' |
+    'vardecl' | 'assign' | 'exprstmt' | 'while_' | 'for_' | 'return_' | 'break_' | 'continue_' |
+    'defer_' | 'when_' | 'arm' |
+    'fn_' | 'param' | 'struct_' | 'enum_' | 'variant' | 'const_' | 'import_' | 'test_' |
+    'build_' |
+    'tname' | 'tarray' | 'tmap' | 'ttuple' | 'topt' | 'tptr' | 'tfn' |
+    'pwild' | 'plit' | 'prange' | 'pvariant' |
+    'tunion' | 'istype' | 'loopx' | 'lhead' | 'narrow' | 'typealias' | 'ptype' | 'record_lit' |
+    'matrix' | 'trecord' | 'propagate' | 'unit_lit' | 'tquantity' | 'reflect_scope' | 'record_loop' | 'trefined' |
+    'typeapply' | 'pshape' | 'pseq' | 'parallel_region' | 'new_axis'
+
+Node:type=[
+    kind:NK='nil'
+    op:int32=0
+    flags:int32=0
+    pos:int64=0
+    a:int32=0
+    b:int32=0
+    c:int32=0
+    d:int32=0
+    list:int32=0
+    nlist:int32=0
+    list2:int32=0
+    nlist2:int32=0
+    name:int32=0
+    sval:int32=0
+    ival:int64=0
+    fval:float64=0.0
+    type:int32=0
+    sym:int32=0
+    aux:int32=0
+    aux2:int32=0      # vardecl: 1 for a synthesized Dewy value-parameter binding
+    mod:int32=0
+]
+
+# (the flag clone clears: ast.jo's NF_CHECKED)
+const NODE_CHECKED:int64=128
+
+# A new node of kind at pos, every other field zero
+node_mk=(@store:array<Node> kind:NK pos:int64):>int64=>{
+    store.push(Node[kind=kind pos=pos])
+    store.length - 1
+}
+
+# xs as a new run of lists; its start
+node_run=(@lists:array<int32> xs:array<int64>):>int64=>{
+    let start=lists.length
+    loop x in xs {lists.push(int32(x))}
+    start
+}
+
+# n's children (list) and its second list (list2) are xs, as a new run of lists
+node_set_list=(@store:array<Node> @lists:array<int32> n:int64 xs:array<int64>)=>{
+    let start=lists.length
+    loop x in xs {lists.push(int32(x))}
+    store[n].list=int32(start)
+    store[n].nlist=int32(xs.length)
+}
+
+node_set_list2=(@store:array<Node> @lists:array<int32> n:int64 xs:array<int64>)=>{
+    let start=lists.length
+    loop x in xs {lists.push(int32(x))}
+    store[n].list2=int32(start)
+    store[n].nlist2=int32(xs.length)
+}
+
+# a run of lists as an array
+node_run_of=(@lists:array<int32> start:int64 count:int64):>array<int64>=>{
+    let out:array<int64>=[]
+    loop i in [start..start + count) {out.push(lists[i])}
+    out
+}
+
+node_kids=(@store:array<Node> @lists:array<int32> n:int64):>array<int64>=>node_run_of(@lists store[n].list store[n].nlist)
+node_kids2=(@store:array<Node> @lists:array<int32> n:int64):>array<int64>=>node_run_of(@lists store[n].list2 store[n].nlist2)
+
+# A deep copy of a subtree (generic functions are instantiated so): the copy's own fields
+# first, unchecked, then its children's copies, in order
+node_clone=(@store:array<Node> @lists:array<int32> n:int64):>int64=>{
+    if n =? 0 {return 0}
+    let nd=store[n]
+    let k=nd.kind
+    if k not=? 'fn_' and k not=? 'struct_' and k not=? 'enum_' {nd.sym=0}
+    if k not=? 'conv' {nd.type=0}
+    nd.flags=int32<overflow='wrap'>(nd.flags and not NODE_CHECKED)
+    let c=store.length
+    store.push(nd)
+    if nd.a not=? 0 {store[c].a=int32(node_clone(@store @lists nd.a))}
+    if nd.b not=? 0 {store[c].b=int32(node_clone(@store @lists nd.b))}
+    if nd.c not=? 0 {store[c].c=int32(node_clone(@store @lists nd.c))}
+    if nd.d not=? 0 {store[c].d=int32(node_clone(@store @lists nd.d))}
+    if nd.nlist >? 0 {
+        let xs:array<int64>=[]
+        loop i in [0..nd.nlist) {xs.push(node_clone(@store @lists lists[nd.list + i]))}
+        node_set_list(@store @lists c xs)
+    }
+    if nd.nlist2 >? 0 {
+        let xs:array<int64>=[]
+        loop i in [0..nd.nlist2) {xs.push(node_clone(@store @lists lists[nd.list2 + i]))}
+        node_set_list2(@store @lists c xs)
+    }
+    c
+}

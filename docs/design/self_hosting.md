@@ -348,6 +348,36 @@ runs and 3000 interpolation texts. It compiled as first written. Panel: every it
   spec gives a meaning to either. A spec costs about 155 instructions more than the twin's
   (`byte_slice`, and bounds checks in the scan), 15 an interpolation without one: hello +0.02%.
 
+`node_store.dewy` (the node store: the `Node` record and its kinds `NK`, a new node, a node's
+lists as runs of the second array, its children as an array, and a subtree's copy) is the first
+of the parsers' two prerequisites; the intern table is the other. The two arrays stay ast.jo's
+globals, taken by place (`@store @lists`): Sloppy reads and writes nodes' fields in place at
+about 14,700 sites, in every phase, and their code is unchanged (the record's layout and every
+field read are the same instructions). Nineteen modules that name `Node` or `NK` `use` the leaf.
+The one-line field reads and flag tests (`kid`, `nkids`, `has_flag`, `add_flag`, `clear_flag`,
+`set_kid`) stay in ast.jo; NF_* flags stay there too. The differential test runs one Sloppy driver
+over the leaf or its twin on 40 random rounds of node building (every kind made, fields set,
+lists of up to 40 children, runs, children read back, about 600 copies of subtrees) and compares
+every node's fields and the runs with a Python store. Panel: flagships +0.13% (lex+parse +0.25%, resolve+check +0.29%), self-build +0.04%,
+synthetic-22k +0.12%; 684 builds identical. What it
+met:
+- Sloppy can build a Dewy record only when every field has a default, so `Node`'s are `=0`; each
+  such default was stored after the slot's zero fill: 19 stores a node, lex+parse +1.57%. A
+  default that is the zero bytes (0, 0.0, `false`, an enumeration's first member) is now left
+  to the fill, for every record (e4a7d0dd2).
+- Sloppy's `kind >= .int_lit and kind <= .ident` (exact.jo) compared a Dewy enumeration's
+  members as text, by name, as Dewy does: the scalar-leaf test misfired, facts +5%. Sloppy now
+  orders one by position, as its twin's enum (ffbf1fcd5).
+- The field one-liners as calls into the leaf cost the panel +0.80% (resolve+check +2.37%):
+  `x not=? 0` is an `eq` and a `not` with two zero-extensions where Sloppy's `!=` is one `ne`,
+  which takes helpers built on `has_flag` (`is_lit`, `written_at`, ...) over the inliner's size
+  limit, so their callers call them (+7.5 M instructions on the panel); a checked `start + i`
+  index in a counted loop adds an overflow pre-check of about 40 instructions a call (`kids`, now
+  a loop over `[start..start + count)`); a loop leaf taking a place is not inlined into its caller
+  in release (`set_list`, now one function); `lists[store[n].list + i]` adds a `jo` (`kid`).
+- `int32(x)` into the runs checks each value's range, where Sloppy wrapped silently: two compares
+  an element, kept.
+
 The whole lexer was ported first (dn_lex's loop, keywords found by their bytes, names
 interned by the caller): lexing took +11% (+28 instructions a lexeme; synthetic-22k +0.74%,
 lex+parse +0.83%), so the loop stays in Sloppy. Its loop alone matched Sloppy's; the cost was

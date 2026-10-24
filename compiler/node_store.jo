@@ -1,0 +1,115 @@
+# The frozen implementation-language twin of node_store.dewy, for the compilers without the
+# Dewy frontend (tools/compiler/build.py). Change both, or neither.
+
+enum NK:
+    nil,
+    # expressions
+    int_lit, float_lit, str_lit, bool_lit, none_lit, null_lit, ident, field, dotname, call, index,
+    unary, binary, and_, or_, not_, coalesce, unwrap, lambda, array, map_lit, tuple, if_, match_, cast,
+    range, addr, hole, namedarg, pair, block, iflet,
+    # produced by the checker
+    conv, fnref, partial, intrinsic,
+    # statements
+    vardecl, assign, exprstmt, while_, for_, return_, break_, continue_, defer_, when_, arm,
+    # declarations
+    fn_, param, struct_, enum_, variant, const_, import_, test_, build_,
+    # type expressions
+    tname, tarray, tmap, ttuple, topt, tptr, tfn,
+    # patterns
+    pwild, plit, prange, pvariant,
+    # added with syntax revision 2
+    tunion, istype, loopx, lhead,
+    narrow,         # a: a union (or optional) value known to hold member aux (type is the member's)
+    typealias,      # type Name[T] = a
+    ptype,          # Dewy type pattern: a is the type, name is an optional value binding
+    record_lit,     # Dewy [field=value ...], contextual or inferred structural record
+    matrix,         # [1 2 ; 3 4]: the elements row by row; ival = elements per row
+    trecord,        # Dewy inline structural type [field: Type ...]
+    propagate,     # postfix or_throw; checker expands to a checked return
+    unit_lit,       # exact built-in unit: ival numerator, aux denominator, aux2 dimension
+    tquantity,      # type product/division/power: a and b type syntax (power b is expression)
+    reflect_scope, # internal: a specialized iteration's binding and body
+    record_loop,   # literal fields expanded in a compile-time iteration scope
+    trefined,      # a: base type, b: pure predicate, name: optional self binder
+    typeapply,      # Dewy f<T> / Type<T>: a is the base, c the type syntax, kids the type arguments
+    pshape,         # Dewy object pattern [f g:T h:1]: kids are field patterns named by their fields
+    pseq,           # Dewy sequence pattern (p q r): kids are the element patterns
+    parallel_region, # a: checked library call; retains the scoped fork/join boundary
+    new_axis        # Dewy xs[new ..]: a is the receiver, kids the entries (`new` is the ident $new)
+
+struct Node:
+    kind: NK
+    op: i32
+    flags: i32
+    pos: int
+    a: i32
+    b: i32
+    c: i32
+    d: i32
+    list: i32
+    nlist: i32
+    list2: i32
+    nlist2: i32
+    name: i32
+    sval: i32
+    ival: int
+    fval: f64
+    type: i32
+    sym: i32
+    aux: i32
+    aux2: i32         # vardecl: 1 for a synthesized Dewy value-parameter binding
+    mod: i32
+
+const NODE_CHECKED = 128
+
+node_mk = (store: mut Node[], kind: NK, pos: int) -> int:
+    store.push(Node(kind = kind, pos = pos))
+    store.len() - 1
+
+node_run = (runs: mut i32[], xs: int[]) -> int:
+    start = runs.len()
+    loop x in xs: runs.push(i32(x))
+    start
+
+node_set_list = (store: mut Node[], runs: mut i32[], n: int, xs: int[]):
+    start = runs.len()
+    loop x in xs: runs.push(i32(x))
+    store[n].list = i32(start)
+    store[n].nlist = i32(xs.len())
+
+node_set_list2 = (store: mut Node[], runs: mut i32[], n: int, xs: int[]):
+    start = runs.len()
+    loop x in xs: runs.push(i32(x))
+    store[n].list2 = i32(start)
+    store[n].nlist2 = i32(xs.len())
+
+node_run_of = (runs: mut i32[], start: int, count: int) -> int[]:
+    out: int[]
+    loop i in [start..start + count): out.push(int(runs[i]))
+    out
+
+node_kids = (store: mut Node[], runs: mut i32[], n: int) -> int[]: node_run_of(runs, int(store[n].list), int(store[n].nlist))
+node_kids2 = (store: mut Node[], runs: mut i32[], n: int) -> int[]: node_run_of(runs, int(store[n].list2), int(store[n].nlist2))
+
+node_clone = (store: mut Node[], runs: mut i32[], n: int) -> int:
+    if n == 0: return 0
+    nd = store[n]
+    k = nd.kind
+    if k != .fn_ and k != .struct_ and k != .enum_: nd.sym = 0
+    if k != .conv: nd.type = 0
+    nd.flags = i32(int(nd.flags) & ~NODE_CHECKED)
+    c = store.len()
+    store.push(nd)
+    if nd.a != 0: store[c].a = i32(node_clone(store, runs, int(nd.a)))
+    if nd.b != 0: store[c].b = i32(node_clone(store, runs, int(nd.b)))
+    if nd.c != 0: store[c].c = i32(node_clone(store, runs, int(nd.c)))
+    if nd.d != 0: store[c].d = i32(node_clone(store, runs, int(nd.d)))
+    if nd.nlist > 0:
+        xs: int[]
+        loop i in [0..int(nd.nlist)): xs.push(node_clone(store, runs, int(runs[int(nd.list) + i])))
+        node_set_list(store, runs, c, xs)
+    if nd.nlist2 > 0:
+        xs: int[]
+        loop i in [0..int(nd.nlist2)): xs.push(node_clone(store, runs, int(runs[int(nd.list2) + i])))
+        node_set_list2(store, runs, c, xs)
+    c

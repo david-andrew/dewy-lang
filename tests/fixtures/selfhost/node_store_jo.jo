@@ -1,0 +1,61 @@
+# One driver over the compiler's node_store.jo (the frozen twin) or, with this line naming
+# node_store.dewy, over the leaf: `node_store_jo file` reads the file's lines, tab-separated.
+#   R                    a fresh store: node 0, the sentinel, and no runs
+#   M kind pos           a new node (kind by number); prints it
+#   L n xs, L2 n xs      n's list or list2 (xs comma-separated)
+#   U xs                 xs as a run; prints its start
+#   F n field value      sets one of n's fields
+#   K n, K2 n            prints n's list or list2
+#   C n                  copies n's subtree; prints the copy
+#   D                    prints every node, then the runs
+use '../../../compiler/node_store.jo'
+
+ns: Node[] = [Node()]
+runs: i32[]
+
+ints = (s: str) -> int[]:
+    out: int[]
+    if len(s) == 0: return out
+    loop x in split(s, ","): out.push(to_int(x) ?? 0)
+    out
+
+set_field = (n: int, field: str, v: int):
+    x = i32(v)
+    if field == "kind": ns[n].kind = NK(v)
+    else if field == "op": ns[n].op = x
+    else if field == "flags": ns[n].flags = x
+    else if field == "a": ns[n].a = x
+    else if field == "b": ns[n].b = x
+    else if field == "c": ns[n].c = x
+    else if field == "d": ns[n].d = x
+    else if field == "name": ns[n].name = x
+    else if field == "sval": ns[n].sval = x
+    else if field == "ival": ns[n].ival = v
+    else if field == "fval": ns[n].fval = f64(v) / 4.0
+    else if field == "type": ns[n].type = x
+    else if field == "sym": ns[n].sym = x
+    else if field == "aux": ns[n].aux = x
+    else if field == "aux2": ns[n].aux2 = x
+    else if field == "mod": ns[n].mod = x
+
+main = ():
+    text = read_file(args()[1]) ?? ""
+    loop line in split(text, "\n"):
+        f = split(line, "\t")
+        op = f[0]
+        if op == "R":
+            ns = [Node()]
+            runs = []
+        else if op == "M": print("{node_mk(ns, NK(to_int(f[1]) ?? 0), to_int(f[2]) ?? 0)}")
+        else if op == "L": node_set_list(ns, runs, to_int(f[1]) ?? 0, ints(f[2]))
+        else if op == "L2": node_set_list2(ns, runs, to_int(f[1]) ?? 0, ints(f[2]))
+        else if op == "U": print("{node_run(runs, ints(f[1]))}")
+        else if op == "F": set_field(to_int(f[1]) ?? 0, f[2], to_int(f[3]) ?? 0)
+        else if op == "K": print("{node_kids(ns, runs, to_int(f[1]) ?? 0)}")
+        else if op == "K2": print("{node_kids2(ns, runs, to_int(f[1]) ?? 0)}")
+        else if op == "C": print("{node_clone(ns, runs, to_int(f[1]) ?? 0)}")
+        else if op == "D":
+            loop i in [0..ns.len()):
+                d = ns[i]
+                print("{i} {d.kind} {d.op} {d.flags} {d.pos} {d.a} {d.b} {d.c} {d.d} {d.list} {d.nlist} {d.list2} {d.nlist2} {d.name} {d.sval} {d.ival} {d.fval} {d.type} {d.sym} {d.aux} {d.aux2} {d.mod}")
+            print("{runs}")

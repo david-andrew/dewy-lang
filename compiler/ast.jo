@@ -1,43 +1,9 @@
 # Abstract syntax tree. Nodes live in one global array and refer to each other by index.
-# Node 0 is the "no node" sentinel.
+# Node 0 is the "no node" sentinel. The node record, the kinds and the store's builders are
+# node_store.dewy's; the arrays are here, passed to it by place.
 
 use 'util.jo'
-
-enum NK:
-    nil,
-    # expressions
-    int_lit, float_lit, str_lit, bool_lit, none_lit, null_lit, ident, field, dotname, call, index,
-    unary, binary, and_, or_, not_, coalesce, unwrap, lambda, array, map_lit, tuple, if_, match_, cast,
-    range, addr, hole, namedarg, pair, block, iflet,
-    # produced by the checker
-    conv, fnref, partial, intrinsic,
-    # statements
-    vardecl, assign, exprstmt, while_, for_, return_, break_, continue_, defer_, when_, arm,
-    # declarations
-    fn_, param, struct_, enum_, variant, const_, import_, test_, build_,
-    # type expressions
-    tname, tarray, tmap, ttuple, topt, tptr, tfn,
-    # patterns
-    pwild, plit, prange, pvariant,
-    # added with syntax revision 2
-    tunion, istype, loopx, lhead,
-    narrow,         # a: a union (or optional) value known to hold member aux (type is the member's)
-    typealias,      # type Name[T] = a
-    ptype,          # Dewy type pattern: a is the type, name is an optional value binding
-    record_lit,     # Dewy [field=value ...], contextual or inferred structural record
-    matrix,         # [1 2 ; 3 4]: the elements row by row; ival = elements per row
-    trecord,        # Dewy inline structural type [field: Type ...]
-    propagate,     # postfix or_throw; checker expands to a checked return
-    unit_lit,       # exact built-in unit: ival numerator, aux denominator, aux2 dimension
-    tquantity,      # type product/division/power: a and b type syntax (power b is expression)
-    reflect_scope, # internal: a specialized iteration's binding and body
-    record_loop,   # literal fields expanded in a compile-time iteration scope
-    trefined,      # a: base type, b: pure predicate, name: optional self binder
-    typeapply,      # Dewy f<T> / Type<T>: a is the base, c the type syntax, kids the type arguments
-    pshape,         # Dewy object pattern [f g:T h:1]: kids are field patterns named by their fields
-    pseq,           # Dewy sequence pattern (p q r): kids are the element patterns
-    parallel_region, # a: checked library call; retains the scoped fork/join boundary
-    new_axis        # Dewy xs[new ..]: a is the receiver, kids the entries (`new` is the ident $new)
+use 'node_store.dewy'
 
 # Generic lambdas retain type parameters in kids2, as module functions do.
 # Their explicit captures use a child block so cloning preserves both lists.
@@ -99,98 +65,27 @@ const TUPLE_VALUES = 7
 const UNPACK_OBLIGATION = 31
 const RANGE_EXHAUSTION = 32
 
-struct Node:
-    kind: NK
-    op: i32
-    flags: i32
-    pos: int
-    a: i32
-    b: i32
-    c: i32
-    d: i32
-    list: i32
-    nlist: i32
-    list2: i32
-    nlist2: i32
-    name: i32
-    sval: i32
-    ival: int
-    fval: f64
-    type: i32
-    sym: i32
-    aux: i32
-    aux2: i32         # vardecl: 1 for a synthesized Dewy value-parameter binding
-    mod: i32
-
 nodes: Node[] = [Node()]
 lists: i32[]
 
-mk = (kind: NK, pos: int) -> int:
-    nodes.push(Node(kind = kind, pos = pos))
-    nodes.len() - 1
-
-mklist = (xs: int[]) -> int:
-    start = lists.len()
-    loop x in xs: lists.push(i32(x))
-    start
-
-set_list = (n: int, xs: int[]):
-    nodes[n].list = i32(mklist(xs))
-    nodes[n].nlist = i32(xs.len())
-
-set_list2 = (n: int, xs: int[]):
-    nodes[n].list2 = i32(mklist(xs))
-    nodes[n].nlist2 = i32(xs.len())
-
+# (the one-line field reads and flag tests stay here, where they inline into their callers)
+mk = (kind: NK, pos: int) -> int: node_mk(nodes, kind, pos)
+mklist = (xs: int[]) -> int: node_run(lists, xs)
+set_list = (n: int, xs: int[]): node_set_list(nodes, lists, n, xs)
+set_list2 = (n: int, xs: int[]): node_set_list2(nodes, lists, n, xs)
 kid = (n: int, i: int) -> int: int(lists[int(nodes[n].list) + i])
 kid2 = (n: int, i: int) -> int: int(lists[int(nodes[n].list2) + i])
 nkids = (n: int) -> int: int(nodes[n].nlist)
 nkids2 = (n: int) -> int: int(nodes[n].nlist2)
 set_kid = (n: int, i: int, v: int): lists[int(nodes[n].list) + i] = i32(v)
 set_kid2 = (n: int, i: int, v: int): lists[int(nodes[n].list2) + i] = i32(v)
-
-kids = (n: int) -> int[]:
-    out: int[]
-    s = int(nodes[n].list)
-    loop i in [0..int(nodes[n].nlist)): out.push(int(lists[s + i]))
-    out
-
-kids2 = (n: int) -> int[]:
-    out: int[]
-    s = int(nodes[n].list2)
-    loop i in [0..int(nodes[n].nlist2)): out.push(int(lists[s + i]))
-    out
-
+kids = (n: int) -> int[]: node_kids(nodes, lists, n)
+kids2 = (n: int) -> int[]: node_kids2(nodes, lists, n)
 has_flag = (n: int, f: int) -> bool: int(nodes[n].flags) & f != 0
 add_flag = (n: int, f: int): nodes[n].flags = i32(int(nodes[n].flags) | f)
 clear_flag = (n: int, f: int): nodes[n].flags = i32(int(nodes[n].flags) & ~f)
-
-# deep copy of a subtree (used to instantiate generic functions)
-clone = (n: int) -> int:
-    if n == 0: return 0
-    # (the copy's own fields first; its children are copied after it, in order)
-    nd = nodes[n]
-    k = nd.kind
-    if k != .fn_ and k != .struct_ and k != .enum_: nd.sym = 0
-    if k != .conv: nd.type = 0
-    nd.flags = i32(int(nd.flags) & ~NF_CHECKED)
-    c = nodes.len()
-    nodes.push(nd)
-    if nd.a != 0: nodes[c].a = i32(clone(int(nd.a)))
-    if nd.b != 0: nodes[c].b = i32(clone(int(nd.b)))
-    if nd.c != 0: nodes[c].c = i32(clone(int(nd.c)))
-    if nd.d != 0: nodes[c].d = i32(clone(int(nd.d)))
-    nl = int(nd.nlist)
-    if nl > 0:
-        xs: int[]
-        loop i in [0..nl): xs.push(clone(int(lists[int(nd.list) + i])))
-        set_list(c, xs)
-    nl2 = int(nd.nlist2)
-    if nl2 > 0:
-        xs: int[]
-        loop i in [0..nl2): xs.push(clone(int(lists[int(nd.list2) + i])))
-        set_list2(c, xs)
-    c
+# (a deep copy of a subtree: generic functions are instantiated so)
+clone = (n: int) -> int: node_clone(nodes, lists, n)
 
 # Declarations marked `$shadowable const`: an inner scope or an importing module
 # may bind the name anew (a plain `name = ...` there declares): decl_shadowable
