@@ -547,3 +547,14 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
   - Enums: string-literal unions are unordered from the user's perspective;
     internal numbering is a representation detail and must not leak across
     subset/superset unions.
+- Small batch (decided 2026-10-23):
+  - Place-returning methods may be annotated `:>@T`, written with a space after
+    the arrow in idiomatic style (`lock = () :> @T => …`); unannotated, the
+    place result is inferred from the body.
+  - Defaulting specific errors: `x ??<Missing|ParseError> 0` defaults only the
+    listed exception types (and `none` if listed); other errors pass through.
+    Plain `x ?? 0` defaults any exception and `none`.
+  - Soft preconditions: `$warn_if <condition> "message"` is a warn-strength
+    assertion; at a call site it warns when the compiler cannot prove the
+    condition false. The sink design that uses it (and its meaning for
+    command-line and environment input) is pending.
