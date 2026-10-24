@@ -51,6 +51,9 @@ df_gap = (left: DewyLexeme, right: DewyLexeme, inside: bool, function: bool) -> 
     if right.symbol == .colon or right.symbol == .comma or right.symbol == .semi: return ""
     if left.symbol == .colon or left.symbol == .returns or right.symbol == .returns: return ""
     if left.symbol == .lbrace and right.symbol == .rbrace: return ""
+    # (`a:array<array<int64>>=[]`: the `>>=` or `>=` closes the angle brackets)
+    if df_angles > 0 and (right.symbol == .shr_assign or right.symbol == .angle_assign): return ""
+    if left.symbol == .shr_assign or left.symbol == .angle_assign: return " "
     if left.symbol == .function or right.symbol == .function or dn_token_assignment(left.symbol) or dn_token_assignment(right.symbol): return " "
     if left.symbol == .assign or right.symbol == .assign:
         if not inside or function or right.space: return " "
@@ -75,11 +78,12 @@ df_tokens = (file: int, src: str) -> str[]:
     out
 
 df_stack: DewyToken[]       # the delimiters open before df_tracked
+df_levels: int[]            # the indentation level of the line each of them was opened on
 df_tracked = 0
 df_angles = 0
 
 # Count the delimiters of the tokens up to `stop`; false when they do not match.
-df_track = (tokens: DewyLexeme[], stop: int) -> bool:
+df_track = (tokens: DewyLexeme[], stop: int, level: int) -> bool:
     loop df_tracked < stop:
         t = tokens[df_tracked]
         df_tracked += 1
@@ -89,18 +93,20 @@ df_track = (tokens: DewyLexeme[], stop: int) -> bool:
         else if df_angles > 1 and t.symbol == .shr: df_angles -= 2
         if t.symbol == .lparen or t.symbol == .lbrack or t.symbol == .lbrace:
             df_stack.push(t.symbol)
+            df_levels.push(level)
             if df_stack.len() > 256: return false
         else if t.symbol == .rparen or t.symbol == .rbrack or t.symbol == .rbrace:
             if df_stack.len() == 0: return false
             opening = df_stack.pop()
+            df_levels.pop()
             if (opening == .lbrace) != (t.symbol == .rbrace): return false
             # [a..b) and (a..b] are valid Dewy range delimiters.
     true
 
 # A line continues the statement before it, one level deeper, when that statement ended in an
-# operator or an `=`/`=>`, or the line starts with `&`, `|`, `and`, `or` or `xor`.
+# operator, a comma or an `=`/`=>`, or the line starts with `&`, `|`, `and`, `or` or `xor`.
 df_continues = (prev: DewyToken, first: DewyToken) -> bool:
-    df_assignment(prev) or prev == .amp or prev == .pipe or prev == .kw_and or prev == .kw_or or prev == .kw_xor or first == .amp or first == .pipe or first == .kw_and or first == .kw_or or first == .kw_xor
+    df_assignment(prev) or prev == .comma or prev == .amp or prev == .pipe or prev == .kw_and or prev == .kw_or or prev == .kw_xor or first == .amp or first == .pipe or first == .kw_and or first == .kw_or or first == .kw_xor
 
 # Whether the innermost open delimiter is a ( or a [ (or an angle bracket).
 df_inside = () -> bool:
@@ -117,6 +123,7 @@ df_text = (src: str) -> str?:
     tokens = df_lexemes
     blocks = df_blocks
     df_stack = []
+    df_levels = []
     df_tracked = 0
     df_angles = 0
     bi = 0
@@ -143,7 +150,12 @@ df_text = (src: str) -> str?:
             bi += 2
         lead = 0
         loop at + lead < stop and tokens[at + lead].kind == .op and (tokens[at + lead].symbol == .rparen or tokens[at + lead].symbol == .rbrack or tokens[at + lead].symbol == .rbrace): lead += 1
-        depth = max(0, df_stack.len() - lead)
+        # (a line is indented one level past the line that opened the bracket it is in, so two
+        # brackets opened on one line add one level, and a line starting with a closer sits level
+        # with the line that opened it)
+        depth = 0
+        if lead > 0 and df_stack.len() > 0: depth = df_levels[df_stack.len() - 1]
+        else if df_stack.len() > 0: depth = df_levels[df_stack.len() - 1] + 1
         if lead == 0 and at > 0 and at < stop and not protected and df_continues(tokens[at - 1].symbol, tokens[at].symbol): depth += 1
         first = start
         loop first < content_end and (src[first] == ' ' or src[first] == '\t'): first += 1
@@ -164,7 +176,7 @@ df_text = (src: str) -> str?:
                 if tokens[at].start > first: parts.push(src[first..tokens[at].start))
                 loop i in [at..stop):
                     if i > at:
-                        if not df_track(tokens, i): return none
+                        if not df_track(tokens, i, depth): return none
                         between = src[tokens[i - 1].stop..tokens[i].start)
                         if find_byte(between, '#') >= 0: parts.push(between)
                         else: parts.push(df_gap(tokens[i - 1], tokens[i], df_inside(), df_assign_function(tokens, i)))
@@ -175,7 +187,7 @@ df_text = (src: str) -> str?:
             lines.push(join(parts, ""))
         # Strings can span physical lines, including closing quotes followed by
         # code. Their contents stay untouched, but following delimiters count.
-        if not df_track(tokens, stop): return none
+        if not df_track(tokens, stop, depth): return none
         df_angles = 0       # (a type's angle brackets end on their line, even when a `>?` or `>>` closes them)
         lines.push(newline)
         at = stop
