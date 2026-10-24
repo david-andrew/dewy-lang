@@ -1,0 +1,31 @@
+# quick
+# A block as a binding's value gives its values: `x = { 1 2 }` holds both, as `x = (1 2)`.
+add=(a:int64 b:int64)=>a+b
+pair=()=>{ 10 20 }
+run=()=>{
+    x={ 1 2 }
+    printl(add(x))
+    let y={ pair() }
+    printl(y)
+    let z={ 0 pair() }
+    printl([z])
+    let (a b)={ "left" "right" }
+    printl("{b} {a}")
+    let one={
+        let t=4
+        t*10
+    }
+    printl(one)
+    let quiet={
+        printl("side");
+        7
+    }
+    printl(quiet)
+    let c=true
+    let picked={
+        1
+        if c 2 else 3
+    }
+    printl(picked)
+}
+run()

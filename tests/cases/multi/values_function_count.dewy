@@ -1,0 +1,28 @@
+# quick
+# A function value carries how many values its function gives: calls through it fill parameters.
+add=(a:int64 b:int64)=>a+b
+add3=(a:int64 b:int64 c:int64)=>a+b+c
+pair=()=>(1 2)
+written=():>(int64 int64)=>{ 3 4 }
+swap=(a:int64 b:int64)=>{ b a }
+use=(f:<():>(int64 int64)>)=>add(f)
+run=()=>{
+    let f=@pair
+    printl(add(f))
+    printl(add(f()))
+    let x=f()
+    printl(x)
+    let w=@written
+    printl(add3(10 w))
+    printl(use(@written))
+    printl(use(()=>{ 5 6 }))
+    let s=@swap
+    let (p q)=s(1 2)
+    printl("{p} {q}")
+    printl(add(s(7 1)))
+    printl([s(8 9) f()])
+    let h:<():>(int64 int64)>=@written
+    h=()=>{ 1 2 }
+    printl(add(h))
+}
+run()

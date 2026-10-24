@@ -1434,6 +1434,14 @@ dw_type = (id: int) -> int:
             if nodes[base].kind != .tname or nkids(base) != 0: return dw_fail(id, "type arguments on this type expression")
             set_list(base, args)
         return base
+    # (`let p:(int64 int64) = ...`: several values, a binding's type; a function's result is dw_pack_type)
+    if dewy_syntax[id].kind == .block and dewy_syntax[id].text == "():" and dw_nchildren(id) >= 2:
+        n = mk(.ttuple, pos)
+        nodes[n].aux = i32(TUPLE_VALUES)
+        elements: int[]
+        loop child in dw_children(id): elements.push(dw_type(child))
+        set_list(n, elements)
+        return n
     return dw_fail(id, "this type expression")
 
 # `array<T length=[m n]>`: the shape in the type (tensors.md). Two or more

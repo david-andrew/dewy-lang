@@ -100,9 +100,11 @@ x = { log(1)  5 }   # error at log(1): this gives a value, and here the block
                     # gives one, its last expression: attach `;` to discard it
 ```
 
-*Flagged: a block expressing several values as a binding's value
-(`x = { 1 2 }`) is still the attach-`;` error; under substitution invariance it
-could hold both. Reversible.*
+A block as a binding's value gives every value it expresses, as a group would
+(`x = { 1 2 }` holds both, `(int int)`; `x = { pair() 3 }` holds three). Each
+must be a statement of the block's own level: a value in a loop or a branch has
+no fixed count, and a binding holds a fixed number, so it is an error (collect
+them, `x = [ … ]`). One value is held as before.
 
 **Statement contexts drop values.** Module-level code drops what it expresses.
 The old "value is not used" warning stays here, for values that are discarded and
@@ -154,8 +156,9 @@ loop or a branch, or from a call whose count is not written, has no fixed count
 and is an error, as are more or fewer values. A call of such a function behaves
 like a call of an inferred one (collected, `[pair()]`, or an error in a
 one-value place). The values share one type for now; `(int64 string)` is an
-error. A grouped result exists only as a function's result: `let x:(int64 int64)`
-is not a type.
+error. Parenthesized values are a type only as a function's result or as a
+binding's whole type, `let p:(int64 int64) = …` (where the types may differ,
+`(int64 string)`, as a group's).
 *Flagged: one type per group and the static count are conservative choices;
 both are reversible.*
 
@@ -167,11 +170,14 @@ one". Today it's rejected, which is the conservative choice.*
 
 A function value (`@pair`) of a function expressing several values carries it in
 its type, written `<():>(int64 int64)>`: a call through it gives several values,
-under the same rules as a direct call. A function giving one value does not fit
-a type giving several, nor the reverse. A lambda checked against such a type
-expresses its values as an inferred body does. The count is not part of a
-function type (`<():>(int64 ...)>` in diagnostics), so a body written to give a
-fixed number of values cannot count a call through a value.
+under the same rules as a direct call. The count is part of the function type
+(decided 2026-10-23, substitution invariance; reverses the provisional "count is
+not part of a function type"): `f = @pair; add(f)` fills both parameters, as
+`add(pair)` does, and `<():>(int64 int64 int64)>` does not hold `@pair`. A
+function whose count varies (a loop, a branch) has the type `<():>(int64 ...)>`
+in diagnostics, and a call through it is only collected. A function giving one
+value does not fit a type giving several, nor the reverse. A lambda checked
+against such a type expresses exactly its count, as a written result does.
 
 ## Substitution invariance (decided 2026-10-23)
 
@@ -202,9 +208,10 @@ add(fn2...)         # a function giving a container: spread it
   or, as any obligation, checked at run time where the scope allows one. A
   record does not spread into named arguments (deferred).
 - **The count is static.** A call's count comes from its function's written or
-  inferred result type; one that varies cannot fill parameters (collect it). A
-  call through a function value has no static count. Overloads see the expanded
-  shape: `show(pair())` picks the two-parameter `show`.
+  inferred result type, or from a function value's type; one that varies cannot
+  fill parameters (collect it). The bare name of a function value taking no
+  parameters calls it, as a function's does (`f = @pair; add(f)`). Overloads see
+  the expanded shape: `show(pair())` picks the two-parameter `show`.
 - **Order.** Arguments run in written order: an argument before a held one
   (a call giving several values, a spread container) that may have an effect is
   evaluated first, into a temporary.
@@ -216,8 +223,10 @@ add(fn2...)         # a function giving a container: spread it
 - A group's values may have different types: `(1 "a")` is `(int string)`. A
   function's written result `:>(T T)` still has one type (below).
 
-*Flagged: a binding annotated with several values (`let p:(int64 int64) = ...`)
-is not implemented; the type is inferred. Reversible.*
+A binding's type may be written with several values, `let p:(int64 int64) = …`
+(each value converts to its place's type, as a group's does; another count is an
+error naming both). It is the binding's whole type: `array<(int64 int64)>` or a
+parameter typed so is an error.
 
 ## Unpacking (decided 2026-10-23)
 
@@ -308,10 +317,17 @@ collector's array, as loop capture always has.
   in place into pushes. A body expressing exactly one value, its last, checks
   exactly as before. Single-value code pays nothing per node: the sink
   bookkeeping runs per block and per expressed value.
-- A multi-valued function returns its accumulator array. Its `FnInst.pack` marks
+- A multi-valued function with a static count returns `(T T)`, a values tuple,
+  in place (a struct return, no allocation): a BODY sink holds each value in a
+  local while the count stays static (`sink_hold`) and gives the group of them
+  at its end; once a value in a loop or branch appears, the held values are
+  pushed after all and the function returns its accumulator array. A BIND sink
+  (a block as a binding's value) holds them the same way, and a value whose
+  count is not static there is an error. Its `FnInst.pack` marks
   it (a written `:>(T T)` also sets `pack_n`, the count its BODY sink checks;
   `pack_k` is the static count, written or inferred, 0 when it varies; a
-  function type marks it with its `sign` field), and only a consumer that asked
+  function type marks it with its `sign` field, its result `(T T)` or the
+  array), and only a consumer that asked
   for several values (array element, spread, statement, final value of a
   collecting body, binding, unpacking, call argument) accepts the call. Any other
   use is the one-value error.

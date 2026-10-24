@@ -270,13 +270,16 @@ result written `:>T`) takes a block's last expression, and an earlier value
 there is an error. A function without a written result may express several
 values: `pair = () => { 1 2 }` or `pair = () => (1 2)` makes `[pair()]` `[1 2]`.
 `:>(int64 int64)` writes such a result: parentheses group the values, and the
-body must express exactly that many, in its own block. `@pair` keeps it in its
-type, `<():>(int64 int64)>`, so a call through it gives several values too.
+body must express exactly that many, in its own block. `@pair` keeps it, with the
+count, in its type, `<():>(int64 int64)>`, so a call through it gives that many
+values too (`f = @pair; add(f)` fills both parameters). A fixed number of values
+is returned in place, with no array.
 
 Several values work wherever the same values written out would (substitution
 invariance). `(1 2)` is two values, not a container; `[1 2]` is an array, one
-value. A binding holds several values (`p = (1 2)` has type `(int int)`, and
-`p = pair()` holds both), a call takes them as that many positional arguments
+value. A binding holds several values (`p = (1 2)` has type `(int int)`, which
+may be written, `let p:(int64 int64) = …`; `p = pair()` and `p = { 1 2 }` hold
+both), a call takes them as that many positional arguments
 (`add(p)`, `add(pair())` and `add(pair)`, where the bare name calls, are all
 `add(1 2)`), a collector takes them all (`[p]` is `[1 2]`), and a pattern takes
 them apart (`(a b) = p`). A place for one value given several is an error naming
@@ -285,7 +288,8 @@ the count, never the last value: `p + 1` and `p[0]` (write `[p][0]`) are errors.
 `add([20 22]...)`: a fixed array's length is known, and an array's must be
 exactly what the parameters left take, proven or checked like an index. A call
 takes several values only when its function's count is static, written or
-inferred from a body that expresses each value once in its own block; overloads
+inferred from a body that expresses each value once in its own block (a call
+through a function value has its type's count); overloads
 see the expanded arguments. A multi-valued argument followed by more positional
 arguments warns, and the editor names the parameters it fills.
 Module code drops what it expresses. A body written `:>void` expresses nothing:

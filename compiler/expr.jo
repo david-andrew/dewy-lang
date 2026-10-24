@@ -3011,6 +3011,15 @@ dewy_spread_source_type = (n: int) -> int:
     sink_pack_hit = 0
     prune(t)
 
+# (`[f()...]`, f a function or function value by name: it may give several values)
+values_spread_call = (c: int) -> bool:
+    callee = int(nodes[c].a)
+    if nodes[callee].kind != .ident or has_flag(c, NF_CHECKED): return false
+    s = lookup(int(nodes[callee].name))
+    if s == 0: return false
+    k = syms[s].kind
+    k == .fns or k == .local or k == .global
+
 dewy_classify_spread = (n: int):
     if nodes[n].kind != .array or nodes[n].b != 0 or nkids(n) == 0: return
     first = kid(n, 0)
@@ -8387,7 +8396,7 @@ check_lambda = (lam: int, expected: int) -> int:
     ret_hint = 0
     if et != 0: ret_hint = int(types[et].elem)
     # (checked as `<():>(int64 int64)>`: its body gives several values of that type)
-    if et != 0 and fn_type_pack(et) and nodes[lam].a == 0: sink_lambda_pack = int(types[prune(ret_hint)].elem)
+    if et != 0 and fn_type_pack(et) and nodes[lam].a == 0: sink_lambda_pack = prune(ret_hint)
     check_lambda_body(f, lam, ret_hint)
     # (a parallel or spawn body the compiler made keeps its values as the array it collects)
     lang_body = has_flag(lam, NF_LANG_BODY)
@@ -9863,8 +9872,16 @@ check_expr_other = (n: int, expected: int) -> int:
             c = kid(n, i)
             callee = mk(.field, pos)
             nodes[callee].a = i32(mk_name(acc, pos))
-            # (`[pair()...]` of a function expressing several values: the values, spread)
-            if has_flag(c, NF_SPREAD) and nodes[c].kind == .call: sink_spread_calls[c] = true
+            # (`[pair()...]` of a function expressing several values: the values, spread; a
+            # fixed number of them, `(int64 int64)`, collected first, as `[pair()]` would)
+            if has_flag(c, NF_SPREAD) and nodes[c].kind == .call:
+                if values_spread_call(c) and is_values(dewy_spread_source_type(c)):
+                    clear_flag(c, NF_SPREAD)
+                    collected = mk(.array, pos)
+                    set_list(collected, [c])
+                    add_flag(collected, NF_SPREAD)
+                    c = collected
+                else: sink_spread_calls[c] = true
             if has_flag(c, NF_SPREAD):
                 clear_flag(c, NF_SPREAD)
                 nodes[callee].name = i32(intern("extend"))
@@ -9970,7 +9987,12 @@ check_expr_other = (n: int, expected: int) -> int:
                     sink_pack_site = c
                     st = prune(check_expr(c, h))
                     sink_pack_site = saved_site
+                    hit = sink_pack_hit != 0
                     sink_pack_hit = 0
+                    # (`[pair()... 3]`, pair giving a fixed number of values: they are elements)
+                    if hit and is_values(st):
+                        clear_flag(c, NF_SPREAD)
+                        return values_elements(n, i, last_checked, expected)
                     if types[st].kind != .array: fatal(nodes[c].pos, "only arrays can be spread into an array (found {dt(st)})")
                     if elt == 0: elt = int(types[st].elem)
                     allchar = false

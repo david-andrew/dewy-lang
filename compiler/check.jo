@@ -1347,10 +1347,14 @@ new_global = (name: int, decl: int, m: int) -> int:
     g
 
 # ---------------- type resolution ----------------
+values_type_ok = false   # (resolve_binding_type: a binding's whole type may be several values)
 resolve_type = (tn: int) -> int:
     if nodes[tn].kind == .tname and nodes[tn].aux == -9: return policy_int(resolve_type(int(nodes[tn].a)), int(nodes[tn].ival), nodes[tn].pos)
     if nodes[tn].kind == .tname and nodes[tn].aux == -7: return int(nodes[tn].ival)
     k = nodes[tn].kind
+    # (several values are a binding's whole type, not part of another)
+    values_ok = values_type_ok
+    values_type_ok = false
     if k == .trefined: return resolve_refinement(tn)
     if k == .tquantity: return resolve_quantity_type(tn)
     # (Dewy's array<T> and dict<K V>: the type words, for the editor)
@@ -1467,9 +1471,12 @@ resolve_type = (tn: int) -> int:
         if nodes[tn].aux == 1: return total_dict_type(mt, nodes[tn].pos)
         return mt
     if k == .ttuple:
+        values = nodes[tn].aux == i32(TUPLE_VALUES)
+        if values and not values_ok: fatal(nodes[tn].pos, "parentheses group several values only as a binding's type, `let p:(int64 int64) = ...`, or a function's result, `:>(int64 int64)`")
         el: int[]
         loop i in [0..nkids(tn)): el.push(resolve_type(kid(tn, i)))
         if el.len() == 0: return T_VOID
+        if values: return mk_values(el)
         return mk_tuple(el)
     if k == .topt: return mk_opt(resolve_type(int(nodes[tn].a)))
     if k == .tunion:
@@ -2420,7 +2427,7 @@ ensure_global = (g: int, use_pos: int, in_flow: bool = false):
     d = int(globals[g].decl)
     if globals[g].is_const:
         t = 0
-        if nodes[d].a != 0: t = resolve_type(int(nodes[d].a))
+        if nodes[d].a != 0: t = resolve_binding_type(int(nodes[d].a))
         cl = clone(int(nodes[d].b))
         et = values_init(cl, t)
         cl = last_checked
@@ -2448,7 +2455,7 @@ ensure_global = (g: int, use_pos: int, in_flow: bool = false):
             nodes[d].type = i32(t)
     else:
         t = 0
-        if nodes[d].a != 0: t = resolve_type(int(nodes[d].a))
+        if nodes[d].a != 0: t = resolve_binding_type(int(nodes[d].a))
         if refine_active and types[prune(t)].kind == .refined and nodes[d].b == 0: nodes[d].b = i32(struct_default(t, nodes[d].pos))
         # (x: T, a struct with default field values: it starts with them)
         if nodes[d].b == 0 and t != 0: nodes[d].b = i32(struct_default(t, nodes[d].pos))
@@ -2629,6 +2636,7 @@ const SINK_BODY = 2       # an inferred function body: one value, or a pack of s
 const SINK_ARM = 3        # an arm of the `if`/`match` ending a BODY (or ARM): expresses into the BODY
 const SINK_COLLECTOR = 4  # loop capture, `[...]` with blocks: pushes onto its accumulator
 const SINK_VOID = 5       # a body written `:>void` (or `:>void | E`): expressing a value is an error
+const SINK_BIND = 6       # a binding's value, `x = { 1 2 }`: one value, or several it holds as `(T T)`
 
 struct Sink:
     mode: int
@@ -2646,6 +2654,11 @@ struct Sink:
     count: int      # ... the values expressed so far, each directly in the body's block
     vague: int      # ... where a value whose number is not known statically is (0: none)
     direct: int     # (the statement of the body's block being checked)
+    tuple: bool     # BODY/BIND: several values with a static count are held in locals and given
+                    # as `(T T)`, returned in place (no array); false: always pushed (a parallel body)
+    held: int[]     # ... the statements whose values are held so far (sink_splice says how) ...
+    hlocals: int[]  # ... and the locals holding them, one per value, in order
+    hcount: int[]   # ... how many of those each statement holds
 
 sinks: Sink[]
 # (values a BODY expressed before it needed an accumulator: exprstmts, and whether
@@ -2662,6 +2675,10 @@ sink_want_n = 0          # (a written `:>(T T)` body about to open: its count an
 sink_want_elem = 0
 sink_lambda_pack = 0     # (a lambda checked as a function type giving several values: their type)
 sink_spread_calls: {int: bool}   # (calls spread into an array, `[f()...]`: they may give several values)
+sink_splice: {int: int[]}        # (a held value's statement: the statements it becomes, sink_hold)
+sink_no_tuple = false            # (a body about to open whose values are always pushed onto an array)
+sink_bind_next = 0               # (the block a binding is about to check as its value: a BIND ...)
+sink_bind_expect = 0             # (... and the several values its written type says it holds)
 
 sink_root = (i: int) -> int: if sinks[i].mode == SINK_ARM: int(sinks[i].root) else: i
 
@@ -2811,8 +2828,15 @@ values_init = (e: int, expected: int, unpacking: bool = false) -> int:
     if not dewy_at(nodes[e].pos): return check_expr(e, expected)
     saved = sink_pack_site
     sink_pack_site = e
-    t = check_expr(e, expected)
+    # (`x = { 1 2 }`: the block's values, as a group's; one value as before)
+    if nodes[e].kind == .block and not has_flag(e, NF_COMPREHENSION) and not has_flag(e, NF_CHECKED):
+        sink_bind_next = e
+        sink_bind_expect = if is_values(expected): prune(expected) else: 0
+    t = check_expr(e, if is_values(expected) and nodes[e].kind == .block: 0 else: expected)
+    sink_bind_next = 0
+    sink_bind_expect = 0
     v = last_checked
+    if is_values(expected) and is_values(t) and types[prune(t)].nargs != types[prune(expected)].nargs: fatal(nodes[v].pos, "this gives {types[prune(t)].nargs} values, and the binding's type, {dt(expected)}, holds {types[prune(expected)].nargs}")
     sink_pack_site = saved
     hit = sink_pack_hit != 0 and sink_pack_hit == e
     sink_pack_hit = 0
@@ -2860,6 +2884,9 @@ sink_make_acc = (i: int, elem: int, pos: int):
 sink_push = (i: int, s: int, pack: bool):
     v = int(nodes[s].a)
     pos = nodes[v].pos
+    if sinks[i].tuple and sinks[i].vague == 0:
+        sink_hold(i, s, pack)
+        return
     if pack and is_values(ntype(v)):
         sink_push_values(i, s)
         return
@@ -2868,6 +2895,7 @@ sink_push = (i: int, s: int, pack: bool):
         if pack: elem = int(types[prune(elem)].elem)
         else if is_lit(v): elem = lit_default(v)
         if sinks[i].elem != 0: elem = sinks[i].elem
+        else if sinks[i].hlocals.len() > 0: elem = int(locals[sinks[i].hlocals[0]].type)
         sink_make_acc(i, elem, pos)
     else if sinks[i].mode != SINK_COLLECTOR:
         elem = int(types[prune(int(locals[int(sinks[i].acc)].type))].elem)
@@ -2884,6 +2912,39 @@ sink_push = (i: int, s: int, pack: bool):
     set_list(call, [v])
     check_expr(call, 0)
     nodes[s].a = i32(last_checked)
+
+# The value(s) of exprstmt s, a statement of BODY/BIND i's own block while their number is
+# static, held in locals: the block gives them at its end as `(T T)` (sink_close), with no
+# array. A BODY's values have one type, as an array's elements would.
+sink_hold = (i: int, s: int, pack: bool):
+    v = int(nodes[s].a)
+    pre: int[]
+    parts = if pack or is_values(ntype(v)): values_parts(v, pre) else: [v]
+    loop p0 in parts:
+        p = p0
+        t = ntype(p)
+        if sinks[i].mode == SINK_BODY:
+            elem = int(sinks[i].elem)
+            if elem == 0 and sinks[i].hlocals.len() > 0: elem = int(locals[sinks[i].hlocals[0]].type)
+            if elem == 0: elem = if is_lit(p): lit_default(p) else: t
+            else if not is_lit(p) and not can_coerce(p, t, elem): fatal(nodes[p].pos, "this expresses {a_type(t)}, and the values expressed before it are {dt(elem)}: the values one block expresses have one type; attach `;` to discard this one, as in `f();`, or convert it")
+            p = coerce(p, elem)
+            t = elem
+        else:
+            # (`let p:(int64 int64) = { 1 2 }`: each value takes its place's type)
+            want = int(sinks[i].elem)
+            at = sinks[i].hlocals.len()
+            if want != 0 and at < int(types[want].nargs):
+                p = coerce(p, targ(want, at))
+                t = targ(want, at)
+            else:
+                finalize_literal(p)
+                t = ntype(p)
+        held = capture_value(p, t, pre)
+        sinks[i].hlocals.push(int(nodes[held].sym))
+    sink_splice[s] = pre
+    sinks[i].held.push(s)
+    sinks[i].hcount.push(parts.len())
 
 # Several values held as one `(T T)` (a group or a binding) expressed into sink i: each pushed.
 sink_push_values = (i: int, s: int):
@@ -2924,12 +2985,12 @@ sink_express = (s: int, t: int, pack: bool, final: bool):
         sink_push(i, s, pack)
         return
     r = sink_root(i)
-    if sinks[r].mode == SINK_BODY: sink_count(r, s, pack)
-    if not final and sinks[r].first == 0:
+    if sinks[r].mode == SINK_BODY or sinks[r].mode == SINK_BIND: sink_count(r, s, pack)
+    if not final and sinks[r].first == 0 and sinks[r].mode == SINK_BODY:
         sinks[r].first = nodes[v].pos
         # (a body that also gives a value with `return`: said here, before the values meet)
         if sinks[r].returns == 0 and has_value_return(int(sinks[r].block)): fatal(nodes[v].pos, "this expresses a value before the function's end, and the function also gives one back with `return`; a function expressing several values cannot `return` one yet: attach `;` to discard this value, as in `f();`")
-    if sinks[r].acc != 0 or pack or loop_serials.len() > sinks[r].loops:
+    if sinks[r].acc != 0 or sinks[r].held.len() > 0 or pack or loop_serials.len() > sinks[r].loops:
         if sinks[r].first == 0: sinks[r].first = nodes[v].pos
         sink_flush(r)
         sink_push(r, s, pack)
@@ -2945,6 +3006,7 @@ sink_count = (r: int, s: int, pack: bool):
     if pack:
         n = values_count(v)
     if n == 0 or s != sinks[r].direct or sinks.len() - 1 != r or loop_serials.len() > sinks[r].loops:
+        if sinks[r].mode == SINK_BIND: fatal(nodes[v].pos, "this value is in a loop or a branch, or comes from a call that may give any number, so the block does not give a fixed number of values, and a binding holds a fixed number: collect them into an array, `[ ... ]`, or attach `;` to discard it, as in `f();`")
         if sinks[r].vague == 0: sinks[r].vague = nodes[v].pos
         return
     sinks[r].count += n
@@ -2962,17 +3024,22 @@ sink_arm = (e: int, b: int):
 sink_pack_body = (f: int) -> int:
     sink_body_mode = SINK_BODY
     sink_want_n = fns[f].pack_n
-    sink_want_elem = int(types[prune(int(ctxs[cx].ret))].elem)
+    sink_want_elem = targ(prune(int(ctxs[cx].ret)), 0)
     0
 
 sink_open = (b: int, mode: int):
     sinks.push(Sink(mode = mode, block = b, root = -1, acc = 0, loops = loop_serials.len(), pending = sink_pending.len()))
     i = sinks.len() - 1
+    sinks[i].tuple = mode == SINK_BIND or mode == SINK_BODY and not sink_no_tuple
+    if mode == SINK_BODY: sink_no_tuple = false
     if mode == SINK_BODY and (sink_want_n > 0 or sink_want_elem != 0):
         sinks[i].want = sink_want_n
         sinks[i].elem = sink_want_elem
         sink_want_n = 0
         sink_want_elem = 0
+    if mode == SINK_BIND:
+        sinks[i].elem = sink_bind_expect
+        sink_bind_expect = 0
     if mode == SINK_ARM:
         p = sinks.len() - 2
         sinks[i].root = i32(sink_root(p))
@@ -3012,19 +3079,22 @@ sink_close = (b: int, result: int) -> int:
         want = int(sinks[i].want)
         d = int(fns[int(ctxs[cx].inst)].decl)
         what = if d != 0 and nodes[d].kind == .fn_ and nodes[d].name > 0: "'{name_of(int(nodes[d].name))}'" else: "this function"
-        if sinks[i].vague != 0: fatal(int(sinks[i].vague), "{what} is written to give {want} values, so its block expresses them itself, each once: a value in a loop or a branch, or from a call that may give any number, has no fixed count")
-        if sinks[i].count != want: fatal(nodes[b].pos, "{what} is written to give {want} values, and its body expresses {sinks[i].count}")
-    if mode == SINK_BODY:
+        # (a lambda checked as a function type giving that many: the type says so)
+        said = if fns[int(ctxs[cx].inst)].pack_n > 0: "is written" else: "is passed where its type says it has"
+        if sinks[i].vague != 0: fatal(int(sinks[i].vague), "{what} {said} to give {want} values, so its block expresses them itself, each once: a value in a loop or a branch, or from a call that may give any number, has no fixed count")
+        if sinks[i].count != want: fatal(nodes[b].pos, "{what} {said} to give {want} values, and its body expresses {sinks[i].count}")
+    if mode == SINK_BODY or mode == SINK_BIND:
         start = int(sinks[i].pending)
-        single = sinks[i].acc == 0
+        single = sinks[i].acc == 0 and sinks[i].held.len() == 0
         loop k in [start..sink_pending.len()):
             if not sink_pfinal[k]: single = false
         if not single:
             first = int(sinks[i].first)
             if first == 0: first = nodes[b].pos
-            if sinks[i].returns != 0: fatal(first, "this expresses a value before the function's end, and the function also gives one back with `return` (line {line_col(sinks[i].returns).0}); a function expressing several values cannot `return` one yet: attach `;` to discard this value, as in `f();`")
-            d = int(fns[int(ctxs[cx].inst)].decl)
-            if d != 0 and nodes[d].kind == .fn_ and name_of(int(nodes[d].name)) == "main": fatal(first, "this expresses a value before main's end, and main gives back nothing (or the errors that reach it): attach `;` to discard it, as in `f();`")
+            if mode == SINK_BODY:
+                if sinks[i].returns != 0: fatal(first, "this expresses a value before the function's end, and the function also gives one back with `return` (line {line_col(sinks[i].returns).0}); a function expressing several values cannot `return` one yet: attach `;` to discard this value, as in `f();`")
+                d = int(fns[int(ctxs[cx].inst)].decl)
+                if d != 0 and nodes[d].kind == .fn_ and name_of(int(nodes[d].name)) == "main": fatal(first, "this expresses a value before main's end, and main gives back nothing (or the errors that reach it): attach `;` to discard it, as in `f();`")
             sink_flush(i)
             k = sinks[i].finals.len() - 1
             loop k >= 0:
@@ -3032,20 +3102,58 @@ sink_close = (b: int, result: int) -> int:
                 k -= 1
             sink_unwrap_last(b)
             pos = nodes[b].pos
-            acc = int(sinks[i].acc)
-            value = mk_ident_local(acc, pos)
+            tuple = sinks[i].tuple and sinks[i].vague == 0
+            # (values held before one whose number is not static: pushed after all, in order)
+            pushes: {int: int[]}
+            if not tuple:
+                h = 0
+                loop j in [0..sinks[i].held.len()):
+                    st = sinks[i].held[j]
+                    more: int[]
+                    loop part in sink_splice[st]: more.push(part)
+                    loop q in [0..sinks[i].hcount[j]):
+                        e = mk(.exprstmt, pos)
+                        nodes[e].a = i32(mk_ident_local(sinks[i].hlocals[h], pos))
+                        sink_push(i, e, false)
+                        add_flag(e, NF_CHECKED)
+                        more.push(e)
+                        h += 1
+                    pushes[st] = more
+            xs: int[]
+            if not tuple: xs.push(int(sinks[i].decl))
+            loop k in kids(b):
+                if pushes.has(k):
+                    loop x in pushes[k]: xs.push(x)
+                else if sink_splice.has(k) and sinks[i].held.contains(k):
+                    loop x in sink_splice[k]: xs.push(x)
+                else: xs.push(k)
+            value = 0
+            if tuple:
+                value = mk(.tuple, pos)
+                nodes[value].aux = i32(TUPLE_VALUES)
+                vs: int[]
+                ts: int[]
+                loop l in sinks[i].hlocals:
+                    vs.push(mk_ident_local(l, pos))
+                    ts.push(int(locals[l].type))
+                set_list(value, vs)
+                out = mk_values(ts)
+                nodes[value].type = i32(out)
+                add_flag(value, NF_CHECKED)
+            else:
+                value = mk_ident_local(int(sinks[i].acc), pos)
+                out = int(locals[int(sinks[i].acc)].type)
             r = mk(.exprstmt, pos)
             nodes[r].a = i32(value)
             add_flag(r, NF_CHECKED)
-            xs = [int(sinks[i].decl)]
-            loop k in kids(b): xs.push(k)
             xs.push(r)
             set_list(b, xs)
             nodes[b].aux = 1
-            out = int(locals[acc].type)
-            fns[int(ctxs[cx].inst)].pack = first
-            # (a count every path gives, each value a statement of the body's own block)
-            if sinks[i].want == 0: fns[int(ctxs[cx].inst)].pack_k = if sinks[i].vague == 0: int(sinks[i].count) else: 0
+            if mode == SINK_BODY:
+                fns[int(ctxs[cx].inst)].pack = first
+                # (a count every path gives, each value a statement of the body's own block)
+                if sinks[i].want == 0: fns[int(ctxs[cx].inst)].pack_k = if sinks[i].vague == 0: int(sinks[i].count) else: 0
+        loop st in sinks[i].held: sink_splice.remove(st)
         sink_pending.truncate(start)
         sink_pfinal.truncate(start)
     sinks.pop()
@@ -3060,13 +3168,15 @@ check_block = (b: int, expected: int, want_value: bool) -> int:
     else if want_value and files[pos_file(nodes[b].pos)].is_dewy:
         if has_flag(b, NF_COMPREHENSION): sink_mode = SINK_COLLECTOR
         else if sink_arm_next == b: sink_mode = SINK_ARM
+        else if sink_bind_next == b: sink_mode = SINK_BIND
         else: sink_mode = SINK_ONE
     sink_arm_next = 0
+    sink_bind_next = 0
     was_discarding = discarding
     if sink_mode >= 0:
         sink_open(b, sink_mode)
         discarding = false
-    collecting = sink_mode == SINK_BODY or sink_mode == SINK_ARM
+    collecting = sink_mode == SINK_BODY or sink_mode == SINK_ARM or sink_mode == SINK_BIND
     transparent = nodes[b].aux == 5 and not want_value
     has_when = false
     loop i in [0..nkids(b)):
@@ -3082,7 +3192,7 @@ check_block = (b: int, expected: int, want_value: bool) -> int:
     saved_block = sibling_block
     saved_index = sibling_index
     sibling_block = b
-    counted = sink_mode == SINK_BODY
+    counted = sink_mode == SINK_BODY or sink_mode == SINK_BIND
     loop i in [0..n):
         s = kid(b, i)
         sibling_index = i
@@ -3094,6 +3204,7 @@ check_block = (b: int, expected: int, want_value: bool) -> int:
                 clear_flag(s, NF_STMT)
                 set_kid(b, i, es)
                 s = es
+                if counted: sinks[sinks.len() - 1].direct = s
             e = int(nodes[s].a)
             if nodes[e].kind == .match_: clear_flag(e, NF_STMT)
             if collecting:
@@ -3147,6 +3258,13 @@ set_block_value = (b: int, e: int): nodes[kid(b, nkids(b) - 1)].a = i32(e)
 # A written result `:>(int64 int64)` (dw_pack_type): how many values it gives, or 0.
 pack_result_count = (tn: int) -> int: if tn != 0 and nodes[tn].kind == .tarray and nodes[tn].ival < 0: int(-nodes[tn].ival) else: 0
 
+# A binding's written type, where several values may be written, `let p:(int64 int64) = ...`.
+resolve_binding_type = (tn: int) -> int:
+    values_type_ok = true
+    t = resolve_type(tn)
+    values_type_ok = false
+    t
+
 # A function's written result type, where a pack of several values may be written.
 pack_result_ok = false
 resolve_result_type = (tn: int) -> int:
@@ -3156,15 +3274,17 @@ resolve_result_type = (tn: int) -> int:
     pack_result_ok = saved
     t
 
-# `(int64 int64)` as a result: the values' one type, as the array a call gives them in.
+# `(int64 int64)` as a result: several values of one type, `(T T)`, returned in place.
 pack_result_type = (tn: int) -> int:
-    if not pack_result_ok: fatal(nodes[tn].pos, "parentheses group several values only as a function's result, `:>(int64 int64)`")
+    if not pack_result_ok: fatal(nodes[tn].pos, "parentheses group several values only as a function's result, `:>(int64 int64)`, or a binding's type, `let p:(int64 int64) = ...`")
     pack_result_ok = false
     first = resolve_type(kid(tn, 0))
+    ts = [first]
     loop i in [1..nkids(tn)):
         t = resolve_type(kid(tn, i))
         if not type_eq(t, first): fatal(nodes[kid(tn, i)].pos, "the values a function gives have one type for now: this is {dt(t)}, and the first is {dt(first)}")
-    mk_array(first)
+        ts.push(t)
+    mk_values(ts)
 
 # loop p in ps (ps a soa array): loop i in [0..len(ps)): p = ps[i]
 soa_loop = (s: int):
@@ -4602,7 +4722,7 @@ var_type_error = (lhs: int, lt: int, rt: int, at: int):
 # A type on the whole pattern supplies context before extracting its leaves.
 check_binding_input = (s: int) -> int:
     expected = 0
-    if nodes[s].a != 0: expected = resolve_type(int(nodes[s].a))
+    if nodes[s].a != 0: expected = resolve_binding_type(int(nodes[s].a))
     t = prune(values_init(int(nodes[s].b), expected, nodes[s].nlist > 0))
     nodes[s].b = i32(last_checked)
     if expected != 0:
@@ -4702,7 +4822,7 @@ check_vardecl = (s: int):
     if nodes[s].a != 0:
         previous_self = refine_self
         refine_self = int(nodes[s].name)
-        t = resolve_type(int(nodes[s].a))
+        t = resolve_binding_type(int(nodes[s].a))
         refine_self = previous_self
     no_value = nodes[s].b == 0
     literal_init = false
@@ -5400,11 +5520,20 @@ check_lambda_body = (f: int, lam: int, ret_hint: int):
     sink_body_mode = sink_body_kind(body, infer and types[prune(int(ctxs[cx].ret))].kind == .var, want, int(ctxs[cx].ret), not infer and sink_written(lam))
     if fns[f].pack_n > 0: exp = sink_pack_body(f)
     else if sink_lambda_pack != 0:
-        # (as an inferred body, its values pushed as the type's element; any number of them)
+        # (as the type says: `(int64 int64)`, that many values, as a written result; an array's
+        # element, any number of them, pushed)
         sink_body_mode = SINK_BODY
-        sink_want_elem = sink_lambda_pack
+        lp = prune(sink_lambda_pack)
+        if is_values(lp):
+            sink_want_n = int(types[lp].nargs)
+            sink_want_elem = targ(lp, 0)
+        else:
+            sink_want_elem = int(types[lp].elem)
+            sink_no_tuple = true
         exp = 0
     sink_lambda_pack = 0
+    # (a parallel or spawn body the compiler made keeps its values as the array it collects)
+    if has_flag(lam, NF_LANG_BODY) and sink_body_mode == SINK_BODY: sink_no_tuple = true
     sink_fn = sinks.len()
     bt = check_block(body, exp, want)
     sink_fn = saved_sink
@@ -7191,23 +7320,32 @@ values_candidate = (c: int) -> bool:
     s = lookup(int(nodes[c].name))
     if s == 0: return false
     sk = syms[s].kind
-    if sk == .local: return is_values(int(locals[int(syms[s].ref)].type))
+    held = 0
+    if sk == .local: held = int(locals[int(syms[s].ref)].type)
     if sk == .global:
         g = int(syms[s].ref)
         if globals[g].type == 0: ensure_global(g, nodes[c].pos)
-        return is_values(int(globals[g].type))
-    if sk != .fns: return false
-    # (`add(fn)`, fn giving several values: the bare name calls it)
-    ds: int[]
-    collect_named(int(nodes[c].name), -1, ds)
-    if ds.len() != 1: return false
-    d = ds[0]
-    if has_flag(d, NF_GENERIC) or nkids(d) > 0 and nodes[kid(d, 0)].b == 0: return false
-    if pack_result_count(int(nodes[d].a)) == 0:
-        if nodes[d].a != 0 or has_flag(d, NF_WRITTEN_VOID): return false
-        f = get_fn_inst(d, [], nodes[c].pos)
-        check_fn_body(f)
-        if fns[f].pack == 0: return false
+        held = int(globals[g].type)
+    if sk == .local or sk == .global:
+        if held == 0: return false
+        if is_values(held): return true
+        # (`f = @pair; add(f)`: a function value giving a fixed number of values, by its type,
+        # called by its bare name as the function's own name is)
+        ft = callable_base(prune(held))
+        if not fn_type_pack(ft) or types[ft].nargs != 0 or not is_values(int(types[ft].elem)): return false
+    else if sk != .fns: return false
+    else:
+        # (`add(fn)`, fn giving several values: the bare name calls it)
+        ds: int[]
+        collect_named(int(nodes[c].name), -1, ds)
+        if ds.len() != 1: return false
+        d = ds[0]
+        if has_flag(d, NF_GENERIC) or nkids(d) > 0 and nodes[kid(d, 0)].b == 0: return false
+        if pack_result_count(int(nodes[d].a)) == 0:
+            if nodes[d].a != 0 or has_flag(d, NF_WRITTEN_VOID): return false
+            f = get_fn_inst(d, [], nodes[c].pos)
+            check_fn_body(f)
+            if fns[f].pack == 0: return false
     call = mk(.call, nodes[c].pos)
     nodes[call].a = i32(clone(c))
     nodes[c] = nodes[call]
