@@ -1989,9 +1989,7 @@ dw_expr = (id: int) -> int:
         if text == "():" and children.len() == 1: return dw_expr(children[0])
         if text == "():" and children.len() >= 2: return dw_values(id, children)
         if text == "[]:":
-            if children.len() == 1 and dewy_syntax[children[0]].kind == .flow:
-                first = dw_child(children[0], 0)
-                if dewy_syntax[first].kind == .keyword_expr and (dewy_syntax[dw_child(first, 0)].text == "loop" or dewy_syntax[dw_child(first, 0)].text == "parallel"): return dw_comprehension(children[0])
+            if children.len() == 1 and dw_loop_flow(children[0]): return dw_comprehension(children[0])
             if dw_has_rows(children): return dw_rows_literal(id, children)
             if dw_collects(children): return dw_collector(id, children)
             is_map = children.len() > 0 and dw_op(children[0]) == .arrow
@@ -2198,6 +2196,7 @@ dw_expr = (id: int) -> int:
                         nodes[a].name = dw_name_id(dw_child(child, 1))
                         nodes[a].a = i32(dw_expr(dw_child(child, 2)))
                         args.push(a)
+                    else if bracket and xs.len() == 1 and dw_loop_flow(child): args.push(dw_comprehension(child))
                     else if bracket and xs.len() > 1: args.push(dw_iterable(child, true, true))
                     else if not bracket and dw_spread_at(child): args.push(dw_spread_item(child))
                     else: args.push(dw_expr(child))
@@ -3686,6 +3685,12 @@ dw_record_loop = (id: int) -> int:
         if dewy_syntax[id].children.len() != 1: return dw_fail(id, "a record loop body with multiple entries")
         return dw_record_loop(dw_child(id, 0))
     dw_record_entry(id)
+
+# A flow whose first arm is `loop` or `parallel`: a comprehension inside brackets.
+dw_loop_flow = (id: int) -> bool:
+    if dewy_syntax[id].kind != .flow: return false
+    first = dw_child(id, 0)
+    dewy_syntax[first].kind == .keyword_expr and (dewy_syntax[dw_child(first, 0)].text == "loop" or dewy_syntax[dw_child(first, 0)].text == "parallel")
 
 dw_comprehension = (id: int) -> int:
     first = dw_child(id, 0)

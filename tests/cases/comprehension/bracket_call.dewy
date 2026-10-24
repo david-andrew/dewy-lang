@@ -1,0 +1,12 @@
+# A comprehension as the whole delimited argument of a call: `f[loop ...]`.
+from units import °C
+show = (d:dict<int int>) => printl"{d.length} entries"
+main = () => {
+    let xs = [1 2 3]
+    printl(sum[loop x in xs x*2])
+    printl(sum[loop x in xs if x >? 1 x])
+    printl(sum[parallel x in xs x*x])
+    show[loop x in xs x->x*2]
+    printl(mean[loop r in [13 15 16 16] r*°C])
+    printl(xs[loop i in [0 2] i])
+}

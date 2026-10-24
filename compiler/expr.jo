@@ -9522,12 +9522,20 @@ dewy_bracket_call = (n: int) -> bool:
     loop x in kids(n):
         k = nodes[x].kind
         if k == .range or k == .namedarg or (k == .ident and name_of(int(nodes[x].name)) == "$new"): return false
-    items = mk(.array, nodes[n].pos)
-    set_list(items, kids(n))
+    items = if nkids(n) == 1 and dewy_whole_collection(kid(n, 0)): kid(n, 0) else: mk(.array, nodes[n].pos)
+    if items != kid(n, 0): set_list(items, kids(n))
     nodes[n].kind = .call
     nodes[n].b = 0
     set_list(n, [items])
     true
+
+# A comprehension written as the whole delimited argument, `mean[loop t in ts t*°C]`:
+# the collection it builds is the argument (dw_comprehension's shapes).
+dewy_whole_collection = (x: int) -> bool:
+    k = nodes[x].kind
+    if k == .block: return has_flag(x, NF_COMPREHENSION)
+    if k == .parallel_region: return true
+    k == .call and nkids(x) == 1 and nodes[int(nodes[x].a)].kind == .ident and name_of(int(nodes[int(nodes[x].a)].name)) == "__map_of"
 
 check_index_expr = (n: int, expected: int) -> int:
     if has_flag(n, NF_JUXT): juxt_member_check(n)
