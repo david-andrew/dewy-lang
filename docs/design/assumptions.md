@@ -14,7 +14,7 @@ bundle that turns every entry off. Spellings marked *pending* await David.
 | A failure of the environment inside the library (a graphics driver refusing a call, no pipes for the test runner: `__environment_failure`) is environmental, not `panics` | effects (`panics`) | *pending* |
 | Library code's own obligations stay runtime checks under a static user policy | facts policy | *pending* |
 | The library's raw-memory code is trusted by the arena escape check | ownership (arenas) | *pending* |
-| `$runtime_assert` within one module does not make that module's own callers `panics` | effects (`panics`) | `$assume_local_asserts=false` (spelling provisional) |
+| `$runtime_assert` within one module does not make that module's own callers `panics` (a scoping assumption, not an assumed bound: `$no_assumed_bounds` does not cover it) | effects (`panics`) | `$assume_local_asserts=false` (spelling provisional; `$bulletproof` should include it) |
 | Paths from command-line arguments or the environment do not warn at filesystem sinks | untrusted-input brand | *pending* |
 | `$no_deadlocks`: the scheduler is fair, local computation terminates, external peers cooperate | deadlock certificates | stated assumptions of the theorem |
 
