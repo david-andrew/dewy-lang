@@ -1,0 +1,22 @@
+# quick
+# A later arm is checked against the match's expected type, not the first arm's.
+Value:type = int | bool | none
+ev = (e:int):>Value => match e {
+    <0> => 5
+    <1> => if e =? 1 false else 7
+    _ => match e {
+        <2> => none
+        _ => ev(e - 2)
+    }
+}
+classify = (e:int):>int | string => {
+    let r:int | string = match e {
+        <0> => 0
+        _ => if e <? 0 "negative" else e * 10
+    }
+    r
+}
+main = () => {
+    loop i in [0..5) printl(ev(i))
+    loop i in [-1..2) printl(classify(i))
+}

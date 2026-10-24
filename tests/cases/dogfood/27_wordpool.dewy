@@ -1,0 +1,54 @@
+# modes: native native-release
+# Count words in several documents at once: one task per document sends its
+# counts over a channel, and the main task merges them as they arrive.
+
+Counts:type = [name:string words:dict<string int64> lines:int64]
+
+count_words = (text:string):>dict<string int64> => {
+    let counts:dict<string int64> = []
+    loop line in text.lines {
+        loop raw in line.split {
+            let word = raw.trim.lower
+            if word in? counts counts[word] += 1 else counts[word] = 1
+        }
+    }
+    counts
+}
+
+worker = (name:string text:string out:Channel<Counts>) => {
+    out.send(Counts[name count_words(text) text.lines.length]) or_throw
+}
+
+# every worker, then close the channel so the reader knows no more will come
+produce_all = (docs:dict<string string> out:Channel<Counts>) => {
+    concurrent {
+        loop [name text] in docs { spawn worker(name text out) }
+    }
+    out.close()
+}
+
+main = () => {
+    let docs = [
+        "fox.txt" -> "The quick brown fox\njumps over the lazy dog"
+        "dog.txt" -> "the dog barks\nthe fox runs\nThe End"
+        "pool.txt" -> "a quick test of the pool"
+    ]
+    let results = channel<Counts>(2)
+    let total:dict<string int64> = []
+    let per_doc:array<Counts> = []
+    concurrent {
+        spawn produce_all(docs results)
+        loop true {
+            let c = results.receive()
+            if c is? exception break
+            per_doc.push(c)
+            loop [word n] in c.words { total[word] = (total.get(word) ?? 0) + n }
+        }
+    }
+    per_doc.sort(key=(c) => c.name)
+    loop c in per_doc printl("{c.name:<9} {c.lines} lines, {c.words.length} distinct words")
+    let top = [loop [w n] in total [word=w n=n]]
+    top.sort(key=(e) => e.word)
+    top.sort(key=(e) => e.n reverse=true)
+    loop e in top[$clamp 0..5) printl("{e.word:<6} {e.n}")
+}

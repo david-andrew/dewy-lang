@@ -1,0 +1,25 @@
+# quick
+# `_` after type arms over an optional union holds the members not matched yet.
+Oops:type = type of error & [message:string]
+get = (n:int64):>int64 | bool | Oops | none => {
+    if n =? 0 return Oops["bad"]
+    if n =? 1 return none
+    if n =? 2 return true
+    n
+}
+maybe = (v:int64 | bool | none):>string => "maybe {v}"
+sure = (v:int64 | bool):>string => "sure {v}"
+main = () => {
+    loop i in [0..4) {
+        let v = get(i)
+        match v {
+            e:Oops => printl(e.message)
+            _ => printl(maybe(v))
+        }
+        match v {
+            <none> => printl("nothing")
+            <Oops> => printl("oops")
+            _ => printl(sure(v))
+        }
+    }
+}

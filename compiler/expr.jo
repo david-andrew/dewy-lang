@@ -862,6 +862,7 @@ coerce = (n: int, target: int) -> int:
     dewy = dewy_at(nodes[n].pos)
     if fk == .opt and tk == .bool_: why = if dewy: " (an optional is not true or false: `x isnt? none` asks, and narrows x inside `if x isnt? none \{ }`)" else: " (an optional is not true or false: `if let v = x:` runs when there is a value and names it, `x != none` asks)"
     if fk == .float_ and tk == .int_: why = if dewy: " (int64(x) makes it a whole number, dropping the fraction)" else: " (int(x) makes it a whole number, dropping the fraction)"
+    if tk == .int_ and (fk == .float_ or bundled_rational_type(from)) and int_update_lhs != 0 and nodes[n].pos == int_update_pos: var_type_error(int_update_lhs, to, from, int_update_pos)
     if dewy and tk == .int_ and bundled_rational_type(from): why = " (`/` gives an exact fraction: `//` divides whole numbers, and `q.floor()` or `q.round()` gives a whole number)"
     if tk == .bool_ and (fk == .array or fk == .str_ or is_map_type(from)): why = if dewy: " (not true or false: `xs.length >? 0` asks if it has anything)" else: " (not true or false: `xs.len() > 0` asks if it has anything)"
     if tk == .bool_ and (fk == .int_ or fk == .float_): why = if dewy: " (a number is not true or false: `x not=? 0` asks)" else: " (a number is not true or false: `x != 0` asks)"
@@ -3562,7 +3563,9 @@ conversion = (n: int, to0: int, args: int[]) -> int:
     if cv < 0:
         hint = ""
         read_int = if dewy_at(nodes[n].pos): T_MATH_INT else: T_INT
-        if fk == .str_ and tk == .int_: hint = " (`to_int(s)` reads a number from text: it gives {a_type(mk_opt(read_int))}, none when the text is not one)"
+        if fk == .str_ and tk == .int_:
+            hint = " (`to_int(s)` reads a number from text: it gives {a_type(mk_opt(read_int))}, none when the text is not one)"
+            if dewy_at(nodes[n].pos): hint = " (`to_int(s)` reads a number from text: it gives an int, or `NotAnInteger` when the text is not one; `to_int(s) ?? 0` falls back)"
         if fk == .str_ and tk == .float_: hint = " (`to_float(s)` reads a number from text: it gives {a_type(mk_opt(T_FLOAT))}, none when the text is not one)"
         fatal(nodes[n].pos, "cannot convert {dt(ft)} to {dt(to)}{hint}")
     if type_eq(ft, to):
@@ -6188,6 +6191,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         source_type = prune(check_expr(source, hint))
         source = last_checked
         add_flag(source, NF_CHECKED)
+        if is_map_type(source_type) and dewy_at(nodes[n].pos): fatal(nodes[source].pos, "a dictionary cannot be spread into an array or added to one: take its keys (`[d.keys...]`), its values (`d.values`), or its entries as records (`[loop [key value] in d [key=key value=value]]`)")
         if is_dewy_set_type(source_type): source = bc_call("__dewy_set_values", [source], nodes[source].pos)
         if types[source_type].kind == .fixed and has_var(int(types[t].elem)):
             unify(int(types[t].elem), int(types[source_type].elem))
@@ -8368,7 +8372,8 @@ check_match = (m: int, expected: int) -> int:
             if arm_wild:
                 arm_members.clear()
                 if types[st].kind == .opt:
-                    if finite_before & 2 != 0 and finite_before & 1 == 0: arm_members.push(telem(st))
+                    if finite_before & 1 == 0 and opt_members.len() > 0: opt_wild_narrow(int(nodes[sc].sym), st, opt_members, finite_before & 2 != 0, nodes[arm].pos)
+                    else if finite_before & 2 != 0 and finite_before & 1 == 0: arm_members.push(telem(st))
                 else:
                     loop vi in 0.. and um in union_members(st):
                         if not seen_before[vi]: arm_members.push(um)
@@ -8389,7 +8394,9 @@ check_match = (m: int, expected: int) -> int:
         if is_stmt: check_block(body, 0, false)
         else:
             exp = expected
-            if result != 0: exp = result
+            # (a later arm takes the match's expected type when it has one, not the first arm's:
+            # `:>int | bool => match e { <0> => 5  _ => if c false else 7 }`)
+            if result != 0 and (expected == 0 or tkind(expected) == .var): exp = result
             # (one arm prints, another gives a number: as a function's last line, the match is
             # what it gives back)
             if result != 0 and tkind(result) == .void_ and (expected == 0 or tkind(expected) == .var): coerce_hint = " (an arm above gives no value, so this match gives none: where it ends a function, its arms are what the function gives back; `-> void` after the function's parameters says it gives back nothing)"
@@ -12015,6 +12022,32 @@ narrow_opt_rest_by = (c: int):
     nl = new_local(int(locals[l].name), mk_opt(inner), pos)
     locals[nl].flags = i32(LF_ALIAS)
     locals[nl].alias = i32(opt_rest_expr(l, keep, pos))
+
+# match x over an (A | B | C)?: the `_` arm after `c:C` (and `<none>`) knows x is an (A | B)? (an
+# A | B). O(members).
+opt_wild_narrow = (l0: int, st: int, matched: int[], none_matched: bool, pos: int):
+    keep: int[]
+    loop m in union_members(prune(telem(st))):
+        if not matched.contains(m): keep.push(m)
+    if keep.len() == 0: return
+    l = l0
+    loop int(locals[l].flags) & LF_ALIAS != 0 and opt_rest_aliases.has(int(locals[l].alias)): l = narrowed_var(l)
+    if not type_eq(prune(int(locals[l].type)), st): return
+    inner = keep[0]
+    if keep.len() > 1: inner = mk_union(keep)
+    rest = opt_rest_expr(l, keep, pos)
+    t = mk_opt(inner)
+    if none_matched:
+        # (present too: the kept members themselves)
+        e = mk(.unwrap, pos)
+        nodes[e].a = i32(rest)
+        nodes[e].type = i32(inner)
+        add_flag(e, NF_CHECKED)
+        rest = e
+        t = inner
+    nl = new_local(int(locals[l].name), t, pos)
+    locals[nl].flags = i32(LF_ALIAS)
+    locals[nl].alias = i32(rest)
 
 # Optional-union narrowing aliases: `if x != none: some(payload as the kept members) else none`,
 # an expression of x (narrowed_var finds x in its condition)

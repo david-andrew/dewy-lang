@@ -882,6 +882,9 @@ million unless given; zero: no limit) give `TooManyDigits`, since converting the
 takes time that grows faster than their length (CVE-2020-10735). Both are errors
 (provisional names); `to_int(text) ?? 0` falls back on either. Decimal text converts both ways by divide and
 conquer, in about the time of a few multiplications of that size.
+`to_float(text)` reads a decimal number, with an optional exponent (`-1e3`), or
+`inf` or `nan`, as a `float64`; it gives `none` for any other text, so
+`to_float(text) ?? 0.0` falls back.
 `from_text<int>` and integer fields in parsed records and containers preserve
 the same arbitrary precision. Printing, interpolation and
 `string(value)` format `int` as decimal. Mathematical integers are not yet
@@ -3034,7 +3037,11 @@ outcome as a value:
 
 A failure is `FileNotFound`, `FileAccessDenied`, `IsDirectory`, `FileExists` or
 `FileError` (any other failure), and `read_text` adds `InvalidUtf8`. All are
-`error`s, so `is? error`, `or_throw` and `match` handle them.
+`error`s, so `is? error`, `or_throw` and `match` handle them. The file-system
+operations are also cancellation points (see "Parallel CPU work"), so their
+results include `Canceled`, an `exception` but not an `error`: after
+`if text is? error continue`, `text` is still a `string | Canceled`, while
+`if text is? exception continue` leaves the `string`.
 
 Provisional path methods for durable stores (spellings unsettled): `sync`, `replace(target)` (atomic rename), `append_bytes(bytes)` and `read_at(offset count)`.
 
@@ -3836,7 +3843,9 @@ Single or double quotes support escapes and interpolation.
 `+` never joins text: two strings combine by interpolation, `"{left}{right}"`,
 and many pieces collect in an `array<string>` and `join` (`pieces.join` or
 `pieces.join(", ")`). `s = "{s}more"` on a local string appends in place, so
-building text in a loop stays linear; `s += x` is an error. Unicode escapes use
+building text in a loop stays linear; `s += x` is an error. `text * n` (or
+`n * text`) repeats it: `"-" * 20` is a rule of twenty dashes, and a count of
+zero or less gives `""`. Unicode escapes use
 four hexadecimal digits (`"\u00E9"`) or one to six inside braces
 (`"\u{1F642}"`); both name Unicode scalar values. Surrogates and values above
 `10FFFF` are errors. Braced escapes currently accept hex literals, not expressions.

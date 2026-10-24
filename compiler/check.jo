@@ -2905,6 +2905,16 @@ sink_make_acc = (i: int, elem: int, pos: int):
     sinks[i].acc = l
     sinks[i].decl = d
 
+# (values of two types expressed in main's body: main gives back none, so the first one
+# expressed is the mistake to name, as sink_close does)
+sink_main_value = (i: int, pos: int):
+    if sinks[i].mode != SINK_BODY: return
+    d = int(fns[int(ctxs[cx].inst)].decl)
+    if d == 0 or nodes[d].kind != .fn_ or name_of(int(nodes[d].name)) != "main": return
+    first = int(sinks[i].first)
+    if first == 0: first = pos
+    fatal(first, "this expresses a value before main's end, and main gives back nothing (or the errors that reach it): attach `;` to discard it, as in `f();`")
+
 # `value` pushed (or a pack extended) onto sink i's accumulator, in exprstmt s.
 sink_push = (i: int, s: int, pack: bool):
     v = int(nodes[s].a)
@@ -2926,7 +2936,9 @@ sink_push = (i: int, s: int, pack: bool):
         elem = int(types[prune(int(locals[int(sinks[i].acc)].type))].elem)
         vt = ntype(v)
         if pack: vt = int(types[prune(vt)].elem)
-        if not is_lit(v) and not can_coerce(v, vt, elem): fatal(pos, "this expresses {a_type(vt)}, and the values expressed before it are {dt(elem)}: the values one block expresses have one type; attach `;` to discard this one, as in `f();`, or convert it")
+        if not is_lit(v) and not can_coerce(v, vt, elem):
+            sink_main_value(i, pos)
+            fatal(pos, "this expresses {a_type(vt)}, and the values expressed before it are {dt(elem)}: the values one block expresses have one type; attach `;` to discard this one, as in `f();`, or convert it")
     receiver = mk_ident_local(int(sinks[i].acc), pos)
     add_flag(receiver, NF_MUT)
     callee = mk(.field, pos)
@@ -2952,7 +2964,9 @@ sink_hold = (i: int, s: int, pack: bool):
             elem = int(sinks[i].elem)
             if elem == 0 and sinks[i].hlocals.len() > 0: elem = int(locals[sinks[i].hlocals[0]].type)
             if elem == 0: elem = if is_lit(p): lit_default(p) else: t
-            else if not is_lit(p) and not can_coerce(p, t, elem): fatal(nodes[p].pos, "this expresses {a_type(t)}, and the values expressed before it are {dt(elem)}: the values one block expresses have one type; attach `;` to discard this one, as in `f();`, or convert it")
+            else if not is_lit(p) and not can_coerce(p, t, elem):
+                sink_main_value(i, nodes[p].pos)
+                fatal(nodes[p].pos, "this expresses {a_type(t)}, and the values expressed before it are {dt(elem)}: the values one block expresses have one type; attach `;` to discard this one, as in `f();`, or convert it")
             p = coerce(p, elem)
             t = elem
         else:
@@ -3908,6 +3922,9 @@ compound_op = (op: int) -> int:
         shreq: int(Tok.shr)
         _: 0
 
+int_update_lhs = 0      # (the integer binding a compound update is checked for, as `total` in `total += x`,
+int_update_pos = 0      # and the update's position)
+
 # Dewy's arithmetic helpers implement floor division, exact division and power.
 # Keep the update as an assignment until its place and indices are resolved.
 compound_value = (s: int, left: int, right: int) -> int:
@@ -3935,6 +3952,15 @@ compound_checked = (s: int, left: int, right: int, target: int) -> int:
     literal = is_quantity(target) and quantity_literal_syntax(right)
     n = compound_value(s, left, right)
     if literal: quantity_update_right = right
+    # (`let total = 0` then `total += x` with a float x: var_type_error says where total was made)
+    # (`x /= 2` keeps its own hint, `//=`)
+    if nodes[left].kind == .ident and (nodes[left].aux == i32(int(SK.local)) or nodes[left].aux == i32(int(SK.global))) and is_int(representation_type(prune(target))) and nodes[s].op != i32(int(Tok.slasheq)):
+        int_update_lhs = mk(.ident, nodes[left].pos)
+        nodes[int_update_lhs].aux = nodes[left].aux
+        nodes[int_update_lhs].sym = nodes[left].sym
+        nodes[int_update_lhs].name = nodes[left].name
+        if nodes[left].name == 0: nodes[int_update_lhs].name = if nodes[left].aux == i32(int(SK.local)): locals[int(nodes[left].sym)].name else: globals[int(nodes[left].sym)].name
+        int_update_pos = nodes[s].pos
     result = prune(check_expr(n, 0))
     quantity_update_right = 0
     if is_quantity(target) and quantity_point(target) and quantity_is_delta(result): fatal(nodes[s].pos, "this update leaves a difference, not a temperature point, so the point cannot hold it: subtract a difference (`5K`), or keep the difference in a new binding")
@@ -3944,7 +3970,9 @@ compound_checked = (s: int, left: int, right: int, target: int) -> int:
     # just as += does, even when a library helper computes in 64 bits.
     if nodes[s].sval != 0 and ((is_int(t) and is_int(result)) or (is_float(t) and is_float(result))):
         if result != t: wrap_conv(last_checked, (if is_int(t): CV.int_ else: CV.float_), t)
-    coerce(last_checked, target)
+    r = coerce(last_checked, target)
+    int_update_lhs = 0
+    r
 
 # the variable a narrowing alias (see narrow_var) stands for, or 0
 narrowed_var = (l: int) -> int:
@@ -4745,7 +4773,7 @@ var_type_error = (lhs: int, lt: int, rt: int, at: int):
         ln, c = line_col(p)
         made = " (made on line {ln})"
     how = "`let {nm} = ...` makes a new variable"
-    if is_int(lt) and is_float(rt):
+    if is_int(lt) and (is_float(rt) or bundled_rational_type(rt)):
         # (time_left = 30, then time_left -= dt: 30.0 holds fractions)
         start = "0.0"
         if nodes[lhs].aux != i32(int(SK.local)) and nodes[lhs].sym > 0 and globals[int(nodes[lhs].sym)].decl > 0:

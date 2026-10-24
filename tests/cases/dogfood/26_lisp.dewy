@@ -1,0 +1,215 @@
+# A tiny Lisp: numbers, symbols, lists, define, lambda, if, let, closures.
+
+Token:type = [text:string pos:int64]
+
+LispError:type = type of error & [message:string pos:int64]
+
+Num:type = type of any & [value:int]
+Sym:type = type of any & [name:string pos:int64]
+List:type = type of any & [items:array<Expr> pos:int64]
+Expr:type = Num | Sym | List
+
+# Environments live in one array and refer to their parent by index: a record
+# holding its parent would hold a copy, and a closure could never see a later
+# `define` (such as its own, for recursion).
+Frame:type = [vars:dict<string Value> parent:int64]
+
+Closure:type = [params:array<string> body:Expr env:int64]
+Builtin:type = [name:string]
+Value:type = int | bool | Closure | Builtin | none
+
+tokenize = (src:string):>array<Token> => {
+    let tokens:array<Token> = []
+    let i = 0
+    let current = ""
+    let start = 0
+    loop ch in src {
+        if ch =? "(" or ch =? ")" or ch =? " " or ch =? "\n" {
+            if current not=? "" {
+                tokens.push(Token[current start])
+                current = ""
+            }
+            if ch =? "(" or ch =? ")" tokens.push(Token[ch i])
+        } else {
+            if current =? "" start = i
+            current = "{current}{ch}"
+        }
+        i += 1
+    }
+    if current not=? "" tokens.push(Token[current start])
+    return tokens
+}
+
+Parser:type = [
+    tokens:array<Token>
+    at:int64 = 0
+    parse = ():>Expr | LispError => {
+        if at >=? tokens.length return LispError["unexpected end of input" -1]
+        let tok = tokens[at]
+        at += 1
+        if tok.text =? "(" {
+            let items:array<Expr> = []
+            loop true {
+                if at >=? tokens.length return LispError["missing )" tok.pos]
+                if tokens[at].text =? ")" {
+                    at += 1
+                    return List[items tok.pos]
+                }
+                items.push(parse() or_throw)
+            }
+        }
+        if tok.text =? ")" return LispError["unexpected )" tok.pos]
+        let n = to_int(tok.text)
+        if n is? int return Num[n]
+        return Sym[tok.text tok.pos]
+    }
+]
+
+lookup = (frames:array<Frame> env:int64 name:string):>Value | none => {
+    let at = env
+    loop at >=? 0 {
+        let v = frames[at].vars.get(name)
+        if v isnt? none return v
+        at = frames[at].parent
+    }
+    return none
+}
+
+show = (v:Value):>string => match v {
+    n:int => "{n}"
+    b:bool => if b "#t" else "#f"
+    c:Closure => "<lambda/{c.params.length}>"
+    b:Builtin => "<builtin {b.name}>"
+    _ => "nil"
+}
+
+apply_builtin = (name:string args:array<Value> pos:int64):>Value | LispError => {
+    let nums:array<int> = []
+    loop a in args {
+        if a isnt? int return LispError["{name}: expected a number, got {show(a)}" pos]
+        nums.push(a)
+    }
+    match name {
+        <"+"> => nums.sum
+        <"*"> => {
+            let p = 1
+            loop n in nums { p *= n }
+            p
+        }
+        <"-"> => {
+            if nums.length =? 0 return LispError["-: needs an argument" pos]
+            if nums.length =? 1 return -nums[0]
+            let r = nums[0]
+            loop n in nums[1..] { r -= n }
+            r
+        }
+        <"<"> => {
+            if nums.length not=? 2 return LispError["<: needs two arguments" pos]
+            nums[0] <? nums[1]
+        }
+        <"="> => {
+            if nums.length not=? 2 return LispError["=: needs two arguments" pos]
+            nums[0] =? nums[1]
+        }
+        _ => LispError["unknown builtin {name}" pos]
+    }
+}
+
+eval = (e:Expr @frames:array<Frame> env:int64):>Value | LispError => match e {
+    n:Num => n.value
+    s:Sym => {
+        if s.name =? "#t" return true
+        if s.name =? "#f" return false
+        let v = lookup(frames env s.name)
+        if v is? none return LispError["undefined symbol '{s.name}'" s.pos]
+        v
+    }
+    l:List => {
+        if l.items.length =? 0 return none
+        let head = l.items[0]
+        if head is? Sym {
+            match head.name {
+                <"define"> => {
+                    let target = l.items[1]
+                    if target isnt? Sym return LispError["define: expected a name" l.pos]
+                    let value = eval(l.items[2] @frames env) or_throw
+                    frames[env].vars[target.name] = value
+                    return none
+                }
+                <"if"> => {
+                    let cond = eval(l.items[1] @frames env) or_throw
+                    if cond =? false return eval(l.items[3] @frames env)
+                    return eval(l.items[2] @frames env)
+                }
+                <"lambda"> => {
+                    let ps = l.items[1]
+                    if ps isnt? List return LispError["lambda: expected a parameter list" l.pos]
+                    let names:array<string> = []
+                    loop p in ps.items {
+                        if p isnt? Sym return LispError["lambda: parameter must be a symbol" ps.pos]
+                        names.push(p.name)
+                    }
+                    return Closure[names l.items[2] env]
+                }
+                _ => {}
+            }
+        }
+        let f = eval(head @frames env) or_throw
+        let args:array<Value> = []
+        loop a in l.items[1..] { args.push(eval(a @frames env) or_throw) }
+        match f {
+            b:Builtin => apply_builtin(b.name args l.pos)
+            c:Closure => {
+                if c.params.length not=? args.length {
+                    return LispError["expected {c.params.length} arguments, got {args.length}" l.pos]
+                }
+                let vars:dict<string Value> = []
+                loop name in c.params and value in args { vars[name] = value }
+                frames.push(Frame[vars c.env])
+                eval(c.body @frames frames.length - 1)
+            }
+            _ => LispError["not a function: {show(f)}" l.pos]
+        }
+    }
+}
+
+run = (src:string @frames:array<Frame>):>void => {
+    let p = Parser[tokenize(src)]
+    loop p.at <? p.tokens.length {
+        let e = p.parse()
+        if e is? LispError {
+            printl("parse error at {e.pos}: {e.message}")
+            return
+        }
+        let v = eval(e @frames 0)
+        match v {
+            err:LispError => {
+                printl("error at {err.pos}: {err.message}")
+                printl("  {src}")
+                printl("  {" " * err.pos}^")
+                return
+            }
+            _ => if v isnt? none printl(show(v))
+        }
+    }
+}
+
+main = () => {
+    let builtins:dict<string Value> = []
+    loop name in ["+" "-" "*" "<" "="] { builtins[name] = Builtin[name] }
+    let frames = [Frame[builtins -1]]
+    let programs = [
+        "(+ 1 2 3)"
+        "(define sq (lambda (x) (* x x)))"
+        "(sq 12)"
+        "(define fact (lambda (n) (if (< n 2) 1 (* n (fact (- n 1))))))"
+        "(fact 25)"
+        "(define make-adder (lambda (k) (lambda (x) (+ x k))))"
+        "((make-adder 40) 2)"
+        "(+ 1 undefined-thing)"
+        "(sq 1 2)"
+        "(+ 1 (lambda (x) x))"
+        "(+ 1 2"
+    ]
+    loop src in programs { run(src @frames) }
+}
