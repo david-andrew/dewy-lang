@@ -339,7 +339,7 @@ dl_init = () -> bool:
         loop auxv[2 * na] != 0: na += 1
         top = stack + stack_size
         strs = top - 256
-        name = "sloppy-dl\0"
+        name = "dewy-dl\0"
         loop i in [0..len(name)): strs[i] = name[i]
         rnd = strs + 64
         loop i in [0..16): rnd[i] = u8((i * 37 + 11) & 255)

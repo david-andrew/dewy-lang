@@ -726,7 +726,7 @@ repl_plain = () -> str?:
 repl_completions = (text: str) -> str[]:
     a = len(text)
     loop a > 0 and (is_alnum(text[a - 1]) or text[a - 1] >= 0x80): a -= 1
-    probe = text[..a) + "__sloppy_complete__\n"
+    probe = text[..a) + "__dewy_complete__\n"
     got = ""
     when not BOOTSTRAP:
         lo, n = __image_data()
@@ -734,7 +734,7 @@ repl_completions = (text: str) -> str[]:
         ide_on = true
         ide_fd = -1
         ide_out = ""
-        ide_sentinel = intern("__sloppy_complete__")
+        ide_sentinel = intern("__dewy_complete__")
         if __setjmp(repl_jbuf) == 0:
             __repl_jmp = repl_jbuf
             repl_compile(probe, repl_inputs)

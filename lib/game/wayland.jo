@@ -1108,7 +1108,7 @@ __wl_ensure_buffers = (w: int, h: int):
         syscall(3, __wl_pool_fd)
     one = w * h * 4
     __wl_pool_size = one * 3
-    __wl_pool_fd = syscall(319, data("sloppy-wl\0"), 1)        # memfd_create(MFD_CLOEXEC)
+    __wl_pool_fd = syscall(319, data("dewy-wl\0"), 1)        # memfd_create(MFD_CLOEXEC)
     syscall(77, __wl_pool_fd, __wl_pool_size)              # ftruncate
     __wl_pool_mem = __mmap(null, __wl_pool_size, 3, 1, __wl_pool_fd, 0)
     __wl_pool = __wl_new(WLK_POOL)

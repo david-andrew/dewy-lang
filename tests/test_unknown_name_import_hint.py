@@ -16,7 +16,7 @@ def test_dewy_file_gets_dewy_import_hint(compiler, tmp_path):  # noqa: F811
     assert "use '" not in checked.stderr, checked.stderr
 
 
-def test_sloppy_file_keeps_use_hint(compiler, tmp_path):  # noqa: F811
+def test_jo_file_keeps_use_hint(compiler, tmp_path):  # noqa: F811
     (tmp_path / 'helpers.jo').write_text('advance = (x: int) -> int: x + 1\n')
     (tmp_path / 'other.jo').write_text("use 'helpers.jo'\n")
     source = tmp_path / 'main.jo'

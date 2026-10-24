@@ -112,7 +112,7 @@ async function scenario(run) {
             c.send({id: 'recovered', method: 'textDocument/hover', params: document});
             const recovered = await c.reply('recovered');
             assert.match(JSON.stringify(recovered.result), /answer/);
-            assert(!JSON.stringify(recovered).includes('__sloppy_complete__'));
+            assert(!JSON.stringify(recovered).includes('__dewy_complete__'));
             assert(c.diagnostics().every(m => m.params.diagnostics.length === 0));
         });
     }

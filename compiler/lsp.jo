@@ -540,7 +540,7 @@ docs: Doc[]
 doc_by_uri: {str: int} = {}
 root_lib = ""
 # (a program for checking library files alone: it uses nothing, and is not on disk)
-empty_main = "/.sloppy-lsp-empty-main.jo"
+empty_main = "/.dewy-lsp-empty-main.jo"
 
 uri_to_path = (uri: str) -> str:
     s = uri
@@ -690,7 +690,7 @@ check_child = (main_path: str, doc_path: str, sentinel: bool, skips: str[], lowe
     ide_fd = fd
     ide_doc = doc_path
     ide_wide = wide
-    if sentinel: ide_sentinel = intern("__sloppy_complete__")
+    if sentinel: ide_sentinel = intern("__dewy_complete__")
     # (file numbers are the same in every check of the same texts)
     loop s in skips:
         fp = split_pos(s)
@@ -1205,7 +1205,7 @@ on_hover = (id: int, params: int) -> int:
         if k != IK_FN and k != IK_STRUCT and k != IK_ENUM: code = "({kind_name(k)}) {code}"
     else if len(x.info) > 0: code = x.info
     if len(code) == 0: return lsp_reply(id, "null")
-    language = if ends_with(docs[d].path, ".dewy"): "dewy" else: "sloppy"
+    language = if ends_with(docs[d].path, ".dewy"): "dewy" else: "jo"
     md = "```{language}\n{code}\n```"
     if len(doc) > 0: md += "\n---\n" + doc
     lsp_reply(id, "\{\"contents\":\{\"kind\":\"markdown\",\"value\":{jq(md)}\}\}")
@@ -1583,7 +1583,7 @@ on_completion = (id: int, params: int) -> int:
         return lsp_reply(id, "\{\"isIncomplete\":false,\"items\":[{join(dv, ",")}]\}")
     if member and a > 1 and text[a - 2] == '.': return lsp_reply(id, no_items)     # a range: 0..
     if not member and len(prefix) > 0 and is_digit(prefix[0]): return lsp_reply(id, no_items)
-    sent = "__sloppy_complete__"
+    sent = "__dewy_complete__"
     saved = text
     tries: str[]
     tries.push(text[..a) + sent + text[b..])
