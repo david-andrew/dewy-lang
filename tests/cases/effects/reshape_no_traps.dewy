@@ -1,0 +1,9 @@
+$runtime_checks=false
+# (no traps: reshape's element count is the caller's obligation, proven here)
+main=():>void=>{
+    printl(reshape([1 2 3 4 5 6] 2 3))
+    let values:array<int64 length=8>=[1 2 3 4 5 6 7 8]
+    printl(reshape(values 2 2 2).shape)
+    let xs=[loop i in [0..12) i]
+    printl(reshape(xs 3 4).shape)
+}

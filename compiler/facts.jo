@@ -2261,21 +2261,26 @@ fact_string_index = (n: int, s: mut FactState, index: int, length: int):
 # library's helper checks them where they are deferred). 4 swap, 5 insert, or 0.
 # `bytes.read<uint64>(i)` needs 0 <=? i and i + 8 <=? bytes.length (4 for uint32, 2 for
 # uint16): 10 plus the width here.
+# `reshape(xs a b)` (to four dimensions) needs each dimension >= 0 and their
+# product xs.length: 20 plus the dimensions.
 fact_name_swap = 0
 fact_name_insert = 0
+fact_name_reshape = 0
 fact_name_reads: int[]
 fact_array_call = (n: int) -> int:
-    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) < 2 or nkids(n) > 3: return 0
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) < 2 or nkids(n) > 5: return 0
     d = int(fns[int(nodes[n].sym)].decl)
     if d == 0: return 0
     if fact_name_swap == 0:
         fact_name_swap = intern("swap")
         fact_name_insert = intern("__dewy_insert")
+        fact_name_reshape = intern("reshape")
         fact_name_reads = [intern("__dewy_read_u64"), intern("__dewy_read_u32"), intern("__dewy_read_u16")]
     name = int(nodes[d].name)
     k = 0
-    if nkids(n) == 3: k = if name == fact_name_swap: 4 else if name == fact_name_insert: 5 else: 0
-    else: k = if name == fact_name_reads[0]: 18 else if name == fact_name_reads[1]: 14 else if name == fact_name_reads[2]: 12 else: 0
+    if name == fact_name_reshape and nkids(n) >= 3 and nkids(n) <= 5: k = 19 + nkids(n)
+    else if nkids(n) == 3: k = if name == fact_name_swap: 4 else if name == fact_name_insert: 5 else: 0
+    else if nkids(n) == 2: k = if name == fact_name_reads[0]: 18 else if name == fact_name_reads[1]: 14 else if name == fact_name_reads[2]: 12 else: 0
     if k == 0 or not pos_in_lib(nodes[d].pos) or tkind(representation_type(ntype(kid(n, 0)))) != .array: return 0
     k
 
@@ -2356,6 +2361,9 @@ fact_array_call_check = (n: int, s: mut FactState, values: int[], kind: int):
     base = if held.len() > 0: held[held.len() - 1] else: values[0]
     length = fact_project(s, base, -1, false, T_INT)
     zero = fact_constant(s, 0)
+    if kind > 20:
+        fact_reshape_check(n, s, values, length)
+        return
     if kind > 10:
         # (i + width <=? length: i - length <=? -width)
         width = kind - 10
@@ -2383,6 +2391,27 @@ fact_array_call_check = (n: int, s: mut FactState, values: int[], kind: int):
         bound = if kind == 4: length else: fact_arithmetic(s, kid(n, 0), .plus, length, fact_constant(s, 1))
         wit_index(n, s, index, bound, lo, hi, kid(n, 0), kid(n, i))
         return
+
+# reshape's dimensions: each >= 0, their product the length (a product the
+# facts model: all but one dimension constant). O(dimensions).
+fact_reshape_check = (n: int, s: mut FactState, values: int[], length: int):
+    zero = fact_constant(s, 0)
+    product = values[1]
+    loop i in [1..values.len()):
+        if fact_compare(s, .ge, values[i], zero) != 1:
+            if fact_probe_on: fact_probe_record(n, false)
+            else: wit_unknown(n, fact_bound(s, values[i]), "reshape's dimension `{wit_text(kid(n, i))}` is >= 0", 0, "{wit_text(kid(n, i))} >=? 0")
+            return
+        if i > 1: product = fact_arithmetic(s, kid(n, i), .star, product, values[i])
+    proven = fact_compare(s, .eq, length, product) == 1
+    if fact_probe_on: fact_probe_record(n, proven)
+    else if not proven:
+        dims: str[]
+        loop i in [1..values.len()): dims.push(wit_text(kid(n, i)))
+        receiver = wit_text(kid(n, 0))
+        relation = if receiver != "": "{receiver}.length =? {join(dims, "*")}" else: ""
+        whose = if receiver != "": "`" + receiver + "`'s" else: "the"
+        wit_unknown(n, fact_bound(s, product), "reshape's dimensions multiply to {whose} element count", 0, relation)
 
 # `text[a..b)`: 0 <=? a <=? b <=? text.length (an inclusive end counts one
 # more, an open end is the length); the slice's length is their difference.
