@@ -6108,8 +6108,10 @@ unpack_values = (e: int, t: int, bindings: int[], pos: int, statements: mut int[
     if is_tuple:
         n = int(types[t].nargs)
         if r < 0 and n != count or r >= 0 and n < count: unpack_count_error(e, t, count, r >= 0, pos)
+    exactly = if r >= 0: "at least" else: "exactly"
+    elements = if count == 1: "element" else: "elements"
     if is_fixed and (r < 0 and fixed_len(t) != count or r >= 0 and fixed_len(t) < count):
-        fatal(pos, "unpacking requires {if r >= 0: "at least" else: "exactly"} {count} elements, found {dt(t)}")
+        fatal(pos, "unpacking requires {exactly} {count} {elements}, found {dt(t)}")
     total = if is_tuple: int(types[t].nargs) else if is_fixed: fixed_len(t) else: -1
     input = e
     input_type = t
@@ -6118,10 +6120,9 @@ unpack_values = (e: int, t: int, bindings: int[], pos: int, statements: mut int[
         input_type = prune(check_expr(bc_call("__map_entries", [input], pos), 0))
         input = last_checked
     source = capture_value(input, input_type, statements)
-    exactly = if r >= 0: "at least" else: "exactly"
     if is_array and not is_fixed:
         # (an obligation: proven from what is known of the array, or checked where allowed)
-        statements.push(unpack_length_check(mk_ident_local(int(nodes[source].sym), pos), count, r < 0, pos, "unpacking requires {exactly} {count} element{if count == 1: "" else: "s"}"))
+        statements.push(unpack_length_check(mk_ident_local(int(nodes[source].sym), pos), count, r < 0, pos, "unpacking requires {exactly} {count} {elements}"))
     if is_map:
         length = mk(.call, pos)
         check_intrinsic(length, .len, [bc_map_keys(source, pos)], 0)
@@ -6132,7 +6133,7 @@ unpack_values = (e: int, t: int, bindings: int[], pos: int, statements: mut int[
         nodes[equal].op = i32(int(if r >= 0: Tok.ge else: Tok.eq))
         nodes[equal].a = i32(length)
         nodes[equal].b = i32(wanted)
-        message = synth_str("unpacking requires {exactly} {count} element{if count == 1: "" else: "s"}", pos)
+        message = synth_str("unpacking requires {exactly} {count} {elements}", pos)
         guard = mk(.call, pos)
         check_intrinsic(guard, .assert, [equal, message], 0)
         statement = mk(.exprstmt, pos)
