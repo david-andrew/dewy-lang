@@ -1,0 +1,8 @@
+# quick
+# One bool literal does not cover an optional union's bool.
+name = (v:(int64 | bool)?):>string => match v {
+    <true> => "yes"
+    <none> => "nothing"
+    n:int64 => "int {n}"
+}
+main = () => printl(name(true))

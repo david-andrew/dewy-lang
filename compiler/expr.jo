@@ -8348,6 +8348,30 @@ check_match = (m: int, expected: int) -> int:
                     nodes[narrowed].type = i32(pt)
                     add_flag(narrowed, NF_CHECKED)
                     value = narrowed
+            opt_lit = dewy and pk == .plit and types[st].kind == .opt and is_union(telem(st)) and nodes[int(nodes[p].a)].kind != .none_lit
+            if opt_lit:
+                # (`<true>` where the value is an (int64 | bool)?: present, and that member's value)
+                u = prune(telem(st))
+                e = int(nodes[p].a)
+                check_expr(e, 0)
+                vi = union_target(e, ntype(e), u)
+                if vi < 0: fatal(nodes[p].pos, "literal pattern is not a member of {type_str(st, true)}")
+                pt = union_members(u)[vi]
+                if not is_int(representation_type(pt)) and pt != T_BOOL and tkind(representation_type(pt)) != .str_ and str_set_of(pt) == 0:
+                    fatal(nodes[p].pos, "literal patterns need an integer, bool or string member")
+                coerce(e, pt)
+                nodes[p].aux2 = i32(vi)
+                if pt == T_BOOL:
+                    union_bool_seen |= if nodes[e].ival != 0: 1 else: 2
+                    if union_bool_seen == 3 and not opt_members.contains(pt):
+                        opt_members.push(pt)
+                        if opt_members.len() == union_members(u).len(): finite_seen |= 1
+                if binding != 0:
+                    present = mk(.unwrap, nodes[p].pos)
+                    nodes[present].a = i32(value)
+                    nodes[present].type = i32(u)
+                    add_flag(present, NF_CHECKED)
+                    value = union_part(present, u, [pt], nodes[p].pos)
             if binding != 0:
                 if pk == .plit and nodes[p].type != 0 and str_set_of(ntype(value)) == 0: nodes[value].type = nodes[p].type
                 d = mk(.vardecl, nodes[p].pos)
@@ -8403,7 +8427,7 @@ check_match = (m: int, expected: int) -> int:
                 nodes[p].a = i32(d)
             if pk == .plit:
                 e = int(nodes[p].a)
-                if dewy and is_union(st): continue
+                if dewy and (is_union(st) or opt_lit): continue
                 if types[st].kind == .opt and nodes[e].kind == .none_lit:
                     finite_seen |= 2
                     arm_members.push(T_NONE)

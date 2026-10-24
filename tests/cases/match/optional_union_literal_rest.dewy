@@ -1,0 +1,25 @@
+# quick
+# A bare-name catch-all after literal arms over an optional union binds what they leave:
+# after both bool literals, the int64 or none; after one, the whole value.
+get = (n:int64):>(int64 | bool)? => {
+    if n =? 1 return none
+    if n =? 2 return true
+    if n =? 3 return false
+    n
+}
+rest_of = (v:int64 | none):>string => "rest {v}"
+whole = (v:(int64 | bool)?):>string => "whole {v}"
+main = () => {
+    loop i in [0..5) {
+        let v = get(i)
+        match v {
+            <true> => printl("t")
+            <false> => printl("f")
+            rest => printl(rest_of(rest))
+        }
+        match get(i) {
+            <true> => printl("t")
+            rest => printl(whole(rest))
+        }
+    }
+}

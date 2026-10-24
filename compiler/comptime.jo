@@ -469,7 +469,9 @@ ct_pattern = (p: int, v: int) -> bool:
         if is_union(x.type):
             if x.i != int(nodes[p].aux2): return false
             return ct_pattern(p, x.items[0])
-        if tkind(x.type) == .opt: return x.i == 0
+        if tkind(x.type) == .opt:
+            if nodes[int(nodes[p].a)].kind == .none_lit: return x.i == 0
+            return x.i != 0 and ct_pattern(p, x.items[0])
         return ct_equal(v, ct_expr(int(nodes[p].a)))
     if k == .prange:
         lo = ct_expr(int(nodes[p].a))

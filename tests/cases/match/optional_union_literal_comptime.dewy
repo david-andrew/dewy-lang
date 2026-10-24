@@ -1,0 +1,23 @@
+# quick
+# Literal arms over an optional union at compile time: none is not `<true>` (closed
+# evaluation once took any literal arm on an optional for `<none>`).
+get = (n:int64):>(int64 | bool)? => {
+    if n =? 1 return none
+    if n =? 2 return true
+    n
+}
+label = (v:(int64 | bool)?):>string => match v {
+    <true> => "yes"
+    <false> => "no"
+    <7> => "seven"
+    _ => "other"
+}
+const NOTHING = label(none)
+const TRUE = label(get(2))
+const SEVEN = label(get(7))
+const EIGHT = label(get(8))
+$assert NOTHING =? "other"
+$assert TRUE =? "yes"
+$assert SEVEN =? "seven"
+$assert EIGHT =? "other"
+main = () => printl("{NOTHING} {TRUE} {SEVEN} {EIGHT} {label(get(1))} {label(get(7))}")

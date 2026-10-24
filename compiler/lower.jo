@@ -2641,6 +2641,16 @@ gen_match_test = (p: int, st0: int, hidden_addr: int) -> int:
             return e_call2(rt("__str_eq"), e_load(VI, hidden_addr, 0, ptr_size), v, VI)
         if types[st].kind == .opt:
             if nodes[a].kind == .none_lit: return e_bin(.eq, VI, opt_has(hidden_addr, int(types[st].elem)), e_iconst(0))
+            u = prune(int(types[st].elem))
+            if is_union(u):
+                # (a member's literal where the value is an (A | B)?: present, then as for A | B; the
+                # union sits in place)
+                result = vreg(VI)
+                e_mov(result, e_iconst(0))
+                iff(opt_has(hidden_addr, u))
+                e_mov(result, gen_match_test(p, u, hidden_addr))
+                endc()
+                return result
             fatal(nodes[p].pos, "only `none` and `_` patterns are supported for optionals; use {jd(nodes[p].pos, "`if let v = x`", "`if x isnt? none \{ }`")}")
         if vc(st) == VC_FLT: fatal(nodes[p].pos, "cannot match on floats")
         if vc(st) == VC_AGG: fatal(nodes[p].pos, "unsupported pattern for this type")
