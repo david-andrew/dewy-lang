@@ -1,0 +1,22 @@
+# `e:error` matches the error kinds a value may hold, and branches failing in different
+# ways join into one union.
+Bad:type = type of error & [message:string]
+Worse:type = type of error
+f = (s:string):>int | Bad => if s =? "" Bad["empty"] else 1
+g = (s:string):>int | Worse => if s =? "" Worse else 2
+h = (s:string) => if s =? "" Bad["blank"] else int(s.length)
+main = () => {
+    loop t in ["" "abc"] loop flag in [true false] {
+        let r = if flag f(t) else g(t)
+        match r {
+            n:int => printl"n {n}"
+            e:error => printl"failed: {e}"
+        }
+        let q = if flag h(t) else g(t)
+        match q {
+            n:int => printl"q {n}"
+            e:Bad => printl"bad {e.message}"
+            e:error => printl"other {e}"
+        }
+    }
+}

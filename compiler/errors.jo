@@ -58,6 +58,45 @@ nominal_family = (t: int) -> int:
     nominal_families[t] = result
     result
 
+# A family written as a pattern (`e:error`) against union u: the family's members u holds,
+# as one type (0 when t is no family's, or u holds none of it). O(members).
+nominal_family_part = (t: int, u: int) -> int:
+    if not is_union(t) or not is_union(u): return 0
+    family = false
+    loop _, found in nominal_families:
+        if found == t: family = true
+    if not family: return 0
+    held: int[]
+    loop m in union_members(t):
+        if union_index(u, m) >= 0: held.push(m)
+    if held.len() == 0: return 0
+    mk_union(held)
+
+# Two branches' types that differ only in how they may fail join into one union: `int | Bad`
+# and `int | Worse` give `int | Bad | Worse` (0 when their values differ, or neither fails).
+exception_join = (ta: int, tb: int) -> int:
+    ma = value_members(ta)
+    mb = value_members(tb)
+    va: int[]
+    vb: int[]
+    fails = false
+    loop m in ma:
+        if m == T_NONE or exception_member(m): fails = true
+        else: va.push(m)
+    loop m in mb:
+        if m == T_NONE or exception_member(m): fails = true
+        else: vb.push(m)
+    if not fails or not (members_within(va, vb) or members_within(vb, va)): return 0
+    mk_union(ma + mb)
+
+members_within = (xs: int[], ys: int[]) -> bool:
+    loop x in xs:
+        found = false
+        loop y in ys:
+            if type_eq(x, y): found = true
+        if not found: return false
+    true
+
 nominal_resolve = (t: int):
     if nominal_parent.has(t) or t == exception_type: return
     if nominal_resolving.get(t, false): fatal(nodes[int(structs[int(types[t].st)].decl)].pos, "nominal ancestry contains a cycle")

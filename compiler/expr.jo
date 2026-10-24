@@ -950,6 +950,16 @@ join_types = (a: int, b: int, pos: int) -> int:
         coerce(a, t)
         coerce(b, t)
         return t
+    # (branches failing in different ways: `int | Bad` and `int | Worse` give `int | Bad | Worse`)
+    if not type_eq(ta, tb) and not can_coerce(b, tb, ta) and files[pos_file(nodes[a].pos)].is_dewy:
+        if can_coerce(a, ta, tb):
+            coerce(a, tb)
+            return tb
+        t = exception_join(ta, tb)
+        if t != 0:
+            coerce(a, t)
+            coerce(b, t)
+            return t
     coerce(b, ta)
     ta
 
@@ -8127,6 +8137,10 @@ check_match = (m: int, expected: int) -> int:
                 if pk == .pwild and binding != 0: bare_arm_warning(nodes[p].pos, binding)
             if pk == .ptype:
                 pt = prune(resolve_type(int(nodes[p].a)))
+                # (`e:error`: the error kinds the value may hold)
+                if dewy and is_union(pt) and not type_eq(pt, st):
+                    held = nominal_family_part(pt, if types[st].kind == .opt: prune(telem(st)) else: st)
+                    if held != 0: pt = prune(held)
                 if type_eq(pt, st):
                     nodes[p].kind = .pwild
                 else if is_union(st) and union_index(st, pt) >= 0:
