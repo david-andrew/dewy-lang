@@ -95,9 +95,12 @@ parallel_range[U] = (n: int, f: (int) -> U) -> U[]:
 __dewy_parallel_collect[T, U] = (xs: T[], f: (T) -> U) -> U[]:
     parallel_map(xs, f)
 
+# (a range of 2^63 or more values counts as 2^63 - 1: collecting it runs out of
+# memory, as allocation does, and running it does not end, as counting that far
+# cannot; docs/design/assumptions.md)
 __parallel_range_count = (r: IntRange) -> int:
     if r._empty: return 0
-    if r._count == 0 or r._count > u64(9223372036854775807): panic("parallel range is too large")
+    if r._count == 0 or r._count > u64(9223372036854775807): return 9223372036854775807
     int(r._count)
 
 @parallel

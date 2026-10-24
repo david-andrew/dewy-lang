@@ -3,7 +3,7 @@
 # and a big integer beyond, so small fractions keep word arithmetic and no
 # operation overflows. Reduction strategies are adapted from the old
 # library/rational.dewy; representation and error handling use the compact core.
-from bigint import BigInt, _big, _parse_big, _ratio_float_bits
+from bigint import BigInt, _big, _parse_big, _power, _ratio_float_bits
 
 # `_shown` is how the value prints, which never affects its value (equality and
 # hashing ignore it): bit 1 when decimal literals took part, bit 2 when a
@@ -37,8 +37,14 @@ _gcd=(a:int b:int):>int=>{
     return big.gcd(other)
 }
 
+# A zero denominator is the caller's to rule out (`rational(n 0)`); the library's
+# own fractions reduce with _reduce, whose denominator is a Rational's, a power
+# of ten or one already checked, so no arithmetic here can fail.
 _make=(numerator:int denominator:int shown:int64=0):>Rational=>{
     if denominator =? 0 panic("rational denominator must be nonzero")
+    return _reduce(numerator denominator shown)
+}
+_reduce=(numerator:int denominator:int shown:int64=0):>Rational=>{
     if denominator <? 0 {numerator=-numerator denominator=-denominator}
     if numerator =? 0 return Rational[0 1 shown]
     if denominator =? 1 return Rational[numerator 1 shown]
@@ -53,7 +59,7 @@ rational = ((numerator denominator=1):>Rational=>_make(_integer(numerator) _inte
 # A written fraction: `a/b` of integers and the `rational(...)` constructors.
 _fraction=(numerator denominator=1):>Rational=>_make(_integer(numerator) _integer(denominator) 2)
 # A decimal literal too long for word parts.
-_decimal=(numerator denominator):>Rational=>_make(_integer(numerator) _integer(denominator) 1)
+_decimal=(numerator denominator):>Rational=>_reduce(_integer(numerator) _integer(denominator) 1)
 
 # `rational(x)` of a float: a finite float is exactly sign * mantissa * 2^exponent,
 # and that value is the result, unrounded. NaN and infinity have none, and are
@@ -82,7 +88,7 @@ _parse_parts=(numerator:string denominator:string):>Rational|none=>{
     let n=_parse_big(numerator)
     let d=_parse_big(denominator)
     if n is? none or d is? none or d =? 0 return none
-    return _make(_integer(n) _integer(d) 2)
+    return _reduce(_integer(n) _integer(d) 2)
 }
 
 _neg=(value:Rational):>Rational=>Rational[-value.numerator value.denominator value._shown]
@@ -92,7 +98,7 @@ _add=(a:Rational b:Rational):>Rational=>{
     let shown=a._shown or b._shown
     if a.denominator =? b.denominator {
         if a.denominator =? 1 return Rational[a.numerator+b.numerator 1 shown]
-        return _make(a.numerator+b.numerator a.denominator shown)
+        return _reduce(a.numerator+b.numerator a.denominator shown)
     }
     if a.denominator =? 1 return Rational[a.numerator*b.denominator+b.numerator b.denominator shown]
     if b.denominator =? 1 return Rational[a.numerator+b.numerator*a.denominator a.denominator shown]
@@ -117,6 +123,10 @@ _mul=(a:Rational b:Rational):>Rational=>{
 }
 reciprocal=(value:Rational):>Rational=>{
     if value.numerator =? 0 panic("rational division by zero")
+    return _invert(value)
+}
+# (of a nonzero value: the library's own divisions by known units)
+_invert=(value:Rational):>Rational=>{
     if value.numerator <? 0 return Rational[-value.denominator -value.numerator value._shown]
     return Rational[value.denominator value.numerator value._shown]
 }
@@ -259,7 +269,7 @@ _decimal_text=(numerator:int denominator:int repeats:bool):>string=>{
     let digits=""
     if lead >? 0 {
         let scale:int=1
-        if lead <=? 18 {loop _ in [0..lead) scale=scale*10} else scale=_big(10)^lead
+        if lead <=? 18 {loop _ in [0..lead) scale=scale*10} else scale=_power(_big(10) lead)
         let scaled=remainder*scale
         let head="{scaled//denominator}"
         remainder=scaled%denominator
@@ -389,8 +399,9 @@ _quantity_exact=(value:Rational units:array<string> nums:array<int64> dens:array
         let simplest=-1
         let simplest_size=0
         loop i in 0.. and n in nums {
-            let count=_div(shifted _make(n dens[i]))
-            if count.denominator =? 1 and not _lt(size _make(n dens[i])) whole=i
+            let unit=_reduce(n dens[i])
+            let count=_mul(shifted _invert(unit))
+            if count.denominator =? 1 and not _lt(size unit) whole=i
             let digits=count.numerator.abs()+count.denominator
             if simplest <? 0 or digits <? simplest_size {
                 simplest=i
@@ -400,7 +411,7 @@ _quantity_exact=(value:Rational units:array<string> nums:array<int64> dens:array
         pick=simplest
         if whole >=? 0 pick=whole
     }
-    return "{_div(shifted _make(nums[pick] dens[pick]))}{units[pick]}"
+    return "{_mul(shifted _invert(_reduce(nums[pick] dens[pick])))}{units[pick]}"
 }
 _quantity_float=(value:float64 units:array<string> nums:array<int64> dens:array<int64> base:int64 offset:float64):>string=>{
     let size=value

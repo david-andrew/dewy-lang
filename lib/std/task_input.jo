@@ -40,6 +40,8 @@ __task_input = (prompt: str) -> (str | Canceled):
     if result is str: return result
     ""
 
+# (asking again until a number comes; input that ends or cannot be read first
+# is the environment failing the program, as running out of memory is)
 input_int = (prompt: str = "") -> (int | Canceled):
     loop:
         write(prompt)
@@ -47,7 +49,7 @@ input_int = (prompt: str = "") -> (int | Canceled):
         if result is Canceled: return Canceled
         if result is str:
             if let value = to_int(trim(result)): return value
-        else: panic("the input ended before a whole number came")
+        else: __environment_failure("the input ended before a whole number came")
 
 input_float = (prompt: str = "") -> (f64 | Canceled):
     loop:
@@ -56,7 +58,7 @@ input_float = (prompt: str = "") -> (f64 | Canceled):
         if result is Canceled: return Canceled
         if result is str:
             if let value = to_float(trim(result)): return value
-        else: panic("the input ended before a number came")
+        else: __environment_failure("the input ended before a number came")
 
 # Streaming handles retain their established close discipline. Cancellation is
 # reported separately from EOF; an open completed during cancellation is closed.

@@ -616,6 +616,10 @@ divmod=(a:BigInt b:BigInt):>BigIntDivision=>{
 
 pow=(base:BigInt exponent:int64):>BigInt=>{
     if exponent <? 0 panic("big integer exponent must be nonnegative")
+    return _power(base exponent)
+}
+# (a nonnegative exponent: a negative one gives 1)
+_power=(base:BigInt exponent:int64):>BigInt=>{
     let result=_big(1)
     let factor=base
     loop exponent >? 0 {
@@ -654,7 +658,7 @@ to_int64=(value:BigInt):>int64|none=>{
 # remainder avoids overflowing either part or losing a tie-breaking low bit.
 _ratio_float_bits=(negative:bool numerator:array<uint64> denominator:array<uint64>
                    fraction_bits:int64 exponent_bits:int64):>uint64=>{
-    if denominator.length =? 0 panic("floating conversion denominator must be nonzero")
+    # (the denominator is nonzero: a Rational's, or 1)
     let sign:uint64=0
     if negative sign=(1 as uint64) << (fraction_bits+exponent_bits)
     if numerator.length =? 0 return sign

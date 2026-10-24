@@ -34,6 +34,13 @@ __nd_size = (shape: int[]) -> int:
         n *= d
     n
 
+# The element count of an array's own shape, which cannot fail: its dimensions
+# are nonnegative and their product is the length of its data.
+__nd_extent = (shape: int[]) -> int:
+    n = 1
+    loop d in shape: n *= d
+    n
+
 __shape_str = (shape: int[]) -> str:
     s = ""
     loop i in 0.. and d in shape:
@@ -1112,7 +1119,7 @@ __fmt_nd[T] = (buf: mut u8[], data: T[], shape: int[], dim: int, start: int):
                 if j > 0: __buf_byte(buf, ' ')
                 __fmt_elem(buf, data[start + i * c + j])
     else:
-        sub = __nd_size(shape[dim + 1..])
+        sub = __nd_extent(shape[dim + 1..])
         loop i in [0..shape[dim]):
             if i > 0: __buf_append_str(buf, ", ")
             __fmt_nd(buf, data, shape, dim + 1, start + i * sub)

@@ -3567,7 +3567,11 @@ fact_capture = (n: int, s: mut FactState) -> int:
             if c >= 128 or c == 13: ascii = false
         if ascii:
             value = fact_new(s, FactBound(), FactTerm(type = T_STR))
-            if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(value, -1, false, fact_constant(s, len(text))))
+            # (and its byte view's: `"abc" as array<uint8>` has 3 elements)
+            if s.projections.len() + 3 < FACT_CAP:
+                count = fact_constant(s, len(text))
+                fact_add_projection(s, FactProjection(value, -1, false, count))
+                fact_add_projection(s, FactProjection(fact_byte_view(s, value), -1, false, count))
             return value
     # An optional's or union's tag (-3: 0 for none, 1 for a value, or the
     # member) and payload (-4) are projections of its immutable evaluation.
@@ -3863,6 +3867,11 @@ fact_capture = (n: int, s: mut FactState) -> int:
         if nodes[n].aux == i32(int(CV.fixed2arr)): return a
         if nodes[n].aux == i32(int(CV.set_text)): return fact_new(s, FactBound(), FactTerm(type = ntype(n)))
         b = fact_bound(s, a)
+        # (`uint8<overflow='wrap'>(x)` and saturation: x itself when it fits,
+        # else some value of the type)
+        if (nodes[n].aux == i32(int(CV.wrap_int)) or nodes[n].aux == i32(int(CV.saturate_int))) and fact_scalar(ntype(n)) and representation_type(ntype(n)) != T_U64:
+            if fact_scalar(ntype(int(nodes[n].a))) and representation_type(ntype(int(nodes[n].a))) != T_U64 and sa_fits(b.lo, ntype(n)) and sa_fits(b.hi, ntype(n)): return a
+            return fact_new(s, fact_domain(ntype(n)), FactTerm(type = ntype(n)))
         if ntype(n) != ntype(int(nodes[n].a)) and (ntype(n) == T_U64 or ntype(int(nodes[n].a)) == T_U64):
             # (a value both types hold converts exactly: decode or encode its interval)
             if fact_scalar(ntype(n)) and fact_scalar(ntype(int(nodes[n].a))) and nodes[n].aux == i32(int(CV.int_)):
