@@ -416,6 +416,7 @@ can_coerce = (n: int, from0: int, to0: int) -> bool:
         if fs != 0 and tk == .str_ and n != 0: return true
     if fk == .refined or tk == .refined: return can_coerce(n, representation_type(from), representation_type(to))
     if refine_active and fk == .struct_ and tk == .struct_ and ref_record_conversion(from, to): return true
+    if fk == .struct_ and tk == .struct_ and record_int_conversion(from, to): return true
     if fk == .struct_ and tk == .struct_ and intersection_parts.len() > 0 and intersection_within(from, to): return true
     if fk == .quantity or tk == .quantity:
         if fk == .var or tk == .var: return true
@@ -497,6 +498,22 @@ str_text_or_set = (t: int) -> bool: prune(t) == T_STR or str_set_of(t) != 0
 str_set_within = (a: int, b: int) -> bool:
     loop value in str_sets[a]:
         if not str_sets[b].contains(value): return false
+    true
+
+# An anonymous record whose integer fields convert as scalars do (`[x:int]` where
+# `[x:int64]` is wanted): field by field, each `int` field the proven narrowing.
+# O(fields); other field types must agree.
+record_int_conversion = (from: int, to: int) -> bool:
+    fs = int(types[from].st); ts = int(types[to].st)
+    if structs[fs].decl != structs[ts].decl or not has_flag(int(structs[fs].decl), NF_RECORD): return false
+    check_struct_fields(fs)
+    check_struct_fields(ts)
+    loop i in [0..int(structs[ts].nfields)):
+        a = prune(int(fields[int(structs[fs].fields) + i].type))
+        b = prune(int(fields[int(structs[ts].fields) + i].type))
+        if type_eq(a, b): continue
+        if types[a].kind != .int_ or types[b].kind != .int_: return false
+        if a != T_MATH_INT and b != T_MATH_INT and not int_widens(a, b): return false
     true
 
 # is record `to` an operand of intersection `from` (or of one of its operands)?
@@ -709,6 +726,7 @@ coerce = (n: int, target: int) -> int:
         return n
     fk = types[from].kind
     if refine_active and fk == .struct_ and tk == .struct_ and ref_record_conversion(from, to): return ref_convert_record(n, to)
+    if fk == .struct_ and tk == .struct_ and record_int_conversion(from, to): return ref_convert_record(n, to)
     # (an intersection's value where one of its operand records is wanted: those fields)
     if fk == .struct_ and tk == .struct_ and intersection_parts.len() > 0 and intersection_within(from, to): return ref_convert_record(n, to)
     if fk == .array and is_soa(to) and can_coerce(0, int(types[from].elem), soa_elem(to)):

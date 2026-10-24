@@ -1,0 +1,14 @@
+# quick
+# An anonymous record of int fields converts to fixed-width fields, each the
+# proven narrowing a scalar int gets
+sum = (point:[x:int64 y:int64]):>int64 => point.x+point.y
+main = () => {
+    let point = [y=22 x=20]
+    printl(sum(point))
+    let q:[x:int64 y:int64] = point
+    let wide:[x:int y:int] = q
+    printl(wide.x+q.y)
+    let tagged = [n=7 name="seven"]
+    let fixed:[n:int64 name:string] = tagged
+    printl(fixed.n)
+}

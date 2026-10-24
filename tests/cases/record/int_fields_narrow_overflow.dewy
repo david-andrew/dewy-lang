@@ -1,0 +1,8 @@
+# exit: 101
+# A record's int field that does not fit int64 fails its narrowing, as a scalar does
+sum = (point:[x:int64 y:int64]):>int64 => point.x+point.y
+big = (n:int):>int => n*n*n*n*n
+main = () => {
+    let point = [y=1 x=big(10000)]
+    printl(sum(point))
+}
