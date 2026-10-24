@@ -1,6 +1,8 @@
 # Milestone 24: ownership, scoped storage and cleanup
 
-Accepted design, 2026-10-20. Slices 1–3 are implemented; arena slices 4–5 wait on open question 4.
+Accepted design, 2026-10-20. Slices 1–3 are implemented. Open question 4, the
+allocation-failure policy the arena slices 4–5 waited on, is decided (Q4,
+[resource_exhaustion.md](resource_exhaustion.md#allocation-q4)); arenas build on it.
 
 ## Authority and starting point
 
@@ -222,9 +224,12 @@ Pass an internal allocator-context operand through demanded direct helpers and
 allocator-aware callable adapters; ordinary call ABIs/heap helpers stay unchanged.
 Unmodelled indirect calls use enclosing-placement fallback. A closure does not
 implicitly capture a temporary allocator context for later invocation. Cleanup
-records restore any active scope state on panic. Keep allocation failure behind
-`FailurePolicy=Unsettled/Return/Terminate`; unsettled costs cannot certify no-panic
-or recovery. Current fatal OOM is an observation, not approval of the final policy.
+records restore any active scope state on panic. Allocation failure follows the
+decided Q4 policy ([resource_exhaustion.md](resource_exhaustion.md#allocation-q4)):
+ordinary allocation is infallible and true OOM ends the process with a report;
+`$explicit_allocation_failure` makes each allocating function return
+`T | OutOfMemory`; under `$no_hidden_costs` capacity is acquired explicitly (an
+arena returns `Arena | OutOfMemory`), and use proven within it cannot fail.
 Returned places are enabled for methods lending a field route of their object
 (see "Returned places" below).
 
