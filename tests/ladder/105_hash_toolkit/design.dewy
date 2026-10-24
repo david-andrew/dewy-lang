@@ -1,0 +1,111 @@
+# Tier 5 / 105_hash_toolkit / milestone 40
+# Acceptance: Hashing, checksums and a seeded generator on fixed-width integers: wrapping and saturating overflow policies where wanted, exact intermediates everywhere else (uint64 midpoints, widening products, averaged bytes), proven narrowing stores.
+Hash32:type = uint32<overflow='wrap'>
+Word64:type = uint64<overflow='wrap'>
+Count8:type = uint8<overflow='saturate'>
+
+# FNV-1a, 32 bits: multiplying is meant to wrap.
+fnv1a = (text:string):>Hash32 => {
+    let h:Hash32 = 2166136261
+    loop b in (text as array<uint8>) h = (h xor b) * 16777619
+    h
+}
+
+# Adler-32: sums stay exact; the modulus keeps each store in range.
+adler32 = (text:string):>uint32 => {
+    let a:uint32 = 1
+    let b:uint32 = 0
+    loop byte in (text as array<uint8>) {
+        a = (a + byte) % 65521
+        b = (b + a) % 65521
+    }
+    b*65536 + a
+}
+
+# xorshift64*: a small seeded generator, wrapping by design.
+Rng:type = [state:Word64]
+next = (@rng:Rng):>uint64 => {
+    let x = rng.state
+    x = x xor (x >> 12)
+    x = x xor (x << 25)
+    x = x xor (x >> 27)
+    rng.state = x
+    Word64(x * 2685821657736338717)
+}
+
+# a*b mod m without overflow: the product is exact, only the remainder is stored.
+mul_mod = (a:uint64 b:uint64 m:uint64<(>? 0)>):>uint64 => a*b % m
+
+# Binary search over sorted uint64 keys: (lo + hi) // 2 never overflows.
+find = (keys:array<uint64> target:uint64):>bool => {
+    if keys.length =? 0 return false
+    let lo:uint64 = 0
+    let hi:uint64 = keys.length - 1
+    loop lo <=? hi {
+        let mid:uint64 = (lo + hi) // 2
+        let k = keys.get(mid) ?? 0
+        if k =? target return true
+        if k <? target lo = mid + 1
+        else if mid =? 0 return false
+        else hi = mid - 1
+    }
+    false
+}
+
+# The midpoint of two huge values, which plain machine addition would overflow.
+midpoint = (a:uint64 b:uint64):>uint64 => (a + b) // 2
+
+# Blend two grey pixels: the sum of two bytes may pass 255, the average fits.
+blend = (p:uint8 q:uint8):>uint8 => (p + q) // 2
+
+# A counting Bloom filter: each counter saturates at 255 instead of wrapping to 0.
+Bloom:type = [counts:array<Count8>]
+slots = (word:string):>array<int> => {
+    let h = fnv1a(word)
+    let g = adler32(word)
+    [loop i in [0..3) (h + i*g) % 64]
+}
+add = (@bloom:Bloom word:string):>void => {
+    loop s in slots(word) {
+        let c = bloom.counts.get(s) ?? 0
+        bloom.counts[s] = Count8(c + 1)
+    }
+}
+maybe_has = (bloom:Bloom word:string):>bool => {
+    loop s in slots(word) if (bloom.counts.get(s) ?? 0) =? 0 return false
+    true
+}
+
+main = () => {
+    printl"-- hashes --"
+    loop word in ["" "a" "hello" "Dewy" "The quick brown fox jumps over the lazy dog"] {
+        printl"{word.length} chars: fnv1a {fnv1a(word)} adler32 {adler32(word)}"
+    }
+
+    printl"-- generator --"
+    let rng = Rng[2026]
+    let draws = [loop _ in [0..5) next(@rng)]
+    printl"{draws}"
+    let dice = [loop d in draws d % 6 + 1]
+    printl"dice {dice}"
+
+    printl"-- exact intermediates --"
+    let big:uint64 = 18446744073709551000
+    printl"midpoint {midpoint(big big + 500)}"
+    printl"mul_mod {mul_mod(big 18446744073709550000 1000000007)}"
+    printl"blend {blend(250 240)} {blend(3 4)}"
+    let scale:int64 = 3037000500
+    let per_mille:int64 = scale*scale // 1000000007
+    printl"per mille {per_mille}"
+    let keys:array<uint64> = [3 9 27 81 243 18446744073709551000 18446744073709551600]
+    printl"find {find(keys 81)} {find(keys 18446744073709551600)} {find(keys 4)}"
+
+    printl"-- counting bloom filter --"
+    let bloom = Bloom[[loop _ in [0..64) Count8(0)]]
+    loop word in ["apple" "banana" "cherry" "date"] add(@bloom word)
+    loop _ in [0..300) add(@bloom "spam")
+    let hot = 0
+    loop c in bloom.counts if c =? 255 hot += 1
+    printl"saturated counters {hot}"
+    loop word in ["apple" "cherry" "grape" "spam" "kiwi"] printl"{word}: {maybe_has(bloom word)}"
+}

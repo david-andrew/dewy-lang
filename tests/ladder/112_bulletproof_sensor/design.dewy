@@ -1,0 +1,122 @@
+# Tier 5 / 112_bulletproof_sensor / milestone 46
+# Acceptance: A sensor-log summarizer under $bulletproof: no runtime checks, no hidden allocation or copies, explicit allocation failure, finite floats, no assumed bounds. Every index, division, narrowing and loop bound is proven from guards and refinements, and every failure (bad lines, overflowing input, end of input, OutOfMemory) is a handled value.
+$bulletproof
+
+const capacity = 64
+const max_lines = 1000
+const limit = 100000            # readings are tenths of a degree, within ±10000.0
+
+Slot:type = int64<(<? capacity)>
+Reading:type = int32<r => -100000 <=? r and r <=? 100000>
+
+Log:type = [
+    values:array<Reading length=64>
+    count:int64<c => 0 <=? c and c <=? capacity>
+    rejected:int64<c => 0 <=? c and c <=? max_lines>
+]
+
+Summary:type = [count:int64<c => 0 <? c and c <=? capacity> low:Reading high:Reading total:int64 mean_tenths:int64 median:Reading]
+
+BadReading:type = type of error & [message:string]
+
+# Text to a reading: every way it can fail is a value.
+parse_reading = (text:string):>(Reading | BadReading) & allocates => {
+    let n = to_int(text.trim() max_digits=7)
+    if n is? NotAnInteger return BadReading["not a number"]
+    if n is? TooManyDigits return BadReading["too long"]
+    if n <? -limit or n >? limit return BadReading["out of range"]
+    Reading(n)
+}
+
+# Store a reading if there is room; the index is proven by the guard.
+record = (@log:Log value:Reading):>bool & no allocates & no panics => {
+    let at = log.count
+    if at >=? capacity return false
+    log.values[at] = value
+    log.count = at + 1
+    true
+}
+
+# Insertion sort of the first n values, in place; every index is in range.
+sort_prefix = (@xs:array<Reading length=64> n:int64<c => 0 <=? c and c <=? capacity>):>void & no allocates & no panics => {
+    loop i in [1..n) {
+        let key = xs[i]
+        let j = i
+        loop j >? 0 and xs[j - 1] >? key {
+            xs[j] = xs[j - 1]
+            j -= 1
+        }
+        xs[j] = key
+    }
+}
+
+summarize = (log:Log):>(Summary | none) & no allocates & no panics => {
+    let n = log.count
+    if n =? 0 return none
+    let low:Reading = log.values[0]
+    let high:Reading = low
+    let total:int64 = 0              # at most 64 × 100000: no overflow, by the bounds
+    loop i in [0..n) {
+        let v = log.values[i]
+        if v <? low low = v
+        if v >? high high = v
+        total += v
+    }
+    let sorted = log.values          # a fixed array: an inline copy, no allocation
+    sort_prefix(@sorted n)
+    Summary[n low high total total // n sorted[n // 2]]
+}
+
+# Ten equal-width buckets between low and high; the bucket index is proven < 10.
+histogram = (log:Log s:Summary):>array<int64 length=10> & no allocates & no panics => {
+    let buckets:array<int64 length=10> = [0 0 0 0 0 0 0 0 0 0]
+    let width = int64(s.high) - int64(s.low) + 1
+    loop i in [0..log.count) {
+        let offset = int64(log.values[i]) - int64(s.low)
+        let b = offset*10 // width
+        if 0 <=? b and b <? 10 buckets[b] += 1
+    }
+    buckets
+}
+
+degrees = (tenths:int64):>string & allocates => {
+    let sign = if tenths <? 0 "-" else ""
+    let magnitude = if tenths <? 0 -tenths else tenths
+    "{sign}{magnitude // 10}.{magnitude % 10}"
+}
+
+main = ():>void | OutOfMemory => {
+    let log = Log[[loop _ in [0..capacity) Reading(0)] 0 0]
+    let lines:int64 = 0
+    loop lines <? max_lines {
+        let line = read_line()
+        if line is? none break
+        if line is? Canceled or line is? FileError {
+            printl"input failed after {lines} lines"
+            break
+        }
+        lines += 1
+        match parse_reading(line) {
+            v:Reading => if not record(@log v) {
+                printl"line {lines}: log full"
+                if log.rejected <? max_lines log.rejected += 1
+            }
+            e:BadReading => {
+                printl"line {lines}: {e.message}: '{line}'"
+                if log.rejected <? max_lines log.rejected += 1
+            }
+            <OutOfMemory> => return OutOfMemory
+        }
+    }
+    printl"{lines} lines, {log.count} readings kept, {log.rejected} rejected"
+    match summarize(log) {
+        <none> => printl"no readings"
+        s:Summary => {
+            printl"low {degrees(s.low)} high {degrees(s.high)} mean {degrees(s.mean_tenths)} median {degrees(s.median)}"
+            let mean:float64 = float64(s.total)/float64(s.count)/10.0
+            printl"exact mean {mean}"
+            let bars = histogram(log s)
+            loop i in [0..10) and count in bars printl"  bucket {i}: {count}"
+        }
+    }
+}

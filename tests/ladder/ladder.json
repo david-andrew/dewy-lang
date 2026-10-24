@@ -35,7 +35,17 @@
   "33": "Web services with a wasm UI",
   "34": "Self-hosting compiler modules",
   "35": "Flagship: freestanding kernel in the strict lane",
-  "36": "Flagship: ML training over tensors"
+  "36": "Flagship: ML training over tensors",
+  "37": "Multi-values and unpacking",
+  "38": "Juxtaposed math on quantities",
+  "39": "Exact rationals as written",
+  "40": "Fixed-width overflow policies and exact intermediates",
+  "41": "Secrets",
+  "42": "Contained paths",
+  "43": "Locks and channels without deadlocks",
+  "44": "Error kinds and fallible patterns",
+  "45": "Build mode and target facts",
+  "46": "Bulletproof programs"
  },
  "tiers": {
   "1\u20132": [
@@ -49,6 +59,10 @@
   "4": [
    31,
    36
+  ],
+  "5": [
+   37,
+   46
   ]
  },
  "programs": {
@@ -443,6 +457,54 @@
   "101_ml_training": {
    "milestone": 36,
    "note": "ML training loop (tier-4 flagship): a 2-12-12-3 ReLU perceptron trained with Adam on a seeded three-class XOR cloud, per-sample backpropagation in parallel with a fixed-order gradient reduction, per-epoch loss/accuracy, held-out confusion matrix and probes, matched bit for bit (printed) by an independent float oracle. core.dewy is the twin over arrays and parallel."
+  },
+  "102_trip_splitter": {
+   "milestone": 37,
+   "note": "Split shared trip costs: functions giving several values (:>(int int)), substitution invariance (show(pair), show(saved(total)), show([d c]...)), [a b] and (a b) unpacking, record fields renamed with `as`, [first ...middle last], [head ...], swaps and record parameter patterns."
+  },
+  "103_garden_physics": {
+   "milestone": 38,
+   "note": "Garden and kitchen physics with juxtaposed products (n(n+1)/2, (l+2w)(b+2w), 4(n+1), slope(run), k(x)^2/2, 3x^2, 4spring_energy(...)) on exact quantities, int quantities promoting to rational parameters, temperature points versus differences decided by use (mean[loop ...], setpoint +/- band, boil - 5\u00b0C)."
+  },
+  "104_exact_kitchen": {
+   "milestone": 39,
+   "note": "Recipe scaling, bill splitting, savings, harmonic sums and dice odds in exact rationals printed as written (fractions, decimals, repeating decimals, decimals through quantities), loop-carried products annotated rational/float64 so no growth warning fires."
+  },
+  "105_hash_toolkit": {
+   "milestone": 40,
+   "note": "FNV-1a and xorshift64* with overflow='wrap', a counting Bloom filter with overflow='saturate', Adler-32 with proven narrowing stores, and exact intermediates: uint64 midpoints, a*b % m on uint64, int64 squares over 2^63, averaged uint8 pixels.",
+   "open": "Decided (fixed-width integers, 2026-10-22): intN/uintN arithmetic is exact and intermediates get a wide enough machine width before the proven narrowing store. Awaiting implementation (roadmap Next 3): today uint64 (a+b)//2, a*b % m and int64 x*y//p wrap silently."
+  },
+  "106_login_vault": {
+   "milestone": 41,
+   "note": "Credential service over a stdin script: passwords, PINs and session tokens as secret<T> (declared fields and results, secret(x), x as secret<T>); records, errors, dictionaries with secret keys and arrays print <redacted>; =? gives bool, + stays secret; .reveal feeds an audit digest."
+  },
+  "107_static_files": {
+   "milestone": 42,
+   "note": "Static file server over a request script: p\"{root}/{name}\" confined with root.confine(p) or_throw or guarded with root.contains(p) before any file operation, SafePath parameters, directory indexes and listings, 404/403/405, and traversal attempts (.., css/../..) refused."
+  },
+  "108_bank_ledger": {
+   "milestone": 43,
+   "note": "Mutex<int64> accounts: four teller tasks move money with lock_all (DuplicateLock for self-transfers, Overdrawn as a value), a three-lock split payment, a parallel 1% interest pass locking one account per iteration, try_lock reporting Busy, totals conserved and deterministic under DEWY_THREADS=2."
+  },
+  "109_log_pipeline": {
+   "milestone": 43,
+   "note": "Access-log report as a reader -> parser -> classifier -> aggregator pipeline over channel(4) with backpressure, close propagation and a task result for the malformed count, in a $no_deadlocks module.",
+   "open": "Decided (deadlock freedom, 2026-10-23): $no_deadlocks, every wait certified (here a bounded-channel pipeline). Awaiting implementation: `$no_deadlocks` is an unknown directive; the program runs and matches without it."
+  },
+  "110_config_loader": {
+   "milestone": 44,
+   "note": "Config from stdin: `??` defaults any failure, `??<NotAnInteger>` defaults only that kind while TooManyDigits reaches a match, to_int(max_digits=) failure kinds explained, literal regexes as Regex, and a user-supplied pattern through regex(p) giving Regex | RegexError.",
+   "open": "Decided (2026-10-23): regex(p) returns Regex | RegexError for a pattern known only at run time. Awaiting implementation: regex(p) gives Regex, so the RegexError arm is unreachable (the program matches with regex_error(p) instead)."
+  },
+  "111_build_aware": {
+   "milestone": 45,
+   "note": "Notes indexer adapting to its build: $target.os paths, line endings and artifact names, $target.arch word size (value ifs on $target), $build.mode self-checks and footers with only the live arm compiled, $supported_targets. expected.out is the ladder's --release build on x86_64-linux."
+  },
+  "112_bulletproof_sensor": {
+   "milestone": 46,
+   "note": "Sensor-log summarizer under $bulletproof: fixed arrays, refined Reading and Log fields, rows on every function, OutOfMemory handled, every index, division, narrowing and loop bound proven, bad lines as values.",
+   "open": "Decided (2026-10-23): the $bulletproof bundle ($no_hidden_costs, $explicit_allocation_failure, $finite_floats, $no_deadlocks, $no_assumed_bounds). Awaiting implementation: the bundle, $no_deadlocks and $no_assumed_bounds are unknown; with the existing parts, `& no allocates` functions still gain | OutOfMemory, a refined alias is not a conversion (Reading(n)), and a Reading-annotated local loses its refinement after a loop."
   }
  },
  "design_passing": [
@@ -457,6 +519,10 @@
   "09_ode_rk4",
   "100_rtos_kernel",
   "101_ml_training",
+  "102_trip_splitter",
+  "106_login_vault",
+  "107_static_files",
+  "108_bank_ledger",
   "10_statistics",
   "11_units_physics",
   "12_linear_regression",

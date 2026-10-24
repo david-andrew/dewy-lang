@@ -1,0 +1,101 @@
+# Tier 5 / 109_log_pipeline / milestone 43
+# Acceptance: An access-log report as a four-stage pipeline over bounded channels (reader -> parser -> classifier -> aggregator) with backpressure, close propagation and malformed-line counting, in a $no_deadlocks module whose every wait is certified.
+$no_deadlocks
+
+# Each log line is `METHOD PATH STATUS BYTES`, e.g. `GET /index.html 200 5120`;
+# anything else is counted as malformed and skipped.
+Hit:type = [method:string path:string status:int bytes:int]
+
+# Stage 1: hand each raw line on; the channel holds at most 4, so this waits.
+read_stage = (lines:array<string> out:Channel<string>):>void | Closed | Canceled => {
+    loop line in lines out.send(line) or_throw
+    out.close()
+}
+
+# Stage 2: parse what it can; count and drop the rest.
+parse = (line:string):>Hit | none => {
+    let fields = [loop w in line.split(" ") if w.length >? 0 w]
+    if fields.length not=? 4 return none
+    let [method path status bytes] = fields
+    if method not in? ["GET" "POST" "PUT" "DELETE"] return none
+    let code = to_int(status)
+    if code is? error return none
+    let size = to_int(bytes)
+    if size is? error return none
+    Hit[method path code size]
+}
+# Gives back how many lines it could not parse.
+parse_stage = (input:Channel<string> out:Channel<Hit>):>int | Closed | Canceled => {
+    let bad = 0
+    loop true {
+        let line = input.receive()
+        if line is? Closed break
+        match parse(line or_throw) {
+            hit:Hit => out.send(hit) or_throw
+            _ => { bad += 1 }
+        }
+    }
+    out.close()
+    bad
+}
+
+# Stage 3: label each hit with its status class.
+Labeled:type = [hit:Hit class:string]
+classify_stage = (input:Channel<Hit> out:Channel<Labeled>):>void | Closed | Canceled => {
+    loop true {
+        let next = input.receive()
+        if next is? Closed break
+        let hit = next or_throw
+        let class = if hit.status <? 300 "ok"
+            else if hit.status <? 400 "redirect"
+            else if hit.status <? 500 "client error"
+            else "server error"
+        out.send(Labeled[hit class]) or_throw
+    }
+    out.close()
+}
+
+main = () => {
+    let lines:array<string> = []
+    loop true {
+        let line = read_line()
+        if line is? none break
+        if line is? (Canceled|FileError) exit(1)
+        lines.push(line)
+    }
+
+    let raw = channel<string>(4)
+    let hits = channel<Hit>(4)
+    let labeled = channel<Labeled>(4)
+    let by_class:dict<string int> = []
+    let by_status:dict<int int> = []
+    let bytes_by_path:dict<string int> = []
+    let total = 0
+    concurrent {
+        spawn read_stage(lines raw)
+        let parser = spawn parse_stage(raw hits)
+        spawn classify_stage(hits labeled)
+        # Stage 4, on this thread: aggregate until the classifier closes its side.
+        loop true {
+            let next = labeled.receive()
+            if next is? Closed break
+            let [hit class] = next or_throw
+            let [status bytes path] = hit
+            by_class[class] = (by_class.get(class) ?? 0) + 1
+            by_status[status] = (by_status.get(status) ?? 0) + 1
+            bytes_by_path[path] = (bytes_by_path.get(path) ?? 0) + bytes
+            total += 1
+        }
+    }
+
+    let bad = parser or_throw
+    printl"{lines.length} lines, {total} requests, {bad} malformed"
+    printl"by status:"
+    loop code in by_status.keys.sorted() printl"  {code}: {by_status[code]}"
+    printl"by class: {by_class}"
+    printl"bytes by path, largest first:"
+    let paths = bytes_by_path.keys.sorted(key=(p:string) => -bytes_by_path[p])
+    loop p in paths printl"  {p}: {bytes_by_path[p]}"
+    let errors = sum([loop [code n] in by_status if code >=? 400 n])
+    printl"error rate {errors}/{total}"
+}

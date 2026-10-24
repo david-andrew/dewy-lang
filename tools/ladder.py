@@ -347,7 +347,7 @@ def print_scoreboard(doc: dict, names: list[str], design: dict, core: dict):
         group = [n for n in names if str(programs[n]['milestone']) in milestones]
         if not group:
             continue
-        numbers = sorted(int(n[:2]) for n in group)
+        numbers = sorted(int(n.split('_')[0]) for n in group)
         heading = f'Tier {label} (programs {numbers[0]:02}–{numbers[-1]:02})' if label else 'Programs'
         print(f'{heading:<{width + 2}} {"design":>8} {"core":>8}')
         for number in milestones:

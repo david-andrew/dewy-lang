@@ -1,0 +1,102 @@
+# Tier 5 / 111_build_aware / milestone 45
+# Acceptance: A notes indexer that adapts to its build: $target.os picks paths and line endings, $target.arch the word size, $build.mode =? 'debug' turns on expensive self-checks, and only the live arm of each check is compiled. expected.out is the ladder's release build on x86_64-linux.
+$supported_targets = ["x86_64-linux" "aarch64-linux" "aarch64-mac" "x86_64-windows" "wasm32"]
+
+const app = "notes"
+const version = "0.3"
+
+config_dir = (home:string):>string => {
+    if $target =? 'wasm32' return "browser storage"
+    if $target.os =? 'windows' return "{home}\\AppData\\Roaming\\{app}"
+    if $target.os =? 'mac' return "{home}/Library/Application Support/{app}"
+    "{home}/.config/{app}"
+}
+
+newline = ():>string => if $target.os =? 'windows' "\r\n" else "\n"
+
+word_bits = ():>int => if $target.arch in? ['x86_64' 'aarch64' 'riscv64'] 64 else 32
+
+# File names the installer writes, by platform; only the live branch is compiled.
+artifact = (stem:string kind:'program'|'library'):>string => {
+    if $target =? 'wasm32' return "{stem}.wasm"
+    if $target.os =? 'windows' return if kind =? 'program' "{stem}.exe" else "{stem}.dll"
+    if $target.os =? 'mac' return if kind =? 'program' stem else "lib{stem}.dylib"
+    if kind =? 'program' stem else "lib{stem}.so"
+}
+
+# Hash buckets sized for the machine: wider words, more buckets.
+bucket_count = ():>int => if word_bits() =? 64 64 else 16
+
+Note:type = [title:string body:string]
+Index:type = [buckets:array<array<string>> words:int]
+
+key_of = (word:string):>int => {
+    let h = 0
+    loop b in (word as array<uint8>) h = (h*31 + b) % 1000003
+    h
+}
+
+build_index = (notes:array<Note>):>Index => {
+    let n = bucket_count()
+    let index = Index[[loop _ in [0..n) []] 0]
+    loop note in notes {
+        loop word in note.body.split(" ") {
+            if word.length =? 0 continue
+            let w = word.lower()
+            let slot = key_of(w) % n
+            let bucket = index.buckets.get(slot) ?? []
+            if w not in? bucket {
+                index.buckets[slot].push(w)
+                index.words += 1
+            }
+        }
+    }
+    index
+}
+
+# Debug builds re-derive every word from scratch and compare; release builds
+# trust the index and skip this entirely.
+self_check = (notes:array<Note> index:Index):>string => {
+    if $build.mode =? 'debug' {
+        let seen:set<string> = []
+        loop note in notes loop word in note.body.split(" ") if word.length >? 0 seen.push(word.lower())
+        $runtime_assert seen.length =? index.words
+        return "self-check passed for {seen.length} words"
+    }
+    "self-check skipped in {$build.mode} builds"
+}
+
+lookup = (index:Index word:string):>bool => {
+    let w = word.lower()
+    let bucket = index.buckets.get(key_of(w) % bucket_count()) ?? []
+    w in? bucket
+}
+
+main = () => {
+    let os = $target.os
+    printl"{app} {version} ({$build.mode} build, {os}, {word_bits()}-bit words)"
+    printl"config in {config_dir("/home/demo")}"
+    let ending = if newline() =? "\r\n" "CRLF" else "LF"
+    printl"line endings {ending}, {bucket_count()} buckets"
+    printl"installs {artifact(app 'program')} and {artifact(app 'library')}"
+    console.debug("debug logging is on")
+
+    let notes = [
+        Note["groceries" "Eggs flour milk and more eggs"]
+        Note["ideas" "a tiny language with exact numbers and no traps"]
+        Note["todo" "Write the parser then the checker then more tests"]
+    ]
+    let index = build_index(notes)
+    printl"{index.words} distinct words"
+    printl(self_check(notes index))
+    let used = [loop b in index.buckets if b.length >? 0 1]
+    printl"{used.length} of {bucket_count()} buckets used"
+    loop w in ["eggs" "Parser" "traps" "coffee"] printl"{w}: {lookup(index w)}"
+
+    # Release builds end with a one-line footer for the logs; debug builds dump the buckets.
+    if $build.mode =? 'release' {
+        printl"ready"
+    } else {
+        loop b in index.buckets if b.length >? 0 printl"  {b}"
+    }
+}

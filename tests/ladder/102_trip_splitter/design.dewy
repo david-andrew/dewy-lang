@@ -1,0 +1,132 @@
+# Tier 5 / 102_trip_splitter / milestone 37
+# Acceptance: Split shared trip costs: functions giving several values, substitution invariance, [a b] and (a b) unpacking, record fields renamed with `as`, ...rest, swaps and parameter patterns.
+Expense:type = [payer:string cents:int what:string]
+Transfer:type = [sender:string receiver:string cents:int]
+
+# Whole dollars and the cents left over: two values, not a container.
+dollars_cents = (cents:int):>(int int) => (cents // 100  cents % 100)
+
+# Takes two values; a call giving two values fills both parameters.
+show = (dollars:int cents:int):>string => {
+    let pad = if cents <? 10 "0" else ""
+    "${dollars}.{pad}{cents}"
+}
+
+money = (cents:int):>string => {
+    if cents <? 0 return "-{money(-cents)}"
+    show(dollars_cents(cents))
+}
+
+# The smallest and largest amounts, as two values.
+cheapest_and_dearest = (expenses:array<Expense>) => {
+    let lo = expenses[0].cents
+    let hi = lo
+    loop e in expenses {
+        if e.cents <? lo lo = e.cents
+        if e.cents >? hi hi = e.cents
+    }
+    (lo hi)
+}
+
+# Each person's fair share: the total split evenly, the leftover cents going
+# one each to the first people in alphabetical order.
+shares = (people:array<string> total:int):>dict<string int> => {
+    let [base extra] = [total // people.length  total % people.length]
+    let out:dict<string int> = []
+    loop i in 0.. and name in people {
+        out[name] = base + (if i <? extra 1 else 0)
+    }
+    out
+}
+
+# Settle up: repeatedly match the biggest debtor with the biggest creditor.
+settle = (balances:dict<string int>):>array<Transfer> => {
+    let owed = balances
+    let out:array<Transfer> = []
+    loop true {
+        let debtor = ""
+        let creditor = ""
+        let [low high] = [0 0]
+        loop [name amount] in owed {
+            if amount <? low { debtor = name; low = amount }
+            if amount >? high { creditor = name; high = amount }
+        }
+        if debtor =? "" or creditor =? "" break
+        let paid = min(-low high)
+        out.push(Transfer[debtor creditor paid])
+        owed[debtor] += paid
+        owed[creditor] -= paid
+    }
+    out
+}
+
+# A parameter pattern takes the record apart on entry.
+describe = ([sender receiver cents]:Transfer):>string => "{sender} pays {receiver} {money(cents)}"
+
+main = () => {
+    let expenses = [
+        Expense["Maya" 18450 "cabin"]
+        Expense["Jonah" 6320 "groceries"]
+        Expense["Ines" 4275 "fuel"]
+        Expense["Maya" 2999 "firewood"]
+        Expense["Theo" 11800 "kayak rental"]
+        Expense["Jonah" 1550 "coffee"]
+        Expense["Ines" 905 "ice"]
+    ]
+    let people = ["Ines" "Jonah" "Maya" "Theo"]
+
+    printl"expenses:"
+    let total = 0
+    loop e in expenses {
+        let [payer as who  cents as amount  what] = e
+        printl"  {who} paid {money(amount)} for {what}"
+        total += amount
+    }
+    let (dollars cents) = dollars_cents(total)
+    printl"total {show(dollars cents)} ({dollars} dollars, {cents} cents)"
+
+    # The same two values, whichever way they arrive.
+    let pair = dollars_cents(total)
+    let saved = @dollars_cents
+    $runtime_assert show(pair) =? show(dollars cents)
+    $runtime_assert show(saved(total)) =? show(dollars_cents(total))
+    $runtime_assert show([dollars cents]...) =? money(total)
+    $runtime_assert [pair] =? [dollars cents]
+
+    let [lo hi] = cheapest_and_dearest(expenses)
+    printl"cheapest {money(lo)}, dearest {money(hi)}"
+
+    let fair = shares(people total)
+    let balances:dict<string int> = []
+    loop [name share] in fair balances[name] = -share
+    loop [payer as who  cents] in expenses balances[who] = (balances.get(who) ?? 0) + cents
+    printl"balances:"
+    loop [name amount] in balances {
+        let verdict = if amount >? 0 "is owed" else if amount <? 0 "owes" else "is even"
+        printl"  {name} {verdict} {money(amount.abs())}"
+    }
+
+    let transfers = settle(balances)
+    printl"settle up in {transfers.length} transfers:"
+    loop t in transfers printl"  {describe(t)}"
+
+    # Check the plan: replaying it leaves everyone even.
+    let check = balances
+    loop [sender receiver cents] in transfers {
+        check[sender] = (check.get(sender) ?? 0) + cents
+        check[receiver] = (check.get(receiver) ?? 0) - cents
+    }
+    loop [_ amount] in check $runtime_assert amount =? 0
+
+    # Rank everyone from most owed to most owing.
+    let order = people.sorted(key=(name:string) => -balances[name])
+    let [first ...middle last] = order
+    printl"most owed {first}, most owing {last}, between: {middle}"
+    let [head ...] = transfers
+    printl"first transfer {head.sender} -> {head.receiver}"
+
+    # Two drivers trade seats halfway.
+    let [driver navigator] = ["Ines" "Theo"]
+    [driver navigator] = [navigator driver]
+    printl"after the swap {driver} drives and {navigator} navigates"
+}

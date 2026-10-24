@@ -1,0 +1,101 @@
+# Tier 5 / 104_exact_kitchen / milestone 39
+# Acceptance: Recipe scaling, bill splitting and savings in exact rationals that print the way they were written (fractions, decimals, repeating decimals), with loop-carried products annotated so they draw no growth warning.
+from units import kg, g, N
+
+Ingredient:type = [name:string amount:rational unit:string]
+
+scale = (recipe:array<Ingredient> factor:rational):>array<Ingredient> =>
+    [loop i in recipe Ingredient[i.name i.amount*factor i.unit]]
+
+show = (recipe:array<Ingredient>):>void => {
+    loop i in recipe printl"  {i.amount} {i.unit} {i.name}"
+}
+
+# Compound interest: the balance is carried through `*=` every year, so it is
+# annotated to say it stays exact on purpose.
+grow = (start:rational rate:rational years:int):>rational => {
+    let balance:rational = start
+    loop _ in [0..years) balance *= 1 + rate
+    balance
+}
+
+# Newton's square root: an approximation is fine, so the float is written down.
+newton_sqrt = (n:float64):>float64 => {
+    let x:float64 = n
+    loop _ in [0..6) x = (x + n/x)/2
+    x
+}
+
+# Two dice: the chance of each total, as fractions.
+dice = ():>dict<int rational> => {
+    let out:dict<int rational> = []
+    loop a in [1..6] {
+        loop b in [1..6] out[a+b] = (out.get(a+b) ?? 0) + 1/36
+    }
+    out
+}
+
+main = () => {
+    printl"-- pancakes for 4 --"
+    let pancakes = [
+        Ingredient["flour" 3/4 "cup"]
+        Ingredient["milk" 1.25 "cup"]
+        Ingredient["sugar" 1/3 "cup"]
+        Ingredient["butter" 0.5 "stick"]
+        Ingredient["eggs" 2 "whole"]
+    ]
+    show(pancakes)
+    printl"-- for 6 (x3/2) --"
+    show(scale(pancakes 3/2))
+    printl"-- for 1 (x0.25) --"
+    show(scale(pancakes 0.25))
+
+    printl"-- splitting a bill --"
+    let bill = 100.00
+    loop people in [2 3 4 6 7] printl"  {people} ways: {bill/people} each"
+    let tip = 0.15
+    let tax = 8/100
+    printl"  with tip {bill*(1 + tip)}, tax on 19.99 is {19.99*tax}"
+    printl"  a third and a half: {1/3 + 0.5}"
+    $runtime_assert 0.1 + 0.2 =? 0.3
+    let third = 1/3
+    $runtime_assert third*3 =? 1
+    $runtime_assert bill/3*3 =? bill
+
+    printl"-- shopping --"
+    let prices = [2.49 0.99 3.75]
+    let counts = [3 12 2]
+    let subtotal = sum([loop p in prices and c in counts p*c])
+    printl"  subtotal {subtotal}, rounded {round(subtotal)}"
+    printl"  halves round away from zero: {round(2.5)} {round(-2.5)} {round(0.125*100)}"
+    let per_egg = 3.75/12
+    printl"  each egg {per_egg}, a dozen {per_egg*12}, a third of a dozen {per_egg*12/3}"
+
+    printl"-- savings --"
+    let saved = grow(1000.00 0.05 10)
+    printl"  1000.00 at 5% for 10 years: {saved}"
+    printl"  to the cent: {round(saved*100)/100.0}"
+    let monthly = grow(250 1/100 3)
+    printl"  250 at 1/100 for 3 months: {monthly}"
+
+    printl"-- harmonic and dice --"
+    let h:rational = 0
+    loop k in [1..10] h += 1/k
+    printl"  H(10) = {h}"
+    let chances = dice()
+    printl"  P(7) = {chances[7]}, P(2) = {chances[2]}, P(10) = {chances[10]}"
+    let total:rational = 0
+    loop [_ p] in chances total += p
+    printl"  all totals: {total}"
+
+    printl"-- floats where they belong --"
+    printl"  sqrt(2) ~ {newton_sqrt(2.0)}"
+    # Converting on purpose rounds once, to the nearest float.
+    printl"  a third as a float {third.to_float64()}, as a fraction {third}"
+
+    printl"-- a sack of flour --"
+    let sack = 2.5kg
+    let gravity = 9.81N/kg
+    let portions = sack/(125g)
+    printl"  {portions} portions, weighing {sack*gravity/N} N"
+}

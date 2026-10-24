@@ -1,0 +1,118 @@
+# Tier 5 / 108_bank_ledger / milestone 43
+# Acceptance: Concurrent bank transfers between Mutex<int64> accounts: four teller tasks move money with lock_all (canonical order, DuplicateLock for a self-transfer), a parallel interest pass locks one account per iteration, try_lock reports Busy, and money is conserved.
+Transfer:type = [source:int target:int amount:int64]
+Overdrawn:type = type of error & [message:string]
+
+# Move money between two accounts, holding both locks for the whole step.
+transfer = (accounts:array<Mutex<int64>> t:Transfer):>void | Overdrawn | DuplicateLock | Canceled => {
+    let [a b] = @(lock_all(accounts[t.source] accounts[t.target])) or_throw
+    if a <? t.amount return Overdrawn["insufficient funds"]
+    a -= t.amount
+    b += t.amount
+}
+
+# Pay two people at once: all three locks are taken together.
+split_payment = (accounts:array<Mutex<int64>> payer:int first:int second:int each:int64):>void | Overdrawn | DuplicateLock | Canceled => {
+    let [p a b] = @(lock_all(accounts[payer] accounts[first] accounts[second])) or_throw
+    if p <? 2*each return Overdrawn["insufficient funds"]
+    p -= 2*each
+    a += each
+    b += each
+}
+
+# A teller works through its share of the day's transfers and tallies outcomes.
+Tally:type = [done:int rejected:int duplicate:int]
+teller = (accounts:array<Mutex<int64>> work:array<Transfer>):>Tally => {
+    let tally = Tally[0 0 0]
+    loop t in work {
+        match transfer(accounts t) {
+            <Overdrawn> => { tally.rejected += 1 }
+            <DuplicateLock> => { tally.duplicate += 1 }
+            <Canceled> => return tally
+            _ => { tally.done += 1 }
+        }
+    }
+    tally
+}
+
+total = (accounts:array<Mutex<int64>>):>int64 => {
+    let sum:int64 = 0
+    loop m in accounts {
+        let held = @(m.lock())
+        sum += held
+    }
+    sum
+}
+
+show = (names:array<string> accounts:array<Mutex<int64>>):>void => {
+    loop name in names and m in accounts {
+        let held = @(m.lock())
+        printl"  {name}: {held}"
+    }
+}
+
+main = () => {
+    let names = ["alice" "bob" "carol" "dave" "erin" "frank"]
+    let accounts = [loop _ in names mutex(int64(10000))]
+    printl"opening total {total(accounts)}"
+
+    # The day's transfers: every one is affordable whatever order they run in,
+    # except two impossible ones and those that name the same account twice.
+    let day:array<Transfer> = []
+    loop i in [0..120) {
+        let source = (i*7 + 3) % 6
+        let target = (i*11 + 1) % 6
+        day.push(Transfer[source target int64(i % 9 + 1)*10])
+    }
+    day.push(Transfer[0 1 1000000])
+    day.push(Transfer[4 2 999999])
+
+    # Four tellers take every fourth transfer each.
+    let shares = [loop k in [0..4) [loop i in [0..day.length) if i % 4 =? k day[i]]]
+    let tallies:array<Tally> = []
+    concurrent {
+        let t0 = spawn teller(accounts shares[0])
+        let t1 = spawn teller(accounts shares[1])
+        let t2 = spawn teller(accounts shares[2])
+        let t3 = spawn teller(accounts shares[3])
+    }
+    loop t in [t0 t1 t2 t3] tallies.push(t or_throw)
+    let [done rejected duplicate] = [
+        sum([loop t in tallies t.done])
+        sum([loop t in tallies t.rejected])
+        sum([loop t in tallies t.duplicate])
+    ]
+    printl"transfers done {done}, rejected {rejected}, same account {duplicate}"
+    printl"after transfers:"
+    show(names accounts)
+    printl"total {total(accounts)}"
+
+    # Month end: 1% interest, one account per parallel iteration.
+    parallel i in [0..6) {
+        let balance = @(accounts[i].lock())
+        balance += balance // 100
+    }
+    printl"after interest:"
+    show(names accounts)
+    printl"total {total(accounts)}"
+
+    # Carol treats Alice and Bob; Dave tries to pay himself.
+    split_payment(accounts 2 0 1 50) or_throw
+    match split_payment(accounts 3 3 4 10) {
+        <DuplicateLock> => printl"dave cannot pay dave"
+        _ => printl"unexpected"
+    }
+    printl"after the treat:"
+    show(names accounts)
+    printl"total {total(accounts)}"
+
+    # An auditor peeks without waiting: free locks are taken, a held one is Busy.
+    let held = @(accounts[2].lock())
+    loop i in [1..3] {
+        match @(accounts[i].try_lock()) {
+            <Busy> => printl"  {names[i]} is busy"
+            b:int64 => printl"  {names[i]} has {b}"
+        }
+    }
+    held += 0
+}

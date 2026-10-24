@@ -1,0 +1,111 @@
+# Tier 5 / 106_login_vault / milestone 41
+# Acceptance: A small credential service: passwords, PINs and session tokens held as secret<T>; logs, records, errors and collections print <redacted>; comparisons give plain bools, arithmetic stays secret, and .reveal is the one visible way out.
+Account:type = [user:string password:secret<string> pin:secret<int> failures:int]
+BadLogin:type = type of error & [message:string user:string tried:secret<string>]
+Locked:type = type of error & [message:string user:string]
+
+# A toy digest for the audit log: it only ever sees revealed text on purpose.
+digest = (text:string):>string => {
+    let h:uint32<overflow='wrap'> = 2166136261
+    loop b in (text as array<uint8>) h = (h xor b) * 16777619
+    let hex = "0123456789abcdef"
+    let out = ""
+    loop shift in [28 24 20 16 12 8 4 0] {
+        let nibble = (h >> shift) and 15
+        out = "{out}{hex.byte_slice(nibble nibble + 1)}"
+    }
+    out
+}
+
+# Session tokens are made from a counter and the user, and are secret from birth.
+new_token = (user:string serial:int):>secret<string> => "tok-{serial*7919 % 100003}-{user}"
+
+words = (line:string):>array<string> => [loop w in line.split(" ") if w.length >? 0 w]
+
+login = (@accounts:dict<string Account> user:string attempt:string):>secret<string> | BadLogin | Locked => {
+    let account = accounts.get(user)
+    if account is? none return BadLogin["unknown user" user secret(attempt)]
+    if account.failures >=? 3 return Locked["too many failures" user]
+    if not (account.password =? attempt) {
+        accounts[user] = [account... failures=account.failures + 1]
+        return BadLogin["wrong password" user attempt as secret<string>]
+    }
+    accounts[user] = [account... failures=0]
+    new_token(user accounts.length + account.failures + user.length)
+}
+
+main = () => {
+    let accounts:dict<string Account> = []
+    let sessions:dict<secret<string> string> = []
+    let audit:array<string> = []
+    let last_token:secret<string> = ""
+
+    loop true {
+        let line = read_line()
+        if line is? none break
+        if line is? (Canceled|FileError) exit(1)
+        let parts = words(line)
+        if parts.length =? 0 continue
+        let [command ...rest] = parts
+        if command =? "register" and rest.length =? 3 {
+            let [user password pin] = rest
+            let account = Account[user password to_int(pin) ?? 0 0]
+            accounts[user] = account
+            printl"registered {account}"
+            audit.push("register {user} {digest(account.password.reveal)}")
+        } else if command =? "login" and rest.length =? 2 {
+            let [user attempt] = rest
+            match login(@accounts user attempt) {
+                token:secret<string> => {
+                    sessions[token] = user
+                    last_token = token
+                    printl"welcome {user}, your session is {token}"
+                    audit.push("login {user} session {digest(token.reveal)}")
+                }
+                e:BadLogin => printl"refused: {e}"
+                e:Locked => printl"refused: {e.message} for {e.user}"
+            }
+        } else if command =? "pin" and rest.length =? 2 {
+            let [user guess] = rest
+            let account = accounts.get(user)
+            if account is? none {
+                printl"no such user {user}"
+                continue
+            }
+            # The PIN is shifted for the comparison; the shifted value is still secret.
+            let shifted = account.pin + 1111
+            let ok = shifted =? (to_int(guess) ?? -1) + 1111
+            let verdict = if ok "accepted" else "rejected"
+            printl"pin for {user}: {verdict} (shifted pin is {shifted})"
+        } else if command =? "passwd" and rest.length =? 3 {
+            let [user old replacement] = rest
+            let account = accounts.get(user)
+            if account is? none {
+                printl"passwd refused: no user {user}"
+                continue
+            }
+            if not (account.password =? old) {
+                printl"passwd refused for {user}: wrong password"
+                continue
+            }
+            if replacement.length <? 8 {
+                printl"passwd refused for {user}: new password too short"
+                continue
+            }
+            accounts[user] = [account... password=replacement]
+            printl"password changed: {accounts[user]}"
+            audit.push("passwd {user} {digest(replacement)}")
+        } else if command =? "whoami" {
+            let who = sessions.get(last_token) ?? "nobody"
+            printl"the last session belongs to {who}"
+        } else if command =? "dump" {
+            loop [user account] in accounts printl"  {user}: {account}"
+            printl"  sessions: {sessions}"
+            printl"  passwords: {[loop [_ a] in accounts a.password]}"
+        } else {
+            printl"unknown command: {line}"
+        }
+    }
+    printl"audit log:"
+    loop entry in audit printl"  {entry}"
+}

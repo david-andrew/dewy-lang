@@ -1,0 +1,20 @@
+GET / -> 200 OK text/html 28: <h1>Home</h1>
+GET /index.html -> 200 OK text/html 28: <h1>Home</h1>
+GET /about.html?lang=en -> 200 OK text/html 14: <h1>About</h1>
+GET /css/site.css -> 200 OK text/css 18: body { margin: 0 }
+GET /css -> 403 Forbidden text/plain 8: no index
+GET /empty -> 403 Forbidden text/plain 8: no index
+GET /missing.html -> 404 Not Found text/plain 7: missing
+GET /../private.txt -> 403 Forbidden (escapes the site)
+GET /css/../../private.txt -> 403 Forbidden (escapes the site)
+GET /css/../about.html -> 403 Forbidden (escapes the site)
+GET /./about.html -> 200 OK text/html 14: <h1>About</h1>
+DOWNLOAD notes.txt -> 200 OK application/octet-stream 21: shopping: eggs, flour
+DOWNLOAD data.json -> 200 OK application/octet-stream 13: {"visits": 3}
+DOWNLOAD ../../private.txt -> 403 Forbidden text/plain 16: outside the site
+DOWNLOAD ../index.html -> 403 Forbidden text/plain 16: outside the site
+LIST / -> 200 OK: about.html css empty files index.html
+LIST /files -> 200 OK: data.json notes.txt
+LIST /css/.. -> 403 Forbidden (escapes the site)
+LIST /about.html -> 404 Not Found: not a directory
+POST /index.html -> 405 Method Not Allowed text/plain 0: 

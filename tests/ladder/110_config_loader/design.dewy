@@ -1,0 +1,106 @@
+# Tier 5 / 110_config_loader / milestone 44
+# Acceptance: Load a server config from stdin: `??` defaults any failure, `??<NotAnInteger>` defaults only that kind while TooManyDigits passes through to a match, to_int reports why it failed, and user-supplied patterns go through regex(p), which gives Regex | RegexError.
+Config:type = [
+    port:int
+    workers:int
+    max_body:int
+    name:string
+    user_pattern:Regex?
+    problems:array<string>
+]
+
+# A literal pattern is checked when compiling, so it is simply a Regex.
+const setting = regex(r"^\s*([a-z_]+)\s*=\s*(.*?)\s*$")
+const comment = regex(r"^\s*(#.*)?$")
+
+read_settings = ():>dict<string string> => {
+    let out:dict<string string> = []
+    loop true {
+        let line = read_line()
+        if line is? none break
+        if line is? (Canceled|FileError) exit(1)
+        if line.matches(comment) continue
+        match line.find(setting) {
+            m:Match => {
+                let [key value] = m.groups
+                out[key] = value
+            }
+            <Missing> => printl"ignored: {line}"
+        }
+    }
+    out
+}
+
+why = (e:NotAnInteger | TooManyDigits):>string => match e {
+    <NotAnInteger> => "not a number"
+    <TooManyDigits> => "too many digits"
+}
+
+load = (raw:dict<string string>):>Config => {
+    let problems:array<string> = []
+
+    # Missing or unreadable: either way the default is fine.
+    let workers = to_int(raw.get("workers") ?? "4") ?? 4
+
+    # A port that isn't a number falls back; one that is far too long is reported.
+    let port_text = raw.get("port") ?? "8080"
+    let port = 8080
+    match to_int(port_text max_digits=5) ??<NotAnInteger> 8080 {
+        n:int => { port = n }
+        e:TooManyDigits => problems.push("port {port_text}: {why(e)}, using 8080")
+    }
+    if port <? 1 or port >? 65535 {
+        problems.push("port {port}: out of range, using 8080")
+        port = 8080
+    }
+
+    # Each failure kind gets its own message.
+    let body_text = raw.get("max_body") ?? "1048576"
+    let max_body = 1048576
+    match to_int(body_text max_digits=9) {
+        n:int => { max_body = n }
+        e:NotAnInteger | TooManyDigits => problems.push("max_body {body_text}: {why(e)}, using 1048576")
+    }
+
+    let name = raw.get("name") ?? "server"
+    if name =? "" name = "server"
+
+    # The pattern comes from the user, so it may not compile.
+    let user_pattern:Regex? = none
+    let pattern_text = raw.get("user_pattern")
+    if pattern_text isnt? none {
+        match regex(pattern_text) {
+            r:Regex => { user_pattern = r }
+            <RegexError> => problems.push("user_pattern {pattern_text}: not a valid pattern")
+        }
+    }
+    Config[port workers max_body name user_pattern problems]
+}
+
+main = () => {
+    let raw = read_settings()
+    printl"read {raw.length} settings"
+    let config = load(raw)
+    printl"name {config.name}, port {config.port}, workers {config.workers}, max_body {config.max_body}"
+    loop p in config.problems printl"problem: {p}"
+
+    let users = ["ada" "bob_2" "3cats" "Eve" "x" "dave-o"]
+    let rule = config.user_pattern ?? regex(r"^[a-z]+$")
+    loop u in users {
+        let verdict = if u.matches(rule) "ok" else "rejected"
+        printl"user {u}: {verdict}"
+    }
+
+    # Only NotAnInteger is defaulted here; TooManyDigits still arrives as itself.
+    loop text in ["42" "4x2" "123456789012" ""] {
+        match to_int(text max_digits=10) ??<NotAnInteger> -1 {
+            n:int => printl"'{text}' -> {n}"
+            e:TooManyDigits => printl"'{text}' -> {why(e)}"
+        }
+    }
+
+    # The same loader against a second, broken pattern.
+    let broken = load(["user_pattern"->"([a-z]+" "port"->"http" "workers"->"many"])
+    printl"second config: port {broken.port}, workers {broken.workers}"
+    loop p in broken.problems printl"problem: {p}"
+}

@@ -1,0 +1,102 @@
+# Tier 5 / 107_static_files / milestone 42
+# Acceptance: A tiny static file server over a request script: request paths joined to the site root are confined (root.confine(p) or_throw) or guarded (root.contains(p)) before any file operation, SafePath parameters take only proven paths, and traversal attempts get 403.
+Response:type = [status:int reason:string kind:string body:string]
+
+const root = p"site"
+
+content_type = (f:Path):>string => {
+    let suffix = f.suffix
+    if suffix =? ".html" return "text/html"
+    if suffix =? ".css" return "text/css"
+    if suffix =? ".txt" return "text/plain"
+    if suffix =? ".json" return "application/json"
+    "application/octet-stream"
+}
+
+# Only a proven path gets here: the compiler rejects anything else.
+serve_file = (f:SafePath) => {
+    if f.is_dir {
+        let index = p"{f}/index.html"
+        if not index.exists return Response[403 "Forbidden" "text/plain" "no index"]
+        return Response[200 "OK" "text/html" index.read_text or_throw]
+    }
+    if not f.exists return Response[404 "Not Found" "text/plain" "missing"]
+    Response[200 "OK" content_type(f) f.read_text or_throw]
+}
+
+# The request target, minus its leading slash and any query string.
+target_of = (request:string):>string => {
+    let path = request
+    let q = path.find("?")
+    if q isnt? Missing path = path.byte_slice(0 q)
+    path.remove_prefix("/")
+}
+
+handle = (request:string) => {
+    let name = target_of(request)
+    if name =? "" return serve_file(root) or_throw
+    let wanted = p"{root}/{name}"
+    serve_file(root.confine(wanted) or_throw) or_throw
+}
+
+# A second route: downloads, checked with the guard instead.
+download = (name:string) => {
+    let wanted = p"{root}/files/{name}"
+    if not root.contains(wanted) return Response[403 "Forbidden" "text/plain" "outside the site"]
+    let r = serve_file(wanted) or_throw
+    r.kind = "application/octet-stream"
+    r
+}
+
+# A third route: directory listings, confined like GET.
+listing = (request:string) => {
+    let wanted = p"{root}/{target_of(request)}"
+    let dir = root.confine(wanted) or_throw
+    if not dir.is_dir return Response[404 "Not Found" "text/plain" "not a directory"]
+    let names = (dir.list or_throw).sorted()
+    Response[200 "OK" "text/plain" names.join(" ")]
+}
+
+setup = () => {
+    p"{root}/css".make_dirs or_throw;
+    p"{root}/files".make_dirs or_throw;
+    p"{root}/empty".make_dirs or_throw;
+    p"{root}/index.html".write_text("<h1>Home</h1>\n<p>welcome</p>") or_throw;
+    p"{root}/about.html".write_text("<h1>About</h1>") or_throw;
+    p"{root}/css/site.css".write_text(r"body { margin: 0 }") or_throw;
+    p"{root}/files/notes.txt".write_text("shopping: eggs, flour") or_throw;
+    p"{root}/files/data.json".write_text(r'{"visits": 3}') or_throw;
+    p"private.txt".write_text("the admin password is swordfish") or_throw;
+}
+
+first_line = (text:string):>string => {
+    let at = text.find("\n")
+    if at is? Missing return text
+    text.byte_slice(0 at)
+}
+
+main = () => {
+    setup() or_throw
+    loop true {
+        let line = read_line()
+        if line is? none break
+        if line is? (Canceled|FileError) exit(1)
+        let [method target] = [loop w in line.split(" ") if w.length >? 0 w]
+        if method =? "LIST" {
+            match listing(target) {
+                r:Response => printl"{method} {target} -> {r.status} {r.reason}: {r.body}"
+                <PathEscape> => printl"{method} {target} -> 403 Forbidden (escapes the site)"
+                _ => printl"{method} {target} -> 500"
+            }
+            continue
+        }
+        let result = if method =? "GET" handle(target)
+            else if method =? "DOWNLOAD" download(target)
+            else Response[405 "Method Not Allowed" "text/plain" ""]
+        match result {
+            r:Response => printl"{method} {target} -> {r.status} {r.reason} {r.kind} {r.body.length}: {first_line(r.body)}"
+            <PathEscape> => printl"{method} {target} -> 403 Forbidden (escapes the site)"
+            _ => printl"{method} {target} -> 500 {result}"
+        }
+    }
+}
