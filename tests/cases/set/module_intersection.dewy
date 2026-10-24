@@ -1,0 +1,16 @@
+# quick
+# A module-level `&` of values is the operator (set intersection, bitwise and), not an
+# overload group, which joins function literals
+let tags = set["visible" "moving" "visible"]
+tags.push("selected")
+if "moving" in? tags { printl"moving entity" }
+let active = tags & set["visible" "selected"]
+let names = [loop tag in active tag]
+let [first second] = active
+let visited:set<int64> = set[]
+if 7 not in? visited { visited.push(7) printl"first visit" }
+printl(names)
+printl(first)
+printl(second)
+mask = 6 & 3
+printl(mask)

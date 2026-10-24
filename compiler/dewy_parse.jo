@@ -3854,6 +3854,8 @@ dw_top_declarations_inner = (id: int) -> int[]:
         if name != "" and dw_op(mint) == .kw_of: return dw_with_methods(dw_declare(declaration, false, true))
         if name != "" and dw_op(initial) == .amp:
             if dw_op(dw_grouped(dw_child(initial, 2))) == .tilde: return [dw_declare(declaration, false, true)]
+        # (an `&` of values, `tags & other`, is the operator: a group joins a function literal)
+        if name != "" and dw_overload_group(initial):
             if name == "main": return [dw_fail(id, "an overloaded entry point")]
             declarations: int[]
             dw_overload_members(initial, name, declarations)
