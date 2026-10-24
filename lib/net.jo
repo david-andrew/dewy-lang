@@ -674,14 +674,13 @@ __ws_frame = (out: mut u8[], op: int, payload: u8[], masked: bool):
     if not masked:
         out.extend(payload)
         return
-    key = [u8(random_int(0, 256)), u8(random_int(0, 256)), u8(random_int(0, 256)), u8(random_int(0, 256))]
+    # (RFC 6455: an unpredictable key for each frame, from the system's random source)
+    key = crypto.random_bytes(4)
     out.extend(key)
     loop k in [0..n): out.push(payload[k] xor key[k & 3])
 
 __ws_key = () -> str:
-    b: u8[]
-    loop _ in [0..16): b.push(u8(random_int(0, 256)))
-    base64_encode(b)
+    base64_encode(crypto.random_bytes(16))
 
 # ---------------- UDP (native programs) ----------------
 # Datagrams: no connection, each one arrives whole or not at all, maybe out of order. Faster
