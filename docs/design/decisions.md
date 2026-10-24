@@ -433,3 +433,59 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
   (`match @(m.try_lock()) {...}`).
 - Idiom: when taking the place returned by a zero-argument method, write the
   optional parentheses: `let a=@(acct.lock())`, not `@(acct.lock)`.
+- Bulletproof principle (David, 2026-10-23): "I want to be able to write an
+  actually bulletproof program that accounts for every eventuality, with the
+  compiler enforcing it." Every convenience axiom or assumption has a metatag
+  that turns it off and demands the proof instead. They are tracked in one list
+  ([assumptions.md](assumptions.md)) so the strictest configuration can be a
+  library bundle.
+- Answers on pending items (decided 2026-10-23):
+  - Counter progress axiom: default on. A 64-bit counter or accumulator that
+    grows by a bounded amount per iteration or allocation cannot overflow;
+    32-bit and narrower counters get no axiom. An opt-out metatag (spelling
+    pending David) disables it and requires a real proof.
+  - Multi-value function type: `:>(int64 int64)`; parentheses group several
+    result values.
+  - `secret<T>` reveal: `s.reveal`. Sealed secrets (reveal requiring a key or
+    capability) may come later.
+  - `$runtime_assert` makes its function `panics` for callers in other modules,
+    not within its own module.
+  - `regex(p)` returns `Regex | RegexError`; literal patterns are checked at
+    compile time.
+  - Quantities print without a space: `1500m`, `20°C`.
+  - `s.byte_slice(a b)` (proven char boundaries) and `b.read<uint64>(i)`
+    (proven in bounds, no `$unsafe`).
+  - The float and net provisional sets are approved.
+  - `$no_nan` does not assume incoming values: callers prove not-NaN, or it is
+    checked under `$runtime_checks`.
+  - Delimited-argument calls `f[…]` and `printl'…'` are approved.
+  - `to_int` returns a specific error kind saying why it failed (unparsable, too
+    many digits, …) instead of `none`.
+  - Paths from command-line arguments or the environment do not warn at
+    filesystem operations, but stay untrusted for other sinks.
+- Corrections (decided 2026-10-23):
+  - Loops have exactly one form, `loop <condition> <body>`, and are not
+    whitespace sensitive; an infinite loop is `loop true <body>`. The
+    provisional "`loop { … }` loops forever" rule is removed.
+  - No local precedence exception for `loop c in s as array<uint8>`. Operator
+    precedence starts from the archived Python implementation's table, adjusted
+    only where it would confuse; deviations are reported to David.
+  - Multi-expressions: a `:>void` function whose body expresses values is an
+    error (attach `;` or change the return type). `void | E` expresses `E` when
+    it fails and nothing on success. `[1 2; 3 4]` is valid (the attached `;`
+    discards `2`, giving `[1 3 4]`), with a warning and a ` ; ` fix-it when it
+    looks like a mistaken row separator.
+  - Juxtaposition: `]x` stays a parse error. A parenthesized numeric expression
+    followed by a name or number multiplies (`(5)x`, `(x)2`). A parenthesized
+    callable followed by a delimited argument is a call (`(p)r"..."`,
+    `(f)[1 2]`, `(f)(x)`). Any expression immediately followed by an empty
+    `()` is a call. `a(x).abs()` and `a(x)[i]` are rejected only when `a` is
+    numeric (idiomatic: `abs(a(x))`).
+  - Unpacking: `[a b] = …` and `(a b) = …` both unpack whenever the right side
+    provides a compatible number of values, including multi-valued calls, rest
+    (`(a b ...c) = (1 2 3 4 5 6)`), nested patterns and renaming, following
+    resources/discussion_points.md "Unpack syntax". Call-argument and signature
+    destructuring is undecided.
+  - Untrusted-input markers are metatags, not `@` (which means places):
+    `$sink(path)` and `$guard(SafePath)` on library declarations, and a source
+    marker in place of `__untrusted(x)` (exact forms proposed to David).
