@@ -47,7 +47,7 @@ def test_core_packaged_toolchain(toolchain, tmp_path):
         assert hashlib.sha256((moved / name).read_bytes()).hexdigest() == expected
     compiler = moved / 'bin' / ('dewy-core.exe' if os.name == 'nt' else 'dewy-core')
     assert os.access(compiler, os.X_OK)
-    env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
+    env = {k: v for k, v in os.environ.items() if not k.startswith('DEWY_')}
     env['PATH'] = ''
 
     def run(*arguments):

@@ -72,7 +72,7 @@ def compiler():
 
 def environment():
     return {k: v for k, v in os.environ.items()
-            if not k.startswith(('SLOPPY_', 'DEWY_'))
+            if not k.startswith('DEWY_')
             and k not in ('HOST', 'JOIN', 'INVITE', 'ROOM', 'TURN', 'TURN_SECRET', 'ROLE', 'NAME')}
 
 
@@ -180,7 +180,7 @@ def test_core_netpong_winning_state(compiler, tmp_path, release):
     build(compiler, path, binary, release)
     port = free_port()
     env = environment()
-    env.update(HOST='1', DEWY_NETPONG_PORT=str(port), SLOPPY_SOFTWARE='1', SLOPPY_FRAMES='180')
+    env.update(HOST='1', DEWY_NETPONG_PORT=str(port), DEWY_SOFTWARE='1', DEWY_FRAMES='180')
     server = subprocess.Popen([binary], env=env, stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE, text=True)
     try:
@@ -270,8 +270,8 @@ def test_core_room_native_peers(room_binaries, tmp_path):
     with room_server(room_binaries[0], tmp_path) as port:
         def start(name, room=''):
             env = environment()
-            env.update(DEWY_MATCH_SERVER=f'ws://127.0.0.1:{port}', SLOPPY_SOFTWARE='1',
-                       SLOPPY_THREADS='1', SLOPPY_FRAMES='900', ROLE='join' if room else 'host',
+            env.update(DEWY_MATCH_SERVER=f'ws://127.0.0.1:{port}', DEWY_SOFTWARE='1',
+                       DEWY_THREADS='1', DEWY_FRAMES='900', ROLE='join' if room else 'host',
                        NAME=name, ROOM=room, XDG_DATA_HOME=str(tmp_path / name))
             process = subprocess.Popen([room_binaries[1]], env=env, stdout=subprocess.PIPE,
                                        stderr=subprocess.PIPE, text=True)
@@ -376,8 +376,8 @@ update=(dt:float64)=>{
     with room_server(room_binaries[0], tmp_path) as port:
         def start_peer(role, room=''):
             env = environment()
-            env.update(DEWY_MATCH_SERVER=f'ws://127.0.0.1:{port}', SLOPPY_SOFTWARE='1',
-                       SLOPPY_THREADS='1', SLOPPY_FRAMES='900', ROLE=role,
+            env.update(DEWY_MATCH_SERVER=f'ws://127.0.0.1:{port}', DEWY_SOFTWARE='1',
+                       DEWY_THREADS='1', DEWY_FRAMES='900', ROLE=role,
                        ROOM=room, XDG_DATA_HOME=str(tmp_path / role))
             process = subprocess.Popen([binary], env=env, stdout=subprocess.PIPE,
                                        stderr=subprocess.PIPE, text=True)

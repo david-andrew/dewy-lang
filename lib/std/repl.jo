@@ -6,7 +6,7 @@
 # the copy carries on as the session. On Windows, a copy of this process's memory is taken first
 # (lib/std/snapshot.jo), and put back if it fails.
 #
-# Messages from the compiler (fd 3; Windows: the handles in SLOPPY_REPL_PIPES), each a header of
+# Messages from the compiler (fd 3; Windows: the handles in DEWY_REPL_PIPES), each a header of
 # three words:
 #   1 addr len, then len bytes: copy them to addr (in the region __repl_region reserved)
 #   2 entry end: run the code at entry (a function taking and returning nothing); the globals
@@ -156,7 +156,7 @@ when TARGET == "windows":
     __repl_hi = 0
 
     __repl_serve_w32 = (region: int, size: int):
-        hs = split(env("SLOPPY_REPL_PIPES") ?? "", ",")
+        hs = split(env("DEWY_REPL_PIPES") ?? "", ",")
         if hs.len() != 2: exit(1)
         __repl_hin = (to_int(hs[0]) ?? 0) as *u8
         __repl_hout = (to_int(hs[1]) ?? 0) as *u8

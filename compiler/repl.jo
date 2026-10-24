@@ -111,7 +111,7 @@ repl_start = () -> str:
     loop g in global_ids:
         if modules[int(globals[g].mod)].is_prelude and global_off.get(g) != none: repl_inited[g] = true
     when TARGET == "windows":
-        # start it with two pipes, their handles in SLOPPY_REPL_PIPES
+        # start it with two pipes, their handles in DEWY_REPL_PIPES
         sa = fill(0, 3)
         sa[0] = 24
         sa[2] = 1                                     # inheritable
@@ -123,7 +123,7 @@ repl_start = () -> str:
         CreatePipe(data(from_r), data(from_w), data(sa) as *u8, 0)
         SetHandleInformation(to_w[0], 1, 0)           # (this side's ends stay here)
         SetHandleInformation(from_r[0], 1, 0)
-        name = __wide("SLOPPY_REPL_PIPES")
+        name = __wide("DEWY_REPL_PIPES")
         val = __wide("{to_r[0] as int},{from_w[0] as int}")
         SetEnvironmentVariableW(data(name), data(val))
         wcmd = __wide(__w32_cmdline([path]))

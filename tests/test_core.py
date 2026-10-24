@@ -1585,8 +1585,8 @@ def test_core_compiler_hosts(compiler, tmp_path, host):
     source = compiler.parent.parent / 'compiler/main.jo'
     binary = tmp_path / ('compiler.exe' if host == 'windows' else 'compiler')
     env = {key: value for key, value in os.environ.items()
-           if not key.startswith(('DEWY_', 'SLOPPY_'))}
-    env.update(DEWY_CORE_LIB=str(compiler.parent.parent / 'lib'), SLOPPY_EMIT_WORKERS='1')
+           if not key.startswith('DEWY_')}
+    env.update(DEWY_CORE_LIB=str(compiler.parent.parent / 'lib'), DEWY_EMIT_WORKERS='1')
     built = subprocess.run([compiler, 'build', source, '--target', target_name(host),
                             '-o', binary], env=env, capture_output=True, text=True,
                            timeout=60, check=False)
@@ -2163,23 +2163,23 @@ def test_core_numeric_example(compiler, tmp_path, target, release):
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_gpu_arrays(compiler, tmp_path, target, backend, release, request):
     env = {key: value for key, value in os.environ.items()
-           if not key.startswith(('DEWY_', 'SLOPPY_'))}
-    env.update(SLOPPY_THREADS='2', LP_NUM_THREADS='2', SLOPPY_VK_PIPELINE_CACHE='0')
+           if not key.startswith('DEWY_')}
+    env.update(DEWY_THREADS='2', LP_NUM_THREADS='2', DEWY_VK_PIPELINE_CACHE='0')
     if backend == 'fallback':
-        env['SLOPPY_SOFTWARE'] = '1'
+        env['DEWY_SOFTWARE'] = '1'
     else:
         if platform.system() != 'Linux':
             pytest.skip('offscreen Mesa driver checks currently target Linux')
         env.update(LIBGL_ALWAYS_SOFTWARE='1', EGL_PLATFORM='surfaceless')
         if backend == 'gles':
             request.getfixturevalue('shader_driver')
-            env['SLOPPY_VULKAN'] = '0'
+            env['DEWY_VULKAN'] = '0'
         else:
             drivers = list(Path('/usr/share/vulkan/icd.d').glob('lvp_icd*.json'))
             drivers = [path for path in drivers if 'i686' not in path.name]
             if not drivers:
                 pytest.skip('Mesa lavapipe Vulkan driver is needed')
-            env.update(SLOPPY_VULKAN='1', VK_DRIVER_FILES=str(drivers[0]),
+            env.update(DEWY_VULKAN='1', VK_DRIVER_FILES=str(drivers[0]),
                        VK_ICD_FILENAMES=str(drivers[0]))
     program = '''import p"@lib/game/gpuarray.jo" as engine
 half=(x:float32):>float32=>x*0.5+0.25
@@ -2244,8 +2244,8 @@ def test_core_metal_magnitude(compiler, tmp_path, release):
     shaders = tmp_path / 'shaders'
     shaders.mkdir()
     env = {key: value for key, value in os.environ.items()
-           if not key.startswith(('DEWY_', 'SLOPPY_'))}
-    env['SLOPPY_MSL_DUMP'] = str(shaders)
+           if not key.startswith('DEWY_')}
+    env['DEWY_MSL_DUMP'] = str(shaders)
     built = subprocess.run([compiler, 'build', source, '--target', 'aarch64-mac', '-o', tmp_path / 'magnitude',
                             *(['--release'] if release else [])], env=env,
                            capture_output=True, text=True, timeout=30, check=False)
@@ -2269,8 +2269,8 @@ printl(cpu(floats).data) printl(cpu(ints).data)
     shaders = tmp_path / 'shaders'
     shaders.mkdir()
     env = {key: value for key, value in os.environ.items()
-           if not key.startswith(('DEWY_', 'SLOPPY_'))}
-    env['SLOPPY_MSL_DUMP'] = str(shaders)
+           if not key.startswith('DEWY_')}
+    env['DEWY_MSL_DUMP'] = str(shaders)
     built = subprocess.run([compiler, 'build', source, '--target', 'aarch64-mac', '-o', tmp_path / 'plus',
                             *(['--release'] if release else [])], env=env,
                            capture_output=True, text=True, timeout=30, check=False)
@@ -2331,9 +2331,9 @@ return 42
     assert error is None, error
     modes = [False, True] if target == 'native' else [False]
     for no_avx in modes:
-        env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
+        env = {k: v for k, v in os.environ.items() if not k.startswith('DEWY_')}
         if no_avx:
-            env['SLOPPY_NO_AVX'] = '1'
+            env['DEWY_NO_AVX'] = '1'
         ran = subprocess.run(command, env=env, capture_output=True, text=True, timeout=10, check=False)
         assert ran.returncode == 42, ran.stdout + ran.stderr
 
@@ -2410,9 +2410,9 @@ return 42
     assert all('vld ' in body and 'vst ' in body for body in bodies), '\n'.join(bodies)
     for sse2 in [False, True]:
         env = {key: value for key, value in os.environ.items()
-               if not key.startswith(('DEWY_', 'SLOPPY_'))}
+               if not key.startswith('DEWY_')}
         if sse2:
-            env['SLOPPY_NO_AVX'] = '1'
+            env['DEWY_NO_AVX'] = '1'
         ran = subprocess.run([binary], env=env, capture_output=True, text=True, timeout=10, check=False)
         assert ran.returncode == 42, ran.stdout + ran.stderr
         for form in ['short', 'values']:
@@ -2972,7 +2972,7 @@ def test_core_game_web_build(compiler, tmp_path, game, release):
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
     html = output.with_suffix('.html').read_text()
-    embedded = re.search(r'SLOPPY_WASM = "([A-Za-z0-9+/=]+)"', html)
+    embedded = re.search(r'DEWY_WASM = "([A-Za-z0-9+/=]+)"', html)
     assert embedded, 'web host must include its compiled program'
     module = tmp_path / f'{game}.wasm'
     module.write_bytes(base64.b64decode(embedded[1], validate=True))
@@ -2990,9 +2990,9 @@ def test_core_game_renderer(compiler, tmp_path, game):
                            text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
     screenshot = tmp_path / 'frame.png'
-    env = {k: v for k, v in os.environ.items() if not k.startswith('SLOPPY_')}
-    env.update(SLOPPY_SOFTWARE='1', SLOPPY_SCREENSHOT=str(screenshot), SLOPPY_FRAMES='3',
-               SLOPPY_WINDOW='1280x720', SLOPPY_INPUT='1:mouse=800x620,2:mouse_right+,3:b+')
+    env = {k: v for k, v in os.environ.items() if not k.startswith('DEWY_')}
+    env.update(DEWY_SOFTWARE='1', DEWY_SCREENSHOT=str(screenshot), DEWY_FRAMES='3',
+               DEWY_WINDOW='1280x720', DEWY_INPUT='1:mouse=800x620,2:mouse_right+,3:b+')
     ran = subprocess.run([binary], env=env, capture_output=True, text=True, timeout=15, check=False)
     assert ran.returncode == 0, ran.stdout + ran.stderr
     data = screenshot.read_bytes()
@@ -3016,8 +3016,8 @@ def test_core_software_raster_chunks(compiler, tmp_path, release):
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
     for threads in [1, 2]:
-        env = {k: v for k, v in os.environ.items() if not k.startswith('SLOPPY_')}
-        env.update(SLOPPY_THREADS=str(threads), SLOPPY_SOFT_SCALE='0.5')
+        env = {k: v for k, v in os.environ.items() if not k.startswith('DEWY_')}
+        env.update(DEWY_THREADS=str(threads), DEWY_SOFT_SCALE='0.5')
         ran = subprocess.run([binary], env=env, capture_output=True, text=True,
                              timeout=10, check=False)
         assert ran.returncode == 42, (threads, ran.stdout, ran.stderr)
@@ -3031,8 +3031,8 @@ def test_core_chart_render(compiler, tmp_path, release):
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
-    env = {k: v for k, v in os.environ.items() if not k.startswith('SLOPPY_')}
-    env['SLOPPY_SOFTWARE'] = '1'
+    env = {k: v for k, v in os.environ.items() if not k.startswith('DEWY_')}
+    env['DEWY_SOFTWARE'] = '1'
     ran = subprocess.run([binary], cwd=tmp_path, env=env, capture_output=True,
                          text=True, timeout=10, check=False)
     assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
@@ -3061,9 +3061,9 @@ def test_core_slider_controls(compiler, tmp_path, release):
         'descending': '1:mouse=360x220,1:mouse_left+,2:mouse=700x450,3:mouse_left-',
     }
     for scenario, script in scripts.items():
-        env = {k: v for k, v in os.environ.items() if not k.startswith('SLOPPY_')}
-        env.update(SLOPPY_SOFTWARE='1', SLOPPY_SCREENSHOT=str(tmp_path / f'{scenario}.png'),
-                   SLOPPY_FRAMES='10', SLOPPY_WINDOW='640x480', SLOPPY_INPUT=script)
+        env = {k: v for k, v in os.environ.items() if not k.startswith('DEWY_')}
+        env.update(DEWY_SOFTWARE='1', DEWY_SCREENSHOT=str(tmp_path / f'{scenario}.png'),
+                   DEWY_FRAMES='10', DEWY_WINDOW='640x480', DEWY_INPUT=script)
         ran = subprocess.run([binary], env=env, capture_output=True, text=True,
                              timeout=15, check=False)
         assert ran.returncode == 0, (scenario, ran.stdout, ran.stderr)
@@ -3271,9 +3271,9 @@ def test_core_new_project(compiler, tmp_path, kind):
     built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True,
                            text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
-    env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
-    env.update(SLOPPY_SOFTWARE='1', SLOPPY_THREADS='2', SLOPPY_FRAMES='3',
-               SLOPPY_SCREENSHOT=str(project / 'frame.png'), SLOPPY_SAVE_DIR=str(project / 'saves'))
+    env = {k: v for k, v in os.environ.items() if not k.startswith('DEWY_')}
+    env.update(DEWY_SOFTWARE='1', DEWY_THREADS='2', DEWY_FRAMES='3',
+               DEWY_SCREENSHOT=str(project / 'frame.png'), DEWY_SAVE_DIR=str(project / 'saves'))
     ran = subprocess.run([binary], env=env, capture_output=True, text=True, timeout=10, check=False)
     assert ran.returncode == 0, ran.stdout + ran.stderr
     if kind == 'program':
@@ -3542,8 +3542,8 @@ main=()=>{
 @pytest.mark.parametrize(('kind', 'count'), [('platformer', 2), ('3d', 1), ('arcade', 2), ('story', 2)])
 def test_core_game_starter_tests(compiler, tmp_path, flags, kind, count):
     template = Path(__file__).resolve().parents[1] / f'lib/new/dewy/{kind}.dewy'
-    env = {**os.environ, 'DISPLAY': '', 'WAYLAND_DISPLAY': '', 'SLOPPY_THREADS': '2',
-           'SLOPPY_SAVE_DIR': str(tmp_path / 'saves')}
+    env = {**os.environ, 'DISPLAY': '', 'WAYLAND_DISPLAY': '', 'DEWY_THREADS': '2',
+           'DEWY_SAVE_DIR': str(tmp_path / 'saves')}
     result = subprocess.run([compiler, 'test', *flags, template], env=env, capture_output=True,
                             text=True, timeout=30, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -3617,8 +3617,8 @@ save_round = () => {
 $test
 load_round = () => $expect best=?7
 ''')
-    env = {**os.environ, 'DISPLAY': '', 'WAYLAND_DISPLAY': '', 'SLOPPY_THREADS': '2',
-           'SLOPPY_SAVE_DIR': str(tmp_path / 'saves')}
+    env = {**os.environ, 'DISPLAY': '', 'WAYLAND_DISPLAY': '', 'DEWY_THREADS': '2',
+           'DEWY_SAVE_DIR': str(tmp_path / 'saves')}
     for name in ['save_round', 'load_round']:
         result = subprocess.run([compiler, 'test', *flags, source, name], env=env,
                                 capture_output=True, text=True, timeout=30, check=False)
@@ -3644,8 +3644,8 @@ load_reading = () => {
     $expect reading.shown["mira"]=?"left" and reading.background=?SCENES["square"]
 }
 ''')
-    env = {**os.environ, 'DISPLAY': '', 'WAYLAND_DISPLAY': '', 'SLOPPY_THREADS': '2',
-           'SLOPPY_SAVE_DIR': str(tmp_path / 'saves')}
+    env = {**os.environ, 'DISPLAY': '', 'WAYLAND_DISPLAY': '', 'DEWY_THREADS': '2',
+           'DEWY_SAVE_DIR': str(tmp_path / 'saves')}
     for name in ['save_reading', 'load_reading']:
         result = subprocess.run([compiler, 'test', *flags, source, name], env=env,
                                 capture_output=True, text=True, timeout=30, check=False)
@@ -6149,7 +6149,7 @@ exit(42)
         runner = tmp_path / 'products.cjs'
         runner.write_text('\n'.join(scripts.parts))
         command = [node, runner]
-    ran = subprocess.run(command, env={**os.environ, 'SLOPPY_THREADS': str(threads)},
+    ran = subprocess.run(command, env={**os.environ, 'DEWY_THREADS': str(threads)},
                          capture_output=True, text=True, timeout=15)
     assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
 

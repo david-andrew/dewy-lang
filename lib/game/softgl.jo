@@ -1,5 +1,5 @@
 # Software rendering: a CPU implementation of the part of OpenGL ES the game library uses,
-# for machines without a GPU driver (or with SLOPPY_SOFTWARE=1). Shaders written in Sloppy run as
+# for machines without a GPU driver (or with DEWY_SOFTWARE=1). Shaders written in Sloppy run as
 # the compiled Sloppy functions they are; triangles are rasterized in horizontal bands on all
 # cores. Frames are rendered at a reduced internal resolution and scaled up on screen.
 
@@ -144,8 +144,8 @@ __sw_tls_init = ():
 # the window's framebuffer
 __sw_init_window = (w: int, h: int):
     if __s_fb_color[0] == 0:
-        # SLOPPY_SOFT_SCALE=1 renders at full resolution (sharper, about 4x the work)
-        if let v = env("SLOPPY_SOFT_SCALE"): __soft_scale = clamp(to_float(v) ?? 0.5, 0.1, 1.0)
+        # DEWY_SOFT_SCALE=1 renders at full resolution (sharper, about 4x the work)
+        if let v = env("DEWY_SOFT_SCALE"): __soft_scale = clamp(to_float(v) ?? 0.5, 0.1, 1.0)
         __s_fb_scale[0] = __soft_scale
     iw = max(int(f64(w) * __soft_scale), 1)
     ih = max(int(f64(h) * __soft_scale), 1)

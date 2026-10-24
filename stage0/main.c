@@ -19,7 +19,7 @@ int main(int argc, char **argv) {
     else usage();
   }
   if (!in) usage();
-  g_lib_dir = getenv("SLOPPY_LIB");
+  g_lib_dir = getenv("DEWY_CORE_LIB");
   if (!g_lib_dir) {
     char exe[1024];
     ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);

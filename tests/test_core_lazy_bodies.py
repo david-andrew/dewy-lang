@@ -10,9 +10,9 @@ from tools.compiler.speed import generate_dewy
 
 
 def compile_result(compiler, source, output, workers, *options):
-    env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
-    env.update(DEWY_CORE_LIB=str(ROOT / 'lib'), SLOPPY_EMIT_WORKERS=str(workers),
-               SLOPPY_EMIT_FORCE='1')
+    env = {k: v for k, v in os.environ.items() if not k.startswith('DEWY_')}
+    env.update(DEWY_CORE_LIB=str(ROOT / 'lib'), DEWY_EMIT_WORKERS=str(workers),
+               DEWY_EMIT_FORCE='1')
     run = subprocess.run([compiler, *options, 'build', source, '-o', output],
                          env=env, capture_output=True, timeout=120)
     return run.returncode, run.stdout, run.stderr
@@ -49,14 +49,14 @@ def test_lazy_warning_order_and_bytes(compiler, tmp_path):
     for i in (0, 20, 200, 400, 590):
         text = text.replace(f'let s="item {i}"', f'let unused_{i}=1\n    let s="item {i}"')
     source.write_text(text)
-    check(compiler, source, tmp_path, SLOPPY_EMIT_FORCE='1')
-    _, err = build(compiler, source, tmp_path / 'warnings', 4, SLOPPY_EMIT_FORCE='1')
+    check(compiler, source, tmp_path, DEWY_EMIT_FORCE='1')
+    _, err = build(compiler, source, tmp_path / 'warnings', 4, DEWY_EMIT_FORCE='1')
     lines = [line for line in err.splitlines() if 'unused_' in line]
     assert len(lines) == 5
     assert [next(i for i in (0, 20, 200, 400, 590) if f"'unused_{i}'" in line)
             for line in lines] == [0, 20, 200, 400, 590]
     _, timed = build(compiler, source, tmp_path / 'timed-lazy', 4,
-                     SLOPPY_EMIT_FORCE='1', SLOPPY_PAR_TIME='1')
+                     DEWY_EMIT_FORCE='1', DEWY_PAR_TIME='1')
     assert 'pcheck: parsed deferred bodies before checking' in timed
 
 

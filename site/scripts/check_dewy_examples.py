@@ -131,7 +131,7 @@ def validate(example: Example, compiler: Path, scratch: Path) -> dict:
         source.write_text(prefix + padding + example.source + data.get('suffix', ''))
         def call(args):
             return subprocess.run(args, cwd=work, capture_output=True, timeout=60,
-                                  env={k:v for k,v in os.environ.items() if not k.startswith('SLOPPY_')})
+                                  env={k:v for k,v in os.environ.items() if not k.startswith('DEWY_') or k.startswith('DEWY_CORE_')})
         checked = call([compiler, 'check', source])
         diagnostic = (checked.stdout+checked.stderr).decode(errors='replace')
         if mode == 'reject':

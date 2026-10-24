@@ -400,7 +400,7 @@ watch_record_image = ():
     wm_clear()
     keys = wk_fn_keys()
     relocs_collect()
-    if env("SLOPPY_WATCH_TRACE") != none: watch_trace(keys)
+    if env("DEWY_WATCH_TRACE") != none: watch_trace(keys)
     loop i in [0..keys.len()):
         if len(keys[i]) == 0: continue
         a = img_text_addr + fn_addr[i]
@@ -711,7 +711,7 @@ w_place = (n: int) -> int:
     if wm_next > w_region() + w_region_size(): fatal(0, "dewy-core watch: no room left for new code (restart the program: r)")
     a
 
-# (SLOPPY_WATCH_TRACE=file: each function's key, then what its code refers to and its bytes)
+# (DEWY_WATCH_TRACE=file: each function's key, then what its code refers to and its bytes)
 watch_trace = (keys: str[]):
     out = ""
     loop i in [0..keys.len()):
@@ -733,7 +733,7 @@ watch_trace = (keys: str[]):
         h = ""
         loop p in [s..s + fn_len[i]): h += "{int(code[p])} "
         out += "  {h}\n"
-    write_file(env("SLOPPY_WATCH_TRACE") ?? "", out)
+    write_file(env("DEWY_WATCH_TRACE") ?? "", out)
 
 watch_make_patch = () -> bool:
     w_patch = []
@@ -742,7 +742,7 @@ watch_make_patch = () -> bool:
     w_added = []
     keys = wk_fn_keys()
     relocs_collect()
-    if env("SLOPPY_WATCH_TRACE") != none: watch_trace(keys)
+    if env("DEWY_WATCH_TRACE") != none: watch_trace(keys)
     inits = watch_globals_to_init()
     w_kept = []
     loop g in w_migrate:
@@ -1301,8 +1301,8 @@ watch_run = ():
         one = [0]
         syscall(0, int(c[0]), data(one), 1)
         syscall(3, int(c[0]))
-        # (SLOPPY_WATCH_KEEP=1: kept until it ends, for qemu-user, which opens the file after exec)
-        if env("SLOPPY_WATCH_KEEP") == none: delete_file(w_out)
+        # (DEWY_WATCH_KEEP=1: kept until it ends, for qemu-user, which opens the file after exec)
+        if env("DEWY_WATCH_KEEP") == none: delete_file(w_out)
 
 watch_stop = ():
     if w_pid < 0: return
@@ -1330,7 +1330,7 @@ watch_reap = () -> int:
         syscall(61, w_pid, data(st), 0, 0)
         syscall(3, w_to)
         syscall(3, w_from)
-        if env("SLOPPY_WATCH_KEEP") != none: delete_file(w_out)
+        if env("DEWY_WATCH_KEEP") != none: delete_file(w_out)
     w_to = -1
     w_from = -1
     w_pid = -1
@@ -1339,7 +1339,7 @@ watch_reap = () -> int:
 
 # send a patch; the program applies it at its next frame and answers
 watch_send = (t0: f64):
-    if let dp = env("SLOPPY_WATCH_DUMP"): write_bytes(dp, w_patch)
+    if let dp = env("DEWY_WATCH_DUMP"): write_bytes(dp, w_patch)
     w_log("sending a patch of {w_patch.len()} bytes")
     if not __write_all(w_to, w_patch):
         eprint("dewy-core watch: the program did not take the new code (writing to it failed: {w_write_err}); r + enter starts it again")
@@ -1387,9 +1387,9 @@ __write_all = (fd: int, b: u8[]) -> bool:
         got += r
     true
 
-# (SLOPPY_WATCH_LOG=1: each step of a reload, to standard error)
+# (DEWY_WATCH_LOG=1: each step of a reload, to standard error)
 w_log = (msg: str):
-    if env("SLOPPY_WATCH_LOG") != none: eprint("dewy-core watch log: {msg}")
+    if env("DEWY_WATCH_LOG") != none: eprint("dewy-core watch log: {msg}")
 
 # the program's answer (a word); -1: it is gone
 w_read8 = () -> int:
@@ -1423,7 +1423,7 @@ w_self_id = () -> int:
 
 # ---- Windows: what fork, pipes, inotify and poll do on Linux ----
 # Each build runs in a new process (dewy-core watch --build) given the link map in a file; the
-# program gets its pipes' handles in SLOPPY_WATCH_PIPES; files are watched by when they were
+# program gets its pipes' handles in DEWY_WATCH_PIPES; files are watched by when they were
 # last written, checked a few times a second.
 w32_mtimes: {str: int} = {}
 w32_dir_count: {str: int} = {}
@@ -1533,7 +1533,7 @@ w32_wait = () -> int:
     else:
         return 0
 
-# start the program built, with two pipes whose handles it finds in SLOPPY_WATCH_PIPES
+# start the program built, with two pipes whose handles it finds in DEWY_WATCH_PIPES
 w32_run = ():
     when TARGET == "windows":
         sa = fill(0, 3)
@@ -1547,7 +1547,7 @@ w32_run = ():
         CreatePipe(data(from_r), data(from_w), data(sa) as *u8, 0)
         SetHandleInformation(to_w[0], 1, 0)           # (this side's ends stay here)
         SetHandleInformation(from_r[0], 1, 0)
-        name = __wide("SLOPPY_WATCH_PIPES")
+        name = __wide("DEWY_WATCH_PIPES")
         val = __wide("{to_r[0] as int},{from_w[0] as int}")
         SetEnvironmentVariableW(data(name), data(val))
         argv = [w_out]

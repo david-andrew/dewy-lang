@@ -36,7 +36,7 @@ def test_rollback_warning_order(compiler, tmp_path, automatic, shared):
     elif automatic:
         text += generate_dewy(600)
     source.write_text(text)
-    options = {} if automatic else {'SLOPPY_EMIT_FORCE': '1'}
+    options = {} if automatic else {'DEWY_EMIT_FORCE': '1'}
     check(compiler, source, tmp_path, **options)
     base, err = build(compiler, source, tmp_path / 'serial', 1, **options)
     assert err.count('takes random numbers') == 1
@@ -57,10 +57,10 @@ def test_library_root_error_order(compiler, tmp_path, forced):
                       '\nprintl"{f0()}"\n')
     results = []
     for workers, disabled in ((1, False), (2, False), (4, False), (4, True)):
-        env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
-        env.update(DEWY_CORE_LIB=str(ROOT / 'lib'), SLOPPY_EMIT_WORKERS=str(workers))
+        env = {k: v for k, v in os.environ.items() if not k.startswith('DEWY_')}
+        env.update(DEWY_CORE_LIB=str(ROOT / 'lib'), DEWY_EMIT_WORKERS=str(workers))
         if forced:
-            env['SLOPPY_EMIT_FORCE'] = '1'
+            env['DEWY_EMIT_FORCE'] = '1'
         if disabled:
             env['DEWY_PCHECK'] = '0'
         run = subprocess.run([compiler, 'build', source, '-o', tmp_path / 'bad'],
@@ -76,7 +76,7 @@ def test_library_root_error_order(compiler, tmp_path, forced):
 def test_partial_worker_failure(compiler, tmp_path, mode, failed):
     source = tmp_path / 'partial.dewy'
     source.write_text(generate_dewy(600))
-    options = {'SLOPPY_EMIT_FORCE': '1'}
+    options = {'DEWY_EMIT_FORCE': '1'}
     if mode == 'fused':
         options['DEWY_PCHECK'] = '0'
     if mode == 'emission':
@@ -86,5 +86,5 @@ def test_partial_worker_failure(compiler, tmp_path, mode, failed):
     for workers in (2, 4):
         got = build(compiler, source, tmp_path / 'partial', workers, **options, **{failure: failed})
         assert got == base
-        _, trace = build(compiler, source, tmp_path / 'trace', workers, SLOPPY_PAR_TIME='1', **options, **{failure: failed})
+        _, trace = build(compiler, source, tmp_path / 'trace', workers, DEWY_PAR_TIME='1', **options, **{failure: failed})
         assert f'{"emit" if mode == "emission" else "fused"}: {workers} workers,' in trace

@@ -18,7 +18,7 @@ def build(compiler, tmp_path, source, suffix='dewy'):
 
 
 def run(binary, workers):
-    return subprocess.run([binary], env=dict(os.environ, SLOPPY_THREADS=str(workers)),
+    return subprocess.run([binary], env=dict(os.environ, DEWY_THREADS=str(workers)),
                           capture_output=True, text=True, timeout=30)
 
 
@@ -127,9 +127,9 @@ main=():>void=>{printl"{fork(25)}"}
     if managed:
         program = program.replace(':>int64=>', ':>array<int64>=>').replace('return n', 'return [n]').replace('return parts[0]+parts[1]', 'return [parts[0][0]+parts[1][0]]').replace('fork(25)}', 'fork(25)[0]}')
     source.write_text(program)
-    one, _ = fused_build(compiler, source, tmp_path / 'one', 1, SLOPPY_EMIT_FORCE='1')
+    one, _ = fused_build(compiler, source, tmp_path / 'one', 1, DEWY_EMIT_FORCE='1')
     two, log = fused_build(compiler, source, tmp_path / 'two', 2,
-                           SLOPPY_EMIT_FORCE='1', SLOPPY_PAR_TIME='1')
+                           DEWY_EMIT_FORCE='1', DEWY_PAR_TIME='1')
     assert 'fused: 2 workers' in log, log
     assert two == one
     result = run(tmp_path / 'two', 2)

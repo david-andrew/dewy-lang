@@ -55,8 +55,8 @@ def main() -> int:
         parser.error('not enough available physical cores')
     args.work.mkdir(parents=True, exist_ok=True)
     env = {k: v for k, v in os.environ.items()
-           if not k.startswith(('DEWY_', 'SLOPPY_', 'OMP_'))}
-    env['SLOPPY_EMIT_WORKERS'] = '1'
+           if not k.startswith(('DEWY_', 'OMP_'))}
+    env['DEWY_EMIT_WORKERS'] = '1'
     compilers = {'dewy': args.compiler.resolve()}
     if args.previous:
         compilers['previous'] = args.previous.resolve()
@@ -85,7 +85,7 @@ def main() -> int:
         for workers, serial in [(n, False) for n in args.workers] + [(1, True)]:
             samples = {label: [] for label in binaries}
             counts = {label: [] for label in binaries}
-            run_env = dict(env, SLOPPY_THREADS=str(workers), OMP_NUM_THREADS=str(workers),
+            run_env = dict(env, DEWY_THREADS=str(workers), OMP_NUM_THREADS=str(workers),
                            OMP_PROC_BIND='true', OMP_PLACES='cores')
             for repeat in range(args.runs):
                 order = list(binaries)

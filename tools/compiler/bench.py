@@ -163,7 +163,7 @@ def main(argv: list[str], compiler: Path) -> int:
         cli.error(f'no kernel matches {args.words!r}; kernels: {" ".join(COUNTS)}')
     if args.instructions or args.baseline:
         return instructions(args, names, compiler)
-    env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
+    env = {k: v for k, v in os.environ.items() if not k.startswith('DEWY_')}
     cc = os.environ.get('CC', 'cc')
     SCRATCH.mkdir(parents=True, exist_ok=True)
     print(f'{"kernel":16} {"default":>9} {"release":>9} {"C -O2":>9} {"def/C":>6} {"rel/C":>6}  same output'

@@ -59,7 +59,7 @@ when TARGET == "windows":
     # so for a stack overflow a guard page 64 KB above the end of the main thread's stack (all of
     # it committed: compiler/pe.jo) leaves room to tell it.)
     __crash_install = () -> bool:
-        if env("SLOPPY_NO_CRASH_HANDLER") != none: return false
+        if env("DEWY_NO_CRASH_HANDLER") != none: return false
         f: cfn(*u8) -> i32 = __w32_crash
         AddVectoredExceptionHandler(1, f as *u8)
         __w32_stack_guard()
@@ -106,7 +106,7 @@ when TARGET == "windows":
         0
 else when TARGET == "macos":
     __crash_install = () -> bool:
-        if env("SLOPPY_NO_CRASH_HANDLER") != none: return false
+        if env("DEWY_NO_CRASH_HANDLER") != none: return false
         size = 1 << 16
         st = fill(0, 3)
         st[0] = __os_pages(size) as int
@@ -134,13 +134,13 @@ else when TARGET == "macos":
             else: what = "crashed: memory access at 0x{__hex_text(a)} (a bad pointer, in code using raw pointers or C?)"
         else if sig == 8: what = "arithmetic error"
         else if sig == 4: what = "illegal instruction"
-        if env("SLOPPY_CRASH_DETAIL") != none: what = "{what} [signal {sig}, address 0x{__hex_text(((info + 24) as *int)[0])}, sp 0x{__hex_text(rsp)}, pc 0x{__hex_text(rip)}, thread {__tid()}]"
+        if env("DEWY_CRASH_DETAIL") != none: what = "{what} [signal {sig}, address 0x{__hex_text(((info + 24) as *int)[0])}, sp 0x{__hex_text(rsp)}, pc 0x{__hex_text(rip)}, thread {__tid()}]"
         __write_err("panic: {what}\n")
         __backtrace_from(rbp, rip)
         __exit(101)
 else when TARGET != "wasm":
     __crash_install = () -> bool:
-        if env("SLOPPY_NO_CRASH_HANDLER") != none: return false
+        if env("DEWY_NO_CRASH_HANDLER") != none: return false
         size = 1 << 16
         alt = __os_pages(size)
         st = fill(0, 3)

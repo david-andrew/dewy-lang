@@ -84,8 +84,6 @@ cli_option_refused = (x: str):
 find_lib_dir = () -> str:
     if let e = env("DEWY_CORE_LIB"):
         if len(e) > 0: return os_path(e)
-    if let e = env("SLOPPY_LIB"):
-        if len(e) > 0: return os_path(e)
     exe = os_path(exe_path())
     d = exe
     s = rfind(d, "/")
@@ -361,7 +359,7 @@ release_pipeline = ():
         rel_finish()
         emit_function()
     rel_fns = []
-    if env("SLOPPY_PAR_TIME") != none: eprint("release: optimize {(rt1 - rt0) * 1000.0:.1} ms, inline {(rt2 - rt1) * 1000.0:.1} ms, versioning and licm {(time() - rt2) * 1000.0:.1} ms")
+    if env("DEWY_PAR_TIME") != none: eprint("release: optimize {(rt1 - rt0) * 1000.0:.1} ms, inline {(rt2 - rt1) * 1000.0:.1} ms, versioning and licm {(time() - rt2) * 1000.0:.1} ms")
 
 # Inlining and constant folding can remove a lowered function's last caller.
 # Keep entry points, exports, and functions reached by calls or stored addresses.
@@ -408,7 +406,7 @@ emit_queued = ():
         icb = ic_lf(IC_EMIT, f.fn_index)
         emit_now(fin[k])
         ic_restore(icb)
-    if env("SLOPPY_PAR_TIME") != none: eprint("emit: here, {(time() - t0) * 1000.0:.1} ms")
+    if env("DEWY_PAR_TIME") != none: eprint("emit: here, {(time() - t0) * 1000.0:.1} ms")
 
 # the functions in an order where each comes after the ones it calls (but in cycles)
 callee_order = (fs: IrFn[]) -> int[]:
@@ -472,11 +470,11 @@ compile = (path: str, out0: str) -> str:
     if timing:
         pl_on = true
         ic_start()
-    ra_stat = env("SLOPPY_RASTAT") != none
-    ra_verbose = (env("SLOPPY_RASTAT") ?? "") == "v"
-    if env("SLOPPY_RA_LINEAR") != none: ra_prio = false
-    ra_dump = env("SLOPPY_RADUMP") ?? ""
-    ra_only = env("SLOPPY_RA_ONLY") ?? ""
+    ra_stat = env("DEWY_RASTAT") != none
+    ra_verbose = (env("DEWY_RASTAT") ?? "") == "v"
+    if env("DEWY_RA_LINEAR") != none: ra_prio = false
+    ra_dump = env("DEWY_RADUMP") ?? ""
+    ra_only = env("DEWY_RA_ONLY") ?? ""
     scan_build_block(path)
     if lower_only: opt_release = false
     main_error_payloads = debug_vars
@@ -634,7 +632,7 @@ compile = (path: str, out0: str) -> str:
         else: emit_function()
         break
     if lower_only: return ""
-    if env("SLOPPY_PAR_TIME") != none: eprint("lower: {(time() - tlow) * 1000.0:.1} ms here")
+    if env("DEWY_PAR_TIME") != none: eprint("lower: {(time() - tlow) * 1000.0:.1} ms here")
     if watch_build and not watch_first:
         watch_lower_inits()
         watch_lower_migrate()
@@ -787,7 +785,7 @@ internal_options = (a: str[]) -> str[]:
     a
 
 main = ():
-    __copies_min = 0       # (SLOPPY_COPIES is for the program it runs, not the compiler's own copies)
+    __copies_min = 0       # (DEWY_COPIES is for the program it runs, not the compiler's own copies)
     a = args()
     if a.len() > 2 and a[1] == "--eager-bodies":
         dc_eager = true
@@ -919,7 +917,7 @@ main = ():
             dir_obligations = true
             a = [a[0], a[1], a[2]] + a[4..]
         if a.len() < 3: usage()
-        if let s = env("SLOPPY_STOP"): stop_after = s
+        if let s = env("DEWY_STOP"): stop_after = s
         path = os_path(a[2])
         # (the test blocks are checked too, as sloppy test would)
         test_mode = true

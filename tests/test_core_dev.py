@@ -217,7 +217,6 @@ def test_core_driver_test_command(monkeypatch, tmp_path):
     monkeypatch.setattr(core, 'toolchain', lambda **kwargs: binary)
     monkeypatch.setenv('DEWY_CORE_COMPILER', '/stale/compiler')
     monkeypatch.setenv('DEWY_CORE_LIB', '/stale/library')
-    monkeypatch.setenv('SLOPPY_LIB', '/stale/library')
     received = {}
 
     def run(command, **options):
@@ -235,7 +234,6 @@ def test_core_driver_test_command(monkeypatch, tmp_path):
     assert received['env']['DEWY_CORE_COMPILER'] == str(binary)
     assert received['env']['PYTEST_DISABLE_PLUGIN_AUTOLOAD'] == '1'
     assert 'DEWY_CORE_LIB' not in received['env']
-    assert 'SLOPPY_LIB' not in received['env']
 
 
 def test_core_driver_quick_command(monkeypatch, tmp_path):

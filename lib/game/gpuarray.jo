@@ -13,7 +13,7 @@
 # buffer, the program a compute program (compiler/spirv.jo, spirv_kernel), with or without a
 # window. Otherwise they use OpenGL ES (without a window, through a windowless EGL context), and
 # web builds WebGL 2: an array is a float texture holding four values per texel, the program a
-# fragment program drawn over it. Where none of these can (no driver, SLOPPY_SOFTWARE=1, an old
+# fragment program drawn over it. Where none of these can (no driver, DEWY_SOFTWARE=1, an old
 # browser, node) the same expressions run on the CPU, so programs work everywhere;
 # gpu_available() tells which.
 
@@ -74,7 +74,7 @@ __gvk_pipelines: {str: int} = {}
 __gpu_context = () -> bool:
     when TARGET == "wasm": return __web_gpu_init() != 0
     else:
-        if (env("SLOPPY_SOFTWARE") ?? "") == "1" or (env("SLOPPY_NO_GPU") ?? "") == "1": return false
+        if (env("DEWY_SOFTWARE") ?? "") == "1" or (env("DEWY_NO_GPU") ?? "") == "1": return false
         if __vk or (not __win_open and __vk_wanted() and len(__vk_open("", () -> int: 0)) == 0):
             __gpu_vk = true
             return true

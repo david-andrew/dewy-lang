@@ -295,12 +295,12 @@ __rtc_new = (controlling: bool) -> int:
         c.t_pass = t.2
         c.t_state = 1
         __turn_allocate(c)
-    # (SLOPPY_RTC_RELAY_ONLY=1, for trying the TURN path: no direct candidates)
+    # (DEWY_RTC_RELAY_ONLY=1, for trying the TURN path: no direct candidates)
     if __rtc_relay_only: c.local.clear()
     __conns.push(c)
     __conns.len() - 1
 
-__rtc_relay_only = (env("SLOPPY_RTC_RELAY_ONLY") ?? "") == "1"
+__rtc_relay_only = (env("DEWY_RTC_RELAY_ONLY") ?? "") == "1"
 
 # this side's description (complete once gathered)
 __rtc_desc = (id: int, active: bool) -> RtcDesc:
@@ -895,8 +895,8 @@ __dtls_client_finished = (c: mut __Conn, msg: u8[]):
     c.d_state = 2
     c.d_flight.clear()
 
-# (SLOPPY_RTC_DEBUG=1: what goes on, on stderr)
-__rtc_debug = env("SLOPPY_RTC_DEBUG") != none
+# (DEWY_RTC_DEBUG=1: what goes on, on stderr)
+__rtc_debug = env("DEWY_RTC_DEBUG") != none
 __rtc_say = (c: __Conn, s: str):
     if __rtc_debug:
         who = if c.d_client: "client" else: "server"

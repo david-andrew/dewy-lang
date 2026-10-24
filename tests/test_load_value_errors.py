@@ -25,7 +25,7 @@ def test_load_value_reports_unreadable_data(compiler, tmp_path):
     built = subprocess.run([compiler, 'build', source, '-o', binary],
                            capture_output=True, text=True, timeout=60, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
-    env = dict(os.environ, SLOPPY_SAVE_DIR=str(tmp_path / 'saves'))
+    env = dict(os.environ, DEWY_SAVE_DIR=str(tmp_path / 'saves'))
     ran = subprocess.run([binary], capture_output=True, text=True, timeout=10, env=env, check=False)
     assert ran.returncode == 0, ran.stdout + ran.stderr
     assert ran.stdout.splitlines() == [

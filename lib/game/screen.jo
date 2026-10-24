@@ -60,17 +60,17 @@ __canvas_w = 0
 __canvas_h = 0
 __canvas_smooth = true
 
-# (SLOPPY_FIT=letterbox and SLOPPY_RESOLUTION=320x180 try a mode on any game)
+# (DEWY_FIT=letterbox and DEWY_RESOLUTION=320x180 try a mode on any game)
 __screen_env_read = false
 __screen_env = ():
     __screen_env_read = true
-    if let f = env("SLOPPY_FIT"):
+    if let f = env("DEWY_FIT"):
         if f == "expand": __fit = .expand
         else if f == "letterbox": __fit = .letterbox
         else if f == "crop": __fit = .crop
         else if f == "stretch": __fit = .stretch
         else if f == "native": __fit = .native
-    if let r = env("SLOPPY_RESOLUTION"):
+    if let r = env("DEWY_RESOLUTION"):
         x = find(r, "x")
         if x > 0: render_resolution(to_int(r[..x)) ?? 0, to_int(r[x + 1..]) ?? 0)
 

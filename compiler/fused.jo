@@ -179,8 +179,8 @@ fused_start = (pinit_lf: int) -> bool:
         root = 0
         loop k in 0.. and f in cands:
             if not modules[int(fns[f].mod)].is_prelude: root += ws[k]
-        if env("SLOPPY_PAR_TIME") != none: eprint("fused: weight {total}, root {root}")
-        forced = env("SLOPPY_EMIT_FORCE") != none
+        if env("DEWY_PAR_TIME") != none: eprint("fused: weight {total}, root {root}")
+        forced = env("DEWY_EMIT_FORCE") != none
         # (library-heavy programs, games among them, have many small functions that workers
         # would each lower to inline: there the code is made as before, emission alone in parallel)
         fz_layout = forced or root / 20000 >= 2
@@ -201,7 +201,7 @@ fused_start = (pinit_lf: int) -> bool:
             acc += ws[k]
             if acc * n >= total * cuts.len() and cuts.len() < n and k + 1 < cands.len(): cuts.push(k + 1)
         cuts.push(cands.len())
-        tm = env("SLOPPY_PAR_TIME") != none
+        tm = env("DEWY_PAR_TIME") != none
         fz_lf0 = lfuncs.len()
         fz_r0 = rodata.len()
         fz_d0 = data_size
@@ -898,7 +898,7 @@ fz_emit = (q: IrFn[]):
             tn += time() - t4
             continue
         fz_place(fz_recs[fz_qrec[f.fn_index]], f.fn_index)
-    if env("SLOPPY_PAR_TIME") != none: eprint("fused: joined in {(time() - t0) * 1000.0:.1} ms (mapping {(t1 - t0) * 1000.0:.1}, leaves {(t2 - t1) * 1000.0:.1}, prepare {(t3 - t2) * 1000.0:.1}, made here {tn * 1000.0:.1})")
+    if env("DEWY_PAR_TIME") != none: eprint("fused: joined in {(time() - t0) * 1000.0:.1} ms (mapping {(t1 - t0) * 1000.0:.1}, leaves {(t2 - t1) * 1000.0:.1}, prepare {(t3 - t2) * 1000.0:.1}, made here {tn * 1000.0:.1})")
 
 fz_place = (x: FzRec, lf: int):
     w = x.w

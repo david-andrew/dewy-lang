@@ -497,7 +497,7 @@ def plan(cases: list[Case], node: bool) -> list[tuple[str, str, list[Case]]]:
 
 
 def clean_environment() -> dict:
-    return {key: value for key, value in os.environ.items() if not key.startswith(('DEWY_', 'SLOPPY_'))}
+    return {key: value for key, value in os.environ.items() if not key.startswith('DEWY_')}
 
 
 def run(compiler: Path, cases: list[Case], *, workers: int = 2, update: bool = False,

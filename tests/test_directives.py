@@ -61,7 +61,7 @@ def test_prototype_warnings_silenced(compiler, tmp_path):
 def test_editor_hint_for_runtime_checks(compiler, tmp_path):
     path = tmp_path / 'sites.dewy'
     path.write_text(SITES)
-    env = dict(os.environ, SLOPPY_LOWER='1')
+    env = dict(os.environ, DEWY_LOWER='1')
     result = subprocess.run([compiler, 'lsp', '--dump', path], text=True, capture_output=True, timeout=60, env=env)
     hints = [line.split('\t')[2] for line in result.stdout.splitlines() if line.startswith('I\t')]
     # Only `$runtime_checks` sites are hinted; prototype sites are warnings already.

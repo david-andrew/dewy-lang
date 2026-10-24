@@ -24,8 +24,8 @@ def test_pinned_core_behavior(tmp_path, name, release):
     expected = (fixtures / f'{name}.expected').read_text()
     binary = tmp_path / name
     flags = ['--release'] if release else []
-    env = {k: v for k, v in os.environ.items() if not k.startswith('SLOPPY_')}
-    env.update(SLOPPY_LIB=str(compiler.parent.parent / 'lib'), SLOPPY_EMIT_WORKERS='1')
+    env = {k: v for k, v in os.environ.items() if not k.startswith('DEWY_')}
+    env.update(DEWY_CORE_LIB=str(compiler.parent.parent / 'lib'), DEWY_EMIT_WORKERS='1')
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags], env=env,
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr

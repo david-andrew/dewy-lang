@@ -13,7 +13,7 @@ pytestmark = pytest.mark.skipif(platform.machine().lower() not in ('x86_64', 'am
 
 
 def build_run(compiler, source, output, flags):
-    env = {**os.environ, 'SLOPPY_EMIT_WORKERS': '1', 'SLOPPY_RASTAT': 'v'}
+    env = {**os.environ, 'DEWY_EMIT_WORKERS': '1', 'DEWY_RASTAT': 'v'}
     built = subprocess.run([compiler, 'build', source, *flags, '-o', output],
                            env=env, capture_output=True, text=True, timeout=60)
     assert built.returncode == 0, built.stdout + built.stderr

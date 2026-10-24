@@ -129,8 +129,8 @@ def check(compiler: Path, output: Path, *, seed: int = 1, count: int = 25,
     generator_hash = hashlib.sha256(generator.read_bytes()).hexdigest()
     output = output.resolve()
     output.mkdir(parents=True, exist_ok=False)
-    env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
-    env['SLOPPY_EMIT_WORKERS'] = '1'
+    env = {k: v for k, v in os.environ.items() if not k.startswith('DEWY_')}
+    env['DEWY_EMIT_WORKERS'] = '1'
     modes = [('default', []), ('release', ['--release']), ('debug', ['-g'])]
     if wasm:
         modes += [('web', ['--target', 'wasm32']), ('web-release', ['--target', 'wasm32', '--release'])]

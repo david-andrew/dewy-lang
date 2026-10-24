@@ -238,7 +238,7 @@ def test(binary: Path, arguments: list[str], quick: bool) -> int:
     if not python.exists():
         python = Path(sys.executable)
     env = {k: v for k, v in os.environ.items()
-           if not k.startswith(('DEWY_', 'SLOPPY_')) or k == 'DEWY_GATE_SLOT_HELD'}
+           if not k.startswith('DEWY_') or k == 'DEWY_GATE_SLOT_HELD'}
     env.update(DEWY_CORE_COMPILER=str(binary), PYTEST_DISABLE_PLUGIN_AUTOLOAD='1')
     if quick:
         arguments = ['-m', 'core_quick', *arguments]

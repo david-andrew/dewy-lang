@@ -12,7 +12,7 @@ simulation on native and web targets, in default and release builds.
 [`terrain_array.dewy`](terrain_array.dewy) generates a height field with one fused
 GPU expression and checks it against the same Dewy function on the CPU. Run
 `./tools/dewy examples/terrain_array.dewy`, or build with `--target wasm32`
-for the browser. `SLOPPY_SOFTWARE=1` exercises the CPU fallback. See the
+for the browser. `DEWY_SOFTWARE=1` exercises the CPU fallback. See the
 [GPU array guide](../docs/LANGUAGE.md#gpu-arrays).
 
 [`trajectory_fit.dewy`](trajectory_fit.dewy) fits a quadratic to sampled heights
@@ -24,7 +24,7 @@ also builds for the web. See the
 
 [`parallel_particles.dewy`](parallel_particles.dewy) computes particle forces
 through the worker pool and checks every resulting value against the serial
-simulation. Run `SLOPPY_THREADS=2 ./tools/dewy --release examples/parallel_particles.dewy`.
+simulation. Run `DEWY_THREADS=2 ./tools/dewy --release examples/parallel_particles.dewy`.
 The same source builds for the web using the serial fallback. See the
 [parallel CPU guide](../docs/LANGUAGE.md#parallel-cpu-work) for the APIs and benchmark.
 
@@ -189,8 +189,8 @@ mutable receivers, optional handles, tuple results, record copies and rendering.
 For display-independent rendering and scripted mouse input:
 
 ```sh
-SLOPPY_SOFTWARE=1 SLOPPY_SCREENSHOT=/tmp/paddle.png SLOPPY_FRAMES=30 \
-  SLOPPY_INPUT=1:mouse=800x620 /tmp/paddle
+DEWY_SOFTWARE=1 DEWY_SCREENSHOT=/tmp/paddle.png DEWY_FRAMES=30 \
+  DEWY_INPUT=1:mouse=800x620 /tmp/paddle
 ```
 
 `paddle_model.dewy` has no graphics dependency. The core test suite checks
@@ -311,8 +311,8 @@ room open until `invite.close_room()`. `room_code()`, `room_link(web_page)` and
 HTTPS pages require a `wss://` endpoint, usually a TLS proxy in front of the
 server. Native clients currently use plain WebSockets: supply a separate native
 URL to `invite.server`, or the library derives `ws://hostname:7700` from a
-configured `wss://` URL. `DEWY_MATCH_SERVER` overrides both; legacy `SLOPPY_SERVER`
-and the browser's `?server=` remain supported. Set the override to `none` to use
+configured `wss://` URL. `DEWY_MATCH_SERVER` overrides both, as does
+the browser's `?server=`. Set the override to `none` to use
 manual invites. The invite screen also offers **Invite with a code instead**.
 
 The rendezvous service forwards connection offers and replies; game traffic

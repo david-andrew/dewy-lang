@@ -261,7 +261,7 @@ def run(compiler: Path, *, keyword: str = '', workers: int = 2, update_ratchet: 
         return 0
     scratch = Path(tempfile.mkdtemp(prefix='dewy-ladder-'))
     env = clean_environment()
-    env['SLOPPY_THREADS'] = '2'
+    env['DEWY_THREADS'] = '2'
     jobs = [(name, version) for name in names for version in ('design', 'core')
             if version == 'design' or has_core(name)]
     parallel = [job for job in jobs if not programs[job[0]].get('serial')]

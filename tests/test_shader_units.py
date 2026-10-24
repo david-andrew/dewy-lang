@@ -31,7 +31,7 @@ write_text("q.vert" source.vs); write_text("q.frag" source.fs); return 0}
 
 
 def _env(**extra):
-    env = {key: value for key, value in os.environ.items() if not key.startswith(('DEWY_', 'SLOPPY_'))}
+    env = {key: value for key, value in os.environ.items() if not key.startswith('DEWY_')}
     env.update(extra)
     return env
 
@@ -66,7 +66,7 @@ def test_shader_units_glsl(compiler, tmp_path):
 def test_shader_units_spirv(compiler, tmp_path):
     dump = tmp_path / 'spv'
     dump.mkdir()
-    _build(compiler, tmp_path, env=_env(SLOPPY_SPIRV_DUMP=str(dump)))
+    _build(compiler, tmp_path, env=_env(DEWY_SPIRV_DUMP=str(dump)))
     modules = sorted(dump.glob('*.spv'))
     assert len(modules) == 2
     validator = shutil.which('spirv-val')
@@ -80,7 +80,7 @@ def test_shader_units_spirv(compiler, tmp_path):
 def test_shader_units_metal(compiler, tmp_path):
     dump = tmp_path / 'msl'
     dump.mkdir()
-    _build(compiler, tmp_path, '--target', 'aarch64-mac', env=_env(SLOPPY_MSL_DUMP=str(dump)))
+    _build(compiler, tmp_path, '--target', 'aarch64-mac', env=_env(DEWY_MSL_DUMP=str(dump)))
     text = ''.join(path.read_text() for path in sorted(dump.glob('*.metal')))
     assert 'sin(6.283185307179586f * fract(' in text and 'cos(6.283185307179586f * fract(' in text
     assert 'float phase_;' in text

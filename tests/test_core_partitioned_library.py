@@ -13,7 +13,7 @@ def test_partitioned_library_closure(compiler, tmp_path):
     source.write_text(generate_dewy(600).replace(
         'let s="item 400"', 'let unused_library_guard=1\n    let s="item 400"'))
     check(compiler, source, tmp_path)
-    _, timed = build(compiler, source, tmp_path / 'library-trace', 4, SLOPPY_PAR_TIME='1')
+    _, timed = build(compiler, source, tmp_path / 'library-trace', 4, DEWY_PAR_TIME='1')
     shared = re.search(r'pcheck: checked (\d+) pending library instances before fork', timed)
     assert shared and int(shared.group(1)) > 0, timed
     assert 'pcheck: 4 workers checked 598 roots' in timed

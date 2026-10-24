@@ -15,10 +15,10 @@ import pytest
 
 class Watch:
     def __init__(self, compiler, source, *, game=False, options=None, filters=()):
-        env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
-        env.update(SLOPPY_SOFTWARE='1', SLOPPY_FRAMES='1000000', SLOPPY_EMIT_WORKERS='1')
+        env = {k: v for k, v in os.environ.items() if not k.startswith('DEWY_')}
+        env.update(DEWY_SOFTWARE='1', DEWY_FRAMES='1000000', DEWY_EMIT_WORKERS='1')
         if game:
-            env['SLOPPY_SCREENSHOT'] = str(source.parent / 'unused.png')
+            env['DEWY_SCREENSHOT'] = str(source.parent / 'unused.png')
         command = [compiler, *(options or ['watch']), source, *filters]
         self.process = subprocess.Popen(command, cwd=source.parent, env=env,
                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE,

@@ -238,7 +238,7 @@ def world(tmp_path):
     home = tmp_path / 'home with spaces'
     home.mkdir()
     env = {k: v for k, v in os.environ.items()
-           if not k.startswith(('DEWY_', 'SLOPPY_')) and k not in ('ZDOTDIR', 'XDG_CONFIG_HOME')}
+           if not k.startswith('DEWY_') and k not in ('ZDOTDIR', 'XDG_CONFIG_HOME')}
     env.update(HOME=str(home), SHELL='/bin/bash',
                DEWY_INSTALL_CHANNEL_URL=releases.channel.as_uri(),
                DEWY_INSTALL_DOWNLOAD_URL=releases.root.as_uri())
@@ -660,7 +660,7 @@ def test_powershell_rejects_unsupported_hosts(tmp_path):
 @pytest.fixture
 def ps_world(tmp_path):
     releases = Releases(tmp_path)
-    env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
+    env = {k: v for k, v in os.environ.items() if not k.startswith('DEWY_')}
     env.update(DEWY_INSTALL_CHANNEL_URL=str(releases.channel), DEWY_INSTALL_DOWNLOAD_URL=str(releases.root))
     return releases, env, tmp_path / 'dewy home'
 

@@ -79,14 +79,14 @@ __tstack_base: *u8 = null
 __mt_active = false                   # a parallel job is running: refcounts are atomic
 
 # Loops the compiler vectorized run 256-bit instructions where the processor has AVX2, else
-# 128-bit ones (every x86-64 has SSE2): the results are the same. SLOPPY_NO_AVX=1 forces the
+# 128-bit ones (every x86-64 has SSE2): the results are the same. DEWY_NO_AVX=1 forces the
 # second kind (to compare, or to test them).
 __cpu_avx2 = __cpu_detect()
 __cpu_detect = () -> bool:
     r = false
     when TARGET != "wasm":
         r = __cpu_features() & 1 != 0
-        if r and env("SLOPPY_NO_AVX") != none: r = false
+        if r and env("DEWY_NO_AVX") != none: r = false
     r
 
 __tid = () -> int:
@@ -811,7 +811,7 @@ __arr_filled = (n: int, es: int) -> *u8:
     p
 
 # copy a shared array (caller retains elements); drops one reference to the original
-# SLOPPY_COPIES=1 (or a number of bytes, 65536 by default): each copy of an array that size or
+# DEWY_COPIES=1 (or a number of bytes, 65536 by default): each copy of an array that size or
 # bigger made because it was shared when it changed, told with where it was made (the first 50)
 __copies_min = -1
 __copies_told = 0
@@ -843,7 +843,7 @@ __copy_report = (n: int, es: int):
     when not BOOTSTRAP:
         if __copies_min < 0:
             __copies_min = 0
-            if let v = env("SLOPPY_COPIES"):
+            if let v = env("DEWY_COPIES"):
                 __copies_min = 65536
                 if let b = to_int(v):
                     if b > 1: __copies_min = b

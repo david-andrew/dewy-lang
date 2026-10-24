@@ -112,7 +112,7 @@ when TARGET == "macos":
             exit(1)
 
     __platform_open = ():
-        __soft = __soft_kept or (env("SLOPPY_SOFTWARE") ?? "") == "1"
+        __soft = __soft_kept or (env("DEWY_SOFTWARE") ?? "") == "1"
         pool = objc_autoreleasePoolPush()
         __need(dl_open("/System/Library/Frameworks/AppKit.framework/AppKit") != null, "AppKit is missing")
         __ns_app = __oc(__cls("NSApplication"), __sel("sharedApplication"))
@@ -138,7 +138,7 @@ when TARGET == "macos":
         __ns_mode = __nsstr("kCFRunLoopDefaultMode")
         __ns_cs = CGColorSpaceCreateDeviceRGB()
         # (screenshot runs keep the size asked for)
-        if env("SLOPPY_SCREENSHOT") == none: __ns_size()
+        if env("DEWY_SCREENSHOT") == none: __ns_size()
         if not __soft and __vk_wanted():
             why = __ns_metal_open()
             if len(why) > 0: __vk_note("{why}; using OpenGL")
@@ -147,7 +147,7 @@ when TARGET == "macos":
             if len(why) > 0:
                 eprint("note: {why}; using the software renderer")
                 __soft = true
-            else if env("SLOPPY_SCREENSHOT") == none: __ns_size()
+            else if env("DEWY_SCREENSHOT") == none: __ns_size()
         if __soft:
             __oc_i(__ns_view, __sel("setWantsLayer:"), 1)
             __sw_init_window(__win_w, __win_h)
@@ -159,7 +159,7 @@ when TARGET == "macos":
         if len(why) > 0: return why
         l = __mg_make_layer()
         # (all the pixels of a Retina screen; not in screenshot runs, which keep the size asked for)
-        if env("SLOPPY_SCREENSHOT") == none:
+        if env("DEWY_SCREENSHOT") == none:
             __ns_hidpi = true
             __ns_scale = max(__oc_f(__ns_win, __sel("backingScaleFactor")), 1.0)
             __mo_d(l, __sel("setContentsScale:"), __ns_scale)
@@ -173,9 +173,9 @@ when TARGET == "macos":
     __ns_gl_open = () -> str:
         if dl_open("libGLESv2.so.2") == null: return "OpenGL is missing"
         # core profile 4.1, double buffered, 24-bit color, 8-bit alpha, 24-bit depth, 8-bit stencil,
-        # accelerated (SLOPPY_GL_SOFTWARE=1: Apple's software renderer instead, as on machines with no GPU)
+        # accelerated (DEWY_GL_SOFTWARE=1: Apple's software renderer instead, as on machines with no GPU)
         attrs: u32[] = [99, 0x4100, 5, 8, 24, 11, 8, 12, 24, 13, 8, 73, 0]
-        if (env("SLOPPY_GL_SOFTWARE") ?? "") == "1":
+        if (env("DEWY_GL_SOFTWARE") ?? "") == "1":
             attrs[11] = 70                                                  # NSOpenGLPFARendererID
             attrs[12] = 0x00020400                                          # kCGLRendererGenericFloatID
             attrs.push(0)
@@ -184,7 +184,7 @@ when TARGET == "macos":
         ctx = __oc_pp(__oc(__cls("NSOpenGLContext"), __sel("alloc")), __sel("initWithFormat:shareContext:"), pf, null)
         if ctx == null: return "no OpenGL context"
         # (all the pixels of a Retina screen; not in screenshot runs, which keep the size asked for)
-        if env("SLOPPY_SCREENSHOT") == none:
+        if env("DEWY_SCREENSHOT") == none:
             __oc_i(__ns_view, __sel("setWantsBestResolutionOpenGLSurface:"), 1)
             __ns_hidpi = true
         __oc_p(ctx, __sel("setView:"), __ns_view)
@@ -222,7 +222,7 @@ when TARGET == "macos":
         __win_focused = __oc_int(__ns_win, __sel("isKeyWindow")) & 255 != 0
         # (closed with its button; a window in the Dock is still the game's)
         if __oc_int(__ns_win, __sel("isVisible")) & 255 == 0 and __oc_int(__ns_win, __sel("isMiniaturized")) & 255 == 0: __win_close = true
-        if env("SLOPPY_SCREENSHOT") == none: __ns_size()
+        if env("DEWY_SCREENSHOT") == none: __ns_size()
         # the pointer, from the bottom left of the view in points
         __ns_struct(__ns_win, "mouseLocationOutsideOfEventStream", 16)
         x = __ns_val[0] * __ns_scale
@@ -457,7 +457,7 @@ when TARGET == "macos":
 
     __game_run = (update: (f64) -> void, draw: () -> void):
         window(__win_title, __win_w, __win_h)
-        __fixed_step = env("SLOPPY_SCREENSHOT") != none
+        __fixed_step = env("DEWY_SCREENSHOT") != none
         when WATCH:
             __watch_init()
         last = time()

@@ -1,7 +1,7 @@
 # Audio: a software mixer written in Sloppy. Sounds are float sample buffers (stereo,
 # interleaved, at the mixer rate). Each frame the mixer renders just enough samples to
 # keep the output device fed: on Linux through ALSA, on Windows waveOut, on macOS AudioQueue,
-# in a web page Web Audio (silent where there is none, or with SLOPPY_NO_AUDIO=1).
+# in a web page Web Audio (silent where there is none, or with DEWY_NO_AUDIO=1).
 # Web: WebAudio.
 
 # A Sound is its samples: make one from your own, `Sound(samples)`, for synthesis (left and
@@ -485,7 +485,7 @@ else when TARGET == "windows":
         __audio_state = 2
         # (a screenshot run: silent, its mixer on the frames' clock, so fades and audio_time are
         # the same every run)
-        if env("SLOPPY_NO_AUDIO") != none or env("SLOPPY_SCREENSHOT") != none: return
+        if env("DEWY_NO_AUDIO") != none or env("DEWY_SCREENSHOT") != none: return
         if not lib_available("winmm.dll"): return
         fmt = fill(u8(0), 20)
         p = data(fmt)
@@ -547,7 +547,7 @@ else when TARGET == "macos":
         __audio_state = 2
         # (a screenshot run: silent, its mixer on the frames' clock, so fades and audio_time are
         # the same every run)
-        if env("SLOPPY_NO_AUDIO") != none or env("SLOPPY_SCREENSHOT") != none: return
+        if env("DEWY_NO_AUDIO") != none or env("DEWY_SCREENSHOT") != none: return
         # (AudioStreamBasicDescription: 48 kHz linear PCM, packed float, stereo)
         fmt = fill(u8(0), 40)
         p = data(fmt)
@@ -606,7 +606,7 @@ else:
         __audio_state = 2
         # (a screenshot run: silent, its mixer on the frames' clock, so fades and audio_time are
         # the same every run)
-        if env("SLOPPY_NO_AUDIO") != none or env("SLOPPY_SCREENSHOT") != none: return
+        if env("DEWY_NO_AUDIO") != none or env("DEWY_SCREENSHOT") != none: return
         if not lib_available("libasound.so.2"): return
         p: *u8 = null
         if snd_pcm_open(&p, data("default"), 0, 1) < 0: return       # playback, non-blocking

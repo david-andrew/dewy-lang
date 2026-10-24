@@ -262,7 +262,7 @@ else when TARGET == "macos":
                 __gc_slot[k] = 0
                 __pad_clear(k)
 else:
-    # the joystick devices: /dev/input/js0 to js7 are pads 0 to 7 (SLOPPY_JOYSTICK: one device
+    # the joystick devices: /dev/input/js0 to js7 are pads 0 to 7 (DEWY_JOYSTICK: one device
     # instead, as pad 0), each looked for again every two seconds while not there
     __js_fd: int[] = fill(-1, 8)
     __js_retry: f64[] = fill(0.0, 8)
@@ -271,7 +271,7 @@ else:
     __pad_poll = ():
         # (a screenshot run is a test: the same frames on any machine, whatever is plugged in)
         if __fixed_step: return
-        one = env("SLOPPY_JOYSTICK")
+        one = env("DEWY_JOYSTICK")
         loop p in [0..MAX_GAMEPADS):
             if __js_fd[p] < 0:
                 if elapsed() < __js_retry[p]: continue

@@ -54,7 +54,7 @@ dc_lazy_allowed = (file: int) -> bool:
         return false
     else:
         if dc_eager or not dc_enabled or dc_compare or emit_workers() < 2 or shown_warnings.len() > 0: return false
-        if len(files[file].src) < 100000 and env("SLOPPY_EMIT_FORCE") == none: return false
+        if len(files[file].src) < 100000 and env("DEWY_EMIT_FORCE") == none: return false
         if (env("DEWY_PCHECK") ?? "") == "0" or (env("DEWY_FUSED") ?? "") == "0": return false
         if target_wasm or target_arm64 or target_windows or target_macos or opt_release or dbg_on or watch_build or repl_image or lower_only or host_ir or ra_stat or len(ra_dump) > 0 or not queue_emit or ide_on or errors_only or test_mode or check_all or len(stop_after) > 0: return false
         true

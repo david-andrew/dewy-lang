@@ -6,7 +6,7 @@
 # Each program has its own place, named after it (PROGRAM_NAME: the build block's `name`, else
 # the main file's name): on Linux ~/.local/share/<name>/ (or $XDG_DATA_HOME), on Windows
 # %APPDATA%\<name>\, on macOS ~/Library/Application Support/<name>/, in a web page the browser's storage for the page (it survives reloads and
-# restarts of the browser). SLOPPY_SAVE_DIR=/tmp/x puts it in /tmp/x/<name>/ instead (tests).
+# restarts of the browser). DEWY_SAVE_DIR=/tmp/x puts it in /tmp/x/<name>/ instead (tests).
 # For a file the player names (an editor's levels), write the text yourself:
 # `write_file(path, to_text(level))` and `from_text[Level](read_file(path) ?? "")`.
 
@@ -16,7 +16,7 @@ when TARGET == "wasm":
 
 # the directory a program's data goes to (made when first written; "" in a web page)
 save_dir = () -> str:
-    if let d = env("SLOPPY_SAVE_DIR"):
+    if let d = env("DEWY_SAVE_DIR"):
         if len(d) > 0: return "{d}/{PROGRAM_NAME}"
     when TARGET == "windows":
         base = env("APPDATA") ?? ""

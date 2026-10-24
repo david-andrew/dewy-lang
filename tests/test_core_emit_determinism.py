@@ -23,8 +23,8 @@ PROGRAMS = [('dunes', []), ('paddle', ['--release']), ('controls', [])]
 
 
 def build(compiler, name, flags, output, workers):
-    env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
-    env.update(SLOPPY_EMIT_WORKERS=str(workers), SLOPPY_PAR_TIME='1', DEWY_CORE_LIB=str(ROOT / 'lib'))
+    env = {k: v for k, v in os.environ.items() if not k.startswith('DEWY_')}
+    env.update(DEWY_EMIT_WORKERS=str(workers), DEWY_PAR_TIME='1', DEWY_CORE_LIB=str(ROOT / 'lib'))
     run = subprocess.run([compiler, 'build', ROOT / 'examples' / f'{name}.dewy', *flags, '-o', output],
                          cwd=output.parent, env=env, capture_output=True, text=True, timeout=120)
     assert run.returncode == 0, run.stdout + run.stderr

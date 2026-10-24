@@ -26,6 +26,6 @@ def test_borrowed_stencil_odd_sizes(compiler, tmp_path, release):
         expected = sum(int(x*1024) for row in a for x in row)
         for tail in ([], ['serial']):
             run = subprocess.run([output, str(n), *tail], capture_output=True, text=True,
-                                 env=dict(os.environ, SLOPPY_THREADS='2'), timeout=30)
+                                 env=dict(os.environ, DEWY_THREADS='2'), timeout=30)
             assert run.returncode == 0, run.stderr
             assert int(run.stdout.split()[0]) == expected

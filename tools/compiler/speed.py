@@ -147,8 +147,8 @@ def delta(base: int, candidate: int) -> float:
 
 
 def clean_env(**extra: str) -> dict:
-    env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
-    env.update({'SLOPPY_EMIT_WORKERS': '1', **extra})
+    env = {k: v for k, v in os.environ.items() if not k.startswith('DEWY_')}
+    env.update({'DEWY_EMIT_WORKERS': '1', **extra})
     return env
 
 
@@ -608,7 +608,7 @@ def stage_wall(toolchain: Toolchain, role: str) -> Path:
 
 def wall_once(active: Path, source: Path, workers: int, cpus: list[int]) -> tuple[float, float]:
     """Wall and CPU milliseconds of one build."""
-    env = clean_env(DEWY_CORE_LIB=str(active / 'lib'), SLOPPY_EMIT_WORKERS=str(workers))
+    env = clean_env(DEWY_CORE_LIB=str(active / 'lib'), DEWY_EMIT_WORKERS=str(workers))
     command = [str(active / 'bin/dewy-core'), 'build', str(source), '-o', str(active / 'program')]
     before = resource.getrusage(resource.RUSAGE_CHILDREN)
     started = time.perf_counter()
@@ -644,7 +644,7 @@ def critical_result(stderr: str) -> tuple[int, int]:
 
 def critical_once(counter: Path, active: Path, source: Path, workers: int,
                   output: Path | None = None) -> tuple[int, int]:
-    env = clean_env(DEWY_CORE_LIB=str(active / 'lib'), SLOPPY_EMIT_WORKERS=str(workers))
+    env = clean_env(DEWY_CORE_LIB=str(active / 'lib'), DEWY_EMIT_WORKERS=str(workers))
     run = subprocess.run([counter, active / 'bin/dewy-core', 'build', source, '-o', output or active / 'program'],
                          cwd=ROOT, env=env, capture_output=True, text=True)
     if run.returncode:

@@ -20,7 +20,7 @@ def build(compiler, tmp_path, source, *, release=True):
 
 
 def execute(output, workers=1):
-    return subprocess.run([output], env=dict(os.environ, SLOPPY_THREADS=str(workers)),
+    return subprocess.run([output], env=dict(os.environ, DEWY_THREADS=str(workers)),
                           capture_output=True, text=True, timeout=30)
 
 

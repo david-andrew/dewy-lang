@@ -2471,7 +2471,7 @@ including array comprehensions and fused dotted expressions; release builds
 apply broader optimization. Bounds and overlap guards select a scalar fallback
 when a whole loop cannot safely use SIMD; tail elements also use scalar code.
 Web builds use the same scalar
-operations. `SLOPPY_THREADS = 1` restricts native execution to the
+operations. `DEWY_THREADS = 1` restricts native execution to the
 calling thread.
 
 `value.to(device)` places a value's arrays on a device, and computation
@@ -2500,7 +2500,7 @@ the point where CPU code needs the result.
 
 Native Linux programs try Vulkan, then offscreen GLES; browser builds use
 WebGL 2 where available. `gpu_available()` reports whether the driver path is
-active. Otherwise—including Node and `SLOPPY_SOFTWARE = 1`—the same expression runs
+active. Otherwise—including Node and `DEWY_SOFTWARE = 1`—the same expression runs
 on the CPU. GPU functions must use shader-compatible numeric values and cannot
 capture closures or allocate managed collections. These restrictions are checked
 at compilation even if execution will use the CPU fallback. Exact rational
@@ -2543,8 +2543,8 @@ independent value semantics. Collection preserves source order, so a subsequent
 `sum` uses the same reduction order as the sequential collection. Scheduling
 does not reassociate reductions.
 
-Native programs use a persistent worker pool. `SLOPPY_THREADS = 2` limits it to
-two threads including the caller; `SLOPPY_THREADS = 1` runs on the caller. Nested
+Native programs use a persistent worker pool. `DEWY_THREADS = 2` limits it to
+two threads including the caller; `DEWY_THREADS = 1` runs on the caller. Nested
 operations share the same pool, and a caller waiting at a join helps run ready
 work. Forks stay local until a heartbeat exposes work to another worker; small
 scoped joins use direct calls on the sequential path. Web builds run serially with
@@ -2672,7 +2672,7 @@ particle's forces from a shared previous-frame snapshot and checks the result
 against the serial calculation. Run it on two threads:
 
 ```sh
-SLOPPY_THREADS=2 ./tools/dewy --release examples/parallel_particles.dewy
+DEWY_THREADS=2 ./tools/dewy --release examples/parallel_particles.dewy
 ```
 
 ## Channels

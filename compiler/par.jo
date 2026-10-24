@@ -21,12 +21,12 @@ use 'types.jo'
 use 'ast.jo'
 use 'fused.jo'
 
-# (SLOPPY_EMIT_WORKERS=n: how many; 1: none. SLOPPY_EMIT_FORCE=1: workers even for a small
-# program, for tests. SLOPPY_PAR_TIME=1: how long each part took)
+# (DEWY_EMIT_WORKERS=n: how many; 1: none. DEWY_EMIT_FORCE=1: workers even for a small
+# program, for tests. DEWY_PAR_TIME=1: how long each part took)
 emit_workers = () -> int:
     n = 1
     when not BOOTSTRAP: n = min(cpu_count(), 16)          # (the C bootstrap's compiler: one)
-    if let w = env("SLOPPY_EMIT_WORKERS"): n = to_int(w) ?? n
+    if let w = env("DEWY_EMIT_WORKERS"): n = to_int(w) ?? n
     n
 
 # true when the queued functions' code was made in parallel (and joined)
@@ -40,7 +40,7 @@ emit_parallel = (q: IrFn[], fin: bool[]) -> bool:
         n = emit_workers()
         # (each worker should have enough to make the fork worth it)
         n = min(n, total / 20000)
-        forced = env("SLOPPY_EMIT_FORCE") != none
+        forced = env("DEWY_EMIT_FORCE") != none
         if forced: n = max(emit_workers(), 1)
         if (n < 2 and not forced) or q.len() < n: return false
         # runs of consecutive functions with about the same amount of IR each
@@ -52,7 +52,7 @@ emit_parallel = (q: IrFn[], fin: bool[]) -> bool:
         cuts.push(q.len())
         # (forked one by one and read in order: each pipe holds what a worker writes until read)
         r0 = rodata.len()
-        tm = env("SLOPPY_PAR_TIME") != none
+        tm = env("DEWY_PAR_TIME") != none
         ta = time()
         pids: int[]
         fds: int[]
@@ -198,7 +198,7 @@ par_worker = (q: IrFn[], fin: bool[], a: int, b: int, r0: int, fd: int):
     tw2 = time()
     __olen = 0                      # (the compiler's own output, not yet written, is the parent's to write)
     __write_fd(fd, data(out), out.len())
-    if env("SLOPPY_PAR_TIME") != none: eprint("  worker {a}..{b}: emit {(tw1 - tw0) * 1000.0:.1} ms, pack {(tw2 - tw1) * 1000.0:.1} ms, write {(time() - tw2) * 1000.0:.1} ms, {out.len()} bytes")
+    if env("DEWY_PAR_TIME") != none: eprint("  worker {a}..{b}: emit {(tw1 - tw0) * 1000.0:.1} ms, pack {(tw2 - tw1) * 1000.0:.1} ms, write {(time() - tw2) * 1000.0:.1} ms, {out.len()} bytes")
     exit(0)
 
 pw = (b: mut u8[], v: int):

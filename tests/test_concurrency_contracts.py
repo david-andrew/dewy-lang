@@ -11,7 +11,7 @@ def check(compiler, tmp_path, text, mode='check'):
     source = tmp_path / 'concurrency.dewy'
     source.write_text(text)
     return subprocess.run([compiler, mode, source, *(['-o', tmp_path / 'program'] if mode == 'build' else [])],
-                          env=dict(os.environ, SLOPPY_STOP='check') if mode == 'check' else os.environ,
+                          env=dict(os.environ, DEWY_STOP='check') if mode == 'check' else os.environ,
                           capture_output=True, text=True, timeout=60)
 
 
@@ -70,7 +70,7 @@ main=()=>{
 ''', 'build')
     assert result.returncode == 0, result.stderr
     for threads in (1, 2):
-        ran = subprocess.run([tmp_path / 'program'], env=dict(os.environ, SLOPPY_THREADS=str(threads)),
+        ran = subprocess.run([tmp_path / 'program'], env=dict(os.environ, DEWY_THREADS=str(threads)),
                              capture_output=True, text=True, timeout=20)
         assert ran.returncode == 0, ran.stderr
 

@@ -17,7 +17,7 @@ def run(compiler, tmp_path, library):
     (lib / 'zz_lazy.dewy').write_text(library)
     main = tmp_path / 'main.dewy'
     main.write_text('import zz_lazy\nprintl(zz_lazy.g(3))\n')
-    env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
+    env = {k: v for k, v in os.environ.items() if not k.startswith('DEWY_')}
     env['DEWY_CORE_LIB'] = str(lib)
     built = subprocess.run([compiler, 'build', main, '-o', tmp_path / 'main'], env=env,
                            capture_output=True, text=True, timeout=120)

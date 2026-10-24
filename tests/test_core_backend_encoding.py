@@ -12,7 +12,7 @@ def run_source(compiler, tmp_path, text, flags=()):
     source.write_text(text)
     binary = tmp_path / 'encoding'
     built = subprocess.run([compiler, 'build', source, *flags, '-o', binary],
-                           env={**os.environ, 'SLOPPY_EMIT_WORKERS': '1'},
+                           env={**os.environ, 'DEWY_EMIT_WORKERS': '1'},
                            capture_output=True, text=True, timeout=120)
     assert built.returncode == 0, built.stdout + built.stderr
     ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)

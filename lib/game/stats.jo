@@ -2,7 +2,7 @@
 # screen, frames that took much longer than usual (stutter), and the time each zone of the frame
 # takes (zone("physics") ... zone_end(): update and draw are zones already, as are the 3D scene,
 # its shadows and post-processing), on the CPU and, through Vulkan, on the GPU. show_stats() turns it
-# on, as do SLOPPY_STATS=1 and, in a web page, ?stats in the URL. SLOPPY_STATS=log (?stats=log)
+# on, as do DEWY_STATS=1 and, in a web page, ?stats in the URL. DEWY_STATS=log (?stats=log)
 # prints the same numbers every two seconds instead, and each long frame as it happens.
 
 const __STATS_N = 240
@@ -116,7 +116,7 @@ __zone_stat = (id: int, n: int, gpu: bool = false) -> (f64, f64):
 __stats_record = (cpu: f64):
     if not __stats_checked:
         __stats_checked = true
-        mode = env("SLOPPY_STATS") ?? ""
+        mode = env("DEWY_STATS") ?? ""
         __stats_on = mode == "1"
         __stats_log = mode == "log"
     now = time()

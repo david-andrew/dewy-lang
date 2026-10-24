@@ -28,7 +28,7 @@ def main():
             commands = [[binary, str(count)], [baseline, kernel, str(count)]]
             for index in ((0, 1) if repeat % 2 else (1, 0)):
                 result = subprocess.run(commands[index], cwd=args.work, capture_output=True, text=True, check=True, timeout=30,
-                                        env=dict(os.environ, SLOPPY_THREADS='4'))
+                                        env=dict(os.environ, DEWY_THREADS='4'))
                 checksum, ns, latency = map(int, result.stdout.split())
                 assert checksum == (count//4 if kernel == 'find_first' else count), result.stdout
                 rows[index].append((ns, latency))

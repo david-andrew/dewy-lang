@@ -96,7 +96,7 @@ user_cache_dir = () -> str:
 
 # where fetched packages are kept: the user's cache directory
 pkg_cache = () -> str:
-    if let e = env("SLOPPY_PACKAGES"): return os_path(e)
+    if let e = env("DEWY_PACKAGES"): return os_path(e)
     user_cache_dir() + "/sloppy/packages"
 
 # where built programs are kept between runs of dewy-core (made, with the directories above it)

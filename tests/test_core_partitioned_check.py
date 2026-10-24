@@ -17,7 +17,7 @@ def test_partitioned_roots(compiler, tmp_path):
         text = text.replace(f'let s="item {i}"', f'let unused_{i}=1\n    let s="item {i}"')
     source.write_text(text)
     check(compiler, source, tmp_path)
-    _, timed = build(compiler, source, tmp_path / 'checked', 4, SLOPPY_PAR_TIME='1')
+    _, timed = build(compiler, source, tmp_path / 'checked', 4, DEWY_PAR_TIME='1')
     assert 'pcheck: 4 workers checked 598 roots' in timed, timed
     serial, err = build(compiler, source, tmp_path / 'serial', 4, DEWY_PCHECK='0')
     assert serial == (tmp_path / 'one').read_bytes()
@@ -40,7 +40,7 @@ def test_partitioned_new_instance_falls_back(compiler, tmp_path):
     base, errors = build(compiler, source, tmp_path / 'one', 1)
     got, err = build(compiler, source, tmp_path / 'four', 4)
     assert (got, err) == (base, errors)
-    _, timed = build(compiler, source, tmp_path / 'timed', 4, SLOPPY_PAR_TIME='1')
+    _, timed = build(compiler, source, tmp_path / 'timed', 4, DEWY_PAR_TIME='1')
     assert 'pcheck: closed-state check rejected' in timed
 
 
@@ -49,8 +49,8 @@ def test_partitioned_error_order(compiler, tmp_path):
     source.write_text(generate_dewy(600).replace('let s="item 20"', 'let s=not_a_name').replace('let s="item 590"', 'let s=another_missing_name'))
     results = []
     for workers in (1, 2, 4):
-        env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
-        env.update(DEWY_CORE_LIB=str(ROOT / 'lib'), SLOPPY_EMIT_WORKERS=str(workers))
+        env = {k: v for k, v in os.environ.items() if not k.startswith('DEWY_')}
+        env.update(DEWY_CORE_LIB=str(ROOT / 'lib'), DEWY_EMIT_WORKERS=str(workers))
         r = subprocess.run([compiler, 'build', source, '-o', tmp_path / 'bad'], env=env,
                            capture_output=True, timeout=120)
         assert r.returncode != 0
@@ -67,7 +67,7 @@ def test_partitioned_below_fused_gate(compiler, tmp_path):
     base, errors = build(compiler, source, tmp_path / 'one', 1)
     got, err = build(compiler, source, tmp_path / 'four', 4)
     assert (got, err) == (base, errors)
-    _, timed = build(compiler, source, tmp_path / 'timed', 4, SLOPPY_PAR_TIME='1')
+    _, timed = build(compiler, source, tmp_path / 'timed', 4, DEWY_PAR_TIME='1')
     assert 'pcheck: 4 workers checked 138 roots' in timed
     assert 'fused: 4 workers,' not in timed
 
@@ -82,7 +82,7 @@ def test_partitioned_unsupported_program(compiler, tmp_path, addition):
     base, errors = build(compiler, source, tmp_path / 'one', 1)
     got, err = build(compiler, source, tmp_path / 'four', 4)
     assert (got, err) == (base, errors)
-    _, timed = build(compiler, source, tmp_path / 'timed', 4, SLOPPY_PAR_TIME='1')
+    _, timed = build(compiler, source, tmp_path / 'timed', 4, DEWY_PAR_TIME='1')
     assert 'pcheck: 4 workers checked' not in timed
 
 
@@ -92,12 +92,12 @@ def test_partitioned_cross_worker_inline(compiler, tmp_path):
     source.write_text('f0=(x:int64):>int64=>x\n' +
                       '\n'.join(f'f{i}=(x:int64):>int64=>f{i-1}(x)+{i}' for i in range(1, 180)) +
                       '\nprintl"{f179(1)}"\n')
-    base, errors = build(compiler, source, tmp_path / 'one', 1, SLOPPY_EMIT_FORCE='1')
+    base, errors = build(compiler, source, tmp_path / 'one', 1, DEWY_EMIT_FORCE='1')
     for workers in (2, 4):
-        got, err = build(compiler, source, tmp_path / f'w{workers}', workers, SLOPPY_EMIT_FORCE='1')
+        got, err = build(compiler, source, tmp_path / f'w{workers}', workers, DEWY_EMIT_FORCE='1')
         assert (got, err) == (base, errors)
     _, timed = build(compiler, source, tmp_path / 'timed', 4,
-                     SLOPPY_EMIT_FORCE='1', SLOPPY_PAR_TIME='1')
+                     DEWY_EMIT_FORCE='1', DEWY_PAR_TIME='1')
     assert 'pcheck: 4 workers checked 178 roots' in timed
     assert subprocess.run([tmp_path / 'w4'], capture_output=True, text=True).stdout == '16111\n'
 
@@ -108,8 +108,8 @@ def test_partitioned_static_policy_stays_serial(compiler, tmp_path):
                       '\nlet sum:int64=0\n' + '\n'.join(f'sum+=f{i}({i})' for i in range(140)) +
                       '\nprintl"{sum}"\n')
     strict = '--internal-fact-policy=require-static'
-    base, errors = build(compiler, source, tmp_path / 'one', 1, strict, SLOPPY_EMIT_FORCE='1')
-    got, err = build(compiler, source, tmp_path / 'four', 4, strict, SLOPPY_EMIT_FORCE='1')
+    base, errors = build(compiler, source, tmp_path / 'one', 1, strict, DEWY_EMIT_FORCE='1')
+    got, err = build(compiler, source, tmp_path / 'four', 4, strict, DEWY_EMIT_FORCE='1')
     assert (got, err) == (base, errors)
-    _, timed = build(compiler, source, tmp_path / 'timed', 4, strict, SLOPPY_PAR_TIME='1', SLOPPY_EMIT_FORCE='1')
+    _, timed = build(compiler, source, tmp_path / 'timed', 4, strict, DEWY_PAR_TIME='1', DEWY_EMIT_FORCE='1')
     assert 'pcheck:' not in timed

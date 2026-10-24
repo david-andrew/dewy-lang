@@ -272,7 +272,7 @@ def test_isolation_relocated_library(compiler, tmp_path):
         program = tmp_path / 'program'
         built = subprocess.run(
             [compiler, 'build', source, '--ir', '-o', program],
-            env={**os.environ, 'SLOPPY_LIB': str(lib)},
+            env={**os.environ, 'DEWY_CORE_LIB': str(lib)},
             capture_output=True, text=True, timeout=60)
         assert built.returncode == 0, built.stdout + built.stderr
         ran = subprocess.run([program], capture_output=True, text=True, timeout=10)

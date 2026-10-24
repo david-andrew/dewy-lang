@@ -33,7 +33,7 @@ def main():
                 for repeat in range(args.runs):
                     for index in ((0, 1) if repeat % 2 else (1, 0)):
                         result = subprocess.run([binaries[index], str(args.count), *(['padded'] if padded else [])],
-                                                env=dict(os.environ, SLOPPY_THREADS=str(workers), OMP_NUM_THREADS=str(workers)),
+                                                env=dict(os.environ, DEWY_THREADS=str(workers), OMP_NUM_THREADS=str(workers)),
                                                 capture_output=True, text=True, check=True, timeout=60)
                         value, ns = map(int, result.stdout.split())
                         assert checksum is None or value == checksum, result.stdout

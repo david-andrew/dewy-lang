@@ -5,8 +5,8 @@
 # then copied, turned over, into the window's swapchain image: so the screen, like a texture
 # drawn into, has OpenGL's rows (row 0 at the bottom), and shaders need no special case for it.
 #
-# The library draws through it on Linux and Windows (OpenGL stays for the web, for SLOPPY_VULKAN=0,
-# and wherever Vulkan 1.3 is missing). SLOPPY_VK_VALIDATE=1 asks for the Khronos validation layer.
+# The library draws through it on Linux and Windows (OpenGL stays for the web, for DEWY_VULKAN=0,
+# and wherever Vulkan 1.3 is missing). DEWY_VK_VALIDATE=1 asks for the Khronos validation layer.
 
 when TARGET != "wasm" and TARGET != "macos":
     # ---------------- the functions (the loader exports them all) ----------------
@@ -902,20 +902,20 @@ when TARGET != "wasm" and TARGET != "macos":
     __vk_screen = __VkImage()
     __vk_screen_depth = __VkImage()
     # (antialiasing, as a web page's canvas has: the screen drawn with __vk_samples samples a
-    # pixel into these, resolved into __vk_screen at the end of each pass; SLOPPY_MSAA=1: none.
+    # pixel into these, resolved into __vk_screen at the end of each pass; DEWY_MSAA=1: none.
     # Every Vulkan device has 4 for these formats)
-    __vk_samples = if (env("SLOPPY_MSAA") ?? "") == "1": 1 else: 4
+    __vk_samples = if (env("DEWY_MSAA") ?? "") == "1": 1 else: 4
     __vk_screen_ms = __VkImage()
     __vk_screen_ms_depth = __VkImage()
 
     # a missing or too old driver is not a program bug: say why, so the caller can fall back
     __vk_fail = ""
 
-    # Vulkan is tried first unless SLOPPY_VULKAN=0 (OpenGL, then); without a driver that has what
-    # this needs, the library uses OpenGL, saying why only when SLOPPY_VULKAN=1 asked for Vulkan
-    __vk_wanted = () -> bool: (env("SLOPPY_VULKAN") ?? "") != "0"
+    # Vulkan is tried first unless DEWY_VULKAN=0 (OpenGL, then); without a driver that has what
+    # this needs, the library uses OpenGL, saying why only when DEWY_VULKAN=1 asked for Vulkan
+    __vk_wanted = () -> bool: (env("DEWY_VULKAN") ?? "") != "0"
     __vk_note = (msg: str):
-        if (env("SLOPPY_VULKAN") ?? "") == "1": eprint("note: {msg}")
+        if (env("DEWY_VULKAN") ?? "") == "1": eprint("note: {msg}")
 
     __vk_check = (r: i32, what: str):
         if r != 0: __environment_failure("Vulkan: {what} failed ({r})")
@@ -1064,7 +1064,7 @@ when TARGET != "wasm" and TARGET != "macos":
         exts: *u8[]
         loop nm in names: exts.push(data(nm))
         layers: *u8[]
-        if (env("SLOPPY_VK_VALIDATE") ?? "") == "1":
+        if (env("DEWY_VK_VALIDATE") ?? "") == "1":
             if __vk_has_layer("VK_LAYER_KHRONOS_validation"): layers.push(data("VK_LAYER_KHRONOS_validation"))
             else: eprint("note: the Vulkan validation layer is not installed")
         info = VkInstanceCreateInfo(stype = 1, app = (&app) as *u8, nlayers = u32(layers.len()), layers = data(layers) as *u8, nexts = u32(exts.len()), exts = data(exts) as *u8)
@@ -1101,7 +1101,7 @@ when TARGET != "wasm" and TARGET != "macos":
                 best = i
                 best_rank = rank
         if best < 0: return "no Vulkan device can be used: {why}"
-        if let want = env("SLOPPY_VK_DEVICE"):
+        if let want = env("DEWY_VK_DEVICE"):
             # (by index, for testing: e.g. the software one)
             if let k = to_int(want):
                 if k >= 0 and k < int(n) and len(__vk_device_unfit(pds[k])) == 0: best = k
@@ -1162,7 +1162,7 @@ when TARGET != "wasm" and TARGET != "macos":
         __vk_make_frames()
         __vk_make_bindless()
         __vk_load_pipeline_cache()
-        if (env("SLOPPY_VK_VALIDATE") ?? "") == "1": eprint("vulkan: {__vk_device_name}")
+        if (env("DEWY_VK_VALIDATE") ?? "") == "1": eprint("vulkan: {__vk_device_name}")
         ""
 
     # ---------------- the pipeline cache ----------------
@@ -1170,12 +1170,12 @@ when TARGET != "wasm" and TARGET != "macos":
     # dispatched) are kept in a VkPipelineCache, saved between runs: making one again takes the
     # driver a fraction of the time (on NVIDIA, Breakwater's take 10 ms instead of 70). The file
     # is the program's in ~/.cache/sloppy ($XDG_CACHE_HOME; %LOCALAPPDATA%\sloppy on Windows),
-    # saved after a frame that made pipelines; SLOPPY_VK_PIPELINE_CACHE=0 leaves it out.
+    # saved after a frame that made pipelines; DEWY_VK_PIPELINE_CACHE=0 leaves it out.
     __vk_pcache = 0
     __vk_pcache_dirty = false
 
     __vk_pcache_path = () -> str:
-        if (env("SLOPPY_VK_PIPELINE_CACHE") ?? "") == "0": return ""
+        if (env("DEWY_VK_PIPELINE_CACHE") ?? "") == "0": return ""
         dir = ""
         when TARGET == "windows":
             dir = env("LOCALAPPDATA") ?? ""
@@ -1609,9 +1609,9 @@ when TARGET != "wasm" and TARGET != "macos":
             __vk_sc_rendered.push(s)
             __vk_sc_layout_fresh.push(true)
 
-    # vsync (FIFO, which every driver has) unless SLOPPY_VSYNC=0 asks for the fastest
+    # vsync (FIFO, which every driver has) unless DEWY_VSYNC=0 asks for the fastest
     __vk_present_mode = () -> u32:
-        if (env("SLOPPY_VSYNC") ?? "") != "0": return 2
+        if (env("DEWY_VSYNC") ?? "") != "0": return 2
         n: u32 = 0
         vkGetPhysicalDeviceSurfacePresentModesKHR(__vk_pd, __vk_surface, &n, null)
         modes = fill(u32(0), int(n))
@@ -1900,7 +1900,7 @@ when TARGET != "wasm" and TARGET != "macos":
             w = data(code) as *u32
             loop i in [5..len(code) / 4 - 1):
                 if w[i] != u32(0x20011): break
-                if w[i + 1] == u32(61): panic("this GPU ({__vk_device_name}) lacks the subgroup operations a compute function uses (SLOPPY_VULKAN=0 runs it on the CPU)")
+                if w[i + 1] == u32(61): panic("this GPU ({__vk_device_name}) lacks the subgroup operations a compute function uses (DEWY_VULKAN=0 runs it on the CPU)")
         m = __vk_module(code)
         info = VkComputePipelineCreateInfo(stype = 29, stage = VkPipelineShaderStageCreateInfo(stype = 18, stage = 0x20, module = m, name = data("main")), layout = __vk_layout, base_index = -1)
         pl = 0

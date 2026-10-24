@@ -1,7 +1,7 @@
 # A height field from one fused expression, with a CPU reference calculation.
 # Native: tools/dewy examples/terrain_array.dewy
 # Web: tools/dewy build examples/terrain_array.dewy --target wasm32 -o terrain
-# Force the portable CPU fallback with SLOPPY_SOFTWARE=1.
+# Force the portable CPU fallback with DEWY_SOFTWARE=1.
 from units import rad
 height = (x:float32 z:float32 phase:float32):>float32 => {
     return sin((x*0.25+phase)*rad)*cos((z*0.25-phase)*rad)*2.0

@@ -310,14 +310,14 @@ __inv_copied_note = () -> str:
 # the matchmaking server for rooms (tools/compiler/rendezvous.jo: examples/README.md#short-code-rooms runs one): url is
 # where web pages reach it, as wss://match.example.com (a page served over https may only reach
 # wss://), native where native programs do, which have no TLS ("": ws:// to the same host, on the
-# server's own port, 7700). "" for none. DEWY_MATCH_SERVER (legacy SLOPPY_SERVER, or a web page's ?server=) sets it for any
+# server's own port, 7700). "" for none. DEWY_MATCH_SERVER (or a web page's ?server=) sets it for any
 # game, over the game's own ("none": no server): for trying a server of one's own
 server = (url: str, native: str = ""):
     __inv_server_set = true
     __inv_server = trim(url)
     __inv_native = trim(native)
     __inv_server_env = false
-    if let o = env("DEWY_MATCH_SERVER") ?? env("SLOPPY_SERVER"):
+    if let o = env("DEWY_MATCH_SERVER"):
         __inv_server_env = trim(o) != "none"
         __inv_server = if trim(o) == "none": "" else: trim(o)
         __inv_native = ""

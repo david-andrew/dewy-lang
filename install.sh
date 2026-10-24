@@ -361,7 +361,7 @@ check_toolchain() {
 }
 
 # The compiler reports its version and builds and runs a tiny program, with
-# no inherited DEWY_*/SLOPPY_* settings and no build tools on PATH.
+# no inherited DEWY_* settings and no build tools on PATH.
 smoke() {
     local compiler="$1/bin/dewy-core" work="$staging/smoke" status
     rm -rf -- "$work"

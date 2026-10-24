@@ -86,7 +86,7 @@ def test_effect_rows_internal_policy(compiler, tmp_path, mode, body, accepted):
 
 @pytest.mark.core_quick
 def test_effect_rows_check_without_lowering(compiler, tmp_path):
-    env = dict(os.environ, SLOPPY_STOP='check')
+    env = dict(os.environ, DEWY_STOP='check')
     result = compile_source(compiler, FIXTURES / 'unreachable.dewy', tmp_path, 'check', env)
     assert result.returncode != 0
     assert 'effect contract violation' in result.stderr, result.stderr

@@ -5,9 +5,9 @@
 # the socket, and each event libwayland delivers is turned back into wire format for it: one
 # implementation of the protocol logic, two transports. Using libwayland lets libdecor draw the
 # window's decorations the way the desktop does (on GNOME with GTK; where the compositor draws
-# them itself, libdecor leaves that to it). Without libwayland (SLOPPY_WAYLAND=protocol, or a
+# them itself, libdecor leaves that to it). Without libwayland (DEWY_WAYLAND=protocol, or a
 # system without it) wayland.jo speaks the protocol itself and draws a title bar of its own;
-# without libdecor (or SLOPPY_LIBDECOR=0) it does the same over libwayland.
+# without libdecor (or DEWY_CORE_LIBDECOR=0) it does the same over libwayland.
 
 when TARGET != "wasm":
     @lib("libwayland-client.so.0")
@@ -271,7 +271,7 @@ zwp_relative_pointer_v1 1
 
     # connect through libwayland; false if it is not there or cannot connect
     __lw_connect = () -> bool:
-        if (env("SLOPPY_WAYLAND") ?? "") == "protocol" or not lib_available("libwayland-client.so.0"): return false
+        if (env("DEWY_WAYLAND") ?? "") == "protocol" or not lib_available("libwayland-client.so.0"): return false
         if not __lw_make_ifaces(): return false
         d = wl_display_connect(null)
         if d == null: return false
@@ -469,7 +469,7 @@ zwp_relative_pointer_v1 1
 
     # decorate the window with libdecor; false if it is not available
     __ld_open = (title: str) -> bool:
-        if (env("SLOPPY_LIBDECOR") ?? "") == "0" or not lib_available("libdecor-0.so.0"): return false
+        if (env("DEWY_CORE_LIBDECOR") ?? "") == "0" or not lib_available("libdecor-0.so.0"): return false
         __ld_iface = __alloc(8 * 16)
         mem_set(__ld_iface, 0, 8 * 16)
         err: cfn(*u8, i32, *u8) = __ld_error

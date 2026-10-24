@@ -83,10 +83,10 @@ when TARGET == "macos":
     __vk_bar_h = 0
     __vk_inst: *u8 = null
 
-    # (opt-in while it is new: SLOPPY_METAL=1)
-    __vk_wanted = () -> bool: (env("SLOPPY_METAL") ?? "") == "1"
+    # (opt-in while it is new: DEWY_METAL=1)
+    __vk_wanted = () -> bool: (env("DEWY_METAL") ?? "") == "1"
     __vk_note = (msg: str):
-        if (env("SLOPPY_VULKAN") ?? "") == "1" or (env("SLOPPY_METAL") ?? "") == "1": eprint("note: {msg}")
+        if (env("DEWY_VULKAN") ?? "") == "1" or (env("DEWY_METAL") ?? "") == "1": eprint("note: {msg}")
     __vk_ts_want = (): pass
     __vk_ts_mark = () -> int: 0
     __vk_ts_pair = (what: int, q0: int, session: int): pass

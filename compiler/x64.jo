@@ -372,7 +372,7 @@ const WATCH_CODE_AT = 0x50000000       # sloppy watch: where later builds' code 
 const WATCH_CODE_SIZE = 0x20000000     # heap may start, within 2 GB of the globals)
 
 ra_on = true              # false: spill everything (fast debug codegen)
-ra_prio = true            # (release builds: allocate_release; SLOPPY_RA_LINEAR=1: allocate)
+ra_prio = true            # (release builds: allocate_release; DEWY_RA_LINEAR=1: allocate)
 callee_pool = [RBX, 12, 13, 14, 15]
 is_callee = [false, false, false, true, false, false, false, false, false, false, false, false, true, true, true, true]
 caller_pool = [RSI, RDI, R8, R9, R10, R11]
@@ -802,8 +802,8 @@ allocate = ():
 ra_occ: int[]
 ra_words = 0
 ra_cw: int[]                # prefix sums of call weights
-ra_dump = ""                # (SLOPPY_RADUMP=f_name: print the allocation of that function)
-ra_only = ""                # (SLOPPY_RA_ONLY=f_name: allocate only that function this way)
+ra_dump = ""                # (DEWY_RADUMP=f_name: print the allocation of that function)
+ra_only = ""                # (DEWY_RA_ONLY=f_name: allocate only that function this way)
 
 # mask of bits lo..hi (0..63) of a word
 ra_mask = (lo: int, hi: int) -> int:
@@ -3226,7 +3226,7 @@ jfalse = (cc: int, fx: mut int[]):
         return
     fx.push(jcc32((cc xor 1)))
 
-# (SLOPPY_RASTAT: what the allocation costs, as loads and stores of spilled values and of values
+# (DEWY_RASTAT: what the allocation costs, as loads and stores of spilled values and of values
 # saved around calls, each weighted by loop depth like v_weight)
 ra_stat = false
 ra_spill_cost = 0

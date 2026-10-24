@@ -176,14 +176,14 @@ function Test-Toolchain([string]$dir, [string]$short) {
 }
 
 # The compiler reports its version and builds and runs a tiny program, with
-# no inherited DEWY_*/SLOPPY_* settings and no build tools on PATH.
+# no inherited DEWY_* settings and no build tools on PATH.
 function Test-Smoke([string]$dir) {
     $work = Join-Path $State.Staging 'smoke'
     if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force }
     New-Item -ItemType Directory -Path $work | Out-Null
     $compiler = Join-Path $dir 'bin\dewy-core.exe'
     $saved = @{}
-    foreach ($item in @(Get-ChildItem env: | Where-Object { $_.Name -match '^(DEWY_|SLOPPY_)' -or $_.Name -eq 'PATH' })) {
+    foreach ($item in @(Get-ChildItem env: | Where-Object { $_.Name -match '^DEWY_' -or $_.Name -eq 'PATH' })) {
         $saved[$item.Name] = $item.Value
         Remove-Item -LiteralPath "env:$($item.Name)"
     }

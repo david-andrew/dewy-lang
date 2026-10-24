@@ -21,8 +21,8 @@ def build(toolchain: Path, output: Path) -> None:
     output.mkdir(parents=True, exist_ok=False)
     compiler = toolchain / 'bin/dewy-core'
     env = {key: value for key, value in os.environ.items()
-           if not key.startswith(('DEWY_', 'SLOPPY_'))}
-    env.update(DEWY_CORE_LIB=str(toolchain / 'lib'), SLOPPY_EMIT_WORKERS='1')
+           if not key.startswith('DEWY_')}
+    env.update(DEWY_CORE_LIB=str(toolchain / 'lib'), DEWY_EMIT_WORKERS='1')
     for host, target in TARGETS.items():
         bundle = output / host / 'dewy-core'
         (bundle / 'bin').mkdir(parents=True)

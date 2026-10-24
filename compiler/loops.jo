@@ -734,7 +734,7 @@ lx_dbg = ""
 loop_versioning = (vector_only: bool = false):
     if not lx_dbg_read:
         lx_dbg_read = true
-        lx_dbg = env("SLOPPY_LXDBG") ?? ""
+        lx_dbg = env("DEWY_LXDBG") ?? ""
     if len(lx_dbg) > 0 and find(ir.name, lx_dbg) < 0: return
     code = ir.code
     ends = lx_ends(code)

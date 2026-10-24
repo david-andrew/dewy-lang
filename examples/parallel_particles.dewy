@@ -1,5 +1,5 @@
 # Pure per-particle work reads the previous frame and returns the next value.
-# Run: SLOPPY_THREADS=2 tools/dewy --release examples/parallel_particles.dewy
+# Run: DEWY_THREADS=2 tools/dewy --release examples/parallel_particles.dewy
 # The same program builds for the web, where parallel_map runs serially.
 Particle:type = [x:float64 y:float64 vx:float64 vy:float64]
 make = (count:int64):>array<Particle> => [loop i in [0..count) Particle[(i%32) as float64 (i//32) as float64 0.0 0.0]]

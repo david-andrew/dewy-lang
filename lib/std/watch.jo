@@ -33,7 +33,7 @@ when TARGET != "windows" and TARGET != "wasm":
         __exit(128 + int(sig))
 
 __watch_on = false
-__watch_hin: *u8 = null          # (Windows: the pipes, handles passed in SLOPPY_WATCH_PIPES)
+__watch_hin: *u8 = null          # (Windows: the pipes, handles passed in DEWY_WATCH_PIPES)
 __watch_hout: *u8 = null
 __watch_jbuf: *u8 = null
 __watch_jmp: *u8 = null      # set while update and draw run: where a panic goes
@@ -47,7 +47,7 @@ __watch_init = ():
         ok = false
         when TARGET == "windows":
             # the pipes' handles, from dewy-core watch (else the program was started some other way)
-            hs = split(env("SLOPPY_WATCH_PIPES") ?? "", ",")
+            hs = split(env("DEWY_WATCH_PIPES") ?? "", ",")
             if hs.len() != 2: return
             __watch_hin = (to_int(hs[0]) ?? 0) as *u8
             __watch_hout = (to_int(hs[1]) ?? 0) as *u8

@@ -120,7 +120,7 @@ pc_try = (start: int):
                 lib_checked += 1
             lib_cursor += 1
         pc_prechecking = false
-        if env("SLOPPY_PAR_TIME") != none: eprint("pcheck: checked {lib_checked} pending library instances before fork")
+        if env("DEWY_PAR_TIME") != none: eprint("pcheck: checked {lib_checked} pending library instances before fork")
         if open_globals.len() != 0 or not pc_features(): return
         n = min(4, emit_workers())
         pc_workers = n
@@ -206,7 +206,7 @@ pc_try = (start: int):
                 loop fd in reads:
                     if fd >= 0: syscall(3, fd)
                 dc_replay()
-            if env("SLOPPY_PAR_TIME") != none: eprint("pcheck: parsed deferred bodies before checking")
+            if env("DEWY_PAR_TIME") != none: eprint("pcheck: parsed deferred bodies before checking")
             ack: u8[]
             pw(ack, 1)
             loop fd in controls: pc_send(fd, ack)
@@ -228,7 +228,7 @@ pc_try = (start: int):
             pc_pids = []
             pc_fds = []
             pc_owner = {}
-            if env("SLOPPY_PAR_TIME") != none: eprint("pcheck: closed-state check rejected")
+            if env("DEWY_PAR_TIME") != none: eprint("pcheck: closed-state check rejected")
             return
         # Broadcast in partition order, which is also serial root order.
         merged: u8[]
@@ -241,7 +241,7 @@ pc_try = (start: int):
             syscall(3, fd)
         pc_merge(merged)
         pc_active = true
-        if env("SLOPPY_PAR_TIME") != none: eprint("pcheck: {n} workers checked {roots.len()} roots")
+        if env("DEWY_PAR_TIME") != none: eprint("pcheck: {n} workers checked {roots.len()} roots")
 
 pc_check = (roots: int[], outfd: int, infd: int, parsefd: int):
     if (env("DEWY_PCHECK_FAIL") ?? "") == "check": exit(1)

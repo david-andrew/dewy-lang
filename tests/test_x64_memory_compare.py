@@ -16,7 +16,7 @@ def build(compiler, tmp_path, source, flags):
     binary = tmp_path / 'memory_compare'
     result = subprocess.run([compiler, 'build', path, '-o', binary, *flags],
                             capture_output=True, text=True, timeout=60,
-                            env={**os.environ, 'SLOPPY_EMIT_WORKERS': '1'})
+                            env={**os.environ, 'DEWY_EMIT_WORKERS': '1'})
     assert result.returncode == 0, result.stdout + result.stderr
     return binary
 

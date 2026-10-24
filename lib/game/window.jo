@@ -1,5 +1,5 @@
 # Windows, the frame loop and input. Linux: Wayland (or X11), drawn with Vulkan (or OpenGL ES 3,
-# or the software renderer: SLOPPY_SOFTWARE=1); Windows: Win32 and Vulkan or OpenGL; macOS: Cocoa
+# or the software renderer: DEWY_SOFTWARE=1); Windows: Win32 and Vulkan or OpenGL; macOS: Cocoa
 # and OpenGL. The system's libraries are loaded at runtime. Web: a <canvas> with WebGL2.
 
 enum Key:
@@ -33,14 +33,14 @@ __mouse_btn: bool[]
 __mouse_pressed: bool[]
 __mouse_released: bool[]
 __text_input = ""
-# (screenshot runs: the input as the last frame left it, so that only SLOPPY_INPUT changes it)
+# (screenshot runs: the input as the last frame left it, so that only DEWY_INPUT changes it)
 __kept_keys: bool[]
 __kept_btns: bool[]
 __kept_mouse = vec2(0, 0)
 __time0 = time()              # (from the start; from the window opening, once it has)
 __fixed_step = false          # screenshot runs advance exactly 1/60 s per frame
 __pace_real_time = false      # (and at 60 frames a second, not faster: a networked game's)
-# (SLOPPY_INPUT's punctuation keys: each name, then the character it types and shifted)
+# (DEWY_INPUT's punctuation keys: each name, then the character it types and shifted)
 const __SCRIPT_PUNCT = " minus -_ equals =+ comma ,< period .> slash /? semicolon ;: quote '\" lbracket [{{ rbracket ]}} backslash \\| grave `~ "
 __frame_count = 0
 __dt = 0.0
@@ -92,7 +92,7 @@ __input_end_frame = ():
         __kept_mouse = vec2(__mouse_x, __mouse_y)
 
 # (screenshot runs are the same each time: what the desktop sent since the last frame, keys,
-# buttons, the mouse, typing, is undone; SLOPPY_INPUT's events come after)
+# buttons, the mouse, typing, is undone; DEWY_INPUT's events come after)
 __ignore_real_input = ():
     if __kept_keys.len() == 0: return
     __key_down = __kept_keys
@@ -273,7 +273,7 @@ __touch_ids: int[]
 __touch_pos: vec2[]
 __touch_last = false
 
-# a finger (a web page's, or SLOPPY_INPUT's): kind 1 down, 0 moved, 2 up (or cancelled); 3: the
+# a finger (a web page's, or DEWY_INPUT's): kind 1 down, 0 moved, 2 up (or cancelled); 3: the
 # mouse was used (id -1); x, y in the window's pixels
 __touch_event = (id: int, kind: int, x: f32, y: f32):
     if kind == 3:
@@ -373,8 +373,8 @@ window = (title: str = "", width: int = 1280, height: int = 720):
         k = max(1, min(1280 / width, 720 / height))
         __win_w = width * k
         __win_h = height * k
-    # (testing aid: SLOPPY_WINDOW=WxH opens the window at another size than the design size)
-    if let ws = env("SLOPPY_WINDOW"):
+    # (testing aid: DEWY_WINDOW=WxH opens the window at another size than the design size)
+    if let ws = env("DEWY_WINDOW"):
         x = find(ws, "x")
         if x > 0:
             __win_w = to_int(ws[..x)) ?? width
@@ -601,11 +601,11 @@ else when TARGET == "windows":
     const __WS_VISIBLE = 0x10000000
 
     __platform_open = ():
-        __soft = __soft_kept or (env("SLOPPY_SOFTWARE") ?? "") == "1"
-        __w32_any_size = env("SLOPPY_SCREENSHOT") != none
-        # (a screenshot run through Vulkan with SLOPPY_HEADLESS=1, as over ssh, where there is no
+        __soft = __soft_kept or (env("DEWY_SOFTWARE") ?? "") == "1"
+        __w32_any_size = env("DEWY_SCREENSHOT") != none
+        # (a screenshot run through Vulkan with DEWY_HEADLESS=1, as over ssh, where there is no
         # desktop to show a window on: no window, frames are only drawn)
-        if not __soft and __vk_wanted() and __w32_any_size and env("SLOPPY_HEADLESS") != none:
+        if not __soft and __vk_wanted() and __w32_any_size and env("DEWY_HEADLESS") != none:
             why = __vk_open("", () -> int: 0)
             if len(why) == 0:
                 __vk = true
@@ -969,7 +969,7 @@ else when TARGET == "windows":
 
     __game_run = (update: (f64) -> void, draw: () -> void):
         window(__win_title, __win_w, __win_h)
-        __fixed_step = env("SLOPPY_SCREENSHOT") != none
+        __fixed_step = env("DEWY_SCREENSHOT") != none
         when WATCH:
             __watch_init()
         last = time()
@@ -1097,13 +1097,13 @@ else when TARGET == "linux":
             exit(1)
 
     __platform_open = ():
-        __soft = __soft_kept or (env("SLOPPY_SOFTWARE") ?? "") == "1"
+        __soft = __soft_kept or (env("DEWY_SOFTWARE") ?? "") == "1"
         # (the software renderer with no display to show it on: frames drawn, no window, as for
-        # a benchmark with SLOPPY_FRAMES and SLOPPY_STATS)
+        # a benchmark with DEWY_FRAMES and DEWY_STATS)
         no_display = env("WAYLAND_DISPLAY") == none and env("DISPLAY") == none
-        headless = __soft and (env("SLOPPY_SCREENSHOT") != none or no_display)
+        headless = __soft and (env("DEWY_SCREENSHOT") != none or no_display)
         # (a screenshot run through Vulkan needs no display: no window, frames are only drawn)
-        if not __soft and __vk_wanted() and env("SLOPPY_SCREENSHOT") != none and env("WAYLAND_DISPLAY") == none and env("DISPLAY") == none:
+        if not __soft and __vk_wanted() and env("DEWY_SCREENSHOT") != none and env("WAYLAND_DISPLAY") == none and env("DISPLAY") == none:
             why = __vk_open("", () -> int: 0)
             if len(why) == 0:
                 __vk = true
@@ -1111,8 +1111,8 @@ else when TARGET == "linux":
             __vk_note("{why}; using the software renderer")
             __soft = true
             headless = true
-        # Wayland first where it is running (SLOPPY_PLATFORM=x11 or wayland chooses)
-        plat = env("SLOPPY_PLATFORM") ?? ""
+        # Wayland first where it is running (DEWY_PLATFORM=x11 or wayland chooses)
+        plat = env("DEWY_PLATFORM") ?? ""
         if plat != "x11" and (env("WAYLAND_DISPLAY") != none or plat == "wayland") and not headless:
             why = __wl_open(__win_title, __win_w, __win_h)
             if len(why) == 0:
@@ -1132,7 +1132,7 @@ else when TARGET == "linux":
                 if __soft: __sw_init_window(__win_w, __win_h)
                 return
             if plat == "wayland": __need(false, why)
-        if not lib_available("libX11.so.6") or (env("SLOPPY_X11") ?? "") == "protocol":
+        if not lib_available("libX11.so.6") or (env("DEWY_X11") ?? "") == "protocol":
             # no Xlib: talk to the X server directly and render in software
             __soft = true
             why = __xp_open(__win_title, __win_w, __win_h)
@@ -1444,7 +1444,7 @@ else when TARGET == "linux":
         owner = XGetSelectionOwner(__xdpy, cb)
         if owner == __xwin: return __x_clip_text
         if owner == 0: return ""
-        prop = __x_atom("SLOPPY_CLIPBOARD")
+        prop = __x_atom("DEWY_CLIPBOARD")
         __x_sel_done = false
         XConvertSelection(__xdpy, cb, __x_atom("UTF8_STRING"), prop, __xwin, 0)
         XFlush(__xdpy)
@@ -1589,7 +1589,7 @@ else when TARGET == "linux":
 
     __game_run = (update: (f64) -> void, draw: () -> void):
         window(__win_title, __win_w, __win_h)
-        __fixed_step = env("SLOPPY_SCREENSHOT") != none
+        __fixed_step = env("DEWY_SCREENSHOT") != none
         when WATCH:
             __watch_init()
         last = time()
@@ -1652,7 +1652,7 @@ __game_quit = ():
 __fps_acc = 0.0
 __fps_n = 0
 
-# testing aid: SLOPPY_INPUT="5:space+,7:space-,10:right+" (commas or spaces between) presses (+) / releases (-) keys at
+# testing aid: DEWY_INPUT="5:space+,7:space-,10:right+" (commas or spaces between) presses (+) / releases (-) keys at
 # frames (the names of Key: a, n1, space, escape, left, shift...); mouse_left+ (and mouse_right,
 # mouse_middle) the mouse's buttons, 3:wheel=1 turns the wheel a notch (-1: back), and
 # 12:mouse=400x300 moves the mouse there (in the screen's
@@ -1664,13 +1664,13 @@ __script: (int, int, bool, vec2)[]          # (frame, key (-1 - button: a mouse 
 __script_loaded = false
 __script_mouse_placed = false
 __script_text: (int, str)[]                 # (frame, text typed then: 5:text=ACE)
-# (SLOPPY_INPUT's gamepad, pad 0: there from the first item that uses it)
+# (DEWY_INPUT's gamepad, pad 0: there from the first item that uses it)
 __scripted_pad = ():
     loop e in __script:
         if e.0 != __frame_count or e.1 > -300 or e.1 <= -500: continue
         if not __pad_on[0]:
             __pad_on[0] = true
-            __pad_names[0] = "SLOPPY_INPUT"
+            __pad_names[0] = "DEWY_INPUT"
         if e.1 > -400:
             __pad_down[-300 - e.1] = e.2
         else:
@@ -1689,7 +1689,7 @@ __scripted_input = ():
         if __fixed_step:
             __mouse_x = f64(__win_w) / 2.0
             __mouse_y = f64(__win_h) / 2.0
-        if let s = env("SLOPPY_INPUT"):
+        if let s = env("DEWY_INPUT"):
             # (items between commas or spaces; text=... runs on, spaces and all, to the next
             # comma or the next word that starts with a frame number and a colon)
             items: str[]
@@ -1772,7 +1772,7 @@ __scripted_input = ():
                 loop b in [0..3):
                     if "mouse_{b as Mouse}" == name: found = -1 - b
                 if found == -1000 or (item[len(item) - 1] != '+' and item[len(item) - 1] != '-'):
-                    eprint("SLOPPY_INPUT: '{item}' is not frame:key+ or frame:key- (keys as Key names them: a, n1, space, enter, escape, left, shift; mouse_left), frame:mouse=XxY, frame:wheel=N, frame:text=..., frame:touch1=XxY or frame:touch1-, frame:pad_a+ (a gamepad's buttons), frame:lstick=XxY, rstick=XxY, lt=V nor rt=V")
+                    eprint("DEWY_INPUT: '{item}' is not frame:key+ or frame:key- (keys as Key names them: a, n1, space, enter, escape, left, shift; mouse_left), frame:mouse=XxY, frame:wheel=N, frame:text=..., frame:touch1=XxY or frame:touch1-, frame:pad_a+ (a gamepad's buttons), frame:lstick=XxY, rstick=XxY, lt=V nor rt=V")
                     continue
                 __script.push((fr, found, down, vec2(0, 0)))
     loop e in __script_text:
@@ -1922,21 +1922,21 @@ __present_how = () -> str:
             return "{how} shared memory copy, scale {__wl_scale:.3}"
         "egl window surface"
 
-# testing aid: SLOPPY_SCREENSHOT=out.png [SLOPPY_FRAMES=n] saves frame n and exits (SLOPPY_WINDOW=WxH
+# testing aid: DEWY_SCREENSHOT=out.png [DEWY_FRAMES=n] saves frame n and exits (DEWY_WINDOW=WxH
 # for a window of another size)
-# (SLOPPY_FRAME_STATS=1 also reports the average CPU time of a frame: update + draw + submit)
+# (DEWY_FRAME_STATS=1 also reports the average CPU time of a frame: update + draw + submit)
 __maybe_screenshot = ():
     when TARGET != "wasm":
-        if let path = env("SLOPPY_SCREENSHOT"):
-            n = to_int(env("SLOPPY_FRAMES") ?? "5") ?? 5
+        if let path = env("DEWY_SCREENSHOT"):
+            n = to_int(env("DEWY_FRAMES") ?? "5") ?? 5
             if __frame_count == n:
                 save_png(screenshot(), path)
-                if env("SLOPPY_FRAME_STATS") != none:
+                if env("DEWY_FRAME_STATS") != none:
                     eprint("frame cpu: {__frame_cpu * 1000.0 / f64(n + 1):.2} ms average over {n + 1} frames, present {__frame_present * 1000.0 / f64(n):.2} ms; {__win_w}x{__win_h} pixels, {__present_how()}")
                 __game_quit()
                 exit(0)
-        # (SLOPPY_FRAMES alone: that many frames, then the program ends, with no picture)
-        else if let fr = env("SLOPPY_FRAMES"):
+        # (DEWY_FRAMES alone: that many frames, then the program ends, with no picture)
+        else if let fr = env("DEWY_FRAMES"):
             if __frame_count == (to_int(fr) ?? -1):
                 __game_quit()
                 exit(0)

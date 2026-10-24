@@ -1085,7 +1085,7 @@ msl_build = (vsf: int, fsf: int) -> (str, str):
     loop j in 0.. and lf in leaves2: m += "    i{lf.0} = in.v{j};\n"
     m += "    return {fname}(tx, i, pc.params);\n}\n"
     fs = ml_source(m)
-    if let dir = env("SLOPPY_MSL_DUMP"):
+    if let dir = env("DEWY_MSL_DUMP"):
         write_file("{dir}/{ml_dumped}.vs.metal", vs)
         write_file("{dir}/{ml_dumped}.fs.metal", fs)
         ml_dumped += 1
@@ -1109,7 +1109,7 @@ msl_compute = (f: int) -> str:
     else: m += "    if (int(gid.x) < pc.vstride) {name}(tx, sl_sg_size, sl_sg_id, int(gid.x), pc.params);\n"
     m += "}\n"
     src = ml_source(m)
-    if let dir = env("SLOPPY_MSL_DUMP"):
+    if let dir = env("DEWY_MSL_DUMP"):
         write_file("{dir}/{ml_dumped}.comp.metal", src)
         ml_dumped += 1
     src
@@ -1157,7 +1157,7 @@ msl_kernel = (f: int, desc: str) -> str:
     else if types[rt].kind == .int_: bits = "as_type<uint>(int({val}))"
     m += "    sl_ptr(q, 0)[idx] = {bits};\n}\n"
     src = ml_source(m)
-    if let dir = env("SLOPPY_MSL_DUMP"):
+    if let dir = env("DEWY_MSL_DUMP"):
         write_file("{dir}/{ml_dumped}.kernel.metal", src)
         ml_dumped += 1
     src

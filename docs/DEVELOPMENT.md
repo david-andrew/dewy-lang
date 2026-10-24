@@ -226,7 +226,7 @@ generation or library changes. A cached run takes about 20 s with counters.
 Without counters it uses valgrind with inputs a tenth the size (`--counter
 valgrind` forces this); CI does not run it. `build --time` reports compiler phases and, on Linux x86-64, the
 instructions of each phase for the program's code, the library's (`lib/`) and
-neither; `SLOPPY_PAR_TIME=1` adds
+neither; `DEWY_PAR_TIME=1` adds
 optimizer and emission timing. `python3 -m tools.compiler.fuzz` runs bounded
 differential checks of native/web, default/release and `-g` builds on
 generated programs.
@@ -252,7 +252,6 @@ generated programs.
   differential test keeps each pair giving the same results.
 
 Build hashes identify provenance; byte-identical executables are not required.
-Runtime tuning variables keep their `SLOPPY_*` names for now.
 
 ## Releases and installers
 

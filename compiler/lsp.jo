@@ -2676,8 +2676,8 @@ lsp_main = ():
         main_path = path
         if starts_with(path, root_lib + "/"): main_path = empty_main
         sk: str[]
-        if let s = env("SLOPPY_SKIP"): sk.push(s)
-        o = run_child(main_path, path, env("SLOPPY_SENTINEL") != none, sk, env("SLOPPY_LOWER") != none, env("SLOPPY_WIDE") != none)
+        if let s = env("DEWY_SKIP"): sk.push(s)
+        o = run_child(main_path, path, env("DEWY_SENTINEL") != none, sk, env("DEWY_LOWER") != none, env("DEWY_WIDE") != none)
         loop l in o.lines: print(l)
         exit(0)
     shutdown = false

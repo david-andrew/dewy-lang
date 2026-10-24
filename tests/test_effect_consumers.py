@@ -12,7 +12,7 @@ def build_run(compiler, tmp_path, source, release):
     binary = tmp_path / 'consumer'
     result = subprocess.run(
         [compiler, 'build', path, '-o', binary, *(['--release'] if release else [])],
-        env=dict(os.environ, SLOPPY_EMIT_WORKERS='1'),
+        env=dict(os.environ, DEWY_EMIT_WORKERS='1'),
         capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stdout + result.stderr
     ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)

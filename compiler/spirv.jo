@@ -1781,14 +1781,14 @@ sv_fragment = (fsf: int) -> str:
 
 sv_dumped = 0
 
-# returns (vertex module, fragment module). With SLOPPY_SPIRV_DUMP=dir, each is also written to
+# returns (vertex module, fragment module). With DEWY_SPIRV_DUMP=dir, each is also written to
 # dir/<n>.vert.spv and dir/<n>.frag.spv (for spirv-val: tools/spirvtest.py)
 spirv_build = (vsf: int, fsf: int) -> (str, str):
     sv_translated = {}
     vs = sv_vertex(vsf)
     sv_translated = {}
     fs = sv_fragment(fsf)
-    if let dir = env("SLOPPY_SPIRV_DUMP"):
+    if let dir = env("DEWY_SPIRV_DUMP"):
         write_file("{dir}/{sv_dumped}.vert.spv", vs)
         write_file("{dir}/{sv_dumped}.frag.spv", fs)
         sv_dumped += 1
@@ -1910,7 +1910,7 @@ spirv_kernel = (f: int, desc: str) -> str:
     sv_finish_fn(head)
     sv_drain()
     m = sv_module(5, main)
-    if let dir = env("SLOPPY_SPIRV_DUMP"):
+    if let dir = env("DEWY_SPIRV_DUMP"):
         write_file("{dir}/{sv_dumped}.comp.spv", m)
         sv_dumped += 1
     m
@@ -1966,7 +1966,7 @@ spirv_compute = (f: int) -> str:
     sv_finish_fn(head)
     sv_drain()
     m = sv_module(5, main)
-    if let dir = env("SLOPPY_SPIRV_DUMP"):
+    if let dir = env("DEWY_SPIRV_DUMP"):
         write_file("{dir}/{sv_dumped}.comp.spv", m)
         sv_dumped += 1
     m

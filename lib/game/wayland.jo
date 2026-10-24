@@ -961,11 +961,11 @@ __wl_apply_size = ():
 
 __wl_set_scale = (preferred: f64):
     s = preferred
-    # (SLOPPY_SCALE=1 renders at the logical size, scaled up by the compositor; a screenshot run
+    # (DEWY_SCALE=1 renders at the logical size, scaled up by the compositor; a screenshot run
     # does, so that its picture is the same size each time, whenever the compositor's scale
     # comes)
-    if let f = to_float(env("SLOPPY_SCALE") ?? ""): s = f
-    else if env("SLOPPY_SCREENSHOT") != none: s = 1.0
+    if let f = to_float(env("DEWY_SCALE") ?? ""): s = f
+    else if env("DEWY_SCREENSHOT") != none: s = 1.0
     if s <= 0.0 or s == __wl_scale: return
     __wl_scale = s
     __wl_apply_size()
@@ -1205,7 +1205,7 @@ __wl_commit = (buffer: int):
 # dma-buf buffers of w x h pixels, made once per size
 __wl_ensure_gpu_buffers = (w: int, h: int) -> bool:
     if __wl_gbuf_w == w and __wl_gbuf_h == h and __wl_gbufs.len() > 0: return true
-    if __wl_dmabuf == 0 or (env("SLOPPY_PRESENT") ?? "") == "copy": return false
+    if __wl_dmabuf == 0 or (env("DEWY_PRESENT") ?? "") == "copy": return false
     loop b in __wl_gbufs:
         __wl_begin(b.id, 0)                    # wl_buffer.destroy
         __wl_end()

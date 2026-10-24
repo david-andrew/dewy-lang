@@ -61,7 +61,7 @@ gpu_compute = () -> bool:
     if __gb_mode == 0:
         __gb_mode = 2
         when TARGET != "wasm":
-            off = (env("SLOPPY_SOFTWARE") ?? "") == "1" or (env("SLOPPY_NO_GPU") ?? "") == "1"
+            off = (env("DEWY_SOFTWARE") ?? "") == "1" or (env("DEWY_NO_GPU") ?? "") == "1"
             if not off and (__vk or (not __win_open and __vk_wanted() and len(__vk_open("", () -> int: 0)) == 0)): __gb_mode = 1
     __gb_mode == 1
 

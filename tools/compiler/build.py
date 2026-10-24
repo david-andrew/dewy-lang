@@ -56,8 +56,8 @@ def build(output: Path, *, seed: Path | None = None, bootstrap: bool = False) ->
     sources = {str(p.relative_to(output)): identity(p) for p in sorted(output.rglob('*')) if p.is_file()}
     binary_dir = output / 'bin'
     binary_dir.mkdir()
-    env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
-    env.update(SLOPPY_LIB=str(output / 'lib'), SLOPPY_EMIT_WORKERS='1')
+    env = {k: v for k, v in os.environ.items() if not k.startswith('DEWY_')}
+    env.update(DEWY_CORE_LIB=str(output / 'lib'), DEWY_EMIT_WORKERS='1')
     steps = []
 
     def run(command, log, cwd=output):
