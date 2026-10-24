@@ -39,6 +39,7 @@ use 'juxtapose.jo'
 use 'sibling_types.jo'
 use 'temperature_kinds.jo'
 use 'dewy_methods.jo'
+use 'secrets.jo'
 use 'directives.jo'
 use 'ffi.jo'
 use 'floats.jo'
@@ -1375,6 +1376,10 @@ resolve_type = (tn: int) -> int:
                 if nkids(tn) == 0: return decimal_type(nodes[tn].pos)
                 if nkids(tn) == 1 and resolve_type(kid(tn, 0)) == T_INT: return word_rational_type(nodes[tn].pos)
                 fatal(nodes[tn].pos, "`rational` is the exact type and `rational<int64>` its one fixed-width form")
+        # `secret<T>`: the builtin wrapper (types.jo's mk_secret), unless a type shadows it
+        if nm == secret_name and nodes[tn].sval == 0 and (s == 0 or not secret_type_sym(syms[s].kind)):
+            if nkids(tn) != 1: fatal(nodes[tn].pos, jd(nodes[tn].pos, "`secret` takes one type argument: `secret[str]`", "`secret` takes one type argument: `secret<string>`"))
+            return mk_secret(resolve_type(kid(tn, 0)))
         if s == 0:
             if name_of(nm) == "none": return T_NONE
             # (push = (h: mut Heap[T], x: T): a generic function names its type parameters)
@@ -1590,6 +1595,7 @@ subst = (t0: int, targs: int[]) -> int:
     if k == .callable: return mk_callable_contract(subst(int(types[t].elem), targs), effect_subst(int(types[t].st), targs), int(types[t].bits))
     if k == .refined: return mk_refined(subst(int(types[t].elem), targs), ref_subst(int(types[t].st), targs))
     if k == .quantity: return mk_quantity(subst(int(types[t].elem), targs), int(types[t].st), 0, int(types[t].bits))
+    if k == .secret: return mk_secret(subst(int(types[t].elem), targs))
     if k == .array: return mk_array(subst(int(types[t].elem), targs))
     if k == .fixed: return mk_fixed(subst(int(types[t].elem), targs), fixed_len(t))
     if k == .ptr: return mk_ptr(subst(int(types[t].elem), targs))
@@ -6446,6 +6452,7 @@ check_program = (main_path: str):
     # (dictionaries hash keys with the keyed value hash: lib/core/map.jo)
     runtime_switch_on("__KEYED_HASH")
     runtime_switch_on("__MUL_HI")
+    runtime_switch_on("__SECRETS")
     if runtime_switches.len() > 0: runtime_switch()
     bind_from_imports()
     dewy_resolve_inherited()

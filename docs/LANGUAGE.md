@@ -2712,6 +2712,49 @@ main = ():>void|UsageError|Offline => {
 Without arguments this prints `error: UsageError[message="usage: fetch HOST"]`
 and exits 1; `fetch nowhere` exits 69.
 
+## Secrets
+
+A `secret<T>` holds a `T` that no output shows. `secret(x)` makes one, and so
+does `x as secret<T>`. A `T` also goes by itself wherever a `secret<T>` is
+declared: a `let`, a field, a parameter or a result. `s.reveal` gives the value
+back. It is the only way out, and it is visible in the code.
+
+```dewy
+Login:type = [user:string pass:secret<string>]
+check = (pw:secret<string> attempt:string):>bool => pw =? attempt
+let login = Login["ann" read_line() ?? ""]
+printl(login)                          # [user="ann" pass=<redacted>]
+send_password(login.pass.reveal)
+```
+
+Wherever its value would become text, a secret is written `<redacted>`. That
+covers `printl`, interpolation, `string(s)`, records, arrays, dictionaries and
+errors holding one, and the error report from `main`, even a debug build's full
+payload. The editor's hover, `gdb`, `lldb` and Visual Studio show `<redacted>`
+too. A failing runtime check on a value on its way into a secret leaves its value
+out of the report. JSON has no writer for a secret, so writing one is a compile
+error.
+
+Anything that would use a secret as its `T` is a compile error that names
+`.reveal`:
+
+- a `secret<T>` where a `T` is wanted (a binding, an argument, a result, a
+  condition);
+- `s as T`;
+- members and methods other than `reveal` (`s.length`);
+- indexing and iteration.
+
+Operators work on the values. Comparisons (`=?`, `not=?`, `<?`, ...) give a plain
+`bool`. Arithmetic, the other binary operators and unary `-` give a secret of the
+result, as `k + 1` or `k += 1` does. `hash(s)` is a secret too; the `hash` of a
+container holding secrets is not available yet. Secrets can be dictionary keys
+and set members, and they work in generic code.
+
+A secret costs nothing. It is stored and passed exactly as its `T`, and a program
+built with secrets compiles to the same machine code as the one without them. A
+comparison with `=?` still takes time that depends on the values; constant-time
+comparison is planned.
+
 ## Files, paths and processes
 
 `p"dir/file.txt"` is a path literal and `p(text)` builds a path at run time.

@@ -102,7 +102,9 @@ lf_of_inst = (f: int) -> int:
     if fused_on: fz_note(0, x, f, 0, 0)
     x
 
-lf_helper = (hk: HK, t: int, p: int) -> int:
+lf_helper = (hk: HK, t0: int, p: int) -> int:
+    # (a secret's helpers are its value's: secrets.jo)
+    t = if secrets_seen: secret_repr(t0) else: t0
     if helper_slots.len() == 0: helper_slots = fill(0, 64)
     slot = helper_slot(hk, t, p)
     if helper_slots[slot] != 0:
@@ -5520,7 +5522,7 @@ gen_array = (e: int, t: int) -> Val:
     V(res, true)
 
 all_const = (e: int, et: int) -> bool:
-    k = types[prune(et)].kind
+    k = types[quantity_base(et)].kind
     if k != .int_ and k != .float_ and k != .bool_: return false
     loop i in [0..nkids(e)):
         item = kid(e, i)

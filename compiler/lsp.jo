@@ -1199,6 +1199,8 @@ on_hover = (id: int, params: int) -> int:
             else: code = hdr + "\n# here: " + dc.name + x.info
         else if (k == IK_LOCAL or k == IK_PARAM or k == IK_GLOBAL) and len(x.info) > 0:
             code = "{dc.name}: {x.info}"
+        # (a secret constant: its type, and not the text that makes it)
+        else if k == IK_CONST and (starts_with(x.info, "secret<") or starts_with(x.info, "secret[")): code = "{dc.name}: {x.info} = <redacted>"
         else if k == IK_FIELD and len(x.info) > 0 and not contains(code, ":"): code = "{code}: {x.info}"
         if k != IK_FN and k != IK_STRUCT and k != IK_ENUM: code = "({kind_name(k)}) {code}"
     else if len(x.info) > 0: code = x.info

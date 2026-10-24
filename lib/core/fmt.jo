@@ -761,6 +761,14 @@ __fmt[T] = (buf: mut u8[], p: *T):
     __buf_append_str(buf, "0x")
     __fmt_hex(buf, p as u64, 0, false)
 
+# a secret's value is never written (compiler/secrets.jo; sloppy0 has no secrets)
+when not BOOTSTRAP:
+    __fmt[T] = (buf: mut u8[], x: secret[T]): __buf_append_str(buf, "<redacted>")
+    __fmt_elem[T] = (buf: mut u8[], x: secret[T]): __buf_append_str(buf, "<redacted>")
+    __fmt_spec[T] = (buf: mut u8[], x: secret[T], spec: str): __fmt_spec(buf, "<redacted>", spec)
+    __dewy_fmt[T] = (buf: mut u8[], x: secret[T]): __buf_append_str(buf, "<redacted>")
+    __dewy_fmt_elem[T] = (buf: mut u8[], x: secret[T]): __buf_append_str(buf, "<redacted>")
+
 # structs, enums, tuples
 __fmt = (buf: mut u8[], x): __fmt_fields(buf, x)
 

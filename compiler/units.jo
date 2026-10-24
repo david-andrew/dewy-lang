@@ -24,6 +24,7 @@ quantity_scales: QuantityScale[]
 is_quantity = (t: int) -> bool: types[prune(t)].kind == .quantity
 quantity_base = (t0: int) -> int:
     t = prune(t0)
+    if types[t].kind == .secret: t = prune(int(types[t].elem))
     if types[t].kind == .callable: t = prune(int(types[t].elem))
     if refine_active and types[t].kind == .refined: t = prune(int(types[t].elem))
     if types[t].kind == .quantity: return prune(int(types[t].elem))

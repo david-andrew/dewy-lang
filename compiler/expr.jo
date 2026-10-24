@@ -32,6 +32,7 @@ use 'ffi.jo'
 use 'isolation.jo'
 use 'sibling_types.jo'
 use 'floats.jo'
+use 'secrets.jo'
 
 enum IN:
     none_, len, push, pop, insert, remove, clear, reserve, slice, syscall, memcpy, memset, sizeof,
@@ -40,7 +41,7 @@ enum IN:
     ceil_, fabs, fmin, fmax, setjmp, longjmp, jump, shader, extend, clone_thread, atomic_add, atomic_cas, stack_ptr, fill, fmt_elem, gpu_kernel, cpu_features, code_sync, compute, compute_spirv, compute_textures,
     read_fields, default_init, offset_unit, embed_dir, dewy_iter, dewy_iter_done, dewy_iter_value, json_fields, dewy_iter_pair, dewy_set,
     static_assert, runtime_assert, dewy_print, dewy_fmt, dewy_fmt_elem, lend, loan_address, loan_load, loan_store, loan_length,
-    zeroed, relocate, take_slot, live_len, task_report, task_data, task_duration, arena_result, arrdata_permute, mul_hi
+    zeroed, relocate, take_slot, live_len, task_report, task_data, task_duration, arena_result, arrdata_permute, mul_hi, secret_wrap, secret_value
 
 # (fixed2arr: T[N] -> T[], a new array holding a copy of the elements)
 enum CV: none_, int_, int2float, float2int, float_, opt, ptr, bits, fn2clos, union_, fixed2arr, arr2fixed, quantity_const, explicit_copy, refinement, big2math, math2big, set_text, promote, wrap_int, saturate_int
@@ -52,6 +53,8 @@ struct Intrinsic:
 
 intrinsics = [
     Intrinsic("$lend", .lend, false),
+    Intrinsic("secret", .secret_wrap, false),
+    Intrinsic("__secret_value", .secret_value, false),
     Intrinsic("$allocator_result", .arena_result, false),
     Intrinsic("__load_i64__", .loan_address, false),
     Intrinsic("__load_u8__", .loan_load, false),
@@ -399,6 +402,9 @@ can_coerce = (n: int, from0: int, to0: int) -> bool:
     if from == T_NEVER: return true
     fk = types[from].kind
     tk = types[to].kind
+    if fk == .secret or tk == .secret:
+        r = secret_can_coerce(n, from, to)
+        if r >= 0: return r == 1
     if fk == .tuple and tk == .array and n != 0 and sibling_array_source(n, from, int(types[to].elem)): return true
     if str_sets.len() > 1:
         fs = str_set_of(from)
@@ -594,6 +600,9 @@ coerce = (n: int, target: int) -> int:
         if to != T_NEVER and types[to].kind != .void_ and types[to].kind != .var and types[to].kind != .param: wrap_conv(n, CV.none_, to)
         return n
     tk = types[to].kind
+    if tk == .secret or types[from].kind == .secret:
+        r = secret_coerce(n, from, to)
+        if r >= 0: return r
     if types[from].kind == .tuple and tk == .array and sibling_array_source(n, from, int(types[to].elem)): return sibling_to_array(n, from, to)
     if (from == T_MATH_INT and math_rep_type(to)) or (to == T_MATH_INT and math_rep_type(from)):
         wrap_conv(n, .none_, to)
@@ -1437,7 +1446,7 @@ match_type = (pat0: int, a0: int, binds: mut int[], depth: int) -> int:
         if r < 0: return -1
         return r + 2
     if pk != ak: return -1
-    if pk == .array or pk == .ptr or pk == .opt: return match_type(int(types[pat].elem), int(types[a].elem), binds, depth + 1)
+    if pk == .array or pk == .ptr or pk == .opt or pk == .secret: return match_type(int(types[pat].elem), int(types[a].elem), binds, depth + 1)
     if pk == .fixed:
         if types[pat].bits != types[a].bits: return -1
         return match_type(int(types[pat].elem), int(types[a].elem), binds, depth + 1)
@@ -1515,6 +1524,7 @@ subst_partial = (pat0: int, binds: mut int[]) -> int:
     if k == .callable: return mk_callable_contract(subst_partial(int(types[pat].elem), binds), effect_subst(int(types[pat].st), binds), int(types[pat].bits))
     if k == .refined: return mk_refined(subst_partial(int(types[pat].elem), binds), ref_subst(int(types[pat].st), binds))
     if k == .quantity: return mk_quantity(subst_partial(int(types[pat].elem), binds), int(types[pat].st), 0, int(types[pat].bits))
+    if k == .secret: return mk_secret(subst_partial(int(types[pat].elem), binds))
     if k == .fixed: return mk_fixed(subst_partial(int(types[pat].elem), binds), fixed_len(pat))
     if k == .ptr: return mk_ptr(subst_partial(int(types[pat].elem), binds))
     if k == .opt: return mk_opt(subst_partial(int(types[pat].elem), binds))
@@ -1628,6 +1638,12 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
     pk = types[p].kind
     target = p
     if pk == .param and binds[int(types[p].id)] != 0: target = prune(binds[int(types[p].id)])
+    # (a literal or a value its context types, where a secret<T> is wanted: as for a T, a little
+    # dearer; only for a written secret type, as a generic secret[T] takes secrets alone)
+    if pk == .secret and not has_var(p) and (nodes[a].type == 0 or is_lit(a) or ctx_dependent(a)):
+        r = arg_cost(a, int(types[p].elem), binds)
+        if r < 0: return -1
+        return r + 1
     if nodes[a].kind != .int_lit and bundled_rational_type(target) and decimal_literal_tree(a): return 0
     if is_float(target) and nodes[a].type != 0 and bundled_rational_type(ntype(a)): return 10
     if bundled_rational_type(target) and (nodes[a].kind == .int_lit or (nodes[a].type != 0 and is_int(ntype(a)))): return 10
@@ -5112,6 +5128,7 @@ variant_hint = (a: int, t0: int) -> str:
     if nodes[a].type != 0:
         # (a color is a vec4; light and sky colors are vec3s)
         ft = prune(int(nodes[a].type))
+        if types[ft].kind == .secret and types[t].kind != .secret: return secret_hint(a)
         if dewy_at(nodes[a].pos) and rational_float_mismatch(ft, t): return " (a decimal literal such as `0.5` is an exact rational: write the floating type where the value is made, as `let x:float64 = 0.5` or `let xs:array<float64> = [1.5 2.5]`)"
         c = "c"
         if nodes[a].kind == .ident: c = name_of(int(nodes[a].name))
@@ -5884,6 +5901,26 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
     nodes[n].a = 0
     nargs = args.len()
     r = T_VOID
+    if id == .secret_wrap:
+        # secret(x): x's value as a secret (secrets.jo)
+        nargs_check(n, nargs, 1, 1, "secret")
+        want = 0
+        if expected != 0 and tkind(expected) == .secret: want = prune(telem(expected))
+        t = prune(arg_type(args, 0, want))
+        if is_lit(args[0]): t = prune(finalize_literal(args[0]))
+        nodes[n] = nodes[args[0]]
+        if types[t].kind == .secret: return t
+        return secret_wrap(n, t)
+    if id == .secret_value:
+        # __secret_value(x): x, or a secret's value (the library's: a dictionary hashes a
+        # secret key as its value)
+        nargs_check(n, nargs, 1, 1, "__secret_value")
+        if not pos_in_lib(nodes[n].pos): fatal(nodes[n].pos, "__secret_value is the library's: `x.reveal` gives a secret's value")
+        t = prune(arg_type(args, 0, expected))
+        nodes[n] = nodes[args[0]]
+        if types[t].kind != .secret: return t
+        secret_reveal(n)
+        return prune(ntype(n))
     if id == .task_duration:
         nargs_check(n, nargs, 1, 1, "__task_nanoseconds")
         return task_duration_value(n, args[0])
@@ -6312,6 +6349,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
             ct = if types[t].sign: T_I32 else: T_F32
             count = if t == T_MAT4: 16 else: int(types[t].bits)
             loop i in [0..count): fts.push(ct)
+        else if k == .secret: fatal(nodes[n].pos, "a {dt(t)} is never written as JSON: its value is hidden (a field holding `x.reveal` writes it, where showing it is intended)")
         else: fatal(nodes[n].pos, "a value of type {dt(t)} cannot be written as JSON")
         refs: int[]
         loop ft in fts:
@@ -6980,6 +7018,7 @@ check_binary = (n: int, expected: int) -> int:
         # (`m[0 [..]] =? [1 2]`: a 1-D selection against a literal of its elements)
         if (op == .eq or op == .ne) and is_nd(ta) and bk == .array: h = mk_array(nd_elem(ta))
         tb = prune(check_expr(b, h))
+    if types[ta].kind == .secret or types[tb].kind == .secret: return secret_binary(n, op, a, b)
     # (two plain numbers, neither a written fraction nor a character: none of the cases below
     # applies to them, so straight to the arithmetic)
     if not is_shift and ta != T_MATH_INT and tb != T_MATH_INT:
@@ -9149,6 +9188,7 @@ check_field_expr = (n: int, expected: int) -> int:
     type_receiver_at = saved_receiver
     nodes[n].a = i32(last_checked)
     fname = int(nodes[n].name)
+    if types[bt].kind == .secret: return secret_member(n, bt)
     if str_sets.len() > 1 and str_set_of(bt) != 0:
         coerce(int(nodes[n].a), T_STR)
         bt = T_STR
@@ -9676,6 +9716,7 @@ check_expr_other = (n: int, expected: int) -> int:
         if ex != 0 and (is_numeric(ex) or is_vec(ex) or bundled_bigint_type(ex)): hint = ex
         q_lit = quantity_literal_syntax(int(nodes[n].a))
         at = prune(check_expr(int(nodes[n].a), hint))
+        if types[at].kind == .secret: return secret_unary(n)
         if types[at].kind == .quantity:
             quantity_unary_literal = q_lit
             return quantity_unary(n, expected)
@@ -10062,6 +10103,7 @@ check_expr_other = (n: int, expected: int) -> int:
             refine_coerce(n, tt)
             last_checked = n
             return ntype(n)
+        if types[tt].kind == .secret: return secret_cast(n, a, tt)
         ak = nodes[a].kind
         if ak == .array or ak == .map_lit or ak == .tuple or ((ak == .int_lit or ak == .float_lit) and (is_numeric(tt))):
             # `[1, 2] as [u8]`, `0.5 as f32`: the target type guides the literal
@@ -10074,6 +10116,7 @@ check_expr_other = (n: int, expected: int) -> int:
         check_expr(a, 0)
         finalize_literal(a)
         ft = prune(ntype(a))
+        if types[ft].kind == .secret: fatal(nodes[n].pos, "a {dt(ft)} converts to no other type: its value is hidden{secret_hint(a)}")
         # (`bytes as string` claims valid UTF-8, which runtime bytes cannot prove)
         if tt == T_STR and dewy_at(nodes[n].pos) and not pos_in_lib(nodes[n].pos) and (ft == mk_array(T_U8) or tkind(ft) == .fixed and prune(int(types[ft].elem)) == T_U8):
             fatal(nodes[n].pos, "`bytes as string` needs a proof that the bytes are valid UTF-8: `bytes as string | none` decodes them, giving none when they are not valid, and `bytes as string ?? fallback` replaces that none")

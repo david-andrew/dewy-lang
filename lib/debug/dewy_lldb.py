@@ -96,6 +96,8 @@ def show(v, depth=0):
     v = v.GetNonSyntheticValue()
     t = v.GetType()
     name = t.GetName() or ""
+    if name.startswith("secret<") or name.startswith("secret["):
+        return "<redacted>"
     c = t.GetCanonicalType()
     process = v.GetProcess()
     if name == "int" and c.GetTypeClass() == lldb.eTypeClassBuiltin:
@@ -211,7 +213,7 @@ def _is_dewy(t, internal_dict):
 def __lldb_init_module(debugger, internal_dict):
     m = __name__
     run = debugger.HandleCommand
-    for pattern in ("^int$", "^string$", "^array<.+>$"):
+    for pattern in ("^int$", "^string$", "^array<.+>$", "^secret<.+>$"):
         run('type summary add -w dewy -v -x "%s" -F %s.dewy_summary' % (pattern, m))
         run('type synthetic add -w dewy -x "%s" -l %s.NoChildren' % (pattern, m))
     # records, optionals, unions and dictionaries by what they hold: an lldb with

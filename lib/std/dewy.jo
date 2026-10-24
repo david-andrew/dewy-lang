@@ -36,14 +36,16 @@ pop[K, V] = (m: mut Map[K, V], k: K) -> V:
     v
 
 pop[K, V] = (m: mut Map[K, V], k: K, default: V?) -> V?:
-    e = __map_find(m, k, __map_hash(k))
+    when __SECRETS: e = __map_find(m, k, __map_hash(__secret_value(k)))
+    when not __SECRETS: e = __map_find(m, k, __map_hash(k))
     if e < 0: return default
     v = __take_at(m.vals, e)
     m.remove(k)
     v
 
 pop[K, V] = (m: mut Map[K, V], k: K, default: V) -> V:
-    e = __map_find(m, k, __map_hash(k))
+    when __SECRETS: e = __map_find(m, k, __map_hash(__secret_value(k)))
+    when not __SECRETS: e = __map_find(m, k, __map_hash(k))
     if e < 0: return default
     v = __take_at(m.vals, e)
     m.remove(k)

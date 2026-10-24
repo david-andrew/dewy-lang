@@ -11,6 +11,7 @@ use 'lower.jo'
 use 'ir.jo'
 use 'util.jo'
 use 'witness.jo'
+use 'secrets.jo'
 
 struct RefTerm:
     kind: int = 0 # self, literal, formal ordinal, stable lexical declaration, type limit
@@ -737,6 +738,10 @@ ref_gen_check = (n: int, self: int, args: int[], arg_types: int[]):
         if right == "": right = "the bound"
         seen_left = if atom.a.kind == 1: "" else: left
         seen_right = if atom.b.kind == 1: "" else: right
+        # (a value on its way into a secret is not shown: secrets.jo)
+        if secret_checks.len() > 0 and secret_checks.has(n):
+            seen_left = ""
+            seen_right = ""
         # (`a op b + c`: the right side's observed value is the sum)
         c = atom.b.offset
         sum = if c != 0: e_bin(.add, VI, b, e_iconst(c)) else: b

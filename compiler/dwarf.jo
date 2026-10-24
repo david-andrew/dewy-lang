@@ -628,6 +628,12 @@ dw_type_die = (t0: int):
         dw_member("code", DW_VOIDP, 0)
         dw_member("env", DW_VOIDP, 8)
         dw_tb.push(0)
+    else if k == .secret:
+        # (a secret: its bytes are not described, so a debugger shows none of them; lib/debug's
+        # printers show `<redacted>`)
+        dw_tb.push(17)
+        cstr(dw_tb, dw_name(t))
+        put32(dw_tb, size)
     else if k == .fixed:
         dw_tb.push(7)
         dw_ref(0, int(types[t].elem))

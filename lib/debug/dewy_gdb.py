@@ -91,6 +91,8 @@ def show(val):
     """a value as Dewy text"""
     t = val.type.strip_typedefs()
     name = _name(val.type)
+    if name.startswith("secret<") or name.startswith("secret["):
+        return "<redacted>"
     if name == "int" and t.code == gdb.TYPE_CODE_INT:
         return str(tagged_int(int(val)))
     if name == "string":
