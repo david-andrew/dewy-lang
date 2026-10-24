@@ -419,6 +419,7 @@ decode_str = (s: str, pos: int, raw: bool) -> str:
             else if e == '}}': buf.push('}}')
             else if e == 'e': buf.push(27)
             else if e == 'x':
+                if i + 2 >= n: fatal(pos, "bad \\x escape")
                 h = hexval(s[i + 1])
                 l = hexval(s[i + 2])
                 if h < 0 or l < 0: fatal(pos, "bad \\x escape")

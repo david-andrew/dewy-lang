@@ -7654,6 +7654,10 @@ int_intervals_wide = (t0: int) -> (bool, int[], int[]):
             if atom.op != .le and atom.op != .lt and atom.op != .ne: return (false, nothing, nothing)
             if atom.a.kind == 1 and atom.b.kind == 0:
                 v = atom.a.value
+                # (`c <= x + k` keeps k on the value's side (refine.jo ref_offset_right): c - k <= x)
+                if atom.b.offset != 0:
+                    if atom.a.unsigned or not fact_add_fits(v, -atom.b.offset): return (false, nothing, nothing)
+                    v -= atom.b.offset
                 big = atom.a.unsigned and v < 0
                 if atom.op == .ne:
                     if big: hgaps.push(v)
@@ -12107,7 +12111,8 @@ check_istype = (n: int) -> int:
     if types[tt].kind == .refined and is_int(representation_type(tt)) and is_int(representation_type(at)) and not is_union(at):
         subj = is_subject(n, orig)
         c = 0
-        loop atom in ref_predicates[int(types[tt].st)]:
+        loop atom0 in ref_predicates[int(types[tt].st)]:
+            atom = ref_is_atom(atom0, pos)
             check = bc_bin(atom.op, ref_is_term(atom.a, subj, pos), ref_is_term(atom.b, subj, pos), pos)
             c = if c == 0: check else: bc_logic(.and_, c, check, pos)
         if c == 0:
@@ -12128,10 +12133,20 @@ check_istype = (n: int) -> int:
 
     T_BOOL
 
+# (`c < x + k` keeps k on the value's side (refine.jo ref_offset_right): as `c - k < x`, which
+# cannot overflow where x + k would)
+ref_is_atom = (atom0: RefAtom, pos: int) -> RefAtom:
+    atom = atom0
+    if atom.a.kind != 1 or atom.b.offset == 0: return atom
+    if atom.a.unsigned or not fact_add_fits(atom.a.value, -atom.b.offset): fatal(pos, "`is?` tests a refinement whose bound, less its offset, is within int64's range")
+    atom.a.value -= atom.b.offset
+    atom.b.offset = 0
+    atom
+
 # what `x is ...` tests again: x itself (a variable or field path), or else its value put in a
 # variable of its own (computed once)
 ref_is_term = (term: RefTerm, subj: int, pos: int) -> int:
-    if term.kind == 0 and term.path.len() == 0: return copy_path(subj)
+    if term.kind == 0 and term.path.len() == 0 and term.offset == 0: return copy_path(subj)
     if term.kind != 1: fatal(pos, "`is?` tests a refinement whose bounds are constants")
     e = bc_int(term.value, pos)
     if term.unsigned: add_flag(e, NF_U64)

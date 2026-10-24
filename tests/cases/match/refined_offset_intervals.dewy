@@ -1,0 +1,26 @@
+# A refinement bound written with an offset (`i - 1 >=? 0`, `i + 5 >? 10`) admits the values the
+# offset moves it to: arms covering them are exhaustive, and `is?` tests the same values.
+pos = int64<i => i - 1 >=? 0>
+above = int64<i => i + 5 >? 10>
+f = (x:pos):>string => match x {
+    <1|2|3> => "small"
+    big:int64<big >? 3> => "big {big}"
+}
+g = (x:above):>string => match x {
+    <6|7|8|9|10> => "near"
+    far:int64<far >=? 11> => "far {far}"
+}
+main = () => {
+    printl(f(pos(1)))
+    printl(f(pos(9)))
+    printl(g(above(6)))
+    printl(g(above(12)))
+    let x:int64=7
+    printl(x is? int64<i => i + 5 >? 10>)
+    let y:int64=5
+    printl(y is? int64<i => i + 5 >? 10>)
+    let z:int64=1
+    printl(z is? int64<i => i - 1 >=? 0>)
+    let w:int64=0
+    printl(w is? int64<i => i - 1 >=? 0>)
+}

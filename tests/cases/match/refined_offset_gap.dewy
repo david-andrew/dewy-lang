@@ -1,0 +1,6 @@
+# `i + 5 >? 10` admits 6 and up: arms from 11 on leave 6 through 10 uncovered.
+above = int64<i => i + 5 >? 10>
+f = (x:above):>string => match x {
+    big:int64<big >=? 11> => "big {big}"
+}
+main = () => printl(f(above(12)))

@@ -968,8 +968,8 @@ __arr_concat = (a: *u8, b: *u8, es: int) -> *u8:
     q
 
 # ---------------- strings ----------------
-# Every string's bytes are followed by a 0 (the lexers read up to it, C reads a string's data):
-# whatever makes or shortens one writes it.
+# Every string's bytes are followed by a 0, written by whatever makes or shortens it: the lexers
+# read up to it (nothing past it), C reads a string's data. A nil string has neither (data() null).
 __str_new = (n: int) -> *u8:
     p = __alloc(24 + n + 1)
     h = p as *int

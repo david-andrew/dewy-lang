@@ -649,55 +649,13 @@ lx_string = (raw: bool):
     if triple: lx_i = i + 3
     else: lx_i = i + 1
 
-lx_char = ():
-    p = lx_p
-    s = lx_i
-    i = s + 1
-    v = 0
-    if p[i] == '\\':
-        i += 1
-        c = p[i]
-        i += 1
-        if c == 'n': v = 10
-        else if c == 't': v = 9
-        else if c == 'r': v = 13
-        else if c == '0': v = 0
-        else if c == '\\': v = 92
-        else if c == '\'': v = 39
-        else if c == '"': v = 34
-        else if c == 'e': v = 27
-        else if c == 'x':
-            h = hexval(p[i])
-            l = hexval(p[i + 1])
-            if h < 0 or l < 0: lx_err(i, "bad \\x escape")
-            v = h * 16 + l
-            i += 2
-        else: lx_err(i - 1, "unknown escape sequence")
-    else:
-        b = int(p[i])
-        if b < 0x80:
-            v = b
-            i += 1
-        else:
-            n = 1
-            if b >= 0xf0: n = 3
-            else if b >= 0xe0: n = 2
-            v = b & (0x3f >> n)
-            i += 1
-            loop k in [0..n):
-                v = (v << 6) | (int(p[i]) & 0x3f)
-                i += 1
-    if p[i] != '\'': lx_err(s, "unterminated character literal")
-    lx_i = i + 1
-    lx_emit(.int_lit, s, lx_i - s)
-    lx_slots[lx_count - 1].ival = v
-    lx_slots[lx_count - 1].flags = i32(INTF_CHAR)
-
 # (from, to: a part of src alone, as a lazy function body: tokens keep their places in src)
 lex = (file: int, src: str, from: int = 0, to: int = -1) -> Token[]:
     lx_file = file
     lx_src = src
     lx_p = data(src)
+    # (a nil string, the zero value, has no bytes and no 0 after them: the empty text's do)
+    if lx_p == null: lx_p = data("")
     lx_n = len(src)
     if to >= 0: lx_n = to
     lx_i = from
