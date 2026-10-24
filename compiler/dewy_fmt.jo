@@ -18,17 +18,42 @@ df_assignment = (s: DewyToken) -> bool:
 df_free_gap = (left: DewyToken, right: DewyToken) -> bool:
     df_assignment(left) or df_assignment(right) or left == .colon or left == .comma or left == .semi or left == .lbrace or right == .colon or right == .comma or right == .semi or right == .rbrace
 
+# Whether the `=` at tokens[at] is followed by a function literal: `x =>`, `(...) =>`,
+# `(...):>T =>` or `<T>(...) =>`.
+df_function_value = (tokens: DewyLexeme[], at: int) -> bool:
+    i = at + 1
+    n = tokens.len()
+    if i < n and tokens[i].symbol == .langle:
+        depth = 0
+        loop i < n:
+            if tokens[i].symbol == .langle: depth += 1
+            else if tokens[i].symbol == .rangle: depth -= 1
+            i += 1
+            if depth == 0: break
+    if i >= n: return false
+    if tokens[i].kind == .identifier: return i + 1 < n and tokens[i + 1].symbol == .function
+    if tokens[i].symbol != .lparen: return false
+    depth = 0
+    loop i < n:
+        if tokens[i].symbol == .lparen: depth += 1
+        else if tokens[i].symbol == .rparen: depth -= 1
+        i += 1
+        if depth == 0: break
+    i < n and (tokens[i].symbol == .function or tokens[i].symbol == .returns)
+
 # The layout: `name = (x:int64):>int64 => body`. `=>`, `+=` and the like always have a space on
 # each side; `=` has one when it binds a name (a statement), but not where it names an argument,
 # a default or a field inside parentheses or brackets (`f(scale=3)`, `[x=1]`), which stays as
-# written. `:` and `:>` have none. `inside`: the innermost open delimiter is a ( or a [.
-df_gap = (left: DewyLexeme, right: DewyLexeme, inside: bool) -> str:
+# written, unless it defines a function member of an object (`width = () => stop-start`).
+# `:` and `:>` have none. `inside`: the innermost open delimiter is a ( or a [. `function`: the `=`
+# defines a function member.
+df_gap = (left: DewyLexeme, right: DewyLexeme, inside: bool, function: bool) -> str:
     if right.symbol == .colon or right.symbol == .comma or right.symbol == .semi: return ""
     if left.symbol == .colon or left.symbol == .returns or right.symbol == .returns: return ""
     if left.symbol == .lbrace and right.symbol == .rbrace: return ""
     if left.symbol == .function or right.symbol == .function or dn_token_assignment(left.symbol) or dn_token_assignment(right.symbol): return " "
     if left.symbol == .assign or right.symbol == .assign:
-        if not inside or right.space: return " "
+        if not inside or function or right.space: return " "
         return ""
     if df_free_gap(left.symbol, right.symbol): return " "
     if right.space: " " else: ""
@@ -51,6 +76,7 @@ df_tokens = (file: int, src: str) -> str[]:
 
 df_stack: DewyToken[]       # the delimiters open before df_tracked
 df_tracked = 0
+df_angles = 0
 
 # Count the delimiters of the tokens up to `stop`; false when they do not match.
 df_track = (tokens: DewyLexeme[], stop: int) -> bool:
@@ -58,6 +84,8 @@ df_track = (tokens: DewyLexeme[], stop: int) -> bool:
         t = tokens[df_tracked]
         df_tracked += 1
         if t.kind != .op: continue
+        if t.symbol == .langle: df_angles += 1
+        else if t.symbol == .rangle and df_angles > 0: df_angles -= 1
         if t.symbol == .lparen or t.symbol == .lbrack or t.symbol == .lbrace:
             df_stack.push(t.symbol)
             if df_stack.len() > 256: return false
@@ -68,11 +96,23 @@ df_track = (tokens: DewyLexeme[], stop: int) -> bool:
             # [a..b) and (a..b] are valid Dewy range delimiters.
     true
 
+# Whether the innermost open delimiter is a ( or a [ (or an angle bracket).
+df_inside = () -> bool:
+    df_angles > 0 or df_stack.len() > 0 and df_stack[df_stack.len() - 1] != .lbrace
+
+# Whether the gap before tokens[i] touches an `=` that defines a member of an object: directly
+# inside [ ] with a function literal as its value (as opposed to `sort(key=x => x.size)`).
+df_assign_function = (tokens: DewyLexeme[], i: int) -> bool:
+    if df_angles > 0 or df_stack.len() == 0 or df_stack[df_stack.len() - 1] != .lbrack: return false
+    if tokens[i].symbol == .assign: return df_function_value(tokens, i)
+    tokens[i - 1].symbol == .assign and df_function_value(tokens, i - 1)
+
 df_text = (src: str) -> str?:
     tokens = df_lexemes
     blocks = df_blocks
     df_stack = []
     df_tracked = 0
+    df_angles = 0
     bi = 0
     lines: str[]
     at = 0
@@ -120,7 +160,7 @@ df_text = (src: str) -> str?:
                         if not df_track(tokens, i): return none
                         between = src[tokens[i - 1].stop..tokens[i].start)
                         if find_byte(between, '#') >= 0: parts.push(between)
-                        else: parts.push(df_gap(tokens[i - 1], tokens[i], df_stack.len() > 0 and df_stack[df_stack.len() - 1] != .lbrace))
+                        else: parts.push(df_gap(tokens[i - 1], tokens[i], df_inside(), df_assign_function(tokens, i)))
                     t = tokens[i]
                     parts.push(src[t.start..min(t.stop, content_end)))
                 cursor = min(tokens[stop - 1].stop, content_end)

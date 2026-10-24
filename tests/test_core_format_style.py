@@ -22,6 +22,9 @@ CASES = [
     ('f=(a b=a)=>a', 'f = (a b=a) => a'),
     ('main=()=>{\nx+=1\nlet [a b]=p\nxs[0]=2\nprintl(f(scale=3 7))\n}',
      'main = () => {\n    x += 1\n    let [a b] = p\n    xs[0] = 2\n    printl(f(scale=3 7))\n}'),
+    ('T=type of [id:int64\nwidth=()=>stop-start\ng=<T>(x:T):>T=>x\nn=3]',
+     'T = type of [id:int64\n    width = () => stop-start\n    g = <T>(x:T):>T => x\n    n=3]'),
+    ('x=array<int64 length=3>', 'x = array<int64 length=3>'),
     ('xs.sort(key=m=>m.length reverse=true)', 'xs.sort(key=m => m.length reverse=true)'),
     ('let size=match v {n:int64=>n <none>=>0}', 'let size = match v { n:int64 => n <none> => 0 }'),
 ]
