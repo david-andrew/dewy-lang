@@ -489,3 +489,61 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
   - Untrusted-input markers are metatags, not `@` (which means places):
     `$sink(path)` and `$guard(SafePath)` on library declarations, and a source
     marker in place of `__untrusted(x)` (exact forms proposed to David).
+- Batch 13 (decided 2026-10-23):
+  - Metatag names: `$no_assumed_bounds` disables the 64-bit counter progress
+    axiom and any similar "can't happen in practice" bound, demanding real
+    proofs. `$bulletproof` is the strictest-everything library bundle:
+    `$no_hidden_costs`, `$explicit_allocation_failure`, `$finite_floats`,
+    `$no_deadlocks`, `$no_assumed_bounds`, and every future opt-out listed in
+    [assumptions.md](assumptions.md).
+  - Place-returning methods: the place result is inferred from a body that
+    returns `@something`; call sites write `@(m.lock())`. The explicit
+    definition-side annotation is pending David.
+  - `??` defaults any exception value as well as `none` (`to_int(s) ?? 0`); the
+    editor hover shows which failures a `??` covers. Defaulting only specific
+    error kinds is pending David.
+  - Line continuation: a `\` at the end of a line cancels that newline
+    everywhere: in array and matrix literals (`[2 3 5 \` + newline + `7 11]` is
+    one row), in strings (removes the newline) and in ordinary code. This
+    replaces the provisional "1-D receiving type flattens rows" rule; a 2-D
+    literal assigned to a 1-D type is an error suggesting `\`.
+  - C interop: `$export` may share the line with its definition (a metatag
+    applies to the next thing). `$unsafe` applies to the next expression, on the
+    same line or the next (`$unsafe strlen(msg.ptr)`); several expressions use
+    `$unsafe { ... }`. This replaces the provisional "own line, rest of the
+    block" form.
+  - Sibling literals: after `let s = Circle[...]` and a later `s = Square[...]`,
+    the exact type is tracked flow-sensitively (a `Circle` until the write, a
+    `Square` after); the binding's covering type stays the union, with a warning
+    suggesting an annotation (either type or the union).
+  - Juxtaposition warns when the coefficient is a numeric or array local
+    shadowing a function name (`let sin=0.5` then `sin(x)^2`).
+  - Shifts with an unbounded intermediate (`(a << n) >> n`, `n` unproven) are a
+    compile error with fix-its (bound `n`, compute in `int`, or an overflow
+    policy).
+  - Unpacking: rename with `as`, with the type on the source name
+    (`[apple:int64  banana:int64 as b] = o`; nested
+    `[apple  banana as [carrot durian]] = o2`). `=` inside patterns is reserved
+    for future defaults (deferred). `...rest` may appear anywhere in a pattern,
+    once per level (`[first ...mid last]`); a bare `...` drops the remaining
+    values (`[first ...] = xs`). Both `[...] =` and `(...) =`. `[local=field]`
+    renaming becomes `[field as local]`, with no alias.
+  - Multi-values into calls: a multi-valued expression is never reduced to its
+    last value and never needs `...`. `add(pair())` passes both values to
+    `add`'s two parameters; the target must accept that many, or it is a
+    compile error naming the counts. `...` only expands an actual container
+    (`add([20 22]...)`, positional, exact length proven). `[pair()]` collects.
+    Arity comes from the declared or inferred result type `:>(int64 int64)`;
+    overloads see the expanded shape. Mitigation for shifted arguments: an LSP
+    inlay hint showing which parameter each value fills, and a warning when a
+    multi-valued argument is followed by further positional arguments.
+  - Parameter patterns: each parameter takes one argument and destructures it on
+    entry (`area = ([w h]:Size) => w*h`). Pattern names are not part of the
+    function type. Patterns must be proven to fit. `((a b)) =>` declares one
+    patterned parameter, `(a b) =>` two. Deferred: record-to-keyword spreading
+    `f(opts...)`, place patterns `@[a b]`, pattern defaults.
+  - Precedence of `as` versus `in` is exactly the archived Python parser's; no
+    special case for `loop c in s as …` (write `loop c in (s as array<uint8>)`).
+  - Enums: string-literal unions are unordered from the user's perspective;
+    internal numbering is a representation detail and must not leak across
+    subset/superset unions.

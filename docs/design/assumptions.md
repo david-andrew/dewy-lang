@@ -7,8 +7,8 @@ bundle that turns every entry off. Spellings marked *pending* await David.
 
 | Assumption (default on) | Where | Opt-out metatag |
 |---|---|---|
-| A 64-bit counter or accumulator growing by a bounded amount per iteration or allocation cannot overflow | facts (fixed-width stores) | *pending* |
-| An array's length fits in 2^56 bytes (the largest address space of any target) | facts (integer counters) | *pending* |
+| A 64-bit counter or accumulator growing by a bounded amount per iteration or allocation cannot overflow | facts (fixed-width stores) | `$no_assumed_bounds` |
+| An array's length fits in 2^56 bytes (the largest address space of any target) | facts (integer counters) | `$no_assumed_bounds` |
 | Library-internal `assert`/`unreachable` are trusted invariants, not `panics` | effects (`panics`) | *pending* |
 | Running out of memory and the runtime core (lib/core/rt.jo) are environmental, not `panics` | effects (`panics`) | *pending* (`$explicit_allocation_failure` covers allocation) |
 | Library code's own obligations stay runtime checks under a static user policy | facts policy | *pending* |
@@ -19,3 +19,7 @@ bundle that turns every entry off. Spellings marked *pending* await David.
 
 When a new assumption is added anywhere in the compiler or library, it gets a
 row here in the same change.
+
+`$bulletproof` (library bundle) turns every row off together with
+`$no_hidden_costs`, `$explicit_allocation_failure`, `$finite_floats` and
+`$no_deadlocks`.
