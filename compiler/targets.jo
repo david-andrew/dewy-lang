@@ -71,3 +71,20 @@ host_target_name = () -> str:
         else if m == 0x100000C: name = "aarch64-mac"
     name
 
+# The build mode and target the command line asks for ("" when it does not): they override
+# what the program's file sets (`$build.mode = 'release'`, `$target = 'wasm32'`), with a
+# warning where the two differ. Nothing else is set from the command line.
+cli_mode = ""
+native_only = false              # (tests and watch run natively, whatever the target)
+cli_target = ""
+# The settings the main file makes: `$build.mode = 'release'` and `$target = 'wasm32'` at the
+# start of a line in a Dewy file (the parser confirms each and reports its mistakes), or the
+# Sloppy build block's opt and target. Where a Dewy file's setting starts (its byte offset, -1
+# for none), and whether the parser has found it there.
+build_target = ""
+file_mode = ""
+file_mode_at = -1
+file_mode_seen = false
+build_target_at = -1
+build_target_seen = false
+settings_path = ""

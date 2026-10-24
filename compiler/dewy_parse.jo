@@ -296,9 +296,9 @@ dw_is_build = (id: int) -> bool:
     let id = dw_unwrap(id)
     dewy_syntax[id].kind == .metatag and dewy_syntax[id].text == "build"
 
-# `$target` (0), `$target.arch` (1), `$target.os` (2), `$build.mode` (3) or
-# `$build.debug` (4, a bool); -1 for anything else. `$build` is the compile-time
-# record of how the program is built: its mode, 'release' or 'debug'.
+# `$target` (0), `$target.arch` (1), `$target.os` (2) or `$build.mode` (3); -1 for
+# anything else. `$build` is the compile-time record of how the program is built: its
+# mode, 'debug' or 'release'.
 dw_target_field = (id: int) -> int:
     let id = dw_unwrap(id)
     if dw_is_target(id): return 0
@@ -306,8 +306,8 @@ dw_target_field = (id: int) -> int:
     member = dw_name(dw_child(id, 2))
     if dw_is_build(dw_child(id, 1)):
         if member == "mode": return 3
-        if member == "debug": return 4
-        fatal(dewy_syntax[id].pos, "`$build` has `mode` ('release' or 'debug') and `debug` (true in a debug build), not `{member}`")
+        if member == "debug": fatal(dewy_syntax[id].pos, "`$build` has `mode` ('debug' or 'release'), not `debug`: test `$build.mode =? 'debug'`")
+        fatal(dewy_syntax[id].pos, "`$build` has `mode` ('debug' or 'release'), not `{member}`")
     if not dw_is_target(dw_child(id, 1)): return -1
     if member == "arch": return 1
     if member == "os": return 2
@@ -318,7 +318,6 @@ dw_target_field_value = (field: int) -> str:
     if field == 1: return target_arch_of(dw_target_name())
     if field == 2: return target_os_of(dw_target_name())
     if field == 3: return if release_build: "release" else: "debug"
-    if field == 4: return if release_build: "false" else: "true"
     dw_target_name()
 
 # A target name (field 0), processor (1) or system (2) written as a string literal,
@@ -353,7 +352,6 @@ dw_target_condition = (id0: int) -> int:
     if kind == .prefix and op == .kw_not:
         inner = dw_target_condition(dw_child(id, 1))
         return if inner < 0: -1 else: 1 - inner
-    if dw_target_field(id) == 4: return if release_build: 0 else: 1
     if kind != .binary: return -1
     if op == .kw_and or op == .kw_or:
         left = dw_target_condition(dw_child(id, 1))
@@ -436,6 +434,68 @@ dw_supported_targets = (tag: int, declaration: int):
     if not (dw_target_name() in names):
         listed = if names.len() == 0: "no target" else: join(names, ", ")
         fatal(pos, "this module supports {listed}, not {dw_target_name()}, the target being compiled for")
+
+# `$target`, or `$build` or one of its members (`$target.arch` too: setting it is an error).
+dw_setting_place = (id: int) -> bool:
+    let id = dw_unwrap(id)
+    if dw_is_target(id) or dw_is_build(id): return true
+    dw_op(id) == .dot and dw_nchildren(id) == 3 and (dw_is_build(dw_child(id, 1)) or dw_is_target(dw_child(id, 1)))
+
+dw_setting_text = (id: int) -> str:
+    let id = dw_unwrap(id)
+    if dw_is_target(id): return "$target"
+    if dw_is_build(id): return "$build"
+    base = if dw_is_build(dw_child(id, 1)): "$build" else: "$target"
+    "{base}.{dw_name(dw_child(id, 2))}"
+
+# A top-level statement setting how the program is built (docs/LANGUAGE.md, "Targets"):
+# `$build.mode = 'release'` or `$target = 'aarch64-linux'`, in the program's main file. In
+# a statement a metatag sets; in an expression it is read. main.jo's scan_settings read the
+# setting before checking began (the target and mode decide what is checked); here it is
+# checked in place, and a command line that overrides it with another value is warned of.
+# True when the statement was one.
+dw_build_setting = (declaration: int) -> bool:
+    place = declaration
+    value = 0
+    if dw_op(declaration) == .assign:
+        place = dw_unwrap(dw_child(declaration, 1))
+        value = dw_unwrap(dw_child(declaration, 2))
+    if not dw_setting_place(place): return false
+    # (where the line starts: the `$`)
+    pos = if dw_op(place) == .dot: dewy_syntax[dw_unwrap(dw_child(place, 1))].pos else: dewy_syntax[place].pos
+    text = dw_setting_text(place)
+    if dw_is_target(place) and value == 0: return false
+    if text == "$target.arch" or text == "$target.os": fatal(pos, "`{text}` is part of the target: set the whole target, as `$target = 'aarch64-linux'`")
+    if text == "$build": fatal(pos, "`$build` is set one member at a time: `$build.mode = 'release'`")
+    if text != "$target" and text != "$build.mode":
+        dw_target_field(place)
+        return false
+    if value == 0: fatal(pos, "`$build.mode` is set to 'debug' or 'release': `$build.mode = 'release'`")
+    target = text == "$target"
+    example = if target: "aarch64-linux" else: "release"
+    if dewy_syntax[value].kind != .string: fatal(dewy_syntax[value].pos, "`{text}` is set to a name in quotes, as `{text} = '{example}'`")
+    name = dewy_syntax[value].text
+    file = pos_file(pos)
+    if files[file].path != settings_path:
+        if target: fatal(pos, "`$target` is set by the program's main file; a module lists the targets it supports with `$supported_targets`")
+        fatal(pos, "`{text}` is set by the program's main file")
+    if (target and build_target_seen) or (not target and file_mode_seen): fatal(pos, "`{text}` is set twice")
+    at = if target: build_target_at else: file_mode_at
+    if at != pos_off(pos): fatal(pos, "`{text} = ...` goes on a line of its own, at its start")
+    if target:
+        build_target_seen = true
+        host = host_target_name()
+        why = target_problem(name, host)
+        if not (name in target_names()): fatal(dewy_syntax[value].pos, "`$target`: {why}")
+        overridden = len(cli_target) > 0 or native_only
+        if len(why) > 0 and not overridden: fatal(dewy_syntax[value].pos, "`$target`: {why}")
+        meant = if name in supported_target_names(): name else: host
+        if len(cli_target) > 0 and not native_only and meant != dw_target_name(): warn(pos, "--target {cli_target} overrides `$target = '{name}'`: this build is for {dw_target_name()}")
+    else:
+        file_mode_seen = true
+        if name != "debug" and name != "release": fatal(dewy_syntax[value].pos, "unknown build mode \"{name}\": `$build.mode` is \"debug\" or \"release\"")
+        if len(cli_mode) > 0 and cli_mode != name: warn(pos, "--{cli_mode} overrides `$build.mode = '{name}'`: this is a {cli_mode} build")
+    true
 
 dw_unimplemented = (id: int, name: str) -> int:
     fatal(dewy_syntax[id].pos, "`${name}` is part of the design but not implemented yet")
@@ -1821,7 +1881,7 @@ dw_expr = (id: int) -> int:
     if k == .directive and text == "concurrent": return dw_concurrent(id, false)
     if k == .directive: return dw_directive(id)
     if k == .metatag:
-        if text == "build": fatal(pos, "`$build` is the compile-time record of how the program is built: `$build.mode` ('release' or 'debug') or `$build.debug`")
+        if text == "build": fatal(pos, "`$build` is the compile-time record of how the program is built: `$build.mode` is 'debug' or 'release'")
         if text != "target": return dw_metatag_fail(id)
         n = mk(.str_lit, pos)
         nodes[n].sval = i32(intern(dw_target_name()))
@@ -2048,10 +2108,6 @@ dw_expr = (id: int) -> int:
             return n
         if op == .dot:
             field = dw_target_field(id)
-            if field == 4:
-                n = mk(.bool_lit, pos)
-                nodes[n].ival = if release_build: 0 else: 1
-                return n
             if field > 0:
                 n = mk(.str_lit, pos)
                 nodes[n].sval = i32(intern(dw_target_field_value(field)))
@@ -2449,6 +2505,7 @@ dw_chain_from = (links: int[], operands: int[], i: int, left: int) -> int:
 dw_stmt = (id: int, top: bool = false) -> int:
     let id = dw_unwrap(id)
     if dw_unsafe_directive(id): return dw_stmt(dw_unsafe_scope(id), top)
+    if dw_op(id) == .assign and dw_setting_place(dw_child(id, 1)): fatal(dewy_syntax[id].pos, "`{dw_setting_text(dw_child(id, 1))}` is set at the top level of the program's main file, on a line of its own")
     # `(count += 1)`: a parenthesized update is the update (a function body may be one).
     grouped = dw_grouped(id)
     if grouped != id and (dn_token_assignment(dw_op(grouped)) or dw_op(grouped) == .assign): id = grouped
@@ -3606,6 +3663,7 @@ dw_top_declarations_inner = (id: int) -> int[]:
         loop item in dw_target_splice([declaration]):
             loop made in dw_top_declarations(item): spliced.push(made)
         return spliced
+    if dw_build_setting(declaration): return []
     tag = declaration
     if dw_op(declaration) == .assign: tag = dw_unwrap(dw_child(declaration, 1))
     if dewy_syntax[tag].kind == .metatag and dewy_syntax[tag].text == "explicit_allocation_failure":

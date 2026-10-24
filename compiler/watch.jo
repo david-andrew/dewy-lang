@@ -26,6 +26,7 @@ use 'poly_closure.jo'
 use 'expr.jo'
 use 'ir.jo'
 use 'lower.jo'
+use 'targets.jo'
 use 'opt.jo'
 use 'inline.jo'
 use 'x64.jo'
@@ -1592,7 +1593,8 @@ w32_compile = (path: str, first: bool) -> bool:
         testing = "0"
         release = "0"
         if test_mode: testing = "1"
-        if cli_release: release = "1"
+        if cli_mode == "release": release = "1"
+        else if cli_mode == "debug": release = "d"
         wcmd = __wide(__w32_cmdline([exe, "watch", "--build", path, state, res, f, w_out, testing, release]))
         wexe = __wide(exe)
         si = fill(0, 13)

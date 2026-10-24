@@ -260,7 +260,7 @@ def test_core_native_tests_format(compiler, tmp_path):
 def test_core_native_tests_help(compiler):
     result = command(compiler, 'test', '--help')
     assert result.returncode == 0
-    assert 'test [--watch] [--release] [--json] file.dewy [name filters...]' in result.stderr
+    assert 'test [--watch] [--release|--debug] [--json] file.dewy [name filters...]' in result.stderr
 
 
 def test_core_native_tests_game(compiler, tmp_path):

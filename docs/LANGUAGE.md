@@ -132,7 +132,10 @@ call no other functions, then apply one local optimization pass per function.
 Read-only walks through recursive records avoid per-node copies in development
 builds as well as release builds.
 `watch` and the interactive prompt retain calls so definitions can be replaced.
-`--release` adds broader inlining and further loop optimization.
+`--release` adds broader inlining and further loop optimization. A program may
+choose its build mode and target in its main file (`$build.mode = 'release'`,
+`$target = 'wasm32'`; see "Targets"); `--release`, `--debug` and `--target`
+override the file.
 Use `-g` without `--release` for native variable debugging; it preserves local
 variable locations instead of running the default local optimization pass.
 Types carry their Dewy spellings, and `lib/debug/dewy_gdb.py` (gdb `source`) or
@@ -3702,7 +3705,9 @@ A setting is a metatag on a line of its own: `$name` or `$name = true` turns it
 on and `$name = false` turns it off. It holds throughout the scope it is written
 in, wherever in that scope: the module at file level, a function in its body,
 or any other block. An inner scope may change it again. A scope sets each
-setting at most once, and the value must be a literal `true` or `false`.
+setting at most once, and the value must be a literal `true` or `false`. Settings
+live in the source: the command line cannot set them (it sets only the build
+mode and the target, under "Targets").
 
 An obligation is a fact an operation needs: an index or slice in bounds (a
 string's counted in graphemes, as `text.length` counts), a nonzero divisor, a value that fits a narrower integer, an argument meeting a refined
@@ -3841,10 +3846,38 @@ if $target =? "wasm32" {
 `$supported_targets` lists the full target names a module accepts, once at file
 scope; compiling it for any other target is an error.
 
-`$build` is the compile-time record of how the program is built: `$build.mode`
-is `"release"` or `"debug"`, and `$build.debug` is `true` in a debug build.
-Conditions on them fold like `$target` tests (`if $build.debug {...}` compiles
-only the live arm). Project flags are ordinary constants in a build module the
+`$build` is the compile-time record of how the program is built. Its member
+`$build.mode` is `'debug'` (the default: what `dewy file.dewy` builds) or
+`'release'`. Conditions on it fold like `$target` tests (`if $build.mode =?
+'debug' {...}` compiles only the live arm).
+
+The program's main file sets the target and build mode, each at the top level on
+a line of its own. As with every metatag, a statement sets the value and an
+expression reads it:
+
+```dewy
+$target = 'aarch64-linux'
+$build.mode = 'release'
+
+main = () => {
+    if $target.os =? 'linux' and $build.mode =? 'release' { printl('fast') }
+}
+```
+
+The value is a name in quotes. Each is set at most once, and only by the main
+file: a module states the targets it accepts with `$supported_targets`. Without
+a setting, the program is built in debug mode for this machine. `$target.arch` and
+`$target.os` are read from the target and are not set on their own. A boolean
+member of `$build` would be set by its bare name and turned off with `= false`.
+
+The command line overrides the file: `--release` or `--debug` sets the mode and
+`--target` the target. When the override differs from the value the file sets,
+the build goes ahead with the command line's value and a warning naming both
+(`--debug overrides $build.mode = 'release'`). An output name ending in `.html`,
+`.zip` or `.exe` picks the target only when neither sets one. Only the mode and
+the target come from the command line. Every other setting (`$runtime_checks`,
+`$no_hidden_costs`, …) is written in the source; given on the command line, it
+is an error. Project flags are ordinary constants in a build module the
 entry module overrides; there are no command-line `-D` flags.
 
 Start a game with the built-in template, then edit it while it runs:

@@ -6171,6 +6171,10 @@ check_program = (main_path: str):
     mainm = load_module(main_path, false, -1)
     ic_switch(IC_CHECK, IC_SHARED)
     ts_dewy = files[int(modules[mainm].file)].is_dewy
+    # (a setting main.jo's scan_settings read that the parser did not find as a statement: inside
+    # a string or comment, say)
+    if ts_dewy and build_target_at >= 0 and not build_target_seen: fatal(mkpos(int(modules[mainm].file), build_target_at), "this line reads as `$target = ...` but is not a statement at the top level")
+    if ts_dewy and file_mode_at >= 0 and not file_mode_seen: fatal(mkpos(int(modules[mainm].file), file_mode_at), "this line reads as `$build.mode = ...` but is not a statement at the top level")
     # The editor checks library documents with an empty main. Named libraries
     # are outside the prelude, so load the opened document explicitly as well.
     if ide_on and starts_with(ide_doc, ide_norm(lib_dir) + "/") and find_module(ide_doc) < 0:
