@@ -1,0 +1,15 @@
+# Whole-record copies between array elements and locals, each followed by a
+# float field write, which sees the copied value.
+Pair:type=[left:float64 right:int64]
+main = ():>void => {
+    let xs:array<Pair> = [[left=1.0 right=1] [left=2.0 right=2]]
+    xs[0].left += 0.5
+    xs[0] = xs[1]
+    xs[0].left += 0.25
+    let r:Pair = [left=7.0 right=7]
+    r.left += 1.0
+    r = xs[0]
+    r.left += 1.0
+    printl(xs)
+    printl(r)
+}

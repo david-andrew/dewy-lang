@@ -40,21 +40,7 @@ def test_unpacked_values_keep_their_declared_type(compiler, tmp_path):  # noqa: 
 
 
 # Wrong code tracked until fixed: (source, expected stdout).
-TRACKED = {
-    'release_record_field_after_call': (
-        'g = (n:int64):>[left:float64 right:int64] => {\n'
-        '    let result:[left:float64 right:int64] = [left=0.0 right=n]\n'
-        '    return result\n'
-        '}\n'
-        'main = ():>void => {\n'
-        '    let r:[left:float64 right:int64] = [left=2.25 right=1]\n'
-        '    r.left += 1.0\n'
-        '    r = g(1)\n'
-        '    r.left += 3.0\n'
-        '    printl(r)\n'
-        '}\n',
-        '[left=3.0 right=1]\n'),
-}
+TRACKED: dict[str, tuple[str, str]] = {}
 
 
 def test_tracked_issues_have_repros_of_their_shape():
@@ -68,9 +54,8 @@ def test_tracked_repros_pass_in_default_builds(compiler, tmp_path):  # noqa: F81
         assert build_and_run(compiler, tmp_path, name, source).stdout == expected, name
 
 
-@pytest.mark.parametrize('name', [pytest.param('release_record_field_after_call', marks=pytest.mark.xfail(
-    reason='release: a float field updated after the record is replaced by a call result adds to its old value '
-           '(inlining/scalar replacement)', strict=True))])
+@pytest.mark.xfail(reason='wrong code tracked until fixed (tools/compiler/dewy_fuzz.py TRACKED)', strict=True)
+@pytest.mark.parametrize('name', sorted(TRACKED))
 def test_tracked_wrong_output_in_release(compiler, tmp_path, name):  # noqa: F811
     source, expected = TRACKED[name]
     assert build_and_run(compiler, tmp_path, name, source, release=True).stdout == expected

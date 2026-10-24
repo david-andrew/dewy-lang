@@ -1,0 +1,68 @@
+# A record a callee builds and returns replaces one whose float field was just
+# written, and the field reads after the call see the returned value (release
+# builds inline the callee and keep its record in registers).
+Rev:type=[count:int64 scale:float64]
+Point:type=[x:float64 y:float64]
+Body:type=[p:Point n:int64]
+Mix:type=[a:int64 b:float64 c:int64 d:float64]
+Small:type=[f:float32 i:int32 g:float32 j:int32]
+
+make_rev = (n:int64):>Rev => {
+    let r:Rev = [count=n scale=0.0]
+    return r
+}
+make_body = (n:int64):>Body => {
+    let b:Body = [p=[x=0.0 y=0.25] n=n]
+    return b
+}
+make_mix = (n:int64):>Mix => {
+    let m:Mix = [a=n b=0.5 c=n d=1.5]
+    return m
+}
+make_small = (n:int32):>Small => {
+    let s:Small = [f=0.0 i=n g=0.5 j=n]
+    return s
+}
+
+order = ():>void => {
+    let r:Rev = [count=1 scale=2.25]
+    r.scale += 1.0
+    r = make_rev(4)
+    r.scale += 3.0
+    r.count += 1
+    printl(r)
+}
+nested = ():>void => {
+    let b:Body = [p=[x=2.25 y=8.0] n=1]
+    b.p.x += 1.0
+    b = make_body(2)
+    b.p.x += 3.0
+    printl(b)
+}
+mixed = ():>void => {
+    let m:Mix = [a=1 b=2.25 c=3 d=4.5]
+    m.d += 1.0
+    m = make_mix(7)
+    m.d += 3.0
+    printl(m)
+    m.b += 1.0
+    m.a += 10
+    m = make_mix(8)
+    m.b += 3.0
+    m.c += 100
+    printl(m)
+}
+narrow = ():>void => {
+    let s:Small = [f=2.25 i=1 g=4.5 j=2]
+    s.g += 1.0
+    s = make_small(3)
+    s.g += 3.0
+    s.f += 1.0
+    printl(s)
+}
+main = ():>void => {
+    order()
+    nested()
+    mixed()
+    narrow()
+}

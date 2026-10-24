@@ -44,12 +44,7 @@ class Tracked:
     shape: re.Pattern
 
 
-TRACKED = (
-    # A record's float field updated, the record replaced by a call's result, then that field
-    # updated again: release builds add to the field's value from before the call.
-    Tracked('release_record_field_after_call', 'mismatch', ('native-release', 'web-release'),
-            re.compile(r'^ *(\w+)\.(\w+) [-+*/]?= .*\n(?:.*\n)*? *\1 = \w+\(.*\n(?:.*\n)*? *\1\.\2 [-+*/]= ', re.M)),
-)
+TRACKED: tuple[Tracked, ...] = ()
 
 
 @dataclass

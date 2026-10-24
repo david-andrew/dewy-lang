@@ -1,0 +1,35 @@
+# Replacing a record with a returned one, then writing its float field, in a
+# loop, and with the write after the replacement or before it.
+Pair:type=[left:float64 right:int64]
+make = (n:int64):>Pair => {
+    let result:Pair = [left=0.0 right=n]
+    return result
+}
+in_loop = ():>void => {
+    let r:Pair = [left=2.25 right=1]
+    let total = 0.0
+    loop i in [0..5) {
+        r.left += 1.0
+        r = make(i)
+        r.left += 3.0
+        total += r.left
+    }
+    printl(r)
+    printl(total)
+}
+after = ():>void => {
+    let r:Pair = make(1)
+    r.left += 1.5
+    r = make(2)
+    r.left += 3.0
+    printl(r)
+    let s:Pair = make(3)
+    r = s
+    r.left += 0.25
+    printl(r)
+    printl(s)
+}
+main = ():>void => {
+    in_loop()
+    after()
+}

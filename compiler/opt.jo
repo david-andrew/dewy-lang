@@ -1149,6 +1149,89 @@ sra_lane_use = (s: int, off: int, bytes: int, k: int) -> bool:
             sra_lanes[j].kind = k
     true
 
+# Copies join lanes into classes. The forward pass keeps integer and float memory apart, so a
+# copy between lanes and memory must access each word as what it is: a lane that is only copied
+# (kind 0) takes the one kind its class shows. A class showing neither kind, or both, that a copy
+# joins to memory keeps its slots in memory (each slot leaving makes its other classes reach
+# memory too), where the copy stays a copy. O(P + L log L) for P pending operations and L lanes;
+# nothing is allocated for a function whose slots meet no copy.
+sra_find = (parent: mut int[], j: int) -> int:
+    let j = j
+    loop parent[j] != j:
+        parent[j] = parent[parent[j]]
+        j = parent[j]
+    j
+
+sra_lane_first = (v: int) -> int: sra_values[v].slot * 4 + (sra_values[v].offset >> sra_shift(sra_slots[sra_values[v].slot].width))
+sra_lane_count = (s: int) -> int: int(ir.slot_size[s]) >> sra_shift(sra_slots[s].width)
+
+sra_copy_kinds = (code: *Ins, pending: int[], ns: int):
+    copies: int[]
+    loop pos in pending:
+        if code[pos].op == .copy: copies.push(pos)
+    if copies.len() == 0: return
+    n = ns * 4
+    parent = fill(0, n)
+    loop j in [0..n): parent[j] = j
+    flags = fill(0, n)             # at a class root: 1 float, 2 integer, 4 reaches memory
+    loop pos in copies:
+        ins = code[pos]
+        a = int(ins.a)
+        b = int(ins.b)
+        pa = sra_is_p(a)
+        pb = sra_is_p(b)
+        if not pa and not pb: continue
+        m = int(ins.imm) >> sra_shift(sra_slots[sra_values[if pa: a else: b].slot].width)
+        loop i in [0..m):
+            if pa and pb:
+                ra = sra_find(parent, sra_lane_first(a) + i)
+                rb = sra_find(parent, sra_lane_first(b) + i)
+                if ra != rb:
+                    parent[ra] = rb
+                    flags[rb] = flags[rb] | flags[ra]
+            else:
+                x = if pa: a else: b
+                r = sra_find(parent, sra_lane_first(x) + i)
+                flags[r] = flags[r] | 4
+    head = fill(-1, n)             # at a class root: its first lane; then each lane's next
+    next = fill(-1, n)
+    loop s in [0..ns):
+        if not sra_slots[s].ok: continue
+        loop i in [0..sra_lane_count(s)):
+            j = s * 4 + i
+            r = sra_find(parent, j)
+            flags[r] = flags[r] | sra_lanes[j].kind
+            next[j] = head[r]
+            head[r] = j
+    # slots of the classes with no single kind that reach memory leave, which can make more
+    # classes reach memory: each slot leaves once
+    work: int[]
+    loop s in [0..ns):
+        if not sra_slots[s].ok: continue
+        loop i in [0..sra_lane_count(s)):
+            f = flags[sra_find(parent, s * 4 + i)]
+            if f & 4 != 0 and (f & 3 == 0 or f & 3 == 3):
+                work.push(s)
+                break
+    loop work.len() > 0:
+        s = work.pop()
+        if not sra_slots[s].ok: continue
+        sra_slots[s].ok = false
+        loop i in [0..sra_lane_count(s)):
+            r = sra_find(parent, s * 4 + i)
+            if flags[r] & 4 != 0: continue
+            flags[r] = flags[r] | 4
+            if flags[r] & 3 == 1 or flags[r] & 3 == 2: continue
+            j = head[r]
+            loop j >= 0:
+                work.push(j >> 2)
+                j = next[j]
+    loop s in [0..ns):
+        if not sra_slots[s].ok: continue
+        loop i in [0..sra_lane_count(s)):
+            f = flags[sra_find(parent, s * 4 + i)] & 3
+            if sra_lanes[s * 4 + i].kind == 0 and (f == 1 or f == 2): sra_lanes[s * 4 + i].kind = f
+
 sra_is_p = (v: int) -> bool: v >= 0 and v < sra_nv and sra_values[v].slot >= 0 and sra_slots[sra_values[v].slot].ok
 sra_lane_of = (v: int, i: int) -> int: sra_lanes[sra_values[v].slot * 4 + (sra_values[v].offset >> sra_shift(sra_slots[sra_values[v].slot].width)) + i].reg
 
@@ -1375,6 +1458,7 @@ o_sra = ():
         loop operand_index in [0..ir_use_count):
             let u = ir_use(operand_index)
             if sra_values[u].slot >= 0: sra_slots[sra_values[u].slot].ok = false
+    sra_copy_kinds(code, pending, ns)
     # a register per lane
     any = false
     loop s in [0..ns):

@@ -1,0 +1,12 @@
+# A float field written before a returned record replaces the whole record.
+g = (n:int64):>[left:float64 right:int64] => {
+    let result:[left:float64 right:int64] = [left=0.0 right=n]
+    return result
+}
+main = ():>void => {
+    let r:[left:float64 right:int64] = [left=2.25 right=1]
+    r.left += 1.0
+    r = g(1)
+    r.left += 3.0
+    printl(r)
+}
