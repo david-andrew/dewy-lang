@@ -7,11 +7,11 @@ bundle that turns every entry off. Spellings marked *pending* await David.
 
 | Assumption (default on) | Where | Opt-out metatag |
 |---|---|---|
-| A 64-bit counter or accumulator growing by a bounded amount per iteration or allocation cannot overflow | facts (fixed-width stores) | `$no_assumed_bounds` |
+| A 64-bit counter or accumulator growing by a bounded amount per iteration or allocation cannot overflow | facts (fixed-width stores); a `parallel` range of 2^63 or more values runs as 2^63 - 1 (lib/std/thread.jo) | `$no_assumed_bounds` |
 | An array's length fits in 2^56 bytes (the largest address space of any target) | facts (integer counters) | `$no_assumed_bounds` |
 | Library-internal `assert`/`unreachable` are trusted invariants, not `panics` | effects (`panics`) | *pending* |
-| Running out of memory and the runtime core (lib/core/rt.jo) are environmental, not `panics` | effects (`panics`) | *pending* (`$explicit_allocation_failure` covers allocation) |
-| A failure of the environment inside the library (a graphics driver refusing a call, no pipes for the test runner: `__environment_failure`) is environmental, not `panics` | effects (`panics`) | *pending* |
+| Running out of memory (an array shape whose element count passes int64 included) and the runtime core (lib/core/rt.jo) are environmental, not `panics` | effects (`panics`) | *pending* (`$explicit_allocation_failure` covers allocation) |
+| A failure of the environment inside the library (a graphics driver refusing a call, no pipes for the test runner, standard input ending before `input_int`/`input_float` get a number: `__environment_failure`) is environmental, not `panics` | effects (`panics`) | *pending* |
 | Library code's own obligations stay runtime checks under a static user policy | facts policy | *pending* |
 | The library's raw-memory code is trusted by the arena escape check | ownership (arenas) | *pending* |
 | `$runtime_assert` within one module does not make that module's own callers `panics` (a scoping assumption, not an assumed bound: `$no_assumed_bounds` does not cover it) | effects (`panics`) | `$assume_local_asserts=false` (spelling provisional; `$bulletproof` should include it) |
