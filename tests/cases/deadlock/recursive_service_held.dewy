@@ -1,0 +1,13 @@
+# A recursive service that keeps its lock while it serves a sub-request waits for itself.
+serve = (m:Mutex<int64> depth:int64):>int64 => {
+    let state = @(m.lock())
+    if depth >? 0 {
+        let below = serve(m depth - 1)
+        state += below
+    }
+    return depth
+}
+main = () => {
+    let m = mutex<int64>(0)
+    printl"{serve(m 3)}"
+}

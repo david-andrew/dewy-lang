@@ -847,7 +847,7 @@ cannot be replaced, passed whole as a place, or lend another place by `let`.
 The object is a local variable or parameter, or a field or element of one (a
 global is an error for now). For now a method lends one field route (`@balance`,
 `@vault.balance`), as its last statement; calling it without `@(...)` is an
-error. Lock types and `lock_all` are not in the library yet.
+error. The library's lock, `Mutex<T>`, is one such type (see Parallel CPU work).
 
 Lengths retain their current `int64` type. An `int` index uses the ordinary bounds
 checks. `to_int(text)` returns `int | NotAnInteger | TooManyDigits`, parsing
@@ -2588,6 +2588,35 @@ growth cannot manufacture these handles; empty containers remain valid.
 `CachePadded<T>` has a `value:T` payload and a padded representation: its stride
 includes a spare cache line and rounds to 128 bytes. The payload keeps its
 natural alignment. Padding a handle pads the handle, not its separate allocation.
+
+A `Mutex<T>` guards a value that tasks share. `mutex(value)` makes one (provisional
+spelling); copies of the handle share the lock, so tasks and `parallel` iterations
+capture it like an atomic handle. `@(m.lock())` waits for the lock and lends the
+value as a place, held until the place's last use (or an earlier exit);
+`@(m.try_lock())` gives `Busy` instead of waiting. Several locks are taken together,
+in one canonical order whatever order they are written in, with `lock_all`:
+
+```dewy
+transfer = (src:Mutex<int64> dst:Mutex<int64> amount:int64):>void | DuplicateLock | Canceled => {
+    let [a b] = @(lock_all(src dst)) or_throw   # DuplicateLock when src is dst
+    a -= amount
+    b += amount                                 # each lock released after its last use
+}
+```
+
+`lock_all` gives `DuplicateLock` for a lock written twice (never two places into
+one value) and `Canceled` when its task is canceled while it waits, holding nothing
+either way. `lock` itself is not a cancellation point.
+
+The compiler checks the order locks are taken in across the whole program, with no
+annotations. It rejects what it can show waits forever: two paths taking the same
+locks in opposite orders (in a program with tasks or `parallel` work), waiting for
+a lock the task already holds (directly, through a call, a callback it passes or
+is given, or a copied handle), holding a lock while joining tasks or a `parallel`
+loop whose work takes it, and a `parallel` iteration polling an atomic that only a
+sibling iteration sets. It warns where it cannot decide: two elements of one array
+taken one inside the other, a function value called while a lock is held, or a
+parallel iteration polling an atomic set elsewhere.
 
 Waiting work uses a structured task group on the Linux threads backend:
 

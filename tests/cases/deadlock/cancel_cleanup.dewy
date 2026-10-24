@@ -1,0 +1,38 @@
+# modes: native native-release
+# Cancellation during cleanup: a task holding two locks is canceled while it sleeps; leaving by
+# `or_throw` drops its places' guards (shielded cleanup), releasing both. A sibling waiting for
+# the same locks in lock_all either gets them or gets Canceled, never a lost lock.
+Stop:type = type of error
+holder = (a:Mutex<int64> b:Mutex<int64>):>int64 | Canceled | DuplicateLock => {
+    let [x y] = @(lock_all(a b)) or_throw
+    sleep(10s) or_throw
+    x += 1
+    y += 1
+    1
+}
+waiter = (a:Mutex<int64> b:Mutex<int64>):>int64 | Canceled | DuplicateLock => {
+    sleep(0.01s) or_throw
+    let [y x] = @(lock_all(b a)) or_throw
+    x += 100
+    y += 100
+    2
+}
+stopper = ():>int64 | Stop | Canceled => {
+    sleep(0.05s) or_throw
+    Stop
+}
+main = () => {
+    let a = mutex<int64>(0)
+    let b = mutex<int64>(0)
+    concurrent {
+        let h = spawn holder(a b)
+        let w = spawn waiter(a b)
+        let s = spawn stopper()
+    }
+    printl"stopper: {s is? Stop}"
+    printl"holder canceled: {h is? Canceled}"
+    let [x y] = @(lock_all(a b)) or_throw
+    # (the waiter may get the locks once the holder's cleanup released them, or be canceled first)
+    let consistent = if w is? Canceled x =? 0 and y =? 0 else x =? 100 and y =? 100
+    printl"both free again, consistent: {consistent}"
+}

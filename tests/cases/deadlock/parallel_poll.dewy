@@ -1,0 +1,7 @@
+main = () => {
+    let ready = atomic(0)
+    parallel i in [0..4) {
+        if i =? 0 { ready.store(1) }
+        else { loop ready.load() =? 0 { } }
+    }
+}

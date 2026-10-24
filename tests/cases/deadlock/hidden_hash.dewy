@@ -1,0 +1,16 @@
+# A key whose hash takes a lock: inserting it while holding that lock waits forever, through
+# the dictionary's hidden call of `hash`.
+Key:type = [id:int64 seen:Mutex<int64>]
+__eq__ = (a:Key b:Key):>bool => a.id =? b.id
+hash = (key:Key):>uint64 => {
+    let n = @(key.seen.lock())
+    n += 1
+    (key.id as uint64).hash()
+}
+main = () => {
+    let k = Key[1 mutex<int64>(0)]
+    let counts:dict<Key int64> = []
+    let held = @(k.seen.lock())
+    counts[k] = 1
+    held += 1
+}

@@ -1,0 +1,37 @@
+# modes: native native-release
+# The grant-versus-cancel race: tasks keep moving money with lock_all while a sibling's failure
+# cancels the group. A task either gets both locks (and releases them after its last use) or
+# gets Canceled holding nothing; no lock is lost and no money appears or vanishes.
+Failed:type = type of error
+mover = (a:Mutex<int64> b:Mutex<int64> rounds:int64):>int64 | Canceled | DuplicateLock => {
+    let moved:int64 = 0
+    loop i in [0..rounds) {
+        let [x y] = @(lock_all(a b)) or_throw
+        x -= 1
+        y += 1
+        moved += 1
+    }
+    moved
+}
+quitter = ():>int64 | Failed | Canceled => {
+    sleep(0.001s) or_throw
+    return Failed
+}
+main = () => {
+    let start:int64 = 1000000
+    let a = mutex(start)
+    let b = mutex(start)
+    let outcome = concurrent {
+        spawn mover(a b 100000000)
+        spawn mover(b a 100000000)
+        spawn quitter()
+    }
+    printl"group: {outcome is? Failed}"
+    match @(a.try_lock()) {
+        <Busy> => printl"a lost"
+        x:int64 => match @(b.try_lock()) {
+            <Busy> => printl"b lost"
+            y:int64 => printl"both free, total kept: {x + y =? 2 * start}"
+        }
+    }
+}

@@ -1,0 +1,35 @@
+# modes: native native-release
+# Account transfers in both directions at once: lock_all takes both locks in one canonical order,
+# so the tasks cannot wait on each other, and money is neither made nor lost. The same account
+# twice is DuplicateLock, never two places into one balance.
+transfer = (src:Mutex<int64> dst:Mutex<int64> amount:int64):>int64 | Canceled | DuplicateLock => {
+    let [a b] = @(lock_all(src dst)) or_throw
+    a -= amount
+    b += amount
+    amount
+}
+churn = (src:Mutex<int64> dst:Mutex<int64> rounds:int64):>int64 | Canceled | DuplicateLock => {
+    loop i in [0..rounds) { transfer(src dst 1) or_throw; }
+    rounds
+}
+main = () => {
+    let x = mutex<int64>(1000)
+    let y = mutex<int64>(1000)
+    concurrent {
+        spawn churn(x y 20000)
+        spawn churn(y x 20000)
+        spawn churn(x y 5000)
+    }
+    let [a b] = @(lock_all(x y)) or_throw
+    printl"{a} {b} total {a + b}"
+    match transfer(x x 1) {
+        <DuplicateLock> => printl"x and x: DuplicateLock"
+        _ => printl"unexpected"
+    }
+    let accounts = [mutex<int64>(5) mutex<int64>(7) mutex<int64>(9)]
+    let [p q] = @(lock_all(accounts[2] accounts[0])) or_throw
+    p -= 4
+    q += 4
+    let [r s t] = @(lock_all(accounts[0] accounts[1] accounts[2])) or_throw
+    printl"{r} {s} {t}"
+}

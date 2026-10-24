@@ -1,0 +1,13 @@
+each = (n:int64 visit:<(i:int64):>void>):>void => {
+    loop i in [0..n) visit(i)
+}
+main = () => {
+    let m = mutex(0)
+    let bump = (i:int64):>void => {
+        let again = @(m.lock())
+        again += i
+    }
+    let held = @(m.lock())
+    each(3 @bump)
+    held += 1
+}

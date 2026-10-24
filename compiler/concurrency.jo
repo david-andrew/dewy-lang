@@ -15,6 +15,7 @@ use 'refine.jo'
 use 'ownership.jo'
 use 'errors.jo'
 use 'ffi.jo'
+use 'deadlock.jo'
 
 concurrency_calls: int[]
 # A type's transfer rows (`$send=false`, `$sync=false`, claims `$send`/`$sync`,
@@ -56,6 +57,10 @@ concurrency_transfer = (t0: int, seen: mut {int: bool}, sync: bool = false) -> b
     seen[t] = true
     k = tkind(t)
     if concurrency_builtin_type(t, "Atomic") or concurrency_builtin_type(t, "TaskGroup") or concurrency_builtin_type(t, "Task"): return true
+    # (a lock's shared state, Mutex<T>'s: Send and Sync when its payload is Send, which only a holder touches)
+    if concurrency_builtin_type(t, "__Lock"):
+        payload: {int: bool} = {}
+        return concurrency_transfer(struct_targ(int(types[t].st), 0), payload, false)
     if k == .ptr or k == .fn_ or k == .cfn or k == .polyfn: return false
     if k == .array or k == .fixed or k == .opt or k == .box: return concurrency_transfer(telem(t), seen, sync)
     if k == .tuple:
@@ -228,6 +233,7 @@ concurrency_callback = (a: int, waiting: bool = false):
 
 concurrency_atomic_call = (n: int):
     if nodes[n].aux != 0 or nodes[n].sym <= 0: return
+    deadlock_atomics = true
     f = int(nodes[n].sym)
     if not modules[int(fns[f].mod)].is_prelude: return
     d = int(fns[f].decl)
