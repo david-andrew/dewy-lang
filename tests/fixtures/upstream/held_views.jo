@@ -1,5 +1,5 @@
 # Adapted: explicit half-open ranges and equivalent match forms for variant if/loop-let.
-# requires: sloppy
+# requires: full-compiler
 # Release builds walk what a parameter holds without copying it: `cur = n` and then
 # `loop let c = cur: cur = c.left`, or `match e: .bin(op, l, r)`, point into the parameter.
 # Each case here must print what a copy would: a value taken out lives on after the tree changes,
