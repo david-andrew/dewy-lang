@@ -9,9 +9,8 @@ from tests.support import ROOT, compiler  # noqa: F401
 def build(compiler, tmp_path, source, *, strict=False, release=False):
     path = tmp_path / 'aggregate.dewy'
     path.write_text(source)
-    return subprocess.run([compiler, 'build', path, '-o', tmp_path / 'aggregate',
-                           *(['--release'] if release else [])], text=True, capture_output=True,
-                          env={**os.environ, **({'DEWY_INTERNAL_FACT_POLICY': 'require-static'} if strict else {})})
+    return subprocess.run([compiler, *(['--internal-fact-policy=require-static'] if strict else []), 'build', path, '-o', tmp_path / 'aggregate',
+                           *(['--release'] if release else [])], text=True, capture_output=True)
 
 
 @pytest.mark.parametrize('release', [False, True])

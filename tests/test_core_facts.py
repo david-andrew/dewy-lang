@@ -45,10 +45,10 @@ def test_scalar_fact_check_diagnostics(compiler, name):
                                           ('policy_refuted', 'divisor refuted: zero'),
                                           ('policy_math_result', 'cannot prove division result: possible fixed-width wrap')])
 def test_scalar_fact_internal_policy(compiler, tmp_path, command, name, expected):
-    arguments = [compiler, command, CASES / f'{name}.dewy']
+    arguments = [compiler, '--internal-fact-policy=require-static', command, CASES / f'{name}.dewy']
     if command == 'build':
         arguments += ['-o', tmp_path / 'program']
-    result = subprocess.run(arguments, env={**os.environ, 'DEWY_INTERNAL_FACT_POLICY': 'require-static'},
+    result = subprocess.run(arguments,
                             text=True, capture_output=True, timeout=30)
     if expected:
         assert result.returncode != 0

@@ -83,11 +83,10 @@ PROVED_OUTPUT = '14\n0\n110\n46\n14\n0\n210\n1116\n7\n3\n4\n6\n'
 def run(compiler, tmp_path, source, command, strict):
     path = tmp_path / 'loops.dewy'
     path.write_text(source)
-    arguments = [compiler, command, path]
+    arguments = [compiler, *(['--internal-fact-policy=require-static'] if strict else []), command, path]
     if command == 'build':
         arguments += ['-o', tmp_path / 'loops']
-    env = {**os.environ, **({'DEWY_INTERNAL_FACT_POLICY': 'require-static'} if strict else {})}
-    return subprocess.run(arguments, env=env, text=True, capture_output=True, timeout=60)
+    return subprocess.run(arguments, text=True, capture_output=True, timeout=60)
 
 
 @pytest.mark.parametrize('strict', [False, True], ids=['ordinary', 'strict'])

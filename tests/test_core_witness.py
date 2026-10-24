@@ -76,10 +76,10 @@ CASES = [
 
 
 def strict(compiler, path, command='check'):
-    arguments = [compiler, command, path]
+    arguments = [compiler, '--internal-fact-policy=require-static', command, path]
     if command == 'build':
         arguments += ['-o', path.with_suffix('')]
-    return subprocess.run(arguments, env={**os.environ, 'DEWY_INTERNAL_FACT_POLICY': 'require-static'},
+    return subprocess.run(arguments,
                           text=True, capture_output=True, timeout=30)
 
 

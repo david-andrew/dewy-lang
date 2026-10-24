@@ -29,8 +29,7 @@ def test_refinement_runtime_and_strict(compiler, tmp_path, release, source):
     assert ran.returncode != 0
     assert 'refinement failed' in ran.stderr
     for command in ('check', 'build'):
-        result = subprocess.run([compiler, command, path, *(['-o', binary] if command == 'build' else [])],
-                                env={**os.environ, 'DEWY_INTERNAL_FACT_POLICY': 'require-static'},
+        result = subprocess.run([compiler, '--internal-fact-policy=require-static', command, path, *(['-o', binary] if command == 'build' else [])],
                                 capture_output=True, text=True)
         assert result.returncode != 0
         assert 'cannot prove refinement' in result.stderr and 'help:' in result.stderr, result.stderr
@@ -75,8 +74,7 @@ def test_refinement_rejections(compiler, tmp_path, source, diagnostic):
 @pytest.mark.parametrize('name', ['pilot', 'snapshot', 'generic', 'mutate', 'uint',
                                   'recursive', 'local', 'later_dependent'])
 def test_refinement_internal_static_positive(compiler, name):
-    result = subprocess.run([compiler, 'check', CASES / f'{name}.dewy'],
-                            env={**os.environ, 'DEWY_INTERNAL_FACT_POLICY': 'require-static'},
+    result = subprocess.run([compiler, '--internal-fact-policy=require-static', 'check', CASES / f'{name}.dewy'],
                             capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
 
@@ -84,8 +82,7 @@ def test_refinement_internal_static_positive(compiler, name):
 def test_refinement_uint_zero_strict(compiler, tmp_path):
     path = tmp_path / 'zero.dewy'
     path.write_text('f=(x:uint64):>uint64=>{let z:uint64=0; return x//z}\nmain=()=>printl(f(2))')
-    result = subprocess.run([compiler, 'check', path],
-                            env={**os.environ, 'DEWY_INTERNAL_FACT_POLICY': 'require-static'},
+    result = subprocess.run([compiler, '--internal-fact-policy=require-static', 'check', path],
                             capture_output=True, text=True)
     assert result.returncode != 0
     assert 'divisor refuted: zero' in result.stderr, result.stderr

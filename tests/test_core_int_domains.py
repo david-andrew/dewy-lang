@@ -26,8 +26,7 @@ main=()=>run()
 def check(compiler, tmp_path, source):
     path = tmp_path / 'domain.dewy'
     path.write_text(source)
-    return subprocess.run([compiler, 'check', path], text=True, capture_output=True, timeout=30,
-                          env={**os.environ, 'DEWY_INTERNAL_FACT_POLICY': 'require-static'})
+    return subprocess.run([compiler, '--internal-fact-policy=require-static', 'check', path], text=True, capture_output=True, timeout=30)
 
 
 def test_int_domain_proves_conversion(compiler, tmp_path):

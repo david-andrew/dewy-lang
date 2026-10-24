@@ -26,10 +26,10 @@ KERNELS = ['records', 'text', 'callbacks', 'callbacks_literal']
 EXAMPLES = ['ring', 'rollback_model', 'reaction_model']
 
 
-def build(compiler, source, output, workers, **extra):
+def build(compiler, source, output, workers, *options, **extra):
     env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
     env.update(SLOPPY_EMIT_WORKERS=str(workers), DEWY_CORE_LIB=str(ROOT / 'lib'), **extra)
-    run = subprocess.run([compiler, 'build', source, '-o', output], cwd=output.parent, env=env,
+    run = subprocess.run([compiler, *options, 'build', source, '-o', output], cwd=output.parent, env=env,
                          capture_output=True, text=True, timeout=120)
     assert run.returncode == 0, run.stdout + run.stderr
     assert run.stdout == "", run.stdout

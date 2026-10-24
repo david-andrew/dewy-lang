@@ -89,8 +89,7 @@ main=():>void=>exit(entry()) entry=():>int64=>pick()
 def check(compiler, tmp_path, name, source):
     path = tmp_path / f'{name}.dewy'
     path.write_text(source)
-    return subprocess.run([compiler, 'check', path], text=True, capture_output=True, timeout=30,
-                          env={**os.environ, 'DEWY_INTERNAL_FACT_POLICY': 'require-static'})
+    return subprocess.run([compiler, '--internal-fact-policy=require-static', 'check', path], text=True, capture_output=True, timeout=30)
 
 
 @pytest.mark.parametrize('name', PROVED)

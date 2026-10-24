@@ -24,7 +24,7 @@ def test_library_obligations_stay_the_librarys(compiler, tmp_path):
     source = tmp_path / 'program.dewy'
     source.write_text(SOURCE)
     for policy in ('require-static-all', 'require-static-measure'):
-        result = subprocess.run([compiler, 'check', 'program.dewy'], env={**os.environ, 'DEWY_INTERNAL_FACT_POLICY': policy},
+        result = subprocess.run([compiler, f'--internal-fact-policy={policy}', 'check', 'program.dewy'],
                                 text=True, capture_output=True, timeout=60, cwd=tmp_path)
         errors = [line for line in result.stderr.splitlines() if ': error: ' in line]
         assert errors and all(line.startswith('program.dewy:5:') for line in errors), result.stderr

@@ -4534,7 +4534,11 @@ facts_finalize = ():
     if wi_fact_requests.len() > 0: wi_fact_finish()
     if wit_collected > 0 and not wit_measure: stop(1)
 
-# Harness-only policy; this is not a strict-lane surface or no-panic claim.
+# Harness-only policy; this is not a strict-lane surface or no-panic claim. The test tools
+# ask for it with `--internal-fact-policy=...` before the command (main.jo); no setting
+# from the environment changes what a build means.
+fact_internal_policy = ""
+
 facts_reset = ():
     fact_slice = FactSlice()
     fact_slice_cache = {}
@@ -4552,7 +4556,8 @@ facts_reset = ():
     fact_validated = {}
     fact_query = false
     fact_policy = FactPolicy.RuntimeAllowed
-    if let policy = env("DEWY_INTERNAL_FACT_POLICY"):
+    if len(fact_internal_policy) > 0:
+        policy = fact_internal_policy
         if policy == "require-static" or policy == "require-static-all" or policy == "require-static-measure": fact_policy = .RequireStatic
         wit_collect = policy == "require-static-all" or policy == "require-static-measure"
         # (measure: report every failure and build anyway, so `build --time`

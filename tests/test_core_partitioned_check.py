@@ -107,9 +107,9 @@ def test_partitioned_static_policy_stays_serial(compiler, tmp_path):
     source.write_text('\n'.join(f'f{i}=(x:int64):>int64=>x+{i}' for i in range(140)) +
                       '\nlet sum:int64=0\n' + '\n'.join(f'sum+=f{i}({i})' for i in range(140)) +
                       '\nprintl"{sum}"\n')
-    policy = {'DEWY_INTERNAL_FACT_POLICY': 'require-static', 'SLOPPY_EMIT_FORCE': '1'}
-    base, errors = build(compiler, source, tmp_path / 'one', 1, **policy)
-    got, err = build(compiler, source, tmp_path / 'four', 4, **policy)
+    strict = '--internal-fact-policy=require-static'
+    base, errors = build(compiler, source, tmp_path / 'one', 1, strict, SLOPPY_EMIT_FORCE='1')
+    got, err = build(compiler, source, tmp_path / 'four', 4, strict, SLOPPY_EMIT_FORCE='1')
     assert (got, err) == (base, errors)
-    _, timed = build(compiler, source, tmp_path / 'timed', 4, SLOPPY_PAR_TIME='1', **policy)
+    _, timed = build(compiler, source, tmp_path / 'timed', 4, strict, SLOPPY_PAR_TIME='1', SLOPPY_EMIT_FORCE='1')
     assert 'pcheck:' not in timed

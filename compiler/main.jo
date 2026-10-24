@@ -777,12 +777,21 @@ open_in_browser = (path: str) -> bool:
     else:
         return spawn_detached("/usr/bin/xdg-open", ["xdg-open", path])
 
+# `dewy-core --internal-fact-policy=require-static check ...`: the test tools' fact policy
+# (facts.jo), right after the program's name, where no command or program argument goes
+internal_options = (a: str[]) -> str[]:
+    if a.len() > 2 and starts_with(a[1], "--internal-fact-policy="):
+        fact_internal_policy = a[1][len("--internal-fact-policy=")..]
+        return [a[0]] + a[2..]
+    a
+
 main = ():
     __copies_min = 0       # (SLOPPY_COPIES is for the program it runs, not the compiler's own copies)
     a = args()
     if a.len() > 2 and a[1] == "--eager-bodies":
         dc_eager = true
         a = [a[0]] + a[2..]
+    a = internal_options(a)
     if a.len() >= 2 and (a[1] == "--version" or a[1] == "version"):
         print("dewy-core {DEWY_CORE_VERSION}")
         return
@@ -816,6 +825,7 @@ main = ():
     if a.len() > 2 and a[1] == "--eager-bodies":
         dc_eager = true
         a = [a[0]] + a[2..]
+    a = internal_options(a)
     if a.len() >= 2 and (a[1] == "build" or a[1] == "check" or a[1] == "test" or a[1] == "run" or ends_with(a[1], ".jo") or ends_with(a[1], ".dewy")): more_errors = true
     lib_dir = find_lib_dir()
     lib_root = lib_dir

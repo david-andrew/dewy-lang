@@ -156,8 +156,7 @@ main=():>void=>exit(f([1]))
 def check(compiler, tmp_path, name, source):
     path = tmp_path / f'{name}.dewy'
     path.write_text(source)
-    return subprocess.run([compiler, 'check', path], text=True, capture_output=True, timeout=30,
-                          env={**os.environ, 'DEWY_INTERNAL_FACT_POLICY': 'require-static'})
+    return subprocess.run([compiler, '--internal-fact-policy=require-static', 'check', path], text=True, capture_output=True, timeout=30)
 
 
 # The pool index fact holds, but __pool_index still panics in the library

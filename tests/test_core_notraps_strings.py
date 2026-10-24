@@ -73,6 +73,5 @@ def test_string_obligations_runtime_checks(compiler, tmp_path):
 
 def test_string_obligations_default_unchanged(compiler, tmp_path):
     """Until the default flips, an unproven string index keeps its runtime check."""
-    env = {k: v for k, v in os.environ.items() if k != 'DEWY_INTERNAL_FACT_POLICY'}
-    result = run(compiler, tmp_path, 'first=(text:string):>string=>text[0]\nprintl(first("a"))\n', 'run', env=env)
+    result = run(compiler, tmp_path, 'first=(text:string):>string=>text[0]\nprintl(first("a"))\n', 'run')
     assert result.returncode == 0 and result.stdout == 'a\n', result.stderr
