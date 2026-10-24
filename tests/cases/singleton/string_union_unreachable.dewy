@@ -1,6 +1,7 @@
 Dir:type = 'n' | 's'
 step = (d:Dir):>int64 => match d {
     <'n'> => 1
-    <'s'|'n'> => 2
+    <'s'> => 2
+    <'s'|'n'> => 3
 }
 printl(step('n'))

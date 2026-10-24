@@ -7603,8 +7603,9 @@ refined_patterns = (arm: int, domain: int[], st: int):
     set_list(arm, out)
 
 # A string set type pattern (`<'n'|'s'>`, `other:'e'|'w'`) on a string: one
-# literal pattern per member; the first keeps the binding, typed as the set.
-str_set_patterns = (arm: int, st: int):
+# literal pattern per member the scrutinee can hold and no earlier arm matches
+# (`covered`, or `union_lits` on a union); the first keeps the binding, typed as the set.
+str_set_patterns = (arm: int, st: int, covered: str[], union_lits: str[]):
     out: int[]
     loop p in kids(arm):
         pt = if nodes[p].kind == .ptype: prune(resolve_type(int(nodes[p].a))) else: 0
@@ -7612,7 +7613,26 @@ str_set_patterns = (arm: int, st: int):
         if set == 0 or type_eq(pt, st) and str_set_of(st) == 0 or is_union(st) and union_index(st, pt) >= 0:
             out.push(p)
             continue
-        loop k in 0.. and value in str_sets[set]:
+        # (only the members the scrutinee can hold: `x:'a'|'b'|'c'` on `'b'|'c' | int64`)
+        held = str_set_of(st)
+        prefix = ""
+        if is_union(st):
+            loop vi in 0.. and m in union_members(st):
+                if str_set_of(m) != 0:
+                    held = str_set_of(m)
+                    prefix = "{vi}"
+        values: str[]
+        any = false
+        loop value in str_sets[set]:
+            if held != 0 and not str_sets[held].contains(value): continue
+            any = true
+            if covered.contains(value) or held != 0 and union_lits.contains("{prefix}'{value}"): continue
+            values.push(value)
+        if not any:
+            out.push(p)
+            continue
+        if values.len() == 0: fatal(nodes[p].pos, "this arm is unreachable: earlier arms already match every value it does")
+        loop k in 0.. and value in values:
             q = mk(.plit, nodes[p].pos)
             nodes[q].a = i32(bc_str(value, nodes[p].pos))
             if k == 0:
@@ -8086,7 +8106,7 @@ check_match = (m: int, expected: int) -> int:
         finite_before = finite_seen
         if dewy and has_wild: fatal(nodes[arm].pos, "this arm is unreachable: an earlier arm already matches every value")
         if domain_known: refined_patterns(arm, domain, st)
-        if str_patterns: str_set_patterns(arm, st)
+        if str_patterns: str_set_patterns(arm, st, str_covered, union_lits)
         loop k in [0..nkids(arm)):
             p = kid(arm, k)
             pk = nodes[p].kind

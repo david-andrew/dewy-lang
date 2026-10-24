@@ -1,0 +1,37 @@
+# quick
+# A type arm whose set is wider than, or overlaps, the scrutinee's set member matches the
+# members the scrutinee can hold that no earlier arm matched; the binding has the arm's type.
+ABC:type='a'|'b'|'c'
+BC:type='b'|'c'
+CA:type='c'|'a'
+show=(p:ABC)=>match p {
+    <'a'> => "A"
+    <'b'> => "B"
+    <'c'> => "C"
+}
+main=()=>{
+    loop s in ['b' 'c'] {
+        let q:BC=s
+        let u:BC|int64=q
+        printl(match u {
+            y:CA => "ca {y} {show(y)}"
+            y:ABC => "abc {y} {show(y)}"
+            n:int64 => "{n}"
+        })
+        printl(match q {
+            x:ABC => "q {show(x)}"
+        })
+    }
+    loop s in ['a' 'b' 'c'] {
+        let p:ABC=s
+        printl(match p {
+            y:CA => "ca {y}"
+            y:BC => "bc {y}"
+        })
+    }
+    let n:BC|int64=7
+    printl(match n {
+        y:ABC => "abc {y}"
+        k:int64 => "int {k}"
+    })
+}
