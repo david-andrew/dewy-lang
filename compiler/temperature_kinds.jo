@@ -216,6 +216,8 @@ tk_class = (x: int, depth: int) -> int:
         if op == .star or op == .slash:
             ka = nodes[a].kind
             kb = nodes[b].kind
+            # (a number times an offset unit is a point: c*°C)
+            if op == .star and kb == .ident and not has_flag(b, NF_CHECKED) and tk_offset_unit(int(nodes[b].name)): return TKC_POINT
             if (kb == .int_lit or kb == .float_lit) and tk_class(a, depth + 1) == TKC_DIFF: return TKC_DIFF
             if op == .star and (ka == .int_lit or ka == .float_lit) and tk_class(b, depth + 1) == TKC_DIFF: return TKC_DIFF
             return TKC_OTHER

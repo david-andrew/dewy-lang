@@ -1,0 +1,16 @@
+# Two literal-only bindings: comparing one with a number times a unit (a point) makes it
+# a point, so the other, added to it, is a difference.
+from units import °C, °F
+main = () => {
+    let setpoint = 21°C
+    let band = 2°C
+    let low = setpoint - band
+    let high = setpoint + band
+    printl"below {low}, above {high} ({band} or {band as °F} either side)"
+    loop f in [64 68 71 73 75] {
+        let t = f*°F
+        let action = if t <? low "heat" else if t >? high "vent" else "hold"
+        let side = if t <? setpoint "below" else "at or above"
+        printl"{t} = {t as °C}: {action} ({side} the setpoint)"
+    }
+}
