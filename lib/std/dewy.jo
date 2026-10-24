@@ -36,12 +36,18 @@ pop[K, V] = (m: mut Map[K, V], k: K) -> V:
     v
 
 pop[K, V] = (m: mut Map[K, V], k: K, default: V?) -> V?:
-    if not m.has(k): return default
-    m.pop(k)
+    e = __map_find(m, k, __map_hash(k))
+    if e < 0: return default
+    v = __take_at(m.vals, e)
+    m.remove(k)
+    v
 
 pop[K, V] = (m: mut Map[K, V], k: K, default: V) -> V:
-    if not m.has(k): return default
-    m.pop(k)
+    e = __map_find(m, k, __map_hash(k))
+    if e < 0: return default
+    v = __take_at(m.vals, e)
+    m.remove(k)
+    v
 
 # Dewy's `xs.insert(value index)` names the value first.
 # (a position past either end is the caller's to rule out: `panics` counts it)

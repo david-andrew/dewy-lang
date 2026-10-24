@@ -62,7 +62,7 @@ main=()=>{
     'format_spec': ('$runtime_checks=false\nshow=(s:string):>string=>format(s ".2")\nprintl(show("x"))\n',
                     'calling `format` may panic (format: panic "text formatting takes alignment'),
     'dictionary': ('$runtime_checks=false\ncount=(d:dict<string int64>):>int64=>d["a"]\nprintl(count(["a"->1]))\n',
-                   'indexing with `[]` may panic'),
+                   'cannot prove the key is in the dictionary'),
 }
 
 PROVED = '''$runtime_checks=false
@@ -122,9 +122,11 @@ main=():>void=>{
 
 def test_panics_listing(compiler, tmp_path):
     # `check --obligations` names library calls that may panic where checks are allowed.
-    source = '$runtime_checks\ncount=(d:dict<string int64>):>int64=>d["a"]\nprintl(count(["a"->1]))\n'
+    source = '$runtime_checks\nshow=(s:string):>string=>format(s ".2")\nprintl(show("x"))\ncount=(d:dict<string int64>):>int64=>d["a"]\nprintl(count(["a"->1]))\n'
     result = run(compiler, tmp_path, source, 'check', '--obligations')
-    assert 'program.dewy:2:38: may panic: indexing with `[]` ($runtime_checks)' in result.stdout, result.stdout + result.stderr
+    assert 'program.dewy:2:26: may panic: calling `format` ($runtime_checks)' in result.stdout, result.stdout + result.stderr
+    # (a missing key is the caller's obligation, listed as its own check)
+    assert 'program.dewy:4:38: runtime check: the key is in the dictionary ($runtime_checks)' in result.stdout, result.stdout + result.stderr
 
 
 def test_first_runtime_check(compiler, tmp_path):

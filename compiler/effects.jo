@@ -1848,6 +1848,12 @@ panic_device_literal = (n: int) -> bool:
         if member != "best" and member != "cpu": return false
     true
 
+# A program's `d[k]` (or `d[k] += 1`, `d.pop(k)`): the key's presence is its
+# obligation (facts.jo fact_map_check), proven, an error or its own check.
+panic_map_obligation = (n: int) -> bool:
+    m = fact_map_call(n)
+    m >= 2 and m <= 4
+
 panic_edge = (f: int, g: int, n: int):
     if g <= 0 or g >= fns.len() or g == f: return
     panic_edges.push(g)
@@ -1870,7 +1876,7 @@ panic_node = (f: int, n: int):
     else if k == .call and nodes[n].aux == 0 or k == .fnref or k == .lambda or k == .pair or k == .partial and nodes[n].aux == 0:
         # (a call whose precondition is the caller's obligation, as a string
         # index or a divisor: proven, an error, or a check of the caller's own)
-        if nodes[n].sym > 0 and not (k == .call and (fact_string_call(n) >= 2 or fact_array_call(n) != 0 or fact_floor_call(n) != 0 or fact_divisors.has(n) or panic_format_literal(n) or panic_device_literal(n))): panic_edge(f, int(nodes[n].sym), n)
+        if nodes[n].sym > 0 and not (k == .call and (fact_string_call(n) >= 2 or fact_array_call(n) != 0 or fact_floor_call(n) != 0 or fact_divisors.has(n) or panic_format_literal(n) or panic_device_literal(n) or not panic_lib and panic_map_obligation(n))): panic_edge(f, int(nodes[n].sym), n)
     loop g in value_helper_calls(n): panic_edge(f, g, n)
     if k == .parallel_region:
         panic_node(f, int(nodes[n].a))

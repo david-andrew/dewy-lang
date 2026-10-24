@@ -629,9 +629,11 @@ makes its asserts panic for every caller.
 precondition is the caller's obligation where the library states it: `xs.first`
 and `xs.last` take an array with `length >? 0`, and `xs.swap(i j)` and
 `xs.insert(value i)` need their positions in bounds, so a guarded call cannot
-panic. Other library failures (a missing dictionary key with `d[k]`, a bad
-format specification) still make the call panic; their value-returning forms
-(`d.get(k)`) do not. Running out of memory is not a panic. The editor's hover
+panic. `d[k]`, `d[k] += 1` and `d.pop(k)` need the key present, proven by a
+guard (`if k in? d`) or an earlier store into `d[k]` with no other change of
+`d` between; `d.get(k)` and `d.pop(k default=v)` take a missing key as a value.
+Other library failures (a bad format specification) still make the call
+panic. Running out of memory is not a panic. The editor's hover
 shows `& panics` on a function that may panic, and `dewy check --obligations`
 lists each library call that may panic where runtime checks are allowed.
 

@@ -1098,10 +1098,36 @@ fact_store = (s: mut FactState, e: int, value: int, at: int):
 
 fact_exposed = (p: PlaceIdentity) -> bool:
     if p.root != .local: return true
+    # (a Dewy dictionary's address is taken only to pass it as a mutable
+    # argument, for that call: its summary names what it writes)
+    flags = int(locals[p.declaration].flags)
+    if flags & (LF_MUTPARAM | LF_SHARED | LF_CAPTURE | LF_BYREF | LF_EXPOSED) == 0 and flags & LF_ADDR != 0 and is_map_type(int(locals[p.declaration].type)) and fact_dewy_local(p.declaration): return false
     # Only the closed, checked partition ABI supplies this guarantee. Ordinary
     # callers and speculative summaries retain conservative alias invalidation.
     if fact_probe_disjoint != 0 and fact_owner == fact_probe_disjoint and int(locals[p.declaration].owner) == fact_probe_disjoint and tkind(int(locals[p.declaration].type)) == .array and int(locals[p.declaration].flags) & LF_MUTPARAM != 0: return false
     int(locals[p.declaration].flags) & (LF_MUTPARAM | LF_SHARED | LF_CAPTURE | LF_ADDR | LF_BYREF | LF_EXPOSED) != 0
+
+# A dictionary local passed mutably to a call (not exposed, fact_exposed) has
+# a new value after it, whatever the callee's summary says or lacks.
+fact_forget_mutable_maps = (n: int, s: mut FactState):
+    mask = checked_call_mutmask(n)
+    if mask == 0: return
+    loop i in [0..min(nkids(n), 62)):
+        if mask & (1 << i) == 0: continue
+        e = kid(n, i)
+        loop nodes[e].kind == .addr or nodes[e].kind == .conv: e = int(nodes[e].a)
+        if nodes[e].kind != .ident or nodes[e].aux != i32(int(SK.local)) or has_flag(e, NF_GLOBAL): continue
+        l = int(nodes[e].sym)
+        if l <= 0 or not is_map_type(int(locals[l].type)): continue
+        p = PlaceIdentity(.local, int(locals[l].owner), l)
+        j = fact_binding(s, p)
+        if j < 0: continue
+        t = int(locals[l].type)
+        s.bindings[j] = FactBinding(p, fact_new(s, fact_domain(t, .call, n), FactTerm(type = t)), n, if s.bindings[j].event == n: s.bindings[j].prior else: s.bindings[j].value)
+
+fact_dewy_local = (l: int) -> bool:
+    f = int(locals[l].owner)
+    f > 0 and f < fns.len() and fns[f].decl != 0 and files[pos_file(nodes[int(fns[f].decl)].pos)].is_dewy
 
 # Distinct `@` parameters of one Dewy function are disjoint storage: each call
 # passes them places the mutable-argument check proves apart (provisional).
@@ -1140,6 +1166,7 @@ fact_path_call_effects = (n: int, s: mut FactState):
 # Opaque/callback/hidden-helper effects still invalidate every exposed root.
 fact_call_effects = (n: int, s: mut FactState):
     f = int(nodes[n].sym)
+    fact_forget_mutable_maps(n, s)
     # (a callee opaque by its signature forgets the same exposed roots its
     # summary would: its call tree is not visited for it)
     if nodes[n].aux == 0 and f > 0 and f < fns.len() and not (fns[f].body != 0 and fns[f].state != 2) and effect_signature_opaque(f):
@@ -2192,6 +2219,69 @@ fact_array_call = (n: int) -> int:
     if k == 0 or not pos_in_lib(nodes[d].pos) or tkind(representation_type(ntype(kid(n, 0)))) != .array: return 0
     k
 
+# Dictionary key presence (no traps): `d[k]`, `d[k] += 1` and `d.pop(k)` need
+# k in d, an obligation of the call as an index is. `k in? d` is a projection
+# of d's value on k's (an element projection: a dictionary has no other), true
+# after a guard or a store into d[k]; any other change of d gives d a new
+# value. O(1) per call. 1 `in?`, 2 read, 3 changed entry, 4 pop, 5 stored
+# entry, or 0.
+fact_name_contains = 0
+fact_name_has = 0
+fact_name_read = 0
+fact_name_present = 0
+fact_name_pop = 0
+fact_name_entry = 0
+fact_name_store = 0
+fact_map_call = (n: int) -> int:
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) < 2: return 0
+    d = int(fns[int(nodes[n].sym)].decl)
+    if d == 0: return 0
+    if fact_name_contains == 0:
+        fact_name_contains = intern("contains")
+        fact_name_has = intern("has")
+        fact_name_read = intern("[]")
+        fact_name_present = intern("__map_entry_present")
+        fact_name_pop = intern("pop")
+        fact_name_entry = intern("__map_entry")
+        fact_name_store = intern("[]=")
+    name = int(nodes[d].name)
+    k = if name == fact_name_contains or name == fact_name_has: 1 else if name == fact_name_read: 2 else if name == fact_name_present: 3 else if name == fact_name_pop: 4 else if name == fact_name_entry or name == fact_name_store: 5 else: 0
+    if k == 0 or k != 5 and nkids(n) != 2 or not pos_in_lib(nodes[d].pos) or not is_map_type(representation_type(ntype(kid(n, 0)))): return 0
+    k
+
+# The key's value; a plain string literal is one value however often written,
+# and so is a binding never written after its declaration (a loop's element
+# among them, which may be read again each time it is named, by reference to
+# an element its loop does not change). Such a value is
+# one per declaration, not per execution: a fact about it made in one
+# iteration reaches the next only through the loop's header, which joins it
+# with the entry, where the declaration has not happened.
+fact_map_key = (s: mut FactState, e0: int, value: int) -> int:
+    e = e0
+    loop nodes[e].kind == .narrow or nodes[e].kind == .conv: e = int(nodes[e].a)
+    if nodes[e].kind == .str_lit and nkids(e) == 0 and nodes[e].sval >= 0: return fact_constant(s, (1 << 42) + int(nodes[e].sval))
+    if nodes[e].kind == .ident and nodes[e].aux == i32(int(SK.local)) and not has_flag(e, NF_GLOBAL):
+        l = int(nodes[e].sym)
+        if l > 0 and int(locals[l].flags) & (LF_PARAM | LF_MUTPARAM | LF_ASSIGNED | LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_ADDR | LF_ELEMALIAS | LF_SOAMUT) == 0 and fact_dewy_local(l): return fact_constant(s, (2 << 42) + l)
+    value
+
+fact_map_member = (s: mut FactState, n: int, map: int, key: int) -> int:
+    fact_project(s, map, fact_map_key(s, kid(n, 1), key), true, T_BOOL)
+
+fact_map_receiver = (s: mut FactState, n: int, value: int) -> int:
+    route = fact_route(kid(n, 0), s)
+    held = fact_route_values(s, route)
+    if held.len() > 0: held[held.len() - 1] else: value
+
+fact_map_check = (n: int, s: mut FactState, values: int[]):
+    if fact_speculating != 0 or not (fact_policy == .RequireStatic or fact_query): return
+    member = fact_map_member(s, n, fact_map_receiver(s, n, values[0]), values[1])
+    proven = fact_truth(s, member) == 1
+    if fact_probe_on:
+        fact_probe_record(n, proven)
+        return
+    if not proven: wit_key(n)
+
 fact_array_call_check = (n: int, s: mut FactState, values: int[], kind: int):
     if fact_speculating != 0 or not (fact_policy == .RequireStatic or fact_query): return
     # (the receiver is a place, as a builtin operation's is)
@@ -3058,7 +3148,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
                         forks.push(arg)
             if result_active or proof_active or fact_divisors.has(n): values.push(n)
             else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and fact_string_call(n) >= 2: values.push(n)
-            else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and fact_array_call(n) != 0:
+            else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and (fact_array_call(n) != 0 or fact_map_call(n) != 0):
                 active.push(n)
                 values.push(n)
                 loop arg in kids(n): values.push(arg)
@@ -3325,6 +3415,7 @@ fact_obliged = (n: int) -> bool:
     if k == .binary and nodes[n].aux == 0 and (nodes[n].op == i32(int(Tok.slash)) or nodes[n].op == i32(int(Tok.percent))): return true
     if k == .conv and nodes[n].aux == i32(int(CV.refinement)): return true
     if k == .call and (fact_divisors.has(n) or fact_floor_call(n) != 0 or fact_string_call(n) >= 2 or fact_array_call(n) != 0): return true
+    if k == .call and fact_map_call(n) >= 2 and fact_map_call(n) <= 4: return true
     # (a fork closure's obligations start from its creator's facts)
     if k == .call and (fact_library_call(n, "parallel_range") or fact_library_call(n, "parallel_map")):
         loop arg in kids(n):
@@ -3874,6 +3965,26 @@ fact_capture = (n: int, s: mut FactState) -> int:
             else if floor_probe: fact_probe_divisor(n, s, values[1], kid(n, 1))
         array = fact_array_call(n)
         if array != 0: fact_array_call_check(n, s, values, array)
+        map = if fact_policy == .RequireStatic or fact_query or fact_probe_on: fact_map_call(n) else: 0
+        if map >= 2 and map <= 4: fact_map_check(n, s, values)
+        if map != 0:
+            before = fact_map_receiver(s, n, values[0])
+            fact_path_call_effects(n, s)
+            if map == 1: return fact_map_member(s, n, before, values[1])
+            # (the entry is there now, in d's value after the change, and so is
+            # every key known there before: a store removes none)
+            if map == 3 or map == 5:
+                after = fact_map_receiver(s, n, fact_capture(kid(n, 0), s))
+                if after != before:
+                    keys: int[]
+                    i = fact_index_get(s.index[0].projection_head, before)
+                    loop i >= 0:
+                        q = s.projections[i]
+                        i = s.index[0].projection_next[i]
+                        if q.element and fact_truth(s, q.value) == 1: keys.push(q.selector)
+                    loop key in keys: fact_assume(s, fact_project(s, after, key, true, T_BOOL), true)
+                fact_assume(s, fact_map_member(s, n, after, values[1]), true)
+            return fact_new(s, fact_domain(ntype(n), .call, n), FactTerm(type = ntype(n)))
         string = fact_string_call(n)
         if string != 0:
             length = fact_project(s, values[0], -1, false, T_INT)

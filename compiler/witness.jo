@@ -456,6 +456,18 @@ wit_index = (n: int, s: mut FactState, index: int, length: int, lo: int, hi: int
     if dir_defer(n, "cannot prove {read} is in bounds: missing {which}", true): return
     wit_fail(nodes[n].pos, "cannot prove {read} is in bounds: missing {which}")
 
+# `d[k]`, `d[k] += 1` or `d.pop(k)` where k may be missing (facts.jo fact_map_check).
+wit_key = (n: int):
+    base = wit_text(kid(n, 0))
+    e = kid(n, 1)
+    key = if nodes[e].kind == .str_lit and nkids(e) == 0 and nodes[e].sval >= 0: "\"{name_of(int(nodes[e].sval))}\"" else: wit_text(e)
+    relation = if base != "" and key != "": "{key} in? {base}" else: ""
+    wit_context(0)
+    wit_help(relation)
+    if base != "" and key != "": err_notes.push((-1, "help: or take the missing key as a value: `{base}.get({key})` gives none for it"))
+    if dir_defer(n, "cannot prove the key is in the dictionary", true): return
+    wit_fail(nodes[n].pos, "cannot prove the key is in the dictionary")
+
 # A builtin operation's precondition `a op b` (`xs.length >? 0` for pop, a
 # truncate count `>=? 0`), refuted (c = 0) or unknown: one lower bound.
 wit_operation = (n: int, s: mut FactState, op: Tok, a: WitSide, b: WitSide, c: int, refuted: str, what: str):
