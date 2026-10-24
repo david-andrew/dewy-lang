@@ -7,9 +7,10 @@
 # the driver reopens the store from whatever is on disk.
 #
 # A completed append is synced to the disk before the commit returns, and a whole
-# file (a manifest slot, a compacted or truncated log) is written beside its name,
-# synced, then renamed over it, so a crash leaves the old file or the new one, never
-# a mixture. A crash can still cut an append short at any byte.
+# file (a manifest slot, a compacted or truncated log) is replaced by `write_bytes`,
+# which writes beside its name, syncs, then renames over it, so a crash leaves the
+# old file or the new one, never a mixture. A crash can still cut an append short at
+# any byte.
 
 Crashed:type = type of error & [step:string]
 DiskError:type = type of error & [message:string]
@@ -60,16 +61,12 @@ Disk:type = [
         appends += 1
     }
 
-    # Replace a whole file atomically: the new bytes go to a side file, reach the
-    # disk, then take the name in one rename, which the directory's sync makes last.
+    # Replace a whole file atomically: `write_bytes` puts the new bytes in a side
+    # file, syncs it and renames it over the name; the directory's sync makes the
+    # rename last.
     write = (name:string data:array<uint8>):>void|DiskError => {
-        let side = p(path("{name}.tmp"))
-        let written = side.write_bytes(data)
+        let written = p(path(name)).write_bytes(data)
         if written is? (error|Canceled) return DiskError["cannot write {name}"]
-        let synced = side.sync
-        if synced is? (error|Canceled) return DiskError["cannot sync {name}"]
-        let renamed = side.replace(p(path(name)))
-        if renamed is? (error|Canceled) return DiskError["cannot replace {name}"]
         let settled = p(root).sync
         if settled is? (error|Canceled) return DiskError["cannot sync {root}"]
         writes += 1
