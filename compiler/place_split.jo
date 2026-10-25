@@ -1,21 +1,11 @@
 # The definition side of place-returning methods (place_methods.jo): splitting a method that
-# lends a place, as dewy_parse.jo declares a type's methods. Apart from place_methods.jo, which
+# lends a place, as dewy_direct.jo declares a type's methods. Apart from place_methods.jo, which
 # the checker uses, so the bootstrap's seed frontend never reads the Dewy frontend.
 use 'ast.jo'
 use 'expr.jo'
 use 'util.jo'
-use 'dewy_parse.jo'
+use 'dewy_nodes.jo'
 use 'place_methods.jo'
-
-# The `@T` of a written result `@T` or `@T | Busy`, or 0.
-place_result_syntax = (id0: int) -> int:
-    id = dw_unwrap(id0)
-    if dewy_syntax[id].kind == .prefix and dw_op(id) == .at: return dw_child(id, 1)
-    if dw_op(id) == .pipe:
-        left = place_result_syntax(dw_child(id, 1))
-        if left != 0: return left
-        return place_result_syntax(dw_child(id, 2))
-    0
 
 # The member names of `@$self.a.b`, or none when v is not a place inside the receiver.
 place_route_of = (v: int, receiver: int) -> int[]?:

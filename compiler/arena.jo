@@ -1,7 +1,7 @@
 # Scoped allocators (docs/LANGUAGE.md, "Scoped allocators"; docs/design/ownership.md,
 # "Arena placement, escape and runtime").
 #
-# `$allocator(@arena) expression` is projected (dewy_parse.jo, dw_allocator) into
+# `$allocator(@arena) expression` is projected (dewy_direct.jo) into
 #     { let c=__arena_enter(@arena)  let v=expression  __arena_leave(c)  $allocator_result(v) }
 # While it runs, the arena is the thread's context allocator (lib/core/rt.jo, __TS_ARENA):
 # every allocation bumps its cursor. `$allocator_result(v)` becomes a promotion (a `.conv`

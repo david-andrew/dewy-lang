@@ -1,0 +1,19 @@
+# Unbraced module-level arms a `$target` test leaves out: passed over, their names noted.
+f = (p:int64 s:int64) => 0
+if $target =? "x86_64-windows" g = () => p + "{s}" else { g = () => 1 }
+if $target =? "x86_64-windows" if $target.arch =? "aarch64" h = () => 4 else h = () => 5 else { h = () => 6 }
+if $target =? "x86_64-windows" k = (x:int64) => [x
+    x + 1]
+else { k = (x:int64) => [x] }
+if $target.os =? "windows" m = () => 2
+else if $target =? "x86_64-windows" m = () => 3
+else { m = () => 7 }
+if $target.os =? "freestanding" { q = () => 0 } else if $target.os =? "windows" q = () => match 1 { 1 => 2 _ => 3 } else q = () => 4
+if $target.os =? "freestanding" { q2 = () => 0 } else { q2 = () => 9 }
+main = () => {
+    printl(f(1 2) + g())
+    printl(h())
+    printl(k(3))
+    printl(m())
+    printl(q2())
+}

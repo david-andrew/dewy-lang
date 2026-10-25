@@ -6,7 +6,7 @@ use 'util.jo'
 use 'lex.jo'
 use 'parse.jo'
 use 'ast.jo'
-use 'dewy_parse.jo'
+use 'dewy_nodes.jo'
 use 'oom.jo'
 use 'proofs.jo'
 use 'dewy_tokens.dewy'
@@ -110,7 +110,6 @@ dn_quote_close = (bytes: *u8, start: int, stop: int, raw: bool) -> int:
     e
 
 dn_ident_start = (c: u8) -> bool: is_alpha(c) or c == '_' or c >= 128
-dn_ident_part = (c: u8) -> bool: dn_ident_start(c) or is_digit(c)
 
 dn_matches = (source: *u8, at: int, stop: int, value: str) -> bool:
     if len(value) > stop - at: return false
@@ -531,28 +530,18 @@ dn_accept_semi = () -> bool:
     dn_at += 1
     true
 
-dn_expect = (symbol: DewyToken):
-    if not dn_accept(symbol): dn_error(dn_tokens[dn_at].start, "expected '{dn_token_text(symbol)}'")
-
 dn_node = (kind: DewyKind, text: str, offset: int, children: int[] = [], name: i32 = 0) -> int: syntax_node(dewy_syntax, kind, text, mkpos(dn_file, offset), children, name)
-
-# Expression operators are scalar tags on their parent node. Child zero is
-# the shared ordinary/inverted sentinel; operands retain indices one onward.
-dn_op_node = (kind: DewyKind, symbol: DewyToken, offset: int, children: int[]) -> int: syntax_op_node(dewy_syntax, kind, symbol, mkpos(dn_file, offset), children)
-
-dn_operator = (kind: DewyKind, op: DewyToken, left: int, right: int) -> int: syntax_operator(dewy_syntax, kind, op, left, right)
 
 # String decoding is shared; the construction target selects syntax nodes for
 # the reference parser or compact nodes for the value parser.
-dn_text = (kind: DewyKind, text: str, offset: int, direct: bool) -> int:
-    if not direct: return dn_node(kind, text, offset)
+dn_text = (text: str, offset: int) -> int:
     n = mk(.str_lit, mkpos(dn_file, offset))
     nodes[n].sval = i32(intern(text))
     n
 
 # (a mistake in a string's escapes: one stops the compile)
 dn_string_problem = LiteralProblem("", 0, false)
-dn_string = (token: DewyLexeme, direct: bool = false) -> int:
+dn_string = (token: DewyLexeme) -> int:
     source = files[dn_file].src
     raw = token.kind == .rawquoted
     opening = token.start
@@ -560,7 +549,7 @@ dn_string = (token: DewyLexeme, direct: bool = false) -> int:
     width = dn_quote_width(source, opening, token.stop)
     i = opening + width
     stop = token.stop - width
-    if raw: return dn_text(.string, source[i..stop), token.start, direct)
+    if raw: return dn_text(source[i..stop), token.start)
     chunks: int[]
     bytes_: u8[]
     chunk_start = i
@@ -572,7 +561,7 @@ dn_string = (token: DewyLexeme, direct: bool = false) -> int:
         if i >= stop: break
         interpolated = true
         if bytes_.len() > 0:
-            chunks.push(dn_text(.string_chunk, str_from_bytes(bytes_), chunk_start, direct))
+            chunks.push(dn_text(str_from_bytes(bytes_), chunk_start))
             bytes_.clear()
         first = i + 1
         i = dn_interpolation_close(source, first, stop)
@@ -587,7 +576,7 @@ dn_string = (token: DewyLexeme, direct: bool = false) -> int:
         dn_angles = 0
         dn_comma_stop = false
         dn_in_interpolation += 1
-        expression = if direct: dc_expr(0) else: dn_expr(0)
+        expression = dc_expr(0)
         if expression != 0 and dn_tokens[dn_at].kind != .eof: dn_error(dn_tokens[dn_at].start, "expected one interpolation expression")
         dn_in_interpolation -= 1
         dn_tokens = saved_tokens
@@ -595,54 +584,19 @@ dn_string = (token: DewyLexeme, direct: bool = false) -> int:
         dn_angles = saved_angles
         dn_comma_stop = saved_comma
         spec = if colon >= 0: source[colon + 1..i) else: ""
-        if direct:
-            if expression == 0: return 0
-            part = mk(.pair, mkpos(dn_file, first))
-            nodes[part].a = i32(expression)
-            nodes[part].sval = if colon >= 0: i32(intern(spec)) else: -1
-            chunks.push(part)
-        else if colon >= 0: chunks.push(dn_node(.block, "{{}}:", first, [expression, dn_node(.string, spec, colon + 1)]))
-        else: chunks.push(dn_node(.block, "{{}}:", first, [expression]))
+        if expression == 0: return 0
+        part = mk(.pair, mkpos(dn_file, first))
+        nodes[part].a = i32(expression)
+        nodes[part].sval = if colon >= 0: i32(intern(spec)) else: -1
+        chunks.push(part)
         i += 1
         chunk_start = i
-    if not interpolated: return dn_text(.string, str_from_bytes(bytes_), token.start, direct)
-    if bytes_.len() > 0: chunks.push(dn_text(.string_chunk, str_from_bytes(bytes_), chunk_start, direct))
-    if direct:
-        n = mk(.str_lit, mkpos(dn_file, token.start))
-        nodes[n].aux = 1
-        set_list(n, chunks)
-        return n
-    dn_node(.interpolated_string, "", token.start, chunks)
-
-dn_partial = (opening: DewyLexeme) -> int:
-    # Reuse the just-consumed opening token as a synthetic left operand. This
-    # preserves normal precedence without inserting/shifting the token array
-    # or adding work to the ordinary expression loop. Restore it after parsing.
-    slot = dn_at - 1
-    name = "$partial"
-    id = i32(intern(name))
-    dn_tokens[slot] = DewyLexeme(.identifier, id, opening.start, opening.stop, opening.space, opening.newline)
-    dn_at = slot
-    saved_angles = dn_angles
-    dn_angles = 0
-    body = dn_expr(0)
-    dn_angles = saved_angles
-    dn_tokens[slot] = opening
-    dn_expect(.rparen)
-    parameter = dn_node(.identifier, name, opening.start, name = id)
-    params = dn_node(.block, "():", opening.start, [parameter])
-    fn = dn_operator(.binary, .function, params, body)
-    dn_node(.block, "():", opening.start, [fn])
-
-# Brackets start a fresh comma context, even inside an assertion condition.
-dn_block = () -> int:
-    saved = dn_comma_stop
-    dn_comma_stop = false
-    block = dn_bracketed()
-    dn_comma_stop = saved
-    block
-
-dn_bracketed = () -> int: dn_bracketed_from(dn_take())
+    if not interpolated: return dn_text(str_from_bytes(bytes_), token.start)
+    if bytes_.len() > 0: chunks.push(dn_text(str_from_bytes(bytes_), chunk_start))
+    n = mk(.str_lit, mkpos(dn_file, token.start))
+    nodes[n].aux = 1
+    set_list(n, chunks)
+    n
 
 # Splitting a generic closer edits its token in place. While a direct declaration
 # may still retry the reference grammar, the original tokens are kept to restore.
@@ -696,372 +650,8 @@ dn_split_closer = ():
     tail = dn_tokens[dn_at]
     dn_tokens[dn_at].symbol = dn_token_kind(files[dn_file].src[tail.start..tail.stop))
 
-# `array<<(x:int64):>int64>>`: an adjacent `<<` opens two type-argument blocks
-dn_double_angle = () -> int:
-    outer = dn_tokens[dn_at]
-    outer.symbol = .langle
-    outer.stop = outer.start + 1
-    dn_token_edit(dn_at)
-    dn_tokens[dn_at].start += 1
-    dn_tokens[dn_at].symbol = .langle
-    dn_bracketed_from(outer)
-
-dn_bracketed_from = (opening: DewyLexeme) -> int:
-    if opening.symbol == .lparen:
-        op = dn_peek()
-        if dn_partial_operator(op) or (op == .kw_not and dn_at + 1 < dn_tokens.len() and dn_token_invert(dn_tokens[dn_at + 1].symbol) != .none): return dn_partial(opening)
-    if opening.symbol == .langle: dn_angles += 1
-    rows = dn_rows
-    dn_rows = opening.symbol == .lbrack
-    close = if opening.symbol == .lparen: DewyToken.rparen else if opening.symbol == .lbrack: DewyToken.rbrack else if opening.symbol == .langle: DewyToken.rangle else: DewyToken.rbrace
-    children: int[]
-    loop true:
-        if dn_tokens[dn_at].kind == .eof: dn_error(opening.start, "expected '{dn_token_text(close)}' before end of file")
-        # Split adjacent generic closers, assignments and optional suffixes.
-        # Consume one angle at a time, leaving the rest for its parent.
-        # A spaced ` >? ` stays a comparison inside a refinement.
-        if close == .rangle and dn_closer_joined():
-            dn_split_closer()
-            break
-        if dn_accept(close): break
-        # (`xs[$clamp a..b)`: an in-index metatag before the range)
-        if ((opening.symbol == .lbrack and dn_peek() == .rparen) or (opening.symbol == .lparen and dn_peek() == .rbrack)) and (children.len() == 1 and dw_op(children[0]) == .range_apply or children.len() == 2 and dewy_syntax[children[0]].kind == .metatag and dw_op(children[1]) == .range_apply):
-            close = dn_peek()
-            dn_at += 1
-            break
-        # ([0..n as int64): `as` binds more loosely than `..`, so it took the whole range)
-        if opening.symbol == .lbrack and dn_peek() == .rparen and children.len() == 1 and (dw_op(children[0]) == .kw_as or dw_op(children[0]) == .kw_transmute) and dw_op(dw_child(children[0], 1)) == .range_apply:
-            return dn_error(dn_tokens[dn_at].start, "expected an expression, found ')': `{dn_token_text(dw_op(children[0]))}` binds more loosely than `..`, so here it converts the whole range; parenthesize the bound, as in `[0..(n as int64))`")
-        # (a standalone `;` in an array literal ends a row: `[1 2 ; 3 4]`, and `;;` a block)
-        if dn_rows and dn_peek() == .semi:
-            children.push(dn_node(.keyword, ";", dn_take().start))
-            continue
-        before = dn_at
-        children.push(if opening.symbol == .lbrace: dn_statement() else: dn_stmt())
-        if dn_at == before: dn_error(dn_tokens[dn_at].start, "expected a block element")
-    dn_rows = rows
-    if opening.symbol == .langle: dn_angles -= 1
-    label = dn_token_text(opening.symbol) + dn_token_text(close) + ":"
-    dn_node(.block, label, opening.start, children)
-
-dn_flow = () -> int:
-    start = dn_tokens[dn_at].start
-    arms: int[]
-    loop true:
-        keyword = dn_take()
-        key = dn_node(.keyword, dn_token_text(keyword.symbol), keyword.start)
-        condition = dn_expr(0)
-        if not dn_can_start(dn_tokens, dn_at):
-            # (a loop has one form, `loop condition body`: `loop { ... }` alone has no body)
-            if keyword.symbol == .kw_loop and dewy_syntax[condition].kind == .block and dewy_syntax[condition].text == "{{}}:": dn_error(dn_tokens[dn_at].start, "expected a body after this loop's condition: a loop is `loop condition body`, so a loop that runs until `break` or `return` is `loop true \{ ... }`")
-            next = dn_peek()
-            habit = ""
-            if next == .gt or next == .lt or next == .rangle or next == .ge or next == .le: habit = " (comparisons end with `?`: `x >? y`, `x <=? y`)"
-            else if dw_op(condition) == .colon: habit = " (a condition takes no colon: its body goes in braces, `{dn_token_text(keyword.symbol)} x >? 3 \{ ... }`)"
-            dn_error(dn_tokens[dn_at].start, "expected a body after '{dn_token_text(keyword.symbol)}'{habit}")
-        # (`loop { ... }` then a new line: the block is the condition and the next line the body)
-        if keyword.symbol == .kw_loop and dewy_syntax[condition].kind == .block and dewy_syntax[condition].text == "{{}}:" and dn_tokens[dn_at].newline:
-            warn(mkpos(dn_file, dn_tokens[dn_at].start), "this line is the body of the loop above, whose block is its condition: a loop is `loop condition body`, so a loop that runs until `break` or `return` is `loop true \{ ... }`; to keep this meaning, start the body on the condition's line")
-        body = dn_expr(0)
-        arms.push(dn_node(.keyword_expr, "", keyword.start, [key, condition, body]))
-        if not dn_accept(.kw_else): break
-        if dn_peek() == .kw_if or dn_peek() == .kw_match: continue
-        arms.push(dn_expr(0))
-        break
-    dn_node(.flow, "", start, arms)
-
-# Children: the condition, the message and the condition's source text (each
-# 0 when absent). The text gives a failed check its default description.
-dn_directive = (token: DewyLexeme, form: int) -> int:
-    dn_at += 1
-    name = dn_payload(token)
-    if form == 6:
-        # `$unsafe expression`: the boundary covers the next expression, on this line or the
-        # next (`$unsafe { ... }` several); `$unsafe=false` and a type's `$unsafe` row stay settings
-        next = dn_tokens[dn_at]
-        if not dn_can_start(dn_tokens, dn_at) or next.symbol == .assign or next.kind == .metatag: return dn_node(token.kind, name, token.start, name = token.name)
-        return dn_node(.directive, name, token.start, [dn_expr(0)])
-    if form == 4:
-        dn_expect(.lparen)
-        owner = dn_expr(0)
-        reservation = 0
-        if dn_payload(dn_tokens[dn_at]) == "reserve":
-            dn_at += 1
-            dn_expect(.assign)
-            reservation = dn_expr(0)
-        dn_expect(.rparen)
-        body = dn_expr(0)
-        return dn_node(.directive, name, token.start, [owner, reservation, body])
-    if form == 5:
-        # `$allocator(@arena) expression`: the arena lent to the whole next expression
-        dn_expect(.lparen)
-        arena = dn_expr(0)
-        dn_expect(.rparen)
-        return dn_node(.directive, name, token.start, [arena, 0, dn_expr(0)])
-    next = dn_tokens[dn_at]
-    present = not next.newline and dn_can_start(dn_tokens, dn_at)
-    if form == 3 or not present:
-        if form == 1: return dn_error(token.start, "`${name}` needs a condition: `${name} condition` or `${name} condition, \"message\"`")
-        return dn_node(.directive, name, token.start, [0, 0, 0])
-    saved = dn_comma_stop
-    dn_comma_stop = true
-    condition = 0
-    text = 0
-    message = 0
-    if form == 7:
-        # `$warn_if condition "message"`: the message follows the condition (a comma may
-        # separate them)
-        condition = dn_expr(0)
-        dn_accept(.comma)
-        if dn_tokens[dn_at].newline or not dn_can_start(dn_tokens, dn_at): return dn_error(token.start, "`$warn_if` needs a message after its condition: `$warn_if condition \"message\"`")
-        message = dn_expr(0)
-    else if form == 1:
-        # `$assert(condition, "message")`: an adjacent group is the argument
-        # list, as for other directives, with the same comma.
-        listed = next.symbol == .lparen and not next.space
-        if listed: dn_at += 1
-        first = dn_tokens[dn_at].start
-        condition = dn_expr(0)
-        text = dn_node(.string, files[dn_file].src[first..dn_tokens[dn_at - 1].stop), first)
-        if dn_accept(.comma): message = dn_expr(0)
-        if listed: dn_expect(.rparen)
-    else: message = dn_expr(0)
-    dn_comma_stop = saved
-    dn_node(.directive, name, token.start, [condition, message, text])
-
-dn_atom = () -> int:
-    token = dn_tokens[dn_at]
-    symbol = token.symbol
-    # Effect negation is contextual; ordinary bindings named `no` remain valid.
-    effect_no = false
-    if token.kind == .identifier and (token.name == i32(dn_no_id) or token.name == 0 and dn_payload(token) == "no") and dn_at + 1 < dn_tokens.len():
-        following = dn_payload(dn_tokens[dn_at + 1])
-        if following == "reads" or following == "mutates" or following == "allocates" or following == "blocks" or following == "panics":
-            symbol = .kw_not
-            effect_no = true
-    if token.kind == .eof: return dn_error(token.start, "expected an expression")
-    # (`(... amount:int64)`: a bare `...` opening a parameter list)
-    # (`[...rest last] = xs`, `[... last] = xs`: a pattern's rest, or bare `...`, opening it)
-    if symbol == .ellipsis and dn_at > 0 and dn_tokens[dn_at - 1].symbol == .lbrack and dn_at + 1 < dn_tokens.len() and (dn_tokens[dn_at + 1].symbol == .rbrack or dn_tokens[dn_at + 1].kind == .identifier):
-        dn_at += 1
-        return dn_node(.identifier, "...", token.start)
-    if symbol == .ellipsis and dn_at > 0 and dn_tokens[dn_at - 1].symbol == .lparen and dn_at + 1 < dn_tokens.len() and (dn_tokens[dn_at + 1].symbol == .rparen or dn_tokens[dn_at + 1].kind == .identifier and dn_at + 2 < dn_tokens.len() and (dn_tokens[dn_at + 2].symbol == .colon or dn_tokens[dn_at + 2].kind == .identifier or dn_tokens[dn_at + 2].symbol == .rparen)):
-        dn_at += 1
-        return dn_node(.identifier, "...", token.start)
-    if token.kind == .metatag:
-        form = dn_directive_form(dn_payload(token))
-        if form != 0: return dn_directive(token, form)
-    if symbol == .lparen or symbol == .lbrack or symbol == .lbrace or symbol == .langle: return dn_block()
-    if symbol == .kw_if or symbol == .kw_loop or symbol == .kw_parallel or symbol == .kw_match: return dn_flow()
-    if (symbol == .kw_let or symbol == .kw_const or symbol == .kw_return or symbol == .kw_break or symbol == .kw_continue or symbol == .kw_import or symbol == .kw_from): return dn_stmt()
-    dn_at += 1
-    if token.kind == .quoted or token.kind == .rawquoted: return dn_string(token)
-    if (symbol == .tilde or symbol == .plus or symbol == .minus or symbol == .dot_plus or symbol == .dot_minus or symbol == .at or symbol == .kw_not):
-        # (`no reads & no blocks` is `(no reads) & (no blocks)`)
-        return dn_op_node(.prefix, symbol, token.start, [0, dn_expr(dn_prefix_power(symbol, effect_no))])
-    if symbol == .range:
-        dots = dn_node(.identifier, "..", token.start)
-        if not dn_range_bound(dn_tokens, dn_at): return dots
-        bound = dn_expr(101)
-        return dn_op_node(.flat, .range_apply, token.start, [0, dots, bound])
-    text = dn_payload(token)
-    if symbol == .kw_concurrent:
-        group = 0
-        if dn_peek() != .lbrace:
-            token = dn_take()
-            if token.kind != .identifier: return dn_error(token.start, "concurrent needs a group name or a braced body")
-            group = dn_node(.identifier, dn_payload(token), token.start, name = token.name)
-        if dn_peek() != .lbrace: return dn_error(dn_tokens[dn_at].start, "concurrent needs a braced body")
-        body = dn_block()
-        return dn_node(.directive, "concurrent", token.start, [group, body])
-    if symbol == .kw_spawn and (dn_peek() == .assign or dn_peek() == .colon): return dn_node(.identifier, text, token.start)
-    if symbol == .kw_spawn:
-        group = 0
-        if dn_peek() == .lparen and not dn_tokens[dn_at].space:
-            arguments = dn_block()
-            # The established process API is still an ordinary completed call.
-            # Task spawning has an expression after its one group argument.
-            if dw_nchildren(arguments) != 1 or not dn_can_start(dn_tokens, dn_at) or dn_tokens[dn_at].newline or dn_power(dn_peek()) > 0 or dn_peek() == .kw_return or dn_peek() == .kw_let or dn_peek() == .kw_const or dn_peek() == .kw_break or dn_peek() == .kw_continue:
-                callee = dn_node(.identifier, "spawn", token.start)
-                return dn_operator(.binary, .call, callee, arguments)
-            group = dw_child(arguments, 0)
-        value = dn_expr(0)
-        return dn_node(.directive, "spawn", token.start, [group, value])
-    if text == "type" and dn_accept(.kw_of):
-        return dn_op_node(.prefix, .kw_of, token.start, [0, dn_expr(dn_prefix_power(.kw_of, false))])
-    if token.kind == .op:
-        # (xs[1:], xs[::-1]: Python's slices)
-        after_colon = symbol == .colon or dn_at >= 2 and dn_tokens[dn_at - 2].symbol == .colon
-        # (`(from:int64)`, `let loop = 1`: a keyword where a name was meant)
-        # (not `else:` or `loop:`, other languages' block colons)
-        if (symbol == .colon or symbol == .assign) and dn_at >= 2 and dn_tokens[dn_at - 2].symbol != .none and not dn_tokens[dn_at - 1].newline:
-            word = dn_token_text(dn_tokens[dn_at - 2].symbol)
-            named = symbol == .assign or dn_tokens[dn_at - 2].stop == token.start and not (word in ["else", "loop", "if", "match"])
-            if named and len(word) > 0 and word[0] >= 'a' and word[0] <= 'z':
-                return dn_error(dn_tokens[dn_at - 2].start, "`{word}` is a keyword, so it cannot name a variable, parameter or field: choose another name")
-        if after_colon and (symbol == .colon or symbol == .rbrack): return dn_error(token.start, "expected an expression, found '{text}' (a slice is a range in the brackets: `xs[1..]`, `xs[..n)`, `xs[a..b)`; `xs.reversed()` reverses; `:` gives a type)")
-        habit = dn_operator_habit(dn_tokens, dn_at, text)
-        return dn_error(token.start, "expected an expression, found '{text}'{habit}")
-    dn_node(token.kind, text, token.start, name = token.name)
-
-dn_expr = (minimum: int) -> int:
-    dn_depth += 1
-    if dn_depth > 256: return dn_error(dn_tokens[dn_at].start, "expression is nested too deeply")
-    opening = dn_tokens[dn_at].symbol
-    left = dn_atom()
-    # (a parenthesized group, while nothing has applied to it: `(5)x`, `(x)2` multiply)
-    group = if opening == .lparen and dn_tokens[dn_at - 1].symbol == .rparen: left else: -1
-    loop true:
-        token = dn_tokens[dn_at]
-        op = token.symbol
-        if token.kind == .eof: break
-        if token.newline and dn_power(op) == 0 and op != .kw_not: break
-        if dn_angles > 0 and ((op == .shr or op == .shr_assign or op == .angle_assign) or (op == .gt and not token.space)): break
-        if op == .kw_or_throw and minimum <= 48:
-            dn_at += 1
-            left = dn_op_node(.postfix, .kw_or_throw, pos_off(dewy_syntax[left].pos), [0, left])
-            continue
-        if op == .ellipsis and minimum <= 170:
-            dn_at += 1
-            left = dn_op_node(.postfix, .ellipsis, pos_off(dewy_syntax[left].pos), [0, left])
-            continue
-        # A numeric literal against a name or a group is a coefficient (`2x`, `2(x+1)`,
-        # `2^3x`), binding below `^` and above `*` (docs/design/juxtaposition.md).
-        # Whitespace always separates expressions.
-        if not token.space and (token.kind == .identifier or op == .lparen or token.kind == .source_integer or token.kind == .source_real or token.kind == .integer):
-            # (`2()` is a call: an empty `()` after any expression calls it; most such lexemes follow
-            # no number and no group, the inline test)
-            pk = dn_tokens[dn_at - 1].kind
-            if (left == group or pk == .source_integer or pk == .source_real or pk == .integer) and dn_juxtaposed(dn_tokens, dn_at, left == group):
-                if minimum > 135: break
-                left = dn_operator(.binary, .multiply_apply, left, dn_expr(136))
-                continue
-            if op != .lparen and dn_juxt_excluded(dn_tokens, dn_at): return dn_error(token.start, dn_juxt_excluded_message(dn_tokens, dn_at))
-        if op == .dot and minimum <= 170:
-            dn_at += 1
-            if dn_peek() == .lparen and not dn_tokens[dn_at].space:
-                left = dn_operator(.binary, .broadcast_call, left, dn_block())
-                continue
-            right = dn_take()
-            if right.kind == .metatag and dn_payload(right) == "field":
-                member = dn_node(.metatag, "field", right.start)
-                if dn_peek() != .lparen: return dn_error(right.start, "expected `$field(name)`")
-                member = dn_operator(.binary, .call, member, dn_block())
-                left = dn_operator(.binary, .dot, left, member)
-                continue
-            if right.kind == .metatag and dw_designed_directive(dn_payload(right)): return dn_error(right.start, "`${dn_payload(right)}` is part of the design but not implemented yet")
-            if right.kind != .identifier: return dn_error(right.start, "expected a member name")
-            left = dn_operator(.binary, .dot, left, dn_node(.identifier, dn_payload(right), right.start, name = right.name))
-            continue
-        if not token.space and (op == .lparen or op == .lbrack) and minimum <= 170:
-            right = dn_block()
-            label = if op == .lparen: DewyToken.call else: DewyToken.index
-            left = dn_operator(.binary, label, left, right)
-            continue
-        if not token.space and (token.kind == .quoted or token.kind == .rawquoted) and minimum <= 170:
-            dn_at += 1
-            left = dn_operator(.binary, .call, left, dn_string(token))
-            continue
-        if not token.space and op == .langle and minimum <= 160:
-            left = dn_operator(.binary, .type_apply, left, dn_block())
-            continue
-        if not token.space and op == .shl and minimum <= 160 and dewy_syntax[left].kind == .identifier and dn_double_closes(dn_tokens, dn_at):
-            left = dn_operator(.binary, .type_apply, left, dn_double_angle())
-            continue
-        if op == .question and minimum <= 140:
-            dn_at += 1
-            left = dn_op_node(.postfix, .question, pos_off(dewy_syntax[left].pos), [0, left])
-            continue
-        # An inverted comparison may be written with a space after `not`.
-        if op == .kw_not and dn_at + 1 < dn_tokens.len():
-            inverted = dn_token_invert(dn_tokens[dn_at + 1].symbol)
-            if inverted != .none:
-                op = inverted
-                token.stop = dn_tokens[dn_at + 1].stop
-        if op == .comma and dn_comma_stop: break
-        power = dn_power(op)
-        if power == 0 or power < minimum: break
-        if (op == .plus or op == .minus) and token.space and not dn_tokens[dn_at + 1].space: break
-        dn_at += 1
-        if token.symbol == .kw_not: dn_at += 1
-        if op == .range:
-            parts = [0, left, dn_node(.identifier, "..", token.start)]
-            if dn_range_bound(dn_tokens, dn_at): parts.push(dn_expr(power + 1))
-            left = dn_op_node(.flat, .range_apply, pos_off(dewy_syntax[left].pos), parts)
-            continue
-        # `x ??<Missing | ParseError> 0`: the fallback only for the kinds listed
-        if op == .coalesce and not dn_tokens[dn_at].space and (dn_tokens[dn_at].symbol == .langle or dn_tokens[dn_at].symbol == .lt):
-            if dn_tokens[dn_at].symbol == .lt: dn_tokens[dn_at].symbol = .langle
-            kinds = dn_block()
-            fallback = dn_expr(power)
-            left = dn_op_node(.flat, .coalesce, pos_off(dewy_syntax[left].pos), [0, left, fallback, kinds])
-            continue
-        right = dn_expr(if dn_right_associative(op): power else: power + 1)
-        if op == .kw_as or op == .kw_transmute:
-            # (`loop c in text as array<uint8>`: `as` binds more loosely than `in`)
-            last = left
-            loop dewy_syntax[last].kind == .binary and (dw_op(last) == .kw_and or dw_op(last) == .kw_or): last = dewy_syntax[last].child_right
-            if dewy_syntax[last].kind == .binary and dw_op(last) == .kw_in: return dn_error(token.start, "`{dn_token_text(op)}` binds more loosely than `in`, so this converts the whole loop header: parenthesize the source, as in `loop c in (text {dn_token_text(op)} array<uint8>)`")
-            # `bytes as string ?? ""`: no type has a fallback, so this converts to an
-            # optional and falls back, as `(bytes as string | none) ?? ""`
-            if op == .kw_as and dewy_syntax[right].kind == .binary and dw_op(right) == .coalesce:
-                target = dewy_syntax[right].child_left
-                optional = dn_operator(.binary, .pipe, target, dn_node(.identifier, "none", pos_off(dewy_syntax[target].pos)))
-                left = dn_operator(.binary, .coalesce, dn_operator(.binary, op, left, optional), dewy_syntax[right].child_right)
-                continue
-        if op == .comma:
-            parts: int[]
-            if dw_op(left) == .comma: parts = dw_children(left)
-            else: parts = [0, left]
-            parts.push(right)
-            left = dn_op_node(.flat, .comma, pos_off(dewy_syntax[left].pos), parts)
-        # (`a nand b` is `not (a and b)`, as `nor` and `xnor` are of `or` and `xor`)
-        else if op == .kw_nand or op == .kw_nor or op == .kw_xnor:
-            base = if op == .kw_nand: DewyToken.kw_and else if op == .kw_nor: DewyToken.kw_or else: DewyToken.kw_xor
-            left = dn_op_node(.prefix, .kw_not, token.start, [0, dn_operator(.binary, base, left, right)])
-        else: left = dn_operator(.binary, op, left, right)
-    dn_depth -= 1
-    left
-
-dn_stmt = () -> int:
-    token = dn_tokens[dn_at]
-    word = dn_token_text(token.symbol)
-    symbol = token.symbol
-    result = 0
-    # Contextual keyword: ordinary bindings/calls named `test` still work.
-    if symbol == .kw_test and dn_tokens[dn_at + 1].space and (dn_tokens[dn_at + 1].kind == .quoted or dn_tokens[dn_at + 1].kind == .rawquoted) and not dn_tokens[dn_at + 1].newline:
-        # (the test block of other languages: a Dewy test is a function marked `$test`)
-        return dn_error(token.start, "a test is a function marked `$test` on the line before it: `$test` then `let adds_numbers = () => $expect add(20 22) =? 42`")
-    if (symbol == .kw_let or symbol == .kw_const or symbol == .kw_return or symbol == .kw_break or symbol == .kw_continue or symbol == .kw_import or symbol == .kw_from):
-        dn_at += 1
-        parts = [dn_node(.keyword, word, token.start)]
-        if symbol != .kw_break and symbol != .kw_continue:
-            if symbol != .kw_return or (dn_can_start(dn_tokens, dn_at) and not dn_tokens[dn_at].newline): parts.push(dn_expr(0))
-        else if dn_tokens[dn_at].kind == .metatag and not dn_tokens[dn_at].newline:
-            parts.push(dn_atom())
-        if symbol == .kw_from:
-            keyword = dn_tokens[dn_at]
-            dn_expect(.kw_import)
-            parts.push(dn_node(.keyword, "import", keyword.start))
-            parts.push(dn_expr(0))
-        else if symbol == .kw_import and dn_tokens[dn_at].symbol == .kw_from and not dn_tokens[dn_at].newline:
-            # (`import (a b) from p"x"`, the other order)
-            keyword = dn_take()
-            parts.push(dn_node(.keyword, "from", keyword.start))
-            parts.push(dn_expr(0))
-        # (`from m import a b`: names listed without commas or parentheses; `import m n`: two modules)
-        if (symbol == .kw_import or symbol == .kw_from) and not dn_tokens[dn_at].newline and dn_can_start(dn_tokens, dn_at):
-            if parts.len() == 2: return dn_error(dn_tokens[dn_at].start, "an `import` line takes one module: put the next on a line of its own, or take names from a module with `from m import a, b`")
-            return dn_error(dn_tokens[dn_at].start, "imported names are separated by commas, `import a, b`, or listed in parentheses, `import (a b)`")
-        result = dn_node(.keyword_expr, "", token.start, parts)
-    else: result = dn_expr(0)
-    if dn_accept_semi(): result = dn_operator(.binary, .statement_end, result, 0)
-    result
-
-
 dewy_fast_file = (file: int) -> int[]:
     dw_bigint_import = 0
-    saved_head = dc_head
     # (a reading may split generic closers: a retry restores them, dn_edits_undo)
     saved_edits_on = dn_edits_on
     dn_edits_on = true
@@ -1120,7 +710,6 @@ dewy_fast_file = (file: int) -> int[]:
         # declaration's temporary syntax before parsing the next declaration.
         dewy_syntax.truncate(2)
         if dn_at == before: dn_error(dn_tokens[dn_at].start, "expected a declaration")
-    dc_head = saved_head
     if proof_pending: dn_error(dn_tokens[dn_at].start, "$proof requires a following function declaration")
     if dir_bundles.len() > 0: dir_bundles_resolve()
     if dw_export_pos != 0: fatal(dw_export_pos, "`$export` marks a module-level function: put it before one, on its line or the line above")

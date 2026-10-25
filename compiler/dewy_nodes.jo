@@ -1,0 +1,706 @@
+# The compact nodes the direct parser (dewy_direct.jo) builds beyond single nodes (functions,
+# ranges, singletons, task groups, ...), and the declarations its module statements make
+# (dw_top_declarations).
+use 'util.jo'
+use 'module_paths.dewy'
+use 'ast.jo'
+use 'lex.jo'
+use 'parse.jo'
+use 'expr.jo'
+use 'arena.jo'
+use 'oom.jo'
+use 'check.jo'
+use 'decimals.jo'
+use 'dewy_tokens.dewy'
+use 'dewy_syntax.dewy'
+use 'dewy_grammar.dewy'
+use 'refine.jo'
+use 'proofs.jo'
+use 'dewy_methods.jo'
+use 'effects.jo'
+use 'ownership.jo'
+use 'dewy_directives.jo'
+use 'dewy_ffi.jo'
+use 'directives.jo'
+use 'settings.jo'
+use 'targets.dewy'
+use 'literals.dewy'
+use 'concurrency.jo'
+use 'place_methods.jo'
+use 'place_split.jo'
+use 'node_store.dewy'
+
+dewy_syntax: DewySyntax[]
+
+# The compact name of a Dewy identifier used as a value (printl is the library's print).
+dw_renamed: int[]               # printl, print, int and the compact names they become
+dw_value_name = (name: i32, pos: int) -> i32:
+    if dw_renamed.len() == 0: dw_renamed_init()
+    if int(name) == dw_renamed[0]: return i32(dw_renamed[1])
+    if int(name) == dw_renamed[2]: return i32(dw_renamed[3])
+    # (`bigint` names `int`'s arbitrary-precision form: the same type, so `bigint(x)` is `int(x)`)
+    if int(name) == dw_renamed[4] or int(name) == dw_renamed[6]: return i32(dw_renamed[5])
+    name
+
+dw_renamed_init = (): dw_renamed = [intern("printl"), intern("print"), intern("print"), intern("__dewy_print"), intern("int"), intern("__dewy_int"), intern("bigint")]
+
+dw_receivers_used: {int: bool} = {}   # receivers a method body reached
+dw_pending_decls: int[]               # methods of the type just declared, as module functions
+
+dw_receiver_field = (receiver: int, name: i32, pos: int) -> int:
+    dw_receivers_used[receiver] = true
+    base = mk(.ident, pos)
+    nodes[base].name = i32(receiver)
+    n = mk(.field, pos)
+    nodes[n].a = i32(base)
+    nodes[n].name = name
+    n
+
+# A method's receiver comes first. Its type is the object's (the type parameter
+# `object_type` for a record literal's method); whether it is a place is inferred
+# from the body before checking (dewy_methods.jo).
+dw_add_receiver = (fn_: int, receiver: int, receiver_type: int):
+    param = mk(.param, nodes[fn_].pos)
+    nodes[param].name = i32(receiver)
+    nodes[param].a = i32(receiver_type)
+    set_list(fn_, [param] + kids(fn_))
+
+dw_fail_pos = (pos: int, what: str) -> int:
+    fatal(pos, "Dewy does not yet support {what}")
+    0
+
+# `$target`: the full name of the target being compiled for (docs/LANGUAGE.md,
+# "Targets"). A name has only the fields it needs: the processor (or `c`, `wasm32`),
+# then the system. A processor alone asks for the current machine, so `$target` is
+# never one; `$target.arch` and `$target.os` are its fields.
+dw_target_name = () -> str:
+    if target_wasm: return "wasm32"
+    if target_macos: return "aarch64-mac"
+    if target_arm64: return "aarch64-linux"
+    if target_windows: return "x86_64-windows"
+    "x86_64-linux"
+
+dw_build_mode = () -> str:
+    if release_build: return "release"
+    "debug"
+
+dw_target_field_value = (field: int) -> str: syntax_target_field_value(field, dw_target_name(), dw_build_mode())
+
+dw_target_dropped_name = (nm: int, pos: int):
+    if not dewy_target_dropped.has(nm): dewy_target_dropped[nm] = []
+    dewy_target_dropped[nm].push(pos)
+
+# `$supported_targets = ["x86_64-linux" ...]`: the targets a module accepts, by full name.
+dw_targets_listed: {int: bool} = {}   # files that set it
+
+dw_supported_names = (pos: int, names: str[]):
+    file = pos_file(pos)
+    if dw_targets_listed.has(file): fatal(pos, "`$supported_targets` may be set only once per module")
+    dw_targets_listed[file] = true
+    if not (dw_target_name() in names):
+        listed = if names.len() == 0: "no target" else: join(names, ", ")
+        fatal(pos, "this module supports {listed}, not {dw_target_name()}, the target being compiled for")
+
+# `$target = 'name'` (target) or `$build.mode = 'name'` (text, as written) set at pos, its value
+# at value_pos: checked and applied (dw_build_setting, dc_build_setting).
+build_setting_apply = (target: bool, text: str, pos: int, value_pos: int, name: str):
+    file = pos_file(pos)
+    if files[file].path != settings_path:
+        if target: fatal(pos, "`$target` is set by the program's main file; a module lists the targets it supports with `$supported_targets`")
+        fatal(pos, "`{text}` is set by the program's main file")
+    if (target and build_target_seen) or (not target and file_mode_seen): fatal(pos, "`{text}` is set twice")
+    at = if target: build_target_at else: file_mode_at
+    if at != pos_off(pos): fatal(pos, "`{text} = ...` goes on a line of its own, at its start")
+    if target:
+        build_target_seen = true
+        host = host_target_name()
+        why = target_problem(name, host)
+        if not (name in target_names()): fatal(value_pos, "`$target`: {why}")
+        overridden = len(cli_target) > 0 or native_only
+        if len(why) > 0 and not overridden: fatal(value_pos, "`$target`: {why}")
+        meant = if name in supported_target_names(): name else: host
+        if len(cli_target) > 0 and not native_only and meant != dw_target_name(): warn(pos, "--target {cli_target} overrides `$target = '{name}'`: this build is for {dw_target_name()}")
+    else:
+        file_mode_seen = true
+        if name != "debug" and name != "release": fatal(value_pos, "unknown build mode \"{name}\": `$build.mode` is \"debug\" or \"release\"")
+        if len(cli_mode) > 0 and cli_mode != name: warn(pos, "--{cli_mode} overrides `$build.mode = '{name}'`: this is a {cli_mode} build")
+
+metatag_fail_text = (name: str) -> str:
+    if name == "supported_targets" or name == "explicit_allocation_failure": return "`${name}` is a module directive; put it at file scope"
+    if dir_builtin(name): return "`${name}` is a setting: write it on a line of its own in a module, function body or block"
+    if name == "test": return "`$test` goes alone on the line just before a module-level function declaration"
+    if name == "shadowable": return "`$shadowable` marks a module-level const: `$shadowable const name = ...` at the top of the file"
+    if name == "expect" or name == "fail": return "`${name}` is a statement in a function: a test, or a helper a test calls"
+    if dw_designed_directive(name): return "`${name}` is part of the design but not implemented yet"
+    if name == "capture": return "`$capture` belongs in a parameter list before a name: `($capture @count) => ...`"
+    if name == "include_bytes": return "`$include_bytes` takes one path literal: `$include_bytes(p\"asset.png\") as image`"
+    "unknown directive `${name}` (a loop label goes on its own line just before its loop)"
+
+# `$allocator(@arena) expression` (docs/LANGUAGE.md, "Scoped allocators"): the
+# expression allocates from the arena, the context allocator until it ends, and its
+# value leaves with storage of the enclosing allocator's:
+#     { let c=__arena_enter(@arena)  let v=expression  __arena_leave(c)  $allocator_result(v) }
+# compiler/arena.jo checks that nothing else the expression makes outlives it.
+dw_allocators = 0
+
+# The scope lending arena to body (its allocator number serial; copied, its value is written
+# `....copy()`).
+dw_arena_scope = (serial: int, arena: int, body: int, copied: bool, pos: int) -> int:
+    context = "__arena_context{serial}"
+    value = "__arena_value{serial}"
+    # (the value itself, even a function: a closure is reported as what cannot leave)
+    result = bc_ident(value, pos)
+    nodes[result].aux2 = 1
+    bc_block([bc_let(context, bc_call("__arena_enter", [arena], pos), pos), bc_let(value, body, pos),
+        bc_stmt(bc_call("__arena_leave", [bc_ident(context, pos)], pos), pos), bc_stmt(bc_call("$allocator_result", [result, bc_bool(copied, pos)], pos), pos)], pos)
+
+# ---- tests: `$test`, `$expect`, `$fail` ----
+
+# The statement checking value (0: none, `$fail`), reporting a failure with the message said
+# and the notes, the condition written at where as described.
+dw_expectation = (pos: int, where: int, described: str, said: int, notes: int, value: int) -> int:
+    shown = ""
+    if value != 0:
+        line = source_line(where)
+        l, c = line_col(where)
+        if len(line) > 0:
+            caret = ""
+            loop i in [0..c - 1):
+                if i < len(line) and line[i] == '\t': caret += "\t"
+                else: caret += " "
+            width = max(1, min(len(described), len(line) - (c - 1)))
+            caret += "^"
+            loop i in [1..width): caret += "~"
+            shown = "    {line}\n    {caret}"
+    report = mk(.call, pos)
+    callee = mk(.ident, pos)
+    nodes[callee].name = i32(intern("__expect_fail"))
+    nodes[report].a = i32(callee)
+    set_list(report, [dw_text(pos_str(pos), pos), dw_text(described, pos), dw_text(shown, pos), said, notes])
+    statement = mk(.exprstmt, pos)
+    nodes[statement].a = i32(report)
+    failed = mk(.block, pos)
+    set_list(failed, [statement, mk(.return_, pos)])
+    if value == 0: return failed
+    n = mk(.if_, pos)
+    negated = mk(.not_, pos)
+    nodes[negated].a = i32(value)
+    nodes[n].a = i32(negated)
+    nodes[n].b = i32(failed)
+    add_flag(n, NF_STMT)
+    expectation_ifs[n] = true
+    n
+
+dw_text = (text: str, pos: int) -> int:
+    n = mk(.str_lit, pos)
+    nodes[n].sval = i32(intern(text))
+    n
+
+# The two operands of a comparison as written, split at its operator outside
+# brackets and quotes ([] when the operator is not found once).
+dw_comparison_sides = (text: str, op: DewyToken) -> str[]:
+    spelled = dn_token_text(op)
+    depth = 0
+    quote: u8 = 0
+    at = -1
+    i = 0
+    loop i < len(text):
+        c = text[i]
+        if quote != 0:
+            if c == '\\': i += 1
+            else if c == quote: quote = 0
+        else if c == '"' or c == '\'': quote = c
+        else if c == '(' or c == '[' or c == '{': depth += 1
+        else if c == ')' or c == ']' or c == '}': depth -= 1
+        else if depth == 0 and i + len(spelled) <= len(text) and text[i..i + len(spelled)) == spelled:
+            # (`<?` inside `<=?`, `=?` inside `not=?`: the whole operator only)
+            before = if i > 0: text[i - 1] else: u8(' ')
+            negated = i >= 3 and text[i - 3..i) == "not"
+            if before != '<' and before != '>' and before != '=' and before != '.' and not negated:
+                if at >= 0: return []
+                at = i
+                i += len(spelled)
+                continue
+        i += 1
+    if at < 0: return []
+    [trim(text[0..at)), trim(text[at + len(spelled)..len(text)))]
+
+# `$shadowable` before a module-level `const`
+dw_shadowable_tag = (id: int) -> int:
+    if dewy_syntax[id].kind == .metatag and dewy_syntax[id].text == "shadowable": return id
+    0
+
+# `$test` or `$test(cases=…)`: a line of its own before a module function (dc_marker,
+# dc_directive_line)
+dw_test_tag = (id: int) -> int:
+    k = dewy_syntax[id].kind
+    if k == .compact_stmt and dewy_syntax[id].text == "$test" or k == .metatag and dewy_syntax[id].text == "test": return id
+    0
+
+# The test a `$test` line declares, its function still to come (dc_test_cases); `ival` 1 when
+# cases are given.
+dw_test_spec = (id: int) -> int:
+    if dewy_syntax[id].kind == .compact_stmt: return dewy_syntax[id].child_left
+    n = mk(.test_, dewy_syntax[id].pos)
+    nodes[n].aux = 1
+    n
+
+# The function a `$test` line marks: it names the test, and its parameters must
+# take the cases (or there are none, and no cases).
+dw_test_attach = (marked: int, declarations: int[]):
+    pos = nodes[marked].pos
+    if declarations.len() == 0 or nodes[declarations[0]].kind != .fn_: fatal(pos, "`$test` marks a module-level function: put it on the line just before one (`$test` then `let adds = () => $expect add(1 2) =? 3`)")
+    f = declarations[0]
+    nodes[marked].name = nodes[f].name
+    nodes[marked].sval = nodes[f].name
+    cased = nodes[marked].ival == 1
+    if nkids(f) > 0 and not cased: fatal(pos, "the test '{name_of(int(nodes[f].name))}' takes parameters: give it cases, `$test(cases=…)`")
+    if nkids(f) == 0 and cased: fatal(pos, "the test '{name_of(int(nodes[f].name))}' takes no parameters, so it cannot be given cases")
+
+# Only modules that use a large literal import the exact-integer library. The
+# alias contains a character that cannot occur in a user identifier.
+# (the first such literal's position + 1, 0 none: the import is made once the module is read)
+dw_bigint_import = 0
+const DW_BIGINT_ALIAS = "$dewy_bigint"
+
+dw_finish_declarations = (declarations: int[]) -> int[]:
+    if dw_bigint_import == 0: return declarations
+    n = mk(.import_, dw_bigint_import - 1)
+    nodes[n].aux2 = 1
+    nodes[n].sval = i32(intern("@lib/bigint.dewy"))
+    nodes[n].name = i32(intern(DW_BIGINT_ALIAS))
+    [n] + declarations
+
+dw_bigint_value = (limbs: u64[], pos: int, negative: bool = false) -> int:
+    if dw_bigint_import == 0: dw_bigint_import = pos + 1
+    owner = mk(.ident, pos)
+    nodes[owner].name = i32(intern(DW_BIGINT_ALIAS))
+    callee = mk(.field, pos)
+    nodes[callee].a = i32(owner)
+    nodes[callee].name = i32(intern("BigInt"))
+    sign = mk(.int_lit, pos)
+    nodes[sign].ival = if negative: -1 else: 1
+    add_flag(sign, NF_LITERAL)
+    sign_arg = mk(.namedarg, pos)
+    nodes[sign_arg].name = i32(intern("_sign"))
+    nodes[sign_arg].a = i32(sign)
+    items: int[]
+    loop limb in limbs:
+        item = mk(.int_lit, pos)
+        nodes[item].ival = int(limb)
+        add_flag(item, NF_LITERAL)
+        items.push(item)
+    magnitude = mk(.array, pos)
+    set_list(magnitude, items)
+    magnitude_arg = mk(.namedarg, pos)
+    nodes[magnitude_arg].name = i32(intern("_limbs"))
+    nodes[magnitude_arg].a = i32(magnitude)
+    result = mk(.call, pos)
+    nodes[result].a = i32(callee)
+    set_list(result, [sign_arg, magnitude_arg])
+    nodes[result].aux2 = -1       # oversized literal; the checker requires an explicit BigInt context
+    result
+
+# Surface type spellings share one translation in both construction paths.
+dw_type_name = (name: str) -> str:
+    if name == "addr": refine_active = true
+    if name == "int64": return "i64"
+    else if name == "uint64": return "u64"
+    else if name == "int32": return "i32"
+    else if name == "uint32": return "u32"
+    else if name == "int16": return "i16"
+    else if name == "uint16": return "u16"
+    else if name == "int8": return "i8"
+    else if name == "uint8": return "u8"
+    else if name == "float64": return "f64"
+    else if name == "float32": return "f32"
+    else if name == "string": return "str"
+    else if name == "set": return "Set"
+    else if name == "int" or name == "bigint": return "__dewy_int"
+    name
+
+dw_singleton_bound = (op: Tok, a: int, b: int, pos: int) -> int:
+    e = mk(.binary, pos)
+    nodes[e].op = i32(int(op))
+    nodes[e].a = i32(a)
+    nodes[e].b = i32(b)
+    e
+
+dw_singleton_and = (a: int, b: int, pos: int) -> int:
+    e = mk(.and_, pos)
+    nodes[e].a = i32(a)
+    nodes[e].b = i32(b)
+    e
+
+dw_singleton_value = (binder: int, pos: int) -> int:
+    e = mk(.ident, pos)
+    nodes[e].name = i32(binder)
+    e
+
+dw_singleton_int = (v: int, pos: int) -> int:
+    e = mk(.int_lit, pos)
+    nodes[e].ival = v
+    add_flag(e, NF_LITERAL)
+    e
+
+# A union of integer singletons is an int64 whose value set is its invariant:
+# `lo <= v <= hi` and `v != g` for each gap g.
+dw_int_singleton_type = (values: int[], pos: int) -> int:
+    lo = values[0]
+    hi = values[0]
+    loop v in values:
+        lo = min(lo, v)
+        hi = max(hi, v)
+    if hi - lo - values.len() + 1 > 24 or hi - lo < 0: fatal(pos, "an integer singleton union with more than 24 missing values between its least and greatest members")
+    binder = intern("$singleton")
+    predicate = dw_singleton_bound(.le, dw_singleton_int(lo, pos), dw_singleton_value(binder, pos), pos)
+    predicate = dw_singleton_and(predicate, dw_singleton_bound(.le, dw_singleton_value(binder, pos), dw_singleton_int(hi, pos), pos), pos)
+    loop g in [lo..hi]:
+        if not values.contains(g): predicate = dw_singleton_and(predicate, dw_singleton_bound(.ne, dw_singleton_value(binder, pos), dw_singleton_int(g, pos), pos), pos)
+    base = mk(.tname, pos)
+    nodes[base].name = i32(intern("i64"))
+    n = mk(.trefined, pos)
+    nodes[n].a = i32(base)
+    nodes[n].name = i32(binder)
+    nodes[n].b = i32(predicate)
+    refine_active = true
+    n
+
+dw_has_shape = (t: int) -> bool: t != 0 and nodes[t].kind == .tarray and nodes[t].ival == 1
+
+# The checks of a shaped parameter at entry: its rank, then each dimension.
+# A dimension named by a word not yet bound binds it (SHAPE_DIM marks the
+# declaration for the checker); any other dimension is compared.
+dw_shape_prologue = (param: int, out: mut int[]):
+    t = int(nodes[param].a)
+    pos = nodes[param].pos
+    value = (p: int) -> int:
+        v = mk(.ident, nodes[p].pos)
+        nodes[v].name = nodes[p].name
+        nodes[v].aux2 = 1
+        v
+    out.push(bc_stmt(bc_call("__shape_rank", [value(param), bc_int(nkids(t), pos)], pos), pos))
+    loop i in 0.. and dim in kids(t):
+        if nodes[dim].kind == .ident:
+            local = mk(.vardecl, nodes[dim].pos)
+            nodes[local].name = nodes[dim].name
+            nodes[local].aux2 = SHAPE_DIM
+            add_flag(local, NF_LOOPCOUNT)
+            nodes[local].b = i32(bc_call("__shape_dim", [value(param), bc_int(i, pos)], pos))
+            out.push(local)
+        else: out.push(bc_stmt(bc_call("__shape_check", [value(param), bc_int(i, pos), clone(dim)], pos), pos))
+
+# Both constructors synthesize the same local bindings for value parameters.
+dw_finish_function = (n: int, parameters: int[], body: int, name: str) -> int:
+    let ps = parameters
+    prefix: int[]
+    loop param in ps:
+        if has_flag(param, NF_MUT) or name_of(int(nodes[param].name)) == "_": continue
+        local = mk(.vardecl, nodes[param].pos)
+        nodes[local].aux2 = 1   # synthesized value-parameter binding
+        nodes[local].name = nodes[param].name
+        if nkids(param) > 0: set_list(local, kids(param))
+        value = mk(.ident, nodes[param].pos)
+        nodes[value].name = nodes[param].name
+        nodes[value].aux2 = 1   # the parameter's value itself, even a function
+        if name == "main":
+            if ps.len() != 1: return dw_fail_pos(nodes[n].pos, "multiple entry-point parameters")
+            nodes[value].name = i32(intern("args"))
+            call = mk(.call, nodes[param].pos)
+            nodes[call].a = i32(value)
+            value = call
+            nodes[local].a = nodes[param].a
+        nodes[local].b = i32(value)
+        prefix.push(local)
+    loop param in ps:
+        if dw_has_shape(int(nodes[param].a)): dw_shape_prologue(param, prefix)
+    if name == "main":
+        loop param in ps:
+            if has_flag(param, NF_MUT): return dw_fail_pos(nodes[n].pos, "a mutable entry-point parameter")
+        ps = []
+    set_list(n, ps)
+    loop statement in kids(body): prefix.push(statement)
+    # (a shaped result, `:>array<T length=[m p]>`: the final value is checked as it leaves;
+    # a `return` is checked where it is)
+    if dw_has_shape(int(nodes[n].a)) and prefix.len() > 0 and nodes[prefix[prefix.len() - 1]].kind == .exprstmt:
+        last = prefix[prefix.len() - 1]
+        pos = nodes[last].pos
+        dims: int[]
+        loop dim in kids(int(nodes[n].a)): dims.push(clone(dim))
+        sizes = mk(.array, pos)
+        set_list(sizes, dims)
+        nodes[last].a = i32(bc_call("__shape_value", [int(nodes[last].a), sizes], pos))
+    set_list(body, prefix)
+    nodes[n].b = i32(body)
+    return n
+
+# The compact operator of a combined assignment token.
+dn_assign_tok = (op: DewyToken) -> Tok:
+    match op:
+        assign: .assign
+        plus_assign: .pluseq
+        minus_assign: .minuseq
+        slash_assign, floor_assign: .slasheq
+        percent_assign: .percenteq
+        power_assign, xor_assign: .careteq
+        shl_assign: .shleq
+        shr_assign: .shreq
+        amp_assign, and_assign: .ampeq
+        pipe_assign, or_assign: .pipeeq
+        _: .stareq
+
+dw_register_literal_methods = (entries: int[]):
+    row_names: int[]
+    decls: int[]
+    loop entry in entries:
+        if nodes[entry].kind != .namedarg or nodes[entry].name == 0: continue
+        value = int(nodes[entry].a)
+        row_names.push(int(nodes[entry].name))
+        decls.push(if nodes[value].kind == .lambda and dewy_is_method(value): value else: 0)
+    dewy_method_group(row_names, decls)
+
+# `[1 2; 3 4]` written for a matrix: the attached `;` discards the 2, which does nothing,
+# so `[1 3 4]` is meant only rarely (the editor's fix-it puts a space before the `;`).
+DW_ROW_HINT = "a row break is a standalone `;`, with a space before it, as in `[1 2 ; 3 4]`"
+
+# Comparison chains (`0 <? x <? 10`): consecutive comparisons joined by `and`,
+# each operand evaluated once and in order, later ones only while the chain
+# holds (which way one runs: dewy_grammar.dewy dw_chain_way).
+
+dw_chain_count = 0
+
+# A temporary holding value, declared in statements; its name as a value.
+dw_chain_temp = (value: int, statements: mut int[], pos: int) -> int:
+    dw_chain_count += 1
+    name = "$chain{dw_chain_count}"
+    statements.push(bc_let(name, value, pos))
+    bc_ident(name, pos)
+
+# Pure scalar syntax can stay a compile-time expression. Anything that reads a
+# name, calls code or constructs a collection must retain one initialized value.
+dw_const_number = (n: int) -> bool:
+    k = nodes[n].kind
+    if k == .int_lit or k == .float_lit or k == .bool_lit: return true
+    if k == .unary or k == .not_: return dw_const_number(int(nodes[n].a))
+    if k == .binary or k == .and_ or k == .or_:
+        return dw_const_number(int(nodes[n].a)) and dw_const_number(int(nodes[n].b))
+    false
+
+# Words with a fixed meaning cannot be bound: variables, constants, functions,
+# parameters, fields, methods, loop and pattern names, and import aliases.
+dewy_reserved_name = (name: str, pos: int):
+    text = dewy_reserved_text(name)
+    if text != "": fatal(pos, text)
+
+# (its mistake, "" for a name that may be bound)
+dewy_reserved_text = (name: str) -> str:
+    if len(name) < 3: return ""
+    c = name[0]
+    if c != 'e' and c != 'n' and c != 'v': return ""
+    role = ""
+    if name == "end": role = "inside brackets it is the last index, as in `xs[end]`"
+    else if name == "new": role = "inside brackets it inserts an axis, as in `xs[new]`"
+    else if name == "none": role = "it is the empty value"
+    else if name == "void": role = "it is the type of no value"
+    if role == "": return ""
+    "'{name}' is reserved, not a name: {role} (use `{name}_`)"
+
+# A type's methods become module functions of the same name taking the instance first
+# (`s.width` is `width(s)` by the uniform call syntax); no function is stored in the
+# object. A generic type's methods take its type parameters first.
+# A minted type's methods also reach the members it inherits: from a parent declared
+# earlier in this module as they are read, from any other once every module is
+# (dewy_resolve_inherited).
+dw_type_members: {int: {int: {int: int}}} = {}   # file -> type name -> its members (dewy_method_group)
+
+# A method's function as a module function: the type's parameters first, then its receiver.
+dw_method_finish = (fn_: int, struct_: int, type_params: int[], receiver: int):
+    pos = nodes[fn_].pos
+    object_type = mk(.tname, pos)
+    nodes[object_type].name = nodes[struct_].name
+    if type_params.len() > 0:
+        own = kids2(fn_)
+        params: int[]
+        arguments: int[]
+        loop tp in type_params:
+            loop mine in own:
+                if nodes[mine].name == nodes[tp].name: fatal(nodes[mine].pos, "type parameter '{name_of(int(nodes[tp].name))}' is already {name_of(int(nodes[struct_].name))}'s")
+            param = mk(.ident, pos)
+            nodes[param].name = nodes[tp].name
+            params.push(param)
+            argument = mk(.tname, pos)
+            nodes[argument].name = nodes[tp].name
+            arguments.push(argument)
+        set_list(object_type, arguments)
+        set_list2(fn_, params + own)
+        add_flag(fn_, NF_GENERIC)
+    dw_add_receiver(fn_, receiver, object_type)
+
+dw_range_value = (range: int) -> int: dewy_range_value(range)
+
+# The clamped slice of index n (its receiver read) by range r (dw_clamp_slice).
+dw_clamp_block = (n: int, r: int) -> int:
+    pos = nodes[n].pos
+    source = "$clamp_source{n}"
+    length = "$clamp_length{n}"
+    lo = "$clamp_start{n}"
+    hi = "$clamp_stop{n}"
+    count = mk(.field, pos)
+    nodes[count].a = i32(bc_ident(source, pos))
+    nodes[count].name = i32(intern("length"))
+    stmts = [bc_let(source, int(nodes[n].a), pos), bc_let(length, count, pos)]
+    if nodes[n].sval != 0: stmts.push(bc_let(name_of(int(nodes[n].sval)), bc_bin(.minus, bc_ident(length, pos), bc_int(1, pos), pos), pos))
+    stmts.push(bc_let(lo, (if nodes[r].a != 0: int(nodes[r].a) else: bc_int(0, pos)), pos))
+    stmts.push(bc_if(bc_bin(.lt, bc_ident(lo, pos), bc_int(0, pos), pos), [bc_assign(bc_ident(lo, pos), bc_int(0, pos), pos)], [], pos))
+    stmts.push(bc_if(bc_bin(.gt, bc_ident(lo, pos), bc_ident(length, pos), pos), [bc_assign(bc_ident(lo, pos), bc_ident(length, pos), pos)], [], pos))
+    stop = bc_ident(length, pos)
+    if nodes[r].b != 0:
+        stop = int(nodes[r].b)
+        if has_flag(r, NF_INCLUSIVE): stop = bc_bin(.plus, stop, bc_int(1, pos), pos)
+    stmts.push(bc_let(hi, stop, pos))
+    stmts.push(bc_if(bc_bin(.gt, bc_ident(hi, pos), bc_ident(length, pos), pos), [bc_assign(bc_ident(hi, pos), bc_ident(length, pos), pos)], [], pos))
+    stmts.push(bc_if(bc_bin(.lt, bc_ident(hi, pos), bc_ident(lo, pos), pos), [bc_assign(bc_ident(hi, pos), bc_ident(lo, pos), pos)], [], pos))
+    bounds = mk(.range, pos)
+    nodes[bounds].a = i32(bc_ident(lo, pos))
+    nodes[bounds].b = i32(bc_ident(hi, pos))
+    slice = mk(.index, pos)
+    nodes[slice].a = i32(bc_ident(source, pos))
+    set_list(slice, [bounds])
+    nodes[slice].b = i32(bounds)
+    stmts.push(bc_stmt(slice, pos))
+    bc_block(stmts, pos)
+
+# Parallel bodies become visible callbacks, so the existing race checker
+# checks captured/global writes transitively. Mutable element bindings use the
+# library's unique-array partition path; each callback owns one value.
+dw_parallel_exits = (n: int, depth: int = 0):
+    if n == 0 or nodes[n].kind == .lambda or nodes[n].kind == .fn_: return
+    k = nodes[n].kind
+    if k == .return_: fatal(nodes[n].pos, "return cannot leave a parallel body; return a comprehension value instead")
+    if (k == .break_ or k == .continue_) and depth == 0:
+        fatal(nodes[n].pos, "break and continue cannot leave a parallel body")
+    inner = depth
+    if k == .for_ or k == .while_ or k == .loopx: inner += 1
+    dw_parallel_exits(int(nodes[n].a), depth)
+    dw_parallel_exits(int(nodes[n].b), inner)
+    dw_parallel_exits(int(nodes[n].c), depth)
+    loop child in kids(n): dw_parallel_exits(child, depth)
+
+# `$warn_if condition "message"` before a function declaration: a soft precondition
+# (compiler/warn_if.jo), kept as the declaration's `warn_if` attribute (condition, message).
+dw_warn_if_pending: int[]
+
+# The declarations a module statement the direct grammar read makes (dewy_direct.jo's dn_statement):
+# a marker line (dc_marker), a compact statement, or a `$target` chain's compiled arm (a flow
+# holding its block of module statements, or nothing).
+dw_top_declarations = (id: int) -> int[]:
+    k = dewy_syntax[id].kind
+    text = dewy_syntax[id].text
+    pos = dewy_syntax[id].pos
+    if k == .metatag:
+        if text == "proof":
+            if proof_pending: fatal(pos, "duplicate $proof")
+            proof_pending = true
+            proof_active = true
+            refine_active = true
+        else if text == "export": dw_export_at(pos, "")
+        else if text == "explicit_allocation_failure": oom_module(pos_file(pos), pos)
+        return []
+    # (`$export(name=…)`, `$supported_targets = […]`: dc_directive_line; `$warn_if`: dc_warn_if)
+    if k == .compact_stmt and text == "$export":
+        dw_export_at(pos, name_of(int(nodes[dewy_syntax[id].child_left].sval)))
+        return []
+    if k == .compact_stmt and text == "$supported_targets":
+        names: str[]
+        loop entry in kids(dewy_syntax[id].child_left): names.push(name_of(int(nodes[entry].sval)))
+        dw_supported_names(pos, names)
+        return []
+    if k == .compact_stmt and text == "$warn_if":
+        dw_warn_if_pending.push(dewy_syntax[id].child_left)
+        return []
+    exported = dw_export_pos != 0
+    pending = proof_pending
+    soft = dw_warn_if_pending
+    dw_warn_if_pending = []
+    made = dw_top_declarations_inner(id)
+    if exported: dw_export_attach(made)
+    if soft.len() > 0:
+        if made.len() != 1 or nodes[made[0]].kind != .fn_: fatal(nodes[soft[0]].pos, "`$warn_if` goes on the line before the function declaration whose callers it warns")
+        dw_ffi_attach(made[0], soft)
+    if pending:
+        if made.len() != 1 or nodes[made[0]].kind != .fn_: fatal(pos, "$proof requires a function declaration")
+        if not proof_decls.has(made[0]): proof_decls[made[0]] = 0
+        proof_pending = false
+    made
+
+dw_top_declarations_inner = (id: int) -> int[]:
+    # (a `$target` chain: its compiled arm's statements, which bind in the module, dc_target_chain)
+    if dewy_syntax[id].kind == .flow:
+        spliced: int[]
+        if dewy_syntax[id].children.len() > 0:
+            loop item in dewy_syntax[dewy_syntax[id].children[0]].children:
+                loop made in dw_top_declarations(item): spliced.push(made)
+        return spliced
+    # (a directly built overload group: its member declarations)
+    if dewy_syntax[id].children.len() > 0: return dewy_syntax[id].children
+    # (a module setting: dc_setting; a statement that declares nothing: a bundle dc_bundle defined,
+    # a build setting, or a function the compiler provides, dc_declares_nothing)
+    if dewy_syntax[id].text != "":
+        if dewy_syntax[id].text == "$nothing": return []
+        file = pos_file(dewy_syntax[id].pos)
+        dw_dir_apply(dewy_syntax[id].text, int(dewy_syntax[id].child_right), dewy_syntax[id].pos, dir_module_start(file), dir_module_end(file), true)
+        return []
+    dw_with_methods(dewy_syntax[id].child_left)
+
+# A declaration followed by the module functions its type's methods became.
+dw_with_methods = (declaration: int) -> int[]:
+    declarations = [declaration]
+    loop method in dw_pending_decls: declarations.push(method)
+    dw_pending_decls = []
+    declarations
+
+# Spawned bindings are resolved at the joining brace. Their task storage stays
+# hidden, and ordinary bindings become visible in the enclosing statement scope.
+dw_task_groups: str[]
+
+# `spawn value` in group g: the task's call
+dw_task_spawn = (g: int, value: int, pos: int) -> int:
+    body = bc_block([bc_stmt(value, pos)], pos)
+    fn_ = mk(.lambda, pos)
+    add_flag(fn_, NF_LANG_BODY)
+    nodes[fn_].b = i32(body)
+    call = bc_call("__task_spawn", [g, fn_], pos)
+    nodes[call].aux2 = 17
+    call
+
+# A concurrent group named name around body's statements, joined at its end (serial numbers
+# its hidden names).
+dw_task_group = (pos: int, name: str, serial: int, body: int, transparent: bool) -> int:
+    previous = "$context{serial}"
+    outcome = "$joined{serial}"
+    statements = [bc_let(name, bc_call("__task_new_group", [], pos), pos), bc_let(previous, bc_call("__task_enter", [bc_ident(name, pos)], pos), pos)]
+    cleanup = mk(.defer_, pos)
+    nodes[cleanup].a = i32(bc_stmt(bc_call("__task_cleanup", [bc_ident(name, pos), bc_ident(previous, pos)], pos), pos))
+    statements.push(cleanup)
+    results: int[]
+    loop statement in kids(body):
+        if nodes[statement].kind == .vardecl and nodes[int(nodes[statement].b)].kind == .call and nodes[int(nodes[statement].b)].aux2 == 17:
+            original = name_of(int(nodes[statement].name))
+            token = "$task{statement}"
+            nodes[statement].name = i32(intern(token))
+            results.push(bc_let(original, bc_call("__task_result", [bc_ident(token, nodes[statement].pos)], nodes[statement].pos), nodes[statement].pos))
+        # (`spawn f()` as a statement: its task is the group's, not a value the block expresses)
+        if nodes[statement].kind == .exprstmt and nodes[int(nodes[statement].a)].kind == .call and nodes[int(nodes[statement].a)].aux2 == 17:
+            discard = mk(.assign, nodes[statement].pos)
+            nodes[discard].op = i32(int(Tok.assign))
+            nodes[discard].a = i32(mk(.hole, nodes[statement].pos))
+            nodes[discard].b = nodes[statement].a
+            statements.push(discard)
+        else: statements.push(statement)
+    statements.push(bc_let(outcome, bc_call("__task_join", [bc_ident(name, pos)], pos), pos))
+    statements.push(bc_stmt(bc_call("__task_restore", [bc_ident(previous, pos)], pos), pos))
+    loop result in results: statements.push(result)
+    if not transparent: statements.push(bc_stmt(bc_ident(outcome, pos), pos))
+    block = bc_block(statements, pos)
+    if transparent: nodes[block].aux = 5
+    block

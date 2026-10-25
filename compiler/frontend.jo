@@ -4,14 +4,13 @@ use 'util.jo'
 use 'dewy_lex.dewy'
 use 'ast.jo'
 use 'parse.jo'
-use 'dewy_parse.jo'
+use 'dewy_nodes.jo'
 use 'dewy_fast.jo'
 use 'directives.jo'
 use 'dewy_directives.jo'
 
 source_declarations = (file: int) -> int[]:
     if files[file].is_dewy:
-        dw_index_context = []
         first = nodes.len()
         decls = dewy_fast_file(file)
         i = nodes.len() - 1

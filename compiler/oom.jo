@@ -3,7 +3,7 @@
 # module's functions that may allocate returns `T | OutOfMemory`. Ordinary allocation stays
 # infallible elsewhere: a refusal with no such function running ends the process.
 #
-# The projection (dewy_parse.jo) gives such a function `f` a frame: `f` becomes
+# The projection (dewy_direct.jo) gives such a function `f` a frame: `f` becomes
 #     f = (params) => {
 #         if __setjmp(__oom_frame()) not=? 0 { __oom_caught()  return OutOfMemory }
 #         defer __oom_release()
@@ -46,7 +46,7 @@ oom_body_allocates = (n: int) -> bool:
     k = nodes[n].kind
     if k == .ident or k == .int_lit or k == .float_lit or k == .bool_lit or k == .break_ or k == .continue_: return false
     if k == .vardecl:
-        # (a value parameter's own binding, dewy_parse.jo dw_finish_function, has its type)
+        # (a value parameter's own binding, dewy_nodes.jo dw_finish_function, has its type)
         if nodes[n].aux2 == 1: return false
         if nodes[n].a == 0 or not oom_fixed_type(int(nodes[n].a)): return true
         return oom_body_allocates(int(nodes[n].b))

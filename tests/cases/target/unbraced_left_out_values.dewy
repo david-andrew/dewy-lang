@@ -1,0 +1,12 @@
+# Unbraced arms a `$target` test leaves out, as values and in a function body.
+const n = if $target =? "x86_64-windows" 1 else if $target.os =? "windows" 2 else 3
+show = (unused_p:int64 kept:int64) => {
+    if $target =? "x86_64-windows" printl("{unused_p}") else printl(kept)
+}
+main = () => {
+    let p = 5
+    let v = if $target =? "x86_64-windows" p + 1 else if $target.os =? "windows" p + 2 else 9
+    if $target.os =? "windows" printl(p) else if $target =? "x86_64-windows" printl(p + 1) else printl(v)
+    printl(n)
+    show(1 2)
+}

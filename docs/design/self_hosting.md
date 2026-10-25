@@ -478,41 +478,32 @@ of a new name left to Sloppy.
 
 ## Retiring the reference parser
 
-The direct parser (dewy_direct.jo, `dc_*`) builds checker nodes and is the only reader of a normal
-compile; there is no `DEWY_FRONTEND` mode. The reference grammar (dewy_fast.jo, `dn_*`) and its
-projection (dewy_parse.jo, `dw_*`) remain for three uses:
-- A form the direct parser does not read (`dc_unread`): the reference grammar reads the module
-  statement again (a body checking asks for, `dw_block` of it) only to report its mistake; when it
-  reports none, the first mistake noted, else "Dewy does not read this form" (provisional wording).
-  No valid program in the suite, the examples, the ladder or the library gets there.
-- A module-level `$target` chain's left-out arms, read as syntax with `dc_enabled` off
-  (`dc_dropped_arm`) so `dw_target_dropped` notes the names they use.
-- Node builders the direct parser calls (`dw_finish_function`, `dw_range_value`, `dw_value_name`,
-  `dw_parallel_exits`, `build_setting_apply`, `metatag_fail_text`, the `dw_ffi_*` and `dw_dir_*`
-  helpers, …) and `dw_top_declarations`' handling of the compact statements it returns.
+The direct parser (dewy_direct.jo, `dc_*`) builds checker nodes and is the only reader; the
+reference grammar's expression and statement readers and its projection of `DewySyntax` are gone.
+What is left of the old frontend:
+- dewy_fast.jo: the lexer, `dn_string`, the edit log (`dn_edits_*`), `dn_error` and the file driver
+  (`dewy_fast_file`). A module statement comes back as a `DewySyntax` carrier (a compact
+  statement, a marker tag, or a `$target` chain's compiled arm).
+- dewy_nodes.jo (`dw_*`): the node builders the direct parser calls (`dw_finish_function`,
+  `dw_range_value`, `dw_value_name`, `dw_parallel_exits`, `build_setting_apply`,
+  `metatag_fail_text`, task groups, singletons, …) and `dw_top_declarations`, which turns the
+  carriers into declarations. dewy_directives.jo and dewy_ffi.jo keep only the settings and C
+  helpers they call.
+- dewy_syntax.dewy: `DewySyntax` itself and `dw_kind_name` (the formatter's); its `target_fold`,
+  `syntax_target_live`, `syntax_setting_*` and operator queries are now used by their tests only.
 
-The formatter (dewy_fmt.jo) uses only the lexer and `dw_kind_name`; the language server (ide.jo)
-reads checker nodes and diagnostics. Mistakes the direct parser reports: a parse mistake (dn_error's
-text) at once; a projection mistake (dw_fail's, fatal's) noted (`dc_report`) and reported once the
-module statement is read, or at once where reading on would take another reading (`dc_fail_now`).
-The frontend golden cases (tests/cases/frontend) were the old mode-comparing tests.
+Mistakes: a parse mistake (dn_error's text) at once; a projection mistake noted (`dc_report`) and
+reported once the module statement is read, or at once (`dc_fail_now`); a mistake on a form no
+reading accepts is noted as a hint (`dc_hint`, the first since the statement began) and reported
+by `dc_unread` when the statement reads no way, else the first noted, else "Dewy does not read this
+form" (provisional wording). A left-out `$target` arm is passed over by token (braced, or to the
+end of its statement: `dc_arm_end`), its names (and its strings' interpolations') noted for
+`dw_target_dropped_name`. A hot reader
+holds no string temporaries: diagnostics live in helpers.
 
-Removal, in order (each step gated by the full suite, the bootstrap and same-output):
-1. Close the valid forms (done).
-2. The direct parser reports its own mistakes (done for the golden cases and the suite's
-   programs). Left: the mistakes `dc_unread` still asks the reference grammar for (about 35 of the
-   frontend golden cases: `dw_fail`'s "does not yet support …" forms, reserved names in patterns,
-   `$send=1`, lifecycle tags without a method, `concurrent` without a body, …). A hot reader (dc_expr,
-   dc_atom, dc_body_read, dc_word, …) holds no string temporaries: diagnostics live in helpers.
-3. Retire `compare` and `old` (done): `dc_same*`, the deferred statements, `dn_value` and
-   `DEWY_FRONTEND` are gone; strict is the only mode.
-4. Delete the projection once step 2 is done: dewy_parse.jo's readers of `DewySyntax` (`dw_expr`,
-   `dw_stmt`, `dw_flow`, `dw_block`, `dw_declare`, `dw_type`, `dw_top_declarations`' syntax paths,
-   …), moving the node builders above to a node-side module first.
-5. Delete the reference grammar (dewy_fast.jo's `dn_expr`, `dn_stmt`, `dn_atom`,
-  `dn_bracketed_from`, …; dewy_syntax.dewy's tree and `target_fold`) once the dropped arms are
-  skipped by token. Keep the lexer, `dn_string`, the token rules (dewy_grammar.dewy), the edit log
-  (`dn_edits_*`) and the file driver (`dewy_fast_file`).
+Removal steps 1–5 are done (valid forms closed, own mistakes, `compare`/`old` retired, projection
+and reference grammar deleted). Left for the Dewy port: dewy_direct.jo and dewy_nodes.jo
+themselves, the driver, and replacing the `DewySyntax` carrier with the checker nodes it holds.
 
 ## Decided rules
 
