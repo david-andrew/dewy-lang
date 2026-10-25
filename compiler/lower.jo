@@ -5036,7 +5036,7 @@ gen_expr_value = (e: int) -> Val:
         lambda: return gen_lambda(e)
         fnref: return gen_fnref(e)
         unary: return gen_value_unary(e)
-        not_: return V(e_bin(.xor, VI, gen_expr(int(nodes[e].a)).v, e_iconst(1)), false)
+        not_: return V(gen_not(int(nodes[e].a)), false)
         and_, or_: return gen_value_and_(e)
         binary:
             value = gen_binary(e)
@@ -5805,6 +5805,17 @@ negate_cmp = (op: Op) -> Op:
         gtu: .leu
         geu: .ltu
         _: .nop
+
+# A fresh integer comparison can produce its complement directly. Keep the
+# boolean inversion for other values, including unordered float comparisons.
+gen_not = (e: int) -> int:
+    start = ir.code.len()
+    value = gen_expr(e).v
+    last = ir.code.len() - 1
+    if last >= start and int(ir.code[last].dst) == value and negate_cmp(ir.code[last].op) != .nop:
+        ir.code[last].op = negate_cmp(ir.code[last].op)
+        return value
+    e_bin(.xor, VI, value, e_iconst(1))
 
 # continue when e is true, branch to `level` when it is false
 jump_if_false = (e: int, level: int):
