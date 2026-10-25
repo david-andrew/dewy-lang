@@ -99,17 +99,31 @@ arena_unpromotable = (t0: int, depth: int = 0) -> str:
 # (the projected expression: a `return` in it, outside its closures, would leave before its
 # value is copied out)
 arena_no_return = (n: int):
-    if n == 0: return
+    at = arena_return_at(n)
+    if at != 0: fatal(nodes[at].pos, "`return` inside an `$allocator` expression would leave it before its value is copied out of the arena: make the value the expression's result, and return after it")
+
+# The first `return` in n outside function literals (0: none).
+arena_return_at = (n: int) -> int:
+    if n == 0: return 0
     k = nodes[n].kind
-    if k == .lambda or k == .fn_: return
-    if k == .return_: fatal(nodes[n].pos, "`return` inside an `$allocator` expression would leave it before its value is copied out of the arena: make the value the expression's result, and return after it")
+    if k == .lambda or k == .fn_: return 0
+    if k == .return_: return n
     mask = isolation_children(k)
-    if mask < 0: return
-    if mask & 1 != 0: arena_no_return(int(nodes[n].a))
-    if mask & 2 != 0: arena_no_return(int(nodes[n].b))
-    if mask & 4 != 0: arena_no_return(int(nodes[n].c))
+    if mask < 0: return 0
+    if mask & 1 != 0:
+        at = arena_return_at(int(nodes[n].a))
+        if at != 0: return at
+    if mask & 2 != 0:
+        at = arena_return_at(int(nodes[n].b))
+        if at != 0: return at
+    if mask & 4 != 0:
+        at = arena_return_at(int(nodes[n].c))
+        if at != 0: return at
     if mask & 16 != 0:
-        loop child in kids(n): arena_no_return(child)
+        loop child in kids(n):
+            at = arena_return_at(child)
+            if at != 0: return at
+    0
 
 # `$allocator_result(v)`: the scope's value, promoted to the enclosing allocator.
 # Under `$explicit_copies` the copy out is a costly copy like any other (strings included:

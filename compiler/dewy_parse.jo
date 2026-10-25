@@ -394,15 +394,21 @@ dw_allocator = (id: int) -> int:
     if dw_op(arena) != .at: fatal(dewy_syntax[arena].pos, "`$allocator` lends an arena by its place: `$allocator(@scratch) expression`")
     arena_enable()
     dw_allocators += 1
-    context = "__arena_context{dw_allocators}"
-    value = "__arena_value{dw_allocators}"
+    serial = dw_allocators
     body = dw_expr(dw_child(id, 2))
     arena_no_return(body)
+    dw_arena_scope(serial, dw_expr(arena), body, dw_copy_result(dw_child(id, 2)), pos)
+
+# The scope lending arena to body (its allocator number serial; copied, its value is written
+# `....copy()`).
+dw_arena_scope = (serial: int, arena: int, body: int, copied: bool, pos: int) -> int:
+    context = "__arena_context{serial}"
+    value = "__arena_value{serial}"
     # (the value itself, even a function: a closure is reported as what cannot leave)
     result = bc_ident(value, pos)
     nodes[result].aux2 = 1
-    bc_block([bc_let(context, bc_call("__arena_enter", [dw_expr(arena)], pos), pos), bc_let(value, body, pos),
-        bc_stmt(bc_call("__arena_leave", [bc_ident(context, pos)], pos), pos), bc_stmt(bc_call("$allocator_result", [result, bc_bool(dw_copy_result(dw_child(id, 2)), pos)], pos), pos)], pos)
+    bc_block([bc_let(context, bc_call("__arena_enter", [arena], pos), pos), bc_let(value, body, pos),
+        bc_stmt(bc_call("__arena_leave", [bc_ident(context, pos)], pos), pos), bc_stmt(bc_call("$allocator_result", [result, bc_bool(copied, pos)], pos), pos)], pos)
 
 # (an expression whose value is written `....copy()`: the copy out of the arena is asked for,
 # as `$explicit_copies` wants)
@@ -467,9 +473,19 @@ dw_expect = (id: int) -> int:
     described = ""
     if text != 0: described = join(words(dewy_syntax[text].text), " ")
     where = pos
+    if condition != 0: where = dewy_syntax[dw_unwrap(condition)].pos
+    said = dw_text("", pos)
+    if message != 0: said = dw_expr(message)
+    notes = dw_expect_notes(condition, pos, described)
+    value = 0
+    if condition != 0: value = dw_expr(condition)
+    dw_expectation(pos, where, described, said, notes, value)
+
+# The statement checking value (0: none, `$fail`), reporting a failure with the message said
+# and the notes, the condition written at where as described.
+dw_expectation = (pos: int, where: int, described: str, said: int, notes: int, value: int) -> int:
     shown = ""
-    if condition != 0:
-        where = dewy_syntax[dw_unwrap(condition)].pos
+    if value != 0:
         line = source_line(where)
         l, c = line_col(where)
         if len(line) > 0:
@@ -485,17 +501,15 @@ dw_expect = (id: int) -> int:
     callee = mk(.ident, pos)
     nodes[callee].name = i32(intern("__expect_fail"))
     nodes[report].a = i32(callee)
-    said = dw_text("", pos)
-    if message != 0: said = dw_expr(message)
-    set_list(report, [dw_text(pos_str(pos), pos), dw_text(described, pos), dw_text(shown, pos), said, dw_expect_notes(condition, pos, described)])
+    set_list(report, [dw_text(pos_str(pos), pos), dw_text(described, pos), dw_text(shown, pos), said, notes])
     statement = mk(.exprstmt, pos)
     nodes[statement].a = i32(report)
     failed = mk(.block, pos)
     set_list(failed, [statement, mk(.return_, pos)])
-    if condition == 0: return failed
+    if value == 0: return failed
     n = mk(.if_, pos)
     negated = mk(.not_, pos)
-    nodes[negated].a = i32(dw_expr(condition))
+    nodes[negated].a = i32(value)
     nodes[n].a = i32(negated)
     nodes[n].b = i32(failed)
     add_flag(n, NF_STMT)
@@ -712,19 +726,20 @@ dw_literal_problem = (p: LiteralProblem, id: int):
 
 # Only modules that use a large literal import the exact-integer library. The
 # alias contains a character that cannot occur in a user identifier.
+# (the first such literal's position + 1, 0 none: the import is made once the module is read)
 dw_bigint_import = 0
 const DW_BIGINT_ALIAS = "$dewy_bigint"
 
 dw_finish_declarations = (declarations: int[]) -> int[]:
     if dw_bigint_import == 0: return declarations
-    [dw_bigint_import] + declarations
+    n = mk(.import_, dw_bigint_import - 1)
+    nodes[n].aux2 = 1
+    nodes[n].sval = i32(intern("@lib/bigint.dewy"))
+    nodes[n].name = i32(intern(DW_BIGINT_ALIAS))
+    [n] + declarations
 
 dw_bigint_value = (limbs: u64[], pos: int, negative: bool = false) -> int:
-    if dw_bigint_import == 0:
-        dw_bigint_import = mk(.import_, pos)
-        nodes[dw_bigint_import].aux2 = 1
-        nodes[dw_bigint_import].sval = i32(intern("@lib/bigint.dewy"))
-        nodes[dw_bigint_import].name = i32(intern(DW_BIGINT_ALIAS))
+    if dw_bigint_import == 0: dw_bigint_import = pos + 1
     owner = mk(.ident, pos)
     nodes[owner].name = i32(intern(DW_BIGINT_ALIAS))
     callee = mk(.field, pos)
@@ -3731,7 +3746,10 @@ dw_spawn = (id: int) -> int:
     else:
         if dw_task_groups.len() == 0: fatal(pos, "spawn needs an enclosing concurrent group, or an explicit spawn(group)")
         g = bc_ident(dw_task_groups[dw_task_groups.len() - 1], pos)
-    value = dw_expr(dw_child(id, 1))
+    dw_task_spawn(g, dw_expr(dw_child(id, 1)), pos)
+
+# `spawn value` in group g: the task's call
+dw_task_spawn = (g: int, value: int, pos: int) -> int:
     body = bc_block([bc_stmt(value, pos)], pos)
     fn_ = mk(.lambda, pos)
     add_flag(fn_, NF_LANG_BODY)
@@ -3741,14 +3759,18 @@ dw_spawn = (id: int) -> int:
     call
 
 dw_concurrent = (id: int, transparent: bool) -> int:
-    pos = dewy_syntax[id].pos
     group = dw_child(id, 0)
     name = if group == 0: "$group{id}" else: dw_name(group)
-    previous = "$context{id}"
-    outcome = "$joined{id}"
     dw_task_groups.push(name)
     body = dw_block(dw_child(id, 1))
     dw_task_groups.pop()
+    dw_task_group(dewy_syntax[id].pos, name, id, body, transparent)
+
+# A concurrent group named name around body's statements, joined at its end (serial numbers
+# its hidden names).
+dw_task_group = (pos: int, name: str, serial: int, body: int, transparent: bool) -> int:
+    previous = "$context{serial}"
+    outcome = "$joined{serial}"
     statements = [bc_let(name, bc_call("__task_new_group", [], pos), pos), bc_let(previous, bc_call("__task_enter", [bc_ident(name, pos)], pos), pos)]
     cleanup = mk(.defer_, pos)
     nodes[cleanup].a = i32(bc_stmt(bc_call("__task_cleanup", [bc_ident(name, pos), bc_ident(previous, pos)], pos), pos))

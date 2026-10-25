@@ -659,12 +659,15 @@ dn_token_edit = (at: int):
     dn_edit_was.push(dn_tokens[at])
 
 # Undo the edits recorded after `mark` (an abandoned attempt's), the latest first. An entry
-# -(k + 1) is a setting scope the attempt set (dc_unsafe_scope): scopes from k on go.
+# -(k + 1) is a setting scope the attempt set (dc_unsafe_scope): scopes from k on go;
+# DN_EDIT_BIGINT, the module's bigint import the attempt asked for (dc_bigint_value).
+const DN_EDIT_BIGINT = -1099511627776
 dn_edits_undo = (mark: int = 0):
     i = dn_edit_at.len() - 1
     loop i >= mark:
         at = dn_edit_at[i]
-        if at < 0: dir_scopes.truncate(-at - 1)
+        if at == DN_EDIT_BIGINT: dw_bigint_import = 0
+        else if at < 0: dir_scopes.truncate(-at - 1)
         else: dn_tokens[at] = dn_edit_was[i]
         i -= 1
     dn_edits_clear(mark)
