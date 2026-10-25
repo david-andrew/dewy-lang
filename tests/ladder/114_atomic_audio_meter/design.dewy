@@ -1,0 +1,159 @@
+# Tier 6 / 114 / milestone 48
+# Acceptance: Mix a short signed sample stream into a ring and publish peak and
+# frame counts through padded atomic handles. Samples are bounded by construction.
+Frame:type = [left:int right:int]
+Ring:type = [slots:array<Frame length=8> head:int64<h => 0 <=? h and h <? 8> written:int]
+
+new_ring = ():>Ring => Ring[[loop _ in [0..8) Frame[0 0]] 0 0]
+
+clip = (x:int):>int => {
+    if x <? -1000 return -1000
+    if x >? 1000 return 1000
+    x
+}
+
+magnitude = (x:int):>int => if x <? 0 -x else x
+
+mix = (dry:int wet:int):>Frame => {
+    let l = clip(dry + wet // 2)
+    let r = clip(dry // 2 - wet)
+    Frame[l r]
+}
+
+push = (@ring:Ring frame:Frame):>void => {
+    ring.slots[ring.head] = frame
+    ring.head = (ring.head + 1) % 8
+    ring.written += 1
+}
+
+sample_at = (ring:Ring offset:int64<o => 0 <=? o and o <? 8>):>Frame => {
+    let pos = (ring.head + offset) % 8
+    ring.slots.get(pos) ?? Frame[0 0]
+}
+
+process = (samples:array<int length=84> peak:CachePadded<Atomic<int64>> count:CachePadded<Atomic<int64>>):>Ring => {
+    let ring = new_ring()
+    loop i in [0..samples.length) {
+        let dry = samples.get(i) ?? 0
+        let wet = samples.get((i+3) % samples.length) ?? 0
+        let frame = mix(dry wet)
+        push(@ring frame)
+        peak.value.set_max(int64(max(0 min(max(magnitude(frame.left) magnitude(frame.right)) 1000))) 'relaxed')
+        count.value.store(int64(i+1) 'release')
+    }
+    ring
+}
+
+checksum = (ring:Ring):>int => {
+    let result = 0
+    loop i in [0..8) {
+        let f = sample_at(ring i)
+        result += f.left*3 + f.right*5
+    }
+    result
+}
+
+gate_status = (gate:Mutex<int>):>string => match @(gate.try_lock()) {
+    <Busy> => "busy"
+    value:int => "ready {value}"
+}
+
+main = () => {
+    let samples:array<int length=84> = [
+        -600
+        -529
+        -458
+        -387
+        -316
+        -245
+        -174
+        -103
+        -32
+        39
+        110
+        181
+        252
+        323
+        394
+        465
+        536
+        -594
+        -523
+        -452
+        -381
+        -310
+        -239
+        -168
+        -97
+        -26
+        45
+        116
+        187
+        258
+        329
+        400
+        471
+        542
+        -588
+        -517
+        -446
+        -375
+        -304
+        -233
+        -162
+        -91
+        -20
+        51
+        122
+        193
+        264
+        335
+        406
+        477
+        548
+        -582
+        -511
+        -440
+        -369
+        -298
+        -227
+        -156
+        -85
+        -14
+        57
+        128
+        199
+        270
+        341
+        412
+        483
+        554
+        -576
+        -505
+        -434
+        -363
+        -292
+        -221
+        -150
+        -79
+        -8
+        63
+        134
+        205
+        276
+        347
+        418
+        489
+    ]
+    let peak = CachePadded[atomic(int64(0))]
+    let frames = CachePadded[atomic(int64(0))]
+    let ring = process(samples peak frames)
+    printl"frames {frames.value.load'acquire'}; peak {peak.value.load'acquire'}"
+    printl"ring checksum {checksum(ring)}"
+    printl"last 8 left: {[loop i in [0..8) sample_at(ring i).left]}"
+    printl"last 8 right: {[loop i in [0..8) sample_at(ring i).right]}"
+    let gate = mutex(1)
+    let held = @(gate.lock())
+    held += 1
+    printl"gate {gate_status(gate)}"
+}

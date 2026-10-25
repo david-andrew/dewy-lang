@@ -1,0 +1,153 @@
+# Tier 6 / 122 / milestone 56
+# Acceptance: A local-only telemetry accumulator can process its batch on the
+# caller, but moving that type into a spawned task is rejected by $send=false.
+Reading:type = [sequence:int value:int]
+LocalAccumulator:type = [
+    sum:int
+    high:int
+    last:int
+    $send = false
+]
+
+new_accumulator = ():>LocalAccumulator => LocalAccumulator[0 0 0]
+
+observe = (@acc:LocalAccumulator r:Reading):>void => {
+    acc.sum += r.value
+    if r.value >? acc.high acc.high = r.value
+    acc.last = r.sequence
+}
+
+scan = (@acc:LocalAccumulator readings:array<Reading>):>void => {
+    loop r in readings observe(@acc r)
+}
+
+remote_scan = (acc:LocalAccumulator readings:array<Reading>):>int => {
+    let copy = acc
+    scan(@copy readings)
+    copy.sum
+}
+
+classify = (r:Reading):>string => {
+    if r.value <? 20 return "low"
+    if r.value <? 80 return "normal"
+    "high"
+}
+
+local_report = (acc:LocalAccumulator readings:array<Reading>):>void => {
+    let low = 0
+    let normal = 0
+    let high = 0
+    loop r in readings {
+        let kind = classify(r)
+        if kind =? "low" low += 1
+        else if kind =? "normal" normal += 1
+        else high += 1
+    }
+    printl"local sum {acc.sum}, peak {acc.high}, last {acc.last}"
+    printl"buckets {low}/{normal}/{high}"
+}
+
+main = () => {
+    let readings:array<Reading> = [
+        Reading[1 0]
+        Reading[2 19]
+        Reading[3 38]
+        Reading[4 57]
+        Reading[5 76]
+        Reading[6 95]
+        Reading[7 13]
+        Reading[8 32]
+        Reading[9 51]
+        Reading[10 70]
+        Reading[11 89]
+        Reading[12 7]
+        Reading[13 26]
+        Reading[14 45]
+        Reading[15 64]
+        Reading[16 83]
+        Reading[17 1]
+        Reading[18 20]
+        Reading[19 39]
+        Reading[20 58]
+        Reading[21 77]
+        Reading[22 96]
+        Reading[23 14]
+        Reading[24 33]
+        Reading[25 52]
+        Reading[26 71]
+        Reading[27 90]
+        Reading[28 8]
+        Reading[29 27]
+        Reading[30 46]
+        Reading[31 65]
+        Reading[32 84]
+        Reading[33 2]
+        Reading[34 21]
+        Reading[35 40]
+        Reading[36 59]
+        Reading[37 78]
+        Reading[38 97]
+        Reading[39 15]
+        Reading[40 34]
+        Reading[41 53]
+        Reading[42 72]
+        Reading[43 91]
+        Reading[44 9]
+        Reading[45 28]
+        Reading[46 47]
+        Reading[47 66]
+        Reading[48 85]
+        Reading[49 3]
+        Reading[50 22]
+        Reading[51 41]
+        Reading[52 60]
+        Reading[53 79]
+        Reading[54 98]
+        Reading[55 16]
+        Reading[56 35]
+        Reading[57 54]
+        Reading[58 73]
+        Reading[59 92]
+        Reading[60 10]
+        Reading[61 29]
+        Reading[62 48]
+        Reading[63 67]
+        Reading[64 86]
+        Reading[65 4]
+        Reading[66 23]
+        Reading[67 42]
+        Reading[68 61]
+        Reading[69 80]
+        Reading[70 99]
+        Reading[71 17]
+        Reading[72 36]
+        Reading[73 55]
+        Reading[74 74]
+        Reading[75 93]
+        Reading[76 11]
+        Reading[77 30]
+        Reading[78 49]
+        Reading[79 68]
+        Reading[80 87]
+        Reading[81 5]
+        Reading[82 24]
+        Reading[83 43]
+        Reading[84 62]
+        Reading[85 81]
+        Reading[86 100]
+        Reading[87 18]
+        Reading[88 37]
+        Reading[89 56]
+        Reading[90 75]
+        Reading[91 94]
+        Reading[92 12]
+    ]
+    let local = new_accumulator()
+    scan(@local readings)
+    local_report(local readings)
+    concurrent {
+        # REJECT
+        let task = spawn remote_scan(local readings)
+    }
+    printl"remote sum {task or_throw}"
+}

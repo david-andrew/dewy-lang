@@ -1,0 +1,152 @@
+# Tier 6 / 119 / milestone 53
+# Acceptance: Decode little-endian 64-bit words from a network frame with a
+# proved read boundary, and apply the decided wrapping-byte conversion.
+Byte:type = uint8<overflow='wrap'>
+
+fold = (part:array<uint8>):>int => {
+    let word:int = 0
+    loop b in part word = word*256 + int(b)
+    word
+}
+
+words = (payload:array<uint8>):>array<uint64> => {
+    let out:array<uint64> = []
+    let i = 0
+    loop i + 8 <=? payload.length {
+        let w = payload.read<uint64>(i)
+        out.push(w)
+        i += 8
+    }
+    out
+}
+
+xor_all = (values:array<uint64>):>uint64<overflow='wrap'> => {
+    let state:uint64<overflow='wrap'> = 0
+    loop x in values state = state xor x
+    state
+}
+
+checksum8 = (payload:array<uint8>):>Byte => {
+    let total:int = 0
+    loop b in payload total += int(b)
+    Byte(total)
+}
+
+header = (payload:array<uint8>):>string => {
+    let prefix = [loop b in payload if b <? 32 b]
+    "{prefix}"
+}
+
+main = () => {
+    let raw:array<uint8> = [
+        17
+        148
+        23
+        154
+        29
+        160
+        35
+        166
+        41
+        172
+        47
+        178
+        53
+        184
+        59
+        190
+        65
+        196
+        71
+        202
+        77
+        208
+        83
+        214
+        89
+        220
+        95
+        226
+        101
+        232
+        107
+        238
+        113
+        244
+        119
+        250
+        125
+        0
+        131
+        6
+        137
+        12
+        143
+        18
+        149
+        24
+        155
+        30
+        161
+        36
+        167
+        42
+        173
+        48
+        179
+        54
+        185
+        60
+        191
+        66
+        197
+        72
+        203
+        78
+        209
+        84
+        215
+        90
+        221
+        96
+        227
+        102
+        233
+        108
+        239
+        114
+        245
+        120
+        251
+        126
+        1
+        132
+        7
+        138
+        13
+        144
+        19
+        150
+        25
+        156
+        31
+        162
+        37
+        168
+        43
+        174
+        49
+        180
+        55
+        186
+        61
+        192
+    ]
+    let decoded = words(raw)
+    let first = decoded.get(0) ?? 0
+    let last = decoded.get(decoded.length-1) ?? 0
+    printl"bytes {raw.length}, words {decoded.length}, checksum8 {checksum8(raw)}"
+    printl"first {first}; last {last}; xor {xor_all(decoded)}"
+    printl"prefix {header(raw)}"
+    printl"wrapped 300 to {Byte(300)}; wrapped -1 to {Byte(-1)}"
+}

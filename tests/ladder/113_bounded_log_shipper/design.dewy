@@ -1,0 +1,150 @@
+# Tier 6 / 113 / milestone 47
+# Acceptance: A bounded four-slot channel ships an ordered batch of service log events
+# from a producer task to a consumer, closes after the batch, and summarizes classes.
+Event:type = [seq:int level:string service:string bytes:int]
+Summary:type = [seen:int accepted:int dropped:int bytes:int last:int]
+
+make_summary = ():>Summary => Summary[0 0 0 0 0]
+
+valid = (e:Event):>bool =>
+    e.level in? ["info" "warn" "error"] and e.bytes >? 0 and e.service.length >? 0
+
+record = (@s:Summary e:Event @by_service:dict<string int>):>void => {
+    s.seen += 1
+    if not valid(e) {
+        s.dropped += 1
+        return
+    }
+    s.accepted += 1
+    s.bytes += e.bytes
+    s.last = e.seq
+    by_service[e.service] = (by_service.get(e.service) ?? 0) + 1
+}
+
+produce = (out:Channel<Event> batch:array<Event>):>void | Closed | Canceled => {
+    loop e in batch out.send(e) or_throw
+    out.close()
+}
+
+print_summary = (s:Summary by_service:dict<string int>):>void => {
+    printl"received {s.seen}, accepted {s.accepted}, dropped {s.dropped}"
+    printl"accepted bytes {s.bytes}; last accepted sequence {s.last}"
+    loop name in by_service.keys.sorted() {
+        printl"{name}: {by_service.get(name) ?? 0}"
+    }
+}
+
+main = () => {
+    let batch:array<Event> = [
+        Event[1 "info" "api" 80]
+        Event[2 "info" "billing" 117]
+        Event[3 "warn" "search" 154]
+        Event[4 "error" "billing" 191]
+        Event[5 "info" "search" 228]
+        Event[6 "info" "media" 265]
+        Event[7 "debug" "search" 302]
+        Event[8 "info" "media" 339]
+        Event[9 "warn" "auth" 376]
+        Event[10 "warn" "media" 92]
+        Event[11 "info" "auth" 129]
+        Event[12 "warn" "api" 166]
+        Event[13 "error" "auth" 203]
+        Event[14 "error" "api" 240]
+        Event[15 "info" "billing" 277]
+        Event[16 "debug" "api" 314]
+        Event[17 "info" "billing" 351]
+        Event[18 "info" "search" 388]
+        Event[19 "warn" "billing" 104]
+        Event[20 "info" "search" 141]
+        Event[21 "warn" "media" 178]
+        Event[22 "warn" "search" 215]
+        Event[23 "error" "media" 252]
+        Event[24 "info" "auth" 289]
+        Event[25 "debug" "media" 326]
+        Event[26 "debug" "auth" 363]
+        Event[27 "info" "api" 400]
+        Event[28 "warn" "auth" 116]
+        Event[29 "info" "api" 153]
+        Event[30 "info" "billing" 190]
+        Event[31 "warn" "api" 227]
+        Event[32 "error" "billing" 264]
+        Event[33 "info" "search" 301]
+        Event[34 "info" "billing" 338]
+        Event[35 "debug" "search" 375]
+        Event[36 "info" "media" 91]
+        Event[37 "warn" "search" 128]
+        Event[38 "warn" "media" 165]
+        Event[39 "info" "auth" 202]
+        Event[40 "warn" "media" 239]
+        Event[41 "error" "auth" 276]
+        Event[42 "error" "api" 313]
+        Event[43 "info" "auth" 350]
+        Event[44 "debug" "api" 387]
+        Event[45 "info" "billing" 103]
+        Event[46 "info" "api" 140]
+        Event[47 "warn" "billing" 177]
+        Event[48 "info" "search" 214]
+        Event[49 "warn" "billing" 251]
+        Event[50 "warn" "search" 288]
+        Event[51 "error" "media" 325]
+        Event[52 "info" "search" 362]
+        Event[53 "debug" "media" 399]
+        Event[54 "debug" "auth" 115]
+        Event[55 "info" "media" 152]
+        Event[56 "warn" "auth" 189]
+        Event[57 "info" "api" 226]
+        Event[58 "info" "auth" 263]
+        Event[59 "warn" "api" 300]
+        Event[60 "error" "billing" 337]
+        Event[61 "info" "api" 374]
+        Event[62 "info" "billing" 90]
+        Event[63 "debug" "search" 127]
+        Event[64 "info" "billing" 164]
+        Event[65 "warn" "search" 201]
+        Event[66 "warn" "media" 238]
+        Event[67 "info" "search" 275]
+        Event[68 "warn" "media" 312]
+        Event[69 "error" "auth" 349]
+        Event[70 "error" "media" 386]
+        Event[71 "info" "auth" 102]
+        Event[72 "debug" "api" 139]
+        Event[73 "info" "auth" 176]
+        Event[74 "info" "api" 213]
+        Event[75 "warn" "billing" 250]
+        Event[76 "info" "api" 287]
+        Event[77 "warn" "billing" 324]
+        Event[78 "warn" "search" 361]
+        Event[79 "error" "billing" 398]
+        Event[80 "info" "search" 114]
+        Event[81 "debug" "media" 151]
+        Event[82 "debug" "search" 188]
+        Event[83 "info" "media" 225]
+        Event[84 "warn" "auth" 262]
+        Event[85 "info" "media" 299]
+        Event[86 "info" "auth" 336]
+        Event[87 "warn" "api" 373]
+        Event[88 "error" "auth" 89]
+        Event[89 "info" "api" 126]
+        Event[90 "info" "billing" 163]
+        Event[91 "debug" "api" 200]
+        Event[92 "info" "billing" 237]
+        Event[93 "warn" "search" 274]
+        Event[94 "warn" "billing" 311]
+        Event[95 "info" "search" 348]
+        Event[96 "warn" "media" 385]
+    ]
+    let wire = channel<Event>(4)
+    let summary = make_summary()
+    let by_service:dict<string int> = []
+    concurrent {
+        spawn produce(wire batch)
+        loop true {
+            match wire.receive() {
+                e:Event => record(@summary e @by_service)
+                <Closed> => break
+                <Canceled> => break
+            }
+        }
+    }
+    print_summary(summary by_service)
+}

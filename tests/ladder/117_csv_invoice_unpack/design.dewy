@@ -1,0 +1,154 @@
+# Tier 6 / 117 / milestone 51
+# Acceptance: Parse line-oriented invoice CSV, unpack nested fields and a rest
+# segment, swap columns in a reconciliation step, and calculate customer totals.
+Order:type = [buyer:string item:string count:int cents:int]
+Ledger:type = [rows:int rejected:int gross:int by_buyer:dict<string int>]
+BuyerTotal:type = [name:string amount:int]
+
+new_ledger = ():>Ledger => Ledger[0 0 0 []]
+
+parse = (line:string):>Order | none => {
+    let cells = line.split(",")
+    if cells.length not=? 4 return none
+    let [buyer item amount price] = cells
+    let count = to_int(amount)
+    let cents = to_int(price)
+    if count is? error or cents is? error return none
+    if buyer.length =? 0 or item.length =? 0 return none
+    if count <=? 0 or cents <? 0 return none
+    Order[buyer item count cents]
+}
+
+record = (@ledger:Ledger order:Order):>void => {
+    let [buyer item count cents] = order
+    let amount = count*cents
+    ledger.rows += 1
+    ledger.gross += amount
+    ledger.by_buyer[buyer] = (ledger.by_buyer.get(buyer) ?? 0) + amount
+}
+
+receive = (@ledger:Ledger line:string):>void => {
+    let order = parse(line)
+    if order is? none { ledger.rejected += 1; return }
+    record(@ledger order)
+}
+
+format_cents = (cents:int):>string => {
+    let suffix = cents % 100
+    let pad = if suffix <? 10 "0" else ""
+    "${cents // 100}.{pad}{suffix}"
+}
+
+show_top = (ledger:Ledger):>void => {
+    let pairs = [loop [name amount] in ledger.by_buyer BuyerTotal[name amount]]
+    let ranked = pairs.sorted(key=(p:BuyerTotal) => -p.amount)
+    loop pair in ranked {
+        let [name amount] = pair
+        printl"{name}: {format_cents(amount)}"
+    }
+}
+
+main = () => {
+    let lines:array<string> = [
+        "Mara,pen,1,9"
+        "Niko,folder,2,22"
+        "Ari,ink,3,35"
+        "Bea,tape,4,48"
+        "Chen,binder,5,20"
+        "Dara,paper,1,33"
+        "Eli,pen,2,46"
+        "Mara,folder,3,18"
+        "Niko,ink,4,31"
+        "Ari,tape,5,44"
+        "Bea,binder,1,16"
+        "Chen,paper,2,29"
+        "Dara,pen,3,42"
+        "Eli,folder,4,14"
+        "Mara,ink,5,27"
+        "Niko,tape,1,40"
+        "Ari,binder,2,12"
+        "Bea,paper,3,25"
+        "Chen,pen,4,38"
+        "Dara,folder,5,10"
+        "Eli,ink,1,23"
+        "Mara,tape,2,36"
+        "Niko,binder,3,49"
+        "Ari,paper,4,21"
+        "Bea,pen,5,34"
+        "Chen,folder,1,47"
+        "Dara,ink,2,19"
+        "Eli,tape,3,32"
+        "Mara,binder,4,45"
+        "Niko,paper,5,17"
+        "Ari,pen,1,30"
+        "Bea,folder,2,43"
+        "Chen,ink,3,15"
+        "Dara,tape,4,28"
+        "Eli,binder,5,41"
+        "Mara,paper,1,13"
+        "Niko,pen,2,26"
+        "Ari,folder,3,39"
+        "Bea,ink,4,11"
+        "Chen,tape,5,24"
+        "Dara,binder,1,37"
+        "Eli,paper,2,9"
+        "Mara,pen,3,22"
+        "Niko,folder,4,35"
+        "Ari,ink,5,48"
+        "Bea,tape,1,20"
+        "Chen,binder,2,33"
+        "Dara,paper,3,46"
+        "Eli,pen,4,18"
+        "Mara,folder,5,31"
+        "Niko,ink,1,44"
+        "Ari,tape,2,16"
+        "Bea,binder,3,29"
+        "Chen,paper,4,42"
+        "Dara,pen,5,14"
+        "Eli,folder,1,27"
+        "Mara,ink,2,40"
+        "Niko,tape,3,12"
+        "Ari,binder,4,25"
+        "Bea,paper,5,38"
+        "Chen,pen,1,10"
+        "Dara,folder,2,23"
+        "Eli,ink,3,36"
+        "Mara,tape,4,49"
+        "Niko,binder,5,21"
+        "Ari,paper,1,34"
+        "Bea,pen,2,47"
+        "Chen,folder,3,19"
+        "Dara,ink,4,32"
+        "Eli,tape,5,45"
+        "Mara,binder,1,17"
+        "Niko,paper,2,30"
+        "Ari,pen,3,43"
+        "Bea,folder,4,15"
+        "Chen,ink,5,28"
+        "Dara,tape,1,41"
+        "Eli,binder,2,13"
+        "Mara,paper,3,26"
+        "Niko,pen,4,39"
+        "Ari,folder,5,11"
+        "Bea,ink,1,24"
+        "Chen,tape,2,37"
+        "Dara,binder,3,9"
+        "Eli,paper,4,22"
+        "Mara,pen,5,35"
+        "Niko,folder,1,48"
+        "Ari,ink,2,20"
+        "Bea,tape,3,33"
+        "Chen,binder,4,46"
+    ]
+    let ledger = new_ledger()
+    loop line in lines receive(@ledger line)
+    # Reconcile a four-column header with a nested first/last field and rest.
+    let columns = ["buyer" "item" "quantity" "price" "source" "batch"]
+    let [first second ...middle last] = columns
+    let [[nested_a nested_b] nested_tail] = [["buyer" "item"] ["quantity" "price"]]
+    [first second] = [second first]
+    printl"columns {first}/{second}, extras {middle.length}, tail {last}"
+    printl"nested {nested_a}/{nested_b}, tail {nested_tail.length}"
+    printl"rows {ledger.rows}, rejected {ledger.rejected}, gross {format_cents(ledger.gross)}"
+    show_top(ledger)
+}

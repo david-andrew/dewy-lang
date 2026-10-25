@@ -1,0 +1,152 @@
+# Tier 6 / 120 / milestone 54
+# Acceptance: Book a small transfer ledger under explicit allocation failure;
+# acquire an arena, perform scoped allocations, and surface OutOfMemory as value.
+$explicit_allocation_failure
+
+Entry:type = [account:string delta:int]
+Result:type = [accepted:int rejected:int total:int]
+
+new_result = ():>Result => Result[0 0 0]
+
+validate = (entry:Entry):>bool => entry.account.length >? 0 and
+    entry.delta >=? -50 and entry.delta <=? 50
+
+apply = (@balances:dict<string int> @result:Result entry:Entry):>void | OutOfMemory => {
+    if not (validate(entry) or_throw) {
+        result.rejected += 1
+        return
+    }
+    balances[entry.account] = (balances.get(entry.account) ?? 0) + entry.delta
+    result.accepted += 1
+    result.total += entry.delta
+}
+
+book = (entries:array<Entry>):>Result | OutOfMemory => {
+    let arena = arena(65536) or_throw
+    let scratch_count = $allocator(@arena) {
+        let scratch = [loop e in entries e.delta]
+        scratch.length
+    }
+    let balances:dict<string int> = []
+    let result = Result[0 0 0]
+    loop e in entries apply(@balances @result e) or_throw
+    printl"balances:"
+    loop name in balances.keys.sorted() printl"  {name}: {balances.get(name) ?? 0}"
+    result
+}
+
+main = ():>void | OutOfMemory => {
+    let entries:array<Entry> = [
+        Entry["north" -40]
+        Entry["west" -17]
+        Entry["south" 6]
+        Entry["reserve" 29]
+        Entry["east" 52]
+        Entry["north" -22]
+        Entry["west" 1]
+        Entry["south" 24]
+        Entry["reserve" 47]
+        Entry["east" -27]
+        Entry["north" -4]
+        Entry["west" 19]
+        Entry["south" 42]
+        Entry["reserve" -32]
+        Entry["east" -9]
+        Entry["north" 14]
+        Entry["west" 37]
+        Entry["south" -37]
+        Entry["reserve" -14]
+        Entry["east" 9]
+        Entry["north" 32]
+        Entry["west" 55]
+        Entry["south" -19]
+        Entry["reserve" 4]
+        Entry["east" 27]
+        Entry["north" 50]
+        Entry["west" -24]
+        Entry["south" -1]
+        Entry["reserve" 22]
+        Entry["east" 45]
+        Entry["north" -29]
+        Entry["west" -6]
+        Entry["south" 17]
+        Entry["reserve" 40]
+        Entry["east" -34]
+        Entry["north" -11]
+        Entry["west" 12]
+        Entry["south" 35]
+        Entry["reserve" -39]
+        Entry["east" -16]
+        Entry["north" 7]
+        Entry["west" 30]
+        Entry["south" 53]
+        Entry["reserve" -21]
+        Entry["east" 2]
+        Entry["north" 25]
+        Entry["west" 48]
+        Entry["south" -26]
+        Entry["reserve" -3]
+        Entry["east" 20]
+        Entry["north" 43]
+        Entry["west" -31]
+        Entry["south" -8]
+        Entry["reserve" 15]
+        Entry["east" 38]
+        Entry["north" -36]
+        Entry["west" -13]
+        Entry["south" 10]
+        Entry["reserve" 33]
+        Entry["east" 56]
+        Entry["north" -18]
+        Entry["west" 5]
+        Entry["south" 28]
+        Entry["reserve" 51]
+        Entry["east" -23]
+        Entry["north" 0]
+        Entry["west" 23]
+        Entry["south" 46]
+        Entry["reserve" -28]
+        Entry["east" -5]
+        Entry["north" 18]
+        Entry["west" 41]
+        Entry["south" -33]
+        Entry["reserve" -10]
+        Entry["east" 13]
+        Entry["north" 36]
+        Entry["west" -38]
+        Entry["south" -15]
+        Entry["reserve" 8]
+        Entry["east" 31]
+        Entry["north" 54]
+        Entry["west" -20]
+        Entry["south" 3]
+        Entry["reserve" 26]
+        Entry["east" 49]
+        Entry["north" -25]
+        Entry["west" -2]
+        Entry["south" 21]
+        Entry["reserve" 44]
+        Entry["east" -30]
+        Entry["north" -7]
+        Entry["west" 16]
+        Entry["south" 39]
+        Entry["reserve" -35]
+        Entry["east" -12]
+        Entry["north" 11]
+        Entry["west" 34]
+        Entry["south" -40]
+        Entry["reserve" -17]
+        Entry["east" 6]
+        Entry["north" 29]
+        Entry["west" 52]
+        Entry["south" -22]
+        Entry["reserve" 1]
+        Entry["east" 24]
+        Entry["north" 47]
+        Entry["west" -27]
+    ]
+    match book(entries) {
+        r:Result => printl"accepted {r.accepted}, rejected {r.rejected}, net {r.total}"
+        <OutOfMemory> => printl"allocation refused"
+    }
+}

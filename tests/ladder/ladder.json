@@ -45,7 +45,17 @@
   "43": "Locks and channels without deadlocks",
   "44": "Error kinds and fallible patterns",
   "45": "Build mode and target facts",
-  "46": "Bulletproof programs"
+  "46": "Bulletproof programs",
+  "47": "Bounded log shipment",
+  "48": "Atomic audio meter",
+  "49": "Foreign libc binding",
+  "50": "Finite float analytics",
+  "51": "Invoice CSV unpacking",
+  "52": "Live route worklists",
+  "53": "Binary frame decoding",
+  "54": "Explicit arena accounting",
+  "55": "Soft catalog contracts",
+  "56": "Non-Send telemetry rejection"
  },
  "tiers": {
   "1\u20132": [
@@ -63,6 +73,10 @@
   "5": [
    37,
    46
+  ],
+  "6": [
+   47,
+   56
   ]
  },
  "programs": {
@@ -501,6 +515,53 @@
   "112_bulletproof_sensor": {
    "milestone": 46,
    "note": "Sensor-log summarizer under $bulletproof: fixed arrays, refined Reading and Log fields, rows on every function, OutOfMemory handled, every index, division, narrowing and loop bound proven, bad lines as values."
+  },
+  "113_bounded_log_shipper": {
+   "milestone": 47,
+   "note": "A producer task ships 96 service events through a bounded four-slot channel; the consumer drains through close and tallies accepted payloads."
+  },
+  "114_atomic_audio_meter": {
+   "milestone": 48,
+   "note": "An 84-frame audio mixer writes an eight-frame ring and publishes peak and count in CachePadded<Atomic<int64>> handles; held on question 23 for CachePadded.value.",
+   "open": 23
+  },
+  "115_libc_lengths": {
+   "milestone": 49,
+   "note": "A libc strlen binding with ptr<uint8> checks 104 NUL-terminated buffers; held on question 25(c) for array .ptr.",
+   "open": 25
+  },
+  "116_float_policy_lab": {
+   "milestone": 50,
+   "note": "A finite-float guarded ratio and fast-math transform summarize 91 sensor readings under default no-traps policy."
+  },
+  "117_csv_invoice_unpack": {
+   "milestone": 51,
+   "note": "An invoice CSV batch uses record unpacking, nested/rest unpacking and a swap while reconciling 89 orders."
+  },
+  "118_live_route_worklist": {
+   "milestone": 52,
+   "note": "A live worklist traverses 85 directed route edges and a bound tree iterator skips a closed subtree."
+  },
+  "119_binary_frame_decoder": {
+   "milestone": 53,
+   "note": "A decoder reads little-endian uint64 words at proven offsets and reduces 102 bytes with wrapping uint8 conversion."
+  },
+  "120_arena_budget_ledger": {
+   "milestone": 54,
+   "note": "A ledger acquires an Arena under explicit allocation failure and books 107 entries with OutOfMemory handled as a value."
+  },
+  "121_catalog_warnings": {
+   "milestone": 55,
+   "note": "A catalog quote exercises $warn_if as a soft quantity contract and members(Tier) as an array value."
+  },
+  "122_non_send_telemetry": {
+   "milestone": 56,
+   "note": "A local-only telemetry record processes 92 readings locally and must be rejected when moved into spawn.",
+   "expect": {
+    "kind": "compile-error",
+    "diagnostic": "[Ss]end",
+    "line": 150
+   }
   }
  },
  "design_passing": [
@@ -527,7 +588,15 @@
   "110_config_loader",
   "111_build_aware",
   "112_bulletproof_sensor",
+  "113_bounded_log_shipper",
+  "116_float_policy_lab",
+  "117_csv_invoice_unpack",
+  "118_live_route_worklist",
+  "119_binary_frame_decoder",
   "11_units_physics",
+  "120_arena_budget_ledger",
+  "121_catalog_warnings",
+  "122_non_send_telemetry",
   "12_linear_regression",
   "13_logistic_regression",
   "14_tokenizer",

@@ -1,0 +1,151 @@
+# Tier 6 / 118 / milestone 52
+# Acceptance: Live iteration grows a graph search worklist while a bound tree
+# walker skips closed subtrees. The graph traversal uses distinct seen state.
+from tree import Tree
+Edge:type = [source:int target:int mode:string]
+Visit:type = [node:int depth:int]
+
+adjacent = (edges:array<Edge> source:int):>array<int> =>
+    [loop edge in edges if edge.source =? source edge.target]
+
+reachable = (edges:array<Edge> start:int):>array<Visit> => {
+    let seen:dict<int bool> = []
+    let work:array<Visit> = [Visit[start 0]]
+    seen[start] = true
+    let out:array<Visit> = []
+    loop next in @work {
+        out.push(next)
+        loop target in adjacent(edges next.node) {
+            if seen.get(target) ?? false continue
+            seen[target] = true
+            work.push(Visit[target next.depth+1])
+        }
+    }
+    out
+}
+
+max_depth = (visits:array<Visit>):>int => {
+    let result = 0
+    loop v in visits if v.depth >? result result = v.depth
+    result
+}
+
+mode_counts = (edges:array<Edge>):>dict<string int> => {
+    let counts:dict<string int> = []
+    loop e in edges counts[e.mode] = (counts.get(e.mode) ?? 0)+1
+    counts
+}
+
+show_tree = ():>void => {
+    let tree:Tree<string> = []
+    let root = tree.add("metro")
+    let open = tree.add("open" root)
+    tree.add("museum" open);
+    tree.add("station" open);
+    let closed = tree.add("closed" root)
+    tree.add("maintenance" closed);
+    tree.add("depot" closed);
+    let walk = tree.walk
+    let visible:array<string> = []
+    loop name in @walk {
+        if name =? "closed" walk.skip_children
+        visible.push(name)
+    }
+    printl"visible tree {visible}"
+}
+
+main = () => {
+    let edges:array<Edge> = [
+        Edge[0 1 "walk"]
+        Edge[1 2 "bus"]
+        Edge[2 3 "rail"]
+        Edge[3 4 "walk"]
+        Edge[4 5 "bus"]
+        Edge[5 6 "rail"]
+        Edge[6 7 "walk"]
+        Edge[7 8 "bus"]
+        Edge[8 9 "rail"]
+        Edge[9 10 "walk"]
+        Edge[10 11 "bus"]
+        Edge[11 12 "rail"]
+        Edge[12 13 "walk"]
+        Edge[13 14 "bus"]
+        Edge[14 15 "rail"]
+        Edge[15 16 "walk"]
+        Edge[16 17 "bus"]
+        Edge[17 18 "rail"]
+        Edge[18 19 "walk"]
+        Edge[19 20 "bus"]
+        Edge[20 21 "rail"]
+        Edge[21 22 "walk"]
+        Edge[22 23 "bus"]
+        Edge[23 20 "rail"]
+        Edge[0 3 "walk"]
+        Edge[1 10 "bus"]
+        Edge[2 17 "rail"]
+        Edge[3 0 "walk"]
+        Edge[4 7 "bus"]
+        Edge[5 14 "rail"]
+        Edge[6 21 "walk"]
+        Edge[7 4 "bus"]
+        Edge[8 11 "rail"]
+        Edge[9 18 "walk"]
+        Edge[10 1 "bus"]
+        Edge[11 8 "rail"]
+        Edge[12 15 "walk"]
+        Edge[13 22 "bus"]
+        Edge[14 5 "rail"]
+        Edge[15 12 "walk"]
+        Edge[16 19 "bus"]
+        Edge[17 2 "rail"]
+        Edge[18 9 "walk"]
+        Edge[19 16 "bus"]
+        Edge[20 23 "rail"]
+        Edge[21 6 "walk"]
+        Edge[22 13 "bus"]
+        Edge[23 20 "rail"]
+        Edge[0 3 "walk"]
+        Edge[1 10 "bus"]
+        Edge[2 17 "rail"]
+        Edge[3 0 "walk"]
+        Edge[4 7 "bus"]
+        Edge[5 14 "rail"]
+        Edge[6 21 "walk"]
+        Edge[7 4 "bus"]
+        Edge[8 11 "rail"]
+        Edge[9 18 "walk"]
+        Edge[10 1 "bus"]
+        Edge[11 8 "rail"]
+        Edge[12 15 "walk"]
+        Edge[13 22 "bus"]
+        Edge[14 5 "rail"]
+        Edge[15 12 "walk"]
+        Edge[16 19 "bus"]
+        Edge[17 2 "rail"]
+        Edge[18 9 "walk"]
+        Edge[19 16 "bus"]
+        Edge[20 23 "rail"]
+        Edge[21 6 "walk"]
+        Edge[22 13 "bus"]
+        Edge[23 20 "rail"]
+        Edge[0 3 "walk"]
+        Edge[1 10 "bus"]
+        Edge[2 17 "rail"]
+        Edge[3 0 "walk"]
+        Edge[4 7 "bus"]
+        Edge[5 14 "rail"]
+        Edge[6 21 "walk"]
+        Edge[7 4 "bus"]
+        Edge[8 11 "rail"]
+        Edge[9 18 "walk"]
+        Edge[10 1 "bus"]
+        Edge[11 8 "rail"]
+        Edge[12 15 "walk"]
+    ]
+    let visits = reachable(edges 0)
+    let counts = mode_counts(edges)
+    printl"edges {edges.length}; reached {visits.length}; depth {max_depth(visits)}"
+    printl"walk {counts.get("walk") ?? 0}, bus {counts.get("bus") ?? 0}, rail {counts.get("rail") ?? 0}"
+    printl"order {[loop v in visits v.node]}"
+    show_tree()
+}

@@ -1,0 +1,151 @@
+# Tier 6 / 115 / milestone 49
+# Acceptance: Pass NUL-terminated byte buffers to libc strlen through ptr<uint8>,
+# compare the foreign lengths with Dewy lengths, and classify a realistic batch.
+# The array .ptr spelling is provisional: question 25(c).
+strlen = (s:ptr<uint8>):>uint64 => $extern
+
+CString:type = [storage:array<uint8> length:uint64]
+
+prepare = (s:string):>CString => {
+    let raw = bytes(s)
+    raw.push(0)
+    CString[raw uint64(s.length)]
+}
+
+foreign_length = (s:CString):>uint64 => $unsafe strlen(s.storage.ptr)
+
+is_ascii = (s:string):>bool => {
+    loop b in bytes(s) if b >? 128 return false
+    true
+}
+
+Bucket:type = [short:int64 medium:int64 long:int64 mismatches:int64]
+new_bucket = ():>Bucket => Bucket[0 0 0 0]
+
+record = (@b:Bucket s:string):>void => {
+    let data = prepare(s)
+    let observed = foreign_length(data)
+    if observed not=? data.length b.mismatches += 1
+    if observed <? 8 b.short += 1
+    else if observed <? 12 b.medium += 1
+    else b.long += 1
+}
+
+main = () => {
+    let names:array<string> = [
+        "alpha-000"
+        "foxtrot-001"
+        "kilo-002"
+        "delta-003"
+        "india-004"
+        "bravo-005"
+        "golf-006"
+        "lima-007"
+        "echo-008"
+        "juliet-009"
+        "charlie-010"
+        "hotel-011"
+        "alpha-012"
+        "foxtrot-013"
+        "kilo-014"
+        "delta-015"
+        "india-016"
+        "bravo-017"
+        "golf-018"
+        "lima-019"
+        "echo-020"
+        "juliet-021"
+        "charlie-022"
+        "hotel-023"
+        "alpha-024"
+        "foxtrot-025"
+        "kilo-026"
+        "delta-027"
+        "india-028"
+        "bravo-029"
+        "golf-030"
+        "lima-031"
+        "echo-032"
+        "juliet-033"
+        "charlie-034"
+        "hotel-035"
+        "alpha-036"
+        "foxtrot-037"
+        "kilo-038"
+        "delta-039"
+        "india-040"
+        "bravo-041"
+        "golf-042"
+        "lima-043"
+        "echo-044"
+        "juliet-045"
+        "charlie-046"
+        "hotel-047"
+        "alpha-048"
+        "foxtrot-049"
+        "kilo-050"
+        "delta-051"
+        "india-052"
+        "bravo-053"
+        "golf-054"
+        "lima-055"
+        "echo-056"
+        "juliet-057"
+        "charlie-058"
+        "hotel-059"
+        "alpha-060"
+        "foxtrot-061"
+        "kilo-062"
+        "delta-063"
+        "india-064"
+        "bravo-065"
+        "golf-066"
+        "lima-067"
+        "echo-068"
+        "juliet-069"
+        "charlie-070"
+        "hotel-071"
+        "alpha-072"
+        "foxtrot-073"
+        "kilo-074"
+        "delta-075"
+        "india-076"
+        "bravo-077"
+        "golf-078"
+        "lima-079"
+        "echo-080"
+        "juliet-081"
+        "charlie-082"
+        "hotel-083"
+        "alpha-084"
+        "foxtrot-085"
+        "kilo-086"
+        "delta-087"
+        "india-088"
+        "bravo-089"
+        "golf-090"
+        "lima-091"
+        "echo-092"
+        "juliet-093"
+        "charlie-094"
+        "hotel-095"
+        "alpha-096"
+        "foxtrot-097"
+        "kilo-098"
+        "delta-099"
+        "india-100"
+        "bravo-101"
+        "golf-102"
+        "lima-103"
+    ]
+    let bucket = new_bucket()
+    let ascii = 0
+    loop name in names {
+        if is_ascii(name) ascii += 1
+        record(@bucket name)
+    }
+    printl"messages {names.length}; ascii {ascii}; length mismatches {bucket.mismatches}"
+    printl"short {bucket.short}; medium {bucket.medium}; long {bucket.long}"
+    printl"first {names.get(0) ?? ""}: {foreign_length(prepare(names.get(0) ?? ""))}"
+    printl"last {names.get(names.length-1) ?? ""}: {foreign_length(prepare(names.get(names.length-1) ?? ""))}"
+}

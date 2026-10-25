@@ -1,0 +1,158 @@
+# Tier 6 / 116 / milestone 50
+# Acceptance: A controlled finite-float analytics kernel compares precise and
+# fast scopes, rejects unsafe inputs, and summarizes a bounded sensor batch.
+Reading:type = [signal:float64 baseline:float64]
+Score:type = [usable:int64 rejected:int64 positive:int64 total:float64]
+
+new_score = ():>Score => Score[0 0 0 0.0]
+
+safe_ratio = (signal:float64 baseline:float64):>float64 => {
+    $finite_floats
+    $no_nan
+    if signal not=? signal return 0.0
+    if baseline not=? baseline return 0.0
+    if baseline <? 0.1 or baseline >? 100.0 return 0.0
+    if signal <? -100.0 or signal >? 100.0 return 0.0
+    signal / baseline
+}
+
+$fast_math
+fast_transform = (x:float64):>float64 => (x*0.5 + x*0.25) + x*0.125
+
+normal_transform = (x:float64):>float64 => x*0.5 + (x*0.25 + x*0.125)
+
+accept = (r:Reading):>bool =>
+    r.signal =? r.signal and r.baseline =? r.baseline and
+    -10.0 <=? r.signal and r.signal <=? 10.0 and
+    0.1 <=? r.baseline and r.baseline <=? 10.0
+
+record = (@s:Score r:Reading):>void => {
+    if not accept(r) {
+        s.rejected += 1
+        return
+    }
+    let signal = r.signal
+    let baseline = r.baseline
+    if signal not=? signal or baseline not=? baseline return
+    let ratio = safe_ratio(signal baseline)
+    s.usable += 1
+    if ratio >? 0.0 s.positive += 1
+    s.total += ratio
+}
+
+band = (x:float64):>string => {
+    if x <? -2.0 return "very low"
+    if x <? -0.5 return "low"
+    if x <? 0.5 return "neutral"
+    if x <? 2.0 return "high"
+    "very high"
+}
+
+main = () => {
+    let samples:array<Reading> = [
+        Reading[-1.5 0.2]
+        Reading[0.2 0.8]
+        Reading[-1.2 1.4]
+        Reading[0.5 2.0]
+        Reading[-0.9 0.3]
+        Reading[0.8 0.9]
+        Reading[-0.6 1.5]
+        Reading[1.1 2.1]
+        Reading[-0.3 0.4]
+        Reading[1.4 1.0]
+        Reading[0.0 1.6]
+        Reading[-1.4 2.2]
+        Reading[0.3 0.5]
+        Reading[-1.1 1.1]
+        Reading[0.6 1.7]
+        Reading[-0.8 2.3]
+        Reading[0.9 0.6]
+        Reading[-0.5 1.2]
+        Reading[1.2 1.8]
+        Reading[-0.2 2.4]
+        Reading[1.5 0.7]
+        Reading[0.1 1.3]
+        Reading[-1.3 1.9]
+        Reading[0.4 0.2]
+        Reading[-1.0 0.8]
+        Reading[0.7 1.4]
+        Reading[-0.7 2.0]
+        Reading[1.0 0.3]
+        Reading[-0.4 0.9]
+        Reading[1.3 1.5]
+        Reading[-0.1 2.1]
+        Reading[-1.5 0.4]
+        Reading[0.2 1.0]
+        Reading[-1.2 1.6]
+        Reading[0.5 2.2]
+        Reading[-0.9 0.5]
+        Reading[0.8 1.1]
+        Reading[-0.6 1.7]
+        Reading[1.1 2.3]
+        Reading[-0.3 0.6]
+        Reading[1.4 1.2]
+        Reading[0.0 1.8]
+        Reading[-1.4 2.4]
+        Reading[0.3 0.7]
+        Reading[-1.1 1.3]
+        Reading[0.6 1.9]
+        Reading[-0.8 0.2]
+        Reading[0.9 0.8]
+        Reading[-0.5 1.4]
+        Reading[1.2 2.0]
+        Reading[-0.2 0.3]
+        Reading[1.5 0.9]
+        Reading[0.1 1.5]
+        Reading[-1.3 2.1]
+        Reading[0.4 0.4]
+        Reading[-1.0 1.0]
+        Reading[0.7 1.6]
+        Reading[-0.7 2.2]
+        Reading[1.0 0.5]
+        Reading[-0.4 1.1]
+        Reading[1.3 1.7]
+        Reading[-0.1 2.3]
+        Reading[-1.5 0.6]
+        Reading[0.2 1.2]
+        Reading[-1.2 1.8]
+        Reading[0.5 2.4]
+        Reading[-0.9 0.7]
+        Reading[0.8 1.3]
+        Reading[-0.6 1.9]
+        Reading[1.1 0.2]
+        Reading[-0.3 0.8]
+        Reading[1.4 1.4]
+        Reading[0.0 2.0]
+        Reading[-1.4 0.3]
+        Reading[0.3 0.9]
+        Reading[-1.1 1.5]
+        Reading[0.6 2.1]
+        Reading[-0.8 0.4]
+        Reading[0.9 1.0]
+        Reading[-0.5 1.6]
+        Reading[1.2 2.2]
+        Reading[-0.2 0.5]
+        Reading[1.5 1.1]
+        Reading[0.1 1.7]
+        Reading[-1.3 2.3]
+        Reading[0.4 0.6]
+        Reading[-1.0 1.2]
+        Reading[0.7 1.8]
+        Reading[-0.7 2.4]
+        Reading[1.0 0.7]
+        Reading[-0.4 1.3]
+    ]
+    let score = new_score()
+    loop r in samples record(@score r)
+    printl"samples {samples.length}, usable {score.usable}, rejected {score.rejected}"
+    printl"positive {score.positive}, sum {format(score.total ".3f")}"
+    loop i in [0..5) {
+        let r = samples.get(i) ?? Reading[0.0 1.0]
+        let signal = r.signal
+        let baseline = r.baseline
+        if signal not=? signal or baseline not=? baseline continue
+        let ratio = safe_ratio(signal baseline)
+        printl"{i}: {band(ratio)} {format(ratio ".3f")}"
+    }
+    printl"transform {format(fast_transform(2.0) ".3f")} {format(normal_transform(2.0) ".3f")}"
+}

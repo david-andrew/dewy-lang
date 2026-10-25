@@ -1,0 +1,152 @@
+# Tier 6 / 121 / milestone 55
+# Acceptance: A catalog quoting service carries a soft quantity precondition
+# and uses members(Tier) as a value to enumerate its allowed service grades.
+Tier:type = 'bronze' | 'silver' | 'gold'
+Item:type = [sku:string quantity:int tier:Tier]
+Quote:type = [units:int bronze:int silver:int gold:int total:int]
+
+new_quote = ():>Quote => Quote[0 0 0 0 0]
+
+$warn_if quantity >? 100 "check unusually large order"
+line_price = (quantity:int tier:Tier):>int => {
+    let cents = if tier =? 'bronze' 100
+        else if tier =? 'silver' 150 else 225
+    quantity*cents
+}
+
+add = (@q:Quote item:Item):>void => {
+    q.units += item.quantity
+    let cents = line_price(item.quantity item.tier)
+    q.total += cents
+    if item.tier =? 'bronze' q.bronze += cents
+    else if item.tier =? 'silver' q.silver += cents
+    else q.gold += cents
+}
+
+show_grades = ():>void => {
+    let all:array<Tier> = members(Tier)
+    printl"grades {all.length}: {all.get(0) ?? 'bronze'}, {all.get(1) ?? 'bronze'}, {all.get(2) ?? 'bronze'}"
+}
+
+show = (q:Quote):>void => {
+    printl"units {q.units}; total cents {q.total}"
+    printl"bronze {q.bronze}; silver {q.silver}; gold {q.gold}"
+}
+
+main = () => {
+    let catalog:array<Item> = [
+        Item["sku-000" 1 "bronze"]
+        Item["sku-001" 2 "silver"]
+        Item["sku-002" 3 "gold"]
+        Item["sku-003" 4 "bronze"]
+        Item["sku-004" 5 "silver"]
+        Item["sku-005" 6 "gold"]
+        Item["sku-006" 7 "bronze"]
+        Item["sku-007" 1 "silver"]
+        Item["sku-008" 2 "gold"]
+        Item["sku-009" 3 "bronze"]
+        Item["sku-010" 4 "silver"]
+        Item["sku-011" 5 "gold"]
+        Item["sku-012" 6 "bronze"]
+        Item["sku-013" 7 "silver"]
+        Item["sku-014" 1 "gold"]
+        Item["sku-015" 2 "bronze"]
+        Item["sku-016" 3 "silver"]
+        Item["sku-017" 4 "gold"]
+        Item["sku-018" 5 "bronze"]
+        Item["sku-019" 6 "silver"]
+        Item["sku-020" 7 "gold"]
+        Item["sku-021" 1 "bronze"]
+        Item["sku-022" 2 "silver"]
+        Item["sku-023" 3 "gold"]
+        Item["sku-024" 4 "bronze"]
+        Item["sku-025" 5 "silver"]
+        Item["sku-026" 6 "gold"]
+        Item["sku-027" 7 "bronze"]
+        Item["sku-028" 1 "silver"]
+        Item["sku-029" 2 "gold"]
+        Item["sku-030" 3 "bronze"]
+        Item["sku-031" 4 "silver"]
+        Item["sku-032" 5 "gold"]
+        Item["sku-033" 6 "bronze"]
+        Item["sku-034" 7 "silver"]
+        Item["sku-035" 1 "gold"]
+        Item["sku-036" 2 "bronze"]
+        Item["sku-037" 3 "silver"]
+        Item["sku-038" 4 "gold"]
+        Item["sku-039" 5 "bronze"]
+        Item["sku-040" 6 "silver"]
+        Item["sku-041" 7 "gold"]
+        Item["sku-042" 1 "bronze"]
+        Item["sku-043" 2 "silver"]
+        Item["sku-044" 3 "gold"]
+        Item["sku-045" 4 "bronze"]
+        Item["sku-046" 5 "silver"]
+        Item["sku-047" 6 "gold"]
+        Item["sku-048" 7 "bronze"]
+        Item["sku-049" 1 "silver"]
+        Item["sku-050" 2 "gold"]
+        Item["sku-051" 3 "bronze"]
+        Item["sku-052" 4 "silver"]
+        Item["sku-053" 5 "gold"]
+        Item["sku-054" 6 "bronze"]
+        Item["sku-055" 7 "silver"]
+        Item["sku-056" 1 "gold"]
+        Item["sku-057" 2 "bronze"]
+        Item["sku-058" 3 "silver"]
+        Item["sku-059" 4 "gold"]
+        Item["sku-060" 5 "bronze"]
+        Item["sku-061" 6 "silver"]
+        Item["sku-062" 7 "gold"]
+        Item["sku-063" 1 "bronze"]
+        Item["sku-064" 2 "silver"]
+        Item["sku-065" 3 "gold"]
+        Item["sku-066" 4 "bronze"]
+        Item["sku-067" 5 "silver"]
+        Item["sku-068" 6 "gold"]
+        Item["sku-069" 7 "bronze"]
+        Item["sku-070" 1 "silver"]
+        Item["sku-071" 2 "gold"]
+        Item["sku-072" 3 "bronze"]
+        Item["sku-073" 4 "silver"]
+        Item["sku-074" 5 "gold"]
+        Item["sku-075" 6 "bronze"]
+        Item["sku-076" 7 "silver"]
+        Item["sku-077" 1 "gold"]
+        Item["sku-078" 2 "bronze"]
+        Item["sku-079" 3 "silver"]
+        Item["sku-080" 4 "gold"]
+        Item["sku-081" 5 "bronze"]
+        Item["sku-082" 6 "silver"]
+        Item["sku-083" 7 "gold"]
+        Item["sku-084" 1 "bronze"]
+        Item["sku-085" 2 "silver"]
+        Item["sku-086" 3 "gold"]
+        Item["sku-087" 4 "bronze"]
+        Item["sku-088" 5 "silver"]
+        Item["sku-089" 6 "gold"]
+        Item["sku-090" 7 "bronze"]
+        Item["sku-091" 1 "silver"]
+        Item["sku-092" 2 "gold"]
+        Item["sku-093" 3 "bronze"]
+        Item["sku-094" 4 "silver"]
+        Item["sku-095" 5 "gold"]
+        Item["sku-096" 6 "bronze"]
+        Item["sku-097" 7 "silver"]
+        Item["sku-098" 1 "gold"]
+        Item["sku-099" 2 "bronze"]
+        Item["sku-100" 3 "silver"]
+        Item["sku-101" 4 "gold"]
+        Item["sku-102" 5 "bronze"]
+    ]
+    let quote = new_quote()
+    loop item in catalog add(@quote item)
+    show_grades()
+    show(quote)
+    if quote.units >? 0 {
+        let mean_cents = quote.total // quote.units
+        printl"mean unit cents {mean_cents}"
+    }
+    printl"first sku {((catalog.get(0) ?? Item["" 0 'bronze']).sku)}"
+    printl"last sku {((catalog.get(catalog.length-1) ?? Item["" 0 'bronze']).sku)}"
+}
