@@ -54,6 +54,26 @@ dw_kind_name = (kind: DewyKind) -> str:
         compact_stmt: "CompactStatement"
         lazy_body: "LazyBody"
 
+syntax_node = (tree: mut DewySyntax[], kind: DewyKind, text: str, pos: int, children: int[], name: i32) -> int:
+    id = tree.len()
+    tree.push(DewySyntax(kind, text, pos, children, .none, name))
+    id
+
+syntax_op_node = (tree: mut DewySyntax[], kind: DewyKind, symbol: DewyToken, pos: int, children: int[]) -> int:
+    id = tree.len()
+    tree.push(DewySyntax(kind, "", pos, children, symbol))
+    id
+
+syntax_operator = (tree: mut DewySyntax[], kind: DewyKind, op: DewyToken, left: int, right: int) -> int:
+    scalar = dn_token_uninvert(op)
+    sentinel = 0
+    if scalar != op: sentinel = 1
+    id = tree.len()
+    pos = tree[left].pos
+    if kind == .binary: tree.push(DewySyntax(kind, "", pos, [], scalar, 0, sentinel + 1, left, right))
+    else: tree.push(DewySyntax(kind, "", pos, [sentinel, left, right], scalar))
+    id
+
 syntax_child = (tree: mut DewySyntax[], id: int, at: int) -> int:
     mode = tree[id].child_mode
     if mode == 0: return tree[id].children[at]

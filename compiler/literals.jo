@@ -209,6 +209,17 @@ literal_scalar = (p: mut LiteralProblem, s: str, i: int, stop: int) -> (int, int
         return (0, -1)
     (value, at)
 
+literal_string_text = (p: mut LiteralProblem, out: mut u8[], s: str, i0: int, stop: int) -> int:
+    i = i0
+    loop i < stop:
+        c = s[i]
+        if c == 123: break             # ('{', an interpolation)
+        if c == '\\': i = literal_escape(p, out, s, i, stop)
+        else:
+            out.push(c)
+            i += 1
+    i
+
 # The escape at s[i] (its backslash) in a string ending before stop, onto out: where the
 # text after it starts (stop after a mistake, in p)
 literal_escape = (p: mut LiteralProblem, out: mut u8[], s: str, i: int, stop: int) -> int:

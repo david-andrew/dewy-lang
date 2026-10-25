@@ -1,0 +1,47 @@
+# One driver over the compiler's literals.jo (the frozen twin) or, with this line naming
+# literals.dewy, over the leaf: `string_text_jo FILE` reads lines `HEX I0 STOP` (a text's bytes in
+# hexadecimal, then where to read it from and to) and prints for each the bytes
+# literal_string_text gives, in hexadecimal, where it stopped, and its mistake.
+use '../../../compiler/literals.jo'
+
+DIGITS = "0123456789abcdef"
+
+nibble = (c: u8) -> int:
+    if c >= 'a': return int(c) - 87
+    int(c) - 48
+
+unhex = (s: str) -> str:
+    out: u8[]
+    i = 0
+    loop i + 1 < len(s):
+        out.push(u8(nibble(s[i]) * 16 + nibble(s[i + 1])))
+        i += 2
+    str_from_bytes(out)
+
+tohex = (b: u8[]) -> str:
+    out: u8[]
+    loop c in b:
+        out.push(DIGITS[int(c) >> 4])
+        out.push(DIGITS[int(c) & 15])
+    str_from_bytes(out)
+
+tohex_text = (s: str) -> str:
+    out: u8[]
+    loop c in s:
+        out.push(DIGITS[int(c) >> 4])
+        out.push(DIGITS[int(c) & 15])
+    str_from_bytes(out)
+
+main = ():
+    text = read_file(args()[1]) ?? ""
+    loop line in split(text, "\n"):
+        if len(line) == 0: continue
+        f = split(line, " ")
+        s = unhex(f[0])
+        i0 = to_int(f[1]) ?? 0
+        stop = to_int(f[2]) ?? 0
+        p = LiteralProblem("", 0, false)
+        out: u8[]
+        at = literal_string_text(p, out, s, i0, stop)
+        if len(p.message) > 0: print("{tohex(out)} {at} ! {tohex_text(p.message)} @{p.at} {p.unsupported}")
+        else: print("{tohex(out)} {at}")

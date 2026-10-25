@@ -532,26 +532,13 @@ dn_accept_semi = () -> bool:
 dn_expect = (symbol: DewyToken):
     if not dn_accept(symbol): dn_error(dn_tokens[dn_at].start, "expected '{dn_token_text(symbol)}'")
 
-dn_node = (kind: DewyKind, text: str, offset: int, children: int[] = [], name: i32 = 0) -> int:
-    id = dewy_syntax.len()
-    dewy_syntax.push(DewySyntax(kind, text, mkpos(dn_file, offset), children, .none, name))
-    id
+dn_node = (kind: DewyKind, text: str, offset: int, children: int[] = [], name: i32 = 0) -> int: syntax_node(dewy_syntax, kind, text, mkpos(dn_file, offset), children, name)
 
 # Expression operators are scalar tags on their parent node. Child zero is
 # the shared ordinary/inverted sentinel; operands retain indices one onward.
-dn_op_node = (kind: DewyKind, symbol: DewyToken, offset: int, children: int[]) -> int:
-    id = dewy_syntax.len()
-    dewy_syntax.push(DewySyntax(kind, "", mkpos(dn_file, offset), children, symbol))
-    id
+dn_op_node = (kind: DewyKind, symbol: DewyToken, offset: int, children: int[]) -> int: syntax_op_node(dewy_syntax, kind, symbol, mkpos(dn_file, offset), children)
 
-dn_operator = (kind: DewyKind, op: DewyToken, left: int, right: int) -> int:
-    scalar = dn_token_uninvert(op)
-    sentinel = if scalar != op: 1 else: 0
-    if kind == .binary:
-        id = dewy_syntax.len()
-        dewy_syntax.push(DewySyntax(kind, "", dewy_syntax[left].pos, [], scalar, 0, sentinel + 1, left, right))
-        return id
-    dn_op_node(kind, scalar, pos_off(dewy_syntax[left].pos), [sentinel, left, right])
+dn_operator = (kind: DewyKind, op: DewyToken, left: int, right: int) -> int: syntax_operator(dewy_syntax, kind, op, left, right)
 
 # String decoding is shared; the construction target selects syntax nodes for
 # the reference parser or compact nodes for the value parser.
@@ -561,6 +548,8 @@ dn_text = (kind: DewyKind, text: str, offset: int, direct: bool) -> int:
     nodes[n].sval = i32(intern(text))
     n
 
+# (a mistake in a string's escapes: one stops the compile)
+dn_string_problem = LiteralProblem("", 0, false)
 dn_string = (token: DewyLexeme, direct: bool = false) -> int:
     source = files[dn_file].src
     raw = token.kind == .rawquoted
@@ -575,52 +564,45 @@ dn_string = (token: DewyLexeme, direct: bool = false) -> int:
     chunk_start = i
     interpolated = false
     loop i < stop:
-        c = source[i]
-        if c == '\\':
-            # (literals.dewy reads the escape)
-            p = LiteralProblem("", 0, false)
-            i = literal_escape(p, bytes_, source, i, stop)
-            if len(p.message) > 0: dn_error(p.at, p.message)
-            continue
-        if c == '{':
-            interpolated = true
-            if bytes_.len() > 0:
-                chunks.push(dn_text(.string_chunk, str_from_bytes(bytes_), chunk_start, direct))
-                bytes_.clear()
-            first = i + 1
-            i = dn_interpolation_close(source, first, stop)
-            # (`{x:.2f}`: a format spec after the value's last top-level colon)
-            colon = dn_spec_colon(dn_lexer, source, first, i)
-            saved_tokens = dn_tokens
-            saved_at = dn_at
-            saved_angles = dn_angles
-            saved_comma = dn_comma_stop
-            dn_tokens = dn_lex(dn_file, first, if colon >= 0: colon else: i)
-            dn_at = 0
-            dn_angles = 0
-            dn_comma_stop = false
-            dn_in_interpolation += 1
-            expression = if direct: dc_expr(0) else: dn_expr(0)
-            if expression != 0 and dn_tokens[dn_at].kind != .eof: dn_error(dn_tokens[dn_at].start, "expected one interpolation expression")
-            dn_in_interpolation -= 1
-            dn_tokens = saved_tokens
-            dn_at = saved_at
-            dn_angles = saved_angles
-            dn_comma_stop = saved_comma
-            spec = if colon >= 0: source[colon + 1..i) else: ""
-            if direct:
-                if expression == 0: return 0
-                part = mk(.pair, mkpos(dn_file, first))
-                nodes[part].a = i32(expression)
-                nodes[part].sval = if colon >= 0: i32(intern(spec)) else: -1
-                chunks.push(part)
-            else if colon >= 0: chunks.push(dn_node(.block, "{{}}:", first, [expression, dn_node(.string, spec, colon + 1)]))
-            else: chunks.push(dn_node(.block, "{{}}:", first, [expression]))
-            i += 1
-            chunk_start = i
-            continue
-        bytes_.push(c)
+        # (literals.dewy reads the text up to an interpolation)
+        i = literal_string_text(dn_string_problem, bytes_, source, i, stop)
+        if len(dn_string_problem.message) > 0: dn_error(dn_string_problem.at, dn_string_problem.message)
+        if i >= stop: break
+        interpolated = true
+        if bytes_.len() > 0:
+            chunks.push(dn_text(.string_chunk, str_from_bytes(bytes_), chunk_start, direct))
+            bytes_.clear()
+        first = i + 1
+        i = dn_interpolation_close(source, first, stop)
+        # (`{x:.2f}`: a format spec after the value's last top-level colon)
+        colon = dn_spec_colon(dn_lexer, source, first, i)
+        saved_tokens = dn_tokens
+        saved_at = dn_at
+        saved_angles = dn_angles
+        saved_comma = dn_comma_stop
+        dn_tokens = dn_lex(dn_file, first, if colon >= 0: colon else: i)
+        dn_at = 0
+        dn_angles = 0
+        dn_comma_stop = false
+        dn_in_interpolation += 1
+        expression = if direct: dc_expr(0) else: dn_expr(0)
+        if expression != 0 and dn_tokens[dn_at].kind != .eof: dn_error(dn_tokens[dn_at].start, "expected one interpolation expression")
+        dn_in_interpolation -= 1
+        dn_tokens = saved_tokens
+        dn_at = saved_at
+        dn_angles = saved_angles
+        dn_comma_stop = saved_comma
+        spec = if colon >= 0: source[colon + 1..i) else: ""
+        if direct:
+            if expression == 0: return 0
+            part = mk(.pair, mkpos(dn_file, first))
+            nodes[part].a = i32(expression)
+            nodes[part].sval = if colon >= 0: i32(intern(spec)) else: -1
+            chunks.push(part)
+        else if colon >= 0: chunks.push(dn_node(.block, "{{}}:", first, [expression, dn_node(.string, spec, colon + 1)]))
+        else: chunks.push(dn_node(.block, "{{}}:", first, [expression]))
         i += 1
+        chunk_start = i
     if not interpolated: return dn_text(.string, str_from_bytes(bytes_), token.start, direct)
     if bytes_.len() > 0: chunks.push(dn_text(.string_chunk, str_from_bytes(bytes_), chunk_start, direct))
     if direct:

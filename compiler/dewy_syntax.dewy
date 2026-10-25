@@ -11,7 +11,7 @@ $runtime_checks
 # caller passes by place (the first one found; the answer is then meaningless) and reported
 # by the caller.
 
-from p"dewy_tokens.dewy" import DewyToken, DewyKind, dn_token_kind
+from p"dewy_tokens.dewy" import DewyToken, DewyKind, dn_token_kind, dn_token_uninvert
 from p"targets.dewy" import target_names, target_arches, target_oses, target_arch_of, target_os_of
 
 # A node. Binary nodes keep their sentinel and operands inline (child_mode is the sentinel
@@ -68,6 +68,35 @@ dw_kind_name=(kind:DewyKind):>string=>match kind {
     <'compact_expr'> => "CompactExpression"
     <'compact_stmt'> => "CompactStatement"
     <'lazy_body'> => "LazyBody"
+}
+
+# ---- building (dewy_fast.jo's reference parser) ----
+
+# A new node: its id
+syntax_node=(@tree:array<DewySyntax> kind:DewyKind text:string pos:int64 children:array<int64> name:int32):>int64=>{
+    let id=tree.length
+    tree.push(DewySyntax[kind=kind text=text pos=pos children=children name=name])
+    id
+}
+
+# A new node applying an operator: child 0 is the ordinary or inverted sentinel, the operands follow
+syntax_op_node=(@tree:array<DewySyntax> kind:DewyKind symbol:DewyToken pos:int64 children:array<int64>):>int64=>{
+    let id=tree.length
+    tree.push(DewySyntax[kind=kind text="" pos=pos children=children symbol=symbol])
+    id
+}
+
+# `left op right`, where its left operand starts: an inverted comparison (`not=?`) applies its
+# scalar operator over the inverted sentinel. A binary node keeps its sentinel and operands inline.
+syntax_operator=(@tree:array<DewySyntax> kind:DewyKind op:DewyToken left:int64 right:int64):>int64=>{
+    let scalar=dn_token_uninvert(op)
+    let sentinel:int64=if scalar not=? op 1 else 0
+    let id=tree.length
+    let pos=tree[left].pos
+    if kind =? 'binary' {
+        tree.push(DewySyntax[kind=kind text="" pos=pos children=[] symbol=scalar child_mode=sentinel + 1 child_left=left child_right=right])
+    } else {tree.push(DewySyntax[kind=kind text="" pos=pos children=[sentinel left right] symbol=scalar])}
+    id
 }
 
 # ---- children ----

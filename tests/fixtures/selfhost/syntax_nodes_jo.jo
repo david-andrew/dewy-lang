@@ -1,0 +1,32 @@
+# One driver over the compiler's dewy_syntax.jo (the frozen twin) or, with this line naming
+# dewy_syntax.dewy, over the leaf: `syntax_nodes_jo FILE` builds a tree from the file's lines,
+# tab-separated, after the parser's two sentinels, and prints each new node's id, then every node.
+#   N kind text pos children name   syntax_node (kind by number, children comma-separated)
+#   O kind symbol pos children      syntax_op_node (symbol by number)
+#   B kind op left right            syntax_operator
+use '../../../compiler/dewy_tokens.dewy'
+use '../../../compiler/dewy_syntax.jo'
+
+ints = (s: str) -> int[]:
+    out: int[]
+    if len(s) == 0: return out
+    loop x in split(s, ","): out.push(to_int(x) ?? 0)
+    out
+
+shown = (xs: int[]) -> str:
+    parts: str[]
+    loop x in xs: parts.push("{x}")
+    join(parts, ",")
+
+main = ():
+    text = read_file(args()[1]) ?? ""
+    tree = [DewySyntax(.unknown, "", 0, []), DewySyntax(.inverted_comparison, "", 0, [])]
+    loop line in split(text, "\n"):
+        f = split(line, "\t")
+        if f.len() < 2: continue
+        n = to_int(f[1]) ?? 0
+        if f[0] == "N": print("{syntax_node(tree, DewyKind(n), f[2], to_int(f[3]) ?? 0, ints(f[4]), i32(to_int(f[5]) ?? 0))}")
+        else if f[0] == "O": print("{syntax_op_node(tree, DewyKind(n), DewyToken(to_int(f[2]) ?? 0), to_int(f[3]) ?? 0, ints(f[4]))}")
+        else if f[0] == "B": print("{syntax_operator(tree, DewyKind(n), DewyToken(to_int(f[2]) ?? 0), to_int(f[3]) ?? 0, to_int(f[4]) ?? 0)}")
+    loop t in tree:
+        print("{int(t.kind)}\t{int(t.symbol)}\t{t.text}\t{t.pos}\t{t.name}\t{t.child_mode}\t{t.child_left}\t{t.child_right}\t{shown(t.children)}")

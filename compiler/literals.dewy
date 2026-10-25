@@ -368,6 +368,25 @@ literal_packed=(@p:LiteralProblem text:string):>array<uint8>=>{
     []
 }
 
+# A string's text s[i..stop) onto out, its escapes read, up to its next interpolation: where
+# it stopped, at that interpolation's `{` or at stop (stop after a mistake, in p)
+literal_string_text=(@p:LiteralProblem @out:array<uint8> s:string i0:int64 stop:int64):>int64=>{
+    let b=s as array<uint8>
+    let i=i0
+    let run=i0      # (the bytes from run to i go as they are)
+    loop i <? stop {
+        let c=b[i]
+        if c =? b'\{' {break}
+        if c =? b'\\' {
+            out.extend(b[run..i))
+            i=literal_escape(@p @out s i stop)
+            run=i
+        } else {i+=1}
+    }
+    if run <? i {out.extend(b[run..i))}
+    i
+}
+
 # The escape at s[i] (its backslash) onto out: where the text after it starts (stop
 # after a mistake)
 literal_escape=(@p:LiteralProblem @out:array<uint8> s:string i:int64 stop:int64):>int64=>{

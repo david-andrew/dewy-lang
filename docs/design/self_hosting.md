@@ -413,6 +413,32 @@ grows; a Python oracle hashes and keeps the table, slots included. Panel: every 
   about 15 fewer instructions a hit but 190 more a new name (five pushes through a place):
   flagships +0.25% more, dropped.
 
+The reference parser's first pieces are the ones that do not recurse: its node constructors
+(dewy_syntax.dewy's `syntax_node`, `syntax_op_node` and `syntax_operator`, behind dewy_fast.jo's
+one-line `dn_node`, `dn_op_node` and `dn_operator`) and a string's text up to its next
+interpolation (literals.dewy's `literal_string_text`, which dn_string calls once a chunk for
+both parsers; the interpolations' parsing stays with the parsers). The rest of the reference
+parser recurses through the direct parser (`dn_value`, `dn_statement`, an interpolation's
+`dc_expr`) and back, so it moves with a parser state record and hooks, or with the direct
+parser. The path is cold: a flagship builds 1,300 to 6,900 syntax nodes (the
+direct parser makes the rest) and reads 50 to 850 strings. The differential tests run one
+Sloppy driver over each leaf or its twin: 17,180 spans of the repository's double-quoted strings
+(from each start and after each interpolation) and 3,000 generated ones (escapes good and bad,
+braces, malformed UTF-8, NUL, spans starting and stopping anywhere) against an oracle with the
+escape rules of the literals test; 120 random build sequences against a Python tree. Panel:
+flagships +0.00% to +0.03% (lex+parse +0.08%), every other item within 0.01%; 684 builds
+identical. What it met:
+- A call into the leaf costs about 70 instructions a string more than the inline loop it
+  replaces (on the 99_dewy_frontend flagship, strings averaging 8 bytes, +62 k; 97, averaging
+  18, breaks even): the leaf saves its callee-saved registers, and the run goes through
+  `extend` (`out.extend(b[run..i))`, which costs less a byte than master's push). Returning
+  at the brace cost 12 k more than breaking out of the loop to one exit.
+  Reading the bytes through a checked pointer in place of `b[i]` saved nothing.
+- The constructors cost about 10 instructions a node: the call layer, and the record pushed
+  zero-filled and then stored field by field.
+- The C seed compiler reads `'{'` as an unterminated string, so the twin compares with
+  `123`.
+
 The whole lexer was ported first (dn_lex's loop, keywords found by their bytes, names
 interned by the caller): lexing took +11% (+28 instructions a lexeme; synthetic-22k +0.74%,
 lex+parse +0.83%), so the loop stays in Sloppy. Its loop alone matched Sloppy's; the cost was
