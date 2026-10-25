@@ -378,6 +378,41 @@ met:
 - `int32(x)` into the runs checks each value's range, where Sloppy wrapped silently: two compares
   an element, kept.
 
+`intern.dewy` (the compiler's names: a name's hash, its id found by its bytes, a new name's id)
+is the parsers' other prerequisite, so both are now leaves. The table stays util.jo's three
+globals (`names`, `name_hash`, `name_tab`), taken by place; `names[id]` and `name_of` are
+unchanged at their 800-odd sites. The caller hashes (`hash_bytes`, which prelude.jo's index of the
+library's names shares) and, for a new name, cuts its string; util.jo's `intern_sub` is a few
+lines that Sloppy inlines into the lexers, its new-name path (`intern_new`) apart. The
+differential test runs one Sloppy driver over the leaf or its twin on 25 rounds of names of any
+bytes (malformed UTF-8 and NUL included) at different places, lookups that miss by a byte,
+names whose probes wrap past the table's end, and a round past 8,192 names, where the table
+grows; a Python oracle hashes and keeps the table, slots included. Panel: every item -0.04% to
++0.12% (hello +0.12%, lex+parse -0.04%); 684 builds identical. What it met:
+- A string read from an array by place, `let t=texts[id] as array<uint8>`, or passed to a helper,
+  is retained and released (about 20 instructions a lookup); `texts.ptr[id]` makes the array
+  unique first and retains too. The view written twice in one expression,
+  `(texts[id] as array<uint8>).length` and `.ptr`, does neither, at the cost of a second bounds
+  check.
+- Taking `.ptr` of an array parameter passed by value copies the array at each call (a lookup
+  with the three arrays by value took 235 k instructions).
+- `i + 8 <? n` on `int64`s is an exact `int` comparison, about 14 instructions a word in the
+  hash's loop; `let last=n - 8` and `i <? last` is one. `(i + 1) & mask` checks the narrowing
+  back to `int64`, about 20 instructions a probe, where `if i <? mask i + 1 else 0` is a `jo`:
+  in name_add's probes this alone was synthetic-22k +0.24%.
+- Each call layer counts: the leaf hashing inside name_find, under a wrapper that was not
+  inlined, cost lex+parse +1.40% (flagships +0.33%); the wrapper inlined, +0.42%; the hash taken
+  by the caller (no nested call, a new name hashed once), +0.01%. `@noinline` on the wrapper
+  alone is flagships +0.17% more: a function returning early still saves all five callee-saved
+  registers.
+- Dewy cannot make a string of bytes it does not check, and a name may hold any (a string
+  literal's source): `bytes as string | none` refuses malformed UTF-8, and `byte_slice` panics
+  at a continuation byte. So the cut stays Sloppy's (`intern_new`); a Dewy parser interning a
+  literal's span needs an unchecked byte range.
+- A byte pool for the comparisons (each name's bytes appended, its start and length by id) took
+  about 15 fewer instructions a hit but 190 more a new name (five pushes through a place):
+  flagships +0.25% more, dropped.
+
 The whole lexer was ported first (dn_lex's loop, keywords found by their bytes, names
 interned by the caller): lexing took +11% (+28 instructions a lexeme; synthetic-22k +0.74%,
 lex+parse +0.83%), so the loop stays in Sloppy. Its loop alone matched Sloppy's; the cost was
@@ -412,11 +447,8 @@ Open gaps from these leaves, by cost:
 
 Gaps met on the way, and since closed: `bytes as string ?? ""` converts to
 `string | none` and falls back; `fill(v n)` is documented; Sloppy takes a Dewy
-string-literal union as its enum. Still open: the intern table (`hash_bytes`) as a leaf
-costs +0.5–0.8% on the panel (lex+parse +2%): a new name needed a byte-range substring
-Dewy lacked (copy loop, UTF-8 check, conversion: ~600 instructions against Sloppy's ~250;
-`byte_slice` now, at about 1.2x Sloppy's, see `targets.dewy` above), and
-Sloppy retains a string passed beside a `mut` place (~20 instructions a call).
+string-literal union as its enum; the intern table is a leaf (`intern.dewy` above), the cut
+of a new name left to Sloppy.
 
 ## Decided rules
 

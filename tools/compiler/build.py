@@ -31,7 +31,7 @@ FROZEN_TWINS = {'zip.dewy': 'zip.jo', 'spelling.dewy': 'spelling.jo', 'leb128.de
                'habits.dewy': 'habits.jo', 'dewy_layout.dewy': 'dewy_layout.jo',
                'dewy_lex.dewy': 'dewy_lex.jo', 'module_paths.dewy': 'module_paths.jo',
                'dewy_syntax.dewy': 'dewy_syntax.jo', 'dewy_grammar.dewy': 'dewy_grammar.jo',
-               'node_store.dewy': 'node_store.jo'}
+               'node_store.dewy': 'node_store.jo', 'intern.dewy': 'intern.jo'}
 
 
 def identity(path: Path) -> str:

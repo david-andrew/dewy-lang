@@ -1,0 +1,58 @@
+# The frozen implementation-language twin of intern.dewy, for the compilers without the
+# Dewy frontend (tools/compiler/build.py). Change both, or neither.
+
+# (eight bytes at a time: words, then the last eight overlapping; a short name in at most two
+# reads. Names are mostly short, so this is a handful of multiplies, not one per byte.)
+hash_bytes = (p: *u8, n: int) -> int:
+    h = u64(n) * 0x9E3779B97F4A7C15
+    if n > 8:
+        i = 0
+        loop i + 8 < n:
+            h = (h xor ((p + i) as *u64)[0]) * 0xBF58476D1CE4E5B9
+            h = h xor (h >> 31)
+            i += 8
+        h = h xor ((p + n - 8) as *u64)[0]
+    else if n >= 4: h = h xor u64((p as *u32)[0]) xor (u64(((p + n - 4) as *u32)[0]) << 32)
+    else if n > 0: h = h xor u64(p[0]) xor (u64(p[n >> 1]) << 8) xor (u64(p[n - 1]) << 16)
+    h = h * 0xBF58476D1CE4E5B9
+    int(h xor (h >> 32))
+
+# a[0..n) and b[0..n) hold the same bytes
+same_bytes = (a: *u8, b: *u8, n: int) -> bool: __mem_eq(a, b, n)
+
+# the id of the name at p[0..n), whose hash_bytes is h, or -1 when the table does not have it
+name_find = (texts: mut str[], hashes: mut int[], slots: mut i32[], p: *u8, n: int, h: int) -> int:
+    if slots.len() == 0: return -1
+    mask = slots.len() - 1
+    i = h & mask
+    loop true:
+        e = int(slots[i])
+        if e == 0: return -1
+        id = e - 1
+        if hashes[id] == h and len(texts[id]) == n and __mem_eq(data(texts[id]), p, n): return id
+        i = (i + 1) & mask
+    -1
+
+# a new id for name, which the table does not have; h is its hash_bytes
+name_add = (texts: mut str[], hashes: mut int[], slots: mut i32[], name: str, h: int) -> int:
+    if slots.len() == 0:
+        slots = fill(i32(0), 1 << 14)
+        # (name 0 is "", whose hash is 0: 0 stands for no name)
+        name_add(texts, hashes, slots, "", 0)
+        if len(name) == 0: return 0
+    mask = slots.len() - 1
+    i = h & mask
+    loop slots[i] != 0: i = (i + 1) & mask
+    id = texts.len()
+    texts.push(name)
+    hashes.push(h)
+    slots[i] = i32(id + 1)
+    if texts.len() * 2 > slots.len():
+        # (grown: every id placed again)
+        slots = fill(i32(0), slots.len() * 2)
+        m2 = slots.len() - 1
+        loop k in [0..texts.len()):
+            j = hashes[k] & m2
+            loop slots[j] != 0: j = (j + 1) & m2
+            slots[j] = i32(k + 1)
+    id

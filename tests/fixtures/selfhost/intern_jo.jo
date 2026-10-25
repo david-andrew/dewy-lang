@@ -1,0 +1,61 @@
+# One driver over the compiler's intern.jo (the frozen twin) or, with this line naming
+# intern.dewy, over the leaf: `intern_jo blob steps` reads the names' bytes from blob and the
+# steps from steps, one a line, space-separated. Names are spans of blob (start, length).
+#   R              a fresh table
+#   I start n      interns the span as util.jo's intern_sub does; prints its id
+#   S start n      the same, the span first cut as a string of its own (the whole-string path)
+#   F start n      prints the span's id, or -1 when it is not interned
+#   H start n      prints the span's hash_bytes
+#   Q a b n        prints 1 when spans (a, n) and (b, n) hold the same bytes, else 0
+#   D              prints the count and the slots' size and checksum, then each name by id
+use '../../../compiler/intern.jo'
+
+tab_names: str[]
+tab_hashes: int[]
+tab_slots: i32[]
+
+intern_span = (s: str, start: int, n: int) -> int:
+    p = data(s) + start
+    h = hash_bytes(p, n)
+    id = name_find(tab_names, tab_hashes, tab_slots, p, n, h)
+    if id >= 0: return id
+    if start == 0 and n == len(s): return name_add(tab_names, tab_hashes, tab_slots, s, h)
+    name_add(tab_names, tab_hashes, tab_slots, s[start..start + n), h)
+
+main = () -> int:
+    a = args()
+    blob = read_file(a[1]) ?? ""
+    steps = read_file(a[2]) ?? ""
+    print("{len(blob)}")
+    loop line in split(steps, "\n"):
+        if len(line) == 0: continue
+        f = split(line, " ")
+        op = f[0]
+        x = 0
+        y = 0
+        z = 0
+        if f.len() > 1: x = to_int(f[1]) ?? 0
+        if f.len() > 2: y = to_int(f[2]) ?? 0
+        if f.len() > 3: z = to_int(f[3]) ?? 0
+        if op == "R":
+            tab_names = []
+            tab_hashes = []
+            tab_slots = []
+        else if op == "I": print("{intern_span(blob, x, y)}")
+        else if op == "S": print("{intern_span(blob[x..x + y), 0, y)}")
+        else if op == "F": print("{name_find(tab_names, tab_hashes, tab_slots, data(blob) + x, y, hash_bytes(data(blob) + x, y))}")
+        else if op == "H": print("{hash_bytes(data(blob) + x, y)}")
+        else if op == "Q":
+            same = 0
+            if same_bytes(data(blob) + x, data(blob) + y, z): same = 1
+            print("{same}")
+        else if op == "D":
+            sum = 0
+            loop i in [0..tab_slots.len()): sum += (i + 1) * int(tab_slots[i])
+            print("{tab_names.len()} {tab_slots.len()} {sum}")
+            loop i in [0..tab_names.len()):
+                t = tab_names[i]
+                bs: int[]
+                loop k in [0..len(t)): bs.push(int(data(t)[k]))
+                print("{i} {tab_hashes[i]} {bs}")
+    0

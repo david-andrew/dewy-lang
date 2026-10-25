@@ -7,6 +7,7 @@ use 'watch.jo'
 use 'ide.jo'
 use 'fused.jo'
 use 'line_table.dewy'
+use 'intern.dewy'
 
 struct SrcFile:
     path: str
@@ -15,75 +16,32 @@ struct SrcFile:
     is_dewy: bool = false  # decided once when the source file is loaded
 
 files: SrcFile[]
+# the interned names (intern.dewy's table, passed to it by place): each name by id, its hash by
+# id, and open addressing over the ids (+1; 0 = empty)
 names: str[]
 name_hash: int[]
-name_tab: i32[]          # open addressing over name ids (+1; 0 = empty)
-
-# (eight bytes at a time: words, then the last eight overlapping; a short name in at most two
-# reads. Names are mostly short, so this is a handful of multiplies, not one per byte.)
-hash_bytes = (p: *u8, n: int) -> int:
-    h = u64(n) * 0x9E3779B97F4A7C15
-    if n > 8:
-        i = 0
-        loop i + 8 < n:
-            h = (h xor ((p + i) as *u64)[0]) * 0xBF58476D1CE4E5B9
-            h = h xor (h >> 31)
-            i += 8
-        h = h xor ((p + n - 8) as *u64)[0]
-    else if n >= 4: h = h xor u64((p as *u32)[0]) xor (u64(((p + n - 4) as *u32)[0]) << 32)
-    else if n > 0: h = h xor u64(p[0]) xor (u64(p[n >> 1]) << 8) xor (u64(p[n - 1]) << 16)
-    h = h * 0xBF58476D1CE4E5B9
-    int(h xor (h >> 32))
+name_tab: i32[]
 
 intern = (s: str) -> int: intern_sub(s, 0, len(s))
 
-# intern s[start..start + n] without allocating unless the name is new
+# intern s[start..start + n] without allocating unless the name is new (an existing name is
+# found by its bytes alone, s not passed beside the table: no reference counting)
 intern_sub = (s: str, start: int, n: int) -> int:
-    if name_tab.len() == 0:
-        name_tab = fill(0, 1 << 14)
-        intern_sub("", 0, 0)             # (name 0 is "": 0 stands for no name)
     p = data(s) + start
     h = hash_bytes(p, n)
-    mask = name_tab.len() - 1
-    i = h & mask
-    loop true:
-        e = int(name_tab[i])
-        if e == 0: break
-        id = e - 1
-        if name_hash[id] == h and len(names[id]) == n and __mem_eq(data(names[id]), p, n): return id
-        i = (i + 1) & mask
-    id = names.len()
-    if start == 0 and n == len(s): names.push(s)
-    else: names.push(s[start..start + n))
-    name_hash.push(h)
-    name_tab[i] = i32(id + 1)
-    if names.len() * 2 > name_tab.len():
-        # grow and rehash
-        name_tab = fill(0, name_tab.len() * 2)
-        m2 = name_tab.len() - 1
-        loop k in [0..names.len()):
-            j = name_hash[k] & m2
-            loop name_tab[j] != 0: j = (j + 1) & m2
-            name_tab[j] = i32(k + 1)
-    id
+    id = name_find(names, name_hash, name_tab, p, n, h)
+    if id >= 0: return id
+    intern_new(s, start, n, h)
+
+# (a new name: cut from s unless it is all of s)
+intern_new = (s: str, start: int, n: int, h: int) -> int:
+    if start == 0 and n == len(s): return name_add(names, name_hash, name_tab, s, h)
+    name_add(names, name_hash, name_tab, s[start..start + n), h)
 
 name_of = (id: int) -> str: names[id]
 
 # Whether s is an interned name already, without interning it
-name_known = (s: str) -> bool:
-    if name_tab.len() == 0: return false
-    n = len(s)
-    p = data(s)
-    h = hash_bytes(p, n)
-    mask = name_tab.len() - 1
-    i = h & mask
-    loop true:
-        e = int(name_tab[i])
-        if e == 0: return false
-        id = e - 1
-        if name_hash[id] == h and len(names[id]) == n and __mem_eq(data(names[id]), p, n): return true
-        i = (i + 1) & mask
-    false
+name_known = (s: str) -> bool: name_find(names, name_hash, name_tab, data(s), len(s), hash_bytes(data(s), len(s))) >= 0
 
 # position encoding: file index in the high bits, byte offset in the low 40 bits
 mkpos = (file: int, off: int) -> int: (file << 40) | off

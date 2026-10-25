@@ -1,0 +1,101 @@
+$runtime_checks
+# The compiler's names: each distinct name once, by a number (its id), so names compare
+# and hash as integers. Name 0 is "", which stands for no name.
+#
+# A module of the compiler written in Dewy. intern.jo is its frozen twin for the
+# compilers without the Dewy frontend (tools/compiler/build.py); the two keep the same
+# interface and give the same ids (tests/test_selfhost_intern.py). The table is three of
+# Sloppy's globals (util.jo `names`, `name_hash` and `name_tab`), passed by place: the
+# names by id, their hashes by id, and open addressing over the ids (+1; 0 = empty). The
+# caller hashes the name (hash_bytes) and, when it is new, cuts its string: a name may hold
+# any bytes (a string literal's source, malformed UTF-8 included), and Dewy has no way to
+# make a string of bytes it does not check.
+
+# (eight bytes at a time: words, then the last eight overlapping; a short name in at most
+# two reads. Names are mostly short, so this is a handful of multiplies, not one per byte.)
+hash_bytes=(p:ptr<uint8> n:int64):>int64=>$unsafe {
+    let h:uint64<overflow='wrap'>=uint64<overflow='wrap'>(n) * 0x9E3779B97F4A7C15
+    if n >? 8 {
+        let last=n - 8
+        let i:int64=0
+        loop i <? last {
+            h=(h xor ((p + i) as ptr<uint64>)[0]) * 0xBF58476D1CE4E5B9
+            h=h xor (h >> 31)
+            i+=8
+        }
+        h=h xor ((p + last) as ptr<uint64>)[0]
+    } else if n >=? 4 {
+        h=h xor uint64((p as ptr<uint32>)[0]) xor (uint64(((p + (n - 4)) as ptr<uint32>)[0]) << 32)
+    } else if n >? 0 {
+        h=h xor uint64(p[0]) xor (uint64(p[n >> 1]) << 8) xor (uint64(p[n - 1]) << 16)
+    }
+    h=h * 0xBF58476D1CE4E5B9
+    (h xor (h >> 32)) transmute int64
+}
+
+# a[0..n) and b[0..n) hold the same bytes (words, then the last word overlapping)
+same_bytes=(a:ptr<uint8> b:ptr<uint8> n:int64):>bool=>$unsafe {
+    if n >=? 8 {
+        let last=n - 8
+        let i:int64=0
+        loop i <? last {
+            if ((a + i) as ptr<uint64>)[0] not=? ((b + i) as ptr<uint64>)[0] {return false}
+            i+=8
+        }
+        return ((a + last) as ptr<uint64>)[0] =? ((b + last) as ptr<uint64>)[0]
+    }
+    if n >=? 4 {
+        return (a as ptr<uint32>)[0] =? (b as ptr<uint32>)[0] and ((a + (n - 4)) as ptr<uint32>)[0] =? ((b + (n - 4)) as ptr<uint32>)[0]
+    }
+    if n >=? 2 {
+        return (a as ptr<uint16>)[0] =? (b as ptr<uint16>)[0] and ((a + (n - 2)) as ptr<uint16>)[0] =? ((b + (n - 2)) as ptr<uint16>)[0]
+    }
+    if n >? 0 {return a[0] =? b[0]}
+    true
+}
+
+# the id of the name at p[0..n), whose hash_bytes is h, or -1 when the table does not have it
+# (a lookup with no string in hand: an existing name costs no reference counting)
+name_find=(@texts:array<string> @hashes:array<int64> @slots:array<int32> p:ptr<uint8> n:int64 h:int64):>int64=>$unsafe {
+    let size=slots.length
+    if size =? 0 {return -1}
+    let mask=size - 1
+    let sp=slots.ptr
+    let hp=hashes.ptr
+    let i=h & mask
+    loop true {
+        let e=int64(sp[i])
+        if e =? 0 {return -1}
+        let id=e - 1
+        if hp[id] =? h and (texts[id] as array<uint8>).length =? n and same_bytes((texts[id] as array<uint8>).ptr p n) {return id}
+        i=if i <? mask i + 1 else 0
+    }
+}
+
+# a new id for name, which the table does not have; h is its hash_bytes
+name_add=(@texts:array<string> @hashes:array<int64> @slots:array<int32> name:string h:int64):>int64=>{
+    if slots.length =? 0 {
+        slots=fill(int32(0) 1 << 14)
+        # (name 0 is "", whose hash is 0: 0 stands for no name)
+        name_add(@texts @hashes @slots "" 0);
+        if (name as array<uint8>).length =? 0 {return 0}
+    }
+    let mask=slots.length - 1
+    let i=h & mask
+    loop slots[i] not=? 0 {i=if i <? mask i + 1 else 0}
+    let id=texts.length
+    texts.push(name)
+    hashes.push(h)
+    slots[i]=int32(id + 1)
+    if texts.length * 2 >? slots.length {
+        # (grown: every id placed again)
+        slots=fill(int32(0) slots.length * 2)
+        let m2=slots.length - 1
+        loop k in [0..texts.length) {
+            let j=hashes[k] & m2
+            loop slots[j] not=? 0 {j=if j <? m2 j + 1 else 0}
+            slots[j]=int32(k + 1)
+        }
+    }
+    id
+}
