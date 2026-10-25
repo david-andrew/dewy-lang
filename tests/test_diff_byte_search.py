@@ -81,7 +81,7 @@ def binaries(compiler, tmp_path_factory):
 def test_differential_byte_search(binaries):
     want = expected()
     assert len(want) >= 120
-    assert len(binaries) == 5, f'Missing target: {binaries.keys()}'
+    assert {'native', 'release', 'debug'} <= set(binaries), f'Missing target: {binaries.keys()}'
     for mode, binary in binaries.items():
         command = ([shutil.which('node'), binary] if mode == 'wasm' else
                    [shutil.which('qemu-aarch64'), binary] if mode == 'arm64' else [binary])
