@@ -1,0 +1,36 @@
+# Pool calls change their own pool only: another global pool's membership
+# survives them, and an array search of handles changes nothing. A direct
+# update after a membership guard needs nothing more of its caller.
+Item:type = [name:string qty:int64]
+Player:type = [name:string items:array<Handle>]
+let items:Pool<Item> = []
+let players:Pool<Player> = []
+give = (p:Handle name:string) => {
+    if not players.has(p) return
+    let h = items.add(Item[name 3])
+    let pl = players[p]
+    pl.items.push(h)
+    players[p] = pl
+}
+use = (p:Handle h:Handle) => {
+    if not players.has(p) or not items.has(h) return
+    items[h].qty -= 1
+    if items[h].qty >? 1 return
+    items.remove(h);
+    let pl = players[p]
+    let i = pl.items.index_of(h)
+    if i isnt? Missing pl.items.pop(i);
+    players[p] = pl
+}
+let ann = players.add(Player["Ann" []])
+give(ann "wood")
+let before = players.get(ann)
+if before isnt? none {
+    loop h in before.items {
+        use(ann h)
+        use(ann h)
+    }
+}
+let after = players.get(ann)
+if after isnt? none printl(after.items.length)
+printl(items.length)

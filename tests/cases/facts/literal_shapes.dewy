@@ -1,0 +1,10 @@
+# Literal arrays of arrays or tuples: their elements' lengths and component
+# ranges, in loops and at unknown indexes.
+loop [x y z] in [[1 2 3] [4 5 6]] printl(x + y + z)
+let grid = [[1 2 3] [4 5 6] [7 8 9]]
+loop [x y] in [[1 0] [2 2]] printl(grid[y][x])
+let cells:array<[int64 int64]> = [[1 0] [2 1] [0 2]]
+loop [x y] in cells printl(grid[y][x])
+const DIRS = [[1 0] [-1 0] [0 1] [0 -1]]
+loop [dx dy] in DIRS printl(grid[1 + dy][1 + dx])
+loop i in [0..grid.length) printl(grid[i][2])

@@ -304,13 +304,16 @@ dir_defer = (n: int, what: str, deferrable: bool) -> bool:
     p = nodes[n].pos
     # (`pool[h].hp -= 1` indexes `items` at `__pool_index`'s answer: the
     # library's invariant, which keeps its check, as the library's own do)
-    policy = if nodes[n].kind == .index and has_flag(n, NF_LIB_INDEX): DIR_IMPLICIT else: dir_policy(p)
+    lib_index = nodes[n].kind == .index and has_flag(n, NF_LIB_INDEX)
+    policy = if lib_index: DIR_IMPLICIT else: dir_policy(p)
     if policy == DIR_STATIC: return false
     err_notes = []
     dir_sites.push(DirSite(p, what, policy))
     owner = fact_retry_owner
     if fact_owner > 0: owner = fact_owner
-    if policy != DIR_IMPLICIT or not pos_in_lib(p): effect_panic_note(owner, n, what, fact_deferred.has(owner))
+    # (a pool update's own failure is its `__pool_index` membership, an obligation of its
+    # own: the index it answers is the library's invariant, no panic of the caller's)
+    if (policy != DIR_IMPLICIT or not pos_in_lib(p)) and not lib_index: effect_panic_note(owner, n, what, fact_deferred.has(owner))
     if fact_deferred.has(owner):
         pending = fact_deferred_checks.get(owner) ?? []
         pending.push(n)

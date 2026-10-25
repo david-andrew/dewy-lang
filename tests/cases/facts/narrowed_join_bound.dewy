@@ -1,0 +1,20 @@
+# A bound copied from a narrowed result and raised on one path keeps its
+# order on both; a search from a start finds at or after it.
+pick = (n:int64):>int64 | Missing => if n >? 2 n else Missing
+cut = (t:string lo:int64):>string => {
+    if not (0 <=? lo <=? t.length) return ""
+    let o = pick(t.length)
+    if o is? Missing return ""
+    let hi = o
+    if hi <? lo hi = lo
+    if hi >? t.length return ""
+    t[lo..hi)
+}
+before = (t:string pos:int64):>string => {
+    if not (0 <=? pos <=? t.length) return ""
+    let o = t.find("x" pos)
+    if o is? Missing return ""
+    "{t[pos..o)}|{t[$clamp pos..o)}"
+}
+printl(cut("abcxdef" 1))
+printl(before("abcxdef" 1))

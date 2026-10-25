@@ -6,14 +6,14 @@ render = (template:string vars:dict<string string>):>string => {
     let out:array<string> = []
     let pos = 0
     loop pos <=? template.length {
-        let open = template.find("\{\{" pos) ?? -1
-        if open <? 0 {
+        let open = template.find("\{\{" pos)
+        if open is? Missing {
             out.push(template[pos..])
             break
         }
-        out.push(template[$clamp pos..open))
-        let close = template.find("\}\}" open) ?? -1
-        if close <? 0 {
+        out.push(template[pos..open))
+        let close = template.find("\}\}" open)
+        if close is? Missing {
             out.push(template[open..])
             break
         }

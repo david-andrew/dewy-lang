@@ -1,5 +1,5 @@
-# The library check of a parameter pool's direct update names the handle's
-# membership, not the pool's internal storage.
+# A parameter pool's direct update after its membership guard asks nothing
+# of its caller: the index it answers is the pool library's invariant.
 Item:type = [qty:int64]
 use = (@items:Pool<Item> h:Handle) => {
     if not items.has(h) return

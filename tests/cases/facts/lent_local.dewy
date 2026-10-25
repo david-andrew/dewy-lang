@@ -1,0 +1,13 @@
+# A local passed once by `@` is lent to that call only: later calls keep
+# what is known of it, while the lending call's own writes still count.
+add2 = (@xs:array<int64>) => { xs.push(1); xs.push(2) }
+main = () => {
+    let q:array<int64> = [1 2 3]
+    add2(@q)
+    q.sort()
+    if q.length >? 4 {
+        printl("five")
+        q.push(7)
+        printl(q[4])
+    }
+}

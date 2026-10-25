@@ -1,0 +1,10 @@
+# A field of an unchanged binding is one dictionary key wherever it is read.
+Sale:type = [region:string units:int64]
+main = () => {
+    let by_region:dict<string array<int64>> = []
+    loop s in [Sale["n" 1] Sale["s" 2] Sale["n" 3]] {
+        if s.region not in? by_region by_region[s.region] = []
+        by_region[s.region].push(s.units)
+    }
+    printl(by_region)
+}

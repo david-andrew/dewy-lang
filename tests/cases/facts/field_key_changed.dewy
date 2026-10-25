@@ -1,0 +1,9 @@
+# A field written after the guard is another key.
+Sale:type = [region:string units:int64]
+main = () => {
+    let counts:dict<string int64> = []
+    let t = Sale["q" 1]
+    if t.region not in? counts counts[t.region] = 0
+    t.region = "zz"
+    counts[t.region] += 1
+}

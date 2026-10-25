@@ -6497,7 +6497,7 @@ check_program = (main_path: str):
     if ts_dewy and prelude_named(["mutex", "Mutex", "lock_all", "Busy", "DuplicateLock"]): dewy_prelude_module(intern("mutex"))
     if ts_dewy and prelude_named(["channel", "Channel", "Closed"]): dewy_prelude_module(intern("channel"))
     # (the certified protocols are built on channels: theirs load first)
-    if ts_dewy and prelude_named(["serve", "Service", "pipeline"]):
+    if ts_dewy and prelude_named(["serve", "Service", "pipeline"], true):
         dewy_prelude_module(intern("channel"))
         concurrency_protocol_module = dewy_prelude_module(intern("serve"))
     prepare_nominals()
@@ -6884,9 +6884,12 @@ check_program = (main_path: str):
 # channels': a name some source has, and that no module of the program declares itself, as a
 # program's own `Mutex` type): a probe per name, then a lookup per module only for a name some
 # source has.
-prelude_named = (probes: str[]) -> bool:
+prelude_named = (probes: str[], families: bool = false) -> bool:
     loop nm in probes:
         if not name_known(nm): continue
+        # (a protocol's name reaches the prelude's family even beside a module's own:
+        # collect_fns loads its module then, too late for the nominals it uses)
+        if families and nm[0] >= 'a' and nm[0] <= 'z': return true
         id = intern(nm)
         own = false
         loop m in [0..modules.len()):

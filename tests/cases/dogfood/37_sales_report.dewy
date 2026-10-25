@@ -39,9 +39,8 @@ printl"{sales.length} sales"
 # group by region
 let by_region:dict<string array<Sale>> = []
 loop s in sales {
-    let region = s.region
-    if region not in? by_region by_region[region] = []
-    by_region[region].push(s)
+    if s.region not in? by_region by_region[s.region] = []
+    by_region[s.region].push(s)
 }
 
 printl""
@@ -96,11 +95,10 @@ loop p in products {
 let price_sum:dict<string float64> = []
 let price_n:dict<string int64> = []
 loop s in sales {
-    let product = s.product
-    if product not in? price_sum price_sum[product] = 0.0
-    if product not in? price_n price_n[product] = 0
-    price_sum[product] += s.price
-    price_n[product] += 1
+    if s.product not in? price_sum price_sum[s.product] = 0.0
+    if s.product not in? price_n price_n[s.product] = 0
+    price_sum[s.product] += s.price
+    price_n[s.product] += 1
 }
 printl""
 loop [p total] in price_sum {

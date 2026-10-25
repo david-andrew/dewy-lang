@@ -1,0 +1,11 @@
+# Removing a handle from its pool ends its membership, whatever else changed.
+Item:type = [name:string]
+let items:Pool<Item> = []
+let other:Pool<Item> = []
+f = (h:Handle) => {
+    if not items.has(h) return
+    other.add(Item["x"])
+    items.remove(h);
+    printl(items[h].name)
+}
+f(items.add(Item["a"]))

@@ -271,7 +271,9 @@ dp_scanned = false
 dp_paths: str[]                 # file -> path
 dp_mods: int[]                  # file -> its module once loaded, or -1
 dp_loaded: int[]                # the loaded modules (Dewy modules initialize after them)
-dp_names: {int: int}            # name -> the file declaring it
+# name -> the file declaring it. (Not interned: an interned name is one some source read so far
+# names, which prelude_named asks; a name only the prelude declares is not one.)
+dp_names: {str: int}
 
 dp_scan = ():
     dp_scanned = true
@@ -289,14 +291,16 @@ dp_scan = ():
         dp_mods.push(-1)
         r = scan_source(src!)
         loop x in [su_name0[r.0]..su_name0[r.1]):
-            name = intern_sub(src!, su_name_at[x], su_name_len[x])
-            if not is_private(name) and dp_names.get(name) == none: dp_names[name] = f
+            at = su_name_at[x]
+            if su_name_len[x] == 0 or src![at] == '_': continue
+            name = src![at..at + su_name_len[x])
+            if dp_names.get(name) == none: dp_names[name] = f
     ic_restore(icb)
 
 # The Dewy prelude module declaring name (loaded on first use), or -1
 dewy_prelude_module = (name: int) -> int:
     if not dp_scanned: dp_scan()
-    f = dp_names.get(name) ?? -1
+    f = dp_names.get(name_of(name)) ?? -1
     if f < 0: return -1
     m = dp_mods[f]
     if m < 0:
@@ -324,7 +328,7 @@ dewy_prelude_module = (name: int) -> int:
 # indexes only, so nothing is loaded or parsed (a splat import's shadowing warning)
 prelude_source = (name: int) -> str:
     if not dp_scanned: dp_scan()
-    if let f = dp_names.get(name): return prelude_shown_path(dp_paths[f])
+    if let f = dp_names.get(name_of(name)): return prelude_shown_path(dp_paths[f])
     if let s = prelude.get(name):
         if syms[s].decl != 0: return prelude_shown_path(files[pos_file(nodes[int(syms[s].decl)].pos)].path)
     if pn_slots.len() != 0:

@@ -1,0 +1,9 @@
+# The call a local is lent to may change it.
+clear_all = (@xs:array<int64>) => xs.clear()
+main = () => {
+    let q:array<int64> = [1 2 3]
+    if q.length >? 2 {
+        clear_all(@q)
+        printl(q[2])
+    }
+}

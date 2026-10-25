@@ -8,8 +8,8 @@ let items:Pool<Item> = []
 let players:Pool<Player> = []
 
 give = (p:Handle name:string kind:string qty:int64 value:int64) => {
-    let h = items.add(Item[name kind qty value])
     if not players.has(p) return
+    let h = items.add(Item[name kind qty value])
     let pl = players[p]
     pl.items.push(h)
     players[p] = pl
@@ -40,17 +40,15 @@ find_item = (p:Handle name:string):>Handle? => {
 consume = (p:Handle name:string qty:int64):>bool => {
     let h = find_item(p name)
     if h is? none or not items.has(h) return false
-    let it = items[h]
-    if it.qty <? qty return false
-    it.qty -= qty
-    items[h] = it
-    if it.qty =? 0 {
+    if items[h].qty <? qty return false
+    items[h].qty -= qty
+    if items[h].qty =? 0 {
         items.remove(h);
         if not players.has(p) return true
         let pl = players[p]
         let idx = pl.items.index_of(h)
-        if idx isnt? Missing and idx <? pl.items.length pl.items.pop(idx);
-        if players.has(p) players[p] = pl
+        if idx isnt? Missing pl.items.pop(idx);
+        players[p] = pl
     }
     true
 }
@@ -82,13 +80,13 @@ trade = (seller:Handle buyer:Handle name:string price:int64):>bool => {
     let b = players[buyer]
     if b.gold <? price return false
     let idx = s.items.index_of(h)
-    if idx is? Missing or idx >=? s.items.length return false
+    if idx is? Missing return false
     s.items.pop(idx);
     s.gold += price
     b.items.push(h)
     b.gold -= price
-    if players.has(seller) players[seller] = s
-    if players.has(buyer) players[buyer] = b
+    players[seller] = s
+    players[buyer] = b
     printl"{s.name} sold {name} to {b.name} for {price}g"
     true
 }

@@ -1,8 +1,8 @@
 # Grid simulations: Conway's game of life on a small torus, flood fill
 # of regions on a map, and counting islands with a BFS.
 
-const W = 10
-const H = 8
+W = 10
+H = 8
 
 make_grid = (w:int64 h:int64):>array<array<bool>> => {
     let g:array<array<bool>> = []
@@ -46,7 +46,7 @@ step = (g:array<array<bool>>):>array<array<bool>> => [
 
 let life = make_grid(W H)
 # a glider and a blinker
-let for_cells:array<[int64 int64]> = [[1 0] [2 1] [0 2] [1 2] [2 2] [7 4] [7 5] [7 6]]
+let for_cells = [[1 0] [2 1] [0 2] [1 2] [2 2] [7 4] [7 5] [7 6]]
 loop [x y] in for_cells {
     if 0 <=? y <? life.length and 0 <=? x <? life[y].length life[y][x] = true
 }
@@ -101,7 +101,7 @@ loop r in rows printl(r.join(""))
 
 # count islands of '#' with BFS, labelling each with a letter
 const LABELS = "ABCDEFGHIJ"
-const DIRS:array<[int int]> = [[1 0] [-1 0] [0 1] [0 -1]]
+const DIRS = [[1 0] [-1 0] [0 1] [0 -1]]
 let seen:set<[int64 int64]> = set[]
 let islands = 0
 loop y in 0.. and row in rows {

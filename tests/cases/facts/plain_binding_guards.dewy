@@ -1,0 +1,17 @@
+# A plain top-level binding (not const) keeps guards on `@` parameters,
+# script bindings and dictionary keys proving.
+W = 10
+flood = (@grid:array<array<string>> sx:int64 sy:int64):>int64 => {
+    if not (0 <=? sy <? grid.length and 0 <=? sx <? grid[sy].length) return 0
+    grid[sy][sx] = "~"
+    1
+}
+let rows:array<array<string>> = [["a" "b"] ["c" "d"]]
+printl(flood(@rows 1 W - 9))
+let seen:dict<string int64> = []
+loop w in ["a" "b" "a"] {
+    if w not in? seen seen[w] = 0
+    seen[w] += 1
+}
+printl(rows)
+printl(seen)
