@@ -898,18 +898,20 @@ class Comp(Expr):
 
     def eval(self, m, env):
         result = {} if self.ty.kind == 'dict' else DSet(()) if self.ty.kind == 'set' else []
+        key_ty = self.ty.args[0] if self.ty.kind == 'dict' else None
+        value_ty = self.ty.args[-1] if self.ty.args else self.value.ty
         for item in iterate(m.eval(self.source, env), len(self.names)):
             m.tick()
             local = Scope(dict(zip(self.names, item)), env)
             if self.guard is not None and not m.eval(self.guard, local):
                 continue
             if self.key is not None:
-                key = m.eval(self.key, local)
-                result[key] = copy.deepcopy(m.eval(self.value, local))
+                key = store(m.eval(self.key, local), key_ty)
+                result[key] = copy.deepcopy(store(m.eval(self.value, local), value_ty))
             elif isinstance(result, DSet):
-                result.items.setdefault(m.eval(self.value, local))
+                result.items.setdefault(store(m.eval(self.value, local), value_ty))
             else:
-                result.append(copy.deepcopy(m.eval(self.value, local)))
+                result.append(copy.deepcopy(store(m.eval(self.value, local), value_ty)))
         return result
 
 
@@ -2854,6 +2856,8 @@ def fill_asserts(program: Program) -> Program:
             value = observed.get(node.tag)
             if value is None and node.tag not in observed:
                 return _Seq(())  # never executed
+            if node.expr.ty in (I, U) and wrap(value, node.expr.ty) != value:
+                return _Seq(())  # an exact result past the type has no literal of that type
             return replace(node, expected=Lit(node.expr.ty, value))
         return node
     filled = transform(program, fill)
