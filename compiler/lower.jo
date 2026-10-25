@@ -7874,10 +7874,11 @@ begin_fn = (name: str, idx: int):
 
 find_ids: int[]
 # (the bytes Op.findb looks for, packed, for a runtime function so made (lib/core/str.jo); -1:
-# not one)
+# not one; -2: the dynamic-byte __memchr)
 find_bytes_set = (name: int) -> int:
     if find_ids.len() == 0:
-        loop nm in ["__find_delim", "__find_newline", "__find_line_delim", "__find_line_delim4", "__find_line_delim8"]: find_ids.push(intern(nm))
+        loop nm in ["__find_delim", "__find_newline", "__find_line_delim", "__find_line_delim4", "__find_line_delim8", "__memchr"]: find_ids.push(intern(nm))
+    if name == find_ids[5]: return -2
     delims = 0x0A | (0x22 << 8) | (0x23 << 16) | (0x27 << 24)
     if name == find_ids[0]: return delims
     if name == find_ids[1]: return 0x0A0A0A0A
@@ -7916,8 +7917,24 @@ lower_inst = (lf: int, f: int):
     if refine_active: refine_gen_entry(f)
     ir.ret = ret_vt(cur_ret)
     if fns[f].decl != 0 and not target_arm64 and not target_wasm and not dbg_on and modules[int(fns[f].mod)].is_prelude:
-        # (the declaration scanner's searches, lib/core/str.jo: sixteen bytes at a time)
+        # Private bounded byte searches from lib/core/str.jo.
         set = find_bytes_set(int(nodes[int(fns[f].decl)].name))
+        if set == -2:
+            # __memchr(p, from, n, byte): guard the span before subtracting or
+            # forming its address. The intrinsic returns a relative offset.
+            ir.raw_mem = true
+            e_if(e_bin(.ges, VI, 1, 2))
+            e_ret(e_iconst(-1))
+            e_end()
+            pointer = e_bin(.add, VI, 0, 1)
+            length = e_bin(.sub, VI, 2, 1)
+            result = vreg(VI)
+            emit(.findbyte, VI, result, pointer, length, 3, 0)
+            e_if(e_bin(.ges, VI, result, e_iconst(0)))
+            e_ret(e_bin(.add, VI, result, 1))
+            e_end()
+            e_ret(e_iconst(-1))
+            return
         if set >= 0:
             ir.raw_mem = true
             result = vreg(VI)

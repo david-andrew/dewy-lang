@@ -2080,6 +2080,85 @@ emit_memeq = (d: int, a: int, bb: int, count: int, flags: bool = false, strings:
     st(d, RAX)
     x_loop_depth = enclosing_depth
 
+# Dynamic byte search. Only scratch rax/rcx/rdx, xmm0/xmm1 and the destination
+# are clobbered. Unaligned vector reads stay inside the supplied span; the
+# tail uses one bounded eight-byte load and 0..7 scalar reads, including
+# spans ending at a guard page.
+emit_findbyte = (d: int, p: int, n: int, byte: int):
+    if vloc[d] == LOC_NONE: return
+    mask = dreg(d, R11)
+    saved = vloc[d] < 0
+    if saved: b16(0x5341)                    # push r11
+    ld(RCX, p)
+    ld(RDX, n)
+    ld(RAX, byte)
+    sse_rr(0x66, 0x6E, 1, RAX)              # movd xmm1, eax
+    mov_imm(RAX, 0)                         # offset from the original p
+    cmp_branch_pad(10)
+    b24(0xFA8348); b(8)                     # cmp rdx, 8
+    short = jcc32(CC_L)
+    sse_rr(0x66, 0x60, 1, 1)                # replicate the low byte
+    sse_rr(0x66, 0x61, 1, 1)
+    sse_rr(0x66, 0x70, 1, 1); b(0)
+    cmp_branch_pad(10)
+    b24(0xFA8348); b(16)
+    word = jcc32(CC_L)
+    nop_pad((16 - code.len() % 16) % 16)
+    top = code.len()
+    sse_rm(0xF3, 0x6F, 0, RCX, 0)           # movdqu xmm0, [rcx]
+    sse_rr(0x66, 0x74, 0, 1)                # pcmpeqb
+    sse_rr(0x66, 0xD7, mask, 0)             # pmovmskb
+    cmp_branch_pad(9)
+    op_rr(0x85, false, mask, mask)
+    found = jcc32(CC_NE)
+    lea(RAX, RAX, 16)
+    lea(RCX, RCX, 16)
+    lea(RDX, RDX, -16)
+    cmp_branch_pad(10)
+    b24(0xFA8348); b(16)
+    patch_branch(jcc32(CC_GE), top)
+    cmp_branch_pad(10)
+    b24(0xFA8348); b(8)
+    tail_short = jcc32(CC_L)
+    patch_here(word)
+    sse_rm(0xF3, 0x7E, 0, RCX, 0)           # movq: only eight bytes are readable
+    sse_rr(0x66, 0x74, 0, 1)
+    sse_rr(0x66, 0xD7, mask, 0)
+    # movq zeroes the upper lanes. Ignore them, also when searching for NUL.
+    rex(false, 0, 0, mask, false)
+    b(0x81); modrr(4, mask); b32(255)
+    found_word = jcc32(CC_NE)
+    lea(RAX, RAX, 8)
+    lea(RCX, RCX, 8)
+    lea(RDX, RDX, -8)
+    patch_here(short)
+    patch_here(tail_short)
+    op_rr(0x01, true, RAX, RDX)             # end offset = offset + remainder
+    sse_rr(0x66, 0x7E, 1, mask)             # movd mask32, xmm1 (the byte)
+    tail = code.len()
+    cmp_branch_pad(9)
+    op_rr(0x39, true, RDX, RAX)
+    absent = jcc32(CC_GE)
+    cmp_branch_pad(9)
+    rex(false, mask, 0, RCX, true)
+    b(0x38); mem(mask, RCX, 0)              # cmp byte [rcx], mask8
+    equal = jcc32(CC_E)
+    lea(RAX, RAX, 1)
+    lea(RCX, RCX, 1)
+    jmp_back(tail)
+    patch_here(found)
+    patch_here(found_word)
+    rex(false, mask, 0, mask, false)
+    b16(0xBC0F); modrr(mask, mask)          # bsf (the mask is nonzero)
+    op_rr(0x01, true, mask, RAX)
+    done = jmp32()
+    patch_here(absent)
+    mov_imm(RAX, -1)
+    patch_here(equal)
+    patch_here(done)
+    if saved: b16(0x5B41)                   # pop r11
+    st(d, RAX)
+
 # The first k in [i, n) whose byte p[k] is one of four (set: packed, low byte first), or n:
 # sixteen bytes at a time (pcmpeqb against each, pmovmskb, bsf), then byte by byte. With bit 32
 # of set, byte 0 (a line end) counts only before a line indented by at most w columns (bits
@@ -2295,6 +2374,7 @@ emit_ins = (pos: int, ins: *Ins):
         gaddr, daddr: x_emit_gaddr(pos, ins)
         faddr: x_emit_faddr(pos, ins)
         memeq, streq: x_emit_memeq(pos, ins)
+        findbyte: emit_findbyte(int(ins.dst), int(ins.a), int(ins.b), int(ins.c))
         findb: x_emit_findb(pos, ins)
         copy: x_emit_copy(pos, ins)
         zero: x_emit_zero(pos, ins)

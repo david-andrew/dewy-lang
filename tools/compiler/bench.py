@@ -28,7 +28,7 @@ BENCH = ROOT / 'bench'
 SCRATCH = ROOT / '__dewycache__' / 'bench'
 # Input size per kernel (roughly 5-400 ms each in C).
 COUNTS = {'callbacks_literal': 1000000, 'callbacks': 1000000, 'game': 5000000, 'helpers': 500000, 'arrays': 10000000, 'records': 1000000, 'records_nested': 1000000,
-          'text': 10000000, 'graph': 1000000, 'dict_words': 2000000, 'string_equal': 10000000, 'match_dispatch': 10000000,
+          'byte_find': 20000, 'text': 10000000, 'graph': 1000000, 'dict_words': 2000000, 'string_equal': 10000000, 'match_dispatch': 10000000,
           'branch_dispatch': 10000000, 'managed_params': 10000000, 'method_params': 10000000,
           'shifted_arrays': 100000, 'case_conversion': 20000, 'array_swap': 10000000,
           'integer_parse': 2000000, 'recursive_list': 20000, 'recursive_tree': 2000000, 'broadcast': 1000, 'arena': 10000, 'name_table': 1000000, 'push': 5000000}
@@ -37,7 +37,7 @@ MODES = ('default', 'release')
 C_SOURCE = {'records_nested': 'records'}
 # Checksums at size 1000, for the correctness suite.
 CHECKSUMS_1000 = {'callbacks_literal': 311536, 'callbacks': 155768, 'game': 2096, 'helpers': 985290002, 'arrays': 876830114, 'records': 649125068,
-                  'text': 681360428, 'graph': 740553269, 'dict_words': 401322948, 'string_equal': 171284, 'match_dispatch': 29443,
+                  'byte_find': 2047000, 'text': 681360428, 'graph': 740553269, 'dict_words': 401322948, 'string_equal': 171284, 'match_dispatch': 29443,
                   'branch_dispatch': 517766884, 'managed_params': 250508, 'method_params': 250508,
                   'shifted_arrays': 2100736000, 'case_conversion': 17080000, 'array_swap': 888753138,
                   'integer_parse': 33285884, 'broadcast': 2478937617244, 'arena': 156973339,

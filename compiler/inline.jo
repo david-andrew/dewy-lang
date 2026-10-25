@@ -164,6 +164,9 @@ inlinable = (f: IrFn) -> int:
             # Match the existing string helper plus its bounded comparison.
             size += 81
             has_loop = true
+        if ins.op == .findbyte:
+            size += 30
+            has_loop = true
         if ins.op == .memeq:
             # A variable-length comparison expands to several size cases and
             # a vector loop. Charge it as a substantial body, not one scalar

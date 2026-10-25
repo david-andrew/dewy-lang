@@ -1,0 +1,13 @@
+# Search long text for a delimiter or an absent byte, alternating both paths.
+from p"harness.dewy" import size_argument, clock
+main=(args:array<string>):>void=>{
+    let count=size_argument(args 20000)
+    let padding=repeat("a" 4095)
+    let text="{padding}\n"
+    let result:int64=0
+    let started=clock()
+    loop i in [0..count) {result+=find_byte(text if i%2=?0 b'\n' else b'!')}
+    let finished=clock()
+    printl"{result} {finished-started}"
+}
+$runtime_checks
