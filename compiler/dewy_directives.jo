@@ -93,7 +93,12 @@ dw_dir_statement = (statement: int, start: int, end: int, module: bool) -> bool:
         dw_dir_define(name, tag, value)
         return true
     if not dw_dir_name(name): return false
-    enabled = dw_dir_boolean(name, value)
+    dw_dir_apply(name, dw_dir_boolean(name, value), dewy_syntax[tag].pos, start, end, module)
+    true
+
+# A setting or bundle `$name` (enabled 1) or `$name=false` (0) written at `at`, for the scope
+# [start, end] (the direct grammar's top-level settings come here too: dc_setting).
+dw_dir_apply = (name: str, enabled: int, at: int, start: int, end: int, module: bool):
     # (a bundle with `$explicit_allocation_failure` sets that module policy too; opting a
     # nested scope out leaves the module's policy in place)
     b = dir_bundle_index(intern(name))
@@ -101,11 +106,9 @@ dw_dir_statement = (statement: int, start: int, end: int, module: bool) -> bool:
         chain: int[]
         dir_bundle_resolve(b, chain)
         if dir_bundles[b].allocation_failure:
-            at = dewy_syntax[tag].pos
             if not module: fatal(at, "`${name}` includes `$explicit_allocation_failure`, a module policy: put it at the top of a module")
             if not oom_files.has(pos_file(at)): oom_module(pos_file(at), at)
-    dir_set(intern(name), enabled, start, end, dewy_syntax[tag].pos)
-    true
+    dir_set(intern(name), enabled, start, end, at)
 
 # The last source position inside a syntax tree (a scope's end).
 dw_dir_last = (id: int) -> int:
@@ -123,7 +126,8 @@ dw_dir_node_last = (n: int) -> int:
     if n <= 0 or n >= nodes.len(): return 0
     last = nodes[n].pos
     mask = isolation_children(nodes[n].kind)
-    if mask < 0: mask = 1 | 2 | 4 | 16
+    # (a lambda's body is inside the scope too)
+    if mask < 0 or nodes[n].kind == .lambda: mask = 1 | 2 | 4 | 16
     if mask & 1 != 0: last = max(last, dw_dir_node_last(int(nodes[n].a)))
     if mask & 2 != 0: last = max(last, dw_dir_node_last(int(nodes[n].b)))
     if mask & 4 != 0: last = max(last, dw_dir_node_last(int(nodes[n].c)))
@@ -138,6 +142,10 @@ dw_target_dropped_node = (n: int):
     if n <= 0 or n >= nodes.len(): return
     if nodes[n].kind == .ident: dw_target_dropped_name(int(nodes[n].name), nodes[n].pos)
     mask = isolation_children(nodes[n].kind)
+    # (a lambda's body and captures use names too)
+    if nodes[n].kind == .lambda:
+        mask = 1 | 2 | 4 | 16
+        loop c in kids2(n): dw_target_dropped_node(c)
     if mask < 0: mask = 1 | 2 | 4 | 16
     if mask & 1 != 0: dw_target_dropped_node(int(nodes[n].a))
     if mask & 2 != 0: dw_target_dropped_node(int(nodes[n].b))

@@ -3574,6 +3574,11 @@ dw_top_declarations_inner = (id: int) -> int[]:
     if dw_unsafe_directive(declaration): return dw_top_declarations(dw_unsafe_scope(declaration))
     # (a directly built overload group: its member declarations)
     if dewy_syntax[declaration].kind == .compact_stmt and dewy_syntax[declaration].children.len() > 0: return dewy_syntax[declaration].children
+    # (a module setting the direct grammar read: dc_setting)
+    if dewy_syntax[declaration].kind == .compact_stmt and dewy_syntax[declaration].text != "":
+        file = pos_file(dewy_syntax[declaration].pos)
+        dw_dir_apply(dewy_syntax[declaration].text, int(dewy_syntax[declaration].child_right), dewy_syntax[declaration].pos, dir_module_start(file), dir_module_end(file), true)
+        return []
     if dw_op(declaration) == .statement_end: declaration = dw_unwrap(dw_child(declaration, 1))
     if dw_target_live(declaration) >= 0:
         spliced: int[]
