@@ -32,6 +32,8 @@ FROZEN_TWINS = {'zip.dewy': 'zip.jo', 'spelling.dewy': 'spelling.jo', 'leb128.de
                'dewy_lex.dewy': 'dewy_lex.jo', 'module_paths.dewy': 'module_paths.jo',
                'dewy_syntax.dewy': 'dewy_syntax.jo', 'dewy_grammar.dewy': 'dewy_grammar.jo',
                'dewy_scan.dewy': 'dewy_scan.jo', 'dewy_parser.dewy': 'dewy_parser.jo',
+               'dewy_builders.dewy': 'dewy_builders.jo', 'dewy_walk.dewy': 'dewy_walk.jo',
+               'dewy_reach.dewy': 'dewy_reach.jo',
                'node_store.dewy': 'node_store.jo', 'intern.dewy': 'intern.jo'}
 
 
@@ -83,7 +85,7 @@ def build(output: Path, *, seed: Path | None = None, bootstrap: bool = False) ->
     if bootstrap:
         # Build the implementation-language frontend first. This permits the
         # main compiler to use features outside the intentionally small C seed.
-        bootstrap_modules = ('frontend.jo', 'dewy_fmt.jo')
+        bootstrap_modules = ('frontend.jo', 'dewy_fmt.jo', 'dewy_context.jo')
         for name in bootstrap_modules:
             shutil.copy2(ROOT / 'bootstrap' / name, output / 'compiler' / name)
         stage0 = output / 'stage0/sloppy0'

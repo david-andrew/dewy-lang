@@ -1,0 +1,77 @@
+# Same construction script against the Dewy leaf or its frozen Jo twin.
+use '../../../compiler/dewy_builders.jo'
+use '../../../compiler/node_store.dewy'
+
+ns: Node[] = [Node()]
+runs: i32[]
+texts: str[] = [""]
+used: {int: bool} = {}
+
+name_id = (text: str) -> int:
+    loop i in [0..texts.len()):
+        if texts[i] == text: return i
+    texts.push(text)
+    print("intern {text}")
+    texts.len() - 1
+unsupported = (pos: int, text: str) -> int:
+    print("unsupported {pos} {text}")
+    -77
+host = ParserBuilderHost(name_id, unsupported)
+
+dump = (result: int):
+    print("result {result}")
+    loop i in [0..ns.len()):
+        d = ns[i]
+        print("{i} {d.kind} {d.op} {d.flags} {d.pos} {d.a} {d.b} {d.c} {d.d} {d.list} {d.nlist} {d.list2} {d.nlist2} {d.name} {d.sval} {d.ival} {d.fval} {d.type} {d.sym} {d.aux} {d.aux2} {d.mod}")
+    print("{runs}")
+    print("{texts}")
+
+parameter = (name: str, shape: bool, mutable: bool, destructured: bool, pos: int) -> int:
+    p = node_mk(ns, .param, pos)
+    ns[p].name = i32(name_id(name))
+    if mutable: ns[p].flags = 1
+    if destructured: node_set_list(ns, runs, p, [db_singleton_value(ns, name_id("x"), pos), db_singleton_value(ns, name_id("y"), pos)])
+    if shape:
+        t = node_mk(ns, .tarray, pos)
+        ns[t].ival = 1
+        node_set_list(ns, runs, t, [db_singleton_value(ns, name_id("m"), pos), db_singleton_int(ns, 7, pos)])
+        ns[p].a = i32(t)
+    p
+
+main = ():
+    renamed = [name_id("printl"), name_id("print"), name_id("print"), name_id("__dewy_print"), name_id("int"), name_id("__dewy_int"), name_id("bigint")]
+    loop i in [0..texts.len()): print("map {i} {db_value_name(renamed, i32(i), 19)}")
+    loop name in ["int64", "uint64", "int32", "uint32", "int16", "uint16", "int8", "uint8", "float64", "float32", "string", "set", "int", "bigint", "addr", "ordinary"]: print("type {name} {db_type_name(name)}")
+    loop round in [0..64):
+        ns = [Node()]
+        runs = []
+        pos = (round + 1) * 10000000007
+        a = db_singleton_int(ns, -round - 1, pos)
+        dump(a)
+        b = db_singleton_value(ns, name_id("x"), pos + 1)
+        dump(b)
+        c = db_singleton_bound(ns, 17 + round, a, b, pos)
+        dump(c)
+        dump(db_singleton_and(ns, c, c, pos))
+        dump(db_receiver_field(ns, used, 100 + round, i32(name_id("x")), pos))
+        print("used {used.has(100 + round)}")
+        limbs: u64[] = []
+        loop i in [0..round % 8): limbs.push(if i == 0: u64(0) - u64(1) else if i == 1: u64(1) << 63 else: u64(4294967295 - i))
+        dump(db_bigint_value(ns, runs, host, limbs, pos, round % 2 == 1))
+        range = node_mk(ns, .range, pos)
+        ns[range].a = i32(a)
+        ns[range].b = i32(b)
+        ns[range].c = i32(c)
+        ns[range].flags = i32((if (round & 1) != 0: 2 else: 0) | (if (round & 2) != 0: 32768 else: 0) | (if (round & 4) != 0: 536870912 else: 0))
+        dump(db_range_value(ns, runs, host, range))
+        fn_ = node_mk(ns, .fn_, pos)
+        params: int[]
+        loop i in [0..round % 4): params.push(parameter(if i == 1: "_" else: "p", (round & 4) != 0, (round & 8) != 0, (round & 16) != 0, pos + i))
+        body = node_mk(ns, .block, pos)
+        if (round & 1) != 0: node_set_list(ns, runs, body, [db_stmt(ns, a, pos)])
+        if (round & 2) != 0:
+            result = node_mk(ns, .tarray, pos)
+            ns[result].ival = 1
+            node_set_list(ns, runs, result, [a, b])
+            ns[fn_].a = i32(result)
+        dump(db_finish_function(ns, runs, host, texts, fn_, params, body, if (round & 32) != 0: "main" else: "work"))

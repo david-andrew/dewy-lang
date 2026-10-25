@@ -16,6 +16,21 @@ struct ParserStatus:
     hint_pos: int
     hint_text: str
 
+struct ParserCollection:
+    mixed: bool
+    mixed_pos: int
+    pairs_collected: int
+    tagged_last: {int: bool}
+
+struct ParserReach:
+    scope: {int: int}
+    waiting: int[]
+    waiting_names: int[]
+    waiting_callees: int[]
+    used: {int: bool}
+    captures: {int: int[]}
+    inherited: int
+
 struct ParserContext:
     tokens: DewyLexeme[]
     at: int
@@ -24,6 +39,8 @@ struct ParserContext:
     flags: ParserFlags
     status: ParserStatus
     classes: u8[]
+    collection: ParserCollection
+    reach: ParserReach
 
 struct ParserHost:
     value_name: (i32, int) -> i32

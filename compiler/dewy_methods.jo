@@ -6,6 +6,7 @@
 # from the bodies before checking, so every call sees the final signature.
 use 'prelude.jo'
 use 'util.jo'
+use 'dewy_context.jo'
 use 'ast.jo'
 use 'check.jo'
 use 'expr.jo'
@@ -174,7 +175,7 @@ dewy_infer_methods = ():
     loop i in [dewy_methods_inferred..dewy_methods.len()):
         if dewy_methods[i].state == 3: add_flag(kid(dewy_methods[i].decl, 0), NF_MUT)
         else: dewy_methods[i].state = 2
-        if dewy_member_captures.len() > 0: dewy_member_closures(int(nodes[dewy_methods[i].decl].b))
+        if dc_parser.reach.captures.len() > 0: dewy_member_closures(int(nodes[dewy_methods[i].decl].b))
     # A method is static unless it reaches a member other than a static method:
     # a least fixed point again, so static methods may call one another.
     loop true:
@@ -273,7 +274,6 @@ dewy_member_changes = (base: int, name: int, receiver: int, i: int) -> bool:
 
 # Members a closure captured by place (`$capture @count`), by lambda node, and
 # those of the closure being walked.
-dewy_member_captures: {int: int[]} = {}
 dewy_allowed_members: int[]
 
 dewy_change_found = (n: int, nested: bool, member: int = 0) -> bool:
@@ -293,7 +293,7 @@ dewy_member_closures = (body: int):
 dewy_member_closure_names = (n: int, parent: int, names: mut int[]):
     if n == 0: return
     k = nodes[n].kind
-    if k == .lambda and dewy_member_captures.has(n):
+    if k == .lambda and dc_parser.reach.captures.has(n):
         if parent == 0 or nodes[parent].kind != .vardecl or int(nodes[parent].b) != n: fatal(nodes[n].pos, "a closure that changes the object's members runs inside the method: bind it with `let` and call it there")
         names.push(int(nodes[parent].name))
     dewy_member_closure_names(int(nodes[n].a), n, names)
@@ -337,7 +337,7 @@ dewy_changes = (n: int, receiver: int, i: int, nested: bool) -> bool:
     inner = nested or k == .lambda
     if k == .lambda:
         saved = dewy_allowed_members
-        dewy_allowed_members = dewy_member_captures.get(n) ?? []
+        dewy_allowed_members = dc_parser.reach.captures.get(n) ?? []
         found = dewy_changes_within(n, receiver, i, true) or dewy_allowed_members.len() > 0
         dewy_allowed_members = saved
         return found

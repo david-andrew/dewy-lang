@@ -1,4 +1,7 @@
 use 'dewy_parser.dewy'
+use 'dewy_context.jo'
+use 'dewy_walk.dewy'
+use 'dewy_reach.dewy'
 use 'check.jo'
 use 'decimals.jo'
 use 'expr.jo'
@@ -181,22 +184,13 @@ dc_chains_made = 0     # (comparison chains read so far)
 dc_cast_coalesce = false   # (an `as` type may end at `??`: the cast is to an optional, dc_expr)
 dc_map_ok = false      # (statements of a comprehension's bodies may be `key -> value` entries)
 dc_pairs_made = 0      # (entries read, and entries collected: every one read must be collected)
-dc_pairs_collected = 0
 dc_top_level = false   # (dc_statement is reading a module's top-level statement, not one in a body)
 # (the `if` whose chain was read last, when every condition up to its compiled arm folds
 # (syntax_target_live): its value is that arm's body (dc_flow), whose statements a block splices
 # in its place (dw_target_splice); -1 for none)
 dc_live_at = -1
-# The members a method's bare names reach (dw_siblings while dw_function reads it): a name maps
-# to the receiver it is read through; names bound in a scope hide members (dw_shadow).
-dc_scope: {int: int} = {}
 dc_transfer_bits = 0    # (the transfer tags of the record being read, dw_transfer_row's bits)
 dc_transfer_at = 0      # (where its last claim is written)
-# (the names that wait for inherited members, dewy_defer_name, and the callees among them, recorded
-# once every method resolves)
-dc_waiting: int[]
-dc_waiting_names: int[]
-dc_waiting_callees: int[]
 dc_effects_follow = false   # (a result type may end at `&`: an effect row follows, dc_effect_row)
 dc_rename_follows = false   # (a pattern name's type may end at `as`: `y:int64 as py`, dc_binding_items)
 dc_dropping = 0        # (the arms being read are left out by an earlier arm's fold)
@@ -1011,16 +1005,16 @@ dc_literal_methods = (entries: int[]) -> bool:
         if nodes[entry].kind != .namedarg or nodes[int(nodes[entry].a)].kind != .lambda: continue
         fn_ = int(nodes[entry].a)
         receiver = intern("$self{nodes.len()}")
-        dw_receivers_used.remove(receiver)
-        saved = dc_scope
+        dc_parser.reach.used.remove(receiver)
+        saved = dc_parser.reach.scope
         inner: {int: int} = {}
         loop name, other in saved: inner[name] = other
         loop name in members: inner[name] = receiver
-        dc_scope = inner
+        dc_parser.reach.scope = inner
         reached = dc_reach_fn(fn_)
-        dc_scope = saved
+        dc_parser.reach.scope = saved
         if not reached: return false
-        if not dw_receivers_used.has(receiver): continue
+        if not dc_parser.reach.used.has(receiver): continue
         pos = nodes[fn_].pos
         object_type = mk(.ident, pos)
         nodes[object_type].name = i32(intern("$Object{receiver}"))
@@ -3643,10 +3637,10 @@ dc_body_read = () -> int:
         statements.push(statement)
         if not braced: break
     # (a block whose last statement is tagged: dc_collect leaves it unread)
-    if statements.len() > 0 and dc_parser.tokens[last_start].kind == .metatag: dc_tagged_last[n] = true
+    if statements.len() > 0 and dc_parser.tokens[last_start].kind == .metatag: dc_parser.collection.tagged_last[n] = true
     if dc_settings.len() > settings:
         # (through its closing brace: its last syntax node is the last position inside, dw_dir_last)
-        dc_tagged_last[n] = true
+        dc_parser.collection.tagged_last[n] = true
         end = mkpos(dc_parser.file, dc_parser.tokens[dc_parser.at - 1].start)
         loop i in [settings..dc_settings.len()):
             dc_scope_undoable()
@@ -4473,12 +4467,10 @@ dc_parallel_exits = (n: int, depth: int) -> bool:
 # `key -> value` entries make a dictionary. A parallel or record comprehension is read
 # elsewhere.
 
-dc_collect_mixed = false   # (the comprehension being collected mixes elements and entries, dc_mixed_at)
-dc_mixed_pos = 0
 dc_comprehension = () -> int:
     pos = mkpos(dc_parser.file, dc_parser.tokens[dc_parser.at].start)
     saved_map = dc_map_ok
-    made = dc_pairs_made - dc_pairs_collected
+    made = dc_pairs_made - dc_parser.collection.pairs_collected
     dc_map_ok = true
     flow = dc_flow()
     dc_map_ok = saved_map
@@ -4497,11 +4489,11 @@ dc_comprehension = () -> int:
     if mixed != 0:
         if not dc_parser.flags.report_now: return 0
         dc_report(mixed, "a comprehension cannot mix array elements and dictionary entries")
-    saved_mixed = dc_collect_mixed
-    dc_collect_mixed = mixed != 0
+    saved_mixed = dc_parser.collection.mixed
+    dc_parser.collection.mixed = mixed != 0
     collected = dc_collect(flow, accumulator, map)
-    dc_collect_mixed = saved_mixed
-    if collected == 0 or dc_pairs_made - dc_pairs_collected != made: return 0
+    dc_parser.collection.mixed = saved_mixed
+    if collected == 0 or dc_pairs_made - dc_parser.collection.pairs_collected != made: return 0
     result = mk(.exprstmt, pos)
     value = mk(.ident, pos)
     nodes[value].name = i32(accumulator)
@@ -4563,146 +4555,47 @@ dc_record_loop = (n: int) -> int:
 # What a comprehension's first collected value is (dw_collection_kind): 1 a value, 2 a dictionary
 # entry, 0 none.
 dc_tail_kind = (statement: int) -> int:
-    if statement <= 0: return 0
-    k = nodes[statement].kind
-    if k == .if_ or k == .for_ or k == .while_ or k == .loopx:
-        first = dc_block_tail_kind(int(nodes[statement].b))
-        if first != 0: return first
-        return dc_block_tail_kind(int(nodes[statement].c))
-    if k != .exprstmt: return 0
-    value = int(nodes[statement].a)
-    if nodes[value].kind == .block and not has_flag(value, NF_COMPREHENSION): return dc_block_tail_kind(value)
-    if nodes[value].kind == .match_:
-        loop arm in kids(value):
-            arm_kind = dc_block_tail_kind(int(nodes[arm].b))
-            if arm_kind != 0: return arm_kind
-        return 0
-    if nodes[value].kind == .pair: return 2
-    1
+    dr_tail_kind(nodes, lists, statement)
 
 dc_block_tail_kind = (block: int) -> int:
-    if block <= 0 or nodes[block].kind != .block or nkids(block) == 0: return 0
-    dc_tail_kind(kid(block, nkids(block) - 1))
+    dr_block_tail_kind(nodes, lists, block)
 
-dc_tagged_last: {int: bool} = {}
 
 # A comprehension's statement collecting into `accumulator` (dw_collect): a value is pushed (a
 # call's own values, as its sink gives them), an entry of a dictionary (`map`) as its pair, a
 # flow collects in each body, a `{ ... }` value in its last statement; other statements collect
 # nothing. 0: a form collected another way.
 dc_collect = (statement: int, accumulator: int, map: bool = false) -> int:
-    if statement <= 0: return 0
-    k = nodes[statement].kind
-    if k == .if_ or k == .for_ or k == .while_ or k == .loopx:
-        if not dc_collect_block(int(nodes[statement].b), accumulator, map): return 0
-        if nodes[statement].c != 0 and not dc_collect_block(int(nodes[statement].c), accumulator, map): return 0
-        return statement
-    if k != .exprstmt: return statement
-    value = int(nodes[statement].a)
-    # (a parallel loop collects nothing: dw_flow reports it)
-    if nodes[value].kind == .parallel_region: return 0
-    # (a match collects in each arm's body, dw_match)
-    if nodes[value].kind == .match_:
-        loop arm in kids(value):
-            if not dc_collect_block(int(nodes[arm].b), accumulator, map): return 0
-        add_flag(value, NF_STMT)
-        return statement
-    if nodes[value].kind == .block and not has_flag(value, NF_COMPREHENSION):
-        if not dc_collect_block(value, accumulator, map): return 0
-        return value
-    pos = nodes[statement].pos
-    if map != (nodes[value].kind == .pair):
-        # (dw_collection_kind's mistake, dc_comprehension)
-        if not dc_collect_mixed: return 0
-        if nodes[value].kind == .pair: dc_pairs_collected += 1
-        return statement
-    if map:
-        entry = mk(.tuple, pos)
-        add_flag(entry, NF_MAP_PAIR)
-        set_list(entry, [int(nodes[value].a), int(nodes[value].b)])
-        value = entry
-        dc_pairs_collected += 1
-    else if nodes[value].kind == .call: return statement
-    nodes[statement].a = i32(dc_push(accumulator, value, pos))
-    statement
+    dr_collect(dc_parser.collection, nodes, lists, dw_builder_host, statement, accumulator, map)
 
 # `accumulator.push(value)`
 dc_push = (accumulator: int, value: int, pos: int) -> int:
-    receiver = mk(.ident, pos)
-    nodes[receiver].name = i32(accumulator)
-    add_flag(receiver, NF_MUT)
-    callee = mk(.field, pos)
-    nodes[callee].a = i32(receiver)
-    nodes[callee].name = i32(intern("push"))
-    call = mk(.call, pos)
-    nodes[call].a = i32(callee)
-    set_list(call, [value])
-    call
+    dr_push(nodes, lists, dw_builder_host, accumulator, value, pos)
 
 # Where a comprehension's flow mixes elements and entries, as dw_collection_kind finds it: the first
 # arm body whose kind differs from those before it among its flow's arms (an `else if` chain's or
 # an `else match`'s arms are one flow's); 0 for none.
 dc_mixed_at = (flow: int) -> int:
-    dc_mixed_pos = 0
+    dc_parser.collection.mixed_pos = 0
     dc_kind_of(flow)
-    dc_mixed_pos
+    dc_parser.collection.mixed_pos
 
 dc_kind_of = (statement: int) -> int:
-    if statement <= 0: return 0
-    k = nodes[statement].kind
-    if k == .if_ or k == .for_ or k == .while_ or k == .loopx:
-        arms: int[]
-        dc_flow_arms(statement, arms)
-        return dc_arms_kind(arms)
-    if k != .exprstmt: return 0
-    value = int(nodes[statement].a)
-    if nodes[value].kind == .block and not has_flag(value, NF_COMPREHENSION): return dc_last_kind(value)
-    if nodes[value].kind == .match_:
-        arms: int[]
-        loop arm in kids(value): arms.push(int(nodes[arm].b))
-        return dc_arms_kind(arms)
-    if nodes[value].kind == .pair: 2 else: 1
+    dr_kind_of(dc_parser.collection, nodes, lists, statement)
 
 # A flow's arm bodies: an `else if` or `else match` goes on the same flow (dc_flow's block at the
 # chain's own position).
 dc_flow_arms = (flow: int, arms: mut int[]):
-    arms.push(int(nodes[flow].b))
-    rest = int(nodes[flow].c)
-    if rest == 0: return
-    if nodes[rest].kind == .block and nodes[rest].pos == nodes[flow].pos and nkids(rest) == 1:
-        inner = kid(rest, 0)
-        if nodes[inner].kind == .if_:
-            dc_flow_arms(inner, arms)
-            return
-        if nodes[inner].kind == .exprstmt and nodes[int(nodes[inner].a)].kind == .match_:
-            loop arm in kids(int(nodes[inner].a)): arms.push(int(nodes[arm].b))
-            return
-    arms.push(rest)
+    dr_flow_arms(nodes, lists, flow, arms)
 
 dc_arms_kind = (arms: int[]) -> int:
-    result = 0
-    loop arm in arms:
-        next = dc_last_kind(arm)
-        if dc_mixed_pos != 0: return 0
-        if next == 0: continue
-        if result != 0 and result != next:
-            dc_mixed_pos = nodes[arm].pos
-            return 0
-        result = next
-    result
+    dr_arms_kind(dc_parser.collection, nodes, lists, arms)
 
 dc_last_kind = (block: int) -> int:
-    if block <= 0 or nodes[block].kind != .block or nkids(block) == 0: return 0
-    dc_kind_of(kid(block, nkids(block) - 1))
+    dr_last_kind(dc_parser.collection, nodes, lists, block)
 
 dc_collect_block = (block: int, accumulator: int, map: bool) -> bool:
-    if block <= 0 or nodes[block].kind != .block or dc_tagged_last.has(block): return false
-    count = nkids(block)
-    if count == 0: return true
-    last = dc_collect(kid(block, count - 1), accumulator, map)
-    if last == 0: return false
-    set_kid(block, count - 1, last)
-    true
+    dr_collect_block(dc_parser.collection, nodes, lists, dw_builder_host, block, accumulator, map)
 
 # A lambda opens here: a name then `=>`, or a parenthesized list then `=>` or `:>`.
 dc_lambda_next = () -> bool: dc_lambda_next_at(dc_parser.at)
@@ -4875,7 +4768,7 @@ dc_operand_body = () -> int:
         if statement == 0: return 0
         # (a chain folding to its compiled arm: that arm's statements, dw_block's dw_target_splice)
         if dc_live_at == first and opening.symbol == .kw_if:
-            if dc_tagged_last.has(statement): return 0
+            if dc_parser.collection.tagged_last.has(statement): return 0
             spliced = mk(.block, mkpos(dc_parser.file, opening.start))
             set_list(spliced, kids(statement))
             return spliced
@@ -5651,20 +5544,20 @@ dc_record_members = (struct_: int, names: int[]) -> bool:
             loop other in kids(struct_):
                 if nodes[other].name == nodes[method].name: return dc_field_and_method(struct_, method)
         # (every method resolves before any is finished: a retry undoes the nodes only)
-        dc_waiting.clear()
-        dc_waiting_names.clear()
-        dc_waiting_callees.clear()
+        dc_parser.reach.waiting.clear()
+        dc_parser.reach.waiting_names.clear()
+        dc_parser.reach.waiting_callees.clear()
         loop method in methods:
-            dc_scope = members
+            dc_parser.reach.scope = members
             reached = dc_reach_fn(method)
-            dc_scope = {}
+            dc_parser.reach.scope = {}
             if not reached: return false
     if deferred: dewy_defer_type(struct_, file)
-    loop i in 0.. and waiting in dc_waiting: dewy_defer_name(struct_, waiting, dc_waiting_names[i])
-    loop callee in dc_waiting_callees: dewy_defer_callee(callee)
-    dc_waiting.clear()
-    dc_waiting_names.clear()
-    dc_waiting_callees.clear()
+    loop i in 0.. and waiting in dc_parser.reach.waiting: dewy_defer_name(struct_, waiting, dc_parser.reach.waiting_names[i])
+    loop callee in dc_parser.reach.waiting_callees: dewy_defer_callee(callee)
+    dc_parser.reach.waiting.clear()
+    dc_parser.reach.waiting_names.clear()
+    dc_parser.reach.waiting_callees.clear()
     decls: int[]
     extra_names: int[]
     extra_decls: int[]
@@ -5728,215 +5621,46 @@ dc_field_and_method = (struct_: int, method: int) -> bool:
     false
 
 dc_hide = (names: int[]):
-    if dc_scope.len() == 0: return
-    deferred = dc_scope.has(dewy_inherited_key())
-    hidden = deferred
-    loop name in names:
-        if dc_scope.has(name): hidden = true
-    if not hidden: return
-    visible: {int: int} = {}
-    loop name, receiver in dc_scope:
-        if not names.contains(name): visible[name] = receiver
-    if deferred:
-        loop name in names: visible[name] = 0
-    dc_scope = visible
+    dm_hide(dc_parser, dw_builder_host, names)
 
 # Resolve member names in n, as a body's names meet them. False: a
 # form this does not follow.
 dc_reach = (n: int) -> bool:
-    if n <= 0: return n == 0
-    k = nodes[n].kind
-    if k == .ident:
-        if let receiver = dc_scope.get(int(nodes[n].name)):
-            if receiver != 0:
-                field = dw_receiver_field(receiver, nodes[n].name, nodes[n].pos)
-                nodes[field].flags = nodes[n].flags
-                nodes[n] = nodes[field]
-        else if dc_scope.has(dewy_inherited_key()):
-            dc_waiting.push(n)
-            dc_waiting_names.push(int(nodes[n].name))
-        return true
-    if k == .int_lit or k == .float_lit or k == .bool_lit or k == .none_lit or k == .hole: return true
-    if k == .str_lit:
-        loop part in kids(n):
-            if nodes[part].kind == .pair and not dc_reach(int(nodes[part].a)): return false
-        return true
-    if k == .field or k == .not_ or k == .unary or k == .propagate or k == .namedarg: return dc_reach(int(nodes[n].a))
-    if k == .call:
-        if not dc_reach(int(nodes[n].a)): return false
-        callee = int(nodes[n].a)
-        if nodes[callee].kind == .field: add_flag(int(nodes[callee].a), NF_MUT)
-        if dc_waiting.len() > 0 and dc_waiting[dc_waiting.len() - 1] == callee: dc_waiting_callees.push(callee)
-        return dc_reach_all(kids(n))
-    if k == .index: return dc_reach(int(nodes[n].a)) and dc_reach_all(kids(n))
-    if k == .binary or k == .and_ or k == .or_ or k == .pair: return dc_reach(int(nodes[n].a)) and dc_reach(int(nodes[n].b))
-    if k == .coalesce: return dc_reach(int(nodes[n].a)) and dc_reach(int(nodes[n].b)) and dc_reach_type(int(nodes[n].c))
-    if k == .cast or k == .istype: return dc_reach(int(nodes[n].a)) and dc_reach_type(int(nodes[n].b))
-    if k == .range: return dc_reach(int(nodes[n].a)) and dc_reach(int(nodes[n].b)) and dc_reach(int(nodes[n].c))
-    if k == .array or k == .map_lit or k == .record_lit: return dc_reach_all(kids(n))
-    if k == .lambda: return dc_reach_fn(n)
-    if k == .block:
-        saved = dc_scope
-        reached = dc_reach_statements(n)
-        dc_scope = saved
-        return reached
-    if k == .if_ or k == .for_ or k == .while_ or k == .loopx: return dc_reach_flow(n)
-    if k == .match_: return dc_reach_match(n)
-    # (`f<T>(x)`: the callee read as a value, its types as types)
-    if k == .typeapply:
-        if not dc_reach(int(nodes[n].a)) or not dc_reach_type(int(nodes[n].c)): return false
-        loop arg in kids(n):
-            if not dc_reach_type(arg): return false
-        return true
-    false
+    dm_reach(dc_parser, nodes, lists, dw_builder_host, names, n)
 
 dc_reach_all = (xs: int[]) -> bool:
-    loop x in xs:
-        if not dc_reach(x): return false
-    true
+    dm_reach_all(dc_parser, nodes, lists, dw_builder_host, names, xs)
 
 dc_reach_statements = (block: int) -> bool:
-    loop statement in kids(block):
-        if not dc_reach_statement(statement): return false
-    true
+    dm_reach_statements(dc_parser, nodes, lists, dw_builder_host, names, block)
 
 dc_reach_statement = (s: int) -> bool:
-    if s <= 0: return false
-    k = nodes[s].kind
-    if k == .vardecl or k == .const_:
-        # (a parameter's value binding, dw_finish_function: never a member)
-        if nodes[s].aux2 == 1: return true
-        if nkids(s) > 0:
-            if not dc_reach(int(nodes[s].b)) or not dc_reach_type(int(nodes[s].a)): return false
-            names: int[]
-            dc_bound(kids(s), names)
-            dc_hide(names)
-            return true
-        value = int(nodes[s].b)
-        if value != 0 and nodes[value].kind == .lambda:
-            dc_hide([int(nodes[s].name)])
-            return dc_reach_fn(value) and dc_reach_type(int(nodes[s].a))
-        if not dc_reach_type(int(nodes[s].a)) or not dc_reach(value): return false
-        dc_hide([int(nodes[s].name)])
-        return true
-    if k == .assign: return dc_reach(int(nodes[s].a)) and dc_reach(int(nodes[s].b))
-    if k == .exprstmt or k == .return_: return dc_reach(int(nodes[s].a))
-    if k == .break_ or k == .continue_: return true
-    if k == .if_ or k == .for_ or k == .while_ or k == .loopx: return dc_reach_flow(s)
-    if k == .block: return dc_reach(s)
-    false
+    dm_reach_statement(dc_parser, nodes, lists, dw_builder_host, names, s)
 
 # The names a pattern binds (dw_bound_names).
 dc_bound = (bindings: int[], out: mut int[]):
-    loop b in bindings:
-        if nodes[b].kind == .tuple: dc_bound(kids(b), out)
-        else if nodes[b].kind == .ident: out.push(int(nodes[b].name))
+    dm_bound(nodes, lists, bindings, out)
 
 dc_reach_flow = (n: int) -> bool:
-    saved = dc_scope
-    k = nodes[n].kind
-    reached = true
-    if k == .for_: reached = dc_reach_in(kids(n), int(nodes[n].a))
-    else if k == .loopx: reached = dc_reach_head(int(nodes[n].a))
-    else: reached = dc_reach(int(nodes[n].a))
-    if not reached or not dc_reach(int(nodes[n].b)): return false
-    dc_scope = saved
-    dc_reach(int(nodes[n].c))
+    dm_reach_flow(dc_parser, nodes, lists, dw_builder_host, names, n)
 
 # `binders in source`: the binders hide members in the body, not in the source (dw_loop_head).
 dc_reach_in = (binders: int[], source: int) -> bool:
-    before = dc_scope
-    names: int[]
-    dc_bound(binders, names)
-    dc_hide(names)
-    inside = dc_scope
-    dc_scope = before
-    if not dc_reach(source): return false
-    dc_scope = inside
-    true
+    dm_reach_in(dc_parser, nodes, lists, dw_builder_host, names, binders, source)
 
 dc_reach_head = (h: int) -> bool:
-    op = nodes[h].op
-    if op == 1: return dc_reach_in(kids(h), int(nodes[h].a))
-    if op == 4: return dc_reach(int(nodes[h].a))
-    dc_reach_head(int(nodes[h].a)) and dc_reach_head(int(nodes[h].b))
+    dm_reach_head(dc_parser, nodes, lists, dw_builder_host, names, h)
 
 dc_reach_match = (n: int) -> bool:
-    if not dc_reach(int(nodes[n].a)): return false
-    loop arm in kids(n):
-        pattern = kid(arm, 0)
-        if nodes[pattern].kind == .pshape or nodes[pattern].kind == .pseq: return false
-        if nodes[pattern].kind == .plit and not dc_reach(int(nodes[pattern].a)): return false
-        saved = dc_scope
-        if nodes[pattern].name != 0: dc_hide([int(nodes[pattern].name)])
-        if not dc_reach(int(nodes[arm].b)): return false
-        dc_scope = saved
-    true
+    dm_reach_match(dc_parser, nodes, lists, dw_builder_host, names, n)
 
 # A function: its result and parameters' types and defaults, its captures, then its body with
 # its parameters and captures hiding members (dw_function).
 dc_reach_fn = (n: int) -> bool:
-    if not dc_reach_type(int(nodes[n].a)): return false
-    bound: int[]
-    loop p in kids(n):
-        if not dc_reach_type(int(nodes[p].a)) or not dc_reach(int(nodes[p].b)): return false
-        if nkids(p) > 0: dc_bound(kids(p), bound)
-        else if dc_word(int(nodes[p].name)) != DC_HOLE: bound.push(int(nodes[p].name))
-    if nodes[n].kind == .lambda:
-        captured = kids2(n)
-        if has_flag(n, NF_GENERIC):
-            captured = []
-            if nodes[n].d != 0: captured = kids(int(nodes[n].d))
-        # (`$capture @hits` of a member: the closure writes it through the receiver's place, one
-        # capture of the receiver for every member, dewy_member_captures, dw_function)
-        members: int[]
-        kept: int[]
-        loop capture in captured:
-            if let receiver = dc_scope.get(int(nodes[capture].name)):
-                if receiver != 0:
-                    if not has_flag(capture, NF_MUT) or members.contains(int(nodes[capture].name)): return false
-                    members.push(int(nodes[capture].name))
-                    field = dw_receiver_field(receiver, nodes[capture].name, nodes[capture].pos)
-                    if members.len() == 1:
-                        base = int(nodes[field].a)
-                        add_flag(base, NF_MUT)
-                        kept.push(base)
-                    continue
-            bound.push(int(nodes[capture].name))
-            kept.push(capture)
-        if members.len() > 0:
-            dewy_member_captures[n] = members
-            if has_flag(n, NF_GENERIC): set_list(int(nodes[n].d), kept)
-            else: set_list2(n, kept)
-    saved = dc_scope
-    dc_hide(bound)
-    reached = dc_reach(int(nodes[n].b))
-    dc_scope = saved
-    reached
+    dm_reach_fn(dc_parser, nodes, lists, dw_builder_host, names, n)
 
 dc_reach_type = (t: int) -> bool:
-    if t <= 0: return t == 0
-    k = nodes[t].kind
-    if k == .tarray: return dc_reach_type(int(nodes[t].a)) and dc_reach(int(nodes[t].b))
-    if k == .topt or k == .tptr: return dc_reach_type(int(nodes[t].a))
-    if k == .tmap: return dc_reach_type(int(nodes[t].a)) and dc_reach_type(int(nodes[t].b))
-    if k == .tname:
-        if not dc_reach_type(int(nodes[t].a)): return false
-        loop arg in kids(t):
-            if not dc_reach_type(arg): return false
-        return true
-    if k == .tunion or k == .ttuple or k == .tfn:
-        if not dc_reach_type(int(nodes[t].a)): return false
-        loop arg in kids(t):
-            if not dc_reach_type(arg): return false
-        return true
-    if k == .trecord:
-        loop f in kids(t):
-            if not dc_reach_type(int(nodes[f].a)): return false
-        return true
-    # (a refinement's predicate is a value: its binder hides nothing, dw_ref_predicate)
-    if k == .trefined: return dc_reach_type(int(nodes[t].a)) and dc_reach(int(nodes[t].b))
-    false
+    dm_reach_type(dc_parser, nodes, lists, dw_builder_host, names, t)
 
 # A token an effect row's atom may start with (dw_effect_atom reports any other).
 dc_effect_atom_start = (token: DewyLexeme) -> bool: token.kind == .identifier or token.symbol == .kw_not
@@ -6064,7 +5788,7 @@ dc_function_literal = (name_id: i32, opening: DewyLexeme, type_params: int[] = [
             if target.kind != .identifier or (target.symbol != .none and target.symbol != .kw_test) or dn_reserved(int(target.name)) or dc_word(int(target.name)) == DC_HOLE: return 0
             if bound.has(int(target.name)):
                 # (dw_function's mistake; a method's member captures it checks apart)
-                if dc_scope.len() == 0: fatal(mkpos(dc_parser.file, target.start), "duplicate parameter binding '{dn_payload(target)}'")
+                if dc_parser.reach.scope.len() == 0: fatal(mkpos(dc_parser.file, target.start), "duplicate parameter binding '{dn_payload(target)}'")
                 return 0
             dc_parser.at += 1
             cap = mk(.ident, mkpos(dc_parser.file, target.start))
@@ -6403,7 +6127,7 @@ dc_statement = () -> int:
         # (a chain folding to its compiled arm splices that arm's statements into a block that reads
         # it, dc_body_read)
         if dc_live_at == start and op == .kw_if:
-            if not splice or dn_peek() == .semi or dc_tagged_last.has(n): return 0
+            if not splice or dn_peek() == .semi or dc_parser.collection.tagged_last.has(n): return 0
             return n
         add_flag(n, NF_STMT)
         # (`loop c xs.pop();`: what the statement expresses is discarded)
@@ -7182,11 +6906,11 @@ dn_statement_read = (top: bool) -> int:
 # (the member captures of closures and the propositions of proofs a discarded reading made: their
 # nodes are gone)
 dc_forget_tables = (node_start: int):
-    if dewy_member_captures.len() > 0:
+    if dc_parser.reach.captures.len() > 0:
         gone: int[]
-        loop n, members in dewy_member_captures:
+        loop n, members in dc_parser.reach.captures:
             if n >= node_start: gone.push(n)
-        loop n in gone: dewy_member_captures.remove(n)
+        loop n in gone: dc_parser.reach.captures.remove(n)
     if proof_pending and proof_decls.len() > 0:
         proofs: int[]
         loop n, predicate in proof_decls:
@@ -7325,16 +7049,10 @@ dc_lend = (token: DewyLexeme) -> int:
 
 # The value is written `....copy()` (dw_copy_result).
 dc_copy_value = (n: int) -> bool:
-    if nodes[n].kind == .block: return dc_copy_last(n)
-    value = n
-    if nodes[value].kind == .call: value = int(nodes[value].a)
-    nodes[value].kind == .field and name_of(int(nodes[value].name)) == "copy"
+    dr_copy_value(nodes, lists, names, n)
 
 dc_copy_last = (block: int) -> bool:
-    count = nkids(block)
-    if count == 0: return false
-    last = kid(block, count - 1)
-    nodes[last].kind == .exprstmt and dc_copy_value(int(nodes[last].a))
+    dr_copy_last(nodes, lists, names, block)
 
 
 # A module-level `if` chain testing `$target` or `$build`, after which only the compiled arm's

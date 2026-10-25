@@ -13,7 +13,16 @@ ParserFlags:type=[report_now:bool unread_here:bool fn_body:bool comma_stop:bool]
 # A failed reading restores report_pos and reports only: report_text stays valid
 # because the first report alone writes it. Hints reset at statement entry.
 ParserStatus:type=[report_pos:int64 report_text:string reports:int64 hint_pos:int64 hint_text:string]
-ParserContext:type=[tokens:array<DewyLexeme> at:int64 file:int64 depth:int64 flags:ParserFlags status:ParserStatus classes:array<uint8>]
+# Collection bookkeeping survives speculative reader rollback exactly as before.
+ParserCollection:type=[mixed:bool mixed_pos:int64 pairs_collected:int64 tagged_last:dict<int64 bool>]
+# Member resolution snapshots scope per block/function and retains deferred names.
+# inherited caches the first interned $inherited id; clear it if the name store resets.
+ParserReach:type=[
+    scope:dict<int64 int64>
+    waiting:array<int64> waiting_names:array<int64> waiting_callees:array<int64>
+    used:dict<int64 bool> captures:dict<int64 array<int64>> inherited:int64
+]
+ParserContext:type=[tokens:array<DewyLexeme> at:int64 file:int64 depth:int64 flags:ParserFlags status:ParserStatus classes:array<uint8> collection:ParserCollection reach:ParserReach]
 
 # Only Jo-only services cross back. These noncapturing hooks must not call readers.
 # Nodes/lists and intern tables are borrowed directly from their existing owners;

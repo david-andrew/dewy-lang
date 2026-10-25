@@ -1,0 +1,146 @@
+# Frozen independent node-walker twin, extracted from dewy_direct.jo.
+use 'node_store.dewy'
+use 'dewy_parser.dewy'
+use 'dewy_builders.dewy'
+
+const DR_MUT = 1
+const DR_STMT = 16
+const DR_MAP_PAIR = 33554432
+const DR_COMPREHENSION = 67108864
+
+dr_tail_kind = (store: mut Node[], lists: mut i32[], statement: int) -> int:
+    if statement <= 0: return 0
+    k = store[statement].kind
+    if k == .if_ or k == .for_ or k == .while_ or k == .loopx:
+        first = dr_block_tail_kind(store, lists, int(store[statement].b))
+        if first != 0: return first
+        return dr_block_tail_kind(store, lists, int(store[statement].c))
+    if k != .exprstmt: return 0
+    value = int(store[statement].a)
+    if store[value].kind == .block and not ((int(store[value].flags) & DR_COMPREHENSION) != 0): return dr_block_tail_kind(store, lists, value)
+    if store[value].kind == .match_:
+        loop arm in node_kids(store, lists, value):
+            arm_kind = dr_block_tail_kind(store, lists, int(store[arm].b))
+            if arm_kind != 0: return arm_kind
+        return 0
+    if store[value].kind == .pair: return 2
+    1
+
+dr_block_tail_kind = (store: mut Node[], lists: mut i32[], block: int) -> int:
+    if block <= 0 or store[block].kind != .block or int(store[block].nlist) == 0: return 0
+    dr_tail_kind(store, lists, int(lists[int(store[block].list) + int(store[block].nlist) - 1]))
+
+dr_collect = (state: mut ParserCollection, store: mut Node[], lists: mut i32[], host: mut ParserBuilderHost, statement: int, accumulator: int, map: bool = false) -> int:
+    if statement <= 0: return 0
+    k = store[statement].kind
+    if k == .if_ or k == .for_ or k == .while_ or k == .loopx:
+        if not dr_collect_block(state, store, lists, host, int(store[statement].b), accumulator, map): return 0
+        if store[statement].c != 0 and not dr_collect_block(state, store, lists, host, int(store[statement].c), accumulator, map): return 0
+        return statement
+    if k != .exprstmt: return statement
+    value = int(store[statement].a)
+    # (a parallel loop collects nothing: dw_flow reports it)
+    if store[value].kind == .parallel_region: return 0
+    # (a match collects in each arm's body, dw_match)
+    if store[value].kind == .match_:
+        loop arm in node_kids(store, lists, value):
+            if not dr_collect_block(state, store, lists, host, int(store[arm].b), accumulator, map): return 0
+        store[value].flags = i32(int(store[value].flags) | DR_STMT)
+        return statement
+    if store[value].kind == .block and not ((int(store[value].flags) & DR_COMPREHENSION) != 0):
+        if not dr_collect_block(state, store, lists, host, value, accumulator, map): return 0
+        return value
+    pos = store[statement].pos
+    if map != (store[value].kind == .pair):
+        # (dw_collection_kind's mistake, dc_comprehension)
+        if not state.mixed: return 0
+        if store[value].kind == .pair: state.pairs_collected += 1
+        return statement
+    if map:
+        entry = node_mk(store, .tuple, pos)
+        store[entry].flags = i32(int(store[entry].flags) | DR_MAP_PAIR)
+        node_set_list(store, lists, entry, [int(store[value].a), int(store[value].b)])
+        value = entry
+        state.pairs_collected += 1
+    else if store[value].kind == .call: return statement
+    store[statement].a = i32(dr_push(store, lists, host, accumulator, value, pos))
+    statement
+
+dr_collect_block = (state: mut ParserCollection, store: mut Node[], lists: mut i32[], host: mut ParserBuilderHost, block: int, accumulator: int, map: bool) -> bool:
+    if block <= 0 or store[block].kind != .block or state.tagged_last.has(block): return false
+    count = int(store[block].nlist)
+    if count == 0: return true
+    last = dr_collect(state, store, lists, host, int(lists[int(store[block].list) + count - 1]), accumulator, map)
+    if last == 0: return false
+    lists[int(store[block].list) + count - 1] = i32(last)
+    true
+
+dr_push = (store: mut Node[], lists: mut i32[], host: mut ParserBuilderHost, accumulator: int, value: int, pos: int) -> int:
+    receiver = node_mk(store, .ident, pos)
+    store[receiver].name = i32(accumulator)
+    store[receiver].flags = i32(int(store[receiver].flags) | DR_MUT)
+    callee = node_mk(store, .field, pos)
+    store[callee].a = i32(receiver)
+    store[callee].name = i32(host.intern_name("push"))
+    call = node_mk(store, .call, pos)
+    store[call].a = i32(callee)
+    node_set_list(store, lists, call, [value])
+    call
+
+dr_kind_of = (state: mut ParserCollection, store: mut Node[], lists: mut i32[], statement: int) -> int:
+    if statement <= 0: return 0
+    k = store[statement].kind
+    if k == .if_ or k == .for_ or k == .while_ or k == .loopx:
+        arms: int[]
+        dr_flow_arms(store, lists, statement, arms)
+        return dr_arms_kind(state, store, lists, arms)
+    if k != .exprstmt: return 0
+    value = int(store[statement].a)
+    if store[value].kind == .block and not ((int(store[value].flags) & DR_COMPREHENSION) != 0): return dr_last_kind(state, store, lists, value)
+    if store[value].kind == .match_:
+        arms: int[]
+        loop arm in node_kids(store, lists, value): arms.push(int(store[arm].b))
+        return dr_arms_kind(state, store, lists, arms)
+    if store[value].kind == .pair: 2 else: 1
+
+dr_last_kind = (state: mut ParserCollection, store: mut Node[], lists: mut i32[], block: int) -> int:
+    if block <= 0 or store[block].kind != .block or int(store[block].nlist) == 0: return 0
+    dr_kind_of(state, store, lists, int(lists[int(store[block].list) + int(store[block].nlist) - 1]))
+
+dr_arms_kind = (state: mut ParserCollection, store: mut Node[], lists: mut i32[], arms: int[]) -> int:
+    result = 0
+    loop arm in arms:
+        next = dr_last_kind(state, store, lists, arm)
+        if state.mixed_pos != 0: return 0
+        if next == 0: continue
+        if result != 0 and result != next:
+            state.mixed_pos = store[arm].pos
+            return 0
+        result = next
+    result
+
+dr_flow_arms = (store: mut Node[], lists: mut i32[], flow: int, arms: mut int[]):
+    arms.push(int(store[flow].b))
+    rest = int(store[flow].c)
+    if rest == 0: return
+    if store[rest].kind == .block and store[rest].pos == store[flow].pos and int(store[rest].nlist) == 1:
+        inner = int(lists[int(store[rest].list) + 0])
+        if store[inner].kind == .if_:
+            dr_flow_arms(store, lists, inner, arms)
+            return
+        if store[inner].kind == .exprstmt and store[int(store[inner].a)].kind == .match_:
+            loop arm in node_kids(store, lists, int(store[inner].a)): arms.push(int(store[arm].b))
+            return
+    arms.push(rest)
+
+dr_copy_value = (store: mut Node[], lists: mut i32[], texts: mut str[], n: int) -> bool:
+    if store[n].kind == .block: return dr_copy_last(store, lists, texts, n)
+    value = n
+    if store[value].kind == .call: value = int(store[value].a)
+    store[value].kind == .field and texts[int(store[value].name)] == "copy"
+
+dr_copy_last = (store: mut Node[], lists: mut i32[], texts: mut str[], block: int) -> bool:
+    count = int(store[block].nlist)
+    if count == 0: return false
+    last = int(lists[int(store[block].list) + count - 1])
+    store[last].kind == .exprstmt and dr_copy_value(store, lists, texts, int(store[last].a))

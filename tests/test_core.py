@@ -4724,7 +4724,8 @@ def lexer_span_helpers(compiler, out):
         'mkpos = (file: int, off: int) -> int: (file << 40) | off\n'
         'fatal = (pos: int, message: str): panic(message)\n'
         'err_notes: (int, str)[]',
-        fast[fast.index('dc_parser: ParserContext'):fast.index('dn_peek =')],
+        'dc_parser: ParserContext',
+        fast[fast.index('dn_angles ='):fast.index('dn_peek =')],
     ])
 
 

@@ -526,15 +526,62 @@ the context, O(1) on hits, O(18) on misses with amortized cache growth. Report/h
 updates are O(1). Keep lex+parse within ±0.3% on every flagship when extending this
 boundary, and preserve output bytes and first diagnostics.
 
-Next slices:
+`dewy_builders.dewy` constructs the pure node shapes and maps value/type names;
+`ParserBuilderHost` lends only interning and unsupported-form reporting. The Jo
+adapters retain module bookkeeping (bigint imports and refinement activation)
+and range validation. Function completion, including shaped parameters/results,
+uses the node store directly. `dewy_walk.dewy` owns collection/kind/copy traversal;
+`dewy_reach.dewy` owns member resolution, including scope snapshots, inherited
+names and captures. Their `ParserCollection` and `ParserReach` records belong to
+the context. `dewy_context.jo` supplies its shared storage without importing the
+reader driver into bootstrap consumers. The C seed, which has no Dewy frontend,
+uses a capture-table-only stub; generation two restores the full frozen context.
+Member-effect checking reads the same capture table. The inherited
+key is interned lazily at its original first lookup and cached for the name
+store's lifetime; resetting that store must reset this cache and `classes`.
 
-1. Move pure builders and name mapping, then independent `dc_reach_*`, collection,
-   copy and kind-reader groups. Extend context fields only as those readers need
-   them; compare node fields, lists, names and rollback state against the twins.
-2. Move the roughly 100-function expression/type/body/statement SCC together.
-   Keep its recursive calls inside Dewy, with local cursors in hot loops; move the
-   remaining flags, edit log and lazy state into the context at that cutover.
-3. Move the file driver and replace `DewySyntax` carriers with checker-node results.
+Host calls must finish before a borrowed dictionary is used as a method receiver:
+`let key=host.intern_name(...)` followed by `scope.has(key)` avoids a defensive
+snapshot around the callback. Keep owned scope snapshots inside the block path,
+not in every scalar visit. These are boundary costs, not extra analysis passes.
+The walkers visit only requested subtrees, with indexed node/list/name state;
+scope hiding retains its existing O(scope size × hidden names) reconstruction.
+
+Next cutover (one coherent recursive reader, not successive mixed-language calls):
+
+1. Close the remaining outward dependencies before translating the core. Move
+   the small token predicates and pure builders it uses into Dewy leaves; give
+   effectful settings, C declarations, proof/task registration, source-byte
+   access and fatal diagnostics typed noncapturing host services. A service may
+   manipulate its own tables, but may not call a reader. Use the existing intern
+   stores by place; ordinary atoms map names directly through the builder leaf,
+   retiring the cold `ParserHost.value_name` callback at that cutover.
+2. Freeze the last Jo reader and move the roughly 100-function
+   expression/type/body/statement group into one Dewy reader module. Translate
+   its literal/atom and type paths, expression precedence, then bodies,
+   declarations, functions and target chains inside that module, switching the
+   production entry points only when the whole group is closed. Include the
+   interpolation loop of `dn_string`: it calls `dc_expr`, so leaving it behind a
+   host hook would recreate the cycle. String byte scanning/lexing can remain a
+   non-reader service; string construction and nested parser save/restore cannot.
+3. Move the remaining reader flags, edit log and lazy-body tables into context at
+   the same boundary. Preserve each existing save set: interpolation restores
+   tokens/cursor/comma state; speculative reads restore their original cursor,
+   nodes/lists, diagnostic positions/counts and edits; lazy forcing restores its
+   file/depth/syntax/flags and applies its recorded edits. Persistent caches and
+   first-report text are not wholesale reset. Jo lazy-force and file adapters
+   enter the Dewy module only at coarse body/module-statement entry points.
+4. Keep hot cursors and token/node fields local to each recursive loop. A scratch
+   sample replacing just `dc_atom`'s initial token read with a typed Dewy helper
+   added 16,568 / 17,627 / 17,070 lex+parse instructions on KV store / crypto /
+   frontend (+0.031% / +0.044% / +0.037%), with identical outputs. Even this small
+   call has measurable cost; it is not a production split. Compare the closed
+   group's flagship panel against its own rebased master, within ±0.3% per item,
+   plus first diagnostics, rollback state, interpolation and lazy forcing.
+5. After the closed reader passes twins, independent bootstrap/fixed point,
+   fuzzing and output parity, move the file driver and replace `DewySyntax`
+   carriers with checker-node results. Keep this representation change separate
+   from the mechanical reader cutover.
 
 Each stable leaf API has a checked-in frozen Jo twin in `FROZEN_TWINS`; generations
 1–2 use those twins. Freeze the final Jo reader at the central SCC cutover. A

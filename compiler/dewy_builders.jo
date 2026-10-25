@@ -1,0 +1,187 @@
+# Frozen builder twin: extracted from the Jo parser builders at the port boundary.
+use 'node_store.dewy'
+
+struct ParserBuilderHost:
+    intern_name: (str) -> int
+    unsupported: (int, str) -> int
+
+const DB_MUT = 1
+const DB_LITERAL = 256
+const DB_LOOPCOUNT = 33554432
+const DB_SHAPE_DIM = 1789
+
+db_parameter_value = (store: mut Node[], p: int) -> int:
+    v = node_mk(store, .ident, store[p].pos)
+    store[v].name = store[p].name
+    store[v].aux2 = 1
+    v
+
+db_call = (store: mut Node[], lists: mut i32[], host: mut ParserBuilderHost, name: str, args: int[], pos: int) -> int:
+    c = node_mk(store, .call, pos)
+    v = node_mk(store, .ident, pos)
+    store[v].name = i32(host.intern_name(name))
+    store[c].a = i32(v)
+    node_set_list(store, lists, c, args)
+    c
+
+db_stmt = (store: mut Node[], value: int, pos: int) -> int:
+    n = node_mk(store, .exprstmt, pos)
+    store[n].a = i32(value)
+    n
+
+db_value_name = (renamed: mut int[], name: i32, pos: int) -> i32:
+    if int(name) == renamed[0]: return i32(renamed[1])
+    if int(name) == renamed[2]: return i32(renamed[3])
+    # (`bigint` names `int`'s arbitrary-precision form: the same type, so `bigint(x)` is `int(x)`)
+    if int(name) == renamed[4] or int(name) == renamed[6]: return i32(renamed[5])
+    name
+
+db_type_name = (name: str) -> str:
+    if name == "int64": return "i64"
+    else if name == "uint64": return "u64"
+    else if name == "int32": return "i32"
+    else if name == "uint32": return "u32"
+    else if name == "int16": return "i16"
+    else if name == "uint16": return "u16"
+    else if name == "int8": return "i8"
+    else if name == "uint8": return "u8"
+    else if name == "float64": return "f64"
+    else if name == "float32": return "f32"
+    else if name == "string": return "str"
+    else if name == "set": return "Set"
+    else if name == "int" or name == "bigint": return "__dewy_int"
+    name
+
+db_receiver_field = (store: mut Node[], used: mut {int: bool}, receiver: int, name: i32, pos: int) -> int:
+    used[receiver] = true
+    base = node_mk(store, .ident, pos)
+    store[base].name = i32(receiver)
+    n = node_mk(store, .field, pos)
+    store[n].a = i32(base)
+    store[n].name = name
+    n
+
+db_bigint_value = (store: mut Node[], lists: mut i32[], host: mut ParserBuilderHost, limbs: u64[], pos: int, negative: bool = false) -> int:
+    owner = node_mk(store, .ident, pos)
+    store[owner].name = i32(host.intern_name("$dewy_bigint"))
+    callee = node_mk(store, .field, pos)
+    store[callee].a = i32(owner)
+    store[callee].name = i32(host.intern_name("BigInt"))
+    sign = node_mk(store, .int_lit, pos)
+    store[sign].ival = if negative: -1 else: 1
+    store[sign].flags = i32(int(store[sign].flags) | DB_LITERAL)
+    sign_arg = node_mk(store, .namedarg, pos)
+    store[sign_arg].name = i32(host.intern_name("_sign"))
+    store[sign_arg].a = i32(sign)
+    items: int[]
+    loop limb in limbs:
+        item = node_mk(store, .int_lit, pos)
+        store[item].ival = int(limb)
+        store[item].flags = i32(int(store[item].flags) | DB_LITERAL)
+        items.push(item)
+    magnitude = node_mk(store, .array, pos)
+    node_set_list(store, lists, magnitude, items)
+    magnitude_arg = node_mk(store, .namedarg, pos)
+    store[magnitude_arg].name = i32(host.intern_name("_limbs"))
+    store[magnitude_arg].a = i32(magnitude)
+    result = node_mk(store, .call, pos)
+    store[result].a = i32(callee)
+    node_set_list(store, lists, result, [sign_arg, magnitude_arg])
+    store[result].aux2 = -1       # oversized literal; the checker requires an explicit BigInt context
+    result
+
+db_singleton_bound = (store: mut Node[], op: int, a: int, b: int, pos: int) -> int:
+    e = node_mk(store, .binary, pos)
+    store[e].op = i32(op)
+    store[e].a = i32(a)
+    store[e].b = i32(b)
+    e
+
+db_singleton_and = (store: mut Node[], a: int, b: int, pos: int) -> int:
+    e = node_mk(store, .and_, pos)
+    store[e].a = i32(a)
+    store[e].b = i32(b)
+    e
+
+db_singleton_value = (store: mut Node[], binder: int, pos: int) -> int:
+    e = node_mk(store, .ident, pos)
+    store[e].name = i32(binder)
+    e
+
+db_singleton_int = (store: mut Node[], v: int, pos: int) -> int:
+    e = node_mk(store, .int_lit, pos)
+    store[e].ival = v
+    store[e].flags = i32(int(store[e].flags) | DB_LITERAL)
+    e
+
+db_has_shape = (store: mut Node[], t: int) -> bool: t != 0 and store[t].kind == .tarray and store[t].ival == 1
+
+db_shape_prologue = (store: mut Node[], lists: mut i32[], host: mut ParserBuilderHost, param: int, out: mut int[]):
+    t = int(store[param].a)
+    pos = store[param].pos
+    out.push(db_stmt(store, db_call(store, lists, host, "__shape_rank", [db_parameter_value(store, param), db_singleton_int(store, int(store[t].nlist), pos)], pos), pos))
+    loop i in 0.. and dim in node_kids(store, lists, t):
+        if store[dim].kind == .ident:
+            local = node_mk(store, .vardecl, store[dim].pos)
+            store[local].name = store[dim].name
+            store[local].aux2 = DB_SHAPE_DIM
+            store[local].flags = i32(int(store[local].flags) | DB_LOOPCOUNT)
+            store[local].b = i32(db_call(store, lists, host, "__shape_dim", [db_parameter_value(store, param), db_singleton_int(store, i, pos)], pos))
+            out.push(local)
+        else: out.push(db_stmt(store, db_call(store, lists, host, "__shape_check", [db_parameter_value(store, param), db_singleton_int(store, i, pos), node_clone(store, lists, dim)], pos), pos))
+
+db_finish_function = (store: mut Node[], lists: mut i32[], host: mut ParserBuilderHost, texts: mut str[], n: int, parameters: int[], body: int, name: str) -> int:
+    let ps = parameters
+    prefix: int[]
+    loop param in ps:
+        if (int(store[param].flags) & DB_MUT) != 0 or texts[int(store[param].name)] == "_": continue
+        local = node_mk(store, .vardecl, store[param].pos)
+        store[local].aux2 = 1   # synthesized value-parameter binding
+        store[local].name = store[param].name
+        if int(store[param].nlist) > 0: node_set_list(store, lists, local, node_kids(store, lists, param))
+        value = node_mk(store, .ident, store[param].pos)
+        store[value].name = store[param].name
+        store[value].aux2 = 1   # the parameter's value itself, even a function
+        if name == "main":
+            if ps.len() != 1: return host.unsupported(store[n].pos, "multiple entry-point parameters")
+            store[value].name = i32(host.intern_name("args"))
+            call = node_mk(store, .call, store[param].pos)
+            store[call].a = i32(value)
+            value = call
+            store[local].a = store[param].a
+        store[local].b = i32(value)
+        prefix.push(local)
+    loop param in ps:
+        if db_has_shape(store, int(store[param].a)): db_shape_prologue(store, lists, host, param, prefix)
+    if name == "main":
+        loop param in ps:
+            if (int(store[param].flags) & DB_MUT) != 0: return host.unsupported(store[n].pos, "a mutable entry-point parameter")
+        ps = []
+    node_set_list(store, lists, n, ps)
+    loop statement in node_kids(store, lists, body): prefix.push(statement)
+    # (a shaped result, `:>array<T length=[m p]>`: the final value is checked as it leaves;
+    # a `return` is checked where it is)
+    if db_has_shape(store, int(store[n].a)) and prefix.len() > 0 and store[prefix[prefix.len() - 1]].kind == .exprstmt:
+        last = prefix[prefix.len() - 1]
+        pos = store[last].pos
+        dims: int[]
+        loop dim in node_kids(store, lists, int(store[n].a)): dims.push(node_clone(store, lists, dim))
+        sizes = node_mk(store, .array, pos)
+        node_set_list(store, lists, sizes, dims)
+        store[last].a = i32(db_call(store, lists, host, "__shape_value", [int(store[last].a), sizes], pos))
+    node_set_list(store, lists, body, prefix)
+    store[n].b = i32(body)
+    return n
+
+# Caller validates both endpoints; flags are ast.jo's NF_STEP/INCLUSIVE/EXCL_FIRST.
+db_range_value = (store: mut Node[], lists: mut i32[], host: mut ParserBuilderHost, range: int) -> int:
+    pos = store[range].pos
+    step = (int(store[range].flags) & 32768) != 0
+    second = if step: int(store[range].c) else: db_singleton_int(store, 0, pos)
+    stepped = node_mk(store, .bool_lit, pos)
+    store[stepped].ival = if step: 1 else: 0
+    inclusive = node_mk(store, .bool_lit, pos)
+    store[inclusive].ival = if (int(store[range].flags) & 2) != 0: 1 else: 0
+    result = db_call(store, lists, host, "__dewy_range", [int(store[range].a), second, int(store[range].b), stepped, inclusive], pos)
+    if (int(store[range].flags) & 536870912) != 0: result = db_call(store, lists, host, "__dewy_range_tail", [result], pos)
+    result

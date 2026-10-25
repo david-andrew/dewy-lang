@@ -1,0 +1,9 @@
+# The C seed has no Dewy frontend. Its shared method checker sees only an empty
+# member-capture table; the next generation restores the full parser context.
+struct SeedParserReach:
+    captures: {int: int[]}
+
+struct SeedParserContext:
+    reach: SeedParserReach
+
+dc_parser: SeedParserContext

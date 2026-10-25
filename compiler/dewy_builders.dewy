@@ -1,0 +1,211 @@
+$runtime_checks
+from p"node_store.dewy" import Node, node_mk, node_set_list, node_set_list2, node_kids, node_kids2, node_clone
+
+# Checker-node builders. Stores cross by place; only name misses and fatal
+# unsupported forms use noncapturing host services. Node allocation stays in Dewy.
+ParserBuilderHost:type=[intern_name:<(text:string):>int64> unsupported:<(pos:int64 text:string):>int64>]
+const DB_MUT:int64=1
+const DB_LITERAL:int64=256
+const DB_LOOPCOUNT:int64=33554432
+const DB_SHAPE_DIM:int64=1789
+
+db_parameter_value=(@store:array<Node> p:int64):>int64=>{
+    let v=node_mk(@store 'ident' store[p].pos)
+    store[v].name = store[p].name
+    store[v].aux2 = 1
+    v
+}
+
+db_call=(@store:array<Node> @lists:array<int32> @host:ParserBuilderHost name:string args:array<int64> pos:int64):>int64=>{
+    let c=node_mk(@store 'call' pos)
+    let v=node_mk(@store 'ident' pos)
+    store[v].name = int32(host.intern_name(name))
+    store[c].a = int32(v)
+    node_set_list(@store @lists c args)
+    c
+}
+
+db_stmt=(@store:array<Node> value:int64 pos:int64):>int64=>{
+    let n=node_mk(@store 'exprstmt' pos)
+    store[n].a = int32(value)
+    n
+}
+
+db_value_name=(@renamed:array<int64> name:int32 pos:int64):>int32=>{
+    if int64(name) =? renamed[0] {return int32(renamed[1])}
+    if int64(name) =? renamed[2] {return int32(renamed[3])}
+    # (`bigint` names `int`'s arbitrary-precision form: the same type, so `bigint(x)` is `int(x)`)
+    if int64(name) =? renamed[4] or int64(name) =? renamed[6] {return int32(renamed[5])}
+    name
+}
+
+db_type_name=(name:string):>string=>{
+    if name =? "int64" {return "i64"}
+    else if name =? "uint64" {return "u64"}
+    else if name =? "int32" {return "i32"}
+    else if name =? "uint32" {return "u32"}
+    else if name =? "int16" {return "i16"}
+    else if name =? "uint16" {return "u16"}
+    else if name =? "int8" {return "i8"}
+    else if name =? "uint8" {return "u8"}
+    else if name =? "float64" {return "f64"}
+    else if name =? "float32" {return "f32"}
+    else if name =? "string" {return "str"}
+    else if name =? "set" {return "Set"}
+    else if name =? "int" or name =? "bigint" {return "__dewy_int"}
+    name
+}
+
+db_receiver_field=(@store:array<Node> @used:dict<int64 bool> receiver:int64 name:int32 pos:int64):>int64=>{
+    used[receiver] = true
+    let base=node_mk(@store 'ident' pos)
+    store[base].name = int32(receiver)
+    let n=node_mk(@store 'field' pos)
+    store[n].a = int32(base)
+    store[n].name = name
+    n
+}
+
+db_bigint_value=(@store:array<Node> @lists:array<int32> @host:ParserBuilderHost limbs:array<uint64> pos:int64 negative:bool=false):>int64=>{
+    let owner=node_mk(@store 'ident' pos)
+    store[owner].name = int32(host.intern_name("$dewy_bigint"))
+    let callee=node_mk(@store 'field' pos)
+    store[callee].a = int32(owner)
+    store[callee].name = int32(host.intern_name("BigInt"))
+    let sign=node_mk(@store 'int_lit' pos)
+    store[sign].ival = if negative -1 else 1
+    store[sign].flags = int32(int64(store[sign].flags) or DB_LITERAL)
+    let sign_arg=node_mk(@store 'namedarg' pos)
+    store[sign_arg].name = int32(host.intern_name("_sign"))
+    store[sign_arg].a = int32(sign)
+    let items:array<int64>=[]
+    loop limb in limbs {
+        let item=node_mk(@store 'int_lit' pos)
+        store[item].ival = limb transmute int64
+        store[item].flags = int32(int64(store[item].flags) or DB_LITERAL)
+        items.push(item)
+    }
+    let magnitude=node_mk(@store 'array' pos)
+    node_set_list(@store @lists magnitude items)
+    let magnitude_arg=node_mk(@store 'namedarg' pos)
+    store[magnitude_arg].name = int32(host.intern_name("_limbs"))
+    store[magnitude_arg].a = int32(magnitude)
+    let result=node_mk(@store 'call' pos)
+    store[result].a = int32(callee)
+    node_set_list(@store @lists result [sign_arg magnitude_arg])
+    store[result].aux2 = -1 # oversized literal; the checker requires an explicit BigInt context
+    result
+}
+
+db_singleton_bound=(@store:array<Node> op:int64 a:int64 b:int64 pos:int64):>int64=>{
+    let e=node_mk(@store 'binary' pos)
+    store[e].op = int32(op)
+    store[e].a = int32(a)
+    store[e].b = int32(b)
+    e
+}
+
+db_singleton_and=(@store:array<Node> a:int64 b:int64 pos:int64):>int64=>{
+    let e=node_mk(@store 'and_' pos)
+    store[e].a = int32(a)
+    store[e].b = int32(b)
+    e
+}
+
+db_singleton_value=(@store:array<Node> binder:int64 pos:int64):>int64=>{
+    let e=node_mk(@store 'ident' pos)
+    store[e].name = int32(binder)
+    e
+}
+
+db_singleton_int=(@store:array<Node> v:int64 pos:int64):>int64=>{
+    let e=node_mk(@store 'int_lit' pos)
+    store[e].ival = v
+    store[e].flags = int32(int64(store[e].flags) or DB_LITERAL)
+    e
+}
+
+db_has_shape=(@store:array<Node> t:int64):>bool=>{
+    t not=? 0 and store[t].kind =? 'tarray' and store[t].ival =? 1
+}
+
+db_shape_prologue=(@store:array<Node> @lists:array<int32> @host:ParserBuilderHost param:int64 @out:array<int64>)=>{
+    let t=int64(store[param].a)
+    let pos=store[param].pos
+    out.push(db_stmt(@store db_call(@store @lists @host "__shape_rank" [db_parameter_value(@store param) db_singleton_int(@store int64(store[t].nlist) pos)] pos) pos))
+    loop i in [0..) and dim in node_kids(@store @lists t) {
+        if store[dim].kind =? 'ident' {
+            let local=node_mk(@store 'vardecl' store[dim].pos)
+            store[local].name = store[dim].name
+            store[local].aux2 = DB_SHAPE_DIM
+            store[local].flags = int32(int64(store[local].flags) or DB_LOOPCOUNT)
+            store[local].b = int32(db_call(@store @lists @host "__shape_dim" [db_parameter_value(@store param) db_singleton_int(@store i pos)] pos))
+            out.push(local)
+        }
+        else {out.push(db_stmt(@store db_call(@store @lists @host "__shape_check" [db_parameter_value(@store param) db_singleton_int(@store i pos) node_clone(@store @lists dim)] pos) pos))}
+    }
+}
+
+db_finish_function=(@store:array<Node> @lists:array<int32> @host:ParserBuilderHost @texts:array<string> n:int64 parameters:array<int64> body:int64 name:string):>int64=>{
+    let ps=parameters
+    let prefix:array<int64>=[]
+    loop param in ps {
+        if (int64(store[param].flags) & DB_MUT) not=? 0 or texts[int64(store[param].name)] =? "_" {continue}
+        let local=node_mk(@store 'vardecl' store[param].pos)
+        store[local].aux2 = 1 # synthesized value-parameter binding
+        store[local].name = store[param].name
+        if int64(store[param].nlist) >? 0 {node_set_list(@store @lists local node_kids(@store @lists param))}
+        let value=node_mk(@store 'ident' store[param].pos)
+        store[value].name = store[param].name
+        store[value].aux2 = 1 # the parameter's value itself, even a function
+        if name =? "main" {
+            if ps.length not=? 1 {return host.unsupported(store[n].pos "multiple entry-point parameters")}
+            store[value].name = int32(host.intern_name("args"))
+            let call=node_mk(@store 'call' store[param].pos)
+            store[call].a = int32(value)
+            value=call
+            store[local].a = store[param].a
+        }
+        store[local].b = int32(value)
+        prefix.push(local)
+    }
+    loop param in ps {
+        if db_has_shape(@store int64(store[param].a)) {db_shape_prologue(@store @lists @host param @prefix)}
+    }
+    if name =? "main" {
+        loop param in ps {
+            if (int64(store[param].flags) & DB_MUT) not=? 0 {return host.unsupported(store[n].pos "a mutable entry-point parameter")}
+        }
+        ps=[]
+    }
+    node_set_list(@store @lists n ps)
+    loop statement in node_kids(@store @lists body) {prefix.push(statement)}
+    # (a shaped result, `:>array<T length=[m p]>`: the final value is checked as it leaves;
+    # a `return` is checked where it is)
+    if db_has_shape(@store int64(store[n].a)) and prefix.length >? 0 and store[prefix[prefix.length - 1]].kind =? 'exprstmt' {
+        let last=prefix[prefix.length - 1]
+        let pos=store[last].pos
+        let dims:array<int64>=[]
+        loop dim in node_kids(@store @lists int64(store[n].a)) {dims.push(node_clone(@store @lists dim))}
+        let sizes=node_mk(@store 'array' pos)
+        node_set_list(@store @lists sizes dims)
+        store[last].a = int32(db_call(@store @lists @host "__shape_value" [int64(store[last].a) sizes] pos))
+    }
+    node_set_list(@store @lists body prefix)
+    store[n].b = int32(body)
+    return n
+# Caller validates both endpoints; flags are ast.jo's NF_STEP/INCLUSIVE/EXCL_FIRST.
+}
+
+db_range_value=(@store:array<Node> @lists:array<int32> @host:ParserBuilderHost range:int64):>int64=>{
+    let pos=store[range].pos
+    let step=(int64(store[range].flags) & 32768) not=? 0
+    let second=if step int64(store[range].c) else db_singleton_int(@store 0 pos)
+    let stepped=node_mk(@store 'bool_lit' pos)
+    store[stepped].ival = if step 1 else 0
+    let inclusive=node_mk(@store 'bool_lit' pos)
+    store[inclusive].ival = if (int64(store[range].flags) & 2) not=? 0 1 else 0
+    let result=db_call(@store @lists @host "__dewy_range" [int64(store[range].a) second int64(store[range].b) stepped inclusive] pos)
+    if (int64(store[range].flags) & 536870912) not=? 0 {result = db_call(@store @lists @host "__dewy_range_tail" [result] pos)}
+    result
+}

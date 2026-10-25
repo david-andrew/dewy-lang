@@ -1,0 +1,277 @@
+$runtime_checks
+from p"node_store.dewy" import Node, node_mk, node_set_list, node_set_list2, node_kids, node_kids2, node_clone
+
+from p"dewy_parser.dewy" import ParserContext, dc_parser_word
+from p"dewy_builders.dewy" import ParserBuilderHost, db_receiver_field
+# Runs only for method/member resolution. Node visits and scope lookups are
+# indexed; hiding retains the original O(scope size * hidden names) copy.
+const DM_MUT:int64=1
+const DM_GENERIC:int64=64
+
+dm_hide=(@context:ParserContext @host:ParserBuilderHost names:array<int64>)=>{
+    if context.reach.scope.length =? 0 {return}
+    let inherited=dm_inherited(@context @host)
+    let deferred=context.reach.scope.has(inherited)
+    let hidden=deferred
+    loop name in names {
+        if context.reach.scope.has(name) {hidden = true}
+    }
+    if not hidden {return}
+    let visible:dict<int64 int64>=[]
+    loop [name receiver] in context.reach.scope {
+        if not (name in? names) {visible[name] = receiver}
+    }
+    if deferred {
+        loop name in names {visible[name] = 0}
+    }
+    context.reach.scope = visible
+}
+
+dm_reach=(@context:ParserContext @store:array<Node> @lists:array<int32> @host:ParserBuilderHost @texts:array<string> n:int64):>bool=>{
+    if n <=? 0 {return n =? 0}
+    let k=store[n].kind
+    if k =? 'ident' {
+        let receiver=context.reach.scope.get(int64(store[n].name))
+        if receiver isnt? none {
+            if receiver not=? 0 {
+                let field=db_receiver_field(@store @context.reach.used receiver store[n].name store[n].pos)
+                store[field].flags = store[n].flags
+                store[n] = store[field]
+            }
+        }
+        else {
+            let inherited=dm_inherited(@context @host)
+            if context.reach.scope.has(inherited) {
+                context.reach.waiting.push(n)
+                context.reach.waiting_names.push(int64(store[n].name))
+            }
+        }
+        return true
+    }
+    if k =? 'int_lit' or k =? 'float_lit' or k =? 'bool_lit' or k =? 'none_lit' or k =? 'hole' {return true}
+    if k =? 'str_lit' {
+        loop part in node_kids(@store @lists n) {
+            if store[part].kind =? 'pair' and not dm_reach(@context @store @lists @host @texts int64(store[part].a)) {return false}
+        }
+        return true
+    }
+    if k =? 'field' or k =? 'not_' or k =? 'unary' or k =? 'propagate' or k =? 'namedarg' {return dm_reach(@context @store @lists @host @texts int64(store[n].a))}
+    if k =? 'call' {
+        if not dm_reach(@context @store @lists @host @texts int64(store[n].a)) {return false}
+        let callee=int64(store[n].a)
+        if store[callee].kind =? 'field' {store[int64(store[callee].a)].flags = int32(int64(store[int64(store[callee].a)].flags) or DM_MUT)}
+        if context.reach.waiting.length >? 0 and context.reach.waiting[context.reach.waiting.length - 1] =? callee {context.reach.waiting_callees.push(callee)}
+        return dm_reach_all(@context @store @lists @host @texts node_kids(@store @lists n))
+    }
+    if k =? 'index' {return dm_reach(@context @store @lists @host @texts int64(store[n].a)) and dm_reach_all(@context @store @lists @host @texts node_kids(@store @lists n))}
+    if k =? 'binary' or k =? 'and_' or k =? 'or_' or k =? 'pair' {return dm_reach(@context @store @lists @host @texts int64(store[n].a)) and dm_reach(@context @store @lists @host @texts int64(store[n].b))}
+    if k =? 'coalesce' {return dm_reach(@context @store @lists @host @texts int64(store[n].a)) and dm_reach(@context @store @lists @host @texts int64(store[n].b)) and dm_reach_type(@context @store @lists @host @texts int64(store[n].c))}
+    if k =? 'cast' or k =? 'istype' {return dm_reach(@context @store @lists @host @texts int64(store[n].a)) and dm_reach_type(@context @store @lists @host @texts int64(store[n].b))}
+    if k =? 'range' {return dm_reach(@context @store @lists @host @texts int64(store[n].a)) and dm_reach(@context @store @lists @host @texts int64(store[n].b)) and dm_reach(@context @store @lists @host @texts int64(store[n].c))}
+    if k =? 'array' or k =? 'map_lit' or k =? 'record_lit' {return dm_reach_all(@context @store @lists @host @texts node_kids(@store @lists n))}
+    if k =? 'lambda' {return dm_reach_fn(@context @store @lists @host @texts n)}
+    if k =? 'block' {return dm_reach_block(@context @store @lists @host @texts n)}
+    if k =? 'if_' or k =? 'for_' or k =? 'while_' or k =? 'loopx' {return dm_reach_flow(@context @store @lists @host @texts n)}
+    if k =? 'match_' {return dm_reach_match(@context @store @lists @host @texts n)}
+    # (`f<T>(x)`: the callee read as a value, its types as types)
+    if k =? 'typeapply' {
+        if not dm_reach(@context @store @lists @host @texts int64(store[n].a)) or not dm_reach_type(@context @store @lists @host @texts int64(store[n].c)) {return false}
+        loop arg in node_kids(@store @lists n) {
+            if not dm_reach_type(@context @store @lists @host @texts arg) {return false}
+        }
+        return true
+    }
+    false
+}
+
+dm_reach_all=(@context:ParserContext @store:array<Node> @lists:array<int32> @host:ParserBuilderHost @texts:array<string> xs:array<int64>):>bool=>{
+    loop x in xs {
+        if not dm_reach(@context @store @lists @host @texts x) {return false}
+    }
+    true
+}
+
+dm_reach_statements=(@context:ParserContext @store:array<Node> @lists:array<int32> @host:ParserBuilderHost @texts:array<string> block:int64):>bool=>{
+    loop statement in node_kids(@store @lists block) {
+        if not dm_reach_statement(@context @store @lists @host @texts statement) {return false}
+    }
+    true
+}
+
+dm_reach_statement=(@context:ParserContext @store:array<Node> @lists:array<int32> @host:ParserBuilderHost @texts:array<string> s:int64):>bool=>{
+    if s <=? 0 {return false}
+    let k=store[s].kind
+    if k =? 'vardecl' or k =? 'const_' {
+        # (a parameter's value binding, dw_finish_function: never a member)
+        if store[s].aux2 =? 1 {return true}
+        if int64(store[s].nlist) >? 0 {
+            if not dm_reach(@context @store @lists @host @texts int64(store[s].b)) or not dm_reach_type(@context @store @lists @host @texts int64(store[s].a)) {return false}
+            let names:array<int64>=[]
+            dm_bound(@store @lists node_kids(@store @lists s) @names)
+            dm_hide(@context @host names)
+            return true
+        }
+        let value=int64(store[s].b)
+        if value not=? 0 and store[value].kind =? 'lambda' {
+            dm_hide(@context @host [int64(store[s].name)])
+            return dm_reach_fn(@context @store @lists @host @texts value) and dm_reach_type(@context @store @lists @host @texts int64(store[s].a))
+        }
+        if not dm_reach_type(@context @store @lists @host @texts int64(store[s].a)) or not dm_reach(@context @store @lists @host @texts value) {return false}
+        dm_hide(@context @host [int64(store[s].name)])
+        return true
+    }
+    if k =? 'assign' {return dm_reach(@context @store @lists @host @texts int64(store[s].a)) and dm_reach(@context @store @lists @host @texts int64(store[s].b))}
+    if k =? 'exprstmt' or k =? 'return_' {return dm_reach(@context @store @lists @host @texts int64(store[s].a))}
+    if k =? 'break_' or k =? 'continue_' {return true}
+    if k =? 'if_' or k =? 'for_' or k =? 'while_' or k =? 'loopx' {return dm_reach_flow(@context @store @lists @host @texts s)}
+    if k =? 'block' {return dm_reach(@context @store @lists @host @texts s)}
+    false
+}
+
+dm_bound=(@store:array<Node> @lists:array<int32> bindings:array<int64> @out:array<int64>)=>{
+    loop b in bindings {
+        if store[b].kind =? 'tuple' {dm_bound(@store @lists node_kids(@store @lists b) @out)}
+        else if store[b].kind =? 'ident' {out.push(int64(store[b].name))}
+    }
+}
+
+dm_reach_flow=(@context:ParserContext @store:array<Node> @lists:array<int32> @host:ParserBuilderHost @texts:array<string> n:int64):>bool=>{
+    let saved=context.reach.scope
+    let k=store[n].kind
+    let reached=true
+    if k =? 'for_' {reached = dm_reach_in(@context @store @lists @host @texts node_kids(@store @lists n) int64(store[n].a))}
+    else if k =? 'loopx' {reached = dm_reach_head(@context @store @lists @host @texts int64(store[n].a))}
+    else {reached = dm_reach(@context @store @lists @host @texts int64(store[n].a))}
+    if not reached or not dm_reach(@context @store @lists @host @texts int64(store[n].b)) {return false}
+    context.reach.scope = saved
+    dm_reach(@context @store @lists @host @texts int64(store[n].c))
+}
+
+dm_reach_in=(@context:ParserContext @store:array<Node> @lists:array<int32> @host:ParserBuilderHost @texts:array<string> binders:array<int64> source:int64):>bool=>{
+    let before=context.reach.scope
+    let names:array<int64>=[]
+    dm_bound(@store @lists binders @names)
+    dm_hide(@context @host names)
+    let inside=context.reach.scope
+    context.reach.scope = before
+    if not dm_reach(@context @store @lists @host @texts source) {return false}
+    context.reach.scope = inside
+    true
+}
+
+dm_reach_head=(@context:ParserContext @store:array<Node> @lists:array<int32> @host:ParserBuilderHost @texts:array<string> h:int64):>bool=>{
+    let op=store[h].op
+    if op =? 1 {return dm_reach_in(@context @store @lists @host @texts node_kids(@store @lists h) int64(store[h].a))}
+    if op =? 4 {return dm_reach(@context @store @lists @host @texts int64(store[h].a))}
+    dm_reach_head(@context @store @lists @host @texts int64(store[h].a)) and dm_reach_head(@context @store @lists @host @texts int64(store[h].b))
+}
+
+dm_reach_match=(@context:ParserContext @store:array<Node> @lists:array<int32> @host:ParserBuilderHost @texts:array<string> n:int64):>bool=>{
+    if not dm_reach(@context @store @lists @host @texts int64(store[n].a)) {return false}
+    loop arm in node_kids(@store @lists n) {
+        let pattern=int64(lists[int64(store[arm].list) + 0])
+        if store[pattern].kind =? 'pshape' or store[pattern].kind =? 'pseq' {return false}
+        if store[pattern].kind =? 'plit' and not dm_reach(@context @store @lists @host @texts int64(store[pattern].a)) {return false}
+        let saved=context.reach.scope
+        if store[pattern].name not=? 0 {dm_hide(@context @host [int64(store[pattern].name)])}
+        if not dm_reach(@context @store @lists @host @texts int64(store[arm].b)) {return false}
+        context.reach.scope = saved
+    }
+    true
+}
+
+dm_reach_fn=(@context:ParserContext @store:array<Node> @lists:array<int32> @host:ParserBuilderHost @texts:array<string> n:int64):>bool=>{
+    if not dm_reach_type(@context @store @lists @host @texts int64(store[n].a)) {return false}
+    let bound:array<int64>=[]
+    loop p in node_kids(@store @lists n) {
+        if not dm_reach_type(@context @store @lists @host @texts int64(store[p].a)) or not dm_reach(@context @store @lists @host @texts int64(store[p].b)) {return false}
+        if int64(store[p].nlist) >? 0 {dm_bound(@store @lists node_kids(@store @lists p) @bound)}
+        else if dc_parser_word(@context @texts int64(store[p].name)) not=? 4 {bound.push(int64(store[p].name))}
+    }
+    if store[n].kind =? 'lambda' {
+        let captured=node_kids2(@store @lists n)
+        if ((int64(store[n].flags) & DM_GENERIC) not=? 0) {
+            captured=[]
+            if store[n].d not=? 0 {captured = node_kids(@store @lists int64(store[n].d))}
+        # (`$capture @hits` of a member: the closure writes it through the receiver's place, one
+        # capture of the receiver for every member, context.reach.captures, dw_function)
+        }
+        let members:array<int64>=[]
+        let kept:array<int64>=[]
+        loop capture in captured {
+            let receiver=context.reach.scope.get(int64(store[capture].name))
+            if receiver isnt? none {
+                if receiver not=? 0 {
+                    if not ((int64(store[capture].flags) & DM_MUT) not=? 0) or (int64(store[capture].name) in? members) {return false}
+                    members.push(int64(store[capture].name))
+                    let field=db_receiver_field(@store @context.reach.used receiver store[capture].name store[capture].pos)
+                    if members.length =? 1 {
+                        let base=int64(store[field].a)
+                        store[base].flags = int32(int64(store[base].flags) or DM_MUT)
+                        kept.push(base)
+                    }
+                    continue
+                }
+            }
+            bound.push(int64(store[capture].name))
+            kept.push(capture)
+        }
+        if members.length >? 0 {
+            context.reach.captures[n] = members
+            if ((int64(store[n].flags) & DM_GENERIC) not=? 0) {node_set_list(@store @lists int64(store[n].d) kept)}
+            else {node_set_list2(@store @lists n kept)}
+        }
+    }
+    let saved=context.reach.scope
+    dm_hide(@context @host bound)
+    let reached=dm_reach(@context @store @lists @host @texts int64(store[n].b))
+    context.reach.scope = saved
+    reached
+}
+
+dm_reach_type=(@context:ParserContext @store:array<Node> @lists:array<int32> @host:ParserBuilderHost @texts:array<string> t:int64):>bool=>{
+    if t <=? 0 {return t =? 0}
+    let k=store[t].kind
+    if k =? 'tarray' {return dm_reach_type(@context @store @lists @host @texts int64(store[t].a)) and dm_reach(@context @store @lists @host @texts int64(store[t].b))}
+    if k =? 'topt' or k =? 'tptr' {return dm_reach_type(@context @store @lists @host @texts int64(store[t].a))}
+    if k =? 'tmap' {return dm_reach_type(@context @store @lists @host @texts int64(store[t].a)) and dm_reach_type(@context @store @lists @host @texts int64(store[t].b))}
+    if k =? 'tname' {
+        if not dm_reach_type(@context @store @lists @host @texts int64(store[t].a)) {return false}
+        loop arg in node_kids(@store @lists t) {
+            if not dm_reach_type(@context @store @lists @host @texts arg) {return false}
+        }
+        return true
+    }
+    if k =? 'tunion' or k =? 'ttuple' or k =? 'tfn' {
+        if not dm_reach_type(@context @store @lists @host @texts int64(store[t].a)) {return false}
+        loop arg in node_kids(@store @lists t) {
+            if not dm_reach_type(@context @store @lists @host @texts arg) {return false}
+        }
+        return true
+    }
+    if k =? 'trecord' {
+        loop f in node_kids(@store @lists t) {
+            if not dm_reach_type(@context @store @lists @host @texts int64(store[f].a)) {return false}
+        }
+        return true
+    # (a refinement's predicate is a value: its binder hides nothing, dw_ref_predicate)
+    }
+    if k =? 'trefined' {return dm_reach_type(@context @store @lists @host @texts int64(store[t].a)) and dm_reach(@context @store @lists @host @texts int64(store[t].b))}
+    false
+}
+
+# Keep the scope snapshot local to the block path, so scalar/name visits do not
+# initialize its owned dictionary temporary. Restore it on failed readings too.
+dm_reach_block=(@context:ParserContext @store:array<Node> @lists:array<int32> @host:ParserBuilderHost @texts:array<string> n:int64):>bool=>{
+    let saved=context.reach.scope
+    let reached=dm_reach_statements(@context @store @lists @host @texts n)
+    context.reach.scope=saved
+    reached
+}
+
+# Name ids are stable for the life of the context's intern store. Populate this
+# on the original first lookup, preserving name order without a hook on each miss.
+dm_inherited=(@context:ParserContext @host:ParserBuilderHost):>int64=>{
+    if context.reach.inherited =? 0 {context.reach.inherited=host.intern_name("$inherited")}
+    context.reach.inherited
+}

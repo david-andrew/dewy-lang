@@ -1,0 +1,216 @@
+# Frozen member-resolution walker extracted at the parser port boundary.
+use 'node_store.dewy'
+use 'dewy_parser.dewy'
+use 'dewy_builders.dewy'
+
+const DM_MUT = 1
+const DM_GENERIC = 64
+
+dm_hide = (context: mut ParserContext, host: mut ParserBuilderHost, names: int[]):
+    if context.reach.scope.len() == 0: return
+    deferred = context.reach.scope.has(dm_inherited(context, host))
+    hidden = deferred
+    loop name in names:
+        if context.reach.scope.has(name): hidden = true
+    if not hidden: return
+    visible: {int: int} = {}
+    loop name, receiver in context.reach.scope:
+        if not names.contains(name): visible[name] = receiver
+    if deferred:
+        loop name in names: visible[name] = 0
+    context.reach.scope = visible
+
+dm_reach = (context: mut ParserContext, store: mut Node[], lists: mut i32[], host: mut ParserBuilderHost, texts: mut str[], n: int) -> bool:
+    if n <= 0: return n == 0
+    k = store[n].kind
+    if k == .ident:
+        if let receiver = context.reach.scope.get(int(store[n].name)):
+            if receiver != 0:
+                field = db_receiver_field(store, context.reach.used, receiver, store[n].name, store[n].pos)
+                store[field].flags = store[n].flags
+                store[n] = store[field]
+        else if context.reach.scope.has(dm_inherited(context, host)):
+            context.reach.waiting.push(n)
+            context.reach.waiting_names.push(int(store[n].name))
+        return true
+    if k == .int_lit or k == .float_lit or k == .bool_lit or k == .none_lit or k == .hole: return true
+    if k == .str_lit:
+        loop part in node_kids(store, lists, n):
+            if store[part].kind == .pair and not dm_reach(context, store, lists, host, texts, int(store[part].a)): return false
+        return true
+    if k == .field or k == .not_ or k == .unary or k == .propagate or k == .namedarg: return dm_reach(context, store, lists, host, texts, int(store[n].a))
+    if k == .call:
+        if not dm_reach(context, store, lists, host, texts, int(store[n].a)): return false
+        callee = int(store[n].a)
+        if store[callee].kind == .field: store[int(store[callee].a)].flags = i32(int(store[int(store[callee].a)].flags) | DM_MUT)
+        if context.reach.waiting.len() > 0 and context.reach.waiting[context.reach.waiting.len() - 1] == callee: context.reach.waiting_callees.push(callee)
+        return dm_reach_all(context, store, lists, host, texts, node_kids(store, lists, n))
+    if k == .index: return dm_reach(context, store, lists, host, texts, int(store[n].a)) and dm_reach_all(context, store, lists, host, texts, node_kids(store, lists, n))
+    if k == .binary or k == .and_ or k == .or_ or k == .pair: return dm_reach(context, store, lists, host, texts, int(store[n].a)) and dm_reach(context, store, lists, host, texts, int(store[n].b))
+    if k == .coalesce: return dm_reach(context, store, lists, host, texts, int(store[n].a)) and dm_reach(context, store, lists, host, texts, int(store[n].b)) and dm_reach_type(context, store, lists, host, texts, int(store[n].c))
+    if k == .cast or k == .istype: return dm_reach(context, store, lists, host, texts, int(store[n].a)) and dm_reach_type(context, store, lists, host, texts, int(store[n].b))
+    if k == .range: return dm_reach(context, store, lists, host, texts, int(store[n].a)) and dm_reach(context, store, lists, host, texts, int(store[n].b)) and dm_reach(context, store, lists, host, texts, int(store[n].c))
+    if k == .array or k == .map_lit or k == .record_lit: return dm_reach_all(context, store, lists, host, texts, node_kids(store, lists, n))
+    if k == .lambda: return dm_reach_fn(context, store, lists, host, texts, n)
+    if k == .block:
+        saved = context.reach.scope
+        reached = dm_reach_statements(context, store, lists, host, texts, n)
+        context.reach.scope = saved
+        return reached
+    if k == .if_ or k == .for_ or k == .while_ or k == .loopx: return dm_reach_flow(context, store, lists, host, texts, n)
+    if k == .match_: return dm_reach_match(context, store, lists, host, texts, n)
+    # (`f<T>(x)`: the callee read as a value, its types as types)
+    if k == .typeapply:
+        if not dm_reach(context, store, lists, host, texts, int(store[n].a)) or not dm_reach_type(context, store, lists, host, texts, int(store[n].c)): return false
+        loop arg in node_kids(store, lists, n):
+            if not dm_reach_type(context, store, lists, host, texts, arg): return false
+        return true
+    false
+
+dm_reach_all = (context: mut ParserContext, store: mut Node[], lists: mut i32[], host: mut ParserBuilderHost, texts: mut str[], xs: int[]) -> bool:
+    loop x in xs:
+        if not dm_reach(context, store, lists, host, texts, x): return false
+    true
+
+dm_reach_statements = (context: mut ParserContext, store: mut Node[], lists: mut i32[], host: mut ParserBuilderHost, texts: mut str[], block: int) -> bool:
+    loop statement in node_kids(store, lists, block):
+        if not dm_reach_statement(context, store, lists, host, texts, statement): return false
+    true
+
+dm_reach_statement = (context: mut ParserContext, store: mut Node[], lists: mut i32[], host: mut ParserBuilderHost, texts: mut str[], s: int) -> bool:
+    if s <= 0: return false
+    k = store[s].kind
+    if k == .vardecl or k == .const_:
+        # (a parameter's value binding, dw_finish_function: never a member)
+        if store[s].aux2 == 1: return true
+        if int(store[s].nlist) > 0:
+            if not dm_reach(context, store, lists, host, texts, int(store[s].b)) or not dm_reach_type(context, store, lists, host, texts, int(store[s].a)): return false
+            names: int[]
+            dm_bound(store, lists, node_kids(store, lists, s), names)
+            dm_hide(context, host, names)
+            return true
+        value = int(store[s].b)
+        if value != 0 and store[value].kind == .lambda:
+            dm_hide(context, host, [int(store[s].name)])
+            return dm_reach_fn(context, store, lists, host, texts, value) and dm_reach_type(context, store, lists, host, texts, int(store[s].a))
+        if not dm_reach_type(context, store, lists, host, texts, int(store[s].a)) or not dm_reach(context, store, lists, host, texts, value): return false
+        dm_hide(context, host, [int(store[s].name)])
+        return true
+    if k == .assign: return dm_reach(context, store, lists, host, texts, int(store[s].a)) and dm_reach(context, store, lists, host, texts, int(store[s].b))
+    if k == .exprstmt or k == .return_: return dm_reach(context, store, lists, host, texts, int(store[s].a))
+    if k == .break_ or k == .continue_: return true
+    if k == .if_ or k == .for_ or k == .while_ or k == .loopx: return dm_reach_flow(context, store, lists, host, texts, s)
+    if k == .block: return dm_reach(context, store, lists, host, texts, s)
+    false
+
+dm_bound = (store: mut Node[], lists: mut i32[], bindings: int[], out: mut int[]):
+    loop b in bindings:
+        if store[b].kind == .tuple: dm_bound(store, lists, node_kids(store, lists, b), out)
+        else if store[b].kind == .ident: out.push(int(store[b].name))
+
+dm_reach_flow = (context: mut ParserContext, store: mut Node[], lists: mut i32[], host: mut ParserBuilderHost, texts: mut str[], n: int) -> bool:
+    saved = context.reach.scope
+    k = store[n].kind
+    reached = true
+    if k == .for_: reached = dm_reach_in(context, store, lists, host, texts, node_kids(store, lists, n), int(store[n].a))
+    else if k == .loopx: reached = dm_reach_head(context, store, lists, host, texts, int(store[n].a))
+    else: reached = dm_reach(context, store, lists, host, texts, int(store[n].a))
+    if not reached or not dm_reach(context, store, lists, host, texts, int(store[n].b)): return false
+    context.reach.scope = saved
+    dm_reach(context, store, lists, host, texts, int(store[n].c))
+
+dm_reach_in = (context: mut ParserContext, store: mut Node[], lists: mut i32[], host: mut ParserBuilderHost, texts: mut str[], binders: int[], source: int) -> bool:
+    before = context.reach.scope
+    names: int[]
+    dm_bound(store, lists, binders, names)
+    dm_hide(context, host, names)
+    inside = context.reach.scope
+    context.reach.scope = before
+    if not dm_reach(context, store, lists, host, texts, source): return false
+    context.reach.scope = inside
+    true
+
+dm_reach_head = (context: mut ParserContext, store: mut Node[], lists: mut i32[], host: mut ParserBuilderHost, texts: mut str[], h: int) -> bool:
+    op = store[h].op
+    if op == 1: return dm_reach_in(context, store, lists, host, texts, node_kids(store, lists, h), int(store[h].a))
+    if op == 4: return dm_reach(context, store, lists, host, texts, int(store[h].a))
+    dm_reach_head(context, store, lists, host, texts, int(store[h].a)) and dm_reach_head(context, store, lists, host, texts, int(store[h].b))
+
+dm_reach_match = (context: mut ParserContext, store: mut Node[], lists: mut i32[], host: mut ParserBuilderHost, texts: mut str[], n: int) -> bool:
+    if not dm_reach(context, store, lists, host, texts, int(store[n].a)): return false
+    loop arm in node_kids(store, lists, n):
+        pattern = int(lists[int(store[arm].list) + 0])
+        if store[pattern].kind == .pshape or store[pattern].kind == .pseq: return false
+        if store[pattern].kind == .plit and not dm_reach(context, store, lists, host, texts, int(store[pattern].a)): return false
+        saved = context.reach.scope
+        if store[pattern].name != 0: dm_hide(context, host, [int(store[pattern].name)])
+        if not dm_reach(context, store, lists, host, texts, int(store[arm].b)): return false
+        context.reach.scope = saved
+    true
+
+dm_reach_fn = (context: mut ParserContext, store: mut Node[], lists: mut i32[], host: mut ParserBuilderHost, texts: mut str[], n: int) -> bool:
+    if not dm_reach_type(context, store, lists, host, texts, int(store[n].a)): return false
+    bound: int[]
+    loop p in node_kids(store, lists, n):
+        if not dm_reach_type(context, store, lists, host, texts, int(store[p].a)) or not dm_reach(context, store, lists, host, texts, int(store[p].b)): return false
+        if int(store[p].nlist) > 0: dm_bound(store, lists, node_kids(store, lists, p), bound)
+        else if dc_parser_word(context, texts, int(store[p].name)) != 4: bound.push(int(store[p].name))
+    if store[n].kind == .lambda:
+        captured = node_kids2(store, lists, n)
+        if ((int(store[n].flags) & DM_GENERIC) != 0):
+            captured = []
+            if store[n].d != 0: captured = node_kids(store, lists, int(store[n].d))
+        # (`$capture @hits` of a member: the closure writes it through the receiver's place, one
+        # capture of the receiver for every member, context.reach.captures, dw_function)
+        members: int[]
+        kept: int[]
+        loop capture in captured:
+            if let receiver = context.reach.scope.get(int(store[capture].name)):
+                if receiver != 0:
+                    if not ((int(store[capture].flags) & DM_MUT) != 0) or members.contains(int(store[capture].name)): return false
+                    members.push(int(store[capture].name))
+                    field = db_receiver_field(store, context.reach.used, receiver, store[capture].name, store[capture].pos)
+                    if members.len() == 1:
+                        base = int(store[field].a)
+                        store[base].flags = i32(int(store[base].flags) | DM_MUT)
+                        kept.push(base)
+                    continue
+            bound.push(int(store[capture].name))
+            kept.push(capture)
+        if members.len() > 0:
+            context.reach.captures[n] = members
+            if ((int(store[n].flags) & DM_GENERIC) != 0): node_set_list(store, lists, int(store[n].d), kept)
+            else: node_set_list2(store, lists, n, kept)
+    saved = context.reach.scope
+    dm_hide(context, host, bound)
+    reached = dm_reach(context, store, lists, host, texts, int(store[n].b))
+    context.reach.scope = saved
+    reached
+
+dm_reach_type = (context: mut ParserContext, store: mut Node[], lists: mut i32[], host: mut ParserBuilderHost, texts: mut str[], t: int) -> bool:
+    if t <= 0: return t == 0
+    k = store[t].kind
+    if k == .tarray: return dm_reach_type(context, store, lists, host, texts, int(store[t].a)) and dm_reach(context, store, lists, host, texts, int(store[t].b))
+    if k == .topt or k == .tptr: return dm_reach_type(context, store, lists, host, texts, int(store[t].a))
+    if k == .tmap: return dm_reach_type(context, store, lists, host, texts, int(store[t].a)) and dm_reach_type(context, store, lists, host, texts, int(store[t].b))
+    if k == .tname:
+        if not dm_reach_type(context, store, lists, host, texts, int(store[t].a)): return false
+        loop arg in node_kids(store, lists, t):
+            if not dm_reach_type(context, store, lists, host, texts, arg): return false
+        return true
+    if k == .tunion or k == .ttuple or k == .tfn:
+        if not dm_reach_type(context, store, lists, host, texts, int(store[t].a)): return false
+        loop arg in node_kids(store, lists, t):
+            if not dm_reach_type(context, store, lists, host, texts, arg): return false
+        return true
+    if k == .trecord:
+        loop f in node_kids(store, lists, t):
+            if not dm_reach_type(context, store, lists, host, texts, int(store[f].a)): return false
+        return true
+    # (a refinement's predicate is a value: its binder hides nothing, dw_ref_predicate)
+    if k == .trefined: return dm_reach_type(context, store, lists, host, texts, int(store[t].a)) and dm_reach(context, store, lists, host, texts, int(store[t].b))
+    false
+
+dm_inherited = (context: mut ParserContext, host: mut ParserBuilderHost) -> int:
+    if context.reach.inherited == 0: context.reach.inherited = host.intern_name("$inherited")
+    context.reach.inherited

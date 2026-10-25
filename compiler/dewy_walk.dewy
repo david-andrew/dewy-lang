@@ -1,0 +1,175 @@
+$runtime_checks
+from p"node_store.dewy" import Node, node_mk, node_set_list, node_set_list2, node_kids, node_kids2, node_clone
+
+from p"dewy_parser.dewy" import ParserCollection
+from p"dewy_builders.dewy" import ParserBuilderHost
+# Traversals run only when the reader asks for collection/copy classification.
+# Work is proportional to visited nodes and child runs; tagged tails use a dict.
+const DR_MUT:int64=1
+const DR_STMT:int64=16
+const DR_MAP_PAIR:int64=33554432
+const DR_COMPREHENSION:int64=67108864
+
+dr_tail_kind=(@store:array<Node> @lists:array<int32> statement:int64):>int64=>{
+    if statement <=? 0 {return 0}
+    let k=store[statement].kind
+    if k =? 'if_' or k =? 'for_' or k =? 'while_' or k =? 'loopx' {
+        let first=dr_block_tail_kind(@store @lists int64(store[statement].b))
+        if first not=? 0 {return first}
+        return dr_block_tail_kind(@store @lists int64(store[statement].c))
+    }
+    if k not=? 'exprstmt' {return 0}
+    let value=int64(store[statement].a)
+    if store[value].kind =? 'block' and not ((int64(store[value].flags) & DR_COMPREHENSION) not=? 0) {return dr_block_tail_kind(@store @lists value)}
+    if store[value].kind =? 'match_' {
+        loop arm in node_kids(@store @lists value) {
+            let arm_kind=dr_block_tail_kind(@store @lists int64(store[arm].b))
+            if arm_kind not=? 0 {return arm_kind}
+        }
+        return 0
+    }
+    if store[value].kind =? 'pair' {return 2}
+    1
+}
+
+dr_block_tail_kind=(@store:array<Node> @lists:array<int32> block:int64):>int64=>{
+    if block <=? 0 or store[block].kind not=? 'block' or int64(store[block].nlist) =? 0 {return 0}
+    dr_tail_kind(@store @lists int64(lists[int64(store[block].list) + int64(store[block].nlist) - 1]))
+}
+
+dr_collect=(@state:ParserCollection @store:array<Node> @lists:array<int32> @host:ParserBuilderHost statement:int64 accumulator:int64 map:bool=false):>int64=>{
+    if statement <=? 0 {return 0}
+    let k=store[statement].kind
+    if k =? 'if_' or k =? 'for_' or k =? 'while_' or k =? 'loopx' {
+        if not dr_collect_block(@state @store @lists @host int64(store[statement].b) accumulator map) {return 0}
+        if store[statement].c not=? 0 and not dr_collect_block(@state @store @lists @host int64(store[statement].c) accumulator map) {return 0}
+        return statement
+    }
+    if k not=? 'exprstmt' {return statement}
+    let value=int64(store[statement].a)
+    # (a parallel loop collects nothing: dw_flow reports it)
+    if store[value].kind =? 'parallel_region' {return 0}
+    # (a match collects in each arm's body, dw_match)
+    if store[value].kind =? 'match_' {
+        loop arm in node_kids(@store @lists value) {
+            if not dr_collect_block(@state @store @lists @host int64(store[arm].b) accumulator map) {return 0}
+        }
+        store[value].flags = int32(int64(store[value].flags) or DR_STMT)
+        return statement
+    }
+    if store[value].kind =? 'block' and not ((int64(store[value].flags) & DR_COMPREHENSION) not=? 0) {
+        if not dr_collect_block(@state @store @lists @host value accumulator map) {return 0}
+        return value
+    }
+    let pos=store[statement].pos
+    if map not=? (store[value].kind =? 'pair') {
+        # (dw_collection_kind's mistake, dc_comprehension)
+        if not state.mixed {return 0}
+        if store[value].kind =? 'pair' {state.pairs_collected += 1}
+        return statement
+    }
+    if map {
+        let entry=node_mk(@store 'tuple' pos)
+        store[entry].flags = int32(int64(store[entry].flags) or DR_MAP_PAIR)
+        node_set_list(@store @lists entry [int64(store[value].a) int64(store[value].b)])
+        value=entry
+        state.pairs_collected += 1
+    }
+    else if store[value].kind =? 'call' {return statement}
+    store[statement].a = int32(dr_push(@store @lists @host accumulator value pos))
+    statement
+}
+
+dr_collect_block=(@state:ParserCollection @store:array<Node> @lists:array<int32> @host:ParserBuilderHost block:int64 accumulator:int64 map:bool):>bool=>{
+    if block <=? 0 or store[block].kind not=? 'block' or state.tagged_last.has(block) {return false}
+    let count=int64(store[block].nlist)
+    if count =? 0 {return true}
+    let last=dr_collect(@state @store @lists @host int64(lists[int64(store[block].list) + count - 1]) accumulator map)
+    if last =? 0 {return false}
+    lists[int64(store[block].list) + count - 1] = int32(last)
+    true
+}
+
+dr_push=(@store:array<Node> @lists:array<int32> @host:ParserBuilderHost accumulator:int64 value:int64 pos:int64):>int64=>{
+    let receiver=node_mk(@store 'ident' pos)
+    store[receiver].name = int32(accumulator)
+    store[receiver].flags = int32(int64(store[receiver].flags) or DR_MUT)
+    let callee=node_mk(@store 'field' pos)
+    store[callee].a = int32(receiver)
+    store[callee].name = int32(host.intern_name("push"))
+    let call=node_mk(@store 'call' pos)
+    store[call].a = int32(callee)
+    node_set_list(@store @lists call [value])
+    call
+}
+
+dr_kind_of=(@state:ParserCollection @store:array<Node> @lists:array<int32> statement:int64):>int64=>{
+    if statement <=? 0 {return 0}
+    let k=store[statement].kind
+    if k =? 'if_' or k =? 'for_' or k =? 'while_' or k =? 'loopx' {
+        let arms:array<int64>=[]
+        dr_flow_arms(@store @lists statement @arms)
+        return dr_arms_kind(@state @store @lists arms)
+    }
+    if k not=? 'exprstmt' {return 0}
+    let value=int64(store[statement].a)
+    if store[value].kind =? 'block' and not ((int64(store[value].flags) & DR_COMPREHENSION) not=? 0) {return dr_last_kind(@state @store @lists value)}
+    if store[value].kind =? 'match_' {
+        let arms:array<int64>=[]
+        loop arm in node_kids(@store @lists value) {arms.push(int64(store[arm].b))}
+        return dr_arms_kind(@state @store @lists arms)
+    }
+    if store[value].kind =? 'pair' {2} else {1}
+}
+
+dr_last_kind=(@state:ParserCollection @store:array<Node> @lists:array<int32> block:int64):>int64=>{
+    if block <=? 0 or store[block].kind not=? 'block' or int64(store[block].nlist) =? 0 {return 0}
+    dr_kind_of(@state @store @lists int64(lists[int64(store[block].list) + int64(store[block].nlist) - 1]))
+}
+
+dr_arms_kind=(@state:ParserCollection @store:array<Node> @lists:array<int32> arms:array<int64>):>int64=>{
+    let result:int64=0
+    loop arm in arms {
+        let next=dr_last_kind(@state @store @lists arm)
+        if state.mixed_pos not=? 0 {return 0}
+        if next =? 0 {continue}
+        if result not=? 0 and result not=? next {
+            state.mixed_pos = store[arm].pos
+            return 0
+        }
+        result=next
+    }
+    result
+}
+
+dr_flow_arms=(@store:array<Node> @lists:array<int32> flow:int64 @arms:array<int64>)=>{
+    arms.push(int64(store[flow].b))
+    let rest=int64(store[flow].c)
+    if rest =? 0 {return}
+    if store[rest].kind =? 'block' and store[rest].pos =? store[flow].pos and int64(store[rest].nlist) =? 1 {
+        let inner=int64(lists[int64(store[rest].list) + 0])
+        if store[inner].kind =? 'if_' {
+            dr_flow_arms(@store @lists inner @arms)
+            return
+        }
+        if store[inner].kind =? 'exprstmt' and store[int64(store[inner].a)].kind =? 'match_' {
+            loop arm in node_kids(@store @lists int64(store[inner].a)) {arms.push(int64(store[arm].b))}
+            return
+        }
+    }
+    arms.push(rest)
+}
+
+dr_copy_value=(@store:array<Node> @lists:array<int32> @texts:array<string> n:int64):>bool=>{
+    if store[n].kind =? 'block' {return dr_copy_last(@store @lists @texts n)}
+    let value=n
+    if store[value].kind =? 'call' {value = int64(store[value].a)}
+    store[value].kind =? 'field' and texts[int64(store[value].name)] =? "copy"
+}
+
+dr_copy_last=(@store:array<Node> @lists:array<int32> @texts:array<string> block:int64):>bool=>{
+    let count=int64(store[block].nlist)
+    if count =? 0 {return false}
+    let last=int64(lists[int64(store[block].list) + count - 1])
+    store[last].kind =? 'exprstmt' and dr_copy_value(@store @lists @texts int64(store[last].a))
+}

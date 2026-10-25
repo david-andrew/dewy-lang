@@ -1,4 +1,5 @@
 use 'dewy_parser.dewy'
+use 'dewy_context.jo'
 use 'dewy_methods.jo'
 use 'lazy_bodies.jo'
 # In-process Dewy frontend. Value expressions construct compact AST nodes;
@@ -21,9 +22,6 @@ use 'dewy_ffi.jo'
 use 'literals.dewy'
 use 'dewy_lex.dewy'
 
-# Active reader state; nested interpolation and lazy-body reads save/restore the
-# same individual fields as before. The name-class cache survives file changes.
-dc_parser: ParserContext
 dn_angles = 0
 dn_depth = 0
 

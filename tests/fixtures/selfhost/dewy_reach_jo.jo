@@ -1,0 +1,88 @@
+use '../../../compiler/node_store.dewy'
+use '../../../compiler/dewy_parser.dewy'
+use '../../../compiler/dewy_builders.dewy'
+use '../../../compiler/dewy_reach.jo'
+
+ns: Node[] = [Node()]
+runs: i32[]
+
+ints = (s: str) -> int[]:
+    out: int[]
+    if len(s) == 0: return out
+    loop x in split(s, ","): out.push(to_int(x) ?? 0)
+    out
+
+set_field = (n: int, field: str, v: int):
+    x = i32(v)
+    if field == "kind": ns[n].kind = NK(v)
+    else if field == "op": ns[n].op = x
+    else if field == "flags": ns[n].flags = x
+    else if field == "a": ns[n].a = x
+    else if field == "b": ns[n].b = x
+    else if field == "c": ns[n].c = x
+    else if field == "d": ns[n].d = x
+    else if field == "name": ns[n].name = x
+    else if field == "sval": ns[n].sval = x
+    else if field == "ival": ns[n].ival = v
+    else if field == "fval": ns[n].fval = f64(v) / 4.0
+    else if field == "type": ns[n].type = x
+    else if field == "sym": ns[n].sym = x
+    else if field == "aux": ns[n].aux = x
+    else if field == "aux2": ns[n].aux2 = x
+    else if field == "mod": ns[n].mod = x
+
+context: ParserContext
+texts: str[] = ["", "member", "shadow", "other", "_", "$inherited", "receiver"]
+intern_calls = 0
+name_id = (text: str) -> int:
+    intern_calls += 1
+    loop i in [0..texts.len()):
+        if texts[i] == text: return i
+    texts.push(text)
+    print("intern {text}")
+    texts.len() - 1
+unsupported = (pos: int, text: str) -> int: -77
+host = ParserBuilderHost(name_id, unsupported)
+
+main = ():
+    text = read_file(args()[1]) ?? ""
+    loop line in split(text, "\n"):
+        f = split(line, "\t")
+        op = f[0]
+        if op == "R":
+            context.reach = ParserReach({}, [], [], [], {}, {}, 0)
+            intern_calls = 0
+            context.classes = []
+            context.at = 111
+            context.status.report_pos = 222
+            context.status.hint_pos = 333
+            ns = [Node()]
+            runs = []
+        else if op == "M": print("{node_mk(ns, NK(to_int(f[1]) ?? 0), to_int(f[2]) ?? 0)}")
+        else if op == "L": node_set_list(ns, runs, to_int(f[1]) ?? 0, ints(f[2]))
+        else if op == "L2": node_set_list2(ns, runs, to_int(f[1]) ?? 0, ints(f[2]))
+        else if op == "U": print("{node_run(runs, ints(f[1]))}")
+        else if op == "F": set_field(to_int(f[1]) ?? 0, f[2], to_int(f[3]) ?? 0)
+        else if op == "K": print("{node_kids(ns, runs, to_int(f[1]) ?? 0)}")
+        else if op == "K2": print("{node_kids2(ns, runs, to_int(f[1]) ?? 0)}")
+        else if op == "C": print("{node_clone(ns, runs, to_int(f[1]) ?? 0)}")
+        else if op == "S": context.reach.scope[to_int(f[1]) ?? 0] = to_int(f[2]) ?? 0
+        else if op == "H": dm_hide(context, host, ints(f[1]))
+        else if op == "V": print("reach {dm_reach(context, ns, runs, host, texts, to_int(f[1]) ?? 0)}")
+        else if op == "T": print("reach {dm_reach_type(context, ns, runs, host, texts, to_int(f[1]) ?? 0)}")
+        else if op == "Q": print("reach {dm_reach_statement(context, ns, runs, host, texts, to_int(f[1]) ?? 0)}")
+        else if op == "E": print("reach {dm_reach_head(context, ns, runs, host, texts, to_int(f[1]) ?? 0)}")
+        else if op == "D":
+            print("state {context.at} {context.status.report_pos} {context.status.hint_pos}")
+            print("waiting {context.reach.waiting} {context.reach.waiting_names} {context.reach.waiting_callees}")
+            print("classes {context.classes}")
+            print("intern-cache {context.reach.inherited} {intern_calls}")
+            loop id in [0..texts.len()):
+                if let receiver = context.reach.scope.get(id): print("scope {id} {receiver}")
+                if context.reach.used.has(id): print("used {id}")
+            loop n in [0..ns.len()):
+                if let captured = context.reach.captures.get(n): print("captures {n} {captured}")
+            loop i in [0..ns.len()):
+                d = ns[i]
+                print("{i} {d.kind} {d.op} {d.flags} {d.pos} {d.a} {d.b} {d.c} {d.d} {d.list} {d.nlist} {d.list2} {d.nlist2} {d.name} {d.sval} {d.ival} {d.fval} {d.type} {d.sym} {d.aux} {d.aux2} {d.mod}")
+            print("{runs}")
