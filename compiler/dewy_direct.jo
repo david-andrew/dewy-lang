@@ -17,6 +17,8 @@ use 'lex.jo'
 use 'dewy_tokens.dewy'
 use 'dewy_syntax.dewy'
 use 'dewy_grammar.dewy'
+use 'dewy_lex.dewy'
+use 'literals.dewy'
 use 'dewy_parse.jo'
 use 'dewy_fast.jo'
 use 'par.jo'
@@ -189,6 +191,7 @@ dc_binary_token = (op: DewyToken) -> Tok:
         minus: .minus
         star, multiply_apply: .star
         eq: .eq
+        contains: .kw_in
         lt: .lt
         le: .le
         gt: .gt
@@ -520,8 +523,17 @@ dc_expr = (minimum: int) -> int:
             juxt_head = false
             continue
         if not token.space and (token.kind == .quoted or token.kind == .rawquoted) and minimum <= 170:
-            # (`b'a'`, `b"abc"`: byte literals take the reference grammar)
-            if nodes[left].kind == .ident and dc_word(int(nodes[left].name)) == DC_B: return 0
+            # `b'a'`, `b"abc"`: a byte, or an array of bytes (dw_byte_literal)
+            if nodes[left].kind == .ident and dc_word(int(nodes[left].name)) == DC_B:
+                written = dn_tokens[dn_at - 1]
+                if written.kind != .identifier or nodes[left].pos != mkpos(dn_file, written.start): return 0
+                literal = dc_byte_literal(token)
+                if literal == 0: return 0
+                dn_at += 1
+                left = literal
+                last_call = literal
+                juxt_head = false
+                continue
             dn_at += 1
             arg = dn_string(token, true)
             if arg == 0: return 0
@@ -596,6 +608,36 @@ dc_expr = (minimum: int) -> int:
     if token.symbol == .question or token.symbol == .ellipsis: return 0
     dc_depth -= 1
     left
+
+# A byte literal's string, as dw_byte_literal makes it: 0 where that reports a
+# mistake (the reference grammar reports it)
+dc_byte_literal = (token: DewyLexeme) -> int:
+    if token.kind != .quoted: return 0
+    source = files[dn_file].src
+    width = dn_quote_width(source, token.start, token.stop)
+    stop = token.stop - width
+    problem = LiteralProblem("", 0, false)
+    text: u8[]
+    if literal_string_text(problem, text, source, token.start + width, stop) < stop or len(problem.message) > 0: return 0
+    pos = mkpos(dn_file, token.start)
+    single = source[token.start] == '\''
+    if single and text.len() != 1: return 0
+    u8 = mk(.tname, pos)
+    nodes[u8].name = i32(intern("u8"))
+    n = mk(.cast, pos)
+    if single:
+        nodes[n].a = i32(bc_int(int(text[0]), pos))
+        nodes[n].b = i32(u8)
+        return n
+    elements: int[]
+    loop c in text: elements.push(bc_int(int(c), pos))
+    values = mk(.array, pos)
+    set_list(values, elements)
+    t = mk(.tarray, pos)
+    nodes[t].a = i32(u8)
+    nodes[n].a = i32(values)
+    nodes[n].b = i32(t)
+    n
 
 dc_arithmetic = (n: int) -> bool:
     k = nodes[n].kind
@@ -762,13 +804,15 @@ const DC_MUTATES = 12
 const DC_ALLOCATES = 13
 const DC_BLOCKS = 14
 const DC_PANICS = 15
+const DC_LENGTH = 16
+const DC_OVERFLOW = 17
 dc_classes: u8[]
 
 dc_word = (id: int) -> int:
     if id < dc_classes.len() and dc_classes[id] != 0: return int(dc_classes[id]) - 1
     if dc_classes.len() < names.len(): dc_classes.resize(names.len() + 256)
     name = name_of(id)
-    words = ["set", "b", "main", "_", "array", "ptr", "dict", "totaldict", "addr", "no_effects", "reads", "mutates", "allocates", "blocks", "panics"]
+    words = ["set", "b", "main", "_", "array", "ptr", "dict", "totaldict", "addr", "no_effects", "reads", "mutates", "allocates", "blocks", "panics", "length", "overflow"]
     c = 0
     loop k in [0..words.len()):
         if name == words[k]: c = k + 1
@@ -798,20 +842,52 @@ dc_type_named = () -> int:
     if word == DC_ADDR: refine_active = true
     # Parameter refinements use the existing annotation parser. Keeping the
     # declaration direct lets its body remain lazy instead of expanding it.
-    if dc_parameter_type and word == 0 and not dn_tokens[dn_at + 1].space and dn_tokens[dn_at + 1].symbol == .langle:
+    # (an overflow policy alone, `uint32<overflow='wrap'>`, is no refinement)
+    if dc_parameter_type and word == 0 and not dn_tokens[dn_at + 1].space and dn_tokens[dn_at + 1].symbol == .langle and not dc_policy_only():
         name = name_of(id)
         if name in ["int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64"]:
             return dw_type(dn_expr(160))
     dn_at += 1
-    n = mk(.tname, mkpos(dn_file, token.start))
+    pos = mkpos(dn_file, token.start)
+    n = mk(.tname, pos)
     nodes[n].name = i32(spelled)
     if not dn_tokens[dn_at].space and dn_accept(.langle):
         args: int[]
+        length = 0
         loop not dn_accept(.rangle):
+            # `array<T length=n>`, `T<overflow='wrap'>` (dw_type's type application)
+            if dc_named_next():
+                setting = dc_word(int(dn_tokens[dn_at].name))
+                dn_at += 2
+                if setting == DC_LENGTH and word == DC_ARRAY and args.len() == 1 and length == 0 and dn_peek() != .lbrack:
+                    saved_comma = dn_comma_stop
+                    dn_comma_stop = false
+                    dn_angles += 1
+                    length = dc_expr(dn_power(.assign) + 1)
+                    dn_angles -= 1
+                    dn_comma_stop = saved_comma
+                    if length == 0 or dn_peek() != .rangle: return 0
+                    continue
+                if setting != DC_OVERFLOW or (word >= DC_ARRAY and word <= DC_TOTALDICT) or nodes[n].aux == -9: return 0
+                policy = dc_policy(dn_tokens[dn_at])
+                if policy == 0: return 0
+                dn_at += 1
+                if dn_peek() != .rangle: return 0
+                wrapper = mk(.tname, pos)
+                nodes[wrapper].aux = -9
+                nodes[wrapper].a = i32(n)
+                nodes[wrapper].ival = policy
+                n = wrapper
+                continue
             child = dc_annotation()
             if child == 0: return 0
             args.push(child)
-        if word == DC_ARRAY:
+        if length != 0:
+            nodes[n].kind = .tarray
+            nodes[n].name = 0
+            nodes[n].a = i32(args[0])
+            nodes[n].b = i32(length)
+        else if word == DC_ARRAY:
             if args.len() != 1: return 0
             nodes[n].kind = .tarray
             nodes[n].name = 0
@@ -832,6 +908,26 @@ dc_type_named = () -> int:
                 nodes[n].aux = 1
         else: set_list(n, args)
     n
+
+# `'wrap'` 1, `'saturate'` 2, as an overflow policy is written (anything else 0: the
+# reference grammar reads it, and reports it)
+dc_policy = (token: DewyLexeme) -> int:
+    if token.kind != .quoted: return 0
+    source = files[dn_file].src
+    quote = source[token.start]
+    if (quote != '\'' and quote != '"') or source[token.stop - 1] != quote: return 0
+    width = token.stop - token.start - 2
+    if width == 4 and dn_matches(source.data(), token.start + 1, token.stop, "wrap"): return 1
+    if width == 8 and dn_matches(source.data(), token.start + 1, token.stop, "saturate"): return 2
+    0
+
+# `<overflow='wrap'>` is next, after the type's name.
+dc_policy_only = () -> bool:
+    at = dn_at + 2
+    if at + 3 >= dn_tokens.len(): return false
+    setting = dn_tokens[at]
+    if setting.kind != .identifier or setting.symbol != .none or dc_word(int(setting.name)) != DC_OVERFLOW: return false
+    dn_tokens[at + 1].symbol == .assign and dc_policy(dn_tokens[at + 2]) != 0 and dn_tokens[at + 3].symbol == .rangle
 
 dc_declaration = (constant: bool, bare: bool = false) -> int:
     token = dn_tokens[dn_at]
@@ -1099,6 +1195,17 @@ dc_type_declaration = () -> int:
     if dn_tokens[dn_at + 1].symbol != .colon or dn_tokens[dn_at + 2].kind != .identifier or dn_tokens[dn_at + 2].name != i32(dn_type_id) or dn_tokens[dn_at + 3].symbol != .assign: return 0
     dn_at += 4
     pos = mkpos(dn_file, token.start)
+    # `Name:type = type of Base`: a nominal type without fields or methods (dw_declare)
+    if dn_tokens[dn_at].kind == .identifier and dn_tokens[dn_at].name == i32(dn_type_id) and dn_tokens[dn_at + 1].symbol == .kw_of:
+        dn_at += 2
+        base = dc_type_named()
+        if base == 0 or nodes[base].kind != .tname or nkids(base) != 0 or not dc_statement_ends(): return 0
+        n = mk(.struct_, pos)
+        nodes[n].name = token.name
+        nodes[n].a = i32(base)
+        set_list(n, [])
+        dw_type_methods(n, [], [])
+        return n
     if dn_peek() != .lbrack:
         alias = dc_annotation()
         if alias == 0 or dn_power(dn_peek()) > 0: return 0
@@ -1289,6 +1396,7 @@ dc_statement = () -> int:
         dn_at += 1
         return dc_declaration(op == .kw_const)
     if token.kind == .identifier and dn_tokens[dn_at + 1].symbol == .colon: return dc_declaration(false, true)
+    if token.kind == .metatag: return dc_assertion(token)
     # Assignment operands are values rather than binding patterns.
     if token.kind != .identifier or (op != .none and op != .kw_test): return 0
     left = dc_expr(11)
@@ -1312,6 +1420,57 @@ dc_statement = () -> int:
     nodes[n].a = i32(left)
     nodes[n].b = i32(right)
     dn_accept_semi()
+    n
+
+# What follows ends the statement, as it ends the reference grammar's expression.
+dc_statement_ends = () -> bool:
+    after = dn_tokens[dn_at]
+    if after.kind == .eof: return true
+    if dn_power(after.symbol) > 0 or after.symbol == .comma or after.symbol == .semi or after.symbol == .dot or after.symbol == .question or after.symbol == .ellipsis or after.symbol == .kw_or_throw or after.symbol == .kw_not: return false
+    after.space or after.newline or after.symbol == .rbrace or after.symbol == .rparen or after.symbol == .rbrack
+
+# `$assert condition`, `$runtime_assert condition, message`, or either with its arguments
+# listed, `$assert(condition, "message")`: the statement calling the intrinsic, as
+# dw_directive makes it. Other directives, settings and labels take the reference grammar.
+dc_assertion = (token: DewyLexeme) -> int:
+    source = files[dn_file].src
+    width = token.stop - token.start - 1
+    runtime = width == 14 and dn_matches(source.data(), token.start + 1, token.stop, "runtime_assert")
+    if not runtime and not (width == 6 and dn_matches(source.data(), token.start + 1, token.stop, "assert")): return 0
+    pos = mkpos(dn_file, token.start)
+    dn_at += 1
+    next = dn_tokens[dn_at]
+    if next.newline or not dn_can_start(dn_tokens, dn_at): return 0
+    listed = next.symbol == .lparen and not next.space
+    if listed: dn_at += 1
+    first = dn_tokens[dn_at].start
+    saved = dn_comma_stop
+    dn_comma_stop = true
+    condition = dc_expr(0)
+    stop = dn_tokens[dn_at - 1].stop
+    message = 0
+    if condition != 0 and dn_accept(.comma):
+        written = dn_at
+        message = dc_expr(0)
+        # (an `$assert` message is a plain string literal: the reference grammar reports others)
+        if message != 0 and not runtime and (dn_at != written + 1 or nodes[message].kind != .str_lit or nodes[message].aux != 0): message = 0
+        if message == 0: condition = 0
+    dn_comma_stop = saved
+    if condition == 0 or listed and not dn_accept(.rparen): return 0
+    if not dc_statement_ends(): return 0
+    args = [condition]
+    if message != 0: args.push(message)
+    else if runtime:
+        text = mk(.str_lit, pos)
+        nodes[text].sval = i32(intern("assertion failed: " + join(words(source[first..stop)), " ")))
+        args.push(text)
+    callee = mk(.ident, pos)
+    nodes[callee].name = i32(intern(if runtime: "$runtime_assert" else: "$assert"))
+    call = mk(.call, pos)
+    nodes[call].a = i32(callee)
+    set_list(call, args)
+    n = mk(.exprstmt, pos)
+    nodes[n].a = i32(call)
     n
 
 dn_statement = (top: bool = false) -> int:
