@@ -12,6 +12,7 @@ use 'dewy_tokens.dewy'
 use 'dewy_syntax.dewy'
 use 'dewy_grammar.dewy'
 use 'dewy_direct.jo'
+use 'place_methods.jo'
 use 'dewy_directives.jo'
 use 'directives.jo'
 use 'dewy_ffi.jo'
@@ -660,13 +661,21 @@ dn_token_edit = (at: int):
 
 # Undo the edits recorded after `mark` (an abandoned attempt's), the latest first. An entry
 # -(k + 1) is a setting scope the attempt set (dc_unsafe_scope): scopes from k on go;
-# DN_EDIT_BIGINT, the module's bigint import the attempt asked for (dc_bigint_value).
+# DN_EDIT_BIGINT, the module's bigint import the attempt asked for (dc_bigint_value); below it,
+# DN_EDIT_BIGINT - n, the place type written for function n (dc_function_literal); below
+# DN_EDIT_LIVE, DN_EDIT_LIVE - n, node n marked a live loop's source (dc_head_term).
 const DN_EDIT_BIGINT = -1099511627776
-dn_edits_undo = (mark: int = 0):
+const DN_EDIT_LIVE = -1125899906842624
+# (`kept`: the direct nodes stay, compare mode's: their place and live-source marks stay too)
+dn_edits_undo = (mark: int = 0, kept: bool = false):
     i = dn_edit_at.len() - 1
     loop i >= mark:
         at = dn_edit_at[i]
         if at == DN_EDIT_BIGINT: dw_bigint_import = 0
+        else if at < DN_EDIT_BIGINT:
+            if kept: at = 0
+            else if at <= DN_EDIT_LIVE: dewy_live_sources.remove(DN_EDIT_LIVE - at)
+            else: place_written.remove(DN_EDIT_BIGINT - at)
         else if at < 0: dir_scopes.truncate(-at - 1)
         else: dn_tokens[at] = dn_edit_was[i]
         i -= 1
