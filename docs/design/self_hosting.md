@@ -484,9 +484,8 @@ the same nodes. A direct attempt that meets a form it does not take returns 0 an
 grammar re-reads that statement. `DEWY_FRONTEND=strict` stops at the first such fallback
 (`dc_fallback`; a `$target` chain's left-out arms, which `dw_target_dropped` reads as syntax, are
 not fallbacks): it is the gate for step 2. tests/test_frontend_strict.py holds valid programs that
-pass it; tests/test_frontend_strict_errors.py runs it over every error case. Valid input across the
-corpus no longer stops anywhere. Of the 1,207 error cases, 20 still stop (its PENDING list): that is
-how those mistakes are still reported.
+pass it; tests/test_frontend_strict_errors.py runs it over every error case. No golden case,
+example, ladder or library program stops anywhere, valid or not.
 
 Read directly since: generic lambdas in record literals and generic methods, member captures
 (`$capture @hits`, dewy_member_captures), recursive local closures, `(<value:int64>)`,
@@ -494,7 +493,8 @@ Read directly since: generic lambdas in record literals and generic methods, mem
 `in?` refinements over any range (dc_ref_ranges), `array<T><cond>`, `uint8<m in? 2..254>`,
 `T & ~v` in any type, wrapped overload groups, grouped literal unions (`('b' | 'a') | none`),
 `loop {…} {…}`, `[m.keys...]` as a loop source, `sum[parallel …]`, a match ending a
-comprehension's body, and the `??` and braced-condition warnings.
+comprehension's body, the `??` and braced-condition warnings, `$include_bytes(p"…") as name`
+statements and `$include_bytes(p"…") as T` casts.
 
 What still needs the reference path:
 - Diagnostics. The direct parser reports the reference's text at the reference's position. A parse
@@ -503,12 +503,18 @@ What still needs the reference path:
   (after deferred statements written before it), so parse mistakes later in the statement still
   come first; a reading given up, or one inside the reference grammar's block, leaves it to the
   projection. Where reading on would take another reading, a projection mistake is reported at once
-  (`dc_fail_now`; duplicate names, type parameters, `not` chains). The 20 pending: `[@n]()` capture
-  lists, `x:T => …` as an argument, `((x:int64):>int64)` types, a comprehension mixing entries,
-  match arms (`=` bodies, `else` inside), local types with methods, `$include_bytes` of a missing
-  file, `return` in an `$allocator` value, `xs[new..1]`, and the Python and C habits the
-  projection names (`def`, `for`, `a, b` parameters and loop names, `==` in a condition,
-  `xs[1:2]`, `[0..n as T)`, `if c:`), a format spec's `.`, and the nesting limit.
+  (`dc_fail_now`; duplicate names, type parameters, `not` chains, `x:T => …` as an argument,
+  `loop k, v in …`). Where the reference grammar read on past what the direct grammar takes (`if c:`
+  through its colon, `x == 3` and `xs[1:2]` through the operator, `[0..n as T)` through the cast),
+  the direct parser reads the same span; its depth counts as `dn_depth` (an unbraced body adds no
+  level, a value after `=` one), so the nesting limit falls on the same token.
+- Valid forms the suite's own programs (pytest's inline sources) still re-read, found by the full
+  suite with strict as the default mode (about 150 tests): proof results with facts in a union
+  (`:>true & <a >? 0> | false & <a <=? 0>`, `:>Yes & <…> | No`), `$build.mode = '…'` and
+  `$target = …` settings, `from p"m" import (A as B), c`, `(type of error) & [...]`, effect rows on
+  parameter types (`Action<no mutates<Disk>>`), one-line records with `$__drop__`, and mistakes
+  in bundle definitions (`$a = {…}`), `$warn_if`, `$test(cases=…)`, `parallel` bodies,
+  `bad<no_effects>(1)`, `[1 2; 3 4]` in a call and `let y = $expect true`.
 - `DEWY_FRONTEND=old` (`dc_enabled` false) and `compare` (each direct statement re-read by `dn_stmt`,
   projected and compared with `dc_same`; directive lines and settings compare their own
   results). The `tests/test_frontend_*` files run old, direct and compare side by side.
@@ -529,13 +535,17 @@ What still needs the reference path:
 Removal, in order (each step gated by the full suite, the bootstrap and same-output):
 1. Close the valid forms (done). The `(a b)` groups still routed through `dn_value` go with their
   consumers (`$test` cases are read directly now).
-2. The direct parser reports its own mistakes: each `return 0` that marks a mistake rather than
-  another reading reports the reference's text at its position. Gate: a fallback-free mode that
-  stops at any fallback, every `.err` test identical, the error-root survey at zero (PENDING
-  empty). A hot reader (dc_expr, dc_atom, dc_body_read, dc_word, …) holds no string temporaries:
+2. The direct parser reports its own mistakes (done for the golden cases): each `return 0` that
+  marks a mistake rather than another reading reports the reference's text at its position. Gate:
+  strict mode stops nowhere, every `.err` test identical. Left: the pytest programs above. A hot
+  reader (dc_expr, dc_atom, dc_body_read, dc_word, …) holds no string temporaries:
   each costs on every call, so diagnostics and other string work live in helpers.
 3. Retire `compare` and `old`: delete the `dc_compare` paths, `dc_same*`, `DEWY_FRONTEND`; the
-  triple-mode tests keep their programs as single-mode golden tests.
+  triple-mode tests keep their programs as single-mode golden tests. Gate: the full suite passes
+  with strict as the default (`dc_strict = mode == "strict" or mode == ""`). Each fallback site
+  then becomes a mistake (`fatal` at the statement, or the first noted mistake); the left-out
+  `$target` arms stay the reference grammar's, read with `dc_enabled` off (pure syntax for
+  `dw_target_dropped`).
 4. Delete the projection: dewy_parse.jo's readers of `DewySyntax` (`dw_expr`, `dw_stmt`, `dw_flow`,
   `dw_block`, `dw_declare`, `dw_type`, `dw_top_declarations`' syntax paths, …). The node builders
   the direct parser calls move to a node-side module first: `dw_finish_function`,

@@ -40,6 +40,7 @@ DIRECT = [
     'tests/cases/unpack/param_patterns.dewy',
     'tests/ladder/71_checked_proofs/design.dewy',
     'compiler/spelling.dewy',
+    'tests/fixtures/programs/include_bytes.dewy',
 ]
 
 REPORTED = [
