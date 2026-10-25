@@ -7,13 +7,13 @@ day; keep it under 150 lines. Accepted designs live in [docs/design](docs/design
 
 ## North star
 
-| Measure | Now (2026-10-24) | Goal |
+| Measure | Now (2026-10-25) | Goal |
 |---|---|---|
-| Acceptance ladder, design surface | 101/101 (no open rungs; new rungs needed) | all |
+| Acceptance ladder, design surface | 112/112 (tier 5 done; new rungs needed) | all |
 | Tier-4 flagship programs (1–5k lines each) | 7/7 pass | all pass |
-| No traps by default (`require-static`, no opt-ins) | ~272/372 programs; flip commit on `wt/flip4` | flip the default |
-| Compile throughput, single thread, default build, every processed line | flagships 139k lines/s (min 99_dewy_frontend 93k) | 200–250k on every flagship |
-| Hello-world compile | 7.9 ms (instruction-derived) | ≤20 ms |
+| No traps by default | default since 589be07d8; ~1,418 narrowing, ~1,411 callee-panic sites still need opt-ins | ordinary code proves without opt-ins |
+| Compile throughput, single thread, default build, every processed line | flagships 142k lines/s (min 99_dewy_frontend 95k) | 200–250k on every flagship |
+| Hello-world compile | 8.0 ms (instruction-derived) | ≤20 ms |
 | Kernels vs C -O2 (time, default) | broadcast 3.8×, arena 4.4× | ≤1.2× |
 | Quick / full suite | ~20–33 s / ~4 min (loaded machine) | ≤30 s / ≤5 min |
 
@@ -24,26 +24,22 @@ changes. Wall clock only on a quiet pinned machine or a CI runner. Kernels:
 
 ## Next
 
-1. **No traps by default** (top capability). Blockers before the flip lands:
-   facts/effects compile cost with facts everywhere (facts +111%, effects
-   +231%), codegen regressions under the flip (bench `arrays`, lost stencil
-   vectorization), remaining unproven library ops.
+1. **No traps: ordinary code proves** (top capability; the default flipped).
+   Remaining unproven families: narrowing on unconstrained `int64` arithmetic
+   (needs a design call), callee-may-panic chains, 2-D shapes, loop fixed
+   points over arrays, string `find` bounds. Dogfood programs are the yardstick.
 2. **Compile speed** (200–250k lines/s single-thread on every flagship; every
-   processed line counts). Next: obligation-heavy facts cost (99_dewy_frontend's
-   contracts), then the native code-quality gap vs GCC (frame/allocation,
-   instruction selection). Layout changes need cycle measurements.
-3. **Exact fixed-width integers** (decided): overflow policies landed; store
-   obligations and exact intermediates at gate-neutral cost (Astra).
-4. **Decided surface still to build:** deadlock freedom (`lock_all`,
-   `try_lock`, `$no_deadlocks`, inferred lock order); place-returning methods;
-   `$bulletproof`/`$no_assumed_bounds`; the time system (redesign pending).
-5. **Runtime speed vs C:** loop and `push` codegen (broadcast, arena), register
-   allocation, vectorization under checks.
-6. **Self-hosting** ([readiness](docs/design/self_hosting.md)): next leaves
-   `targets.jo`, the intern table (after the flip removes proven-read checks).
-7. **Hygiene at quiet points:** the internal Sloppy comment sweep and
-   `SLOPPY_*` names; moving implemented rounds out of decisions.md into their
-   design docs.
+   processed line counts). Next: the parked `members`-loop architecture (bound
+   3.5%), the native code-quality gap vs GCC (register allocation bound 6.5%,
+   one pilot rejected; live-range splitting unmeasured).
+3. **Self-hosting** ([readiness](docs/design/self_hosting.md)): one parser
+   first (migrate remaining forms into the direct parser, retire the reference
+   fallback), then port the parser onto the node-store and intern leaves.
+4. **Runtime speed vs C:** vectorization under checks (broadcast), allocation
+   and growth in `arena`, `push` vs C (~2.3× instructions).
+5. **Decided surface still to build:** the time system (redesign pending).
+6. **Hygiene at quiet points:** the internal Sloppy comment sweep and
+   `SLOPPY_*` names.
 
 ## Decided (David; full text in [docs/design/decisions.md](docs/design/decisions.md))
 
