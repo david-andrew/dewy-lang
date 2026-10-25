@@ -17,8 +17,8 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[2]
 SIZES = {'fib': 32, 'sum': 16777216, 'matmul': 1024,
-         'jacobi': 1024, 'mergesort': 262144}
-SMALL = {'fib': 16, 'sum': 10003, 'matmul': 65, 'jacobi': 31, 'mergesort': 1031}
+         'jacobi': 1024, 'mergesort': 262144, 'parallel_particles': 2048}
+SMALL = {'fib': 16, 'sum': 10003, 'matmul': 65, 'jacobi': 31, 'mergesort': 1031, 'parallel_particles': 65}
 
 
 def physical_cpus() -> list[int]:
@@ -40,8 +40,9 @@ def main() -> int:
     parser.add_argument('--kernels', nargs='+', choices=SIZES, default=list(SIZES))
     parser.add_argument('--small', action='store_true', help='checksum smoke sizes')
     parser.add_argument('--instructions', action='store_true')
+    parser.add_argument('--cycles', action='store_true', help='indicative pinned hardware cycles')
     parser.add_argument('--gate', action='store_true',
-                        help='fail below 0.9x OpenMP or above 1.1x sequential time')
+                        help='fail below 0.9x OpenMP throughput/scaling or above 1.1x sequential time')
     parser.add_argument('--work', type=Path,
                         default=ROOT / 'build/forkjoin-bench')
     args = parser.parse_args()
@@ -61,11 +62,11 @@ def main() -> int:
     if args.previous:
         compilers['previous'] = args.previous.resolve()
     counter = None
-    if args.instructions:
+    if args.instructions or args.cycles:
         sys.path.insert(0, str(ROOT))
         from tools.compiler.speed import Counter, CACHE
         CACHE.mkdir(parents=True, exist_ok=True)
-        counter = Counter('auto')
+        counter = Counter('perf' if args.cycles else 'auto')
     print(f'load start: {os.getloadavg()}; physical CPUs: {cpus}', flush=True)
     sizes = SMALL if args.small else SIZES
     for kernel in args.kernels:
@@ -77,7 +78,7 @@ def main() -> int:
                             '-o', output], env=env, check=True)
             binaries[label] = output
         output = args.work / f'{kernel}-openmp'
-        subprocess.run(['gcc', '-O3', '-fopenmp', source.with_suffix('.c'), '-o', output],
+        subprocess.run(['gcc', '-O3', '-fopenmp', source.with_suffix('.c'), '-lm', '-o', output],
                        check=True)
         binaries['openmp'] = output
         expected = None
@@ -85,6 +86,7 @@ def main() -> int:
         for workers, serial in [(n, False) for n in args.workers] + [(1, True)]:
             samples = {label: [] for label in binaries}
             counts = {label: [] for label in binaries}
+            cycles = {label: [] for label in binaries}
             run_env = dict(env, DEWY_THREADS=str(workers), OMP_NUM_THREADS=str(workers),
                            OMP_PROC_BIND='true', OMP_PLACES='cores')
             for repeat in range(args.runs):
@@ -104,27 +106,54 @@ def main() -> int:
                     if checksum != expected:
                         raise RuntimeError(f'{kernel}/{label}: {checksum} != {expected}')
                     samples[label].append(ns / 1e6)
-                    if counter:
+                    if args.instructions:
                         instructions, output = counter.run(command, run_env)
                         if int(output.split()[0]) != expected:
                             raise RuntimeError(f'{kernel}/{label}: counter checksum mismatch')
                         counts[label].append(instructions)
+                    if args.cycles:
+                        from tools.compiler.speed import counter_result
+                        measured = subprocess.run([counter.binary, '--cycles', *command],
+                                                  env=run_env, capture_output=True,
+                                                  text=True, check=True, timeout=120)
+                        if int(measured.stdout.split()[0]) != expected:
+                            raise RuntimeError(f'{kernel}/{label}: cycle checksum mismatch')
+                        cycles[label].append(counter_result(measured.stderr, 'cycles'))
             label = 'serial' if serial else str(workers)
             exact = {k: statistics.median(v) for k, v in samples.items()}
             measurements[label] = exact
             medians = {k: round(v, 3) for k, v in exact.items()}
             print(f'{kernel:10} {label:6} ms={medians} checksum={expected} '
                   f'load={os.getloadavg()}', flush=True)
-            if counter:
+            if args.instructions:
                 print('  instructions (whole process, including setup): '
                       + str({k: int(statistics.median(v)) for k, v in counts.items()}),
                       flush=True)
+            if args.cycles:
+                print('  cycles (whole process, indicative on a shared host): '
+                      + str({k: int(statistics.median(v)) for k, v in cycles.items()}), flush=True)
+            print('  range ms: ' + str({k: (round(min(v), 3), round(max(v), 3))
+                                        for k, v in samples.items()}), flush=True)
+        for implementation in binaries:
+            t1 = measurements['1'][implementation] if '1' in measurements else None
+            if t1 is not None:
+                print(f'  {implementation} T1/Tseq={t1 / measurements["serial"][implementation]:.3f}; '
+                      + 'speedups ' + str({n: round(t1 / measurements[str(n)][implementation], 3)
+                                          for n in args.workers}), flush=True)
+        print('  OpenMP/Dewy rates: ' + str({n: round(measurements[str(n)]['openmp'] /
+              measurements[str(n)]['dewy'], 3) for n in args.workers}), flush=True)
         if args.gate:
             for workers in args.workers:
                 times = measurements[str(workers)]
                 ratio = times['openmp'] / times['dewy']
                 if ratio < 0.9:
                     print(f'FAIL {kernel}/{workers}: {ratio:.3f}x OpenMP < 0.9x', flush=True)
+                    failed = True
+                dewy_speedup = measurements['1']['dewy'] / times['dewy']
+                c_speedup = measurements['1']['openmp'] / times['openmp']
+                if workers > 1 and dewy_speedup < 0.9 * c_speedup:
+                    print(f'FAIL {kernel}/{workers}: scaling {dewy_speedup:.3f}x '
+                          f'< 0.9 * OpenMP {c_speedup:.3f}x', flush=True)
                     failed = True
             overhead = measurements['1']['dewy'] / measurements['serial']['dewy']
             if overhead > 1.1:

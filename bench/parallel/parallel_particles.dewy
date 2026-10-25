@@ -1,0 +1,21 @@
+# The all-pairs update from examples/parallel_particles.dewy, timed separately
+# from initialization and checksum collection. Each frame reads its predecessor.
+from p"../harness.jo" import clock, size_argument
+from p"../../examples/parallel_particles.dewy" import make, advance
+main=(args:array<string>):>void=>{
+    let n=size_argument(args 2048)
+    let particles=make(n)
+    let threaded=args.length <=? 2
+    let start=clock()
+    loop frame in [0..4) {particles=advance(particles 0.01 threaded)}
+    let elapsed=clock()-start
+    let checksum:int64=0
+    loop p in particles {
+        checksum+=(p.x*1000000.0) as int64
+        checksum+=(p.y*1000000.0) as int64
+        checksum+=(p.vx*1000000.0) as int64
+        checksum+=(p.vy*1000000.0) as int64
+    }
+    printl"{checksum} {elapsed}"
+}
+$runtime_checks

@@ -3768,6 +3768,9 @@ gen_intrinsic_len = (e: int, arg_start: int) -> Val:
     arg0 = int(lists[arg_start])
     id = nodes[e].aux as IN
     at = prune(ntype(arg0))
+    if id == .len:
+        scalar = parallel_scalar_length(arg0)
+        if scalar >= 0: return V(e_iconst(scalar), false)
     if id == .len and types[at].kind == .fixed:
         gen_borrowed(arg0)
         return V(e_iconst(fixed_len(at)), false)
