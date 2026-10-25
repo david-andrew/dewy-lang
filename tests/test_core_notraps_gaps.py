@@ -159,12 +159,7 @@ def check(compiler, tmp_path, name, source):
     return subprocess.run([compiler, '--internal-fact-policy=require-static', 'check', path], text=True, capture_output=True, timeout=30)
 
 
-# The pool index fact holds, but __pool_index still panics in the library
-# until pool handles carry a liveness proof (the panics effect reports it).
-PANICS_PENDING = {'pool_direct_update'}
-
-
-@pytest.mark.parametrize('name', [pytest.param(n, marks=pytest.mark.xfail(reason='pool index panics until handles carry liveness', strict=True)) if n in PANICS_PENDING else n for n in PROVED])
+@pytest.mark.parametrize('name', PROVED)
 def test_gap_fact_proved(compiler, tmp_path, name):
     result = check(compiler, tmp_path, name, PROVED[name])
     assert result.returncode == 0, result.stdout + result.stderr

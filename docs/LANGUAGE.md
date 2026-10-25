@@ -682,6 +682,11 @@ and a heap's `h.pop()`, `h.peek()` and `h.peek_priority()`. The key functions re
 needs `0 <=? start <=? text.length`, so a guarded call cannot panic. `d[k]`, `d[k] += 1` and `d.pop(k)` need the key present, proven by a
 guard (`if k in? d`) or an earlier store into `d[k]` with no other change of
 `d` between; `d.get(k)` and `d.pop(k default=v)` take a missing key as a value.
+`pool[h]`, `pool[h] = x` and `pool[h].field += x` need `pool.has(h)`, proven by
+`h = pool.add(x)` or a guard (`if pool.has(h)`) with nothing since that may have
+removed `h`: stores, updates and loops that do not remove keep it, and so does
+`pool.remove(g)` when `g` and `h` both came from `add` on this pool, one while the
+other was in; `pool.get(h)` takes a missing handle as a value.
 A stepped range's nonzero step is the caller's obligation too, as a divisor is,
 in a slice (`xs[a,b..]`, `m[a,b..c ..]`) and an open counter (`[a,b..]`) as in a loop.
 A literal can rule a failure out: a power with a literal exponent `>=? 0` and a

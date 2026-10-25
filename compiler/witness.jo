@@ -68,7 +68,7 @@ wit_op = (op: Tok) -> str:
 # counters): never shown to the user.
 wit_hidden_name = (name: str) -> bool:
     if starts_with(name, "$"): return true
-    loop prefix in ["__s", "__k", "__ix", "__each", "__has"]:
+    loop prefix in ["__s", "__k", "__ix", "__each", "__has", "__index"]:
         if starts_with(name, prefix) and name.len() > prefix.len():
             c = name[prefix.len()]
             if c >= '0' and c <= '9': return true

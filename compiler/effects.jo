@@ -2160,6 +2160,9 @@ panic_device_literal = (n: int) -> bool:
 # obligation (facts.jo fact_map_check), proven, an error or its own check.
 panic_map_obligation = (n: int) -> bool:
     m = fact_map_call(n)
+    if m >= 2 and m <= 4: return true
+    # (a pool's `pool[h]`, `pool[h] = x` and `__pool_index`: the handle's membership)
+    m = fact_pool_call(n)
     m >= 2 and m <= 4
 
 # A literal argument the library's one failure cannot happen with: a range

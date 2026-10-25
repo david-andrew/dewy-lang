@@ -71,8 +71,11 @@ remove[T] = (p: mut Pool[T], h: Handle) -> bool:
     last = p.items.len() - 1
     if i != last:
         p.items[i] = p.items[last]
-        p.handles[i] = p.handles[last]
-        p.__where[p.handles[i].slot] = i
+        moved = p.handles[last]
+        p.handles[i] = moved
+        # (only the slot whose thing was last moves: `handles` is public, and
+        # the slot tables, which `has` reads, stay the library's own)
+        if p.__where[moved.slot] == last: p.__where[moved.slot] = i
     p.items.pop()
     p.handles.pop()
     p.__where[h.slot] = -1
@@ -90,7 +93,10 @@ len[T] = (p: Pool[T]) -> int: p.items.len()
 
 # everything out (every handle gone)
 clear[T] = (p: mut Pool[T]):
-    loop h in p.handles: p.__where[h.slot] = -1
-    loop h in p.handles: p.__free.push(h.slot)
+    # (a slot is free exactly when its `__where` is -1, once in `__free`)
+    loop h in p.handles:
+        if p.__where[h.slot] >= 0:
+            p.__where[h.slot] = -1
+            p.__free.push(h.slot)
     p.items.clear()
     p.handles.clear()

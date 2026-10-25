@@ -903,6 +903,8 @@ fact_field_args = (s: mut FactState, base: int) -> int[]:
 
 fact_replace = (s: mut FactState, base: int, selector: int, element: bool, value: int, t: int) -> int:
     v = fact_new(s, fact_domain(t), FactTerm(type = t))
+    # (a pool's slot tables are its memberships: fact_pool_call)
+    private = not element and selector >= 0 and fact_pool_type(t) and starts_with(name_of(selector), "__")
     old = s.projections
     links = s.index[0].projection_next
     pi = fact_index_get(s.index[0].projection_head, base)
@@ -910,6 +912,7 @@ fact_replace = (s: mut FactState, base: int, selector: int, element: bool, value
         p = old[pi]
         pi = links[pi]
         if element and not p.element and (p.selector == FACT_ELEMENT_LENGTH or p.selector == FACT_ELEMENT_VALUE): continue
+        if private and p.element: continue
         if p.element == element:
             if not element and p.selector == selector: continue
             # Different selector identities do not prove different elements.
@@ -1357,18 +1360,19 @@ fact_exposed = (p: PlaceIdentity) -> bool:
         if g <= 0 or fact_owner <= 0: return true
         return globals[g].fn_accessed or globals[g].fn_written or globals[g].exposed or fns[fact_owner].kind != FK_INIT or modules[int(globals[g].mod)].init_fn != i32(fact_owner)
     if p.root != .local: return true
-    # (a Dewy dictionary's address is taken only to pass it as a mutable
-    # argument, for that call: its summary names what it writes)
+    # (a Dewy dictionary's or pool's address is taken only to pass it as a
+    # mutable argument, for that call: its summary names what it writes)
     flags = int(locals[p.declaration].flags)
     if flags & LF_VALUEITER != 0: flags &= ~LF_BYREF
-    if flags & (LF_MUTPARAM | LF_SHARED | LF_CAPTURE | LF_BYREF | LF_EXPOSED) == 0 and flags & LF_ADDR != 0 and is_map_type(int(locals[p.declaration].type)) and fact_dewy_local(p.declaration): return false
+    if flags & (LF_MUTPARAM | LF_SHARED | LF_CAPTURE | LF_BYREF | LF_EXPOSED) == 0 and flags & LF_ADDR != 0 and (is_map_type(int(locals[p.declaration].type)) or fact_pool_type(int(locals[p.declaration].type))) and fact_dewy_local(p.declaration): return false
     # Only the closed, checked partition ABI supplies this guarantee. Ordinary
     # callers and speculative summaries retain conservative alias invalidation.
     if fact_probe_disjoint != 0 and fact_owner == fact_probe_disjoint and int(locals[p.declaration].owner) == fact_probe_disjoint and tkind(int(locals[p.declaration].type)) == .array and int(locals[p.declaration].flags) & LF_MUTPARAM != 0: return false
     flags & (LF_MUTPARAM | LF_SHARED | LF_CAPTURE | LF_ADDR | LF_BYREF | LF_EXPOSED) != 0
 
-# A dictionary local passed mutably to a call (not exposed, fact_exposed) has
-# a new value after it, whatever the callee's summary says or lacks.
+# A dictionary or pool local passed mutably to a call (not exposed,
+# fact_exposed) has a new value after it, whatever the callee's summary says
+# or lacks.
 fact_forget_mutable_maps = (n: int, s: mut FactState):
     mask = checked_call_mutmask(n)
     if mask == 0: return
@@ -1379,7 +1383,7 @@ fact_forget_mutable_maps = (n: int, s: mut FactState):
         p = place_base(place_route(e))
         if p.declaration <= 0 or (p.root != .local and p.root != .global): continue
         t = if p.root == .local: int(locals[p.declaration].type) else: int(globals[p.declaration].type)
-        if not is_map_type(t): continue
+        if not is_map_type(t) and not fact_pool_type(t): continue
         j = fact_binding(s, p)
         if j < 0: continue
         s.bindings[j] = FactBinding(p, fact_new(s, fact_domain(t, .call, n), FactTerm(type = t)), n, if s.bindings[j].event == n: s.bindings[j].prior else: s.bindings[j].value)
@@ -2196,6 +2200,8 @@ fact_change_route = (s: mut FactState, target: int, resize: bool, at: int, reaso
             if length != 0 and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(fresh, -1, false, length))
             return
         selector = if nodes[c].aux == -2: int(nodes[c].ival) else: int(nodes[c].name)
+        # (a pool's public fields hold no membership: fact_pool_call)
+        if nodes[c].aux != -2 and fact_pool_type(ntype(int(nodes[c].a))) and not starts_with(name_of(selector), "__"): fact_pool_keep(s, old, fresh)
         child = 0
         kept: FactProjection[]
         qi = fact_index_get(s.index[0].projection_head, old)
@@ -2288,7 +2294,8 @@ fact_changes = (n: int, s: mut FactState, at: int, reason: FactReason = .loop_):
             fact_change_route(s, kid(n, 0), true, at, reason)
     # (a direct call havocs what its summary writes; reading lengths and
     # erased or failing assertions write nothing; a record is built in place)
-    if k == .call and nodes[n].aux == 0: fact_call_effects(n, s)
+    if k == .call and nodes[n].aux == 0 and fact_pool_call(n) == 4: fact_pool_store_changes(n, s)
+    else if k == .call and nodes[n].aux == 0: fact_call_effects(n, s)
     else if k == .call and nodes[n].aux == 2: s = s
     else if k == .intrinsic and fact_reads_only(nodes[n].aux as IN): s = s
     # (a closure's creation writes nothing: fact_capture)
@@ -3156,6 +3163,145 @@ fact_map_call = (n: int) -> int:
     if not is_map_type(t): return 0
     k
 
+# Pool handle membership (no traps): `pool[h]`, `pool[h] = x` and a direct
+# update's `__pool_index(pool h)` need `pool.has(h)`, the calls' one failure,
+# an obligation as a dictionary key's presence is. has(h) reads only the
+# pool's slot tables, which add, remove and clear alone change (lib/std/pool.jo
+# keeps them so whatever its public fields hold): h's membership is an element
+# projection of the pool's value on h's, an integer, >= 1 for a member and 0
+# for none. A store into `items` or `handles`, element or whole, keeps a
+# pool's memberships (fact_replace, fact_change_route); so does `[]=`. `has`
+# is the projection's test. `add`'s handle is a member of the new value and of
+# no older one: its projection is a rank above every finite rank of the
+# members before, so ranks are pairwise distinct among handles one add apart,
+# and only there; a handle a guard admits ranks [1, max], overlapping every
+# other. `remove(h)` makes h no member and keeps exactly the members whose
+# rank interval is disjoint from h's (provably another handle), or all when h
+# is known to be no member. Any other change of the pool (clear, retain, an
+# opaque or effectful call) gives it a new value with no memberships. O(1) per
+# call, plus O(members) projection copies per add, remove or store.
+# 1 has, 2 `[]`, 3 `__pool_index`, 4 `[]=`, 5 add, 6 remove, or 0.
+fact_pool_names: int[]
+fact_pool_path = ""
+fact_pool_call = (n: int) -> int:
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) < 2 or nkids(n) > 3: return 0
+    d = int(fns[int(nodes[n].sym)].decl)
+    if d == 0: return 0
+    if fact_pool_names.len() == 0:
+        fact_pool_names = [intern("has"), intern("[]"), intern("__pool_index"), intern("[]="), intern("add"), intern("remove")]
+        fact_pool_path = lib_dir + "/std/pool.jo"
+    name = int(nodes[d].name)
+    k = 0
+    loop i in [0..6):
+        if fact_pool_names[i] == name: k = i + 1
+    if k == 0 or nkids(n) != (if k == 4: 3 else: 2) or not pos_in_lib(nodes[d].pos): return 0
+    if files[pos_file(nodes[d].pos)].path != fact_pool_path: return 0
+    k
+
+# The bundled Pool's type. O(1).
+fact_pool_type = (t0: int) -> bool:
+    t = prune(t0)
+    if types[t].kind != .struct_: return false
+    st = int(types[t].st)
+    if structs[st].name != "Pool": return false
+    d = int(structs[st].decl)
+    if fact_pool_path == "": fact_pool_path = lib_dir + "/std/pool.jo"
+    d != 0 and files[pos_file(nodes[d].pos)].path == fact_pool_path
+
+fact_pool_member = (s: mut FactState, pool: int, handle: int) -> int: fact_project(s, pool, handle, true, T_INT)
+
+# (the members of `from`, by their projections, are members of `to`; with
+# `except`, only those provably another handle than it)
+fact_pool_keep = (s: mut FactState, from: int, to: int, except: int = 0):
+    if from == to or from == 0 or to == 0: return
+    gone = if except != 0: fact_bound(s, fact_pool_member(s, from, except)) else: FactBound(0, 0)
+    kept: FactProjection[]
+    i = fact_index_get(s.index[0].projection_head, from)
+    loop i >= 0:
+        q = s.projections[i]
+        i = s.index[0].projection_next[i]
+        if not q.element: continue
+        b = fact_bound(s, q.value)
+        if b.lo < 1 or b.wide: continue
+        if gone.hi > 0 and not (gone.lo >= 1 and not gone.wide and (b.hi < gone.lo or gone.hi < b.lo)): continue
+        kept.push(FactProjection(to, q.selector, true, q.value))
+    loop q in kept:
+        if s.projections.len() < FACT_CAP: fact_add_projection(s, q)
+
+# The highest finite rank among the members of `pool` (0 when none).
+fact_pool_rank = (s: FactState, pool: int) -> int:
+    top = 0
+    i = fact_index_get(s.index[0].projection_head, pool)
+    loop i >= 0:
+        q = s.projections[i]
+        i = s.index[0].projection_next[i]
+        if not q.element: continue
+        b = fact_bound(s, q.value)
+        if b.lo >= 1 and not b.wide and b.hi < (1 << 40): top = max(top, b.hi)
+    top
+
+fact_pool_check = (n: int, s: mut FactState, pool: int, handle: int):
+    if fact_speculating != 0 or not (fact_policy == .RequireStatic or fact_query): return
+    b = fact_bound(s, fact_pool_member(s, pool, handle))
+    proven = b.lo >= 1 and not b.wide
+    if fact_probe_on:
+        fact_probe_record(n, proven)
+        return
+    if proven: return
+    receiver = wit_text(kid(n, 0))
+    h = wit_text(kid(n, 1))
+    relation = if receiver != "" and h != "": "{receiver}.has({h})" else: ""
+    wit_context(0)
+    if relation == "" and receiver != "": err_notes.push((-1, "help: a handle is in the pool while nothing removed it since `{receiver}.add` gave it or `{receiver}.has` was true"))
+    if b.hi <= 0 and not b.wide:
+        wit_help(relation)
+        if dir_defer(n, "the handle is no longer in the pool", true): return
+        wit_fail(nodes[n].pos, "the handle is no longer in the pool")
+        return
+    wit_help(relation)
+    if relation != "" and nodes[n].kind == .call and fact_pool_call(n) == 2: err_notes.push((-1, "help: or take a missing thing as a value: `{receiver}.get({h})` gives none for it"))
+    if dir_defer(n, "cannot prove the handle is in the pool", true): return
+    wit_fail(nodes[n].pos, "cannot prove the handle is in the pool")
+
+# A loop's havoc of `pool[h] = x` (fact_changes): the pool local's new value
+# keeps its memberships, as the call's own transfer does. O(members).
+fact_pool_store_changes = (n: int, s: mut FactState):
+    e = kid(n, 0)
+    loop nodes[e].kind == .addr or nodes[e].kind == .conv: e = int(nodes[e].a)
+    i = if nodes[e].kind == .ident: fact_binding(s, fact_place(e)) else: -1
+    before = if i >= 0: s.bindings[i].value else: 0
+    fact_call_effects(n, s)
+    i = if before != 0: fact_binding(s, fact_place(e)) else: -1
+    if i >= 0: fact_pool_keep(s, before, s.bindings[i].value)
+
+fact_pool_capture = (n: int, s: mut FactState, values: int[], kind: int) -> int:
+    before = fact_map_receiver(s, n, values[0])
+    if kind >= 2 and kind <= 4: fact_pool_check(n, s, before, values[1])
+    # (has, `[]` and `__pool_index` read the pool and the handle, and call nothing)
+    if kind > 3: fact_path_call_effects(n, s)
+    if kind == 1: return fact_new(s, fact_domain(T_BOOL), FactTerm(.gt, fact_pool_member(s, before, values[1]), fact_constant(s, 0)))
+    if kind <= 3: return fact_new(s, fact_domain(ntype(n), .call, n), FactTerm(type = ntype(n)))
+    # (the pool's value after the call: a new one even where no effect row gave one)
+    target = kid(n, 0)
+    loop nodes[target].kind == .addr or nodes[target].kind == .conv: target = int(nodes[target].a)
+    route = fact_route(target, s)
+    held = fact_route_values(s, route)
+    after = if held.len() > 0: held[held.len() - 1] else: 0
+    if after == before or after == 0:
+        if route.root == 0: return fact_new(s, fact_domain(ntype(n), .call, n), FactTerm(type = ntype(n)))
+        after = fact_new(s, FactBound(), FactTerm(type = ntype(target)))
+        fact_store_route(s, route, after, n)
+    result = fact_new(s, fact_domain(ntype(n), .call, n), FactTerm(type = ntype(n)))
+    if kind == 4: fact_pool_keep(s, before, after)
+    else if kind == 5:
+        rank = fact_pool_rank(s, before) + 1
+        fact_pool_keep(s, before, after)
+        if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(after, result, true, fact_constant(s, rank, n)))
+    else:
+        fact_pool_keep(s, before, after, values[1])
+        if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(after, values[1], true, fact_constant(s, 0, n)))
+    result
+
 # The key's value; a plain string literal is one value however often written,
 # and so is a binding never written after its declaration (a loop's element
 # among them, which may be read again each time it is named, by reference to
@@ -3506,11 +3652,25 @@ fact_loop_header = (entry: mut FactState, back: FactState, old: FactState, at: i
         if h < 0 or s.bindings[h].value == binding.value: continue
         peer = if predecessor.live: fact_binding(predecessor, binding.place) else: -1
         if predecessor.live and peer < 0: continue
+        # (and a pool the memberships both hold, the same rank: fact_pool_call)
+        t = if binding.place.root == .local: int(locals[binding.place.declaration].type) else: int(globals[binding.place.declaration].type)
+        pool = fact_pool_type(t)
         pi = fact_index_get(source.index[0].projection_head, binding.value)
         loop pi >= 0:
             p = source.projections[pi]
             pi = source.index[0].projection_next[pi]
-            if p.element or fact_slot(entry, p.value) < 0: continue
+            if fact_slot(entry, p.value) < 0: continue
+            if p.element:
+                if not pool or fact_slot(entry, p.selector) < 0 or fact_bound(source, p.value).lo < 1: continue
+                if peer >= 0:
+                    qi = fact_index_get(predecessor.index[0].projection_head, predecessor.bindings[peer].value)
+                    loop qi >= 0:
+                        q = predecessor.projections[qi]
+                        if q.element and q.selector == p.selector: break
+                        qi = predecessor.index[0].projection_next[qi]
+                    if qi < 0 or predecessor.projections[qi].value != p.value: continue
+                if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(s.bindings[h].value, p.selector, true, p.value))
+                continue
             if peer >= 0:
                 qi = fact_index_get(predecessor.index[0].projection_index, fact_projection_key(predecessor.bindings[peer].value, p.selector, false))
                 if qi < 0 or predecessor.projections[qi].value != p.value: continue
@@ -4712,7 +4872,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
                 values.push(n)
                 values.push(kid(n, first))
                 values.push(kid(n, first + 1))
-            else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and (fact_array_call(n) != 0 or fact_map_call(n) != 0 or fact_nonempty_call(n)):
+            else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and (fact_array_call(n) != 0 or fact_map_call(n) != 0 or fact_nonempty_call(n) or fact_pool_call(n) != 0):
                 active.push(n)
                 values.push(n)
                 loop arg in kids(n): values.push(arg)
@@ -5024,6 +5184,8 @@ fact_obligation_node = (n: int) -> bool:
         if (fact_floor_call(n) != 0 and not fact_literal_nonzero(kid(n, 1))) or fact_string_call(n) >= 2 or fact_array_call(n) != 0 or fact_power_call(n): return true
         map = fact_map_call(n)
         if map >= 2 and map <= 4 or fact_nonempty_call(n): return true
+        pool = fact_pool_call(n)
+        if pool >= 2 and pool <= 4: return true
         # A fork closure's obligations start from its creator's facts.
         if fact_library_call(n, "parallel_range") or fact_library_call(n, "parallel_map"):
             loop arg in kids(n):
@@ -5752,6 +5914,8 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(fresh, -1, false, length))
             fact_store_route(s, route, fresh, n, true)
             return fact_new(s, fact_domain(ntype(n)))
+        pool = if fact_policy == .RequireStatic or fact_query or fact_probe_on: fact_pool_call(n) else: 0
+        if pool != 0: return fact_pool_capture(n, s, values, pool)
         map = if fact_policy == .RequireStatic or fact_query or fact_probe_on: fact_map_call(n) else: 0
         if map >= 2 and map <= 4: fact_map_check(n, s, values)
         if map != 0:
