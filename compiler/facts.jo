@@ -1798,7 +1798,10 @@ fact_affine_compare = (s: FactState, op: Tok, av: int, bv: int) -> int:
 fact_compare = (s: FactState, op: Tok, a: int, b: int) -> int:
     x = fact_bound(s, a)
     y = fact_bound(s, b)
-    if x.wide or y.wide: return -1
+    if x.wide or y.wide:
+        # (a wide value marked nonzero still differs from a zero)
+        if (op == .eq or op == .ne) and (x.nz and not y.wide and y.lo == 0 and y.hi == 0 or y.nz and not x.wide and x.lo == 0 and x.hi == 0): return int(op == .ne)
+        return -1
     # Intervals already decide separated or singleton ranges. Do not search
     # predicates and relation rows for an answer the endpoints give directly.
     if op == .eq or op == .ne:
@@ -5740,6 +5743,8 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         x = ref_encoded(nodes[n].ival, ntype(n))
         # A uint64 constant is biased; its type lets a witness decode it.
         if fact_type(ntype(n)) == T_U64: return fact_new(s, FactBound(x, x, x != 0), FactTerm(origin = n, type = T_U64))
+        # (an `int` literal above int64 keeps its unsigned bits: beyond the host words)
+        if has_flag(n, NF_U64) and x < 0: return fact_new(s, FactBound(FACT_MAX, FACT_MAX, true, wide = true), FactTerm(origin = n, type = ntype(n)))
         return fact_constant(s, x, n)
     # (an ASCII string literal's length is its byte count; "\r\n" is one grapheme)
     if k == .str_lit and nodes[n].aux != 1 and fact_type(ntype(n)) == T_STR and nodes[n].sval >= 0:

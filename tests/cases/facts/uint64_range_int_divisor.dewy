@@ -1,0 +1,7 @@
+# Without runtime checks, an `int` literal between 2^63 and 2^64 is a nonzero divisor.
+main = ():>void => {
+    let d:int = 18446744073709551615
+    let parts = (-37).divmod(d)
+    printl"{parts.quotient} {parts.remainder}"
+    printl((d - 1).divmod(9876543210987654321).remainder)
+}
