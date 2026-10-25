@@ -1,0 +1,265 @@
+# Share only fully lowered members bodies: checking/facts still see each literal.
+# Admission comes from member_replay; IR, checks, cleanup, positions and external
+# storage must then agree modulo private registers/slots and recorded literals.
+# Demand-driven O(I + V + S + M*C + text bytes) time/storage for admitted loops:
+# I emitted instructions/arguments, V registers, S slots, M members, C literal
+# occurrences. Relocation is indexed, never a search through earlier members.
+use 'member_replay.jo'
+use 'lower.jo'
+use 'ir.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'check.jo'
+use 'util.jo'
+use 'lex.jo'
+use 'main.jo'
+use 'fused.jo'
+
+struct MemberLiteral:
+    reg: int
+    pos: int
+    kind: int                 # 0: a literal word, 1: immortal string address
+    value: int
+
+struct MemberLowered:
+    start: int
+    end: int
+    regs: int
+    reg_end: int
+    slots: int
+    slot_end: int
+    zeros: int
+    zero_end: int
+    scope: int
+    literals: MemberLiteral[]
+
+member_lower_active = -1
+member_lower_literals: MemberLiteral[]
+
+member_lower_text = (e: int, reg: int):
+    if not member_templates[member_lower_active].positions.has(nodes[e].pos): return
+    member_lower_literals.push(MemberLiteral(reg, nodes[e].pos, 1, int(nodes[e].sval)))
+
+member_lower_word = (e: int, value: int) -> int:
+    # A private constant distinguishes this use from unrelated equal constants.
+    # It remains constant during lowering, so all ordinary decisions still apply.
+    reg = k_vreg_new(value)
+    member_lower_literals.push(MemberLiteral(reg, nodes[e].pos, 0, value))
+    reg
+
+struct MemberMatch:
+    first: MemberLowered
+    next: MemberLowered
+    regs: int[]
+    reverse: int[]
+    slots: int[]
+    slot_reverse: int[]
+    literal: int[]
+    next_literal: int[]
+
+member_match_reg = (m: mut MemberMatch, a: int, b: int) -> bool:
+    if a < 0 or b < 0: return a == b
+    la = m.literal[a]
+    lb = m.next_literal[b]
+    if la >= 0 or lb >= 0: return la == lb
+    if is_kv(a) or is_kv(b): return is_kv(a) and is_kv(b) and kv_of(a) == kv_of(b)
+    if a < m.first.regs or a >= m.first.reg_end:
+        mapped = m.regs[a]
+        if mapped >= 0: return mapped == b
+        return a == b
+    if b < m.next.regs or b >= m.next.reg_end or ir.vtypes[a] != ir.vtypes[b]: return false
+    if m.regs[a] >= 0: return m.regs[a] == b
+    if m.reverse[b] >= 0: return false
+    m.regs[a] = b
+    m.reverse[b] = a
+    true
+
+member_match_slot = (m: mut MemberMatch, a: int, b: int) -> bool:
+    if a < m.first.slots or a >= m.first.slot_end:
+        mapped = m.slots[a]
+        if mapped >= 0: return mapped == b
+        return a == b
+    if b < m.next.slots or b >= m.next.slot_end or ir.slot_size[a] != ir.slot_size[b] or ir.slot_align[a] != ir.slot_align[b]: return false
+    if m.slots[a] >= 0: return m.slots[a] == b
+    if m.slot_reverse[b] >= 0: return false
+    m.slots[a] = b
+    m.slot_reverse[b] = a
+    true
+
+member_match_body = (m: mut MemberMatch) -> bool:
+    a = m.first
+    b = m.next
+    if a.end - a.start != b.end - b.start or a.zero_end - a.zeros != b.zero_end - b.zeros or a.literals.len() != b.literals.len(): return false
+    loop i in [0..a.literals.len()):
+        x = a.literals[i]
+        y = b.literals[i]
+        if x.kind != y.kind or x.pos != y.pos: return false
+        m.literal[x.reg] = i
+        m.next_literal[y.reg] = i
+    aa = member_scope_locals[a.scope]
+    bb = member_scope_locals[b.scope]
+    if aa.len() != bb.len(): return false
+    loop i in [0..aa.len()):
+        x = locals[aa[i]]
+        y = locals[bb[i]]
+        if x.type != y.type or x.flags != y.flags or (x.offset >= 0) != (y.offset >= 0): return false
+        if x.offset >= 0:
+            m.slots[int(x.offset)] = int(y.offset)
+        else:
+            m.regs[int(x.vreg)] = int(y.vreg)
+    depth = 0
+    loop i in [0..a.end - a.start):
+        x = ir.code[a.start + i]
+        y = ir.code[b.start + i]
+        op = x.op
+        if op != y.op or x.ty != y.ty or ir_positions[int(x.pos)] != ir_positions[int(y.pos)]: return false
+        if op == .nop: continue
+        if op == .ret or op == .brtable or op == .zeroslots: return false
+        if (op == .load or op == .store) and int(x.c) & M_INDEX != 0: return false
+        if op == .br or op == .brif:
+            if x.imm >= depth: return false
+        if op == .block or op == .loop or op == .if_: depth += 1
+        if op == .end:
+            depth -= 1
+            if depth < 0: return false
+        mode = ir_operand_layout[int(op)]
+        if mode & IR_DEF != 0:
+            if not member_match_reg(m, int(x.dst), int(y.dst)): return false
+        else if x.dst != y.dst: return false
+        if op == .slot:
+            if x.b != y.b or x.c != y.c: return false
+            if not member_match_slot(m, int(x.a), int(y.a)): return false
+        else if mode & IR_ARGS != 0:
+            if x.b != y.b: return false
+            loop j in [0..int(x.b)):
+                if not member_match_reg(m, int(ir.args[int(x.a) + j]), int(ir.args[int(y.a) + j])): return false
+            if mode & IR_INDIRECT != 0:
+                if not member_match_reg(m, int(x.c), int(y.c)): return false
+            else if x.c != y.c: return false
+        else:
+            count = mode & 7
+            if count > 0:
+                if not member_match_reg(m, int(x.a), int(y.a)): return false
+            else if x.a != y.a: return false
+            if count > 1:
+                if not member_match_reg(m, int(x.b), int(y.b)): return false
+            else if x.b != y.b: return false
+            if count > 2:
+                if not member_match_reg(m, int(x.c), int(y.c)): return false
+            else if x.c != y.c: return false
+        if op == .daddr and m.literal[int(x.dst)] >= 0: continue
+        if x.imm != y.imm: return false
+    if depth != 0: return false
+    loop i in [0..a.zero_end - a.zeros):
+        x = lower_zeros[a.zeros + i]
+        y = lower_zeros[b.zeros + i]
+        if x.mark >> 32 < a.start or y.mark >> 32 < b.start: return false
+        if (x.mark >> 32) - a.start != (y.mark >> 32) - b.start or x.count != y.count: return false
+        loop j in [0..x.count):
+            xx = int(ir.args[x.start + j])
+            yy = int(ir.args[y.start + j])
+            if xx & 1 != yy & 1: return false
+            if xx & 1 != 0:
+                if not member_match_reg(m, xx / 2, yy / 2): return false
+            else if not member_match_slot(m, xx / 2, yy / 2): return false
+    true
+
+member_lower_table = (parts: MemberLowered[]) -> int:
+    loop rodata.len() % 8 != 0: rodata.push(0)
+    base = rodata.len()
+    ro_starts.push(base)
+    width = parts[0].literals.len()
+    # Relative offsets refer only within this block, including fused workers.
+    text_at = width * parts.len() * 8
+    strings: str[]
+    loop part in parts:
+        loop literal in part.literals:
+            if literal.kind == 0: push_i64(rodata, literal.value)
+            else:
+                text = name_of(literal.value)
+                push_i64(rodata, text_at)
+                strings.push(text)
+                text_at += (24 + len(text) + 1 + 7) / 8 * 8
+    loop text in strings:
+        push_i64(rodata, -1)
+        push_i64(rodata, len(text))
+        push_i64(rodata, len(text) + 1)
+        loop byte in bytes(text): rodata.push(byte)
+        rodata.push(0)
+        loop rodata.len() % 8 != 0: rodata.push(0)
+    if fused_on: fz_note_raw(base, 8)
+    base
+
+member_lower_emit = (parts: MemberLowered[]):
+    first = parts[0]
+    body = ir.code[first.start..first.end)
+    ir.code.truncate(first.start)
+    lower_zeros.truncate(first.zero_end)
+    table = e_daddr(member_lower_table(parts))
+    row = vreg(VI)
+    e_mov(row, table)
+    limit = e_addi(table, parts.len() * first.literals.len() * 8)
+    e_loop()
+    values: {int: int} = {}
+    loop i in [0..first.literals.len()):
+        literal = first.literals[i]
+        value = e_load(VI, row, i * 8, 8)
+        if literal.kind == 1: value = e_bin(.add, VI, table, value)
+        else:
+            ir.vtypes[literal.reg] = i8(VI)
+            e_mov(literal.reg, value)
+        values[literal.reg] = value
+    shift = ir.code.len() - first.start
+    loop i in [first.zeros..first.zero_end): lower_zeros[i].mark += shift << 32
+    loop original in body:
+        ins = original
+        if ins.op == .daddr:
+            if let value = values.get(int(ins.dst)):
+                ins.op = .mov
+                ins.a = i32(value)
+                ins.imm = 0
+        ir.code.push(ins)
+    e_mov(row, e_addi(row, first.literals.len() * 8))
+    e_brif(e_bin(.ltu, VI, row, limit), 0)
+    e_end()
+
+member_lower_block = (b: int) -> bool:
+    # Foreign OS formats keep byte identity until their runtime is exercised.
+    if target_windows or target_macos: return false
+    if member_lower_active >= 0 or dbg_on or debug_vars or tl_items.len() != 0 or building.len() != 0: return false
+    index = member_scopes.get(kid(b, 0)) ?? -1
+    if index < 0 or not member_templates[index].okay or nkids(b) != member_templates[index].texts.len(): return false
+    # A checking-only mode is also a byte-identity oracle for fallback lowering.
+    if (env("DEWY_MEMBERS") ?? "") == "checked": return false
+    loop scope in kids(b):
+        if (member_scopes.get(scope) ?? -1) != index or not member_scope_locals.has(scope): return false
+    parts: MemberLowered[]
+    loop i in [0..nkids(b)):
+        scope = kid(b, i)
+        part = MemberLowered(start = ir.code.len(), regs = ir.vtypes.len(), slots = ir.slot_size.len(), zeros = lower_zeros.len(), scope = scope)
+        member_lower_active = index
+        member_lower_literals = []
+        cur_block = b
+        cur_block_i = i
+        gen_stmt(scope)
+        member_lower_active = -1
+        part.end = ir.code.len()
+        part.reg_end = ir.vtypes.len()
+        part.slot_end = ir.slot_size.len()
+        part.zero_end = lower_zeros.len()
+        part.literals = member_lower_literals
+        parts.push(part)
+    first = parts[0]
+    okay = first.literals.len() > 0
+    m = MemberMatch(first = first, regs = fill(-1, ir.vtypes.len()), reverse = fill(-1, ir.vtypes.len()), slots = fill(-1, ir.slot_size.len()), slot_reverse = fill(-1, ir.slot_size.len()), literal = fill(-1, ir.vtypes.len()), next_literal = fill(-1, ir.vtypes.len()))
+    loop i in [1..parts.len()):
+        if not okay: break
+        m.next = parts[i]
+        okay = member_match_body(m)
+        # Only template keys are reused. Candidate ranges never overlap, so
+        # reverse maps and literal indices need no clearing between members.
+        loop v in [first.regs..first.reg_end): m.regs[v] = -1
+        loop s in [first.slots..first.slot_end): m.slots[s] = -1
+    if member_trace: eprint("member lowering {pos_str(nodes[b].pos)}: {okay}, {parts.len()} members, {first.end - first.start} instructions")
+    if okay: member_lower_emit(parts)
+    true

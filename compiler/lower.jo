@@ -11,6 +11,8 @@ use 'poly_closure.jo'
 import 'concurrency.jo' as concurrency
 use 'isolation.jo'
 use 'fused.jo'
+use 'member_lowering.jo'
+use 'member_replay.jo'
 # Lowering: typed AST -> IR, including reference counting, copy-on-write and closures.
 use 'copies.jo'
 use 'ownership.jo'
@@ -5094,7 +5096,9 @@ gen_value_none_lit = (e: int) -> Val:
 
 gen_value_str_lit = (e: int) -> Val:
     if nodes[e].aux != 0: return gen_interp(e)
-    return V(e_daddr(str_data(name_of(int(nodes[e].sval)))), false)
+    value = e_daddr(str_data(name_of(int(nodes[e].sval))))
+    if member_lower_active >= 0: member_lower_text(e, value)
+    return V(value, false)
 
 gen_value_ident = (e: int) -> Val:
     t = prune(ntype(e))
@@ -5117,7 +5121,10 @@ gen_value_dotname = (e: int) -> Val:
     t = prune(ntype(e))
     si = int(types[t].st)
     layout(t)
-    if structs[si].simple_enum: return V(e_iconst(variants[int(structs[si].variants) + int(nodes[e].aux)].value), false)
+    if structs[si].simple_enum:
+        value = variants[int(structs[si].variants) + int(nodes[e].aux)].value
+        if member_lower_active >= 0 and member_templates[member_lower_active].positions.has(nodes[e].pos): return V(member_lower_word(e, value), false)
+        return V(e_iconst(value), false)
     s = new_temp(t)
     d = e_slot(s)
     e_zero(d, tsize(t))
@@ -7834,6 +7841,7 @@ gen_stmt = (s: int):
     else: fatal(nodes[s].pos, "unsupported statement in codegen")
 
 gen_block_stmts = (b: int) -> void:
+    if member_scopes.len() > 0 and nkids(b) > 1 and member_lower_block(b): return
     guarded = lower_length_guards.len()
     loop i in [0..nkids(b)):
         cur_block = b

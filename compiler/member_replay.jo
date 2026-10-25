@@ -42,6 +42,7 @@ struct MemberTemplate:
 
 member_templates: MemberTemplate[]
 member_scopes: {int: int}
+member_scope_locals: {int: int[]}
 member_words: {int: {str: int}}
 member_plain_types: {int: bool}
 member_record = -1
@@ -51,6 +52,7 @@ member_trace = false
 member_reset = ():
     member_templates = []
     member_scopes = {}
+    member_scope_locals = {}
     member_words = {}
     member_plain_types = {}
     member_record = -1
@@ -277,16 +279,19 @@ member_scope = (scope: int) -> bool:
         # Admission may have populated destination-domain counts.
         t.decisions = member_templates[index].decisions
         member_templates[index] = t
+        if t.okay: member_scope_locals[scope] = t.locals
         member_record = previous
         if member_trace: eprint("member template {pos_str(nodes[scope].pos)}: {t.okay}, {t.locals.len()} locals, {t.requests.len()} obligations, {t.refinements.len()} refinements")
         return true
     t = member_templates[index]
     lm: {int: int} = {}
+    copied_locals: int[]
     loop old in t.locals:
         l = locals.len()
         locals.push(locals[old])
         fns[t.owner].locals.push(l)
         lm[old] = l
+        copied_locals.push(l)
         if let write = copy_writes.get(old): copy_writes[l] = write
     nm: {int: int} = {}
     text = name_of(int(nodes[int(nodes[scope].a)].sval))
@@ -296,6 +301,7 @@ member_scope = (scope: int) -> bool:
     loop request in t.refinements:
         if let copy = nm.get(request): refine_requests.push(FactRequest(copy, t.owner))
     nodes[scope].b = i32(body)
+    member_scope_locals[scope] = copied_locals
     true
 
 # A destination domain intersects the source in this many members; compute it
