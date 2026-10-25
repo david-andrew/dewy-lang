@@ -8,7 +8,7 @@ const kcal = 4184J
 Sport:type = 'run' | 'ride'
 
 Workout:type = [
-    day:int
+    day:int64
     sport:Sport
     distance:float64 * Length
     duration:float64 * Time
@@ -31,7 +31,7 @@ parse_duration = (text:string):>(float64 * Time) | ParseError => {
 parse_line = (line:string):>Workout | ParseError => {
     let f = line.split()
     if f.length not=? 5 return ParseError["expected 5 fields: {line}"]
-    let day = to_int(f[0]) ?? 0
+    let day = to_int64(to_int(f[0]) ?? 0) ?? 0
     let sport:Sport = if f[1] =? "run" 'run' else if f[1] =? "ride" 'ride' else return ParseError["unknown sport {f[1]}"]
     let dist = to_float(f[2])
     if dist is? none return ParseError["bad distance {f[2]}"]
@@ -95,7 +95,7 @@ main = () => {
         }
     }
     # weekly totals
-    let weekly:dict<int float64 * Length> = []
+    let weekly:dict<int64 float64 * Length> = []
     loop w in workouts {
         let week = (w.day - 1) // 7 + 1
         if week not in? weekly weekly[week] = 0.0m

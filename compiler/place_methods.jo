@@ -26,6 +26,7 @@ use 'util.jo'
 use 'sibling_types.jo'
 use 'lex.jo'
 use 'deadlock.jo'
+use 'places.jo'
 
 struct PlaceMethod:
     route: int[]          # member names from the object down to the place
@@ -137,6 +138,7 @@ place_alias = (name: int, rn: str, info: PlaceMethod, pos: int) -> int:
     check_vardecl(d)
     s = lookup(name)
     l = int(syms[s].ref)
+    if pos_in_lib(info.at) and files[pos_file(info.at)].path == lib_dir + "/prelude/locks.dewy": place_locked[l] = true
     l
 
 place_written_check = (info: PlaceMethod, decl: int, g: int, l: int, pos: int):

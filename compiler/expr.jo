@@ -2918,6 +2918,8 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
             if cd.args[i] == 0 and default_uses_params(int(nodes[kid(decl, i)].b), decl, i): capture_defaults = true
     if capture_defaults and cd.sig.mutmask != 0:
         fatal(nodes[n].pos, "defaults referring to earlier parameters cannot yet be combined with mutable arguments; supply those defaults explicitly")
+    refined_array = RefArrayCall()
+    if refine_active and not partial and not capture_defaults and cd.sig.mutmask == 1 and fns[f].ret == T_VOID: refined_array = ref_array_call_prepare(decl, cd.args, fns[f].ptypes, args)
     captured: int[]
     statements: int[]
     if capture_defaults:
@@ -2973,6 +2975,7 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
         return finish_partial(n, fns[f].ptypes, int(cd.sig.mutmask), int(fns[f].ret))
     if not capture_defaults: save_call_order(n, args, fin)
     nodes[n].type = i32(representation_type(int(fns[f].ret)))
+    if refined_array.candidate != 0: return ref_array_call_finish(n, refined_array)
     if cc_any and nodes[decl].c != 0 and closure == 0 and not capture_defaults:
         narrowed = cc_call(n, f, decl)
         if narrowed != 0: return narrowed

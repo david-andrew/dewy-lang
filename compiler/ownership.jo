@@ -13,6 +13,9 @@ use 'places.jo'
 use 'refine.jo'
 
 ownership_decls: {int: int}
+# __Held only releases its lock word after the checked place's last use; it
+# cannot run user code. Other lifecycle hooks retain opaque cleanup effects.
+ownership_fact_cleanup = false
 ownership_hooks: {int: int}
 ownership_copies: {int: int}
 ownership_moves: {int: int}
@@ -26,6 +29,7 @@ ownership_declare = (decl: int, hook: int, role: int):
     if ownership_decls.has(key):
         name = if role == 1: "drop" else if role == 2: "copy" else: "move"
         fatal(nodes[hook].pos, "duplicate $__{name}__ hook")
+    if role != 1 or name_of(int(nodes[decl].name)) != "__Held" or files[pos_file(nodes[decl].pos)].path != lib_dir + "/prelude/locks.dewy": ownership_fact_cleanup = true
     ownership_decls[key] = hook
     ownership_hooks[hook] = role
     add_flag(kid(hook, 0), NF_MUT)

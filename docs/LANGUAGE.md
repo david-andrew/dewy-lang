@@ -684,7 +684,8 @@ guard (`if k in? d`) or an earlier store into `d[k]` with no other change of
 `d` between (changing entries in place, `d[j] += 1` or `d[j].push(x)`, keeps the
 keys, in loops too); a nested dictionary's key is proven the same way through its
 entry (`if m not in? d[p] d[p][m] = 0` before `d[p][m] += 1`), while neither `d`
-nor that entry changes otherwise; `d.get(k)` and `d.pop(k default=v)` take a missing key as a value.
+nor that entry changes otherwise. These rules also apply to a dictionary lent by
+`@(m.lock())` and to a helper taking it by `@`, while the guard is held; `d.get(k)` and `d.pop(k default=v)` take a missing key as a value.
 `pool[h]`, `pool[h] = x` and `pool[h].field += x` need `pool.has(h)`, proven by
 `h = pool.add(x)` or a guard (`if pool.has(h)`) with nothing since that may have
 removed `h`: stores, updates and loops that do not remove keep it, and so does
@@ -1864,7 +1865,10 @@ Arrays and records retain independent values when copied, including nested
 managed fields. Arrays support indexing, `.length`, and methods such as
 `.push(value)`, `.pop()`, `.pop(i)` (removes and returns the element at `i`),
 `.insert(value i)` (inserts before `i`), `.clear()` and `.truncate(count)` (a
-negative count panics). `fill(value count)` makes an array of `count` copies of
+negative count panics). Inserting an element proves a following `.pop()` has
+an element; `.truncate(count)` keeps the smaller of the old length and count.
+Length-refined arrays support `.insert`, `.sort` and `.reverse`, checking the
+result against the storage contract, as `.push` and `.pop` do. `fill(value count)` makes an array of `count` copies of
 `value`: `fill(false n)`, `fill(uint8(0) 512)`, and with an annotation choosing
 the element type, `let row:array<int64> = fill(0 n)`. `xs[1..3)` is an
 exclusive-end slice; `xs[1..2]` includes index 2. A slice's bounds are proven
@@ -3849,7 +3853,9 @@ return independent strings using the core's current simple mappings for ASCII
 and supported Latin, Greek and Cyrillic letters. For example, `upper("café")`
 is `"CAFÉ"`. Unmapped characters and malformed UTF-8 bytes are preserved;
 these byte-oriented transformations do not perform grapheme validation.
-`text.startswith(prefix)` and `text.endswith(suffix)` test the ends of a string;
+`text.startswith(prefix)` and `text.endswith(suffix)` test the ends of a string.
+Success with a known nonempty pattern proves the text is nonempty, so
+`if not text.startswith("=") return ...` permits `text[1..]` afterward;
 `text.remove_prefix(prefix)` and `text.remove_suffix(suffix)` give the text without
 that end when it has it (once), and the text unchanged otherwise.
 `text.trim_start` and `text.trim_end` drop whitespace from one end (`trim` both),

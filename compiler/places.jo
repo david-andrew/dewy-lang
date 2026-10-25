@@ -16,6 +16,11 @@ struct PlaceIdentity:
     projection: PlaceProjection = .root
     selector: int = 0
 
+# A checked Mutex payload is a stable, guard-scoped place. Its raw pointer
+# route is for lowering only; analyses use the alias declaration as its root.
+# Registered once while taking the place, expected O(1) per lookup.
+place_locked: {int: bool} = {}
+
 place_scalar_root = (e: int) -> PlaceIdentity:
     if e == 0: return PlaceIdentity(.local, 0, 0)
     if nodes[e].kind == .addr: return place_scalar_root(int(nodes[e].a))
@@ -24,7 +29,7 @@ place_scalar_root = (e: int) -> PlaceIdentity:
     if nodes[e].aux == i32(int(SK.global)): return PlaceIdentity(.global, 0, l)
     if nodes[e].aux != i32(int(SK.local)): return PlaceIdentity(.local, 0, 0)
     depth = 0
-    loop int(locals[l].flags) & LF_ALIAS != 0 and locals[l].alias != 0:
+    loop int(locals[l].flags) & LF_ALIAS != 0 and locals[l].alias != 0 and not place_locked.has(l):
         a = int(locals[l].alias)
         if nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)): return PlaceIdentity(.local, 0, 0)
         l = int(nodes[a].sym)
@@ -69,7 +74,7 @@ place_route = (e: int, depth: int = 0) -> PlaceIdentity:
     if k == .ident and nodes[e].aux == i32(int(SK.local)):
         l = int(nodes[e].sym)
         if l <= 0 or l >= locals.len(): return PlaceIdentity(.local, 0, 0)
-        if int(locals[l].flags) & LF_ALIAS != 0:
+        if int(locals[l].flags) & LF_ALIAS != 0 and not place_locked.has(l):
             return place_route(int(locals[l].alias), depth + 1)
     place_scalar_root(e)
 

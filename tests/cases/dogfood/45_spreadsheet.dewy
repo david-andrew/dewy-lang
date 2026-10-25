@@ -70,7 +70,7 @@ value = (sheet:Sheet name:string visiting:set<string>):>float64 | Failure => {
         if n is? none return ParseError["not a number: {text}"]
         return n
     }
-    let tokens = tokenize(text.remove_prefix("=")) or_throw
+    let tokens = tokenize(text[1..]) or_throw
     let p = Parser[tokens]
     let result = expr(sheet @p set[visiting... name]) or_throw
     if not p.at_end return ParseError["trailing input in {text}"]

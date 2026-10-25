@@ -1232,3 +1232,52 @@ ref_nested_formals = (t0: int, nested: bool = false, depth: int = 0) -> bool:
         loop i in [0..int(types[t].nargs)):
             if ref_nested_formals(targ(t, i), true, depth + 1): return true
     false
+
+# Library array mutations on refined storage use the same private-candidate
+# boundary as intrinsic mutations. The published value is checked afterward;
+# callbacks never gain unrefined authority over the caller's storage. Only
+# these at-most-three-argument calls request it: O(receiver route depth).
+struct RefArrayCall:
+    before: int[]
+    place: int = 0
+    candidate: int = 0
+
+ref_array_call_prepare = (decl: int, args: mut int[], ptypes: int[], written: int[]) -> RefArrayCall:
+    out = RefArrayCall()
+    if args.len() == 0 or not pos_in_lib(nodes[decl].pos): return out
+    name = name_of(int(nodes[decl].name))
+    if name != "__dewy_insert" and name != "reverse" and name != "sort" and name != "sort_by" and name != "sort_with": return out
+    place = args[0]
+    t = prune(refine_storage(place, ntype(place)))
+    if tkind(representation_type(t)) != .array or (types[t].kind != .refined and not ref_dependent_ancestor(place)): return out
+    if not type_eq(representation_type(t), ptypes[0]): return out
+    ref_mutable_authority(place)
+    check_place(place, true)
+    # Receiver selectors, then explicit operands in source order, once.
+    path = index_update_path(place)
+    j = path.len() - 1
+    loop j >= 0:
+        part = path[j]; j -= 1
+        if nodes[part].kind == .index and nodes[part].b != 0: nodes[part].b = i32(capture_value(int(nodes[part].b), ntype(int(nodes[part].b)), out.before))
+    loop source in written:
+        a = unnamed(source)
+        loop i in [1..args.len()):
+            if args[i] != a: continue
+            finish_arg(a, ptypes[i], false)
+            args[i] = capture_value(a, ptypes[i], out.before)
+            break
+    out.place = place
+    out.candidate = capture_value(copy_place(place), representation_type(t), out.before)
+    args[0] = copy_checked(out.candidate)
+    add_flag(args[0], NF_MUT)
+    out
+
+ref_array_call_finish = (n: int, prepared: RefArrayCall) -> int:
+    before = prepared.before
+    before.push(bc_stmt(copy_checked(n), nodes[n].pos))
+    store = bc_assign(prepared.place, copy_checked(prepared.candidate), nodes[n].pos)
+    before.push(check_assign(store))
+    nodes[n] = nodes[bc_block(before, nodes[n].pos)]
+    nodes[n].type = i32(T_VOID)
+    add_flag(n, NF_CHECKED)
+    T_VOID

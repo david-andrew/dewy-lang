@@ -52,11 +52,10 @@ work = (jobs:Channel<string> stats:Mutex<dict<string Stats>> errors:Atomic<int64
         }
         if hit.status >=? 500 errors.add(1);
         let table = @(stats.lock())
-        let st = table.get(hit.path) ?? Stats[0 0 0]
-        st.count += 1
-        st.total_ms += hit.ms
-        st.slowest = max(st.slowest hit.ms)
-        table[hit.path] = st
+        if hit.path not in? table table[hit.path] = Stats[0 0 0]
+        table[hit.path].count += 1
+        table[hit.path].total_ms += hit.ms
+        table[hit.path].slowest = max(table[hit.path].slowest hit.ms)
         handled += 1
     }
     handled
@@ -65,7 +64,7 @@ work = (jobs:Channel<string> stats:Mutex<dict<string Stats>> errors:Atomic<int64
 is_prime = (n:int64):>bool => {
     if n <? 2 return false
     let d:int64 = 2
-    loop d >=? 2 and d*d <=? n {
+    loop d*d <=? n {
         if n % d =? 0 return false
         d += 1
     }
@@ -90,12 +89,11 @@ main = () => {
     let rows = [loop [path st] in table [path=path st=st]]
     rows.sort(key=(r) => r.path)
     loop r in rows {
-        let n = r.st.count
-        if n =? 0 continue
-        let avg = r.st.total_ms / n
+        if r.st.count =? 0 continue
+        let avg = r.st.total_ms / r.st.count
         printl"{r.path}: {r.st.count} hits, avg {format(avg.to_float64() ".1f")} ms, slowest {r.st.slowest} ms"
     }
-    let candidates:array<int64> = [loop i in [1..60] i*i + 1]
+    let candidates = [loop i in [1..60] i*i + 1]
     let flags = [parallel n in candidates is_prime(n)]
     let primes = [loop n in candidates and p in flags if p n]
     printl"n^2+1 primes: {primes.length} of {candidates.length}: {primes[$clamp 0..8)}"
