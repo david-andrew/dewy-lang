@@ -658,16 +658,32 @@ dn_token_edit = (at: int):
     dn_edit_at.push(at)
     dn_edit_was.push(dn_tokens[at])
 
-dn_edits_undo = ():
+# Undo the edits recorded after `mark` (an abandoned attempt's), the latest first. An entry
+# -(k + 1) is a setting scope the attempt set (dc_unsafe_scope): scopes from k on go.
+dn_edits_undo = (mark: int = 0):
     i = dn_edit_at.len() - 1
-    loop i >= 0:
-        dn_tokens[dn_edit_at[i]] = dn_edit_was[i]
+    loop i >= mark:
+        at = dn_edit_at[i]
+        if at < 0: dir_scopes.truncate(-at - 1)
+        else: dn_tokens[at] = dn_edit_was[i]
         i -= 1
-    dn_edits_clear()
+    dn_edits_clear(mark)
 
-dn_edits_clear = ():
-    dn_edit_at.clear()
-    dn_edit_was.clear()
+dn_edits_clear = (mark: int = 0):
+    dn_edit_at.truncate(mark)
+    dn_edit_was.truncate(mark)
+
+# A generic closer joined to what follows (`>>`, `>=`, `>?` unspaced) closes one angle:
+# its first `>` is consumed in place, leaving the rest for the enclosing grammar.
+dn_closer_joined = () -> bool:
+    op = dn_peek()
+    op == .shr or op == .shr_assign or op == .angle_assign or (op == .gt and not dn_tokens[dn_at].space)
+
+dn_split_closer = ():
+    dn_token_edit(dn_at)
+    dn_tokens[dn_at].start += 1
+    tail = dn_tokens[dn_at]
+    dn_tokens[dn_at].symbol = dn_token_kind(files[dn_file].src[tail.start..tail.stop))
 
 # `array<<(x:int64):>int64>>`: an adjacent `<<` opens two type-argument blocks
 dn_double_angle = () -> int:
@@ -693,11 +709,8 @@ dn_bracketed_from = (opening: DewyLexeme) -> int:
         # Split adjacent generic closers, assignments and optional suffixes.
         # Consume one angle at a time, leaving the rest for its parent.
         # A spaced ` >? ` stays a comparison inside a refinement.
-        if close == .rangle and ((dn_peek() == .shr or dn_peek() == .shr_assign or dn_peek() == .angle_assign) or (dn_peek() == .gt and not dn_tokens[dn_at].space)):
-            dn_token_edit(dn_at)
-            dn_tokens[dn_at].start += 1
-            tail = dn_tokens[dn_at]
-            dn_tokens[dn_at].symbol = dn_token_kind(files[dn_file].src[tail.start..tail.stop))
+        if close == .rangle and dn_closer_joined():
+            dn_split_closer()
             break
         if dn_accept(close): break
         # (`xs[$clamp a..b)`: an in-index metatag before the range)
@@ -1044,6 +1057,9 @@ dewy_fast_file = (file: int) -> int[]:
         dc_selected = mode != "old"
         dc_compare = mode == "compare"
     dc_enabled = dc_selected
+    # (a direct attempt may split generic closers: a retry restores them, dn_edits_undo)
+    saved_edits_on = dn_edits_on
+    dn_edits_on = dc_enabled
     dn_file = file
     dn_lexer.suspect_brace = -1
     dn_in_interpolation = 0
@@ -1109,4 +1125,5 @@ dewy_fast_file = (file: int) -> int[]:
         dc_lib_lazy = false
     dn_tokens = []
     dewy_syntax = []
+    dn_edits_on = saved_edits_on
     dw_finish_declarations(declarations)
