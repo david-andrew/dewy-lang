@@ -3197,9 +3197,11 @@ gen_binary = (e: int) -> Val:
     # and aggregate operations need a copy even for values without references.
     keep_left = false
     if is_managed(lt) or vc(lt) == VC_AGG:
-        # Built-in string equality invokes no user code. A plain right-hand
+        # Built-in string comparisons invoke no user code. A plain right-hand
         # read cannot invalidate the left value, even through an indexed place.
-        plain_string = aux == 2 and (op == .eq or op == .ne) and plain_read(b)
+        # The borrow ends at this comparison; stores, returns and captures keep
+        # their ordinary owning path, as does an effectful right operand.
+        plain_string = aux == 2 and is_cmp and plain_read(b)
         plain_resource = aux == 1 and ownership_type(lt) and plain_read(b)
         if not plain_string and not plain_resource and place_var(a) != 0: keep_left = not unchanged_by(a, b)
     if aux == 1 and byte_eq_type(lt):

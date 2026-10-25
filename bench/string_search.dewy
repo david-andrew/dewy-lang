@@ -1,0 +1,43 @@
+# Binary search of separately allocated ordered keys, alternating hits and
+# misses. The checked midpoint and assertion match the kv-store search path.
+$runtime_checks
+from p"harness.dewy" import size_argument, clock
+
+make_key=(value:int64):>string=>{
+    let bytes:array<uint8>=[107 101 121 45 48 48 48 48]
+    let x=value
+    loop i in [0..4) {
+        bytes[7-i]=uint8(48+x%10)
+        x=x//10
+    }
+    return str_from_bytes(bytes)
+}
+find_key=(keys:array<string> key:string):>int64=>{
+    let lo:int64=0
+    let hi=keys.length
+    loop lo <? hi {
+        let mid=lo+(hi-lo)//2
+        $runtime_assert mid <? keys.length
+        if keys[mid] <? key {lo=mid+1} else {hi=mid}
+    }
+    return lo
+}
+kernel=(keys:array<string> queries:array<string> count:int64):>int64=>{
+    let result:int64=0
+    if queries.length <? 1024 {return 0}
+    loop i in [0..count) {result+=find_key(keys queries[(i*17)%1024])}
+    return result
+}
+main=(args:array<string>):>void=>{
+    let count=size_argument(args 1000000)
+    let keys:array<string>=[]
+    let queries:array<string>=[]
+    loop i in [0..1024) {
+        keys.push(make_key(i*2))
+        queries.push(make_key(i*2+i%2))
+    }
+    let started=clock()
+    let result=kernel(keys queries count)
+    let finished=clock()
+    printl"{result} {finished-started}"
+}

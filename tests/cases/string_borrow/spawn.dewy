@@ -1,0 +1,13 @@
+# modes: native native-release
+$runtime_checks
+copy=(s:string):>string=>str_from_bytes(s as array<uint8>)
+read=(s:string):>string=>s
+main=()=>{
+    let keys=[copy("task element")]
+    concurrent {
+        let result=spawn read(keys[0])
+        keys=[copy("replacement")]
+    }
+    $runtime_assert (result ?? "") =? "task element"
+    $runtime_assert keys[0] =? "replacement"
+}

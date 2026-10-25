@@ -1,0 +1,27 @@
+# quick
+$runtime_checks
+copy=(s:string):>string=>str_from_bytes(s as array<uint8>)
+replace=(@keys:array<string>):>string=>{
+    keys=[copy("zulu")]
+    return copy("middle")
+}
+choose=(@keys:array<string>):>int64=>{
+    keys=[copy("zulu")]
+    return 0
+}
+main=()=>{
+    let keys=[copy("alpha") copy("beta")]
+    loop i in [0..keys.length) {
+        let saved=keys[i]
+        keys[i]=copy("zulu")
+        $runtime_assert saved <? keys[i]
+    }
+    keys=[copy("alpha")]
+    let saved=keys[0]
+    $runtime_assert keys[0] <? replace(@keys)
+    $runtime_assert saved <? keys[0]
+    $runtime_assert keys[0] =? "zulu"
+    keys=[copy("alpha")]
+    $runtime_assert keys[0] <? keys[choose(@keys)]
+    $runtime_assert saved =? "alpha"
+}

@@ -1,0 +1,34 @@
+$runtime_checks
+copy=(s:string):>string=>str_from_bytes(s as array<uint8>)
+main=()=>{
+    let empty:string=""
+    let allocated=str_from_bytes([] as array<uint8>)
+    $runtime_assert empty <=? allocated and allocated >=? empty
+    $runtime_assert not (empty <? allocated) and not (allocated >? empty)
+    loop n in [1..81) {
+        let bytes:array<uint8>=[]
+        loop j in [0..n) {bytes.push(uint8((j*7)%120))}
+        let a=str_from_bytes(bytes)
+        let twin=str_from_bytes(bytes)
+        $runtime_assert a <=? twin and a >=? twin
+        $runtime_assert not (a <? twin) and not (a >? twin)
+        $runtime_assert empty <? a and a >? empty
+        loop at in [0..n) {
+            let changed=bytes
+            changed[at]=uint8(int64(changed[at])+1)
+            let b=str_from_bytes(changed)
+            $runtime_assert a <? b and a <=? b
+            $runtime_assert b >? a and b >=? a
+        }
+        bytes.push(0)
+        let longer=str_from_bytes(bytes)
+        $runtime_assert a <? longer and longer >? a
+        $runtime_assert a <=? longer and longer >=? a
+    }
+    # Lexicographic order precedes length; zeros are payload, UTF-8 bytes unsigned.
+    let values=[copy("z") copy("aa") copy("a\0b") copy("a\0c") copy("é") copy("ê")]
+    $runtime_assert values[0] >? values[1]
+    $runtime_assert values[2] <? values[3]
+    $runtime_assert values[4] <? values[5]
+    $runtime_assert values[4] >? values[0]
+}

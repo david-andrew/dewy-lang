@@ -1,0 +1,22 @@
+$runtime_checks
+copy=(s:string):>string=>str_from_bytes(s as array<uint8>)
+let keys:array<string>=[]
+replace=():>string=>{
+    keys=[copy("zulu")]
+    return copy("middle")
+}
+read=(a:string b:string):>bool=>a <? b
+replace_arg=(@values:array<string>):>string=>{
+    values=[copy("zulu")]
+    return copy("middle")
+}
+probe=()=>{
+    keys=[copy("alpha")]
+    $runtime_assert keys[0] <? replace()
+    let local=[copy("alpha")]
+    $runtime_assert read(local[0] replace_arg(@local))
+    let captured=[copy("alpha")]
+    let change=($capture @captured)=>{captured=[copy("zulu")] return copy("middle")}
+    $runtime_assert captured[0] <? change()
+}
+main=()=>probe()

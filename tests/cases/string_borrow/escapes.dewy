@@ -1,0 +1,24 @@
+# quick
+$runtime_checks
+copy=(s:string):>string=>str_from_bytes(s as array<uint8>)
+Box:type=[text:string]
+first=(keys:array<string>):>string=>keys[0]
+publish=(keys:array<string>):>Box=>Box[keys[0]]
+reader=(keys:array<string>):> <():>string> => {
+    let saved=keys[0]
+    return ()=>saved
+}
+main=()=>{
+    let keys=[copy("borrowed element")]
+    let stored=publish(keys)
+    let returned=first(keys)
+    let captured=reader(keys)
+    let pushed:array<string>=[]
+    pushed.push(keys[0])
+    keys=[]
+    $runtime_assert stored.text =? "borrowed element"
+    $runtime_assert returned =? "borrowed element"
+    $runtime_assert captured() =? "borrowed element"
+    $runtime_assert pushed[0] =? "borrowed element"
+    $runtime_assert pushed[0] <? "z"
+}

@@ -1024,19 +1024,19 @@ __str_cmp = (a: str, b: str) -> int:
     lb = len(b)
     n = la
     if lb < n: n = lb
-    pa = data(a)
-    pb = data(b)
+    # With a nil input n is zero: the derived payload pointers are never read.
+    pa = (a as *u8) + 24
+    pb = (b as *u8) + 24
     i = 0
-    loop i < n:
-        ca = pa[i]
-        cb = pb[i]
-        if ca != cb:
-            if ca < cb: return -1
-            return 1
-        i += 1
-    if la < lb: return -1
-    if la > lb: return 1
-    0
+    # Skip equal words, then halve the first differing word (or short tail).
+    # Every probe is in range; equality probes work on either byte order.
+    loop i + 8 <= n and ((pa + i) as *u64)[0] == ((pb + i) as *u64)[0]: i += 8
+    if i + 4 <= n and ((pa + i) as *u32)[0] == ((pb + i) as *u32)[0]: i += 4
+    if i + 2 <= n and ((pa + i) as *u16)[0] == ((pb + i) as *u16)[0]: i += 2
+    if i < n and pa[i] == pb[i]: i += 1
+    # Only the sign is consumed. Nonnegative byte/length differences fit int.
+    if i < n: return int(pa[i]) - int(pb[i])
+    la - lb
 
 __str_slice = (s: str, a: int, b: int) -> str:
     n = len(s)
