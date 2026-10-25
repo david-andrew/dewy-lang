@@ -1,0 +1,8 @@
+# modes: native
+first=(n:int64):>void=>{
+    if n >? 0 second(n-1)
+    else circle(vec2(100 100) 20 RED)
+}
+second=(n:int64):>void=>first(n)
+draw=():>void=>first(3)
+update=(_dt:float64):>void=>second(2)

@@ -1,0 +1,9 @@
+# modes: native
+$runtime_checks
+first=(n:int64):>void=>{
+    if n >? 0 second(n-1)
+    else circle(vec2(100 100) 20 RED)
+}
+second=(n:int64):>void=>first(n)
+draw=():>void=>{clear(BLACK) first(3)}
+main=()=>exit(0)

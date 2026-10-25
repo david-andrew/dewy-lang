@@ -1,0 +1,260 @@
+# The bundled draw precondition is a caller obligation, like an index bound.
+# No syntax or inferred public effect is added. Demand comes from a checked
+# instance of draw2d's existing __outside_draw guard. Other programs allocate
+# no graph and visit no bodies here.
+use 'check.jo'
+use 'facts.jo'
+use 'effects.jo'
+use 'directives.jo'
+use 'isolation.jo'
+use 'ast.jo'
+use 'util.jo'
+use 'lex.jo'
+use 'expr.jo'
+use 'ownership.jo'
+use 'witness.jo'
+use 'prelude.jo'
+
+struct DrawEdge:
+    caller: int
+    callee: int
+    node: int
+    value: bool
+    next_in: int
+    next_out: int
+
+draw_context_guard = 0
+draw_edges: DrawEdge[]
+draw_in: int[]
+draw_out: int[]
+draw_required: bool[]
+draw_library: bool[]
+draw_root: int[]                 # 1 outside, 2 function value, 3 user-called draw
+draw_index: int[]
+draw_low: int[]
+draw_answer: int[]               # 0 open, 1 draw-only, 2 unproven
+draw_stack: int[]
+draw_serial = 0
+draw_built = false
+draw_seen: int[]
+draw_path: int[]                 # predecessor edge for an outside-draw witness
+draw_origin: int[]
+
+draw_context_reset = ():
+    draw_context_guard = 0
+    draw_edges = []
+    draw_in = []; draw_out = []
+    draw_required = []; draw_library = []; draw_root = []
+    draw_index = []; draw_low = []; draw_answer = []
+    draw_stack = []; draw_seen = []; draw_path = []; draw_origin = []
+    draw_serial = 0
+    draw_built = false
+
+draw_edge = (f: int, g: int, n: int, value: bool):
+    if g <= 0 or g >= fns.len() or draw_library[g]: return
+    e = draw_edges.len()
+    draw_edges.push(DrawEdge(f, g, n, value, draw_in[g], draw_out[f]))
+    draw_in[g] = e
+    draw_out[f] = e
+    if value: draw_root[g] = 2
+    else if g == draw_fn: draw_root[g] = 3
+
+# Inventory user runtime children once. Hidden value helpers are unknown
+# roots below; asking for their layouts here would instantiate unused bodies.
+# The synthesized __game_run argument is the sole trusted draw entry: a user
+# call of __game_run or a user-written @draw does not get that certificate.
+draw_scan = (f: int, n: int):
+    if n == 0 or draw_seen[n] == f: return
+    draw_seen[n] = f
+    k = nodes[n].kind
+    if k == .call and nodes[n].aux == 0 and nodes[n].sym > 0:
+        g = int(nodes[n].sym)
+        if nodes[n].pos == 0 and effect_name(g) == "__game_run" and fn_in_lib(g) and nkids(n) == 2:
+            # The update callback is still an outside-draw root.
+            draw_scan(f, kid(n, 0))
+            return
+        draw_edge(f, g, n, false)
+    else if (k == .fnref or k == .lambda or k == .partial and nodes[n].aux == 0) and nodes[n].sym > 0:
+        draw_edge(f, int(nodes[n].sym), n, true)
+    else if k == .pair and nodes[n].sym > 0: draw_edge(f, int(nodes[n].sym), n, false)
+    if k == .map_lit and nkids(n) > 0: draw_edge(f, int(nodes[n].sym), n, false)
+    if (k == .binary and nodes[n].aux == 6 or k == .istype) and nodes[n].aux2 > 0: draw_edge(f, int(nodes[n].aux2), n, false)
+    if k == .ident and nodes[n].aux == i32(int(SK.local)):
+        l = int(nodes[n].sym)
+        if l > 0 and int(locals[l].flags) & LF_ALIAS != 0: draw_scan(f, int(locals[l].alias))
+    if k == .parallel_region:
+        draw_scan(f, int(nodes[n].a))
+        return
+    mask = isolation_children(k)
+    if mask < 0: return
+    if mask & 1 != 0: draw_scan(f, int(nodes[n].a))
+    if mask & 2 != 0: draw_scan(f, int(nodes[n].b))
+    if mask & 4 != 0: draw_scan(f, int(nodes[n].c))
+    if mask & 16 != 0:
+        loop c in kids(n): draw_scan(f, c)
+
+# Tarjan on incoming calls in the demanded user slice. A component is proved
+# only if it has a draw entry and every incoming component is proved. A cycle
+# without an entry, an unknown caller, or a path through update stays unproven.
+# Inventory O(user body nodes + edges), plus the shared call-site index when
+# it has not already been demanded; each reverse SCC query is
+# O(V + E), with indexed O(V + E) storage. V and E for the proof include only
+# functions reaching a requested draw precondition. The library precondition
+# travels with the existing panic SCC walk; no second library walk is made.
+draw_visit = (f: int):
+    draw_serial += 1
+    draw_index[f] = draw_serial
+    draw_low[f] = draw_serial
+    draw_stack.push(f)
+    e = draw_in[f]
+    loop e >= 0:
+        edge = draw_edges[e]
+        e = edge.next_in
+        g = edge.caller
+        if edge.value or draw_library[g]: continue
+        if draw_index[g] == 0:
+            draw_visit(g)
+            if draw_answer[g] == 0: draw_low[f] = min(draw_low[f], draw_low[g])
+        else if draw_answer[g] == 0: draw_low[f] = min(draw_low[f], draw_index[g])
+    if draw_low[f] != draw_index[f]: return
+    start = draw_stack.len() - 1
+    loop draw_stack[start] != f: start -= 1
+    good = false
+    bad = false
+    loop i in [start..draw_stack.len()):
+        g = draw_stack[i]
+        if g == draw_fn: good = true
+        if draw_root[g] != 0: bad = true
+        e = draw_in[g]
+        loop e >= 0:
+            edge = draw_edges[e]
+            e = edge.next_in
+            if edge.value: continue
+            h = edge.caller
+            if draw_library[h]: bad = true
+            else if draw_answer[h] == 1: good = true
+            else if draw_answer[h] == 2: bad = true
+    answer = if good and not bad: 1 else: 2
+    loop draw_stack.len() > start: draw_answer[draw_stack.pop()] = answer
+
+draw_witnesses = ():
+    todo: int[]
+    loop f in [1..fns.len()):
+        if not draw_library[f] and draw_root[f] != 0:
+            draw_origin[f] = f
+            todo.push(f)
+    i = 0
+    loop i < todo.len():
+        f = todo[i]
+        i += 1
+        e = draw_out[f]
+        loop e >= 0:
+            edge = draw_edges[e]
+            g = edge.callee
+            if not edge.value and draw_origin[g] == 0:
+                draw_origin[g] = draw_origin[f]
+                draw_path[g] = e
+                todo.push(g)
+            e = edge.next_out
+
+draw_reason = (f: int, g: int) -> str:
+    chain_names = [effect_shown_name(g), effect_shown_name(f)]
+    at = f
+    loop draw_path[at] >= 0:
+        at = draw_edges[draw_path[at]].caller
+        chain_names.push(effect_shown_name(at))
+    text = if draw_root[at] == 2: "function value -> " else if draw_root[at] == 3: "user call to draw -> " else if draw_root[at] == 4: "library caller -> " else: ""
+    loop i in [0..chain_names.len()):
+        if i != 0: text += " -> "
+        text += chain_names[chain_names.len() - i - 1]
+    text
+
+draw_context_finalize = ():
+    # Probe an optional, already-loaded name; unlike required prelude_known
+    # entries, this must not cause a non-game program to load the guard.
+    guard_name = "__outside_draw"
+    if not name_known(guard_name): return
+    s = prelude.get(intern(guard_name)) ?? 0
+    if s == 0: return
+    d = int(syms[s].decl)
+    if d == 0 or nodes[d].sym == 0 or files[pos_file(nodes[d].pos)].path != lib_dir + "/game/draw2d.jo": return
+    loop f in decl_infos[int(nodes[d].sym)].insts:
+        if fns[f].state == 2: draw_context_guard = f
+    if draw_context_guard == 0: return
+    draw_required = fill(false, fns.len())
+
+# Built only when a caller asks for the precondition, after checking is final.
+draw_context_begin = ():
+    if draw_built: return
+    draw_built = true
+    m = fns.len()
+    draw_in = fill(-1, m); draw_out = fill(-1, m)
+    draw_library = fill(false, m)
+    draw_root = fill(0, m)
+    draw_index = fill(0, m); draw_low = fill(0, m); draw_answer = fill(0, m)
+    draw_path = fill(-1, m); draw_origin = fill(0, m)
+    draw_seen = fill(0, nodes.len())
+    loop f in [1..m): draw_library[f] = fn_in_lib(f)
+    loop f in [1..m):
+        if not draw_library[f] and fns[f].state == 2 and fns[f].body != 0: draw_scan(f, int(fns[f].body))
+    # A library's generic hash/equality hooks can call user code without a
+    # function-value node. Its source position supplies an unknown caller;
+    # do not infer exclusivity from user bodies alone. Reuse the final index,
+    # visiting only the user functions' sites, O(indexed nodes + use sites).
+    effect_index_build()
+    loop f in [1..m):
+        if draw_library[f] or draw_root[f] != 0 or f >= effect_ix_heads[2].len(): continue
+        n = effect_ix_heads[2][f]
+        loop n != 0:
+            if pos_in_lib(nodes[n].pos):
+                draw_root[f] = 4
+                break
+            n = effect_ix_next[2][n]
+    # Generated aggregate and lifecycle hooks also have implicit callers.
+    # Their entry context is unknown, just as a function value's is.
+    loop _, f in value_hash_fns:
+        if draw_root[f] == 0: draw_root[f] = 4
+    loop _, f in value_equal_fns:
+        if draw_root[f] == 0: draw_root[f] = 4
+    loop f in export_fns: draw_root[f] = 1
+    loop f in [1..m):
+        if draw_library[f]: continue
+        if ownership_hooks.has(int(fns[f].decl)) and draw_root[f] == 0: draw_root[f] = 4
+        if f == update_fn or f == main_fn or fns[f].kind == FK_INIT or fns[f].cabi: draw_root[f] = 1
+        if f != draw_fn and draw_in[f] < 0: draw_root[f] = 1
+    draw_witnesses()
+
+# Reuse the panic graph's completed SCC, including its independent failures.
+# Required callers are recorded even when another panic would mask the guard.
+draw_context_component = (start: int):
+    needs_draw = false
+    loop i in [start..panic_stack.len()):
+        g = panic_stack[i]
+        if draw_required[g]: needs_draw = true
+        loop j in [0..(panic_edge_end[g] - panic_edge_at[g]) / 2):
+            if draw_required[panic_edges[panic_edge_at[g] + 2 * j]]: needs_draw = true
+    loop i in [start..panic_stack.len()): draw_required[panic_stack[i]] = needs_draw
+    if not needs_draw: return
+    loop i in [start..panic_stack.len()):
+        g = panic_stack[i]
+        if fn_in_lib(g): continue
+        loop j in [0..(panic_edge_end[g] - panic_edge_at[g]) / 2):
+            e = panic_edge_at[g] + 2 * j
+            h = panic_edges[e]
+            if draw_required[h] and fn_in_lib(h): draw_context_check(g, h, panic_edges[e + 1])
+
+draw_context_check = (f: int, g: int, n: int):
+    if nodes[n].pos <= 0 or pos_in_lib(nodes[n].pos): return
+    draw_context_begin()
+    if draw_index[f] == 0: draw_visit(f)
+    value = nodes[n].kind == .fnref or nodes[n].kind == .partial or nodes[n].kind == .lambda
+    if not value and draw_answer[f] == 1: return
+    path = if value: "function value -> {effect_shown_name(g)}" else: draw_reason(f, g)
+    what = "cannot prove drawing runs only inside runtime-invoked draw (outside path: {path})"
+    saved = fact_owner
+    fact_owner = f
+    deferred = dir_defer(n, what, true)
+    fact_owner = saved
+    if deferred:
+        if panic_witness[f] == 0: panic_witness[f] = n
+    else if not wit_measure: fatal(nodes[n].pos, "{what}; move the call into draw or a helper called only by draw, or {dir_panic_fix(nodes[n].pos)}")

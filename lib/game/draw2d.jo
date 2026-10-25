@@ -628,7 +628,7 @@ flush = ():
     glBindVertexArray(0)
     __b_count = 0
 
-# (circle(...) on a line of the top level, as in Scratch: there is no screen to draw on yet)
+# Caller precondition: inside runtime-invoked draw. Deferred calls keep this guard.
 __outside_draw = ():
     panic("drawing works only inside `draw = ():`, which the game calls by itself each frame (after `update`) once the window is open")
 

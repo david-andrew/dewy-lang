@@ -799,7 +799,7 @@ else:
             ln: i32 = 0
             __glGetShaderInfoLog(s, 4095, &ln, buf)
             eprint("shader compile error:\n{__cstr(buf)}\n--- source ---\n{src}")
-            panic("shader compilation failed")
+            __environment_failure("shader compilation failed")
         int(s)
 
     gl_create_program = (vs: str, fs: str) -> int:
@@ -818,7 +818,7 @@ else:
             ln: i32 = 0
             __glGetProgramInfoLog(p, 4095, &ln, buf)
             eprint("shader link error:\n{__cstr(buf)}")
-            panic("shader linking failed")
+            __environment_failure("shader linking failed")
         __glDeleteShader(u32(v))
         __glDeleteShader(u32(f))
         int(p)

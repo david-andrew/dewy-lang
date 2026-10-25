@@ -23,6 +23,7 @@ use 'arena.jo'
 use 'lower.jo'
 use 'effect_library.jo'
 use 'node_store.dewy'
+use 'draw_context.jo'
 
 enum EffectKind: read, write, alloc, detach, costly_copy, panic, io, block, spawn, escape, opaque, remainder
 struct EffectAtom:
@@ -2013,6 +2014,8 @@ panic_edges: int[]                    # pairs (callee, node)
 panic_stack: int[]
 panic_serial = 0
 panic_lib = false                     # the body being walked is the library's
+panic_draw = false                    # this library body needs draw-precondition discovery
+panic_stop = false                    # stop this library walk after its first independent panic
 panic_name_format = 0
 panic_name_to = 0
 
@@ -2048,6 +2051,7 @@ effect_panic_note = (f: int, n: int, what: str, provisional: bool = false):
 panic_grow = ():
     m = fns.len()
     if panic_index.len() >= m: return
+    if draw_context_guard != 0 and draw_required.len() < m: draw_required.resize(m)
     extra = m - panic_index.len()
     panic_index += fill(0, extra)
     panic_low += fill(0, extra)
@@ -2221,7 +2225,7 @@ panic_edge = (f: int, g: int, n: int):
 
 panic_site = (f: int, n: int):
     # (a library body's answer is settled by its first panic; its call sites are not checked)
-    if n == 0 or panic_lib and panic_witness[f] != 0: return
+    if n == 0 or panic_stop and panic_witness[f] != 0: return
     k = nodes[n].kind
     if k == .intrinsic:
         id = nodes[n].aux as IN
@@ -2234,6 +2238,10 @@ panic_site = (f: int, n: int):
                 if panic_local[f] == 0: panic_local[f] = n
             else: panic_witness[f] = n
     else if k == .call and nodes[n].aux == 0 or k == .fnref or k == .lambda or k == .pair or k == .partial and nodes[n].aux == 0:
+        # Draw context is checked at the program/library boundary, like bounds.
+        if panic_draw and k == .call and nodes[n].sym == i32(draw_context_guard):
+            draw_required[f] = true
+            return
         # (a call whose precondition is the caller's obligation, as a string
         # index or a divisor: proven, an error, or a check of the caller's own)
         if nodes[n].sym > 0 and not (k == .call and (fact_string_call(n) >= 2 or fact_array_call(n) != 0 or fact_floor_call(n) != 0 or fact_divisors.has(n) or fact_power_call(n) or panic_format_literal(n) or panic_device_literal(n) or not panic_lib and (panic_map_obligation(n) or fact_range_call(n) or fact_nonempty_call(n)) or panic_literal_safe(n))): panic_edge(f, int(nodes[n].sym), n)
@@ -2242,7 +2250,7 @@ panic_site = (f: int, n: int):
 
 # The full walk is needed only when fact demand did not inventory the body.
 panic_node = (f: int, n: int):
-    if n == 0 or panic_lib and panic_witness[f] != 0: return
+    if n == 0 or panic_stop and panic_witness[f] != 0: return
     panic_site(f, n)
     k = nodes[n].kind
     if k == .parallel_region:
@@ -2265,6 +2273,8 @@ panic_scan = (f: int):
     if fns[f].state != 2 or fns[f].body == 0 or d != 0 and has_flag(d, NF_EXTERN): return
     if d != 0 and modules[int(fns[f].mod)].is_prelude and files[pos_file(nodes[d].pos)].path == lib_dir + "/core/rt.jo": return
     panic_lib = fn_in_lib(f)
+    panic_draw = panic_lib and draw_context_guard != 0
+    panic_stop = panic_lib and not panic_draw
     if let sites = fact_panic_sites.get(f):
         loop n in sites: panic_site(f, n)
     else: panic_node(f, int(fns[f].body))
@@ -2278,7 +2288,7 @@ panic_visit = (f: int):
     panic_scan(f)
     library = fn_in_lib(f)
     loop i in [0..(panic_edge_end[f] - panic_edge_at[f]) / 2):
-        if library and panic_witness[f] != 0: break
+        if library and panic_witness[f] != 0 and draw_context_guard == 0: break
         e = panic_edge_at[f] + 2 * i
         g = panic_edges[e]
         if panic_index[g] == 0:
@@ -2296,6 +2306,7 @@ panic_visit = (f: int):
     # does; a module-local panic spanning modules is no longer local)
     start = panic_stack.len() - 1
     loop panic_stack[start] != f: start -= 1
+    if draw_context_guard != 0: draw_context_component(start)
     any = false
     local = false
     spans = false

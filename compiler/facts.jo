@@ -30,6 +30,7 @@ use 'witness.jo'
 use 'directives.jo'
 use 'warn_if.jo'
 use 'string_domains.jo'
+use 'draw_context.jo'
 
 enum FactPolicy: RuntimeAllowed, RequireStatic
 enum FactReason: missing, write, call, join, loop_, unsupported, budget, callee
@@ -6857,6 +6858,7 @@ fn_dewy = (f: int) -> bool:
     files[pos_file(nodes[int(fns[f].body)].pos)].is_dewy
 
 facts_finalize = ():
+    draw_context_finalize()
     if proof_active: proof_prepare()
     if loan_owners.len() == 0 and fact_requests.len() == 0 and refine_requests.len() == 0 and wi_fact_requests.len() == 0 and proof_calls.len() == 0 and not proof_active and not result_active and fact_policy == .RuntimeAllowed and exact_stores.len() == 0 and exact_owners.len() == 0: return
     demanded: {int: bool} = {}
@@ -6957,6 +6959,7 @@ facts_finalize = ():
 fact_internal_policy = ""
 
 facts_reset = ():
+    draw_context_reset()
     fact_search_predicate = 0
     exact_reset()
     fact_slice = FactSlice()
