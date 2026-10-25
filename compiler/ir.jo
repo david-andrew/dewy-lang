@@ -33,7 +33,8 @@ enum Op:
     overflow_add, overflow_sub, overflow_mul # bool: signed arithmetic overflow
     rot32           # native unsigned 32-bit rotate left, b in 0..32
     streq           # compare runtime strings a and b, including nil (x86-64 only)
-    findbyte        # dst = first offset of byte c in [a, a+b), or -1; bounded x86-64 reads
+    findbyte        # dst = first offset of byte c in [a, a+b), or -1; imm=1 finds unequal bytes; bounded x86-64 reads
+    scanbytes       # bounded byte class search/count; imm low bits invert/count, upper bits rodata range descriptor + 1 (0: dynamic byte c)
     findb           # dst = the first k in [b, c) whose byte a[k] is one of imm's four (packed, low byte first), or c (x86-64 only)
 
 const VI = 0
@@ -439,7 +440,7 @@ ir_operands = (ins: Ins) -> int:
         memcpy, memset, vop:
             ir_use_count = 3
             return -1
-        select, memeq, findbyte, findb:
+        select, memeq, findbyte, scanbytes, findb:
             ir_use_count = 3
             return d
         load:
@@ -474,7 +475,7 @@ ir_operand_layouts = () -> int[]:
     loop op in [Op.mov, Op.neg, Op.not_, Op.fneg, Op.fsqrt, Op.fabs, Op.ffloor, Op.fceil, Op.ftrunc, Op.sext8, Op.sext16, Op.sext32, Op.zext8, Op.zext16, Op.zext32, Op.i2f, Op.u2f, Op.f2i, Op.f2f, Op.bits2f, Op.f2bits, Op.vsplat]: modes[int(op)] = IR_DEF | 1
     loop op in [Op.if_, Op.brif, Op.brtable, Op.assume, Op.zero]: modes[int(op)] = 1
     loop op in [Op.memcpy, Op.memset, Op.vop]: modes[int(op)] = 3
-    loop op in [Op.select, Op.memeq, Op.findbyte, Op.findb]: modes[int(op)] = IR_DEF | 3
+    loop op in [Op.select, Op.memeq, Op.findbyte, Op.scanbytes, Op.findb]: modes[int(op)] = IR_DEF | 3
     loop op in [Op.intr, Op.call, Op.syscall]: modes[int(op)] = IR_DEF | IR_ARGS
     loop op in [Op.calli, Op.callc]: modes[int(op)] = IR_DEF | IR_ARGS | IR_INDIRECT
     modes[int(Op.ret)] = IR_RETURN | 1
@@ -482,7 +483,7 @@ ir_operand_layouts = () -> int[]:
     modes[int(Op.load)] = IR_DEF | IR_INDEX | 1
     modes[int(Op.store)] = IR_STORE | IR_INDEX | 2
     modes[int(Op.vst)] = IR_STORE | 2
-    loop op in [Op.intr, Op.call, Op.calli, Op.callc, Op.syscall, Op.memcpy, Op.memset, Op.findb, Op.copy, Op.zero]: modes[int(op)] |= IR_CALL
+    loop op in [Op.intr, Op.call, Op.calli, Op.callc, Op.syscall, Op.memcpy, Op.memset, Op.scanbytes, Op.findb, Op.copy, Op.zero]: modes[int(op)] |= IR_CALL
     modes[int(Op.zext32)] |= IR_NARROW32
     loop op in [Op.overflow_add, Op.overflow_sub, Op.overflow_mul]: modes[int(op)] |= IR_OVERFLOW
     modes

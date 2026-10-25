@@ -1,0 +1,256 @@
+use 'fused.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'check.jo'
+use 'expr.jo'
+use 'lex.jo'
+use 'ir.jo'
+use 'lower.jo'
+use 'main.jo'
+use 'places.jo'
+
+# Local byte-scan idioms, after checking and facts. No whole-function analysis:
+# reject noncandidates in O(1), then inspect only the condition and tiny body.
+# Versioned array spans retain the scalar loop for any unproved bounds. Raw
+# pointer bounds do not establish readable storage. Only byte indexing is accepted;
+# Dewy string/grapheme indexing is a call, never this primitive.
+
+scan_local = (n: int) -> int:
+    if n == 0 or nodes[n].kind != .ident or nodes[n].aux != i32(int(SK.local)): return -1
+    l = int(nodes[n].sym)
+    if locals[l].offset >= 0 or int(locals[l].flags) & (LF_MUTPARAM | LF_CAPTURE | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_SOAELEM | LF_ELEMALIAS) != 0: return -1
+    l
+
+scan_word = (n: int) -> bool: prune(ntype(n)) == T_INT
+
+scan_inc = (s: int, l: int) -> bool:
+    if nodes[s].kind != .assign or scan_local(int(nodes[s].a)) != l: return false
+    rhs = int(nodes[s].b)
+    if nodes[s].op == i32(int(Tok.pluseq)):
+        return nodes[rhs].kind == .int_lit and nodes[rhs].ival == 1
+    if nodes[s].op != i32(int(Tok.assign)): return false
+    if nodes[rhs].kind == .conv and nodes[rhs].aux == i32(int(CV.fixed_store)): rhs = int(nodes[rhs].a)
+    if nodes[rhs].kind != .binary or nodes[rhs].aux != 0 or nodes[rhs].op != i32(int(Tok.plus)): return false
+    one = int(nodes[rhs].b)
+    scan_local(int(nodes[rhs].a)) == l and nodes[one].kind == .int_lit and nodes[one].ival == 1
+
+scan_value = (n: int, l: int) -> bool:
+    if nodes[n].kind == .int_lit: return true
+    other = scan_local(n)
+    other >= 0 and other != l
+
+scan_bound = (n: int, l: int) -> bool:
+    if not scan_word(n): return false
+    if scan_value(n, l): return true
+    nodes[n].kind == .intrinsic and nodes[n].aux == i32(int(IN.len)) and nkids(n) == 1 and scan_local(kid(n, 0)) >= 0
+
+# Return true only after emitting the entire replacement, including its scalar
+# fallback. No expressions with calls, aliasing, narrowing or hidden writes move.
+gen_scan_loop = (s: int) -> bool:
+    if dbg_on or target_arm64 or target_wasm or nodes[s].aux != 0: return false
+    body = int(nodes[s].b)
+    count_node = 0
+    predicate = 0
+    bound = int(nodes[s].a)
+    increment = 0
+    if nkids(body) == 1 and nodes[bound].kind == .and_:
+        predicate = int(nodes[bound].b)
+        bound = int(nodes[bound].a)
+        if nodes[bound].kind == .and_:
+            predicate = int(nodes[s].a)
+            depth = 0
+            loop nodes[bound].kind == .and_:
+                depth += 1
+                if depth > 8: return false
+                bound = int(nodes[bound].a)
+        increment = kid(body, 0)
+    else if nkids(body) == 2:
+        branch = kid(body, 0)
+        if nodes[branch].kind != .if_ or nodes[branch].c != 0: return false
+        then_body = int(nodes[branch].b)
+        if nkids(then_body) != 1: return false
+        update = kid(then_body, 0)
+        if nodes[update].kind != .assign: return false
+        count_node = int(nodes[update].a)
+        counter = scan_local(count_node)
+        if counter < 0 or not scan_word(count_node) or not scan_inc(update, counter): return false
+        predicate = int(nodes[branch].a)
+        increment = kid(body, 1)
+    else: return false
+    if nodes[bound].kind != .binary or nodes[bound].aux != 0 or nodes[bound].op != i32(int(Tok.lt)): return false
+    index = int(nodes[bound].a)
+    stop = int(nodes[bound].b)
+    l = scan_local(index)
+    if l < 0 or not scan_word(index) or not scan_bound(stop, l) or not scan_inc(increment, l): return false
+    if count_node != 0 and (scan_local(count_node) == l or scan_local(count_node) == scan_local(stop)): return false
+    access = 0
+    byte = 0
+    mode = if count_node != 0: 2 else: 0
+    test_node = predicate
+    negate = nodes[test_node].kind == .not_
+    if negate: test_node = int(nodes[test_node].a)
+    if nodes[test_node].kind == .binary and nodes[test_node].aux == 0:
+        op = nodes[test_node].op as Tok
+        if op == .eq or op == .ne:
+            a = int(nodes[test_node].a)
+            b = int(nodes[test_node].b)
+            if nodes[a].kind == .index and prune(ntype(a)) == T_U8 and scan_local(int(nodes[a].b)) == l and scan_value(b, l) and prune(ntype(b)) == T_U8:
+                access = a
+                byte = b
+                equal = (op == .eq) != negate
+                # Search for the first false predicate, or count true ones.
+                if equal != (count_node != 0): mode |= 1
+    ranges: u8[]
+    if access == 0:
+        state = [0, 0, bound]
+        domain = scan_domain(predicate, l, state)
+        if domain.len() != 256 or state[1] == 0: return false
+        access = state[1]
+        truth = count_node != 0
+        ranges = scan_ranges(domain, truth)
+        inverse = scan_ranges(domain, not truth)
+        if inverse.len() < ranges.len():
+            ranges = inverse
+            mode |= 1
+        if ranges.len() > 8: return false
+    if count_node != 0 and scan_local(byte) == scan_local(count_node): return false
+    array = int(nodes[access].a)
+    if scan_local(array) < 0: return false
+    at = prune(ntype(array))
+    ak = types[at].kind
+    if ak != .array and ak != .str_: return false
+    if ak != .str_ and prune(int(types[at].elem)) != T_U8: return false
+    if byte == 0:
+        offset = rodata.len()
+        ro_starts.push(offset)
+        rodata.push(u8(ranges.len() / 2))
+        loop value in ranges: rodata.push(value)
+        if fused_on: fz_note_raw(offset, 1)
+        mode |= (offset + 1) << 2
+    stmt_begin()
+    startv = gen_expr(index).v
+    stopv = gen_expr(stop).v
+    # No pointer formation or array access for an empty/reversed span.
+    iff(e_bin(.lts, VI, startv, stopv))
+    valid = e_bin(.ges, VI, startv, e_iconst(0))
+    data = gen_borrowed(array).v
+    valid = e_bin(.and_, VI, valid, e_bin(.les, VI, stopv, arr_len(data)))
+    countv = -1
+    if count_node != 0:
+        countv = gen_expr(count_node).v
+        valid = e_bin(.and_, VI, valid, e_bin(.les, VI, countv, e_bin(.sub, VI, e_iconst(9223372036854775807), e_bin(.sub, VI, stopv, startv))))
+    iff(valid)
+    data = e_addi(data, 24)
+    result = vreg(VI)
+    operation = if byte != 0 and count_node == 0: Op.findbyte else: Op.scanbytes
+    needle = if byte != 0: gen_expr(byte).v else: e_iconst(0)
+    emit(operation, VI, result, e_bin(.add, VI, data, startv), e_bin(.sub, VI, stopv, startv), needle, mode)
+    if count_node != 0:
+        write_place(local_place(scan_local(count_node), true), T_INT, e_bin(.add, VI, countv, result))
+        write_place(local_place(l, true), T_INT, stopv)
+    else:
+        iff(e_bin(.ges, VI, result, e_iconst(0)))
+        write_place(local_place(l, true), T_INT, e_bin(.add, VI, startv, result))
+        els()
+        write_place(local_place(l, true), T_INT, stopv)
+        endc()
+    els()
+    gen_while_scalar(s)
+    endc()
+    endc()
+    stmt_end()
+    true
+
+# A small, total predicate evaluated over the finite uint8 domain. This is only
+# demanded after the induction/body shape matches. O(256 * E), E <= 24, with
+# temporary indexed vectors. Tables must be literal, immutable, unexposed and
+# cover every byte. No general constant evaluator (or user code) runs here.
+scan_literal = (n0: int) -> int:
+    n = n0
+    loop nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.int_)):
+        t = prune(ntype(n))
+        if types[t].kind != .int_ or int(types[t].bits) < 8 or (int(types[t].bits) == 8 and types[t].sign): return -1
+        n = int(nodes[n].a)
+    if nodes[n].kind == .int_lit and nodes[n].ival >= 0 and nodes[n].ival <= 255: return nodes[n].ival
+    -1
+
+scan_table = (n: int) -> int:
+    if nodes[n].kind != .ident or (nodes[n].aux != i32(int(SK.global)) and nodes[n].aux != i32(int(SK.const_))): return 0
+    t = prune(ntype(n))
+    if types[t].kind != .fixed or fixed_len(t) != 256 or prune(int(types[t].elem)) != T_U8: return 0
+    g = int(nodes[n].sym)
+    if not globals[g].is_const and not readonly_global(g): return 0
+    if globals[g].fn_written or globals[g].init_written or globals[g].exposed: return 0
+    init = int(globals[g].init)
+    if init == 0: init = int(nodes[int(globals[g].decl)].b)
+    if nodes[init].kind != .array or nkids(init) != 256: return 0
+    init
+
+scan_domain = (n: int, l: int, state: mut int[]) -> int[]:
+    if n == state[2]: return fill(1, 256)
+    state[0] += 1
+    if state[0] > 24: return []
+    literal = scan_literal(n)
+    if literal >= 0: return fill(literal, 256)
+    k = nodes[n].kind
+    if k == .index:
+        base = int(nodes[n].a)
+        ix = int(nodes[n].b)
+        if scan_local(ix) == l and prune(ntype(n)) == T_U8 and scan_local(base) >= 0 and (tkind(ntype(base)) == .array or tkind(ntype(base)) == .str_):
+            if state[1] != 0 and scan_local(int(nodes[state[1]].a)) != scan_local(base): return []
+            state[1] = n
+            out: int[]
+            loop v in [0..256): out.push(v)
+            return out
+        table = scan_table(base)
+        if table == 0: return []
+        values = scan_domain(ix, l, state)
+        if values.len() != 256: return []
+        out: int[]
+        loop v in values:
+            if v < 0 or v > 255: return []
+            value = scan_literal(kid(table, v))
+            if value < 0: return []
+            out.push(value)
+        return out
+    if k == .conv and nodes[n].aux == i32(int(CV.int_)):
+        a = int(nodes[n].a)
+        # Only widening the scanned byte; narrowing predicates have distinct semantics.
+        if prune(ntype(a)) == T_U8 and (prune(ntype(n)) == T_INT or prune(ntype(n)) == T_U8): return scan_domain(a, l, state)
+        return []
+    if k == .not_:
+        out = scan_domain(int(nodes[n].a), l, state)
+        loop j in [0..out.len()): out[j] = if out[j] == 0: 1 else: 0
+        return out
+    if k != .binary and k != .and_ and k != .or_: return []
+    if k == .binary and nodes[n].aux != 0: return []
+    op = nodes[n].op as Tok
+    if k == .binary and op != .amp and op != .eq and op != .ne and op != .lt and op != .le and op != .gt and op != .ge: return []
+    left = scan_domain(int(nodes[n].a), l, state)
+    if left.len() != 256: return []
+    right = scan_domain(int(nodes[n].b), l, state)
+    if right.len() != 256: return []
+    loop v in [0..256):
+        a = left[v]
+        b = right[v]
+        if k == .and_: left[v] = if a != 0 and b != 0: 1 else: 0
+        else if k == .or_: left[v] = if a != 0 or b != 0: 1 else: 0
+        else if op == .amp: left[v] = a & b
+        else:
+            truth = if op == .eq: a == b else if op == .ne: a != b else if op == .lt: a < b else if op == .le: a <= b else if op == .gt: a > b else: a >= b
+            left[v] = if truth: 1 else: 0
+    left
+
+scan_ranges = (domain: int[], truth: bool) -> u8[]:
+    ranges: u8[]
+    v = 0
+    loop v < 256:
+        if (domain[v] != 0) != truth:
+            v += 1
+            continue
+        lo = v
+        loop v < 255 and (domain[v + 1] != 0) == truth: v += 1
+        ranges.push(u8(lo))
+        ranges.push(u8(v))
+        v += 1
+    ranges

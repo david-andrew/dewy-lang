@@ -164,7 +164,7 @@ inlinable = (f: IrFn) -> int:
             # Match the existing string helper plus its bounded comparison.
             size += 81
             has_loop = true
-        if ins.op == .findbyte:
+        if ins.op == .findbyte or ins.op == .scanbytes:
             size += 30
             has_loop = true
         if ins.op == .memeq:

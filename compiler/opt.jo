@@ -15,7 +15,7 @@ o_rewrite_mask = (op: Op) -> int:
         calli, callc: 20
         if_, brif, zero, brtable, assume: 1
         ret: 32
-        memcpy, memset, select, vop, memeq, findbyte, findb: 7
+        memcpy, memset, select, vop, memeq, findbyte, scanbytes, findb: 7
         load: 65
         store: 131
         vst: 11
@@ -132,7 +132,7 @@ o_pure_classify = (op: Op) -> bool:
         fadd, fsub, fmul, fdiv, fneg, fsqrt, fmin, fmax, ffloor, fceil, fabs, ftrunc: true
         feq, fne, flt, fle, fgt, fge: true
         sext8, sext16, sext32, zext8, zext16, zext32, i2f, u2f, f2i, f2f, bits2f, f2bits: true
-        vld, vbin, vsplat, memeq, streq, findbyte: true
+        vld, vbin, vsplat, memeq, streq, findbyte, scanbytes: true
         _: false
 
 o_resize = (n: int):
@@ -1498,7 +1498,7 @@ o_sra = ():
                 if a >= 0: sra_escape(a)
             if_, brif, brtable, assume, neg, not_, fneg, fsqrt, fabs, ffloor, fceil, ftrunc, sext8, sext16, sext32, zext8, zext16, zext32, i2f, u2f, f2i, f2f, bits2f, f2bits, vsplat:
                 sra_escape(a)
-            memcpy, memset, select, memeq, findbyte, findb:
+            memcpy, memset, select, memeq, findbyte, scanbytes, findb:
                 sra_escape(a)
                 sra_escape(b)
                 sra_escape(c)
@@ -1801,7 +1801,7 @@ optimize = ():
                 o_input_use(int(ins.c), pos)
                 d = -1
                 kill = 7
-            select, memeq, findbyte, findb:
+            select, memeq, findbyte, scanbytes, findb:
                 o_input_use(a, pos)
                 o_input_use(b, pos)
                 o_input_use(int(ins.c), pos)
@@ -2434,7 +2434,7 @@ o_retargetable_classify = (op: Op) -> bool:
         # Native flags consume the operands before assigning the result. Wasm
         # checks the saved operands afterwards, so it must retain a fresh local.
         checked_add, checked_sub, checked_mul: checked_flags
-        add, sub, mul, divs, divu, rems, remu, and_, or_, xor, shl, shrs, shru, rot32, neg, not_, load, mov, mulhs, mulhu, memeq, streq, findbyte, overflow_add, overflow_sub, overflow_mul: true
+        add, sub, mul, divs, divu, rems, remu, and_, or_, xor, shl, shrs, shru, rot32, neg, not_, load, mov, mulhs, mulhu, memeq, streq, findbyte, scanbytes, overflow_add, overflow_sub, overflow_mul: true
         eq, ne, lts, les, gts, ges, ltu, leu, gtu, geu: true
         fadd, fsub, fmul, fdiv, fneg, fsqrt, fmin, fmax, ffloor, fceil, fabs, ftrunc: true
         sext8, sext16, sext32, zext8, zext16, zext32, i2f, u2f, f2i, f2f, bits2f, f2bits, fconst, iconst: true

@@ -861,6 +861,8 @@ fz_unpack_ir = (x: FzRec, lf: int) -> IrFn:
         ins = Ins(op as Op, i32(ty), i32(dst), i32(a), i32(b), i32(c), imm, i32(pos))
         o = ins.op
         if o == .call or o == .faddr or o == .checked_add or o == .checked_sub or o == .checked_mul: ins.imm = fz_map_lf(x.w, ins.imm)
+        else if o == .scanbytes and ins.imm >= 4:
+            ins.imm = ((fz_map_in(x.w, 0, (ins.imm >> 2) - 1, fz_r0) + 1) << 2) | (ins.imm & 3)
         else if o == .daddr: ins.imm = fz_map_in(x.w, 0, ins.imm, fz_r0)
         else if o == .gaddr: ins.imm = fz_map_in(x.w, 1, ins.imm, fz_d0)
         f.code.push(ins)

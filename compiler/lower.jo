@@ -7717,8 +7717,14 @@ simple_cond = (e: int) -> bool:
         return true
     false
 
+use 'scanloops.jo'
+
 gen_while = (s: int):
     if eg_stack.len() > 0: eg_loop()
+    if gen_scan_loop(s): return
+    gen_while_scalar(s)
+
+gen_while_scalar = (s: int):
     scope_push()
     rotate = nodes[s].aux != 1 and simple_cond(int(nodes[s].a))
     nfp = fp_begin(s, -1, 0, 0)

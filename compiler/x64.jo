@@ -471,7 +471,7 @@ call_like = (ins: *Ins) -> bool:
     if op == .intr and ins.imm >= 2: return true
     if op == .call and ins.c == 1 and not dbg_on: return false      # never returns (a panic: with -g, where its caller's variables must be readable)
     if op == .call and ins.c >= CALL_IF_SHARED and ins.c <= CALL_RC_DEC and not target_wasm: return false     # (through a stub keeping every register)
-    if op == .call or op == .calli or op == .callc or op == .syscall or op == .memcpy or op == .memset or op == .findb: return true
+    if op == .call or op == .calli or op == .callc or op == .syscall or op == .memcpy or op == .memset or op == .findb or op == .scanbytes: return true
     if op == .copy or op == .zero: return ins.imm > INLINE_COPY
     false
 
@@ -2085,7 +2085,7 @@ emit_memeq = (d: int, a: int, bb: int, count: int, flags: bool = false, strings:
 # are clobbered. Unaligned vector reads stay inside the supplied span; the
 # tail uses one bounded eight-byte load and 0..7 scalar reads, including
 # spans ending at a guard page.
-emit_findbyte = (d: int, p: int, n: int, byte: int):
+emit_findbyte = (d: int, p: int, n: int, byte: int, invert: bool):
     if vloc[d] == LOC_NONE: return
     mask = dreg(d, R11)
     saved = vloc[d] < 0
@@ -2109,6 +2109,9 @@ emit_findbyte = (d: int, p: int, n: int, byte: int):
     sse_rm(0xF3, 0x6F, 0, RCX, 0)           # movdqu xmm0, [rcx]
     sse_rr(0x66, 0x74, 0, 1)                # pcmpeqb
     sse_rr(0x66, 0xD7, mask, 0)             # pmovmskb
+    if invert:
+        rex(false, 0, 0, mask, false)
+        b(0x81); modrr(6, mask); b32(65535)
     cmp_branch_pad(9)
     op_rr(0x85, false, mask, mask)
     found = jcc32(CC_NE)
@@ -2125,6 +2128,9 @@ emit_findbyte = (d: int, p: int, n: int, byte: int):
     sse_rm(0xF3, 0x7E, 0, RCX, 0)           # movq: only eight bytes are readable
     sse_rr(0x66, 0x74, 0, 1)
     sse_rr(0x66, 0xD7, mask, 0)
+    if invert:
+        rex(false, 0, 0, mask, false)
+        b(0x81); modrr(6, mask); b32(255)
     # movq zeroes the upper lanes. Ignore them, also when searching for NUL.
     rex(false, 0, 0, mask, false)
     b(0x81); modrr(4, mask); b32(255)
@@ -2143,7 +2149,7 @@ emit_findbyte = (d: int, p: int, n: int, byte: int):
     cmp_branch_pad(9)
     rex(false, mask, 0, RCX, true)
     b(0x38); mem(mask, RCX, 0)              # cmp byte [rcx], mask8
-    equal = jcc32(CC_E)
+    equal = jcc32(if invert: CC_NE else: CC_E)
     lea(RAX, RAX, 1)
     lea(RCX, RCX, 1)
     jmp_back(tail)
@@ -2375,7 +2381,8 @@ emit_ins = (pos: int, ins: *Ins):
         gaddr, daddr: x_emit_gaddr(pos, ins)
         faddr: x_emit_faddr(pos, ins)
         memeq, streq: x_emit_memeq(pos, ins)
-        findbyte: emit_findbyte(int(ins.dst), int(ins.a), int(ins.b), int(ins.c))
+        findbyte: emit_findbyte(int(ins.dst), int(ins.a), int(ins.b), int(ins.c), ins.imm != 0)
+        scanbytes: emit_scanbytes(ins)
         findb: x_emit_findb(pos, ins)
         copy: x_emit_copy(pos, ins)
         zero: x_emit_zero(pos, ins)
@@ -4364,3 +4371,104 @@ x64_resolve = (text_addr: int, ro_addr: int, data_addr: int):
         if f.1 == 1: base = data_addr
         target = base + f.2
         patch32(f.0, target - (text_addr + f.0 + 4))
+
+# Byte predicates are unions of up to four closed ranges. Constants occupy
+# xmm4..11; xmm12 is all ones, xmm13 is byte ones, xmm3 is zero. This operation
+# is call-like: its caller saves live caller-saved integer/vector registers.
+x_scan_splat = (x: int, value: int):
+    mov_imm(R8, value * 0x01010101)
+    sse_rr(0x66, 0x6E, x, R8)
+    sse_rr(0x66, 0x70, x, x); b(0)
+
+x_scan_predicate = (offset: int, invert: bool):
+    if offset < 0:
+        sse_rr(0x66, 0x6F, 2, 0)
+        sse_rr(0x66, 0x74, 2, 4)
+    else:
+        sse_rr(0x66, 0xEF, 2, 2)
+        loop j in [0..int(rodata[offset])):
+            sse_rr(0x66, 0x6F, 1, 0)
+            if rodata[offset + 1 + 2 * j] == rodata[offset + 2 + 2 * j]:
+                sse_rr(0x66, 0x74, 1, 4 + 2 * j)
+            else:
+                sse_rr(0x66, 0xDE, 1, 4 + 2 * j)       # pmaxub lower
+                sse_rr(0x66, 0xDA, 1, 5 + 2 * j)       # pminub upper
+                sse_rr(0x66, 0x74, 1, 0)
+            sse_rr(0x66, 0xEB, 2, 1)
+    if invert: sse_rr(0x66, 0xEF, 2, 12)
+
+emit_scanbytes = (ins: *Ins):
+    d = int(ins.dst)
+    if vloc[d] == LOC_NONE: return
+    offset = (ins.imm >> 2) - 1
+    invert = ins.imm & 1 != 0
+    counting = ins.imm & 2 != 0
+    ld(RCX, int(ins.a))
+    ld(RDX, int(ins.b))
+    if offset < 0:
+        ld(R8, int(ins.c))
+        sse_rr(0x66, 0x6E, 4, R8)
+        sse_rr(0x66, 0x60, 4, 4)
+        sse_rr(0x66, 0x61, 4, 4)
+        sse_rr(0x66, 0x70, 4, 4); b(0)
+    else:
+        loop j in [0..int(rodata[offset])):
+            x_scan_splat(4 + 2 * j, int(rodata[offset + 1 + 2 * j]))
+            x_scan_splat(5 + 2 * j, int(rodata[offset + 2 + 2 * j]))
+    if invert: sse_rr(0x66, 0x74, 12, 12)
+    if counting:
+        sse_rr(0x66, 0xEF, 3, 3)
+        x_scan_splat(13, 1)
+    mov_imm(RAX, 0)
+    top = code.len()
+    cmp_branch_pad(10)
+    b24(0xFA8348); b(16)                     # cmp rdx, 16
+    tail_jump = jcc32(CC_L)
+    sse_rm(0xF3, 0x6F, 0, RCX, 0)
+    x_scan_predicate(offset, invert)
+    found = -1
+    if counting:
+        sse_rr(0x66, 0xDB, 2, 13)            # one per matching byte
+        sse_rr(0x66, 0xF6, 2, 3)             # psadbw: two eight-byte sums
+        b(0x66); rex(true, 2, 0, R8, false); b16(0x7E0F); modrr(2, R8) # movq r8, xmm2
+    else:
+        sse_rr(0x66, 0xD7, R9, 2)
+        op_rr(0x85, false, R9, R9)
+        found = jcc32(CC_NE)
+        lea(RAX, RAX, 16)
+    if counting:
+        sse_rr(0x66, 0x73, 3, 2); b(8)       # psrldq xmm2, 8
+        b(0x66); rex(true, 2, 0, R9, false); b16(0x7E0F); modrr(2, R9)
+        op_rr(0x01, true, R8, RAX)
+        op_rr(0x01, true, R9, RAX)
+    lea(RCX, RCX, 16)
+    lea(RDX, RDX, -16)
+    jmp_back(top)
+    patch_here(tail_jump)
+    tail = code.len()
+    op_rr(0x85, true, RDX, RDX)
+    absent = jcc32(CC_LE)
+    rex(false, R8, 0, RCX, false); b16(0xB60F); mem(R8, RCX, 0)
+    sse_rr(0x66, 0x6E, 0, R8)
+    x_scan_predicate(offset, invert)
+    sse_rr(0x66, 0xD7, R9, 2)
+    rex(false, 0, 0, R9, false); b(0x83); modrr(4, R9); b(1)
+    equal = -1
+    if counting: op_rr(0x01, true, R9, RAX)
+    else:
+        equal = jcc32(CC_NE)
+        lea(RAX, RAX, 1)
+    lea(RCX, RCX, 1)
+    lea(RDX, RDX, -1)
+    jmp_back(tail)
+    if not counting:
+        patch_here(found)
+        rex(false, R9, 0, R9, false); b16(0xBC0F); modrr(R9, R9)
+        op_rr(0x01, true, R9, RAX)
+        done = jmp32()
+        patch_here(absent)
+        mov_imm(RAX, -1)
+        patch_here(equal)
+        patch_here(done)
+    else: patch_here(absent)
+    st(d, RAX)

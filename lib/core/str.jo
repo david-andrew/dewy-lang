@@ -61,12 +61,13 @@ find = (s: str, sub: str, start: int = 0) -> int:
 # where byte c first is in p[from..n), or -1: a word at a time (has a byte equal to c: the
 # word xor c in every byte has a zero byte)
 __memchr = (p: *u8, from: int, n: int, c: u8) -> int:
+    if from >= n: return -1
     i = from
     loop i < n and ((p + i) as int) & 7 != 0:
         if p[i] == c: return i
         i += 1
     pat = u64(c) * 0x0101010101010101
-    loop i + 8 <= n:
+    loop i < n and u64(n) - u64(i) >= 8:
         w = ((p + i) as *u64)[0] xor pat
         if (w - 0x0101010101010101) & (w xor 0xFFFFFFFFFFFFFFFF) & 0x8080808080808080 != 0: break
         i += 8

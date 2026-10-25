@@ -1,0 +1,20 @@
+# An explicit bounded byte loop: the same search as byte_find.
+scan=(text:string c:uint8):>int64=>{
+    let bytes=text as array<uint8>
+    let i:int64=0
+    loop i <? bytes.length and bytes[i] not=? c {i+=1}
+    if i =? bytes.length {-1} else {i}
+}
+# Search long text for a delimiter or an absent byte, alternating both paths.
+from p"harness.dewy" import size_argument, clock
+main=(args:array<string>):>void=>{
+    let count=size_argument(args 20000)
+    let padding=repeat("a" 4095)
+    let text="{padding}\n"
+    let result:int64=0
+    let started=clock()
+    loop i in [0..count) {result+=scan(text if i%2=?0 b'\n' else b'!')}
+    let finished=clock()
+    printl"{result} {finished-started}"
+}
+$runtime_checks
