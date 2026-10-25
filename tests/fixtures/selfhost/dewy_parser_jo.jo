@@ -1,0 +1,70 @@
+# Runs the same state/service boundary against either leaf or frozen twin.
+use '../../../compiler/dewy_parser.jo'
+use '../../../compiler/node_store.dewy'
+use '../../../compiler/intern.dewy'
+use '../../../compiler/dewy_tokens.dewy'
+
+reader: ParserContext
+other: ParserContext
+store: Node[]
+texts: str[]
+hashes: int[]
+slots: i32[]
+misses = 0
+
+new_name = (source: str, start: int, length: int, hash: int) -> int:
+    misses += 1
+    name_add(texts, hashes, slots, source[start..start + length), hash)
+
+value_name = (name: i32, pos: int) -> i32:
+    # Host work can grow a borrowed store. The leaf must reacquire store[n]
+    # after this hook returns, and the caller must see both new nodes.
+    node_mk(store, .none_lit, pos + 1)
+    name + 100
+
+main = ():
+    host = ParserHost(value_name, new_name)
+    blob = read_file(args()[1]) ?? ""
+    script = read_file(args()[2]) ?? ""
+    reader.at = 7
+    reader.file = 3
+    reader.depth = 2
+    reader.flags.report_now = true
+    reader.flags.comma_stop = true
+    reader.tokens = [DewyLexeme(.eof, 0, 5, 5, false, false, .none)]
+    node_mk(store, .nil, 0)
+    loop line in split(script, "\n"):
+        f = split(line, " ")
+        if f[0] == "W":
+            start = to_int(f[1]) ?? 0
+            length = to_int(f[2]) ?? 0
+            pos = to_int(f[3]) ?? 0
+            n = dc_parser_word_name(host, store, texts, hashes, slots, blob[start..start + length), pos)
+            print("{n} {store.len()} {int(store[n].name)} {store[n].pos} {misses} {texts.len()} {store[n].kind == NK.ident}")
+        else if f[0] == "Q":
+            id = to_int(f[1]) ?? 0
+            a = dc_parser_word(reader, texts, id)
+            b = dc_parser_word(other, texts, id)
+            print("{a} {b}")
+    # Preserve independent parser state while caches grow, including warm hits.
+    assert(reader.at == 7 and reader.file == 3 and reader.depth == 2)
+    assert(reader.flags.report_now and reader.flags.comma_stop)
+    assert(reader.tokens.len() == 1 and reader.tokens[0].start == 5)
+    assert(other.tokens.len() == 0 and other.at == 0 and not other.flags.report_now)
+    dc_parser_report(reader.status, 11, "first")
+    pos = reader.status.report_pos
+    count = reader.status.reports
+    dc_parser_report(reader.status, 12, "ignored")
+    assert(reader.status.reports == 2 and reader.status.report_text == "first")
+    reader.status.report_pos = pos
+    reader.status.reports = count
+    dc_parser_report(reader.status, 13, "still ignored")
+    dc_parser_hint(reader.status, 21, "hint")
+    dc_parser_hint(reader.status, 22, "ignored")
+    print("{reader.status.report_pos} {reader.status.reports} {reader.status.report_text} {reader.status.hint_pos} {reader.status.hint_text}")
+    reader.status.report_pos = 0
+    reader.status.hint_pos = 0
+    dc_parser_report(reader.status, 31, "next")
+    dc_parser_hint(reader.status, 32, "next hint")
+    dc_parser_report(other.status, 41, "other")
+    print("{reader.status.report_pos} {reader.status.reports} {reader.status.report_text} {reader.status.hint_pos} {reader.status.hint_text} {other.status.report_text}")

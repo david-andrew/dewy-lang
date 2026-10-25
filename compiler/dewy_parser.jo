@@ -1,0 +1,61 @@
+# Frozen bootstrap layout and reader twin of dewy_parser.dewy.
+use 'dewy_tokens.dewy'
+use 'node_store.dewy'
+use 'intern.dewy'
+
+struct ParserFlags:
+    report_now: bool
+    unread_here: bool
+    fn_body: bool
+    comma_stop: bool
+
+struct ParserStatus:
+    report_pos: int
+    report_text: str
+    reports: int
+    hint_pos: int
+    hint_text: str
+
+struct ParserContext:
+    tokens: DewyLexeme[]
+    at: int
+    file: int
+    depth: int
+    flags: ParserFlags
+    status: ParserStatus
+    classes: u8[]
+
+struct ParserHost:
+    value_name: (i32, int) -> i32
+    intern_new: (str, int, int, int) -> int
+
+dc_parser_word = (p: mut ParserContext, texts: mut str[], id: int) -> int:
+    if id < p.classes.len() and p.classes[id] != 0: return int(p.classes[id]) - 1
+    if p.classes.len() < texts.len(): p.classes.resize(texts.len() + 256)
+    name = texts[id]
+    words = ["set", "b", "main", "_", "array", "ptr", "dict", "totaldict", "addr", "no_effects", "reads", "mutates", "allocates", "blocks", "panics", "length", "overflow", "p"]
+    c = 0
+    loop k in [0..words.len()):
+        if name == words[k]: c = k + 1
+    if id < p.classes.len(): p.classes[id] = u8(c + 1)
+    c
+
+dc_parser_word_name = (host: mut ParserHost, store: mut Node[], texts: mut str[], hashes: mut int[], slots: mut i32[], text: str, pos: int) -> int:
+    n = node_mk(store, .ident, pos)
+    h = hash_bytes(data(text), len(text))
+    id = name_find(texts, hashes, slots, data(text), len(text), h)
+    if id < 0: id = host.intern_new(text, 0, len(text), h)
+    store[n].name = host.value_name(i32(id), pos)
+    n
+
+dc_parser_report = (status: mut ParserStatus, pos: int, message: str):
+    status.reports += 1
+    if status.report_pos == 0:
+        status.report_pos = pos
+        status.report_text = message
+
+dc_parser_hint = (status: mut ParserStatus, pos: int, message: str) -> int:
+    if status.hint_pos == 0:
+        status.hint_pos = pos
+        status.hint_text = message
+    0

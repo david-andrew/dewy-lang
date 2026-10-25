@@ -4712,19 +4712,19 @@ def lexer_span_helpers(compiler, out):
     # Compile the actual lexer and its intern/token helpers in a small probe in out, beside
     # the Dewy modules it uses. Diagnostics are stubbed; malformed-source integration tests
     # use the compiler.
-    for module in ('dewy_tokens.dewy', 'dewy_lex.dewy', 'intern.dewy'):
+    for module in ('dewy_tokens.dewy', 'dewy_lex.dewy', 'intern.dewy', 'dewy_parser.dewy', 'node_store.dewy'):
         shutil.copy2(directory / module, out / module)
     fast = (directory / 'dewy_fast.jo').read_text(encoding='utf-8')
     util = (directory / 'util.jo').read_text(encoding='utf-8')
     lex = (directory / 'lex.jo').read_text(encoding='utf-8')
     return '\n'.join([
-        "use 'dewy_tokens.dewy'\nuse 'dewy_lex.dewy'\nuse 'intern.dewy'",
+        "use 'dewy_tokens.dewy'\nuse 'dewy_lex.dewy'\nuse 'intern.dewy'\nuse 'dewy_parser.dewy'",
         lex[lex.index('lx_cls:'):lex.index('is_ident_start =')],
         util[util.index('struct SrcFile:'):util.index('# position encoding')],
         'mkpos = (file: int, off: int) -> int: (file << 40) | off\n'
         'fatal = (pos: int, message: str): panic(message)\n'
         'err_notes: (int, str)[]',
-        fast[fast.index('dn_tokens: DewyLexeme[]'):fast.index('dn_peek =')],
+        fast[fast.index('dc_parser: ParserContext'):fast.index('dn_peek =')],
     ])
 
 
@@ -4771,7 +4771,7 @@ def test_core_lexer_bounded_spans(compiler, tmp_path, release):
             body += [
                 '        if true:',
                 f'            files = [SrcFile(path = "span.dewy", src = {full_text}, is_dewy = true)]',
-                '            dn_file = 0',
+                '            dc_parser.file = 0',
                 f'            ts = dn_lex(0, {start}, {stop}, intern_names)',
                 f'            assert(ts.len() == {len(expected)})',
             ]

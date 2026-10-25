@@ -1,3 +1,4 @@
+use 'dewy_parser.dewy'
 # Dewy spellings of scoped settings and bundles (compiler/directives.jo).
 use 'util.jo'
 use 'ast.jo'
@@ -22,7 +23,7 @@ dw_dir_lexed = (file: int):
     if not dw_dir_dollars or dir_bundles_loaded: return
     seen = 0
     unknown = false
-    loop t in dn_tokens:
+    loop t in dc_parser.tokens:
         if t.kind != .metatag: continue
         if not dw_dir_known(dn_payload(t)):
             unknown = true
@@ -31,8 +32,8 @@ dw_dir_lexed = (file: int):
         if seen >= dn_metatags: break
     if not unknown: return
     # (the lexed source waits while the bundles are parsed)
-    tokens = dn_tokens
-    at_file = dn_file
+    tokens = dc_parser.tokens
+    at_file = dc_parser.file
     suspect = dn_lexer.suspect_brace
     interpolation = dn_in_interpolation
     bigint = dw_bigint_import
@@ -44,8 +45,8 @@ dw_dir_lexed = (file: int):
     dn_lazy_left = lazy_left
     dn_metatags = metatags
     dn_block_comments = comments
-    dn_tokens = tokens
-    dn_file = at_file
+    dc_parser.tokens = tokens
+    dc_parser.file = at_file
     dn_lexer.suspect_brace = suspect
     dn_in_interpolation = interpolation
     dw_bigint_import = bigint

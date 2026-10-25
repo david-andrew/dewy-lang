@@ -505,6 +505,43 @@ Removal steps 1–5 are done (valid forms closed, own mistakes, `compare`/`old` 
 and reference grammar deleted). Left for the Dewy port: dewy_direct.jo and dewy_nodes.jo
 themselves, the driver, and replacing the `DewySyntax` carrier with the checker nodes it holds.
 
+### Direct-parser port boundary
+
+`dewy_scan.dewy` owns bounded bracket and left-out-arm scans; Jo wrappers pass the
+lexemes by place. `dewy_parser.dewy` owns `ParserContext`: tokens, cursor, file,
+depth, reader flags, first-report/hint status and the name-class cache. The Jo
+driver holds one zero-initialized context and lends it by place. Keep the existing
+field-by-field saves for interpolation, lazy bodies and speculative readings;
+copying or resetting the whole context would also reset persistent caches or
+change which diagnostic survives. A failed reading restores report position and
+count, retaining its text; statement entry clears the hint position.
+
+The import direction is Jo driver → Dewy reader → Dewy leaves. Node/list and
+intern stores stay with their current owners and cross by place. Construct nodes
+through `node_store` directly, with local field access. `ParserHost` holds only
+noncapturing Jo service hooks: `intern_new` for a missing arbitrary-byte name and
+`dw_value_name` for the cold word-operator recovery path. Hooks never enter readers;
+ordinary atoms must not acquire a per-node Jo callback. `dc_word` classifies through
+the context, O(1) on hits, O(18) on misses with amortized cache growth. Report/hint
+updates are O(1). Keep lex+parse within ±0.3% on every flagship when extending this
+boundary, and preserve output bytes and first diagnostics.
+
+Next slices:
+
+1. Move pure builders and name mapping, then independent `dc_reach_*`, collection,
+   copy and kind-reader groups. Extend context fields only as those readers need
+   them; compare node fields, lists, names and rollback state against the twins.
+2. Move the roughly 100-function expression/type/body/statement SCC together.
+   Keep its recursive calls inside Dewy, with local cursors in hot loops; move the
+   remaining flags, edit log and lazy state into the context at that cutover.
+3. Move the file driver and replace `DewySyntax` carriers with checker-node results.
+
+Each stable leaf API has a checked-in frozen Jo twin in `FROZEN_TWINS`; generations
+1–2 use those twins. Freeze the final Jo reader at the central SCC cutover. A
+changed API/layout or new syntax used by compiler sources requires a deliberate
+twin refresh and independent bootstrap/fixed-point checks, not a second evolving
+parser.
+
 ## Decided rules
 
 Moved here from the decisions ledger ([decisions.md](decisions.md)), which keeps
