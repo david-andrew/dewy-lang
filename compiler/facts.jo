@@ -1049,6 +1049,16 @@ fact_route = (e: int, s: mut FactState, depth: int = 0) -> FactRoute:
         route.types.push(refine_storage(e, ntype(e)))
         route.sites.push(if k == .index: e else: 0)
         return route
+    # (a narrowed name, `if r is? T` or `if r isnt? none`, writes its variable's
+    # payload: the -4 projection fact_capture reads it by)
+    if (k == .narrow or k == .unwrap) and nodes[e].a != 0:
+        route = fact_route(int(nodes[e].a), s, depth + 1)
+        if route.root == 0: return route
+        route.selectors.push(-4)
+        route.elements.push(false)
+        route.types.push(ntype(e))
+        route.sites.push(0)
+        return route
     fact_capture(e, s)
     FactRoute()
 
@@ -1459,7 +1469,13 @@ fact_written_root = (e0: int) -> PlaceIdentity:
     loop e != 0 and depth < 32:
         depth += 1
         k = nodes[e].kind
-        if k == .index and nodes[e].b != 0: indexed = true
+        if k == .index and nodes[e].b != 0 or fact_payload_node(e): indexed = true
+        # (a local place, `let q = @xs[i]` or `loop @x in xs`, and a narrowed
+        # name write the place they name)
+        else if k == .ident and nodes[e].aux == i32(int(SK.local)) and int(locals[int(nodes[e].sym)].flags) & LF_ALIAS != 0 and locals[int(nodes[e].sym)].alias != 0:
+            e = int(locals[int(nodes[e].sym)].alias)
+            indexed = true
+            continue
         else if k != .addr and k != .conv and not fact_field_node(e): break
         e = int(nodes[e].a)
     if not indexed or e == 0: return p
@@ -2275,6 +2291,9 @@ fact_pair_add = (left: int[], right: int[], index: mut int[], pair: int):
 
 fact_unknown = (n: int, b: FactBound, what: str = "assertion", contract: int = 0): wit_unknown(n, b, what, contract)
 
+# A narrowed name's payload, `.narrow`/`.unwrap` of a variable (fact_capture's -4).
+fact_payload_node = (e: int) -> bool: (nodes[e].kind == .narrow or nodes[e].kind == .unwrap) and nodes[e].a != 0
+
 fact_field_node = (e: int) -> bool:
     nodes[e].kind == .field and (nodes[e].aux >= 0 and tkind(ntype(int(nodes[e].a))) == .struct_ or nodes[e].aux == -2 and tkind(ntype(int(nodes[e].a))) == .tuple)
 
@@ -2293,7 +2312,7 @@ fact_change_route = (s: mut FactState, target: int, resize: bool, at: int, reaso
     depth = 0
     loop e != 0 and depth < 32:
         depth += 1
-        if fact_field_node(e) or nodes[e].kind == .index and nodes[e].b != 0:
+        if fact_field_node(e) or nodes[e].kind == .index and nodes[e].b != 0 or fact_payload_node(e):
             chain.push(e)
             e = int(nodes[e].a)
         # (an element alias, `loop @x in xs`, writes the place it names)
@@ -2323,9 +2342,10 @@ fact_change_route = (s: mut FactState, target: int, resize: bool, at: int, reaso
             length = fact_project(s, old, -1, false, T_INT)
             if length != 0 and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(fresh, -1, false, length))
             return
-        selector = if nodes[c].aux == -2: int(nodes[c].ival) else: int(nodes[c].name)
+        payload = fact_payload_node(c)
+        selector = if payload: -4 else if nodes[c].aux == -2: int(nodes[c].ival) else: int(nodes[c].name)
         # (a pool's public fields hold no membership: fact_pool_call)
-        if nodes[c].aux != -2 and fact_pool_type(ntype(int(nodes[c].a))) and not starts_with(name_of(selector), "__"): fact_pool_keep(s, old, fresh)
+        if not payload and nodes[c].aux != -2 and fact_pool_type(ntype(int(nodes[c].a))) and not starts_with(name_of(selector), "__"): fact_pool_keep(s, old, fresh)
         child = 0
         kept: FactProjection[]
         # (a dictionary's entries changing keep its keys and their positions)
@@ -5055,9 +5075,21 @@ fact_slice_target = (writers: mut FactSliceEdges, n: int, at: int):
     if nodes[n].kind == .tuple:
         loop c in kids(n): fact_slice_target(writers, c, at)
         return
+    fact_slice_writer(writers, fact_slice_root(n), at)
+
+# The variable a write target changes: through fields, elements, local
+# places (`let q = @r.xs`, `loop @x in xs`) and narrowed names (`if r is? T`),
+# which write the variable they name, or none. O(route depth).
+fact_slice_root = (n: int) -> PlaceIdentity:
     root = n
-    loop nodes[root].kind == .field or nodes[root].kind == .index: root = int(nodes[root].a)
-    fact_slice_writer(writers, fact_place(root), at)
+    depth = 0
+    loop root != 0 and depth < 64:
+        depth += 1
+        k = nodes[root].kind
+        if k == .field or k == .index or k == .addr or fact_payload_node(root): root = int(nodes[root].a)
+        else if k == .ident and nodes[root].aux == i32(int(SK.local)) and int(locals[int(nodes[root].sym)].flags) & LF_ALIAS != 0 and locals[int(nodes[root].sym)].alias != 0: root = int(locals[int(nodes[root].sym)].alias)
+        else: break
+    fact_place(root)
 
 # A contract reads its value and referenced actuals; proving it does not
 # demand the callee's return summary. Called only for written argument
@@ -5198,6 +5230,11 @@ fact_slice_prepare = (f: int, summary: bool = false):
             id = nodes[n].aux as IN
             if id == .push or id == .pop or id == .clear or id == .reserve or id == .insert or id == .remove or id == .extend or id == .truncate or id == .resize:
                 fact_slice_target(writers, kid(n, 0), n)
+                # (as an assignment's: a write to an exposed root, a global or an
+                # `@` parameter, may change every other exposed root)
+                p = fact_slice_root(kid(n, 0))
+                if p.declaration == 0: opaque_writes.push(n)
+                else if fact_exposed(p): exposed_writes.push(n)
                 # (removing needs an element, truncating a nonnegative count)
                 if not summary and fact_policy == .RequireStatic and (id == .pop or id == .remove or id == .truncate):
                     active.push(n)
