@@ -341,6 +341,9 @@ __alloc_slow = (size: int, zero: bool) -> *u8:
 __free = (p: *u8):
     if p == null: return
     h = (p - 16) as *int
+    when __ARENAS:
+        # Arena frees are logical only; no thread state or free list is touched.
+        if h[1] != 0 and h[1] != -1: return
     t = __ts()
     if t == __ts_foreign:
         __free_foreign(h)
@@ -863,6 +866,20 @@ __arr_grow = (slot: **u8, es: int, need: int):
     if p == null:
         cap = need
         if cap < 4: cap = 4
+        when __ARENAS:
+            c = __ts()[__TS_ARENA] as *int
+            if c != null:
+                # Growable arenas amortize the first few pushes; bounded
+                # arenas retain their existing capacity requirements.
+                if c[5] < 0 and cap < 8: cap = 8
+                size = __arr_bytes(cap, es)
+                q = __arena_alloc(c, size, false)
+                h = q as *int
+                h[0] = 1
+                h[1] = 0
+                h[2] = cap
+                slot[0] = q
+                return
         slot[0] = __arr_new_raw(cap, es)
         return
     h = p as *int

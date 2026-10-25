@@ -1,0 +1,37 @@
+# Reused arena bytes must be initialized for each element width; growth preserves
+# snapshots and promoted results. Resource cleanup still precedes arena reset.
+$runtime_checks
+Wide:type=[a:int64 b:int64 c:int64]
+let drops:int64=0
+Owner=type of [value:int64
+    $__drop__
+    release=():>void=>{drops+=1}
+]
+main=()=>{
+    let scratch=Arena[]
+    loop round in [0..12) {
+        let result=$allocator(@scratch) {
+            let bytes:array<uint8>=[]
+            let wide:array<Wide>=[]
+            let owners:array<Owner>=[]
+            loop i in [0..257) {
+                bytes.push((i%256) as uint8)
+                wide.push(Wide[i i+1 i+2])
+                owners.push(Owner[i])
+            }
+            let saved=bytes
+            bytes[0]=99 as uint8
+            $runtime_assert saved[0] =? 0
+            loop i in [0..257) {
+                $runtime_assert wide[i].c =? i+2
+                $runtime_assert saved[i] =? ((i%256) as uint8)
+            }
+            bytes
+        }
+        scratch.reset()
+        $runtime_assert result.length =? 257 and result[0] =? 99
+        $runtime_assert result[256] =? 0
+        $runtime_assert drops =? (round+1)*257
+    }
+    printl"ok"
+}

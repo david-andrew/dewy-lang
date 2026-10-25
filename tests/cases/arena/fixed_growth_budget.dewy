@@ -1,0 +1,20 @@
+# modes: native native-release
+# Four int64 slots plus array/allocation headers fit in exactly 80 bytes.
+# Reserving a growable arena's larger initial capacity here would wrongly refuse.
+$runtime_checks
+$explicit_allocation_failure
+fill=(@scratch:Arena):>int64=>{
+    $allocator(@scratch) {
+        let xs:array<int64>=[]
+        loop i in [0..4) {xs.push(i+1)}
+        xs[0]+xs[1]+xs[2]+xs[3]
+    }
+}
+main=()=>{
+    let scratch=arena(80) or_throw
+    loop round in [0..8) {
+        $runtime_assert (fill(@scratch) or_throw) =? 10
+        scratch.reset()
+    }
+    printl"ok"
+}
