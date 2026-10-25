@@ -107,7 +107,58 @@ dc_hint = (pos: int, msg: str) -> int: dc_parser_hint(dc_parser.status, pos, msg
 dc_unread = (at: int):
     if dc_parser.status.hint_pos != 0: fatal(dc_parser.status.hint_pos, dc_parser.status.hint_text)
     if dc_parser.status.report_pos != 0: fatal(dc_parser.status.report_pos, dc_parser.status.report_text)
+    dc_foreign_habit(at)
     fatal(mkpos(dc_parser.file, dc_parser.tokens[at].start), "Dewy does not read this form")
+
+# A statement no reading takes, written as another language declares or loops (dc_unread's
+# mistake): `type Op = ...`, `type Point struct { ... }`, `for _, x := range xs { ... }`.
+dc_foreign_habit = (at: int):
+    token = dc_parser.tokens[at]
+    if at > 0 and not token.newline and dc_parser.tokens[at - 1].kind == .identifier and dn_payload(dc_parser.tokens[at - 1]) == "for": fatal(mkpos(dc_parser.file, dc_parser.tokens[at - 1].start), "iterate values with `loop x in xs \{ ... }`, or key and value with `loop [key value] in m \{ ... }`")
+    name = dc_parser.tokens[at + 1]
+    if token.kind != .identifier or token.name != i32(dn_type_id) or name.kind != .identifier or name.newline: return
+    pos = mkpos(dc_parser.file, token.start)
+    written = dn_payload(name)
+    after = dc_parser.tokens[at + 2]
+    src = files[dc_parser.file].src
+    if after.symbol == .assign and not dc_parser.tokens[at + 3].newline and dc_parser.tokens[at + 3].kind != .eof:
+        k = at + 3
+        loop dc_parser.tokens[k + 1].kind != .eof and not dc_parser.tokens[k + 1].newline: k += 1
+        aliased = src[dc_parser.tokens[at + 3].start..dc_parser.tokens[k].stop)
+        fatal(pos, "a type alias binds a name with `:type =`: write `{written}:type = {aliased}`")
+    if after.kind != .identifier or dn_payload(after) != "struct": return
+    listing = dc_foreign_fields(at + 3)
+    if listing == "": fatal(pos, "a record type uses `:type =`: write `{written}:type = [field:type ...]`")
+    fatal(pos, "a record type uses `:type =`: write `{written}:type = [{listing}]`")
+
+# `{ x int; y int }` at `at`: the fields as Dewy writes them, `x:int64 y:int64`; "" for other forms.
+dc_foreign_fields = (at: int) -> str:
+    if dc_parser.tokens[at].symbol != .lbrace: return ""
+    out = ""
+    k = at + 1
+    loop dc_parser.tokens[k].symbol != .rbrace:
+        field = dc_parser.tokens[k]
+        if field.kind == .eof: return ""
+        kind = dc_parser.tokens[k + 1]
+        if field.kind != .identifier or kind.kind != .identifier or kind.newline: return ""
+        dewy = dc_foreign_type(dn_payload(kind))
+        if dewy == "": return ""
+        if out != "": out = out + " "
+        out = out + dn_payload(field) + ":" + dewy
+        k += 2
+        if dc_parser.tokens[k].symbol == .semi: k += 1
+    out
+
+# A builtin type another language spells w, as Dewy does ("" for others).
+dc_foreign_type = (w: str) -> str:
+    if w == "int" or w == "i64": return "int64"
+    if w == "uint" or w == "u64": return "uint64"
+    if w == "float" or w == "number" or w == "f64": return "float64"
+    if w == "bool" or w == "boolean": return "bool"
+    if w == "string" or w == "str": return "string"
+    if w == "byte": return "uint8"
+    if dc_integer_name(intern(w)) or w == "float32" or w == "float64": return w
+    dewy_type_word(w)
 dc_condition_depth = -1    # (the dc_parser.depth of an `if` condition: a `:` ends it, dc_colon_body)
 dc_head_depth = -1         # (the dc_parser.depth of a loop head's term: `f(x) in xs` is its binding, dw_loop_head)
 dc_range_top = false       # (the first entry of an index: it may end at a slice's `..`)
@@ -437,7 +488,7 @@ dc_build_member = (member: DewyLexeme, pos: int) -> bool:
 # (a value in their place); 0 for `type` and anywhere else.
 dc_outside_index = (name: int, pos: int) -> int:
     # (`type of x` as a value: dw_expr's mistake, should nothing else read it)
-    if name == dn_type_id and dn_peek() == .kw_of: return dc_hint(pos, "Dewy does not yet support prefix 'kw_of'")
+    if name == dn_type_id and dn_peek() == .kw_of: return dc_hint(pos, "`type of ...` forms a type, not a runtime value; bind it with `T:type = type of ...`")
     if dc_index_node != 0 or not dc_parser.flags.report_now or name == dn_type_id: return 0
     if name == dn_end_id: dc_report(pos, "`end` is the last index inside brackets, as in `xs[end]` or `xs[1..end]`; outside them, use `xs.length - 1`")
     else: dc_report(pos, "`new` inserts an axis as an entry inside brackets, as in `xs[new]` or `xs[.. new]`")
@@ -605,7 +656,7 @@ dc_tag_unread = (token: DewyLexeme, pos: int) -> int:
 # nothing else read it)
 dc_atom_unread = (token: DewyLexeme, pos: int) -> int:
     op = token.symbol
-    if (op == .kw_return or op == .kw_break or op == .kw_continue or op == .kw_let or op == .kw_const) and dn_power(dc_parser.tokens[dc_parser.at - 2].symbol) > 0: dc_hint(pos, "Dewy does not yet support syntax 'KeywordExpr'")
+    if (op == .kw_return or op == .kw_break or op == .kw_continue or op == .kw_let or op == .kw_const) and dc_parser.at >= 2 and dn_power(dc_parser.tokens[dc_parser.at - 2].symbol) > 0: dc_hint(pos, "expected a value after `{dn_payload(dc_parser.tokens[dc_parser.at - 2])}`; `{dn_payload(token)}` begins a statement")
     0
 
 # A parenthesized group after its `(`: one value, or several (`(a b)`, dw_values), through `)`.
@@ -630,6 +681,10 @@ dc_atom_mistake = (token: DewyLexeme) -> int:
         named = symbol == .assign or dc_parser.tokens[dc_parser.at - 2].stop == token.start and not (word in ["else", "loop", "if", "match"])
         if named and len(word) > 0 and word[0] >= 'a' and word[0] <= 'z': return dn_error(dc_parser.tokens[dc_parser.at - 2].start, "`{word}` is a keyword, so it cannot name a variable, parameter or field: choose another name")
     if after_colon and (symbol == .colon or symbol == .rbrack): return dn_error(token.start, "expected an expression, found '{text}' (a slice is a range in the brackets: `xs[1..]`, `xs[..n)`, `xs[a..b)`; `xs.reversed()` reverses; `:` gives a type)")
+    # (`x := 1`: a binding written as another language declares one)
+    if symbol == .assign and dc_parser.at >= 3 and dc_parser.tokens[dc_parser.at - 2].symbol == .colon and dc_parser.tokens[dc_parser.at - 2].stop == token.start and dc_parser.tokens[dc_parser.at - 3].kind == .identifier:
+        bound = dn_payload(dc_parser.tokens[dc_parser.at - 3])
+        dn_error(dc_parser.tokens[dc_parser.at - 3].start, "a new local binding uses `let {bound} = value`; an existing binding uses `{bound} = value`")
     habit = dn_operator_habit(dc_parser.tokens, dc_parser.at, text)
     dn_error(token.start, "expected an expression, found '{text}'{habit}")
 
@@ -785,7 +840,9 @@ dc_array_literal = (pos: int) -> int:
             nodes[pair].b = i32(value)
             item = pair
         # (`["a" -> 1 2]`: dw_expr's mistake, should nothing else read it)
-        else if nodes[n].kind == .map_lit: return dc_hint(mkpos(dc_parser.file, item_start), "Dewy does not yet support a dictionary item without ->")
+        else if nodes[n].kind == .map_lit:
+            extra = files[dc_parser.file].src[item_start..dc_parser.tokens[dc_parser.at - 1].stop)
+            return dc_hint(mkpos(dc_parser.file, item_start), "each dictionary item needs one `key -> value` pair; remove the extra `{extra}` or give it a key")
         if not has_flag(item, NF_SPREAD): positional = true
         # (an attached `;` discards the element: a collector, dw_collects; a pure value's is
         # warned of)
@@ -1398,7 +1455,11 @@ dc_expr = (minimum: int) -> int:
         if op == .comma and dc_index_node == 0 and dc_member_depth != dc_parser.depth and minimum <= dn_power(.range):
             dc_parser.at += 1
             step = dc_expr(power + 1)
-            if step == 0 or dn_peek() != .range: return 0
+            if step == 0 or dn_peek() != .range:
+                # (`[1, 2, 3]`: commas after the first element, not a stepped range's starts;
+                # dw_comma_fail's mistake, should nothing else read it)
+                if step != 0 and first_at > 0 and dc_parser.tokens[first_at - 1].symbol == .lbrack and not dc_range_follows(dc_parser.at): dc_hint(pos, dc_comma_text())
+                return 0
             op = DewyToken.range
             power = dn_power(op)
         if op == .range:
@@ -2282,10 +2343,13 @@ dc_arguments = (n: int, close: DewyToken, first: int = 0) -> bool:
     if first != 0: args.push(first)
     # (`f(xs...)`: a call's spread argument, dw_spread_item)
     saved_spread = dc_spread_depth
+    opener = dc_parser.at - 1
     loop not dn_accept(close):
         token = dc_parser.tokens[dc_parser.at]
         if token.kind == .eof:
             dc_spread_depth = saved_spread
+            # (`f(1` and nothing after: dn_bracketed_from's mistake, should nothing else read it)
+            dc_hint(mkpos(dc_parser.file, dc_parser.tokens[opener].start), "expected '{dn_token_text(close)}' before end of file")
             return false
         if dc_named_next():
             dc_parser.at += 2
@@ -2311,6 +2375,20 @@ dc_arguments = (n: int, close: DewyToken, first: int = 0) -> bool:
     true
 
 dc_comma_mistake = (pos: int): dc_report(pos, dc_comma_text())
+
+# A `..` follows at `at`'s depth before its group closes: `[0,1,2..5]` is a range of too many starts.
+dc_range_follows = (at: int) -> bool:
+    depth = 0
+    k = at
+    loop dc_parser.tokens[k].kind != .eof:
+        t = dc_parser.tokens[k].symbol
+        if depth == 0 and t == .range: return true
+        if t == .lparen or t == .lbrack or t == .lbrace: depth += 1
+        if t == .rparen or t == .rbrack or t == .rbrace:
+            if depth == 0: return false
+            depth -= 1
+        k += 1
+    false
 
 dc_comma_text = () -> str: "Dewy separates arguments, parameters and elements with spaces, not commas: `add(1 2)`, `(a:int64 b:int64) => ...`, `[1 2 3]` (a comma steps a range, as in `[0,2..10]`)"
 
@@ -2859,7 +2937,7 @@ dc_parameter_type = false
 
 # A word no type is spelled with (dw_type's mistake, should nothing else read it).
 dc_unspelled = (token: DewyLexeme) -> int:
-    if dn_payload(token) == "uint": dc_hint(mkpos(dc_parser.file, token.start), "Dewy does not yet support unbounded uint is not yet supported; use an explicit fixed width")
+    if dn_payload(token) == "uint": dc_hint(mkpos(dc_parser.file, token.start), "unbounded `uint` is unsupported; choose a fixed width such as `uint64`")
     0
 
 dc_type_named = () -> int:
@@ -2965,7 +3043,12 @@ dc_type_arguments = (n0: int, word: int, opened: bool = false) -> int:
                     dc_parser.flags.comma_stop = saved_comma
                     if length == 0: return 0
                     # (`array<int64 length=2 length=3>`: dw_type's mistake, should nothing else read it)
-                    if not dc_closes() and dn_can_start(dc_parser.tokens, dc_parser.at): return dc_hint(pos, "Dewy does not yet support array type constraints; use array<T> or array<T length=N>")
+                    if not dc_closes() and dn_can_start(dc_parser.tokens, dc_parser.at):
+                        again = dc_parser.tokens[dc_parser.at]
+                        if again.kind == .identifier and again.symbol == .none and dc_word(int(again.name)) == DC_LENGTH and dc_parser.tokens[dc_parser.at + 1].symbol == .assign:
+                            once = files[dc_parser.file].src[pos_off(pos)..dc_parser.tokens[dc_parser.at - 1].stop)
+                            return dc_hint(pos, "array length may be specified once: use `{once}>`")
+                        return dc_hint(pos, "Dewy does not yet support array type constraints; use array<T> or array<T length=N>")
                     if not dc_closes(): return 0
                     continue
                 # (`array<int64 length=2 length=3>`: dw_type's mistake, should nothing else read it)
@@ -3266,8 +3349,12 @@ dc_membership = (n: int, top: bool = true) -> bool:
 # `'wrap'` 1, `'saturate'` 2, as an overflow policy is written (anything else 0)
 dc_policy_mistake = (policy: int) -> int:
     at = mkpos(dc_parser.file, dc_parser.tokens[dc_parser.at - 2].start)
-    if policy == 0: return dc_hint(at, "Dewy does not yet support overflow='wrap' or overflow='saturate'")
-    dc_hint(at, "Dewy does not yet support duplicate overflow policy")
+    if policy == 0:
+        token = dc_parser.tokens[dc_parser.at]
+        if token.kind != .quoted: return dc_hint(at, "an overflow policy is a quoted name: use 'wrap' or 'saturate'")
+        written = files[dc_parser.file].src[token.start..token.stop)
+        return dc_hint(at, "unknown overflow policy {written}; use 'wrap' or 'saturate'")
+    dc_hint(at, "an integer type takes one overflow policy; remove the second `overflow=...`")
 
 dc_policy = (token: DewyLexeme) -> int:
     if token.kind != .quoted: return 0
@@ -3291,12 +3378,65 @@ dc_policy_only = () -> bool:
 # the type the rest extends), should nothing else read it.
 dc_unnamed = (n: int) -> int:
     typed = int(nodes[n].a)
-    if typed != 0 and dn_power(dn_peek()) > 0: return dc_hint(nodes[typed].pos, "Dewy does not yet support this type expression")
-    dc_hint(nodes[n].pos, "Dewy does not yet support this declaration")
+    name = dc_token_from(pos_off(nodes[n].pos))
+    if name <= 0:
+        if typed != 0 and dn_power(dn_peek()) > 0: return dc_hint(nodes[typed].pos, "Dewy does not yet support this type expression")
+        return dc_hint(nodes[n].pos, "Dewy does not yet support this declaration")
+    src = files[dc_parser.file].src
+    keyword = dn_payload(dc_parser.tokens[name - 1])
+    written = dn_payload(dc_parser.tokens[name])
+    if typed != 0 and dn_power(dn_peek()) > 0:
+        annotation = src[pos_off(nodes[typed].pos)..dc_parser.tokens[dc_parser.at - 1].stop)
+        return dc_hint(nodes[typed].pos, "a type annotation ends before `=`: write `{keyword} {written}:{annotation} = expression`")
+    dc_hint(nodes[n].pos, "a variable binding needs a value: write `{keyword} {written} = expression`")
+
+# The token written at offset off, at or before dc_parser.at (-1 for none).
+dc_token_from = (off: int) -> int:
+    k = dc_parser.at
+    loop k >= 0 and dc_parser.tokens[k].start > off: k -= 1
+    if k < 0 or dc_parser.tokens[k].start != off: return -1
+    k
+
+# `let (a) = (1)`: one name in parentheses, `)` at close (dw_declare's mistake, should nothing else
+# read it), written again without them when the value ends its line.
+dc_grouped_binder = (close: int) -> int:
+    opening = dc_open_paren(close)
+    pos = mkpos(dc_parser.file, dc_parser.tokens[opening].start)
+    src = files[dc_parser.file].src
+    keyword = dn_payload(dc_parser.tokens[opening - 1])
+    written = src[dc_parser.tokens[opening + 1].start..dc_parser.tokens[close - 1].stop)
+    first = close + 2
+    if dc_parser.tokens[close + 1].symbol != .assign or dc_parser.tokens[first].newline or dc_parser.tokens[first].kind == .eof: return dc_hint(pos, "a parenthesized name is not a binding pattern: write `{keyword} {written} = value`")
+    last = first
+    loop dc_parser.tokens[last + 1].kind != .eof and not dc_parser.tokens[last + 1].newline and dc_parser.tokens[last + 1].symbol != .rbrace: last += 1
+    # (a value wholly in parentheses, `(1)`, is written without them)
+    if dc_parser.tokens[first].symbol == .lparen and dc_parser.tokens[last].symbol == .rparen and dc_closing(first) == last and last > first + 1:
+        first += 1
+        last -= 1
+    value = src[dc_parser.tokens[first].start..dc_parser.tokens[last].stop)
+    dc_hint(pos, "a parenthesized name is not a binding pattern: write `{keyword} {written} = {value}`")
+
+# The `(` the `)` at `at` closes.
+dc_open_paren = (at: int) -> int:
+    depth = 0
+    k = at
+    loop k > 0:
+        if dc_parser.tokens[k].symbol == .rparen: depth += 1
+        if dc_parser.tokens[k].symbol == .lparen:
+            depth -= 1
+            if depth == 0: return k
+        k -= 1
+    k
 
 # A declaration's type read no way (dw_type's mistake, should nothing else read it).
 dc_untyped = (at: int) -> int:
     token = dc_parser.tokens[at]
+    # (`let value:int64 + 1`: the rest extends a type that is one name)
+    after = dc_parser.tokens[at + 1].symbol
+    keyword = DewyToken.none
+    if at >= 3: keyword = dc_parser.tokens[at - 3].symbol
+    if (keyword == .kw_let or keyword == .kw_const) and token.kind == .identifier and dc_parser.tokens[at - 1].symbol == .colon and dn_power(after) > 0 and after != .assign and after != .pipe and after != .amp and after != .langle and after != .question and after != .coalesce:
+        return dc_hint(mkpos(dc_parser.file, token.start), "a type annotation ends before `=`: write `{dn_payload(dc_parser.tokens[at - 3])} {dn_payload(dc_parser.tokens[at - 2])}:{dn_payload(token)} = expression`")
     # (`let value:return=1`: a keyword then `=`, dn_atom's mistake)
     if token.symbol != .none and token.kind == .identifier and dc_parser.tokens[at + 1].symbol == .assign: return dc_hint(mkpos(dc_parser.file, token.start), dc_keyword_text(token.symbol))
     dc_hint(mkpos(dc_parser.file, token.start), "Dewy does not yet support this type expression")
@@ -3312,7 +3452,7 @@ dc_declaration = (constant: bool, bare: bool = false) -> int:
         if token.symbol == .lparen: close = .rparen
         binders = dc_binding_items(seen, close)
         if binders.len() == 0: return 0
-        if close == .rparen and binders.len() < 2: return dc_hint(nodes[n].pos, "Dewy does not yet support this declaration")
+        if close == .rparen and binders.len() < 2: return dc_grouped_binder(dc_parser.at - 1)
         set_list(n, binders)
         if dn_accept(.colon):
             annotation = dc_annotation()
@@ -3927,7 +4067,7 @@ dc_head_term = () -> int:
         condition = dc_expr(71)
         dc_head_depth = saved_head
         # (`loop 1 in xs`: no name binds, dw_loop_head's mistake should nothing else read it)
-        if condition == 0 and dn_peek() == .kw_in: return dc_hint(nodes[head].pos, "Dewy does not yet support this loop binding")
+        if condition == 0 and dn_peek() == .kw_in: return dc_hint(nodes[head].pos, "a loop binding needs a name or pattern: write `loop x in items \{ ... }`")
         if condition == 0: return 0
         # (`x in? xs`: a membership, a condition; `f(x) in xs` is no expression dc_expr reads)
         nodes[head].op = 4
@@ -4173,9 +4313,13 @@ dc_flow = () -> int:
     else:
         saved_condition = dc_condition_depth
         dc_condition_depth = dc_parser.depth + 1
+        condition_at = dc_parser.at
         condition = dc_expr(0)
         dc_condition_depth = saved_condition
-        if condition == 0: return 0
+        if condition == 0:
+            # (`if x = 2`: the condition's value ends at `=`)
+            if dn_peek() == .assign and dc_parser.at > condition_at: return dc_condition_assign(condition_at)
+            return 0
         if dn_peek() == .colon: return dc_colon_body(token)
         nodes[n].a = i32(condition)
         # (`if $target.os =? "windows" a else b`: one arm is compiled, dw_flow's dw_target_condition)
@@ -4246,6 +4390,14 @@ dc_flow = () -> int:
     dc_parser.depth -= 1
     n
 
+# `[parallel @x in xs x]`: a place as a comprehension's binding (dw_parallel's mistake, should nothing
+# else read it).
+dc_parallel_place = (binder: DewyLexeme) -> int:
+    source = dc_parser.tokens[dc_parser.at + 2]
+    iterable = "..."
+    if source.kind == .identifier and source.symbol == .none: iterable = dn_payload(source)
+    dc_hint(mkpos(dc_parser.file, binder.start), "parallel comprehension bindings are values: write `parallel {dn_payload(binder)} in {iterable} ...`")
+
 # `parallel x in xs body`, `parallel @x in xs body` after its keyword; `collect`, a comprehension's
 # (`[parallel x in xs f(x)]`): the region dw_parallel makes. A form it reports is left unread
 # (dc_unread).
@@ -4257,7 +4409,7 @@ dc_parallel = (token: DewyLexeme, collect: bool) -> int:
     if not mutable and dc_parser.tokens[dc_parser.at + 1].symbol != .kw_in and binder.symbol != .lparen and dc_parser.flags.report_now: return dc_fail_now(mkpos(dc_parser.file, binder.start), "Dewy does not yet support a parallel loop without one bounded iterable")
     if binder.kind != .identifier or binder.symbol != .none or dc_parser.tokens[dc_parser.at + 1].symbol != .kw_in: return 0
     # (`[parallel @x in xs x]`: dw_parallel's mistake, should nothing else read it)
-    if collect and mutable and not dn_reserved(int(binder.name)): return dc_hint(mkpos(dc_parser.file, binder.start), "Dewy does not yet support a mutable parallel comprehension binding")
+    if collect and mutable and not dn_reserved(int(binder.name)): return dc_parallel_place(binder)
     if collect and mutable: return 0
     if dn_reserved(int(binder.name)): dc_reserved_at(binder)
     dc_parser.at += 2
@@ -4371,7 +4523,7 @@ dc_row_outside = (flow: int) -> int:
     last = dc_tail_value(flow)
     if last == 0: return 0
     if nodes[last].kind == .namedarg: return dc_hint(nodes[last].pos, metatag_fail_text("field"))
-    if nodes[last].kind == .pair: return dc_hint(nodes[last].pos, "Dewy does not yet support operator '->'")
+    if nodes[last].kind == .pair: return dc_hint(nodes[last].pos, "a dictionary comprehension emits one `key -> value` pair per iteration")
     0
 
 # (the value of a flow's last statement, through its loops and blocks; 0 for none)
@@ -4666,7 +4818,8 @@ dc_flow_ends = () -> bool:
 dc_arm = () -> int:
     first = dc_parser.tokens[dc_parser.at]
     pattern = dc_pattern()
-    if pattern == 0 or not dn_accept(.function): return 0
+    if pattern == 0: return 0
+    if not dn_accept(.function): return dc_arm_arrow(first)
     arm = mk(.arm, mkpos(dc_parser.file, first.start))
     set_list(arm, [pattern])
     body = dc_operand_body()
@@ -4679,6 +4832,32 @@ dc_arm = () -> int:
     if not dc_flow_ends(): return 0
     nodes[arm].b = i32(body)
     arm
+
+# `if x = 2 { ... }`: an assignment as the condition (dw_flow's mistake, should nothing else read it),
+# the condition as written again with `=?` when it ends on its line at a `{`.
+dc_condition_assign = (start: int) -> int:
+    pos = mkpos(dc_parser.file, dc_parser.tokens[start].start)
+    k = dc_parser.at + 1
+    loop dc_parser.tokens[k].kind != .eof and dc_parser.tokens[k].symbol != .lbrace and not dc_parser.tokens[k].newline: k += 1
+    if k == dc_parser.at + 1 or dc_parser.tokens[k].symbol != .lbrace or dc_parser.tokens[k].newline: return dc_hint(pos, "a condition compares with `=?`, not `=`")
+    src = files[dc_parser.file].src
+    left = src[dc_parser.tokens[start].start..dc_parser.tokens[dc_parser.at - 1].stop)
+    right = src[dc_parser.tokens[dc_parser.at + 1].start..dc_parser.tokens[k - 1].stop)
+    dc_hint(pos, "a condition compares with `=?`: write `if {left} =? {right} \{ ... }`")
+
+# `<1> -> 2`, `<1> 2`: a pattern without its `=>` (dw_arm_fail's mistake, should nothing else read
+# it), the arm as written again when its body is one token.
+dc_arm_arrow = (first: DewyLexeme) -> int:
+    pos = mkpos(dc_parser.file, first.start)
+    if dn_peek() == .arrow: return dc_hint(pos, "a match arm uses `=>`: replace `->` with `=>`")
+    if not dn_can_start(dc_parser.tokens, dc_parser.at): return 0
+    src = files[dc_parser.file].src
+    body = dc_parser.tokens[dc_parser.at]
+    after = dc_parser.tokens[dc_parser.at + 1]
+    if body.newline or not (after.symbol == .rbrace or after.newline or after.kind == .eof): return dc_hint(pos, "a match arm needs `=>` after its pattern")
+    pattern = src[first.start..dc_parser.tokens[dc_parser.at - 1].stop)
+    value = src[body.start..body.stop)
+    dc_hint(pos, "a match arm needs `=>`: write `{pattern} => {value}`")
 
 # The right operand of `=>` as a block (dw_block): braced, or one statement.
 dc_operand_body = () -> int:
