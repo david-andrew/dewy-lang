@@ -8,6 +8,7 @@
 # needs, and is faster anyway.
 
 use 'exact_loop.jo'
+use 'loop_ordered.jo'
 use 'util.jo'
 use 'ir.jo'
 use 'opt.jo'
@@ -347,8 +348,8 @@ lx_copy = (code: Ins[], s: int, e: int, checks: LCheck[], ren: int[], out: mut I
 # arithmetic of + - * / min max and negation on floats or + - and or xor on integers, with values from
 # outside the loop used in every lane, runs 8 (or 4) elements at a time with AVX2 where the
 # processor has it, else 4 (or 2) with SSE2, then the rest one at a time. Each element gets
-# exactly the operations it got before (no reordering across elements: float sums over the loop
-# are left alone), so the results are the same everywhere. An integer sum over the loop (and
+# exactly the operations it got before. Float sums fold the computed lanes in source order;
+# other carried float dependencies stay scalar. An integer sum over the loop (and
 # `and`, `or`, `xor`), which comes out the same in any order, is kept in a vector of partial
 # sums, added together after.
 lx_vec_on = true            # (off for wasm)
@@ -364,6 +365,7 @@ struct VPlan:
     stores: bool[]
     indexes: int[]          # counter, or a checked counter + invariant offset
     index_defs: int[]       # intermediate affine calculations omitted from vector bodies
+    strides: int[] = []     # 0 contiguous; otherwise read-only f64 record stride
 
 # where each vreg first and last appears (defined or used), worked out on first need:
 # most loops fail their plan on an instruction kind before asking
@@ -438,7 +440,7 @@ lx_vec_index = (code: Ins[], L: CLoop, checks: LCheck[], p: int, depth: int = 0)
 # the instructions a vector plan can take (outside the checks it drops)
 lx_vec_op = (op: Op) -> bool:
     match op:
-        block, end, nop, iconst, fconst, load, store, sext32, zext32, fneg: true
+        block, end, nop, iconst, fconst, load, store, sext32, zext32, fneg, fsqrt, shl: true
         add, sub, mul, and_, or_, xor, fadd, fsub, fmul, fdiv, fmin, fmax: true
         gts, lts, ges, les, select: true
         _: false
@@ -484,6 +486,9 @@ lx_vec_plan = (code: Ins[], L: CLoop, checks: LCheck[]) -> VPlan:
         if minmax != 0:
             ins.a = ins.b
             ins.b = ins.c
+        if op == .shl and lx_record_index(code, L, p):
+            indexes.push(d)
+            continue
         if affine and (op == .add or op == .sub) and lx_vec_index(code, L, checks, p):
             indexes.push(d)
             continue
@@ -500,7 +505,9 @@ lx_vec_plan = (code: Ins[], L: CLoop, checks: LCheck[]) -> VPlan:
             ix = mem_index(ins)
             sc = 3
             if size == 4: sc = 2
-            if (ix != L.ctr and not indexes.contains(ix)) or mem_scale(ins) != sc: return no
+            stride = lx_record_stride(code, L, ins)
+            if stride == 0 and ((ix != L.ctr and not indexes.contains(ix)) or mem_scale(ins) != sc): return no
+            if stride != 0 and (op != .load or c & M_FLOAT == 0 or size != 8): return no
             base = int(ins.a)
             if lx_defined_in(code, base, L.pl + 1, L.pe): return no
             if plan.es == 0: plan.es = size
@@ -509,7 +516,8 @@ lx_vec_plan = (code: Ins[], L: CLoop, checks: LCheck[]) -> VPlan:
             plan.bases.push(base)
             plan.offs.push(ins.imm)
             plan.stores.push(op == .store)
-            plan.indexes.push(ix)
+            plan.indexes.push(if stride != 0: L.ctr else: ix)
+            plan.strides.push(stride)
             if op == .load:
                 if not lx_within(code, d, L): return no
                 kinds[d] = k
@@ -526,7 +534,7 @@ lx_vec_plan = (code: Ins[], L: CLoop, checks: LCheck[]) -> VPlan:
                     kinds[d] = 2
                     continue
             return no
-        if op == .fneg:
+        if op == .fneg or op == .fsqrt:
             if not lx_within(code, d, L): return no
             fk = if int(ins.ty) == VS: 0 else: 1
             if let uk = kinds.get(int(ins.a)):
@@ -534,6 +542,14 @@ lx_vec_plan = (code: Ins[], L: CLoop, checks: LCheck[]) -> VPlan:
                     kinds[d] = fk
                     continue
             return no
+        # Float folds consume vector lanes in the original iteration order.
+        # The accumulator must have no other use/definition in the loop.
+        if op == .fadd and ins.ty == VF and (ins.a == ins.dst or ins.b == ins.dst) and ins.a != ins.b:
+            x = if ins.a == ins.dst: int(ins.b) else: int(ins.a)
+            if (kinds.get(x) ?? -1) != 1 or lx_appears(code, d, L.pl, L.pe) != 1: return no
+            lx_reds.push(d)
+            lx_red_ops.push(op)
+            continue
         # (s = s + x: an integer sum over the loop, s used nowhere else in it)
         if (op == .add or op == .xor or op == .or_ or op == .and_) and int(ins.ty) == VI and (int(ins.a) == d or int(ins.b) == d) and int(ins.a) != int(ins.b):
             x = int(ins.b)
@@ -573,6 +589,10 @@ lx_vec_plan = (code: Ins[], L: CLoop, checks: LCheck[]) -> VPlan:
             plan.avx_only = true
         kinds[d] = k
     if plan.es == 0: return no
+    # Strided reads cannot overlap an earlier vector lane's write. Keep all
+    # write loops on the existing contiguous/overlap-guarded path.
+    loop stride in plan.strides:
+        if stride != 0 and plan.stores.contains(true): return no
     # stores and the accesses at the same base: the same element (an update in place), or none
     loop i in 0.. and bi in plan.bases:
         loop j in 0.. and bj in plan.bases:
@@ -652,7 +672,9 @@ lx_vloop = (code: Ins[], L: CLoop, checks: LCheck[], plan: VPlan, bases: int[], 
         if op == .load:
             k = lx_kind_of_mode(int(ins.c))
             v = vreg(ty)
-            body.push(Ins(.vld, i32(ty), i32(v), i32(bases[memory_index]), i32(L.ctr), i32(k), ins.imm))
+            stride = plan.strides[memory_index]
+            index = if stride == 0: L.ctr else: lx_bin(body, .mul, L.ctr, k_vreg(stride))
+            body.push(Ins(.vld, i32(ty), i32(v), i32(bases[memory_index]), i32(index), i32(k | (stride << 8)), ins.imm))
             memory_index += 1
             vmap[d] = v
             kind[d] = k
@@ -668,6 +690,14 @@ lx_vloop = (code: Ins[], L: CLoop, checks: LCheck[], plan: VPlan, bases: int[], 
             vmap[d] = vmap[int(ins.a)]
             kind[d] = 2
             continue
+        if op == .fsqrt:
+            k = if int(ins.ty) == VS: 0 else: 1
+            xa = lx_splat(pre, vmap, int(ins.a), k, ty)
+            v = vreg(ty)
+            body.push(Ins(.vbin, i32(ty), i32(v), i32(xa), i32(xa), 9, k))
+            vmap[d] = v
+            kind[d] = k
+            continue
         if op == .fneg:
             k = if int(ins.ty) == VS: 0 else: 1
             xa = lx_splat(pre, vmap, int(ins.a), k, ty)
@@ -682,6 +712,10 @@ lx_vloop = (code: Ins[], L: CLoop, checks: LCheck[], plan: VPlan, bases: int[], 
             kind[d] = k
             continue
         ri = lx_reds.index_of(d)
+        if ri >= 0 and int(ins.ty) == VF:
+            x = if ins.a == ins.dst: int(ins.b) else: int(ins.a)
+            body.push(Ins(.vbin, VF, i32(d), i32(d), i32(vmap[x]), i32(if ins.a == ins.dst: 10 else: 11), 1))
+            continue
         if ri >= 0 and int(ins.ty) == VI:
             # (an integer sum: partial sums in a vector, which starts at the identity)
             if racc[ri] < 0:

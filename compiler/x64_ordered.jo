@@ -1,0 +1,94 @@
+# Native vector operations used by ordered floating-point reductions. Gather
+# reads exactly the scalar fields (including the last full vector at an edge).
+# Folds preserve addition order and operand order; no reassociation or FMA.
+use 'x64.jo'
+use 'ir.jo'
+use 'util.jo'
+
+x_emit_record_load = (ins: *Ins):
+    d = int(ins.dst)
+    if vloc[d] == LOC_NONE: return
+    ty = int(ins.ty)
+    stride = int(ins.c) >> 8
+    base, disp = addr_of(int(ins.a), RCX)
+    disp += ins.imm
+    base, disp = indexed_base(base, disp, ins.imm)
+    ix = reg_of(int(ins.b), RDX)
+    x = xdreg(d, 0)
+    use_index(ix, 0)
+    if ty == VY:
+        vex(x, 0, base, 1, 3, 0, 0); b(0x10); mem(x, base, disp)
+        vex(x, x, base, 1, 1, 0, 0); b(0x16); mem(x, base, disp + stride)
+        vex(15, 0, base, 1, 3, 0, 0); b(0x10); mem(15, base, disp + 2 * stride)
+        vex(15, 15, base, 1, 1, 0, 0); b(0x16); mem(15, base, disp + 3 * stride)
+        cur_index = -1
+        vex(x, x, 15, 3, 1, 0, 1); b(0x18); modrr(x, 15); b(1) # vinsertf128
+    else:
+        sse_rm(0xF2, 0x10, x, base, disp)
+        sse_rm(0x66, 0x16, x, base, disp + stride)
+        cur_index = -1
+    sts(d, x, ty)
+
+x_emit_vector_sqrt = (ins: *Ins):
+    d = int(ins.dst)
+    if vloc[d] == LOC_NONE: return
+    ty = int(ins.ty)
+    x = xdreg(d, 0)
+    a = xreg_of(int(ins.a), 1, ty)
+    if ty == VY:
+        vex(x, 0, a, 1, (if ins.imm == 1: 1 else: 0), 0, 1)
+        b(0x51); modrr(x, a)
+    else: sse_rr((if ins.imm == 1: 0x66 else: 0), 0x51, x, a)
+    sts(d, x, ty)
+
+# VEX scalar moves keep an AVX fold free of SSE transition penalties, including
+# spills. The scalar source is floating-point storage, never an integer vreg.
+x_ordered_scalar = (v: int):
+    l = vloc[v]
+    if l >= XMM:
+        vex(1, 0, l - XMM, 1, 0, 0, 0); b(0x28); modrr(1, l - XMM)
+    else if l == LOC_SPILL:
+        vex(1, 0, RBP, 1, 3, 0, 0); b(0x10); mem(1, RBP, vspill[v])
+    else if l == LOC_FCONST:
+        saved = rip_kind
+        rip_kind = 0
+        vex(1, 0, RIPREL, 1, 3, 0, 0); b(0x10); mem(1, RIPREL, ro_const(vcval[v]))
+        rip_kind = saved
+    else: ice("ordered fold scalar storage")
+
+x_ordered_add = (lane: int, reverse: bool, avx: bool):
+    if avx:
+        vex(1, (if reverse: lane else: 1), (if reverse: 1 else: lane), 1, 3, 0, 0)
+        b(0x58); modrr(1, if reverse: 1 else: lane)
+    else if reverse:
+        # xmm0 holds the selected lane; keep the source vector unchanged.
+        if lane != 0: vmov_rr(0, lane, VX)
+        sse_rr(0xF2, 0x58, 0, 1)
+        vmov_rr(1, 0, VX)
+    else: sse_rr(0xF2, 0x58, 1, lane)
+
+x_emit_ordered_fold = (ins: *Ins):
+    d = int(ins.dst)
+    if vloc[d] == LOC_NONE: return
+    vector = int(ins.b)
+    avx = vtype(vector) == VY
+    a = xreg_of(vector, 15, vtype(vector))
+    reverse = ins.c == 11
+    if avx: x_ordered_scalar(int(ins.a))
+    else: lds(1, int(ins.a), VF)
+    x_ordered_add(a, reverse, avx)
+    if avx:
+        vex(0, a, a, 1, 1, 0, 0); b(0x15); modrr(0, a) # lane 1
+    else: sse_rr(0, 0x12, 0, a) # movhlps: high source double becomes low
+    x_ordered_add(0, reverse, avx)
+    if avx:
+        vex(a, 0, 0, 3, 1, 0, 1); b(0x19); modrr(a, 0); b(1) # high 128 bits
+        x_ordered_add(0, reverse, true)
+        vex(0, 0, 0, 1, 1, 0, 0); b(0x15); modrr(0, 0)
+        x_ordered_add(0, reverse, true)
+        dest = vloc[d]
+        if dest >= XMM:
+            vex(dest - XMM, 0, 1, 1, 0, 0, 0); b(0x28); modrr(dest - XMM, 1)
+        else:
+            vex(1, 0, RBP, 1, 3, 0, 0); b(0x11); mem(1, RBP, vspill[d])
+    else: sts(d, 1, VF)

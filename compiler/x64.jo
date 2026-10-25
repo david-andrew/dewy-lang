@@ -10,6 +10,7 @@ use 'ast.jo'
 use 'elf.jo'
 use 'pe.jo'
 use 'fused.jo'
+use 'x64_ordered.jo'
 
 x_int_fail: int[]
 x_int_fail_fn = 0
@@ -3200,6 +3201,7 @@ x_emit_zero = (pos: int, ins: *Ins):
         b16(0xAAF3)          # rep stosb
 
 x_emit_vld = (pos: int, ins: *Ins):
+    if int(ins.c) >> 8 != 0: x_emit_record_load(ins); return
     d = int(ins.dst)
     a = int(ins.a)
     bb = int(ins.b)
@@ -3234,6 +3236,8 @@ x_emit_vst = (pos: int, ins: *Ins):
     cur_index = -1
 
 x_emit_vbin = (pos: int, ins: *Ins):
+    if ins.c == 9: x_emit_vector_sqrt(ins); return
+    if ins.c == 10 or ins.c == 11: x_emit_ordered_fold(ins); return
     d = int(ins.dst)
     a = int(ins.a)
     bb = int(ins.b)

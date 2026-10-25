@@ -1,0 +1,29 @@
+# Demand-only helpers for read-only record loops. The existing vector planner
+# bounds a body to 400 instructions; each candidate index checks only that body.
+# No new whole-program pass or persistent analysis state.
+use 'loops.jo'
+use 'ir.jo'
+
+# Record addressing is lowered as a shifted counter plus a field offset.
+# Only power-of-two strides 16..64, f64 fields, and memory-only index uses.
+lx_record_index = (code: Ins[], L: CLoop, p: int) -> bool:
+    ins = code[p]
+    if ins.op != .shl or ins.a != L.ctr or not is_kv(int(ins.b)): return false
+    shift = kv_of(int(ins.b))
+    if shift < 4 or shift > 6 or not lx_within(code, int(ins.dst), L): return false
+    if lx_def_at(code, int(ins.dst), L.pl + 1, L.pe) != p: return false
+    used = false
+    loop q in [L.pl + 1..L.pe):
+        if q == p: continue
+        access = code[q]
+        ir_operands(access)
+        if not ir_has_use(int(ins.dst)): continue
+        if q <= p or access.op != .load or mem_index(access) != int(ins.dst) or mem_scale(access) != 0 or access.ty != VF or access.a == ins.dst: return false
+        used = true
+    used
+
+lx_record_stride = (code: Ins[], L: CLoop, ins: Ins) -> int:
+    if ins.op != .load or ins.ty != VF or mem_scale(ins) != 0: return 0
+    at = lx_def_at(code, mem_index(ins), L.pl + 1, L.inc)
+    if at < 0 or not lx_record_index(code, L, at): return 0
+    1 << kv_of(int(code[at].b))

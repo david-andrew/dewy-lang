@@ -1157,6 +1157,28 @@ exact_affine_store = (n: int) -> int:
     scaled = e_bin(.mul, VI, value, e_iconst(scale))
     e_bin(.add, VI, scaled, e_iconst(offset))
 
+# At a signed-word store, (x +/- c) +/- y with matching signs can combine
+# bounded nonnegative offsets before checking x once. The source intermediate
+# stays exact: no early narrowing, and x/y still evaluate once in source order.
+# Demand-only, constant-size shape check; bounds reuse the indexed range cache.
+exact_offset_store = (n: int) -> int:
+    source = int(nodes[n].a)
+    if nodes[source].kind != .binary or nodes[source].aux != 0: return -1
+    op = nodes[source].op as Tok
+    if op != .plus and op != .minus: return -1
+    inner = int(nodes[source].a)
+    if not exact_has_node(inner) or nodes[inner].kind != .binary or nodes[inner].aux != 0 or nodes[inner].op != nodes[source].op: return -1
+    x = int(nodes[inner].a); y = int(nodes[source].b)
+    known, offset = integer_constant(int(nodes[inner].b))
+    if not known or offset < 0 or exact_bits(x) > 64: return -1
+    bound = positive_bound(y, true)
+    if bound < 0 or offset > FACT_MAX - bound: return -1
+    value = freeze_scalar(exact_low_word(x), ntype(x))
+    by = e_addi(exact_low_word(y), offset)
+    result = vreg(VI)
+    emit((if op == .plus: Op.checked_add else: Op.checked_sub), VI, result, value, by, 0, rt("__int_overflow"))
+    result
+
 exact_chain_store = (n: int) -> int:
     if target_wasm or target_arm64 or exact_chain_active: return -1
     source = int(nodes[n].a)
@@ -1266,6 +1288,9 @@ exact_gen_store = (n: int) -> Val:
             checked = if op == .plus: Op.checked_add else if op == .minus: Op.checked_sub else: Op.checked_mul
             emit(checked, VI, result, av, bv, 1, rt("__int_overflow"))
             return V(result, false)
+    if not proven and not target_wasm and not target_arm64 and types[t].bits == 64 and types[t].sign:
+        offset = exact_offset_store(n)
+        if offset >= 0: return V(offset, false)
     if not proven and types[t].bits == 64 and types[t].sign:
         affine = exact_affine_store(n)
         if affine >= 0: return V(affine, false)

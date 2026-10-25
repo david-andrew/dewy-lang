@@ -7028,6 +7028,13 @@ positive_bound_value = (n: int, use_locals: bool) -> int:
     if k == .int_lit:
         if has_flag(n, NF_U64) or nodes[n].ival < 0: return -1
         return nodes[n].ival
+    # Literal regions own their callback. Its immutable formal is bounded
+    # even while collecting the writes of the source-level parameter binding.
+    if not target_wasm and not target_arm64 and k == .ident and nodes[n].aux == i32(int(SK.local)):
+        l = int(nodes[n].sym)
+        if int(locals[l].flags) & (LF_ASSIGNED | LF_MUTPARAM | LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_EXPOSED | LF_SHARED) == 0 and cur_fn > 0 and fns[cur_fn].kind == FK_LAMBDA and fns[cur_fn].params.len() == 1 and fns[cur_fn].params[0] == l:
+            if let bound = fact_parallel_bounds.get(cur_fn):
+                if not bound.wide and bound.lo >= 0: return bound.hi
     if k == .ident and nodes[n].aux == i32(int(SK.local)) and use_locals:
         if let limit = math_word_limits.get(int(nodes[n].sym)): return limit
         loop i in [0..nonneg_locals.len()):

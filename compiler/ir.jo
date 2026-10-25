@@ -20,9 +20,10 @@ enum Op:
     brtable,          # a = index, b = count, c = args start (depths), imm = default depth; index >= count (unsigned) -> default
     # vectors (made by the loop vectorizer, x86-64 only); ty = VX or VY; lanes of one element
     # kind (Ins.c for memory, Ins.imm otherwise): 0 f32, 1 f64, 2 i32, 3 i64
-    vld,              # dst = [a + b * element size + imm]
+    vld,              # dst = [a + b * element size + imm]; c>>8: f64 gather stride, b then a byte offset
     vst,              # [a + dst * element size + imm] = b
-    vbin,             # dst = a op b, c = op: 0 add, 1 sub, 2 mul, 3 div, 4 min, 5 max, 6 and, 7 or, 8 xor
+    vbin,             # dst = a op b, c: 0 add, 1 sub, 2 mul, 3 div, 4 min, 5 max, 6 and, 7 or, 8 xor
+                      # 9 sqrt(a); 10/11 ordered f64 fold a+b lanes / b lanes+a (ty=VF)
     vsplat,           # dst = a (a scalar) in every lane
     vzu,              # leave 256-bit code (vzeroupper)
     mulhs             # dst = the high 64 bits of a * b, signed (division by a constant: x86-64 and arm64)
