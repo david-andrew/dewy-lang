@@ -5803,7 +5803,14 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
     if k == .assign:
         a = int(nodes[n].a)
         old = 0
-        if nodes[n].op != i32(int(Tok.assign)): old = fact_capture(a, s)
+        compound = nodes[n].op != i32(int(Tok.assign))
+        if compound:
+            # (the read keeps its selectors' values, tagged with this update,
+            # and the store's route reuses them: each selector runs once)
+            outer_call = fact_route_call
+            fact_route_call = n
+            old = fact_capture(a, s)
+            fact_route_call = outer_call
         r = fact_capture(int(nodes[n].b), s)
         if ownership_decls.len() != 0: r = fact_owner_value(int(nodes[n].b), r, s)
         op = nodes[n].op as Tok
@@ -5816,7 +5823,10 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             r = fact_arithmetic(s, a, arithmetic_op, old, r)
         else if op != .assign or nodes[n].aux != 0: r = fact_new(s, fact_domain(ntype(a), .write, n))
         # (a compound one's target was read above, with its obligations)
+        outer_reuse = fact_route_reuse
+        if compound: fact_route_reuse = n
         route = fact_route(a, s)
+        fact_route_reuse = outer_reuse
         fact_store_route(s, route, r, n, op == .assign)
         return r
     if k == .if_:
@@ -7288,8 +7298,21 @@ fact_owner_value = (n: int, value: int, s: mut FactState) -> int:
     if n == 0 or not ownership_fact_type(ntype(n)): return value
     k = nodes[n].kind
     if k != .ident and k != .field: return value
-    fact_forget(s, n, .call, true)
+    fact_forget_hooked(s, n)
     fact_new(s, fact_domain(ntype(n), .call, n), FactTerm(type = ntype(n)))
+
+# A hook reaches its own value and what other code can reach: globals and
+# locals exposed, lent, captured or aliased. Every other local keeps its facts;
+# the transferred value's own root does not. O(bindings).
+fact_forget_hooked = (s: mut FactState, n: int):
+    moved = fact_written_root(n)
+    loop i in [0..s.bindings.len()):
+        p = s.bindings[i].place
+        if p.root == .local and p.declaration > 0 and int(locals[p.declaration].flags) & FACT_LENT == 0 and not (moved.root == .local and moved.declaration == p.declaration): continue
+        t = if p.root == .local: int(locals[p.declaration].type) else: int(globals[p.declaration].type)
+        v = fact_new(s, fact_domain(t, .call, n), FactTerm(type = t))
+        fact_holds_contract(s, t, v)
+        s.bindings[i] = FactBinding(p, v, n, s.bindings[i].value)
 
 # Branches often change only intervals and guard rows. Their storage identities
 # need no phi pairs or projection matching, only the common relation facts.

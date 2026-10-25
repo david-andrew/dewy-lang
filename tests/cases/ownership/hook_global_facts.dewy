@@ -1,0 +1,14 @@
+# A drop hook can change a global: its earlier facts end at the drop.
+let count:int64=0
+Owner=type of [value:int64
+    $__drop__
+    release=():>void=>{count+=1}
+]
+main=()=>{
+    let xs=[10 20 30]
+    count=0
+    let m:dict<int64 Owner>=[]
+    m[0]=Owner[0]
+    m[0]=Owner[1]
+    printl(xs[count])
+}

@@ -1,0 +1,24 @@
+# A lifecycle hook reaches its own value and globals, not a function's
+# own locals: their facts survive owner transfers and drops.
+let drops:int64=0
+Owner=type of [value:int64
+    $__drop__
+    release=():>void=>{drops+=1}
+]
+main=()=>{
+    let xs=[10 20 30]
+    let k=2
+    let total=0
+    {
+        let m:dict<int64 Owner>=[]
+        loop i in [0..10) {
+            m[i]=Owner[i]
+            let o=Owner[i+100]
+            m[i+100]=o
+            m[i]=Owner[i+200]
+            total+=xs[k]
+        }
+        printl'{m.length} {drops}'
+    }
+    printl'{total} {drops}'
+}

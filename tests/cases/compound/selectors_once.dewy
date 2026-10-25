@@ -1,0 +1,41 @@
+# Each selector of a compound update's target runs once, left to right.
+$runtime_checks
+Item:type=[values:array<int64> count:int64]
+Box:type=[values:array<int64>]
+__index__=(box:Box i:int64):>int64=>box.values[i]
+__setindex__=(@box:Box i:int64 value:int64):>void=>{box.values[i]=value}
+let log:array<string>=[]
+pick=(tag:string i:int64):>int64=>{log.push(tag) return i}
+key=(tag:string k:string):>string=>{log.push(tag) return k}
+show=(what:string)=>{printl'{what} {log}' log.clear()}
+main=()=>{
+    let i = 0
+    let d = ["a" -> ["x" -> 1]]
+    d[{i += 1; "a"}]["x"] += 1
+    printl'{i} {d}'
+    let ys = [["x" -> 1] ["x" -> 2]]
+    ys[pick("row" 1)][key("col" "x")] *= 10
+    show'{ys}'
+    let m = ["a" -> [1 2 3]]
+    m[key("k" "a")][pick("i" 2)] -= 1
+    show'{m}'
+    let dd = ["p" -> ["q" -> ["r" -> 5]]]
+    dd[key("1" "p")][key("2" "q")][key("3" "r")] //= 2
+    show'{dd}'
+    let rs = [Item[[1 2] 0] Item[[3 4] 0]]
+    rs[pick("r" 1)].values[pick("v" 0)] += 100
+    rs[pick("r" 0)].count += 1
+    show'{rs}'
+    let boxes = [Box[[1 2]] Box[[3 4]]]
+    boxes[pick("b" 1)][pick("e" 0)] += 7
+    show'{boxes[1].values}'
+    let flags = ["on" -> [true false]]
+    flags[key("f" "on")][pick("n" 0)] and= false
+    show'{flags}'
+    let xs = [10 20 30]
+    xs[pick("x" 1) + pick("y" 1)] += 1
+    show'{xs}'
+    let grid = [[1 2] [3 4]]
+    grid[pick("g" 1)] .+= 10
+    show'{grid}'
+}

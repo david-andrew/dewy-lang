@@ -2221,7 +2221,8 @@ without adding entries or changing their order; arrays have `reserve` too.
 
 An in-place update such as `values[key] += 1`, `values[key].x = 5` or
 `values[key].push(v)` changes an existing entry; a missing key fails as
-`values[key]` does, and nothing is inserted. Count with
+`values[key]` does, and nothing is inserted. Each key and index of the target
+is evaluated once, from left to right: `d[next()]["x"] += 1` calls `next` once. Count with
 `if key in? counts counts[key] += 1 else counts[key] = 1`.
 
 `values.pop(key)` removes an entry and returns its value; a missing key fails
@@ -4191,7 +4192,8 @@ An unproven obligation's error names the missing relation (`i <? xs.length`,
   `d[k] += 1`, and group with `if k not in? d d[k] = []` followed by
   `d[k].push(x)`; nest the same steps for a dictionary of dictionaries
   (`if m not in? d[p] d[p][m] = 0` then `d[p][m] += 1`). Both branches establish that the key is present. The key is a
-  local or a literal: bind a field first (`let k = sale.region`). To rank a
+  local, a literal or a field of an unchanged binding (`d[sale.region]`); bind
+  other expressions first (`let k = name(sale)`). To rank a
   dictionary, collect its entries (`[loop [k v] in d [key=k total=v]]`) and sort
   those; an array of `d.keys` does not carry their membership.
 - Guard a pool handle (`if not pool.has(h) return`) or take the entry as a value

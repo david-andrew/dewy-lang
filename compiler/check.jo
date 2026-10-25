@@ -3984,6 +3984,65 @@ pool_direct_update = (s: int, ix: int, bt: int) -> bool:
             if tkind(pt) != .array: return false
     true
 
+# A selector that may run code or have effects (a block, a call, an operator
+# on records). A plain read (a name, a literal, a field, scalar arithmetic over
+# those) gives the same value at the read and the write: it is left in place so
+# facts keep following it. A syntactically plain selector is checked on a copy.
+compound_selector_runs = (n: int) -> bool:
+    k = nodes[n].kind
+    if k == .ident or k == .int_lit or k == .float_lit or k == .bool_lit: return false
+    if k == .str_lit and nkids(n) == 0: return false
+    if not compound_selector_plain(n, 0): return true
+    check_expr(clone(n), 0)
+    if nodes[last_checked].kind == .str_lit and nkids(last_checked) == 0: return false
+    not pool_update_read(last_checked)
+
+compound_selector_plain = (n: int, depth: int) -> bool:
+    if n == 0 or depth > 16: return false
+    k = nodes[n].kind
+    if k == .ident or k == .int_lit or k == .float_lit or k == .bool_lit: return true
+    if k == .str_lit: return nkids(n) == 0
+    if k == .field: return compound_selector_plain(int(nodes[n].a), depth + 1)
+    if k == .unary or k == .not_: return compound_selector_plain(int(nodes[n].a), depth + 1)
+    if k == .binary or k == .and_ or k == .or_ or k == .index:
+        return compound_selector_plain(int(nodes[n].a), depth + 1) and compound_selector_plain(int(nodes[n].b), depth + 1)
+    false
+
+# A compound update reads its target and writes it back. Each selector that
+# can run code is evaluated exactly once, from the root outward (left to
+# right), before both: `d[f()]["x"] += 1` calls f once. O(path).
+compound_selector_capture = (s: int) -> int:
+    if nodes[s].op == i32(int(Tok.assign)) or has_flag(s, NF_BROADCAST) or has_flag(s, NF_INDEX_CAPTURED): return 0
+    lhs = int(nodes[s].a)
+    if nodes[lhs].kind != .index and nodes[lhs].kind != .field: return 0
+    pos = nodes[s].pos
+    stmts: int[]
+    path = index_update_path(lhs)
+    i = path.len() - 1
+    loop i >= 0:
+        part = path[i]
+        i -= 1
+        if nodes[part].kind != .index or has_flag(part, NF_LIB_INDEX): continue
+        selectors = if nodes[part].b != 0: [int(nodes[part].b)] else: kids(part)
+        captured: int[]
+        loop selector in selectors:
+            if nodes[selector].kind == .range or nodes[selector].kind == .hole or not compound_selector_runs(selector):
+                captured.push(selector)
+                continue
+            name = "$selector{bc_count}"
+            bc_count += 1
+            stmts.push(bc_let(name, selector, pos))
+            captured.push(bc_ident(name, pos))
+        if nodes[part].b != 0: nodes[part].b = i32(captured[0])
+        else: set_list(part, captured)
+    if stmts.len() == 0: return 0
+    update = nodes.len()
+    nodes.push(nodes[s])
+    stmts.push(update)
+    blk = bc_block(stmts, pos)
+    check_stmt(blk)
+    blk
+
 elem_field_assign = (s: int) -> int:
     if has_flag(s, NF_INDEX_CAPTURED): return 0
     lhs = int(nodes[s].a)
@@ -4328,6 +4387,10 @@ __check_assign = (s: int) -> int:
         return s
     if nodes[lhs].kind == .field or (nodes[lhs].kind == .index and (op != int(Tok.assign) or nodes[int(nodes[lhs].a)].kind == .index or nodes[int(nodes[lhs].a)].kind == .field)):
         r = elem_field_assign(s)
+        if r != 0: return r
+        # (after a custom index's read/edit/writeback, which captures its own
+        # receiver selectors before its getter runs)
+        r = compound_selector_capture(s)
         if r != 0: return r
     if nodes[lhs].kind == .index:
         bt = prune(check_expr(int(nodes[lhs].a), 0))
