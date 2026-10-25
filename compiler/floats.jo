@@ -323,9 +323,10 @@ ff_mode_at = (p: int) -> int:
     m
 
 ff_top = () -> FR:
-    # (finite under `$no_inf`, and a NaN unless `$no_nan` holds too)
+    # (finite under `$no_inf`, and a NaN unless `$no_nan` holds too: a caller outside the scope
+    # proves nothing it cannot follow)
     if ff_assume & FF_INF != 0: return FR(-FF_MAX, FF_MAX, ff_assume & FF_NAN == 0)
-    FR(-INF, INF)
+    FR(-INF, INF, ff_assume & FF_NAN == 0)
 
 # a value entering the scope: it may be NaN
 ff_enter = () -> FR:
@@ -362,6 +363,13 @@ ff_get = (n: int) -> FR:
     # written through a reference or by a closure: what it holds may come from outside)
     if n > 0 and nodes[n].kind == .ident and ff_float(n) and (nodes[n].aux == i32(int(SK.global)) or nodes[n].aux == i32(int(SK.local))): return ff_enter()
     ff_top()
+
+# (a float, or an optional one: its value, once present, is followed the same way)
+ff_float_or_opt = (t0: int) -> bool:
+    if t0 <= 0: return false
+    t = prune(t0)
+    if is_float(t): return true
+    types[t].kind == .opt and int(types[t].elem) > 0 and is_float(prune(int(types[t].elem)))
 
 ff_float = (n: int) -> bool:
     t = ntype(n)
@@ -571,7 +579,7 @@ ff_eval_node = (n: int) -> FR:
                 if args[i].nan and ff_float(c):
                     ff_obligation(c, FF_ENTER, "{ff_shown(c)} is not NaN", "`{name_of(int(nodes[decl].name))}` takes it under `$no_nan`")
                     args[i] = ff_use_done(c, args[i])
-        if t <= 0 or not is_float(t): return ff_top()
+        if not ff_float_or_opt(t): return ff_top()
         if decl > 0 and pos_in_lib(nodes[decl].pos):
             name = name_of(int(nodes[decl].name))
             if name in ["log", "log2", "log10", "exp", "sin", "cos", "tan", "asin", "acos", "pow", "tanh"]:
@@ -579,7 +587,7 @@ ff_eval_node = (n: int) -> FR:
             return ff_math(n, name, args)
         if decl > 0 and ff_scope_decl(decl) == 1: return ff_top()
         return ff_enter()
-    if k == .call and t > 0 and is_float(t):
+    if k == .call and ff_float_or_opt(t):
         # (a function value, a closure: its result enters)
         ff_children(n)
         return ff_enter()
@@ -637,6 +645,13 @@ ff_eval_node = (n: int) -> FR:
     if mask < 0 or k == .lambda:
         ff_env = {}
         return ff_top()
+    if k == .coalesce and ff_float_or_opt(t):
+        # (`x ?? y`: either one, as a parsed `to_float(s) ?? 0.0` may be NaN)
+        ff_forget_assigned(n)
+        a = ff_eval(int(nodes[n].a))
+        b = ff_eval(int(nodes[n].b))
+        ff_forget_assigned(n)
+        return ff_hull(a, b)
     if k == .and_ or k == .or_ or k == .coalesce or k == .match_ or k == .iflet or k == .arm:
         # (evaluated on some paths only: what they assign is unknown after them)
         ff_forget_assigned(n)
@@ -813,7 +828,7 @@ ff_conv = (n: int) -> FR:
         if ntype(a) == T_MATH_INT:
             m = ff_mode_at(nodes[n].pos)
             if m & FF_INF != 0: ff_obligation(n, FF_INF, "the `int` fits a float")
-            return ff_top()
+            return FR(-INF, INF)
         # (a narrow or refined integer converts within its bounds: a
         # `count:int64<(>? 0)>` divides without making a NaN)
         st = refine_storage(a, ntype(a))

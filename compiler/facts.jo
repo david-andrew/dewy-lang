@@ -5746,6 +5746,8 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                 fact_add_projection(s, FactProjection(value, -1, false, count))
                 fact_add_projection(s, FactProjection(fact_byte_view(s, value), -1, false, count))
             return value
+        # (another is one value too, so guards on its byte view reach `byte_slice`)
+        if nodes[n].aux == 0 and nkids(n) == 0: return fact_new(s, FactBound(), FactTerm(type = T_STR))
     # An optional's or union's tag (-3: 0 for none, 1 for a value, or the
     # member) and payload (-4) are projections of its immutable evaluation.
     if k == .istype:

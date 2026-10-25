@@ -1,0 +1,9 @@
+# A float parsed under `$no_nan` entered the scope: as a dictionary key it is
+# tested first.
+$runtime_checks=false
+main=()=>{
+    $no_nan
+    let k=to_float(env("X")??"nan")??0.0
+    let d=[k->1]
+    printl(d.get(k))
+}

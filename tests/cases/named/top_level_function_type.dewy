@@ -1,0 +1,14 @@
+# A module-level function value under a function-type annotation takes the
+# annotation's parameter names, as a local does.
+let f:<(amount:int):>int> = (x) => x*2
+g:<(value:int):>int> = (v) => v+1
+twice = (h:<(n:int):>int> v:int) => h(h(v))
+Apply:type=<(left:int right:int):>int>
+let join:Apply=(x y)=>x+y
+printl(f(amount=21))
+main=()=>{
+    printl(g(value=41))
+    printl(twice(@f 5))
+    printl(f(4))
+    printl(join(right=2 left=40))
+}

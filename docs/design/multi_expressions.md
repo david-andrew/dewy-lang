@@ -92,13 +92,15 @@ indexes, named arguments, the result of a function with a written one-value
 contract, and the arms of a value `if`/`match` outside a collecting position.
 Several values there are never cut down to one: it is a compile error naming the
 count (`'pair' holds 2 values, and only one is taken here`). A block in a
-one-value context, or as a binding's value, expresses its last expression. An
+one-value context expresses its last expression. An
+
 earlier non-`void` value is an error with a fix-it to attach `;`:
 
 ```
-x = { log(1)  5 }   # error at log(1): this gives a value, and here the block
-                    # gives one, its last expression: attach `;` to discard it
+printl({ log(1)  5 })   # error at log(1): this gives a value, and here the block
+                        # gives one, its last expression: attach `;` to discard it
 ```
+
 
 A block as a binding's value gives every value it expresses, as a group would
 (`x = { 1 2 }` holds both, `(int int)`; `x = { pair() 3 }` holds three). Each

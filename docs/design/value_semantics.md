@@ -161,7 +161,7 @@ elidable operations do not guarantee a particular hook invocation count.
 Slices and nested elements are values too. `A[1]` on a multidimensional array, and `nested[1]` on an `array<array<T>>`, both produce a value. `A[1 0] = 9` mutates `A`. `row = A[1]  row[0] = 9` does not.
 
 ```dewy
-myarr = update(myarr)
+myarr = transform(myarr)
 ```
 
 is the usual way to thread an updated array through a function. If `myarr` is unique, lowering elides the copy. `@` is for the cases a return cannot say cleanly: in-place algorithms, several outputs, reduce-into an accumulator, a buffer the callee must fill.
@@ -201,12 +201,12 @@ reject independent writes beneath the same owner when disjointness is unproved.
 Mark a place on both sides for ordinary values:
 
 ```dewy
-some_fn = (@a:array<int64><length>?10> b:bool) => {
+some_fn = (@a:array<int64><length >? 10> b:bool) => {
     a[10] = 42     # writes the caller's place
     b = false      # rebinds the local copy
 }
 
-myarr = [1 2 3 4 5 6 7 8 9 10 11 12 13]
+myarr:array<int64><length >? 10> = [1 2 3 4 5 6 7 8 9 10 11 12 13]
 some_fn(@myarr true)     # ok
 some_fn(myarr true)      # error: expected a place
 
@@ -214,7 +214,8 @@ set_value(@record.count) # place of one field
 set_value(@values[i])    # place of one element
 ```
 
-Signature-only marking makes `some_fn(myarr)` look like a copy. Call-site-only marking makes every function a potential mutator. Both sides are required so ordinary calls stay copies and length refinements stay local.
+A refined place must carry the parameter's storage contract exactly, as
+`myarr` does here. Signature-only marking makes `some_fn(myarr)` look like a copy. Call-site-only marking makes every function a potential mutator. Both sides are required so ordinary calls stay copies and length refinements stay local.
 
 Once `a` is a place, both element writes and rebinding write the caller:
 
@@ -224,7 +225,8 @@ some_fn = (@a:array<int64>) => {
     a = [0 0 0]  # replaces the whole thing in place
 }
 
-myarr = [1 2 3 4 5 6 7 8 9 10 11 12 13]
+myarr:array<int64> = [1 2 3 4 5 6 7 8 9 10 11 12 13]
+
 some_fn(@myarr)
 # myarr = [0 0 0]
 ```
@@ -355,38 +357,37 @@ The existing `__load_i64__(bytes)` operation obtains the element address, and
 the checked extraction does not permanently pin its storage.
 
 ```dewy
-let written = $lend(bytes) {
+let first = $lend(bytes) {
     let address = __load_i64__(bytes)
-    __syscall3__(1 fd address bytes.length)
+    __load_u8__(address)
 }
 ```
 
-The initial implementation accepts scalar local work, raw word reads, and
-Linux x86-64 synchronous `write` (also through the C backend). An address or
+The implementation accepts scalar local work, raw word reads and byte loads
+(`__load_u8__(address)`). An address or
 anything derived from it cannot escape through a result, outer assignment,
 aggregate, closure or unmodeled call. Assignments and loop backedges propagate
 address origins to a fixed point. The owner cannot be mutated, replaced or
 passed elsewhere inside the expression. Unknown operations are rejected;
 the compiler grants unpinned access only after checking the whole body.
-The Linux x86-64/C stdout, stderr and file-writing library paths use these
-loans. File reads use writable loans to fill array storage in bulk.
 Unscoped raw exposure retains the existing pinning rule.
 
 Writable `$lend(@bytes reserve=n)` accepts a named, growable array of
 unrestricted `uint8`. It evaluates `n` once, reserves that many **additional**
 bytes and detaches existing shared snapshots before lending the address.
-Omitting `reserve` means zero additional bytes. Byte stores and synchronous
-Linux x86-64/C reads may write through the scoped address.
+Omitting `reserve` means zero additional bytes. Byte stores
+(`__store_u8__(value address)`) may write through the scoped address.
 
 ```dewy
-$lend(@bytes reserve=4096) {
+$runtime_checks     # the address arithmetic and the commit are checked
+$lend(@bytes reserve=2) {
     let address = __load_i64__(bytes)
-    let count = __syscall3__(0 fd address + bytes.length 4096)
-    if count >? 0 and count <=? 4096 {
-        bytes.set_length(bytes.length + count)
-    }
+    __store_u8__(33 address + bytes.length)
+    __store_u8__(10 address + bytes.length + 1)
+    bytes.set_length(bytes.length + 2)
 }
 ```
+
 
 `set_length` is available only on the active writable owner. Every commit
 must prove a nonnegative length no greater than the captured entry length

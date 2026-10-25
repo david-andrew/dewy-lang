@@ -100,12 +100,13 @@ __dewy_range_indices = (size: int, r: IntRange) -> int:
 
 __pick[A, T] = (xs: A, r: IntRange) -> T[]:
     count = __dewy_range_indices(xs.len(), r)
+    # (pushed, not zero-filled: a refined element, as a rational, has no zero to start from)
     out: T[]
-    out.resize(count)
+    out.reserve(count)
     index = r._first
     delta = int(if r._up: r._stride else: __wrap64(0) - r._stride)
     loop j in [0..count):
-        __at(out, j) = __at(xs, index)
+        out.push(__at(xs, index))
         index += delta
     out
 

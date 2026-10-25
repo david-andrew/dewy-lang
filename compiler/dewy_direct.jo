@@ -3317,12 +3317,15 @@ dc_declaration = (constant: bool, bare: bool = false) -> int:
         nodes[n].a = i32(annotation)
     if dn_accept(.assign):
         # (`name:T = value` without `let` declares at the top of a module only, dw_stmt)
-        if bare and not dc_top_level or not dc_fn_body and dc_lambda_next(): return 0
+        # (a module's annotated function literal is a value of that type, its parameter names
+        # among it: `let f:<(amount:int64):>int64> = (x) => x*2`)
+        typed = dc_top_level and nodes[n].a != 0
+        if bare and not dc_top_level or not dc_fn_body and not typed and dc_lambda_next(): return 0
         dc_initial_at = dn_at
         dc_depth += 1
         initial = dc_expr(11)
         dc_depth -= 1
-        if initial == 0 or nodes[initial].kind == .lambda and not dc_fn_body or dc_inferred_refinement(initial): return 0
+        if initial == 0 or nodes[initial].kind == .lambda and not dc_fn_body and not typed or dc_inferred_refinement(initial): return 0
         nodes[n].b = i32(initial)
     else:
         next = dn_tokens[dn_at]

@@ -1,8 +1,12 @@
 # Tensors and broadcasting (adopted direction, 2026-10-21)
 
 David's decision on open question 7. It replaces the earlier provisional tensor
-notes. Not built yet: it is queued after concurrency stage 1. Keep it
-device-agnostic. A GPU is placement context (`x.to(dev)`), not a type change, and
+notes. Largely built: shaped arrays and shape-typed parameters, dotted
+broadcasting and `f.(xs)`, matrix literals, `end`/`new` indexing, `value.to(device)`
+(one device, `'cpu'`, so far) and `gpu(...)` arrays work as docs/LANGUAGE.md
+("Numeric arrays and matrices", "GPU arrays") describes. Keep it
+device-agnostic.
+ A GPU is placement context (`x.to(dev)`), not a type change, and
 mixing devices is a compile error (see "Decided rules" below).
 
 ## One array type, shape in the type

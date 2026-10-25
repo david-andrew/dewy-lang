@@ -1,0 +1,13 @@
+# The guide's guard on a byte view proves `byte_slice` for a non-ASCII literal
+# text as for any other: one string value, one byte view.
+$runtime_checks=false
+let text="café"
+let i=2
+let b=text as array<uint8>
+if i <? b.length and b[i] <? 0x80 {printl(text.byte_slice(0 i))}
+main=()=>{
+    let word="naïve"
+    let bytes=word as array<uint8>
+    let j=3
+    if j <? bytes.length and bytes[j] <? 0x80 {printl(word.byte_slice(0 j))} else {printl("inside")}
+}

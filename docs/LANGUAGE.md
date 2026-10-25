@@ -43,16 +43,16 @@ A test is an ordinary function marked `$test` on the line before it. `$expect
 condition` (or `$expect condition, "message"`) states what it checks:
 
 ```dewy
-add = (a:int64 b:int64) => a+b
+add = (a:int b:int) => a+b
 
 $test
 adds_numbers = () => $expect add(20 22) =? 42
 
 $test(cases=(1 2 -3))
-adds_zero = (x:int64) => $expect add(x 0) =? x, "{x} changed"
+adds_zero = (x:int) => $expect add(x 0) =? x, "{x} changed"
 
 $test(cases=[[a=1 b=2] [a=(-3) b=4]])
-commutes = (a:int64 b:int64) => $expect add(a b) =? add(b a)
+commutes = (a:int b:int) => $expect add(a b) =? add(b a)
 ```
 
 ```sh
@@ -257,7 +257,7 @@ panic or an endless loop, and a call to it ends its branch like `exit` does.
 
 ```dewy
 twice = (x) => x+x
-add = (a:int64 b:int64=2):>int64 => a+b
+add = (a:int b:int=2):>int => a+b
 combine = (a b=a) => a+b
 main = () => printl(add(twice(20)))  # 42
 ```
@@ -337,21 +337,21 @@ defaults in parameter order. An earlier parameter used in a default refers to
 its captured value, so `combine(next())` calls `next()` once.
 
 `...` after a parameter ends the positional run: in
-`offset = (value:int64 ... amount:int64) => value+amount`, `amount` must be named,
+`offset = (value:int ... amount:int) => value+amount`, `amount` must be named,
 `offset(40 amount=2)`; a leading bare `...`, as in `(... width:int64)`, makes
 every parameter keyword-only. An attached `...rest` is a rest parameter, which
 is not implemented yet and reports so. A parameter wrapped in `<>` is position-only: it keeps its
-local name, but `increment = (<value:int64>) => value+1` rejects `increment(value=41)`.
+local name, but `increment = (<value:int>) => value+1` rejects `increment(value=41)`.
 These kinds apply to direct calls of declared functions.
 
 Named arguments also work through function values, returned callbacks, record
 fields and array elements. An inferred function value retains its declared
 parameter names. A function-type annotation supplies the names at that boundary:
-`let f:<(amount:int64):>int64> = (x) => x*2` can be called as `f(amount=21)`.
+`let f:<(amount:int):>int> = (x) => x*2` can be called as `f(amount=21)`.
 These names do not change the runtime calling convention. The callee evaluates
 first, then explicit arguments in written order. Parameters named `_` accept
 positional arguments only. A handle keeps its function's defaults: after
-`f = (a:int64 b:int64=2) => a+b` and `g = @f`, `g(1)` is `f(1)`, with the default
+`f = (a:int b:int=2) => a+b` and `g = @f`, `g(1)` is `f(1)`, with the default
 evaluated at each call. A function-type annotation states only the contract, so
 a value stored under one, or chosen between two such functions, takes every
 argument.
@@ -366,8 +366,8 @@ it; `@w.on_event` selects it). A member applies to the result:
 function itself:
 
 ```dewy
-double = (x:int64):>int64 => x*2
-apply = (f:<(x:int64):>int64> x:int64):>int64 => f(x)
+double = (x:int):>int => x*2
+apply = (f:<(x:int):>int> x:int):>int => f(x)
 main = () => {
     let f = @double     # the function, not a call
     let g = @f          # copy a function value with `@` too
@@ -395,9 +395,10 @@ nested patterns can combine them. `((a b)) =>` is one patterned parameter, the
 same as `([a b]) =>`; `(a b) =>` is two parameters.
 
 ```dewy
-sum = ([left right]:array<int64>) => left+right
-score = ([damage armor]:[damage:int64 armor:int64]) => damage-armor
-make_adder = (bias:int64) => (([a b]:array<int64>) => a+b+bias)
+sum = ([left right]:array<int length=2>) => left+right
+score = ([damage armor]:[damage:int armor:int]) => damage-armor
+make_adder = (bias:int) => (([a b]:array<int length=2>) => a+b+bias)
+
 main = () => printl(sum([20 22]))  # 42
 ```
 
@@ -418,8 +419,8 @@ Mutable `@` patterns are not supported; use a named parameter for those cases.
 Module-level overload groups join function literals with `&`:
 
 ```dewy
-measure = ((value:int64):>int64 => value)
-    & ((text:string):>int64 => text.length)
+measure = ((value:int):>int => value)
+    & ((text:string):>int => text.length)
 main = () => printl(measure(40)+measure("ab"))  # 42
 ```
 
@@ -605,7 +606,7 @@ held in a variable adapts the same way (`apply(@h)`, `let g:<(x:int64):>int64> =
 names the visible family, so a module's own function shadows the prelude's;
 multiple concrete overloads still require a callable type. Pass them to a typed callback
 parameter or give a local a function type,
-for example `let twice:<(value:int64):>int64> = (* 2)`. A module declaration such
+for example `let twice:<(value:int):>int> = (* 2)`. A module declaration such
 as `twice = (* 2)` can infer its parameter type at calls, like other functions.
 Operators with prefix meanings keep those meanings: `(-1)` is a negative value.
 
@@ -621,7 +622,9 @@ Function signatures can bound direct place effects with `reads<place>`,
 ```dewy
 read = (@x:int64):>int64 & reads<x> => x
 write = (@x:int64 value:int64):>void & mutates<x> => { x = value }
-quiet = (x:int64):>int64 & no_effects => x*2
+quiet = (x:int32):>int64 & no_effects => x*2     # an `int` result could allocate
+
+
 ```
 
 A positive row is a closed upper bound, and it is the contract callers see: a
@@ -775,7 +778,8 @@ without rounding through a float. `int`-to-float retains the usual rounding. Con
 a narrowing between fixed widths or from `int`, explicit (`uint64(x)`, `x as uint8`) or implicit
 (`let n:uint64 = xs.length`, `let b:int8 = w` after `if -128 <=? w <=? 127`, a
 `uint64` index or slice bound, an argument or result), is a proven conversion: the facts that
-prove a refinement prove it, an unproven one is checked when it runs (`value does not fit int8`),
+prove a refinement prove it, an unproven one is a compile error by default and is checked
+when it runs under `$runtime_checks` (`value does not fit int8`),
 and a refuted one is a compile error (`w does not fit uint64`). Bounds propagate through
 products of bounded integers, signed right shifts, and floor remainder (including
 negative divisors). Loop assignments using a constant remainder or mask retain
@@ -837,8 +841,10 @@ possibly zero divisor, `log(0)`, `exp`, `pow`, a `float32` narrowing, a large
 `int` converted). `$finite_floats` (lib/directives.dewy) is both. Under
 `$no_nan`, values that enter the scope are not assumed free of NaN. A
 parameter of a function whose body is in the scope is proven by each caller: a
-float argument the caller cannot prove is an obligation there, under the
-caller's own settings (a runtime check by default). A field, element, global,
+float argument the caller cannot prove (one parsed from text, `to_float(s) ?? 0.0`,
+may be NaN) is an obligation there, under the caller's own settings (a compile
+error by default, a runtime check under `$runtime_checks`). A field, element, global,
+
 loop variable, the result of a call from outside the scope, or a parameter of a
 lambda or of a function used as a value, may be NaN: using it (in arithmetic, a
 math function, a `return`, a reassignment, a dictionary key or set element) is
@@ -1096,10 +1102,12 @@ Literals outside the checked `int` range need an explicit fixed-width context
 that fits, or `int` (`bigint`).
 
 For fixed-width integers, shift counts are unsigned: a negative literal count
-is an error, and a negative runtime count acts as a huge one. Shifting a
-fixed-width integer by at least its width gives `0` for `<<` and unsigned `>>`,
-and the sign (`0` or `-1`) for signed `>>`: `uint64(1) << 64` is `0` and
-`int64(-2) >> 64` is `-1`.
+is an error, and a negative runtime count acts as a huge one. A right shift by
+at least the width gives `0` for unsigned `>>` and the sign (`0` or `-1`) for
+signed `>>`: `int64(-2) >> 64` is `-1`. A plain fixed-width `<<` is exact, so its
+result must fit the type, an obligation like any other arithmetic
+(`uint64(1) << 64` is a compile error by default); a wrapping type keeps the low
+bits, so `uint64<overflow='wrap'>(1) << 64` is `0`.
 
 Comparisons use `=?`, `<?`, `>?`, `<=?` and `>=?`. Comparisons chain in one
 direction: `0 <? x <? 10` is `0 <? x and x <? 10`, each operand evaluated once
@@ -1151,8 +1159,10 @@ It binds above multiplication, literal coefficients and unary minus, so `2x^2`
 is `2*(x^2)` and `-2^2` is `-(2^2)`. Use `xor` for bitwise exclusive-or.
 Integer powers use a nonnegative integer exponent. `int` powers remain exact,
 including when the exponent is `int64`; fixed-width powers also compute exactly and require a bounded intermediate width. A negative constant
-exponent gives a `rational`, `2^(-2)` is `1/4`; a negative runtime exponent panics
+exponent gives a `rational`, `2^(-2)` is `1/4`; a runtime exponent that may be negative
+is an obligation (a compile error by default, a panic under `$runtime_checks`)
 with guidance to use an explicit rational or floating base. Float powers use the inherited
+
 floating math library. `bigint` powers remain exact for nonnegative exponents;
 `rational` supports signed exponents. All these types define zero to the zero
 power as one.
@@ -1275,6 +1285,7 @@ zero:
 
 ```dewy
 from units import K, °C, °F
+$runtime_checks              # dividing by a unit is checked
 let start = 20°C
 let later = start+15°C       # 35°C: a literal added to a point is a difference
 let rise = later-start       # 15°C: point - point is a difference
@@ -1378,7 +1389,9 @@ The inherited `big` module is a separate approximate-number library for idle gam
 ```dewy
 kelvin = (celsius:rational):>rational => celsius+273.15
 main = ():>void => {
+    $runtime_checks          # a negative power checks its base is nonzero
     let half = 1/2
+
     printl"{half+1/3}"  # 5/6
     printl"{(2/3)^(-3)}"  # 27/8
     printl"{kelvin(20)}"  # 293.15
@@ -1456,7 +1469,8 @@ truncates toward zero. Exact numbers round as people do, a half away from zero:
 fractions. A nonzero divisor of `/`, `//` and `%` is an obligation, as an
 integer division's, when the divisor is an integer or a constant (`x/n` after
 `n not=? 0`, `x/0.5`); a rational divisor computed at run time, a zero
-denominator and negative powers of zero panic. Zero to the zeroth power is one. Copies are independent, and
+denominator and negative powers of zero fail: they are compile errors by
+default, and panic under `$runtime_checks`. Zero to the zeroth power is one. Copies are independent, and
 normalized values can be dictionary keys.
 
 `.to_float32()` and `.to_float64()` round the exact ratio once, to nearest with
@@ -1473,7 +1487,10 @@ let movement = vec2(step 2.0*step)
 
 `rational(x)` of a `float32` or `float64` is the float's exact binary value
 (`rational(f)` with `f:float64 = 0.1` is `3602879701896397/36028797018963968`);
-NaN and infinity panic. Floats never become fractions implicitly. Inferred
+NaN and infinity fail (a compile error by default, a panic under
+`$runtime_checks`). Floats never become fractions implicitly. Inferred
+
+
 decimal bindings hold fractions unless a float is written to them later, which
 makes them `float64` from the start; annotate `float32` explicitly.
 
@@ -1629,8 +1646,9 @@ Records can contain optional values of their own type, including through other
 records and unions. Lists and trees keep ordinary value semantics:
 
 ```dewy
-Node:type = [value:int64 next:Node?=none]
-sum = (node:Node?):>int64 => {
+Node:type = [value:int next:Node?=none]
+sum = (node:Node?):>int => {
+
     let cur = node let total = 0
     loop cur is? Node { total += cur.value cur = cur.next }
     return total
@@ -1723,10 +1741,10 @@ or local of the same name hides the member.
 
 ```dewy
 Span:type = [
-    start:int64
-    stop:int64
+    start:int
+    stop:int
     width = () => stop-start
-    grow = (by:int64) => { stop += by }
+    grow = (by:int) => { stop += by }
 ]
 counter = (start=0) => [
     value=start
@@ -1761,11 +1779,13 @@ a method of a type with minted children cannot change its object yet.
 Custom records can define arithmetic and indexing with ordinary functions:
 
 ```dewy
-Point:type = [x:int64 y:int64]
+Point:type = [x:int y:int]
 __add__ = (a:Point b:Point):>Point => Point[a.x+b.x a.y+b.y]
 
+$runtime_checks   # store[i] checks its index, as an array's
 Store:type = <T>[values:array<T>]
 __index__ = <T>(store:Store<T> index:int64):>T => store.values[index]
+
 __setindex__ = <T>(@store:Store<T> index:int64 value:T):>void => {
     store.values[index] = value
 }
@@ -1801,9 +1821,10 @@ machine integers use bit operations. Power uses `__pow__` and keeps bitwise
 Dictionary and set keys can define `hash` alongside their record type:
 
 ```dewy
-Key:type = [id:int64 label:string]
+Key:type = [id:uint64 label:string]
 __eq__ = (a:Key b:Key):>bool => a.id =? b.id
-hash = (key:Key):>uint64 => (key.id as uint64).hash()
+hash = (key:Key):>uint64 => key.id.hash()
+
 ```
 
 Equal keys must return the same hash; here both operations use `id` and ignore
@@ -2045,7 +2066,7 @@ and `$intrinsic` metatags, under "Foreign functions".)
 
 Array literals take their element type from a function parameter, including
 nested arrays and optional array parameters. For example,
-`sum_words = (xs:array<uint64>) => xs[0]+xs[1]` accepts `sum_words([20 22])` without
+`sum_words = (xs:array<uint64 length=2>):>int => xs[0]+xs[1]` accepts `sum_words([20 22])` without
 element casts. Overloads compare element conversions and prefer the usual
 integer or floating literal type when it fits. A literal outside a parameter's
 element range is rejected. An already constructed array keeps its element type;
@@ -2078,7 +2099,8 @@ the right operand does not change the left value already read.
 is the same pattern; both also take several values (`let (a b) = pair()`). The
 length must fit: several values, fixed arrays and `[T U]` are checked while
 compiling, and an array's length is an obligation (exactly the names, or at
-least them with a rest), proven from facts or checked at run time like an index.
+least them with a rest), proven from facts like an index's bounds (a length guard,
+`if xs.length =? 2`, or a fixed length), or checked at run time under `$runtime_checks`.
 `_` discards an element. `...rest` takes what the other names leave, anywhere in
 the pattern and once per level, `[first ...mid last]`; a bare `...` drops it,
 `[head ...] = xs`. For records, targets select fields by name, in any order;
@@ -2099,7 +2121,8 @@ Each level follows its source type: arrays and tuples use positions, dictionarie
 yield key/value pairs in insertion order, and records use field names. Dictionary
 unpacking skips removed entries and requires exactly as many live entries as
 targets (at least as many with a bare `...`; a dictionary's `...rest` is not
-supported yet), checked at run time. `_` can discard an entry or either member of a pair. The source evaluates
+supported yet), an obligation like an array's. `_` can discard an entry or either member of a pair. The source evaluates
+
 once, nested lengths are checked before destinations are written, and extracted
 values keep ordinary value semantics.
 A one-element loop pattern still unpacks: `loop [x] in [[20] [22]]` visits
@@ -2160,6 +2183,7 @@ ranges are rejected.
 Arrays can select elements with a stored `IntRange` or a stepped slice:
 
 ```dewy
+$runtime_checks                  # each selected index is checked
 let values = [10 20 30 40 50 60]
 let evens = values[0, 2..]       # [10 30 50]
 let backwards = values[5, 3..0] # [60 40 20]
@@ -2290,6 +2314,7 @@ or dictionary keys; changing a copy leaves an already-inserted key independent.
 Sets retain distinct members in insertion order:
 
 ```dewy
+$runtime_checks                  # the unpack checks the set has two elements
 let tags = set["visible" "moving" "visible"]
 tags.push("selected")
 if "moving" in? tags { printl"moving entity" }
@@ -2371,6 +2396,7 @@ obligation `>=? 0`, proven where the arguments show it (`zeros(2 3)`), and a
 shape with more elements than an `int64` counts runs out of memory:
 
 ```dewy
+$runtime_checks                  # matrix indexes are checked
 let values:array<float64> = [3.0 1.0 1.0 2.0]
 let matrix = reshape(values 2 2)
 let saved = matrix
@@ -2393,9 +2419,12 @@ The shape belongs in the type: `array<float64 length=[m n]>` is a 2-D array,
 `array<float64 length=[n]>` a 1-D one. In a parameter, a dimension named by a
 word not yet bound binds it, and later mentions check it; an annotated `let`
 checks its value's shape. Shapes are compared where values enter: a literal of
-the wrong shape is a compile-time error, other values are checked at run time:
+the wrong shape is a compile-time error, and another value's shape is an
+obligation: a compile error unless proven, checked at run time under `$runtime_checks`:
+
 
 ```dewy
+$runtime_checks                  # each shape is checked on entry
 product = (a:array<float64 length=[m n]> b:array<float64 length=[n p]>) => a*b
 width = (rows:array<int64 length=[r 2]>):>int64 => r   # r is rows' first dimension
 ```
@@ -2445,6 +2474,7 @@ Dotted operators apply scalar arithmetic to each element. Adjacent dotted
 operations and calls fuse into one traversal without intermediate result arrays:
 
 ```dewy
+$runtime_checks                  # shapes are checked
 let xs = [1.0 4.0 9.0]
 let shifted = sqrt.(xs) .* 2.0 .+ 1.0       # [3.0 5.0 7.0]
 let mask = shifted .>=? 5.0                # [false true true]
@@ -2485,6 +2515,7 @@ may change a dynamic matrix's shape, while fixed-size arrays check the resulting
 length. Ordinary and fixed arrays also support dotted selection updates:
 
 ```dewy
+$runtime_checks                  # the range is checked
 positions[1..end] .+= 0.5
 positions[[true false true]] .*= 2.0
 ```
@@ -2509,6 +2540,7 @@ unsupported.
 Put a range in its own brackets when selecting axes:
 
 ```dewy
+$runtime_checks                  # selections and exact element updates are checked
 let matrix = reshape([1 2 3 4 5 6] 2 3)
 let column = matrix[[..] 1]           # shape [2], values [2 5]
 let row = matrix[1 [..]]              # shape [3], values [4 5 6]
@@ -2592,6 +2624,7 @@ integer inputs become `int32<overflow='wrap'>` (the GPU's modular word format),
 and arrays may have up to four dimensions:
 
 ```dewy
+$runtime_checks                  # shapes are checked
 let xs = gpu([1.0 2.0 3.0])
 let shifted = xs .* 2.0 .+ 1.0
 $runtime_assert(cpu(shifted).data =? [3.0 5.0 7.0])
@@ -2626,6 +2659,7 @@ the generated programs; they are not hardware GPU performance measurements.
 collects its results in input order:
 
 ```dewy
+$runtime_checks                  # saved[0] is checked
 let squares = [parallel i in [0..1000) i*i]
 let shifted = [parallel x in squares x+1]
 let saved = shifted
@@ -2734,7 +2768,7 @@ parallel iteration polling an atomic set elsewhere.
 Waiting work uses a structured task group on the Linux threads backend:
 
 ```dewy
-work = (n:int64) => n*2
+work = (n:int) => n*2
 concurrent {
     let a = spawn work(21)
     let b = spawn work(20)
@@ -2866,13 +2900,13 @@ The certified protocols (provisional spellings) are request/reply and a pipeline
 with feedback:
 
 ```dewy
-square = (n:int64):>int64 => n * n
+square = (n:int):>int => n * n
 main = ():>void | Closed | Canceled => {
-    let total = serve(@square (s:Service<int64 int64>):>int64 | Closed | Canceled => {
+    let total = serve(@square (s:Service<int int>):>int | Closed | Canceled => {
         (s.request(3) or_throw) + (s.request(4) or_throw)     # 25
     }) or_throw
-    let seeds:array<int64> = [6]
-    let path = pipeline(2 seeds (n:int64):>int64 => n + 1  (r:int64):>array<int64> => if r <? 9 [r] else []) or_throw
+    let seeds:array<int> = [6]
+    let path = pipeline(2 seeds (n:int):>int => n + 1  (r:int):>array<int> => if r <? 9 [r] else []) or_throw
     printl"{total} {path}"                                  # 25 [7 8 9]
 }
 ```
@@ -2946,12 +2980,13 @@ Intersections are module-level declarations of plain (not minted) records.
 ```dewy
 Empty:type = type of error
 ParseError:type = type of error & [message:string]
-parse = (text:string):>int64|ParseError => {
+parse = (text:string):>int|ParseError => {
     let n = to_int(text)
     if n is? error return ParseError["invalid integer"]
     return n
 }
-twice = (text:string):>int64|ParseError => {
+twice = (text:string):>int|ParseError => {
+
     let n = parse(text) or_throw
     return n*2
 }
@@ -3288,7 +3323,7 @@ gettimeofday = (now:ptr<TimeVal> zone:ptr<uint8>?):>int32 => $extern
 main = ():>void => $unsafe {
     let now:array<TimeVal> = [TimeVal[0 0]]
     gettimeofday(now.ptr none);
-    printl(now[0].seconds)
+    if now.length >? 0 { printl(now[0].seconds) }
 }
 ```
 
@@ -3390,14 +3425,18 @@ optional dictionary lookup. Direct indexing returns the stored element itself.
 Loop bindings can unpack structured values, including nested groups:
 
 ```dewy
-let scores = ["red"->[20 22] "blue"->[4 8]]
+let scores:dict<string array<int length=2>> = ["red"->[20 22] "blue"->[4 8]]
 loop [team [home away]] in scores { printl"{team}: {home+away}" }
-loop [x y z] in [[1 2 3] [4 5 6]] { printl(x+y+z) }
+let rows:array<array<int length=3>> = [[1 2 3] [4 5 6]]
+loop [x y z] in rows { printl(x+y+z) }
 ```
 
 With two bindings, dictionaries yield keys and values. Several bindings over an array unpack
 each element by position for arrays/tuples or by field name for records. Nested
-values follow the same declaration rules and keep independent value semantics.
+values follow the same declaration rules and keep independent value semantics;
+the fixed lengths above prove each unpack, where a plain `array<int>` element's
+length would be an obligation.
+
 A dictionary binder may be followed by `and` conditions, and `else` runs if its
 body never enters. Nested groups also work in indexed-sequence `and` headers;
 `or` headers yield optional values and do not support unpacking groups.
@@ -3422,9 +3461,10 @@ work as finite indexed sequences in loops and comprehensions. Length describes
 integer positions from zero through `container.length-1`. For example:
 
 ```dewy
-Series:type = [first:int64 count:int64]
+Series:type = [first:int count:int]
 length = (s:Series) => s.count
-__index__ = (s:Series index:int64) => s.first+index
+__index__ = (s:Series index:int) => s.first+index
+
 let values = [loop value in Series[40 3] value] # [40 41 42]
 ```
 
@@ -3538,7 +3578,9 @@ the loop stops first, or allow a runtime check and its `panics` effect. Narrow c
 never use the 64-bit progress assumption; `$no_assumed_bounds` disables that assumption
 for 64-bit counters too.
 Signed-word stepped ranges, including open-ended counters, also work in combined
-headers: `loop i in [0,2..] and item in items { ... }`. A condition can bound the
+headers: `loop i in [0,2..] and item in items { ... }` (the finite partner does not
+yet prove the counter's exhaustion obligation, so this needs `$runtime_checks`). A condition can bound the
+
 counter, and comprehensions use the same forms. `or` headers expose optional
 values as usual; the open counter continues after a finite partner ends, until
 the body exits or another requested counter value would overflow. Combined
@@ -3622,7 +3664,7 @@ Each loop's bindings and label belong to that arm; they are unavailable in its
 fallback. A comprehension can collect fallback elements for an empty loop.
 A loop expresses its body's values: a collector takes them, and a function
 without a written result that ends in one gives them, as in
-`squares = (n:int64) => { loop i in 0..n i^2 }` and `[squares(3)]`.
+`squares = (n:int) => { loop i in 0..n i^2 }` and `[squares(3)]`.
 
 Place `$name` before a loop to target it from nested loops:
 
@@ -3902,7 +3944,7 @@ They are not Dewy's ordinary grapheme indices; use the returned `text` directly.
 ```dewy
 let date = regex(r"(\d{4})-(\d\d)-(\d\d)")
 let found = "due 2026-10-19!".find(date)
-if found isnt? Missing { printl(found.groups[0]) }
+if found isnt? Missing and found.groups.length >? 0 { printl(found.groups[0]) }  # 2026
 let rewritten = "due 2026-10-19!".replace(date "$3/$2/$1")
 let fields = "a, b;c".split(regex(r"[,;]\s*"))
 ```
@@ -4020,7 +4062,10 @@ for this kind of formatting. Fixed decimal rounding uses ties to even.
 
 Text takes alignment, fill and minimum width, optionally ending in `s`. Its
 width counts grapheme clusters; it does not truncate. Use a string slice to
-truncate explicitly. Invalid specs or options for the wrong value type panic.
+truncate explicitly. Invalid specs or options for the wrong value type fail: a
+spec not proven valid is a compile error by default, and panics under
+`$runtime_checks`.
+
 
 `bytes.read<uint64>(i)` loads the eight bytes at offset `i` of an `array<uint8>` as one
 little-endian `uint64`, at any alignment and without `$unsafe`; `read<uint32>` and
@@ -4448,7 +4493,9 @@ window, ready for `save_png(image path)`. Lines, points and bars accept arrays o
 A line can omit its x array to use sample indices. For example:
 
 ```dewy
+$runtime_checks          # chart_image panics if the renderer fails
 let chart = Chart[title="Measurements" equal_axes=true
+
     legend_at=LegendAt.bottom_left]
 chart.line([0 1 2] [0 2 0] "trial" dash=6.0)
 chart.annotate(1.0 2.0 "peak")

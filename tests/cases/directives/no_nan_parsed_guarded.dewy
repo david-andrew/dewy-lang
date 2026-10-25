@@ -1,0 +1,12 @@
+# A parsed float tested by its caller enters `$no_nan` proven.
+$runtime_checks=false
+half=(x:float64):>float64=>{
+    $no_nan
+    x*0.5
+}
+main=()=>{
+    let x:float64=to_float("3.0")??0.0
+    if x =? x {printl(half(x))}
+    let k=to_float("nan")??1.0
+    if 0.0 <=? k {printl(half(k))} else {printl("not a number")}
+}

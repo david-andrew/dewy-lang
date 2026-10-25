@@ -1,0 +1,9 @@
+# Range selections of rational arrays: picked by pushing, never zero-filled
+# (a rational has no unchecked zero).
+$runtime_checks
+let positions=[1.0 2.0 3.0]
+positions[1..end] .+= 0.5
+printl(positions)
+positions[[true false true]] .*= 2.0
+printl(positions)
+printl(positions[0,2..])
