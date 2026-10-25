@@ -1072,6 +1072,7 @@ dewy_fast_file = (file: int) -> int[]:
         mode = env("DEWY_FRONTEND") ?? ""
         dc_selected = mode != "old"
         dc_compare = mode == "compare"
+        dc_strict = mode == "strict"
     dc_enabled = dc_selected
     # (a direct attempt may split generic closers: a retry restores them, dn_edits_undo)
     saved_edits_on = dn_edits_on

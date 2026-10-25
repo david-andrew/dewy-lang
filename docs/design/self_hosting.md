@@ -481,53 +481,58 @@ of a new name left to Sloppy.
 The direct parser (dewy_direct.jo, `dc_*`) builds checker nodes; the reference grammar
 (dewy_fast.jo, `dn_*`) builds `DewySyntax` that the projection (dewy_parse.jo, `dw_*`) turns into
 the same nodes. A direct attempt that meets a form it does not take returns 0 and the reference
-grammar re-reads that statement. Valid input across the corpus now falls back at 38 roots
-(1,196 tokens; 123 and 2,687 before the last pass), the forms below. Error tests fall back at 120
-roots: that is how every mistake is still reported.
+grammar re-reads that statement. `DEWY_FRONTEND=strict` stops at the first such fallback
+(`dc_fallback`; a `$target` chain's left-out arms, which `dw_target_dropped` reads as syntax, are
+not fallbacks): it is the gate for step 2, and tests/test_frontend_strict.py holds what passes it.
+Valid input across the corpus now stops in 22 files (38 roots before the last pass), the forms
+below. Of the 1,206 error tests, 135 still stop: that is how those mistakes are still reported.
+
+Read directly since: open-range index axes (`a[0 [1..]]`, `m[2 [end,end-1..]]`), bundle
+definitions (`dc_bundle` builds the `DirBundle`, its row through `dc_effect_entries`), `T & ~v`
+aliases (`dc_refinement_alias`), `$intrinsic` bodies and bundles (a `$nothing` statement that
+declares nothing), a function named `spawn`, module partials (`twice = (*2)`, a module function as
+`dw_function` makes it), a `match` value before `;`, `$include_bytes(p"…")`.
 
 Valid forms still read by the reference grammar (each to migrate, none needs a new rule):
-- slices and indexes: an axis that is a bracketed open range (`a[0 [1..]]`, `m[2 [end,end-1..]]`),
-  a member's spread in a loop source (`loop s in [m.keys...].sorted()`);
+- slices and indexes: a member's spread in a loop source (`loop s in [m.keys...].sorted()`);
 - refinements: a parameter refined by another (`b:int64<(>=? a)>`) with a proof result
   (`:><a <=? c>`), `int64<(in? (0..3])>`, `array<int64><0 <? length …>`, `uint8<m in? 2..254>`
-  as a pattern, `int64 & ~0` in an overload member or a module alias (`nonzero = int64 & ~0`);
-- functions: recursive local closures, a closure capturing a member, a function named `spawn`,
-  a module partial (`twice = (*2)`), `$intrinsic` bodies, a lambda with type parameters in a
-  record literal (`[f=<T>(x:T) => x]`), a type's generic method (`pair = <U>(other:U) => …`),
-  grouped overload members (`(((a:T) => a) & …)`), keyword-only `(<value:int64>)` and grouped
-  parameter patterns (`((a b):array<int64 length=2>)`), `(a:int64 <string>)` sequence patterns,
-  `:>('b' | 'a') | none`;
-- flow: a braced loop condition (`loop { … } { … }`, which warns), a `match` value before `;`,
-  a `return` ending a comprehension's body, `[parallel …]` as an index, `??` before `=?` in a
-  chain (`read() ?? 20 + 22 =? 42`);
-- directives: bundle definitions (lib/directives.dewy), `$include_bytes(p"…")`.
+  as a pattern, `int64 & ~0` in an overload member;
+- functions: recursive local closures, a closure capturing a member, a lambda with type
+  parameters in a record literal (`[f=<T>(x:T) => x]`), a type's generic method
+  (`pair = <U>(other:U) => …`), grouped overload members (`(((a:T) => a) & …)`), keyword-only
+  `(<value:int64>)` and grouped parameter patterns (`((a b):array<int64 length=2>)`),
+  `(a:int64 <string>)` sequence patterns, `:>('b' | 'a') | none`;
+- flow: a braced loop condition (`loop { … } { … }`, which warns), a `return` ending a
+  comprehension's body, `[parallel …]` as an index, `??` before `=?` in a chain
+  (`read() ?? 20 + 22 =? 42`) and an arithmetic `??` fallback, which warn.
 
 What still needs the reference path besides those:
-- Diagnostics. The direct parser reports nothing of its own (literal problems in `dn_string`
-  aside): each mistake is the reference grammar's `dn_error` or the projection's `dw_fail`,
-  `fatal` or `warn` (`[1; 2]`, `loop { ... }` with its body on the next line). Warnings on valid
-  input are fallbacks too.
+- Diagnostics. The direct parser reports few of its own: literal problems in `dn_string`, and
+  (since the strict mode) duplicate pattern and parameter names, `=` defaults and reserved words
+  in patterns, with `dw_function`'s and `dw_binding_one`'s text at their positions (a declaration's
+  parameters only once its `)` meets `=>`, `dc_duplicate_parameter`). Every other mistake is the
+  reference grammar's `dn_error` or the projection's `dw_fail`, `fatal` or `warn` (`[1; 2]`,
+  `loop { ... }` with its body on the next line). Warnings on valid input are fallbacks too.
 - `DEWY_FRONTEND=old` (`dc_enabled` false) and `compare` (each direct statement re-read by `dn_stmt`,
   projected and compared with `dc_same`; directive lines and settings compare their own
   results). The `tests/test_frontend_*` files run old, direct and compare side by side.
 - Consumers that read syntax: `dw_top_declarations` for `$proof`, `$warn_if`,
   `$explicit_allocation_failure` and `$shadowable` (`dc_marker` builds their one-node syntax),
   module settings (`dc_setting`'s compact statement), `$target = …` / `$build.mode = …` in the main
-  file (`dw_build_setting`), bundle definitions (`dw_dir_define`, lib/directives.dewy),
-  `$intrinsic` bodies (`dw_intrinsic_check`); a deferred statement (`dc_defer_statement`) is
+  file (`dw_build_setting`); a deferred statement (`dc_defer_statement`) is
   reference syntax projected by `dw_stmt`; a module-level `$target` chain reads its left-out arms
   with `dn_expr` to note their names (`dw_target_dropped`).
 - The formatter (dewy_fmt.jo) uses only the lexer (`dn_lex`, dewy_lex.dewy, dewy_tokens) and
   `dw_kind_name`; the language server (ide.jo) reads checker nodes and diagnostics. Neither
   needs the grammar or the projection.
 - lib/directives.dewy holds only bundle definitions, `$name = { $setting  $setting=false
-  $default_row = <row> }`, read today by the reference grammar and `dw_dir_define`.
+  $default_row = <row> }`, read by `dc_bundle` (a mistake in one, by the reference grammar and
+  `dw_dir_define`).
 
 Removal, in order (each step gated by the full suite, the bootstrap and same-output):
-1. Close the forms above. Bundles: a direct reader building the `DirBundle` (its row through
-  `dc_effect_row` without the leading `&`). `T & ~v` and the `(a b)` groups still routed through
-  `dn_value` go with their consumers (`dc_refinement_alias` takes the refinement; `$test` cases
-  are read directly now).
+1. Close the forms above. The `(a b)` groups still routed through `dn_value` go with their
+  consumers (`$test` cases are read directly now).
 2. The direct parser reports its own mistakes: each `return 0` that marks a mistake rather than
   another reading reports the reference's text at its position. Gate: a fallback-free mode that
   stops at any fallback, every `.err` test identical, the error-root survey at zero.
