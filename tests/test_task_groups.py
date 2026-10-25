@@ -236,7 +236,7 @@ def test_task_rejects_unsynchronized_global(compiler, tmp_path):
     run(compiler, tmp_path, '''
 let shared=[1 2 3]
 read=()=>shared.length
-main=()=>{concurrent {spawn read()}}
+main=()=>{concurrent {spawn read()} shared.push(4)}
 ''', expected_error='unsynchronized global')
 
 

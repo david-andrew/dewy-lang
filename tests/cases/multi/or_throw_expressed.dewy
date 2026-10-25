@@ -1,0 +1,9 @@
+# Without a declared result, a statement's value is expressed; when the function also
+# propagates with `or_throw`, the error names `or_throw`, not a `return` nobody wrote.
+Oops:type = type of error
+step = (n:int64):>int64 | Oops => if n <? 0 Oops else n
+run = () => {
+    step(1) or_throw
+    step(2) or_throw
+}
+main = () => { run(); }

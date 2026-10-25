@@ -1,0 +1,14 @@
+# modes: native native-release
+# A task reads a module binding nothing writes after its declaration, as it reads a const:
+# no race is possible. (A binding the program writes stays an error: test_task_groups.py.)
+GREETING = "hello from a task"
+let sizes = [3 4 5]
+shout = ():>string => GREETING.upper()
+total = ():>int64 => sizes.length
+main = () => {
+    concurrent {
+        let a = spawn shout()
+        let b = spawn total()
+    }
+    printl"{a ?? ""} {b ?? 0}"
+}

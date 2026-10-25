@@ -1,0 +1,102 @@
+# modes: native native-release
+# A job queue: a producer feeds request log lines through a channel to worker tasks,
+# which parse them and report per-endpoint stats under a lock; an atomic counts errors.
+# Then a CPU-bound pass checks numbers for primality in parallel.
+
+Hit:type = [path:string status:int64 ms:int64]
+Stats:type = [count:int64 total_ms:int64 slowest:int64]
+
+LOG = """
+GET /home 200 12
+GET /api/users 200 45
+POST /api/users 201 80
+GET /home 200 9
+GET /missing 404 3
+GET /api/users 500 120
+GET /home 200 15
+POST /login 200 60
+GET /api/orders 200 33
+GET /api/orders 503 250
+garbage line
+GET /home 200 11
+"""
+
+parse_hit = (line:string):>Hit? => {
+    let f = line.split()
+    if f.length not=? 4 return none
+    let status = to_int(f[2])
+    let ms = to_int(f[3])
+    if status is? error or ms is? error return none
+    if not (100 <=? status <? 600) or not (0 <=? ms <? 3600000) return none
+    Hit[f[1] status ms]
+}
+
+produce = (out:Channel<string> text:string):>void | Closed | Canceled => {
+    loop line in text.lines {
+        if not line.trim.is_empty out.send(line) or_throw
+    }
+    out.close()
+}
+
+work = (jobs:Channel<string> stats:Mutex<dict<string Stats>> errors:Atomic<int64> bad:Atomic<int64>):>int64 | Canceled => {
+    $runtime_checks    # atomic add may overflow: no way to prove it
+    let handled:int64 = 0
+    loop true {
+        let line = jobs.receive()
+        if line is? Closed break
+        let text = line or_throw
+        let hit = parse_hit(text)
+        if hit is? none {
+            bad.add(1);
+            continue
+        }
+        if hit.status >=? 500 errors.add(1);
+        let table = @(stats.lock())
+        let st = table.get(hit.path) ?? Stats[0 0 0]
+        st.count += 1
+        st.total_ms += hit.ms
+        st.slowest = max(st.slowest hit.ms)
+        table[hit.path] = st
+        handled += 1
+    }
+    handled
+}
+
+is_prime = (n:int64):>bool => {
+    if n <? 2 return false
+    let d:int64 = 2
+    loop d >=? 2 and d*d <=? n {
+        if n % d =? 0 return false
+        d += 1
+    }
+    true
+}
+
+main = () => {
+    let jobs = channel<string>(4)
+    let stats = mutex(dict<string Stats>[])
+    let errors = atomic(0)
+    let bad = atomic(0)
+    concurrent {
+        $runtime_checks    # the workers' atomic counters
+        spawn produce(jobs LOG)
+        let a = spawn work(jobs stats errors bad)
+        let b = spawn work(jobs stats errors bad)
+        let c = spawn work(jobs stats errors bad)
+    }
+    let total:int = (a ?? 0) + (b ?? 0) + (c ?? 0)
+    printl"handled {total} lines, {bad.load} unparsable, {errors.load} server errors"
+    let table = @(stats.lock())
+    let rows = [loop [path st] in table [path=path st=st]]
+    rows.sort(key=(r) => r.path)
+    loop r in rows {
+        let n = r.st.count
+        if n =? 0 continue
+        let avg = r.st.total_ms / n
+        printl"{r.path}: {r.st.count} hits, avg {format(avg.to_float64() ".1f")} ms, slowest {r.st.slowest} ms"
+    }
+    let candidates:array<int64> = [loop i in [1..60] i*i + 1]
+    let flags = [parallel n in candidates is_prime(n)]
+    let primes = [loop n in candidates and p in flags if p n]
+    printl"n^2+1 primes: {primes.length} of {candidates.length}: {primes[$clamp 0..8)}"
+}

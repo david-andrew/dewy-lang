@@ -1,0 +1,14 @@
+# An `int` counter a `loop true` changes, returned as an int64: the help names the
+# documented fix, a 64-bit counter declared where it is made.
+count_lines = (text:string):>int64 => {
+    let seen = 0
+    let rest = text
+    loop true {
+        let at = rest.find("\n")
+        if at is? Missing break
+        seen += 1
+        rest = rest[$clamp at+1..]
+    }
+    seen
+}
+main = () => printl(count_lines("a\nb\n"))

@@ -2674,11 +2674,15 @@ integers; `atomic<T>(value)` selects another width. `load`, `store`, `add`,
 `compare_swap`, and the existing `get`, `set`, and `set_max` operations accept an
 optional compile-time `MemoryOrder` literal: `'relaxed'`, `'acquire'`,
 `'release'`, `'acq_rel'`, or `'seq_cst'` (the default). Loads reject release
-orders; stores reject acquire orders. `add` returns the new value. The current
+orders; stores reject acquire orders. `add` returns the new value (discard it
+with `;` as a statement, `hits.add(1);`). It panics when the exact result does
+not fit the payload, which no fact proves yet, so for now code that calls it,
+and its callers, need `$runtime_checks` (as below). The current
 native backend implements every order with sequentially consistent instructions,
 which is stronger than requested. For example:
 
 ```dewy
+$runtime_checks
 let hits = atomic(0)
 parallel i in [0..1000) { hits.add(1 'relaxed') }
 $runtime_assert(hits.load'acquire' =? 1000)
@@ -2740,6 +2744,8 @@ a `TaskGroup`; pass it explicitly to helpers that use `spawn(g) expression`.
 `cancel(g)` cancels that group and its descendants. Captures and results must
 satisfy inferred transfer properties. A task cannot read an unsynchronized
 mutable global while its parent runs; capture a value or use an atomic handle.
+A module binding that nothing writes after its declaration (`LOG = """..."""`)
+reads like a `const`.
 
 `Canceled` is an exception value, with US spelling (`Cancelled` produces a
 fix-it diagnostic). Cancellation is level-triggered: every later blocking
@@ -3098,7 +3104,10 @@ outcome as a value:
   (`*` any part of a name, `?` one character, `**` any number of directories).
 
 A failure is `FileNotFound`, `FileAccessDenied`, `IsDirectory`, `FileExists` or
-`FileError` (any other failure), and `read_text` adds `InvalidUtf8`. All are
+`FileError` (any other failure), and `read_text` adds `InvalidUtf8`. `FileError` is
+their sibling, not their parent: `or_throw` in a function declared
+`:>T | FileError` cannot pass a `FileNotFound` on, so list the kinds or leave the
+result type to be inferred. All are
 `error`s, so `is? error`, `or_throw` and `match` handle them. The file-system
 operations are also cancellation points (see "Parallel CPU work"), so their
 results include `Canceled`, an `exception` but not an `error`: after
@@ -4391,7 +4400,11 @@ Start a game with the built-in template, then edit it while it runs:
 ```
 
 The web build produces `/tmp/game.html`. Games use `main()` for setup,
-`update(dt:float64)` each frame, and `draw()` for rendering. The
+`update(dt:float64)` each frame, and `draw()` for rendering. A drawing call
+outside a frame (at the top level, before the window opens) panics, which no fact
+proves away yet, and the game takes a handle to `draw`, so a game's main file
+says `$runtime_checks` at its top, as the templates do; a model module without
+drawing can stay in the default no-traps mode. The
 [paddle game, physics playground, forest and Dunes](../examples/README.md) show
 input, 2D/3D drawing, simulation, module boundaries and live reload. Graphics, fonts,
 audio, physics and other platform libraries come with the toolchain.

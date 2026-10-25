@@ -1,0 +1,98 @@
+# Tidy a downloads folder: sort files into an archive by kind, skip duplicates by
+# content, write a JSON manifest, read it back, and refuse names that escape.
+
+Entry:type = [name:string kind:string bytes:int64 checksum:uint64]
+Manifest:type = [entries:array<Entry> skipped:array<string>]
+
+Kind:type = 'docs' | 'data' | 'images' | 'other'
+KINDS:dict<string Kind> = ["txt"->"docs" "md"->"docs" "csv"->"data" "json"->"data" "jpg"->"images" "png"->"images"]
+
+kind_of = (f:Path):>Kind => {
+    let suffix = f.suffix.remove_prefix(".").lower()
+    KINDS.get(suffix) ?? "other"
+}
+
+human = (n:int64):>string => {
+    if n <? 1024 return "{n} B"
+    if n <? 1024*1024 return "{format(n/1024 ".1f")} KiB"
+    "{format(n/(1024*1024) ".1f")} MiB"
+}
+
+checksum = (bytes:array<uint8>):>uint64 => {
+    let h:uint64<overflow='wrap'> = 1469598103934665603
+    loop b in bytes {
+        h = (h xor b) * 1099511628211
+    }
+    h
+}
+
+setup = (inbox:Path) => {
+    p"{inbox}".make_dirs or_throw;
+    p"{inbox}/todo.txt".write_text("buy milk\ncall mom\n") or_throw;
+    p"{inbox}/README.md".write_text("# Notes\n\nSome notes.\n") or_throw;
+    p"{inbox}/sales.csv".write_text("region,amount\nnorth,10\nsouth,32\n") or_throw;
+    p"{inbox}/copy of todo.txt".write_text("buy milk\ncall mom\n") or_throw;
+    p"{inbox}/photo.jpg".write_bytes([0xff 0xd8 0xff 0xe0 0 16 74 70 73 70]) or_throw;
+    p"{inbox}/song.mp3".write_bytes(fill(uint8(7) 3000)) or_throw;
+}
+
+archive_all = (inbox:Path archive:Path) => {
+    let entries:array<Entry> = []
+    let skipped:array<string> = []
+    let seen:dict<uint64 string> = []
+    let files = inbox.walk or_throw
+    loop f in files {
+        let data = f.read_bytes or_throw
+        let sum = checksum(data)
+        if sum in? seen {
+            skipped.push("{f.name} (same as {seen[sum]})")
+            continue
+        }
+        seen[sum] = f.name
+        let kind = kind_of(f)
+        let dir = p"{archive}/{kind}"
+        dir.make_dirs or_throw;
+        let target = archive.confine(p"{dir}/{f.name}") or_throw
+        f.copy_to(target) or_throw;
+        entries.push(Entry[f.name kind data.length sum])
+    }
+    Manifest[entries skipped]
+}
+
+main = () => {
+    let base = p"dogfood_archive"
+    let inbox = p"{base}/inbox"
+    let archive = p"{base}/archive"
+    setup(inbox) or_throw;
+    let manifest = archive_all(inbox archive) or_throw
+    p"{base}/manifest.json".write_text(to_json(manifest 2)) or_throw;
+
+    let loaded = from_json<Manifest>(p"{base}/manifest.json".read_text or_throw) or_throw
+    let by_kind:dict<string int64> = []
+    loop e in loaded.entries {
+        if e.kind not in? by_kind by_kind[e.kind] = 0
+        by_kind[e.kind] += e.bytes
+    }
+    loop [kind total] in by_kind printl"{kind}: {human(total)}"
+    loop s in loaded.skipped printl"skipped {s}"
+    loop f in archive.glob"**/*" printl"archived {f}"
+
+    # a name typed by the user must stay inside the archive
+    loop name in ["docs/todo.txt" "../../etc/passwd" "images/photo.jpg"] {
+        let wanted = p"{archive}/{name}"
+        if not archive.contains(wanted) {
+            printl"refused {name}"
+            continue
+        }
+        match wanted.size {
+            n:int64 => printl"{name}: {human(n)}"
+            <FileNotFound> => printl"{name}: not archived"
+            _ => printl"{name}: unreadable"
+        }
+    }
+
+    # clean up
+    loop f in (base.walk or_throw) f.unlink or_throw;
+    loop d in [p"{archive}/docs" p"{archive}/data" p"{archive}/images" p"{archive}/other" archive inbox base] d.rmdir or_throw;
+    printl"clean: {not base.exists}"
+}

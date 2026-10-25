@@ -347,7 +347,10 @@ concurrency_task_globals_node = (n: int, seen: mut {int: bool}):
     k = nodes[n].kind
     if k == .ident and nodes[n].aux == i32(int(SK.global)):
         t = ntype(n)
-        if not globals[int(nodes[n].sym)].is_const and not concurrency_builtin_type(t, "Atomic") and not concurrency_builtin_type(t, "TaskGroup"):
+        g = int(nodes[n].sym)
+        # (a binding nothing writes after its declaration, nor exposes, is as constant as a `const`)
+        written = globals[g].fn_written or globals[g].init_written or globals[g].exposed
+        if not globals[g].is_const and written and not concurrency_builtin_type(t, "Atomic") and not concurrency_builtin_type(t, "TaskGroup"):
             fatal(nodes[n].pos, "a task cannot read an unsynchronized global while its parent runs; capture a value or use Atomic")
     if k == .call and nodes[n].aux == 0: concurrency_task_globals(int(nodes[n].sym), seen)
     loop f in value_helper_calls(n): concurrency_task_globals(f, seen)

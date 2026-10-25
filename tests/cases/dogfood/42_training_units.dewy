@@ -1,0 +1,124 @@
+# Running and cycling training log: parse workouts, compute paces and speeds with
+# units, weekly totals, energy estimates and a temperature-adjusted pace.
+from units import m, km, kg, J, °C, °F, K
+
+const mile = 1609.344m
+const kcal = 4184J
+
+Sport:type = 'run' | 'ride'
+
+Workout:type = [
+    day:int
+    sport:Sport
+    distance:float64 * Length
+    duration:float64 * Time
+    temp:float64 * Temperature
+    pace = () => duration / distance
+    speed = () => distance / duration
+]
+
+ParseError:type = type of error & [message:string]
+
+parse_duration = (text:string):>(float64 * Time) | ParseError => {
+    let parts = text.split(":")
+    if parts.length not=? 2 return ParseError["bad duration {text}"]
+    let mins = to_int(parts[0]) ?? -1
+    let secs = to_int(parts[1]) ?? -1
+    if mins <? 0 or secs <? 0 or secs >=? 60 return ParseError["bad duration {text}"]
+    return float64(mins)*minute + float64(secs)*s
+}
+
+parse_line = (line:string):>Workout | ParseError => {
+    let f = line.split()
+    if f.length not=? 5 return ParseError["expected 5 fields: {line}"]
+    let day = to_int(f[0]) ?? 0
+    let sport:Sport = if f[1] =? "run" 'run' else if f[1] =? "ride" 'ride' else return ParseError["unknown sport {f[1]}"]
+    let dist = to_float(f[2])
+    if dist is? none return ParseError["bad distance {f[2]}"]
+    let dur = parse_duration(f[3]) or_throw
+    let t = to_float(f[4])
+    if t is? none return ParseError["bad temperature {f[4]}"]
+    return Workout[day sport dist*km dur t*°C]
+}
+
+fmt_time = (d:float64 * Time):>string => {
+    let total = d/s
+    if not (0.0 <=? total <? 1e9) return "?"
+    let whole = int(total)
+    let h = whole // 3600
+    let rest = whole % 3600
+    if h >? 0 return "{h}:{format(rest // 60 "02d")}:{format(rest % 60 "02d")}"
+    "{rest // 60}:{format(rest % 60 "02d")}"
+}
+
+fmt_pace = (p:float64 * Time / Length):>string => {
+    let secs_per_km = p*km/s
+    if not (0.0 <=? secs_per_km <? 1e9) return "--:--/km"
+    let whole = int(secs_per_km)
+    "{whole // 60}:{format(whole % 60 "02d")}/km"
+}
+
+# Heat slows you down: about 0.4% per degree above 15°C.
+heat_factor = (t:float64 * Temperature):>float64 => {
+    let over = t/°C - 15.0
+    if over <=? 0.0 return 1.0
+    1.0 + 0.004*over
+}
+
+LOG = """
+1 run 10.0 52:30 18
+2 ride 42.5 85:00 22
+3 run 5.0 24:10 12
+4 run 21.1 118:00 25
+5 ride 60.0 120:00 28
+6 swim 2.0 40:00 20
+8 run 12.0 63:00 30
+9 run 8.0 41:20 9
+"""
+
+main = () => {
+    let workouts:array<Workout> = []
+    loop line in LOG.lines {
+        if line.trim.is_empty continue
+        match parse_line(line) {
+            w:Workout => workouts.push(w)
+            e:ParseError => printl"skipped: {e.message}"
+        }
+    }
+    printl"{workouts.length} workouts"
+    loop w in workouts {
+        if w.sport =? 'run' {
+            let adjusted = w.pace / heat_factor(w.temp)
+            printl"day {w.day}: run {w.distance} in {fmt_time(w.duration)}, pace {fmt_pace(w.pace)}, heat-adjusted {fmt_pace(adjusted)} at {w.temp as °F}"
+        } else {
+            printl"day {w.day}: ride {w.distance} at {format(w.speed*3600s/km ".1f")} km/h"
+        }
+    }
+    # weekly totals
+    let weekly:dict<int float64 * Length> = []
+    loop w in workouts {
+        let week = (w.day - 1) // 7 + 1
+        if week not in? weekly weekly[week] = 0.0m
+        weekly[week] += w.distance
+    }
+    loop [week total] in weekly {
+        printl"week {week}: {total} ({format(total/mile ".1f")} mi)"
+    }
+    # energy: running ~ 1 kcal per kg per km; riding ~ 0.3
+    const mass = 70.0kg
+    let energy:float64 * Mass * Length^2 / Time^2 = 0.0J
+    loop w in workouts {
+        let per = if w.sport =? 'run' 1.0 else 0.3
+        energy += per * kcal/(kg*km) * mass * w.distance
+    }
+    printl"energy: {format(energy/kcal ".0f")} kcal"
+    let runs = [loop w in workouts if w.sport =? 'run' w]
+    if not runs.is_empty {
+        let fastest = runs.min_by((w:Workout) => w.pace/(s/km))
+        printl"fastest run: day {fastest.day} at {fmt_pace(fastest.pace)}"
+    }
+    if not workouts.is_empty {
+        let hottest = workouts.max_by((w:Workout) => w.temp/K)
+        printl"hottest: day {hottest.day} at {hottest.temp as °C}"
+    }
+}

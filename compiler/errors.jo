@@ -236,6 +236,7 @@ check_propagate = (n: int, expected: int) -> int:
     stmts = [bc_let(name, a, pos)]
     loop t in exceptions:
         ret = mk(.return_, pos)
+        or_throw_returns[pos] = true
         if t == T_NONE: nodes[ret].a = i32(mk(.none_lit, pos))
         else: nodes[ret].a = i32(bc_ident(name, pos))
         if exceptions.len() == members.len() and t == exceptions[exceptions.len() - 1]:

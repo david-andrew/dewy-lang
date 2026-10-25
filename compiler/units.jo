@@ -474,6 +474,18 @@ quantity_compound = (s: int, target: int) -> bool:
     nodes[s].b = i32(quantity_number(coerce(right, target)))
     true
 
+# (e = 0.0J then e += x*J with x a float: an exact quantity variable cannot take a float one.
+# The whole types, dimensions included, and the annotation that makes it a float quantity.)
+quantity_float_update = (s: int, target: int, tr: int):
+    if not is_quantity(target) or not dewy_at(nodes[s].pos): return
+    exact = bundled_rational_type(quantity_base(target)) or quantity_base(target) == T_MATH_INT
+    if not exact or not is_float(quantity_base(tr)) or quantity_dimension(tr) != quantity_dimension(target): return
+    place = int(nodes[s].a)
+    if nodes[place].kind != .ident: return
+    nm = name_of(int(nodes[place].name))
+    wanted = dt(mk_quantity(quantity_base(tr), quantity_dimension(target)))
+    fatal(nodes[s].pos, "'{nm}' holds an exact {dt(target)}, and this is a {dt(tr)}: a decimal literal with a unit, such as `0.0s`, is exact; write the floating type where it is made, as `let {nm}:{wanted} = ...`")
+
 # t += x and t -= x on a temperature: a point moves by a difference (a literal is read as
 # one); a difference moves by a difference.
 quantity_update_check = (pos: int, minus: bool, place: int, right: int, target: int, literal: bool):

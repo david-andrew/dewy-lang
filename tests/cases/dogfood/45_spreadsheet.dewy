@@ -1,0 +1,152 @@
+# A tiny spreadsheet: cells hold numbers or formulas like "=A1+B2*2"; evaluation
+# reports parse errors, bad references and cycles as values.
+
+ParseError:type = type of error & [message:string]
+RefError:type = type of error & [cell:string]
+CycleError:type = type of error & [cell:string]
+
+Token:type = [kind:string text:string]
+
+tokenize = (src:string):>array<Token> | ParseError => {
+    let tokens:array<Token> = []
+    let i = 0
+    let chars = src.chars
+    loop i <? chars.length {
+        let c = chars[i]
+        if c =? " " {
+            i += 1
+            continue
+        }
+        if c in? "+-*/()" {
+            tokens.push(Token["op" c])
+            i += 1
+            continue
+        }
+        if c in? "0123456789." {
+            let start = i
+            loop i <? chars.length and chars[i] in? "0123456789." i += 1
+            tokens.push(Token["num" chars[start..i).join])
+            continue
+        }
+        if c.upper() =? c and c in? "ABCDEFGHIJKLMNOPQRSTUVWXYZ" {
+            let start = i
+            i += 1
+            loop i <? chars.length and chars[i] in? "0123456789" i += 1
+            tokens.push(Token["ref" chars[start..i).join])
+            continue
+        }
+        return ParseError["unexpected '{c}' in {src}"]
+    }
+    tokens
+}
+
+Parser:type = [
+    tokens:array<Token>
+    pos:int64 = 0
+    peek = ():>Token? => tokens.get(pos)
+    advance = ():>Token? => {
+        let t = tokens.get(pos)
+        pos += 1
+        t
+    }
+    at_end = () => pos >=? tokens.length
+]
+
+Sheet:type = [
+    cells:dict<string string>
+    put = (name:string text:string):>void => { cells[name] = text }
+    names = ():>array<string> => [cells.keys...].sorted()
+]
+
+Failure:type = ParseError | RefError | CycleError
+
+# value of a cell; `visiting` holds the cells being evaluated, to find cycles
+value = (sheet:Sheet name:string visiting:set<string>):>float64 | Failure => {
+    if name in? visiting return CycleError[name]
+    let text = sheet.cells.get(name)
+    if text is? none return RefError[name]
+    if not text.startswith("=") {
+        let n = to_float(text)
+        if n is? none return ParseError["not a number: {text}"]
+        return n
+    }
+    let tokens = tokenize(text.remove_prefix("=")) or_throw
+    let p = Parser[tokens]
+    let result = expr(sheet @p set[visiting... name]) or_throw
+    if not p.at_end return ParseError["trailing input in {text}"]
+    result
+}
+
+expr = (sheet:Sheet @p:Parser visiting:set<string>):>float64 | Failure => {
+    let total = term(sheet @p visiting) or_throw
+    loop true {
+        let t = p.peek
+        if t is? none or t.kind not=? "op" or t.text not in? ["+" "-"] break
+        p.advance;
+        let rhs = term(sheet @p visiting) or_throw
+        if t.text =? "+" total += rhs else total -= rhs
+    }
+    total
+}
+
+term = (sheet:Sheet @p:Parser visiting:set<string>):>float64 | Failure => {
+    let total = factor(sheet @p visiting) or_throw
+    loop true {
+        let t = p.peek
+        if t is? none or t.kind not=? "op" or t.text not in? ["*" "/"] break
+        p.advance;
+        let rhs = factor(sheet @p visiting) or_throw
+        if t.text =? "*" total *= rhs else total /= rhs
+    }
+    total
+}
+
+factor = (sheet:Sheet @p:Parser visiting:set<string>):>float64 | Failure => {
+    let t = p.advance
+    if t is? none return ParseError["unexpected end"]
+    if t.kind =? "num" {
+        let n = to_float(t.text)
+        if n is? none return ParseError["bad number {t.text}"]
+        return n
+    }
+    if t.kind =? "ref" return value(sheet t.text visiting) or_throw
+    if t.text =? "-" return -(factor(sheet @p visiting) or_throw)
+    if t.text =? "(" {
+        let inner = expr(sheet @p visiting) or_throw
+        let close = p.advance
+        if close is? none or close.text not=? ")" return ParseError["missing )"]
+        return inner
+    }
+    ParseError["unexpected {t.text}"]
+}
+
+describe = (e:Failure):>string => match e {
+    pe:ParseError => "parse error: {pe.message}"
+    re:RefError => "no cell {re.cell}"
+    ce:CycleError => "cycle through {ce.cell}"
+}
+
+main = () => {
+    let sheet = Sheet[[]]
+    sheet.put("A1" "10")
+    sheet.put("A2" "32")
+    sheet.put("A3" "=A1+A2")
+    sheet.put("B1" "=A3*2 - (A1 - 4) / 3")
+    sheet.put("B2" "=B3+1")
+    sheet.put("B3" "=B2*2")
+    sheet.put("C1" "=A1 + Z9")
+    sheet.put("C2" "=A1 +* 2")
+    sheet.put("C3" "=A1 $ 2")
+    sheet.put("C4" "hello")
+    sheet.put("D1" "=-A1 + 2.5")
+    loop name in sheet.names {
+        let v = value(sheet name set[])
+        match v {
+            x:float64 => printl"{name} = {x}"
+            e:Failure => printl"{name}: {describe(e)}"
+        }
+    }
+    let total = 0.0
+    loop name in sheet.names total += value(sheet name set[]) ?? 0.0
+    printl"sum of good cells: {total}"
+}

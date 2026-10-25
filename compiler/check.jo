@@ -2477,6 +2477,7 @@ sink_final = 0           # (the expression ending the innermost BODY or ARM)
 sink_pack_site = 0       # (the expression where a pack is taken: a consumer sets it)
 sink_pack_hit = 0        # (... and a call of a pack function there sets this)
 sink_fn = -1             # (the sink of the function body being checked)
+or_throw_returns: {int: bool} = {}   # positions of the returns `or_throw` writes (errors.jo)
 sink_want_n = 0          # (a written `:>(T T)` body about to open: its count and type)
 sink_want_elem = 0
 sink_lambda_pack = 0     # (a lambda checked as a function type giving several values: their type)
@@ -2912,7 +2913,10 @@ sink_close = (b: int, result: int) -> int:
             first = int(sinks[i].first)
             if first == 0: first = nodes[b].pos
             if mode == SINK_BODY:
-                if sinks[i].returns != 0: fatal(first, "this expresses a value before the function's end, and the function also gives one back with `return` (line {line_col(sinks[i].returns).0}); a function expressing several values cannot `return` one yet: attach `;` to discard this value, as in `f();`")
+                if sinks[i].returns != 0:
+                    at = line_col(sinks[i].returns).0
+                    back = if or_throw_returns.has(sinks[i].returns): "`or_throw` (line {at}) gives its failure back with a `return`" else: "the function also gives one back with `return` (line {at})"
+                    fatal(first, "this expresses a value before the function's end, and {back}; a function expressing several values cannot `return` one yet: attach `;` to discard this value, as in `f();`")
                 d = int(fns[int(ctxs[cx].inst)].decl)
                 if d != 0 and nodes[d].kind == .fn_ and name_of(int(nodes[d].name)) == "main": fatal(first, "this expresses a value before main's end, and main gives back nothing (or the errors that reach it): attach `;` to discard it, as in `f();`")
             sink_flush(i)
@@ -3758,6 +3762,7 @@ compound_checked = (s: int, left: int, right: int, target: int) -> int:
     result = prune(check_expr(n, 0))
     quantity_update_right = 0
     if is_quantity(target) and quantity_point(target) and quantity_is_delta(result): fatal(nodes[s].pos, "this update leaves a difference, not a temperature point, so the point cannot hold it: subtract a difference (`5K`), or keep the difference in a new binding")
+    quantity_float_update(s, target, result)
     t = prune(target)
     if decimal_target != 0 and decimal_float_write(result, t): return last_checked
     # Built-in compound arithmetic keeps the destination's fixed width,

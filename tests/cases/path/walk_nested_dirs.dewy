@@ -1,0 +1,17 @@
+# walk and glob list the files under nested directories, never the directories
+# themselves, on every target (the web's page file system included).
+main = () => {
+    let root = p"case_walk_nested"
+    p"{root}/a/b".make_dirs;
+    p"{root}/a/one.txt".write_text("1");
+    p"{root}/a/b/two.txt".write_text("2");
+    p"{root}/top.txt".write_text("3");
+    printl(p"{root}/a".is_dir)
+    printl(root.walk)
+    printl(root.glob"**/*")
+    printl(root.glob"*")
+    loop f in (root.walk ?? []) f.unlink;
+    p"{root}/a/b".rmdir;
+    p"{root}/a".rmdir;
+    printl(root.rmdir)
+}

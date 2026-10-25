@@ -454,7 +454,8 @@ write_bytes = (path: str, b: u8[]) -> bool: write_file(path, str_from_bytes(b))
 # a directory (and not a file)
 is_dir = (path: str) -> bool:
     when TARGET == "wasm":
-        return false
+        # (the page's file system: 2 is a directory, made or holding files)
+        return __wasm_fs(4, data(path), len(path)) == 2
     else when TARGET == "windows":
         return __w32_is_dir(path)
     else when TARGET == "macos":

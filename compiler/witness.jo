@@ -389,9 +389,20 @@ wit_unknown = (n: int, b: FactBound, what: str, contract: int = 0, relation: str
     wit_cause(b, n)
     wit_context(contract)
     wit_help(relation, runtime, contract)
+    wit_counter_help(n, b)
     why = if b.reason == .missing and missing != "": "missing {missing}" else: wit_reason(b)
     if dir_defer(n, "cannot prove {what}: {why}", runtime and what != "assertion"): return
     wit_fail(nodes[n].pos, "cannot prove {what}: {why}")
+
+# (`let n = 0`, `n += 1` in a loop, then `n` given as an int64: the counter-progress
+# assumption covers 64-bit counters, not an `int` converted afterwards. O(1))
+wit_counter_help = (n: int, b: FactBound):
+    if b.reason != .loop_ or n <= 0 or nodes[n].a == 0 or not is_int(ntype(n)) or types[prune(ntype(n))].bits != 64: return
+    v = int(nodes[n].a)
+    loop nodes[v].kind == .narrow: v = int(nodes[v].a)
+    if nodes[v].kind != .ident or nodes[v].aux != i32(int(SK.local)) or prune(ntype(v)) != T_MATH_INT or not dewy_at(nodes[n].pos): return
+    name = name_of(int(nodes[v].name))
+    err_notes.push((-1, "help: or declare `{name}` a 64-bit counter where it is made (`let {name}:{dt(ntype(n))} = 0`): the counter-progress assumption covers 64-bit counters, not an `int` converted afterwards"))
 
 wit_side = (value: int, node0: int) -> WitSide:
     node = node0

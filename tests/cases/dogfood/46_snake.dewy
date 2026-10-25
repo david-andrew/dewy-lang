@@ -1,0 +1,117 @@
+# Snake on a small grid: a deterministic model (seeded food), a greedy autopilot,
+# and an ASCII renderer. The windowed front end lives elsewhere; this runs headless.
+
+const W = 16
+const H = 8
+
+Cell:type = [x:int y:int]
+Dir:type = 'up' | 'down' | 'left' | 'right'
+
+Game:type = [
+    snake:array<Cell>          # head first
+    dir:Dir
+    food:Cell
+    score:int64 = 0
+    alive:bool = true
+    ticks:int64 = 0
+    rng:Rng
+]
+
+step_of = (d:Dir):>Cell => match d {
+    <'up'> => Cell[0 -1]
+    <'down'> => Cell[0 1]
+    <'left'> => Cell[-1 0]
+    <'right'> => Cell[1 0]
+}
+
+opposite = (a:Dir b:Dir):>bool => {
+    let sa = step_of(a)
+    let sb = step_of(b)
+    sa.x =? -sb.x and sa.y =? -sb.y
+}
+
+occupied = (g:Game c:Cell):>bool => g.snake.any((s:Cell) => s =? c)
+
+place_food = (@g:Game):>void => {
+    loop true {
+        let c = Cell[g.rng.next_int(0 W) g.rng.next_int(0 H)]
+        if not occupied(g c) {
+            g.food = c
+            return
+        }
+    }
+}
+
+new_game = (seed:int64):>Game => {
+    let g = Game[snake=[Cell[4 4] Cell[3 4] Cell[2 4]] dir='right' food=Cell[0 0] rng=rng(seed)]
+    place_food(@g)
+    g
+}
+
+turn = (@g:Game d:Dir):>void => {
+    if not opposite(g.dir d) g.dir = d
+}
+
+tick = (@g:Game):>void => {
+    if not g.alive or g.snake.is_empty return
+    g.ticks += 1
+    let head = g.snake[0]
+    let s = step_of(g.dir)
+    let next = Cell[head.x + s.x head.y + s.y]
+    if next.x <? 0 or next.x >=? W or next.y <? 0 or next.y >=? H or occupied(g next) {
+        g.alive = false
+        return
+    }
+    g.snake.insert(next 0)
+    if next =? g.food {
+        g.score += 1
+        place_food(@g)
+    } else if not g.snake.is_empty {
+        g.snake.pop();
+    }
+}
+
+# greedy: prefer the direction that gets closer to the food without dying
+autopilot = (g:Game):>Dir => {
+    if g.snake.is_empty return g.dir
+    let head = g.snake[0]
+    let best:Dir = g.dir
+    let best_dist = 1000000
+    loop d in members(Dir) {
+        if opposite(g.dir d) continue
+        let s = step_of(d)
+        let c = Cell[head.x + s.x head.y + s.y]
+        if c.x <? 0 or c.x >=? W or c.y <? 0 or c.y >=? H or occupied(g c) continue
+        let dist = abs(c.x - g.food.x) + abs(c.y - g.food.y)
+        if dist <? best_dist {
+            best = d
+            best_dist = dist
+        }
+    }
+    best
+}
+
+render = (g:Game):>string => {
+    let rows = [loop y in [0..H) [loop x in [0..W) "."]]
+    let f = g.food
+    if 0 <=? f.y <? rows.length and 0 <=? f.x <? rows[f.y].length rows[f.y][f.x] = "*"
+    loop i in 0.. and c in g.snake {
+        if 0 <=? c.y <? rows.length and 0 <=? c.x <? rows[c.y].length rows[c.y][c.x] = if i =? 0 "@" else "o"
+    }
+    let lines = [loop r in rows r.join]
+    lines.join("\n")
+}
+
+main = () => {
+    let g = new_game(7)
+    printl(render(g))
+    loop g.alive and g.ticks <? 200 {
+        turn(@g autopilot(g))
+        tick(@g)
+        if g.ticks % 50 =? 0 {
+            printl"-- tick {g.ticks}, score {g.score}, length {g.snake.length}"
+            printl(render(g))
+        }
+    }
+    printl"game over at tick {g.ticks}: score {g.score}, alive {g.alive}"
+}
