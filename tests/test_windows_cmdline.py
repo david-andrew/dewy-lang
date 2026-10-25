@@ -117,7 +117,8 @@ main=()=>{
 }
 '''
 
-RUNNER = '''main=()=>{
+RUNNER = '''$runtime_checks
+main=()=>{
     let argv=args()
     let status=run(argv[1] argv[2..])
     if status is? int64 exit(status)
