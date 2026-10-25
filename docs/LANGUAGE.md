@@ -772,6 +772,10 @@ that range together with the loop's entry value; other writes still participate.
 Literal-initialized script integers that are never written also supply bounds
 inside helpers. A fixed-width value widened to `int` retains its bounds;
 guards at both inclusive `int64` endpoints also prove a conversion back to `int64`.
+An `int` that only ever holds fixed-width values or literals (a branch, a function's
+returns, a loop's running `max`) stays within `int64`. A counter that a loop changes
+at most once per iteration by a small fixed step (`n += 1`, `t += b` for a byte `b`)
+stays within its entry value plus that many steps per element or range position.
 Keeping the bits has its own
 spelling: `uint8<overflow='wrap'>(x)` is the integer modulo 2^8 (two's complement for a signed target, and
 the low bits of an `int`), so `uint64<overflow='wrap'>(int64(-1))` is `18446744073709551615`.

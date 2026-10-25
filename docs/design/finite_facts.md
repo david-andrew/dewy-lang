@@ -198,6 +198,13 @@ input array's entry length (strict or non-strict), checked on every return.
 Callers use the evaluated argument snapshot; replacing the source does not
 transfer that bound to its replacement.
 
+A mathematical `int` hull (a join, conditional or match arms, a return summary,
+`min`/`max`, a loop header) whose every input has finite signed host endpoints is
+an `int64` value; loop stability compares that representation. A private scalar
+updated by `l = l ± step` at most once per iteration of a range or array loop,
+with a literal or narrow-typed step, stays within entry + [0, trips] * step, the
+trip count bounded by the range or the length ceiling. Nothing is speculated.
+
 Scanner loops can select a relation to their condition's named scalar or array
 length, and monotone counters can retain a symbolic starting bound. These are
 candidates checked at entry and on the backedge, never assumptions from a guard.

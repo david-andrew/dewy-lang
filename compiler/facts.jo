@@ -1084,6 +1084,7 @@ struct FactSummary:
     delta: int = 0
     upper: int = -1          # scalar result <= entry array length + upper_delta
     upper_delta: int = 0
+    host: bool = false       # every scalar return has finite host endpoints
 
 fact_summaries: {int: FactSummary} = {}
 fact_summary_owner = 0
@@ -1114,6 +1115,9 @@ fact_summary_record = (s: mut FactState, r: int):
         if fact_summary_entry.len() > 0:
             same, delta = fact_summary_relation(s, lv)
     else if r != 0: value = fact_bound(s, r)
+    # (a mathematical int result of fixed-width or singleton returns is a
+    # finite int64 value; O(incident rows) per return)
+    host = r != 0 and fact_type(t) == T_MATH_INT and (not fact_summary_acc.seen or fact_summary_acc.host) and fact_host_finite(s, r)
     upper = -1
     upper_delta = 0
     if r != 0 and fact_scalar(t) and is_int(t) and t != T_U64:
@@ -1136,7 +1140,7 @@ fact_summary_record = (s: mut FactState, r: int):
         length = fact_hull(fact_summary_acc.length, length, 0)
         value = fact_hull(fact_summary_acc.value, value, 0)
         if fact_summary_acc.same != same or fact_summary_acc.delta != delta: same = -1
-    fact_summary_acc = FactSummary(length, value, true, same, delta, upper, upper_delta)
+    fact_summary_acc = FactSummary(length, value, true, same, delta, upper, upper_delta, host)
     # A hull only widens. Once it says nothing the result's own domain does
     # not, and no argument-length relation survives (once lost, it stays
     # lost), the rest of the run cannot bound anything a caller asks: stop it
@@ -1148,7 +1152,7 @@ fact_summary_record = (s: mut FactState, r: int):
 fact_summary_vacuous = (acc: FactSummary, t: int) -> bool:
     if tkind(t) == .array: return acc.length.lo <= 0 and acc.length.hi >= fact_length_max()
     d = fact_domain(t)
-    acc.value.lo <= d.lo and acc.value.hi >= d.hi and not acc.value.nz
+    acc.value.lo <= d.lo and acc.value.hi >= d.hi and not acc.value.nz and not acc.host
 
 fact_summary = (f: int) -> FactSummary:
     if let known = fact_summaries.get(f): return known
@@ -1747,9 +1751,29 @@ fact_hull_all = (s: mut FactState, a: FactState, b: FactState, count: int, at: i
 # A phi keeps a shared representation, including a fixed word's finite
 # endpoints and uint64's biased encoding. Bounds still join independently.
 # O(1); never recover a fixed type from only one predecessor.
-fact_join_term = (a: int, b: int) -> FactTerm:
+# Different representations whose values both have finite host endpoints (a
+# fixed signed or narrow word, a singleton) share int64's: the hull is finite.
+# uint64's biased encoding joins only itself. O(1) per differing binding.
+fact_join_term = (sa: FactState, a: int, sb: FactState, b: int) -> FactTerm:
     t = fact_terms[a].type
-    FactTerm(type = if t == fact_terms[b].type: t else: 0)
+    if t == fact_terms[b].type: return FactTerm(type = t)
+    FactTerm(type = if fact_signed_host(sa, a) and fact_signed_host(sb, b): T_INT else: 0)
+
+# A finite host value whose bounds are not uint64's biased encoding. O(1).
+fact_signed_host = (s: FactState, v: int) -> bool:
+    fact_type(fact_terms[v].type) != T_U64 and fact_host_value(s, v)
+
+# A value hull (a conditional expression, coalescing, match arms) keeps its
+# static type unless that is mathematical int and both incoming values have
+# finite host endpoints; then the hull is a finite int64 value. Bounded by
+# the incident rows fact_host_endpoint inspects; evaluated once per hull.
+fact_hull_type = (t: int, sa: FactState, a: int, sb: FactState, b: int) -> int:
+    if fact_type(t) != T_MATH_INT or not fact_host_finite(sa, a) or not fact_host_finite(sb, b): return t
+    T_INT
+
+fact_host_finite = (s: FactState, v: int) -> bool:
+    if v == 0 or fact_type(fact_terms[v].type) == T_U64: return false
+    fact_host_value(s, v) or fact_host_endpoint(s, v, false) and fact_host_endpoint(s, v, true)
 
 fact_join = (a: FactState, b: FactState, at: int) -> FactState:
     if not a.live: return b
@@ -1854,7 +1878,7 @@ fact_join = (a: FactState, b: FactState, at: int) -> FactState:
         pair = fact_pair_key(v, other)
         prior = fact_pair_find(left, right, pairs, v, other)
         if prior >= 0: v = merged[prior]
-        else if v != other: v = fact_new(s, fact_hull(fact_bound(a, v), fact_bound(b, other), at), fact_join_term(v, other))
+        else if v != other: v = fact_new(s, fact_hull(fact_bound(a, v), fact_bound(b, other), at), fact_join_term(a, v, b, other))
         # (the tombstone survives when both paths share it)
         r = if v == binding.value and b.bindings[i].event == binding.event and binding.event != 0: binding else: FactBinding(binding.place, v)
         if r != binding: s.bindings[i] = r
@@ -1871,7 +1895,7 @@ fact_join = (a: FactState, b: FactState, at: int) -> FactState:
         pair = fact_pair_key(v, other)
         prior = fact_pair_find(left, right, pairs, v, other)
         if prior >= 0: v = merged[prior]
-        else if v != other: v = fact_new(s, fact_hull(fact_bound(a, v), fact_bound(b, other), at), fact_join_term(v, other))
+        else if v != other: v = fact_new(s, fact_hull(fact_bound(a, v), fact_bound(b, other), at), fact_join_term(a, v, b, other))
         fact_bind(s, binding.place, v)
         if v == binding.value and b.bindings[j].event == binding.event: fact_rebind(s, binding.place, v, binding.event, binding.prior)
         if prior < 0:
@@ -1913,7 +1937,7 @@ fact_join = (a: FactState, b: FactState, at: int) -> FactState:
             pair = fact_pair_key(v, q.value)
             prior = fact_pair_find(left, right, pairs, v, q.value)
             if prior >= 0: v = merged[prior]
-            else if v != q.value: v = fact_new(s, fact_hull(fact_bound(a, v), fact_bound(b, q.value), at), fact_join_term(v, q.value))
+            else if v != q.value: v = fact_new(s, fact_hull(fact_bound(a, v), fact_bound(b, q.value), at), fact_join_term(a, v, b, q.value))
             if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(merged[cursor], selector, p.element, v))
             if prior < 0:
                 fact_pair_add(left, right, pairs, pair)
@@ -2525,7 +2549,7 @@ fact_extremum = (s: mut FactState, n: int, a: int, b: int, lower: bool) -> int:
     # finite endpoints, even when the clamped intermediate exceeded a word.
     r.wide = (x.wide or y.wide) and (r.lo == FACT_MIN or r.hi == FACT_MAX)
     r.nz = r.lo > 0 or r.hi < 0 or x.nz and y.nz
-    v = fact_new(s, r, FactTerm(.eof, a, b, n, ntype(n)))
+    v = fact_new(s, r, FactTerm(.eof, a, b, n, fact_hull_type(ntype(n), s, a, s, b)))
     if lower:
         fact_difference(s, v, a, 0, n)
         fact_difference(s, v, b, 0, n)
@@ -3289,7 +3313,10 @@ fact_loop_header = (entry: mut FactState, back: FactState, old: FactState, at: i
             # (only the contract's interval: its rows to fresh literals would
             # never settle the header)
             if refine_active: bound = ref_interval(t, bound)
-            fact_bind(s, binding.place, fact_new(s, bound, FactTerm(type = t)))
+            # (a mathematical int that entry and the backedge both hold
+            # within int64 stays there, even when widened to the domain;
+            # stability compares this representation too)
+            fact_bind(s, binding.place, fact_new(s, bound, FactTerm(type = fact_hull_type(t, source, v, predecessor, peer_value))))
     # A changing aggregate keeps the lengths and fields entry and backedge
     # share (an element write leaves its length); stability re-validates them.
     loop binding in source.bindings:
@@ -3478,7 +3505,7 @@ fact_loop_stable = (a: FactState, b: FactState) -> bool:
         if i < 0: return false
         x = fact_bound(a, binding.value)
         y = fact_bound(b, b.bindings[i].value)
-        if x.lo != y.lo or x.hi != y.hi or x.nz != y.nz: return false
+        if x.lo != y.lo or x.hi != y.hi or x.nz != y.nz or fact_terms[binding.value].type != fact_terms[b.bindings[i].value].type: return false
         # Aggregate identity carries its projections; an equal top interval
         # alone is not evidence that a changed aggregate has stabilized. Two
         # header aggregates with no projections or rows are both top.
@@ -3847,18 +3874,25 @@ fact_range_invariants = (n: int, pre: FactState, s: mut FactState, lo: int, hi: 
 
 # A bounded range can update a private scalar at most once per iteration.
 # Use declared operand ranges, not a speculative backedge: even conditional
-# updates stay within entry + [0,count] * delta. O(body nodes), demanded only
-# by static exact stores; nested loops and exposed locals remain unknown.
+# updates stay within entry + [0,count] * delta. O(body nodes); nested loops
+# and exposed locals remain unknown. Fixed-width targets are demanded only by
+# static exact stores. A mathematical int counter (`count += 1`) needs no
+# store proof; its sum bounds later narrowing of the counter.
 fact_range_sums = (n: int, s: FactState, lo: int, hi: int) -> (int, FactBound)[]:
-    out: (int, FactBound)[]
-    if not exact_proof_demands.has(fact_owner): return out
     it = int(nodes[n].a)
-    if nodes[it].b == 0: return out
+    if nodes[it].b == 0: return []
     x = fact_bound(s, lo); y = fact_bound(s, hi)
-    if x.wide or y.wide or x.lo == FACT_MIN or not fact_add_fits(y.hi, -x.lo): return out
+    if x.wide or y.wide or x.lo == FACT_MIN or y.hi == FACT_MAX or not fact_add_fits(y.hi, -x.lo): return []
     count = max(0, y.hi - x.lo)
-    if count > 1048576: return out
-    if has_flag(it, NF_INCLUSIVE): count += 1
+    if has_flag(it, NF_INCLUSIVE):
+        if count == FACT_MAX: return []
+        count += 1
+    fact_counted_sums(n, s, count)
+
+# The sums of a loop that runs at most count times (see fact_range_sums).
+fact_counted_sums = (n: int, s: FactState, count: int) -> (int, FactBound)[]:
+    out: (int, FactBound)[]
+    exact = exact_proof_demands.has(fact_owner) and count <= 1048576
     work = [int(nodes[n].b)]
     stores: (int, int)[]
     seen: {int: bool} = {}
@@ -3876,8 +3910,11 @@ fact_range_sums = (n: int, s: FactState, lo: int, hi: int) -> (int, FactBound)[]
                 if seen.has(l): bad[l] = true
                 seen[l] = true
                 store = int(nodes[e].b)
-                operation = if exact_has_store(store): fact_progress_strip(int(nodes[store].a)) else: 0
-                if operation > 0 and fact_exact_demand(store) and nodes[operation].kind == .binary and nodes[operation].aux == 0 and (nodes[operation].op == i32(int(Tok.plus)) or nodes[operation].op == i32(int(Tok.minus))) and fact_progress_same(a, int(nodes[operation].a)) and not exact_has_node(int(nodes[operation].b)):
+                operation = 0
+                if exact_has_store(store):
+                    if exact and fact_exact_demand(store): operation = fact_progress_strip(int(nodes[store].a))
+                else if fact_type(int(locals[l].type)) == T_MATH_INT: operation = fact_progress_strip(store)
+                if operation > 0 and nodes[operation].kind == .binary and nodes[operation].aux == 0 and (nodes[operation].op == i32(int(Tok.plus)) or nodes[operation].op == i32(int(Tok.minus))) and fact_progress_same(a, int(nodes[operation].a)) and not exact_has_node(int(nodes[operation].b)):
                     stores.push((l, operation))
                 else: bad[l] = true
         mask = isolation_children(k)
@@ -3901,11 +3938,17 @@ fact_range_sums = (n: int, s: FactState, lo: int, hi: int) -> (int, FactBound)[]
             if before.wide or after.wide or before.lo < after.lo or before.hi > after.hi: break
             rhs = int(nodes[rhs].a)
         delta = fact_domain(ntype(rhs))
+        # (a literal step is its own interval; a mathematical int is unbounded)
+        if nodes[rhs].kind == .int_lit and not oversized_literal(rhs) and not has_flag(rhs, NF_U64): delta = FactBound(nodes[rhs].ival, nodes[rhs].ival)
+        else if fact_type(ntype(rhs)) == T_MATH_INT: continue
         if entry.wide or delta.wide or delta.lo < -2147483648 or delta.hi > 2147483647: continue
         low = min(0, delta.lo); high = max(0, delta.hi)
         if nodes[e].op == i32(int(Tok.minus)):
             low = min(0, -delta.hi); high = max(0, -delta.lo)
+        if count > 0 and (-low > FACT_MAX / count or high > FACT_MAX / count): continue
         low *= count; high *= count
+        # (a mathematical int's endpoint sentinels mean unbounded: keep them)
+        if low != 0 and entry.lo == FACT_MIN or high != 0 and entry.hi == FACT_MAX: continue
         if not fact_add_fits(entry.lo, low) or not fact_add_fits(entry.hi, high): continue
         out.push((l, FactBound(entry.lo + low, entry.hi + high)))
     out
@@ -4937,7 +4980,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         selected = 0
         if mark & FACT_VALUE != 0 and fact_scalar(ntype(n)) and paths.yes.ids.len() < FACT_CAP and paths.no.ids.len() < FACT_CAP and fact_terms.len() < 0x80000000:
             selected = fact_terms.len()
-            fact_terms.push(FactTerm(type = ntype(n)))
+            fact_terms.push(FactTerm(type = fact_hull_type(ntype(n), paths.yes, y, paths.no, z)))
             fact_add_value(paths.yes, selected, fact_bound(paths.yes, y))
             fact_add_value(paths.no, selected, fact_bound(paths.no, z))
         if selected != 0:
@@ -4948,10 +4991,11 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             fact_selected_rows(s, paths.no, paths.yes, selected)
             return selected
         result = fact_hull(fact_bound(paths.yes, y), fact_bound(paths.no, z), n)
-        if not paths.yes.live: result = fact_bound(paths.no, z)
-        if not paths.no.live: result = fact_bound(paths.yes, y)
+        hull = fact_hull_type(ntype(n), paths.yes, y, paths.no, z)
+        if not paths.yes.live: result = fact_bound(paths.no, z); hull = fact_terms[z].type
+        if not paths.no.live: result = fact_bound(paths.yes, y); hull = fact_terms[y].type
         s = fact_join(paths.yes, paths.no, n)
-        return fact_new(s, result)
+        return fact_new(s, result, FactTerm(type = hull))
     if k == .and_ or k == .or_:
         paths = fact_condition(n, s)
         result = fact_domain(T_BOOL)
@@ -4977,8 +5021,22 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         indexed = k == .for_ and (nodes[n].aux == 1 or nodes[n].aux == 2) and nodes[n].c != 0 and files[pos_file(nodes[n].pos)].is_dewy
         if indexed: base = fact_capture(int(nodes[n].a), s)
         pushes: (int, int)[]
-        if indexed: pushes = fact_counted_pushes(n, s)
+        sums: (int, FactBound)[]
+        if indexed:
+            pushes = fact_counted_pushes(n, s)
+            # (one iteration per element of the evaluated source; every
+            # length is within the enabled address-space ceiling)
+            t = fact_type(ntype(int(nodes[n].a)))
+            trips = fact_length_max()
+            if types[t].kind == .fixed: trips = fixed_len(t)
+            else:
+                b = fact_bound(s, fact_project(s, base, -1, false, T_INT))
+                if not b.wide: trips = max(0, min(trips, b.hi))
+            sums = fact_counted_sums(n, s, trips)
         fact_changes(n, s, n)
+        loop sum in sums:
+            i = fact_binding(s, PlaceIdentity(.local, int(locals[sum.0].owner), sum.0))
+            if i >= 0: fact_set_bound(s, s.bindings[i].value, sum.1)
         after = s
         body = s
         fact_growing_lengths(body, pushes)
@@ -5385,6 +5443,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                 else:
                     b = fact_bound(s, result)
                     fact_set_bound(s, result, FactBound(max(b.lo, summary.value.lo), min(b.hi, summary.value.hi), b.nz or summary.value.nz))
+                    if summary.host and result != 0: fact_terms[result].type = T_INT
                     if summary.upper >= 0 and summary.upper < entry.len():
                         other = fact_project(s, entry[summary.upper], -1, false, T_INT)
                         fact_difference(s, result, other, summary.upper_delta, n)
@@ -5408,12 +5467,13 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             y = fact_capture(int(nodes[n].b), yes)
         z = fact_capture((if k == .coalesce: int(nodes[n].b) else: int(nodes[n].c)), s)
         result = fact_hull(fact_bound(yes, y), fact_bound(s, z), n)
-        if not yes.live: result = fact_bound(s, z)
-        if not s.live: result = fact_bound(yes, y)
+        hull = fact_hull_type(ntype(n), yes, y, s, z)
+        if not yes.live: result = fact_bound(s, z); hull = fact_terms[z].type
+        if not s.live: result = fact_bound(yes, y); hull = fact_terms[y].type
         s = fact_join(yes, s, n)
         # (an owned binding ends here; its hook may write exposed storage)
         if k == .iflet and ownership_decls.len() != 0: fact_forget(s, n, .call)
-        return fact_new(s, result)
+        return fact_new(s, result, FactTerm(type = hull))
     if k == .map_lit:
         # (each entry is inserted by a call: an unknown callee's effects)
         keys: (int, int)[]
