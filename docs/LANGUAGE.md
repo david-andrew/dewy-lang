@@ -2254,6 +2254,9 @@ is evaluated once, from left to right: `d[next()]["x"] += 1` calls `next` once. 
 `if key in? counts counts[key] += 1 else counts[key] = 1`.
 If the right-hand side changes the dictionary, the store finds the captured key
 in the current dictionary again; if that key is gone, the update fails.
+Compound updates keep the old entry value read before the right-hand side:
+`d[k] += replace()` stores that old value plus the result into the current `d`.
+The bare-call spelling `d[k] += replace` follows the same order.
 
 `values.pop(key)` removes an entry and returns its value; a missing key fails
 as `values[key]` does. `values.pop(key default=none)` returns the default for a

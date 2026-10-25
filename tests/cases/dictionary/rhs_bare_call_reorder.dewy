@@ -1,0 +1,8 @@
+# quick
+# Capture the key, not the entry position, even when the RHS is a bare call.
+$runtime_checks
+let d:dict<string int64>=["a"->10 "b"->20]
+let key="a"
+replace=():>int64=>{d=["b"->200 "a"->100]; key="b"; return 7}
+apply=()=>{d[key]+=replace; printl(d)}
+main=()=>apply()

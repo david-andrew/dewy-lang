@@ -3996,7 +3996,9 @@ pool_direct_update = (s: int, ix: int, bt: int) -> bool:
 # facts keep following it. A syntactically plain selector is checked on a copy.
 compound_selector_runs = (n: int) -> bool:
     k = nodes[n].kind
-    if k == .ident or k == .int_lit or k == .float_lit or k == .bool_lit: return false
+    # A Dewy name can invoke a function, including a captured callable. Resolve
+    # it before deciding that its selectors or destination survive the RHS.
+    if k == .int_lit or k == .float_lit or k == .bool_lit: return false
     if k == .str_lit and nkids(n) == 0: return false
     if not compound_selector_plain(n, 0): return true
     check_expr(clone(n), 0)

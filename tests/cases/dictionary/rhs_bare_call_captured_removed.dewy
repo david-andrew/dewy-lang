@@ -1,0 +1,10 @@
+# exit: 101
+$runtime_checks
+main=()=>{
+    let d:dict<string int>=["a"->10 "b"->20]
+    let apply=($capture @d)=>{
+        let replace=($capture @d):>int=>{d=["b"->200]; return 7}
+        if "a" in? d {d["a"]+=replace}
+    }
+    apply()
+}

@@ -1,0 +1,8 @@
+# A bare read-only call preserves the presence proof for the fresh lookup.
+amount=():>int=>7
+main=()=>{
+    let d:dict<string int>=["a"->10]
+    let key="a"
+    if key in? d {d[key]+=amount}
+    printl(d)
+}

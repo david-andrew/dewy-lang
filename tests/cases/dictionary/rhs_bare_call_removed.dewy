@@ -1,0 +1,7 @@
+# exit: 101
+# The pre-call membership guard cannot justify a post-call stale position.
+$runtime_checks
+let d:dict<string int64>=["a"->10 "b"->20]
+replace=():>int64=>{d=["b"->200]; return 7}
+apply=()=>{if "a" in? d {d["a"]+=replace}}
+main=()=>apply()

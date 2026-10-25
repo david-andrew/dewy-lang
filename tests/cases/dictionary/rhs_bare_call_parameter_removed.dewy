@@ -1,0 +1,6 @@
+# exit: 101
+$runtime_checks
+let d:dict<string int>=["a"->10 "b"->20]
+replace=():>int=>{d=["b"->200]; return 7}
+apply=(@x:dict<string int>)=>{if "a" in? x {x["a"]+=replace}}
+main=()=>apply(@d)

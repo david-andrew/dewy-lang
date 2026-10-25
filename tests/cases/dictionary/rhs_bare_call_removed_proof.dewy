@@ -1,0 +1,5 @@
+# The store needs a fresh presence proof after the call, just as replace().
+let d:dict<string int>=["a"->10 "b"->20]
+replace=():>int=>{d=["b"->200]; return 7}
+apply=()=>{if "a" in? d {d["a"]+=replace}}
+main=()=>apply()
