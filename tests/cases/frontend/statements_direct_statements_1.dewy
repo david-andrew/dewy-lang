@@ -1,0 +1,22 @@
+# quick
+# modes: native native-release
+# exit: 47
+main=():>void=>{
+    let value:int64=7
+    value+=5
+    value*=3
+    value//=2
+    value%=11
+    value^=2
+    value<<=1
+    value>>=1
+    $outer
+    loop true {
+        value-=1
+        if value=?48 {continue $outer}
+        break $outer
+    }
+    exit(value);
+}
+
+$runtime_checks

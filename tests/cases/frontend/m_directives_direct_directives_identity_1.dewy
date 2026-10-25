@@ -1,0 +1,42 @@
+# modes: native
+$runtime_checks
+$supported_targets = ["x86_64-linux" "aarch64-linux" "wasm32"]
+if $target =? "wasm32" {
+    width = ():>int64 => 32
+} else {
+    width = ():>int64 => 64
+}
+Entry:type = [int64 string]
+Located:type = [line:int64 column:int64]
+Labeled:type = [label:string]
+Tagged:type = Located & Labeled & [extra:bool = false  show = ():>string => "{extra}"]
+Raw:type = [p:int64 $send $sync=false]
+Action:type = <E:Effect>(<(x:int64):>int64 & E>)
+apply_one = <E:Effect>(f:Action<E> value:int64):>int64 & E => f(value)
+square = (x:int64):>int64 & no_effects => x * x
+newline = ():>string => if $target.os =? 'windows' "\r\n" else "\n"
+evens = 0,2..10
+$test(cases=[[a=1 b=2] [a=(-3) b=4]])
+commutes = (a:int64 b:int64):>void => {
+    $expect a + b =? b + a
+}
+f = ():>int64 => 5
+copy_fields = <T>(value:T) => [loop field in fields(T) $field(field.name)=value.$field(field.name)]
+main = () => {
+    if $build.mode =? 'debug' and $target.arch in? ["x86_64" "aarch64" "wasm32"] {
+        let mode = "known"
+    } else {
+        let mode = "other"
+    }
+    let bits = if $target.arch in? ["riscv64" "c"] {0} else {width() * 2}
+    let counter = [value=1 step = () => (value += 1)]
+    counter.step()
+    let collected = [f(); 7 {3 4} if bits >? 0 5]
+    let named = [$field("answer")=42]
+    let t:Tagged = [line=3 column=4 label="x"]
+    let e:Entry = [1 "a"]
+    let parent = [loop c in [1 2 3] -1]
+    let [line as l  column:int64 as c] = Located[line=1 column=2]
+    printl("{mode} {bits} {counter.value} {collected} {named.answer} {t.show()} {e[1]} {parent} {l + c}")
+    printl("{newline().length} {apply_one(@square 3)} {evens} {copy_fields(Located[5 6]).line} {$target.length >? 2}")
+}

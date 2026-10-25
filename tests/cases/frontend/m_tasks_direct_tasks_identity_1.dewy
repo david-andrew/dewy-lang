@@ -1,0 +1,60 @@
+# modes: native
+$runtime_checks
+$unsafe
+if $target.os =? "windows" {
+    width = ():>int64 => 32
+} else if $build.mode =? "debug" {
+    width = ():>int64 => 64
+    tag = ():>string => "debug"
+} else {
+    width = ():>int64 => 64
+    tag = ():>string => "release"
+}
+zeros = ((n:int64):>array<float64> => [loop i in [0..n) 0.0]) & (<T>(n:int64 fill:T):>array<T> => [loop i in [0..n) fill])
+head = <T>(xs:array<T length >? 0>):>T => xs[0]
+work = (n:int64):>int64 => n * 2
+P:type = [x:int64 y:int64]
+$test
+expectations = () => {
+    let p = P[x=1 y=2]
+    let xs = [1 2 3]
+    $expect p.x <? p.y, "ordered"
+    $expect xs.length =? 3
+    $expect not p.x =? 2
+    $expect p.x not=? 2
+    $expect (p.y) >? 1
+}
+$test
+failing = () => {
+    if false { $fail "never" }
+    if false { $fail }
+}
+main = () => {
+    let big = 18446744073709551615
+    let exact = 340282366920938463463374607431768211456
+    let negative = -18446744073709551615
+    let based = 0xFF
+    let xs = [0 1 2 3 4 5 6 7]
+    let lo = 1
+    let hi = 6
+    let p = P[x=2 y=5]
+    printl("{big} {exact} {negative} {based}")
+    printl("{0 <? lo <=? hi <? 10} {lo <? work(lo) <? hi =? 6} {p.x <? p.y =? 5}")
+    printl("{xs[0,2..]} {xs[end,end-2..0]} {xs[..]} {xs[1,3..6)}")
+    let twice = <T>(x:T) => [x x]
+    let count = 0
+    let bump = <T>(x:T $capture @count) => { count += 1; x }
+    printl("{twice(4)} {bump(1)} {bump(2)} {count}")
+    printl("{zeros(2)} {zeros(2 7)} {head(xs)} {width()} {tag()}")
+    let a = Arena[]
+    let n = $allocator(@a) { let ys = [1 2 3]; ys.length }
+    let s = $allocator(@a) "a{n}".copy()
+    concurrent {
+        let t = spawn work(21)
+        spawn work(1)
+    }
+    let total = concurrent g {
+        spawn(g) work(4)
+    }
+    printl("{n} {s} {t} {total is? Canceled}")
+}

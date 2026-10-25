@@ -478,85 +478,41 @@ of a new name left to Sloppy.
 
 ## Retiring the reference parser
 
-The direct parser (dewy_direct.jo, `dc_*`) builds checker nodes; the reference grammar
-(dewy_fast.jo, `dn_*`) builds `DewySyntax` that the projection (dewy_parse.jo, `dw_*`) turns into
-the same nodes. A direct attempt that meets a form it does not take returns 0 and the reference
-grammar re-reads that statement. `DEWY_FRONTEND=strict` stops at the first such fallback
-(`dc_fallback`; a `$target` chain's left-out arms, which `dw_target_dropped` reads as syntax, are
-not fallbacks): it is the gate for step 2. tests/test_frontend_strict.py holds valid programs that
-pass it; tests/test_frontend_strict_errors.py runs it over every error case. No golden case,
-example, ladder or library program stops anywhere, valid or not.
+The direct parser (dewy_direct.jo, `dc_*`) builds checker nodes and is the only reader of a normal
+compile; there is no `DEWY_FRONTEND` mode. The reference grammar (dewy_fast.jo, `dn_*`) and its
+projection (dewy_parse.jo, `dw_*`) remain for three uses:
+- A form the direct parser does not read (`dc_unread`): the reference grammar reads the module
+  statement again (a body checking asks for, `dw_block` of it) only to report its mistake; when it
+  reports none, the first mistake noted, else "Dewy does not read this form" (provisional wording).
+  No valid program in the suite, the examples, the ladder or the library gets there.
+- A module-level `$target` chain's left-out arms, read as syntax with `dc_enabled` off
+  (`dc_dropped_arm`) so `dw_target_dropped` notes the names they use.
+- Node builders the direct parser calls (`dw_finish_function`, `dw_range_value`, `dw_value_name`,
+  `dw_parallel_exits`, `build_setting_apply`, `metatag_fail_text`, the `dw_ffi_*` and `dw_dir_*`
+  helpers, …) and `dw_top_declarations`' handling of the compact statements it returns.
 
-Read directly since: generic lambdas in record literals and generic methods, member captures
-(`$capture @hits`, dewy_member_captures), recursive local closures, `(<value:int64>)`,
-`((a b):T)` parameters, `(a:int64 <string>)` sequence parts, proof results (`:><a <=? c>`),
-`in?` refinements over any range (dc_ref_ranges), `array<T><cond>`, `uint8<m in? 2..254>`,
-`T & ~v` in any type, wrapped overload groups, grouped literal unions (`('b' | 'a') | none`),
-`loop {…} {…}`, `[m.keys...]` as a loop source, `sum[parallel …]`, a match ending a
-comprehension's body, the `??` and braced-condition warnings, `$include_bytes(p"…") as name`
-statements and `$include_bytes(p"…") as T` casts.
-
-What still needs the reference path:
-- Diagnostics. The direct parser reports the reference's text at the reference's position. A parse
-  mistake (dn_error's) is reported at once. A projection mistake (dw_fail's, fatal's) is noted
-  (`dc_report`) and the statement read on; a module statement read through reports the first noted
-  (after deferred statements written before it), so parse mistakes later in the statement still
-  come first; a reading given up, or one inside the reference grammar's block, leaves it to the
-  projection. Where reading on would take another reading, a projection mistake is reported at once
-  (`dc_fail_now`; duplicate names, type parameters, `not` chains, `x:T => …` as an argument,
-  `loop k, v in …`). Where the reference grammar read on past what the direct grammar takes (`if c:`
-  through its colon, `x == 3` and `xs[1:2]` through the operator, `[0..n as T)` through the cast),
-  the direct parser reads the same span; its depth counts as `dn_depth` (an unbraced body adds no
-  level, a value after `=` one), so the nesting limit falls on the same token.
-- Valid forms the suite's own programs (pytest's inline sources) still re-read, found by the full
-  suite with strict as the default mode (about 150 tests): proof results with facts in a union
-  (`:>true & <a >? 0> | false & <a <=? 0>`, `:>Yes & <…> | No`), `$build.mode = '…'` and
-  `$target = …` settings, `from p"m" import (A as B), c`, `(type of error) & [...]`, effect rows on
-  parameter types (`Action<no mutates<Disk>>`), one-line records with `$__drop__`, and mistakes
-  in bundle definitions (`$a = {…}`), `$warn_if`, `$test(cases=…)`, `parallel` bodies,
-  `bad<no_effects>(1)`, `[1 2; 3 4]` in a call and `let y = $expect true`.
-- `DEWY_FRONTEND=old` (`dc_enabled` false) and `compare` (each direct statement re-read by `dn_stmt`,
-  projected and compared with `dc_same`; directive lines and settings compare their own
-  results). The `tests/test_frontend_*` files run old, direct and compare side by side.
-- Consumers that read syntax: `dw_top_declarations` for `$proof`, `$warn_if`,
-  `$explicit_allocation_failure` and `$shadowable` (`dc_marker` builds their one-node syntax),
-  module settings (`dc_setting`'s compact statement), `$target = …` / `$build.mode = …` in the main
-  file (`dw_build_setting`); a deferred statement (`dc_defer_statement`) is
-  reference syntax projected by `dw_stmt`; a module-level `$target` chain reads its left-out arms
-  with `dn_expr` to note their names (`dw_target_dropped`).
-- The formatter (dewy_fmt.jo) uses only the lexer (`dn_lex`, dewy_lex.dewy, dewy_tokens) and
-  `dw_kind_name`; the language server (ide.jo) reads checker nodes and diagnostics. Neither
-  needs the grammar or the projection.
-- lib/directives.dewy holds only bundle definitions, `$name = { $setting  $setting=false
-  $default_row = <row> }`, read by `dc_bundle` (which reports a bundle defined twice or named for
-  a setting, `$unsafe` and `$audited_wait` in one; other mistakes, the reference grammar and
-  `dw_dir_define`).
+The formatter (dewy_fmt.jo) uses only the lexer and `dw_kind_name`; the language server (ide.jo)
+reads checker nodes and diagnostics. Mistakes the direct parser reports: a parse mistake (dn_error's
+text) at once; a projection mistake (dw_fail's, fatal's) noted (`dc_report`) and reported once the
+module statement is read, or at once where reading on would take another reading (`dc_fail_now`).
+The frontend golden cases (tests/cases/frontend) were the old mode-comparing tests.
 
 Removal, in order (each step gated by the full suite, the bootstrap and same-output):
-1. Close the valid forms (done). The `(a b)` groups still routed through `dn_value` go with their
-  consumers (`$test` cases are read directly now).
-2. The direct parser reports its own mistakes (done for the golden cases): each `return 0` that
-  marks a mistake rather than another reading reports the reference's text at its position. Gate:
-  strict mode stops nowhere, every `.err` test identical. Left: the pytest programs above. A hot
-  reader (dc_expr, dc_atom, dc_body_read, dc_word, …) holds no string temporaries:
-  each costs on every call, so diagnostics and other string work live in helpers.
-3. Retire `compare` and `old`: delete the `dc_compare` paths, `dc_same*`, `DEWY_FRONTEND`; the
-  triple-mode tests keep their programs as single-mode golden tests. Gate: the full suite passes
-  with strict as the default (`dc_strict = mode == "strict" or mode == ""`). Each fallback site
-  then becomes a mistake (`fatal` at the statement, or the first noted mistake); the left-out
-  `$target` arms stay the reference grammar's, read with `dc_enabled` off (pure syntax for
-  `dw_target_dropped`).
-4. Delete the projection: dewy_parse.jo's readers of `DewySyntax` (`dw_expr`, `dw_stmt`, `dw_flow`,
-  `dw_block`, `dw_declare`, `dw_type`, `dw_top_declarations`' syntax paths, …). The node builders
-  the direct parser calls move to a node-side module first: `dw_finish_function`,
-  `dw_range_value`, `dw_bigint_value`, `dw_value_name`, `dw_receiver_field`, `dw_add_receiver`,
-  `dw_method_finish`, `dw_register_literal_methods`, `dw_target_name`/`dw_target_field_value`,
-  `dw_dir_apply`, `dw_export_at`, `dw_supported_names`, the `dw_ffi_*` helpers.
+1. Close the valid forms (done).
+2. The direct parser reports its own mistakes (done for the golden cases and the suite's
+   programs). Left: the mistakes `dc_unread` still asks the reference grammar for (about 35 of the
+   frontend golden cases: `dw_fail`'s "does not yet support …" forms, reserved names in patterns,
+   `$send=1`, lifecycle tags without a method, `concurrent` without a body, …). A hot reader (dc_expr,
+   dc_atom, dc_body_read, dc_word, …) holds no string temporaries: diagnostics live in helpers.
+3. Retire `compare` and `old` (done): `dc_same*`, the deferred statements, `dn_value` and
+   `DEWY_FRONTEND` are gone; strict is the only mode.
+4. Delete the projection once step 2 is done: dewy_parse.jo's readers of `DewySyntax` (`dw_expr`,
+   `dw_stmt`, `dw_flow`, `dw_block`, `dw_declare`, `dw_type`, `dw_top_declarations`' syntax paths,
+   …), moving the node builders above to a node-side module first.
 5. Delete the reference grammar (dewy_fast.jo's `dn_expr`, `dn_stmt`, `dn_atom`,
-  `dn_bracketed_from`, …; dewy_syntax.dewy's tree and `target_fold`). Keep the lexer, `dn_string`,
-  the token rules (dewy_grammar.dewy: `dn_power`, `dn_can_start`, `dn_juxtaposed`), the edit log
-  (`dn_edits_*`) and the file driver (`dewy_fast_file`), which the formatter, the language server
-  and the direct parser use.
+  `dn_bracketed_from`, …; dewy_syntax.dewy's tree and `target_fold`) once the dropped arms are
+  skipped by token. Keep the lexer, `dn_string`, the token rules (dewy_grammar.dewy), the edit log
+  (`dn_edits_*`) and the file driver (`dewy_fast_file`).
 
 ## Decided rules
 

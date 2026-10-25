@@ -1,0 +1,17 @@
+# quick
+# modes: native native-release
+# exit: 42
+main=():>void=>{
+    let total:int64=0
+    loop i in [0..4) {
+        if i%2=?0 {total+=i}
+        else if i=?1 {total+=10}
+        else {total+=20}
+    }
+    let count=0
+    loop count <? 2 {count+=1}
+    loop false {return} else {total+=count}
+    if total=?34 {exit(total+8)} else {return}
+}
+
+$runtime_checks

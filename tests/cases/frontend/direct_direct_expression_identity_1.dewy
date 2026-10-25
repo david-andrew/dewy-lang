@@ -1,0 +1,22 @@
+# quick
+# modes: native native-release
+# exit: 42
+Point:type=[x:int64 y:int64]
+twice=(x:int64):>int64=>x*2
+main=():>void=>exit(entry()) entry=()=>{
+    let point=Point[10 11]
+    let values=[1 2 3]
+    let callback=(x:int64):>int64=>x+1
+    let unused=2(3+4)^2
+    let signed_zero=-0.0
+    let a=twice(x=point.x)
+    let b=values[end-1]
+    let c=callback(b)
+    let text="item {c}"
+    if a >? 0 and not false {
+        return twice((point.x+point.y))
+    }
+    return 0
+}
+
+$runtime_checks

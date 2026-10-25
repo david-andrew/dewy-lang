@@ -41,22 +41,16 @@ use 'isolation.jo'
 use 'concurrency.jo'
 use 'arena.jo'
 
-# DEWY_FRONTEND=old selects the reference path; compare checks every migrated
-# value against a fresh legacy parse and projection before retaining its nodes;
-# strict stops at any statement the reference grammar would re-read (dc_fallback).
-# Unmigrated grammar remains on that reference path in the other modes.
+# The direct parser reads every module; the reference grammar (dewy_fast.jo) reads only the
+# left-out arms of a module-level `$target` chain, whose names dw_target_dropped notes: false
+# while it does.
 dc_enabled = true
-dc_selected = true     # (DEWY_FRONTEND, read once)
-dc_mode_read = false
-dc_compare = false
-dc_strict = false
 dc_literal_at = -1     # (the `(` of the module function declaration being read: dc_duplicate_parameter)
 dc_nothing = false     # (the module statement read declares nothing: `=> $intrinsic`, dn_statement)
-dc_dropped_reads = 0   # (a `$target` chain's left-out arms being read: dw_target_dropped's syntax, no fallback)
 
 # A mistake the reference grammar's projection reports once the whole statement is read: the
 # direct reading notes it (dc_report) and goes on; a module statement read through reports the first
-# (dc_flush_report, after earlier deferred statements' projection, dc_project_deferred); a
+# (dc_flush_report); a
 # statement given up, or one read inside the reference grammar's block, leaves it to the
 # projection.
 dc_report_pos = 0
@@ -117,9 +111,33 @@ dc_word_operator = (t: DewyToken) -> bool: t == .kw_and or t == .kw_or or t == .
 dc_reserved_at = (token: DewyLexeme):
     dc_report(mkpos(dn_file, token.start), dewy_reserved_text(dn_payload(token)))
 
-# The reference grammar is about to re-read what starts at token `at`: strict mode stops there.
-dc_fallback = (at: int):
-    if dc_strict and dc_dropped_reads == 0: fatal(mkpos(dn_file, dn_tokens[at].start), "the direct parser does not read this (DEWY_FRONTEND=strict)")
+# (a module function's body is being read: a statement in it read no way is reported there; not in
+# a group or region, whose reading the whole statement's report covers)
+dc_unread_here = false
+
+# The module statement being read starts at token dc_head, after dc_head_edits token edits (-1: none;
+# a body checking asks for starts at dc_body_start).
+dc_head = -1
+dc_head_edits = 0
+dc_body_start = -1
+
+# The direct parser reads no form that starts at token `at`. The mistake is the reference grammar's,
+# which reads the module statement (or the body) again only to report it (dw_top_declarations,
+# dw_block); else the first noted; else that the form is not read.
+dc_unread = (at: int):
+    pos = mkpos(dn_file, dn_tokens[at].start)
+    noted = dc_report_pos
+    text = dc_report_text
+    dc_report_pos = 0
+    if dc_head >= 0 or dc_body_start >= 0:
+        dn_edits_undo(dc_head_edits)
+        dc_enabled = false
+        dn_at = if dc_head >= 0: dc_head else: dc_body_start
+        dn_expand_lazy()
+        if dc_head >= 0: dw_top_declarations(dn_stmt())
+        else: dw_block(dn_expr(0))
+    if noted != 0: fatal(noted, text)
+    fatal(pos, "Dewy does not read this form")
 dc_depth = 0
 dc_condition_depth = -1    # (the dc_depth of an `if` condition: a `:` ends it, dc_colon_body)
 dc_head_depth = -1         # (the dc_depth of a loop head's term: `f(x) in xs` is its binding, dw_loop_head)
@@ -181,13 +199,13 @@ dc_lazy_on = false
 dc_lib_lazy = false
 
 dc_lib_lazy_allowed = (file: int) -> bool:
-    prelude_lazy and not dc_compare and dc_enabled and len(lib_root) > 0 and starts_with(files[file].path, lib_root)
+    prelude_lazy and len(lib_root) > 0 and starts_with(files[file].path, lib_root)
 
 dc_lazy_allowed = (file: int) -> bool:
     when BOOTSTRAP or TARGET != "linux" or ARCH != "x86_64":
         return false
     else:
-        if dc_eager or not dc_enabled or dc_compare or emit_workers() < 2 or shown_warnings.len() > 0: return false
+        if dc_eager or emit_workers() < 2 or shown_warnings.len() > 0: return false
         if len(files[file].src) < 100000 and env("DEWY_EMIT_FORCE") == none: return false
         if (env("DEWY_PCHECK") ?? "") == "0" or (env("DEWY_FUSED") ?? "") == "0": return false
         if target_wasm or target_arm64 or target_windows or target_macos or opt_release or dbg_on or watch_build or repl_image or lower_only or host_ir or ra_stat or len(ra_dump) > 0 or not queue_emit or ide_on or errors_only or test_mode or check_all or len(stop_after) > 0: return false
@@ -297,20 +315,18 @@ dc_force_body = (d: int):
     reports = dc_reports
     saved_now = dc_report_now
     dc_report_now = true
+    saved_head = dc_head
+    dc_head = -1
+    dc_head_edits = edits
+    dc_body_start = first
     body = dc_body()
+    if body == 0: dc_unread(first)
+    dc_head = saved_head
+    dc_body_start = -1
     dc_report_now = saved_now
     dc_fn_result = saved_result
     dc_fn_body = saved_in_body
-    if body != 0 and dc_reports != reports: dc_flush_report()
-    if body == 0:
-        dc_report_pos = 0
-        nodes.truncate(node_start)
-        lists.truncate(list_start)
-        dn_edits_undo(edits)
-        dn_at = first
-        dc_depth = 2
-        dc_fallback(first)
-        body = dw_block(dn_expr(0))
+    if dc_reports != reports: dc_flush_report()
     i = nodes.len() - 1
     loop i >= node_start:
         if nodes[i].kind == .loopx:
@@ -442,6 +458,8 @@ dc_metatag_atom = (token: DewyLexeme, pos: int) -> int:
     if width == 10 and dn_payload(token) == "allocator": return dc_allocator(token)
     if width == 5 and dn_payload(token) == "lend": return dc_lend(token)
     if width == 14 and dn_payload(token) == "include_bytes": return dc_include_bytes(pos)
+    # (`let y = $expect true`: dw_directive's mistake)
+    if (width == 7 and dn_payload(token) == "expect" or width == 5 and dn_payload(token) == "fail") and dc_report_now: return dc_fail_now(pos, "`${dn_payload(token)}` is a statement: it returns from its function when it fails, so it cannot give a value")
     -1
 
 # `$build.debug`, `$build.opt`: syntax_target_field's mistake (false for `mode`).
@@ -711,6 +729,7 @@ dc_array_literal = (pos: int) -> int:
     breaks: int[]       # (`[1 2 ; 3 4]`: the row breaks after each element, dw_rows_literal)
     rows = false
     discards: int[]     # (`[f(); 7]`: the elements an attached `;` discards)
+    pure_at: int[]      # (where those of them whose discarding does nothing are written, dw_pure)
     starts: int[]       # (where each element is written)
     flows = false
     targets = dc_targets_made
@@ -782,7 +801,9 @@ dc_array_literal = (pos: int) -> int:
         # (an attached `;` discards the element: a collector, dw_collects; a pure value's the
         # reference grammar warns of)
         if dn_peek() == .semi and not dn_tokens[dn_at].space and not dn_tokens[dn_at].newline:
-            if not dc_discardable(item): return 0
+            if not dc_discardable(item):
+                if not dc_pure(item): return 0
+                pure_at.push(mkpos(dn_file, item_start))
             dn_at += 1
             discards.push(items.len())
         items.push(item)
@@ -790,6 +811,7 @@ dc_array_literal = (pos: int) -> int:
         breaks.push(0)
     dn_comma_stop = saved
     collects = discards.len() > 0
+    if pure_at.len() > 0 and not dc_pure_discards(pure_at, rows): return 0
     if flows:
         loop item in items:
             if not has_flag(item, NF_SPREAD) and dc_multi(item): collects = true
@@ -838,6 +860,25 @@ dc_discardable = (n: int) -> bool:
     if nodes[n].kind != .call or has_flag(n, NF_SPREAD): return false
     callee = int(nodes[n].a)
     nodes[callee].kind != .ident or (nodes[callee].name != i32(dc_builtin(0)) and nodes[callee].name != i32(dc_builtin(1)))
+
+# Pure values an attached `;` discards, where each is written: dw_discard_check's warning, or its
+# mistake among rows (false).
+dc_pure_discards = (pure_at: int[], rows: bool) -> bool:
+    if rows:
+        dc_fail_now(pure_at[0], "this `;` is attached to the value before it, which discards that value and does nothing here: {DW_ROW_HINT}")
+        return false
+    loop at in pure_at: warn(at, "this `;` is attached to the value before it, which discards that value, so `[1 2; 3 4]` is `[1 3 4]`: {DW_ROW_HINT}; to drop the value, leave it out")
+    true
+
+# A value whose discarding does nothing (dw_pure): a literal, a name, or arithmetic of them.
+dc_pure = (n: int) -> bool:
+    k = nodes[n].kind
+    if k == .ident or k == .int_lit or k == .float_lit or k == .bool_lit: return true
+    if k == .str_lit: return nkids(n) == 0
+    if k == .unary: return not has_flag(n, NF_BROADCAST) and dc_pure(int(nodes[n].a))
+    if k != .binary or has_flag(n, NF_BROADCAST): return false
+    op = nodes[n].op
+    (op == i32(int(Tok.plus)) or op == i32(int(Tok.minus)) or op == i32(int(Tok.star)) or op == i32(int(Tok.slash)) or op == i32(int(Tok.caret))) and dc_pure(int(nodes[n].a)) and dc_pure(int(nodes[n].b))
 
 # `[0 {1 2} if c 3]`: a literal collecting every value its elements express, in order
 # (dw_collector); starts, where each element is written; discards, those an attached `;` discards.
@@ -2346,109 +2387,6 @@ dc_axes_end = (mark: int, read: bool) -> bool:
     dc_axis_ranges.truncate(mark)
     read
 
-# Compare semantic child links, independent of allocation order. Every scalar
-# field in a compact node participates, including flags and source positions.
-dc_same = (a: int, b: int) -> bool:
-    if a == 0 or b == 0: return a == b
-    x = nodes[a]
-    y = nodes[b]
-    if x.kind != y.kind or x.op != y.op or x.flags != y.flags or x.pos != y.pos or not dc_same_name(int(x.name), int(y.name)) or not (if (x.kind == .fn_ or x.kind == .lambda or x.kind == .tfn) and x.sval != y.sval: dc_same_row(int(x.sval), int(y.sval)) else: dc_same_name(int(x.sval), int(y.sval))) or x.ival != y.ival or f64_bits(x.fval) != f64_bits(y.fval) or x.type != y.type or x.sym != y.sym or x.aux != y.aux or x.aux2 != y.aux2 or x.mod != y.mod: return false
-    if not dc_same(int(x.a), int(y.a)) or not dc_same(int(x.b), int(y.b)) or not dc_same(int(x.c), int(y.c)) or not dc_same(int(x.d), int(y.d)): return false
-    if nkids(a) != nkids(b) or nkids2(a) != nkids2(b): return false
-    loop i in [0..nkids(a)):
-        if not dc_same(kid(a, i), kid(b, i)): return false
-    loop i in [0..nkids2(a)):
-        if not dc_same(kid2(a, i), kid2(b, i)): return false
-    true
-
-# A function's effect row, by content (each construction appends its own).
-dc_same_row = (a: int, b: int) -> bool:
-    if a <= 0 or b <= 0 or a >= effect_syntax.len() or b >= effect_syntax.len(): return false
-    x = effect_syntax[a]
-    y = effect_syntax[b]
-    if x.len() != y.len(): return false
-    loop i in [0..x.len()):
-        if x[i].kind != y[i].kind or x[i].path != y[i].path or x[i].pos != y[i].pos or x[i].negative != y[i].negative or x[i].variable != y[i].variable: return false
-    true
-
-# Hidden names a projection numbers by node or syntax index (`$parameter12`,
-# `$dewy_collection_40`) differ only in that number between the two frontends.
-dc_same_name = (a: int, b: int) -> bool:
-    if a == b: return true
-    if a <= 0 or b <= 0: return false
-    x = name_of(a)
-    y = name_of(b)
-    if len(x) == 0 or x[0] != '$': return false
-    dc_undigited(x) == dc_undigited(y)
-
-dc_undigited = (text: str) -> str:
-    out: u8[]
-    loop c in text:
-        if not is_digit(c): out.push(c)
-    str_from_bytes(out)
-
-dn_value = (minimum: int) -> int:
-    # (a bracketed value stays syntax here: `$test(cases=[...])` reads its rows)
-    if not dc_enabled or dn_peek() == .lbrack: return dn_expr(minimum)
-    start = dn_at
-    node_start = nodes.len()
-    list_start = lists.len()
-    edits = dn_edit_at.len()
-    dc_depth = 0
-    # (`name = (...) => ...` may declare a module function or a method: dw_top_declarations
-    # reads the reference grammar's function)
-    if minimum <= 30 and dc_lambda_next(): return dn_expr(minimum)
-    allocators = dw_allocators
-    targets = dc_targets_made
-    reports = dc_reports
-    report_pos = dc_report_pos
-    saved_now = dc_report_now
-    dc_report_now = false
-    value = dc_expr(minimum)
-    dc_report_now = saved_now
-    if value != 0 and nodes[value].kind == .lambda: value = 0
-    # (inside the reference grammar's statement: its projection reports the mistake)
-    if dc_reports != reports:
-        value = 0
-        dc_reports = reports
-        dc_report_pos = report_pos
-    # (`$target` in the reference grammar's value stays syntax: its `if` folds that, dw_flow)
-    if dc_targets_made != targets: value = 0
-    # (`cases=(0 1 2)`: a group of values stays syntax here too)
-    if value != 0 and nodes[value].kind == .tuple and dn_tokens[start].symbol == .lparen and dc_closing(start) == dn_at - 1: value = 0
-    # (`nonzero = int64 & ~0`: dw_top_declarations reads a refined type's syntax)
-    if value != 0 and nodes[value].kind == .binary and nodes[value].op == i32(int(Tok.amp)) and nodes[int(nodes[value].b)].kind == .not_: value = 0
-    if value == 0:
-        dn_at = start
-        nodes.truncate(node_start)
-        lists.truncate(list_start)
-        dn_edits_undo(edits)
-        dc_forget_tables(node_start)
-        return dn_expr(minimum)
-    if dc_compare:
-        stop = dn_at
-        node_stop = nodes.len()
-        list_stop = lists.len()
-        syntax_start = dewy_syntax.len()
-        dn_at = start
-        dn_edits_undo(edits, true)
-        dc_enabled = false
-        old = dn_expr(minimum)
-        dc_enabled = true
-        assert(dn_at == stop)
-        # (the projection numbers its arenas as the direct grammar did)
-        dw_allocators = allocators
-        methods = dewy_methods.len()
-        projected = dw_expr(old)
-        dewy_methods.truncate(methods)
-        if not dc_same(value, projected): fatal(mkpos(dn_file, dn_tokens[start].start), "direct expression AST differs")
-        nodes.truncate(node_stop)
-        lists.truncate(list_stop)
-        dewy_syntax.truncate(syntax_start)
-    id = dn_node(.compact_expr, "", dn_tokens[start].start)
-    dewy_syntax[id].child_left = value
-    id
-
 # Named, generic and optional annotations have a known type context. Other
 # type forms retry the reference grammar without mutating angle tokens.
 dc_annotation = (boundary: int = 10) -> int:
@@ -2654,11 +2592,36 @@ dc_closes = () -> bool: dn_peek() == .rangle or dn_edits_on and dn_closer_joined
 
 dc_grouped = 0     # (the type dc_type_primary read last in parentheses)
 
+# An effect atom where a type is (`Action<no mutates<Disk>>`, `twice<no_effects>(...)`): no_effects,
+# allocates, blocks, panics, `reads<...>`, `mutates<...>`, or one of these after `no` (dw_type's row).
+dc_effect_atom_at = (at: int) -> bool:
+    token = dn_tokens[at]
+    if token.symbol != .none: return false
+    word = dc_word(int(token.name))
+    if word == DC_NO_EFFECTS or word == DC_ALLOCATES or word == DC_BLOCKS or word == DC_PANICS: return true
+    if word == DC_READS or word == DC_MUTATES: return dn_tokens[at + 1].symbol == .langle and not dn_tokens[at + 1].space
+    if int(token.name) != dn_no_id: return false
+    next = dn_tokens[at + 1]
+    following = if next.kind == .identifier and next.symbol == .none: dc_word(int(next.name)) else: 0
+    following == DC_READS or following == DC_MUTATES or following == DC_ALLOCATES or following == DC_BLOCKS or following == DC_PANICS
+
+# Such an atom: a type naming its row (aux -8, sval the row).
+dc_effect_type = (token: DewyLexeme) -> int:
+    entries: EffectSyntax[]
+    if not dc_effect_entries(entries, true): return 0
+    effect_syntax.push(entries)
+    n = mk(.tname, mkpos(dn_file, token.start))
+    nodes[n].aux = -8
+    nodes[n].sval = i32(effect_syntax.len() - 1)
+    effects_active = true
+    n
+
 # A named type with optional type arguments, a grouped type `(A | B)`, a record type
 # `[x:T y:U]` or `[T U]`, or a function type `<(x:T):>R>`; then `?` suffixes.
 dc_type_primary = () -> int:
     token = dn_tokens[dn_at]
     n = 0
+    if token.kind == .identifier and dc_effect_atom_at(dn_at): return dc_effect_type(token)
     if token.kind == .identifier: n = dc_type_named()
     else if token.symbol == .lparen and dc_type_args > 0 and dn_tokens[dc_closing(dn_at) + 1].symbol == .returns:
         # `array<():>int64>`: a type argument may be a function type without its own angle brackets
@@ -2935,23 +2898,14 @@ dc_module_type = (token: DewyLexeme) -> int:
 
 dc_integer_name = (id: int) -> bool: name_of(id) in ["int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64"]
 
-# A parameter's refined integer type, `int64<(>? 0)>`: directly when the refinement is one the
-# direct grammar reads, else the reference grammar's.
+# A parameter's refined integer type, `int64<(>? 0)>`.
 dc_refined_parameter = () -> int:
     start = dn_at
-    node_start = nodes.len()
-    list_start = lists.len()
-    edits = dn_edit_at.len()
     dc_parameter_type = false
     direct = dc_type_named()
     dc_parameter_type = true
-    if direct != 0: return direct
-    dn_at = start
-    nodes.truncate(node_start)
-    lists.truncate(list_start)
-    dn_edits_undo(edits)
-    dc_fallback(start)
-    dw_type(dn_expr(160))
+    if direct == 0: dc_unread(start)
+    direct
 
 # `array<<(x:int64):>int64>>`: an adjacent `<<` opens two angle brackets; its first `<` is split
 # off in place (dn_double_angle), the other left for the type argument.
@@ -3031,7 +2985,7 @@ dc_type_arguments = (n0: int, word: int, opened: bool = false) -> int:
                 if predicate == 0 or dc_membership(predicate) or not dc_closes(): return 0
                 tested = predicate
                 if nodes[tested].kind == .not_: tested = int(nodes[tested].a)
-                if not (nodes[predicate].kind == .and_ or nodes[tested].kind == .binary and dc_comparison(Tok(int(nodes[tested].op)))): return 0
+                if not (nodes[predicate].kind == .and_ or nodes[tested].kind == .binary and (dc_comparison(Tok(int(nodes[tested].op))) or nodes[tested].op == i32(int(Tok.kw_in)))): return 0
                 constraint = predicate
                 continue
             # `int64<(>? 0)>`, `addr<(<? xs.length)>`, `int64<i => 0 <=? i>`: a refinement
@@ -3208,6 +3162,84 @@ dc_ref_predicate = (n: int) -> int:
     nodes[both].b = i32(dc_ref_predicate(int(nodes[n].b)))
     both
 
+# `<a >? 0 b <? a>` at its `<`: the propositions, joined by `and` (0: none, or one not read).
+dc_facts = () -> int:
+    dn_at += 1
+    predicate = 0
+    loop not dn_accept(.rangle):
+        if dn_tokens[dn_at].kind == .eof: return 0
+        dn_angles += 1
+        entry = dc_ref_predicate_read(0)
+        dn_angles -= 1
+        if entry == 0 or dc_membership(entry): return 0
+        term = dc_ref_predicate(entry)
+        if predicate == 0: predicate = term
+        else:
+            both = mk(.and_, nodes[term].pos)
+            nodes[both].a = i32(predicate)
+            nodes[both].b = i32(term)
+            predicate = both
+    predicate
+
+# A result type with a boolean arm or facts on an arm is next (`:>true & <a >? 0> | false`,
+# `:>Yes & <a >? 0> | No`), before the `=>`.
+dc_fact_result_next = () -> bool:
+    at = dn_at
+    depth = 0
+    loop true:
+        t = dn_tokens[at]
+        s = t.symbol
+        if t.kind == .eof or depth == 0 and (s == .function or s == .lbrace): return false
+        if s == .lparen or s == .lbrack or s == .langle: depth += 1
+        else if s == .rparen or s == .rbrack or s == .rangle:
+            if depth == 0: return false
+            depth -= 1
+        else if depth == 0 and (t.kind == .boolean or s == .amp and dn_tokens[at + 1].symbol == .langle): return true
+        at += 1
+    false
+
+# Such a result (dw_result_type): its arms joined left to right; a boolean arm is a bool marked in
+# result_boolean_masks, an arm's facts a ResultClause of the function `owner`.
+dc_fact_result = (owner: int) -> int:
+    pos = mkpos(dn_file, dn_tokens[dn_at].start)
+    n = dc_fact_arm(owner)
+    loop n != 0 and dn_peek() == .pipe:
+        dn_at += 1
+        right = dc_fact_arm(owner)
+        if right == 0: return 0
+        union = mk(.tunion, pos)
+        set_list(union, [n, right])
+        n = union
+    n
+
+dc_fact_arm = (owner: int) -> int:
+    token = dn_tokens[dn_at]
+    member = 0
+    tag = 0
+    if token.kind == .boolean:
+        dn_at += 1
+        tag = if int(token.name) == dn_true_id: 2 else: 1
+        result_boolean_masks[owner] = (result_boolean_masks.get(owner) ?? 0) | tag
+        result_active = true
+        refine_active = true
+        member = mk(.tname, mkpos(dn_file, token.start))
+        nodes[member].name = i32(intern("bool"))
+    else:
+        dc_effects_follow = true
+        member = dc_annotation(dn_power(.pipe))
+        dc_effects_follow = false
+        if member == 0: return 0
+    if dn_peek() != .amp or dn_tokens[dn_at + 1].symbol != .langle: return member
+    dn_at += 1
+    predicate = dc_facts()
+    if predicate == 0: return 0
+    clauses = result_syntax.get(owner) ?? []
+    clauses.push(ResultClause(member, predicate, tag))
+    result_syntax[owner] = clauses
+    result_active = true
+    refine_active = true
+    member
+
 # `in?` under `not` in a refinement's predicate, but in a contiguous range (dw_ref_predicate reads
 # only the conjunction's own memberships as slices, dc_ref_ranges; another stays a value).
 dc_membership = (n: int, top: bool = true) -> bool:
@@ -3307,63 +3339,6 @@ dc_declaration = (constant: bool, bare: bool = false) -> int:
     dc_accept_semi(not (bare and dc_unbraced))
     n
 
-# Inside a directly built module function, a braced statement the direct grammar
-# does not cover takes the reference grammar alone; the rest of the function stays
-# direct. Its projection waits until the whole declaration is parsed, so projection
-# diagnostics follow every parse diagnostic, as on the reference path. The block
-# holds a placeholder, -(k + 1) for deferred statement k, until then.
-dc_defer_result = 0         # 0 outside such a function; else its dw_fn_result
-dc_deferred_syntax: int[]
-dc_deferred_block: int[]
-dc_deferred_result: int[]
-
-dc_defer_statement = (start: int, node_start: int, list_start: int, block: int) -> int:
-    # (settings, labels and `$target` chains belong to the block's own projection)
-    if dc_defer_result == 0 or dn_tokens[start].kind == .metatag: return 0
-    dn_at = start
-    nodes.truncate(node_start)
-    lists.truncate(list_start)
-    result = dc_defer_result
-    dc_defer_result = 0
-    saved_depth = dn_depth
-    dn_depth = dc_depth
-    dc_fallback(start)
-    syntax = dn_stmt()
-    dn_depth = saved_depth
-    dc_defer_result = result
-    if dn_at == start or dw_target_live(syntax) >= 0: return 0
-    dc_deferred_syntax.push(syntax)
-    dc_deferred_block.push(block)
-    dc_deferred_result.push(result)
-    0 - dc_deferred_syntax.len()
-
-dc_project_deferred = ():
-    loop k in [0..dc_deferred_syntax.len()):
-        # (a mistake noted before this statement is reported before its projection's)
-        if dc_report_pos != 0 and dewy_syntax[dc_deferred_syntax[k]].pos > dc_report_pos: dc_flush_report()
-        outer = dw_fn_result
-        dw_fn_result = dc_deferred_result[k]
-        statement = dw_stmt(dc_deferred_syntax[k])
-        dw_fn_result = outer
-        block = dc_deferred_block[k]
-        placed = false
-        if block > 0 and block < nodes.len() and nodes[block].kind == .block:
-            loop i in [0..nkids(block)):
-                if kid(block, i) == -(k + 1):
-                    set_kid(block, i, statement)
-                    placed = true
-                    break
-        # (a statement deferred in an attempt that was abandoned would have no block left)
-        if not placed: ice("deferred statement {k} has no placeholder in block {block}")
-    dc_deferred_clear()
-
-dc_deferred_clear = (): dc_deferred_truncate(0)
-
-dc_deferred_truncate = (count: int):
-    dc_deferred_syntax.truncate(count)
-    dc_deferred_block.truncate(count)
-    dc_deferred_result.truncate(count)
-
 # A flow body is a statement block even when its braces are omitted. These
 # functions participate in the enclosing construction transaction: an unknown
 # head, label, declaration or expression retries the reference grammar.
@@ -3419,8 +3394,6 @@ dc_body_read = () -> int:
         node_start = nodes.len()
         list_start = lists.len()
         depth = dc_depth
-        deferred = dc_deferred_syntax.len()
-        syntax_start = dewy_syntax.len()
         edits = dn_edit_at.len()
         # `$runtime_checks`, `$no_nan=false`: a setting holding throughout the block, wherever
         # written (dw_dir_block); `$outer loop ...`: a loop's label (dw_block)
@@ -3442,8 +3415,6 @@ dc_body_read = () -> int:
         # `if $target.os =? "windows" { ... } else { ... }`: the compiled arm's statements, here
         # (dw_target_splice)
         if statement != 0 and dc_live_at == start and dn_tokens[start].symbol == .kw_if:
-            loop k in [deferred..dc_deferred_syntax.len()):
-                if dc_deferred_block[k] == statement: dc_deferred_block[k] = n
             loop spliced in kids(statement): statements.push(spliced)
             if not braced: break
             continue
@@ -3457,8 +3428,6 @@ dc_body_read = () -> int:
                 nodes.truncate(node_start)
                 lists.truncate(list_start)
                 dn_edits_undo(edits)
-                dc_deferred_truncate(deferred)
-                dewy_syntax.truncate(syntax_start)
                 # A failed expression may leave the recursion counter elevated.
                 dc_depth = depth
                 value = dc_expr(0)
@@ -3479,15 +3448,10 @@ dc_body_read = () -> int:
                     value = pair
                     dc_pairs_made += 1
             if value == 0:
-                # (an `if` value attempt may have deferred statements of its own bodies: they
-                # go with it, before the whole statement is deferred)
-                dc_deferred_truncate(deferred)
-                dewy_syntax.truncate(syntax_start)
-                dn_edits_undo(edits)
-                statement = if braced: dc_defer_statement(start, node_start, list_start, n) else: 0
-                if statement == 0: return 0
-                statements.push(statement)
-                continue
+                # (in a module function's braced body, a statement read no way is reported here;
+                # elsewhere the enclosing reading gives up, dc_unread)
+                if braced and dc_unread_here and dn_tokens[start].kind != .metatag: dc_unread(start)
+                return 0
             at = mkpos(dn_file, dn_tokens[start].start)
             if dc_accept_semi(braced):
                 statement = mk(.assign, at)
@@ -3534,6 +3498,8 @@ dc_body_metatag = (statements: mut int[]) -> int:
         dc_setting_values.push(value)
         dc_setting_at.push(mkpos(dn_file, tag.start))
         return 1
+    # (`$build.mode = ...`: a mistake in a body, dc_statement's dc_body_setting)
+    if (name == "target" or name == "build") and dn_tokens[dc_setting_place_end(dn_at)].symbol == .assign: return 0
     mistake = dc_body_tag(name, tag)
     if mistake != 0: return mistake
     dn_at += 1
@@ -3555,6 +3521,8 @@ dc_body_tag = (name: str, tag: DewyLexeme) -> int:
         dn_at += 1
         dn_accept(.assign)
         return 1
+    # (`$capture`, `$unsafe_assume ...` in a body: dw_metatag_fail's and dw_unimplemented's mistakes)
+    if (name == "capture" or dc_unbuilt(name)) and dc_report_now: return dc_fail_now(mkpos(dn_file, tag.start), metatag_fail_text(name)) - 1
     if name == "target" or name == "build" or name == "capture" or name == "include_bytes" or name == "shadowable" or name == "supported_targets" or dw_designed_directive(name): return -1
     next = dn_tokens[dn_at + 1]
     if next.symbol == .kw_loop: return 0
@@ -4171,17 +4139,14 @@ dc_flow = () -> int:
             fold = dc_target_fold(condition)
             if fold == -2: return 0
     if not dn_can_start(dn_tokens, dn_at): return dc_no_body(token, n, head)
-    deferred = dc_deferred_syntax.len()
     if fold >= 0 and dc_unsafe_at(dn_at): return 0
     body = dc_body()
     if body == 0: return 0
-    if fold == 0 and dc_deferred_syntax.len() != deferred: return 0
     nodes[n].b = i32(body)
     alternative = 0
     rest = 0
     rest_live = true
     if dn_accept(.kw_else):
-        deferred = dc_deferred_syntax.len()
         if dn_peek() == .kw_if or dn_peek() == .kw_match:
             rest_at = dn_at
             saved_dropping = dc_dropping
@@ -4199,7 +4164,6 @@ dc_flow = () -> int:
             if fold >= 0 and dc_unsafe_at(dn_at): return 0
             alternative = dc_body()
             if alternative == 0: return 0
-        if fold == 1 and dc_deferred_syntax.len() != deferred: return 0
         nodes[n].c = i32(alternative)
     if fold >= 0:
         # (the arms left out are read, never checked: the names they use are noted)
@@ -4245,6 +4209,8 @@ dc_parallel = (token: DewyLexeme, collect: bool) -> int:
     pos = mkpos(dn_file, token.start)
     mutable = dn_accept(.at)
     binder = dn_tokens[dn_at]
+    # (`parallel true {}`: dw_parallel's mistake)
+    if not mutable and dn_tokens[dn_at + 1].symbol != .kw_in and binder.symbol != .lparen and dc_report_now: return dc_fail_now(mkpos(dn_file, binder.start), "Dewy does not yet support a parallel loop without one bounded iterable")
     if binder.kind != .identifier or binder.symbol != .none or dn_tokens[dn_at + 1].symbol != .kw_in or collect and mutable: return 0
     if dn_reserved(int(binder.name)): dc_reserved_at(binder)
     dn_at += 2
@@ -4252,17 +4218,22 @@ dc_parallel = (token: DewyLexeme, collect: bool) -> int:
     if source == 0 or dn_power(dn_peek()) > 0 or dn_peek() == .kw_not or not dn_can_start(dn_tokens, dn_at): return 0
     param = mk(.param, mkpos(dn_file, binder.start))
     nodes[param].name = binder.name
-    saved_defer = dc_defer_result
+    saved_unread = dc_unread_here
     saved_result = dc_fn_result
-    dc_defer_result = 0
+    dc_unread_here = false
     dc_fn_result = if collect: 1 else: 0
     saved_map = dc_map_ok
     dc_map_ok = false
     body = dc_body()
     dc_map_ok = saved_map
     dc_fn_result = saved_result
-    dc_defer_result = saved_defer
-    if body == 0 or dn_peek() == .kw_else or not dc_parallel_exits(body, 0): return 0
+    dc_unread_here = saved_unread
+    if body == 0 or dn_peek() == .kw_else: return 0
+    if not dc_parallel_exits(body, 0):
+        # (dw_parallel_exits' mistakes, at once)
+        if not dc_report_now: return 0
+        dc_flush_report()
+        dw_parallel_exits(body, 0)
     fn_ = mk(.lambda, pos)
     add_flag(fn_, NF_LANG_BODY)
     if not collect and not mutable: add_flag(fn_, NF_VOID)
@@ -4824,6 +4795,15 @@ dc_function = () -> int:
         if n == 0: return 0
         dn_accept_semi()
         return n
+    # `g = x => body`: one parameter, named alone (dw_function's bare parameter)
+    bare = dn_tokens[dn_at + 2]
+    if bare.kind == .identifier and bare.symbol == .none and dn_tokens[dn_at + 3].symbol == .function and not dn_reserved(int(bare.name)) and dc_word(int(token.name)) != DC_MAIN:
+        dn_at += 2
+        dc_depth += 3
+        n = dc_function_literal(token.name, bare, bare = true)
+        if n == 0: return 0
+        dn_accept_semi()
+        return n
     if dn_tokens[dn_at + 2].symbol != .lparen: return 0
     # `twice = (*2)`: a partial application, a module function of its own (dw_function)
     if dc_partial_at(dn_at + 2):
@@ -4957,23 +4937,27 @@ dc_type_declaration = () -> int:
     token = dn_tokens[dn_at]
     if token.kind != .identifier or (token.symbol != .none and token.symbol != .kw_test) or dn_reserved(int(token.name)): return 0
     annotated = dn_tokens[dn_at + 1].symbol == .colon and dn_tokens[dn_at + 2].kind == .identifier and dn_tokens[dn_at + 2].name == i32(dn_type_id) and dn_tokens[dn_at + 3].symbol == .assign
-    minted = dn_tokens[dn_at + 1].symbol == .assign and dn_tokens[dn_at + 2].kind == .identifier and dn_tokens[dn_at + 2].name == i32(dn_type_id) and dn_tokens[dn_at + 3].symbol == .kw_of
+    # (`E = (type of error) & [...]`: the nominal type grouped, dw_declare's mint)
+    minted = dn_tokens[dn_at + 1].symbol == .assign and (dc_mint_at(dn_at + 2) or dn_tokens[dn_at + 2].symbol == .lparen and dc_mint_at(dn_at + 3))
     if not annotated and not minted: return 0
     dc_methods.clear()
     dc_method_hooks.clear()
     dn_at += if annotated: 4 else: 2
     pos = mkpos(dn_file, token.start)
-    if dn_tokens[dn_at].kind == .identifier and dn_tokens[dn_at].name == i32(dn_type_id) and dn_tokens[dn_at + 1].symbol == .kw_of:
+    grouped = dn_tokens[dn_at].symbol == .lparen and dc_mint_at(dn_at + 1)
+    if grouped: dn_at += 1
+    if dc_mint_at(dn_at):
         dn_at += 2
         n = mk(.struct_, pos)
         nodes[n].name = token.name
         names: int[]
-        if dn_peek() == .lbrack:
+        if dn_peek() == .lbrack and not grouped:
             dn_at += 1
             if not dc_record_fields(n, names): return 0
         else:
             base = dc_type_named()
             if base == 0 or nodes[base].kind != .tname or nkids(base) != 0: return 0
+            if grouped and not dn_accept(.rparen): return 0
             nodes[n].a = i32(base)
             if dn_accept(.amp):
                 if not dn_accept(.lbrack) or not dc_record_fields(n, names): return 0
@@ -5041,6 +5025,9 @@ dc_type_declaration = () -> int:
     dc_transfer_apply(n)
     n
 
+# `type of` at token `at`.
+dc_mint_at = (at: int) -> bool: dn_tokens[at].kind == .identifier and dn_tokens[at].name == i32(dn_type_id) and dn_tokens[at + 1].symbol == .kw_of
+
 # An `&` joins the declared type's operands at the top (not `int64 & ~0`, a refinement).
 dc_intersection_next = () -> bool:
     depth = 0
@@ -5077,6 +5064,8 @@ dc_intersection = (token: DewyLexeme, pos: int) -> int:
                 if hook != 0: return 0
         else:
             leaf = dn_tokens[dn_at]
+            # (`$abstract type of any & [...]`: dw_type's mistake)
+            if leaf.kind == .metatag and dc_report_now: return dc_fail_now(mkpos(dn_file, leaf.start), metatag_fail_text(dn_payload(leaf)))
             if leaf.kind != .identifier or leaf.symbol != .none: return 0
             t = dc_type_named()
             if t == 0: return 0
@@ -5181,9 +5170,10 @@ dc_record_fields = (n: int, names: mut int[]) -> bool:
         # (`$send`, `$sync=false`, `$unsafe` among the rows: the type's transfer claims, dw_transfer_row)
         if first.kind == .metatag and hook == 0 and dc_transfer_row(first): continue
         if first.kind == .metatag:
-            # (`$__drop__`, `$__copy__`, `$__move__` on a line before a method)
+            # (`$__drop__`, `$__copy__`, `$__move__` before a method, on the line before it or not)
             tag = dc_lifecycle_tag(first)
-            if tag == 0 or hook != 0 or not dn_tokens[dn_at + 1].newline: return false
+            next = dn_tokens[dn_at + 1]
+            if tag == 0 or hook != 0 or not (next.newline or next.space and next.kind == .identifier): return false
             hook = tag
             dn_at += 1
             continue
@@ -5205,12 +5195,11 @@ dc_record_fields = (n: int, names: mut int[]) -> bool:
                 if type_params.len() == 0: return false
             else: dn_at += 1
             dc_depth += 3
-            deferred = dc_deferred_syntax.len()
             saved = dc_method_body
             dc_method_body = true
             method = dc_function_literal(field.name, opening, type_params)
             dc_method_body = saved
-            if method == 0 or dc_deferred_syntax.len() != deferred or dn_peek() == .semi: return false
+            if method == 0 or dn_peek() == .semi: return false
             dc_methods.push(method)
             dc_method_hooks.push(hook)
             hook = 0
@@ -5326,10 +5315,12 @@ dc_import_mistake = (module: bool):
     if module: dn_error(dn_tokens[dn_at].start, "an `import` line takes one module: put the next on a line of its own, or take names from a module with `from m import a, b`")
     dn_error(dn_tokens[dn_at].start, "imported names are separated by commas, `import a, b`, or listed in parentheses, `import (a b)`")
 
-# The names an import selects, in order, each with an optional alias: `a, b as c` or `(a b as c)`.
+# The names an import selects, in order, each with an optional alias: `a, b as c` or `(a b as c)`;
+# a group may be one of the comma-separated names, `(A as B), c` (dw_import_words).
 dc_import_list = (imported: mut int[]) -> bool:
-    grouped = dn_accept(.lparen)
+    grouped = false
     loop true:
+        if not grouped and dn_accept(.lparen): grouped = true
         word = dn_tokens[dn_at]
         if not dc_import_word(word): return false
         dn_at += 1
@@ -5339,8 +5330,11 @@ dc_import_list = (imported: mut int[]) -> bool:
             if not dc_import_alias(dn_tokens[dn_at]): return false
             nodes[item].aux = i32(intern(dn_payload(dn_take())))
         imported.push(item)
-        if grouped and dn_accept(.rparen): return imported.len() > 0
-        if not dn_accept(.comma) and not grouped: return true
+        if grouped and dn_accept(.rparen):
+            if dn_peek() != .comma: return true
+            dn_at += 1
+            grouped = false
+        else if not dn_accept(.comma) and not grouped: return true
     true
 
 # An alias (`as void`: dw_import's mistake, a reserved word).
@@ -5679,6 +5673,9 @@ dc_reach_type = (t: int) -> bool:
     if k == .trefined: return dc_reach_type(int(nodes[t].a)) and dc_reach(int(nodes[t].b))
     false
 
+# A token an effect row's atom may start with (dw_effect_atom reports any other).
+dc_effect_atom_start = (token: DewyLexeme) -> bool: token.kind == .identifier or token.symbol == .kw_not
+
 # `:>R & no allocates & no blocks`: a function's effect row, atom by atom
 # (dw_effect_result and dw_effect_atom read the same atoms in this order).
 dc_effect_row = (owner: int) -> bool:
@@ -5926,29 +5923,19 @@ dc_function_literal = (name_id: i32, opening: DewyLexeme, type_params: int[] = [
             place_written[n] = written
             dn_edit_at.push(DN_EDIT_BIGINT - n)
             dn_edit_was.push(dn_tokens[dn_at - 1])
-        else if dn_tokens[dn_at].kind == .identifier and int(dn_tokens[dn_at].name) == dn_void_id and dn_tokens[dn_at + 1].symbol != .pipe:
+        else if dn_tokens[dn_at].kind == .identifier and int(dn_tokens[dn_at].name) == dn_void_id and dn_tokens[dn_at + 1].symbol != .pipe and not (dn_tokens[dn_at + 1].symbol == .amp and dn_tokens[dn_at + 2].symbol == .langle):
             dn_at += 1
             add_flag(n, NF_VOID | NF_WRITTEN_VOID)
         else if proof_pending and dn_peek() == .langle:
             # (`$proof` then `:><a <=? c>`: the propositions it proves, joined, dw_function)
-            dn_at += 1
-            predicate = 0
-            loop not dn_accept(.rangle):
-                if dn_tokens[dn_at].kind == .eof: return 0
-                dn_angles += 1
-                entry = dc_ref_predicate_read(0)
-                dn_angles -= 1
-                if entry == 0 or dc_membership(entry): return 0
-                term = dc_ref_predicate(entry)
-                if predicate == 0: predicate = term
-                else:
-                    both = mk(.and_, nodes[term].pos)
-                    nodes[both].a = i32(predicate)
-                    nodes[both].b = i32(term)
-                    predicate = both
+            predicate = dc_facts()
             if predicate == 0: return 0
             proof_decls[n] = predicate
             add_flag(n, NF_VOID)
+        else if dc_fact_result_next():
+            result = dc_fact_result(n)
+            if result == 0: return 0
+            nodes[n].a = i32(result)
         else:
             dc_effects_follow = true
             dc_grouped = 0
@@ -5966,9 +5953,6 @@ dc_function_literal = (name_id: i32, opening: DewyLexeme, type_params: int[] = [
     # (`() => $extern` as a value: dw_extern_finish's mistake)
     if lambda and dn_tokens[dn_at].kind == .metatag and dc_report_now and dc_lambda_extern(): return dc_extern(n, ps)
     if lambda:
-        # (a lambda's statements wait with the enclosing function's, when one is waiting)
-        enclosing = dc_defer_result
-        if enclosing != 0: dc_defer_result = if nodes[n].a != 0: 2 else: 1
         in_body = dc_fn_body
         dc_fn_body = true
         outer_result = dc_fn_result
@@ -5979,7 +5963,6 @@ dc_function_literal = (name_id: i32, opening: DewyLexeme, type_params: int[] = [
         dc_map_ok = saved_map
         dc_fn_result = outer_result
         dc_fn_body = in_body
-        dc_defer_result = enclosing
         if body == 0: return 0
         dc_depth -= 2
         return dw_finish_function(n, ps, body, name)
@@ -5999,14 +5982,14 @@ dc_function_literal = (name_id: i32, opening: DewyLexeme, type_params: int[] = [
     body = if concrete and not dc_method_body and (nodes[n].a != 0 or dn_tokens[dn_at].kind == .lazy_body and has_flag(n, NF_VOID)): dc_lazy_body() else: 0
     if body == 0 and dn_tokens[dn_at].kind == .lazy_body: dn_expand_lazy()
     if body == 0:
-        dc_defer_result = if nodes[n].a != 0: 2 else: 1
+        dc_unread_here = true
         dc_fn_body = true
         outer_result = dc_fn_result
-        dc_fn_result = dc_defer_result
+        dc_fn_result = if nodes[n].a != 0: 2 else: 1
         body = dc_body()
         dc_fn_result = outer_result
         dc_fn_body = false
-        dc_defer_result = 0
+        dc_unread_here = false
     if body == 0: return 0
     dc_depth -= 2
     dw_finish_function(n, ps, body, name)
@@ -6197,6 +6180,10 @@ dc_statement = () -> int:
             if width == 7 and dn_payload(token) == "expect" or width == 5 and dn_payload(token) == "fail": return dc_expect(token, width == 5)
             if width == 11 and dn_payload(token) == "breakpoint": return dc_breakpoint(token)
             if width == 14 and dn_payload(token) == "include_bytes": return dc_include_binding(token)
+            # (`$unsafe_assume x`: dw_unimplemented's mistake)
+            if dc_report_now and dc_unbuilt(dn_payload(token)): return dc_fail_now(pos, metatag_fail_text(dn_payload(token)))
+            place_end = dc_setting_place_end(dn_at)
+            if place_end > 0 and dn_tokens[place_end].symbol == .assign: return dc_body_setting(place_end)
             return dc_assertion(token)
         dn_at += 1
         n = dc_statement()
@@ -6434,6 +6421,11 @@ dc_lone_value = (at: int) -> bool:
 # `$assert condition`, `$runtime_assert condition, message`, or either with its arguments
 # listed, `$assert(condition, "message")`: the statement calling the intrinsic, as
 # dw_directive makes it. Other directives, settings and labels take the reference grammar.
+dc_assert_alone = (token: DewyLexeme, runtime: bool) -> int:
+    name = "assert"
+    if runtime: name = "runtime_assert"
+    dn_error(token.start, "`${name}` needs a condition: `${name} condition` or `${name} condition, \"message\"`")
+
 dc_assertion = (token: DewyLexeme) -> int:
     source = files[dn_file].src
     width = token.stop - token.start - 1
@@ -6442,7 +6434,8 @@ dc_assertion = (token: DewyLexeme) -> int:
     pos = mkpos(dn_file, token.start)
     dn_at += 1
     next = dn_tokens[dn_at]
-    if next.newline or not dn_can_start(dn_tokens, dn_at): return 0
+    # (`$assert` alone: dn_directive's mistake)
+    if next.newline or not dn_can_start(dn_tokens, dn_at): return dc_assert_alone(token, runtime)
     listed = next.symbol == .lparen and not next.space
     if listed: dn_at += 1
     first = dn_tokens[dn_at].start
@@ -6511,16 +6504,6 @@ dc_marker = (token: DewyLexeme) -> int:
     dn_expand_lazy()
     dn_at += 1
     id = dn_node(token.kind, name, token.start, name = token.name)
-    if dc_compare:
-        stop = dn_at
-        syntax_start = dewy_syntax.len()
-        dn_at = start
-        dc_enabled = false
-        old = dn_stmt()
-        dc_enabled = true
-        assert(dn_at == stop)
-        if dewy_syntax[old].kind != .metatag or dewy_syntax[old].text != name or dewy_syntax[old].pos != dewy_syntax[id].pos: fatal(mkpos(dn_file, token.start), "direct marker differs")
-        dewy_syntax.truncate(syntax_start)
     id
 
 # `$test(cases=…)`, `$export(name='…')` or `$supported_targets = [...]` on a line of its own at the
@@ -6549,26 +6532,6 @@ dc_directive_line = (token: DewyLexeme) -> int:
         nodes.truncate(node_start)
         lists.truncate(list_start)
         return 0
-    if dc_compare:
-        stop = dn_at
-        syntax_start = dewy_syntax.len()
-        node_stop = nodes.len()
-        dn_at = start
-        dc_enabled = false
-        old = dn_stmt()
-        dc_enabled = true
-        assert(dn_at == stop)
-        same = false
-        if name == "test": same = dc_same(n, dw_test_spec(dw_test_tag(old)))
-        else if name == "export": same = name_of(int(nodes[n].sval)) == (dw_ffi_options(old, "export", ["name"]).get("name") ?? "")
-        else:
-            list = dw_unwrap(dw_child(old, 2))
-            same = dw_nchildren(list) == nkids(n)
-            loop i in 0.. and entry in dw_children(list):
-                if same and dw_target_literal(entry) != name_of(int(nodes[kid(n, i)].sval)): same = false
-        if not same: fatal(pos, "direct directive differs")
-        nodes.truncate(node_stop)
-        dewy_syntax.truncate(syntax_start)
     id = dn_node(.compact_stmt, "$" + name, token.start)
     dewy_syntax[id].child_left = n
     id
@@ -6576,7 +6539,11 @@ dc_directive_line = (token: DewyLexeme) -> int:
 # `$test(` then its cases, through `)` (dw_test_spec): the test, its function still to come.
 dc_test_cases = (pos: int) -> int:
     key = dn_tokens[dn_at]
-    if key.kind != .identifier or dn_payload(key) != "cases" or dn_tokens[dn_at + 1].symbol != .assign: return 0
+    # (dw_test_spec's mistakes, at once)
+    if key.symbol == .rparen: fatal(pos, DC_TEST_USAGE)
+    if key.kind != .identifier or dn_payload(key) != "cases" or dn_tokens[dn_at + 1].symbol != .assign:
+        if key.kind == .identifier and key.symbol == .none and dn_tokens[dn_at + 1].symbol == .assign: fatal(mkpos(dn_file, key.start), DC_TEST_USAGE)
+        return 0
     dn_at += 2
     n = mk(.test_, pos)
     nodes[n].aux = 1
@@ -6600,7 +6567,7 @@ dc_test_cases = (pos: int) -> int:
             case = mk(.block, mkpos(dn_file, element.start))
             set_list(case, args)
             cases.push(case)
-        if cases.len() == 0: return 0
+        if cases.len() == 0: fatal(mkpos(dn_file, opening.start), "`$test(cases=…)` needs at least one case")
         set_list(n, cases)
     else:
         value = dc_expr(0)
@@ -6608,6 +6575,8 @@ dc_test_cases = (pos: int) -> int:
         nodes[n].a = i32(value)
     if not dn_accept(.rparen): return 0
     n
+
+DC_TEST_USAGE = "`$test` takes its cases as `$test(cases=(1 2 3))` or `$test(cases=[[a=1 b=2] [a=3 b=4]])`"
 
 # `$export(` then `name='c_name'` or nothing, through `)` (dw_export_begin): the name as a string.
 dc_export_name = (pos: int) -> int:
@@ -6661,14 +6630,16 @@ dc_bundle = (token: DewyLexeme) -> int:
     read = true
     loop read and not dn_accept(.rbrace):
         member = dn_tokens[dn_at]
-        if member.kind != .metatag: read = false
+        # (dw_dir_define's mistakes, at once)
+        if member.kind != .metatag: fatal(mkpos(dn_file, member.start), "a bundle lists settings: `$name`, `$name=false`, or `$default_row = <effect row>`")
         else:
             text = dn_payload(member)
             pos = mkpos(dn_file, member.start)
             dn_at += 1
             if text == "default_row":
-                if bundle.row != 0 or not dn_accept(.assign): read = false
+                if bundle.row != 0 or not dn_accept(.assign): fatal(pos, "`$default_row` takes one effect row, as written after `&` on a function: `$default_row = no allocates`")
                 else:
+                    if not dc_effect_atom_start(dn_tokens[dn_at]): fatal(mkpos(dn_file, dn_tokens[dn_at].start), "effect pilot requires reads<place>, mutates<place>, or no_effects")
                     entries: EffectSyntax[]
                     # (a bundle's row demands what it excludes only where it is applied: dir_apply_rows)
                     saved_demand = effect_panics_demanded
@@ -6681,17 +6652,20 @@ dc_bundle = (token: DewyLexeme) -> int:
                 enabled = 1
                 if dn_accept(.assign):
                     value = dn_tokens[dn_at]
-                    if value.kind != .boolean: read = false
+                    if value.kind != .boolean:
+                        if not dc_lone_value(dn_at): read = false
+                        else if text != "unsafe" and text != "audited_wait": fatal(mkpos(dn_file, value.start), "`${text}` takes a literal true or false")
                     else if int(value.name) != dn_true_id: enabled = 0
                     dn_at += 1
                 if text == "unsafe" and read: fatal(pos, "`$unsafe` cannot be bundled: write it where the unsafe code is, so each boundary is visible")
                 if text == "audited_wait" and read: fatal(pos, "`$audited_wait` cannot be bundled: write it in each audited adapter, so each audit is visible")
                 else if text == "explicit_allocation_failure":
-                    if enabled != 1: read = false
+                    if enabled != 1 and read: fatal(pos, "a bundle can turn `$explicit_allocation_failure` on, not off: it is a module policy")
                     bundle.allocation_failure = true
                 # (any other name is a bundle it includes, defined before or after: dir_bundle_resolve)
                 else if not dir_builtin(text):
-                    if dw_dir_known(text) or enabled != 1: read = false
+                    if dw_dir_known(text) and read: fatal(pos, "a bundle lists builtin settings (`$runtime_checks`, `$explicit_copies`, `$no_nan`, …), other bundles and `$default_row`, not `${text}`")
+                    if enabled != 1 and read: fatal(pos, "a bundle includes another bundle whole: `${text}`, not `${text}=false`")
                     bundle.includes.push(intern(text))
                     bundle.include_at.push(pos)
                 else:
@@ -6705,36 +6679,40 @@ dc_bundle = (token: DewyLexeme) -> int:
         effect_syntax.truncate(rows)
         effect_blocks_demanded = blocks
         return 0
-    if dc_compare:
-        stop = dn_at
-        syntax_start = dewy_syntax.len()
-        dn_at = start
-        dc_enabled = false
-        old = dn_stmt()
-        dc_enabled = true
-        assert(dn_at == stop)
-        parts = dw_dir_parts(old)
-        made = dir_bundles.len()
-        dw_dir_define(name, parts.0, parts.1)
-        theirs = dir_bundles[made]
-        dir_bundles.truncate(made)
-        same = theirs.name == bundle.name and dc_same_ints(theirs.settings, bundle.settings) and dc_same_ints(theirs.values, bundle.values) and theirs.at == bundle.at and dc_same_ints(theirs.includes, bundle.includes) and dc_same_ints(theirs.include_at, bundle.include_at) and theirs.allocation_failure == bundle.allocation_failure and (theirs.row == 0) == (bundle.row == 0)
-        if same and bundle.row != 0:
-            mine = effect_syntax[bundle.row]
-            other = effect_syntax[theirs.row]
-            same = mine.len() == other.len()
-            loop i in [0..mine.len()):
-                if same and (mine[i].kind != other[i].kind or not dc_same_ints(mine[i].path, other[i].path) or mine[i].pos != other[i].pos or mine[i].negative != other[i].negative or mine[i].variable != other[i].variable): same = false
-        if not same: fatal(bundle.at, "direct bundle differs")
-        dewy_syntax.truncate(syntax_start)
     dir_bundles.push(bundle)
     dn_node(.compact_stmt, "$nothing", token.start)
 
-dc_same_ints = (a: int[], b: int[]) -> bool:
-    if a.len() != b.len(): return false
-    loop i in [0..a.len()):
-        if a[i] != b[i]: return false
-    true
+# A directive of the design not built yet, written as a statement (dw_unimplemented's).
+dc_unbuilt = (name: str) -> bool: name == "unsafe_assume" or name == "abstract" or name == "no_prelude"
+
+# A tag no top-level form takes when set (`$frob = 3`): dw_metatag_fail reports it.
+dc_tag_mistake = (name: str) -> bool: not dw_dir_name(name) and not dw_dir_known(name) and name != "supported_targets" and name != "target" and name != "build" and name != "export" and name != "test"
+
+# `$warn_if condition "message"` on the line before a module function (dw_warn_if_attr): a
+# compact statement holding the attribute the function takes (dw_top_declarations).
+dc_warn_if = (token: DewyLexeme) -> int:
+    if token.stop - token.start != 8 or dn_payload(token) != "warn_if": return 0
+    pos = mkpos(dn_file, token.start)
+    dn_at += 1
+    if dn_tokens[dn_at].newline or not dn_can_start(dn_tokens, dn_at): fatal(pos, "`$warn_if` takes a condition and a message: `$warn_if condition \"message\"`")
+    saved = dn_comma_stop
+    dn_comma_stop = true
+    condition = dc_expr(0)
+    if condition == 0: return 0
+    dn_accept(.comma)
+    if dn_tokens[dn_at].newline or not dn_can_start(dn_tokens, dn_at): return dn_error(token.start, "`$warn_if` needs a message after its condition: `$warn_if condition \"message\"`")
+    written = dn_tokens[dn_at]
+    message = dc_expr(0)
+    dn_comma_stop = saved
+    if message == 0: return 0
+    if nodes[message].kind != .str_lit or written.kind != .quoted and written.kind != .rawquoted: fatal(mkpos(dn_file, written.start), "a `$warn_if` message is a string literal: the compiler shows it")
+    next = dn_tokens[dn_at]
+    if next.kind != .eof and not next.newline: return 0
+    at = dw_ffi_attr("warn_if", condition, pos)
+    nodes[at].b = i32(message)
+    id = dn_node(.compact_stmt, "$warn_if", token.start)
+    dewy_syntax[id].child_left = at
+    id
 
 dc_setting = (token: DewyLexeme) -> int:
     name = dn_payload(token)
@@ -6746,25 +6724,68 @@ dc_setting = (token: DewyLexeme) -> int:
         if value.newline: return 0
         if value.kind != .boolean:
             # (`$explicit_copies = 1`: dw_dir_boolean's mistake)
-            if dc_lone_value(at + 1): return dc_fail_now(mkpos(dn_file, value.start), "`${name}` takes a literal true or false")
+            if dc_lone_value(at + 1) or value.symbol == .lbrace and dir_builtin(name): return dc_fail_now(mkpos(dn_file, value.start), "`${name}` takes a literal true or false")
             return 0
         if int(value.name) != dn_true_id: enabled = 0
         at += 2
     next = dn_tokens[at]
     if next.kind != .eof and not (next.newline and dn_power(next.symbol) == 0 and next.symbol != .kw_not and next.symbol != .semi): return 0
-    if dc_compare:
-        syntax_start = dewy_syntax.len()
-        dc_enabled = false
-        old = dn_stmt()
-        dc_enabled = true
-        assert(dn_at == at)
-        parts = dw_dir_parts(old)
-        if parts.0 == 0 or dewy_syntax[parts.0].text != name or dw_dir_boolean(name, parts.1) != enabled or dewy_syntax[parts.0].pos != mkpos(dn_file, token.start): fatal(mkpos(dn_file, token.start), "direct setting differs")
-        dewy_syntax.truncate(syntax_start)
     dn_at = at
     id = dn_node(.compact_stmt, name, token.start)
     dewy_syntax[id].child_right = enabled
     id
+
+# Where `$target`, `$build` or a member of either written at token `at` ends (the token after it):
+# -1 for anything else.
+dc_setting_place_end = (at: int) -> int:
+    token = dn_tokens[at]
+    width = token.stop - token.start
+    if not (width == 7 and dn_payload(token) == "target" or width == 6 and dn_payload(token) == "build"): return -1
+    dot = dn_tokens[at + 1]
+    member = dn_tokens[at + 2]
+    if dot.symbol == .dot and not dot.space and not member.space and member.kind == .identifier: return at + 3
+    at + 1
+
+# How the setting place ending before token `place_stop` is written: `$target`, `$build`, `$build.mode`.
+dc_setting_text = (place_stop: int) -> str:
+    start = if dn_tokens[place_stop - 1].kind == .metatag: place_stop - 1 else: place_stop - 3
+    text = "$" + dn_payload(dn_tokens[start])
+    if place_stop - start == 3: text = text + "." + dn_payload(dn_tokens[place_stop - 1])
+    text
+
+# `$build.mode = 'release'` or `$target = 'aarch64-linux'` at the top of a module: checked and
+# applied where it is (dw_build_setting); a statement declaring nothing. 0 for another form.
+dc_build_setting = () -> int:
+    token = dn_tokens[dn_at]
+    place_stop = dc_setting_place_end(dn_at)
+    if place_stop < 0: return 0
+    target = dn_payload(token) == "target"
+    assigned = dn_tokens[place_stop].symbol == .assign
+    if target and not assigned: return 0
+    pos = mkpos(dn_file, token.start)
+    text = dc_setting_text(place_stop)
+    if text == "$target.arch" or text == "$target.os": fatal(pos, "`{text}` is part of the target: set the whole target, as `$target = 'aarch64-linux'`")
+    if text == "$build": fatal(pos, "`$build` is set one member at a time: `$build.mode = 'release'`")
+    if text != "$target" and text != "$build.mode":
+        # (`$build.debug`: syntax_target_field's mistake)
+        if target or not dc_build_member(dn_tokens[place_stop - 1], pos): return 0
+        dc_flush_report()
+    if not assigned: fatal(pos, "`$build.mode` is set to 'debug' or 'release': `$build.mode = 'release'`")
+    value = dn_tokens[place_stop + 1]
+    after = dn_tokens[place_stop + 2]
+    literal = if value.kind == .quoted and dc_plain_quote(value) or value.kind == .rawquoted: dn_string(value, true) else: 0
+    if literal == 0 or nodes[literal].kind != .str_lit or nkids(literal) > 0 or after.kind != .eof and not after.newline:
+        example = if target: "aarch64-linux" else: "release"
+        fatal(mkpos(dn_file, value.start), "`{text}` is set to a name in quotes, as `{text} = '{example}'`")
+    build_setting_apply(target, text, pos, mkpos(dn_file, value.start), name_of(int(nodes[literal].sval)))
+    dn_at = place_stop + 2
+    dn_node(.compact_stmt, "$nothing", token.start)
+
+# `$build.mode = ...` in a body (dw_stmt's mistake, noted): the value read on.
+dc_body_setting = (place_stop: int) -> int:
+    dc_report(mkpos(dn_file, dn_tokens[dn_at].start), "`{dc_setting_text(place_stop)}` is set at the top level of the program's main file, on a line of its own")
+    dn_at = place_stop + 1
+    dc_expr(0)
 
 dn_statement = (top: bool = false) -> int:
     if not dc_enabled: return dn_stmt()
@@ -6775,9 +6796,14 @@ dn_statement = (top: bool = false) -> int:
     read
 
 dn_statement_read = (top: bool) -> int:
+    if top:
+        dc_head = dn_at
+        dc_head_edits = dn_edit_at.len()
     # (`test "adds" { ... }`: dn_stmt's mistake, at once)
     if dn_tokens[dn_at].symbol == .kw_test and dc_test_block(dn_at): dn_error(dn_tokens[dn_at].start, "a test is a function marked `$test` on the line before it: `$test` then `let adds_numbers = () => $expect add(20 22) =? 42`")
     if top and dn_tokens[dn_at].kind == .metatag:
+        built = dc_build_setting()
+        if built != 0: return built
         setting = dc_setting(dn_tokens[dn_at])
         if setting != 0: return setting
         marker = dc_marker(dn_tokens[dn_at])
@@ -6788,6 +6814,11 @@ dn_statement_read = (top: bool) -> int:
         if bundle != 0:
             dc_flush_report()
             return bundle
+        soft = dc_warn_if(dn_tokens[dn_at])
+        if soft != 0: return soft
+        # (`$frob = 3`, `$no_prelude = true`, `$bogus` alone: dw_metatag_fail's mistake)
+        alone = dn_tokens[dn_at + 1].kind == .eof or dn_tokens[dn_at + 1].newline and dn_tokens[dn_at + 1].symbol != .kw_loop and dn_power(dn_tokens[dn_at + 1].symbol) == 0
+        if (alone or dn_tokens[dn_at + 1].symbol == .assign and dn_tokens[dn_at + 2].symbol != .lbrace) and dc_tag_mistake(dn_payload(dn_tokens[dn_at])): return dc_fail_now(mkpos(dn_file, dn_tokens[dn_at].start), metatag_fail_text(dn_payload(dn_tokens[dn_at])))
     # (`$unsafe` then a declaration: its boundary covers the declaration, dw_top_declarations)
     head = dn_at
     if top and dc_unsafe_at(dn_at): dn_at += 1
@@ -6797,7 +6828,6 @@ dn_statement_read = (top: bool) -> int:
     edits = dn_edit_at.len()
     dc_depth = 0
     value = 0
-    allocators = dw_allocators
     report_pos = dc_report_pos
     reports = dc_reports
     if top:
@@ -6826,16 +6856,14 @@ dn_statement_read = (top: bool) -> int:
             value = dc_function()
             if dc_nothing:
                 dc_nothing = false
-                if value == 0 or head != start or dc_deferred_syntax.len() > 0: value = 0
+                if value == 0 or head != start: value = 0
                 else: return dc_declares_nothing(head, node_start, list_start, edits)
-        if value != 0: dc_project_deferred()
-        else:
+        if value == 0:
             dn_edits_undo(edits)
             dn_at = start
             nodes.truncate(node_start)
             lists.truncate(list_start)
             dewy_syntax.truncate(syntax_start)
-            dc_deferred_clear()
             dc_made.clear()
             dc_forget_tables(node_start)
             dc_depth = 0
@@ -6862,72 +6890,9 @@ dn_statement_read = (top: bool) -> int:
         value = dc_expression_statement(mkpos(dn_file, dn_tokens[head].start), mkpos(dn_file, dn_tokens[start].start), read)
     dc_value = 0
     dc_value_start = -1
-    # (a statement in the reference grammar's block: its projection reports the mistake)
-    if value != 0 and dc_reports != reports and not top: value = 0
-    if value == 0:
-        dc_report_pos = report_pos
-        dc_reports = reports
-        dn_at = head
-        nodes.truncate(node_start)
-        lists.truncate(list_start)
-        dn_edits_undo(edits)
-        dc_forget_tables(node_start)
-        dn_expand_lazy()
-        dc_fallback(head)
-        syntax = dn_stmt()
-        if top: dn_edits_clear(edits)
-        return syntax
+    if value == 0: dc_unread(head)
     if head != start: dc_unsafe_scope(mkpos(dn_file, dn_tokens[head].start))
     if top and dc_reports != reports: dc_flush_report()
-    if dc_compare:
-        stop = dn_at
-        node_stop = nodes.len()
-        list_stop = lists.len()
-        syntax_start = dewy_syntax.len()
-        dn_at = head
-        dn_edits_undo(edits, true)
-        methods = dewy_methods.len()
-        dc_enabled = false
-        old = dn_stmt()
-        dc_enabled = true
-        assert(dn_at == stop)
-        dw_allocators = allocators
-        made = if dc_made.len() > 0: dc_made else: [value]
-        if top:
-            # (a pending `$export`, `$warn_if` or `$proof` marks the retained declaration, not this one)
-            saved_export = dw_export_pos
-            saved_warn = dw_warn_if_pending
-            saved_proof = proof_pending
-            dw_export_pos = 0
-            dw_warn_if_pending = []
-            # (a pending `$proof` reads the discarded projection's result as propositions too: its
-            # entries go below)
-            # (and the discarded projection's lifecycle hooks and member tables)
-            saved_hooks = ownership_decls
-            saved_roles = ownership_hooks
-            saved_members = dewy_type_members
-            declarations = dw_top_declarations(old)
-            dw_export_pos = saved_export
-            dw_warn_if_pending = saved_warn
-            proof_pending = saved_proof
-            ownership_decls = saved_hooks
-            ownership_hooks = saved_roles
-            dewy_type_members = saved_members
-            if declarations.len() != made.len(): fatal(mkpos(dn_file, dn_tokens[start].start), "direct declaration count differs")
-            loop i in [0..made.len()):
-                if not dc_same(made[i], declarations[i]): fatal(mkpos(dn_file, dn_tokens[start].start), "direct statement AST differs")
-                # (the discarded declaration's type tables)
-                dewy_decl_members.remove(declarations[i])
-                dewy_decl_methods.remove(declarations[i])
-                struct_components.remove(declarations[i])
-                transfer_tags.remove(declarations[i])
-                transfer_claim_pos.remove(declarations[i])
-                if saved_proof: proof_decls.remove(declarations[i])
-        else if not dc_same(value, dw_stmt(old)): fatal(mkpos(dn_file, dn_tokens[start].start), "direct statement AST differs")
-        dewy_methods.truncate(methods)
-        nodes.truncate(node_stop)
-        lists.truncate(list_stop)
-        dewy_syntax.truncate(syntax_start)
     if top: dn_edits_clear(edits)
     id = dn_node(.compact_stmt, "", dn_tokens[head].start)
     dewy_syntax[id].child_left = value
@@ -6959,15 +6924,6 @@ dc_declares_nothing = (head: int, node_start: int, list_start: int, edits: int) 
     dn_edits_undo(edits)
     nodes.truncate(node_start)
     lists.truncate(list_start)
-    if dc_compare:
-        syntax_start = dewy_syntax.len()
-        dn_at = head
-        dc_enabled = false
-        old = dn_stmt()
-        dc_enabled = true
-        assert(dn_at == stop)
-        if dw_top_declarations(old).len() != 0: fatal(mkpos(dn_file, dn_tokens[head].start), "direct statement declarations differ")
-        dewy_syntax.truncate(syntax_start)
     dn_at = stop
     dn_node(.compact_stmt, "$nothing", dn_tokens[head].start)
 
@@ -6988,10 +6944,10 @@ dc_concurrent = (token: DewyLexeme, transparent: bool) -> int:
         dn_at += 1
         if dn_peek() != .lbrace: return 0
     dw_task_groups.push(name)
-    saved_defer = dc_defer_result
-    dc_defer_result = 0
+    saved_unread = dc_unread_here
+    dc_unread_here = false
     body = dc_body()
-    dc_defer_result = saved_defer
+    dc_unread_here = saved_unread
     dw_task_groups.pop()
     if body == 0 or not dc_flow_ends(): return 0
     dw_task_group(pos, name, serial, body, transparent)
@@ -7039,7 +6995,11 @@ dc_spawn = (token: DewyLexeme) -> int:
 # the reference grammar (which reports it).
 dc_allocator = (token: DewyLexeme) -> int:
     pos = mkpos(dn_file, token.start)
-    if not dn_accept(.lparen) or dn_peek() != .at: return 0
+    if not dn_accept(.lparen): return 0
+    # (`$allocator(scratch)`: dw_allocator's mistake)
+    if dn_peek() != .at:
+        if dc_report_now: return dc_fail_now(mkpos(dn_file, dn_tokens[dn_at].start), "`$allocator` lends an arena by its place: `$allocator(@scratch) expression`")
+        return 0
     arena = dc_expr(0)
     if arena == 0 or not dn_accept(.rparen): return 0
     if not (has_flag(arena, NF_AT) or nodes[arena].kind == .call and (nodes[arena].aux2 == i32(AUX2_PARTIAL) or nodes[arena].aux2 == i32(AUX2_PLACE))): return 0
@@ -7117,22 +7077,24 @@ dc_target_chain = () -> int:
             live = true
         else:
             dc_target_dropped(condition)
-            dc_dropped_reads += 1
-            dropped.push(dn_expr(0))
-            dc_dropped_reads -= 1
+            dropped.push(dc_dropped_arm())
         if not dn_accept(.kw_else): break
         if dn_peek() == .kw_if: continue
         if not live:
             if not dc_module_block_next(): return 0
             compiled = dc_module_block()
-        else:
-            dc_dropped_reads += 1
-            dropped.push(dn_expr(0))
-            dc_dropped_reads -= 1
+        else: dropped.push(dc_dropped_arm())
         break
     loop arm in dropped: dw_target_dropped(arm)
     # (the compiled arm, alone: dw_top_declarations splices its declarations, dw_target_live)
     dn_node(.flow, "", start, if compiled != 0: [compiled] else: [])
+
+# A left-out arm, as the reference grammar reads it (its syntax, the names dw_target_dropped notes).
+dc_dropped_arm = () -> int:
+    dc_enabled = false
+    arm = dn_expr(0)
+    dc_enabled = true
+    arm
 
 # A braced arm is next that nothing after its `}` continues but `else` (as an arm's body,
 # dn_expr would apply it).

@@ -345,7 +345,12 @@ dw_build_setting = (declaration: int) -> bool:
     target = text == "$target"
     example = if target: "aarch64-linux" else: "release"
     if dewy_syntax[value].kind != .string: fatal(dewy_syntax[value].pos, "`{text}` is set to a name in quotes, as `{text} = '{example}'`")
-    name = dewy_syntax[value].text
+    build_setting_apply(target, text, pos, dewy_syntax[value].pos, dewy_syntax[value].text)
+    true
+
+# `$target = 'name'` (target) or `$build.mode = 'name'` (text, as written) set at pos, its value
+# at value_pos: checked and applied (dw_build_setting, dc_build_setting).
+build_setting_apply = (target: bool, text: str, pos: int, value_pos: int, name: str):
     file = pos_file(pos)
     if files[file].path != settings_path:
         if target: fatal(pos, "`$target` is set by the program's main file; a module lists the targets it supports with `$supported_targets`")
@@ -357,16 +362,15 @@ dw_build_setting = (declaration: int) -> bool:
         build_target_seen = true
         host = host_target_name()
         why = target_problem(name, host)
-        if not (name in target_names()): fatal(dewy_syntax[value].pos, "`$target`: {why}")
+        if not (name in target_names()): fatal(value_pos, "`$target`: {why}")
         overridden = len(cli_target) > 0 or native_only
-        if len(why) > 0 and not overridden: fatal(dewy_syntax[value].pos, "`$target`: {why}")
+        if len(why) > 0 and not overridden: fatal(value_pos, "`$target`: {why}")
         meant = if name in supported_target_names(): name else: host
         if len(cli_target) > 0 and not native_only and meant != dw_target_name(): warn(pos, "--target {cli_target} overrides `$target = '{name}'`: this build is for {dw_target_name()}")
     else:
         file_mode_seen = true
-        if name != "debug" and name != "release": fatal(dewy_syntax[value].pos, "unknown build mode \"{name}\": `$build.mode` is \"debug\" or \"release\"")
+        if name != "debug" and name != "release": fatal(value_pos, "unknown build mode \"{name}\": `$build.mode` is \"debug\" or \"release\"")
         if len(cli_mode) > 0 and cli_mode != name: warn(pos, "--{cli_mode} overrides `$build.mode = '{name}'`: this is a {cli_mode} build")
-    true
 
 dw_unimplemented = (id: int, name: str) -> int:
     fatal(dewy_syntax[id].pos, "`${name}` is part of the design but not implemented yet")
@@ -374,18 +378,19 @@ dw_unimplemented = (id: int, name: str) -> int:
 
 # A metatag where no metatag form fits: name the directive precisely.
 dw_metatag_fail = (id: int) -> int:
-    name = dewy_syntax[id].text
-    pos = dewy_syntax[id].pos
-    if name == "supported_targets" or name == "explicit_allocation_failure": fatal(pos, "`${name}` is a module directive; put it at file scope")
-    if dir_builtin(name): fatal(pos, "`${name}` is a setting: write it on a line of its own in a module, function body or block")
-    if name == "test": fatal(pos, "`$test` goes alone on the line just before a module-level function declaration")
-    if name == "shadowable": fatal(pos, "`$shadowable` marks a module-level const: `$shadowable const name = ...` at the top of the file")
-    if name == "expect" or name == "fail": fatal(pos, "`${name}` is a statement in a function: a test, or a helper a test calls")
-    if dw_designed_directive(name): return dw_unimplemented(id, name)
-    if name == "capture": fatal(pos, "`$capture` belongs in a parameter list before a name: `($capture @count) => ...`")
-    if name == "include_bytes": fatal(pos, "`$include_bytes` takes one path literal: `$include_bytes(p\"asset.png\") as image`")
-    fatal(pos, "unknown directive `${name}` (a loop label goes on its own line just before its loop)")
+    fatal(dewy_syntax[id].pos, metatag_fail_text(dewy_syntax[id].text))
     0
+
+metatag_fail_text = (name: str) -> str:
+    if name == "supported_targets" or name == "explicit_allocation_failure": return "`${name}` is a module directive; put it at file scope"
+    if dir_builtin(name): return "`${name}` is a setting: write it on a line of its own in a module, function body or block"
+    if name == "test": return "`$test` goes alone on the line just before a module-level function declaration"
+    if name == "shadowable": return "`$shadowable` marks a module-level const: `$shadowable const name = ...` at the top of the file"
+    if name == "expect" or name == "fail": return "`${name}` is a statement in a function: a test, or a helper a test calls"
+    if dw_designed_directive(name): return "`${name}` is part of the design but not implemented yet"
+    if name == "capture": return "`$capture` belongs in a parameter list before a name: `($capture @count) => ...`"
+    if name == "include_bytes": return "`$include_bytes` takes one path literal: `$include_bytes(p\"asset.png\") as image`"
+    "unknown directive `${name}` (a loop label goes on its own line just before its loop)"
 
 # `$allocator(@arena) expression` (docs/LANGUAGE.md, "Scoped allocators"): the
 # expression allocates from the arena, the context allocator until it ends, and its
@@ -3591,6 +3596,9 @@ dw_top_declarations = (id: int) -> int[]:
         names: str[]
         loop entry in kids(dewy_syntax[tag].child_left): names.push(name_of(int(nodes[entry].sval)))
         dw_supported_names(dewy_syntax[tag].pos, names)
+        return []
+    if dewy_syntax[tag].kind == .compact_stmt and dewy_syntax[tag].text == "$warn_if":
+        dw_warn_if_pending.push(dewy_syntax[tag].child_left)
         return []
     if dewy_syntax[tag].kind == .directive and dewy_syntax[tag].text == "warn_if":
         dw_warn_if_pending.push(dw_warn_if_attr(tag))

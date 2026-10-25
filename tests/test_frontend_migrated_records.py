@@ -1,11 +1,7 @@
 """Records with methods, imports, `$unsafe`, block settings and labels, loop heads,
 comprehensions, dictionaries, ranges, `end`, refinements and the other forms the direct
-parser reads build as the reference grammar and projection build them, and report the
-same mistakes."""
-import os
+parser reads: a program importing a module beside it."""
 import subprocess
-
-import pytest
 
 from tests.support import compiler  # noqa: F401
 
@@ -75,43 +71,13 @@ main = () => {
 '''
 
 
-def test_direct_records_identity(compiler, tmp_path):
+def test_direct_records(compiler, tmp_path):
     (tmp_path / 'helper.dewy').write_text(HELPER)
     source = tmp_path / 'records.dewy'
     source.write_text(PROGRAM)
-    images, outputs = [], []
-    for mode in ('old', 'compare'):
-        output = tmp_path / mode
-        result = subprocess.run([compiler, 'build', source, '-o', output],
-                                env=dict(os.environ, DEWY_FRONTEND=mode),
-                                capture_output=True, text=True, timeout=60)
-        assert result.returncode == 0, result.stdout + result.stderr
-        images.append(output.read_bytes())
-        ran = subprocess.run([output], capture_output=True, timeout=10)
-        assert ran.returncode == 0
-        outputs.append(ran.stdout)
-    assert images[0] == images[1]
-    assert outputs[0] == outputs[1]
-    assert outputs[0].startswith(b'top 2\n')
-
-
-@pytest.mark.core_quick
-@pytest.mark.parametrize('top,body', [
-    ('R:type=[x:int64 x=()=>1]', ''), ('R:type=[main=()=>1]', ''), ('R:type=[$__drop__\nx:int64]', ''),
-    ('R:type=[$__drop__\n$__copy__\nf=()=>1]', ''), ('R = type of [x:int64]\nS = type of R & [f=()=>x]', ''),
-    ('from p"missing.dewy" import a', ''), ('import a, b', ''), ('from m import a b', ''),
-    ('', '$again let x = 1'), ('', '$runtime_checks=1'), ('', 'let n = $unsafe'),
-    ('', 'loop @x in @xs {}'), ('', 'loop x in xs as int64 {}'), ('', 'let r = [1..]'),
-    ('', 'let f = ((x:int64)=>x) & ((y:string)=>1)'), ('', 'let v = end'),
-    ('P:type = int64<(in? 1..5)>', ''), ('Q:type = (x:int64):>int64', ''),
-    ('', 'let xs = [1 2] printl(xs[0 [1..]])'), ('', 'let d = ["a" -> 1 2]')])
-def test_migrated_records_diagnostics(compiler, tmp_path, top, body):
-    source = tmp_path / 'migrated.dewy'
-    source.write_text(f'{top}\nmain=():>void=>{{\nlet xs = [1]\n{body}\n}}\n')
-    results = []
-    for mode in ('old', 'direct', 'compare'):
-        result = subprocess.run([compiler, 'check', source],
-                                env=dict(os.environ, DEWY_FRONTEND=mode),
-                                capture_output=True, text=True, timeout=30)
-        results.append((result.returncode, result.stdout, result.stderr))
-    assert results[0] == results[1] == results[2]
+    output = tmp_path / 'records'
+    result = subprocess.run([compiler, 'build', source, '-o', output], capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stdout + result.stderr
+    ran = subprocess.run([output], capture_output=True, timeout=10)
+    assert ran.returncode == 0
+    assert ran.stdout.startswith(b'top 2\n')

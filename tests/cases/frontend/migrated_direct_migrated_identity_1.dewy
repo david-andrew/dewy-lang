@@ -1,0 +1,17 @@
+# modes: native
+Oops:type = type of error
+Missing:type=type of Oops
+wrap_add = (a:uint8<overflow='wrap'> b:uint8):>uint8<overflow="wrap"> => a + b
+main=():>void=>{
+    let pair:array<int64 length=2> = [20 22]
+    let words = ["a" "b"]
+    $runtime_assert pair[0] + pair[1] =? 42
+    $runtime_assert(words.length =? 2, "two words")
+    $assert 1 <? 2, "ordered"
+    $assert(2 >? 1)
+    let byte = b'a'
+    let bytes = b"bc\n"
+    if "a" in? words and not ("z" in? words) printl("member {byte} {bytes.length}")
+    let wide:int64<overflow='saturate'> = 5
+    printl("{wrap_add(250 10)} {wide} {pair[1]}")
+}

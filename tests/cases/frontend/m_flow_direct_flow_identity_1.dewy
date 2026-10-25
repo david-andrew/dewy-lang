@@ -1,0 +1,38 @@
+# modes: native
+$runtime_checks
+$no_nan=false
+$explicit_copies = false
+Oops:type = type of error & [message:string]
+id = <T>(x:T):>T => x
+pick = <A B>(a:A b:B):>A => a
+describe = (v:bool|int64|string):>string => match v {
+    b:bool => "bool {b}"
+    n:int64 => if n >? 3 "big" else "small"
+    _ => "other"
+}
+mode = (name:string):>int64 => match name { <"fast"> => 1 <"slow"> => { let x = 2
+    x } _ => 3 }
+maybe = (x:int64):>void|Oops => {
+    if x >? 3 return Oops("big")
+}
+main=()=>{
+    let k = 5
+    let near = (s:string):>int64? => if s.length >? 1 k else none
+    let twice = (x:int64) => x * 2
+    let total = 0
+    let add = ($capture @total x:int64) => { total += x total }
+    let xs = [1 2 3 4]
+    let i = 0
+    loop i <? 4 and xs[i] <? 3 or i =? 9 { i += 1 }
+    loop (i >? 0 and i <? 10) and not (i =? 7) { i -= 1 }
+    loop xs.length >? 2 xs.pop();
+    let found:int64|none = 4
+    let size = match found { n:int64 => n <none> => 0 }
+    let other = if size >? 100 1 else match found { n:int64 => n } else 9
+    match size {
+        <-1> => printl("negative")
+        _ => printl("{describe(size)} {mode("slow")} {other} {id(i)} {pick(1 "a")}")
+    }
+    maybe(1);
+    printl("{twice(3)} {add(2)} {xs.count(x => x >? 1)} {near("ab")}")
+}

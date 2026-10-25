@@ -636,15 +636,10 @@ dn_partial = (opening: DewyLexeme) -> int:
 
 # Brackets start a fresh comma context, even inside an assertion condition.
 dn_block = () -> int:
-    # Square brackets may define record function fields. Their sibling scope
-    # is established during projection, after all field names are known.
-    direct = dc_enabled
-    if dn_peek() == .lbrack: dc_enabled = false
     saved = dn_comma_stop
     dn_comma_stop = false
     block = dn_bracketed()
     dn_comma_stop = saved
-    dc_enabled = direct
     block
 
 dn_bracketed = () -> int: dn_bracketed_from(dn_take())
@@ -755,7 +750,7 @@ dn_flow = () -> int:
     loop true:
         keyword = dn_take()
         key = dn_node(.keyword, dn_token_text(keyword.symbol), keyword.start)
-        condition = if keyword.symbol == .kw_loop or keyword.symbol == .kw_parallel: dn_expr(0) else: dn_value(0)
+        condition = dn_expr(0)
         if not dn_can_start(dn_tokens, dn_at):
             # (a loop has one form, `loop condition body`: `loop { ... }` alone has no body)
             if keyword.symbol == .kw_loop and dewy_syntax[condition].kind == .block and dewy_syntax[condition].text == "{{}}:": dn_error(dn_tokens[dn_at].start, "expected a body after this loop's condition: a loop is `loop condition body`, so a loop that runs until `break` or `return` is `loop true \{ ... }`")
@@ -1001,8 +996,7 @@ dn_expr = (minimum: int) -> int:
             fallback = dn_expr(power)
             left = dn_op_node(.flat, .coalesce, pos_off(dewy_syntax[left].pos), [0, left, fallback, kinds])
             continue
-        value_rhs = dn_token_assignment(op) or (op == .assign and dw_name(left) != "")
-        right = if value_rhs: dn_value(power + 1) else: dn_expr(if dn_right_associative(op): power else: power + 1)
+        right = dn_expr(if dn_right_associative(op): power else: power + 1)
         if op == .kw_as or op == .kw_transmute:
             # (`loop c in text as array<uint8>`: `as` binds more loosely than `in`)
             last = left
@@ -1042,7 +1036,7 @@ dn_stmt = () -> int:
         dn_at += 1
         parts = [dn_node(.keyword, word, token.start)]
         if symbol != .kw_break and symbol != .kw_continue:
-            if symbol != .kw_return or (dn_can_start(dn_tokens, dn_at) and not dn_tokens[dn_at].newline): parts.push(if symbol == .kw_return: dn_value(0) else: dn_expr(0))
+            if symbol != .kw_return or (dn_can_start(dn_tokens, dn_at) and not dn_tokens[dn_at].newline): parts.push(dn_expr(0))
         else if dn_tokens[dn_at].kind == .metatag and not dn_tokens[dn_at].newline:
             parts.push(dn_atom())
         if symbol == .kw_from:
@@ -1067,16 +1061,10 @@ dn_stmt = () -> int:
 
 dewy_fast_file = (file: int) -> int[]:
     dw_bigint_import = 0
-    if not dc_mode_read:
-        dc_mode_read = true
-        mode = env("DEWY_FRONTEND") ?? ""
-        dc_selected = mode != "old"
-        dc_compare = mode == "compare"
-        dc_strict = mode == "strict"
-    dc_enabled = dc_selected
-    # (a direct attempt may split generic closers: a retry restores them, dn_edits_undo)
+    saved_head = dc_head
+    # (a reading may split generic closers: a retry restores them, dn_edits_undo)
     saved_edits_on = dn_edits_on
-    dn_edits_on = dc_enabled
+    dn_edits_on = true
     dn_file = file
     dn_lexer.suspect_brace = -1
     dn_in_interpolation = 0
@@ -1132,6 +1120,7 @@ dewy_fast_file = (file: int) -> int[]:
         # declaration's temporary syntax before parsing the next declaration.
         dewy_syntax.truncate(2)
         if dn_at == before: dn_error(dn_tokens[dn_at].start, "expected a declaration")
+    dc_head = saved_head
     if proof_pending: dn_error(dn_tokens[dn_at].start, "$proof requires a following function declaration")
     if dir_bundles.len() > 0: dir_bundles_resolve()
     if dw_export_pos != 0: fatal(dw_export_pos, "`$export` marks a module-level function: put it before one, on its line or the line above")

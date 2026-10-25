@@ -1,0 +1,8 @@
+# modes: native native-release
+
+bounded=(k:int64<0 <=? k and k <? 63>):>int64=>{
+    let value:int64=1 << k
+    return value
+}
+small=(k:uint8<k <? 10>):>uint8=>k+1
+main=():>void=>{printl(bounded(5)) printl(small(8))}
