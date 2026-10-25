@@ -4792,6 +4792,7 @@ shape_checked_value = (s: int):
     known: int[]
     if nodes[value].kind == .matrix and nodes[value].ival > 0: known = [nkids(value) / int(nodes[value].ival), int(nodes[value].ival)]
     else if nodes[value].kind == .array and not array_has_spread(value): known = [nkids(value)]
+    proven = false
     if known.len() > 0:
         written: int[]
         loop dim in kids(tn):
@@ -4809,11 +4810,16 @@ shape_checked_value = (s: int):
                     out += if d < 0: "_" else: "{d}"
                 "[{out}]"
             fatal(pos, "this literal has shape {shape(known)}, but its type says {shape(written)}")
+        # (every dimension written as a literal and matched: nothing is left to check)
+        proven = not written.contains(-1)
     # (the value takes the declared type first: a literal's elements adapt to it)
     t = resolve_type(tn)
     check_expr(value, t)
     typed = coerce(last_checked, t)
     add_flag(typed, NF_CHECKED)
+    if proven:
+        nodes[s].b = i32(typed)
+        return
     dims: int[]
     loop dim in kids(tn): dims.push(clone(dim))
     sizes = mk(.array, pos)

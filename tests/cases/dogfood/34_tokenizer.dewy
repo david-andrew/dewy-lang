@@ -1,0 +1,115 @@
+# A tokenizer and evaluator for a tiny expression language with variables.
+#   let x = 3 + 4 * (2 - 1)
+#   print x * 2
+
+Token:type = [kind:string text:string]
+
+is_digit = (c:string):>bool => c >=? "0" and c <=? "9"
+is_alpha = (c:string):>bool => c >=? "a" and c <=? "z" or c >=? "A" and c <=? "Z" or c =? "_"
+
+tokenize = (src:string):>array<Token> => {
+    let tokens:array<Token> = []
+    let i = 0
+    loop i <? src.length {
+        let c = src[i]
+        if c =? " " {
+            i += 1
+        } else if is_digit(c) {
+            let start = i
+            loop i <? src.length and is_digit(src[i]) i += 1
+            if start <=? i <=? src.length tokens.push(Token["num" src[start..i)])
+        } else if is_alpha(c) {
+            let start = i
+            loop i <? src.length and (is_alpha(src[i]) or is_digit(src[i])) i += 1
+            if start <=? i <=? src.length tokens.push(Token["name" src[start..i)])
+        } else if c =? "=" and i+1 <? src.length and src[i+1] =? "=" {
+            tokens.push(Token["op" "=="])
+            i += 2
+        } else {
+            tokens.push(Token["op" c])
+            i += 1
+        }
+    }
+    tokens
+}
+
+Parser:type = [tokens:array<Token> pos:int64<(>=? 0)> = 0 vars:dict<string int> error:string = ""]
+
+peek = (p:Parser):>string => {
+    if p.pos <? p.tokens.length return p.tokens[p.pos].text
+    ""
+}
+
+advance = (@p:Parser):>Token => {
+    if p.pos >=? p.tokens.length return Token["eof" ""]
+    let t = p.tokens[p.pos]
+    p.pos += 1
+    t
+}
+
+primary = (@p:Parser):>int => {
+    let t = advance(@p)
+    if t.kind =? "num" return to_int(t.text) ?? 0
+    if t.kind =? "name" return p.vars.get(t.text) ?? 0
+    if t.text =? "(" {
+        let v = expr(@p)
+        advance(@p);  # ")"
+        return v
+    }
+    if t.text =? "-" return -primary(@p)
+    0
+}
+
+term = (@p:Parser):>int => {
+    let v = primary(@p)
+    loop peek(p) =? "*" or peek(p) =? "/" or peek(p) =? "%" {
+        let op = advance(@p).text
+        let r = primary(@p)
+        if op =? "*" v = v * r
+        else if r =? 0 p.error = "division by zero"
+        else if op =? "/" v = v // r
+        else v = v % r
+    }
+    v
+}
+
+expr = (@p:Parser):>int => {
+    let v = term(@p)
+    loop peek(p) =? "+" or peek(p) =? "-" {
+        let op = advance(@p).text
+        let r = term(@p)
+        if op =? "+" v = v + r else v = v - r
+    }
+    v
+}
+
+run = (program:string) => {
+    let vars:dict<string int> = []
+    loop line in program.lines {
+        let toks = tokenize(line)
+        if toks.length =? 0 continue
+        if toks[0].text =? "let" and toks.length >=? 4 {
+            let name = toks[1].text
+            let p = Parser[toks[3..] 0 vars]
+            vars[name] = expr(@p)
+            if p.error not=? "" printl"error: {p.error}"
+        } else if toks[0].text =? "print" {
+            let p = Parser[toks[1..] 0 vars]
+            let v = expr(@p)
+            if p.error not=? "" printl"error: {p.error}" else printl(v)
+        } else {
+            printl"? {line}"
+        }
+    }
+}
+
+run("""let x = 3 + 4 * (2 - 1)
+let y = x * x - 10 / 3
+print x
+print y
+print (x + y) % 7
+let big = 99999999999 * 99999999999
+print big
+print -x + 2
+print x / (y - y)
+oops""")

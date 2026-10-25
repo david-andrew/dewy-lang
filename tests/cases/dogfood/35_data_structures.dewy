@@ -1,0 +1,119 @@
+# Data structures: bracket matching with a stack, BFS with a queue,
+# a binary min-heap for task scheduling, and a dict of lists for grouping.
+
+balanced = (text:string):>bool => {
+    let stack:array<string> = []
+    let pairs = [")"->"(" "]"->"[" "\}"->"\{"]
+    loop c in text {
+        if c =? "(" or c =? "[" or c =? "\{" {
+            stack.push(c)
+        } else if c in? pairs {
+            if stack.length =? 0 return false
+            if stack.pop() not=? pairs[c] return false
+        }
+    }
+    stack.length =? 0
+}
+
+bfs = (graph:dict<string array<string>> start:string):>array<string> => {
+    let order:array<string> = []
+    let seen:set<string> = set[start]
+    let queue:array<string> = [start]
+    let head = 0
+    loop head <? queue.length {
+        let node = queue[head]
+        head += 1
+        order.push(node)
+        loop next in (graph.get(node) ?? []) {
+            if next not in? seen {
+                seen.push(next)
+                queue.push(next)
+            }
+        }
+    }
+    order
+}
+
+# min-heap of (priority, name)
+Task:type = [priority:int64 name:string]
+
+heap_push = (@heap:array<Task> t:Task) => {
+    heap.push(t)
+    let i = heap.length - 1
+    loop i >? 0 and i <? heap.length {
+        let parent = (i - 1) // 2
+        if heap[parent].priority <=? heap[i].priority break
+        heap.swap(i parent)
+        i = parent
+    }
+}
+
+heap_pop = (@heap:array<Task>):>Task? => {
+    if heap.length =? 0 return none
+    let top = heap[0]
+    let last = heap.pop()
+    if heap.length >? 0 {
+        heap[0] = last
+        let i = 0
+        loop i <? heap.length {
+            let l = 2*i + 1
+            let r = 2*i + 2
+            let smallest = i
+            if 0 <=? l <? heap.length and heap[l].priority <? heap[smallest].priority smallest = l
+            if 0 <=? r <? heap.length and heap[r].priority <? heap[smallest].priority smallest = r
+            if smallest =? i break
+            heap.swap(i smallest)
+            i = smallest
+        }
+    }
+    top
+}
+
+main = () => {
+    loop s in [r"(a[b]{c})" "(]" "((" r"x{y}[z]()"] {
+        printl"{s}: {balanced(s)}"
+    }
+
+    let graph:dict<string array<string>> = [
+        "a"->["b" "c"]
+        "b"->["d"]
+        "c"->["d" "e"]
+        "d"->["f"]
+        "e"->["f"]
+        "f"->[]
+    ]
+    printl"bfs: {bfs(graph "a")}"
+
+    let heap:array<Task> = []
+    heap_push(@heap Task[5 "write report"])
+    heap_push(@heap Task[1 "fix outage"])
+    heap_push(@heap Task[3 "review PR"])
+    heap_push(@heap Task[2 "answer email"])
+    heap_push(@heap Task[4 "lunch"])
+    loop true {
+        let t = heap_pop(@heap)
+        if t is? none break
+        printl"{t.priority}: {t.name}"
+    }
+
+    # group words by first letter
+    let groups:dict<string array<string>> = []
+    loop w in ["apple" "avocado" "banana" "blueberry" "cherry" "apricot"] {
+        if w.length =? 0 continue
+        let k = w[0]
+        if k in? groups groups[k].push(w) else groups[k] = [w]
+    }
+    loop [k ws] in groups printl"{k}: {ws}"
+
+    # undo history: last item and pop
+    let history:array<string> = []
+    loop cmd in ["type a" "type b" "undo" "type c" "undo" "undo" "undo"] {
+        if cmd =? "undo" {
+            if history.length >? 0 printl"undo {history.pop()}"
+            else printl"nothing to undo"
+        } else {
+            history.push(cmd)
+            printl"did {cmd}; last is {history.last}"
+        }
+    }
+}

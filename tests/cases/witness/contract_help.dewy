@@ -1,0 +1,4 @@
+# A call's unproven contract without a spelled relation points at the contract.
+range_sum = (sums:array<int64> lo:int64<0 <=? lo and lo <=? hi> hi:int64<hi <? sums.length>):>int => sums[hi] - sums[lo]
+first_two = (sums:array<int64>):>int => range_sum(sums 0 2)
+main = () => printl(first_two([0 1 3 6]))

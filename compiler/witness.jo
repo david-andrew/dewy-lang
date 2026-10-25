@@ -41,16 +41,16 @@ wit_fail = (p: int, msg: str):
 
 # One note per span: a cause already shown at an event is not repeated.
 wit_note = (at: int, text: str):
-    if at > 0:
-        loop e in err_notes:
-            if e.0 == at: return
-    err_notes.push((at, "note: {text}"))
+    line = "note: {text}"
+    loop e in err_notes:
+        if at > 0 and e.0 == at or e.1 == line: return
+    err_notes.push((at, line))
 
 # Repairs are current evidence or an explicit runtime check, never `$assert`.
 # Inside an erased proof, evidence comes only from its preconditions, guards
 # and other proofs.
-wit_help = (relation: str, runtime: bool = true):
-    want = if relation != "": "`{relation}`" else: "it"
+wit_help = (relation: str, runtime: bool = true, contract: int = 0):
+    want = if relation != "": "`{relation}`" else if contract > 0: "the declared contract" else: "what the operation needs"
     if proof_active and fact_owner > 0 and fact_owner < fns.len() and proof_decls.has(int(fns[fact_owner].decl)):
         err_notes.push((-1, "help: establish {want} with a stronger proof precondition, a call to another proof or a current guard; erased proofs cannot check at run time"))
     else if runtime: err_notes.push((-1, "help: establish {want} with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`"))
@@ -82,11 +82,16 @@ wit_hidden_read = (n: int) -> bool:
         if e > 0 and nodes[e].kind == .ident and nodes[e].name != 0 and wit_hidden_name(name_of(int(nodes[e].name))): return true
     false
 
+# A conversion that keeps the value, spelled as its operand.
+wit_same_value = (n: int) -> bool:
+    cv = nodes[n].aux
+    cv == i32(int(CV.int_)) or cv == i32(int(CV.none_)) or cv == i32(int(CV.fixed_store)) or cv == i32(int(CV.promote)) or cv == i32(int(CV.big2math)) or cv == i32(int(CV.math2big))
+
 # The spelling of a simple place or literal; "" for anything else.
 wit_text = (e0: int, depth: int = 0) -> str:
     e = e0
     if e <= 0 or depth > 8: return ""
-    loop nodes[e].kind == .narrow or nodes[e].kind == .conv and (nodes[e].aux == i32(int(CV.int_)) or nodes[e].aux == i32(int(CV.none_)) or nodes[e].aux == i32(int(CV.refinement))):
+    loop nodes[e].kind == .narrow or nodes[e].kind == .conv and (wit_same_value(e) or nodes[e].aux == i32(int(CV.refinement))):
         e = int(nodes[e].a)
     k = nodes[e].kind
     if k == .ident and nodes[e].name != 0:
@@ -103,6 +108,14 @@ wit_text = (e0: int, depth: int = 0) -> str:
         base = wit_text(int(nodes[e].a), depth + 1)
         index = wit_text(int(nodes[e].b), depth + 1)
         if base != "" and index != "": return "{base}[{index}]"
+    # (`i + 1`, `n - 1`, `2*i`: the arithmetic of a simple place and literals)
+    if k == .binary and (nodes[e].op == i32(int(Tok.plus)) or nodes[e].op == i32(int(Tok.minus)) or nodes[e].op == i32(int(Tok.star))):
+        left = wit_text(int(nodes[e].a), depth + 1)
+        right = wit_text(int(nodes[e].b), depth + 1)
+        if left == "" or right == "": return ""
+        if nodes[e].op == i32(int(Tok.star)): return "{left}*{right}"
+        sign = if nodes[e].op == i32(int(Tok.plus)): "+" else: "-"
+        return "{left} {sign} {right}"
     ""
 
 # What happened at an invalidating event, as a noun.
@@ -116,7 +129,8 @@ wit_event = (at: int) -> str:
         return "operation"
     if k == .call:
         f = int(nodes[at].sym)
-        if nodes[at].aux == 0 and f > 0 and fns[f].decl != 0: return "call to {name_of(int(nodes[int(fns[f].decl)].name))}"
+        # (a library helper's internal name is not the user's: `__print_str` is printl's)
+        if nodes[at].aux == 0 and f > 0 and fns[f].decl != 0 and not starts_with(name_of(int(nodes[int(fns[f].decl)].name)), "__"): return "call to {name_of(int(nodes[int(fns[f].decl)].name))}"
         return "call"
     if k == .assign: return "assignment"
     if k == .while_ or k == .for_: return "loop"
@@ -274,6 +288,8 @@ wit_relation = (s: FactState, cex: FactState, op: Tok, a: WitSide, b: WitSide, r
         shown = if bound.lo == bound.hi: wit_value(s, side.value, bound.lo) else: ""
         unsigned = side.value > 0 and side.value < fact_terms.len() and representation_type(fact_terms[side.value].type) == T_U64
         known = if shown != "": "is {shown}" else if bound.lo == bound.hi: "" else: wit_known(bound, unsigned)
+        # (a declaration makes the binding; it does not change an earlier value)
+        if tomb.0 != 0 and nodes[tomb.0].kind == .vardecl and tomb.1 == 0: tomb = (0, 0)
         if tomb.0 != 0:
             what = wit_event(tomb.0)
             if shown != "": wit_note(nodes[tomb.0].pos, "{side.text} {known} after this {what}")
@@ -308,14 +324,14 @@ wit_relation = (s: FactState, cex: FactState, op: Tok, a: WitSide, b: WitSide, r
 wit_unknown = (n: int, b: FactBound, what: str, contract: int = 0, relation: str = "", missing: str = "", runtime: bool = true):
     wit_cause(b, n)
     wit_context(contract)
-    wit_help(relation, runtime)
+    wit_help(relation, runtime, contract)
     why = if b.reason == .missing and missing != "": "missing {missing}" else: wit_reason(b)
     if dir_defer(n, "cannot prove {what}: {why}", runtime and what != "assertion"): return
     wit_fail(nodes[n].pos, "cannot prove {what}: {why}")
 
 wit_side = (value: int, node0: int) -> WitSide:
     node = node0
-    loop node > 0 and (nodes[node].kind == .narrow or nodes[node].kind == .conv and (nodes[node].aux == i32(int(CV.int_)) or nodes[node].aux == i32(int(CV.none_)))): node = int(nodes[node].a)
+    loop node > 0 and (nodes[node].kind == .narrow or nodes[node].kind == .conv and wit_same_value(node)): node = int(nodes[node].a)
     side = WitSide(value, node, wit_text(node))
     if node > 0 and nodes[node].kind == .int_lit: side.literal = true
     if node > 0 and nodes[node].kind == .intrinsic and nodes[node].aux == i32(int(IN.len)) and nkids(node) > 0:
@@ -458,6 +474,9 @@ wit_index = (n: int, s: mut FactState, index: int, length: int, lo: int, hi: int
 
         wit_cause(fact_bound(s, length), n)
     wit_context(0)
+    # (the help names what is missing: `i >=? 0`, `i <? xs.length`, or both)
+    if lo != 1 and hi != 1: relation = if relation != "": "0 <=? {relation}" else: ""
+    else if lo != 1: relation = wit_relation_text(.ge, i, zero)
     wit_help(relation)
     which = if lo != 1 and hi != 1: "lower and upper bounds" else if lo != 1: "lower bound" else: "upper bound"
     if dir_defer(n, "cannot prove {read} is in bounds: missing {which}", true): return
@@ -512,20 +531,26 @@ wit_slice_at = (n: int, s: mut FactState, lo: int, hi: int, length: int, checks:
     base = wit_text(receiver)
     start = if lo_node != 0: wit_side(lo, lo_node) else: WitSide(lo, 0, "0", false, true)
     stop = if hi_node != 0: wit_side(hi, hi_node) else: WitSide(hi, 0, (if base != "": "{base}.length" else: ""), true)
-    if hi_node != 0 and inclusive and stop.text != "": stop.text = "{stop.text}+1"
+    if hi_node != 0 and inclusive and stop.text != "": stop.text = "{stop.text} + 1"
     zero = WitSide(fact_constant(s, 0), 0, "0", false, true)
     size = WitSide(length, receiver, (if base != "": "{base}.length" else: ""), true)
     pairs = [(zero, start), (start, stop), (stop, size)]
     labels = ["lower bound", "ordered bounds", "upper bound"]
     refuted = checks.contains(0)
-    relation = ""
+    relations: str[]
     missing: str[]
     loop i in [0..3):
         if checks[i] == 1 or refuted and checks[i] != 0: continue
-        relation = wit_relation_text(.le, pairs[i].0, pairs[i].1)
+        shown = wit_relation_text(.le, pairs[i].0, pairs[i].1)
+        # (`xs[a..b]` ends inside the receiver: `b <? xs.length` reads better than `b+1 <=? xs.length`)
+        if i == 2 and inclusive and hi_node != 0:
+            plain = wit_side(hi, hi_node)
+            shown = wit_relation_text(.lt, plain, pairs[i].1)
+        if shown != "" and not relations.contains(shown): relations.push(shown)
         wit_relation(s, s, .le, pairs[i].0, pairs[i].1, refuted, labels[i])
         missing.push(labels[i])
     wit_context(0)
+    relation = join(relations, "` and `")
     wit_help(relation)
     if refuted:
         if dir_defer(n, "slice is not in bounds", true): return

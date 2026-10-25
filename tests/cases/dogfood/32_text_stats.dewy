@@ -1,0 +1,76 @@
+# Text stats: word frequencies, longest line, initials, simple CSV field pick.
+
+TEXT = """The quick brown fox jumps over the lazy dog.
+A journey of a thousand miles begins with a single step.
+To be or not to be, that is the question.
+All that glitters is not gold."""
+
+CSV = """name,age,city
+alice,31,paris
+bob,27,berlin
+carol,45,lisbon"""
+
+clean = (word:string):>string => {
+    let w = word.lower()
+    loop w.length >? 0 and (w.endswith(".") or w.endswith(",")) {
+        w = w[0..w.length-1)
+    }
+    w
+}
+
+let counts:dict<string int64> = []
+let lines = TEXT.lines
+let longest = ""
+loop line in lines {
+    if line.length >? longest.length longest = line
+    loop raw in line.split() {
+        let w = clean(raw)
+        if w in? counts { counts[w] += 1 } else { counts[w] = 1 }
+    }
+}
+printl"lines: {lines.length}"
+printl"longest: {longest}"
+
+let pairs:array<[string int64]> = [loop [w n] in counts [w n]]
+let ranked = pairs.sorted(key=(p:[string int64]) => p[1] reverse=true)
+loop [w n] in ranked[$clamp 0..5) {
+    printl"{w}: {n}"
+}
+
+# initials of each line
+loop line in lines {
+    let parts = line.split()
+    let initials = [loop p in parts if p.length >? 0 p[0]].join
+    printl"initials: {initials}"
+}
+
+# first and last word of first line
+let first = (lines.get(0) ?? "").split()
+if first.length >? 0 {
+    printl"first word: {first[0]}, last word: {clean(first[end])}"
+}
+
+# middle three characters of each word in line 2
+let second = (lines.get(1) ?? "").split()
+loop w in second {
+    let mid = w.length // 2
+    if mid >=? 1 and mid+1 <? w.length {
+        printl"{w} -> {w[mid-1..mid+1]}"
+    }
+}
+
+# CSV: pick the city column by header name
+let rows = CSV.lines
+let header = (rows.get(0) ?? "").split(",")
+let col = header.index_of("city") ?? 0
+loop r in rows[$clamp 1..] {
+    let fields = r.split(",")
+    if 0 <=? col <? fields.length printl"{fields[0]} lives in {fields[col]}"
+}
+
+# count vowels
+let vowels = 0
+loop c in TEXT.lower() {
+    if c in? ["a" "e" "i" "o" "u"] vowels += 1
+}
+printl"vowels: {vowels}"

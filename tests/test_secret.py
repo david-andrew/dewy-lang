@@ -95,7 +95,7 @@ def test_main_error_report_redacts(compiler, tmp_path, flags, leak, hidden):  # 
 
 
 @pytest.mark.parametrize(('body', 'requirement'), [
-    ('let p:secret<Pos> = k.reveal - 5000', 'refinement failed: `the value >=? 0`'),
+    ('let p:secret<Pos> = k.reveal - 5000', 'refinement failed: `k - 5000 >=? 0`'),
     ('let p:secret<uint8> = k.reveal', 'integer overflow: value does not fit uint8'),
 ])
 def test_runtime_check_report_hides_the_value(compiler, tmp_path, body, requirement):  # noqa: F811

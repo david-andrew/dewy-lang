@@ -4130,6 +4130,36 @@ an unproven one does:
   the warnings. Obligations of `$proof` functions and `$assert` are never
   deferred.
 
+### Making code prove
+
+An unproven obligation's error names the missing relation (`i <? xs.length`,
+`start <=? i`) and shows the bounds it knows. These forms state the facts:
+
+- Loop over the values (`loop x in xs`, `loop i in 0.. and x in xs`) or over the
+  positions the array has (`loop i in [0..xs.length)`, `loop i in [1..xs.length-1)` for
+  neighbours `i-1` and `i+1`). A cursor loop keeps its bound in the condition
+  (`loop i <? xs.length and xs[i] =? " " { i += 1 }`), and a loop that moves an index
+  elsewhere (a heap's parent or child) carries `i <? xs.length` in its condition too.
+- Guard the whole relation, lower bound included: `if 0 <=? i <? xs.length`. A
+  value of unknown sign, such as a search result after `?? 0`, needs both ends; a
+  position that cannot be negative can say so in its type
+  (`pos:int64<(>=? 0)> = 0` in a record, `i:int64<0 <=? i and i <? xs.length>` as a parameter,
+  which moves the proof to each caller).
+- Take the missing case as a value: `xs.get(i) ?? fallback`, `d.get(k) ?? fallback`,
+  and a function that cannot give a result returns an optional
+  (`if xs.length =? 0 return none` before `xs[0]` and `xs.pop()`).
+- Slice the way Python does with `xs[$clamp a..b)`: `rows[$clamp 1..]` skips a header
+  line and `ranked[$clamp 0..5)` takes at most five.
+- Count into a dictionary with `if k in? d { d[k] += 1 } else { d[k] = 1 }`, and
+  group with `if k in? d d[k].push(x) else d[k] = [x]`.
+- Arithmetic that may exceed a fixed width either computes in `int`
+  (`:>int => a - b`), masks to the width (`(crc << 1) and 0xFF`), or says it wraps
+  (`let h:uint32<overflow='wrap'> = 2166136261`, as a hash does).
+
+Top-level bindings are globals, and a call or a loop may change a global as far as the
+analysis knows, so a guard on one is forgotten at the next call. Code that indexes
+proves most easily inside a function such as `main`.
+
 `dewy check --obligations file.dewy` lists every unproven obligation that
 compiles to a runtime check, one per line, with the setting responsible
 (`$runtime_checks` or `$prototype`; outside them none compiles to a check), and each library call that may

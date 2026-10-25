@@ -1,0 +1,7 @@
+# An index missing only its lower bound: the help names that bound.
+scan = (src:string start:int64):>int64 => {
+    let i = start
+    loop i <? src.length and src[i] =? "a" i += 1
+    i
+}
+main = () => printl(scan("aab" 0))

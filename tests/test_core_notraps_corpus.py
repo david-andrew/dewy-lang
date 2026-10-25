@@ -210,7 +210,7 @@ main=(args:array<string>):>void=>{
     printl(load16(xs k))
     printl(load16(xs k+1))
 }
-""", 'observed: the value was 2 and the bound was 1'),
+""", 'observed: k + 1 was 2 and the bound was 1'),
     'wrapped': ("""below=(x:int64 limit:int64<(<? x-2)>):>int64=>limit
 main=(args:array<string>):>void=>{
     let k=args.length

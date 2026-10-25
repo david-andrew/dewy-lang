@@ -1,0 +1,16 @@
+# A slice missing two of its relations: the help names both, and a note is not repeated.
+runs = (src:string):>array<string> => {
+    let out:array<string> = []
+    let i = 0
+    loop i <? src.length {
+        if src[i] =? "a" {
+            let start = i
+            loop i <? src.length and src[i] =? "a" i += 1
+            out.push(src[start..i))
+        } else {
+            i += 1
+        }
+    }
+    out
+}
+main = () => printl(runs("aabaaa"))
