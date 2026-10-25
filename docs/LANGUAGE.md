@@ -727,7 +727,7 @@ Explicit `int8` through `int64` and `uint8` through `uint64` have exact
 arithmetic; their widths describe storage. Intermediates use sufficiently wide
 machine words, including statically sized multiword values, without allocating
 big integers. A store into a binding, field, element, parameter or result narrows:
-a proven fit costs nothing; otherwise the current default emits a runtime check.
+a proven fit costs nothing; otherwise a runtime check requires an opt-in.
 `$runtime_checks=false` and `$no_hidden_costs` reject an unproven narrowing with
 suggestions to add a guard or choose an overflow policy. `$runtime_checks` permits
 the check except under `$no_hidden_costs`.
@@ -765,7 +765,14 @@ a narrowing between fixed widths or from `int`, explicit (`uint64(x)`, `x as uin
 (`let n:uint64 = xs.length`, `let b:int8 = w` after `if -128 <=? w <=? 127`, a
 `uint64` index or slice bound, an argument or result), is a proven conversion: the facts that
 prove a refinement prove it, an unproven one is checked when it runs (`value does not fit int8`),
-and a refuted one is a compile error (`w does not fit uint64`). Keeping the bits has its own
+and a refuted one is a compile error (`w does not fit uint64`). Bounds propagate through
+products of bounded integers, signed right shifts, and floor remainder (including
+negative divisors). Loop assignments using a constant remainder or mask retain
+that range together with the loop's entry value; other writes still participate.
+Literal-initialized script integers that are never written also supply bounds
+inside helpers. A fixed-width value widened to `int` retains its bounds;
+guards at both inclusive `int64` endpoints also prove a conversion back to `int64`.
+Keeping the bits has its own
 spelling: `uint8<overflow='wrap'>(x)` is the integer modulo 2^8 (two's complement for a signed target, and
 the low bits of an `int`), so `uint64<overflow='wrap'>(int64(-1))` is `18446744073709551615`.
 `uint8<overflow='saturate'>(x)` clamps an integer to 0 through 255 instead.

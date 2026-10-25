@@ -5,11 +5,11 @@ encode = (packet:Packet):>array<uint8> => {
     let bytes:array<uint8> = [68 87 (packet.kind as uint8) (packet.sequence//256 as uint8) (packet.sequence & 0xff as uint8) (size//256 as uint8) (size & 0xff as uint8)]
     let checksum = 0
     loop byte in bytes {
-        checksum = (checksum+(byte as int64))%256
+        checksum = (checksum+byte)%256
     }
     loop byte in packet.payload {
         bytes.push(byte)
-        checksum = (checksum+(byte as int64))%256
+        checksum = (checksum+byte)%256
     }
     bytes.push(checksum as uint8)
     return bytes
@@ -27,7 +27,7 @@ decode = (bytes:array<uint8>):>Packet|BadPacket => {
     }
     let sum = 0
     loop i in [0..bytes.length-1) {
-        sum = (sum+(bytes[i] as int64))%256
+        sum = (sum+bytes[i])%256
     }
     if sum not=? (bytes[bytes.length-1] as int64) {
         return BadPacket[bytes.length-1]
@@ -74,5 +74,3 @@ main = ():>void => {
     }
     printl("{bytes.length} {rejected} {sum}")
 }
-
-$runtime_checks

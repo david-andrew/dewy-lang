@@ -816,9 +816,26 @@ fact_read = (s: mut FactState, e: int) -> int:
     fact_bind(s, p, v)
     if refine_active: ref_assume(t, v, [], s)
     if p.root == .global:
+        if t == T_MATH_INT:
+            bound = fact_global_integer(p.declaration)
+            if not bound.wide: fact_set_bound(s, v, bound)
         size = fact_global_length(p.declaration)
         if size >= 0 and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(v, -1, false, fact_constant(s, size)))
     v
+
+# A literal-initialized script integer that no checked write can replace.
+# Seed only demanded reads, O(1), using the existing global write flags.
+# Include the zero-initialized value too: a helper may run during initialization.
+# Mutable literal unions keep their existing whole-write-domain inference.
+fact_global_integer = (g: int) -> FactBound:
+    unknown = FactBound(wide = true)
+    if g <= 0 or g >= globals.len() or globals[g].fn_written or globals[g].init_written or globals[g].exposed: return unknown
+    d = int(globals[g].decl)
+    if d == 0 or nodes[d].kind != .vardecl: return unknown
+    init = domain_leaf(int(nodes[d].b))
+    if init == 0 or nodes[init].kind != .int_lit or oversized_literal(init): return unknown
+    x = nodes[init].ival
+    FactBound(min(0, x), max(0, x))
 
 # The length of an immutable global literal: O(elements) for arrays,
 # O(bytes) for ASCII strings (CR and non-ASCII graphemes stay unknown).
@@ -1539,15 +1556,15 @@ fact_compare = (s: FactState, op: Tok, a: int, b: int) -> int:
         if x.lo == x.hi and y.lo == y.hi: return int((x.lo == y.lo) == (op == .eq))
     else if op == .lt:
         if x.hi < y.lo: return 1
-        if x.lo >= y.hi: return 0
+        if x.lo >= y.hi and (x.lo != FACT_MIN or fact_host_endpoint(s, a, false)) and (y.hi != FACT_MAX or fact_host_endpoint(s, b, true)): return 0
     else if op == .le:
-        if x.hi <= y.lo: return 1
+        if x.hi <= y.lo and (x.hi != FACT_MAX or fact_host_endpoint(s, a, true)) and (y.lo != FACT_MIN or fact_host_endpoint(s, b, false)): return 1
         if x.lo > y.hi: return 0
     else if op == .gt:
         if x.lo > y.hi: return 1
-        if x.hi <= y.lo: return 0
+        if x.hi <= y.lo and (x.hi != FACT_MAX or fact_host_endpoint(s, a, true)) and (y.lo != FACT_MIN or fact_host_endpoint(s, b, false)): return 0
     else if op == .ge:
-        if x.lo >= y.hi: return 1
+        if x.lo >= y.hi and (x.lo != FACT_MIN or fact_host_endpoint(s, a, false)) and (y.hi != FACT_MAX or fact_host_endpoint(s, b, true)): return 1
         if x.hi < y.lo: return 0
     if a != 0 and b != 0:
         loop i in [0..s.ids.len()):
@@ -1571,9 +1588,9 @@ fact_compare = (s: FactState, op: Tok, a: int, b: int) -> int:
         if x.lo == x.hi and y.lo == y.hi: return int(x.lo == y.lo)
     if op == .lt:
         if x.hi < y.lo: return 1
-        if x.lo >= y.hi: return 0
+        if x.lo >= y.hi and (x.lo != FACT_MIN or fact_host_endpoint(s, a, false)) and (y.hi != FACT_MAX or fact_host_endpoint(s, b, true)): return 0
     if op == .le:
-        if x.hi <= y.lo: return 1
+        if x.hi <= y.lo and (x.hi != FACT_MAX or fact_host_endpoint(s, a, true)) and (y.lo != FACT_MIN or fact_host_endpoint(s, b, false)): return 1
         if x.lo > y.hi: return 0
     fact_affine_compare(s, op, a, b)
 
@@ -1727,6 +1744,13 @@ fact_hull_all = (s: mut FactState, a: FactState, b: FactState, count: int, at: i
         if x == y: continue
         s.bounds[i] = FactBound(min(x.lo, y.lo), max(x.hi, y.hi), (x.nz or x.lo > 0 or x.hi < 0) and (y.nz or y.lo > 0 or y.hi < 0), reason, at, x.wide or y.wide)
 
+# A phi keeps a shared representation, including a fixed word's finite
+# endpoints and uint64's biased encoding. Bounds still join independently.
+# O(1); never recover a fixed type from only one predecessor.
+fact_join_term = (a: int, b: int) -> FactTerm:
+    t = fact_terms[a].type
+    FactTerm(type = if t == fact_terms[b].type: t else: 0)
+
 fact_join = (a: FactState, b: FactState, at: int) -> FactState:
     if not a.live: return b
     if not b.live: return a
@@ -1830,7 +1854,7 @@ fact_join = (a: FactState, b: FactState, at: int) -> FactState:
         pair = fact_pair_key(v, other)
         prior = fact_pair_find(left, right, pairs, v, other)
         if prior >= 0: v = merged[prior]
-        else if v != other: v = fact_new(s, fact_hull(fact_bound(a, v), fact_bound(b, other), at))
+        else if v != other: v = fact_new(s, fact_hull(fact_bound(a, v), fact_bound(b, other), at), fact_join_term(v, other))
         # (the tombstone survives when both paths share it)
         r = if v == binding.value and b.bindings[i].event == binding.event and binding.event != 0: binding else: FactBinding(binding.place, v)
         if r != binding: s.bindings[i] = r
@@ -1847,7 +1871,7 @@ fact_join = (a: FactState, b: FactState, at: int) -> FactState:
         pair = fact_pair_key(v, other)
         prior = fact_pair_find(left, right, pairs, v, other)
         if prior >= 0: v = merged[prior]
-        else if v != other: v = fact_new(s, fact_hull(fact_bound(a, v), fact_bound(b, other), at))
+        else if v != other: v = fact_new(s, fact_hull(fact_bound(a, v), fact_bound(b, other), at), fact_join_term(v, other))
         fact_bind(s, binding.place, v)
         if v == binding.value and b.bindings[j].event == binding.event: fact_rebind(s, binding.place, v, binding.event, binding.prior)
         if prior < 0:
@@ -1889,7 +1913,7 @@ fact_join = (a: FactState, b: FactState, at: int) -> FactState:
             pair = fact_pair_key(v, q.value)
             prior = fact_pair_find(left, right, pairs, v, q.value)
             if prior >= 0: v = merged[prior]
-            else if v != q.value: v = fact_new(s, fact_hull(fact_bound(a, v), fact_bound(b, q.value), at))
+            else if v != q.value: v = fact_new(s, fact_hull(fact_bound(a, v), fact_bound(b, q.value), at), fact_join_term(v, q.value))
             if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(merged[cursor], selector, p.element, v))
             if prior < 0:
                 fact_pair_add(left, right, pairs, pair)
@@ -2066,12 +2090,12 @@ fact_pure_conversion = (n: int) -> bool:
 fact_reads_only = (id: IN) -> bool:
     id == .len or id == .arrcap or id == .sizeof or id == .alignof or id == .static_assert or id == .runtime_assert or id == .assert or id == .panic or id == .unreachable or fact_pure_intrinsic(id)
 
-# A store of x % a positive constant has an unconditional finite range.
+# A remainder or nonnegative constant mask has an unconditional finite range.
 # During loop havoc retain the hull with entry, so zero iterations and every
-# other store remain covered. No speculative source bound is used. Demanded
-# only by exact stores; O(conversion depth), with O(1) indexed binding access.
+# other store remain covered. No speculative source bound is used. Only visited
+# on the obligation's active slice; O(conversion depth), indexed binding access.
 fact_bounded_change = (n: int, s: mut FactState, at: int, reason: FactReason) -> bool:
-    if not exact_proof_demands.has(fact_owner) or nodes[n].op != i32(int(Tok.assign)): return false
+    if nodes[n].op != i32(int(Tok.assign)): return false
     target = int(nodes[n].a)
     if nodes[target].kind != .ident: return false
     p = fact_place(target)
@@ -2082,21 +2106,28 @@ fact_bounded_change = (n: int, s: mut FactState, at: int, reason: FactReason) ->
     if nodes[rhs].kind == .binary and nodes[rhs].aux == 0 and nodes[rhs].op == i32(int(Tok.percent)) and files[pos_file(nodes[rhs].pos)].is_dewy and is_int(ntype(rhs)):
         kind = 2
         operand = int(nodes[rhs].b)
+    else if nodes[rhs].kind == .binary and nodes[rhs].aux == 0 and nodes[rhs].op == i32(int(Tok.amp)) and is_int(ntype(rhs)):
+        kind = 4
+        operand = int(nodes[rhs].b)
+        if nodes[fact_progress_strip(operand)].kind != .int_lit: operand = int(nodes[rhs].a)
     else if nodes[rhs].kind == .call:
         kind = fact_floor_call(rhs)
         if kind == 2 or kind == 4: operand = kid(rhs, 1)
     if operand == 0: return false
     divisor = fact_progress_strip(operand)
-    if nodes[divisor].kind != .int_lit or nodes[divisor].ival <= 0: return false
-    high = nodes[divisor].ival - (if kind == 2: 1 else: 0)
+    if nodes[divisor].kind != .int_lit or oversized_literal(divisor): return false
+    limit = nodes[divisor].ival
+    if kind == 2 and limit == 0 or kind == 4 and limit < 0: return false
+    low = if kind == 2 and limit < 0: limit + 1 else: 0
+    high = if kind == 4: limit else if limit > 0: limit - 1 else: 0
     domain = fact_domain(ntype(target))
-    if domain.lo > 0 or high > domain.hi: return false
+    if low < domain.lo or high > domain.hi: return false
     i = fact_binding(s, p)
     if i < 0: return false
     old = fact_bound(s, s.bindings[i].value)
     fact_change_route(s, target, false, at, reason)
     i = fact_binding(s, p)
-    if i >= 0: fact_set_bound(s, s.bindings[i].value, fact_hull(old, FactBound(0, high), at))
+    if i >= 0: fact_set_bound(s, s.bindings[i].value, fact_hull(old, FactBound(low, high), at))
     true
 
 # Conservative loop fallback: pre-kill every syntactically changing route.
@@ -2236,7 +2267,9 @@ fact_arithmetic = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
         if op == .minus and not fact_add_fits(x.hi, yhi): y.lo = fact_relational(s, b, false)
         if op == .minus and not fact_add_fits(x.lo, ylo): y.hi = fact_relational(s, b, true)
     if op == .star:
-        if not exact_has_node(n) and x.lo != x.hi and y.lo != y.hi: return fact_unmodeled(s, n, .unsupported)
+        # Mathematical ints multiply exactly too. Two bounded variable
+        # operands need the same four endpoint products as fixed exact ints.
+        if not exact_has_node(n) and prune(ntype(n)) != T_MATH_INT and x.lo != x.hi and y.lo != y.hi: return fact_unmodeled(s, n, .unsupported)
         if math_word_overflow(2, x.lo, y.lo) or math_word_overflow(2, x.lo, y.hi) or math_word_overflow(2, x.hi, y.lo) or math_word_overflow(2, x.hi, y.hi): return fact_unmodeled(s, n, .unsupported)
         lo = min(min(x.lo * y.lo, x.lo * y.hi), min(x.hi * y.lo, x.hi * y.hi))
         hi = max(max(x.lo * y.lo, x.lo * y.hi), max(x.hi * y.lo, x.hi * y.hi))
@@ -2322,9 +2355,16 @@ fact_divisor = (s: mut FactState, n: int, a: int, b: int, modulo: bool) -> bool:
     if truth != 1: wit_divisor(n, s, b, zero, operand, truth == 0)
     truth == 1
 
-# Integer `//` and `%` by a positive divisor (kind 1, 2), or by a power of two
+# Call only after excluding zero and MIN / -1. Jo divides toward zero;
+# Dewy's floor quotient rounds downward when the signs differ. O(1).
+fact_quotient = (a: int, b: int, floor: bool) -> int:
+    q = a / b
+    if floor and (a < 0) != (b < 0) and a % b != 0: q -= 1
+    q
+
+# Integer `//` and `%` by a nonzero divisor (kind 1, 2), or by a power of two
 # as a shift count or mask (3, 4). Dewy's remainder has the divisor's sign, so
-# `x % n` lies in [0, n) for any x; Sloppy's truncating forms agree when the
+# `x % n` lies in [0, n) for positive n; Sloppy's truncating forms agree when the
 # dividend is nonnegative. A nonnegative dividend bounds both results, and
 # halving a positive one makes it smaller.
 fact_floor = (s: mut FactState, n: int, kind: int, a: int, b: int, floor: bool) -> int:
@@ -2334,9 +2374,29 @@ fact_floor = (s: mut FactState, n: int, kind: int, a: int, b: int, floor: bool) 
     # finite divisor alone. Division and right shift must retain it.
     if y.wide or x.wide and (kind == 1 or kind == 3 or not floor): return fact_unmodeled(s, n, .unsupported)
     if x.lo < 1: x.lo = max(x.lo, fact_relational(s, a, false))
+    # Shrinking an unbounded mathematical value does not make it a word.
+    # Endpoint sentinels must not become finite merely by division/shift.
+    if (kind == 1 or kind == 3) and (not fact_host_endpoint(s, a, false) or not fact_host_endpoint(s, a, true)): return fact_unmodeled(s, n, .unsupported)
     # (a shift count stays below the word; a mask is any nonnegative value)
     if kind == 3 or kind == 4:
         if y.lo < 0 or kind == 3 and y.hi > 62: return fact_unmodeled(s, n, .unsupported)
+    else if kind == 1 and y.hi < 0:
+        # The four corners bound division on a strictly negative denominator
+        # interval. MIN / -1 is outside the host domain: decline, never wrap.
+        if not fact_host_endpoint(s, b, false): return fact_unmodeled(s, n, .unsupported)
+        if x.lo == FACT_MIN and y.hi == -1: return fact_unmodeled(s, n, .unsupported)
+        ll = fact_quotient(x.lo, y.lo, floor)
+        lh = fact_quotient(x.lo, y.hi, floor)
+        hl = fact_quotient(x.hi, y.lo, floor)
+        hh = fact_quotient(x.hi, y.hi, floor)
+        low = min(min(ll, lh), min(hl, hh))
+        high = max(max(ll, lh), max(hl, hh))
+        return fact_new(s, FactBound(low, high, low > 0 or high < 0), FactTerm(type = ntype(n)))
+    else if kind == 2 and floor and y.hi < 0:
+        # Floor remainder has its divisor's sign, including for a wide
+        # dividend: d < x % d <= 0. No negation of MIN is needed. O(1).
+        if not fact_host_endpoint(s, b, false): return fact_unmodeled(s, n, .unsupported)
+        return fact_new(s, FactBound(y.lo + 1, 0), FactTerm(.eof, a, b, n, ntype(n)))
     else if y.lo < 1: return fact_unmodeled(s, n, .unsupported)
     if x.lo < 0 and kind == 1 and not x.wide and not y.wide:
         low = x.lo / y.lo
@@ -2349,7 +2409,7 @@ fact_floor = (s: mut FactState, n: int, kind: int, a: int, b: int, floor: bool) 
     r = FactBound()
     if kind == 2 or kind == 4:
         r.lo = 0
-        r.hi = if kind == 2: y.hi - 1 else: y.hi
+        r.hi = if kind == 2 and fact_host_endpoint(s, b, true): y.hi - 1 else: y.hi
         if x.lo >= 0 and not x.wide: r.hi = min(r.hi, x.hi)
     else if kind == 1:
         r.lo = x.lo / y.hi
@@ -2432,9 +2492,13 @@ fact_bitwise = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
         loop mask < top: mask = (mask << 1) | 1
         r.lo = if op == .pipe: max(x.lo, y.lo) else: 0
         r.hi = mask
-    else if op == .shr and x.lo >= 0 and y.lo >= 0 and y.hi <= 63:
-        r.lo = x.lo >> y.hi
-        r.hi = x.hi >> y.lo
+    else if op == .shr and y.lo >= 0 and y.hi <= 63:
+        # Arithmetic right shift is monotone in x. For negative x increasing
+        # the count raises the result; for nonnegative x it lowers it.
+        # Mathematical int's endpoint sentinels are not finite bounds.
+        if fact_type(ntype(int(nodes[n].a))) == T_MATH_INT and (not fact_host_endpoint(s, a, false) or not fact_host_endpoint(s, a, true)): return fact_unmodeled(s, n, .unsupported)
+        r.lo = x.lo >> (if x.lo < 0: y.lo else: y.hi)
+        r.hi = x.hi >> (if x.hi < 0: y.hi else: y.lo)
     else if op == .shl and x.lo >= 0 and y.lo >= 0 and y.hi <= 62:
         if x.hi > (FACT_MAX >> y.hi): return fact_unmodeled(s, n, .unsupported)
         r.lo = x.lo << y.lo
@@ -2456,8 +2520,10 @@ fact_extremum_call = (n: int) -> bool:
 # interval is theirs combined, and a row below (above) each operand. O(1).
 fact_extremum = (s: mut FactState, n: int, a: int, b: int, lower: bool) -> int:
     x = fact_bound(s, a); y = fact_bound(s, b)
-    if x.wide or y.wide: return fact_unmodeled(s, n, .unsupported)
     r = if lower: FactBound(min(x.lo, y.lo), min(x.hi, y.hi)) else: FactBound(max(x.lo, y.lo), max(x.hi, y.hi))
+    # A wide side uses MIN/MAX as infinity. Clamping can replace both with
+    # finite endpoints, even when the clamped intermediate exceeded a word.
+    r.wide = (x.wide or y.wide) and (r.lo == FACT_MIN or r.hi == FACT_MAX)
     r.nz = r.lo > 0 or r.hi < 0 or x.nz and y.nz
     v = fact_new(s, r, FactTerm(.eof, a, b, n, ntype(n)))
     if lower:
@@ -2624,18 +2690,51 @@ fact_refinement_covers = (r: int) -> int:
     if not known or allowed.len() == 0 or allowed[0] == FACT_MIN or allowed[allowed.len() - 1] == FACT_MAX: return 0
     inner
 
+# A captured fixed-width value or singleton has real host endpoints, unlike
+# an unconstrained mathematical int. Conversions preserve value identity, so
+# widening int64 to int and storing it back need not invent strict bounds.
+# O(1), using the existing value-indexed term; wide intermediates never qualify.
+fact_host_value = (s: FactState, value: int) -> bool:
+    if value == 0: return false
+    b = fact_bound(s, value)
+    if b.wide: return false
+    if b.lo == b.hi: return true
+    t = fact_type(fact_terms[value].type)
+    is_int(t) and t != T_MATH_INT and t != T_U64
+
+# Endpoint sentinels become finite through a current guard too. Inspect only
+# this value's indexed incident rows (at most 16), not every value in the body.
+# The other endpoint must itself have a finite interval; do not recurse through
+# rows, so a cycle of unconstrained values cannot manufacture a bound.
+fact_host_endpoint = (s: FactState, value: int, upper: bool) -> bool:
+    b = fact_bound(s, value)
+    if b.wide: return false
+    if (if upper: b.hi != FACT_MAX else: b.lo != FACT_MIN) or fact_host_value(s, value): return true
+    ri = fact_difference_head(s, value, int(upper))
+    loop ri >= 0:
+        row = s.differences[ri]
+        ri = fact_difference_next(s, ri, int(upper))
+        other = if upper: row.b else: row.a
+        q = fact_bound(s, other)
+        if q.wide: continue
+        if upper:
+            if (q.hi != FACT_MAX or fact_host_value(s, other)) and fact_add_fits(q.hi, row.limit): return true
+        else if row.limit != FACT_MIN:
+            if (q.lo != FACT_MIN or fact_host_value(s, other)) and fact_add_fits(q.lo, -row.limit): return true
+    false
+
 # An `int` converted to a fixed width (`int32(x)`, `x as int32`, a store into a
 # fixed-width place): x must fit, proven, an error or a check of its scope.
-# An `int`'s bounds at FACT_MIN or FACT_MAX are unbounded, so a 64-bit target
-# needs bounds strictly inside them. True when proven.
+# An `int`'s endpoint sentinels need strict bounds unless a captured fixed
+# value or current guard establishes that endpoint is finite. True when proven.
 fact_narrow_check = (n: int, s: mut FactState, value: int) -> bool:
     to = representation_type(ntype(n))
     bits = int(types[to].bits)
     sign = types[to].sign
     low = if not sign: 0 else if bits >= 64: FACT_MIN else: -(1 << (bits - 1))
     high = if bits >= 64: FACT_MAX else if sign: (1 << (bits - 1)) - 1 else: (1 << bits) - 1
-    lo_op = if low == FACT_MIN: Tok.gt else: Tok.ge
-    hi_op = if high == FACT_MAX: Tok.lt else: Tok.le
+    lo_op = if low == FACT_MIN and not fact_host_endpoint(s, value, false): Tok.gt else: Tok.ge
+    hi_op = if high == FACT_MAX and not fact_host_endpoint(s, value, true): Tok.lt else: Tok.le
     lo = fact_constant(s, low)
     hi = fact_constant(s, high)
     lc = fact_compare(s, lo_op, value, lo)
@@ -5632,7 +5731,7 @@ fact_progress_note = (assignment: int):
         exact_measure_sites[store] = site
 
 fact_exact_demand = (n: int) -> bool:
-    (exact_has_store(n) and not exact_decided(n) and (fact_deferred_proving or dir_policy(nodes[n].pos) == DIR_STATIC)) or (n >= 0 and n < exact_marks.len() and exact_marks[n] & 128 != 0)
+    (exact_has_store(n) and not exact_decided(n) and (fact_deferred_proving or dir_obligations or dir_policy(nodes[n].pos) == DIR_STATIC)) or (n >= 0 and n < exact_marks.len() and exact_marks[n] & 128 != 0)
 
 # (Jo sources, the compiler's own, keep runtime checks: none is demanded)
 fn_dewy = (f: int) -> bool:
