@@ -69,51 +69,49 @@ heap_pop = (@heap:array<Task>):>Task? => {
     top
 }
 
-main = () => {
-    loop s in [r"(a[b]{c})" "(]" "((" r"x{y}[z]()"] {
-        printl"{s}: {balanced(s)}"
-    }
+loop s in [r"(a[b]{c})" "(]" "((" r"x{y}[z]()"] {
+    printl"{s}: {balanced(s)}"
+}
 
-    let graph:dict<string array<string>> = [
-        "a"->["b" "c"]
-        "b"->["d"]
-        "c"->["d" "e"]
-        "d"->["f"]
-        "e"->["f"]
-        "f"->[]
-    ]
-    printl"bfs: {bfs(graph "a")}"
+let graph:dict<string array<string>> = [
+    "a"->["b" "c"]
+    "b"->["d"]
+    "c"->["d" "e"]
+    "d"->["f"]
+    "e"->["f"]
+    "f"->[]
+]
+printl"bfs: {bfs(graph "a")}"
 
-    let heap:array<Task> = []
-    heap_push(@heap Task[5 "write report"])
-    heap_push(@heap Task[1 "fix outage"])
-    heap_push(@heap Task[3 "review PR"])
-    heap_push(@heap Task[2 "answer email"])
-    heap_push(@heap Task[4 "lunch"])
-    loop true {
-        let t = heap_pop(@heap)
-        if t is? none break
-        printl"{t.priority}: {t.name}"
-    }
+let heap:array<Task> = []
+heap_push(@heap Task[5 "write report"])
+heap_push(@heap Task[1 "fix outage"])
+heap_push(@heap Task[3 "review PR"])
+heap_push(@heap Task[2 "answer email"])
+heap_push(@heap Task[4 "lunch"])
+loop true {
+    let t = heap_pop(@heap)
+    if t is? none break
+    printl"{t.priority}: {t.name}"
+}
 
-    # group words by first letter
-    let groups:dict<string array<string>> = []
-    loop w in ["apple" "avocado" "banana" "blueberry" "cherry" "apricot"] {
-        if w.length =? 0 continue
-        let k = w[0]
-        if k in? groups groups[k].push(w) else groups[k] = [w]
-    }
-    loop [k ws] in groups printl"{k}: {ws}"
+# group words by first letter
+let groups:dict<string array<string>> = []
+loop w in ["apple" "avocado" "banana" "blueberry" "cherry" "apricot"] {
+    let k = w[0]
+    if k not in? groups groups[k] = []
+    groups[k].push(w)
+}
+loop [k ws] in groups printl"{k}: {ws}"
 
-    # undo history: last item and pop
-    let history:array<string> = []
-    loop cmd in ["type a" "type b" "undo" "type c" "undo" "undo" "undo"] {
-        if cmd =? "undo" {
-            if history.length >? 0 printl"undo {history.pop()}"
-            else printl"nothing to undo"
-        } else {
-            history.push(cmd)
-            printl"did {cmd}; last is {history.last}"
-        }
+# undo history: last item and pop
+let history:array<string> = []
+loop cmd in ["type a" "type b" "undo" "type c" "undo" "undo" "undo"] {
+    if cmd =? "undo" {
+        if history.length >? 0 printl"undo {history.pop()}"
+        else printl"nothing to undo"
+    } else {
+        history.push(cmd)
+        printl"did {cmd}; last is {history.last}"
     }
 }

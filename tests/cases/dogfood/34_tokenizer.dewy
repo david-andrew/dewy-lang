@@ -17,11 +17,11 @@ tokenize = (src:string):>array<Token> => {
         } else if is_digit(c) {
             let start = i
             loop i <? src.length and is_digit(src[i]) i += 1
-            if start <=? i <=? src.length tokens.push(Token["num" src[start..i)])
+            tokens.push(Token["num" src[start..i)])
         } else if is_alpha(c) {
             let start = i
             loop i <? src.length and (is_alpha(src[i]) or is_digit(src[i])) i += 1
-            if start <=? i <=? src.length tokens.push(Token["name" src[start..i)])
+            tokens.push(Token["name" src[start..i)])
         } else if c =? "=" and i+1 <? src.length and src[i+1] =? "=" {
             tokens.push(Token["op" "=="])
             i += 2

@@ -75,6 +75,7 @@ struct Module:
     inits: int[]
     init_fn: i32
 
+const LF_VALUEITER = 33554432 # readonly scalar/string element of a Dewy array snapshot
 const LF_PARAM = 1
 const LF_MUTPARAM = 2
 const LF_CAPTURE = 4
@@ -133,6 +134,8 @@ struct Global:
     addr: i32
     fn_written: bool    # some function (not top-level code) changes it
     init_written: bool = false    # top-level code changes it after its declaration
+    fn_accessed: bool = false     # reachable from a function or another module
+    exposed: bool = false         # raw address or non-map mutable argument
 
 struct Capture:
     outer: i32
@@ -3593,6 +3596,7 @@ check_for = (s: int):
             else:
                 el = new_local(elname, et, pos)
                 locals[el].flags = i32(int(locals[el].flags) | LF_BYREF)
+                if k == .array and dewy_at(pos) and (is_int(et) or prune(et) == T_STR): locals[el].flags |= i32(LF_VALUEITER)
                 nodes[s].aux = 1
                 if k == .array and dewy_at(pos) and route_text(it) != "": value_loops.push(ValueLoop(cx, it, elname))
             nodes[s].sym = i32(el)

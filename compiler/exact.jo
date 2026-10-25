@@ -524,7 +524,7 @@ exact_fact_store = (n: int, value: int, s: mut FactState) -> int:
     if not ok and fact_speculating == 0:
         what = "cannot prove exact integer result fits {dt(t)}"
         if not dir_defer(n, what, true):
-            err_notes.push((-1, "help: bound the value with a guard or choose an overflow policy type; " + dir_panic_fix(nodes[n].pos)))
+            err_notes.push((-1, "help: bound the value with a guard or choose an overflow policy type; " + dir_panic_fix(nodes[n].pos, true)))
             fatal(nodes[n].pos, what)
     # The continuation is dominated by either a proof or its runtime check.
     if ok: return value

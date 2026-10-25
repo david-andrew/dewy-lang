@@ -4150,15 +4150,16 @@ An unproven obligation's error names the missing relation (`i <? xs.length`,
   (`if xs.length =? 0 return none` before `xs[0]` and `xs.pop()`).
 - Slice the way Python does with `xs[$clamp a..b)`: `rows[$clamp 1..]` skips a header
   line and `ranked[$clamp 0..5)` takes at most five.
-- Count into a dictionary with `if k in? d { d[k] += 1 } else { d[k] = 1 }`, and
-  group with `if k in? d d[k].push(x) else d[k] = [x]`.
+- Count into a dictionary with `if k not in? d d[k] = 0` followed by
+  `d[k] += 1`, and group with `if k not in? d d[k] = []` followed by
+  `d[k].push(x)`. Both branches establish that the key is present.
 - Arithmetic that may exceed a fixed width either computes in `int`
   (`:>int => a - b`), masks to the width (`(crc << 1) and 0xFF`), or says it wraps
   (`let h:uint32<overflow='wrap'> = 2166136261`, as a hash does).
 
-Top-level bindings are globals, and a call or a loop may change a global as far as the
-analysis knows, so a guard on one is forgotten at the next call. Code that indexes
-proves most easily inside a function such as `main`.
+Script bindings keep facts across loops and calls when no function can reach their
+storage. A binding referenced by a function, passed by mutable place, or exposed
+through a raw address still needs its facts re-established after a possible change.
 
 `dewy check --obligations file.dewy` lists every unproven obligation that
 compiles to a runtime check, one per line, with the setting responsible

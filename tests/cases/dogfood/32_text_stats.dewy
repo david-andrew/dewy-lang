@@ -25,7 +25,8 @@ loop line in lines {
     if line.length >? longest.length longest = line
     loop raw in line.split() {
         let w = clean(raw)
-        if w in? counts { counts[w] += 1 } else { counts[w] = 1 }
+        if w not in? counts counts[w] = 0
+        counts[w] += 1
     }
 }
 printl"lines: {lines.length}"
@@ -40,7 +41,7 @@ loop [w n] in ranked[$clamp 0..5) {
 # initials of each line
 loop line in lines {
     let parts = line.split()
-    let initials = [loop p in parts if p.length >? 0 p[0]].join
+    let initials = [loop p in parts p[0]].join
     printl"initials: {initials}"
 }
 
@@ -53,8 +54,8 @@ if first.length >? 0 {
 # middle three characters of each word in line 2
 let second = (lines.get(1) ?? "").split()
 loop w in second {
-    let mid = w.length // 2
-    if mid >=? 1 and mid+1 <? w.length {
+    if w.length >=? 3 {
+        let mid = w.length // 2
         printl"{w} -> {w[mid-1..mid+1]}"
     }
 }

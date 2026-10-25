@@ -452,12 +452,13 @@ dir_panic_call = (n: int, g: int) -> str:
 
 # The repairs: prove what the callee checks (a guard, a refined parameter, or
 # a value-returning form such as `xs.get(i)`), or opt in to runtime checks.
-dir_panic_fix = (p: int) -> str:
+dir_panic_fix = (p: int, operation: bool = false) -> str:
+    where = if operation: "operation" else: "call"
     i = dir_find(dir_name_runtime, p)
     if i >= 0 and dir_scopes[i].bundle != 0:
         b = name_of(dir_scopes[i].bundle)
-        return "prove what it checks before the call (a guard, a refined parameter, or a form that returns the failure as a value), or opt this function out of `${b}` with `${b}=false` and add `$runtime_checks`"
-    "prove what it checks before the call (a guard, a refined parameter, or a form that returns the failure as a value), or opt in to the check with `$runtime_checks` on a line of its own in this function or block"
+        return "prove what it checks before the {where} (a guard, a refined parameter, or a form that returns the failure as a value), or opt this function out of `${b}` with `${b}=false` and add `$runtime_checks`"
+    "prove what it checks before the {where} (a guard, a refined parameter, or a form that returns the failure as a value), or opt in to the check with `$runtime_checks` on a line of its own in this function or block"
 
 # A `$runtime_assert` at p is its module's own handling, not `panics` for the
 # module's callers, unless the scope says `$assume_local_asserts=false`

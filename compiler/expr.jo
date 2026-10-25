@@ -1237,6 +1237,7 @@ check_place = (n: int, for_mut: bool):
             if readonly_global(int(nodes[n].sym)): place_fatal(nodes[n].pos, "cannot modify const '{name_of(int(nodes[n].name))}'")
             if for_mut and string_domains.len() > 0 and ntype(n) == T_STR: string_domain_write(n, 0)
             if for_mut and ntype(n) == T_MATH_INT: int_domain_write(n, 0, -1)
+            if for_mut and not is_map_type(ntype(n)): globals[int(nodes[n].sym)].exposed = true
             note_global_write(int(nodes[n].sym))
             return
         fatal(nodes[n].pos, "cannot assign to '{name_of(int(nodes[n].name))}'")
@@ -1308,6 +1309,8 @@ note_storage_access = (n: int):
     k = nodes[n].kind
     if k == .field or k == .index or k == .unwrap or k == .narrow:
         note_storage_access(int(nodes[n].a))
+    else if k == .ident and nodes[n].aux == i32(int(SK.global)):
+        globals[int(nodes[n].sym)].exposed = true
     else if k == .ident and nodes[n].aux == i32(int(SK.local)):
         l = int(nodes[n].sym)
         locals[l].flags |= i32(LF_EXPOSED)
@@ -9723,6 +9726,7 @@ check_ident_expr = (n: int, expected: int) -> int:
     else if sk == .global:
         g = int(syms[s].ref)
         ensure_global(g, nodes[n].pos)
+        if cx < 0 or fns[int(ctxs[cx].inst)].kind != FK_INIT or cur_mod() != int(globals[g].mod): globals[g].fn_accessed = true
         if globals[g].is_const and is_quantity(int(globals[g].type)):
             juxt_spaced_unit(n)
             q = quantity_scales[quantity_constant_scale(int(globals[g].init))]

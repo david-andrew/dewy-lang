@@ -10,7 +10,7 @@ adler32 = (data:array<uint8>):>uint32 => {
         a = (a + byte) % 65521
         b = (b + a) % 65521
     }
-    ((b and 0xFFFF) << 16) | a
+    (b << 16) | a
 }
 
 fnv1a = (data:array<uint8>):>uint32 => {
@@ -43,11 +43,13 @@ xorshift32 = (@state:uint32):>uint32 => {
     x
 }
 
+HEX = "0123456789abcdef"
+
 hex32 = (v:uint32):>string => {
     let out:array<string> = []
     loop shift in [28, 24..0] {
         let nibble = (v >> shift) and 0xF
-        out.push("0123456789abcdef"[nibble])
+        out.push(HEX[nibble])
     }
     out.join
 }
@@ -67,16 +69,14 @@ luhn_digit = (digits:string):>int64 => {
     (10 - total % 10) % 10
 }
 
-main = () => {
-    loop text in ["Wikipedia" "hello world" ""] {
-        let data = bytes_of(text)
-        printl"{text:<12} adler32={hex32(adler32(data))} fnv1a={hex32(fnv1a(data))} crc8={crc8(data)}"
-    }
-    let state:uint32 = 2463534242
-    let rolls:array<int64> = []
-    loop _ in [0..6) {
-        rolls.push(xorshift32(@state) % 6 + 1)
-    }
-    printl"dice: {rolls}"
-    printl"luhn(7992739871) = {luhn_digit("7992739871")}"
+loop text in ["Wikipedia" "hello world" ""] {
+    let data = bytes_of(text)
+    printl"{text:<12} adler32={hex32(adler32(data))} fnv1a={hex32(fnv1a(data))} crc8={crc8(data)}"
 }
+let state:uint32 = 2463534242
+let rolls:array<int64> = []
+loop _ in [0..6) {
+    rolls.push(xorshift32(@state) % 6 + 1)
+}
+printl"dice: {rolls}"
+printl"luhn(7992739871) = {luhn_digit("7992739871")}"
