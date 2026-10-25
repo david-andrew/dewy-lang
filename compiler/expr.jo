@@ -4648,7 +4648,8 @@ frame_call_check = (n: int, decl: int):
     if ci <= 0 or fns[ci].decl == 0: return
     fd = int(fns[ci].decl)
     if not modules[int(nodes[fd].mod)].is_main: return
-    here = name_of(int(nodes[fd].name))
+    # (a type's method named update or draw is not the game's)
+    here = if dewy_is_method(fd): "" else: name_of(int(nodes[fd].name))
     fnm = name_of(int(nodes[decl].name))
     drawing = false
     loop d in DRAWING_FNS:
@@ -7599,7 +7600,7 @@ check_binary = (n: int, expected: int) -> int:
         if nodes[b].kind == .int_lit: lv = f64(nodes[b].ival)
         else if nodes[b].kind == .float_lit: lv = nodes[b].fval
         ci = int(ctxs[cx].inst)
-        if lv != 0.0 and ci > 0 and fns[ci].decl != 0 and name_of(int(nodes[int(fns[ci].decl)].name)) == "update":
+        if lv != 0.0 and ci > 0 and fns[ci].decl != 0 and name_of(int(nodes[int(fns[ci].decl)].name)) == "update" and not dewy_is_method(int(fns[ci].decl)):
             lt = "{lv}"
             if lv == floor(lv) and abs(lv) < 1e15: lt = "{i64(lv)}"
             nm = "it"

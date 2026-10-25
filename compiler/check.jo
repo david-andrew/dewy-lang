@@ -819,10 +819,20 @@ __never_skip = (decl: int) -> bool:
     nm = name_of(int(nodes[decl].name))
     nm == "main" or nm == "update" or nm == "draw"
 
+# The main module m's own function the game calls by this name (main, update, draw), as its
+# symbol; a type's method of that name (`Shape:type = [draw = () => ...]`) is not one.
+game_fn = (m: int, name: str) -> int?:
+    e = modules[m].names.get(intern(name)) ?? 0
+    loop e != 0 and syms[e].kind == .fns and syms[e].decl != 0 and dewy_is_method(int(syms[e].decl)): e = int(syms[e].next)
+    if e == 0: return none
+    e
+
 # ---------------- modules ----------------
 module_source = (stem: str, dewy: bool, exclude: str = "", watch_candidates: bool = false) -> str:
+    # (the importer by any spelling: `physics.dewy` checked from its folder is ./physics.dewy)
+    skip = if len(exclude) > 0: module_path_key(exclude) else: ""
     loop path in module_candidates(stem, dewy):
-        if path == exclude: continue
+        if len(skip) > 0 and module_path_key(path) == skip: continue
         if file_exists(path): return path
         if watch_candidates: watch_missing_input(path)
     ""
@@ -5479,7 +5489,7 @@ unused_local_warnings = (f: int):
         # (score = 0 in update, then score += 1: it starts again each frame, and nothing reads it)
         fnm = ""
         if fns[f].decl != 0 and nodes[int(fns[f].decl)].kind == .fn_: fnm = name_of(int(nodes[int(fns[f].decl)].name))
-        if fl & LF_ASSIGNED != 0 and len(near) == 0 and (fnm == "update" or fnm == "draw"):
+        if fl & LF_ASSIGNED != 0 and len(near) == 0 and (fnm == "update" or fnm == "draw") and not dewy_is_method(int(fns[f].decl)):
             warn(locals[l].pos, "'{nm}' starts again here each frame, as a variable made in {fnm} belongs to that one run, and is never read: to keep it from frame to frame, give it its first value at the top of the file, outside the functions")
         else if fl & LF_ASSIGNED != 0 and len(near) == 0: warn(locals[l].pos, "'{nm}' is given a value here, and changed, but never read")
         else: warn(locals[l].pos, "'{nm}' is given a value here but never used{near}")
@@ -6635,13 +6645,13 @@ check_program = (main_path: str):
     # (native programs report crashes as they do panics: lib/std/backtrace.jo)
     if not target_wasm and prelude.get(intern("__crash_install")) != none: modules[mainm].inits.insert(0, synth_call("__crash_install", [], 0))
     # programs with update()/draw() run the game loop after main()
-    has_upd = modules[mainm].names.get(intern("update")) != none
-    has_drw = modules[mainm].names.get(intern("draw")) != none
+    has_upd = game_fn(mainm, "update") != none
+    has_drw = game_fn(mainm, "draw") != none
     # (two updates, as a Scratch project's scripts, one per sprite: only the first would run)
     loop gname in ["update", "draw", "main"]:
         first = 0
         loop d in modules[mainm].decls:
-            if nodes[d].kind != .fn_ or name_of(int(nodes[d].name)) != gname: continue
+            if nodes[d].kind != .fn_ or name_of(int(nodes[d].name)) != gname or dewy_is_method(d): continue
             if first == 0: first = d
             else:
                 what = "runs every frame"
@@ -6659,7 +6669,7 @@ check_program = (main_path: str):
     # (the game ignores what update and draw give back: their last line is a statement, as
     # `world.step(dt)` or a mistaken `pos == pos + v`, which then gets its warning)
     loop gn in ["update", "draw"]:
-        if let gs = modules[mainm].names.get(intern(gn)):
+        if let gs = game_fn(mainm, gn):
             gd = int(syms[gs].decl)
             if syms[gs].kind == .fns and gd != 0 and nodes[gd].kind == .fn_ and nodes[gd].a == 0: add_flag(gd, NF_VOID)
     # (Godot's callbacks, which nothing here calls)
@@ -6669,7 +6679,7 @@ check_program = (main_path: str):
                 if syms[gs].decl != 0: callback_warn(gs, "nothing calls {gn}: a game is {jd(nodes[int(syms[gs].decl)].pos, "`update = (dt: f64): ...`", "`update = (dt:float64):>void => \{...}`")}, called each frame, and {jd(nodes[int(syms[gs].decl)].pos, "`draw = (): ...`", "`draw = ():>void => \{...}`")} after it; what runs once goes at the top level")
     # (Draw = ():, updte = (dt: f64): a near miss of the name the game calls, and nothing runs)
     loop want in ["draw", "update"]:
-        if modules[mainm].names.get(intern(want)) != none: continue
+        if game_fn(mainm, want) != none: continue
         lim = 1
         if want == "update": lim = 2
         loop nm, gs in modules[mainm].names:
@@ -6775,13 +6785,13 @@ check_program = (main_path: str):
         ua = mk(.ident, 0)
         if has_upd:
             nodes[ua].name = i32(intern("update"))
-            nodes[ua].pos = nodes[int(syms[modules[mainm].names[intern("update")]].decl)].pos
+            nodes[ua].pos = nodes[int(syms[game_fn(mainm, "update")!].decl)].pos
             add_flag(ua, NF_MUT)   # the function itself (Dewy's `@update`)
         else: nodes[ua].name = i32(intern("__no_update"))
         da = mk(.ident, 0)
         if has_drw:
             nodes[da].name = i32(intern("draw"))
-            nodes[da].pos = nodes[int(syms[modules[mainm].names[intern("draw")]].decl)].pos
+            nodes[da].pos = nodes[int(syms[game_fn(mainm, "draw")!].decl)].pos
             add_flag(da, NF_MUT)
         else: nodes[da].name = i32(intern("__no_draw"))
         set_list(gc, [ua, da])
@@ -6852,13 +6862,13 @@ check_program = (main_path: str):
             if files[int(modules[mainm].file)].is_dewy: dewy_main_result(int(syms[s].decl), rt)
             else if rt != T_VOID and rt != T_NEVER and not is_int(rt):
                 fatal(nodes[int(syms[s].decl)].pos, "main must return void or an integer exit code, found {dt(rt)}")
-    if let s = modules[mainm].names.get(intern("update")):
+    if let s = game_fn(mainm, "update"):
         if syms[s].kind == .fns:
             # (update = (dt): ..., its parameter untyped: the seconds the game loop gives it)
             ud = int(syms[s].decl)
             if fn_sig(ud).generic and int(fn_sig(ud).ntp) == 1 and nkids(ud) == 1: update_fn = get_fn_inst(ud, [T_FLOAT], 0)
             else: update_fn = get_fn_inst(ud, [], 0)
-    if let s = modules[mainm].names.get(intern("draw")):
+    if let s = game_fn(mainm, "draw"):
         if syms[s].kind == .fns: draw_fn = get_fn_inst(int(syms[s].decl), [], 0)
     loop d in export_decls:
         if not modules[int(nodes[d].mod)].is_prelude: export_fns.push(get_fn_inst(d, [], nodes[d].pos))
@@ -6921,7 +6931,7 @@ check_program = (main_path: str):
         if nodes[i0].pos <= 0 or pos_in_lib(nodes[i0].pos): continue
         if ik != .vardecl and ik != .assign and ik != .const_: runs = true
     loop nm0 in ["main", "update", "draw"]:
-        if modules[mainm].names.get(intern(nm0)) != none: runs = true
+        if game_fn(mainm, nm0) != none: runs = true
     # (a const nothing uses is checked too: `const X = no_such(3)` is an error, used or not)
     loop mi in [0..modules.len()):
         if modules[mi].is_prelude: continue

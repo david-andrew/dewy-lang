@@ -1,0 +1,13 @@
+# A type's methods named update and draw are not the game's callbacks: the
+# program has a main and opens no window.
+Counter:type = [
+    total:int64=0
+    update = (step:int64):>void => { total += step }
+    draw = ():>void => { printl"total {total}" }
+]
+main = ():>void => {
+    let c = Counter[]
+    c.update(2)
+    c.update(3)
+    c.draw()
+}

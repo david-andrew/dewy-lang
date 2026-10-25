@@ -1,0 +1,15 @@
+# A settled callee whose effect row is opaque still writes its `@` argument:
+# the stale `one[0] =? 5` must not refute the assertion after the call.
+step = (@xs:array<int64>):>void => { if xs.length >? 0 { xs[0] += 1 } }
+probe = ():>void => {
+    let one:array<int64> = [5]
+    step(@one)
+    $runtime_assert one.length =? 1 and one[0] =? 6
+    printl"{one[0]}"
+}
+main = ():>void => {
+    probe()
+    let other:array<int64> = []
+    step(@other)
+    $runtime_assert other.length =? 0
+}

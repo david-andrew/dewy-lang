@@ -5148,6 +5148,12 @@ fact_slice_target = (writers: mut FactSliceEdges, n: int, at: int):
 # The variable a write target changes: through fields, elements, local
 # places (`let q = @r.xs`, `loop @x in xs`) and narrowed names (`if r is? T`),
 # which write the variable they name, or none. O(route depth).
+# A call's mutable (`@`) arguments, each written by it.
+fact_slice_place_arguments = (writers: mut FactSliceEdges, n: int):
+    mask = checked_call_mutmask(n)
+    loop i in [0..nkids(n)):
+        if mask & (1 << i) != 0: fact_slice_target(writers, kid(n, i), n)
+
 fact_slice_root = (n: int) -> PlaceIdentity:
     root = n
     depth = 0
@@ -5281,8 +5287,11 @@ fact_slice_prepare = (f: int, summary: bool = false):
             callee = int(nodes[n].sym)
             if nodes[n].aux == 0 and callee > 0 and ref_refined_result(int(fns[callee].ret)): values.push(n)
             if nodes[n].aux == 0 and callee > 0 and callee < effect_summaries.len() and effect_summaries[callee].done:
+                opaque = false
                 loop event in effect_summaries[int(nodes[n].sym)].events:
-                    if event.atom.kind == .opaque or event.atom.kind == .escape: exposed_writes.push(n)
+                    if event.atom.kind == .opaque or event.atom.kind == .escape:
+                        exposed_writes.push(n)
+                        opaque = true
                     if event.atom.kind != .write: continue
                     p = place_base(event.atom.place)
                     if p.root == .formal:
@@ -5292,11 +5301,11 @@ fact_slice_prepare = (f: int, summary: bool = false):
                     else:
                         fact_slice_writer(writers, p, n)
                         if fact_exposed(p): exposed_writes.push(n)
+                # (an opaque callee writes its place arguments too: fact_call_effects forgets them)
+                if opaque: fact_slice_place_arguments(writers, n)
             else if nodes[n].aux != 2 and nodes[n].aux != 3:
                 exposed_writes.push(n)
-                mask = checked_call_mutmask(n)
-                loop i in [0..nkids(n)):
-                    if mask & (1 << i) != 0: fact_slice_target(writers, kid(n, i), n)
+                fact_slice_place_arguments(writers, n)
         else if k == .intrinsic:
             id = nodes[n].aux as IN
             if id == .push or id == .pop or id == .clear or id == .reserve or id == .insert or id == .remove or id == .extend or id == .truncate or id == .resize:
