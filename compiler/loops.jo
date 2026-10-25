@@ -762,18 +762,42 @@ lx_vec_emit = (code: Ins[], L: CLoop, checks: LCheck[], plan: VPlan, out: mut In
     if not plan.avx_only: lx_vloop(code, L, checks, plan, bases, VX, out)
     out.push(Ins(.end, 0, 0, 0, 0, 0, 0))
 
-# Default builds only consider short array/float loops with a vector plan. Bounds
-# and overlap guards retain the scalar path when a whole loop is not safe.
+# Default builds consider short array/float loops with a vector plan. A large
+# function may wrap a small floating-point kernel in shape and exact-index
+# guards: cap the loop body, not its enclosing function. Keep the large integer
+# path demand-driven through exact maps. Bounds and overlap guards retain the
+# scalar path when a whole loop is not safe.
 fast_vectorize = ():
     if not lx_vec_on: return
-    if ir.code.len() > 400 and (ir.fn_index < 0 or ir.fn_index >= exact_map_functions.len() or not exact_map_functions[ir.fn_index]): return
+    large = ir.code.len() > 400 and (ir.fn_index < 0 or ir.fn_index >= exact_map_functions.len() or not exact_map_functions[ir.fn_index])
     candidate = false
     has_loop = false
+    floating = false
     loop ins in ir.code:
-        if ins.op == .fadd or ins.op == .fsub or ins.op == .fmul or ins.op == .fdiv or ins.op == .fneg: candidate = true
+        if ins.op == .fadd or ins.op == .fsub or ins.op == .fmul or ins.op == .fdiv or ins.op == .fneg: candidate = true; floating = true
         if ins.op == .load and int(ins.c) & M_INDEX != 0: candidate = true
         if ins.op == .loop: has_loop = true
-    if candidate and has_loop: loop_versioning(true)
+    if candidate and has_loop and (not large or floating): loop_versioning(true)
+
+# Reject loop shapes that cannot form a vector plan before decomposing any
+# indexes or allocating vreg spans. This bounded O(body instructions) sieve
+# grants no proofs: lx_checks and lx_vec_plan still validate every candidate.
+lx_vec_candidate = (code: Ins[], ends: int[], L: CLoop) -> bool:
+    p = L.pl + 1
+    loop p < L.inc:
+        ins = code[p]
+        if ins.op == .if_:
+            q = ends[p]
+            last = code[q - 1]
+            if last.op != .call or last.c != 1: return false
+            loop r in [p + 1..q - 1):
+                op = code[r].op
+                if op != .daddr and op != .iconst and op != .mov and op != .add and op != .gaddr: return false
+            p = q + 1
+            continue
+        if not lx_vec_op(ins.op) and ins.op != .checked_add and ins.op != .checked_sub and ins.op != .geu and ins.op != .eq: return false
+        p += 1
+    true
 
 # version the counting loops of the current function that have checks to drop
 lx_dbg_read = false
@@ -792,10 +816,10 @@ loop_versioning = (vector_only: bool = false):
     synced = false
     lx_span_ready = false
     out: Ins[]
-    out.reserve(code.len() * 2)
     at = 0
     loop L in cl:
         if L.pe - L.pl > 400: continue
+        if vector_only and not lx_vec_candidate(code, ends, L): continue
         checks = lx_checks(code, ends, L)
         # Only affine overflow obligations demand this copy. The guarded
         # operations become ordinary arithmetic for planning and vector emission;
@@ -821,6 +845,7 @@ loop_versioning = (vector_only: bool = false):
         if not synced:
             # (o_regs as the identity, once a loop is to be copied)
             synced = true
+            out.reserve(code.len() * 2)
             lx_sync()
         loop p in [at..L.pl): out.push(code[p])
         wrap = 0
