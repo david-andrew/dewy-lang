@@ -18,6 +18,7 @@ correctness suite also runs the workloads on native and web targets.
 | `shifted_arrays` | shifted array indexes with a runtime offset: bounds-check elimination and vectorization |
 | `broadcast` | tensor broadcasting: a matrix plus a row and a column through `new` axes, clipped at zero, then a same-shape product and sum |
 | `name_table` | a compiler's name table: words hashed a word at a time through a pointer, found by open addressing and compared as byte ranges in place |
+| `push` | records, integers and string literals pushed one at a time onto growing arrays |
 | `array_swap`, `case_conversion`, `integer_parse`, `records_nested`, `recursive_list`, `recursive_tree` | further focused kernels |
 
 Every program takes its size from the command line and generates its input

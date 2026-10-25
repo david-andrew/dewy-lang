@@ -419,8 +419,20 @@ note_mt_active = ():
     if s == 0 or syms[s].kind != .global: ice("missing runtime global __mt_active")
     mt_active_off = global_addr_off(int(syms[s].ref))
 
+# v was just computed as a read-only datum's address (e_daddr, a fresh vreg defined once): an
+# immortal object, as every object in read-only data is (str_data, const_array). A bounded look
+# back over the last few instructions; constant time.
+static_datum = (v: int) -> bool:
+    i = ir.code.len() - 1
+    floor = i - 4
+    loop i >= 0 and i >= floor:
+        if int(ir.code[i].dst) == v and ir.code[i].op == .daddr: return true
+        i -= 1
+    false
+
 # rc <= 0 marks immortal objects
 retain = (v: int, t0: int):
+    if static_datum(v): return
     t = quantity_base(t0)
     if math_optional(t):
         retain(e_bin(.xor, VI, v, e_iconst(1)), T_MATH_INT)
