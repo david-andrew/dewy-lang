@@ -7485,6 +7485,136 @@ fns_param_hint = (decls: int[], i: int, nargs: int) -> int:
         hint = pt
     hint
 
+# Context for call arguments after mapping names/defaults. Only the receiver and
+# explicit type arguments bind generics here; other arguments still select overloads.
+# Demand-driven by an unchecked call argument. Positional mapping is O(C * P);
+# named mapping uses map_args (O(C * A * P)), with indexed argument-to-slot lookup.
+fns_argument_hints = (decls: int[], args: int[], receiver: int = 0, explicit: int[] = []) -> int[]:
+    hints = fill(0, args.len())
+    indices: {int: int} = {}
+    positional = true
+    loop i in 0.. and a in args:
+        if nodes[a].kind == .namedarg: positional = false
+        indices[unnamed(a)] = i
+    loop d in decls:
+        np = nkids(d)
+        if np < args.len(): continue
+        kinds = dewy_param_kinds.get(d) ?? []
+        mapped = args
+        if not positional or kinds.len() > 0:
+            names: int[]
+            defaults: bool[]
+            loop p in kids(d):
+                names.push(int(nodes[p].name))
+                defaults.push(nodes[p].b != 0)
+            if map_args(names, defaults, args, mapped, kinds, false) != "": continue
+        else:
+            takes = true
+            loop j in [args.len()..np):
+                if nodes[kid(d, j)].b == 0: takes = false
+            if not takes: continue
+        sig = fn_sig(d)
+        binds = fill(0, int(sig.ntp))
+        if explicit.len() > 0:
+            if explicit.len() != nkids2(d): continue
+            loop i in 0.. and t in explicit: binds[i] = t
+        if receiver != 0:
+            if np == 0 or match_type(sig.params[0], ntype(receiver), binds, 0) < 0: continue
+        loop j in [0..mapped.len()):
+            a = mapped[j]
+            if a == 0: continue
+            i = if positional and kinds.len() == 0: j else: indices.get(a) ?? -1
+            if i < 0 or hints[i] < 0: continue
+            pt = prune(subst(sig.params[j], binds))
+            if int(sig.mutmask) & (1 << j) != 0 or pt == 0 or has_var(pt) or hints[i] != 0 and not type_eq(hints[i], pt): hints[i] = -1
+            else: hints[i] = pt
+    loop i in [0..hints.len()):
+        if hints[i] < 0: hints[i] = 0
+    hints
+
+# Discover the same method/module family that check_call will use, only when an
+# argument call needs context before the multi-value check. No argument is tried
+# against a speculative overload.
+values_argument_hints = (n: int, expected: int) -> int[]:
+    callee = int(nodes[n].a)
+    args = kids(n)
+    explicit: int[]
+    if nodes[callee].kind == .typeapply:
+        loop t in kids(callee): explicit.push(effect_generic_argument(t))
+        callee = int(nodes[callee].a)
+    decls: int[]
+    receiver = 0
+    ft = 0
+    if nodes[callee].kind == .ident:
+        s = lookup(int(nodes[callee].name))
+        if s != 0 and syms[s].kind == .fns: collect_named(int(nodes[callee].name), -1, decls)
+    else if nodes[callee].kind == .field and nodes[callee].b == 0:
+        recv = int(nodes[callee].a)
+        name = int(nodes[callee].name)
+        saved = type_receiver_at
+        type_receiver_at = recv
+        rt = prune(check_expr(recv, receiver_literal_hint(recv, name, args.len(), expected, nodes[n].pos)))
+        type_receiver_at = saved
+        recv = last_checked
+        nodes[callee].a = i32(recv)
+        add_flag(recv, NF_CHECKED)
+        k = types[rt].kind
+        if k == .module: collect_named(name, int(types[rt].mod), decls)
+        else if k == .typeval:
+            tt = prune(telem(rt))
+            if types[tt].kind == .struct_:
+                si = int(types[tt].st)
+                j = dewy_type_method(int(structs[si].decl), name)
+                if j >= 0 and not dewy_methods[j].reads:
+                    check_struct_fields(si)
+                    decls.push(dewy_methods[j].decl)
+                    # The static call supplies an unused object of this type.
+                    receiver = mk(.call, nodes[n].pos)
+                    nodes[receiver].type = i32(tt)
+        else:
+            st = if k == .ptr: prune(telem(rt)) else: rt
+            if types[st].kind == .struct_:
+                si = int(types[st].st)
+                check_struct_fields(si)
+                loop i in [0..int(structs[si].nfields)):
+                    f = int(structs[si].fields) + i
+                    if fields[f].name == i32(name):
+                        t = prune(int(fields[f].type))
+                        fk = tkind(t)
+                        if fk == .fn_ or fk == .cfn or fk == .polyfn or fk == .callable: ft = t
+            if ft != 0:
+                if tkind(ft) == .polyfn:
+                    d = poly_families[int(types[ft].st)].decl
+                    decls.push(d)
+                    if dewy_is_method(d): receiver = recv
+                else: ft = callable_base(ft)
+            else if k != .typeval:
+                if str_set_of(rt) != 0 and not program_fn_named(name): rt = T_STR
+                name = dewy_member_name(callee, rt, name, args)
+                # Array intrinsics give the same context as check_intrinsic,
+                # unless call_by_name selects a user-defined sequence overload.
+                if k == .array and args.len() == 1 and (name_of(name) == "push" or name_of(name) == "extend"):
+                    own: int[]
+                    collect_module(cur_mod(), name, own)
+                    loop d in own:
+                        if not decl_in_prelude(d) and args_fit(d, 2) and takes_seq(d): decls.push(d)
+                    if decls.len() == 0: return [if name_of(name) == "push": telem(rt) else: rt]
+                    return fns_argument_hints(decls, [recv] + args, recv)[1..]
+                collect_fns(name, decls)
+                loop m in method_modules(rt): collect_module(m, name, decls)
+                receiver = recv
+    if receiver != 0: args = [receiver] + args
+    hints: int[]
+    if decls.len() > 0: hints = fns_argument_hints(decls, args, receiver, explicit)
+    else if ft != 0 and (tkind(ft) == .fn_ or tkind(ft) == .cfn):
+        # A function field already has its complete signature. Its named calls
+        # and defaults remain the responsibility of value_call.
+        loop i in [0..args.len()):
+            if nodes[args[i]].kind == .namedarg or i >= int(types[ft].nargs): return []
+            hints.push(if int(types[ft].mutmask) & (1 << i) == 0: targ(ft, i) else: 0)
+    if receiver != 0 and hints.len() > 0: return hints[1..]
+    hints
+
 # A Dewy call some of whose arguments give several values (or spread a container): checked
 # with its arguments expanded, as `{ held...; f(values...) }`. -1: nothing to expand.
 values_call = (n: int, expected: int) -> int:
@@ -7500,24 +7630,26 @@ values_call = (n: int, expected: int) -> int:
     positional = true
     fn_decls_read = 0
     fn_decls: int[]
+    hints_read = false
+    arg_hints: int[]
+    loop j in [0..nkids(n)):
+        if nodes[kid(n, j)].kind == .namedarg: positional = false
     loop i in [0..nkids(n)):
-        a = kid(n, i)
+        original = kid(n, i)
+        named = nodes[original].kind == .namedarg
+        a = unnamed(original)
         if nodes[a].kind == .call and members_named(a): members_argument(a)
         k = nodes[a].kind
-        if k == .namedarg:
-            record = 0
-            positional = false
-        if k == .tuple and nodes[a].aux == i32(TUPLE_VALUES) or has_flag(a, NF_SPREAD) or values_hits.has(a):
+        if named: record = 0
+        if not named and (k == .tuple and nodes[a].aux == i32(TUPLE_VALUES) or has_flag(a, NF_SPREAD) or values_hits.has(a)):
             some = true
             break
         if has_flag(a, NF_CHECKED): continue
-        if k == .ident:
+        if k == .ident and not named:
             if values_candidate(a):
                 some = true
                 break
         else if k == .call and not ctx_dependent(a) and not sink_spread_calls.has(a):
-            saved = sink_pack_site
-            sink_pack_site = a
             # (a record's positional field: its type is what the value is checked against, as
             # a function's parameter is once its overload is chosen)
             field = 0
@@ -7530,13 +7662,23 @@ values_call = (n: int, expected: int) -> int:
                     s = lookup(int(nodes[callee].name))
                     if s != 0 and syms[s].kind == .fns: collect_named(int(nodes[callee].name), -1, fn_decls)
                 field = fns_param_hint(fn_decls, i, nkids(n))
+            else:
+                if not hints_read:
+                    hints_read = true
+                    arg_hints = values_argument_hints(n, expected)
+                if i < arg_hints.len(): field = arg_hints[i]
+            if named and field == 0: continue
+            saved = sink_pack_site
+            sink_pack_site = if named: 0 else: a
             check_expr(a, field)
             sink_pack_site = saved
             hit = sink_pack_hit != 0 and sink_pack_hit == a
             sink_pack_hit = 0
             v = last_checked
             add_flag(v, NF_CHECKED)
-            if v != a: set_kid(n, i, v)
+            if v != a:
+                if named: nodes[original].a = i32(v)
+                else: set_kid(n, i, v)
             if hit:
                 values_hits[v] = true
                 some = true

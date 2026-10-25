@@ -1,0 +1,6 @@
+A:type='push'|'pop'
+B:type='push'|'load'
+R:type=[n:int64]
+take=(r:R s:set<A> n:int64)=>s.length+n+r.n
+take=(r:R s:set<B> n:string)=>s.length+n.length+r.n
+main=()=>{let r=R[2] printl(r.take(set(['push']) 3))}

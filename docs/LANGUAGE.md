@@ -1686,7 +1686,9 @@ main = () => {
 ```
 
 Calls normally infer the type arguments; `first<string>(words)` supplies them
-explicitly. Type applications nest, as in `Pool<Box<int64>>`, and work on imported
+explicitly. A call used as an argument takes the receiving parameter's type when
+all candidates agree on that type. This also applies to methods, qualified calls
+and named arguments; disagreeing overloads supply no such context. Type applications nest, as in `Pool<Box<int64>>`, and work on imported
 names such as `models.Box<string>`. Generic type aliases wrap their definition in
 parentheses. Each concrete function/type is specialized by the compact compiler;
 this adds no universal boxed-value representation. Defaults can use the bound

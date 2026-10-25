@@ -1,0 +1,6 @@
+Op:type = 'push' | 'pop'
+let trace:int64=0
+mark=(n:int64)=>{trace=trace*10+n; n}
+g=(xs:array<float64> s:set<Op> n:int64=mark(3))=>xs.length+s.length+n
+main=()=>{printl(g(s=set(['push']) xs=fill(1.5 mark(2)))) printl(trace)}
+$runtime_checks

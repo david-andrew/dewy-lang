@@ -1,0 +1,7 @@
+Op:type = 'push' | 'pop'
+R:type=[n:int64]
+take=(r:R s:set<Op> tag:int64)=>s.length+r.n+tag
+take=(r:R s:set<Op> tag:string)=>s.length+r.n+tag.length
+main=()=>{let r=R[2] printl(r.take(set(['push']) 3)) printl(r.take(tag="x" s=set(['pop'])))}
+
+$runtime_checks
