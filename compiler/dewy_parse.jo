@@ -79,12 +79,14 @@ dw_name_id = (id: int) -> i32:
 # The compact name of a Dewy identifier used as a value (printl is the library's print).
 dw_renamed: int[]               # printl, print, int and the compact names they become
 dw_value_name = (name: i32, pos: int) -> i32:
-    if dw_renamed.len() == 0: dw_renamed = [intern("printl"), intern("print"), intern("print"), intern("__dewy_print"), intern("int"), intern("__dewy_int"), intern("bigint")]
+    if dw_renamed.len() == 0: dw_renamed_init()
     if int(name) == dw_renamed[0]: return i32(dw_renamed[1])
     if int(name) == dw_renamed[2]: return i32(dw_renamed[3])
     # (`bigint` names `int`'s arbitrary-precision form: the same type, so `bigint(x)` is `int(x)`)
     if int(name) == dw_renamed[4] or int(name) == dw_renamed[6]: return i32(dw_renamed[5])
     name
+
+dw_renamed_init = (): dw_renamed = [intern("printl"), intern("print"), intern("print"), intern("__dewy_print"), intern("int"), intern("__dewy_int"), intern("bigint")]
 
 # Inside a method, a bare name of one of the object's fields or methods is that member
 # of the instance (there is no `self`): it reads through the method's hidden receiver
@@ -2533,16 +2535,21 @@ dw_reserved_name = (name: str, at: int):
 # Words with a fixed meaning cannot be bound: variables, constants, functions,
 # parameters, fields, methods, loop and pattern names, and import aliases.
 dewy_reserved_name = (name: str, pos: int):
-    if len(name) < 3: return
+    text = dewy_reserved_text(name)
+    if text != "": fatal(pos, text)
+
+# (its mistake, "" for a name that may be bound)
+dewy_reserved_text = (name: str) -> str:
+    if len(name) < 3: return ""
     c = name[0]
-    if c != 'e' and c != 'n' and c != 'v': return
+    if c != 'e' and c != 'n' and c != 'v': return ""
     role = ""
     if name == "end": role = "inside brackets it is the last index, as in `xs[end]`"
     else if name == "new": role = "inside brackets it inserts an axis, as in `xs[new]`"
     else if name == "none": role = "it is the empty value"
     else if name == "void": role = "it is the type of no value"
-    if role == "": return
-    fatal(pos, "'{name}' is reserved, not a name: {role} (use `{name}_`)")
+    if role == "": return ""
+    "'{name}' is reserved, not a name: {role} (use `{name}_`)"
 
 dw_declare = (id: int, constant: bool, top: bool) -> int:
     let id = dw_unwrap(id)
