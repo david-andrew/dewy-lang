@@ -294,6 +294,9 @@ dw_supported_targets = (tag: int, declaration: int):
         name = dw_target_literal(entry)
         if len(name) == 0: fatal(dewy_syntax[entry].pos, "`$supported_targets` lists target names as string literals")
         names.push(name)
+    dw_supported_names(pos, names)
+
+dw_supported_names = (pos: int, names: str[]):
     file = pos_file(pos)
     if dw_targets_listed.has(file): fatal(pos, "`$supported_targets` may be set only once per module")
     dw_targets_listed[file] = true
@@ -624,7 +627,9 @@ dw_shadowable_tag = (id: int) -> int:
 
 # `$test` or `$test(cases=…)`: a line of its own before a module function
 dw_test_tag = (id: int) -> int:
-    if id <= 0 or dewy_syntax[id].kind == .compact_stmt: return 0
+    if id <= 0: return 0
+    # (`$test(cases=…)` the direct grammar read: dc_directive_line)
+    if dewy_syntax[id].kind == .compact_stmt: return if dewy_syntax[id].text == "$test": id else: 0
     let id = dw_unwrap(id)
     if dewy_syntax[id].kind == .metatag and dewy_syntax[id].text == "test": return id
     if dn_token_call(dw_op(id)) and dw_nchildren(id) == 3:
@@ -636,6 +641,7 @@ dw_test_tag = (id: int) -> int:
 # arguments per case (positional values, or an object's fields by name), or for a
 # computed array, the array (`a`); `ival` 1 when cases are given.
 dw_test_spec = (id: int) -> int:
+    if dewy_syntax[id].kind == .compact_stmt: return dewy_syntax[id].child_left
     pos = dewy_syntax[id].pos
     n = mk(.test_, pos)
     nodes[n].aux = 1
@@ -3569,6 +3575,15 @@ dw_top_declarations = (id: int) -> int[]:
         return []
     if dw_export_tag(tag):
         dw_export_begin(tag)
+        return []
+    # (`$export(name=…)`, `$supported_targets = […]` the direct grammar read: dc_directive_line)
+    if dewy_syntax[tag].kind == .compact_stmt and dewy_syntax[tag].text == "$export":
+        dw_export_at(dewy_syntax[tag].pos, name_of(int(nodes[dewy_syntax[tag].child_left].sval)))
+        return []
+    if dewy_syntax[tag].kind == .compact_stmt and dewy_syntax[tag].text == "$supported_targets":
+        names: str[]
+        loop entry in kids(dewy_syntax[tag].child_left): names.push(name_of(int(nodes[entry].sval)))
+        dw_supported_names(dewy_syntax[tag].pos, names)
         return []
     if dewy_syntax[tag].kind == .directive and dewy_syntax[tag].text == "warn_if":
         dw_warn_if_pending.push(dw_warn_if_attr(tag))

@@ -127,9 +127,13 @@ dw_export_tag = (id: int) -> bool:
 dw_export_begin = (id0: int):
     id = dw_unwrap(id0)
     if dw_export_pos != 0: fatal(dewy_syntax[id].pos, "a second `$export`: one marks the function just after it")
-    dw_export_pos = dewy_syntax[id].pos
     options = dw_ffi_options(id, "export", ["name"])
-    dw_export_name = options.get("name") ?? ""
+    dw_export_at(dewy_syntax[id].pos, options.get("name") ?? "")
+
+dw_export_at = (pos: int, name: str):
+    if dw_export_pos != 0: fatal(pos, "a second `$export`: one marks the function just after it")
+    dw_export_pos = pos
+    dw_export_name = name
 
 dw_export_attach = (made: int[]):
     pos = dw_export_pos
