@@ -446,10 +446,11 @@ __bcast_offset = (r: int, out: int[], st: int[]) -> int:
     o
 
 # the length of the innermost loop: the whole array when every operand has the result's shape
+# (arrays' shapes and their broadcast: nonnegative dimensions)
 __bcast_inner = (shapes: int[][], out: int[]) -> int:
-    n = __nd_size(out)
+    n = __nd_count(out)
     loop s in shapes:
-        if __nd_size(s) != n: return out[out.len() - 1]
+        if __nd_count(s) != n: return out[out.len() - 1]
     n
 
 # the step of the innermost loop through an operand of `size` elements: an operand of the

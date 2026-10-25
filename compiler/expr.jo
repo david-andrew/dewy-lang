@@ -12053,7 +12053,8 @@ bc_loop_nd = (tmpl: int, arrs: str[], kinds: int[], pre: str, epre: str, pos: in
     id = (nm: str) -> int: bc_ident("{pre}{nm}", pos)
     stmts.push(bc_let("{pre}shs", sa, pos))
     stmts.push(bc_let("{pre}shp", bc_call("__bcast_shape", [id("shs")], pos), pos))
-    stmts.push(bc_let("{pre}n", bc_call("__nd_size", [id("shp")], pos), pos))
+    # (the operands' dimensions are nonnegative, and so is each of the result's)
+    stmts.push(bc_let("{pre}n", bc_call("__nd_count", [id("shp")], pos), pos))
     stmts.push(bc_let("{pre}in", bc_call("__bcast_inner", [id("shs"), id("shp")], pos), pos))
     stmts.push(bc_let("{pre}on", bc_call("__bcast_rows", [id("n"), id("in")], pos), pos))
     flat: str[]

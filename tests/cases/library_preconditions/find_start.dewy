@@ -1,0 +1,14 @@
+# quick
+# `text.find(part start)` needs 0 <=? start <=? text.length: a caller obligation
+# its facts prove, so a guarded or literal start builds without runtime checks.
+search=(text:string start:int64):>int64=>{
+    if start <? 0 or start >? text.length return -1
+    return text.find("b" start) ?? -1
+}
+main=()=>{
+    let s="abcabc"
+    printl(s.find("c" 1))
+    printl(s.find("c" 6))
+    printl(search(s 2))
+    printl(search(s 9))
+}

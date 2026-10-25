@@ -1,0 +1,17 @@
+# quick
+# min, max, a set's pop and a heap's pop and peek need an element: guards prove it.
+main=()=>{
+    let xs=[3 1 2]
+    printl"{min(xs)} {max(xs)}"
+    let empty:array<int64>=[]
+    if empty.length >? 0 printl(max(empty))
+    let values:set<int64>=set[5 6 7]
+    let total=0
+    loop not values.is_empty() total+=values.pop()
+    printl(total)
+    let queue:Heap<string>=[]
+    queue.push("later" 2.0)
+    queue.push("first" 1.0)
+    if queue.length >? 0 printl(queue.peek())
+    loop queue.length >? 0 printl(queue.pop())
+}

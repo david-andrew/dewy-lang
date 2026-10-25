@@ -232,9 +232,11 @@ zwp_relative_pointer_v1 1
             p = dl_sym(__lw_lib, n + "_interface")
             if p == null: return false
             by_name[n] = p
-        loop d in defs: by_name[d.name] = __alloc(40)
+        ips: *u8[]
         loop d in defs:
-            ip = by_name[d.name]
+            ips.push(__alloc(40))
+            by_name[d.name] = ips[ips.len() - 1]
+        loop d in defs and ip in ips:
             mem_set(ip, 0, 40)
             (ip as **u8)[0] = __lw_cstr(d.name)
             (ip as *i32)[2] = i32(d.version)

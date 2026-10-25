@@ -754,13 +754,15 @@ fact_library_call = (n: int, name: str) -> bool:
     d = int(fns[int(nodes[n].sym)].decl)
     d != 0 and pos_in_lib(nodes[d].pos) and name_of(int(nodes[d].name)) == name
 
-# Reviewed array emptiness contract. O(1), only when a demanded expression
-# reads the result; mutation continues to invalidate the receiver normally.
+# Reviewed array (and set) emptiness contract. O(1), only when a demanded
+# expression reads the result; mutation continues to invalidate the receiver
+# normally. A set's is its entry count's (fact_entry_count_call).
 fact_empty_array_call = (n: int) -> bool:
     if nkids(n) != 1 or not fact_library_call(n, "is_empty"): return false
+    d = int(fns[int(nodes[n].sym)].decl)
+    if is_dewy_set_type(representation_type(ntype(kid(n, 0)))): return files[pos_file(nodes[d].pos)].path == lib_dir + "/std/dewy_sets.jo"
     t = fact_type(ntype(kid(n, 0)))
     if types[t].kind != .array and types[t].kind != .fixed: return false
-    d = int(fns[int(nodes[n].sym)].decl)
     files[pos_file(nodes[d].pos)].path == lib_dir + "/core/array.jo"
 
 # Reviewed entry-count contract: the bundled dictionary's `len` counts its
@@ -775,7 +777,58 @@ fact_entry_count_call = (n: int) -> bool:
     if int(nodes[int(fns[int(nodes[n].sym)].decl)].name) != fact_name_len: return false
     t = representation_type(ntype(kid(n, 0)))
     path = files[pos_file(nodes[int(fns[int(nodes[n].sym)].decl)].pos)].path
-    is_map_type(t) and path == lib_dir + "/core/map.jo" or is_dewy_set_type(t) and path == lib_dir + "/std/dewy_sets.jo"
+    is_map_type(t) and path == lib_dir + "/core/map.jo" or is_dewy_set_type(t) and path == lib_dir + "/std/dewy_sets.jo" or path == lib_dir + "/std/heap.jo"
+
+# Reviewed nonempty requirements: an array's `min(xs)` and `max(xs)`, a set's
+# `s.pop()` (any member) and a heap's `h.pop()`, `h.peek()` and
+# `h.peek_priority()` need an element, so `xs.length >? 0` is the call's
+# obligation, as an index's bound is (each library body states it as its one
+# failure). A set's or heap's length is the entry-count projection above. O(1).
+fact_name_peek = 0
+fact_name_peek_priority = 0
+fact_name_take = 0
+fact_name_least = 0
+fact_name_most = 0
+fact_nonempty_call = (n: int) -> bool:
+    if nkids(n) != 1 or nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or fns[int(nodes[n].sym)].decl == 0: return false
+    if fact_name_peek == 0:
+        fact_name_peek = intern("peek")
+        fact_name_peek_priority = intern("peek_priority")
+        fact_name_take = intern("pop")
+        fact_name_least = intern("min")
+        fact_name_most = intern("max")
+    d = int(fns[int(nodes[n].sym)].decl)
+    name = int(nodes[d].name)
+    if name != fact_name_take and name != fact_name_peek and name != fact_name_peek_priority and name != fact_name_least and name != fact_name_most: return false
+    path = files[pos_file(nodes[d].pos)].path
+    if name == fact_name_least or name == fact_name_most:
+        rk = tkind(fact_type(ntype(kid(n, 0))))
+        return path == lib_dir + "/core/array.jo" and (rk == .array or rk == .fixed)
+    if path == lib_dir + "/std/heap.jo": return true
+    name == fact_name_take and path == lib_dir + "/std/dewy_sets.jo" and is_dewy_set_type(representation_type(ntype(kid(n, 0))))
+
+fact_nonempty_check = (n: int, s: mut FactState, values: int[]):
+    if fact_speculating != 0 or not (fact_policy == .RequireStatic or fact_query): return
+    t = fact_type(ntype(kid(n, 0)))
+    length = if tkind(t) == .fixed: fact_constant(s, fixed_len(t)) else: fact_project(s, fact_map_receiver(s, n, values[0]), -1, false, T_INT)
+    # (the constant first: the state is taken before later arguments run)
+    one = fact_constant(s, 1)
+    c = fact_compare(s, .ge, length, one)
+    if fact_probe_on:
+        fact_probe_record(n, c == 1)
+        return
+    if c == 1: return
+    receiver = wit_text(kid(n, 0))
+    rk = tkind(t)
+    what = if rk == .array or rk == .fixed: "array" else if is_dewy_set_type(representation_type(ntype(kid(n, 0)))): "set" else: "heap"
+    shown = if receiver != "": "`{receiver}`" else: "the {what}"
+    relation = if receiver != "": "{receiver}.length >? 0" else: ""
+    if c == 0:
+        wit_help(relation)
+        if dir_defer(n, "{shown} is empty", true): return
+        wit_fail(nodes[n].pos, "{shown} is empty")
+        return
+    wit_unknown(n, fact_bound(s, length), "{shown} is nonempty", 0, relation)
 
 # The bundled delimiter split always appends its final part when the
 # separator is nonempty. Empty separators and whitespace splitting differ.
@@ -2675,15 +2728,50 @@ fact_shift_obliged = (n: int) -> bool:
 
 # A stepped range, `[a, b..c]` (a loop's, or the library's IntRange): its step
 # b - a must be nonzero, so b not=? a is an obligation. n: the stepped `for_`,
-# or the `__dewy_range` call with a literal `true` for `stepped`.
+# or a call of one of the library's range constructors with a literal `true`
+# for `stepped` (fact_range_first).
+fact_range_call = (n: int) -> bool: fact_range_first(n, true) >= 0
+
+# The library's range constructors, whose one failure is a zero step: the
+# position of the `first` argument (the second value follows it) when the call
+# passes a literal `stepped` that is `step` (an open counter's is always
+# stepped), or -1. `__dewy_range(first second last stepped inclusive)`, a matrix
+# axis's `__nd_axis_slice(first second last inclusive bounded stepped
+# exclusive_first)`, an update's `__dewy_slice_range(size first second last
+# inclusive bounded stepped)` and `__dewy_open_range_iter(first second)`. O(1).
 fact_name_range = 0
-fact_range_call = (n: int) -> bool:
-    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) != 5: return false
+fact_name_axis_slice = 0
+fact_name_slice_range = 0
+fact_name_open_range = 0
+fact_range_first = (n: int, step: bool) -> int:
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0: return -1
+    m = nkids(n)
+    if m != 2 and m != 5 and m != 7: return -1
     d = int(fns[int(nodes[n].sym)].decl)
-    if d == 0: return false
-    if fact_name_range == 0: fact_name_range = intern("__dewy_range")
-    stepped = kid(n, 3)
-    int(nodes[d].name) == fact_name_range and pos_in_lib(nodes[d].pos) and nodes[stepped].kind == .bool_lit and nodes[stepped].ival != 0
+    if d == 0: return -1
+    if fact_name_range == 0:
+        fact_name_range = intern("__dewy_range")
+        fact_name_axis_slice = intern("__nd_axis_slice")
+        fact_name_slice_range = intern("__dewy_slice_range")
+        fact_name_open_range = intern("__dewy_open_range_iter")
+    name = int(nodes[d].name)
+    first = -1
+    stepped = -1
+    if m == 5 and name == fact_name_range:
+        first = 0
+        stepped = 3
+    else if m == 7 and name == fact_name_axis_slice:
+        first = 0
+        stepped = 5
+    else if m == 7 and name == fact_name_slice_range:
+        first = 1
+        stepped = 6
+    else if m == 2 and name == fact_name_open_range: first = 0
+    if first < 0 or not pos_in_lib(nodes[d].pos): return -1
+    if stepped < 0: return if step: first else: -1
+    flag = kid(n, stepped)
+    if nodes[flag].kind != .bool_lit or (nodes[flag].ival != 0) != step: return -1
+    first
 
 fact_stepped_loop = (n: int) -> bool:
     it = int(nodes[n].a)
@@ -2889,8 +2977,33 @@ fact_string_call = (n: int) -> int:
         fact_name_byte_slice = intern("__dewy_byte_slice")
     name = int(nodes[d].name)
     k = if name == fact_name_string_length and nkids(n) == 1: 1 else if name == fact_name_string_index and nkids(n) == 2: 2 else if name == fact_name_string_slice and nkids(n) == 5: 3 else if name == fact_name_byte_slice and nkids(n) == 3: 4 else: 0
+    # (`text.find(part start)`: 5, its start an obligation as a slice's is)
+    if k == 0 and nkids(n) == 3 and fact_text_search_call(n) and name == fact_name_find: return 5
     if k == 0 or not pos_in_lib(nodes[d].pos): return 0
     k
+
+# `text.find(part start)` searches from grapheme `start`: 0 <=? start <=?
+# text.length, as a slice `text[start..]` needs (the library's start check). O(1).
+fact_find_start = (n: int, s: mut FactState, start: int, length: int):
+    if fact_speculating != 0 or not (fact_policy == .RequireStatic or fact_query): return
+    zero = fact_constant(s, 0)
+    lo = fact_compare(s, .le, zero, start)
+    hi = fact_compare(s, .le, start, length)
+    if fact_probe_on:
+        fact_probe_record(n, lo == 1 and hi == 1)
+        return
+    if lo == 1 and hi == 1: return
+    i = wit_text(kid(n, 2))
+    text = wit_text(kid(n, 0))
+    upper = if text != "": "{i} <=? {text}.length" else: ""
+    relation = if lo == 1: upper else if hi == 1: "{i} >=? 0" else if upper != "": "0 <=? {upper}" else: ""
+    if lo == 0 or hi == 0:
+        wit_help(relation)
+        if dir_defer(n, "find's start is outside the text", true): return
+        wit_fail(nodes[n].pos, "find's start is outside the text")
+        return
+    missing = if lo == 1: "upper bound" else if hi == 1: "lower bound" else: "lower and upper bounds"
+    wit_unknown(n, fact_bound(s, start), "find's start `{i}` is within the text", 0, relation, missing)
 
 # A string's byte view, the value `text as array<uint8>` is: one per string value, so
 # its length and the bytes guards read relate to every view of the same text.
@@ -4595,10 +4708,11 @@ fact_slice_prepare = (f: int, summary: bool = false):
                 values.push(n)
                 values.push(kid(n, 1))
             else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and fact_range_call(n):
+                first = fact_range_first(n, true)
                 values.push(n)
-                values.push(kid(n, 0))
-                values.push(kid(n, 1))
-            else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and (fact_array_call(n) != 0 or fact_map_call(n) != 0):
+                values.push(kid(n, first))
+                values.push(kid(n, first + 1))
+            else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and (fact_array_call(n) != 0 or fact_map_call(n) != 0 or fact_nonempty_call(n)):
                 active.push(n)
                 values.push(n)
                 loop arg in kids(n): values.push(arg)
@@ -4909,7 +5023,7 @@ fact_obligation_node = (n: int) -> bool:
         if wi_fact_calls.has(n) or fact_divisors.has(n) or fact_range_call(n): return true
         if (fact_floor_call(n) != 0 and not fact_literal_nonzero(kid(n, 1))) or fact_string_call(n) >= 2 or fact_array_call(n) != 0 or fact_power_call(n): return true
         map = fact_map_call(n)
-        if map >= 2 and map <= 4: return true
+        if map >= 2 and map <= 4 or fact_nonempty_call(n): return true
         # A fork closure's obligations start from its creator's facts.
         if fact_library_call(n, "parallel_range") or fact_library_call(n, "parallel_map"):
             loop arg in kids(n):
@@ -5617,7 +5731,8 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                 if floor_probe: fact_probe_record(n, proven)
             else if floor_probe: fact_probe_divisor(n, s, values[1], kid(n, 1))
             if values.len() == 2 and fact_power_call(n): fact_power_check(n, s, values[1])
-            if values.len() == 5 and fact_range_call(n): fact_step_check(n, s, values[0], values[1], kid(n, 0), kid(n, 1))
+            first = fact_range_first(n, true)
+            if first >= 0 and values.len() == nkids(n): fact_step_check(n, s, values[first], values[first + 1], kid(n, first), kid(n, first + 1))
         # (a dictionary's or set's entry count is a length of its value)
         if fact_entry_count_call(n): return fact_project(s, values[0], -1, false, T_INT)
         if fact_empty_array_call(n):
@@ -5626,6 +5741,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             return fact_new(s, fact_domain(T_BOOL), FactTerm(.eq, length, fact_constant(s, 0)))
         array = fact_array_call(n)
         if array != 0: fact_array_call_check(n, s, values, array)
+        if fact_nonempty_call(n): fact_nonempty_check(n, s, values)
         if array >= 30:
             # (a slice assignment changes elements, not the length)
             a = kid(n, 0)
@@ -5666,7 +5782,8 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             return fact_new(s, fact_domain(T_BOOL), FactTerm(.eq, numerator, fact_constant(s, 0)))
         string = fact_string_call(n)
         if string == 4: return fact_byte_slice(n, s, values)
-        if string != 0:
+        if string == 5: fact_find_start(n, s, values[2], fact_project(s, values[0], -1, false, T_INT))
+        else if string != 0:
             length = fact_project(s, values[0], -1, false, T_INT)
             if string == 1: return length
             if string == 3: return fact_string_slice(n, s, values, length)

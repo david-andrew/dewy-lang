@@ -676,12 +676,14 @@ makes its asserts panic for every caller.
 `& no panics` forbids it outright, whatever the scope, local asserts included. A library function's
 precondition is the caller's obligation where the library states it: `xs.first`
 and `xs.last`, along with `xs.min_by(key)` and `xs.max_by(key)`, take an array
-with `length >? 0`. The key functions retain their own effects. `xs.swap(i j)` and
-`xs.insert(value i)` need their positions in bounds, so a guarded call cannot
-panic. `d[k]`, `d[k] += 1` and `d.pop(k)` need the key present, proven by a
+with `length >? 0`, as do `min(xs)` and `max(xs)` of an array, a set's `s.pop()`
+and a heap's `h.pop()`, `h.peek()` and `h.peek_priority()`. The key functions retain their own effects. `xs.swap(i j)` and
+`xs.insert(value i)` need their positions in bounds, and `text.find(part start)`
+needs `0 <=? start <=? text.length`, so a guarded call cannot panic. `d[k]`, `d[k] += 1` and `d.pop(k)` need the key present, proven by a
 guard (`if k in? d`) or an earlier store into `d[k]` with no other change of
 `d` between; `d.get(k)` and `d.pop(k default=v)` take a missing key as a value.
-A stepped range's nonzero step is the caller's obligation too, as a divisor is.
+A stepped range's nonzero step is the caller's obligation too, as a divisor is,
+in a slice (`xs[a,b..]`, `m[a,b..c ..]`) and an open counter (`[a,b..]`) as in a loop.
 A literal can rule a failure out: a power with a literal exponent `>=? 0` and a
 rational with a literal nonzero denominator cannot panic. Other library failures (a bad format
 specification) still make the call panic. Running out of memory is not a panic. The editor's hover

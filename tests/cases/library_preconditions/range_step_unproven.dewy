@@ -1,0 +1,7 @@
+# A stepped open counter's step is the caller's obligation, as a loop's is.
+count=(a:int64 b:int64)=>{
+    let out:array<int64>=[]
+    loop i in [a,b..] and x in [1 2 3] out.push(i+x)
+    return out
+}
+main=()=>printl(count(0 2))

@@ -2166,7 +2166,6 @@ panic_map_obligation = (n: int) -> bool:
 # without a step (or with a literal step that is not zero), a power with a
 # literal exponent >= 0 (every library `pow` and `__pow__` fails only for a
 # negative one), a rational with a literal nonzero denominator.
-panic_name_range = 0
 panic_name_power = 0
 panic_name_rational = 0
 panic_name_pow = 0
@@ -2182,19 +2181,19 @@ panic_literal_safe = (n: int) -> bool:
     if k_call_args(n) < 2: return false
     d = int(fns[int(nodes[n].sym)].decl)
     if d == 0 or not pos_in_lib(nodes[d].pos): return false
-    if panic_name_range == 0:
-        panic_name_range = intern("__dewy_range")
+    if panic_name_power == 0:
         panic_name_power = intern("__dewy_power")
         panic_name_rational = intern("rational")
         panic_name_pow = intern("pow")
         panic_name_pow_op = intern("__pow__")
         panic_name_fraction = intern("_fraction")
     name = int(nodes[d].name)
-    if name == panic_name_range and nkids(n) == 5:
-        stepped = panic_literal(kid(n, 3))
-        if stepped != 0 and nodes[stepped].ival == 0: return true
-        a = panic_literal(kid(n, 0))
-        b = panic_literal(kid(n, 1))
+    # (a range constructor's: unstepped, or two distinct literal first values)
+    if fact_range_first(n, false) >= 0: return true
+    first = fact_range_first(n, true)
+    if first >= 0:
+        a = panic_literal(kid(n, first))
+        b = panic_literal(kid(n, first + 1))
         return a != 0 and b != 0 and nodes[a].ival != nodes[b].ival
     if (name == panic_name_power or name == panic_name_pow or name == panic_name_pow_op) and nkids(n) == 2:
         e = panic_literal(kid(n, 1))
@@ -2234,7 +2233,7 @@ panic_site = (f: int, n: int):
     else if k == .call and nodes[n].aux == 0 or k == .fnref or k == .lambda or k == .pair or k == .partial and nodes[n].aux == 0:
         # (a call whose precondition is the caller's obligation, as a string
         # index or a divisor: proven, an error, or a check of the caller's own)
-        if nodes[n].sym > 0 and not (k == .call and (fact_string_call(n) >= 2 or fact_array_call(n) != 0 or fact_floor_call(n) != 0 or fact_divisors.has(n) or fact_power_call(n) or panic_format_literal(n) or panic_device_literal(n) or not panic_lib and (panic_map_obligation(n) or fact_range_call(n)) or panic_literal_safe(n))): panic_edge(f, int(nodes[n].sym), n)
+        if nodes[n].sym > 0 and not (k == .call and (fact_string_call(n) >= 2 or fact_array_call(n) != 0 or fact_floor_call(n) != 0 or fact_divisors.has(n) or fact_power_call(n) or panic_format_literal(n) or panic_device_literal(n) or not panic_lib and (panic_map_obligation(n) or fact_range_call(n) or fact_nonempty_call(n)) or panic_literal_safe(n))): panic_edge(f, int(nodes[n].sym), n)
     if k == .binary or k == .intrinsic:
         loop g in value_helper_calls(n): panic_edge(f, g, n)
 

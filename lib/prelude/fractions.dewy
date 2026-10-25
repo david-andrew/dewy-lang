@@ -7,6 +7,9 @@ import p"@lib/rational.dewy" as exact
 # the text is not that (or the denominator is zero); `rational(f)` of a float,
 # its exact binary value.
 rational = ((numerator denominator=1):>rational=>exact._fraction(numerator denominator))
+    # (an integer alone: its own exact value, never the float overloads' conversion)
+    & ((value:int64):>rational=>exact._fraction(value))
+    & ((value:int):>rational=>exact._fraction(value))
     & ((text:string):>rational|none=>exact._parse(text))
     & ((numerator:string denominator:string):>rational|none=>exact._parse_parts(numerator denominator))
     & ((value:float64):>rational=>exact._from_float(value))
