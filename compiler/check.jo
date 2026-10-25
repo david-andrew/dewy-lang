@@ -1382,6 +1382,7 @@ resolve_alias = (d: int, targs: int[], use_pos: int) -> int:
     cx = saved
     nodes[d].aux = 0
     if ntp == 0: nodes[d].type = i32(t)
+    if ntp == 0 and dewy_at(nodes[d].pos) and not pos_in_lib(nodes[d].pos): union_alias_note(t, int(nodes[d].name))
     t
 
 subst = (t0: int, targs: int[]) -> int:

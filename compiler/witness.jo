@@ -9,6 +9,7 @@ use 'util.jo'
 use 'expr.jo'
 use 'check.jo'
 use 'facts.jo'
+use 'lower.jo'
 use 'refine.jo'
 use 'proofs.jo'
 use 'directives.jo'
@@ -46,13 +47,28 @@ wit_note = (at: int, text: str):
         if at > 0 and e.0 == at or e.1 == line: return
     err_notes.push((at, line))
 
+# (the call that last replaced the shown relation's operand, and that relation:
+# its repair is evidence after the call. Set by wit_relation, taken by wit_help)
+wit_after = 0
+wit_after_relation = ""
+wit_after_note = 0      # (the span of its note: a later diagnostic's notes start over)
+
 # Repairs are current evidence or an explicit runtime check, never `$assert`.
 # Inside an erased proof, evidence comes only from its preconditions, guards
 # and other proofs.
-wit_help = (relation: str, runtime: bool = true, contract: int = 0):
+wit_help = (relation: str, runtime: bool = true, contract: int = 0, before: str = ""):
+    after = wit_after
+    wit_after = 0
     want = if relation != "": "`{relation}`" else if contract > 0: "the declared contract" else: "what the operation needs"
+    if before != "" and relation != "": want += " before `{before}`"
+    noted = false
+    if after > 0 and relation != "" and relation == wit_after_relation:
+        loop e in err_notes:
+            if e.0 == wit_after_note: noted = true
+    call = if noted: wit_call_text(after, 0) else: ""
     if proof_active and fact_owner > 0 and fact_owner < fns.len() and proof_decls.has(int(fns[fact_owner].decl)):
         err_notes.push((-1, "help: establish {want} with a stronger proof precondition, a call to another proof or a current guard; erased proofs cannot check at run time"))
+    else if runtime and call != "": err_notes.push((-1, "help: establish {want} after `{call}` with a current guard, or check it at run time with `$runtime_assert`"))
     else if runtime: err_notes.push((-1, "help: establish {want} with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`"))
     else: err_notes.push((-1, "help: establish {want} with a current guard or a stronger checked contract; erased proofs have no runtime fallback"))
 
@@ -107,6 +123,7 @@ wit_text = (e0: int, depth: int = 0) -> str:
         name = name_of(int(nodes[e].name))
         return if wit_hidden_name(name): "" else: name
     if k == .int_lit and not has_flag(e, NF_U64): return "{nodes[e].ival}"
+    if k == .str_lit: return wit_quoted(e)
     if k == .field and nodes[e].aux >= 0:
         base = wit_text(int(nodes[e].a), depth + 1)
         if base != "": return "{base}.{name_of(int(nodes[e].name))}"
@@ -163,6 +180,21 @@ wit_text = (e0: int, depth: int = 0) -> str:
         return wit_call_text(e, depth)
     ""
 
+# Call c's argument i, the place itself for a mutable one (`@x`).
+wit_lent = (c: int, i: int) -> int:
+    e = kid(c, i)
+    loop e > 0 and nodes[e].kind == .addr: e = int(nodes[e].a)
+    e
+
+# A plain string literal as written, `"x"`; "" for one with escapes or interpolation.
+wit_quoted = (e: int) -> str:
+    if nkids(e) != 0 or nodes[e].aux != 0 or nodes[e].sval < 0: return ""
+    text = name_of(int(nodes[e].sval))
+    if find(text, "\"") >= 0 or find(text, "\\") >= 0 or find(text, "\{") >= 0 or find(text, "}") >= 0: return ""
+    loop i in [0..text.len()):
+        if text[i] < ' ' or text[i] > '~': return ""
+    "\"{text}\""
+
 # A direct call, `f(x 1)` (a method call's receiver is its first argument):
 # the callee's shown name and each argument's spelling, `...` for one that has
 # none. An operator's or a library helper's internal name (`[]`, `_truncate`)
@@ -176,8 +208,11 @@ wit_call_text = (e: int, depth: int) -> str:
     c = name[0]
     if not (c >= 'a' and c <= 'z' or c >= 'A' and c <= 'Z' or c == '_'): return ""
     args = ""
+    mask = checked_call_mutmask(e)
     loop i in [0..nkids(e)):
-        text = wit_text(kid(e, i), depth + 1)
+        text = wit_text(wit_lent(e, i), depth + 1)
+        # (a mutable argument, `f(@x)`)
+        if text != "" and i < 62 and mask & (1 << i) != 0: text = "@" + text
         if i > 0: args += " "
         args += if text == "": "..." else: text
     "{name}({args})"
@@ -256,6 +291,58 @@ wit_tomb = (s: FactState, side: WitSide) -> (int, int):
         return (binding.event, binding.prior)
     if wit_projection(s, binding.value, -1) != side.value: return (0, 0)
     (binding.event, wit_projection(s, binding.prior, -1))
+
+# The call an event is, through its statement; 0 for another event.
+wit_call_node = (at: int) -> int:
+    e = at
+    loop e > 0 and nodes[e].kind == .exprstmt: e = int(nodes[e].a)
+    if e > 0 and nodes[e].kind == .call: return e
+    0
+
+# Whether call c passes `@` the place spelled `text` or one containing it
+# (`zero(@d["x"].count)`, `grow(@xs)` for `xs.length`). O(arguments)
+wit_call_writes = (c: int, text: str) -> bool:
+    mask = checked_call_mutmask(c)
+    loop i in [0..min(nkids(c), 62)):
+        if mask & (1 << i) == 0: continue
+        place = wit_text(wit_lent(c, i))
+        if place != "" and (place == text or starts_with(text, place + ".") or starts_with(text, place + "[")): return true
+    false
+
+# The analyzed function's direct calls with an `@` argument and a shown name,
+# collected once per function when a projection's explanation first needs
+# them. O(function size) once, then O(calls) per explanation.
+wit_calls_owner = 0
+wit_calls: int[]
+
+wit_owner_calls = () -> int[]:
+    if wit_calls_owner == fact_owner: return wit_calls
+    wit_calls_owner = fact_owner
+    wit_calls = []
+    if fact_owner <= 0 or fact_owner >= fns.len() or fns[fact_owner].body == 0: return wit_calls
+    stack = [int(fns[fact_owner].body)]
+    visits = 0
+    loop stack.len() > 0 and visits < 200000:
+        e = stack.pop()
+        visits += 1
+        if e <= 0 or e >= nodes.len() or nodes[e].kind == .lambda: continue
+        if nodes[e].kind == .call and nodes[e].aux == 0 and checked_call_mutmask(e) != 0 and wit_call_text(e, 0) != "": wit_calls.push(e)
+        stack.push(int(nodes[e].a)); stack.push(int(nodes[e].b)); stack.push(int(nodes[e].c)); stack.push(int(nodes[e].d))
+        loop child in kids(e): stack.push(child)
+    wit_calls
+
+# The latest call before a projection side's use that passes `@` its place
+# (`d["x"].count` after `zero(@d["x"].count)`): an event a projection keeps no
+# tombstone for. 0 for a variable (its tombstone tells) or none.
+wit_projection_call = (side: WitSide) -> int:
+    if side.text == "" or side.node <= 0 or nodes[side.node].kind == .ident: return 0
+    site = nodes[side.node].pos
+    best = 0
+    loop c in wit_owner_calls():
+        p = nodes[c].pos
+        if pos_file(p) != pos_file(site) or p >= site or best != 0 and p <= nodes[best].pos: continue
+        if wit_call_writes(c, side.text): best = c
+    best
 
 wit_value = (s: FactState, v: int, x: int) -> str:
     t = if v > 0 and v < fact_terms.len(): representation_type(fact_terms[v].type) else: 0
@@ -354,6 +441,13 @@ wit_relation = (s: FactState, cex: FactState, op: Tok, a: WitSide, b: WitSide, r
         known = if shown != "": "is {shown}" else if bound.lo == bound.hi: "" else: wit_known(bound, unsigned)
         # (a declaration makes the binding; it does not change an earlier value)
         if tomb.0 != 0 and nodes[tomb.0].kind == .vardecl and tomb.1 == 0: tomb = (0, 0)
+        # (the call that replaced the value: the repair checks after it)
+        changed = if tomb.0 == 0 and not refuted: wit_projection_call(side) else: wit_call_node(tomb.0)
+        if tomb.0 == 0 and changed != 0: wit_note(nodes[changed].pos, "{side.text} may have changed at this {wit_event(changed)}")
+        if changed != 0 and relation != "":
+            wit_after = changed
+            wit_after_relation = relation
+            wit_after_note = if tomb.0 != 0: nodes[tomb.0].pos else: nodes[changed].pos
         if tomb.0 != 0:
             what = wit_event(tomb.0)
             if shown != "": wit_note(nodes[tomb.0].pos, "{side.text} {known} after this {what}")
@@ -390,7 +484,9 @@ wit_unknown = (n: int, b: FactBound, what: str, contract: int = 0, relation: str
     wit_context(contract)
     wit_help(relation, runtime, contract)
     wit_counter_help(n, b)
-    why = if b.reason == .missing and missing != "": "missing {missing}" else: wit_reason(b)
+    # (a loop's or an unsupported operation's part is a note at its span: the
+    # headline names the bound the relation lacks)
+    why = if missing != "" and (b.reason == .missing or b.reason == .loop_ or b.reason == .unsupported): "missing {missing}" else: wit_reason(b)
     if dir_defer(n, "cannot prove {what}: {why}", runtime and what != "assertion"): return
     wit_fail(nodes[n].pos, "cannot prove {what}: {why}")
 
@@ -605,8 +701,20 @@ wit_key = (n: int):
 
 # A builtin operation's precondition `a op b` (`xs.length >? 0` for pop, a
 # truncate count `>=? 0`), refuted (c = 0) or unknown: one lower bound.
-wit_operation = (n: int, s: mut FactState, op: Tok, a: WitSide, b: WitSide, c: int, refuted: str, what: str):
+wit_operation = (n: int, s: mut FactState, op: Tok, a0: WitSide, b: WitSide, c: int, refuted: str, what: str):
+    a = a0
+    if a.text == "": a.text = wit_held_name(s, a.value)
     relation = wit_relation_text(op, a, b)
+    # (`xs.truncate(n)`: the guard belongs before the call)
+    before = ""
+    if nodes[n].kind == .intrinsic and nodes[n].aux == i32(int(IN.truncate)) and a.text != "":
+        receiver = kid(n, 0)
+        loop receiver > 0 and nodes[receiver].kind == .addr: receiver = int(nodes[receiver].a)
+        shown = wit_text(receiver)
+        if shown == "" and nodes[receiver].kind == .ident:
+            i = fact_binding(s, fact_place(receiver))
+            if i >= 0: shown = wit_held_name(s, s.bindings[i].value)
+        if shown != "": before = "{shown}.truncate({a.text})"
     if c == 0:
         wit_relation(s, s, op, a, b, true)
         wit_context(0)
@@ -620,9 +728,19 @@ wit_operation = (n: int, s: mut FactState, op: Tok, a: WitSide, b: WitSide, c: i
         return
     wit_relation(s, s, op, a, b, false, "lower bound")
     wit_context(0)
-    wit_help(relation)
+    wit_help(relation, true, 0, before)
     if dir_defer(n, "cannot prove {what}: missing lower bound", true): return
     wit_fail(nodes[n].pos, "cannot prove {what}: missing lower bound")
+
+# The variable holding value v, for an operand a call captured into a hidden
+# local (`xs.truncate(n)` on a refined array); "" for none. O(bindings)
+wit_held_name = (s: FactState, v: int) -> str:
+    if v <= 0: return ""
+    loop binding in s.bindings:
+        l = binding.place.declaration
+        if binding.value != v or binding.place.root != .local or l <= 0 or locals[l].name == 0: continue
+        if not wit_hidden_name(name_of(int(locals[l].name))): return name_of(int(locals[l].name))
+    ""
 
 # A builtin slice `xs[lo..hi)`: 0 <=? lo <=? hi <=? xs.length, where an
 # omitted bound is 0 or the length and an inclusive end counts one more.

@@ -856,6 +856,11 @@ ts_dewy = false
 # (text in the spelling of the program being compiled: Sloppy's, else Dewy's)
 tsd = (jo: str, dewy: str) -> str: if ts_dewy: dewy else: jo
 dt = (t: int) -> str: type_str(t, ts_dewy)
+# (a type mismatch's side: a Dewy union by the alias the program names it with)
+dt_named = (t: int) -> str:
+    alias = if ts_dewy: union_alias_names.get(prune(t)) ?? 0 else: 0
+    if alias != 0: return name_of(alias)
+    dt(t)
 # (the names of the type parameters of the declaration whose types are being shown: a
 # parameter that has none shows as T, U, ... by its place)
 ts_params: int[]
@@ -1107,6 +1112,17 @@ mk_union = (ms0: int[]) -> int:
 # mk_union supplies flat, sorted member IDs. Concrete unions are canonical;
 # unresolved members still need structural matching until inference finishes.
 union_instances: {int[]: int} = {}
+# (a Dewy union the program names with one non-generic alias, `Value:type=int64|string`:
+# diagnostics show the alias; 0 when two aliases name it)
+union_alias_names: {int: int} = {}
+
+union_alias_note = (t0: int, name: int):
+    t = prune(t0)
+    if tkind(t) != .struct_ and tkind(t) != .enum_ or not structs[int(types[t].st)].union_: return
+    if let seen = union_alias_names.get(t):
+        if seen != name: union_alias_names[t] = 0
+        return
+    union_alias_names[t] = name
 union_candidates: int[]
 
 union_inst = (ms: int[]) -> int:
