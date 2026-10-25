@@ -4185,7 +4185,22 @@ An unproven obligation's error names the missing relation (`i <? xs.length`,
   line and `ranked[$clamp 0..5)` takes at most five.
 - Count into a dictionary with `if k not in? d d[k] = 0` followed by
   `d[k] += 1`, and group with `if k not in? d d[k] = []` followed by
-  `d[k].push(x)`. Both branches establish that the key is present.
+  `d[k].push(x)`. Both branches establish that the key is present. The key is a
+  local or a literal: bind a field first (`let k = sale.region`). To rank a
+  dictionary, collect its entries (`[loop [k v] in d [key=k total=v]]`) and sort
+  those; an array of `d.keys` does not carry their membership.
+- Guard a pool handle (`if not pool.has(h) return`) or take the entry as a value
+  (`pool.get(h)`). A pool's entry is a value: to call a changing method on part of
+  it, copy it out, change the copy and store it back (`let e = pool[h]`,
+  `e.items.push(x)`, `pool[h] = e`).
+- Unpacking needs the length: give pairs a tuple type
+  (`let moves:array<[int64 int64]> = [[1 0] [0 1]]`) rather than arrays of
+  arrays. Build a grid with a comprehension
+  (`[loop y in [0..h) [loop x in [0..w) f(x y)]]`) instead of storing into a
+  filled one, and read a ragged row with `row.get(x) ?? fallback`.
+- A counter a condition loop returns as `int64` is declared `int64`
+  (`let n:int64 = 0`): the counter-progress assumption covers 64-bit counters, not
+  an `int` counter converted at the end.
 - Arithmetic that may exceed a fixed width either computes in `int`
   (`:>int => a - b`), masks to the width (`(crc << 1) and 0xFF`), or says it wraps
   (`let h:uint32<overflow='wrap'> = 2166136261`, as a hash does).

@@ -1,0 +1,6 @@
+# Floor division and remainder are spelled as written.
+digit = (digits:string v:int64 base:int64):>string => {
+    if base <=? 0 return ""
+    digits[v % base]
+}
+main = () => printl(digit("0123" 5 3))

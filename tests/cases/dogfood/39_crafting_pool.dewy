@@ -1,0 +1,132 @@
+# Inventory and crafting: players and items live in pools, players hold
+# handles to items, a crafting recipe consumes items, trades move handles.
+
+Item:type = [name:string kind:string qty:int64 value:int64]
+Player:type = [name:string gold:int64 items:array<Handle>]
+
+let items:Pool<Item> = []
+let players:Pool<Player> = []
+
+give = (p:Handle name:string kind:string qty:int64 value:int64) => {
+    let h = items.add(Item[name kind qty value])
+    if not players.has(p) return
+    let pl = players[p]
+    pl.items.push(h)
+    players[p] = pl
+}
+
+describe = (p:Handle) => {
+    let pl = players.get(p)
+    if pl is? none return
+    let parts:array<string> = []
+    loop h in pl.items {
+        let it = items.get(h)
+        if it is? none continue
+        parts.push("{it.name} x{it.qty}")
+    }
+    printl"{pl.name} ({pl.gold}g): {parts.join(", ")}"
+}
+
+find_item = (p:Handle name:string):>Handle? => {
+    let pl = players.get(p)
+    if pl is? none return none
+    loop h in pl.items {
+        if items.has(h) and items[h].name =? name return h
+    }
+    none
+}
+
+# consume qty of an item; removes it from the pool when it runs out
+consume = (p:Handle name:string qty:int64):>bool => {
+    let h = find_item(p name)
+    if h is? none or not items.has(h) return false
+    let it = items[h]
+    if it.qty <? qty return false
+    it.qty -= qty
+    items[h] = it
+    if it.qty =? 0 {
+        items.remove(h);
+        if not players.has(p) return true
+        let pl = players[p]
+        let idx = pl.items.index_of(h)
+        if idx isnt? Missing and idx <? pl.items.length pl.items.pop(idx);
+        if players.has(p) players[p] = pl
+    }
+    true
+}
+
+Recipe:type = [output:string kind:string needs:dict<string int64>]
+
+craft = (p:Handle r:Recipe):>bool => {
+    let pl = players.get(p)
+    if pl is? none return false
+    let who = pl.name
+    loop [name qty] in r.needs {
+        let h = find_item(p name)
+        if h is? none or not items.has(h) or items[h].qty <? qty {
+            printl"{who} cannot craft {r.output}: needs {qty} {name}"
+            return false
+        }
+    }
+    loop [name qty] in r.needs consume(p name qty);
+    give(p r.output r.kind 1 50)
+    printl"{who} crafted {r.output}"
+    true
+}
+
+trade = (seller:Handle buyer:Handle name:string price:int64):>bool => {
+    let h = find_item(seller name)
+    if h is? none return false
+    if not players.has(seller) or not players.has(buyer) return false
+    let s = players[seller]
+    let b = players[buyer]
+    if b.gold <? price return false
+    let idx = s.items.index_of(h)
+    if idx is? Missing or idx >=? s.items.length return false
+    s.items.pop(idx);
+    s.gold += price
+    b.items.push(h)
+    b.gold -= price
+    if players.has(seller) players[seller] = s
+    if players.has(buyer) players[buyer] = b
+    printl"{s.name} sold {name} to {b.name} for {price}g"
+    true
+}
+
+let ann = players.add(Player["Ann" 100 []])
+let bo = players.add(Player["Bo" 40 []])
+give(ann "wood" "material" 5 1)
+give(ann "iron" "material" 3 4)
+give(ann "rope" "material" 1 2)
+give(bo "bread" "food" 4 3)
+describe(ann)
+describe(bo)
+
+let sword = Recipe["sword" "weapon" ["iron"->2 "wood"->1]]
+let bow = Recipe["bow" "weapon" ["wood"->3 "rope"->2]]
+craft(ann sword)
+craft(ann bow)
+describe(ann)
+
+trade(ann bo "sword" 30)
+trade(bo ann "bread" 5)
+describe(ann)
+describe(bo)
+
+# total inventory value per player, sorted
+let worth:array<[name:string value:int]> = []
+loop pl in players.items {
+    let total:int = pl.gold
+    loop h in pl.items {
+        if items.has(h) total += items[h].qty * items[h].value
+    }
+    worth.push([name=pl.name value=total])
+}
+worth.sort(key=(w:[name:string value:int]) => w.value reverse=true)
+loop w in worth printl"{w.name}: {w.value}"
+
+# stale handles
+let old = items.add(Item["junk" "misc" 1 0])
+items.remove(old)
+printl"junk still there: {items.has(old)}"
+printl"live items: {items.length}"

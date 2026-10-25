@@ -1,0 +1,150 @@
+# Integer toolbox: popcount and bit tricks, a Bloom-ish bitset, histogram
+# bins, modular exponentiation and inverses, a sieve, and base conversion.
+
+popcount = (x:uint64):>int64 => {
+    let n:int64 = 0
+    let v = x
+    loop v not=? 0 {
+        v = v and (v - 1)
+        n += 1
+    }
+    n
+}
+
+bits = (x:uint64 width:int64):>string => {
+    if not (0 <? width <=? 64) return ""
+    let out:array<string> = []
+    loop i in [width-1, width-2..0] {
+        out.push(if ((x >> i) and 1) =? 1 "1" else "0")
+    }
+    out.join("")
+}
+
+is_power_of_two = (x:uint64):>bool => x not=? 0 and (x and (x - 1)) =? 0
+
+next_power_of_two = (x:uint64):>uint64 => {
+    let p:uint64 = 1
+    loop p <? x and p <? (uint64(1) << 63) p = p << 1
+    p
+}
+
+# a 256-bit set stored in four words
+BitSet:type = [words:array<uint64>]
+bs_new = ():>BitSet => BitSet[fill(uint64(0) 4)]
+bs_add = (@s:BitSet k:int64) => {
+    let i = k // 64
+    if 0 <=? i <? s.words.length s.words[i] = s.words[i] or (uint64(1) << (k % 64))
+}
+bs_has = (s:BitSet k:int64):>bool => {
+    let i = k // 64
+    0 <=? i <? s.words.length and ((s.words[i] >> (k % 64)) and 1) =? 1
+}
+
+hash_a = (word:string):>int64 => {
+    let h = 0
+    loop b in (word as array<uint8>) h = (h * 31 + b) % 256
+    h
+}
+hash_b = (word:string):>int64 => {
+    let h = 7
+    loop b in (word as array<uint8>) h = (h * 131 xor b) % 256
+    h
+}
+
+# histogram of values into fixed-width bins
+histogram = (values:array<int64> lo:int64 hi:int64 nbins:int64):>array<int64> => {
+    if nbins <=? 0 or hi <=? lo return []
+    let counts:array<int64> = fill(0 nbins)
+    let width:int = max(1 (int(hi) - lo) // nbins)
+    loop v in values {
+        if v <? lo or v >=? hi continue
+        let b = (v - lo) // width
+        if 0 <=? b <? counts.length counts[b] += 1
+    }
+    counts
+}
+
+pow_mod = (base:int64 exp:int64 m:int64):>int64 => {
+    if m <=? 0 return 0
+    let result:int64 = 1
+    let b = base % m
+    let e = exp
+    loop e >? 0 {
+        if e % 2 =? 1 result = result * b % m
+        b = b * b % m
+        e = e // 2
+    }
+    result
+}
+
+# extended Euclid: inverse of a mod m, or none
+inverse = (a:int m:int):>int? => {
+    if m =? 0 return none
+    let [old_r r] = [a m]
+    let [old_s s] = [1 0]
+    loop r not=? 0 {
+        let q = old_r // r
+        [old_r r] = [r old_r - q * r]
+        [old_s s] = [s old_s - q * s]
+    }
+    if old_r not=? 1 return none
+    old_s % m
+}
+
+sieve = (n:int64):>array<int64> => {
+    if not (2 <=? n <=? 100_000_000) return []
+    let composite = fill(false n + 1)
+    let primes:array<int64> = []
+    loop i in [2..n] {
+        if composite[i] continue
+        primes.push(i)
+        let j = i * i
+        loop j <=? n {
+            composite[j] = true
+            j += i
+        }
+    }
+    primes
+}
+
+const DIGITS = "0123456789abcdefghijklmnopqrstuvwxyz"
+to_base = (value:int64 base:int64):>string => {
+    if value =? 0 return "0"
+    if not (2 <=? base <=? DIGITS.length) return "?"
+    let v = value
+    let digits:array<string> = []
+    loop v >? 0 {
+        digits.push(DIGITS[v % base])
+        v = v // base
+    }
+    digits.reverse()
+    digits.join("")
+}
+
+loop x in [uint64(0) 1 7 8 255 1023 4096] {
+    printl"{x:>5} popcount={popcount(x)} bits={bits(x 12)} pow2={is_power_of_two(x)} next={next_power_of_two(x)}"
+}
+
+let seen = bs_new()
+loop w in ["apple" "banana" "cherry"] {
+    bs_add(@seen hash_a(w))
+    bs_add(@seen hash_b(w))
+}
+loop w in ["apple" "durian" "cherry" "fig"] {
+    let maybe = bs_has(seen hash_a(w)) and bs_has(seen hash_b(w))
+    printl"{w}: {if maybe "maybe" else "no"}"
+}
+
+let data:array<int64> = [3 17 22 45 46 47 51 68 70 71 72 99 100 -4]
+let h = histogram(data 0 100 5)
+loop i in 0.. and c in h printl"{i*20:>3}-{i*20+19:<3} {"*" * c}"
+
+printl"3^200 mod 1000007 = {pow_mod(3 200 1000007)}"
+printl"inverse of 17 mod 3120 = {inverse(17 3120)}"
+printl"inverse of 6 mod 9 = {inverse(6 9)}"
+let ps = sieve(60)
+printl"primes: {ps}"
+let total = 0
+loop p in ps total += p
+printl"sum: {total}"
+loop b in [2 8 16 36] printl"255 in base {b}: {to_base(255 b)}"

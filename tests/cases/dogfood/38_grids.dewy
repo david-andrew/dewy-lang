@@ -1,0 +1,133 @@
+# Grid simulations: Conway's game of life on a small torus, flood fill
+# of regions on a map, and counting islands with a BFS.
+
+const W = 10
+const H = 8
+
+make_grid = (w:int64 h:int64):>array<array<bool>> => {
+    let g:array<array<bool>> = []
+    loop _ in [0..h) g.push(fill(false w))
+    g
+}
+
+show = (g:array<array<bool>>) => {
+    loop row in g {
+        let line:array<string> = []
+        loop cell in row line.push(if cell "#" else ".")
+        printl(line.join(""))
+    }
+}
+
+neighbours = (g:array<array<bool>> x:int64 y:int64):>int64 => {
+    let n:int64 = 0
+    let h = g.length
+    if h =? 0 return 0
+    let w = g[0].length
+    if w =? 0 return 0
+    loop dy in [-1..1] {
+        loop dx in [-1..1] {
+            if dx =? 0 and dy =? 0 continue
+            let yy = (y + dy) % h
+            let xx = (x + dx) % w
+            if g[yy].get(xx) ?? false n += 1
+        }
+    }
+    n
+}
+
+step = (g:array<array<bool>>):>array<array<bool>> => [
+    loop y in [0..g.length) [
+        loop x in [0..g[y].length) {
+            let n = neighbours(g x y)
+            n =? 3 or (g[y][x] and n =? 2)
+        }
+    ]
+]
+
+let life = make_grid(W H)
+# a glider and a blinker
+let for_cells:array<[int64 int64]> = [[1 0] [2 1] [0 2] [1 2] [2 2] [7 4] [7 5] [7 6]]
+loop [x y] in for_cells {
+    if 0 <=? y <? life.length and 0 <=? x <? life[y].length life[y][x] = true
+}
+
+printl"generation 0"
+show(life)
+loop gen in [1..4] {
+    life = step(life)
+}
+printl"generation 4"
+show(life)
+let alive = 0
+loop row in life loop c in row if c alive += 1
+printl"alive: {alive}"
+
+# flood fill on a character map
+const MAP = """
+..##......
+..##..###.
+......#.#.
+.##...###.
+.##.......
+......##..
+"""
+
+let rows:array<array<string>> = []
+loop line in MAP.trim.lines rows.push(line.chars)
+
+flood = (@grid:array<array<string>> sx:int64 sy:int64 mark:string):>int64 => {
+    if not (0 <=? sy <? grid.length and 0 <=? sx <? grid[sy].length) return 0
+    let target = grid[sy][sx]
+    if target =? mark return 0
+    let stack:array<[int64 int64]> = [[sx sy]]
+    let filled:int64 = 0
+    loop stack.length >? 0 {
+        let [x y] = stack.pop()
+        if y <? 0 or y >=? grid.length or x <? 0 or x >=? grid[y].length continue
+        if grid[y][x] not=? target continue
+        grid[y][x] = mark
+        filled += 1
+        stack.push([x+1 y])
+        stack.push([x-1 y])
+        stack.push([x y+1])
+        stack.push([x y-1])
+    }
+    filled
+}
+
+let filled = flood(@rows 0 0 "~")
+printl"flooded {filled} cells"
+loop r in rows printl(r.join(""))
+
+# count islands of '#' with BFS, labelling each with a letter
+const LABELS = "ABCDEFGHIJ"
+const DIRS:array<[int int]> = [[1 0] [-1 0] [0 1] [0 -1]]
+let seen:set<[int64 int64]> = set[]
+let islands = 0
+loop y in 0.. and row in rows {
+    loop x in 0.. and cell in row {
+        if cell not=? "#" or [x y] in? seen continue
+        let label = if 0 <=? islands <? LABELS.length LABELS[islands] else "?"
+        islands += 1
+        let queue:array<[int64 int64]> = [[x y]]
+        seen.push([x y])
+        let head = 0
+        loop head <? queue.length {
+            let [cx cy] = queue[head]
+            head += 1
+            if 0 <=? cy <? rows.length and 0 <=? cx <? rows[cy].length rows[cy][cx] = label
+            loop [dx dy] in DIRS {
+                let nx = cx + dx
+                let ny = cy + dy
+                if 0 <=? ny <? rows.length and 0 <=? nx <? rows[ny].length {
+                    if rows[ny][nx] =? "#" and [nx ny] not in? seen {
+                        seen.push([nx ny])
+                        queue.push([nx ny])
+                    }
+                }
+            }
+        }
+    }
+}
+printl"islands: {islands}"
+loop r in rows printl(r.join(""))

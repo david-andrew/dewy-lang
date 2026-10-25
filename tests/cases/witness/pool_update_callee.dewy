@@ -1,0 +1,12 @@
+# The library check of a parameter pool's direct update names the handle's
+# membership, not the pool's internal storage.
+Item:type = [qty:int64]
+use = (@items:Pool<Item> h:Handle) => {
+    if not items.has(h) return
+    items[h].qty -= 1
+}
+main = () => {
+    let items:Pool<Item> = []
+    let a = items.add(Item[5])
+    use(@items a)
+}

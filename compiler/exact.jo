@@ -12,6 +12,7 @@ use 'isolation.jo'
 use 'directives.jo'
 use 'effects.jo'
 use 'refine.jo'
+use 'witness.jo'
 use 'util.jo'
 # Exact fixed-width values keep their source storage type in the checked tree.
 # Only a storage boundary narrows. Owner and node indexes make preparation
@@ -524,7 +525,11 @@ exact_fact_store = (n: int, value: int, s: mut FactState) -> int:
     if not ok and fact_speculating == 0:
         what = "cannot prove exact integer result fits {dt(t)}"
         if not dir_defer(n, what, true):
-            err_notes.push((-1, "help: bound the value with a guard or choose an overflow policy type; " + dir_panic_fix(nodes[n].pos, true)))
+            # (what overflows, as written, and the `int` route: Dewy's integer
+            # arithmetic is exact, so the wider result fits an `int`)
+            shown = wit_text(n)
+            if shown != "": err_notes.push((-1, "note: nothing bounds `{shown}` within {dt(t)} here"))
+            err_notes.push((-1, "help: compute it in `int` (`let total:int = ...`, or an `int` parameter or result), bound the operands with a guard, or choose an overflow policy type; " + dir_panic_fix(nodes[n].pos, true)))
             fatal(nodes[n].pos, what)
     # The continuation is dominated by either a proof or its runtime check.
     if ok: return value

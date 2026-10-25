@@ -1291,6 +1291,23 @@ check_place = (n: int, for_mut: bool):
             fm = int(nodes[fd].mod)
         if dewy_at(nodes[n].pos) and fnm == "__dewy_string_index": fatal(nodes[n].pos, "a string cannot be changed in place: make a new one")
         if dewy_at(nodes[n].pos) and starts_with(fnm, "__"): fatal(nodes[n].pos, "this is a copy, so changing it changes nothing")
+        # (`pool[h].items.push(x)`: a container's `[]` gives its entry back as a value)
+        if dewy_at(nodes[n].pos) and fnm == "[]":
+            shown = ""
+            if nkids(n) == 2:
+                parts = [kid(n, 0), kid(n, 1)]
+                loop i in [0..2):
+                    loop parts[i] > 0 and (nodes[parts[i]].kind == .addr or nodes[parts[i]].kind == .narrow or nodes[parts[i]].kind == .conv): parts[i] = int(nodes[parts[i]].a)
+                if nodes[parts[0]].kind == .ident and nodes[parts[1]].kind == .ident and nodes[parts[0]].name != 0 and nodes[parts[1]].name != 0:
+                    container = name_of(int(nodes[parts[0]].name))
+                    key = name_of(int(nodes[parts[1]].name))
+                    if not starts_with(container, "$") and not starts_with(container, "__") and not starts_with(key, "$") and not starts_with(key, "__"): shown = "{container}[{key}]"
+            entry = "this entry"
+            place = "pool[h]"
+            if shown != "":
+                entry = "`{shown}`"
+                place = shown
+            fatal(nodes[n].pos, "{entry} is a copy of the entry, so changing it changes nothing: copy it out, change the copy and store it back (`let e = {place}` ... `{place} = e`)")
         if len(fnm) > 0:
             setter = ""
             if lookup(intern("set_{fnm}")) != 0 or (fm >= 0 and modules[fm].names.get(intern("set_{fnm}")) != none): setter = ": `set_{fnm}(...)` changes it"

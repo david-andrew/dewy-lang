@@ -87,6 +87,15 @@ wit_same_value = (n: int) -> bool:
     cv = nodes[n].aux
     cv == i32(int(CV.int_)) or cv == i32(int(CV.none_)) or cv == i32(int(CV.fixed_store)) or cv == i32(int(CV.promote)) or cv == i32(int(CV.big2math)) or cv == i32(int(CV.math2big))
 
+# An operand's spelling inside a tighter operator: a sum or a difference in
+# parentheses, as `(lo + hi) // 2` and `a - (b - c)` need.
+wit_operand = (e0: int, depth: int) -> str:
+    text = wit_text(e0, depth)
+    e = e0
+    loop e > 0 and (nodes[e].kind == .narrow or nodes[e].kind == .conv): e = int(nodes[e].a)
+    if text != "" and e > 0 and nodes[e].kind == .binary and (nodes[e].op == i32(int(Tok.plus)) or nodes[e].op == i32(int(Tok.minus))): return "({text})"
+    text
+
 # The spelling of a simple place or literal; "" for anything else.
 wit_text = (e0: int, depth: int = 0) -> str:
     e = e0
@@ -105,18 +114,53 @@ wit_text = (e0: int, depth: int = 0) -> str:
         base = wit_text(kid(e, 0), depth + 1)
         if base != "": return "{base}.length"
     if k == .index and nodes[e].b != 0:
+        # (a dictionary entry as a place, `d[k]`, indexes its values at the entry's position)
+        at = int(nodes[e].b)
+        if nodes[at].kind == .call and (fact_map_call(at) == 3 or fact_map_call(at) == 5) and nkids(at) >= 2:
+            base = wit_text(kid(at, 0), depth + 1)
+            index = wit_text(kid(at, 1), depth + 1)
+            return if base != "" and index != "": "{base}[{index}]" else: ""
         base = wit_text(int(nodes[e].a), depth + 1)
         index = wit_text(int(nodes[e].b), depth + 1)
         if base != "" and index != "": return "{base}[{index}]"
+    # (`i // 2` and `v % base` on fixed-width integers: a checked floor operation)
+    if k == .binary and (nodes[e].op == i32(int(Tok.percent)) or nodes[e].op == i32(int(Tok.slash)) and is_int(prune(ntype(e)))):
+        left = wit_operand(int(nodes[e].a), depth + 1)
+        right = wit_operand(int(nodes[e].b), depth + 1)
+        if left == "" or right == "": return ""
+        operator = if nodes[e].op == i32(int(Tok.percent)): "%" else: "//"
+        return "{left} {operator} {right}"
     # (`i + 1`, `n - 1`, `2*i`: the arithmetic of a simple place and literals)
     if k == .binary and (nodes[e].op == i32(int(Tok.plus)) or nodes[e].op == i32(int(Tok.minus)) or nodes[e].op == i32(int(Tok.star))):
-        left = wit_text(int(nodes[e].a), depth + 1)
-        right = wit_text(int(nodes[e].b), depth + 1)
+        star = nodes[e].op == i32(int(Tok.star))
+        left = if star: wit_operand(int(nodes[e].a), depth + 1) else: wit_text(int(nodes[e].a), depth + 1)
+        right = if nodes[e].op == i32(int(Tok.plus)): wit_text(int(nodes[e].b), depth + 1) else: wit_operand(int(nodes[e].b), depth + 1)
         if left == "" or right == "": return ""
-        if nodes[e].op == i32(int(Tok.star)): return "{left}*{right}"
+        if star: return "{left}*{right}"
         sign = if nodes[e].op == i32(int(Tok.plus)): "+" else: "-"
         return "{left} {sign} {right}"
-    if k == .call: return wit_call_text(e, depth)
+    if k == .call:
+        # (what the user wrote for a library operation: `text.length`, `v % base`,
+        # `i // 2`, a dictionary's or a pool's `d[k]`)
+        if fact_string_call(e) == 1:
+            base = wit_text(kid(e, 0), depth + 1)
+            if base != "": return "{base}.length"
+        floor = fact_floor_call(e)
+        if floor != 0:
+            left = wit_operand(kid(e, 0), depth + 1)
+            # (a power of two's helper holds the shift or the mask, not the divisor)
+            divisor = kid(e, 1)
+            right = if floor == 1 or floor == 2: wit_operand(divisor, depth + 1) else if nodes[divisor].kind != .int_lit: "" else if floor == 3: "{1 << nodes[divisor].ival}" else: "{nodes[divisor].ival + 1}"
+            if left == "" or right == "": return ""
+            operator = if floor == 1 or floor == 3: "//" else: "%"
+            return "{left} {operator} {right}"
+        m = fact_map_call(e)
+        if m == 2 or m == 5 or fact_pool_call(e) == 2:
+            base = wit_text(kid(e, 0), depth + 1)
+            index = wit_text(kid(e, 1), depth + 1)
+            if base != "" and index != "": return "{base}[{index}]"
+            return ""
+        return wit_call_text(e, depth)
     ""
 
 # A direct call, `f(x 1)` (a method call's receiver is its first argument):
@@ -459,12 +503,38 @@ wit_assertion = (cond: int, message: int, paths: FactPaths, entry: FactState):
     # (an unpacking's or a spread's length: an obligation, which a scope with runtime
     # checks keeps as one)
     if wit_obligation != 0 and message != 0:
-        wit_unknown(cond, reason, "the length ({name_of(int(nodes[message].sval))})", 0, relation, missing)
+        what = "the length ({name_of(int(nodes[message].sval))})"
+        # (the length of an element or a temporary has no spelling: say how a
+        # fixed shape states it, as a tuple type does)
+        if relation == "" and starts_with(name_of(int(nodes[message].sval)), "unpacking"):
+            wit_cause(reason, cond)
+            wit_context(0)
+            words = split(name_of(int(nodes[message].sval)), " ")
+            first = if words.len() >= 5 and words[2] == "at": "if xs.length >=? {words[4]}" else if words.len() >= 4: "if xs.length =? {words[3]}" else: "if xs.length =? 2"
+            err_notes.push((-1, "help: give the values a fixed shape, such as a tuple type (`array<[int64 int64]>` for pairs) or a record, or test the length first (`{first}`)"))
+            why = if reason.reason == .missing: "nothing establishes the length here" else: wit_reason(reason)
+            if dir_defer(cond, "cannot prove {what}: {why}", true): return
+            wit_fail(nodes[cond].pos, "cannot prove {what}: {why}")
+            return
+        wit_unknown(cond, reason, what, 0, relation, missing)
         return
     wit_unknown(cond, reason, "assertion", 0, relation, missing)
 
 # A builtin index: refuted (some bound is false) or unknown (some is missing).
 wit_index = (n: int, s: mut FactState, index: int, length: int, lo: int, hi: int, base_node: int = -1, index_node: int = -1):
+    # (`pool[h].hp -= 1` indexes the pool's storage `items` at `__pool_index`'s
+    # answer: what it needs is the handle's membership, said as the user wrote it)
+    if has_flag(n, NF_LIB_INDEX):
+        storage = int(nodes[n].a)
+        loop storage > 0 and (nodes[storage].kind == .addr or nodes[storage].kind == .narrow): storage = int(nodes[storage].a)
+        pool = if nodes[storage].kind == .field: wit_text(int(nodes[storage].a)) else: ""
+        what = if pool != "": "the handle is in the pool `{pool}` for this update of its entry" else: "the handle is in the pool for this update of its entry"
+        wit_context(0)
+        shown_pool = if pool != "": pool else: "pool"
+        err_notes.push((-1, "help: establish `{shown_pool}.has(handle)` with a current guard, or copy the entry out, change it and store it back (`let e = pool[h]` ... `pool[h] = e`)"))
+        if dir_defer(n, "cannot prove {what}", true): return
+        wit_fail(nodes[n].pos, "cannot prove {what}")
+        return
     a = if base_node >= 0: base_node else: int(nodes[n].a)
     base = wit_text(a)
     # A loop's own element read is described as such, never by its lowering.
@@ -504,7 +574,10 @@ wit_index = (n: int, s: mut FactState, index: int, length: int, lo: int, hi: int
 
 # `d[k]`, `d[k] += 1` or `d.pop(k)` where k may be missing (facts.jo fact_map_check).
 wit_key = (n: int):
-    base = wit_text(kid(n, 0))
+    # (an update's receiver is its place: `d[k][j] += 1` reads `d[k]` at `@`)
+    receiver = kid(n, 0)
+    loop receiver > 0 and nodes[receiver].kind == .addr: receiver = int(nodes[receiver].a)
+    base = wit_text(receiver)
     e = kid(n, 1)
     key = if nodes[e].kind == .str_lit and nkids(e) == 0 and nodes[e].sval >= 0: "\"{name_of(int(nodes[e].sval))}\"" else: wit_text(e)
     relation = if base != "" and key != "": "{key} in? {base}" else: ""

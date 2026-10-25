@@ -1,0 +1,121 @@
+# Sales report: parse CSV text, group by region, per-rep totals,
+# top sellers, monthly breakdown and a fixed-width table.
+
+DATA = """date,region,rep,product,units,price
+2026-01-04,north,alice,widget,12,3.50
+2026-01-09,south,bob,gadget,3,19.99
+2026-01-15,north,carol,widget,7,3.50
+2026-02-02,east,dave,gizmo,1,149.00
+2026-02-11,south,bob,widget,20,3.25
+2026-02-19,north,alice,gadget,5,19.99
+2026-03-01,east,erin,widget,9,3.50
+2026-03-07,south,frank,gizmo,2,145.00
+2026-03-21,north,carol,gadget,4,18.50
+bad line here
+2026-03-30,east,dave,widget,15,3.40
+"""
+
+Sale:type = [date:string region:string rep:string product:string units:int price:float64]
+
+parse = (text:string):>array<Sale> => {
+    let out:array<Sale> = []
+    let lines = text.lines
+    loop line in lines[$clamp 1..] {
+        let cols = line.split(",")
+        if cols.length not=? 6 {
+            printl"skipping: {line}"
+            continue
+        }
+        let units = to_int(cols[4]) ?? 0
+        let price = to_float(cols[5]) ?? 0.0
+        out.push(Sale[cols[0] cols[1] cols[2] cols[3] units price])
+    }
+    out
+}
+
+let sales = parse(DATA)
+printl"{sales.length} sales"
+
+# group by region
+let by_region:dict<string array<Sale>> = []
+loop s in sales {
+    let region = s.region
+    if region not in? by_region by_region[region] = []
+    by_region[region].push(s)
+}
+
+printl""
+printl"Revenue by region"
+loop [region rows] in by_region {
+    let total = 0.0
+    loop r in rows total += r.units * r.price
+    printl"  {region:<6} {rows.length} sales  {total:>9.2f}"
+}
+
+# per-rep totals, sorted descending
+let rep_total:dict<string float64> = []
+loop s in sales {
+    rep_total[s.rep] = (rep_total.get(s.rep) ?? 0.0) + s.units * s.price
+}
+let ranked = [loop [rep total] in rep_total [rep=rep total=total]]
+ranked.sort(key=(x:[rep:string total:float64]) => x.total reverse=true)
+printl""
+printl"Top 3 reps"
+loop x in ranked[$clamp 0..3) {
+    printl"  {x.rep:<6} {x.total:>9.2f}"
+}
+
+# monthly units per product
+let months:array<string> = []
+let units_by:dict<[string string] int> = []
+let product_set:set<string> = set[]
+loop s in sales {
+    let month = s.date[$clamp 0..7)
+    if month not in? months months.push(month)
+    let key:[string string] = [s.product month]
+    product_set.push(s.product)
+    if key not in? units_by units_by[key] = 0
+    units_by[key] += s.units
+}
+
+printl""
+let header:array<string> = ["product   "]
+loop m in months header.push(format(m ">8"))
+printl(header.join(""))
+let products = product_set.sorted
+loop p in products {
+    let row:array<string> = [format(p "<10")]
+    loop m in months {
+        let n = units_by.get([p m]) ?? 0
+        row.push(format(n ">8"))
+    }
+    printl(row.join(""))
+}
+
+# average price per product and the most expensive single sale
+let price_sum:dict<string float64> = []
+let price_n:dict<string int64> = []
+loop s in sales {
+    let product = s.product
+    if product not in? price_sum price_sum[product] = 0.0
+    if product not in? price_n price_n[product] = 0
+    price_sum[product] += s.price
+    price_n[product] += 1
+}
+printl""
+loop [p total] in price_sum {
+    let avg = total / (price_n.get(p) ?? 1)
+    printl"avg price {p}: {avg:.2f}"
+}
+if sales.length >? 0 {
+    let biggest = sales.max_by((s:Sale) => s.units * s.price)
+    printl"biggest sale: {biggest.rep} {biggest.product} x{biggest.units} on {biggest.date}"
+}
+
+# median units
+let units = [loop s in sales s.units].sorted()
+if units.length >? 0 {
+    let n = units.length
+    let median = (units[(n - 1) // 2] + units[n // 2]) / 2.0
+    printl"median units: {median}"
+}

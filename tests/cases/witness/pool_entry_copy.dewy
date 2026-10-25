@@ -1,0 +1,7 @@
+# A pool's entry is a value: a mutating method on it changes a copy.
+Player:type = [items:array<int64>]
+main = () => {
+    let players:Pool<Player> = []
+    let p = players.add(Player[[]])
+    players[p].items.push(1)
+}

@@ -1,0 +1,130 @@
+# Text tools: a tiny template engine with {{name}} and {{name|filter}},
+# word wrapping to a width, a key=value config parser with sections,
+# and a slugify/title-case pair.
+
+render = (template:string vars:dict<string string>):>string => {
+    let out:array<string> = []
+    let pos = 0
+    loop pos <=? template.length {
+        let open = template.find("\{\{" pos) ?? -1
+        if open <? 0 {
+            out.push(template[pos..])
+            break
+        }
+        out.push(template[$clamp pos..open))
+        let close = template.find("\}\}" open) ?? -1
+        if close <? 0 {
+            out.push(template[open..])
+            break
+        }
+        let inner = template[$clamp open+2..close).trim
+        let parts = inner.split("|")
+        let name = parts[0].trim
+        let value = vars.get(name) ?? "<{name}?>"
+        if parts.length >? 1 {
+            let filter = parts[1].trim
+            if filter =? "upper" value = value.upper
+            else if filter =? "lower" value = value.lower
+            else if filter =? "title" value = title_case(value)
+        }
+        out.push(value)
+        pos = close + 2
+    }
+    out.join("")
+}
+
+title_case = (text:string):>string => {
+    let words:array<string> = []
+    loop w in text.split() {
+        words.push("{w[0].upper}{w[1..].lower}")
+    }
+    words.join(" ")
+}
+
+slugify = (text:string):>string => {
+    let out:array<string> = []
+    let dash = false
+    loop c in text.lower {
+        if "a" <=? c <=? "z" or "0" <=? c <=? "9" {
+            out.push(c)
+            dash = false
+        } else if not dash and out.length >? 0 {
+            out.push("-")
+            dash = true
+        }
+    }
+    if dash and out.length >? 0 out.pop();
+    out.join("")
+}
+
+wrap = (text:string width:int64):>array<string> => {
+    let lines:array<string> = []
+    let line = ""
+    loop word in text.split() {
+        if line.length =? 0 {
+            line = word
+        } else if line.length + 1 + word.length <=? width {
+            line = "{line} {word}"
+        } else {
+            lines.push(line)
+            line = word
+        }
+    }
+    if line.length >? 0 lines.push(line)
+    lines
+}
+
+parse_config = (text:string):>dict<string dict<string string>> => {
+    let cfg:dict<string dict<string string>> = []
+    let section = "default"
+    loop raw in text.lines {
+        let line = raw.trim
+        if line.length =? 0 or line.startswith("#") continue
+        if line.startswith("[") and line.endswith("]") {
+            section = line[$clamp 1..line.length-1).trim
+            continue
+        }
+        let eq = line.find("=")
+        if eq is? Missing {
+            printl"bad line: {line}"
+            continue
+        }
+        let key = line[0..eq).trim
+        let value = line[$clamp eq+1..].trim
+        if section not in? cfg cfg[section] = []
+        cfg[section][key] = value
+    }
+    cfg
+}
+
+let vars = ["name"->"ada lovelace" "lang"->"Dewy" "n"->"3"]
+printl(render(r"Hello {{ name | title }}, welcome to {{lang|upper}} ({{n}} new, {{missing}})." vars))
+printl(render("no tags here" vars))
+printl(render(r"unclosed {{name" vars))
+
+printl(slugify("Hello, World! It's 2026 -- Dewy  rocks"))
+printl(title_case("the quick BROWN fox"))
+
+let text = "Dewy aims for Python-like ease, C-like speed, and safety by default with danger opt-in. Every partial operation is proven, handled or checked explicitly."
+loop i in 0.. and l in wrap(text 32) printl"{i+1:>2}| {l}"
+
+let cfg = parse_config("""
+# app settings
+name = demo
+debug = true
+
+[server]
+host = 0.0.0.0
+port = 8080
+oops
+[db]
+url = postgres://localhost/app
+""")
+loop [section entries] in cfg {
+    printl"[{section}]"
+    loop [k v] in entries printl"  {k} = {v}"
+}
+let server = cfg.get("server")
+let port_text = if server isnt? none server.get("port") ?? "80" else "80"
+let port = to_int(port_text) ?? 80
+printl"port+1 = {port + 1}"
