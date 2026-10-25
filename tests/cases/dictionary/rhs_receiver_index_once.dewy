@@ -1,0 +1,6 @@
+$runtime_checks
+let row:int64=0
+let key="a"
+let rows:array<dict<string int64>>=[["a" -> 10 "b" -> 20] ["b" -> 30 "a" -> 40]]
+replace=():>int64=>{row=1; key="b"; return 7}
+main=()=>{rows[row][key]+=replace(); printl(rows)}

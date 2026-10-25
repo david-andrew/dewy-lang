@@ -1,0 +1,5 @@
+# An entry removed by the RHS must be looked up again at the store.
+Item:type=[n:int64]
+let d:dict<string Item>=["a" -> Item[10]]
+wipe=():>int64=>{ d.clear(); return 7 }
+main=()=>{ if "a" in? d { d["a"].n = wipe() } }

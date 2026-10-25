@@ -1,0 +1,15 @@
+$runtime_checks
+let d:dict<string dict<string int64>>=["a" -> ["x" -> 10 "y" -> 20] "b" -> ["x" -> 30]]
+let log=""
+let key="a"
+let inner="x"
+pick=(tag:string k:string):>string=>{log="{log}{tag}"; return k}
+main=()=>{
+    d[pick("a" key)][pick("b" inner)] += {
+        log="{log}r"
+        d=["b" -> ["x" -> 300] "a" -> ["y" -> 200 "x" -> 100]]
+        key="b"; inner="y"
+        7
+    }
+    printl'{d} {log}'
+}

@@ -1,0 +1,12 @@
+# quick
+# Keep the old value and key, but find the entry in the replacement dictionary.
+$runtime_checks
+let d:dict<string int64>=["a" -> 10 "b" -> 20]
+let key="a"
+let calls=0
+pick=():>string=>{calls+=1; return key}
+replace=():>int64=>{ d=["b" -> 200 "a" -> 100]; key="b"; return 7 }
+main=()=>{
+    d[pick()] += replace()
+    printl'{d} {calls} {key}'
+}

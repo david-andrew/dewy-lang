@@ -4289,16 +4289,54 @@ dewy_selection_update = (s: int, matrix: bool = false) -> int:
     check_stmt(block)
     block
 
+# Only dictionary update paths need this work. O(path^2 + RHS): capture keys
+# and ordinary indices before the old-value read/RHS, never entry positions.
+# Each dictionary's receiver copy contains at most the preceding path.
+# Plain RHSs retain the existing single-lookup compound update.
+map_update_capture = (lhs: int, rhs: int, before: mut int[]):
+    if nodes[lhs].kind != .field and nodes[lhs].kind != .index: return
+    path = index_update_path(lhs)
+    found = false
+    loop part in path:
+        if map_place_index(part): found = true
+    if not found or not compound_selector_runs(rhs): return
+    i = path.len() - 1
+    loop i >= 0:
+        part = path[i]; i -= 1
+        if nodes[part].kind != .index or nodes[part].b == 0: continue
+        entry = map_place_index(part)
+        selector = if entry: kid(int(nodes[part].b), 1) else: int(nodes[part].b)
+        kept = selector
+        sk = nodes[selector].kind
+        literal = sk == .int_lit or sk == .float_lit or sk == .bool_lit or sk == .str_lit and nkids(selector) == 0
+        if not literal:
+            kept = capture_value(selector, ntype(selector), before)
+            if entry:
+                add_flag(before[before.len() - 1], NF_MAP_KEY)
+                add_flag(kept, NF_MAP_KEY)
+        if entry:
+            call = int(nodes[part].b)
+            # map_elem_place copied the receiver before these selectors were
+            # captured. Refresh it too (rows[i][key] must keep i as well).
+            receiver = copy_place(int(nodes[int(nodes[part].a)].a))
+            add_flag(receiver, NF_MUT)
+            set_kid(call, 0, receiver)
+            set_kid(call, 1, kept)
+            add_flag(part, NF_RELOOKUP)
+        else: nodes[part].b = i32(kept)
+
 check_assign = (s: int) -> int:
     growth_assign(s)
     saved = decimal_assign_begin(s)
     literal = if sibling_flow.len() > 0: sibling_syntax_type(int(nodes[s].b)) else: 0
-    r = __check_assign(s)
+    before: int[]
+    r = __check_assign(s, before)
     decimal_target = saved
     if sibling_flow.len() > 0: sibling_flow_assign(r, literal)
+    if before.len() > 0: return bc_block(before + [copy_checked(r)], nodes[s].pos)
     r
 
-__check_assign = (s: int) -> int:
+__check_assign = (s: int, before: mut int[]) -> int:
     if files[pos_file(nodes[s].pos)].is_dewy:
         end_update = dewy_end_assign(s)
         if end_update != 0: return end_update
@@ -4488,6 +4526,7 @@ __check_assign = (s: int) -> int:
     lhs = last_checked
     nodes[s].a = i32(lhs)
     check_place(lhs, false)
+    if dewy_at(nodes[s].pos): map_update_capture(lhs, int(nodes[s].b), before)
     # (a local written through and never read: see copy_write_warnings)
     if nodes[lhs].kind == .field or nodes[lhs].kind == .index:
         r = place_root(lhs)
@@ -4533,7 +4572,7 @@ __check_assign = (s: int) -> int:
         i = path.len() - 1
         loop i >= 0:
             part = path[i]; i -= 1
-            if nodes[part].kind == .index and nodes[part].b != 0:
+            if nodes[part].kind == .index and nodes[part].b != 0 and not has_flag(part, NF_RELOOKUP):
                 selector = int(nodes[part].b)
                 if nodes[selector].kind != .int_lit: nodes[part].b = i32(capture_value(selector, ntype(selector), before))
         rd = copy_place(lhs)
@@ -4569,7 +4608,7 @@ __check_assign = (s: int) -> int:
         pre: int[]
         x = lhs
         loop nodes[x].kind == .field or nodes[x].kind == .index:
-            if nodes[x].kind == .index and nodes[x].b != 0:
+            if nodes[x].kind == .index and nodes[x].b != 0 and not has_flag(x, NF_RELOOKUP):
                 ib = int(nodes[x].b)
                 ik = nodes[ib].kind
                 if ik != .int_lit:

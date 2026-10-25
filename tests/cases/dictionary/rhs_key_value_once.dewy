@@ -1,0 +1,6 @@
+# Even plain selector names are captured before an effectful RHS.
+$runtime_checks
+let key="a"
+let d:dict<string int64>=["a" -> 10 "b" -> 20]
+replace=():>int64=>{d=["b" -> 200 "a" -> 100]; key="b"; return 7}
+main=()=>{d[key]+=replace(); printl(d)}

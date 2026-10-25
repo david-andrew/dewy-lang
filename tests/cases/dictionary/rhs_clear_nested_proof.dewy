@@ -1,0 +1,4 @@
+# An entry removed by the RHS must be looked up again at the store.
+let d:dict<string dict<string int>>=["a" -> ["x" -> 10]]
+wipe=():>int=>{ d.clear(); return 7 }
+main=()=>{ if "a" in? d and "x" in? d["a"] { d["a"]["x"] += wipe() } }

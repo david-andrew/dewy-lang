@@ -1,0 +1,11 @@
+$runtime_checks
+Item:type=[n:int64]
+let pool:Pool<Item>=[]
+let other:Handle=[]
+move=():>int64=>{pool.remove(other); return 7}
+main=()=>{
+    other=pool.add(Item[100])
+    let h=pool.add(Item[10])
+    pool[h].n += move()
+    printl(pool[h].n)
+}

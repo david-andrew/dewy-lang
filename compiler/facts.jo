@@ -1042,7 +1042,9 @@ fact_route = (e: int, s: mut FactState, depth: int = 0) -> FactRoute:
         selector = 0
         if k == .field: selector = if nodes[e].aux == -2: int(nodes[e].ival) else: int(nodes[e].name)
         else:
-            known = if fact_route_reuse != 0: fact_route_selectors.get(e) ?? (0, 0) else: (0, 0)
+            # A dictionary store after an effectful RHS uses the captured key
+            # but a fresh position, with a fresh membership obligation.
+            known = if fact_route_reuse != 0 and not has_flag(e, NF_RELOOKUP): fact_route_selectors.get(e) ?? (0, 0) else: (0, 0)
             selector = if known.0 == fact_route_reuse and known.0 != 0: known.1 else: fact_capture(int(nodes[e].b), s)
         route.selectors.push(selector)
         route.elements.push(k == .index)
@@ -3540,6 +3542,7 @@ fact_pool_capture = (n: int, s: mut FactState, values: int[], kind: int) -> int:
 fact_map_key = (s: mut FactState, e0: int, value: int) -> int:
     e = e0
     loop nodes[e].kind == .narrow or nodes[e].kind == .conv: e = int(nodes[e].a)
+    if has_flag(e, NF_MAP_KEY) and nodes[e].kind == .ident: return value
     if nodes[e].kind == .str_lit and nkids(e) == 0 and nodes[e].sval >= 0: return fact_constant(s, (1 << 42) + int(nodes[e].sval))
     stable = fact_stable_key(e)
     if stable > 0: return fact_constant(s, stable)
@@ -5916,6 +5919,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         return 0
     if k == .vardecl:
         r = if nodes[n].b != 0: fact_capture(int(nodes[n].b), s) else: fact_constant(s, 0, n)
+        if has_flag(n, NF_MAP_KEY): r = fact_map_key(s, int(nodes[n].b), r)
         if ownership_decls.len() != 0: r = fact_owner_value(int(nodes[n].b), r, s)
         l = int(nodes[n].sym)
         if nkids(n) > 0 and not has_flag(n, NF_GLOBAL):

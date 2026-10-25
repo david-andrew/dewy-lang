@@ -1,0 +1,5 @@
+# exit: 101
+$runtime_checks
+let d:dict<string dict<string int>>=["a" -> ["x" -> 10]]
+wipe=():>int=>{d["a"].clear(); return 7}
+main=()=>{d["a"]["x"]+=wipe()}

@@ -1,0 +1,7 @@
+# exit: 101
+# An entry removed by the RHS must be looked up again at the store.
+$runtime_checks
+Item:type=[n:int64]
+let d:dict<string Item>=["a" -> Item[10]]
+wipe=():>int64=>{ d.clear(); return 7 }
+main=()=>{ d["a"].n = wipe() }

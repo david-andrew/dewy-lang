@@ -1,0 +1,15 @@
+# Plain updates retain presence and nested-entry facts without runtime checks.
+Item:type=[n:int64]
+main=()=>{
+    let counts:dict<string int64>=[]
+    loop word in ["a" "b" "a"] {
+        if word in? counts counts[word]+=1 else counts[word]=1
+    }
+    let d=["a" -> ["x" -> 10]]
+    if "a" in? d and "x" in? d["a"] {d["a"]["x"]+=1; d["a"]["x"]+=2}
+    let r=["a" -> Item[1]]
+    if "a" in? r {r["a"].n+=1; r["a"].n=3}
+    let a=["a" -> [1 2]]
+    if "a" in? a and 0 <? a["a"].length {a["a"][0]+=1; a["a"][0]=3}
+    printl'{counts} {d} {r} {a}'
+}

@@ -2228,6 +2228,8 @@ An in-place update such as `values[key] += 1`, `values[key].x = 5` or
 `values[key]` does, and nothing is inserted. Each key and index of the target
 is evaluated once, from left to right: `d[next()]["x"] += 1` calls `next` once. Count with
 `if key in? counts counts[key] += 1 else counts[key] = 1`.
+If the right-hand side changes the dictionary, the store finds the captured key
+in the current dictionary again; if that key is gone, the update fails.
 
 `values.pop(key)` removes an entry and returns its value; a missing key fails
 as `values[key]` does. `values.pop(key default=none)` returns the default for a

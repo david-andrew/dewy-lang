@@ -1,0 +1,7 @@
+# exit: 101
+# Effectful pool updates use the getter/setter path and recheck the handle.
+$runtime_checks
+Item:type=[n:int64]
+let pool:Pool<Item>=[]
+wipe=():>int64=>{pool.clear(); return 7}
+main=()=>{let h=pool.add(Item[10]); pool[h].n += wipe()}

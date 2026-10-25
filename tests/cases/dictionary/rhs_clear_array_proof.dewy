@@ -1,0 +1,4 @@
+# An entry removed by the RHS must be looked up again at the store.
+let d:dict<string array<int64>>=["a" -> [10]]
+wipe=():>int64=>{ d.clear(); return 7 }
+main=()=>{ if "a" in? d and 0 <? d["a"].length { d["a"][0] = wipe() } }

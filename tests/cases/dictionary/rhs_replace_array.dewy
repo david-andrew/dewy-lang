@@ -1,0 +1,9 @@
+$runtime_checks
+let d:dict<string array<int64>>=["a" -> [10 11] "b" -> [20 21]]
+let log=""
+let key="a"
+let index=0
+pick=():>string=>{log="{log}k"; return key}
+at=():>int64=>{log="{log}i"; return index}
+replace=():>int64=>{log="{log}r"; d=["b" -> [200 201] "a" -> [100 101]]; key="b"; index=1; return 7}
+main=()=>{ d[pick()][at()] = replace(); printl'{d} {log}' }

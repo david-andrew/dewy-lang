@@ -1,0 +1,5 @@
+$runtime_checks
+Item:type=[n:int64 other:int64]
+let d:dict<string Item>=["a" -> Item[10 11] "b" -> Item[20 21]]
+replace=():>int64=>{d=["b" -> Item[200 201] "a" -> Item[100 101]]; return 7}
+main=()=>{ d["a"].n = replace(); printl(d) }

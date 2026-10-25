@@ -1106,7 +1106,7 @@ copy_place = (n: int) -> int:
     c
 
 # m[k] changed in place (m[k] += 1, m[k].push(x), m[k].x = 5, loop mut x in m[k]): the value
-# stored in m, m.vals[__map_entry(m, k)], where a missing key is added first
+# stored in m, m.vals[__map_entry_present(m, k)] in Dewy (a missing key fails)
 map_elem_place = (n: int):
     pos = nodes[n].pos
     m = kid(n, 0)
@@ -1147,6 +1147,15 @@ map_elem_place = (n: int):
     nodes[n] = Node(kind = .index, pos = pos, a = i32(f), b = i32(call), type = i32(rt), flags = i32(NF_CHECKED | NF_INBOUNDS))
 
 is_map_type = (t: int) -> bool: types[prune(t)].kind == .struct_ and structs[int(types[prune(t)].st)].name == "Map"
+
+# The generated entry-position selector of a dictionary place, not a user's
+# array index. Its key can survive a call; its position cannot.
+map_place_index = (n: int) -> bool:
+    if nodes[n].kind != .index or not has_flag(n, NF_INBOUNDS): return false
+    call = int(nodes[n].b)
+    if nodes[call].kind != .call or nodes[call].aux != 0 or nodes[call].sym <= 0 or nkids(call) != 2: return false
+    d = int(fns[int(nodes[call].sym)].decl)
+    d != 0 and decl_in_prelude(d) and name_of(int(nodes[d].name)) == "__map_entry_present"
 
 is_map_entries_type = (t: int) -> bool:
     p = prune(t)

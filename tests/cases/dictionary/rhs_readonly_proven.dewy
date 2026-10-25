@@ -1,0 +1,11 @@
+# A non-writing call keeps the key's presence available to the fresh lookup.
+amount=():>int=>7
+main=()=>{
+    let d:dict<string int>=["a" -> 10]
+    if "a" in? d {d["a"]+=amount()}
+    let key="a"
+    if key in? d {d[key]+=amount()}
+    let other="a"
+    if other in? d {d[other]+=amount()}
+    printl(d)
+}

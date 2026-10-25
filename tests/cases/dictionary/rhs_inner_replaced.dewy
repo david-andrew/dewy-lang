@@ -1,0 +1,4 @@
+$runtime_checks
+let d:dict<string dict<string int64>>=["a" -> ["x" -> 10 "y" -> 20]]
+replace=():>int64=>{d["a"]=["y" -> 200 "x" -> 100]; return 7}
+main=()=>{d["a"]["x"]+=replace(); printl(d)}

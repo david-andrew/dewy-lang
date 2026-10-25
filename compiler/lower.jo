@@ -6106,7 +6106,7 @@ gen_assign = (s: int):
             steps: int[]
             loop true:
                 xk = nodes[x].kind
-                if xk == .index and nodes[x].b != 0 and not index_stable(int(nodes[x].b), rhs): steps.insert(0, int(nodes[x].b))
+                if xk == .index and nodes[x].b != 0 and not has_flag(x, NF_RELOOKUP) and not index_stable(int(nodes[x].b), rhs): steps.insert(0, int(nodes[x].b))
                 if xk == .field or xk == .index or xk == .unwrap or xk == .narrow: x = int(nodes[x].a)
                 else: break
             loop ib in steps:
