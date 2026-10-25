@@ -860,7 +860,8 @@ and write `xs[i]`, with `i` evaluated once at the declaration. A local place can
 name a whole variable (`let p = @xs`: `p.push(4)` changes `xs`), or an element,
 a dictionary entry (`@table[k]`) or a field (`@r.a`) of a local variable; each
 access checks the index or key at run time. Deeper routes
-go to an `@` parameter instead. `@` of a function value is still its handle.
+go to an `@` parameter instead. A place is declared in a function or block: a
+top-level `let p = @xs[0]` would make `p` a global, which is an error for now. `@` of a function value is still its handle.
 A function gives back a value: `return @a` is an error.
 
 A method can lend a place inside its object. One whose body gives `@member` (its

@@ -1,0 +1,15 @@
+# modes: native native-release
+# A task group's outcome tested against an error type, then an int64 times a float64 in a
+# function checked afterwards: the exact conversion that product demands checks the library
+# modules still pending, top-level code included, in the middle of that body.
+Failed:type = type of error
+main = () => {
+    let outcome = concurrent {
+    }
+    printl"group: {outcome is? Failed}"
+    show(2 1.5)
+}
+show = (b:int64 width:float64) => {
+    printl("{(b+1)*width} {b}")
+}
+$runtime_checks

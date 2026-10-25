@@ -2268,6 +2268,7 @@ ensure_global = (g: int, use_pos: int, in_flow: bool = false):
         if nodes[d].b == 0 and dewy_at(nodes[d].pos): dg_record(g)
         tk_unit = 0
         if nodes[d].b != 0:
+            global_place_decl(d)
             if t == 0 and dewy_at(nodes[d].pos): tk_unit = tk_literal_unit(int(nodes[d].b))
             et = values_init(int(nodes[d].b), t)
             nodes[d].b = i32(last_checked)
@@ -4633,6 +4634,19 @@ local_place_decl = (s: int) -> bool:
     if temp != 0: nodes[s] = nodes[temp]
     true
 
+# `let p = @q[0]` at the top level: p would be a global, and a global holds a value, not a
+# place (it would silently be a copy). Function handles (`@f`, `@r.f`) stay values.
+global_place_decl = (d: int):
+    init = int(nodes[d].b)
+    if nodes[d].a != 0 or has_flag(d, NF_RDONLY) or not has_flag(init, NF_MUT) or not files[pos_file(nodes[d].pos)].is_dewy: return
+    k = nodes[init].kind
+    if k != .ident and k != .index and k != .field: return
+    probe = clone(init)
+    if is_fn_type(check_expr(probe, 0)): return
+    if k == .ident and nodes[probe].kind != .ident or k == .ident and nodes[probe].aux != i32(int(SK.local)) and nodes[probe].aux != i32(int(SK.global)): return
+    nm = name_of(int(nodes[d].name))
+    fatal(nodes[init].pos, "'{nm}' is declared at the top level, so it would be a global, and a global cannot be a place (it would hold a copy): declare the place inside a function or a block (`main = () => \{ let {nm} = @... }`), or copy the value without `@`")
+
 check_vardecl = (s: int):
     if has_flag(s, NF_SOA):
         soa_alias(s)
@@ -6420,11 +6434,14 @@ check_pending_functions = (start: int) -> int:
         k += 1
     k
 
-# a module's top-level code
+# a module's top-level code. It may be checked in the middle of another body (a runtime
+# function demanded there checks what is pending, runtime_fn): that body's context comes back.
 check_init_now = (k: int):
     m = int(fns[k].mod)
+    saved = cx
     entered = enter_module_context(m)
     cx = module_ctx[m]
+    saved_floor = ctxs[cx].floor
     fns[k].state = 1
     mark = scope_mark()
     ctxs[cx].floor = i32(sc_names.len())
@@ -6436,8 +6453,9 @@ check_init_now = (k: int):
     copy_write_warnings(k)
     fns[k].ret = i32(T_VOID)
     fns[k].state = 2
+    ctxs[cx].floor = saved_floor
     leave_module_context(m, entered)
-    cx = -1
+    cx = saved
 
 check_program = (main_path: str):
     console_type_id = -1
