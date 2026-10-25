@@ -1,3 +1,4 @@
+use 'member_replay.jo'
 use 'exact.jo'
 use 'concurrency.jo'
 use 'parallel_lower.jo'
@@ -2027,13 +2028,17 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
         # (a member literal fits a string set; another string is checked when it runs)
         p = sp
         ps = str_set_of(p)
-        if nodes[a].kind == .str_lit and nodes[a].aux != 1: return if str_sets[ps].contains(name_of(int(nodes[a].sval))): 0 else: -1
+        if nodes[a].kind == .str_lit and nodes[a].aux != 1:
+            if member_record >= 0: member_string_decision(a, ps)
+            return if str_sets[ps].contains(name_of(int(nodes[a].sval))): 0 else: -1
         at = prune(ntype(a))
         if at == p: return 0
         if str_set_of(at) != 0: return if str_set_within(str_set_of(at), ps): 1 else: -1
         if at != T_STR: return -1
         e = kid_lit(a)
-        if nodes[e].kind == .str_lit and nodes[e].aux != 1: return if str_sets[ps].contains(name_of(int(nodes[e].sval))): 0 else: -1
+        if nodes[e].kind == .str_lit and nodes[e].aux != 1:
+            if member_record >= 0: member_string_decision(e, ps)
+            return if str_sets[ps].contains(name_of(int(nodes[e].sval))): 0 else: -1
         return 2
     if is_lit(a) and types[prune(pat)].kind == .refined and refine_active:
         # (a literal for a refined integer parameter, `d:0` or `d:int64 & ~0`: the overload
@@ -2473,6 +2478,7 @@ written_int_param = (d: int, i: int) -> bool:
     tkind(int(syms[s].ref)) == .int_
 
 resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, closure: int = 0, ufcs: bool = false) -> int:
+    if member_record >= 0: member_candidates(decls)
     # (this call's own type arguments: a call among its arguments has none, from_text[S](f(x)))
     targs_here = call_targs
     call_targs = []

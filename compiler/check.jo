@@ -1,3 +1,4 @@
+use 'member_replay.jo'
 use 'exact.jo'
 use 'concurrency.jo'
 use 'partition.jo'
@@ -4981,7 +4982,8 @@ check_stmt = (s: int):
         body = int(nodes[s].b)
         active = reflect_active
         reflect_active = true
-        check_block(body, 0, false)
+        if not member_scope(s): check_block(int(nodes[s].b), 0, false)
+        body = int(nodes[s].b)
         reflect_active = active
         scope_reset(mark)
         nodes[s] = nodes[body]
@@ -6565,6 +6567,7 @@ check_init_now = (k: int):
     cx = saved
 
 check_program = (main_path: str):
+    member_reset()
     console_type_id = -1
     ut_reset()
     wi_reset()

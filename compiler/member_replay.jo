@@ -1,0 +1,319 @@
+# Reuse a checked members(U) body only when its decisions are uniform across U.
+# The first copy is checked normally. Restricted syntax excludes escapes, new type
+# inference, compile-time member evaluation and narrowing. Unknown decisions fall
+# back before the second copy; the first copy is already the ordinary result.
+# Literal destinations and overload membership scores cover every member. Replayed
+# copies get their own locals, literal values, and deferred proof requests. Facts
+# and lowering see exactly those per-member copies, never a union-typed substitute.
+# O(B + D + T + M*B + sum(S)) time and storage: B body nodes, D source
+# domain, T reachable types, M copies, S destination domains. All relocation and domain
+# membership is indexed. No work for non-reflective loops; reference mode is the
+# differential oracle (DEWY_MEMBERS=reference, trace prints admission decisions).
+use 'reflection.jo'
+use 'main.jo'
+use 'ast.jo'
+use 'node_store.dewy'
+use 'check.jo'
+use 'expr.jo'
+use 'types.jo'
+use 'facts.jo'
+use 'refine.jo'
+use 'exact.jo'
+use 'warn_if.jo'
+use 'ide.jo'
+use 'util.jo'
+use 'lex.jo'
+use 'sibling_types.jo'
+use 'isolation.jo'
+
+struct MemberTemplate:
+    body: int = 0
+    owner: int = 0
+    positions: {int: bool}
+    bindings: {int: bool}
+    dependent: {int: bool}
+    texts: str[]
+    domain: {str: bool}
+    decisions: {int: int}
+    locals: int[]
+    requests: int[]
+    refinements: int[]
+    okay: bool = true
+
+member_templates: MemberTemplate[]
+member_scopes: {int: int}
+member_words: {int: {str: int}}
+member_plain_types: {int: bool}
+member_record = -1
+member_enabled = false
+member_trace = false
+
+member_reset = ():
+    member_templates = []
+    member_scopes = {}
+    member_words = {}
+    member_plain_types = {}
+    member_record = -1
+    mode = env("DEWY_MEMBERS") ?? ""
+    # Debug variables include generated names derived from node IDs. Keep
+    # their allocation order as well as their values byte-identical under -g.
+    member_enabled = mode != "reference" and not debug_vars
+    member_trace = mode == "trace"
+
+member_dependencies = (n: int, name: int, memo: mut {int: bool}) -> bool:
+    if n == 0: return false
+    if let known = memo.get(n): return known
+    found = nodes[n].kind == .ident and nodes[n].name == i32(name)
+    loop child in [int(nodes[n].a), int(nodes[n].b), int(nodes[n].c), int(nodes[n].d)]:
+        value = member_dependencies(child, name, memo)
+        found = found or value
+    loop child in kids(n):
+        value = member_dependencies(child, name, memo)
+        found = found or value
+    memo[n] = found
+    found
+
+member_dependent = (n: int, t: MemberTemplate) -> bool: t.dependent.get(n) ?? false
+
+member_syntax = (n: int, name: int, t: mut MemberTemplate, value: bool = false) -> bool:
+    okay = member_syntax_inner(n, name, t, value)
+    if not okay and member_trace: eprint("member syntax rejected {pos_str(nodes[n].pos)} kind {int(nodes[n].kind)} name {name_of(int(nodes[n].name))}")
+    okay
+
+member_syntax_inner = (n: int, name: int, t: mut MemberTemplate, value: bool) -> bool:
+    if n == 0: return true
+    k = nodes[n].kind
+    if k == .ident:
+        if nodes[n].name == i32(name): t.positions[nodes[n].pos] = true
+        else:
+            # Admission must not demand prelude names for body-local bindings.
+            nm = int(nodes[n].name)
+            sym = if nm < sc_top.len() and sc_top[nm] >= int(ctxs[cx].floor): sc_syms[sc_top[nm]] else: 0
+            if sym != 0 and syms[sym].kind == .local:
+                l = int(syms[sym].ref)
+                if has_var(prune(int(locals[l].type))) or int(locals[l].flags) & (LF_ALIAS | LF_CAPTURED | LF_BYREF | LF_ADDR) != 0: return false
+            if sym != 0 and syms[sym].kind == .global and has_var(prune(int(globals[int(syms[sym].ref)].type))): return false
+        return true
+    if k == .vardecl:
+        t.bindings[int(nodes[n].name)] = true
+        if nodes[n].name == i32(name) or nodes[n].a != 0 or nkids(n) > 0 or has_flag(n, NF_RDONLY) or has_flag(n, NF_AT): return false
+        b = int(nodes[n].b)
+        if member_dependent(b, t) and (nodes[b].kind != .call or nodes[int(nodes[b].a)].kind != .ident or name_of(int(nodes[int(nodes[b].a)].name)) != "bytes"): return false
+    else if k == .call:
+        callee = int(nodes[n].a)
+        if nodes[callee].kind == .ident:
+            nm = name_of(int(nodes[callee].name))
+            if nm != "bytes" and nm != "$runtime_assert" and nm != "$assert": return false
+            if nm != "bytes" and member_dependent(n, t): return false
+        else if nodes[callee].kind == .field:
+            if name_of(int(nodes[callee].name)) != "push": return false
+        else: return false
+    else if k == .exprstmt and not value:
+        expr = int(nodes[n].a)
+        if nodes[expr].kind != .call: return false
+        callee = int(nodes[expr].a)
+        if nodes[callee].kind == .ident and name_of(int(nodes[callee].name)) == "bytes": return false
+    else if k == .field:
+        if nodes[n].b != 0 or member_dependent(int(nodes[n].a), t): return false
+    else if k == .index:
+        if member_dependent(int(nodes[n].a), t): return false
+    else if k == .binary:
+        if member_dependent(n, t): return false
+    else if k == .cast:
+        if member_dependent(n, t): return false
+    else if k == .tname:
+        if nkids(n) > 0: return false
+    else if k == .if_:
+        if member_dependent(int(nodes[n].a), t): return false
+    else if k == .assign:
+        if nodes[n].op != i32(int(Tok.assign)) or nodes[int(nodes[n].a)].kind != .index: return false
+    else if k != .block and k != .exprstmt and k != .field and k != .index and k != .array and k != .binary and k != .and_ and k != .or_ and k != .not_ and k != .int_lit and k != .str_lit and k != .bool_lit: return false
+    # Comparison chains contain value blocks. Their final expression belongs
+    # to that block, whereas a loop-body expression could feed an outer sink.
+    branch_value = if k == .if_: value else: true
+    if not member_syntax(int(nodes[n].a), name, t, true) or not member_syntax(int(nodes[n].b), name, t, branch_value) or not member_syntax(int(nodes[n].c), name, t, branch_value) or not member_syntax(int(nodes[n].d), name, t, true): return false
+    loop i in [0..nkids(n)):
+        child_value = k != .block or value and i == nkids(n) - 1
+        if not member_syntax(kid(n, i), name, t, child_value): return false
+    nkids2(n) == 0
+
+member_prepare = (scopes: int[], body: int):
+    if not member_enabled or scopes.len() < 2 or ide_on or cx < 0 or const_views.len() > 0 or sibling_known.len() > 0 or sibling_flow.len() > 0: return
+    t = MemberTemplate(owner = int(ctxs[cx].inst))
+    loop scope in scopes:
+        value = int(nodes[scope].a)
+        if nodes[scope].aux != 0 or nodes[value].kind != .str_lit: return
+        text = name_of(int(nodes[value].sval))
+        t.texts.push(text)
+        t.domain[text] = true
+    member_dependencies(body, int(nodes[scopes[0]].name), t.dependent)
+    if not member_syntax(body, int(nodes[scopes[0]].name), t): return
+    if t.positions.len() == 0: return
+    index = member_templates.len()
+    member_templates.push(t)
+    loop scope in scopes: member_scopes[scope] = index
+
+# User overloads, including ones that lose on the first member, need the ordinary checker.
+member_candidates = (decls: int[]):
+    if member_record < 0: return
+    loop d in decls:
+        if not decl_in_prelude(d): member_templates[member_record].okay = false
+
+# Restrict shared local storage to closed scalar/container shapes. Other types
+# can have ownership, inference or callable records outside the checked subtree.
+# Each reachable type is inspected once; recursive shapes conservatively fail.
+member_plain = (input: int) -> bool:
+    t = prune(input)
+    if let known = member_plain_types.get(t): return known
+    member_plain_types[t] = false
+    k = types[t].kind
+    okay = k == .bool_ or k == .int_ or k == .float_ or k == .str_ or str_set_of(t) != 0
+    if k == .array: okay = member_plain(telem(t))
+    if is_map_type(t):
+        si = int(types[t].st)
+        okay = structs[si].ntargs == 2 and member_plain(struct_targ(si, 0)) and member_plain(struct_targ(si, 1))
+    member_plain_types[t] = okay
+    okay
+
+member_checked = (n: int, t: MemberTemplate, seen: mut {int: bool}) -> bool:
+    if n == 0 or seen.has(n): return true
+    seen[n] = true
+    k = nodes[n].kind
+    if t.positions.has(nodes[n].pos) and (k == .str_lit or k == .dotname):
+        if k == .dotname:
+            set = str_set_of(ntype(n))
+            if set == 0: return false
+            if member_domain_count(set) != t.texts.len(): return false
+        else if ntype(n) != T_STR: return false
+    if k == .ident:
+        if nodes[n].aux == i32(int(SK.global)): return false
+        if nodes[n].aux == i32(int(SK.local)):
+            l = int(nodes[n].sym)
+            # A checked path may have become an existing narrowed alias.
+            # Text/integer inference also has use-site records outside this tree.
+            if int(locals[l].flags) & (LF_ALIAS | LF_CAPTURE | LF_CAPTURED | LF_BYREF) != 0 or int(locals[l].type) == T_STR or int(locals[l].type) == T_MATH_INT or not member_plain(int(locals[l].type)): return false
+    if k == .lambda or k == .fnref or k == .partial or k == .narrow or k == .istype or k == .iflet or k == .match_ or k == .for_ or k == .while_ or k == .return_: return false
+    if k == .conv and (nodes[n].aux == i32(int(CV.refinement)) or nodes[n].aux == i32(int(CV.set_text))): return false
+    if exact_stores.has(n) or ref_narrowing.has(n) or wi_fact_calls.has(n): return false
+    if nodes[n].type != 0 and has_var(prune(ntype(n))): return false
+    if k == .intrinsic:
+        id = nodes[n].aux as IN
+        if id != .to_bytes and id != .runtime_assert and id != .static_assert and id != .len and id != .push: return false
+    if k == .call:
+        if nodes[n].aux != 0: return false
+        decl = int(fns[int(nodes[n].sym)].decl)
+        if not decl_in_prelude(decl) or nodes[decl].c != 0: return false
+    mask = isolation_children(k)
+    if mask < 0: return false
+    if mask & 1 != 0 and not member_checked(int(nodes[n].a), t, seen): return false
+    if mask & 2 != 0 and not member_checked(int(nodes[n].b), t, seen): return false
+    if mask & 4 != 0 and not member_checked(int(nodes[n].c), t, seen): return false
+    if mask & 16 != 0:
+        loop child in kids(n):
+            if not member_checked(child, t, seen): return false
+    true
+
+member_copy = (n: int, t: MemberTemplate, text: str, lm: {int: int}, nm: mut {int: int}) -> int:
+    if n == 0: return 0
+    if let known = nm.get(n): return known
+    nd = nodes[n]
+    k = nd.kind
+    c = nodes.len()
+    nodes.push(nd)
+    nm[n] = c
+    if t.positions.has(nd.pos):
+        if k == .str_lit: nodes[c].sval = i32(intern(text))
+        else if k == .dotname:
+            nodes[c].aux = i32(member_words[str_set_of(ntype(n))][text])
+            nodes[c].name = i32(intern(text))
+    if k == .vardecl or k == .ident and nd.aux == i32(int(SK.local)):
+        if let local = lm.get(int(nd.sym)): nodes[c].sym = i32(local)
+    mask = isolation_children(k)
+    if mask & 1 != 0: nodes[c].a = i32(member_copy(int(nd.a), t, text, lm, nm))
+    if mask & 2 != 0: nodes[c].b = i32(member_copy(int(nd.b), t, text, lm, nm))
+    if mask & 4 != 0: nodes[c].c = i32(member_copy(int(nd.c), t, text, lm, nm))
+    if mask & 16 != 0:
+        children: int[]
+        loop child in kids(n): children.push(member_copy(child, t, text, lm, nm))
+        set_list(c, children)
+    if let divisor = fact_divisors.get(n): fact_divisors[c] = divisor
+    exact_note(c)
+    c
+
+member_scope = (scope: int) -> bool:
+    index = member_scopes.get(scope) ?? -1
+    if index < 0: return false
+    if not member_templates[index].okay:
+        nodes[scope].b = i32(clone(int(nodes[scope].b)))
+        return false
+    if member_templates[index].body == 0:
+        owner = member_templates[index].owner
+        first_local = fns[owner].locals.len()
+        first_request = fact_requests.len()
+        first_refine = refine_requests.len()
+        before_warnings = shown_warnings.len()
+        previous = member_record
+        member_record = index
+        check_block(int(nodes[scope].b), 0, false)
+        t = member_templates[index]
+        t.body = int(nodes[scope].b)
+        loop i in [first_local..fns[owner].locals.len()):
+            l = fns[owner].locals[i]
+            t.locals.push(l)
+            if not t.bindings.has(int(locals[l].name)): t.okay = false
+            if int(locals[l].flags) & (LF_ALIAS | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_BYREF | LF_CONST) != 0 or has_var(prune(int(locals[l].type))) or int(locals[l].type) == T_STR or int(locals[l].type) == T_MATH_INT or locals[l].const_init != 0: t.okay = false
+        seen: {int: bool} = {}
+        if not member_checked(t.body, t, seen) or before_warnings != shown_warnings.len(): t.okay = false
+        loop i in [first_request..fact_requests.len()):
+            if fact_requests[i].owner == owner:
+                request = fact_requests[i].node
+                t.requests.push(request)
+                if not seen.has(request): t.okay = false
+        loop i in [first_refine..refine_requests.len()):
+            if refine_requests[i].owner == owner:
+                request = refine_requests[i].node
+                t.refinements.push(request)
+                if not seen.has(request): t.okay = false
+        # Admission may have populated destination-domain counts.
+        t.decisions = member_templates[index].decisions
+        member_templates[index] = t
+        member_record = previous
+        if member_trace: eprint("member template {pos_str(nodes[scope].pos)}: {t.okay}, {t.locals.len()} locals, {t.requests.len()} obligations, {t.refinements.len()} refinements")
+        return true
+    t = member_templates[index]
+    lm: {int: int} = {}
+    loop old in t.locals:
+        l = locals.len()
+        locals.push(locals[old])
+        fns[t.owner].locals.push(l)
+        lm[old] = l
+        if let write = copy_writes.get(old): copy_writes[l] = write
+    nm: {int: int} = {}
+    text = name_of(int(nodes[int(nodes[scope].a)].sval))
+    body = member_copy(t.body, t, text, lm, nm)
+    loop request in t.requests:
+        if let copy = nm.get(request): fact_requests.push(FactRequest(copy, t.owner))
+    loop request in t.refinements:
+        if let copy = nm.get(request): refine_requests.push(FactRequest(copy, t.owner))
+    nodes[scope].b = i32(body)
+    true
+
+# A destination domain intersects the source in this many members; compute it
+# once per body/destination. A partial intersection makes a literal overload's
+# score differ between members, so the whole loop uses ordinary checking.
+member_domain_count = (set: int) -> int:
+    if let count = member_templates[member_record].decisions.get(set): return count
+    if not member_words.has(set):
+        words: {str: int} = {}
+        loop i in 0.. and text in str_sets[set]: words[text] = i
+        member_words[set] = words
+    count = 0
+    loop text in str_sets[set]:
+        if member_templates[member_record].domain.has(text): count += 1
+    member_templates[member_record].decisions[set] = count
+    count
+
+member_string_decision = (n: int, set: int):
+    if member_record < 0 or not member_templates[member_record].positions.has(nodes[n].pos): return
+    count = member_domain_count(set)
+    if count > 0 and count < member_templates[member_record].texts.len(): member_templates[member_record].okay = false

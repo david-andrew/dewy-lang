@@ -1,5 +1,6 @@
 # Type-derived sequences specialize ordinary checked code; no source generation.
 use 'check.jo'
+use 'member_replay.jo'
 use 'string_domains.jo'
 use 'expr.jo'
 use 'comptime.jo'
@@ -240,9 +241,10 @@ reflect_loop = (s: int) -> bool:
     index = "$field_iteration{s}"
     bodies: int[]
     jumping = reflect_jumps(int(nodes[s].b))
+    if not jumping: member_prepare(scopes, int(nodes[s].b))
     loop i in [0..scopes.len()):
         scope = scopes[i]
-        nodes[scope].b = i32(clone(int(nodes[s].b)))
+        nodes[scope].b = i32(if i > 0 and member_scopes.has(scope): int(nodes[s].b) else: clone(int(nodes[s].b)))
         if jumping: bodies.push(bc_if(bc_bin(.eq, bc_ident(index, pos), bc_int(i, pos), pos), [scope], [], pos))
         else: bodies.push(scope)
     if not jumping:
