@@ -9,3 +9,27 @@ first = (<T>(xs:array<T length >? 0>):>T=>xs[0])
 last = (<T>(xs:array<T length >? 0>):>T=>xs[xs.length-1])
     # (the last n elements, all of them when there are fewer)
     & (<T>(xs:array<T> n:int64):>array<T>=>xs[xs.length-clamp(n 0 xs.length)..])
+
+# The first element with the smallest/largest key. Evaluate each key exactly
+# once, in source order; equal keys retain the first element. Float keys use
+# the same total ordering as sorting (including NaNs and signed zero).
+min_by=<T K>(xs:array<T length >? 0> key:<(value:T):>K>):>T=>{
+    let best=xs[0]
+    let best_key=key(best)
+    loop i in [1..xs.length) {
+        let value=xs[i]
+        let value_key=key(value)
+        if __sort_lt(value_key best_key) {best=value best_key=value_key}
+    }
+    return best
+}
+max_by=<T K>(xs:array<T length >? 0> key:<(value:T):>K>):>T=>{
+    let best=xs[0]
+    let best_key=key(best)
+    loop i in [1..xs.length) {
+        let value=xs[i]
+        let value_key=key(value)
+        if __sort_lt(best_key value_key) {best=value best_key=value_key}
+    }
+    return best
+}

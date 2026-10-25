@@ -675,7 +675,8 @@ other modules. `$assume_local_asserts=false` in a module, function or block
 makes its asserts panic for every caller.
 `& no panics` forbids it outright, whatever the scope, local asserts included. A library function's
 precondition is the caller's obligation where the library states it: `xs.first`
-and `xs.last` take an array with `length >? 0`, and `xs.swap(i j)` and
+and `xs.last`, along with `xs.min_by(key)` and `xs.max_by(key)`, take an array
+with `length >? 0`. The key functions retain their own effects. `xs.swap(i j)` and
 `xs.insert(value i)` need their positions in bounds, so a guarded call cannot
 panic. `d[k]`, `d[k] += 1` and `d.pop(k)` need the key present, proven by a
 guard (`if k in? d`) or an earlier store into `d[k]` with no other change of
@@ -1358,6 +1359,10 @@ main = ():>void => {
     printl"{(rational("-7/3") ?? 0).floor()}"  # -3
 }
 ```
+
+A rational stores a positive denominator as a field refinement: construction
+and field writes must preserve it. `round` uses this invariant without a
+runtime assertion.
 
 `rational` is the exact fraction type, built in like `int`. Dividing two
 integers with `/` gives a `rational`, including mixed
@@ -3219,6 +3224,10 @@ bare name is the system's usual file for it (`kernel32.dll`, `libz.so`,
 (`lib='libsqlite3.so.0'`). The library is loaded when the function is first
 called. A web build imports it from the page under its Dewy name; Dewy has no
 spelling yet for the JavaScript that supplies it.
+
+A growable array with a refined length still supports `.ptr`: writing its
+elements cannot change its length. Raw access to refined elements remains
+rejected, because it could violate their storage contract.
 
 `ptr<T>` is a raw pointer, never null; `ptr<T>?` may be null, which is `none` on
 the Dewy side. `p[i]` reads and writes the `i`th `T` from `p`, `p + n` is `n`

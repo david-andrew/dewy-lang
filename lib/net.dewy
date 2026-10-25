@@ -28,7 +28,6 @@ tcp_listen=(port:int64 host:string="127.0.0.1" backlog:int32=128):>TcpListener |
     if handle <? 0 return __failure("cannot make a socket" __last_error())
     __reuse_address(handle)
     # (a socket address is a few dozen bytes)
-    $runtime_assert address.bytes.length <=? 128
     let size=int32(address.bytes.length)
     if __bind(handle address.bytes.ptr size) not=? 0 {
         let code=__last_error()
@@ -40,7 +39,7 @@ tcp_listen=(port:int64 host:string="127.0.0.1" backlog:int32=128):>TcpListener |
         __close(handle)
         return __failure("cannot listen on {host}:{port}" code)
     }
-    let bound:array<uint8>=fill(uint8(0) 28)
+    let bound:array<uint8 length =? 28>=fill(uint8(0) 28)
     let length:array<int32>=[28]
     if __name(handle bound.ptr length.ptr) not=? 0 {
         let code=__last_error()
@@ -48,7 +47,6 @@ tcp_listen=(port:int64 host:string="127.0.0.1" backlog:int32=128):>TcpListener |
         return __failure("cannot listen on {host}:{port}" code)
     }
     # (the call writes the address through its pointer; the length stays)
-    $runtime_assert bound.length =? 28
     return TcpListener[handle (int64(bound[2]) << 8) | int64(bound[3])]
 }
 
@@ -74,7 +72,6 @@ tcp_connect=(host:string port:int64):>TcpStream | NetError | Canceled=>{
     let handle=__open(address.family)
     if handle <? 0 return __failure("cannot make a socket" __last_error())
     # (a socket address is a few dozen bytes)
-    $runtime_assert address.bytes.length <=? 128
     let size=int32(address.bytes.length)
     if __connect(handle address.bytes.ptr size) not=? 0 {
         let code=__last_error()
@@ -137,7 +134,7 @@ tcp_close=(server:TcpListener):>void=>__close(server.handle)
 
 # ---------------- below: each system's C functions ----------------
 
-__Address:type=[family:int32 bytes:array<uint8>]
+__Address:type=[family:int32 bytes:array<uint8 length <=? 128>]
 __SockAddrIn:type=[family:uint16 port:uint16 address:uint32 zero:uint64]
 __SockAddrIn6:type=[family:uint16 port:uint16 flow:uint32 a0:uint32 a1:uint32 a2:uint32 a3:uint32 scope:uint32]
 
@@ -227,7 +224,7 @@ if $target.os =? "windows" {
     __send=(s:int64 data:ptr<uint8> length:int64):>int64=>int64(__send_c(s data int32(min(length 1 << 30)) 0))
     __receive=(s:int64 data:ptr<uint8> length:int64):>int64=>int64(__recv_c(s data int32(min(length 1 << 30)) 0))
     __socket_error=(s:int64):>int32=>{
-        let code:array<int32>=[0]
+        let code:array<int32 length =? 1>=[0]
         let length:array<int32>=[4]
         if __getsockopt(s __SOL_SOCKET __SO_ERROR code.ptr length.ptr) not=? 0 return __last_error()
         return code[0]
@@ -236,7 +233,7 @@ if $target.os =? "windows" {
     __again=(code:int32):>bool=>code =? 10035 or code =? 10004
     __in_progress=(code:int32):>bool=>code =? 10035 or code =? 10036
     __poll_one=(s:int64 events:int32 timeout:int32):>int32=>{
-        let fds:array<__PollFd>=[__PollFd[s int16<overflow='wrap'>(events) 0]]
+        let fds:array<__PollFd length =? 1>=[__PollFd[s int16<overflow='wrap'>(events) 0]]
         if __WSAPoll(fds.ptr 1 timeout) <=? 0 return 0
         return int32(fds[0].revents)
     }
@@ -282,9 +279,8 @@ if $target.os =? "windows" {
     __name=(fd:int64 address:ptr<uint8> length:ptr<int32>):>int32=>__name_c(__fd(fd) address length)
     __receive=(fd:int64 data:ptr<uint8> length:int64):>int64=>if length <? 0 -1 else __recv_c(__fd(fd) data uint64(length) 0)
     __poll_one=(fd:int64 events:int32 timeout:int32):>int32=>{
-        let fds:array<__PollFd>=[__PollFd[__fd(fd) int16<overflow='wrap'>(events) 0]]
+        let fds:array<__PollFd length =? 1>=[__PollFd[__fd(fd) int16<overflow='wrap'>(events) 0]]
         if __poll(fds.ptr 1 timeout) <=? 0 return 0
-        $runtime_assert fds.length =? 1
         return int32(fds[0].revents)
     }
     __reuse_address=(fd:int64):>void=>{
@@ -292,10 +288,9 @@ if $target.os =? "windows" {
         __setsockopt(__fd(fd) __SOL_SOCKET __SO_REUSEADDR on.ptr 4);
     }
     __socket_error=(fd:int64):>int32=>{
-        let code:array<int32>=[0]
+        let code:array<int32 length =? 1>=[0]
         let length:array<uint32>=[4]
         if __getsockopt(__fd(fd) __SOL_SOCKET __SO_ERROR code.ptr length.ptr) not=? 0 return __last_error()
-        $runtime_assert code.length =? 1
         return code[0]
     }
 

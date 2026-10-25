@@ -4249,6 +4249,8 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
             check_expr(a0, 0)
             add_flag(a0, NF_CHECKED)
         t0 = prune(ntype(a0))
+        # Raw element access cannot resize an array; retain element contracts below.
+        if intrinsics[ii].id == .arrdata and tkind(representation_type(t0)) == .array: t0 = representation_type(t0)
         if types[t0].kind == .array or types[t0].kind == .str_:
             # (the program's own insert(t: mut T[], k) and the like, taking that many arguments: its)
             own: int[]
@@ -6431,7 +6433,9 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         r = mk_ptr(telem(t))
     else if id == .arrdata:
         nargs_check(n, nargs, 1, 1, "data")
+        # A pointer reaches the elements, never the descriptor's length.
         t = arg_type(args, 0, 0)
+        if tkind(representation_type(t)) == .array: t = representation_type(t)
         if types[t].kind == .str_: r = T_RAWPTR
         else if types[t].kind == .array: r = mk_ptr(int(types[t].elem))
         else: fatal(nodes[n].pos, "data() needs an array or string")
@@ -9943,7 +9947,7 @@ check_field_expr = (n: int, expected: int) -> int:
         nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(method))
         return check_expr(n, expected)
     # (Dewy's `xs.ptr`: where an array's elements are, a ptr<T> for C (provisional spelling))
-    if bk == .array and fname == id_dewy_ptr and files[pos_file(nodes[n].pos)].is_dewy:
+    if tkind(representation_type(bt)) == .array and fname == id_dewy_ptr and files[pos_file(nodes[n].pos)].is_dewy:
         method = mk(.field, nodes[n].pos)
         nodes[method].a = nodes[n].a
         nodes[method].name = i32(intern("data"))

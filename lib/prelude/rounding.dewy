@@ -31,7 +31,6 @@ round = ((x:float64 ties:_Ties='even'):>float64=>{
     & ((x:float32 ties:_Ties='even'):>float32=>float32(round(float64(x) ties)))
     & ((value:rational ties:_Ties='away'):>int=>{
         # (a rational's denominator is positive)
-        $runtime_assert value.denominator >? 0
         let low=value.numerator//value.denominator
         let twice=(value.numerator-low*value.denominator)*2
         if twice <? value.denominator return low

@@ -305,6 +305,47 @@ ct_call = (e: int) -> int:
     ct_stack.pop()
     v
 
+# Evaluate a self-contained contract where the value is actually constructed.
+# This is demanded only by a refinement conversion during constant execution;
+# dependent formals/lexicals still require their own environment support.
+ct_ref_term = (e: int, term: RefTerm, self: int) -> int:
+    value = self
+    if term.kind == 1: value = ct_int((if term.unsigned: T_U64 else: T_INT), term.value)
+    else if term.kind != 0: ct_fail(e, "dependent refinement is not supported in compile-time execution")
+    loop selector in term.path:
+        x = ct_values[value]
+        if selector == -1:
+            if tkind(x.type) == .str_:
+                call = mk(.call, nodes[e].pos)
+                nodes[call].sym = i32(runtime_fn("__dewy_string_length"))
+                nodes[call].type = i32(T_INT)
+                set_list(call, [ct_literal(value, nodes[e].pos)])
+                value = ct_call(call)
+            else if tkind(x.type) == .array or tkind(x.type) == .fixed: value = ct_int(T_INT, x.items.len())
+            else: ct_fail(e, "refinement length needs a collection")
+        else:
+            base = representation_type(x.type)
+            if tkind(base) != .struct_: ct_fail(e, "refinement projection needs a record")
+            si = int(types[base].st)
+            check_struct_fields(si)
+            index = -1
+            loop i in [0..int(structs[si].nfields)):
+                if int(fields[int(structs[si].fields) + i].name) == selector: index = i
+            if index < 0 or index >= x.items.len(): ct_fail(e, "refinement projection is not available")
+            value = x.items[index]
+    if not is_int(ct_values[value].type): ct_fail(e, "refinement needs an integer value")
+    value = ct_exact_operand(value, e)
+    if term.offset != 0: value = ct_math_binary(e, .plus, value, ct_int(T_MATH_INT, term.offset))
+    value
+
+ct_refinement = (e: int, value: int):
+    t = prune(int(nodes[e].aux2))
+    if t <= 0 or types[t].kind != .refined: ct_fail(e, "refinement contract is not available")
+    loop atom in ref_predicates[int(types[t].st)]:
+        a = ct_ref_term(e, atom.a, value)
+        b = ct_ref_term(e, atom.b, value)
+        if ct_values[ct_math_binary(e, atom.op, a, b)].i == 0: ct_fail(e, "refinement failed for {dt(t)}")
+
 ct_convert = (e: int, v: int) -> int:
     t = prune(ntype(e))
     x = ct_values[v]
@@ -374,6 +415,10 @@ ct_convert = (e: int, v: int) -> int:
         fits = int_fits(x.i, to)
         if not types[x.type].sign and x.i < 0: fits = false
         if not fits: ct_fail(e, "integer overflow: value does not fit {dt(to)}")
+        x.type = t
+        return ct_add(x)
+    if cv == .refinement:
+        ct_refinement(e, v)
         x.type = t
         return ct_add(x)
     if cv == .opt:
