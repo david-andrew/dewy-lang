@@ -1529,6 +1529,7 @@ def effects(node, functions, shared=frozenset()):
                 writes.add(n.callee)
                 reads.update(shared)
                 writes.update(shared)
+                output = True  # the closure's body may print or stop the program
             elif n.callee in printing:
                 output = True
     writes.discard(None)
@@ -1545,7 +1546,7 @@ def printing_functions(functions) -> set[str]:
             if f.name in result:
                 continue
             for n in walk(f):
-                if isinstance(n, Print) or isinstance(n, (Bin, Unary, Conv)) and n.ty in INTS or isinstance(n, Assign) and n.op and n.target.ty in INTS or (isinstance(n, Call) and not n.closure and n.callee in result):
+                if isinstance(n, Print) or isinstance(n, (Bin, Unary, Conv)) and n.ty in INTS or isinstance(n, Assign) and n.op and n.target.ty in INTS or (isinstance(n, Call) and (n.closure or n.callee in result)):
                     result.add(f.name)
                     changed = True
                     break
