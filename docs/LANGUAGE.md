@@ -776,6 +776,10 @@ An `int` that only ever holds fixed-width values or literals (a branch, a functi
 returns, a loop's running `max`) stays within `int64`. A counter that a loop changes
 at most once per iteration by a small fixed step (`n += 1`, `t += b` for a byte `b`)
 stays within its entry value plus that many steps per element or range position.
+Array and range loops settle what they carry the way condition loops do (a running
+`max` over `loop x in xs` stays within `int64`), and an integer array built by a
+loop that only pushes onto it (a comprehension, filtered or not) keeps the range of
+what it pushed. A dictionary's or set's `length` is a length like an array's.
 Keeping the bits has its own
 spelling: `uint8<overflow='wrap'>(x)` is the integer modulo 2^8 (two's complement for a signed target, and
 the low bits of an `int`), so `uint64<overflow='wrap'>(int64(-1))` is `18446744073709551615`.
@@ -3842,7 +3846,9 @@ UTF-8 sequence). Guards on the byte view prove it
 otherwise it is checked at run time under `$runtime_checks`.
 `text.find(part)` and `text.rfind(part)` give the grapheme position of the first or
 last occurrence, as indexing counts, or `Missing`; `text.find(part start)` searches from
-grapheme `start`. `xs.index_of(x)` gives the first position of `x` in an array, or
+grapheme `start`. A found text position is at most `text.length` (a match inside
+the last character counts it), so `close + 1` after a found `close` needs no check;
+it is not necessarily an index. `xs.index_of(x)` gives the first position of `x` in an array, or
 `Missing`. `Missing` is the prelude's exception for a search that found nothing:
 it is neither `none` nor -1. Default it with `??` (`text.find("=") ?? -1`), test
 it with `is? Missing`, forward it with `or_throw`, or `match` it.

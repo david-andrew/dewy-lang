@@ -116,7 +116,27 @@ wit_text = (e0: int, depth: int = 0) -> str:
         if nodes[e].op == i32(int(Tok.star)): return "{left}*{right}"
         sign = if nodes[e].op == i32(int(Tok.plus)): "+" else: "-"
         return "{left} {sign} {right}"
+    if k == .call: return wit_call_text(e, depth)
     ""
+
+# A direct call, `f(x 1)` (a method call's receiver is its first argument):
+# the callee's shown name and each argument's spelling, `...` for one that has
+# none. An operator's or a library helper's internal name (`[]`, `_truncate`)
+# is not what the user wrote: "" for it.
+wit_call_text = (e: int, depth: int) -> str:
+    f = int(nodes[e].sym)
+    if nodes[e].aux != 0 or f <= 0 or fns[f].decl == 0: return ""
+    d = int(fns[f].decl)
+    name = shown_fn_name(name_of(int(nodes[d].name)))
+    if name == "" or starts_with(name, "__") or starts_with(name, "_") and pos_in_lib(nodes[d].pos): return ""
+    c = name[0]
+    if not (c >= 'a' and c <= 'z' or c >= 'A' and c <= 'Z' or c == '_'): return ""
+    args = ""
+    loop i in [0..nkids(e)):
+        text = wit_text(kid(e, i), depth + 1)
+        if i > 0: args += " "
+        args += if text == "": "..." else: text
+    "{name}({args})"
 
 # What happened at an invalidating event, as a noun.
 wit_event = (at: int) -> str:

@@ -66,7 +66,7 @@ let header = (rows.get(0) ?? "").split(",")
 let col = header.index_of("city") ?? 0
 loop r in rows[$clamp 1..] {
     let fields = r.split(",")
-    if 0 <=? col <? fields.length printl"{fields[0]} lives in {fields[col]}"
+    if col <? fields.length printl"{fields[0]} lives in {fields[col]}"
 }
 
 # count vowels

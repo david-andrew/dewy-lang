@@ -205,13 +205,33 @@ updated by `l = l ± step` at most once per iteration of a range or array loop,
 with a literal or narrow-typed step, stays within entry + [0, trips] * step, the
 trip count bounded by the range or the length ceiling. Nothing is speculated.
 
+A range or array loop whose body assigns a scalar declared outside it iterates
+its header as a while loop does (four widening rounds, then one narrowing round
+from the settled header, within the nest's shared budget); counted sums bound
+every head, and a place the loop's syntactic changes leave alone keeps its entry
+value. Breaks join the exit. Unsettled or exhausted, the loop havocs as before.
+A private integer array that is empty (or already hulled) at a range or array
+loop's entry and that the body changes only by `push` gets an element hull
+projection: the hull of every pushed value, provided every push site recorded
+one in some pass. Element reads and array loops use it; any element write, other
+mutation or replacement drops it. Push values are demanded only for such arrays.
+
 Scanner loops can select a relation to their condition's named scalar or array
 length, and monotone counters can retain a symbolic starting bound. These are
 candidates checked at entry and on the backedge, never assumptions from a guard.
 The existing bounded indexed searches and incident-row budgets still apply.
 
 The bundled `index_of` search carries its input snapshot's index bound only on
-the successful integer arm; `Missing` supplies no evidence.
+the successful integer arm; `Missing` supplies no evidence. The bundled text
+`find`/`rfind` success is a grapheme count of a byte prefix ending where a match
+starts. Every segmentation rule decides a boundary from the text before it and
+the one scalar after it, so the prefix's inner boundaries are the text's own and
+its count is at most the text's: the arm carries `0 <= position <= text.length`
+(a trusted library contract, by binding identity; a match inside the last
+cluster counts the whole text, so it is not an index). The bundled dictionary's
+and set's entry count is a length projection of the evaluated value (its keys
+array less the deleted entries still in it); mutation passes the receiver
+mutably, replacing that value.
 The bundled delimiter `split` supplies nonemptiness only when the separator is
 proven nonempty. Whitespace splitting and empty separators do not supply it.
 ASCII literal text supplies character boundaries; bounds are checked separately.

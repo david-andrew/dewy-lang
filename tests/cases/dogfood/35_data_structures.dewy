@@ -59,8 +59,8 @@ heap_pop = (@heap:array<Task>):>Task? => {
             let l = 2*i + 1
             let r = 2*i + 2
             let smallest = i
-            if 0 <=? l <? heap.length and heap[l].priority <? heap[smallest].priority smallest = l
-            if 0 <=? r <? heap.length and heap[r].priority <? heap[smallest].priority smallest = r
+            if l <? heap.length and heap[l].priority <? heap[smallest].priority smallest = l
+            if r <? heap.length and heap[r].priority <? heap[smallest].priority smallest = r
             if smallest =? i break
             heap.swap(i smallest)
             i = smallest
