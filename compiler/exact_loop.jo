@@ -317,6 +317,79 @@ exm_width = (n0: int, bits: int) -> int:
     if op == .amp or op == .pipe or op == .caret: return max(a, b)
     10000
 
+# The range census already proved the arithmetic of this generated map. Make
+# at most four stride versions (all unit, or one splat among up to three inputs),
+# not a Cartesian product. Other shapes keep the original guarded scalar loop.
+# The loads are in bounds by broadcast shape validation. Splat loads stay behind
+# the nonempty test; each version has private element and induction registers.
+exm_stride_loop = (s: int, assignment: int, count: int, splat: int):
+    induction = int(nodes[s].sym)
+    old_ctr = locals[induction].vreg
+    ctr = vreg(VI)
+    locals[induction].vreg = i32(ctr)
+    old_elements: int[]
+    loop l in exm_elements:
+        old_elements.push(int(locals[l].vreg))
+        locals[l].vreg = i32(vreg(VI))
+    e_mov(ctr, e_iconst(0))
+    blk()
+    brif_to(e_bin(.ges, VI, ctr, count), ctl)
+    bases: int[]
+    starts: int[]
+    loop j in [0..exm_arrays.len()):
+        pointer = read_place(gen_place(exm_arrays[j], false), ntype(exm_arrays[j]))
+        start = if exm_indices[j] == 0: e_iconst(0) else: read_place(gen_place(exm_indices[j], false), T_INT)
+        starts.push(start)
+        base = e_bin(.add, VI, pointer, e_bin(.shl, VI, start, e_iconst(3)))
+        bases.push(base)
+        if j == splat: e_mov(int(locals[exm_elements[j]].vreg), e_load(VI, base, 24, 8))
+    lop()
+    loop j in [0..exm_arrays.len()):
+        if j == splat: continue
+        address = e_bin(.add, VI, bases[j], e_bin(.shl, VI, ctr, e_iconst(3)))
+        e_mov(int(locals[exm_elements[j]].vreg), e_load(VI, address, 24, 8))
+    gen_stmt(assignment)
+    e_mov(ctr, e_addi(ctr, 1))
+    brif_to(e_bin(.lts, VI, ctr, count), ctl)
+    endc()
+    # Preserve the observable cursor state, including a full vector plus tail.
+    loop j in [0..exm_indices.len()):
+        if exm_indices[j] != 0 and j != splat:
+            write_place(gen_place(exm_indices[j], true), T_INT, e_bin(.add, VI, starts[j], count))
+    endc()
+    locals[induction].vreg = old_ctr
+    loop j in [0..exm_elements.len()): locals[exm_elements[j]].vreg = i32(old_elements[j])
+
+exm_stride_versions = (s: int, assignment: int, count: int) -> bool:
+    induction = int(nodes[s].sym)
+    if exm_arrays.len() > 3 or exact_representation(int(locals[induction].type)) != T_INT or locals[induction].offset >= 0: return false
+    loop l in exm_elements:
+        if locals[l].offset >= 0: return false
+    loop j in [0..exm_indices.len()):
+        if exm_indices[j] == 0: continue
+        loop k in [0..j):
+            if exm_indices[k] != 0 and nodes[exm_indices[k]].sym == nodes[exm_indices[j]].sym: return false
+    strided = false
+    loop step in exm_steps:
+        if step != 0: strided = true
+    if not strided: return false
+    steps: int[]
+    loop step in exm_steps: steps.push(if step == 0: e_iconst(1) else: read_place(gen_place(step, false), T_INT))
+    worthwhile = e_bin(.ges, VI, count, e_iconst(8))
+    versions = 0
+    loop splat in [-1..exm_arrays.len()):
+        if splat >= 0 and exm_steps[splat] == 0: continue
+        valid = worthwhile
+        loop j in [0..steps.len()):
+            valid = e_bin(.and_, VI, valid, e_bin(.eq, VI, steps[j], e_iconst(if j == splat: 0 else: 1)))
+        iff(valid)
+        exm_stride_loop(s, assignment, count, splat)
+        els()
+        versions += 1
+    gen_for(s)
+    loop _ in [0..versions): endc()
+    true
+
 exact_map_for = (s: int) -> bool:
     if exm_emitting or exact_loop_fast or dbg_on or target_wasm or target_arm64 or not exact_demands.has(cur_fn): return false
     if nodes[s].aux != 0: return false
@@ -328,6 +401,7 @@ exact_map_for = (s: int) -> bool:
     if nodes[endnode].kind != .ident and nodes[endnode].kind != .int_lit: return false
     exm_arrays = []; exm_elements = []; exm_indices = []; exm_steps = []; exm_scalars = []; exm_broadcast = false; exm_obligation = false; exact_map_stores = {}
     store = 0
+    assignment = 0
     loop stmt in kids(body):
         n = stmt
         if nodes[n].kind == .exprstmt: n = int(nodes[n].a)
@@ -373,6 +447,7 @@ exact_map_for = (s: int) -> bool:
             loop input in exm_arrays:
                 if nodes[input].sym == nodes[array].sym: return false
             store = int(nodes[n].b)
+            assignment = n
         else: return false
     if store == 0 or exm_arrays.len() == 0 or exm_arrays.len() > 8: return false
     loop j in [0..exm_indices.len()):
@@ -445,7 +520,7 @@ exact_map_for = (s: int) -> bool:
         old_regs.push(int(locals[l].vreg))
         locals[l].vreg = i32(vreg(VI))
     exact_map_active = true
-    gen_for(s)
+    if not exm_stride_versions(s, assignment, count): gen_for(s)
     exact_map_active = false
     loop j in [0..versioned.len()): locals[versioned[j]].vreg = i32(old_regs[j])
     els()

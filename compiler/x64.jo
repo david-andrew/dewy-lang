@@ -3164,7 +3164,40 @@ x_emit_vbin = (pos: int, ins: *Ins):
     x = xdreg(d, 0)
     xa = xreg_of(a, 1, ty)
     xb = xreg_of(bb, 15, ty)
-    if ty == VY and vk == 3 and vo == 2:
+    if vk == 3 and (vo == 4 or vo == 5):
+        # Signed qword min/max, including opposite signs and extreme words.
+        # Sources live outside the three reserved scratch registers; reload
+        # them after making the mask before writing an overlapping destination.
+        vmov_rr(1, xa, ty)
+        vmov_rr(15, xb, ty)
+        if ty == VY:
+            vex(0, 1, 15, 2, 1, 0, 1); b(0x37); modrr(0, 15) # vpcmpgtq
+        else:
+            # If the high dwords are equal, the sign of b-a is the unsigned
+            # low-dword comparison. Otherwise compare the signed high dwords.
+            vmov_rr(0, 15, VX)
+            sse_rr(0x66, 0xFB, 0, 1)        # psubq
+            sse_rr(0x66, 0x76, 1, 15)       # pcmpeqd
+            sse_rr(0x66, 0x72, 4, 0); b(31) # psrad xmm0, 31
+            sse_rr(0x66, 0x70, 0, 0); b(0xF5)
+            sse_rr(0x66, 0x70, 1, 1); b(0xF5)
+            vop2(6, 3, 0, 1)
+            vmov_rr(1, xreg_of(a, 1, VX), VX)
+            sse_rr(0x66, 0x66, 1, 15)       # pcmpgtd
+            sse_rr(0x66, 0x70, 1, 1); b(0xF5)
+            vop2(7, 3, 0, 1)
+        vmov_rr(1, xreg_of((if vo == 5: a else: bb), 1, ty), ty)
+        vmov_rr(15, xreg_of((if vo == 5: bb else: a), 15, ty), ty)
+        if ty == VY:
+            vop3(6, 3, 1, 1, 0)
+            vex(0, 0, 15, 1, 1, 0, 1); b(0xDF); modrr(0, 15) # vpandn
+            vop3(7, 3, x, 1, 0)
+        else:
+            vop2(6, 3, 1, 0)
+            sse_rr(0x66, 0xDF, 0, 15)       # pandn
+            vop2(7, 3, 1, 0)
+            vmov_rr(x, 1, VX)
+    else if ty == VY and vk == 3 and vo == 2:
         # Low qword product: a0*b0 + ((a1*b0 + a0*b1) << 32).
         # AVX2's unsigned dword products give the same low 64 bits for signed
         # operands. Preserve both sources in reserved scratch registers before

@@ -440,7 +440,25 @@ lx_vec_op = (op: Op) -> bool:
     match op:
         block, end, nop, iconst, fconst, load, store, sext32, zext32, fneg: true
         add, sub, mul, and_, or_, xor, fadd, fsub, fmul, fdiv, fmin, fmax: true
+        gts, lts, ges, les, select: true
         _: false
+
+# Only an adjacent signed comparison selecting its own operands is a word
+# min/max. Its boolean must have no other use (it is not a vector of 0/1).
+lx_minmax = (code: Ins[], L: CLoop, p: int) -> int:
+    ins = code[p]
+    if ins.op != .select or ins.ty != VI or p <= L.pl + 1: return 0
+    cmp = code[p - 1]
+    greater = cmp.op == .gts or cmp.op == .ges
+    if not greater and cmp.op != .lts and cmp.op != .les: return 0
+    if cmp.ty != VI or cmp.dst != ins.a or cmp.dst == cmp.a or cmp.dst == cmp.b: return 0
+    direct = ins.b == cmp.a and ins.c == cmp.b
+    reverse = ins.b == cmp.b and ins.c == cmp.a
+    if not direct and not reverse: return 0
+    lx_spans(code)
+    if lx_first[int(cmp.dst)] != p - 1 or lx_last[int(cmp.dst)] != p: return 0
+    if greater == direct: return 5
+    4
 
 lx_vec_plan = (code: Ins[], L: CLoop, checks: LCheck[]) -> VPlan:
     no = VPlan(false, 0, false, [], [], [], [], [])
@@ -461,6 +479,11 @@ lx_vec_plan = (code: Ins[], L: CLoop, checks: LCheck[]) -> VPlan:
         op = ins.op
         d = int(ins.dst)
         if op == .block or op == .end or op == .nop: continue
+        if (op == .gts or op == .lts or op == .ges or op == .les) and p + 1 < L.inc and lx_minmax(code, L, p + 1) != 0: continue
+        minmax = lx_minmax(code, L, p)
+        if minmax != 0:
+            ins.a = ins.b
+            ins.b = ins.c
         if affine and (op == .add or op == .sub) and lx_vec_index(code, L, checks, p):
             indexes.push(d)
             continue
@@ -522,7 +545,7 @@ lx_vec_plan = (code: Ins[], L: CLoop, checks: LCheck[]) -> VPlan:
                     continue
             return no
         fl = op == .fadd or op == .fsub or op == .fmul or op == .fdiv or op == .fmin or op == .fmax
-        il = op == .add or op == .sub or op == .mul or op == .and_ or op == .or_ or op == .xor
+        il = op == .add or op == .sub or op == .mul or op == .and_ or op == .or_ or op == .xor or minmax != 0
         if not fl and not il: return no
         if not lx_within(code, d, L): return no
         k = -1
@@ -544,6 +567,7 @@ lx_vec_plan = (code: Ins[], L: CLoop, checks: LCheck[]) -> VPlan:
         if fl and k != fk: return no
         if fl and k >= 2: return no
         if il and k < 2: return no
+        if minmax != 0 and k != 3: return no
         if op == .mul:
             if k != 2 and k != 3: return no
             plan.avx_only = true
@@ -609,6 +633,11 @@ lx_vloop = (code: Ins[], L: CLoop, checks: LCheck[], plan: VPlan, bases: int[], 
         op = ins.op
         d = int(ins.dst)
         if op == .block or op == .end or op == .nop: continue
+        if (op == .gts or op == .lts or op == .ges or op == .les) and p + 1 < L.inc and lx_minmax(code, L, p + 1) != 0: continue
+        minmax = lx_minmax(code, L, p)
+        if minmax != 0:
+            ins.a = ins.b
+            ins.b = ins.c
         if o_defines(op) and d != L.ctr and plan.index_defs.contains(d): continue
         if op == .fconst or op == .iconst:
             # Constants are loop invariant; materialize once, then splat.
@@ -687,6 +716,7 @@ lx_vloop = (code: Ins[], L: CLoop, checks: LCheck[], plan: VPlan, bases: int[], 
             and_: vo = 6
             or_: vo = 7
             _: vo = 8
+        if minmax != 0: vo = minmax
         xa = lx_splat(pre, vmap, int(ins.a), k, ty)
         xb = lx_splat(pre, vmap, int(ins.b), k, ty)
         v = vreg(ty)
