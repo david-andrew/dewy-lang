@@ -190,6 +190,28 @@ language-level maximum loop sizes. The delayed-dependency, zero-trip,
 condition-write, iterator and candidate-budget regressions check that exhausted
 or unproved candidates cannot justify an obligation.
 
+## Idiomatic result propagation
+
+A demanded scalar `if` expression retains interval and difference facts supported
+by both arms. Scalar return summaries may retain one upper bound against an
+input array's entry length (strict or non-strict), checked on every return.
+Callers use the evaluated argument snapshot; replacing the source does not
+transfer that bound to its replacement.
+
+Scanner loops can select a relation to their condition's named scalar or array
+length, and monotone counters can retain a symbolic starting bound. These are
+candidates checked at entry and on the backedge, never assumptions from a guard.
+The existing bounded indexed searches and incident-row budgets still apply.
+
+The bundled `index_of` search carries its input snapshot's index bound only on
+the successful integer arm; `Missing` supplies no evidence.
+The bundled delimiter `split` supplies nonemptiness only when the separator is
+proven nonempty. Whitespace splitting and empty separators do not supply it.
+ASCII literal text supplies character boundaries; bounds are checked separately.
+Byte array mutation does not turn a different string into ASCII text. Foreign
+strings may be malformed: a known ASCII byte alone does not prove a boundary
+at the next byte.
+
 ## Remaining closure work
 
 Broader shared proof coverage and measurements of nested-loop state size
