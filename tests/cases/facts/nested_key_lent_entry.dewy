@@ -1,0 +1,9 @@
+# An entry lent to a function may come back with any keys.
+wipe = (@a:dict<string int64>) => { a.clear() }
+main = () => {
+    let d:dict<string dict<string int64>> = []
+    d["a"] = []
+    if "x" not in? d["a"] d["a"]["x"] = 0
+    wipe(@d["a"])
+    d["a"]["x"] += 1
+}

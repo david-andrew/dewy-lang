@@ -1,0 +1,31 @@
+# An entry read twice with an unchanged key and dictionary is one value: the
+# inner key a guard establishes on `units[p]` holds for `units[p][m] += 1`, and
+# an entry write keeps the outer dictionary's keys, in loops too.
+main = () => {
+    let units:dict<string dict<string int64>> = []
+    let pairs:array<[string string]> = [["a" "x"] ["a" "y"] ["b" "x"] ["a" "x"]]
+    loop [p m] in pairs {
+        if p not in? units units[p] = []
+        if m not in? units[p] units[p][m] = 0
+        units[p][m] += 1
+        printl(units[p][m])
+    }
+    let counts:dict<string dict<string int64>> = []
+    let words = ["a" "b" "a"]
+    loop first in words {
+        if first not in? counts counts[first] = []
+        loop next in words {
+            if next not in? counts[first] counts[first][next] = 0
+            counts[first][next] += 1
+        }
+    }
+    printl(units)
+    printl(counts)
+    let lists:dict<string array<int64>> = []
+    let k = "k"
+    if k not in? lists lists[k] = []
+    loop v in [1 2 3] lists[k].push(v)
+    printl(lists)
+    let d:dict<string int64> = ["a"->3]
+    if d["a"] >? 0 printl(10 // d["a"])
+}

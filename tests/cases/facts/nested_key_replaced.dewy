@@ -1,0 +1,8 @@
+# Replacing the outer entry forgets the inner keys known of the old one.
+main = () => {
+    let d:dict<string dict<string int64>> = []
+    d["a"] = []
+    if "x" not in? d["a"] d["a"]["x"] = 0
+    d["a"] = []
+    d["a"]["x"] += 1
+}

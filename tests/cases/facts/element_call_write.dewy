@@ -1,0 +1,10 @@
+# A call given an element place may change that element's length.
+wipe = (@a:array<int64>) => { a.clear() }
+main = () => {
+    let xs:array<array<int64>> = [[1 2] [3]]
+    let i = 0
+    if xs[i].length >=? 2 {
+        wipe(@xs[i])
+        printl(xs[i][1])
+    }
+}

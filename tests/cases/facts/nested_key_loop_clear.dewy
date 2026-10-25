@@ -1,0 +1,11 @@
+# A loop that may empty the entry keeps none of its keys.
+main = () => {
+    let d:dict<string dict<string int64>> = []
+    let k = "a"
+    if k not in? d d[k] = []
+    if "x" not in? d[k] d[k]["x"] = 0
+    loop v in [1 2 3] {
+        d[k]["x"] += 1
+        if v =? 2 d[k].clear()
+    }
+}

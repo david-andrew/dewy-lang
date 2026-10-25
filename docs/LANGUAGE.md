@@ -681,7 +681,10 @@ and a heap's `h.pop()`, `h.peek()` and `h.peek_priority()`. The key functions re
 `xs.insert(value i)` need their positions in bounds, and `text.find(part start)`
 needs `0 <=? start <=? text.length`, so a guarded call cannot panic. `d[k]`, `d[k] += 1` and `d.pop(k)` need the key present, proven by a
 guard (`if k in? d`) or an earlier store into `d[k]` with no other change of
-`d` between; `d.get(k)` and `d.pop(k default=v)` take a missing key as a value.
+`d` between (changing entries in place, `d[j] += 1` or `d[j].push(x)`, keeps the
+keys, in loops too); a nested dictionary's key is proven the same way through its
+entry (`if m not in? d[p] d[p][m] = 0` before `d[p][m] += 1`), while neither `d`
+nor that entry changes otherwise; `d.get(k)` and `d.pop(k default=v)` take a missing key as a value.
 `pool[h]`, `pool[h] = x` and `pool[h].field += x` need `pool.has(h)`, proven by
 `h = pool.add(x)` or a guard (`if pool.has(h)`) with nothing since that may have
 removed `h`: stores, updates and loops that do not remove keep it, and so does
@@ -4186,7 +4189,8 @@ An unproven obligation's error names the missing relation (`i <? xs.length`,
   line and `ranked[$clamp 0..5)` takes at most five.
 - Count into a dictionary with `if k not in? d d[k] = 0` followed by
   `d[k] += 1`, and group with `if k not in? d d[k] = []` followed by
-  `d[k].push(x)`. Both branches establish that the key is present. The key is a
+  `d[k].push(x)`; nest the same steps for a dictionary of dictionaries
+  (`if m not in? d[p] d[p][m] = 0` then `d[p][m] += 1`). Both branches establish that the key is present. The key is a
   local or a literal: bind a field first (`let k = sale.region`). To rank a
   dictionary, collect its entries (`[loop [k v] in d [key=k total=v]]`) and sort
   those; an array of `d.keys` does not carry their membership.

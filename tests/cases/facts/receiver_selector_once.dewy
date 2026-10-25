@@ -1,0 +1,11 @@
+$runtime_checks
+# A call's receiver place is evaluated once: its key expression runs once in
+# the facts as it does at run time.
+main = () => {
+    let d:dict<string dict<string int64>> = []
+    d["a"] = []
+    let i:int64 = 0
+    d[{i += 1; "a"}]["x"] = 0
+    $assert(i =? 1)
+    printl(i)
+}

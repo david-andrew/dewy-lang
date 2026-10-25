@@ -197,6 +197,9 @@ const FACT_ELEMENT_LENGTH = -16
 # Projection selector of an integer array's element hull: the interval every
 # element lies in. Built by recorded pushes; an element write drops it.
 const FACT_ELEMENT_VALUE = -17
+# Projection selector of a dictionary value's key positions (fact_map_entry).
+const FACT_MAP_POSITIONS = -18
+fact_name_vals = 0
 
 # A runtime-child walk, never into nested function bodies. Closed calls
 # keep comptime's existing semantics; an open operand must NEVER reach ct_run.
@@ -931,6 +934,7 @@ fact_replace = (s: mut FactState, base: int, selector: int, element: bool, value
         pi = links[pi]
         if element and not p.element and (p.selector == FACT_ELEMENT_LENGTH or p.selector == FACT_ELEMENT_VALUE): continue
         if private and p.element: continue
+        if p.selector == FACT_MAP_POSITIONS and not p.element and (element or selector != fact_name_vals): continue
         if p.element == element:
             if not element and p.selector == selector: continue
             # Different selector identities do not prove different elements.
@@ -1001,6 +1005,28 @@ struct FactRoute:
     types: int[]
     sites: int[]    # each selector's index node (0 for a field)
 
+# A call's receiver route (a dictionary's, a pool's or an array's place, as
+# `d.vals[__map_entry_present(d k)]` for `d[k].pop(j)`) was evaluated once,
+# as the call's argument: its index nodes' selector values are kept, tagged
+# with the call whose arguments evaluated them, and fact_receiver_route
+# rebuilds the route from them instead of evaluating the selectors again
+# (`d[next()][k] = x` calls next once). O(1) per index node.
+fact_route_call = 0
+fact_route_reuse = 0
+fact_route_selectors: {int: (int, int)} = {}
+
+fact_receiver_route = (n: int, s: mut FactState) -> FactRoute:
+    target = kid(n, 0)
+    loop nodes[target].kind == .addr or nodes[target].kind == .conv: target = int(nodes[target].a)
+    # (a temporary, `units[p]` read by `[]`, is no place: its value is the argument's)
+    k = nodes[target].kind
+    if k != .ident and k != .field and k != .index: return FactRoute()
+    outer = fact_route_reuse
+    fact_route_reuse = n
+    route = fact_route(target, s)
+    fact_route_reuse = outer
+    route
+
 # Capture target selectors once. Rebuilding ancestor values below is a pure
 # operation over those captured selectors, never a second syntax evaluation.
 fact_route = (e: int, s: mut FactState, depth: int = 0) -> FactRoute:
@@ -1013,7 +1039,11 @@ fact_route = (e: int, s: mut FactState, depth: int = 0) -> FactRoute:
         return FactRoute(e)
     if k == .field or k == .index:
         route = fact_route(int(nodes[e].a), s, depth + 1)
-        selector = if k == .field: (if nodes[e].aux == -2: int(nodes[e].ival) else: int(nodes[e].name)) else: fact_capture(int(nodes[e].b), s)
+        selector = 0
+        if k == .field: selector = if nodes[e].aux == -2: int(nodes[e].ival) else: int(nodes[e].name)
+        else:
+            known = if fact_route_reuse != 0: fact_route_selectors.get(e) ?? (0, 0) else: (0, 0)
+            selector = if known.0 == fact_route_reuse and known.0 != 0: known.1 else: fact_capture(int(nodes[e].b), s)
         route.selectors.push(selector)
         route.elements.push(k == .index)
         route.types.push(refine_storage(e, ntype(e)))
@@ -1406,15 +1436,46 @@ fact_forget_mutable_maps = (n: int, s: mut FactState, lent: bool = false, at0: i
         if mask & (1 << i) == 0: continue
         e = kid(n, i)
         loop nodes[e].kind == .addr or nodes[e].kind == .conv: e = int(nodes[e].a)
-        p = place_base(place_route(e))
+        p = fact_written_root(e)
         if p.declaration <= 0 or (p.root != .local and p.root != .global): continue
         t = if p.root == .local: int(locals[p.declaration].type) else: int(globals[p.declaration].type)
         if is_map_type(t) or fact_pool_type(t):
             if lent: continue
         else if not lent or fact_exposed(p): continue
+        if fact_routed_write(s, e, at, reason): continue
         j = fact_binding(s, p)
         if j < 0: continue
         s.bindings[j] = FactBinding(p, fact_new(s, fact_domain(t, reason, at), FactTerm(type = t)), at, if s.bindings[j].event == at: s.bindings[j].prior else: s.bindings[j].value)
+
+# The root a mutable argument writes: its place's, through elements as well as
+# fields (`f(@xs[i])`, and `d[k].clear()` on `d.vals[__map_entry_present(d k)]`),
+# or none. O(route depth).
+fact_written_root = (e0: int) -> PlaceIdentity:
+    p = place_base(place_route(e0))
+    if p.declaration != 0: return p
+    e = e0
+    indexed = false
+    depth = 0
+    loop e != 0 and depth < 32:
+        depth += 1
+        k = nodes[e].kind
+        if k == .index and nodes[e].b != 0: indexed = true
+        else if k != .addr and k != .conv and not fact_field_node(e): break
+        e = int(nodes[e].a)
+    if not indexed or e == 0: return p
+    place_base(place_route(e))
+
+# A call's write through an element place, `f(@xs[i])` or `f(@d[k])` (on
+# `d.vals[...]`), changes that route alone: its root gets a new value keeping
+# what the route cannot change (fact_change_route: an array's length, a
+# dictionary's keys and positions). False when the place is not one, for the
+# caller's own rule. O(route depth + the root's projections).
+fact_routed_write = (s: mut FactState, e0: int, at: int, reason: FactReason) -> bool:
+    e = e0
+    loop nodes[e].kind == .addr or nodes[e].kind == .conv: e = int(nodes[e].a)
+    if place_base(place_route(e)).declaration != 0 or fact_written_root(e).declaration == 0: return false
+    fact_change_route(s, e, false, at, reason)
+    true
 
 # An opaque call's effects: every exposed root, and each local lent to it.
 fact_forget_call = (s: mut FactState, n: int, reason: FactReason, at: int = 0):
@@ -1507,6 +1568,7 @@ fact_call_effects = (n: int, s: mut FactState):
         if p.root == .formal:
             i = p.declaration - 1
             if i < 0 or i >= nkids(n): fact_forget_call(s, n, .call); return
+            if fact_routed_write(s, kid(n, i), n, .call): continue
             p = place_base(place_route(kid(n, i)))
         if p.declaration == 0: fact_forget_call(s, n, .call); return
         # Alias overlap is conservative until its provenance is represented.
@@ -2221,6 +2283,7 @@ fact_field_node = (e: int) -> bool:
 # of the first array whose elements it writes. Everything at and below the
 # written element (or, with `resize`, the route's own value) is unknown.
 fact_change_route = (s: mut FactState, target: int, resize: bool, at: int, reason: FactReason):
+    if fact_name_vals == 0: fact_name_vals = intern("vals")
     if target != 0 and nodes[target].kind == .hole: return
     if target != 0 and nodes[target].kind == .tuple:
         loop c in kids(target): fact_change_route(s, c, resize, at, reason)
@@ -2265,13 +2328,17 @@ fact_change_route = (s: mut FactState, target: int, resize: bool, at: int, reaso
         if nodes[c].aux != -2 and fact_pool_type(ntype(int(nodes[c].a))) and not starts_with(name_of(selector), "__"): fact_pool_keep(s, old, fresh)
         child = 0
         kept: FactProjection[]
+        # (a dictionary's entries changing keep its keys and their positions)
+        entries = selector == fact_name_vals and nodes[c].aux >= 0 and is_map_type(representation_type(ntype(int(nodes[c].a))))
         qi = fact_index_get(s.index[0].projection_head, old)
         loop qi >= 0:
             q = s.projections[qi]
             qi = s.index[0].projection_next[qi]
-            if q.element: continue
+            if q.element:
+                if entries and fact_truth(s, q.value) == 1: kept.push(FactProjection(fresh, q.selector, true, q.value))
+                continue
             if q.selector == selector: child = q.value
-            else: kept.push(FactProjection(fresh, q.selector, false, q.value))
+            else if q.selector != FACT_MAP_POSITIONS or selector == fact_name_vals: kept.push(FactProjection(fresh, q.selector, false, q.value))
         loop q in kept:
             if s.projections.len() < FACT_CAP: fact_add_projection(s, q)
         if j == 0 and resize: return
@@ -2356,6 +2423,8 @@ fact_changes = (n: int, s: mut FactState, at: int, reason: FactReason = .loop_):
     # (a direct call havocs what its summary writes; reading lengths and
     # erased or failing assertions write nothing; a record is built in place)
     if k == .call and nodes[n].aux == 0 and fact_pool_call(n) == 4: fact_pool_store_changes(n, s)
+    else if k == .call and nodes[n].aux == 0 and fact_map_store_call(n): fact_map_store_changes(n, s, at, reason)
+    else if k == .call and nodes[n].aux == 0 and fact_map_reads_only(n): s = s
     else if k == .call and nodes[n].aux == 0: fact_call_effects(n, s)
     else if k == .call and nodes[n].aux == 2: s = s
     else if k == .intrinsic and fact_reads_only(nodes[n].aux as IN): s = s
@@ -3341,7 +3410,7 @@ fact_pool_store_changes = (n: int, s: mut FactState):
 fact_pool_receiver = (n: int) -> PlaceIdentity:
     e = kid(n, 0)
     loop nodes[e].kind == .addr or nodes[e].kind == .conv: e = int(nodes[e].a)
-    p = place_base(place_route(e))
+    p = fact_written_root(e)
     if p.root != .local and p.root != .global: return PlaceIdentity(.local, 0, 0)
     p
 
@@ -3357,18 +3426,18 @@ fact_pool_capture = (n: int, s: mut FactState, values: int[], kind: int) -> int:
             if fact_exposed(written): fact_forget(s, n, .call, false, written)
         else: fact_path_call_effects(n, s)
     if kind == 1: return fact_new(s, fact_domain(T_BOOL), FactTerm(.gt, fact_pool_member(s, before, values[1]), fact_constant(s, 0)))
-    if kind <= 3: return fact_new(s, fact_domain(ntype(n), .call, n), FactTerm(type = ntype(n)))
+    if kind <= 3: return fact_new(s, fact_domain(ntype(n), .missing, n), FactTerm(type = ntype(n)))
     # (the pool's value after the call: a new one even where no effect row gave one)
     target = kid(n, 0)
     loop nodes[target].kind == .addr or nodes[target].kind == .conv: target = int(nodes[target].a)
-    route = fact_route(target, s)
+    route = fact_receiver_route(n, s)
     held = fact_route_values(s, route)
     after = if held.len() > 0: held[held.len() - 1] else: 0
     if after == before or after == 0:
-        if route.root == 0: return fact_new(s, fact_domain(ntype(n), .call, n), FactTerm(type = ntype(n)))
+        if route.root == 0: return fact_new(s, fact_domain(ntype(n), .missing, n), FactTerm(type = ntype(n)))
         after = fact_new(s, FactBound(), FactTerm(type = ntype(target)))
         fact_store_route(s, route, after, n)
-    result = fact_new(s, fact_domain(ntype(n), .call, n), FactTerm(type = ntype(n)))
+    result = fact_new(s, fact_domain(ntype(n), .missing, n), FactTerm(type = ntype(n)))
     if kind == 4: fact_pool_keep(s, before, after)
     else if kind == 5:
         rank = fact_pool_rank(s, before) + 1
@@ -3414,8 +3483,89 @@ fact_stable_key = (e: int, depth: int = 0) -> int:
 fact_map_member = (s: mut FactState, n: int, map: int, key: int) -> int:
     fact_project(s, map, fact_map_key(s, kid(n, 1), key), true, T_BOOL)
 
+# A dictionary's entries (no traps): the entry of key k in a dictionary's value
+# is its `vals` element at k's position, a projection of that value on k (under
+# FACT_MAP_POSITIONS). `d[k]` reads it, and `d[k] += 1` or `d[k][j] = x` change
+# it through `d.vals[__map_entry_present(d k)]` (expr.jo map_elem_place), so
+# what is known of an entry (the keys of a nested dictionary among it) holds
+# from one spelling of `d[k]` to the next while d's value is unchanged. A
+# change of an entry's contents keeps the positions (fact_replace and
+# fact_change_route keep the value's other projections; a store into any
+# other field of the dictionary drops them); every other change of d (an
+# insertion, a removal, an opaque or effectful call) gives d a new value
+# without them. O(1) per read beyond the membership projection's.
+fact_map_position = (s: mut FactState, n: int, map: int, key: int) -> int:
+    # (named before any positions exist: fact_replace keeps them for a store into `vals`)
+    if fact_name_vals == 0: fact_name_vals = intern("vals")
+    positions = fact_project(s, map, FACT_MAP_POSITIONS, false, T_INT)
+    fact_project(s, positions, fact_map_key(s, kid(n, 1), key), true, T_INT)
+
+fact_map_entry = (s: mut FactState, n: int, map: int, key: int) -> int:
+    position = fact_map_position(s, n, map, key)
+    t = prune(fact_terms[map].type)
+    vt = if types[t].kind == .struct_ and int(structs[int(types[t].st)].nfields) > 1: int(fields[int(structs[int(types[t].st)].fields) + 1].type) else: T_INT
+    fact_project(s, fact_project(s, map, fact_name_vals, false, vt), position, true, ntype(n))
+
+# A dictionary's membership test, read or entry position for a builtin key
+# reads the dictionary alone (the transfer's own rule). O(1).
+fact_map_reads_only = (n: int) -> bool:
+    m = fact_map_call(n)
+    if m < 1 or m > 3: return false
+    kt = representation_type(ntype(kid(n, 1)))
+    fact_scalar(kt) or kt == T_STR
+
+# `d[k] = x` for a key of a builtin type, in a program without lifecycle
+# hooks, writes d alone and calls nothing of the program's (as a pool's `[]=`,
+# fact_pool_capture): d's place gets a new value holding the keys it held
+# and k, and its enclosing values keep their other projections (an outer
+# dictionary's positions and keys, for `d[p][m] = x`). O(keys held).
+fact_map_store_call = (n: int) -> bool:
+    if fact_map_call(n) != 5 or nkids(n) != 3 or ownership_decls.len() != 0 or int(nodes[int(fns[int(nodes[n].sym)].decl)].name) != fact_name_store: return false
+    kt = representation_type(ntype(kid(n, 1)))
+    fact_scalar(kt) or kt == T_STR
+
+# A loop's havoc of `d[k] = x` (fact_changes): the route's own value is
+# unknown, d keeps the keys it held (a store removes none), and an enclosing
+# dictionary keeps its keys and positions (fact_change_route). O(keys held).
+fact_map_store_changes = (n: int, s: mut FactState, at: int, reason: FactReason):
+    target = kid(n, 0)
+    loop nodes[target].kind == .addr or nodes[target].kind == .conv: target = int(nodes[target].a)
+    i = if nodes[target].kind == .ident: fact_binding(s, fact_place(target)) else: -1
+    before = if i >= 0: s.bindings[i].value else: 0
+    fact_change_route(s, target, true, at, reason)
+    i = if before != 0: fact_binding(s, fact_place(target)) else: -1
+    if i < 0: return
+    after = s.bindings[i].value
+    keys: int[]
+    j = fact_index_get(s.index[0].projection_head, before)
+    loop j >= 0:
+        q = s.projections[j]
+        j = s.index[0].projection_next[j]
+        if q.element and fact_truth(s, q.value) == 1: keys.push(q.selector)
+    loop key in keys: fact_assume(s, fact_project(s, after, key, true, T_BOOL), true)
+
+fact_map_store = (n: int, s: mut FactState, values: int[], before: int) -> int:
+    target = kid(n, 0)
+    loop nodes[target].kind == .addr or nodes[target].kind == .conv: target = int(nodes[target].a)
+    route = fact_receiver_route(n, s)
+    if route.root == 0: return 0
+    written = fact_place(route.root)
+    if written.declaration == 0: return 0
+    if fact_exposed(written): fact_forget(s, n, .call, false, written)
+    after = fact_new(s, FactBound(), FactTerm(type = ntype(target)))
+    fact_store_route(s, route, after, n)
+    keys: int[]
+    i = fact_index_get(s.index[0].projection_head, before)
+    loop i >= 0:
+        q = s.projections[i]
+        i = s.index[0].projection_next[i]
+        if q.element and fact_truth(s, q.value) == 1: keys.push(q.selector)
+    loop key in keys: fact_assume(s, fact_project(s, after, key, true, T_BOOL), true)
+    fact_assume(s, fact_map_member(s, n, after, values[1]), true)
+    fact_new(s, fact_domain(ntype(n), .missing, n), FactTerm(type = ntype(n)))
+
 fact_map_receiver = (s: mut FactState, n: int, value: int) -> int:
-    route = fact_route(kid(n, 0), s)
+    route = fact_receiver_route(n, s)
     held = fact_route_values(s, route)
     if held.len() > 0: held[held.len() - 1] else: value
 
@@ -3437,7 +3587,7 @@ fact_map_check = (n: int, s: mut FactState, values: int[]):
 fact_array_call_check = (n: int, s: mut FactState, values: int[], kind: int):
     if fact_speculating != 0 or not (fact_policy == .RequireStatic or fact_query): return
     # (the receiver is a place, as a builtin operation's is)
-    route = fact_route(kid(n, 0), s)
+    route = fact_receiver_route(n, s)
     held = fact_route_values(s, route)
     base = if held.len() > 0: held[held.len() - 1] else: values[0]
     length = fact_project(s, base, -1, false, T_INT)
@@ -3745,9 +3895,10 @@ fact_loop_header = (entry: mut FactState, back: FactState, old: FactState, at: i
         if h < 0 or s.bindings[h].value == binding.value: continue
         peer = if predecessor.live: fact_binding(predecessor, binding.place) else: -1
         if predecessor.live and peer < 0: continue
-        # (and a pool the memberships both hold, the same rank: fact_pool_call)
+        # (and a pool the memberships both hold, the same rank: fact_pool_call;
+        # a dictionary the keys both hold, a store into its entries keeping them)
         t = if binding.place.root == .local: int(locals[binding.place.declaration].type) else: int(globals[binding.place.declaration].type)
-        pool = fact_pool_type(t)
+        pool = fact_pool_type(t) or is_map_type(representation_type(t))
         pi = fact_index_get(source.index[0].projection_head, binding.value)
         loop pi >= 0:
             p = source.projections[pi]
@@ -4800,6 +4951,9 @@ fact_inventory_bound = (s: mut FactState, value: int, parts: int[], t: int, at: 
         loop j in [0..parts.len()):
             b = fact_bound(s, fact_project(s, parts[j], selector, false, ct))
             joined = if j == 0: b else: fact_hull(joined, b, at)
+        # (what the elements share bounds it: where that is too little, nothing
+        # establishes more, whatever iterates them)
+        joined.reason = .missing; joined.witness = 0
         fact_add_projection(s, FactProjection(value, selector, false, fact_new(s, joined, FactTerm(type = ct))))
         # (arrays of one short length: each position's hull, as a tuple's)
         if not sized or t == T_STR or joined.wide or joined.lo != joined.hi or joined.hi > 8: continue
@@ -4810,6 +4964,7 @@ fact_inventory_bound = (s: mut FactState, value: int, parts: int[], t: int, at: 
             loop j in [0..parts.len()):
                 b = fact_bound(s, fact_project(s, parts[j], fact_constant(s, k), true, et))
                 item = if j == 0: b else: fact_hull(item, b, at)
+            item.reason = .missing; item.witness = 0
             if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(value, fact_constant(s, k), true, fact_new(s, item, FactTerm(type = et))))
 
 # A backwards slice of checked syntax and storage definitions. Build only for
@@ -5029,7 +5184,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
                     p = place_base(event.atom.place)
                     if p.root == .formal:
                         i = p.declaration - 1
-                        p = if i >= 0 and i < nkids(n): place_base(place_route(kid(n, i))) else: PlaceIdentity(.local, 0, 0)
+                        p = if i >= 0 and i < nkids(n): fact_written_root(kid(n, i)) else: PlaceIdentity(.local, 0, 0)
                     if p.declaration == 0: exposed_writes.push(n)
                     else:
                         fact_slice_writer(writers, p, n)
@@ -5518,6 +5673,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             base = fact_capture(int(nodes[n].a), s)
             index = fact_capture(int(nodes[n].b), s)
         fact_covered = outer
+        if fact_route_call != 0: fact_route_selectors[n] = (fact_route_call, index)
         t = fact_type(ntype(int(nodes[n].a)))
         if types[t].kind == .array or types[t].kind == .fixed:
             length = if types[t].kind == .fixed: fact_constant(s, fixed_len(t)) else: fact_project(s, base, -1, false, T_INT)
@@ -6018,7 +6174,10 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             proof_call(n, s)
             return 0
         fact_capture(int(nodes[n].a), s)
+        outer_call = fact_route_call
+        fact_route_call = n
         values = fact_call_arguments(n, s)
+        fact_route_call = outer_call
         if wi_fact_calls.len() > 0 and wi_fact_calls.has(n): wi_fact_check(n, values, s)
         if fact_speculating == 0:
             floor_probe = fact_probe_on and nkids(n) == 2 and (fact_floor_call(n) == 1 or fact_floor_call(n) == 2)
@@ -6044,7 +6203,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         if array >= 30:
             # (a slice assignment changes elements, not the length)
             a = kid(n, 0)
-            route = fact_route(a, s)
+            route = fact_receiver_route(n, s)
             held = fact_route_values(s, route)
             length = fact_project(s, (if held.len() > 0: held[held.len() - 1] else: values[0]), -1, false, T_INT)
             fresh = fact_new(s, FactBound(), FactTerm(type = ntype(a)))
@@ -6057,16 +6216,22 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         if map >= 2 and map <= 4: fact_map_check(n, s, values)
         if map != 0:
             before = fact_map_receiver(s, n, values[0])
-            # (asking for a builtin key reads the dictionary and nothing else:
-            # an exposed one is not forgotten, as its summary, through the
-            # hashing's generic calls, would have it)
+            # (asking for a builtin key, or for its entry's position, reads the
+            # dictionary and nothing else: an exposed one is not forgotten, as
+            # its summary, through the hashing's generic calls, would have it)
             kt = representation_type(ntype(kid(n, 1)))
-            if map > 2 or not (fact_scalar(kt) or kt == T_STR): fact_path_call_effects(n, s)
+            builtin = fact_scalar(kt) or kt == T_STR
+            if map == 5 and fact_map_store_call(n):
+                stored = fact_map_store(n, s, values, before)
+                if stored != 0: return stored
+            if map > 3 or not builtin: fact_path_call_effects(n, s)
             if map == 1: return fact_map_member(s, n, before, values[1])
+            # (the entry, of the dictionary's value after the hashing's calls)
+            if map == 2: return fact_map_entry(s, n, (if builtin: before else: fact_map_receiver(s, n, values[0])), values[1])
             # (the entry is there now, in d's value after the change, and so is
             # every key known there before: a store removes none)
             if map == 3 or map == 5:
-                after = fact_map_receiver(s, n, fact_capture(kid(n, 0), s))
+                after = fact_map_receiver(s, n, values[0])
                 if after != before:
                     keys: int[]
                     i = fact_index_get(s.index[0].projection_head, before)
@@ -6076,7 +6241,8 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                         if q.element and fact_truth(s, q.value) == 1: keys.push(q.selector)
                     loop key in keys: fact_assume(s, fact_project(s, after, key, true, T_BOOL), true)
                 fact_assume(s, fact_map_member(s, n, after, values[1]), true)
-            return fact_new(s, fact_domain(ntype(n), .call, n), FactTerm(type = ntype(n)))
+                if map == 3: return fact_map_position(s, n, after, values[1])
+            return fact_new(s, fact_domain(ntype(n), .missing, n), FactTerm(type = ntype(n)))
         zero_test = fact_rational_zero_test(n)
         if zero_test >= 0 and values[zero_test] != 0:
             numerator = fact_project(s, values[zero_test], intern("numerator"), false, T_MATH_INT)

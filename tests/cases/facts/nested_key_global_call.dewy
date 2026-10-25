@@ -1,0 +1,9 @@
+# A call that writes the dictionary forgets what was known of its entries.
+let g:dict<string dict<string int64>> = []
+wipe = () => { g["a"] = [] }
+main = () => {
+    g["a"] = []
+    if "x" not in? g["a"] g["a"]["x"] = 0
+    wipe()
+    g["a"]["x"] += 1
+}
