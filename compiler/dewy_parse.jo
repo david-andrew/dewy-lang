@@ -2906,7 +2906,6 @@ dw_membership = (id: int) -> int:
 # bounds are clamped to [0, length] and the end to at least the start, so it
 # is always in bounds; the receiver and the bounds are evaluated once, in order.
 dw_clamp_slice = (n: int, right: int, xs: int[]) -> int:
-    pos = nodes[n].pos
     tag = dewy_syntax[xs[0]].text
     if tag != "clamp": fatal(dewy_syntax[xs[0]].pos, "`${tag}` is not an index setting: `$clamp` truncates a slice to the receiver, as in `xs[$clamp a..b)`")
     if xs.len() != 2 or dw_op(xs[1]) != .range_apply: fatal(dewy_syntax[xs[0]].pos, "`$clamp` truncates one range: `xs[$clamp a..b)`")
@@ -2914,6 +2913,11 @@ dw_clamp_slice = (n: int, right: int, xs: int[]) -> int:
     dewy_syntax.push(DewySyntax(kind = .block, text = dewy_syntax[right].text, pos = dewy_syntax[right].pos, children = [xs[1]]))
     r = dw_iterable(wrapper, true)
     if nodes[r].kind != .range or has_flag(r, NF_STEP): fatal(dewy_syntax[xs[1]].pos, "`$clamp` truncates a contiguous slice: `xs[$clamp a..b)`")
+    dw_clamp_block(n, r)
+
+# The clamped slice of index n (its receiver read) by range r (dw_clamp_slice).
+dw_clamp_block = (n: int, r: int) -> int:
+    pos = nodes[n].pos
     source = "$clamp_source{n}"
     length = "$clamp_length{n}"
     lo = "$clamp_start{n}"

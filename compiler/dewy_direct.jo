@@ -62,6 +62,12 @@ dc_unbraced = false
 # 2 a value; -1 not known, a body read when checking asks for it)
 dc_fn_result = 0
 dc_chains_made = 0     # (comparison chains read so far)
+dc_cast_coalesce = false   # (an `as` type may end at `??`: the cast is to an optional, dc_expr)
+dc_map_ok = false      # (statements of a comprehension's bodies may be `key -> value` entries)
+dc_pairs_made = 0      # (entries read, and entries collected: every one read must be collected)
+dc_pairs_collected = 0
+dc_top_level = false   # (dc_statement is reading a module's top-level statement, not one in a body)
+dc_kinds: int[]        # (the parameter kinds of the functions being read: 1 keyword-only, dewy_param_kinds)
 
 # Full lexing retains source positions and names; only closed braced bodies are
 # deferred. The marker lives on the block so function instances keep its identity.
@@ -312,6 +318,19 @@ dc_atom = () -> int:
         add_flag(n, NF_LITERAL)
         return n
     if token.kind == .integer: return dc_wide_integer(token, pos)
+    # `0x"0a0b"`: the bytes a based string spells (dw_binary)
+    if token.kind == .based_string:
+        problem = LiteralProblem("", 0, false)
+        packed = literal_packed(problem, dn_payload(token))
+        if len(problem.message) > 0: return 0
+        text = mk(.str_lit, pos)
+        nodes[text].sval = i32(intern(str_from_bytes(packed)))
+        callee = mk(.ident, pos)
+        nodes[callee].name = i32(intern("bytes"))
+        call = mk(.call, pos)
+        nodes[call].a = i32(callee)
+        set_list(call, [text])
+        return call
     if token.kind == .source_real:
         fast = dc_short_real(token)
         if fast != none:
@@ -332,12 +351,15 @@ dc_atom = () -> int:
     if op == .range and dc_member_depth == dc_depth:
         dn_at -= 1
         return dc_member_range(pos)
+    # `[0..n)`, `[1,4..11]`, `(a..b]`: a range value (dw_range_value); in a membership, the range
+    # itself, which may be open (`x in? [..0]`, dw_membership)
+    if (op == .lbrack or op == .lparen) and dn_peek() != .kw_loop and dn_peek() != .kw_parallel and dc_range_inside(dn_at - 1):
+        range = dc_range_atom()
+        if range >= 0: return range
     if op == .lparen:
         after = dn_peek()
         if dn_partial_operator(after) or after == .kw_not and dn_token_invert(dn_tokens[dn_at + 1].symbol) != .none: return dc_partial(token)
-        n = dc_expr(0)
-        if n == 0 or not dn_accept(.rparen): return 0
-        return n
+        return dc_group(pos)
     # `if c a else b` and `match` as values; loops and `$target` chains take the reference grammar
     if op == .kw_if or op == .kw_match:
         dn_at -= 1
@@ -345,6 +367,7 @@ dc_atom = () -> int:
     # `$unsafe expression`: the boundary holds over the expression (dw_unsafe_scope)
     if token.kind == .metatag:
         if token.stop - token.start == 10 and dn_payload(token) == "allocator": return dc_allocator(token)
+        if token.stop - token.start == 5 and dn_payload(token) == "lend": return dc_lend(token)
         if not dc_unsafe_at(dn_at - 1): return 0
         operand = dc_expr(0)
         if operand == 0: return 0
@@ -370,73 +393,8 @@ dc_atom = () -> int:
         region = dc_parallel(dn_take(), true)
         if region == 0 or not dn_accept(.rbrack): return 0
         return region
-    # `[0..n)`, `[1,4..11]`: a range value (dw_range_value)
-    if op == .lbrack and (dn_tokens[dn_at + 1].symbol == .range or dn_tokens[dn_at + 1].symbol == .comma and dn_tokens[dn_at + 3].symbol == .range):
-        start = dn_at
-        node_start = nodes.len()
-        list_start = lists.len()
-        edits = dn_edit_at.len()
-        range = dc_range(true, true)
-        if dn_at < 0: return 0
-        if range != 0:
-            # (`[1..]`: a slice's or a loop's, not a value: dewy_range_value reports it)
-            if nodes[range].a == 0 or nodes[range].b == 0: return 0
-            value = dw_range_value(range)
-            dc_range_call = value
-            dc_range_node = range
-            return value
-        dn_at = start
-        nodes.truncate(node_start)
-        lists.truncate(list_start)
-        dn_edits_undo(edits)
-    # `[a b c]`: comprehensions, records, dictionaries, spreads and rows take the reference grammar
-    if op == .lbrack:
-        record = dc_named_next()
-        n = mk(if record: NK.record_lit else: NK.array, pos)
-        saved = dn_comma_stop
-        dn_comma_stop = false
-        items: int[]
-        loop not dn_accept(.rbrack):
-            if dn_tokens[dn_at].kind == .eof: return 0
-            # (`[x=1 y=2]`: every row a named field; methods take the reference grammar)
-            if record:
-                field = dn_tokens[dn_at]
-                if not dc_named_next() or dn_reserved(int(field.name)): return 0
-                dn_at += 2
-                value = dc_expr(11)
-                # (`[f=() => ...]`: a method, dw_method_row)
-                if value == 0 or nodes[value].kind == .lambda: return 0
-                entry = mk(.namedarg, mkpos(dn_file, field.start))
-                nodes[entry].name = field.name
-                nodes[entry].a = i32(value)
-                items.push(entry)
-                continue
-            # (a flow or block element may express several values or none: the reference
-            # grammar decides, building a collector when it does, dw_collector)
-            first = dn_peek()
-            if first == .kw_if or first == .kw_loop or first == .kw_match or first == .lbrace: return 0
-            # (`[xs... 1]`: an element spread; `["a" -> 1]`: a dictionary's entry)
-            item_start = dn_tokens[dn_at].start
-            saved_spread = dc_spread_depth
-            dc_spread_depth = dc_depth + 1
-            item = dc_expr(21)
-            dc_spread_depth = saved_spread
-            if item == 0: return 0
-            if dn_peek() == .arrow:
-                if items.len() == 0: nodes[n].kind = .map_lit
-                if nodes[n].kind != .map_lit or has_flag(item, NF_SPREAD): return 0
-                dn_at += 1
-                value = dc_expr(21)
-                if value == 0: return 0
-                pair = mk(.pair, mkpos(dn_file, item_start))
-                nodes[pair].a = i32(item)
-                nodes[pair].b = i32(value)
-                item = pair
-            else if nodes[n].kind == .map_lit: return 0
-            items.push(item)
-        dn_comma_stop = saved
-        set_list(n, items)
-        return n
+    # `[a b c]`, `[x=1 y=2]`, `["a" -> 1]`, `[base... x=1]`, `[1 2 ; 3 4]`
+    if op == .lbrack: return dc_array_literal(pos)
     # `.-xs`: elementwise negation (dw_expr's prefix)
     if op == .dot_minus or op == .dot_plus:
         e = dc_expr(dn_prefix_power(op, false))
@@ -445,6 +403,14 @@ dc_atom = () -> int:
         nodes[n].op = i32(int(if op == .dot_minus: Tok.minus else: Tok.plus))
         nodes[n].a = i32(e)
         add_flag(n, NF_BROADCAST)
+        return n
+    # `~x`: `not x` at a tighter precedence (dw_expr's prefix)
+    if op == .tilde:
+        e = dc_expr(dn_prefix_power(op, false))
+        if e == 0: return 0
+        n = mk(.not_, pos)
+        nodes[n].op = i32(int(Tok.plus))
+        nodes[n].a = i32(e)
         return n
     if op == .plus or op == .minus or op == .kw_not:
         e = dc_expr(dn_prefix_power(op, false))
@@ -473,6 +439,129 @@ dc_atom = () -> int:
         nodes[n].ival = if int(token.name) == dn_true_id: 1 else: 0
         return n
     0
+
+# A parenthesized group after its `(`: one value, or several (`(a b)`, dw_values), through `)`.
+dc_group = (pos: int) -> int:
+    # (`(a b)`: several values, dw_values; each may be spread, `(xs... 1)`)
+    saved_spread = dc_spread_depth
+    dc_spread_depth = dc_depth + 1
+    n = dc_expr(0)
+    items: int[]
+    loop n != 0 and not dn_accept(.rparen):
+        if items.len() == 0: items.push(n)
+        if not dn_can_start(dn_tokens, dn_at) or dn_tokens[dn_at].symbol == .rparen:
+            n = 0
+            break
+        dc_spread_depth = dc_depth + 1
+        item = dc_expr(0)
+        if item == 0: n = 0
+        else: items.push(item)
+    dc_spread_depth = saved_spread
+    if n == 0: return 0
+    if items.len() == 0:
+        if has_flag(n, NF_SPREAD): return 0
+        return n
+    values = mk(.tuple, pos)
+    nodes[values].aux = i32(TUPLE_VALUES)
+    set_list(values, items)
+    return values
+
+# A bracketed range at dn_at (after its opener), as dc_atom reads one: its value, or in a
+# membership the range itself; -1 when the brackets hold no range (nothing read).
+dc_range_atom = () -> int:
+    start = dn_at
+    node_start = nodes.len()
+    list_start = lists.len()
+    edits = dn_edit_at.len()
+    member = dc_member_depth == dc_depth
+    range = dc_range(true, true, member)
+    if dn_at < 0: return 0
+    if range != 0:
+        # (`[1..]`: a slice's or a loop's, not a value: dewy_range_value reports it)
+        if nodes[range].a == 0 or nodes[range].b == 0:
+            if not member or has_flag(range, NF_EXCL_FIRST): return 0
+            dc_range_call = range
+            dc_range_node = range
+            return range
+        value = dw_range_value(range)
+        dc_range_call = value
+        dc_range_node = range
+        return value
+    dn_at = start
+    nodes.truncate(node_start)
+    lists.truncate(list_start)
+    dn_edits_undo(edits)
+    -1
+
+# An array literal after its `[`, through `]`: elements, a record's named fields and spreads, a
+# dictionary's entries, or rows; comprehensions of several kinds and collectors take the reference
+# grammar.
+dc_array_literal = (pos: int) -> int:
+    n = mk(.array, pos)
+    saved = dn_comma_stop
+    dn_comma_stop = false
+    items: int[]
+    named = false       # (a row is a named field: the literal is a record)
+    positional = false  # (an element neither spread nor named)
+    breaks: int[]       # (`[1 2 ; 3 4]`: the row breaks after each element, dw_rows_literal)
+    rows = false
+    loop not dn_accept(.rbrack):
+        if dn_tokens[dn_at].kind == .eof: return 0
+        if dn_peek() == .semi:
+            if breaks.len() == 0: return 0
+            breaks[breaks.len() - 1] += 1
+            rows = true
+            dn_at += 1
+            continue
+        # (`[x=1 y=2]`: a named field; methods take the reference grammar)
+        if dc_named_next():
+            field = dn_tokens[dn_at]
+            if dn_reserved(int(field.name)) or nodes[n].kind == .map_lit: return 0
+            dn_at += 2
+            value = dc_expr(11)
+            # (`[f=() => ...]`: a method, dw_method_row)
+            if value == 0 or nodes[value].kind == .lambda: return 0
+            entry = mk(.namedarg, mkpos(dn_file, field.start))
+            nodes[entry].name = field.name
+            nodes[entry].a = i32(value)
+            items.push(entry)
+            named = true
+            continue
+        # (a flow or block element may express several values or none: the reference
+        # grammar decides, building a collector when it does, dw_collector)
+        first = dn_peek()
+        if first == .kw_if or first == .kw_loop or first == .kw_match or first == .lbrace: return 0
+        # (`[xs... 1]`: an element spread; `["a" -> 1]`: a dictionary's entry)
+        item_start = dn_tokens[dn_at].start
+        saved_spread = dc_spread_depth
+        dc_spread_depth = dc_depth + 1
+        item = dc_expr(21)
+        dc_spread_depth = saved_spread
+        if item == 0: return 0
+        if dn_peek() == .arrow:
+            if items.len() == 0: nodes[n].kind = .map_lit
+            if nodes[n].kind != .map_lit or has_flag(item, NF_SPREAD): return 0
+            dn_at += 1
+            value = dc_expr(21)
+            if value == 0: return 0
+            pair = mk(.pair, mkpos(dn_file, item_start))
+            nodes[pair].a = i32(item)
+            nodes[pair].b = i32(value)
+            item = pair
+        else if nodes[n].kind == .map_lit: return 0
+        if not has_flag(item, NF_SPREAD): positional = true
+        # (an attached `;` discards the element: a collector, dw_collects)
+        if dn_peek() == .semi and not dn_tokens[dn_at].space and not dn_tokens[dn_at].newline: return 0
+        items.push(item)
+        breaks.push(0)
+    dn_comma_stop = saved
+    # (a record's rows are named fields and spreads, dw_record_entry)
+    if named:
+        if positional or rows: return 0
+        nodes[n].kind = .record_lit
+    if rows: return dc_rows(n, items, breaks, pos)
+    set_list(n, items)
+    return n
 
 # `(*2)`, `(=? limit)`, `(as float64)` after its `(`: a one-parameter lambda whose operand stands
 # in place of the parenthesis (dn_partial).
@@ -524,6 +613,57 @@ dc_bigint_value = (limbs: u64[], pos: int, negative: bool) -> int:
         dn_edit_at.push(DN_EDIT_BIGINT)
         dn_edit_was.push(dn_tokens[dn_at - 1])
     dw_bigint_value(limbs, pos, negative)
+
+# The brackets opening at `at` hold a range at their top: a `..` not inside other brackets.
+dc_range_inside = (at: int) -> bool:
+    depth = 0
+    k = at
+    loop k < dn_tokens.len():
+        t = dn_tokens[k]
+        if t.kind == .eof: return false
+        symbol = t.symbol
+        if symbol == .lparen or symbol == .lbrack or symbol == .lbrace: depth += 1
+        else if symbol == .rparen or symbol == .rbrack or symbol == .rbrace:
+            depth -= 1
+            if depth == 0: return false
+        else if symbol == .range and depth == 1: return true
+        k += 1
+    false
+
+# `[1 2 ; 3 4]`: the elements of an array literal in rows (each element's breaks after it), a
+# matrix, or for more levels the elements reshaped (dw_rows_literal). 0 for a literal it reports.
+dc_rows = (n: int, elements: int[], breaks: int[], pos: int) -> int:
+    loop item in elements:
+        if nodes[n].kind != .array or has_flag(item, NF_SPREAD): return 0
+    rank = 1
+    loop b in breaks: rank = max(rank, b + 1)
+    dims = fill(-1, rank)
+    counts = fill(0, rank)
+    loop i in 0.. and b in breaks:
+        counts[0] += 1
+        close = rank - 1
+        if i + 1 < breaks.len(): close = b
+        loop level in [1..close]:
+            size = counts[level - 1]
+            if dims[level - 1] < 0: dims[level - 1] = size
+            else if dims[level - 1] != size: return 0
+            counts[level - 1] = 0
+            counts[level] += 1
+    dims[rank - 1] = counts[rank - 1]
+    if rank == 2:
+        nodes[n].kind = .matrix
+        set_list(n, elements)
+        nodes[n].ival = dims[0]
+        return n
+    set_list(n, elements)
+    shape: int[]
+    k = rank - 1
+    loop k >= 0:
+        shape.push(bc_int(dims[k], pos))
+        k -= 1
+    sizes = mk(.array, pos)
+    set_list(sizes, shape)
+    bc_call("reshape", [n, sizes], pos)
 
 # The index of the bracket closing the one at `at` (-1: none).
 dc_closing = (at: int) -> int:
@@ -643,6 +783,13 @@ dc_expr = (minimum: int) -> int:
         if op == .dot and minimum <= 170:
             dn_at += 1
             member = dn_tokens[dn_at]
+            # `f.(xs)`: the call broadcast over its arguments; `value.$field(name)`: a member named
+            # by a compile-time string
+            if member.symbol == .lparen and not member.space or member.kind == .metatag:
+                left = dc_dot_form(left, left == last_call, pos)
+                if left == 0: return 0
+                if nodes[left].kind == .call: juxt_head = false
+                continue
             if member.kind != .identifier: return 0
             dn_at += 1
             n = mk(.field, pos)
@@ -658,6 +805,13 @@ dc_expr = (minimum: int) -> int:
             nodes[n].a = i32(left)
             if juxt_head: add_flag(n, NF_JUXT)
             if nodes[left].kind == .field: add_flag(int(nodes[left].a), NF_MUT)
+            # (`members(<'a' | 1>)`: members(U) takes a type, grouped as in a type position)
+            if dn_peek() == .langle and nodes[left].kind == .ident and name_of(int(nodes[left].name)) == "members":
+                if not dc_members_type(n): return 0
+                left = n
+                last_call = n
+                juxt_head = false
+                continue
             if not dc_arguments(n, .rparen): return 0
             left = n
             last_call = n
@@ -692,6 +846,11 @@ dc_expr = (minimum: int) -> int:
             # (`b.read<uint64>(2)`: a module's name, dw_type's `.`)
             name_token = dn_tokens[dn_at - 1]
             first = dn_at - 1
+            if not dc_named_base(left):
+                left = dc_type_applied(left, pos)
+                if left == 0: return 0
+                juxt_head = false
+                continue
             if nodes[left].kind == .field and dn_at >= 3 and dn_tokens[dn_at - 2].symbol == .dot and dn_tokens[dn_at - 3].kind == .identifier and nodes[int(nodes[left].a)].kind == .ident and nodes[int(nodes[left].a)].pos == mkpos(dn_file, dn_tokens[dn_at - 3].start): first = dn_at - 3
             else if nodes[left].kind != .ident or name_token.kind != .identifier or nodes[left].pos != mkpos(dn_file, name_token.start): return 0
             at = dn_at
@@ -763,6 +922,8 @@ dc_expr = (minimum: int) -> int:
             juxt_head = false
             group = -1
             continue
+        # (`key -> value` as a comprehension's element: dc_body_read pairs them)
+        if dc_map_ok and op == .arrow: break
         power = dn_power(op)
         if power == 0 or power < minimum: break
         # (a slice's first bound ends at its `..`; elsewhere a range takes the reference grammar)
@@ -787,7 +948,7 @@ dc_expr = (minimum: int) -> int:
         if token.symbol == op and (op == .is_type or op == .isnt_type or op == .kw_as or op == .kw_transmute):
             if compared and (op == .is_type or op == .isnt_type): return 0
             dn_at += 1
-            t = dc_annotation(power)
+            t = dc_cast_type(op == .kw_as, power)
             if t == 0: return 0
             n = mk(if op == .kw_as or op == .kw_transmute: NK.cast else: NK.istype, pos)
             nodes[n].a = i32(left)
@@ -803,8 +964,13 @@ dc_expr = (minimum: int) -> int:
             continue
         # `a ?? b`: an arithmetic fallback (`a ?? 1 + n`) has a warning of its own
         if op == .coalesce:
-            # (`??<A | B>`: the reference grammar)
-            if dn_at + 1 < dn_tokens.len() and not dn_tokens[dn_at + 1].space and (dn_tokens[dn_at + 1].symbol == .langle or dn_tokens[dn_at + 1].symbol == .lt): return 0
+            # `x ??<A | B> fallback`: the fallback only for the kinds listed, one type (c)
+            if dn_at + 1 < dn_tokens.len() and not dn_tokens[dn_at + 1].space and (dn_tokens[dn_at + 1].symbol == .langle or dn_tokens[dn_at + 1].symbol == .lt):
+                left = dc_listed_coalesce(left, power, pos)
+                if left == 0: return 0
+                compared = false
+                juxt_head = false
+                continue
             dn_at += 1
             right = dc_expr(power)
             if right == 0 or dc_arithmetic(right): return 0
@@ -812,6 +978,20 @@ dc_expr = (minimum: int) -> int:
             nodes[n].a = i32(left)
             nodes[n].b = i32(right)
             left = n
+            compared = false
+            juxt_head = false
+            continue
+        # `x |> f`, `f <| x`: the value supplied to the callable (dw_expr's pipes)
+        if op == .pipe_right or op == .pipe_left:
+            left = dc_pipe(op, left, power, pos)
+            if left == 0: return 0
+            compared = false
+            juxt_head = false
+            continue
+        # `a nand b`: `not (a and b)`, as `nor` and `xnor` are of `or` and `xor` (the `not` at the word)
+        if op == .kw_nand or op == .kw_nor or op == .kw_xnor:
+            left = dc_word_not(op, left, power, pos)
+            if left == 0: return 0
             compared = false
             juxt_head = false
             continue
@@ -855,7 +1035,7 @@ dc_expr = (minimum: int) -> int:
         dc_member_depth = saved_member
         if right == 0: return 0
         # (`x in? [0..9]`: membership in the range itself, dw_membership)
-        if membership and dc_range_call == right and not has_flag(dc_range_node, NF_STEP): right = dc_range_node
+        if membership and dc_range_call == right and not has_flag(dc_range_node, NF_STEP) and not has_flag(dc_range_node, NF_EXCL_FIRST): right = dc_range_node
         # (`f & g` of function literals: an overload group, declared at module level only)
         if op == .amp and (dc_overloads(left) or dc_overloads(right)): return 0
         # (`a(x)^2` with the call unparenthesized: the power may take the group, juxtapose.jo)
@@ -879,6 +1059,130 @@ dc_expr = (minimum: int) -> int:
         add_flag(left, NF_SPREAD)
     dc_depth -= 1
     left
+
+# `xs[0]<int64>`, `make().f<int64>` at the `<`: no type is named, only its arguments, each a type
+# (dw_expr's type application).
+dc_type_applied = (left: int, pos: int) -> int:
+    dn_at += 1
+    args: int[]
+    dc_type_args += 1
+    loop not dn_accept(.rangle):
+        if dn_edits_on and dn_closer_joined():
+            dn_split_closer()
+            break
+        arg = dc_annotation()
+        if arg == 0:
+            dc_type_args -= 1
+            return 0
+        args.push(arg)
+    dc_type_args -= 1
+    n = mk(.typeapply, pos)
+    nodes[n].a = i32(left)
+    set_list(n, args)
+    n
+
+# `x |> f`, `f <| x` at the operator: the value supplied to the callable (dw_expr's pipes).
+dc_pipe = (op: DewyToken, left: int, power: int, pos: int) -> int:
+    dn_at += 1
+    right = dc_expr(if dn_right_associative(op): power else: power + 1)
+    if right == 0: return 0
+    n = mk(.call, pos)
+    callee = right
+    supplied = left
+    if op == .pipe_left:
+        callee = left
+        supplied = right
+    nodes[n].a = i32(callee)
+    set_list(n, [supplied])
+    n
+
+# `a nand b` at the operator: `not (a and b)`, as `nor` and `xnor` are of `or` and `xor`, the `not`
+# at the word.
+dc_word_not = (op: DewyToken, left: int, power: int, pos: int) -> int:
+    word = dn_take()
+    right = dc_expr(power + 1)
+    if right == 0: return 0
+    base = DewyToken.kw_and
+    if op == .kw_nor: base = .kw_or
+    if op == .kw_xnor: base = .kw_xor
+    inner = dc_binary(base, left, right, pos)
+    if inner == 0: return 0
+    n = mk(.not_, mkpos(dn_file, word.start))
+    nodes[n].op = i32(int(Tok.plus))
+    nodes[n].a = i32(inner)
+    n
+
+# `x ??<A | B> fallback` at `??`: the fallback only for the kinds listed, one type (c).
+dc_listed_coalesce = (left: int, power: int, pos: int) -> int:
+    dn_at += 1
+    dn_tokens[dn_at].symbol = .langle
+    dn_at += 1
+    dc_type_args += 1
+    kinds = dc_annotation()
+    dc_type_args -= 1
+    if kinds == 0: return 0
+    if not dn_accept(.rangle):
+        if not (dn_edits_on and dn_closer_joined()): return 0
+        dn_split_closer()
+    right = dc_expr(power)
+    if right == 0: return 0
+    n = mk(.coalesce, pos)
+    nodes[n].a = i32(left)
+    nodes[n].b = i32(right)
+    nodes[n].c = i32(kinds)
+    n
+
+# The type after `as`, `is?` or `transmute`; `bytes as string ?? ""` (cast): no type has a
+# fallback, so this converts to an optional and falls back, as `(bytes as string | none) ?? ""`
+# (the fallback is dc_expr's next operator).
+dc_cast_type = (cast: bool, power: int) -> int:
+    type_at = dn_at
+    dc_cast_coalesce = cast
+    t = dc_annotation(power)
+    dc_cast_coalesce = false
+    if t == 0 or not cast or dn_peek() != .coalesce: return t
+    type_pos = mkpos(dn_file, dn_tokens[type_at].start)
+    missing = mk(.tname, type_pos)
+    nodes[missing].name = i32(dc_none_type())
+    optional = mk(.tunion, type_pos)
+    set_list(optional, [t, missing])
+    optional
+
+# After `.`: `f.(xs)`, the call broadcast over its arguments (dw_expr's broadcast call), or
+# `value.$field(name)`, a member named by a compile-time string (dw_field_name); 0 for another form.
+dc_dot_form = (left: int, after_call: bool, pos: int) -> int:
+    member = dn_tokens[dn_at]
+    if member.symbol == .lparen:
+        dn_at += 1
+        n = mk(.call, pos)
+        nodes[n].a = i32(left)
+        add_flag(n, NF_BROADCAST)
+        if nodes[left].kind == .field: add_flag(int(nodes[left].a), NF_MUT)
+        if not dc_arguments(n, .rparen): return 0
+        return n
+    if dn_tokens[dn_at + 1].symbol != .lparen or dn_payload(member) != "field": return 0
+    dn_at += 2
+    computed = dc_expr(0)
+    if computed == 0 or not dn_accept(.rparen): return 0
+    n = mk(.field, pos)
+    nodes[n].a = i32(left)
+    nodes[n].b = i32(computed)
+    if after_call: add_flag(n, NF_JUXT)
+    n
+
+# `members(<'a' | 1>)` after its `(`: members(U) takes a type, grouped as in a type position, into
+# the call n.
+dc_members_type = (n: int) -> bool:
+    t = dc_type_primary()
+    if t == 0 or not dn_accept(.rparen): return false
+    set_list(n, [t])
+    true
+
+# The value a type application is written on is a name, or a field route from one.
+dc_named_base = (n: int) -> bool:
+    base = n
+    loop nodes[base].kind == .field: base = int(nodes[base].a)
+    nodes[base].kind == .ident
 
 # The open range at `..` (its first bound 0), as a membership reads it (dw_iterable's slice).
 dc_member_range = (pos: int) -> int:
@@ -990,6 +1294,15 @@ dc_plain_operand = (n: int) -> bool:
 # An index's entries after its `[`, through its `]`: `xs[i]`, `m[i j]`, `Point[x=1 y=2]`, or one
 # slice, `xs[a..b]`, `xs[a..b)`, `xs[a..]`, `xs[..b)`.
 dc_index = (n: int) -> bool:
+    if dn_tokens[dn_at].kind == .metatag: return dc_clamp(n)
+    if dc_new_inside(): return dc_new_axes(n)
+    # (`mean[loop r in rs r*2]`: one comprehension, dw_comprehension)
+    if dn_peek() == .kw_loop:
+        made = dc_comprehension()
+        if made == 0: return false
+        set_list(n, [made])
+        nodes[n].b = i32(made)
+        return true
     first_pos = mkpos(dn_file, dn_tokens[dn_at].start)
     first = 0
     if dn_peek() == .rbrack or dc_named_next():
@@ -1047,6 +1360,132 @@ dc_index = (n: int) -> bool:
         return true
     if not dc_axes(n, first, first_range): return false
     if nkids(n) == 1: nodes[n].b = i32(kid(n, 0))
+    true
+
+# An index's entries, from dn_at through its `]`, name `new` at their top.
+dc_new_inside = () -> bool:
+    depth = 0
+    k = dn_at
+    loop k < dn_tokens.len():
+        t = dn_tokens[k]
+        if t.kind == .eof: return false
+        symbol = t.symbol
+        if symbol == .lparen or symbol == .lbrack or symbol == .lbrace: depth += 1
+        else if symbol == .rparen or symbol == .rbrack or symbol == .rbrace:
+            if depth == 0: return false
+            depth -= 1
+        else if depth == 0 and t.kind == .identifier and int(t.name) == dn_new_id: return true
+        k += 1
+    false
+
+# `m[new ..]`, `m[.. new]`, `m[[..] end new]`: an index inserting axes, through its `]` (dw_expr's
+# `new` entries, dw_new_range): each `new` the name `$new`, `..` beside one a whole axis; the
+# other entries as dc_axes reads them. The node becomes a new_axis.
+dc_new_axes = (n: int) -> bool:
+    args: int[]
+    mark = dc_axis_ranges.len()
+    entries = 0
+    loop not dn_accept(.rbrack):
+        token = dn_tokens[dn_at]
+        if token.kind == .eof: return dc_axes_end(mark, false)
+        entries += 1
+        nodes[n].aux2 = i32(args.len())
+        pos = mkpos(dn_file, token.start)
+        new_first = token.kind == .identifier and int(token.name) == dn_new_id
+        if new_first or token.symbol == .range:
+            # (`new`, `new ..`, `new .. new`, `.. new`, `..`)
+            at = dn_at
+            if new_first: at += 1
+            if dn_tokens[at].symbol != .range:
+                if not new_first: return dc_axes_end(mark, false)
+                dn_at = at
+                args.push(bc_ident("$new", pos))
+                dc_axis_ranges.push(0)
+                continue
+            last = dn_tokens[at + 1]
+            new_last = dn_range_bound(dn_tokens, at + 1) and last.kind == .identifier and int(last.name) == dn_new_id
+            if dn_range_bound(dn_tokens, at + 1) and not (new_last and (dn_tokens[at + 2].symbol == .rbrack or dn_tokens[at + 2].space)): return dc_axes_end(mark, false)
+            # (`..` alone among several entries: a whole axis, dw_iterable's slice)
+            if not new_first and not new_last:
+                dn_at = at + 1
+                whole = mk(.range, pos)
+                args.push(whole)
+                dc_axis_ranges.push(whole)
+                continue
+            dn_at = at + 1
+            if new_first: args.push(bc_ident("$new", pos))
+            args.push(mk(.range, pos))
+            if new_last:
+                dn_at += 1
+                args.push(bc_ident("$new", pos))
+            loop k in [0..args.len() - dc_axis_ranges.len() + mark): dc_axis_ranges.push(0)
+            continue
+        if dc_named_next(): return dc_axes_end(mark, false)
+        if dc_whole_axis():
+            whole = mk(.range, mkpos(dn_file, dn_tokens[dn_at + 1].start))
+            dn_at += 3
+            args.push(whole)
+            dc_axis_ranges.push(whole)
+            continue
+        dc_range_call = 0
+        dc_range_top = true
+        arg = dc_expr(0)
+        dc_range_top = false
+        if arg == 0: return dc_axes_end(mark, false)
+        slice = 0
+        if dc_range_call == arg: slice = dc_range_node
+        # (`m[1..end new]`: a range written without brackets, inclusive)
+        if dn_accept(.range):
+            if slice != 0: return dc_axes_end(mark, false)
+            first_bound = arg
+            last = 0
+            if dn_range_bound(dn_tokens, dn_at):
+                last = dc_expr(101)
+                if last == 0: return dc_axes_end(mark, false)
+            arg = mk(.range, pos)
+            nodes[arg].a = i32(first_bound)
+            nodes[arg].b = i32(last)
+            add_flag(arg, NF_INCLUSIVE)
+            slice = arg
+        args.push(arg)
+        dc_axis_ranges.push(slice)
+    # (several entries: a bracketed range among them is a slice, dw_iterable)
+    if entries > 1:
+        loop i in [0..args.len()):
+            if dc_axis_ranges[mark + i] != 0: args[i] = dc_axis_ranges[mark + i]
+    nodes[n].kind = .new_axis
+    set_list(n, args)
+    if args.len() == 1: nodes[n].b = i32(args[0])
+    dc_axes_end(mark, true)
+
+# `xs[$clamp a..b)` after its `[`: the slice truncated to the receiver (dw_clamp_slice), into n.
+dc_clamp = (n: int) -> bool:
+    tag = dn_tokens[dn_at]
+    if tag.stop - tag.start != 6 or dn_payload(tag) != "clamp": return false
+    dn_at += 1
+    pos = mkpos(dn_file, dn_tokens[dn_at].start)
+    first = 0
+    if dn_peek() != .range:
+        saved_comma = dn_comma_stop
+        dn_comma_stop = true
+        dc_range_top = true
+        first = dc_expr(0)
+        dc_range_top = false
+        dn_comma_stop = saved_comma
+        if first == 0 or dn_peek() != .range: return false
+    dn_at += 1
+    last = 0
+    if dn_range_bound(dn_tokens, dn_at):
+        last = dc_expr(101)
+        if last == 0: return false
+    inclusive = dn_accept(.rbrack)
+    if not inclusive and not dn_accept(.rparen): return false
+    r = mk(.range, pos)
+    nodes[r].a = i32(first)
+    nodes[r].b = i32(last)
+    if inclusive: add_flag(r, NF_INCLUSIVE)
+    block = dw_clamp_block(n, r)
+    nodes[n] = nodes[block]
     true
 
 # A byte literal's string, as dw_byte_literal makes it: 0 where that reports a
@@ -1257,6 +1696,10 @@ dn_value = (minimum: int) -> int:
     allocators = dw_allocators
     value = dc_expr(minimum)
     if value != 0 and nodes[value].kind == .lambda: value = 0
+    # (`cases=(0 1 2)`: a group of values stays syntax here too)
+    if value != 0 and nodes[value].kind == .tuple and dn_tokens[start].symbol == .lparen and dc_closing(start) == dn_at - 1: value = 0
+    # (`nonzero = int64 & ~0`: dw_top_declarations reads a refined type's syntax)
+    if value != 0 and nodes[value].kind == .binary and nodes[value].op == i32(int(Tok.amp)) and nodes[int(nodes[value].b)].kind == .not_: value = 0
     if value == 0:
         dn_at = start
         nodes.truncate(node_start)
@@ -1295,7 +1738,7 @@ dc_annotation = (boundary: int = 10) -> int:
     # member (dw_literal_type).
     n = 0
     kind = dn_tokens[dn_at].kind
-    literal = kind == .quoted or kind == .rawquoted
+    literal = kind == .quoted or kind == .rawquoted or kind == .source_integer or kind == .integer or dn_tokens[dn_at].symbol == .minus and dc_int_leaf(dn_at) > 0
     if not literal:
         n = dc_type_primary()
         if n == 0: return 0
@@ -1304,7 +1747,7 @@ dc_annotation = (boundary: int = 10) -> int:
             n = dc_type_term_from(n, pos)
             if n == 0: return 0
         loop dn_peek() == .pipe and dn_power(.pipe) > boundary:
-            if dc_quoted_next(dn_at + 1):
+            if dc_quoted_next(dn_at + 1) or dc_int_leaf(dn_at + 1) > 0:
                 literal = true
                 break
             dn_at += 1
@@ -1316,29 +1759,63 @@ dc_annotation = (boundary: int = 10) -> int:
     if literal:
         n = dc_literal_union(n, boundary, pos)
         if n == 0: return 0
-    if dn_power(dn_peek()) > boundary and not (dc_effects_follow and dn_peek() == .amp) and not (dc_type_args > 0 and dc_closes()): return 0
+    if dn_power(dn_peek()) > boundary and not (dc_effects_follow and dn_peek() == .amp) and not (dc_type_args > 0 and dc_closes()) and not dc_annotation_ends(): return 0
     dc_depth -= 1
     n
 
+
+# What follows a type ends it though it is an operator: `7 as int8 -3`, a spaced sign before an
+# unspaced operand starts the next operand; `t is? T,`, a comma ends an assertion's condition;
+# `x as string ?? ""`, dc_expr's optional cast.
+dc_annotation_ends = () -> bool:
+    after = dn_tokens[dn_at]
+    after.symbol == .comma and dn_comma_stop or (after.symbol == .minus or after.symbol == .plus) and after.space and not dn_tokens[dn_at + 1].space or after.symbol == .coalesce and dc_cast_coalesce
+
 dc_quoted_next = (at: int) -> bool: dn_tokens[at].kind == .quoted or dn_tokens[at].kind == .rawquoted
 
-# A union with a string member, from the members read so far (union, its leaves): the strings one
-# string set first, then the other members in order (dw_literal_type, dw_pipe_leaves).
+# The tokens of an integer literal at `at`, `5` (1) or `-1` (2), as a type's singleton is written
+# (dw_int_leaf); 0 for anything else.
+dc_int_leaf = (at: int) -> int:
+    t = dn_tokens[at]
+    if t.kind == .source_integer or t.kind == .integer: return 1
+    if t.symbol != .minus: return 0
+    next = dn_tokens[at + 1]
+    if next.kind == .source_integer or next.kind == .integer: return 2
+    0
+
+# A union with a literal member, from the members read so far (union, its leaves): the integers
+# one refined int64, the strings one string set, then the other members in order (dw_literal_type,
+# dw_pipe_leaves).
 dc_literal_union = (union: int, boundary: int, pos: int) -> int:
     texts: str[]
+    ints: int[]
     others: int[]
     if union != 0: dc_union_leaves(union, others)
     if union != 0: dn_at += 1
     loop true:
-        if dc_type_member(texts, others) < 0: return 0
+        if dc_type_member(texts, ints, others) < 0: return 0
         if not (dn_peek() == .pipe and dn_power(.pipe) > boundary): break
         dn_at += 1
-    n = mk(.tname, pos)
-    nodes[n].aux = -7
-    nodes[n].ival = str_set_type(texts)
-    loop other in others:
+    parts: int[]
+    if ints.len() > 0:
+        lo = ints[0]
+        hi = ints[0]
+        loop v in ints:
+            lo = min(lo, v)
+            hi = max(hi, v)
+        # (too many gaps: dw_int_singleton_type reports it)
+        if hi - lo - ints.len() + 1 > 24 or hi - lo < 0: return 0
+        parts.push(dw_int_singleton_type(ints, pos))
+    if texts.len() > 0:
+        strings = mk(.tname, pos)
+        nodes[strings].aux = -7
+        nodes[strings].ival = str_set_type(texts)
+        parts.push(strings)
+    loop other in others: parts.push(other)
+    n = parts[0]
+    loop k in [1..parts.len()):
         joined = mk(.tunion, pos)
-        set_list(joined, [n, other])
+        set_list(joined, [n, parts[k]])
         n = joined
     dc_literal_seen = true
     n
@@ -1349,9 +1826,9 @@ dc_union_leaves = (n: int, out: mut int[]):
         dc_union_leaves(kid(n, 1), out)
     else: out.push(n)
 
-# A union's member: a type (its node, kept in others too), or a plain string literal (0, its
-# text in texts once). -1: neither.
-dc_type_member = (texts: mut str[], others: mut int[]) -> int:
+# A union's member: a type (its node, kept in others too), a plain string literal (its text in
+# texts once) or an integer (its value in ints once): 0 for a literal. -1: none of these.
+dc_type_member = (texts: mut str[], ints: mut int[], others: mut int[]) -> int:
     token = dn_tokens[dn_at]
     if token.kind == .quoted or token.kind == .rawquoted:
         if token.kind == .quoted and not dc_plain_quote(token): return -1
@@ -1360,6 +1837,14 @@ dc_type_member = (texts: mut str[], others: mut int[]) -> int:
         dn_at += 1
         text = name_of(int(nodes[literal].sval))
         if not texts.contains(text): texts.push(text)
+        return 0
+    leaf = dc_int_leaf(dn_at)
+    if leaf > 0:
+        before = dn_at
+        value = dc_atom()
+        # (beyond int64: dw_int_singletons reports it)
+        if value == 0 or dn_at != before + leaf or nodes[value].kind != .int_lit or has_flag(value, NF_U64): return -1
+        if not ints.contains(nodes[value].ival): ints.push(nodes[value].ival)
         return 0
     n = dc_type_term()
     if n == 0: return -1
@@ -1418,6 +1903,9 @@ dc_type_primary = () -> int:
     token = dn_tokens[dn_at]
     n = 0
     if token.kind == .identifier: n = dc_type_named()
+    else if token.symbol == .lparen and dc_type_args > 0 and dn_tokens[dc_closing(dn_at) + 1].symbol == .returns:
+        # `array<():>int64>`: a type argument may be a function type without its own angle brackets
+        n = dc_function_type(false)
     else if token.symbol == .lparen:
         # (dw_type of its one element; a joined closer cannot end a type in it)
         dn_at += 1
@@ -1426,10 +1914,11 @@ dc_type_primary = () -> int:
         saved_literal = dc_literal_seen
         dc_literal_seen = false
         n = dc_annotation()
+        if n != 0 and not dn_accept(.rparen): n = dc_type_group(n, mkpos(dn_file, token.start))
         dc_type_args = saved
         literal = dc_literal_seen
         dc_literal_seen = saved_literal
-        if n == 0 or literal or not dn_accept(.rparen): return 0
+        if n == 0 or literal: return 0
         dc_grouped = n
     else if token.symbol == .lbrack or token.symbol == .langle and dn_tokens[dn_at + 1].symbol == .lparen:
         # (inside, a joined closer ends no type argument)
@@ -1437,14 +1926,39 @@ dc_type_primary = () -> int:
         dc_type_args = 0
         n = if token.symbol == .lbrack: dc_record_type() else: dc_function_type()
         dc_type_args = saved
+    else if token.symbol == .langle:
+        # `<int64 | string>`, `<'fast' | 1>`: a type in angle brackets is that type (dw_type's `<>`)
+        dn_at += 1
+        dc_type_args += 1
+        n = dc_annotation()
+        dc_type_args -= 1
+        if n == 0: return 0
+        if not dn_accept(.rangle):
+            if not (dn_edits_on and dn_closer_joined()): return 0
+            dn_split_closer()
     if n == 0: return 0
     loop dn_accept(.question):
         optional = mk(.topt, mkpos(dn_file, token.start))
         nodes[optional].a = i32(n)
         n = optional
-    # (`x as float32 (y)`: a spaced group is the next operand's)
+    # (`x as float32 (y)`: a spaced group is the next operand's; among type arguments, a spaced
+    # `<` opens the next, `dict<string <(x:int64):>int64>>`)
     next = dn_tokens[dn_at].symbol
-    if next == .dot or next == .langle or (next == .lbrack or next == .lparen) and not dn_tokens[dn_at].space: return 0
+    if next == .dot or next == .langle and (dc_type_args == 0 or not dn_tokens[dn_at].space) or (next == .lbrack or next == .lparen) and not dn_tokens[dn_at].space: return 0
+    n
+
+# `(int64 int64)` after its first type: several values' types through `)` (dw_type's group of two
+# or more).
+dc_type_group = (first: int, pos: int) -> int:
+    members = [first]
+    loop not dn_accept(.rparen):
+        if dn_tokens[dn_at].kind == .eof: return 0
+        member = dc_annotation()
+        if member == 0: return 0
+        members.push(member)
+    n = mk(.ttuple, pos)
+    nodes[n].aux = i32(TUPLE_VALUES)
+    set_list(n, members)
     n
 
 # `[x:T y:U]`, a record type; `[T U]`, a tuple type (dw_type's `[]:`).
@@ -1479,8 +1993,8 @@ dc_record_type = () -> int:
 
 # `<(x:T @y:U):>R>`: a function type, its parameters' labels and types (dw_type's `:>`); an effect
 # row on it takes the reference grammar.
-dc_function_type = () -> int:
-    dn_at += 2
+dc_function_type = (angled: bool = true) -> int:
+    dn_at += if angled: 2 else: 1
     pos = mkpos(dn_file, dn_tokens[dn_at - 1].start)
     n = mk(.tfn, pos)
     types_: int[]
@@ -1504,18 +2018,36 @@ dc_function_type = () -> int:
     if not dn_accept(.returns): return 0
     if dn_tokens[dn_at].kind == .identifier and int(dn_tokens[dn_at].name) == dn_void_id and dn_tokens[dn_at + 1].symbol != .pipe: dn_at += 1
     else:
-        # (its closer may be joined: `dict<string <(x:int64):>int64>>`)
-        dc_type_args = 1
+        # (its closer may be joined: `dict<string <(x:int64):>int64>>`; without angles, the
+        # enclosing type argument's, `array<():>int64>`)
+        saved_args = dc_type_args
+        if angled: dc_type_args = 1
+        dc_grouped = 0
         result = dc_annotation()
-        dc_type_args = 0
+        dc_type_args = if angled: 0 else: saved_args
         if result == 0: return 0
-        nodes[n].a = i32(result)
+        nodes[n].a = i32(dc_pack(result))
+    if not angled:
+        set_list(n, types_)
+        set_list2(n, labels)
+        return n
     if not dn_accept(.rangle):
         if not (dn_edits_on and dn_closer_joined()): return 0
         dn_split_closer()
     set_list(n, types_)
     set_list2(n, labels)
     n
+
+# `:>(int64 int64)`: several result values, an array type marked with ival -(their number), its
+# list each value's type (dw_pack_type): from the group of types dc_type_primary read last.
+dc_pack = (result: int) -> int:
+    if result != dc_grouped or nodes[result].kind != .ttuple or nodes[result].aux != i32(TUPLE_VALUES): return result
+    members = kids(result)
+    nodes[result].kind = .tarray
+    nodes[result].aux = 0
+    nodes[result].a = i32(members[0])
+    nodes[result].ival = -members.len()
+    result
 
 # Names the direct grammar dispatches on, by ID: a type name's compact
 # spelling (dw_type_name), cached per name; 0 not yet looked up, -1 a name
@@ -1607,16 +2139,27 @@ dc_type_named = () -> int:
     dn_at += 1
     n = mk(.tname, mkpos(dn_file, token.start))
     nodes[n].name = i32(spelled)
-    if dn_tokens[dn_at].symbol != .langle or dn_tokens[dn_at].space: return n
-    dc_type_arguments(n, word)
+    if dn_tokens[dn_at].space: return n
+    if dn_tokens[dn_at].symbol == .langle: return dc_type_arguments(n, word)
+    if dc_double_angle(): return dc_type_arguments(n, word, true)
+    n
+
+# `array<<(x:int64):>int64>>`: an adjacent `<<` opens two angle brackets; its first `<` is split
+# off in place (dn_double_angle), the other left for the type argument.
+dc_double_angle = () -> bool:
+    if dn_tokens[dn_at].symbol != .shl or dn_tokens[dn_at].space or not dn_double_closes(dn_tokens, dn_at): return false
+    dn_token_edit(dn_at)
+    dn_tokens[dn_at].start += 1
+    dn_tokens[dn_at].symbol = .langle
+    true
 
 # A named type's arguments, `<...>`, if any (dw_type's type application): n holds the name.
 dc_shapes: int[]
 
-dc_type_arguments = (n0: int, word: int) -> int:
+dc_type_arguments = (n0: int, word: int, opened: bool = false) -> int:
     n = n0
     pos = nodes[n].pos
-    if not dn_tokens[dn_at].space and dn_accept(.langle):
+    if opened or not dn_tokens[dn_at].space and dn_accept(.langle):
         args: int[]
         length = 0
         constraint = 0
@@ -1889,9 +2432,10 @@ dc_declaration = (constant: bool, bare: bool = false) -> int:
         if annotation == 0: return 0
         nodes[n].a = i32(annotation)
     if dn_accept(.assign):
-        if bare or not dc_fn_body and dc_lambda_next(): return 0
+        # (`name:T = value` without `let` declares at the top of a module only, dw_stmt)
+        if bare and not dc_top_level or not dc_fn_body and dc_lambda_next(): return 0
         initial = dc_expr(11)
-        if initial == 0 or nodes[initial].kind == .lambda and not dc_fn_body: return 0
+        if initial == 0 or nodes[initial].kind == .lambda and not dc_fn_body or dc_inferred_refinement(initial): return 0
         nodes[n].b = i32(initial)
     else:
         next = dn_tokens[dn_at]
@@ -1993,6 +2537,7 @@ dc_setting_values: int[]
 dc_setting_at: int[]
 
 dc_body_read = () -> int:
+    dc_top_level = false
     dc_depth += 1
     if dc_depth + dn_depth > 256: return 0
     pos = mkpos(dn_file, dn_tokens[dn_at].start)
@@ -2066,6 +2611,17 @@ dc_body_read = () -> int:
                 dc_depth = depth
             dc_value = 0
             dc_value_start = -1
+            # (`key -> value` ending a dictionary comprehension's body: an entry, dc_collect)
+            if value != 0 and dc_map_ok and dn_peek() == .arrow:
+                dn_at += 1
+                entry = dc_expr(21)
+                if entry == 0: value = 0
+                else:
+                    pair = mk(.pair, mkpos(dn_file, dn_tokens[start].start))
+                    nodes[pair].a = i32(value)
+                    nodes[pair].b = i32(entry)
+                    value = pair
+                    dc_pairs_made += 1
             if value == 0:
                 # (an `if` value attempt may have deferred statements of its own bodies: they
                 # go with it, before the whole statement is deferred)
@@ -2198,23 +2754,28 @@ dc_range_at = 0
 # A loop's range from its first bound; `bracketed`, after `[` or `(`, through its closer. 0 when
 # what is here is no range (then dc_range_first holds the value read, ending at dc_range_at),
 # or with dn_at -1 when it is a range the direct grammar does not take.
-dc_range = (bracketed: bool, value: bool = false) -> int:
+dc_range = (bracketed: bool, value: bool = false, open: bool = false) -> int:
     grouped = bracketed and dn_tokens[dn_at - 1].symbol == .lparen
     pos = mkpos(dn_file, dn_tokens[dn_at].start)
     dc_range_first = 0
-    if dn_peek() == .range: return dc_range_fail()
-    # (`(+ 1)`: a partial application, dn_partial)
-    if grouped and (dn_partial_operator(dn_peek()) or dn_peek() == .kw_not): return dc_range_fail()
-    first = dc_expr(106)
-    if first == 0: return dc_range_fail()
+    first = 0
     second = 0
-    if dn_accept(.comma):
-        second = dc_expr(106)
-        if second == 0 or dn_peek() != .range: return dc_range_fail()
-    if not dn_accept(.range):
-        dc_range_first = first
-        dc_range_at = dn_at
-        return 0
+    if open and dn_accept(.range):
+        # (`x in? [..b]`: a membership's range may be open, dw_iterable's slice)
+        first = 0
+    else:
+        if dn_peek() == .range: return dc_range_fail()
+        # (`(+ 1)`: a partial application, dn_partial)
+        if grouped and (dn_partial_operator(dn_peek()) or dn_peek() == .kw_not): return dc_range_fail()
+        first = dc_expr(106)
+        if first == 0: return dc_range_fail()
+        if dn_accept(.comma):
+            second = dc_expr(106)
+            if second == 0 or dn_peek() != .range: return dc_range_fail()
+        if not dn_accept(.range):
+            dc_range_first = first
+            dc_range_at = dn_at
+            return 0
     last = 0
     if dn_range_bound(dn_tokens, dn_at):
         last = dc_expr(101)
@@ -2226,12 +2787,15 @@ dc_range = (bracketed: bool, value: bool = false) -> int:
         else: return dc_range_fail()
         if value:
             n = mk(.range, pos)
+            # (`[..]`: the whole range, no bound to include)
+            if first == 0 and last == 0: return n
             nodes[n].a = i32(first)
             nodes[n].b = i32(last)
             if second != 0:
                 nodes[n].c = i32(second)
                 add_flag(n, NF_STEP)
             if inclusive: add_flag(n, NF_INCLUSIVE)
+            if grouped: add_flag(n, NF_EXCL_FIRST)
             return n
         # (`[0..n).reversed()`: the brackets are a value the expression goes on with)
         after = dn_tokens[dn_at].symbol
@@ -2309,10 +2873,7 @@ dc_head_term = () -> int:
     if not (named or dn_tokens[at].symbol == .lbrack and not place):
         condition = dc_expr(71)
         if condition == 0: return 0
-        # (`f(x) in xs`, `x not in xs`: an iteration head with a binder it cannot bind, dw_loop_head)
-        tested = condition
-        if nodes[tested].kind == .not_: tested = int(nodes[tested].a)
-        if nodes[tested].kind == .binary and nodes[tested].op == i32(int(Tok.kw_in)): return 0
+        # (`x in? xs`: a membership, a condition; `f(x) in xs` is no expression dc_expr reads)
         nodes[head].op = 4
         nodes[head].a = i32(condition)
         return head
@@ -2413,6 +2974,15 @@ dc_binding_items = (seen: mut int[], close: DewyToken = .rbrack) -> int[]:
             dn_at += 1
             annotation = dc_annotation(45)
             if annotation == 0: return []
+        # `apple as a`: the field apple bound as a (dw_binding_one's renaming)
+        source = 0
+        if annotation == 0 and dn_peek() == .kw_as:
+            target = dn_tokens[dn_at + 1]
+            if rest or target.kind != .identifier or target.symbol != .none or dn_reserved(int(target.name)): return []
+            source = int(t.name)
+            t = target
+            pos = mkpos(dn_file, t.start)
+            dn_at += 2
         after = dn_tokens[dn_at]
         if not after.space and after.symbol != close: return []
         hole = dc_word(int(t.name)) == DC_HOLE
@@ -2422,10 +2992,11 @@ dc_binding_items = (seen: mut int[], close: DewyToken = .rbrack) -> int[]:
         n = mk(if hole: NK.hole else: NK.ident, pos)
         nodes[n].name = t.name
         nodes[n].a = i32(annotation)
+        if source != 0: nodes[n].sval = i32(source)
         if rest: add_flag(n, NF_SPREAD)
         rest = false
         out.push(n)
-        plain = annotation == 0
+        plain = annotation == 0 and source == 0
         last_pos = pos
     if rest or out.len() == 1 and nodes[out[0]].kind == .hole and has_flag(out[0], NF_SPREAD): return []
     out
@@ -2499,7 +3070,10 @@ dc_parallel = (token: DewyLexeme, collect: bool) -> int:
     saved_result = dc_fn_result
     dc_defer_result = 0
     dc_fn_result = if collect: 1 else: 0
+    saved_map = dc_map_ok
+    dc_map_ok = false
     body = dc_body()
+    dc_map_ok = saved_map
     dc_fn_result = saved_result
     dc_defer_result = saved_defer
     if body == 0 or dn_peek() == .kw_else or not dc_parallel_exits(body, 0): return 0
@@ -2539,18 +3113,25 @@ dc_parallel_exits = (n: int, depth: int) -> bool:
         if not dc_parallel_exits(child, depth): return false
     true
 
-# `[loop ... ]` after its `[`: the loop collects the values its bodies end with (dw_comprehension).
-# A parallel, dictionary or record comprehension takes the reference grammar.
+# `[loop ... ]` after its `[`: the loop collects the values its bodies end with (dw_comprehension);
+# `key -> value` entries make a dictionary. A parallel or record comprehension takes the reference
+# grammar.
+
 dc_comprehension = () -> int:
     pos = mkpos(dn_file, dn_tokens[dn_at].start)
+    saved_map = dc_map_ok
+    made = dc_pairs_made - dc_pairs_collected
+    dc_map_ok = true
     flow = dc_flow()
+    dc_map_ok = saved_map
     if flow == 0 or not dn_accept(.rbrack): return 0
     add_flag(flow, NF_STMT)
     accumulator = intern("$dewy_collection_{nodes.len()}")
     decl = mk(.vardecl, pos)
     nodes[decl].name = i32(accumulator)
     nodes[decl].b = i32(mk(.array, pos))
-    if dc_collect(flow, accumulator) == 0: return 0
+    map = dc_tail_kind(flow) == 2
+    if dc_collect(flow, accumulator, map) == 0 or dc_pairs_made - dc_pairs_collected != made: return 0
     result = mk(.exprstmt, pos)
     value = mk(.ident, pos)
     nodes[value].name = i32(accumulator)
@@ -2558,29 +3139,62 @@ dc_comprehension = () -> int:
     block = mk(.block, pos)
     set_list(block, [decl, flow, result])
     add_flag(block, NF_COMPREHENSION)
-    block
+    if not map: return block
+    callee = mk(.ident, pos)
+    nodes[callee].name = i32(intern("__map_of"))
+    call = mk(.call, pos)
+    nodes[call].a = i32(callee)
+    set_list(call, [block])
+    call
+
+# What a comprehension's first collected value is (dw_collection_kind): 1 a value, 2 a dictionary
+# entry, 0 none.
+dc_tail_kind = (statement: int) -> int:
+    if statement <= 0: return 0
+    k = nodes[statement].kind
+    if k == .if_ or k == .for_ or k == .while_ or k == .loopx:
+        first = dc_block_tail_kind(int(nodes[statement].b))
+        if first != 0: return first
+        return dc_block_tail_kind(int(nodes[statement].c))
+    if k != .exprstmt: return 0
+    value = int(nodes[statement].a)
+    if nodes[value].kind == .block and not has_flag(value, NF_COMPREHENSION): return dc_block_tail_kind(value)
+    if nodes[value].kind == .pair: return 2
+    1
+
+dc_block_tail_kind = (block: int) -> int:
+    if block <= 0 or nodes[block].kind != .block or nkids(block) == 0: return 0
+    dc_tail_kind(kid(block, nkids(block) - 1))
 
 dc_tagged_last: {int: bool} = {}
 
 # A comprehension's statement collecting into `accumulator` (dw_collect): a value is pushed (a
-# call's own values, as its sink gives them), a flow collects in each body, a `{ ... }` value in
-# its last statement; other statements collect nothing. 0: a form collected another way.
-dc_collect = (statement: int, accumulator: int) -> int:
+# call's own values, as its sink gives them), an entry of a dictionary (`map`) as its pair, a
+# flow collects in each body, a `{ ... }` value in its last statement; other statements collect
+# nothing. 0: a form collected another way.
+dc_collect = (statement: int, accumulator: int, map: bool = false) -> int:
     if statement <= 0: return 0
     k = nodes[statement].kind
     if k == .if_ or k == .for_ or k == .while_ or k == .loopx:
-        if not dc_collect_block(int(nodes[statement].b), accumulator): return 0
-        if nodes[statement].c != 0 and not dc_collect_block(int(nodes[statement].c), accumulator): return 0
+        if not dc_collect_block(int(nodes[statement].b), accumulator, map): return 0
+        if nodes[statement].c != 0 and not dc_collect_block(int(nodes[statement].c), accumulator, map): return 0
         return statement
     if k != .exprstmt: return statement
     value = int(nodes[statement].a)
     # (a parallel loop collects nothing: dw_flow reports it)
     if nodes[value].kind == .match_ or nodes[value].kind == .parallel_region: return 0
     if nodes[value].kind == .block and not has_flag(value, NF_COMPREHENSION):
-        if not dc_collect_block(value, accumulator): return 0
+        if not dc_collect_block(value, accumulator, map): return 0
         return value
-    if nodes[value].kind == .call: return statement
     pos = nodes[statement].pos
+    if map != (nodes[value].kind == .pair): return 0
+    if map:
+        entry = mk(.tuple, pos)
+        add_flag(entry, NF_MAP_PAIR)
+        set_list(entry, [int(nodes[value].a), int(nodes[value].b)])
+        value = entry
+        dc_pairs_collected += 1
+    else if nodes[value].kind == .call: return statement
     receiver = mk(.ident, pos)
     nodes[receiver].name = i32(accumulator)
     add_flag(receiver, NF_MUT)
@@ -2593,11 +3207,11 @@ dc_collect = (statement: int, accumulator: int) -> int:
     nodes[statement].a = i32(call)
     statement
 
-dc_collect_block = (block: int, accumulator: int) -> bool:
+dc_collect_block = (block: int, accumulator: int, map: bool) -> bool:
     if block <= 0 or nodes[block].kind != .block or dc_tagged_last.has(block): return false
     count = nkids(block)
     if count == 0: return true
-    last = dc_collect(kid(block, count - 1), accumulator)
+    last = dc_collect(kid(block, count - 1), accumulator, map)
     if last == 0: return false
     set_kid(block, count - 1, last)
     true
@@ -2616,7 +3230,7 @@ dc_lambda_opens = () -> bool:
     if dn_tokens[dn_at].kind == .identifier: return (dn_tokens[dn_at].symbol == .none or dn_tokens[dn_at].symbol == .kw_test) and dn_tokens[dn_at + 1].symbol == .function
     if dn_tokens[dn_at].symbol != .lparen: return false
     next = dn_tokens[dn_at + 1].symbol
-    if not (next == .rparen or next == .at or dn_tokens[dn_at + 1].kind == .metatag or dn_tokens[dn_at + 1].kind == .identifier and (dn_tokens[dn_at + 2].symbol == .colon or dn_tokens[dn_at + 2].symbol == .rparen or dn_tokens[dn_at + 2].kind == .identifier or dn_tokens[dn_at + 2].symbol == .assign)): return false
+    if not (next == .rparen or next == .at or next == .lbrack or next == .lparen or next == .ellipsis or dn_tokens[dn_at + 1].kind == .metatag or dn_tokens[dn_at + 1].kind == .identifier and (dn_tokens[dn_at + 2].symbol == .colon or dn_tokens[dn_at + 2].symbol == .rparen or dn_tokens[dn_at + 2].kind == .identifier or dn_tokens[dn_at + 2].symbol == .assign)): return false
     depth = 0
     at = dn_at
     loop at < dn_tokens.len():
@@ -2638,6 +3252,11 @@ dc_generic_lambda_next_at = (start: int) -> bool:
     loop dn_tokens[at].kind == .identifier and dn_tokens[at].symbol == .none: at += 1
     at > start + 1 and dn_tokens[at].symbol == .rangle and dn_tokens[at + 1].symbol == .lparen and not dn_tokens[at + 1].space and dc_lambda_next_at(at + 1)
 
+dc_none_id = 0
+dc_none_type = () -> int:
+    if dc_none_id == 0: dc_none_id = intern("none")
+    dc_none_id
+
 dc_empty_id = -1
 dc_empty_name = () -> int:
     if dc_empty_id < 0: dc_empty_id = intern("")
@@ -2657,8 +3276,14 @@ dc_flow_stmt = (n: int) -> int:
 dc_match = (token: DewyLexeme) -> int:
     pos = mkpos(dn_file, token.start)
     n = mk(.match_, pos)
+    first = dn_at
     scrutinee = dc_expr(0)
     if scrutinee == 0 or not dn_can_start(dn_tokens, dn_at): return 0
+    # (`match (x y)`: a sequence of values, each read once, dw_match)
+    if nodes[scrutinee].kind == .tuple and nodes[scrutinee].aux == i32(TUPLE_VALUES) and dn_tokens[first].symbol == .lparen and dc_closing(first) == dn_at - 1:
+        loop item in kids(scrutinee):
+            if has_flag(item, NF_SPREAD): return 0
+        nodes[scrutinee].aux = 0
     nodes[n].a = i32(scrutinee)
     arms: int[]
     if dn_accept(.lbrace):
@@ -2730,6 +3355,9 @@ dc_operand_body = () -> int:
         # (`=> return x`: the statement, dn_stmt within the operand)
         statement = dc_statement()
         if statement == 0: return 0
+    else if opening.symbol == .lparen and dc_update_next():
+        statement = dc_grouped_update()
+        if statement == 0: return 0
     else:
         value = dc_expr(30)
         if value == 0: return 0
@@ -2772,6 +3400,19 @@ dc_pattern = () -> int:
             p = mk(.ptype, pos)
             nodes[p].a = i32(t)
             return p
+        # `<0|1|2>`, `<-1|1>`: integer singletons, a type (dw_literal_type)
+        leaf = dc_int_leaf(dn_at)
+        if leaf > 0 and dn_tokens[dn_at + leaf].symbol == .pipe:
+            dc_type_args += 1
+            t = dc_annotation()
+            dc_type_args -= 1
+            if t == 0: return 0
+            if not dn_accept(.rangle):
+                if not (dn_edits_on and dn_closer_joined()): return 0
+                dn_split_closer()
+            p = mk(.ptype, pos)
+            nodes[p].a = i32(t)
+            return p
         negative = literal.symbol == .minus
         if negative: literal = dn_tokens[dn_at + 1]
         integer = literal.kind == .source_integer or literal.kind == .integer
@@ -2784,6 +3425,22 @@ dc_pattern = () -> int:
         p = mk(.plit, pos)
         nodes[p].a = i32(value)
         return p
+    # `[sign:1 limbs]`: an object's shape, each part a named field; `(a b)`: a sequence of two or more
+    if token.symbol == .lbrack or token.symbol == .lparen:
+        shape = token.symbol == .lbrack
+        close = DewyToken.rparen
+        if shape: close = .rbrack
+        dn_at += 1
+        parts: int[]
+        loop not dn_accept(close):
+            if dn_tokens[dn_at].kind == .eof: return 0
+            part = dc_pattern()
+            if part == 0 or shape and nodes[part].name == 0: return 0
+            parts.push(part)
+        if not shape and parts.len() < 2: return 0
+        p = mk(if shape: NK.pshape else: NK.pseq, pos)
+        set_list(p, parts)
+        return p
     if token.kind != .identifier or (token.symbol != .none and token.symbol != .kw_test) or dn_reserved(int(token.name)): return 0
     dn_at += 1
     named = dc_word(int(token.name)) != DC_HOLE
@@ -2792,7 +3449,19 @@ dc_pattern = () -> int:
         if named: nodes[p].name = token.name
         return p
     written = dn_tokens[dn_at]
-    if written.kind != .identifier or written.symbol != .none or int(written.name) == dn_none_id: return 0
+    # `answer:42`, `s:"yes"`, `x:none`: one literal, a value (dw_pattern's literal); `n:1|2`,
+    # `other:'e'|'w'`: literals joined, a type
+    leaf = dc_int_leaf(dn_at)
+    if leaf == 0 and (written.kind == .boolean or written.kind == .quoted and dc_plain_quote(written) or written.kind == .identifier and int(written.name) == dn_none_id): leaf = 1
+    if leaf > 0 and dn_tokens[dn_at + leaf].symbol != .pipe:
+        before = dn_at
+        value = dc_atom()
+        if value == 0 or dn_at != before + leaf: return 0
+        p = mk(.plit, pos)
+        nodes[p].a = i32(value)
+        if named: nodes[p].name = token.name
+        return p
+    if leaf == 0 and written.symbol != .lbrack and (written.kind != .identifier or written.symbol != .none or int(written.name) == dn_none_id): return 0
     outer = dc_pattern_binder
     if named: dc_pattern_binder = int(token.name)
     t = dc_annotation(45)
@@ -2905,6 +3574,9 @@ dc_scope: {int: int} = {}
 # methods, lifecycle tags or type parameters; `Name:type = T|U` an alias; `Name = type of Base`,
 # `Name = type of [fields]` or `Name = type of Base & [fields]` (`:type` or not), a nominal type.
 dc_type_declaration = () -> int:
+    # `small = int64<i => 0 <=? i>`: a refinement names a type (dw_top_declarations, dw_declare)
+    refined = dc_refinement_alias()
+    if refined != 0: return refined
     # (`let Name:type = ...` declares it too, dw_declare)
     word = dn_tokens[dn_at].symbol
     if (word == .kw_let or word == .kw_const) and dn_tokens[dn_at + 2].symbol == .colon: dn_at += 1
@@ -2939,7 +3611,8 @@ dc_type_declaration = () -> int:
     if not annotated: return 0
     # `Name:type = <T U>[fields]`: a generic record (dw_type_params)
     type_params: int[]
-    if dn_peek() == .langle:
+    # (`<T>[...]`: type parameters, plain names then a record; `<(x:T):>R>`, `<'a' | 1>`: an alias)
+    if dn_peek() == .langle and dn_tokens[dn_at + 1].kind == .identifier and dn_tokens[dn_at + 1].symbol == .none and (dn_tokens[dn_at + 2].symbol == .rangle or dn_tokens[dn_at + 2].kind == .identifier):
         dn_at += 1
         loop not dn_accept(.rangle):
             binder = dn_tokens[dn_at]
@@ -2950,9 +3623,24 @@ dc_type_declaration = () -> int:
             t = mk(.ident, mkpos(dn_file, binder.start))
             nodes[t].name = binder.name
             type_params.push(t)
-        if type_params.len() == 0 or dn_peek() != .lbrack or dn_tokens[dn_at].space: return 0
+        if type_params.len() == 0 or dn_tokens[dn_at].space: return 0
+        # `Pair:type = <T>(array<T length=2>)`: a generic alias of the one type in parentheses
+        if dn_accept(.lparen):
+            alias = dc_annotation()
+            if alias == 0 or not dn_accept(.rparen) or dn_power(dn_peek()) > 0: return 0
+            n = mk(.typealias, pos)
+            nodes[n].name = token.name
+            nodes[n].a = i32(alias)
+            set_list2(n, type_params)
+            add_flag(n, NF_GENERIC)
+            dn_accept_semi()
+            return n
+        if dn_peek() != .lbrack: return 0
     if dn_peek() != .lbrack:
-        alias = dc_annotation()
+        # `Apply:type = (x:int64):>int64`: a function type without its angle brackets (dw_type's `:>`)
+        alias = 0
+        if dn_peek() == .lparen and dn_tokens[dc_closing(dn_at) + 1].symbol == .returns: alias = dc_function_type(false)
+        else: alias = dc_annotation()
         if alias == 0 or dn_power(dn_peek()) > 0: return 0
         n = mk(.typealias, pos)
         nodes[n].name = token.name
@@ -2970,6 +3658,56 @@ dc_type_declaration = () -> int:
     dn_accept_semi()
     if not dc_record_members(n, names): return 0
     n
+
+# `name = T<condition>` at the top of a module (`let` or `const` before it, or neither): the alias
+# of the refined type; 0 for anything else (dn_at stays).
+dc_refinement_alias = () -> int:
+    start = dn_at
+    if dn_tokens[dn_at].symbol == .kw_let or dn_tokens[dn_at].symbol == .kw_const: dn_at += 1
+    if dn_at + 3 >= dn_tokens.len():
+        dn_at = start
+        return 0
+    token = dn_tokens[dn_at]
+    base = dn_tokens[dn_at + 2]
+    if token.kind != .identifier or token.symbol != .none or dn_reserved(int(token.name)) or dn_tokens[dn_at + 1].symbol != .assign or base.kind != .identifier or base.symbol != .none or dn_tokens[dn_at + 3].symbol != .langle or dn_tokens[dn_at + 3].space or not dc_refinement_arguments(dn_at + 3):
+        dn_at = start
+        return 0
+    dn_at += 2
+    t = dc_type_named()
+    if t == 0 or nodes[t].kind != .trefined or dn_power(dn_peek()) > 0: return 0
+    n = mk(.typealias, mkpos(dn_file, token.start))
+    nodes[n].name = token.name
+    nodes[n].a = i32(t)
+    dn_accept_semi()
+    n
+
+# The type arguments opening at `at` hold a condition at their top (dw_top_declarations' test): a
+# `=>` or a comparison, or a group opening with one.
+dc_refinement_arguments = (at: int) -> bool:
+    depth = 0
+    k = at
+    loop k < dn_tokens.len():
+        t = dn_tokens[k]
+        symbol = t.symbol
+        if t.kind == .eof: return false
+        if symbol == .langle or symbol == .lparen or symbol == .lbrack or symbol == .lbrace:
+            depth += 1
+            if depth == 2 and symbol == .lparen and dc_refinement_next_at(k): return true
+        else if symbol == .rangle or symbol == .rparen or symbol == .rbrack or symbol == .rbrace:
+            depth -= 1
+            if depth == 0: return false
+        else if depth == 1:
+            scalar = dn_token_uninvert(symbol)
+            if symbol == .function or symbol == .kw_and or scalar == .eq or scalar == .lt or scalar == .le or scalar == .gt or scalar == .ge or scalar == .contains: return true
+        k += 1
+    false
+
+dc_refinement_next_at = (at: int) -> bool:
+    saved = dn_at
+    dn_at = at
+    yes = dc_refinement_next()
+    dn_at = saved
+    yes
 
 # A record type's rows after its `[`, through its `]` (dw_param of each field): its fields, the
 # rows' names in order; methods (`name = (params) => body`, a lifecycle tag before one) wait in
@@ -3299,6 +4037,7 @@ dc_reach_match = (n: int) -> bool:
     if not dc_reach(int(nodes[n].a)): return false
     loop arm in kids(n):
         pattern = kid(arm, 0)
+        if nodes[pattern].kind == .pshape or nodes[pattern].kind == .pseq: return false
         if nodes[pattern].kind == .plit and not dc_reach(int(nodes[pattern].a)): return false
         saved = dc_scope
         if nodes[pattern].name != 0: dc_hide([int(nodes[pattern].name)])
@@ -3428,11 +4167,21 @@ dc_function_literal = (name_id: i32, opening: DewyLexeme, type_params: int[] = [
     ps: int[]
     captures: int[]
     bound: {int: bool} = {}
+    # (`... by:int64`: a bare `...` ends the positional run; the parameters after it are named
+    # only, dewy_param_kinds)
+    keyword_only = false
+    kinds_at = dc_kinds.len()
     loop true:
         if bare:
             if ps.len() > 0: break
         else if dn_accept(.rparen): break
         first = dn_tokens[dn_at]
+        if first.symbol == .ellipsis and not bare and not keyword_only and dn_tokens[dn_at - 1].symbol == .lparen:
+            after = dn_tokens[dn_at + 1]
+            if after.kind != .identifier or after.symbol != .none or not after.space or dn_tokens[dn_at + 2].symbol != .colon: return 0
+            keyword_only = true
+            dn_at += 1
+            continue
         if lambda and first.kind == .metatag and not bare:
             if dn_payload(first) != "capture": return 0
             dn_at += 1
@@ -3449,13 +4198,16 @@ dc_function_literal = (name_id: i32, opening: DewyLexeme, type_params: int[] = [
         by_place = not bare and dn_accept(.at)
         parameter = dn_tokens[dn_at]
         p = mk(.param, mkpos(dn_file, first.start))
-        pattern = parameter.symbol == .lbrack and not bare and not by_place
+        pattern = (parameter.symbol == .lbrack or parameter.symbol == .lparen) and not bare and not by_place
         if pattern:
-            # `([a b]:array<int64>) => ...`: the argument unpacked (dw_param's pattern)
+            # `([a b]:array<int64>) => ...`, `((a b):array<int64>) => ...`: the argument unpacked
+            # (dw_param's pattern)
             dn_at += 1
             seen: int[]
-            binders = dc_binding_items(seen)
-            if binders.len() == 0: return 0
+            close = DewyToken.rbrack
+            if parameter.symbol == .lparen: close = .rparen
+            binders = dc_binding_items(seen, close)
+            if binders.len() == 0 or close == .rparen and binders.len() < 2: return 0
             nodes[p].name = i32(intern("$parameter{p}"))
             set_list(p, binders)
         else:
@@ -3466,12 +4218,22 @@ dc_function_literal = (name_id: i32, opening: DewyLexeme, type_params: int[] = [
         if bare:
             ps.push(p)
             break
+        kind = 0
+        if keyword_only: kind = 1
+        dc_kinds.push(kind)
         if dn_accept(.colon):
             dc_parameter_type = true
             annotation = dc_annotation()
             dc_parameter_type = false
             if annotation == 0: return 0
             nodes[p].a = i32(annotation)
+            # (`value:int64 ...`: the positional run ends after this parameter; `...rest` attached
+            # is a rest parameter, which dw_function reports)
+            if dn_peek() == .ellipsis and not bare:
+                after = dn_tokens[dn_at + 1]
+                if keyword_only or after.symbol == .assign or not after.space and after.kind == .identifier: return 0
+                dn_at += 1
+                keyword_only = true
         if dn_accept(.assign):
             initial = dc_expr(11)
             if initial == 0: return 0
@@ -3482,6 +4244,9 @@ dc_function_literal = (name_id: i32, opening: DewyLexeme, type_params: int[] = [
         else if not dc_bind_once(bound, int(parameter.name)): return 0
         ps.push(p)
     if name == "main" and (ps.len() > 1 or (ps.len() == 1 and has_flag(ps[0], NF_MUT))): return 0
+    if dc_kinds.len() > kinds_at:
+        if dc_kinds[dc_kinds.len() - 1] == 1: dewy_param_kinds[n] = dc_kinds[kinds_at..dc_kinds.len())
+        dc_kinds.truncate(kinds_at)
     if captures.len() > 0:
         # (a generic function's second list holds its type parameters: its captures are a block)
         if type_params.len() > 0:
@@ -3515,7 +4280,9 @@ dc_function_literal = (name_id: i32, opening: DewyLexeme, type_params: int[] = [
             # (`:>A | B & no_effects` puts the row on the last alternative: an error; `(A | B) & ...`
             # is the row of the whole result)
             if result == 0 or nodes[result].kind == .tunion and result != dc_grouped and dn_peek() == .amp: return 0
-            nodes[n].a = i32(result)
+            packed = dc_pack(result)
+            if packed == result and nodes[packed].kind == .tarray and nodes[packed].ival < 0 and dn_peek() == .amp: return 0
+            nodes[n].a = i32(packed)
         if dn_peek() == .amp and not dc_effect_row(n): return 0
     if not dn_accept(.function): return 0
     dc_depth -= 1
@@ -3527,7 +4294,10 @@ dc_function_literal = (name_id: i32, opening: DewyLexeme, type_params: int[] = [
         dc_fn_body = true
         outer_result = dc_fn_result
         dc_fn_result = if nodes[n].a != 0: 2 else: 1
+        saved_map = dc_map_ok
+        dc_map_ok = false
         body = dc_operand_body()
+        dc_map_ok = saved_map
         dc_fn_result = outer_result
         dc_fn_body = in_body
         dc_defer_result = enclosing
@@ -3663,11 +4433,18 @@ dc_statement = () -> int:
         if not dc_unsafe_at(dn_at):
             width = token.stop - token.start
             if width == 7 and dn_payload(token) == "expect" or width == 5 and dn_payload(token) == "fail": return dc_expect(token, width == 5)
+            if width == 11 and dn_payload(token) == "breakpoint": return dc_breakpoint(token)
             return dc_assertion(token)
         dn_at += 1
         n = dc_statement()
         if n != 0: dc_unsafe_scope(pos)
         return n
+    if op == .lparen and dc_update_next():
+        update = dc_grouped_update()
+        if update == 0 or not dc_flow_ends(): return 0
+        return update
+    # `[a b] = value`, `(a b) = values`: unpacked into names (dw_stmt's pattern target)
+    if (op == .lbrack or op == .lparen) and dn_tokens[dc_closing(dn_at) + 1].symbol == .assign: return dc_unpacking_assignment(op == .lparen, pos)
     # Assignment operands are values rather than binding patterns.
     if token.kind != .identifier or (op != .none and op != .kw_test): return 0
     left = dc_expr(11)
@@ -3686,7 +4463,39 @@ dc_statement = () -> int:
     right = dc_expr(11)
     # (outside a function body, `name = (...) => ...` may declare a module function: a `$target`
     # arm's statements are module declarations, dw_top_declarations)
-    if right == 0 or nodes[right].kind == .lambda and not dc_fn_body: return 0
+    if right == 0 or nodes[right].kind == .lambda and not dc_fn_body or dc_inferred_refinement(right): return 0
+    n = dc_assign_node(op, left, right, pos)
+    dc_accept_semi(not dc_unbraced)
+    n
+
+# `nonzero = int64 & ~0` at the top of a module names a refined type (dw_top_declarations), which
+# the reference grammar reads.
+dc_inferred_refinement = (n: int) -> bool: dc_top_level and nodes[n].kind == .binary and nodes[n].op == i32(int(Tok.amp)) and nodes[int(nodes[n].b)].kind == .not_
+
+# `[a b] = value`, `(a b) = values` (grouped) at its opener: the pattern target's assignment.
+dc_unpacking_assignment = (grouped: bool, pos: int) -> int:
+    dn_at += 1
+    seen: int[]
+    close = DewyToken.rbrack
+    if grouped: close = .rparen
+    binders = dc_binding_items(seen, close)
+    if binders.len() == 0 or grouped and binders.len() < 2: return 0
+    dn_at += 1
+    if dc_lambda_next(): return 0
+    right = dc_expr(11)
+    if right == 0 or nodes[right].kind == .lambda: return 0
+    pattern = mk(.tuple, pos)
+    set_list(pattern, binders)
+    n = mk(.assign, pos)
+    nodes[n].op = i32(int(Tok.assign))
+    nodes[n].a = i32(pattern)
+    nodes[n].b = i32(right)
+    dc_accept_semi(not dc_unbraced)
+    n
+
+# `target op= value` (dw_stmt's assignment).
+dc_assign_node = (op0: DewyToken, left: int, right: int, pos: int) -> int:
+    op = op0
     n = mk(.assign, pos)
     scalar = dn_token_undot(op)
     if scalar != .none:
@@ -3698,8 +4507,33 @@ dc_statement = () -> int:
         nodes[n].sval = i32(intern(if op == .slash_assign: "__dewy_divide" else if op == .floor_assign: "__floor_div" else if op == .percent_assign: "__floor_mod" else: "__dewy_power"))
     nodes[n].a = i32(left)
     nodes[n].b = i32(right)
-    dc_accept_semi(not dc_unbraced)
     n
+
+# `(count += 1)` is next: parentheses holding an update at their top.
+dc_update_next = () -> bool:
+    close = dc_closing(dn_at)
+    if close < 0 or dn_tokens[dn_at + 1].kind != .identifier: return false
+    depth = 0
+    loop k in [dn_at + 1..close):
+        symbol = dn_tokens[k].symbol
+        if symbol == .lparen or symbol == .lbrack or symbol == .lbrace: depth += 1
+        else if symbol == .rparen or symbol == .rbrack or symbol == .rbrace: depth -= 1
+        else if depth == 0 and dn_token_assignment(symbol): return true
+    false
+
+# A parenthesized update is the update (dw_stmt's grouped assignment): 0 for one the reference
+# grammar reads.
+dc_grouped_update = () -> int:
+    dn_at += 1
+    pos = mkpos(dn_file, dn_tokens[dn_at].start)
+    left = dc_expr(11)
+    if left == 0 or nodes[left].kind == .lambda: return 0
+    op = dn_peek()
+    if not dn_token_assignment(op): return 0
+    dn_at += 1
+    right = dc_expr(11)
+    if right == 0 or nodes[right].kind == .lambda or not dn_accept(.rparen): return 0
+    dc_assign_node(op, left, right, pos)
 
 # `test "name" { ... }`: another language's test block, which dn_stmt reports.
 dc_test_block = (at: int) -> bool:
@@ -3800,7 +4634,9 @@ dc_assertion = (token: DewyLexeme) -> int:
         if message == 0: condition = 0
     dn_comma_stop = saved
     if condition == 0 or listed and not dn_accept(.rparen): return 0
-    if not dc_statement_ends(): return 0
+    # (`$assert x >? 0;`: the statement ends, its value discarded, dw_stmt's statement end)
+    ended = dn_peek() == .semi and dc_accept_semi(not dc_unbraced)
+    if not ended and not dc_statement_ends(): return 0
     args = [condition]
     if message != 0: args.push(message)
     else if runtime:
@@ -3812,9 +4648,52 @@ dc_assertion = (token: DewyLexeme) -> int:
     call = mk(.call, pos)
     nodes[call].a = i32(callee)
     set_list(call, args)
+    dc_directive_statement(call, pos, ended)
+
+# A directive's call as a statement (dw_stmt): with its `;` (ended), the value discarded.
+dc_directive_statement = (call: int, pos: int, ended: bool) -> int:
+    if ended:
+        n = mk(.assign, pos)
+        nodes[n].op = i32(int(Tok.assign))
+        nodes[n].a = i32(mk(.hole, pos))
+        nodes[n].b = i32(call)
+        return n
     n = mk(.exprstmt, pos)
     nodes[n].a = i32(call)
     n
+
+# `$breakpoint` alone (dn_directive's form 3, dw_directive): the call showing the live bindings.
+dc_breakpoint = (token: DewyLexeme) -> int:
+    pos = mkpos(dn_file, token.start)
+    dn_at += 1
+    ended = dn_peek() == .semi and dc_accept_semi(not dc_unbraced)
+    if not ended and not dc_statement_ends(): return 0
+    dc_directive_statement(bc_call("$breakpoint", [], pos), pos, ended)
+
+# `$test`, `$proof`, `$export`, `$shadowable` or `$explicit_allocation_failure` alone at the top of
+# a module, marking what follows: its metatag syntax, as dn_atom reads it (dewy_fast_file,
+# dw_top_declarations). 0 for any other form.
+dc_marker = (token: DewyLexeme) -> int:
+    name = dn_payload(token)
+    if not (name == "test" or name == "proof" or name == "export" or name == "shadowable" or name == "explicit_allocation_failure"): return 0
+    next = dn_tokens[dn_at + 1]
+    if next.kind != .eof and not (next.newline and dn_power(next.symbol) == 0 and next.symbol != .kw_not):
+        if not next.space or dn_power(next.symbol) > 0 or next.symbol == .kw_not or next.symbol == .semi or next.symbol == .dot or next.symbol == .question or next.symbol == .ellipsis: return 0
+    start = dn_at
+    dn_expand_lazy()
+    dn_at += 1
+    id = dn_node(token.kind, name, token.start, name = token.name)
+    if dc_compare:
+        stop = dn_at
+        syntax_start = dewy_syntax.len()
+        dn_at = start
+        dc_enabled = false
+        old = dn_stmt()
+        dc_enabled = true
+        assert(dn_at == stop)
+        if dewy_syntax[old].kind != .metatag or dewy_syntax[old].text != name or dewy_syntax[old].pos != dewy_syntax[id].pos: fatal(mkpos(dn_file, token.start), "direct marker differs")
+        dewy_syntax.truncate(syntax_start)
+    id
 
 # `$setting`, `$setting=true` or `$setting=false` on a line of its own at the top of a
 # module: a compact statement naming the setting (child_right 1 on, 0 off), applied where
@@ -3851,6 +4730,8 @@ dn_statement = (top: bool = false) -> int:
     if top and dn_tokens[dn_at].kind == .metatag:
         setting = dc_setting(dn_tokens[dn_at])
         if setting != 0: return setting
+        marker = dc_marker(dn_tokens[dn_at])
+        if marker != 0: return marker
     # (`$unsafe` then a declaration: its boundary covers the declaration, dw_top_declarations)
     head = dn_at
     if top and dc_unsafe_at(dn_at): dn_at += 1
@@ -3894,7 +4775,10 @@ dn_statement = (top: bool = false) -> int:
     # (in a block the reference grammar reads, a statement's syntax may be read as syntax: an
     # expression statement or `$unsafe` collects, dw_collect, and ends an arena's value,
     # dw_copy_result)
-    if value == 0 and (top or not dc_unsafe_at(start)): value = dc_statement()
+    if value == 0 and (top or not dc_unsafe_at(start)):
+        dc_top_level = top
+        value = dc_statement()
+        dc_top_level = false
     if value == 0 and top and dn_tokens[start].kind != .metatag and not dc_test_block(start):
         read = 0
         if dc_value_start == start: read = dc_value
@@ -4005,11 +4889,26 @@ dc_spawn = (token: DewyLexeme) -> int:
         close = dc_closing(dn_at)
         if close < 0: return 0
         after = dn_tokens[close + 1]
-        if not dn_can_start(dn_tokens, close + 1) or after.newline or dn_power(after.symbol) > 0: return 0
-        if after.symbol == .kw_return or after.symbol == .kw_let or after.symbol == .kw_const or after.symbol == .kw_break or after.symbol == .kw_continue: return 0
-        dn_at += 1
-        g = dc_expr(0)
-        if g == 0 or dn_at != close: return 0
+        # (`spawn("/bin/sh" [])`: the process API's call, unless one group is followed by a value)
+        call = close == dn_at + 1 or not dn_can_start(dn_tokens, close + 1) or after.newline or dn_power(after.symbol) > 0 or after.symbol == .kw_return or after.symbol == .kw_let or after.symbol == .kw_const or after.symbol == .kw_break or after.symbol == .kw_continue
+        if not call:
+            group_at = dn_at
+            node_start = nodes.len()
+            list_start = lists.len()
+            edits = dn_edit_at.len()
+            dn_at += 1
+            g = dc_expr(0)
+            if g == 0: return 0
+            if dn_at != close:
+                call = true
+                dn_at = group_at
+                nodes.truncate(node_start)
+                lists.truncate(list_start)
+                dn_edits_undo(edits)
+        if call:
+            callee = mk(.ident, pos)
+            nodes[callee].name = dw_value_name(i32(intern("spawn")), pos)
+            return callee
         dn_at += 1
     else:
         if dw_task_groups.len() == 0: return 0
@@ -4035,6 +4934,24 @@ dc_allocator = (token: DewyLexeme) -> int:
     # (a braced body's value is its last statement's, dw_copy_result)
     copied = if dn_tokens[first].symbol == .lbrace and dc_closing(first) == dn_at - 1 and nodes[body].kind == .block: dc_copy_last(body) else: dc_copy_value(body)
     dw_arena_scope(serial, arena, body, copied, pos)
+
+# `$lend(@owner reserve=n) body` after its tag (dn_directive's form 4, dw_directive): the call
+# lending the owner's bytes to the body.
+dc_lend = (token: DewyLexeme) -> int:
+    pos = mkpos(dn_file, token.start)
+    if not dn_accept(.lparen): return 0
+    owner = dc_expr(0)
+    if owner == 0: return 0
+    reservation = 0
+    if dn_tokens[dn_at].kind == .identifier and dn_payload(dn_tokens[dn_at]) == "reserve" and dn_tokens[dn_at + 1].symbol == .assign:
+        dn_at += 2
+        reservation = dc_expr(0)
+        if reservation == 0: return 0
+    if not dn_accept(.rparen): return 0
+    body = dc_expr(0)
+    if body == 0: return 0
+    if reservation == 0: reservation = bc_int(0, pos)
+    bc_call("$lend", [owner, reservation, body], pos)
 
 # The value is written `....copy()` (dw_copy_result).
 dc_copy_value = (n: int) -> bool:
