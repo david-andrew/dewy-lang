@@ -2363,7 +2363,8 @@ class Generator:
     def loop_statement(self, depth, accumulate=None):
         r = self.r
         if self.chance(.15):
-            v = self.pick(lambda v: v.mutable and v.ty in (AI, AF) and v.ty.kind == 'array')
+            # (not one a closure shares: calling it in the body could resize the source)
+            v = self.pick(lambda v: v.mutable and v.ty in (AI, AF) and v.ty.kind == 'array' and v.name not in self.shared)
             if v is not None:
                 name = self.fresh('e')
                 element = v.ty.args[0]

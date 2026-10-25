@@ -13,6 +13,7 @@ use 'util.jo'
 use 'witness.jo'
 use 'secrets.jo'
 use 'node_store.dewy'
+use 'math_lower.jo'
 
 struct RefTerm:
     kind: int = 0 # self, literal, formal ordinal, stable lexical declaration, type limit
@@ -700,7 +701,11 @@ refine_implies = (from: int, to: int) -> bool:
     fact_terms = saved
     ok
 
+# (the type of the value ref_ir_term last gave: 0 for a constant)
+ref_term_type = 0
+
 ref_ir_term = (term: RefTerm, self: int, args: int[], self_type: int, arg_types: int[]) -> int:
+    ref_term_type = 0
     if term.kind == 1: return e_iconst(term.value)
     value = self
     t = self_type
@@ -730,7 +735,21 @@ ref_ir_term = (term: RefTerm, self: int, args: int[], self_type: int, arg_types:
             if fi < 0: ice("unresolved refinement field")
             t = int(fields[fi].type)
             value = load_val(t, field_val_addr(fi, value), 0)
+    ref_term_type = representation_type(t)
     value
+
+# A word of type t as a Dewy `int` (a tagged word; math_lower.jo); made gets it when it is new.
+ref_math_term = (value: int, t: int, made: mut int[]) -> int:
+    if t == T_MATH_INT: return value
+    if t != 0 and is_int(t) and not types[t].sign and int(types[t].bits) == 64:
+        out = math_call("__mi_unsigned", [value]).v
+        made.push(out)
+        return out
+    out = math_word(value)
+    if out.owned: made.push(out.v)
+    out.v
+
+ref_tagged_fits = (k: int) -> bool: k >= -4611686018427387904 and k <= 4611686018427387903
 
 ref_gen_check = (n: int, self: int, args: int[], arg_types: int[]):
     if nodes[n].ival == 1: return
@@ -739,7 +758,23 @@ ref_gen_check = (n: int, self: int, args: int[], arg_types: int[]):
     shown = wit_text(int(nodes[n].a))
     if shown == "": shown = "the value"
     loop atom in ref_predicates[int(types[t].st)]:
-        a = ref_ir_term(atom.a, self, args, int(types[t].elem), arg_types); b = ref_ir_term(atom.b, self, args, int(types[t].elem), arg_types)
+        a = ref_ir_term(atom.a, self, args, int(types[t].elem), arg_types)
+        a_type = ref_term_type
+        b = ref_ir_term(atom.b, self, args, int(types[t].elem), arg_types)
+        b_type = ref_term_type
+        # (a Dewy `int` is a tagged word or a BigInt: both sides compare as ints, exactly)
+        math = a_type == T_MATH_INT or b_type == T_MATH_INT
+        # (`x not=? k`, k a constant in the tagged range: a value has one representation,
+        # so its word decides, and a value failing it is k)
+        tagged_ne = 0
+        if math and atom.op == .ne and atom.b.offset == 0:
+            if atom.a.kind == 1 and b_type == T_MATH_INT and ref_tagged_fits(atom.a.value):
+                tagged_ne = e_bin(.ne, VI, b, e_iconst(atom.a.value << 1))
+                b = a
+            else if atom.b.kind == 1 and a_type == T_MATH_INT and ref_tagged_fits(atom.b.value):
+                tagged_ne = e_bin(.ne, VI, a, e_iconst(atom.b.value << 1))
+                a = b
+            if tagged_ne != 0: math = false
         # The failure names the violated requirement and the observed values,
         # the constrained value first (contracts are stored as `a < b`).
         left = wit_ref_text(atom.a, shown); right = wit_ref_text(atom.b, shown)
@@ -754,7 +789,15 @@ ref_gen_check = (n: int, self: int, args: int[], arg_types: int[]):
             seen_right = ""
         # (`a op b + c`: the right side's observed value is the sum)
         c = atom.b.offset
-        sum = if c != 0: e_bin(.add, VI, b, e_iconst(c)) else: b
+        made: int[]
+        if math:
+            a = ref_math_term(a, a_type, made)
+            b = ref_math_term(b, b_type, made)
+        sum = b
+        if c != 0 and math:
+            sum = math_binary(.plus, b, math_word(e_iconst(c)).v).v
+            made.push(sum)
+        else if c != 0: sum = e_bin(.add, VI, b, e_iconst(c))
         first = a; second = sum
         relation = atom.op
         if atom.b.kind == 0 and atom.a.kind != 0 and (relation == .lt or relation == .le):
@@ -766,7 +809,9 @@ ref_gen_check = (n: int, self: int, args: int[], arg_types: int[]):
         if let width = ref_narrowing.get(n): message = "integer overflow: value does not fit {dt(width)}"
         op = if atom.op == .lt: Op.lts else if atom.op == .le: Op.les else: Op.ne
         condition = 0
-        if c != 0:
+        if tagged_ne != 0: condition = tagged_ne
+        else if math: condition = math_compare(atom.op, a, sum)
+        else if c != 0:
             # Exactly, without comparing a wrapped word: a sum past int64
             # holds (upward) or fails (downward). Offsets are signed only.
             past = if c > 0: e_bin(.lts, VI, e_iconst(FACT_MAX - c), b) else: e_bin(.lts, VI, b, e_iconst(FACT_MIN - c))
@@ -779,8 +824,10 @@ ref_gen_check = (n: int, self: int, args: int[], arg_types: int[]):
                 b = e_bin(.xor, VI, b, e_iconst(FACT_MIN))
             condition = e_bin(op, VI, a, b)
         iff(e_bin(.eq, VI, condition, e_iconst(0)))
-        e_call_nr(rt("__requirement_fail"), [e_daddr(str_data(message)), e_daddr(loc_data(nodes[n].pos)), e_daddr(str_data(seen_left)), first, e_daddr(str_data(seen_right)), second], -1)
+        fail = if math: "__mi_requirement_fail" else: "__requirement_fail"
+        e_call_nr(rt(fail), [e_daddr(str_data(message)), e_daddr(loc_data(nodes[n].pos)), e_daddr(str_data(seen_left)), first, e_daddr(str_data(seen_right)), second], -1)
         endc()
+        loop v in made: release(v, T_MATH_INT)
 
 refine_gen = (n: int) -> Val:
     value = gen_expr(int(nodes[n].a))

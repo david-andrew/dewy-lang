@@ -1,0 +1,22 @@
+# A refinement on arbitrary-precision `int` compares the values, small or big,
+# not their machine words: match arms bind them, bindings and arguments check them.
+$runtime_checks
+above = (x:int):>string => match x {<-2> => "minus two" g:int<(>? 4611686018427387903)> => "huge {g}" other => "other {other}"}
+below = (x:int):>string => match x {g:int<(<? 3)> => "small {g}" _ => "large"}
+gap = (lo:int hi:int<(>? lo)>):>int => hi - lo
+nonzero = (a:int b:int<(not=? 0)>):>int => a // b
+skip = (a:int b:int<(not=? 9223372036854775807)>):>int => a - b
+main = (argv:array<string>):>void => {
+    let z:int = argv.length - 1
+    loop v in [(-22) (-2) 2 3 4 4611686018427387903 4611686018427387904 9223372036854775807 18446744073709551616 (-9223372036854775809)] {
+        printl"{above(v)} / {below(v)}"
+    }
+    let big:int = 9223372036854775807
+    let checked:int<(>? 4611686018427387903)> = big + 1
+    printl(checked)
+    printl(gap(1 9223372036854775808))
+    printl(gap((-9223372036854775809) 2))
+    printl(nonzero(36893488147419103232 18446744073709551616 + z))
+    printl(skip(0 9223372036854775808 + z))
+    printl(skip(0 (-9223372036854775807) + z))
+}

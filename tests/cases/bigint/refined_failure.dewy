@@ -1,0 +1,8 @@
+# exit: 101
+# A failed `int` refinement shows the value it saw, however large.
+$runtime_checks
+gap = (lo:int hi:int<(>? lo)>):>int => hi - lo
+main = ():>void => {
+    printl(gap(2 3))
+    printl(gap(18446744073709551616 (-9223372036854775809)))
+}

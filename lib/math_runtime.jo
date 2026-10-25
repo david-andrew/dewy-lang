@@ -252,3 +252,26 @@ __mi_clamp_word = (a: __dewy_int, lo: int, hi: int, unsigned: int) -> int:
         return int(u64(0) - magnitude)
     if magnitude > u64(hi): return hi
     int(magnitude)
+
+# (by short division: a failure report needs no fast conversion, nor its code: bigint.dewy's __as__)
+__mi_text = (a: __dewy_int) -> str:
+    if (a as int) & 1 == 0: return "{(a as int) >> 1}"
+    value = __mi_payload(a)[0]
+    chunks = __bi._bigint_decimal_chunks(value._limbs)
+    i = chunks.len() - 1
+    text = if value._sign < 0: "-{chunks[i]}" else: "{chunks[i]}"
+    loop i > 0:
+        i -= 1
+        digits = "{chunks[i]}"
+        text = text + "000000000"[len(digits)..9) + digits
+    text
+
+# A runtime-checked requirement on `int` values failed (core/rt.jo's __requirement_fail).
+__mi_requirement_fail = (requirement: str, loc: str, left: str, a: __dewy_int, right: str, b: __dewy_int):
+    observed = ""
+    if len(left) > 0: observed = "{left} was " + __mi_text(a)
+    if len(right) > 0:
+        if len(observed) > 0: observed = observed + " and "
+        observed = observed + "{right} was " + __mi_text(b)
+    if len(observed) == 0: __panic("{loc}: {requirement}")
+    __panic("{loc}: {requirement} (observed: {observed})")
