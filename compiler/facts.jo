@@ -2078,6 +2078,67 @@ fact_set_bound = (s: mut FactState, v: int, b0: FactBound, exact: bool = false):
         b.nz = true
     s.bounds[i] = b
 
+# A `let` binding's `and`/`or` value (fact_saving while it is captured):
+# a saved Boolean, assumed again where it is tested.
+fact_saving = false
+fact_saved_boolean = (n0: int) -> bool:
+    n = n0
+    loop n > 0 and nodes[n].kind == .not_: n = int(nodes[n].a)
+    n > 0 and (nodes[n].kind == .and_ or nodes[n].kind == .or_)
+
+# A saved Boolean's right operand runs on one path only, but the places it
+# reads, the elements it reads at a local index (`xs[i]`) and its literals
+# hold the same values on both paths at the split. Evaluate them before the
+# split: both paths then share their identities, so assuming the saved
+# Boolean narrows later reads. Reads only, never closures or nested control;
+# at most `budget` nodes. (fact_shared_literals: the literals' values, which
+# the operand's own evaluation reuses, scanned only while it is evaluated.)
+fact_shared_literals: (int, int)[]
+fact_preread = (n: int, s: mut FactState, budget: mut int):
+    if n <= 0 or budget <= 0: return
+    budget -= 1
+    k = nodes[n].kind
+    if k == .ident:
+        if fact_preread_local(n): fact_read(s, n)
+        return
+    if k == .int_lit or k == .bool_lit:
+        fact_shared_literals.push((n, fact_literal(s, n)))
+        return
+    if k == .index and nodes[n].b != 0:
+        base = int(nodes[n].a)
+        index = int(nodes[n].b)
+        t = fact_type(ntype(base))
+        if fact_preread_local(base) and fact_preread_local(index) and (types[t].kind == .array or types[t].kind == .fixed):
+            fact_project(s, fact_read(s, base), fact_read(s, index), true, int(types[t].elem))
+            return
+    if k == .binary or k == .not_ or k == .and_ or k == .or_ or k == .index:
+        fact_preread(int(nodes[n].a), s, budget)
+        fact_preread(int(nodes[n].b), s, budget)
+
+fact_preread_local = (n: int) -> bool:
+    nodes[n].kind == .ident and nodes[n].aux == i32(int(SK.local)) and int(locals[int(nodes[n].sym)].flags) & LF_ALIAS == 0
+
+# An `int` literal in [2^63, 2^64) (a wide value): its uint64 bits as an
+# int64, which is negative; otherwise 0. O(1).
+fact_u64_literal = (v: int) -> int:
+    if v <= 0 or v >= fact_terms.len(): return 0
+    t = fact_terms[v]
+    n = t.origin
+    if t.op != .eof or t.a != 0 or t.b != 0 or n <= 0 or nodes[n].kind != .int_lit or not has_flag(n, NF_U64): return 0
+    if fact_type(ntype(n)) == T_U64 or nodes[n].ival >= 0: return 0
+    nodes[n].ival
+
+# v <= 2^64-1 through a guard row v - c <= d to such a literal c (fact_assume
+# keeps that row: no interval holds it). O(incident rows of v).
+fact_u64_capped = (s: FactState, v: int) -> bool:
+    ri = fact_difference_head(s, v, 1)
+    loop ri >= 0:
+        row = s.differences[ri]
+        ri = fact_difference_next(s, ri, 1)
+        c = fact_u64_literal(row.b)
+        if c < 0 and fact_add_fits(c, row.limit) and c + row.limit <= -1: return true
+    false
+
 # Assume the CAPTURED Boolean, never reevaluate its syntax after later effects.
 fact_assume = (s: mut FactState, v: int, truth: bool):
     if v == 0: return
@@ -2127,6 +2188,9 @@ fact_assume = (s: mut FactState, v: int, truth: bool):
             y.wide = false
             fact_set_bound(s, b, y, not fact_open_endpoint(s, a, false))
             y = fact_bound(s, b)
+        # (below an `int` literal in [2^63, 2^64): a row, the only place
+        # that ceiling fits, for a conversion to uint64)
+        if y.wide and not x.wide and fact_u64_literal(b) < 0: fact_difference(s, a, b, (if op == .lt: -1 else: 0), t.origin)
     if x.wide or y.wide: return
     exact = false
     if op == .eq:
@@ -3485,6 +3549,10 @@ fact_narrow_check = (n: int, s: mut FactState, value: int) -> bool:
     hi = fact_constant(s, high)
     lc = fact_compare(s, lo_op, value, lo)
     hc = fact_compare(s, hi_op, value, hi)
+    # (uint64's ceiling 2^64-1 is beyond int64: a real int64 end is below it,
+    # a guard row to a larger literal caps an open one, nothing refutes it)
+    unsigned = fact_type(to) == T_U64
+    if unsigned and hc != 1: hc = if fact_u64_capped(s, value): 1 else: -1
     # (a binding's covering set of written values: string_domains.jo)
     proven = lc == 1 and hc == 1 or int_domain_proven.has(n) or exact_progress_math.has(n)
     if fact_speculating != 0: return proven
@@ -3497,7 +3565,8 @@ fact_narrow_check = (n: int, s: mut FactState, value: int) -> bool:
     # (an operand with no spelling of its own, as refinements show it)
     if side.text == "": side.text = "the value"
     limit = if upper: high else: low
-    bound = WitSide((if upper: hi else: lo), 0, "{limit}", false, true)
+    shown_limit = if upper and unsigned: "18446744073709551615" else: "{limit}"
+    bound = WitSide((if upper: hi else: lo), 0, shown_limit, false, true)
     op = if upper: Tok.le else: Tok.ge
     refuted = (if upper: hc else: lc) == 0
     missing = wit_relation(s, s, op, side, bound, refuted)
@@ -6119,6 +6188,15 @@ fact_capture = (n: int, s: mut FactState) -> int:
     if n > 0 and fact_speculating == 0 and exact_has_node(n): exact_value_fact(n, value, s)
     value
 
+fact_literal = (s: mut FactState, n: int) -> int:
+    if not fact_scalar(ntype(n)): return fact_new(s, FactBound(reason = .unsupported, witness = n))
+    x = ref_encoded(nodes[n].ival, ntype(n))
+    # A uint64 constant is biased; its type lets a witness decode it.
+    if fact_type(ntype(n)) == T_U64: return fact_new(s, FactBound(x, x, x != 0), FactTerm(origin = n, type = T_U64))
+    # (an `int` literal above int64 keeps its unsigned bits: beyond the host words)
+    if has_flag(n, NF_U64) and x < 0: return fact_new(s, FactBound(FACT_MAX, FACT_MAX, true, wide = true), FactTerm(origin = n, type = ntype(n)))
+    fact_constant(s, x, n)
+
 fact_capture_value = (n: int, s: mut FactState) -> int:
     if n == 0 or not s.live: return 0
     if fact_speculating > 0:
@@ -6142,13 +6220,9 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             return value
     if k == .block and has_flag(n, NF_COMPREHENSION) and nkids(n) > 1 and nodes[kid(n, 0)].kind == .vardecl: fact_comprehensions[kid(n, 1)] = int(nodes[kid(n, 0)].sym)
     if k == .int_lit or k == .bool_lit:
-        if not fact_scalar(ntype(n)): return fact_new(s, FactBound(reason = .unsupported, witness = n))
-        x = ref_encoded(nodes[n].ival, ntype(n))
-        # A uint64 constant is biased; its type lets a witness decode it.
-        if fact_type(ntype(n)) == T_U64: return fact_new(s, FactBound(x, x, x != 0), FactTerm(origin = n, type = T_U64))
-        # (an `int` literal above int64 keeps its unsigned bits: beyond the host words)
-        if has_flag(n, NF_U64) and x < 0: return fact_new(s, FactBound(FACT_MAX, FACT_MAX, true, wide = true), FactTerm(origin = n, type = ntype(n)))
-        return fact_constant(s, x, n)
+        loop shared in fact_shared_literals:
+            if shared.0 == n and fact_slot(s, shared.1) >= 0: return shared.1
+        return fact_literal(s, n)
     # (an ASCII string literal's length is its byte count; "\r\n" is one grapheme)
     if k == .str_lit and nodes[n].aux != 1 and fact_type(ntype(n)) == T_STR and nodes[n].sval >= 0:
         text = name_of(int(nodes[n].sval))
@@ -6352,7 +6426,10 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         s.live = false
         return 0
     if k == .vardecl:
+        saving = fact_saving
+        fact_saving = fact_saved_boolean(int(nodes[n].b))
         r = if nodes[n].b != 0: fact_capture(int(nodes[n].b), s) else: fact_constant(s, 0, n)
+        fact_saving = saving
         if has_flag(n, NF_MAP_KEY): r = fact_map_key(s, int(nodes[n].b), r)
         if ownership_decls.len() != 0: r = fact_owner_value(int(nodes[n].b), r, s)
         l = int(nodes[n].sym)
@@ -6437,11 +6514,15 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         # true/false state copies. O(1) transfer per demanded connective plus
         # the existing bounded join. Effects still replace storage identities.
         a = fact_capture(int(nodes[n].a), s)
+        budget = if fact_saving: 32 else: 0
+        shared = fact_shared_literals.len()
+        fact_preread(int(nodes[n].b), s, budget)
         rhs = s
         take = k == .and_
         fact_assume(rhs, a, take)
         fact_assume(s, a, not take)
         b = fact_capture(int(nodes[n].b), rhs)
+        fact_shared_literals.truncate(shared)
         result = fact_domain(T_BOOL)
         if not rhs.live: result = FactBound(int(not take), int(not take), not take)
         else if not s.live: result = fact_bound(rhs, b)
@@ -6595,7 +6676,9 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                 fact_set_bound(s, a, b, true)
                 return a
             if not proven or b.lo < 0: return fact_unmodeled(s, n, .unsupported)
-            return fact_new(s, FactBound(b.lo xor FACT_MIN, b.hi xor FACT_MIN), FactTerm(type = T_U64))
+            # (an open or wide upper end, capped by a guard, is uint64's own)
+            top = if b.wide or b.hi == FACT_MAX and fact_open_endpoint(s, a, true): FACT_MAX else: b.hi xor FACT_MIN
+            return fact_new(s, FactBound(b.lo xor FACT_MIN, top), FactTerm(type = T_U64))
         if from == to and nodes[n].aux == i32(int(CV.int_)): return a
         if ntype(n) != ntype(int(nodes[n].a)) and (ntype(n) == T_U64 or ntype(int(nodes[n].a)) == T_U64):
             # (a value both types hold converts exactly: decode or encode its interval)
@@ -7435,6 +7518,8 @@ facts_finalize = ():
 fact_internal_policy = ""
 
 facts_reset = ():
+    fact_shared_literals = []
+    fact_saving = false
     fact_constant_globals = {}
     draw_context_reset()
     fact_search_predicate = 0
@@ -7901,7 +7986,8 @@ other_index_of = (n: int, a: int, ok: int[], seen: mut bool[]) -> bool:
         it = int(nodes[n].a)
         if int(nodes[n].aux) == 0 and stable_loop_index(int(nodes[n].sym)) and range_bounds_arrays(it).contains(a): inner.push(int(nodes[n].sym))
         return other_index_of(it, a, ok, seen) or other_index_of(int(nodes[n].b), a, inner, seen)
-    loop c in [int(nodes[n].a), int(nodes[n].b), int(nodes[n].c), int(nodes[n].d)]:
+    # (a checked `for` returned above; a partial's d is a function instance)
+    loop c in [int(nodes[n].a), int(nodes[n].b), kid_c(n), kid_d(n)]:
         if other_index_of(c, a, ok, seen): return true
     loop i in [0..nkids(n)):
         if other_index_of(kid(n, i), a, ok, seen): return true

@@ -1,0 +1,7 @@
+f = (v:int):>uint64 => {
+    let ok = v >=? 0 and 18446744073709551615 >=? v
+    if ok return uint64(v)
+    0
+}
+printl(f(5))
+printl(f(18446744073709551615))

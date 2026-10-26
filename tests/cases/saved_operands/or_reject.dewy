@@ -1,0 +1,6 @@
+f = (xs:array<int> i:int64<(>=? 0)> d:int):>int => {
+    let ok = i <? xs.length or d not=? 0
+    if ok return 1 // d
+    0
+}
+printl(f([7] 0 2))
