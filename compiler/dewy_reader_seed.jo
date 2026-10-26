@@ -133,7 +133,7 @@ rt_dc_unread = (at: int):
     if dc_parser.status.hint_pos != 0: fatal(dc_parser.status.hint_pos, dc_parser.status.hint_text)
     if dc_parser.status.report_pos != 0: fatal(dc_parser.status.report_pos, dc_parser.status.report_text)
     rt_dc_foreign_habit(at)
-    fatal(mkpos(dc_parser.file, dc_parser.tokens[at].start), "Dewy does not read this form")
+    fatal(mkpos(dc_parser.file, dc_parser.tokens[at].start), "could not parse the statement starting here; check the syntax near the underlined token")
 
 rt_dc_cut_off = (cut: int):
     token = dc_parser.tokens[cut]

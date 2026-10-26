@@ -33,11 +33,12 @@ record = (@s:Score r:Reading):>void => {
     }
     let signal = r.signal
     let baseline = r.baseline
-    if signal not=? signal or baseline not=? baseline return
-    let ratio = safe_ratio(signal baseline)
-    s.usable += 1
-    if ratio >? 0.0 s.positive += 1
-    s.total += ratio
+    if -100.0 <=? signal and signal <=? 100.0 and 0.1 <=? baseline and baseline <=? 100.0 {
+        let ratio = safe_ratio(signal baseline)
+        s.usable += 1
+        if ratio >? 0.0 s.positive += 1
+        s.total += ratio
+    }
 }
 
 band = (x:float64):>string => {
@@ -150,9 +151,10 @@ main = () => {
         let r = samples.get(i) ?? Reading[0.0 1.0]
         let signal = r.signal
         let baseline = r.baseline
-        if signal not=? signal or baseline not=? baseline continue
-        let ratio = safe_ratio(signal baseline)
-        printl"{i}: {band(ratio)} {format(ratio ".3f")}"
+        if -100.0 <=? signal and signal <=? 100.0 and 0.1 <=? baseline and baseline <=? 100.0 {
+            let ratio = safe_ratio(signal baseline)
+            printl"{i}: {band(ratio)} {format(ratio ".3f")}"
+        }
     }
     printl"transform {format(fast_transform(2.0) ".3f")} {format(normal_transform(2.0) ".3f")}"
 }

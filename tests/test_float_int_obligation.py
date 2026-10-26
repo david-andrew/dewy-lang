@@ -72,7 +72,7 @@ b = (x:float64):>uint8 => {
 c = (x:float64):>uint64 => if 0.0 <=? x and x <? 1.8e19 uint64(x) else 0
 d = (x:float64):>(int | OutOfMemory) & allocates => if -1e300 <=? x and x <=? 1e300 int(x) else 0
 main = ():>(void | OutOfMemory) & no panics => {
-    printl"{a(-999.9)} {a(5000.0)} {a(NAN)} {b(255.9)} {b(-0.5)} {c(1.7e19)} {d(-2.5)} {d(INF)}"
+    printl"{a(-999.9)} {a(5000.0)} {a(NAN)} {b(255.9)} {b(-0.5)} {c(1.7e19)} {d(-2.5)} {d(1e301)}"
 }
 '''
 

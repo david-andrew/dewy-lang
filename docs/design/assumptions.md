@@ -18,7 +18,6 @@ await David, so that configuration is not yet fully enforceable.
 | The library's own drop hooks (a lock guard releasing its word) cannot fail | ownership (hooks: compiler/ownership.jo) | *pending* |
 | `$runtime_assert` within one module does not make that module's own callers `panics` (a scoping assumption, not an assumed bound: `$no_assumed_bounds` does not cover it) | effects (`panics`) | `$assume_local_asserts=false` (spelling provisional; `$bulletproof` includes it) |
 | A path taken whole (from arguments, the environment, input or anywhere else) has no base to escape: the file-system operations' `$warn_if path isnt? SafePath` takes it as safe | contained paths (compiler/safe_paths.jo) | `$confine_external_paths` (spelling provisional; `$bulletproof` includes it) |
-| `$no_inf` takes values entering its scope (parameters, fields, elements, call results) as finite; `$no_nan` no longer assumes them | floats (compiler/floats.jo) | *pending* |
 | `$no_deadlocks`: the scheduler is fair, local computation terminates, external peers cooperate | deadlock certificates (compiler/deadlock.jo; safety_and_concurrency.md) | stated assumptions of the theorem |
 | A foreign call or system call inside an audited adapter (`$audited_wait`, spelling provisional) waits only on the outside world, never on a task of the program | deadlock certificates (compiler/deadlock.jo) | none: the audit is a person's claim, like `$unsafe`; write `$audited_wait` only in each adapter (never for a module, never in a bundle) |
 | The library's certified protocols (`serve`, `pipeline`: lib/prelude/protocols.dewy) wait only as documented | deadlock certificates | *pending* (a model-checking gate for the primitives, as planned for the expert lane) |
@@ -69,5 +68,5 @@ a pointer to each rule. The wording is David's.
   grows by a bounded amount per iteration or allocation cannot overflow;
   32-bit and narrower counters get no axiom. An opt-out metatag (spelling
   pending David) disables it and requires a real proof.
-- `$no_nan` does not assume incoming values: callers prove not-NaN, or it is
-  checked under `$runtime_checks`.
+- `$no_nan` and `$no_inf` do not assume incoming values: callers prove the
+  relevant property, or it is checked under `$runtime_checks`.

@@ -1,0 +1,10 @@
+# quick
+$runtime_checks=false
+half=(x:float64):>float64=>{
+    $no_inf
+    x*0.5
+}
+main=()=>{
+    let x:float64=to_float(env("X")??"inf")??0.0
+    printl(half(x))
+}

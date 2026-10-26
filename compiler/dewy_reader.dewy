@@ -10609,7 +10609,7 @@ rd_dc_unread=(@reader_ctx:ParserContext at:int64):>void=>$unsafe {
         reader_ctx.stores.host[0].fatal(reader_ctx.status.report_pos reader_ctx.status.report_text);
     }
     rd_dc_foreign_habit(@reader_ctx at);
-    reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file reader_ctx.tokens[at].start) "Dewy does not read this form");
+    reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file reader_ctx.tokens[at].start) "could not parse the statement starting here; check the syntax near the underlined token");
 }
 
 # A statement the end of the text cuts off (dc_unread's mistake, before any noted): the bracket it

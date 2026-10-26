@@ -390,7 +390,7 @@ _whole_nanoseconds=(seconds:Rational):>int64=>{
 # unit with the simplest fraction; floats take the largest unit not above the magnitude. offset is the shown unit's
 # zero (Celsius' 273.15 K); for floats it comes multiplied by dens[0], so that a reading
 # is (value*den - offset)/num with the fewest roundings.
-_quantity_exact=(value:Rational units:array<string> nums:array<int64> dens:array<int64> base:int64 offset:Rational):>string=>{
+_quantity_exact=(value:Rational units:array<string> nums:array<int64> dens:array<int64> base:int64 offset:Rational angle:bool):>string=>{
     let shifted=_sub(value offset)
     let size=abs(shifted)
     let pick=base
@@ -411,7 +411,13 @@ _quantity_exact=(value:Rational units:array<string> nums:array<int64> dens:array
         pick=simplest
         if whole >=? 0 pick=whole
     }
-    return "{_mul(shifted _invert(_reduce(nums[pick] dens[pick])))}{units[pick]}"
+    let count=_mul(shifted _invert(_reduce(nums[pick] dens[pick])))
+    # rad is a rational approximation to an irrational turn count. Show conversions
+    # through its scale as a decimal, without changing the exact stored value.
+    if angle and (value.denominator % 5706674932067741 =? 0 or dens[pick] % 5706674932067741 =? 0) {
+        return "{to_float64(count)}{units[pick]}"
+    }
+    return "{count}{units[pick]}"
 }
 _quantity_float=(value:float64 units:array<string> nums:array<int64> dens:array<int64> base:int64 offset:float64):>string=>{
     let size=value

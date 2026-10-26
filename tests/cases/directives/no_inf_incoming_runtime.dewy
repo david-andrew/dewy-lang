@@ -1,0 +1,19 @@
+# quick
+# exit: 101
+$runtime_checks
+Reading:type=[value:float64]
+half=(x:float64):>float64=>{
+    $no_inf
+    x*0.5
+}
+field=(r:Reading):>float64=>{
+    $no_inf
+    r.value*0.5
+}
+main=()=>{
+    let zero:float64=0.0
+    let inf=1.0/zero
+    printl(half(4.0))
+    printl(field(Reading[4.0]))
+    printl(half(inf))
+}

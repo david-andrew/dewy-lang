@@ -1158,7 +1158,9 @@ quantity_display = (x: int) -> int:
         nodes[offset].fval = f64(quantity_scales[scaled].numerator) / f64(quantity_scales[scaled].denominator)
     c = mk(.call, pos)
     nodes[c].a = i32(bc_field(bc_ident("$dewy_rational", pos), fname, pos))
-    set_list(c, [number, quantity_array(syms, T_STR, pos), quantity_array(nums, T_INT, pos), quantity_array(dens, T_INT, pos), bc_int(ladder.base, pos), offset])
+    args = [number, quantity_array(syms, T_STR, pos), quantity_array(nums, T_INT, pos), quantity_array(dens, T_INT, pos), bc_int(ladder.base, pos), offset]
+    if exact: args.push(bc_bool(quantity_dimension(t) == base_dimension(7), pos))
+    set_list(c, args)
     check_expr(c, T_STR)
     last_checked
 

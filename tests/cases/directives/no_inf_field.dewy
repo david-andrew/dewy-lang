@@ -1,0 +1,8 @@
+# quick
+$runtime_checks=false
+Reading:type=[value:float64]
+doubled=(r:Reading):>float64=>{
+    $no_inf
+    r.value*2.0
+}
+main=()=>printl(doubled(Reading[1.0]))

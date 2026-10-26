@@ -232,8 +232,7 @@ nan_value_check = (v: int, t0: int, message: str, e: int):
 #   infinity (IEEE overflow, division by zero): a sum, difference, product or
 #     quotient beyond the largest float, x/0, log(0), exp, pow, a float64
 #     narrowed to float32 or a large `int` converted.
-# Under `$no_nan`, values that enter the scope are not assumed free of NaN
-# (`$no_inf` still takes them as finite):
+# Values entering either scope are not assumed to obey it:
 #   - a parameter of a function whose body is in the scope is proven by each
 #     direct caller, an obligation at the argument under the caller's policy
 #     (the callers are walked too, outside the scope, only for that); a
@@ -257,6 +256,7 @@ nan_value_check = (v: int, t0: int, message: str, e: int):
 const FF_NAN = 1
 const FF_INF = 2
 const FF_ENTER = 4  # (a check that a value entering `$no_nan` is not NaN)
+const FF_ENTER_INF = 8 # (a check that a value entering `$no_inf` is finite)
 const FF_MAX = 1.7976931348623157e308
 
 struct FR:
@@ -272,8 +272,8 @@ ff_env: {int: FR} = {}          # tracked local -> its bounds here
 ff_files: {int: bool} = {}      # files holding a float scope
 ff_owners: {int: bool} = {}     # functions a float scope is written in
 ff_assume = 0                   # the settings at the function body: what entering values obey
-ff_callers: {int: bool} = {}    # functions calling a function whose body is under `$no_nan`
-ff_direct: {int: int} = {}      # declaration -> 1: its body is under `$no_nan`, 2: not
+ff_callers: {int: bool} = {}    # functions calling a function whose body has a float policy
+ff_direct: {int: int} = {}      # declaration -> its body's float policy plus one
 ff_indirect: {int: bool} = {}   # declarations used as values: their parameters enter
 ff_keys: {int: int} = {}        # dictionary key or set element under `$no_nan` -> what (FK_*)
 ff_conversions: {int: bool} = {} # functions converting a float to an integer (expr.jo)
@@ -300,9 +300,9 @@ ff_note_conversion = ():
     if cx >= 0: ff_conversions[int(ctxs[cx].inst)] = true
 
 # expr.jo, a direct call of f from the function being checked: its caller is walked when f's body
-# is under `$no_nan` and takes a float
+# has a float policy and takes a float
 ff_note_call = (f: int, decl: int):
-    if ff_scope_decl(decl) != 1 or cx < 0: return
+    if ff_scope_decl(decl) == 0 or cx < 0: return
     has_float = false
     loop t in fns[f].ptypes:
         if is_float(quantity_base(prune(t))): has_float = true
@@ -312,13 +312,13 @@ ff_note_call = (f: int, decl: int):
 ff_note_ref = (decl: int):
     if decl != 0: ff_indirect[decl] = true
 
-# 1 when the declaration's body is under `$no_nan`, else 2
+# The declaration's body's float policy (0 if neither setting holds).
 ff_scope_decl = (decl: int) -> int:
-    if decl == 0 or nodes[decl].kind != .fn_ or nodes[decl].b == 0: return 2
-    if let k = ff_direct.get(decl): return k
-    k = if dir_value(dir_name_no_nan, nodes[int(nodes[decl].b)].pos) == 1: 1 else: 2
-    ff_direct[decl] = k
-    k
+    if decl == 0 or nodes[decl].kind != .fn_ or nodes[decl].b == 0: return 0
+    if let k = ff_direct.get(decl): return k - 1
+    mode = ff_mode_at(nodes[int(nodes[decl].b)].pos)
+    ff_direct[decl] = mode + 1
+    mode
 
 ff_mode_at = (p: int) -> int:
     m = 0
@@ -334,9 +334,7 @@ ff_top = () -> FR:
 
 # a value entering the scope: it may be NaN
 ff_enter = () -> FR:
-    r = ff_top()
-    r.nan = true
-    r
+    FR(-INF, INF, true)
 
 ff_hull = (a: FR, b: FR) -> FR: FR(min(a.lo, b.lo), max(a.hi, b.hi), a.nan or b.nan)
 ff_has = (a: FR, x: f64) -> bool: a.lo <= x and x <= a.hi
@@ -379,16 +377,24 @@ ff_float = (n: int) -> bool:
     t = ntype(n)
     t > 0 and is_float(t)
 
-# n's value r is used where `$no_nan` holds: it must not be NaN (an obligation when it may be)
+# n's value r is used under a float policy: prove or check each property it may violate.
 ff_use = (n: int, r: FR) -> FR:
-    if not r.nan or n <= 0 or ff_mode_at(nodes[n].pos) & FF_NAN == 0: return r
-    ff_obligation(n, FF_ENTER, "{ff_shown(n)} is not NaN")
+    if n <= 0: return r
+    mode = ff_mode_at(nodes[n].pos)
+    if r.nan and mode & FF_NAN != 0: ff_obligation(n, FF_ENTER, "{ff_shown(n)} is not NaN")
+    if ff_may_inf(r) and mode & FF_INF != 0: ff_obligation(n, FF_ENTER_INF, "{ff_shown(n)} is finite")
+    if (not r.nan or mode & FF_NAN == 0) and (not ff_may_inf(r) or mode & FF_INF == 0): return r
     l = ff_local(n)
     if l > 0 and ff_env.has(l):
         k = ff_env[l]
-        k.nan = false
+        if mode & FF_NAN != 0: k.nan = false
+        if mode & FF_INF != 0:
+            k.lo = max(k.lo, -FF_MAX)
+            k.hi = min(k.hi, FF_MAX)
         ff_env[l] = k
-    FR(r.lo, r.hi, false)
+    lo = if mode & FF_INF != 0: max(r.lo, -FF_MAX) else: r.lo
+    hi = if mode & FF_INF != 0: min(r.hi, FF_MAX) else: r.hi
+    FR(lo, hi, r.nan and mode & FF_NAN == 0)
 
 ff_shown = (n0: int) -> str:
     n = n0
@@ -403,13 +409,14 @@ ff_shown = (n0: int) -> str:
 ff_obligation = (n: int, kind: int, what: str, by: str = ""):
     if ff_probing: return
     p = nodes[n].pos
-    tag = if kind == FF_INF: "no_inf" else: "no_nan"
+    tag = if kind == FF_INF or kind == FF_ENTER_INF: "no_inf" else: "no_nan"
     claim = if len(by) > 0: "cannot prove {what}: {by}" else: "cannot prove {what} under `${tag}`"
     if dir_defer(n, claim, true):
         ff_checks[n] = (ff_checks.get(n) ?? 0) | kind
         ff_checks_any = true
         return
     if kind == FF_ENTER: err_notes.push((-1, "help: a value entering `$no_nan` (a parameter of a function used as a value, a field, an element, a call's result) may be NaN: test it first (`if x =? x`, `if 0.0 <=? x`), or check it at run time with `$runtime_checks`"))
+    else if kind == FF_ENTER_INF: err_notes.push((-1, "help: a value entering `$no_inf` may be infinite: bound it with a guard, or check it at run time with `$runtime_checks`"))
     else: err_notes.push((-1, "help: bound the operands with a guard (`if b not=? 0.0`, `if x <? 1e300`), or opt this scope out with `${tag}=false`"))
     fatal(p, claim)
 
@@ -576,20 +583,27 @@ ff_eval_node = (n: int) -> FR:
         ff_eval(int(nodes[n].a))
         f = int(nodes[n].sym)
         decl = int(fns[f].decl)
-        # (a function whose body is under `$no_nan` takes its parameters proven: each float
-        # argument here, under this code's policy)
-        if decl > 0 and fns[f].kind != i32(FK_LAMBDA) and ff_scope_decl(decl) == 1:
+        # A direct call proves the properties its callee's float policy requires.
+        scope = ff_scope_decl(decl)
+        if decl > 0 and fns[f].kind != i32(FK_LAMBDA) and scope != 0:
             loop i in 0.. and c in kids(n):
-                if args[i].nan and ff_float(c):
-                    ff_obligation(c, FF_ENTER, "{ff_shown(c)} is not NaN", "`{name_of(int(nodes[decl].name))}` takes it under `$no_nan`")
-                    args[i] = ff_use_done(c, args[i])
+                if ff_float(c):
+                    if args[i].nan and scope & FF_NAN != 0:
+                        ff_obligation(c, FF_ENTER, "{ff_shown(c)} is not NaN", "`{name_of(int(nodes[decl].name))}` takes it under `$no_nan`")
+                    if ff_may_inf(args[i]) and scope & FF_INF != 0:
+                        ff_obligation(c, FF_ENTER_INF, "{ff_shown(c)} is finite", "`{name_of(int(nodes[decl].name))}` takes it under `$no_inf`")
+                    lo = if scope & FF_INF != 0: max(args[i].lo, -FF_MAX) else: args[i].lo
+                    hi = if scope & FF_INF != 0: min(args[i].hi, FF_MAX) else: args[i].hi
+                    args[i] = FR(lo, hi, args[i].nan and scope & FF_NAN == 0)
         if not ff_float_or_opt(t): return ff_top()
         if decl > 0 and pos_in_lib(nodes[decl].pos):
             name = name_of(int(nodes[decl].name))
             if name in ["log", "log2", "log10", "exp", "sin", "cos", "tan", "asin", "acos", "pow", "tanh"]:
                 loop i in 0.. and c in kids(n): args[i] = ff_use(c, args[i])
             return ff_math(n, name, args)
-        if decl > 0 and ff_scope_decl(decl) == 1: return ff_top()
+        if decl > 0 and scope != 0:
+            hi = if scope & FF_INF != 0: FF_MAX else: INF
+            return FR(-hi, hi, scope & FF_NAN == 0)
         return ff_enter()
     if k == .call and ff_float_or_opt(t):
         # (a function value, a closure: its result enters)
@@ -951,10 +965,10 @@ ff_walk = (f: int):
     body = int(fns[f].body)
     ff_fn = f
     ff_env = {}
-    # (its callers prove its parameters when its body is under `$no_nan` and every call is
-    # seen; otherwise they enter)
+    # (direct callers prove the properties demanded by the body's scope; a lambda or function
+    # used as a value still receives unchecked parameters)
     decl = int(fns[f].decl)
-    entering = fns[f].kind == i32(FK_LAMBDA) or ff_scope_decl(decl) != 1 or ff_indirect.has(decl)
+    entering = fns[f].kind == i32(FK_LAMBDA) or ff_scope_decl(decl) == 0 or ff_indirect.has(decl)
     loop l in fns[f].params:
         if ff_tracked(l) and int(locals[l].type) > 0 and is_float(int(locals[l].type)): ff_env[l] = if entering: ff_enter() else: ff_top()
     r = ff_eval(body)
@@ -993,9 +1007,10 @@ float_check = (e: int, v: int, t: int):
         iff(e_bin(.fne, ty, v, v))
         e_call_nr(rt("__assert_fail"), [e_daddr(str_data("a NaN entered `$no_nan`")), e_daddr(loc_data(nodes[e].pos))], -1)
         endc()
-    if kinds & FF_INF != 0:
+    if kinds & (FF_INF | FF_ENTER_INF) != 0:
         # (v - v is NaN for an infinity, and for NaN)
         d = e_bin(.fsub, ty, v, v)
         iff(e_bin(.and_, VI, e_bin(.feq, ty, v, v), e_bin(.fne, ty, d, d)))
-        e_call_nr(rt("__assert_fail"), [e_daddr(str_data("produced an infinity under `$no_inf`")), e_daddr(loc_data(nodes[e].pos))], -1)
+        message = if kinds & FF_ENTER_INF != 0: "an infinity entered `$no_inf`" else: "produced an infinity under `$no_inf`"
+        e_call_nr(rt("__assert_fail"), [e_daddr(str_data(message)), e_daddr(loc_data(nodes[e].pos))], -1)
         endc()

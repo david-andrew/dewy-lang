@@ -872,18 +872,18 @@ in its scope that could produce a NaN (`∞-∞`, `0*∞`, `0/0`, `∞/∞`, `sq
 `log` of a negative number, `sin` of an infinity, `pow`) an obligation, and
 `$no_inf` does the same for infinities (an overflowing `+`, `-`, `*` or `/`, a
 possibly zero divisor, `log(0)`, `exp`, `pow`, a `float32` narrowing, a large
-`int` converted). `$finite_floats` (lib/directives.dewy) is both. Under
-`$no_nan`, values that enter the scope are not assumed free of NaN. A
-parameter of a function whose body is in the scope is proven by each caller: a
-float argument the caller cannot prove (one parsed from text, `to_float(s) ?? 0.0`,
-may be NaN) is an obligation there, under the caller's own settings (a compile
-error by default, a runtime check under `$runtime_checks`). A field, element, global,
-
-loop variable, the result of a call from outside the scope, or a parameter of a
-lambda or of a function used as a value, may be NaN: using it (in arithmetic, a
+`int` converted). `$finite_floats` (lib/directives.dewy) is both. Values
+entering a `$no_nan` or `$no_inf` scope are not assumed to obey it. A parameter
+of a function whose body is in the scope is proven by each caller: a float
+argument the caller cannot prove (one parsed from text, `to_float(s) ?? 0.0`,
+may be NaN or infinite) is an obligation there, under the caller's own settings
+(a compile error by default, a runtime check under `$runtime_checks`). A field,
+element, global, loop variable, the result of a call from outside the scope,
+or a parameter of a lambda or of a function used as a value, may be NaN or
+infinite: using it (in arithmetic, a
 math function, a `return`, a reassignment, a dictionary key or set element) is
-an obligation, which a comparison that holds proves (`let v = r.value` then
-`if v =? v` or `if 0.0 <=? v`). `$no_inf` still takes entering values as finite.
+an obligation, which a suitable comparison that holds proves (`let v = r.value`
+then `if v =? v` for NaN, or a finite range guard for infinities).
 Guards on locals and constant operands prove most obligations:
 
 ```dewy
@@ -1364,7 +1364,8 @@ exactly in whole turns. A float angle gives a `float64`; an exact one gives a
 `float64` rounded to fixed's 32 fraction bits until `fixed` exists. A plain
 number is rejected too, and so is `@sin` as a function of one: radians are
 `x*rad` (`rad`, `radian` or `radians` from `units`, 1/2π turn as a fraction
-within 1e-31 of it, so a float angle rounds once). In shader code a quantity is
+within 1e-31 of it, so a float angle rounds once). Conversions involving `rad`
+display as decimals, while retaining the exact fraction internally. In shader code a quantity is
 its plain canonical number (an angle counts turns), and `sin` is the GPU's.
 
 ## Exact large integers
@@ -3139,8 +3140,10 @@ Anything that would use a secret as its `T` is a compile error that names
 - members and methods other than `reveal` (`s.length`);
 - indexing and iteration.
 
-Operators work on the values. Comparisons (`=?`, `not=?`, `<?`, ...) give a plain
-`bool`. Arithmetic, the other binary operators and unary `-` give a secret of the
+Operators work on the values. Equality (`=?`, `not=?`) gives a plain `bool`,
+deliberately revealing one bit with value-dependent timing. Ordering (`<?`,
+`<=?`, `>?`, `>=?`) gives `secret<bool>`; use `.reveal` to branch on it.
+Arithmetic, the other binary operators and unary `-` give a secret of the
 result, as `k + 1` or `k += 1` does. `hash(s)` is a secret too; the `hash` of a
 container holding secrets is not available yet. Secrets can be dictionary keys
 and set members, and they work in generic code.
