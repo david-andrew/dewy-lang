@@ -2952,7 +2952,8 @@ check_block = (b: int, expected: int, want_value: bool) -> int:
         s = kid(b, i)
         sibling_index = i
         if counted: sinks[sinks.len() - 1].direct = s
-        if i == n - 1 and want_value and value_capable(s):
+        # A trailing spawn is a statement even in a value-producing helper body.
+        if i == n - 1 and want_value and value_capable(s) and not (nodes[s].kind == .exprstmt and nodes[int(nodes[s].a)].kind == .call and nodes[int(nodes[s].a)].aux2 == 17):
             if nodes[s].kind == .if_ or nodes[s].kind == .iflet:
                 es = mk(.exprstmt, nodes[s].pos)
                 nodes[es].a = i32(s)

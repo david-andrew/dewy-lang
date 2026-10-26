@@ -94,13 +94,13 @@ __re_read = (p: mut __ReParser) -> int:
     if len(p.err) == 0: __re_check_size(p, ast)
     ast
 
-# a pattern made ready to match, or RegexError when it cannot be read (regex_error says why). A
+# a pattern made ready to match, or RegexError with the reason when it cannot be read. A
 # literal pattern is checked while compiling: it is a Regex, or a compile error.
 @check_constant(regex_error(pattern), "not a valid pattern")
 regex = (pattern: str) -> Regex | RegexError:
     p = __ReParser(pattern, chars(pattern))
     ast = __re_read(p)
-    if len(p.err) > 0: return RegexError()
+    if len(p.err) > 0: return RegexError(p.err)
     r = Regex(pattern, [], [], 0)
     r.icase = p.icase
     r.groups = p.groups

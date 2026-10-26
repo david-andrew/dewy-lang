@@ -1,0 +1,14 @@
+# Singular is an error value from either linear algebra operation.
+main = () => {
+    $runtime_checks    # shape obligations are separate from singularity
+    let values:array<float64> = [1.0 2.0 2.0 4.0]
+    let a = reshape(values 2 2)
+    match solve(a [3.0 6.0]) {
+        x:array<float64> => printl(x)
+        <Singular> => printl("solve: singular")
+    }
+    match inverse(a) {
+        <Singular> => printl("inverse: singular")
+        _ => printl("inverse: invertible")
+    }
+}

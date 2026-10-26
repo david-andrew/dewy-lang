@@ -2149,7 +2149,7 @@ def test_core_applications(compiler, tmp_path, name, target, release):
 def test_core_numeric_example(compiler, tmp_path, target, release):
     source = Path(__file__).resolve().parents[1] / 'examples/trajectory_fit.dewy'
     command, error = build_case_batch(compiler, tmp_path, {'trajectory': source.read_text()},
-                                      ['case_0()'], release, target)
+                                      ['match case_0() { <Singular> => exit(1) _ => {} }'], release, target)
     assert error is None, error
     ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
     assert ran.returncode == 0, ran.stdout + ran.stderr

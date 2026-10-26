@@ -1,0 +1,12 @@
+# modes: native native-release
+# A trailing spawn in a helper gives no task handle back.
+work = (n:int):>int => n + 1
+helper = (g:TaskGroup):>void => { spawn(g) work(41) }
+inferred = (g:TaskGroup) => { spawn(g) work(0) }
+main = () => {
+    concurrent g {
+        helper(g)
+        inferred(g)
+    }
+    printl("joined")
+}

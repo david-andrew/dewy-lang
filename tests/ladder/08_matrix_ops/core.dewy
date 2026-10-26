@@ -9,16 +9,16 @@ residual = (matrix:NDArray<float64> x:array<float64> b:array<float64>):>float64 
     }
     return total
 }
-main = ():>void => {
+main = ():>void | Singular => {
     let a = reshape<float64>([3.0 1.0 1.0 2.0] 2 2)
     let b:array<float64> = [9.0 8.0]
-    let solution = solve(a b)
+    let solution = solve(a b) or_throw
     $runtime_assert(close(solution[0] 2.0))
     $runtime_assert(close(solution[1] 3.0))
     $runtime_assert(residual(a solution b) <? 1e-9)
     let product = a*eye(2)
     $runtime_assert(product.data =? a.data)
-    let inverse_a = inverse(a)
+    let inverse_a = inverse(a) or_throw
     let identity = a*inverse_a
     $runtime_assert(close(identity[0 0] 1.0))
     $runtime_assert(close(identity[1 1] 1.0))

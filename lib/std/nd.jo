@@ -895,15 +895,15 @@ outer = (a: f64[], b: f64[]) -> f64[,]:
 diag = (m: f64[,]) -> f64[]: [loop i in [0..min(rows(m), cols(m))): m.data[i * cols(m) + i]]
 trace = (m: f64[,]) -> f64: sum(diag(m))
 
-# x with a * x = b, a square (Gaussian elimination, choosing the largest pivot); a matrix with
-# no inverse panics
-solve = (a: f64[,], b: f64[]) -> f64[]:
+# x with a * x = b, a square (Gaussian elimination, choosing the largest pivot).
+solve = (a: f64[,], b: f64[]) -> f64[] | Singular:
     n = __square(a, "solve")
     if b.len() != n: panic("solve: a is {n}x{n} and b has {b.len()} values")
     m = a.data
     x = b
     loop c in [0..n):
         p = __pivot(m, n, c)
+        if abs(m[p * n + c]) < 1e-300: return Singular()
         if p != c:
             __swap_rows(m, n, p, c)
             t = x[p]
@@ -921,13 +921,14 @@ solve = (a: f64[,], b: f64[]) -> f64[]:
         x[c] = t / m[c * n + c]
     x
 
-# the inverse (a * inverse(a) is eye(n)); a matrix with none panics
-inverse = (a: f64[,]) -> f64[,]:
+# the inverse (a * inverse(a) is eye(n)).
+inverse = (a: f64[,]) -> f64[,] | Singular:
     n = __square(a, "inverse")
     m = a.data
     inv = eye(n).data
     loop c in [0..n):
         p = __pivot(m, n, c)
+        if abs(m[p * n + c]) < 1e-300: return Singular()
         if p != c:
             __swap_rows(m, n, p, c)
             __swap_rows(inv, n, p, c)
@@ -970,7 +971,6 @@ __pivot = (m: f64[], n: int, c: int) -> int:
     p = c
     loop r in [c + 1..n):
         if abs(m[r * n + c]) > abs(m[p * n + c]): p = r
-    if abs(m[p * n + c]) < 1e-300: panic("the matrix has no inverse (its rows are not independent)")
     p
 __swap_rows = (m: mut f64[], n: int, a: int, b: int):
     loop k in [0..n):

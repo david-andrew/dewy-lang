@@ -1,0 +1,9 @@
+# A dynamic invalid pattern carries its own diagnostic.
+describe = (pattern:string):>string => match regex(pattern) {
+    r:Regex => "valid"
+    e:RegexError => e.message
+}
+main = () => {
+    let pattern = "("
+    printl(describe(pattern))
+}

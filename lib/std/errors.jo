@@ -30,10 +30,13 @@ struct NotAnInteger:
 @nominal(error)
 struct TooManyDigits:
     pass
-# A pattern regex(pattern) cannot read, or too big to match in reasonable time (regex_error
-# says what is wrong).
+# A pattern regex(pattern) cannot read, or too big to match in reasonable time.
 @nominal(error)
 struct RegexError:
+    message: str
+# A square matrix whose rows are not independent.
+@nominal(error)
+struct Singular:
     pass
 # A fixed-width result that does not fit its parts (rational<int64> arithmetic).
 @nominal(error)

@@ -65,10 +65,8 @@ fit_line = (xs:array<float64> ys:array<float64>):>Line | TooFewPoints | NoSpread
 }
 
 # least squares for y = a + b x + c x^2: solve (XᵀX) β = Xᵀy
-fit_quadratic = (xs:array<float64> ys:array<float64>):>array<float64> | TooFewPoints => {
-    # `solve` panics on a singular system and has no form that returns the
-    # failure as a value, so this function opts in to that check
-    $runtime_checks
+fit_quadratic = (xs:array<float64> ys:array<float64>):>array<float64> | TooFewPoints | Singular => {
+    $runtime_checks    # matrix shape and index obligations remain checked
     if xs.length <? 3 return TooFewPoints[3 xs.length]
     let design:array<float64> = [loop x in xs {1.0 x x^2}]
     let x = reshape(design xs.length 3)
@@ -130,10 +128,11 @@ main = () => {
     let xs:array<float64> = [0 1 2 3 4]
     let ys = [loop x in xs 2.0 - 3.0*x + 0.5*x^2]
     {
-        $runtime_checks          # a singular system would stop the program here
+        $runtime_checks          # matrix shape and index obligations remain checked
         match fit_quadratic(xs ys) {
             beta:array<float64> => printl"quadratic: {[loop b in beta format(b ".3f")].join(" ")}"
             e:TooFewPoints => printl"quadratic: need {e.needed}"
+            <Singular> => printl"quadratic: singular"
         }
     }
 

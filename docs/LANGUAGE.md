@@ -1289,6 +1289,7 @@ exact: `3km =? 3000m`, `300ms =? 3s/10`, and `90deg =? turn/4`; `°` also
 spells degrees. Fractions use `rational`, and quantities also support machine
 integers, checked `int` (`bigint`), `float32`, and `float64`. A floating annotation rounds an
 exact scale to that representation.
+`L` and `mL` are volume units (`1L =? m^3/1000`, `1000mL =? 1L`).
 
 Addition, subtraction, and comparisons require identical dimensions.
 Multiplication/division combine dimensions; powers require a constant integer
@@ -2460,7 +2461,7 @@ let matrix = reshape(values 2 2)
 let saved = matrix
 matrix[0 1] = 4.0
 $runtime_assert(saved[0 1] =? 1.0)
-let solution = solve(saved [9.0 8.0])  # approximately [2.0 3.0]
+let solution = solve(saved [9.0 8.0]) or_throw  # approximately [2.0 3.0]
 let product = saved*eye(2)
 $runtime_assert(product.data =? saved.data)
 ```
@@ -2527,7 +2528,8 @@ For matrices, `a*b` is the matrix product; `a*values` multiplies a matrix by a
 column vector. `a+b` and `a-b` require matching shapes. `sum`, `mean`, `min` and
 `max` reduce the elements. `solve(matrix values)`, `inverse(matrix)` and
 `det(matrix)` provide linear algebra on square `float64` matrices; a singular
-matrix raises an error in `solve` and `inverse`.
+matrix gives `Singular` as an error value from `solve` and `inverse`; use
+`or_throw`, `??`, or `match` to handle it.
 
 `dot(a b)` computes a dot product. `norm(values)` computes the Euclidean length
 of a `float64` array; `hypot(x y)` computes the length of two coordinates.
@@ -2856,7 +2858,9 @@ concurrent {
 The closing brace joins every child. A task's result is kept only by
 `let name = spawn ...` written directly in the block; a spawn elsewhere is a
 statement (`loop x in xs { spawn work(x out) }`), so tasks in a loop send their
-results over a channel or store them under a `Mutex`. As an expression, `concurrent { ... }`
+results over a channel or store them under a `Mutex`. A helper whose final
+statement is `spawn(g) work()` returns `void`, without exposing a task handle.
+As an expression, `concurrent { ... }`
 returns `true` on success or the first exception returned by a child. The first
 failure cancels its siblings; joining still waits for their cleanup. Returning
 early from the body cancels and joins its children. `concurrent g { ... }` names
@@ -4016,7 +4020,7 @@ printl([3 1 4].index_of(9))            # Missing
 ```
 
 `regex(pattern)` prepares a reusable regular expression, or gives `RegexError`
-(an error) for a pattern it cannot read: it returns `Regex | RegexError`. A literal
+(an error with a `message`) for a pattern it cannot read: it returns `Regex | RegexError`. A literal
 pattern (or a constant holding one) is checked while compiling, so
 `regex(r"\d+")` is simply a `Regex`, and a literal it cannot read is a compile
 error saying what is wrong. `text.find(pattern)`
@@ -4037,13 +4041,13 @@ let fields = "a, b;c".split(regex(r"[,;]\s*"))
 Patterns support character classes, alternatives, captured and `(?:...)`
 uncaptured groups, greedy/lazy repetitions, line anchors `^`/`$`, and word
 boundaries. `(?i)` at the start folds ASCII case. A pattern known only at run
-time is handled like any fallible value, and `regex_error(pattern)` says what is
+time is handled like any fallible value. `regex_error(pattern)` independently says what is
 wrong with one (or gives `none`):
 
 ```dewy
 match regex(user_pattern) {
     r:Regex => printl(text.matches(r))
-    <RegexError> => printl"bad pattern: {regex_error(user_pattern) ?? ""}"
+    e:RegexError => printl"bad pattern: {e.message}"
 }
 ```
 
