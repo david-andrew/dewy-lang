@@ -437,3 +437,14 @@ _quantity_float32=(value:float32 units:array<string> nums:array<int64> dens:arra
     }
     return "{(value*float32(dens[pick])-offset)/float32(nums[pick])}{units[pick]}"
 }
+
+# The exact members of the prelude's abs, min, max and sign (they join its
+# families in a Dewy module once a rational is in use). An integer argument
+# promotes; a float one makes the float member the choice. `sign` is an `int`.
+abs=(value:RationalWord):>RationalWord|Overflow=>_narrow(abs(_widen(value)))
+min = ((a:Rational b:Rational):>Rational=>if _lt(b a) b else a)
+    & ((a:RationalWord b:RationalWord):>RationalWord=>if _lt(_widen(b) _widen(a)) b else a)
+max = ((a:Rational b:Rational):>Rational=>if _lt(a b) b else a)
+    & ((a:RationalWord b:RationalWord):>RationalWord=>if _lt(_widen(a) _widen(b)) b else a)
+sign = ((value:Rational):>int=>if value.numerator <? 0 -1 else if value.numerator >? 0 1 else 0)
+    & ((value:RationalWord):>int=>if value.numerator <? 0 -1 else if value.numerator >? 0 1 else 0)

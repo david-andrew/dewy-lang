@@ -1493,7 +1493,8 @@ truncates toward zero. Exact numbers round as people do, a half away from zero:
 `f:float64 = 2.5`. Both take `ties=` to choose the rule: `'away'`, `'even'`,
 `'zero'` (toward zero), `'up'` (toward +∞) or `'down'` (toward −∞), as in
 `round(f ties='away')`. `.abs()`, `.reciprocal()` and `.pow(signed_exponent)` return
-fractions. A nonzero divisor of `/`, `//` and `%` is an obligation, as an
+fractions. `abs`, `min` and `max` of fractions (an integer beside one included) are
+exact fractions, and `sign(q)` is an `int`; beside a float they give a float. A nonzero divisor of `/`, `//` and `%` is an obligation, as an
 integer division's, when the divisor is an integer or a constant (`x/n` after
 `n not=? 0`, `x/0.5`); a rational divisor computed at run time, a zero
 denominator and negative powers of zero fail: they are compile errors by
@@ -2053,7 +2054,7 @@ to a value and `xs.count(f)` those a predicate accepts; `xs.any(f)` and
 `xs.filter(f)` one of the elements `f` accepts (a comprehension says either,
 `[loop x in xs if f(x) x]`); `xs.reversed()` is a new array in reverse order,
 while `xs.reverse()` reverses `xs` itself. `xs.get(i)` gives the element, or
-`none` when `i` is out of bounds (negative included). Without a predicate, `any` and `all` apply only to
+`none` when `i` is out of bounds (negative included). Any `int` index works, with nothing to prove: one beyond the `int64` range is out of bounds too. Without a predicate, `any` and `all` apply only to
 an array of bools (`all(flags)`; the idiom for numbers is a comparison per
 element, `all(xs .>? 0)`, part of the planned elementwise operators). There is no
 `zip` or `enumerate`: a compound loop walks several sources in step,

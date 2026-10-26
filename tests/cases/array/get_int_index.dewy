@@ -1,0 +1,16 @@
+# `xs.get(i)` of an `int` index needs no proof that it fits a word: one past
+# the word range is out of bounds too, and gives none.
+main=():>void=>{
+    let xs=[10 20 30]
+    let words=["a" "b"]
+    let huge:int=2^70
+    let low:int=-(2^70)
+    let before:int=-1
+    let length:int=xs.length
+    let last:int=xs.length-1
+    printl("{xs.get(huge)} {xs.get(low)} {xs.get(before)} {xs.get(length)}")
+    printl("{xs.get(0)} {xs.get(last)} {xs.get(huge-huge+1)} {get(xs last)}")
+    printl("{words.get(huge) ?? "-"} {words.get(low) ?? "-"} {words.get(before+1) ?? "-"}")
+    let w:int64=2
+    printl(xs.get(w))
+}

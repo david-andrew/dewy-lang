@@ -2536,6 +2536,9 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
             # (last_err is for a name with one function only; sin(v) with v: vec3 looks at
             # sin(vec3) alone)
             if p0 != a0t and (pk0 == .vec or pk0 == .int_ or pk0 == .float_) and not can_coerce(0, a0t, p0): continue
+            # (a float never becomes a fraction implicitly: abs(x) with x: f64 passes over the
+            # exact members its family has once a rational is in use)
+            if pk0 == .struct_ and tkind(a0t) == .float_ and (bundled_rational_type(p0) or bundled_word_rational_type(p0)): continue
         cd = Cand(decl = d, sig = decl_infos[di].sig)
         np = nkids(d)
         kinds = dewy_param_kinds.get(d) ?? []
@@ -3934,6 +3937,24 @@ collect_fns = (name: int, out: mut int[]):
     hide_lib_only = true
     collect_in(prelude, name, out)
     hide_private = false
+    # (the builtin `rational`'s exact abs, min, max and sign join the prelude's families once
+    # its library is in use: a probe per family collected, the cache's once a name is stamped)
+    if m >= 0 and not modules[m].is_prelude and files[int(modules[m].file)].is_dewy and exact_family_name(name):
+        rm = rational_module()
+        if rm >= 0 and rm != m: collect_in(modules[rm].names, name, out)
+
+exact_family_name = (name: int) -> bool:
+    name == ci(28, "abs") or name == ci(44, "min") or name == ci(45, "max") or name == ci(46, "sign")
+
+# The bundled rational's module, or -1 while it is not loaded: probed again only once more
+# modules are loaded. O(1) amortized.
+rational_module_found = -1
+rational_module_probed = 0
+rational_module = () -> int:
+    if rational_module_found >= 0 or modules.len() == rational_module_probed: return rational_module_found
+    rational_module_probed = modules.len()
+    rational_module_found = find_module(lib_dir + "/rational.dewy")
+    rational_module_found
 
 # A bare name in a Dewy module names one binding: the module's own declarations
 # of it (or its selected imports) shadow the shadowable ones it would otherwise
@@ -4261,6 +4282,19 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
             if k0 == .str_ and name == id_chars: return call_by_name(n, ci(1, "graphemes"), mod_scope, args, expected, false)
             if k0 == .str_ and name != id_index_of and name != id_chars: return call_by_name(n, intern("__dewy_{name_of(name)}"), mod_scope, args, expected, false)
             if k0 == .array and name == id_index_of and args.len() == 2: return call_by_name(n, ci(2, "__dewy_index_of"), mod_scope, args, expected, false)
+    # (`xs.get(i)` of an `int` index: one past the word range is past an end too, so the index
+    # saturates into a word rather than narrowing with a proof, as a text repeat count does)
+    if name == ci(47, "get") and mod_scope < 0 and args.len() == 2 and nodes[args[0]].kind != .namedarg and nodes[args[1]].kind != .namedarg and dewy_at(nodes[n].pos):
+        a0 = args[0]
+        if not has_flag(a0, NF_CHECKED):
+            check_expr(a0, 0)
+            add_flag(a0, NF_CHECKED)
+        if tkind(prune(ntype(a0))) == .array:
+            a1 = args[1]
+            if not has_flag(a1, NF_CHECKED):
+                check_expr(a1, 0)
+                add_flag(a1, NF_CHECKED)
+            if prune(ntype(a1)) == T_MATH_INT and not is_lit(a1): coerce(a1, policy_int(T_INT, 2, nodes[n].pos))
     if not ufcs and mod_scope < 0 and args.len() == 2 and (name == ci(3, "__floor_div") or name == ci(4, "__floor_mod") or name == ci(5, "__dewy_power") or name == ci(6, "__dewy_divide")) and (files[pos_file(nodes[n].pos)].is_dewy or pos_in_lib(nodes[n].pos)):
         if nodes[args[0]].kind != .namedarg and nodes[args[1]].kind != .namedarg:
             return dewy_arithmetic_call(n, name, args, expected)
