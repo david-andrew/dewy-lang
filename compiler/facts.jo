@@ -2007,6 +2007,10 @@ fact_inverse = (op: Tok) -> Tok:
 fact_open_endpoint = (s: FactState, v: int, upper: bool) -> bool:
     v != 0 and fact_type(fact_terms[v].type) != T_U64 and not fact_host_endpoint(s, v, upper)
 
+# Neither of v's MIN/MAX ends is open. O(fact_open_endpoint).
+fact_real_ends = (s: FactState, v: int, b: FactBound) -> bool:
+    (b.lo != FACT_MIN or not fact_open_endpoint(s, v, false)) and (b.hi != FACT_MAX or not fact_open_endpoint(s, v, true))
+
 fact_set_bound = (s: mut FactState, v: int, b0: FactBound, exact: bool = false):
     i = fact_slot(s, v)
     if i < 0: return
@@ -2051,17 +2055,19 @@ fact_assume = (s: mut FactState, v: int, truth: bool):
     # A true comparison can bring an exact offset back into the host domain.
     # Require its opposite endpoint to be strictly inside that domain: an
     # endpoint at MIN/MAX may stand for an unbounded side of a wide value.
+    # The other side's MIN/MAX end must be real too: an open `int` end would
+    # hand a wide int64 sum a real-looking word bound (`a+b <? m`).
     if op == .eq:
-        if x.wide and not y.wide: x = y; fact_set_bound(s, a, x, y.lo == y.hi)
-        else if y.wide and not x.wide: y = x; fact_set_bound(s, b, y, x.lo == x.hi)
+        if x.wide and not y.wide and fact_real_ends(s, b, y): x = y; fact_set_bound(s, a, x, y.lo == y.hi)
+        else if y.wide and not x.wide and fact_real_ends(s, a, x): y = x; fact_set_bound(s, b, y, x.lo == x.hi)
     else if op == .lt or op == .le:
-        if x.wide and not y.wide and x.lo > FACT_MIN:
+        if x.wide and not y.wide and x.lo > FACT_MIN and (y.hi != FACT_MAX or not fact_open_endpoint(s, b, true)):
             x.hi = y.hi
             x.wide = false
             # (below a real MAX, at least MAX is exactly MAX)
             fact_set_bound(s, a, x, not fact_open_endpoint(s, b, true))
             x = fact_bound(s, a)
-        if y.wide and not x.wide and y.hi < FACT_MAX:
+        if y.wide and not x.wide and y.hi < FACT_MAX and (x.lo != FACT_MIN or not fact_open_endpoint(s, a, false)):
             y.lo = x.lo
             y.wide = false
             fact_set_bound(s, b, y, not fact_open_endpoint(s, a, false))
@@ -2803,7 +2809,7 @@ fact_arithmetic = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
         lo = min(min(x.lo * y.lo, x.lo * y.hi), min(x.hi * y.lo, x.hi * y.hi))
         hi = max(max(x.lo * y.lo, x.lo * y.hi), max(x.hi * y.lo, x.hi * y.hi))
         if not exact_has_node(n) and (not sa_fits(lo, ntype(n)) or not sa_fits(hi, ntype(n))): return fact_unmodeled(s, n, .unsupported)
-        return fact_new(s, FactBound(lo, hi, lo > 0 or hi < 0), FactTerm(op, a, b, n, ntype(n)))
+        return fact_new(s, FactBound(lo, hi, lo > 0 or hi < 0), FactTerm(op, a, b, n, fact_word_type(s, n, a, b, lo, hi)))
     # (two symbolic operands: the same sum again, or rows through terms
     # already evaluated, which can also bound it)
     sums: FactDifference[]
@@ -2856,7 +2862,7 @@ fact_arithmetic = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
     if y.lo == y.hi and y.lo != FACT_MIN:
         same = fact_offset_value(s, a, y.lo)
         if same != 0: return same
-    value = fact_new(s, fact_open_bound(lo, hi, lo_open and lo == FACT_MIN, hi_open and hi == FACT_MAX), FactTerm(op, a, b, n, ntype(n)))
+    value = fact_new(s, fact_open_bound(lo, hi, lo_open and lo == FACT_MIN, hi_open and hi == FACT_MAX), FactTerm(op, a, b, n, (if lo_open or hi_open: ntype(n) else: fact_word_type(s, n, a, b, lo, hi))))
     loop r in sums: fact_difference(s, (if r.a == 0: value else: r.a), (if r.b == 0: value else: r.b), r.limit, n)
     if y.lo == y.hi and y.lo != FACT_MIN:
         fact_difference(s, value, a, y.lo, 0, 16)
@@ -2865,6 +2871,15 @@ fact_arithmetic = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
         fact_difference(s, value, b, x.lo, 0, 16)
         fact_difference(s, b, value, -x.lo, 0, 16)
     value
+
+# An `int` sum or product of two values with real ends has real ends too: at
+# a MIN/MAX endpoint it is an int64 value, as fact_hull_type types a hull.
+# Only an endpoint at MIN/MAX needs the check (fact_host_finite's rows).
+fact_word_type = (s: FactState, n: int, a: int, b: int, lo: int, hi: int) -> int:
+    t = ntype(n)
+    if lo != FACT_MIN and hi != FACT_MAX or fact_type(t) != T_MATH_INT: return t
+    if fact_host_finite(s, a) and fact_host_finite(s, b): return T_INT
+    t
 
 # A product with an open (infinite) `int` end: the endpoint products, an
 # infinite factor times a nonzero finite one infinite with their sign, times
@@ -3005,12 +3020,15 @@ fact_floor = (s: mut FactState, n: int, kind: int, a: int, b: int, floor: bool) 
         if not fact_host_endpoint(s, b, false): return fact_unmodeled(s, n, .unsupported)
         return fact_new(s, FactBound(y.lo + 1, 0), FactTerm(.eof, a, b, n, ntype(n)))
     else if y.lo < 1: return fact_unmodeled(s, n, .unsupported)
+    # (an open divisor end is infinite, not 2^63-1: a quotient by it tends to 0)
+    y_open = y.hi == FACT_MAX and fact_open_endpoint(s, b, true)
     if x.lo < 0 and kind == 1 and not x.wide and not y.wide:
         low = x.lo / y.lo
         if floor and x.lo % y.lo != 0: low -= 1
         divisor = if x.hi < 0: y.hi else: y.lo
         high = x.hi / divisor
         if floor and x.hi < 0 and x.hi % divisor != 0: high -= 1
+        if x.hi < 0 and y_open: high = if floor: -1 else: 0
         return fact_new(s, FactBound(low, high, low > 0 or high < 0), FactTerm(type = ntype(n)))
     if x.lo < 0 and (not floor or kind == 1 or kind == 3): return fact_unmodeled(s, n, .unsupported)
     r = FactBound()
@@ -3019,7 +3037,7 @@ fact_floor = (s: mut FactState, n: int, kind: int, a: int, b: int, floor: bool) 
         r.hi = if kind == 2 and fact_host_endpoint(s, b, true): y.hi - 1 else: y.hi
         if x.lo >= 0 and not x.wide: r.hi = min(r.hi, x.hi)
     else if kind == 1:
-        r.lo = x.lo / y.hi
+        r.lo = if y_open: 0 else: x.lo / y.hi
         r.hi = x.hi / y.lo
     else:
         r.lo = x.lo >> y.hi
