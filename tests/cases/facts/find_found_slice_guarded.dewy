@@ -1,0 +1,16 @@
+# quick
+# A found position is at most the text's length: the prefix before it needs no check,
+# and the rest after it needs `at <? length`, since a match inside the last character
+# gives the length itself.
+split = (word:string part:string):>string => {
+    let at = word.find(part)
+    if at is? Missing return word
+    let next = at + 1
+    if at <? word.length return "{word[..at)}|{word[at + 1..]}|{next}"
+    "{word[..at)}|end"
+}
+main = () => {
+    printl(split("--name=value" "="))
+    printl(split("--flag" "="))
+    printl(split("e\u{301}" "\u{301}"))
+}

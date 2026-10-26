@@ -4627,7 +4627,8 @@ gen_fmt_struct = (e: int) -> Val:
             nf = int(variants[vi].nfields)
             if structs[si].union_:
                 f = int(variants[vi].fields)
-                fmt_field(ba, int(nodes[kid2(e, fi)].sym), int(fields[f].type), e_addi(va, int(fields[f].offset)))
+                if tkind(int(fields[f].type)) == .void_: lit(ba, "void")
+                else: fmt_field(ba, int(nodes[kid2(e, fi)].sym), int(fields[f].type), e_addi(va, int(fields[f].offset)))
                 fi += 1
                 endc()
                 continue

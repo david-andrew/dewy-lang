@@ -6994,7 +6994,9 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         else if dewy: fname = ci(23, "__dewy_fmt_elem")
         loop ft in fts:
             ref = mk(.fnref, nodes[n].pos)
-            nodes[ref].sym = i32(resolve_by_types(fname, [bt, ft], nodes[n].pos, true))
+            # (a union's void member shows as `void`: the text lowering appends)
+            if is_union(t) and tkind(ft) == .void_: nodes[ref].sym = i32(resolve_by_types(intern("__buf_append_str"), [bt, T_STR], nodes[n].pos, true))
+            else: nodes[ref].sym = i32(resolve_by_types(fname, [bt, ft], nodes[n].pos, true))
             refs.push(ref)
         set_list2(n, refs)
     else if id == .hash:

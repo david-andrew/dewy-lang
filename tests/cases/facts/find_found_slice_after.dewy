@@ -1,0 +1,8 @@
+# A found position may be the text's length (a match inside the last character), so
+# the rest after it is not proven without `at <? word.length`.
+split = (word:string part:string):>string => {
+    let at = word.find(part)
+    if at is? Missing return word
+    word[at + 1..]
+}
+main = () => { printl(split("e\u{301}" "\u{301}")) }

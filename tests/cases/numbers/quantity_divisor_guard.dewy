@@ -1,0 +1,18 @@
+# quick
+# A guard on an exact quantity proves its division's divisor nonzero, as one on a
+# plain rational does: the quantity and its number are one value.
+from units import kg, m
+per = (a:rational * Length b:rational * Mass):>rational * Length / Mass => {
+    if b not=? 0kg { return a / b }
+    0m / 1kg
+}
+per_early = (a:rational * Length b:rational * Mass):>rational * Length / Mass => {
+    if b =? 0kg return 0m / 1kg
+    a / b
+}
+main = () => {
+    printl(per(3m 2kg))
+    printl(per(3m 0kg))
+    printl(per_early(1m 4kg))
+    printl(per_early(1m 0kg))
+}

@@ -2986,6 +2986,15 @@ fact_pure_binary = (n: int) -> bool:
     t = ntype(int(nodes[n].a))
     helper_value_members(t).len() == 0 and (ownership_decls.len() == 0 or not ownership_fact_type(t))
 
+# Is a conversion from one type to the other only a unit attached or dropped?
+fact_unit_erased = (from0: int, to0: int) -> bool:
+    from = prune(from0)
+    to = prune(to0)
+    if types[from].kind != .quantity and types[to].kind != .quantity: return false
+    if types[from].kind == .quantity: from = prune(int(types[from].elem))
+    if types[to].kind == .quantity: to = prune(int(types[to].elem))
+    from == to
+
 # Numeric conversions between floats and integers write nothing.
 fact_pure_conversion = (n: int) -> bool:
     aux = nodes[n].aux
@@ -3074,9 +3083,10 @@ fact_changes = (n: int, s: mut FactState, at: int, reason: FactReason = .loop_):
     else if k == .call and nodes[n].aux == 0: fact_call_effects(n, s)
     else if k == .call and nodes[n].aux == 2: s = s
     else if k == .intrinsic and fact_reads_only(nodes[n].aux as IN): s = s
-    # (a closure's or partial application's creation writes nothing: fact_capture)
+    # (a closure's, partial application's or handle's creation writes nothing,
+    # unless ownership may move an owner: fact_capture)
     else if k == .call: fact_forget_call(s, n, reason, at)
-    else if k == .intrinsic or k == .lambda and ownership_decls.len() != 0 or k == .partial and fact_partial_opaque(n): fact_forget(s, at, reason)
+    else if k == .intrinsic or k == .lambda and ownership_decls.len() != 0 or k == .partial and fact_partial_opaque(n) or k == .fnref and fact_handle_opaque(n): fact_forget(s, at, reason)
     mask = isolation_children(k)
     if mask < 0: fact_forget(s, at, reason, true); return
     if mask & 1 != 0: fact_changes(int(nodes[n].a), s, at, reason)
@@ -7217,6 +7227,9 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             ff_integer_record(n, a, s)
             return fact_fresh(s, ntype(n))
         if nodes[n].aux == i32(int(CV.set_text)): return fact_new(s, FactBound(), FactTerm(type = ntype(n)))
+        # (an exact quantity and its number are one value: lowering erases the
+        # unit, so `b not=? 0kg` guards `a / b`'s rational divisor. O(1))
+        if nodes[n].aux == i32(int(CV.none_)) and not fact_scalar(ntype(n)) and fact_unit_erased(ntype(int(nodes[n].a)), ntype(n)): return a
         b = fact_bound(s, a)
         from = fact_type(ntype(int(nodes[n].a)))
         to = fact_type(ntype(n))

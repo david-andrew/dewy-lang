@@ -1,0 +1,7 @@
+# Only a zero test on the divisor itself proves it: `b not=? 1kg` leaves b = 0kg.
+from units import kg, m
+per = (a:rational * Length b:rational * Mass):>rational * Length / Mass => {
+    if b not=? 1kg { return a / b }
+    0m / 1kg
+}
+main = () => printl(per(3m 2kg))

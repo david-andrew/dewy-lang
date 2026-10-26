@@ -1,0 +1,13 @@
+# quick
+# A `void | E` value prints its member: `void` when it succeeded, the error otherwise.
+Oops:type = type of error & [code:int64]
+check = (x:int64):>void|Oops => {
+    if x <? 0 { return Oops[x] }
+}
+main = () => {
+    printl(check(1))
+    printl(check(-3))
+    let r = check(2)
+    printl("got {r} as {string(r)}")
+    printl([check(1) check(-1)])
+}

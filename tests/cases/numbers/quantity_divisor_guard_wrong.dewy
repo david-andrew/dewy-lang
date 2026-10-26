@@ -1,0 +1,7 @@
+# A guard on another quantity does not prove the divisor.
+from units import kg, m
+per = (a:rational * Length b:rational * Mass c:rational * Mass):>rational * Length / Mass => {
+    if c not=? 0kg { return a / b }
+    0m / 1kg
+}
+main = () => printl(per(3m 2kg 1kg))

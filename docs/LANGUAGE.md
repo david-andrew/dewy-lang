@@ -1503,7 +1503,7 @@ truncates toward zero. Exact numbers round as people do, a half away from zero:
 fractions. `abs`, `min` and `max` of fractions (an integer beside one included) are
 exact fractions, and `sign(q)` is an `int`; beside a float they give a float. A nonzero divisor of `/`, `//` and `%` is an obligation, as an
 integer division's, when the divisor is an integer or a constant (`x/n` after
-`n not=? 0`, `x/0.5`); a rational divisor computed at run time, a zero
+`n not=? 0`, `x/0.5`, and `a/b` after `b not=? 0kg` for an exact quantity); a rational divisor computed at run time, a zero
 denominator and negative powers of zero fail: they are compile errors by
 default, and panic under `$runtime_checks`. Zero to the zeroth power is one. Copies are independent, and
 normalized values can be dictionary keys.
@@ -3963,9 +3963,11 @@ UTF-8 sequence). Guards on the byte view prove it
 otherwise it is checked at run time under `$runtime_checks`.
 `text.find(part)` and `text.rfind(part)` give the grapheme position of the first or
 last occurrence, as indexing counts, or `Missing`; `text.find(part start)` searches from
-grapheme `start`. A found text position is at most `text.length` (a match inside
-the last character counts it), so `close + 1` after a found `close` needs no check;
-it is not necessarily an index. `xs.index_of(x)` gives the first position of `x` in an array, or
+grapheme `start`. A found text position is at most `text.length`, so after a found
+`close`, `text[..close)` and `close + 1` need no check. It is not necessarily an
+index, even for a nonempty part: a match inside the last character counts that
+character (`"e\u{301}".find("\u{301}")` is 1, the length), so `text[close + 1..]`
+needs `close <? text.length` first. `xs.index_of(x)` gives the first position of `x` in an array, or
 `Missing`. `Missing` is the prelude's exception for a search that found nothing:
 it is neither `none` nor -1. Default it with `??` (`text.find("=") ?? -1`), test
 it with `is? Missing`, forward it with `or_throw`, or `match` it.
