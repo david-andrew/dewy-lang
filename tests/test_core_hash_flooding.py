@@ -1,8 +1,8 @@
 """Dictionaries resist hash flooding: keys crafted to collide under the old unkeyed hashes
 (an invertible integer finalizer, a record hash whose second field cancels the first) stay
 fast, since slots come from a hash keyed per process. `hash` itself stays the same each run."""
+import resource
 import subprocess
-import time
 
 from tests.support import compiler
 
@@ -87,10 +87,31 @@ $runtime_checks
 '''
 
 
-def _run_timed(binary, *args):
-    started = time.perf_counter()
-    ran = subprocess.run([binary, *args], capture_output=True, text=True, timeout=60, check=False)
-    return ran, time.perf_counter() - started
+def _run_cpu(binary, keys):
+    """Run once; return the result and the child's CPU seconds (user+sys), which a loaded
+    machine inflates far less than wall time."""
+    before = resource.getrusage(resource.RUSAGE_CHILDREN)
+    ran = subprocess.run([binary, keys], capture_output=True, text=True, timeout=120, check=False)
+    after = resource.getrusage(resource.RUSAGE_CHILDREN)
+    return ran, (after.ru_utime - before.ru_utime) + (after.ru_stime - before.ru_stime)
+
+
+def _assert_flat(binary, tmp_path, crafted, control, expected):
+    """Crafted keys must cost about what the same number of ordinary keys cost. Quadratic
+    chains made them ~80x slower (8 s against 0.1 s), so a 10x factor plus 0.5 s of slack
+    separates the two by a wide margin on any machine, since both runs share the load."""
+    (tmp_path / 'crafted.txt').write_text('\n'.join(crafted) + '\n')
+    (tmp_path / 'control.txt').write_text('\n'.join(control) + '\n')
+    controls = []
+    for _ in range(2):
+        ran, seconds = _run_cpu(binary, tmp_path / 'control.txt')
+        assert ran.returncode == 0, ran.stderr
+        assert ran.stdout.split() == expected
+        controls.append(seconds)
+    ran, seconds = _run_cpu(binary, tmp_path / 'crafted.txt')
+    assert ran.returncode == 0, ran.stderr
+    assert ran.stdout.split() == expected
+    assert seconds < 10 * min(controls) + 0.5, (seconds, controls)
 
 
 def _build(compiler, tmp_path, name, source):
@@ -104,22 +125,13 @@ def _build(compiler, tmp_path, name, source):
 
 
 def test_crafted_integer_keys_stay_fast(compiler, tmp_path):
-    keys = tmp_path / 'keys.txt'
-    keys.write_text('\n'.join(_int_keys()) + '\n')
-    ran, seconds = _run_timed(_build(compiler, tmp_path, 'ints', INTS), keys)
-    assert ran.returncode == 0, ran.stderr
-    assert ran.stdout.split() == [str(COUNT), str(COUNT)]
-    # (unkeyed, these took about 8 s; keyed, about 0.1 s)
-    assert seconds < 3.0, seconds
+    control = [str(i * 7919) for i in range(1, COUNT + 1)]
+    _assert_flat(_build(compiler, tmp_path, 'ints', INTS), tmp_path, _int_keys(), control, [str(COUNT)] * 2)
 
 
 def test_crafted_record_keys_stay_fast(compiler, tmp_path):
-    keys = tmp_path / 'keys.txt'
-    keys.write_text('\n'.join(_record_keys()) + '\n')
-    ran, seconds = _run_timed(_build(compiler, tmp_path, 'records', RECORDS), keys)
-    assert ran.returncode == 0, ran.stderr
-    assert ran.stdout.split() == [str(COUNT)]
-    assert seconds < 3.0, seconds
+    control = [f'{a} {a * 7919}' for a in range(1, COUNT + 1)]
+    _assert_flat(_build(compiler, tmp_path, 'records', RECORDS), tmp_path, _record_keys(), control, [str(COUNT)])
 
 
 def test_hash_and_iteration_are_the_same_every_run(compiler, tmp_path):

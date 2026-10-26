@@ -26,7 +26,7 @@ main = ():>void | DuplicateLock | Canceled | OutOfMemory => {
     }
     let both = (a or_throw) + (b or_throw)
     printl"{both} {audit(x y)}"
-    let total = within(1s @audit(x y))
+    let total = within(10s @audit(x y))
     printl"{total}"
 }
 

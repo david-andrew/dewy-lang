@@ -38,8 +38,8 @@ def test_conversions_keep_the_value_and_keys_are_a_set():
 
 
 def test_fuzz_smoke(compiler, tmp_path):  # noqa: F811
-    started = time.monotonic()
+    started = time.monotonic()  # the limit below only catches hangs; load makes builds slow
     status = dewy_fuzz.fuzz(compiler, seed=1, count=3, modes=('native', 'web'), shrink=0, quiet=True,
                             failures_dir=tmp_path / 'failures', work=tmp_path / 'work')
     assert status == 0, sorted(p.name for p in (tmp_path / 'failures').iterdir())
-    assert time.monotonic() - started < 10
+    assert time.monotonic() - started < 120

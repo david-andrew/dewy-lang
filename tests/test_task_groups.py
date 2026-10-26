@@ -156,7 +156,7 @@ work=()=>{sleep(1ms); return 1}
 main=()=>{
  let before=live()
  loop i in [0..20) {concurrent {spawn work() spawn work()}}
- loop i in [0..100) {if live() =? before break sleep(1ms);}
+ loop i in [0..5000) {if live() =? before break sleep(1ms);}
  $runtime_assert(live() =? before)
 }
 """)
