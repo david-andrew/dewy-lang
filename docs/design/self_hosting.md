@@ -250,6 +250,22 @@ What it met:
   `parse_int`, Dewy's second `str`, `float` and `items`) never matched; they are gone, as
   unreachable arms would be refused.
 
+`int_domains.dewy` owns the integer write-domain engine: its four-word write log,
+`IntDomain` states, demand closure through value captures, settlement, interval
+construction and domain text. `string_domains.jo` records syntax/type events and
+registers consumers; it lends the log and the states by place, then uses the
+settled intervals for exhaustive matches and refinement conversions. The whole
+solver is a leaf with no checker callbacks. Its frozen twin is `int_domains.jo`.
+The backwards capture-demand scan and forwards settlement are O(log length +
+demanded writes), indexed by binding ID; settlement runs only when a consumer
+exists. Interval expansion retains the existing eight-delta, 256-value and
+64-link limits, with the value cap applied after each delta. Explicit wrapping
+operands preserve the twin's signed-word arithmetic at endpoints; mixing a
+policy operand with an ordinary integer would instead check narrowing. The
+differential driver replays write histories over either module and compares
+with an eager set-based oracle, including repeated queries to check that reading
+a capture does not mutate its source.
+
 `dewy_layout.dewy` (`dewy-core fmt`'s layout of Dewy text: indentation by the brackets open and
 by continued statements, the spaces between lexemes, and the lines kept as written) is the
 first leaf that imports another (`from p"dewy_tokens.dewy" import ...`; twins' imports are

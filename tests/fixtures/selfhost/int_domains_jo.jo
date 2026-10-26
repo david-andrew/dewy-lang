@@ -1,0 +1,32 @@
+# The same driver runs the Dewy engine and its frozen bootstrap twin.
+# R resets; W binding kind a b appends a write; D binding demands a domain;
+# S settles; Q binding prints presence, intervals and their diagnostic text.
+use '../../../compiler/int_domains.jo'
+
+log: int[]
+states: {int: IntDomain}
+demanded: {int: bool}
+
+main = () -> int:
+    arguments = args()
+    loop line in split(read_file(arguments[1]) ?? "", "\n"):
+        if len(line) == 0: continue
+        fields = split(line, " ")
+        op = fields[0]
+        if op == "R":
+            log = []
+            states = {}
+            demanded = {}
+        else if op == "W":
+            id_record(log, to_int(fields[1]) ?? 0, to_int(fields[2]) ?? 0, to_int(fields[3]) ?? 0, to_int(fields[4]) ?? 0)
+        else if op == "D": demanded[to_int(fields[1]) ?? 0] = true
+        else if op == "S":
+            id_settle(log, states, demanded)
+            print("states {states.len()}")
+        else if op == "Q":
+            binding = to_int(fields[1]) ?? 0
+            if not states.has(binding): print("absent")
+            else:
+                intervals = id_intervals(states, binding)
+                print("{intervals} {id_text(intervals)}")
+    0

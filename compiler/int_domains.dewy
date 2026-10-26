@@ -1,0 +1,127 @@
+$runtime_checks
+# Integer write domains, independent of the checker and its syntax/type tables.
+# The caller lends the flat write log and the states by binding ID. Only requested
+# domains (and their capture sources) settle; there is no whole-tree analysis.
+# int_domains.jo is the frozen bootstrap twin; tests/test_selfhost_int_domains.py
+# runs both against a separate set-based oracle.
+
+const INT_DOMAIN_CAP:int64=256
+const INT_DECL:int64=0
+const INT_POINT:int64=1
+const INT_OPEN:int64=2
+const INT_DELTA:int64=3
+const INT_CAPTURE:int64=4
+
+IntDomain:type=[
+    site:int64=-2
+    open:bool=false
+    points:array<int64>=[]
+    deltas:array<int64>=[]
+    source:int64=0
+]
+
+# O(1) amortized per write, retaining the four-word log format.
+id_record=(@log:array<int64> binding:int64 kind:int64 a:int64 b:int64)=>{
+    log.push(binding)
+    log.push(kind)
+    log.push(a)
+    log.push(b)
+}
+
+# Capture links point to older bindings. The backward pass closes demands;
+# the forward pass settles those bindings only: O(log length + demanded writes).
+id_settle=(@log:array<int64> @states:dict<int64 IntDomain> @demanded:dict<int64 bool>)=>{
+    let i:int64=log.length - 4
+    loop i >=? 0 {
+        if log[i + 1] =? INT_CAPTURE and demanded.has(log[i]) {demanded[log[i + 2]]=true}
+        i-=4
+    }
+    i=0
+    loop i <? log.length {
+        let b=log[i]
+        if demanded.has(b) {
+            let kind=log[i + 1]
+            if kind =? INT_DECL {
+                let d=IntDomain[]
+                d.site=log[i + 2]
+                states[b]=d
+            } else if kind =? INT_CAPTURE {
+                if states.has(log[i + 2]) {
+                    let d=IntDomain[]
+                    d.source=log[i + 2]
+                    d.site=-1
+                    states[b]=d
+                }
+            } else if states.has(b) {
+                let d=states[b]
+                if kind =? INT_POINT {d.points.push(log[i + 2])}
+                else if kind =? INT_OPEN {d.open=true}
+                else if kind =? INT_DELTA {
+                    if d.site <? 0 or d.site not=? log[i + 3] or d.deltas.length >=? 8 {d.open=true}
+                    else {d.deltas.push(log[i + 2])}
+                }
+                states[b]=d
+            }
+        }
+        i+=4
+    }
+}
+
+# Sorted disjoint inclusive intervals, empty when open. Each capture recurses
+# at most 64 links; expansion is capped at 256 values after each of <=8 deltas.
+# Arithmetic at endpoints deliberately retains the twin's signed-word wrap.
+id_intervals=(@states:dict<int64 IntDomain> binding:int64 depth:int64=0):>array<int64>=>{
+    let nothing:array<int64>=[]
+    if not states.has(binding) or depth >? 64 {return nothing}
+    let d=states[binding]
+    if d.open {return nothing}
+    let points=d.points
+    if d.source not=? 0 {
+        let source=id_intervals(@states d.source depth + 1)
+        if source.length =? 0 {return nothing}
+        loop k in [0..source.length // 2) {
+            if int64<overflow='wrap'>(source[2 * k + 1]) - int64<overflow='wrap'>(source[2 * k]) >=? INT_DOMAIN_CAP {return nothing}
+            let stop:int64=int64<overflow='wrap'>(source[2 * k + 1]) + int64<overflow='wrap'>(1)
+            loop v in [source[2 * k]..stop) {points.push(v)}
+        }
+    }
+    if points.length =? 0 {return nothing}
+    let seen:dict<int64 bool>=[]
+    let values:array<int64>=[]
+    loop p in points {
+        if not seen.has(p) {
+            seen[p]=true
+            values.push(p)
+        }
+    }
+    loop delta in d.deltas {
+        let grown:array<int64>=[]
+        loop p in values {
+            let q:int64=int64<overflow='wrap'>(p) + int64<overflow='wrap'>(delta)
+            if (delta >? 0 and q <? p) or (delta <? 0 and q >? p) {return nothing}
+            if not seen.has(q) {
+                seen[q]=true
+                grown.push(q)
+            }
+        }
+        values.extend(grown)
+        if values.length >? INT_DOMAIN_CAP {return nothing}
+    }
+    values.sort()
+    let out:array<int64>=[]
+    loop v in values {
+        if out.length >? 0 and int64<overflow='wrap'>(out[out.length - 1]) + int64<overflow='wrap'>(1) =? v {out[out.length - 1]=v}
+        else {out.extend([v v])}
+    }
+    out
+}
+
+id_text=(xs:array<int64>):>string=>{
+    let text=""
+    loop k in [0..xs.length // 2) {
+        if (text as array<uint8>).length >? 0 {text="{text}|"}
+        if xs[2 * k] =? xs[2 * k + 1] {text="{text}{xs[2 * k]}"}
+        else {text="{text}{xs[2 * k]}..{xs[2 * k + 1]}"}
+    }
+    text
+}

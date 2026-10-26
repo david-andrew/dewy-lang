@@ -1,0 +1,93 @@
+# Frozen bootstrap twin of int_domains.dewy. Change both, or neither.
+
+INT_DOMAIN_CAP = 256
+INT_DECL = 0
+INT_POINT = 1
+INT_OPEN = 2
+INT_DELTA = 3
+INT_CAPTURE = 4
+id_record = (log: mut int[], binding: int, kind: int, a: int, b: int):
+    log.push(binding)
+    log.push(kind)
+    log.push(a)
+    log.push(b)
+struct IntDomain:
+    site: int = -2
+    open: bool = false
+    points: int[]
+    deltas: int[]
+    source: int = 0
+
+id_settle = (log: mut int[], states: mut {int: IntDomain}, demanded: mut {int: bool}):
+    i = log.len() - 4
+    loop i >= 0:
+        if log[i + 1] == INT_CAPTURE and demanded.has(log[i]): demanded[log[i + 2]] = true
+        i -= 4
+    i = 0
+    loop i < log.len():
+        b = log[i]
+        if demanded.has(b):
+            kind = log[i + 1]
+            if kind == INT_DECL:
+                d = IntDomain()
+                d.site = log[i + 2]
+                states[b] = d
+            else if kind == INT_CAPTURE:
+                if states.has(log[i + 2]):
+                    d = IntDomain()
+                    d.source = log[i + 2]
+                    d.site = -1
+                    states[b] = d
+            else if states.has(b):
+                d = states[b]
+                if kind == INT_POINT: d.points.push(log[i + 2])
+                else if kind == INT_OPEN: d.open = true
+                else if kind == INT_DELTA:
+                    if d.site < 0 or d.site != log[i + 3] or d.deltas.len() >= 8: d.open = true
+                    else: d.deltas.push(log[i + 2])
+                states[b] = d
+        i += 4
+
+id_intervals = (states: mut {int: IntDomain}, binding: int, depth: int = 0) -> int[]:
+    nothing: int[]
+    if not states.has(binding) or depth > 64: return nothing
+    d = states[binding]
+    if d.open: return nothing
+    points = d.points
+    if d.source != 0:
+        source = id_intervals(states, d.source, depth + 1)
+        if source.len() == 0: return nothing
+        loop k in [0..source.len() / 2):
+            if source[2 * k + 1] - source[2 * k] >= INT_DOMAIN_CAP: return nothing
+            loop v in [source[2 * k]..source[2 * k + 1] + 1): points.push(v)
+    if points.len() == 0: return nothing
+    seen: {int: bool}
+    set: int[]
+    loop p in points:
+        if not seen.has(p):
+            seen[p] = true
+            set.push(p)
+    loop delta in d.deltas:
+        grown: int[]
+        loop p in set:
+            q = p + delta
+            if (delta > 0 and q < p) or (delta < 0 and q > p): return nothing
+            if not seen.has(q):
+                seen[q] = true
+                grown.push(q)
+        set += grown
+        if set.len() > INT_DOMAIN_CAP: return nothing
+    set.sort()
+    out: int[]
+    loop v in set:
+        if out.len() > 0 and out[out.len() - 1] + 1 == v: out[out.len() - 1] = v
+        else: out += [v, v]
+    out
+
+id_text = (xs: int[]) -> str:
+    text = ""
+    loop k in [0..xs.len() / 2):
+        if len(text) > 0: text += "|"
+        if xs[2 * k] == xs[2 * k + 1]: text += "{xs[2 * k]}"
+        else: text += "{xs[2 * k]}..{xs[2 * k + 1]}"
+    text
