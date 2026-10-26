@@ -9,7 +9,7 @@ from p"dewy_parser.dewy" import ParserContext, dc_parser_hint, dc_parser_report,
 from p"dewy_reach.dewy" import dm_bound, dm_hide, dm_reach, dm_reach_all, dm_reach_flow, dm_reach_fn, dm_reach_head, dm_reach_in, dm_reach_match, dm_reach_statement, dm_reach_statements, dm_reach_type
 from p"dewy_reader_host.dewy" import ParserReaderHost
 from p"dewy_reader_types.dewy" import DirBundle, EffectKind, EffectSyntax, ResultClause
-from p"dewy_scan.dewy" import dc_scan_arm_end, dc_scan_closing
+from p"dewy_scan.dewy" import dc_scan_arm_end, dc_scan_closing, dc_scan_cut
 from p"dewy_syntax.dewy" import syntax_node
 from p"dewy_tokens.dewy" import DewyKind, DewyLexeme, DewyToken, dn_token_assignment, dn_token_invert, dn_token_kind, dn_token_text, dn_token_undot, dn_token_uninvert
 from p"dewy_walk.dewy" import dr_arms_kind, dr_block_tail_kind, dr_collect, dr_collect_block, dr_copy_last, dr_copy_value, dr_flow_arms, dr_kind_of, dr_last_kind, dr_push, dr_tail_kind
@@ -600,6 +600,11 @@ rd_dc_assertion=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:DewyL
     let saved:bool=reader_ctx.flags.comma_stop
     reader_ctx.flags.comma_stop = true
     let condition:int64=rd_dc_expr(@reader_ctx @reader_nodes 0)
+    # (a range the condition does not take leaves the cursor at -1)
+    if (condition =? 0) {
+        reader_ctx.flags.comma_stop = saved
+        return 0
+    }
     let stop:int64=reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) - 1)].stop
     let message:int64=0
     if ((condition not=? 0) and rd_dn_accept(@reader_ctx 'comma')) {
@@ -2436,10 +2441,14 @@ rd_dc_comma_arguments=(@reader_ctx:ParserContext @reader_nodes:array<Node> start
     let saved:bool=reader_ctx.flags.comma_stop
     reader_ctx.flags.comma_stop = true
     loop (not rd_dn_accept(@reader_ctx close)) {
-        if ((reader_ctx.tokens[reader_ctx.at].kind =? 'eof') or rd_dn_accept(@reader_ctx 'comma')) {
+        if rd_dn_accept(@reader_ctx 'comma') {
             continue
         }
-        let arg:int64=rd_dc_expr(@reader_ctx @reader_nodes 0)
+        # (`f(1, 2` and nothing after: the reading fails)
+        let arg:int64=0
+        if (reader_ctx.tokens[reader_ctx.at].kind not=? 'eof') {
+            arg = rd_dc_expr(@reader_ctx @reader_nodes 0)
+        }
         if (arg =? 0) {
             reader_ctx.flags.comma_stop = saved
             return false
@@ -4256,8 +4265,8 @@ rd_dc_flow=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$unsafe
         let condition:int64=rd_dc_expr(@reader_ctx @reader_nodes 0)
         reader_ctx.reader.dc_condition_depth = saved_condition
         if (condition =? 0) {
-            # (`if x = 2`: the condition's value ends at `=`)
-            if ((rd_dn_peek(@reader_ctx) =? 'assign') and (reader_ctx.at >? condition_at)) {
+            # (`if x = 2`: the condition's value ends at `=`; a range it does not take leaves the cursor at -1)
+            if ((reader_ctx.at >? condition_at) and (rd_dn_peek(@reader_ctx) =? 'assign')) {
                 return rd_dc_condition_assign(@reader_ctx condition_at)
             }
             return 0
@@ -10492,6 +10501,10 @@ rd_dc_unpacking_assignment=(@reader_ctx:ParserContext @reader_nodes:array<Node> 
 # The direct parser reads no form that starts at token `at`: the mistake its readings gave up
 # on (dc_hint), else the first noted, else that the form is not read.
 rd_dc_unread=(@reader_ctx:ParserContext at:int64):>void=>$unsafe {
+    let cut:int64=dc_scan_cut(@reader_ctx.tokens at)
+    if (cut >=? 0) {
+        rd_dc_cut_off(@reader_ctx cut);
+    }
     if (reader_ctx.status.hint_pos not=? 0) {
         reader_ctx.stores.host[0].fatal(reader_ctx.status.hint_pos reader_ctx.status.hint_text);
     }
@@ -10500,6 +10513,24 @@ rd_dc_unread=(@reader_ctx:ParserContext at:int64):>void=>$unsafe {
     }
     rd_dc_foreign_habit(@reader_ctx at);
     reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file reader_ctx.tokens[at].start) "Dewy does not read this form");
+}
+
+# A statement the end of the text cuts off (dc_unread's mistake, before any noted): the bracket it
+# leaves open, or the end after a token it cannot end with (dc_scan_cut).
+rd_dc_cut_off=(@reader_ctx:ParserContext cut:int64):>void=>$unsafe {
+    let token:DewyLexeme=reader_ctx.tokens[cut]
+    let pos:int64=rd_mkpos(reader_ctx.file token.start)
+    if (token.kind =? 'eof') {
+        reader_ctx.stores.host[0].fatal(pos "unexpected end of file");
+    }
+    let close:DewyToken='rbrace'
+    if (token.symbol =? 'lparen') {
+        close = 'rparen'
+    }
+    else if (token.symbol =? 'lbrack') {
+        close = 'rbrack'
+    }
+    reader_ctx.stores.host[0].fatal(pos "expected '{dn_token_text(close)}' before end of file");
 }
 
 # `$unsafe` opens a boundary over the expression after it, on its line or the next

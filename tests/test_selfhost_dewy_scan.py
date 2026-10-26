@@ -61,6 +61,35 @@ def arm_end(ts, at):
     raise AssertionError('arm inputs require EOF')
 
 
+UNENDING = OPEN | {'langle', 'at', 'tilde', 'bang', 'dot', 'kw_let', 'kw_const', 'kw_if', 'kw_else', 'kw_loop',
+                   'kw_match', 'kw_not', 'kw_import', 'kw_from', 'kw_of', 'kw_parallel', 'kw_concurrent', 'kw_spawn'}
+
+
+def ends(symbol):
+    if ranked(symbol):
+        return symbol in {'range', 'kw_or_throw'}
+    return symbol not in UNENDING
+
+
+def cut(ts, at):
+    """The innermost bracket the end leaves open, the eof after a token no statement ends with,
+    or -1 where the statement ends first. Unlike the scans above it tells braces from brackets
+    (a range closes `[` with `)`): a brace paired with a bracket is the reader's mistake (-1)."""
+    opens = []
+    for i in range(at, len(ts)):
+        kind, symbol, newline = ts[i]
+        if kind == 'eof':
+            return opens[-1] if opens else i if i > at and not ends(ts[i - 1][1]) else -1
+        if not opens and i > at and newline and ends(ts[i - 1][1]):
+            return -1
+        if symbol in OPEN:
+            opens.append(i)
+        elif symbol in CLOSE:
+            if not opens or (ts[opens.pop()][1] == 'lbrace') != (symbol == 'rbrace'):
+                return -1
+    return -1
+
+
 def corpus():
     runs = [[], [EOF]]
     for symbols in (
@@ -76,6 +105,7 @@ def corpus():
     runs.append([token('lparen'), ('eof', 'rparen', False), token('rparen'), EOF])
     for symbol in ENUMS['DewyToken']:
         runs.append([token('none'), token(symbol, True), token('none'), EOF])
+        runs.append([token('none'), token(symbol), EOF])
     for size in (1, 2, 17, 256, 2048):
         runs.extend([
             [token('lparen')] * size + [token('rbrack')] * size + [EOF],
@@ -83,7 +113,8 @@ def corpus():
             [token('kw_if'), token('kw_match')] * size + [token('kw_else')] * (2 * size + 1) + [EOF],
         ])
     rng = random.Random(7351)
-    symbols = sorted(OPEN | CLOSE | {'none', 'kw_if', 'kw_match', 'kw_else', 'plus', 'dot', 'kw_not', 'semi'})
+    symbols = sorted(OPEN | CLOSE | {'none', 'kw_if', 'kw_match', 'kw_else', 'plus', 'dot', 'kw_not', 'semi',
+                                     'range', 'kw_or_throw', 'kw_let', 'colon', 'assign'})
     for _ in range(1500):
         runs.append([token(rng.choice(symbols), rng.random() < .3) for _ in range(rng.randrange(60))] + [EOF])
     lines, expected = [], []
@@ -93,6 +124,8 @@ def corpus():
         for at in positions:
             lines.append(f'C\t{at}\t{encoded}')
             expected.append(closing(ts, at))
+            lines.append(f'U\t{at}\t{encoded}')
+            expected.append(cut(ts, at))
             if any(k == 'eof' for k, _, _ in ts[at:]):
                 lines.append(f'A\t{at}\t{encoded}')
                 expected.append(arm_end(ts, at))

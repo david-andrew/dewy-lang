@@ -127,10 +127,21 @@ rt_dc_hint = (pos: int, msg: str) -> int: dc_parser_hint(dc_parser.status, pos, 
 # on (dc_hint), else the first noted, else that the form is not read.
 
 rt_dc_unread = (at: int):
+    cut = dc_scan_cut(dc_parser.tokens, at)
+    if cut >= 0: rt_dc_cut_off(cut)
     if dc_parser.status.hint_pos != 0: fatal(dc_parser.status.hint_pos, dc_parser.status.hint_text)
     if dc_parser.status.report_pos != 0: fatal(dc_parser.status.report_pos, dc_parser.status.report_text)
     rt_dc_foreign_habit(at)
     fatal(mkpos(dc_parser.file, dc_parser.tokens[at].start), "Dewy does not read this form")
+
+rt_dc_cut_off = (cut: int):
+    token = dc_parser.tokens[cut]
+    pos = mkpos(dc_parser.file, token.start)
+    if token.kind == .eof: fatal(pos, "unexpected end of file")
+    close = DewyToken.rbrace
+    if token.symbol == .lparen: close = .rparen
+    else if token.symbol == .lbrack: close = .rbrack
+    fatal(pos, "expected '{dn_token_text(close)}' before end of file")
 
 # A statement no reading takes, written as another language declares or loops (dc_unread's
 # mistake): `type Op = ...`, `type Point struct { ... }`, `for _, x := range xs { ... }`.
@@ -2343,8 +2354,9 @@ rt_dc_comma_arguments = (start: int, close: DewyToken, args: mut int[]) -> bool:
     saved = dc_parser.flags.comma_stop
     dc_parser.flags.comma_stop = true
     loop not rt_dn_accept(close):
-        if dc_parser.tokens[dc_parser.at].kind == .eof or rt_dn_accept(.comma): continue
-        arg = rt_dc_expr(0)
+        if rt_dn_accept(.comma): continue
+        arg = 0
+        if dc_parser.tokens[dc_parser.at].kind != .eof: arg = rt_dc_expr(0)
         if arg == 0:
             dc_parser.flags.comma_stop = saved
             return false
@@ -4245,8 +4257,8 @@ rt_dc_flow = () -> int:
         condition = rt_dc_expr(0)
         dc_parser.reader.dc_condition_depth = saved_condition
         if condition == 0:
-            # (`if x = 2`: the condition's value ends at `=`)
-            if rt_dn_peek() == .assign and dc_parser.at > condition_at: return rt_dc_condition_assign(condition_at)
+            # (`if x = 2`: the condition's value ends at `=`; a range it does not take leaves the cursor at -1)
+            if dc_parser.at > condition_at and rt_dn_peek() == .assign: return rt_dc_condition_assign(condition_at)
             return 0
         if rt_dn_peek() == .colon: return rt_dc_colon_body(token)
         nodes[n].a = i32(condition)
@@ -6428,6 +6440,10 @@ rt_dc_assertion = (token: DewyLexeme) -> int:
     saved = dc_parser.flags.comma_stop
     dc_parser.flags.comma_stop = true
     condition = rt_dc_expr(0)
+    # (a range the condition does not take leaves the cursor at -1)
+    if condition == 0:
+        dc_parser.flags.comma_stop = saved
+        return 0
     stop = dc_parser.tokens[dc_parser.at - 1].stop
     message = 0
     if condition != 0 and rt_dn_accept(.comma):

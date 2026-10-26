@@ -113,7 +113,7 @@ dn_expand_lazy = ():
             out.push(t)
             continue
         inner = dn_lex(dc_parser.file, t.start, t.stop)
-        loop j in [0..inner.len() - 1):
+        loop j in [0..inner.len() - 1 - DN_EOF_SPARE):
             x = inner[j]
             if j == 0:
                 x.space = t.space

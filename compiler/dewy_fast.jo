@@ -279,6 +279,12 @@ dn_word_assign = (word: DewyToken, bytes: *u8, at: int, stop: int) -> DewyToken:
     if word == .kw_xor: return .xor_assign
     .none
 
+# Spare eofs after a token array's eof. The readers look up to six tokens past their cursor
+# without bounds tests (`tokens[at + k]`), and a truncated text puts the cursor on the eof, or
+# one past it after taking the eof, so lookahead from there reads eofs and the reader reports
+# the mistake rather than indexing past the array.
+const DN_EOF_SPARE = 8
+
 dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLexeme[]:
     if intern_names and dn_word_tokens.len() == 0: dn_init_words()
     source = files[file].src
@@ -292,7 +298,7 @@ dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLe
     symbols = data(dn_symbols)
     widths = data(dn_symbol_widths)
     out: DewyLexeme[]
-    capacity = (stop - begin) / 2 + 1
+    capacity = (stop - begin) / 2 + 2 + DN_EOF_SPARE
     out.resize(capacity)
     slots = data(out)
     count = 0
@@ -471,8 +477,12 @@ dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLe
                         count += 1
                         dc_parser.reader.dn_lazy_left = true
                         i = e
-    out.truncate(count)
-    out.push(DewyLexeme(.eof, 0, stop, stop, spaced, newline))
+    if count + 1 + DN_EOF_SPARE > capacity:
+        capacity = count + 1 + DN_EOF_SPARE
+        out.resize(capacity)
+        slots = data(out)
+    loop k in [count..count + DN_EOF_SPARE]: slots[k] = DewyLexeme(.eof, 0, stop, stop, spaced, newline)
+    out.truncate(count + 1 + DN_EOF_SPARE)
     out
 
 # Tokens contain only scalar tags, name IDs and source spans. Materialize text

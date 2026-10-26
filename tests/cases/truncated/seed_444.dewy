@@ -1,0 +1,40 @@
+$runtime_checks
+$no_assumed_bounds
+Item:type=[id:int64 tags:array<int64> label:string]
+Bad:type=type of error & [code:int64]
+h6=(@t7:array<int64> p8:int64):>void=>{
+    t7.push((-p8))
+}
+mk14=(p15:int64)=>{
+    let c16:int64=p15
+    return (s17:int64 $capture c16):>int64=>{
+        c16 = (c16 xor s17)
+        c16
+    }
+}
+h18=(p19:int64 p20:int64 p21:int64):>int64=>{
+    p20 *= p21
+    p19 -= ((p21 xor p20) xor p19)
+    if (int64(-19) <? int64(-20)) {
+        let f22:float64=((float64(8.0) - float64(-3.0)) + (float64(2.25) + float64(-1.5)))
+        if ((p20 <? (-1)) and (p19 >=? (-9))) {
+            let f23:float64=(-18.0)
+            let xs24:array<int64>=[(p21 >> 43) p20 (-13)]
+        } else {
+            let xs25:array<int64>=[(if (int64(-19) >=? int64(-19)) p21 else p21)]
+        }
+    } else {
+        let u26:uint64=((uint64(18) + uint64(3)) << 62)
+    }
+    int64(int64<overflow='wrap'>(uint64(uint64<overflow='wrap'>(p21))))
+}
+rec32=(n33:int64 acc34:int64):>int64=>{
+    if (n33 <=? 0) {
+        return acc34
+    }
+    return rec32((n33 - 1) ((acc34 * 2) - n33))
+}
+main=():>void=>{
+    let o1:int64?=(if false (-8) else 5)
+    let s2:string=(if (o1 isnt? none) (if (int64(-8) =? int64(-17)) "" else "dewy") else " {[int64(-2)]} {"dewy"}")
+    let 

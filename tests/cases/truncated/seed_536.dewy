@@ -1,0 +1,20 @@
+$runtime_checks
+$no_assumed_bounds
+Item:type=[id:int64 tags:array<int64> label:string]
+Bad:type=type of error & [code:int64]
+h3=(p4:int64 p5:int64 p6:int64):>int64=>{
+    p6 -= 20
+    p4
+}
+h10=(@t11:int64 p12:int64):>void=>{
+    t11 *= t11
+    t11 *= h3(p12 p12 t11)
+}
+h15=(p16:int64):>int64=>{
+    let u17:uint64=34
+    p16 = p16
+    let b18:bool=true
+    p16
+}
+main=():>void=>{
+    let f1:

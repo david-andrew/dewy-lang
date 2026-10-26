@@ -4753,7 +4753,7 @@ def test_core_lexer_bounded_spans(compiler, tmp_path, release):
                 f'            files = [SrcFile(path = "span.dewy", src = {full_text}, is_dewy = true)]',
                 '            dc_parser.file = 0',
                 f'            ts = dn_lex(0, {start}, {stop}, intern_names)',
-                f'            assert(ts.len() == {len(expected)})',
+                f'            assert(ts.len() == {len(expected)} + DN_EOF_SPARE and ts[ts.len() - 1].kind == DewyKind.eof)',
             ]
             previous_stop = 0
             for i, (kind, payload, begin, end) in enumerate(expected):

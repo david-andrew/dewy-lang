@@ -34,3 +34,30 @@ dc_scan_arm_end = (tokens: mut DewyLexeme[], at: int) -> int:
         else if depth == 0 and (symbol == .kw_if or symbol == .kw_match): flows += 1
         k += 1
     k
+
+dc_scan_ends = (symbol: DewyToken) -> bool:
+    if dn_power(symbol) > 0: return symbol == .range or symbol == .kw_or_throw
+    if symbol == .lparen or symbol == .lbrack or symbol == .lbrace or symbol == .langle or symbol == .at or symbol == .tilde or symbol == .bang or symbol == .dot: return false
+    if symbol == .kw_let or symbol == .kw_const or symbol == .kw_if or symbol == .kw_else or symbol == .kw_loop or symbol == .kw_match or symbol == .kw_not: return false
+    if symbol == .kw_import or symbol == .kw_from or symbol == .kw_of or symbol == .kw_parallel or symbol == .kw_concurrent or symbol == .kw_spawn: return false
+    true
+
+dc_scan_cut = (tokens: mut DewyLexeme[], at: int) -> int:
+    opens: int[]
+    last = DewyToken.none
+    k = at
+    loop k < tokens.len():
+        t = tokens[k]
+        if t.kind == .eof:
+            if opens.len() > 0: return opens[opens.len() - 1]
+            if k > at and not dc_scan_ends(last): return k
+            return -1
+        symbol = t.symbol
+        if opens.len() == 0 and k > at and t.newline and dc_scan_ends(last): return -1
+        if symbol == .lparen or symbol == .lbrack or symbol == .lbrace: opens.push(k)
+        else if symbol == .rparen or symbol == .rbrack or symbol == .rbrace:
+            if opens.len() == 0: return -1
+            if (tokens[opens.pop()].symbol == .lbrace) != (symbol == .rbrace): return -1
+        last = symbol
+        k += 1
+    -1

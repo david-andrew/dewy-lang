@@ -29,6 +29,10 @@ def test_recursive_reader_ships_dewy(compiler, tmp_path):
 def test_recursive_reader_matches_frozen(compiler, tmp_path, release):
     pair = parser_diff.build_pair(compiler, tmp_path, release)
     sources = sorted((parser_diff.ROOT / 'tests/cases/frontend').glob('*.dewy'))
+    sources += sorted((parser_diff.ROOT / 'tests/cases/truncated').glob('*.dewy'))
     sources += parser_diff.generated(tmp_path / 'generated', 4)
     failures = parser_diff.compare(pair, sources, tmp_path, release, workers=1)
     assert not failures, '\n'.join(f'{path}: {reason}' for path, reason in failures)
+    # (a panic both readers share is no difference, but still a mistake)
+    shared = tmp_path / 'shared-panics'
+    assert not shared.exists(), shared.read_text()

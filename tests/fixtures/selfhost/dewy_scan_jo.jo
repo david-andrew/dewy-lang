@@ -1,5 +1,5 @@
 # One driver over either frozen scanner or Dewy leaf. Every row is a token run;
-# C also permits no sentinel, A requires EOF. Fields: operation, at, tokens.
+# C and U also permit no sentinel, A requires EOF. Fields: operation, at, tokens.
 use '../../../compiler/dewy_tokens.dewy'
 use '../../../compiler/dewy_scan.jo'
 
@@ -16,4 +16,5 @@ main = ():
             tokens.push(DewyLexeme(DewyKind(to_int(v[0]) ?? 0), 0, at * 2, at * 2 + 1, false, v[2] == "1", DewyToken(to_int(v[1]) ?? 0)))
         at = to_int(f[1]) ?? 0
         if f[0] == "C": print(dc_scan_closing(tokens, at))
+        else if f[0] == "U": print(dc_scan_cut(tokens, at))
         else: print(dc_scan_arm_end(tokens, at))

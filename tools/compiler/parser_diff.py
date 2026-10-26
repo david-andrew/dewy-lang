@@ -78,7 +78,10 @@ def generated(directory: Path, count: int, seed: int = 417) -> list[Path]:
              b'let x:array<array<int64>>=[[1]]\nprintl(x[0][0])\n',
              b'let x=if true {"{if false 1 else 2}"} else "x"\nprintl(x)\n',
              b'f=(x:array<int64>):>int64=>x[0]\nprintl(f([3]))\n',
-             b'printl("{\xff}")\n', b'let x=(\n', b'$target.x86_64 {let x=1}\n']
+             b'printl("{\xff}")\n', b'let x=(\n', b'$target.x86_64 {let x=1}\n',
+             # Truncated text: lookahead past the end, a range left unread, a comma list cut off.
+             b'f=(x:int64 y', b'main=():>void=>{\n    let', b'if [1..5', b'printl(max(1, 2',
+             b'main=():>void=>{\n    $assert(x[[..', b'let f:']
     for index, data in enumerate(edges):
         path = directory / f'edge-{index}.dewy'
         path.write_bytes(data)

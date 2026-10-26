@@ -45,3 +45,42 @@ dc_scan_arm_end=(@tokens:array<DewyLexeme> at:int64):>int64=>{
     }
     k
 }
+
+# Whether a statement may end after a token: not after an infix operator (but `..`, `a..`, and
+# postfix `or_throw`), a prefix, `.`, `<` or a keyword that a part must follow
+dc_scan_ends=(symbol:DewyToken):>bool=>{
+    if dn_power(symbol) >? 0 {return symbol =? 'range' or symbol =? 'kw_or_throw'}
+    match symbol {
+        <'lparen'|'lbrack'|'lbrace'|'langle'|'at'|'tilde'|'bang'|'dot'|'kw_let'|'kw_const'|'kw_if'|'kw_else'|'kw_loop'|'kw_match'|'kw_not'|'kw_import'|'kw_from'|'kw_of'|'kw_parallel'|'kw_concurrent'|'kw_spawn'> => false
+        _ => true
+    }
+}
+
+# Where the end of the tokens cuts off the statement at at: the innermost bracket it leaves
+# open, else the eof when its last token ends no statement; -1 when the statement ends first
+# (a closer of a group around it, or a new line at its top after a token one may end with) or
+# a brace and a bracket pair up (the reader's mistake to name).
+dc_scan_cut=(@tokens:array<DewyLexeme> at:int64):>int64=>{
+    let opens:array<int64>=[]
+    let last:DewyToken='none'
+    let k=at
+    loop k <? tokens.length {
+        let t=tokens[k]
+        if t.kind =? 'eof' {
+            if opens.length >? 0 {return opens[opens.length - 1]}
+            if k >? at and not dc_scan_ends(last) {return k}
+            return -1
+        }
+        let symbol=t.symbol
+        if opens.length =? 0 and k >? at and t.newline and dc_scan_ends(last) {return -1}
+        if symbol =? 'lparen' or symbol =? 'lbrack' or symbol =? 'lbrace' {opens.push(k)}
+        else if symbol =? 'rparen' or symbol =? 'rbrack' or symbol =? 'rbrace' {
+            if opens.length =? 0 {return -1}
+            # (a range may close `[` with `)` and `(` with `]`)
+            if (tokens[opens.pop()].symbol =? 'lbrace') not=? (symbol =? 'rbrace') {return -1}
+        }
+        last=symbol
+        k+=1
+    }
+    -1
+}
