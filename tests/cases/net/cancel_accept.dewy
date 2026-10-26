@@ -2,14 +2,18 @@
 # Canceling a task wakes its blocked accept and receive: they give Canceled.
 import net
 
-wait_for_client=(server:net.TcpListener):>string=>{
+# (each sets `ready` first: the canceling side waits for it, since a task that starts
+# after its group is canceled is skipped)
+wait_for_client=(server:net.TcpListener ready:Atomic<int64>):>string=>{
+    ready.store(1)
     let got=net.tcp_accept(server)
     if got is? Canceled return "accept: Canceled"
     if got is? net.NetError return "accept: {got.message}"
     return "accept: a connection"
 }
 
-wait_for_bytes=(stream:net.TcpStream):>string=>{
+wait_for_bytes=(stream:net.TcpStream ready:Atomic<int64>):>string=>{
+    ready.store(1)
     let got=net.tcp_receive(stream)
     if got is? Canceled return "receive: Canceled"
     if got is? none return "receive: end"
@@ -20,16 +24,20 @@ wait_for_bytes=(stream:net.TcpStream):>string=>{
 main=():>void | net.NetError | Canceled=>{
     let server=net.tcp_listen(0) or_throw
     let started=time()
+    let ready=atomic(0)
     concurrent g {
-        let accepting=spawn(g) wait_for_client(server)
+        let accepting=spawn(g) wait_for_client(server ready)
+        loop ready.load() =? 0 {sleep(1ms);}
         sleep(50ms);
         cancel(g)
     }
     printl(accepting)
+    ready.store(0)
     let client=net.tcp_connect("127.0.0.1" server.port) or_throw
     let peer=net.tcp_accept(server) or_throw
     concurrent h {
-        let receiving=spawn(h) wait_for_bytes(peer)
+        let receiving=spawn(h) wait_for_bytes(peer ready)
+        loop ready.load() =? 0 {sleep(1ms);}
         sleep(50ms);
         cancel(h)
     }
@@ -38,7 +46,7 @@ main=():>void | net.NetError | Canceled=>{
     printl(time() - started <? 2.0)
     # The connection still works after the canceled wait.
     net.tcp_send(client "still here") or_throw
-    printl(wait_for_bytes(peer))
+    printl(wait_for_bytes(peer ready))
     net.tcp_close(client)
     net.tcp_close(peer)
     net.tcp_close(server)

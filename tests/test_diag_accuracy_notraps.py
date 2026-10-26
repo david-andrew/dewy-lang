@@ -34,15 +34,16 @@ CASES = {
     'loop_iterable_fallback': (
         'main=()=>{let a:array<int64>|none=none let b:array<int64>=[1] '
         'loop x in a ?? b {printl(x)}}',
-        'error: parenthesize the fallback in the loop iterable: `loop x in (a ?? b)`'),
+        'error: `??` binds more loosely than `in`, so this applies the fallback to the whole loop '
+        'header: parenthesize the source, as in `loop x in (a ?? b)`'),
     'union_alias': (
         'Value:type=int64|string\nf=(v:Value):>int64=>v\nprintl(f(1))',
         'error: type mismatch: expected int64, found Value'),
 }
 
 
-# (the loop header is read by the direct parser, whose readers are being moved)
-PENDING = {'loop_iterable_fallback'}
+# (targets the compiler does not meet yet)
+PENDING: set[str] = set()
 
 
 @pytest.mark.core_quick

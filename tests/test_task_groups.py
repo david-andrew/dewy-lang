@@ -83,10 +83,12 @@ main=()=>{
 
 
 def test_cancellation_is_level_triggered(compiler, tmp_path):
+    # (fail waits until observe runs: a task that starts after its group is canceled is skipped)
     run(compiler, tmp_path, """
 Bad:type=type of error
-fail=()=>{sleep(2ms); return Bad}
-observe=(hits:Atomic<int64>)=>{
+fail=(started:Atomic<int64>)=>{loop started.load() =? 0 {sleep(1ms);} return Bad}
+observe=(hits:Atomic<int64> started:Atomic<int64>)=>{
+ started.store(1)
  let first=sleep(1s)
  if first is? Canceled {hits.add(1);}
  let second=sleep(1s)
@@ -94,7 +96,8 @@ observe=(hits:Atomic<int64>)=>{
 }
 main=()=>{
  let hits=atomic(0)
- concurrent {spawn observe(hits) spawn fail()}
+ let started=atomic(0)
+ concurrent {spawn observe(hits started) spawn fail(started)}
  $runtime_assert(hits.load() =? 2)
 }
 """)
@@ -114,14 +117,18 @@ main=()=>{{
 
 @pytest.mark.parametrize("cleanup_ns,expected", [(2000000, 1), (1000000000, -1)])
 def test_cleanup_is_shielded(compiler, tmp_path, cleanup_ns, expected):
+    # A deadline can pass before the task's thread first runs; then its body is skipped and
+    # no cleanup is registered. Only a run that started counts: the deadline doubles until
+    # one does. Work sleeps far past every deadline, so each run ends canceled.
     (tmp_path / 'cleanup.jo').write_text(f"""
 cleanup = (flag: Atomic[int]) -> void:
     result = __task_sleep_ns({cleanup_ns})
     if result is Canceled: flag.store(-1)
     else: flag.store(1)
-work = (flag: Atomic[int]) -> (int | Canceled):
+work = (flag: Atomic[int], started: Atomic[int]) -> (int | Canceled):
     defer cleanup(flag)
-    result = __task_sleep_ns(1000000000)
+    started.store(1)
+    result = __task_sleep_ns(60000000000)
     if result is Canceled: return Canceled
     42
 """)
@@ -129,8 +136,13 @@ work = (flag: Atomic[int]) -> (int | Canceled):
 from p"cleanup.jo" import work
 main=()=>{
  let flag=atomic(0)
- let result=within(10ms @work(flag))
- $runtime_assert(result is? Timeout)
+ let started=atomic(0)
+ loop deadline in [10ms 20ms 40ms 80ms 160ms 320ms 640ms 1280ms 2560ms] {
+  let result=within(deadline @work(flag started))
+  $runtime_assert(result is? Timeout)
+  if started.load() =? 1 break
+ }
+ $runtime_assert(started.load() =? 1)
  $runtime_assert(flag.load() =? EXPECTED)
 }
 """.replace("EXPECTED", str(expected)))
