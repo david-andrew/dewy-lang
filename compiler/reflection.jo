@@ -225,7 +225,7 @@ reflect_jumps = (n: int) -> bool:
     k = nodes[n].kind
     if k == .break_ or k == .continue_: return true
     if k == .lambda: return false
-    if reflect_jumps(int(nodes[n].a)) or reflect_jumps(int(nodes[n].b)) or reflect_jumps(int(nodes[n].c)) or reflect_jumps(int(nodes[n].d)): return true
+    if reflect_jumps(int(nodes[n].a)) or reflect_jumps(int(nodes[n].b)) or reflect_jumps(kid_c(n)) or reflect_jumps(kid_d(n)): return true
     loop child in kids(n):
         if reflect_jumps(child): return true
     false

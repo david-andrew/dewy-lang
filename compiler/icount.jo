@@ -158,8 +158,8 @@ ic_decl_lines = (decl: int) -> int:
             if o > hi: hi = o
         if nodes[n].a != 0: stack.push(int(nodes[n].a))
         if nodes[n].b != 0: stack.push(int(nodes[n].b))
-        if nodes[n].c != 0: stack.push(int(nodes[n].c))
-        if nodes[n].d != 0: stack.push(int(nodes[n].d))
+        if kid_c(n) != 0: stack.push(kid_c(n))
+        if kid_d(n) != 0: stack.push(kid_d(n))
         loop k in kids(n): stack.push(k)
         loop k in kids2(n): stack.push(k)
     if hi < 0: return 0

@@ -127,7 +127,7 @@ sibling_writes = (n: int, name: int) -> bool:
     if k == .call and nodes[int(nodes[n].a)].kind == .field and sibling_route_name(int(nodes[int(nodes[n].a)].a)) == name: return true
     if (k == .for_ or k == .lhead) and has_flag(n, NF_MUT) and sibling_route_name(int(nodes[n].a)) == name: return true
     if sibling_writes(int(nodes[n].a), name) or sibling_writes(int(nodes[n].b), name): return true
-    if sibling_writes(int(nodes[n].c), name) or sibling_writes(int(nodes[n].d), name): return true
+    if sibling_writes(kid_c(n), name) or sibling_writes(kid_d(n), name): return true
     loop c in kids(n):
         if sibling_writes(c, name): return true
     if k != .lambda and k != .fn_:
@@ -253,8 +253,8 @@ sibling_scalar_scan = (n: int, name: int, in_fn: bool, out: mut int[], escapes: 
     inner = in_fn or k == .lambda or k == .fn_
     sibling_scalar_scan(int(nodes[n].a), name, inner, out, escapes)
     sibling_scalar_scan(int(nodes[n].b), name, inner, out, escapes)
-    sibling_scalar_scan(int(nodes[n].c), name, inner, out, escapes)
-    sibling_scalar_scan(int(nodes[n].d), name, inner, out, escapes)
+    sibling_scalar_scan(kid_c(n), name, inner, out, escapes)
+    sibling_scalar_scan(kid_d(n), name, inner, out, escapes)
     loop c in kids(n): sibling_scalar_scan(c, name, inner, out, escapes)
     if k != .lambda and k != .fn_:
         loop c in kids2(n): sibling_scalar_scan(c, name, inner, out, escapes)
@@ -360,7 +360,7 @@ sibling_loop_writes = (n: int, name: int, in_loop: bool) -> bool:
     if in_loop and k == .assign and sibling_route_name(int(nodes[n].a)) == name: return true
     inner = in_loop or k == .while_ or k == .for_ or k == .loopx or k == .lhead
     if sibling_loop_writes(int(nodes[n].a), name, inner) or sibling_loop_writes(int(nodes[n].b), name, inner): return true
-    if sibling_loop_writes(int(nodes[n].c), name, inner) or sibling_loop_writes(int(nodes[n].d), name, inner): return true
+    if sibling_loop_writes(kid_c(n), name, inner) or sibling_loop_writes(kid_d(n), name, inner): return true
     loop c in kids(n):
         if sibling_loop_writes(c, name, inner): return true
     if k != .lambda and k != .fn_:

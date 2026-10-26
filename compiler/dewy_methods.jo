@@ -206,7 +206,7 @@ dewy_reads = (n: int, receiver: int, i: int) -> bool:
             return true
         return dewy_reads(base, receiver, i)
     if dewy_reads(int(nodes[n].a), receiver, i) or dewy_reads(int(nodes[n].b), receiver, i): return true
-    if dewy_reads(int(nodes[n].c), receiver, i) or dewy_reads(int(nodes[n].d), receiver, i): return true
+    if dewy_reads(kid_c(n), receiver, i) or dewy_reads(kid_d(n), receiver, i): return true
     loop child in kids(n):
         if dewy_reads(child, receiver, i): return true
     if k != .lambda and k != .fn_:
@@ -298,8 +298,8 @@ dewy_member_closure_names = (n: int, parent: int, names: mut int[]):
         names.push(int(nodes[parent].name))
     dewy_member_closure_names(int(nodes[n].a), n, names)
     dewy_member_closure_names(int(nodes[n].b), n, names)
-    dewy_member_closure_names(int(nodes[n].c), n, names)
-    dewy_member_closure_names(int(nodes[n].d), n, names)
+    dewy_member_closure_names(kid_c(n), n, names)
+    dewy_member_closure_names(kid_d(n), n, names)
     loop child in kids(n): dewy_member_closure_names(child, n, names)
 
 dewy_member_closure_handles = (n: int, names: int[]):
@@ -313,8 +313,8 @@ dewy_member_closure_handles = (n: int, names: int[]):
         fatal(nodes[n].pos, "'{name_of(int(nodes[named].name))}' changes the object's members, so it cannot leave the method: call it there")
     dewy_member_closure_handles(int(nodes[n].a), names)
     dewy_member_closure_handles(int(nodes[n].b), names)
-    dewy_member_closure_handles(int(nodes[n].c), names)
-    dewy_member_closure_handles(int(nodes[n].d), names)
+    dewy_member_closure_handles(kid_c(n), names)
+    dewy_member_closure_handles(kid_d(n), names)
     loop child in kids(n): dewy_member_closure_handles(child, names)
 
 # The object's member a route from the receiver starts with (0 for the object itself).
@@ -371,8 +371,8 @@ dewy_changes_within = (n: int, receiver: int, i: int, nested: bool) -> bool:
     if dewy_changes(int(nodes[n].a), receiver, i, nested): found = true
     if k == .field: return found
     if dewy_changes(int(nodes[n].b), receiver, i, nested): found = true
-    if dewy_changes(int(nodes[n].c), receiver, i, nested): found = true
-    if dewy_changes(int(nodes[n].d), receiver, i, nested): found = true
+    if dewy_changes(kid_c(n), receiver, i, nested): found = true
+    if dewy_changes(kid_d(n), receiver, i, nested): found = true
     loop child in kids(n):
         if dewy_changes(child, receiver, i, nested): found = true
     if k != .lambda and k != .fn_:

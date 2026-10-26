@@ -66,7 +66,7 @@ member_dependencies = (n: int, name: int, memo: mut {int: bool}) -> bool:
     if n == 0: return false
     if let known = memo.get(n): return known
     found = nodes[n].kind == .ident and nodes[n].name == i32(name)
-    loop child in [int(nodes[n].a), int(nodes[n].b), int(nodes[n].c), int(nodes[n].d)]:
+    loop child in [int(nodes[n].a), int(nodes[n].b), kid_c(n), kid_d(n)]:
         value = member_dependencies(child, name, memo)
         found = found or value
     loop child in kids(n):

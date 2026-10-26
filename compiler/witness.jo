@@ -330,7 +330,7 @@ wit_owner_calls = () -> int[]:
         visits += 1
         if e <= 0 or e >= nodes.len() or nodes[e].kind == .lambda: continue
         if nodes[e].kind == .call and nodes[e].aux == 0 and checked_call_mutmask(e) != 0 and wit_call_text(e, 0) != "": wit_calls.push(e)
-        stack.push(int(nodes[e].a)); stack.push(int(nodes[e].b)); stack.push(int(nodes[e].c)); stack.push(int(nodes[e].d))
+        stack.push(int(nodes[e].a)); stack.push(int(nodes[e].b)); stack.push(kid_c(e)); stack.push(kid_d(e))
         loop child in kids(e): stack.push(child)
     wit_calls
 
@@ -889,7 +889,7 @@ wit_call_holding = (n: int) -> int:
         if nodes[e].kind == .call:
             loop child in kids(e):
                 if child == n: return e
-        stack.push(int(nodes[e].a)); stack.push(int(nodes[e].b)); stack.push(int(nodes[e].c)); stack.push(int(nodes[e].d))
+        stack.push(int(nodes[e].a)); stack.push(int(nodes[e].b)); stack.push(kid_c(e)); stack.push(kid_d(e))
         loop child in kids(e): stack.push(child)
     0
 

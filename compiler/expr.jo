@@ -5456,7 +5456,7 @@ int_literal_elem_mismatch = (from0: int, to0: int) -> bool:
 local_decl_in = (n: int, l: int) -> int:
     if n == 0: return 0
     if nodes[n].kind == .vardecl and nodes[n].sym == i32(l) and not has_flag(n, NF_GLOBAL): return n
-    loop c in [int(nodes[n].a), int(nodes[n].b), int(nodes[n].c), int(nodes[n].d)]:
+    loop c in [int(nodes[n].a), int(nodes[n].b), kid_c(n), kid_d(n)]:
         d = local_decl_in(c, l)
         if d != 0: return d
     loop c in kids(n) + kids2(n):
@@ -11807,7 +11807,7 @@ dewy_end_substitute = (e: int, names: int[], source: int, pos: int):
     if nodes[e].kind == .ident and names.contains(int(nodes[e].name)):
         nodes[e] = nodes[dewy_index_end(clone(source), nodes[e].pos)]
         return
-    loop c in [int(nodes[e].a), int(nodes[e].b), int(nodes[e].c), int(nodes[e].d)]: dewy_end_substitute(c, names, source, pos)
+    loop c in [int(nodes[e].a), int(nodes[e].b), kid_c(e), kid_d(e)]: dewy_end_substitute(c, names, source, pos)
     loop c in kids(e):
         if c != int(nodes[e].b): dewy_end_substitute(c, names, source, pos)
 
@@ -11875,7 +11875,7 @@ dewy_axis_depth = (t0: int) -> int:
 dewy_axis_mentions = (e: int, name: int) -> bool:
     if e == 0 or name == 0: return false
     if nodes[e].kind == .ident and nodes[e].name == i32(name): return true
-    loop c in [int(nodes[e].a), int(nodes[e].b), int(nodes[e].c), int(nodes[e].d)]:
+    loop c in [int(nodes[e].a), int(nodes[e].b), kid_c(e), kid_d(e)]:
         if dewy_axis_mentions(c, name): return true
     loop c in kids(e):
         if dewy_axis_mentions(c, name): return true

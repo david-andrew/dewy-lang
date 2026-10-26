@@ -45,7 +45,7 @@ place_count = 0
 place_names_used = (n: int, names: {int: bool}) -> int:
     if n == 0: return 0
     if nodes[n].kind == .ident and names.has(int(nodes[n].name)): return n
-    loop child in [int(nodes[n].a), int(nodes[n].b), int(nodes[n].c), int(nodes[n].d)]:
+    loop child in [int(nodes[n].a), int(nodes[n].b), kid_c(n), kid_d(n)]:
         found = place_names_used(child, names)
         if found != 0: return found
     loop child in kids(n):
@@ -323,8 +323,8 @@ place_scan = (n: int, name: int, root: int, arg: bool, closure: bool):
     inner = closure or k == .lambda or k == .fn_
     place_scan(int(nodes[n].a), name, root, false, inner)
     place_scan(int(nodes[n].b), name, root, false, inner)
-    place_scan(int(nodes[n].c), name, root, false, inner)
-    place_scan(int(nodes[n].d), name, root, false, inner)
+    place_scan(kid_c(n), name, root, false, inner)
+    place_scan(kid_d(n), name, root, false, inner)
     loop child in kids(n):
         if k == .call and nodes[child].kind == .namedarg:
             place_scan(int(nodes[child].a), name, root, true, inner)

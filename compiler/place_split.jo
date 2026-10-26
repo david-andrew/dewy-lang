@@ -33,8 +33,8 @@ place_returns_in = (n: int, receiver: int, places: mut int[], values: mut int[])
         else: values.push(n)
     place_returns_in(int(nodes[n].a), receiver, places, values)
     place_returns_in(int(nodes[n].b), receiver, places, values)
-    place_returns_in(int(nodes[n].c), receiver, places, values)
-    place_returns_in(int(nodes[n].d), receiver, places, values)
+    place_returns_in(kid_c(n), receiver, places, values)
+    place_returns_in(kid_d(n), receiver, places, values)
     loop child in kids(n): place_returns_in(child, receiver, places, values)
 
 # Splits a method that lends a place (see the top); the functions it adds, to declare as rows.

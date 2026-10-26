@@ -386,10 +386,8 @@ wk_init_scan = (n: int, m: int, h0: int, refs: mut int[], seen: mut int[]) -> in
                     if not w_assets.contains(p): w_assets.push(p)
     h = wk_init_scan(int(nodes[n].a), m, h, refs, seen)
     h = wk_init_scan(int(nodes[n].b), m, h, refs, seen)
-    # (a checked loop's c and d are locals, its index and snapshot, not nodes)
-    if k != .for_:
-        h = wk_init_scan(int(nodes[n].c), m, h, refs, seen)
-        h = wk_init_scan(int(nodes[n].d), m, h, refs, seen)
+    h = wk_init_scan(kid_c(n), m, h, refs, seen)
+    h = wk_init_scan(kid_d(n), m, h, refs, seen)
     loop i in [0..nkids(n)): h = wk_init_scan(kid(n, i), m, h, refs, seen)
     loop i in [0..nkids2(n)): h = wk_init_scan(kid2(n, i), m, h, refs, seen)
     h

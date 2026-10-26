@@ -787,6 +787,9 @@ internal_options = (a: str[]) -> str[]:
     if a.len() > 2 and starts_with(a[1], "--internal-fact-policy="):
         fact_internal_policy = a[1][len("--internal-fact-policy=")..]
         return [a[0]] + a[2..]
+    if a.len() > 2 and a[1] == "--internal-collide-locals":
+        collide_locals = true
+        return internal_options([a[0]] + a[2..])
     a
 
 main = ():

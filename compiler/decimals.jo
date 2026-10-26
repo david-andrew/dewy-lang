@@ -85,7 +85,7 @@ decimal_binding_in = (n: int) -> bool:
         if nodes[n].a == 0 and nodes[n].b != 0 and nodes[n].nlist == 0 and not has_flag(n, NF_RDONLY) and decimal_literal_tree(int(nodes[n].b)): return true
         return decimal_lambda_in(int(nodes[n].b))
     if k != .block and k != .if_ and k != .iflet and k != .while_ and k != .for_ and k != .exprstmt and k != .match_ and k != .arm and k != .defer_ and k != .when_: return decimal_lambda_in(n)
-    if decimal_binding_in(int(nodes[n].a)) or decimal_binding_in(int(nodes[n].b)) or decimal_binding_in(int(nodes[n].c)) or decimal_binding_in(int(nodes[n].d)): return true
+    if decimal_binding_in(int(nodes[n].a)) or decimal_binding_in(int(nodes[n].b)) or decimal_binding_in(kid_c(n)) or decimal_binding_in(kid_d(n)): return true
     loop i in [0..nkids(n)):
         if decimal_binding_in(kid(n, i)): return true
     loop i in [0..nkids2(n)):
@@ -98,7 +98,7 @@ decimal_lambda_in = (n: int) -> bool:
     k = nodes[n].kind
     if k == .lambda: return decimal_binding_in(int(nodes[n].b))
     if k == .ident or k == .int_lit or k == .float_lit or k == .str_lit or k == .bool_lit or k == .none_lit: return false
-    if decimal_lambda_in(int(nodes[n].a)) or decimal_lambda_in(int(nodes[n].b)) or decimal_lambda_in(int(nodes[n].c)) or decimal_lambda_in(int(nodes[n].d)): return true
+    if decimal_lambda_in(int(nodes[n].a)) or decimal_lambda_in(int(nodes[n].b)) or decimal_lambda_in(kid_c(n)) or decimal_lambda_in(kid_d(n)): return true
     loop i in [0..nkids(n)):
         if decimal_lambda_in(kid(n, i)): return true
     false
@@ -128,8 +128,8 @@ decimal_save = (n: int):
         if p > dsn_hi: dsn_hi = p
     decimal_save(int(nodes[n].a))
     decimal_save(int(nodes[n].b))
-    decimal_save(int(nodes[n].c))
-    decimal_save(int(nodes[n].d))
+    decimal_save(kid_c(n))
+    decimal_save(kid_d(n))
     s = int(nodes[n].list)
     loop i in [0..int(nodes[n].nlist)):
         dsn_slots.push(s + i)
@@ -433,7 +433,7 @@ decimal_writes = (n: int, names: {int: bool}) -> bool:
         lhs = int(nodes[n].a)
         if lhs != 0 and nodes[lhs].kind == .ident and names.has(int(nodes[lhs].name)): return true
     if k == .int_lit or k == .float_lit or k == .str_lit or k == .ident: return false
-    if decimal_writes(int(nodes[n].a), names) or decimal_writes(int(nodes[n].b), names) or decimal_writes(int(nodes[n].c), names) or decimal_writes(int(nodes[n].d), names): return true
+    if decimal_writes(int(nodes[n].a), names) or decimal_writes(int(nodes[n].b), names) or decimal_writes(kid_c(n), names) or decimal_writes(kid_d(n), names): return true
     loop i in [0..nkids(n)):
         if decimal_writes(kid(n, i), names): return true
     loop i in [0..nkids2(n)):

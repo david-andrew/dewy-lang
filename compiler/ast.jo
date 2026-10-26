@@ -81,6 +81,14 @@ nkids = (n: int) -> int: int(nodes[n].nlist)
 nkids2 = (n: int) -> int: int(nodes[n].nlist2)
 set_kid = (n: int, i: int, v: int): lists[int(nodes[n].list) + i] = i32(v)
 set_kid2 = (n: int, i: int, v: int): lists[int(nodes[n].list2) + i] = i32(v)
+# n's c and d where they hold child nodes, for walks over every field of any node. A checked
+# for keeps locals in c and d (its index and the iterable's snapshot), a partial a function
+# instance in d (check.jo, expr.jo's finish_partial); in large builds those numbers reach
+# node numbers, and a raw walk recurses into unrelated nodes or its own loop.
+kid_c = (n: int) -> int: if nodes[n].kind == .for_: 0 else: int(nodes[n].c)
+kid_d = (n: int) -> int:
+    k = nodes[n].kind
+    if k == .for_ or k == .partial: 0 else: int(nodes[n].d)
 kids = (n: int) -> int[]: node_kids(nodes, lists, n)
 kids2 = (n: int) -> int[]: node_kids2(nodes, lists, n)
 has_flag = (n: int, f: int) -> bool: int(nodes[n].flags) & f != 0

@@ -335,7 +335,6 @@ tk_walk = (n: int):
             if nodes[v].kind == .ident: tk_decls.push(TkDecl(name = int(nodes[v].name), decl = 0, block = 0, index = 0))
             else: tk_walk(v)
         tk_walk(int(nodes[n].b))
-        tk_walk(int(nodes[n].c))
         tk_decls.truncate(mark)
         return
     if k == .vardecl:
@@ -354,8 +353,8 @@ tk_walk = (n: int):
         return
     tk_walk(int(nodes[n].a))
     tk_walk(int(nodes[n].b))
-    tk_walk(int(nodes[n].c))
-    tk_walk(int(nodes[n].d))
+    tk_walk(kid_c(n))
+    tk_walk(kid_d(n))
     loop c in kids(n): tk_walk(c)
     loop c in kids2(n): tk_walk(c)
 

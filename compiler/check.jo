@@ -1778,7 +1778,7 @@ returned_values = (n: int, out: mut int[]):
     if nodes[n].kind == .return_ and nodes[n].a != 0: value_leaves(int(nodes[n].a), out)
     returned_values(int(nodes[n].a), out)
     returned_values(int(nodes[n].b), out)
-    returned_values(int(nodes[n].c), out)
+    returned_values(kid_c(n), out)
     loop i in [0..nkids(n)): returned_values(kid(n, i), out)
 
 # (an expression that names none of the functions `pending` and nothing out of scope here)
@@ -2026,6 +2026,12 @@ ensure_ret = (f: int, use_pos: int):
         return
     if fns[f].state == 1: fatal(use_pos, "recursive function '{name_of(int(nodes[int(fns[f].decl)].name))}' needs an explicit return type (add {jd(use_pos, "`-> Type`", "`:>Type`")})")
     check_fn_body(f)
+
+# (--internal-collide-locals, a self-test: a checked loop's index local takes the loop's own
+# node number, so a walk reading the loop's c as a node meets the loop again and never ends)
+collide_locals = false
+collide_local = (s: int):
+    if collide_locals and locals.len() < s: locals.resize(s)
 
 new_local = (name: int, t: int, pos: int) -> int:
     inst = int(ctxs[cx].inst)
@@ -3596,6 +3602,7 @@ check_for = (s: int):
             if k == .array or k == .fixed: et = int(types[t].elem)
             idxname = 0
             if nv == 2: idxname = n1
+            collide_local(s)
             idx = new_local(idxname, T_INT, pos)
             snap = new_local(0, t, pos)
             elname = n1
@@ -3632,6 +3639,7 @@ check_for = (s: int):
             check_struct_fields(si)
             kt = int(fields[int(structs[si].fields)].type)
             vt = int(fields[int(structs[si].fields) + 1].type)
+            collide_local(s)
             idx = new_local(0, T_INT, pos)
             snap = new_local(0, t, pos)
             kl = new_local(n1, telem(kt), pos)

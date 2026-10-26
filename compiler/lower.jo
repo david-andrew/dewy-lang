@@ -1774,14 +1774,13 @@ mentions_var = (n: int, r: int) -> bool:
     if nodes[n].kind == .lambda: return false
     child_a = int(nodes[n].a)
     child_b = int(nodes[n].b)
-    child_c = int(nodes[n].c)
-    child_d = int(nodes[n].d)
-    more_children = nodes[n].kind != .for_
+    # (kid_c and kid_d, with the kind in hand)
+    child_c = if nodes[n].kind == .for_: 0 else: int(nodes[n].c)
+    child_d = if nodes[n].kind == .for_ or nodes[n].kind == .partial: 0 else: int(nodes[n].d)
     if mentions_var(child_a, r): return true
     if mentions_var(child_b, r): return true
-    if more_children:
-        if mentions_var(child_c, r): return true
-        if mentions_var(child_d, r): return true
+    if mentions_var(child_c, r): return true
+    if mentions_var(child_d, r): return true
     loop i in [0..nkids(n)):
         if mentions_var(kid(n, i), r): return true
     loop i in [0..nkids2(n)):
@@ -3421,14 +3420,13 @@ has_call = (n: int) -> bool:
     if k == .lambda: return false
     child_a = int(nodes[n].a)
     child_b = int(nodes[n].b)
-    child_c = int(nodes[n].c)
-    child_d = int(nodes[n].d)
-    more_children = k != .for_
+    # (kid_c and kid_d, with the kind in hand)
+    child_c = if nodes[n].kind == .for_: 0 else: int(nodes[n].c)
+    child_d = if nodes[n].kind == .for_ or nodes[n].kind == .partial: 0 else: int(nodes[n].d)
     if has_call(child_a): return true
     if has_call(child_b): return true
-    if more_children:
-        if has_call(child_c): return true
-        if has_call(child_d): return true
+    if has_call(child_c): return true
+    if has_call(child_d): return true
     loop i in [0..nkids(n)):
         if has_call(kid(n, i)): return true
     loop i in [0..nkids2(n)):
@@ -3446,7 +3444,7 @@ assign_rhs_effects = (n: int) -> bool:
         id = nodes[n].aux as IN
         if id == .fmt_struct or id == .json_fields or id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .reserve or id == .resize or id == .truncate or id == .extend: return true
     if assign_rhs_effects(int(nodes[n].a)) or assign_rhs_effects(int(nodes[n].b)): return true
-    if assign_rhs_effects(int(nodes[n].c)) or assign_rhs_effects(int(nodes[n].d)): return true
+    if assign_rhs_effects(kid_c(n)) or assign_rhs_effects(kid_d(n)): return true
     loop i in [0..nkids(n)):
         if assign_rhs_effects(kid(n, i)): return true
     loop i in [0..nkids2(n)):
@@ -3859,7 +3857,7 @@ gen_intrinsic_push = (e: int, arg_start: int) -> Val:
         # (generated code that reserved room in an array of its own: no checks)
         n0 = 0
         if has_flag(e, NF_COMPREHENSION):
-            n0 = read_place(local_place(int(nodes[e].d), false), T_INT)
+            n0 = read_place(local_place(comprehension_push_index.get(e) ?? 0, false), T_INT)
         else:
             n0 = hdr_load(p, 8)
             hdr_store(p, 8, e_addi(n0, 1))
@@ -6469,8 +6467,8 @@ hv_scan = (n: int):
         if id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .reserve or id == .resize or id == .truncate or id == .setlen or id == .extend or id == .arrdata: hv_spoil(kid(n, 0))
     else if k == .addr or (k == .cast or k == .conv) and raw_view(n): hv_spoil(int(nodes[n].a))
     else if k == .for_ and has_flag(n, NF_MUT): hv_spoil(int(nodes[n].a))
-    fs = [int(nodes[n].a), int(nodes[n].b), int(nodes[n].c), int(nodes[n].d)]
-    if k == .for_: fs = [int(nodes[n].a), int(nodes[n].b)]
+    fs = [int(nodes[n].a), int(nodes[n].b)]
+    if k != .for_: fs = [int(nodes[n].a), int(nodes[n].b), int(nodes[n].c), if k == .partial: 0 else: int(nodes[n].d)]
     loop c in fs: hv_scan(c)
     loop i in [0..nkids(n)):
         c = kid(n, i)
@@ -6510,14 +6508,13 @@ mentions_local = (n: int, l: int) -> bool:
     if k == .ident: return nodes[n].aux == i32(int(SK.local)) and int(nodes[n].sym) == l
     child_a = int(nodes[n].a)
     child_b = int(nodes[n].b)
-    child_c = int(nodes[n].c)
-    child_d = int(nodes[n].d)
-    more_children = k != .for_
+    # (kid_c and kid_d, with the kind in hand)
+    child_c = if nodes[n].kind == .for_: 0 else: int(nodes[n].c)
+    child_d = if nodes[n].kind == .for_ or nodes[n].kind == .partial: 0 else: int(nodes[n].d)
     if mentions_local(child_a, l): return true
     if mentions_local(child_b, l): return true
-    if more_children:
-        if mentions_local(child_c, l): return true
-        if mentions_local(child_d, l): return true
+    if mentions_local(child_c, l): return true
+    if mentions_local(child_d, l): return true
     loop i in [0..nkids(n)):
         if mentions_local(kid(n, i), l): return true
     loop i in [0..nkids2(n)):
@@ -6583,14 +6580,13 @@ may_write_root = (n: int, rn: int, place: int = 0) -> bool:
             if w.all or (glob and w.globals.contains(int(nodes[rn].sym))) or (mutparam and w.globals.len() > 0): return true
     child_a = int(nodes[n].a)
     child_b = int(nodes[n].b)
-    child_c = int(nodes[n].c)
-    child_d = int(nodes[n].d)
-    more_children = k != .for_
+    # (kid_c and kid_d, with the kind in hand)
+    child_c = if nodes[n].kind == .for_: 0 else: int(nodes[n].c)
+    child_d = if nodes[n].kind == .for_ or nodes[n].kind == .partial: 0 else: int(nodes[n].d)
     if may_write_root(child_a, rn, place): return true
     if may_write_root(child_b, rn, place): return true
-    if more_children:
-        if may_write_root(child_c, rn, place): return true
-        if may_write_root(child_d, rn, place): return true
+    if may_write_root(child_c, rn, place): return true
+    if may_write_root(child_d, rn, place): return true
     loop i in [0..nkids(n)):
         if may_write_root(kid(n, i), rn, place): return true
     loop i in [0..nkids2(n)):
@@ -6625,14 +6621,13 @@ calls_leave = (n: int, rn: int, written: bool) -> bool:
                 if w.globals.len() > 0 or (written and w.mentions.len() > 0): return false
     child_a = int(nodes[n].a)
     child_b = int(nodes[n].b)
-    child_c = int(nodes[n].c)
-    child_d = int(nodes[n].d)
-    more_children = k != .for_
+    # (kid_c and kid_d, with the kind in hand)
+    child_c = if nodes[n].kind == .for_: 0 else: int(nodes[n].c)
+    child_d = if nodes[n].kind == .for_ or nodes[n].kind == .partial: 0 else: int(nodes[n].d)
     if not calls_leave(child_a, rn, written): return false
     if not calls_leave(child_b, rn, written): return false
-    if more_children:
-        if not calls_leave(child_c, rn, written): return false
-        if not calls_leave(child_d, rn, written): return false
+    if not calls_leave(child_c, rn, written): return false
+    if not calls_leave(child_d, rn, written): return false
     loop i in [0..nkids(n)):
         if not calls_leave(kid(n, i), rn, written): return false
     loop i in [0..nkids2(n)):
@@ -6726,9 +6721,8 @@ fw_scan = (n: int, w: mut FnWrites):
         else if aux == 0 and not w.calls.contains(int(nodes[n].sym)): w.calls.push(int(nodes[n].sym))
     fw_scan(int(nodes[n].a), w)
     fw_scan(int(nodes[n].b), w)
-    if k != .for_:
-        fw_scan(int(nodes[n].c), w)
-        fw_scan(int(nodes[n].d), w)
+    fw_scan(kid_c(n), w)
+    fw_scan(kid_d(n), w)
     loop i in [0..nkids(n)): fw_scan(kid(n, i), w)
     loop i in [0..nkids2(n)): fw_scan(kid2(n, i), w)
 
@@ -6787,9 +6781,8 @@ fr_scan = (n: int, out: mut int[]):
             if mm & (1 << i) != 0: fr_root(kid(n, i), out)
     fr_scan(int(nodes[n].a), out)
     fr_scan(int(nodes[n].b), out)
-    if k != .for_:
-        fr_scan(int(nodes[n].c), out)
-        fr_scan(int(nodes[n].d), out)
+    fr_scan(kid_c(n), out)
+    fr_scan(kid_d(n), out)
     loop i in [0..nkids(n)): fr_scan(kid(n, i), out)
     loop i in [0..nkids2(n)): fr_scan(kid2(n, i), out)
 
@@ -6803,9 +6796,8 @@ lm_resizing_call = (n: int, g: int) -> int:
     if k == .call and int(nodes[n].aux) == 0 and nodes[n].sym > 0 and fn_resizes(int(nodes[n].sym)).contains(g): return n
     r = lm_resizing_call(int(nodes[n].a), g)
     if r == 0: r = lm_resizing_call(int(nodes[n].b), g)
-    if r == 0 and k != .for_:
-        r = lm_resizing_call(int(nodes[n].c), g)
-        if r == 0: r = lm_resizing_call(int(nodes[n].d), g)
+    if r == 0: r = lm_resizing_call(kid_c(n), g)
+    if r == 0: r = lm_resizing_call(kid_d(n), g)
     loop i in [0..nkids(n)):
         if r == 0: r = lm_resizing_call(kid(n, i), g)
     loop i in [0..nkids2(n)):
@@ -7021,6 +7013,9 @@ comprehension_value = (n: int) -> bool:
         if not comprehension_value(child): return false
     true
 
+# a comprehension's in-bounds push (NF_COMPREHENSION) -> the loop's index local, the slot it writes
+comprehension_push_index: {int: int} = {}
+
 reserve_comprehension = (b: int):
     if not has_flag(b, NF_COMPREHENSION) or nkids(b) != 3 or not files[pos_file(nodes[b].pos)].is_dewy: return
     decl = kid(b, 0)
@@ -7064,10 +7059,7 @@ reserve_comprehension = (b: int):
     if not is_managed(int(types[at].elem)) and stable_loop_index(idx):
         add_flag(loop_, NF_INBOUNDS)
         add_flag(push, NF_COMPREHENSION)
-        # The generic write walker observes d as a child. If its first demand
-        # is after this lowering annotation, retain that walk's exact input.
-        fns[cur_fn].writes_ready = false
-        nodes[push].d = i32(idx)
+        comprehension_push_index[push] = idx
 
 gen_comprehension_reserve = (s: int, count: int):
     if not has_flag(s, NF_COMPREHENSION): return
