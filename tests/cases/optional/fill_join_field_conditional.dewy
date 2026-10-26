@@ -1,0 +1,9 @@
+# A field filled only on some paths through the branch stays optional.
+need = (s:string):>int64 => s.length
+Box:type = [name:string?]
+field = (@b:Box c:bool):>int64 => {
+    if b.name is? none { if c { b.name = "box" } }
+    need(b.name)
+}
+let b:Box = [none]
+printl(field(@b true))

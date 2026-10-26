@@ -1258,7 +1258,9 @@ units `s`, `ms`, `us`, `ns`, their written names, `minute`, and `hour` are in
 the prelude. Import other units from `units`. A unit is written against its
 number, `20m`, `9.81m/s^2`: `9.81 m` is two expressions, and a unit written
 apart from the number before it is an error. Units are ordinary names, so a
-local `m` hides the metre.
+local `m` hides the metre. After `0`, a unit is a unit (`0g`, `0s`, `0deg`):
+only `0x` and `0z` always begin a base prefix, and `0b`, `0t`, `0q`, `0s`, `0o`,
+`0d`, `0u` and `0g` do before a digit, `_` or quote (`0b101`, `0g"zz"`).
 
 ```dewy
 from units import m, km, kg, deg, turn
@@ -4140,7 +4142,12 @@ let size = match found { n:int => n <none> => 0 }
 printl"Length: {size}"
 ```
 
-Assigning another type invalidates a narrowed local. Sibling `if` and `match`
+Assigning another type invalidates a narrowed local. After
+`if v is? none { v = value }` (or `v =? none`), v holds a value: the branch
+fills it at its top level with a value that is not optional and keeps it filled,
+and any `else` keeps the value v was tested to hold. A fill under a condition or
+in a loop, an optional value, or `none` on the way leaves v optional. This holds
+for a variable, a global or a field path. Sibling `if` and `match`
 arms are checked independently: an assignment in one arm does not change the
 type assumptions used to check another arm. A guard carries forward only
 refinements still valid on its continuing path. Replacing a parent value

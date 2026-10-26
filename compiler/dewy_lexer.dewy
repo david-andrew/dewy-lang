@@ -31,7 +31,17 @@ dx_lex_quote=(@lx:DewyLexer host:ptr<DewyLexHost> bytes:ptr<uint8> start:int64 s
     if e <? 0 {host[0].problem();}
     e
 }
-dx_base_prefix=(c:uint8):>bool=>c =? b'b' or c =? b't' or c =? b'q' or c =? b's' or c =? b'o' or c =? b'd' or c =? b'z' or c =? b'x' or c =? b'u' or c =? b'g'
+# Whether the `0` at i (i + 1 <? stop) opens a base prefix. `0x` and `0z` always do; another
+# prefix letter only before a digit, `_` or quote, so `0g`, `0s`, `0b` and `0days` are a zero
+# with a unit, while `0g12` stays a (rejected) based literal.
+dx_base_prefix=(bytes:ptr<uint8> i:int64 stop:int64 classes:ptr<uint8>):>bool=>$unsafe {
+    let c=bytes[i + 1]
+    if c =? b'x' or c =? b'z' {return true}
+    if not (c =? b'b' or c =? b't' or c =? b'q' or c =? b's' or c =? b'o' or c =? b'd' or c =? b'u' or c =? b'g') {return false}
+    if i + 2 >=? stop {return false}
+    let d=bytes[i + 2]
+    (classes[d] & 4) not=? 0 or d =? b'"' or d =? b'\''
+}
 dx_word_assign=(word:DewyToken bytes:ptr<uint8> at:int64 stop:int64):>DewyToken=>$unsafe {
     if at >=? stop or bytes[at] not=? b'=' {return 'none'}
     if at + 1 <? stop and (bytes[at + 1] =? b'?' or bytes[at + 1] =? b'>' or bytes[at + 1] =? b'=') {return 'none'}
@@ -207,7 +217,7 @@ dx_lex=(@state:DewyLexState host:ptr<DewyLexHost> @lx:DewyLexer @comments:array<
         else if (b'0' <=? c and c <=? b'9') {
             let decimal=true
             let digits:int64=start
-            if (((c =? b'0') and ((int64<overflow='wrap'>(i) + 1) <? stop)) and dx_base_prefix(bytes[(int64<overflow='wrap'>(i) + 1)])) {
+            if (((c =? b'0') and ((int64<overflow='wrap'>(i) + 1) <? stop)) and dx_base_prefix(bytes i stop classes)) {
                 decimal=(bytes[(int64<overflow='wrap'>(i) + 1)] =? b'd')
                 i+=2
                 digits=i

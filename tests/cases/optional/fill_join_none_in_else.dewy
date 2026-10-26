@@ -1,0 +1,8 @@
+# Emptied in the else branch: v stays optional.
+need = (s:string):>int64 => s.length
+f = (v0:string?):>int64 => {
+    let v = v0
+    if v is? none { v = "x" } else { v = none }
+    need(v)
+}
+main = () => printl(f(none))

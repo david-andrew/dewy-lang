@@ -1,0 +1,11 @@
+# Emptied again on a path through the branch: v stays optional.
+need = (s:string):>int64 => s.length
+f = (v0:string? c:bool):>int64 => {
+    let v = v0
+    if v is? none {
+        v = "x"
+        if c { v = none }
+    }
+    need(v)
+}
+main = () => printl(f(none true))

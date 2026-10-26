@@ -11281,6 +11281,84 @@ check_swizzle = (n: int, bt: int) -> int:
     if len(s) == 3: return T_VEC3
     T_VEC4
 
+# The statements `if v is? none` checking their then-branch, whose top level may fill v
+# (opt_fill_subject): v (a variable, global or field path), the branch, and the alias of
+# v's latest fill there.
+struct OptFill:
+    subject: i32
+    block: i32
+    alias: i32
+
+opt_fill_watch: OptFill[]
+
+# A Dewy statement `if v is? none` (or `v =? none`) over an optional v, a variable not
+# narrowed or a global or field path: v, else 0. A then-branch that fills v at its top level
+# (opt_fill_at) and keeps it filled leaves v holding a value after the if. O(path length).
+opt_fill_subject = (cond: int) -> int:
+    k = nodes[cond].kind
+    a = 0
+    if k == .istype and nodes[cond].aux == -1: a = int(nodes[cond].a)
+    else if k == .binary and nodes[cond].op == i32(int(Tok.eq)) and nodes[int(nodes[cond].b)].kind == .none_lit: a = int(nodes[cond].a)
+    if a == 0 or not files[pos_file(nodes[cond].pos)].is_dewy or types[prune(ntype(a))].kind != .opt: return 0
+    if nodes[a].kind == .ident and nodes[a].aux == i32(int(SK.local)):
+        if int(locals[int(nodes[a].sym)].flags) & LF_ALIAS != 0: return 0
+        return a
+    if (nodes[a].kind == .field or nodes[a].kind == .ident and nodes[a].aux == i32(int(SK.global))) and len(path_key(a)) > 0: return a
+    0
+
+# v = value (value not optional) at the top level of a branch watching v: its watch, else -1.
+# O(nesting of watching ifs * path length).
+opt_fill_at = (lhs: int, rt: int, value: int) -> int:
+    if types[rt].kind == .opt: return -1
+    local = nodes[lhs].kind == .ident and nodes[lhs].aux == i32(int(SK.local))
+    key = ""
+    if not local:
+        key = path_key(lhs)
+        if len(key) == 0: return -1
+    loop j in [0..opt_fill_watch.len()):
+        w = opt_fill_watch[j]
+        if int(w.block) != sibling_block: continue
+        sub = int(w.subject)
+        if local and nodes[sub].kind == .ident and nodes[sub].aux == i32(int(SK.local)) and nodes[sub].sym == nodes[lhs].sym or not local and path_key(sub) == key:
+            if can_coerce(value, rt, int(types[prune(ntype(sub))].elem)): return j
+            return -1
+    -1
+
+# after that assignment: v holds a value from here on, until written again (a path: as the
+# assignment narrowed it)
+opt_fill = (j: int, lhs: int, pos: int):
+    sub = int(opt_fill_watch[j].subject)
+    al = 0
+    if nodes[sub].kind == .ident and nodes[sub].aux == i32(int(SK.local)): al = opt_unwrap_alias(int(nodes[sub].sym), pos)
+    else:
+        al = path_alias(lhs)
+        if al < 0 or nodes[int(locals[al].alias)].kind != .unwrap: al = 0
+    opt_fill_watch[j].alias = i32(al)
+
+# where its name is looked up now, optional v holds a value by a narrowing still in force
+opt_filled = (sub: int) -> bool:
+    if nodes[sub].kind != .ident or nodes[sub].aux != i32(int(SK.local)):
+        al = path_alias(sub)
+        return al >= 0 and nodes[int(locals[al].alias)].kind == .unwrap
+    l = int(nodes[sub].sym)
+    sy = lookup(int(locals[l].name))
+    if sy == 0 or syms[sy].kind != .local: return false
+    nl = int(syms[sy].ref)
+    if int(locals[nl].flags) & (LF_ALIAS | LF_UNNARROWED) != LF_ALIAS: return false
+    nodes[int(locals[nl].alias)].kind == .unwrap and narrowed_var(nl) == l
+
+# from here on, optional variable l's name stands for its value
+opt_unwrap_alias = (l: int, pos: int) -> int:
+    e = mk(.unwrap, pos)
+    t = int(types[prune(int(locals[l].type))].elem)
+    nodes[e].a = i32(mk_ident_local(l, pos))
+    nodes[e].type = i32(t)
+    add_flag(e, NF_CHECKED)
+    nl = new_local(int(locals[l].name), t, pos)
+    locals[nl].flags = i32(LF_ALIAS)
+    locals[nl].alias = i32(e)
+    nl
+
 # A Dewy `is?` test ending an else-less if (checked or not).
 is_chain_end = (cond: int) -> bool:
     nodes[cond].kind == .istype and files[pos_file(nodes[cond].pos)].is_dewy
@@ -11321,7 +11399,14 @@ check_if = (n: int, ex: int) -> int:
         after_b = locals.len()
         changes = narrow_changes.len()
         jumps = narrow_jumps.len()
+        fill = opt_fill_subject(cond)
+        if fill != 0: opt_fill_watch.push(OptFill(i32(fill), i32(b), 0))
         check_block(b, 0, false)
+        # (`if v is? none { v = x }`: v holds a value at the end of the branch)
+        filled = false
+        if fill != 0:
+            nl = int(opt_fill_watch.pop().alias)
+            filled = nl != 0 and int(locals[nl].flags) & LF_UNNARROWED == 0 and not stmt_terminates(b)
         if narrow_changes.len() != changes: narrow_returned(changes, jumps, b)
         scope_reset(mark)
         before_c = 0
@@ -11333,6 +11418,8 @@ check_if = (n: int, ex: int) -> int:
             after_c = locals.len()
             jumps = narrow_jumps.len()
             check_block(c, 0, false)
+            # (and in the else branch, v keeps the value it was tested to hold)
+            if filled and not stmt_terminates(c): filled = opt_filled(fill)
             if narrow_changes.len() != changes: narrow_returned(changes, jumps, c)
             scope_reset(mark)
             narrow_merge(first)
@@ -11342,6 +11429,8 @@ check_if = (n: int, ex: int) -> int:
             if c == 0: narrow_by(cond, false)
             else: narrow_promote(before_c, after_c)
         else if c != 0 and stmt_terminates(c) and not stmt_terminates(b): narrow_promote(before_b, after_b)
+        # (every path on holds a value: v stands for it from here, as after an early exit)
+        if filled: narrow_by(cond, false)
         return T_VOID
     if c == 0: fatal(nodes[n].pos, "an if expression needs an else branch")
     mark = scope_mark()
@@ -12974,14 +13063,7 @@ narrow_var = (isn: int, holds: bool):
             narrow_local(l, rest, pos)
         return
     if types[ut].kind != .opt or (vi == -2) != holds: return
-    e = mk(.unwrap, pos)
-    t = int(types[ut].elem)
-    nodes[e].a = i32(mk_ident_local(l, pos))
-    nodes[e].type = i32(t)
-    add_flag(e, NF_CHECKED)
-    nl = new_local(int(locals[l].name), t, pos)
-    locals[nl].flags = i32(LF_ALIAS)
-    locals[nl].alias = i32(e)
+    opt_unwrap_alias(l, pos)
 
 # from here on, union variable l is known to hold one of members ms: its name stands for that
 # member (one) or the smaller union of them (converted from the variable's value when used)

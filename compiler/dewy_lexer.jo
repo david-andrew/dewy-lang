@@ -27,6 +27,15 @@ struct DewyLexHost:
     problem: () -> int
     error: (int, str) -> int
 
+# Whether the `0` at i (i + 1 < stop) opens a base prefix; see dewy_lexer.dewy.
+dx_base_prefix = (bytes: *u8, i: int, stop: int, classes: *u8) -> bool:
+    c = bytes[i + 1]
+    if c == 'x' or c == 'z': return true
+    if find_byte("btqsodug", c) < 0: return false
+    if i + 2 >= stop: return false
+    d = bytes[i + 2]
+    classes[d] & 4 != 0 or d == '"' or d == '\''
+
 dx_lex_quote = (lx: mut DewyLexer, host: *DewyLexHost, bytes: *u8, start: int, stop: int, raw: bool) -> int:
     e = dx_quote_end(lx, bytes, start, stop, 0, raw, false)
     if e < 0: host[0].problem()
@@ -155,7 +164,7 @@ dx_lex = (state: mut DewyLexState, host: *DewyLexHost, lx: mut DewyLexer, commen
         else if is_digit(c):
             decimal = true
             digits = start
-            if c == '0' and i + 1 < stop and find_byte("btqsodzxug", bytes[i + 1]) >= 0:
+            if c == '0' and i + 1 < stop and dx_base_prefix(bytes, i, stop, classes):
                 decimal = bytes[i + 1] == 'd'
                 i += 2
                 digits = i

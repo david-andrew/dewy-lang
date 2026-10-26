@@ -1,0 +1,9 @@
+# Emptied after the if: v is optional again.
+need = (s:string):>int64 => s.length
+f = (v0:string?):>int64 => {
+    let v = v0
+    if v is? none { v = "x" }
+    v = none
+    need(v)
+}
+main = () => printl(f(none))

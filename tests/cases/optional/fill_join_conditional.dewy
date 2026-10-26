@@ -1,0 +1,8 @@
+# Filled only when c holds: v stays optional after the if.
+need = (s:string):>int64 => s.length
+f = (v0:string? c:bool):>int64 => {
+    let v = v0
+    if v is? none { if c { v = "x" } }
+    need(v)
+}
+main = () => printl(f(none true))

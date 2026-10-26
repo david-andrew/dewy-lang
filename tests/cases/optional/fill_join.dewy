@@ -1,0 +1,88 @@
+# `if v is? none { v = value }` leaves v holding a value after the if: the then-branch fills v
+# at its top level, and the else path (written or not) keeps the value v was tested to hold.
+# Early exits narrow as before. Variables, globals and field paths alike.
+need = (s:string):>int64 => s.length
+same = (n:int64):>int64 => n
+Box:type = [name:string?]
+fill = (v0:string?):>int64 => {
+    let v = v0
+    if v is? none { v = "x" }
+    need(v)
+}
+fill_eq = (v0:string?):>int64 => {
+    let v = v0
+    if v =? none v = "xyz"
+    need(v)
+}
+fill_else = (v0:string?):>int64 => {
+    let v = v0
+    if v is? none { v = "x" } else { printl"had {need(v)}" }
+    need(v)
+}
+else_write = (v0:string?):>int64 => {
+    let v = v0
+    if v is? none { v = "x" } else { v = "zzz" }
+    need(v)
+}
+else_exit = (v0:string?):>int64 => {
+    let v = v0
+    if v is? none { v = "x" } else { return 0 }
+    need(v)
+}
+fill_inside = (v0:string?):>int64 => {
+    let v = v0
+    if v is? none {
+        v = "four"
+        printl"filled {need(v)}"
+    }
+    need(v)
+}
+refill = (v0:string? c:bool):>int64 => {
+    let v = v0
+    if v is? none {
+        v = "x"
+        if c { v = none return -1 }
+        v = "yy"
+    }
+    need(v)
+}
+num = (v0:int64?):>int64 => {
+    let v = v0
+    if v is? none { v = 5 }
+    same(v)
+}
+members = (v0:(int64 | string)?):>string => {
+    let v = v0
+    if v is? none { v = 3 }
+    if v is? int64 "int {v}" else "string {v}"
+}
+copied = (v0:string?):>int64 => {
+    let v = v0
+    if v is? none { v = "abcd" }
+    let w = v
+    need(w) + need(v ?? "")
+}
+early = (v0:string?):>int64 => {
+    let v = v0
+    if v is? none return 0
+    need(v)
+}
+early_block = (v0:string?):>int64 => {
+    let v = v0
+    if v is? none { printl"none" return -1 }
+    need(v)
+}
+field = (@b:Box):>int64 => {
+    if b.name is? none { b.name = "box" }
+    need(b.name)
+}
+let g:string? = none
+if g is? none { g = "global" }
+printl(need(g))
+printl"{fill(none)} {fill("abc")} {fill_eq(none)} {fill_else(none)} {fill_else("ab")}"
+printl"{else_write(none)} {else_write("ab")} {else_exit(none)} {else_exit("a")} {fill_inside(none)}"
+printl"{refill(none false)} {refill(none true)} {num(none)} {num(4)} {members(none)} {members("s")}"
+printl"{copied(none)} {early(none)} {early("ab")} {early_block(none)} {early_block("a")}"
+let b:Box = [none]
+let c:Box = ["c"]
+printl"{field(@b)} {field(@c)}"

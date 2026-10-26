@@ -1,0 +1,8 @@
+# Filled in a loop that may not run: v stays optional.
+need = (s:string):>int64 => s.length
+f = (v0:string? n:int64):>int64 => {
+    let v = v0
+    if v is? none { loop i in [0..n) { v = "x" } }
+    need(v)
+}
+main = () => printl(f(none 1))

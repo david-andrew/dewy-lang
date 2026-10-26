@@ -4485,6 +4485,7 @@ __check_assign = (s: int, before: mut int[]) -> int:
         if tk_difference_writes.len() > 0: rt = temperature_write(int(nodes[s].b), last_checked, rt, lt)
         if decimal_target != 0 and decimal_float_write(rt, lt): return s
         if rt != lt and nodes[lhs].kind == .ident and (nodes[lhs].aux == i32(int(SK.local)) or nodes[lhs].aux == i32(int(SK.global))) and not can_coerce(last_checked, rt, lt): var_type_error(lhs, lt, rt, nodes[last_checked].pos)
+        fill = if opt_fill_watch.len() > 0: opt_fill_at(lhs, rt, last_checked) else: -1
         # (release_call's zero bytes are no value of lt: nothing reads them)
         if nodes[last_checked].kind != .intrinsic or nodes[last_checked].aux != i32(int(IN.zeroed)): nodes[s].b = i32(coerce(last_checked, lt))
         if (nodes[lhs].kind != .ident or nodes[lhs].aux == i32(int(SK.global))) and (path_narrows > 0 or is_union(lt) or tkind(lt) == .opt):
@@ -4499,6 +4500,7 @@ __check_assign = (s: int, before: mut int[]) -> int:
             # x.f = Enemy() where x.f is an Enemy?: it holds one from here on
             else if tkind(lt) == .opt and len(key) > 0 and type_eq(int(types[prune(lt)].elem), rt): narrow_path(lhs, -2, true)
         else if path_narrows > 0 and nodes[lhs].kind == .ident and path_rooted(lhs): path_forget(path_key(lhs))
+        if fill >= 0: opt_fill(fill, lhs, nodes[s].pos)
         return s
     if types[prune(lt)].kind == .refined:
         # The checked replacement reads and writes one selected element.

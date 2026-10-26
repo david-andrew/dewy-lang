@@ -1,0 +1,7 @@
+# A unit right after `0` is a unit, not a base prefix: only `0x` and `0z` always open one; the
+# other prefixes do before a digit, `_` or quote (`0b101`, `0o17`, `0g"zz"`).
+from units import g, kg, m, mm, cd, deg
+let mass = 0g
+printl"{mass} {0kg} {5kg} {0m} {0mm} {0cd} {0s} {0deg} {mass + 3g}"
+printl(0x1f + 0b101 + 0o17 + 0d9 + 0t12 + 0q3 + 0s5 + 0z1e)
+printl"{0b"1111_0000"} {0g"zz"} {0u"ab"}"

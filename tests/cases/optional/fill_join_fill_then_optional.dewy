@@ -1,0 +1,12 @@
+# Filled, then given an optional: v stays optional.
+need = (s:string):>int64 => s.length
+maybe = (c:bool):>string? => if c "x" else none
+f = (v0:string? c:bool):>int64 => {
+    let v = v0
+    if v is? none {
+        v = "y"
+        v = maybe(c)
+    }
+    need(v)
+}
+main = () => printl(f(none true))
