@@ -1,0 +1,8 @@
+# The keys taken before an insertion keep the old length: the new entry does not reach them.
+first_name = (totals:dict<string int>):>string => {
+    let names = [totals.keys...]
+    totals["new"] = 1
+    if totals.length >? 0 return names[0]
+    ""
+}
+main = () => printl(first_name(["a"->1]))

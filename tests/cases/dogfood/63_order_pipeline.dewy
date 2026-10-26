@@ -1,0 +1,118 @@
+# modes: native native-release
+# An order-processing pipeline over bounded channels: a reader parses order
+# lines into a small queue, two pricing workers look each item up in a
+# warehouse (a lookup that takes too long times out), and a collector gathers
+# the priced orders. Results are sorted by order number, so the output does not
+# depend on which worker handled which order.
+
+ORDERS = """
+1001 alice  widget 3
+1002 bob    gadget 1
+1003 carol  gizmo 2
+1004 dave   widget 10
+1005 erin   doohickey 1
+1006 frank  gadget 4
+oops this line is not an order
+1007 grace  sprocket 5
+1008 heidi  widget 1
+"""
+
+PRICES = ["widget"->250 "gadget"->1999 "gizmo"->75 "sprocket"->40]
+# the warehouse answers at once for most items; "sprocket" lookups hang
+SLOW = set["sprocket"]
+
+Order:type = [id:int customer:string item:string quantity:int]
+Priced:type = [order:Order cents:int note:string]
+
+parse_order = (line:string):>Order | string => {
+    let fields = line.split()
+    if fields.length not=? 4 return "expected 4 fields, got {fields.length}"
+    let id = to_int(fields[0])
+    let quantity = to_int(fields[3])
+    if id is? error return "bad order number '{fields[0]}'"
+    if quantity is? error or quantity <=? 0 return "bad quantity '{fields[3]}'"
+    Order[id fields[1] fields[2] quantity]
+}
+
+# a warehouse lookup: the unit price in cents, or none for an unknown item
+lookup_price = (item:string):>int? | Canceled => {
+    if item in? SLOW sleep(10s) or_throw else sleep(1ms) or_throw
+    PRICES.get(item)
+}
+
+read_orders = (text:string out:Channel<Order> rejects:Channel<string>):>void | Closed | Canceled => {
+    loop line in text.lines {
+        if line.trim.is_empty continue
+        match parse_order(line) {
+            o:Order => out.send(o) or_throw
+            problem:string => rejects.send("'{line}': {problem}") or_throw
+        }
+    }
+    out.close()
+    rejects.close()
+}
+
+price_orders = (input:Channel<Order> out:Channel<Priced>):>void | Closed | Canceled => {
+    loop true {
+        let next = input.receive()
+        if next is? Closed break
+        let order = next or_throw
+        let found = within(100ms @lookup_price(order.item))
+        let priced = match found {
+            <Timeout> => Priced[order 0 "warehouse timed out"]
+            <OutOfMemory> => Priced[order 0 "no room for the lookup"]
+            <Canceled> => return Canceled
+            <none> => Priced[order 0 "unknown item"]
+            price:int => Priced[order price * order.quantity ""]
+        }
+        out.send(priced) or_throw
+    }
+}
+
+dollars = (cents:int):>string => "${cents // 100}.{format(cents % 100 "02")}"
+
+main = () => {
+    let orders = channel<Order>(2)
+    let priced = channel<Priced>(2)
+    let rejects = channel<string>(8)
+    let results:array<Priced> = []
+    concurrent {
+        spawn read_orders(ORDERS orders rejects)
+        spawn {
+            concurrent {
+                spawn price_orders(orders priced)
+                spawn price_orders(orders priced)
+            }
+            priced.close()
+        }
+        loop true {
+            let p = priced.receive()
+            if p is? exception break
+            results.push(p)
+        }
+    }
+
+    results.sort(key=(p) => p.order.id)
+    let total = 0
+    let by_customer:dict<string int> = []
+    loop p in results {
+        let o = p.order
+        if p.note.is_empty {
+            printl"#{o.id} {o.customer:<6} {o.quantity:>2} x {o.item:<9} {dollars(p.cents):>8}"
+            total += p.cents
+            by_customer[o.customer] = (by_customer.get(o.customer) ?? 0) + p.cents
+        } else {
+            printl"#{o.id} {o.customer:<6} {o.quantity:>2} x {o.item:<9} -- {p.note}"
+        }
+    }
+    printl"total {dollars(total)} from {by_customer.length} customers"
+    if by_customer.length >? 0 {
+        let best = [by_customer.keys...].max_by((name) => by_customer.get(name) ?? 0)
+        printl"biggest spender: {best}"
+    }
+    loop true {
+        let r = rejects.receive()
+        if r is? exception break
+        printl"rejected {r}"
+    }
+}

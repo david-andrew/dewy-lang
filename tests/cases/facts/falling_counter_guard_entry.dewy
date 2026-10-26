@@ -1,0 +1,8 @@
+# The bound must hold on entry too: start may begin above stop.
+strip_end = (word:string start:int):>string => {
+    if not (0 <=? start <=? word.length) return ""
+    let stop = word.length // 2
+    loop stop >? start and word[stop - 1] =? "." stop -= 1
+    word[start..stop)
+}
+main = () => printl(strip_end("a..." 3))

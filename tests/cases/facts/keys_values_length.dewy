@@ -1,0 +1,16 @@
+# A dictionary's keys and values, and a set's members, have one element per entry: a guard on
+# the dictionary's or set's length bounds the array made from it.
+main = () => {
+    let totals:dict<string int> = ["frank"->7996 "dave"->2500]
+    totals["bob"] = 1999
+    if totals.length >? 0 {
+        let names = [totals.keys...]
+        let amounts = totals.values
+        printl"{names[0]} {amounts[0]} {names[names.length - 1]}"
+    }
+    let tags = set["red" "green"]
+    tags.push("blue")
+    let members = [tags...]
+    let listed = tags.values
+    if tags.length >? 1 printl"{members[1]} {listed[0]}"
+}

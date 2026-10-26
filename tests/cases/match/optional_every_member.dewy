@@ -1,0 +1,11 @@
+# An arm for every member and for `none` covers an optional union, in any order.
+describe = (v:(int64 | string | bool)?):>string => match v {
+    <none> => "nothing"
+    b:bool => "flag {b}"
+    s:string => "text {s}"
+    n:int64 => "number {n}"
+}
+main = () => {
+    let values:array<(int64 | string | bool)?> = [3 "x" true none]
+    loop v in values printl(describe(v))
+}

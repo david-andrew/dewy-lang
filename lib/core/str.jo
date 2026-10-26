@@ -148,13 +148,33 @@ trim = (s: str) -> str:
     loop b > a and is_space(s[b - 1]): b -= 1
     s[a..b)
 
-# remove any of the characters in `chars` from both ends
+# remove any of the characters in `chars` from both ends (whole characters: "—" never takes a
+# byte of another character that shares one)
 trim = (s: str, chars: str) -> str:
     a = 0
     b = len(s)
-    loop a < b and __has_byte(chars, s[a]): a += 1
-    loop b > a and __has_byte(chars, s[b - 1]): b -= 1
+    loop a < b:
+        n = 1
+        loop a + n < b and s[a + n] & 0xC0 == 0x80: n += 1
+        if not __has_char(chars, data(s) + a, n): break
+        a += n
+    loop b > a:
+        m = b - 1
+        loop m > a and s[m] & 0xC0 == 0x80: m -= 1
+        if not __has_char(chars, data(s) + m, b - m): break
+        b = m
     s[a..b)
+
+# (whether chars holds the n-byte character at p as one of its own characters)
+__has_char = (chars: str, p: *u8, n: int) -> bool:
+    if n == 1 and p[0] < 128: return __has_byte(chars, p[0])
+    i = 0
+    loop i < len(chars):
+        w = 1
+        loop i + w < len(chars) and chars[i + w] & 0xC0 == 0x80: w += 1
+        if w == n and __mem_eq(data(chars) + i, p, n): return true
+        i += w
+    false
 
 __has_byte = (s: str, c: u8) -> bool:
     loop x in s:
@@ -380,13 +400,23 @@ __case_of = (c: int, up: bool) -> int:
     if up:
         if c >= 0xE0 and c <= 0xFE and c != 0xF7: return c - 32
         if c == 0xFF: return 0x178
-        if c >= 0x3B1 and c <= 0x3C9 and c != 0x3C2: return c - 32
+        if c >= 0x3B1 and c <= 0x3CB and c != 0x3C2: return c - 32
+        # (Greek with an accent, and the final sigma)
+        if c == 0x3C2: return 0x3A3
+        if c == 0x3AC: return 0x386
+        if c >= 0x3AD and c <= 0x3AF: return c - 37
+        if c == 0x3CC: return 0x38C
+        if c == 0x3CD or c == 0x3CE: return c - 63
         if c >= 0x430 and c <= 0x44F: return c - 32
         if c >= 0x450 and c <= 0x45F: return c - 80
     else:
         if c >= 0xC0 and c <= 0xDE and c != 0xD7: return c + 32
         if c == 0x178: return 0xFF
-        if c >= 0x391 and c <= 0x3A9 and c != 0x3A2: return c + 32
+        if c >= 0x391 and c <= 0x3AB and c != 0x3A2: return c + 32
+        if c == 0x386: return 0x3AC
+        if c >= 0x388 and c <= 0x38A: return c + 37
+        if c == 0x38C: return 0x3CC
+        if c == 0x38E or c == 0x38F: return c + 63
         if c >= 0x410 and c <= 0x42F: return c + 32
         if c >= 0x400 and c <= 0x40F: return c + 80
     # (Latin Extended-A: pairs, the capital first)

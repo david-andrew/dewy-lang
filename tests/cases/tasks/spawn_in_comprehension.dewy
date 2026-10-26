@@ -1,0 +1,10 @@
+# modes: native native-release
+# A comprehension of spawns collects nothing: a spawn hands its task to the group. The
+# compiler says how to collect the results of a varying number of tasks.
+work = (n:int):>int => n * 2
+main = () => {
+    let xs = [1 2 3]
+    concurrent {
+        let tasks = [loop x in xs spawn work(x)]
+    }
+}

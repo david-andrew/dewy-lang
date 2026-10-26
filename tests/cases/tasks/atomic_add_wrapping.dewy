@@ -1,0 +1,11 @@
+# modes: native native-release
+# A counter whose payload wraps needs no check: its add never fails.
+Count:type = int64<overflow='wrap'>
+main = () => {
+    let hits = atomic<Count>(0)
+    concurrent {
+        spawn { hits.add(1); }
+        spawn { hits.add(2); }
+    }
+    printl(hits.load())
+}

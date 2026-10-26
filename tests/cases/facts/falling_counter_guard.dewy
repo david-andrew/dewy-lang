@@ -1,0 +1,19 @@
+# A counter stepped down while it stays above a fixed bound keeps that bound after the loop:
+# trimming from both ends leaves start at most stop, so the slice is in bounds.
+strip = (word:string skip:string):>string => {
+    let start = 0
+    let stop = word.length
+    loop start <? stop and word[start] =? skip start += 1
+    loop stop >? start and word[stop - 1] =? skip stop -= 1
+    word[start..stop)
+}
+from_end = (word:string start:int):>string => {
+    if not (0 <=? start <=? word.length) return ""
+    let stop = word.length
+    loop stop >? start and word[stop - 1] =? " " stop -= 1
+    word[start..stop)
+}
+main = () => {
+    printl"[{strip("..ab.." ".")}] [{strip("...." ".")}] [{strip("" ".")}]"
+    printl"[{from_end("ab  " 1)}] [{from_end("  " 2)}]"
+}

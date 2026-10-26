@@ -1,0 +1,7 @@
+# A match on an optional union names the member no arm takes.
+describe = (v:(int64 | string | bool)?):>string => match v {
+    n:int64 => "number {n}"
+    <none> => "nothing"
+    b:bool => "flag {b}"
+}
+main = () => printl(describe(3))

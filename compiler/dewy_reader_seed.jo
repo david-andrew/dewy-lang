@@ -129,6 +129,7 @@ rt_dc_hint = (pos: int, msg: str) -> int: dc_parser_hint(dc_parser.status, pos, 
 rt_dc_unread = (at: int):
     cut = dc_scan_cut(dc_parser.tokens, at)
     if cut >= 0: rt_dc_cut_off(cut)
+    rt_dc_keyword_in_statement(at)
     if dc_parser.status.hint_pos != 0: fatal(dc_parser.status.hint_pos, dc_parser.status.hint_text)
     if dc_parser.status.report_pos != 0: fatal(dc_parser.status.report_pos, dc_parser.status.report_text)
     rt_dc_foreign_habit(at)
@@ -145,6 +146,17 @@ rt_dc_cut_off = (cut: int):
 
 # A statement no reading takes, written as another language declares or loops (dc_unread's
 # mistake): `type Op = ...`, `type Point struct { ... }`, `for _, x := range xs { ... }`.
+
+# (`loop [url from] in links`: `from` and `import` begin a statement or follow `import (...)`,
+# so one later on the line of an unread statement is a keyword written as a name)
+
+rt_dc_keyword_in_statement = (at: int):
+    token = dc_parser.tokens[at]
+    if token.symbol == .kw_import or token.symbol == .kw_from: return
+    k = at + 1
+    loop dc_parser.tokens[k].kind != .eof and not dc_parser.tokens[k].newline:
+        if dc_parser.tokens[k].symbol == .kw_from or dc_parser.tokens[k].symbol == .kw_import: fatal(mkpos(dc_parser.file, dc_parser.tokens[k].start), rt_dc_keyword_text(dc_parser.tokens[k].symbol))
+        k += 1
 
 rt_dc_foreign_habit = (at: int):
     token = dc_parser.tokens[at]

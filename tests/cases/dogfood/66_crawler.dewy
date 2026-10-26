@@ -1,0 +1,122 @@
+# modes: native native-release
+# A concurrent crawler over an in-memory web: fetch each level of pages at
+# once (one task per page, each fetch with a deadline), follow links breadth
+# first, keep a shared count of fetches in an atomic, and report pages by
+# depth, broken links, pages nothing links to, and each site's outgoing links.
+# Every level is sorted before it is printed, so the order tasks finish in
+# never shows.
+
+SITE = [
+    "/"              -> "home: see /about /blog /shop"
+    "/about"         -> "about us: /team /contact /"
+    "/blog"          -> "posts: /blog/1 /blog/2 /blog/3"
+    "/blog/1"        -> "first post, links /blog/2 https://example.org/a"
+    "/blog/2"        -> "second post, links /blog/1 /blog/3 /missing"
+    "/blog/3"        -> "third post, very slow server"
+    "/shop"          -> "shop: /shop/cart /shop/item/1 /shop/item/2"
+    "/shop/cart"     -> "cart: /shop"
+    "/shop/item/1"   -> "item one: /shop https://example.org/b"
+    "/shop/item/2"   -> "item two: /shop /shop/item/1"
+    "/team"          -> "team: /about"
+    "/contact"       -> "contact: mailto:hello@example.com"
+    "/old-page"      -> "orphan: /"
+]
+SLOW = set["/blog/3"]
+
+# a fetch counter that wraps rather than fail (it never gets near 2^63)
+Count:type = int64<overflow='wrap'>
+Page:type = [url:string links:array<string> words:int]
+Fetched:type = [url:string page:Page | none | string]
+
+# links are the words that start with "/" (internal) or "https://" (external)
+links_in = (text:string):>array<string> => {
+    let out:array<string> = []
+    loop word in text.split() {
+        if word.startswith("/") or word.startswith("https://") out.push(word)
+    }
+    out
+}
+
+fetch = (url:string fetches:Atomic<Count>):>Page? | Canceled => {
+    fetches.add(1);
+    sleep(if url in? SLOW 5s else 2ms) or_throw
+    let body = SITE.get(url)
+    if body is? none return none
+    Page[url links_in(body) body.split().length]
+}
+
+fetch_with_deadline = (url:string fetches:Atomic<Count>):>Fetched => {
+    match within(200ms @fetch(url fetches)) {
+        page:Page => Fetched[url page]
+        <none> => Fetched[url none]
+        <Timeout> => Fetched[url "timed out"]
+        _ => Fetched[url "failed"]
+    }
+}
+
+crawl_one = (url:string fetches:Atomic<Count> found:Mutex<array<Fetched>>) => {
+    let fetched = fetch_with_deadline(url fetches)
+    let list = @(found.lock())
+    list.push(fetched)
+}
+
+main = () => {
+    let fetches = atomic<Count>(0)
+    let seen = set["/"]
+    let frontier = ["/"]
+    let pages:dict<string Page> = []
+    let broken:array<string> = []
+    let external:set<string> = set[]
+    let depth = 0
+    loop frontier.length >? 0 and depth <? 5 {
+        # one task per page; each adds what it fetched to a shared list
+        let found = mutex<array<Fetched>>([])
+        concurrent {
+            loop url in frontier spawn crawl_one(url fetches found)
+        }
+        let results = @(found.lock())
+        results.sort(key=(r) => r.url)
+        printl"depth {depth}: {[loop r in results r.url].join(" ")}"
+        let next:array<string> = []
+        loop r in results {
+            match r.page {
+                page:Page => {
+                    pages[r.url] = page
+                    loop link in page.links {
+                        if link.startswith("https://") external.push(link)
+                        else if link not in? seen {
+                            seen.push(link)
+                            next.push(link)
+                        }
+                    }
+                }
+                <none> => broken.push(r.url)
+                why:string => printl"  {r.url}: {why}"
+            }
+        }
+        frontier = next
+        depth += 1
+    }
+
+    printl"fetched {fetches.load()} pages, {pages.length} readable"
+    printl"broken: {broken.sorted().join(" ")}"
+    printl"external: {external.sorted().join(" ")}"
+    let unreached = set[SITE.keys...] - seen
+    printl"never reached: {unreached.sorted().join(" ")}"
+
+    # who links here: invert the link graph
+    let incoming:dict<string set<string>> = []
+    loop [url page] in pages {
+        loop link in page.links {
+            if link not in? incoming incoming[link] = set[]
+            incoming[link].push(url)
+        }
+    }
+    let popular = [loop [url sources] in incoming [url=url n=sources.length]]
+    popular.sort(key=(e) => e.url)
+    popular.sort(key=(e) => e.n reverse=true)
+    printl"most linked:"
+    loop e in popular[$clamp 0..4) printl"  {e.url:<14} {e.n}"
+    let total_words = sum([loop [url page] in pages page.words])
+    printl"{total_words} words across the site"
+}

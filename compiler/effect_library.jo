@@ -80,7 +80,7 @@ effect_library_classify = (g: int) -> EffectClass:
         if name in ["__str_concat", "__str_from_bytes", "__str_new", "__buf_append_str", "__buf_append_raw", "__buf_byte", "__buf_reserve"]: return .allocates
         return .unclassified
     if file == "/core/str.jo":
-        if name in ["find", "rfind", "find_byte", "contains", "starts_with", "ends_with", "count", "hash", "__has_byte", "__memchr"]: return .reads
+        if name in ["find", "rfind", "find_byte", "contains", "starts_with", "ends_with", "count", "hash", "__has_byte", "__has_char", "__memchr"]: return .reads
         if name in ["trim", "trim_start", "trim_end", "split", "words", "lines", "join", "replace", "upper", "lower", "__str_from", "__buf_finish_val", "__case_text"]: return .allocates
         return .unclassified
     if file == "/math_runtime.jo":

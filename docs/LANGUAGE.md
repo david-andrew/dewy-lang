@@ -821,7 +821,11 @@ stays within its entry value plus that many steps per element or range position.
 Array and range loops settle what they carry the way condition loops do (a running
 `max` over `loop x in xs` stays within `int64`), and an integer array built by a
 loop that only pushes onto it (a comprehension, filtered or not) keeps the range of
-what it pushed. A dictionary's or set's `length` is a length like an array's.
+what it pushed. A counter stepped down while the condition keeps it above a bound
+the loop leaves alone (`loop stop >? start ... stop -= 1`) stays at least that bound
+afterwards. A dictionary's or set's `length` is a length like an array's, and its
+keys, values or members collected into an array (`[d.keys...]`, `d.values`,
+`[s...]`) have that length.
 Keeping the bits has its own
 spelling: `uint8<overflow='wrap'>(x)` is the integer modulo 2^8 (two's complement for a signed target, and
 the low bits of an `int`), so `uint64<overflow='wrap'>(int64(-1))` is `18446744073709551615`.
@@ -2750,7 +2754,8 @@ optional compile-time `MemoryOrder` literal: `'relaxed'`, `'acquire'`,
 orders; stores reject acquire orders. `add` returns the new value (discard it
 with `;` as a statement, `hits.add(1);`). It panics when the exact result does
 not fit the payload, which no fact proves yet, so for now code that calls it,
-and its callers, need `$runtime_checks` (as below). The current
+and its callers, need `$runtime_checks` (as below), or a payload that wraps
+(`atomic<int64<overflow='wrap'>>(0)`), whose `add` never fails. The current
 native backend implements every order with sequentially consistent instructions,
 which is stronger than requested. For example:
 
@@ -2809,7 +2814,10 @@ concurrent {
 # a and b are available here: their results, or Canceled / OutOfMemory.
 ```
 
-The closing brace joins every child. As an expression, `concurrent { ... }`
+The closing brace joins every child. A task's result is kept only by
+`let name = spawn ...` written directly in the block; a spawn elsewhere is a
+statement (`loop x in xs { spawn work(x out) }`), so tasks in a loop send their
+results over a channel or store them under a `Mutex`. As an expression, `concurrent { ... }`
 returns `true` on success or the first exception returned by a child. The first
 failure cancels its siblings; joining still waits for their cleanup. Returning
 early from the body cancels and joins its children. `concurrent g { ... }` names
@@ -3935,7 +3943,8 @@ Success with a known nonempty pattern proves the text is nonempty, so
 `if not text.startswith("=") return ...` permits `text[1..]` afterward;
 `text.remove_prefix(prefix)` and `text.remove_suffix(suffix)` give the text without
 that end when it has it (once), and the text unchanged otherwise.
-`text.trim_start` and `text.trim_end` drop whitespace from one end (`trim` both),
+`text.trim_start` and `text.trim_end` drop whitespace from one end (`trim` both;
+`text.trim(chars)` drops any of the characters in `chars` from both ends instead),
 `text.split(sep)` gives the pieces between separators (`"a,,b".split(",")` is
 `["a" "" "b"]`) and `text.split()` the words between runs of whitespace (none for
 blank text), `text.lines` gives the lines without their breaks (a final break adds no empty

@@ -1,0 +1,14 @@
+# quick
+# trim(chars) removes whole characters from both ends: a character that shares a byte with
+# one in chars (Ā is C4 80, — is E2 80 94) stays whole, so the text stays valid UTF-8.
+show = (text:string) => printl"[{text}] {(text as array<uint8>).length} bytes"
+main = () => {
+    show("xĀ".trim("—"))
+    show("—¡hola!—".trim("—¡!"))
+    show("ĀxĀ".trim("Ā"))
+    show("..a..".trim("."))
+    show("é".trim("e"))
+    show("".trim("ab"))
+    show("aaa".trim("a"))
+    show("«quoted»".trim("«»"))
+}

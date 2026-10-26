@@ -1,0 +1,117 @@
+# A web-server log analyzer: write a day's access log to a file (a line at a
+# time, as a server would append it), read it back, and report requests per
+# hour, status classes, the slowest endpoints, unique visitors, suspicious
+# clients and a per-user-agent summary. Malformed lines are counted, not fatal.
+
+ENTRIES = [
+    "2026-10-26T08:01:12 203.0.113.5 GET /index.html 200 12 Mozilla/5.0"
+    "2026-10-26T08:03:40 198.51.100.7 GET /about.html 200 8 curl/8.4"
+    "2026-10-26T08:15:02 203.0.113.5 GET /api/items?page=2 200 41 Mozilla/5.0"
+    "2026-10-26T08:59:59 192.0.2.44 POST /login 401 5 python-requests/2.31"
+    "2026-10-26T09:00:00 192.0.2.44 POST /login 401 6 python-requests/2.31"
+    "2026-10-26T09:00:01 192.0.2.44 POST /login 401 4 python-requests/2.31"
+    "2026-10-26T09:00:02 192.0.2.44 POST /login 401 5 python-requests/2.31"
+    "2026-10-26T09:12:30 198.51.100.7 GET /api/items 500 230 curl/8.4"
+    "not a log line at all"
+    "2026-10-26T09:45:10 203.0.113.9 GET /images/logo.png 304 2 Mozilla/5.0"
+    "2026-10-26T10:05:00 203.0.113.5 GET /api/items 200 38 Mozilla/5.0"
+    "2026-10-26T10:06:00 203.0.113.5 DELETE /api/items/7 403 3 Mozilla/5.0"
+    "2026-10-26T10:30:00 198.51.100.7 GET /api/items 200 n/a curl/8.4"
+    "2026-10-26T11:59:00 203.0.113.9 GET /index.html 200 15 Mozilla/5.0"
+    "2026-10-26T11:59:30 192.0.2.44 POST /login 200 7 python-requests/2.31"
+]
+
+Request:type = [hour:int ip:string method:string path:string status:int ms:int agent:string]
+
+parse = (line:string):>Request | string => {
+    let fields = line.split(" ")
+    if fields.length not=? 7 return "expected 7 fields"
+    let [stamp ip method target status_text ms_text agent] = fields
+    let clock = stamp.split("T")
+    if clock.length not=? 2 return "bad timestamp '{stamp}'"
+    let hour = to_int(clock[1].split(":")[0])
+    if hour is? error return "bad hour in '{stamp}'"
+    let status = to_int(status_text)
+    if status is? error return "bad status '{status_text}'"
+    let ms = to_int(ms_text)
+    if ms is? error return "bad duration '{ms_text}'"
+    # the endpoint without its query string
+    let path = target.split("?")[0]
+    Request[hour ip method path status ms agent]
+}
+
+status_class = (status:int):>string => "{status // 100}xx"
+
+bar = (n:int scale:int):>string => "#" * (n * scale)
+
+main = () => {
+    let log = p"dogfood_access.log"
+    if log.exists log.unlink or_throw;
+    loop line in ENTRIES append_file(log.path "{line}\n") or_throw;
+    printl"wrote {log.size or_throw} bytes to {log.name}"
+
+    let text = log.read_text or_throw
+    let requests:array<Request> = []
+    let problems:array<string> = []
+    loop n in 1.. and line in text.lines {
+        match parse(line) {
+            r:Request => requests.push(r)
+            why:string => problems.push("line {n}: {why}")
+        }
+    }
+    printl"{requests.length} requests, {problems.length} malformed"
+    loop p in problems printl"  {p}"
+
+    printl"\nrequests per hour:"
+    let per_hour:dict<int int> = []
+    loop r in requests per_hour[r.hour] = (per_hour.get(r.hour) ?? 0) + 1
+    loop hour in per_hour.keys.sorted() {
+        let n = per_hour.get(hour) ?? 0
+        printl"  {format(hour "02")}:00 {n:>2} {bar(n 2)}"
+    }
+
+    printl"\nstatus classes:"
+    let classes:dict<string int> = []
+    loop r in requests {
+        let c = status_class(r.status)
+        if c in? classes classes[c] += 1 else classes[c] = 1
+    }
+    loop [c n] in classes printl"  {c}: {n}"
+
+    printl"\nslowest endpoints (mean ms):"
+    let times:dict<string array<int>> = []
+    loop r in requests {
+        if r.path not in? times times[r.path] = []
+        times[r.path].push(r.ms)
+    }
+    let means = [loop [path ms] in times if ms.length >? 0 [path=path mean=sum(ms) / ms.length]]
+    means.sort(key=(e) => e.mean reverse=true)
+    loop e in means[$clamp 0..3) printl"  {e.path:<18} {format(e.mean ".1f"):>6}"
+
+    let visitors = set[loop r in requests r.ip]
+    let browsers = set[loop r in requests if r.agent.startswith("Mozilla") r.ip]
+    printl"\n{visitors.length} visitors, {browsers.length} with a browser"
+    printl"  without a browser: {(visitors - browsers).sorted().join(" ")}"
+
+    # a client with three or more failed logins is suspicious
+    let failures:dict<string int> = []
+    loop r in requests if r.path =? "/login" and r.status =? 401 {
+        failures[r.ip] = (failures.get(r.ip) ?? 0) + 1
+    }
+    loop [ip n] in failures if n >=? 3 printl"  suspicious: {ip} ({n} failed logins)"
+
+    printl"\nby user agent:"
+    let agents:dict<string set<string>> = []
+    loop r in requests {
+        let name = r.agent.split("/")[0]
+        if name not in? agents agents[name] = set[]
+        agents[name].push(r.method)
+    }
+    loop name in agents.keys.sorted() {
+        let methods = agents.get(name) ?? set[]
+        printl"  {name:<16} {methods.sorted().join(",")}"
+    }
+
+    log.unlink or_throw;
+    printl"\nremoved: {not log.exists}"
+}

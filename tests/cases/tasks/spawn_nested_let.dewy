@@ -1,0 +1,12 @@
+# modes: native native-release
+# `let r = spawn ...` inside a loop of the group's block would bind the task's private handle:
+# a result is kept only by a binding directly in the block.
+work = (n:int):>int => n * 2
+main = () => {
+    concurrent {
+        loop x in [1 2 3] {
+            let r = spawn work(x)
+            printl(r)
+        }
+    }
+}

@@ -1,0 +1,9 @@
+# Stepping down by two can pass the bound by one: the slice stays unproven.
+strip_end = (word:string):>string => {
+    let start = 1
+    if word.length <? 1 return ""
+    let stop = word.length
+    loop stop >? start and word[stop - 1] =? "." stop -= 2
+    word[start..stop)
+}
+main = () => printl(strip_end("a..."))

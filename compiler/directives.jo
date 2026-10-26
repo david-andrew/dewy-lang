@@ -406,7 +406,10 @@ dir_panics_finalize = ():
             p = nodes[n].pos
             # (the measuring harness builds anyway: it reports the analysis's cost)
             if wit_measure: continue
-            fatal(p, "{dir_panic_call(n, g)} may panic ({effect_panic_reason(g)}), and this scope has no runtime checks (no traps): {dir_panic_fix(p)}")
+            reason = effect_panic_reason(g)
+            # (an atomic counter's add: a payload that wraps never fails)
+            wrap = if contains(reason, "exact atomic result does not fit"): "; or keep a counter whose payload wraps, `atomic<int64<overflow='wrap'>>(0)`" else: ""
+            fatal(p, "{dir_panic_call(n, g)} may panic ({reason}), and this scope has no runtime checks (no traps): {dir_panic_fix(p)}{wrap}")
     loop f in [1..fns.len()):
         d = int(fns[f].decl)
         if d == 0 or nodes[d].sval == 0 or fns[f].state != 2 or fns[f].body == 0: continue

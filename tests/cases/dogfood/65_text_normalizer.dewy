@@ -1,0 +1,119 @@
+# A unicode-aware text normalizer and tokenizer: fold case and accents, tidy
+# quotes and whitespace, split text into words, numbers, punctuation and
+# symbols, then build slugs, truncate to a display width without cutting a
+# character in half, and find words that collide once accents are folded.
+
+SAMPLES = [
+    "  Crème Brûlée costs €4.50 — “très bon”!  "
+    "Ελληνικά και Русский: ΣΟΦΙΑ, Москва 2026"
+    "naïve  café\tcoöperate   résumé"
+    "Thumbs up 👍🏽 and flags 🇨🇦🇫🇷 count as one each"
+    "Zoë's 3rd résumé, v2.0 — final_final (really)"
+    "Resume, RÉSUMÉ or Résumé? Cafe or CAFÉ…"
+]
+
+# accented Latin letters and their plain forms
+const FOLD = [
+    "à"->"a" "á"->"a" "â"->"a" "ä"->"a" "ã"->"a" "å"->"a"
+    "ç"->"c" "è"->"e" "é"->"e" "ê"->"e" "ë"->"e"
+    "ì"->"i" "í"->"i" "î"->"i" "ï"->"i" "ñ"->"n"
+    "ò"->"o" "ó"->"o" "ô"->"o" "ö"->"o" "õ"->"o"
+    "ù"->"u" "ú"->"u" "û"->"u" "ü"->"u" "ý"->"y" "ÿ"->"y"
+]
+# typographic punctuation and its ASCII form
+const PLAIN = ["“"->"\"" "”"->"\"" "‘"->"'" "’"->"'" "—"->"-" "–"->"-" "…"->"..."]
+
+Kind:type = 'word' | 'number' | 'punct' | 'symbol'
+Token:type = [kind:Kind text:string]
+
+# a cased letter changes under upper or lower: that covers Latin, Greek and Cyrillic
+is_letter = (c:string):>bool => upper(c) not=? lower(c)
+is_digit = (c:string):>bool => c.length =? 1 and "0" <=? c <=? "9"
+is_space = (c:string):>bool => c.trim().is_empty
+
+fold = (text:string):>string => {
+    let out:array<string> = []
+    loop c in text.lower() out.push(FOLD.get(c) ?? PLAIN.get(c) ?? c)
+    out.join("")
+}
+
+# collapse runs of whitespace to one space and trim the ends
+squeeze = (text:string):>string => text.split().join(" ")
+
+kind_of = (c:string):>Kind => {
+    if is_letter(c) or c =? "_" or c =? "'" return "word"
+    if is_digit(c) return "number"
+    if (c as array<uint8>).length =? 1 return "punct"
+    "symbol"
+}
+
+tokenize = (text:string):>array<Token> => {
+    let tokens:array<Token> = []
+    let current = ""
+    let current_kind:Kind = "word"
+    loop c in text {
+        if is_space(c) {
+            if not current.is_empty tokens.push(Token[current_kind current])
+            current = ""
+            continue
+        }
+        let k = kind_of(c)
+        # a decimal point between digits stays in the number
+        let joins = k =? current_kind and (k =? "word" or k =? "number")
+            or current_kind =? "number" and c =? "."
+        if not current.is_empty and not joins {
+            tokens.push(Token[current_kind current])
+            current = ""
+        }
+        current = "{current}{c}"
+        if current.length =? 1 current_kind = k
+    }
+    if not current.is_empty tokens.push(Token[current_kind current])
+    tokens
+}
+
+slug = (text:string):>string => {
+    let words = [loop t in tokenize(fold(text)) if t.kind =? "word" or t.kind =? "number" t.text.trim("'.")]
+    [loop w in words if not w.is_empty w].join("-")
+}
+
+# at most `width` characters, with an ellipsis when something was cut
+truncate = (text:string width:int):>string => {
+    if text.length <=? width return text
+    if width <? 1 return ""
+    "{text[0..width - 1)}…"
+}
+
+main = () => {
+    loop s in SAMPLES {
+        let tidy = squeeze(s)
+        printl"«{tidy}»"
+        printl"  {tidy.length} characters, {(tidy as array<uint8>).length} bytes"
+        printl"  folded: {fold(tidy)}"
+        let tokens = tokenize(tidy)
+        let counts:dict<Kind int> = []
+        loop t in tokens counts[t.kind] = (counts.get(t.kind) ?? 0) + 1
+        printl"  tokens: {[loop [k n] in counts "{n} {k}"].join(", ")}"
+        let symbols = [loop t in tokens if t.kind =? "symbol" t.text]
+        if symbols.length >? 0 printl"  symbols: {symbols.join(" ")}"
+        printl"  slug: {slug(tidy)}"
+        printl"  short: {truncate(tidy 16)}"
+    }
+
+    # words that are the same once case and accents are folded
+    let groups:dict<string set<string>> = []
+    loop s in SAMPLES {
+        loop t in tokenize(squeeze(s)) if t.kind =? "word" {
+            let key = fold(t.text)
+            if key not in? groups groups[key] = set[]
+            groups[key].push(t.text)
+        }
+    }
+    printl"collisions:"
+    loop [key words] in groups if words.length >? 1 printl"  {key}: {words.sorted().join(" ")}"
+
+    # reversing by character keeps flags and skin tones whole
+    let thumbs = "ok 👍🏽 🇨🇦!"
+    printl"reversed: {[loop c in thumbs c].reversed().join("")}"
+    printl"upper: {upper("straße ελληνικά москва")}"
+}

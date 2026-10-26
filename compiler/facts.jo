@@ -794,6 +794,26 @@ fact_entry_count_call = (n: int) -> bool:
     path = files[pos_file(nodes[int(fns[int(nodes[n].sym)].decl)].pos)].path
     is_map_type(t) and path == lib_dir + "/core/map.jo" or is_dewy_set_type(t) and path == lib_dir + "/std/dewy_sets.jo" or path == lib_dir + "/std/heap.jo"
 
+# Reviewed length-preserving calls: `d.keys` (__dewy_keys), a dictionary's `keys` and
+# `values`, and a set's members as an array (__dewy_set_values, `s.values`) have one
+# element per entry, so the result's length is the receiver's entry count. O(1).
+fact_same_length_call = (n: int) -> bool:
+    if nkids(n) != 1 or nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or fns[int(nodes[n].sym)].decl == 0: return false
+    d = int(fns[int(nodes[n].sym)].decl)
+    name = name_of(int(nodes[d].name))
+    t = representation_type(ntype(kid(n, 0)))
+    path = files[pos_file(nodes[d].pos)].path
+    if is_map_type(t): return path == lib_dir + "/core/map.jo" and (name == "keys" or name == "values") or path == lib_dir + "/std/dewy_sets.jo" and name == "__dewy_keys"
+    is_dewy_set_type(t) and path == lib_dir + "/std/dewy_sets.jo" and (name == "__dewy_set_values" or name == "values")
+
+# The length of e's value when its argument is not captured (a dictionary is lent): its place's
+# current value's, or through nested length-preserving calls (`[d.keys...]`); 0 for unknown.
+fact_length_through = (e: int, s: mut FactState, depth: int) -> int:
+    if depth < 4 and nodes[e].kind == .call and fact_same_length_call(e): return fact_length_through(kid(e, 0), s, depth + 1)
+    held = fact_route_values(s, fact_route(e, s))
+    if held.len() == 0: return 0
+    fact_project(s, held[held.len() - 1], -1, false, T_INT)
+
 # Reviewed nonempty requirements: an array's `min(xs)` and `max(xs)`, a set's
 # `s.pop()` (any member) and a heap's `h.pop()`, `h.peek()` and
 # `h.peek_priority()` need an element, so `xs.length >? 0` is the call's
@@ -4675,6 +4695,9 @@ fact_guarded_rows = (e: int, back: FactState, changing: {int: bool}, carried: mu
         if not changing.has(v) or changing.has(other): continue
         limit = fact_shortest(back, v, other)
         if limit != FACT_MAX: carried.push(FactDifference(v, other, limit, e))
+        # (and from below: `loop stop >? start ... stop -= 1` keeps stop at least start)
+        below = fact_shortest(back, other, v)
+        if below != FACT_MAX: carried.push(FactDifference(other, v, below, e))
 
 # Common projection skeleton of changing loop aggregates. Leaves keep their
 # immutable identity only when both entry and backedge have that identity.
@@ -6989,6 +7012,8 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                 if added != 0 and grown.lo == grown.hi:
                     fact_difference(s, size, length, grown.lo, n)
                     fact_difference(s, length, size, -grown.lo, n)
+                # (an empty receiver, as `[s...]`'s: the new length is the operand's)
+                else if added != 0 and old.lo == 0 and old.hi == 0: size = added
             fresh = fact_new(s, FactBound(), FactTerm(type = ntype(a)))
             if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(fresh, -1, false, size))
             fact_store_route(s, route, fresh, n, true)
@@ -7072,6 +7097,12 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             if first >= 0 and values.len() == nkids(n): fact_step_check(n, s, values[first], values[first + 1], kid(n, first), kid(n, first + 1))
         # (a dictionary's or set's entry count is a length of its value)
         if fact_entry_count_call(n): return fact_project(s, values[0], -1, false, T_INT)
+        if fact_same_length_call(n) and s.projections.len() < FACT_CAP:
+            length = if values.len() == 1 and values[0] != 0: fact_project(s, values[0], -1, false, T_INT) else: fact_length_through(kid(n, 0), s, 0)
+            if length != 0:
+                fresh = fact_new(s, FactBound(), FactTerm(type = ntype(n)))
+                fact_add_projection(s, FactProjection(fresh, -1, false, length))
+                return fresh
         if fact_affix_call(n):
             length = fact_project(s, values[0], -1, false, T_INT)
             pattern = fact_project(s, values[1], -1, false, T_INT)

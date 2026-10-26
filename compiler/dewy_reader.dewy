@@ -4553,6 +4553,22 @@ rd_dc_foreign_habit=(@reader_ctx:ParserContext at:int64):>void=>$unsafe {
     reader_ctx.stores.host[0].fatal(pos "a record type uses `:type =`: write `{written}:type = [{listing}]`");
 }
 
+# (`loop [url from] in links`: `from` and `import` begin a statement or follow `import (...)`,
+# so one later on the line of an unread statement is a keyword written as a name)
+rd_dc_keyword_in_statement=(@reader_ctx:ParserContext at:int64):>void=>$unsafe {
+    let token:DewyLexeme=reader_ctx.tokens[at]
+    if ((token.symbol =? 'kw_import') or (token.symbol =? 'kw_from')) {
+        return
+    }
+    let k:int64=(int64<overflow='wrap'>(at) + 1)
+    loop (reader_ctx.tokens[k].kind not=? 'eof') and (not reader_ctx.tokens[k].newline) {
+        if ((reader_ctx.tokens[k].symbol =? 'kw_from') or (reader_ctx.tokens[k].symbol =? 'kw_import')) {
+            reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file reader_ctx.tokens[k].start) rd_dc_keyword_text(reader_ctx.tokens[k].symbol));
+        }
+        k = (int64<overflow='wrap'>(k) + 1)
+    }
+}
+
 # A builtin type another language spells w, as Dewy does ("" for others).
 rd_dc_foreign_type=(@reader_ctx:ParserContext w:string):>string=>$unsafe {
     if ((w =? "int") or (w =? "i64")) {
@@ -10585,6 +10601,7 @@ rd_dc_unread=(@reader_ctx:ParserContext at:int64):>void=>$unsafe {
     if (cut >=? 0) {
         rd_dc_cut_off(@reader_ctx cut);
     }
+    rd_dc_keyword_in_statement(@reader_ctx at);
     if (reader_ctx.status.hint_pos not=? 0) {
         reader_ctx.stores.host[0].fatal(reader_ctx.status.hint_pos reader_ctx.status.hint_text);
     }

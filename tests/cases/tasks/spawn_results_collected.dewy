@@ -1,0 +1,23 @@
+# modes: native native-release
+# The forms that keep a spawn: `let name = spawn ...` directly in the block, read after the
+# brace; spawns as statements in a loop, each storing its result under a lock; and a spawn
+# into a named group from a helper.
+work = (n:int):>int => n * 2
+store = (n:int results:Mutex<array<int>>) => {
+    let list = @(results.lock())
+    list.push(work(n))
+}
+helper = (g:TaskGroup results:Mutex<array<int>>):>void => {
+    spawn(g) store(100 results)
+}
+main = () => {
+    let results = mutex<array<int>>([])
+    concurrent g {
+        let first = spawn work(21)
+        loop x in [1 2 3] spawn store(x results)
+        helper(g results)
+    }
+    printl(first)
+    let list = @(results.lock())
+    printl(list.sorted())
+}

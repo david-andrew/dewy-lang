@@ -1,0 +1,107 @@
+# Parallel word count: split a text into chunks of lines, count each chunk's
+# words in parallel, merge the per-chunk tables, and report the most common
+# words, the words only one chunk uses, and how evenly the work was spread.
+
+TEXT = """
+It was the best of times, it was the worst of times,
+it was the age of wisdom, it was the age of foolishness,
+it was the epoch of belief, it was the epoch of incredulity,
+it was the season of Light, it was the season of Darkness,
+it was the spring of hope, it was the winter of despair.
+Café owners in Zürich said: "the times, the times!"
+We had everything before us, we had nothing before us,
+we were all going direct to Heaven, we were all going direct the other way.
+In short, the period was so far like the present period,
+that some of its noisiest authorities insisted on its being received,
+for good or for evil, in the superlative degree of comparison only.
+Naïve readers of the café menu ordered crème brûlée — twice.
+"""
+
+PUNCTUATION = ",.;:!?\"'()—-"
+
+Tally:type = [words:dict<string int> lines:int total:int]
+
+# lowercase a word and strip punctuation from both ends
+clean = (raw:string):>string => raw.lower().trim(PUNCTUATION)
+
+count_chunk = (lines:array<string>):>Tally => {
+    let words:dict<string int> = []
+    let total = 0
+    loop line in lines {
+        loop raw in line.split() {
+            let word = clean(raw)
+            if word.is_empty continue
+            if word in? words words[word] += 1 else words[word] = 1
+            total += 1
+        }
+    }
+    Tally[words lines.length total]
+}
+
+# group consecutive lines into chunks of at most `size` lines
+chunks_of = (lines:array<string> size:int):>array<array<string>> => {
+    let out:array<array<string>> = []
+    let current:array<string> = []
+    loop line in lines {
+        current.push(line)
+        if current.length =? size {
+            out.push(current)
+            current = []
+        }
+    }
+    if current.length >? 0 out.push(current)
+    out
+}
+
+merge = (tallies:array<Tally>):>dict<string int> => {
+    let total:dict<string int> = []
+    loop t in tallies {
+        loop [word n] in t.words {
+            total[word] = (total.get(word) ?? 0) + n
+        }
+    }
+    total
+}
+
+main = () => {
+    let lines = [loop line in TEXT.lines if not line.trim.is_empty line]
+    let chunks = chunks_of(lines 4)
+    let tallies = [parallel chunk in chunks count_chunk(chunk)]
+
+    printl"{lines.length} lines in {chunks.length} chunks"
+    loop i in 0.. and t in tallies {
+        printl"  chunk {i}: {t.lines} lines, {t.total} words, {t.words.length} distinct"
+    }
+
+    let total = merge(tallies)
+    let all_words = sum([loop t in tallies t.total])
+    printl"{all_words} words, {total.length} distinct"
+
+    # the most common words, ties broken alphabetically
+    let ranked = [loop [word n] in total [word=word n=n]]
+    ranked.sort(key=(e) => e.word)
+    ranked.sort(key=(e) => e.n reverse=true)
+    printl"most common:"
+    loop e in ranked[$clamp 0..8) printl"  {e.word:<8} {e.n:>3}"
+
+    # words that appear in exactly one chunk, per chunk
+    let seen_in:dict<string set<int>> = []
+    loop i in 0.. and t in tallies {
+        loop word in t.words.keys {
+            if word not in? seen_in seen_in[word] = set[]
+            seen_in[word].push(i)
+        }
+    }
+    loop i in 0.. and t in tallies {
+        let only = [loop word in t.words.keys if (seen_in.get(word) ?? set[]).length =? 1 word]
+        printl"  only in chunk {i}: {only.sorted().join(" ")}"
+    }
+
+    # words with letters outside ASCII
+    let accented = [loop word in total.keys if (word as array<uint8>).length >? word.length word]
+    printl"accented: {accented.sorted().join(", ")}"
+
+    # the parallel result must match a sequential count
+    let sequential = count_chunk(lines)
+    printl"matches sequential: {sequential.words =? total}"
+}

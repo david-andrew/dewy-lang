@@ -1,0 +1,10 @@
+# modes: native native-release
+# Assigning a spawn to an existing variable would store its private handle.
+work = (n:int):>int => n * 2
+main = () => {
+    let r = 0
+    concurrent {
+        r = spawn work(4)
+    }
+    printl(r)
+}

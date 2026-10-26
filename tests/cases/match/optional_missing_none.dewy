@@ -1,0 +1,6 @@
+# Every member of an optional union has an arm, but `none` has none: the match says so.
+describe = (v:(int64 | string)?):>string => match v {
+    n:int64 => "number {n}"
+    s:string => "text {s}"
+}
+main = () => printl(describe(3))

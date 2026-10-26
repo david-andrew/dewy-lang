@@ -4794,6 +4794,10 @@ global_place_decl = (d: int):
     fatal(nodes[init].pos, "'{nm}' is declared at the top level, so it would be a global, and a global cannot be a place (it would hold a copy): declare the place inside a function or a block (`main = () => \{ let {nm} = @... }`), or copy the value without `@`")
 
 check_vardecl = (s: int):
+    # (a task's result is kept by `let name = spawn ...` written directly in its group's block,
+    # which dewy_nodes.jo dw_task_group renames; elsewhere the binding would hold its private handle)
+    b = int(nodes[s].b)
+    if b > 0 and nodes[b].kind == .call and nodes[b].aux2 == 17 and not starts_with(name_of(int(nodes[s].name)), "$task"): spawn_value_error(nodes[b].pos)
     if has_flag(s, NF_SOA):
         soa_alias(s)
         return
@@ -5059,6 +5063,7 @@ check_stmt = (s: int):
         assign_to_decl(s)
         check_vardecl(s)
     else if k == .assign:
+        if nodes[int(nodes[s].b)].kind == .call and nodes[int(nodes[s].b)].aux2 == 17: spawn_value_error(nodes[int(nodes[s].b)].pos)
         check_late_global(s)
         r = check_assign(s)
         if r != s:
@@ -5095,6 +5100,8 @@ check_stmt = (s: int):
         # (a Dewy block expresses the value: multi_expressions.md)
         # (a `spawn` statement hands its task to the group and expresses nothing)
         spawned = raw.kind == .call and raw.aux2 == 17
+        # (`[loop x in xs spawn work(x)]`: a spawn gives the collection nothing)
+        if spawned and not dropped and sinks.len() > 0 and sinks[sinks.len() - 1].mode == SINK_COLLECTOR: spawn_value_error(raw.pos)
         if not dropped and not spawned and sinks.len() > 0 and sinks[sinks.len() - 1].mode != SINK_NONE and t != T_NEVER and tkind(t) != .void_:
             # (`void | E` expresses E when it fails, and nothing when it succeeds)
             if union_has_void(t): sink_void_error(s, t)

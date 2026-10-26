@@ -5962,6 +5962,9 @@ breakpoint_call = (n: int) -> int:
     nodes[n] = nodes[bc_call("__dewy_breakpoint", [bc_str("{path}:{line}", pos), snapshot], pos)]
     n
 
+spawn_value_error = (pos: int):
+    fatal(pos, "a spawned task's result is kept only by `let name = spawn ...` written directly in its `concurrent` block, and read after the closing brace: spawn a varying number of tasks as statements, `loop x in xs \{ spawn work(x out) }`, and have each send its result over a channel or store it under a `Mutex`")
+
 check_call = (n: int, expected: int) -> int:
     if reflect_fields(n): fatal(nodes[n].pos, "fields(T) is a compile-time sequence; iterate over it with `loop field in fields(T)`")
     callee = int(nodes[n].a)
@@ -9052,6 +9055,20 @@ check_match = (m: int, expected: int) -> int:
                 spelled: str[]
                 loop w in written: spelled.push("'{w}'")
                 fatal(nodes[m].pos, "match is not exhaustive: this is a string, which may hold other text than {join(spelled, ", ")} (add a `_ => ...` arm, or match the literal union instead: `match x as U \{...}` after `x is? U` holds)")
+        # (an optional subject: name what no arm takes, `none` or a member of the payload)
+        if dewy and types[st].kind == .opt and str_domain == 0 and not domain_known and union_bool_seen == 0 and union_lits.len() == 0 and member_arms.len() == 0:
+            miss: str[]
+            if finite_seen & 2 == 0: miss.push("none")
+            u = prune(telem(st))
+            if finite_seen & 1 == 0:
+                if is_union(u):
+                    loop member in union_members(u):
+                        taken = false
+                        loop o in opt_members:
+                            if type_eq(o, member): taken = true
+                        if not taken: miss.push(dt(member))
+                else: miss.push(dt(u))
+            if miss.len() > 0: fatal(nodes[m].pos, "this match has no arm for {join(miss, ", ")} (add one, or a `_ => ...` arm for the rest)")
         if dewy: fatal(nodes[m].pos, "match is not exhaustive (add a `_ => ...` arm or `else`)")
         fatal(nodes[m].pos, "match expression is not exhaustive (add a `_:` arm)")
     if result == 0: result = T_NEVER

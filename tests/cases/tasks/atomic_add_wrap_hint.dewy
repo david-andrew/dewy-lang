@@ -1,0 +1,10 @@
+# modes: native native-release
+# An atomic counter's add may overflow, which no fact proves yet: the error names the
+# counter whose payload wraps as well as `$runtime_checks`.
+main = () => {
+    let hits = atomic(0)
+    concurrent {
+        spawn { hits.add(1); }
+    }
+    printl(hits.load())
+}
