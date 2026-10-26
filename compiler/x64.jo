@@ -4,6 +4,7 @@ use 'ir_types.dewy'
 # integer args in rdi, rsi, rdx, rcx, r8, r9; float args in xmm0-7; the rest on the stack.
 
 use 'util.jo'
+use 'main.jo'
 use 'ir.jo'
 use 'lower.jo'
 use 'types.jo'
@@ -98,7 +99,25 @@ rex = (w: bool, r: int, x: int, bb0: int, force: bool):
     if v != 0x40 or force: b(v)
 
 # ModRM + optional SIB + displacement for [base + disp]
-mem = (reg: int, base: int, disp: int):
+rsp_frame = false
+rsp_extra = 0
+# Sorted (text offset, return-slot displacement from rsp) transitions for the
+# panic/crash walker. -1 resumes the ordinary rbp chain; -2 ends a stack.
+# Emitted only for RSP frames: O(stack adjustments), no instruction scan.
+rsp_rows: int[]
+rsp_row = (depth: int):
+    rsp_rows.push(code.len())
+    rsp_rows.push(depth)
+rsp_adjust = (delta: int):
+    rsp_extra += delta
+    if rsp_frame: rsp_row(frame_size + 8 + rsp_extra)
+
+mem = (reg: int, base0: int, disp0: int):
+    base = base0
+    disp = disp0
+    if rsp_frame and base == RBP:
+        base = RSP
+        disp += frame_size + rsp_extra
     r = reg & 7
     if cur_index >= 0:
         sib = (cur_scale << 6) | ((cur_index & 7) << 3) | (base & 7)
@@ -508,9 +527,11 @@ vop_operand = (x: int, v: int, splat: bool, n: int, scratch: int):
             sse_rm(0xF3, 0x10, 15, base, disp + 8)                       # movss
             sse_rr(0, 0x16, x, 15)                                       # movlhps x, xmm15
 
+x_has_foreign_call = false
 x_has_narrow32 = false
 x_has_overflow_pair = false
 analyze = (plan_starts: bool = false):
+    x_has_foreign_call = false
     x_has_narrow32 = false
     x_has_overflow_pair = false
     nv = ir.vtypes.len()
@@ -563,6 +584,7 @@ analyze = (plan_starts: bool = false):
     # O(instructions + operands). No shared decoder state or per-op arrays.
     loop pos in [0..ir.code.len()):
         ins = &instructions[pos]
+        if ins.op == .callc: x_has_foreign_call = true
         mode = layouts[int(ins.op)]
         features |= mode
         uses = &ins.a
@@ -1324,6 +1346,7 @@ emit_moves = (mask: int):
                     else:
                         rex(false, 0, 0, src, false)
                         b(0x50 + (src & 7))
+                    rsp_adjust(8)
                     dst = m.dst
                     emit_moves(pending & ~(1 << k))
                     if is_xmm(dst):
@@ -1332,6 +1355,7 @@ emit_moves = (mask: int):
                     else:
                         rex(false, 0, 0, dst, false)
                         b(0x58 + (dst & 7))
+                    rsp_adjust(-8)
                     return
     loop k in [0..pm_count):
         if pending & (1 << k) == 0: continue
@@ -1357,7 +1381,7 @@ uw_fo = 0                   # (Windows: the function's rbp is rsp + 16 uw_fo, it
 uw_at = 0
 
 emit_prologue = ():
-    b(0x55)                        # push rbp
+    if not rsp_frame: b(0x55)                        # push rbp
     nsave = 0
     loop r in [0..16):
         if callee_off[r] != 0: nsave += 1
@@ -1391,12 +1415,18 @@ emit_prologue = ():
                 uw_data.push(r)
                 uw_data.push(callee_off[r] + 16 * uw_fo)
     else:
-        mov_rr(RBP, RSP)
-        if frame_size > 0:
+        if not rsp_frame: mov_rr(RBP, RSP)
+        if frame_size > 0 or rsp_frame:
             rex(true, 0, 0, RSP, false)
-            b(0x81)
-            modrr(5, RSP)
-            b32(frame_size)        # sub rsp, frame
+            if rsp_frame and frame_size == 0:
+                b(0x83)
+                modrr(5, RSP)
+                b(8)             # Same four-byte entry span as push rbp / mov rbp,rsp.
+            else:
+                b(0x81)
+                modrr(5, RSP)
+                b32(frame_size + (if rsp_frame: 8 else: 0))        # sub rsp, frame
+            if rsp_frame: rsp_row(frame_size + 8)
         loop r in [0..16):
             if callee_off[r] != 0: mov_mr(RBP, callee_off[r], r)
     # Spill incoming registers before moving any; capture register sources in
@@ -1448,6 +1478,21 @@ emit_prologue = ():
 emit_epilogue = ():
     loop r in [0..16):
         if callee_off[r] != 0: mov_rm(r, RBP, callee_off[r])
+    if rsp_frame:
+        rex(true, 0, 0, RSP, false)
+        if frame_size == 0:
+            b(0x83)
+            modrr(0, RSP)
+            b(8)                 # Same five-byte exit span as the compact RBP epilogue.
+        else:
+            b(0x81)
+            modrr(0, RSP)
+            b32(frame_size + 8)
+        rsp_row(0)
+        b(0xC3)
+        # Later blocks still enter with the function's frame allocated.
+        rsp_row(frame_size + 8)
+        return
     # Empty frames leave rsp at rbp. Keep Windows' canonical unwind form.
     compact = frame_size == 0 and not target_windows
     # Ignored CS prefixes keep pop/ret opcodes and every following loop/JCC
@@ -1483,6 +1528,7 @@ emit_call_args = (start: int, n: int, extra: int, extra_dst: int):
         b(0x83)
         modrr(5, RSP)
         b(8)
+        rsp_adjust(8)
     if nstack > 0:
         # Reverse the existing operand span, counting down each register class;
         # this is exactly the old stack-argument order, without a temporary list.
@@ -1500,6 +1546,7 @@ emit_call_args = (start: int, n: int, extra: int, extra_dst: int):
                 lds(0, v, vtype(v))
                 movq_rx(RAX, 0)
             b(0x50)
+            rsp_adjust(8)
     emit_parallel()
     call_stack_bytes = pad + nstack * 8
 
@@ -1520,6 +1567,7 @@ emit_call_args_win64 = (start: int, n: int, extra: int, extra_dst: int):
         b(0x83)
         modrr(5, RSP)
         b(8)
+        rsp_adjust(8)
     i = n - 1
     loop i >= 4:
         v = int(ir.args[start + i])
@@ -1528,11 +1576,13 @@ emit_call_args_win64 = (start: int, n: int, extra: int, extra_dst: int):
             lds(0, v, vtype(v))
             movq_rx(RAX, 0)
         b(0x50)
+        rsp_adjust(8)
         i -= 1
     rex(true, 0, 0, RSP, false)              # sub rsp, 32
     b(0x83)
     modrr(5, RSP)
     b(32)
+    rsp_adjust(32)
     emit_parallel()
     loop k in [0..min(n, 4)):
         if vtype(int(ir.args[start + k])) != VI: movq_rx(WIN_ARG_REGS[k], k)
@@ -1544,6 +1594,7 @@ pop_call_stack = ():
         b(0x81)
         modrr(0, RSP)
         b32(call_stack_bytes)
+        rsp_adjust(-call_stack_bytes)
 
 store_result = (ins: Ins):
     d = int(ins.dst)
@@ -1959,6 +2010,7 @@ emit_memeq = (d: int, a: int, bb: int, count: int, flags: bool = false, strings:
     saved = vloc[d] < 0
     if saved:
         b16(0x5341)                       # push r11 (spilled destination)
+        rsp_adjust(8)
     ld(RAX, a)
     ld(RCX, bb)
     unequal: int[]
@@ -2066,6 +2118,7 @@ emit_memeq = (d: int, a: int, bb: int, count: int, flags: bool = false, strings:
         loop fix in unequal: patch_here(fix)
         if saved:
             b16(0x5B41)
+            rsp_adjust(-8)
         x_loop_depth = enclosing_depth
         return
     setcc(4)
@@ -2080,6 +2133,7 @@ emit_memeq = (d: int, a: int, bb: int, count: int, flags: bool = false, strings:
     patch_here(done_false)
     if saved:
         b16(0x5B41)                       # pop r11
+        rsp_adjust(-8)
     st(d, RAX)
     x_loop_depth = enclosing_depth
 
@@ -2091,7 +2145,9 @@ emit_findbyte = (d: int, p: int, n: int, byte: int, invert: bool):
     if vloc[d] == LOC_NONE: return
     mask = dreg(d, R11)
     saved = vloc[d] < 0
-    if saved: b16(0x5341)                    # push r11
+    if saved:
+        b16(0x5341)
+        rsp_adjust(8)
     ld(RCX, p)
     ld(RDX, n)
     ld(RAX, byte)
@@ -2165,7 +2221,9 @@ emit_findbyte = (d: int, p: int, n: int, byte: int, invert: bool):
     mov_imm(RAX, -1)
     patch_here(equal)
     patch_here(done)
-    if saved: b16(0x5B41)                   # pop r11
+    if saved:
+        b16(0x5B41)
+        rsp_adjust(-8)
     st(d, RAX)
 
 # The first k in [i, n) whose byte p[k] is one of four (set: packed, low byte first), or n:
@@ -2185,6 +2243,7 @@ emit_findb = (d: int, p: int, i: int, n: int, set0: int):
     saved = vloc[d] < 0
     if saved:
         b16(0x5341)                       # push r11 (spilled destination)
+        rsp_adjust(8)
     ld(RAX, i)
     ld(RCX, p)
     ld(RDX, n)
@@ -2320,6 +2379,7 @@ emit_findb = (d: int, p: int, i: int, n: int, set0: int):
     patch_here(done)
     if saved:
         b16(0x5B41)                       # pop r11
+        rsp_adjust(-8)
     st(d, RAX)
 
 # fused compare + branch: next instruction consumes the flag
@@ -3756,6 +3816,12 @@ x64_function = ():
     if priority: allocate_release()
     else: allocate()
     layout_frame()
+    # Large loop frames keep compact negative displacements and their established
+    # branch layout. RSP's SIB/disp32 expansion otherwise adds hot-loop padding.
+    # Relocatable watch/repl images and foreign C boundaries retain their chain.
+    rsp_frame = not dbg_on and not target_windows and not watch_build and not repl_image and not ir.cabi and not x_has_foreign_call and not (frame_size >= 64 and loop_s.len() > 0)
+    rsp_extra = 0
+    if rsp_frame: rsp_row(0)
     xctl = []
     x_loop_depth = 0
     fused_cc = -1
@@ -3833,6 +3899,8 @@ x64_function = ():
                 dbg_cfi.push(callee_off[r] - 16)
         dbg_cfi.push(dbg_epis.len())
         loop e in dbg_epis: dbg_cfi.push(e - fn_start)
+    if rsp_frame: rsp_row(-1)
+    rsp_frame = false
     elf_syms.push((sym_name(ir.name), fn_start, code.len() - fn_start))
     fn_len[ir.fn_index] = code.len() - fn_start
     if target_windows:
@@ -4086,6 +4154,7 @@ x64_cabi_adapter = (lf: int, ptypes: int[]) -> int:
 x64_entry = (inits: int[], main_lf: int) -> int:
     loop code.len() % 16 != 0: b(0xCC)
     start = code.len()
+    if rsp_rows.len() > 0: rsp_row(-2)
     # (no source line: line 0)
     line_rows.push(code.len())
     line_rows.push(0)
@@ -4134,6 +4203,7 @@ x64_entry = (inits: int[], main_lf: int) -> int:
     b16(0x050F)                          # exit_group
     # (the entry point: debuggers stop unwinding here)
     elf_syms.push(("_start", start, code.len() - start))
+    if rsp_rows.len() > 0: rsp_row(-1)
     start
 
 # where each call returns to, and the source position of the call (an index into
@@ -4161,6 +4231,16 @@ call_site = (ins: Ins):
     if ins.pos == 0: return
     call_sites.push(code.len())
     call_sites.push(int(ins.pos))
+
+# .dewy_frames: SFR1, u32 row count, then u32 text offset / signed i32
+# displacement pairs. The walker binary-searches only when a panic/crash occurs.
+x64_frame_table = () -> u8[]:
+    out = fill(u8(0), 8 + 4 * rsp_rows.len())
+    words = data(out) as *u32
+    words[0] = 0x31524653                 # SFR1
+    words[1] = u32(rsp_rows.len() / 2)
+    loop i in [0..rsp_rows.len()): words[i + 2] = u32(rsp_rows[i])
+    out
 
 # the ".dewy_lines" section: "SLN1", the files (u32 count, then u32 length and name each),
 # then u32 count and for each call site in address order: varints of the return address's
@@ -4232,7 +4312,9 @@ stub_addr: int[] = [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1]
 
 # machine code stubs for non-local control transfer
 x64_stubs = ():
+    frames = rsp_rows.len() > 0
     loop code.len() % 16 != 0: b(0xCC)
+    if frames: rsp_row(0)
     line_rows.push(code.len())
     line_rows.push(0)
     row_pos = 0
@@ -4279,8 +4361,9 @@ x64_stubs = ():
               0x0F, 0x05,                    # syscall
               0x48, 0x85, 0xC0,              # test rax, rax
               0x74, 0x01,                    # jz child
-              0xC3,                          # ret
-              0x58,                          # child: pop rax
+              0xC3]: b(x)                    # ret in the parent
+    if frames: rsp_row(-2)
+    loop x in [0x58,                          # child: pop rax
               0x5F,                          # pop rdi
               0xFF, 0xD0,                    # call rax
               0xB8, 0x3C, 0x00, 0x00, 0x00,  # mov eax, 60 (exit this thread)
@@ -4290,6 +4373,7 @@ x64_stubs = ():
     # atomic_add(rdi = p, rsi = v) -> old value
     loop code.len() % 16 != 0: b(0xCC)
     stub_addr[6] = code.len()
+    if frames: rsp_row(0)
     loop x in [0x48, 0x89, 0xF0, 0xF0, 0x48, 0x0F, 0xC1, 0x07, 0xC3]: b(x)     # mov rax, rsi; lock xadd [rdi], rax; ret
     # atomic_cas(rdi = p, rsi = expected, rdx = desired) -> old value
     loop code.len() % 16 != 0: b(0xCC)
@@ -4303,7 +4387,9 @@ x64_stubs = ():
     # xmm and ymm state; cpuid 7: AVX2)
     loop code.len() % 16 != 0: b(0xCC)
     stub_addr[9] = code.len()
-    loop x in [0x53,                                     # push rbx
+    b(0x53)                             # push rbx
+    if frames: rsp_row(8)
+    loop x in [
                0xB8, 0x01, 0x00, 0x00, 0x00,             # mov eax, 1
                0x31, 0xC9,                               # xor ecx, ecx
                0x0F, 0xA2,                               # cpuid
@@ -4322,8 +4408,13 @@ x64_stubs = ():
                0x89, 0xD8,                               # mov eax, ebx
                0xC1, 0xE8, 0x05,                         # shr eax, 5
                0x83, 0xE0, 0x01,                         # and eax, 1
-               0x5B, 0xC3,                               # pop rbx; ret
-               0x31, 0xC0, 0x5B, 0xC3]: b(x)             # no: xor eax, eax; pop rbx; ret
+               0x5B]: b(x)                               # pop rbx
+    if frames: rsp_row(0)
+    b(0xC3)
+    if frames: rsp_row(8)
+    loop x in [0x31, 0xC0, 0x5B]: b(x)                    # no: xor eax, eax; pop rbx
+    if frames: rsp_row(0)
+    b(0xC3)
     # code_sync(p, n): nothing to do (x86-64 keeps the instruction cache coherent)
     loop code.len() % 16 != 0: b(0xCC)
     stub_addr[11] = code.len()
@@ -4332,7 +4423,9 @@ x64_stubs = ():
     # register allocator need not know of: CALL_IF_SHARED's when it is taken)
     loop code.len() % 16 != 0: b(0xCC)
     stub_addr[12] = code.len()
-    loop x in [0x55, 0x48, 0x89, 0xE5,                       # push rbp; mov rbp, rsp
+    loop x in [0x55, 0x48, 0x89, 0xE5]: b(x)          # push rbp; mov rbp,rsp
+    if frames: rsp_row(-1)
+    loop x in [
                0x57, 0x56, 0x52, 0x41, 0x50, 0x41, 0x51,     # push rdi, rsi, rdx, r8, r9
                0x41, 0x52, 0x41, 0x53,                       # push r10, r11
                0x48, 0x83, 0xE4, 0xF0,                       # and rsp, -16
@@ -4342,7 +4435,9 @@ x64_stubs = ():
     loop i in [0..16): xmm_spill(false, i)
     loop x in [0x48, 0x8D, 0x65, 0xC8,                       # lea rsp, [rbp - 56]
                0x41, 0x5B, 0x41, 0x5A, 0x41, 0x59, 0x41, 0x58,  # pop r11, r10, r9, r8
-               0x5A, 0x5E, 0x5F, 0x5D, 0xC3]: b(x)           # pop rdx, rsi, rdi, rbp; ret
+               0x5A, 0x5E, 0x5F, 0x5D]: b(x)                # pop rdx, rsi, rdi, rbp
+    if frames: rsp_row(0)
+    b(0xC3)
 
 # movdqu [rsp + 16 i], xmm i (or back)
 xmm_spill = (store: bool, i: int):

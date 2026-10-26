@@ -132,13 +132,14 @@ par_worker = (q: IrFn[], fin: bool[], a: int, b: int, r0: int, fd: int):
     dbg_raw = []
     dbg_cfi = []
     ro_new = []
+    rsp_rows = []
     tw0 = time()
     out: u8[]
     pw(out, b - a)
     loop k in [a..b):
         ir = q[k]
         # (where it starts in each table: par_join's marks)
-        at: int[] = [code.len(), call_fix.len(), data_fix.len(), stub_fix.len(), cabi_fix.len(), elf_syms.len(), line_rows.len(), call_sites.len(), unwind_fns.len(), uw_data.len(), dbg_raw.len(), dbg_cfi.len(), ro_new.len()]
+        at: int[] = [code.len(), call_fix.len(), data_fix.len(), stub_fix.len(), cabi_fix.len(), elf_syms.len(), line_rows.len(), call_sites.len(), unwind_fns.len(), uw_data.len(), dbg_raw.len(), dbg_cfi.len(), ro_new.len(), rsp_rows.len()]
         emit_now(fin[k])
         pw(out, ir.fn_index)
         pw(out, fn_addr[ir.fn_index])
@@ -196,6 +197,7 @@ par_worker = (q: IrFn[], fin: bool[], a: int, b: int, r0: int, fd: int):
         news.push(c.0)
         news.push(c.1)
     pw_ints(out, news)
+    pw_ints(out, rsp_rows)
     tw2 = time()
     __olen = 0                      # (the compiler's own output, not yet written, is the parent's to write)
     __write_fd(fd, data(out), out.len())
@@ -251,16 +253,16 @@ par_join = (bytes_: u8[], r0: int, q: IrFn[], fin: bool[], a: int):
     ats: int[]
     lns: int[]
     moves: int[]
-    # per function, then once more at the run's end: where it starts in each of the 13 tables
+    # per function, then once more at the run's end: where it starts in each of the 14 tables
     # (code, call_fix, data_fix, stub_fix, cabi_fix, elf_syms, line_rows, call_sites,
-    # unwind_fns, uw_data, dbg_raw, dbg_cfi, constants)
+    # unwind_fns, uw_data, dbg_raw, dbg_cfi, constants, rsp_rows)
     marks: int[]
     loop _ in [0..nf):
         fis.push(pr(r))
         ats.push(pr(r))
         lns.push(pr(r))
         moves.push(pr(r))
-        loop _ in [0..13): marks.push(pr(r))
+        loop _ in [0..14): marks.push(pr(r))
     nc = pr(r)
     c0 = r.i
     r.i += nc
@@ -285,7 +287,8 @@ par_join = (bytes_: u8[], r0: int, q: IrFn[], fin: bool[], a: int):
     raw = pr_ints(r)
     cfi = pr_ints(r)
     news = pr_ints(r)
-    ends: int[] = [nc, calls.len() / 2, datas.len() / 3, stubs.len() / 2, cabis.len() / 2, names.len(), rows.len(), sites.len(), uws.len() / 4, uwd.len(), raw.len(), cfi.len(), news.len() / 2]
+    frames = pr_ints(r)
+    ends: int[] = [nc, calls.len() / 2, datas.len() / 3, stubs.len() / 2, cabis.len() / 2, names.len(), rows.len(), sites.len(), uws.len() / 4, uwd.len(), raw.len(), cfi.len(), news.len() / 2, frames.len()]
     loop x in ends: marks.push(x)
     starts: int[]           # the worker's constants: where it put each, and where each is here
     to: int[]
@@ -299,13 +302,13 @@ par_join = (bytes_: u8[], r0: int, q: IrFn[], fin: bool[], a: int):
             ir = q[a + j]
             emit_now(fin[a + j])
             par_here += 1
-            loop k in [marks[13 * j + 12]..marks[13 * j + 25]):
+            loop k in [marks[14 * j + 12]..marks[14 * j + 26]):
                 starts.push(news[2 * k])
                 to.push(ro_const(news[2 * k + 1]))
             j += 1
             continue
-        m0 = 13 * j
-        m1 = 13 * e
+        m0 = 14 * j
+        m1 = 14 * e
         # (constants the worker added: their places here, in the order it first used them)
         loop k in [marks[m0 + 12]..marks[m1 + 12]):
             starts.push(news[2 * k])
@@ -390,4 +393,9 @@ par_join = (bytes_: u8[], r0: int, q: IrFn[], fin: bool[], a: int):
             loop _ in [0..ne):
                 dbg_cfi.push(cfi[k])
                 k += 1
+        k = marks[m0 + 13]
+        loop k < marks[m1 + 13]:
+            rsp_rows.push(frames[k] + shift)
+            rsp_rows.push(frames[k + 1])
+            k += 2
         j = e

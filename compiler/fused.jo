@@ -488,6 +488,7 @@ fz_worker = (cands: int[], a: int, b: int, fd: int):
         cs0 = call_sites.len()
         e0 = elf_syms.len()
         ro0 = fz_ro.len()
+        u0 = rsp_rows.len()
         emit_now(false)
         start = fn_addr[r.lf]
         pw(out, 1)
@@ -520,6 +521,12 @@ fz_worker = (cands: int[], a: int, b: int, fd: int):
             k4 += 2
         pw(out, (fz_ro.len() - ro0) / 2)
         loop x in fz_ro[ro0..fz_ro.len()): pw(out, x)
+        pw(out, (rsp_rows.len() - u0) / 2)
+        k4 = u0
+        loop k4 < rsp_rows.len():
+            pw(out, rsp_rows[k4] - start)
+            pw(out, rsp_rows[k4 + 1])
+            k4 += 2
         if elf_syms.len() == e0: pw(out, 0)
         else: pw(out, 1)
     pw(out, 0x46555345)
@@ -642,6 +649,8 @@ fz_parse = (w: int, b: u8[]):
         skip = 16 * pr(r)
         r.i += skip
         skip = 16 * pr(r)
+        r.i += skip
+        skip = 16 * pr(r)       # RSP unwind transitions
         r.i += skip
         pr(r)
     loop k in [first..fz_recs.len()):
@@ -942,6 +951,10 @@ fz_place = (x: FzRec, lf: int):
         off = pr(fz_rd[w])
         got = ro_const(bits)
         fz_mrc[x.w][off] = got
+    loop _ in [0..pr(fz_rd[w])):
+        p = pr(fz_rd[w])
+        rsp_rows.push(base + p)
+        rsp_rows.push(pr(fz_rd[w]))
     if pr(fz_rd[w]) != 0: elf_syms.push((sym_name(lfuncs[lf].name), base, nc))
     loop c in calls: call_fix.push((c.0, fz_map_lf(x.w, c.1)))
     loop d in datas:

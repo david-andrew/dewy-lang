@@ -759,6 +759,7 @@ compile = (path: str, out0: str) -> str:
         else:
             # (backtraces always; debuggers and profilers get DWARF in what `sloppy build` writes)
             elf_extra = [(".dewy_lines", x64_line_table())]
+            if rsp_rows.len() > 0: elf_extra.push((".dewy_frames", x64_frame_table()))
             dw_data_addr = img_data_addr
             if debug_info: elf_extra = elf_extra + dwarf_sections(img_text_addr, code.len(), path, DEWY_CORE_VERSION)
             ok = write_elf(out, code, entry, rodata, data_size + 8 + bss_reserve)

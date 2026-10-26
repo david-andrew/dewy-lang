@@ -1,7 +1,7 @@
 # Backtraces at a panic (called by __panic in lib/core/rt.jo).
 
 # where the functions on the call stack were called from: return addresses found through the
-# frame pointers, function names in the program file's .symtab, lines in its .dewy_lines
+# frame pointers or .dewy_frames, function names in the program file's .symtab, lines in its .dewy_lines
 # (written by the compiler: compiler/x64.jo, x64_line_table)
 __in_backtrace = false
 
@@ -13,40 +13,56 @@ __backtrace = ():
         when ARCH == "arm64":
             __backtrace_from((jb as *int)[10], 0)
         else:
-            __backtrace_from((jb as *int)[1], 0)
+            __backtrace_from((jb as *int)[1], 0, (jb as *int)[6], (jb as *int)[7])
 
 # the frames from frame pointer fp (pc: where the program was, when it is not in a call; 0:
 # none). Runs of the same call (deep recursion) are told once, with a count.
-__backtrace_from = (fp0: int, pc: int):
+__backtrace_from = (fp0: int, pc: int, sp0: int = 0, retpc: int = 0):
     when TARGET != "wasm":
         if __in_backtrace: return
         __in_backtrace = true
-        rets: int[]
-        counts: int[]
-        if pc != 0:
-            rets.push(pc + 1)
-            counts.push(1)
-        fp = fp0
-        n = 0
-        loop n < 100000000 and fp != 0 and fp & 7 == 0:
-            ret = (fp as *int)[1]
-            next = (fp as *int)[0]
-            if ret == 0: break
-            if rets.len() > 0 and rets[rets.len() - 1] == ret: counts[counts.len() - 1] += 1
-            else if rets.len() < 400:
-                rets.push(ret)
+        when TARGET == "windows" or TARGET == "macos":
+            rets: int[]
+            counts: int[]
+            if pc != 0:
+                rets.push(pc + 1)
                 counts.push(1)
-            n += 1
-            # (frames of callers are above; another stack -- a thread's parent -- is not followed)
-            if next <= fp or next - fp > (1 << 23): break
-            fp = next
-        when TARGET == "windows":
-            __backtrace_print_pe(rets, counts)
-        else when TARGET == "macos":
-            __backtrace_print_macho(rets, counts)
+            fp = fp0
+            n = 0
+            loop n < 100000000 and fp != 0 and fp & 7 == 0:
+                ret = (fp as *int)[1]
+                next = (fp as *int)[0]
+                if ret == 0: break
+                if rets.len() > 0 and rets[rets.len() - 1] == ret: counts[counts.len() - 1] += 1
+                else if rets.len() < 400:
+                    rets.push(ret)
+                    counts.push(1)
+                n += 1
+                # (frames of callers are above; another stack -- a thread's parent -- is not followed)
+                if next <= fp or next - fp > (1 << 23): break
+                fp = next
+            when TARGET == "windows":
+                __backtrace_print_pe(rets, counts)
+            else when TARGET == "macos":
+                __backtrace_print_macho(rets, counts)
         else:
-            if let exe = read_bytes("/proc/self/exe"): __backtrace_print(rets, counts, exe)
+            if let exe = read_bytes("/proc/self/exe"):
+                __backtrace_print(fp0, pc, sp0, retpc, exe)
         __in_backtrace = false
+
+# The table is read only on a panic/crash, in the same ELF section scan that
+# finds symbols and source lines. Each RSP frame is an O(log rows) lookup.
+__backtrace_frame = (exe: u8[], table: int, pc: int) -> int:
+    # Own executable's fixed-width metadata: unaligned loads are native on x86.
+    rows = (data(exe) + table + 8) as *i32
+    lo = 0
+    hi = int((rows as *u32)[-1])
+    loop lo < hi:
+        mid = (lo + hi) / 2
+        if int((rows as *u32)[2 * mid]) <= pc: lo = mid + 1
+        else: hi = mid
+    if lo == 0: return -1
+    int(rows[2 * lo - 1])
 
 # ---------------- crashes ----------------
 # a segmentation fault (a stack overflow, or a bad pointer in code using raw pointers or C) or
@@ -181,7 +197,7 @@ else when TARGET != "wasm":
         else if sig == 8: what = "arithmetic error"
         else if sig == 4: what = "illegal instruction"
         __write_err("panic: {what}\n")
-        __backtrace_from(rbp, rip)
+        __backtrace_from(rbp, rip, rsp)
         __exit(101)
 
 # what "{x:x}" writes, without the general formatter (spec parsing and floats): every native
@@ -205,7 +221,7 @@ __cstr_at = (b: u8[], o: int) -> str:
     str_from_bytes(b[o..e))
 
 # the function each return address is in, from the program file's .symtab; then the report
-__backtrace_print = (rets: int[], counts: int[], exe: u8[]):
+__backtrace_print = (fp0: int, pc: int, sp0: int, retpc: int, exe: u8[]):
     if exe.len() < 64 or exe[0] != 0x7F: return
     shoff = __u64_at(exe, 0x28)
     shnum = __u16_at(exe, 0x3C)
@@ -217,6 +233,7 @@ __backtrace_print = (rets: int[], counts: int[], exe: u8[]):
     str_off = 0
     lines_off = 0
     text_addr = 0
+    frames = 0
     loop i in [0..shnum):
         h = shoff + i * 64
         nm = __cstr_at(exe, names_off + __u32_at(exe, h))
@@ -226,6 +243,41 @@ __backtrace_print = (rets: int[], counts: int[], exe: u8[]):
         else if nm == ".strtab": str_off = __u64_at(exe, h + 24)
         else if nm == ".dewy_lines": lines_off = __u64_at(exe, h + 24)
         else if nm == ".text": text_addr = __u64_at(exe, h + 16)
+        else if nm == ".dewy_frames": frames = __u64_at(exe, h + 24)
+    rets: int[]
+    counts: int[]
+    if pc != 0:
+        rets.push(pc + 1)
+        counts.push(1)
+    fp = fp0
+    sp = sp0
+    at = if pc != 0: pc else: retpc - 1
+    n = 0
+    loop n < 100000000:
+        ret = 0
+        next = 0
+        depth = if frames != 0: __backtrace_frame(exe, frames, at - text_addr) else: -1
+        if depth == -2: break
+        if depth >= 0:
+            if sp == 0 or sp & 7 != 0 or depth > (1 << 23): break
+            ret = ((sp + depth) as *int)[0]
+            sp += depth + 8
+        else:
+            if fp == 0 or fp & 7 != 0: break
+            ret = (fp as *int)[1]
+            next = (fp as *int)[0]
+            sp = fp + 16
+        if ret == 0: break
+        if rets.len() > 0 and rets[rets.len() - 1] == ret: counts[counts.len() - 1] += 1
+        else if rets.len() < 400:
+            rets.push(ret)
+            counts.push(1)
+        n += 1
+        # (frames of callers are above; another stack -- a thread's parent -- is not followed)
+        if depth < 0:
+            if (next != 0 or frames == 0) and (next <= fp or next - fp > (1 << 23)): break
+            fp = next
+        at = ret - 1
     if sym_off == 0 or lines_off == 0: return
     fnames: str[]
     loop ret in rets:
