@@ -6,17 +6,19 @@ const OW_MIN_INT = -9223372036854775807 - 1
 
 ow_vreg = (ty: int) -> int:
     opt_ir.vtypes.push(i8(ty))
+    opt_vtypes = data(opt_ir.vtypes)
     opt_ir.vtypes.len() - 1
 ow_vtype = (v: int) -> int:
-    t = int(opt_ir.vtypes[v])
+    t = int(opt_vtypes[v])
     if t == 3: return 0
     t
-ow_is_kv = (v: int) -> bool: int(opt_ir.vtypes[v]) == 3
+ow_is_kv = (v: int) -> bool: int(opt_vtypes[v]) == 3
 ow_k_vreg = (v: int) -> int:
     slot = (v xor (v >> 8)) & 255
     if opt_kc_epoch[slot] == opt_kc_fn and opt_kc_val[slot] == v: return opt_kc_reg[slot]
     d = opt_ir.vtypes.len()
     opt_ir.vtypes.push(i8(3))
+    opt_vtypes = data(opt_ir.vtypes)
     loop opt_ir.kval.len() < d: opt_ir.kval.push(0)
     opt_ir.kval.push(v)
     opt_kc_epoch[slot] = opt_kc_fn
@@ -51,7 +53,7 @@ ow_operands = (ins: *Ins) -> int:
     -1
 ow_use = (i: int) -> int:
     if opt_use_span >= 0:
-        if i < opt_use_span_count: return int(opt_ir.args[opt_use_span + i])
+        if i < opt_use_span_count: return int(opt_args[opt_use_span + i])
         return opt_use_values[2]
     opt_use_values[i]
 ow_word_overflow = (operation: int, x: int, y: int) -> bool:
@@ -76,7 +78,7 @@ ow_rewrite = (ins: *Ins):
     mask = opt_decode[oc_tag(ins)] >> 8
     if mask & 16 != 0:
         loop k in [int(ins.a)..int(ins.a) + int(ins.b)):
-            opt_ir.args[k] = o_regs[int(opt_ir.args[k])].repl
+            opt_args[k] = o_regs[int(opt_args[k])].repl
     else:
         if mask & 1 != 0 or (mask & 32 != 0 and ins.a >= 0): ins.a = o_regs[int(ins.a)].repl
         if mask & 2 != 0 or (mask & 64 != 0 and int(ins.c) & 128 != 0): ins.b = o_regs[int(ins.b)].repl
@@ -228,7 +230,7 @@ ow_flow_emit = (ins: *Ins):
             ow_flow_exit(int(ins.imm))
             if control == 9:
                 loop k in [0..int(ins.b)):
-                    ow_flow_exit(int(opt_ir.args[int(ins.c) + k]))
+                    ow_flow_exit(int(opt_args[int(ins.c) + k]))
         if control == 7 or control == 9 or control == 10 or control == 11 or (control == 12 and ins.c == 1):
             o_flow_dead = true
             o_flow_depth = 0
@@ -344,7 +346,7 @@ ow_holds = (d: int, s: int) -> bool:
         if opt_decode[oc_tag(ins)] & 1 != 0 and int(ins.dst) == s: return false
         if op == .zeroslots:
             loop k in [0..int(ins.b)):
-                item = int(opt_ir.args[int(ins.a) + k])
+                item = int(opt_args[int(ins.a) + k])
                 if item & 1 == 1 and item >> 1 == s: return false
         if op == .block or op == .if_ or op == .loop: open.push(op)
         else if op == .end and open.len() > 0: open.pop()
@@ -622,9 +624,9 @@ ow_transfer = (ins: *Ins, simplify: bool):
         if kind == 7:
             fp = int(ins.c)
             at = int(o_regs[fp].defpos)
-            if ow_stable(fp) and at >= 0 and opt_ir.code[at].op == .faddr:
+            if ow_stable(fp) and at >= 0 and opt_input[at].op == .faddr:
                 ins.op = .call
-                ins.imm = opt_ir.code[at].imm
+                ins.imm = opt_input[at].imm
                 ins.c = 0
                 op = .call
             break
@@ -996,10 +998,15 @@ ow_input_use = (v: int, pos: int):
     o_input_last[v] = i32(pos)
 
 opt_rewrite = ():
+    opt_args = data(opt_ir.args)
+    opt_vtypes = data(opt_ir.vtypes)
+    opt_input_count = opt_ir.code.len()
+    opt_nparams = opt_ir.nparams
+    opt_raw_mem = opt_ir.raw_mem
     # The outer transfer uses slot 0. Strength reduction uses slot 1 with
     # simplification disabled, so a nested transfer never needs a third slot.
     nv = opt_ir.vtypes.len()
-    loop p in [0..opt_ir.nparams):
+    loop p in [0..opt_nparams):
         o_regs[p].ndef += 1
         o_regs[p].stable = true
         o_regs[p].defpos = -1
@@ -1016,7 +1023,7 @@ opt_rewrite = ():
     o_lastuse.resize(nv)
     o_input_last = data(o_lastuse)
     loop v in [0..nv): o_lastuse[v] = -1
-    o_depth.resize(opt_ir.code.len())
+    o_depth.resize(opt_input_count)
     depths = data(o_depth)
     depth = 0
     # (and what each loop defines and stores to, in the same walk)
@@ -1034,7 +1041,7 @@ opt_rewrite = ():
     input = data(opt_ir.code)
     opt_input = input
     working = opt_working
-    loop pos in [0..opt_ir.code.len()):
+    loop pos in [0..opt_input_count):
         ins = input + pos
         op = ins.op
         a = int(ins.a)
@@ -1068,7 +1075,7 @@ opt_rewrite = ():
             nop, else_, br, trap, vzu: d = -1
             iconst, fconst, slot, gaddr, daddr, faddr: pass
             intr, call, syscall, calli, callc:
-                loop k in [a..a + b): ow_input_use(int(opt_ir.args[k]), pos)
+                loop k in [a..a + b): ow_input_use(int(opt_args[k]), pos)
                 if op == .calli or op == .callc: ow_input_use(int(ins.c), pos)
                 if op != .call or ins.c != 1: kill = 7
             ret:
@@ -1087,7 +1094,7 @@ opt_rewrite = ():
                 if op == .vst or int(ins.c) & 128 != 0: ow_input_use(d, pos)
                 if op == .store:
                     m = int(ins.c)
-                    if opt_ir.raw_mem: kill = 7
+                    if opt_raw_mem: kill = 7
                     else if m & 64 != 0: kill = 4
                     else if m & 32 != 0: kill = 2
                     else: kill = 1
@@ -1114,7 +1121,7 @@ opt_rewrite = ():
                 ow_input_use(a, pos)
             zeroslots:
                 loop k in [a..a + b):
-                    item = int(opt_ir.args[k])
+                    item = int(opt_args[k])
                     if item & 1 == 1:
                         o_regs[item >> 1].ndef += 2
                         o_regs[item >> 1].stable = false
@@ -1133,19 +1140,19 @@ opt_rewrite = ():
         if kill != 0 and active >= 0: lp_kills[active] = lp_kills[active] | kill
     # forward: fold, propagate copies, eliminate common subexpressions, drop dead branches
     o_count = 0
-    if o_capacity < opt_ir.code.len():
-        o_capacity = opt_ir.code.len()
+    if o_capacity < opt_input_count:
+        o_capacity = opt_input_count
         o_out_storage.resize(o_capacity)
         o_out = data(o_out_storage)
     ow_flow_begin()
     o_cse = true
-    ow_ht_setup(opt_ir.code.len() + 16)
+    ow_ht_setup(opt_input_count + 16)
     # 0 normal, 1 if(true), 2 if(false), 3 block; keep each control's facts together.
     ctl: OptControl[]
     o_join_regs.clear()
     o_join_next.clear()
     skip = 0           # nesting depth inside a dead branch
-    loop pos in [0..opt_ir.code.len()):
+    loop pos in [0..opt_input_count):
         working[0] = input[pos]
         ins = working
         op = ins.op
@@ -1256,7 +1263,7 @@ opt_rewrite = ():
         if op == .zeroslots:
             ow_kill_all()
             loop k in [0..int(ins.b)):
-                item = int(opt_ir.args[int(ins.a) + k])
+                item = int(opt_args[int(ins.a) + k])
                 if item & 1 == 1: o_regs[item >> 1].ver += 1
             ow_append_plain(ins[0])
             continue

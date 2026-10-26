@@ -1,6 +1,6 @@
 $runtime_checks
 from p"opt_workspace.dewy" import (
-    opt_ir o_dead_first o_dead_limit o_fact_nbr o_fact_scope o_flow o_flow_at o_reg_count
+    opt_args opt_vtypes opt_ir o_dead_first o_dead_limit o_fact_nbr o_fact_scope o_flow o_flow_at o_reg_count
     o_reg_storage o_regs opt_checked_flags opt_decode opt_operands
 )
 from p"ir_types.dewy" import (Op Ins IrFn)
@@ -25,7 +25,7 @@ oc_retargetable=(ins:ptr<Ins>):>bool=>$unsafe {
     ((opt_decode[oc_tag(ins)] & 8) not=? 0)
 }
 oc_vtype=(v:int64):>int64=>$unsafe {
-    let t=int64(opt_ir[0].vtypes[v])
+    let t=int64(opt_vtypes[v])
     if (t =? 3) {
         return 0
     }
@@ -41,7 +41,7 @@ oc_has_use=(ins:ptr<Ins> v:int64):>bool=>$unsafe {
     let mode=opt_operands[oc_tag(ins)]
     if ((mode & 16) not=? 0) {
         loop k in [int64(ins[0].a)..(OptWord(int64(ins[0].a)) + OptWord(int64(ins[0].b)))) {
-            if (int64(opt_ir[0].args[k]) =? v) {
+            if (int64(opt_args[k]) =? v) {
                 return true
             }
         }
@@ -74,6 +74,7 @@ oc_has_use=(ins:ptr<Ins> v:int64):>bool=>$unsafe {
 oc_tmp=():>int64=>$unsafe {
     let d=opt_ir[0].vtypes.length
     opt_ir[0].vtypes.push(int8(0))
+    opt_vtypes=opt_ir[0].vtypes.ptr
     if (o_reg_count <=? d) {
         o_reg_storage.resize((OptWord(d) + OptWord(int64(1))))
         o_regs=o_reg_storage.ptr

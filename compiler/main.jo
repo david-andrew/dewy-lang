@@ -38,6 +38,7 @@ use 'isolation.jo'
 use 'copies.jo'
 use 'ownership.jo'
 use 'opt.jo'
+use 'opt_returns.dewy'
 use 'inline.jo'
 use 'callback_specialize.jo'
 use 'loops.jo'
@@ -288,7 +289,7 @@ emit_function = ():
 # a release build's last passes over a function, before its code is made
 rel_finish = ():
     kc_fn += 1
-    ir.code = o_ret_sink(ir.code)
+    opt_ret_sink(ir.code, ir.vtypes, ir.fn_index)
     loop_versioning()
     ir.code = o_licm(ir.code)
 

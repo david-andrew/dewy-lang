@@ -92,6 +92,7 @@ are grouped. See the ownership sections for the live service contracts.
 | `constant_eval`, `constant_host`, `source_types` | Same stems + `.jo` | Dewy recursive constant-expression evaluation and borrowed source dialects | O(executed syntax + demanded checking/binding); local scalar operations; peak flagship phase +0.103% including layouts. |
 | `ir_types` | `ir_types.jo` | Dewy opcode and instruction/function/use-plan layouts | 107 ordinals, 30 fields; direct Jo consumers, no adapters; flagship phase change −0.0037% to +0.0030%. |
 | `ir_operands` | `ir_operands.jo` | Dewy final-IR layout construction and flags | O(opcodes) once per process; Jo consumes the table directly; flagship phase change −0.0001% to +0.0005%. |
+| `opt_returns` | `opt_returns.jo` | Dewy recursive return sinking | Borrows code/types at the release-pass boundary; guarded end-index construction, no host callbacks. |
 
 ### Boundary lessons that constrain the next cutover
 
@@ -319,7 +320,12 @@ table; those helpers are not adapters on the Dewy execution path.
 `opt_ir` borrows the original function for the complete call. Input code stays
 stable until final publication; output uses a separate arena. Every arena grow
 refreshes its raw pointer, and no register-entry pointer survives a helper that
-can create a virtual register. Two instruction slots suffice: the outer forward
+can create a virtual register. The argument view is borrowed once, detaching
+shared storage before rewriting; its arena never grows during the pass. The
+type view refreshes after every ordinary, constant or cleanup-register append.
+Input length, parameter count and raw-memory policy stay fixed for the call;
+the constant prefix is read before any new constant is appended. Two instruction
+slots suffice: the outer forward
 transfer uses slot zero, and strength reduction uses slot one with simplification
 disabled. The operand view is transient: consume it before decoding another
 instruction, and decode DCE operands before replacing the instruction with nop.
@@ -338,6 +344,16 @@ including minimum-integer negation and the zero/minimum division guards.
 The frozen workspace, rewrite and cleanup twins remain required by both Jo
 bootstrap generations. Their retirement follows the Dewy-capable bootstrap
 route above; execution ownership alone does not remove that dependency.
+
+`opt_returns.dewy` owns recursive return sinking before loop versioning and
+LICM. Its caller lends the code and type arrays and the current function ID.
+The initial scan borrows read-only instructions; only a recursive direct call
+and a return following an end demand the indexed end table and writable view.
+Code length and type storage stay fixed. Preserve loop back edges, same-type
+move checks, canonical integer constants, branch positions and shared snapshots.
+The scan and end table take O(N) time/space; following adjacent ends retains the
+existing O(B * D) worst case for B branches and nesting depth D. The frozen twin
+keeps the original array implementation as a differential reference.
 
 ## Parser ownership boundary
 

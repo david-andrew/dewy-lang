@@ -1,0 +1,46 @@
+use 'ir_types.dewy'
+
+opt_ret_sink = (code: mut Ins[], vtypes: mut i8[], fn_index: int):
+    n = code.len()
+    # (only in recursive functions, where a value kept across the calls costs at every call,
+    # and where some ret comes right after an end)
+    any = false
+    calls = false
+    loop i in [1..n):
+        op = code[i].op
+        if op == .ret and code[i - 1].op == .end: any = true
+        else if op == .call and code[i].imm == fn_index: calls = true
+    if not any or not calls: return
+    # where each construct starts: the end of the construct a br leaves (-1 for a loop: it goes back)
+    ends = fill(-1, n)
+    open: int[]
+    loop i in 0.. and ins in code:
+        op = ins.op
+        if op == .block or op == .loop or op == .if_: open.push(i)
+        else if op == .end: ends[open.pop()] = i
+    stack: int[]
+    loop i in [0..n):
+        op = code[i].op
+        if op == .block or op == .loop or op == .if_: stack.push(i)
+        else if op == .end and stack.len() > 0: stack.pop()
+        if op != .br: continue
+        ins = code[i]
+        if int(ins.imm) < stack.len():
+            st = stack[stack.len() - 1 - int(ins.imm)]
+            if code[st].op != .loop:
+                q = ends[st] + 1
+                loop q < n and code[q].op == .end: q += 1
+                if q < n and code[q].op == .ret:
+                    # (only for `v = x` just before: ret x; a return of nothing gains nothing
+                    # but one more copy of what returning takes)
+                    r = code[q]
+                    if i > 0 and int(r.a) >= 0:
+                        lst = code[i - 1]
+                        ta = 0
+                        if lst.op == .mov: ta = int(vtypes[int(lst.a)])
+                        if ta == 3: ta = 0
+                        if lst.op == .mov and int(lst.dst) == int(r.a) and int(lst.ty) == ta and int(lst.a) != int(r.a):
+                            code[i - 1] = Ins(.nop, 0, 0, 0, 0, 0, 0)
+                            r.a = lst.a
+                            r.pos = ins.pos
+                            code[i] = r

@@ -53,6 +53,9 @@ run = (code: Ins[], nv: int, policy: int = 0, raw: bool = false):
     opt_use_values = &opt_use_tuple as *int
     before = ir
     opt_ir = &ir
+    opt_args = data(ir.args)
+    opt_vtypes = data(ir.vtypes)
+    opt_input_count = ir.code.len()
     opt_working = &opt_working_storage as *Ins
     opt_rewrite()
     assert(before.code.len() == code.len() and before.vtypes.len() == nv, "borrowed input snapshot")
@@ -66,7 +69,11 @@ run = (code: Ins[], nv: int, policy: int = 0, raw: bool = false):
 
 main = ():
     opt_ir = &ir
+    opt_args = data(ir.args)
+    opt_vtypes = data(ir.vtypes)
+    opt_input_count = ir.code.len()
     ir.args = [i32(2), i32(3), i32(4)]
+    opt_args = data(ir.args)
     opt_decode = o_decode
     opt_operands = data(ir_operand_layout)
     opt_use_values = &opt_use_tuple as *int

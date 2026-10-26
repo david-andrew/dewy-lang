@@ -1,0 +1,61 @@
+$runtime_checks
+from p"ir_types.dewy" import (Ins)
+
+ReturnIndex:type=int64<overflow='wrap'>
+
+# Final release pass. Demand the end-index table only for recursive functions
+# with a return following an end. Borrow read-only code for the guard, then
+# detach once before mutation; no IR arena grows while its view is live.
+opt_ret_sink=(@code:array<Ins> @vtypes:array<int8> fn_index:int64):>void=>$unsafe {
+    let n=code.length
+    let input=code.ptr
+    let any=false
+    let calls=false
+    loop i in [1..n) {
+        let op=input[i].op
+        if op =? 'ret' and input[ReturnIndex(i) - 1].op =? 'end' {any=true}
+        else if op =? 'call' and input[i].imm =? fn_index {calls=true}
+    }
+    if not any or not calls {return}
+    let ends:array<int64>=[]
+    ends.resize(n)
+    let end_at=ends.ptr
+    let open:array<int64>=[]
+    loop i in [0..n) {
+        let op=input[i].op
+        if op =? 'block' or op =? 'loop' or op =? 'if_' {open.push(i)}
+        else if op =? 'end' {end_at[open.pop()]=i}
+    }
+    let out=code.ptr
+    let types=vtypes.ptr
+    let stack:array<int64>=[]
+    loop i in [0..n) {
+        let op=out[i].op
+        if op =? 'block' or op =? 'loop' or op =? 'if_' {stack.push(i)}
+        else if op =? 'end' and stack.length >? 0 {stack.pop();}
+        if op not=? 'br' {continue}
+        let ins=out[i]
+        if ins.imm <? stack.length {
+            let st=stack[ReturnIndex(stack.length) - 1 - ReturnIndex(ins.imm)]
+            if out[st].op not=? 'loop' {
+                let q:ReturnIndex=ReturnIndex(end_at[st]) + 1
+                loop q <? n and out[q].op =? 'end' {q+=1}
+                if q <? n and out[q].op =? 'ret' {
+                    let r=out[q]
+                    if i >? 0 and r.a >=? 0 {
+                        let last=out[ReturnIndex(i) - 1]
+                        let ty:int64=0
+                        if last.op =? 'mov' {ty=int64(types[int64(last.a)])}
+                        if ty =? 3 {ty=0}
+                        if last.op =? 'mov' and last.dst =? r.a and int64(last.ty) =? ty and last.a not=? r.a {
+                            out[ReturnIndex(i) - 1]=Ins()
+                            r.a=last.a
+                            r.pos=ins.pos
+                            out[i]=r
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

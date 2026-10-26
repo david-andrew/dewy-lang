@@ -23,7 +23,8 @@ ROOT = HERE.parents[1]
 # Steps 1 and 2 cannot read Dewy, so there every `use 'X.dewy'` in compiler/
 # names X.dewy's frozen implementation-language twin instead. Steps 3 on
 # compile the Dewy modules, so the compiler that ships runs them.
-FROZEN_TWINS = {'opt_cleanup.dewy': 'opt_cleanup.jo',
+FROZEN_TWINS = {'opt_returns.dewy': 'opt_returns.jo',
+               'opt_cleanup.dewy': 'opt_cleanup.jo',
                'opt_rewrite.dewy': 'opt_rewrite.jo',
                'opt_workspace.dewy': 'opt_workspace.jo',
                'ir_operands.dewy': 'ir_operands.jo',

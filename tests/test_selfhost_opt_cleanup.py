@@ -32,6 +32,9 @@ run = (code: Ins[], nv: int, native: bool = true) -> Ins[]:
     o_fact_scope.resize(nv * 2)
     o_fact_nbr.resize(nv * 2)
     opt_ir = &ir
+    opt_args = data(ir.args)
+    opt_vtypes = data(ir.vtypes)
+    opt_input_count = ir.code.len()
     o_count = 0
     o_capacity = max(1, code.len())
     o_out_storage.resize(o_capacity)
@@ -59,9 +62,13 @@ run = (code: Ins[], nv: int, native: bool = true) -> Ins[]:
 
 main = ():
     opt_ir = &ir
+    opt_args = data(ir.args)
+    opt_vtypes = data(ir.vtypes)
+    opt_input_count = ir.code.len()
     # The leaf's raw tag and descriptor reads must agree with the independent
     # optimizer walker, for every opcode and exceptional operand form.
     ir.args = [i32(2), i32(3), i32(4)]
+    opt_args = data(ir.args)
     opt_decode = o_decode
     opt_operands = data(ir_operand_layout)
     loop tag in [0..int(Op.findb) + 1):

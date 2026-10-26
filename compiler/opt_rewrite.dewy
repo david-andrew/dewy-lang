@@ -1,7 +1,7 @@
 $runtime_checks
 from p"ir_types.dewy" import (Op Ins IrFn)
 from p"opt_workspace.dewy" import (
-    OptFlow OptScope OptControl AvailableValue opt_ir ht_entries ht_mask ht_storage lp_defs
+    OptFlow OptScope OptControl AvailableValue opt_args opt_vtypes opt_input_count opt_nparams opt_raw_mem opt_ir ht_entries ht_mask ht_storage lp_defs
     lp_first lp_kills lp_limit lp_next lp_open lp_parent o_capacity o_count o_cse o_dead_first
     o_dead_limit o_dead_start o_depth o_epoch o_fact_nbr o_fact_scope o_flow o_flow_at
     o_flow_at_storage o_flow_count o_flow_dead o_flow_depth o_flow_level o_flow_open
@@ -21,11 +21,12 @@ const OW_MIN_INT:int64=-9223372036854775807 - 1
 
 ow_vreg=(ty:int64):>int64=>$unsafe {
     opt_ir[0].vtypes.push(int8(ty))
+    opt_vtypes=opt_ir[0].vtypes.ptr
     (OptWord(opt_ir[0].vtypes.length) - OptWord(int64(1)))
 }
 
 ow_vtype=(v:int64):>int64=>$unsafe {
-    let t=int64(opt_ir[0].vtypes[v])
+    let t=int64(opt_vtypes[v])
     if (t =? 3) {
         return 0
     }
@@ -33,7 +34,7 @@ ow_vtype=(v:int64):>int64=>$unsafe {
 }
 
 ow_is_kv=(v:int64):>bool=>$unsafe {
-    (int64(opt_ir[0].vtypes[v]) =? 3)
+    (int64(opt_vtypes[v]) =? 3)
 }
 
 ow_k_vreg=(v:int64):>int64=>$unsafe {
@@ -43,6 +44,7 @@ ow_k_vreg=(v:int64):>int64=>$unsafe {
     }
     let d=opt_ir[0].vtypes.length
     opt_ir[0].vtypes.push(int8(3))
+    opt_vtypes=opt_ir[0].vtypes.ptr
     loop (opt_ir[0].kval.length <? d) {
         opt_ir[0].kval.push(0)
     }
@@ -104,7 +106,7 @@ ow_operands=(ins:ptr<Ins>):>int64=>$unsafe {
 ow_use=(i:int64):>int64=>$unsafe {
     if (opt_use_span >=? 0) {
         if (i <? opt_use_span_count) {
-            return int64(opt_ir[0].args[(OptWord(opt_use_span) + OptWord(i))])
+            return int64(opt_args[(OptWord(opt_use_span) + OptWord(i))])
         }
         return opt_use_values[2]
     }
@@ -115,7 +117,7 @@ ow_rewrite=(ins:ptr<Ins>):>void=>$unsafe {
     let mask=(opt_decode[oc_tag(ins)] >> 8)
     if ((mask & 16) not=? 0) {
         loop k in [int64(ins[0].a)..(OptWord(int64(ins[0].a)) + OptWord(int64(ins[0].b)))) {
-            opt_ir[0].args[k]=o_regs[int64(opt_ir[0].args[k])].repl
+            opt_args[k]=o_regs[int64(opt_args[k])].repl
         }
     }
     else {
@@ -319,12 +321,12 @@ ow_commutes=(op:Op):>bool=>$unsafe {
 # owns a different array. Every append checks capacity before taking its address.
 
 ow_flow_begin=():>void=>$unsafe {
-    if (o_flow_storage.length <? opt_ir[0].code.length) {
-        o_flow_storage.resize(opt_ir[0].code.length)
+    if (o_flow_storage.length <? opt_input_count) {
+        o_flow_storage.resize(opt_input_count)
     }
     o_flow=o_flow_storage.ptr
-    if (o_flow_open_storage.length <? opt_ir[0].code.length) {
-        o_flow_open_storage.resize(opt_ir[0].code.length)
+    if (o_flow_open_storage.length <? opt_input_count) {
+        o_flow_open_storage.resize(opt_input_count)
     }
     o_flow_open=o_flow_open_storage.ptr
     o_flow_level=(- OptWord(int64(1)))
@@ -409,7 +411,7 @@ ow_flow_emit=(ins:ptr<Ins>):>void=>$unsafe {
             ow_flow_exit(int64(ins[0].imm))
             if (control =? 9) {
                 loop k in [0..int64(ins[0].b)) {
-                    ow_flow_exit(int64(opt_ir[0].args[(OptWord(int64(ins[0].c)) + OptWord(k))]))
+                    ow_flow_exit(int64(opt_args[(OptWord(int64(ins[0].c)) + OptWord(k))]))
                 }
             }
         }
@@ -528,7 +530,7 @@ ow_can_alias=(d:int64 s:int64):>bool=>$unsafe {
     if (o_regs[s].ndef not=? 1) {
         return ((ow_vtype(d) =? ow_vtype(s)) and ow_holds(d s))
     }
-    if ((s >=? opt_ir[0].nparams) and (o_regs[s].first <? o_regs[s].defpos)) {
+    if ((s >=? opt_nparams) and (o_regs[s].first <? o_regs[s].defpos)) {
         return false
     }
     (ow_vtype(d) =? ow_vtype(s))
@@ -551,7 +553,7 @@ ow_holds=(d:int64 s:int64):>bool=>$unsafe {
     let loop_at:OptWord=(- OptWord(int64(1)))
     let p=(OptWord(q) + OptWord(int64(1)))
     loop ((p <=? e) or (((loop_at >=? 0) and (open.length >? loop_at)))) {
-        if ((p >=? opt_ir[0].code.length) or ((OptWord(p) - OptWord(q)) >? 4000)) {
+        if ((p >=? opt_input_count) or ((OptWord(p) - OptWord(q)) >? 4000)) {
             return false
         }
         let ins=(opt_input + p)
@@ -567,7 +569,7 @@ ow_holds=(d:int64 s:int64):>bool=>$unsafe {
         }
         if (op =? 'zeroslots') {
             loop k in [0..int64(ins[0].b)) {
-                let item=int64(opt_ir[0].args[(OptWord(int64(ins[0].a)) + OptWord(k))])
+                let item=int64(opt_args[(OptWord(int64(ins[0].a)) + OptWord(k))])
                 if (((item & 1) =? 1) and ((item >> 1) =? s)) {
                     return false
                 }
@@ -671,7 +673,7 @@ ow_ht_available=(i:int64 gen:int64 va:int64 vb:int64):>int64=>$unsafe {
 }
 
 ow_mem_gen=(mode:int64):>int64=>$unsafe {
-    if opt_ir[0].raw_mem {
+    if opt_raw_mem {
         return o_gen
     }
     if ((mode & 64) not=? 0) {
@@ -684,7 +686,7 @@ ow_mem_gen=(mode:int64):>int64=>$unsafe {
 }
 
 ow_kill_mem=(mode:int64):>void=>$unsafe {
-    if opt_ir[0].raw_mem {
+    if opt_raw_mem {
         ow_kill_all()
     }
     else if ((mode & 64) not=? 0) {
@@ -1005,9 +1007,9 @@ ow_transfer=(ins:ptr<Ins> simplify:bool):>void=>$unsafe {
         if (kind =? 7) {
             let fp=int64(ins[0].c)
             let at=int64(o_regs[fp].defpos)
-            if ((ow_stable(fp) and (at >=? 0)) and (opt_ir[0].code[at].op =? 'faddr')) {
+            if ((ow_stable(fp) and (at >=? 0)) and (opt_input[at].op =? 'faddr')) {
                 ins[0].op='call'
-                ins[0].imm=opt_ir[0].code[at].imm
+                ins[0].imm=opt_input[at].imm
                 ins[0].c=0
                 op='call'
             }
@@ -1414,13 +1416,13 @@ ow_enter_loop=():>void=>$unsafe {
         o_regs[lp_defs[k]].ver=(OptIndex(o_regs[lp_defs[k]].ver) + OptIndex(OptIndex(int64(1))))
     }
     k=lp_kills[l]
-    if (((k & 1) not=? 0) or opt_ir[0].raw_mem) {
+    if (((k & 1) not=? 0) or opt_raw_mem) {
         o_gen=(OptWord(o_gen) + OptWord(int64(1)))
     }
-    if (((k & 2) not=? 0) or opt_ir[0].raw_mem) {
+    if (((k & 2) not=? 0) or opt_raw_mem) {
         o_genf=(OptWord(o_genf) + OptWord(int64(1)))
     }
-    if (((k & 4) not=? 0) or opt_ir[0].raw_mem) {
+    if (((k & 4) not=? 0) or opt_raw_mem) {
         o_genh=(OptWord(o_genh) + OptWord(int64(1)))
     }
 }
@@ -1434,28 +1436,34 @@ ow_input_use=(v:int64 pos:int64):>void=>$unsafe {
 }
 
 opt_rewrite=():>void=>$unsafe {
+    opt_args=opt_ir[0].args.ptr
+    opt_vtypes=opt_ir[0].vtypes.ptr
+    opt_input_count=opt_ir[0].code.length
+    opt_nparams=opt_ir[0].nparams
+    opt_raw_mem=opt_ir[0].raw_mem
     # The outer transfer uses slot 0. Strength reduction uses slot 1 with
     # simplification disabled, so a nested transfer never needs a third slot.
     let nv=opt_ir[0].vtypes.length
-    loop p in [0..opt_ir[0].nparams) {
+    loop p in [0..opt_nparams) {
         o_regs[p].ndef=(OptIndex(o_regs[p].ndef) + OptIndex(OptIndex(int64(1))))
         o_regs[p].stable=true
         o_regs[p].defpos=(- OptWord(int64(1)))
     }
     # constant vregs: one canonical vreg per value
     o_kmap.clear()
+    let constants=opt_ir[0].kval.ptr
     loop v in [0..opt_ir[0].kval.length) {
         if ow_is_kv(v) {
             o_regs[v].ndef=(OptIndex(o_regs[v].ndef) + OptIndex(OptIndex(int64(1))))
             o_regs[v].stable=true
             o_regs[v].constant=true
-            o_regs[v].cval=opt_ir[0].kval[v]
-            let c:int64?=o_kmap.get(opt_ir[0].kval[v])
+            o_regs[v].cval=constants[v]
+            let c:int64?=o_kmap.get(constants[v])
             if c isnt? none {
                 o_regs[v].repl=OptIndex(c)
             }
             else {
-                o_kmap[opt_ir[0].kval[v]]=v
+                o_kmap[constants[v]]=v
             }
         }
     }
@@ -1464,7 +1472,7 @@ opt_rewrite=():>void=>$unsafe {
     loop v in [0..nv) {
         o_lastuse[v]=(- OptWord(int64(1)))
     }
-    o_depth.resize(opt_ir[0].code.length)
+    o_depth.resize(opt_input_count)
     let depths=o_depth.ptr
     let depth:OptWord=0
     # (and what each loop defines and stores to, in the same walk)
@@ -1482,7 +1490,7 @@ opt_rewrite=():>void=>$unsafe {
     let input=opt_ir[0].code.ptr
     opt_input=input
     let working=opt_working
-    loop pos in [0..opt_ir[0].code.length) {
+    loop pos in [0..opt_input_count) {
         let ins=(input + pos)
         let op=ins[0].op
         let a=int64(ins[0].a)
@@ -1531,7 +1539,7 @@ opt_rewrite=():>void=>$unsafe {
             }
             <'intr'|'call'|'syscall'|'calli'|'callc'> => {
                 loop k in [a..(OptWord(a) + OptWord(b))) {
-                    ow_input_use(int64(opt_ir[0].args[k]) pos)
+                    ow_input_use(int64(opt_args[k]) pos)
                 }
                 if ((op =? 'calli') or (op =? 'callc')) {
                     ow_input_use(int64(ins[0].c) pos)
@@ -1563,7 +1571,7 @@ opt_rewrite=():>void=>$unsafe {
                 }
                 if (op =? 'store') {
                     let m=int64(ins[0].c)
-                    if opt_ir[0].raw_mem {
+                    if opt_raw_mem {
                         kill=7
                     }
                     else if ((m & 64) not=? 0) {
@@ -1607,7 +1615,7 @@ opt_rewrite=():>void=>$unsafe {
             }
             <'zeroslots'> => {
                 loop k in [a..(OptWord(a) + OptWord(b))) {
-                    let item=int64(opt_ir[0].args[k])
+                    let item=int64(opt_args[k])
                     if ((item & 1) =? 1) {
                         o_regs[(item >> 1)].ndef=(OptIndex(o_regs[(item >> 1)].ndef) + OptIndex(OptIndex(int64(2))))
                         o_regs[(item >> 1)].stable=false
@@ -1640,20 +1648,20 @@ opt_rewrite=():>void=>$unsafe {
     }
     # forward: fold, propagate copies, eliminate common subexpressions, drop dead branches
     o_count=0
-    if (o_capacity <? opt_ir[0].code.length) {
-        o_capacity=opt_ir[0].code.length
+    if (o_capacity <? opt_input_count) {
+        o_capacity=opt_input_count
         o_out_storage.resize(o_capacity)
         o_out=o_out_storage.ptr
     }
     ow_flow_begin()
     o_cse=true
-    ow_ht_setup((OptWord(opt_ir[0].code.length) + OptWord(int64(16))))
+    ow_ht_setup((OptWord(opt_input_count) + OptWord(int64(16))))
     # 0 normal, 1 if(true), 2 if(false), 3 block; keep each control's facts together.
     let ctl:array<OptControl>=[]
     o_join_regs.clear()
     o_join_next.clear()
     let skip:OptWord=0
-    loop pos in [0..opt_ir[0].code.length) {
+    loop pos in [0..opt_input_count) {
         working[0]=input[pos]
         let ins=working
         let op=ins[0].op
@@ -1808,7 +1816,7 @@ opt_rewrite=():>void=>$unsafe {
         if (op =? 'zeroslots') {
             ow_kill_all()
             loop k in [0..int64(ins[0].b)) {
-                let item=int64(opt_ir[0].args[(OptWord(int64(ins[0].a)) + OptWord(k))])
+                let item=int64(opt_args[(OptWord(int64(ins[0].a)) + OptWord(k))])
                 if ((item & 1) =? 1) {
                     o_regs[(item >> 1)].ver=(OptIndex(o_regs[(item >> 1)].ver) + OptIndex(OptIndex(int64(1))))
                 }

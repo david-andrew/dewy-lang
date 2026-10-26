@@ -124,3 +124,11 @@ let opt_use_span_count:int64=0
 let opt_use_tuple:[int64 int64 int64]=[0 0 0]
 let opt_use_values:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let opt_ir:ptr<IrFn>=$unsafe (uint64(0) as ptr<IrFn>)
+
+# Borrowed IR views. Arguments never grow during rewrite; vtypes refresh after
+# every push. Scalar policies and input length stay fixed until publication.
+let opt_args:ptr<int32>=$unsafe (uint64(0) as ptr<int32>)
+let opt_vtypes:ptr<int8>=$unsafe (uint64(0) as ptr<int8>)
+let opt_input_count:int64=0
+let opt_nparams:int64=0
+let opt_raw_mem:bool=false

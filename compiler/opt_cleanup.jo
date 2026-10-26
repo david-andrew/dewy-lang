@@ -8,7 +8,7 @@ oc_retargetable = (ins: *Ins) -> bool:
     if ins.op == .checked_add or ins.op == .checked_sub or ins.op == .checked_mul: return opt_checked_flags
     opt_decode[oc_tag(ins)] & 8 != 0
 oc_vtype = (v: int) -> int:
-    t = int(opt_ir.vtypes[v])
+    t = int(opt_vtypes[v])
     if t == 3: return 0
     t
 oc_is_k = (v: int) -> bool: o_regs[v].constant
@@ -19,7 +19,7 @@ oc_has_use = (ins: *Ins, v: int) -> bool:
     mode = opt_operands[oc_tag(ins)]
     if mode & 16 != 0:
         loop k in [int(ins.a)..int(ins.a) + int(ins.b)):
-            if int(opt_ir.args[k]) == v: return true
+            if int(opt_args[k]) == v: return true
         return mode & 128 != 0 and int(ins.c) == v
     n = mode & 7
     if mode & 256 != 0 and ins.a < 0: n = 0
@@ -35,6 +35,7 @@ oc_has_use = (ins: *Ins, v: int) -> bool:
 oc_tmp = () -> int:
     d = opt_ir.vtypes.len()
     opt_ir.vtypes.push(i8(0))
+    opt_vtypes = data(opt_ir.vtypes)
     if o_reg_count <= d:
         o_reg_storage.resize(d + 1)
         o_regs = data(o_reg_storage)
