@@ -706,7 +706,7 @@ fact_rebind = (s: mut FactState, p: PlaceIdentity, v: int, at: int, prior: int):
 # Aggregates have immutable evaluated identities too. A projection belongs to
 # that value, never to a source spelling; a store rebuilds the enclosing value.
 fact_project = (s: mut FactState, base: int, selector: int, element: bool, t: int) -> int:
-    if base == 0: return fact_new(s, fact_domain(t))
+    if base == 0: return fact_fresh(s, t)
     if not element:
         i = fact_index_get(s.index[0].projection_index, fact_projection_key(base, selector, false))
         if i >= 0: return s.projections[i].value
@@ -1131,7 +1131,7 @@ fact_component = (s: mut FactState, value: int, t0: int, i: int, ct: int) -> int
     t = fact_type(t0)
     if tkind(t) == .tuple: return fact_project(s, value, i, false, ct)
     if tkind(t) == .array or tkind(t) == .fixed: return fact_project(s, value, fact_constant(s, i), true, ct)
-    fact_new(s, fact_domain(ct))
+    fact_fresh(s, ct)
 
 # An unpacking store `(a b) = value` writes each component's route.
 fact_store_pattern = (s: mut FactState, target: int, value: int, at: int, depth: int = 0):
@@ -1975,7 +1975,14 @@ fact_inverse = (op: Tok) -> Tok:
     if op == .gt: return .le
     .lt
 
-fact_set_bound = (s: mut FactState, v: int, b0: FactBound):
+# A MIN/MAX endpoint of an `int` (or an untyped value) is open: it may stand
+# for values beyond int64, unless a singleton, a captured fixed value or a
+# current guard makes it real. uint64's biased endpoints are real (0, 2^64-1).
+# O(1) plus at most 16 incident rows.
+fact_open_endpoint = (s: FactState, v: int, upper: bool) -> bool:
+    v != 0 and fact_type(fact_terms[v].type) != T_U64 and not fact_host_endpoint(s, v, upper)
+
+fact_set_bound = (s: mut FactState, v: int, b0: FactBound, exact: bool = false):
     i = fact_slot(s, v)
     if i < 0: return
     b = b0
@@ -1984,6 +1991,11 @@ fact_set_bound = (s: mut FactState, v: int, b0: FactBound):
     # is `n >=? 1` (an early-returned empty length makes `xs[0]`, `xs[end]` safe).
     else if b.nz and b.lo == 0: b.lo = 1
     else if b.nz and b.hi == 0: b.hi = -1
+    # (an `int` narrowed onto an open MIN/MAX endpoint, `n >=? MAX`, is at
+    # least MAX, not MAX itself: it stays wide unless that endpoint was real)
+    if s.live and not exact and not b.wide and b.lo == b.hi and (b.hi == FACT_MAX or b.lo == FACT_MIN) and fact_open_endpoint(s, v, b.hi == FACT_MAX):
+        b.wide = true
+        b.nz = true
     s.bounds[i] = b
 
 # Assume the CAPTURED Boolean, never reevaluate its syntax after later effects.
@@ -2015,18 +2027,21 @@ fact_assume = (s: mut FactState, v: int, truth: bool):
     # Require its opposite endpoint to be strictly inside that domain: an
     # endpoint at MIN/MAX may stand for an unbounded side of a wide value.
     if op == .eq:
-        if x.wide and not y.wide: x = y; fact_set_bound(s, a, x)
-        else if y.wide and not x.wide: y = x; fact_set_bound(s, b, y)
+        if x.wide and not y.wide: x = y; fact_set_bound(s, a, x, y.lo == y.hi)
+        else if y.wide and not x.wide: y = x; fact_set_bound(s, b, y, x.lo == x.hi)
     else if op == .lt or op == .le:
         if x.wide and not y.wide and x.lo > FACT_MIN:
             x.hi = y.hi
             x.wide = false
             fact_set_bound(s, a, x)
+            x = fact_bound(s, a)
         if y.wide and not x.wide and y.hi < FACT_MAX:
             y.lo = x.lo
             y.wide = false
             fact_set_bound(s, b, y)
+            y = fact_bound(s, b)
     if x.wide or y.wide: return
+    exact = false
     if op == .eq:
         fact_difference(s, a, b, 0, t.origin)
         fact_difference(s, b, a, 0, t.origin)
@@ -2034,6 +2049,10 @@ fact_assume = (s: mut FactState, v: int, truth: bool):
         hi = min(x.hi, y.hi)
         x.lo = lo; y.lo = lo; x.hi = hi; y.hi = hi
         x.nz = x.nz or y.nz; y.nz = x.nz
+        # (equal to a real MIN/MAX endpoint is exactly that value)
+        if lo == hi and (hi == FACT_MAX or lo == FACT_MIN):
+            upper = hi == FACT_MAX
+            exact = not fact_open_endpoint(s, a, upper) or not fact_open_endpoint(s, b, upper)
     else if op == .ne:
         # A disequality tightens an already ordered symbolic pair too.
         # The existing bounded indexed path query supplies the ordering.
@@ -2044,21 +2063,28 @@ fact_assume = (s: mut FactState, v: int, truth: bool):
         if x.lo == 0 and x.hi == 0: y.nz = true
         # (a constant at an interval's end moves that end inward: `x not=? MAX`
         # leaves room for x+1, `r not=? -1` with r >=? -1 makes r >=? 0)
+        # An open `int` endpoint at MIN/MAX does not move: n not=? MAX may be above it.
         if y.lo == y.hi and x.lo < x.hi:
-            if x.lo == y.lo: x.lo += 1
-            else if x.hi == y.lo: x.hi -= 1
+            if x.lo == y.lo and (x.lo != FACT_MIN or not fact_open_endpoint(s, a, false)): x.lo += 1
+            else if x.hi == y.lo and (x.hi != FACT_MAX or not fact_open_endpoint(s, a, true)): x.hi -= 1
         else if x.lo == x.hi and y.lo < y.hi:
-            if y.lo == x.lo: y.lo += 1
-            else if y.hi == x.lo: y.hi -= 1
+            if y.lo == x.lo and (y.lo != FACT_MIN or not fact_open_endpoint(s, b, false)): y.lo += 1
+            else if y.hi == x.lo and (y.hi != FACT_MAX or not fact_open_endpoint(s, b, true)): y.hi -= 1
     else if op == .lt or op == .le:
         d = if op == .lt: 1 else: 0
+        # An open `int` endpoint at MIN/MAX bounds nothing and refutes nothing:
+        # `MAX <? n` holds for n above int64. Past a real one the edge is dead.
+        x_open = x.lo == FACT_MIN and fact_open_endpoint(s, a, false)
+        y_open = y.hi == FACT_MAX and fact_open_endpoint(s, b, true)
         fact_difference(s, a, b, -d, t.origin)
-        if d == 1 and (y.hi == FACT_MIN or x.lo == FACT_MAX): s.live = false
+        if d == 1 and (y.hi == FACT_MIN and not x_open or x.lo == FACT_MAX and not y_open): s.live = false
         else:
-            x.hi = min(x.hi, y.hi - d)
-            y.lo = max(y.lo, x.lo + d)
-    fact_set_bound(s, a, x)
-    fact_set_bound(s, b, y)
+            below = if y.hi == FACT_MIN: FACT_MIN else: y.hi - d
+            above = if x.lo == FACT_MAX: FACT_MAX else: x.lo + d
+            if not y_open: x.hi = min(x.hi, below)
+            if not x_open: y.lo = max(y.lo, above)
+    fact_set_bound(s, a, x, exact)
+    fact_set_bound(s, b, y, exact)
     if op == .lt or op == .le:
         fact_offset_narrow(s, a, x)
         fact_offset_narrow(s, b, y)
@@ -2674,7 +2700,15 @@ fact_pattern_tag = (p: int, st: int) -> int:
 fact_unmodeled = (s: mut FactState, n: int, reason: FactReason) -> int:
     b = if exact_has_node(n): FactBound(reason = reason, witness = n, wide = true) else: fact_domain(ntype(n), reason, n)
     if fact_query: fact_unknown(n, b)
-    fact_new(s, b)
+    fact_new(s, b, FactTerm(type = fact_fresh_type(ntype(n))))
+
+# A fresh value of type t. A signed 64-bit or `int` value keeps its type, so
+# fact_open_endpoint can tell an int64's real edges from an `int`'s open ones.
+fact_fresh_type = (t: int) -> int:
+    f = fact_type(t)
+    if is_int(f) and types[f].bits == 64 and f != T_U64: return t
+    0
+fact_fresh = (s: mut FactState, t: int) -> int: fact_new(s, fact_domain(t), FactTerm(type = fact_fresh_type(t)))
 
 fact_add_fits = (a: int, b: int) -> bool:
     if b > 0: return a <= FACT_MAX - b
@@ -4672,7 +4706,7 @@ fact_range_body = (n: int, s: FactState, lo: int, hi: int) -> FactState:
     iterator = int(nodes[n].a)
     body = s
     l = int(nodes[n].sym)
-    v = fact_new(body, fact_domain(int(locals[l].type)))
+    v = fact_fresh(body, int(locals[l].type))
     fact_bind(body, PlaceIdentity(.local, int(locals[l].owner), l), v)
     lower = fact_new(body, fact_domain(T_BOOL), FactTerm(.ge, v, lo))
     upper = fact_new(body, fact_domain(T_BOOL), FactTerm((if has_flag(iterator, NF_INCLUSIVE): Tok.le else: Tok.lt), v, hi))
@@ -5106,7 +5140,7 @@ fact_stepped = (n: int, s: mut FactState):
     after = s
     body = s
     l = int(nodes[n].sym)
-    v = fact_new(body, fact_domain(int(locals[l].type)))
+    v = fact_fresh(body, int(locals[l].type))
     fact_bind(body, PlaceIdentity(.local, int(locals[l].owner), l), v)
     inclusive = has_flag(iterator, NF_INCLUSIVE)
     if up or down:
@@ -6361,12 +6395,12 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         if id == .loan_address or id == .loan_load or id == .loan_store:
             # Raw writes invalidate element facts; no address becomes evidence.
             if id == .loan_store: fact_forget(s, n, .write, true)
-            return fact_new(s, fact_domain(ntype(n)))
+            return fact_fresh(s, ntype(n))
         # (a float square root, rounding, min/max or vector constructor reads
         # its operands and writes nothing)
         if fact_pure_intrinsic(id):
             loop c in kids(n): fact_capture(c, s)
-            return fact_new(s, fact_domain(ntype(n)))
+            return fact_fresh(s, ntype(n))
         # (`bytes(text)`, which `text as array<uint8>` is: the text's byte view)
         if id == .to_bytes and nkids(n) == 1 and tkind(ntype(kid(n, 0))) == .str_: return fact_byte_view(s, fact_capture(kid(n, 0), s))
         if id == .len:
@@ -6407,7 +6441,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                     fact_difference(s, length, size, -delta, n)
             if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(fresh, -1, false, size))
             fact_store_route(s, route, fresh, n, true)
-            return fact_new(s, fact_domain(ntype(n)))
+            return fact_fresh(s, ntype(n))
         # `xs.extend(ys)` grows by ys's length, `truncate(k)` never grows,
         # `resize(k)` makes max(0, k): the operand first, then the receiver,
         # as push's.
@@ -6442,7 +6476,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             fresh = fact_new(s, FactBound(), FactTerm(type = ntype(a)))
             if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(fresh, -1, false, size))
             fact_store_route(s, route, fresh, n, true)
-            return fact_new(s, fact_domain(ntype(n)))
+            return fact_fresh(s, ntype(n))
         if id == .panic or id == .unreachable:
             # Never returns: its message is evaluated, then the path ends.
             loop c in kids(n): fact_capture(c, s)
@@ -6566,7 +6600,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             fresh = fact_new(s, FactBound(), FactTerm(type = ntype(a)))
             if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(fresh, -1, false, length))
             fact_store_route(s, route, fresh, n, true)
-            return fact_new(s, fact_domain(ntype(n)))
+            return fact_fresh(s, ntype(n))
         pool = if fact_policy == .RequireStatic or fact_query or fact_probe_on: fact_pool_call(n) else: 0
         if pool != 0: return fact_pool_capture(n, s, values, pool)
         map = if fact_policy == .RequireStatic or fact_query or fact_probe_on: fact_map_call(n) else: 0
@@ -6717,7 +6751,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             keys.push((int(nodes[p].a), fact_capture(int(nodes[p].a), s)))
             fact_capture(int(nodes[p].b), s)
             fact_forget(s, n, .call)
-        result = fact_new(s, fact_domain(ntype(n)))
+        result = fact_fresh(s, ntype(n))
         # (every key written is in it: fact_map_check)
         if is_map_type(representation_type(ntype(n))):
             loop key in keys: fact_assume(s, fact_project(s, result, fact_map_key(s, key.0, key.1), true, T_BOOL), true)
@@ -6766,7 +6800,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
     if k == .field and nodes[n].aux == -3:
         # (a variant's payload field, bound by a match arm)
         fact_capture(int(nodes[n].a), s)
-        return fact_new(s, fact_domain(ntype(n)))
+        return fact_fresh(s, ntype(n))
     # Opaque forms cannot export facts; evaluate each child from top so control
     # alternatives, implicit hooks and raw aliases cannot mint stale evidence.
     fact_forget(s, n, .unsupported, true)

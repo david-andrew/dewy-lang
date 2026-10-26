@@ -1,0 +1,55 @@
+# quick
+# `int` values at and beyond the int64 edges take their own branches, loop
+# exits and conversions; facts must keep those paths live.
+$runtime_checks
+const NAMES:array<string length=4>=["word" "above" "u64" "wide"]
+kind=(n:int):>int64=>{
+    let i=0
+    if n >? 9223372036854775807 { i=1 }
+    if n >? 9223372036854775807 and n <=? 18446744073709551615 { i=2 }
+    if n >? 18446744073709551615 { i=3 }
+    i
+}
+edges=(n:int):>string=>{
+    let s=""
+    if n >=? 9223372036854775807 { s="{s}ge" }
+    if n >=? 9223372036854775807 and n not=? 9223372036854775807 { s="{s}+" }
+    if n =? 9223372036854775807 { s="{s}=" }
+    if n+1 >? 9223372036854775807 { s="{s}o" }
+    if n <? -9223372036854775808 { s="{s}lt" }
+    if n <=? -9223372036854775808 and n not=? -9223372036854775808 { s="{s}-" }
+    s
+}
+narrow=(n:int):>string=>{
+    let w:int64=9223372036854775807
+    if n >? w return "beyond int64"
+    if n <? -9223372036854775808 return "below int64"
+    "{int64(n)}"
+}
+unsigned=(n:int):>string=>{
+    if n <? 0 or n >? 18446744073709551615 return "beyond uint64"
+    "{uint64(n)}"
+}
+up=(start:int):>string=>{
+    let x=start
+    let steps=0
+    loop x <=? 9223372036854775807 { x+=1 steps+=1 }
+    "{steps} {x} {NAMES[kind(x)]}"
+}
+down=(start:int):>string=>{
+    let x=start
+    let steps=0
+    loop x >=? -9223372036854775808 { x-=1 steps+=1 }
+    "{steps} {x}"
+}
+main=()=>{
+    let max:int=9223372036854775807
+    let values=[max-1 max max+1 18446744073709551615 18446744073709551616 2^100 -max-1 -max-2]
+    loop v in values {
+        printl"{v}: {NAMES[kind(v)]} [{edges(v)}] {narrow(v)} {unsigned(v)} {float64(v)} {v//2} {v%1000}"
+    }
+    printl(up(max-2))
+    printl(up(18446744073709551616))
+    printl(down(-max+1))
+    printl(down(-2^70))
+}

@@ -361,6 +361,9 @@ wit_known = (b: FactBound, unsigned: bool = false) -> str:
         if b.lo > FACT_MIN: return "is at least {lo}"
         if b.hi < FACT_MAX: return "is at most {hi}"
         return ""
+    # (a wide MIN/MAX singleton is an `int` beyond int64: only that side is known)
+    if b.wide and b.lo == b.hi and b.lo == FACT_MAX: return "is at least {b.lo}"
+    if b.wide and b.lo == b.hi and b.lo == FACT_MIN: return "is at most {b.lo}"
     if b.lo == b.hi: return "is {b.lo}"
     lo = b.lo > -(1 << 62)
     hi = b.hi < (1 << 62)
@@ -379,6 +382,8 @@ wit_holds = (op: Tok, x: int, y: int) -> bool:
 
 wit_candidates = (b: FactBound) -> int[]:
     out: int[]
+    # (no host value witnesses an `int` beyond int64)
+    if b.wide and b.lo == b.hi and (b.lo == FACT_MAX or b.lo == FACT_MIN): return out
     loop x in [0, 1, -1, b.lo, b.hi, b.lo + 1, b.hi - 1]:
         if x < b.lo or x > b.hi or b.nz and x == 0 or out.contains(x): continue
         out.push(x)
@@ -437,9 +442,9 @@ wit_relation = (s: FactState, cex: FactState, op: Tok, a: WitSide, b: WitSide, r
         if side.text == "" or side.literal: continue
         bound = fact_bound(s, side.value)
         tomb = wit_tomb(s, side)
-        shown = if bound.lo == bound.hi: wit_value(s, side.value, bound.lo) else: ""
+        shown = if bound.lo == bound.hi and not bound.wide: wit_value(s, side.value, bound.lo) else: ""
         unsigned = side.value > 0 and side.value < fact_terms.len() and representation_type(fact_terms[side.value].type) == T_U64
-        known = if shown != "": "is {shown}" else if bound.lo == bound.hi: "" else: wit_known(bound, unsigned)
+        known = if shown != "": "is {shown}" else if bound.lo == bound.hi and not bound.wide: "" else: wit_known(bound, unsigned)
         # (a declaration makes the binding; it does not change an earlier value)
         if tomb.0 != 0 and nodes[tomb.0].kind == .vardecl and tomb.1 == 0: tomb = (0, 0)
         # (the call that replaced the value: the repair checks after it)
