@@ -1,0 +1,37 @@
+# Frozen bootstrap twin of ir_operands.dewy.
+use 'ir_types.dewy'
+
+# Fixed operand layouts for final-IR consumers. Low bits count contiguous
+# a/b/c uses; flags describe definitions, exceptional operands, and opcode
+# features consumed by the backend. One lookup replaces repeated classification.
+# Build once, O(opcodes). The opcode names, rather than ordinal ranges, keep
+# the exceptions explicit when the IR grows.
+const IR_DEF = 8
+const IR_ARGS = 16
+const IR_INDEX = 32
+const IR_STORE = 64
+const IR_INDIRECT = 128
+const IR_RETURN = 256
+const IR_CALL = 512
+const IR_NARROW32 = 1024
+const IR_OVERFLOW = 2048
+ir_operand_layouts = () -> int[]:
+    modes = fill(IR_DEF | 2, int(Op.findb) + 1)
+    loop op in [Op.nop, Op.block, Op.loop, Op.end, Op.else_, Op.br, Op.trap, Op.zeroslots, Op.vzu]: modes[int(op)] = 0
+    loop op in [Op.iconst, Op.fconst, Op.slot, Op.gaddr, Op.daddr, Op.faddr]: modes[int(op)] = IR_DEF
+    loop op in [Op.mov, Op.neg, Op.not_, Op.fneg, Op.fsqrt, Op.fabs, Op.ffloor, Op.fceil, Op.ftrunc, Op.sext8, Op.sext16, Op.sext32, Op.zext8, Op.zext16, Op.zext32, Op.i2f, Op.u2f, Op.f2i, Op.f2f, Op.bits2f, Op.f2bits, Op.vsplat]: modes[int(op)] = IR_DEF | 1
+    loop op in [Op.if_, Op.brif, Op.brtable, Op.assume, Op.zero]: modes[int(op)] = 1
+    loop op in [Op.memcpy, Op.memset, Op.vop]: modes[int(op)] = 3
+    loop op in [Op.select, Op.memeq, Op.findbyte, Op.scanbytes, Op.findb]: modes[int(op)] = IR_DEF | 3
+    loop op in [Op.intr, Op.call, Op.syscall]: modes[int(op)] = IR_DEF | IR_ARGS
+    loop op in [Op.calli, Op.callc]: modes[int(op)] = IR_DEF | IR_ARGS | IR_INDIRECT
+    modes[int(Op.ret)] = IR_RETURN | 1
+    modes[int(Op.copy)] = 2
+    modes[int(Op.load)] = IR_DEF | IR_INDEX | 1
+    modes[int(Op.store)] = IR_STORE | IR_INDEX | 2
+    modes[int(Op.vst)] = IR_STORE | 2
+    loop op in [Op.intr, Op.call, Op.calli, Op.callc, Op.syscall, Op.memcpy, Op.memset, Op.scanbytes, Op.findb, Op.copy, Op.zero]: modes[int(op)] |= IR_CALL
+    modes[int(Op.zext32)] |= IR_NARROW32
+    loop op in [Op.overflow_add, Op.overflow_sub, Op.overflow_mul]: modes[int(op)] |= IR_OVERFLOW
+    modes
+

@@ -1,0 +1,61 @@
+$runtime_checks
+# Final-IR layout construction; frozen bootstrap twin: ir_operands.jo.
+# O(opcodes) once per process. Consumers retain direct indexed reads.
+from p"ir_types.dewy" import Op
+
+# Low bits count contiguous a/b/c uses; flags describe definitions, exceptional
+# operands and backend features. zeroslots definitions remain in IrFn.args.
+
+const IR_DEF = 8
+const IR_ARGS = 16
+const IR_INDEX = 32
+const IR_STORE = 64
+const IR_INDIRECT = 128
+const IR_RETURN = 256
+const IR_CALL = 512
+const IR_NARROW32 = 1024
+const IR_OVERFLOW = 2048
+# Literal unions expose text, not integer ordinals, to Dewy. Keep this ABI-order
+# list aligned with Op; exhaustive twin/walker tests check every table slot.
+ir_operand_layouts=():>array<int64>=>{
+    let modes:array<int64>=[]
+    loop op in [
+        Op.nop Op.iconst Op.fconst Op.mov Op.add Op.sub Op.mul Op.divs
+        Op.divu Op.rems Op.remu Op.and_ Op.or_ Op.xor Op.shl Op.shrs
+        Op.shru Op.neg Op.not_ Op.eq Op.ne Op.lts Op.les Op.gts
+        Op.ges Op.ltu Op.leu Op.gtu Op.geu Op.fadd Op.fsub Op.fmul
+        Op.fdiv Op.fneg Op.fsqrt Op.fmin Op.fmax Op.ffloor Op.fceil Op.fabs
+        Op.ftrunc Op.feq Op.fne Op.flt Op.fle Op.fgt Op.fge Op.sext8
+        Op.sext16 Op.sext32 Op.zext8 Op.zext16 Op.zext32 Op.i2f Op.u2f Op.f2i
+        Op.f2f Op.bits2f Op.f2bits Op.load Op.store Op.slot Op.gaddr Op.daddr
+        Op.faddr Op.copy Op.zero Op.memcpy Op.memset Op.zeroslots Op.vop Op.call
+        Op.calli Op.callc Op.syscall Op.intr Op.block Op.loop Op.if_ Op.else_
+        Op.end Op.br Op.brif Op.ret Op.trap Op.select Op.assume Op.brtable
+        Op.vld Op.vst Op.vbin Op.vsplat Op.vzu Op.mulhs Op.mulhu Op.memeq
+        Op.checked_add Op.checked_sub Op.checked_mul Op.overflow_add Op.overflow_sub Op.overflow_mul Op.rot32 Op.streq
+        Op.findbyte Op.scanbytes Op.findb
+    ] {
+        let mode:int64=IR_DEF or 2
+        match op {
+            <'nop'|'block'|'loop'|'end'|'else_'|'br'|'trap'|'zeroslots'|'vzu'> => {mode = 0}
+            <'iconst'|'fconst'|'slot'|'gaddr'|'daddr'|'faddr'> => {mode = IR_DEF}
+            <'mov'|'neg'|'not_'|'fneg'|'fsqrt'|'fabs'|'ffloor'|'fceil'|'ftrunc'|'sext8'|'sext16'|'sext32'|'zext8'|'zext16'|'zext32'|'i2f'|'u2f'|'f2i'|'f2f'|'bits2f'|'f2bits'|'vsplat'> => {mode = IR_DEF or 1}
+            <'if_'|'brif'|'brtable'|'assume'|'zero'> => {mode = 1}
+            <'memcpy'|'memset'|'vop'> => {mode = 3}
+            <'select'|'memeq'|'findbyte'|'scanbytes'|'findb'> => {mode = IR_DEF or 3}
+            <'intr'|'call'|'syscall'> => {mode = IR_DEF or IR_ARGS}
+            <'calli'|'callc'> => {mode = IR_DEF or IR_ARGS or IR_INDIRECT}
+            <'ret'> => {mode = IR_RETURN or 1}
+            <'copy'> => {mode = 2}
+            <'load'> => {mode = IR_DEF or IR_INDEX or 1}
+            <'store'> => {mode = IR_STORE or IR_INDEX or 2}
+            <'vst'> => {mode = IR_STORE or 2}
+            _ => {}
+        }
+        if op =? 'intr' or op =? 'call' or op =? 'calli' or op =? 'callc' or op =? 'syscall' or op =? 'memcpy' or op =? 'memset' or op =? 'scanbytes' or op =? 'findb' or op =? 'copy' or op =? 'zero' {mode = mode or IR_CALL}
+        if op =? 'zext32' {mode = mode or IR_NARROW32}
+        if op =? 'overflow_add' or op =? 'overflow_sub' or op =? 'overflow_mul' {mode = mode or IR_OVERFLOW}
+        modes.push(mode)
+    }
+    return modes
+}

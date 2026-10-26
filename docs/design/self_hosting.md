@@ -91,6 +91,7 @@ are grouped. See the ownership sections for the live service contracts.
 | `evaluator_state` | `evaluator_state.jo` | Dewy immutable value, frame, place and scalar-result layouts | Stable IDs/ABI; Jo writers share storage; peak flagship phase +0.0001%. |
 | `constant_eval`, `constant_host`, `source_types` | Same stems + `.jo` | Dewy recursive constant-expression evaluation and borrowed source dialects | O(executed syntax + demanded checking/binding); local scalar operations; peak flagship phase +0.103% including layouts. |
 | `ir_types` | `ir_types.jo` | Dewy opcode and instruction/function/use-plan layouts | 107 ordinals, 30 fields; direct Jo consumers, no adapters; flagship phase change −0.0037% to +0.0030%. |
+| `ir_operands` | `ir_operands.jo` | Dewy final-IR layout construction and flags | O(opcodes) once per process; Jo consumes the table directly; flagship phase change −0.0001% to +0.0005%. |
 
 ### Boundary lessons that constrain the next cutover
 
@@ -277,11 +278,12 @@ First three cutovers in this sequence (cost estimates unless marked shipped):
    a frozen twin. Keep globals, constants, builders and all hot consumers in
    place. No algorithm or new traversal; measured phase cost −0.0037% to +0.0030%,
    with ordinal/layout/default and mutation differential tests.
-2. **Final-IR operand description:** move the opcode layout-table construction
-   and its constants as one leaf, keeping direct indexed consumption in Jo.
-   O(opcodes) once per compiler process, no per-instruction callback; expected
-   <0.1% per phase. Exhaustively compare every opcode and exceptional operand
-   form against the existing operand walker before extending consumers.
+2. **Final-IR operand description (shipped):** `ir_operands.dewy` owns layout-table
+   construction and flags; Jo keeps storage and direct indexed consumption.
+   O(opcodes) once per process, no per-instruction callback. An explicit ABI-order
+   opcode list avoids numeric conversion of Dewy string unions. Differential
+   tests compare all 107 slots and exceptional operand forms with the frozen
+   constructor and independent optimizer walker, in default and release modes.
 3. **IR cleanup pass:** move the mutually dependent `opt.jo` rewrite/cleanup
    group with its indexed scratch tables and borrowed `IrFn`; expose coarse
    type/diagnostic requests only where demanded. Preserve existing pass order
