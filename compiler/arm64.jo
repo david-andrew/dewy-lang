@@ -1,7 +1,8 @@
+use 'backend_analysis.dewy'
 use 'ir_types.dewy'
 # arm64 (AArch64) code generator: Linux on 64-bit ARM (`--target aarch64-linux`).
 #
-# The same IR as x64.jo and the same analysis (analyze: lifetimes, loops, calls); registers are
+# The same IR as x64.jo and the same analysis (backend_analyze: lifetimes, loops, calls); registers are
 # given by linear scan (a_allocate), a value without one lives in the frame and is loaded into a
 # scratch register where used. Calls follow AAPCS64 (x0-x7 and v0-v7, the rest on the stack), for
 # Sloppy functions and C functions alike.
@@ -195,7 +196,7 @@ a_fmov_to = (ty: int, rd: int, fr: int):
 # a call get the callee-saved registers (x19-x28, d8-d15; those used are saved in the prologue)
 # or stay in the frame; the others take x8, x13-x15 and v19-v31, or x0-x7 and v0-v7 when no
 # call is anywhere in their lifetime (calls put their arguments there) and they are not
-# parameters (which arrive there). Linear scan over the intervals analyze makes (as x64.jo's
+# parameters (which arrive there). Linear scan over the intervals backend_analyze makes (as x64.jo's
 # allocate, which also decides which value gives up its register when there are too few).
 const A_V = 32
 a_saved: int[]              # callee-saved registers used here
@@ -1276,7 +1277,8 @@ arm64_function = ():
     if code.len() % 8 != 0: w32(0)
     fn_addr[ir.fn_index] = code.len()
     fn_start = code.len()
-    analyze()
+    if dbg_on: backend_debug_bindings()
+    backend_analyze(ir, ir_operand_layout, dbg_on, target_wasm, ra_stat)
     a_allocate()
     a_layout()
     actl = []

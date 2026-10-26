@@ -8,7 +8,7 @@ from tests.support import ROOT, compiler
 
 def test_backend_operand_layouts_match_optimizer(compiler, tmp_path):
     source = tmp_path / 'operands.jo'
-    source.write_text(f"use '{ROOT / 'compiler/x64.jo'}'\nuse '{ROOT / 'compiler/ir_types.dewy'}'\nuse '{ROOT / 'compiler/ir.jo'}'\n" + '''
+    source.write_text(f"use '{ROOT / 'compiler/backend_analysis.dewy'}'\nuse '{ROOT / 'compiler/x64.jo'}'\nuse '{ROOT / 'compiler/ir_types.dewy'}'\nuse '{ROOT / 'compiler/ir.jo'}'\n" + '''
 loop tag in [0..int(Op.findb) + 1):
     loop indexed in [0..2):
         op = Op(tag)
@@ -31,7 +31,7 @@ loop tag in [0..int(Op.findb) + 1):
                 loop i in [0..int(ins.b)):
                     item = int(ir.args[int(ins.a) + i])
                     if item & 1 != 0: defs[item >> 1] += 2
-        analyze()
+        backend_analyze(ir, ir_operand_layout, false, false, false)
         loop v in [0..256):
             assert(v_live[v].nuse == uses[v], "use layout")
             assert(v_live[v].ndef == defs[v], "definition layout")

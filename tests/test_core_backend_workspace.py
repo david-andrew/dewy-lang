@@ -8,13 +8,13 @@ from tests.support import ROOT, compiler
 
 def test_backend_workspace_reuses_storage_without_locations(compiler, tmp_path):
     source = tmp_path / 'workspace.jo'
-    source.write_text(f"use '{ROOT / 'compiler/x64.jo'}'\nuse '{ROOT / 'compiler/ir.jo'}'\n" + '''
+    source.write_text(f"use '{ROOT / 'compiler/backend_analysis.dewy'}'\nuse '{ROOT / 'compiler/x64.jo'}'\nuse '{ROOT / 'compiler/ir.jo'}'\n" + '''
 ir_begin("large", 0)
 loop i in [0..256):
     v = vreg(VI)
     emit(.gaddr, VI, v, 0, 0, 0, 64 + i)
     e_ret(v)
-analyze(true)
+backend_analyze(ir, ir_operand_layout, false, false, false, true)
 capacity = v_live_storage.len()
 assert(vgkind[0] == 1 and vgoff[0] == 64, "global location")
 assert(v_live[0].nuse == 1, "uses")
@@ -24,7 +24,7 @@ ir_begin("small", 1)
 v = vreg(VI)
 emit(.slot, VI, v, new_slot(8, 8), 0, 0, 0)
 e_ret(v)
-analyze(true)
+backend_analyze(ir, ir_operand_layout, false, false, false, true)
 assert(v_live_storage.len() == capacity, "retained capacity")
 assert(v_live[0].ndef == 1 and v_live[0].nuse == 1, "fresh uses")
 assert(vslot[0] == 0 and vsoff[0] == 0, "fresh slot")
@@ -33,10 +33,10 @@ ir_begin("data", 2)
 v = vreg(VI)
 emit(.daddr, VI, v, 0, 0, 0, 96)
 e_ret(v)
-analyze(true)
+backend_analyze(ir, ir_operand_layout, false, false, false, true)
 assert(vgkind[0] == 0 and vgoff[0] == 96, "data after global")
 ir_begin("empty", 3)
-analyze(true)
+backend_analyze(ir, ir_operand_layout, false, false, false, true)
 allocate()
 print("ok")
 ''')

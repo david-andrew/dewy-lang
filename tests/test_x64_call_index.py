@@ -7,12 +7,12 @@ from tests.support import ROOT, compiler
 def test_release_call_boundary_index(compiler, tmp_path):
     source = tmp_path / 'call_index.jo'
     source.write_text(f"use '{ROOT / 'compiler/x64.jo'}'\nuse '{ROOT / 'compiler/ir.jo'}'\n"
-                      f"use '{ROOT / 'compiler/ir_types.dewy'}'\n" + '''
+                      f"use '{ROOT / 'compiler/ir_types.dewy'}'\nuse '{ROOT / 'compiler/backend_analysis.dewy'}'\nuse '{ROOT / 'compiler/ir_operands.dewy'}'\n" + '''
 loop length in [4, 65, 7, 129, 3]:
     loop stride in [1, 2, 5, 200]:
         ir_begin("calls", 0)
         ir.code = fill(Ins(.nop, 0, -1, 0, 0, 0, 0), length)
-        analyze(true)
+        backend_analyze(ir, ir_operand_layout, false, false, false, true)
         call_pos.clear()
         call_w.clear()
         loop p in [0..length):
@@ -36,7 +36,7 @@ loop length in [4, 65, 7, 129, 3]:
                 if count == 1 and cold: weight = -1
                 assert(ra_cross_w(s, e) == weight, "call boundary")
     ir_begin("empty", 0)
-    analyze(true)
+    backend_analyze(ir, ir_operand_layout, false, false, false, true)
     allocate_release()
     assert(ra_cross_w(-1, 0) == 0, "empty after reuse")
 print("ok")

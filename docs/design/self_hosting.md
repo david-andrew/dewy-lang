@@ -92,6 +92,7 @@ are grouped. See the ownership sections for the live service contracts.
 | `constant_eval`, `constant_host`, `source_types` | Same stems + `.jo` | Dewy recursive constant-expression evaluation and borrowed source dialects | O(executed syntax + demanded checking/binding); local scalar operations; peak flagship phase +0.103% including layouts. |
 | `ir_types` | `ir_types.jo` | Dewy opcode and instruction/function/use-plan layouts | 107 ordinals, 30 fields; direct Jo consumers, no adapters; flagship phase change −0.0037% to +0.0030%. |
 | `ir_operands` | `ir_operands.jo` | Dewy final-IR layout construction and flags | O(opcodes) once per process; Jo consumes the table directly; flagship phase change −0.0001% to +0.0005%. |
+| `backend_analysis` | `backend_analysis.jo` | Dewy final-IR use/lifetime/call/loop analysis | Shared native workspace; direct allocator/emitter views, no host callbacks. |
 | `opt_returns` | `opt_returns.jo` | Dewy recursive return sinking | Borrows code/types at the release-pass boundary; guarded end-index construction, no host callbacks. |
 
 ### Boundary lessons that constrain the next cutover
@@ -354,6 +355,36 @@ move checks, canonical integer constants, branch positions and shared snapshots.
 The scan and end table take O(N) time/space; following adjacent ends retains the
 existing O(B * D) worst case for B branches and nesting depth D. The frozen twin
 keeps the original array implementation as a differential reference.
+
+## Shared backend analysis boundary
+
+`backend_analysis.dewy` owns the complete final-IR analysis used by x64 and
+arm64, including operand uses, definitions, rematerializable locations, weighted
+calls, loop intervals, debug lifetime extension and the demanded allocation-start
+index. Its independent globals retain the existing sequential function lifetime;
+allocators, frame layout and emitters consume the published pointers directly.
+Native function emitters lend the `IrFn` and opcode layouts directly, with
+target/debug/stat policies. Only debug mode demands Jo's selection of
+checker-owned bindings into reusable virtual-register IDs; Dewy extends their
+lifetimes after the main scan. No checker local-array header or value crosses
+this boundary: exposing or sharing it disables existing checker optimizations.
+No scalar operand or metadata request calls back into Jo. Register allocation
+and emission remain with their current owners.
+
+IR storage stays fixed throughout the call. Scratch arrays grow only at a new
+high-water mark and refresh their views before use; no view escapes into the IR
+or emitted fragment. Only fields valid for a location kind may be read, and
+per-function use records, save flags and active list lengths are reset. The
+allocation index is optional; debug locals are traversed only in debug mode.
+Op tags and contiguous a/b/c operands use the shared `Ins` ABI, covered by the
+exhaustive operand differential. Call-stub kinds preserve the IR's 3..5 encoding.
+
+The existing algorithm costs O(N + U + V log L + visited loop summaries), for N
+instructions, U operands, V virtual registers and L loops; nested loop extension
+retains its existing worst-case O(V * L). Space is O(V + N + L), with the O(N)
+allocation-start index demanded only by callers that allocate through it. The
+frozen twin preserves the original walks and is required by both bootstrap
+source generations, under the same retirement rule as the optimizer twins.
 
 ## Parser ownership boundary
 
