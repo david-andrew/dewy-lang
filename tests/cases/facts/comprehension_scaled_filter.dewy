@@ -1,0 +1,7 @@
+# A filter can skip an element, so the count is only an upper bound.
+pairs = (xs:array<int>) => {
+    let ys = [loop x in xs if x >? 0 {x -x}]
+    $assert ys.length =? xs.length*2
+    ys
+}
+main = () => printl(pairs([1 -2]))

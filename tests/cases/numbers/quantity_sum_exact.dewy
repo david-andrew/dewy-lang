@@ -1,0 +1,11 @@
+# An exact quantity starts at zero in its unit: summing masses adds them all.
+from units import kg, g, m
+Part:type = [mass:rational * Mass length:rational * Length = 0m]
+main = () => {
+    let xs:array<rational * Mass> = [6kg 105kg 12g]
+    printl(sum(xs))
+    let parts = [Part[2kg 3m] Part[500g]]
+    printl"{sum([loop p in parts p.mass])} {sum([loop p in parts p.length])}"
+    let floats:array<float64 * Mass> = [1.5kg 2.5kg]
+    printl(sum(floats))
+}

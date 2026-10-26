@@ -1,0 +1,99 @@
+# Geometry: shapes as a family of minted record types, each with its area,
+# perimeter and bounding box; a point-in-shape test; overlap of bounding
+# boxes; and a scene summary that sorts shapes and finds overlapping pairs.
+
+Point:type = [x:float64 y:float64]
+Box:type = [lo:Point hi:Point
+    width = () => hi.x - lo.x
+    height = () => hi.y - lo.y
+]
+
+Shape:type = type of any & [name:string]
+Circle:type = type of Shape & [center:Point radius:float64]
+Rect:type = type of Shape & [corner:Point width:float64 height:float64]
+Triangle:type = type of Shape & [a:Point b:Point c:Point]
+
+
+distance = (p:Point q:Point):>float64 => hypot(q.x - p.x q.y - p.y)
+
+area = (s:Circle | Rect | Triangle):>float64 => match s {
+    c:Circle => PI * c.radius^2
+    r:Rect => r.width * r.height
+    t:Triangle => abs((t.b.x - t.a.x)*(t.c.y - t.a.y) - (t.c.x - t.a.x)*(t.b.y - t.a.y)) / 2
+}
+
+perimeter = (s:Circle | Rect | Triangle):>float64 => match s {
+    c:Circle => 2 * PI * c.radius
+    r:Rect => 2 * (r.width + r.height)
+    t:Triangle => distance(t.a t.b) + distance(t.b t.c) + distance(t.c t.a)
+}
+
+bounds = (s:Circle | Rect | Triangle):>Box => match s {
+    c:Circle => Box[[c.center.x - c.radius c.center.y - c.radius] [c.center.x + c.radius c.center.y + c.radius]]
+    r:Rect => Box[r.corner [r.corner.x + r.width r.corner.y + r.height]]
+    t:Triangle => Box[[min(t.a.x min(t.b.x t.c.x)) min(t.a.y min(t.b.y t.c.y))]
+                      [max(t.a.x max(t.b.x t.c.x)) max(t.a.y max(t.b.y t.c.y))]]
+}
+
+# which side of the line a->b the point p is on (positive: left)
+side = (a:Point b:Point p:Point):>float64 => (b.x - a.x)*(p.y - a.y) - (b.y - a.y)*(p.x - a.x)
+
+contains = (s:Circle | Rect | Triangle p:Point):>bool => match s {
+    c:Circle => distance(c.center p) <=? c.radius
+    r:Rect => r.corner.x <=? p.x <=? r.corner.x + r.width and r.corner.y <=? p.y <=? r.corner.y + r.height
+    t:Triangle => {
+        let d1 = side(t.a t.b p)
+        let d2 = side(t.b t.c p)
+        let d3 = side(t.c t.a p)
+        not ((d1 <? 0 or d2 <? 0 or d3 <? 0) and (d1 >? 0 or d2 >? 0 or d3 >? 0))
+    }
+}
+
+# the overlap of two boxes, or none when they do not touch
+intersect = (a:Box b:Box):>Box? => {
+    let lo = Point[max(a.lo.x b.lo.x) max(a.lo.y b.lo.y)]
+    let hi = Point[min(a.hi.x b.hi.x) min(a.hi.y b.hi.y)]
+    if lo.x >? hi.x or lo.y >? hi.y return none
+    Box[lo hi]
+}
+
+fmt = (p:Point):>string => "({p.x:.1f}, {p.y:.1f})"
+
+main = () => {
+    let shapes:array<Circle | Rect | Triangle> = [
+        Circle[name="pond" center=[2.0 2.0] radius=1.5]
+        Rect[name="shed" corner=[3.0 0.5] width=2.0 height=1.0]
+        Triangle[name="roof" a=[3.0 1.5] b=[5.0 1.5] c=[4.0 3.0]]
+        Rect[name="field" corner=[-4.0 -4.0] width=3.0 height=2.0]
+        Circle[name="well" center=[-3.0 3.0] radius=0.5]
+    ]
+
+    printl"{"shape":<6} {"area":>7} {"perimeter":>9}  bounds"
+    loop s in shapes {
+        let b = bounds(s)
+        printl"{s.name:<6} {area(s):>7.2f} {perimeter(s):>9.2f}  {fmt(b.lo)}..{fmt(b.hi)}"
+    }
+
+    let total = sum([loop s in shapes area(s)])
+    printl"total area {total:.2f}"
+    let biggest = shapes.max_by(@area)
+    printl"largest: {biggest.name}"
+    let ranked = shapes.sorted(key=@perimeter reverse=true)
+    printl"by perimeter: {[loop s in ranked s.name].join(", ")}"
+
+    let probes:array<Point> = [[2.0 2.0] [4.0 1.0] [4.0 2.0] [0.0 0.0] [-3.2 2.9]]
+    loop p in probes {
+        let inside = [loop s in shapes if contains(s p) s.name]
+        printl"{fmt(p)} is in {if inside.is_empty "nothing" else inside.join(" and ")}"
+    }
+
+    printl"overlapping bounds:"
+    loop i in [0..shapes.length) {
+        loop j in [i + 1..shapes.length) {
+            let o = intersect(bounds(shapes[i]) bounds(shapes[j]))
+            if o is? Box {
+                printl"  {shapes[i].name} & {shapes[j].name}: {o.width:.2f} x {o.height:.2f}"
+            }
+        }
+    }
+}

@@ -1,0 +1,15 @@
+# A comprehension that collects k values for every element has k times as many.
+design = (xs:array<float64>):>array<float64> => {
+    let flat:array<float64> = [loop x in xs {1.0 x x*x}]
+    let m = reshape(flat xs.length 3)
+    transpose(m).data
+}
+pairs = (xs:array<int>) => {
+    let ys = [loop x in xs {x -x}]
+    $assert ys.length =? xs.length*2
+    ys
+}
+main = () => {
+    printl(design([2.0 3.0]))
+    printl(pairs([1 2]))
+}

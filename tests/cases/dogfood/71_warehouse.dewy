@@ -1,0 +1,87 @@
+# A warehouse inventory with typed units: stock is counted, weighed or
+# measured, each item keeps its quantity in its own dimension, shipments are
+# checked against stock and truck capacity, and mistakes come back as errors.
+
+from units import kg, g, m, cm
+
+OutOfStock:type = type of error & [item:string wanted:int have:int]
+Overweight:type = type of error & [message:string]
+UnknownItem:type = type of error & [item:string]
+
+Item:type = [
+    sku:string
+    name:string
+    count:int = 0
+    unit_mass:rational * Mass
+    unit_length:rational * Length = 0m
+
+    mass = () => count * unit_mass
+    take = (n:int):>void | OutOfStock => {
+        if n >? count return OutOfStock[name n count]
+        count -= n
+    }
+]
+
+Inventory:type = [
+    items:dict<string Item> = []
+
+    stock = (item:Item):>void => {
+        if item.sku in? items { items[item.sku].count += item.count }
+        else { items[item.sku] = item }
+    }
+    total_mass = () => sum([loop [_ it] in items it.mass])
+]
+
+Line:type = [sku:string count:int]
+
+# pack an order onto a truck: every line must be in stock and the load light enough
+ship = (@inv:Inventory order:array<Line> capacity:rational * Mass):>rational * Mass | OutOfStock | UnknownItem | Overweight => {
+    let load:rational * Mass = 0kg
+    loop line in order {
+        let found = inv.items.get(line.sku)
+        if found is? none return UnknownItem[line.sku]
+        if line.count >? found.count return OutOfStock[found.name line.count found.count]
+        load += line.count * found.unit_mass
+    }
+    if load >? capacity return Overweight["{load} is over the truck's {capacity}"]
+    loop line in order {
+        if line.sku in? inv.items { inv.items[line.sku].take(line.count) or_throw }
+    }
+    load
+}
+
+report = (inv:Inventory) => {
+    loop [sku it] in inv.items {
+        let longest = if it.unit_length >? 0m "  {it.count * it.unit_length as m} of it laid end to end" else ""
+        printl"{sku} {it.name:<12} x{it.count:<4} {it.mass}{longest}"
+    }
+    printl"total mass {inv.total_mass}"
+}
+
+main = () => {
+    let inv = Inventory[]
+    inv.stock(Item["B12" "bolt" 400 12g 5cm])
+    inv.stock(Item["P20" "pipe" 30 3.5kg 2m])
+    inv.stock(Item["C01" "cement bag" 50 25kg])
+    inv.stock(Item["B12" "bolt" 100 12g 5cm])
+    report(inv)
+
+    let orders = [
+        [Line["B12" 200] Line["P20" 10]]
+        [Line["C01" 40] Line["P20" 5]]
+        [Line["P20" 50]]
+        [Line["X99" 1]]
+        [Line["C01" 20] Line["B12" 300]]
+    ]
+    loop i in 1.. and order in orders {
+        match ship(@inv order 1000kg) {
+            load:rational * Mass => printl"order {i}: shipped {load}"
+            e:OutOfStock => printl"order {i}: only {e.have} {e.item} left, wanted {e.wanted}"
+            e:UnknownItem => printl"order {i}: no such item {e.item}"
+            e:Overweight => printl"order {i}: too heavy: {e.message}"
+        }
+    }
+    report(inv)
+    let pipe = inv.items.get("P20")
+    if pipe isnt? none printl"one pipe weighs {pipe.unit_mass} and is {pipe.unit_length as cm} long"
+}

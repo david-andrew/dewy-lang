@@ -794,7 +794,8 @@ effect_plain = (t0: int, depth: int = 0) -> bool:
 effect_plain_type = (t: int, depth: int = 0) -> bool:
     # (an Arena is a handle: copying, reading or dropping one allocates nothing, arena.jo)
     if arena_fns.len() > 0 and arena_handle(t): return true
-    # (a union of plain members, `int64 | Oops`, is plain: a tag and a payload)
+    # (a union of plain members, `int64 | Oops`, is plain: a tag and a payload;
+    # `void | Oops`'s void member has nothing)
     if depth <= 16 and tkind(t) == .enum_:
         layout(t)
         si = int(types[t].st)
@@ -803,6 +804,7 @@ effect_plain_type = (t: int, depth: int = 0) -> bool:
             vi = int(structs[si].variants) + v
             loop j in [0..int(variants[vi].nfields)):
                 fi = int(variants[vi].fields) + j
+                if representation_type(int(fields[fi].type)) == T_VOID: continue
                 if fields[fi].boxed or not effect_plain(int(fields[fi].type), depth + 1): return false
         return true
     # (an optional plain value is inline: a flag beside the payload)
@@ -864,6 +866,7 @@ effect_share_type = (t: int, depth: int) -> bool:
             vi = int(structs[si].variants) + v
             loop j in [0..int(variants[vi].nfields)):
                 fi = int(variants[vi].fields) + j
+                if representation_type(int(fields[fi].type)) == T_VOID: continue
                 if fields[fi].boxed or not effect_share(int(fields[fi].type), depth + 1): return false
         return true
     loop i in [0..int(structs[si].nfields)):
@@ -1780,10 +1783,13 @@ effect_signature_opaque = (f: int) -> bool:
     # (`int`s and arrays of words or `int`s are shares effect_visit accepts;
     # text and records of them stay opaque rather than walk the library's
     # formatting and text trees)
-    if not effect_signature_value(int(fns[f].ret)) and int(fns[f].ret) != T_VOID: return true
+    # (a program's own function with text in its signature, a method returning
+    # `void | Error[message=...]`, is visited: its summary is the program's)
+    own = not fn_in_lib(f)
+    if not effect_signature_value(int(fns[f].ret)) and int(fns[f].ret) != T_VOID and not (own and effect_value(int(fns[f].ret))): return true
     loop l in fns[f].params:
         t = representation_type(int(locals[l].type))
-        if int(locals[l].flags) & LF_MUTPARAM == 0 and not effect_signature_value(t) and not is_fn_type(t): return true
+        if int(locals[l].flags) & LF_MUTPARAM == 0 and not effect_signature_value(t) and not is_fn_type(t) and not (own and effect_value(t)): return true
     false
 
 effect_signature_value = (t0: int) -> bool:

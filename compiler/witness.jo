@@ -121,6 +121,10 @@ wit_text = (e0: int, depth: int = 0) -> str:
     if k == .int_lit and not has_flag(e, NF_U64): return "{nodes[e].ival}"
     if k == .str_lit: return wit_quoted(e)
     if k == .field and nodes[e].aux >= 0:
+        # (inside a method a member is written bare: `accounts`, not its object's field)
+        a = int(nodes[e].a)
+        loop nodes[a].kind == .addr or nodes[a].kind == .conv: a = int(nodes[a].a)
+        if nodes[a].kind == .ident and nodes[a].name != 0 and starts_with(name_of(int(nodes[a].name)), "$self"): return name_of(int(nodes[e].name))
         base = wit_text(int(nodes[e].a), depth + 1)
         if base != "": return "{base}.{name_of(int(nodes[e].name))}"
     if k == .intrinsic and nodes[e].aux == i32(int(IN.len)) and nkids(e) > 0:

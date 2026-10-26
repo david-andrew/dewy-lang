@@ -1,0 +1,145 @@
+# A small statistics toolkit: summary statistics for float samples, an exact
+# version of the same summaries over rationals, a least-squares line fit with
+# its error cases as values, and a quadratic fit through the normal equations
+# solved as a matrix.
+
+TooFewPoints:type = type of error & [needed:int got:int]
+NoSpread:type = type of error & [message:string]
+
+Summary:type = [count:int mean:float64 variance:float64 low:float64 high:float64]
+
+Sample:type = [
+    name:string
+    values:array<float64>
+
+    count = () => values.length
+    mean = ():>float64 | TooFewPoints => {
+        if values.length =? 0 return TooFewPoints[1 0]
+        sum(values) / values.length
+    }
+    # sample variance (n-1 in the denominator), as Python's statistics.variance
+    variance = ():>float64 | TooFewPoints => {
+        if values.length <? 2 return TooFewPoints[2 values.length]
+        let m = mean or_throw
+        let total = 0.0
+        loop v in values { total += (v - m)^2 }
+        total / (values.length - 1)
+    }
+    median = ():>float64 | TooFewPoints => {
+        if values.length =? 0 return TooFewPoints[1 0]
+        let sorted = values.sorted()
+        let mid = sorted.length // 2
+        if sorted.length % 2 =? 1 return sorted[mid]
+        # (an even, nonempty length has mid >= 1; the facts do not see parity)
+        ((sorted.get(mid - 1) ?? sorted[mid]) + sorted[mid]) / 2
+    }
+    summary = ():>Summary | TooFewPoints => {
+        if values.length <? 2 return TooFewPoints[2 values.length]
+        let m = mean or_throw
+        let v = variance or_throw
+        Summary[values.length m v min(values) max(values)]
+    }
+]
+
+Line:type = [slope:float64 intercept:float64 r2:float64
+    at = (x:float64):>float64 => slope*x + intercept
+]
+
+fit_line = (xs:array<float64> ys:array<float64>):>Line | TooFewPoints | NoSpread => {
+    if xs.length <? 2 or ys.length <? 2 return TooFewPoints[2 min(xs.length ys.length)]
+    if xs.length not=? ys.length return NoSpread["{xs.length} xs but {ys.length} ys"]
+    let mx = mean(xs)
+    let my = mean(ys)
+    let sxx:float64 = 0.0
+    let sxy:float64 = 0.0
+    let syy:float64 = 0.0
+    loop x in xs and y in ys {
+        sxx += (x - mx)^2
+        sxy += (x - mx) * (y - my)
+        syy += (y - my)^2
+    }
+    if sxx =? 0.0 return NoSpread["every x is {mx}"]
+    let slope = sxy / sxx
+    let r2 = if syy =? 0.0 1.0 else sxy^2 / (sxx * syy)
+    Line[slope my - slope*mx r2]
+}
+
+# least squares for y = a + b x + c x^2: solve (XᵀX) β = Xᵀy
+fit_quadratic = (xs:array<float64> ys:array<float64>):>array<float64> | TooFewPoints => {
+    # `solve` panics on a singular system and has no form that returns the
+    # failure as a value, so this function opts in to that check
+    $runtime_checks
+    if xs.length <? 3 return TooFewPoints[3 xs.length]
+    let design:array<float64> = [loop x in xs {1.0 x x^2}]
+    let x = reshape(design xs.length 3)
+    let xt = transpose(x)
+    solve(xt*x xt*ys)
+}
+
+# exact statistics: the same formulas over fractions give exact answers
+exact_mean = (values:array<rational>):>rational | TooFewPoints => {
+    if values.length =? 0 return TooFewPoints[1 0]
+    let total:rational = 0
+    loop v in values { total += v }
+    total / values.length
+}
+
+exact_variance = (values:array<rational>):>rational | TooFewPoints => {
+    if values.length <? 2 return TooFewPoints[2 values.length]
+    let m = exact_mean(values) or_throw
+    let total:rational = 0
+    loop v in values { total += (v - m)^2 }
+    total / (values.length - 1)
+}
+
+show = (label:string value:float64 | TooFewPoints | NoSpread) => match value {
+    x:float64 => printl"{label}: {x:.4f}"
+    e:TooFewPoints => printl"{label}: needs {e.needed} values, got {e.got}"
+    e:NoSpread => printl"{label}: {e.message}"
+}
+
+main = () => {
+    let temps = Sample["temperatures" [21.5 23.0 19.8 25.1 22.4 20.9 24.3]]
+    printl"{temps.name}: {temps.count} readings"
+    show("mean" temps.mean)
+    show("median" temps.median)
+    show("variance" temps.variance)
+    match temps.summary {
+        s:Summary => printl"range {s.low}..{s.high}, sd {sqrt(s.variance):.3f}"
+        e:TooFewPoints => printl"summary: needs {e.needed} values"
+    }
+    let lonely = Sample["one" [4.0]]
+    show("lonely variance" lonely.variance)
+
+    let hours:array<float64> = [1 2 3 4 5 6]
+    let scores:array<float64> = [52 55 61 64 70 73]
+    match fit_line(hours scores) {
+        line:Line => {
+            printl"score = {line.slope:.3f} * hours + {line.intercept:.3f} (r² {line.r2:.4f})"
+            printl"predicted at 8 hours: {line.at(8.0):.1f}"
+        }
+        e:TooFewPoints => printl"fit: need {e.needed}"
+        e:NoSpread => printl"fit: {e.message}"
+    }
+    match fit_line([3.0 3.0 3.0] [1.0 2.0 3.0]) {
+        line:Line => printl"vertical fit: {line.slope}"
+        e:TooFewPoints => printl"vertical fit: need {e.needed}"
+        e:NoSpread => printl"vertical fit: {e.message}"
+    }
+
+    let xs:array<float64> = [0 1 2 3 4]
+    let ys = [loop x in xs 2.0 - 3.0*x + 0.5*x^2]
+    {
+        $runtime_checks          # a singular system would stop the program here
+        match fit_quadratic(xs ys) {
+            beta:array<float64> => printl"quadratic: {[loop b in beta format(b ".3f")].join(" ")}"
+            e:TooFewPoints => printl"quadratic: need {e.needed}"
+        }
+    }
+
+    # two dice: the exact mean and variance of their total
+    let totals:array<rational> = [loop a in [1..6] loop b in [1..6] a + b]
+    printl"dice total mean {exact_mean(totals)}, variance {exact_variance(totals)}"
+    let prices:array<rational> = [19.99 5.25 7.5 12.0]
+    printl"exact mean price {exact_mean(prices)}"
+}

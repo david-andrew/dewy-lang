@@ -1,0 +1,123 @@
+# A small bank: accounts are records with methods, every operation that can
+# fail returns an error value instead of raising, and a batch of transactions
+# is applied with each failure reported and skipped.
+
+InsufficientFunds:type = type of error & [account:string needed:int available:int]
+UnknownAccount:type = type of error & [name:string]
+InvalidAmount:type = type of error & [amount:int]
+Frozen:type = type of error & [account:string]
+
+BankError:type = InsufficientFunds | UnknownAccount | InvalidAmount | Frozen
+
+Account:type = [
+    owner:string
+    balance:int = 0          # in cents
+    overdraft:int = 0        # how far below zero the balance may go
+    frozen:bool = false
+    history:array<string> = []
+
+    available = () => balance + overdraft
+
+    deposit = (amount:int):>void | InvalidAmount | Frozen => {
+        if amount <=? 0 return InvalidAmount[amount]
+        if frozen return Frozen[owner]
+        balance += amount
+        history.push("+{amount}")
+    }
+
+    withdraw = (amount:int):>void | InvalidAmount | InsufficientFunds | Frozen => {
+        if amount <=? 0 return InvalidAmount[amount]
+        if frozen return Frozen[owner]
+        let room = balance + overdraft
+        if amount >? room return InsufficientFunds[owner amount room]
+        balance -= amount
+        history.push("-{amount}")
+    }
+]
+
+Bank:type = [
+    accounts:dict<string Account> = []
+
+    open = (owner:string overdraft:int=0):>void => {
+        accounts[owner] = Account[owner=owner overdraft=overdraft]
+    }
+
+    transfer = (source:string target:string amount:int):>void | BankError => {
+        if source not in? accounts return UnknownAccount[source]
+        if target not in? accounts return UnknownAccount[target]
+        accounts[source].withdraw(amount) or_throw
+        let landed = accounts[target].deposit(amount)
+        if landed is? error {
+            # put the money back: a transfer happens whole or not at all
+            accounts[source].balance += amount
+            accounts[source].history.push("+{amount} refund")
+            return landed
+        }
+    }
+
+    deposit = (owner:string amount:int):>void | BankError => {
+        if owner not in? accounts return UnknownAccount[owner]
+        accounts[owner].deposit(amount) or_throw
+    }
+
+    freeze = (owner:string):>void | UnknownAccount => {
+        if owner not in? accounts return UnknownAccount[owner]
+        accounts[owner].frozen = true
+    }
+
+    total = () => sum([loop [_ a] in accounts a.balance])
+]
+
+cents = (amount:int):>string => {
+    let sign = if amount <? 0 "-" else ""
+    let a = abs(amount)
+    "{sign}${a // 100}.{format(a % 100 "02")}"
+}
+
+describe = (e:BankError):>string => match e {
+    i:InsufficientFunds => "{i.account} needs {cents(i.needed)} but has {cents(i.available)}"
+    u:UnknownAccount => "no account named '{u.name}'"
+    v:InvalidAmount => "amount must be positive, got {cents(v.amount)}"
+    f:Frozen => "{f.account}'s account is frozen"
+}
+
+Transfer:type = [source:string target:string amount:int]
+
+main = () => {
+    let bank = Bank[]
+    bank.open("alice")
+    bank.open("bob" overdraft=5000)
+    bank.open("carol")
+    bank.deposit("alice" 10000);
+    bank.deposit("carol" 2500);
+
+    let batch = [
+        Transfer["alice" "bob" 2500]
+        Transfer["bob" "carol" 9000]
+        Transfer["carol" "alice" 1000]
+        Transfer["alice" "dave" 100]
+        Transfer["carol" "bob" -50]
+        Transfer["bob" "alice" 1000]
+    ]
+    let start_total = bank.total
+    loop t in batch {
+        let result = bank.transfer(t.source t.target t.amount)
+        if result is? error {
+            printl"FAILED {t.source} -> {t.target} {cents(t.amount)}: {describe(result)}"
+        } else {
+            printl"ok     {t.source} -> {t.target} {cents(t.amount)}"
+        }
+    }
+
+    bank.freeze("carol");
+    match bank.transfer("alice" "carol" 100) {
+        e:BankError => printl"frozen check: {describe(e)}"
+        _ => printl"frozen check: transfer went through"
+    }
+
+    printl""
+    loop [name acct] in bank.accounts {
+        printl"{name:<6} {cents(acct.balance):>9}  {acct.history.join(" ")}"
+    }
+    printl"money is conserved: {bank.total =? start_total}"
+}

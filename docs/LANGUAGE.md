@@ -695,7 +695,10 @@ A saved conjunction can retain its captured guard's bounds, and symbolic
 `max(lo min(hi value))` retains both bounds when `lo <=? hi` is known.
 Integer-to-float conversions use the integer bounds known at that conversion.
 A sorted copy has its input value's length, and `text.chars()` has `text.length`
-elements. Search bounds survive a fallback when both cases establish them:
+elements; a comprehension collecting the same number of values for every element,
+`[loop x in xs {1.0 x x^2}]`, has that many times `xs.length`. A method called
+on a dictionary entry (`accounts[name].withdraw(n) or_throw`) changes that entry
+only: the dictionary keeps its guarded keys. Search bounds survive a fallback when both cases establish them:
 `xs.index_of(x) ?? -1` is below `xs.length`, so a nonnegative guard makes it
 an index. A text search result is at most `text.length`, which permits a slice
 endpoint but needs a strict upper guard for indexing.

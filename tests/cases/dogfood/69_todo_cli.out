@@ -1,0 +1,28 @@
+$ todo add buy milk --priority 2 -t home
+added #1: buy milk
+$ todo add --priority=5 file taxes --tag=admin
+added #2: file taxes
+$ todo -v add call mom -p 4
+added #3: call mom
+$ todo add fix bike -p 9
+  usage error: add: priority must be 1..5, got 9
+$ todo add --colour red paint fence
+  usage error: add: unknown option --colour
+$ todo add water plants -p
+  usage error: add: -p needs a value
+$ todo done 2
+finished #2: file taxes
+$ todo done 7
+  error: done: no todo #7
+$ todo list
+  [ ] p4 call mom
+  [ ] p2 buy milk #home
+$ todo list --all -n 2
+  [x] p5 file taxes #admin
+  [ ] p4 call mom
+$ todo list --all=yes
+  usage error: list: --all takes no value
+$ todo remove 1
+  usage error: unknown command 'remove'
+$ todo 
+  usage error: no command given (try add, list or done)

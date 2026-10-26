@@ -1,0 +1,17 @@
+# Only the guarded key is known: an entry call keeps keys, it does not add one.
+Frozen:type = type of error
+Acct:type = [balance:int = 0
+    give = (n:int):>void | Frozen => { balance += n }
+]
+Bank:type = [
+    accounts:dict<string Acct> = []
+    move = (a:string b:string):>void | Frozen => {
+        if a not in? accounts return
+        accounts[a].give(1) or_throw
+        accounts[b].give(1) or_throw
+    }
+]
+main = () => {
+    let bank = Bank[["x"->Acct[]]]
+    bank.move("x" "x");
+}

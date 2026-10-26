@@ -1250,6 +1250,21 @@ fact_route = (e: int, s: mut FactState, depth: int = 0) -> FactRoute:
     fact_capture(e, s)
     FactRoute()
 
+# A mutable argument's value after its call: its place read again, reusing the
+# selectors the arguments evaluated (`d[k].m()` on `d.vals[__map_entry_present(d k)]`
+# looks k up once, before the call changed d). O(route depth).
+fact_after_call = (n: int, arg: int, s: mut FactState) -> int:
+    target = arg
+    loop nodes[target].kind == .addr or nodes[target].kind == .conv: target = int(nodes[target].a)
+    k = nodes[target].kind
+    if k != .ident and k != .field and k != .index: return fact_capture(arg, s)
+    outer = fact_route_reuse
+    fact_route_reuse = n
+    route = fact_route(target, s)
+    fact_route_reuse = outer
+    held = fact_route_values(s, route)
+    if held.len() > 0: held[held.len() - 1] else: fact_fresh(s, ntype(arg))
+
 fact_route_values = (s: mut FactState, route: FactRoute) -> int[]:
     if route.root == 0: return []
     values = [fact_read(s, route.root)]
@@ -2974,6 +2989,9 @@ fact_pure_binary = (n: int) -> bool:
 # Numeric conversions between floats and integers write nothing.
 fact_pure_conversion = (n: int) -> bool:
     aux = nodes[n].aux
+    # (a union's value re-tagged for a wider or narrower union, `or_throw`'s
+    # remaining members: no copy hook runs, nothing is written)
+    if aux == i32(int(CV.union_)): return ownership_decls.len() == 0 or not ownership_fact_type(ntype(n))
     aux == i32(int(CV.int2float)) or aux == i32(int(CV.float2int)) or aux == i32(int(CV.float_)) or aux == i32(int(CV.wrap_int)) or aux == i32(int(CV.saturate_int))
 
 fact_reads_only = (id: IN) -> bool:
@@ -3199,6 +3217,14 @@ fact_arithmetic = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
         lo = min(min(x.lo * y.lo, x.lo * y.hi), min(x.hi * y.lo, x.hi * y.hi))
         hi = max(max(x.lo * y.lo, x.lo * y.hi), max(x.hi * y.lo, x.hi * y.hi))
         if not exact_has_node(n) and (not sa_fits(lo, ntype(n)) or not sa_fits(hi, ntype(n))): return fact_unmodeled(s, n, .unsupported)
+        # (a symbolic value scaled by a constant again, `xs.length*3`: the same
+        # product, as a comprehension's length is; O(values) only for this shape)
+        if x.lo != x.hi and y.lo == y.hi and a != 0:
+            loop i in [0..s.ids.len()):
+                t = fact_terms[s.ids[i]]
+                if t.op == .star and t.a == a and t.b != 0 and fact_slot(s, t.b) >= 0:
+                    c = fact_bound(s, t.b)
+                    if c.lo == c.hi and c.lo == y.lo: return s.ids[i]
         return fact_new(s, FactBound(lo, hi, lo > 0 or hi < 0), FactTerm(op, a, b, n, fact_word_type(s, n, a, b, lo, hi)))
     # (two symbolic operands: the same sum again, or rows through terms
     # already evaluated, which can also bound it)
@@ -4523,12 +4549,22 @@ fact_map_check = (n: int, s: mut FactState, values: int[]):
         if is_total_dict(ntype(e)) or refine_active and is_total_dict(refine_storage(e, ntype(e))): return
         if nodes[e].kind != .conv and nodes[e].kind != .narrow and nodes[e].kind != .addr: break
         e = int(nodes[e].a)
-    member = fact_map_member(s, n, fact_map_receiver(s, n, values[0]), values[1])
+    receiver = fact_map_receiver(s, n, values[0])
+    member = fact_map_member(s, n, receiver, values[1])
     proven = fact_truth(s, member) == 1
     if fact_probe_on:
         fact_probe_record(n, proven)
         return
-    if not proven: wit_key(n)
+    if not proven:
+        # (the call or write that replaced the dictionary's value, or the value
+        # of the record holding it, when one did)
+        cause = fact_bound(s, receiver)
+        if cause.witness <= 0 or cause.reason == .missing:
+            route = fact_receiver_route(n, s)
+            i = if route.root != 0: fact_binding(s, fact_place(route.root)) else: -1
+            if i >= 0: cause = fact_bound(s, s.bindings[i].value)
+        wit_cause(cause, n)
+        wit_key(n)
 
 fact_array_call_check = (n: int, s: mut FactState, values: int[], kind: int):
     if fact_speculating != 0 or not (fact_policy == .RequireStatic or fact_query): return
@@ -5320,6 +5356,44 @@ fact_counted_pushes = (n: int, s: mut FactState) -> (int, int)[]:
         if i < 0: continue
         found.push((l, fact_project(s, s.bindings[i].value, -1, false, T_INT)))
     found
+
+# Each local of loop n that every iteration pushes onto a fixed k >= 2 times
+# (`[loop x in xs {x x*x}]`), with its entry length and k. O(candidate arrays).
+fact_scaled_pushes = (n: int, s: mut FactState) -> (int, int, int)[]:
+    found: (int, int, int)[]
+    body = int(nodes[n].b)
+    candidates: int[]
+    fact_push_candidates(body, candidates)
+    loop l in candidates:
+        if int(locals[l].flags) & (LF_CAPTURED | LF_SHARED | LF_ADDR | LF_BYREF | LF_ALIAS | LF_MUTPARAM | LF_EXPOSED) != 0: continue
+        if tkind(fact_type(int(locals[l].type))) != .array or fact_mentions(int(nodes[n].a), l): continue
+        k = fact_push_count(body, l)
+        if k < 2 or k > 64: continue
+        i = fact_binding(s, PlaceIdentity(.local, int(locals[l].owner), l))
+        if i < 0: continue
+        found.push((l, fact_project(s, s.bindings[i].value, -1, false, T_INT), k))
+    found
+
+# After the loop: each such local's length is its entry length plus k times the count.
+fact_scaled_lengths = (n: int, s: mut FactState, pushes: (int, int, int)[], count: int):
+    loop entry in pushes:
+        if s.projections.len() >= FACT_CAP: return
+        i = fact_binding(s, PlaceIdentity(.local, int(locals[entry.0].owner), entry.0))
+        if i < 0: continue
+        c = fact_bound(s, count)
+        e = fact_bound(s, entry.1)
+        k = entry.2
+        if c.wide or e.wide or c.lo < 0 or e.lo < 0 or e.lo != e.hi or c.hi > fact_length_max(): continue
+        # (the array holds count*k elements, so the product is a length too:
+        # within the enabled ceiling)
+        cap = fact_length_max()
+        added = fact_new(s, FactBound(min(c.lo * k, cap), min(c.hi * k, cap)), FactTerm(.star, count, fact_constant(s, k), n, T_INT))
+        total = added
+        if e.lo != 0:
+            total = fact_new(s, FactBound(min(c.lo * k + e.lo, cap), min(c.hi * k + e.lo, cap)), FactTerm(.plus, entry.1, added, n, T_INT))
+            fact_difference(s, total, added, e.lo, n)
+            fact_difference(s, added, total, -e.lo, n)
+        fact_add_projection(s, FactProjection(s.bindings[i].value, -1, false, total))
 
 # A counted push never shrinks its receiver. Seed the entry lower bound at
 # each head; its upper bound remains unknown until the counted exit.
@@ -7039,8 +7113,10 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         if indexed or mapped: base = fact_capture(int(nodes[n].a), s)
         pushes: (int, int)[]
         sums: (int, FactBound)[]
+        scaled: (int, int, int)[]
         if indexed:
             pushes = fact_counted_pushes(n, s)
+            scaled = fact_scaled_pushes(n, s)
             # (one iteration per element of the evaluated source; every
             # length is within the enabled address-space ceiling)
             t = fact_type(ntype(int(nodes[n].a)))
@@ -7069,10 +7145,11 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         # (an iterated header holds at every head, not inside the body: a break joins it)
         s = if iterated: fact_join(after, edges.exits, n) else: after
         if hulls: fact_push_close(n, s)
-        if pushes.len() > 0:
+        if pushes.len() > 0 or scaled.len() > 0:
             t = fact_type(ntype(int(nodes[n].a)))
             count = if types[t].kind == .fixed: fact_constant(s, fixed_len(t)) else: fact_project(s, base, -1, false, T_INT)
             fact_counted_lengths(n, s, pushes, count)
+            fact_scaled_lengths(n, s, scaled, count)
         return 0
     if k == .not_:
         a = fact_capture(int(nodes[n].a), s)
@@ -7525,7 +7602,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             f = int(nodes[n].sym)
             entry = values
             loop i in [0..values.len()):
-                if i < fns[f].params.len() and int(locals[fns[f].params[i]].flags) & LF_MUTPARAM != 0: values[i] = fact_capture(kid(n, i), s)
+                if i < fns[f].params.len() and int(locals[fns[f].params[i]].flags) & LF_MUTPARAM != 0: values[i] = fact_after_call(n, kid(n, i), s)
             ref_assume(int(fns[f].ret), result, values, s)
             ref_arm_publish(f, result, values, s)
             if fact_search_call(n): fact_search_result(n, result, entry, s)

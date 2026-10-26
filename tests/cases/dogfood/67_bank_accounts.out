@@ -1,0 +1,12 @@
+ok     alice -> bob $25.00
+FAILED bob -> carol $90.00: bob needs $90.00 but has $75.00
+ok     carol -> alice $10.00
+FAILED alice -> dave $1.00: no account named 'dave'
+FAILED carol -> bob -$0.50: amount must be positive, got -$0.50
+ok     bob -> alice $10.00
+frozen check: carol's account is frozen
+
+alice     $95.00  +10000 -2500 +1000 +1000 -100 +100 refund
+bob       $15.00  +2500 -1000
+carol     $15.00  +2500 -1000
+money is conserved: true

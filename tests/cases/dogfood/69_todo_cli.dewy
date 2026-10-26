@@ -1,0 +1,150 @@
+# A command-line parser for a tiny todo tool: global flags, subcommands with
+# their own options, `--name=value` and `--name value` spellings, short flags,
+# typed values with range checks, and usage errors returned as values. Each
+# argv list below is parsed and run against a small in-memory todo list.
+
+UsageError:type = type of error & [message:string]
+
+Kind:type = 'flag' | 'int' | 'text'
+Opt:type = [name:string short:string = "" kind:Kind = 'flag']
+
+Command:type = [
+    name:string
+    opts:array<Opt> = []
+    positional:int = 0      # how many positional arguments it takes
+
+    find = (word:string):>Opt? => {
+        loop o in opts {
+            if word =? "--{o.name}" or o.short not=? "" and word =? "-{o.short}" return o
+        }
+        none
+    }
+]
+
+Parsed:type = [command:string flags:set<string> = set[] ints:dict<string int> = []
+    texts:dict<string string> = [] args:array<string> = []]
+
+COMMANDS = [
+    Command["add" [Opt["priority" "p" 'int'] Opt["tag" "t" 'text']] 1]
+    Command["list" [Opt["all" "a"] Opt["tag" "t" 'text'] Opt["limit" "n" 'int']] 0]
+    Command["done" [] 1]
+]
+
+parse = (argv:array<string>):>Parsed | UsageError => {
+    if argv.length =? 0 return UsageError["no command given (try add, list or done)"]
+    let verbose = false
+    let i = 0
+    loop i <? argv.length and argv[i].startswith("-") {
+        if argv[i] =? "-v" or argv[i] =? "--verbose" verbose = true
+        else return UsageError["unknown global option {argv[i]}"]
+        i += 1
+    }
+    if i >=? argv.length return UsageError["no command given"]
+    let name = argv[i]
+    let found:Command? = none
+    loop c in COMMANDS { if c.name =? name found = c }
+    if found is? none return UsageError["unknown command '{name}'"]
+    let cmd = found
+    let out = Parsed[command=name]
+    if verbose out.flags.push("verbose")
+    i += 1
+    loop i <? argv.length {
+        let word = argv[i]
+        i += 1
+        if not word.startswith("-") or word =? "-" { out.args.push(word); continue }
+        # `--name=value` carries its value inline
+        let value:string? = none
+        let key = word
+        let eq = word.find("=")
+        if eq isnt? Missing {
+            key = word[..eq)
+            value = word[$clamp eq + 1..]
+        }
+        let opt = cmd.find(key)
+        if opt is? none return UsageError["{name}: unknown option {key}"]
+        if opt.kind =? 'flag' {
+            if value isnt? none return UsageError["{name}: {key} takes no value"]
+            out.flags.push(opt.name)
+            continue
+        }
+        # (`if value is? none { value = argv[i] }` leaves `value` a `string?`)
+        let text = ""
+        if value isnt? none text = value
+        else {
+            if i >=? argv.length return UsageError["{name}: {key} needs a value"]
+            text = argv[i]
+            i += 1
+        }
+        if opt.kind =? 'int' {
+            let n = to_int(text)
+            if n is? error return UsageError["{name}: {key} wants a number, not '{text}'"]
+            if opt.name =? "priority" and not (1 <=? n <=? 5) return UsageError["{name}: priority must be 1..5, got {n}"]
+            out.ints[opt.name] = n
+        } else {
+            out.texts[opt.name] = text
+        }
+    }
+    if out.args.length not=? cmd.positional {
+        return UsageError["{name}: expected {cmd.positional} argument(s), got {out.args.length}"]
+    }
+    out
+}
+
+Todo:type = [title:string priority:int tag:string done:bool = false]
+
+run = (@todos:array<Todo> p:Parsed):>void | UsageError => {
+    match p.command {
+        <"add"> => {
+            if p.args.length =? 0 return UsageError["add: what to add?"]
+            let title = p.args[0]
+            todos.push(Todo[title (p.ints.get("priority") ?? 3) (p.texts.get("tag") ?? "")])
+            printl"added #{todos.length}: {title}"
+        }
+        <"done"> => {
+            if p.args.length =? 0 return UsageError["done: which todo?"]
+            let n = to_int(p.args[0]) ?? 0
+            if not (1 <=? n <=? todos.length) return UsageError["done: no todo #{p.args[0]}"]
+            todos[n - 1].done = true
+            printl"finished #{n}: {todos[n - 1].title}"
+        }
+        _ => {
+            let tag = p.texts.get("tag")
+            let shown = [loop t in todos if (not t.done or "all" in? p.flags) and (tag is? none or t.tag =? tag) t]
+            let ranked = shown.sorted(key=(t:Todo) => -t.priority)
+            let limit = p.ints.get("limit") ?? ranked.length
+            loop t in ranked[$clamp 0..limit) {
+                let mark = if t.done "x" else " "
+                printl"  [{mark}] p{t.priority} {t.title}{if t.tag =? "" "" else " #{t.tag}"}"
+            }
+        }
+    }
+}
+
+main = () => {
+    let todos:array<Todo> = []
+    let sessions = [
+        ["add" "buy milk" "--priority" "2" "-t" "home"]
+        ["add" "--priority=5" "file taxes" "--tag=admin"]
+        ["-v" "add" "call mom" "-p" "4"]
+        ["add" "fix bike" "-p" "9"]
+        ["add" "--colour" "red" "paint fence"]
+        ["add" "water plants" "-p"]
+        ["done" "2"]
+        ["done" "7"]
+        ["list"]
+        ["list" "--all" "-n" "2"]
+        ["list" "--all=yes"]
+        ["remove" "1"]
+        []
+    ]
+    loop argv in sessions {
+        printl"$ todo {argv.join(" ")}"
+        let result = parse(argv)
+        if result is? UsageError {
+            printl"  usage error: {result.message}"
+            continue
+        }
+        let outcome = run(@todos result)
+        if outcome is? UsageError printl"  error: {outcome.message}"
+    }
+}

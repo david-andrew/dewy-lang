@@ -183,7 +183,8 @@ rational_divisor = (n: int):
     if d == 0 or files[pos_file(nodes[d].pos)].path != lib_dir + "/rational.dewy": return
     e = kid(n, 1)
     loop nodes[e].kind == .conv: e = int(nodes[e].a)
-    t = prune(ntype(e))
+    # (a quantity divides as its number: the same obligation, said as one)
+    t = quantity_base(prune(ntype(e)))
     if is_int(t) or t == T_MATH_INT or rational_constants.has(e) or bundled_rational_type(t): fact_divisors[n] = 1
 
 # (node n, replaced by the bundled rational module's fname applied to its old content)
@@ -2722,8 +2723,9 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
                 else if tkind(et0) == .int_: dv = "0"
                 else if tkind(et0) == .float_: dv = "0.0"
                 else if tkind(et0) == .bool_: dv = "false"
-                fatal(nodes[a0].pos, "{gn} may give none (nothing) rather than a {dt(et0)}: say what to use then, as `{gn}(...) ?? {dv}`, before calling '{name_of(name)}'")
-            fatal(nodes[a0].pos, "this {dt(at)} may be none (nothing) rather than a {dt(int(types[at].elem))}: before calling '{name_of(name)}', say what to use then (`x ?? default`){jd(nodes[a0].pos, ", or `x!` when it cannot be none, or `if let v = x: ...`", ", or check it first: `if x isnt? none \{ ... }`")}")
+                fatal(nodes[a0].pos, "{gn} may give none (nothing) rather than a {dt(et0)}: say what to use then, as `{gn}(...) ?? {dv}`, before calling '{surface_call_name(name)}'")
+            called = surface_call_name(name)
+            fatal(nodes[a0].pos, "this {dt(at)} may be none (nothing) rather than a {dt(int(types[at].elem))}: before calling '{called}', say what to use then (`x ?? default`){jd(nodes[a0].pos, ", or `x!` when it cannot be none, or `if let v = x: ...`", ", or check it first: `if x isnt? none \{ ... }`")}")
         # (atomic_add(&x, 1): the atomics are for GPU buffers)
         if starts_with(name_of(name), "atomic_") and args.len() > 0 and nodes[unnamed(args[0])].type != 0 and tkind(ntype(unnamed(args[0]))) == .ptr:
             fatal(nodes[n].pos, "{name_of(name)} changes an element of a GpuBuffer in a compute function; threads on the CPU do not share variables: parallel_map gives each one's result back, and a count or flag they share is an Atomic (`done = atomic(0)`, `done.add(1)`)")
@@ -3104,6 +3106,11 @@ value_call_defaults = (n: int, callee: int, ft: int, f: int, args: int[]) -> int
     nodes[n].type = i32(representation_type(int(types[ft].elem)))
     representation_type(int(types[ft].elem))
 
+# A callee's name as written: `to_int(text)` calls its parser under the hood.
+surface_call_name = (name: int) -> str:
+    if starts_with(name_of(name), "__mi_parse"): return "to_int"
+    name_of(name)
+
 slot_of = (args: int[], a: int) -> int:
     loop x in args:
         if x == a or (nodes[x].kind == .namedarg and int(nodes[x].a) == a): return a
@@ -3125,6 +3132,11 @@ struct_default = (t0: int, pos: int) -> int:
         fixed_literal(value, t)
         add_flag(value, NF_CHECKED)
         return value
+    # (an exact quantity starts at zero in its unit, a rational's 0/1, not zeroed words)
+    if types[t].kind == .quantity and types[quantity_base(t)].kind == .struct_:
+        zero = mk(.int_lit, pos)
+        quantity_constant(zero, 0, 1, quantity_dimension(t), t)
+        return zero
     if types[t].kind != .struct_ or is_map_type(t) or is_union(t): return 0
     si = int(types[t].st)
     if not struct_has_defaults(si, 0): return 0

@@ -1,0 +1,37 @@
+# A method called on a dictionary entry changes that entry only: the keys a guard
+# established stay, through `or_throw`'s narrowing and through `@` parameters and
+# a method's own members, when the callee returns an error with text in it.
+Short:type = type of error & [who:string]
+Frozen:type = type of error
+Acct:type = [
+    owner:string
+    balance:int = 0
+    take = (n:int):>void | Short | Frozen => {
+        if n >? balance return Short[owner]
+        balance -= n
+    }
+    give = (n:int):>void | Frozen => { balance += n }
+]
+move = (@accounts:dict<string Acct> a:string b:string n:int):>void | Short | Frozen => {
+    if a not in? accounts or b not in? accounts return
+    accounts[a].take(n) or_throw
+    accounts[b].give(n) or_throw
+}
+Bank:type = [
+    accounts:dict<string Acct> = []
+    move = (a:string b:string n:int):>void | Short | Frozen => {
+        if a not in? accounts or b not in? accounts return
+        let r = accounts[a].take(n)
+        if r is? Short return r
+        accounts[b].give(n) or_throw
+    }
+]
+main = () => {
+    let d = ["x"->Acct["x" 10] "y"->Acct["y"]]
+    move(@d "x" "y" 4);
+    let bank = Bank[d]
+    bank.move("y" "x" 1);
+    printl([loop [_ a] in d a.balance])
+    let failed = bank.move("y" "x" 9)
+    printl"{[loop [_ a] in bank.accounts a.balance]} {failed is? Short}"
+}
