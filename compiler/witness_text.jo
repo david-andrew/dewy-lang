@@ -1,0 +1,45 @@
+# Frozen bootstrap twin of witness_text.dewy. Change both, or neither.
+
+wit_hidden_name = (name: str) -> bool:
+    if starts_with(name, "$"): return true
+    loop prefix in ["__s", "__k", "__ix", "__each", "__has", "__index"]:
+        if starts_with(name, prefix) and name.len() > prefix.len():
+            c = name[prefix.len()]
+            if c >= '0' and c <= '9': return true
+    false
+
+wit_quote_text = (text: str) -> str:
+    if find(text, "\"") >= 0 or find(text, "\\") >= 0 or find(text, "\{") >= 0 or find(text, "}") >= 0: return ""
+    loop i in [0..text.len()):
+        if text[i] < ' ' or text[i] > '~': return ""
+    "\"{text}\""
+
+wit_bound_text = (low: int, high: int, wide: bool, unsigned: bool) -> str:
+    if unsigned:
+        lo = u64(low xor (-9223372036854775807 - 1)); hi = u64(high xor (-9223372036854775807 - 1))
+        if low == high: return "is {lo}"
+        if low > (-9223372036854775807 - 1) and high < 9223372036854775807: return "is between {lo} and {hi}"
+        if low > (-9223372036854775807 - 1): return "is at least {lo}"
+        if high < 9223372036854775807: return "is at most {hi}"
+        return ""
+    # (a wide MIN/MAX singleton is an `int` beyond int64: only that side is known)
+    if wide and low == high and low == 9223372036854775807: return "is at least {low}"
+    if wide and low == high and low == (-9223372036854775807 - 1): return "is at most {low}"
+    if low == high: return "is {low}"
+    lo = low > -(1 << 62)
+    hi = high < (1 << 62)
+    if lo and hi: return "is between {low} and {high}"
+    if lo: return "is at least {low}"
+    if hi: return "is at most {high}"
+    ""
+
+wit_offset_text = (c: int) -> str: if c > 0: " + {c}" else if c < 0: " - {-c}" else: ""
+
+wit_bound_candidates = (lo: int, hi: int, nz: bool, wide: bool) -> int[]:
+    out: int[]
+    # (no host value witnesses an `int` beyond int64)
+    if wide and lo == hi and (lo == 9223372036854775807 or lo == (-9223372036854775807 - 1)): return out
+    loop x in [0, 1, -1, lo, hi, lo + 1, hi - 1]:
+        if x < lo or x > hi or nz and x == 0 or out.contains(x): continue
+        out.push(x)
+    out

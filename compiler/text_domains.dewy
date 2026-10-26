@@ -1,0 +1,35 @@
+$runtime_checks
+# Joined literal-name writes for inferred string domains. Empty stays open.
+# Syntax and binding resolution stay with the checker; these indexed tables
+# contain only name IDs and capture links to older bindings.
+
+# O(writes.length) append, with the existing array's COW behavior.
+sd_write=(@domains:dict<int64 array<int64>> binding:int64 writes:array<int64> known:bool)=>{
+    if not domains.has(binding) {return}
+    let values=domains[binding]
+    if values.length =? 0 {return}
+    if not known {domains[binding]=[]; return}
+    values.extend(writes)
+    domains[binding]=values
+}
+
+# O(1): a value capture starts with its source's writes and follows later ones.
+sd_capture=(@domains:dict<int64 array<int64>> @captures:dict<int64 int64> inner:int64 outer:int64)=>{
+    if not domains.has(outer) {return}
+    domains[inner]=domains[outer]
+    captures[inner]=outer
+}
+
+# Demand-only reads. Preserve write order and repetitions; the consumer decides
+# how to deduplicate/order names. Each link copies only its joined result, never
+# the tables, and a query cannot mutate either its source or another capture.
+sd_values=(@domains:dict<int64 array<int64>> @captures:dict<int64 int64> binding:int64):>array<int64>=>{
+    let values=domains[binding]
+    if values.length =? 0 {return values}
+    if captures.has(binding) {
+        let source=sd_values(@domains @captures captures[binding])
+        if source.length =? 0 {return source}
+        values.extend(source)
+    }
+    values
+}

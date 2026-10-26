@@ -1,0 +1,23 @@
+use '../../../compiler/node_store.dewy'
+use '../../../compiler/literal_domains.jo'
+store: Node[] = [Node()]
+lists: i32[]
+main = () -> int:
+    commands = read_file(args()[1]) ?? ""
+    loop line in split(commands, "\n"):
+        if len(line) == 0: continue
+        f = split(line, " ")
+        v: int[]
+        loop i in [1..f.len()): v.push(to_int(f[i]) ?? 0)
+        if f[0] == "N":
+            kinds = [NK.nil, .int_lit, .str_lit, .conv, .exprstmt, .block, .unary, .if_, .call]
+            n = Node(kind = kinds[v[0]], a = i32(v[1]), b = i32(v[2]), c = i32(v[3]), aux = i32(v[4]), ival = v[5], sval = i32(v[6]), flags = i32(v[7]), op = i32(v[8]), aux2 = -1)
+            n.list = i32(lists.len())
+            n.nlist = i32(v.len() - 9)
+            loop i in [9..v.len()): lists.push(i32(v[i]))
+            store.push(n)
+        else:
+            out = [-777]
+            known = ld_literals(store, lists, v[0], v[1] != 0, i32(77), out, v[2])
+            print("{ld_leaf(store, lists, v[0])} {known} {out}")
+    0

@@ -1,0 +1,45 @@
+$runtime_checks
+from p"node_store.dewy" import Node
+# Literal write-domain extraction from an already checked node store. The
+# caller lends both arenas and the minus token number; no checker callback.
+# Strip only transparent wrappers. Conditional descent is bounded at depth 8,
+# and failure retains the literals already appended by its successful left arm.
+
+ld_leaf=(@store:array<Node> @lists:array<int32> n0:int64):>int64=>{
+    let n=n0
+    loop n not=? 0 {
+        let k=store[n].kind
+        if k =? 'conv' or k =? 'exprstmt' {n=int64(store[n].a)}
+        else if k =? 'block' and store[n].nlist =? 1 and (int64(store[n].flags) & 67108864) =? 0 {n=int64(lists[store[n].list])}
+        else {break}
+    }
+    n
+}
+
+ld_literals=(@store:array<Node> @lists:array<int32> n0:int64 text:bool minus:int32 @out:array<int64> depth:int64=0):>bool=>{
+    let n=ld_leaf(@store @lists n0)
+    if n =? 0 {return false}
+    let k=store[n].kind
+    if text and k =? 'str_lit' and store[n].aux not=? 1 {
+        out.push(int64(store[n].sval))
+        return true
+    }
+    if not text {
+        # Oversized literals are calls, never int_lit nodes.
+        if k =? 'int_lit' {
+            out.push(store[n].ival)
+            return true
+        }
+        if k =? 'unary' and store[n].op =? minus {
+            let v=ld_leaf(@store @lists int64(store[n].a))
+            if store[v].kind =? 'int_lit' and store[v].ival >? int64.min {
+                out.push(-store[v].ival)
+                return true
+            }
+        }
+    }
+    if k =? 'if_' and store[n].c not=? 0 and depth <? 8 {
+        return ld_literals(@store @lists int64(store[n].b) text minus @out depth + 1) and ld_literals(@store @lists int64(store[n].c) text minus @out depth + 1)
+    }
+    false
+}

@@ -1,0 +1,24 @@
+# Frozen bootstrap twin of text_domains.dewy. Change both, or neither.
+sd_write = (domains: mut {int: int[]}, binding: int, writes: int[], known: bool):
+    if not domains.has(binding): return
+    values = domains[binding]
+    if values.len() == 0: return
+    if not known:
+        domains[binding] = []
+        return
+    values += writes
+    domains[binding] = values
+
+sd_capture = (domains: mut {int: int[]}, captures: mut {int: int}, inner: int, outer: int):
+    if not domains.has(outer): return
+    domains[inner] = domains[outer]
+    captures[inner] = outer
+
+sd_values = (domains: mut {int: int[]}, captures: mut {int: int}, binding: int) -> int[]:
+    values = domains[binding]
+    if values.len() == 0: return values
+    if captures.has(binding):
+        source = sd_values(domains, captures, captures[binding])
+        if source.len() == 0: return source
+        values += source
+    values

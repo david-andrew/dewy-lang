@@ -1,0 +1,83 @@
+$runtime_checks
+# Inclusive signed-word interval algebra for integer refinements and matches.
+# No checker callbacks or global state. Callers request only the operations
+# they need; all scans use flat [lo hi ...] arrays, as the frozen twin does.
+
+# O(g log g) sorting plus O(g) scanning, with duplicates allowed in gaps.
+interval_gaps=(lo:int64 hi:int64 gaps0:array<int64>):>array<int64>=>{
+    let out:array<int64>=[]
+    if lo >? hi {return out}
+    let gaps=gaps0.sorted()
+    let start=lo
+    loop g in gaps {
+        if g <? start or g >? hi {continue}
+        if g >? start {out.extend([start g - 1])}
+        if g =? hi {return out}
+        start=g + 1
+    }
+    out.extend([start hi])
+    out
+}
+
+# O(a.length + b.length) intersection of two sorted interval lists.
+interval_meet=(a:array<int64> b:array<int64>):>array<int64>=>{
+    let out:array<int64>=[]
+    let i:int64=0
+    let j:int64=0
+    loop i <? a.length and j <? b.length {
+        let lo=max(a[i] b[j])
+        let hi=min(a[i + 1] b[j + 1])
+        if lo <=? hi {out.extend([lo hi])}
+        if a[i + 1] <? b[j + 1] {i+=2} else {j+=2}
+    }
+    out
+}
+
+# O(h^2 + w*h), retaining the twin's stable insertion order for unsorted,
+# overlapping coverage. Endpoint guards precede every +/-1 operation.
+interval_missing=(want:array<int64> have0:array<int64>):>array<int64>=>{
+    let have:array<int64>=[]
+    loop k in [0..have0.length // 2) {
+        let at:int64=0
+        loop at <? have.length and have[at] <=? have0[2 * k] {at+=2}
+        have.insert(have0[2 * k + 1] at)
+        have.insert(have0[2 * k] at)
+    }
+    let out:array<int64>=[]
+    loop k in [0..want.length // 2) {
+        let cur=want[2 * k]
+        let hi=want[2 * k + 1]
+        let done=false
+        loop h in [0..have.length // 2) {
+            if done or have[2 * h + 1] <? cur {continue}
+            if have[2 * h] >? hi {break}
+            if have[2 * h] >? cur {out.extend([cur have[2 * h] - 1])}
+            if have[2 * h + 1] >=? hi {done=true}
+            else {cur=have[2 * h + 1] + 1}
+        }
+        if not done {out.extend([cur hi])}
+    }
+    out
+}
+
+# O(xs.length * domain.length): intersect each unsorted input interval alone,
+# preserving its order and repetitions for match-arm diagnostics.
+interval_meet_all=(xs:array<int64> domain:array<int64>):>array<int64>=>{
+    let out:array<int64>=[]
+    loop k in [0..xs.length // 2) {out.extend(interval_meet([xs[2 * k] xs[2 * k + 1]] domain))}
+    out
+}
+
+# Bounded diagnostic rendering: at most four intervals, then an ellipsis.
+interval_text=(xs:array<int64>):>string=>{
+    let text=""
+    loop k in [0..min(xs.length // 2 4)) {
+        if (text as array<uint8>).length >? 0 {text="{text}, "}
+        if xs[2 * k] =? xs[2 * k + 1] {text="{text}{xs[2 * k]}"}
+        else if xs[2 * k] =? int64.min {text="{text}values up to {xs[2 * k + 1]}"}
+        else if xs[2 * k + 1] =? int64.max {text="{text}values from {xs[2 * k]}"}
+        else {text="{text}{xs[2 * k]} through {xs[2 * k + 1]}"}
+    }
+    if xs.length >? 8 {text="{text}, ..."}
+    text
+}

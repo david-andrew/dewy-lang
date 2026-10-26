@@ -1,3 +1,4 @@
+use 'intervals.dewy'
 use 'member_replay.jo'
 use 'exact.jo'
 use 'concurrency.jo'
@@ -8139,77 +8140,11 @@ int_intervals_wide = (t0: int) -> (bool, int[], int[]):
             else: return (false, nothing, nothing)
     (true, interval_gaps(lo, hi, gaps), interval_gaps(hlo, hhi, hgaps))
 
-# lo..hi without the values in gaps, as sorted intervals (none when lo > hi)
-interval_gaps = (lo: int, hi: int, gaps0: int[]) -> int[]:
-    out: int[]
-    if lo > hi: return out
-    gaps = gaps0.sorted()
-    start = lo
-    loop g in gaps:
-        if g < start or g > hi: continue
-        if g > start: out += [start, g - 1]
-        if g == hi: return out
-        start = g + 1
-    out += [start, hi]
-    out
-
-# a and b as sorted interval lists: their intersection
-interval_meet = (a: int[], b: int[]) -> int[]:
-    out: int[]
-    i = 0
-    j = 0
-    loop i < a.len() and j < b.len():
-        lo = max(a[i], b[j])
-        hi = min(a[i + 1], b[j + 1])
-        if lo <= hi: out += [lo, hi]
-        if a[i + 1] < b[j + 1]: i += 2
-        else: j += 2
-    out
-
-# the parts of `want` not covered by any interval in `have` (unsorted, possibly overlapping)
-interval_missing = (want: int[], have0: int[]) -> int[]:
-    have: int[]
-    loop k in [0..have0.len() / 2):
-        at = 0
-        loop at < have.len() and have[at] <= have0[2 * k]: at += 2
-        have.insert(at, have0[2 * k + 1])
-        have.insert(at, have0[2 * k])
-    out: int[]
-    loop k in [0..want.len() / 2):
-        cur = want[2 * k]
-        hi = want[2 * k + 1]
-        done = false
-        loop h in [0..have.len() / 2):
-            if done or have[2 * h + 1] < cur: continue
-            if have[2 * h] > hi: break
-            if have[2 * h] > cur: out += [cur, have[2 * h] - 1]
-            if have[2 * h + 1] >= hi: done = true
-            else: cur = have[2 * h + 1] + 1
-        if not done: out += [cur, hi]
-    out
-
 # a literal behind the conversions checking gave it
 kid_lit = (e0: int) -> int:
     e = e0
     loop nodes[e].kind == .conv: e = int(nodes[e].a)
     e
-
-# intervals xs (unsorted) each met with the sorted domain
-interval_meet_all = (xs: int[], domain: int[]) -> int[]:
-    out: int[]
-    loop k in [0..xs.len() / 2): out += interval_meet([xs[2 * k], xs[2 * k + 1]], domain)
-    out
-
-interval_text = (xs: int[]) -> str:
-    text = ""
-    loop k in [0..min(xs.len() / 2, 4)):
-        if len(text) > 0: text += ", "
-        if xs[2 * k] == xs[2 * k + 1]: text += "{xs[2 * k]}"
-        else if xs[2 * k] == FACT_MIN: text += "values up to {xs[2 * k + 1]}"
-        else if xs[2 * k + 1] == FACT_MAX: text += "values from {xs[2 * k]}"
-        else: text += "{xs[2 * k]} through {xs[2 * k + 1]}"
-    if xs.len() > 8: text += ", ..."
-    text
 
 # A refined integer type pattern on an integer scrutinee (`<-1|1>`,
 # `small:int64<small <? 100>`): range patterns over the values it admits. high: a uint64

@@ -1,0 +1,30 @@
+# Frozen bootstrap twin of literal_domains.dewy. Change both, or neither.
+use 'node_store.dewy'
+ld_leaf = (store: mut Node[], lists: mut i32[], n0: int) -> int:
+    n = n0
+    loop n != 0:
+        k = store[n].kind
+        if k == .conv or k == .exprstmt: n = int(store[n].a)
+        else if k == .block and store[n].nlist == 1 and int(store[n].flags) & 67108864 == 0: n = int(lists[store[n].list])
+        else: break
+    n
+
+ld_literals = (store: mut Node[], lists: mut i32[], n0: int, text: bool, minus: i32, out: mut int[], depth: int = 0) -> bool:
+    n = ld_leaf(store, lists, n0)
+    if n == 0: return false
+    k = store[n].kind
+    if text and k == .str_lit and store[n].aux != 1:
+        out.push(int(store[n].sval))
+        return true
+    if not text:
+        if k == .int_lit:
+            out.push(store[n].ival)
+            return true
+        if k == .unary and store[n].op == minus:
+            v = ld_leaf(store, lists, int(store[n].a))
+            if store[v].kind == .int_lit and store[v].ival > (-9223372036854775807 - 1):
+                out.push(-store[v].ival)
+                return true
+    if k == .if_ and store[n].c != 0 and depth < 8:
+        return ld_literals(store, lists, int(store[n].b), text, minus, out, depth + 1) and ld_literals(store, lists, int(store[n].c), text, minus, out, depth + 1)
+    false

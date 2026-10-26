@@ -59,7 +59,13 @@ id_intervals = (states: mut {int: IntDomain}, binding: int, depth: int = 0) -> i
         if source.len() == 0: return nothing
         loop k in [0..source.len() / 2):
             if source[2 * k + 1] - source[2 * k] >= INT_DOMAIN_CAP: return nothing
-            loop v in [source[2 * k]..source[2 * k + 1] + 1): points.push(v)
+            # Test the inclusive end before incrementing: max has no successor.
+            last = source[2 * k + 1]
+            v = source[2 * k]
+            loop true:
+                points.push(v)
+                if v == last: break
+                v += 1
     if points.len() == 0: return nothing
     seen: {int: bool}
     set: int[]

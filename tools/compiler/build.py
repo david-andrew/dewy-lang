@@ -36,7 +36,8 @@ FROZEN_TWINS = {'dewy_lexer.dewy': 'dewy_lexer.jo', 'dewy_file.dewy': 'dewy_file
                'dewy_scan.dewy': 'dewy_scan.jo', 'dewy_parser.dewy': 'dewy_parser.jo',
                'dewy_builders.dewy': 'dewy_builders.jo', 'dewy_walk.dewy': 'dewy_walk.jo',
                'dewy_reach.dewy': 'dewy_reach.jo',
-               'int_domains.dewy': 'int_domains.jo',
+               'witness_text.dewy': 'witness_text.jo', 'literal_domains.dewy': 'literal_domains.jo',
+               'int_domains.dewy': 'int_domains.jo', 'text_domains.dewy': 'text_domains.jo', 'intervals.dewy': 'intervals.jo',
                'node_store.dewy': 'node_store.jo', 'intern.dewy': 'intern.jo'}
 
 

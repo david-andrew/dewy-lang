@@ -1,0 +1,9 @@
+# A value capture keeps its source's max endpoint alongside its own writes.
+main=()=>{
+    let value=9223372036854775807
+    let read=(reset:bool $capture value)=>{
+        if reset {value=7}
+        match value {<7>=>printl(7)}
+    }
+    read(false)
+}

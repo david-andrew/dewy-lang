@@ -264,7 +264,47 @@ operands preserve the twin's signed-word arithmetic at endpoints; mixing a
 policy operand with an ordinary integer would instead check narrowing. The
 differential driver replays write histories over either module and compares
 with an eager set-based oracle, including repeated queries to check that reading
-a capture does not mutate its source.
+a capture does not mutate its source. Capture expansion tests the inclusive end
+before incrementing, so a run ending at `int64.max` retains that endpoint; the
+frozen twin deliberately shares this correction.
+
+`literal_domains.dewy` extracts integer values and string-name IDs from checked
+literal expressions through conversions, expression statements, one-child blocks
+and conditionals. Jo lends node/list arenas and the minus-token number. Work is
+proportional to the requested subtree's visited nodes, with the existing depth-8
+conditional limit; no whole-tree pass or checker callback is introduced. Preserve
+partial output when a later arm fails and leave comprehension blocks opaque.
+Oversized literals remain calls, not integer-literal nodes. The tree oracle
+covers wrappers, partial failures, depth limits and signed-word endpoints.
+
+`text_domains.dewy` owns inferred string-domain writes, value-capture links and
+joined reads. Jo resolves bindings and literal syntax, then lends the two
+indexed tables by place. Empty remains open; captures include their initial
+snapshot and the source's later writes. Reads are demand-driven, following only
+the requested capture chain and appending each ancestor's result in the existing
+order; copying cost follows those intermediate results, never the whole tables.
+Consumers retain responsibility for deduplication and text ordering. Differential
+histories check later source writes, open propagation and independent query results.
+
+`intervals.dewy` owns the inclusive signed-word interval algebra used by
+refinement and integer match checking: gaps, intersection, coverage subtraction,
+and bounded diagnostic text. The checker passes flat endpoint arrays; the leaf
+has no callbacks or compiler state. Keep the existing ordering and repetitions
+of per-arm intersections, and test endpoints before stepping past them. The
+algorithms retain the twin's bounds: intersection is linear, gap removal sorts
+its points, and coverage subtraction is O(h² + w*h) for h covering and w desired
+intervals. Differential tests split symbolic intervals independently, including
+both signed-word endpoints, overlapping/unsorted coverage and repeated gaps.
+
+`witness_text.dewy` owns hidden-name recognition, printable literal quoting,
+scalar-bound and offset text, and the bounded candidate values used by possible
+witnesses. Jo extracts facts and node metadata; the leaf receives only scalar
+values and text. These helpers are diagnostic work, but some text is prepared
+while facts are checked, so include the facts phase in their gate. Candidate
+construction and bound rendering are bounded; quoting scans only its supplied
+bytes. Both twins preserve unsigned order encoding, wide endpoint wording and
+signed-word candidate arithmetic. Differential tests include arbitrary bytes,
+all byte values, bound thresholds and the signed-word endpoints.
 
 `dewy_layout.dewy` (`dewy-core fmt`'s layout of Dewy text: indentation by the brackets open and
 by continued statements, the spaces between lexemes, and the lines kept as written) is the

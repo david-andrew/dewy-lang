@@ -81,8 +81,14 @@ id_intervals=(@states:dict<int64 IntDomain> binding:int64 depth:int64=0):>array<
         if source.length =? 0 {return nothing}
         loop k in [0..source.length // 2) {
             if int64<overflow='wrap'>(source[2 * k + 1]) - int64<overflow='wrap'>(source[2 * k]) >=? INT_DOMAIN_CAP {return nothing}
-            let stop:int64=int64<overflow='wrap'>(source[2 * k + 1]) + int64<overflow='wrap'>(1)
-            loop v in [source[2 * k]..stop) {points.push(v)}
+            # Test the inclusive end before incrementing: max has no successor.
+            let last=source[2 * k + 1]
+            let v=source[2 * k]
+            loop true {
+                points.push(v)
+                if v =? last {break}
+                v+=1
+            }
         }
     }
     if points.length =? 0 {return nothing}

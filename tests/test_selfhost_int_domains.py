@@ -86,11 +86,7 @@ class Oracle:
             for lo, hi in intervals(source):
                 if hi - lo >= 256:
                     return set()
-                # Existing twin behavior: a captured run ending at MAX has a
-                # wrapped exclusive end and contributes no values. Preserve
-                # it in this translation; changing semantics is out of scope.
-                if hi != MAX:
-                    values.update(range(lo, hi + 1))
+                values.update(range(lo, hi + 1))
         if not values:
             return set()
         for delta in d.deltas:

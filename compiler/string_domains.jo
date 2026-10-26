@@ -10,7 +10,10 @@ use 'refine.jo'
 use 'expr.jo'
 use 'facts.jo'
 use 'node_store.dewy'
+use 'literal_domains.dewy'
+use 'text_domains.dewy'
 use 'int_domains.dewy'
+use 'intervals.dewy'
 
 string_domains: {int: int[]} = {}
 string_domain_matches: (int, int)[]
@@ -44,16 +47,10 @@ string_domain_binding = (n: int) -> int:
 string_domain_write = (lhs: int, value: int):
     binding = string_domain_binding(lhs)
     if not string_domains.has(binding): return
-    values = string_domains[binding]
-    if values.len() == 0: return
-    if value != 0 and nodes[value].kind == .str_lit and nodes[value].aux != 1:
-        values.push(int(nodes[value].sval))
-        string_domains[binding] = values
-        return
-    if not domain_literals(value, true, values):
-        string_domains[binding] = []
-        return
-    string_domains[binding] = values
+    if string_domains[binding].len() == 0: return
+    values: int[]
+    known = domain_literals(value, true, values)
+    sd_write(string_domains, binding, values, known)
 
 string_domain_match = (m: int) -> bool:
     binding = string_domain_binding(int(nodes[m].a))
@@ -88,18 +85,10 @@ string_domains_finish = ():
 string_domain_capture = (inner: int, outer: int):
     root = outer
     loop int(locals[root].flags) & LF_CAPTURE != 0 and int(locals[root].flags) & LF_VALUECAP == 0: root = int(locals[root].outer)
-    if not string_domains.has(root): return
-    string_domains[inner] = string_domains[root]
-    string_domain_captures[inner] = root
+    sd_capture(string_domains, string_domain_captures, inner, root)
 
 string_domain_values = (binding: int) -> int[]:
-    values = string_domains[binding]
-    if values.len() == 0: return values
-    if string_domain_captures.has(binding):
-        source = string_domain_values(string_domain_captures[binding])
-        if source.len() == 0: return source
-        values += source
-    values
+    sd_values(string_domains, string_domain_captures, binding)
 
 # (the request's index, or -1 for a binding without a finite domain)
 string_domain_conversion = (n: int, set: int) -> int:
@@ -175,34 +164,10 @@ string_domains_materialize = ():
 # Literal leaves of a written value: a literal, or a conditional choosing
 # between them (`if verbose 'loud' else 'quiet'`), through the conversions and
 # single-value blocks checking adds. Strings give text ids, integers values.
-domain_leaf = (n0: int) -> int:
-    n = n0
-    loop n != 0:
-        k = nodes[n].kind
-        if k == .conv or k == .exprstmt: n = int(nodes[n].a)
-        else if k == .block and nkids(n) == 1 and not has_flag(n, NF_COMPREHENSION): n = kid(n, 0)
-        else: break
-    n
+domain_leaf = (n0: int) -> int: ld_leaf(nodes, lists, n0)
 
 domain_literals = (n0: int, text: bool, out: mut int[], depth: int = 0) -> bool:
-    n = domain_leaf(n0)
-    if n == 0: return false
-    k = nodes[n].kind
-    if text and k == .str_lit and nodes[n].aux != 1:
-        out.push(int(nodes[n].sval))
-        return true
-    if not text:
-        if k == .int_lit and not oversized_literal(n):
-            out.push(nodes[n].ival)
-            return true
-        if k == .unary and nodes[n].op == i32(int(Tok.minus)):
-            v = domain_leaf(int(nodes[n].a))
-            if nodes[v].kind == .int_lit and not oversized_literal(v) and nodes[v].ival > FACT_MIN:
-                out.push(-nodes[v].ival)
-                return true
-    if k == .if_ and nodes[n].c != 0 and depth < 8:
-        return domain_literals(int(nodes[n].b), text, out, depth + 1) and domain_literals(int(nodes[n].c), text, out, depth + 1)
-    false
+    ld_literals(nodes, lists, n0, text, i32(int(Tok.minus)), out, depth)
 
 # Unannotated integer bindings: the covering set of every written value, as
 # literal points plus the deltas of compound writes that run at most once per

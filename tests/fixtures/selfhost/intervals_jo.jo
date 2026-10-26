@@ -1,0 +1,21 @@
+use '../../../compiler/intervals.jo'
+
+main = () -> int:
+    commands = read_file(args()[1]) ?? ""
+    loop line in split(commands, "\n"):
+        if len(line) == 0: continue
+        f = split(line, " ")
+        values: int[]
+        loop i in [1..f.len()): values.push(to_int(f[i]) ?? 0)
+        out: int[]
+        if f[0] == "G": out = interval_gaps(values[0], values[1], values[2..])
+        else if f[0] == "T": out = values
+        else:
+            n = values[0]
+            a = values[1..n + 1)
+            b = values[n + 1..]
+            if f[0] == "M": out = interval_meet(a, b)
+            else if f[0] == "A": out = interval_meet_all(a, b)
+            else: out = interval_missing(a, b)
+        print("{out}|{interval_text(out)}")
+    0

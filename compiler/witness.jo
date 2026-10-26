@@ -1,3 +1,4 @@
+use 'witness_text.dewy'
 # Explanations of unproven obligations. Nothing here runs until a diagnostic
 # is about to be reported: dormant compilation builds no witness data. Notes
 # report retained evidence only (bounds, one tombstone per replaced route,
@@ -79,16 +80,6 @@ wit_op = (op: Tok) -> str:
     if op == .ge: return ">=?"
     if op == .eq: return "=?"
     "not=?"
-
-# A name the loop lowering made up (its snapshot, position, flags and range
-# counters): never shown to the user.
-wit_hidden_name = (name: str) -> bool:
-    if starts_with(name, "$"): return true
-    loop prefix in ["__s", "__k", "__ix", "__each", "__has", "__index"]:
-        if starts_with(name, prefix) and name.len() > prefix.len():
-            c = name[prefix.len()]
-            if c >= '0' and c <= '9': return true
-    false
 
 # A read the loop lowering made: an index whose base or position is hidden.
 wit_hidden_read = (n: int) -> bool:
@@ -192,11 +183,7 @@ wit_lent = (c: int, i: int) -> int:
 # A plain string literal as written, `"x"`; "" for one with escapes or interpolation.
 wit_quoted = (e: int) -> str:
     if nkids(e) != 0 or nodes[e].aux != 0 or nodes[e].sval < 0: return ""
-    text = name_of(int(nodes[e].sval))
-    if find(text, "\"") >= 0 or find(text, "\\") >= 0 or find(text, "\{") >= 0 or find(text, "}") >= 0: return ""
-    loop i in [0..text.len()):
-        if text[i] < ' ' or text[i] > '~': return ""
-    "\"{text}\""
+    wit_quote_text(name_of(int(nodes[e].sval)))
 
 # A direct call, `f(x 1)` (a method call's receiver is its first argument):
 # the callee's shown name and each argument's spelling, `...` for one that has
@@ -356,23 +343,7 @@ wit_value = (s: FactState, v: int, x: int) -> str:
 
 # Representation limits are not interesting evidence; only report real bounds.
 wit_known = (b: FactBound, unsigned: bool = false) -> str:
-    if unsigned:
-        lo = u64(b.lo xor FACT_MIN); hi = u64(b.hi xor FACT_MIN)
-        if b.lo == b.hi: return "is {lo}"
-        if b.lo > FACT_MIN and b.hi < FACT_MAX: return "is between {lo} and {hi}"
-        if b.lo > FACT_MIN: return "is at least {lo}"
-        if b.hi < FACT_MAX: return "is at most {hi}"
-        return ""
-    # (a wide MIN/MAX singleton is an `int` beyond int64: only that side is known)
-    if b.wide and b.lo == b.hi and b.lo == FACT_MAX: return "is at least {b.lo}"
-    if b.wide and b.lo == b.hi and b.lo == FACT_MIN: return "is at most {b.lo}"
-    if b.lo == b.hi: return "is {b.lo}"
-    lo = b.lo > -(1 << 62)
-    hi = b.hi < (1 << 62)
-    if lo and hi: return "is between {b.lo} and {b.hi}"
-    if lo: return "is at least {b.lo}"
-    if hi: return "is at most {b.hi}"
-    ""
+    wit_bound_text(b.lo, b.hi, b.wide, unsigned)
 
 wit_holds = (op: Tok, x: int, y: int) -> bool:
     if op == .lt: return x < y
@@ -383,13 +354,7 @@ wit_holds = (op: Tok, x: int, y: int) -> bool:
     x != y
 
 wit_candidates = (b: FactBound) -> int[]:
-    out: int[]
-    # (no host value witnesses an `int` beyond int64)
-    if b.wide and b.lo == b.hi and (b.lo == FACT_MAX or b.lo == FACT_MIN): return out
-    loop x in [0, 1, -1, b.lo, b.hi, b.lo + 1, b.hi - 1]:
-        if x < b.lo or x > b.hi or b.nz and x == 0 or out.contains(x): continue
-        out.push(x)
-    out
+    wit_bound_candidates(b.lo, b.hi, b.nz, b.wide)
 
 # A valuation of the two sides that violates `a op b` and satisfies their
 # intervals and every direct difference row between them. Other constraints
@@ -855,8 +820,6 @@ wit_ref_text = (term: RefTerm, self: str) -> str:
     if text == "": return ""
     loop selector in term.path: text += if selector == -1: ".length" else: ".{name_of(selector)}"
     text + wit_offset_text(term.offset)
-
-wit_offset_text = (c: int) -> str: if c > 0: " + {c}" else if c < 0: " - {-c}" else: ""
 
 wit_ref_side = (term: RefTerm, value: int, n: int, self: str) -> WitSide:
     if term.kind == 0 and term.path.len() == 0:

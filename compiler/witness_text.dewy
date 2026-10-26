@@ -1,0 +1,65 @@
+$runtime_checks
+# Diagnostic-only text and bounded candidate values. The checker supplies
+# scalar bounds/text; this leaf has no facts, nodes, callbacks or mutable state.
+
+wit_hidden_name=(name:string):>bool=>{
+    if name.startswith("$") {return true}
+    loop prefix in ["__s" "__k" "__ix" "__each" "__has" "__index"] {
+        let n=(prefix as array<uint8>).length
+        if name.startswith(prefix) and (name as array<uint8>).length >? n {
+            let c=(name as array<uint8>)[n]
+            if c >=? b'0' and c <=? b'9' {return true}
+        }
+    }
+    false
+}
+
+wit_quote_text=(text:string):>string=>{
+    if text.contains("\"") or text.contains("\\") or text.contains("\{") or text.contains("}") {return ""}
+    loop c in (text as array<uint8>) {
+        if c <? b' ' or c >? b'~' {return ""}
+    }
+    "\"{text}\""
+}
+
+wit_bound_text=(low:int64 high:int64 wide:bool unsigned:bool):>string=>{
+    if unsigned {
+        let lo=(low transmute uint64) xor (uint64(1) << 63)
+        let hi=(high transmute uint64) xor (uint64(1) << 63)
+        if low =? high {return "is {lo}"}
+        if low >? int64.min and high <? int64.max {return "is between {lo} and {hi}"}
+        if low >? int64.min {return "is at least {lo}"}
+        if high <? int64.max {return "is at most {hi}"}
+        return ""
+    }
+    if wide and low =? high and low =? int64.max {return "is at least {low}"}
+    if wide and low =? high and low =? int64.min {return "is at most {low}"}
+    if low =? high {return "is {low}"}
+    let lo=low >? -(1 << 62)
+    let hi=high <? (1 << 62)
+    if lo and hi {return "is between {low} and {high}"}
+    if lo {return "is at least {low}"}
+    if hi {return "is at most {high}"}
+    ""
+}
+
+wit_offset_text=(c:int64):>string=>{
+    if c >? 0 {return " + {c}"}
+    if c <? 0 {
+        let magnitude:int64=int64<overflow='wrap'>(0) - int64<overflow='wrap'>(c)
+        return " - {magnitude}"
+    }
+    ""
+}
+
+wit_bound_candidates=(lo:int64 hi:int64 nz:bool wide:bool):>array<int64>=>{
+    let out:array<int64>=[]
+    if wide and lo =? hi and (lo =? int64.max or lo =? int64.min) {return out}
+    let next:int64=int64<overflow='wrap'>(lo) + int64<overflow='wrap'>(1)
+    let prev:int64=int64<overflow='wrap'>(hi) - int64<overflow='wrap'>(1)
+    loop x in [int64(0) int64(1) int64(-1) lo hi next prev] {
+        if x <? lo or x >? hi or nz and x =? 0 or out.contains(x) {continue}
+        out.push(x)
+    }
+    out
+}

@@ -1,0 +1,26 @@
+use '../../../compiler/text_domains.jo'
+domains: {int: int[]}
+captures: {int: int}
+main = () -> int:
+    commands = read_file(args()[1]) ?? ""
+    loop line in split(commands, "\n"):
+        if len(line) == 0: continue
+        f = split(line, " ")
+        op = f[0]
+        if op == "R":
+            domains = {}
+            captures = {}
+            continue
+        binding = to_int(f[1]) ?? 0
+        values: int[]
+        loop i in [2..f.len()): values.push(to_int(f[i]) ?? 0)
+        if op == "D": domains[binding] = values
+        else if op == "W": sd_write(domains, binding, values[1..], values[0] != 0)
+        else if op == "C": sd_capture(domains, captures, binding, values[0])
+        else if not domains.has(binding): print("absent")
+        else:
+            answer = sd_values(domains, captures, binding)
+            print("{answer}")
+            # An owned result may change without changing its source tables.
+            answer.push(-999)
+    0

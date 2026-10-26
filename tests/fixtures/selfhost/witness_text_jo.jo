@@ -1,0 +1,17 @@
+use '../../../compiler/witness_text.jo'
+main = () -> int:
+    blob = read_file(args()[1]) ?? ""
+    commands = read_file(args()[2]) ?? ""
+    loop line in split(commands, "\n"):
+        if len(line) == 0: continue
+        f = split(line, " ")
+        v: int[]
+        loop i in [1..f.len()): v.push(to_int(f[i]) ?? 0)
+        if f[0] == "K": print(wit_bound_text(v[0], v[1], v[2] != 0, v[3] != 0))
+        else if f[0] == "C": print("{wit_bound_candidates(v[0], v[1], v[2] != 0, v[3] != 0)}")
+        else if f[0] == "O": print(wit_offset_text(v[0]))
+        else:
+            text = blob[v[0]..v[0] + v[1])
+            if f[0] == "Q": print(wit_quote_text(text))
+            else: print("{wit_hidden_name(text)}")
+    0
