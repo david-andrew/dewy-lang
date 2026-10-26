@@ -221,23 +221,6 @@ dw_module_text = (id: int) -> str:
     n = dc_parser.reader.module_nodes[-1 - id]
     files[pos_file(n.pos)].src[pos_off(n.pos) + 1..n.ival)
 
-dw_shadowable_tag = (id: int) -> int:
-    if id < 0 and dc_parser.reader.module_nodes[-1 - id].kind == .build_ and dc_parser.reader.module_nodes[-1 - id].aux == 1 and dw_module_text(id) == "shadowable": return id
-    0
-
-dw_test_tag = (id: int) -> int:
-    if id < 0 and dc_parser.reader.module_nodes[-1 - id].kind == .build_:
-        form = dc_parser.reader.module_nodes[-1 - id].aux
-        if form == 5 or form == 1 and dw_module_text(id) == "test": return id
-    0
-
-dw_test_spec = (id: int) -> int:
-    result = dc_parser.reader.module_nodes[-1 - id]
-    if result.aux == 5: return int(result.a)
-    n = mk(.test_, result.pos)
-    nodes[n].aux = 1
-    n
-
 # The function a `$test` line marks: it names the test, and its parameters must
 # take the cases (or there are none, and no cases).
 dw_test_attach = (marked: int, declarations: int[]):

@@ -1,0 +1,79 @@
+# Frozen twin of dewy_file.dewy for bootstrap generations without Dewy.
+use 'dewy_parser.dewy'
+use 'dewy_reader.dewy'
+use 'node_store.dewy'
+
+struct ParserFileHost:
+    note_lazy: (int, bool, bool) -> void
+    declarations: (int, int) -> int[]
+    finish_statement: (int[], bool) -> int[]
+    test_attach: (int, int[]) -> void
+    finish_checks: (int) -> void
+    finish_declarations: (int[]) -> int[]
+
+df_file = (p: mut ParserContext, nodes: mut Node[], host: ParserFileHost, saved_edits: bool, lib_lazy: bool, lazy: bool) -> int[]:
+    file = p.file
+    p.reader.dc_lazy_on = lazy
+    p.reader.dc_lib_lazy = lib_lazy and not lazy
+    host.note_lazy(file, lazy, p.reader.dc_lib_lazy)
+    if lazy: p.reader.dc_lazy_tokens[file] = p.tokens
+    p.at = 0
+    p.reader.dn_angles = 0
+    p.reader.dn_depth = 0
+    p.reader.module_nodes = []
+    p.reader.module_lists = []
+    declarations: int[]
+    marked = 0
+    shadowable_pos = 0
+    loop p.tokens[p.at].kind != .eof:
+        before = p.at
+        statement = rd_dn_statement(p, nodes, true)
+        if statement < 0:
+            id = -1 - statement
+            if p.reader.module_nodes[id].kind == .build_:
+                form = p.reader.module_nodes[id].aux
+                tag = if form == 5: 1 else: 0
+                pos = p.reader.module_nodes[id].pos
+                if form == 1:
+                    text = p.stores.host[0].bytes_slice(p.source, (pos & 0xFFFFFFFFFF) + 1, p.reader.module_nodes[id].ival)
+                    if text == "test": tag = 1
+                    if text == "shadowable": tag = 2
+                if tag == 1:
+                    if marked != 0: p.stores.host[0].fatal(pos, "a second `$test` line: one marks the function just after it")
+                    if form == 5: marked = int(p.reader.module_nodes[id].a)
+                    else:
+                        marked = node_mk(nodes, .test_, pos)
+                        nodes[marked].aux = 1
+                    p.reader.module_nodes.clear()
+                    p.reader.module_lists.clear()
+                    if p.at == before: p.stores.host[0].dn_error(p.tokens[p.at].start, "expected a declaration")
+                    continue
+                if tag == 2:
+                    if shadowable_pos != 0: p.stores.host[0].fatal(pos, "a second `$shadowable`: one marks the const just after it")
+                    if p.tokens[p.at].symbol != .kw_const: p.stores.host[0].fatal(pos, "`$shadowable` marks a module-level const: `$shadowable const name = ...`")
+                    shadowable_pos = pos
+                    p.reader.module_nodes.clear()
+                    p.reader.module_lists.clear()
+                    continue
+        made = host.declarations(statement, (file << 40) | p.tokens[before].start)
+        made = host.finish_statement(made, shadowable_pos != 0)
+        shadowable_pos = 0
+        loop declaration in made: declarations.push(declaration)
+        if marked != 0:
+            host.test_attach(marked, made)
+            declarations.push(marked)
+            marked = 0
+        p.reader.module_nodes.clear()
+        p.reader.module_lists.clear()
+        if p.at == before: p.stores.host[0].dn_error(p.tokens[p.at].start, "expected a declaration")
+    host.finish_checks(p.tokens[p.at].start)
+    if marked != 0: p.stores.host[0].fatal(nodes[marked].pos, "`$test` marks a module-level function: put it on the line just before one")
+    if shadowable_pos != 0: p.stores.host[0].fatal(shadowable_pos, "`$shadowable` marks a module-level const: put it just before one")
+    if p.reader.dc_lib_lazy:
+        p.reader.dc_lazy_tokens[file] = p.tokens
+        p.reader.dc_lib_lazy = false
+    p.tokens = []
+    p.reader.module_nodes = []
+    p.reader.module_lists = []
+    p.reader.dn_edits_on = saved_edits
+    host.finish_declarations(declarations)

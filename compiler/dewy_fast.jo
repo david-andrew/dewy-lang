@@ -1,3 +1,4 @@
+use 'dewy_file.dewy'
 use 'dewy_reader.dewy'
 use 'dewy_reader_services.jo'
 use 'dewy_parser.dewy'
@@ -541,63 +542,23 @@ dewy_fast_file = (file: int) -> int[]:
     dc_parser.tokens = dn_lex(file, 0, len(files[file].src))
     dn_skip_bodies = false
     dw_dir_lexed(file)
-    dc_parser.reader.dc_lazy_on = dc_lazy_allowed(file)
-    dc_parser.reader.dc_lib_lazy = lib_lazy and not dc_parser.reader.dc_lazy_on
-    if dc_parser.reader.dc_lazy_on:
-        # Buffer even warnings preceding the first deferred declaration.
-        dc_lazy_used = true
-        dc_parser.reader.dc_lazy_tokens[file] = dc_parser.tokens
-    if dc_parser.reader.dc_lib_lazy: dc_lib_lazy_files[file] = true
-    dc_parser.at = 0
-    dc_parser.reader.dn_angles = 0
-    dc_parser.reader.dn_depth = 0
-    dc_parser.reader.module_nodes = []
-    dc_parser.reader.module_lists = []
-    declarations: int[]
-    marked = 0
-    shadowable_pos = 0
-    loop dc_parser.tokens[dc_parser.at].kind != .eof:
-        before = dc_parser.at
-        syntax = dn_statement(true)
-        tag = dw_test_tag(syntax)
-        if tag != 0:
-            if marked != 0: fatal(dc_parser.reader.module_nodes[-1 - tag].pos, "a second `$test` line: one marks the function just after it")
-            marked = dw_test_spec(tag)
-            if dc_parser.at == before: dn_error(dc_parser.tokens[dc_parser.at].start, "expected a declaration")
-            dc_parser.reader.module_nodes.clear()
-            dc_parser.reader.module_lists.clear()
-            continue
-        shadow_tag = dw_shadowable_tag(syntax)
-        if shadow_tag != 0:
-            if shadowable_pos != 0: fatal(dc_parser.reader.module_nodes[-1 - shadow_tag].pos, "a second `$shadowable`: one marks the const just after it")
-            if dc_parser.tokens[dc_parser.at].symbol != .kw_const: fatal(dc_parser.reader.module_nodes[-1 - shadow_tag].pos, "`$shadowable` marks a module-level const: `$shadowable const name = ...`")
-            shadowable_pos = dc_parser.reader.module_nodes[-1 - shadow_tag].pos
-            dc_parser.reader.module_nodes.clear()
-            dc_parser.reader.module_lists.clear()
-            continue
-        made = dw_top_declarations(syntax, mkpos(file, dc_parser.tokens[before].start))
-        if oom_files.len() > 0: made = oom_wrap_all(made)
-        if shadowable_pos != 0:
-            loop declaration in made: shadowable_decls[declaration] = true
-            shadowable_pos = 0
-        loop declaration in made: declarations.push(declaration)
-        if marked != 0:
-            dw_test_attach(marked, made)
-            declarations.push(marked)
-            marked = 0
-        dc_parser.reader.module_nodes.clear()
-        dc_parser.reader.module_lists.clear()
-        if dc_parser.at == before: dn_error(dc_parser.tokens[dc_parser.at].start, "expected a declaration")
-    if proof_pending: dn_error(dc_parser.tokens[dc_parser.at].start, "$proof requires a following function declaration")
+    df_file(dc_parser, nodes, dc_file_host, saved_edits_on, lib_lazy, dc_lazy_allowed(file))
+
+# File/lexer setup above may load directive bundles before entering the driver.
+# These services only update their own tables; none enters a reader.
+df_note_lazy = (file: int, deferred: bool, library: bool):
+    if deferred: dc_lazy_used = true
+    if library: dc_lib_lazy_files[file] = true
+
+df_finish_statement = (made: int[], shadowable: bool) -> int[]:
+    out = if oom_files.len() > 0: oom_wrap_all(made) else: made
+    if shadowable:
+        loop declaration in out: shadowable_decls[declaration] = true
+    out
+
+df_finish_checks = (offset: int):
+    if proof_pending: dn_error(offset, "$proof requires a following function declaration")
     if dir_bundles.len() > 0: dir_bundles_resolve()
     if dw_export_pos != 0: fatal(dw_export_pos, "`$export` marks a module-level function: put it before one, on its line or the line above")
-    if marked != 0: fatal(nodes[marked].pos, "`$test` marks a module-level function: put it on the line just before one")
-    if shadowable_pos != 0: fatal(shadowable_pos, "`$shadowable` marks a module-level const: put it just before one")
-    if dc_parser.reader.dc_lib_lazy:
-        dc_parser.reader.dc_lazy_tokens[file] = dc_parser.tokens
-        dc_parser.reader.dc_lib_lazy = false
-    dc_parser.tokens = []
-    dc_parser.reader.module_nodes = []
-    dc_parser.reader.module_lists = []
-    dc_parser.reader.dn_edits_on = saved_edits_on
-    dw_finish_declarations(declarations)
+
+dc_file_host = ParserFileHost(df_note_lazy, dw_top_declarations, df_finish_statement, dw_test_attach, df_finish_checks, dw_finish_declarations)

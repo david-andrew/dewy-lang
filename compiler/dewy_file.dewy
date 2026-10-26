@@ -1,0 +1,93 @@
+# The file driver receives a lexed file and owns its statement loop, markers and
+# reader lifetime. Jo supplies file/lexer setup and effectful module services.
+# Services never enter a reader; recursive bundle loading finishes in the adapter
+# before this entry point, while its caller's lexed tokens wait.
+$runtime_checks
+from p"dewy_parser.dewy" import ParserContext
+from p"dewy_reader.dewy" import rd_dn_statement, rd_mkpos, rd_pos_off
+from p"node_store.dewy" import Node, node_mk
+
+ParserFileHost:type=[
+    note_lazy:<(file:int64 deferred:bool library:bool):>void>
+    declarations:<(statement:int64 pos:int64):>array<int64>>
+    finish_statement:<(made:array<int64> shadowable:bool):>array<int64>>
+    test_attach:<(marked:int64 made:array<int64>):>void>
+    finish_checks:<(offset:int64):>void>
+    finish_declarations:<(made:array<int64>):>array<int64>>
+]
+
+df_file=(@p:ParserContext @nodes:array<Node> host:ParserFileHost saved_edits:bool lib_lazy:bool lazy:bool):>array<int64>=>$unsafe {
+    let file=p.file
+    p.reader.dc_lazy_on=lazy
+    p.reader.dc_lib_lazy=lib_lazy and not lazy
+    host.note_lazy(file lazy p.reader.dc_lib_lazy)
+    if lazy {p.reader.dc_lazy_tokens[file]=p.tokens}
+    p.at=0
+    p.reader.dn_angles=0
+    p.reader.dn_depth=0
+    p.reader.module_nodes=[]
+    p.reader.module_lists=[]
+    let declarations:array<int64>=[]
+    let marked:int64=0
+    let shadowable_pos:int64=0
+    loop p.tokens[p.at].kind not=? 'eof' {
+        let before=p.at
+        let statement=rd_dn_statement(@p @nodes true)
+        if statement <? 0 {
+            let id=-1 - statement
+            if p.reader.module_nodes[id].kind =? 'build_' {
+                let form=p.reader.module_nodes[id].aux
+                let tag:int64=if form =? 5 1 else 0
+                let pos=p.reader.module_nodes[id].pos
+                if form =? 1 {
+                    let text=p.stores.host[0].bytes_slice(p.source rd_pos_off(pos) + 1 p.reader.module_nodes[id].ival)
+                    if text =? "test" {tag=1}
+                    if text =? "shadowable" {tag=2}
+                }
+                if tag =? 1 {
+                    if marked not=? 0 {p.stores.host[0].fatal(pos "a second `$test` line: one marks the function just after it")}
+                    if form =? 5 {marked=int64(p.reader.module_nodes[id].a)} else {
+                        marked=node_mk(@nodes 'test_' pos)
+                        nodes[marked].aux=1
+                    }
+                    p.reader.module_nodes.clear()
+                    p.reader.module_lists.clear()
+                    if p.at =? before {p.stores.host[0].dn_error(p.tokens[p.at].start "expected a declaration");}
+                    continue
+                }
+                if tag =? 2 {
+                    if shadowable_pos not=? 0 {p.stores.host[0].fatal(pos "a second `$shadowable`: one marks the const just after it")}
+                    if p.tokens[p.at].symbol not=? 'kw_const' {p.stores.host[0].fatal(pos "`$shadowable` marks a module-level const: `$shadowable const name = ...`")}
+                    shadowable_pos=pos
+                    p.reader.module_nodes.clear()
+                    p.reader.module_lists.clear()
+                    continue
+                }
+            }
+        }
+        let made=host.declarations(statement rd_mkpos(file p.tokens[before].start))
+        made=host.finish_statement(made shadowable_pos not=? 0)
+        shadowable_pos=0
+        loop declaration in made {declarations.push(declaration)}
+        if marked not=? 0 {
+            host.test_attach(marked made)
+            declarations.push(marked)
+            marked=0
+        }
+        p.reader.module_nodes.clear()
+        p.reader.module_lists.clear()
+        if p.at =? before {p.stores.host[0].dn_error(p.tokens[p.at].start "expected a declaration");}
+    }
+    host.finish_checks(p.tokens[p.at].start)
+    if marked not=? 0 {p.stores.host[0].fatal(nodes[marked].pos "`$test` marks a module-level function: put it on the line just before one")}
+    if shadowable_pos not=? 0 {p.stores.host[0].fatal(shadowable_pos "`$shadowable` marks a module-level const: put it just before one")}
+    if p.reader.dc_lib_lazy {
+        p.reader.dc_lazy_tokens[file]=p.tokens
+        p.reader.dc_lib_lazy=false
+    }
+    p.tokens=[]
+    p.reader.module_nodes=[]
+    p.reader.module_lists=[]
+    p.reader.dn_edits_on=saved_edits
+    host.finish_declarations(declarations)
+}

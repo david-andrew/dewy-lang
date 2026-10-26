@@ -29,7 +29,11 @@ def environment(lib: Path) -> dict[str, str]:
 
 
 def build_pair(seed: Path, work: Path, release: bool) -> tuple[Path, Path]:
-    """Change only the reader import; all other Dewy leaves remain production code."""
+    """Use the frozen driver to reach the frozen reader; other leaves stay Dewy.
+
+    The production Dewy driver imports its reader directly, so swapping Jo
+    imports alone would leave module statements on the production reader.
+    """
     tree = work / 'source'
     shutil.rmtree(tree, ignore_errors=True)
     shutil.copytree(ROOT / 'compiler', tree / 'compiler')
@@ -44,7 +48,9 @@ def build_pair(seed: Path, work: Path, release: bool) -> tuple[Path, Path]:
         if side == 'twin':
             for path in (tree / 'compiler').glob('*.jo'):
                 text = path.read_text()
-                path.write_text(text.replace("use 'dewy_reader.dewy'", "use 'dewy_reader.jo'"))
+                for module in ('dewy_file', 'dewy_reader'):
+                    text = text.replace(f"use '{module}.dewy'", f"use '{module}.jo'")
+                path.write_text(text)
         binary = work / f'{side}-{mode}'
         run = subprocess.run([seed, 'build', tree / 'compiler/main.jo', '-o', binary,
                               *(['--release'] if release else [])], cwd=ROOT,
