@@ -2297,7 +2297,8 @@ as `values[key]` does. `values.pop(key default=none)` returns the default for a
 missing key instead. `values.remove(key)` returns whether it removed an entry.
 
 `totaldict<K V>` is a dictionary with an entry for every value of a finite key
-type (a union of literals). Its literal must list every key, and the error names
+type (a union of literals). Integer key intervals may span at most 4096 steps
+(4097 values) each; wider intervals are rejected. Its literal must list every key, and the error names
 the missing ones; it has no `pop` or `clear`. A `totaldict` parameter takes a
 literal, another `totaldict`, or a `const` dictionary whose literal has every
 key; a `dict<K V>` that may be partial does not pass:

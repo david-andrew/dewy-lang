@@ -1,0 +1,43 @@
+# Frozen bootstrap twin of refine_strings.dewy. Change both, or neither.
+use 'checker_types.dewy'
+use 'checker_services.dewy'
+use 'node_store.dewy'
+
+ref_string_set_type = (sets: mut str[][], set_types: mut int[], types: mut TypeInfo[], structs: mut StructInfo[], variants: mut Variant[], host: mut CheckerInternHost, field_count: int, values: str[]) -> int:
+    id = 0
+    loop i in [1..sets.len()):
+        if id == 0 and sets[i].len() == values.len():
+            same = true
+            loop value in values:
+                if not sets[i].contains(value): same = false
+            if same: id = i
+    if id == 0:
+        sets.push(values)
+        set_types.push(0)
+        id = sets.len() - 1
+    if set_types[id] != 0: return set_types[id]
+    text = ""
+    loop value in sets[id]:
+        if len(text) > 0: text += " | "
+        text += "'{value}'"
+    si = StructInfo(decl = 0, name = text, resolved = true)
+    si.lit_set = i32(id)
+    si.variants = i32(variants.len())
+    si.nvariants = i32(values.len())
+    loop i in 0.. and value in sets[id]:
+        variants.push(Variant(name = i32(host.intern_name(value)), fields = i32(field_count), nfields = 0, tag = i32(i), value = i))
+    idx = structs.len()
+    structs.push(si)
+    types.push(TypeInfo(kind = .enum_, st = i32(idx)))
+    structs[idx].type = i32(types.len() - 1)
+    set_types[id] = types.len() - 1
+    types.len() - 1
+
+
+ref_string_set_const = (sets: mut str[][], set_types: mut int[], store: mut Node[], host: mut CheckerInternHost, id: int, i: int, pos: int) -> int:
+    c = node_mk(store, .dotname, pos)
+    store[c].name = i32(host.intern_name(sets[id][i]))
+    store[c].aux = i32(i)
+    store[c].type = i32(set_types[id])
+    store[c].flags = i32(int(store[c].flags) | NODE_CHECKED)
+    c

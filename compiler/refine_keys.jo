@@ -24,6 +24,8 @@ ref_finite_keys = (types: mut TypeInfo[], structs: mut StructInfo[], args: mut i
     known, intervals = ref_type_intervals(types, predicates, t, math_int)
     if not known: return (false, out)
     loop k in [0..intervals.len() / 2):
-        if intervals[2 * k + 1] - intervals[2 * k] > 4096: return (false, out)
+        # lo <= hi: reject the upper half of the unsigned distance as well.
+        distance = intervals[2 * k + 1] - intervals[2 * k]
+        if distance < 0 or distance > 4096: return (false, out)
         loop v in [intervals[2 * k]..intervals[2 * k + 1]]: out.push("{v}")
     (true, out)

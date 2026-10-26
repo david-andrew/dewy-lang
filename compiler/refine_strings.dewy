@@ -1,0 +1,50 @@
+$runtime_checks
+from p"checker_types.dewy" import TypeInfo, StructInfo, Variant
+from p"checker_services.dewy" import CheckerInternHost
+from p"node_store.dewy" import Node, node_mk, NODE_CHECKED
+
+# The owner lends all published arenas. Preserve first-spelled set order and
+# the existing O(S * M^2) membership search; only a new set calls the host.
+ref_string_set_type=(@sets:array<array<string>> @set_types:array<int64> @types:array<TypeInfo> @structs:array<StructInfo> @variants:array<Variant> @host:CheckerInternHost field_count:int64 values:array<string>):>int64=>{
+    let id:int64=0
+    loop i in [1..sets.length) {
+        if id =? 0 and sets[i].length =? values.length {
+            let same=true
+            loop value in values {if not sets[i].contains(value) {same=false}}
+            if same {id=i}
+        }
+    }
+    if id =? 0 {
+        sets.push(values)
+        set_types.push(0)
+        id=sets.length - 1
+    }
+    if set_types[id] not=? 0 {return set_types[id]}
+    let text=""
+    loop value in sets[id] {
+        if (text as array<uint8>).length >? 0 {text="{text} | "}
+        text="{text}'{value}'"
+    }
+    let si=StructInfo[name=text resolved=true lit_set=int32(id) variants=int32(variants.length) nvariants=int32(values.length)]
+    loop i in [0..sets[id].length) {
+        let name=host.intern_name(sets[id][i])
+        variants.push(Variant[name=int32(name) fields=int32(field_count) tag=int32(i) value=i])
+    }
+    let idx=structs.length
+    structs.push(si)
+    types.push(TypeInfo[kind='enum_' st=int32(idx)])
+    structs[idx].type=int32(types.length - 1)
+    set_types[id]=types.length - 1
+    types.length - 1
+}
+
+# Construct the checked enum value directly, without a per-field host accessor.
+ref_string_set_const=(@sets:array<array<string>> @set_types:array<int64> @store:array<Node> @host:CheckerInternHost id:int64 i:int64 pos:int64):>int64=>{
+    let c=node_mk(@store 'dotname' pos)
+    let name=host.intern_name(sets[id][i])
+    store[c].name=int32(name)
+    store[c].aux=int32(i)
+    store[c].type=int32(set_types[id])
+    store[c].flags=int32(int64(store[c].flags) | NODE_CHECKED)
+    c
+}

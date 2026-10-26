@@ -50,20 +50,15 @@ def corpus():
             return True, out
         if node[0] == 'integer' and not math:
             lo, hi, gaps = node[1:]
-            # Materialize the bounded test domain, then group adjacent points;
-            # the production budget applies independently to each run.
-            points = [v for v in range(lo, hi + 1) if v not in gaps]
-            runs = []
-            for v in points:
-                if runs and runs[-1][-1] + 1 == v:
-                    runs[-1].append(v)
-                else:
-                    runs.append([v])
+            # Split symbolic intervals before materializing any bounded run;
+            # Python arithmetic independently represents distances up to 2^64-1.
             out = []
-            for run in runs:
-                if len(run) > 4097:
+            start = lo
+            for gap in sorted(set(v for v in gaps if lo <= v <= hi)) + [hi + 1]:
+                if gap - start > 4097:
                     return False, out
-                out.extend(map(str, run))
+                out.extend(map(str, range(start, gap)))
+                start = gap + 1
             return True, out
         return False, []
 
@@ -100,6 +95,12 @@ def corpus():
         if rng.randrange(3) == 0:
             children.insert(rng.randrange(len(children) + 1), 1)
         query(union(children))
+    for lo, hi in ((MIN, MAX), (MIN, 0), (-1, MAX), (MIN, -1), (0, MAX),
+                   (MIN, MIN + 4096), (MIN, MIN + 4097),
+                   (MAX - 4096, MAX), (MAX - 4097, MAX)):
+        query(integer(lo, hi))
+    query(integer(MIN, MAX, [MIN + 2]))  # retain the small prefix before overflow
+    query(union([words, integer(MIN, MAX)]))
     query(integer(0, 4096))
     query(integer(0, 4097))
     query(integer(0, 4100, [1]))  # first run retained when a later run is too wide

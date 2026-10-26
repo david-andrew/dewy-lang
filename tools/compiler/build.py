@@ -23,7 +23,9 @@ ROOT = HERE.parents[1]
 # Steps 1 and 2 cannot read Dewy, so there every `use 'X.dewy'` in compiler/
 # names X.dewy's frozen implementation-language twin instead. Steps 3 on
 # compile the Dewy modules, so the compiler that ships runs them.
-FROZEN_TWINS = {'refine_keys.dewy': 'refine_keys.jo',
+FROZEN_TWINS = {'checker_services.dewy': 'checker_services.jo',
+               'refine_strings.dewy': 'refine_strings.jo',
+               'refine_keys.dewy': 'refine_keys.jo',
                'type_queries.dewy': 'type_queries.jo',
                'refine_intervals.dewy': 'refine_intervals.jo',
                'refine_queries.dewy': 'refine_queries.jo',

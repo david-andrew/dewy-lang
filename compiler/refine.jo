@@ -1,3 +1,5 @@
+use 'checker_services.dewy'
+use 'refine_strings.dewy'
 use 'refine_keys.dewy'
 use 'refine_queries.dewy'
 use 'refine_predicates.dewy'
@@ -63,34 +65,12 @@ representation_deep = (t0: int) -> int:
 # compare that word, and the text is made only where the value meets a string.
 str_sets: str[][] = [[]]
 str_set_types: int[] = [0]
+ref_intern_host = CheckerInternHost(intern)
 
 # (a set keeps its first spelling's order: its words, which Jo code switching on a
 # Dewy enumeration shares; `members(U)` has its own, canonical order)
 str_set_type = (values: str[]) -> int:
-    id = 0
-    loop i in [1..str_sets.len()):
-        if id == 0 and str_sets[i].len() == values.len():
-            same = true
-            loop value in values:
-                if not str_sets[i].contains(value): same = false
-            if same: id = i
-    if id == 0:
-        str_sets.push(values)
-        str_set_types.push(0)
-        id = str_sets.len() - 1
-    if str_set_types[id] != 0: return str_set_types[id]
-    si = StructInfo(decl = 0, name = str_set_text(id), resolved = true)
-    si.lit_set = i32(id)
-    si.variants = i32(variants.len())
-    si.nvariants = i32(values.len())
-    loop i in 0.. and value in str_sets[id]:
-        variants.push(Variant(name = i32(intern(value)), fields = i32(fields.len()), nfields = 0, tag = i32(i), value = i))
-    idx = structs.len()
-    structs.push(si)
-    types.push(TypeInfo(kind = .enum_, st = i32(idx)))
-    structs[idx].type = i32(types.len() - 1)
-    str_set_types[id] = types.len() - 1
-    types.len() - 1
+    ref_string_set_type(str_sets, str_set_types, types, structs, variants, ref_intern_host, fields.len(), values)
 
 # the string set a type is, or 0
 str_set_of = (t0: int) -> int:
@@ -172,12 +152,7 @@ call_result_type = (n: int) -> int:
 
 # member i of set id as a constant
 str_set_const = (id: int, i: int, pos: int) -> int:
-    c = mk(.dotname, pos)
-    nodes[c].name = i32(intern(str_sets[id][i]))
-    nodes[c].aux = i32(i)
-    nodes[c].type = i32(str_set_types[id])
-    add_flag(c, NF_CHECKED)
-    c
+    ref_string_set_const(str_sets, str_set_types, nodes, ref_intern_host, id, i, pos)
 
 str_set_text = (id: int) -> str:
     text = ""

@@ -36,7 +36,8 @@ ref_finite_keys=(@types:array<TypeInfo> @structs:array<StructInfo> @args:array<i
         let lo=intervals[2 * k]
         let hi=intervals[2 * k + 1]
         let distance:int64=int64<overflow='wrap'>(hi) - int64<overflow='wrap'>(lo)
-        if distance >? 4096 {return [false out]}
+        # lo <= hi: a negative wrapped distance is at least 2^63, never finite.
+        if distance <? 0 or distance >? 4096 {return [false out]}
         loop v in [lo..hi] {out.push("{v}")}
     }
     [true out]

@@ -1,0 +1,72 @@
+use '../../../compiler/checker_services.jo'
+use '../../../compiler/checker_types.jo'
+use '../../../compiler/node_store.jo'
+use '../../../compiler/refine_strings.jo'
+
+texts: str[] = [""]
+calls: int[]
+intern_text = (text: str) -> int:
+    id = texts.index_of(text)
+    if id < 0:
+        id = texts.len()
+        texts.push(text)
+    calls.push(id)
+    id
+host = CheckerInternHost(intern_text)
+read_i = (text: str) -> int: to_int(text) ?? 0
+hex_text = (text: str) -> str:
+    out = ""
+    loop c in text:
+        out += "0123456789abcdef"[int(c) >> 4..(int(c) >> 4) + 1)
+        out += "0123456789abcdef"[int(c) & 15..(int(c) & 15) + 1)
+    out
+
+main = () -> int:
+    argv = args()
+    blob = read_file(argv[2]) ?? ""
+    sets: str[][] = [[]]
+    set_types = [0]
+    types = [TypeInfo()]
+    structs = [StructInfo()]
+    variants: Variant[]
+    nodes = [Node()]
+    loop line in split(read_file(argv[1]) ?? "", "\n"):
+        p = split(line, " ")
+        before = calls.len()
+        if p[0] == "S":
+            values: str[]
+            loop i in [0..read_i(p[2])):
+                at = read_i(p[3 + 2 * i])
+                values.push(blob[at..at + read_i(p[4 + 2 * i])))
+            t = ref_string_set_type(sets, set_types, types, structs, variants, host, read_i(p[1]), values)
+            # Mutation of the caller's array cannot alter the stored first spelling.
+            values.push("caller-only")
+            si = int(types[t].st)
+            id = int(structs[si].lit_set)
+            print("T {t} {id} {types[t].kind == .enum_} {types.len()} {structs.len()} {variants.len()} {int(structs[si].type)} {structs[si].resolved} {hex_text(structs[si].name)}")
+            loop i in [0..int(structs[si].nvariants)):
+                v = variants[int(structs[si].variants) + i]
+                print("V {v.name} {v.fields} {v.nfields} {v.tag} {v.value}")
+        else if p[0] == "C":
+            c = ref_string_set_const(sets, set_types, nodes, host, read_i(p[1]), read_i(p[2]), read_i(p[3]))
+            n = nodes[c]
+            print("C {c} {n.kind == .dotname} {n.name} {n.aux} {n.type} {n.pos} {n.flags} {n.a} {n.b} {n.sval}")
+        else if p[0] == "P":
+            loop _ in [0..read_i(p[1])):
+                types.push(TypeInfo())
+                structs.push(StructInfo())
+                variants.push(Variant())
+                nodes.push(Node())
+        else if p[0] == "X": set_types[read_i(p[1])] = 0
+        else if p[0] == "R":
+            sets = [[]]
+            set_types = [0]
+            types = [TypeInfo()]
+            structs = [StructInfo()]
+            variants = []
+            nodes = [Node()]
+            texts = [""]
+            calls = []
+            before = 0
+        loop i in [before..calls.len()): print("I {calls[i]}")
+    0
