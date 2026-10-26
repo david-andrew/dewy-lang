@@ -1,0 +1,7 @@
+$runtime_checks
+store=(@xs:array<int64> i:int64)=>{
+    $runtime_checks
+    xs[i]=7
+    {$runtime_checks=false printl(xs[i])}
+}
+main=()=>{let xs:array<int64>=[1 2] store(@xs 1)}

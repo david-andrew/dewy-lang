@@ -1158,7 +1158,21 @@ fact_route_bounds = (s: mut FactState, route: FactRoute, values: int[]):
         lo = fact_compare(s, .le, zero, index)
         hi = fact_compare(s, .lt, index, length)
         dir_index(n, lo == 1 and hi == 1)
-        if lo != 1 or hi != 1: wit_index(n, s, index, length, lo, hi)
+        if lo != 1 or hi != 1:
+            wit_index(n, s, index, length, lo, hi)
+            fact_index_success(n, s, index, length)
+
+# A completed checked access establishes its captured bounds on the normal
+# edge. The obligation is answered FIRST; an unproven no-traps access never
+# supplies its own proof. Only final walks use this transfer, not speculative
+# loop candidates or return summaries. Value identities retire naturally on
+# replacement/resizing. O(1) indexed rows/bounds under the fact-state budget.
+fact_index_success = (n: int, s: mut FactState, index: int, length: int):
+    if fact_speculating != 0 or fact_query or dir_policy(nodes[n].pos) == DIR_STATIC: return
+    if proof_active and fact_owner > 0 and proof_decls.has(int(fns[fact_owner].decl)): return
+    if index == 0 or length == 0 or not s.live: return
+    fact_assume(s, fact_new(s, fact_domain(T_BOOL), FactTerm(.le, fact_constant(s, 0), index, n)), true)
+    fact_assume(s, fact_new(s, fact_domain(T_BOOL), FactTerm(.lt, index, length, n)), true)
 
 # Effect verification asks which accesses a body's own facts keep in bounds.
 # A probe records answers instead of reporting obligations. Borrowed partition
@@ -1229,7 +1243,9 @@ fact_probe_record = (n: int, proven: bool):
 
 fact_probe_index = (n: int, s: mut FactState, index: int, length: int):
     zero = fact_constant(s, 0)
-    fact_probe_record(n, fact_compare(s, .le, zero, index) == 1 and fact_compare(s, .lt, index, length) == 1)
+    proven = fact_compare(s, .le, zero, index) == 1 and fact_compare(s, .lt, index, length) == 1
+    fact_probe_record(n, proven)
+    if not proven: fact_index_success(n, s, index, length)
 
 # (a check of the probe's own: the facts pass would not make this constant)
 fact_probe_divisor = (n: int, s: mut FactState, divisor: int, operand: int):
@@ -6106,6 +6122,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                 else:
                     dir_index(n, lo == 1 and hi == 1)
                     if lo != 1 or hi != 1: wit_index(n, s, index, length, lo, hi)
+                if lo != 1 or hi != 1: fact_index_success(n, s, index, length)
             return fact_project(s, base, index, true, int(types[t].elem))
         return fact_unmodeled(s, n, .unsupported)
     # `fill(x n)`, an array of n copies (none when n is negative): the value,

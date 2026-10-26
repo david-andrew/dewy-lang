@@ -1,0 +1,8 @@
+$runtime_checks
+R:type=[left:int64 right:int64]
+work=(@xs:array<R> i:int64)=>{
+    $runtime_checks
+    xs[i].left=7
+    {$runtime_checks=false xs[i].right=9 printl(xs[i].left xs[i].right)}
+}
+main=()=>{let xs=[R[1 2]] work(@xs 0)}

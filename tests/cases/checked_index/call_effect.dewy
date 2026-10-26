@@ -1,0 +1,9 @@
+$runtime_checks
+erase=(@xs:array<int64>)=>{xs.clear();}
+work=(@xs:array<int64> i:int64)=>{
+    $runtime_checks
+    printl(xs[i])
+    erase(@xs)
+    {$runtime_checks=false printl(xs[i])}
+}
+main=()=>{let xs:array<int64>=[7] work(@xs 0)}

@@ -1,0 +1,7 @@
+$runtime_checks
+work=(@xs:array<int64> i:int64)=>{
+    let snapshot=xs
+    let first=snapshot[i]
+    {$runtime_checks=false printl(first xs[i])}
+}
+main=()=>{let xs:array<int64>=[7] work(@xs 0)}

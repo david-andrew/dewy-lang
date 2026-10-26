@@ -673,6 +673,12 @@ takes a handle to a function that may panic. A scope without runtime checks
 error names the chain to the panic and offers both repairs, proving what the
 callee checks first or opting in with `$runtime_checks`. So a function built
 with `$runtime_checks` cannot fail inside a caller that did not opt in.
+After an array access completes its runtime bounds check, later accesses to
+those same captured values can use the successful check's bounds. This also
+holds inside a later `$runtime_checks=false` block. The first check remains a
+possible panic; replacing or resizing the array, or changing the index, does
+not transfer its bounds to the new values. A check on only one branch or in a
+possibly empty loop supplies no fact after the join.
 Index proofs retain nested array lengths through element writes in branches
 and loops. A checked helper that preserves or grows an array's length can
 preserve a caller's guarded index; an append helper's returned index can be

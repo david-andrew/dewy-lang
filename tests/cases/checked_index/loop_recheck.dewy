@@ -1,0 +1,10 @@
+# exit: 101
+$runtime_checks
+work=(@xs:array<int64> i:int64)=>{
+    loop k in [0..2) {
+        let first=xs[i]
+        {$runtime_checks=false printl(first xs[i])}
+        xs.clear();
+    }
+}
+main=()=>{let xs:array<int64>=[7] work(@xs 0)}

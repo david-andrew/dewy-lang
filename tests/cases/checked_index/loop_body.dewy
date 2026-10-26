@@ -1,0 +1,9 @@
+$runtime_checks
+work=(xs:array<int64> i:int64)=>{
+    $runtime_checks
+    loop k in [0..2) {
+        printl(xs[i])
+        {$runtime_checks=false printl(xs[i])}
+    }
+}
+main=()=>work([7] 0)
