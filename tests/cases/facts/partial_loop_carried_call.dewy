@@ -1,0 +1,13 @@
+# A partial application of a closure sharing the best index writes it when called.
+f = (xs:array<int>):>int => {
+    if xs.length =? 0 return 0
+    best = 0
+    let jump = ($capture @best a:int b:int):>void => {best = a + b}
+    loop i in [0..xs.length) {
+        let g = @jump(xs.length)
+        if xs[i] >? xs[best] best = i
+        if i =? 1 g(0)
+    }
+    xs[best]
+}
+printl(f([3 9 4]))

@@ -1,0 +1,21 @@
+# Creating a function handle writes nothing: facts about exposed values survive it.
+let items = [1 2 3]
+add = (a:int b:int):>int => a + b
+Box = type of [h:<(a:int b:int):>int>]
+f = (i:int):>int => {
+    if i <? 0 or i >=? items.length return 0
+    let g = @add
+    items[i] + g(1 2)
+}
+h = (i:int):>int => {
+    if i <? 0 or i >=? items.length return 0
+    let hs = [@add @add]
+    let b = Box(@add)
+    total = 0
+    loop k in [0..3) {
+        hs.push(@add)
+        total = total + items[i]
+    }
+    total + items[i] + hs[1](1 2) + b.h(3 4)
+}
+printl(f(1) h(1))

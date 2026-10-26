@@ -1,0 +1,12 @@
+# A partial application of a closure sharing the counter writes it when called.
+f = ():>int8 => {
+    let count:int8 = 0
+    let bump = ($capture @count a:int8 b:int8):>void => {count = a}
+    loop i in [0..100) {
+        let g = @bump(100)
+        if i >? 50 count += 1
+        if i =? 60 g(0)
+    }
+    count
+}
+printl(f())

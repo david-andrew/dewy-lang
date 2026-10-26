@@ -1,0 +1,9 @@
+# A handle stored in an array writes when called through its element.
+let items = [1 2 3]
+drop = (a:int b:int):>int => {items.clear(); a + b}
+f = (i:int):>int => {
+    if i <? 0 or i >=? items.length return 0
+    let hs = [@drop]
+    hs[0](1 2) + items[i]
+}
+printl(f(1))

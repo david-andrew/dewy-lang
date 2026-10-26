@@ -1,0 +1,22 @@
+# Partial applications in a loop body write nothing: a best index and a bounded counter carry.
+add = (a:int b:int):>int => a + b
+best_of = (xs:array<int>):>int => {
+    if xs.length =? 0 return 0
+    best = 0
+    total = 0
+    loop i in [0..xs.length) {
+        let g = @add(xs[i])
+        total = g(total)
+        if xs[i] >? xs[best] best = i
+    }
+    xs[best] + total
+}
+count_high = ():>int8 => {
+    let count:int8 = 0
+    loop i in [0..100) {
+        let g = @add(i)
+        if g(1) >? 50 count += 1
+    }
+    count
+}
+printl(best_of([3 9 4]) count_high())

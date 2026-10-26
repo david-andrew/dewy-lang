@@ -1,0 +1,9 @@
+# A handle passed to a function that calls it: that call forgets what it writes.
+let items = [1 2 3]
+drop = (a:int b:int):>int => {items.clear(); a + b}
+apply = (h:<(a:int b:int):>int>):>int => h(1 2)
+f = (i:int):>int => {
+    if i <? 0 or i >=? items.length return 0
+    apply(@drop) + items[i]
+}
+printl(f(1))

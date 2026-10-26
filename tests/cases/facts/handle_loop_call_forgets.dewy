@@ -1,0 +1,12 @@
+# A handle called in a loop: its writes are forgotten after the loop.
+let items = [1 2 3]
+drop = (a:int):>void => {if a >? 0 items.clear()}
+f = (i:int):>int => {
+    if i <? 0 or i >=? items.length return 0
+    loop k in [0..3) {
+        let g = @drop
+        g(k)
+    }
+    items[i]
+}
+printl(f(1))

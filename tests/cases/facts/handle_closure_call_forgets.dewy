@@ -1,0 +1,9 @@
+# A handle to a closure that shares a local writes it when called.
+f = (i:int):>int => {
+    let ys = [1 2 3]
+    drop = ($capture @ys a:int):>int => {ys.clear(); a}
+    if i <? 0 or i >=? ys.length return 0
+    let g = @drop
+    g(2) + ys[i]
+}
+printl(f(1))

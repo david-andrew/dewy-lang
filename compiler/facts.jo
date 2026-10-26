@@ -3030,6 +3030,11 @@ fact_partial_place = (n: int) -> bool:
         if nodes[e].kind == .addr: return true
     false
 
+# A function handle (`@f`) saves only the function, and a generic closure's
+# handle the closure value it reads: creating one writes nothing (its calls
+# forget what the function writes), unless ownership may move an owner. O(1).
+fact_handle_opaque = (n: int) -> bool: ownership_decls.len() != 0
+
 # Conservative loop fallback: pre-kill every syntactically changing route.
 # This is also used for iterators whose backedge transfer is not modeled.
 fact_changes = (n: int, s: mut FactState, at: int, reason: FactReason = .loop_):
@@ -5477,7 +5482,9 @@ fact_counted_sums = (n: int, s: FactState, count: int) -> (int, FactBound)[]:
         e = work.pop()
         if e == 0: continue
         k = nodes[e].kind
-        if k == .while_ or k == .for_ or k == .lambda or k == .partial or k == .defer_: return out
+        # (creating a partial application, like a handle, writes nothing; its
+        # calls write only places the flags below exclude)
+        if k == .while_ or k == .for_ or k == .lambda or k == .partial and fact_partial_opaque(e) or k == .defer_: return out
         if k == .assign:
             a = int(nodes[e].a)
             if nodes[a].kind == .tuple: return out
@@ -5809,7 +5816,7 @@ fact_index_carried = (body: int, l: int) -> int[]:
         e = work.pop()
         if e == 0: continue
         k = nodes[e].kind
-        if k == .lambda or k == .partial: return []
+        if k == .lambda or k == .partial and fact_partial_opaque(e): return []
         if k == .vardecl and nodes[e].sym > 0 and nodes[e].b != 0 and nkids(e) == 0:
             value = int(nodes[e].b)
             if nodes[value].kind == .ident and nodes[value].aux == i32(int(SK.local)) and int(nodes[value].sym) == l: copies[int(nodes[e].sym)] = true
@@ -6271,7 +6278,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
             else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and (nodes[n].op == i32(int(Tok.slash)) or nodes[n].op == i32(int(Tok.percent)) or fact_shift_obliged(n)): values.push(n)
         # (a closure writes only when called: fact_capture)
         else if k == .lambda and ownership_decls.len() == 0: pass
-        else if k == .lambda or k == .partial and fact_partial_opaque(n) or k == .fnref or k == .map_lit or k == .cast or mask < 0: opaque_writes.push(n)
+        else if k == .lambda or k == .partial and fact_partial_opaque(n) or k == .fnref and fact_handle_opaque(n) or k == .map_lit or k == .cast or mask < 0: opaque_writes.push(n)
         else if k == .str_lit and nodes[n].aux != 0: exposed_writes.push(n)
     # (a fork closure's creation reads its captures: their definitions)
     loop lam in forks:
@@ -6853,11 +6860,12 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
     if k == .lambda and fact_speculating == 0 and fact_fork_nodes.has(n): fact_fork_record(n, s)
     if k == .lambda and ownership_decls.len() == 0: return 0
     # (a partial application evaluates its arguments, holes aside, and saves
-    # them: the values its calls read; those calls forget what it may write)
+    # them, and a handle its closure value: the values its calls read; those
+    # calls forget what the function may write)
     if k == .lambda or k == .fnref or k == .partial:
         fact_capture(int(nodes[n].a), s)
         loop child in kids(n): fact_capture(child, s)
-        if k != .partial or fact_partial_opaque(n): fact_forget(s, n, .call, k == .partial and fact_partial_place(n))
+        if k == .lambda or k == .partial and fact_partial_opaque(n) or k == .fnref and fact_handle_opaque(n): fact_forget(s, n, .call, k == .partial and fact_partial_place(n))
         return 0
     if k == .unary:
         a = fact_capture(int(nodes[n].a), s)

@@ -1,0 +1,10 @@
+# A handle stored in a field writes when called through it.
+let items = [1 2 3]
+drop = (a:int b:int):>int => {items.clear(); a + b}
+Box = type of [h:<(a:int b:int):>int>]
+f = (i:int):>int => {
+    if i <? 0 or i >=? items.length return 0
+    let b = Box(@drop)
+    b.h(1 2) + items[i]
+}
+printl(f(1))
