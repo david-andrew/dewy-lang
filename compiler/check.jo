@@ -1,3 +1,4 @@
+use 'checker_state.dewy'
 use 'checker_tokens.dewy'
 use 'checker_types.dewy'
 use 'refinement_types.dewy'
@@ -112,117 +113,15 @@ open_globals: int[]             # globals made empty (`xs = []`) whose element t
 const LF_SHARED = 1024  # modified after a closure captured it, or by the closure: closures and
                         # the function share it by reference (it lives in a heap cell, see lower.jo)
 
-struct Local:
-    name: i32
-    type: i32
-    flags: i32
-    const_init: i32         # checked initializer for constant-expression contexts
-    alias: i32
-    owner: i32
-    pos: int
-    offset: i32
-    env_off: i32
-    vreg: i32
-    outer: i32      # LF_CAPTURE: the enclosing function's variable this one captures
-    dloops: i32     # loops being checked when it was declared
-    soa: i32        # LF_SOAELEM: the (unchecked) ps[i] it stands for
-    wloop: i32      # outermost loop (inside its scope) that modifies it before any capture
-
-struct Global:
-    name: i32
-    type: i32
-    decl: i32
-    mod: i32
-    sym: str
-    state: i32
-    is_const: bool
-    init: i32
-    addr: i32
-    fn_written: bool    # some function (not top-level code) changes it
-    init_written: bool = false    # top-level code changes it after its declaration
-    fn_accessed: bool = false     # reachable from a function or another module
-    exposed: bool = false         # raw address or non-map mutable argument
-
-struct Capture:
-    outer: i32
-    inner: i32
-
 const FK_NORMAL = 0
 const FK_LAMBDA = 1
 const FK_THUNK = 2
 const FK_PARTIAL = 3
 const FK_INIT = 4
 
-struct FnInst:
-    decl: i32
-    body: i32
-    targs: int[]
-    ptypes: int[]
-    params: int[]
-    ret: i32
-    sym: str
-    state: i32
-    kind: i32
-    has_env: bool
-    task_api: bool     # checked waiting-lane spawn boundaries
-    caps: Capture[]
-    env_size: i32
-    mod: i32
-    partial: i32
-    target: i32
-    locals: int[]
-    fntype: i32
-    cabi: bool
-    deterministic: bool # callback results should depend only on their state and inputs
-    parallel: bool      # @parallel: the functions it is given run on many threads at once
-    atomic_api: bool    # bundled atomic entry points need literal-order validation
-    write_sites: int[]  # finalization events for integer write proofs
-    writes_ready: bool
-    no_indexes: bool    # finalized normal body has no indexing; init/lambda bodies stay unknown
-    no_user_globals: bool # finalized body cannot mention a closed-program array candidate
-    noinline: bool      # @noinline: call it rather than copy it into its callers
-    gdepth: i32         # generic instances: how many were being checked, one inside the other, when it was made
-    export_name: str
-    aux_void: bool
-    clib: str
-    csym: str
-    cvariadic: i32      # @variadic(n): a C function with n fixed parameters, then C's `...` (0: none)
-    use_pos: int        # generic instances: the call that made it (for errors inside it) ...
-    made_in: i32        # ... in the body of this instance (0: none)
-    pack: int           # (Dewy) a body expressing several values: where the first extra one is (0: one value)
-    pack_n: int         # (Dewy) how many values a written result `:>(int64 int64)` gives (0: not written so)
-    pack_k: int         # (Dewy) how many values a call gives when the count is static, written or inferred (0: any number)
-
-struct FnSig:
-    contract: i32
-    ntp: i32
-    nexplicit: i32
-    params: int[]
-    ret: i32
-    mutmask: i32
-    generic: bool
-    done: bool
-
-struct DeclInfo:
-    insts: int[]
-    sig: FnSig
-
-struct FnInstanceKey:
-    decl: int
-    args: int[]
-
 # Concrete types are interned: their IDs are their equality keys. Keep the
 # declaration's instance list for inference-bearing arguments and IDE ordering.
 fn_instances: {FnInstanceKey: int} = {}
-
-struct FnCtx:
-    inst: i32
-    parent: i32
-    ret: i32
-    infer_ret: bool
-    loop_depth: i32
-    mod: i32
-    floor: i32
 
 syms: Sym[] = [Sym()]
 modules: Module[]
@@ -235,8 +134,7 @@ fns: FnInst[] = [FnInst()]
 decl_infos: DeclInfo[] = [DeclInfo()]
 ctxs: FnCtx[]
 cx = -1
-sc_names: int[]
-sc_syms: int[]
+check_scopes = CheckerScope()
 inst_counter = 0
 lib_dir = ""
 target_wasm = false
@@ -313,26 +211,24 @@ scope_add_module = (m: int, name: int, kind: SK, r: int, decl: int) -> int:
     s
 
 # Scopes are one stack of (name, symbol); each name also links its bindings, newest first, so
-# a lookup is one step instead of a scan: sc_top[name] -> newest index, sc_prev[i] -> older one.
-sc_prev: int[]
-sc_top: int[]
+# a lookup is one step instead of a scan: check_scopes.top[name] -> newest index, check_scopes.prev[i] -> older one.
 
 push_scope_sym = (name: int, sym: int):
-    loop sc_top.len() <= name: sc_top.push(-1)
-    sc_prev.push(sc_top[name])
-    sc_top[name] = sc_names.len()
-    sc_names.push(name)
-    sc_syms.push(sym)
+    loop check_scopes.top.len() <= name: check_scopes.top.push(-1)
+    check_scopes.prev.push(check_scopes.top[name])
+    check_scopes.top[name] = check_scopes.names.len()
+    check_scopes.names.push(name)
+    check_scopes.syms.push(sym)
 
-scope_mark = () -> int: sc_names.len()
+scope_mark = () -> int: check_scopes.names.len()
 scope_reset = (mark: int):
-    i = sc_names.len() - 1
+    i = check_scopes.names.len() - 1
     loop i >= mark:
-        sc_top[sc_names[i]] = sc_prev[i]
+        check_scopes.top[check_scopes.names[i]] = check_scopes.prev[i]
         i -= 1
-    sc_names.truncate(mark)
-    sc_syms.truncate(mark)
-    sc_prev.truncate(mark)
+    check_scopes.names.truncate(mark)
+    check_scopes.syms.truncate(mark)
+    check_scopes.prev.truncate(mark)
 
 # What a name reaches at module level changes only with a binding of that name or with the
 # module structure (imports; the universe, complete before checking starts). Each change takes
@@ -634,9 +530,9 @@ lookup = (name: int) -> int:
     if cx >= 0:
         floor = int(ctxs[cx].floor)
         m = int(ctxs[cx].mod)
-    if name < sc_top.len():
-        i = sc_top[name]
-        if i >= floor: return sc_syms[i]
+    if name < check_scopes.top.len():
+        i = check_scopes.top[name]
+        if i >= floor: return check_scopes.syms[i]
     module_lookup(m, name)
 
 # ---------------- "did you mean" ----------------
@@ -750,7 +646,7 @@ gone_local_hint = (nm: int, at: int) -> str:
 # names visible from the current scope: locals, the module, the standard library, built-ins
 visible_names = () -> int[]:
     prelude_demand_all()
-    out = sc_names
+    out = check_scopes.names
     loop k, v in modules[cur_mod()].names: out.push(k)
     loop k, v in prelude: out.push(k)
     loop k, v in universe: out.push(k)
@@ -928,7 +824,7 @@ ensure_bundled_import = (file: str, alias: str, pos: int):
 
 eval_when_toplevel = (m: int, w: int):
     saved = cx
-    ctxs.push(FnCtx(0, -1, i32(T_VOID), false, 0, i32(m), i32(sc_names.len())))
+    ctxs.push(FnCtx(0, -1, i32(T_VOID), false, 0, i32(m), i32(check_scopes.names.len())))
     cx = ctxs.len() - 1
     cond = const_eval_bool(int(nodes[w].a))
     ctxs.pop()
@@ -1221,14 +1117,14 @@ resolve_type = (tn: int) -> int:
     if k == .trecord:
         let fields = kids(tn)
         seen: {int: bool} = {}
-        old_fields = refine_fields
+        old_fields = refine_bindings.fields
         if refine_active:
-            refine_fields = []
+            refine_bindings.fields = []
             loop field in fields:
                 name = int(nodes[field].name)
                 i = 0
-                loop i < refine_fields.len() and name_of(refine_fields[i]) < name_of(name): i += 1
-                refine_fields.insert(i, name)
+                loop i < refine_bindings.fields.len() and name_of(refine_bindings.fields[i]) < name_of(name): i += 1
+                refine_bindings.fields.insert(i, name)
         loop field in fields:
             name = int(nodes[field].name)
             if seen.has(name): fatal(nodes[field].pos, "duplicate record field '{name_of(name)}'")
@@ -1237,7 +1133,7 @@ resolve_type = (tn: int) -> int:
             if tkind(t) == .void_ or tkind(t) == .typeval:
                 fatal(nodes[field].pos, "inline record fields need value types")
             nodes[field].type = i32(t)
-        refine_fields = old_fields
+        refine_bindings.fields = old_fields
         t = dewy_record_schema(tn, fields)
         if refine_active: ref_validate_record(t, nodes[tn].pos)
         return t
@@ -1278,23 +1174,23 @@ resolve_type = (tn: int) -> int:
         return mk_union(ms)
     if k == .tptr: return mk_ptr(resolve_type(int(nodes[tn].a)))
     if k == .tfn:
-        old_formals = refine_formals
-        old_self = refine_self
+        old_formals = refine_bindings.formals
+        old_self = refine_bindings.self
         if refine_active:
-            refine_formals = []
-            loop p in kids2(tn): refine_formals.push(int(nodes[p].name))
+            refine_bindings.formals = []
+            loop p in kids2(tn): refine_bindings.formals.push(int(nodes[p].name))
         ps: int[]
         mm = 0
         loop i in [0..nkids(tn)):
-            if i < refine_formals.len(): refine_self = refine_formals[i]
+            if i < refine_bindings.formals.len(): refine_bindings.self = refine_bindings.formals[i]
             ps.push(resolve_type(kid(tn, i)))
             if has_flag(kid(tn, i), NF_MUT): mm |= 1 << i
         ret = T_VOID
-        refine_self = 0
+        refine_bindings.self = 0
         if nodes[tn].a != 0: ret = resolve_result_type(int(nodes[tn].a))
         if refine_active: ref_validate_signature(ps, ret, mm, nodes[tn].pos)
-        refine_formals = old_formals
-        refine_self = old_self
+        refine_bindings.formals = old_formals
+        refine_bindings.self = old_self
         if has_flag(tn, NF_CABI): return mk_cfn(ps, ret)
         key = 0
         if nkids2(tn) > 0:
@@ -1373,7 +1269,7 @@ resolve_alias = (d: int, targs: int[], use_pos: int) -> int:
         fatal(nodes[d].pos, "type '{nm}' is defined in terms of itself")
     nodes[d].aux = 1
     saved = cx
-    ctxs.push(FnCtx(i32(new_inst(FK_INIT, int(nodes[d].mod), "typedef")), -1, i32(T_VOID), false, 0, nodes[d].mod, i32(sc_names.len())))
+    ctxs.push(FnCtx(i32(new_inst(FK_INIT, int(nodes[d].mod), "typedef")), -1, i32(T_VOID), false, 0, nodes[d].mod, i32(check_scopes.names.len())))
     cx = ctxs.len() - 1
     mark = scope_mark()
     push_type_params(d, targs)
@@ -1487,7 +1383,7 @@ check_struct_fields = (si: int):
     targs: int[]
     loop i in [0..int(structs[si].ntargs)): targs.push(struct_targ(si, i))
     saved = cx
-    ctxs.push(FnCtx(i32(new_inst(FK_INIT, int(nodes[d].mod), "fielddef")), -1, i32(T_VOID), false, 0, nodes[d].mod, i32(sc_names.len())))
+    ctxs.push(FnCtx(i32(new_inst(FK_INIT, int(nodes[d].mod), "fielddef")), -1, i32(T_VOID), false, 0, nodes[d].mod, i32(check_scopes.names.len())))
     cx = ctxs.len() - 1
     mark = scope_mark()
     push_type_params(d, targs)
@@ -1504,11 +1400,11 @@ check_struct_fields = (si: int):
         structs[si].nfields = i32(n + inherited.len())
         loop field in inherited: fields.push(field)
         loop i in [0..n): fields.push(Field())
-        old_fields = refine_fields
+        old_fields = refine_bindings.fields
         if refine_active:
-            refine_fields = []
-            loop field in inherited: refine_fields.push(int(field.name))
-            loop i in [0..n): refine_fields.push(int(nodes[kid(d, i)].name))
+            refine_bindings.fields = []
+            loop field in inherited: refine_bindings.fields.push(int(field.name))
+            loop i in [0..n): refine_bindings.fields.push(int(nodes[kid(d, i)].name))
         loop i in [0..n):
             f = kid(d, i)
             fi = int(structs[si].fields) + inherited.len() + i
@@ -1548,7 +1444,7 @@ check_struct_fields = (si: int):
                 fields[start + kept] = fields[start + i]
                 kept += 1
             structs[si].nfields = i32(kept)
-        refine_fields = old_fields
+        refine_bindings.fields = old_fields
         if refine_active: ref_validate_record(int(structs[si].type), nodes[d].pos)
     else:
         nv = nkids(d)
@@ -1636,7 +1532,7 @@ fn_sig = (decl: int) -> FnSig:
     sig.nexplicit = i32(nkids2(decl))
     saved = cx
     parent = if nodes[decl].kind == .lambda: cx else: -1
-    floor = if parent >= 0: ctxs[parent].floor else: i32(sc_names.len())
+    floor = if parent >= 0: ctxs[parent].floor else: i32(check_scopes.names.len())
     ctxs.push(FnCtx(0, i32(parent), i32(T_VOID), false, 0, nodes[decl].mod, floor))
     cx = ctxs.len() - 1
     mark = scope_mark()
@@ -1646,15 +1542,15 @@ fn_sig = (decl: int) -> FnSig:
         pt = mk_param(i)
         if nodes[kid2(decl, i)].aux == 1: pt = effect_type(effect_intern([], [], [pt]))
         push_scope_sym(nm, new_sym(nm, .type_, pt, 0))
-    old_formals = refine_formals
-    old_self = refine_self
-    refine_formals = []
+    old_formals = refine_bindings.formals
+    old_self = refine_bindings.self
+    refine_bindings.formals = []
     if refine_active:
-        loop p in kids(decl): refine_formals.push(int(nodes[p].name))
+        loop p in kids(decl): refine_bindings.formals.push(int(nodes[p].name))
     mm = 0
     loop i in [0..nkids(decl)):
         p = kid(decl, i)
-        refine_self = int(nodes[p].name)
+        refine_bindings.self = int(nodes[p].name)
         if nodes[p].a != 0: sig.params.push(resolve_type(int(nodes[p].a)))
         else:
             sig.params.push(mk_param(ntp))
@@ -1663,7 +1559,7 @@ fn_sig = (decl: int) -> FnSig:
     sig.mutmask = i32(mm)
     sig.ntp = i32(ntp)
     sig.generic = ntp > 0
-    refine_self = 0
+    refine_bindings.self = 0
     if nodes[decl].a != 0: sig.ret = i32(resolve_result_type(int(nodes[decl].a)))
     else if has_flag(decl, NF_VOID): sig.ret = i32(T_VOID)
     if result_active: result_signature(decl, sig.params, int(sig.ret))
@@ -1692,8 +1588,8 @@ fn_sig = (decl: int) -> FnSig:
     scope_reset(mark)
     ctxs.pop()
     cx = saved
-    refine_formals = old_formals
-    refine_self = old_self
+    refine_bindings.formals = old_formals
+    refine_bindings.self = old_self
     decl_infos[di].sig = sig
     sig
 
@@ -1929,7 +1825,7 @@ get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
             at = kid(ab, i)
             an = name_of(int(nodes[at].name))
             if an == "cabi": fns[f].cabi = true
-            else if an == "parallel": fns[f].parallel = true
+            else if an == "parallel": fns[f].parallel_api = true
             else if an == "deterministic": fns[f].deterministic = true
             else if an == "noinline": fns[f].noinline = true
             else if an == "warn_if" or an == "check_constant": pass
@@ -2255,7 +2151,7 @@ ensure_global = (g: int, use_pos: int, in_flow: bool = false):
     flow = in_flow and cx == module_ctx[m]
     cx = module_ctx[m]
     saved_floor = ctxs[cx].floor
-    if not flow: ctxs[cx].floor = i32(sc_names.len())
+    if not flow: ctxs[cx].floor = i32(check_scopes.names.len())
     d = int(globals[g].decl)
     if globals[g].is_const:
         t = 0
@@ -4847,10 +4743,10 @@ check_vardecl = (s: int):
         return
     t = 0
     if nodes[s].a != 0:
-        previous_self = refine_self
-        refine_self = int(nodes[s].name)
+        previous_self = refine_bindings.self
+        refine_bindings.self = int(nodes[s].name)
         t = resolve_binding_type(int(nodes[s].a))
-        refine_self = previous_self
+        refine_bindings.self = previous_self
     no_value = nodes[s].b == 0
     literal_init = false
     if refine_active and types[prune(t)].kind == .refined and nodes[s].b == 0: nodes[s].b = i32(struct_default(t, nodes[s].pos))
@@ -5272,7 +5168,7 @@ check_body_now = (f: int):
         source_force_body(decl)
         ic_restore(icl)
     saved = cx
-    ctxs.push(FnCtx(i32(f), -1, 0, false, 0, fns[f].mod, i32(sc_names.len())))
+    ctxs.push(FnCtx(i32(f), -1, 0, false, 0, fns[f].mod, i32(check_scopes.names.len())))
     cx = ctxs.len() - 1
     mark = scope_mark()
     da_mark = da_decls.len()
@@ -5543,7 +5439,7 @@ check_lambda_body = (f: int, lam: int, ret_hint: int):
         s = lookup(nm)
         # Folded lexical constants need no environment slot, but they are
         # still valid explicit captures. Keep the capture declaration intact.
-        if s != 0 and syms[s].kind == .const_ and nm < sc_top.len() and sc_top[nm] >= int(ctxs[cx].floor) and sc_syms[sc_top[nm]] == s:
+        if s != 0 and syms[s].kind == .const_ and nm < check_scopes.top.len() and check_scopes.top[nm] >= int(ctxs[cx].floor) and check_scopes.syms[check_scopes.top[nm]] == s:
             check_expr(clone(cap), 0)
             continue
         capture_decl = cap
@@ -5563,18 +5459,18 @@ check_lambda_body = (f: int, lam: int, ret_hint: int):
         locals[l].flags = i32(fl)
         fns[f].params.push(l)
     declared = 0
-    old_formals = refine_formals
-    old_self = refine_self
+    old_formals = refine_bindings.formals
+    old_self = refine_bindings.self
     if refine_active:
-        refine_formals = []
-        refine_self = 0
-        loop p in kids(lam): refine_formals.push(int(nodes[p].name))
+        refine_bindings.formals = []
+        refine_bindings.self = 0
+        loop p in kids(lam): refine_bindings.formals.push(int(nodes[p].name))
     if nodes[lam].a != 0:
         declared = resolve_result_type(int(nodes[lam].a))
         pack_written(f, int(nodes[lam].a))
     else if has_flag(lam, NF_VOID): declared = T_VOID
-    refine_formals = old_formals
-    refine_self = old_self
+    refine_bindings.formals = old_formals
+    refine_bindings.self = old_self
     if refine_active: ref_validate_signature(fns[f].ptypes, declared, ref_decl_mask(lam), nodes[lam].pos)
     if declared != 0: ctxs[cx].ret = i32(declared)
     else if ret_hint != 0 and not has_var(prune(ret_hint)): ctxs[cx].ret = i32(ret_hint)
@@ -6601,7 +6497,7 @@ check_init_now = (k: int):
     saved_floor = ctxs[cx].floor
     fns[k].state = 1
     mark = scope_mark()
-    ctxs[cx].floor = i32(sc_names.len())
+    ctxs[cx].floor = i32(check_scopes.names.len())
     body = int(fns[k].body)
     loop j in [0..nkids(body)): check_stmt(kid(body, j))
     scope_reset(mark)
@@ -7169,7 +7065,7 @@ main_kind_order = (decl: int, kinds: int[]) -> int[]:
     if nodes[decl].a != 0:
         written: int[]
         saved = cx
-        ctxs.push(FnCtx(i32(new_inst(FK_INIT, int(nodes[decl].mod), "main result")), -1, i32(T_VOID), false, 0, nodes[decl].mod, i32(sc_names.len())))
+        ctxs.push(FnCtx(i32(new_inst(FK_INIT, int(nodes[decl].mod), "main result")), -1, i32(T_VOID), false, 0, nodes[decl].mod, i32(check_scopes.names.len())))
         cx = ctxs.len() - 1
         main_written_kinds(int(nodes[decl].a), written)
         ctxs.pop()

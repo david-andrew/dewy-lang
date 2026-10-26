@@ -1,0 +1,125 @@
+# Shared checker state layouts. Storage stays with its existing writers.
+Local:type=[
+    name:int32=0
+    type:int32=0
+    flags:int32=0
+    const_init:int32=0 # checked initializer for constant-expression contexts
+    alias:int32=0
+    owner:int32=0
+    pos:int64=0
+    offset:int32=0
+    env_off:int32=0
+    vreg:int32=0
+    outer:int32=0 # LF_CAPTURE: the enclosing function's variable this one captures
+    dloops:int32=0 # loops being checked when it was declared
+    soa:int32=0 # LF_SOAELEM: the (unchecked) ps[i] it stands for
+    wloop:int32=0 # outermost loop (inside its scope) that modifies it before any capture
+]
+
+Global:type=[
+    name:int32=0
+    type:int32=0
+    decl:int32=0
+    mod:int32=0
+    sym:string=""
+    state:int32=0
+    is_const:bool=false
+    init:int32=0
+    addr:int32=0
+    fn_written:bool=false # some function (not top-level code) changes it
+    init_written:bool=false # top-level code changes it after its declaration
+    fn_accessed:bool=false # reachable from a function or another module
+    exposed:bool=false # raw address or non-map mutable argument
+]
+
+Capture:type=[
+    outer:int32=0
+    inner:int32=0
+]
+
+FnInst:type=[
+    decl:int32=0
+    body:int32=0
+    targs:array<int64>=[]
+    ptypes:array<int64>=[]
+    params:array<int64>=[]
+    ret:int32=0
+    sym:string=""
+    state:int32=0
+    kind:int32=0
+    has_env:bool=false
+    task_api:bool=false # checked waiting-lane spawn boundaries
+    caps:array<Capture>=[]
+    env_size:int32=0
+    mod:int32=0
+    partial:int32=0
+    target:int32=0
+    locals:array<int64>=[]
+    fntype:int32=0
+    cabi:bool=false
+    deterministic:bool=false # callback results should depend only on their state and inputs
+    parallel_api:bool=false # @parallel: the functions it is given run on many threads at once
+    atomic_api:bool=false # bundled atomic entry points need literal-order validation
+    write_sites:array<int64>=[] # finalization events for integer write proofs
+    writes_ready:bool=false
+    no_indexes:bool=false # finalized normal body has no indexing; init/lambda bodies stay unknown
+    no_user_globals:bool=false # finalized body cannot mention a closed-program array candidate
+    noinline:bool=false # @noinline: call it rather than copy it into its callers
+    gdepth:int32=0 # generic instances: how many were being checked, one inside the other, when it was made
+    export_name:string=""
+    aux_void:bool=false
+    clib:string=""
+    csym:string=""
+    cvariadic:int32=0 # @variadic(n): a C function with n fixed parameters, then C's `...` (0: none)
+    use_pos:int64=0 # generic instances: the call that made it (for errors inside it) ...
+    made_in:int32=0 # ... in the body of this instance (0: none)
+    pack:int64=0 # (Dewy) a body expressing several values: where the first extra one is (0: one value)
+    pack_n:int64=0 # (Dewy) how many values a written result `:>(int64 int64)` gives (0: not written so)
+    pack_k:int64=0 # (Dewy) how many values a call gives when the count is static, written or inferred (0: any number)
+]
+
+FnSig:type=[
+    contract:int32=0
+    ntp:int32=0
+    nexplicit:int32=0
+    params:array<int64>=[]
+    ret:int32=0
+    mutmask:int32=0
+    generic:bool=false
+    done:bool=false
+]
+
+DeclInfo:type=[
+    insts:array<int64>=[]
+    sig:FnSig=FnSig[]
+]
+
+FnInstanceKey:type=[
+    decl:int64=0
+    args:array<int64>=[]
+]
+
+FnCtx:type=[
+    inst:int32=0
+    parent:int32=0
+    ret:int32=0
+    infer_ret:bool=false
+    loop_depth:int32=0
+    mod:int32=0
+    floor:int32=0
+]
+
+CheckerScope:type=[
+    names:array<int64>=[]
+    syms:array<int64>=[]
+    prev:array<int64>=[]
+    top:array<int64>=[]
+]
+
+RefineBindings:type=[
+    fields:array<int64>=[]
+    formals:array<int64>=[]
+    self:int64=0
+    base_type:int64=0
+]
+

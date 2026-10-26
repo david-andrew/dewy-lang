@@ -1,0 +1,147 @@
+$runtime_checks
+# Resolve only requested syntax. O(visited syntax + emitted atoms), apart from
+# demanded binder/name lookup and semantic host work; preserve depth/atom limits.
+# Borrow headers across reentrant checking/evaluation; never retain elements.
+from p"node_store.dewy" import Node
+from p"checker_tokens.dewy" import Tok
+from p"checker_types.dewy" import TypeInfo
+from p"checker_state.dewy" import RefineBindings
+from p"refinement_types.dewy" import RefTerm, RefAtom
+from p"refine_queries.dewy" import ref_query_prune
+from p"refine_predicates.dewy" import ref_add, ref_op_rank
+from p"refine_resolve_host.dewy" import RefResolveHost
+
+# Node.op stores the shared token ordinal; compute these once, never per node.
+const REF_RESOLVE_EQ:int64=ref_op_rank('eq')
+const REF_RESOLVE_NE:int64=ref_op_rank('ne')
+const REF_RESOLVE_LT:int64=ref_op_rank('lt')
+const REF_RESOLVE_LE:int64=ref_op_rank('le')
+const REF_RESOLVE_GT:int64=ref_op_rank('gt')
+const REF_RESOLVE_GE:int64=ref_op_rank('ge')
+const REF_RESOLVE_PLUS:int64=ref_op_rank('plus')
+const REF_RESOLVE_MINUS:int64=ref_op_rank('minus')
+const REF_RESOLVE_KW_IN:int64=ref_op_rank('kw_in')
+
+ref_resolve_op=(code:int32):>Tok=>{
+    if int64(code) =? REF_RESOLVE_EQ {return 'eq'}
+    if int64(code) =? REF_RESOLVE_NE {return 'ne'}
+    if int64(code) =? REF_RESOLVE_LT {return 'lt'}
+    if int64(code) =? REF_RESOLVE_LE {return 'le'}
+    if int64(code) =? REF_RESOLVE_GT {return 'gt'}
+    if int64(code) =? REF_RESOLVE_GE {return 'ge'}
+    'eof'
+}
+
+ref_resolve_inverse=(op:Tok):>Tok=>{
+    if op =? 'eq' {return 'ne'}
+    if op =? 'ne' {return 'eq'}
+    if op =? 'lt' {return 'ge'}
+    if op =? 'le' {return 'gt'}
+    if op =? 'gt' {return 'le'}
+    'lt'
+}
+
+ref_resolve_term=(@nodes:array<Node> @types:array<TypeInfo> @names:array<string> @bindings:RefineBindings @host:RefResolveHost n:int64 binder:int64):>RefTerm=>{
+    let k=nodes[n].kind
+    if k =? 'ident' {
+        let name=int64(nodes[n].name)
+        if name =? binder and binder not=? 0 {return RefTerm[]}
+        if names[name] =? "length" {
+            let base=ref_query_prune(@types bindings.base_type)
+            if types[base].kind =? 'array' or types[base].kind =? 'str_' {return RefTerm(path=[-1])}
+        }
+        loop i in [0..bindings.fields.length) {
+            if name =? bindings.fields[i] {return RefTerm(kind=5 value=i)}
+        }
+        loop i in [0..bindings.formals.length) {
+            if name =? bindings.formals[i] {return RefTerm(kind=2 value=i)}
+        }
+        return host.value_term(n)
+    }
+    if k =? 'int_lit' {return RefTerm(kind=1 value=nodes[n].ival unsigned=(nodes[n].flags & 2097152) not=? 0)}
+    if k =? 'binary' and (int64(nodes[n].op) =? REF_RESOLVE_PLUS or int64(nodes[n].op) =? REF_RESOLVE_MINUS) {
+        let left=ref_resolve_term(@nodes @types @names @bindings @host int64(nodes[n].a) binder)
+        let right=ref_resolve_term(@nodes @types @names @bindings @host int64(nodes[n].b) binder)
+        let minus=int64(nodes[n].op) =? REF_RESOLVE_MINUS
+        let base=ref_query_prune(@types bindings.base_type)
+        if left.unsigned or right.unsigned or (types[base].kind =? 'int_' and not types[base].sign) {
+            host.fatal(nodes[n].pos "a refinement offset needs a signed integer representation")
+        }
+        if right.kind =? 1 and left.kind =? 1 {
+            left.value=if minus {int64<overflow='wrap'>(left.value) - int64<overflow='wrap'>(right.value)} else {int64<overflow='wrap'>(left.value) + int64<overflow='wrap'>(right.value)}
+            if left.value <? -4294967296 or left.value >? 4294967296 {host.fatal(nodes[n].pos "refinement offset is too large")}
+            return left
+        }
+        if right.kind =? 1 or left.kind =? 1 and not minus {
+            let term=if right.kind =? 1 left else right
+            let c=if right.kind =? 1 right.value else left.value
+            if minus {c=int64<overflow='wrap'>(0) - int64<overflow='wrap'>(c)}
+            let offset:int64=int64<overflow='wrap'>(term.offset) + int64<overflow='wrap'>(c)
+            if term.kind =? 4 or c <? -4294967296 or c >? 4294967296 or offset <? -4294967296 or offset >? 4294967296 {host.fatal(nodes[n].pos "unsupported refinement offset")}
+            term.offset=offset
+            return term
+        }
+        host.fatal(nodes[n].pos "unsupported refinement term; only a constant may be added to a bound")
+    }
+    if k =? 'field' {
+        let base=int64(nodes[n].a)
+        if nodes[base].kind =? 'ident' {
+            let limit=host.type_limit(n)
+            if limit.found {return limit.term}
+        }
+        let term=ref_resolve_term(@nodes @types @names @bindings @host base binder)
+        if term.kind =? 1 or term.kind =? 4 or term.offset not=? 0 {host.fatal(nodes[n].pos "refinement projection requires a value")}
+        term.path.push(if names[int64(nodes[n].name)] =? "length" -1 else int64(nodes[n].name))
+        return term
+    }
+    host.fatal(nodes[n].pos "unsupported refinement term; expected a scalar binding or integer bound")
+    RefTerm[]
+}
+
+ref_resolve_atoms=(@nodes:array<Node> @types:array<TypeInfo> @names:array<string> @bindings:RefineBindings @host:RefResolveHost n:int64 binder:int64 @out:array<RefAtom> depth:int64)=>{
+    if depth >? 32 or out.length >=? 32 {host.fatal(nodes[n].pos "refinement predicate budget exhausted")}
+    if nodes[n].kind =? 'and_' {
+        ref_resolve_atoms(@nodes @types @names @bindings @host int64(nodes[n].a) binder @out depth + 1)
+        ref_resolve_atoms(@nodes @types @names @bindings @host int64(nodes[n].b) binder @out depth + 1)
+        return
+    }
+    if nodes[n].kind =? 'not_' {
+        let inner=int64(nodes[n].a)
+        if nodes[inner].kind =? 'binary' {
+            let op=ref_resolve_op(nodes[inner].op)
+            if op not=? 'eof' {
+                let left=ref_resolve_term(@nodes @types @names @bindings @host int64(nodes[inner].a) binder)
+                let right=ref_resolve_term(@nodes @types @names @bindings @host int64(nodes[inner].b) binder)
+                ref_add(ref_resolve_inverse(op) left right @out)
+                return
+            }
+        }
+    }
+    if nodes[n].kind not=? 'binary' {host.fatal(nodes[n].pos "unsupported refinement predicate; expected an integer comparison")}
+    let op=ref_resolve_op(nodes[n].op)
+    let a=int64(nodes[n].a)
+    let b=int64(nodes[n].b)
+    if int64(nodes[n].op) =? REF_RESOLVE_KW_IN and nodes[b].kind =? 'range' {
+        let lo=ref_resolve_term(@nodes @types @names @bindings @host int64(nodes[b].a) binder)
+        let hi=ref_resolve_term(@nodes @types @names @bindings @host int64(nodes[b].b) binder)
+        if lo.kind not=? 1 or hi.kind not=? 1 {host.fatal(nodes[b].pos "refinement range needs literal bounds")}
+        let value=ref_resolve_term(@nodes @types @names @bindings @host a binder)
+        ref_add((if (nodes[b].flags & 536870912) not=? 0 'lt' else 'le') lo value @out)
+        ref_add((if (nodes[b].flags & 2) not=? 0 'le' else 'lt') value hi @out)
+        return
+    }
+    if op =? 'eof' {host.fatal(nodes[n].pos "unsupported refinement predicate; expected an integer comparison")}
+    if nodes[a].kind =? 'binary' {
+        let earlier=ref_resolve_op(nodes[a].op)
+        if earlier not=? 'eof' {
+            if not ((earlier =? 'lt' or earlier =? 'le') and (op =? 'lt' or op =? 'le') or (earlier =? 'gt' or earlier =? 'ge') and (op =? 'gt' or op =? 'ge')) {
+                host.fatal(nodes[n].pos "refinement comparison chain must have one direction")
+            }
+            ref_resolve_atoms(@nodes @types @names @bindings @host a binder @out depth + 1)
+            a=int64(nodes[a].b)
+        }
+    }
+    let left=ref_resolve_term(@nodes @types @names @bindings @host a binder)
+    let right=ref_resolve_term(@nodes @types @names @bindings @host b binder)
+    ref_add(op left right @out)
+}

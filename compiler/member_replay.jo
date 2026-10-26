@@ -92,7 +92,7 @@ member_syntax_inner = (n: int, name: int, t: mut MemberTemplate, value: bool) ->
         else:
             # Admission must not demand prelude names for body-local bindings.
             nm = int(nodes[n].name)
-            sym = if nm < sc_top.len() and sc_top[nm] >= int(ctxs[cx].floor): sc_syms[sc_top[nm]] else: 0
+            sym = if nm < check_scopes.top.len() and check_scopes.top[nm] >= int(ctxs[cx].floor): check_scopes.syms[check_scopes.top[nm]] else: 0
             if sym != 0 and syms[sym].kind == .local:
                 l = int(syms[sym].ref)
                 if has_var(prune(int(locals[l].type))) or int(locals[l].flags) & (LF_ALIAS | LF_CAPTURED | LF_BYREF | LF_ADDR) != 0: return false

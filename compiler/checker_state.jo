@@ -1,0 +1,114 @@
+# Shared checker state layouts. Storage stays with its existing writers.
+struct Local:
+    name: i32
+    type: i32
+    flags: i32
+    const_init: i32         # checked initializer for constant-expression contexts
+    alias: i32
+    owner: i32
+    pos: int
+    offset: i32
+    env_off: i32
+    vreg: i32
+    outer: i32      # LF_CAPTURE: the enclosing function's variable this one captures
+    dloops: i32     # loops being checked when it was declared
+    soa: i32        # LF_SOAELEM: the (unchecked) ps[i] it stands for
+    wloop: i32      # outermost loop (inside its scope) that modifies it before any capture
+
+struct Global:
+    name: i32
+    type: i32
+    decl: i32
+    mod: i32
+    sym: str
+    state: i32
+    is_const: bool
+    init: i32
+    addr: i32
+    fn_written: bool    # some function (not top-level code) changes it
+    init_written: bool = false    # top-level code changes it after its declaration
+    fn_accessed: bool = false     # reachable from a function or another module
+    exposed: bool = false         # raw address or non-map mutable argument
+
+struct Capture:
+    outer: i32
+    inner: i32
+
+struct FnInst:
+    decl: i32
+    body: i32
+    targs: int[]
+    ptypes: int[]
+    params: int[]
+    ret: i32
+    sym: str
+    state: i32
+    kind: i32
+    has_env: bool
+    task_api: bool     # checked waiting-lane spawn boundaries
+    caps: Capture[]
+    env_size: i32
+    mod: i32
+    partial: i32
+    target: i32
+    locals: int[]
+    fntype: i32
+    cabi: bool
+    deterministic: bool # callback results should depend only on their state and inputs
+    parallel_api: bool      # @parallel: the functions it is given run on many threads at once
+    atomic_api: bool    # bundled atomic entry points need literal-order validation
+    write_sites: int[]  # finalization events for integer write proofs
+    writes_ready: bool
+    no_indexes: bool    # finalized normal body has no indexing; init/lambda bodies stay unknown
+    no_user_globals: bool # finalized body cannot mention a closed-program array candidate
+    noinline: bool      # @noinline: call it rather than copy it into its callers
+    gdepth: i32         # generic instances: how many were being checked, one inside the other, when it was made
+    export_name: str
+    aux_void: bool
+    clib: str
+    csym: str
+    cvariadic: i32      # @variadic(n): a C function with n fixed parameters, then C's `...` (0: none)
+    use_pos: int        # generic instances: the call that made it (for errors inside it) ...
+    made_in: i32        # ... in the body of this instance (0: none)
+    pack: int           # (Dewy) a body expressing several values: where the first extra one is (0: one value)
+    pack_n: int         # (Dewy) how many values a written result `:>(int64 int64)` gives (0: not written so)
+    pack_k: int         # (Dewy) how many values a call gives when the count is static, written or inferred (0: any number)
+
+struct FnSig:
+    contract: i32
+    ntp: i32
+    nexplicit: i32
+    params: int[]
+    ret: i32
+    mutmask: i32
+    generic: bool
+    done: bool
+
+struct DeclInfo:
+    insts: int[]
+    sig: FnSig
+
+struct FnInstanceKey:
+    decl: int
+    args: int[]
+
+struct FnCtx:
+    inst: i32
+    parent: i32
+    ret: i32
+    infer_ret: bool
+    loop_depth: i32
+    mod: i32
+    floor: i32
+
+struct CheckerScope:
+    names: int[]
+    syms: int[]
+    prev: int[]
+    top: int[]
+
+struct RefineBindings:
+    fields: int[]
+    formals: int[]
+    self: int
+    base_type: int

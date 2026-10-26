@@ -1,3 +1,4 @@
+use 'checker_state.dewy'
 # Nominal exception families share the existing tagged-union representation.
 # The program's declarations are closed before signatures are checked, so parent
 # storage can retain every concrete child's identity and complete payload.
@@ -108,7 +109,7 @@ nominal_resolve = (t: int):
         nominal_resolving[t] = false
         return
     saved = cx
-    ctxs.push(FnCtx(i32(new_inst(FK_INIT, int(nodes[d].mod), "nominal")), -1, i32(T_VOID), false, 0, nodes[d].mod, i32(sc_names.len())))
+    ctxs.push(FnCtx(i32(new_inst(FK_INIT, int(nodes[d].mod), "nominal")), -1, i32(T_VOID), false, 0, nodes[d].mod, i32(check_scopes.names.len())))
     cx = ctxs.len() - 1
     parent = resolve_type(int(nodes[d].a))
     ctxs.pop()

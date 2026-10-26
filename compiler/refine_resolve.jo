@@ -1,0 +1,112 @@
+use 'node_store.dewy'
+use 'checker_types.dewy'
+use 'checker_state.dewy'
+use 'checker_tokens.dewy'
+use 'refinement_types.dewy'
+use 'refine_predicates.dewy'
+use 'refine_queries.dewy'
+use 'refine_resolve_host.dewy'
+
+const REF_RESOLVE_EQ = int(Tok.eq)
+const REF_RESOLVE_NE = int(Tok.ne)
+const REF_RESOLVE_LT = int(Tok.lt)
+const REF_RESOLVE_LE = int(Tok.le)
+const REF_RESOLVE_GT = int(Tok.gt)
+const REF_RESOLVE_GE = int(Tok.ge)
+const REF_RESOLVE_PLUS = int(Tok.plus)
+const REF_RESOLVE_MINUS = int(Tok.minus)
+const REF_RESOLVE_KW_IN = int(Tok.kw_in)
+
+ref_resolve_op = (code: i32) -> Tok:
+    if code == i32(int(Tok.eq)): return .eq
+    if code == i32(int(Tok.ne)): return .ne
+    if code == i32(int(Tok.lt)): return .lt
+    if code == i32(int(Tok.le)): return .le
+    if code == i32(int(Tok.gt)): return .gt
+    if code == i32(int(Tok.ge)): return .ge
+    .eof
+
+ref_resolve_inverse = (op: Tok) -> Tok:
+    if op == .eq: return .ne
+    if op == .ne: return .eq
+    if op == .lt: return .ge
+    if op == .le: return .gt
+    if op == .gt: return .le
+    .lt
+
+ref_resolve_term = (nodes: mut Node[], types: mut TypeInfo[], names: mut str[], bindings: mut RefineBindings, host: mut RefResolveHost, n: int, binder: int) -> RefTerm:
+    k = nodes[n].kind
+    if k == .ident:
+        name = int(nodes[n].name)
+        if name == binder and binder != 0: return RefTerm()
+        if names[name] == "length" and (types[ref_query_prune(types, bindings.base_type)].kind == .array or types[ref_query_prune(types, bindings.base_type)].kind == .str_): return RefTerm(path = [-1])
+        loop i in [0..bindings.fields.len()):
+            if name == bindings.fields[i]: return RefTerm(5, i)
+        loop i in [0..bindings.formals.len()):
+            if name == bindings.formals[i]: return RefTerm(2, i)
+        return host.value_term(n)
+    if k == .int_lit: return RefTerm(1, nodes[n].ival, (nodes[n].flags & 2097152 != 0))
+    # A constant offset (`at + 4`, `stop - 1`): the difference atom `x - y <= c`
+    # the facts already keep. Only a literal or constant may be added.
+    if k == .binary and (nodes[n].op == i32(int(Tok.plus)) or nodes[n].op == i32(int(Tok.minus))):
+        left = ref_resolve_term(nodes, types, names, bindings, host, int(nodes[n].a), binder)
+        right = ref_resolve_term(nodes, types, names, bindings, host, int(nodes[n].b), binder)
+        minus = nodes[n].op == i32(int(Tok.minus))
+        if left.unsigned or right.unsigned or types[ref_query_prune(types, bindings.base_type)].kind == .int_ and not types[ref_query_prune(types, bindings.base_type)].sign:
+            host.fatal(nodes[n].pos, "a refinement offset needs a signed integer representation")
+        if right.kind == 1 and left.kind == 1:
+            left.value = if minus: left.value - right.value else: left.value + right.value
+            if left.value < -4294967296 or left.value > 4294967296: host.fatal(nodes[n].pos, "refinement offset is too large")
+            return left
+        if right.kind == 1 or left.kind == 1 and not minus:
+            term = if right.kind == 1: left else: right
+            c = if right.kind == 1: right.value else: left.value
+            if minus: c = -c
+            if term.kind == 4 or c < -4294967296 or c > 4294967296 or term.offset + c < -4294967296 or term.offset + c > 4294967296: host.fatal(nodes[n].pos, "unsupported refinement offset")
+            term.offset += c
+            return term
+        host.fatal(nodes[n].pos, "unsupported refinement term; only a constant may be added to a bound")
+
+    if k == .field:
+        base = int(nodes[n].a)
+        if nodes[base].kind == .ident:
+            limit = host.type_limit(n)
+            if limit.found: return limit.term
+        term = ref_resolve_term(nodes, types, names, bindings, host, base, binder)
+        if term.kind == 1 or term.kind == 4 or term.offset != 0: host.fatal(nodes[n].pos, "refinement projection requires a value")
+        term.path.push(if names[int(nodes[n].name)] == "length": -1 else: int(nodes[n].name))
+        return term
+    host.fatal(nodes[n].pos, "unsupported refinement term; expected a scalar binding or integer bound")
+    RefTerm()
+
+ref_resolve_atoms = (nodes: mut Node[], types: mut TypeInfo[], names: mut str[], bindings: mut RefineBindings, host: mut RefResolveHost, n: int, binder: int, out: mut RefAtom[], depth: int):
+    if depth > 32 or out.len() >= 32: host.fatal(nodes[n].pos, "refinement predicate budget exhausted")
+    if nodes[n].kind == .and_:
+        ref_resolve_atoms(nodes, types, names, bindings, host, int(nodes[n].a), binder, out, depth + 1)
+        ref_resolve_atoms(nodes, types, names, bindings, host, int(nodes[n].b), binder, out, depth + 1)
+        return
+    if nodes[n].kind == .not_:
+        inner = int(nodes[n].a)
+        if nodes[inner].kind == .binary and (ref_resolve_op(nodes[inner].op) != .eof):
+            ref_add(ref_resolve_inverse(nodes[inner].op as Tok), ref_resolve_term(nodes, types, names, bindings, host, int(nodes[inner].a), binder), ref_resolve_term(nodes, types, names, bindings, host, int(nodes[inner].b), binder), out)
+            return
+    if nodes[n].kind != .binary: host.fatal(nodes[n].pos, "unsupported refinement predicate; expected an integer comparison")
+    op = nodes[n].op as Tok
+    a = int(nodes[n].a); b = int(nodes[n].b)
+    if op == .kw_in and nodes[b].kind == .range:
+        lo = ref_resolve_term(nodes, types, names, bindings, host, int(nodes[b].a), binder)
+        hi = ref_resolve_term(nodes, types, names, bindings, host, int(nodes[b].b), binder)
+        if lo.kind != 1 or hi.kind != 1: host.fatal(nodes[b].pos, "refinement range needs literal bounds")
+        value = ref_resolve_term(nodes, types, names, bindings, host, a, binder)
+        ref_add((if (nodes[b].flags & 536870912 != 0): Tok.lt else: Tok.le), lo, value, out)
+        ref_add((if (nodes[b].flags & 2 != 0): Tok.le else: Tok.lt), value, hi, out)
+        return
+    if ref_resolve_op(nodes[n].op) == .eof: host.fatal(nodes[n].pos, "unsupported refinement predicate; expected an integer comparison")
+    if nodes[a].kind == .binary and (ref_resolve_op(nodes[a].op) != .eof):
+        earlier = nodes[a].op as Tok
+        if not ((earlier == .lt or earlier == .le) and (op == .lt or op == .le) or (earlier == .gt or earlier == .ge) and (op == .gt or op == .ge)):
+            host.fatal(nodes[n].pos, "refinement comparison chain must have one direction")
+        ref_resolve_atoms(nodes, types, names, bindings, host, a, binder, out, depth + 1)
+        a = int(nodes[a].b)
+    ref_add(op, ref_resolve_term(nodes, types, names, bindings, host, a, binder), ref_resolve_term(nodes, types, names, bindings, host, b, binder), out)
+

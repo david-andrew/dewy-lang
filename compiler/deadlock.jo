@@ -481,7 +481,7 @@ dl_call = (n: int, held: mut DlHeld[]):
                 dl_callee(h, 0, held, pos, "a task joined at {dl_line(pos)}")
         return
     # Parallel work: its iterations run while the caller waits for them all.
-    if fns[g].parallel:
+    if fns[g].parallel_api:
         deadlock_parallel = true
         loop c in kids(n):
             h = dl_fn_arg(c)
@@ -1056,7 +1056,7 @@ dc_call = (n: int):
     if gname == "__task_join" and nkids(n) == 1:
         dc_event(5, dc_loc(kid(n, 0)), pos)
         return
-    if fns[g].parallel: return
+    if fns[g].parallel_api: return
     # (a function given as a value to a call not walked here, as a library helper's)
     if not dl_relevant.has(g):
         loop c in kids(n):

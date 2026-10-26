@@ -1,0 +1,10 @@
+from p"refinement_types.dewy" import RefTerm
+
+# Coarse semantic requests may re-enter resolution and grow all checker arenas.
+# No service is called for a literal, self binder, sibling or formal reference.
+RefResolveLimit:type=[found:bool=false term:RefTerm=RefTerm[]]
+RefResolveHost:type=[
+    value_term:<(n:int64):>RefTerm>
+    type_limit:<(n:int64):>RefResolveLimit>
+    fatal:<(pos:int64 message:string):>void>
+]

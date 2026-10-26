@@ -1,3 +1,6 @@
+use 'refine_resolve.dewy'
+use 'refine_resolve_host.dewy'
+use 'checker_state.dewy'
 use 'refine_projection.dewy'
 use 'refine_storage.dewy'
 use 'checker_services.dewy'
@@ -32,10 +35,7 @@ refine_active = false
 ref_addr_type = 0
 ref_addr_max = () -> int: if ptr_size == 4: 4294967295 else: 281474976710655
 
-refine_fields: int[]
-refine_formals: int[]
-refine_self = 0
-refine_base_type = 0
+refine_bindings = RefineBindings()
 refine_requests: FactRequest[]
 refine_owners: {int: bool} = {}
 # refinement checks made by an implicit narrowing, with the width they narrow to
@@ -169,10 +169,10 @@ refine_reset = ():
     str_set_types = [0]
     ref_predicates = [[]]
     refine_active = false
-    refine_fields = []
+    refine_bindings.fields = []
     ref_addr_type = 0
-    refine_formals = []
-    refine_self = 0
+    refine_bindings.formals = []
+    refine_bindings.self = 0
     refine_requests = []
     refine_owners = {}
     ref_narrowing = {}
@@ -221,131 +221,67 @@ mk_refined = (base0: int, predicate: int) -> int:
 # A string is refined only by its length (`string<length >? 0>`).
 ref_length_only = (predicate: int) -> bool: ref_atoms_length_only(ref_predicates[predicate])
 
-ref_term = (n: int, binder: int) -> RefTerm:
-    k = nodes[n].kind
-    if k == .ident:
-        name = int(nodes[n].name)
-        if name == binder and binder != 0: return RefTerm()
-        if name_of(name) == "length" and (tkind(refine_base_type) == .array or tkind(refine_base_type) == .str_): return RefTerm(path = [-1])
-        loop i in [0..refine_fields.len()):
-            if name == refine_fields[i]: return RefTerm(5, i)
-        loop i in [0..refine_formals.len()):
-            if name == refine_formals[i]: return RefTerm(2, i)
-        sym = lookup(name)
-        if sym != 0 and syms[sym].kind == .const_:
-            value = clone(n)
-            check_expr(value, 0)
-            if not is_int(ntype(value)): fatal(nodes[n].pos, "refinement bound must be an integer")
-            result = ceval(value)
-            return RefTerm(1, result.i, ntype(value) == T_U64 and result.i < 0)
-        if sym != 0 and syms[sym].kind == .local:
-            l = int(syms[sym].ref)
-            if cx < 0 or locals[l].owner != ctxs[cx].inst: fatal(nodes[n].pos, "captured refinement dependencies await closure invariant checking")
-            if int(locals[l].flags) & LF_CONST == 0: fatal(nodes[n].pos, "refinement dependency must be a stable binding")
-            return RefTerm(3, l)
-        fatal(nodes[n].pos, "unsupported refinement term '{name_of(name)}'")
-    if k == .int_lit: return RefTerm(1, nodes[n].ival, has_flag(n, NF_U64))
-    # A constant offset (`at + 4`, `stop - 1`): the difference atom `x - y <= c`
-    # the facts already keep. Only a literal or constant may be added.
-    if k == .binary and (nodes[n].op == i32(int(Tok.plus)) or nodes[n].op == i32(int(Tok.minus))):
-        left = ref_term(int(nodes[n].a), binder)
-        right = ref_term(int(nodes[n].b), binder)
-        minus = nodes[n].op == i32(int(Tok.minus))
-        if left.unsigned or right.unsigned or is_int(refine_base_type) and not types[representation_type(refine_base_type)].sign:
-            fatal(nodes[n].pos, "a refinement offset needs a signed integer representation")
-        if right.kind == 1 and left.kind == 1:
-            left.value = if minus: left.value - right.value else: left.value + right.value
-            if left.value < -4294967296 or left.value > 4294967296: fatal(nodes[n].pos, "refinement offset is too large")
-            return left
-        if right.kind == 1 or left.kind == 1 and not minus:
-            term = if right.kind == 1: left else: right
-            c = if right.kind == 1: right.value else: left.value
-            if minus: c = -c
-            if term.kind == 4 or c < -4294967296 or c > 4294967296 or term.offset + c < -4294967296 or term.offset + c > 4294967296: fatal(nodes[n].pos, "unsupported refinement offset")
-            term.offset += c
-            return term
-        fatal(nodes[n].pos, "unsupported refinement term; only a constant may be added to a bound")
-
-        term = ref_term(int(nodes[n].a), binder)
-        if term.kind != 1 or term.unsigned: fatal(nodes[n].pos, "unsupported refinement bound")
-        term.value = -term.value
-        return term
-    if k == .field:
-        base = int(nodes[n].a)
-        if nodes[base].kind == .ident:
-            spelling = name_of(int(nodes[base].name))
-            ty = T_VOID
-            if spelling == "int64": ty = T_INT
-            else if spelling == "int8": ty = T_I8
-            else if spelling == "int16": ty = T_I16
-            else if spelling == "int32": ty = T_I32
-            else if spelling == "uint64": ty = T_U64
-            else if spelling == "uint8": ty = T_U8
-            else if spelling == "uint16": ty = T_U16
-            else if spelling == "uint32": ty = T_U32
-            if ty == T_VOID:
-                symbol = lookup(int(nodes[base].name))
-                if symbol != 0 and syms[symbol].kind == .type_: ty = int(syms[symbol].ref)
-            member = name_of(int(nodes[n].name))
-            if ty != T_VOID and has_var(ty) and (member == "min" or member == "max"): return RefTerm(4, ty, member == "max")
-            if ty != T_VOID and (member == "min" or member == "max"):
-                if ty == T_U64: return RefTerm(1, (if member == "max": -1 else: 0), member == "max")
-                if ty == ref_addr_type: return RefTerm(1, if member == "max": ref_addr_max() else: 0)
-                bound = fact_domain(ty)
-                return RefTerm(1, if member == "max": bound.hi else: bound.lo)
-        term = ref_term(base, binder)
-        if term.kind == 1 or term.kind == 4 or term.offset != 0: fatal(nodes[n].pos, "refinement projection requires a value")
-        term.path.push(if name_of(int(nodes[n].name)) == "length": -1 else: int(nodes[n].name))
-        return term
-    fatal(nodes[n].pos, "unsupported refinement term; expected a scalar binding or integer bound")
+ref_resolve_value = (n: int) -> RefTerm:
+    name = int(nodes[n].name)
+    sym = lookup(name)
+    if sym != 0 and syms[sym].kind == .const_:
+        value = clone(n)
+        check_expr(value, 0)
+        if not is_int(ntype(value)): fatal(nodes[n].pos, "refinement bound must be an integer")
+        result = ceval(value)
+        return RefTerm(1, result.i, ntype(value) == T_U64 and result.i < 0)
+    if sym != 0 and syms[sym].kind == .local:
+        l = int(syms[sym].ref)
+        if cx < 0 or locals[l].owner != ctxs[cx].inst: fatal(nodes[n].pos, "captured refinement dependencies await closure invariant checking")
+        if int(locals[l].flags) & LF_CONST == 0: fatal(nodes[n].pos, "refinement dependency must be a stable binding")
+        return RefTerm(3, l)
+    fatal(nodes[n].pos, "unsupported refinement term '{name_of(name)}'")
     RefTerm()
 
+ref_resolve_limit = (n: int) -> RefResolveLimit:
+    base = int(nodes[n].a)
+    spelling = name_of(int(nodes[base].name))
+    ty = T_VOID
+    if spelling == "int64": ty = T_INT
+    else if spelling == "int8": ty = T_I8
+    else if spelling == "int16": ty = T_I16
+    else if spelling == "int32": ty = T_I32
+    else if spelling == "uint64": ty = T_U64
+    else if spelling == "uint8": ty = T_U8
+    else if spelling == "uint16": ty = T_U16
+    else if spelling == "uint32": ty = T_U32
+    if ty == T_VOID:
+        symbol = lookup(int(nodes[base].name))
+        if symbol != 0 and syms[symbol].kind == .type_: ty = int(syms[symbol].ref)
+    member = name_of(int(nodes[n].name))
+    if ty != T_VOID and has_var(ty) and (member == "min" or member == "max"): return RefResolveLimit(true, RefTerm(4, ty, member == "max"))
+    if ty != T_VOID and (member == "min" or member == "max"):
+        if ty == T_U64: return RefResolveLimit(true, RefTerm(1, (if member == "max": -1 else: 0), member == "max"))
+        if ty == ref_addr_type: return RefResolveLimit(true, RefTerm(1, if member == "max": ref_addr_max() else: 0))
+        bound = fact_domain(ty)
+        return RefResolveLimit(true, RefTerm(1, if member == "max": bound.hi else: bound.lo))
+    RefResolveLimit()
+
+ref_resolve_host = RefResolveHost(ref_resolve_value, ref_resolve_limit, fatal)
+
 ref_atoms = (n: int, binder: int, out: mut RefAtom[], depth: int = 0):
-    if depth > 32 or out.len() >= 32: fatal(nodes[n].pos, "refinement predicate budget exhausted")
-    if nodes[n].kind == .and_:
-        ref_atoms(int(nodes[n].a), binder, out, depth + 1)
-        ref_atoms(int(nodes[n].b), binder, out, depth + 1)
-        return
-    if nodes[n].kind == .not_:
-        inner = int(nodes[n].a)
-        if nodes[inner].kind == .binary and fact_comparison(nodes[inner].op as Tok):
-            ref_add(fact_inverse(nodes[inner].op as Tok), ref_term(int(nodes[inner].a), binder), ref_term(int(nodes[inner].b), binder), out)
-            return
-    if nodes[n].kind != .binary: fatal(nodes[n].pos, "unsupported refinement predicate; expected an integer comparison")
-    op = nodes[n].op as Tok
-    a = int(nodes[n].a); b = int(nodes[n].b)
-    if op == .kw_in and nodes[b].kind == .range:
-        lo = ref_term(int(nodes[b].a), binder)
-        hi = ref_term(int(nodes[b].b), binder)
-        if lo.kind != 1 or hi.kind != 1: fatal(nodes[b].pos, "refinement range needs literal bounds")
-        value = ref_term(a, binder)
-        ref_add((if has_flag(b, NF_EXCL_FIRST): Tok.lt else: Tok.le), lo, value, out)
-        ref_add((if has_flag(b, NF_INCLUSIVE): Tok.le else: Tok.lt), value, hi, out)
-        return
-    if not fact_comparison(op): fatal(nodes[n].pos, "unsupported refinement predicate; expected an integer comparison")
-    if nodes[a].kind == .binary and fact_comparison(nodes[a].op as Tok):
-        earlier = nodes[a].op as Tok
-        if not ((earlier == .lt or earlier == .le) and (op == .lt or op == .le) or (earlier == .gt or earlier == .ge) and (op == .gt or op == .ge)):
-            fatal(nodes[n].pos, "refinement comparison chain must have one direction")
-        ref_atoms(a, binder, out, depth + 1)
-        a = int(nodes[a].b)
-    ref_add(op, ref_term(a, binder), ref_term(b, binder), out)
+    ref_resolve_atoms(nodes, types, names, refine_bindings, ref_resolve_host, n, binder, out, depth)
 
 resolve_refinement = (n: int) -> int:
     # (a refinement of a module whose declarations were not asked for yet, met another way)
     if not refine_active and refine_deferred.len() > 0:
         loop m, _ in refine_deferred: refine_resume(m)
     base = resolve_type(int(nodes[n].a))
-    binder = if nodes[n].name != 0: int(nodes[n].name) else: refine_self
+    binder = if nodes[n].name != 0: int(nodes[n].name) else: refine_bindings.self
     atoms: RefAtom[]
-    previous_base = refine_base_type
-    refine_base_type = base
-    ref_atoms(int(nodes[n].b), binder, atoms)
-    refine_base_type = previous_base
+    previous_base = refine_bindings.base_type
+    refine_bindings.base_type = base
+    ref_resolve_atoms(nodes, types, names, refine_bindings, ref_resolve_host, int(nodes[n].b), binder, atoms, 0)
+    refine_bindings.base_type = previous_base
     expected = if tkind(representation_type(base)) == .array or tkind(representation_type(base)) == .str_: T_INT else: representation_type(base)
     loop atom in atoms:
         loop term in [atom.a, atom.b]:
-            if refine_fields.len() > 0 and term.kind == 2: fatal(nodes[n].pos, "record field refinement dependencies must name siblings or stable lexical bindings")
+            if refine_bindings.fields.len() > 0 and term.kind == 2: fatal(nodes[n].pos, "record field refinement dependencies must name siblings or stable lexical bindings")
             root = 0
             if term.kind == 0: root = base
             else if term.kind == 3: root = int(locals[term.value].type)

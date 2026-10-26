@@ -156,7 +156,7 @@ concurrency_blocks = (f: int, seen: mut {int: bool}, sharing: bool = false) -> b
         name = name_of(int(nodes[d].name))
         # Blocking public boundaries. Fork-join is safe inline and is not a
         # waiting-lane join. Its checked callbacks supply the obligations.
-        if fns[f].parallel: return false
+        if fns[f].parallel_api: return false
         if files[pos_file(nodes[d].pos)].path == lib_dir + "/std/tasks.jo": return true
         if name == "sleep" or name == "__sleep_ns" or name == "read_file" or name == "write_file" or name == "read_line" or name == "read_stdin" or name == "print" or name == "printl" or name == "__print_str" or name == "write" or name == "flush" or name == "__task_join" or name == "__group_join": return true
         # Runtime internals are trusted nonblocking unless classified here;

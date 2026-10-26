@@ -1857,14 +1857,14 @@ race_arg = (a: int, who: str):
         if k == .ident and nodes[a].aux == i32(int(SK.local)) and int(locals[int(nodes[a].sym)].owner) == cur_fn:
             fl = int(locals[int(nodes[a].sym)].flags)
             param = fl & LF_PARAM != 0 or fl & (LF_VALUEPARAM | LF_ASSIGNED) == LF_VALUEPARAM
-        if param and fns[cur_fn].parallel: return
+        if param and fns[cur_fn].parallel_api: return
         hint = ""
         if param: hint = ", or mark '{name_of(int(nodes[int(fns[cur_fn].decl)].name))}' @parallel so that the functions given to it are checked"
         fatal(nodes[a].pos, "{who} runs this function on many threads at once, so the compiler checks it for data races, which it can only do for a function it can see: pass a function by name or a lambda{hint}")
 
 # a @parallel function is checked at its calls: it cannot be used as a value
 parallel_direct = (f: int, pos: int):
-    if f > 0 and fns[f].parallel and not in_lib(pos):
+    if f > 0 and fns[f].parallel_api and not in_lib(pos):
         fatal(pos, "'{name_of(int(nodes[int(fns[f].decl)].name))}' runs the function it is given on many threads at once, so it can only be called directly (where the compiler checks that function), not used as a value or partially applied")
 
 # (a type or module where a value is wanted: P, Box[int])
@@ -5202,7 +5202,7 @@ gen_value_call = (e: int) -> Val:
         if arithmetic >= 0: return V(arithmetic, false)
         word = gen_byte_read(e)
         if word >= 0: return V(word, false)
-        if fns[int(nodes[e].sym)].parallel: race_check(int(nodes[e].sym), kids(e), nodes[e].pos)
+        if fns[int(nodes[e].sym)].parallel_api: race_check(int(nodes[e].sym), kids(e), nodes[e].pos)
         if fns[int(nodes[e].sym)].deterministic:
             # Cache ownership follows reachable serial lowering, not worker candidates.
             if fused_on: fz_note(7, 0, e, 0, 0)

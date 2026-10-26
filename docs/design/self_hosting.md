@@ -86,6 +86,8 @@ are grouped. See the ownership sections for the live service contracts.
 | `checker_services`, `refine_strings` | `checker_services.jo`, `refine_strings.jo` | Dewy interning interface, set publication/constants | O(S*M²) search; one host call per new member/constant; peak flagship phase +0.115%. |
 | `refine_storage` | `refine_storage.jo` | Dewy storage-contract traversal | O(V * D), D≤32; private ancestor stack, unresolved-record callbacks; peak flagship phase +0.054%. |
 | `refine_projection` | `refine_projection.jo` | Dewy projection validation | O(path + scanned field runs + inference links); lazy fields, dialect/runtime request and first-error status. |
+| `checker_state` | `checker_state.jo` | Dewy local/global/function/context, scope and binder layouts | Stable IDs/ABI; Jo writers borrow the same storage; flagship phase cost ≤+0.163%. |
+| `refine_resolve`, `refine_resolve_host` | Same stems + `.jo` | Dewy recursive terms/predicates, typed semantic requests | Demand traversal and existing budgets; resolver increment ≤0.072%, state+resolver peak phase +0.234%. |
 
 ### Boundary lessons that constrain the next cutover
 
@@ -201,24 +203,27 @@ member constant costs one node append and one interning call, with direct field
 writes. Keep the frequently used diagnostic renderer in Jo; text for a newly
 published structure is built inside the coarse publication operation.
 
-The remaining cutovers, in dependency order, are:
+`checker_state.dewy` defines locals, globals, function instances/signatures,
+active contexts, the indexed scope stack and refinement binders. Jo writers keep
+storage and direct hot reads; nested work restores only changed binder fields.
+Symbols and module invalidation stay with their writers. The internal function
+flag is `parallel_api`, preserving its ABI slot without a Dewy keyword field.
+`refine_resolve.dewy` owns recursive terms and predicates. It borrows node/type/name
+headers and binders, retaining direct scalar/literal paths. Its noncapturing host
+handles lexical lookup plus constant checking/evaluation, type limits and fatal
+diagnostics. These requests may grow arenas or enter a nested resolver; the
+caller rereads by ID. Cost is O(visited syntax + emitted atoms), apart from
+requested binder/name lookup and semantic work; existing depth/atom budgets stay.
+Scope lookup remains O(1), rollback proportional to bindings removed.
 
-1. Checker local/function/scope layouts and refinement binders, then the recursive
-   term/predicate resolver with typed lookup, type-resolution, diagnostic and
-   evaluation requests. Borrow indexed state and keep direct scalar/literal paths
-   in the recursive group; only terms needing semantic work call the host. Retain
-   the existing depth/atom budgets, O(visited syntax + emitted atoms) apart from
-   demanded lookup/type resolution/evaluation. Scope lookup stays O(1); rollback
-   costs only popped bindings. Moving definitions must add no record translation
-   or new analysis pass.
-2. Evaluation's value/frame/place layouts and its recursive execution group.
-   Keep checker entry at coarse expression/body forcing boundaries, then remove
-   those host edges as the corresponding checker groups move. Cost follows the
-   executed program, its existing immutable-value copies and call-frame depth;
-   there is no whole-source scan or new fuel limit. A scalar evaluated operation
-   must not acquire a callback; checking requests may grow shared arenas, so
-   reacquire elements afterwards. Preserve pending/global caches and restore only
-   the active evaluation frame and call stack on nested entry.
+The next cutover is evaluation's value/frame/place layouts and recursive execution
+group. Keep checker entry at coarse expression/body forcing boundaries, then remove
+those host edges as the corresponding checker groups move. Cost follows the
+executed program, its existing immutable-value copies and call-frame depth;
+there is no whole-source scan or new fuel limit. A scalar evaluated operation
+must not acquire a callback; checking requests may grow shared arenas, so
+reacquire elements afterwards. Preserve pending/global caches and restore only
+the active evaluation frame and call stack on nested entry.
 
 Each cutover must fit ±0.3% of every flagship phase row, not merely the aggregate
 compile. The boundary budget includes reference counting, checked narrowing,

@@ -1,0 +1,10 @@
+use 'refinement_types.dewy'
+
+struct RefResolveLimit:
+    found: bool
+    term: RefTerm
+
+struct RefResolveHost:
+    value_term: (int) -> RefTerm
+    type_limit: (int) -> RefResolveLimit
+    fatal: (int, str) -> void

@@ -1,3 +1,4 @@
+use 'checker_state.dewy'
 use 'refine_intervals.dewy'
 use 'intervals.dewy'
 use 'refine_predicates.dewy'
@@ -2294,7 +2295,7 @@ default_arg = (decl: int, i: int, pt: int, given: int[] = [], captured: bool = f
     # (h: f64 = w: a default naming an earlier parameter takes that argument)
     if given.len() > 0 and not captured: subst_params(d, decl, given)
     saved = cx
-    ctxs.push(FnCtx(ctxs[cx].inst, -1, i32(T_VOID), false, 0, nodes[decl].mod, i32(sc_names.len())))
+    ctxs.push(FnCtx(ctxs[cx].inst, -1, i32(T_VOID), false, 0, nodes[decl].mod, i32(check_scopes.names.len())))
     cx = ctxs.len() - 1
     mark = scope_mark()
     push_type_params(decl, targs)
@@ -3524,7 +3525,7 @@ struct_ctor = (n: int, st_type: int, decl: int, args: int[], expected: int) -> i
             if dv != 0:
                 d = clone(dv)
                 saved = cx
-                ctxs.push(FnCtx(ctxs[cx].inst, -1, i32(T_VOID), false, 0, nodes[decl].mod, i32(sc_names.len())))
+                ctxs.push(FnCtx(ctxs[cx].inst, -1, i32(T_VOID), false, 0, nodes[decl].mod, i32(check_scopes.names.len())))
                 cx = ctxs.len() - 1
                 mark = scope_mark()
                 targs: int[]
@@ -5811,7 +5812,7 @@ fn_names_for = (t: int) -> int[]:
 
 check_expr_in_module = (n: int, m: int, expected: int = 0) -> int:
     saved = cx
-    ctxs.push(FnCtx(ctxs[cx].inst, i32(cx), ctxs[cx].ret, false, 0, i32(m), i32(sc_names.len())))
+    ctxs.push(FnCtx(ctxs[cx].inst, i32(cx), ctxs[cx].ret, false, 0, i32(m), i32(check_scopes.names.len())))
     cx = ctxs.len() - 1
     t = check_expr(n, expected)
     ctxs.pop()
@@ -6014,12 +6015,12 @@ breakpoint_call = (n: int) -> int:
     if slash >= 0: path = path[slash + 1..]
     pieces: int[]
     floor = if cx >= 0: int(ctxs[cx].floor) else: 0
-    loop i in [floor..sc_names.len()):
-        nm = sc_names[i]
-        if sc_top[nm] != i or syms[sc_syms[i]].kind != .local: continue
+    loop i in [floor..check_scopes.names.len()):
+        nm = check_scopes.names[i]
+        if check_scopes.top[nm] != i or syms[check_scopes.syms[i]].kind != .local: continue
         text = name_of(nm)
         if len(text) == 0 or text[0] == '$' or text[0] == '_' or find(text, "$") >= 0: continue
-        l = int(syms[sc_syms[i]].ref)
+        l = int(syms[check_scopes.syms[i]].ref)
         t = prune(int(locals[l].type))
         k = tkind(t)
         locals[l].flags = i32(int(locals[l].flags) | LF_READ)
@@ -9201,16 +9202,16 @@ check_lambda = (lam: int, expected: int) -> int:
     fns[f].decl = i32(lam)
     fns[f].has_env = true
     fns[f].body = nodes[lam].b
-    old_formals = refine_formals
-    old_self = refine_self
+    old_formals = refine_bindings.formals
+    old_self = refine_bindings.self
     if refine_active:
-        refine_formals = []
-        loop p in kids(lam): refine_formals.push(int(nodes[p].name))
+        refine_bindings.formals = []
+        loop p in kids(lam): refine_bindings.formals.push(int(nodes[p].name))
     mm = 0
     pts: int[]
     loop i in [0..np):
         p = kid(lam, i)
-        refine_self = int(nodes[p].name)
+        refine_bindings.self = int(nodes[p].name)
         pt = 0
         if nodes[p].a != 0:
             pt = resolve_type(int(nodes[p].a))
@@ -9231,8 +9232,8 @@ check_lambda = (lam: int, expected: int) -> int:
             mm |= 1 << i
             add_flag(p, NF_MUT)
         pts.push(pt)
-    refine_formals = old_formals
-    refine_self = old_self
+    refine_bindings.formals = old_formals
+    refine_bindings.self = old_self
     fns[f].ptypes = pts
     ret_hint = 0
     if et != 0: ret_hint = int(types[et].elem)
@@ -10038,7 +10039,7 @@ check_call_expr = (n: int, expected: int) -> int:
         if fns[int(nodes[n].sym)].task_api:
             concurrency_tasks.push(n)
             concurrency_runtime_needed = true
-    if nkids(n) == 2 and nodes[n].aux == 0 and nodes[n].sym > 0 and fns[int(nodes[n].sym)].parallel:
+    if nkids(n) == 2 and nodes[n].aux == 0 and nodes[n].sym > 0 and fns[int(nodes[n].sym)].parallel_api:
         concurrency_calls.push(n)
         parallel_prepare(n)
     if nodes[n].aux == 0 and nodes[n].sym > 0 and nkids(n) >= 1 and dewy_at(nodes[n].pos): map_float_key(n)
@@ -13146,12 +13147,12 @@ narrow_root_local = (l0: int) -> int:
 path_forget = (key: str, same_type: int = 0):
     if path_narrows == 0 or len(key) == 0: return
     prefix = key + "."
-    i = sc_names.len() - 1
+    i = check_scopes.names.len() - 1
     floor = int(ctxs[cx].floor)
     loop i >= floor:
-        nm = name_of(sc_names[i])
+        nm = name_of(check_scopes.names[i])
         if nm == key or starts_with(nm, prefix):
-            sy = sc_syms[i]
+            sy = check_scopes.syms[i]
             if syms[sy].kind == .local:
                 l = int(syms[sy].ref)
                 if int(locals[l].flags) & LF_ALIAS != 0:

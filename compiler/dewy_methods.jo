@@ -1,3 +1,4 @@
+use 'checker_state.dewy'
 # Dewy methods: which ones change their object.
 # A method reaches its object only through bare member names, which the frontend
 # reads through a hidden receiver parameter (`$self...`). A method that assigns or
@@ -103,7 +104,7 @@ dewy_parent_decl = (decl: int) -> int:
     p = int(nodes[decl].a)
     if p == 0 or mint_of_any(decl): return 0
     saved = cx
-    ctxs.push(FnCtx(i32(new_inst(FK_INIT, int(nodes[decl].mod), "nominal")), -1, i32(T_VOID), false, 0, nodes[decl].mod, i32(sc_names.len())))
+    ctxs.push(FnCtx(i32(new_inst(FK_INIT, int(nodes[decl].mod), "nominal")), -1, i32(T_VOID), false, 0, nodes[decl].mod, i32(check_scopes.names.len())))
     cx = ctxs.len() - 1
     t = prune(resolve_type(p))
     ctxs.pop()

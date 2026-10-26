@@ -1,3 +1,4 @@
+use 'checker_state.dewy'
 use 'checker_types.dewy'
 use 'types.jo'
 use 'ast.jo'
@@ -39,10 +40,10 @@ poly_scope = () -> PolyScope:
         c = int(ctxs[c].parent)
     loop i in [0..chain.len()): scope.frames.push(ctxs[chain[chain.len() - 1 - i]])
     frozen: {int: int} = {}
-    loop i in [int(ctxs[cx].floor)..sc_names.len()):
-        name = sc_names[i]
-        if sc_top[name] != i: continue
-        symbol = sc_syms[i]
+    loop i in [int(ctxs[cx].floor)..check_scopes.names.len()):
+        name = check_scopes.names[i]
+        if check_scopes.top[name] != i: continue
+        symbol = check_scopes.syms[i]
         if syms[symbol].kind == .local and narrowed_var(int(syms[symbol].ref)) != 0:
             local = poly_freeze_narrowing(int(syms[symbol].ref), frozen)
             symbol = new_sym(name, .local, local, int(syms[symbol].decl))
