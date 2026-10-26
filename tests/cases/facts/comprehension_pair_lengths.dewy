@@ -1,0 +1,8 @@
+f=(xs:array<string>):>int=>{
+    let pairs=[loop i in 0.. and x in xs [i x.length]]
+    let total=0
+    loop pair in pairs {let [i len]=pair; total+=i+len}
+    loop i in [0..pairs.length) total+=pairs[i][1]
+    total
+}
+main=()=>{printl(f(["ab" "c"]) f([]))}

@@ -1464,6 +1464,20 @@ effect_scan_node = (f: int, n: int):
         # (a string index or slice: in bounds by the caller's facts, or a possible failure)
         if fact_string_call(n) >= 2: effect_failure(f, n)
         return
+    # A plain array element replacement writes its containing array route,
+    # not sibling record fields. COW may allocate/detach; indexing may fail.
+    # Hooks and unsupported selectors keep the ordinary opaque fallback.
+    if k == .assign and nodes[n].op == i32(int(Tok.assign)):
+        target = int(nodes[n].a)
+        if nodes[target].kind == .index and nodes[int(nodes[target].a)].kind == .field and effect_index_read(target) and tkind(representation_type(ntype(int(nodes[target].a)))) == .array:
+            effect_target_parts(f, int(nodes[target].a))
+            effect_access(f, int(nodes[target].a), true)
+            effect_scan_node(f, int(nodes[target].b))
+            loop c in kids(target): effect_scan_node(f, c)
+            effect_bounds(f, target)
+            effect_plan_cost(f, n, (1 << int(EffectKind.alloc)) | (1 << int(EffectKind.detach)))
+            effect_scan_node(f, int(nodes[n].b))
+            return
     if k == .assign:
         effect_target_parts(f, int(nodes[n].a))
         effect_access(f, int(nodes[n].a), true)
@@ -1742,7 +1756,23 @@ effect_propagate = (f: int) -> bool:
 # visiting its call tree: f takes or returns a value that is not plain. A
 # superset of effect_visit's signature checks, which accept shares
 # (effect_share) and reviewed library classes: forgetting more is sound.
+# Bundled dictionary removal hashes/compares a builtin key and retires an
+# entry in its own mutable receiver. This is a write footprint only; the
+# full cost/panic inventory still reads the body. With hook-free values, no callback or
+# cleanup can write a sibling/global. The library owns its slot bookkeeping.
+# O(1) identity tests and the existing cached share-type query, on demand.
+effect_map_remove = (f: int) -> bool:
+    d = int(fns[f].decl)
+    if d == 0 or name_of(int(nodes[d].name)) != "remove" or fns[f].params.len() != 2: return false
+    if files[pos_file(nodes[d].pos)].path != lib_dir + "/core/map.jo": return false
+    m = representation_type(int(locals[fns[f].params[0]].type))
+    if not is_map_type(m) or int(locals[fns[f].params[0]].flags) & LF_MUTPARAM == 0: return false
+    key = representation_type(int(locals[fns[f].params[1]].type))
+    if not effect_scalar(key) and key != T_MATH_INT and key != T_STR: return false
+    effect_value(struct_targ(int(types[m].st), 1))
+
 effect_signature_opaque = (f: int) -> bool:
+    if effect_map_remove(f): return false
     d = int(fns[f].decl)
     if fns[f].state != 2 or fns[f].body == 0 or fns[f].kind == FK_INIT or (d != 0 and has_flag(d, NF_EXTERN)):
         return not (d != 0 and has_flag(d, NF_EXTERN) and effect_declared_row(f) != 0)
@@ -1793,7 +1823,9 @@ effect_visit = (f: int):
         trusted = d != 0 and has_flag(d, NF_EXTERN) and effect_declared_row(f) != 0
         if effect_blocks_demanded and not trusted and concurrency_fn_blocks(f): effect_add(f, EffectEvent(EffectAtom(.block), d))
         library = effect_library_class(f)
-        if library != .unclassified: effect_library_summary(f, library, d)
+        if effect_footprints_only and effect_map_remove(f):
+            effect_add(f, EffectEvent(EffectAtom(.write, PlaceIdentity(.formal, f, 1)), d))
+        else if library != .unclassified: effect_library_summary(f, library, d)
         else if fns[f].state != 2 or fns[f].body == 0 or fns[f].kind == FK_INIT or (d != 0 and has_flag(d, NF_EXTERN)) or effect_unavailable.has(f):
             if not trusted: effect_opaque(f, d)
             effect_isolation_block(f, .unavailable, d)

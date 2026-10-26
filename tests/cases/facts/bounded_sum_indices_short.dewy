@@ -1,0 +1,9 @@
+mul=(a:array<int> b:array<int>):>array<int>=>{
+    if a.length =? 0 or b.length =? 0 return []
+    let out=fill(0 a.length+b.length-2)
+    loop i in 0.. and x in a {
+        loop j in 0.. and y in b out[i+j]+=x*y
+    }
+    out
+}
+printl(mul([1] [1]))

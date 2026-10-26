@@ -1,0 +1,9 @@
+const FLAT=[loop i in [1..4] i+1]
+const FILTERED=[loop i in [1..4] if i >? 2 i]
+f=():>int=>{
+    let total=FLAT[3]
+    loop x in FLAT total+=12//x
+    loop x in FILTERED total+=12//x
+    total
+}
+main=()=>printl(f())

@@ -1,0 +1,7 @@
+solve=(@xs:array<int> n:int):>void=>{
+    if xs.length =? 0 return
+    if n <=? 0 {xs.clear(); return}
+    solve(@xs n-1)
+    xs[0]=0
+}
+let xs=[1]; solve(@xs 3)

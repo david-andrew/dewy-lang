@@ -1,0 +1,11 @@
+f=(xs:array<int>):>int=>{
+    let n=xs.count(0)
+    if n =? xs.length return 0
+    xs[n]
+}
+g=(xs:array<int>):>int=>{
+    let n=xs.count((x)=>x <? 1)
+    if n =? xs.length return 0
+    xs[n]
+}
+main=()=>{printl(f([0 2]) f([]) f([0 0]) g([0 4 2]))}

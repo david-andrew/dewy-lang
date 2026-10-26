@@ -1,0 +1,6 @@
+solve=(@xs:array<int> n:int):>void=>{
+    if xs.length =? 0 or n <=? 0 return
+    loop d in [1 2] {xs[0]=d; solve(@xs n-1)}
+    xs[0]=0
+}
+main=()=>{let xs=[1]; solve(@xs 3); printl(xs); let ys:array<int>=[]; solve(@ys 2); printl(ys)}

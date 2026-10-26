@@ -1,0 +1,21 @@
+# Two independent bounds compose into the bound on their sum.
+mul=(a:array<int> b:array<int>):>array<int>=>{
+    if a.length =? 0 or b.length =? 0 return []
+    let out=fill(0 a.length+b.length-1)
+    loop i in 0.. and x in a {
+        loop j in 0.. and y in b out[i+j]+=x*y
+    }
+    out
+}
+subtract_tail=(@rest:array<int> d:array<int>):>void=>{
+    if d.length =? 0 or rest.length <? d.length return
+    let shift=rest.length-d.length
+    loop j in 0.. and c in d rest[shift+j]-=c
+}
+main=()=>{
+    printl(mul([1 2] [3 4]))
+    printl(mul([] [1]))
+    let xs=[1 2 3]
+    subtract_tail(@xs [4 5])
+    printl(xs)
+}

@@ -1,0 +1,12 @@
+C:type=[keys:array<int> prev:array<int> head:int slots:dict<string int>]
+unlink=(@c:C):>void=>{
+    if c.prev.length >? 0 c.prev[0]=-1
+    c.head=-1
+}
+remove=(@c:C):>void=>{c.slots.remove("old"); unlink(@c)}
+f=(@c:C i:int):>int=>{
+    if i <? 0 or i >=? c.keys.length return 0
+    remove(@c)
+    c.keys[i]
+}
+main=()=>{let c=C[[4] [2] 0 ["old"->0]]; printl(f(@c 0) c.prev c.head c.slots.length)}

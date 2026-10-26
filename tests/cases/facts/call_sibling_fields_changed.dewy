@@ -1,0 +1,8 @@
+C:type=[keys:array<int> prev:array<int>]
+unlink=(@c:C):>void=>{c.keys.clear(); c.prev.clear()}
+f=(@c:C i:int):>int=>{
+    if i <? 0 or i >=? c.keys.length return 0
+    unlink(@c)
+    c.keys[i]
+}
+let c=C[[4] [2]]; printl(f(@c 0))

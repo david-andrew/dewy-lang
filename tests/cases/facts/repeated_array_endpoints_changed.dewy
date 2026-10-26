@@ -1,0 +1,6 @@
+f=(@xs:array<rational>):>rational=>{
+    if xs.length =? 0 or xs.last =? 0 return 0
+    xs[xs.length-1]=0
+    1/xs.last
+}
+let xs:array<rational>=[2]; printl(f(@xs))
