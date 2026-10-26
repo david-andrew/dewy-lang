@@ -1,3 +1,4 @@
+use 'type_queries.dewy'
 use 'checker_types.dewy'
 use 'concurrency.jo'
 # Type representation: all types live in `types` and are referred to by index.
@@ -307,14 +308,7 @@ occurs = (v: int, t0: int) -> bool:
     t = prune(t0)
     if t == v: return true
     if not has_var(t): return false
-    if types[t].elem != 0 and occurs(v, int(types[t].elem)): return true
-    loop i in [0..int(types[t].nargs)):
-        if occurs(v, targ(t, i)): return true
-    if (types[t].kind == .struct_ or types[t].kind == .enum_) and types[t].st != 0:
-        si = int(types[t].st)
-        loop i in [0..int(structs[si].ntargs)):
-            if occurs(v, int(type_args[int(structs[si].targs) + i])): return true
-    false
+    type_query_occurs_children(types, structs, type_args, v, t)
 
 zonk = (t0: int) -> int:
     t = prune(t0)
@@ -345,23 +339,7 @@ type_eq = (a0: int, b0: int) -> bool:
     if a == b: return true
     if a == 0 or b == 0: return false
     if not has_var(a) and not has_var(b): return false
-    ta = types[a]
-    tb = types[b]
-    if ta.kind != tb.kind or ta.nargs != tb.nargs or ta.bits != tb.bits: return false
-    if ta.kind == .var: return false
-    if ta.kind == .struct_ or ta.kind == .enum_:
-        if ta.st == tb.st: return true
-        sa = int(ta.st)
-        sb = int(tb.st)
-        if structs[sa].decl != structs[sb].decl or structs[sa].ntargs != structs[sb].ntargs: return false
-        loop i in [0..int(structs[sa].ntargs)):
-            if not type_eq(struct_targ(sa, i), struct_targ(sb, i)): return false
-        return true
-    if ta.st != tb.st: return false
-    if (ta.elem != 0 or tb.elem != 0) and not type_eq(int(ta.elem), int(tb.elem)): return false
-    loop i in [0..int(ta.nargs)):
-        if not type_eq(targ(a, i), targ(b, i)): return false
-    true
+    type_query_equal_shape(types, structs, type_args, a, b)
 
 unify = (a0: int, b0: int) -> bool:
     a = prune(a0)

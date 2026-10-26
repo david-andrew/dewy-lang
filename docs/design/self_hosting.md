@@ -337,6 +337,35 @@ following inference. Neither introduces a whole-program pass or checker callback
 Differential graphs cover cycles, inference chains, repeated children, ignored
 callable/record branches, depth boundaries and subsequent arena writes.
 
+`refine_intervals.dewy` derives signed and unsigned integer domains from the shared
+metadata and predicates. Match checking and total dictionaries lend their arenas;
+no fact-state adapter or checker callback is needed. The unsigned upper half keeps
+its signed-word bit patterns; offset arithmetic retains the twin's wrapping and
+fit checks. Unsupported terms yield an unknown domain.
+The query follows inference links and sorts only its predicate's excluded points:
+O(inference links + A log A) for A atoms. Endpoint and symbolic-constraint differential
+tests cover both halves of uint64, holes, offsets and later arena writes.
+
+`refine_keys.dewy` enumerates finite total-dictionary keys.
+It follows union arguments directly in their arena, preserving member order,
+repetition and partial output when a later member fails. A failing child contributes
+none of its own partial output. The existing integer limit is a distance of 4096
+per interval, not a total union-size limit. String sets retain their first spelling's
+order. Work follows requested type edges and interval extraction, plus key bytes
+appended at each visited union, including intermediate child results. No
+whole-program pass is introduced.
+
+`type_queries.dewy` owns recursive structural equality and the occurs-check over
+borrowed type, structure and argument arenas. Jo retains the inlinable root guards
+for inference pruning, identity and concrete types. Recursive calls stay in the
+leaf, reading fields directly instead of copying TypeInfo records. Preserve the
+existing metadata comparisons: concrete types compare by interned identity;
+inferred record/enum shapes compare their declarations and type arguments. These
+queries cost O(visited type occurrences + traversed inference links), with stack
+space proportional to query depth. They add neither caching nor a new traversal
+budget. Differential graphs include shared children, aliases, deep types and a
+binding changed between queries.
+
 `dewy_layout.dewy` (`dewy-core fmt`'s layout of Dewy text: indentation by the brackets open and
 by continued statements, the spaces between lexemes, and the lines kept as written) is the
 first leaf that imports another (`from p"dewy_tokens.dewy" import ...`; twins' imports are

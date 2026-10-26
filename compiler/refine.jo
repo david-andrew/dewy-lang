@@ -1,3 +1,4 @@
+use 'refine_keys.dewy'
 use 'refine_queries.dewy'
 use 'refine_predicates.dewy'
 use 'checker_tokens.dewy'
@@ -114,25 +115,7 @@ is_total_dict = (t0: int) -> bool:
 
 # every value of a finite key type, as text (`'0b'`, `3`): (finite, values)
 total_dict_keys = (t0: int) -> (bool, str[]):
-    t = prune(t0)
-    out: str[]
-    if is_union(t):
-        loop m in union_members(t):
-            ok, values = total_dict_keys(m)
-            if not ok: return (false, out)
-            out += values
-        return (true, out)
-    set = str_set_of(t)
-    if set != 0:
-        loop value in str_sets[set]: out.push("'{value}'")
-        return (true, out)
-    if types[t].kind != .refined: return (false, out)
-    known, intervals = int_intervals(t)
-    if not known: return (false, out)
-    loop k in [0..intervals.len() / 2):
-        if intervals[2 * k + 1] - intervals[2 * k] > 4096: return (false, out)
-        loop v in [intervals[2 * k]..intervals[2 * k + 1]]: out.push("{v}")
-    (true, out)
+    ref_finite_keys(types, structs, type_args, ref_predicates, str_sets, t0, T_MATH_INT)
 
 # a dictionary literal given for a totaldict: an entry for every key
 total_literal_check = (n: int, t: int):

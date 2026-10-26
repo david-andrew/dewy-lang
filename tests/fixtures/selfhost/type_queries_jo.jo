@@ -1,0 +1,28 @@
+use '../../../compiler/type_queries.jo'
+use '../../../compiler/checker_types.jo'
+read_i = (text: str) -> int: to_int(text) ?? 0
+read_args = (text: str) -> i32[]:
+    out: i32[]
+    if text != "-":
+        loop x in split(text, ","): out.push(i32(read_i(x)))
+    out
+main = () -> int:
+    argv = args()
+    types = [TypeInfo()]
+    structs = [StructInfo()]
+    args: i32[]
+    loop line in split(read_file(argv[1]) ?? "", "\n"):
+        p = split(line, " ")
+        if p[0] == "S":
+            children = read_args(p[2])
+            structs.push(StructInfo(decl = i32(read_i(p[1])), targs = i32(args.len()), ntargs = i32(children.len())))
+            args += children
+        else if p[0] == "T":
+            children = read_args(p[7])
+            types.push(TypeInfo(kind = TK(read_i(p[1])), bits = i32(read_i(p[2])), flags = i32(read_i(p[3])), elem = i32(read_i(p[4])), ref = i32(read_i(p[5])), st = i32(read_i(p[6])), args = i32(args.len()), nargs = i32(children.len()), sign = p[8] == "1", mutmask = i32(read_i(p[9]))))
+            args += children
+        else if p[0] == "R": types[read_i(p[1])].ref = i32(read_i(p[2]))
+        else if p[0] == "Q":
+            a = read_i(p[1]); b = read_i(p[2]); v = read_i(p[3])
+            print("{type_query_equal(types, structs, args, a, b)} {type_query_occurs(types, structs, args, v, a)}")
+    0

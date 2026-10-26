@@ -1,0 +1,39 @@
+use '../../../compiler/refine_keys.jo'
+use '../../../compiler/checker_types.jo'
+use '../../../compiler/checker_tokens.jo'
+use '../../../compiler/refinement_types.jo'
+read_i = (text: str) -> int: to_int(text) ?? 0
+main = () -> int:
+    argv = args()
+    types = [TypeInfo(), TypeInfo(kind = .int_, bits = 64, sign = true), TypeInfo(kind = .int_, bits = 64)]
+    structs = [StructInfo()]
+    args: i32[]
+    predicates: RefAtom[][] = [[]]
+    sets: str[][] = [[]]
+    loop line in split(read_file(argv[1]) ?? "", "\n"):
+        p = split(line, " ")
+        if p[0] == "S":
+            values = split(p[1], ",")
+            types.push(TypeInfo(kind = .enum_, st = i32(structs.len())))
+            structs.push(StructInfo(lit_set = i32(sets.len())))
+            sets.push(values)
+        else if p[0] == "M":
+            sets[read_i(p[1])] = split(p[2], ",")
+        else if p[0] == "I":
+            row = [RefAtom(.le, RefTerm(1, read_i(p[1])), RefTerm()), RefAtom(.le, RefTerm(), RefTerm(1, read_i(p[2])))]
+            if p[3] != "-":
+                loop x in split(p[3], ","): row.push(RefAtom(.ne, RefTerm(), RefTerm(1, read_i(x))))
+            types.push(TypeInfo(kind = .refined, elem = 1, st = i32(predicates.len())))
+            predicates.push(row)
+        else if p[0] == "U":
+            start = args.len()
+            if p[1] != "-":
+                loop x in split(p[1], ","): args.push(i32(read_i(x)))
+            types.push(TypeInfo(kind = .enum_, st = i32(structs.len())))
+            structs.push(StructInfo(union_ = true, targs = i32(start), ntargs = i32(args.len() - start)))
+        else if p[0] == "V": types.push(TypeInfo(kind = .var, ref = i32(read_i(p[1]))))
+        else if p[0] == "H": types.push(TypeInfo(kind = .refined, elem = 2))
+        else if p[0] == "Q":
+            ok, values = ref_finite_keys(types, structs, args, predicates, sets, read_i(p[1]), read_i(p[2]))
+            print("{ok} {join(values, "|")}")
+    0

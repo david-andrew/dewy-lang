@@ -1,0 +1,89 @@
+# Frozen bootstrap twin of refine_intervals.dewy. Change both, or neither.
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'refine_queries.dewy'
+use 'refine_predicates.dewy'
+use 'intervals.dewy'
+
+ref_type_intervals = (types: mut TypeInfo[], predicates: mut RefAtom[][], t0: int, math_int: int) -> (bool, int[]):
+    known, out, high = ref_type_intervals_wide(types, predicates, t0, math_int)
+    if high.len() > 0:
+        nothing: int[]
+        return (false, nothing)
+    (known, out)
+
+# int_intervals, and a uint64's values from 2^63 on as intervals of their bits (negative,
+# ordered as the values are). A uint64's refinement constants from 2^63 on are its `unsigned`
+# terms, their bits negative. O(atoms log atoms).
+ref_type_intervals_wide = (types: mut TypeInfo[], predicates: mut RefAtom[][], t0: int, math_int: int) -> (bool, int[], int[]):
+    t = ref_query_prune(types, t0)
+    base = t
+    if types[base].kind == .refined: base = ref_query_prune(types, int(types[base].elem))
+    nothing: int[]
+    if types[base].kind != .int_ or base == math_int: return (false, nothing, nothing)
+    bits = int(types[base].bits)
+    sign = types[base].sign
+    lo = if not sign: 0 else if bits >= 64: FACT_MIN else: -(1 << (bits - 1))
+    hi = if bits >= 64: FACT_MAX else if sign: (1 << (bits - 1)) - 1 else: (1 << bits) - 1
+    # (a uint64's values from 2^63 on: hlo..hhi, their bits; none when hlo > hhi)
+    hlo = 0
+    hhi = -1
+    if not sign and bits >= 64: hlo = FACT_MIN
+    gaps: int[]
+    hgaps: int[]
+    if types[t].kind == .refined:
+        loop atom in predicates[int(types[t].st)]:
+            if atom.a.path.len() > 0 or atom.b.path.len() > 0: return (false, nothing, nothing)
+            if atom.op != .le and atom.op != .lt and atom.op != .ne: return (false, nothing, nothing)
+            if atom.a.kind == 1 and atom.b.kind == 0:
+                v = atom.a.value
+                # (`c <= x + k` keeps k on the value's side (refine.jo ref_offset_right): c - k <= x)
+                if atom.b.offset != 0:
+                    if atom.a.unsigned or not ref_sum_fits(v, -atom.b.offset): return (false, nothing, nothing)
+                    v -= atom.b.offset
+                big = atom.a.unsigned and v < 0
+                if atom.op == .ne:
+                    if big: hgaps.push(v)
+                    else: gaps.push(v)
+                    continue
+                # (c <= x, or c < x as c + 1 <= x)
+                if atom.op == .lt:
+                    if big and v == -1:
+                        hlo = 0
+                        lo = 1
+                        hi = 0
+                        continue
+                    if not big and v == FACT_MAX:
+                        lo = 1
+                        hi = 0
+                        continue
+                    v += 1
+                if big:
+                    lo = 1
+                    hi = 0
+                    hlo = max(hlo, v)
+                else: lo = max(lo, v)
+            else if atom.a.kind == 0 and atom.b.kind == 1:
+                v = atom.b.value
+                big = atom.b.unsigned and v < 0
+                if atom.op == .ne:
+                    if big: hgaps.push(v)
+                    else: gaps.push(v)
+                    continue
+                # (x <= c, or x < c as x <= c - 1)
+                if atom.op == .lt:
+                    if big and v == FACT_MIN:
+                        hlo = 0
+                        continue
+                    if not big and v == FACT_MIN:
+                        hlo = 0
+                        lo = 1
+                        hi = 0
+                        continue
+                    v -= 1
+                if big: hhi = min(hhi, v)
+                else:
+                    hi = min(hi, v)
+                    hlo = 0
+            else: return (false, nothing, nothing)
+    (true, interval_gaps(lo, hi, gaps), interval_gaps(hlo, hhi, hgaps))

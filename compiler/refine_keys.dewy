@@ -1,0 +1,43 @@
+$runtime_checks
+# Finite key domains requested by totaldict checking. Borrow indexed arenas;
+# preserve union order, partial results on failure and first-spelled set order.
+# O(visited type edges + interval extraction + emitted key bytes), retaining
+# the existing 4096-distance limit per integer interval, not per union.
+from p"checker_types.dewy" import TypeInfo, StructInfo
+from p"refinement_types.dewy" import RefAtom
+from p"refine_queries.dewy" import ref_query_prune
+from p"refine_intervals.dewy" import ref_type_intervals
+
+ref_finite_keys=(@types:array<TypeInfo> @structs:array<StructInfo> @args:array<int32> @predicates:array<array<RefAtom>> @sets:array<array<string>> t0:int64 math_int:int64):>[bool array<string>]=>{
+    let t=ref_query_prune(@types t0)
+    let out:array<string>=[]
+    if types[t].kind =? 'enum_' {
+        let si=int64(types[t].st)
+        if structs[si].union_ {
+            let first=int64(structs[si].targs)
+            let stop:int64=first + int64(structs[si].ntargs)
+            loop i in [first..stop) {
+                let [ok values]=ref_finite_keys(@types @structs @args @predicates @sets int64(args[i]) math_int)
+                if not ok {return [false out]}
+                out.extend(values)
+            }
+            return [true out]
+        }
+        let set=int64(structs[si].lit_set)
+        if set not=? 0 {
+            loop value in sets[set] {out.push("'{value}'")}
+            return [true out]
+        }
+    }
+    if types[t].kind not=? 'refined' {return [false out]}
+    let [known intervals]=ref_type_intervals(@types @predicates t math_int)
+    if not known {return [false out]}
+    loop k in [0..intervals.length // 2) {
+        let lo=intervals[2 * k]
+        let hi=intervals[2 * k + 1]
+        let distance:int64=int64<overflow='wrap'>(hi) - int64<overflow='wrap'>(lo)
+        if distance >? 4096 {return [false out]}
+        loop v in [lo..hi] {out.push("{v}")}
+    }
+    [true out]
+}

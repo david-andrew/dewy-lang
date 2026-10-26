@@ -1,0 +1,69 @@
+$runtime_checks
+# Structural queries borrow the owner's arenas. Jo keeps its inlinable root
+# guards; recursive children stay here. No record snapshots or checker callbacks.
+# Each query costs O(visited type occurrences + traversed inference links),
+# with stack space proportional to the queried type's depth, as in the twin.
+from p"checker_types.dewy" import TypeInfo, StructInfo
+from p"refine_queries.dewy" import ref_query_prune
+
+# Inference metadata's existing TF_HAS_VAR bit, not a new analysis.
+const TYPE_QUERY_HAS_VAR:int32=1
+
+type_query_occurs=(@types:array<TypeInfo> @structs:array<StructInfo> @args:array<int32> v:int64 t0:int64):>bool=>{
+    let t=ref_query_prune(@types t0)
+    if t =? v {return true}
+    if (types[t].flags & TYPE_QUERY_HAS_VAR) =? 0 {return false}
+    type_query_occurs_children(@types @structs @args v t)
+}
+
+type_query_occurs_children=(@types:array<TypeInfo> @structs:array<StructInfo> @args:array<int32> v:int64 t:int64):>bool=>{
+    if types[t].elem not=? 0 and type_query_occurs(@types @structs @args v int64(types[t].elem)) {return true}
+    let start=int64(types[t].args)
+    let stop:int64=start + int64(types[t].nargs)
+    loop i in [start..stop) {
+        if type_query_occurs(@types @structs @args v int64(args[i])) {return true}
+    }
+    if (types[t].kind =? 'struct_' or types[t].kind =? 'enum_') and types[t].st not=? 0 {
+        let si=int64(types[t].st)
+        let first=int64(structs[si].targs)
+        let last:int64=first + int64(structs[si].ntargs)
+        loop i in [first..last) {
+            if type_query_occurs(@types @structs @args v int64(args[i])) {return true}
+        }
+    }
+    false
+}
+
+type_query_equal=(@types:array<TypeInfo> @structs:array<StructInfo> @args:array<int32> a0:int64 b0:int64):>bool=>{
+    let a=ref_query_prune(@types a0)
+    let b=ref_query_prune(@types b0)
+    if a =? b {return true}
+    if a =? 0 or b =? 0 {return false}
+    if (types[a].flags & TYPE_QUERY_HAS_VAR) =? 0 and (types[b].flags & TYPE_QUERY_HAS_VAR) =? 0 {return false}
+    type_query_equal_shape(@types @structs @args a b)
+}
+
+type_query_equal_shape=(@types:array<TypeInfo> @structs:array<StructInfo> @args:array<int32> a:int64 b:int64):>bool=>{
+    if types[a].kind not=? types[b].kind or types[a].nargs not=? types[b].nargs or types[a].bits not=? types[b].bits {return false}
+    if types[a].kind =? 'var' {return false}
+    if types[a].kind =? 'struct_' or types[a].kind =? 'enum_' {
+        if types[a].st =? types[b].st {return true}
+        let sa=int64(types[a].st)
+        let sb=int64(types[b].st)
+        if structs[sa].decl not=? structs[sb].decl or structs[sa].ntargs not=? structs[sb].ntargs {return false}
+        let first=int64(structs[sa].targs)
+        let second=int64(structs[sb].targs)
+        loop i in [0..int64(structs[sa].ntargs)) {
+            if not type_query_equal(@types @structs @args int64(args[first + i]) int64(args[second + i])) {return false}
+        }
+        return true
+    }
+    if types[a].st not=? types[b].st {return false}
+    if (types[a].elem not=? 0 or types[b].elem not=? 0) and not type_query_equal(@types @structs @args int64(types[a].elem) int64(types[b].elem)) {return false}
+    let first=int64(types[a].args)
+    let second=int64(types[b].args)
+    loop i in [0..int64(types[a].nargs)) {
+        if not type_query_equal(@types @structs @args int64(args[first + i]) int64(args[second + i])) {return false}
+    }
+    true
+}

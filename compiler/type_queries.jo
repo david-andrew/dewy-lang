@@ -1,0 +1,45 @@
+# Frozen bootstrap twin of type_queries.dewy. Change both, or neither.
+use 'checker_types.dewy'
+use 'refine_queries.dewy'
+const TYPE_QUERY_HAS_VAR = 1
+
+type_query_occurs = (types: mut TypeInfo[], structs: mut StructInfo[], args: mut i32[], v: int, t0: int) -> bool:
+    t = ref_query_prune(types, t0)
+    if t == v: return true
+    if int(types[t].flags) & TYPE_QUERY_HAS_VAR == 0: return false
+    type_query_occurs_children(types, structs, args, v, t)
+
+type_query_occurs_children = (types: mut TypeInfo[], structs: mut StructInfo[], args: mut i32[], v: int, t: int) -> bool:
+    if types[t].elem != 0 and type_query_occurs(types, structs, args, v, int(types[t].elem)): return true
+    loop i in [0..int(types[t].nargs)):
+        if type_query_occurs(types, structs, args, v, int(args[int(types[t].args) + i])): return true
+    if (types[t].kind == .struct_ or types[t].kind == .enum_) and types[t].st != 0:
+        si = int(types[t].st)
+        loop i in [0..int(structs[si].ntargs)):
+            if type_query_occurs(types, structs, args, v, int(args[int(structs[si].targs) + i])): return true
+    false
+
+type_query_equal = (types: mut TypeInfo[], structs: mut StructInfo[], args: mut i32[], a0: int, b0: int) -> bool:
+    a = ref_query_prune(types, a0)
+    b = ref_query_prune(types, b0)
+    if a == b: return true
+    if a == 0 or b == 0: return false
+    if int(types[a].flags) & TYPE_QUERY_HAS_VAR == 0 and int(types[b].flags) & TYPE_QUERY_HAS_VAR == 0: return false
+    type_query_equal_shape(types, structs, args, a, b)
+
+type_query_equal_shape = (types: mut TypeInfo[], structs: mut StructInfo[], args: mut i32[], a: int, b: int) -> bool:
+    if types[a].kind != types[b].kind or types[a].nargs != types[b].nargs or types[a].bits != types[b].bits: return false
+    if types[a].kind == .var: return false
+    if types[a].kind == .struct_ or types[a].kind == .enum_:
+        if types[a].st == types[b].st: return true
+        sa = int(types[a].st)
+        sb = int(types[b].st)
+        if structs[sa].decl != structs[sb].decl or structs[sa].ntargs != structs[sb].ntargs: return false
+        loop i in [0..int(structs[sa].ntargs)):
+            if not type_query_equal(types, structs, args, int(args[int(structs[sa].targs) + i]), int(args[int(structs[sb].targs) + i])): return false
+        return true
+    if types[a].st != types[b].st: return false
+    if (types[a].elem != 0 or types[b].elem != 0) and not type_query_equal(types, structs, args, int(types[a].elem), int(types[b].elem)): return false
+    loop i in [0..int(types[a].nargs)):
+        if not type_query_equal(types, structs, args, int(args[int(types[a].args) + i]), int(args[int(types[b].args) + i])): return false
+    true

@@ -1,0 +1,29 @@
+# Frozen bootstrap twin of refine_keys.dewy. Change both, or neither.
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'refine_queries.dewy'
+use 'refine_intervals.dewy'
+
+ref_finite_keys = (types: mut TypeInfo[], structs: mut StructInfo[], args: mut i32[], predicates: mut RefAtom[][], sets: mut str[][], t0: int, math_int: int) -> (bool, str[]):
+    t = ref_query_prune(types, t0)
+    out: str[]
+    if types[t].kind == .enum_ and structs[int(types[t].st)].union_:
+        si = int(types[t].st)
+        loop i in [0..int(structs[si].ntargs)):
+            m = int(args[int(structs[si].targs) + i])
+            ok, values = ref_finite_keys(types, structs, args, predicates, sets, m, math_int)
+            if not ok: return (false, out)
+            out += values
+        return (true, out)
+    set = 0
+    if types[t].kind == .enum_: set = int(structs[int(types[t].st)].lit_set)
+    if set != 0:
+        loop value in sets[set]: out.push("'{value}'")
+        return (true, out)
+    if types[t].kind != .refined: return (false, out)
+    known, intervals = ref_type_intervals(types, predicates, t, math_int)
+    if not known: return (false, out)
+    loop k in [0..intervals.len() / 2):
+        if intervals[2 * k + 1] - intervals[2 * k] > 4096: return (false, out)
+        loop v in [intervals[2 * k]..intervals[2 * k + 1]]: out.push("{v}")
+    (true, out)

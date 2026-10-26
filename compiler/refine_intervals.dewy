@@ -1,0 +1,95 @@
+$runtime_checks
+# Integer type domains, requested by match and finite-key checking. Borrow the
+# owner's arenas; no callbacks or copied records. O(A log A) for A predicate
+# atoms, plus inference-chain traversal. High uint64 endpoints keep their bits.
+from p"checker_types.dewy" import TypeInfo
+from p"refinement_types.dewy" import RefAtom, FACT_MIN, FACT_MAX
+from p"refine_queries.dewy" import ref_query_prune
+from p"refine_predicates.dewy" import ref_sum_fits
+from p"intervals.dewy" import interval_gaps
+
+ref_type_intervals=(@types:array<TypeInfo> @predicates:array<array<RefAtom>> t0:int64 math_int:int64):>[bool array<int64>]=>{
+    let [known out high]=ref_type_intervals_wide(@types @predicates t0 math_int)
+    if high.length >? 0 {return [false []]}
+    [known out]
+}
+
+ref_type_intervals_wide=(@types:array<TypeInfo> @predicates:array<array<RefAtom>> t0:int64 math_int:int64):>[bool array<int64> array<int64>]=>{
+    let t=ref_query_prune(@types t0)
+    let base=t
+    if types[base].kind =? 'refined' {base=ref_query_prune(@types int64(types[base].elem))}
+    if types[base].kind not=? 'int_' or base =? math_int {return [false [] []]}
+    let bits=int64(types[base].bits)
+    let sign=types[base].sign
+    let lo:int64=if not sign 0 else if bits >=? 64 FACT_MIN else -(1 << (bits - 1))
+    let hi:int64=if bits >=? 64 FACT_MAX else if sign (1 << (bits - 1)) - 1 else (1 << bits) - 1
+    let hlo:int64=0
+    let hhi:int64=-1
+    if not sign and bits >=? 64 {hlo=FACT_MIN}
+    let gaps:array<int64>=[]
+    let hgaps:array<int64>=[]
+    if types[t].kind =? 'refined' {
+        loop atom in predicates[int64(types[t].st)] {
+            if atom.a.path.length >? 0 or atom.b.path.length >? 0 {return [false [] []]}
+            if atom.op not=? 'le' and atom.op not=? 'lt' and atom.op not=? 'ne' {return [false [] []]}
+            if atom.a.kind =? 1 and atom.b.kind =? 0 {
+                let v=atom.a.value
+                # c <= x + k is c - k <= x, retaining signed-word arithmetic.
+                if atom.b.offset not=? 0 {
+                    let negative:int64=int64<overflow='wrap'>(0) - int64<overflow='wrap'>(atom.b.offset)
+                    if atom.a.unsigned or not ref_sum_fits(v negative) {return [false [] []]}
+                    v=int64<overflow='wrap'>(v) - int64<overflow='wrap'>(atom.b.offset)
+                }
+                let big=atom.a.unsigned and v <? 0
+                if atom.op =? 'ne' {
+                    if big {hgaps.push(v)} else {gaps.push(v)}
+                    continue
+                }
+                if atom.op =? 'lt' {
+                    if big and v =? -1 {
+                        hlo=0
+                        lo=1
+                        hi=0
+                        continue
+                    }
+                    if not big and v =? FACT_MAX {
+                        lo=1
+                        hi=0
+                        continue
+                    }
+                    v+=1
+                }
+                if big {
+                    lo=1
+                    hi=0
+                    hlo=max(hlo v)
+                } else {lo=max(lo v)}
+            } else if atom.a.kind =? 0 and atom.b.kind =? 1 {
+                let v=atom.b.value
+                let big=atom.b.unsigned and v <? 0
+                if atom.op =? 'ne' {
+                    if big {hgaps.push(v)} else {gaps.push(v)}
+                    continue
+                }
+                if atom.op =? 'lt' {
+                    if big and v =? FACT_MIN {
+                        hlo=0
+                        continue
+                    }
+                    if not big and v =? FACT_MIN {
+                        hlo=0
+                        lo=1
+                        hi=0
+                        continue
+                    }
+                    v-=1
+                }
+                if big {hhi=min(hhi v)} else {
+                    hi=min(hi v)
+                    hlo=0
+                }
+            } else {return [false [] []]}
+        }
+    }
+    [true interval_gaps(lo hi gaps) interval_gaps(hlo hhi hgaps)]
+}
