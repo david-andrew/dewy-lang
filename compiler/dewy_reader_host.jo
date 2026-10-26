@@ -1,0 +1,137 @@
+use 'dewy_tokens.dewy'
+use 'dewy_reader_types.dewy'
+use 'dewy_builders.dewy'
+use 'dewy_lex.dewy'
+use 'literals.dewy'
+use 'node_store.dewy'
+
+struct ParserReaderHost:
+    __pow10: (int) -> f64
+    arena_enable: () -> void
+    arena_return_at: (int) -> int
+    binding_leaves: (int[]) -> int[]
+    build_setting_apply: (bool, str, int, int, str) -> void
+    bytes_slice: (str, int, int) -> str
+    decimal_let: (int) -> void
+    dewy_defer_callee: (int) -> void
+    dewy_defer_name: (int, int, int) -> void
+    dewy_defer_type: (int, int) -> void
+    dewy_deferred_here: (int, int) -> bool
+    dewy_inherited_key: () -> int
+    dewy_method_group: (int[], int[], {int:int}) -> {int:int}
+    dewy_note_member: (int) -> void
+    dewy_reserved_name: (str, int) -> void
+    dir_builtin: (str) -> bool
+    dir_bundle_index: (int) -> int
+    dir_set: (int, int, int, int, int) -> void
+    dn_error: (int, str) -> int
+    dn_expand_lazy: () -> void
+    dn_interpolation_close: (str, int, int) -> int
+    dn_lex: (int, int, int, bool) -> DewyLexeme[]
+    dw_add_receiver: (int, int, int) -> void
+    dw_arena_scope: (int, int, int, bool, int) -> int
+    dw_bigint_value: (u64[], int, bool) -> int
+    dw_chain_temp: (int, mut int[], int) -> int
+    dw_clamp_block: (int, int) -> int
+    dw_dir_apply: (str, int, int, int, int, bool) -> void
+    dw_dir_known: (str) -> bool
+    dw_dir_name: (str) -> bool
+    dw_expectation: (int, int, str, int, int, int) -> int
+    dw_ffi_attach: (int, int[]) -> void
+    dw_ffi_attr: (str, int, int) -> int
+    dw_ffi_c_types: (int) -> void
+    dw_ffi_library: (str) -> str
+    dw_finish_function: (int, int[], int, str) -> int
+    dw_int_singleton_type: (int[], int) -> int
+    dw_method_finish: (int, int, int[], int) -> void
+    dw_parallel_exits: (int, int) -> void
+    dw_range_value: (int) -> int
+    dw_register_literal_methods: (int[]) -> void
+    dw_renamed_init: () -> void
+    dw_target_dropped_name: (int, int) -> void
+    dw_target_dropped_node: (int) -> void
+    dw_target_field_value: (int) -> str
+    dw_target_name: () -> str
+    dw_task_group: (int, str, int, int, bool) -> int
+    dw_task_spawn: (int, int, int) -> int
+    fatal: (int, str) -> void
+    file_name: (str) -> str
+    head_collapse: (int) -> int
+    intern: (str) -> int
+    intern_sub: (str, int, int) -> int
+    intrinsic_of: (int) -> int
+    isolation_children: (NK) -> int
+    join: (str[], str) -> str
+    metatag_fail_text: (str) -> str
+    ownership_declare: (int, int, int) -> void
+    place_method_split: (int, int, str) -> int[]
+    replace: (str, str, str) -> str
+    spec_colon: (str, int, int) -> int
+    str_from_bytes: (u8[]) -> str
+    str_set_type: (str[]) -> int
+    to_float: (str) -> f64?
+    trim: (str) -> str
+    warn: (int, str) -> void
+    words: (str) -> str[]
+    g_DC_TEST_USAGE: () -> str
+    g_DW_ROW_HINT: () -> str
+    g_TRANSFER_SEND_CLAIM: () -> int
+    g_TRANSFER_SEND_OFF: () -> int
+    g_TRANSFER_SYNC_CLAIM: () -> int
+    g_TRANSFER_SYNC_OFF: () -> int
+    g_TRANSFER_UNSAFE: () -> int
+    g_dc_lazy_used_set: (bool) -> void
+    g_dewy_decl_members_item_set: (int, {int:int}) -> void
+    g_dewy_decl_methods_item_set: (int, int[]) -> void
+    g_dewy_live_sources_has: (int) -> bool
+    g_dewy_live_sources_item_set: (int, bool) -> void
+    g_dewy_live_sources_remove: (int) -> void
+    g_dewy_methods_len: () -> int
+    g_dewy_methods_truncate: (int) -> void
+    g_dewy_param_kinds_item_set: (int, int[]) -> void
+    g_dewy_type_members_item_set: (int, {int:int}) -> void
+    g_dir_bundles_push: (DirBundle) -> void
+    g_dir_scopes_len: () -> int
+    g_dir_scopes_truncate: (int) -> void
+    g_dw_allocators: () -> int
+    g_dw_allocators_set: (int) -> void
+    g_dw_bigint_import: () -> int
+    g_dw_bigint_import_set: (int) -> void
+    g_dw_task_groups_item: (int) -> str
+    g_dw_task_groups_len: () -> int
+    g_dw_task_groups_pop: () -> str
+    g_dw_task_groups_push: (str) -> void
+    g_dw_type_members_get: (int) -> {int:{int:int}}?
+    g_dw_type_members_item_set: (int, {int:{int:int}}) -> void
+    g_effect_blocks_demanded: () -> bool
+    g_effect_blocks_demanded_set: (bool) -> void
+    g_effect_panics_demanded: () -> bool
+    g_effect_panics_demanded_set: (bool) -> void
+    g_effect_syntax_len: () -> int
+    g_effect_syntax_push: (EffectSyntax[]) -> void
+    g_effect_syntax_truncate: (int) -> void
+    g_effects_active_set: (bool) -> void
+    g_place_written_item_set: (int, int) -> void
+    g_place_written_remove: (int) -> void
+    g_proof_decls: () -> {int:int}
+    g_proof_decls_item_set: (int, int) -> void
+    g_proof_decls_len: () -> int
+    g_proof_decls_remove: (int) -> void
+    g_proof_pending: () -> bool
+    g_refine_active_set: (bool) -> void
+    g_result_active_set: (bool) -> void
+    g_result_boolean_masks_get: (int) -> int?
+    g_result_boolean_masks_item_set: (int, int) -> void
+    g_result_syntax_get: (int) -> ResultClause[]?
+    g_result_syntax_item_set: (int, ResultClause[]) -> void
+    g_struct_components_item_set: (int, int[]) -> void
+    g_target_wasm: () -> bool
+    g_transfer_claim_pos_item_set: (int, int) -> void
+    g_transfer_tags_get: (int) -> int?
+    g_transfer_tags_item_set: (int, int) -> void
+
+struct ParserReaderStores:
+    lists: *(i32[])
+    texts: *(str[])
+    host: *ParserReaderHost
+    builder: *ParserBuilderHost

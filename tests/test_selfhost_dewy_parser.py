@@ -1,4 +1,4 @@
-"""Parser context and host hooks preserve stores, cache ids and first diagnostics."""
+"""Parser contexts preserve independent name caches and first diagnostics."""
 import random
 import subprocess
 from pathlib import Path
@@ -14,7 +14,7 @@ WORDS = 'set b main _ array ptr dict totaldict addr no_effects reads mutates all
 
 def corpus():
     rng = random.Random(417)
-    # Arbitrary source bytes must reach the Jo miss hook without UTF-8 validation.
+    # Cache growth and arbitrary interned byte strings leave each context independent.
     names = [b'', *[s.encode() for s in WORDS], b'ordinary', b'Set', b'\x80', b'\xff\x00', 'λ'.encode()]
     names += [f'name_{i}'.encode() for i in range(1100)]
     blob, spans = bytearray(), []
@@ -23,7 +23,7 @@ def corpus():
         blob.extend(name + b'\n')
     ids, known = {b'': 0}, [b'']
     lines, expected = [], []
-    misses, count = 0, 1
+    misses = 0
     initialized = False
     for index in list(range(len(names))) + [rng.randrange(len(names)) for _ in range(700)]:
         name = names[index]
@@ -36,8 +36,7 @@ def corpus():
         start, size = spans[index]
         pos = 17 + 3 * index
         lines.append(f'W {start} {size} {pos}')
-        expected.append(f'{count} {count + 2} {ids[name] + 100} {pos} {misses} {len(known)} true')
-        count += 2
+        expected.append(f'{ids[name]} {misses} {len(known)}')
         # Query every new id and a random warm hit after interning grows the table.
         for id in (ids[name], rng.randrange(len(known))):
             lines.append(f'Q {id}')

@@ -1,0 +1,101 @@
+from p"dewy_tokens.dewy" import DewyLexeme, DewyToken
+from p"dewy_syntax.dewy" import DewySyntax
+from p"literals.dewy" import LiteralProblem
+
+# Persistent reader state. Nested and speculative reads restore only their original save sets.
+ParserReaderState:type=[
+    dc_axis_depth:int64=(-1)
+    dc_axis_ranges:array<int64>
+    dc_builtins:array<int64>
+    dc_cast_coalesce:bool=false
+    dc_chain_operands:array<int64>
+    dc_chain_ops:array<DewyToken>
+    dc_chain_starts:array<int64>
+    dc_chains_made:int64=0
+    dc_condition_depth:int64=(-1)
+    dc_dropping:int64=0
+    dc_effects_follow:bool=false
+    dc_empty_id:int64=(-1)
+    dc_fn_result:int64=0
+    dc_grouped:int64=0
+    dc_grouped_literal:bool=false
+    dc_head_depth:int64=(-1)
+    dc_index_node:int64=0
+    dc_initial_at:int64=(-1)
+    dc_kinds:array<int64>
+    dc_lazy_on:bool=false
+    dc_lazy_span_end:dict<int64 int64>
+    dc_lazy_tokens:dict<int64 array<DewyLexeme>>
+    dc_lib_lazy:bool=false
+    dc_literal_at:int64=(-1)
+    dc_literal_seen:bool=false
+    dc_live_at:int64=(-1)
+    dc_live_at_pos:dict<int64 int64>=[]
+    dc_local_type_on:bool=false
+    dc_made:array<int64>
+    dc_map_ok:bool=false
+    dc_member_depth:int64=(-1)
+    dc_member_ranges:dict<int64 int64>=[]
+    dc_method_body:bool=false
+    dc_method_hooks:array<int64>
+    dc_methods:array<int64>
+    dc_none_id:int64=0
+    dc_nothing:bool=false
+    dc_open_axes:int64=0
+    dc_pairs_made:int64=0
+    dc_parameter_type:bool=false
+    dc_partial_id:int64=0
+    dc_partial_name:int64=0
+    dc_pattern_binder:int64=0
+    dc_range_at:int64=0
+    dc_range_call:int64=0
+    dc_range_first:int64=0
+    dc_range_node:int64=0
+    dc_range_top:bool=false
+    dc_refining:int64=0
+    dc_rename_follows:bool=false
+    dc_sequence_part:bool=false
+    dc_setting_at:array<int64>
+    dc_setting_values:array<int64>
+    dc_settings:array<string>
+    dc_shapes:array<int64>
+    dc_splice_ok:bool=false
+    dc_spread_depth:int64=(-1)
+    dc_target_fields:dict<int64 int64>=[]
+    dc_target_members:dict<int64 int64>=[]
+    dc_target_pos:dict<int64 int64>=[]
+    dc_target_problem:int64=(-1)
+    dc_targets_made:int64=0
+    dc_top_level:bool=false
+    dc_transfer_at:int64=0
+    dc_transfer_bits:int64=0
+    dc_type_args:int64=0
+    dc_type_spelling:array<int32>
+    dc_unbraced:bool=false
+    dc_unsafe_name:int64=0
+    dc_value:int64=0
+    dc_value_start:int64=(-1)
+    dewy_syntax:array<DewySyntax>
+    dn_angles:int64=0
+    dn_depth:int64=0
+    dn_edit_at:array<int64>
+    dn_edit_was:array<DewyLexeme>
+    dn_edits_on:bool=false
+    dn_end_id:int64=0
+    dn_false_id:int64=0
+    dn_in_id:int64=0
+    dn_in_interpolation:int64=0
+    dn_is_id:int64=0
+    dn_isnt_id:int64=0
+    dn_lazy_left:bool=false
+    dn_new_id:int64=0
+    dn_no_id:int64=0
+    dn_none_id:int64=0
+    dn_reserved_words:array<bool>
+    dn_rows:bool=false
+    dn_string_problem:LiteralProblem=LiteralProblem[message="" at=0 unsupported=false]
+    dn_true_id:int64=0
+    dn_type_id:int64=0
+    dn_void_id:int64=0
+    dw_renamed:array<int64>
+]

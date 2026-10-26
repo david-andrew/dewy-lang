@@ -128,7 +128,7 @@ dm_reach_statement=(@context:ParserContext @store:array<Node> @lists:array<int32
     false
 }
 
-dm_bound=(@store:array<Node> @lists:array<int32> bindings:array<int64> @out:array<int64>)=>{
+dm_bound=(@store:array<Node> @lists:array<int32> bindings:array<int64> @out:array<int64>):>void=>{
     loop b in bindings {
         if store[b].kind =? 'tuple' {dm_bound(@store @lists node_kids(@store @lists b) @out)}
         else if store[b].kind =? 'ident' {out.push(int64(store[b].name))}

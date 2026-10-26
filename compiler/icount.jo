@@ -1,3 +1,4 @@
+use 'dewy_context.jo'
 # `build --time`'s instruction split: user-space instructions this process
 # retires, by phase and by whose code the work is for (the program's own,
 # the library's, or neither). Linux x86-64 only; off unless --time asks.
@@ -194,7 +195,7 @@ ic_lines_report = ():
         if nodes[i].kind == .block and has_flag(i, NF_LAZY):
             f = pos_file(nodes[i].pos)
             if f >= 0 and f < files.len(): unasked += code_lines(files[f].src, int(nodes[i].ival), int(nodes[i].ival) + int(nodes[i].aux))
-    loop b, stop in dc_lazy_span_end:
+    loop b, stop in dc_parser.reader.dc_lazy_span_end:
         f = pos_file(nodes[b].pos)
         if f >= 0 and f < files.len(): unasked += code_lines(files[f].src, int(nodes[b].ival), stop)
     made: {int: int} = {}

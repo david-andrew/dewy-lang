@@ -1,9 +1,13 @@
 # The C seed has no Dewy frontend. Its shared method checker sees only an empty
-# member-capture table; the next generation restores the full parser context.
+# member-capture and lazy-span tables; the next generation restores the full context.
 struct SeedParserReach:
     captures: {int: int[]}
 
+struct SeedParserReader:
+    dc_lazy_span_end: {int: int}
+
 struct SeedParserContext:
     reach: SeedParserReach
+    reader: SeedParserReader
 
 dc_parser: SeedParserContext

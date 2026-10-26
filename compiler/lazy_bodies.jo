@@ -11,7 +11,6 @@ dc_lib_lazy_files: {int: bool}     # library files whose function bodies wait (d
 # A waiting library body not lexed yet: its block is marked so, from its `{` (ival) to the end of
 # its `}` (dc_lazy_span_end, by block)
 const DC_LAZY_SPAN = -315
-dc_lazy_span_end: {int: int}
 dc_warning_pos: int[]
 dc_warning_text: str[]
 
@@ -48,4 +47,3 @@ dc_flush_warnings = ():
     loop i in [0..dc_warning_pos.len()): warn(dc_warning_pos[i], dc_warning_text[i])
     dc_warning_pos = []
     dc_warning_text = []
-

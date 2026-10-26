@@ -1,3 +1,5 @@
+use 'dewy_reader.dewy'
+use 'dewy_reader_services.jo'
 use 'dewy_parser.dewy'
 use 'dewy_context.jo'
 use 'dewy_methods.jo'
@@ -22,54 +24,39 @@ use 'dewy_ffi.jo'
 use 'literals.dewy'
 use 'dewy_lex.dewy'
 
-dn_angles = 0
-dn_depth = 0
 
 # Like the implementation-language lexer, classify interned words by ID. Names
 # added after this table cannot be keywords; formatting keeps its noninterning
 # path so editing a document does not grow the compiler's persistent name pool.
 dn_word_tokens: DewyToken[]
-dn_true_id = 0
-dn_false_id = 0
-dn_is_id = 0
-dn_isnt_id = 0
-dn_in_id = 0
-dn_no_id = 0
-dn_end_id = 0
-dn_type_id = 0
-dn_none_id = 0
-dn_new_id = 0
-dn_void_id = 0
 
 # Reserved words cannot be bound; the reference grammar reports them.
-dn_reserved_words: bool[]
-dn_reserved = (name: int) -> bool: name < dn_reserved_words.len() and dn_reserved_words[name]
+
 
 dn_init_words = ():
-    dn_no_id = intern("no")
-    dn_end_id = intern("end")
-    dn_type_id = intern("type")
-    dn_none_id = intern("none")
-    dn_new_id = intern("new")
-    dn_void_id = intern("void")
-    dn_reserved_words = fill(false, names.len())
-    loop word in [dn_end_id, dn_new_id, dn_none_id, dn_void_id]: dn_reserved_words[word] = true
-    dn_true_id = intern("true")
-    dn_false_id = intern("false")
-    dn_is_id = intern("is")
-    dn_isnt_id = intern("isnt")
-    dn_in_id = intern("in")
+    dc_parser.reader.dn_no_id = intern("no")
+    dc_parser.reader.dn_end_id = intern("end")
+    dc_parser.reader.dn_type_id = intern("type")
+    dc_parser.reader.dn_none_id = intern("none")
+    dc_parser.reader.dn_new_id = intern("new")
+    dc_parser.reader.dn_void_id = intern("void")
+    dc_parser.reader.dn_reserved_words = fill(false, names.len())
+    loop word in [dc_parser.reader.dn_end_id, dc_parser.reader.dn_new_id, dc_parser.reader.dn_none_id, dc_parser.reader.dn_void_id]: dc_parser.reader.dn_reserved_words[word] = true
+    dc_parser.reader.dn_true_id = intern("true")
+    dc_parser.reader.dn_false_id = intern("false")
+    dc_parser.reader.dn_is_id = intern("is")
+    dc_parser.reader.dn_isnt_id = intern("isnt")
+    dc_parser.reader.dn_in_id = intern("in")
     words = ["as", "and", "break", "const", "continue", "else", "from", "import", "if", "in", "let", "loop", "parallel", "concurrent", "spawn", "match", "not", "of", "or", "or_throw", "return", "test", "transmute", "xor", "nand", "nor", "xnor"]
     loop word in words: intern(word)
     dn_word_tokens = fill(DewyToken.none, names.len())
     loop word in words: dn_word_tokens[intern(word)] = dn_token_kind(word)
 
 # (above 0: parsing the expression of a string interpolation)
-dn_in_interpolation = 0
 DN_BRACE_HINT = "`\{...}` in a string holds an expression: write `\\\{` and `\\\}` for literal braces, or use a raw string `r\"...\"`"
 
 dn_error = (offset: int, message: str) -> int:
-    if dn_in_interpolation > 0: fatal(mkpos(dc_parser.file, offset), "{message}, inside a string interpolation ({DN_BRACE_HINT}; `format(value \".2f\")` formats a number)")
+    if dc_parser.reader.dn_in_interpolation > 0: fatal(mkpos(dc_parser.file, offset), "{message}, inside a string interpolation ({DN_BRACE_HINT}; `format(value \".2f\")` formats a number)")
     fatal(mkpos(dc_parser.file, offset), message)
     0
 
@@ -376,7 +363,7 @@ dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLe
                 id = if c >= 0x80: intern(dn_identifier_canonical(source[start..i))) else: intern_sub(source, start, i - start)
                 name = i32(id)
                 if id < dn_word_tokens.len(): symbol = dn_word_tokens[id]
-                if id == dn_true_id or id == dn_false_id: kind = .boolean
+                if id == dc_parser.reader.dn_true_id or id == dc_parser.reader.dn_false_id: kind = .boolean
                 combined = dn_word_assign(symbol, bytes, i, stop)
                 if combined != .none:
                     symbol = combined
@@ -384,9 +371,9 @@ dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLe
                     i += 1
                 if i < stop and bytes[i] == '?':
                     query = DewyToken.none
-                    if id == dn_is_id: query = .is_type
-                    else if id == dn_isnt_id: query = .isnt_type
-                    else if id == dn_in_id: query = .contains
+                    if id == dc_parser.reader.dn_is_id: query = .is_type
+                    else if id == dc_parser.reader.dn_isnt_id: query = .isnt_type
+                    else if id == dc_parser.reader.dn_in_id: query = .contains
                     if query != .none:
                         symbol = query
                         kind = .op
@@ -482,7 +469,7 @@ dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLe
                         slots[count].newline = false
                         slots[count].symbol = .none
                         count += 1
-                        dn_lazy_left = true
+                        dc_parser.reader.dn_lazy_left = true
                         i = e
     out.truncate(count)
     out.push(DewyLexeme(.eof, 0, stop, stop, spaced, newline))
@@ -504,174 +491,58 @@ dn_payload = (token: DewyLexeme) -> str:
     if (token.kind == .source_integer or token.kind == .source_real) and first + 1 < token.stop and source[first] == '0' and source[first + 1] == 'd': first += 2
     source[first..token.stop)
 
-dn_peek = () -> DewyToken: dc_parser.tokens[dc_parser.at].symbol
-dn_take = () -> DewyLexeme:
-    value = dc_parser.tokens[dc_parser.at]
-    dc_parser.at += 1
-    value
 
-dn_accept = (symbol: DewyToken) -> bool:
-    if dn_peek() != symbol: return false
-    dc_parser.at += 1
-    true
 
-# A statement's `;` is attached to it, `f();`: an unattached one (after a space or
-# on its own line) ends a row of an array literal, `[1 2 ; 3 4]`
-dn_rows = false
-dn_accept_semi = () -> bool:
-    if dn_peek() != .semi: return false
-    token = dc_parser.tokens[dc_parser.at]
-    if dn_rows and (token.space or token.newline): return false
-    if token.space or token.newline: dn_error(token.start, "an unattached `;` is reserved for array-dimension selection: attach it to the statement it ends, `f();`, or leave it out")
-    dc_parser.at += 1
-    true
 
-dn_node = (kind: DewyKind, text: str, offset: int, children: int[] = [], name: i32 = 0) -> int: syntax_node(dewy_syntax, kind, text, mkpos(dc_parser.file, offset), children, name)
 
-# String decoding is shared; the construction target selects syntax nodes for
-# the reference parser or compact nodes for the value parser.
-dn_text = (text: str, offset: int) -> int:
-    n = mk(.str_lit, mkpos(dc_parser.file, offset))
-    nodes[n].sval = i32(intern(text))
-    n
 
-# (a mistake in a string's escapes: one stops the compile)
-dn_string_problem = LiteralProblem("", 0, false)
-dn_string = (token: DewyLexeme) -> int:
-    source = files[dc_parser.file].src
-    raw = token.kind == .rawquoted
-    opening = token.start
-    if raw: opening += 1
-    width = dn_quote_width(source, opening, token.stop)
-    i = opening + width
-    stop = token.stop - width
-    if raw: return dn_text(source[i..stop), token.start)
-    chunks: int[]
-    bytes_: u8[]
-    chunk_start = i
-    interpolated = false
-    loop i < stop:
-        # (literals.dewy reads the text up to an interpolation)
-        i = literal_string_text(dn_string_problem, bytes_, source, i, stop)
-        if len(dn_string_problem.message) > 0: dn_error(dn_string_problem.at, dn_string_problem.message)
-        if i >= stop: break
-        interpolated = true
-        if bytes_.len() > 0:
-            chunks.push(dn_text(str_from_bytes(bytes_), chunk_start))
-            bytes_.clear()
-        first = i + 1
-        i = dn_interpolation_close(source, first, stop)
-        # (`{x:.2f}`: a format spec after the value's last top-level colon)
-        colon = dn_spec_colon(dn_lexer, source, first, i)
-        saved_tokens = dc_parser.tokens
-        saved_at = dc_parser.at
-        saved_angles = dn_angles
-        saved_comma = dc_parser.flags.comma_stop
-        dc_parser.tokens = dn_lex(dc_parser.file, first, if colon >= 0: colon else: i)
-        dc_parser.at = 0
-        dn_angles = 0
-        dc_parser.flags.comma_stop = false
-        dn_in_interpolation += 1
-        expression = dc_expr(0)
-        if expression != 0 and dc_parser.tokens[dc_parser.at].kind != .eof: dn_error(dc_parser.tokens[dc_parser.at].start, "expected one interpolation expression")
-        dn_in_interpolation -= 1
-        dc_parser.tokens = saved_tokens
-        dc_parser.at = saved_at
-        dn_angles = saved_angles
-        dc_parser.flags.comma_stop = saved_comma
-        spec = if colon >= 0: source[colon + 1..i) else: ""
-        if expression == 0: return 0
-        part = mk(.pair, mkpos(dc_parser.file, first))
-        nodes[part].a = i32(expression)
-        nodes[part].sval = if colon >= 0: i32(intern(spec)) else: -1
-        chunks.push(part)
-        i += 1
-        chunk_start = i
-    if not interpolated: return dn_text(str_from_bytes(bytes_), token.start)
-    if bytes_.len() > 0: chunks.push(dn_text(str_from_bytes(bytes_), chunk_start))
-    n = mk(.str_lit, mkpos(dc_parser.file, token.start))
-    nodes[n].aux = 1
-    set_list(n, chunks)
-    n
 
-# Splitting a generic closer edits its token in place. While a direct declaration
-# may still retry the reference grammar, the original tokens are kept to restore.
-dn_edits_on = false
-dn_edit_at: int[]
-dn_edit_was: DewyLexeme[]
 
-dn_token_edit = (at: int):
-    if not dn_edits_on: return
-    dn_edit_at.push(at)
-    dn_edit_was.push(dc_parser.tokens[at])
 
-# Undo the edits recorded after `mark` (an abandoned attempt's), the latest first. An entry
-# -(k + 1) is a setting scope the attempt set (dc_unsafe_scope): scopes from k on go;
-# DN_EDIT_BIGINT, the module's bigint import the attempt asked for (dc_bigint_value); below it,
-# DN_EDIT_BIGINT - n, the place type written for function n (dc_function_literal); below
-# DN_EDIT_LIVE, DN_EDIT_LIVE - n, node n marked a live loop's source (dc_head_term).
+
+
+
 const DN_EDIT_BIGINT = -1099511627776
 const DN_EDIT_LIVE = -1125899906842624
 # (below DN_EDIT_METHODS, DN_EDIT_METHODS - k: the method groups from k on, dc_literal_methods)
 const DN_EDIT_METHODS = -36028797018963968
 # (`kept`: the direct nodes stay, compare mode's: their place and live-source marks stay too)
-dn_edits_undo = (mark: int = 0, kept: bool = false):
-    i = dn_edit_at.len() - 1
-    loop i >= mark:
-        at = dn_edit_at[i]
-        if at == DN_EDIT_BIGINT: dw_bigint_import = 0
-        else if at < DN_EDIT_BIGINT:
-            if kept: at = 0
-            else if at <= DN_EDIT_METHODS: dewy_methods.truncate(DN_EDIT_METHODS - at)
-            else if at <= DN_EDIT_LIVE: dewy_live_sources.remove(DN_EDIT_LIVE - at)
-            else: place_written.remove(DN_EDIT_BIGINT - at)
-        else if at < 0: dir_scopes.truncate(-at - 1)
-        else: dc_parser.tokens[at] = dn_edit_was[i]
-        i -= 1
-    dn_edits_clear(mark)
+
 
 dn_edits_clear = (mark: int = 0):
-    dn_edit_at.truncate(mark)
-    dn_edit_was.truncate(mark)
+    rd_dn_edits_clear(dc_parser, mark)
 
-# A generic closer joined to what follows (`>>`, `>=`, `>?` unspaced) closes one angle:
-# its first `>` is consumed in place, leaving the rest for the enclosing grammar.
-dn_closer_joined = () -> bool:
-    op = dn_peek()
-    op == .shr or op == .shr_assign or op == .angle_assign or (op == .gt and not dc_parser.tokens[dc_parser.at].space)
 
-dn_split_closer = ():
-    dn_token_edit(dc_parser.at)
-    dc_parser.tokens[dc_parser.at].start += 1
-    tail = dc_parser.tokens[dc_parser.at]
-    dc_parser.tokens[dc_parser.at].symbol = dn_token_kind(files[dc_parser.file].src[tail.start..tail.stop))
+
+
 
 dewy_fast_file = (file: int) -> int[]:
     dw_bigint_import = 0
     # (a reading may split generic closers: a retry restores them, dn_edits_undo)
-    saved_edits_on = dn_edits_on
-    dn_edits_on = true
+    saved_edits_on = dc_parser.reader.dn_edits_on
+    dc_parser.reader.dn_edits_on = true
     dc_parser.file = file
+    dc_parser.source = files[file].src
     dn_lexer.suspect_brace = -1
-    dn_in_interpolation = 0
+    dc_parser.reader.dn_in_interpolation = 0
     dn_metatags = 0
     lib_lazy = dc_lib_lazy_allowed(file) and not dc_lazy_allowed(file)
-    dn_lazy_left = false
+    dc_parser.reader.dn_lazy_left = false
     dn_skip_bodies = lib_lazy
     dc_parser.tokens = dn_lex(file, 0, len(files[file].src))
     dn_skip_bodies = false
     dw_dir_lexed(file)
-    dc_lazy_on = dc_lazy_allowed(file)
-    dc_lib_lazy = lib_lazy and not dc_lazy_on
-    if dc_lazy_on:
+    dc_parser.reader.dc_lazy_on = dc_lazy_allowed(file)
+    dc_parser.reader.dc_lib_lazy = lib_lazy and not dc_parser.reader.dc_lazy_on
+    if dc_parser.reader.dc_lazy_on:
         # Buffer even warnings preceding the first deferred declaration.
         dc_lazy_used = true
-        dc_lazy_tokens[file] = dc_parser.tokens
-    if dc_lib_lazy: dc_lib_lazy_files[file] = true
+        dc_parser.reader.dc_lazy_tokens[file] = dc_parser.tokens
+    if dc_parser.reader.dc_lib_lazy: dc_lib_lazy_files[file] = true
     dc_parser.at = 0
-    dn_angles = 0
-    dn_depth = 0
-    dewy_syntax = [DewySyntax(.unknown, "", 0, []), DewySyntax(.inverted_comparison, "", 0, [])]
+    dc_parser.reader.dn_angles = 0
+    dc_parser.reader.dn_depth = 0
+    dc_parser.reader.dewy_syntax = [DewySyntax(.unknown, "", 0, []), DewySyntax(.inverted_comparison, "", 0, [])]
     declarations: int[]
     marked = 0
     shadowable_pos = 0
@@ -680,17 +551,17 @@ dewy_fast_file = (file: int) -> int[]:
         syntax = dn_statement(true)
         tag = dw_test_tag(syntax)
         if tag != 0:
-            if marked != 0: fatal(dewy_syntax[tag].pos, "a second `$test` line: one marks the function just after it")
+            if marked != 0: fatal(dc_parser.reader.dewy_syntax[tag].pos, "a second `$test` line: one marks the function just after it")
             marked = dw_test_spec(tag)
-            dewy_syntax.truncate(2)
+            dc_parser.reader.dewy_syntax.truncate(2)
             if dc_parser.at == before: dn_error(dc_parser.tokens[dc_parser.at].start, "expected a declaration")
             continue
         shadow_tag = dw_shadowable_tag(syntax)
         if shadow_tag != 0:
-            if shadowable_pos != 0: fatal(dewy_syntax[shadow_tag].pos, "a second `$shadowable`: one marks the const just after it")
-            if dc_parser.tokens[dc_parser.at].symbol != .kw_const: fatal(dewy_syntax[shadow_tag].pos, "`$shadowable` marks a module-level const: `$shadowable const name = ...`")
-            shadowable_pos = dewy_syntax[shadow_tag].pos
-            dewy_syntax.truncate(2)
+            if shadowable_pos != 0: fatal(dc_parser.reader.dewy_syntax[shadow_tag].pos, "a second `$shadowable`: one marks the const just after it")
+            if dc_parser.tokens[dc_parser.at].symbol != .kw_const: fatal(dc_parser.reader.dewy_syntax[shadow_tag].pos, "`$shadowable` marks a module-level const: `$shadowable const name = ...`")
+            shadowable_pos = dc_parser.reader.dewy_syntax[shadow_tag].pos
+            dc_parser.reader.dewy_syntax.truncate(2)
             continue
         made = dw_top_declarations(syntax)
         if oom_files.len() > 0: made = oom_wrap_all(made)
@@ -704,17 +575,17 @@ dewy_fast_file = (file: int) -> int[]:
             marked = 0
         # Projection owns the retained data in the compact AST. Discard each
         # declaration's temporary syntax before parsing the next declaration.
-        dewy_syntax.truncate(2)
+        dc_parser.reader.dewy_syntax.truncate(2)
         if dc_parser.at == before: dn_error(dc_parser.tokens[dc_parser.at].start, "expected a declaration")
     if proof_pending: dn_error(dc_parser.tokens[dc_parser.at].start, "$proof requires a following function declaration")
     if dir_bundles.len() > 0: dir_bundles_resolve()
     if dw_export_pos != 0: fatal(dw_export_pos, "`$export` marks a module-level function: put it before one, on its line or the line above")
     if marked != 0: fatal(nodes[marked].pos, "`$test` marks a module-level function: put it on the line just before one")
     if shadowable_pos != 0: fatal(shadowable_pos, "`$shadowable` marks a module-level const: put it just before one")
-    if dc_lib_lazy:
-        dc_lazy_tokens[file] = dc_parser.tokens
-        dc_lib_lazy = false
+    if dc_parser.reader.dc_lib_lazy:
+        dc_parser.reader.dc_lazy_tokens[file] = dc_parser.tokens
+        dc_parser.reader.dc_lib_lazy = false
     dc_parser.tokens = []
-    dewy_syntax = []
-    dn_edits_on = saved_edits_on
+    dc_parser.reader.dewy_syntax = []
+    dc_parser.reader.dn_edits_on = saved_edits_on
     dw_finish_declarations(declarations)

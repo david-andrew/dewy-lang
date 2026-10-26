@@ -1,11 +1,11 @@
 $runtime_checks
+from p"dewy_reader_host.dewy" import ParserReaderStores
+from p"dewy_reader_state.dewy" import ParserReaderState
 from p"dewy_tokens.dewy" import DewyLexeme
-from p"node_store.dewy" import Node, node_mk
-from p"intern.dewy" import hash_bytes, name_find
 
 # State owned by the Dewy reader, lent by its Jo driver. Fields have no initializers:
-# the driver's zero-initialized global has no module-order dependency. Token edits,
-# lazy-body tables and the remaining grammar state still live in the Jo driver.
+# the driver's zero-initialized global has no module-order dependency. The reader
+# owns token edits, lazy-body tables and grammar state through this context.
 # report_now: mistakes may be flushed immediately; unread_here: a function body
 # owns unread forms; fn_body: parsing a function body; comma_stop: an assertion's
 # condition stops at the top-level comma before its message.
@@ -22,15 +22,7 @@ ParserReach:type=[
     waiting:array<int64> waiting_names:array<int64> waiting_callees:array<int64>
     used:dict<int64 bool> captures:dict<int64 array<int64>> inherited:int64
 ]
-ParserContext:type=[tokens:array<DewyLexeme> at:int64 file:int64 depth:int64 flags:ParserFlags status:ParserStatus classes:array<uint8> collection:ParserCollection reach:ParserReach]
-
-# Only Jo-only services cross back. These noncapturing hooks must not call readers.
-# Nodes/lists and intern tables are borrowed directly from their existing owners;
-# ordinary node construction uses node_store, with no per-node host callback.
-ParserHost:type=[
-    value_name:<(name:int32 pos:int64):>int32>
-    intern_new:<(source:string start:int64 length:int64 hash:int64):>int64>
-]
+ParserContext:type=[tokens:array<DewyLexeme> at:int64 file:int64 depth:int64 flags:ParserFlags status:ParserStatus classes:array<uint8> collection:ParserCollection reach:ParserReach reader:ParserReaderState source:string stores:ParserReaderStores]
 
 # O(1) on a cached name, O(18) on a miss; cache growth is amortized O(names).
 dc_parser_word=(@p:ParserContext @texts:array<string> id:int64):>int64=>{
@@ -42,19 +34,6 @@ dc_parser_word=(@p:ParserContext @texts:array<string> id:int64):>int64=>{
     loop k in [0..words.length) {if name =? words[k] {c=k + 1}}
     if id <? p.classes.length {p.classes[id]=uint8(c + 1)}
     c
-}
-
-# Cold recovery path: a word operator used as a name. The lookup sees the real
-# intern table; only a miss cuts bytes in Jo (including malformed source bytes).
-# The node is appended directly, then its spelling is mapped by the host builder.
-dc_parser_word_name=(@host:ParserHost @store:array<Node> @texts:array<string> @hashes:array<int64> @slots:array<int32> text:string pos:int64):>int64=>$unsafe {
-    let n=node_mk(@store 'ident' pos)
-    let bytes=text as array<uint8>
-    let hash=hash_bytes(bytes.ptr bytes.length)
-    let id=name_find(@texts @hashes @slots bytes.ptr bytes.length hash)
-    if id <? 0 {id=host.intern_new(text 0 bytes.length hash)}
-    store[n].name=host.value_name(int32(id) pos)
-    n
 }
 
 # O(1), with no allocation on paths that retain an earlier diagnostic.

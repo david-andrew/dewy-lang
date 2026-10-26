@@ -1,3 +1,4 @@
+use 'dewy_reader_host.dewy'
 # Frozen bootstrap layout and reader twin of dewy_parser.dewy.
 use 'dewy_tokens.dewy'
 use 'node_store.dewy'
@@ -31,6 +32,8 @@ struct ParserReach:
     captures: {int: int[]}
     inherited: int
 
+use 'dewy_reader_state.dewy'
+
 struct ParserContext:
     tokens: DewyLexeme[]
     at: int
@@ -41,10 +44,9 @@ struct ParserContext:
     classes: u8[]
     collection: ParserCollection
     reach: ParserReach
-
-struct ParserHost:
-    value_name: (i32, int) -> i32
-    intern_new: (str, int, int, int) -> int
+    reader: ParserReaderState
+    source: str
+    stores: ParserReaderStores
 
 dc_parser_word = (p: mut ParserContext, texts: mut str[], id: int) -> int:
     if id < p.classes.len() and p.classes[id] != 0: return int(p.classes[id]) - 1
@@ -56,14 +58,6 @@ dc_parser_word = (p: mut ParserContext, texts: mut str[], id: int) -> int:
         if name == words[k]: c = k + 1
     if id < p.classes.len(): p.classes[id] = u8(c + 1)
     c
-
-dc_parser_word_name = (host: mut ParserHost, store: mut Node[], texts: mut str[], hashes: mut int[], slots: mut i32[], text: str, pos: int) -> int:
-    n = node_mk(store, .ident, pos)
-    h = hash_bytes(data(text), len(text))
-    id = name_find(texts, hashes, slots, data(text), len(text), h)
-    if id < 0: id = host.intern_new(text, 0, len(text), h)
-    store[n].name = host.value_name(i32(id), pos)
-    n
 
 dc_parser_report = (status: mut ParserStatus, pos: int, message: str):
     status.reports += 1

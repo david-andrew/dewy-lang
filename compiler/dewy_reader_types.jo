@@ -1,0 +1,25 @@
+# Frozen parser service payload layouts.
+enum EffectKind:
+    read, write, alloc, detach, costly_copy, panic, io, block, spawn, escape, opaque, remainder
+struct EffectSyntax:
+    kind: EffectKind = .read
+    path: int[] = []
+    pos: int = 0
+    negative: bool = false
+    variable: bool = false
+
+struct ResultClause:
+    member: int = 0
+    predicate: int = 0
+    boolean: int = 0
+
+struct DirBundle:
+    name: int = 0
+    settings: int[] = []
+    values: int[] = []
+    row: int = 0
+    at: int = 0
+    includes: int[] = []
+    include_at: int[] = []
+    state: int = 0
+    allocation_failure: bool = false

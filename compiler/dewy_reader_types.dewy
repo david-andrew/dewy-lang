@@ -1,0 +1,27 @@
+# Parser service payloads; preserve the compiler ABI and enum ordinals.
+EffectKind:type='read' | 'write' | 'alloc' | 'detach' | 'costly_copy' | 'panic' | 'io' | 'block' | 'spawn' | 'escape' | 'opaque' | 'remainder'
+EffectSyntax:type=[
+    kind:EffectKind='read'
+    path:array<int64>=[]
+    pos:int64=0
+    negative:bool=false
+    variable:bool=false
+]
+
+ResultClause:type=[
+    member:int64=0
+    predicate:int64=0
+    boolean:int64=0
+]
+
+DirBundle:type=[
+    name:int64=0
+    settings:array<int64>=[]
+    values:array<int64>=[]
+    row:int64=0
+    at:int64=0
+    includes:array<int64>=[]
+    include_at:array<int64>=[]
+    state:int64=0
+    allocation_failure:bool=false
+]

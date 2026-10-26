@@ -1,0 +1,135 @@
+from p"dewy_tokens.dewy" import DewyLexeme, DewyToken
+from p"dewy_reader_types.dewy" import EffectSyntax, EffectKind, ResultClause, DirBundle
+from p"dewy_builders.dewy" import ParserBuilderHost
+from p"dewy_lex.dewy" import DewyLexer
+from p"literals.dewy" import LiteralProblem
+from p"node_store.dewy" import Node, NK
+
+ParserReaderHost:type=[
+    __pow10:<(a0:int64):>float64>
+    arena_enable:<():>void>
+    arena_return_at:<(n:int64):>int64>
+    binding_leaves:<(bindings:array<int64>):>array<int64>>
+    build_setting_apply:<(target:bool text:string pos:int64 value_pos:int64 name:string):>void>
+    bytes_slice:<(source:string first:int64 stop:int64):>string>
+    decimal_let:<(n:int64):>void>
+    dewy_defer_callee:<(n:int64):>void>
+    dewy_defer_name:<(decl:int64 n:int64 name:int64):>void>
+    dewy_defer_type:<(decl:int64 file:int64):>void>
+    dewy_deferred_here:<(file:int64 name:int64):>bool>
+    dewy_inherited_key:<():>int64>
+    dewy_method_group:<(names:array<int64> decls:array<int64> inherited:dict<int64 int64>):>dict<int64 int64>>
+    dewy_note_member:<(n:int64):>void>
+    dewy_reserved_name:<(name:string pos:int64):>void>
+    dir_builtin:<(name:string):>bool>
+    dir_bundle_index:<(name:int64):>int64>
+    dir_set:<(name:int64 value:int64 start:int64 end_:int64 at:int64):>void>
+    dn_error:<(offset:int64 message:string):>int64>
+    dn_expand_lazy:<():>void>
+    dn_interpolation_close:<(source:string start:int64 stop:int64):>int64>
+    dn_lex:<(file:int64 begin:int64 stop:int64 intern_names:bool):>array<DewyLexeme>>
+    dw_add_receiver:<(fn_:int64 receiver:int64 receiver_type:int64):>void>
+    dw_arena_scope:<(serial:int64 arena:int64 body:int64 copied:bool pos:int64):>int64>
+    dw_bigint_value:<(limbs:array<uint64> pos:int64 negative:bool):>int64>
+    dw_chain_temp:<(value:int64 @statements:array<int64> pos:int64):>int64>
+    dw_clamp_block:<(n:int64 r:int64):>int64>
+    dw_dir_apply:<(name:string enabled:int64 at:int64 start:int64 end_:int64 module:bool):>void>
+    dw_dir_known:<(name:string):>bool>
+    dw_dir_name:<(name:string):>bool>
+    dw_expectation:<(pos:int64 where:int64 described:string said:int64 notes:int64 value:int64):>int64>
+    dw_ffi_attach:<(n:int64 attrs:array<int64>):>void>
+    dw_ffi_attr:<(name:string value:int64 pos:int64):>int64>
+    dw_ffi_c_types:<(t:int64):>void>
+    dw_ffi_library:<(lib:string):>string>
+    dw_finish_function:<(n:int64 parameters:array<int64> body:int64 name:string):>int64>
+    dw_int_singleton_type:<(values:array<int64> pos:int64):>int64>
+    dw_method_finish:<(fn_:int64 struct_:int64 type_params:array<int64> receiver:int64):>void>
+    dw_parallel_exits:<(n:int64 depth:int64):>void>
+    dw_range_value:<(range:int64):>int64>
+    dw_register_literal_methods:<(entries:array<int64>):>void>
+    dw_renamed_init:<():>void>
+    dw_target_dropped_name:<(nm:int64 pos:int64):>void>
+    dw_target_dropped_node:<(n:int64):>void>
+    dw_target_field_value:<(field:int64):>string>
+    dw_target_name:<():>string>
+    dw_task_group:<(pos:int64 name:string serial:int64 body:int64 transparent:bool):>int64>
+    dw_task_spawn:<(g:int64 value:int64 pos:int64):>int64>
+    fatal:<(p0:int64 msg0:string):>void>
+    file_name:<(path:string):>string>
+    head_collapse:<(n:int64):>int64>
+    intern:<(s:string):>int64>
+    intern_sub:<(s:string start:int64 n:int64):>int64>
+    intrinsic_of:<(name:int64):>int64>
+    isolation_children:<(k:NK):>int64>
+    join:<(a0:array<string> a1:string):>string>
+    metatag_fail_text:<(name:string):>string>
+    ownership_declare:<(decl:int64 hook:int64 role:int64):>void>
+    place_method_split:<(fn_:int64 receiver:int64 name:string):>array<int64>>
+    replace:<(a0:string a1:string a2:string):>string>
+    spec_colon:<(source:string start:int64 stop:int64):>int64>
+    str_from_bytes:<(a0:array<uint8>):>string>
+    str_set_type:<(values:array<string>):>int64>
+    to_float:<(a0:string):>float64?>
+    trim:<(a0:string):>string>
+    warn:<(p:int64 msg:string):>void>
+    words:<(a0:string):>array<string>>
+    g_DC_TEST_USAGE:<():>string>
+    g_DW_ROW_HINT:<():>string>
+    g_TRANSFER_SEND_CLAIM:<():>int64>
+    g_TRANSFER_SEND_OFF:<():>int64>
+    g_TRANSFER_SYNC_CLAIM:<():>int64>
+    g_TRANSFER_SYNC_OFF:<():>int64>
+    g_TRANSFER_UNSAFE:<():>int64>
+    g_dc_lazy_used_set:<(a0:bool):>void>
+    g_dewy_decl_members_item_set:<(a0:int64 a1:dict<int64 int64>):>void>
+    g_dewy_decl_methods_item_set:<(a0:int64 a1:array<int64>):>void>
+    g_dewy_live_sources_has:<(a0:int64):>bool>
+    g_dewy_live_sources_item_set:<(a0:int64 a1:bool):>void>
+    g_dewy_live_sources_remove:<(a0:int64):>void>
+    g_dewy_methods_len:<():>int64>
+    g_dewy_methods_truncate:<(a0:int64):>void>
+    g_dewy_param_kinds_item_set:<(a0:int64 a1:array<int64>):>void>
+    g_dewy_type_members_item_set:<(a0:int64 a1:dict<int64 int64>):>void>
+    g_dir_bundles_push:<(a0:DirBundle):>void>
+    g_dir_scopes_len:<():>int64>
+    g_dir_scopes_truncate:<(a0:int64):>void>
+    g_dw_allocators:<():>int64>
+    g_dw_allocators_set:<(a0:int64):>void>
+    g_dw_bigint_import:<():>int64>
+    g_dw_bigint_import_set:<(a0:int64):>void>
+    g_dw_task_groups_item:<(a0:int64):>string>
+    g_dw_task_groups_len:<():>int64>
+    g_dw_task_groups_pop:<():>string>
+    g_dw_task_groups_push:<(a0:string):>void>
+    g_dw_type_members_get:<(a0:int64):>dict<int64 dict<int64 int64>>?>
+    g_dw_type_members_item_set:<(a0:int64 a1:dict<int64 dict<int64 int64>>):>void>
+    g_effect_blocks_demanded:<():>bool>
+    g_effect_blocks_demanded_set:<(a0:bool):>void>
+    g_effect_panics_demanded:<():>bool>
+    g_effect_panics_demanded_set:<(a0:bool):>void>
+    g_effect_syntax_len:<():>int64>
+    g_effect_syntax_push:<(a0:array<EffectSyntax>):>void>
+    g_effect_syntax_truncate:<(a0:int64):>void>
+    g_effects_active_set:<(a0:bool):>void>
+    g_place_written_item_set:<(a0:int64 a1:int64):>void>
+    g_place_written_remove:<(a0:int64):>void>
+    g_proof_decls:<():>dict<int64 int64>>
+    g_proof_decls_item_set:<(a0:int64 a1:int64):>void>
+    g_proof_decls_len:<():>int64>
+    g_proof_decls_remove:<(a0:int64):>void>
+    g_proof_pending:<():>bool>
+    g_refine_active_set:<(a0:bool):>void>
+    g_result_active_set:<(a0:bool):>void>
+    g_result_boolean_masks_get:<(a0:int64):>int64?>
+    g_result_boolean_masks_item_set:<(a0:int64 a1:int64):>void>
+    g_result_syntax_get:<(a0:int64):>array<ResultClause>?>
+    g_result_syntax_item_set:<(a0:int64 a1:array<ResultClause>):>void>
+    g_struct_components_item_set:<(a0:int64 a1:array<int64>):>void>
+    g_target_wasm:<():>bool>
+    g_transfer_claim_pos_item_set:<(a0:int64 a1:int64):>void>
+    g_transfer_tags_get:<(a0:int64):>int64?>
+    g_transfer_tags_item_set:<(a0:int64 a1:int64):>void>
+]
+
+# These pointers borrow the long-lived compiler globals; resizing arrays changes their headers in place.
+ParserReaderStores:type=[lists:ptr<array<int32>> texts:ptr<array<string>> host:ptr<ParserReaderHost> builder:ptr<ParserBuilderHost>]

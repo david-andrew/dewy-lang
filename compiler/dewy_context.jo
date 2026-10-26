@@ -3,3 +3,18 @@ use 'dewy_parser.dewy'
 # Shared storage without importing the reader driver into bootstrap consumers.
 # Nested interpolation and lazy bodies save individual fields; caches persist.
 dc_parser: ParserContext
+
+dc_reader_initialize = () -> bool:
+    dc_parser.reader.dc_axis_depth = -1
+    dc_parser.reader.dc_condition_depth = -1
+    dc_parser.reader.dc_empty_id = -1
+    dc_parser.reader.dc_head_depth = -1
+    dc_parser.reader.dc_initial_at = -1
+    dc_parser.reader.dc_literal_at = -1
+    dc_parser.reader.dc_live_at = -1
+    dc_parser.reader.dc_member_depth = -1
+    dc_parser.reader.dc_spread_depth = -1
+    dc_parser.reader.dc_target_problem = -1
+    dc_parser.reader.dc_value_start = -1
+    true
+dc_reader_initialized = dc_reader_initialize()

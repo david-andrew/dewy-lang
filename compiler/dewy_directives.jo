@@ -36,20 +36,21 @@ dw_dir_lexed = (file: int):
     tokens = dc_parser.tokens
     at_file = dc_parser.file
     suspect = dn_lexer.suspect_brace
-    interpolation = dn_in_interpolation
+    interpolation = dc_parser.reader.dn_in_interpolation
     bigint = dw_bigint_import
     # (and the lexer's state: lazily lexed bodies left to expand, metatags seen)
-    lazy_left = dn_lazy_left
+    lazy_left = dc_parser.reader.dn_lazy_left
     metatags = dn_metatags
     comments = dn_block_comments
     dw_dir_load()
-    dn_lazy_left = lazy_left
+    dc_parser.reader.dn_lazy_left = lazy_left
     dn_metatags = metatags
     dn_block_comments = comments
     dc_parser.tokens = tokens
     dc_parser.file = at_file
+    dc_parser.source = files[dc_parser.file].src
     dn_lexer.suspect_brace = suspect
-    dn_in_interpolation = interpolation
+    dc_parser.reader.dn_in_interpolation = interpolation
     dw_bigint_import = bigint
     dw_dir_dollars = true
 
@@ -95,4 +96,3 @@ dw_target_dropped_node = (n: int):
     if mask & 4 != 0: dw_target_dropped_node(int(nodes[n].c))
     if mask & 16 != 0:
         loop c in kids(n): dw_target_dropped_node(c)
-

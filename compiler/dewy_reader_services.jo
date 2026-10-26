@@ -1,0 +1,285 @@
+use 'dewy_parser.dewy'
+use 'dewy_context.jo'
+use 'dewy_walk.dewy'
+use 'dewy_reach.dewy'
+use 'check.jo'
+use 'decimals.jo'
+use 'expr.jo'
+use 'dewy_methods.jo'
+use 'effects.jo'
+use 'refine.jo'
+use 'x64.jo'
+use 'ir.jo'
+use 'parse.jo'
+use 'ide.jo'
+use 'lower.jo'
+use 'util.jo'
+use 'ast.jo'
+use 'lex.jo'
+use 'dewy_tokens.dewy'
+use 'dewy_syntax.dewy'
+use 'dewy_grammar.dewy'
+use 'dewy_scan.dewy'
+use 'dewy_lex.dewy'
+use 'literals.dewy'
+use 'dewy_nodes.jo'
+use 'dewy_fast.jo'
+use 'dewy_directives.jo'
+use 'dewy_ffi.jo'
+use 'proofs.jo'
+use 'module_paths.dewy'
+use 'place_split.jo'
+use 'place_methods.jo'
+use 'ownership.jo'
+use 'par.jo'
+use 'pcheck.jo'
+use 'main.jo'
+use 'lazy_bodies.jo'
+use 'prelude.jo'
+use 'icount.jo'
+use 'directives.jo'
+use 'node_store.dewy'
+use 'targets.dewy'
+use 'isolation.jo'
+use 'concurrency.jo'
+use 'arena.jo'
+use 'dewy_reader_types.dewy'
+use 'dewy_direct.jo'
+use 'dewy_reader_host.dewy'
+
+rs___pow10 = (a0: int) -> f64: __pow10(a0)
+rs_arena_enable = ():
+    arena_enable()
+    return
+rs_arena_return_at = (n: int) -> int: arena_return_at(n)
+rs_binding_leaves = (bindings: int[]) -> int[]: binding_leaves(bindings)
+rs_build_setting_apply = (target: bool, text: str, pos: int, value_pos: int, name: str):
+    build_setting_apply(target, text, pos, value_pos, name)
+    return
+rs_bytes_slice = (source: str, first: int, stop: int) -> str: source[first..stop)
+rs_decimal_let = (n: int):
+    decimal_let(n)
+    return
+rs_dewy_defer_callee = (n: int):
+    dewy_defer_callee(n)
+    return
+rs_dewy_defer_name = (decl: int, n: int, name: int):
+    dewy_defer_name(decl, n, name)
+    return
+rs_dewy_defer_type = (decl: int, file: int):
+    dewy_defer_type(decl, file)
+    return
+rs_dewy_deferred_here = (file: int, name: int) -> bool: dewy_deferred_here(file, name)
+rs_dewy_inherited_key = () -> int: dewy_inherited_key()
+rs_dewy_method_group = (names: int[], decls: int[], inherited: {int:int}) -> {int:int}: dewy_method_group(names, decls, inherited)
+rs_dewy_note_member = (n: int):
+    dewy_note_member(n)
+    return
+rs_dewy_reserved_name = (name: str, pos: int):
+    dewy_reserved_name(name, pos)
+    return
+rs_dir_builtin = (name: str) -> bool: dir_builtin(name)
+rs_dir_bundle_index = (name: int) -> int: dir_bundle_index(name)
+rs_dir_set = (name: int, value: int, start: int, end: int, at: int):
+    dir_set(name, value, start, end, at)
+    return
+rs_dn_error = (offset: int, message: str) -> int: dn_error(offset, message)
+rs_dn_expand_lazy = ():
+    dn_expand_lazy()
+    return
+rs_dn_interpolation_close = (source: str, start: int, stop: int) -> int: dn_interpolation_close(source, start, stop)
+rs_dn_lex = (file: int, begin: int, stop: int, intern_names: bool) -> DewyLexeme[]: dn_lex(file, begin, stop, intern_names)
+rs_dw_add_receiver = (fn_: int, receiver: int, receiver_type: int):
+    dw_add_receiver(fn_, receiver, receiver_type)
+    return
+rs_dw_arena_scope = (serial: int, arena: int, body: int, copied: bool, pos: int) -> int: dw_arena_scope(serial, arena, body, copied, pos)
+rs_dw_bigint_value = (limbs: u64[], pos: int, negative: bool) -> int: dw_bigint_value(limbs, pos, negative)
+rs_dw_chain_temp = (value: int, statements: mut int[], pos: int) -> int: dw_chain_temp(value, statements, pos)
+rs_dw_clamp_block = (n: int, r: int) -> int: dw_clamp_block(n, r)
+rs_dw_dir_apply = (name: str, enabled: int, at: int, start: int, end: int, module: bool):
+    dw_dir_apply(name, enabled, at, start, end, module)
+    return
+rs_dw_dir_known = (name: str) -> bool: dw_dir_known(name)
+rs_dw_dir_name = (name: str) -> bool: dw_dir_name(name)
+rs_dw_expectation = (pos: int, where: int, described: str, said: int, notes: int, value: int) -> int: dw_expectation(pos, where, described, said, notes, value)
+rs_dw_ffi_attach = (n: int, attrs: int[]):
+    dw_ffi_attach(n, attrs)
+    return
+rs_dw_ffi_attr = (name: str, value: int, pos: int) -> int: dw_ffi_attr(name, value, pos)
+rs_dw_ffi_c_types = (t: int):
+    dw_ffi_c_types(t)
+    return
+rs_dw_ffi_library = (lib: str) -> str: dw_ffi_library(lib)
+rs_dw_finish_function = (n: int, parameters: int[], body: int, name: str) -> int: dw_finish_function(n, parameters, body, name)
+rs_dw_int_singleton_type = (values: int[], pos: int) -> int: dw_int_singleton_type(values, pos)
+rs_dw_method_finish = (fn_: int, struct_: int, type_params: int[], receiver: int):
+    dw_method_finish(fn_, struct_, type_params, receiver)
+    return
+rs_dw_parallel_exits = (n: int, depth: int):
+    dw_parallel_exits(n, depth)
+    return
+rs_dw_range_value = (range: int) -> int: dw_range_value(range)
+rs_dw_register_literal_methods = (entries: int[]):
+    dw_register_literal_methods(entries)
+    return
+rs_dw_renamed_init = ():
+    dw_renamed_init()
+    return
+rs_dw_target_dropped_name = (nm: int, pos: int):
+    dw_target_dropped_name(nm, pos)
+    return
+rs_dw_target_dropped_node = (n: int):
+    dw_target_dropped_node(n)
+    return
+rs_dw_target_field_value = (field: int) -> str: dw_target_field_value(field)
+rs_dw_target_name = () -> str: dw_target_name()
+rs_dw_task_group = (pos: int, name: str, serial: int, body: int, transparent: bool) -> int: dw_task_group(pos, name, serial, body, transparent)
+rs_dw_task_spawn = (g: int, value: int, pos: int) -> int: dw_task_spawn(g, value, pos)
+rs_fatal = (p0: int, msg0: str):
+    fatal(p0, msg0)
+    return
+rs_file_name = (path: str) -> str: file_name(path)
+rs_head_collapse = (n: int) -> int: head_collapse(n)
+rs_intern = (s: str) -> int: intern(s)
+rs_intern_sub = (s: str, start: int, n: int) -> int: intern_sub(s, start, n)
+rs_intrinsic_of = (name: int) -> int: intrinsic_of(name)
+rs_isolation_children = (k: NK) -> int: isolation_children(k)
+rs_join = (a0: str[], a1: str) -> str: join(a0, a1)
+rs_metatag_fail_text = (name: str) -> str: metatag_fail_text(name)
+rs_ownership_declare = (decl: int, hook: int, role: int):
+    ownership_declare(decl, hook, role)
+    return
+rs_place_method_split = (fn_: int, receiver: int, name: str) -> int[]: place_method_split(fn_, receiver, name)
+rs_replace = (a0: str, a1: str, a2: str) -> str: replace(a0, a1, a2)
+rs_spec_colon = (source: str, start: int, stop: int) -> int: dn_spec_colon(dn_lexer, source, start, stop)
+rs_str_from_bytes = (a0: u8[]) -> str: str_from_bytes(a0)
+rs_str_set_type = (values: str[]) -> int: str_set_type(values)
+rs_to_float = (a0: str) -> f64?: to_float(a0)
+rs_trim = (a0: str) -> str: trim(a0)
+rs_warn = (p: int, msg: str):
+    warn(p, msg)
+    return
+rs_words = (a0: str) -> str[]: words(a0)
+rs_g_DC_TEST_USAGE = () -> str: DC_TEST_USAGE
+rs_g_DW_ROW_HINT = () -> str: DW_ROW_HINT
+rs_g_TRANSFER_SEND_CLAIM = () -> int: TRANSFER_SEND_CLAIM
+rs_g_TRANSFER_SEND_OFF = () -> int: TRANSFER_SEND_OFF
+rs_g_TRANSFER_SYNC_CLAIM = () -> int: TRANSFER_SYNC_CLAIM
+rs_g_TRANSFER_SYNC_OFF = () -> int: TRANSFER_SYNC_OFF
+rs_g_TRANSFER_UNSAFE = () -> int: TRANSFER_UNSAFE
+rs_g_dc_lazy_used_set = (a0: bool):
+    dc_lazy_used = a0
+    return
+rs_g_dewy_decl_members_item_set = (a0: int, a1: {int:int}):
+    dewy_decl_members[a0] = a1
+    return
+rs_g_dewy_decl_methods_item_set = (a0: int, a1: int[]):
+    dewy_decl_methods[a0] = a1
+    return
+rs_g_dewy_live_sources_has = (a0: int) -> bool: dewy_live_sources.has(a0)
+rs_g_dewy_live_sources_item_set = (a0: int, a1: bool):
+    dewy_live_sources[a0] = a1
+    return
+rs_g_dewy_live_sources_remove = (a0: int):
+    dewy_live_sources.remove(a0)
+    return
+rs_g_dewy_methods_len = () -> int: dewy_methods.len()
+rs_g_dewy_methods_truncate = (a0: int):
+    dewy_methods.truncate(a0)
+    return
+rs_g_dewy_param_kinds_item_set = (a0: int, a1: int[]):
+    dewy_param_kinds[a0] = a1
+    return
+rs_g_dewy_type_members_item_set = (a0: int, a1: {int:int}):
+    dewy_type_members[a0] = a1
+    return
+rs_g_dir_bundles_push = (a0: DirBundle):
+    dir_bundles.push(a0)
+    return
+rs_g_dir_scopes_len = () -> int: dir_scopes.len()
+rs_g_dir_scopes_truncate = (a0: int):
+    dir_scopes.truncate(a0)
+    return
+rs_g_dw_allocators = () -> int: dw_allocators
+rs_g_dw_allocators_set = (a0: int):
+    dw_allocators = a0
+    return
+rs_g_dw_bigint_import = () -> int: dw_bigint_import
+rs_g_dw_bigint_import_set = (a0: int):
+    dw_bigint_import = a0
+    return
+rs_g_dw_task_groups_item = (a0: int) -> str: dw_task_groups[a0]
+rs_g_dw_task_groups_len = () -> int: dw_task_groups.len()
+rs_g_dw_task_groups_pop = () -> str: dw_task_groups.pop()
+rs_g_dw_task_groups_push = (a0: str):
+    dw_task_groups.push(a0)
+    return
+rs_g_dw_type_members_get = (a0: int) -> {int:{int:int}}?: dw_type_members.get(a0)
+rs_g_dw_type_members_item_set = (a0: int, a1: {int:{int:int}}):
+    dw_type_members[a0] = a1
+    return
+rs_g_effect_blocks_demanded = () -> bool: effect_blocks_demanded
+rs_g_effect_blocks_demanded_set = (a0: bool):
+    effect_blocks_demanded = a0
+    return
+rs_g_effect_panics_demanded = () -> bool: effect_panics_demanded
+rs_g_effect_panics_demanded_set = (a0: bool):
+    effect_panics_demanded = a0
+    return
+rs_g_effect_syntax_len = () -> int: effect_syntax.len()
+rs_g_effect_syntax_push = (a0: EffectSyntax[]):
+    effect_syntax.push(a0)
+    return
+rs_g_effect_syntax_truncate = (a0: int):
+    effect_syntax.truncate(a0)
+    return
+rs_g_effects_active_set = (a0: bool):
+    effects_active = a0
+    return
+rs_g_place_written_item_set = (a0: int, a1: int):
+    place_written[a0] = a1
+    return
+rs_g_place_written_remove = (a0: int):
+    place_written.remove(a0)
+    return
+rs_g_proof_decls = () -> {int:int}: proof_decls
+rs_g_proof_decls_item_set = (a0: int, a1: int):
+    proof_decls[a0] = a1
+    return
+rs_g_proof_decls_len = () -> int: proof_decls.len()
+rs_g_proof_decls_remove = (a0: int):
+    proof_decls.remove(a0)
+    return
+rs_g_proof_pending = () -> bool: proof_pending
+rs_g_refine_active_set = (a0: bool):
+    refine_active = a0
+    return
+rs_g_result_active_set = (a0: bool):
+    result_active = a0
+    return
+rs_g_result_boolean_masks_get = (a0: int) -> int?: result_boolean_masks.get(a0)
+rs_g_result_boolean_masks_item_set = (a0: int, a1: int):
+    result_boolean_masks[a0] = a1
+    return
+rs_g_result_syntax_get = (a0: int) -> ResultClause[]?: result_syntax.get(a0)
+rs_g_result_syntax_item_set = (a0: int, a1: ResultClause[]):
+    result_syntax[a0] = a1
+    return
+rs_g_struct_components_item_set = (a0: int, a1: int[]):
+    struct_components[a0] = a1
+    return
+rs_g_target_wasm = () -> bool: target_wasm
+rs_g_transfer_claim_pos_item_set = (a0: int, a1: int):
+    transfer_claim_pos[a0] = a1
+    return
+rs_g_transfer_tags_get = (a0: int) -> int?: transfer_tags.get(a0)
+rs_g_transfer_tags_item_set = (a0: int, a1: int):
+    transfer_tags[a0] = a1
+    return
+
+dc_reader_host = ParserReaderHost(rs___pow10, rs_arena_enable, rs_arena_return_at, rs_binding_leaves, rs_build_setting_apply, rs_bytes_slice, rs_decimal_let, rs_dewy_defer_callee, rs_dewy_defer_name, rs_dewy_defer_type, rs_dewy_deferred_here, rs_dewy_inherited_key, rs_dewy_method_group, rs_dewy_note_member, rs_dewy_reserved_name, rs_dir_builtin, rs_dir_bundle_index, rs_dir_set, rs_dn_error, rs_dn_expand_lazy, rs_dn_interpolation_close, rs_dn_lex, rs_dw_add_receiver, rs_dw_arena_scope, rs_dw_bigint_value, rs_dw_chain_temp, rs_dw_clamp_block, rs_dw_dir_apply, rs_dw_dir_known, rs_dw_dir_name, rs_dw_expectation, rs_dw_ffi_attach, rs_dw_ffi_attr, rs_dw_ffi_c_types, rs_dw_ffi_library, rs_dw_finish_function, rs_dw_int_singleton_type, rs_dw_method_finish, rs_dw_parallel_exits, rs_dw_range_value, rs_dw_register_literal_methods, rs_dw_renamed_init, rs_dw_target_dropped_name, rs_dw_target_dropped_node, rs_dw_target_field_value, rs_dw_target_name, rs_dw_task_group, rs_dw_task_spawn, rs_fatal, rs_file_name, rs_head_collapse, rs_intern, rs_intern_sub, rs_intrinsic_of, rs_isolation_children, rs_join, rs_metatag_fail_text, rs_ownership_declare, rs_place_method_split, rs_replace, rs_spec_colon, rs_str_from_bytes, rs_str_set_type, rs_to_float, rs_trim, rs_warn, rs_words, rs_g_DC_TEST_USAGE, rs_g_DW_ROW_HINT, rs_g_TRANSFER_SEND_CLAIM, rs_g_TRANSFER_SEND_OFF, rs_g_TRANSFER_SYNC_CLAIM, rs_g_TRANSFER_SYNC_OFF, rs_g_TRANSFER_UNSAFE, rs_g_dc_lazy_used_set, rs_g_dewy_decl_members_item_set, rs_g_dewy_decl_methods_item_set, rs_g_dewy_live_sources_has, rs_g_dewy_live_sources_item_set, rs_g_dewy_live_sources_remove, rs_g_dewy_methods_len, rs_g_dewy_methods_truncate, rs_g_dewy_param_kinds_item_set, rs_g_dewy_type_members_item_set, rs_g_dir_bundles_push, rs_g_dir_scopes_len, rs_g_dir_scopes_truncate, rs_g_dw_allocators, rs_g_dw_allocators_set, rs_g_dw_bigint_import, rs_g_dw_bigint_import_set, rs_g_dw_task_groups_item, rs_g_dw_task_groups_len, rs_g_dw_task_groups_pop, rs_g_dw_task_groups_push, rs_g_dw_type_members_get, rs_g_dw_type_members_item_set, rs_g_effect_blocks_demanded, rs_g_effect_blocks_demanded_set, rs_g_effect_panics_demanded, rs_g_effect_panics_demanded_set, rs_g_effect_syntax_len, rs_g_effect_syntax_push, rs_g_effect_syntax_truncate, rs_g_effects_active_set, rs_g_place_written_item_set, rs_g_place_written_remove, rs_g_proof_decls, rs_g_proof_decls_item_set, rs_g_proof_decls_len, rs_g_proof_decls_remove, rs_g_proof_pending, rs_g_refine_active_set, rs_g_result_active_set, rs_g_result_boolean_masks_get, rs_g_result_boolean_masks_item_set, rs_g_result_syntax_get, rs_g_result_syntax_item_set, rs_g_struct_components_item_set, rs_g_target_wasm, rs_g_transfer_claim_pos_item_set, rs_g_transfer_tags_get, rs_g_transfer_tags_item_set)
+
+dc_reader_connect = () -> bool:
+    dc_parser.stores = ParserReaderStores(&lists, &names, &dc_reader_host, &dw_builder_host)
+    true
+dc_reader_connected = dc_reader_connect()

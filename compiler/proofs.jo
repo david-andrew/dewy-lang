@@ -1,3 +1,4 @@
+use 'dewy_reader_types.dewy'
 # Erased procedures are checked in the finite fact domain, never executed.
 use 'ast.jo'
 use 'check.jo'
@@ -167,11 +168,6 @@ proof_erase = ():
 
 # Declaration metadata stays sparse; conditional witnesses live only in demanded
 # states and refer to immutable results and evaluated arguments, never spellings.
-struct ResultClause:
-    member: int
-    predicate: int
-    boolean: int = 0 # 0: type arm, 1: false, 2: true
-
 struct ResultEvidence:
     result: int
     tag: int

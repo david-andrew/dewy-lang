@@ -1,0 +1,99 @@
+use 'dewy_tokens.dewy'
+use 'dewy_syntax.dewy'
+use 'literals.dewy'
+
+struct ParserReaderState:
+    dc_axis_depth: int = -1
+    dc_axis_ranges: int[]
+    dc_builtins: int[]
+    dc_cast_coalesce: bool = false
+    dc_chain_operands: int[]
+    dc_chain_ops: DewyToken[]
+    dc_chain_starts: int[]
+    dc_chains_made: int = 0
+    dc_condition_depth: int = -1
+    dc_dropping: int = 0
+    dc_effects_follow: bool = false
+    dc_empty_id: int = -1
+    dc_fn_result: int = 0
+    dc_grouped: int = 0
+    dc_grouped_literal: bool = false
+    dc_head_depth: int = -1
+    dc_index_node: int = 0
+    dc_initial_at: int = -1
+    dc_kinds: int[]
+    dc_lazy_on: bool = false
+    dc_lazy_span_end: {int:int}
+    dc_lazy_tokens: {int:DewyLexeme[]}
+    dc_lib_lazy: bool = false
+    dc_literal_at: int = -1
+    dc_literal_seen: bool = false
+    dc_live_at: int = -1
+    dc_live_at_pos: {int:int} = {}
+    dc_local_type_on: bool = false
+    dc_made: int[]
+    dc_map_ok: bool = false
+    dc_member_depth: int = -1
+    dc_member_ranges: {int:int} = {}
+    dc_method_body: bool = false
+    dc_method_hooks: int[]
+    dc_methods: int[]
+    dc_none_id: int = 0
+    dc_nothing: bool = false
+    dc_open_axes: int = 0
+    dc_pairs_made: int = 0
+    dc_parameter_type: bool = false
+    dc_partial_id: int = 0
+    dc_partial_name: int = 0
+    dc_pattern_binder: int = 0
+    dc_range_at: int = 0
+    dc_range_call: int = 0
+    dc_range_first: int = 0
+    dc_range_node: int = 0
+    dc_range_top: bool = false
+    dc_refining: int = 0
+    dc_rename_follows: bool = false
+    dc_sequence_part: bool = false
+    dc_setting_at: int[]
+    dc_setting_values: int[]
+    dc_settings: str[]
+    dc_shapes: int[]
+    dc_splice_ok: bool = false
+    dc_spread_depth: int = -1
+    dc_target_fields: {int:int} = {}
+    dc_target_members: {int:int} = {}
+    dc_target_pos: {int:int} = {}
+    dc_target_problem: int = -1
+    dc_targets_made: int = 0
+    dc_top_level: bool = false
+    dc_transfer_at: int = 0
+    dc_transfer_bits: int = 0
+    dc_type_args: int = 0
+    dc_type_spelling: i32[]
+    dc_unbraced: bool = false
+    dc_unsafe_name: int = 0
+    dc_value: int = 0
+    dc_value_start: int = -1
+    dewy_syntax: DewySyntax[]
+    dn_angles: int = 0
+    dn_depth: int = 0
+    dn_edit_at: int[]
+    dn_edit_was: DewyLexeme[]
+    dn_edits_on: bool = false
+    dn_end_id: int = 0
+    dn_false_id: int = 0
+    dn_in_id: int = 0
+    dn_in_interpolation: int = 0
+    dn_is_id: int = 0
+    dn_isnt_id: int = 0
+    dn_lazy_left: bool = false
+    dn_new_id: int = 0
+    dn_no_id: int = 0
+    dn_none_id: int = 0
+    dn_reserved_words: bool[]
+    dn_rows: bool = false
+    dn_string_problem: LiteralProblem = LiteralProblem("", 0, false)
+    dn_true_id: int = 0
+    dn_type_id: int = 0
+    dn_void_id: int = 0
+    dw_renamed: int[]

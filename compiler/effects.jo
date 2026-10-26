@@ -1,3 +1,4 @@
+use 'dewy_reader_types.dewy'
 # Interned callback contracts and demanded place/row inference.
 # Absence of a declaration never means purity.
 # The arena, graph and cost inventory are demanded only by explicit contracts
@@ -25,17 +26,10 @@ use 'effect_library.jo'
 use 'node_store.dewy'
 use 'draw_context.jo'
 
-enum EffectKind: read, write, alloc, detach, costly_copy, panic, io, block, spawn, escape, opaque, remainder
 struct EffectAtom:
     kind: EffectKind
     place: PlaceIdentity = PlaceIdentity(.local, 0, 0)
     row: int = 0
-struct EffectSyntax:
-    kind: EffectKind
-    path: int[]
-    pos: int
-    negative: bool = false
-    variable: bool = false
 struct EffectContract:
     atoms: EffectAtom[]
     exclusions: EffectAtom[]

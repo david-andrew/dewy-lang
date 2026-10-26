@@ -1,3 +1,4 @@
+use 'dewy_reader_types.dewy'
 use 'isolation.jo'
 # Scoped settings written as metatags: `$name`, `$name=true`, `$name=false`.
 # A setting holds throughout the scope it is written in (a module, a function
@@ -22,17 +23,6 @@ struct DirScope:
     value: int        # 1 on, 0 off, -1 the default (a bundle's opt-out); a row: its syntax
     bundle: int = 0   # the bundle that set it; 0 when written directly
     at: int = 0
-
-struct DirBundle:
-    name: int
-    settings: int[]
-    values: int[]
-    row: int = 0      # effect_syntax index of the row its functions default to
-    at: int = 0
-    includes: int[]   # the bundles it includes (names), merged in by dir_bundle_resolve
-    include_at: int[]
-    state: int = 0    # 0 its includes not merged yet, 1 merging (a cycle if met again), 2 merged
-    allocation_failure: bool = false   # it sets `$explicit_allocation_failure` (a module policy)
 
 struct DirSite:
     at: int

@@ -1,3 +1,4 @@
+use 'util.jo'
 use 'dewy_parser.dewy'
 use 'dewy_context.jo'
 # `dewy-core fmt` for Dewy text: the lexer's lexemes of it, as fmt.jo compares them before and
@@ -11,14 +12,18 @@ use 'dewy_layout.dewy'
 df_lexemes: DewyLexeme[]
 df_blocks: int[]            # block comments of the lexed text: [start, end) pairs
 df_file = () -> int: dc_parser.file
-df_file = (file: int): dc_parser.file = file
+df_file = (file: int):
+    dc_parser.file = file
+    dc_parser.source = files[dc_parser.file].src
 
 df_tokens = (file: int, src: str) -> str[]:
     saved = dc_parser.file
     dc_parser.file = file
+    dc_parser.source = files[dc_parser.file].src
     df_lexemes = dn_lex(file, 0, len(src), false)
     df_blocks = dn_block_comments
     dc_parser.file = saved
+    dc_parser.source = files[dc_parser.file].src
     out: str[]
     loop i in 0.. and t in df_lexemes:
         if t.kind == .eof: break
