@@ -1881,6 +1881,33 @@ cmp_ops = (a: int, bb: int, branch: bool = false):
         else: op_rm((if left: 0x39 else: 0x3B), true, r, base, disp)
         cur_index = -1
         return
+    # A spill already is a full-width integer operand. Compare its stack slot
+    # directly when the other operand fits x64's register/immediate form;
+    # keep the original operand order so signed and unsigned flags agree.
+    other = vloc[bb]
+    if vloc[a] == LOC_SPILL and (other == LOC_CONST or (other >= 0 and other < XMM)):
+        immediate = other == LOC_CONST
+        short = immediate and vcval[bb] >= -128 and vcval[bb] <= 127
+        if branch and ra_on:
+            disp = vspill[a]
+            base = RBP
+            if rsp_frame:
+                base = RSP
+                disp += frame_size + rsp_extra
+            span = 3                         # REX.W, opcode, ModRM
+            if base == RSP: span += 1         # SIB
+            if disp < -128 or disp > 127: span += 4
+            else if disp != 0 or base == RBP: span += 1
+            if immediate: span += if short: 1 else: 4
+            cmp_branch_pad(span + 6)
+        if immediate:
+            rex(true, 0, 0, RBP, false)
+            b(if short: 0x83 else: 0x81)
+            mem(7, RBP, vspill[a])
+            if short: b(vcval[bb])
+            else: b32(vcval[bb])
+        else: op_rm(0x39, true, other, RBP, vspill[a])
+        return
     ra = reg_of(a, RAX)
     if branch and ra_on:
         l = vloc[bb]
