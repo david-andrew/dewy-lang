@@ -431,7 +431,8 @@ address mode, call policy, frame and reused-state transition.
 
 `arm64_encode.dewy` owns whole scalar instruction-encoding functions: word
 read/write/patch, immediates, integer and floating operations, branches and
-memory addressing. `arm64_encode.jo` freezes the original encodings for the
+memory addressing, logical/FP immediate recognition, indexed memory forms and
+ADRP/ADD field patching. `arm64_encode.jo` freezes the original encodings for the
 bootstrap. Register allocation, frame layout, IR dispatch, relocation policy
 and diagnostics remain in the Jo host. There is no per-instruction callback.
 
@@ -440,10 +441,15 @@ emission; Mach-O, REPL and watch users import the same leaf. The borrowed addres
 survives backing-buffer growth and replacement. Appending one word uses the
 runtime's `[references, length, capacity]` header and calls the language's
 `reserve` operation on shared or insufficient storage, reacquiring the header
-before writing. No byte pointer survives a write. Patching retains array COW
-semantics. Encoding fields use wrapping machine words, matching Jo rather than
+before writing. Reads borrow bytes for one existing word; patches detach shared
+storage once, then borrow its bytes. Both accept unaligned word positions; the
+host supplies an existing four-byte span. No byte pointer survives an operation.
+Patching retains array COW semantics. Encoding fields use wrapping machine words, matching Jo rather than
 introducing exact-integer arithmetic. Work remains O(emitted bytes), amortized
-for growth, with the existing O(buffer size) copy when storage is shared.
+for growth, with the existing O(buffer size) copy when storage is shared. Logical
+immediate recognition is bounded by the 64-bit word width; the other field
+encoders and ADRP/ADD patching do constant work. Relocation iteration, target
+resolution and range diagnostics remain with the host.
 
 ## Parser ownership boundary
 
