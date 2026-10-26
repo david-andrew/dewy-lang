@@ -5358,6 +5358,11 @@ gen_value_cast = (e: int) -> Val:
     a = int(nodes[e].a)
     from = prune(ntype(a))
     val = gen_expr(a)
+    # Simple enums store their variant number as a plain word. Mathematical
+    # integers use a tagged word, so crossing this boundary must unpack or
+    # pack the number rather than reinterpret its representation.
+    if from == T_MATH_INT and types[t].kind == .enum_: return V(math_signed(val.v), false)
+    if types[from].kind == .enum_ and t == T_MATH_INT: return math_pack_word(a, val.v)
     if types[from].kind == .float_ and types[t].kind == .int_:
         d = vreg(VI)
         emit(.f2bits, vt_of(from), d, val.v, 0, 0, 0)
