@@ -1,0 +1,334 @@
+use 'opt_workspace.dewy'
+use 'ir_types.dewy'
+
+oc_tag = (ins: *Ins) -> int: int((ins as *u32)[0])
+oc_pure = (ins: *Ins) -> bool: opt_decode[oc_tag(ins)] & 2 != 0
+oc_defines = (ins: *Ins) -> bool: opt_decode[oc_tag(ins)] & 1 != 0
+oc_retargetable = (ins: *Ins) -> bool:
+    if ins.op == .checked_add or ins.op == .checked_sub or ins.op == .checked_mul: return opt_checked_flags
+    opt_decode[oc_tag(ins)] & 8 != 0
+oc_vtype = (v: int) -> int:
+    t = int(opt_ir.vtypes[v])
+    if t == 3: return 0
+    t
+oc_is_k = (v: int) -> bool: o_regs[v].constant
+
+# Read the same operand description as the backends, without a host callback or
+# a copied operand list. zeroslots carries definitions, not register uses.
+oc_has_use = (ins: *Ins, v: int) -> bool:
+    mode = opt_operands[oc_tag(ins)]
+    if mode & 16 != 0:
+        loop k in [int(ins.a)..int(ins.a) + int(ins.b)):
+            if int(opt_ir.args[k]) == v: return true
+        return mode & 128 != 0 and int(ins.c) == v
+    n = mode & 7
+    if mode & 256 != 0 and ins.a < 0: n = 0
+    if mode & 32 != 0 and int(ins.c) & 128 != 0: n += 1
+    if mode & 64 != 0 and mode & 32 == 0: n += 1
+    if n > 0 and int(ins.a) == v: return true
+    if n > 1 and int(ins.b) == v: return true
+    if n > 2:
+        if mode & 64 != 0: return int(ins.dst) == v
+        return int(ins.c) == v
+    false
+
+oc_tmp = () -> int:
+    d = opt_ir.vtypes.len()
+    opt_ir.vtypes.push(i8(0))
+    if o_reg_count <= d:
+        o_reg_storage.resize(d + 1)
+        o_regs = data(o_reg_storage)
+        o_reg_count = d + 1
+        o_fact_scope.resize((d + 1) * 2)
+        o_fact_nbr.resize((d + 1) * 2)
+    reg = &o_regs[d]
+    reg.ndef = 1
+    reg.stable = true
+    reg.defpos = -1
+    reg.first = 2147483647
+    reg.nuse = 0
+    reg.constant = false
+    reg.repl = i32(d)
+    reg.ver = 0
+    reg.dop = -1
+    d
+
+oc_select_op = (ins: Ins) -> bool:
+    if ins.ty != 0: return false
+    match ins.op:
+        iconst, mov, add, sub, mul, and_, or_, xor, shl, shrs, shru, neg, not_: true
+        eq, ne, lts, les, gts, ges, ltu, leu, gtu, geu: true
+        sext8, sext16, sext32, zext8, zext16, zext32: true
+        _: false
+
+# Lowered value-if: block { block { condition; brif else; yes; br end }; no }.
+# Recognize a small diamond after inlining, so tiny arithmetic helpers count too.
+
+oc_if_select = (out: *Ins, start: int, n: int) -> int:
+    if n - start < 6 or n - start > 32 or out[start + 1].op != .block: return -1
+    depth = 0
+    branch = -1
+    jump = -1
+    split = -1
+    yes = -1
+    no = -1
+    cost = 0
+    guard = -1
+    guard_yes = false
+    skip = -1
+    loop j in [start + 2..n):
+        if j <= skip: continue
+        ins = out[j]
+        op = ins.op
+        # A single no-argument failure guard can be predicated by the arm's
+        # selection. Every other instruction in both arms remains pure.
+        if branch >= 0 and depth == 0 and guard < 0 and op == .if_ and j + 2 < n:
+            failure = out[j + 1]
+            if failure.op == .call and failure.c == 1 and failure.b == 0 and failure.dst < 0 and out[j + 2].op == .end:
+                guard = j
+                guard_yes = split < 0
+                skip = j + 2
+                cost += 2
+                continue
+        if op == .block:
+            depth += 1
+            continue
+        if op == .end:
+            if depth > 0: depth -= 1
+            else:
+                if jump != j - 1 or split >= 0: return -1
+                split = j
+            continue
+        if op == .brif and branch < 0 and depth == 0 and ins.imm == 0:
+            branch = j
+            continue
+        if op == .br and branch >= 0 and jump < 0 and depth == 0 and ins.imm == 1:
+            jump = j
+            continue
+        if op == .br or op == .brif or op == .brtable or op == .loop or op == .if_ or op == .else_ or op == .ret or op == .trap: return -1
+        if branch < 0: continue
+        if not oc_select_op(ins): return -1
+        cost += 1
+        if cost > 8: return -1
+        if split < 0:
+            if jump >= 0: return -1
+            yes = j
+        else: no = j
+    if depth != 0 or yes < 0 or no < 0 or split < 0 or cost > 8: return -1
+    dst = int(out[yes].dst)
+    cond = int(out[branch].a)
+    if dst < 0 or out[no].dst != dst or oc_vtype(dst) != 0: return -1
+    if guard >= 0 and out[guard].a == dst: return -1
+    loop j in [branch + 1..n):
+        ins = out[j]
+        if not oc_select_op(ins): continue
+        d = int(ins.dst)
+        # Only the two result writes may redefine a register. Everything else
+        # must be a temporary, and neither arm may read the result being joined.
+        if d == cond: return -1
+        if j != yes and j != no:
+            if d == dst or d < 0 or o_regs[d].ndef != 1: return -1
+        if oc_has_use(out + j, dst): return -1
+    # A result copy already names the selected value. Keep that operand
+    # directly rather than introducing two moves before the select; besides
+    # saving vregs this leaves adjacent comparisons available to the emitter.
+    y = if out[yes].op == .mov: int(out[yes].a) else: oc_tmp()
+    z = if out[no].op == .mov: int(out[no].a) else: oc_tmp()
+    truth = -1
+    comparison = out[branch - 1]
+    if o_regs[cond].nuse == 1 and comparison.dst == cond and comparison.op == .ne and oc_is_k(int(comparison.b)) and o_regs[int(comparison.b)].cval == 0:
+        source = int(comparison.a)
+        stable = source != dst
+        loop j in [branch + 1..n):
+            if out[j].dst == source: stable = false
+        if stable:
+            truth = branch - 1
+            cond = source
+    replacement: Ins[]
+    loop j in [start + 2..n):
+        if j == truth: continue
+        ins = out[j]
+        if j == guard:
+            replacement.push(ins)
+            chosen = cond
+            if guard_yes:
+                zero = oc_tmp()
+                chosen = oc_tmp()
+                replacement.push(Ins(.iconst, 0, i32(zero), 0, 0, 0, 0))
+                replacement.push(Ins(.eq, 0, i32(chosen), i32(cond), i32(zero), 0, 0))
+            replacement.push(Ins(.if_, 0, -1, i32(chosen), 0, 0, 0))
+            replacement.push(out[j + 1])
+            replacement.push(out[j + 2])
+            replacement.push(out[j + 2])
+            continue
+        if guard >= 0 and (j == guard + 1 or j == guard + 2): continue
+        if ins.op == .block or ins.op == .end or j == branch or j == jump: continue
+        if (j == yes or j == no) and ins.op == .mov: continue
+        if j == yes: ins.dst = i32(y)
+        if j == no: ins.dst = i32(z)
+        replacement.push(ins)
+    selected = Ins(.select, 0, i32(dst), i32(cond), i32(z), i32(y), 0)
+    selected.pos = out[branch].pos
+    replacement.push(selected)
+    loop k in [0..replacement.len()): out[start + k] = replacement[k]
+    start + replacement.len()
+
+# A branch to a block's end can make that end reachable even when its body
+# cannot fall through. Branches to loop headers do not reach the loop's end.
+
+opt_cleanup = (code: *Ins, count: int) -> Ins[]:
+    storage: Ins[]
+    # At most one instruction and one explicit trap per input operation. The
+    # buffer never grows while raw views are live; publication trims its length.
+    storage.resize(count * 2)
+    out = data(storage)
+    used = 0
+    dead_range = 0
+    dead_count = o_dead_first.len()
+    dead_first = data(o_dead_first)
+    dead_limit = data(o_dead_limit)
+    next_dead = if dead_count > 0: dead_first[0] else: count
+    input_pos = 0
+    loop input_pos < count:
+        if input_pos == next_dead:
+            input_pos = dead_limit[dead_range]
+            dead_range += 1
+            next_dead = if dead_range < dead_count: dead_first[dead_range] else: count
+            continue
+        index = input_pos
+        ins = &code[index]
+        input_pos += 1
+        op = ins.op
+        control = (opt_decode[oc_tag(ins)] >> 20) & 15
+        if control == 0 or control == 15 or (control == 12 and ins.c != 1):
+            out[used] = ins[0]
+            used += 1
+            continue
+        if control == 1: continue
+        top = -1
+        if op == .end: top = int(o_flow_at[index])
+        if op == .end and used > 0:
+            if o_flow[top].kind == .block:
+                selected = oc_if_select(out, o_flow[top].start, used)
+                if selected >= 0:
+                    used = selected
+                    continue
+            last = out[used - 1]
+            if last.op == .br and last.imm == 0 and o_flow[top].kind != .loop: used -= 1
+            # Inlining a leaf can leave `block; value; end` after its final
+            # branch is removed. A single pure instruction cannot target this
+            # block; removing the wrapper exposes adjacent compare/branch pairs.
+            if o_flow[top].kind == .block and used == o_flow[top].start + 2 and oc_pure(out + used - 1):
+                used -= 1
+                value = out[used]
+                out[used - 1] = value
+                continue
+            # `if c { br d }` is `brif c, d - 1` (one branch instead of two)
+            if used >= 2 and o_flow[top].kind == .if_:
+                last = out[used - 1]
+                prev = out[used - 2]
+                if last.op == .br and last.imm >= 1 and prev.op == .if_:
+                    used -= 1
+                    used -= 1
+                    out[used] = Ins(.brif, 0, 0, prev.a, 0, 0, last.imm - 1)
+                    used += 1
+                    continue
+            # `block { ...; brif c, 0; br d }` (c a comparison used only there) is
+            # `...; brif !c, d - 1`
+            if used >= 2 and o_flow[top].kind == .block:
+                last = out[used - 1]
+                prev = out[used - 2]
+                st = o_flow[top].start
+                c = int(prev.a)
+                if last.op == .br and last.imm >= 1 and prev.op == .brif and prev.imm == 0 and c >= 0 and c < o_reg_count and o_regs[c].nuse == 1:
+                    # the comparison, inside the block, with no other branch there
+                    cd = -1
+                    plain = true
+                    loop j in [st + 1..used - 2):
+                        eo = out[j].op
+                        if eo == .br or eo == .brif or eo == .brtable or eo == .block or eo == .loop or eo == .if_ or eo == .end or eo == .else_: plain = false
+                        if int(out[j].dst) == c and oc_defines(out + j): cd = j
+                    if plain and cd >= 0 and oc_negate(out[cd].op) != .nop:
+                        e = out[cd]
+                        e.op = oc_negate(e.op)
+                        out[cd] = e
+                        d = last.imm - 1
+                        used -= 1
+                        used -= 1
+                        loop j in [st..used - 1): out[j] = out[j + 1]
+                        used -= 1
+                        out[used] = Ins(.brif, 0, 0, i32(c), 0, 0, d)
+                        used += 1
+                        continue
+        if op == .mov and used > 0:
+            t = int(ins.a)
+            d = int(ins.dst)
+            if t != d and t >= 0 and t < o_reg_count and o_regs[t].nuse == 1 and oc_vtype(t) == oc_vtype(d):
+                # (also a few instructions back, in straight-line code that leaves d alone:
+                # vector lanes computed one after the other, then copied)
+                j = used - 1
+                done = false
+                loop j >= 0 and j >= used - 8:
+                    e = out[j]
+                    eo = e.op
+                    if int(e.dst) == t and oc_defines(out + j):
+                        if oc_retargetable(out + j):
+                            e.dst = i32(d)
+                            out[j] = e
+                            done = true
+                        break
+                    if eo == .block or eo == .loop or eo == .if_ or eo == .else_ or eo == .end or eo == .br or eo == .brif or eo == .brtable or eo == .zeroslots: break
+                    ed = if oc_defines(out + j): int(e.dst) else: -1
+                    if ed == d or oc_has_use(out + j, d) or ed == t: break
+                    j -= 1
+                if done: continue
+        if op == .copy and used > 0:
+            # vector arithmetic into a temporary that is then copied: compute into the copy's target
+            last = out[used - 1]
+            t = int(ins.b)
+            if last.op == .vop and int(last.a) == t and o_regs[t].nuse == 2 and int(ins.imm) == ((int(last.imm) >> 4) & 7) * 4 and oc_sole_slot(code, count, t):
+                last.a = ins.a
+                out[used - 1] = last
+                continue
+        out[used] = ins[0]
+        used += 1
+        if op == .block or op == .loop or op == .if_:
+            o_flow[int(o_flow_at[index])].start = used - 1
+        else if op == .end and o_flow[top].terminated:
+            out[used] = Ins(.trap, 0, 0, 0, 0, 0, 0)
+            used += 1
+    storage.resize(used)
+    storage
+
+# Is t the address of a frame slot no other instruction takes the address of? (Asked rarely:
+# a vector operation into a temporary that is then copied.)
+
+oc_sole_slot = (code: *Ins, count: int, t: int) -> bool:
+    s = -1
+    loop input_pos in [0..count):
+        ins = &code[input_pos]
+        if ins.op == .slot and int(ins.dst) == t: s = int(ins.a)
+    if s < 0: return false
+    refs = 0
+    loop input_pos in [0..count):
+        ins = &code[input_pos]
+        if ins.op == .slot and int(ins.a) == s: refs += 1
+    refs == 1
+
+# the comparison that is true exactly when op is false (integers only: floats have NaN)
+
+oc_negate = (op: Op) -> Op:
+    match op:
+        eq: .ne
+        ne: .eq
+        lts: .ges
+        ges: .lts
+        les: .gts
+        gts: .les
+        ltu: .geu
+        geu: .ltu
+        leu: .gtu
+        gtu: .leu
+        _: .nop
+
+# instructions whose result register may be renamed

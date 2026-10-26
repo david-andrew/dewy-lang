@@ -1,0 +1,1278 @@
+use 'ir_types.dewy'
+use 'opt_workspace.dewy'
+use 'opt_cleanup.dewy'
+
+const OW_MIN_INT = -9223372036854775807 - 1
+
+ow_vreg = (ty: int) -> int:
+    opt_ir.vtypes.push(i8(ty))
+    opt_ir.vtypes.len() - 1
+ow_vtype = (v: int) -> int:
+    t = int(opt_ir.vtypes[v])
+    if t == 3: return 0
+    t
+ow_is_kv = (v: int) -> bool: int(opt_ir.vtypes[v]) == 3
+ow_k_vreg = (v: int) -> int:
+    slot = (v xor (v >> 8)) & 255
+    if opt_kc_epoch[slot] == opt_kc_fn and opt_kc_val[slot] == v: return opt_kc_reg[slot]
+    d = opt_ir.vtypes.len()
+    opt_ir.vtypes.push(i8(3))
+    loop opt_ir.kval.len() < d: opt_ir.kval.push(0)
+    opt_ir.kval.push(v)
+    opt_kc_epoch[slot] = opt_kc_fn
+    opt_kc_val[slot] = v
+    opt_kc_reg[slot] = d
+    d
+# ABI ordinals: eq..geu are 19..28; load is 59. The exhaustive operand
+# differential checks these queries against the independent Jo classifier.
+ow_boolean_tag = (tag: int) -> bool: tag >= 19 and tag <= 28
+ow_arity = (tag: int, mode: int) -> int:
+    if tag == 59 and mode & 128 != 0: return 2
+    ((opt_decode[tag] >> 4) & 7) - 1
+ow_operands = (ins: *Ins) -> int:
+    mode = opt_operands[oc_tag(ins)]
+    opt_use_span = -1
+    opt_use_values[0] = int(ins.a)
+    opt_use_values[1] = int(ins.b)
+    opt_use_values[2] = int(ins.c)
+    opt_use_count = mode & 7
+    if mode & 16 != 0:
+        opt_use_span = int(ins.a)
+        opt_use_span_count = int(ins.b)
+        opt_use_count = int(ins.b)
+        if mode & 128 != 0: opt_use_count += 1
+    else:
+        if mode & 256 != 0 and ins.a < 0: opt_use_count = 0
+        if mode & 32 != 0 and int(ins.c) & 128 != 0: opt_use_count += 1
+        if mode & 64 != 0:
+            opt_use_values[2] = int(ins.dst)
+            if mode & 32 == 0: opt_use_count += 1
+    if mode & 8 != 0: return int(ins.dst)
+    -1
+ow_use = (i: int) -> int:
+    if opt_use_span >= 0:
+        if i < opt_use_span_count: return int(opt_ir.args[opt_use_span + i])
+        return opt_use_values[2]
+    opt_use_values[i]
+ow_word_overflow = (operation: int, x: int, y: int) -> bool:
+    if operation == 0:
+        r = x + y
+        return ((x xor r) & (y xor r)) < 0
+    if operation == 1:
+        r = x - y
+        return ((x xor y) & (x xor r)) < 0
+    if operation == 2:
+        ax = if x < 0: u64(-(x + 1)) + 1 else: u64(x)
+        ay = if y < 0: u64(-(y + 1)) + 1 else: u64(y)
+        limit = if (x < 0) != (y < 0): u64(9223372036854775807) + 1 else: u64(9223372036854775807)
+        return ay != 0 and ax > limit / ay
+    if operation == 3: return y == 0 or (x == -9223372036854775807 - 1 and y == -1)
+    if y < 0: return true
+    if y >= 64: return x != 0
+    ((x << y) >> y) != x
+
+
+ow_rewrite = (ins: *Ins):
+    mask = opt_decode[oc_tag(ins)] >> 8
+    if mask & 16 != 0:
+        loop k in [int(ins.a)..int(ins.a) + int(ins.b)):
+            opt_ir.args[k] = o_regs[int(opt_ir.args[k])].repl
+    else:
+        if mask & 1 != 0 or (mask & 32 != 0 and ins.a >= 0): ins.a = o_regs[int(ins.a)].repl
+        if mask & 2 != 0 or (mask & 64 != 0 and int(ins.c) & 128 != 0): ins.b = o_regs[int(ins.b)].repl
+        if mask & 8 != 0 or (mask & 128 != 0 and int(ins.c) & 128 != 0): ins.dst = o_regs[int(ins.dst)].repl
+    if mask & 4 != 0: ins.c = o_regs[int(ins.c)].repl
+
+ow_log2_exact = (x: int) -> int:
+    if x <= 0 or x & (x - 1) != 0: return -1
+    k = 0
+    loop (1 << k) != x: k += 1
+    k
+
+ow_shru_val = (a: int, k: int) -> int:
+    if k == 0: return a
+    (a >> k) & ((1 << (64 - k)) - 1)
+
+ow_ult = (a: int, b: int) -> bool: ((a xor OW_MIN_INT)) < ((b xor OW_MIN_INT))
+
+ow_is_k = (v: int) -> bool: o_regs[v].constant
+
+# fold an integer operation on constants; returns (ok, value)
+
+ow_fold = (op: Op, x: int, y: int) -> (bool, int):
+    match op:
+        overflow_add: (true, int(ow_word_overflow(0, x, y)))
+        overflow_sub: (true, int(ow_word_overflow(1, x, y)))
+        overflow_mul: (true, int(ow_word_overflow(2, x, y)))
+        add: (true, x + y)
+        sub: (true, x - y)
+        mul: (true, x * y)
+        divs:
+            if y == 0 or (x == OW_MIN_INT and y == -1): return (false, 0)
+            (true, x / y)
+        rems:
+            if y == 0 or (x == OW_MIN_INT and y == -1): return (false, 0)
+            (true, x % y)
+        and_: (true, x & y)
+        or_: (true, x | y)
+        xor: (true, (x xor y))
+        shl: (true, x << (y & 63))
+        shrs: (true, x >> (y & 63))
+        shru: (true, ow_shru_val(x, y & 63))
+        eq: (true, int(x == y))
+        ne: (true, int(x != y))
+        lts: (true, int(x < y))
+        les: (true, int(x <= y))
+        gts: (true, int(x > y))
+        ges: (true, int(x >= y))
+        ltu: (true, int(ow_ult(x, y)))
+        leu: (true, int(not ow_ult(y, x)))
+        gtu: (true, int(ow_ult(y, x)))
+        geu: (true, int(not ow_ult(x, y)))
+        _: (false, 0)
+
+ow_fold_un = (op: Op, x: int) -> (bool, int):
+    match op:
+        neg: (true, -x)
+        not_: (true, ~x)
+        sext8: (true, (x << 56) >> 56)
+        sext16: (true, (x << 48) >> 48)
+        sext32: (true, (x << 32) >> 32)
+        zext8: (true, x & 255)
+        zext16: (true, x & 65535)
+        zext32: (true, x & 4294967295)
+        _: (false, 0)
+
+# comparison with its operands swapped
+
+ow_mirror = (op: Op) -> Op:
+    match op:
+        lts: .gts
+        les: .ges
+        gts: .lts
+        ges: .les
+        ltu: .gtu
+        leu: .geu
+        gtu: .ltu
+        geu: .leu
+        _: op
+
+ow_commutes = (op: Op) -> bool:
+    op == .add or op == .mul or op == .and_ or op == .or_ or op == .xor or op == .eq or op == .ne
+
+# Function-local output arena. The cleanup consumer borrows it; published IR
+# owns a different array. Every append checks capacity before taking its address.
+
+ow_flow_begin = ():
+    if o_flow_storage.len() < opt_ir.code.len(): o_flow_storage.resize(opt_ir.code.len())
+    o_flow = data(o_flow_storage)
+    if o_flow_open_storage.len() < opt_ir.code.len(): o_flow_open_storage.resize(opt_ir.code.len())
+    o_flow_open = data(o_flow_open_storage)
+    o_flow_level = -1
+    o_flow_at_storage.resize(o_capacity)
+    o_flow_at = data(o_flow_at_storage)
+    o_flow_count = 0
+    o_flow_top = -1
+    o_flow_dead = false
+    o_flow_depth = 0
+    o_dead_first.clear()
+    o_dead_limit.clear()
+
+ow_flow_exit = (distance: int):
+    level = o_flow_level - distance
+    if level < 0: return
+    target = int(o_flow_open[level])
+    if o_flow[target].kind != .loop: o_flow[target].exit = true
+
+ow_flow_end_dead = ():
+    if o_dead_start < o_count:
+        o_dead_first.push(o_dead_start)
+        o_dead_limit.push(o_count)
+
+# Callers select control operations; data emission never enters this path.
+
+ow_flow_emit = (ins: *Ins):
+    if o_count == o_capacity: ow_grow_output()
+    control = (opt_decode[oc_tag(ins)] >> 20) & 15
+    if o_flow_dead:
+        if control >= 2 and control <= 4:
+            o_flow_depth += 1
+            return
+        if control == 5 or control == 6:
+            if o_flow_depth > 0:
+                if control == 6: o_flow_depth -= 1
+                return
+            ow_flow_end_dead()
+        else: return
+    if control >= 2 and control <= 4:
+        index = o_flow_count
+        o_flow_count += 1
+        o_flow[index] = OptFlow(ins.op, o_flow_top, o_count, false, false)
+        o_flow_top = index
+        o_flow_level += 1
+        o_flow_open[o_flow_level] = i32(index)
+        o_flow_at[o_count] = i32(index)
+    else if control == 5:
+        o_flow[o_flow_top].exit = o_flow[o_flow_top].exit or not o_flow_dead
+        o_flow[o_flow_top].kind = .else_
+        o_flow_dead = false
+    else if control == 6:
+        o_flow_dead = o_flow_dead and not o_flow[o_flow_top].exit and o_flow[o_flow_top].kind != .if_
+        o_flow[o_flow_top].terminated = o_flow_dead
+        o_flow_at[o_count] = i32(o_flow_top)
+        o_flow_top = o_flow[o_flow_top].parent
+        o_flow_level -= 1
+        if o_flow_dead: o_dead_start = o_count + 1
+    else:
+        if control == 7 or control == 8 or control == 9:
+            ow_flow_exit(int(ins.imm))
+            if control == 9:
+                loop k in [0..int(ins.b)):
+                    ow_flow_exit(int(opt_ir.args[int(ins.c) + k]))
+        if control == 7 or control == 9 or control == 10 or control == 11 or (control == 12 and ins.c == 1):
+            o_flow_dead = true
+            o_flow_depth = 0
+            o_dead_start = o_count + 1
+
+ow_flow_pop = ():
+    # Only an empty block/if opener can be removed by the forward writer.
+    if o_flow_dead: o_flow_depth -= 1
+    else:
+        o_flow_top = o_flow[o_flow_top].parent
+        o_flow_level -= 1
+        o_flow_count -= 1
+
+ow_grow_output = ():
+    o_capacity = max(32, o_capacity * 2)
+    o_out_storage.resize(o_capacity)
+    o_out = data(o_out_storage)
+    o_flow_at_storage.resize(o_capacity)
+    o_flow_at = data(o_flow_at_storage)
+
+ow_append_plain = (ins: Ins):
+    if o_count == o_capacity: ow_grow_output()
+    o_out[o_count] = ins
+    o_count += 1
+
+ow_append = (ins: Ins):
+    if o_count == o_capacity: ow_grow_output()
+    o_out[o_count] = ins
+    ow_flow_emit(o_out + o_count)
+    o_count += 1
+
+ow_kconst = (v: int) -> int:
+    if ow_fits32(v):
+        if let c = o_kmap.get(v): return c
+        k = ow_k_vreg(v)
+        ow_resize_one(k)
+        o_regs[k].ndef = 1
+        o_regs[k].stable = true
+        o_regs[k].constant = true
+        o_regs[k].cval = v
+        o_kmap[v] = k
+        return k
+    d = ow_vreg(0)
+    ow_resize_one(d)
+    o_regs[d].ndef = 1
+    o_regs[d].stable = true
+    o_regs[d].constant = true
+    o_regs[d].cval = v
+    ow_emit(Ins(.iconst, 0, i32(d), 0, 0, 0, v))
+    int(o_regs[d].repl)
+
+ow_resize_one = (d: int):
+    if o_reg_count <= d:
+        o_reg_storage.resize(d + 1)
+        o_regs = data(o_reg_storage)
+        o_reg_count = d + 1
+        o_fact_scope.resize((d + 1) * 2)
+        o_fact_nbr.resize((d + 1) * 2)
+    reg = &o_regs[d]
+    reg.ndef = 0
+    reg.stable = false
+    reg.defpos = -1
+    reg.first = 2147483647
+    reg.nuse = 0
+    reg.constant = false
+    reg.repl = i32(d)
+    reg.ver = 0
+    reg.dop = -1
+
+# (results may be replaced by an existing equal value)
+
+ow_bin = (op: Op, d: int, a: int, b: int) -> int:
+    ow_emit(Ins(op, 0, i32(d), i32(a), i32(b), 0, 0))
+    int(o_regs[d].repl)
+
+ow_tmp = () -> int:
+    d = ow_vreg(0)
+    ow_resize_one(d)
+    o_regs[d].ndef = 1
+    o_regs[d].stable = true
+    d
+
+# can uses of d be replaced by s? both must be single-definition values defined before use
+
+ow_can_alias = (d: int, s: int) -> bool:
+    if o_regs[d].ndef != 1: return false
+    if o_regs[d].first < o_regs[d].defpos: return false
+    if o_regs[s].ndef != 1: return ow_vtype(d) == ow_vtype(s) and ow_holds(d, s)
+    if s >= opt_ir.nparams and o_regs[s].first < o_regs[s].defpos: return false
+    ow_vtype(d) == ow_vtype(s)
+
+# d = s (s defined more than once, like a loop counter): may d's uses read s instead? Yes if s
+# is not redefined from there to d's last use, and the copy dominates the uses (the construct
+# open at the copy stays open: no path reaches a use around it, as through a loop's back edge).
+# A use in a loop entered after the copy sees s again on the next iteration: s must not change
+# anywhere in that loop either.
+
+ow_holds = (d: int, s: int) -> bool:
+    q = int(o_regs[d].defpos)
+    e = int(o_lastuse[d])
+    if q < 0 or e < q: return false
+    dq = o_depth[q]
+    # (constructs opened after the copy, and how deep the outermost loop among them is)
+    open: Op[]
+    loop_at = -1        # open.len() when the outermost such loop that is open at the last use opened
+    p = q + 1
+    loop p <= e or (loop_at >= 0 and open.len() > loop_at):
+        if p >= opt_ir.code.len() or p - q > 4000: return false
+        ins = opt_input + p
+        op = ins.op
+        if o_depth[p] < dq: return false
+        if op == .else_ and o_depth[p] == dq: return false
+        if opt_decode[oc_tag(ins)] & 1 != 0 and int(ins.dst) == s: return false
+        if op == .zeroslots:
+            loop k in [0..int(ins.b)):
+                item = int(opt_ir.args[int(ins.a) + k])
+                if item & 1 == 1 and item >> 1 == s: return false
+        if op == .block or op == .if_ or op == .loop: open.push(op)
+        else if op == .end and open.len() > 0: open.pop()
+        if p == e:
+            loop j in [0..open.len()):
+                if open[j] == .loop:
+                    loop_at = j
+                    break
+        p += 1
+    true
+
+# ---------------- common subexpressions ----------------
+# A hash table of available values keyed by (op, type, operands, immediate). Entries belong to
+# their control construct. An unconditional block can export its prefix before
+# the first branch; conditional arms and loops never export. Loads also die when
+# memory may have changed (any store or call bumps the memory generation).
+# Keep one probed entry together instead of visiting ten separate arrays.
+# The key and validity metadata occupy 64 bytes; their meaning is unchanged.
+
+ow_ht_setup = (n: int):
+    size = 64
+    loop size < n * 4: size *= 2
+    if ht_storage.len() < size: ht_storage.resize(size)
+    ht_entries = data(ht_storage)
+    ht_mask = size - 1
+    o_epoch += 1
+    o_gen = 0
+    o_genf = 1 << 40
+    o_genh = 2 << 40
+    o_scope_storage.clear()
+    o_scopes.clear()
+    ow_scope_open()
+
+ow_scope_open = (export_prefix: bool = false):
+    parent = -1
+    if o_scopes.len() > 0: parent = o_scopes[o_scopes.len() - 1]
+    o_scope_storage.push(OptScope(o_nbr, i32(parent), true, export_prefix))
+    o_scope_info = data(o_scope_storage)
+    o_scopes.push(o_scope_storage.len() - 1)
+
+ow_scope_close = ():
+    o_scope_info[o_scopes.pop()].open = false
+
+ow_ht_slot = (k1: int, k2: int, k3: int) -> int:
+    h = (k1 * -7046029254386353131) xor (k2 * -4417276706812531889) xor (k3 * 1609587929392839161)
+    i = (h >> 29) & ht_mask
+    loop ht_entries[i].epoch == o_epoch:
+        if ht_entries[i].key1 == k1 and ht_entries[i].key2 == k2 and ht_entries[i].key3 == k3: return i
+        i = (i + 1) & ht_mask
+    i
+
+ow_ht_available = (i: int, gen: int, va: int, vb: int) -> int:
+    entry = &ht_entries[i]
+    if entry.epoch != o_epoch: return -1
+    scope = int(entry.scope)
+    loop not o_scope_info[scope].open:
+        # Every exit from this block passes its straight-line prefix. After
+        # any earlier branch the value might have been skipped, so discard it.
+        if not o_scope_info[scope].export_prefix or entry.branches != o_scope_info[scope].branches: return -1
+        scope = int(o_scope_info[scope].parent)
+        if scope < 0: return -1
+    if gen >= 0 and entry.generation != gen: return -1
+    if int(entry.version_a) != va or int(entry.version_b) != vb: return -1
+    int(entry.value)
+
+ow_mem_gen = (mode: int) -> int:
+    if opt_ir.raw_mem: return o_gen
+    if mode & 64 != 0: return o_genh
+    if mode & 32 != 0: return o_genf
+    o_gen
+
+ow_kill_mem = (mode: int):
+    if opt_ir.raw_mem: ow_kill_all()
+    else if mode & 64 != 0: o_genh += 1
+    else if mode & 32 != 0: o_genf += 1
+    else: o_gen += 1
+
+ow_kill_all = ():
+    o_gen += 1
+    o_genf += 1
+    o_genh += 1
+
+ow_ht_put_gen = (k1: int, k2: int, k3: int, v: int, gen: int, va: int, vb: int):
+    ow_ht_insert(ow_ht_slot(k1, k2, k3), k1, k2, k3, v, gen, va, vb)
+
+ow_load_key1 = (ty: int, mode: int, addr: int) -> int: 59 | (ty << 8) | ((mode & 4095) << 12) | (addr << 24)
+
+ow_ht_insert = (i: int, k1: int, k2: int, k3: int, v: int, gen: int, va: int, vb: int):
+    # The probe returns an index masked to the current table capacity.
+    scope = i32(o_scopes[o_scopes.len() - 1])
+    ht_entries[i] = AvailableValue(k1, k2, k3, i32(v), scope, o_nbr, gen, o_epoch, i32(va), i32(vb))
+
+
+# a value that is defined once and never read before its definition
+
+ow_stable = (v: int) -> bool: o_regs[v].stable
+
+# Available expressions have at most two register operands, always a then b.
+# Read their versions directly instead of filling the general operand buffer
+# for every expression. -1 means the instruction is not an available value.
+
+ow_push = (ins: *Ins):
+    d = ow_operands(ins)
+    if d >= 0: o_regs[d].ver += 1
+    loop k in [0..opt_use_count): o_regs[ow_use(k)].nuse += 1
+    control = (opt_decode[oc_tag(ins)] >> 20) & 15
+    if control >= 2 and control <= 11 or (control == 12 and ins.c == 1): ow_flow_emit(ins)
+    ow_append_plain(ins[0])
+
+# drop the last output instruction (an empty construct's opening)
+
+ow_pop = ():
+    ow_flow_pop()
+    o_count -= 1
+    ins = o_out[o_count]
+    if ins.op == .if_: o_regs[int(ins.a)].nuse -= 1
+
+ow_join_kill = (head0: int):
+    head = head0
+    loop head >= 0:
+        o_regs[o_join_regs[head]].ver += 1
+        head = o_join_next[head]
+
+ow_branch_copy = () -> int:
+    n = o_count
+    if n < 3 or o_out[n - 2].op != .mov: return -1
+    d = int(o_out[n - 2].dst)
+    if d < 0 or o_regs[d].ndef <= 1 or o_regs[d].repl != i32(d): return -1
+    i = n - 3
+    floor = max(0, n - 19)
+    loop i >= floor:
+        ins = o_out + i
+        op = ins.op
+        if op == .brif:
+            if ins.imm == 0: return d
+            return -1
+        if op == .block or op == .loop or op == .if_ or op == .else_ or op == .end or op == .br or op == .brtable or op == .ret or op == .trap or op == .zeroslots: return -1
+        if opt_decode[oc_tag(ins)] & 1 != 0 and ins.dst == i32(d): return -1
+        i -= 1
+    -1
+
+# v was computed by `op` from operands that still hold the same values here
+
+ow_def_is = (v: int, op: int) -> bool:
+    reg = &o_regs[v]
+    if not reg.stable or reg.dop != i32(op): return false
+    o_regs[int(reg.da)].ver == reg.dva and o_regs[int(reg.db)].ver == reg.dvb
+
+# Bounded expression queries use CSE's operand-version checks, so a changed
+# loop variable cannot lend an old range or rotate identity to its new value.
+
+ow_unsigned32 = (v: int, depth: int = 0) -> bool:
+    if ow_is_k(v): return o_regs[v].cval >= 0 and o_regs[v].cval <= 4294967295
+    if ow_def_is(v, 52) or ow_def_is(v, 51) or ow_def_is(v, 50) or ow_def_is(v, 102): return true
+    if depth >= 4: return false
+    if ow_def_is(v, 11): return ow_unsigned32(int(o_regs[v].da), depth + 1) or ow_unsigned32(int(o_regs[v].db), depth + 1)
+    if ow_def_is(v, 12) or ow_def_is(v, 13): return ow_unsigned32(int(o_regs[v].da), depth + 1) and ow_unsigned32(int(o_regs[v].db), depth + 1)
+    if ow_def_is(v, 16): return ow_unsigned32(int(o_regs[v].da), depth + 1)
+    false
+
+ow_unwrap32 = (v: int) -> int: if ow_def_is(v, 52): int(o_regs[v].da) else: v
+
+# A four-edge query only at shift/count consumers. CSE versions invalidate
+# stale operands; no function scan or new analysis state is needed.
+
+ow_small_count = (v: int, depth: int = 0) -> int:
+    if ow_is_k(v): return if o_regs[v].cval >= 0 and o_regs[v].cval <= 64: o_regs[v].cval else: -1
+    if depth >= 4: return -1
+    if ow_def_is(v, 11):
+        a = ow_small_count(int(o_regs[v].da), depth + 1)
+        b = ow_small_count(int(o_regs[v].db), depth + 1)
+        if a >= 0 and b >= 0: return min(a, b)
+        return max(a, b)
+    if ow_def_is(v, 5) and ow_is_k(int(o_regs[v].da)):
+        a = o_regs[int(o_regs[v].da)].cval
+        b = ow_small_count(int(o_regs[v].db), depth + 1)
+        if a >= 0 and a <= 64 and b >= 0 and b <= a: return a
+    -1
+
+ow_rotate32 = (ins: *Ins) -> bool:
+    if not opt_rotate32_ok: return false
+    value = int(ins.a)
+    if ins.op == .zext32 and ow_def_is(value, 12) or ins.op == .or_ and ow_unsigned32(int(ins.a)) and ow_unsigned32(int(ins.b)):
+        left = ow_unwrap32(if ins.op == .or_: int(ins.a) else: int(o_regs[value].da))
+        right = ow_unwrap32(if ins.op == .or_: int(ins.b) else: int(o_regs[value].db))
+        if ow_def_is(left, 16):
+            saved = left; left = right; right = saved
+        if ow_def_is(left, 14) and ow_def_is(right, 16):
+            lc = int(o_regs[left].db); rc = int(o_regs[right].db)
+            x = int(o_regs[right].da)
+            complementary = ow_is_k(lc) and ow_is_k(rc) and o_regs[lc].cval >= 0 and o_regs[lc].cval <= 32 and o_regs[lc].cval + o_regs[rc].cval == 32
+            if ow_def_is(rc, 5) and ow_is_k(int(o_regs[rc].da)) and o_regs[int(o_regs[rc].da)].cval == 32 and o_regs[rc].db == i32(lc):
+                limit = ow_small_count(lc)
+                complementary = limit >= 0 and limit <= 32
+            if ow_def_is(lc, 5) and ow_is_k(int(o_regs[lc].da)) and o_regs[int(o_regs[lc].da)].cval == 32 and o_regs[lc].db == i32(rc):
+                limit = ow_small_count(rc)
+                complementary = limit >= 0 and limit <= 32
+            if complementary and ow_unwrap32(int(o_regs[left].da)) == ow_unwrap32(x) and ow_unsigned32(x):
+                ins[0] = Ins(.rot32, 0, ins.dst, i32(ow_unwrap32(x)), i32(lc), 0, 0)
+                return true
+    if ins.op != .zext32: return false
+    # Duplication into both halves followed by a shift is the same rotation.
+    if ow_def_is(value, 16) and ow_is_k(int(o_regs[value].db)):
+        count = o_regs[int(o_regs[value].db)].cval
+        dup = int(o_regs[value].da)
+        if count <= 0 or count >= 32 or not ow_def_is(dup, 12): return false
+        x = int(o_regs[dup].da); shifted = int(o_regs[dup].db)
+        if ow_def_is(x, 14):
+            saved = x; x = shifted; shifted = saved
+        if ow_def_is(shifted, 14) and o_regs[shifted].da == i32(x) and ow_is_k(int(o_regs[shifted].db)) and o_regs[int(o_regs[shifted].db)].cval == 32 and ow_unsigned32(x):
+            rotation = ow_kconst(32 - count)
+            ins[0] = Ins(.rot32, 0, ins.dst, i32(x), i32(rotation), 0, 0)
+            return true
+    false
+
+ow_fits32 = (v: int) -> bool: v >= -2147483648 and v <= 2147483647
+
+ow_emit = (ins0: Ins):
+    opt_working[1] = ins0
+    ow_transfer(opt_working + 1, false)
+
+# Only single-definition values have facts. Direct indexing avoids hashing the
+# same condition at every branch; both truth values keep their own scope, just
+# as separate available-expression keys did.
+
+ow_fact_known = (c: int, truth: int) -> bool:
+    if not o_cse or not ow_stable(c) or o_regs[c].fact_epoch != o_epoch: return false
+    index = c * 2 + truth
+    scope = int(o_fact_scope[index])
+    if scope < 0: return false
+    loop not o_scope_info[scope].open:
+        if not o_scope_info[scope].export_prefix or o_fact_nbr[index] != o_scope_info[scope].branches: return false
+        scope = int(o_scope_info[scope].parent)
+        if scope < 0: return false
+    true
+
+ow_add_fact = (c: int, truth: int):
+    if not o_cse or not ow_stable(c): return
+    if o_regs[c].fact_epoch != o_epoch:
+        o_fact_scope[c * 2] = -1
+        o_fact_scope[c * 2 + 1] = -1
+        o_regs[c].fact_epoch = o_epoch
+    index = c * 2 + truth
+    o_fact_scope[index] = i32(o_scopes[o_scopes.len() - 1])
+    o_fact_nbr[index] = o_nbr
+
+ow_fact_false = (c: int) -> bool: ow_fact_known(c, 0)
+
+ow_add_fact_false = (c: int): ow_add_fact(c, 0)
+
+ow_fact_true = (c: int) -> bool: ow_fact_known(c, 1)
+
+ow_add_fact_true = (c: int): ow_add_fact(c, 1)
+
+# simplify one instruction, appending the result to o_out
+# One opcode-directed forward transfer. Only scalar arithmetic enters folding;
+# memory/call/vector/control operations go directly from rewriting to CSE/emission.
+# Replacement operations are revisited locally, never by a whole-function sweep.
+# The walk is O(input operations + emitted strength-reduction operations), apart
+# from the separately bounded copy-lifetime queries and CSE hash probes.
+
+ow_transfer = (ins: *Ins, simplify: bool):
+    loop simplify:
+        op = ins.op
+        kind = (opt_decode[oc_tag(ins)] >> 16) & 15
+        if kind == 0 or kind == 7:
+            ow_rewrite(ins)
+            if kind == 0: break
+        else if kind != 1:
+            ins.a = o_regs[int(ins.a)].repl
+            if kind >= 4: ins.b = o_regs[int(ins.b)].repl
+            if kind == 6: ins.c = o_regs[int(ins.c)].repl
+        # Inlining and store forwarding can expose the address behind a closure
+        # invocation. A stable function address uses the ordinary direct-call ABI.
+        if kind == 7:
+            fp = int(ins.c)
+            at = int(o_regs[fp].defpos)
+            if ow_stable(fp) and at >= 0 and opt_ir.code[at].op == .faddr:
+                ins.op = .call
+                ins.imm = opt_ir.code[at].imm
+                ins.c = 0
+                op = .call
+            break
+        d = int(ins.dst)
+        a = int(ins.a)
+        bb = int(ins.b)
+        if kind == 5:
+            if op == .checked_sub and ow_is_k(a) and o_regs[a].cval >= 0 and o_regs[a].cval <= 64:
+                limit = ow_small_count(bb)
+                if limit >= 0 and limit <= o_regs[a].cval:
+                    ins[0] = Ins(.sub, 0, i32(d), i32(a), i32(bb), 0, 0)
+                    continue
+            raw = if op == .checked_add: Op.add else if op == .checked_sub: Op.sub else: Op.mul
+            if ow_is_k(a) and ow_is_k(bb):
+                operation = if op == .checked_add: 0 else if op == .checked_sub: 1 else: 2
+                overflow = false
+                if int(ins.c) & 1 != 0:
+                    av = u64(o_regs[a].cval); bv = u64(o_regs[bb].cval)
+                    overflow = if operation == 0: av + bv < av else if operation == 1: av < bv else: bv != 0 and av > u64(18446744073709551615) / bv
+                else: overflow = ow_word_overflow(operation, o_regs[a].cval, o_regs[bb].cval)
+                if int(ins.c) & 32 != 0:
+                    folded, value = ow_fold(raw, o_regs[a].cval, o_regs[bb].cval)
+                    overflow = overflow or (if int(ins.c) & 1 != 0: value < 0 or value > 4294967295 else: value < -2147483648 or value > 2147483647)
+                if overflow:
+                    # A reachable store still fails at runtime under the default
+                    # policy, even when inlining exposes constant operands.
+                    break
+                ok, value = ow_fold(raw, o_regs[a].cval, o_regs[bb].cval)
+                ins[0] = Ins(.iconst, 0, i32(d), 0, 0, 0, value)
+                continue
+            if ow_is_k(bb) and ((raw != .mul and o_regs[bb].cval == 0) or (raw == .mul and (o_regs[bb].cval == 0 or o_regs[bb].cval == 1))):
+                ins.op = raw
+                continue
+            break
+        if kind == 1:
+            if ow_stable(d):
+                o_regs[d].constant = true
+                o_regs[d].cval = ins.imm
+            break
+        if kind == 2:
+            if ow_can_alias(d, a):
+                o_regs[d].repl = i32(a)
+                if o_regs[a].constant:
+                    o_regs[d].constant = true
+                    o_regs[d].cval = o_regs[a].cval
+                return
+            if ow_is_k(a) and ow_vtype(d) == 0:
+                ins[0] = Ins(.iconst, 0, i32(d), 0, 0, 0, o_regs[a].cval)
+                break
+            break
+        if int(ins.ty) != 0 or d < 0:
+            break
+        # Inlining can make a previously dynamic scalar choice constant. Its
+        # inputs were already evaluated, so replacing the selection by a move
+        # preserves their effects; ordinary dead-code removal handles pure inputs.
+        if kind == 6:
+            if bb == int(ins.c) or ow_is_k(a) or ow_fact_true(a) or ow_fact_false(a):
+                yes = bb == int(ins.c) or (ow_is_k(a) and o_regs[a].cval != 0) or ow_fact_true(a)
+                value = if yes: bb else: int(ins.c)
+                ins[0] = Ins(.mov, 0, i32(d), i32(value), 0, 0, 0)
+                continue
+            break
+        # Comparisons already produce a canonical boolean. Inlined bool
+        # returns otherwise leave an ABI extension between compare and branch.
+        if op == .zext8 and ow_stable(a) and (o_regs[a].dop == i32(95) or o_regs[a].dop == i32(103) or ow_boolean_tag(int(o_regs[a].dop))):
+            ins[0] = Ins(.mov, 0, i32(d), i32(a), 0, 0, 0)
+            continue
+        if op == .zext32:
+            if ow_rotate32(ins): continue
+            if ow_unsigned32(a):
+                ins[0] = Ins(.mov, 0, i32(d), i32(a), 0, 0, 0)
+                continue
+        # unary integer ops
+        if kind == 3:
+            if ow_is_k(a):
+                ok, v = ow_fold_un(op, o_regs[a].cval)
+                if ok:
+                    ins[0] = Ins(.iconst, 0, i32(d), 0, 0, 0, v)
+                    continue
+            break
+        # binary integer ops
+        if op == .or_ and ow_rotate32(ins): continue
+        if op == .shru and ow_is_k(bb) and o_regs[bb].cval == 6:
+            limit = ow_small_count(a)
+            if limit >= 0 and limit < 64:
+                ins[0] = Ins(.iconst, 0, i32(d), 0, 0, 0, 0)
+                continue
+        if ow_is_k(a) and ow_is_k(bb):
+            ok, v = ow_fold(op, o_regs[a].cval, o_regs[bb].cval)
+            if ok:
+                ins[0] = Ins(.iconst, 0, i32(d), 0, 0, 0, v)
+                continue
+        if ow_is_k(a) and not ow_is_k(bb):
+            if ow_commutes(op):
+                ins.a = i32(bb)
+                ins.b = i32(a)
+            else if ow_mirror(op) != op:
+                ins.op = ow_mirror(op)
+                ins.a = i32(bb)
+                ins.b = i32(a)
+            op = ins.op
+            a = int(ins.a)
+            bb = int(ins.b)
+        if not ow_is_k(bb):
+            break
+        k = o_regs[bb].cval
+        # A nonnegative constant mask bounds its result in [0, mask]. Relational
+        # comparisons are monotone on that interval, in both signed and unsigned
+        # order. Equal endpoints prove the whole comparison; equality is excluded.
+        if op == .lts or op == .les or op == .gts or op == .ges or op == .ltu or op == .leu or op == .gtu or op == .geu:
+            if ow_def_is(a, 11) and ow_is_k(int(o_regs[a].db)):
+                limit = o_regs[int(o_regs[a].db)].cval
+                if limit >= 0:
+                    lo = ow_fold(op, 0, k)
+                    hi = ow_fold(op, limit, k)
+                    if lo.1 == hi.1:
+                        ins[0] = Ins(.iconst, 0, i32(d), 0, 0, 0, lo.1)
+                        continue
+        # identities: result is a
+        if (k == 0 and (op == .add or op == .sub or op == .or_ or op == .xor or op == .shl or op == .shrs or op == .shru)) or (k == 1 and (op == .mul or op == .divs or op == .divu)):
+            ins[0] = Ins(.mov, 0, i32(d), i32(a), 0, 0, 0)
+            continue
+        if op == .and_ and k == -1:
+            ins[0] = Ins(.mov, 0, i32(d), i32(a), 0, 0, 0)
+            continue
+        if k == 0 and (op == .mul or op == .and_):
+            ins[0] = Ins(.iconst, 0, i32(d), 0, 0, 0, 0)
+            continue
+        if op == .add and ow_def_is(a, 4) and o_regs[int(o_regs[a].db)].constant:
+            ow_bin(.add, d, int(o_regs[a].da), ow_kconst(k + o_regs[int(o_regs[a].db)].cval))
+            return
+        sh = ow_log2_exact(k)
+        if sh > 0:
+            if op == .mul:
+                ow_bin(.shl, d, a, ow_kconst(sh))
+                return
+            if op == .divu:
+                ow_bin(.shru, d, a, ow_kconst(sh))
+                return
+            if op == .remu:
+                ow_bin(.and_, d, a, ow_kconst(k - 1))
+                return
+            if op == .divs or op == .rems:
+                # round toward zero: add (2^sh - 1) to negative dividends before shifting
+                t1 = ow_bin(.shrs, ow_tmp(), a, ow_kconst(63))
+                t2 = ow_bin(.shru, ow_tmp(), t1, ow_kconst(64 - sh))
+                t3 = ow_bin(.add, ow_tmp(), a, t2)
+                if op == .divs:
+                    ow_bin(.shrs, d, t3, ow_kconst(sh))
+                else:
+                    t4 = ow_bin(.and_, ow_tmp(), t3, ow_kconst(-k))
+                    ow_bin(.sub, d, a, t4)
+                return
+        if (op == .divs or op == .rems) and k > 1 and sh <= 0 and opt_mulh_ok:
+            # by any other constant: a multiply by a "magic" number, its high half, a shift, and a
+            # one added to negative dividends (Hacker's Delight 10-1), as C compilers do
+            mag, s = ow_div_magic(k)
+            q = ow_bin(.mulhs, ow_tmp(), a, ow_kconst(mag))
+            if mag < 0: q = ow_bin(.add, ow_tmp(), q, a)
+            if s > 0: q = ow_bin(.shrs, ow_tmp(), q, ow_kconst(s))
+            neg = ow_bin(.shru, ow_tmp(), a, ow_kconst(63))
+            if op == .divs:
+                ow_bin(.add, d, q, neg)
+            else:
+                qq = ow_bin(.add, ow_tmp(), q, neg)
+                t = ow_bin(.mul, ow_tmp(), qq, ow_kconst(k))
+                ow_bin(.sub, d, a, t)
+            return
+        if (op == .divu or op == .remu) and k > 1 and sh <= 0 and opt_mulh_ok:
+            # unsigned: the high half of a multiply by a magic number, and a shift (with an add when
+            # the number needs 65 bits: Hacker's Delight 10-8)
+            mag, s, add = ow_divu_magic(u64(k))
+            # (the last step writes the quotient straight into d, as the signed one does)
+            qd = d
+            if op == .remu: qd = ow_tmp()
+            t = ow_bin(.mulhu, ow_tmp(), a, ow_kconst(int(mag)))
+            if add:
+                q1 = ow_bin(.sub, ow_tmp(), a, t)
+                q2 = ow_bin(.shru, ow_tmp(), q1, ow_kconst(1))
+                if s > 1:
+                    q3 = ow_bin(.add, ow_tmp(), q2, t)
+                    ow_bin(.shru, qd, q3, ow_kconst(s - 1))
+                else: ow_bin(.add, qd, q2, t)
+            else:
+                ow_bin(.shru, qd, t, ow_kconst(s))
+            if op == .remu:
+                q = int(o_regs[qd].repl)
+                m = ow_bin(.mul, ow_tmp(), q, ow_kconst(k))
+                ow_bin(.sub, d, a, m)
+            return
+        break
+    op = ins.op
+    if op == .br or op == .brif or op == .brtable: o_nbr += 1
+    if o_cse and (op == .load or op == .store):
+        # fold constant offsets into the access: [x + k + imm]
+        a = int(ins.a)
+        loop ow_def_is(a, 4) and o_regs[int(o_regs[a].db)].constant and ow_fits32(ins.imm + o_regs[int(o_regs[a].db)].cval):
+            ins.imm += o_regs[int(o_regs[a].db)].cval
+            a = int(o_regs[a].da)
+        # [base + index << scale + imm] (x86 addressing; wasm computes it)
+        if int(ins.c) & 128 == 0 and ow_def_is(a, 4) and not o_regs[int(o_regs[a].db)].constant and not o_regs[int(o_regs[a].da)].constant:
+            base = int(o_regs[a].da)
+            idx = int(o_regs[a].db)
+            scale = 0
+            if ow_def_is(idx, 14) and o_regs[int(o_regs[idx].db)].constant and o_regs[int(o_regs[idx].db)].cval <= 3 and o_regs[int(o_regs[idx].db)].cval >= 0:
+                scale = o_regs[int(o_regs[idx].db)].cval
+                idx = int(o_regs[idx].da)
+            loop ow_def_is(base, 4) and o_regs[int(o_regs[base].db)].constant and ow_fits32(ins.imm + o_regs[int(o_regs[base].db)].cval):
+                ins.imm += o_regs[int(o_regs[base].db)].cval
+                base = int(o_regs[base].da)
+            a = base
+            ins.c = i32(int(ins.c) | 128 | (scale << 8))
+            if op == .store: ins.dst = i32(idx)
+            else: ins.b = i32(idx)
+        ins.a = i32(a)
+    if o_cse:
+        arity = ow_arity(oc_tag(ins), int(ins.c))
+        if arity >= 0:
+            d = int(ins.dst)
+            reg = &o_regs[d]
+            va = 0
+            vb = 0
+            if arity > 0: va = int(o_regs[int(ins.a)].ver)
+            if arity > 1: vb = int(o_regs[int(ins.b)].ver)
+            k1 = oc_tag(ins) | (int(ins.ty) << 8) | ((int(ins.c) & 4095) << 12) | (int(ins.a) << 24)
+            k2 = int(ins.b)
+            k3 = ins.imm
+            gen = -1
+            if op == .load: gen = ow_mem_gen(int(ins.c))
+            slot = ow_ht_slot(k1, k2, k3)
+            e = ow_ht_available(slot, gen, va, vb)
+            if e >= 0 and ow_vtype(e) == ow_vtype(d):
+                if reg.stable:
+                    reg.repl = i32(e)
+                    if o_regs[e].constant:
+                        reg.constant = true
+                        reg.cval = o_regs[e].cval
+                    return
+                reg.ver += 1
+                o_regs[e].nuse += 1
+                ow_append_plain(Ins(.mov, i32(ow_vtype(d)), i32(d), i32(e), 0, 0, 0))
+                return
+            if reg.stable:
+                ow_ht_insert(slot, k1, k2, k3, d, gen, va, vb)
+                reg.dop = i32(oc_tag(ins))
+                reg.da = ins.a
+                reg.db = ins.b
+                reg.dva = o_regs[int(ins.a)].ver
+                reg.dvb = o_regs[int(ins.b)].ver
+            # CSE already decoded these operands. Account for the surviving
+            # operation here instead of decoding it again through o_push.
+            reg.ver += 1
+            if arity > 0: o_regs[int(ins.a)].nuse += 1
+            if arity > 1: o_regs[int(ins.b)].nuse += 1
+            ow_append_plain(ins[0])
+            return
+        else if op == .store:
+            mode = int(ins.c)
+            ow_kill_mem(mode)
+            # store-to-load forwarding for full-width values
+            a = int(ins.a)
+            v = int(ins.b)
+            ix = 0
+            vix = 0
+            if mode & 128 != 0:
+                ix = int(ins.dst)
+                vix = int(o_regs[ix].ver)
+            if (mode & 15 == 8 or mode & 32 != 0) and ow_stable(v):
+                ow_ht_put_gen(ow_load_key1(int(ins.ty), mode, a), ix, ins.imm, v, ow_mem_gen(mode), int(o_regs[a].ver), vix)
+            o_regs[a].nuse += 1
+            o_regs[v].nuse += 1
+            if mode & 128 != 0: o_regs[ix].nuse += 1
+            ow_append_plain(ins[0])
+            return
+        else if op == .assume:
+            a = int(ins.a)
+            if ins.imm == 1:
+                k = ow_kconst(1)
+                ow_ht_put_gen(ow_load_key1(0, 8 | 64, a), 0, 0, k, ow_mem_gen(8 | 64), int(o_regs[a].ver), 0)
+            return
+        else if opt_decode[oc_tag(ins)] & 4 != 0 and not (op == .call and ins.c == 1): ow_kill_all()
+    # Record the boolean result without making raw-memory reads available
+    # expressions: subsequent stores must still perform a new comparison.
+    if (op == .memeq or op == .streq) and ow_stable(int(ins.dst)): o_regs[int(ins.dst)].dop = i32(oc_tag(ins))
+    ow_push(ins)
+
+# the magic number, shift and whether an add is needed, for dividing an unsigned 64-bit integer
+# by d (d >= 2) (Hacker's Delight 10-2)
+
+ow_divu_magic = (d: u64) -> (u64, int, bool):
+    two63: u64 = 0x8000000000000000
+    max63: u64 = 0x7FFFFFFFFFFFFFFF
+    add = false
+    nc = (u64(0) - 1) - (u64(0) - d) % d
+    p = 63
+    q1 = two63 / nc
+    r1 = two63 - q1 * nc
+    q2 = max63 / d
+    r2 = max63 - q2 * d
+    loop true:
+        p += 1
+        if r1 >= nc - r1:
+            q1 = q1 * 2 + 1
+            r1 = r1 * 2 - nc
+        else:
+            q1 = q1 * 2
+            r1 = r1 * 2
+        if r2 + 1 >= d - r2:
+            if q2 >= max63: add = true
+            q2 = q2 * 2 + 1
+            r2 = r2 * 2 + 1 - d
+        else:
+            if q2 >= two63: add = true
+            q2 = q2 * 2
+            r2 = r2 * 2 + 1
+        delta = d - 1 - r2
+        if not (p < 128 and (q1 < delta or (q1 == delta and r1 == 0))): break
+    (q2 + 1, p - 64, add)
+
+# the magic number and shift for dividing a signed 64-bit integer by d (d >= 2): q = mulhs(n, m)
+# (+ n when m < 0) >> s, plus 1 when n < 0
+
+ow_div_magic = (d: int) -> (int, int):
+    two63: u64 = 0x8000000000000000
+    ad = u64(d)
+    t = two63
+    anc = t - 1 - t % ad
+    p = 63
+    q1 = two63 / anc
+    r1 = two63 - q1 * anc
+    q2 = two63 / ad
+    r2 = two63 - q2 * ad
+    loop true:
+        p += 1
+        q1 = q1 * 2
+        r1 = r1 * 2
+        if r1 >= anc:
+            q1 += 1
+            r1 -= anc
+        q2 = q2 * 2
+        r2 = r2 * 2
+        if r2 >= ad:
+            q2 += 1
+            r2 -= ad
+        delta = ad - r2
+        if not (q1 < delta or (q1 == delta and r1 == 0)): break
+    (int(q2 + 1), p - 64)
+
+# Forward whole-slot copies through dead intermediates after inlining. A
+# temporary must have one address definition and exactly two uses: the incoming
+# and outgoing copies. No derived address, call, or later observer can exist.
+# Both endpoints are distinct stack slots and no write/control boundary may
+# intervene, so the source still contains the snapshot the second copy needs.
+# Larger records benefit without adding scalar lanes or register pressure.
+
+ow_enter_loop = ():
+    l = lp_next
+    lp_next += 1
+    loop k in [lp_first[l]..lp_limit[l]): o_regs[lp_defs[k]].ver += 1
+    k = lp_kills[l]
+    if k & 1 != 0 or opt_ir.raw_mem: o_gen += 1
+    if k & 2 != 0 or opt_ir.raw_mem: o_genf += 1
+    if k & 4 != 0 or opt_ir.raw_mem: o_genh += 1
+
+# Input metadata is O(N + U): each operation and operand use is visited once.
+
+ow_input_use = (v: int, pos: int):
+    if o_regs[v].first > pos: o_regs[v].first = i32(pos)
+    o_input_last[v] = i32(pos)
+
+opt_rewrite = ():
+    # The outer transfer uses slot 0. Strength reduction uses slot 1 with
+    # simplification disabled, so a nested transfer never needs a third slot.
+    nv = opt_ir.vtypes.len()
+    loop p in [0..opt_ir.nparams):
+        o_regs[p].ndef += 1
+        o_regs[p].stable = true
+        o_regs[p].defpos = -1
+    # constant vregs: one canonical vreg per value
+    o_kmap.clear()
+    loop v in [0..opt_ir.kval.len()):
+        if ow_is_kv(v):
+            o_regs[v].ndef += 1
+            o_regs[v].stable = true
+            o_regs[v].constant = true
+            o_regs[v].cval = opt_ir.kval[v]
+            if let c = o_kmap.get(opt_ir.kval[v]): o_regs[v].repl = i32(c)
+            else: o_kmap[opt_ir.kval[v]] = v
+    o_lastuse.resize(nv)
+    o_input_last = data(o_lastuse)
+    loop v in [0..nv): o_lastuse[v] = -1
+    o_depth.resize(opt_ir.code.len())
+    depths = data(o_depth)
+    depth = 0
+    # (and what each loop defines and stores to, in the same walk)
+    lp_defs.clear()
+    lp_first.clear()
+    lp_limit.clear()
+    lp_parent.clear()
+    lp_kills.clear()
+    lp_open.clear()
+    lp_next = 0
+    active = -1
+    # One dispatch supplies operand uses, structured-loop facts, definitions,
+    # and memory invalidation. Do not reconstruct a general operand view and
+    # redispatch the same operation separately for each consumer.
+    input = data(opt_ir.code)
+    opt_input = input
+    working = opt_working
+    loop pos in [0..opt_ir.code.len()):
+        ins = input + pos
+        op = ins.op
+        a = int(ins.a)
+        b = int(ins.b)
+        d = int(ins.dst)
+        kill = 0
+        depths[pos] = i32(depth)
+        match op:
+            end:
+                depth -= 1
+                depths[pos] = i32(depth)
+                l = lp_open.pop()
+                if l >= 0:
+                    lp_limit[l] = lp_defs.len()
+                    active = lp_parent[l]
+                    if active >= 0: lp_kills[active] = lp_kills[active] | lp_kills[l]
+                d = -1
+            block, loop, if_:
+                depth += 1
+                if op == .loop:
+                    l = lp_first.len()
+                    lp_open.push(l)
+                    lp_first.push(lp_defs.len())
+                    lp_limit.push(-1)
+                    lp_parent.push(active)
+                    lp_kills.push(0)
+                    active = l
+                else: lp_open.push(-1)
+                if op == .if_: ow_input_use(a, pos)
+                d = -1
+            nop, else_, br, trap, vzu: d = -1
+            iconst, fconst, slot, gaddr, daddr, faddr: pass
+            intr, call, syscall, calli, callc:
+                loop k in [a..a + b): ow_input_use(int(opt_ir.args[k]), pos)
+                if op == .calli or op == .callc: ow_input_use(int(ins.c), pos)
+                if op != .call or ins.c != 1: kill = 7
+            ret:
+                if a >= 0: ow_input_use(a, pos)
+                d = -1
+            brif, brtable, assume:
+                ow_input_use(a, pos)
+                d = -1
+            zero:
+                ow_input_use(a, pos)
+                d = -1
+                kill = 7
+            store, vst:
+                ow_input_use(a, pos)
+                ow_input_use(b, pos)
+                if op == .vst or int(ins.c) & 128 != 0: ow_input_use(d, pos)
+                if op == .store:
+                    m = int(ins.c)
+                    if opt_ir.raw_mem: kill = 7
+                    else if m & 64 != 0: kill = 4
+                    else if m & 32 != 0: kill = 2
+                    else: kill = 1
+                d = -1
+            copy:
+                ow_input_use(a, pos)
+                ow_input_use(b, pos)
+                d = -1
+                kill = 7
+            memcpy, memset, vop:
+                ow_input_use(a, pos)
+                ow_input_use(b, pos)
+                ow_input_use(int(ins.c), pos)
+                d = -1
+                kill = 7
+            select, memeq, findbyte, scanbytes, findb:
+                ow_input_use(a, pos)
+                ow_input_use(b, pos)
+                ow_input_use(int(ins.c), pos)
+            load:
+                ow_input_use(a, pos)
+                if int(ins.c) & 128 != 0: ow_input_use(b, pos)
+            mov, neg, not_, fneg, fsqrt, fabs, ffloor, fceil, ftrunc, sext8, sext16, sext32, zext8, zext16, zext32, i2f, u2f, f2i, f2f, bits2f, f2bits, vsplat:
+                ow_input_use(a, pos)
+            zeroslots:
+                loop k in [a..a + b):
+                    item = int(opt_ir.args[k])
+                    if item & 1 == 1:
+                        o_regs[item >> 1].ndef += 2
+                        o_regs[item >> 1].stable = false
+                        if active >= 0: lp_defs.push(item >> 1)
+                d = -1
+                kill = 7
+            _:
+                ow_input_use(a, pos)
+                ow_input_use(b, pos)
+        if d >= 0:
+            if opt_ir.slot_size.len() == 0:
+                o_regs[d].ndef += 1
+            o_regs[d].defpos = i32(pos)
+            o_regs[d].stable = o_regs[d].ndef == 1 and o_regs[d].first > pos
+            if active >= 0: lp_defs.push(d)
+        if kill != 0 and active >= 0: lp_kills[active] = lp_kills[active] | kill
+    # forward: fold, propagate copies, eliminate common subexpressions, drop dead branches
+    o_count = 0
+    if o_capacity < opt_ir.code.len():
+        o_capacity = opt_ir.code.len()
+        o_out_storage.resize(o_capacity)
+        o_out = data(o_out_storage)
+    ow_flow_begin()
+    o_cse = true
+    ow_ht_setup(opt_ir.code.len() + 16)
+    # 0 normal, 1 if(true), 2 if(false), 3 block; keep each control's facts together.
+    ctl: OptControl[]
+    o_join_regs.clear()
+    o_join_next.clear()
+    skip = 0           # nesting depth inside a dead branch
+    loop pos in [0..opt_ir.code.len()):
+        working[0] = input[pos]
+        ins = working
+        op = ins.op
+        if skip > 0:
+            if op == .block or op == .loop or op == .if_: skip += 1
+            if op == .loop: lp_next += 1
+            else if op == .else_ and skip == 1 and ctl[ctl.len() - 1].kind == 2:
+                skip = 0
+                ow_scope_open()
+            else if op == .end:
+                skip -= 1
+                if skip == 0:
+                    frame = ctl.pop()
+                    ow_join_kill(frame.deferred)
+                    lop = o_out[o_count - 1].op
+                    if lop == .block or lop == .if_: ow_pop()
+                    else: ow_append(ins[0])
+            continue
+        if opt_decode[oc_tag(ins)] & (1 << 24) == 0:
+            ow_transfer(ins, true)
+            continue
+        if op == .nop: continue
+        if op == .block or op == .loop:
+            if op == .loop: ow_enter_loop()
+            kind = 0
+            if op == .block: kind = 3
+            ctl.push(OptControl(kind, -1, o_nbr))
+            ow_scope_open(op == .block)
+            ow_append(ins[0])
+            continue
+        if op == .if_:
+            c = int(o_regs[int(ins.a)].repl)
+            known = o_regs[c].constant or ow_fact_false(c) or ow_fact_true(c)
+            if known:
+                # the if becomes a plain block so branch depths inside stay valid
+                ow_append(Ins(.block, 0, 0, 0, 0, 0, 0))
+                if (o_regs[c].constant and o_regs[c].cval != 0) or ow_fact_true(c):
+                    ctl.push(OptControl(1, -1, o_nbr))
+                    ow_scope_open()
+                else:
+                    ctl.push(OptControl(2, -1, o_nbr))
+                    skip = 1
+                continue
+            ctl.push(OptControl(0, c, o_nbr))
+            ow_scope_open()
+            ow_add_fact_true(c)
+            ins2 = ins[0]
+            ins2.a = i32(c)
+            o_regs[c].nuse += 1
+            ow_append(ins2)
+            continue
+        if op == .else_:
+            c = ctl[ctl.len() - 1].condition
+            ctl[ctl.len() - 1].condition = -1
+            ow_scope_close()
+            if ctl[ctl.len() - 1].kind == 1:
+                skip = 1
+                continue
+            ow_scope_open()
+            if c >= 0: ow_add_fact_false(c)
+            ow_append(ins[0])
+            continue
+        if op == .end:
+            # A terminating if arm leaves its condition false. For a block with exactly
+            # one conditional exit and a terminating tail, only that taken exit reaches
+            # the join. Count all branches conservatively, including nested breaks.
+            frame = ctl.pop()
+            c = frame.condition
+            nbr = frame.branches
+            kind = frame.kind
+            ow_join_kill(frame.deferred)
+            last = o_out[o_count - 1]
+            if kind == 3 and c >= 0 and nbr + 2 == o_nbr and last.op == .br and last.imm > 0:
+                target = ctl.len() - int(last.imm)
+                if target >= 0:
+                    d = ow_branch_copy()
+                    if d >= 0:
+                        o_regs[d].ver -= 1
+                        o_join_regs.push(d)
+                        o_join_next.push(ctl[target].deferred)
+                        ctl[target].deferred = o_join_regs.len() - 1
+            terminates = last.op == .ret or last.op == .trap or (last.op == .call and last.c == 1)
+            noret = c >= 0 and terminates
+            ow_scope_close()
+            if last.op == .block or last.op == .if_:
+                # empty construct: drop it (an if's condition is pure)
+                ow_pop()
+                continue
+            ow_append(ins[0])
+            if noret:
+                if kind == 3 and nbr + 1 == o_nbr: ow_add_fact_true(c)
+                else if kind == 0 and nbr == o_nbr: ow_add_fact_false(c)
+            continue
+        if op == .brif:
+            # a branch on a known condition: always or never taken
+            c = int(o_regs[int(ins.a)].repl)
+            if o_regs[c].constant or ow_fact_false(c) or ow_fact_true(c):
+                if (o_regs[c].constant and o_regs[c].cval != 0) or ow_fact_true(c): ow_emit(Ins(.br, 0, 0, 0, 0, 0, ins.imm))
+                continue
+            # Remember an exit's condition for a possible terminating block. Multiple
+            # exits (even with the same condition) fail the branch-count check at its end.
+            target = ctl.len() - 1 - int(ins.imm)
+            if target >= 0 and ctl[target].kind == 3: ctl[target].condition = c
+            # (after it, in this construct, the condition is false)
+            ow_transfer(ins, true)
+            ow_add_fact_false(c)
+            continue
+        if op == .zeroslots:
+            ow_kill_all()
+            loop k in [0..int(ins.b)):
+                item = int(opt_ir.args[int(ins.a) + k])
+                if item & 1 == 1: o_regs[item >> 1].ver += 1
+            ow_append_plain(ins[0])
+            continue
+        ow_transfer(ins, true)
+    if o_flow_dead: ow_flow_end_dead()
+    # backward: drop pure instructions whose results are unused (o_push counted the uses)
+    i = o_count - 1
+    loop i >= 0:
+        ins = o_out + i
+        if opt_decode[oc_tag(ins)] & 2 != 0:
+            d = int(ins.dst)
+            if o_regs[d].nuse == 0:
+                ow_operands(ins)
+                o_out[i].op = .nop
+                loop operand_index in [0..opt_use_count):
+                    let u = ow_use(operand_index)
+                    o_regs[u].nuse -= 1
+        i -= 1
+    opt_ir.code = opt_cleanup(o_out, o_count)

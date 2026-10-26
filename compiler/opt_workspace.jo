@@ -1,0 +1,121 @@
+use 'ir_types.dewy'
+
+struct OptReg:
+    ndef: i32                   # static definitions (params count as one)
+    stable: bool                # single definition preceding every use
+    defpos: i32 = -1             # last definition position
+    first: i32 = 2147483647      # first use position
+    nuse: i32
+    constant: bool              # single-def integer constant
+    cval: int
+    repl: i32                   # copy propagation's replacement vreg
+    ver: i32                    # definitions emitted (CSE validity)
+    dop: i32 = -1               # defining op of a stable value
+    da: i32
+    db: i32
+    dva: i32                    # operand versions at that definition
+    dvb: i32
+    fact_epoch: int
+
+struct OptFlow:
+    kind: Op
+    parent: int
+    start: int
+    exit: bool
+    terminated: bool
+
+struct AvailableValue:
+    key1: int
+    key2: int
+    key3: int
+    value: i32
+    scope: i32
+    branches: int
+    generation: int
+    epoch: int
+    version_a: i32
+    version_b: i32
+
+struct OptScope:
+    branches: int
+    parent: i32
+    open: bool
+    export_prefix: bool
+
+struct OptControl:
+    kind: int
+    condition: int
+    branches: int
+    deferred: int = -1
+
+# One non-reentrant optimizer workspace, with independent globals so a scalar
+# update does not invalidate unrelated arena views in the compiler's alias model.
+# Raw views start empty and are bound before use; growth refreshes them. Never
+# retain an entry pointer across register creation or output growth. The two
+# instruction slots and operand tuple have fixed storage, borrowed at pass entry.
+o_reg_storage: OptReg[]
+o_regs: *OptReg
+o_reg_count: int = 0
+o_fact_scope: i32[]
+o_fact_nbr: int[]
+o_out_storage: Ins[]
+o_out: *Ins
+o_count: int = 0
+o_capacity: int = 0
+o_flow_storage: OptFlow[]
+o_flow: *OptFlow
+o_flow_at_storage: i32[]
+o_flow_at: *i32
+o_flow_count: int = 0
+o_flow_top: int = -1
+o_flow_level: int = -1
+o_flow_open_storage: i32[]
+o_flow_open: *i32
+o_flow_dead: bool = false
+o_flow_depth: int = 0
+o_dead_start: int = 0
+o_dead_first: int[]
+o_dead_limit: int[]
+o_kmap: {int: int} = {}
+o_lastuse: i32[]
+o_depth: i32[]
+ht_storage: AvailableValue[]
+ht_entries: *AvailableValue
+ht_mask: int = 0
+o_epoch: int = 0
+o_gen: int = 0
+o_genf: int = 0
+o_genh: int = 0
+o_scope_storage: OptScope[]
+o_scope_info: *OptScope
+o_scopes: int[]
+o_cse: bool = false
+o_nbr: int = 0
+o_join_regs: int[]
+o_join_next: int[]
+lp_defs: int[]
+lp_first: int[]
+lp_limit: int[]
+lp_parent: int[]
+lp_kills: int[]
+lp_next: int = 0
+lp_open: int[]
+o_input_last: *i32
+opt_decode: *int
+opt_operands: *int
+opt_checked_flags: bool
+opt_rotate32_ok: bool
+opt_mulh_ok: bool
+opt_kc_val: *int
+opt_kc_reg: *int
+opt_kc_epoch: *int
+opt_kc_fn: int
+opt_input: *Ins
+opt_working_storage: (Ins, Ins)
+opt_working: *Ins
+opt_use_count: int
+opt_use_span: int
+opt_use_span_count: int
+opt_use_tuple: (int, int, int)
+opt_use_values: *int
+opt_ir: *IrFn

@@ -1,0 +1,126 @@
+from p"ir_types.dewy" import (Op Ins IrFn)
+
+OptReg:type=[
+    ndef:int32
+    stable:bool
+    defpos:int32=-1
+    first:int32=2147483647
+    nuse:int32
+    constant:bool
+    cval:int64
+    repl:int32
+    ver:int32
+    dop:int32=-1
+    da:int32
+    db:int32
+    dva:int32
+    dvb:int32
+    fact_epoch:int64
+]
+
+OptFlow:type=[
+    kind:Op
+    parent:int64
+    start:int64
+    exit:bool
+    terminated:bool
+]
+
+AvailableValue:type=[
+    key1:int64
+    key2:int64
+    key3:int64
+    value:int32
+    scope:int32
+    branches:int64
+    generation:int64
+    epoch:int64
+    version_a:int32
+    version_b:int32
+]
+
+OptScope:type=[
+    branches:int64
+    parent:int32
+    open:bool
+    export_prefix:bool
+]
+
+OptControl:type=[
+    kind:int64
+    condition:int64
+    branches:int64
+    deferred:int64=-1
+]
+
+# One non-reentrant optimizer workspace, with independent globals so a scalar
+# update does not invalidate unrelated arena views in the compiler's alias model.
+# Raw views start empty and are bound before use; growth refreshes them. Never
+# retain an entry pointer across register creation or output growth. The two
+# instruction slots and operand tuple have fixed storage, borrowed at pass entry.
+let o_reg_storage:array<OptReg>=[]
+let o_regs:ptr<OptReg>=$unsafe (uint64(0) as ptr<OptReg>)
+let o_reg_count:int64=0
+let o_fact_scope:array<int32>=[]
+let o_fact_nbr:array<int64>=[]
+let o_out_storage:array<Ins>=[]
+let o_out:ptr<Ins>=$unsafe (uint64(0) as ptr<Ins>)
+let o_count:int64=0
+let o_capacity:int64=0
+let o_flow_storage:array<OptFlow>=[]
+let o_flow:ptr<OptFlow>=$unsafe (uint64(0) as ptr<OptFlow>)
+let o_flow_at_storage:array<int32>=[]
+let o_flow_at:ptr<int32>=$unsafe (uint64(0) as ptr<int32>)
+let o_flow_count:int64=0
+let o_flow_top:int64=-1
+let o_flow_level:int64=-1
+let o_flow_open_storage:array<int32>=[]
+let o_flow_open:ptr<int32>=$unsafe (uint64(0) as ptr<int32>)
+let o_flow_dead:bool=false
+let o_flow_depth:int64=0
+let o_dead_start:int64=0
+let o_dead_first:array<int64>=[]
+let o_dead_limit:array<int64>=[]
+let o_kmap:dict<int64 int64>=[]
+let o_lastuse:array<int32>=[]
+let o_depth:array<int32>=[]
+let ht_storage:array<AvailableValue>=[]
+let ht_entries:ptr<AvailableValue>=$unsafe (uint64(0) as ptr<AvailableValue>)
+let ht_mask:int64=0
+let o_epoch:int64=0
+let o_gen:int64=0
+let o_genf:int64=0
+let o_genh:int64=0
+let o_scope_storage:array<OptScope>=[]
+let o_scope_info:ptr<OptScope>=$unsafe (uint64(0) as ptr<OptScope>)
+let o_scopes:array<int64>=[]
+let o_cse:bool=false
+let o_nbr:int64=0
+let o_join_regs:array<int64>=[]
+let o_join_next:array<int64>=[]
+let lp_defs:array<int64>=[]
+let lp_first:array<int64>=[]
+let lp_limit:array<int64>=[]
+let lp_parent:array<int64>=[]
+let lp_kills:array<int64>=[]
+let lp_next:int64=0
+let lp_open:array<int64>=[]
+let o_input_last:ptr<int32>=$unsafe (uint64(0) as ptr<int32>)
+let opt_decode:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let opt_operands:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let opt_checked_flags:bool=false
+let opt_rotate32_ok:bool=false
+let opt_mulh_ok:bool=false
+let opt_kc_val:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let opt_kc_reg:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let opt_kc_epoch:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let opt_kc_fn:int64=0
+let opt_input:ptr<Ins>=$unsafe (uint64(0) as ptr<Ins>)
+let opt_working_storage:[Ins Ins]=[Ins() Ins()]
+let opt_working:ptr<Ins>=$unsafe (uint64(0) as ptr<Ins>)
+let opt_use_count:int64=0
+let opt_use_span:int64=0
+let opt_use_span_count:int64=0
+let opt_use_tuple:[int64 int64 int64]=[0 0 0]
+let opt_use_values:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let opt_ir:ptr<IrFn>=$unsafe (uint64(0) as ptr<IrFn>)

@@ -1,0 +1,1936 @@
+$runtime_checks
+from p"ir_types.dewy" import (Op Ins IrFn)
+from p"opt_workspace.dewy" import (
+    OptFlow OptScope OptControl AvailableValue opt_ir ht_entries ht_mask ht_storage lp_defs
+    lp_first lp_kills lp_limit lp_next lp_open lp_parent o_capacity o_count o_cse o_dead_first
+    o_dead_limit o_dead_start o_depth o_epoch o_fact_nbr o_fact_scope o_flow o_flow_at
+    o_flow_at_storage o_flow_count o_flow_dead o_flow_depth o_flow_level o_flow_open
+    o_flow_open_storage o_flow_storage o_flow_top o_gen o_genf o_genh o_input_last o_join_next
+    o_join_regs o_kmap o_lastuse o_nbr o_out o_out_storage o_reg_count o_reg_storage o_regs
+    o_scope_info o_scope_storage o_scopes opt_decode opt_input opt_kc_epoch opt_kc_fn
+    opt_kc_reg opt_kc_val opt_mulh_ok opt_operands opt_rotate32_ok opt_use_count opt_use_span
+    opt_use_span_count opt_use_values opt_working
+)
+from p"opt_cleanup.dewy" import (oc_tag opt_cleanup)
+
+# Word arithmetic preserves Jo overflow; IR IDs and bounded cursors are fixed width.
+OptWord:type=int64<overflow='wrap'>
+OptIndex:type=int32<overflow='wrap'>
+
+const OW_MIN_INT:int64=-9223372036854775807 - 1
+
+ow_vreg=(ty:int64):>int64=>$unsafe {
+    opt_ir[0].vtypes.push(int8(ty))
+    (OptWord(opt_ir[0].vtypes.length) - OptWord(int64(1)))
+}
+
+ow_vtype=(v:int64):>int64=>$unsafe {
+    let t=int64(opt_ir[0].vtypes[v])
+    if (t =? 3) {
+        return 0
+    }
+    t
+}
+
+ow_is_kv=(v:int64):>bool=>$unsafe {
+    (int64(opt_ir[0].vtypes[v]) =? 3)
+}
+
+ow_k_vreg=(v:int64):>int64=>$unsafe {
+    let slot=(((v xor ((v >> 8)))) & 255)
+    if ((opt_kc_epoch[slot] =? opt_kc_fn) and (opt_kc_val[slot] =? v)) {
+        return opt_kc_reg[slot]
+    }
+    let d=opt_ir[0].vtypes.length
+    opt_ir[0].vtypes.push(int8(3))
+    loop (opt_ir[0].kval.length <? d) {
+        opt_ir[0].kval.push(0)
+    }
+    opt_ir[0].kval.push(v)
+    opt_kc_epoch[slot]=opt_kc_fn
+    opt_kc_val[slot]=v
+    opt_kc_reg[slot]=d
+    d
+}
+
+# ABI ordinals: eq..geu are 19..28; load is 59. The exhaustive operand
+# differential checks these queries against the independent Jo classifier.
+ow_boolean_tag=(tag:int64):>bool=>$unsafe {
+    ((tag >=? 19) and (tag <=? 28))
+}
+
+ow_arity=(tag:int64 mode:int64):>int64=>$unsafe {
+    if ((tag =? 59) and ((mode & 128) not=? 0)) {
+        return 2
+    }
+    (OptWord(((((opt_decode[tag] >> 4)) & 7))) - OptWord(int64(1)))
+}
+
+ow_operands=(ins:ptr<Ins>):>int64=>$unsafe {
+    let mode=opt_operands[oc_tag(ins)]
+    opt_use_span=(- OptWord(int64(1)))
+    opt_use_values[0]=int64(ins[0].a)
+    opt_use_values[1]=int64(ins[0].b)
+    opt_use_values[2]=int64(ins[0].c)
+    opt_use_count=(mode & 7)
+    if ((mode & 16) not=? 0) {
+        opt_use_span=int64(ins[0].a)
+        opt_use_span_count=int64(ins[0].b)
+        opt_use_count=int64(ins[0].b)
+        if ((mode & 128) not=? 0) {
+            opt_use_count=(OptWord(opt_use_count) + OptWord(int64(1)))
+        }
+    }
+    else {
+        if (((mode & 256) not=? 0) and (ins[0].a <? 0)) {
+            opt_use_count=0
+        }
+        if (((mode & 32) not=? 0) and ((int64(ins[0].c) & 128) not=? 0)) {
+            opt_use_count=(OptWord(opt_use_count) + OptWord(int64(1)))
+        }
+        if ((mode & 64) not=? 0) {
+            opt_use_values[2]=int64(ins[0].dst)
+            if ((mode & 32) =? 0) {
+                opt_use_count=(OptWord(opt_use_count) + OptWord(int64(1)))
+            }
+        }
+    }
+    if ((mode & 8) not=? 0) {
+        return int64(ins[0].dst)
+    }
+    (- OptWord(int64(1)))
+}
+
+ow_use=(i:int64):>int64=>$unsafe {
+    if (opt_use_span >=? 0) {
+        if (i <? opt_use_span_count) {
+            return int64(opt_ir[0].args[(OptWord(opt_use_span) + OptWord(i))])
+        }
+        return opt_use_values[2]
+    }
+    opt_use_values[i]
+}
+
+ow_rewrite=(ins:ptr<Ins>):>void=>$unsafe {
+    let mask=(opt_decode[oc_tag(ins)] >> 8)
+    if ((mask & 16) not=? 0) {
+        loop k in [int64(ins[0].a)..(OptWord(int64(ins[0].a)) + OptWord(int64(ins[0].b)))) {
+            opt_ir[0].args[k]=o_regs[int64(opt_ir[0].args[k])].repl
+        }
+    }
+    else {
+        if (((mask & 1) not=? 0) or ((((mask & 32) not=? 0) and (ins[0].a >=? 0)))) {
+            ins[0].a=o_regs[int64(ins[0].a)].repl
+        }
+        if (((mask & 2) not=? 0) or ((((mask & 64) not=? 0) and ((int64(ins[0].c) & 128) not=? 0)))) {
+            ins[0].b=o_regs[int64(ins[0].b)].repl
+        }
+        if (((mask & 8) not=? 0) or ((((mask & 128) not=? 0) and ((int64(ins[0].c) & 128) not=? 0)))) {
+            ins[0].dst=o_regs[int64(ins[0].dst)].repl
+        }
+    }
+    if ((mask & 4) not=? 0) {
+        ins[0].c=o_regs[int64(ins[0].c)].repl
+    }
+}
+
+ow_log2_exact=(x:int64):>int64=>$unsafe {
+    if ((x <=? 0) or ((x & ((OptWord(x) - OptWord(int64(1))))) not=? 0)) {
+        return (- OptWord(int64(1)))
+    }
+    let k:OptWord=0
+    loop (((OptWord(int64(1)) << k)) not=? x) {
+        k=(OptWord(k) + OptWord(int64(1)))
+    }
+    k
+}
+
+ow_shru_val=(a:int64 k:int64):>int64=>$unsafe {
+    if (k =? 0) {
+        return a
+    }
+    (((a >> k)) & ((OptWord(((OptWord(int64(1)) << ((OptWord(int64(64)) - OptWord(k)))))) - OptWord(int64(1)))))
+}
+
+ow_ult=(a:int64 b:int64):>bool=>$unsafe {
+    ((((a xor OW_MIN_INT))) <? (((b xor OW_MIN_INT))))
+}
+
+ow_is_k=(v:int64):>bool=>$unsafe {
+    o_regs[v].constant
+}
+# fold an integer operation on constants; returns (ok, value)
+
+ow_fold=(op:Op x:int64 y:int64):>[bool int64]=>$unsafe {
+    match op {
+        <'overflow_add'> => {
+            [true int64(ow_word_overflow(0 x y))]
+        }
+        <'overflow_sub'> => {
+            [true int64(ow_word_overflow(1 x y))]
+        }
+        <'overflow_mul'> => {
+            [true int64(ow_word_overflow(2 x y))]
+        }
+        <'add'> => {
+            [true (OptWord(x) + OptWord(y))]
+        }
+        <'sub'> => {
+            [true (OptWord(x) - OptWord(y))]
+        }
+        <'mul'> => {
+            [true (OptWord(x) * OptWord(y))]
+        }
+        <'divs'> => {
+            if ((y =? 0) or (((x =? OW_MIN_INT) and (y =? (- OptWord(int64(1))))))) {
+                return [false 0]
+            }
+            [true ow_trunc_div(x y)]
+        }
+        <'rems'> => {
+            if ((y =? 0) or (((x =? OW_MIN_INT) and (y =? (- OptWord(int64(1))))))) {
+                return [false 0]
+            }
+            [true (OptWord(x) - OptWord((OptWord(ow_trunc_div(x y)) * OptWord(y))))]
+        }
+        <'and_'> => {
+            [true (x & y)]
+        }
+        <'or_'> => {
+            [true (x or y)]
+        }
+        <'xor'> => {
+            [true ((x xor y))]
+        }
+        <'shl'> => {
+            [true (OptWord(x) << ((y & 63)))]
+        }
+        <'shrs'> => {
+            [true (x >> ((y & 63)))]
+        }
+        <'shru'> => {
+            [true ow_shru_val(x (y & 63))]
+        }
+        <'eq'> => {
+            [true int64((x =? y))]
+        }
+        <'ne'> => {
+            [true int64((x not=? y))]
+        }
+        <'lts'> => {
+            [true int64((x <? y))]
+        }
+        <'les'> => {
+            [true int64((x <=? y))]
+        }
+        <'gts'> => {
+            [true int64((x >? y))]
+        }
+        <'ges'> => {
+            [true int64((x >=? y))]
+        }
+        <'ltu'> => {
+            [true int64(ow_ult(x y))]
+        }
+        <'leu'> => {
+            [true int64((not ow_ult(y x)))]
+        }
+        <'gtu'> => {
+            [true int64(ow_ult(y x))]
+        }
+        <'geu'> => {
+            [true int64((not ow_ult(x y)))]
+        }
+        _ => {
+            [false 0]
+        }
+    }
+}
+
+ow_fold_un=(op:Op x:int64):>[bool int64]=>$unsafe {
+    match op {
+        <'neg'> => {
+            [true (- OptWord(x))]
+        }
+        <'not_'> => {
+            [true (not x)]
+        }
+        <'sext8'> => {
+            [true (((OptWord(x) << 56)) >> 56)]
+        }
+        <'sext16'> => {
+            [true (((OptWord(x) << 48)) >> 48)]
+        }
+        <'sext32'> => {
+            [true (((OptWord(x) << 32)) >> 32)]
+        }
+        <'zext8'> => {
+            [true (x & 255)]
+        }
+        <'zext16'> => {
+            [true (x & 65535)]
+        }
+        <'zext32'> => {
+            [true (x & 4294967295)]
+        }
+        _ => {
+            [false 0]
+        }
+    }
+}
+# comparison with its operands swapped
+
+ow_mirror=(op:Op):>Op=>$unsafe {
+    match op {
+        <'lts'> => {
+            'gts'
+        }
+        <'les'> => {
+            'ges'
+        }
+        <'gts'> => {
+            'lts'
+        }
+        <'ges'> => {
+            'les'
+        }
+        <'ltu'> => {
+            'gtu'
+        }
+        <'leu'> => {
+            'geu'
+        }
+        <'gtu'> => {
+            'ltu'
+        }
+        <'geu'> => {
+            'leu'
+        }
+        _ => {
+            op
+        }
+    }
+}
+
+ow_commutes=(op:Op):>bool=>$unsafe {
+    (((((((op =? 'add') or (op =? 'mul')) or (op =? 'and_')) or (op =? 'or_')) or (op =? 'xor')) or (op =? 'eq')) or (op =? 'ne'))
+}
+# Function-local output arena. The cleanup consumer borrows it; published IR
+# owns a different array. Every append checks capacity before taking its address.
+
+ow_flow_begin=():>void=>$unsafe {
+    if (o_flow_storage.length <? opt_ir[0].code.length) {
+        o_flow_storage.resize(opt_ir[0].code.length)
+    }
+    o_flow=o_flow_storage.ptr
+    if (o_flow_open_storage.length <? opt_ir[0].code.length) {
+        o_flow_open_storage.resize(opt_ir[0].code.length)
+    }
+    o_flow_open=o_flow_open_storage.ptr
+    o_flow_level=(- OptWord(int64(1)))
+    o_flow_at_storage.resize(o_capacity)
+    o_flow_at=o_flow_at_storage.ptr
+    o_flow_count=0
+    o_flow_top=(- OptWord(int64(1)))
+    o_flow_dead=false
+    o_flow_depth=0
+    o_dead_first.clear()
+    o_dead_limit.clear()
+}
+
+ow_flow_exit=(distance:int64):>void=>$unsafe {
+    let level=(OptWord(o_flow_level) - OptWord(distance))
+    if (level <? 0) {
+        return
+    }
+    let target=int64(o_flow_open[level])
+    if (o_flow[target].kind not=? 'loop') {
+        o_flow[target].exit=true
+    }
+}
+
+ow_flow_end_dead=():>void=>$unsafe {
+    if (o_dead_start <? o_count) {
+        o_dead_first.push(o_dead_start)
+        o_dead_limit.push(o_count)
+    }
+}
+# Callers select control operations; data emission never enters this path.
+
+ow_flow_emit=(ins:ptr<Ins>):>void=>$unsafe {
+    if (o_count =? o_capacity) {
+        ow_grow_output()
+    }
+    let control=(((opt_decode[oc_tag(ins)] >> 20)) & 15)
+    if o_flow_dead {
+        if ((control >=? 2) and (control <=? 4)) {
+            o_flow_depth=(OptWord(o_flow_depth) + OptWord(int64(1)))
+            return
+        }
+        if ((control =? 5) or (control =? 6)) {
+            if (o_flow_depth >? 0) {
+                if (control =? 6) {
+                    o_flow_depth=(OptWord(o_flow_depth) - OptWord(int64(1)))
+                }
+                return
+            }
+            ow_flow_end_dead()
+        }
+        else {
+            return
+        }
+    }
+    if ((control >=? 2) and (control <=? 4)) {
+        let index=o_flow_count
+        o_flow_count=(OptWord(o_flow_count) + OptWord(int64(1)))
+        o_flow[index]=OptFlow(ins[0].op o_flow_top o_count false false)
+        o_flow_top=index
+        o_flow_level=(OptWord(o_flow_level) + OptWord(int64(1)))
+        o_flow_open[o_flow_level]=OptIndex(index)
+        o_flow_at[o_count]=OptIndex(index)
+    }
+    else if (control =? 5) {
+        o_flow[o_flow_top].exit=(o_flow[o_flow_top].exit or (not o_flow_dead))
+        o_flow[o_flow_top].kind='else_'
+        o_flow_dead=false
+    }
+    else if (control =? 6) {
+        o_flow_dead=((o_flow_dead and (not o_flow[o_flow_top].exit)) and (o_flow[o_flow_top].kind not=? 'if_'))
+        o_flow[o_flow_top].terminated=o_flow_dead
+        o_flow_at[o_count]=OptIndex(o_flow_top)
+        o_flow_top=o_flow[o_flow_top].parent
+        o_flow_level=(OptWord(o_flow_level) - OptWord(int64(1)))
+        if o_flow_dead {
+            o_dead_start=(OptWord(o_count) + OptWord(int64(1)))
+        }
+    }
+    else {
+        if (((control =? 7) or (control =? 8)) or (control =? 9)) {
+            ow_flow_exit(int64(ins[0].imm))
+            if (control =? 9) {
+                loop k in [0..int64(ins[0].b)) {
+                    ow_flow_exit(int64(opt_ir[0].args[(OptWord(int64(ins[0].c)) + OptWord(k))]))
+                }
+            }
+        }
+        if (((((control =? 7) or (control =? 9)) or (control =? 10)) or (control =? 11)) or (((control =? 12) and (ins[0].c =? 1)))) {
+            o_flow_dead=true
+            o_flow_depth=0
+            o_dead_start=(OptWord(o_count) + OptWord(int64(1)))
+        }
+    }
+}
+
+ow_flow_pop=():>void=>$unsafe {
+    # Only an empty block/if opener can be removed by the forward writer.
+    if o_flow_dead {
+        o_flow_depth=(OptWord(o_flow_depth) - OptWord(int64(1)))
+    }
+    else {
+        o_flow_top=o_flow[o_flow_top].parent
+        o_flow_level=(OptWord(o_flow_level) - OptWord(int64(1)))
+        o_flow_count=(OptWord(o_flow_count) - OptWord(int64(1)))
+    }
+}
+
+ow_grow_output=():>void=>$unsafe {
+    o_capacity=max(32 (OptWord(o_capacity) * OptWord(int64(2))))
+    o_out_storage.resize(o_capacity)
+    o_out=o_out_storage.ptr
+    o_flow_at_storage.resize(o_capacity)
+    o_flow_at=o_flow_at_storage.ptr
+}
+
+ow_append_plain=(ins:Ins):>void=>$unsafe {
+    if (o_count =? o_capacity) {
+        ow_grow_output()
+    }
+    o_out[o_count]=ins
+    o_count=(OptWord(o_count) + OptWord(int64(1)))
+}
+
+ow_append=(ins:Ins):>void=>$unsafe {
+    if (o_count =? o_capacity) {
+        ow_grow_output()
+    }
+    o_out[o_count]=ins
+    ow_flow_emit((o_out + o_count))
+    o_count=(OptWord(o_count) + OptWord(int64(1)))
+}
+
+ow_kconst=(v:int64):>int64=>$unsafe {
+    if ow_fits32(v) {
+        let c:int64?=o_kmap.get(v)
+        if c isnt? none {
+            return c
+        }
+        let k=ow_k_vreg(v)
+        ow_resize_one(k)
+        o_regs[k].ndef=1
+        o_regs[k].stable=true
+        o_regs[k].constant=true
+        o_regs[k].cval=v
+        o_kmap[v]=k
+        return k
+    }
+    let d=ow_vreg(0)
+    ow_resize_one(d)
+    o_regs[d].ndef=1
+    o_regs[d].stable=true
+    o_regs[d].constant=true
+    o_regs[d].cval=v
+    ow_emit(Ins('iconst' 0 OptIndex(d) 0 0 0 v))
+    int64(o_regs[d].repl)
+}
+
+ow_resize_one=(d:int64):>void=>$unsafe {
+    if (o_reg_count <=? d) {
+        o_reg_storage.resize((OptWord(d) + OptWord(int64(1))))
+        o_regs=o_reg_storage.ptr
+        o_reg_count=(OptWord(d) + OptWord(int64(1)))
+        o_fact_scope.resize((OptWord(((OptWord(d) + OptWord(int64(1))))) * OptWord(int64(2))))
+        o_fact_nbr.resize((OptWord(((OptWord(d) + OptWord(int64(1))))) * OptWord(int64(2))))
+    }
+    let reg=(o_regs + d)
+    reg[0].ndef=0
+    reg[0].stable=false
+    reg[0].defpos=(- OptWord(int64(1)))
+    reg[0].first=2147483647
+    reg[0].nuse=0
+    reg[0].constant=false
+    reg[0].repl=OptIndex(d)
+    reg[0].ver=0
+    reg[0].dop=(- OptWord(int64(1)))
+}
+# (results may be replaced by an existing equal value)
+
+ow_bin=(op:Op d:int64 a:int64 b:int64):>int64=>$unsafe {
+    ow_emit(Ins(op 0 OptIndex(d) OptIndex(a) OptIndex(b) 0 0))
+    int64(o_regs[d].repl)
+}
+
+ow_tmp=():>int64=>$unsafe {
+    let d=ow_vreg(0)
+    ow_resize_one(d)
+    o_regs[d].ndef=1
+    o_regs[d].stable=true
+    d
+}
+# can uses of d be replaced by s? both must be single-definition values defined before use
+
+ow_can_alias=(d:int64 s:int64):>bool=>$unsafe {
+    if (o_regs[d].ndef not=? 1) {
+        return false
+    }
+    if (o_regs[d].first <? o_regs[d].defpos) {
+        return false
+    }
+    if (o_regs[s].ndef not=? 1) {
+        return ((ow_vtype(d) =? ow_vtype(s)) and ow_holds(d s))
+    }
+    if ((s >=? opt_ir[0].nparams) and (o_regs[s].first <? o_regs[s].defpos)) {
+        return false
+    }
+    (ow_vtype(d) =? ow_vtype(s))
+}
+# d = s (s defined more than once, like a loop counter): may d's uses read s instead? Yes if s
+# is not redefined from there to d's last use, and the copy dominates the uses (the construct
+# open at the copy stays open: no path reaches a use around it, as through a loop's back edge).
+# A use in a loop entered after the copy sees s again on the next iteration: s must not change
+# anywhere in that loop either.
+
+ow_holds=(d:int64 s:int64):>bool=>$unsafe {
+    let q=int64(o_regs[d].defpos)
+    let e=int64(o_lastuse[d])
+    if ((q <? 0) or (e <? q)) {
+        return false
+    }
+    let dq=o_depth[q]
+    # (constructs opened after the copy, and how deep the outermost loop among them is)
+    let open:array<Op>=[]
+    let loop_at:OptWord=(- OptWord(int64(1)))
+    let p=(OptWord(q) + OptWord(int64(1)))
+    loop ((p <=? e) or (((loop_at >=? 0) and (open.length >? loop_at)))) {
+        if ((p >=? opt_ir[0].code.length) or ((OptWord(p) - OptWord(q)) >? 4000)) {
+            return false
+        }
+        let ins=(opt_input + p)
+        let op=ins[0].op
+        if (o_depth[p] <? dq) {
+            return false
+        }
+        if ((op =? 'else_') and (o_depth[p] =? dq)) {
+            return false
+        }
+        if (((opt_decode[oc_tag(ins)] & 1) not=? 0) and (int64(ins[0].dst) =? s)) {
+            return false
+        }
+        if (op =? 'zeroslots') {
+            loop k in [0..int64(ins[0].b)) {
+                let item=int64(opt_ir[0].args[(OptWord(int64(ins[0].a)) + OptWord(k))])
+                if (((item & 1) =? 1) and ((item >> 1) =? s)) {
+                    return false
+                }
+            }
+        }
+        if (((op =? 'block') or (op =? 'if_')) or (op =? 'loop')) {
+            open.push(op)
+        }
+        else if ((op =? 'end') and (open.length >? 0)) {
+            open.pop();
+        }
+        if (p =? e) {
+            loop j in [0..open.length) {
+                if (open[j] =? 'loop') {
+                    loop_at=j
+                    break
+                }
+            }
+        }
+        p=(OptWord(p) + OptWord(int64(1)))
+    }
+    true
+}
+# ---------------- common subexpressions ----------------
+# A hash table of available values keyed by (op, type, operands, immediate). Entries belong to
+# their control construct. An unconditional block can export its prefix before
+# the first branch; conditional arms and loops never export. Loads also die when
+# memory may have changed (any store or call bumps the memory generation).
+# Keep one probed entry together instead of visiting ten separate arrays.
+# The key and validity metadata occupy 64 bytes; their meaning is unchanged.
+
+ow_ht_setup=(n:int64):>void=>$unsafe {
+    let size:OptWord=64
+    loop (size <? (OptWord(n) * OptWord(int64(4)))) {
+        size=(OptWord(size) * OptWord(int64(2)))
+    }
+    if (ht_storage.length <? size) {
+        ht_storage.resize(size)
+    }
+    ht_entries=ht_storage.ptr
+    ht_mask=(OptWord(size) - OptWord(int64(1)))
+    o_epoch=(OptWord(o_epoch) + OptWord(int64(1)))
+    o_gen=0
+    o_genf=(OptWord(int64(1)) << 40)
+    o_genh=(OptWord(int64(2)) << 40)
+    o_scope_storage.clear()
+    o_scopes.clear()
+    ow_scope_open()
+}
+
+ow_scope_open=(export_prefix:bool=false):>void=>$unsafe {
+    let parent:OptWord=(- OptWord(int64(1)))
+    if (o_scopes.length >? 0) {
+        parent=o_scopes[(OptWord(o_scopes.length) - OptWord(int64(1)))]
+    }
+    o_scope_storage.push(OptScope(o_nbr OptIndex(parent) true export_prefix))
+    o_scope_info=o_scope_storage.ptr
+    o_scopes.push((OptWord(o_scope_storage.length) - OptWord(int64(1))))
+}
+
+ow_scope_close=():>void=>$unsafe {
+    o_scope_info[o_scopes.pop()].open=false
+}
+
+ow_ht_slot=(k1:int64 k2:int64 k3:int64):>int64=>$unsafe {
+    let h=((((OptWord(k1) * OptWord((- OptWord(int64(7046029254386353131)))))) xor ((OptWord(k2) * OptWord((- OptWord(int64(4417276706812531889))))))) xor ((OptWord(k3) * OptWord(int64(1609587929392839161)))))
+    let i=(((h >> 29)) & ht_mask)
+    loop (ht_entries[i].epoch =? o_epoch) {
+        if (((ht_entries[i].key1 =? k1) and (ht_entries[i].key2 =? k2)) and (ht_entries[i].key3 =? k3)) {
+            return i
+        }
+        i=(((OptWord(i) + OptWord(int64(1)))) & ht_mask)
+    }
+    i
+}
+
+ow_ht_available=(i:int64 gen:int64 va:int64 vb:int64):>int64=>$unsafe {
+    let entry=(ht_entries + i)
+    if (entry[0].epoch not=? o_epoch) {
+        return (- OptWord(int64(1)))
+    }
+    let scope=int64(entry[0].scope)
+    loop (not o_scope_info[scope].open) {
+        # Every exit from this block passes its straight-line prefix. After
+        # any earlier branch the value might have been skipped, so discard it.
+        if ((not o_scope_info[scope].export_prefix) or (entry[0].branches not=? o_scope_info[scope].branches)) {
+            return (- OptWord(int64(1)))
+        }
+        scope=int64(o_scope_info[scope].parent)
+        if (scope <? 0) {
+            return (- OptWord(int64(1)))
+        }
+    }
+    if ((gen >=? 0) and (entry[0].generation not=? gen)) {
+        return (- OptWord(int64(1)))
+    }
+    if ((int64(entry[0].version_a) not=? va) or (int64(entry[0].version_b) not=? vb)) {
+        return (- OptWord(int64(1)))
+    }
+    int64(entry[0].value)
+}
+
+ow_mem_gen=(mode:int64):>int64=>$unsafe {
+    if opt_ir[0].raw_mem {
+        return o_gen
+    }
+    if ((mode & 64) not=? 0) {
+        return o_genh
+    }
+    if ((mode & 32) not=? 0) {
+        return o_genf
+    }
+    o_gen
+}
+
+ow_kill_mem=(mode:int64):>void=>$unsafe {
+    if opt_ir[0].raw_mem {
+        ow_kill_all()
+    }
+    else if ((mode & 64) not=? 0) {
+        o_genh=(OptWord(o_genh) + OptWord(int64(1)))
+    }
+    else if ((mode & 32) not=? 0) {
+        o_genf=(OptWord(o_genf) + OptWord(int64(1)))
+    }
+    else {
+        o_gen=(OptWord(o_gen) + OptWord(int64(1)))
+    }
+}
+
+ow_kill_all=():>void=>$unsafe {
+    o_gen=(OptWord(o_gen) + OptWord(int64(1)))
+    o_genf=(OptWord(o_genf) + OptWord(int64(1)))
+    o_genh=(OptWord(o_genh) + OptWord(int64(1)))
+}
+
+ow_ht_put_gen=(k1:int64 k2:int64 k3:int64 v:int64 gen:int64 va:int64 vb:int64):>void=>$unsafe {
+    ow_ht_insert(ow_ht_slot(k1 k2 k3) k1 k2 k3 v gen va vb)
+}
+
+ow_load_key1=(ty:int64 mode:int64 addr:int64):>int64=>$unsafe {
+    (((59 or ((OptWord(ty) << 8))) or ((OptWord(((mode & 4095))) << 12))) or ((OptWord(addr) << 24)))
+}
+
+ow_ht_insert=(i:int64 k1:int64 k2:int64 k3:int64 v:int64 gen:int64 va:int64 vb:int64):>void=>$unsafe {
+    # The probe returns an index masked to the current table capacity.
+    let scope=OptIndex(o_scopes[(OptWord(o_scopes.length) - OptWord(int64(1)))])
+    ht_entries[i]=AvailableValue(k1 k2 k3 OptIndex(v) scope o_nbr gen o_epoch OptIndex(va) OptIndex(vb))
+}
+# a value that is defined once and never read before its definition
+
+ow_stable=(v:int64):>bool=>$unsafe {
+    o_regs[v].stable
+}
+# Available expressions have at most two register operands, always a then b.
+# Read their versions directly instead of filling the general operand buffer
+# for every expression. -1 means the instruction is not an available value.
+
+ow_push=(ins:ptr<Ins>):>void=>$unsafe {
+    let d=ow_operands(ins)
+    if (d >=? 0) {
+        o_regs[d].ver=(OptIndex(o_regs[d].ver) + OptIndex(OptIndex(int64(1))))
+    }
+    loop k in [0..opt_use_count) {
+        o_regs[ow_use(k)].nuse=(OptIndex(o_regs[ow_use(k)].nuse) + OptIndex(OptIndex(int64(1))))
+    }
+    let control=(((opt_decode[oc_tag(ins)] >> 20)) & 15)
+    if (((control >=? 2) and (control <=? 11)) or (((control =? 12) and (ins[0].c =? 1)))) {
+        ow_flow_emit(ins)
+    }
+    ow_append_plain(ins[0])
+}
+# drop the last output instruction (an empty construct's opening)
+
+ow_pop=():>void=>$unsafe {
+    ow_flow_pop()
+    o_count=(OptWord(o_count) - OptWord(int64(1)))
+    let ins=o_out[o_count]
+    if (ins.op =? 'if_') {
+        o_regs[int64(ins.a)].nuse=(OptIndex(o_regs[int64(ins.a)].nuse) - OptIndex(OptIndex(int64(1))))
+    }
+}
+
+ow_join_kill=(head0:int64):>void=>$unsafe {
+    let head=head0
+    loop (head >=? 0) {
+        o_regs[o_join_regs[head]].ver=(OptIndex(o_regs[o_join_regs[head]].ver) + OptIndex(OptIndex(int64(1))))
+        head=o_join_next[head]
+    }
+}
+
+ow_branch_copy=():>int64=>$unsafe {
+    let n=o_count
+    if ((n <? 3) or (o_out[(OptWord(n) - OptWord(int64(2)))].op not=? 'mov')) {
+        return (- OptWord(int64(1)))
+    }
+    let d=int64(o_out[(OptWord(n) - OptWord(int64(2)))].dst)
+    if (((d <? 0) or (o_regs[d].ndef <=? 1)) or (o_regs[d].repl not=? OptIndex(d))) {
+        return (- OptWord(int64(1)))
+    }
+    let i=(OptWord(n) - OptWord(int64(3)))
+    let floor=max(0 (OptWord(n) - OptWord(int64(19))))
+    loop (i >=? floor) {
+        let ins=(o_out + i)
+        let op=ins[0].op
+        if (op =? 'brif') {
+            if (ins[0].imm =? 0) {
+                return d
+            }
+            return (- OptWord(int64(1)))
+        }
+        if ((((((((((op =? 'block') or (op =? 'loop')) or (op =? 'if_')) or (op =? 'else_')) or (op =? 'end')) or (op =? 'br')) or (op =? 'brtable')) or (op =? 'ret')) or (op =? 'trap')) or (op =? 'zeroslots')) {
+            return (- OptWord(int64(1)))
+        }
+        if (((opt_decode[oc_tag(ins)] & 1) not=? 0) and (ins[0].dst =? OptIndex(d))) {
+            return (- OptWord(int64(1)))
+        }
+        i=(OptWord(i) - OptWord(int64(1)))
+    }
+    (- OptWord(int64(1)))
+}
+# v was computed by `op` from operands that still hold the same values here
+
+ow_def_is=(v:int64 op:int64):>bool=>$unsafe {
+    let reg=(o_regs + v)
+    if ((not reg[0].stable) or (reg[0].dop not=? OptIndex(op))) {
+        return false
+    }
+    ((o_regs[int64(reg[0].da)].ver =? reg[0].dva) and (o_regs[int64(reg[0].db)].ver =? reg[0].dvb))
+}
+# Bounded expression queries use CSE's operand-version checks, so a changed
+# loop variable cannot lend an old range or rotate identity to its new value.
+
+ow_unsigned32=(v:int64 depth:int64=0):>bool=>$unsafe {
+    if ow_is_k(v) {
+        return ((o_regs[v].cval >=? 0) and (o_regs[v].cval <=? 4294967295))
+    }
+    if (((ow_def_is(v 52) or ow_def_is(v 51)) or ow_def_is(v 50)) or ow_def_is(v 102)) {
+        return true
+    }
+    if (depth >=? 4) {
+        return false
+    }
+    if ow_def_is(v 11) {
+        return (ow_unsigned32(int64(o_regs[v].da) (OptWord(depth) + OptWord(int64(1)))) or ow_unsigned32(int64(o_regs[v].db) (OptWord(depth) + OptWord(int64(1)))))
+    }
+    if (ow_def_is(v 12) or ow_def_is(v 13)) {
+        return (ow_unsigned32(int64(o_regs[v].da) (OptWord(depth) + OptWord(int64(1)))) and ow_unsigned32(int64(o_regs[v].db) (OptWord(depth) + OptWord(int64(1)))))
+    }
+    if ow_def_is(v 16) {
+        return ow_unsigned32(int64(o_regs[v].da) (OptWord(depth) + OptWord(int64(1))))
+    }
+    false
+}
+
+ow_unwrap32=(v:int64):>int64=>$unsafe {
+    (if ow_def_is(v 52) {int64(o_regs[v].da)} else {v})
+}
+# A four-edge query only at shift/count consumers. CSE versions invalidate
+# stale operands; no function scan or new analysis state is needed.
+
+ow_small_count=(v:int64 depth:int64=0):>int64=>$unsafe {
+    if ow_is_k(v) {
+        return (if ((o_regs[v].cval >=? 0) and (o_regs[v].cval <=? 64)) {o_regs[v].cval} else {(- OptWord(int64(1)))})
+    }
+    if (depth >=? 4) {
+        return (- OptWord(int64(1)))
+    }
+    if ow_def_is(v 11) {
+        let a=ow_small_count(int64(o_regs[v].da) (OptWord(depth) + OptWord(int64(1))))
+        let b=ow_small_count(int64(o_regs[v].db) (OptWord(depth) + OptWord(int64(1))))
+        if ((a >=? 0) and (b >=? 0)) {
+            return min(a b)
+        }
+        return max(a b)
+    }
+    if (ow_def_is(v 5) and ow_is_k(int64(o_regs[v].da))) {
+        let a=o_regs[int64(o_regs[v].da)].cval
+        let b=ow_small_count(int64(o_regs[v].db) (OptWord(depth) + OptWord(int64(1))))
+        if ((((a >=? 0) and (a <=? 64)) and (b >=? 0)) and (b <=? a)) {
+            return a
+        }
+    }
+    (- OptWord(int64(1)))
+}
+
+ow_rotate32=(ins:ptr<Ins>):>bool=>$unsafe {
+    if (not opt_rotate32_ok) {
+        return false
+    }
+    let value=int64(ins[0].a)
+    if (((ins[0].op =? 'zext32') and ow_def_is(value 12)) or (((ins[0].op =? 'or_') and ow_unsigned32(int64(ins[0].a))) and ow_unsigned32(int64(ins[0].b)))) {
+        let left=ow_unwrap32((if (ins[0].op =? 'or_') {int64(ins[0].a)} else {int64(o_regs[value].da)}))
+        let right=ow_unwrap32((if (ins[0].op =? 'or_') {int64(ins[0].b)} else {int64(o_regs[value].db)}))
+        if ow_def_is(left 16) {
+            let saved=left
+            left=right
+            right=saved
+        }
+        if (ow_def_is(left 14) and ow_def_is(right 16)) {
+            let lc=int64(o_regs[left].db)
+            let rc=int64(o_regs[right].db)
+            let x=int64(o_regs[right].da)
+            let complementary=((((ow_is_k(lc) and ow_is_k(rc)) and (o_regs[lc].cval >=? 0)) and (o_regs[lc].cval <=? 32)) and ((OptWord(o_regs[lc].cval) + OptWord(o_regs[rc].cval)) =? 32))
+            if (((ow_def_is(rc 5) and ow_is_k(int64(o_regs[rc].da))) and (o_regs[int64(o_regs[rc].da)].cval =? 32)) and (o_regs[rc].db =? OptIndex(lc))) {
+                let limit=ow_small_count(lc)
+                complementary=((limit >=? 0) and (limit <=? 32))
+            }
+            if (((ow_def_is(lc 5) and ow_is_k(int64(o_regs[lc].da))) and (o_regs[int64(o_regs[lc].da)].cval =? 32)) and (o_regs[lc].db =? OptIndex(rc))) {
+                let limit=ow_small_count(rc)
+                complementary=((limit >=? 0) and (limit <=? 32))
+            }
+            if ((complementary and (ow_unwrap32(int64(o_regs[left].da)) =? ow_unwrap32(x))) and ow_unsigned32(x)) {
+                ins[0]=Ins('rot32' 0 ins[0].dst OptIndex(ow_unwrap32(x)) OptIndex(lc) 0 0)
+                return true
+            }
+        }
+    }
+    if (ins[0].op not=? 'zext32') {
+        return false
+    }
+    # Duplication into both halves followed by a shift is the same rotation.
+    if (ow_def_is(value 16) and ow_is_k(int64(o_regs[value].db))) {
+        let count=o_regs[int64(o_regs[value].db)].cval
+        let dup=int64(o_regs[value].da)
+        if (((count <=? 0) or (count >=? 32)) or (not ow_def_is(dup 12))) {
+            return false
+        }
+        let x=int64(o_regs[dup].da)
+        let shifted=int64(o_regs[dup].db)
+        if ow_def_is(x 14) {
+            let saved=x
+            x=shifted
+            shifted=saved
+        }
+        if ((((ow_def_is(shifted 14) and (o_regs[shifted].da =? OptIndex(x))) and ow_is_k(int64(o_regs[shifted].db))) and (o_regs[int64(o_regs[shifted].db)].cval =? 32)) and ow_unsigned32(x)) {
+            let rotation=ow_kconst((OptWord(int64(32)) - OptWord(count)))
+            ins[0]=Ins('rot32' 0 ins[0].dst OptIndex(x) OptIndex(rotation) 0 0)
+            return true
+        }
+    }
+    false
+}
+
+ow_fits32=(v:int64):>bool=>$unsafe {
+    ((v >=? (- OptWord(int64(2147483648)))) and (v <=? 2147483647))
+}
+
+ow_emit=(ins0:Ins):>void=>$unsafe {
+    opt_working[1]=ins0
+    ow_transfer((opt_working + 1) false)
+}
+# Only single-definition values have facts. Direct indexing avoids hashing the
+# same condition at every branch; both truth values keep their own scope, just
+# as separate available-expression keys did.
+
+ow_fact_known=(c:int64 truth:int64):>bool=>$unsafe {
+    if (((not o_cse) or (not ow_stable(c))) or (o_regs[c].fact_epoch not=? o_epoch)) {
+        return false
+    }
+    let index=(OptWord((OptWord(c) * OptWord(int64(2)))) + OptWord(truth))
+    let scope=int64(o_fact_scope[index])
+    if (scope <? 0) {
+        return false
+    }
+    loop (not o_scope_info[scope].open) {
+        if ((not o_scope_info[scope].export_prefix) or (o_fact_nbr[index] not=? o_scope_info[scope].branches)) {
+            return false
+        }
+        scope=int64(o_scope_info[scope].parent)
+        if (scope <? 0) {
+            return false
+        }
+    }
+    true
+}
+
+ow_add_fact=(c:int64 truth:int64):>void=>$unsafe {
+    if ((not o_cse) or (not ow_stable(c))) {
+        return
+    }
+    if (o_regs[c].fact_epoch not=? o_epoch) {
+        o_fact_scope[(OptWord(c) * OptWord(int64(2)))]=(- OptWord(int64(1)))
+        o_fact_scope[(OptWord((OptWord(c) * OptWord(int64(2)))) + OptWord(int64(1)))]=(- OptWord(int64(1)))
+        o_regs[c].fact_epoch=o_epoch
+    }
+    let index=(OptWord((OptWord(c) * OptWord(int64(2)))) + OptWord(truth))
+    o_fact_scope[index]=OptIndex(o_scopes[(OptWord(o_scopes.length) - OptWord(int64(1)))])
+    o_fact_nbr[index]=o_nbr
+}
+
+ow_fact_false=(c:int64):>bool=>$unsafe {
+    ow_fact_known(c 0)
+}
+
+ow_add_fact_false=(c:int64):>void=>$unsafe {
+    ow_add_fact(c 0)
+}
+
+ow_fact_true=(c:int64):>bool=>$unsafe {
+    ow_fact_known(c 1)
+}
+
+ow_add_fact_true=(c:int64):>void=>$unsafe {
+    ow_add_fact(c 1)
+}
+# simplify one instruction, appending the result to o_out
+# One opcode-directed forward transfer. Only scalar arithmetic enters folding;
+# memory/call/vector/control operations go directly from rewriting to CSE/emission.
+# Replacement operations are revisited locally, never by a whole-function sweep.
+# The walk is O(input operations + emitted strength-reduction operations), apart
+# from the separately bounded copy-lifetime queries and CSE hash probes.
+
+ow_transfer=(ins:ptr<Ins> simplify:bool):>void=>$unsafe {
+    loop simplify {
+        let op=ins[0].op
+        let kind=(((opt_decode[oc_tag(ins)] >> 16)) & 15)
+        if ((kind =? 0) or (kind =? 7)) {
+            ow_rewrite(ins)
+            if (kind =? 0) {
+                break
+            }
+        }
+        else if (kind not=? 1) {
+            ins[0].a=o_regs[int64(ins[0].a)].repl
+            if (kind >=? 4) {
+                ins[0].b=o_regs[int64(ins[0].b)].repl
+            }
+            if (kind =? 6) {
+                ins[0].c=o_regs[int64(ins[0].c)].repl
+            }
+        }
+        # Inlining and store forwarding can expose the address behind a closure
+        # invocation. A stable function address uses the ordinary direct-call ABI.
+        if (kind =? 7) {
+            let fp=int64(ins[0].c)
+            let at=int64(o_regs[fp].defpos)
+            if ((ow_stable(fp) and (at >=? 0)) and (opt_ir[0].code[at].op =? 'faddr')) {
+                ins[0].op='call'
+                ins[0].imm=opt_ir[0].code[at].imm
+                ins[0].c=0
+                op='call'
+            }
+            break
+        }
+        let d=int64(ins[0].dst)
+        let a=int64(ins[0].a)
+        let bb=int64(ins[0].b)
+        if (kind =? 5) {
+            if ((((op =? 'checked_sub') and ow_is_k(a)) and (o_regs[a].cval >=? 0)) and (o_regs[a].cval <=? 64)) {
+                let limit=ow_small_count(bb)
+                if ((limit >=? 0) and (limit <=? o_regs[a].cval)) {
+                    ins[0]=Ins('sub' 0 OptIndex(d) OptIndex(a) OptIndex(bb) 0 0)
+                    continue
+                }
+            }
+            let raw=(if (op =? 'checked_add') {Op.add} else {(if (op =? 'checked_sub') {Op.sub} else {Op.mul})})
+            if (ow_is_k(a) and ow_is_k(bb)) {
+                let operation:int64=(if (op =? 'checked_add') {0} else {(if (op =? 'checked_sub') {1} else {2})})
+                let overflow=false
+                if ((int64(ins[0].c) & 1) not=? 0) {
+                    let av=uint64<overflow='wrap'>(o_regs[a].cval)
+                    let bv=uint64<overflow='wrap'>(o_regs[bb].cval)
+                    overflow=(if (operation =? 0) {ow_unsigned_add_overflow(av bv)} else {(if (operation =? 1) {(av <? bv)} else {((bv not=? 0) and (av >? (uint64(18446744073709551615) // bv)))})})
+                }
+                else {
+                    overflow=ow_word_overflow(operation o_regs[a].cval o_regs[bb].cval)
+                }
+                if ((int64(ins[0].c) & 32) not=? 0) {
+                    let [folded value]=ow_fold(raw o_regs[a].cval o_regs[bb].cval)
+                    overflow=(overflow or ((if ((int64(ins[0].c) & 1) not=? 0) {((value <? 0) or (value >? 4294967295))} else {((value <? (- OptWord(int64(2147483648)))) or (value >? 2147483647))})))
+                }
+                if overflow {
+                    # A reachable store still fails at runtime under the default
+                    # policy, even when inlining exposes constant operands.
+                    break
+                }
+                let [ok value]=ow_fold(raw o_regs[a].cval o_regs[bb].cval)
+                ins[0]=Ins('iconst' 0 OptIndex(d) 0 0 0 value)
+                continue
+            }
+            if (ow_is_k(bb) and (((((raw not=? 'mul') and (o_regs[bb].cval =? 0))) or (((raw =? 'mul') and (((o_regs[bb].cval =? 0) or (o_regs[bb].cval =? 1)))))))) {
+                ins[0].op=raw
+                continue
+            }
+            break
+        }
+        if (kind =? 1) {
+            if ow_stable(d) {
+                o_regs[d].constant=true
+                o_regs[d].cval=ins[0].imm
+            }
+            break
+        }
+        if (kind =? 2) {
+            if ow_can_alias(d a) {
+                o_regs[d].repl=OptIndex(a)
+                if o_regs[a].constant {
+                    o_regs[d].constant=true
+                    o_regs[d].cval=o_regs[a].cval
+                }
+                return
+            }
+            if (ow_is_k(a) and (ow_vtype(d) =? 0)) {
+                ins[0]=Ins('iconst' 0 OptIndex(d) 0 0 0 o_regs[a].cval)
+                break
+            }
+            break
+        }
+        if ((int64(ins[0].ty) not=? 0) or (d <? 0)) {
+            break
+        }
+        # Inlining can make a previously dynamic scalar choice constant. Its
+        # inputs were already evaluated, so replacing the selection by a move
+        # preserves their effects; ordinary dead-code removal handles pure inputs.
+        if (kind =? 6) {
+            if ((((bb =? int64(ins[0].c)) or ow_is_k(a)) or ow_fact_true(a)) or ow_fact_false(a)) {
+                let yes=(((bb =? int64(ins[0].c)) or ((ow_is_k(a) and (o_regs[a].cval not=? 0)))) or ow_fact_true(a))
+                let value=(if yes {bb} else {int64(ins[0].c)})
+                ins[0]=Ins('mov' 0 OptIndex(d) OptIndex(value) 0 0 0)
+                continue
+            }
+            break
+        }
+        # Comparisons already produce a canonical boolean. Inlined bool
+        # returns otherwise leave an ABI extension between compare and branch.
+        if (((op =? 'zext8') and ow_stable(a)) and ((((o_regs[a].dop =? OptIndex(int64(95))) or (o_regs[a].dop =? OptIndex(int64(103)))) or ow_boolean_tag(int64(o_regs[a].dop))))) {
+            ins[0]=Ins('mov' 0 OptIndex(d) OptIndex(a) 0 0 0)
+            continue
+        }
+        if (op =? 'zext32') {
+            if ow_rotate32(ins) {
+                continue
+            }
+            if ow_unsigned32(a) {
+                ins[0]=Ins('mov' 0 OptIndex(d) OptIndex(a) 0 0 0)
+                continue
+            }
+        }
+        # unary integer ops
+        if (kind =? 3) {
+            if ow_is_k(a) {
+                let [ok v]=ow_fold_un(op o_regs[a].cval)
+                if ok {
+                    ins[0]=Ins('iconst' 0 OptIndex(d) 0 0 0 v)
+                    continue
+                }
+            }
+            break
+        }
+        # binary integer ops
+        if ((op =? 'or_') and ow_rotate32(ins)) {
+            continue
+        }
+        if (((op =? 'shru') and ow_is_k(bb)) and (o_regs[bb].cval =? 6)) {
+            let limit=ow_small_count(a)
+            if ((limit >=? 0) and (limit <? 64)) {
+                ins[0]=Ins('iconst' 0 OptIndex(d) 0 0 0 0)
+                continue
+            }
+        }
+        if (ow_is_k(a) and ow_is_k(bb)) {
+            let [ok v]=ow_fold(op o_regs[a].cval o_regs[bb].cval)
+            if ok {
+                ins[0]=Ins('iconst' 0 OptIndex(d) 0 0 0 v)
+                continue
+            }
+        }
+        if (ow_is_k(a) and (not ow_is_k(bb))) {
+            if ow_commutes(op) {
+                ins[0].a=OptIndex(bb)
+                ins[0].b=OptIndex(a)
+            }
+            else if (ow_mirror(op) not=? op) {
+                ins[0].op=ow_mirror(op)
+                ins[0].a=OptIndex(bb)
+                ins[0].b=OptIndex(a)
+            }
+            op=ins[0].op
+            a=int64(ins[0].a)
+            bb=int64(ins[0].b)
+        }
+        if (not ow_is_k(bb)) {
+            break
+        }
+        let k=o_regs[bb].cval
+        # A nonnegative constant mask bounds its result in [0, mask]. Relational
+        # comparisons are monotone on that interval, in both signed and unsigned
+        # order. Equal endpoints prove the whole comparison; equality is excluded.
+        if ((((((((op =? 'lts') or (op =? 'les')) or (op =? 'gts')) or (op =? 'ges')) or (op =? 'ltu')) or (op =? 'leu')) or (op =? 'gtu')) or (op =? 'geu')) {
+            if (ow_def_is(a 11) and ow_is_k(int64(o_regs[a].db))) {
+                let limit=o_regs[int64(o_regs[a].db)].cval
+                if (limit >=? 0) {
+                    let lo=ow_fold(op 0 k)
+                    let hi=ow_fold(op limit k)
+                    if (lo[1] =? hi[1]) {
+                        ins[0]=Ins('iconst' 0 OptIndex(d) 0 0 0 lo[1])
+                        continue
+                    }
+                }
+            }
+        }
+        # identities: result is a
+        if ((((k =? 0) and ((((((((op =? 'add') or (op =? 'sub')) or (op =? 'or_')) or (op =? 'xor')) or (op =? 'shl')) or (op =? 'shrs')) or (op =? 'shru'))))) or (((k =? 1) and ((((op =? 'mul') or (op =? 'divs')) or (op =? 'divu')))))) {
+            ins[0]=Ins('mov' 0 OptIndex(d) OptIndex(a) 0 0 0)
+            continue
+        }
+        if ((op =? 'and_') and (k =? (- OptWord(int64(1))))) {
+            ins[0]=Ins('mov' 0 OptIndex(d) OptIndex(a) 0 0 0)
+            continue
+        }
+        if ((k =? 0) and (((op =? 'mul') or (op =? 'and_')))) {
+            ins[0]=Ins('iconst' 0 OptIndex(d) 0 0 0 0)
+            continue
+        }
+        if (((op =? 'add') and ow_def_is(a 4)) and o_regs[int64(o_regs[a].db)].constant) {
+            ow_bin('add' d int64(o_regs[a].da) ow_kconst((OptWord(k) + OptWord(o_regs[int64(o_regs[a].db)].cval))));
+            return
+        }
+        let sh=ow_log2_exact(k)
+        if (sh >? 0) {
+            if (op =? 'mul') {
+                ow_bin('shl' d a ow_kconst(sh));
+                return
+            }
+            if (op =? 'divu') {
+                ow_bin('shru' d a ow_kconst(sh));
+                return
+            }
+            if (op =? 'remu') {
+                ow_bin('and_' d a ow_kconst((OptWord(k) - OptWord(int64(1)))));
+                return
+            }
+            if ((op =? 'divs') or (op =? 'rems')) {
+                # round toward zero: add (2^sh - 1) to negative dividends before shifting
+                let t1=ow_bin('shrs' ow_tmp() a ow_kconst(63))
+                let t2=ow_bin('shru' ow_tmp() t1 ow_kconst((OptWord(int64(64)) - OptWord(sh))))
+                let t3=ow_bin('add' ow_tmp() a t2)
+                if (op =? 'divs') {
+                    ow_bin('shrs' d t3 ow_kconst(sh));
+                }
+                else {
+                    let t4=ow_bin('and_' ow_tmp() t3 ow_kconst((- OptWord(k))))
+                    ow_bin('sub' d a t4);
+                }
+                return
+            }
+        }
+        if ((((((op =? 'divs') or (op =? 'rems'))) and (k >? 1)) and (sh <=? 0)) and opt_mulh_ok) {
+            # by any other constant: a multiply by a "magic" number, its high half, a shift, and a
+            # one added to negative dividends (Hacker's Delight 10-1), as C compilers do
+            let [mag s]=ow_div_magic(k)
+            let q=ow_bin('mulhs' ow_tmp() a ow_kconst(mag))
+            if (mag <? 0) {
+                q=ow_bin('add' ow_tmp() q a)
+            }
+            if (s >? 0) {
+                q=ow_bin('shrs' ow_tmp() q ow_kconst(s))
+            }
+            let neg=ow_bin('shru' ow_tmp() a ow_kconst(63))
+            if (op =? 'divs') {
+                ow_bin('add' d q neg);
+            }
+            else {
+                let qq=ow_bin('add' ow_tmp() q neg)
+                let t=ow_bin('mul' ow_tmp() qq ow_kconst(k))
+                ow_bin('sub' d a t);
+            }
+            return
+        }
+        if ((((((op =? 'divu') or (op =? 'remu'))) and (k >? 1)) and (sh <=? 0)) and opt_mulh_ok) {
+            # unsigned: the high half of a multiply by a magic number, and a shift (with an add when
+            # the number needs 65 bits: Hacker's Delight 10-8)
+            let [mag s add]=ow_divu_magic(uint64(k))
+            # (the last step writes the quotient straight into d, as the signed one does)
+            let qd=d
+            if (op =? 'remu') {
+                qd=ow_tmp()
+            }
+            let t=ow_bin('mulhu' ow_tmp() a ow_kconst((mag transmute int64)))
+            if add {
+                let q1=ow_bin('sub' ow_tmp() a t)
+                let q2=ow_bin('shru' ow_tmp() q1 ow_kconst(1))
+                if (s >? 1) {
+                    let q3=ow_bin('add' ow_tmp() q2 t)
+                    ow_bin('shru' qd q3 ow_kconst((OptWord(s) - OptWord(int64(1)))));
+                }
+                else {
+                    ow_bin('add' qd q2 t);
+                }
+            }
+            else {
+                ow_bin('shru' qd t ow_kconst(s));
+            }
+            if (op =? 'remu') {
+                let q=int64(o_regs[qd].repl)
+                let m=ow_bin('mul' ow_tmp() q ow_kconst(k))
+                ow_bin('sub' d a m);
+            }
+            return
+        }
+        break
+    }
+    let op=ins[0].op
+    if (((op =? 'br') or (op =? 'brif')) or (op =? 'brtable')) {
+        o_nbr=(OptWord(o_nbr) + OptWord(int64(1)))
+    }
+    if (o_cse and (((op =? 'load') or (op =? 'store')))) {
+        # fold constant offsets into the access: [x + k + imm]
+        let a=int64(ins[0].a)
+        loop ((ow_def_is(a 4) and o_regs[int64(o_regs[a].db)].constant) and ow_fits32((OptWord(ins[0].imm) + OptWord(o_regs[int64(o_regs[a].db)].cval)))) {
+            ins[0].imm=(OptWord(ins[0].imm) + OptWord(o_regs[int64(o_regs[a].db)].cval))
+            a=int64(o_regs[a].da)
+        }
+        # [base + index << scale + imm] (x86 addressing; wasm computes it)
+        if (((((int64(ins[0].c) & 128) =? 0) and ow_def_is(a 4)) and (not o_regs[int64(o_regs[a].db)].constant)) and (not o_regs[int64(o_regs[a].da)].constant)) {
+            let base=int64(o_regs[a].da)
+            let idx=int64(o_regs[a].db)
+            let scale:OptWord=0
+            if (((ow_def_is(idx 14) and o_regs[int64(o_regs[idx].db)].constant) and (o_regs[int64(o_regs[idx].db)].cval <=? 3)) and (o_regs[int64(o_regs[idx].db)].cval >=? 0)) {
+                scale=o_regs[int64(o_regs[idx].db)].cval
+                idx=int64(o_regs[idx].da)
+            }
+            loop ((ow_def_is(base 4) and o_regs[int64(o_regs[base].db)].constant) and ow_fits32((OptWord(ins[0].imm) + OptWord(o_regs[int64(o_regs[base].db)].cval)))) {
+                ins[0].imm=(OptWord(ins[0].imm) + OptWord(o_regs[int64(o_regs[base].db)].cval))
+                base=int64(o_regs[base].da)
+            }
+            a=base
+            ins[0].c=OptIndex(((int64(ins[0].c) or 128) or ((OptWord(scale) << 8))))
+            if (op =? 'store') {
+                ins[0].dst=OptIndex(idx)
+            }
+            else {
+                ins[0].b=OptIndex(idx)
+            }
+        }
+        ins[0].a=OptIndex(a)
+    }
+    if o_cse {
+        let arity=ow_arity(oc_tag(ins) int64(ins[0].c))
+        if (arity >=? 0) {
+            let d=int64(ins[0].dst)
+            let reg=(o_regs + d)
+            let va:OptWord=0
+            let vb:OptWord=0
+            if (arity >? 0) {
+                va=int64(o_regs[int64(ins[0].a)].ver)
+            }
+            if (arity >? 1) {
+                vb=int64(o_regs[int64(ins[0].b)].ver)
+            }
+            let k1=(((oc_tag(ins) or ((OptWord(int64(ins[0].ty)) << 8))) or ((OptWord(((int64(ins[0].c) & 4095))) << 12))) or ((OptWord(int64(ins[0].a)) << 24)))
+            let k2=int64(ins[0].b)
+            let k3=ins[0].imm
+            let gen:OptWord=(- OptWord(int64(1)))
+            if (op =? 'load') {
+                gen=ow_mem_gen(int64(ins[0].c))
+            }
+            let slot=ow_ht_slot(k1 k2 k3)
+            let e=ow_ht_available(slot gen va vb)
+            if ((e >=? 0) and (ow_vtype(e) =? ow_vtype(d))) {
+                if reg[0].stable {
+                    reg[0].repl=OptIndex(e)
+                    if o_regs[e].constant {
+                        reg[0].constant=true
+                        reg[0].cval=o_regs[e].cval
+                    }
+                    return
+                }
+                reg[0].ver=(OptIndex(reg[0].ver) + OptIndex(OptIndex(int64(1))))
+                o_regs[e].nuse=(OptIndex(o_regs[e].nuse) + OptIndex(OptIndex(int64(1))))
+                ow_append_plain(Ins('mov' OptIndex(ow_vtype(d)) OptIndex(d) OptIndex(e) 0 0 0))
+                return
+            }
+            if reg[0].stable {
+                ow_ht_insert(slot k1 k2 k3 d gen va vb)
+                reg[0].dop=OptIndex(oc_tag(ins))
+                reg[0].da=ins[0].a
+                reg[0].db=ins[0].b
+                reg[0].dva=o_regs[int64(ins[0].a)].ver
+                reg[0].dvb=o_regs[int64(ins[0].b)].ver
+            }
+            # CSE already decoded these operands. Account for the surviving
+            # operation here instead of decoding it again through o_push.
+            reg[0].ver=(OptIndex(reg[0].ver) + OptIndex(OptIndex(int64(1))))
+            if (arity >? 0) {
+                o_regs[int64(ins[0].a)].nuse=(OptIndex(o_regs[int64(ins[0].a)].nuse) + OptIndex(OptIndex(int64(1))))
+            }
+            if (arity >? 1) {
+                o_regs[int64(ins[0].b)].nuse=(OptIndex(o_regs[int64(ins[0].b)].nuse) + OptIndex(OptIndex(int64(1))))
+            }
+            ow_append_plain(ins[0])
+            return
+        }
+        else if (op =? 'store') {
+            let mode=int64(ins[0].c)
+            ow_kill_mem(mode)
+            # store-to-load forwarding for full-width values
+            let a=int64(ins[0].a)
+            let v=int64(ins[0].b)
+            let ix:OptWord=0
+            let vix:OptWord=0
+            if ((mode & 128) not=? 0) {
+                ix=int64(ins[0].dst)
+                vix=int64(o_regs[ix].ver)
+            }
+            if (((((mode & 15) =? 8) or ((mode & 32) not=? 0))) and ow_stable(v)) {
+                ow_ht_put_gen(ow_load_key1(int64(ins[0].ty) mode a) ix ins[0].imm v ow_mem_gen(mode) int64(o_regs[a].ver) vix)
+            }
+            o_regs[a].nuse=(OptIndex(o_regs[a].nuse) + OptIndex(OptIndex(int64(1))))
+            o_regs[v].nuse=(OptIndex(o_regs[v].nuse) + OptIndex(OptIndex(int64(1))))
+            if ((mode & 128) not=? 0) {
+                o_regs[ix].nuse=(OptIndex(o_regs[ix].nuse) + OptIndex(OptIndex(int64(1))))
+            }
+            ow_append_plain(ins[0])
+            return
+        }
+        else if (op =? 'assume') {
+            let a=int64(ins[0].a)
+            if (ins[0].imm =? 1) {
+                let k=ow_kconst(1)
+                ow_ht_put_gen(ow_load_key1(0 (8 or 64) a) 0 0 k ow_mem_gen((8 or 64)) int64(o_regs[a].ver) 0)
+            }
+            return
+        }
+        else if (((opt_decode[oc_tag(ins)] & 4) not=? 0) and (not (((op =? 'call') and (ins[0].c =? 1))))) {
+            ow_kill_all()
+        }
+    }
+    # Record the boolean result without making raw-memory reads available
+    # expressions: subsequent stores must still perform a new comparison.
+    if ((((op =? 'memeq') or (op =? 'streq'))) and ow_stable(int64(ins[0].dst))) {
+        o_regs[int64(ins[0].dst)].dop=OptIndex(oc_tag(ins))
+    }
+    ow_push(ins)
+}
+# the magic number, shift and whether an add is needed, for dividing an unsigned 64-bit integer
+# by d (d >= 2) (Hacker's Delight 10-2)
+
+ow_enter_loop=():>void=>$unsafe {
+    let l=lp_next
+    lp_next=(OptWord(lp_next) + OptWord(int64(1)))
+    loop k in [lp_first[l]..lp_limit[l]) {
+        o_regs[lp_defs[k]].ver=(OptIndex(o_regs[lp_defs[k]].ver) + OptIndex(OptIndex(int64(1))))
+    }
+    k=lp_kills[l]
+    if (((k & 1) not=? 0) or opt_ir[0].raw_mem) {
+        o_gen=(OptWord(o_gen) + OptWord(int64(1)))
+    }
+    if (((k & 2) not=? 0) or opt_ir[0].raw_mem) {
+        o_genf=(OptWord(o_genf) + OptWord(int64(1)))
+    }
+    if (((k & 4) not=? 0) or opt_ir[0].raw_mem) {
+        o_genh=(OptWord(o_genh) + OptWord(int64(1)))
+    }
+}
+# Input metadata is O(N + U): each operation and operand use is visited once.
+
+ow_input_use=(v:int64 pos:int64):>void=>$unsafe {
+    if (o_regs[v].first >? pos) {
+        o_regs[v].first=OptIndex(pos)
+    }
+    o_input_last[v]=OptIndex(pos)
+}
+
+opt_rewrite=():>void=>$unsafe {
+    # The outer transfer uses slot 0. Strength reduction uses slot 1 with
+    # simplification disabled, so a nested transfer never needs a third slot.
+    let nv=opt_ir[0].vtypes.length
+    loop p in [0..opt_ir[0].nparams) {
+        o_regs[p].ndef=(OptIndex(o_regs[p].ndef) + OptIndex(OptIndex(int64(1))))
+        o_regs[p].stable=true
+        o_regs[p].defpos=(- OptWord(int64(1)))
+    }
+    # constant vregs: one canonical vreg per value
+    o_kmap.clear()
+    loop v in [0..opt_ir[0].kval.length) {
+        if ow_is_kv(v) {
+            o_regs[v].ndef=(OptIndex(o_regs[v].ndef) + OptIndex(OptIndex(int64(1))))
+            o_regs[v].stable=true
+            o_regs[v].constant=true
+            o_regs[v].cval=opt_ir[0].kval[v]
+            let c:int64?=o_kmap.get(opt_ir[0].kval[v])
+            if c isnt? none {
+                o_regs[v].repl=OptIndex(c)
+            }
+            else {
+                o_kmap[opt_ir[0].kval[v]]=v
+            }
+        }
+    }
+    o_lastuse.resize(nv)
+    o_input_last=o_lastuse.ptr
+    loop v in [0..nv) {
+        o_lastuse[v]=(- OptWord(int64(1)))
+    }
+    o_depth.resize(opt_ir[0].code.length)
+    let depths=o_depth.ptr
+    let depth:OptWord=0
+    # (and what each loop defines and stores to, in the same walk)
+    lp_defs.clear()
+    lp_first.clear()
+    lp_limit.clear()
+    lp_parent.clear()
+    lp_kills.clear()
+    lp_open.clear()
+    lp_next=0
+    let active:OptWord=(- OptWord(int64(1)))
+    # One dispatch supplies operand uses, structured-loop facts, definitions,
+    # and memory invalidation. Do not reconstruct a general operand view and
+    # redispatch the same operation separately for each consumer.
+    let input=opt_ir[0].code.ptr
+    opt_input=input
+    let working=opt_working
+    loop pos in [0..opt_ir[0].code.length) {
+        let ins=(input + pos)
+        let op=ins[0].op
+        let a=int64(ins[0].a)
+        let b=int64(ins[0].b)
+        let d=int64(ins[0].dst)
+        let kill:OptWord=0
+        depths[pos]=OptIndex(depth)
+        match op {
+            <'end'> => {
+                depth=(OptWord(depth) - OptWord(int64(1)))
+                depths[pos]=OptIndex(depth)
+                let l=lp_open.pop()
+                if (l >=? 0) {
+                    lp_limit[l]=lp_defs.length
+                    active=lp_parent[l]
+                    if (active >=? 0) {
+                        lp_kills[active]=(lp_kills[active] or lp_kills[l])
+                    }
+                }
+                d=(- OptWord(int64(1)))
+            }
+            <'block'|'loop'|'if_'> => {
+                depth=(OptWord(depth) + OptWord(int64(1)))
+                if (op =? 'loop') {
+                    let l=lp_first.length
+                    lp_open.push(l)
+                    lp_first.push(lp_defs.length)
+                    lp_limit.push((- OptWord(int64(1))))
+                    lp_parent.push(active)
+                    lp_kills.push(0)
+                    active=l
+                }
+                else {
+                    lp_open.push((- OptWord(int64(1))))
+                }
+                if (op =? 'if_') {
+                    ow_input_use(a pos)
+                }
+                d=(- OptWord(int64(1)))
+            }
+            <'nop'|'else_'|'br'|'trap'|'vzu'> => {
+                d=(- OptWord(int64(1)))
+            }
+            <'iconst'|'fconst'|'slot'|'gaddr'|'daddr'|'faddr'> => {
+                {}
+            }
+            <'intr'|'call'|'syscall'|'calli'|'callc'> => {
+                loop k in [a..(OptWord(a) + OptWord(b))) {
+                    ow_input_use(int64(opt_ir[0].args[k]) pos)
+                }
+                if ((op =? 'calli') or (op =? 'callc')) {
+                    ow_input_use(int64(ins[0].c) pos)
+                }
+                if ((op not=? 'call') or (ins[0].c not=? 1)) {
+                    kill=7
+                }
+            }
+            <'ret'> => {
+                if (a >=? 0) {
+                    ow_input_use(a pos)
+                }
+                d=(- OptWord(int64(1)))
+            }
+            <'brif'|'brtable'|'assume'> => {
+                ow_input_use(a pos)
+                d=(- OptWord(int64(1)))
+            }
+            <'zero'> => {
+                ow_input_use(a pos)
+                d=(- OptWord(int64(1)))
+                kill=7
+            }
+            <'store'|'vst'> => {
+                ow_input_use(a pos)
+                ow_input_use(b pos)
+                if ((op =? 'vst') or ((int64(ins[0].c) & 128) not=? 0)) {
+                    ow_input_use(d pos)
+                }
+                if (op =? 'store') {
+                    let m=int64(ins[0].c)
+                    if opt_ir[0].raw_mem {
+                        kill=7
+                    }
+                    else if ((m & 64) not=? 0) {
+                        kill=4
+                    }
+                    else if ((m & 32) not=? 0) {
+                        kill=2
+                    }
+                    else {
+                        kill=1
+                    }
+                }
+                d=(- OptWord(int64(1)))
+            }
+            <'copy'> => {
+                ow_input_use(a pos)
+                ow_input_use(b pos)
+                d=(- OptWord(int64(1)))
+                kill=7
+            }
+            <'memcpy'|'memset'|'vop'> => {
+                ow_input_use(a pos)
+                ow_input_use(b pos)
+                ow_input_use(int64(ins[0].c) pos)
+                d=(- OptWord(int64(1)))
+                kill=7
+            }
+            <'select'|'memeq'|'findbyte'|'scanbytes'|'findb'> => {
+                ow_input_use(a pos)
+                ow_input_use(b pos)
+                ow_input_use(int64(ins[0].c) pos)
+            }
+            <'load'> => {
+                ow_input_use(a pos)
+                if ((int64(ins[0].c) & 128) not=? 0) {
+                    ow_input_use(b pos)
+                }
+            }
+            <'mov'|'neg'|'not_'|'fneg'|'fsqrt'|'fabs'|'ffloor'|'fceil'|'ftrunc'|'sext8'|'sext16'|'sext32'|'zext8'|'zext16'|'zext32'|'i2f'|'u2f'|'f2i'|'f2f'|'bits2f'|'f2bits'|'vsplat'> => {
+                ow_input_use(a pos)
+            }
+            <'zeroslots'> => {
+                loop k in [a..(OptWord(a) + OptWord(b))) {
+                    let item=int64(opt_ir[0].args[k])
+                    if ((item & 1) =? 1) {
+                        o_regs[(item >> 1)].ndef=(OptIndex(o_regs[(item >> 1)].ndef) + OptIndex(OptIndex(int64(2))))
+                        o_regs[(item >> 1)].stable=false
+                        if (active >=? 0) {
+                            lp_defs.push((item >> 1))
+                        }
+                    }
+                }
+                d=(- OptWord(int64(1)))
+                kill=7
+            }
+            _ => {
+                ow_input_use(a pos)
+                ow_input_use(b pos)
+            }
+        }
+        if (d >=? 0) {
+            if (opt_ir[0].slot_size.length =? 0) {
+                o_regs[d].ndef=(OptIndex(o_regs[d].ndef) + OptIndex(OptIndex(int64(1))))
+            }
+            o_regs[d].defpos=OptIndex(pos)
+            o_regs[d].stable=((o_regs[d].ndef =? 1) and (o_regs[d].first >? pos))
+            if (active >=? 0) {
+                lp_defs.push(d)
+            }
+        }
+        if ((kill not=? 0) and (active >=? 0)) {
+            lp_kills[active]=(lp_kills[active] or kill)
+        }
+    }
+    # forward: fold, propagate copies, eliminate common subexpressions, drop dead branches
+    o_count=0
+    if (o_capacity <? opt_ir[0].code.length) {
+        o_capacity=opt_ir[0].code.length
+        o_out_storage.resize(o_capacity)
+        o_out=o_out_storage.ptr
+    }
+    ow_flow_begin()
+    o_cse=true
+    ow_ht_setup((OptWord(opt_ir[0].code.length) + OptWord(int64(16))))
+    # 0 normal, 1 if(true), 2 if(false), 3 block; keep each control's facts together.
+    let ctl:array<OptControl>=[]
+    o_join_regs.clear()
+    o_join_next.clear()
+    let skip:OptWord=0
+    loop pos in [0..opt_ir[0].code.length) {
+        working[0]=input[pos]
+        let ins=working
+        let op=ins[0].op
+        if (skip >? 0) {
+            if (((op =? 'block') or (op =? 'loop')) or (op =? 'if_')) {
+                skip=(OptWord(skip) + OptWord(int64(1)))
+            }
+            if (op =? 'loop') {
+                lp_next=(OptWord(lp_next) + OptWord(int64(1)))
+            }
+            else if (((op =? 'else_') and (skip =? 1)) and (ctl[(OptWord(ctl.length) - OptWord(int64(1)))].kind =? 2)) {
+                skip=0
+                ow_scope_open()
+            }
+            else if (op =? 'end') {
+                skip=(OptWord(skip) - OptWord(int64(1)))
+                if (skip =? 0) {
+                    let frame=ctl.pop()
+                    ow_join_kill(frame.deferred)
+                    let lop=o_out[(OptWord(o_count) - OptWord(int64(1)))].op
+                    if ((lop =? 'block') or (lop =? 'if_')) {
+                        ow_pop()
+                    }
+                    else {
+                        ow_append(ins[0])
+                    }
+                }
+            }
+            continue
+        }
+        if ((opt_decode[oc_tag(ins)] & ((OptWord(int64(1)) << 24))) =? 0) {
+            ow_transfer(ins true)
+            continue
+        }
+        if (op =? 'nop') {
+            continue
+        }
+        if ((op =? 'block') or (op =? 'loop')) {
+            if (op =? 'loop') {
+                ow_enter_loop()
+            }
+            let kind:OptWord=0
+            if (op =? 'block') {
+                kind=3
+            }
+            ctl.push(OptControl(kind (- OptWord(int64(1))) o_nbr))
+            ow_scope_open((op =? 'block'))
+            ow_append(ins[0])
+            continue
+        }
+        if (op =? 'if_') {
+            let c=int64(o_regs[int64(ins[0].a)].repl)
+            let known=((o_regs[c].constant or ow_fact_false(c)) or ow_fact_true(c))
+            if known {
+                # the if becomes a plain block so branch depths inside stay valid
+                ow_append(Ins('block' 0 0 0 0 0 0))
+                if (((o_regs[c].constant and (o_regs[c].cval not=? 0))) or ow_fact_true(c)) {
+                    ctl.push(OptControl(1 (- OptWord(int64(1))) o_nbr))
+                    ow_scope_open()
+                }
+                else {
+                    ctl.push(OptControl(2 (- OptWord(int64(1))) o_nbr))
+                    skip=1
+                }
+                continue
+            }
+            ctl.push(OptControl(0 c o_nbr))
+            ow_scope_open()
+            ow_add_fact_true(c)
+            let ins2=ins[0]
+            ins2.a=OptIndex(c)
+            o_regs[c].nuse=(OptIndex(o_regs[c].nuse) + OptIndex(OptIndex(int64(1))))
+            ow_append(ins2)
+            continue
+        }
+        if (op =? 'else_') {
+            let c=ctl[(OptWord(ctl.length) - OptWord(int64(1)))].condition
+            ctl[(OptWord(ctl.length) - OptWord(int64(1)))].condition=(- OptWord(int64(1)))
+            ow_scope_close()
+            if (ctl[(OptWord(ctl.length) - OptWord(int64(1)))].kind =? 1) {
+                skip=1
+                continue
+            }
+            ow_scope_open()
+            if (c >=? 0) {
+                ow_add_fact_false(c)
+            }
+            ow_append(ins[0])
+            continue
+        }
+        if (op =? 'end') {
+            # A terminating if arm leaves its condition false. For a block with exactly
+            # one conditional exit and a terminating tail, only that taken exit reaches
+            # the join. Count all branches conservatively, including nested breaks.
+            let frame=ctl.pop()
+            let c=frame.condition
+            let nbr=frame.branches
+            let kind=frame.kind
+            ow_join_kill(frame.deferred)
+            let last=o_out[(OptWord(o_count) - OptWord(int64(1)))]
+            if (((((kind =? 3) and (c >=? 0)) and ((OptWord(nbr) + OptWord(int64(2))) =? o_nbr)) and (last.op =? 'br')) and (last.imm >? 0)) {
+                let target=(OptWord(ctl.length) - OptWord(int64(last.imm)))
+                if (target >=? 0) {
+                    let d=ow_branch_copy()
+                    if (d >=? 0) {
+                        o_regs[d].ver=(OptIndex(o_regs[d].ver) - OptIndex(OptIndex(int64(1))))
+                        o_join_regs.push(d)
+                        o_join_next.push(ctl[target].deferred)
+                        ctl[target].deferred=(OptWord(o_join_regs.length) - OptWord(int64(1)))
+                    }
+                }
+            }
+            let terminates=(((last.op =? 'ret') or (last.op =? 'trap')) or (((last.op =? 'call') and (last.c =? 1))))
+            let noret=((c >=? 0) and terminates)
+            ow_scope_close()
+            if ((last.op =? 'block') or (last.op =? 'if_')) {
+                # empty construct: drop it (an if's condition is pure)
+                ow_pop()
+                continue
+            }
+            ow_append(ins[0])
+            if noret {
+                if ((kind =? 3) and ((OptWord(nbr) + OptWord(int64(1))) =? o_nbr)) {
+                    ow_add_fact_true(c)
+                }
+                else if ((kind =? 0) and (nbr =? o_nbr)) {
+                    ow_add_fact_false(c)
+                }
+            }
+            continue
+        }
+        if (op =? 'brif') {
+            # a branch on a known condition: always or never taken
+            let c=int64(o_regs[int64(ins[0].a)].repl)
+            if ((o_regs[c].constant or ow_fact_false(c)) or ow_fact_true(c)) {
+                if (((o_regs[c].constant and (o_regs[c].cval not=? 0))) or ow_fact_true(c)) {
+                    ow_emit(Ins('br' 0 0 0 0 0 ins[0].imm))
+                }
+                continue
+            }
+            # Remember an exit's condition for a possible terminating block. Multiple
+            # exits (even with the same condition) fail the branch-count check at its end.
+            let target=(OptWord((OptWord(ctl.length) - OptWord(int64(1)))) - OptWord(int64(ins[0].imm)))
+            if ((target >=? 0) and (ctl[target].kind =? 3)) {
+                ctl[target].condition=c
+            }
+            # (after it, in this construct, the condition is false)
+            ow_transfer(ins true)
+            ow_add_fact_false(c)
+            continue
+        }
+        if (op =? 'zeroslots') {
+            ow_kill_all()
+            loop k in [0..int64(ins[0].b)) {
+                let item=int64(opt_ir[0].args[(OptWord(int64(ins[0].a)) + OptWord(k))])
+                if ((item & 1) =? 1) {
+                    o_regs[(item >> 1)].ver=(OptIndex(o_regs[(item >> 1)].ver) + OptIndex(OptIndex(int64(1))))
+                }
+            }
+            ow_append_plain(ins[0])
+            continue
+        }
+        ow_transfer(ins true)
+    }
+    if o_flow_dead {
+        ow_flow_end_dead()
+    }
+    # backward: drop pure instructions whose results are unused (o_push counted the uses)
+    let i=(OptWord(o_count) - OptWord(int64(1)))
+    loop (i >=? 0) {
+        let ins=(o_out + i)
+        if ((opt_decode[oc_tag(ins)] & 2) not=? 0) {
+            let d=int64(ins[0].dst)
+            if (o_regs[d].nuse =? 0) {
+                ow_operands(ins);
+                o_out[i].op='nop'
+                loop operand_index in [0..opt_use_count) {
+                    let u=ow_use(operand_index)
+                    o_regs[u].nuse=(OptIndex(o_regs[u].nuse) - OptIndex(OptIndex(int64(1))))
+                }
+            }
+        }
+        i=(OptWord(i) - OptWord(int64(1)))
+    }
+    opt_ir[0].code=opt_cleanup(o_out o_count)
+}
+
+# Word operations preserve the frozen optimizer's overflow and truncation rules.
+OptUnsigned:type=uint64<overflow='wrap'>
+const OW_ONE:OptUnsigned=1
+const OW_TWO:OptUnsigned=2
+ow_unsigned_add_overflow=(a:uint64 b:uint64):>bool=>OptUnsigned(a) + OptUnsigned(b) <? a
+ow_trunc_div=(a:int64 b:int64):>int64=>{
+    let q:int64=a // b
+    if (a <? 0) not=? (b <? 0) and a % b not=? 0 {q+=1}
+    q
+}
+ow_word_overflow=(operation:int64 x:int64 y:int64):>bool=>{
+    if operation =? 0 {
+        let r:int64=OptWord(x) + OptWord(y)
+        return ((x xor r) & (y xor r)) <? 0
+    }
+    if operation =? 1 {
+        let r:int64=OptWord(x) - OptWord(y)
+        return ((x xor y) & (x xor r)) <? 0
+    }
+    if operation =? 2 {
+        let ax:OptUnsigned=if x <? 0 {OptUnsigned(uint64(-(x + 1))) + OW_ONE} else {OptUnsigned(x)}
+        let ay:OptUnsigned=if y <? 0 {OptUnsigned(uint64(-(y + 1))) + OW_ONE} else {OptUnsigned(y)}
+        let limit:uint64=if (x <? 0) not=? (y <? 0) {uint64(9223372036854775808)} else {uint64(9223372036854775807)}
+        return ay not=? 0 and ax >? limit // ay
+    }
+    if operation =? 3 {return y =? 0 or (x =? OW_MIN_INT and y =? -1)}
+    if y <? 0 {return true}
+    if y >=? 64 {return x not=? 0}
+    ((OptWord(x) << y) >> y) not=? x
+}
+ow_divu_magic=(d0:uint64):>[uint64 int64 bool]=>{
+    let d:OptUnsigned=d0
+    let two63:OptUnsigned=0x8000000000000000
+    let max63:OptUnsigned=0x7FFFFFFFFFFFFFFF
+    let zero:OptUnsigned=0
+    let add=false
+    let nc:OptUnsigned=(zero - OW_ONE) - (zero - d) % d
+    let p:int64=63
+    let q1:OptUnsigned=two63 // nc
+    let r1:OptUnsigned=two63 - q1 * nc
+    let q2:OptUnsigned=max63 // d
+    let r2:OptUnsigned=max63 - q2 * d
+    loop true {
+        p+=1
+        if r1 >=? nc - r1 {
+            q1=q1 * OW_TWO + OW_ONE
+            r1=r1 * OW_TWO - nc
+        } else {
+            q1=q1 * OW_TWO
+            r1=r1 * OW_TWO
+        }
+        if r2 + OW_ONE >=? d - r2 {
+            if q2 >=? max63 {add=true}
+            q2=q2 * OW_TWO + OW_ONE
+            r2=r2 * OW_TWO + OW_ONE - d
+        } else {
+            if q2 >=? two63 {add=true}
+            q2=q2 * OW_TWO
+            r2=r2 * OW_TWO + OW_ONE
+        }
+        let delta:OptUnsigned=d - OW_ONE - r2
+        if not (p <? 128 and (q1 <? delta or (q1 =? delta and r1 =? 0))) {break}
+    }
+    [q2 + OW_ONE p - 64 add]
+}
+ow_div_magic=(d:int64):>[int64 int64]=>{
+    let two63:OptUnsigned=0x8000000000000000
+    let ad:OptUnsigned=OptUnsigned(d)
+    let anc:OptUnsigned=two63 - OW_ONE - two63 % ad
+    let p:int64=63
+    let q1:OptUnsigned=two63 // anc
+    let r1:OptUnsigned=two63 - q1 * anc
+    let q2:OptUnsigned=two63 // ad
+    let r2:OptUnsigned=two63 - q2 * ad
+    loop true {
+        p+=1
+        q1=q1 * OW_TWO
+        r1=r1 * OW_TWO
+        if r1 >=? anc {
+            q1=q1 + OW_ONE
+            r1=r1 - anc
+        }
+        q2=q2 * OW_TWO
+        r2=r2 * OW_TWO
+        if r2 >=? ad {
+            q2=q2 + OW_ONE
+            r2=r2 - ad
+        }
+        let delta:OptUnsigned=ad - r2
+        if not (q1 <? delta or (q1 =? delta and r1 =? 0)) {break}
+    }
+    [(q2 + OW_ONE) transmute int64 p - 64]
+}

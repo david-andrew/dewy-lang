@@ -1,0 +1,522 @@
+$runtime_checks
+from p"opt_workspace.dewy" import (
+    opt_ir o_dead_first o_dead_limit o_fact_nbr o_fact_scope o_flow o_flow_at o_reg_count
+    o_reg_storage o_regs opt_checked_flags opt_decode opt_operands
+)
+from p"ir_types.dewy" import (Op Ins IrFn)
+
+# Word arithmetic preserves Jo overflow; IR IDs and bounded cursors are fixed width.
+OptWord:type=int64<overflow='wrap'>
+OptIndex:type=int32<overflow='wrap'>
+
+oc_tag=(ins:ptr<Ins>):>int64=>$unsafe {
+    int64(((ins as ptr<uint32>))[0])
+}
+oc_pure=(ins:ptr<Ins>):>bool=>$unsafe {
+    ((opt_decode[oc_tag(ins)] & 2) not=? 0)
+}
+oc_defines=(ins:ptr<Ins>):>bool=>$unsafe {
+    ((opt_decode[oc_tag(ins)] & 1) not=? 0)
+}
+oc_retargetable=(ins:ptr<Ins>):>bool=>$unsafe {
+    if (((ins[0].op =? 'checked_add') or (ins[0].op =? 'checked_sub')) or (ins[0].op =? 'checked_mul')) {
+        return opt_checked_flags
+    }
+    ((opt_decode[oc_tag(ins)] & 8) not=? 0)
+}
+oc_vtype=(v:int64):>int64=>$unsafe {
+    let t=int64(opt_ir[0].vtypes[v])
+    if (t =? 3) {
+        return 0
+    }
+    t
+}
+oc_is_k=(v:int64):>bool=>$unsafe {
+    o_regs[v].constant
+}
+
+# Read the same operand description as the backends, without a host callback or
+# a copied operand list. zeroslots carries definitions, not register uses.
+oc_has_use=(ins:ptr<Ins> v:int64):>bool=>$unsafe {
+    let mode=opt_operands[oc_tag(ins)]
+    if ((mode & 16) not=? 0) {
+        loop k in [int64(ins[0].a)..(OptWord(int64(ins[0].a)) + OptWord(int64(ins[0].b)))) {
+            if (int64(opt_ir[0].args[k]) =? v) {
+                return true
+            }
+        }
+        return (((mode & 128) not=? 0) and (int64(ins[0].c) =? v))
+    }
+    let n=(mode & 7)
+    if (((mode & 256) not=? 0) and (ins[0].a <? 0)) {
+        n=0
+    }
+    if (((mode & 32) not=? 0) and ((int64(ins[0].c) & 128) not=? 0)) {
+        n+=1
+    }
+    if (((mode & 64) not=? 0) and ((mode & 32) =? 0)) {
+        n+=1
+    }
+    if ((n >? 0) and (int64(ins[0].a) =? v)) {
+        return true
+    }
+    if ((n >? 1) and (int64(ins[0].b) =? v)) {
+        return true
+    }
+    if (n >? 2) {
+        if ((mode & 64) not=? 0) {
+            return (int64(ins[0].dst) =? v)
+        }
+        return (int64(ins[0].c) =? v)
+    }
+    false
+}
+oc_tmp=():>int64=>$unsafe {
+    let d=opt_ir[0].vtypes.length
+    opt_ir[0].vtypes.push(int8(0))
+    if (o_reg_count <=? d) {
+        o_reg_storage.resize((OptWord(d) + OptWord(int64(1))))
+        o_regs=o_reg_storage.ptr
+        o_reg_count=(OptWord(d) + OptWord(int64(1)))
+        o_fact_scope.resize((OptWord(((OptWord(d) + OptWord(int64(1))))) * OptWord(int64(2))))
+        o_fact_nbr.resize((OptWord(((OptWord(d) + OptWord(int64(1))))) * OptWord(int64(2))))
+    }
+    let reg=(o_regs + d)
+    reg[0].ndef=1
+    reg[0].stable=true
+    reg[0].defpos=(- 1)
+    reg[0].first=2147483647
+    reg[0].nuse=0
+    reg[0].constant=false
+    reg[0].repl=int32(d)
+    reg[0].ver=0
+    reg[0].dop=(- 1)
+    d
+}
+oc_select_op=(ins:Ins):>bool=>$unsafe {
+    if (ins.ty not=? 0) {
+        return false
+    }
+    match ins.op {
+        <'iconst'|'mov'|'add'|'sub'|'mul'|'and_'|'or_'|'xor'|'shl'|'shrs'|'shru'|'neg'|'not_'> => {
+            true
+        }
+        <'eq'|'ne'|'lts'|'les'|'gts'|'ges'|'ltu'|'leu'|'gtu'|'geu'> => {
+            true
+        }
+        <'sext8'|'sext16'|'sext32'|'zext8'|'zext16'|'zext32'> => {
+            true
+        }
+        _ => {
+            false
+            # Lowered value-if: block { block { condition; brif else; yes; br end }; no }.
+            # Recognize a small diamond after inlining, so tiny arithmetic helpers count too.
+        }
+    }
+}
+oc_if_select=(out:ptr<Ins> start:int64 n:int64):>int64=>$unsafe {
+    if ((((OptWord(n) - OptWord(start)) <? 6) or ((OptWord(n) - OptWord(start)) >? 32)) or (out[(OptWord(start) + OptWord(int64(1)))].op not=? 'block')) {
+        return (- 1)
+    }
+    let depth:OptWord=0
+    let branch:OptWord=(- 1)
+    let jump:OptWord=(- 1)
+    let split:OptWord=(- 1)
+    let yes:OptWord=(- 1)
+    let no:OptWord=(- 1)
+    let cost:OptWord=0
+    let guard:OptWord=(- 1)
+    let guard_yes=false
+    let skip:OptWord=(- 1)
+    loop j in [(OptWord(start) + OptWord(int64(2)))..n) {
+        if (j <=? skip) {
+            continue
+        }
+        let ins=out[j]
+        let op=ins.op
+        # A single no-argument failure guard can be predicated by the arm's
+        # selection. Every other instruction in both arms remains pure.
+        if (((((branch >=? 0) and (depth =? 0)) and (guard <? 0)) and (op =? 'if_')) and ((OptWord(j) + OptWord(int64(2))) <? n)) {
+            let failure=out[(OptWord(j) + OptWord(int64(1)))]
+            if (((((failure.op =? 'call') and (failure.c =? 1)) and (failure.b =? 0)) and (failure.dst <? 0)) and (out[(OptWord(j) + OptWord(int64(2)))].op =? 'end')) {
+                guard=j
+                guard_yes=(split <? 0)
+                skip=(OptWord(j) + OptWord(int64(2)))
+                cost+=2
+                continue
+            }
+        }
+        if (op =? 'block') {
+            depth+=1
+            continue
+        }
+        if (op =? 'end') {
+            if (depth >? 0) {
+                depth-=1
+            }
+            else {
+                if ((jump not=? (OptWord(j) - OptWord(int64(1)))) or (split >=? 0)) {
+                    return (- 1)
+                }
+                split=j
+            }
+            continue
+        }
+        if ((((op =? 'brif') and (branch <? 0)) and (depth =? 0)) and (ins.imm =? 0)) {
+            branch=j
+            continue
+        }
+        if (((((op =? 'br') and (branch >=? 0)) and (jump <? 0)) and (depth =? 0)) and (ins.imm =? 1)) {
+            jump=j
+            continue
+        }
+        if ((((((((op =? 'br') or (op =? 'brif')) or (op =? 'brtable')) or (op =? 'loop')) or (op =? 'if_')) or (op =? 'else_')) or (op =? 'ret')) or (op =? 'trap')) {
+            return (- 1)
+        }
+        if (branch <? 0) {
+            continue
+        }
+        if (not oc_select_op(ins)) {
+            return (- 1)
+        }
+        cost+=1
+        if (cost >? 8) {
+            return (- 1)
+        }
+        if (split <? 0) {
+            if (jump >=? 0) {
+                return (- 1)
+            }
+            yes=j
+        }
+        else {
+            no=j
+        }
+    }
+    if (((((depth not=? 0) or (yes <? 0)) or (no <? 0)) or (split <? 0)) or (cost >? 8)) {
+        return (- 1)
+    }
+    let dst=int64(out[yes].dst)
+    let cond=int64(out[branch].a)
+    if (((dst <? 0) or (out[no].dst not=? dst)) or (oc_vtype(dst) not=? 0)) {
+        return (- 1)
+    }
+    if ((guard >=? 0) and (out[guard].a =? dst)) {
+        return (- 1)
+    }
+    loop j in [(OptWord(branch) + OptWord(int64(1)))..n) {
+        let ins=out[j]
+        if (not oc_select_op(ins)) {
+            continue
+        }
+        let d=int64(ins.dst)
+        # Only the two result writes may redefine a register. Everything else
+        # must be a temporary, and neither arm may read the result being joined.
+        if (d =? cond) {
+            return (- 1)
+        }
+        if ((j not=? yes) and (j not=? no)) {
+            if (((d =? dst) or (d <? 0)) or (o_regs[d].ndef not=? 1)) {
+                return (- 1)
+            }
+        }
+        if oc_has_use((out + j) dst) {
+            return (- 1)
+        }
+        # A result copy already names the selected value. Keep that operand
+        # directly rather than introducing two moves before the select; besides
+        # saving vregs this leaves adjacent comparisons available to the emitter.
+    }
+    let y=(if (out[yes].op =? 'mov') {int64(out[yes].a)} else {oc_tmp()})
+    let z=(if (out[no].op =? 'mov') {int64(out[no].a)} else {oc_tmp()})
+    let truth:OptWord=(- 1)
+    let comparison=out[(OptWord(branch) - OptWord(int64(1)))]
+    if (((((o_regs[cond].nuse =? 1) and (comparison.dst =? cond)) and (comparison.op =? 'ne')) and oc_is_k(int64(comparison.b))) and (o_regs[int64(comparison.b)].cval =? 0)) {
+        let source=int64(comparison.a)
+        let stable=(source not=? dst)
+        loop j in [(OptWord(branch) + OptWord(int64(1)))..n) {
+            if (out[j].dst =? source) {
+                stable=false
+            }
+        }
+        if stable {
+            truth=(OptWord(branch) - OptWord(int64(1)))
+            cond=source
+        }
+    }
+    let replacement:array<Ins>=[]
+    loop j in [(OptWord(start) + OptWord(int64(2)))..n) {
+        if (j =? truth) {
+            continue
+        }
+        let ins=out[j]
+        if (j =? guard) {
+            replacement.push(ins)
+            let chosen=cond
+            if guard_yes {
+                let zero=oc_tmp()
+                chosen=oc_tmp()
+                replacement.push(Ins('iconst' 0 int32(zero) 0 0 0 0))
+                replacement.push(Ins('eq' 0 int32(chosen) int32(cond) int32(zero) 0 0))
+            }
+            replacement.push(Ins('if_' 0 (- 1) int32(chosen) 0 0 0))
+            replacement.push(out[(OptWord(j) + OptWord(int64(1)))])
+            replacement.push(out[(OptWord(j) + OptWord(int64(2)))])
+            replacement.push(out[(OptWord(j) + OptWord(int64(2)))])
+            continue
+        }
+        if ((guard >=? 0) and (((j =? (OptWord(guard) + OptWord(int64(1)))) or (j =? (OptWord(guard) + OptWord(int64(2))))))) {
+            continue
+        }
+        if ((((ins.op =? 'block') or (ins.op =? 'end')) or (j =? branch)) or (j =? jump)) {
+            continue
+        }
+        if ((((j =? yes) or (j =? no))) and (ins.op =? 'mov')) {
+            continue
+        }
+        if (j =? yes) {
+            ins.dst=int32(y)
+        }
+        if (j =? no) {
+            ins.dst=int32(z)
+        }
+        replacement.push(ins)
+    }
+    let selected=Ins('select' 0 int32(dst) int32(cond) int32(z) int32(y) 0)
+    selected.pos=out[branch].pos
+    replacement.push(selected)
+    loop k in [0..replacement.length) {
+        out[(OptWord(start) + OptWord(k))]=replacement[k]
+    }
+    (OptWord(start) + OptWord(replacement.length))
+}
+
+# A branch to a block's end can make that end reachable even when its body
+# cannot fall through. Branches to loop headers do not reach the loop's end.
+opt_cleanup=(code:ptr<Ins> count:int64):>array<Ins>=>$unsafe {
+    let storage:array<Ins>=[]
+    # At most one instruction and one explicit trap per input operation. The
+    # buffer never grows while raw views are live; publication trims its length.
+    storage.resize((OptWord(count) * OptWord(int64(2))))
+    let out=storage.ptr
+    let used:OptWord=0
+    let dead_range:OptWord=0
+    let dead_count=o_dead_first.length
+    let dead_first=o_dead_first.ptr
+    let dead_limit=o_dead_limit.ptr
+    let next_dead=(if (dead_count >? 0) {dead_first[0]} else {count})
+    let input_pos:OptWord=0
+    loop (input_pos <? count) {
+        if (input_pos =? next_dead) {
+            input_pos=dead_limit[dead_range]
+            dead_range+=1
+            next_dead=(if (dead_range <? dead_count) {dead_first[dead_range]} else {count})
+            continue
+        }
+        let index=input_pos
+        let ins=(code + index)
+        input_pos+=1
+        let op=ins[0].op
+        let control=(((opt_decode[oc_tag(ins)] >> 20)) & 15)
+        if (((control =? 0) or (control =? 15)) or (((control =? 12) and (ins[0].c not=? 1)))) {
+            out[used]=ins[0]
+            used+=1
+            continue
+        }
+        if (control =? 1) {
+            continue
+        }
+        let top:OptWord=(- 1)
+        if (op =? 'end') {
+            top=int64(o_flow_at[index])
+        }
+        if ((op =? 'end') and (used >? 0)) {
+            if (o_flow[top].kind =? 'block') {
+                let selected=oc_if_select(out o_flow[top].start used)
+                if (selected >=? 0) {
+                    used=selected
+                    continue
+                }
+            }
+            let last=out[(OptWord(used) - OptWord(int64(1)))]
+            if (((last.op =? 'br') and (last.imm =? 0)) and (o_flow[top].kind not=? 'loop')) {
+                used-=1
+            }
+            # Inlining a leaf can leave `block; value; end` after its final
+            # branch is removed. A single pure instruction cannot target this
+            # block; removing the wrapper exposes adjacent compare/branch pairs.
+            if (((o_flow[top].kind =? 'block') and (used =? (OptWord(o_flow[top].start) + OptWord(int64(2))))) and oc_pure(((out + used) - 1))) {
+                used-=1
+                let value=out[used]
+                out[(OptWord(used) - OptWord(int64(1)))]=value
+                continue
+                # `if c { br d }` is `brif c, d - 1` (one branch instead of two)
+            }
+            if ((used >=? 2) and (o_flow[top].kind =? 'if_')) {
+                last=out[(OptWord(used) - OptWord(int64(1)))]
+                let prev=out[(OptWord(used) - OptWord(int64(2)))]
+                if (((last.op =? 'br') and (last.imm >=? 1)) and (prev.op =? 'if_')) {
+                    used-=1
+                    used-=1
+                    out[used]=Ins('brif' 0 0 prev.a 0 0 (OptWord(last.imm) - OptWord(int64(1))))
+                    used+=1
+                    continue
+                    # `block { ...; brif c, 0; br d }` (c a comparison used only there) is
+                    # `...; brif !c, d - 1`
+                }
+            }
+            if ((used >=? 2) and (o_flow[top].kind =? 'block')) {
+                last=out[(OptWord(used) - OptWord(int64(1)))]
+                let prev=out[(OptWord(used) - OptWord(int64(2)))]
+                let st=o_flow[top].start
+                let c=int64(prev.a)
+                if (((((((last.op =? 'br') and (last.imm >=? 1)) and (prev.op =? 'brif')) and (prev.imm =? 0)) and (c >=? 0)) and (c <? o_reg_count)) and (o_regs[c].nuse =? 1)) {
+                    # the comparison, inside the block, with no other branch there
+                    let cd:OptWord=(- 1)
+                    let plain=true
+                    loop j in [(OptWord(st) + OptWord(int64(1)))..(OptWord(used) - OptWord(int64(2)))) {
+                        let eo=out[j].op
+                        if ((((((((eo =? 'br') or (eo =? 'brif')) or (eo =? 'brtable')) or (eo =? 'block')) or (eo =? 'loop')) or (eo =? 'if_')) or (eo =? 'end')) or (eo =? 'else_')) {
+                            plain=false
+                        }
+                        if ((int64(out[j].dst) =? c) and oc_defines((out + j))) {
+                            cd=j
+                        }
+                    }
+                    if ((plain and (cd >=? 0)) and (oc_negate(out[cd].op) not=? 'nop')) {
+                        let e=out[cd]
+                        e.op=oc_negate(e.op)
+                        out[cd]=e
+                        let d=(OptWord(last.imm) - OptWord(int64(1)))
+                        used-=1
+                        used-=1
+                        loop j in [st..(OptWord(used) - OptWord(int64(1)))) {
+                            out[j]=out[(OptWord(j) + OptWord(int64(1)))]
+                        }
+                        used-=1
+                        out[used]=Ins('brif' 0 0 int32(c) 0 0 d)
+                        used+=1
+                        continue
+                    }
+                }
+            }
+        }
+        if ((op =? 'mov') and (used >? 0)) {
+            let t=int64(ins[0].a)
+            let d=int64(ins[0].dst)
+            if (((((t not=? d) and (t >=? 0)) and (t <? o_reg_count)) and (o_regs[t].nuse =? 1)) and (oc_vtype(t) =? oc_vtype(d))) {
+                # (also a few instructions back, in straight-line code that leaves d alone:
+                # vector lanes computed one after the other, then copied)
+                let j=(OptWord(used) - OptWord(int64(1)))
+                let done=false
+                loop ((j >=? 0) and (j >=? (OptWord(used) - OptWord(int64(8))))) {
+                    let e=out[j]
+                    let eo=e.op
+                    if ((int64(e.dst) =? t) and oc_defines((out + j))) {
+                        if oc_retargetable((out + j)) {
+                            e.dst=int32(d)
+                            out[j]=e
+                            done=true
+                        }
+                        break
+                    }
+                    if (((((((((eo =? 'block') or (eo =? 'loop')) or (eo =? 'if_')) or (eo =? 'else_')) or (eo =? 'end')) or (eo =? 'br')) or (eo =? 'brif')) or (eo =? 'brtable')) or (eo =? 'zeroslots')) {
+                        break
+                    }
+                    let ed=(if oc_defines((out + j)) {int64(e.dst)} else {(- 1)})
+                    if (((ed =? d) or oc_has_use((out + j) d)) or (ed =? t)) {
+                        break
+                    }
+                    j-=1
+                }
+                if done {
+                    continue
+                }
+            }
+        }
+        if ((op =? 'copy') and (used >? 0)) {
+            # vector arithmetic into a temporary that is then copied: compute into the copy's target
+            let last=out[(OptWord(used) - OptWord(int64(1)))]
+            let t=int64(ins[0].b)
+            if (((((last.op =? 'vop') and (int64(last.a) =? t)) and (o_regs[t].nuse =? 2)) and (int64(ins[0].imm) =? (OptWord(((((int64(last.imm) >> 4)) & 7))) * OptWord(int64(4))))) and oc_sole_slot(code count t)) {
+                last.a=ins[0].a
+                out[(OptWord(used) - OptWord(int64(1)))]=last
+                continue
+            }
+        }
+        out[used]=ins[0]
+        used+=1
+        if (((op =? 'block') or (op =? 'loop')) or (op =? 'if_')) {
+            o_flow[int64(o_flow_at[index])].start=(OptWord(used) - OptWord(int64(1)))
+        }
+        else if ((op =? 'end') and o_flow[top].terminated) {
+            out[used]=Ins('trap' 0 0 0 0 0 0)
+            used+=1
+        }
+    }
+    storage.resize(used)
+    storage
+}
+
+# Is t the address of a frame slot no other instruction takes the address of? (Asked rarely:
+# a vector operation into a temporary that is then copied.)
+oc_sole_slot=(code:ptr<Ins> count:int64 t:int64):>bool=>$unsafe {
+    let s:OptWord=(- 1)
+    loop input_pos in [0..count) {
+        let ins=(code + input_pos)
+        if ((ins[0].op =? 'slot') and (int64(ins[0].dst) =? t)) {
+            s=int64(ins[0].a)
+        }
+    }
+    if (s <? 0) {
+        return false
+    }
+    let refs:OptWord=0
+    loop input_pos in [0..count) {
+        let ins=(code + input_pos)
+        if ((ins[0].op =? 'slot') and (int64(ins[0].a) =? s)) {
+            refs+=1
+        }
+    }
+    (refs =? 1)
+}
+
+# the comparison that is true exactly when op is false (integers only: floats have NaN)
+oc_negate=(op:Op):>Op=>$unsafe {
+    match op {
+        <'eq'> => {
+            'ne'
+        }
+        <'ne'> => {
+            'eq'
+        }
+        <'lts'> => {
+            'ges'
+        }
+        <'ges'> => {
+            'lts'
+        }
+        <'les'> => {
+            'gts'
+        }
+        <'gts'> => {
+            'les'
+        }
+        <'ltu'> => {
+            'geu'
+        }
+        <'geu'> => {
+            'ltu'
+        }
+        <'leu'> => {
+            'gtu'
+        }
+        <'gtu'> => {
+            'leu'
+        }
+        _ => {
+            'nop'
+            # instructions whose result register may be renamed
+        }
+    }
+}

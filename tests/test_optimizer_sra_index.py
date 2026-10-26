@@ -102,7 +102,7 @@ def test_optimizer_input_operand_contract(compiler, tmp_path):
     """Fused metadata must agree with the IR's operand ABI for every opcode."""
     root = Path(__file__).resolve().parents[1]
     source = tmp_path / 'operand-contract.jo'
-    source.write_text(f"use '{root}/compiler/ir_types.dewy'\nuse '{root}/compiler/ir.jo'\nuse '{root}/compiler/opt.jo'\n" + '''
+    source.write_text(f"use '{root}/compiler/ir_types.dewy'\nuse '{root}/compiler/ir.jo'\nuse '{root}/compiler/opt.jo'\nuse '{root}/compiler/opt_workspace.dewy'\n" + '''
 loop k in [0..int(Op.findb) + 1):
     op = Op(k)
     if op == .block or op == .loop or op == .if_ or op == .else_ or op == .end: continue

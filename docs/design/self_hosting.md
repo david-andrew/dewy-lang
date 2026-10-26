@@ -284,12 +284,13 @@ First three cutovers in this sequence (cost estimates unless marked shipped):
    opcode list avoids numeric conversion of Dewy string unions. Differential
    tests compare all 107 slots and exceptional operand forms with the frozen
    constructor and independent optimizer walker, in default and release modes.
-3. **IR cleanup pass:** move the mutually dependent `opt.jo` rewrite/cleanup
-   group with its indexed scratch tables and borrowed `IrFn`; expose coarse
-   type/diagnostic requests only where demanded. Preserve existing pass order
-   and traversal complexity, no extra scan. Budget ±0.3% per flagship phase;
-   arithmetic checks, array COW and lost inlining are the main uncertainties.
-   Measure the whole group before committing to a wider optimizer migration.
+3. **IR cleanup pass:** `opt_rewrite.dewy` owns the mutually dependent forward
+   rewrite, constant folding, strength reduction, CSE, scoped facts and DCE;
+   `opt_cleanup.dewy` owns final control compaction, diamonds and retargeting.
+   `opt_workspace.dewy` owns their indexed scratch tables. The remaining
+   optimizer passes keep their current order and direct shared-table access.
+   Budget ±0.3% per flagship phase; measure the whole group before extending
+   the cutover to SRA, loop transforms or return sinking.
 
 All three retain the ±0.3% limit on *each* flagship phase row. Schema migration
 unblocks direct Dewy IR consumers but does not claim the lowering/optimizer code
@@ -303,6 +304,40 @@ leaves can lose their twins together with the corresponding `FROZEN_TWINS`
 entries. The special reader seed and frontend/context stubs retire with that
 chain. Preserve independent bootstrap and fixed-point checks; deleting twins
 alone is not self-hosting progress.
+
+## Optimizer ownership boundary
+
+The rewrite/cleanup group has one non-reentrant workspace, preserving the
+existing optimizer lifetime. Its independent globals preserve alias information
+between scalar updates and arena views. Jo's coarse `optimize` entry runs SRA, binds the
+current `IrFn`, opcode tables, target policies and constant-cache views, then
+enters Dewy. Its bounded SRA retry happens after Dewy returns. No instruction,
+operand, folding or metadata operation calls back into Jo. Jo sibling passes
+retain their direct rewrite/register-reset helpers and share the same register
+table; those helpers are not adapters on the Dewy execution path.
+
+`opt_ir` borrows the original function for the complete call. Input code stays
+stable until final publication; output uses a separate arena. Every arena grow
+refreshes its raw pointer, and no register-entry pointer survives a helper that
+can create a virtual register. Two instruction slots suffice: the outer forward
+transfer uses slot zero, and strength reduction uses slot one with simplification
+disabled. The operand view is transient: consume it before decoding another
+instruction, and decode DCE operands before replacing the instruction with nop.
+Raw opcode ordinals follow `ir_types` exactly; exhaustive descriptor tests compare
+them with the independent Jo walker.
+
+The metadata, forward and backward walks remain O(N + U + E), for input
+operations, operand uses and emitted operations, plus existing CSE hash probes
+and demanded queries. Copy-lifetime scans stop after 4,000 instructions; scalar
+range queries follow at most four definition edges. Cleanup retains its existing
+diamond/wrapper and sole-slot scans, including their possible quadratic total
+cost; no unconditional analysis or extra sweep is introduced. Arithmetic uses
+fixed-width wrapping words and signed truncation to preserve Jo's folding rules,
+including minimum-integer negation and the zero/minimum division guards.
+
+The frozen workspace, rewrite and cleanup twins remain required by both Jo
+bootstrap generations. Their retirement follows the Dewy-capable bootstrap
+route above; execution ownership alone does not remove that dependency.
 
 ## Parser ownership boundary
 
