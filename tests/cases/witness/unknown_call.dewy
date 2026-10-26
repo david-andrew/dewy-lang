@@ -1,7 +1,7 @@
-grow=(@xs:array<int64>)=>{ xs.push(1) }
+shrink=(@xs:array<int64>)=>{ xs.clear() }
 pick=(@xs:array<int64> i:int64):>int64=>{
     if i <? 0 or i >=? xs.length return 0
-    grow(@xs)
+    shrink(@xs)
     $assert i <? xs.length
     return xs[i]
 }

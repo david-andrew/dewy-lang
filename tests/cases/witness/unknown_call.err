@@ -1,6 +1,6 @@
 /unknown_call.dewy:5:13: error: cannot prove assertion: missing upper bound$/
-/unknown_call.dewy:4:5: note: xs.length may have changed at this call to grow$/
-/unknown_call.dewy:3:18: note: the earlier `i <\? xs.length` fact described the value before the call to grow$/
+/unknown_call.dewy:4:5: note: xs.length may have changed at this call to shrink$/
+/unknown_call.dewy:3:18: note: the earlier `i <\? xs.length` fact described the value before the call to shrink$/
 note: missing upper bound: nothing establishes `i <? xs.length` here
 note: possible witness (consistent with the known bounds, not an observed execution): i = 0, xs.length = 0
-/^    help: establish `i <\? xs.length` after `grow\(@xs\)` with a current guard, or check it at run time with `\$runtime_assert`$/
+/^    help: establish `i <\? xs.length` after `shrink\(@xs\)` with a current guard, or check it at run time with `\$runtime_assert`$/

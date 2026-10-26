@@ -673,6 +673,18 @@ takes a handle to a function that may panic. A scope without runtime checks
 error names the chain to the panic and offers both repairs, proving what the
 callee checks first or opting in with `$runtime_checks`. So a function built
 with `$runtime_checks` cannot fail inside a caller that did not opt in.
+Index proofs retain nested array lengths through element writes in branches
+and loops. A checked helper that preserves or grows an array's length can
+preserve a caller's guarded index; an append helper's returned index can be
+proven below the array's post-call length. Every return must establish the
+relation. Replacing or shrinking the array, an unknown callback, and pending
+return cleanup still invalidate facts they could falsify. Module `const` values,
+including their lengths and guarded elements, retain facts across calls.
+A sorted copy has its input value's length, and `text.chars()` has `text.length`
+elements. Search bounds survive a fallback when both cases establish them:
+`xs.index_of(x) ?? -1` is below `xs.length`, so a nonnegative guard makes it
+an index. A text search result is at most `text.length`, which permits a slice
+endpoint but needs a strict upper guard for indexing.
 A `$runtime_assert` is its module's own explicit handling: it makes its
 function (and the module's functions that call it) panic only for callers in
 other modules. `$assume_local_asserts=false` in a module, function or block

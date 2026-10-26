@@ -18,10 +18,10 @@ STALE = '''forbidden=(@xs:array<int64>):>int64=>{
 main=()=>{ let items:array<int64>=[1]; printl(forbidden(@items)) }
 '''
 
-RESIZED = '''grow=(@xs:array<int64>)=>{ xs.push(1) }
+RESIZED = '''resize=(@xs:array<int64>)=>{ xs.clear() }
 pick=(@xs:array<int64> i:int64):>int64=>{
     if i <? 0 or i >=? xs.length return 0
-    grow(@xs)
+    resize(@xs)
     return xs[i]
 }
 main=()=>{ let items:array<int64>=[1]; printl(pick(@items 0)) }
@@ -59,8 +59,8 @@ CASES = [
              '/w.dewy:5:5: note: xs.length is 0 after this clear$/',
              '/w.dewy:4:8: note: the earlier `i <\\? xs.length` fact described the value before the clear$/']),
     (RESIZED, ['/w.dewy:5:12: error: cannot prove index is in bounds: missing upper bound$/',
-               '/w.dewy:4:5: note: xs.length may have changed at this call to grow$/',
-               '/w.dewy:3:18: note: the earlier `i <\\? xs.length` fact described the value before the call to grow$/',
+               '/w.dewy:4:5: note: xs.length may have changed at this call to resize$/',
+               '/w.dewy:3:18: note: the earlier `i <\\? xs.length` fact described the value before the call to resize$/',
                'note: missing upper bound: nothing establishes `i <? xs.length` here',
                'possible witness (consistent with the known bounds, not an observed execution): i = 0, xs.length = 0']),
     (CONTRACT, ["/w.dewy:3:30: error: cannot prove refinement `y >\\? 0`: missing lower bound$/",

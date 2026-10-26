@@ -28,7 +28,7 @@ sha_dup=(x:Word32):>Word64=>Word64(x) | (Word64(x) << 32)
 sha_rotr=(x:Word32 n:int64):>Word32=>Word32(sha_dup(x) >> n)
 
 # fold the 64-byte block data[at..at + 64) into hs (w: room for the message schedule)
-sha256_block=(@hs:array<Word32> @w:array<Word32 length=64> data:array<uint8> at:int64):>void=>{
+sha256_block=(@hs:array<Word32 length=8> @w:array<Word32 length=64> data:array<uint8> at:int64):>void=>{
     # (the block's big-endian words)
     loop t in [0..16) {
         let q:int64=at + t * 4
@@ -97,7 +97,7 @@ sha_digest=(hs:array<Word32>):>array<uint8>=>{
 
 # the SHA-256 of b[off..off + n)
 sha256=(b:array<uint8> off:int64 n:int64):>array<uint8>=>{
-    let hs:array<Word32>=[0x6a09e667 0xbb67ae85 0x3c6ef372 0xa54ff53a 0x510e527f 0x9b05688c 0x1f83d9ab 0x5be0cd19]
+    let hs:array<Word32 length=8>=[0x6a09e667 0xbb67ae85 0x3c6ef372 0xa54ff53a 0x510e527f 0x9b05688c 0x1f83d9ab 0x5be0cd19]
     let w:array<Word32 length=64>=fill(Word32(0) 64)
     let full:int64=n // 64
     loop k in [0..full) {sha256_block(@hs @w b off + k * 64)}
@@ -106,7 +106,7 @@ sha256=(b:array<uint8> off:int64 n:int64):>array<uint8>=>{
     sha_digest(hs)
 }
 
-sha1_block=(@hs:array<Word32> @w:array<Word32 length=80> data:array<uint8> at:int64):>void=>{
+sha1_block=(@hs:array<Word32 length=5> @w:array<Word32 length=80> data:array<uint8> at:int64):>void=>{
     # (the block's big-endian words)
     loop t in [0..16) {
         let q:int64=at + t * 4
@@ -137,7 +137,7 @@ sha1_block=(@hs:array<Word32> @w:array<Word32 length=80> data:array<uint8> at:in
 
 # the SHA-1 of b
 sha1=(b:array<uint8>):>array<uint8>=>{
-    let hs:array<Word32>=[0x67452301 0xEFCDAB89 0x98BADCFE 0x10325476 0xC3D2E1F0]
+    let hs:array<Word32 length=5>=[0x67452301 0xEFCDAB89 0x98BADCFE 0x10325476 0xC3D2E1F0]
     let w:array<Word32 length=80>=fill(Word32(0) 80)
     let n=b.length
     let full:int64=n // 64
