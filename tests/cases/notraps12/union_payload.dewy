@@ -1,0 +1,4 @@
+Item:type=[values:array<int64>]
+let a:Item|string=Item[[20 22]]
+let result=match a {b:Item=>{b.values[0]=99 b.values[1]} <string>=>0}
+if a is? Item printl(a.values[0]+result)

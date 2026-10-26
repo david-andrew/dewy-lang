@@ -179,6 +179,11 @@ const FACT_ELEMENT_LENGTH = -16
 const FACT_ELEMENT_VALUE = -17
 # Projection selector of a dictionary value's key positions (fact_map_entry).
 const FACT_MAP_POSITIONS = -18
+# Every element of a fill is a copy of this immutable value. Element writes
+# drop the uniform projection; snapshots retain theirs.
+const FACT_ELEMENT_COPY = -19
+const FACT_POOL_POSITIONS = -20
+const FACT_MAP_DENSE = -21
 fact_name_vals = 0
 
 # A runtime-child walk, never into nested function bodies. Closed calls
@@ -695,6 +700,8 @@ fact_project = (s: mut FactState, base: int, selector: int, element: bool, t: in
             p = s.projections[i]
             i = s.index[0].projection_next[i]
             if p.element and (p.selector == selector or fact_compare(s, .eq, p.selector, selector) == 1): return p.value
+        i = fact_index_get(s.index[0].projection_index, fact_projection_key(base, FACT_ELEMENT_COPY, false))
+        if i >= 0: return s.projections[i].value
     v = fact_new(s, fact_domain(t), FactTerm(type = t))
     if not element and selector == -1:
         fact_set_bound(s, v, FactBound(0, fact_length_max()))
@@ -944,9 +951,11 @@ fact_replace = (s: mut FactState, base: int, selector: int, element: bool, value
     loop pi >= 0:
         p = old[pi]
         pi = links[pi]
-        if element and not p.element and (p.selector == FACT_ELEMENT_LENGTH or p.selector == FACT_ELEMENT_VALUE): continue
+        if element and not p.element and (p.selector == FACT_ELEMENT_LENGTH or p.selector == FACT_ELEMENT_VALUE or p.selector == FACT_ELEMENT_COPY): continue
         if private and p.element: continue
+        if private and p.selector == FACT_POOL_POSITIONS: continue
         if p.selector == FACT_MAP_POSITIONS and not p.element and (element or selector != fact_name_vals): continue
+        if p.selector == FACT_MAP_DENSE and not p.element and (element or selector != fact_name_vals): continue
         if p.element == element:
             if not element and p.selector == selector: continue
             # Different selector identities do not prove different elements.
@@ -1567,7 +1576,7 @@ fact_exposed = (p: PlaceIdentity) -> bool:
     # it at their calls; unrelated calls cannot reach it through the mutex.
     if place_locked.has(p.declaration): return false
     flags = int(locals[p.declaration].flags)
-    if flags & LF_VALUEITER != 0: flags &= ~LF_BYREF
+    if flags & LF_BYREF != 0 and (flags & LF_VALUEITER != 0 or map_loop_values.has(p.declaration)): flags &= ~LF_BYREF
     if flags & (LF_MUTPARAM | LF_SHARED | LF_CAPTURE | LF_BYREF | LF_EXPOSED) == 0 and flags & LF_ADDR != 0 and (is_map_type(int(locals[p.declaration].type)) or fact_pool_type(int(locals[p.declaration].type))) and fact_dewy_local(p.declaration): return false
     # (and so is any Dewy local's that nothing captures, aliases or exposes:
     # `@xs` lends it to that call alone, which fact_forget_mutable_args havocs)
@@ -2670,11 +2679,12 @@ fact_change_shape = (s: mut FactState, old0: int, fresh0: int, chain: int[], j0:
         loop qi >= 0:
             q = s.projections[qi]
             qi = s.index[0].projection_next[qi]
+            if q.selector == FACT_POOL_POSITIONS and not q.element and selector >= 0 and starts_with(name_of(selector), "__"): continue
             if q.element:
                 if entries and fact_truth(s, q.value) == 1: kept.push(FactProjection(fresh, q.selector, true, q.value))
                 continue
             if q.selector == selector: child = q.value
-            else if q.selector != FACT_MAP_POSITIONS or selector == fact_name_vals: kept.push(FactProjection(fresh, q.selector, false, q.value))
+            else if q.selector != FACT_MAP_POSITIONS and q.selector != FACT_MAP_DENSE or selector == fact_name_vals: kept.push(FactProjection(fresh, q.selector, false, q.value))
         loop q in kept:
             if s.projections.len() < FACT_CAP: fact_add_projection(s, q)
         if j == 0 and resize: return
@@ -3905,6 +3915,55 @@ fact_pool_receiver = (n: int) -> PlaceIdentity:
     if p.root != .local and p.root != .global: return PlaceIdentity(.local, 0, 0)
     p
 
+# Handle positions name the pool's immutable slot-table value, separately
+# from its public items array. Public item edits keep positions, but bounds
+# and payloads are always read from the CURRENT items value. Private-table
+# writes, removal and opaque calls drop positions. Demand-only O(1) lookup;
+# add/store copy O(tracked projections), within the existing state budget.
+fact_pool_items_name = 0
+fact_pool_items = (s: mut FactState, pool: int, t: int) -> int:
+    if fact_pool_items_name == 0: fact_pool_items_name = intern("items")
+    fact_project(s, pool, fact_pool_items_name, false, mk_array(struct_targ(int(types[fact_type(t)].st), 0)))
+
+fact_pool_position = (s: mut FactState, pool: int, handle: int) -> int:
+    positions = fact_project(s, pool, FACT_POOL_POSITIONS, false, T_INT)
+    fact_project(s, positions, handle, true, T_INT)
+
+fact_pool_values = (n: int, s: mut FactState, before: int, after: int, values: int[], result: int, kind: int):
+    if kind != 4 and kind != 5: return
+    t = fact_type(ntype(kid(n, 0)))
+    if ownership_decls.len() != 0 and ownership_fact_type(t): return
+    at = mk_array(struct_targ(int(types[t].st), 0))
+    items = fact_pool_items(s, before, t)
+    positions = fact_project(s, before, FACT_POOL_POSITIONS, false, T_INT)
+    if kind == 4:
+        index = fact_pool_position(s, before, values[1])
+        changed = fact_replace(s, items, index, true, values[2], at)
+        if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(after, fact_pool_items_name, false, changed))
+    else:
+        length = fact_project(s, items, -1, false, T_INT)
+        b = fact_bound(s, length)
+        size = fact_new(s, FactBound((if b.lo < fact_length_max(): b.lo + 1 else: fact_length_max()), (if b.hi < fact_length_max(): b.hi + 1 else: fact_length_max())), FactTerm(type = T_INT))
+        fact_difference(s, length, size, -1, n)
+        fact_difference(s, size, length, 1, n)
+        appended = fact_replace(s, items, length, true, values[1], at)
+        changed = fact_replace(s, appended, -1, false, size, at)
+        if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(after, fact_pool_items_name, false, changed))
+        # add's new handle is distinct from every earlier live one. Do not
+        # require scalar comparison of an opaque Handle to retain positions.
+        next = fact_new(s, FactBound(), FactTerm(type = T_INT))
+        kept: FactProjection[]
+        pi = fact_index_get(s.index[0].projection_head, positions)
+        loop pi >= 0:
+            p = s.projections[pi]
+            pi = s.index[0].projection_next[pi]
+            if p.element: kept.push(FactProjection(next, p.selector, true, p.value))
+        loop p in kept:
+            if s.projections.len() < FACT_CAP: fact_add_projection(s, p)
+        if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(next, result, true, length))
+        positions = next
+    if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(after, FACT_POOL_POSITIONS, false, positions))
+
 fact_pool_capture = (n: int, s: mut FactState, values: int[], kind: int) -> int:
     before = fact_map_receiver(s, n, values[0])
     if kind >= 2 and kind <= 4: fact_pool_check(n, s, before, values[1])
@@ -3917,6 +3976,12 @@ fact_pool_capture = (n: int, s: mut FactState, values: int[], kind: int) -> int:
             if fact_exposed(written): fact_forget(s, n, .call, false, written)
         else: fact_path_call_effects(n, s)
     if kind == 1: return fact_new(s, fact_domain(T_BOOL), FactTerm(.gt, fact_pool_member(s, before, values[1]), fact_constant(s, 0)))
+    if kind == 2 or kind == 3:
+        t = fact_type(ntype(kid(n, 0)))
+        if ownership_decls.len() == 0 or not ownership_fact_type(t):
+            position = fact_pool_position(s, before, values[1])
+            if kind == 3: return position
+            return fact_project(s, fact_pool_items(s, before, t), position, true, ntype(n))
     if kind <= 3: return fact_new(s, fact_domain(ntype(n), .missing, n), FactTerm(type = ntype(n)))
     # (the pool's value after the call: a new one even where no effect row gave one)
     target = kid(n, 0)
@@ -3937,6 +4002,7 @@ fact_pool_capture = (n: int, s: mut FactState, values: int[], kind: int) -> int:
     else:
         fact_pool_keep(s, before, after, values[1])
         if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(after, values[1], true, fact_constant(s, 0, n)))
+    fact_pool_values(n, s, before, after, values, result, kind)
     result
 
 # The key's value; a plain string literal is one value however often written,
@@ -4056,6 +4122,116 @@ fact_map_store = (n: int, s: mut FactState, values: int[], before: int) -> int:
     loop key in keys: fact_assume(s, fact_project(s, after, key, true, T_BOOL), true)
     fact_assume(s, fact_map_member(s, n, after, values[1]), true)
     fact_new(s, fact_domain(ntype(n), .missing, n), FactTerm(type = ntype(n)))
+
+# A literal dictionary with literal scalar keys has a dense entry inventory.
+# Duplicate keys overwrite their first position, matching core/map.jo. Unknown
+# key equality cannot establish positions, so it retains membership only.
+# Demand-only, indexed O(entries) construction, bounded by FACT_CAP.
+fact_map_literal = (n: int, s: mut FactState, map: int, keys: int[], raw: int[], payloads: int[]):
+    if map == 0 or keys.len() == 0 or keys.len() != nkids(n): return
+    loop pair in kids(n):
+        key = domain_leaf(int(nodes[pair].a))
+        if nodes[key].kind != .int_lit and nodes[key].kind != .bool_lit and not (nodes[key].kind == .str_lit and nkids(key) == 0 and nodes[key].sval >= 0): return
+    loop key in keys:
+        b = fact_bound(s, key)
+        if b.wide or b.lo != b.hi: return
+    t = fact_type(ntype(n))
+    fields_at = int(structs[int(types[t].st)].fields)
+    key_type = int(fields[fields_at].type)
+    value_type = int(fields[fields_at + 1].type)
+    ids: {int: int} = {}
+    selected: int[]
+    first: int[]
+    loop i in [0..keys.len()):
+        key = fact_bound(s, keys[i]).lo
+        at = ids.get(key) ?? -1
+        if at < 0:
+            ids[key] = selected.len()
+            selected.push(i)
+            first.push(i)
+        else: selected[at] = i
+    positions = fact_new(s, FactBound(), FactTerm(type = T_INT))
+    key_values = fact_new(s, FactBound(), FactTerm(type = key_type))
+    entries = fact_new(s, FactBound(), FactTerm(type = value_type))
+    loop i in [0..selected.len()):
+        if s.projections.len() + 3 >= FACT_CAP: return
+        position = fact_constant(s, i)
+        fact_add_projection(s, FactProjection(positions, keys[first[i]], true, position))
+        fact_add_projection(s, FactProjection(key_values, position, true, raw[first[i]]))
+        fact_add_projection(s, FactProjection(entries, position, true, payloads[selected[i]]))
+    if s.projections.len() + 7 >= FACT_CAP: return
+    length = fact_constant(s, selected.len())
+    fact_add_projection(s, FactProjection(key_values, -1, false, length))
+    fact_add_projection(s, FactProjection(entries, -1, false, length))
+    fact_add_projection(s, FactProjection(map, int(fields[fields_at].name), false, key_values))
+    if fact_name_vals == 0: fact_name_vals = intern("vals")
+    fact_add_projection(s, FactProjection(map, fact_name_vals, false, entries))
+    fact_add_projection(s, FactProjection(map, FACT_MAP_POSITIONS, false, positions))
+    fact_add_projection(s, FactProjection(map, -1, false, length))
+    fact_add_projection(s, FactProjection(map, FACT_MAP_DENSE, false, fact_constant(s, 1)))
+
+# Reviewed dense dictionary snapshots share their two immutable arrays. A
+# removal or insertion drops the dense marker; no tombstone layout is inferred.
+fact_map_snapshot_name = 0
+fact_map_snapshot_call = (n: int) -> bool:
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) != 1: return false
+    d = int(fns[int(nodes[n].sym)].decl)
+    if d == 0: return false
+    if fact_map_snapshot_name == 0: fact_map_snapshot_name = intern("__map_entries")
+    int(nodes[d].name) == fact_map_snapshot_name and files[pos_file(nodes[d].pos)].path == lib_dir + "/core/map.jo"
+
+fact_map_snapshot = (n: int, s: mut FactState, map: int) -> int:
+    if ownership_decls.len() != 0 and ownership_fact_type(ntype(kid(n, 0))):
+        fact_path_call_effects(n, s)
+        return fact_fresh(s, ntype(n))
+    if map == 0 or fact_index_get(s.index[0].projection_index, fact_projection_key(map, FACT_MAP_DENSE, false)) < 0: return fact_fresh(s, ntype(n))
+    t = fact_type(ntype(n))
+    value = fact_fresh(s, t)
+    loop i in [0..2):
+        f = fields[int(structs[int(types[t].st)].fields) + i]
+        part = fact_project(s, map, int(f.name), false, int(f.type))
+        if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(value, int(f.name), false, part))
+    value
+
+# A readonly dictionary loop takes key/value hulls from its entry snapshot,
+# even when the source dictionary is subsequently changed. Mutable loops
+# have aliases instead and do not use this rule. O(snapshot projections).
+fact_map_loop = (n: int, base: int, s: mut FactState):
+    t = fact_type(ntype(int(nodes[n].a)))
+    loop i in [0..2):
+        l = if i == 0: int(nodes[n].sym) else: int(nodes[n].aux2)
+        if l <= 0: continue
+        f = fields[int(structs[int(types[t].st)].fields) + i]
+        array = fact_project(s, base, int(f.name), false, int(f.type))
+        parts = fact_inventory(s, array)
+        if parts.len() == 0: continue
+        lt = fact_type(int(locals[l].type))
+        value = fact_fresh(s, lt)
+        fact_inventory_bound(s, value, parts, lt, n)
+        fact_bind(s, PlaceIdentity(.local, int(locals[l].owner), l), value)
+
+# A value slice preserves its elements. Only constant offsets need inventory
+# shifting here; a fill's uniform payload works for any offset. O(projections)
+# on a demanded slice, never a scan of unrelated values or program nodes.
+fact_slice_elements = (s: mut FactState, base: int, value: int, lo: int, hi: int):
+    if base == 0 or value == 0: return
+    uniform = fact_index_get(s.index[0].projection_index, fact_projection_key(base, FACT_ELEMENT_COPY, false))
+    if uniform >= 0 and s.projections.len() < FACT_CAP:
+        fact_add_projection(s, FactProjection(value, FACT_ELEMENT_COPY, false, s.projections[uniform].value))
+        return
+    lower = fact_bound(s, lo)
+    upper = fact_bound(s, hi)
+    if lower.wide or lower.lo != lower.hi or lower.lo < 0: return
+    parts: FactProjection[]
+    pi = fact_index_get(s.index[0].projection_head, base)
+    loop pi >= 0:
+        p = s.projections[pi]
+        pi = s.index[0].projection_next[pi]
+        if p.element: parts.push(p)
+    loop p in parts:
+        index = fact_bound(s, p.selector)
+        if index.wide or index.lo != index.hi or index.lo < lower.lo or index.hi >= upper.lo: continue
+        if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(value, fact_constant(s, index.lo - lower.lo), true, p.value))
 
 fact_map_receiver = (s: mut FactState, n: int, value: int) -> int:
     route = fact_receiver_route(n, s)
@@ -5401,7 +5577,11 @@ fact_loop_index = (n: int, base: int, s: mut FactState):
 # by the ordinary projection budget. Mutations rebuild aggregate identities.
 fact_loop_elements = (n: int, base: int, s: mut FactState):
     l = int(nodes[n].sym)
-    if nodes[n].aux != 1 or l <= 0: return
+    if nodes[n].aux != 1 or l <= 0 or base == 0: return
+    uniform = fact_index_get(s.index[0].projection_index, fact_projection_key(base, FACT_ELEMENT_COPY, false))
+    if uniform >= 0:
+        fact_bind(s, PlaceIdentity(.local, int(locals[l].owner), l), s.projections[uniform].value)
+        return
     t = fact_type(int(locals[l].type))
     sized = t == T_STR or tkind(t) == .array
     if not fact_scalar(t) and not sized and tkind(t) != .tuple and tkind(t) != .struct_: return
@@ -5454,6 +5634,7 @@ fact_inventory_bound = (s: mut FactState, value: int, parts: int[], t: int, at: 
     if fact_scalar(t):
         joined = fact_bound(s, parts[0])
         loop j in [1..parts.len()): joined = fact_hull(joined, fact_bound(s, parts[j]), at)
+        if joined.wide: return
         old = fact_bound(s, value)
         fact_set_bound(s, value, FactBound(max(old.lo, joined.lo), min(old.hi, joined.hi), old.nz or joined.nz))
         return
@@ -5467,7 +5648,7 @@ fact_inventory_bound = (s: mut FactState, value: int, parts: int[], t: int, at: 
         selector = if sized: -1 else if record: int(fields[f].name) else: c
         if s.projections.len() >= FACT_CAP: continue
         if not fact_scalar(ct):
-            if tkind(ct) != .struct_ and tkind(ct) != .tuple: continue
+            if tkind(ct) != .struct_ and tkind(ct) != .tuple and tkind(ct) != .array and ct != T_STR: continue
             children: int[]
             loop part in parts: children.push(fact_project(s, part, selector, false, ct))
             child = fact_project(s, value, selector, false, ct)
@@ -5677,6 +5858,9 @@ fact_slice_prepare = (f: int, summary: bool = false):
         if k == .for_ or k == .iflet or k == .match_:
             l = int(nodes[n].sym)
             if l > 0: fact_slice_writer(writers, PlaceIdentity(.local, int(locals[l].owner), l), n)
+            if k == .for_ and nodes[n].aux == 3 and nodes[n].aux2 > 0:
+                vl = int(nodes[n].aux2)
+                fact_slice_writer(writers, PlaceIdentity(.local, int(locals[vl].owner), vl), n)
             if k == .for_ and not summary and (fact_probe_on or fact_policy == .RequireStatic) and (fact_stepped_loop(n) or fact_open_range(n)): values.push(n)
         if k == .if_ or k == .while_ or k == .for_ or k == .iflet or k == .match_ or k == .and_ or k == .or_ or k == .coalesce:
             # A while can prevent a later obligation from being reached,
@@ -5850,6 +6034,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
         else if k == .for_ or k == .while_: values.push(int(nodes[n].a))
         # (a fork closure's creation reads its captures, pushed above, not its body)
         else if k == .lambda: pass
+        else if k == .call and fact_map_snapshot_call(n): values.push(kid(n, 0))
         else if k == .call and fact_copy_length_call(n): values.push(kid(n, 0))
         else if k == .call and nodes[n].aux == 0 and not result_active and not proof_active and not fact_divisors.has(n) and fact_floor_call(n) == 0 and fact_string_call(n) == 0 and not fact_extremum_call(n) and not fact_empty_array_call(n) and not fact_entry_count_call(n) and not fact_split_call(n) and not fact_words_call(n) and not fact_lines_call(n) and not fact_search_call(n) and not fact_affix_call(n) and not fact_parallel_array(n) and not ref_refined_result(int(fns[int(nodes[n].sym)].ret)):
             # Ordinary summaries start from unknown formals: their return
@@ -5868,6 +6053,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
             values.push(kid(n, 1))
         else if k == .intrinsic and (nodes[n].aux == i32(int(IN.push)) or nodes[n].aux == i32(int(IN.pop)) or nodes[n].aux == i32(int(IN.clear)) or nodes[n].aux == i32(int(IN.reserve)) or nodes[n].aux == i32(int(IN.insert))):
             values.push(kid(n, 0))
+            if nodes[n].aux == i32(int(IN.push)) and nkids(n) == 2 and tkind(fact_type(ntype(kid(n, 1)))) == .array: values.push(kid(n, 1))
             # (an integer comprehension's pushes join its element hull)
             if nodes[n].aux == i32(int(IN.push)) and nkids(n) == 2 and accumulators.has(fact_push_receiver(kid(n, 0))) and fact_scalar(ntype(kid(n, 1))) and is_int(ntype(kid(n, 1))): values.push(kid(n, 1))
         else if k == .intrinsic and (nodes[n].aux == i32(int(IN.extend)) or nodes[n].aux == i32(int(IN.truncate)) or nodes[n].aux == i32(int(IN.resize))):
@@ -6264,6 +6450,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         size = length
         if nodes[r].a != 0 or nodes[r].b != 0: size = fact_arithmetic(s, (if nodes[r].b != 0: int(nodes[r].b) else: int(nodes[r].a)), .minus, hi, lo)
         if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(value, -1, false, size))
+        if ownership_decls.len() == 0 or not ownership_fact_type(ntype(n)): fact_slice_elements(s, base, value, lo, hi)
         return value
     if k == .index and nodes[n].b != 0:
         base = 0
@@ -6299,7 +6486,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
     # `fill(x n)`, an array of n copies (none when n is negative): the value,
     # then the count, which is the length.
     if k == .array and nodes[n].b != 0 and nkids(n) == 1 and tkind(fact_type(ntype(n))) == .array:
-        fact_capture(kid(n, 0), s)
+        element = fact_capture(kid(n, 0), s)
         count = fact_capture(int(nodes[n].b), s)
         value = fact_new(s, FactBound(), FactTerm(type = ntype(n)))
         c = fact_bound(s, count)
@@ -6307,6 +6494,8 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         # the allocation succeeded)
         size = if c.lo < 0 or c.hi > fact_length_max(): fact_clamped(s, count, n) else: count
         if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(value, -1, false, size))
+        if value != 0 and element != 0 and (ownership_decls.len() == 0 or not ownership_fact_type(ntype(n))) and s.projections.len() < FACT_CAP:
+            fact_add_projection(s, FactProjection(value, FACT_ELEMENT_COPY, false, element))
         return value
     if k == .array and nodes[n].aux == 0:
         value = fact_new(s, FactBound(), FactTerm(type = ntype(n)))
@@ -6319,14 +6508,18 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         kt = struct_targ(int(types[fact_type(ntype(n))].st), 0)
         if (fact_scalar(kt) or kt == T_STR) and (ownership_decls.len() == 0 or not ownership_fact_type(ntype(n))):
             keys: int[]
+            raw: int[]
+            payloads: int[]
             loop pair in kids(n):
                 e = int(nodes[pair].a)
                 key = fact_capture(e, s)
                 keys.push(fact_map_key(s, e, key))
-                fact_capture(int(nodes[pair].b), s)
+                raw.push(key)
+                payloads.push(fact_capture(int(nodes[pair].b), s))
             value = fact_new(s, FactBound(), FactTerm(type = ntype(n)))
             loop key in keys:
                 if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(value, key, true, fact_constant(s, 1)))
+            fact_map_literal(n, s, value, keys, raw, payloads)
             return value
     if result_active and k == .none_lit:
         value = fact_new(s, FactBound(), FactTerm(type = ntype(n)))
@@ -6523,7 +6716,8 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         base = 0
         # (`loop @x in xs`, aux 2, cannot resize or replace xs: its length is read once too)
         indexed = k == .for_ and (nodes[n].aux == 1 or nodes[n].aux == 2) and nodes[n].c != 0 and files[pos_file(nodes[n].pos)].is_dewy
-        if indexed: base = fact_capture(int(nodes[n].a), s)
+        mapped = k == .for_ and nodes[n].aux == 3 and is_map_entries_type(fact_type(ntype(int(nodes[n].a))))
+        if indexed or mapped: base = fact_capture(int(nodes[n].a), s)
         pushes: (int, int)[]
         sums: (int, FactBound)[]
         if indexed:
@@ -6550,6 +6744,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         if indexed:
             fact_loop_index(n, base, body)
             fact_loop_elements(n, base, body)
+        else if mapped: fact_map_loop(n, base, body)
         else: fact_capture(int(nodes[n].a), body)
         edges = fact_loop_body(n, body)
         # (an iterated header holds at every head, not inside the body: a break joins it)
@@ -6606,7 +6801,8 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         if nodes[n].aux == i32(int(CV.refinement)): fact_covered = fact_refinement_covers(n)
         a = fact_capture(int(nodes[n].a), s)
         fact_covered = outer
-        if result_active and nodes[n].aux == i32(int(CV.opt)):
+        if nodes[n].aux == i32(int(CV.opt)):
+            if ownership_decls.len() != 0: a = fact_owner_value(int(nodes[n].a), a, s)
             value = fact_new(s, FactBound(), FactTerm(type = ntype(n)))
             if s.projections.len() + 2 < FACT_CAP:
                 fact_add_projection(s, FactProjection(value, -3, false, fact_constant(s, 1)))
@@ -6738,6 +6934,11 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             if id == .reserve: return 0
             if (id == .pop or id == .remove) and fact_speculating == 0 and (fact_policy == .RequireStatic or fact_query): fact_removal(n, s, position, length)
             fresh = fact_new(s, FactBound(), FactTerm(type = ntype(a)))
+            result = 0
+            plain = ownership_decls.len() == 0 or not ownership_fact_type(ntype(a))
+            if plain and id == .pop:
+                last = fact_arithmetic(s, a, .minus, length, fact_constant(s, 1))
+                result = fact_project(s, base, last, true, ntype(n))
             size = fact_new(s, FactBound(0, fact_length_max(), reason = .write, witness = n))
             if id == .clear: size = fact_constant(s, 0)
             else:
@@ -6751,9 +6952,12 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                 if old.lo != old.hi and fact_loops.len() == 0:
                     fact_difference(s, size, length, delta, n)
                     fact_difference(s, length, size, -delta, n)
-            if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(fresh, -1, false, size))
+            if plain and id == .push and position != 0 and fact_loops.len() == 0 and tkind(fact_type(ntype(kid(n, 1)))) == .array:
+                appended = fact_replace(s, base, length, true, position, ntype(a))
+                fresh = fact_replace(s, appended, -1, false, size, ntype(a))
+            else if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(fresh, -1, false, size))
             fact_store_route(s, route, fresh, n, true)
-            return fact_fresh(s, ntype(n))
+            return if result != 0: result else: fact_fresh(s, ntype(n))
         # `xs.extend(ys)` grows by ys's length, `truncate(k)` never grows,
         # `resize(k)` makes max(0, k): the operand first, then the receiver,
         # as push's.
@@ -6835,8 +7039,9 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             # Messages execute only on failure, never on this success edge.
             return 0
     if k == .call:
-        if result_active and nodes[n].aux == 3:
+        if nodes[n].aux == 3:
             payload = fact_capture(kid(n, 0), s)
+            if ownership_decls.len() != 0: payload = fact_owner_value(kid(n, 0), payload, s)
             value = fact_new(s, FactBound(), FactTerm(type = ntype(n)))
             if s.projections.len() + 2 < FACT_CAP:
                 fact_add_projection(s, FactProjection(value, -3, false, fact_constant(s, int(nodes[n].aux2))))
@@ -6850,6 +7055,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         fact_route_call = n
         values = fact_call_arguments(n, s)
         fact_route_call = outer_call
+        if fact_map_snapshot_call(n): return fact_map_snapshot(n, s, values[0])
         if fact_parallel_array(n): fact_parallel_record(n, s, values[0])
         if wi_fact_calls.len() > 0 and wi_fact_calls.has(n): wi_fact_check(n, values, s)
         if fact_speculating == 0:
@@ -6877,6 +7083,18 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         array = fact_array_call(n)
         if array != 0: fact_array_call_check(n, s, values, array)
         if fact_nonempty_call(n): fact_nonempty_check(n, s, values)
+        if array == 4 and (ownership_decls.len() == 0 or not ownership_fact_type(ntype(kid(n, 0)))):
+            route = fact_receiver_route(n, s)
+            held = fact_route_values(s, route)
+            base = if held.len() > 0: held[held.len() - 1] else: values[0]
+            t = ntype(kid(n, 0))
+            element = telem(fact_type(t))
+            left = fact_project(s, base, values[1], true, element)
+            right = fact_project(s, base, values[2], true, element)
+            first = fact_replace(s, base, values[1], true, right, t)
+            fresh = fact_replace(s, first, values[2], true, left, t)
+            fact_store_route(s, route, fresh, n, true)
+            return 0
         if array == 6 and (ownership_decls.len() == 0 or not ownership_fact_type(ntype(kid(n, 0)))):
             route = fact_receiver_route(n, s)
             p = fact_place(route.root)

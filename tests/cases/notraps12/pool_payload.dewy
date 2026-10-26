@@ -1,0 +1,12 @@
+Item:type=[values:array<int64>]
+run=()=>{
+let p:Pool<Item>=[]
+let a=p.add(Item[[20 22]])
+let b=p.add(Item[[21 21]])
+let saved=p
+p[a].values[0]=99
+printl(saved[a].values[0]+p[b].values[1])
+p[a]=Item[[42]]
+printl(p[a].values[0])
+}
+run()
