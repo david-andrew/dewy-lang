@@ -1090,6 +1090,7 @@ register_decls = (m: int, decls: int[]):
                 fatal(nodes[d].pos, "`bigint` is built in, so there is nothing to import: `let n:bigint = 2^100`, and `to_int(text)` reads decimal text (`none` when it is not a number)")
             im = load_module(path, false, nodes[d].pos)
             modules[m].imports.push((im, nodes[d].pos))
+            import_edge_added()
             if nodes[d].aux == 1:
                 ml_bump()
                 modules[m].uses.push(im)

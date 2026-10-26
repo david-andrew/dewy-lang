@@ -2484,6 +2484,9 @@ written_int_param = (d: int, i: int) -> bool:
     tkind(int(syms[s].ref)) == .int_
 
 resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, closure: int = 0, ufcs: bool = false) -> int:
+    if rational_module_found >= 0 and exact_family_name(name):
+        family = exact_members_for(decls, name, args)
+        if family.len() > decls.len(): return resolve_fn_call(n, name, family, args, expected, closure, ufcs)
     if member_record >= 0: member_candidates(decls)
     # (this call's own type arguments: a call among its arguments has none, from_text[S](f(x)))
     targs_here = call_targs
@@ -3932,20 +3935,32 @@ collect_fns = (name: int, out: mut int[]):
     if m >= 0 and not modules[m].is_prelude and files[int(modules[m].file)].is_dewy and not is_private(name):
         dm = dewy_prelude_module(name)
         if dm >= 0 and syms[modules[dm].names.get(name) ?? 0].kind == .fns:
-            if dm != m: collect_in(modules[dm].names, name, out)
+            if dm != m:
+                collect_in(modules[dm].names, name, out)
+                prelude_reach(m, dm)
             return
     hide_private = m >= 0 and not modules[m].is_prelude
     hide_lib_only = true
     collect_in(prelude, name, out)
     hide_private = false
-    # (the builtin `rational`'s exact abs, min, max and sign join the prelude's families once
-    # its library is in use: a probe per family collected, the cache's once a name is stamped)
+    # (the builtin `rational`'s exact abs, min, max and sign join the prelude's families in a
+    # module whose imports reach its library: a probe per family collected, the cache's once a
+    # name is stamped. Never another module's: a batch's float case keeps its float members)
     if m >= 0 and not modules[m].is_prelude and files[int(modules[m].file)].is_dewy and exact_family_name(name):
         rm = rational_module()
-        if rm >= 0 and rm != m: collect_in(modules[rm].names, name, out)
+        if rm >= 0 and rm != m and reaches_rational(m, rm): collect_in(modules[rm].names, name, out)
 
+# (by name: abs, min, max or sign; built on first use)
+exact_named: bool[]
 exact_family_name = (name: int) -> bool:
-    name == ci(28, "abs") or name == ci(44, "min") or name == ci(45, "max") or name == ci(46, "sign")
+    if exact_named.len() == 0:
+        ids = [ci(28, "abs"), ci(44, "min"), ci(45, "max"), ci(46, "sign")]
+        top = 0
+        loop id in ids:
+            if id > top: top = id
+        exact_named = fill(false, top + 1)
+        loop id in ids: exact_named[id] = true
+    name < exact_named.len() and exact_named[name]
 
 # The bundled rational's module, or -1 while it is not loaded: probed again only once more
 # modules are loaded. O(1) amortized.
@@ -3956,6 +3971,73 @@ rational_module = () -> int:
     rational_module_probed = modules.len()
     rational_module_found = find_module(lib_dir + "/rational.dewy")
     rational_module_found
+
+# By module, whether its imports reach the bundled rational module: 1 for good (imports only
+# grow), else 2 + the import count as of which they do not (0: not asked). A walk is
+# O(modules + imports), again for a module only once imports are added.
+rational_reach: int[]
+import_edges = 0
+
+# (an import added: a module's reach may grow, and so may the exact families it collects)
+import_edge_added = ():
+    import_edges += 1
+    exact_families_changed()
+
+exact_families_changed = ():
+    ml_bump_name(ci(28, "abs"))
+    ml_bump_name(ci(44, "min"))
+    ml_bump_name(ci(45, "max"))
+    ml_bump_name(ci(46, "sign"))
+
+# (a function of the Dewy prelude's module dm called from m, such as `rational(1 3)`: m reaches
+# what dm's imports do, the bundled rational included)
+prelude_reach = (m: int, dm: int):
+    rm = rational_module()
+    if rm < 0 or not reaches_rational(dm, rm) or rational_reach[m] == 1: return
+    rational_reach[m] = 1
+    exact_families_changed()
+
+reaches_rational = (m: int, rm: int) -> bool:
+    if rational_reach.len() < modules.len(): rational_reach.resize(modules.len())
+    r = rational_reach[m]
+    if r == 1 or r == import_edges + 2: return r == 1
+    seen = fill(false, modules.len())
+    found = reach_walk(m, rm, seen)
+    rational_reach[m] = if found: 1 else: import_edges + 2
+    found
+
+# (a fraction passed where the module's imports do not reach the bundled rational, as to an
+# instance of a generic helper: its exact members join the prelude's family for the call, as
+# its imports' would. Calls of numbers alone keep the prelude's members)
+exact_members_for = (decls: int[], name: int, args: int[]) -> int[]:
+    rm = rational_module()
+    m = cur_mod()
+    if rm < 0 or m < 0 or m == rm or decls.len() == 0 or modules[m].is_prelude: return decls
+    if not modules[int(nodes[decls[0]].mod)].is_prelude or not files[int(modules[m].file)].is_dewy: return decls
+    loop d in decls:
+        if int(nodes[d].mod) == rm: return decls
+    if reaches_rational(m, rm): return decls
+    loop a0 in args:
+        a = unnamed(a0)
+        if is_lit(a): continue
+        t = 0
+        if has_flag(a, NF_CHECKED): t = prune(ntype(a))
+        else if nodes[a].kind == .ident:
+            s = lookup(int(nodes[a].name))
+            if s != 0 and syms[s].kind == .local: t = prune(int(locals[int(syms[s].ref)].type))
+        if t != 0 and (bundled_rational_type(t) or bundled_word_rational_type(t)):
+            out = decls
+            collect_in(modules[rm].names, name, out)
+            return out
+    decls
+
+reach_walk = (m: int, rm: int, seen: mut bool[]) -> bool:
+    if m == rm or rational_reach[m] == 1: return true
+    seen[m] = true
+    loop edge in modules[m].imports:
+        # (the shared prelude's imports are no module's own)
+        if not seen[edge.0] and not modules[edge.0].is_prelude and reach_walk(edge.0, rm, seen): return true
+    false
 
 # A bare name in a Dewy module names one binding: the module's own declarations
 # of it (or its selected imports) shadow the shadowable ones it would otherwise
