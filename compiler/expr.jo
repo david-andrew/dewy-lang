@@ -8416,7 +8416,15 @@ shape_record = (p: int, t0: int) -> int:
                 if fields[int(structs[si].fields) + i].name == nodes[part].name: has = true
             if not has: all = false
         if all: found.push(prune(c))
-    if found.len() == 0: fatal(nodes[p].pos, "no {dt(t)} has the fields this pattern names")
+    if found.len() == 0:
+        # (`[q r] =>` on a tuple, or an optional one: its positions are taken with `(q r) =>`)
+        hint = ""
+        loop c in candidates:
+            if hint == "" and tkind(c) == .tuple:
+                names: str[]
+                loop part in kids(p): names.push(if nodes[part].name != 0: name_of(int(nodes[part].name)) else: "_")
+                hint = " ({dt(c)} is a tuple: take its positions with `({join(names, " ")}) =>`)"
+        fatal(nodes[p].pos, "no {dt(t)} has the fields this pattern names{hint}")
     if found.len() > 1: fatal(nodes[p].pos, "several members of {dt(t)} have the fields this pattern names; name the type with `x:T` or `<T>`")
     found[0]
 

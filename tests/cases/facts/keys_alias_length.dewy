@@ -1,0 +1,14 @@
+# A dictionary's keys bound to a name, then collected, keep the dictionary's length.
+f = (d:dict<string int> i:int):>string => {
+    if i <? 0 or i >=? d.length return ""
+    let ks = d.keys
+    let names = ks.values
+    names[i]
+}
+g = (s:set<string> i:int):>string => {
+    let members = s
+    if i <? 0 or i >=? s.length return ""
+    let listed = members.values
+    listed[i]
+}
+printl(f(["a"->1 "b"->2] 1) g(set["x"] 0))

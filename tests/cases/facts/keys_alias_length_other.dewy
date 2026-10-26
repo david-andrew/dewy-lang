@@ -1,0 +1,8 @@
+# Another dictionary's keys have their own length.
+f = (d:dict<string int> e:dict<string int> i:int):>string => {
+    if i <? 0 or i >=? d.length return ""
+    let ks = e.keys
+    let names = ks.values
+    names[i]
+}
+printl(f(["a"->1 "b"->2] ["c"->3] 1))

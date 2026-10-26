@@ -1,0 +1,9 @@
+# A record pattern on an optional tuple points to the positional form.
+Poly:type = [c:array<int>]
+divide = (a:Poly):>[Poly Poly]|none => if a.c.length >? 0 [a a] else none
+main = () => {
+    match divide(Poly[[1 2]]) {
+        [q r] => printl(q.c.length + r.c.length)
+        _ => printl("none")
+    }
+}

@@ -1,0 +1,24 @@
+# Creating a partial application writes nothing: facts about unrelated values survive it.
+add = (a:int b:int):>int => a + b
+f = (xs:array<int> i:int):>int => {
+    if i <? 0 or i >=? xs.length return 0
+    let g = @add(xs[i])
+    g(1) + xs[i]
+}
+h = (xs:array<int> i:int):>int => {
+    if i <? 0 or i >=? xs.length return 0
+    total = 0
+    loop k in [0..3) {
+        let g = @add(xs[i])
+        total = total + g(k) + xs[i]
+    }
+    total
+}
+c = (i:int):>int => {
+    let ys = [1 2 3]
+    let r = (a:int $capture @ys b:int):>int => a + b + ys.length
+    if i <? 0 or i >=? ys.length return 0
+    let g = @r(1)
+    ys[i] + g(2)
+}
+printl(f([1 2 3] 1) h([1 2 3] 1) c(1))

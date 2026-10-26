@@ -1,0 +1,9 @@
+# The keys bound before the dictionary grew keep the old count.
+f = (d:dict<string int> i:int):>string => {
+    let ks = d.keys
+    d["new"] = 1
+    if i <? 0 or i >=? d.length return ""
+    let names = ks.values
+    names[i]
+}
+printl(f(["a"->1] 1))

@@ -152,6 +152,18 @@ wit_text = (e0: int, depth: int = 0) -> str:
         if star: return "{left}*{right}"
         sign = if nodes[e].op == i32(int(Tok.plus)): "+" else: "-"
         return "{left} {sign} {right}"
+    # (an array literal with a spread, `[ys... 0]`, built in a `$spread` block: expr.jo
+    # check_expr; its items as written)
+    if k == .block and nkids(e) >= 3 and nkids(e) <= 10 and nodes[kid(e, 0)].kind == .vardecl and starts_with(name_of(int(nodes[kid(e, 0)].name)), "$spread"):
+        parts: str[]
+        loop i in [1..nkids(e) - 1):
+            call = kid(e, i)
+            if nodes[call].kind == .exprstmt: call = int(nodes[call].a)
+            if nodes[call].kind != .intrinsic or nkids(call) != 2 or nodes[call].aux != i32(int(IN.push)) and nodes[call].aux != i32(int(IN.extend)): return ""
+            text = wit_text(kid(call, 1), depth + 1)
+            if text == "": return ""
+            parts.push(if nodes[call].aux == i32(int(IN.extend)): "{text}..." else: text)
+        return "[{join(parts, " ")}]"
     if k == .call:
         # (what the user wrote for a library operation: `text.length`, `v % base`,
         # `i // 2`, a dictionary's or a pool's `d[k]`)

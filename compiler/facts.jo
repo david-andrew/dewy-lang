@@ -846,12 +846,14 @@ fact_entry_count_call = (n: int) -> bool:
 # element per entry, so the result's length is the receiver's entry count. O(1).
 fact_same_length_call = (n: int) -> bool:
     if nkids(n) != 1 or nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or fns[int(nodes[n].sym)].decl == 0: return false
+    t = representation_type(ntype(kid(n, 0)))
+    map = is_map_type(t)
+    if not map and not is_dewy_set_type(t): return false
     d = int(fns[int(nodes[n].sym)].decl)
     name = name_of(int(nodes[d].name))
-    t = representation_type(ntype(kid(n, 0)))
     path = files[pos_file(nodes[d].pos)].path
-    if is_map_type(t): return path == lib_dir + "/core/map.jo" and (name == "keys" or name == "values") or path == lib_dir + "/std/dewy_sets.jo" and name == "__dewy_keys"
-    is_dewy_set_type(t) and path == lib_dir + "/std/dewy_sets.jo" and (name == "__dewy_set_values" or name == "values")
+    if map: return path == lib_dir + "/core/map.jo" and (name == "keys" or name == "values") or path == lib_dir + "/std/dewy_sets.jo" and name == "__dewy_keys"
+    path == lib_dir + "/std/dewy_sets.jo" and (name == "__dewy_set_values" or name == "values")
 
 # The length of e's value when its argument is not captured (a dictionary is lent): its place's
 # current value's, or through nested length-preserving calls (`[d.keys...]`); 0 for unknown.
@@ -3017,6 +3019,17 @@ fact_bounded_change = (n: int, s: mut FactState, at: int, reason: FactReason) ->
     if i >= 0: fact_set_bound(s, s.bindings[i].value, fact_hull(old, FactBound(low, high), at))
     true
 
+# A partial application saves its arguments' values, so creating one writes
+# nothing (its calls forget what the function writes), unless it takes a place
+# (`@x`: lowering rejects a `mut` one) or may move an owner. O(arguments).
+fact_partial_opaque = (n: int) -> bool: ownership_decls.len() != 0 or fact_partial_place(n)
+fact_partial_place = (n: int) -> bool:
+    loop child in kids(n):
+        e = child
+        loop nodes[e].kind == .conv: e = int(nodes[e].a)
+        if nodes[e].kind == .addr: return true
+    false
+
 # Conservative loop fallback: pre-kill every syntactically changing route.
 # This is also used for iterators whose backedge transfer is not modeled.
 fact_changes = (n: int, s: mut FactState, at: int, reason: FactReason = .loop_):
@@ -3038,9 +3051,9 @@ fact_changes = (n: int, s: mut FactState, at: int, reason: FactReason = .loop_):
     else if k == .call and nodes[n].aux == 0: fact_call_effects(n, s)
     else if k == .call and nodes[n].aux == 2: s = s
     else if k == .intrinsic and fact_reads_only(nodes[n].aux as IN): s = s
-    # (a closure's creation writes nothing: fact_capture)
+    # (a closure's or partial application's creation writes nothing: fact_capture)
     else if k == .call: fact_forget_call(s, n, reason, at)
-    else if k == .intrinsic or k == .lambda and ownership_decls.len() != 0 or k == .partial: fact_forget(s, at, reason)
+    else if k == .intrinsic or k == .lambda and ownership_decls.len() != 0 or k == .partial and fact_partial_opaque(n): fact_forget(s, at, reason)
     mask = isolation_children(k)
     if mask < 0: fact_forget(s, at, reason, true); return
     if mask & 1 != 0: fact_changes(int(nodes[n].a), s, at, reason)
@@ -6258,7 +6271,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
             else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and (nodes[n].op == i32(int(Tok.slash)) or nodes[n].op == i32(int(Tok.percent)) or fact_shift_obliged(n)): values.push(n)
         # (a closure writes only when called: fact_capture)
         else if k == .lambda and ownership_decls.len() == 0: pass
-        else if k == .lambda or k == .partial or k == .fnref or k == .map_lit or k == .cast or mask < 0: opaque_writes.push(n)
+        else if k == .lambda or k == .partial and fact_partial_opaque(n) or k == .fnref or k == .map_lit or k == .cast or mask < 0: opaque_writes.push(n)
         else if k == .str_lit and nodes[n].aux != 0: exposed_writes.push(n)
     # (a fork closure's creation reads its captures: their definitions)
     loop lam in forks:
@@ -6329,7 +6342,9 @@ fact_slice_prepare = (f: int, summary: bool = false):
         # (a fork closure's creation reads its captures, pushed above, not its body)
         else if k == .lambda: pass
         else if k == .call and fact_map_snapshot_call(n): values.push(kid(n, 0))
-        else if k == .call and (fact_copy_length_call(n) or fact_endpoint_call(n) != 0): values.push(kid(n, 0))
+        # (a length-preserving call's length is its receiver's: `let ks = d.keys` then `ks.values`
+        # needs ks's definition)
+        else if k == .call and (fact_copy_length_call(n) or fact_endpoint_call(n) != 0 or fact_same_length_call(n)): values.push(kid(n, 0))
         else if k == .call and nodes[n].aux == 0 and not result_active and not proof_active and not fact_divisors.has(n) and fact_floor_call(n) == 0 and fact_string_call(n) == 0 and not fact_extremum_call(n) and not fact_empty_array_call(n) and not fact_entry_count_call(n) and not fact_split_call(n) and not fact_words_call(n) and not fact_lines_call(n) and not fact_search_call(n) and not fact_affix_call(n) and not fact_parallel_array(n) and not ref_refined_result(int(fns[int(nodes[n].sym)].ret)):
             # Ordinary summaries start from unknown formals: their return
             # facts do not depend on the actual values. Argument obligations
@@ -6837,10 +6852,12 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
     # what the body may write. (Ownership may move captures: still opaque.)
     if k == .lambda and fact_speculating == 0 and fact_fork_nodes.has(n): fact_fork_record(n, s)
     if k == .lambda and ownership_decls.len() == 0: return 0
+    # (a partial application evaluates its arguments, holes aside, and saves
+    # them: the values its calls read; those calls forget what it may write)
     if k == .lambda or k == .fnref or k == .partial:
         fact_capture(int(nodes[n].a), s)
         loop child in kids(n): fact_capture(child, s)
-        fact_forget(s, n, .call)
+        if k != .partial or fact_partial_opaque(n): fact_forget(s, n, .call, k == .partial and fact_partial_place(n))
         return 0
     if k == .unary:
         a = fact_capture(int(nodes[n].a), s)
@@ -7643,6 +7660,8 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         s = exits
         if ownership_fact_cleanup: fact_forget(s, n, .call)
         return fact_new(s, if first: fact_domain(ntype(n)) else: result)
+    # (a partial application's hole is a parameter of the function it makes)
+    if k == .hole: return 0
     if k == .field and nodes[n].aux == -3:
         # (a variant's payload field, bound by a match arm)
         fact_capture(int(nodes[n].a), s)

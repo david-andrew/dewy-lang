@@ -1,0 +1,9 @@
+# A partial application of a closure that shares a local writes it when called.
+f = (i:int):>int => {
+    let ys = [1 2 3]
+    let h = (a:int $capture @ys b:int):>int => {ys.clear(); a + b}
+    if i <? 0 or i >=? ys.length return 0
+    let g = @h(1)
+    g(2) + ys[i]
+}
+printl(f(1))

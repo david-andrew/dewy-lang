@@ -1,0 +1,9 @@
+# Calling a partial application runs its function: what that writes is forgotten.
+let items = [1 2 3]
+drop = (a:int b:int):>int => {items.clear(); a + b}
+f = (i:int):>int => {
+    if i <? 0 or i >=? items.length return 0
+    let g = @drop(1)
+    g(2) + items[i]
+}
+printl(f(1))
