@@ -1,0 +1,10 @@
+# A type after a tuple pattern: the repair takes the tuple apart by position,
+# typing each position from the tuple type.
+Poly:type = [c:int]
+divide = (a:Poly b:Poly):>[Poly Poly]|none => if b.c =? 0 none else [Poly[c=a.c // b.c] Poly[c=a.c % b.c]]
+main = () => {
+    match divide(Poly[c=7] Poly[c=2]) {
+        [q r]:[Poly Poly] => printl("{q.c} {r.c}")
+        <none> => printl("none")
+    }
+}

@@ -1,0 +1,8 @@
+# `??` after the last binding of a combined header applies to the whole header.
+main = () => {
+    let a:array<int64>|none = none
+    let b:array<int64> = [1 2]
+    loop i in 0.. and x in a ?? b {
+        printl("{i} {x}")
+    }
+}

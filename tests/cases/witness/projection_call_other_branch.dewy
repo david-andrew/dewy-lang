@@ -1,0 +1,25 @@
+# A call in the other branch of the conditional cannot reach the index.
+C:type = [
+    keys:array<int>
+    n:int
+]
+
+touch = (@c:C s:int):>void => {
+    c.n = s
+}
+
+access = (@c:C key:int):>void => {
+    let victim = c.n
+    if victim <? 0 return
+    if key >? 10 {
+        touch(@c 0)
+    } else {
+        c.keys[victim] = key
+    }
+}
+
+main = () => {
+    let c = C[keys=[1 2 3] n=0]
+    access(@c 4)
+    printl("{c.keys.length}")
+}

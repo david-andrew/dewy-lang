@@ -1,0 +1,9 @@
+# The same after an `or` term.
+main = () => {
+    let a:array<int64>|none = none
+    let b:array<int64> = [1 2]
+    let c:array<int64> = [3 4]
+    loop i in c or x in a ?? b {
+        printl("{i} {x}")
+    }
+}

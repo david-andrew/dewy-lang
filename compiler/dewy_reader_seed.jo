@@ -3966,11 +3966,13 @@ rt_dc_combined_mistake = (head: int) -> bool:
     true
 
 rt_dc_head_mistake = (head: int) -> bool:
-    if not dc_parser.flags.report_now or nodes[head].op != 1: return false
+    last = head
+    loop nodes[last].op == 2 or nodes[last].op == 3: last = int(nodes[last].b)
+    if not dc_parser.flags.report_now or nodes[last].op != 1: return false
     next = dc_parser.tokens[dc_parser.at]
     if next.symbol == .kw_as or next.symbol == .kw_transmute: dn_error(next.start, "`{dn_token_text(next.symbol)}` binds more loosely than `in`, so this converts the whole loop header: parenthesize the source, as in `loop c in (text {dn_token_text(next.symbol)} array<uint8>)`")
     if next.symbol == .coalesce: dn_error(next.start, "`??` binds more loosely than `in`, so this applies the fallback to the whole loop header: parenthesize the source, as in `loop x in (a ?? b)`")
-    if next.symbol != .assign: return false
+    if next.symbol != .assign or last != head: return false
     it = int(nodes[head].a)
     it_name = "it"
     if nodes[it].kind == .call and nkids(it) == 1 and nodes[kid(it, 0)].kind == .ident: it_name = name_of(int(nodes[kid(it, 0)].name))
@@ -4710,6 +4712,8 @@ rt_dc_condition_assign = (start: int) -> int:
 rt_dc_arm_arrow = (first: DewyLexeme) -> int:
     pos = mkpos(dc_parser.file, first.start)
     if rt_dn_peek() == .arrow: return rt_dc_hint(pos, "a match arm uses `=>`: replace `->` with `=>`")
+    # (`[q r]:[Poly Poly] => ...`: a type after an object or sequence pattern)
+    if rt_dn_peek() == .colon and (first.symbol == .lbrack or first.symbol == .lparen): return rt_dc_hint(mkpos(dc_parser.file, dc_parser.tokens[dc_parser.at].start), rt_dc_typed_pattern(first))
     if not dn_can_start(dc_parser.tokens, dc_parser.at): return 0
     src = files[dc_parser.file].src
     body = dc_parser.tokens[dc_parser.at]
@@ -4718,6 +4722,44 @@ rt_dc_arm_arrow = (first: DewyLexeme) -> int:
     pattern = src[first.start..dc_parser.tokens[dc_parser.at - 1].stop)
     value = src[body.start..body.stop)
     rt_dc_hint(pos, "a match arm needs `=>`: write `{pattern} => {value}`")
+
+# The repair for a type after the pattern opening at `first`, the cursor at its `:`: take a
+# tuple apart by position, its names typed by the tuple type's elements when they pair up.
+
+rt_dc_typed_pattern = (first: DewyLexeme) -> str:
+    src = files[dc_parser.file].src
+    colon = dc_parser.at
+    close = colon - 1
+    opening = close
+    loop opening > 0 and dc_parser.tokens[opening].start > first.start: opening -= 1
+    if dc_parser.tokens[colon + 1].symbol != .lbrack or close <= opening + 1: return "a pattern takes no type after it: write `{src[first.start..dc_parser.tokens[close].stop)} => ...`"
+    inner = src[dc_parser.tokens[opening + 1].start..dc_parser.tokens[close - 1].stop)
+    # (the tuple type's elements: spans at depth 0 between spaces)
+    types: str[] = []
+    k = colon + 2
+    begin = k
+    depth = 0
+    loop dc_parser.tokens[k].kind != .eof and depth >= 0:
+        t = dc_parser.tokens[k]
+        if depth == 0 and t.symbol == .rbrack:
+            if k > begin: types.push(src[dc_parser.tokens[begin].start..dc_parser.tokens[k - 1].stop))
+            break
+        if depth == 0 and k > begin and (t.space or t.newline):
+            types.push(src[dc_parser.tokens[begin].start..dc_parser.tokens[k - 1].stop))
+            begin = k
+        if t.symbol == .lparen or t.symbol == .lbrack or t.symbol == .lbrace or t.symbol == .langle: depth += 1
+        else if t.symbol == .rparen or t.symbol == .rbrack or t.symbol == .rbrace or t.symbol == .rangle: depth -= 1
+        else if t.symbol == .shr: depth -= 2
+        k += 1
+    typed = ""
+    i = opening + 1
+    loop i < close and i - opening <= types.len():
+        if dc_parser.tokens[i].kind != .identifier or dc_parser.tokens[i].symbol != .none: break
+        name = src[dc_parser.tokens[i].start..dc_parser.tokens[i].stop)
+        typed = if typed == "": "{name}:{types[i - opening - 1]}" else: "{typed} {name}:{types[i - opening - 1]}"
+        i += 1
+    if i == close and close - opening - 1 == types.len(): return "a pattern takes no type after it: take the tuple apart by position, `({inner}) => ...`, or type each position, `({typed}) => ...`"
+    "a pattern takes no type after it: take the tuple apart by position, `({inner}) => ...`, typing a position as `name:Type` where needed"
 
 # The right operand of `=>` as a block (dw_block): braced, or one statement.
 

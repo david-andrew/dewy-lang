@@ -1,0 +1,25 @@
+# The call in the branch that returned cannot reach the index: no note names it.
+C:type = [
+    keys:array<int>
+    n:int
+]
+
+touch = (@c:C s:int):>void => {
+    c.n = s
+}
+
+access = (@c:C key:int):>void => {
+    if key >? 10 {
+        touch(@c 0)
+        return
+    }
+    let victim = c.n
+    if victim <? 0 return
+    c.keys[victim] = key
+}
+
+main = () => {
+    let c = C[keys=[1 2 3] n=0]
+    access(@c 4)
+    printl("{c.keys.length}")
+}

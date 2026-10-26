@@ -347,6 +347,10 @@ rd_dc_arm_arrow=(@reader_ctx:ParserContext first:DewyLexeme):>int64=>$unsafe {
     if (rd_dn_peek(@reader_ctx) =? 'arrow') {
         return rd_dc_hint(@reader_ctx pos "a match arm uses `=>`: replace `->` with `=>`")
     }
+    # (`[q r]:[Poly Poly] => ...`: a type after an object or sequence pattern)
+    if ((rd_dn_peek(@reader_ctx) =? 'colon') and ((first.symbol =? 'lbrack') or (first.symbol =? 'lparen'))) {
+        return rd_dc_hint(@reader_ctx rd_mkpos(reader_ctx.file reader_ctx.tokens[reader_ctx.at].start) rd_dc_typed_pattern(@reader_ctx first))
+    }
     if (not dn_can_start(@reader_ctx.tokens reader_ctx.at)) {
         return 0
     }
@@ -359,6 +363,64 @@ rd_dc_arm_arrow=(@reader_ctx:ParserContext first:DewyLexeme):>int64=>$unsafe {
     let pattern:string=reader_ctx.stores.host[0].bytes_slice(src first.start reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) - 1)].stop)
     let value:string=reader_ctx.stores.host[0].bytes_slice(src body.start body.stop)
     rd_dc_hint(@reader_ctx pos "a match arm needs `=>`: write `{pattern} => {value}`")
+}
+
+# The repair for a type after the pattern opening at `first`, the cursor at its `:`: take a
+# tuple apart by position, its names typed by the tuple type's elements when they pair up.
+rd_dc_typed_pattern=(@reader_ctx:ParserContext first:DewyLexeme):>string=>$unsafe {
+    let src:string=reader_ctx.source
+    let colon:int64=reader_ctx.at
+    let close:int64=(int64<overflow='wrap'>(colon) - 1)
+    let opening:int64=close
+    loop (opening >? 0) and (reader_ctx.tokens[opening].start >? first.start) {
+        opening = (int64<overflow='wrap'>(opening) - 1)
+    }
+    if ((reader_ctx.tokens[(int64<overflow='wrap'>(colon) + 1)].symbol not=? 'lbrack') or (close <=? (int64<overflow='wrap'>(opening) + 1))) {
+        return "a pattern takes no type after it: write `{reader_ctx.stores.host[0].bytes_slice(src first.start reader_ctx.tokens[close].stop)} => ...`"
+    }
+    let inner:string=reader_ctx.stores.host[0].bytes_slice(src reader_ctx.tokens[(int64<overflow='wrap'>(opening) + 1)].start reader_ctx.tokens[(int64<overflow='wrap'>(close) - 1)].stop)
+    # (the tuple type's elements: spans at depth 0 between spaces)
+    let types:array<string>=[]
+    let k:int64=(int64<overflow='wrap'>(colon) + 2)
+    let begin:int64=k
+    let depth:int64=0
+    loop (reader_ctx.tokens[k].kind not=? 'eof') and (depth >=? 0) {
+        let t:DewyLexeme=reader_ctx.tokens[k]
+        if ((depth =? 0) and (t.symbol =? 'rbrack')) {
+            if (k >? begin) {
+                types.push(reader_ctx.stores.host[0].bytes_slice(src reader_ctx.tokens[begin].start reader_ctx.tokens[(int64<overflow='wrap'>(k) - 1)].stop));
+            }
+            break
+        }
+        if (((depth =? 0) and (k >? begin)) and (t.space or t.newline)) {
+            types.push(reader_ctx.stores.host[0].bytes_slice(src reader_ctx.tokens[begin].start reader_ctx.tokens[(int64<overflow='wrap'>(k) - 1)].stop));
+            begin = k
+        }
+        if ((((t.symbol =? 'lparen') or (t.symbol =? 'lbrack')) or (t.symbol =? 'lbrace')) or (t.symbol =? 'langle')) {
+            depth = (int64<overflow='wrap'>(depth) + 1)
+        }
+        else if ((((t.symbol =? 'rparen') or (t.symbol =? 'rbrack')) or (t.symbol =? 'rbrace')) or (t.symbol =? 'rangle')) {
+            depth = (int64<overflow='wrap'>(depth) - 1)
+        }
+        else if (t.symbol =? 'shr') {
+            depth = (int64<overflow='wrap'>(depth) - 2)
+        }
+        k = (int64<overflow='wrap'>(k) + 1)
+    }
+    let typed:string=""
+    let i:int64=(int64<overflow='wrap'>(opening) + 1)
+    loop (i <? close) and ((int64<overflow='wrap'>(i) - int64<overflow='wrap'>(opening)) <=? types.length) {
+        if ((reader_ctx.tokens[i].kind not=? 'identifier') or (reader_ctx.tokens[i].symbol not=? 'none')) {
+            break
+        }
+        let name:string=reader_ctx.stores.host[0].bytes_slice(src reader_ctx.tokens[i].start reader_ctx.tokens[i].stop)
+        typed = (if (typed =? "") "{name}:{types[(int64<overflow='wrap'>(i) - int64<overflow='wrap'>(opening)) - 1]}" else "{typed} {name}:{types[(int64<overflow='wrap'>(i) - int64<overflow='wrap'>(opening)) - 1]}")
+        i = (int64<overflow='wrap'>(i) + 1)
+    }
+    if ((i =? close) and (((int64<overflow='wrap'>(close) - int64<overflow='wrap'>(opening)) - 1) =? types.length)) {
+        return "a pattern takes no type after it: take the tuple apart by position, `({inner}) => ...`, or type each position, `({typed}) => ...`"
+    }
+    "a pattern takes no type after it: take the tuple apart by position, `({inner}) => ...`, typing a position as `name:Type` where needed"
 }
 
 # Where an unbraced arm from token `at` ends, at bracket depth 0: before an `else` no `if` or
@@ -5322,9 +5384,13 @@ rd_dc_head_join=(@reader_ctx:ParserContext @reader_nodes:array<Node> op:int64 a:
 }
 
 # `loop name in w=tree.walk()`, `loop c in text as T`: dw_loop_head's and dn_expr's mistakes;
-# false for any other head.
+# false for any other head. (`loop i in 0.. and x in a ?? b`: the last term of a combined head.)
 rd_dc_head_mistake=(@reader_ctx:ParserContext @reader_nodes:array<Node> head:int64):>bool=>$unsafe {
-    if ((not reader_ctx.flags.report_now) or (reader_nodes[head].op not=? 1)) {
+    let last:int64=head
+    loop (reader_nodes[last].op =? 2) or (reader_nodes[last].op =? 3) {
+        last = int64<overflow='wrap'>(reader_nodes[last].b)
+    }
+    if ((not reader_ctx.flags.report_now) or (reader_nodes[last].op not=? 1)) {
         return false
     }
     let next:DewyLexeme=reader_ctx.tokens[reader_ctx.at]
@@ -5334,7 +5400,7 @@ rd_dc_head_mistake=(@reader_ctx:ParserContext @reader_nodes:array<Node> head:int
     if (next.symbol =? 'coalesce') {
         reader_ctx.stores.host[0].dn_error(next.start "`??` binds more loosely than `in`, so this applies the fallback to the whole loop header: parenthesize the source, as in `loop x in (a ?? b)`");
     }
-    if (next.symbol not=? 'assign') {
+    if ((next.symbol not=? 'assign') or (last not=? head)) {
         return false
     }
     let it:int64=int64<overflow='wrap'>(reader_nodes[head].a)

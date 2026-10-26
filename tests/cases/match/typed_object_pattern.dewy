@@ -1,0 +1,8 @@
+# A record type after an object pattern: the pattern alone reads the fields.
+Point:type = [x:int y:int]
+main = () => {
+    let p = Point[1 2]
+    match p {
+        [x y]:Point => printl(x + y)
+    }
+}

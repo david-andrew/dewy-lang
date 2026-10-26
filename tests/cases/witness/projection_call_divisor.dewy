@@ -1,0 +1,16 @@
+# A borrowed divisor: the reachable writer is named, not the one in a branch that returned.
+S:type=[count:int64]
+zero=(@x:int64):>void=>{x=0}
+show=(flag:bool):>void=>{
+    let m=mutex(dict<string S>[])
+    let d=@(m.lock())
+    d["x"]=S[2]
+    if d["x"].count =? 0 return
+    zero(@d["x"].count)
+    if flag {
+        zero(@d["x"].count)
+        return
+    }
+    printl(10/d["x"].count)
+}
+main=()=>show(false)

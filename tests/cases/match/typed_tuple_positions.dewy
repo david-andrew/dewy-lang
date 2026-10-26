@@ -1,0 +1,18 @@
+# quick
+# A tuple pattern types its positions inside it; a typed binding takes the tuple whole.
+Poly:type = [c:int]
+divide = (a:Poly b:Poly):>[Poly Poly]|none => if b.c =? 0 none else [Poly[c=a.c // b.c] Poly[c=a.c % b.c]]
+main = () => {
+    match divide(Poly[c=7] Poly[c=2]) {
+        (q:Poly r:Poly) => printl("{q.c} {r.c}")
+        <none> => printl("none")
+    }
+    match divide(Poly[c=9] Poly[c=4]) {
+        (q r) => printl("{q.c} {r.c}")
+        <none> => printl("none")
+    }
+    match divide(Poly[c=9] Poly[c=0]) {
+        qr:[Poly Poly] => printl(qr.length)
+        <none> => printl("none")
+    }
+}

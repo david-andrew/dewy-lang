@@ -303,14 +303,17 @@ wit_call_writes = (c: int, text: str) -> bool:
 
 # The analyzed function's direct calls with an `@` argument and a shown name,
 # collected once per function when a projection's explanation first needs
-# them. O(function size) once, then O(calls) per explanation.
+# them, with each node's parent for wit_reaches. O(function size) once, then
+# O(calls) per explanation.
 wit_calls_owner = 0
 wit_calls: int[]
+wit_parents: {int: int} = {}
 
 wit_owner_calls = () -> int[]:
     if wit_calls_owner == fact_owner: return wit_calls
     wit_calls_owner = fact_owner
     wit_calls = []
+    wit_parents = {}
     if fact_owner <= 0 or fact_owner >= fns.len() or fns[fact_owner].body == 0: return wit_calls
     stack = [int(fns[fact_owner].body)]
     visits = 0
@@ -319,13 +322,68 @@ wit_owner_calls = () -> int[]:
         visits += 1
         if e <= 0 or e >= nodes.len() or nodes[e].kind == .lambda: continue
         if nodes[e].kind == .call and nodes[e].aux == 0 and checked_call_mutmask(e) != 0 and wit_call_text(e, 0) != "": wit_calls.push(e)
-        stack.push(int(nodes[e].a)); stack.push(int(nodes[e].b)); stack.push(kid_c(e)); stack.push(kid_d(e))
-        loop child in kids(e): stack.push(child)
+        loop child in [int(nodes[e].a), int(nodes[e].b), kid_c(e), kid_d(e)] + kids(e):
+            if child <= 0 or child >= nodes.len() or wit_parents.has(child): continue
+            wit_parents[child] = e
+            stack.push(child)
     wit_calls
 
+# Whether statement s, after a call, leaves for good: a `return`, a program
+# exit, or (unless `inner`: a loop between it and the site takes it) a
+# `break` or `continue` out of the loop holding both.
+wit_leaves = (s: int, inner: bool) -> bool:
+    if not inner: return stmt_terminates(s)
+    k = nodes[s].kind
+    if k == .return_: return true
+    if k == .block and has_flag(s, NF_FLOW_RETURNS): return true
+    if k == .exprstmt:
+        e = int(nodes[s].a)
+        return int(nodes[e].type) == T_NEVER or library_exit_call(e)
+    false
+
+# Whether call c (earlier in the analyzed function) can reach node `site`:
+# not from another branch of a conditional or arm of a match holding both,
+# nor past a statement after c that leaves first (wit_leaves). Back edges are
+# not followed. O(depth * block length)
+wit_reaches = (c: int, site: int) -> bool:
+    if not wit_parents.has(site) or not wit_parents.has(c): return true
+    above: int[] = []
+    n = site
+    loop n > 0 and above.len() < 10000:
+        above.push(n)
+        n = wit_parents.get(n) ?? 0
+    # (c's ancestors below the common one, innermost first)
+    chain: int[] = []
+    n = c
+    loop n > 0 and not above.contains(n) and chain.len() < 10000:
+        chain.push(n)
+        n = wit_parents.get(n) ?? 0
+    if n <= 0 or chain.len() == 0: return true
+    top = n
+    from = chain[chain.len() - 1]
+    to = 0
+    loop i in [0..above.len()):
+        if above[i] == top and i > 0: to = above[i - 1]
+    k = nodes[top].kind
+    if to != 0 and to != from and from != int(nodes[top].a) and to != int(nodes[top].a) and (k == .if_ or k == .iflet or k == .match_): return false
+    # (outermost first: a loop below the common ancestor takes the breaks under it)
+    inner = false
+    i = chain.len() - 1
+    loop i > 0:
+        b = chain[i]
+        if nodes[b].kind == .while_ or nodes[b].kind == .for_: inner = true
+        if nodes[b].kind == .block:
+            after = false
+            loop s in kids(b):
+                if after and wit_leaves(s, inner): return false
+                if s == chain[i - 1]: after = true
+        i -= 1
+    true
+
 # The latest call before a projection side's use that passes `@` its place
-# (`d["x"].count` after `zero(@d["x"].count)`): an event a projection keeps no
-# tombstone for. 0 for a variable (its tombstone tells) or none.
+# (`d["x"].count` after `zero(@d["x"].count)`) and can reach it: an event a
+# projection keeps no tombstone for. 0 for a variable (its tombstone tells) or
+# none.
 wit_projection_call = (side: WitSide) -> int:
     if side.text == "" or side.node <= 0 or nodes[side.node].kind == .ident: return 0
     site = nodes[side.node].pos
@@ -333,7 +391,7 @@ wit_projection_call = (side: WitSide) -> int:
     loop c in wit_owner_calls():
         p = nodes[c].pos
         if pos_file(p) != pos_file(site) or p >= site or best != 0 and p <= nodes[best].pos: continue
-        if wit_call_writes(c, side.text): best = c
+        if wit_call_writes(c, side.text) and wit_reaches(c, side.node): best = c
     best
 
 wit_value = (s: FactState, v: int, x: int) -> str:
