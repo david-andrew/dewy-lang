@@ -1,0 +1,14 @@
+# quick
+unpack=([a b]:array<int64>):>int64=>{
+    $runtime_checks
+    a+b
+}
+first=(m:array<int64 length=[r c]>):>int64=>{
+    $runtime_checks
+    m[0 0]
+}
+main=()=>{
+    $runtime_checks
+    printl(unpack([3 4]))
+    printl(first(zeros<int64>(2 3)))
+}

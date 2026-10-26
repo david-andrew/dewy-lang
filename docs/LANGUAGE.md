@@ -2443,7 +2443,7 @@ obligation `>=? 0`, proven where the arguments show it (`zeros(2 3)`), and a
 shape with more elements than an `int64` counts runs out of memory:
 
 ```dewy
-$runtime_checks                  # matrix indexes are checked
+$runtime_checks                  # the linear algebra calls below may panic
 let values:array<float64> = [3.0 1.0 1.0 2.0]
 let matrix = reshape(values 2 2)
 let saved = matrix
@@ -2465,13 +2465,18 @@ standalone ` ;` it probably meant.
 The shape belongs in the type: `array<float64 length=[m n]>` is a 2-D array,
 `array<float64 length=[n]>` a 1-D one. In a parameter, a dimension named by a
 word not yet bound binds it, and later mentions check it; an annotated `let`
-checks its value's shape. Shapes are compared where values enter: a literal of
-the wrong shape is a compile-time error, and another value's shape is an
-obligation: a compile error unless proven, checked at run time under `$runtime_checks`:
+checks its value's shape. A shaped parameter is a refinement: the caller must
+prove the rank and stated extents, including dimensions shared with earlier
+parameters. A known mismatch is a compile-time error; an unknown relation
+needs `$runtime_checks` at the call. The function receives those shape facts,
+and a shaped result gives its checked shape facts back to the caller. A shaped
+`@` parameter constrains its entry value; subsequent writes invalidate facts
+about the value they replace. Taking a handle to a function with a shaped `@`
+parameter still needs `$runtime_checks`; direct calls can prove its entry shape.
 
 
 ```dewy
-$runtime_checks                  # each shape is checked on entry
+$runtime_checks                  # matrix multiplication has further checks
 product = (a:array<float64 length=[m n]> b:array<float64 length=[n p]>) => a*b
 width = (rows:array<int64 length=[r 2]>):>int64 => r   # r is rows' first dimension
 ```
@@ -2480,7 +2485,20 @@ An n-dimensional array's `.length` is its shape, `[2 3]` for a matrix; there
 is no `.shape` member in Dewy code. Internally it is an `NDArray<T>` holding a
 flat, row-major `data` array and a `shape` array. Use
 `matrix[i j]` for a two-dimensional element; three- and four-dimensional
-indexing work too. `zeros<int64>(rows cols)` chooses integer elements instead of
+indexing work too. Scalar indexing requires the rank to equal the number of
+indices and `0 <=? index <? matrix.length[axis]` on every axis. Constructors,
+literals, `reshape` and shaped parameters supply these facts; loops over the
+extents and guards on `.length` prove the bounds without a runtime-check opt-in.
+Element writes keep the shape. Replacing an array or its shape invalidates old
+extent facts; resizing `.data` also requires proving that its element count
+still matches the shape before indexing.
+
+```dewy
+let grid=zeros<int64>(2 3)
+loop row in [0..grid.length[0]) loop col in [0..grid.length[1]) grid[row col]=1
+```
+
+`zeros<int64>(rows cols)` chooses integer elements instead of
 the default `float64`. Dimensions must be nonnegative and their product must
 fit the supported array size. A zero dimension produces an empty array.
 
@@ -4269,7 +4287,9 @@ secure random source (getrandom, getentropy, RtlGenRandom, or
 A setting is a metatag on a line of its own: `$name` or `$name = true` turns it
 on and `$name = false` turns it off. It holds throughout the scope it is written
 in, wherever in that scope: the module at file level, a function in its body,
-or any other block. An inner scope may change it again. A scope sets each
+or any other block. A function's own setting also covers its generated entry
+checks, including parameter unpacking and shape validation. Refined arguments
+remain obligations at their calls. An inner scope may change it again. A scope sets each
 setting at most once, and the value must be a literal `true` or `false`. Settings
 live in the source: the command line cannot set them (it sets only the build
 mode and the target, under "Modules and games").

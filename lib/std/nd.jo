@@ -73,6 +73,11 @@ __rank_panic = (shape: int[], rank: int):
     panic("expected a {rank}-dimensional array, found one of shape {__shape_str(shape)}")
 
 # ---------------- indexing ----------------
+# Scalar indexing contracts belong to the caller: rank equals the number of
+# indices, and 0 <= index < shape[axis] for every axis (reads and writes).
+# rows/cols require rank 2; __nd_1d requires rank 1. Shaped parameters use
+# ordinary refinement contracts. The compiler transfers constructor/shape
+# facts and proves these obligations; these bodies check deferred obligations.
 __index_panic = (ix: int[], shape: int[]):
     panic("index {ix} out of bounds for an array of shape {__shape_str(shape)}")
 
@@ -107,6 +112,7 @@ __offset4 = (s: int[], i: int, j: int, k: int, l: int) -> int:
 
 # ---------------- shapes in types (`array<T length=[m n]>`) ----------------
 __shape_rank[T] = (m: T[,], rank: int):
+    if __nd_storage_valid(m.shape, m.data.len()) == 0: panic("array data does not match its shape")
     if m.shape.len() != rank: panic("expected an array of {rank} dimensions, found one of shape {__shape_str(m.shape)}")
 __shape_rank[T] = (xs: T[], rank: int):
     if rank != 1: panic("expected an array of {rank} dimensions, found a 1-D array of length {xs.len()}")
@@ -1160,3 +1166,18 @@ __fmt_nd[T] = (buf: mut u8[], data: T[], shape: int[], dim: int, start: int):
 to[T] = (value: T, device: str) -> T:
     if device != "best" and device != "cpu": panic("unknown device '{device}' (this build places data on 'cpu'; 'best' chooses it)")
     value
+
+# A total storage invariant query for shaped contracts. Direct writes to data
+# can change its length, so rank and index bounds alone do not prove a read.
+# Divide before multiplying: malformed shapes never overflow or trap here.
+__nd_storage_valid = (shape: int[], length: int) -> int:
+    zero = false
+    loop d in shape:
+        if d < 0: return 0
+        if d == 0: zero = true
+    if zero: return if length == 0: 1 else: 0
+    count = 1
+    loop d in shape:
+        if count > length / d: return 0
+        count *= d
+    if count == length: 1 else: 0

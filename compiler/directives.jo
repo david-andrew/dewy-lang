@@ -45,6 +45,8 @@ dir_sites: DirSite[]
 dir_proven: {int: bool}        # index node -> proven at every visit
 dir_panic_sites: DirSite[]     # calls of code that may panic, where checks are allowed
 dir_row_scopes: {int: int}     # function declaration -> the scope giving its row
+dir_entry_positions: {int: int} = {}
+dir_entry_functions: {int: bool} = {}
 dir_obligations = false        # `check --obligations`
 dir_forced = false             # this module turned the static analysis on
 dir_prior_static = false       # and it was on before (an internal policy)
@@ -69,6 +71,8 @@ dir_name_audited = 0
 dir_name_assumed_bounds = 0
 
 directives_reset = ():
+    dir_entry_positions = {}
+    dir_entry_functions = {}
     dir_scopes = []
     dir_mixed_files = {}
     dir_uniform_files = {}
@@ -264,6 +268,7 @@ dir_set = (name: int, value: int, start: int, end: int, at: int):
 # How an unproven obligation at p compiles: the innermost of `$runtime_checks`
 # and `$prototype` decides.
 dir_policy = (p: int) -> int:
+    let p = if dir_entry_positions.len() != 0: dir_entry_positions.get(p) ?? p else: p
     r = -1
     q = -1
     if dir_scopes.len() > 0:
@@ -540,3 +545,23 @@ dir_uniform_runtime = (p: int) -> bool:
     runtime = policy == DIR_RUNTIME or policy == DIR_IMPLICIT
     dir_uniform_files[file] = runtime
     runtime
+
+# Synthetic entry bindings keep parameter locations for diagnostics but use
+# their function body's policy. Index only parameter syntax, never body nodes;
+# nested blocks keep their own scopes. O(signature nodes), once per declaration.
+dir_function_entry = (decl: int, body: int):
+    if decl == 0 or body == 0 or not dir_mixed_files.has(pos_file(nodes[decl].pos)) or dir_entry_functions.has(decl) or not dewy_at(nodes[decl].pos): return
+    dir_entry_functions[decl] = true
+    if dir_policy(nodes[body].pos) == dir_policy(nodes[decl].pos): return
+    work: int[]
+    loop p in kids(decl):
+        dir_entry_positions[nodes[p].pos] = nodes[body].pos
+        work.push(int(nodes[p].a))
+        loop c in kids(p): work.push(c)
+    loop work.len() > 0:
+        n = work.pop()
+        if n <= 0: continue
+        dir_entry_positions[nodes[n].pos] = nodes[body].pos
+        if nodes[n].a != 0: work.push(int(nodes[n].a))
+        if nodes[n].b != 0: work.push(int(nodes[n].b))
+        loop c in kids(n): work.push(c)

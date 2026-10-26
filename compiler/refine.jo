@@ -21,6 +21,7 @@ use 'types.jo'
 use 'check.jo'
 use 'expr.jo'
 use 'facts.jo'
+use 'nd_contracts.jo'
 use 'lower.jo'
 use 'ir.jo'
 use 'util.jo'
@@ -165,6 +166,7 @@ str_set_text = (id: int) -> str:
     text
 
 refine_reset = ():
+    nd_contracts_reset()
     str_sets = [[]]
     total_literals = {}
     str_set_types = [0]
@@ -209,7 +211,7 @@ mk_refined = (base0: int, predicate: int) -> int:
         normalized.push(atom)
     predicate = ref_intern(normalized)
     ref_span_copy(declared, predicate)
-    if not is_int(base) and types[base].kind != .array and not has_var(base) and not (types[base].kind == .str_ and ref_length_only(predicate)): fatal(-1, "refinement requires an integer, array or string base")
+    if not is_int(base) and types[base].kind != .array and not has_var(base) and not is_nd(base) and not (types[base].kind == .str_ and ref_length_only(predicate)): fatal(-1, "refinement requires an integer, array or string base")
     if not has_var(base) and is_int(base):
         loop atom in ref_predicates[predicate]:
             loop term in [atom.a, atom.b]:
@@ -420,6 +422,9 @@ ref_project = (term: RefTerm, value0: int, s: mut FactState) -> int:
     loop selector in term.path:
         t = if value != 0: representation_type(fact_terms[value].type) else: 0
         projected = T_INT
+        if selector <= -2:
+            value = fact_nd_projection(s, value, selector)
+            continue
         if selector != -1:
             if t == 0 or types[t].kind != .struct_: return 0
             si = int(types[t].st)
@@ -510,6 +515,7 @@ refine_fact_entry = (f: int, s: mut FactState):
         e = mk_ident_local(l, locals[l].pos)
         refine_entry.push(fact_read(s, e))
     loop i in [0..fns[f].ptypes.len()): ref_assume(fns[f].ptypes[i], refine_entry[i], refine_entry, s)
+    nd_mutable_entry(f, s)
 
 refine_implies = (from: int, to: int) -> bool:
     if type_eq(from, to): return true
@@ -552,7 +558,10 @@ ref_ir_term = (term: RefTerm, self: int, args: int[], self_type: int, arg_types:
     else if term.kind != 0: fatal(-1, "unresolved generic refinement bound")
     loop selector in term.path:
         t = representation_type(t)
-        if selector == -1:
+        if selector <= -2:
+            value = nd_ir_projection(value, t, selector)
+            t = T_INT
+        else if selector == -1:
             if types[t].kind == .fixed: value = e_iconst(fixed_len(t))
             else if types[t].kind == .str_: value = e_call(rt("__dewy_string_length"), [value], VI)
             else: value = arr_len(value)
@@ -698,10 +707,11 @@ ref_validate_signature = (params: int[], ret: int, mask: int, pos: int):
                 if term.kind != 2: continue
                 j = term.value
                 if j >= params.len(): fatal(pos, "missing refinement parameter")
-                if mask & (1 << j) != 0 and (i < params.len() or term.path.len() == 0): fatal(pos, "mutable refinement dependencies are only valid in projected postconditions")
-                a = if tkind(representation_type(t)) == .array or tkind(representation_type(t)) == .str_: T_INT else: representation_type(t)
+                if mask & (1 << j) != 0 and (i < params.len() or term.path.len() == 0) and not (term.path.len() == 1 and term.path[0] <= -2 and is_nd(representation_type(params[j]))): fatal(pos, "mutable refinement dependencies are only valid in projected postconditions")
+                a = if tkind(representation_type(t)) == .array or tkind(representation_type(t)) == .str_ or is_nd(representation_type(t)): T_INT else: representation_type(t)
                 b = ref_projection_type(params[j], term.path, pos)
-                if not ref_repr_match(b, a, term.path): fatal(pos, "dependent scalar refinement requires matching integer representations")
+                shape_int = b == T_MATH_INT and nd_shape_predicates.has(int(types[t].st))
+                if not shape_int and not ref_repr_match(b, a, term.path): fatal(pos, "dependent scalar refinement requires matching integer representations")
     # Dependency cycles cannot define a self-justifying set of contracts.
     done = fill(false, params.len())
     loop _ in [0..params.len()):
@@ -784,6 +794,7 @@ ref_projection_host = CheckerProjectionHost(ref_projection_string_length)
 
 # Resolve a projection against its concrete binder before publishing a contract.
 ref_projection_type = (root: int, path: int[], pos: int) -> int:
+    if path.len() == 1 and path[0] <= -2 and is_nd(representation_type(root)): return T_INT
     result = ref_types_projection(types, structs, fields, ref_fields_host, ref_projection_host, root, path, pos, T_INT)
     if result.error == 1: fatal(pos, "refinement length requires an array or a string")
     if result.error == 2: fatal(pos, "refinement field requires a record")

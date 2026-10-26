@@ -1,0 +1,18 @@
+clamp = (v:int lo:int hi:int<(>=? lo)>):>int<r => lo <=? r and r <=? hi> => {
+ if v <? lo return lo
+ if v >? hi return hi
+ v
+}
+pixel=(img:array<int length=[h w]> x:int y:int):>int=>{
+ if h =? 0 or w =? 0 return 0
+ let lastrow:int=h-1
+ let lastcol:int=w-1
+ let row=clamp(y 0 lastrow)
+ let col=clamp(x 0 lastcol)
+ img[row col]
+}
+main=()=>{
+ let img=zeros<int>(2 3)
+ img[1 2]=42
+ printl(pixel(img 99 99))
+}

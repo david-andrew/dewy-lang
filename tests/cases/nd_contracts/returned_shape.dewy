@@ -1,0 +1,9 @@
+# Explicit shaped returns bind the function's formals, not a helper's actuals.
+$runtime_checks
+make=(ignored:int64 rows:int64 cols:int64):>array<int64 length=[rows cols]>=>{
+    return reshape([loop i in [0..rows*cols) i] rows cols)
+}
+main=()=>{
+    let m=make(0 2 3)
+    printl(m[1 2])
+}

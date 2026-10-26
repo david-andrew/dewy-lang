@@ -1,0 +1,18 @@
+# quick
+sum_grid=(m:array<int length=[r c]>):>int=>{
+    let total=0
+    loop i in [0..r) loop j in [0..c) total+=m[i j]
+    total
+}
+main=()=>{
+    let m=zeros<int>(2 3)
+    loop i in [0..rows(m)) loop j in [0..m.length[1]) m[i j]=i*10+j
+    printl(sum_grid(m))
+    printl(m[1 2])
+    let cube=zeros<int64>(2 3 4)
+    loop i in [0..cube.length[0]) loop j in [0..cube.length[1]) loop k in [0..cube.length[2]) cube[i j k]=i+j+k
+    printl(cube[1 2 3])
+    let tensor=zeros<int64>(2 2 2 2)
+    tensor[1 1 1 1]=9
+    printl(tensor[1 1 1 1])
+}

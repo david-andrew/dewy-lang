@@ -14,6 +14,7 @@ use 'check.jo'
 use 'facts.jo'
 use 'lower.jo'
 use 'refine.jo'
+use 'nd_contracts.jo'
 use 'proofs.jo'
 use 'directives.jo'
 
@@ -894,7 +895,7 @@ wit_ref_text = (term: RefTerm, self: str) -> str:
     else if term.kind == 1: return if term.unsigned: "" else: "{term.value}"
     else if term.kind == 3: text = name_of(int(locals[term.value].name))
     if text == "": return ""
-    loop selector in term.path: text += if selector == -1: ".length" else: ".{name_of(selector)}"
+    loop selector in term.path: text += if selector == ND_STORAGE_VALID: " (data matches shape)" else if selector == -1: ".length" else if selector == -2: ".length.length" else if selector <= -3: ".length[{-3 - selector}]" else: ".{name_of(selector)}"
     text + wit_offset_text(term.offset)
 
 wit_ref_side = (term: RefTerm, value: int, n: int, self: str) -> WitSide:
@@ -963,7 +964,7 @@ wit_formal_text = (term: RefTerm, f: int, self: int) -> str:
     if term.kind == 1 or term.kind == 3: return wit_ref_text(term, "")
     if f <= 0 or index < 0 or index >= fns[f].params.len(): return ""
     text = name_of(int(locals[fns[f].params[index]].name))
-    loop selector in term.path: text += if selector == -1: ".length" else: ".{name_of(selector)}"
+    loop selector in term.path: text += if selector == ND_STORAGE_VALID: " (data matches shape)" else if selector == -1: ".length" else if selector == -2: ".length.length" else if selector <= -3: ".length[{-3 - selector}]" else: ".{name_of(selector)}"
     text + wit_offset_text(term.offset)
 
 # A `$proof` precondition or exit proposition, named by the proof's formals.

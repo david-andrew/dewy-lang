@@ -1,0 +1,6 @@
+replace=(@m:NDArray<int64>):>int64=>{m=zeros<int64>(1 1) 0}
+take=(@m:array<int64 length=[2 3]> ignored:int64):>void=>{m[1 2]=1}
+main=()=>{
+    let m=zeros<int64>(2 3)
+    take(@m replace(@m))
+}

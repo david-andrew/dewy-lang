@@ -32,6 +32,7 @@ use 'warn_if.jo'
 use 'check_constant.jo'
 use 'directives.jo'
 use 'refine.jo'
+use 'nd_contracts.jo'
 use 'proofs.jo'
 use 'effects.jo'
 use 'arena.jo'
@@ -9223,6 +9224,7 @@ check_lambda = (lam: int, expected: int) -> int:
         loop p in kids(lam): refine_bindings.formals.push(int(nodes[p].name))
     mm = 0
     pts: int[]
+    shaped = false
     loop i in [0..np):
         p = kid(lam, i)
         refine_bindings.self = int(nodes[p].name)
@@ -9246,6 +9248,14 @@ check_lambda = (lam: int, expected: int) -> int:
             mm |= 1 << i
             add_flag(p, NF_MUT)
         pts.push(pt)
+        if nd_has_shape(int(nodes[p].a)): shaped = true
+    if shaped:
+        refine_bindings.formals = []
+        loop p in kids(lam): refine_bindings.formals.push(int(nodes[p].name))
+        nd_signature(lam, pts)
+        if nd_mutable_signatures.has(lam): nd_mutable_instances[f] = nd_mutable_signatures[lam]
+        ref_validate_signature(pts, 0, mm, nodes[lam].pos)
+    dir_function_entry(lam, int(nodes[lam].b))
     refine_bindings.formals = old_formals
     refine_bindings.self = old_self
     fns[f].ptypes = pts
@@ -11800,7 +11810,7 @@ check_matrix = (n: int, expected: int) -> int:
     args.push(arr)
     if fname == "__array2":
         # with a known element type, literals take it (m: f32[,] = [1 2; 3 4])
-        ex = prune(expected)
+        ex = representation_type(expected)
         if ex != 0 and is_nd(ex):
             check_expr(arr, mk_array(struct_targ(int(types[ex].st), 0)))
         rows = 0

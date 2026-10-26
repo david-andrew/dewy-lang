@@ -45,6 +45,7 @@ use 'prelude.jo'
 use 'comptime.jo'
 use 'facts.jo'
 use 'refine.jo'
+use 'nd_contracts.jo'
 use 'proofs.jo'
 use 'effects.jo'
 use 'arena.jo'
@@ -1520,7 +1521,7 @@ refine_resume = (m: int):
 written_refinement = (n: int) -> bool:
     if n == 0: return false
     k = nodes[n].kind
-    if k == .trefined or (k == .tmap and nodes[n].aux == 1): return true
+    if k == .trefined or (k == .tmap and nodes[n].aux == 1) or k == .tarray and nodes[n].ival == 1: return true
     if k == .block or k == .lambda: return false
     if (k == .param or k == .fn_) and written_refinement(int(nodes[n].a)): return true
     if k != .param and k != .fn_ and (written_refinement(int(nodes[n].a)) or written_refinement(int(nodes[n].b))): return true
@@ -1552,9 +1553,11 @@ fn_sig = (decl: int) -> FnSig:
     if refine_active:
         loop p in kids(decl): refine_bindings.formals.push(int(nodes[p].name))
     mm = 0
+    shaped = nd_has_shape(int(nodes[decl].a))
     loop i in [0..nkids(decl)):
         p = kid(decl, i)
         refine_bindings.self = int(nodes[p].name)
+        if nd_has_shape(int(nodes[p].a)): shaped = true
         if nodes[p].a != 0: sig.params.push(resolve_type(int(nodes[p].a)))
         else:
             sig.params.push(mk_param(ntp))
@@ -1566,6 +1569,7 @@ fn_sig = (decl: int) -> FnSig:
     refine_bindings.self = 0
     if nodes[decl].a != 0: sig.ret = i32(resolve_result_type(int(nodes[decl].a)))
     else if has_flag(decl, NF_VOID): sig.ret = i32(T_VOID)
+    if shaped: sig.ret = i32(nd_signature(decl, sig.params, int(sig.ret)))
     if result_active: result_signature(decl, sig.params, int(sig.ret))
     if proof_active and proof_decls.has(decl):
         if sig.ret != 0 and sig.ret != T_VOID: fatal(nodes[decl].pos, "$proof cannot return a value")
@@ -5066,7 +5070,7 @@ check_stmt = (s: int):
                 nodes[s].a = i32(last_checked)
                 if not (inferring and not can_coerce(0, t, rt) and infer_throw(s, t)):
                     if tkind(rt) == .void_: fatal(nodes[s].pos, "this function does not return a value")
-                    nodes[s].a = i32(shape_returned(coerce(int(nodes[s].a), rt), rt))
+                    nodes[s].a = i32(coerce(shape_returned(int(nodes[s].a), representation_type(rt)), rt))
                     if inferring: infer_note_return(s)
         else:
             rt = prune(ret)
@@ -5204,6 +5208,7 @@ check_body_now = (f: int):
             infer_throws[f] = []
             infer_returns[f] = []
     body = int(fns[f].body)
+    dir_function_entry(decl, body)
     saved_sink = sink_fn
     if fns[f].kind == FK_INIT:
         sink_open(body, SINK_NONE)

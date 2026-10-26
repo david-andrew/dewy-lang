@@ -1,0 +1,13 @@
+lcs_table=(a:array<string> b:array<string>):>array<int length=[a.length+1 b.length+1]>=>{
+ let table=zeros<int>(a.length+1 b.length+1)
+ loop i in [a.length-1, a.length-2..0] {
+  loop j in [b.length-1, b.length-2..0] {
+   table[i j]=if a[i] =? b[j] table[i+1 j+1]+1 else max(table[i+1 j] table[i j+1])
+  }
+ }
+ table
+}
+main=()=>{
+ let table=lcs_table(["a" "b"] ["b" "c"])
+ if table.length[0] >? 0 and table.length[1] >? 0 printl(table[0 0])
+}

@@ -25,6 +25,7 @@ use 'check.jo'
 use 'comptime.jo'
 use 'isolation.jo'
 use 'refine.jo'
+use 'nd_contracts.jo'
 use 'proofs.jo'
 use 'places.jo'
 use 'effects.jo'
@@ -241,6 +242,11 @@ fact_pure = (e: int, budget: mut int) -> int:
         return fact_pure(int(nodes[e].b), budget)
     if k == .field and (nodes[e].aux >= 0 and tkind(ntype(int(nodes[e].a))) == .struct_ or nodes[e].aux == -2 and tkind(ntype(int(nodes[e].a))) == .tuple):
         return fact_pure(int(nodes[e].a), budget)
+    if k == .call and fact_nd_reads_only(e) and (fact_nd_call(e) == 4 or fact_nd_call(e) == 5 or fact_nd_call(e) == 6):
+        loop arg in kids(e):
+            bad = fact_pure(arg, budget)
+            if bad != 0: return bad
+        return 0
     if k == .intrinsic and nodes[e].aux == i32(int(IN.len)):
         return fact_pure(kid(e, 0), budget)
     if k == .not_ or k == .unary or k == .conv:
@@ -3076,9 +3082,10 @@ fact_changes = (n: int, s: mut FactState, at: int, reason: FactReason = .loop_):
             fact_change_route(s, kid(n, 0), true, at, reason)
     # (a direct call havocs what its summary writes; reading lengths and
     # erased or failing assertions write nothing; a record is built in place)
-    if k == .call and nodes[n].aux == 0 and fact_pool_call(n) == 4: fact_pool_store_changes(n, s)
+    if k == .call and nodes[n].aux == 0 and fact_nd_plain_store(n): fact_nd_store(n, s, at, reason)
+    else if k == .call and nodes[n].aux == 0 and fact_pool_call(n) == 4: fact_pool_store_changes(n, s)
     else if k == .call and nodes[n].aux == 0 and fact_map_store_call(n): fact_map_store_changes(n, s, at, reason)
-    else if k == .call and nodes[n].aux == 0 and fact_map_reads_only(n): s = s
+    else if k == .call and nodes[n].aux == 0 and (fact_map_reads_only(n) or fact_nd_reads_only(n)): s = s
     else if k == .call and nodes[n].aux == 0 and nodes[n].sym == i32(fact_owner): fact_path_call_effects(n, s)
     else if k == .call and nodes[n].aux == 0: fact_call_effects(n, s)
     else if k == .call and nodes[n].aux == 2: s = s
@@ -4042,6 +4049,9 @@ fact_name_bcast = 0
 fact_name_reads: int[]
 fact_name_permutations: int[]
 fact_array_call = (n: int) -> int:
+    nd = fact_nd_call(n)
+    if nd == 6: return 107
+    if nd >= 100: return nd
     if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) < 1 or nkids(n) > 8: return 0
     d = int(fns[int(nodes[n].sym)].decl)
     if d == 0: return 0
@@ -4578,6 +4588,9 @@ fact_map_check = (n: int, s: mut FactState, values: int[]):
 
 fact_array_call_check = (n: int, s: mut FactState, values: int[], kind: int):
     if fact_speculating != 0 or not (fact_policy == .RequireStatic or fact_query): return
+    if kind >= 100:
+        fact_nd_check(n, s, values, kind)
+        return
     # (the receiver is a place, as a builtin operation's is)
     route = fact_receiver_route(n, s)
     held = fact_route_values(s, route)
@@ -6291,7 +6304,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
                 values.push(n)
                 values.push(kid(n, first))
                 values.push(kid(n, first + 1))
-            else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and (fact_array_call(n) != 0 or fact_map_call(n) != 0 or fact_nonempty_call(n) or fact_pool_call(n) != 0):
+            else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and (nd_mutable_call(n) or fact_array_call(n) != 0 or fact_map_call(n) != 0 or fact_nonempty_call(n) or fact_pool_call(n) != 0):
                 active.push(n)
                 values.push(n)
                 loop arg in kids(n): values.push(arg)
@@ -6364,6 +6377,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
         else if k == .lambda and ownership_decls.len() == 0: pass
         else if k == .lambda or k == .partial and fact_partial_opaque(n) or k == .fnref and fact_handle_opaque(n) or k == .map_lit or k == .cast or mask < 0: opaque_writes.push(n)
         else if k == .str_lit and nodes[n].aux != 0: exposed_writes.push(n)
+        if not summary and nd_mutable_signatures.len() != 0 and nd_mutable_handle(n): values.push(n)
     # (a fork closure's creation reads its captures: their definitions)
     loop lam in forks:
         values.push(lam)
@@ -6432,6 +6446,8 @@ fact_slice_prepare = (f: int, summary: bool = false):
         else if k == .for_ or k == .while_: values.push(int(nodes[n].a))
         # (a fork closure's creation reads its captures, pushed above, not its body)
         else if k == .lambda: pass
+        else if k == .call and fact_nd_call(n) != 0:
+            loop arg in kids(n): values.push(arg)
         else if k == .call and fact_map_snapshot_call(n): values.push(kid(n, 0))
         # (a length-preserving call's length is its receiver's: `let ks = d.keys` then `ks.values`
         # needs ks's definition)
@@ -6582,6 +6598,7 @@ fact_call_arguments = (n: int, s: mut FactState) -> int[]:
             fact_covered = outer
         else: values[i] = fact_capture(arg, s)
         if ownership_decls.len() != 0: values[i] = fact_owner_value(arg, values[i], s)
+    nd_call_entry(n, s, values)
     loop i in [0..nkids(n)):
         arg = kid(n, i)
         if nodes[arg].kind != .conv or nodes[arg].aux != i32(int(CV.refinement)): continue
@@ -6589,6 +6606,7 @@ fact_call_arguments = (n: int, s: mut FactState) -> int[]:
         # member: its formals are this function's parameters)
         if nodes[n].aux == 3 and nkids(n) == 1 and ref_signature_has(fact_owner, zonk(int(nodes[arg].aux2))): ref_check(arg, values[i], ref_fact_current_entry(s), s)
         else: ref_check(arg, values[i], values, s)
+    nd_mutable_check(n, s, values)
     values
 
 # Undemanded values still execute their effectful descendants. Ordinary calls
@@ -6636,6 +6654,7 @@ fact_bounded_index = (n: int) -> bool:
 # it cannot miss what the transfer would visit. O(body nodes).
 fact_obligation_node = (n: int) -> bool:
     k = nodes[n].kind
+    if nd_mutable_signatures.len() != 0 and nd_mutable_handle(n): return true
     if k == .index: return not has_flag(n, NF_INBOUNDS) and fact_bounded_index(n)
     if k == .binary:
         if nodes[n].aux == 0 and (nodes[n].op == i32(int(Tok.slash)) or nodes[n].op == i32(int(Tok.percent))) and is_int(ntype(int(nodes[n].b))) and not fact_literal_nonzero(int(nodes[n].b)): return true
@@ -6647,7 +6666,7 @@ fact_obligation_node = (n: int) -> bool:
         if exact_has_store(n) and not exact_decided(n) or nodes[n].aux == i32(int(CV.refinement)): return true
         return nodes[n].aux == i32(int(CV.int_)) and prune(ntype(int(nodes[n].a))) == T_MATH_INT and prune(ntype(n)) != T_MATH_INT
     if k == .call:
-        if wi_fact_calls.has(n) or fact_divisors.has(n) or fact_range_call(n): return true
+        if wi_fact_calls.has(n) or fact_divisors.has(n) or fact_range_call(n) or nd_mutable_call(n): return true
         if (fact_floor_call(n) != 0 and not fact_literal_nonzero(kid(n, 1))) or fact_string_call(n) >= 2 or fact_array_call(n) != 0 or fact_power_call(n): return true
         map = fact_map_call(n)
         if map >= 2 and map <= 4 or fact_nonempty_call(n): return true
@@ -6671,7 +6690,7 @@ fact_obliged = (n: int) -> bool:
     if fact_panic_collect:
         if k == .parallel_region: fact_panic_collect = false
         else if k == .intrinsic or k == .call or k == .fnref or k == .lambda or k == .pair or k == .partial or k == .binary and nodes[n].aux == 1: fact_panic_pending.push(n)
-    if k == .lambda: return false
+    if k == .lambda: return nd_mutable_handle(n)
     if k == .ident:
         if nodes[n].aux == i32(int(SK.local)):
             l = int(nodes[n].sym)
@@ -6941,6 +6960,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
     # calls) and writes nothing: its body runs only when called, and every
     # call that can reach it, indirect or through a callee's summary, forgets
     # what the body may write. (Ownership may move captures: still opaque.)
+    if nd_mutable_signatures.len() != 0 and nd_mutable_handle(n): fact_nd_need(n, s, .eq, fact_fresh(s, T_INT), fact_constant(s, 1), "function handle checks its mutable shaped parameters on entry")
     if k == .lambda and fact_speculating == 0 and fact_fork_nodes.has(n): fact_fork_record(n, s)
     if k == .lambda and ownership_decls.len() == 0: return 0
     # (a partial application evaluates its arguments, holes aside, and saves
@@ -7499,6 +7519,8 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             t = fact_type(ntype(kid(n, 0)))
             length = if types[t].kind == .fixed: fact_constant(s, fixed_len(t)) else: fact_project(s, values[0], -1, false, T_INT)
             return fact_new(s, fact_domain(T_BOOL), FactTerm(.eq, length, fact_constant(s, 0)))
+        nd = fact_nd_call(n)
+        if nd != 0: return fact_nd_capture(n, s, values, nd)
         array = fact_array_call(n)
         if array != 0: fact_array_call_check(n, s, values, array)
         if fact_nonempty_call(n): fact_nonempty_check(n, s, values)

@@ -1,0 +1,14 @@
+rank=(m:NDArray<int64>):>int64=>{ if ndim(m) =? 2 return rows(m); -1 }
+# quick
+fixed=(m:array<int64 length=[2 3]>):>int64=>m[1 2]
+checked=(m:array<int64 length=[r c]> i:int64 j:int64):>int64=>{
+    if m.length.length not=? 2 return -1
+    if m.length[0] =? 2 and m.length[1] =? 3 printl(fixed(m))
+    if 0 <=? i <? m.length[0] and 0 <=? j <? m.length[1] return m[i j]
+    -1
+}
+main=()=>{
+    printl(checked(zeros<int64>(2 3) 1 2))
+    printl(checked(zeros<int64>(2 3) 2 0))
+    printl(rank(zeros<int64>(2 3 4)))
+}

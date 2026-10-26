@@ -1,0 +1,19 @@
+# quick
+same=(a:array<int64 length=[r c]> b:array<int64 length=[r c]>):>int=>r+c
+make=(r:int64<(>=? 0)> c:int64<(>=? 0)>):>array<int64 length=[r c]>=>zeros<int64>(r c)
+main=()=>{
+    let a=make(2 3)
+    let literal:array<int64 length=[2 3]>=[1 2 3 ; 4 5 6]
+    printl(same(a literal))
+    printl(a[1 2])
+    let b=reshape([1 2 3 4 5 6] [2 3])
+    printl(b[1 2])
+    let c=reshape(b 3 2)
+    printl(c[2 1])
+    let d=[1 2 ; 3 4 ;; 5 6 ; 7 8]
+    printl(d[1 1 1])
+    let e:array<int64 length=[2 3]>=zeros<int64>(2 3)
+    printl(e[1 2])
+    let line=reshape([7 8 9] [3])
+    printl(line[2])
+}
