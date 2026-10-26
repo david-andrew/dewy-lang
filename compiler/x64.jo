@@ -899,6 +899,8 @@ allocate = ():
 ra_occ: int[]
 ra_words = 0
 ra_cw: int[]                # prefix sums of call weights
+ra_call_cut_storage: i32[]  # release-only instruction boundary -> call ordinal
+ra_call_cut: *i32
 ra_dump = ""                # (DEWY_RADUMP=f_name: print the allocation of that function)
 ra_only = ""                # (DEWY_RA_ONLY=f_name: allocate only that function this way)
 
@@ -939,18 +941,9 @@ ra_take = (r: int, s: int, e: int):
 
 # Weight of calls strictly inside s..e; -1 means exactly one explicit cold call.
 ra_cross_w = (s: int, e: int) -> int:
-    lo = 0
-    hi = call_pos.len()
-    loop lo < hi:
-        mid = (lo + hi) / 2
-        if call_pos[mid] <= s: lo = mid + 1
-        else: hi = mid
-    a = lo
-    hi = call_pos.len()
-    loop lo < hi:
-        mid = (lo + hi) / 2
-        if call_pos[mid] < e: lo = mid + 1
-        else: hi = mid
+    if call_pos.len() == 0: return 0
+    a = int(ra_call_cut[s + 1])
+    lo = int(ra_call_cut[e])
     if lo <= a: return 0
     if lo == a + 1:
         call = ir.code[call_pos[a]]
@@ -963,6 +956,17 @@ allocate_release = ():
     n = ir.code.len() + 1
     ra_cw = fill(0, call_pos.len() + 1)
     loop k in [0..call_pos.len()): ra_cw[k + 1] = ra_cw[k] + call_w[k]
+    # Only release allocation asks weighted crossing queries. Build their
+    # boundary index in O(instructions + calls), then answer each in O(1).
+    # Private scratch is reused; no pointer survives a subsequent resize.
+    if call_pos.len() > 0:
+        if ra_call_cut_storage.len() < n: ra_call_cut_storage.resize(n)
+        ra_call_cut = data(ra_call_cut_storage)
+        calls = data(call_pos)
+        next = 0
+        loop pos in [0..n):
+            loop next < call_pos.len() and calls[next] < pos: next += 1
+            ra_call_cut[pos] = i32(next)
     cross = fill(0, nv)
     loop v in [0..nv):
         if vloc[v] != LOC_SPILL: continue
