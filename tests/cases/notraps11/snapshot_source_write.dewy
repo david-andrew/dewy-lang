@@ -1,0 +1,12 @@
+S:type = [step:rational]
+zero = (@ss:array<S>):>void => { loop @s in ss s.step = 0 }
+f = (ss:array<S>):>rational => {
+    let out:rational = 0
+    loop s in ss {
+        if s.step =? 0 continue
+        zero(@ss)
+        out += 1 / s.step
+    }
+    out
+}
+printl(f([S[1/2] S[1/4]]))

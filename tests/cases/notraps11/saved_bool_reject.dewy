@@ -1,0 +1,7 @@
+change = (@xs:array<int>):>bool => { xs.clear(); true }
+f = (xs:array<int> i:int64<(>=? 0)>):>int => {
+    let ok = i <? xs.length and change(@xs)
+    if ok return xs[i]
+    0
+}
+printl(f([3] 0))

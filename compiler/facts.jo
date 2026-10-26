@@ -31,6 +31,7 @@ use 'directives.jo'
 use 'warn_if.jo'
 use 'string_domains.jo'
 use 'draw_context.jo'
+use 'floats.jo'
 
 enum FactPolicy: RuntimeAllowed, RequireStatic
 enum FactReason: missing, write, call, join, loop_, unsupported, budget, callee
@@ -874,6 +875,13 @@ fact_words_call = (n: int) -> bool:
     d = int(fns[int(nodes[n].sym)].decl)
     files[pos_file(nodes[d].pos)].path == lib_dir + "/core/str.jo"
 
+# core/str.jo lines drops only its last empty part: nonempty input always
+# leaves at least one line (including a lone newline). Empty input leaves none.
+fact_lines_call = (n: int) -> bool:
+    if nkids(n) != 1 or not fact_library_call(n, "lines"): return false
+    d = int(fns[int(nodes[n].sym)].decl)
+    files[pos_file(nodes[d].pos)].path == lib_dir + "/core/str.jo"
+
 # The bundled array search's successful arm is a position in its evaluated
 # input snapshot. Publish through the ordinary conditional-result mechanism:
 # Missing supplies no index evidence, especially when the input is empty.
@@ -977,6 +985,11 @@ fact_read = (s: mut FactState, e: int) -> int:
     if p.declaration == 0: return fact_new(s, FactBound(reason = .unsupported, witness = e), FactTerm(type = ntype(e)))
     i = fact_binding(s, p)
     if i >= 0: return s.bindings[i].value
+    if p.root == .global and readonly_global(p.declaration) and fact_constant_global(p.declaration):
+        value = fact_capture(int(nodes[int(globals[p.declaration].decl)].b), s)
+        if value != 0:
+            fact_bind(s, p, value)
+            return value
     t = refine_storage(e, ntype(e))
     v = fact_new(s, fact_domain(t), FactTerm(type = t))
     fact_bind(s, p, v)
@@ -988,6 +1001,44 @@ fact_read = (s: mut FactState, e: int) -> int:
         size = fact_global_length(p.declaration)
         if size >= 0 and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(v, -1, false, fact_constant(s, size)))
     v
+
+# Seed demanded immutable globals from effect-free value construction, using
+# the ordinary transfer functions. Never execute an initializer or a user
+# function here. Eligibility is cached per global; O(min(nodes, 128)) once,
+# then the normal bounded literal/projection transfer at a demanded read.
+fact_constant_globals: {int: bool} = {}
+fact_constant_global = (g: int) -> bool:
+    if let known = fact_constant_globals.get(g): return known
+    budget = 128
+    d = int(globals[g].decl)
+    known = not globals[g].exposed and d != 0 and fact_constant_tree(int(nodes[d].b), budget)
+    fact_constant_globals[g] = known
+    known
+
+fact_constant_tree = (n: int, budget: mut int) -> bool:
+    budget -= 1
+    if n == 0 or budget < 0: return false
+    if rational_constants.has(n): return true
+    k = nodes[n].kind
+    if k == .int_lit or k == .bool_lit or k == .float_lit or k == .none_lit: return true
+    if k == .str_lit: return nkids(n) == 0 and nodes[n].sval >= 0
+    if k == .ident and nodes[n].aux == i32(int(SK.global)):
+        g = int(nodes[n].sym)
+        return readonly_global(g) and not globals[g].exposed and fact_constant_tree(int(nodes[int(globals[g].decl)].b), budget)
+    if k == .conv and (nodes[n].aux == i32(int(CV.fixed2arr)) or nodes[n].aux == i32(int(CV.int_)) or nodes[n].aux == i32(int(CV.none_))): return fact_constant_tree(int(nodes[n].a), budget)
+    if k == .map_lit:
+        kt = struct_targ(int(types[fact_type(ntype(n))].st), 0)
+        if not fact_scalar(kt) and kt != T_STR: return false
+        loop pair in kids(n):
+            if not fact_constant_tree(int(nodes[pair].a), budget) or not fact_constant_tree(int(nodes[pair].b), budget): return false
+        return true
+    if k == .call:
+        if nodes[n].aux != 2 and not fact_lines_call(n) and not fact_split_call(n) and not fact_words_call(n): return false
+        if ownership_decls.len() != 0 and ownership_fact_type(ntype(n)): return false
+    else if k != .tuple and not (k == .array and nodes[n].a == 0 and nodes[n].b == 0 and nodes[n].aux == 0): return false
+    loop child in kids(n):
+        if has_flag(child, NF_SPREAD) or not fact_constant_tree(child, budget): return false
+    true
 
 # A literal-initialized script integer that no checked write can replace.
 # Seed only demanded reads, O(1), using the existing global write flags.
@@ -2034,6 +2085,10 @@ fact_assume = (s: mut FactState, v: int, truth: bool):
     if known >= 0 and (known == 1) != truth: s.live = false
     t = fact_terms[v]
     fact_set_bound(s, v, FactBound(int(truth), int(truth), truth))
+    if t.op == .kw_and and truth or t.op == .kw_or and not truth:
+        fact_assume(s, t.a, truth)
+        fact_assume(s, t.b, truth)
+        return
     if t.op == .kw_not:
         fact_assume(s, t.a, not truth)
         return
@@ -2134,6 +2189,12 @@ fact_offset_narrow = (s: mut FactState, v: int, b: FactBound):
     if b.hi != FACT_MAX and fact_add_fits(b.hi, -k): x.hi = min(x.hi, b.hi - k)
     if b.lo != FACT_MIN and fact_add_fits(b.lo, -k): x.lo = max(x.lo, b.lo - k)
     fact_set_bound(s, t.a, x)
+    # Once a guard brought the exact offset into range, retain its identity
+    # as well as its interval. The next evaluation of i+k then finds the
+    # guarded value through fact_offset_value. O(1), indexed rows.
+    if not b.wide:
+        fact_difference(s, v, t.a, k, 0, 16)
+        fact_difference(s, t.a, v, -k, 0, 16)
 
 # Publish an arm's scalar result, including its incident difference rows.
 # O(incident rows), indexed and capped by the existing fact-row budget. Only
@@ -3169,6 +3230,22 @@ fact_extremum = (s: mut FactState, n: int, a: int, b: int, lower: bool) -> int:
     else:
         fact_difference(s, a, v, 0, n)
         fact_difference(s, b, v, 0, n)
+    # The other side holds when both operands obey it. Use only existing
+    # incident rows, no candidate pairs or syntax-specific clamp recognition.
+    # O(incident rows x bounded entailment), on demanded min/max results only.
+    loop operand in [a, b]:
+        other = if operand == a: b else: a
+        ri = fact_difference_head(s, operand, int(not lower))
+        rows: FactDifference[]
+        loop ri >= 0:
+            rows.push(s.differences[ri])
+            ri = fact_difference_next(s, ri, int(not lower))
+        loop row in rows:
+            peer = if lower: row.a else: row.b
+            if peer == v: continue
+            if row.limit != 0: continue
+            if lower and fact_compare(s, .le, peer, other) == 1: fact_difference(s, peer, v, 0, n)
+            else if not lower and fact_compare(s, .le, other, peer) == 1: fact_difference(s, v, peer, 0, n)
     v
 
 # `b =? 0` for an exact rational b (the library's `__eq__` with a rational
@@ -5280,7 +5357,7 @@ fact_loop_elements = (n: int, base: int, s: mut FactState):
     if nodes[n].aux != 1 or l <= 0: return
     t = fact_type(int(locals[l].type))
     sized = t == T_STR or tkind(t) == .array
-    if not fact_scalar(t) and not sized and tkind(t) != .tuple: return
+    if not fact_scalar(t) and not sized and tkind(t) != .tuple and tkind(t) != .struct_: return
     if sized:
         pi = fact_index_get(s.index[0].projection_index, fact_projection_key(base, FACT_ELEMENT_LENGTH, false))
         if pi >= 0:
@@ -5320,21 +5397,35 @@ fact_inventory = (s: FactState, base: int) -> int[]:
 
 # What every element of an inventory shares, given to value (one element, of
 # type t): a scalar's hull, a string's or array's length hull, or each scalar
-# component's hull for a tuple. O(parts x components).
-fact_inventory_bound = (s: mut FactState, value: int, parts: int[], t: int, at: int):
+# component's hull for tuples/records, nesting at most four levels and eight
+# fields per level. O(parts x visited components), capped by FACT_CAP.
+fact_inventory_bound = (s: mut FactState, value: int, parts: int[], t: int, at: int, depth: int = 0):
+    if depth >= 4 or parts.len() == 0: return
+    # Copy/transfer hooks can construct different fields for each element.
+    # A literal inventory describes those inputs, not a hook's output values.
+    if ownership_decls.len() != 0 and ownership_fact_type(t): return
     if fact_scalar(t):
         joined = fact_bound(s, parts[0])
         loop j in [1..parts.len()): joined = fact_hull(joined, fact_bound(s, parts[j]), at)
         old = fact_bound(s, value)
         fact_set_bound(s, value, FactBound(max(old.lo, joined.lo), min(old.hi, joined.hi), old.nz or joined.nz))
         return
-    components = if tkind(t) == .tuple: min(int(types[t].nargs), 8) else: 1
+    record = tkind(t) == .struct_ and structs[int(types[t].st)].nvariants == 0 and not structs[int(types[t].st)].union_ and not structs[int(types[t].st)].soa_
+    components = if record: min(int(structs[int(types[t].st)].nfields), 8) else if tkind(t) == .tuple: min(int(types[t].nargs), 8) else: 1
     sized = t == T_STR or tkind(t) == .array
-    if not sized and tkind(t) != .tuple: return
+    if not sized and not record and tkind(t) != .tuple: return
     loop c in [0..components):
-        ct = if sized: T_INT else: fact_type(targ(t, c))
-        selector = if sized: -1 else: c
-        if not fact_scalar(ct) or s.projections.len() >= FACT_CAP: continue
+        f = if record: int(structs[int(types[t].st)].fields) + c else: 0
+        ct = if sized: T_INT else if record: fact_type(int(fields[f].type)) else: fact_type(targ(t, c))
+        selector = if sized: -1 else if record: int(fields[f].name) else: c
+        if s.projections.len() >= FACT_CAP: continue
+        if not fact_scalar(ct):
+            if tkind(ct) != .struct_ and tkind(ct) != .tuple: continue
+            children: int[]
+            loop part in parts: children.push(fact_project(s, part, selector, false, ct))
+            child = fact_project(s, value, selector, false, ct)
+            fact_inventory_bound(s, child, children, ct, at, depth + 1)
+            continue
         joined = FactBound()
         loop j in [0..parts.len()):
             b = fact_bound(s, fact_project(s, parts[j], selector, false, ct))
@@ -5631,6 +5722,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
                 values.push(int(nodes[n].b))
                 if types[fact_type(ntype(int(nodes[n].a)))].kind != .fixed: values.push(int(nodes[n].a))
         else if k == .conv:
+            if ff_integer_demand(n): values.push(n)
             if nodes[n].aux == i32(int(CV.refinement)): values.push(n)
             # (an `int` narrowed to a fixed width: an obligation, and effect_failure asks whether it fits)
             else if (fact_probe_on or fact_policy == .RequireStatic) and not summary and nodes[n].aux == i32(int(CV.int_)) and prune(ntype(int(nodes[n].a))) == T_MATH_INT and prune(ntype(n)) != T_MATH_INT: values.push(n)
@@ -5712,7 +5804,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
         # (a fork closure's creation reads its captures, pushed above, not its body)
         else if k == .lambda: pass
         else if k == .call and fact_copy_length_call(n): values.push(kid(n, 0))
-        else if k == .call and nodes[n].aux == 0 and not result_active and not proof_active and not fact_divisors.has(n) and fact_floor_call(n) == 0 and fact_string_call(n) == 0 and not fact_extremum_call(n) and not fact_empty_array_call(n) and not fact_entry_count_call(n) and not fact_split_call(n) and not fact_words_call(n) and not fact_search_call(n) and not fact_affix_call(n) and not fact_parallel_array(n) and not ref_refined_result(int(fns[int(nodes[n].sym)].ret)):
+        else if k == .call and nodes[n].aux == 0 and not result_active and not proof_active and not fact_divisors.has(n) and fact_floor_call(n) == 0 and fact_string_call(n) == 0 and not fact_extremum_call(n) and not fact_empty_array_call(n) and not fact_entry_count_call(n) and not fact_split_call(n) and not fact_words_call(n) and not fact_lines_call(n) and not fact_search_call(n) and not fact_affix_call(n) and not fact_parallel_array(n) and not ref_refined_result(int(fns[int(nodes[n].sym)].ret)):
             # Ordinary summaries start from unknown formals: their return
             # facts do not depend on the actual values. Argument obligations
             # and effects remain separate roots of this slice.
@@ -5918,6 +6010,7 @@ fact_obligation_node = (n: int) -> bool:
     if k == .assign: return fact_shift_obliged(n)
     if k == .for_: return fact_stepped_loop(n) or fact_open_range(n)
     if k == .conv:
+        if ff_integer_demand(n): return true
         if exact_has_store(n) and not exact_decided(n) or nodes[n].aux == i32(int(CV.refinement)): return true
         return nodes[n].aux == i32(int(CV.int_)) and prune(ntype(int(nodes[n].a))) == T_MATH_INT and prune(ntype(n)) != T_MATH_INT
     if k == .call:
@@ -6018,7 +6111,8 @@ fact_capture = (n: int, s: mut FactState) -> int:
         exact_shift_fact(n, exponent, s)
         return fact_unmodeled(s, n, .unsupported)
     if marks & 64 != 0:
-        fact_capture(int(nodes[n].a), s)
+        value = fact_capture(int(nodes[n].a), s)
+        if ff_integer_demand(n): ff_integer_record(n, value, s)
         return fact_new(s, fact_domain(ntype(n)), FactTerm(type = ntype(n)))
     if n > 0 and exact_has_store(n): return exact_fact_store(n, fact_capture(int(nodes[n].a), s), s)
     value = fact_capture_value(n, s)
@@ -6039,6 +6133,13 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         control = k == .index or k == .block or k == .if_ or k == .iflet or k == .match_ or k == .while_ or k == .for_ or k == .return_ or k == .break_ or k == .continue_ or k == .and_ or k == .or_ or k == .coalesce
         if not control and mark & FACT_VALUE == 0: return fact_slice_capture(n, s)
     k = nodes[n].kind
+    if (k == .call or k == .conv) and rational_constants.len() > 0:
+        if let fraction = rational_constants.get(n):
+            value = fact_new(s, FactBound(), FactTerm(type = ntype(n)))
+            if s.projections.len() + 2 < FACT_CAP:
+                fact_add_projection(s, FactProjection(value, intern("numerator"), false, fact_constant(s, fraction.0)))
+                fact_add_projection(s, FactProjection(value, intern("denominator"), false, fact_constant(s, fraction.1)))
+            return value
     if k == .block and has_flag(n, NF_COMPREHENSION) and nkids(n) > 1 and nodes[kid(n, 0)].kind == .vardecl: fact_comprehensions[kid(n, 1)] = int(nodes[kid(n, 0)].sym)
     if k == .int_lit or k == .bool_lit:
         if not fact_scalar(ntype(n)): return fact_new(s, FactBound(reason = .unsupported, witness = n))
@@ -6162,6 +6263,19 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(value, fact_constant(s, i), true, v))
         if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(value, -1, false, fact_constant(s, nkids(n))))
         return value
+    if k == .map_lit:
+        kt = struct_targ(int(types[fact_type(ntype(n))].st), 0)
+        if (fact_scalar(kt) or kt == T_STR) and (ownership_decls.len() == 0 or not ownership_fact_type(ntype(n))):
+            keys: int[]
+            loop pair in kids(n):
+                e = int(nodes[pair].a)
+                key = fact_capture(e, s)
+                keys.push(fact_map_key(s, e, key))
+                fact_capture(int(nodes[pair].b), s)
+            value = fact_new(s, FactBound(), FactTerm(type = ntype(n)))
+            loop key in keys:
+                if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(value, key, true, fact_constant(s, 1)))
+            return value
     if result_active and k == .none_lit:
         value = fact_new(s, FactBound(), FactTerm(type = ntype(n)))
         fact_add_projection(s, FactProjection(value, -3, false, fact_constant(s, 0)))
@@ -6311,12 +6425,29 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         s = fact_join(paths.yes, paths.no, n)
         return fact_new(s, result, FactTerm(type = hull))
     if k == .and_ or k == .or_:
-        paths = fact_condition(n, s)
+        if fact_summary_owner != 0 or mark != 0 and mark & FACT_VALUE == 0:
+            paths = fact_condition(n, s)
+            result = fact_domain(T_BOOL)
+            if not paths.yes.live: result = FactBound(0, 0)
+            if not paths.no.live: result = FactBound(1, 1, true)
+            s = fact_join(paths.yes, paths.no, n)
+            return fact_new(s, result)
+        # Evaluate a saved Boolean once, retaining the operand identities.
+        # Split only for short circuiting; the RHS result needs no extra
+        # true/false state copies. O(1) transfer per demanded connective plus
+        # the existing bounded join. Effects still replace storage identities.
+        a = fact_capture(int(nodes[n].a), s)
+        rhs = s
+        take = k == .and_
+        fact_assume(rhs, a, take)
+        fact_assume(s, a, not take)
+        b = fact_capture(int(nodes[n].b), rhs)
         result = fact_domain(T_BOOL)
-        if not paths.yes.live: result = FactBound(0, 0)
-        if not paths.no.live: result = FactBound(1, 1, true)
-        s = fact_join(paths.yes, paths.no, n)
-        return fact_new(s, result)
+        if not rhs.live: result = FactBound(int(not take), int(not take), not take)
+        else if not s.live: result = fact_bound(rhs, b)
+        else if fact_truth(rhs, b) == int(not take): result = FactBound(int(not take), int(not take), not take)
+        s = fact_join(s, rhs, n)
+        return fact_new(s, result, FactTerm((if take: Tok.kw_and else: Tok.kw_or), a, b))
     if (k == .while_ or k == .for_) and fact_loops.len() == 0 and fact_speculating == 0:
         fact_loop_steps = 0; fact_loop_exhausted = false
     if k == .while_ and nodes[n].aux == 0:
@@ -6431,6 +6562,9 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                 return fact_new(s, fact_domain(ntype(n), .call, n), FactTerm(type = ntype(n)))
             return a
         if nodes[n].aux == i32(int(CV.fixed2arr)): return a
+        if ff_integer_demand(n):
+            ff_integer_record(n, a, s)
+            return fact_fresh(s, ntype(n))
         if nodes[n].aux == i32(int(CV.set_text)): return fact_new(s, FactBound(), FactTerm(type = ntype(n)))
         b = fact_bound(s, a)
         from = fact_type(ntype(int(nodes[n].a)))
@@ -6448,7 +6582,18 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             # A progress-axiom narrowing supplies its fixed storage domain;
             # its mathematical intermediate must not remain unbounded downstream.
             if proven and exact_progress_math.has(n): return fact_new(s, fact_domain(to), FactTerm(type = to))
-            if (proven or n == fact_covered) and to != T_U64: return a
+            if to != T_U64:
+                # Successful checked narrowing preserves the mathematical
+                # value too. Its obligation is still checked above; a summary
+                # describes only returning paths. O(1) interval intersection.
+                domain = fact_domain(to)
+                b.lo = max(b.lo, domain.lo); b.hi = min(b.hi, domain.hi)
+                b.wide = false
+                # Keep the existing witness when no proof established this
+                # conversion: later uses know its value, not why it fitted.
+                if not proven and n != fact_covered: b.reason = .unsupported; b.witness = n
+                fact_set_bound(s, a, b, true)
+                return a
             if not proven or b.lo < 0: return fact_unmodeled(s, n, .unsupported)
             return fact_new(s, FactBound(b.lo xor FACT_MIN, b.hi xor FACT_MIN), FactTerm(type = T_U64))
         if from == to and nodes[n].aux == i32(int(CV.int_)): return a
@@ -6788,6 +6933,13 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                 fact_add_projection(s, FactProjection(result, -1, false, fact_project(s, entry[0], -1, false, T_INT)))
             if fact_words_call(n) and s.projections.len() < FACT_CAP:
                 fact_add_projection(s, FactProjection(result, FACT_ELEMENT_LENGTH, false, fact_new(s, FactBound(1, fact_length_max()))))
+            if fact_lines_call(n):
+                source = fact_bound(s, fact_project(s, entry[0], -1, false, T_INT))
+                length = fact_project(s, result, -1, false, T_INT)
+                bound = fact_bound(s, length)
+                if source.lo > 0: bound.lo = max(1, bound.lo)
+                if source.hi == 0: bound.hi = 0
+                fact_set_bound(s, length, bound)
             if fact_split_call(n):
                 separator = fact_project(s, entry[1], -1, false, T_INT)
                 if fact_bound(s, separator).lo > 0:
@@ -7184,7 +7336,7 @@ fn_dewy = (f: int) -> bool:
 facts_finalize = ():
     draw_context_finalize()
     if proof_active: proof_prepare()
-    if loan_owners.len() == 0 and fact_requests.len() == 0 and refine_requests.len() == 0 and wi_fact_requests.len() == 0 and proof_calls.len() == 0 and not proof_active and not result_active and fact_policy == .RuntimeAllowed and exact_stores.len() == 0 and exact_owners.len() == 0: return
+    if loan_owners.len() == 0 and fact_requests.len() == 0 and refine_requests.len() == 0 and wi_fact_requests.len() == 0 and proof_calls.len() == 0 and not proof_active and not result_active and fact_policy == .RuntimeAllowed and exact_stores.len() == 0 and exact_owners.len() == 0 and not dir_floats_any and ff_conversions.len() == 0: return
     demanded: {int: bool} = {}
     loop request in wi_fact_requests: demanded[request.owner] = true
     loop f, _ in loan_owners: demanded[f] = true
@@ -7199,9 +7351,9 @@ facts_finalize = ():
     mandatory = demanded
     loop request in refine_requests: demanded[request.owner] = true
     loop f, _ in exact_proof_demands: demanded[f] = true
-    if fact_policy == .RequireStatic:
+    if fact_policy == .RequireStatic or dir_floats_any or ff_conversions.len() > 0:
         loop f in [1..fns.len()):
-            if fns[f].body != 0 and fns[f].state == 2 and not fn_in_lib(f) and fn_dewy(f): demanded[f] = true
+            if (fact_policy == .RequireStatic or dir_floats_any or ff_conversions.has(f)) and fns[f].body != 0 and fns[f].state == 2 and not fn_in_lib(f) and fn_dewy(f): demanded[f] = true
     # (closures after the functions that create them: a fork's entry facts)
     order: int[]
     loop f, _ in demanded:
@@ -7283,6 +7435,7 @@ facts_finalize = ():
 fact_internal_policy = ""
 
 facts_reset = ():
+    fact_constant_globals = {}
     draw_context_reset()
     fact_search_predicate = 0
     exact_reset()

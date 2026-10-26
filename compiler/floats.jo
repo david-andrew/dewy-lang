@@ -265,6 +265,7 @@ struct FR:
 ff_checks: {int: int} = {}      # node -> the result checks lowering adds (FF_NAN | FF_INF)
 ff_checks_any = false
 ff_int_proven: {int: bool} = {} # float-to-integer conversion node -> its value is proven in range
+ff_integer_bounds: {int: FR} = {} # integer-conversion node -> range captured by facts
 ff_env: {int: FR} = {}          # tracked local -> its bounds here
 ff_files: {int: bool} = {}      # files holding a float scope
 ff_owners: {int: bool} = {}     # functions a float scope is written in
@@ -285,6 +286,7 @@ floats_reset = ():
 
 # (check_program starts over: what checking noted for the walks)
 floats_notes_reset = ():
+    ff_integer_bounds = {}
     ff_callers = {}
     ff_direct = {}
     ff_indirect = {}
@@ -811,6 +813,26 @@ ff_below = (x: f64) -> f64:
     bits = int(f64_bits(x))
     f64_from_bits(u64(if x > 0.0: bits - 1 else: bits + 1))
 
+# Only scopes needing float facts demand integer operands from the existing
+# facts traversal. The bridge is node-indexed, O(1) per conversion (plus the
+# bounded endpoint query), and joins repeated observations conservatively.
+ff_integer_demand = (n: int) -> bool:
+    n > 0 and nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.int2float)) and (dir_floats_any or ff_conversions.has(fact_owner))
+
+ff_integer_record = (n: int, value: int, s: FactState):
+    if fact_speculating != 0 or not s.live: return
+    b = fact_bound(s, value)
+    r = FR(-INF, INF)
+    if not b.wide and fact_type(ntype(int(nodes[n].a))) != T_U64:
+        if b.lo != FACT_MIN or not fact_open_endpoint(s, value, false): r.lo = f64(b.lo)
+        if b.hi != FACT_MAX or not fact_open_endpoint(s, value, true): r.hi = f64(b.hi)
+        # Integer-to-float rounding is monotone. A float32 conversion rounds
+        # the endpoints to its own precision before float64 analysis uses them.
+        if int(types[prune(ntype(n))].bits) == 32:
+            r.lo = f64(f32(r.lo)); r.hi = f64(f32(r.hi))
+    if let prior = ff_integer_bounds.get(n): r = ff_hull(prior, r)
+    ff_integer_bounds[n] = r
+
 # A conversion: float widths, integers to floats, floats to integers.
 ff_conv = (n: int) -> FR:
     a = int(nodes[n].a)
@@ -825,6 +847,8 @@ ff_conv = (n: int) -> FR:
             if (x.lo < -limit or x.hi > limit) and m & FF_INF != 0: ff_obligation(n, FF_INF, "the value fits float32")
         return x
     if cv == i32(int(CV.int2float)):
+        if let known = ff_integer_bounds.get(n):
+            if not ff_may_inf(known): return known
         if ntype(a) == T_MATH_INT:
             m = ff_mode_at(nodes[n].pos)
             if m & FF_INF != 0: ff_obligation(n, FF_INF, "the `int` fits a float")

@@ -1,0 +1,12 @@
+make = (n:int):>array<int> => {
+    $runtime_checks
+    fill(1 n)
+}
+main = () => {
+    $runtime_checks
+    let xs = make(3)
+    $assert xs.length =? 3
+    printl(xs[2])
+    let empty = make(-1)
+    $assert empty.length =? 0
+}

@@ -1,0 +1,10 @@
+S:type = [step:rational]
+f = (ss:array<S>):>rational => {
+    let out:rational = 0
+    loop s in ss {
+        printl("helper")
+        out += 1 / s.step
+    }
+    out
+}
+printl(f([S[0]]))

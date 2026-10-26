@@ -1,0 +1,12 @@
+S:type = [step:rational]
+helper = ():>void => printl("helper")
+f = (ss:array<S>):>rational => {
+    let out:rational = 0
+    loop s in ss {
+        if s.step =? 0 continue
+        helper()
+        out += 1 / s.step
+    }
+    out
+}
+printl(f([S[1/2]]))

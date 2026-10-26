@@ -1,7 +1,6 @@
 # The declaration that makes a binding is not reported as a change of its value.
-CSV = """a,b
-c,d"""
-main = () => {
-    let rows = CSV.lines
+first = (csv:string) => {
+    let rows = csv.lines
     printl(rows[0])
 }
+main = () => first("a,b\nc,d")

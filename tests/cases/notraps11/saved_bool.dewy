@@ -1,0 +1,7 @@
+yes = (x:int):>bool => x >? 0
+f = (xs:array<int> i:int64<(>=? 0)>):>int => {
+    let ok = i <? xs.length and yes(xs[i])
+    if ok return xs[i]
+    0
+}
+printl(f([3] 0))

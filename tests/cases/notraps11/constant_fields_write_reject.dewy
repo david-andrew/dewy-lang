@@ -1,0 +1,9 @@
+const SS = [[step=1/2] [step=1/4]]
+f = ():>rational => {
+    let xs = SS
+    xs[0].step = 0
+    let out:rational = 0
+    loop s in xs out += 1 / s.step
+    out
+}
+printl(f())

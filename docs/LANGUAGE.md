@@ -686,6 +686,14 @@ proven below the array's post-call length. Every return must establish the
 relation. Replacing or shrinking the array, an unknown callback, and pending
 return cleanup still invalidate facts they could falsify. Module `const` values,
 including their lengths and guarded elements, retain facts across calls.
+Immutable literal tables supply key membership and element-field bounds;
+`text.lines` is nonempty when `text` is nonempty. Read-only array-loop elements
+keep guarded field facts across unrelated calls. A successful integer narrowing
+preserves the converted value, including a helper's count-to-result-length
+relation; its original narrowing check can still make the helper panic.
+A saved conjunction can retain its captured guard's bounds, and symbolic
+`max(lo min(hi value))` retains both bounds when `lo <=? hi` is known.
+Integer-to-float conversions use the integer bounds known at that conversion.
 A sorted copy has its input value's length, and `text.chars()` has `text.length`
 elements. Search bounds survive a fallback when both cases establish them:
 `xs.index_of(x) ?? -1` is below `xs.length`, so a nonnegative guard makes it
