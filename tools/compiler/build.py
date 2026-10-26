@@ -23,7 +23,8 @@ ROOT = HERE.parents[1]
 # Steps 1 and 2 cannot read Dewy, so there every `use 'X.dewy'` in compiler/
 # names X.dewy's frozen implementation-language twin instead. Steps 3 on
 # compile the Dewy modules, so the compiler that ships runs them.
-FROZEN_TWINS = {'wasm_emit.dewy': 'wasm_emit.jo',
+FROZEN_TWINS = {'arm64_encode.dewy': 'arm64_encode.jo',
+               'wasm_emit.dewy': 'wasm_emit.jo',
                'backend_analysis.dewy': 'backend_analysis.jo',
                'opt_returns.dewy': 'opt_returns.jo',
                'opt_cleanup.dewy': 'opt_cleanup.jo',

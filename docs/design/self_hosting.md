@@ -404,7 +404,11 @@ packaging; native emission is a separate ownership boundary.
 
 A function's IR is a read-only snapshot throughout both walks. Cache its lengths
 and borrow code/argument/type/constant views once; finalized local and slot maps
-stay fixed while encoding. The lifetime walk consumes the shared opcode layout
+stay fixed while encoding. Import parameter/result views borrow module metadata
+without copying signatures. Allocation borrows the fixed three-group count/free
+headers and refreshes its active-local view before each scan; only the later
+append can grow that storage. Swap/pop and stable ordering stay unchanged.
+The lifetime walk consumes the shared opcode layout
 table, using the fixed `Ins` tag and contiguous a/b/c ABI. The emitter owns
 its output, local and slot maps, and transient operand view; consume that view
 before decoding another instruction. Signature and table state lives for the
@@ -422,6 +426,24 @@ The frozen twin preserves the old switch-based operand walk and complete body
 encoder behind the same bulk-metadata interface; the bootstrap generations
 still require it. Whole-body differentials cover every opcode, import ABI,
 address mode, call policy, frame and reused-state transition.
+
+## Arm64 encoding boundary
+
+`arm64_encode.dewy` owns whole scalar instruction-encoding functions: word
+read/write/patch, immediates, integer and floating operations, branches and
+memory addressing. `arm64_encode.jo` freezes the original encodings for the
+bootstrap. Register allocation, frame layout, IR dispatch, relocation policy
+and diagnostics remain in the Jo host. There is no per-instruction callback.
+
+The host binds the stable address of its code-array variable once, before
+emission; Mach-O, REPL and watch users import the same leaf. The borrowed address
+survives backing-buffer growth and replacement. Appending one word uses the
+runtime's `[references, length, capacity]` header and calls the language's
+`reserve` operation on shared or insufficient storage, reacquiring the header
+before writing. No byte pointer survives a write. Patching retains array COW
+semantics. Encoding fields use wrapping machine words, matching Jo rather than
+introducing exact-integer arithmetic. Work remains O(emitted bytes), amortized
+for growth, with the existing O(buffer size) copy when storage is shared.
 
 ## Parser ownership boundary
 

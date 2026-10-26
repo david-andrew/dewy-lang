@@ -378,10 +378,11 @@ cmp_res=():>void=>$unsafe {
     to_i64_from_i32()
 }
 emit_call_args=(start:int64 n:int64 lf:int64):>void=>$unsafe {
-    let imp=lf >=? 0 and wasm_import_results[lf] not=? -2
-    let pts:array<int64>=[]
+    let results=wasm_import_results.ptr
+    let imp=lf >=? 0 and results[lf] not=? -2
+    let pts:ptr<int64>=uint64(0) as ptr<int64>
     if imp {
-        pts=wasm_import_params[lf]
+        pts=wasm_import_params.ptr[lf].ptr
     }
     loop k in [0..n) {
         let v=WasmWord(wasm_arguments[start + k])
@@ -393,9 +394,10 @@ emit_call_args=(start:int64 n:int64 lf:int64):>void=>$unsafe {
 }
 call_result=(ins:Ins lf:int64):>void=>$unsafe {
     let d=WasmWord(ins.dst)
-    let imp=lf >=? 0 and wasm_import_results[lf] not=? -2
+    let results=wasm_import_results.ptr
+    let imp=lf >=? 0 and results[lf] not=? -2
     if imp {
-        let rt=wasm_import_results[lf]
+        let rt=results[lf]
         if rt not=? -1 {
             if rt =? WT_I32 {
                 to_i64_from_i32()
@@ -1250,16 +1252,21 @@ wasm_body=(f:IrFn):>array<uint8>=>$unsafe {
         }
     }
     order.sort(key=(v:int64)=>first[v])
-    let counts:array<int64>=[0  0  0]
-    let free:array<array<int64>>=[[]  []  []]
+    let counts_storage:array<int64>=[0  0  0]
+    let counts=counts_storage.ptr
+    let free_storage:array<array<int64>>=[[]  []  []]
+    let free=free_storage.ptr
     let active:array<[int64 int64 int64]>=[] # (last, type group, local within the group)
     loop v in order {
         let g=wasm_group(vtype_of(v))
+        # The active array can grow only after this scan; reacquire its view
+        # for each vreg. Swap/pop keeps the original allocation order.
+        let active_at=active.ptr
         let k=0
         loop k <? active.length {
-            if active[k][0] <? first[v] {
-                free[active[k][1]].push(active[k][2])
-                active[k] = active[active.length - 1]
+            if active_at[k][0] <? first[v] {
+                free[active_at[k][1]].push(active_at[k][2])
+                active_at[k] = active_at[active.length - 1]
                 active.pop();
             }
             else {
@@ -1288,7 +1295,8 @@ wasm_body=(f:IrFn):>array<uint8>=>$unsafe {
         }
     }
     let next=f.nparams
-    let base:array<int64>=[0  0  0]
+    let base_storage:array<int64>=[0  0  0]
+    let base=base_storage.ptr
     let groups:array<[int64 int64]>=[]
     loop g in [0..3) {
         base[g] = next

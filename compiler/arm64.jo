@@ -1,3 +1,4 @@
+use 'arm64_encode.dewy'
 use 'backend_analysis.dewy'
 use 'ir_types.dewy'
 # arm64 (AArch64) code generator: Linux on 64-bit ARM (`--target aarch64-linux`).
@@ -27,24 +28,6 @@ use 'x64.jo'
 a_int_fail: int[]
 a_int_fail_fn = 0
 
-const A_SP = 31              # as a base register (loads, stores, add/sub immediate)
-const A_ZR = 31              # as an operand elsewhere
-const A_FP = 29
-const A_LR = 30
-
-# condition codes
-const AC_EQ = 0
-const AC_NE = 1
-const AC_HS = 2
-const AC_LO = 3
-const AC_MI = 4
-const AC_HI = 8
-const AC_LS = 9
-const AC_GE = 10
-const AC_LT = 11
-const AC_GT = 12
-const AC_LE = 13
-
 a_out_size = 0               # bytes of stack arguments the calls need
 a_scratch = 0                # offset of the 16 scratch bytes
 
@@ -54,142 +37,8 @@ a_stub_fix: (int, int)[]     # BL to a stub
 a_faddr_fix: (int, int)[]    # ADRP + ADD of a function's address
 a_data_fix: (int, int, int)[]    # ADRP + ADD of rodata (kind 0) or data (kind 1) + offset
 
-w32 = (x: int):
-    code.push(u8(x & 255))
-    code.push(u8((x >> 8) & 255))
-    code.push(u8((x >> 16) & 255))
-    code.push(u8((x >> 24) & 255))
-
-rd32 = (p: int) -> int: int(code[p]) | (int(code[p + 1]) << 8) | (int(code[p + 2]) << 16) | (int(code[p + 3]) << 24)
-wr32 = (p: int, x: int):
-    code[p] = u8(x & 255)
-    code[p + 1] = u8((x >> 8) & 255)
-    code[p + 2] = u8((x >> 16) & 255)
-    code[p + 3] = u8((x >> 24) & 255)
-
-# ---------------- encodings ----------------
-a_movz = (rd: int, imm: int, hw: int): w32(0xD2800000 | (hw << 21) | ((imm & 0xFFFF) << 5) | rd)
-a_movk = (rd: int, imm: int, hw: int): w32(0xF2800000 | (hw << 21) | ((imm & 0xFFFF) << 5) | rd)
-a_movn = (rd: int, imm: int, hw: int): w32(0x92800000 | (hw << 21) | ((imm & 0xFFFF) << 5) | rd)
-
-a_mov_imm = (rd: int, v: int):
-    if v >= 0 and v < 65536:
-        a_movz(rd, v, 0)
-        return
-    if v < 0 and v >= -65536:
-        a_movn(rd, ~v, 0)
-        return
-    a_movz(rd, v & 0xFFFF, 0)
-    loop k in [1..4):
-        c = (v >> (16 * k)) & 0xFFFF
-        if c != 0: a_movk(rd, c, k)
-
-# register to register (rd, rm general registers, not sp)
-a_mov = (rd: int, rm: int):
-    if rd != rm: w32(0xAA0003E0 | (rm << 16) | rd)
-
-# rd = rn + imm (rn or rd may be sp); any imm
-a_add_imm = (rd: int, rn: int, imm: int):
-    if imm >= 0 and imm < 4096:
-        w32(0x91000000 | (imm << 10) | (rn << 5) | rd)
-        return
-    if imm < 0 and imm > -4096:
-        w32(0xD1000000 | ((-imm) << 10) | (rn << 5) | rd)
-        return
-    if imm >= 0 and imm < 0x1000000 and imm & 0xFFF == 0:
-        w32(0x91400000 | ((imm >> 12) << 10) | (rn << 5) | rd)
-        return
-    a_mov_imm(17, imm)
-    w32(0x8B206000 | (17 << 16) | (rn << 5) | rd)          # add rd, rn, x17 (uxtx: rn may be sp)
-
-a_sub_imm = (rd: int, rn: int, imm: int): a_add_imm(rd, rn, -imm)
-
-# three-register integer operations
-a_rrr = (base: int, rd: int, rn: int, rm: int): w32(base | (rm << 16) | (rn << 5) | rd)
-const A_ADD = 0x8B000000
-const A_SUB = 0xCB000000
-const A_AND = 0x8A000000
-const A_ORR = 0xAA000000
-const A_EOR = 0xCA000000
-const A_SDIV = 0x9AC00C00
-const A_UDIV = 0x9AC00800
-const A_LSLV = 0x9AC02000
-const A_LSRV = 0x9AC02400
-const A_ASRV = 0x9AC02800
-
-a_mul = (rd: int, rn: int, rm: int): w32(0x9B000000 | (rm << 16) | (A_ZR << 10) | (rn << 5) | rd)
-# rd = ra - rn * rm
-a_msub = (rd: int, rn: int, rm: int, ra: int): w32(0x9B008000 | (rm << 16) | (ra << 10) | (rn << 5) | rd)
-a_cmp = (rn: int, rm: int): w32(0xEB000000 | (rm << 16) | (rn << 5) | A_ZR)
-a_cmp_imm = (rn: int, imm: int): w32(0xF1000000 | (imm << 10) | (rn << 5) | A_ZR)
-a_cset = (rd: int, cc: int): w32(0x9A9F07E0 | ((cc xor 1) << 12) | rd)
-# rd = rn + (rm << sh)
-a_add_lsl = (rd: int, rn: int, rm: int, sh: int): w32(0x8B000000 | (rm << 16) | (sh << 10) | (rn << 5) | rd)
-# bitfield moves (64-bit): UBFM / SBFM
-a_ubfm = (rd: int, rn: int, immr: int, imms: int): w32(0xD3400000 | (immr << 16) | (imms << 10) | (rn << 5) | rd)
-a_sbfm = (rd: int, rn: int, immr: int, imms: int): w32(0x93400000 | (immr << 16) | (imms << 10) | (rn << 5) | rd)
-
-a_bl = (): w32(0x94000000)
-a_blr = (rn: int): w32(0xD63F0000 | (rn << 5))
-a_br = (rn: int): w32(0xD61F0000 | (rn << 5))
-a_ret = (): w32(0xD65F03C0)
-a_svc = (): w32(0xD4000001)
-
-# memory: size 1, 2, 4, 8 (integers) or 4, 8, 16 with fp; signed loads extend to 64 bits
-a_mem = (load: bool, rt: int, rn: int, off: int, size: int, signed: bool, fp: bool):
-    sz = 3
-    if size == 1: sz = 0
-    else if size == 2: sz = 1
-    else if size == 4: sz = 2
-    opc = 0
-    if load:
-        opc = 1
-        if signed and size < 8: opc = 2
-    vbit = 0
-    if fp:
-        vbit = 1
-        if size == 16:
-            sz = 0
-            if load: opc = 3
-            else: opc = 2
-    if off >= 0 and off % size == 0 and off / size < 4096:
-        w32((sz << 30) | (7 << 27) | (vbit << 26) | (1 << 24) | (opc << 22) | ((off / size) << 10) | (rn << 5) | rt)
-        return
-    if off >= -256 and off < 256:
-        w32((sz << 30) | (7 << 27) | (vbit << 26) | (opc << 22) | ((off & 0x1FF) << 12) | (rn << 5) | rt)
-        return
-    a_add_imm(16, rn, off)
-    w32((sz << 30) | (7 << 27) | (vbit << 26) | (1 << 24) | (opc << 22) | (16 << 5) | rt)
-
-a_ldr = (rt: int, rn: int, off: int): a_mem(true, rt, rn, off, 8, false, false)
-a_str = (rt: int, rn: int, off: int): a_mem(false, rt, rn, off, 8, false, false)
-
-# floating point (ty VF: double, VS: single)
-fty = (ty: int) -> int:
-    if ty == VS: return 0
-    1
-a_fop = (base: int, ty: int, rd: int, rn: int, rm: int): w32(base | (fty(ty) << 22) | (rm << 16) | (rn << 5) | rd)
-a_fun = (base: int, ty: int, rd: int, rn: int): w32(base | (fty(ty) << 22) | (rn << 5) | rd)
-const AF_ADD = 0x1E202800
-const AF_SUB = 0x1E203800
-const AF_MUL = 0x1E200800
-const AF_DIV = 0x1E201800
-const AF_SQRT = 0x1E21C000
-const AF_NEG = 0x1E214000
-const AF_ABS = 0x1E20C000
-const AF_MOV = 0x1E204000
-const AF_FLOOR = 0x1E254000     # frintm
-const AF_CEIL = 0x1E24C000      # frintp
-const AF_TRUNC = 0x1E25C000     # frintz
-a_fcmp = (ty: int, rn: int, rm: int): w32(0x1E202000 | (fty(ty) << 22) | (rm << 16) | (rn << 5))
-a_fcsel = (ty: int, rd: int, rn: int, rm: int, cc: int): w32(0x1E200C00 | (fty(ty) << 22) | (rm << 16) | (cc << 12) | (rn << 5) | rd)
-# general register <-> fp register, the same bits
-a_fmov_from = (ty: int, fd: int, rn: int):
-    if ty == VS: w32(0x1E270000 | (rn << 5) | fd)
-    else: w32(0x9E670000 | (rn << 5) | fd)
-a_fmov_to = (ty: int, rd: int, fr: int):
-    if ty == VS: w32(0x1E260000 | (fr << 5) | rd)
-    else: w32(0x9E660000 | (fr << 5) | rd)
+# Bind the shared code-array variable once, including Mach-O/REPL users.
+a_encoder_binding = arm64_encoder_bind(&code)
 
 # ---------------- registers ----------------
 # A value in a register has vloc x0-x30 as themselves, v0-v31 as A_V + n. Values living across
