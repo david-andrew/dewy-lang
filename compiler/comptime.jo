@@ -1,3 +1,4 @@
+use 'evaluator_state.dewy'
 use 'checker_tokens.dewy'
 use 'refinement_types.dewy'
 # Ordinary checked Dewy bodies, interpreted on demand. Values are immutable;
@@ -13,25 +14,6 @@ use 'util.jo'
 use 'lower.jo'
 use 'math_comptime.jo'
 use 'exact.jo'
-
-struct CTValue:
-    type: int
-    i: int
-    f: f64
-    s: str
-    items: int[]
-
-struct CTFrame:
-    values: {int: int}
-    refs: {int: int}
-    signal: int                 # 1 return, 2 break, 3 continue
-    result: int
-    depth: int
-
-struct CTPlace:
-    frame: int
-    local: int
-    path: int[]
 
 ct_values: CTValue[] = [CTValue()]
 ct_frames: CTFrame[]

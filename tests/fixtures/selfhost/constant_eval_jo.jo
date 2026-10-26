@@ -1,0 +1,104 @@
+use '../../../compiler/constant_eval.jo'
+use '../../../compiler/constant_host.jo'
+use '../../../compiler/evaluator_state.jo'
+use '../../../compiler/node_store.jo'
+use '../../../compiler/source_types.jo'
+use '../../../compiler/checker_tokens.jo'
+
+nodes: Node[] = [Node()]
+names: str[] = ["", "missing", "a\0b", "a\0c"]
+files: SrcFile[] = [SrcFile("test.jo", ".", ""), SrcFile("test.dewy", ".", "", true)]
+requests: int[]
+parent = 0
+replacement = 0
+
+fail = (pos: int, message: str):
+    print("E {pos} {message}")
+    exit(7)
+
+checked = (e: int) -> CVal:
+    requests.push(e)
+    # Re-enter, grow every borrowed arena, then redirect the outer right child.
+    if nodes[e].ival == 99:
+        nested = run(replacement)
+        loop i in [0..300):
+            nodes.push(Node())
+            names.push("grown")
+            files.push(SrcFile())
+        nodes[parent].b = i32(replacement)
+        return nested
+    CVal(false, nodes[e].ival, "")
+
+binding = (e: int) -> int:
+    requests.push(-e)
+    initial = int(nodes[e].sym)
+    loop i in [0..300): nodes.push(Node())
+    initial
+
+host = ConstantHost(checked, binding, fail)
+run = (e: int) -> CVal: constant_eval(nodes, names, files, host, e)
+node = (kind: NK, value: int = 0, a: int = 0, b: int = 0, op: Tok = .eof, pos: int = 700) -> int:
+    nodes.push(Node(kind=kind, ival=value, a=i32(a), b=i32(b), op=i32(int(op)), pos=pos))
+    nodes.len()-1
+show = (e: int):
+    v = run(e)
+    print("{v.is_str} {v.i} {v.s}")
+
+main = ():
+    mode = to_int(args()[1])!
+    zero = node(.int_lit, 0)
+    one = node(.bool_lit, 1)
+    two = node(.int_lit, 2)
+    three = node(.int_lit, 3)
+    text = node(.str_lit)
+    nodes[text].sval=2
+    if mode == 1:
+        missing = node(.ident)
+        nodes[missing].name=1
+        show(missing)
+    if mode == 2: show(node(.binary, a=text, b=one, op=.plus))
+    if mode == 3: show(node(.array))
+    if mode == 4: show(node(.binary, a=one, b=zero, op=.slash))
+    if mode == 5: show(node(.binary, a=three, b=two, op=.percent))
+    show(zero)
+    show(one)
+    show(text)
+    loop op in [Tok.eq, Tok.ne, Tok.lt, Tok.le, Tok.gt, Tok.ge, Tok.plus, Tok.minus, Tok.star, Tok.slash, Tok.shl]:
+        show(node(.binary, a=three, b=two, op=op))
+    show(node(.not_, a=zero))
+    show(node(.not_, a=three))
+    show(node(.binary, a=text, b=text, op=.eq))
+    show(node(.binary, a=text, b=zero, op=.ne))
+    other = node(.str_lit)
+    nodes[other].sval=3
+    show(node(.binary, a=text, b=other, op=.eq))
+    # An invalid right operand must never be visited by a short-circuit expression.
+    bad = node(.array)
+    show(node(.and_, a=zero, b=bad))
+    show(node(.or_, a=three, b=bad))
+    show(node(.and_, a=three, b=two))
+    show(node(.or_, a=zero, b=two))
+    minimum = node(.int_lit, -9223372036854775807-1)
+    maximum = node(.int_lit, 9223372036854775807)
+    minus = node(.int_lit, -1)
+    show(node(.binary, a=maximum, b=one, op=.plus))
+    show(node(.binary, a=minimum, b=one, op=.minus))
+    show(node(.binary, a=maximum, b=two, op=.star))
+    show(node(.binary, a=minimum, b=minus, op=.slash))
+    show(node(.binary, a=minus, b=two, op=.slash))
+    wide = node(.int_lit, 64)
+    loop count in [minus, wide]:
+        show(node(.binary, a=one, b=count, op=.shl))
+        show(node(.binary, a=one, b=count, op=.shl, pos=(1 << 40)+700))
+    for_check = node(.int_lit, 42)
+    nodes[for_check].type=1
+    show(for_check)
+    loop kind in [NK.call, NK.index, NK.field, NK.unary]: show(node(kind, 43))
+    reference = node(.ident)
+    nodes[reference].sym=i32(three)
+    show(reference)
+    replacement=two
+    nested=node(.call, 99)
+    parent=node(.binary, a=nested, b=bad, op=.plus)
+    show(parent)
+    print("{requests.len()} {files.len()} {names.len()}")

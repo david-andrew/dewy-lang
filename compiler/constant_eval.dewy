@@ -1,0 +1,75 @@
+$runtime_checks
+# O(executed syntax + binding/checking work), with ordinary recursion depth.
+# Scalar operations stay local; re-read arena elements after each host request.
+from p"node_store.dewy" import Node
+from p"source_types.dewy" import SrcFile
+from p"evaluator_state.dewy" import CVal
+from p"constant_host.dewy" import ConstantHost
+
+const CEVAL_EQ:int64=69
+const CEVAL_NE:int64=70
+const CEVAL_LT:int64=71
+const CEVAL_LE:int64=72
+const CEVAL_GT:int64=73
+const CEVAL_GE:int64=74
+const CEVAL_PLUS:int64=58
+const CEVAL_MINUS:int64=59
+const CEVAL_STAR:int64=60
+const CEVAL_SLASH:int64=61
+const CEVAL_SHL:int64=67
+
+constant_eval=(@nodes:array<Node> @names:array<string> @files:array<SrcFile> @host:ConstantHost e:int64):>CVal=>{
+    let k=nodes[e].kind
+    if nodes[e].type not=? 0 or k =? 'call' or k =? 'index' or k =? 'field' or k =? 'unary' {return host.checked(e)}
+    if k =? 'bool_lit' or k =? 'int_lit' {return CVal(is_str=false i=nodes[e].ival s="")}
+    if k =? 'str_lit' {return CVal(is_str=true i=0 s=names[int64(nodes[e].sval)])}
+    if k =? 'ident' {
+        let initial=host.binding(e)
+        if initial =? 0 {host.fatal(nodes[e].pos "'{names[int64(nodes[e].name)]}' is not a compile-time constant")}
+        return constant_eval(@nodes @names @files @host initial)
+    }
+    if k =? 'not_' {
+        let v=constant_eval(@nodes @names @files @host int64(nodes[e].a))
+        return CVal(is_str=false i=int64(v.i =? 0) s="")
+    }
+    if k =? 'and_' or k =? 'or_' {
+        let a=constant_eval(@nodes @names @files @host int64(nodes[e].a))
+        if (a.i =? 0) =? (k =? 'and_') {return a}
+        return constant_eval(@nodes @names @files @host int64(nodes[e].b))
+    }
+    if k =? 'binary' {
+        let a=constant_eval(@nodes @names @files @host int64(nodes[e].a))
+        let b=constant_eval(@nodes @names @files @host int64(nodes[e].b))
+        let op=int64(nodes[e].op)
+        if a.is_str or b.is_str {
+            let equal=a.is_str =? b.is_str and a.s =? b.s
+            if op =? CEVAL_EQ {return CVal(is_str=false i=int64(equal) s="")}
+            if op =? CEVAL_NE {return CVal(is_str=false i=int64(not equal) s="")}
+            host.fatal(nodes[e].pos "invalid operator on strings in compile-time expression")
+        }
+        let r:int64=0
+        if op =? CEVAL_EQ {r=int64(a.i =? b.i)}
+        else if op =? CEVAL_NE {r=int64(a.i not=? b.i)}
+        else if op =? CEVAL_LT {r=int64(a.i <? b.i)}
+        else if op =? CEVAL_LE {r=int64(a.i <=? b.i)}
+        else if op =? CEVAL_GT {r=int64(a.i >? b.i)}
+        else if op =? CEVAL_GE {r=int64(a.i >=? b.i)}
+        else if op =? CEVAL_PLUS {r=int64<overflow='wrap'>(a.i) + int64<overflow='wrap'>(b.i)}
+        else if op =? CEVAL_MINUS {r=int64<overflow='wrap'>(a.i) - int64<overflow='wrap'>(b.i)}
+        else if op =? CEVAL_STAR {r=int64<overflow='wrap'>(a.i) * int64<overflow='wrap'>(b.i)}
+        else if op =? CEVAL_SLASH and b.i not=? 0 {
+            # Jo divides toward zero; Dewy's // rounds down.
+            r=int64<overflow='wrap'>(a.i) // int64<overflow='wrap'>(b.i)
+            if (a.i <? 0) not=? (b.i <? 0) and int64<overflow='wrap'>(a.i) % int64<overflow='wrap'>(b.i) not=? 0 {r=int64<overflow='wrap'>(r) + 1}
+        }
+        else if op =? CEVAL_SHL {
+            let pos=nodes[e].pos
+            let file=pos >> 40
+            let dewy=pos >? 0 and file <? files.length and files[file].is_dewy
+            r=if dewy and (b.i >=? 64 or b.i <? 0) {0} else {int64<overflow='wrap'>(a.i) << (b.i & 63)}
+        } else {host.fatal(nodes[e].pos "unsupported operator in compile-time expression")}
+        return CVal(is_str=false i=r s="")
+    }
+    host.fatal(nodes[e].pos "expression is not a compile-time constant")
+    CVal[]
+}

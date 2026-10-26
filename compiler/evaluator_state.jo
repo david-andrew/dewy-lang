@@ -1,0 +1,24 @@
+# Evaluator layouts; preserve the shared ABI and stable value/frame/place IDs.
+struct CTValue:
+    type: int
+    i: int
+    f: f64
+    s: str
+    items: int[]
+
+struct CTFrame:
+    values: {int: int}
+    refs: {int: int}
+    signal: int                 # 1 return, 2 break, 3 continue
+    result: int
+    depth: int
+
+struct CTPlace:
+    frame: int
+    local: int
+    path: int[]
+
+struct CVal:
+    is_str: bool
+    i: int
+    s: str

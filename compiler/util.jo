@@ -1,3 +1,4 @@
+use 'source_types.dewy'
 use 'lazy_bodies.jo'
 use 'frontend.jo'
 use 'pcheck.jo'
@@ -8,12 +9,6 @@ use 'ide.jo'
 use 'fused.jo'
 use 'line_table.dewy'
 use 'intern.dewy'
-
-struct SrcFile:
-    path: str
-    dir: str
-    src: str
-    is_dewy: bool = false  # decided once when the source file is loaded
 
 files: SrcFile[]
 # the interned names (intern.dewy's table, passed to it by place): each name by id, its hash by

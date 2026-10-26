@@ -1,3 +1,7 @@
+use 'constant_eval.dewy'
+use 'constant_host.dewy'
+use 'source_types.dewy'
+use 'evaluator_state.dewy'
 use 'checker_state.dewy'
 use 'checker_tokens.dewy'
 use 'checker_types.dewy'
@@ -5715,70 +5719,26 @@ zonk_tree = (root: int):
         if nd.a != 0: zonk_stack.push(int(nd.a))
 
 # ---------------- compile-time evaluation ----------------
-struct CVal:
-    is_str: bool
-    i: int
-    s: str
+# Coarse evaluator services: checking may re-enter ceval and grow shared arenas.
+constant_checked = (e: int) -> CVal:
+    checked = e
+    if nodes[e].type == 0:
+        check_expr(e, 0)
+        checked = last_checked
+        finalize_literal(checked)
+    value = ct_values[ct_run(checked)]
+    CVal(tkind(value.type) == .str_, value.i, value.s)
 
-ceval = (e: int) -> CVal:
-    k = nodes[e].kind
-    if nodes[e].type != 0 or k == .call or k == .index or k == .field or k == .unary:
-        checked = e
-        if nodes[e].type == 0:
-            check_expr(e, 0)
-            checked = last_checked
-            finalize_literal(checked)
-        value = ct_values[ct_run(checked)]
-        return CVal(tkind(value.type) == .str_, value.i, value.s)
-    if k == .bool_lit or k == .int_lit: return CVal(false, nodes[e].ival, "")
-    if k == .str_lit: return CVal(true, 0, name_of(int(nodes[e].sval)))
-    if k == .ident:
-        initial = 0
-        if nodes[e].type != 0 and (nodes[e].aux == i32(int(SK.local)) or nodes[e].aux == i32(int(SK.global))):
-            initial = binding_const_init(nodes[e].aux as SK, int(nodes[e].sym), nodes[e].pos)
-        else:
-            s = lookup(int(nodes[e].name))
-            if s != 0: initial = binding_const_init(syms[s].kind, int(syms[s].ref), nodes[e].pos)
-        if initial == 0: fatal(nodes[e].pos, "'{name_of(int(nodes[e].name))}' is not a compile-time constant")
-        return ceval(initial)
-    if k == .not_:
-        v = ceval(int(nodes[e].a))
-        r = 0
-        if v.i == 0: r = 1
-        return CVal(false, r, "")
-    if k == .and_:
-        a = ceval(int(nodes[e].a))
-        if a.i == 0: return a
-        return ceval(int(nodes[e].b))
-    if k == .or_:
-        a = ceval(int(nodes[e].a))
-        if a.i != 0: return a
-        return ceval(int(nodes[e].b))
-    if k == .binary:
-        a = ceval(int(nodes[e].a))
-        b = ceval(int(nodes[e].b))
-        op = nodes[e].op as Tok
-        if a.is_str or b.is_str:
-            eq = a.is_str == b.is_str and a.s == b.s
-            if op == .eq: return CVal(false, int(eq), "")
-            if op == .ne: return CVal(false, int(not eq), "")
-            fatal(nodes[e].pos, "invalid operator on strings in compile-time expression")
-        r = 0
-        if op == .eq: r = int(a.i == b.i)
-        else if op == .ne: r = int(a.i != b.i)
-        else if op == .lt: r = int(a.i < b.i)
-        else if op == .le: r = int(a.i <= b.i)
-        else if op == .gt: r = int(a.i > b.i)
-        else if op == .ge: r = int(a.i >= b.i)
-        else if op == .plus: r = a.i + b.i
-        else if op == .minus: r = a.i - b.i
-        else if op == .star: r = a.i * b.i
-        else if op == .slash and b.i != 0: r = a.i / b.i
-        else if op == .shl: r = if dewy_at(nodes[e].pos) and (b.i >= 64 or b.i < 0): 0 else: a.i << b.i
-        else: fatal(nodes[e].pos, "unsupported operator in compile-time expression")
-        return CVal(false, r, "")
-    fatal(nodes[e].pos, "expression is not a compile-time constant")
-    CVal(false, 0, "")
+constant_binding = (e: int) -> int:
+    if nodes[e].type != 0 and (nodes[e].aux == i32(int(SK.local)) or nodes[e].aux == i32(int(SK.global))):
+        return binding_const_init(nodes[e].aux as SK, int(nodes[e].sym), nodes[e].pos)
+    s = lookup(int(nodes[e].name))
+    if s != 0: return binding_const_init(syms[s].kind, int(syms[s].ref), nodes[e].pos)
+    0
+
+constant_host = ConstantHost(constant_checked, constant_binding, fatal)
+
+ceval = (e: int) -> CVal: constant_eval(nodes, names, files, constant_host, e)
 
 const_eval_bool = (e: int) -> bool: ceval(e).i != 0
 

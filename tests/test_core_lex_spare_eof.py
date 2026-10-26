@@ -11,7 +11,7 @@ from tests.support import ROOT, compiler
 @pytest.mark.core_quick
 def test_token_array_spare_eofs(compiler, tmp_path):
     source = tmp_path / 'spare.jo'
-    uses = ''.join(f"use '{ROOT / 'compiler' / name}'\n" for name in ('util.jo', 'lex.jo', 'parse.jo', 'check.jo', 'checker_tokens.dewy'))
+    uses = ''.join(f"use '{ROOT / 'compiler' / name}'\n" for name in ('source_types.dewy', 'util.jo', 'lex.jo', 'parse.jo', 'check.jo', 'checker_tokens.dewy'))
     source.write_text(uses + '''
 # the capacities the lexer's token array takes for text of n bytes (lex in compiler/lex.jo)
 capacities = (n: int) -> int[]:

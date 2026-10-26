@@ -88,6 +88,8 @@ are grouped. See the ownership sections for the live service contracts.
 | `refine_projection` | `refine_projection.jo` | Dewy projection validation | O(path + scanned field runs + inference links); lazy fields, dialect/runtime request and first-error status. |
 | `checker_state` | `checker_state.jo` | Dewy local/global/function/context, scope and binder layouts | Stable IDs/ABI; Jo writers borrow the same storage; flagship phase cost ≤+0.163%. |
 | `refine_resolve`, `refine_resolve_host` | Same stems + `.jo` | Dewy recursive terms/predicates, typed semantic requests | Demand traversal and existing budgets; resolver increment ≤0.072%, state+resolver peak phase +0.234%. |
+| `evaluator_state` | `evaluator_state.jo` | Dewy immutable value, frame, place and scalar-result layouts | Stable IDs/ABI; Jo writers share storage; peak flagship phase +0.0001%. |
+| `constant_eval`, `constant_host`, `source_types` | Same stems + `.jo` | Dewy recursive constant-expression evaluation and borrowed source dialects | O(executed syntax + demanded checking/binding); local scalar operations; peak flagship phase +0.103% including layouts. |
 
 ### Boundary lessons that constrain the next cutover
 
@@ -136,6 +138,7 @@ Rejected cutovers are closed pilot families, not a backlog of tiny optimizations
 | Name comparison byte pool | 15 instructions saved/hit, 190 added/new name; flagships +0.25%. |
 | Split every path stem for malformed-byte safety | Hello +0.73%; lex+parse +0.70%; split only after non-ASCII. |
 | Lexer with post-scan interning and pushed records | +11%; direct slot filling and in-loop lookup replace it. |
+| Checked-body evaluator through a borrowed arena context | Resolve+check +0.345% to +0.429%; retain Jo execution. |
 
 ## Checker ownership and service cutovers
 
@@ -216,10 +219,10 @@ caller rereads by ID. Cost is O(visited syntax + emitted atoms), apart from
 requested binder/name lookup and semantic work; existing depth/atom budgets stay.
 Scope lookup remains O(1), rollback proportional to bindings removed.
 
-The next cutover is evaluation's value/frame/place layouts and recursive execution
-group. Keep checker entry at coarse expression/body forcing boundaries, then remove
-those host edges as the corresponding checker groups move. Cost follows the
-executed program, its existing immutable-value copies and call-frame depth;
+`constant_eval.dewy` owns unchecked constant-expression recursion; its host checks
+expressions and resolves bindings. Value/frame/place layouts are shared in Dewy,
+while the checked execution group stays Jo after its boundary exceeded the budget.
+Cost follows executed work, existing immutable-value copies and call-frame depth;
 there is no whole-source scan or new fuel limit. A scalar evaluated operation
 must not acquire a callback; checking requests may grow shared arenas, so
 reacquire elements afterwards. Preserve pending/global caches and restore only

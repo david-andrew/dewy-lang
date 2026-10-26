@@ -1,0 +1,66 @@
+use 'node_store.dewy'
+use 'source_types.dewy'
+use 'evaluator_state.dewy'
+use 'constant_host.dewy'
+use 'checker_tokens.dewy'
+
+const CEVAL_EQ = 69
+const CEVAL_NE = 70
+const CEVAL_LT = 71
+const CEVAL_LE = 72
+const CEVAL_GT = 73
+const CEVAL_GE = 74
+const CEVAL_PLUS = 58
+const CEVAL_MINUS = 59
+const CEVAL_STAR = 60
+const CEVAL_SLASH = 61
+const CEVAL_SHL = 67
+
+constant_eval = (mut nodes: Node[], mut names: str[], mut files: SrcFile[], mut host: ConstantHost, e: int) -> CVal:
+    k = nodes[e].kind
+    if nodes[e].type != 0 or k == .call or k == .index or k == .field or k == .unary:
+        return host.checked(e)
+    if k == .bool_lit or k == .int_lit: return CVal(false, nodes[e].ival, "")
+    if k == .str_lit: return CVal(true, 0, names[int(nodes[e].sval)])
+    if k == .ident:
+        initial = host.binding(e)
+        if initial == 0: host.fatal(nodes[e].pos, "'{names[int(nodes[e].name)]}' is not a compile-time constant")
+        return constant_eval(nodes, names, files, host, initial)
+    if k == .not_:
+        v = constant_eval(nodes, names, files, host, int(nodes[e].a))
+        r = 0
+        if v.i == 0: r = 1
+        return CVal(false, r, "")
+    if k == .and_:
+        a = constant_eval(nodes, names, files, host, int(nodes[e].a))
+        if a.i == 0: return a
+        return constant_eval(nodes, names, files, host, int(nodes[e].b))
+    if k == .or_:
+        a = constant_eval(nodes, names, files, host, int(nodes[e].a))
+        if a.i != 0: return a
+        return constant_eval(nodes, names, files, host, int(nodes[e].b))
+    if k == .binary:
+        a = constant_eval(nodes, names, files, host, int(nodes[e].a))
+        b = constant_eval(nodes, names, files, host, int(nodes[e].b))
+        op = nodes[e].op as Tok
+        if a.is_str or b.is_str:
+            eq = a.is_str == b.is_str and a.s == b.s
+            if op == .eq: return CVal(false, int(eq), "")
+            if op == .ne: return CVal(false, int(not eq), "")
+            host.fatal(nodes[e].pos, "invalid operator on strings in compile-time expression")
+        r = 0
+        if op == .eq: r = int(a.i == b.i)
+        else if op == .ne: r = int(a.i != b.i)
+        else if op == .lt: r = int(a.i < b.i)
+        else if op == .le: r = int(a.i <= b.i)
+        else if op == .gt: r = int(a.i > b.i)
+        else if op == .ge: r = int(a.i >= b.i)
+        else if op == .plus: r = a.i + b.i
+        else if op == .minus: r = a.i - b.i
+        else if op == .star: r = a.i * b.i
+        else if op == .slash and b.i != 0: r = a.i / b.i
+        else if op == .shl: r = if (nodes[e].pos > 0 and (nodes[e].pos >> 40) < files.len() and files[nodes[e].pos >> 40].is_dewy) and (b.i >= 64 or b.i < 0): 0 else: a.i << b.i
+        else: host.fatal(nodes[e].pos, "unsupported operator in compile-time expression")
+        return CVal(false, r, "")
+    host.fatal(nodes[e].pos, "expression is not a compile-time constant")
+    CVal(false, 0, "")

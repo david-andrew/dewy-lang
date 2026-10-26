@@ -14,6 +14,7 @@ from tests.support import ROOT, compiler  # noqa: F401
 
 HARNESS = '''
 use '{root}/compiler/util.jo'
+use '{root}/compiler/source_types.dewy'
 use '{root}/compiler/check.jo'
 use '{root}/compiler/lex.jo'
 use '{root}/compiler/scan.jo'

@@ -1,0 +1,8 @@
+from p"evaluator_state.dewy" import CVal
+
+# Checking and binding requests may re-enter evaluation and grow every arena.
+ConstantHost:type=[
+    checked:<(node:int64):>CVal>
+    binding:<(node:int64):>int64>
+    fatal:<(pos:int64 message:string):>void>
+]

@@ -1,0 +1,28 @@
+# Evaluator layouts; storage stays with its existing writers.
+CTValue:type=[
+    type:int64=0
+    i:int64=0
+    f:float64=0.0
+    s:string=""
+    items:array<int64>=[]
+]
+
+CTFrame:type=[
+    values:dict<int64 int64>=[]
+    refs:dict<int64 int64>=[]
+    signal:int64=0 # 1 return, 2 break, 3 continue
+    result:int64=0
+    depth:int64=0
+]
+
+CTPlace:type=[
+    frame:int64=0
+    local:int64=0
+    path:array<int64>=[]
+]
+
+CVal:type=[
+    is_str:bool=false
+    i:int64=0
+    s:string=""
+]
