@@ -32,7 +32,6 @@ def test_no_blocks_transitive(compiler, tmp_path, body):
     assert 'blocking operation' in result.stderr, result.stderr
 
 
-@pytest.mark.core_quick
 def test_no_blocks_scalar(compiler, tmp_path):
     result = check(compiler, tmp_path,
                    'twice=(n:int64):>int64 & no blocks=>n*2\nmain=()=>{$runtime_assert(twice(21)=?42)}')
@@ -52,7 +51,6 @@ def test_invalid_memory_order(compiler, tmp_path, operation, diagnostic):
     assert diagnostic in result.stderr, result.stderr
 
 
-@pytest.mark.core_quick
 def test_atomic_orders_and_structural_payloads(compiler, tmp_path):
     result = check(compiler, tmp_path, '''
 main=()=>{

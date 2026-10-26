@@ -35,7 +35,6 @@ main=(args:array<string>)=>{
             assert ran.returncode == 0 and ran.stdout.strip() == f'{x} {x} {x}', ran.stdout + ran.stderr
 
 
-@pytest.mark.core_quick
 def test_constant_power_survives_unrelated_proof_slice(compiler, tmp_path):
     source = tmp_path / 'power.dewy'
     source.write_text('''$runtime_checks

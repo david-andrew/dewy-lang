@@ -227,7 +227,6 @@ def test_selfhost_json_doc_matches_jo(compiler, tmp_path, release):
     assert run(dewy, valid).decode().split('\n')[:-1] == want
 
 
-@pytest.mark.core_quick
 def test_selfhost_json_doc_ships_dewy(compiler):
     binary = compiler.read_bytes()
     assert b'/compiler/json_doc.dewy\0' in binary

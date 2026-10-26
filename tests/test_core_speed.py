@@ -3,7 +3,6 @@ import pytest
 
 from tools.compiler import bench, speed
 
-pytestmark = pytest.mark.core_quick
 
 
 @pytest.mark.parametrize('stderr', ['', 'warning', '{}', '[]',

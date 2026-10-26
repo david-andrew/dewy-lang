@@ -69,7 +69,6 @@ def normalized_lines(data):
     return b''.join(line.removesuffix(b'\r') + b'\n' for line in lines)
 
 
-@pytest.mark.core_quick
 def test_core_file_line_refills(input_program, tmp_path):
     cases = [b'', b'\n', b'\r\n\n', b'last', b'last\r', b'a\x00b\r\nlast',
              'café Ω\n尾\r\n'.encode(), b'a\rb\n']
@@ -87,7 +86,6 @@ def test_core_file_line_refills(input_program, tmp_path):
             assert ran.stdout == expected, (index, prefix, len(ran.stdout), len(expected))
 
 
-@pytest.mark.core_quick
 def test_core_stdin_buffered_tail(input_program):
     cases = [b'', b'\x00\xff\n\r', 'café Ω尾'.encode()]
     cases += [bytes(range(256)) * n + b'tail\x00' for n in (16, 256, 1025)]

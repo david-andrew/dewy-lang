@@ -82,7 +82,6 @@ def test_selfhost_spelling_matches_jo(compiler, tmp_path, release):
     assert [line.rstrip() for line in lines[len(pairs):]] == folded
 
 
-@pytest.mark.core_quick
 def test_selfhost_spelling_ships_dewy(compiler, tmp_path):
     binary = compiler.read_bytes()
     assert b'/compiler/spelling.dewy\0' in binary

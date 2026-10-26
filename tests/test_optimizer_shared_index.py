@@ -7,7 +7,6 @@ import pytest
 from tests.support import compiler
 
 
-@pytest.mark.core_quick
 def test_shared_optimizer_index(compiler, tmp_path):
     root = Path(__file__).resolve().parents[1]
     source = tmp_path / 'shared-index.jo'

@@ -84,7 +84,6 @@ POSITIVE = '''positive=(a:int64):>true & <a >? 0> | false & <a <=? 0>=>{
 '''
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('body,success', [
     ('let r=positive(a); if r {$assert a >? 0} else {$assert a <=? 0}', True),
     ('let r=positive(a); if r =? true {$assert a >? 0}', True),
@@ -185,7 +184,6 @@ f=(a:int64)=>{''' + body + '}\nmain=()=>f(4)\n')
     assert (result.returncode == 0) == success, result.stdout + result.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('source,diagnostic', [
     ('$proof\nmain=():>void=>{}', 'proof cannot be a runtime entry point'),
     ('$proof\np=(a:int64):><a >? 0>=>{}\nmain=()=>{}', 'cannot prove proof exit proposition'),

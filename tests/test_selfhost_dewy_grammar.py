@@ -359,7 +359,6 @@ def test_selfhost_dewy_grammar_match_jo(compiler, tmp_path, release):
     assert len(got) == len(TOKENS) + len(want) + 1
 
 
-@pytest.mark.core_quick
 def test_selfhost_dewy_grammar_ships_dewy(compiler, tmp_path):
     binary = compiler.read_bytes()
     assert b'/compiler/dewy_grammar.dewy\0' in binary

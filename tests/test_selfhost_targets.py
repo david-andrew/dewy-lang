@@ -89,7 +89,6 @@ def test_selfhost_targets_matches_jo(compiler, tmp_path, release):
     assert lines[4:] == expected
 
 
-@pytest.mark.core_quick
 def test_selfhost_targets_ships_dewy(compiler, tmp_path):
     binary = compiler.read_bytes()
     assert b'/compiler/targets.dewy\0' in binary

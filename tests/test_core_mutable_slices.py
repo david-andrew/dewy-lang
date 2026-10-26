@@ -15,7 +15,6 @@ swap=(@a:array<int64> @b:array<int64>):>void=>{
 '''
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True])
 def test_mutable_adjacent_slices(compiler, tmp_path, release):
     source = tmp_path / 'slices.dewy'
@@ -87,7 +86,6 @@ main=():>void=>{
 '''
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True])
 def test_mutable_slice_fork(compiler, tmp_path, release):
     import os
@@ -142,7 +140,6 @@ main=():>void=>{
 '''
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True])
 def test_readonly_input_shared_by_disjoint_fork(compiler, tmp_path, release):
     import os

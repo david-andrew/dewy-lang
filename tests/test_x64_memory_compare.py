@@ -21,7 +21,6 @@ def build(compiler, tmp_path, source, flags):
     return binary
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('flags', [[], ['--release'], ['-g']])
 def test_memory_compare_widths_and_order(compiler, tmp_path, flags):
     definitions, checks = [], []

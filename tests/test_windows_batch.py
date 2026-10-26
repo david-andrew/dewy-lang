@@ -23,7 +23,6 @@ $runtime_checks
 '''
 
 
-@pytest.mark.core_quick
 def test_batch_programs_detected(compiler, tmp_path):
     source = tmp_path / 'detector.jo'
     source.write_text(DETECTOR)

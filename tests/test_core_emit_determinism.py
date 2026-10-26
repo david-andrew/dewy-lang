@@ -39,7 +39,6 @@ def workers_ran(log, workers):
     return int(found.group(1))
 
 
-@pytest.mark.core_quick
 def test_ungated_program_one_and_four_workers(compiler, tmp_path):
     one, _ = build(compiler, 'dunes', [], tmp_path / 'one', 1)
     four, log = build(compiler, 'dunes', [], tmp_path / 'four', 4)

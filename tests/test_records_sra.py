@@ -17,7 +17,6 @@ def test_records_sra_values(compiler, tmp_path, release, target):
         assert code == '42', f'{name}: {code}\n{diagnostic}'
 
 
-@pytest.mark.core_quick
 def test_records_sra_game_codegen(compiler, tmp_path):
     import re
     import subprocess

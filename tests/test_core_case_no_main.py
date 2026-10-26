@@ -30,7 +30,6 @@ def test_core_case_no_main_plan(tmp_path):
                      'commented': 'single'}
 
 
-@pytest.mark.core_quick
 def test_core_case_no_main_builds_once(compiler, tmp_path, monkeypatch):
     root = tmp_path / 'cases'
     write(root, 'script', '# modes: native\nprintl"top"\n', out='top\n')

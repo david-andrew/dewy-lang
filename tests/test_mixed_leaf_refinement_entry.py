@@ -6,7 +6,6 @@ import pytest
 from tests.support import compiler  # noqa: F401
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True])
 def test_mutable_leaf_summary_entry(compiler, tmp_path, release):
     (tmp_path / 'leaf.dewy').write_text('''$runtime_checks

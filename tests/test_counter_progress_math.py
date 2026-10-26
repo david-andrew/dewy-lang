@@ -32,7 +32,6 @@ main=(args:array<string>)=>printl(f(int64(to_int(args[1]) ?? 0) to_int(args[2]) 
         assert ran.returncode != 0 and not ran.stdout
 
 
-@pytest.mark.core_quick
 def test_static_mathematical_increment_uses_one_narrowing_obligation(compiler, tmp_path):
     source = tmp_path / 'static_counter.dewy'
     source.write_text("""$runtime_checks=false

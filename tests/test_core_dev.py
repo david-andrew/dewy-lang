@@ -30,7 +30,6 @@ def test_fuzz_outcome_requires_success_in_every_mode(phase, status, code, output
         assert outcome({'default': candidate, 'release': candidate}) != 'pass'
 
 
-@pytest.mark.core_quick
 def test_fuzz_no_results_cannot_pass():
     from tools.compiler.fuzz import outcome
 
@@ -60,7 +59,6 @@ def checkout(tmp_path, monkeypatch):
     return root, tmp_path / 'cache', calls
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('changed', ['compiler/main.jo', 'lib/core/rt.jo',
                                    'stage0/main.c', 'bootstrap/frontend.jo',
                                    'tools/compiler/build.py'])
@@ -80,7 +78,6 @@ def test_core_driver_rebuilds_changed_inputs(checkout, changed):
     assert len(calls) == 2
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('damage', ['missing', 'modified'])
 def test_core_driver_rejects_damaged_seed(checkout, damage):
     root, cache, calls = checkout
@@ -93,7 +90,6 @@ def test_core_driver_rejects_damaged_seed(checkout, damage):
     assert calls[-1] == {'bootstrap': True, 'seed': None}
 
 
-@pytest.mark.core_quick
 def test_core_driver_unchanged_launch_does_not_hash(checkout, monkeypatch):
     root, cache, calls = checkout
     first = core.toolchain(root=root, cache=cache)
@@ -102,7 +98,6 @@ def test_core_driver_unchanged_launch_does_not_hash(checkout, monkeypatch):
     assert len(calls) == 1
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('target', ['source', 'binary'])
 def test_core_driver_detects_same_size_edit_with_restored_mtime(checkout, target):
     root, cache, calls = checkout
@@ -116,7 +111,6 @@ def test_core_driver_detects_same_size_edit_with_restored_mtime(checkout, target
                          'seed': first if target == 'source' else None}
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('target', ['source', 'binary'])
 def test_core_driver_rechecks_touch_without_rebuilding(checkout, monkeypatch, target):
     root, cache, calls = checkout
@@ -130,7 +124,6 @@ def test_core_driver_rechecks_touch_without_rebuilding(checkout, monkeypatch, ta
     assert len(calls) == 1
 
 
-@pytest.mark.core_quick
 def test_core_driver_detects_added_and_deleted_sources(checkout):
     root, cache, calls = checkout
     first = core.toolchain(root=root, cache=cache)
@@ -143,7 +136,6 @@ def test_core_driver_detects_added_and_deleted_sources(checkout):
     assert len(calls) == 3
 
 
-@pytest.mark.core_quick
 def test_core_driver_upgrades_existing_cache_without_rebuilding(checkout, monkeypatch):
     root, cache, calls = checkout
     first = core.toolchain(root=root, cache=cache)
@@ -157,7 +149,6 @@ def test_core_driver_upgrades_existing_cache_without_rebuilding(checkout, monkey
     assert len(calls) == 1
 
 
-@pytest.mark.core_quick
 def test_core_driver_forced_bootstrap(checkout):
     root, cache, calls = checkout
     first = core.toolchain(root=root, cache=cache)
@@ -165,7 +156,6 @@ def test_core_driver_forced_bootstrap(checkout):
     assert calls[-1] == {'bootstrap': True, 'seed': None}
 
 
-@pytest.mark.core_quick
 def test_core_driver_keeps_previous_state_after_failure(checkout, monkeypatch):
     root, cache, calls = checkout
     first = core.toolchain(root=root, cache=cache)
@@ -185,7 +175,6 @@ def test_core_driver_keeps_previous_state_after_failure(checkout, monkeypatch):
     assert calls[-1] == {'bootstrap': False, 'seed': first}
 
 
-@pytest.mark.core_quick
 def test_core_driver_rejects_source_edit_during_build(checkout, monkeypatch):
     root, cache, _ = checkout
     builder = core.build
@@ -313,7 +302,6 @@ def test_core_driver_worker_selection(monkeypatch, tmp_path, arguments, cpus, av
     assert received['env']['PYTEST_DISABLE_PLUGIN_AUTOLOAD'] == '1'
 
 
-@pytest.mark.core_quick
 def test_core_driver_rejects_cache_path_outside_owned_directory(tmp_path):
     binary = tmp_path / 'unrelated'
     binary.write_text('not a cache entry')
@@ -360,7 +348,6 @@ def test_core_checkout_launcher(tmp_path, arguments, linked):
         assert errors == 'building current compiler\n'
 
 
-@pytest.mark.core_quick
 def test_core_checkout_launcher_stops_on_build_failure(tmp_path):
     tool_dir = tmp_path / 'tools'
     tool_dir.mkdir()

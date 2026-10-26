@@ -34,7 +34,6 @@ def test_no_assumed_bounds_demand_proof_with_repair(compiler, tmp_path, expressi
     assert 'bound the operands with a guard' in strict.stderr
 
 
-@pytest.mark.core_quick
 def test_local_assert_optout_demand_proof_with_repair(compiler, tmp_path):
     body = ('checked=(x:int64):>int64=>{$runtime_assert x >? 0;x}\n'
             'main=():>void=>printl(checked(3))\n')
@@ -48,7 +47,6 @@ def test_local_assert_optout_demand_proof_with_repair(compiler, tmp_path):
     assert 'opt in to the check with `$runtime_checks`' in strict.stderr
 
 
-@pytest.mark.core_quick
 def test_external_paths_optout_current_warning_and_repair(compiler, tmp_path):
     body = 'main=()=>{let f=p(args()[0]);printl(f.exists)}\n$runtime_checks\n'
     default = check(compiler, tmp_path, body)

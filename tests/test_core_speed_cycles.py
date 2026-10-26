@@ -3,7 +3,6 @@ import pytest
 
 from tools.compiler import speed, speed_cycles
 
-pytestmark = pytest.mark.core_quick
 
 
 def test_cycle_counter_requires_cycle_metric():

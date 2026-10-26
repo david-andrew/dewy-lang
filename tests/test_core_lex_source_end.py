@@ -9,7 +9,6 @@ import pytest
 from tests.support import ROOT, compiler
 
 
-@pytest.mark.core_quick
 @pytest.mark.skipif(sys.platform != 'linux' or platform.machine() != 'x86_64', reason='x86-64 Linux mmap')
 def test_lex_stops_at_source_end(compiler, tmp_path):
     source = tmp_path / 'edge.jo'

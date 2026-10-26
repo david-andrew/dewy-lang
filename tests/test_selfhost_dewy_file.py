@@ -45,7 +45,6 @@ def test_file_driver_matches_frozen(compiler, tmp_path, release):
     assert not shared.exists(), shared.read_text()
 
 
-@pytest.mark.core_quick
 def test_file_driver_ships_dewy(compiler):
     binary = compiler.read_bytes()
     assert b'/compiler/dewy_file.dewy\0' in binary

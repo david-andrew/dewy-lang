@@ -22,7 +22,6 @@ def run(compiler, tmp_path, source, *options, name='main.dewy', command=()):
                           timeout=120, check=False, cwd=tmp_path)
 
 
-@pytest.mark.core_quick
 def test_file_sets_build_mode(compiler, tmp_path):
     native_host()
     ran = run(compiler, tmp_path, "$build.mode = 'release'  # the shipped build\n" + REPORT)
@@ -69,7 +68,6 @@ def test_agreeing_override_is_quiet(compiler, tmp_path, setting, flag):
     assert 'warning' not in ran.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('setting, flag', [("release", '--debug'), ("debug", '--release')])
 def test_conflicting_mode_override_warns(compiler, tmp_path, setting, flag):
     native_host()

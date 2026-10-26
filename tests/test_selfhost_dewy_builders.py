@@ -36,7 +36,6 @@ def test_selfhost_dewy_builders_match_jo(compiler, tmp_path, release):
         assert f'intern {name}' in lines
 
 
-@pytest.mark.core_quick
 def test_selfhost_dewy_builders_ships_dewy(compiler):
     binary = compiler.read_bytes()
     assert b'/compiler/dewy_builders.dewy\0' in binary

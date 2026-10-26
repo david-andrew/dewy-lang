@@ -76,7 +76,6 @@ def test_selfhost_line_table_matches_jo(compiler, tmp_path, release):
     assert outputs[0].decode() == oracle(texts)
 
 
-@pytest.mark.core_quick
 def test_selfhost_line_table_ships_dewy(compiler):
     binary = compiler.read_bytes()
     assert b'/compiler/line_table.dewy\0' in binary

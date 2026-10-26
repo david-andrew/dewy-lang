@@ -8,7 +8,6 @@ from tests.support import compiler
 from tests.test_byte_find import build_run
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('flags', [(), ('--release',), ('-g',), ('--target', 'wasm32'), ('--target', 'aarch64-linux')])
 def test_memchr_extreme_empty_offsets(compiler, tmp_path, flags):
     run_memchr(compiler, tmp_path, '''

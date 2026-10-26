@@ -21,7 +21,6 @@ loop x in [-3, 0, 1, 2, 7]: print(work(x))
 '''
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('flags', [[], ['--release'], ['--release', '-g']])
 @pytest.mark.parametrize('noinline', [False, True])
 def test_constant_control_and_dynamic_fallback(compiler, tmp_path, flags, noinline):
@@ -43,7 +42,6 @@ def test_constant_control_and_dynamic_fallback(compiler, tmp_path, flags, noinli
     assert ran.stdout.splitlines() == ['-15', '17', '25', '27', '136']
 
 
-@pytest.mark.core_quick
 def test_new_expansion_stays_outside_loops(compiler, tmp_path):
     source = tmp_path / 'loop.jo'
     source.write_text(SOURCE.format(annotation='') + '''

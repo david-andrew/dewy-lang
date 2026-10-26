@@ -25,7 +25,6 @@ def execute(output, workers=1):
                           capture_output=True, text=True, timeout=30)
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('surface', ['parallel_range(2 (i:int64)=>fork(n-1-i))',
                                      '[parallel i in [0..2) fork(n-1-i)]'])
 def test_scalar_fork(compiler, tmp_path, surface):

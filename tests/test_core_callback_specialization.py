@@ -90,7 +90,6 @@ main=()=>{
         assert 'after' not in ran.stdout, output
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True])
 def test_callback_specialization_resolves_body(compiler, tmp_path, release):
     source = tmp_path / 'known.dewy'

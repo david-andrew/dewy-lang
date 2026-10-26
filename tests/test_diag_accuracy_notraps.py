@@ -46,7 +46,6 @@ CASES = {
 PENDING: set[str] = set()
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('name', [
     pytest.param(name, marks=pytest.mark.xfail(reason='diagnostic text does not yet give the repair', strict=True))
     if name in PENDING else name for name in CASES])

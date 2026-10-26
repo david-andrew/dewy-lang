@@ -25,7 +25,6 @@ def test_every_dewy_module_has_its_twin():
         assert not [p.name for p in COMPILER.glob('*.jo') if f"use '{twin}'\n" in p.read_text()], twin
 
 
-@pytest.mark.core_quick
 def test_dewy_modules_are_leaves():
     stems = {p.stem for p in COMPILER.glob('*.jo')} | {p.stem for p in COMPILER.glob('*.dewy')}
     for module in FROZEN_TWINS:
@@ -37,7 +36,6 @@ def test_dewy_modules_are_leaves():
             assert name not in stems, f'{module} imports the compiler module {name}'
 
 
-@pytest.mark.core_quick
 def test_twins_define_only_the_dewy_names():
     for module, twin in FROZEN_TWINS.items():
         dewy = top_level((COMPILER / module).read_text(), r'^(?:let\s+|const\s+)?([A-Za-z_]\w*)\s*[:=]')
@@ -61,7 +59,6 @@ def jo_enums(text):
     return out
 
 
-@pytest.mark.core_quick
 def test_twins_number_enumerations_alike():
     # (Sloppy code takes a Dewy enumeration as an enum, its members numbered as written: the
     # twin's enum lists them in the same order, so int(x) and Name(i) agree)

@@ -65,7 +65,6 @@ ACCEPT = '$bulletproof\n' + MAIN + '''    let t = 0
 '''
 
 
-@pytest.mark.core_quick
 def test_guarded_accepted(compiler, tmp_path):
     result = run(compiler, tmp_path, ACCEPT, 'run')
     assert result.returncode == 0, result.stdout + result.stderr

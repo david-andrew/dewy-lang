@@ -95,7 +95,6 @@ main=()=>{let xs=NAMES; xs.clear(); loop j in [0..NAMES.length) printl(xs[j])}''
 }
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('name', PROVED)
 def test_call_length_facts_prove(compiler, tmp_path, name):
     source, expected = PROVED[name]
@@ -112,7 +111,6 @@ def test_call_length_facts_prove(compiler, tmp_path, name):
         assert ran.returncode == 0 and ran.stdout == expected, ran.stdout + ran.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('name', REJECTED)
 def test_call_length_facts_reject(compiler, tmp_path, name):
     path = tmp_path / 'stale.dewy'

@@ -83,12 +83,10 @@ def parse_command_line(line):
         out.append(''.join(arg))
 
 
-@pytest.mark.core_quick
 def test_parser_reference():
     assert parse_command_line(r'p a\\\"b "c d" e\f "g\\"') == ['p', 'a\\"b', 'c d', 'e\\f', 'g\\']
 
 
-@pytest.mark.core_quick
 def test_command_lines_round_trip(compiler, tmp_path):
     source = tmp_path / 'quoter.jo'
     source.write_text(QUOTER)

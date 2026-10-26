@@ -602,7 +602,6 @@ def test_selfhost_dewy_layout_fmt_agrees(compiler, tmp_path):
     assert checked > 250
 
 
-@pytest.mark.core_quick
 def test_selfhost_dewy_layout_ships_dewy(compiler, tmp_path):
     binary = compiler.read_bytes()
     assert b'/compiler/dewy_layout.dewy\0' in binary

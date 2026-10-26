@@ -9,7 +9,6 @@ import pytest
 from tests.support import compiler
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('flags', [[], ['--release'], ['-g']])
 def test_return_paths_and_epilogue_unwind(compiler, tmp_path, flags):
     source = tmp_path / 'returns.jo'

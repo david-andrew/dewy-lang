@@ -26,7 +26,6 @@ def run(binary, workers):
                           capture_output=True, text=True, timeout=30)
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('scalar', ['int64', 'float32', 'float64'])
 def test_scalar_tree_and_nested_collectors(compiler, tmp_path, scalar):
     binary = build(compiler, tmp_path, '''
@@ -141,7 +140,6 @@ main=():>void=>{printl"{fork(25)}"}
     assert result.stdout == '75025\n'
 
 
-@pytest.mark.core_quick
 def test_managed_region_ownership(compiler, tmp_path):
     binary = build(compiler, tmp_path, '''
 tree=(a:array<int64> depth:int64):>array<int64>=>{

@@ -55,7 +55,6 @@ quiet = (text:string):>bool => text.length >? 2 and text.startswith("a") and tex
 '''
 
 
-@pytest.mark.core_quick
 def test_string_rows_accept(compiler, tmp_path):
     result = run(compiler, tmp_path, ACCEPT)
     assert result.returncode == 0, result.stdout + result.stderr

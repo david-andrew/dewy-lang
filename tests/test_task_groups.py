@@ -33,7 +33,6 @@ main=()=>{
 ''')
 
 
-@pytest.mark.core_quick
 def test_deadline_cancels_sleep(compiler, tmp_path):
     run(compiler, tmp_path, '''
 slow=():>int64|Canceled=>{sleep(1s) or_throw return 42}

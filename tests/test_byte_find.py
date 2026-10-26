@@ -34,7 +34,6 @@ def build_run(compiler, tmp_path, source, flags=(), no_avx=False):
     return built.stdout
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('flags', [(), ('--release',), ('-g',), ('--target', 'wasm32')])
 def test_byte_find_all_bytes_and_starts(compiler, tmp_path, flags):
     ir = build_run(compiler, tmp_path, '''

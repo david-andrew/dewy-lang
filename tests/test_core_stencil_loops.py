@@ -9,7 +9,6 @@ from tests.support import compiler
 RUNTIME_CHECKS = '\n$runtime_checks\n'
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True])
 def test_stencil_reused_increment(compiler, tmp_path, release):
     source = tmp_path / 'stencil.dewy'

@@ -85,7 +85,6 @@ def test_core_regex_oracle(compiler, tmp_path, target, release):
         assert code == '42', (name, cases[name], code, output)
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_core_regex_operations(compiler, tmp_path, target, release):

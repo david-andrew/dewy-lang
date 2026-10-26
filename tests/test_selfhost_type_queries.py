@@ -139,7 +139,6 @@ def test_type_query_twins_and_oracle(compiler, tmp_path, release):  # noqa: F811
         assert ran.stdout.splitlines() == expected.splitlines()
 
 
-@pytest.mark.core_quick
 def test_type_queries_ship_dewy(compiler):  # noqa: F811
     binary = compiler.read_bytes()
     assert b'/compiler/type_queries.dewy\0' in binary

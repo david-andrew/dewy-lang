@@ -6,7 +6,6 @@ import pytest
 from tests.support import ROOT, compiler
 
 
-@pytest.mark.core_quick
 def test_backend_workspace_reuses_storage_without_locations(compiler, tmp_path):
     source = tmp_path / 'workspace.jo'
     source.write_text(f"use '{ROOT / 'compiler/x64.jo'}'\nuse '{ROOT / 'compiler/ir.jo'}'\n" + '''

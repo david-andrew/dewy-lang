@@ -22,7 +22,6 @@ FORMS = [dict(index='end', slice='end-1..end', index_text='end'),
          dict(index='xs.length - 1', slice='xs.length-1-1..xs.length-1', index_text='text.length - 1')]
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_end_matches_length_arithmetic(compiler, tmp_path, release):
     bodies = []

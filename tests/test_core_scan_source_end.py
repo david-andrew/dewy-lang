@@ -93,7 +93,6 @@ def texts():
     return [t for t in out if b'\x01' not in t]
 
 
-@pytest.mark.core_quick
 @pytest.mark.skipif(sys.platform != 'linux' or platform.machine() != 'x86_64', reason='x86-64 Linux mmap')
 def test_scanners_stop_at_source_end(compiler, tmp_path):  # noqa: F811
     source = tmp_path / 'edge.jo'
@@ -109,7 +108,6 @@ def test_scanners_stop_at_source_end(compiler, tmp_path):  # noqa: F811
     assert ran.stdout == f'{4 * len(cases)}\n'
 
 
-@pytest.mark.core_quick
 def test_hex_escape_at_text_end(compiler, tmp_path):  # noqa: F811
     """A `\\x` escape short of its two digits at the end of a text is an error, not a read past it."""
     source = tmp_path / 'hex.jo'

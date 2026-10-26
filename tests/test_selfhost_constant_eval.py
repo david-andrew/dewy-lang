@@ -43,6 +43,5 @@ def test_constant_eval_twins(compiler, tmp_path, release):  # noqa: F811
     assert outputs[0] == outputs[1]
 
 
-@pytest.mark.core_quick
 def test_constant_eval_ships_dewy(compiler):  # noqa: F811
     assert b'/compiler/constant_eval.dewy\0' in compiler.read_bytes()

@@ -25,7 +25,6 @@ def harness(tmp_path_factory):
     return library
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('mode', ['default', 'release'])
 def test_dewy_ffi_harness(compiler, tmp_path, harness, mode):
     source = tmp_path / 'harness.dewy'

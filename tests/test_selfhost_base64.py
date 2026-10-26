@@ -50,7 +50,6 @@ def test_selfhost_base64_matches_jo(compiler, tmp_path, release):
     assert outputs[0].decode().split('\n')[:-1] == [base64.b64encode(blob).decode() for blob in data]
 
 
-@pytest.mark.core_quick
 def test_selfhost_base64_ships_dewy(compiler):
     binary = compiler.read_bytes()
     assert b'/compiler/base64.dewy\0' in binary

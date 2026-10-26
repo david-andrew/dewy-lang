@@ -42,14 +42,12 @@ def errors(tmp_path, name, text):
     return [(d['range']['start']['line'], d['message']) for d in found if d['severity'] == 1]
 
 
-@pytest.mark.core_quick
 def test_errors_following_a_left_out_body_are_dropped(tmp_path):
     found = errors(tmp_path, 'left_out.dewy', LEFT_OUT)
     assert [line for line, _ in found] == [1], found
     assert 'foo' in found[0][1]
 
 
-@pytest.mark.core_quick
 def test_a_real_error_mentioning_never_is_kept(tmp_path):
     found = errors(tmp_path, 'never_words.dewy', NEVER_WORDS)
     assert [line for line, _ in found] == [1, 3], found

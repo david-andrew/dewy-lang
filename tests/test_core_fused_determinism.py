@@ -83,7 +83,6 @@ main=():>void=>{
 '''
 
 
-@pytest.mark.core_quick
 def test_fused_callback_versions(compiler, tmp_path):
     source = tmp_path / 'versions.dewy'
     source.write_text((CALLBACK_VERSIONS) + "\n$runtime_checks\n")

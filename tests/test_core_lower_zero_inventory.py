@@ -6,7 +6,6 @@ import pytest
 from tests.support import ROOT, compiler
 
 
-@pytest.mark.core_quick
 def test_nested_zero_inventory_order(compiler, tmp_path):
     source = tmp_path / 'zero_inventory.jo'
     source.write_text(''.join(f"use '{ROOT / 'compiler' / (name + '.jo')}'\n"

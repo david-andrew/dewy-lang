@@ -137,7 +137,6 @@ def test_refine_strings_twins_and_oracle(compiler, tmp_path, release):  # noqa: 
         assert ran.stdout.splitlines() == expected.splitlines()
 
 
-@pytest.mark.core_quick
 def test_refine_strings_ship_dewy(compiler):  # noqa: F811
     binary = compiler.read_bytes()
     assert b'/compiler/refine_strings.dewy\0' in binary

@@ -57,7 +57,6 @@ def test_projection_twins_and_trace(compiler, tmp_path, release):  # noqa: F811
         assert ran.stdout.splitlines() == expected
 
 
-@pytest.mark.core_quick
 def test_projection_ships_dewy(compiler):  # noqa: F811
     binary = compiler.read_bytes()
     assert b'/compiler/refine_projection.dewy\0' in binary

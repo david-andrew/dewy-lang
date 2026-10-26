@@ -65,7 +65,6 @@ def test_selfhost_leb128_matches_jo(compiler, tmp_path, release):
     assert [line.rstrip() for line in outputs[0].splitlines()] == expected
 
 
-@pytest.mark.core_quick
 def test_selfhost_leb128_ships_dewy(compiler):
     binary = compiler.read_bytes()
     assert b'/compiler/leb128.dewy\0' in binary

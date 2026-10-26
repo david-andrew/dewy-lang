@@ -136,7 +136,6 @@ def test_core_abandoned_expressions(compiler, tmp_path, target, release):
         assert code == '42', (name, CASES[name], code, output)
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('target,flags', [
     ('native', []), ('native', ['--release']), ('native', ['-g']),
     ('wasm', []), ('wasm', ['--release']),

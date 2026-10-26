@@ -8,7 +8,6 @@ import pytest
 from tests.support import compiler
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('debug', [False, True])
 def test_default_string_inline(compiler, tmp_path, debug):
     if platform.machine().lower() not in ('x86_64', 'amd64'):

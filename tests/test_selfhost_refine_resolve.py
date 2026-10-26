@@ -85,7 +85,6 @@ def test_refine_resolve_twins(compiler, tmp_path, release):  # noqa: F811
     assert runs[0] == runs[1]
 
 
-@pytest.mark.core_quick
 def test_resolver_ships_dewy(compiler):  # noqa: F811
     binary = compiler.read_bytes()
     assert b'/compiler/refine_resolve.dewy\0' in binary

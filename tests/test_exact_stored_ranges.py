@@ -4,7 +4,6 @@ import pytest
 from tests.support import compiler  # noqa: F401
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True])
 def test_small_stored_ranges(compiler, tmp_path, release):
     values = [-2**63, -1001, -1, 0, 999, 2**63-1]

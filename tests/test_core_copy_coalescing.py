@@ -3,7 +3,6 @@ import subprocess
 import pytest
 from tests.support import compiler
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('flags', [[], ['--release'], ['-g']])
 def test_copy_coalescing_under_register_pressure(compiler, tmp_path, flags):
     # Opaque inputs and calls keep both spill and high-register paths live.

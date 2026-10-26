@@ -61,7 +61,6 @@ def test_selfhost_zip_matches_jo(compiler, tmp_path, release):
             assert methods['empty.bin'] == zipfile.ZIP_STORED
 
 
-@pytest.mark.core_quick
 def test_selfhost_zip_ships_dewy(compiler, tmp_path):
     # The compiler's table of its own source files names zip.dewy, never its twin
     # (tools/compiler/build.py compiles the twin only on the way from C).

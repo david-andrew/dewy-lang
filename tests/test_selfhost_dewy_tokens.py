@@ -164,7 +164,6 @@ def test_selfhost_dewy_tokens_match_jo(compiler, tmp_path, release):
     assert sorted(dewy[n:]) == sorted(want[n:])
 
 
-@pytest.mark.core_quick
 def test_selfhost_dewy_tokens_ships_dewy(compiler):
     binary = compiler.read_bytes()
     assert b'/compiler/dewy_tokens.dewy\0' in binary

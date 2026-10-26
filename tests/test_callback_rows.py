@@ -6,7 +6,6 @@ from tests.support import compiler
 from tests.test_effect_rows import compile_source
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('mode', ['check', 'default', 'release'])
 def test_full_callback_rows(compiler, tmp_path, mode):
     source = Path(__file__).parent / 'ladder/74_callback_rows/design.dewy'

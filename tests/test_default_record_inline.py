@@ -17,7 +17,6 @@ def function(ir, name):
                 if body.startswith(f'f_{name}_'))
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('debug', [False, True])
 def test_default_game_inline(compiler, tmp_path, debug):
     source = prepare_source('game', tmp_path)

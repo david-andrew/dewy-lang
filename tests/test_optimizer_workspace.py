@@ -4,7 +4,6 @@ import pytest
 from tests.support import compiler, run_value_batch
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 def test_optimizer_workspace_growth(compiler, tmp_path, release, target):

@@ -111,7 +111,6 @@ def test_refine_query_twins_and_oracle(compiler, tmp_path, release):  # noqa: F8
         assert ran.stdout == expected
 
 
-@pytest.mark.core_quick
 def test_refine_queries_ship_dewy(compiler):  # noqa: F811
     binary = compiler.read_bytes()
     assert b'/compiler/refine_queries.dewy\0' in binary

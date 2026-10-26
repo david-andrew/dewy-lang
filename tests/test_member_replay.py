@@ -263,7 +263,6 @@ def test_member_replay_is_exercised(compiler, tmp_path):
                if line.startswith('member lowering ')) == 3, run.stderr
 
 
-@pytest.mark.core_quick
 def test_member_lowering_rejects_nonliteral_ir_differences(compiler, tmp_path):
     source = tmp_path / 'lowering.jo'
     source.write_text(''.join(f"use '{ROOT / 'compiler' / (name + '.jo')}'\n"

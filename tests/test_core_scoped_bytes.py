@@ -93,7 +93,6 @@ def test_disjoint_nested_and_loop_exits(compiler, tmp_path):
     assert result.stdout == '1 3\n'
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('reservation,length', [('0', '3'), ('2', '5'), ('0', '-1'), ('-1', '0'), ('9223372036854775807', '0')])
 def test_reservation_bounds(compiler, tmp_path, reservation, length):
     source = ('main=()=>{let bytes:array<uint8>=[1 2]; $lend(@bytes reserve='

@@ -153,7 +153,6 @@ def test_selfhost_dewy_scan_match_jo(compiler, tmp_path, release):
     assert outputs[0] == outputs[1]
 
 
-@pytest.mark.core_quick
 def test_selfhost_dewy_scan_ships_dewy(compiler, tmp_path):
     binary = compiler.read_bytes()
     assert b'/compiler/dewy_scan.dewy\0' in binary

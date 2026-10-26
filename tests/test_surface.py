@@ -227,7 +227,6 @@ main = () => {
 '''
 
 
-@quick
 def test_surface_member_calls(compiler, tmp_path):
     ran = run(compiler, tmp_path, MEMBER_CALL_PROGRAM + '\n$runtime_checks\n')
     assert ran.returncode == 0, ran.stdout + ran.stderr

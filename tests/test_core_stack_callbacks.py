@@ -108,7 +108,6 @@ main=()=>{exercise() return if drops=?1 42 else 1}''',
 }
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 def test_stack_callback_boundaries(compiler, tmp_path, release, target):

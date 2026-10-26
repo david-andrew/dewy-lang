@@ -124,7 +124,6 @@ def test_selfhost_habits_match_jo(compiler, tmp_path, release):
     assert sum(sloppy_shaped(v) for v in sloppy.values()) > 20
 
 
-@pytest.mark.core_quick
 def test_selfhost_habits_ship_dewy(compiler, tmp_path):
     binary = compiler.read_bytes()
     assert b'/compiler/habits.dewy\0' in binary

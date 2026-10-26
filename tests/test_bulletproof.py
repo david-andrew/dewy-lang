@@ -32,7 +32,6 @@ main = ():>(void | OutOfMemory) & no panics => {
 '''
 
 
-@pytest.mark.core_quick
 def test_proven_program_runs(compiler, tmp_path):
     result = run(compiler, tmp_path, PROVEN, 'run')
     assert result.returncode == 0 and result.stdout == '10 2.5\n', result.stdout + result.stderr

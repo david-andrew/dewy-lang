@@ -7,7 +7,6 @@ from tests.support import compiler  # noqa: F401
 from tools.compiler import parser_diff
 
 
-@pytest.mark.core_quick
 def test_recursive_reader_ships_dewy(compiler, tmp_path):
     binary = compiler.read_bytes()
     assert b'/compiler/dewy_reader.dewy\0' in binary

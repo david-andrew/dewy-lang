@@ -1137,7 +1137,6 @@ main=():>void=>exit(entry()) entry=()=>probe(-7)
     assert 'call' not in probe[0], 'literal floor arithmetic still calls a helper in default builds'
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_constant_match_lookup(compiler, tmp_path, target, release):
@@ -1306,7 +1305,6 @@ main = () -> int:
     assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_core_recursive_branch_returns(compiler, tmp_path, target, release):
@@ -2656,7 +2654,6 @@ def test_core_netplay_restart(compiler, tmp_path, target, release):
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
-@pytest.mark.core_quick
 def test_core_game_model(compiler, tmp_path, target, release):
     node = shutil.which('node')
     if target == 'wasm' and node is None:
@@ -4414,7 +4411,6 @@ def emission_word_helpers(compiler):
                                             implementation.index('\nrip_kind =')]
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 @pytest.mark.parametrize('target', ['native', 'linux-arm64'])
 def test_core_emission_words(compiler, tmp_path, release, target):
@@ -4708,7 +4704,6 @@ main = () -> int:
 from tests.lexer_probe import lexer_span_helpers
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_core_lexer_bounded_spans(compiler, tmp_path, release):
     # Expected payloads and byte spans are independent of the lexer implementation.
@@ -4807,7 +4802,6 @@ main=():>void=>exit(entry()) entry=()=>callback(Row[[20] 22])
     assert ran.returncode == 42, ran.stdout + ran.stderr
 
 
-@pytest.mark.core_quick
 def test_core_repl_parameter_views(compiler, tmp_path):
     # Subsequent submissions lower checked functions again. A borrowed local
     # must bind to this lowering's parameter storage, while writes stay private.
@@ -4834,7 +4828,6 @@ score(saved)
     assert ran.stdout.splitlines() == ['42', '121', '42', '43', '42']
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 def test_core_fast_inline_failure_path(compiler, tmp_path, target):
     runner = shutil.which('node') if target == 'wasm' else None
@@ -5148,7 +5141,6 @@ main = () -> int:
     assert 'index 2 out of bounds' in bad.stdout + bad.stderr, bad.stdout + bad.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 def test_core_masked_loop_bounds(compiler, tmp_path, release, target):
@@ -5284,7 +5276,6 @@ main = () -> int:
     assert ran.returncode == 42, ran.stdout + ran.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('mode', ['default', 'release', 'debug'])
 def test_core_branch_table_control_flow(compiler, tmp_path, mode):
     keys = [-(1 << 63), -100, *range(-5, 11), (1 << 63)-1]
@@ -5656,7 +5647,6 @@ main = () -> int:
     assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_core_integer_parse_boundaries(compiler, tmp_path, target, release):
@@ -5837,7 +5827,6 @@ def test_core_grapheme_length_invalid_tail(compiler, tmp_path, prefix):
     assert ran.returncode != 0 and 'invalid UTF-8 in grapheme operation' in ran.stderr, ran.stdout + ran.stderr
 
 
-@pytest.mark.core_quick
 def test_core_grapheme_pages_reproducible():
     from tools.compiler.unicode_pages import DIRECTORY, pack
     assert pack() == (DIRECTORY / 'grapheme_pages.bin').read_bytes()

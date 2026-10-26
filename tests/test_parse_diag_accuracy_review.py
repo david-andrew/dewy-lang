@@ -184,7 +184,6 @@ def _case_parameter(case):
                         marks=pytest.mark.xfail(strict=True, reason=f"proposed: {proposal}"))
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize("case", [_case_parameter(case) for case in CASES])
 def test_parse_diagnostic_accuracy(compiler, tmp_path, case):
     source = (ROOT / case["fixture"]).read_text() if case["fixture"] else case["source"]

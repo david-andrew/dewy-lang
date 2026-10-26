@@ -84,7 +84,6 @@ def test_text_domains_twin_and_oracle(compiler, tmp_path, release):  # noqa: F81
         assert ran.stdout == expected
 
 
-@pytest.mark.core_quick
 def test_text_domains_ships_dewy(compiler):  # noqa: F811
     binary = compiler.read_bytes()
     assert b'/compiler/text_domains.dewy\0' in binary

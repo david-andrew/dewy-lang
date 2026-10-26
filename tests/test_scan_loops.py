@@ -7,7 +7,6 @@ from tests.support import compiler
 from tests.test_byte_find import build_run
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('flags', [(), ('--release',), ('-g',), ('--target', 'wasm32')])
 def test_scan_loop_bytes(compiler, tmp_path, flags):
     ir = build_run(compiler, tmp_path, '''

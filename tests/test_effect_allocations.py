@@ -7,7 +7,6 @@ from tests.support import compiler
 from tests.test_effect_rows import compile_source
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('mode', ['check', 'default', 'release'])
 def test_effect_allocation_witness(compiler, tmp_path, mode):
     source = tmp_path / 'growth.dewy'

@@ -205,7 +205,6 @@ def test_corpus_reaches_every_step():
     assert {line.split('\t')[1] for line in text.split('\n') if line.startswith('M\t')} >= {str(i) for i in range(0, len(KINDS), 10)}
 
 
-@pytest.mark.core_quick
 def test_selfhost_node_store_ships_dewy(compiler):  # noqa: F811
     binary = compiler.read_bytes()
     assert b'/compiler/node_store.dewy\0' in binary

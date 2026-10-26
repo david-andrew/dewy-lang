@@ -10,7 +10,6 @@ from tests.support import compiler
 FIXTURES = Path(__file__).parent / 'fixtures/isolation'
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 @pytest.mark.parametrize('name', ['pathname', 'snapshot'])
 def test_isolation_pathname(compiler, tmp_path, release, name):

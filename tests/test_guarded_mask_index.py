@@ -5,7 +5,6 @@ import pytest
 from tests.support import compiler  # noqa: F401
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True])
 @pytest.mark.parametrize('change', ['', 'xs.truncate(1)'])
 def test_guarded_mask_index(compiler, tmp_path, release, change):

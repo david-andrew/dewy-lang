@@ -153,7 +153,6 @@ f=(@xs:array<int64> i:int64)=>{
 })
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('name', PROVED)
 def test_index_length_facts_prove(compiler, tmp_path, name):
     source, expected = PROVED[name]
@@ -170,7 +169,6 @@ def test_index_length_facts_prove(compiler, tmp_path, name):
         assert ran.returncode == 0 and ran.stdout == expected, ran.stdout + ran.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('name', REJECTED)
 def test_index_length_facts_reject_stale(compiler, tmp_path, name):
     path = tmp_path / 'stale.dewy'

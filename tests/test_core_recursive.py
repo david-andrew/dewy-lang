@@ -314,7 +314,6 @@ return if b(true)=?1 and a(false)=?0 and x is?none 42 else 3}''',
 }
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_core_recursive_values(compiler, tmp_path, target, release):

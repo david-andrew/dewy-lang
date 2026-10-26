@@ -162,7 +162,6 @@ def test_selfhost_dewy_reach_match_jo(compiler, tmp_path, release):
     assert any(line.startswith('waiting [') and line != 'waiting [] [] []' for line in lines)
 
 
-@pytest.mark.core_quick
 def test_selfhost_dewy_reach_ships_dewy(compiler):
     binary = compiler.read_bytes()
     assert b'/compiler/dewy_reach.dewy\0' in binary

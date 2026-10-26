@@ -51,7 +51,6 @@ def test_loop_validation(compiler, tmp_path, body, success):
         assert 'assertion' in result.stderr, result.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('body', [
     'let xs:array<int64>=[1]; loop xs.length >? 0 {xs.clear(); $assert xs.length >? 0}',
     'let i:int64=1; let j:int64=1; loop flag {i=j; j=-1; $assert i >? 0}',

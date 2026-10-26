@@ -231,7 +231,6 @@ def test_corpus_reaches_every_step():
     assert wraps == {1 << 14, 1 << 15}
 
 
-@pytest.mark.core_quick
 def test_selfhost_intern_ships_dewy(compiler):  # noqa: F811
     binary = compiler.read_bytes()
     assert b'/compiler/intern.dewy\0' in binary

@@ -64,7 +64,6 @@ main=():>void=>{
 '''
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('flags', [[], ['--release']])
 def test_counters_bounded_by_a_length_stay_words(compiler, tmp_path, flags):
     binary = build(compiler, tmp_path, SCAN, flags)
@@ -92,7 +91,6 @@ main=():>void=>{
 '''
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('flags', [[], ['--release']])
 def test_string_beside_a_place_it_cannot_reach_is_not_retained(compiler, tmp_path, flags):
     binary = build(compiler, tmp_path, BESIDE, flags)
@@ -112,7 +110,6 @@ $runtime_checks
 '''
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('flags', [[], ['--release']])
 def test_byte_ranges_compare_in_place(compiler, tmp_path, flags):
     binary = build(compiler, tmp_path, RANGES, flags)
@@ -140,7 +137,6 @@ main=():>void=>{
 '''
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('flags', [[], ['--release']])
 def test_pointer_only_read_through_copies_nothing(compiler, tmp_path, flags):
     binary = build(compiler, tmp_path, POINTER, flags)
@@ -183,7 +179,6 @@ main=():>void=>$unsafe {
 '''
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('flags', [[], ['--release']])
 def test_nested_and_typed_counters_stay_words(compiler, tmp_path, flags):
     binary = build(compiler, tmp_path, TOKENS, flags)

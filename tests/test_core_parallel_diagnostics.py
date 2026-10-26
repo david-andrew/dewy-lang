@@ -19,7 +19,6 @@ second()
 '''
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('automatic', [False, True])
 @pytest.mark.parametrize('shared', [False, True])
 def test_rollback_warning_order(compiler, tmp_path, automatic, shared):
@@ -47,7 +46,6 @@ def test_rollback_warning_order(compiler, tmp_path, automatic, shared):
         assert (got, errors) == (base, err)
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('forced', [False, True])
 def test_library_root_error_order(compiler, tmp_path, forced):
     source = tmp_path / 'errors.dewy'

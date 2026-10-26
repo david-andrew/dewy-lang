@@ -69,7 +69,6 @@ def test_selfhost_dewy_parser_match_jo(compiler, tmp_path, release):
     assert results[0] == results[1]
 
 
-@pytest.mark.core_quick
 def test_selfhost_dewy_parser_ships_dewy(compiler, tmp_path):
     binary = compiler.read_bytes()
     assert b'/compiler/dewy_parser.dewy\0' in binary

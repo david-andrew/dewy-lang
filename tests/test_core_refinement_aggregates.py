@@ -36,7 +36,6 @@ def test_rejected_store(compiler, tmp_path, source, diagnostic):
     assert result.returncode != 0 and diagnostic in result.stderr, result.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('source', [
     'main=()=>{let xs:array<int64<i => i >? 0> length=1>=[1]; printl(xs[0])}',
     'main=()=>{let xs:array<int64<i => i >? 0>?>=[]; printl(xs.length)}',

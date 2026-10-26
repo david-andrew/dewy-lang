@@ -58,7 +58,6 @@ def test_partitioned_error_order(compiler, tmp_path):
     assert results[0] == results[1] == results[2]
 
 
-@pytest.mark.core_quick
 def test_partitioned_below_fused_gate(compiler, tmp_path):
     source = tmp_path / 'small.dewy'
     source.write_text(('\n'.join(f'f{i}=(x:int64):>int64=>x+{i}' for i in range(140)) +
@@ -86,7 +85,6 @@ def test_partitioned_unsupported_program(compiler, tmp_path, addition):
     assert 'pcheck: 4 workers checked' not in timed
 
 
-@pytest.mark.core_quick
 def test_partitioned_cross_worker_inline(compiler, tmp_path):
     source = tmp_path / 'chain.dewy'
     source.write_text(('f0=(x:int64):>int64=>x\n' +

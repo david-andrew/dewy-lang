@@ -317,7 +317,6 @@ def test_selfhost_manifest_matches_jo(compiler, tmp_path, release):
     assert got == expected(words)
 
 
-@pytest.mark.core_quick
 def test_selfhost_manifest_ships_dewy(compiler):
     binary = compiler.read_bytes()
     assert b'/compiler/manifest.dewy\0' in binary

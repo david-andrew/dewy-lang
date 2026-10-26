@@ -16,7 +16,6 @@ def build(compiler, tmp_path, target):
                           capture_output=True, text=True, timeout=60, check=False)
 
 
-@pytest.mark.core_quick
 def test_processor_alone_is_this_machine(compiler, tmp_path):
     if platform.machine() != 'x86_64' or platform.system() != 'Linux':
         pytest.skip('the expectation is for an x86-64 Linux host')

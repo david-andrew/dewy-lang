@@ -89,7 +89,6 @@ def test_witness_text_twin_and_oracle(compiler, tmp_path, release):  # noqa: F81
         assert ran.stdout == expected
 
 
-@pytest.mark.core_quick
 def test_witness_text_ships_dewy(compiler):  # noqa: F811
     binary = compiler.read_bytes()
     assert b'/compiler/witness_text.dewy\0' in binary

@@ -129,7 +129,6 @@ def test_refine_keys_twins_and_oracle(compiler, tmp_path, release):  # noqa: F81
         assert ran.stdout.splitlines() == expected.splitlines()
 
 
-@pytest.mark.core_quick
 def test_refine_keys_ship_dewy(compiler):  # noqa: F811
     binary = compiler.read_bytes()
     assert b'/compiler/refine_keys.dewy\0' in binary

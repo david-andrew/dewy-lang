@@ -92,7 +92,6 @@ def test_effect_rows_check_without_lowering(compiler, tmp_path):
     assert 'effect contract violation' in result.stderr, result.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('mode', ['check', 'default', 'release'])
 @pytest.mark.parametrize('name', ['callable_indirect', 'callable_field', 'lambda', 'callable_recover'])
 def test_contracted_indirect_calls(compiler, tmp_path, mode, name):

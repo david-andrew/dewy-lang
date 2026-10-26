@@ -56,7 +56,6 @@ def test_selfhost_sha_matches_jo(compiler, tmp_path, release):
     assert outputs[0].decode().split('\n')[:-1] == [digests(blob) for blob in data]
 
 
-@pytest.mark.core_quick
 def test_selfhost_sha_ships_dewy(compiler):
     binary = compiler.read_bytes()
     assert b'/compiler/sha.dewy\0' in binary

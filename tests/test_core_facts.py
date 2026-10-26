@@ -61,7 +61,6 @@ def test_scalar_fact_internal_policy(compiler, tmp_path, command, name, expected
         assert result.returncode == 0, result.stdout + result.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_scalar_fact_erased_capture(compiler, tmp_path, release):
     built = subprocess.run([compiler, 'build', CASES / 'erased_capture.dewy',

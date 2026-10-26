@@ -7,7 +7,6 @@ import pytest
 from tests.support import ROOT, compiler
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True])
 def test_borrowed_stencil_odd_sizes(compiler, tmp_path, release):
     output = tmp_path / 'jacobi'

@@ -6,7 +6,6 @@ import pytest
 from tests.support import compiler
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True])
 @pytest.mark.parametrize('expression', [
     '(x*x-y*y)%256',

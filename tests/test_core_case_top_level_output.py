@@ -22,7 +22,6 @@ def run(compiler, root, tmp_path, monkeypatch):
     return cases.run(compiler, cases.discover(root), workers=2)
 
 
-@pytest.mark.core_quick
 def test_core_case_top_level_output(compiler, tmp_path, monkeypatch, capsys):
     root = tmp_path / 'cases'
     for i in range(3):

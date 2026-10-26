@@ -28,7 +28,6 @@ def test_guarded_narrow_range(compiler, tmp_path, start, limit, policy):
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-@pytest.mark.core_quick
 def test_small_word_progress_has_opt_out(compiler, tmp_path):
     source = 'f=():>void & no panics => {loop i in int64(0).. {let x=i;}}\nmain=()=>f()\n'
     result = check(compiler, tmp_path, source)

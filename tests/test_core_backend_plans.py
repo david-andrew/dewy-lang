@@ -22,7 +22,6 @@ def build_run(compiler, source, output, flags):
     return run.stdout, built.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('count', [2, 28], ids=['low-pressure', 'high-pressure'])
 @pytest.mark.parametrize('flags', [[], ['--release'], ['-g']], ids=['default', 'release', 'debug'])
 def test_backend_pressure(compiler, tmp_path, count, flags):
@@ -58,7 +57,6 @@ def test_backend_pressure(compiler, tmp_path, count, flags):
                 assert saved > 0
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('flags', [[], ['--release']], ids=['default', 'release'])
 def test_backend_bigint_collection_relocation(compiler, tmp_path, flags):
     source = tmp_path / 'helpers.dewy'

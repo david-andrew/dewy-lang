@@ -13,7 +13,6 @@ def run(compiler, tmp_path, source, *flags):
                           text=True, timeout=60, check=False, env={**os.environ, 'TMPDIR': str(tmp_path)})
 
 
-@pytest.mark.core_quick
 def test_piped_stdin_runs_as_a_program(compiler, tmp_path):
     ran = run(compiler, tmp_path, 'printl"hi"\n')
     assert (ran.returncode, ran.stdout, ran.stderr) == (0, 'hi\n', '')

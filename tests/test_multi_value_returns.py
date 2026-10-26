@@ -31,7 +31,6 @@ main = () => {
 '''
 
 
-@pytest.mark.core_quick
 def test_values_return_without_allocation(compiler, tmp_path):  # noqa: F811
     source = tmp_path / 'values.dewy'
     source.write_text((SOURCE) + "\n$runtime_checks\n")

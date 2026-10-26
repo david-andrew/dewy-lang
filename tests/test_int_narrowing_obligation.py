@@ -76,7 +76,6 @@ sat = (n:int):>int16<overflow='saturate'> => int16<overflow='saturate'>(n)
 '''
 
 
-@pytest.mark.core_quick
 def test_guarded_wrap_saturate_accepted(compiler, tmp_path):
     result = run(compiler, tmp_path, ACCEPT, 'run')
     assert result.returncode == 0, result.stdout + result.stderr

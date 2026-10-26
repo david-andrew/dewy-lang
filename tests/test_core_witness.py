@@ -83,7 +83,6 @@ def strict(compiler, path, command='check'):
                           text=True, capture_output=True, timeout=30)
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('command', ['check', 'build'])
 @pytest.mark.parametrize('index', range(len(CASES)), ids=['stale', 'resized', 'contract', 'divisor', 'store', 'nested_store'])
 def test_strict_witness_notes(compiler, tmp_path, index, command):

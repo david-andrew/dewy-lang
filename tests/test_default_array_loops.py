@@ -9,7 +9,6 @@ from tests.support import compiler
 from tools.compiler.bench import CHECKSUMS_1000, prepare_source
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('debug', [False, True])
 def test_default_shifted_array_vectors(compiler, tmp_path, debug):
     source = prepare_source('shifted_arrays', tmp_path)

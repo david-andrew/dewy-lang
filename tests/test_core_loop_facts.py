@@ -152,7 +152,6 @@ def test_resizing_by_value_sources_is_rejected(compiler, tmp_path, name):
     assert not match_patterns([pattern], output), output
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('name', list(NEGATIVE))
 def test_resizing_bodies_kill_loop_facts(compiler, tmp_path, name):
     source, patterns, _ = NEGATIVE[name]

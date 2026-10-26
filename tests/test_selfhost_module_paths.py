@@ -175,7 +175,6 @@ def test_selfhost_module_paths_match_jo(compiler, tmp_path, release):
     assert outputs[0] == want
 
 
-@pytest.mark.core_quick
 def test_selfhost_module_paths_ship_dewy(compiler, tmp_path):
     binary = compiler.read_bytes()
     assert b'/compiler/module_paths.dewy\0' in binary

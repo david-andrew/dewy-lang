@@ -31,7 +31,6 @@ def test_small_integer_boundary(int_program, op, x, y):
     assert result.stdout.strip() == str(expected)
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True])
 def test_tagged_integer_layout(compiler, tmp_path, release):
     source = tmp_path / 'layout.jo'

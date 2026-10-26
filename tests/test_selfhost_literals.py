@@ -333,7 +333,6 @@ def test_selfhost_literals_match_jo(compiler, tmp_path, release):
     assert got == expected(args)
 
 
-@pytest.mark.core_quick
 def test_selfhost_literals_ships_dewy(compiler):
     binary = compiler.read_bytes()
     assert b'/compiler/literals.dewy\0' in binary

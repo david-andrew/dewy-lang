@@ -18,7 +18,6 @@ def test_error_values(compiler, tmp_path, release, target):
         assert code == '42', f'{name}: {code}\n{diagnostic}'
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('source,diagnostic', [
     ('E:type=type of error\nfail=():>int64|E=>E\nmain=():>void=>exit(fail() or_throw)',
      'or_throw cannot propagate'),

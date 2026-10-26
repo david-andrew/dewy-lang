@@ -36,7 +36,6 @@ def run(compiler, tmp_path, source, *arguments, env=None):
                           env=env)
 
 
-@pytest.mark.core_quick
 def test_obligation_listing(compiler, tmp_path):
     result = run(compiler, tmp_path, SITES, 'check', '--obligations')
     assert result.returncode == 0, result.stderr

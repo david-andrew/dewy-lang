@@ -71,7 +71,6 @@ def test_conditional_loop_is_no_hidden_cost(compiler, tmp_path):
     assert result.returncode == 0 and result.stdout == '1 2 3 5 7 9 8 4 \n', result.stdout + result.stderr
 
 
-@pytest.mark.core_quick
 def test_range_loop_keeps_preserved_relation(compiler, tmp_path):
     result = run(compiler, tmp_path, SPAN.replace('BODY', ''))
     assert result.returncode == 0 and result.stdout == '1 9 6 1.125\n', result.stdout + result.stderr
@@ -118,7 +117,6 @@ grow = (n:int64<0 <=? n and n <? 100>):>int64 & allocates => {
 '''
 
 
-@pytest.mark.core_quick
 def test_small_digit_limit_and_allocation_frame(compiler, tmp_path):
     result = run(compiler, tmp_path, PARSE)
     assert result.returncode == 0 and result.stdout == '7 12 -999 7 -2 -1 -1 -1 -1 0\n', result.stdout + result.stderr

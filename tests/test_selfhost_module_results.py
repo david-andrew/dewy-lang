@@ -6,7 +6,6 @@ import pytest
 from tests.support import compiler  # noqa: F401
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('following, column', [
     ('$runtime_checks', 1),
     ("$build.mode = 'debug'", 1),
@@ -22,7 +21,6 @@ def test_proof_requires_the_next_module_result(compiler, tmp_path, following, co
     assert f'{source}:2:{column}: error: $proof requires a function declaration' in diagnostic
 
 
-@pytest.mark.core_quick
 def test_nested_module_groups_keep_declaration_order(compiler, tmp_path):
     source = tmp_path / 'groups.dewy'
     source.write_text('''$runtime_checks

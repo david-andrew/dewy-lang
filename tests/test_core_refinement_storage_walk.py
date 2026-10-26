@@ -6,7 +6,6 @@ import pytest
 from tests.support import ROOT, compiler
 
 
-@pytest.mark.core_quick
 def test_storage_query_paths(compiler, tmp_path):
     source = tmp_path / 'storage_walk.jo'
     source.write_text(f"use '{ROOT / 'compiler/refine.jo'}'\nuse '{ROOT / 'compiler/types.jo'}'\nuse '{ROOT / 'compiler/checker_types.dewy'}'\n" + '''

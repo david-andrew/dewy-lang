@@ -195,7 +195,6 @@ def test_selfhost_int_domains_matches_twin_and_oracle(compiler, tmp_path, releas
     assert outputs[0] == expected
 
 
-@pytest.mark.core_quick
 def test_selfhost_int_domains_ships_dewy(compiler):  # noqa: F811
     binary = compiler.read_bytes()
     assert b'/compiler/int_domains.dewy\0' in binary

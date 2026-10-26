@@ -5,7 +5,6 @@ import pytest
 from tests.support import compiler  # noqa: F401
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True])
 def test_sensor_signed_magnitude(compiler, tmp_path, release):
     program = (Path(__file__).parent/'ladder/112_bulletproof_sensor/design.dewy').read_text()

@@ -3,7 +3,6 @@ import pytest
 
 from tools.compiler import speed_corpus as corpus
 
-pytestmark = pytest.mark.core_quick
 
 
 def test_source_lines_skip_blanks_and_comments():

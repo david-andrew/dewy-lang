@@ -6,7 +6,6 @@ import pytest
 from tests.support import compiler
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True])
 def test_optimizer_cfg_after_output_growth(compiler, tmp_path, release):
     divisors = [k for k in range(3, 93) if k & (k - 1)]

@@ -102,7 +102,6 @@ def test_int_beyond_int64_branch_is_live(compiler, tmp_path, name):
     assert expected in output, output
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('name', PROVED)
 def test_int_real_edges_stay_exact(compiler, tmp_path, name):
     source, expected = PROVED[name]

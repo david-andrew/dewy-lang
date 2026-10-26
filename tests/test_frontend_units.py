@@ -17,7 +17,6 @@ def run_probe(compiler, tmp_path, text, release):
     assert ran.returncode == 42, ran.stdout + ran.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True])
 def test_delimiter_bounded_windows(compiler, tmp_path, release):
     run_probe(compiler, tmp_path, r'''
@@ -61,7 +60,6 @@ main = () -> int:
 ''', release)
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True])
 def test_parser_borrow_survives_interpolation(compiler, tmp_path, release):
     run_probe(compiler, tmp_path, r'''

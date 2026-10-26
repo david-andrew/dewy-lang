@@ -27,7 +27,6 @@ def test_deferred_body_demand(compiler, tmp_path, body, ok):
         assert 'cannot prove' in run.stderr or 'may panic' in run.stderr, run.stderr
 
 
-@pytest.mark.core_quick
 def test_deferred_prototype_warning(compiler, tmp_path):
     source = tmp_path / 'prototype.dewy'
     source.write_text('$prototype\nf=(xs:array<int64> i:int64):>int64=>xs[i]\nprintl(f([1] 0))\n')
@@ -35,7 +34,6 @@ def test_deferred_prototype_warning(compiler, tmp_path):
     assert run.returncode == 0, run.stderr
     assert 'prototype: cannot prove index is in bounds' in run.stderr
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('body,ok', [
     ('if xs.is_empty return 0; return xs[0]', True),
     ('if not xs.is_empty return xs[0]; return 0', True),
@@ -48,7 +46,6 @@ def test_empty_guard_proof(compiler, tmp_path, body, ok):
     assert (run.returncode == 0) == ok, run.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('use', ['f()', 'let saved=@f'])
 def test_sparse_panic_sites_keep_calls_and_handles(compiler, tmp_path, use):
     (tmp_path / 'helper.dewy').write_text('f=():>void=>panic("explicit failure")\n')
