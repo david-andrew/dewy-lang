@@ -46,21 +46,22 @@ isolation_reset = ():
 # are local IDs and partial.d is an instance ID, NOT syntax. Type annotations,
 # call ordering metadata and nested function templates are not evaluated here.
 isolation_children = (k: NK) -> int:
-    if k == .int_lit or k == .float_lit or k == .bool_lit or k == .none_lit or k == .null_lit or k == .ident or k == .dotname or k == .hole or k == .break_ or k == .continue_ or k == .pwild: return 0
-    if k == .str_lit or k == .block or k == .tuple or k == .map_lit or k == .matrix: return 16
-    if k == .field or k == .unary or k == .not_ or k == .unwrap or k == .narrow or k == .cast or k == .conv or k == .addr or k == .exprstmt or k == .return_ or k == .defer_ or k == .istype or k == .plit: return 1
-    if k == .binary or k == .and_ or k == .or_ or k == .coalesce or k == .assign or k == .while_ or k == .for_ or k == .prange: return 3
-    if k == .if_ or k == .iflet or k == .range: return 7
-    if k == .vardecl: return 2
-    if k == .array: return 2 | 16
-    if k == .call or k == .partial or k == .intrinsic or k == .match_: return 1 | 16
-    if k == .index or k == .pair: return 3 | 16
-    if k == .arm: return 7 | 16
-    if k == .pvariant: return 16
-    if k == .fnref: return 1
-    # A closure is conservatively a blocker; never walk its body as this owner.
-    if k == .lambda: return 0
-    -1
+    match k:
+        int_lit, float_lit, bool_lit, none_lit, null_lit, ident, dotname, hole, break_, continue_, pwild: return 0
+        str_lit, block, tuple, map_lit, matrix: return 16
+        field, unary, not_, unwrap, narrow, cast, conv, addr, exprstmt, return_, defer_, istype, plit: return 1
+        binary, and_, or_, coalesce, assign, while_, for_, prange: return 3
+        if_, iflet, range: return 7
+        vardecl: return 2
+        array: return 2 | 16
+        call, partial, intrinsic, match_: return 1 | 16
+        index, pair: return 3 | 16
+        arm: return 7 | 16
+        pvariant: return 16
+        fnref: return 1
+        # A closure is conservatively a blocker; never walk its body as this owner.
+        lambda: return 0
+        else: return -1
 
 # Closed intrinsic contract set, selected by the checker's resolved IN identity.
 # Ordinary bundled functions get exactly the same body analysis as user code.
