@@ -1,0 +1,125 @@
+# Line diff: the longest common subsequence of two texts' lines, by dynamic
+# programming, printed as a unified-style edit script (" " kept, "-" removed,
+# "+" added) with hunk headers, plus a word-level similarity score.
+
+const OLD = """# shopping
+eggs
+milk
+bread
+butter
+jam
+coffee
+tea"""
+
+const NEW = """# shopping list
+eggs
+oat milk
+bread
+jam
+honey
+coffee
+tea
+sugar"""
+
+Edit:type = [kind:string text:string old_line:int new_line:int]
+
+# lcs[i][j]: the LCS length of a[i..] and b[j..]. Rows are built bottom-up and
+# read with `get`: nothing tracks that every row has b.length + 1 entries.
+lcs_table = (a:array<string> b:array<string>):>array<array<int>> => {
+    let below = fill(0 b.length + 1)
+    let rows = [below]
+    loop i in [a.length - 1, a.length - 2..0] {
+        let row = fill(0 b.length + 1)
+        loop j in [b.length - 1, b.length - 2..0] {
+            row[j] = if a[i] =? b[j] (below.get(j + 1) ?? 0) + 1 else max(below.get(j) ?? 0 row.get(j + 1) ?? 0)
+        }
+        rows.push(row)
+        below = row
+    }
+    rows.reversed()
+}
+
+cell = (table:array<array<int>> i:int64 j:int64):>int => (table.get(i) ?? []).get(j) ?? 0
+
+diff = (a:array<string> b:array<string>):>array<Edit> => {
+    let table = lcs_table(a b)
+    let edits:array<Edit> = []
+    let i = 0
+    let j = 0
+    loop i <? a.length and j <? b.length {
+        if a[i] =? b[j] {
+            edits.push(Edit[" " a[i] i + 1 j + 1])
+            i += 1
+            j += 1
+        } else if cell(table i + 1 j) >=? cell(table i j + 1) {
+            edits.push(Edit["-" a[i] i + 1 j + 1])
+            i += 1
+        } else {
+            edits.push(Edit["+" b[j] i + 1 j + 1])
+            j += 1
+        }
+    }
+    loop i <? a.length { edits.push(Edit["-" a[i] i + 1 j + 1]) i += 1 }
+    loop j <? b.length { edits.push(Edit["+" b[j] i + 1 j + 1]) j += 1 }
+    edits
+}
+
+# group changes with up to `context` unchanged lines around them
+hunks = (edits:array<Edit> context:int):>array<array<Edit>> => {
+    let out:array<array<Edit>> = []
+    let current:array<Edit> = []
+    let quiet = 0     # unchanged lines since the last change
+    loop k in 0.. and e in edits {
+        if e.kind =? " " {
+            quiet += 1
+            if current.length >? 0 and quiet <=? context current.push(e)
+            else if current.length >? 0 and quiet >? context {
+                out.push(current)
+                current = []
+            }
+        } else {
+            if current.length =? 0 {
+                # bring in the context before this change
+                loop c in edits[$clamp k - context..k) if c.kind =? " " current.push(c)
+            }
+            current.push(e)
+            quiet = 0
+        }
+    }
+    if current.length >? 0 out.push(current)
+    out
+}
+
+header = (h:array<Edit>):>string => {
+    if h.length =? 0 return "@@ @@"
+    let old_count = h.count((e) => e.kind not=? "+")
+    let new_count = h.count((e) => e.kind not=? "-")
+    let first = h.first
+    "@@ -{first.old_line},{old_count} +{first.new_line},{new_count} @@"
+}
+
+similarity = (a:string b:string):>int => {
+    let x = a.split()
+    let y = b.split()
+    if x.length + y.length =? 0 return 100
+    let common = cell(lcs_table(x y) 0 0)
+    200 * common // (x.length + y.length)
+}
+
+main = () => {
+    let a = OLD.lines
+    let b = NEW.lines
+    let edits = diff(a b)
+    let removed = edits.count((e) => e.kind =? "-")
+    let added = edits.count((e) => e.kind =? "+")
+    printl("--- old ({a.length} lines)")
+    printl("+++ new ({b.length} lines)")
+    loop h in hunks(edits 1) {
+        printl(header(h))
+        loop e in h printl("{e.kind}{e.text}")
+    }
+    let kept:int = edits.length - removed - added
+    printl("{removed} removed, {added} added, {kept} kept")
+    printl("word similarity: {similarity(OLD NEW)}%")
+    printl("identical texts: {similarity("a b c" "a b c")}%")
+}

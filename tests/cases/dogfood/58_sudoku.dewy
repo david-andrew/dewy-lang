@@ -1,0 +1,113 @@
+# Sudoku: read puzzles written as 81 characters ('.' for a blank), check that a
+# grid breaks no rule, and fill it by backtracking over the blank with the
+# fewest candidates. Prints each solution and how many guesses it took.
+
+const PUZZLES = [
+    "53..7....6..195....98....6.8...6...34..8.3..17...2...6.6....28....419..5....8..79"
+    "..9748...7.........2.1.9.....7...24..64.1.59..98...3.....8.3.2.........6...2759.."
+    "11..............................................................................."
+    "12345"
+]
+
+# '.' and '0' are blanks (0); '1'..'9' are digits; anything else is unreadable
+parse = (text:string):>array<int> | none => {
+    if text.length not=? 81 return none
+    let cells:array<int> = []
+    loop ch in text {
+        if ch =? "." or ch =? "0" cells.push(0)
+        else {
+            let d = to_int(ch) ?? -1
+            if d <? 1 or d >? 9 return none
+            cells.push(d)
+        }
+    }
+    cells
+}
+
+# could digit d go in cell i? (no other cell of its row, column or box has it)
+fits = (cells:array<int> i:int d:int):>bool => {
+    if cells.length not=? 81 or i <? 0 or i >=? 81 return false
+    let r = i // 9
+    let c = i % 9
+    let br = (r // 3) * 3
+    let bc = (c // 3) * 3
+    loop k in [0..9) {
+        let in_row = r * 9 + k
+        let in_col = k * 9 + c
+        let in_box = (br + k // 3) * 9 + bc + k % 3
+        if in_row not=? i and cells[in_row] =? d return false
+        if in_col not=? i and cells[in_col] =? d return false
+        if in_box not=? i and cells[in_box] =? d return false
+    }
+    true
+}
+
+# no filled digit repeats in a row, column or box
+valid = (cells:array<int>):>bool => {
+    loop i in 0.. and d in cells {
+        if d not=? 0 and not fits(cells i d) return false
+    }
+    true
+}
+
+candidates = (cells:array<int> i:int):>array<int> => [loop d in [1..9] if fits(cells i d) d]
+
+solve = (@cells:array<int> @guesses:int):>bool => {
+    # the blank with the fewest candidates
+    let best = -1
+    let best_options:array<int> = []
+    loop i in [0..cells.length) {
+        if cells[i] not=? 0 continue
+        let options = candidates(cells i)
+        if options.length =? 0 return false
+        if best <? 0 or options.length <? best_options.length {
+            best = i
+            best_options = options
+        }
+    }
+    if best <? 0 return true    # nothing blank: solved
+    loop d in best_options {
+        guesses += 1
+        # (the recursive call keeps the length, but nothing summarizes recursion)
+        if best >=? cells.length return false
+        cells[best] = d
+        if solve(@cells @guesses) return true
+    }
+    if best <? cells.length cells[best] = 0
+    false
+}
+
+show = (cells:array<int>):>void => {
+    if cells.length not=? 81 return
+    loop r in [0..9) {
+        if r >? 0 and r % 3 =? 0 printl("------+-------+------")
+        let line = ""
+        loop c in [0..9) {
+            if c >? 0 and c % 3 =? 0 line = "{line}| "
+            let d = cells[r * 9 + c]
+            line = "{line}{if d =? 0 "." else "{d}"} "
+        }
+        printl(line.trim_end)
+    }
+}
+
+main = () => {
+    loop i in 0.. and text in PUZZLES {
+        printl("puzzle {i + 1}:")
+        let cells = parse(text)
+        if cells is? none {
+            printl("  not a puzzle ({text.length} characters)")
+            continue
+        }
+        if not valid(cells) {
+            printl("  breaks a rule before solving")
+            continue
+        }
+        let blanks = cells.count(0)
+        let guesses = 0
+        if solve(@cells @guesses) {
+            printl("  solved {blanks} blanks with {guesses} guesses")
+            show(cells)
+        } else printl("  no solution")
+    }
+}

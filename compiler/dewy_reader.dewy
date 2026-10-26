@@ -5974,7 +5974,9 @@ rd_dc_iterable=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$un
     if (reader_ctx.tokens[reader_ctx.at].symbol =? 'at') {
         return 0
     }
-    if ((reader_ctx.tokens[reader_ctx.at].symbol =? 'lbrack') or (reader_ctx.tokens[reader_ctx.at].symbol =? 'lparen')) {
+    # (`loop x in [loop ...]`: a comprehension, never a range, dw_range_value's test)
+    let after:DewyToken=reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 1)].symbol
+    if ((((reader_ctx.tokens[reader_ctx.at].symbol =? 'lbrack') or (reader_ctx.tokens[reader_ctx.at].symbol =? 'lparen')) and (after not=? 'kw_loop')) and (after not=? 'kw_parallel')) {
         let start:int64=reader_ctx.at
         let node_start:int64=reader_nodes.length
         let list_start:int64=reader_ctx.stores.lists[0].length

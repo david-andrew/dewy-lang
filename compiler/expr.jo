@@ -8342,10 +8342,20 @@ shape_literal_type = (e: int) -> int:
     else: return 0
     mk_refined(T_INT, ref_intern([RefAtom(.le, RefTerm(1, v), RefTerm()), RefAtom(.le, RefTerm(), RefTerm(1, v))]))
 
-# the record type an object pattern names: t itself, or the one member of union t with its fields
+# The members a shaped arm chooses among: a union's, or an optional's payload
+# and `none`; a plain type is its own.
+shape_choice = (t: int) -> bool: is_union(t) or tkind(t) == .opt
+shape_members = (t0: int) -> int[]:
+    t = prune(t0)
+    if is_union(t): return union_members(t)
+    if tkind(t) == .opt: return [prune(int(types[t].elem)), T_NONE]
+    [t]
+
+# the record type an object pattern names: t itself, or the one member of union
+# (or optional) t with its fields
 shape_record = (p: int, t0: int) -> int:
     t = prune(t0)
-    candidates = if is_union(t): union_members(t) else: [t]
+    candidates = shape_members(t)
     found: int[]
     loop c in candidates:
         if tkind(c) != .struct_ or is_map_type(c): continue
@@ -8361,6 +8371,17 @@ shape_record = (p: int, t0: int) -> int:
     if found.len() == 0: fatal(nodes[p].pos, "no {dt(t)} has the fields this pattern names")
     if found.len() > 1: fatal(nodes[p].pos, "several members of {dt(t)} have the fields this pattern names; name the type with `x:T` or `<T>`")
     found[0]
+
+# The array or tuple a sequence pattern takes apart: t, or its one such member.
+# A tuple (`[T U]`) has a type per position and as many positions as the pattern.
+shape_sequence = (p: int, t: int) -> int:
+    found: int[]
+    loop m in shape_members(t):
+        if types[prune(m)].kind == .array or tkind(m) == .tuple: found.push(prune(m))
+    if found.len() != 1: fatal(nodes[p].pos, "a sequence pattern needs an array, a tuple or a sequence of values (`match (x y) ...`), found {dt(t)}")
+    st = found[0]
+    if tkind(st) == .tuple and int(types[st].nargs) != nkids(p): fatal(nodes[p].pos, "this pattern has {nkids(p)} positions; {dt(st)} has {int(types[st].nargs)}")
+    st
 
 shape_field_type = (r: int, name: int) -> int:
     si = int(types[r].st)
@@ -8393,7 +8414,7 @@ shape_pattern = (p: int, subj: int, t0: int, out: mut ShapeArm):
         return
     if k == .pshape:
         r = shape_record(p, t)
-        if is_union(t): out.cond = shape_and(out.cond, shape_is(clone(subj), r, pos), pos)
+        if shape_choice(t): out.cond = shape_and(out.cond, shape_is(clone(subj), r, pos), pos)
         loop part in kids(p):
             field = bc_field(clone(subj), name_of(int(nodes[part].name)), nodes[part].pos)
             first = out.decls.len()
@@ -8402,13 +8423,17 @@ shape_pattern = (p: int, subj: int, t0: int, out: mut ShapeArm):
             loop d in out.decls[first..]: add_flag(d, NF_LOOPCOUNT)
         return
     if k == .pseq:
-        if types[t].kind != .array: fatal(pos, "a sequence pattern needs an array or a sequence of values (`match (x y) ...`), found {dt(t)}")
-        out.cond = shape_and(out.cond, bc_bin(.eq, bc_field(clone(subj), "length", pos), bc_int(nkids(p), pos), pos), pos)
+        st = shape_sequence(p, t)
+        if not type_eq(st, t): out.cond = shape_and(out.cond, shape_is(clone(subj), st, pos), pos)
+        tuple = tkind(st) == .tuple
+        if not tuple: out.cond = shape_and(out.cond, bc_bin(.eq, bc_field(clone(subj), "length", pos), bc_int(nkids(p), pos), pos), pos)
         loop i in 0.. and part in kids(p):
             item = mk(.index, nodes[part].pos)
             nodes[item].a = i32(clone(subj))
             nodes[item].b = i32(bc_int(i, nodes[part].pos))
-            shape_pattern(part, item, int(types[t].elem), out)
+            # (a tuple's position reads as `pair[0]` does: dewy_position_index)
+            if tuple: set_list(item, [int(nodes[item].b)])
+            shape_pattern(part, item, (if tuple: targ(st, i) else: int(types[st].elem)), out)
         return
     fatal(pos, "invalid pattern")
 
@@ -8423,11 +8448,27 @@ shape_cover = (p: int, t0: int, out: mut ShapeArm):
         pt = prune(resolve_type(int(nodes[p].a)))
         if type_eq(pt, t): out.member = -1
         else if is_union(t) and union_index(t, pt) >= 0: out.member = pt
+        else if tkind(t) == .opt and (pt == T_NONE or type_eq(pt, int(types[t].elem))): out.member = pt
         else if is_union(t) and types[pt].kind == .refined and union_index(t, int(types[pt].elem)) >= 0:
             known, intervals = int_intervals(pt)
             if known:
                 out.gmember = prune(int(types[pt].elem))
                 out.guard = intervals
+        return
+    # (`<none>` takes an optional's absent member)
+    if k == .plit and tkind(t) == .opt and nodes[int(nodes[p].a)].kind == .none_lit:
+        out.member = T_NONE
+        return
+    # (a tuple's names and its positions' own types take it whole)
+    if k == .pseq:
+        st = shape_sequence(p, t)
+        if tkind(st) != .tuple: return
+        loop i in 0.. and part in kids(p):
+            pk = nodes[part].kind
+            if pk == .pwild: continue
+            if pk == .ptype and type_eq(prune(resolve_type(int(nodes[part].a))), prune(targ(st, i))): continue
+            return
+        out.member = if type_eq(st, t): -1 else: st
         return
     if k != .pshape: return
     r = shape_record(p, t)
@@ -8501,7 +8542,7 @@ check_shaped_match = (m: int, expected: int) -> int:
         subject_types.push(prune(ntype(checked)))
     arms: ShapeArm[]
     total = false
-    whole = subjects.len() == 1 and is_union(subject_types[0])
+    whole = subjects.len() == 1 and shape_choice(subject_types[0])
     covered: int[]
     seq_covered: int[][]
     loop _ in subjects: seq_covered.push([])
@@ -8557,7 +8598,7 @@ check_shaped_match = (m: int, expected: int) -> int:
     # members covered field by field: `[sign:1 ...]` and `[sign:-1 ...]` cover `[sign:-1|1 ...]`
     missing = ""
     if not total and (whole or subjects.len() == 1 and tkind(subject_types[0]) == .struct_):
-        members = if whole: union_members(subject_types[0]) else: [subject_types[0]]
+        members = if whole: shape_members(subject_types[0]) else: [subject_types[0]]
         total = true
         loop member in members:
             done = false

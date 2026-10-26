@@ -1,0 +1,18 @@
+# A helper that can shrink the array it is lent still forgets its length.
+options = (cells:array<int> i:int):>array<int> => [loop d in [1..9] if cells.length >? i // 9 d]
+drop = (@cells:array<int> n:int):>void => { if n >? 3 cells.pop(); }
+
+scan = (@cells:array<int>):>int => {
+    let best = 0
+    loop i in [0..cells.length) {
+        best += options(cells i).length
+        drop(@cells best)
+        cells[i] = best
+    }
+    best
+}
+
+main = () => {
+    let xs = [1 0 2 0]
+    printl(scan(@xs))
+}

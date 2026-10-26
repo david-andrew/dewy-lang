@@ -1,0 +1,147 @@
+# Polynomial arithmetic with exact fraction coefficients: parse "3x^2 - x + 1/2",
+# add, multiply, divide with remainder, differentiate, evaluate by Horner's rule,
+# take greatest common divisors, and find the integer roots of a polynomial.
+
+# coefficients from the constant term up: [1 0 3] is 3x^2 + 1
+Poly:type = array<rational>
+
+# drop leading zero coefficients (the zero polynomial is [])
+trim = (p:Poly):>Poly => {
+    let out = p
+    loop out.length >? 0 and out.last =? 0 out.pop();
+    out
+}
+
+degree = (p:Poly):>int => trim(p).length - 1
+
+add = (a:Poly b:Poly):>Poly => trim([loop i in [0..max(a.length b.length)) (a.get(i) ?? 0) + (b.get(i) ?? 0)])
+
+scale = (p:Poly k:rational):>Poly => trim([loop c in p c * k])
+
+sub = (a:Poly b:Poly):>Poly => add(a scale(b -1))
+
+mul = (a:Poly b:Poly):>Poly => {
+    if a.length =? 0 or b.length =? 0 return []
+    let out:Poly = fill(rational(0) a.length + b.length - 1)
+    loop i in 0.. and x in a {
+        loop j in 0.. and y in b {
+            if i + j <? out.length out[i + j] += x * y
+        }
+    }
+    trim(out)
+}
+
+# quotient and remainder of a / b (b must not be zero)
+divmod = (a:Poly b:Poly):>[Poly Poly] | none => {
+    let d = trim(b)
+    if d.length =? 0 return none
+    let lead = d.last
+    if lead =? 0 return none
+    let rest = trim(a)
+    let q:Poly = fill(rational(0) max(rest.length - d.length + 1 0))
+    loop rest.length >=? d.length {
+        let shift = rest.length - d.length
+        if shift >=? q.length break
+        let k = rest.last / lead
+        q[shift] = k
+        loop j in 0.. and c in d {
+            if shift + j <? rest.length rest[shift + j] -= k * c
+        }
+        rest = trim(rest[..rest.length - 1))
+    }
+    [trim(q) rest]
+}
+
+derivative = (p:Poly):>Poly => trim([loop i in [1..p.length) p[i] * i])
+
+evaluate = (p:Poly x:rational):>rational => {
+    let total:rational = 0
+    loop c in p.reversed() total = total * x + c
+    total
+}
+
+# a monic greatest common divisor, by Euclid's algorithm
+gcd = (a:Poly b:Poly):>Poly => {
+    let x = trim(a)
+    let y = trim(b)
+    loop y.length >? 0 {
+        let parts = divmod(x y)
+        if parts is? none break
+        x = y
+        y = parts[1]
+    }
+    if x.length =? 0 return x
+    let lead = x.last
+    if lead =? 0 return x
+    scale(x 1 / lead)
+}
+
+show = (p0:Poly):>string => {
+    let p = trim(p0)
+    if p.length =? 0 return "0"
+    let out = ""
+    loop i in [p.length - 1, p.length - 2..0] {
+        let c = p[i]
+        if c =? 0 continue
+        let sign = if c <? 0 "-" else "+"
+        let size = c.abs()    # (abs(c) would go through float64)
+        let digits = if size =? 1 and i >? 0 "" else "{size}"
+        let power = if i =? 0 "" else if i =? 1 "x" else "x^{i}"
+        out = if out =? "" "{if c <? 0 "-" else ""}{digits}{power}" else "{out} {sign} {digits}{power}"
+    }
+    out
+}
+
+# "3x^2 - x + 1/2": terms separated by spaces and signs
+parse = (text:string):>Poly | none => {
+    let terms = text.replace(" - " " + -").split(" + ")
+    let p:Poly = []
+    loop t in terms {
+        let term = t.trim
+        let power = 0
+        let coefficient = term
+        if term.endswith("x") {
+            power = 1
+            coefficient = term.remove_suffix("x")
+        } else if "x^" in? term {
+            let parts = term.split("x^")
+            if parts.length not=? 2 return none
+            power = to_int(parts[1]) ?? -1
+            coefficient = parts[0]
+        }
+        if power <? 0 return none
+        let c = if coefficient =? "" 1 else if coefficient =? "-" -1 else rational(coefficient) ?? none
+        if c is? none return none
+        loop p.length <=? power p.push(0)
+        p[power] += c
+    }
+    trim(p)
+}
+
+main = () => {
+    let a = parse("x^3 - 6x^2 + 11x - 6") ?? []
+    let b = parse("x^2 - 3x + 2") ?? []
+    printl("a = {show(a)}")
+    printl("b = {show(b)}")
+    printl("a + b = {show(add(a b))}")
+    printl("a - b = {show(sub(a b))}")
+    printl("a * b = {show(mul(a b))}")
+    match divmod(a b) {
+        (q r) => printl("a / b = {show(q)} remainder {show(r)}")
+        <none> => printl("division by zero")
+    }
+    printl("a' = {show(derivative(a))}")
+    printl("gcd(a, b) = {show(gcd(a b))}")
+    printl("a(1/2) = {evaluate(a 1/2)}")
+    let roots = [loop x in [-10..10] if evaluate(a x) =? 0 x]
+    printl("integer roots of a: {roots}")
+    let half = parse("1/2x^2 + 3/4") ?? []
+    printl("half = {show(half)}, squared = {show(mul(half half))}")
+    printl("degree of a * b: {degree(mul(a b))}")
+    loop text in ["x^^2" "2y + 1" "-x^2 + x"] {
+        match parse(text) {
+            p:Poly => printl("{text} reads as {show(p)}")
+            <none> => printl("{text} is unreadable")
+        }
+    }
+}

@@ -1,0 +1,31 @@
+# A sequence pattern takes a tuple apart by position, also as an optional's or
+# a union's member; an object pattern reads an optional record's fields.
+Point:type = [x:int y:int]
+
+split = (n:int):>[int string] | none => if n <? 0 none else [n // 2 "half of {n}"]
+nearest = (n:int):>Point? => if n =? 0 none else Point[n n + 1]
+
+describe = (n:int):>string => match split(n) {
+    (half text) => "{text} is {half}"
+    <none> => "nothing to split"
+}
+
+main = () => {
+    printl(describe(9))
+    printl(describe(-1))
+    match split(4) {
+        (h:int words) => printl("{h} {words}")
+        <none> => printl("none")
+    }
+    let pair:[int string] = [7 "seven"]
+    match pair {
+        (n t) => printl("{t} = {n}")
+    }
+    loop k in [0 3] {
+        let text = match nearest(k) {
+            [x y] => "at {x},{y}"
+            <none> => "nowhere"
+        }
+        printl(text)
+    }
+}

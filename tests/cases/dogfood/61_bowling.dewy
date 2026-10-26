@@ -1,0 +1,103 @@
+# Ten-pin bowling: read games written as rolls ("X 7/ 9- ..."), check them
+# against the rules (pins per frame, the tenth frame's bonus balls), and print
+# a score card with each frame's running total.
+
+const GAMES = [
+    "X X X X X X X X X X X X"
+    "9- 9- 9- 9- 9- 9- 9- 9- 9- 9-"
+    "5/ 5/ 5/ 5/ 5/ 5/ 5/ 5/ 5/ 5/ 5"
+    "X 7/ 9- X -8 8/ -6 X X X 81"
+    "X 7/ 9- X -8 8/ -6 X X"
+    "8 5"
+    "X X X X X X X X X X X X X"
+]
+
+Frame:type = [rolls:array<int> score:int]
+
+# "X" is ten, "/" whatever the frame's first ball left, "-" a miss
+pins = (mark:string first:int):>int | none => match mark {
+    <"X"> => 10
+    <"/"> => 10 - first
+    <"-"> => 0
+    _ => {
+        let n = to_int(mark) ?? -1
+        if 0 <=? n <=? 9 n else none
+    }
+}
+
+rolls_of = (game:string):>array<int> | string => {
+    let out:array<int> = []
+    loop word in game.split() {
+        let first = 0
+        loop i in 0.. and mark in word {
+            let p = pins(mark (if i =? 1 first else 0))
+            if p is? none return "unreadable mark '{mark}'"
+            if i =? 0 first = p
+            out.push(p)
+        }
+    }
+    out
+}
+
+# split rolls into ten frames, scoring strikes and spares with their bonus balls
+frames = (rolls:array<int>):>array<Frame> | string => {
+    let out:array<Frame> = []
+    let at = 0
+    loop n in [1..10] {
+        if at >=? rolls.length return "the game stops in frame {n}"
+        let first = rolls[at]
+        if first =? 10 {
+            if at + 2 >=? rolls.length return "frame {n}: a strike needs two bonus balls"
+            out.push(Frame[[10] 10 + rolls[at + 1] + rolls[at + 2]])
+            at += 1
+            continue
+        }
+        if at + 1 >=? rolls.length return "frame {n} has one ball"
+        let second = rolls[at + 1]
+        if first + second >? 10 return "frame {n} knocks down {first + second} pins"
+        if first + second =? 10 {
+            if at + 2 >=? rolls.length return "frame {n}: a spare needs a bonus ball"
+            out.push(Frame[[first second] 10 + rolls[at + 2]])
+        } else out.push(Frame[[first second] first + second])
+        at += 2
+    }
+    # the tenth frame's bonus balls are its own; nothing may follow them
+    if out.length =? 0 return "no frames"
+    let last = out.last
+    let bonus = if last.rolls =? [10] 2 else if sum(last.rolls) =? 10 1 else 0
+    if rolls.length - at not=? bonus return "{rolls.length - at} balls after the tenth frame, expected {bonus}"
+    out
+}
+
+mark = (frame:Frame):>string => {
+    if frame.rolls =? [10] return "X"
+    if frame.rolls.length not=? 2 return "?"
+    let [a b] = frame.rolls
+    let first = if a =? 0 "-" else "{a}"
+    let second = if a + b =? 10 "/" else if b =? 0 "-" else "{b}"
+    "{first}{second}"
+}
+
+main = () => {
+    loop game in GAMES {
+        printl(game)
+        match rolls_of(game) {
+            problem:string => printl("  {problem}")
+            rolls:array<int> => match frames(rolls) {
+                problem:string => printl("  invalid: {problem}")
+                card:array<Frame> => {
+                    let total = 0
+                    let marks:array<string> = []
+                    let totals:array<string> = []
+                    loop f in card {
+                        total += f.score
+                        marks.push(format(mark(f) "^4"))
+                        totals.push(format(total "^4"))
+                    }
+                    printl("  |{marks.join("|")}|")
+                    printl("  |{totals.join("|")}|  {total}")
+                }
+            }
+        }
+    }
+}

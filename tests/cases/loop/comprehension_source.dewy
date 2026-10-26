@@ -1,0 +1,9 @@
+# A comprehension is a loop's source like any array.
+const WORDS = ["ant" "bee" "cat"]
+main = () => {
+    loop w in [loop x in WORDS if x not=? "bee" x] printl(w)
+    loop pair in [loop x in WORDS x.upper()] printl(pair)
+    let total = 0
+    loop n in [loop x in WORDS x.length] total += n
+    printl(total)
+}

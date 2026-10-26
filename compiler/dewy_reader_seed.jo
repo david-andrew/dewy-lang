@@ -3781,7 +3781,9 @@ rt_dc_target_dropped_walk = (n: int):
 rt_dc_iterable = () -> int:
     opening = dc_parser.at
     if dc_parser.tokens[dc_parser.at].symbol == .at: return 0
-    if dc_parser.tokens[dc_parser.at].symbol == .lbrack or dc_parser.tokens[dc_parser.at].symbol == .lparen:
+    # (`loop x in [loop ...]`: a comprehension, never a range, dw_range_value's test)
+    after = dc_parser.tokens[dc_parser.at + 1].symbol
+    if (dc_parser.tokens[dc_parser.at].symbol == .lbrack or dc_parser.tokens[dc_parser.at].symbol == .lparen) and after != .kw_loop and after != .kw_parallel:
         start = dc_parser.at
         node_start = nodes.len()
         list_start = lists.len()

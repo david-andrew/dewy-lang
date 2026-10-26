@@ -4180,12 +4180,14 @@ and guards cover the member once their values do. String literal arms work the s
 `<'n'>` and `other:'s'|'e'` cover it, and over a mixed literal union the arms
 cover a literal member once each of its values has an arm.
 
-An object pattern matches the record (or the union member) with the fields it
+An object pattern matches the record (or the union or optional member) with the fields it
 names and binds them: `[sign:1 limbs] => limbs.length` and
 `[sign:-1 limbs] => -limbs.length` together cover `[sign:-1|1 limbs:array<int64>]`.
 A sequence scrutinee is read once per value, `match (x y) (a:int64 <string>) => a`,
 and a sequence pattern on an array tests its length and each element:
-`(a <7> c) => ...`; object and sequence patterns nest inside it. Over a sequence
+`(a <7> c) => ...`; on a tuple it takes each position with its own type, so
+`(q r) => ...` and `<none> => ...` cover a `[Poly Poly] | none`. Object and
+sequence patterns nest inside it. Over a sequence
 scrutinee, arms that cover each member of one value while matching the others
 whole cover the match. An object or sequence arm whose member or field values
 earlier arms already match is unreachable. On an `int` (a variable or any

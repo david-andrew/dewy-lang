@@ -1516,7 +1516,9 @@ effect_scan_node = (f: int, n: int):
     # (an `int` literal is a constant, whatever its sign)
     else if k == .int_lit or k == .bool_lit: supported = effect_scalar(ntype(n)) or effect_count_literal(n) or effect_small(n) >= 0 or k == .int_lit and prune(ntype(n)) == T_MATH_INT and not has_flag(n, NF_U64)
     else if k == .float_lit: supported = effect_float(ntype(n))
-    else if k == .array: supported = effect_fixed_literal(n)
+    # (a growable array of shares is a fresh allocation, counted above; its
+    # elements, spreads and collected loops answer for their own operations)
+    else if k == .array: supported = effect_fixed_literal(n) or tkind(representation_type(ntype(n))) == .array and effect_share(telem(representation_type(ntype(n))))
     # (a conditional loop is visible control flow, not a hidden cost: its
     # condition and body answer for their own operations)
     else if k == .block or k == .exprstmt or k == .return_ or k == .if_ or k == .while_ or k == .and_ or k == .or_ or k == .not_ or k == .defer_ or k == .break_ or k == .continue_: supported = true
@@ -1568,6 +1570,13 @@ effect_scan_node = (f: int, n: int):
         if not supported and nodes[n].aux == 0 and prune(ntype(n)) == T_MATH_INT and effect_integer(int(nodes[n].a)) and effect_integer(int(nodes[n].b)) and (nodes[n].op == i32(int(Tok.plus)) or nodes[n].op == i32(int(Tok.minus)) or nodes[n].op == i32(int(Tok.star))):
             supported = true
             effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
+        # (`int` division and remainder: a big result allocates, and a zero
+        # divisor is a possible failure, as for words)
+        if not supported and nodes[n].aux == 0 and prune(ntype(n)) == T_MATH_INT and effect_integer(int(nodes[n].a)) and effect_integer(int(nodes[n].b)) and (nodes[n].op == i32(int(Tok.slash)) or nodes[n].op == i32(int(Tok.percent))):
+            supported = true
+            effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
+            divisor = int(nodes[n].b)
+            if nodes[divisor].kind != .int_lit or nodes[divisor].ival == 0: effect_failure(f, n)
         # (an `int` shifted may grow into a big integer, which allocates; a
         # negative signed count fails unless the owner's facts show it is not)
         if not supported and shift and nodes[n].aux == 0 and prune(ntype(n)) == T_MATH_INT and effect_integer(int(nodes[n].a)) and effect_integer(int(nodes[n].b)):
@@ -1736,11 +1745,19 @@ effect_signature_opaque = (f: int) -> bool:
     if fns[f].state != 2 or fns[f].body == 0 or fns[f].kind == FK_INIT or (d != 0 and has_flag(d, NF_EXTERN)):
         return not (d != 0 and has_flag(d, NF_EXTERN) and effect_declared_row(f) != 0)
     if fns[f].caps.len() != 0 or fns[f].kind == FK_PARTIAL or fns[f].cabi: return true
-    if not effect_plain(int(fns[f].ret)) and not ownership_scalar(int(fns[f].ret)) and int(fns[f].ret) != T_VOID: return true
+    # (`int`s and arrays of words or `int`s are shares effect_visit accepts;
+    # text and records of them stay opaque rather than walk the library's
+    # formatting and text trees)
+    if not effect_signature_value(int(fns[f].ret)) and int(fns[f].ret) != T_VOID: return true
     loop l in fns[f].params:
         t = representation_type(int(locals[l].type))
-        if int(locals[l].flags) & LF_MUTPARAM == 0 and not effect_plain(t) and not is_fn_type(t) and not (tkind(t) == .array and effect_scalar(telem(t))): return true
+        if int(locals[l].flags) & LF_MUTPARAM == 0 and not effect_signature_value(t) and not is_fn_type(t): return true
     false
+
+effect_signature_value = (t0: int) -> bool:
+    t = representation_type(t0)
+    if effect_plain(t) or ownership_scalar(t) or t == T_MATH_INT: return true
+    tkind(t) == .array and (effect_scalar(telem(t)) or representation_type(telem(t)) == T_MATH_INT)
 
 # (its opaque conditions imply effect_signature_opaque's)
 effect_visit = (f: int):

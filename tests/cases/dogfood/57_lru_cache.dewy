@@ -1,0 +1,124 @@
+# LRU cache simulation: a page cache with a fixed number of slots, kept as a
+# doubly linked list threaded through arrays (prev/next slot numbers, -1 for
+# none) plus a dictionary from key to slot. Replays an access trace for several
+# capacities and reports hits, misses, evictions and the final recency order.
+
+const TRACE = "a b c a d e a b f a c g a b h a"
+
+Cache:type = [
+    capacity:int
+    keys:array<string>
+    prev:array<int>
+    next:array<int>
+    slot_of:dict<string int>
+    head:int     # most recently used, -1 when empty
+    tail:int     # least recently used, -1 when empty
+    hits:int
+    misses:int
+    evicted:array<string>
+]
+
+new_cache = (capacity:int):>Cache => Cache[
+    capacity=capacity
+    keys=[]
+    prev=[]
+    next=[]
+    slot_of=[]
+    head=-1
+    tail=-1
+    hits=0
+    misses=0
+    evicted=[]
+]
+
+# unlink slot s from the recency list
+unlink = (@c:Cache s:int):>void => {
+    if s <? 0 or s >=? c.prev.length or s >=? c.next.length return
+    let p = c.prev[s]
+    let n = c.next[s]
+    if 0 <=? p <? c.next.length c.next[p] = n else c.head = n
+    if 0 <=? n <? c.prev.length c.prev[n] = p else c.tail = p
+    c.prev[s] = -1
+    c.next[s] = -1
+}
+
+# put slot s at the front of the recency list
+push_front = (@c:Cache s:int):>void => {
+    if s <? 0 or s >=? c.prev.length or s >=? c.next.length return
+    c.prev[s] = -1
+    c.next[s] = c.head
+    if 0 <=? c.head <? c.prev.length c.prev[c.head] = s
+    c.head = s
+    if c.tail <? 0 c.tail = s
+}
+
+access = (@c:Cache key:string):>void => {
+    if key in? c.slot_of {
+        c.hits += 1
+        let s = c.slot_of[key]
+        unlink(@c s)
+        push_front(@c s)
+        return
+    }
+    c.misses += 1
+    if c.keys.length <? c.capacity {
+        # a free slot: grow the arrays
+        let s = c.keys.length
+        c.keys.push(key)
+        c.prev.push(-1)
+        c.next.push(-1)
+        c.slot_of[key] = s
+        push_front(@c s)
+        return
+    }
+    # full: reuse the least recently used slot
+    let victim = c.tail
+    if victim <? 0 or victim >=? c.keys.length return
+    let old = c.keys[victim]
+    c.evicted.push(old)
+    c.slot_of.remove(old);
+    unlink(@c victim)
+    # (unlink writes only prev, next, head and tail, but a call lent `@c`
+    # forgets every field's facts)
+    if victim >=? c.keys.length return
+    c.keys[victim] = key
+    c.slot_of[key] = victim
+    push_front(@c victim)
+}
+
+# keys from most to least recently used
+order = (c:Cache):>array<string> => {
+    let out:array<string> = []
+    let s = c.head
+    loop 0 <=? s <? c.keys.length and s <? c.next.length {
+        out.push(c.keys[s])
+        s = c.next[s]
+    }
+    out
+}
+
+main = () => {
+    let requests = TRACE.split()
+    if requests.length =? 0 return
+    printl("{requests.length} requests, {set(requests).length} distinct keys")
+    loop capacity in [1 2 3 4 5] {
+        let c = new_cache(capacity)
+        loop key in requests access(@c key)
+        let rate = c.hits * 100 // requests.length
+        printl("capacity {capacity}: {c.hits} hits, {c.misses} misses ({rate}% hit rate)")
+        printl("  evicted: {c.evicted.join(" ")}")
+        printl("  recency: {order(c).join(" > ")}")
+    }
+    # the best capacity that still misses something
+    let best = 0
+    let best_hits = -1
+    loop capacity in [1..6] {
+        let c = new_cache(capacity)
+        loop key in requests access(@c key)
+        if c.hits >? best_hits {
+            best = capacity
+            best_hits = c.hits
+        }
+    }
+    printl("most hits with capacity {best}: {best_hits}")
+}

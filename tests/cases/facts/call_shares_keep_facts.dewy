@@ -1,0 +1,21 @@
+# A helper that only reads `int`s and arrays of them, builds a fresh array, or
+# divides `int`s, writes none of its caller's storage: a guard on a mutable
+# parameter's length survives the call.
+fits = (cells:array<int> i:int d:int):>bool => cells.length >? i // 9 and d % 3 not=? 1
+options = (cells:array<int> i:int):>array<int> => [loop d in [1..9] if fits(cells i d) d]
+
+scan = (@cells:array<int>):>int => {
+    let best = 0
+    loop i in [0..cells.length) {
+        if cells[i] not=? 0 continue
+        best += options(cells i).length
+        cells[i] = best
+    }
+    best
+}
+
+main = () => {
+    let xs = [1 0 2 0]
+    printl(scan(@xs))
+    printl(xs)
+}
