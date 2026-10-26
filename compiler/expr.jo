@@ -5437,6 +5437,50 @@ rational_float_mismatch = (from0: int, to0: int) -> bool:
             t = prune(int(types[t].elem))
     (bundled_rational_type(f) and tkind(t) == .float_) or (tkind(f) == .float_ and bundled_rational_type(t))
 
+# (an array of `int` where one of a fixed-width integer is wanted, through nested and
+# n-dimensional arrays: integer literals are `int` unless a type is written where they are made)
+int_literal_elem_mismatch = (from0: int, to0: int) -> bool:
+    f = prune(from0)
+    t = prune(to0)
+    if not (tkind(f) == .array and tkind(t) == .array or is_nd(f) and is_nd(t)): return false
+    loop tkind(f) == .array and tkind(t) == .array or is_nd(f) and is_nd(t):
+        if is_nd(f):
+            f = prune(nd_elem(f))
+            t = prune(nd_elem(t))
+        else:
+            f = prune(int(types[f].elem))
+            t = prune(int(types[t].elem))
+    f == T_MATH_INT and tkind(t) == .int_ and t != T_MATH_INT
+
+# the keyword of an unannotated `let name = [...]` or `const name = [...]` whose name is at
+# pos, or ""
+unannotated_literal_binding = (pos: int) -> str:
+    src = files[pos_file(pos)].src
+    o = pos_off(pos)
+    e = o
+    loop e < len(src) and is_ident_char(src[e]): e += 1
+    loop e < len(src) and (src[e] == ' ' or src[e] == '\t'): e += 1
+    if e >= len(src) or src[e] != '=': return ""
+    e += 1
+    loop e < len(src) and (src[e] == ' ' or src[e] == '\t'): e += 1
+    if e >= len(src) or src[e] != '[': return ""
+    b = o
+    loop b > 0 and (src[b - 1] == ' ' or src[b - 1] == '\t'): b -= 1
+    if b == o: return ""
+    loop kw in ["let", "const"]:
+        k = b - len(kw)
+        if k >= 0 and src[k..b) == kw and (k == 0 or not is_ident_char(src[k - 1])): return kw
+    ""
+
+# (`let b = [3 4 5]` then `pick() ?? b` wanting array<int64>: b's type is written where it is made)
+int_literal_elem_hint = (a: int, t: int) -> str:
+    if nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)) and nodes[a].aux != i32(int(SK.global)): return ""
+    dp = if nodes[a].aux == i32(int(SK.local)): locals[int(nodes[a].sym)].pos else: nodes[int(globals[int(nodes[a].sym)].decl)].pos
+    kw = unannotated_literal_binding(dp)
+    if len(kw) == 0: return ""
+    nm = name_of(int(nodes[a].name))
+    " (integer literals are `int` unless a type is written where they are made, and an array keeps its element type: write it where '{nm}' is made, as `{kw} {nm}:{dt_named(t)} = [...]`)"
+
 variant_hint = (a: int, t0: int) -> str:
     t = prune(t0)
     if nodes[a].type != 0:
@@ -5444,6 +5488,9 @@ variant_hint = (a: int, t0: int) -> str:
         ft = prune(int(nodes[a].type))
         if types[ft].kind == .secret and types[t].kind != .secret: return secret_hint(a)
         if dewy_at(nodes[a].pos) and rational_float_mismatch(ft, t): return " (a decimal literal such as `0.5` is an exact rational: write the floating type where the value is made, as `let x:float64 = 0.5` or `let xs:array<float64> = [1.5 2.5]`)"
+        if dewy_at(nodes[a].pos) and int_literal_elem_mismatch(ft, t):
+            h = int_literal_elem_hint(a, t)
+            if len(h) > 0: return h
         c = "c"
         if nodes[a].kind == .ident: c = name_of(int(nodes[a].name))
         if type_eq(ft, T_VEC4) and type_eq(t, T_VEC3): return " (`{c}.rgb` is a color without its alpha)"

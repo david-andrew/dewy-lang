@@ -1,0 +1,15 @@
+pick = (flag:bool):>array<int64>? => {
+    if flag return [1 2]
+    return none
+}
+let m:int64 = 5
+loop x in (pick(false) ?? [3 4 5]) {
+    printl'{x}'
+}
+let c = pick(false) ?? [6 7]
+printl'{c}'
+printl'{(pick(false) ?? [8 9 10]).length}'
+printl'{pick(false) ?? [m 11]}'
+printl'{pick(true) ?? [12]}'
+let d:array<int64> = [13 14]
+printl'{pick(false) ?? d}'

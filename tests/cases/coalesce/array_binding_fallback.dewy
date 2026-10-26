@@ -1,0 +1,8 @@
+pick = (flag:bool):>array<int64>? => {
+    if flag return [1 2]
+    return none
+}
+let b = [3 4 5]
+loop x in (pick(false) ?? b) {
+    printl'{x}'
+}
