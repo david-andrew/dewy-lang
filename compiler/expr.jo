@@ -9670,8 +9670,9 @@ check_expr = (n: int, expected: int) -> int:
     k = nodes[n].kind
     if k == .ident:
         it = if tk_reads_on: temperature_read(n, expected) else: check_ident_expr(n, expected)
-        # (a binding holding several values, read where they are not taken)
-        if values_any and is_values(it) and n != assign_root and name_of(int(nodes[n].name))[0] != '$': sink_values_use(n, it)
+        # (a binding holding several values, read where they are not taken; a bare call, `pair`
+        # as `pair()`, is a call now, and its check took them)
+        if values_any and is_values(it) and nodes[n].kind == .ident and n != assign_root and name_of(int(nodes[n].name))[0] != '$': sink_values_use(n, it)
         return it
     if k == .int_lit: return check_int_expr(n, expected)
     if k == .binary: return ce_finish(n, check_binary(n, expected), expected)

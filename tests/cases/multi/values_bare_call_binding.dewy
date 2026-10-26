@@ -1,0 +1,31 @@
+# quick
+# A binding of a bare call that gives several values holds them all: `x = pair` is `x = pair()`.
+pair=()=>{ 1 2 }
+x=pair
+fw=():>(int64 int64)=>(3 4)
+y=fw
+trio=()=>{
+    printl("trio")
+    5
+    6
+    7
+}
+z=trio
+add=(a:int b:int)=>a+b
+deflt=(a:int=8)=>{ a a+1 }
+d=deflt
+main=()=>{
+    printl([x])
+    printl([y])
+    printl([z])
+    printl([d])
+    k=10
+    near=()=>{ k k+1 }
+    f=@near
+    w=near
+    v=f
+    printl([w])
+    printl(add(v))
+    (a b)=pair
+    printl(a+b)
+}
