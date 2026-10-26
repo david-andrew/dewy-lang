@@ -1,0 +1,97 @@
+# Layered configuration: defaults, a site file and command-line style overrides
+# ("server.port=9000") deep-merged as nested tables, then queried by path.
+
+Value:type = int | float64 | string | bool | Table
+Table:type = [entries:dict<string Value>]
+
+NotFound:type = type of error & [path:string]
+BadOverride:type = type of error & [text:string]
+
+# b's entries win; tables present in both are merged key by key
+merge = (a:Table b:Table):>Table => {
+    let out = a
+    loop [key value] in b.entries {
+        let mine = out.entries.get(key)
+        if mine is? Table and value is? Table {
+            out.entries[key] = merge(mine value)
+        } else {
+            out.entries[key] = value
+        }
+    }
+    out
+}
+
+lookup = (t:Table path:string):>Value | NotFound => {
+    let current:Value = t
+    loop part in path.split(".") {
+        if current isnt? Table return NotFound[path]
+        let next = current.entries.get(part)
+        if next is? none return NotFound[path]
+        current = next
+    }
+    current
+}
+
+parse_value = (text:string):>Value => {
+    if text =? "true" return true
+    if text =? "false" return false
+    let n = to_int(text)
+    if n isnt? error return n
+    let f = to_float(text)
+    if f isnt? none return f
+    text
+}
+
+# "a.b.c=value": a table holding just that entry
+override = (line:string):>Table | BadOverride => {
+    let eq = line.find("=")
+    if eq is? Missing return BadOverride[line]
+    let keys = line[..eq).split(".")
+    let result:Value = parse_value(line[$clamp eq+1..])
+    loop key in keys.reversed() {
+        if key =? "" return BadOverride[line]
+        result = Table[[key->result]]
+    }
+    if result isnt? Table return BadOverride[line]
+    result
+}
+
+show = (v:Value indent:string=""):>string => match v {
+    t:Table => {
+        let lines:array<string> = []
+        loop [k x] in t.entries {
+            if x is? Table lines.push("{indent}{k}:\n{show(x indent="{indent}  ")}")
+            else lines.push("{indent}{k}: {show(x)}")
+        }
+        lines.join("\n")
+    }
+    s:string => "\"{s}\""
+    _ => "{v}"
+}
+
+main = ():>void | BadOverride => {
+    const defaults = Table[[
+        "server"->Table[["host"->"localhost" "port"->8080 "tls"->false]]
+        "log"->Table[["level"->"info" "file"->"app.log"]]
+        "workers"->4
+    ]]
+    const site = Table[[
+        "server"->Table[["host"->"example.org" "tls"->true]]
+        "log"->Table[["level"->"warning"]]
+        "cache"->Table[["size_mb"->256 "ratio"->0.75]]
+    ]]
+    let config = merge(defaults site)
+    loop line in ["server.port=9000" "log.rotate.days=7" "workers=8"] {
+        config = merge(config override(line) or_throw)
+    }
+    printl(show(config))
+    printl("")
+    loop path in ["server.port" "log.rotate.days" "cache.ratio" "server.missing" "workers.count"] {
+        match lookup(config path) {
+            <NotFound> => printl("{path}: not set")
+            v:Value => printl("{path} = {show(v)}")
+        }
+    }
+    let bad = override("no-equals-sign")
+    if bad is? BadOverride printl("rejected override: {bad.text}")
+}

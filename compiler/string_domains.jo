@@ -16,6 +16,8 @@ string_domain_matches: (int, int)[]
 string_domain_sequences: (int, int)[]
 string_domain_sequence_fns: int[]
 string_domain_conversions: (int, int, int)[]
+# (a conversion's failing arm, its panic call: a settled domain inside the set never reaches it)
+string_domain_conversion_stops: {int: int} = {}
 string_domain_captures: {int: int} = {}
 
 string_domain_declare = (binding: int, value: int):
@@ -98,9 +100,12 @@ string_domain_values = (binding: int) -> int[]:
         values += source
     values
 
-string_domain_conversion = (n: int, set: int):
+# (the request's index, or -1 for a binding without a finite domain)
+string_domain_conversion = (n: int, set: int) -> int:
     binding = string_domain_binding(n)
-    if string_domains.has(binding): string_domain_conversions.push((nodes[n].pos, binding, set))
+    if not string_domains.has(binding): return -1
+    string_domain_conversions.push((nodes[n].pos, binding, set))
+    string_domain_conversions.len() - 1
 
 # The sequence's element storage is string, just like the inferred binding.
 # Populate its literal array, in text order, once every checked write is known. Type-based
@@ -137,12 +142,16 @@ string_domain_members = (n: int) -> bool:
     true
 
 string_domains_materialize = ():
-    loop request in string_domain_conversions:
+    loop i in 0.. and request in string_domain_conversions:
         pos = request.0
         binding = request.1
         set = request.2
-        loop value in string_domain_values(binding):
+        values = string_domain_values(binding)
+        loop value in values:
             if not str_sets[set].contains(name_of(value)): fatal(pos, "inferred string domain contains '{name_of(value)}', which is not one of {str_set_text(set)}")
+        # (a settled domain inside the set never reaches the failing arm: no panic is left)
+        stop = string_domain_conversion_stops.get(i) ?? 0
+        if stop != 0 and values.len() > 0: nodes[stop] = nodes[str_set_const(set, 0, pos)]
     loop request in string_domain_sequences:
         n = request.0
         binding = request.1

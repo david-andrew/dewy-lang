@@ -1361,7 +1361,10 @@ resolve_alias = (d: int, targs: int[], use_pos: int) -> int:
     if nodes[d].aux == -7:
         nodes[d].type = i32(str_set_type(["relaxed", "acquire", "release", "acq_rel", "seq_cst"]))
         return int(nodes[d].type)
-    if nodes[d].aux == 1: fatal(nodes[d].pos, "type '{nm}' is defined in terms of itself")
+    if nodes[d].aux == 1:
+        # (`Table:type = dict<string Value>` with Value naming Table: recursion goes through a record)
+        if dewy_at(nodes[d].pos): fatal(nodes[d].pos, "type '{nm}' is defined in terms of itself: a type contains itself only through a record's field, as `Node:type = [value:int next:Node?]` does; make '{nm}' a record holding the rest (`{nm}:type = [entries:...]`)")
+        fatal(nodes[d].pos, "type '{nm}' is defined in terms of itself")
     nodes[d].aux = 1
     saved = cx
     ctxs.push(FnCtx(i32(new_inst(FK_INIT, int(nodes[d].mod), "typedef")), -1, i32(T_VOID), false, 0, nodes[d].mod, i32(sc_names.len())))
@@ -4695,6 +4698,8 @@ var_type_error = (lhs: int, lt: int, rt: int, at: int):
             gd = int(globals[int(nodes[lhs].sym)].decl)
             if nodes[gd].b != 0 and nodes[int(nodes[gd].b)].kind == .int_lit: start = "{nodes[int(nodes[gd].b)].ival}.0"
         how = "write its first value with a decimal point (`{nm} = {start}`), so it holds fractions too, or make this a whole number with int(...)"
+        # (`let total:int64 = 0`: the written type made it whole, not its first value)
+        if ts_dewy and prune(lt) != T_MATH_INT: how = "declare it a float where it is made (`{nm}:float64`), or make this a whole number with `{dt(lt)}(...)`"
         fatal(at, "'{nm}' holds whole numbers{made}, and this is a number with a fraction: {how}")
     # (score = "0", then score += 1: a number in quotes is text)
     if tkind(lt) == .str_ and is_numeric(rt):

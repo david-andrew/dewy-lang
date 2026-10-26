@@ -1,0 +1,7 @@
+# A plain dict read with a literal-union key: the help names the key as written and
+# offers a totaldict, which has every key.
+Severity:type = 'critical' | 'urgent' | 'routine'
+const RANK = ['critical'->0 'urgent'->1 'routine'->2]
+Patient:type = [severity:Severity]
+rank = (p:Patient):>int => RANK[p.severity]
+main = () => printl(rank(Patient['urgent']))

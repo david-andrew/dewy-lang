@@ -1,0 +1,7 @@
+# A union that contains itself through a dict alias: recursion goes through a record.
+Value:type = int | string | Table
+Table:type = dict<string Value>
+main = () => {
+    let t:Table = ["a"->1]
+    printl(t)
+}

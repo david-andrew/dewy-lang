@@ -1,0 +1,92 @@
+# Grade book statistics with plain arrays of arrays: per-assignment summary,
+# per-student averages and letter grades, a correlation, and a z-score table.
+
+const STUDENTS = ["Avery" "Blake" "Casey" "Devon" "Emery" "Finley"]
+const ASSIGNMENTS = ["hw1" "hw2" "quiz" "midterm" "final"]
+const SCORES = [
+    [88 92 79 85 90]
+    [72 65 80 70 68]
+    [95 98 91 94 97]
+    [60 75 58 62 71]
+    [83 80 88 79 85]
+    [91 85 76 88 82]
+]
+
+mean = (xs:array<float64>):>float64 => sum(xs) / xs.length
+
+median = (xs:array<float64>):>float64 => {
+    let s = sorted(xs)
+    let n = s.length
+    if n =? 0 return 0.0
+    if n % 2 =? 1 or n <? 2 return s[n // 2]
+    (s[n // 2 - 1] + s[n // 2]) / 2
+}
+
+stdev = (xs:array<float64>):>float64 => {
+    let m = mean(xs)
+    let total = 0.0
+    loop x in xs total += (x - m) ^ 2
+    sqrt(total / (xs.length - 1))
+}
+
+column = (rows:array<array<int>> j:int64):>array<float64> => [loop r in rows if 0 <=? j <? r.length float64(r[j])]
+
+# (like zip(*rows): as many columns as the shortest row)
+transpose = (rows:array<array<int>>):>array<array<int>> => {
+    if rows.length =? 0 return []
+    let width = min([loop r in rows r.length])
+    [loop j in [0..width) [loop r in rows if j <? r.length r[j]]]
+}
+
+letter = (avg:float64):>string => {
+    if avg >=? 90 return "A"
+    if avg >=? 80 return "B"
+    if avg >=? 70 return "C"
+    if avg >=? 60 return "D"
+    "F"
+}
+
+correlation = (xs:array<float64> ys:array<float64>):>float64 => {
+    let mx = mean(xs)
+    let my = mean(ys)
+    let num = 0.0
+    let dx = 0.0
+    let dy = 0.0
+    loop x in xs and y in ys {
+        num += (x - mx) * (y - my)
+        dx += (x - mx) ^ 2
+        dy += (y - my) ^ 2
+    }
+    num / sqrt(dx * dy)
+}
+
+main = () => {
+    printl("{"assignment":<10}{"mean":>8}{"median":>8}{"stdev":>8}{"min":>6}{"max":>6}")
+    loop j in 0.. and name in ASSIGNMENTS {
+        let col = column(SCORES j)
+        if col.length =? 0 continue
+        printl("{name:<10}{mean(col):>8.1f}{median(col):>8.1f}{stdev(col):>8.2f}{min(col):>6.0f}{max(col):>6.0f}")
+    }
+    printl("")
+    let averages = [loop row in SCORES mean([loop s in row float64(s)])]
+    loop name in STUDENTS and avg in averages {
+        printl("{name:<8} {avg:6.2f}  {letter(avg)}")
+    }
+    let best = 0
+    loop i in [0..averages.length) if averages[i] >? averages[best] best = i
+    printl("top student: {STUDENTS.get(best) ?? "?"}")
+    printl("")
+    let mid = column(SCORES 3)
+    let fin = column(SCORES 4)
+    printl("midterm/final correlation: {correlation(mid fin):.3f}")
+    printl("")
+    let t = transpose(SCORES)
+    printl("z-scores:")
+    loop row in t and name in ASSIGNMENTS {
+        let col = [loop s in row float64(s)]
+        let m = mean(col)
+        let sd = stdev(col)
+        let zs = [loop x in col format((x - m) / sd "+.2f")]
+        printl("{name:<10}{zs.join(" ")}")
+    }
+}

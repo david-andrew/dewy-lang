@@ -313,8 +313,9 @@ A nonliteral write or writable escape conservatively widens the domain to
 `string`. An annotation fixes the type: `let mode:string = "fast"` stays general.
 String operations and character iteration work normally. A conversion to a
 literal union (including a dictionary key) rejects a known domain containing
-values outside that union. `members(mode)` returns an `array<string>` containing
-the distinct values in an inferred finite domain, in text order like `members(U)`;
+values outside that union, and needs no check for one inside it. `members(mode)`
+returns an `array<string>` containing the distinct values in an inferred finite
+domain, in text order like `members(U)`;
 later writes participate. Type-based `members(U)` retains its compile-time
 specialization. Value domains settle after checking, so `members(mode)` cannot
 supply compile-time record field names while the enclosing code is checked.
@@ -4255,6 +4256,11 @@ An unproven obligation's error names the missing relation (`i <? xs.length`,
   (`if xs.length =? 0 return none` before `xs[0]` and `xs.pop()`).
 - Slice the way Python does with `xs[$clamp a..b)`: `rows[$clamp 1..]` skips a header
   line and `ranked[$clamp 0..5)` takes at most five.
+- Key a table by a literal union with a `totaldict<K V>` (`const RANK:totaldict<Severity int>
+  = [...]` listing every member): its reads need no guard. Turn text into a member
+  by comparing it with each, in a function that returns an optional
+  (`loop d in members(Direction) { if word =? d return d }`, then `none`), or with a
+  `match`; `word as Direction` of text whose values are not known is a check.
 - Count into a dictionary with `if k not in? d d[k] = 0` followed by
   `d[k] += 1`, and group with `if k not in? d d[k] = []` followed by
   `d[k].push(x)`; nest the same steps for a dictionary of dictionaries

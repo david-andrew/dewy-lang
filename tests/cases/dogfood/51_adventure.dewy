@@ -1,0 +1,103 @@
+# A tiny text adventure: rooms, items, a locked door and a command parser with
+# synonyms, driven by a scripted list of commands.
+
+Direction:type = 'north' | 'south' | 'east' | 'west'
+
+Room:type = [
+    name:string
+    description:string
+    exits:dict<Direction string>
+    items:array<string>
+]
+
+Game:type = [
+    rooms:dict<string Room>
+    here:string
+    inventory:set<string>
+    door_open:bool = false
+    moves:int = 0
+]
+
+Command:type = [verb:string noun:string]
+
+to_direction = (word:string):>Direction? => {
+    loop d in members(Direction) { if word =? d return d }
+    none
+}
+
+const SYNONYMS = ["n"->"north" "s"->"south" "e"->"east" "w"->"west"
+                  "get"->"take" "grab"->"take" "l"->"look" "i"->"inventory"]
+
+parse = (line:string):>Command => {
+    let words = line.lower().split()
+    if words.length =? 0 return Command["" ""]
+    let verb = SYNONYMS.get(words[0]) ?? words[0]
+    let noun = if words.length >? 1 words[1..].join(" ") else ""
+    noun = SYNONYMS.get(noun) ?? noun
+    # a bare direction means "go"
+    if verb in? ["north" "south" "east" "west"] return Command["go" verb]
+    Command[verb noun]
+}
+
+describe = (g:Game):>string => {
+    let room = g.rooms.get(g.here)
+    if room is? none return "You are nowhere."
+    let text = "== {room.name} ==\n{room.description}"
+    if room.items.length >? 0 text = "{text}\nYou see: {room.items.join(", ")}"
+    let ways = [loop [d _] in room.exits "{d}"]
+    "{text}\nExits: {ways.join(" ")}"
+}
+
+step = (@g:Game cmd:Command):>string => {
+    g.moves += 1
+    match cmd.verb {
+        <"look"> => describe(g)
+        <"inventory"> => if g.inventory.length =? 0 "You carry nothing." else "You carry: {[g.inventory...].join(", ")}"
+        <"go"> => {
+            let dir = to_direction(cmd.noun)
+            if dir is? none return "Go where?"
+            let room = g.rooms.get(g.here)
+            if room is? none return "You are nowhere."
+            let target = room.exits.get(dir)
+            if target is? none return "You can't go that way."
+            if target =? "vault" and not g.door_open return "The vault door is locked."
+            g.here = target
+            describe(g)
+        }
+        <"take"> => {
+            if g.here not in? g.rooms return "You are nowhere."
+            let at = g.rooms[g.here].items.index_of(cmd.noun)
+            if at is? Missing return "There is no {cmd.noun} here."
+            g.rooms[g.here].items.pop(at);
+            g.inventory.push(cmd.noun)
+            "Taken: {cmd.noun}."
+        }
+        <"use"> => {
+            if cmd.noun not in? g.inventory return "You don't have a {cmd.noun}."
+            if cmd.noun =? "key" and g.here =? "hall" {
+                g.door_open = true
+                return "The key turns. The vault door swings open."
+            }
+            "Nothing happens."
+        }
+        _ => "I don't know how to '{cmd.verb}'."
+    }
+}
+
+main = () => {
+    let rooms:dict<string Room> = [
+        "garden"->Room["Garden" "Roses and a gravel path." ['north'->"hall"] ["lamp"]]
+        "hall"->Room["Hall" "A dusty hall with a heavy door to the east." ['south'->"garden" 'east'->"vault" 'west'->"study"] []]
+        "study"->Room["Study" "Books everywhere." ['east'->"hall"] ["key" "book"]]
+        "vault"->Room["Vault" "Gold! You win." ['west'->"hall"] []]
+    ]
+    let game = Game[rooms "garden" set[]]
+    printl(describe(game))
+    let script = ["get lamp" "n" "e" "go west" "take key" "take sword" "i" "e" "use key" "east" "dance"]
+    loop line in script {
+        printl("\n> {line}")
+        printl(step(@game parse(line)))
+        if game.here =? "vault" break
+    }
+    printl("\nFinished in {game.moves} moves.")
+}

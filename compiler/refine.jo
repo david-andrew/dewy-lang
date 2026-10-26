@@ -479,7 +479,8 @@ str_set_coerce = (n: int, t: int) -> int:
     source = str_set_of(ntype(n))
     pos = nodes[n].pos
     if source == id: return n
-    if source == 0 and string_domains.len() > 0: string_domain_conversion(n, id)
+    tracked = -1
+    if source == 0 and string_domains.len() > 0: tracked = string_domain_conversion(n, id)
     if source != 0:
         if nodes[n].kind == .dotname:
             text = str_sets[source][int(nodes[n].aux)]
@@ -500,6 +501,7 @@ str_set_coerce = (n: int, t: int) -> int:
     nodes.push(nodes[n])
     held = "__set{inner}"
     out = bc_call("panic", [bc_str("a string that is not one of {str_set_text(id)}", pos)], pos)
+    stop = out
     k = str_sets[id].len() - 1
     loop k >= 0:
         same = bc_bin(.eq, bc_ident(held, pos), bc_str(str_sets[id][k], pos), pos)
@@ -507,6 +509,8 @@ str_set_coerce = (n: int, t: int) -> int:
         k -= 1
     nodes[n] = nodes[bc_block([bc_assign(bc_ident(held, pos), inner, pos), bc_stmt(out, pos)], pos)]
     check_expr(n, t)
+    # (a binding's finite domain, settled after checking, may prove it: string_domains_materialize)
+    if tracked >= 0: string_domain_conversion_stops[tracked] = stop
     n
 
 # if c a else b, as a value

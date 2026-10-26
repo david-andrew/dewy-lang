@@ -1,0 +1,10 @@
+# Two shared captures need a `$capture` each: the hint names the one left without.
+main = () => {
+    let html:array<string> = []
+    let para:array<string> = []
+    let flush = ($capture @html @para) => {
+        html.push(para.join(" "))
+        para.clear()
+    }
+    flush()
+}

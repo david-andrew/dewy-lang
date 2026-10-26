@@ -1,0 +1,146 @@
+# Markdown to HTML: headings, paragraphs, lists, code blocks, inline emphasis and links.
+
+escape = (text:string):>string => {
+    let out = ""
+    loop c in text {
+        if c =? "<" out = "{out}&lt;"
+        else if c =? ">" out = "{out}&gt;"
+        else if c =? "&" out = "{out}&amp;"
+        else out = "{out}{c}"
+    }
+    out
+}
+
+# inline markup: **bold**, *em*, `code`, [text](url)
+inline = (text:string):>string => {
+    let chars = text.chars
+    let out:array<string> = []
+    let i = 0
+    # (chars has text.length graphemes; the condition states both bounds)
+    loop i <? chars.length and i <? text.length {
+        let c = chars[i]
+        if c =? "`" {
+            let close = text.find("`" i+1)
+            if close is? Missing {
+                out.push(escape(c))
+                i += 1
+                continue
+            }
+            out.push("<code>{escape(text[i+1..close))}</code>")
+            i = close + 1
+            continue
+        }
+        if c =? "*" and i+1 <? chars.length and i+2 <=? text.length and chars[i+1] =? "*" {
+            let close = text.find("**" i+2)
+            if close isnt? Missing {
+                out.push("<strong>{inline(text[i+2..close))}</strong>")
+                i = close + 2
+                continue
+            }
+        }
+        if c =? "*" {
+            let close = text.find("*" i+1)
+            if close isnt? Missing {
+                out.push("<em>{inline(text[i+1..close))}</em>")
+                i = close + 1
+                continue
+            }
+        }
+        if c =? "[" {
+            let mid = text.find("](" i+1)
+            let stop = text.find(")" i)
+            if mid isnt? Missing and stop isnt? Missing and mid <? stop {
+                let label = text[i+1..mid)
+                let url = text[$clamp mid+2..stop)
+                out.push("<a href=\"{escape(url)}\">{inline(label)}</a>")
+                i = stop + 1
+                continue
+            }
+        }
+        out.push(escape(c))
+        i += 1
+    }
+    out.join("")
+}
+
+Heading:type = [level:int text:string]
+
+heading = (line:string):>Heading? => {
+    let n = 0
+    loop n <? line.length and line[n] =? "#" n += 1
+    if n >? 0 and n <=? 6 and n <? line.length and line[n] =? " " return Heading[n line[n+1..]]
+    none
+}
+
+convert = (md:string):>string => {
+    let html:array<string> = []
+    let para:array<string> = []
+    let in_list = false
+    let in_code = false
+    let code:array<string> = []
+
+    let flush_para = ($capture @html $capture @para) => {
+        if para.length >? 0 {
+            html.push("<p>{inline(para.join(" "))}</p>")
+            para.clear()
+        }
+    }
+
+    loop line in md.lines {
+        if line.startswith("```") {
+            if in_code {
+                html.push("<pre><code>{escape(code.join("\n"))}</code></pre>")
+                code.clear()
+                in_code = false
+            } else {
+                flush_para()
+                in_code = true
+            }
+            continue
+        }
+        if in_code {
+            code.push(line)
+            continue
+        }
+        let stripped = line.trim()
+        if stripped =? "" {
+            flush_para()
+            if in_list { html.push("</ul>") in_list = false }
+            continue
+        }
+        let h = heading(stripped)
+        if h isnt? none {
+            flush_para()
+            html.push("<h{h.level}>{inline(h.text)}</h{h.level}>")
+            continue
+        }
+        if stripped.startswith("- ") or stripped.startswith("* ") {
+            flush_para()
+            if not in_list { html.push("<ul>") in_list = true }
+            html.push("  <li>{inline(stripped[$clamp 2..])}</li>")
+            continue
+        }
+        para.push(stripped)
+    }
+    flush_para()
+    if in_list html.push("</ul>")
+    html.join("\n")
+}
+
+const DOC = """# Dewy notes
+
+This is *very* **important** text with `code <here>` and a [link](https://example.com).
+
+## Shopping list
+- eggs & milk
+- **bread**
+- [jam](http://jam.example)
+
+```
+x = 1 < 2
+```
+Plain closing paragraph
+spanning two lines.
+"""
+
+printl(convert(DOC))

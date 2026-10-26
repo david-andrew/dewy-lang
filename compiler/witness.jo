@@ -116,7 +116,8 @@ wit_operand = (e0: int, depth: int) -> str:
 wit_text = (e0: int, depth: int = 0) -> str:
     e = e0
     if e <= 0 or depth > 8: return ""
-    loop nodes[e].kind == .narrow or nodes[e].kind == .conv and (wit_same_value(e) or nodes[e].aux == i32(int(CV.refinement))):
+    # (a literal union shown as its text keeps its spelling: `p.severity`)
+    loop nodes[e].kind == .narrow or nodes[e].kind == .conv and (wit_same_value(e) or nodes[e].aux == i32(int(CV.refinement)) or nodes[e].aux == i32(int(CV.set_text))):
         e = int(nodes[e].a)
     k = nodes[e].kind
     if k == .ident and nodes[e].name != 0:
@@ -487,6 +488,8 @@ wit_unknown = (n: int, b: FactBound, what: str, contract: int = 0, relation: str
     # (a loop's or an unsupported operation's part is a note at its span: the
     # headline names the bound the relation lacks)
     why = if missing != "" and (b.reason == .missing or b.reason == .loop_ or b.reason == .unsupported): "missing {missing}" else: wit_reason(b)
+    # (`q` is nonempty: the relation it lacks, not the analysis's word for it)
+    if missing == "" and b.reason == .missing and relation != "": why = "nothing establishes `{relation}` here"
     if dir_defer(n, "cannot prove {what}: {why}", runtime and what != "assertion"): return
     wit_fail(nodes[n].pos, "cannot prove {what}: {why}")
 
@@ -696,6 +699,11 @@ wit_key = (n: int):
         wit_fail(nodes[n].pos, "cannot prove the value is in the set")
         return
     if base != "" and key != "": err_notes.push((-1, "help: or take the missing key as a value: `{base}.get({key})` gives none for it"))
+    # (a key of a finite literal type, `p.severity` of `'a' | 'b'`, in a plain dict:
+    # a totaldict has every key, so its reads need no guard)
+    dict = representation_type(ntype(kid(n, 0)))
+    if base != "" and nodes[e].kind == .conv and nodes[e].aux == i32(int(CV.set_text)) and is_map_type(dict) and total_dict_keys(ntype(int(nodes[e].a))).0:
+        err_notes.push((-1, "help: or declare `{base}` a `totaldict<{dt_named(ntype(int(nodes[e].a)))} {dt(struct_targ(int(types[prune(dict)].st), 1))}>`, made from a literal with every key: its reads need no guard"))
     if dir_defer(n, "cannot prove the key is in the dictionary", true): return
     wit_fail(nodes[n].pos, "cannot prove the key is in the dictionary")
 

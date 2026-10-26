@@ -2749,7 +2749,11 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
             if len(hh) > 0 and (types[t0].kind == .array or types[t0].kind == .str_): fatal(nodes[n].pos, "no '{name_of(name)}' for {dt(t0)} (use {hh})")
         # (x.push(1) with x an int64: no function of the name takes such an object, so it has no such member)
         if ufcs and not recv_fits and last_err_arg == 1 and caller_dewy() and nodes[unnamed(args[0])].type != 0:
-            fatal(nodes[n].pos, "{dt(ntype(unnamed(args[0])))} has no member '{name_of(name)}'")
+            t0 = prune(ntype(unnamed(args[0])))
+            # (ways.join(" ") of an array<'north' | 'south'>: its members are words, not text yet)
+            if name_of(name) == "join" and types[t0].kind == .array and str_set_of(int(types[t0].elem)) != 0:
+                fatal(nodes[n].pos, "{dt(t0)} has no member 'join': its elements are members of a literal union, not strings; collect their text first, `[loop x in xs \"\{x}\"].join(\" \")`")
+            fatal(nodes[n].pos, "{dt(t0)} has no member '{name_of(name)}'")
         # (an operator the library implements with a function: told as the operator)
         opn = dewy_operator_fn_text(name_of(name))
         if len(opn) > 0 and caller_dewy():
@@ -5211,6 +5215,20 @@ union_or_optional = (t0: int) -> bool:
     is_union(t) or tkind(t) == .opt and is_union(prune(int(types[t].elem)))
 
 # a == b, a < b with types that do not compare
+# An arithmetic or comparison operand that is a union: the member to narrow to, as it
+# is spelled, and when the other members are all failures (`to_int(s)`), the fallback.
+union_operand_why = (n: int, u: int) -> str:
+    if not dewy_at(nodes[n].pos): return " (find out which it holds first: `if x is int: ...` or a `match`)"
+    member = 0
+    others = 0
+    loop m in value_members(prune(u)):
+        if exception_member(m): continue
+        if member == 0 and is_numeric(m): member = m
+        else: others += 1
+    if member != 0 and others == 0: return " (it may hold a failure instead of the {dt(member)}: fall back with `x ?? 0`, pass the failure on with `or_throw`, or test it first, `if x is? {dt(member)} \{ ... }`)"
+    shown = if member != 0: dt(member) else: "int64"
+    " (find out which it holds first: `if x is? {shown} \{ ... }` or a `match`)"
+
 cmp_error = (n: int, ta: int, tb: int):
     why = variant_hint(int(nodes[n].b), ta)
     a = int(nodes[n].a)
@@ -7689,7 +7707,7 @@ check_binary = (n: int, expected: int) -> int:
             nodes[n].type = i32(T_BOOL)
             return T_BOOL
         why = ""
-        if is_union(ta) or is_union(tb): why = if dewy_at(nodes[n].pos): " (find out which it holds first: `if x is? int64 \{ ... }` or a `match`)" else: " (find out which it holds first: `if x is int: ...` or a `match`)"
+        if is_union(ta) or is_union(tb): why = union_operand_why(n, if is_union(ta): ta else: tb)
         else if type_eq(ta, tb) and types[ta].kind == .struct_ and not is_map_type(ta):
             why = " (a struct has the operators defined for it: `({opn}) = (a: {dt(ta)}, b: {dt(ta)}) -> ...`)"
             if op == .gt or op == .le or op == .ge: why = " (define `(<) = (a: {dt(ta)}, b: {dt(ta)}) -> bool: ...` and >, <= and >= come from it)"
@@ -7800,7 +7818,7 @@ check_binary = (n: int, expected: int) -> int:
         if r != 0: return r
         if tka == .opt and is_numeric(int(types[ta].elem)): fatal(nodes[n].pos, "this {dt(ta)} may be none (nothing), so {tok_text(op)} cannot use it: say what to use then (`x ?? 0`){jd(nodes[n].pos, ", or `x!` when it cannot be none", ", or check it first: `if x isnt? none \{ ... }`")}")
         why = ""
-        if is_union(ta) or is_union(tb): why = if dewy_at(nodes[n].pos): " (find out which it holds first: `if x is? int64 \{ ... }` or a `match`)" else: " (find out which it holds first: `if x is int: ...` or a `match`)"
+        if is_union(ta) or is_union(tb): why = union_operand_why(n, if is_union(ta): ta else: tb)
         if tka == .array and is_int(tb) and op == .star:
             why = " (fill(x, n) makes an array of n copies of x)"
             if is_numeric(int(types[ta].elem)): why = " (fill(x, n) makes an array of n copies of x; xs .* n multiplies each element)"
@@ -9096,6 +9114,10 @@ check_lambda = (lam: int, expected: int) -> int:
             if i == 0 and (pn == "self" or pn == "this"):
                 fatal(nodes[p].pos, "structs have no methods: write the function at the top level (not inside the struct), taking what it works on first, as {jd(nodes[p].pos, "`move = (p: mut Player, dt: f64): ...`", "`move = (@p:Player dt:float64) => ...`")}; `p.move(dt)` calls it")
             if pn == "$partial": fatal(nodes[p].pos, "partial operator needs a function type; add a function-type annotation or pass it to a typed callback parameter")
+            # (`($capture @html @para) => ...`: the second shared local lost its `$capture`)
+            if has_flag(p, NF_MUT) and dewy_at(nodes[p].pos):
+                outer = lookup(int(nodes[p].name))
+                if outer != 0 and syms[outer].kind == .local: fatal(nodes[p].pos, "cannot infer the type of parameter '{pn}': to share the enclosing '{pn}' instead, write `$capture @{pn}` (each capture takes its own `$capture`)")
             fatal(nodes[p].pos, "cannot infer the type of parameter '{pn}'; add a type annotation")
         if has_flag(p, NF_MUT): mm |= 1 << i
         if et != 0 and int(types[et].mutmask) & (1 << i) != 0:

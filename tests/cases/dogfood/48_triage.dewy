@@ -1,0 +1,76 @@
+# Emergency room triage: a discrete-event simulation with an event queue and a
+# triage queue ordered by severity, then by arrival.
+
+Severity:type = 'critical' | 'urgent' | 'routine'
+
+const RANK:totaldict<Severity int> = ['critical'->0 'urgent'->1 'routine'->2]
+const TREAT_MINUTES:totaldict<Severity int> = ['critical'->45 'urgent'->25 'routine'->10]
+
+Patient:type = [
+    id:int
+    name:string
+    severity:Severity
+    arrived:int
+]
+
+EventKind:type = 'arrive' | 'finish'
+Event:type = [kind:EventKind time:int patient:Patient doctor:int64 = -1]
+
+Stats:type = [
+    waits:dict<string array<int>>
+    treated:int = 0
+    record = (p:Patient start:int):>void => {
+        let key = p.severity
+        if key not in? waits waits[key] = []
+        waits[key].push(start - p.arrived)
+        treated += 1
+    }
+]
+
+main = () => {
+    let gen = rng(11)
+    let names = ["Ada" "Bo" "Cy" "Dee" "Eli" "Fay" "Gus" "Hal" "Ivy" "Jo"]
+    let events:Heap<Event> = []
+    let clock = 0
+    loop i in [0..names.length) {
+        let roll = gen.next_int(0 10)
+        let sev:Severity = if roll <? 2 'critical' else if roll <? 5 'urgent' else 'routine'
+        clock += gen.next_int(1 8)
+        let p = Patient[i names[i] sev clock]
+        events.push(Event['arrive' clock p] clock)
+    }
+
+    let waiting:Heap<Patient> = []
+    let free = [true true]
+    let stats = Stats[waits=[]]
+
+    loop events.length >? 0 {
+        let e = events.pop()
+        if e.kind =? 'arrive' {
+            printl("{e.time:>4}  {e.patient.name} arrives ({e.patient.severity})")
+            waiting.push(e.patient RANK[e.patient.severity] * 1000 + e.patient.arrived)
+        } else {
+            printl("{e.time:>4}  {e.patient.name} leaves doctor {e.doctor}")
+            if 0 <=? e.doctor <? free.length free[e.doctor] = true
+        }
+        # hand waiting patients to free doctors
+        loop d in [0..free.length) {
+            if free[d] and waiting.length >? 0 {
+                let p = waiting.pop()
+                free[d] = false
+                stats.record(p e.time)
+                let done = e.time + TREAT_MINUTES[p.severity]
+                printl("{e.time:>4}  doctor {d} sees {p.name} until {done}")
+                events.push(Event['finish' done p d] done)
+            }
+        }
+    }
+
+    printl("treated {stats.treated}")
+    loop sev in members(Severity) {
+        let ws = stats.waits.get(sev) ?? []
+        if ws.length =? 0 continue
+        let avg = sum(ws) / ws.length
+        printl("{sev:<9} n={ws.length} avg wait {avg:.1f} max {max(ws)}")
+    }
+}

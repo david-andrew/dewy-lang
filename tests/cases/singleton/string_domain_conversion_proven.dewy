@@ -1,0 +1,13 @@
+# A string whose settled domain lies inside the union converts with no check left,
+# so a caller without runtime checks may call it.
+Direction:type = 'north' | 'south'
+pick = (c:bool):>string => {
+    let mode = "north"
+    if c mode = "south"
+    let d = mode as Direction
+    "dir {d}"
+}
+main = () => {
+    printl(pick(true))
+    printl(pick(false))
+}
