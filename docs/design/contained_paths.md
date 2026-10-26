@@ -1,8 +1,7 @@
 # Contained paths, scoped by construction
 
-Decided 2026-10-23 ([decisions](decisions.md): "Contained paths and untrusted input",
-"Path guard", "Path validator name", "Soft preconditions", "Path safety, scoped by
-construction", which replaces the source-trust design this file described before).
+Decided 2026-10-23 ([decisions](decisions.md#owned-by-a-design-doc): "Contained
+paths", which replaces the earlier source-trust design).
 This is the design and the current implementation (`compiler/safe_paths.jo`,
 `compiler/warn_if.jo`, `lib/std/files.jo`).
 

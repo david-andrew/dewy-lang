@@ -2,8 +2,9 @@
 
 BLUF: Dewy should keep ordinary values on the compiler-managed static/arena/owned-storage path. As an explicit systems escape hatch, a library should be able to define resource-bearing value types such as `Rc<T>`, `Weak<T>`, `Arc<T>`, owning boxes, pools, and foreign handles. This needs a small unsafe allocation and lifecycle substrate; it should not make `@` into a general escaping pointer.
 
-The lifecycle call shape below is approved; its implementation is pending.
-The allocation and resource-access substrate remains a provisional direction.
+The approved lifecycle call shape is implemented for nominal records (`$__copy__`,
+`$__move__`, and `$__drop__`; see `compiler/ownership.jo`). The allocation and
+resource-access substrate for user-managed owners remains a provisional direction.
 
 ## Relationship to value and place semantics
 

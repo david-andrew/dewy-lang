@@ -2,8 +2,9 @@
 
 The bulletproof principle (decisions.md, 2026-10-23): every convenience axiom or
 assumption the compiler makes has a metatag that turns it off and demands the
-proof instead. This is the one list; the strictest configuration is a library
-bundle that turns every entry off. Spellings marked *pending* await David.
+proof instead. This is the one list; the strictest configuration is intended
+to turn every entry off through a library bundle. Spellings marked *pending*
+await David, so that configuration is not yet fully enforceable.
 
 | Assumption (default on) | Where | Opt-out metatag |
 |---|---|---|
