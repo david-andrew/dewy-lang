@@ -1,0 +1,40 @@
+# Frozen read-only type queries. Arenas are borrowed, never translated or rebuilt.
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'refine_predicates.dewy'
+
+ref_query_prune = (types: mut TypeInfo[], t0: int) -> int:
+    t = t0
+    loop t != 0 and types[t].kind == .var and types[t].ref != 0: t = int(types[t].ref)
+    t
+
+ref_types_contain = (types: mut TypeInfo[], structs: mut StructInfo[], args: mut i32[], t0: int, want: int, depth: int) -> bool:
+    t = ref_query_prune(types, t0)
+    if t == want: return true
+    if depth >= 32: return false
+    k = types[t].kind
+    if k == .refined or k == .opt or k == .array or k == .fixed:
+        return ref_types_contain(types, structs, args, int(types[t].elem), want, depth + 1)
+    if k == .enum_ and structs[int(types[t].st)].union_:
+        si = int(types[t].st)
+        start = int(structs[si].targs)
+        stop = start + int(structs[si].ntargs)
+        loop i in [start..stop):
+            if ref_types_contain(types, structs, args, int(args[i]), want, depth + 1): return true
+    false
+
+ref_types_nested_formals = (types: mut TypeInfo[], args: mut i32[], predicates: mut RefAtom[][], t0: int, nested: bool, depth: int) -> bool:
+    if depth >= 32: return true
+    t = ref_query_prune(types, t0)
+    k = types[t].kind
+    if k == .refined:
+        if nested and ref_atoms_have_kind(predicates[int(types[t].st)], 2): return true
+        return ref_types_nested_formals(types, args, predicates, int(types[t].elem), nested, depth + 1)
+    if k == .array or k == .fixed or k == .opt:
+        return ref_types_nested_formals(types, args, predicates, int(types[t].elem), true, depth + 1)
+    if k == .tuple:
+        start = int(types[t].args)
+        stop = start + int(types[t].nargs)
+        loop i in [start..stop):
+            if ref_types_nested_formals(types, args, predicates, int(args[i]), true, depth + 1): return true
+    false

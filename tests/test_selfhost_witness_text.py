@@ -68,7 +68,7 @@ def corpus():
                 expected += [known(lo, hi, wide, flag), str(choices)]
     for value in ends:
         steps.append(f'O {value}')
-        expected.append(f' + {value}' if value > 0 else f' - {signed(-value)}' if value < 0 else '')
+        expected.append(f' + {value}' if value > 0 else f' - {-value}' if value < 0 else '')
     return bytes(blob), '\n'.join(steps) + '\n', '\n'.join(expected) + '\n'
 
 

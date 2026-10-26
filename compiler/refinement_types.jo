@@ -1,0 +1,44 @@
+# Frozen shared layouts; keep field order, defaults and enum ordinals.
+use 'checker_tokens.dewy'
+
+struct RefTerm:
+    kind: int = 0 # self, literal, formal ordinal, stable lexical declaration, type limit
+    value: int = 0
+    unsigned: bool = false
+    path: int[]
+    offset: int = 0 # a constant added to the term (`at + 4`); atoms keep it on their right side
+
+struct RefAtom:
+    op: Tok
+    a: RefTerm
+    b: RefTerm
+
+enum FactPolicy:
+    RuntimeAllowed, RequireStatic
+
+enum FactReason:
+    missing, write, call, join, loop_, unsupported, budget, callee
+
+struct FactBound:
+    lo: int = -9223372036854775807 - 1
+    hi: int = 9223372036854775807
+    nz: bool = false
+    reason: FactReason = .missing
+    witness: int = 0
+    wide: bool = false  # unknown mathematical extent beyond the endpoint representation
+
+struct FactTerm:
+    op: Tok = .eof
+    a: int = 0
+    b: int = 0
+    origin: int = 0
+    type: int = 0
+    slot: int = -1
+
+struct FactRequest:
+    node: int
+    owner: int
+
+const FACT_MIN = -9223372036854775807 - 1
+
+const FACT_MAX = 9223372036854775807

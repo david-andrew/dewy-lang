@@ -1,3 +1,6 @@
+use 'checker_tokens.dewy'
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
 # Sparse panic sites collected only by a complete obligation-free body walk.
 fact_panic_sites: {int: int[]} = {}
 fact_panic_collect = false
@@ -32,25 +35,6 @@ use 'warn_if.jo'
 use 'string_domains.jo'
 use 'draw_context.jo'
 use 'floats.jo'
-
-enum FactPolicy: RuntimeAllowed, RequireStatic
-enum FactReason: missing, write, call, join, loop_, unsupported, budget, callee
-
-struct FactBound:
-    lo: int = -9223372036854775807 - 1
-    hi: int = 9223372036854775807
-    nz: bool = false
-    reason: FactReason = .missing
-    witness: int = 0
-    wide: bool = false  # unknown mathematical extent beyond the endpoint representation
-
-struct FactTerm:
-    op: Tok = .eof
-    a: int = 0
-    b: int = 0
-    origin: int = 0
-    type: int = 0
-    slot: int = -1
 
 # One tombstone per invalidated route: the event that last replaced the
 # place and the value it replaced. Witnesses only; never evidence.
@@ -101,10 +85,6 @@ struct FactState:
     bounds: FactBound[]
     live: bool = true
     full: bool = false
-
-struct FactRequest:
-    node: int
-    owner: int
 
 struct FactLoop:
     back: FactState = FactState(live = false)
@@ -190,8 +170,6 @@ fact_query = false
 fact_policy = FactPolicy.RuntimeAllowed
 const FACT_CAP = 256
 const FACT_STEPS = 4096
-const FACT_MIN = -9223372036854775807 - 1
-const FACT_MAX = 9223372036854775807
 # Projection selector of an integer's nonnegative part, max(0, n): the length
 # `fill(x n)` gets, shared by every fill of the same count.
 const FACT_CLAMPED = -7

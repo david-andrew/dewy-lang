@@ -1,0 +1,47 @@
+# Shared compiler layouts. Arenas and mutable globals stay with their Jo owners.
+from p"checker_tokens.dewy" import Tok
+
+RefTerm:type=[
+    kind:int64=0  # self, literal, formal ordinal, stable lexical declaration, type limit
+    value:int64=0
+    unsigned:bool=false
+    path:array<int64>=[]
+    offset:int64=0  # a constant added to the term (`at + 4`); atoms keep it on their right side
+]
+
+RefAtom:type=[
+    op:Tok='eof'
+    a:RefTerm=RefTerm[]
+    b:RefTerm=RefTerm[]
+]
+
+FactPolicy:type='RuntimeAllowed' | 'RequireStatic'
+
+FactReason:type='missing' | 'write' | 'call' | 'join' | 'loop_' | 'unsupported' | 'budget' | 'callee'
+
+FactBound:type=[
+    lo:int64=-9223372036854775807 - 1
+    hi:int64=9223372036854775807
+    nz:bool=false
+    reason:FactReason='missing'
+    witness:int64=0
+    wide:bool=false   # unknown mathematical extent beyond the endpoint representation
+]
+
+FactTerm:type=[
+    op:Tok='eof'
+    a:int64=0
+    b:int64=0
+    origin:int64=0
+    type:int64=0
+    slot:int64=-1
+]
+
+FactRequest:type=[
+    node:int64=0
+    owner:int64=0
+]
+
+const FACT_MIN:int64= -9223372036854775807 - 1
+
+const FACT_MAX:int64= 9223372036854775807

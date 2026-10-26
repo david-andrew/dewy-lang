@@ -1,0 +1,85 @@
+# Frozen predicate operations; no checker state or callbacks.
+use 'checker_tokens.dewy'
+use 'refinement_types.dewy'
+
+ref_term_less = (a: RefTerm, b: RefTerm) -> bool:
+    if a.kind != b.kind: return a.kind < b.kind
+    if a.unsigned != b.unsigned: return not a.unsigned
+    if a.value != b.value: return a.value < b.value
+    if a.offset != b.offset: return a.offset < b.offset
+    loop i in [0..min(a.path.len(), b.path.len())):
+        if a.path[i] != b.path[i]: return a.path[i] < b.path[i]
+    a.path.len() < b.path.len()
+
+ref_atom_less = (a: RefAtom, b: RefAtom) -> bool:
+    if a.a != b.a: return ref_term_less(a.a, b.a)
+    if a.b != b.b: return ref_term_less(a.b, b.b)
+    int(a.op) < int(b.op)
+
+ref_atoms_intern = (ref_predicates: mut RefAtom[][], atoms0: RefAtom[]) -> int:
+    atoms: RefAtom[]
+    loop atom in atoms0:
+        i = 0
+        loop i < atoms.len() and ref_atom_less(atoms[i], atom): i += 1
+        if i == atoms.len() or atoms[i] != atom: atoms.insert(i, atom)
+    loop i in [1..ref_predicates.len()):
+        if ref_predicates[i] == atoms: return i
+    ref_predicates.push(atoms)
+    ref_predicates.len() - 1
+
+ref_atoms_length_only = (atoms: RefAtom[]) -> bool:
+    loop atom in atoms:
+        loop term in [atom.a, atom.b]:
+            if term.kind != 1 and (term.path.len() == 0 or term.path[term.path.len() - 1] != -1): return false
+    true
+
+ref_add = (op0: Tok, a0: RefTerm, b0: RefTerm, out: mut RefAtom[]):
+    op = op0; a = a0; b = b0
+    if op == .gt or op == .ge:
+        a = b0; b = a0
+        op = if op == .gt: Tok.lt else: Tok.le
+    if op == .eq:
+        out.push(ref_offset_right(RefAtom(.le, a, b)))
+        out.push(ref_offset_right(RefAtom(.le, b, a)))
+    else:
+        if op == .ne and ref_term_less(b, a): a = b0; b = a0
+        out.push(ref_offset_right(RefAtom(op, a, b)))
+
+# `a + x op b + y` becomes `a op b + (y - x)`; a literal folds its offset.
+ref_offset_right = (atom0: RefAtom) -> RefAtom:
+    atom = atom0
+    atom.b.offset -= atom.a.offset
+    atom.a.offset = 0
+    if atom.b.kind == 1:
+        atom.b.value += atom.b.offset
+        atom.b.offset = 0
+    atom
+
+ref_atoms_interval = (atoms: RefAtom[], b0: FactBound) -> FactBound:
+    b = b0
+    loop atom in atoms:
+        x = atom.a
+        y = atom.b
+        if atom.op != .lt and atom.op != .le or x.unsigned or y.unsigned: continue
+        # (`value < c`: a literal side holds its offset folded in)
+        if x.kind == 0 and x.path.len() == 0 and y.kind == 1:
+            if atom.op == .le: b.hi = min(b.hi, y.value)
+            else if y.value != FACT_MIN: b.hi = min(b.hi, y.value - 1)
+        # (`c < value + k`)
+        else if x.kind == 1 and y.kind == 0 and y.path.len() == 0 and ref_sum_fits(x.value, -y.offset):
+            c = x.value - y.offset
+            if atom.op == .le: b.lo = max(b.lo, c)
+            else if c != FACT_MAX: b.lo = max(b.lo, c + 1)
+    b
+
+ref_atoms_have_kind = (atoms: RefAtom[], kind: int) -> bool:
+    loop atom in atoms:
+        if atom.a.kind == kind or atom.b.kind == kind: return true
+    false
+
+ref_sum_fits = (a: int, b: int) -> bool:
+    if b > 0: return a <= FACT_MAX - b
+    if b < 0: return a >= FACT_MIN - b
+    true
+
+ref_op_rank = (op: Tok) -> int: int(op)

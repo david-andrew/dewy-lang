@@ -46,7 +46,7 @@ wit_bound_text=(low:int64 high:int64 wide:bool unsigned:bool):>string=>{
 wit_offset_text=(c:int64):>string=>{
     if c >? 0 {return " + {c}"}
     if c <? 0 {
-        let magnitude:int64=int64<overflow='wrap'>(0) - int64<overflow='wrap'>(c)
+        let magnitude=(int64<overflow='wrap'>(0) - int64<overflow='wrap'>(c)) transmute uint64
         return " - {magnitude}"
     }
     ""

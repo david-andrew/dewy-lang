@@ -304,7 +304,38 @@ while facts are checked, so include the facts phase in their gate. Candidate
 construction and bound rendering are bounded; quoting scans only its supplied
 bytes. Both twins preserve unsigned order encoding, wide endpoint wording and
 signed-word candidate arithmetic. Differential tests include arbitrary bytes,
-all byte values, bound thresholds and the signed-word endpoints.
+all byte values, bound thresholds and the signed-word endpoints. Offset text
+uses an unsigned magnitude, so `int64.min` renders as ` - 9223372036854775808`
+in both twins; the previous signed magnitude printed a second minus sign.
+
+
+`checker_tokens.dewy`, `checker_types.dewy` and `refinement_types.dewy` own the
+shared checker definitions: `Tok`; `TK`, `RepId`, `TypeInfo`, `Field`, `Variant`
+and `StructInfo`; `RefTerm`, `RefAtom`, scalar fact bounds/terms/requests and their
+policy/reason tags. Jo keeps the existing arenas, indexes and startup globals.
+Fields retain their order, widths and defaults; enum members retain their
+ordinals. Native `TypeInfo` is 60 bytes, `StructInfo` 64, `RefTerm` 40, `RefAtom`
+88, `FactBound` 40 and `FactTerm` 48. Leaves borrow these records directly, with
+no translated views. Keep `FactState` and its shared index initializer, place
+identity, result evidence, checker locals and function instances with their
+current owners until a leaf needs that boundary. The layout differential checks
+sizes, alignment, every field offset, defaults and nested-path copy independence.
+
+`refine_predicates.dewy` owns term/atom ordering, offset normalization, comparison
+expansion, predicate interning, length/kind queries and scalar interval extraction.
+Jo lends the intern table or supplies the queried row; it still resolves type
+limits and publishes refined types. Token ordering uses declaration ordinals,
+not Dewy's text ordering. Offset normalization preserves signed-word wrapping.
+Interning retains insertion-sort O(A² * L) plus O(P * A * L) search, for A atoms,
+P stored predicates and L path length; row queries are linear in their atoms.
+`refine_queries.dewy` follows inference links and traverses only the requested
+containment or nested-formal query over type/argument/structure arenas. Each
+visited occurrence costs its inference-chain length plus its selected child
+edges; stack depth stays capped at 32. Containment checks identity before the
+cap, while nested-formal checking conservatively succeeds at the cap before
+following inference. Neither introduces a whole-program pass or checker callback.
+Differential graphs cover cycles, inference chains, repeated children, ignored
+callable/record branches, depth boundaries and subsequent arena writes.
 
 `dewy_layout.dewy` (`dewy-core fmt`'s layout of Dewy text: indentation by the brackets open and
 by continued statements, the spaces between lexemes, and the lines kept as written) is the

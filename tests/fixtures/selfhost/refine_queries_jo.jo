@@ -1,0 +1,30 @@
+use '../../../compiler/refine_queries.jo'
+use '../../../compiler/checker_types.jo'
+use '../../../compiler/refinement_types.jo'
+read_i = (text: str) -> int: to_int(text) ?? 0
+main = () -> int:
+    argv = args()
+    types = [TypeInfo()]
+    structs = [StructInfo()]
+    args: i32[]
+    predicates: RefAtom[][] = [[]]
+    loop line in split(read_file(argv[1]) ?? "", "\n"):
+        p = split(line, " ")
+        if p[0] == "T":
+            start = args.len()
+            if p[4] != "-":
+                loop x in split(p[4], ","): args.push(i32(read_i(x)))
+            t = TypeInfo(kind = TK(read_i(p[1])), elem = i32(read_i(p[2])), ref = i32(read_i(p[3])), args = i32(start), nargs = i32(args.len() - start))
+            if t.kind == .enum_:
+                t.st = i32(structs.len())
+                structs.push(StructInfo(targs = i32(start), ntargs = t.nargs, union_ = p[5] == "1"))
+            else if t.kind == .refined:
+                t.st = i32(predicates.len())
+                row = [RefAtom(a = RefTerm(kind = read_i(p[6])))]
+                predicates.push(row)
+            types.push(t)
+        else if p[0] == "E": types[read_i(p[1])].elem = i32(read_i(p[2]))
+        else if p[0] == "Q":
+            t = read_i(p[1]); want = read_i(p[2]); depth = read_i(p[3]); nested = p[4] == "1"
+            print("{ref_query_prune(types, t)} {ref_types_contain(types, structs, args, t, want, depth)} {ref_types_nested_formals(types, args, predicates, t, nested, depth)}")
+    0

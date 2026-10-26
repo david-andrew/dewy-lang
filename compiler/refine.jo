@@ -1,3 +1,8 @@
+use 'refine_queries.dewy'
+use 'refine_predicates.dewy'
+use 'checker_tokens.dewy'
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
 # Scalar contracts are immutable type metadata. Evaluated values and proof
 # answers belong to facts.jo and never participate in interning.
 use 'ast.jo'
@@ -14,18 +19,6 @@ use 'witness.jo'
 use 'secrets.jo'
 use 'node_store.dewy'
 use 'math_lower.jo'
-
-struct RefTerm:
-    kind: int = 0 # self, literal, formal ordinal, stable lexical declaration, type limit
-    value: int = 0
-    unsigned: bool = false
-    path: int[]
-    offset: int = 0 # a constant added to the term (`at + 4`); atoms keep it on their right side
-
-struct RefAtom:
-    op: Tok
-    a: RefTerm
-    b: RefTerm
 
 ref_predicates: RefAtom[][] = [[]]
 # Declaration spans for diagnostics only; never part of predicate identity.
@@ -229,30 +222,8 @@ ref_span_copy = (from: int, to: int):
     if from != to and not ref_spans.has(to):
         if let at = ref_spans.get(from): ref_spans[to] = at
 
-ref_term_less = (a: RefTerm, b: RefTerm) -> bool:
-    if a.kind != b.kind: return a.kind < b.kind
-    if a.unsigned != b.unsigned: return not a.unsigned
-    if a.value != b.value: return a.value < b.value
-    if a.offset != b.offset: return a.offset < b.offset
-    loop i in [0..min(a.path.len(), b.path.len())):
-        if a.path[i] != b.path[i]: return a.path[i] < b.path[i]
-    a.path.len() < b.path.len()
-
-ref_atom_less = (a: RefAtom, b: RefAtom) -> bool:
-    if a.a != b.a: return ref_term_less(a.a, b.a)
-    if a.b != b.b: return ref_term_less(a.b, b.b)
-    int(a.op) < int(b.op)
-
-ref_intern = (atoms0: RefAtom[]) -> int:
-    atoms: RefAtom[]
-    loop atom in atoms0:
-        i = 0
-        loop i < atoms.len() and ref_atom_less(atoms[i], atom): i += 1
-        if i == atoms.len() or atoms[i] != atom: atoms.insert(i, atom)
-    loop i in [1..ref_predicates.len()):
-        if ref_predicates[i] == atoms: return i
-    ref_predicates.push(atoms)
-    ref_predicates.len() - 1
+# Predicate tables stay with their owner; the leaf borrows the interner.
+ref_intern = (atoms: RefAtom[]) -> int: ref_atoms_intern(ref_predicates, atoms)
 
 mk_refined = (base0: int, predicate: int) -> int:
     base = prune(base0)
@@ -288,11 +259,7 @@ mk_refined = (base0: int, predicate: int) -> int:
     mk_type(TypeInfo(kind = .refined, elem = i32(base), st = i32(predicate)), dependencies)
 
 # A string is refined only by its length (`string<length >? 0>`).
-ref_length_only = (predicate: int) -> bool:
-    loop atom in ref_predicates[predicate]:
-        loop term in [atom.a, atom.b]:
-            if term.kind != 1 and (term.path.len() == 0 or term.path[term.path.len() - 1] != -1): return false
-    true
+ref_length_only = (predicate: int) -> bool: ref_atoms_length_only(ref_predicates[predicate])
 
 ref_term = (n: int, binder: int) -> RefTerm:
     k = nodes[n].kind
@@ -372,29 +339,6 @@ ref_term = (n: int, binder: int) -> RefTerm:
         return term
     fatal(nodes[n].pos, "unsupported refinement term; expected a scalar binding or integer bound")
     RefTerm()
-
-ref_add = (op0: Tok, a0: RefTerm, b0: RefTerm, out: mut RefAtom[]):
-    op = op0; a = a0; b = b0
-    if op == .gt or op == .ge:
-        a = b0; b = a0
-        op = if op == .gt: Tok.lt else: Tok.le
-    if op == .eq:
-        out.push(ref_offset_right(RefAtom(.le, a, b)))
-        out.push(ref_offset_right(RefAtom(.le, b, a)))
-    else:
-        if op == .ne and ref_term_less(b, a): a = b0; b = a0
-        out.push(ref_offset_right(RefAtom(op, a, b)))
-
-# `a + x op b + y` is `a op b + (y - x)`: one canonical spelling per atom, and a
-# literal side folds its offset into its value.
-ref_offset_right = (atom0: RefAtom) -> RefAtom:
-    atom = atom0
-    atom.b.offset -= atom.a.offset
-    atom.a.offset = 0
-    if atom.b.kind == 1:
-        atom.b.value += atom.b.offset
-        atom.b.offset = 0
-    atom
 
 ref_atoms = (n: int, binder: int, out: mut RefAtom[], depth: int = 0):
     if depth > 32 or out.len() >= 32: fatal(nodes[n].pos, "refinement predicate budget exhausted")
@@ -629,24 +573,10 @@ ref_assume = (t0: int, self: int, args: int[], s: mut FactState):
 
 # b narrowed by the atoms of t's contract that compare the value with a
 # literal; relations to other values need a fact state (ref_assume). O(atoms).
-ref_interval = (t0: int, b0: FactBound) -> FactBound:
+ref_interval = (t0: int, b: FactBound) -> FactBound:
     t = prune(t0)
-    b = b0
     if types[t].kind != .refined or representation_type(t) == T_U64: return b
-    loop atom in ref_predicates[int(types[t].st)]:
-        x = atom.a
-        y = atom.b
-        if atom.op != .lt and atom.op != .le or x.unsigned or y.unsigned: continue
-        # (`value < c`: a literal side holds its offset folded in)
-        if x.kind == 0 and x.path.len() == 0 and y.kind == 1:
-            if atom.op == .le: b.hi = min(b.hi, y.value)
-            else if y.value != FACT_MIN: b.hi = min(b.hi, y.value - 1)
-        # (`c < value + k`)
-        else if x.kind == 1 and y.kind == 0 and y.path.len() == 0 and fact_add_fits(x.value, -y.offset):
-            c = x.value - y.offset
-            if atom.op == .le: b.lo = max(b.lo, c)
-            else if c != FACT_MAX: b.lo = max(b.lo, c + 1)
-    b
+    ref_atoms_interval(ref_predicates[int(types[t].st)], b)
 
 ref_check = (n: int, self: int, args: int[], s: mut FactState):
     if fact_speculating > 0:
@@ -893,9 +823,7 @@ ref_validate_signature = (params: int[], ret: int, mask: int, pos: int):
 ref_has_formals = (t0: int) -> bool:
     t = prune(t0)
     if types[t].kind != .refined: return false
-    loop atom in ref_predicates[int(types[t].st)]:
-        if atom.a.kind == 2 or atom.b.kind == 2: return true
-    false
+    ref_atoms_have_kind(ref_predicates[int(types[t].st)], 2)
 
 # (the parameter type finish_arg is coercing an argument to: its formals are that call's)
 refine_arg_target = 0
@@ -910,15 +838,7 @@ ref_signature_has = (f: int, t: int) -> bool:
     false
 
 ref_type_contains = (t0: int, want: int, depth: int) -> bool:
-    t = prune(t0)
-    if t == want: return true
-    if depth >= 32: return false
-    k = types[t].kind
-    if k == .refined or k == .opt or k == .array or k == .fixed: return ref_type_contains(int(types[t].elem), want, depth + 1)
-    if is_union(t):
-        loop m in union_members(t):
-            if ref_type_contains(m, want, depth + 1): return true
-    false
+    ref_types_contain(types, structs, type_args, t0, want, depth)
 
 ref_decl_mask = (decl: int) -> int:
     mask = 0
@@ -1021,9 +941,7 @@ ref_fact_current_entry = (s: mut FactState) -> int[]:
 ref_has_fields = (t0: int) -> bool:
     t = prune(t0)
     if types[t].kind != .refined: return false
-    loop atom in ref_predicates[int(types[t].st)]:
-        if atom.a.kind == 5 or atom.b.kind == 5: return true
-    false
+    ref_atoms_have_kind(ref_predicates[int(types[t].st)], 5)
 
 ref_dependent_record = (t: int) -> bool:
     if tkind(t) != .struct_: return false
@@ -1225,17 +1143,7 @@ ref_mutable_result = (f: int) -> bool:
     false
 
 ref_nested_formals = (t0: int, nested: bool = false, depth: int = 0) -> bool:
-    if depth >= 32: return true
-    t = prune(t0)
-    k = types[t].kind
-    if k == .refined:
-        if nested and ref_has_formals(t): return true
-        return ref_nested_formals(int(types[t].elem), nested, depth + 1)
-    if k == .array or k == .fixed or k == .opt: return ref_nested_formals(int(types[t].elem), true, depth + 1)
-    if k == .tuple:
-        loop i in [0..int(types[t].nargs)):
-            if ref_nested_formals(targ(t, i), true, depth + 1): return true
-    false
+    ref_types_nested_formals(types, type_args, ref_predicates, t0, nested, depth)
 
 # Library array mutations on refined storage use the same private-candidate
 # boundary as intrinsic mutations. The published value is checked afterward;

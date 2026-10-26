@@ -1,0 +1,202 @@
+$runtime_checks
+# Immutable scalar predicate algebra. Jo owns the predicate table; interning borrows it.
+# Sorting is O(A² * L), then O(P * A * L) to find an existing row (A atoms,
+# P interned predicates, L term-path length). Queries visit only their supplied row.
+from p"checker_tokens.dewy" import Tok
+from p"refinement_types.dewy" import RefTerm, RefAtom, FactBound, FACT_MIN, FACT_MAX
+
+ref_term_less=(a:RefTerm b:RefTerm):>bool=>{
+    if a.kind not=? b.kind {return a.kind <? b.kind}
+    if a.unsigned not=? b.unsigned {return not a.unsigned}
+    if a.value not=? b.value {return a.value <? b.value}
+    if a.offset not=? b.offset {return a.offset <? b.offset}
+    loop i in [0..min(a.path.length b.path.length)) {
+        if a.path[i] not=? b.path[i] {return a.path[i] <? b.path[i]}
+    }
+    a.path.length <? b.path.length
+}
+
+ref_atom_less=(a:RefAtom b:RefAtom):>bool=>{
+    if a.a not=? b.a {return ref_term_less(a.a b.a)}
+    if a.b not=? b.b {return ref_term_less(a.b b.b)}
+    ref_op_rank(a.op) <? ref_op_rank(b.op)
+}
+
+ref_atoms_intern=(@predicates:array<array<RefAtom>> atoms0:array<RefAtom>):>int64=>{
+    let atoms:array<RefAtom>=[]
+    loop atom in atoms0 {
+        let i:int64=0
+        loop i <? atoms.length and ref_atom_less(atoms[i] atom) {i+=1}
+        if i =? atoms.length or atoms[i] not=? atom {atoms.insert(atom i)}
+    }
+    loop i in [1..predicates.length) {
+        if predicates[i] =? atoms {return i}
+    }
+    predicates.push(atoms)
+    predicates.length - 1
+}
+
+ref_atoms_length_only=(atoms:array<RefAtom>):>bool=>{
+    loop atom in atoms {
+        loop term in [atom.a atom.b] {
+            if term.kind not=? 1 and (term.path.length =? 0 or term.path[term.path.length - 1] not=? -1) {return false}
+        }
+    }
+    true
+}
+
+ref_add=(op0:Tok a0:RefTerm b0:RefTerm @out:array<RefAtom>)=>{
+    let op=op0
+    let a=a0
+    let b=b0
+    if op =? 'gt' or op =? 'ge' {
+        a=b0
+        b=a0
+        op=if op =? 'gt' 'lt' else 'le'
+    }
+    if op =? 'eq' {
+        out.push(ref_offset_right(RefAtom[op='le' a=a b=b]))
+        out.push(ref_offset_right(RefAtom[op='le' a=b b=a]))
+    } else {
+        if op =? 'ne' and ref_term_less(b a) {a=b0; b=a0}
+        out.push(ref_offset_right(RefAtom[op=op a=a b=b]))
+    }
+}
+
+# `a + x op b + y` becomes `a op b + (y - x)`; a literal folds its offset.
+# Preserve signed-word canonicalization, including offsets at either endpoint.
+ref_offset_right=(atom0:RefAtom):>RefAtom=>{
+    let atom=atom0
+    atom.b.offset=int64<overflow='wrap'>(atom.b.offset) - int64<overflow='wrap'>(atom.a.offset)
+    atom.a.offset=0
+    if atom.b.kind =? 1 {
+        atom.b.value=int64<overflow='wrap'>(atom.b.value) + int64<overflow='wrap'>(atom.b.offset)
+        atom.b.offset=0
+    }
+    atom
+}
+
+ref_atoms_interval=(atoms:array<RefAtom> b0:FactBound):>FactBound=>{
+    let b=b0
+    loop atom in atoms {
+        let x=atom.a
+        let y=atom.b
+        if (atom.op not=? 'lt' and atom.op not=? 'le') or x.unsigned or y.unsigned {continue}
+        if x.kind =? 0 and x.path.length =? 0 and y.kind =? 1 {
+            if atom.op =? 'le' {b.hi=min(b.hi y.value)}
+            else if y.value not=? FACT_MIN {b.hi=min(b.hi y.value - 1)}
+        } else if x.kind =? 1 and y.kind =? 0 and y.path.length =? 0 {
+            let negative:int64=int64<overflow='wrap'>(0) - int64<overflow='wrap'>(y.offset)
+            if ref_sum_fits(x.value negative) {
+                let c:int64=int64<overflow='wrap'>(x.value) - int64<overflow='wrap'>(y.offset)
+                if atom.op =? 'le' {b.lo=max(b.lo c)}
+                else if c not=? FACT_MAX {b.lo=max(b.lo c + 1)}
+            }
+        }
+    }
+    b
+}
+
+ref_atoms_have_kind=(atoms:array<RefAtom> kind:int64):>bool=>{
+    loop atom in atoms {
+        if atom.a.kind =? kind or atom.b.kind =? kind {return true}
+    }
+    false
+}
+
+ref_sum_fits=(a:int64 b:int64):>bool=>{
+    if b >? 0 {return a <=? FACT_MAX - b}
+    if b <? 0 {return a >=? FACT_MIN - b}
+    true
+}
+
+# Jo orders tokens by declaration ordinal; Dewy literal unions order by text.
+ref_op_rank=(op:Tok):>int64=>match op {
+    <'eof'> => 0
+    <'newline'> => 1
+    <'indent'> => 2
+    <'dedent'> => 3
+    <'ident'> => 4
+    <'int_lit'> => 5
+    <'float_lit'> => 6
+    <'str_lit'> => 7
+    <'kw_struct'> => 8
+    <'kw_enum'> => 9
+    <'kw_if'> => 10
+    <'kw_else'> => 11
+    <'kw_in'> => 12
+    <'kw_break'> => 13
+    <'kw_continue'> => 14
+    <'kw_return'> => 15
+    <'kw_match'> => 16
+    <'kw_import'> => 17
+    <'kw_as'> => 18
+    <'kw_const'> => 19
+    <'kw_true'> => 20
+    <'kw_false'> => 21
+    <'kw_none'> => 22
+    <'kw_null'> => 23
+    <'kw_and'> => 24
+    <'kw_or'> => 25
+    <'kw_not'> => 26
+    <'kw_mut'> => 27
+    <'kw_when'> => 28
+    <'kw_defer'> => 29
+    <'kw_extern'> => 30
+    <'kw_test'> => 31
+    <'kw_build'> => 32
+    <'kw_use'> => 33
+    <'kw_pass'> => 34
+    <'lparen'> => 35
+    <'rparen'> => 36
+    <'lbrack'> => 37
+    <'rbrack'> => 38
+    <'lbrace'> => 39
+    <'rbrace'> => 40
+    <'comma'> => 41
+    <'colon'> => 42
+    <'semi'> => 43
+    <'dot'> => 44
+    <'dotdot'> => 45
+    <'arrow'> => 46
+    <'assign'> => 47
+    <'pluseq'> => 48
+    <'minuseq'> => 49
+    <'stareq'> => 50
+    <'slasheq'> => 51
+    <'percenteq'> => 52
+    <'ampeq'> => 53
+    <'pipeeq'> => 54
+    <'careteq'> => 55
+    <'shleq'> => 56
+    <'shreq'> => 57
+    <'plus'> => 58
+    <'minus'> => 59
+    <'star'> => 60
+    <'slash'> => 61
+    <'percent'> => 62
+    <'amp'> => 63
+    <'pipe'> => 64
+    <'caret'> => 65
+    <'tilde'> => 66
+    <'shl'> => 67
+    <'shr'> => 68
+    <'eq'> => 69
+    <'ne'> => 70
+    <'lt'> => 71
+    <'le'> => 72
+    <'gt'> => 73
+    <'ge'> => 74
+    <'question'> => 75
+    <'qq'> => 76
+    <'bang'> => 77
+    <'at'> => 78
+    <'starstar'> => 79
+    <'kw_loop'> => 80
+    <'kw_let'> => 81
+    <'kw_xor'> => 82
+    <'kw_is'> => 83
+    <'ellipsis'> => 84
+    <'dotop'> => 85
+    <'lazy'> => 86
+}

@@ -1,0 +1,53 @@
+$runtime_checks
+# Read-only type queries over the owner's indexed arenas, only when requested.
+# Each visit follows its inference chain, then visits selected children; recursion
+# retains the depth-32 boundary. No checker callback, eager pass, or copied type view.
+from p"checker_types.dewy" import TypeInfo, StructInfo
+from p"refinement_types.dewy" import RefAtom
+from p"refine_predicates.dewy" import ref_atoms_have_kind
+
+ref_query_prune=(@types:array<TypeInfo> t0:int64):>int64=>{
+    let t=t0
+    loop t not=? 0 and types[t].kind =? 'var' and types[t].ref not=? 0 {t=int64(types[t].ref)}
+    t
+}
+
+ref_types_contain=(@types:array<TypeInfo> @structs:array<StructInfo> @args:array<int32> t0:int64 want:int64 depth:int64):>bool=>{
+    let t=ref_query_prune(@types t0)
+    if t =? want {return true}
+    if depth >=? 32 {return false}
+    let k=types[t].kind
+    if k =? 'refined' or k =? 'opt' or k =? 'array' or k =? 'fixed' {
+        return ref_types_contain(@types @structs @args int64(types[t].elem) want depth + 1)
+    }
+    if k =? 'enum_' and structs[int64(types[t].st)].union_ {
+        let si=int64(types[t].st)
+        let start=int64(structs[si].targs)
+        let stop:int64=start + int64(structs[si].ntargs)
+        loop i in [start..stop) {
+            if ref_types_contain(@types @structs @args int64(args[i]) want depth + 1) {return true}
+        }
+    }
+    false
+}
+
+ref_types_nested_formals=(@types:array<TypeInfo> @args:array<int32> @predicates:array<array<RefAtom>> t0:int64 nested:bool depth:int64):>bool=>{
+    if depth >=? 32 {return true}
+    let t=ref_query_prune(@types t0)
+    let k=types[t].kind
+    if k =? 'refined' {
+        if nested and ref_atoms_have_kind(predicates[int64(types[t].st)] 2) {return true}
+        return ref_types_nested_formals(@types @args @predicates int64(types[t].elem) nested depth + 1)
+    }
+    if k =? 'array' or k =? 'fixed' or k =? 'opt' {
+        return ref_types_nested_formals(@types @args @predicates int64(types[t].elem) true depth + 1)
+    }
+    if k =? 'tuple' {
+        let start=int64(types[t].args)
+        let stop:int64=start + int64(types[t].nargs)
+        loop i in [start..stop) {
+            if ref_types_nested_formals(@types @args @predicates int64(args[i]) true depth + 1) {return true}
+        }
+    }
+    false
+}

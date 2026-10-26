@@ -1,0 +1,59 @@
+# Frozen shared layouts; keep field order, defaults and enum ordinals.
+enum TK:
+    void_, bool_, int_, float_, str_, array, ptr, fn_, struct_, enum_, tuple, opt, var, param,
+    null_, range, module, typeval, none_lit, vec, cfn, fixed, box, polyfn, quantity, dimension, refined, callable, effect, secret
+
+enum RepId:
+    ordinary, tagged_int
+
+struct TypeInfo:
+    kind: TK
+    bits: i32
+    sign: bool
+    flags: i32
+    elem: i32
+    args: i32
+    nargs: i32
+    st: i32
+    ref: i32
+    id: i32
+    mutmask: i32
+    size: i32
+    align: i32
+    mod: i32
+    rep: RepId
+
+struct Field:
+    name: i32
+    type: i32
+    offset: i32
+    defval: i32
+    boxed: bool      # its value is kept in a box (its type holds the struct it is in)
+
+struct Variant:
+    name: i32
+    fields: i32
+    nfields: i32
+    tag: i32
+    value: int
+
+struct StructInfo:
+    drop_fn: i32
+    decl: i32
+    targs: i32
+    ntargs: i32
+    fields: i32
+    nfields: i32
+    variants: i32
+    nvariants: i32
+    payload_off: i32
+    simple_enum: bool
+    resolving: bool
+    resolved: bool
+    type: i32
+    name: str
+    union_: bool     # A | B: an enum whose variant i holds type argument (member) i
+    soa_: bool       # soa T[]: a struct with an array for each field of T (type argument 0)
+    record_: bool    # anonymous Dewy record; fields are the shape and types are its arguments
+    boxes_done: bool # which of its fields are boxed is known (decide_boxes)
+    lit_set: i32     # a string literal set (`'a'|'b'`, refine.jo's str_sets): variant i is member i

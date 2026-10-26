@@ -1,0 +1,43 @@
+use '../../../compiler/refine_predicates.jo'
+use '../../../compiler/refinement_types.jo'
+use '../../../compiler/checker_tokens.jo'
+term_text = (t: RefTerm) -> str: "{t.kind},{t.value},{t.unsigned},{t.offset},{t.path}"
+atom_text = (a: RefAtom) -> str: "{int(a.op)}:{term_text(a.a)}:{term_text(a.b)}"
+show_atoms = (atoms: RefAtom[]) -> str:
+    out: str[]
+    loop a in atoms: out.push(atom_text(a))
+    join(out, ";")
+read_i = (text: str) -> int: to_int(text) ?? 0
+main = () -> int:
+    argv = args()
+    terms: RefTerm[]
+    atoms: RefAtom[]
+    table: RefAtom[][] = [[]]
+    loop line in split(read_file(argv[1]) ?? "", "\n"):
+        p = split(line, " ")
+        if p[0] == "T":
+            path: int[]
+            if p[5] != "-":
+                loop x in split(p[5], ","): path.push(read_i(x))
+            terms.push(RefTerm(read_i(p[1]), read_i(p[2]), p[3] == "1", path, read_i(p[4])))
+        else if p[0] == "A": atoms.push(RefAtom(Tok(read_i(p[1])), terms[read_i(p[2])], terms[read_i(p[3])]))
+        else if p[0] == "C": print("{ref_term_less(terms[read_i(p[1])], terms[read_i(p[2])])} {ref_atom_less(atoms[read_i(p[3])], atoms[read_i(p[4])])}")
+        else if p[0] == "N":
+            a = atoms[read_i(p[1])]
+            out: RefAtom[]
+            ref_add(a.op, a.a, a.b, out)
+            print("{atom_text(ref_offset_right(a))}|{show_atoms(out)}|{atom_text(a)}")
+        else if p[0] == "I" or p[0] == "Q":
+            row: RefAtom[]
+            if p[1] != "-":
+                loop x in split(p[1], ","): row.push(atoms[read_i(x)])
+            if p[0] == "I":
+                id = ref_atoms_intern(table, row)
+                print("{id}|{show_atoms(table[id])}|{show_atoms(row)}")
+            else:
+                b = FactBound(read_i(p[2]), read_i(p[3]), p[4] == "1", FactReason(read_i(p[5])), read_i(p[6]), p[7] == "1")
+                r = ref_atoms_interval(row, b)
+                print("{r.lo} {r.hi} {r.nz} {int(r.reason)} {r.witness} {r.wide}|{ref_atoms_length_only(row)} {ref_atoms_have_kind(row, 2)} {ref_atoms_have_kind(row, 5)}")
+        else if p[0] == "R": table = [[]]
+        else if p[0] == "K": print("{ref_op_rank(Tok(read_i(p[1])))}")
+    0

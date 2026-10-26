@@ -33,7 +33,7 @@ wit_bound_text = (low: int, high: int, wide: bool, unsigned: bool) -> str:
     if hi: return "is at most {high}"
     ""
 
-wit_offset_text = (c: int) -> str: if c > 0: " + {c}" else if c < 0: " - {-c}" else: ""
+wit_offset_text = (c: int) -> str: if c > 0: " + {c}" else if c < 0: " - {u64(-c)}" else: ""
 
 wit_bound_candidates = (lo: int, hi: int, nz: bool, wide: bool) -> int[]:
     out: int[]
