@@ -1,0 +1,52 @@
+use '../../../compiler/checker_services.jo'
+use '../../../compiler/checker_types.jo'
+use '../../../compiler/refine_queries.jo'
+use '../../../compiler/refine_projection.jo'
+
+types = [TypeInfo(), TypeInfo(kind = .int_), TypeInfo(kind = .refined, elem = 1),
+    TypeInfo(kind = .str_), TypeInfo(kind = .array, elem = 2), TypeInfo(kind = .fixed, elem = 2),
+    TypeInfo(kind = .var, flags = 1), TypeInfo(kind = .var, ref = 2), TypeInfo(kind = .struct_, st = 1),
+    TypeInfo(kind = .refined, elem = 8), TypeInfo(kind = .struct_, st = 2), TypeInfo(kind = .tuple),
+    TypeInfo(kind = .refined, elem = 7)]
+structs = [StructInfo(), StructInfo(), StructInfo()]
+fields: Field[]
+resolve = (si: int):
+    if structs[si].resolved: panic("callback on resolved record")
+    structs[si].resolved = true
+    print("R {si}")
+    members: Field[]
+    if si == 1:
+        members = [Field(name = 11, type = 4), Field(name = 12, type = 3), Field(name = 13, type = 6),
+            Field(name = 14, type = 10), Field(name = 15, type = 1), Field(name = 15, type = 5)]
+    else: members = [Field(name = 21, type = 9)]
+    structs[si].fields = i32(fields.len())
+    structs[si].nfields = i32(members.len())
+    fields.extend(members)
+    if si == 1:
+        path = [14, 21, 11, -1]
+        result = ref_types_projection(types, structs, fields, resolver, host, 9, path, 1, 1)
+        print("N {result.type} {result.error}")
+    loop _ in [0..257):
+        types.push(TypeInfo())
+        structs.push(StructInfo())
+        fields.push(Field())
+    structs[si].fields = i32(fields.len())
+    fields.extend(members)
+string_length = (pos: int) -> bool:
+    if pos == 0: return false
+    print("L")
+    loop _ in [0..257): types.push(TypeInfo())
+    true
+resolver = CheckerFieldsHost(resolve)
+host = CheckerProjectionHost(string_length)
+read_i = (s: str) -> int: to_int(s) ?? 0
+main = () -> int:
+    argv = args()
+    loop line in split(read_file(argv[1]) ?? "", "\n"):
+        p = split(line, " ")
+        if p[0] != "Q": continue
+        path: int[]
+        loop i in [3..p.len()): path.push(read_i(p[i]))
+        result = ref_types_projection(types, structs, fields, resolver, host, read_i(p[1]), path, read_i(p[2]), 1)
+        print("Q {result.type} {result.error}")
+    0

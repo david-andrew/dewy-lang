@@ -1,0 +1,35 @@
+# Frozen bootstrap twin of refine_projection.dewy. Change both, or neither.
+use 'checker_types.dewy'
+use 'checker_services.dewy'
+use 'refine_queries.dewy'
+
+struct RefProjectionResult:
+    type: int
+    error: int
+
+ref_projection_repr = (types: mut TypeInfo[], t0: int) -> int:
+    t = ref_query_prune(types, t0)
+    if types[t].kind == .refined: return ref_query_prune(types, int(types[t].elem))
+    t
+
+ref_types_projection = (types: mut TypeInfo[], structs: mut StructInfo[], fields: mut Field[], resolver: mut CheckerFieldsHost, host: mut CheckerProjectionHost, root: int, path: int[], pos: int, int_type: int) -> RefProjectionResult:
+    t = ref_projection_repr(types, root)
+    loop selector in path:
+        if int(types[t].flags) & 1 != 0: return RefProjectionResult(type = t)
+        k = types[ref_query_prune(types, t)].kind
+        if selector == -1:
+            if k == .str_:
+                if not host.string_length(pos): return RefProjectionResult(error = 1)
+            else if k != .array and k != .fixed: return RefProjectionResult(error = 1)
+            t = int_type
+        else:
+            if k != .struct_: return RefProjectionResult(error = 2)
+            si = int(types[t].st)
+            if not structs[si].resolved: resolver.resolve_fields(si)
+            next = 0
+            loop i in [0..int(structs[si].nfields)):
+                f = int(structs[si].fields) + i
+                if int(fields[f].name) == selector: next = int(fields[f].type)
+            if next == 0: return RefProjectionResult(error = 3)
+            t = ref_projection_repr(types, next)
+    RefProjectionResult(type = t)

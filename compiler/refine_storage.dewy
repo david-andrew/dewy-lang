@@ -1,0 +1,44 @@
+$runtime_checks
+# Demand-only storage traversal. O(V * D) ancestor checks, O(D) private stack,
+# D <= 32. A callback can re-enter this walker and grow any borrowed arena;
+# retain IDs, never element pointers, and reread field runs after resolution.
+from p"checker_types.dewy" import TypeInfo, StructInfo, Field, TK
+from p"checker_services.dewy" import CheckerFieldsHost
+from p"refine_queries.dewy" import ref_query_prune
+
+ref_types_storage=(@types:array<TypeInfo> @structs:array<StructInfo> @fields:array<Field> @args:array<int32> @host:CheckerFieldsHost t0:int64):>bool=>{
+    let seen:array<int64>=[]
+    ref_types_storage_visit(@types @structs @fields @args @host t0 @seen)
+}
+
+ref_types_storage_visit=(@types:array<TypeInfo> @structs:array<StructInfo> @fields:array<Field> @args:array<int32> @host:CheckerFieldsHost t0:int64 @seen:array<int64>):>bool=>{
+    let t=ref_query_prune(@types t0)
+    if seen.contains(t) {return false}
+    if seen.length >=? 32 {return true}
+    let k=types[t].kind
+    if k =? 'refined' {return true}
+    if k not=? 'opt' and k not=? 'array' and k not=? 'fixed' and k not=? 'tuple' and k not=? 'struct_' {return false}
+    seen.push(t)
+    let found=ref_types_storage_children(@types @structs @fields @args @host t k @seen)
+    seen.pop();
+    found
+}
+
+ref_types_storage_children=(@types:array<TypeInfo> @structs:array<StructInfo> @fields:array<Field> @args:array<int32> @host:CheckerFieldsHost t:int64 k:TK @seen:array<int64>):>bool=>{
+    if k =? 'opt' or k =? 'array' or k =? 'fixed' {
+        return ref_types_storage_visit(@types @structs @fields @args @host int64(types[t].elem) @seen)
+    }
+    if k =? 'tuple' {
+        loop i in [0..int64(types[t].nargs)) {
+            if ref_types_storage_visit(@types @structs @fields @args @host int64(args[int64(types[t].args) + i]) @seen) {return true}
+        }
+    }
+    if k =? 'struct_' {
+        let si=int64(types[t].st)
+        if not structs[si].resolved {host.resolve_fields(si)}
+        loop i in [0..int64(structs[si].nfields)) {
+            if ref_types_storage_visit(@types @structs @fields @args @host int64(fields[int64(structs[si].fields) + i].type) @seen) {return true}
+        }
+    }
+    false
+}

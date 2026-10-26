@@ -84,6 +84,8 @@ are grouped. See the ownership sections for the live service contracts.
 | `refine_keys` | `refine_keys.jo` | Dewy finite dictionary keys | Requested edges + emitted keys; reject distances >4096, including wrapped negative spans. |
 | `type_queries` | `type_queries.jo` | Dewy equality/occurs-check | O(visited occurrences + inference links); hot root guards stay Jo. |
 | `checker_services`, `refine_strings` | `checker_services.jo`, `refine_strings.jo` | Dewy interning interface, set publication/constants | O(S*M²) search; one host call per new member/constant; peak flagship phase +0.115%. |
+| `refine_storage` | `refine_storage.jo` | Dewy storage-contract traversal | O(V * D), D≤32; private ancestor stack, unresolved-record callbacks; peak flagship phase +0.054%. |
+| `refine_projection` | `refine_projection.jo` | Dewy projection validation | O(path + scanned field runs + inference links); lazy fields, dialect/runtime request and first-error status. |
 
 ### Boundary lessons that constrain the next cutover
 
@@ -178,11 +180,15 @@ the name store invalidates every name-indexed cache at the same owner boundary.
 Lazy field resolution is explicitly reentrant: `check_struct_fields` can resolve
 types, check defaults, enter nested function scopes and validate refinements.
 Keep its resolved-before-recursion marker and scope/context save/restore with the
-resolver. A Dewy storage walker calls the service only for an unresolved record,
-then rereads the field run from the shared arena. It lends arena *headers*, not
+resolver. `refine_storage.dewy` borrows `CheckerFieldsHost`, calls it only for an
+unresolved record, then rereads the field run. It lends arena *headers*, not
 cached element pointers, and keeps its ancestor stack private to that invocation.
 Nested validation may enter a fresh walker; it must not clear an outer walk's
 stack or snapshot the checker. No callback per already-resolved field is needed.
+`refine_projection.dewy` shares that resolver and borrows `CheckerProjectionHost`
+only for string-length dialect/runtime requests. It returns the first diagnostic
+as a seed-compatible status; Jo retains reporting. Its path remains a value
+snapshot, while all arena headers are borrowed across reentrant calls.
 
 `refine_strings.dewy` owns string-set construction/publication and checked member
 constants. Its `CheckerInternHost` borrows whole-string interning; the set, type,
@@ -195,15 +201,9 @@ member constant costs one node append and one interning call, with direct field
 writes. Keep the frequently used diagnostic renderer in Jo; text for a newly
 published structure is built inside the coarse publication operation.
 
-The next three cutovers, in dependency order, are:
+The remaining cutovers, in dependency order, are:
 
-1. Lazy field service and storage-contract traversal, followed by projection
-   validation once its type/error services are available. Storage walks retain
-   O(V * D) ancestor checks and O(D) space, D capped at 32, and resolve each record
-   at most once through its existing marker. Projection costs its path plus the
-   scanned field runs; resolution's checking cost belongs to the resolver, not
-   a hidden prepass. Callback count is unresolved records, never visited fields.
-2. Checker local/function/scope layouts and refinement binders, then the recursive
+1. Checker local/function/scope layouts and refinement binders, then the recursive
    term/predicate resolver with typed lookup, type-resolution, diagnostic and
    evaluation requests. Borrow indexed state and keep direct scalar/literal paths
    in the recursive group; only terms needing semantic work call the host. Retain
@@ -211,7 +211,7 @@ The next three cutovers, in dependency order, are:
    demanded lookup/type resolution/evaluation. Scope lookup stays O(1); rollback
    costs only popped bindings. Moving definitions must add no record translation
    or new analysis pass.
-3. Evaluation's value/frame/place layouts and its recursive execution group.
+2. Evaluation's value/frame/place layouts and its recursive execution group.
    Keep checker entry at coarse expression/body forcing boundaries, then remove
    those host edges as the corresponding checker groups move. Cost follows the
    executed program, its existing immutable-value copies and call-frame depth;

@@ -1,0 +1,44 @@
+$runtime_checks
+# Projection validation is demand-only: O(path + scanned field runs + inference
+# links), O(1) local state. Only unresolved records and Dewy string lengths call
+# the host. Resolution may re-enter checking and grow the borrowed arenas.
+from p"checker_types.dewy" import TypeInfo, StructInfo, Field
+from p"checker_services.dewy" import CheckerFieldsHost, CheckerProjectionHost
+from p"refine_queries.dewy" import ref_query_prune
+
+# Seed-facing status, preserving the first diagnostic without an error union.
+# 1: length needs array/string; 2: field needs record; 3: unknown field.
+RefProjectionResult:type=[type:int64=0 error:int64=0]
+
+ref_projection_repr=(@types:array<TypeInfo> t0:int64):>int64=>{
+    let t=ref_query_prune(@types t0)
+    if types[t].kind =? 'refined' {return ref_query_prune(@types int64(types[t].elem))}
+    t
+}
+
+ref_types_projection=(@types:array<TypeInfo> @structs:array<StructInfo> @fields:array<Field> @resolver:CheckerFieldsHost @host:CheckerProjectionHost root:int64 path:array<int64> pos:int64 int_type:int64):>RefProjectionResult=>{
+    let t=ref_projection_repr(@types root)
+    loop selector in path {
+        if (types[t].flags & 1) not=? 0 {return RefProjectionResult(type=t)}
+        let k=types[ref_query_prune(@types t)].kind
+        if selector =? -1 {
+            if k =? 'str_' {
+                if not host.string_length(pos) {return RefProjectionResult(error=1)}
+            }
+            else if k not=? 'array' and k not=? 'fixed' {return RefProjectionResult(error=1)}
+            t=int_type
+        } else {
+            if k not=? 'struct_' {return RefProjectionResult(error=2)}
+            let si=int64(types[t].st)
+            if not structs[si].resolved {resolver.resolve_fields(si)}
+            let next:int64=0
+            loop i in [0..int64(structs[si].nfields)) {
+                let f:int64=int64(structs[si].fields) + i
+                if int64(fields[f].name) =? selector {next=int64(fields[f].type)}
+            }
+            if next =? 0 {return RefProjectionResult(error=3)}
+            t=ref_projection_repr(@types next)
+        }
+    }
+    RefProjectionResult(type=t)
+}

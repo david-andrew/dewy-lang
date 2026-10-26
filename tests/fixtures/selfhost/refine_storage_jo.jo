@@ -1,0 +1,56 @@
+use '../../../compiler/checker_services.jo'
+use '../../../compiler/checker_types.jo'
+use '../../../compiler/refine_queries.jo'
+use '../../../compiler/refinement_types.jo'
+use '../../../compiler/refine_predicates.jo'
+use '../../../compiler/refine_storage.jo'
+
+types = [TypeInfo()]
+structs = [StructInfo()]
+fields: Field[]
+arguments: i32[]
+pending: int[][] = [[]]
+nested: int[] = [0]
+calls: int[]
+resolve = (si: int):
+    if structs[si].resolved: panic("callback on resolved record")
+    structs[si].resolved = true
+    calls.push(si)
+    structs[si].fields = i32(fields.len())
+    structs[si].nfields = i32(pending[si].len())
+    loop t in pending[si]: fields.push(Field(type = i32(t)))
+    if nested[si] != 0:
+        found = ref_types_storage(types, structs, fields, arguments, host, nested[si])
+        print("N {si} {found}")
+    # Grow all shared arenas, then relocate the field run. No leaf may retain
+    # an element pointer or a copied header across the callback.
+    loop _ in [0..257):
+        types.push(TypeInfo())
+        structs.push(StructInfo())
+        fields.push(Field())
+        arguments.push(0)
+    structs[si].fields = i32(fields.len())
+    loop t in pending[si]: fields.push(Field(type = i32(t)))
+host = CheckerFieldsHost(resolve)
+read_i = (s: str) -> int: to_int(s) ?? 0
+main = () -> int:
+    argv = args()
+    loop line in split(read_file(argv[1]) ?? "", "\n"):
+        p = split(line, " ")
+        if p[0] == "T":
+            types.push(TypeInfo(kind = TK(read_i(p[1])), elem = i32(read_i(p[2])), st = i32(read_i(p[3])), ref = i32(read_i(p[4])), args = i32(arguments.len()), nargs = i32(p.len() - 5)))
+            loop i in [5..p.len()): arguments.push(i32(read_i(p[i])))
+        else if p[0] == "S":
+            members: int[]
+            loop i in [3..p.len()): members.push(read_i(p[i]))
+            pending.push(members)
+            nested.push(read_i(p[2]))
+            structs.push(StructInfo(resolved = p[1] == "1", fields = i32(fields.len()), nfields = i32(if p[1] == "1": members.len() else: 0)))
+            if p[1] == "1":
+                loop t in members: fields.push(Field(type = i32(t)))
+        else if p[0] == "Q":
+            found = ref_types_storage(types, structs, fields, arguments, host, read_i(p[1]))
+            print("Q {p[1]} {found}")
+            loop si in calls: print("C {si}")
+            calls = []
+    0

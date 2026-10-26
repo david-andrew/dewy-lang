@@ -1,3 +1,5 @@
+use 'refine_projection.dewy'
+use 'refine_storage.dewy'
 use 'checker_services.dewy'
 use 'refine_strings.dewy'
 use 'refine_keys.dewy'
@@ -826,39 +828,10 @@ ref_subst = (predicate: int, args: int[], zonking: bool = false) -> int:
     ref_span_copy(predicate, result)
     result
 
-# Wrapped element contracts and record fields retain storage authority.
-# Callable contracts inside an aggregate remain value types.
-# One mutable ancestor stack per query, rather than copying it at every edge.
-# For V visited type occurrences and maximum depth D (capped at 32), the walk
-# costs O(V*D) for cycle checks and O(D) space, reusing the path storage.
-# Keep the cycle check before the depth limit, including for scalar leaves.
+# One shared, noncapturing service; resolution owns its reentrant context.
+ref_fields_host = CheckerFieldsHost(check_struct_fields)
 ref_storage_contract = (t0: int) -> bool:
-    seen: int[]
-    ref_storage_visit(t0, seen)
-
-ref_storage_visit = (t0: int, seen: mut int[]) -> bool:
-    t = prune(t0)
-    if seen.contains(t): return false
-    if seen.len() >= 32: return true
-    k = types[t].kind
-    if k == .refined: return true
-    if k != .opt and k != .array and k != .fixed and k != .tuple and k != .struct_: return false
-    seen.push(t)
-    found = ref_storage_children(t, k, seen)
-    seen.pop()
-    found
-
-ref_storage_children = (t: int, k: TK, seen: mut int[]) -> bool:
-    if k == .opt or k == .array or k == .fixed: return ref_storage_visit(int(types[t].elem), seen)
-    if k == .tuple:
-        loop i in [0..int(types[t].nargs)):
-            if ref_storage_visit(targ(t, i), seen): return true
-    if k == .struct_:
-        si = int(types[t].st)
-        check_struct_fields(si)
-        loop i in [0..int(structs[si].nfields)):
-            if ref_storage_visit(int(fields[int(structs[si].fields) + i].type), seen): return true
-    false
+    ref_types_storage(types, structs, fields, type_args, ref_fields_host, t0)
 
 # A length (an int64 fact, never negative) may bound a uint64: its facts are
 # mirrored into the biased uint64 order (ref_value).
@@ -866,26 +839,19 @@ ref_repr_match = (actual: int, expected: int, path: int[]) -> bool:
     if has_var(actual) or has_var(expected) or type_eq(actual, expected): return true
     expected == T_U64 and path.len() > 0 and path[path.len() - 1] == -1
 
+ref_projection_string_length = (pos: int) -> bool:
+    if not files[pos_file(pos)].is_dewy: return false
+    runtime_fn("__dewy_string_length")
+    true
+ref_projection_host = CheckerProjectionHost(ref_projection_string_length)
+
 # Resolve a projection against its concrete binder before publishing a contract.
 ref_projection_type = (root: int, path: int[], pos: int) -> int:
-    t = representation_type(root)
-    loop selector in path:
-        if has_var(t): return t
-        if selector == -1:
-            if tkind(t) == .str_ and files[pos_file(pos)].is_dewy: runtime_fn("__dewy_string_length")
-            else if tkind(t) != .array and tkind(t) != .fixed: fatal(pos, "refinement length requires an array or a string")
-            t = T_INT
-        else:
-            if tkind(t) != .struct_: fatal(pos, "refinement field requires a record")
-            si = int(types[t].st)
-            check_struct_fields(si)
-            next = 0
-            loop i in [0..int(structs[si].nfields)):
-                f = fields[int(structs[si].fields) + i]
-                if int(f.name) == selector: next = int(f.type)
-            if next == 0: fatal(pos, "unknown refinement field")
-            t = representation_type(next)
-    t
+    result = ref_types_projection(types, structs, fields, ref_fields_host, ref_projection_host, root, path, pos, T_INT)
+    if result.error == 1: fatal(pos, "refinement length requires an array or a string")
+    if result.error == 2: fatal(pos, "refinement field requires a record")
+    if result.error == 3: fatal(pos, "unknown refinement field")
+    result.type
 
 ref_fact_current_entry = (s: mut FactState) -> int[]:
     args = refine_entry

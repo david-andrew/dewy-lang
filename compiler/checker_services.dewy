@@ -2,3 +2,10 @@
 # borrowers never copy it or retain a receiver across an interning call.
 # Interning preserves arbitrary bytes and mutates only the shared name store.
 CheckerInternHost:type=[intern_name:<(text:string):>int64>]
+
+# Resolver owns the resolved-before-recursion marker and scope/context restore.
+# It may re-enter leaves and grow arenas; callers lend headers and reread IDs.
+CheckerFieldsHost:type=[resolve_fields:<(si:int64):>void>]
+
+# Check the source dialect lazily, and demand the runtime helper for Dewy text.
+CheckerProjectionHost:type=[string_length:<(pos:int64):>bool>]
