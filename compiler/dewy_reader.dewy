@@ -7629,6 +7629,15 @@ rd_dc_plain_operand=(@reader_nodes:array<Node> n:int64):>bool=>$unsafe {
     if (k =? 'call') {
         return (reader_nodes[n].aux2 =? (-1))
     }
+    # (`b.day - e.day`: sums, differences and products of plain operands read the same twice,
+    # and a comparison takes them exactly, where a temporary would store them)
+    if (k =? 'binary') {
+        let op:int64=int64<overflow='wrap'>(reader_nodes[n].op)
+        if (((op =? 58) or (op =? 59)) or (op =? 60)) {
+            return (rd_dc_plain_operand(@reader_nodes int64<overflow='wrap'>(reader_nodes[n].a)) and rd_dc_plain_operand(@reader_nodes int64<overflow='wrap'>(reader_nodes[n].b)))
+        }
+        return false
+    }
     ((k =? 'field') and rd_dc_plain_operand(@reader_nodes int64<overflow='wrap'>(reader_nodes[n].a)))
 }
 

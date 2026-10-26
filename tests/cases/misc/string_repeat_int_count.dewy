@@ -1,0 +1,6 @@
+# A text repeat takes any `int` count without a proof: zero or less gives "".
+bars = (counts:array<int> most:int):>void => {
+    if most <=? 0 return
+    loop n in counts printl("|{"#" * (n * 20 // most)}{((most - n) * 20 // most) * "."}|")
+}
+main = () => bars([10 -3 25 0] 25)

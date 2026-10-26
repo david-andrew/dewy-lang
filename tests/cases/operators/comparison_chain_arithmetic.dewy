@@ -1,0 +1,15 @@
+# A chain's middle operand of plain arithmetic is compared exactly, as written
+# out with `and`: no int64 store, and its bounds prove an index.
+Entry:type = [day:int64 text:string]
+late = (bank:Entry book:Entry):>bool => 0 <=? bank.day - book.day <=? 3
+before = (xs:array<string> i:int64):>string => {
+    if 0 <=? i - 1 <? xs.length return xs[i - 1]
+    "-"
+}
+main = () => {
+    printl(late(Entry[12 "WIRE IN"] Entry[9 "invoice"]))
+    printl(late(Entry[3 "RENT"] Entry[9 "invoice"]))
+    printl(late(Entry[int64.max "x"] Entry[int64.min "y"]))
+    printl(before(["a" "b" "c"] 3))
+    printl(before(["a" "b" "c"] 4))
+}

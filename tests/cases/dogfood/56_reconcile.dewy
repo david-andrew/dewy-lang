@@ -1,0 +1,115 @@
+# Bank reconciliation: match a ledger against a bank statement by amount, allowing
+# the bank to post up to three days late; report matches, what is missing on each
+# side, and whether the closing balances agree once the differences are explained.
+
+const LEDGER = """2026-03-01,Opening deposit,1500.00
+2026-03-02,Rent,-950.00
+2026-03-04,Groceries,-82.17
+2026-03-09,Freelance invoice,640.50
+2026-03-11,Electric bill,-61.30
+2026-03-15,Groceries,-82.17
+2026-03-20,Gym,-35.00
+2026-03-28,Check #1043,-120.00"""
+
+const STATEMENT = """date,description,amount
+2026-03-01,DEPOSIT,1500.00
+2026-03-03,ACH RENT PMT,-950.00
+2026-03-05,FRESHMART 22,-82.17
+2026-03-12,CITY ELECTRIC,-61.30
+2026-03-12,WIRE IN,640.50
+2026-03-16,FRESHMART 22,-82.17
+2026-03-20,GYM CLUB,-35.00
+2026-03-25,MONTHLY FEE,-4.95
+2026-03-31,INTEREST,0.42"""
+
+Entry:type = [day:int text:string cents:int]
+
+# "2026-03-09" -> day of the year (this report stays inside one year)
+const MONTH_STARTS = [0 31 59 90 120 151 181 212 243 273 304 334]
+
+day_of_year = (date:string):>int | none => {
+    let parts = date.split("-")
+    if parts.length not=? 3 return none
+    let month = to_int(parts[1]) ?? 0
+    let day = to_int(parts[2]) ?? 0
+    if month <? 1 or month >? 12 or day <? 1 or day >? 31 return none
+    MONTH_STARTS[month - 1] + day
+}
+
+# "-82.17" -> -8217, without going through a float
+cents = (text:string):>int | none => {
+    let negative = text.startswith("-")
+    let digits = text.remove_prefix("-")
+    let parts = digits.split(".")
+    if parts.length >? 2 or parts.length =? 0 return none
+    let whole = to_int(parts[0]) ?? -1
+    if whole <? 0 return none
+    let fraction = 0
+    if parts.length =? 2 {
+        let f = parts[1]
+        if f.length not=? 2 return none
+        fraction = to_int(f) ?? -1
+        if fraction <? 0 return none
+    }
+    let total = whole * 100 + fraction
+    if negative -total else total
+}
+
+money = (c:int):>string => {
+    let sign = if c <? 0 "-" else ""
+    let a = abs(c)
+    "{sign}{a // 100}.{a % 100:02}"
+}
+
+parse = (csv:string skip_header:bool):>array<Entry> => {
+    let out:array<Entry> = []
+    loop line in csv.lines {
+        if skip_header and line.startswith("date,") continue
+        let fields = line.split(",")
+        if fields.length not=? 3 continue
+        let day = day_of_year(fields[0])
+        let amount = cents(fields[2])
+        if day is? none or amount is? none {
+            printl("unreadable line: {line}")
+            continue
+        }
+        out.push(Entry[day fields[1] amount])
+    }
+    out
+}
+
+main = () => {
+    let ledger = parse(LEDGER false)
+    let bank = parse(STATEMENT true)
+    let used = fill(false bank.length)
+    let unmatched:array<Entry> = []
+    printl("matched:")
+    loop e in ledger {
+        let found = -1
+        loop j in [0..bank.length) {
+            let b = bank[j]
+            if not used[j] and b.cents =? e.cents and 0 <=? b.day - e.day <=? 3 {
+                found = j
+                break
+            }
+        }
+        if found <? 0 {
+            unmatched.push(e)
+            continue
+        }
+        used[found] = true
+        let lag = bank[found].day - e.day
+        printl("  {e.text:<18} {money(e.cents):>9}  {bank[found].text}{if lag >? 0 " (+{lag}d)" else ""}")
+    }
+    printl("in the ledger, not at the bank:")
+    loop e in unmatched printl("  {e.text:<18} {money(e.cents):>9}")
+    printl("at the bank, not in the ledger:")
+    let bank_only = [loop j in [0..bank.length) if not used[j] bank[j]]
+    loop b in bank_only printl("  {b.text:<18} {money(b.cents):>9}")
+    let book = sum([loop e in ledger e.cents])
+    let statement = sum([loop b in bank b.cents])
+    let explained = book - sum([loop e in unmatched e.cents]) + sum([loop b in bank_only b.cents])
+    printl("ledger balance    {money(book):>9}")
+    printl("statement balance {money(statement):>9}")
+    printl(if explained =? statement "reconciled: the differences explain the gap" else "NOT reconciled: off by {money(statement - explained)}")
+}

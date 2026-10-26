@@ -1,0 +1,13 @@
+# A guarded `int` divisor of a fraction is proven nonzero, as a word one is.
+share = (total:rational people:int):>rational => {
+    if people <=? 0 return 0
+    total / people
+}
+main = () => {
+    let n:int = 3
+    let portion = 3/4
+    if n not=? 0 { portion = portion / n }
+    printl(portion)
+    printl(share(7/2 2))
+    printl(share(7/2 -1))
+}

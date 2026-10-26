@@ -1,0 +1,112 @@
+# Meeting-room scheduler: parse "HH:MM-HH:MM" bookings, merge each person's busy
+# time, find common free slots, count the rooms needed, and pick the most
+# meetings one room can hold (earliest finish first).
+
+Meeting:type = [title:string start:int finish:int]
+
+const BOOKINGS = [
+    "standup 09:00-09:15"
+    "design 09:30-11:00"
+    "lunch 12:00-13:00"
+    "review 10:30-12:15"
+    "1on1 13:00-13:30"
+    "planning 14:00-15:30"
+    "retro 15:00-16:00"
+    "sync 15:15-15:45"
+    "broken 25:00-26:00"
+    "backwards 17:00-16:00"
+]
+
+const DAY_START = 9 * 60
+const DAY_END = 17 * 60
+
+parse_clock = (text:string):>int | none => {
+    let parts = text.split(":")
+    if parts.length not=? 2 return none
+    let h = to_int(parts[0]) ?? -1
+    let m = to_int(parts[1]) ?? -1
+    if h <? 0 or h >? 23 or m <? 0 or m >? 59 return none
+    h * 60 + m
+}
+
+clock = (minutes:int):>string => "{minutes // 60:02}:{minutes % 60:02}"
+
+parse_meeting = (line:string):>Meeting | none => {
+    let words = line.split()
+    if words.length not=? 2 return none
+    let span = words[1].split("-")
+    if span.length not=? 2 return none
+    let start = parse_clock(span[0])
+    let finish = parse_clock(span[1])
+    if start is? none or finish is? none or finish <=? start return none
+    Meeting[words[0] start finish]
+}
+
+# merge overlapping or touching intervals, sorted by start
+merge = (spans:array<[start:int finish:int]>):>array<[start:int finish:int]> => {
+    let out:array<[start:int finish:int]> = []
+    loop s in spans.sorted(key=(s) => s.start) {
+        if out.length >? 0 and s.start <=? out.last.finish {
+            out[out.length - 1].finish = max(out.last.finish s.finish)
+        } else out.push(s)
+    }
+    out
+}
+
+free_slots = (busy:array<[start:int finish:int]> opens:int closes:int):>array<[start:int finish:int]> => {
+    let slots:array<[start:int finish:int]> = []
+    let cursor = opens
+    loop b in merge(busy) {
+        if b.start >? cursor slots.push([start=cursor finish=min(b.start closes)])
+        cursor = max(cursor b.finish)
+    }
+    if cursor <? closes slots.push([start=cursor finish=closes])
+    slots
+}
+
+rooms_needed = (meetings:array<Meeting>):>int => {
+    # sweep: +1 at each start, -1 at each finish (ends first at the same minute)
+    let events = [loop m in meetings { [at=m.start step=1] [at=m.finish step=-1] }]
+    let rooms = 0
+    let most = 0
+    loop e in events.sorted(key=(e):>[int int] => [e.at e.step]) {
+        rooms += e.step
+        most = max(most rooms)
+    }
+    most
+}
+
+one_room = (meetings:array<Meeting>):>array<Meeting> => {
+    let chosen:array<Meeting> = []
+    let free_at = 0
+    loop m in meetings.sorted(key=(m) => m.finish) {
+        if m.start >=? free_at {
+            chosen.push(m)
+            free_at = m.finish
+        }
+    }
+    chosen
+}
+
+main = () => {
+    let meetings:array<Meeting> = []
+    loop line in BOOKINGS {
+        match parse_meeting(line) {
+            m:Meeting => meetings.push(m)
+            <none> => printl("skipping bad booking: {line}")
+        }
+    }
+    printl("{meetings.length} meetings")
+    let busy = merge([loop m in meetings [start=m.start finish=m.finish]])
+    printl("busy:")
+    loop b in busy printl("  {clock(b.start)}-{clock(b.finish)}")
+    printl("free:")
+    loop f in free_slots(busy DAY_START DAY_END) {
+        printl("  {clock(f.start)}-{clock(f.finish)} ({f.finish - f.start} min)")
+    }
+    printl("rooms needed: {rooms_needed(meetings)}")
+    let picked = one_room(meetings)
+    printl("one room holds {picked.length}: {[loop m in picked m.title].join(", ")}")
+    let total = sum([loop m in meetings m.finish - m.start])
+    printl("booked {total // 60}h{total % 60:02}m in total")
+}

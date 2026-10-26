@@ -1882,6 +1882,11 @@ rt_dc_plain_operand = (n: int) -> bool:
     if k == .int_lit: return nodes[n].aux2 == 0
     # (an exact integer literal)
     if k == .call: return nodes[n].aux2 == -1
+    # (`b.day - e.day`: sums, differences and products of plain operands read the same twice,
+    # and a comparison takes them exactly, where a temporary would store them)
+    if k == .binary:
+        op = nodes[n].op as Tok
+        return (op == .plus or op == .minus or op == .star) and rt_dc_plain_operand(int(nodes[n].a)) and rt_dc_plain_operand(int(nodes[n].b))
     k == .field and rt_dc_plain_operand(int(nodes[n].a))
 
 # An index's entries after its `[`, through its `]`: `xs[i]`, `m[i j]`, `Point[x=1 y=2]`, or one

@@ -1,0 +1,7 @@
+# An update's index is evaluated once, in a temporary; a message shows it as written.
+histogram = (pixels:array<int> bins:int64):>array<int> => {
+    let counts = fill(0 bins)
+    loop v in pixels counts[v * bins // 256] += 1
+    counts
+}
+main = () => printl(histogram([10 200] 4))

@@ -1,0 +1,7 @@
+# The same with the width declared: each caller proves its argument fits.
+histogram = (pixels:array<int> bins:int64):>array<int> => {
+    let counts = fill(0 bins)
+    loop v in pixels if 0 <=? v <? counts.length counts[v] += 1
+    counts
+}
+main = () => printl(histogram([1 2 2] 4))

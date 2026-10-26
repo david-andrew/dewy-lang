@@ -1,0 +1,6 @@
+# The constant keyed by its keys: reads of a member need no guard.
+const TSP_PER:totaldict<'tsp' | 'tbsp' | 'cup' int> = ['tsp'->1 'tbsp'->3 'cup'->48]
+main = () => {
+    printl(TSP_PER["cup"])
+    loop unit in ["cup" "tbsp"] printl("{unit}: {TSP_PER[unit]}")
+}

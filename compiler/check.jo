@@ -3128,7 +3128,10 @@ pack_result_type = (tn: int) -> int:
     ts = [first]
     loop i in [1..nkids(tn)):
         t = resolve_type(kid(tn, i))
-        if not type_eq(t, first): fatal(nodes[kid(tn, i)].pos, "the values a function gives have one type for now: this is {dt(t)}, and the first is {dt(first)}")
+        if not type_eq(t, first):
+            # (a record gives values of several types, and a pattern takes it apart the same way)
+            if dewy_at(nodes[tn].pos): err_notes.push((-1, "help: for values of different types, give a record, `:>[first:{dt(first)} second:{dt(t)}]`, and take it apart with `let [first second] = f(...)`"))
+            fatal(nodes[kid(tn, i)].pos, "the values a function gives have one type for now: this is {dt(t)}, and the first is {dt(first)}")
         ts.push(t)
     mk_values(ts)
 
@@ -3929,6 +3932,7 @@ index_update_path = (n: int) -> int[]:
 
 # Capture an index even when it is a variable: the update's right side may
 # change that variable before the selected value is written back.
+index_update_sources: {int: int} = {}   # a captured index's name -> the expression it holds (for messages)
 index_update_capture = (ix: int, stmts: mut int[]) -> int:
     pos = nodes[ix].pos
     elem_tmp_n += 1
@@ -3936,6 +3940,7 @@ index_update_capture = (ix: int, stmts: mut int[]) -> int:
     d = mk(.vardecl, pos)
     nodes[d].name = i32(name)
     nodes[d].b = nodes[ix].b
+    index_update_sources[name] = int(nodes[ix].b)
     stmts.push(d)
     nodes[ix].b = i32(comp_ident(name, pos))
     name
@@ -4055,6 +4060,7 @@ compound_selector_capture = (s: int) -> int:
                 continue
             name = "$selector{bc_count}"
             bc_count += 1
+            index_update_sources[intern(name)] = selector
             stmts.push(bc_let(name, selector, pos))
             captured.push(bc_ident(name, pos))
         if nodes[part].b != 0: nodes[part].b = i32(captured[0])
@@ -4636,6 +4642,7 @@ __check_assign = (s: int, before: mut int[]) -> int:
                     d = mk(.vardecl, pos)
                     nodes[d].name = i32(nm)
                     nodes[d].b = i32(ib)
+                    index_update_sources[nm] = ib
                     add_flag(ib, NF_CHECKED)
                     check_stmt(d)
                     pre.insert(0, d)

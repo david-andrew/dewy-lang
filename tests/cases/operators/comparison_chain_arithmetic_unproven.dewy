@@ -1,0 +1,6 @@
+# The chain allows i - 1 to equal the length, so it is no index.
+before = (xs:array<string> i:int64):>string => {
+    if 0 <=? i - 1 <=? xs.length return xs[i - 1]
+    "-"
+}
+main = () => printl(before(["a" "b" "c"] 3))

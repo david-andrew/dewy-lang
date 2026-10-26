@@ -7636,6 +7636,13 @@ check_binary = (n: int, expected: int) -> int:
             if str_set_of(tb) != 0:
                 coerce(b, T_STR)
                 tb = T_STR
+    # (`"#" * n` of an `int`: a count of zero or less repeats nothing and one past any memory
+    # cannot be made, so the count saturates into a word rather than narrowing with a check)
+    if op == .star and dewy_at(nodes[n].pos) and (ta == T_STR and tb == T_MATH_INT and not is_lit(b) or tb == T_STR and ta == T_MATH_INT and not is_lit(a)):
+        count = if ta == T_STR: b else: a
+        word = policy_int(T_INT, 2, nodes[n].pos)
+        coerce(count, word)
+        if ta == T_STR: tb = word else: ta = word
     pending_decimal = (nodes[a].kind == .float_lit and nodes[a].sval != 0 and is_lit(a)) or (nodes[b].kind == .float_lit and nodes[b].sval != 0 and is_lit(b))
     # (a quantity operand is exact or floating by its number: 0.5 * 2s stays exact)
     na = if types[ta].kind == .quantity: quantity_base(ta) else: ta
@@ -7651,7 +7658,9 @@ check_binary = (n: int, expected: int) -> int:
     if not is_shift and ta == T_MATH_INT and (bundled_bigint_type(tb) or bundled_rational_type(tb)):
         coerce(a, tb)
         ta = tb
-    else if not is_shift and tb == T_MATH_INT and (bundled_bigint_type(ta) or bundled_rational_type(ta)):
+    # (`q / n` keeps an `int` divisor for the library's `(Rational int)` division, so a
+    # guard on n proves it nonzero, as for a word divisor: rational_divisor)
+    else if not is_shift and tb == T_MATH_INT and (bundled_bigint_type(ta) or bundled_rational_type(ta)) and not (op == .slash and bundled_rational_type(ta)):
         coerce(b, ta)
         tb = ta
     if is_float(tb) and bundled_rational_type(ta):
@@ -7834,6 +7843,10 @@ check_binary = (n: int, expected: int) -> int:
                 why = ""
                 ot = op_text(op, nodes[n].pos)
                 if (tka == .array and is_numeric(int(types[ta].elem))) or (tkb == .array and is_numeric(int(types[tb].elem))): why = " (for each element: .{ot}, as in xs .{ot} 2.0, gives {dt(mk_array(T_BOOL))})"
+                # (a sort key written `[a b]` is an array: Python's tuple key is a Dewy tuple)
+                if pos_in_lib(nodes[n].pos) and err_trail_names.len() > 0 and err_trail_names[0] in ["sort", "sorted", "min_by", "max_by"]:
+                    why = ""
+                    err_notes.push((-1, "help: a key of several parts is a tuple, which orders part by part: give the key function a tuple result, `key=(x):>[T T] => [a b]`"))
                 fatal(nodes[n].pos, "arrays can only be compared with {op_text(.eq, nodes[n].pos)} and {op_text(.ne, nodes[n].pos)}{why}")
             if not can_coerce(b, tb, ta) and tkb != .array and tka == .array and is_numeric(int(types[ta].elem)) and (is_numeric(tb) or is_lit(b)):
                 ot = op_text(op, nodes[n].pos)
@@ -9182,7 +9195,16 @@ check_lambda = (lam: int, expected: int) -> int:
     check_lambda_body(f, lam, ret_hint)
     # (a parallel or spawn body the compiler made keeps its values as the array it collects)
     lang_body = has_flag(lam, NF_LANG_BODY)
-    if et != 0 and not lang_body and fn_type_pack(et) != (fns[f].pack != 0): fatal(nodes[lam].pos, if fns[f].pack != 0: "this function gives several values, and {dt(et)} gives one" else: "this function gives one value, and {dt(et)} gives several: express each one in its body, `() => \{ 1 2 }`")
+    if et != 0 and not lang_body and fn_type_pack(et) != (fns[f].pack != 0):
+        if fns[f].pack != 0:
+            # (`key=(e) => (e.at e.step)`, Python's tuple: parentheses list values, a tuple is one)
+            parts = if fns[f].pack_k > 1: fns[f].pack_k else: 2
+            elem = int(types[prune(int(fns[f].ret))].elem)
+            shown = if elem > 0 and tkind(prune(elem)) != .var: dt(elem) else: "T"
+            tuple = "[{" ".join(fill(shown, parts))}]"
+            if dewy_at(nodes[lam].pos): err_notes.push((-1, "help: parentheses list several values; they make no tuple. For one value of several parts, give a tuple and its type: `(...):>{tuple} => [...]`"))
+            fatal(nodes[lam].pos, "this function gives several values, and the function wanted here gives one")
+        fatal(nodes[lam].pos, "this function gives one value, and {dt(et)} gives several: express each one in its body, `() => \{ 1 2 }`")
     zp: int[]
     loop t in fns[f].ptypes: zp.push(zonk(t))
     fns[f].ptypes = zp

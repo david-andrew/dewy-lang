@@ -1,0 +1,4 @@
+# A refinement on another parameter is spelled with the caller's arguments.
+clamp = (v:int lo:int hi:int<(>=? lo)>):>int => if v <? lo lo else if v >? hi hi else v
+pick = (row:array<int> x:int):>int => clamp(x 0 row.length - 1)
+main = () => printl(pick([1 2 3] 5))

@@ -1,0 +1,7 @@
+# An `int` parameter given where an int64 is wanted: the hint names the width.
+histogram = (pixels:array<int> bins:int):>array<int> => {
+    let counts = fill(0 bins)
+    loop v in pixels if 0 <=? v <? counts.length counts[v] += 1
+    counts
+}
+main = () => printl(histogram([1 2 2] 4))

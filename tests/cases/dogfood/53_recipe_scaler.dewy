@@ -1,0 +1,102 @@
+# Recipe scaler: parse ingredient lines with mixed fractions ("1 1/2 cup flour"),
+# scale them exactly, convert to friendlier units, and total a shopping list.
+
+const RECIPE = """pancakes serves 4
+1 1/2 cup flour
+3 1/2 tsp baking powder
+1 tbsp sugar
+1/4 tsp salt
+1 1/4 cup milk
+3 tbsp butter
+1 whole egg"""
+
+# how many teaspoons are in each volume unit
+const TSP_PER:dict<string int> = ["tsp"->1 "tbsp"->3 "cup"->48]
+
+Ingredient:type = [amount:rational unit:string name:string]
+
+parse_amount = (words:array<string>):>[amount:rational used:int64] => {
+    # "1", "1/2" or "1 1/2": returns the amount and how many words it used
+    let total:rational = 0
+    let used = 0
+    loop w in words {
+        let parts = w.split("/")
+        if parts.length =? 1 {
+            let n = to_int(w) ?? -1
+            if n <? 0 or used >? 0 break
+            total += n
+        } else if parts.length =? 2 {
+            let num = to_int(parts[0]) ?? -1
+            let den = to_int(parts[1]) ?? 0
+            if num <? 0 or den <=? 0 break
+            total += num / den
+        } else break
+        used += 1
+    }
+    [amount=total used=used]
+}
+
+parse_line = (line:string):>Ingredient | none => {
+    let words = line.split()
+    let [amount used] = parse_amount(words)
+    if used <=? 0 or used >=? words.length - 1 return none
+    Ingredient[amount words[used] words[used + 1..].join(" ")]
+}
+
+# 7/4 -> "1 3/4", 1/2 -> "1/2", 3 -> "3"
+show = (q:rational):>string => {
+    let whole = q.floor()
+    let rest = q - whole
+    if rest =? 0 return "{whole}"
+    if whole =? 0 return "{rest}"
+    "{whole} {rest}"
+}
+
+# the largest unit that measures the amount in steps a cook can use
+const STEPS = [[unit="cup" step=1/4] [unit="tbsp" step=1/2]]
+
+friendly = (amount:rational unit:string):>[amount:rational unit:string] => {
+    let per = TSP_PER.get(unit) ?? 0
+    if per =? 0 return [amount=amount unit=unit]
+    let tsp = amount * per
+    loop s in STEPS {
+        let size = TSP_PER.get(s.unit) ?? 0
+        let step = s.step
+        if size <=? 0 or step =? 0 continue
+        let count = tsp / size
+        let steps = count / step
+        if count >=? s.step and steps.floor() =? steps return [amount=count unit=s.unit]
+    }
+    [amount=tsp unit="tsp"]
+}
+
+main = () => {
+    let lines = RECIPE.lines
+    if lines.length =? 0 return
+    let header = lines[0].split()
+    if header.length =? 0 return
+    let serves = to_int(header.last) ?? 1
+    if serves <=? 0 return
+    let items = [loop line in lines[1..] { let i = parse_line(line); if i isnt? none i }]
+    loop guests in [2 6 10] {
+        let factor = guests / serves
+        printl("{header[0]} for {guests} (x{show(factor)}):")
+        loop item in items {
+            let [amount unit] = friendly(item.amount * factor item.unit)
+            printl("  {show(amount):>6} {unit:<5} {item.name}")
+        }
+    }
+    # a shopping list for three batches of 6, in teaspoons, then friendly units
+    let totals:dict<string rational> = []
+    loop item in items {
+        let per = TSP_PER.get(item.unit) ?? 0
+        if per =? 0 continue
+        if item.name not in? totals totals[item.name] = 0
+        totals[item.name] += item.amount * per * 3 * 6 / serves
+    }
+    printl("shopping list:")
+    loop [name tsp] in totals {
+        let [amount unit] = friendly(tsp "tsp")
+        printl("  {name:<14} {show(amount)} {unit}")
+    }
+}

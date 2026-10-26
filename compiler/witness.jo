@@ -122,6 +122,8 @@ wit_text = (e0: int, depth: int = 0) -> str:
     k = nodes[e].kind
     if k == .ident and nodes[e].name != 0:
         name = name_of(int(nodes[e].name))
+        # (`d[v * n // 256] += 1` holds its index in a temporary: it is shown as written)
+        if let source = index_update_sources.get(int(nodes[e].name)): return wit_text(source, depth + 1)
         return if wit_hidden_name(name): "" else: name
     if k == .int_lit and not has_flag(e, NF_U64): return "{nodes[e].ival}"
     if k == .str_lit: return wit_quoted(e)
@@ -490,6 +492,7 @@ wit_unknown = (n: int, b: FactBound, what: str, contract: int = 0, relation: str
     wit_context(contract)
     wit_help(relation, runtime, contract)
     wit_counter_help(n, b)
+    wit_int_parameter_help(n)
     # (a loop's or an unsupported operation's part is a note at its span: the
     # headline names the bound the relation lacks)
     why = if missing != "" and (b.reason == .missing or b.reason == .loop_ or b.reason == .unsupported): "missing {missing}" else: wit_reason(b)
@@ -507,6 +510,17 @@ wit_counter_help = (n: int, b: FactBound):
     if nodes[v].kind != .ident or nodes[v].aux != i32(int(SK.local)) or prune(ntype(v)) != T_MATH_INT or not dewy_at(nodes[n].pos): return
     name = name_of(int(nodes[v].name))
     err_notes.push((-1, "help: or declare `{name}` a 64-bit counter where it is made (`let {name}:{dt(ntype(n))} = 0`): the counter-progress assumption covers 64-bit counters, not an `int` converted afterwards"))
+
+# (`bins:int` given where an int64 is wanted, `fill(0 bins)`: an `int` parameter holds any
+# integer, while one declared with the width moves the proof to each caller. O(1))
+wit_int_parameter_help = (n: int):
+    if n <= 0 or nodes[n].a == 0 or not is_int(ntype(n)) or prune(ntype(n)) == T_MATH_INT or not dewy_at(nodes[n].pos): return
+    v = int(nodes[n].a)
+    loop nodes[v].kind == .narrow: v = int(nodes[v].a)
+    if nodes[v].kind != .ident or nodes[v].aux != i32(int(SK.local)) or prune(ntype(v)) != T_MATH_INT: return
+    if int(locals[int(nodes[v].sym)].flags) & LF_VALUEPARAM == 0: return
+    name = name_of(int(nodes[v].name))
+    err_notes.push((-1, "help: or declare the parameter `{name}:{dt(ntype(n))}`: an `int` parameter holds any integer, and one with a width moves the proof to each caller"))
 
 wit_side = (value: int, node0: int) -> WitSide:
     node = node0
@@ -709,8 +723,35 @@ wit_key = (n: int):
     dict = representation_type(ntype(kid(n, 0)))
     if base != "" and nodes[e].kind == .conv and nodes[e].aux == i32(int(CV.set_text)) and is_map_type(dict) and total_dict_keys(ntype(int(nodes[e].a))).0:
         err_notes.push((-1, "help: or declare `{base}` a `totaldict<{dt_named(ntype(int(nodes[e].a)))} {dt(struct_targ(int(types[prune(dict)].st), 1))}>`, made from a literal with every key: its reads need no guard"))
+    else if base != "" and is_map_type(dict) and dewy_at(nodes[n].pos):
+        # (a constant dictionary written out with text keys: those keys as a literal union)
+        keys = wit_constant_keys(receiver)
+        if keys != "": err_notes.push((-1, "help: or key the constant by its keys, `const {base}:totaldict<{keys} {dt(struct_targ(int(types[prune(dict)].st), 1))}> = [...]`: a totaldict has every key, so its reads need no guard"))
     if dir_defer(n, "cannot prove the key is in the dictionary", true): return
     wit_fail(nodes[n].pos, "cannot prove the key is in the dictionary")
+
+# The keys of a module constant made from a dictionary literal with plain text keys,
+# as a literal union (`'tsp' | 'cup'`); "" for anything else. O(keys)
+wit_constant_keys = (r0: int) -> str:
+    r = r0
+    loop r > 0 and (nodes[r].kind == .conv or nodes[r].kind == .narrow): r = int(nodes[r].a)
+    if r <= 0 or nodes[r].kind != .ident or nodes[r].aux != i32(int(SK.global)): return ""
+    d = int(globals[int(nodes[r].sym)].decl)
+    if d <= 0 or not has_flag(d, NF_RDONLY) or nodes[d].kind != .vardecl: return ""
+    init = int(nodes[d].b)
+    loop init > 0 and nodes[init].kind == .conv: init = int(nodes[init].a)
+    if init <= 0 or nodes[init].kind != .map_lit or nkids(init) == 0 or nkids(init) > 8: return ""
+    parts: str[]
+    loop pair in kids(init):
+        k = int(nodes[pair].a)
+        loop k > 0 and nodes[k].kind == .conv: k = int(nodes[k].a)
+        if k <= 0 or nodes[k].kind != .str_lit or nkids(k) != 0 or nodes[k].sval < 0: return ""
+        text = name_of(int(nodes[k].sval))
+        # (text a quoted literal type could not spell as it is)
+        loop bad in ["'", "\\", "\n", "\{", "}"]:
+            if contains(text, bad): return ""
+        parts.push("'{text}'")
+    " | ".join(parts)
 
 # A builtin operation's precondition `a op b` (`xs.length >? 0` for pop, a
 # truncate count `>=? 0`), refuted (c = 0) or unknown: one lower bound.
@@ -822,7 +863,35 @@ wit_ref_side = (term: RefTerm, value: int, n: int, self: str) -> WitSide:
         side = wit_side(value, int(nodes[n].a))
         if side.text == "": side.text = self
         return side
-    WitSide(value, 0, wit_ref_text(term, self), false, term.kind == 1)
+    text = wit_ref_text(term, self)
+    # (another argument of the call, `lo` in `hi:int<(>=? lo)>`: as the caller wrote it)
+    if text == "" and (term.kind == 2 or term.kind == 5) and term.path.len() == 0 and term.offset == 0 and value > 0 and value < fact_terms.len():
+        origin = fact_terms[value].origin
+        if origin <= 0 or wit_text(origin) == "":
+            # (a name's value has no origin there: the call's own argument)
+            call = wit_call_holding(n)
+            if call > 0 and term.value < nkids(call): origin = kid(call, term.value)
+        if origin > 0:
+            side = wit_side(value, origin)
+            if side.text != "": return side
+    WitSide(value, 0, text, false, term.kind == 1)
+
+# The call one of whose arguments is n, in the analyzed function; 0 for none.
+# O(function size), on the error path only.
+wit_call_holding = (n: int) -> int:
+    if fact_owner <= 0 or fact_owner >= fns.len() or fns[fact_owner].body == 0: return 0
+    stack = [int(fns[fact_owner].body)]
+    visits = 0
+    loop stack.len() > 0 and visits < 200000:
+        e = stack.pop()
+        visits += 1
+        if e <= 0 or e >= nodes.len() or nodes[e].kind == .lambda: continue
+        if nodes[e].kind == .call:
+            loop child in kids(e):
+                if child == n: return e
+        stack.push(int(nodes[e].a)); stack.push(int(nodes[e].b)); stack.push(int(nodes[e].c)); stack.push(int(nodes[e].d))
+        loop child in kids(e): stack.push(child)
+    0
 
 # A refinement obligation at its use, with the contract's declaration span.
 wit_refinement = (n: int, t: int, atom: RefAtom, self: int, a: int, b: int, s: FactState, refuted: bool):

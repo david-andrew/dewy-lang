@@ -1,0 +1,108 @@
+# Pixel-grid filters on a small grayscale image: box blur, Sobel edges,
+# threshold, histogram equalization and an ASCII renderer.
+
+const SHADES = " .:-=+*#%@"
+
+make_image = (w:int h:int):>array<array<int>> => [
+    loop y in [0..h) [
+        loop x in [0..w) {
+            # a bright disc on a gradient background
+            let dx = x - w // 2
+            let dy = y - h // 2
+            if dx * dx + dy * dy <? 9 220 else (x * 120) // w + 10
+        }
+    ]
+]
+
+render = (img:array<array<int>>):>void => {
+    loop row in img {
+        let line = [loop v in row {
+            let level = max(0 min(255 v))
+            SHADES[level * (SHADES.length - 1) // 255]
+        }]
+        printl(line.join(""))
+    }
+}
+
+clamp = (v:int lo:int hi:int<(>=? lo)>):>int<r => lo <=? r and r <=? hi> => {
+    if v <? lo return lo
+    if v >? hi return hi
+    v
+}
+
+# pixel at (x, y), with the edges repeated outward
+pixel = (img:array<array<int>> x:int y:int):>int => {
+    if img.length =? 0 return 0
+    let row = img[clamp(y 0 img.length - 1)]
+    if row.length =? 0 return 0
+    row[clamp(x 0 row.length - 1)]
+}
+
+box_blur = (img:array<array<int>>):>array<array<int>> => [
+    loop y in [0..img.length) [
+        loop x in [0..img[y].length) {
+            let total = 0
+            loop dy in [-1..1] loop dx in [-1..1] total += pixel(img x + dx y + dy)
+            total // 9
+        }
+    ]
+]
+
+sobel = (img:array<array<int>>):>array<array<int>> => [
+    loop y in [0..img.length) [
+        loop x in [0..img[y].length) {
+            let gx = pixel(img x+1 y-1) + 2 * pixel(img x+1 y) + pixel(img x+1 y+1)
+                   - pixel(img x-1 y-1) - 2 * pixel(img x-1 y) - pixel(img x-1 y+1)
+            let gy = pixel(img x-1 y+1) + 2 * pixel(img x y+1) + pixel(img x+1 y+1)
+                   - pixel(img x-1 y-1) - 2 * pixel(img x y-1) - pixel(img x+1 y-1)
+            let g = sqrt(float64(gx * gx + gy * gy))
+            if g <? 255.0 int(g) else 255
+        }
+    ]
+]
+
+threshold = (img:array<array<int>> level:int):>array<array<int>> =>
+    [loop row in img [loop v in row if v >=? level 255 else 0]]
+
+histogram = (img:array<array<int>> bins:int64):>array<int> => {
+    let counts = fill(0 bins)
+    loop row in img loop v in row {
+        let b = v * bins // 256
+        if 0 <=? b <? counts.length counts[b] += 1
+    }
+    counts
+}
+
+equalize = (img:array<array<int>>):>array<array<int>> => {
+    let hist = histogram(img 256)
+    let cdf = fill(0 256)
+    let running = 0
+    loop i in [0..256) {
+        running += hist[i]
+        cdf[i] = running
+    }
+    let total = running
+    let lowest = 0
+    loop c in cdf if c >? 0 { lowest = c; break }
+    [loop row in img [loop v in row (cdf[max(0 min(255 v))] - lowest) * 255 // max(1 total - lowest)]]
+}
+
+main = () => {
+    let img = make_image(24 11)
+    printl("original:")
+    render(img)
+    printl("blurred:")
+    render(box_blur(img))
+    printl("edges:")
+    let edges = sobel(img)
+    render(threshold(edges 128))
+    printl("histogram (8 bins):")
+    let hist = histogram(img 8)
+    let widest = max(1 max(hist))
+    loop i in 0.. and n in hist {
+        let bar = "#" * (n * 30 // widest)
+        printl("{i * 32:>3}-{i * 32 + 31:>3} {n:>4} {bar}")
+    }
+    printl("equalized:")
+    render(equalize(img))
+}

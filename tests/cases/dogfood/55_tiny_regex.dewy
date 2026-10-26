@@ -1,0 +1,121 @@
+# A tiny regular-expression matcher in the style of Kernighan and Pike: literals,
+# `.`, `*`, `+`, `?`, `^`, `$` and `[abc]` / `[a-z]` classes, compiled to a list
+# of atoms and matched by backtracking. Checked against the library's regex.
+
+Atom:type = [
+    kind:'char' | 'any' | 'class'
+    text:string = ""
+    ranges:array<[lo:string hi:string]> = []
+    negated:bool = false
+    repeat:'one' | 'star' | 'plus' | 'optional' = 'one'
+]
+
+Pattern:type = [atoms:array<Atom> anchored:bool at_end:bool]
+
+compile = (source:string):>Pattern | string => {
+    let chars = source.chars
+    let atoms:array<Atom> = []
+    let i = 0
+    let anchored = false
+    let at_end = false
+    if chars.length >? 0 and chars[0] =? "^" { anchored = true; i = 1 }
+    loop i <? chars.length {
+        let c = chars[i]
+        i += 1
+        if c =? "$" and i =? chars.length { at_end = true; break }
+        if c =? "*" or c =? "+" or c =? "?" {
+            if atoms.length =? 0 or atoms.last.repeat not=? 'one' return "nothing to repeat before '{c}'"
+            atoms[atoms.length - 1].repeat = if c =? "*" 'star' else if c =? "+" 'plus' else 'optional'
+            continue
+        }
+        if c =? "." { atoms.push(Atom['any']); continue }
+        if c not=? "[" { atoms.push(Atom['char' c]); continue }
+        # a class: [abc], [a-z0-9], [^...]
+        let atom = Atom['class']
+        if i <? chars.length and chars[i] =? "^" { atom.negated = true; i += 1 }
+        let closed = false
+        loop i <? chars.length {
+            let lo = chars[i]
+            i += 1
+            if lo =? "]" { closed = true; break }
+            if i + 1 <? chars.length and chars[i] =? "-" and chars[i + 1] not=? "]" {
+                atom.ranges.push([lo=lo hi=chars[i + 1]])
+                i += 2
+            } else atom.ranges.push([lo=lo hi=lo])
+        }
+        if not closed return "unclosed '[' in {source}"
+        atoms.push(atom)
+    }
+    Pattern[atoms anchored at_end]
+}
+
+accepts = (atom:Atom c:string):>bool => match atom.kind {
+    <'any'> => true
+    <'char'> => c =? atom.text
+    <'class'> => {
+        let inside = false
+        loop r in atom.ranges if r.lo <=? c <=? r.hi inside = true
+        inside not=? atom.negated
+    }
+}
+
+# does the pattern from atom k on match the text from position at on?
+match_here = (p:Pattern k:int64<(>=? 0)> text:array<string> at:int64<0 <=? at and at <=? text.length>):>bool => {
+    if k >=? p.atoms.length return not p.at_end or at =? text.length
+    let atom = p.atoms[k]
+    let fits = at <? text.length and accepts(atom text[at])
+    match atom.repeat {
+        <'one'> => fits and at <? text.length and match_here(p k + 1 text at + 1)
+        <'optional'> => (fits and at <? text.length and match_here(p k + 1 text at + 1)) or match_here(p k + 1 text at)
+        _ => {
+            # greedy: take as many as possible, then give them back one by one
+            let most = at
+            loop most <? text.length and accepts(atom text[most]) most += 1
+            let least = if atom.repeat =? 'plus' at + 1 else at
+            let n = most
+            loop n >=? least {
+                if match_here(p k + 1 text n) return true
+                n -= 1
+            }
+            false
+        }
+    }
+}
+
+search = (p:Pattern text:string):>bool => {
+    let chars = text.chars
+    if p.anchored return match_here(p 0 chars 0)
+    loop start in [0..chars.length] if match_here(p 0 chars start) return true
+    false
+}
+
+main = () => {
+    let cases = [
+        ["^ab*c$" "ac"] ["^ab*c$" "abbbc"] ["^ab*c$" "abbd"]
+        ["colou?r" "my color"] ["colou?r" "the colour!"] ["colou?r" "colr"]
+        ["[0-9]+-[0-9]+" "call 555-1234"] ["^[a-z]+$" "lower"] ["^[a-z]+$" "Upper"]
+        ["[^aeiou ]+" "aaa e"] ["h.llo" "say hallo"] ["x+y" "xxxy"] ["ab$" "abab"]
+    ]
+    let agree = 0
+    loop [source text] in cases {
+        match compile(source) {
+            p:Pattern => {
+                let mine = search(p text)
+                let theirs = match regex(source) {
+                    r:Regex => text.contains(r)
+                    <RegexError> => false
+                }
+                if mine =? theirs agree += 1
+                printl("{source:<16} {"\"{text}\"":<16} {if mine "match" else "no"}{if mine =? theirs "" else "  (library disagrees)"}")
+            }
+            problem:string => printl("{source:<16} error: {problem}")
+        }
+    }
+    printl("{agree} of {cases.length} agree with the library")
+    loop bad in ["*a" "a**" "[abc"] {
+        match compile(bad) {
+            <Pattern> => printl("{bad}: compiled?")
+            problem:string => printl("{bad}: {problem}")
+        }
+    }
+}

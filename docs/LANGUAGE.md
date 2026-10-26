@@ -4006,7 +4006,7 @@ and many pieces collect in an `array<string>` and `join` (`pieces.join` or
 `pieces.join(", ")`). `s = "{s}more"` on a local string appends in place, so
 building text in a loop stays linear; `s += x` is an error. `text * n` (or
 `n * text`) repeats it: `"-" * 20` is a rule of twenty dashes, and a count of
-zero or less gives `""`. Unicode escapes use
+zero or less gives `""`. Any `int` count works, with nothing to prove (`"#" * (n * 30 // most)`). Unicode escapes use
 four hexadecimal digits (`"\u00E9"`) or one to six inside braces
 (`"\u{1F642}"`); both name Unicode scalar values. Surrogates and values above
 `10FFFF` are errors. Braced escapes currently accept hex literals, not expressions.
