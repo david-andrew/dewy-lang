@@ -393,7 +393,11 @@ arena_keep_scan = (f: int, n: int, callees: mut int[]) -> int:
             else: callees.push(g)
         else if aux == 1:
             callee = int(nodes[n].a)
-            formal = nodes[callee].kind == .ident and nodes[callee].aux == i32(int(SK.local)) and int(locals[int(nodes[callee].sym)].flags) & LF_PARAM != 0
+            formal = false
+            if nodes[callee].kind == .ident and nodes[callee].aux == i32(int(SK.local)):
+                # (a Dewy parameter's own binding is the parameter until something writes it)
+                fl = int(locals[int(nodes[callee].sym)].flags)
+                formal = fl & LF_PARAM != 0 or fl & (LF_VALUEPARAM | LF_ASSIGNED) == LF_VALUEPARAM
             if not formal: bad = n
     else if (k == .index or k == .field) and tkind(ntype(int(nodes[n].a))) == .ptr and not arena_trusted(n): bad = n
     if bad != 0: return bad

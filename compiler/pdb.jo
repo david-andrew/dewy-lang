@@ -936,16 +936,14 @@ cv_locals = (out: mut u8[], k0: int):
     put32(fr, (2 << 14) | (2 << 16))               # locals and parameters from rbp
     pdb_record(out, 0x1012, fr)                    # S_FRAMEPROC
     frame = cv_reg(dbg_raw[k0 + 3])
-    nv = dbg_raw[k0 + 4]
-    k = k0 + 5
-    loop _ in [0..nv):
+    loop v in dbg_vars(k0):
+        k = v.0
         l = dbg_raw[k]
         kind = dbg_raw[k + 1]
         r = dbg_raw[k + 2]
         off = dbg_raw[k + 3]
         lo = dbg_raw[k + 4]
         hi = dbg_raw[k + 5]
-        k += 6
         ti = cv_type(store_type(l))
         nm = names[int(locals[l].name)]
         if kind == DL_CONST and lo < hi:
@@ -956,7 +954,7 @@ cv_locals = (out: mut u8[], k0: int):
             pdb_record(out, 0x1107, b)             # S_CONSTANT
             continue
         fl = 0
-        if int(locals[l].flags) & LF_PARAM != 0: fl = 1
+        if v.1: fl = 1
         where = lo < hi and (kind == DL_REG or kind == DL_MEM or kind == DL_MEMAT)
         if not where: fl = fl | 0x100              # optimized out
         if kind == DL_MEMAT: ti = cv_pointer(ti, true)

@@ -1,0 +1,16 @@
+# A reassigned parameter no longer holds the function the caller passed in.
+other=(x:int64):>int64=>x
+apply=(f:<(x:int64):>int64> x:int64):>int64=>{
+    f = @other
+    f(x)
+}
+main=()=>{
+    let a=Arena[]
+    let n=$allocator(@a) {
+        let g=(x:int64):>int64=>{ return x+1 }
+        apply(@g 1)
+    }
+    printl("{n}")
+}
+
+$runtime_checks

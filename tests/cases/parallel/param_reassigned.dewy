@@ -1,0 +1,8 @@
+# A reassigned parameter no longer holds the function the caller gave.
+apply=(f:<(x:int64):>int64> xs:array<int64>):>array<int64>=>{
+    f = @other
+    parallel_map(xs @f)
+}
+same=(x:int64):>int64=>x
+other=(x:int64):>int64=>x
+main=()=>printl(apply(@same [1 2 3]))

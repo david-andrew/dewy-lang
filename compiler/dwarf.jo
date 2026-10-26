@@ -187,14 +187,15 @@ dwarf_sections = (text_addr: int, text_len: int, main_path: str, version: str) -
         dw_w64(dw_sb, dbg_raw[k + 2])
         dw_sb.push(1)                   # DW_AT_frame_base: exprloc of one byte
         dw_sb.push(u8(0x50 + dbg_raw[k + 3]))      # DW_OP_reg
-        nv = dbg_raw[k + 4]
-        k += 5
-        loop _ in [0..nv):
-            l = dbg_raw[k]
-            lo = dbg_raw[k + 4]
-            hi = dbg_raw[k + 5]
+        k0 = k
+        k += 5 + 6 * dbg_raw[k + 4]
+        loop v in dbg_vars(k0):
+            e = v.0
+            l = dbg_raw[e]
+            lo = dbg_raw[e + 4]
+            hi = dbg_raw[e + 5]
             c = 16
-            if int(locals[l].flags) & LF_PARAM != 0: c = 15
+            if v.1: c = 15
             if lo < hi: c -= 2
             dw_sb.push(u8(c))
             cstr(dw_sb, names[int(locals[l].name)])
@@ -205,13 +206,12 @@ dwarf_sections = (text_addr: int, text_len: int, main_path: str, version: str) -
                 dw_w64(loc, hi)
                 at = loc.len()
                 put16(loc, 0)
-                dw_loc_expr(loc, dbg_raw[k + 1], dbg_raw[k + 2], dbg_raw[k + 3])
+                dw_loc_expr(loc, dbg_raw[e + 1], dbg_raw[e + 2], dbg_raw[e + 3])
                 n = loc.len() - at - 2
                 loc[at] = u8(n & 255)
                 loc[at + 1] = u8(n >> 8)
                 dw_w64(loc, 0)
                 dw_w64(loc, 0)
-            k += 6
         dw_sb.push(0)
     loop g in gl:
         dw_sb.push(19)
@@ -653,6 +653,40 @@ dw_breg = (e: mut u8[], r: int, off: int):
         e.push(0x92)
         uleb(e, r)
     sleb(e, off)
+
+# the variables of the function whose dbg_raw entry starts at k0, as a debugger shows them: each
+# one's entry and whether it is a formal parameter. A Dewy value parameter's own binding
+# (LF_VALUEPARAM) is the parameter in the source: it takes its hidden parameter's place, which
+# stays only for an unchanged binding that has no location.
+dbg_vars = (k0: int) -> (int, bool)[]:
+    nv = dbg_raw[k0 + 4]
+    own: {int: int} = {}            # name -> entry of the value parameter's own binding
+    loop i in [0..nv):
+        e = k0 + 5 + 6 * i
+        if int(locals[dbg_raw[e]].flags) & LF_VALUEPARAM != 0: own[int(locals[dbg_raw[e]].name)] = e
+    paired: {int: bool} = {}        # own bindings whose hidden parameter is listed
+    loop i in [0..nv):
+        e = k0 + 5 + 6 * i
+        fl = int(locals[dbg_raw[e]].flags)
+        if fl & (LF_PARAM | LF_MUTPARAM) == LF_PARAM:
+            if let c = own.get(int(locals[dbg_raw[e]].name)): paired[c] = true
+    out: (int, bool)[]
+    loop i in [0..nv):
+        e = k0 + 5 + 6 * i
+        l = dbg_raw[e]
+        fl = int(locals[l].flags)
+        if fl & LF_VALUEPARAM != 0:
+            if not paired.contains(e): out.push((e, true))
+            continue
+        if fl & LF_PARAM == 0:
+            out.push((e, false))
+            continue
+        c = e
+        if fl & LF_MUTPARAM == 0: c = own.get(int(locals[l].name)) ?? e
+        # (its own binding, unless that is unchanged and has no location)
+        if c != e and (int(locals[dbg_raw[c]].flags) & LF_ASSIGNED != 0 or dbg_raw[c + 4] < dbg_raw[c + 5]): e = c
+        out.push((e, true))
+    out
 
 # a variable's place (x64.jo's dbg_function: kind, r, off) as a DWARF expression, at the end of e
 dw_loc_expr = (e: mut u8[], kind: int, r: int, off: int):

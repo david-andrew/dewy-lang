@@ -1850,8 +1850,12 @@ race_arg = (a: int, who: str):
         if nodes[a].aux == 1: race_arg(int(nodes[a].a), who)
         else: race_named(int(nodes[a].sym), who)
     else:
-        # (a @parallel function may pass on the functions it is given: its callers are checked)
-        param = k == .ident and nodes[a].aux == i32(int(SK.local)) and int(locals[int(nodes[a].sym)].owner) == cur_fn and int(locals[int(nodes[a].sym)].flags) & LF_PARAM != 0
+        # (a @parallel function may pass on the functions it is given: its callers are checked;
+        # a Dewy parameter's own binding is the parameter until something writes it)
+        param = false
+        if k == .ident and nodes[a].aux == i32(int(SK.local)) and int(locals[int(nodes[a].sym)].owner) == cur_fn:
+            fl = int(locals[int(nodes[a].sym)].flags)
+            param = fl & LF_PARAM != 0 or fl & (LF_VALUEPARAM | LF_ASSIGNED) == LF_VALUEPARAM
         if param and fns[cur_fn].parallel: return
         hint = ""
         if param: hint = ", or mark '{name_of(int(nodes[int(fns[cur_fn].decl)].name))}' @parallel so that the functions given to it are checked"

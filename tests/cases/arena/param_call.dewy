@@ -1,0 +1,12 @@
+# A function called through its parameter runs what the caller passed in, checked there.
+apply=(f:<(x:int64):>int64> x:int64):>int64=>f(x)
+main=()=>{
+    let a=Arena[]
+    let n=$allocator(@a) {
+        let g=(x:int64):>int64=>{ return x+1 }
+        apply(@g 1)
+    }
+    printl("{n}")
+}
+
+$runtime_checks
