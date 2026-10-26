@@ -1,0 +1,8 @@
+# quick
+# An overlong integer is an error value; an unlisted ?? defaults it.
+main = () => {
+    let long = to_int("123456" max_digits=2)
+    printl(long is? TooManyDigits)
+    printl(to_int("123456" max_digits=2) ?? 0)
+    printl(to_int("12" max_digits=2) ?? 0)
+}

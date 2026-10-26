@@ -40,6 +40,7 @@ struct TkScan:
     mediate: bool = true # weigh uses against other literal-only bindings by their own uses
     p_use: int = 0       # the first use only a point allows
     d_use: int = 0       # the first use only a difference allows
+    neutral_sub: int = 0 # a point minus this binding, if no other use settles its kind
     p_direct: bool = false   # (not through another literal-only binding)
     d_direct: bool = false
     d_reads: int[]
@@ -289,6 +290,7 @@ tk_use = (n: int):
         if op != .plus and op != .minus and not cmp: return
         c = tk_other(x)
         mediated = tk_other_mediated
+        if op == .minus and sb and c == TKC_POINT and tks.neutral_sub == 0: tks.neutral_sub = n
         if op == .plus and c == TKC_POINT: tk_note(true, n, me, mediated)
         else if op == .minus and sb and c == TKC_DIFF: tk_note(true, n, me, mediated)
         else if op == .minus and sa and c == TKC_POINT: tk_note(false, n, me, mediated)
@@ -433,7 +435,12 @@ temperature_binding = (s: int, t: int, unit: int, global: bool) -> int:
     tk_decls = saved_decls
     tk_deciding.remove(s)
     tk_direct[s] = tk_own_kind()
-    if tks.open or tks.d_use == 0: return t
+    if tks.open: return t
+    if tks.d_use == 0:
+        if tks.p_use == 0 and tks.neutral_sub != 0:
+            nm = name_of(tks.name)
+            warn(nodes[tks.neutral_sub].pos, "`{tk_use_text(tks.neutral_sub)}` leaves `{nm}` ambiguous: a temperature point minus a point gives a difference, but minus a difference gives a point. Write the difference in kelvin (`5K`) or as two points (`25{name_of(unit)} - 5{name_of(unit)}`)")
+        return t
     nm = name_of(tks.name)
     if tks.p_use != 0:
         dl, _ = line_col(nodes[tks.d_use].pos)

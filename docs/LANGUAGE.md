@@ -1340,6 +1340,9 @@ difference (`t + rise`, `t -= rise`, `rise*2`, `-rise`, a comparison with a
 difference) and none needs a point (`rise <? t`, `rise - t`), it is a
 difference, so `rise as °F` is `36°F`. Uses either kind allows (`t - rise`,
 printing, `as`) do not decide it, and a binding no use decides is a point.
+When `t - rise` is the only use relevant to its kind, the compiler warns that
+the result could be a point or a difference. Write `rise` in kelvin or as a
+subtraction of two points (`25°C - 5°C`) to settle it.
 When its uses disagree the compiler warns, naming both: the binding stays a
 point, as a temperature written in a unit is, and each difference use reads
 it as a difference, as it would the literal. A point moves by a
