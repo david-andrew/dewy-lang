@@ -5452,32 +5452,33 @@ int_literal_elem_mismatch = (from0: int, to0: int) -> bool:
             t = prune(int(types[t].elem))
     f == T_MATH_INT and tkind(t) == .int_ and t != T_MATH_INT
 
-# the keyword of an unannotated `let name = [...]` or `const name = [...]` whose name is at
-# pos, or ""
-unannotated_literal_binding = (pos: int) -> str:
-    src = files[pos_file(pos)].src
-    o = pos_off(pos)
-    e = o
-    loop e < len(src) and is_ident_char(src[e]): e += 1
-    loop e < len(src) and (src[e] == ' ' or src[e] == '\t'): e += 1
-    if e >= len(src) or src[e] != '=': return ""
-    e += 1
-    loop e < len(src) and (src[e] == ' ' or src[e] == '\t'): e += 1
-    if e >= len(src) or src[e] != '[': return ""
-    b = o
-    loop b > 0 and (src[b - 1] == ' ' or src[b - 1] == '\t'): b -= 1
-    if b == o: return ""
-    loop kw in ["let", "const"]:
-        k = b - len(kw)
-        if k >= 0 and src[k..b) == kw and (k == 0 or not is_ident_char(src[k - 1])): return kw
-    ""
+# the declaration of local l in the subtree at n, or 0 (error path only)
+local_decl_in = (n: int, l: int) -> int:
+    if n == 0: return 0
+    if nodes[n].kind == .vardecl and nodes[n].sym == i32(l) and not has_flag(n, NF_GLOBAL): return n
+    loop c in [int(nodes[n].a), int(nodes[n].b), int(nodes[n].c), int(nodes[n].d)]:
+        d = local_decl_in(c, l)
+        if d != 0: return d
+    loop c in kids(n) + kids2(n):
+        d = local_decl_in(c, l)
+        if d != 0: return d
+    0
 
 # (`let b = [3 4 5]` then `pick() ?? b` wanting array<int64>: b's type is written where it is made)
 int_literal_elem_hint = (a: int, t: int) -> str:
-    if nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)) and nodes[a].aux != i32(int(SK.global)): return ""
-    dp = if nodes[a].aux == i32(int(SK.local)): locals[int(nodes[a].sym)].pos else: nodes[int(globals[int(nodes[a].sym)].decl)].pos
-    kw = unannotated_literal_binding(dp)
-    if len(kw) == 0: return ""
+    if nodes[a].kind != .ident: return ""
+    d = 0
+    if nodes[a].aux == i32(int(SK.global)): d = int(globals[int(nodes[a].sym)].decl)
+    else if nodes[a].aux == i32(int(SK.local)):
+        l = int(nodes[a].sym)
+        # (a parameter's type is written in the signature; a loop variable's is its source's)
+        if int(locals[l].flags) & (LF_PARAM | LF_VALUEPARAM) != 0 or int(locals[l].flags) & LF_DECL == 0: return ""
+        d = local_decl_in(int(fns[int(locals[l].owner)].body), l)
+    if d == 0 or nodes[d].kind != .vardecl or nodes[d].a != 0 or nodes[d].nlist != 0: return ""
+    v = int(nodes[d].b)
+    loop v != 0 and nodes[v].kind == .conv: v = int(nodes[v].a)
+    if v == 0 or nodes[v].kind != .array: return ""
+    kw = if has_flag(d, NF_RDONLY): "const" else: "let"
     nm = name_of(int(nodes[a].name))
     " (integer literals are `int` unless a type is written where they are made, and an array keeps its element type: write it where '{nm}' is made, as `{kw} {nm}:{dt_named(t)} = [...]`)"
 

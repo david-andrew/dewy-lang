@@ -1,0 +1,9 @@
+total = (xs:array<int64>):>int64 => xs[0]
+Box:type = [
+    items:array<int>
+    first = (n:array<int>):>int64 => total(n)
+]
+main = () => {
+    let b = Box([1])
+    printl'{b.first([2])}'
+}

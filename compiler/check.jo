@@ -98,6 +98,8 @@ const LF_PARTBORROW = 16777216 # mutable array capture, admitted only by checked
 const LF_OWNERBORROW = 8388608 # nonescaping resource capture: pointer, not an owned cell
 const LF_VALUECAP = 262144  # Dewy capture owns a snapshot; outer links stop here
 const LF_CONST = 131072     # Dewy const: one initialized value, no writes through the binding
+const LF_VALUEPARAM = 524288 # a Dewy value parameter's own binding (dw_finish_function): a parameter
+                             # in the source, a private mutable copy to the compiler (not LF_PARAM)
 assign_root = 0                 # (the variable an assignment being checked writes through)
 copy_writes: {int: int} = {}    # local -> where its fields or elements are first written
 gcopy_writes: {int: int} = {}   # the same for globals
@@ -4813,6 +4815,7 @@ check_vardecl = (s: int):
             l = new_local(int(nodes[id].name), targ(t, i), nodes[id].pos)
             locals[l].flags = i32(LF_DECL | LF_QUIET)
             if has_flag(s, NF_RDONLY): locals[l].flags = i32(LF_DECL | LF_QUIET | LF_CONST)
+            if nodes[s].aux2 == 1: locals[l].flags = i32(int(locals[l].flags) | LF_VALUEPARAM)
             nodes[id].sym = i32(l)
         nodes[s].type = i32(t)
         return
@@ -4891,6 +4894,7 @@ check_vardecl = (s: int):
         locals[l].const_init = nodes[s].b
         if nodes[s].b != 0 and files[pos_file(nodes[s].pos)].is_dewy: const_view_declare(l, int(nodes[s].b))
     if has_flag(s, NF_LOOPCOUNT): locals[l].flags = i32(LF_DECL | LF_QUIET)
+    if nodes[s].aux2 == 1: locals[l].flags = i32(int(locals[l].flags) | LF_VALUEPARAM)
     nodes[s].sym = i32(l)
     if unset: da_record(s)
     if ide_on and nodes[s].a == 0: ide_hint_local(s, l)
