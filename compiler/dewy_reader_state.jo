@@ -1,5 +1,5 @@
+use 'node_store.dewy'
 use 'dewy_tokens.dewy'
-use 'dewy_syntax.dewy'
 use 'literals.dewy'
 
 struct ParserReaderState:
@@ -74,7 +74,8 @@ struct ParserReaderState:
     dc_unsafe_name: int = 0
     dc_value: int = 0
     dc_value_start: int = -1
-    dewy_syntax: DewySyntax[]
+    module_nodes: Node[]
+    module_lists: i32[]
     dn_angles: int = 0
     dn_depth: int = 0
     dn_edit_at: int[]

@@ -10,7 +10,6 @@ from p"dewy_reach.dewy" import dm_bound, dm_hide, dm_reach, dm_reach_all, dm_rea
 from p"dewy_reader_host.dewy" import ParserReaderHost
 from p"dewy_reader_types.dewy" import DirBundle, EffectKind, EffectSyntax, ResultClause
 from p"dewy_scan.dewy" import dc_scan_arm_end, dc_scan_closing, dc_scan_cut
-from p"dewy_syntax.dewy" import syntax_node
 from p"dewy_tokens.dewy" import DewyKind, DewyLexeme, DewyToken, dn_token_assignment, dn_token_invert, dn_token_kind, dn_token_text, dn_token_undot, dn_token_uninvert
 from p"dewy_walk.dewy" import dr_arms_kind, dr_block_tail_kind, dr_collect, dr_collect_block, dr_copy_last, dr_copy_value, dr_flow_arms, dr_kind_of, dr_last_kind, dr_push, dr_tail_kind
 from p"literals.dewy" import LiteralProblem, literal_limbs, literal_packed, literal_string_text, literal_unsigned
@@ -1728,7 +1727,7 @@ rd_dc_build_setting=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64
     }
     reader_ctx.stores.host[0].build_setting_apply(target text pos rd_mkpos(reader_ctx.file value.start) rd_name_of(@reader_ctx int64<overflow='wrap'>(reader_nodes[literal].sval)));
     reader_ctx.at = (int64<overflow='wrap'>(place_stop) + 2)
-    rd_dn_node(@reader_ctx 'compact_stmt' "$nothing" token.start)
+    rd_module_empty(@reader_ctx token.start)
 }
 
 rd_dc_builtin=(@reader_ctx:ParserContext k:int64):>int64=>$unsafe {
@@ -1857,7 +1856,7 @@ rd_dc_bundle=(@reader_ctx:ParserContext token:DewyLexeme):>int64=>$unsafe {
         return 0
     }
     reader_ctx.stores.host[0].g_dir_bundles_push(bundle);
-    rd_dn_node(@reader_ctx 'compact_stmt' "$nothing" token.start)
+    rd_module_empty(@reader_ctx token.start)
 }
 
 # A byte literal's string, as dw_byte_literal makes it: 0 where that reports a
@@ -2769,7 +2768,7 @@ rd_dc_declares_nothing=(@reader_ctx:ParserContext @reader_nodes:array<Node> head
     reader_nodes.truncate(node_start);
     reader_ctx.stores.lists[0].truncate(list_start);
     reader_ctx.at = stop
-    rd_dn_node(@reader_ctx 'compact_stmt' "$nothing" reader_ctx.tokens[head].start)
+    rd_module_empty(@reader_ctx reader_ctx.tokens[head].start)
 }
 
 # `def main():` at the top of a module, the declaration's target no name (dw_declare's mistake,
@@ -2829,9 +2828,7 @@ rd_dc_directive_line=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:
         reader_ctx.stores.lists[0].truncate(list_start);
         return 0
     }
-    let id:int64=rd_dn_node(@reader_ctx 'compact_stmt' "{"$"}{name}" token.start)
-    reader_ctx.reader.dewy_syntax[id].child_left = n
-    id
+    rd_module_tag(@reader_ctx token (if name =? "test" 5 else if name =? "export" 2 else 3) n 0)
 }
 
 # A directive's call as a statement (dw_stmt): with its `;` (ended), the value discarded.
@@ -6506,8 +6503,7 @@ rd_dc_marker=(@reader_ctx:ParserContext token:DewyLexeme):>int64=>$unsafe {
     let start:int64=reader_ctx.at
     reader_ctx.stores.host[0].dn_expand_lazy();
     reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
-    let id:int64=rd_dn_node(@reader_ctx token.kind name token.start name=token.name)
-    id
+    rd_module_tag(@reader_ctx token 1 0 0)
 }
 
 # `match value { pattern => body ... }`, or one arm without braces, then an optional
@@ -6742,11 +6738,13 @@ rd_dc_module_block=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=
     reader_ctx.reader.dc_lazy_on = false
     reader_ctx.reader.dc_lib_lazy = false
     let children:array<int64>=[]
+    let starts:array<int64>=[]
     loop (not rd_dn_accept(@reader_ctx 'rbrace')) {
         if (reader_ctx.tokens[reader_ctx.at].kind =? 'eof') {
             reader_ctx.stores.host[0].dn_error(opening.start "expected '{dn_token_text('rbrace')}' before end of file");
         }
         let before:int64=reader_ctx.at
+        starts.push(reader_ctx.tokens[before].start)
         children.push(rd_dn_statement(@reader_ctx @reader_nodes true));
         if (reader_ctx.at =? before) {
             reader_ctx.stores.host[0].dn_error(reader_ctx.tokens[reader_ctx.at].start "expected a block element");
@@ -6755,7 +6753,7 @@ rd_dc_module_block=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=
     reader_ctx.reader.dc_lazy_on = saved_lazy
     reader_ctx.reader.dc_lib_lazy = saved_lib
     reader_ctx.reader.dn_rows = saved_rows
-    rd_dn_node(@reader_ctx 'block' "{"{dn_token_text('lbrace')}{dn_token_text('rbrace')}"}{":"}" opening.start children)
+    rd_module_group(@reader_ctx opening.start children -315 starts)
 }
 
 # A braced arm is next that nothing after its `}` continues but `else` (as an arm's body,
@@ -8787,9 +8785,7 @@ rd_dc_setting=(@reader_ctx:ParserContext token:DewyLexeme):>int64=>$unsafe {
         return 0
     }
     reader_ctx.at = at
-    let id:int64=rd_dn_node(@reader_ctx 'compact_stmt' name token.start)
-    reader_ctx.reader.dewy_syntax[id].child_right = enabled
-    id
+    rd_module_tag(@reader_ctx token 0 0 enabled)
 }
 
 # Where `$target`, `$build` or a member of either written at token `at` ends (the token after it):
@@ -9269,7 +9265,11 @@ rd_dc_target_chain=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=
         break
     }
     # (the compiled arm, alone: dw_top_declarations splices its declarations, dw_target_live)
-    rd_dn_node(@reader_ctx 'flow' "" start (if (compiled not=? 0) [compiled] else []))
+    if compiled not=? 0 {
+        reader_ctx.reader.module_nodes[-1 - compiled].pos=rd_mkpos(reader_ctx.file start)
+        return compiled
+    }
+    rd_module_empty(@reader_ctx start)
 }
 
 rd_dc_target_compare=(@reader_ctx:ParserContext @reader_nodes:array<Node> n:int64):>int64=>$unsafe {
@@ -10651,9 +10651,7 @@ rd_dc_warn_if=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:DewyLex
     }
     let at:int64=reader_ctx.stores.host[0].dw_ffi_attr("warn_if" condition pos)
     reader_nodes[at].b = int32<overflow='wrap'>(message)
-    let id:int64=rd_dn_node(@reader_ctx 'compact_stmt' "$warn_if" token.start)
-    reader_ctx.reader.dewy_syntax[id].child_left = at
-    id
+    rd_module_tag(@reader_ctx token 4 at 0)
 }
 
 rd_dc_whole_axis=(@reader_ctx:ParserContext):>bool=>$unsafe {
@@ -10912,8 +10910,31 @@ rd_dn_matches=(source:ptr<uint8> at:int64 stop:int64 value:string):>bool=>$unsaf
     true
 }
 
-rd_dn_node=(@reader_ctx:ParserContext kind:DewyKind text:string offset:int64 children:array<int64>=[] name:int32=0):>int64=>$unsafe {
-    syntax_node(@reader_ctx.reader.dewy_syntax kind text rd_mkpos(reader_ctx.file offset) children name)
+# Module results are checker-node IDs. Positive IDs are retained declarations;
+# negative IDs select temporary Node records here, with their own list runs.
+# This keeps directive/group bookkeeping out of checker IDs and generated names.
+# build_: aux is directive form, a its checker value, b its enabled bit; ival
+# ends its source name (no extra interning). block: aux -315 splices statements,
+# -316 is an overload group. nil: a successful statement declaring nothing.
+rd_module_tag=(@reader_ctx:ParserContext token:DewyLexeme form:int64 value:int64 enabled:int64):>int64=>{
+    let id=node_mk(@reader_ctx.reader.module_nodes 'build_' rd_mkpos(reader_ctx.file token.start))
+    reader_ctx.reader.module_nodes[id].ival=token.stop
+    reader_ctx.reader.module_nodes[id].aux=int32(form)
+    reader_ctx.reader.module_nodes[id].a=int32(value)
+    reader_ctx.reader.module_nodes[id].b=int32(enabled)
+    -1 - id
+}
+
+rd_module_group=(@reader_ctx:ParserContext offset:int64 children:array<int64> form:int64 starts:array<int64>=[]):>int64=>{
+    let id=node_mk(@reader_ctx.reader.module_nodes 'block' rd_mkpos(reader_ctx.file offset))
+    reader_ctx.reader.module_nodes[id].aux=int32(form)
+    node_set_list(@reader_ctx.reader.module_nodes @reader_ctx.reader.module_lists id children)
+    if not starts.is_empty {node_set_list2(@reader_ctx.reader.module_nodes @reader_ctx.reader.module_lists id starts)}
+    -1 - id
+}
+
+rd_module_empty=(@reader_ctx:ParserContext offset:int64):>int64=>{
+    -1 - node_mk(@reader_ctx.reader.module_nodes 'nil' rd_mkpos(reader_ctx.file offset))
 }
 
 # Tokens contain only scalar tags, name IDs and source spans. Materialize text
@@ -11020,13 +11041,14 @@ rd_dn_statement_read=(@reader_ctx:ParserContext @reader_nodes:array<Node> top:bo
     let report_pos:int64=reader_ctx.status.report_pos
     let reports:int64=reader_ctx.status.reports
     if top {
-        let syntax_start:int64=reader_ctx.reader.dewy_syntax.length
+        let module_start=reader_ctx.reader.module_nodes.length
+        let module_lists=reader_ctx.reader.module_lists.length
         reader_ctx.reader.dc_made.clear();
         let word:DewyToken=reader_ctx.tokens[reader_ctx.at].symbol
         # `if $target =? "wasm32" { ... } else { ... }`: the compiled arm's declarations
         if ((word =? 'kw_if') and (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 1)].kind =? 'metatag')) {
             let chain:int64=rd_dc_target_chain(@reader_ctx @reader_nodes)
-            if (chain >? 0) {
+            if (chain not=? 0) {
                 if (head not=? start) {
                     rd_dc_unsafe_scope(@reader_ctx rd_mkpos(reader_ctx.file reader_ctx.tokens[head].start));
                 }
@@ -11035,7 +11057,8 @@ rd_dn_statement_read=(@reader_ctx:ParserContext @reader_nodes:array<Node> top:bo
                 return chain
             }
             reader_ctx.at = start
-            reader_ctx.reader.dewy_syntax.truncate(syntax_start);
+            reader_ctx.reader.module_nodes.truncate(module_start)
+            reader_ctx.reader.module_lists.truncate(module_lists)
         }
         value = (if ((word =? 'kw_import') or (word =? 'kw_from')) rd_dc_import(@reader_ctx @reader_nodes) else rd_dc_type_declaration(@reader_ctx @reader_nodes))
         if (value =? 0) {
@@ -11062,7 +11085,8 @@ rd_dn_statement_read=(@reader_ctx:ParserContext @reader_nodes:array<Node> top:bo
             reader_ctx.at = start
             reader_nodes.truncate(node_start);
             reader_ctx.stores.lists[0].truncate(list_start);
-            reader_ctx.reader.dewy_syntax.truncate(syntax_start);
+            reader_ctx.reader.module_nodes.truncate(module_start)
+            reader_ctx.reader.module_lists.truncate(module_lists)
             reader_ctx.reader.dc_made.clear();
             rd_dc_forget_tables(@reader_ctx node_start);
             reader_ctx.depth = 0
@@ -11108,13 +11132,12 @@ rd_dn_statement_read=(@reader_ctx:ParserContext @reader_nodes:array<Node> top:bo
     if top {
         rd_dn_edits_clear(@reader_ctx edits);
     }
-    let id:int64=rd_dn_node(@reader_ctx 'compact_stmt' "" reader_ctx.tokens[head].start)
-    reader_ctx.reader.dewy_syntax[id].child_left = value
     if (top and (reader_ctx.reader.dc_made.length >? 0)) {
-        reader_ctx.reader.dewy_syntax[id].children = reader_ctx.reader.dc_made
-        reader_ctx.reader.dc_made = []
+        let made=reader_ctx.reader.dc_made
+        reader_ctx.reader.dc_made=[]
+        return rd_module_group(@reader_ctx reader_ctx.tokens[head].start made -316)
     }
-    id
+    value
 }
 
 rd_dn_string=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:DewyLexeme):>int64=>$unsafe {

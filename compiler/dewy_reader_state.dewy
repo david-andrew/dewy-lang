@@ -1,5 +1,5 @@
+from p"node_store.dewy" import Node
 from p"dewy_tokens.dewy" import DewyLexeme, DewyToken
-from p"dewy_syntax.dewy" import DewySyntax
 from p"literals.dewy" import LiteralProblem
 
 # Persistent reader state. Nested and speculative reads restore only their original save sets.
@@ -75,7 +75,8 @@ ParserReaderState:type=[
     dc_unsafe_name:int64=0
     dc_value:int64=0
     dc_value_start:int64=(-1)
-    dewy_syntax:array<DewySyntax>
+    module_nodes:array<Node>
+    module_lists:array<int32>
     dn_angles:int64=0
     dn_depth:int64=0
     dn_edit_at:array<int64>

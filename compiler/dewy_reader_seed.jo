@@ -17,7 +17,6 @@ use 'util.jo'
 use 'ast.jo'
 use 'lex.jo'
 use 'dewy_tokens.dewy'
-use 'dewy_syntax.dewy'
 use 'dewy_grammar.dewy'
 use 'dewy_scan.dewy'
 use 'dewy_lex.dewy'
@@ -6511,8 +6510,8 @@ rt_dc_marker = (token: DewyLexeme) -> int:
     start = dc_parser.at
     dn_expand_lazy()
     dc_parser.at += 1
-    id = rt_dn_node(token.kind, name, token.start, name = token.name)
-    id
+    rt_module_tag(token, 1, 0, 0)
+
 
 # `$test(cases=…)`, `$export(name='…')` or `$supported_targets = [...]` on a line of its own at the
 # top of a module: a compact statement holding what its consumer reads (dw_test_spec's test,
@@ -6541,9 +6540,7 @@ rt_dc_directive_line = (token: DewyLexeme) -> int:
         nodes.truncate(node_start)
         lists.truncate(list_start)
         return 0
-    id = rt_dn_node(.compact_stmt, "$" + name, token.start)
-    dc_parser.reader.dewy_syntax[id].child_left = n
-    id
+    rt_module_tag(token, if name == "test": 5 else: if name == "export": 2 else: 3, n, 0)
 
 # `$test(` then its cases, through `)` (dw_test_spec): the test, its function still to come.
 
@@ -6693,7 +6690,7 @@ rt_dc_bundle = (token: DewyLexeme) -> int:
         effect_blocks_demanded = blocks
         return 0
     dir_bundles.push(bundle)
-    rt_dn_node(.compact_stmt, "$nothing", token.start)
+    rt_module_empty(token.start)
 
 # A directive of the design not built yet, written as a statement (dw_unimplemented's).
 
@@ -6726,9 +6723,7 @@ rt_dc_warn_if = (token: DewyLexeme) -> int:
     if next.kind != .eof and not next.newline: return 0
     at = dw_ffi_attr("warn_if", condition, pos)
     nodes[at].b = i32(message)
-    id = rt_dn_node(.compact_stmt, "$warn_if", token.start)
-    dc_parser.reader.dewy_syntax[id].child_left = at
-    id
+    rt_module_tag(token, 4, at, 0)
 
 rt_dc_setting = (token: DewyLexeme) -> int:
     name = rt_dn_payload(token)
@@ -6747,9 +6742,7 @@ rt_dc_setting = (token: DewyLexeme) -> int:
     next = dc_parser.tokens[at]
     if next.kind != .eof and not (next.newline and dn_power(next.symbol) == 0 and next.symbol != .kw_not and next.symbol != .semi): return 0
     dc_parser.at = at
-    id = rt_dn_node(.compact_stmt, name, token.start)
-    dc_parser.reader.dewy_syntax[id].child_right = enabled
-    id
+    rt_module_tag(token, 0, 0, enabled)
 
 # Where `$target`, `$build` or a member of either written at token `at` ends (the token after it):
 # -1 for anything else.
@@ -6798,7 +6791,7 @@ rt_dc_build_setting = () -> int:
         fatal(mkpos(dc_parser.file, value.start), "`{text}` is set to a name in quotes, as `{text} = '{example}'`")
     build_setting_apply(target, text, pos, mkpos(dc_parser.file, value.start), name_of(int(nodes[literal].sval)))
     dc_parser.at = place_stop + 2
-    rt_dn_node(.compact_stmt, "$nothing", token.start)
+    rt_module_empty(token.start)
 
 # `$build.mode = ...` in a body (dw_stmt's mistake, noted): the value read on.
 
@@ -6849,19 +6842,21 @@ rt_dn_statement_read = (top: bool) -> int:
     report_pos = dc_parser.status.report_pos
     reports = dc_parser.status.reports
     if top:
-        syntax_start = dc_parser.reader.dewy_syntax.len()
+        module_start = dc_parser.reader.module_nodes.len()
+        module_lists = dc_parser.reader.module_lists.len()
         dc_parser.reader.dc_made.clear()
         word = dc_parser.tokens[dc_parser.at].symbol
         # `if $target =? "wasm32" { ... } else { ... }`: the compiled arm's declarations
         if word == .kw_if and dc_parser.tokens[dc_parser.at + 1].kind == .metatag:
             chain = rt_dc_target_chain()
-            if chain > 0:
+            if chain != 0:
                 if head != start: rt_dc_unsafe_scope(mkpos(dc_parser.file, dc_parser.tokens[head].start))
                 rt_dn_edits_clear(edits)
                 rt_dc_flush_report()
                 return chain
             dc_parser.at = start
-            dc_parser.reader.dewy_syntax.truncate(syntax_start)
+            dc_parser.reader.module_nodes.truncate(module_start)
+            dc_parser.reader.module_lists.truncate(module_lists)
         value = if word == .kw_import or word == .kw_from: rt_dc_import() else: rt_dc_type_declaration()
         if value == 0:
             dc_parser.at = start
@@ -6881,7 +6876,8 @@ rt_dn_statement_read = (top: bool) -> int:
             dc_parser.at = start
             nodes.truncate(node_start)
             lists.truncate(list_start)
-            dc_parser.reader.dewy_syntax.truncate(syntax_start)
+            dc_parser.reader.module_nodes.truncate(module_start)
+            dc_parser.reader.module_lists.truncate(module_lists)
             dc_parser.reader.dc_made.clear()
             rt_dc_forget_tables(node_start)
             dc_parser.depth = 0
@@ -6912,12 +6908,12 @@ rt_dn_statement_read = (top: bool) -> int:
     if head != start: rt_dc_unsafe_scope(mkpos(dc_parser.file, dc_parser.tokens[head].start))
     if top and dc_parser.status.reports != reports: rt_dc_flush_report()
     if top: rt_dn_edits_clear(edits)
-    id = rt_dn_node(.compact_stmt, "", dc_parser.tokens[head].start)
-    dc_parser.reader.dewy_syntax[id].child_left = value
     if top and dc_parser.reader.dc_made.len() > 0:
-        dc_parser.reader.dewy_syntax[id].children = dc_parser.reader.dc_made
+        made = dc_parser.reader.dc_made
         dc_parser.reader.dc_made = []
-    id
+        return rt_module_group(dc_parser.tokens[head].start, made, -316)
+    value
+
 
 # (the member captures of closures and the propositions of proofs a discarded reading made: their
 # nodes are gone)
@@ -6945,7 +6941,7 @@ rt_dc_declares_nothing = (head: int, node_start: int, list_start: int, edits: in
     nodes.truncate(node_start)
     lists.truncate(list_start)
     dc_parser.at = stop
-    rt_dn_node(.compact_stmt, "$nothing", dc_parser.tokens[head].start)
+    rt_module_empty(dc_parser.tokens[head].start)
 
 # `concurrent { ... }`, `concurrent name { ... }` after its keyword (dw_concurrent): `transparent`, a
 # statement. Its statements are read directly, none deferred (a deferred `spawn` would be projected
@@ -7115,7 +7111,10 @@ rt_dc_target_chain = () -> int:
         else if not rt_dc_dropped_arm(): return 0
         break
     # (the compiled arm, alone: dw_top_declarations splices its declarations, dw_target_live)
-    rt_dn_node(.flow, "", start, if compiled != 0: [compiled] else: [])
+    if compiled != 0:
+        dc_parser.reader.module_nodes[-1 - compiled].pos = mkpos(dc_parser.file, start)
+        return compiled
+    rt_module_empty(start)
 
 # A left-out arm, passed over: the names its tokens and its strings' interpolations use are noted
 # (dw_target_dropped_name); false where it does not end.
@@ -7181,15 +7180,17 @@ rt_dc_module_block = () -> int:
     dc_parser.reader.dc_lazy_on = false
     dc_parser.reader.dc_lib_lazy = false
     children: int[]
+    starts: int[]
     loop not rt_dn_accept(.rbrace):
         if dc_parser.tokens[dc_parser.at].kind == .eof: dn_error(opening.start, "expected '{dn_token_text(.rbrace)}' before end of file")
         before = dc_parser.at
+        starts.push(dc_parser.tokens[before].start)
         children.push(rt_dn_statement(true))
         if dc_parser.at == before: dn_error(dc_parser.tokens[dc_parser.at].start, "expected a block element")
     dc_parser.reader.dc_lazy_on = saved_lazy
     dc_parser.reader.dc_lib_lazy = saved_lib
     dc_parser.reader.dn_rows = saved_rows
-    rt_dn_node(.block, dn_token_text(.lbrace) + dn_token_text(.rbrace) + ":", opening.start, children)
+    rt_module_group(opening.start, children, -315, starts)
 
 # `$expect condition [, message]`, `$fail [message]` after its tag, a statement (dw_expect). A form
 # dw_expect reports, and a condition holding a comparison chain, are left unread (dc_unread).
@@ -7417,7 +7418,24 @@ rt_dn_accept_semi = () -> bool:
     dc_parser.at += 1
     true
 
-rt_dn_node = (kind: DewyKind, text: str, offset: int, children: int[] = [], name: i32 = 0) -> int: syntax_node(dc_parser.reader.dewy_syntax, kind, text, mkpos(dc_parser.file, offset), children, name)
+rt_module_tag = (token: DewyLexeme, form: int, value: int, enabled: int) -> int:
+    id = node_mk(dc_parser.reader.module_nodes, .build_, mkpos(dc_parser.file, token.start))
+    dc_parser.reader.module_nodes[id].ival = token.stop
+    dc_parser.reader.module_nodes[id].aux = i32(form)
+    dc_parser.reader.module_nodes[id].a = i32(value)
+    dc_parser.reader.module_nodes[id].b = i32(enabled)
+    -1 - id
+
+rt_module_group = (offset: int, children: int[], form: int, starts: int[] = []) -> int:
+    id = node_mk(dc_parser.reader.module_nodes, .block, mkpos(dc_parser.file, offset))
+    dc_parser.reader.module_nodes[id].aux = i32(form)
+    node_set_list(dc_parser.reader.module_nodes, dc_parser.reader.module_lists, id, children)
+    if starts.len() > 0: node_set_list2(dc_parser.reader.module_nodes, dc_parser.reader.module_lists, id, starts)
+    -1 - id
+
+rt_module_empty = (offset: int) -> int:
+    -1 - node_mk(dc_parser.reader.module_nodes, .nil, mkpos(dc_parser.file, offset))
+
 
 # String decoding is shared; the construction target selects syntax nodes for
 # the reference parser or compact nodes for the value parser.

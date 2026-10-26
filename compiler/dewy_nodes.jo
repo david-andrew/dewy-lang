@@ -217,22 +217,24 @@ dw_comparison_sides = (text: str, op: DewyToken) -> str[]:
     [trim(text[0..at)), trim(text[at + len(spelled)..len(text)))]
 
 # `$shadowable` before a module-level `const`
+dw_module_text = (id: int) -> str:
+    n = dc_parser.reader.module_nodes[-1 - id]
+    files[pos_file(n.pos)].src[pos_off(n.pos) + 1..n.ival)
+
 dw_shadowable_tag = (id: int) -> int:
-    if dc_parser.reader.dewy_syntax[id].kind == .metatag and dc_parser.reader.dewy_syntax[id].text == "shadowable": return id
+    if id < 0 and dc_parser.reader.module_nodes[-1 - id].kind == .build_ and dc_parser.reader.module_nodes[-1 - id].aux == 1 and dw_module_text(id) == "shadowable": return id
     0
 
-# `$test` or `$test(cases=…)`: a line of its own before a module function (dc_marker,
-# dc_directive_line)
 dw_test_tag = (id: int) -> int:
-    k = dc_parser.reader.dewy_syntax[id].kind
-    if k == .compact_stmt and dc_parser.reader.dewy_syntax[id].text == "$test" or k == .metatag and dc_parser.reader.dewy_syntax[id].text == "test": return id
+    if id < 0 and dc_parser.reader.module_nodes[-1 - id].kind == .build_:
+        form = dc_parser.reader.module_nodes[-1 - id].aux
+        if form == 5 or form == 1 and dw_module_text(id) == "test": return id
     0
 
-# The test a `$test` line declares, its function still to come (dc_test_cases); `ival` 1 when
-# cases are given.
 dw_test_spec = (id: int) -> int:
-    if dc_parser.reader.dewy_syntax[id].kind == .compact_stmt: return dc_parser.reader.dewy_syntax[id].child_left
-    n = mk(.test_, dc_parser.reader.dewy_syntax[id].pos)
+    result = dc_parser.reader.module_nodes[-1 - id]
+    if result.aux == 5: return int(result.a)
+    n = mk(.test_, result.pos)
     nodes[n].aux = 1
     n
 
@@ -478,32 +480,27 @@ dw_parallel_exits = (n: int, depth: int = 0):
 dw_warn_if_pending: int[]
 
 # The declarations a module statement the direct grammar read makes (dewy_direct.jo's dn_statement):
-# a marker line (dc_marker), a compact statement, or a `$target` chain's compiled arm (a flow
-# holding its block of module statements, or nothing).
-dw_top_declarations = (id: int) -> int[]:
-    k = dc_parser.reader.dewy_syntax[id].kind
-    text = dc_parser.reader.dewy_syntax[id].text
-    pos = dc_parser.reader.dewy_syntax[id].pos
-    if k == .metatag:
-        if text == "proof":
-            if proof_pending: fatal(pos, "duplicate $proof")
-            proof_pending = true
-            proof_active = true
-            refine_active = true
-        else if text == "export": dw_export_at(pos, "")
-        else if text == "explicit_allocation_failure": oom_module(pos_file(pos), pos)
-        return []
-    # (`$export(name=…)`, `$supported_targets = […]`: dc_directive_line; `$warn_if`: dc_warn_if)
-    if k == .compact_stmt and text == "$export":
-        dw_export_at(pos, name_of(int(nodes[dc_parser.reader.dewy_syntax[id].child_left].sval)))
-        return []
-    if k == .compact_stmt and text == "$supported_targets":
-        names: str[]
-        loop entry in kids(dc_parser.reader.dewy_syntax[id].child_left): names.push(name_of(int(nodes[entry].sval)))
-        dw_supported_names(pos, names)
-        return []
-    if k == .compact_stmt and text == "$warn_if":
-        dw_warn_if_pending.push(dc_parser.reader.dewy_syntax[id].child_left)
+# positive IDs are declarations; negative IDs select module-only checker nodes.
+# Keep the statement head separately: a declaration's own position may name its binding.
+dw_top_declarations = (id: int, pos: int) -> int[]:
+    if id < 0 and dc_parser.reader.module_nodes[-1 - id].kind == .build_ and dc_parser.reader.module_nodes[-1 - id].aux != 0 and dc_parser.reader.module_nodes[-1 - id].aux != 5:
+        result = dc_parser.reader.module_nodes[-1 - id]
+        text = dw_module_text(id)
+        form = int(result.aux)
+        if form == 1:
+            if text == "proof":
+                if proof_pending: fatal(pos, "duplicate $proof")
+                proof_pending = true
+                proof_active = true
+                refine_active = true
+            else if text == "export": dw_export_at(pos, "")
+            else if text == "explicit_allocation_failure": oom_module(pos_file(pos), pos)
+        else if form == 2: dw_export_at(pos, name_of(int(nodes[int(result.a)].sval)))
+        else if form == 3:
+            names: str[]
+            loop entry in kids(int(result.a)): names.push(name_of(int(nodes[entry].sval)))
+            dw_supported_names(pos, names)
+        else if form == 4: dw_warn_if_pending.push(int(result.a))
         return []
     exported = dw_export_pos != 0
     pending = proof_pending
@@ -521,23 +518,21 @@ dw_top_declarations = (id: int) -> int[]:
     made
 
 dw_top_declarations_inner = (id: int) -> int[]:
-    # (a `$target` chain: its compiled arm's statements, which bind in the module, dc_target_chain)
-    if dc_parser.reader.dewy_syntax[id].kind == .flow:
-        spliced: int[]
-        if dc_parser.reader.dewy_syntax[id].children.len() > 0:
-            loop item in dc_parser.reader.dewy_syntax[dc_parser.reader.dewy_syntax[id].children[0]].children:
-                loop made in dw_top_declarations(item): spliced.push(made)
-        return spliced
-    # (a directly built overload group: its member declarations)
-    if dc_parser.reader.dewy_syntax[id].children.len() > 0: return dc_parser.reader.dewy_syntax[id].children
-    # (a module setting: dc_setting; a statement that declares nothing: a bundle dc_bundle defined,
-    # a build setting, or a function the compiler provides, dc_declares_nothing)
-    if dc_parser.reader.dewy_syntax[id].text != "":
-        if dc_parser.reader.dewy_syntax[id].text == "$nothing": return []
-        file = pos_file(dc_parser.reader.dewy_syntax[id].pos)
-        dw_dir_apply(dc_parser.reader.dewy_syntax[id].text, int(dc_parser.reader.dewy_syntax[id].child_right), dc_parser.reader.dewy_syntax[id].pos, dir_module_start(file), dir_module_end(file), true)
+    if id > 0: return dw_with_methods(id)
+    result = dc_parser.reader.module_nodes[-1 - id]
+    if result.kind == .nil: return []
+    if result.kind == .build_:
+        file = pos_file(result.pos)
+        text = if result.aux == 5: "$test" else: dw_module_text(id)
+        dw_dir_apply(text, int(result.b), result.pos, dir_module_start(file), dir_module_end(file), true)
         return []
-    dw_with_methods(dc_parser.reader.dewy_syntax[id].child_left)
+    children = node_kids(dc_parser.reader.module_nodes, dc_parser.reader.module_lists, -1 - id)
+    if result.aux == -316: return children
+    spliced: int[]
+    starts = node_kids2(dc_parser.reader.module_nodes, dc_parser.reader.module_lists, -1 - id)
+    loop k in [0..children.len()):
+        loop made in dw_top_declarations(children[k], mkpos(pos_file(result.pos), starts[k])): spliced.push(made)
+    spliced
 
 # A declaration followed by the module functions its type's methods became.
 dw_with_methods = (declaration: int) -> int[]:

@@ -22,7 +22,6 @@ use 'util.jo'
 use 'ast.jo'
 use 'lex.jo'
 use 'dewy_tokens.dewy'
-use 'dewy_syntax.dewy'
 use 'dewy_grammar.dewy'
 use 'dewy_scan.dewy'
 use 'dewy_lex.dewy'
@@ -134,7 +133,6 @@ dc_force_body = (d: int):
     saved_file = dc_parser.file
     saved_source = dc_parser.source
     saved_depth = dc_parser.depth
-    saved_syntax = dc_parser.reader.dewy_syntax
     saved_lib = dc_parser.reader.dc_lib_lazy
     saved_left = dc_parser.reader.dn_lazy_left
     saved_edits_on = dc_parser.reader.dn_edits_on
@@ -154,7 +152,6 @@ dc_force_body = (d: int):
     else: dc_parser.tokens = dc_parser.reader.dc_lazy_tokens[dc_parser.file]
     dc_parser.at = first
     dc_parser.depth = 2
-    dc_parser.reader.dewy_syntax = [DewySyntax(.unknown, "", 0, []), DewySyntax(.inverted_comparison, "", 0, [])]
     node_start = nodes.len()
     list_start = lists.len()
     saved_in_body = dc_parser.flags.fn_body
@@ -187,7 +184,6 @@ dc_force_body = (d: int):
     dc_parser.file = saved_file
     dc_parser.source = saved_source
     dc_parser.depth = saved_depth
-    dc_parser.reader.dewy_syntax = saved_syntax
     dc_parser.reader.dc_lib_lazy = saved_lib
     dc_parser.reader.dn_lazy_left = saved_left
     dn_edits_clear(edits)

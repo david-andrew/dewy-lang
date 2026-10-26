@@ -14,7 +14,6 @@ use 'dewy_nodes.jo'
 use 'oom.jo'
 use 'proofs.jo'
 use 'dewy_tokens.dewy'
-use 'dewy_syntax.dewy'
 use 'dewy_grammar.dewy'
 use 'dewy_direct.jo'
 use 'place_methods.jo'
@@ -552,7 +551,8 @@ dewy_fast_file = (file: int) -> int[]:
     dc_parser.at = 0
     dc_parser.reader.dn_angles = 0
     dc_parser.reader.dn_depth = 0
-    dc_parser.reader.dewy_syntax = [DewySyntax(.unknown, "", 0, []), DewySyntax(.inverted_comparison, "", 0, [])]
+    dc_parser.reader.module_nodes = []
+    dc_parser.reader.module_lists = []
     declarations: int[]
     marked = 0
     shadowable_pos = 0
@@ -561,19 +561,21 @@ dewy_fast_file = (file: int) -> int[]:
         syntax = dn_statement(true)
         tag = dw_test_tag(syntax)
         if tag != 0:
-            if marked != 0: fatal(dc_parser.reader.dewy_syntax[tag].pos, "a second `$test` line: one marks the function just after it")
+            if marked != 0: fatal(dc_parser.reader.module_nodes[-1 - tag].pos, "a second `$test` line: one marks the function just after it")
             marked = dw_test_spec(tag)
-            dc_parser.reader.dewy_syntax.truncate(2)
             if dc_parser.at == before: dn_error(dc_parser.tokens[dc_parser.at].start, "expected a declaration")
+            dc_parser.reader.module_nodes.clear()
+            dc_parser.reader.module_lists.clear()
             continue
         shadow_tag = dw_shadowable_tag(syntax)
         if shadow_tag != 0:
-            if shadowable_pos != 0: fatal(dc_parser.reader.dewy_syntax[shadow_tag].pos, "a second `$shadowable`: one marks the const just after it")
-            if dc_parser.tokens[dc_parser.at].symbol != .kw_const: fatal(dc_parser.reader.dewy_syntax[shadow_tag].pos, "`$shadowable` marks a module-level const: `$shadowable const name = ...`")
-            shadowable_pos = dc_parser.reader.dewy_syntax[shadow_tag].pos
-            dc_parser.reader.dewy_syntax.truncate(2)
+            if shadowable_pos != 0: fatal(dc_parser.reader.module_nodes[-1 - shadow_tag].pos, "a second `$shadowable`: one marks the const just after it")
+            if dc_parser.tokens[dc_parser.at].symbol != .kw_const: fatal(dc_parser.reader.module_nodes[-1 - shadow_tag].pos, "`$shadowable` marks a module-level const: `$shadowable const name = ...`")
+            shadowable_pos = dc_parser.reader.module_nodes[-1 - shadow_tag].pos
+            dc_parser.reader.module_nodes.clear()
+            dc_parser.reader.module_lists.clear()
             continue
-        made = dw_top_declarations(syntax)
+        made = dw_top_declarations(syntax, mkpos(file, dc_parser.tokens[before].start))
         if oom_files.len() > 0: made = oom_wrap_all(made)
         if shadowable_pos != 0:
             loop declaration in made: shadowable_decls[declaration] = true
@@ -583,9 +585,8 @@ dewy_fast_file = (file: int) -> int[]:
             dw_test_attach(marked, made)
             declarations.push(marked)
             marked = 0
-        # Projection owns the retained data in the compact AST. Discard each
-        # declaration's temporary syntax before parsing the next declaration.
-        dc_parser.reader.dewy_syntax.truncate(2)
+        dc_parser.reader.module_nodes.clear()
+        dc_parser.reader.module_lists.clear()
         if dc_parser.at == before: dn_error(dc_parser.tokens[dc_parser.at].start, "expected a declaration")
     if proof_pending: dn_error(dc_parser.tokens[dc_parser.at].start, "$proof requires a following function declaration")
     if dir_bundles.len() > 0: dir_bundles_resolve()
@@ -596,6 +597,7 @@ dewy_fast_file = (file: int) -> int[]:
         dc_parser.reader.dc_lazy_tokens[file] = dc_parser.tokens
         dc_parser.reader.dc_lib_lazy = false
     dc_parser.tokens = []
-    dc_parser.reader.dewy_syntax = []
+    dc_parser.reader.module_nodes = []
+    dc_parser.reader.module_lists = []
     dc_parser.reader.dn_edits_on = saved_edits_on
     dw_finish_declarations(declarations)
