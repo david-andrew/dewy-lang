@@ -51,7 +51,8 @@ def test_key_extrema_panicking_callback(compiler, tmp_path):
 let values:array<int64>=[1 2]
 printl(values.min_by(@key))
 ''', 'check')
-    assert result.returncode != 0 and 'may panic' in result.stderr, result.stderr
+    # The check belongs to this module even when a library calls the helper.
+    assert result.returncode == 0, result.stderr
 
 
 def test_round_rational_no_panics(compiler, tmp_path):

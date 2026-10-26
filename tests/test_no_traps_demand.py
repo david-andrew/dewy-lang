@@ -19,7 +19,8 @@ from tests.support import compiler  # noqa: F401
 ])
 def test_deferred_body_demand(compiler, tmp_path, body, ok):
     source = tmp_path / 'demand.dewy'
-    source.write_text(body + '\n')
+    # Demand the helper's actual panic boundary even within this module.
+    source.write_text('$assume_local_asserts=false\n' + body + '\n')
     run = subprocess.run([compiler, 'check', source], text=True, capture_output=True)
     assert (run.returncode == 0) == ok, run.stderr
     if not ok:

@@ -341,7 +341,7 @@ __gpu_alloc[T] = (xs: T[], shape: int[]) -> GpuArray[T]:
         # (a buffer of the values themselves)
         w = max(n, 1)
         h = 1
-    if h > __gpu_maxw: panic("a GPU array of {n} values does not fit in a texture (at most {__gpu_maxw * __gpu_maxw * 4} here)")
+    if h > __gpu_maxw: __environment_failure("a GPU array of {n} values does not fit in a texture (at most {__gpu_maxw * __gpu_maxw * 4} here)")
     int_ = __gpu_is_int(xs)
     token = fill(u8(0), 1)
     tex = 0

@@ -527,7 +527,7 @@ __gb_bind_gl = (q: *u8, loc: int, loc2: int, unit: int) -> int:
         texels = max((bs.len() + 15) / 16, 1)
         w = min(texels, 1024)
         h = (texels + 1023) / 1024
-        if h > gl_max_texture_size(): panic("a GPU buffer of {bs.len()} bytes is too large for OpenGL here")
+        if h > gl_max_texture_size(): __environment_failure("a GPU buffer of {bs.len()} bytes is too large for OpenGL here")
         bs.resize(w * h * 16)
         if __gb[id].gl_tex == 0:
             __gb[id].gl_tex = gl_create_texture()

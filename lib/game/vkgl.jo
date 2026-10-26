@@ -272,7 +272,7 @@ when TARGET != "wasm" and TARGET != "macos":
             t = __vgt_free.pop()
             __vgt[t] = __VgTex(live = true, linear = true)
             return t
-        if __vgt.len() >= __VK_MAX_TEXTURES: panic("too many textures (at most {__VK_MAX_TEXTURES})")
+        if __vgt.len() >= __VK_MAX_TEXTURES: __environment_failure("too many textures (at most {__VK_MAX_TEXTURES})")
         __vgt.push(__VgTex(live = true, linear = true))
         __vgt.len() - 1
 

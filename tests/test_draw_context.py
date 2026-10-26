@@ -26,12 +26,11 @@ def test_draw_context_proved_and_runs(compiler, tmp_path, name):
     assert checked.returncode == 0, checked.stdout + checked.stderr
     assert 'drawing runs only' not in checked.stdout
     assert 'drawing works only' not in checked.stdout + checked.stderr
-    # Without the opt-in, the draw precondition is discharged. The independent
-    # Vulkan capacity check remains (this task deliberately preserves it).
+    # Without the opt-in, the draw precondition is discharged, and GPU capacity
+    # is an environment failure, not a panic (resource_exhaustion.md).
     path.write_text(source.replace('$runtime_checks\n', ''))
     strict = invoke(compiler, path, 'check')
-    assert strict.returncode == 1, strict.stdout + strict.stderr
-    assert 'vgl_create_texture' in strict.stderr, strict.stderr
+    assert strict.returncode == 0, strict.stdout + strict.stderr
     assert 'drawing' not in strict.stderr
     path.write_text(source)
     screenshot = tmp_path / 'frame.png'
@@ -63,13 +62,11 @@ def test_draw_context_deferred_check_still_traps(compiler, tmp_path):
     assert 'drawing works only inside' in ran.stderr
 
 
-def test_draw_context_preserves_other_panics(compiler, tmp_path):
+def test_draw_context_without_opt_in(compiler, tmp_path):
     path = tmp_path / 'game.dewy'
     path.write_text('draw=():>void=>{circle(vec2(100 100) 20 RED)}\n')
     checked = invoke(compiler, path, 'check')
-    assert checked.returncode == 1, checked.stdout + checked.stderr
-    assert 'vgl_create_texture' in checked.stderr
-    assert 'drawing works only' not in checked.stderr
+    assert checked.returncode == 0, checked.stdout + checked.stderr
 
 
 @pytest.mark.parametrize('target', ['native', 'wasm32'])

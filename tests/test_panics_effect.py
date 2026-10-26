@@ -9,14 +9,16 @@ import pytest
 from tests.support import compiler  # noqa: F401
 
 REJECTED = {
-    # A dependency built with `$runtime_checks` cannot crash inside a caller that did not opt in.
+    # A dependency built with `$runtime_checks` cannot crash inside a caller that did not opt in
+    # (here not assumed the module's own handling: test_runtime_checks_module_local.py).
     'checked_dependency': ('''$runtime_checks=false
+$assume_local_asserts=false
 helper=(xs:array<int64> i:int64):>int64=>{
     $runtime_checks
     return xs[i]
 }
 main=():>void=>printl(helper([1 2] 1))
-''', '6:23: error: calling `helper` may panic (helper: runtime check: index is in bounds'),
+''', '7:23: error: calling `helper` may panic (helper: runtime check: index is in bounds'),
     # An explicit check is a panic too (here not assumed the module's own
     # handling), and a handle to it may be called.
     'handle': ('''$runtime_checks=false

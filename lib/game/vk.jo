@@ -1873,7 +1873,7 @@ when TARGET != "wasm" and TARGET != "macos":
     __vk_slot_next = 1
     __vk_slot_new = () -> int:
         if __vk_slot_free.len() > 0: return __vk_slot_free.pop()
-        if __vk_slot_next >= __VK_MAX_TEXTURES: panic("too many textures (at most {__VK_MAX_TEXTURES})")
+        if __vk_slot_next >= __VK_MAX_TEXTURES: __environment_failure("too many textures (at most {__VK_MAX_TEXTURES})")
         __vk_slot_next += 1
         __vk_slot_next - 1
 

@@ -245,7 +245,10 @@ __gfx_init = ():
     # default font (signed distance field atlas)
     __font_init()
     same = __font.texture.id == __default_font.texture.id
-    __default_font.texture = texture(load_image(embed("assets/font.png")), true)
+    # (the bundled atlas is a PNG this reader reads: an invariant)
+    atlas = load_png(embed("assets/font.png"))
+    if atlas == none: unreachable()
+    __default_font.texture = texture(atlas, true)
     if same: __font = __default_font
 
 # the built-in font's sizes (text_width works before there is a window)

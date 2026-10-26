@@ -2042,11 +2042,13 @@ effects_demand_late = (f: int) -> bool:
 # the runtime (lib/core/rt.jo). Demanded only when some scope is no-traps or a
 # row excludes panics: each reached body is walked once and the call graph
 # solved by Tarjan's algorithm, O(nodes of the reached bodies + call edges).
-# A `$runtime_assert` is its module's own explicit handling (decisions.md,
-# 2026-10-23): it makes its function, and callers in the same module, panic
-# only for callers in other modules (answer 3), unless its scope says
-# `$assume_local_asserts=false` (docs/design/assumptions.md). A call across
-# modules of a function that panics only so panics outright (answer 2).
+# An explicit `panic` or `$runtime_assert` is its module's own handling (decisions.md,
+# 2026-10-23), and so is an obligation its scope opted into checking
+# (`$runtime_checks`, `$prototype`; the same rule): it makes its function, and
+# callers in the same module, panic only for callers in other modules (answer
+# 3), unless its scope says `$assume_local_asserts=false`
+# (docs/design/assumptions.md). A call across modules of a function that
+# panics only so panics outright (answer 2), unless that call opts in too.
 effect_panics_demanded = false
 effect_panics_settled = false         # deferred obligations are known: answers are final
 effect_panic_pending: {int: bool} = {}
@@ -2093,7 +2095,13 @@ effect_panics_reset = ():
 # it is still runtime checks) at n in f's body.
 effect_panic_note = (f: int, n: int, what: str, provisional: bool = false):
     if f <= 0: return
-    if effect_panic_nodes.has(f) and not (effect_panic_pending.has(f) and not provisional): return
+    if let old = effect_panic_nodes.get(f):
+        pending = effect_panic_pending.has(f)
+        # Prefer a settled check to a provisional one, then a check whose scope
+        # refuses the local assumption: a local witness must not hide it.
+        if pending == provisional:
+            if not dir_assume_local_asserts(nodes[old].pos) or dir_assume_local_asserts(nodes[n].pos): return
+        else if provisional: return
     if provisional: effect_panic_pending[f] = true
     else: effect_panic_pending.remove(f)
     effect_panic_nodes[f] = n
@@ -2285,7 +2293,9 @@ panic_site = (f: int, n: int):
         # check the compiler made, as unpacking's: an obligation for facts)
         explicit = id == .panic or id == .runtime_assert or id == .unreachable and not panic_lib
         if explicit and panic_witness[f] == 0 and not panic_synthesized(n):
-            if id == .runtime_assert and dir_assume_local_asserts(nodes[n].pos):
+            # Library panics state caller preconditions, not the library's own
+            # handling. Keep their unconditional answer and short-circuit scan.
+            if (id == .panic and not panic_lib or id == .runtime_assert) and dir_assume_local_asserts(nodes[n].pos):
                 if panic_local[f] == 0: panic_local[f] = n
             else: panic_witness[f] = n
     else if k == .call and nodes[n].aux == 0 or k == .fnref or k == .lambda or k == .pair or k == .partial and nodes[n].aux == 0:
@@ -2320,7 +2330,9 @@ panic_scan = (f: int):
     panic_edge_at[f] = panic_edges.len()
     panic_edge_end[f] = panic_edges.len()
     d = int(fns[f].decl)
-    if let n = effect_panic_nodes.get(f): panic_witness[f] = n
+    if let n = effect_panic_nodes.get(f):
+        if dir_assume_local_asserts(nodes[n].pos): panic_local[f] = n
+        else: panic_witness[f] = n
     if fns[f].state != 2 or fns[f].body == 0 or d != 0 and has_flag(d, NF_EXTERN): return
     if d != 0 and modules[int(fns[f].mod)].is_prelude and files[pos_file(nodes[d].pos)].path == lib_dir + "/core/rt.jo": return
     panic_lib = fn_in_lib(f)
@@ -2346,42 +2358,81 @@ panic_visit = (f: int):
             panic_visit(g)
             if panic_answer[g] == 0: panic_low[f] = min(panic_low[f], panic_low[g])
         else if panic_answer[g] == 0: panic_low[f] = min(panic_low[f], panic_index[g])
-        if panic_witness[f] == 0 and panic_reaches(f, g):
+        answer = panic_edge_answer(f, g, panic_edges[e + 1])
+        if answer == 2 and panic_witness[f] == 0:
             panic_witness[f] = panic_edges[e + 1]
             panic_via[f] = g
-        else if panic_answer[g] == 3 and panic_local[f] == 0:
+        else if answer == 3 and panic_local[f] == 0:
             panic_local[f] = panic_edges[e + 1]
             panic_local_via[f] = g
     if panic_low[f] != panic_index[f]: return
-    # (a component: its members reach one another, so one may panic if any
-    # does; a module-local panic spanning modules is no longer local)
     start = panic_stack.len() - 1
     loop panic_stack[start] != f: start -= 1
     if draw_context_guard != 0: draw_context_component(start)
     any = false
-    local = false
-    spans = false
     loop i in [start..panic_stack.len()):
         g = panic_stack[i]
-        if panic_witness[g] != 0: any = true
-        if panic_local[g] != 0: local = true
-        if fns[g].mod != fns[f].mod: spans = true
-    if local and spans: any = true
-    answer = if any: 2 else if local: 3 else: 1
-    loop i in [start..panic_stack.len()):
-        g = panic_stack[i]
-        if answer == 3 or panic_witness[g] == 0 and panic_local[g] != 0:
-            panic_witness[g] = panic_local[g]
-            panic_via[g] = panic_local_via[g]
-        if answer != 1 and panic_witness[g] == 0:
+        if panic_witness[g] != 0 or panic_local[g] != 0: any = true
+    # Only a recursive component with a panic source needs propagation. An
+    # opted-in edge can make its caller local even when its callee is not, so
+    # members need individual answers, not one answer for the whole component.
+    # Reverse edges are indexed by callee; each answer rises at most twice
+    # (none -> local -> unconditional), hence O(component nodes + edges).
+    # Tarjan is done with these low links: reuse them as incoming-list heads.
+    incoming: int[]
+    pending: int[]
+    propagate = any and panic_stack.len() - start > 1
+    if propagate:
+        loop i in [start..panic_stack.len()): panic_low[panic_stack[i]] = -1
+        loop i in [start..panic_stack.len()):
+            g = panic_stack[i]
             loop j in [0..(panic_edge_end[g] - panic_edge_at[g]) / 2):
                 e = panic_edge_at[g] + 2 * j
                 h = panic_edges[e]
-                if panic_answer[h] == 0 and panic_index[h] >= panic_index[f] and panic_witness[g] == 0:
-                    panic_witness[g] = panic_edges[e + 1]
-                    panic_via[g] = h
+                if panic_answer[h] == 0 and panic_index[h] >= panic_index[f]:
+                    at = incoming.len()
+                    incoming.push(g)
+                    incoming.push(panic_edges[e + 1])
+                    incoming.push(panic_low[h])
+                    panic_low[h] = at
+    loop i in [start..panic_stack.len()):
+        g = panic_stack[i]
+        answer = if panic_witness[g] != 0: 2 else if panic_local[g] != 0: 3 else: 1
+        if answer == 3:
+            panic_witness[g] = panic_local[g]
+            panic_via[g] = panic_local_via[g]
         panic_answer[g] = answer
+        if propagate and answer != 1: pending.push(g)
+    at = 0
+    loop at < pending.len():
+        g = pending[at]
+        at += 1
+        e = panic_low[g]
+        loop e >= 0:
+            h = incoming[e]
+            n = incoming[e + 1]
+            answer = panic_edge_answer(h, g, n)
+            old = panic_answer[h]
+            if old == 1 or old == 3 and answer == 2:
+                panic_answer[h] = answer
+                panic_witness[h] = n
+                panic_via[h] = g
+                pending.push(h)
+            e = incoming[e + 2]
     loop panic_stack.len() > start: panic_stack.pop()
+
+# The effect exported by f after this call. Accepting a dependency's panics at
+# an opted-in call handles them for this module's own callers; the dependency
+# itself and callers of f in other modules still see panics. Diagnostics use
+# panic_reaches directly, so a direct unopted dependency call still fails.
+panic_edge_answer = (f: int, g: int, n: int) -> int:
+    if panic_answer[g] < 2: return 1
+    if not panic_reaches(f, g): return 3
+    p = nodes[n].pos
+    if p > 0 and not pos_in_lib(p) and dir_assume_local_asserts(p):
+        policy = dir_policy(p)
+        if policy == DIR_RUNTIME or policy == DIR_PROTOTYPE: return 3
+    2
 
 # Whether f's call of g (answered) may panic in f: g may panic for every
 # caller, or only for callers outside its module and f is one.

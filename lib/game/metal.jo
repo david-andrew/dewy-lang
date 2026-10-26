@@ -155,7 +155,7 @@ when TARGET == "macos":
         h = __oc_p(__mg_dev, __sel("newHeapWithDescriptor:"), d)
         __mg_release(d)
         objc_autoreleasePoolPop(pool)
-        if h == null: panic("Metal: a heap of {size >> 20} MB could not be made")
+        if h == null: __environment_failure("Metal: a heap of {size >> 20} MB could not be made")
         __mg_heaps.push(__MgHeap(h, shared))
         __mg_heaps.len() - 1
 
@@ -168,7 +168,7 @@ when TARGET == "macos":
             if b != null: return b
         k = __mg_new_heap(max(__MG_HEAP, size * 2), true)
         b = __mo_ii(__mg_heaps[k].heap, __sel("newBufferWithLength:options:"), size, 0)
-        if b == null: panic("Metal: a buffer of {size} bytes could not be made")
+        if b == null: __environment_failure("Metal: a buffer of {size} bytes could not be made")
         b
 
     # a private texture from a descriptor
@@ -181,7 +181,7 @@ when TARGET == "macos":
         sa = __oc_p(__mg_dev, __sel("heapTextureSizeAndAlignWithDescriptor:"), desc) as int
         k = __mg_new_heap(max(__MG_HEAP, sa * 2), false)
         t = __oc_p(__mg_heaps[k].heap, __sel("newTextureWithDescriptor:"), desc)
-        if t == null: panic("Metal: a texture could not be made")
+        if t == null: __environment_failure("Metal: a texture could not be made")
         t
 
     # every heap resident for what an encoder does
@@ -352,7 +352,7 @@ when TARGET == "macos":
 
     __vk_slot_new = () -> int:
         if __vk_slot_free.len() > 0: return __vk_slot_free.pop()
-        if __vk_slot_next >= __VK_MAX_TEXTURES: panic("too many textures (at most {__VK_MAX_TEXTURES})")
+        if __vk_slot_next >= __VK_MAX_TEXTURES: __environment_failure("too many textures (at most {__VK_MAX_TEXTURES})")
         __vk_slot_next += 1
         __vk_slot_next - 1
 
@@ -663,7 +663,7 @@ when TARGET == "macos":
             t = __vgt_free.pop()
             __vgt[t] = __MgTex(live = true, linear = true)
             return t
-        if __vgt.len() >= __VK_MAX_TEXTURES: panic("too many textures (at most {__VK_MAX_TEXTURES})")
+        if __vgt.len() >= __VK_MAX_TEXTURES: __environment_failure("too many textures (at most {__VK_MAX_TEXTURES})")
         __vgt.push(__MgTex(live = true, linear = true))
         __vgt.len() - 1
 

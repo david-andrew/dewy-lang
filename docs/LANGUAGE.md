@@ -671,8 +671,9 @@ scope), panics explicitly (`panic`, `$runtime_assert`), or calls or
 takes a handle to a function that may panic. A scope without runtime checks
 (the default, also `$runtime_checks = false` and `$no_hidden_costs`) cannot call such code: the
 error names the chain to the panic and offers both repairs, proving what the
-callee checks first or opting in with `$runtime_checks`. So a function built
-with `$runtime_checks` cannot fail inside a caller that did not opt in.
+callee checks first or opting in with `$runtime_checks`. Within one module,
+explicit handling is local as described below; callers in other modules must
+prove the obligation or opt in.
 After an array access completes its runtime bounds check, later accesses to
 those same captured values can use the successful check's bounds. This also
 holds inside a later `$runtime_checks=false` block. The first check remains a
@@ -702,10 +703,15 @@ only: the dictionary keeps its guarded keys. Search bounds survive a fallback wh
 `xs.index_of(x) ?? -1` is below `xs.length`, so a nonnegative guard makes it
 an index. A text search result is at most `text.length`, which permits a slice
 endpoint but needs a strict upper guard for indexing.
-A `$runtime_assert` is its module's own explicit handling: it makes its
+An explicit `panic`, a `$runtime_assert`, or a check opted into with
+`$runtime_checks` or `$prototype` is its module's own handling: it makes its
 function (and the module's functions that call it) panic only for callers in
-other modules. `$assume_local_asserts=false` in a module, function or block
-makes its asserts panic for every caller.
+other modules. The module's own callers need no additional opt-in; the check
+still runs. This includes calls to panicking dependencies inside the opted-in
+scope: the dependency itself keeps its effect, a direct call without opt-in
+still fails, and callers from other modules still see `panics`.
+`$assume_local_asserts=false` in a module, function or block
+makes its checks and explicit panics panic for every caller.
 `& no panics` forbids it outright, whatever the scope, local asserts included. A library function's
 precondition is the caller's obligation where the library states it: `xs.first`
 and `xs.last`, along with `xs.min_by(key)` and `xs.max_by(key)`, take an array
@@ -728,7 +734,9 @@ A stepped range's nonzero step is the caller's obligation too, as a divisor is,
 in a slice (`xs[a,b..]`, `m[a,b..c ..]`) and an open counter (`[a,b..]`) as in a loop.
 A literal can rule a failure out: a power with a literal exponent `>=? 0` and a
 rational with a literal nonzero denominator cannot panic. Other library failures (a bad format
-specification) still make the call panic. Running out of memory is not a panic. The editor's hover
+specification) still make the call panic. Running out of memory or GPU capacity
+(buffer room, texture slots, or driver allocation) is an environmental failure:
+it reports the failure and exits with status 1, and is not a `panics` effect. The editor's hover
 shows `& panics` on a function that may panic, and `dewy check --obligations`
 lists each library call that may panic where runtime checks are allowed.
 
@@ -4542,10 +4550,11 @@ Start a game with the built-in template, then edit it while it runs:
 
 The web build produces `/tmp/game.html`. Games use `main()` for setup,
 `update(dt:float64)` each frame, and `draw()` for rendering. A drawing call
-outside a frame (at the top level, before the window opens) panics, which no fact
-proves away yet, and the game takes a handle to `draw`, so a game's main file
-says `$runtime_checks` at its top, as the templates do; a model module without
-drawing can stay in the default no-traps mode. The
+must run inside `draw` or a helper reached only from `draw`; an unproven
+drawing context needs `$runtime_checks`. Drawing in that context needs no
+opt-in for GPU capacity: exhaustion reports and exits as an environmental
+failure. Other obligations, such as indexes and handle validity, still need
+proof or their own opt-in. The
 [paddle game, physics playground, forest and Dunes](../examples/README.md) show
 input, 2D/3D drawing, simulation, module boundaries and live reload. Graphics, fonts,
 audio, physics and other platform libraries come with the toolchain.
