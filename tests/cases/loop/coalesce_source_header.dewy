@@ -1,0 +1,5 @@
+pick=(present:bool):>array<int64>?=>if present [1 2] else none
+main=()=>{
+    let b:array<int64>=[3 4 5]
+    loop x in pick(false) ?? b {printl(x)}
+}

@@ -3962,6 +3962,7 @@ rt_dc_head_mistake = (head: int) -> bool:
     if not dc_parser.flags.report_now or nodes[head].op != 1: return false
     next = dc_parser.tokens[dc_parser.at]
     if next.symbol == .kw_as or next.symbol == .kw_transmute: dn_error(next.start, "`{dn_token_text(next.symbol)}` binds more loosely than `in`, so this converts the whole loop header: parenthesize the source, as in `loop c in (text {dn_token_text(next.symbol)} array<uint8>)`")
+    if next.symbol == .coalesce: dn_error(next.start, "`??` binds more loosely than `in`, so this applies the fallback to the whole loop header: parenthesize the source, as in `loop x in (a ?? b)`")
     if next.symbol != .assign: return false
     it = int(nodes[head].a)
     it_name = "it"

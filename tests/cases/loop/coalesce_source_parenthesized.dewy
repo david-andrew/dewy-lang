@@ -1,0 +1,11 @@
+# quick
+# A fallback for a loop source is parenthesized: `??` binds more loosely than `in`.
+pick=(present:bool):>array<int64>?=>if present [1 2] else none
+main=()=>{
+    let b:array<int64>=[3 4 5]
+    loop x in (pick(false) ?? b) {printl(x)}
+    loop x in (pick(true) ?? b) {printl(x)}
+    loop i in 0.. and x in (pick(false) ?? b) {printl"{i} {x}"}
+    let kept=[loop x in (pick(true) ?? b) x]
+    printl(kept)
+}

@@ -5334,6 +5334,9 @@ rd_dc_head_mistake=(@reader_ctx:ParserContext @reader_nodes:array<Node> head:int
     if ((next.symbol =? 'kw_as') or (next.symbol =? 'kw_transmute')) {
         reader_ctx.stores.host[0].dn_error(next.start "`{dn_token_text(next.symbol)}` binds more loosely than `in`, so this converts the whole loop header: parenthesize the source, as in `loop c in (text {dn_token_text(next.symbol)} array<uint8>)`");
     }
+    if (next.symbol =? 'coalesce') {
+        reader_ctx.stores.host[0].dn_error(next.start "`??` binds more loosely than `in`, so this applies the fallback to the whole loop header: parenthesize the source, as in `loop x in (a ?? b)`");
+    }
     if (next.symbol not=? 'assign') {
         return false
     }
