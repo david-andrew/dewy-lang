@@ -1,3 +1,4 @@
+use 'dewy_lexer.dewy'
 use 'dewy_file.dewy'
 use 'dewy_reader.dewy'
 use 'dewy_reader_services.jo'
@@ -86,112 +87,13 @@ dn_interpolation_close = (source: str, start: int, stop: int) -> int:
     if e < 0: dn_lex_problem()
     e
 
-# (the end of the quoted string at start in the bytes being lexed: dewy_lex.dewy dx_quote_end)
-dn_quote_close = (bytes: *u8, start: int, stop: int, raw: bool) -> int:
-    e = dx_quote_end(dn_lexer, bytes, start, stop, 0, raw, false)
-    if e < 0: dn_lex_problem()
-    e
-
 dn_ident_start = (c: u8) -> bool: is_alpha(c) or c == '_' or c >= 128
-
-dn_matches = (source: *u8, at: int, stop: int, value: str) -> bool:
-    if len(value) > stop - at: return false
-    loop i in [0..len(value)):
-        if source[at + i] != value[i]: return false
-    true
-
-# Dispatch punctuation by its leading byte, trying only relevant longer
-# spellings. Canonical token text avoids allocating a string per punctuation.
-dn_lex_symbol = (source: *u8, at: int, stop: int) -> DewyToken:
-    match source[at]:
-        '%':
-            if dn_matches(source, at, stop, "%="): return .percent_assign
-        '*':
-            if dn_matches(source, at, stop, "*="): return .star_assign
-        '+':
-            if dn_matches(source, at, stop, "+="): return .plus_assign
-        '-':
-            if dn_matches(source, at, stop, "->"): return .arrow
-            if dn_matches(source, at, stop, "-="): return .minus_assign
-        '.':
-            if at + 1 < stop:
-                match source[at + 1]:
-                    '%':
-                        if dn_matches(source, at, stop, ".%="): return .dot_percent_assign
-                        if dn_matches(source, at, stop, ".%"): return .dot_percent
-                    '*':
-                        if dn_matches(source, at, stop, ".*="): return .dot_star_assign
-                        if dn_matches(source, at, stop, ".*"): return .dot_star
-                    '+':
-                        if dn_matches(source, at, stop, ".+="): return .dot_plus_assign
-                        if dn_matches(source, at, stop, ".+"): return .dot_plus
-                    '-':
-                        if dn_matches(source, at, stop, ".-="): return .dot_minus_assign
-                        if dn_matches(source, at, stop, ".-"): return .dot_minus
-                    '.':
-                        if dn_matches(source, at, stop, "..."): return .ellipsis
-                        if dn_matches(source, at, stop, ".."): return .range
-                    '/':
-                        if dn_matches(source, at, stop, ".//="): return .dot_floor_assign
-                        if dn_matches(source, at, stop, "./="): return .dot_slash_assign
-                        if dn_matches(source, at, stop, ".//"): return .dot_floor
-                        if dn_matches(source, at, stop, "./"): return .dot_slash
-                    '<':
-                        if dn_matches(source, at, stop, ".<=?"): return .dot_le
-                        if dn_matches(source, at, stop, ".<?"): return .dot_lt
-                    '=':
-                        if dn_matches(source, at, stop, ".=?"): return .dot_eq
-                    '>':
-                        if dn_matches(source, at, stop, ".>=?"): return .dot_ge
-                        if dn_matches(source, at, stop, ".>?"): return .dot_gt
-                    '^':
-                        if dn_matches(source, at, stop, ".^="): return .dot_power_assign
-                        if dn_matches(source, at, stop, ".^"): return .dot_caret
-                    'n':
-                        if dn_matches(source, at, stop, ".not>=?"): return .dot_not_ge
-                        if dn_matches(source, at, stop, ".not<=?"): return .dot_not_le
-                        if dn_matches(source, at, stop, ".not=?"): return .dot_not_eq
-                        if dn_matches(source, at, stop, ".not>?"): return .dot_not_gt
-                        if dn_matches(source, at, stop, ".not<?"): return .dot_not_lt
-        '/':
-            if dn_matches(source, at, stop, "//="): return .floor_assign
-            if dn_matches(source, at, stop, "/="): return .slash_assign
-            if dn_matches(source, at, stop, "//"): return .floor
-        ':':
-            if dn_matches(source, at, stop, ":>"): return .returns
-        '<':
-            if dn_matches(source, at, stop, "<=?"): return .le
-            if dn_matches(source, at, stop, "<<="): return .shl_assign
-            if dn_matches(source, at, stop, "<?"): return .lt
-            if dn_matches(source, at, stop, "<<"): return .shl
-            if dn_matches(source, at, stop, "<|"): return .pipe_left
-        '=':
-            if dn_matches(source, at, stop, "=>"): return .function
-            if dn_matches(source, at, stop, "=?"): return .eq
-        '>':
-            if dn_matches(source, at, stop, ">=?"): return .ge
-            # Nested generic closers before => are >> then =>, not >>= then >.
-            if dn_matches(source, at, stop, ">>=") and not dn_matches(source, at, stop, ">>=>"): return .shr_assign
-            if dn_matches(source, at, stop, ">?"): return .gt
-            if dn_matches(source, at, stop, ">>"): return .shr
-        '?':
-            if dn_matches(source, at, stop, "??"): return .coalesce
-        '^':
-            if dn_matches(source, at, stop, "^="): return .power_assign
-        '|':
-            if dn_matches(source, at, stop, "|>"): return .pipe_right
-            if dn_matches(source, at, stop, "|="): return .pipe_assign
-        '&':
-            if dn_matches(source, at, stop, "&="): return .amp_assign
-    dn_single_token(source[at])
 
 # The hot punctuation path needs only two bounded byte loads and a table
 # lookup. A `none` entry delegates longer spellings (and errors) to the
-# complete scanner. Store width beside the token so scanning does not
-# materialize token text.
+# complete Dewy scanner. Its width lookup never materializes token text.
 dn_classes: u8[]
 dn_symbols: DewyToken[]
-dn_symbol_widths: int[]
 dn_init_symbols = ():
     dn_classes = fill(u8(0), 256)
     loop c in [0..256):
@@ -205,11 +107,9 @@ dn_init_symbols = ():
         dn_classes[c] = u8(bits)
     dn_symbols = fill(DewyToken.none, 128 * 128)
     longer = fill(false, 128 * 128)
-    dn_symbol_widths = fill(0, int(DewyToken.kw_or_throw) + 1)
     loop i in [1..int(DewyToken.kw_or_throw) + 1):
         text = dn_token_text(DewyToken(i))
         width = len(text)
-        dn_symbol_widths[i] = width
         if width == 0 or dn_ident_start(text[0]): continue
         first = int(text[0]) * 128
         if width == 1:
@@ -270,20 +170,17 @@ dn_identifier_canonical = (s: str) -> str:
         i += 1
     out
 
-# `and=` `or=` `xor=`: a word operator directly followed by `=` (not `=?` or `=>`).
-dn_word_assign = (word: DewyToken, bytes: *u8, at: int, stop: int) -> DewyToken:
-    if at >= stop or bytes[at] != '=': return .none
-    if at + 1 < stop and (bytes[at + 1] == '?' or bytes[at + 1] == '>' or bytes[at + 1] == '='): return .none
-    if word == .kw_and: return .and_assign
-    if word == .kw_or: return .or_assign
-    if word == .kw_xor: return .xor_assign
-    .none
-
 # Spare eofs after a token array's eof. The readers look up to six tokens past their cursor
 # without bounds tests (`tokens[at + k]`), and a truncated text puts the cursor on the eof, or
 # one past it after taking the eof, so lookahead from there reads eofs and the reader reports
 # the mistake rather than indexing past the array.
 const DN_EOF_SPARE = 8
+
+dn_lex_host = DewyLexHost(dn_lex_canonical, dn_lex_newline, dn_lex_slice, intern_new, dn_lex_problem, dn_error)
+
+dn_lex_canonical = (s: str, a: int, b: int) -> int: intern(dn_identifier_canonical(s[a..b)))
+dn_lex_newline = (s: str, a: int, b: int) -> bool: find_byte(s[a..b), '\n') >= 0
+dn_lex_slice = (s: str, a: int, b: int) -> str: s[a..b)
 
 dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLexeme[]:
     if intern_names and dn_word_tokens.len() == 0: dn_init_words()
@@ -291,192 +188,22 @@ dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLe
     # Hold the immutable string while scanning its bounded byte span. The
     # guards below are against stop, including interpolation subexpressions.
     assert(begin >= 0 and begin <= stop and stop <= len(source))
-    bytes = source.data()
     if lx_cls == null: lx_init_classes()
     if dn_symbols.len() == 0: dn_init_symbols()
     classes = data(dn_classes)
     symbols = data(dn_symbols)
-    widths = data(dn_symbol_widths)
     out: DewyLexeme[]
     capacity = (stop - begin) / 2 + 2 + DN_EOF_SPARE
     out.resize(capacity)
-    slots = data(out)
-    count = 0
     dn_block_comments = []
-    i = begin
-    spaced = false
-    newline = false
-    skip = dn_skip_bodies
-    nesting = 0
-    loop i < stop:
-        c = bytes[i]
-        if classes[c] & 16 != 0:
-            spaced = true
-            if c == '\n': newline = true
-            i += 1
-            loop i < stop:
-                c = bytes[i]
-                if c == '\n': newline = true
-                else if classes[c] & 16 == 0: break
-                i += 1
-            continue
-        # (a `\` ending a line cancels that line break: the next line continues this one)
-        if c == '\\':
-            e = i + 1
-            loop e < stop and (bytes[e] == ' ' or bytes[e] == '\t' or bytes[e] == '\r'): e += 1
-            if e < stop and bytes[e] == '\n':
-                spaced = true
-                i = e + 1
-                continue
-        if c == '#' and i + 1 < stop and bytes[i + 1] == '{':
-            e = dx_block_comment_end(bytes, i, stop)
-            if e < 0:
-                dx_block_comment_error(dn_lexer, i)
-                dn_lex_problem()
-            dn_block_comments.push(i)
-            dn_block_comments.push(e)
-            # (a comment over several lines separates like a line break)
-            if find_byte(source[i..e), '\n') >= 0: newline = true
-            spaced = true
-            i = e
-            continue
-        if c == '#':
-            loop i < stop and bytes[i] != '\n': i += 1
-            spaced = true
-            continue
-        start = i
-        kind = DewyKind.op
-        symbol = DewyToken.none
-        name: i32 = 0
-        if c == 'r' and i + 1 < stop and (bytes[i + 1] == '"' or bytes[i + 1] == '\''):
-            i = dn_quote_close(bytes, i + 1, stop, true)
-            kind = .rawquoted
-        else if classes[c] & 1 != 0:
-            if c >= 0x80:
-                # (`x₁₂`: the ASCII scan stopped at `₁`; the name is the token before and this)
-                if count > 0 and slots[count - 1].stop == start and slots[count - 1].kind == .identifier:
-                    count -= 1
-                    start = slots[count].start
-                    spaced = slots[count].space
-                    newline = slots[count].newline
-                    i = start
-                loop i < stop and classes[bytes[i]] & 34 != 0: i += 1
-            else:
-                i += 1
-                loop i < stop and classes[bytes[i]] & 2 != 0: i += 1
-            kind = .identifier
-            if intern_names:
-                id = if c >= 0x80: intern(dn_identifier_canonical(source[start..i))) else: intern_sub(source, start, i - start)
-                name = i32(id)
-                if id < dn_word_tokens.len(): symbol = dn_word_tokens[id]
-                if id == dc_parser.reader.dn_true_id or id == dc_parser.reader.dn_false_id: kind = .boolean
-                combined = dn_word_assign(symbol, bytes, i, stop)
-                if combined != .none:
-                    symbol = combined
-                    kind = .op
-                    i += 1
-                if i < stop and bytes[i] == '?':
-                    query = DewyToken.none
-                    if id == dc_parser.reader.dn_is_id: query = .is_type
-                    else if id == dc_parser.reader.dn_isnt_id: query = .isnt_type
-                    else if id == dc_parser.reader.dn_in_id: query = .contains
-                    if query != .none:
-                        symbol = query
-                        kind = .op
-                        i += 1
-            else:
-                value = source[start..i)
-                if value == "true" or value == "false": kind = .boolean
-                if (value == "is" or value == "isnt" or value == "in") and i < stop and bytes[i] == '?':
-                    value += "?"
-                    i += 1
-                    kind = .op
-                if kind != .boolean: symbol = dn_token_kind(value)
-                combined = dn_word_assign(symbol, bytes, i, stop)
-                if combined != .none:
-                    symbol = combined
-                    kind = .op
-                    i += 1
-        else if c == '$':
-            dn_metatags += 1
-            i += 1
-            loop i < stop and classes[bytes[i]] & 2 != 0: i += 1
-            if i == start + 1: dn_error(start, "expected a name after $")
-            kind = .metatag
-        else if is_digit(c):
-            decimal = true
-            digits = start
-            if c == '0' and i + 1 < stop and find_byte("btqsodzxug", bytes[i + 1]) >= 0:
-                decimal = bytes[i + 1] == 'd'
-                i += 2
-                digits = i
-            if i < stop and (bytes[i] == '"' or bytes[i] == '\''):
-                i = dn_quote_close(bytes, i, stop, false)
-                kind = .based_string
-            else:
-                mask: u8 = if decimal: 4 else: 8
-                loop i < stop and classes[bytes[i]] & mask != 0: i += 1
-                if i == digits: dn_error(start, "expected digits after the base prefix")
-                kind = if decimal: DewyKind.source_integer else: DewyKind.integer
-                if decimal and i + 1 < stop and bytes[i] == '.' and is_digit(bytes[i + 1]):
-                    i += 1
-                    loop i < stop and classes[bytes[i]] & 4 != 0: i += 1
-                    kind = .source_real
-                if decimal and i + 1 < stop and (bytes[i] == 'e' or bytes[i] == 'E') and (is_digit(bytes[i + 1]) or bytes[i + 1] == '+' or bytes[i + 1] == '-'):
-                    i += 1
-                    if i < stop and (bytes[i] == '+' or bytes[i] == '-'): i += 1
-                    first = i
-                    loop i < stop and classes[bytes[i]] & 4 != 0: i += 1
-                    if i == first: dn_error(start, "expected exponent digits")
-                    kind = .source_real
-        else if c == '"' or c == '\'':
-            i = dn_quote_close(bytes, i, stop, false)
-            kind = .quoted
-        else:
-            next: u8 = 0
-            if start + 1 < stop: next = bytes[start + 1]
-            if c < 128 and next < 128: symbol = symbols[int(c) * 128 + int(next)]
-            if symbol == .none:
-                symbol = dn_lex_symbol(bytes, start, stop)
-                if symbol == .none: dn_error(start, "unexpected character in Dewy source")
-            i += widths[int(symbol)]
-        if count == capacity:
-            capacity *= 2
-            out.resize(capacity)
-            slots = data(out)
-        slots[count].kind = kind
-        slots[count].name = name
-        slots[count].start = start
-        slots[count].stop = i
-        slots[count].space = spaced
-        slots[count].newline = newline
-        slots[count].symbol = symbol
-        count += 1
-        spaced = false
-        newline = false
-        if skip and symbol != .none:
-            if symbol == .lparen or symbol == .lbrack or symbol == .lbrace: nesting += 1
-            else if symbol == .rparen or symbol == .rbrack or symbol == .rbrace: nesting -= 1
-            else if symbol == .function and nesting == 0:
-                j = i
-                loop j < stop and (bytes[j] == ' ' or bytes[j] == '\t'): j += 1
-                if j < stop and bytes[j] == '{':
-                    e = dx_lazy_end(bytes, j, stop)
-                    if e > 0:
-                        if count == capacity:
-                            capacity *= 2
-                            out.resize(capacity)
-                            slots = data(out)
-                        slots[count].kind = .lazy_body
-                        slots[count].name = 0
-                        slots[count].start = j
-                        slots[count].stop = e
-                        slots[count].space = j > i
-                        slots[count].newline = false
-                        slots[count].symbol = .none
-                        count += 1
-                        dc_parser.reader.dn_lazy_left = true
-                        i = e
+    state = DewyLexState(dn_skip_bodies, false, dn_metatags, false, false, dc_parser.reader.dn_true_id, dc_parser.reader.dn_false_id, dc_parser.reader.dn_is_id, dc_parser.reader.dn_isnt_id, dc_parser.reader.dn_in_id, dn_word_tokens.len(), &names, &name_hash, &name_tab)
+    count = dx_lex(state, &dn_lex_host, dn_lexer, dn_block_comments, source, begin, stop, intern_names, classes, symbols, data(dn_word_tokens), out, capacity)
+    dn_metatags = state.metatags
+    if state.lazy: dc_parser.reader.dn_lazy_left = true
+    spaced = state.space
+    newline = state.newline
+    capacity = out.len()
+    slots = data(out)
     if count + 1 + DN_EOF_SPARE > capacity:
         capacity = count + 1 + DN_EOF_SPARE
         out.resize(capacity)

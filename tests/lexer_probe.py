@@ -20,7 +20,7 @@ def lexer_span_helpers(compiler, out):
             if not dependency.startswith('@lib/'):
                 copy_leaf(dependency)
 
-    for module in ('dewy_tokens.dewy', 'dewy_lex.dewy', 'intern.dewy', 'dewy_parser.dewy', 'node_store.dewy'):
+    for module in ('dewy_tokens.dewy', 'dewy_lex.dewy', 'dewy_lexer.dewy', 'intern.dewy', 'dewy_parser.dewy', 'node_store.dewy'):
         copy_leaf(module)
     fast = (directory / 'dewy_fast.jo').read_text()
     util = (directory / 'util.jo').read_text()
@@ -28,7 +28,7 @@ def lexer_span_helpers(compiler, out):
     payload = fast.index('dn_payload =')
     end = payload + len(re.match(r'[^\n]+\n(?:[ \t]+[^\n]*\n|\n)*', fast[payload:])[0])
     return '\n'.join([
-        "use 'dewy_tokens.dewy'\nuse 'dewy_lex.dewy'\nuse 'intern.dewy'\nuse 'dewy_parser.dewy'",
+        "use 'dewy_tokens.dewy'\nuse 'dewy_lex.dewy'\nuse 'dewy_lexer.dewy'\nuse 'intern.dewy'\nuse 'dewy_parser.dewy'",
         lex[lex.index('lx_cls:'):lex.index('is_ident_start =')],
         util[util.index('struct SrcFile:'):util.index('# position encoding')],
         'mkpos = (file: int, off: int) -> int: (file << 40) | off\n'

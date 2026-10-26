@@ -23,7 +23,7 @@ main = () -> int:
             text = word + chr(following)
             files = [SrcFile(path = "punct.dewy", src = text, is_dewy = true)]
             loop stop in [1..len(word) + 1):
-                expected = dn_lex_symbol(data(text), 0, stop)
+                expected = dx_symbol(data(text), 0, stop)
                 loop intern_names in [false, true]:
                     ts = dn_lex(0, 0, stop, intern_names)
                     assert(ts[0].symbol == expected)
@@ -31,7 +31,7 @@ main = () -> int:
                     assert(ts[0].stop == len(dn_token_text(expected)))
             # Include a following punctuation or Unicode identifier in the span.
             if following == 61 or following == 63 or following == 62 or following >= 128:
-                expected = dn_lex_symbol(data(text), 0, len(text))
+                expected = dx_symbol(data(text), 0, len(text))
                 ts = dn_lex(0, 0, len(text))
                 assert(ts[0].symbol == expected)
                 assert(ts[0].stop == len(dn_token_text(expected)))

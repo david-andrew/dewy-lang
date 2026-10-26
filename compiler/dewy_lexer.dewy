@@ -1,0 +1,678 @@
+$runtime_checks
+# The tokenizing loop of the Dewy lexer. dewy_lexer.jo is its frozen bootstrap twin.
+# The Jo adapter owns the source, tables and output; it checks begin <= stop <= byte length
+# and lends unique output storage. Source/table pointers remain valid throughout this scan.
+# Calls into the host are cold arbitrary-byte string operations and diagnostics; ordinary
+# names hash and look up directly in the intern leaf. The host never calls a reader.
+#
+# O(stop - begin) byte scanning, plus the existing amortized intern-table operations.
+# Bounded byte offsets use word arithmetic, as the frozen Jo scanner does. Name IDs keep
+# the existing signed 32-bit token representation; converting them preserves Jo's bits.
+# The output is presized and filled through its pointer, without a temporary record per token.
+from p"dewy_tokens.dewy" import (DewyLexeme DewyKind DewyToken dn_token_kind dn_single_token)
+from p"dewy_lex.dewy" import (DewyLexer dx_quote_end dx_block_comment_end dx_block_comment_error dx_lazy_end)
+from p"intern.dewy" import (hash_bytes name_find)
+DewyLexState:type=[
+    skip:bool lazy:bool metatags:int64 space:bool newline:bool
+    true_id:int64 false_id:int64 is_id:int64 isnt_id:int64 in_id:int64
+    word_count:int64
+    texts:ptr<array<string>> hashes:ptr<array<int64>> names:ptr<array<int32>>
+]
+DewyLexHost:type=[
+    canonical:<(s:string a:int64 b:int64):>int64>
+    has_newline:<(s:string a:int64 b:int64):>bool>
+    slice:<(s:string a:int64 b:int64):>string>
+    new_name:<(s:string a:int64 n:int64 h:int64):>int64>
+    problem:<():>int64>
+    error:<(at:int64 message:string):>int64>
+]
+dx_lex_quote=(@lx:DewyLexer host:ptr<DewyLexHost> bytes:ptr<uint8> start:int64 stop:int64 raw:bool):>int64=>$unsafe {
+    let e=dx_quote_end(@lx bytes start stop 0 raw false)
+    if e <? 0 {host[0].problem();}
+    e
+}
+dx_base_prefix=(c:uint8):>bool=>c =? b'b' or c =? b't' or c =? b'q' or c =? b's' or c =? b'o' or c =? b'd' or c =? b'z' or c =? b'x' or c =? b'u' or c =? b'g'
+dx_word_assign=(word:DewyToken bytes:ptr<uint8> at:int64 stop:int64):>DewyToken=>$unsafe {
+    if at >=? stop or bytes[at] not=? b'=' {return 'none'}
+    if at + 1 <? stop and (bytes[at + 1] =? b'?' or bytes[at + 1] =? b'>' or bytes[at + 1] =? b'=') {return 'none'}
+    if word =? 'kw_and' {return 'and_assign'}
+    if word =? 'kw_or' {return 'or_assign'}
+    if word =? 'kw_xor' {return 'xor_assign'}
+    'none'
+}
+# classes has 256 entries, symbols 128*128, words word_count; the adapter holds them
+# immutable. out has capacity slots and is unique; resizing refreshes slots immediately.
+dx_lex=(@state:DewyLexState host:ptr<DewyLexHost> @lx:DewyLexer @comments:array<int64> source:string begin:int64 stop:int64 intern_names:bool classes:ptr<uint8> symbols:ptr<DewyToken> words:ptr<DewyToken> @out:array<DewyLexeme> capacity:int64):>int64=>$unsafe {
+    let bytes=(source as array<uint8>).ptr
+    let slots=out.ptr
+    let count:int64=0
+    let i:int64=begin
+    let spaced=false
+    let newline=false
+    let skip=state.skip
+    let nesting:int64=0
+    loop (i <? stop) {
+        let c=bytes[i]
+        if ((classes[c] & 16) not=? 0) {
+            spaced=true
+            if (c =? b'\n') {
+                newline=true
+            }
+            i+=1
+            loop (i <? stop) {
+                c=bytes[i]
+                if (c =? b'\n') {
+                    newline=true
+                }
+                else if ((classes[c] & 16) =? 0) {
+                    break
+                }
+                i+=1
+            }
+            continue
+        }
+        if (c =? b'\\') {
+            let e:int64=(int64<overflow='wrap'>(i) + 1)
+            loop ((e <? stop) and (((bytes[e] =? b' ') or (bytes[e] =? b'\t')) or (bytes[e] =? b'\r'))) {
+                e+=1
+            }
+            if ((e <? stop) and (bytes[e] =? b'\n')) {
+                spaced=true
+                i=(int64<overflow='wrap'>(e) + 1)
+                continue
+            }
+        }
+        if (((c =? b'#') and ((int64<overflow='wrap'>(i) + 1) <? stop)) and (bytes[(int64<overflow='wrap'>(i) + 1)] =? b'\{')) {
+            let e:int64=dx_block_comment_end(bytes i stop)
+            if (e <? 0) {
+                dx_block_comment_error(@lx i);
+                host[0].problem();
+            }
+            comments.push(i);
+            comments.push(e);
+            if host[0].has_newline(source i e) {
+                newline=true
+            }
+            spaced=true
+            i=e
+            continue
+        }
+        if (c =? b'#') {
+            loop ((i <? stop) and (bytes[i] not=? b'\n')) {
+                i+=1
+            }
+            spaced=true
+            continue
+        }
+        let start:int64=i
+        let kind:DewyKind='op'
+        let symbol:DewyToken='none'
+        let name:int32=0
+        if (((c =? b'r') and ((int64<overflow='wrap'>(i) + 1) <? stop)) and ((bytes[(int64<overflow='wrap'>(i) + 1)] =? b'"') or (bytes[(int64<overflow='wrap'>(i) + 1)] =? b'\''))) {
+            i=dx_lex_quote(@lx host bytes (int64<overflow='wrap'>(i) + 1) stop true)
+            kind='rawquoted'
+        }
+        else if ((classes[c] & 1) not=? 0) {
+            if (c >=? 0x80) {
+                if (((count >? 0) and (slots[(int64<overflow='wrap'>(count) - 1)].stop =? start)) and (slots[(int64<overflow='wrap'>(count) - 1)].kind =? 'identifier')) {
+                    count-=1
+                    start=slots[count].start
+                    spaced=slots[count].space
+                    newline=slots[count].newline
+                    i=start
+                }
+                loop ((i <? stop) and ((classes[bytes[i]] & 34) not=? 0)) {
+                    i+=1
+                }
+            }
+            else {
+                i+=1
+                loop ((i <? stop) and ((classes[bytes[i]] & 2) not=? 0)) {
+                    i+=1
+                }
+            }
+            kind='identifier'
+            if intern_names {
+                let id:int64=0
+                if c >=? 0x80 {id=host[0].canonical(source start i)} else {
+                    let n:int64=int64<overflow='wrap'>(i) - int64<overflow='wrap'>(start)
+                    let p=bytes + start
+                    let h=hash_bytes(p n)
+                    id=name_find(@state.texts[0] @state.hashes[0] @state.names[0] p n h)
+                    if id <? 0 {id=host[0].new_name(source start n h)}
+                }
+                name=int32<overflow='wrap'>(id)
+                if (id <? state.word_count) {
+                    symbol=words[id]
+                }
+                if ((id =? state.true_id) or (id =? state.false_id)) {
+                    kind='boolean'
+                }
+                let combined:DewyToken=dx_word_assign(symbol bytes i stop)
+                if (combined not=? 'none') {
+                    symbol=combined
+                    kind='op'
+                    i+=1
+                }
+                if ((i <? stop) and (bytes[i] =? b'?')) {
+                    let query:DewyToken='none'
+                    if (id =? state.is_id) {
+                        query='is_type'
+                    }
+                    else if (id =? state.isnt_id) {
+                        query='isnt_type'
+                    }
+                    else if (id =? state.in_id) {
+                        query='contains'
+                    }
+                    if (query not=? 'none') {
+                        symbol=query
+                        kind='op'
+                        i+=1
+                    }
+                }
+            }
+            else {
+                let value:string=host[0].slice(source start i)
+                if ((value =? "true") or (value =? "false")) {
+                    kind='boolean'
+                }
+                if (((((value =? "is") or (value =? "isnt")) or (value =? "in")) and (i <? stop)) and (bytes[i] =? b'?')) {
+                    value="{value}?"
+                    i+=1
+                    kind='op'
+                }
+                if (kind not=? 'boolean') {
+                    symbol=dn_token_kind(value)
+                }
+                let combined:DewyToken=dx_word_assign(symbol bytes i stop)
+                if (combined not=? 'none') {
+                    symbol=combined
+                    kind='op'
+                    i+=1
+                }
+            }
+        }
+        else if (c =? b'$') {
+            state.metatags+=1
+            i+=1
+            loop ((i <? stop) and ((classes[bytes[i]] & 2) not=? 0)) {
+                i+=1
+            }
+            if (i =? (int64<overflow='wrap'>(start) + 1)) {
+                host[0].error(start "expected a name after $");
+            }
+            kind='metatag'
+        }
+        else if (b'0' <=? c and c <=? b'9') {
+            let decimal=true
+            let digits:int64=start
+            if (((c =? b'0') and ((int64<overflow='wrap'>(i) + 1) <? stop)) and dx_base_prefix(bytes[(int64<overflow='wrap'>(i) + 1)])) {
+                decimal=(bytes[(int64<overflow='wrap'>(i) + 1)] =? b'd')
+                i+=2
+                digits=i
+            }
+            if ((i <? stop) and ((bytes[i] =? b'"') or (bytes[i] =? b'\''))) {
+                i=dx_lex_quote(@lx host bytes i stop false)
+                kind='based_string'
+            }
+            else {
+                let mask:uint8=(if decimal 4 else 8)
+                loop ((i <? stop) and ((classes[bytes[i]] & mask) not=? 0)) {
+                    i+=1
+                }
+                if (i =? digits) {
+                    host[0].error(start "expected digits after the base prefix");
+                }
+                kind=(if decimal 'source_integer' else 'integer')
+                if (((decimal and ((int64<overflow='wrap'>(i) + 1) <? stop)) and (bytes[i] =? b'.')) and (b'0' <=? bytes[(int64<overflow='wrap'>(i) + 1)] and bytes[(int64<overflow='wrap'>(i) + 1)] <=? b'9')) {
+                    i+=1
+                    loop ((i <? stop) and ((classes[bytes[i]] & 4) not=? 0)) {
+                        i+=1
+                    }
+                    kind='source_real'
+                }
+                if (((decimal and ((int64<overflow='wrap'>(i) + 1) <? stop)) and ((bytes[i] =? b'e') or (bytes[i] =? b'E'))) and (((b'0' <=? bytes[(int64<overflow='wrap'>(i) + 1)] and bytes[(int64<overflow='wrap'>(i) + 1)] <=? b'9') or (bytes[(int64<overflow='wrap'>(i) + 1)] =? b'+')) or (bytes[(int64<overflow='wrap'>(i) + 1)] =? b'-'))) {
+                    i+=1
+                    if ((i <? stop) and ((bytes[i] =? b'+') or (bytes[i] =? b'-'))) {
+                        i+=1
+                    }
+                    let first:int64=i
+                    loop ((i <? stop) and ((classes[bytes[i]] & 4) not=? 0)) {
+                        i+=1
+                    }
+                    if (i =? first) {
+                        host[0].error(start "expected exponent digits");
+                    }
+                    kind='source_real'
+                }
+            }
+        }
+        else if ((c =? b'"') or (c =? b'\'')) {
+            i=dx_lex_quote(@lx host bytes i stop false)
+            kind='quoted'
+        }
+        else {
+            let next:uint8=0
+            if ((int64<overflow='wrap'>(start) + 1) <? stop) {
+                next=bytes[(int64<overflow='wrap'>(start) + 1)]
+            }
+            if ((c <? 128) and (next <? 128)) {
+                symbol=symbols[(int64<overflow='wrap'>(int64(c)) * 128 + int64<overflow='wrap'>(int64(next)))]
+            }
+            if (symbol =? 'none') {
+                symbol=dx_symbol(bytes start stop)
+                if (symbol =? 'none') {
+                    host[0].error(start "unexpected character in Dewy source");
+                }
+            }
+            i+=dx_token_width(symbol)
+        }
+        if (count =? capacity) {
+            capacity*=2
+            out.resize(capacity);
+            slots=out.ptr
+        }
+        slots[count].kind=kind
+        slots[count].name=name
+        slots[count].start=start
+        slots[count].stop=i
+        slots[count].space=spaced
+        slots[count].newline=newline
+        slots[count].symbol=symbol
+        count+=1
+        spaced=false
+        newline=false
+        if (skip and (symbol not=? 'none')) {
+            if (((symbol =? 'lparen') or (symbol =? 'lbrack')) or (symbol =? 'lbrace')) {
+                nesting+=1
+            }
+            else if (((symbol =? 'rparen') or (symbol =? 'rbrack')) or (symbol =? 'rbrace')) {
+                nesting-=1
+            }
+            else if ((symbol =? 'function') and (nesting =? 0)) {
+                let j:int64=i
+                loop ((j <? stop) and ((bytes[j] =? b' ') or (bytes[j] =? b'\t'))) {
+                    j+=1
+                }
+                if ((j <? stop) and (bytes[j] =? b'\{')) {
+                    let e:int64=dx_lazy_end(bytes j stop)
+                    if (e >? 0) {
+                        if (count =? capacity) {
+                            capacity*=2
+                            out.resize(capacity);
+                            slots=out.ptr
+                        }
+                        slots[count].kind='lazy_body'
+                        slots[count].name=0
+                        slots[count].start=j
+                        slots[count].stop=e
+                        slots[count].space=(j >? i)
+                        slots[count].newline=false
+                        slots[count].symbol='none'
+                        count+=1
+                        state.lazy=true
+                        i=e
+                    }
+                }
+            }
+        }
+    }
+    state.space=spaced
+    state.newline=newline
+    count
+}
+
+dx_token_width=(symbol:DewyToken):>int64=>match symbol {
+    <'lparen'> => 1
+    <'rparen'> => 1
+    <'lbrack'> => 1
+    <'rbrack'> => 1
+    <'lbrace'> => 1
+    <'rbrace'> => 1
+    <'langle'> => 1
+    <'rangle'> => 1
+    <'colon'> => 1
+    <'dot'> => 1
+    <'comma'> => 1
+    <'semi'> => 1
+    <'assign'> => 1
+    <'plus'> => 1
+    <'minus'> => 1
+    <'star'> => 1
+    <'slash'> => 1
+    <'percent'> => 1
+    <'at'> => 1
+    <'amp'> => 1
+    <'pipe'> => 1
+    <'caret'> => 1
+    <'question'> => 1
+    <'bang'> => 1
+    <'tilde'> => 1
+    <'not_ge'> => 6
+    <'not_le'> => 6
+    <'not_eq'> => 5
+    <'not_gt'> => 5
+    <'not_lt'> => 5
+    <'ge'> => 3
+    <'le'> => 3
+    <'floor_assign'> => 3
+    <'shl_assign'> => 3
+    <'shr_assign'> => 3
+    <'ellipsis'> => 3
+    <'function'> => 2
+    <'returns'> => 2
+    <'arrow'> => 2
+    <'eq'> => 2
+    <'gt'> => 2
+    <'lt'> => 2
+    <'plus_assign'> => 2
+    <'minus_assign'> => 2
+    <'star_assign'> => 2
+    <'slash_assign'> => 2
+    <'power_assign'> => 2
+    <'percent_assign'> => 2
+    <'coalesce'> => 2
+    <'floor'> => 2
+    <'shl'> => 2
+    <'shr'> => 2
+    <'range'> => 2
+    <'pipe_right'> => 2
+    <'amp_assign'> => 2
+    <'pipe_assign'> => 2
+    <'and_assign'> => 4
+    <'or_assign'> => 3
+    <'xor_assign'> => 4
+    <'pipe_left'> => 2
+    <'angle_assign'> => 2
+    <'is_type'> => 3
+    <'isnt_type'> => 5
+    <'contains'> => 3
+    <'not_contains'> => 7
+    <'kw_of'> => 2
+    <'kw_or_throw'> => 8
+    <'kw_let'> => 3
+    <'kw_const'> => 5
+    <'kw_return'> => 6
+    <'kw_break'> => 5
+    <'kw_continue'> => 8
+    <'kw_import'> => 6
+    <'kw_from'> => 4
+    <'kw_else'> => 4
+    <'kw_if'> => 2
+    <'kw_loop'> => 4
+    <'kw_parallel'> => 8
+    <'kw_concurrent'> => 10
+    <'kw_spawn'> => 5
+    <'kw_match'> => 5
+    <'kw_test'> => 4
+    <'kw_not'> => 3
+    <'kw_as'> => 2
+    <'kw_transmute'> => 9
+    <'kw_or'> => 2
+    <'kw_xor'> => 3
+    <'kw_and'> => 3
+    <'kw_nand'> => 4
+    <'kw_nor'> => 3
+    <'kw_xnor'> => 4
+    <'kw_in'> => 2
+    <'dot_not_ge'> => 7
+    <'dot_not_le'> => 7
+    <'dot_not_eq'> => 6
+    <'dot_not_gt'> => 6
+    <'dot_not_lt'> => 6
+    <'dot_ge'> => 4
+    <'dot_le'> => 4
+    <'dot_floor_assign'> => 4
+    <'dot_plus_assign'> => 3
+    <'dot_minus_assign'> => 3
+    <'dot_star_assign'> => 3
+    <'dot_slash_assign'> => 3
+    <'dot_percent_assign'> => 3
+    <'dot_power_assign'> => 3
+    <'dot_floor'> => 3
+    <'dot_eq'> => 3
+    <'dot_gt'> => 3
+    <'dot_lt'> => 3
+    <'dot_plus'> => 2
+    <'dot_minus'> => 2
+    <'dot_star'> => 2
+    <'dot_slash'> => 2
+    <'dot_percent'> => 2
+    <'dot_caret'> => 2
+    <'multiply_apply'> => 17
+    <'call'> => 13
+    <'broadcast_call'> => 22
+    <'index'> => 14
+    <'type_apply'> => 18
+    <'range_apply'> => 14
+    <'statement_end'> => 18
+    _ => 0
+}
+
+dx_matches=(source:ptr<uint8> at:int64 stop:int64 value:string):>bool=>$unsafe {
+    let bytes=value as array<uint8>
+    let n=bytes.length
+    if n >? stop - at {return false}
+    let i:int64=0
+    loop i <? n {
+        if source[int64<overflow='wrap'>(at) + i] not=? bytes[i] {return false}
+        i+=1
+    }
+    true
+}
+
+dx_symbol=(source:ptr<uint8> at:int64 stop:int64):>DewyToken=>$unsafe {
+    match source[at] {
+        <b'%'> => {
+            if dx_matches(source at stop "%=") {
+                return 'percent_assign'
+            }
+        }
+        <b'*'> => {
+            if dx_matches(source at stop "*=") {
+                return 'star_assign'
+            }
+        }
+        <b'+'> => {
+            if dx_matches(source at stop "+=") {
+                return 'plus_assign'
+            }
+        }
+        <b'-'> => {
+            if dx_matches(source at stop "->") {
+                return 'arrow'
+            }
+            if dx_matches(source at stop "-=") {
+                return 'minus_assign'
+            }
+        }
+        <b'.'> => {
+            if ((int64<overflow='wrap'>(at) + 1) <? stop) {
+                match source[int64<overflow='wrap'>(at) + 1] {
+                    <b'%'> => {
+                        if dx_matches(source at stop ".%=") {
+                            return 'dot_percent_assign'
+                        }
+                        if dx_matches(source at stop ".%") {
+                            return 'dot_percent'
+                        }
+                    }
+                    <b'*'> => {
+                        if dx_matches(source at stop ".*=") {
+                            return 'dot_star_assign'
+                        }
+                        if dx_matches(source at stop ".*") {
+                            return 'dot_star'
+                        }
+                    }
+                    <b'+'> => {
+                        if dx_matches(source at stop ".+=") {
+                            return 'dot_plus_assign'
+                        }
+                        if dx_matches(source at stop ".+") {
+                            return 'dot_plus'
+                        }
+                    }
+                    <b'-'> => {
+                        if dx_matches(source at stop ".-=") {
+                            return 'dot_minus_assign'
+                        }
+                        if dx_matches(source at stop ".-") {
+                            return 'dot_minus'
+                        }
+                    }
+                    <b'.'> => {
+                        if dx_matches(source at stop "...") {
+                            return 'ellipsis'
+                        }
+                        if dx_matches(source at stop "..") {
+                            return 'range'
+                        }
+                    }
+                    <b'/'> => {
+                        if dx_matches(source at stop ".//=") {
+                            return 'dot_floor_assign'
+                        }
+                        if dx_matches(source at stop "./=") {
+                            return 'dot_slash_assign'
+                        }
+                        if dx_matches(source at stop ".//") {
+                            return 'dot_floor'
+                        }
+                        if dx_matches(source at stop "./") {
+                            return 'dot_slash'
+                        }
+                    }
+                    <b'<'> => {
+                        if dx_matches(source at stop ".<=?") {
+                            return 'dot_le'
+                        }
+                        if dx_matches(source at stop ".<?") {
+                            return 'dot_lt'
+                        }
+                    }
+                    <b'='> => {
+                        if dx_matches(source at stop ".=?") {
+                            return 'dot_eq'
+                        }
+                    }
+                    <b'>'> => {
+                        if dx_matches(source at stop ".>=?") {
+                            return 'dot_ge'
+                        }
+                        if dx_matches(source at stop ".>?") {
+                            return 'dot_gt'
+                        }
+                    }
+                    <b'^'> => {
+                        if dx_matches(source at stop ".^=") {
+                            return 'dot_power_assign'
+                        }
+                        if dx_matches(source at stop ".^") {
+                            return 'dot_caret'
+                        }
+                    }
+                    <b'n'> => {
+                        if dx_matches(source at stop ".not>=?") {
+                            return 'dot_not_ge'
+                        }
+                        if dx_matches(source at stop ".not<=?") {
+                            return 'dot_not_le'
+                        }
+                        if dx_matches(source at stop ".not=?") {
+                            return 'dot_not_eq'
+                        }
+                        if dx_matches(source at stop ".not>?") {
+                            return 'dot_not_gt'
+                        }
+                        if dx_matches(source at stop ".not<?") {
+                            return 'dot_not_lt'
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        <b'/'> => {
+            if dx_matches(source at stop "//=") {
+                return 'floor_assign'
+            }
+            if dx_matches(source at stop "/=") {
+                return 'slash_assign'
+            }
+            if dx_matches(source at stop "//") {
+                return 'floor'
+            }
+        }
+        <b':'> => {
+            if dx_matches(source at stop ":>") {
+                return 'returns'
+            }
+        }
+        <b'<'> => {
+            if dx_matches(source at stop "<=?") {
+                return 'le'
+            }
+            if dx_matches(source at stop "<<=") {
+                return 'shl_assign'
+            }
+            if dx_matches(source at stop "<?") {
+                return 'lt'
+            }
+            if dx_matches(source at stop "<<") {
+                return 'shl'
+            }
+            if dx_matches(source at stop "<|") {
+                return 'pipe_left'
+            }
+        }
+        <b'='> => {
+            if dx_matches(source at stop "=>") {
+                return 'function'
+            }
+            if dx_matches(source at stop "=?") {
+                return 'eq'
+            }
+        }
+        <b'>'> => {
+            if dx_matches(source at stop ">=?") {
+                return 'ge'
+            }
+            if (dx_matches(source at stop ">>=") and (not dx_matches(source at stop ">>=>"))) {
+                return 'shr_assign'
+            }
+            if dx_matches(source at stop ">?") {
+                return 'gt'
+            }
+            if dx_matches(source at stop ">>") {
+                return 'shr'
+            }
+        }
+        <b'?'> => {
+            if dx_matches(source at stop "??") {
+                return 'coalesce'
+            }
+        }
+        <b'^'> => {
+            if dx_matches(source at stop "^=") {
+                return 'power_assign'
+            }
+        }
+        <b'|'> => {
+            if dx_matches(source at stop "|>") {
+                return 'pipe_right'
+            }
+            if dx_matches(source at stop "|=") {
+                return 'pipe_assign'
+            }
+        }
+        <b'&'> => {
+            if dx_matches(source at stop "&=") {
+                return 'amp_assign'
+            }
+        }
+        _ => {}
+    }
+    dn_single_token(source[at])
+}

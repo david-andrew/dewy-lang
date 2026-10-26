@@ -1,0 +1,449 @@
+# Frozen twin of dewy_lexer.dewy for bootstrap generations without Dewy.
+use 'dewy_tokens.dewy'
+use 'dewy_lex.dewy'
+use 'intern.dewy'
+
+struct DewyLexState:
+    skip: bool
+    lazy: bool
+    metatags: int
+    space: bool
+    newline: bool
+    true_id: int
+    false_id: int
+    is_id: int
+    isnt_id: int
+    in_id: int
+    word_count: int
+    texts: *(str[])
+    hashes: *(int[])
+    names: *(i32[])
+
+struct DewyLexHost:
+    canonical: (str, int, int) -> int
+    has_newline: (str, int, int) -> bool
+    slice: (str, int, int) -> str
+    new_name: (str, int, int, int) -> int
+    problem: () -> int
+    error: (int, str) -> int
+
+dx_lex_quote = (lx: mut DewyLexer, host: *DewyLexHost, bytes: *u8, start: int, stop: int, raw: bool) -> int:
+    e = dx_quote_end(lx, bytes, start, stop, 0, raw, false)
+    if e < 0: host[0].problem()
+    e
+
+dx_word_assign = (word: DewyToken, bytes: *u8, at: int, stop: int) -> DewyToken:
+    if at >= stop or bytes[at] != '=': return .none
+    if at + 1 < stop and (bytes[at + 1] == '?' or bytes[at + 1] == '>' or bytes[at + 1] == '='): return .none
+    if word == .kw_and: return .and_assign
+    if word == .kw_or: return .or_assign
+    if word == .kw_xor: return .xor_assign
+    .none
+
+dx_lex = (state: mut DewyLexState, host: *DewyLexHost, lx: mut DewyLexer, comments: mut int[], source: str, begin: int, stop: int, intern_names: bool, classes: *u8, symbols: *DewyToken, words: *DewyToken, out: mut DewyLexeme[], capacity0: int) -> int:
+    capacity = capacity0
+    bytes = data(source)
+    slots = data(out)
+    count = 0
+    i = begin
+    spaced = false
+    newline = false
+    skip = state.skip
+    nesting = 0
+    loop i < stop:
+        c = bytes[i]
+        if classes[c] & 16 != 0:
+            spaced = true
+            if c == '\n': newline = true
+            i += 1
+            loop i < stop:
+                c = bytes[i]
+                if c == '\n': newline = true
+                else if classes[c] & 16 == 0: break
+                i += 1
+            continue
+        # (a `\` ending a line cancels that line break: the next line continues this one)
+        if c == '\\':
+            e = i + 1
+            loop e < stop and (bytes[e] == ' ' or bytes[e] == '\t' or bytes[e] == '\r'): e += 1
+            if e < stop and bytes[e] == '\n':
+                spaced = true
+                i = e + 1
+                continue
+        if c == '#' and i + 1 < stop and bytes[i + 1] == '{':
+            e = dx_block_comment_end(bytes, i, stop)
+            if e < 0:
+                dx_block_comment_error(lx, i)
+                host[0].problem()
+            comments.push(i)
+            comments.push(e)
+            # (a comment over several lines separates like a line break)
+            if host[0].has_newline(source, i, e): newline = true
+            spaced = true
+            i = e
+            continue
+        if c == '#':
+            loop i < stop and bytes[i] != '\n': i += 1
+            spaced = true
+            continue
+        start = i
+        kind = DewyKind.op
+        symbol = DewyToken.none
+        name: i32 = 0
+        if c == 'r' and i + 1 < stop and (bytes[i + 1] == '"' or bytes[i + 1] == '\''):
+            i = dx_lex_quote(lx, host, bytes, i + 1, stop, true)
+            kind = .rawquoted
+        else if classes[c] & 1 != 0:
+            if c >= 0x80:
+                # (`x₁₂`: the ASCII scan stopped at `₁`; the name is the token before and this)
+                if count > 0 and slots[count - 1].stop == start and slots[count - 1].kind == .identifier:
+                    count -= 1
+                    start = slots[count].start
+                    spaced = slots[count].space
+                    newline = slots[count].newline
+                    i = start
+                loop i < stop and classes[bytes[i]] & 34 != 0: i += 1
+            else:
+                i += 1
+                loop i < stop and classes[bytes[i]] & 2 != 0: i += 1
+            kind = .identifier
+            if intern_names:
+                id = 0
+                if c >= 0x80: id = host[0].canonical(source, start, i)
+                else:
+                    n = i - start
+                    p = bytes + start
+                    h = hash_bytes(p, n)
+                    id = name_find(state.texts[0], state.hashes[0], state.names[0], p, n, h)
+                    if id < 0: id = host[0].new_name(source, start, n, h)
+                name = i32(id)
+                if id < state.word_count: symbol = words[id]
+                if id == state.true_id or id == state.false_id: kind = .boolean
+                combined = dx_word_assign(symbol, bytes, i, stop)
+                if combined != .none:
+                    symbol = combined
+                    kind = .op
+                    i += 1
+                if i < stop and bytes[i] == '?':
+                    query = DewyToken.none
+                    if id == state.is_id: query = .is_type
+                    else if id == state.isnt_id: query = .isnt_type
+                    else if id == state.in_id: query = .contains
+                    if query != .none:
+                        symbol = query
+                        kind = .op
+                        i += 1
+            else:
+                value = host[0].slice(source, start, i)
+                if value == "true" or value == "false": kind = .boolean
+                if (value == "is" or value == "isnt" or value == "in") and i < stop and bytes[i] == '?':
+                    value += "?"
+                    i += 1
+                    kind = .op
+                if kind != .boolean: symbol = dn_token_kind(value)
+                combined = dx_word_assign(symbol, bytes, i, stop)
+                if combined != .none:
+                    symbol = combined
+                    kind = .op
+                    i += 1
+        else if c == '$':
+            state.metatags += 1
+            i += 1
+            loop i < stop and classes[bytes[i]] & 2 != 0: i += 1
+            if i == start + 1: host[0].error(start, "expected a name after $")
+            kind = .metatag
+        else if is_digit(c):
+            decimal = true
+            digits = start
+            if c == '0' and i + 1 < stop and find_byte("btqsodzxug", bytes[i + 1]) >= 0:
+                decimal = bytes[i + 1] == 'd'
+                i += 2
+                digits = i
+            if i < stop and (bytes[i] == '"' or bytes[i] == '\''):
+                i = dx_lex_quote(lx, host, bytes, i, stop, false)
+                kind = .based_string
+            else:
+                mask: u8 = if decimal: 4 else: 8
+                loop i < stop and classes[bytes[i]] & mask != 0: i += 1
+                if i == digits: host[0].error(start, "expected digits after the base prefix")
+                kind = if decimal: DewyKind.source_integer else: DewyKind.integer
+                if decimal and i + 1 < stop and bytes[i] == '.' and is_digit(bytes[i + 1]):
+                    i += 1
+                    loop i < stop and classes[bytes[i]] & 4 != 0: i += 1
+                    kind = .source_real
+                if decimal and i + 1 < stop and (bytes[i] == 'e' or bytes[i] == 'E') and (is_digit(bytes[i + 1]) or bytes[i + 1] == '+' or bytes[i + 1] == '-'):
+                    i += 1
+                    if i < stop and (bytes[i] == '+' or bytes[i] == '-'): i += 1
+                    first = i
+                    loop i < stop and classes[bytes[i]] & 4 != 0: i += 1
+                    if i == first: host[0].error(start, "expected exponent digits")
+                    kind = .source_real
+        else if c == '"' or c == '\'':
+            i = dx_lex_quote(lx, host, bytes, i, stop, false)
+            kind = .quoted
+        else:
+            next: u8 = 0
+            if start + 1 < stop: next = bytes[start + 1]
+            if c < 128 and next < 128: symbol = symbols[int(c) * 128 + int(next)]
+            if symbol == .none:
+                symbol = dx_symbol(bytes, start, stop)
+                if symbol == .none: host[0].error(start, "unexpected character in Dewy source")
+            i += dx_token_width(symbol)
+        if count == capacity:
+            capacity *= 2
+            out.resize(capacity)
+            slots = data(out)
+        slots[count].kind = kind
+        slots[count].name = name
+        slots[count].start = start
+        slots[count].stop = i
+        slots[count].space = spaced
+        slots[count].newline = newline
+        slots[count].symbol = symbol
+        count += 1
+        spaced = false
+        newline = false
+        if skip and symbol != .none:
+            if symbol == .lparen or symbol == .lbrack or symbol == .lbrace: nesting += 1
+            else if symbol == .rparen or symbol == .rbrack or symbol == .rbrace: nesting -= 1
+            else if symbol == .function and nesting == 0:
+                j = i
+                loop j < stop and (bytes[j] == ' ' or bytes[j] == '\t'): j += 1
+                if j < stop and bytes[j] == '{':
+                    e = dx_lazy_end(bytes, j, stop)
+                    if e > 0:
+                        if count == capacity:
+                            capacity *= 2
+                            out.resize(capacity)
+                            slots = data(out)
+                        slots[count].kind = .lazy_body
+                        slots[count].name = 0
+                        slots[count].start = j
+                        slots[count].stop = e
+                        slots[count].space = j > i
+                        slots[count].newline = false
+                        slots[count].symbol = .none
+                        count += 1
+                        state.lazy = true
+                        i = e
+    state.space = spaced
+    state.newline = newline
+    count
+
+dx_token_width = (symbol: DewyToken) -> int:
+    match symbol:
+        .lparen: 1
+        .rparen: 1
+        .lbrack: 1
+        .rbrack: 1
+        .lbrace: 1
+        .rbrace: 1
+        .langle: 1
+        .rangle: 1
+        .colon: 1
+        .dot: 1
+        .comma: 1
+        .semi: 1
+        .assign: 1
+        .plus: 1
+        .minus: 1
+        .star: 1
+        .slash: 1
+        .percent: 1
+        .at: 1
+        .amp: 1
+        .pipe: 1
+        .caret: 1
+        .question: 1
+        .bang: 1
+        .tilde: 1
+        .not_ge: 6
+        .not_le: 6
+        .not_eq: 5
+        .not_gt: 5
+        .not_lt: 5
+        .ge: 3
+        .le: 3
+        .floor_assign: 3
+        .shl_assign: 3
+        .shr_assign: 3
+        .ellipsis: 3
+        .function: 2
+        .returns: 2
+        .arrow: 2
+        .eq: 2
+        .gt: 2
+        .lt: 2
+        .plus_assign: 2
+        .minus_assign: 2
+        .star_assign: 2
+        .slash_assign: 2
+        .power_assign: 2
+        .percent_assign: 2
+        .coalesce: 2
+        .floor: 2
+        .shl: 2
+        .shr: 2
+        .range: 2
+        .pipe_right: 2
+        .amp_assign: 2
+        .pipe_assign: 2
+        .and_assign: 4
+        .or_assign: 3
+        .xor_assign: 4
+        .pipe_left: 2
+        .angle_assign: 2
+        .is_type: 3
+        .isnt_type: 5
+        .contains: 3
+        .not_contains: 7
+        .kw_of: 2
+        .kw_or_throw: 8
+        .kw_let: 3
+        .kw_const: 5
+        .kw_return: 6
+        .kw_break: 5
+        .kw_continue: 8
+        .kw_import: 6
+        .kw_from: 4
+        .kw_else: 4
+        .kw_if: 2
+        .kw_loop: 4
+        .kw_parallel: 8
+        .kw_concurrent: 10
+        .kw_spawn: 5
+        .kw_match: 5
+        .kw_test: 4
+        .kw_not: 3
+        .kw_as: 2
+        .kw_transmute: 9
+        .kw_or: 2
+        .kw_xor: 3
+        .kw_and: 3
+        .kw_nand: 4
+        .kw_nor: 3
+        .kw_xnor: 4
+        .kw_in: 2
+        .dot_not_ge: 7
+        .dot_not_le: 7
+        .dot_not_eq: 6
+        .dot_not_gt: 6
+        .dot_not_lt: 6
+        .dot_ge: 4
+        .dot_le: 4
+        .dot_floor_assign: 4
+        .dot_plus_assign: 3
+        .dot_minus_assign: 3
+        .dot_star_assign: 3
+        .dot_slash_assign: 3
+        .dot_percent_assign: 3
+        .dot_power_assign: 3
+        .dot_floor: 3
+        .dot_eq: 3
+        .dot_gt: 3
+        .dot_lt: 3
+        .dot_plus: 2
+        .dot_minus: 2
+        .dot_star: 2
+        .dot_slash: 2
+        .dot_percent: 2
+        .dot_caret: 2
+        .multiply_apply: 17
+        .call: 13
+        .broadcast_call: 22
+        .index: 14
+        .type_apply: 18
+        .range_apply: 14
+        .statement_end: 18
+        else: 0
+
+dx_matches = (source: *u8, at: int, stop: int, value: str) -> bool:
+    if len(value) > stop - at: return false
+    loop i in [0..len(value)):
+        if source[at + i] != value[i]: return false
+    true
+
+# Dispatch punctuation by its leading byte, trying only relevant longer
+# spellings. Canonical token text avoids allocating a string per punctuation.
+dx_symbol = (source: *u8, at: int, stop: int) -> DewyToken:
+    match source[at]:
+        '%':
+            if dx_matches(source, at, stop, "%="): return .percent_assign
+        '*':
+            if dx_matches(source, at, stop, "*="): return .star_assign
+        '+':
+            if dx_matches(source, at, stop, "+="): return .plus_assign
+        '-':
+            if dx_matches(source, at, stop, "->"): return .arrow
+            if dx_matches(source, at, stop, "-="): return .minus_assign
+        '.':
+            if at + 1 < stop:
+                match source[at + 1]:
+                    '%':
+                        if dx_matches(source, at, stop, ".%="): return .dot_percent_assign
+                        if dx_matches(source, at, stop, ".%"): return .dot_percent
+                    '*':
+                        if dx_matches(source, at, stop, ".*="): return .dot_star_assign
+                        if dx_matches(source, at, stop, ".*"): return .dot_star
+                    '+':
+                        if dx_matches(source, at, stop, ".+="): return .dot_plus_assign
+                        if dx_matches(source, at, stop, ".+"): return .dot_plus
+                    '-':
+                        if dx_matches(source, at, stop, ".-="): return .dot_minus_assign
+                        if dx_matches(source, at, stop, ".-"): return .dot_minus
+                    '.':
+                        if dx_matches(source, at, stop, "..."): return .ellipsis
+                        if dx_matches(source, at, stop, ".."): return .range
+                    '/':
+                        if dx_matches(source, at, stop, ".//="): return .dot_floor_assign
+                        if dx_matches(source, at, stop, "./="): return .dot_slash_assign
+                        if dx_matches(source, at, stop, ".//"): return .dot_floor
+                        if dx_matches(source, at, stop, "./"): return .dot_slash
+                    '<':
+                        if dx_matches(source, at, stop, ".<=?"): return .dot_le
+                        if dx_matches(source, at, stop, ".<?"): return .dot_lt
+                    '=':
+                        if dx_matches(source, at, stop, ".=?"): return .dot_eq
+                    '>':
+                        if dx_matches(source, at, stop, ".>=?"): return .dot_ge
+                        if dx_matches(source, at, stop, ".>?"): return .dot_gt
+                    '^':
+                        if dx_matches(source, at, stop, ".^="): return .dot_power_assign
+                        if dx_matches(source, at, stop, ".^"): return .dot_caret
+                    'n':
+                        if dx_matches(source, at, stop, ".not>=?"): return .dot_not_ge
+                        if dx_matches(source, at, stop, ".not<=?"): return .dot_not_le
+                        if dx_matches(source, at, stop, ".not=?"): return .dot_not_eq
+                        if dx_matches(source, at, stop, ".not>?"): return .dot_not_gt
+                        if dx_matches(source, at, stop, ".not<?"): return .dot_not_lt
+        '/':
+            if dx_matches(source, at, stop, "//="): return .floor_assign
+            if dx_matches(source, at, stop, "/="): return .slash_assign
+            if dx_matches(source, at, stop, "//"): return .floor
+        ':':
+            if dx_matches(source, at, stop, ":>"): return .returns
+        '<':
+            if dx_matches(source, at, stop, "<=?"): return .le
+            if dx_matches(source, at, stop, "<<="): return .shl_assign
+            if dx_matches(source, at, stop, "<?"): return .lt
+            if dx_matches(source, at, stop, "<<"): return .shl
+            if dx_matches(source, at, stop, "<|"): return .pipe_left
+        '=':
+            if dx_matches(source, at, stop, "=>"): return .function
+            if dx_matches(source, at, stop, "=?"): return .eq
+        '>':
+            if dx_matches(source, at, stop, ">=?"): return .ge
+            # Nested generic closers before => are >> then =>, not >>= then >.
+            if dx_matches(source, at, stop, ">>=") and not dx_matches(source, at, stop, ">>=>"): return .shr_assign
+            if dx_matches(source, at, stop, ">?"): return .gt
+            if dx_matches(source, at, stop, ">>"): return .shr
+        '?':
+            if dx_matches(source, at, stop, "??"): return .coalesce
+        '^':
+            if dx_matches(source, at, stop, "^="): return .power_assign
+        '|':
+            if dx_matches(source, at, stop, "|>"): return .pipe_right
+            if dx_matches(source, at, stop, "|="): return .pipe_assign
+        '&':
+            if dx_matches(source, at, stop, "&="): return .amp_assign
+    dn_single_token(source[at])

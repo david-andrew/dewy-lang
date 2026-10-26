@@ -455,23 +455,26 @@ identical. What it met:
 - The C seed compiler reads `'{'` as an unterminated string, so the twin compares with
   `123`.
 
-The whole lexer was ported first (dn_lex's loop, keywords found by their bytes, names
-interned by the caller): lexing took +11% (+28 instructions a lexeme; synthetic-22k +0.74%,
-lex+parse +0.83%), so the loop stays in Sloppy. Its loop alone matched Sloppy's; the cost was
-around it, in codegen gaps (all open):
-- Indexing an array keeps its bounds check where the index is proven, even with `--release`:
-  `loop i <? n {... b[i] ...}` with `n=b.length`. A pointer read under `$unsafe` drops it.
-- A `const` table's address is loaded again in every iteration of a loop that indexes it
-  (`DX_CLASSES[p[i]]`), and an `array<T length=N>` has no `.ptr`; passing the table as a
-  parameter keeps it in a register.
-- `out.push(Lexeme[...])` zero-fills the slot, then stores every field: about 14 instructions
-  a lexeme over Sloppy's stores into a presized array. Presizing with `fill` and storing
-  through `.data()` or by index spilled more.
-- A small function returning early still saves and restores its callee-saved registers
-  (`dx_word`, the keyword test: about 12 of its 35 instructions a word).
-- The interning table is Sloppy's, so names were interned in a pass after the leaf (about 8
-  instructions a lexeme); a function-typed parameter (`intern:<(s:string at:int64 n:int64):>int64>`)
-  cost more than the pass.
+`dewy_lexer.dewy` owns the tokenizing loop, compound punctuation and word assignments;
+`dewy_lexer.jo` freezes the Jo scanner for generations 1–2. The Jo adapter checks the
+source span, prepares immutable class/keyword/symbol tables and presized token storage,
+and appends the spare EOFs. The leaf fills slots directly and refreshes their pointer
+after growth. Its state returns spacing, metatag count and whether a library body was
+skipped. Ordinary identifiers hash and look up through `intern.dewy`; only a missing name,
+non-ASCII canonicalization, arbitrary-byte slices and diagnostics call the host. Those
+services never call a reader. The noncapturing host record is constructed once and lent
+by pointer. Scanning is linear in bytes, plus the existing amortized intern-table work.
+
+Keep bounded offset arithmetic at machine width and preserve the Jo token name's wrapping
+32-bit conversion. Exact `i + 1 < stop` comparisons otherwise expand to wide arithmetic;
+copying a record of service functions for each identifier also costs more than the scan.
+Keep hashing and lookup in the loop: a helper call per identifier spends the port's budget.
+The token-width match uses enum patterns and an `int64` result, giving a lookup table
+without converting Dewy's unordered string-literal union to a number. The differential
+test checks every tracked Dewy file in default and release compiler builds, and generated
+non-interning/lazy scans, malformed bytes, growth and partial spans. It compares all token
+fields, spare EOFs, comment spans, state and first diagnostics. The earlier scratch lexer
+(+11%, with a post-scan interning pass and pushed records) was not shipped.
 
 Open gaps from these leaves, by cost:
 - A literal beside a policy-typed operand (`w + 1`, `w & 0xFF`, `w xor 0xFFFFFFFF`) goes
