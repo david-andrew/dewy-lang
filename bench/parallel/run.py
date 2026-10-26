@@ -8,6 +8,7 @@ shared machines; --instructions also reports load-independent process counts.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from pathlib import Path
 import statistics
@@ -21,6 +22,27 @@ SIZES = {'fib': 32, 'sum': 16777216, 'matmul': 1024,
 SMALL = {'fib': 16, 'sum': 10003, 'matmul': 65, 'jacobi': 31, 'mergesort': 1031, 'parallel_particles': 65}
 
 
+def gate_failures(measurements: dict, workers: list[int], *, instructions=False) -> list[str]:
+    """Keep timing and instruction gates separate: counters cannot establish scaling."""
+    failures = []
+    t1 = measurements['1']['dewy']
+    if not instructions:
+        for n in workers:
+            times = measurements[str(n)]
+            ratio = times['openmp'] / times['dewy']
+            if ratio < 0.9:
+                failures.append(f'{n} workers: {ratio:.3f}x OpenMP < 0.9x')
+            speedup = t1 / times['dewy']
+            c_speedup = measurements['1']['openmp'] / times['openmp']
+            if n > 1 and speedup < 0.9 * c_speedup:
+                failures.append(f'{n} workers: scaling {speedup:.3f}x < 0.9 * OpenMP {c_speedup:.3f}x')
+    overhead = t1 / measurements['serial']['dewy']
+    if overhead > 1.1:
+        metric = 'instructions' if instructions else 'time'
+        failures.append(f'T1/Tseq {metric}={overhead:.3f} > 1.1')
+    return failures
+
+
 def physical_cpus() -> list[int]:
     found = {}
     for cpu in sorted(os.sched_getaffinity(0)):
@@ -31,6 +53,23 @@ def physical_cpus() -> list[int]:
     return list(found.values())
 
 
+def selected_cpus(allow_smt=False) -> list[int]:
+    cores = physical_cpus()
+    return cores + sorted(set(os.sched_getaffinity(0)) - set(cores)) if allow_smt else cores
+
+
+def count_pinned(counter, command: list, env: dict, cpus: list[int]):
+    # Pin the parent temporarily, so the counter and exec'd kernel inherit the
+    # mask. Valgrind does not follow taskset's exec without --trace-children;
+    # counting the executable directly also removes wrapper startup noise.
+    previous = os.sched_getaffinity(0)
+    try:
+        os.sched_setaffinity(0, cpus)
+        return counter.run(command, env)
+    finally:
+        os.sched_setaffinity(0, previous)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--compiler', required=True, type=Path)
@@ -39,7 +78,12 @@ def main() -> int:
     parser.add_argument('--workers', nargs='+', type=int, default=[1, 2, 4])
     parser.add_argument('--kernels', nargs='+', choices=SIZES, default=list(SIZES))
     parser.add_argument('--small', action='store_true', help='checksum smoke sizes')
+    parser.add_argument('--allow-smt', action='store_true',
+                        help='use SMT siblings after distinct cores; report worker counts, not physical-core scaling')
     parser.add_argument('--instructions', action='store_true')
+    parser.add_argument('--instruction-gate', action='store_true',
+                        help='count instructions and fail above 1.1x sequential instructions')
+    parser.add_argument('--report', type=Path, help='write samples, medians and gate failures as JSON')
     parser.add_argument('--cycles', action='store_true', help='indicative pinned hardware cycles')
     parser.add_argument('--gate', action='store_true',
                         help='fail below 0.9x OpenMP throughput/scaling or above 1.1x sequential time')
@@ -48,12 +92,13 @@ def main() -> int:
     args = parser.parse_args()
     if args.runs < 1 or any(n < 1 or n > 4 for n in args.workers):
         parser.error('positive run counts and 1–4 workers required')
-    if args.gate and 1 not in args.workers:
-        parser.error('--gate requires one-worker measurements')
+    if (args.gate or args.instruction_gate) and 1 not in args.workers:
+        parser.error('gates require one-worker measurements')
+    args.instructions |= args.instruction_gate
     failed = False
-    cpus = physical_cpus()
+    cpus = selected_cpus(args.allow_smt)
     if max(args.workers) > len(cpus):
-        parser.error('not enough available physical cores')
+        parser.error('not enough CPUs (use --allow-smt explicitly to include SMT siblings)')
     args.work.mkdir(parents=True, exist_ok=True)
     env = {k: v for k, v in os.environ.items()
            if not k.startswith(('DEWY_', 'OMP_'))}
@@ -67,7 +112,12 @@ def main() -> int:
         from tools.compiler.speed import Counter, CACHE
         CACHE.mkdir(parents=True, exist_ok=True)
         counter = Counter('perf' if args.cycles else 'auto')
-    print(f'load start: {os.getloadavg()}; physical CPUs: {cpus}', flush=True)
+    print(f'load start: {os.getloadavg()}; physical CPUs: {physical_cpus()}; selected CPUs: {cpus}', flush=True)
+    report = {'physical_cpus': physical_cpus(), 'selected_cpus': cpus, 'load_start': os.getloadavg(),
+              'uses_smt': max(args.workers) > len(physical_cpus()),
+              'workers': args.workers, 'runs': args.runs, 'kernels': {},
+              'counter': counter.label if counter else None,
+              'wall_gate': args.gate, 'instruction_gate': args.instruction_gate}
     sizes = SMALL if args.small else SIZES
     for kernel in args.kernels:
         source = ROOT / 'bench/parallel' / kernel
@@ -83,6 +133,8 @@ def main() -> int:
         binaries['openmp'] = output
         expected = None
         measurements = {}
+        instruction_measurements = {}
+        rows = {}
         for workers, serial in [(n, False) for n in args.workers] + [(1, True)]:
             samples = {label: [] for label in binaries}
             counts = {label: [] for label in binaries}
@@ -107,7 +159,7 @@ def main() -> int:
                         raise RuntimeError(f'{kernel}/{label}: {checksum} != {expected}')
                     samples[label].append(ns / 1e6)
                     if args.instructions:
-                        instructions, output = counter.run(command, run_env)
+                        instructions, output = count_pinned(counter, command[3:], run_env, cpus[:workers])
                         if int(output.split()[0]) != expected:
                             raise RuntimeError(f'{kernel}/{label}: counter checksum mismatch')
                         counts[label].append(instructions)
@@ -122,10 +174,12 @@ def main() -> int:
             label = 'serial' if serial else str(workers)
             exact = {k: statistics.median(v) for k, v in samples.items()}
             measurements[label] = exact
+            rows[label] = {'ms': samples, 'instructions': counts, 'cycles': cycles}
             medians = {k: round(v, 3) for k, v in exact.items()}
             print(f'{kernel:10} {label:6} ms={medians} checksum={expected} '
                   f'load={os.getloadavg()}', flush=True)
             if args.instructions:
+                instruction_measurements[label] = {k: statistics.median(v) for k, v in counts.items()}
                 print('  instructions (whole process, including setup): '
                       + str({k: int(statistics.median(v)) for k, v in counts.items()}),
                       flush=True)
@@ -140,25 +194,24 @@ def main() -> int:
                 print(f'  {implementation} T1/Tseq={t1 / measurements["serial"][implementation]:.3f}; '
                       + 'speedups ' + str({n: round(t1 / measurements[str(n)][implementation], 3)
                                           for n in args.workers}), flush=True)
+                if args.instructions:
+                    ratio = instruction_measurements['1'][implementation] / instruction_measurements['serial'][implementation]
+                    print(f'  {implementation} instruction T1/Tseq={ratio:.6f}', flush=True)
         print('  OpenMP/Dewy rates: ' + str({n: round(measurements[str(n)]['openmp'] /
               measurements[str(n)]['dewy'], 3) for n in args.workers}), flush=True)
-        if args.gate:
-            for workers in args.workers:
-                times = measurements[str(workers)]
-                ratio = times['openmp'] / times['dewy']
-                if ratio < 0.9:
-                    print(f'FAIL {kernel}/{workers}: {ratio:.3f}x OpenMP < 0.9x', flush=True)
-                    failed = True
-                dewy_speedup = measurements['1']['dewy'] / times['dewy']
-                c_speedup = measurements['1']['openmp'] / times['openmp']
-                if workers > 1 and dewy_speedup < 0.9 * c_speedup:
-                    print(f'FAIL {kernel}/{workers}: scaling {dewy_speedup:.3f}x '
-                          f'< 0.9 * OpenMP {c_speedup:.3f}x', flush=True)
-                    failed = True
-            overhead = measurements['1']['dewy'] / measurements['serial']['dewy']
-            if overhead > 1.1:
-                print(f'FAIL {kernel}: T1/Tseq={overhead:.3f} > 1.1', flush=True)
-                failed = True
+        failures = gate_failures(measurements, args.workers) if args.gate else []
+        if args.instruction_gate:
+            failures += gate_failures(instruction_measurements, args.workers, instructions=True)
+        for failure in failures:
+            print(f'FAIL {kernel}: {failure}', flush=True)
+        failed |= bool(failures)
+        report['kernels'][kernel] = {'size': sizes[kernel], 'checksum': expected, 'samples': rows,
+                                     'median_ms': measurements, 'median_instructions': instruction_measurements,
+                                     'failures': failures}
+        # Publish after each kernel, so a later build/run failure retains completed rows.
+        if args.report:
+            args.report.parent.mkdir(parents=True, exist_ok=True)
+            args.report.write_text(json.dumps(report, indent=2) + '\n')
     return int(failed)
 
 

@@ -1,0 +1,86 @@
+name: Fork-join stage-one benchmark
+
+"on":
+  workflow_dispatch:
+  # Also bootstrap/run the workflow before it exists on the default branch.
+  # Ordinary development pushes do not start the benchmark.
+  push:
+    branches: ['bench/forkjoin/**']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: forkjoin-bench-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  forkjoin-bench:
+    # The standard runner can expose 2 cores / 4 SMT threads. Compare both
+    # implementations on the same CPU set and record this topology explicitly.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Record runner and source identity
+        run: |
+          mkdir -p "$RUNNER_TEMP/forkjoin-report"
+          {
+            git rev-parse HEAD
+            uname -a
+            lscpu
+            gcc --version
+          } > "$RUNNER_TEMP/forkjoin-report/host.txt"
+      - name: Bootstrap and verify the compiler fixed point
+        run: |
+          set -o pipefail
+          python -m tools.compiler.build --bootstrap --output "$RUNNER_TEMP/dewy-core" \
+            2>&1 | tee "$RUNNER_TEMP/forkjoin-report/bootstrap.txt"
+          # Debug path strings depend on cwd: reproduce the bootstrap's cwd.
+          cd "$RUNNER_TEMP/dewy-core"
+          DEWY_CORE_LIB="$RUNNER_TEMP/dewy-core/lib" DEWY_EMIT_WORKERS=1 \
+            "$RUNNER_TEMP/dewy-core/bin/dewy-core" build "$RUNNER_TEMP/dewy-core/compiler/main.jo" \
+            -o "$RUNNER_TEMP/fixed-point" \
+            2>&1 | tee -a "$RUNNER_TEMP/forkjoin-report/bootstrap.txt"
+          cmp "$RUNNER_TEMP/dewy-core/bin/dewy-core" "$RUNNER_TEMP/fixed-point" \
+            2>&1 | tee -a "$RUNNER_TEMP/forkjoin-report/bootstrap.txt"
+      - name: Gate wall time on the hosted runner
+        id: wall
+        run: |
+          set -o pipefail
+          python bench/parallel/run.py --compiler "$RUNNER_TEMP/dewy-core/bin/dewy-core" \
+            --gate --allow-smt --runs 9 --workers 1 2 4 --work "$RUNNER_TEMP/forkjoin-bin" \
+            --report "$RUNNER_TEMP/forkjoin-report/wall.json" \
+            2>&1 | tee "$RUNNER_TEMP/forkjoin-report/wall.txt"
+      - name: Count promotions, steals and frontier grain separately
+        if: ${{ !cancelled() && steps.wall.outcome != 'skipped' }}
+        run: |
+          set -o pipefail
+          python bench/parallel/profile.py --compiler "$RUNNER_TEMP/dewy-core/bin/dewy-core" \
+            --counters-only --allow-smt --runs 3 --workers 1 2 4 --kernels mergesort parallel_particles \
+            --depths 4 8 --work "$RUNNER_TEMP/forkjoin-profile" \
+            --report "$RUNNER_TEMP/forkjoin-report/counters.json" \
+            2>&1 | tee "$RUNNER_TEMP/forkjoin-report/counters.txt"
+      - name: Install the load-independent counter fallback
+        if: ${{ !cancelled() && steps.wall.outcome != 'skipped' }}
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q valgrind
+      - name: Gate one-worker instructions
+        if: ${{ !cancelled() && steps.wall.outcome != 'skipped' }}
+        run: |
+          set -o pipefail
+          python bench/parallel/run.py --compiler "$RUNNER_TEMP/dewy-core/bin/dewy-core" \
+            --instruction-gate --runs 3 --workers 1 --kernels fib sum mergesort parallel_particles \
+            --work "$RUNNER_TEMP/forkjoin-bin" --report "$RUNNER_TEMP/forkjoin-report/instructions.json" \
+            2>&1 | tee "$RUNNER_TEMP/forkjoin-report/instructions.txt"
+      - name: Preserve failures and measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: forkjoin-${{ github.sha }}
+          path: ${{ runner.temp }}/forkjoin-report/
+          if-no-files-found: error
