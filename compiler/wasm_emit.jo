@@ -1,0 +1,922 @@
+# Frozen whole-function wasm emitter; module/checker metadata is supplied in bulk.
+use 'ir_types.dewy'
+use 'leb128.dewy'
+const VI = 0
+const VF = 1
+const VS = 2
+const VK = 3
+const M_SIGNED = 16
+const M_FLOAT = 32
+const M_INDEX = 128
+const VOP_SPLAT_B = 256
+const VOP_SPLAT_C = 512
+const CALL_IF_SHARED = 3
+const CALL_RC_INC = 4
+const CALL_RC_DEC = 5
+const INF_POS = 1 << 60
+const RO_BASE = 1024
+wasm_import_params: int[][]
+wasm_import_results: int[]       # -2: internal; -1: void import; otherwise wasm type
+wasm_grow: bool[]
+wasm_user_pos: bool[]
+wasm_mt_active_off = 0
+wasm_data_size = 0
+wasm_error = 0
+wasm_align_up = (n: int, a: int) -> int: (n + a - 1) & ~(a - 1)
+const WT_I32 = 0x7F
+const WT_I64 = 0x7E
+const WT_F32 = 0x7D
+const WT_F64 = 0x7C
+
+wt = (vt: int) -> int:
+    if vt == VF: return WT_F64
+    if vt == VS: return WT_F32
+    WT_I64
+
+type_sigs: u8[][]
+type_index: {str: int} = {}
+
+sig_index = (params: int[], results: int[]) -> int:
+    key = "{params}:{results}"
+    if let i = type_index.get(key): return i
+    s: u8[] = [0x60]
+    uleb(s, params.len())
+    loop p in params: s.push(u8(p))
+    uleb(s, results.len())
+    loop r in results: s.push(u8(r))
+    type_sigs.push(s)
+    i = type_sigs.len() - 1
+    type_index[key] = i
+    i
+
+wfn_index: int[]          # lfunc -> wasm function index
+table_index: {int: int} = {}
+table_funcs: int[]
+data_base = 0
+max_frame = 0
+
+tbl = (lf: int) -> int:
+    if let i = table_index.get(lf): return i
+    table_funcs.push(lf)
+    i = table_funcs.len()      # index 0 stays null
+    table_index[lf] = i
+    i
+
+wasm_mem_index = (ins: Ins) -> int:
+    if int(ins.c) & M_INDEX == 0: return -1
+    if ins.op == .store: return int(ins.dst)
+    int(ins.b)
+
+wasm_mem_scale = (ins: Ins) -> int: (int(ins.c) >> 8) & 3
+
+wasm_ir_use_count = 0
+wasm_ir_use_values: (int, int, int)
+wasm_ir_use_span = -1
+wasm_ir_use_span_count = 0
+
+# A transient view of an instruction's uses: up to three inline operands, or
+# an existing call-argument span plus its indirect target. No temporary array
+# needs filling on each visit. Consume the view before another wasm_ir_operands call.
+wasm_ir_use = (i: int) -> int:
+    if wasm_ir_use_span >= 0:
+        if i < wasm_ir_use_span_count: return int(cur_wf.args[wasm_ir_use_span + i])
+        return wasm_ir_use_values.2
+    # The three integer fields are contiguous. Every caller bounds i by the
+    # descriptor's count (at most three on this inline path).
+    (&wasm_ir_use_values as *int)[i]
+
+wasm_ir_has_use = (v: int) -> bool:
+    loop i in [0..wasm_ir_use_count):
+        if wasm_ir_use(i) == v: return true
+    false
+
+# Sets the operand view; returns the defined vreg or -1. zeroslots definitions
+# are carried in cur_wf.args and handled separately by the consumers.
+wasm_ir_operands = (ins: Ins) -> int:
+    wasm_ir_use_count = 0
+    wasm_ir_use_span = -1
+    a = int(ins.a)
+    bb = int(ins.b)
+    d = int(ins.dst)
+    wasm_ir_use_values.0 = a
+    wasm_ir_use_values.1 = bb
+    wasm_ir_use_values.2 = int(ins.c)
+    match ins.op:
+        nop, block, loop, end, else_, br, trap, zeroslots: return -1
+        iconst, fconst, slot, gaddr, daddr, faddr: return d
+        intr, call, syscall:
+            wasm_ir_use_span = a
+            wasm_ir_use_span_count = bb
+            wasm_ir_use_count = bb
+            return d
+        calli, callc:
+            wasm_ir_use_span = a
+            wasm_ir_use_span_count = bb
+            wasm_ir_use_count = bb + 1
+            return d
+        if_, brif, brtable, assume:
+            wasm_ir_use_count = 1
+            return -1
+        ret:
+            if a >= 0: wasm_ir_use_count = 1
+            return -1
+        store:
+            wasm_ir_use_count = 2
+            if int(ins.c) & M_INDEX != 0:
+                wasm_ir_use_values.2 = d
+                wasm_ir_use_count = 3
+            return -1
+        vst:
+            wasm_ir_use_values.2 = d
+            wasm_ir_use_count = 3
+            return -1
+        vsplat:
+            wasm_ir_use_count = 1
+            return d
+        vzu: return -1
+        copy:
+            wasm_ir_use_count = 2
+            return -1
+        zero:
+            wasm_ir_use_count = 1
+            return -1
+        memcpy, memset, vop:
+            wasm_ir_use_count = 3
+            return -1
+        select, memeq, findbyte, scanbytes, findb:
+            wasm_ir_use_count = 3
+            return d
+        load:
+            wasm_ir_use_count = 1
+            if int(ins.c) & M_INDEX != 0: wasm_ir_use_count = 2
+            return d
+        mov, neg, not_, fneg, fsqrt, fabs, ffloor, fceil, ftrunc, sext8, sext16, sext32, zext8, zext16, zext32, i2f, u2f, f2i, f2f, bits2f, f2bits:
+            wasm_ir_use_count = 1
+            return d
+        _:
+            wasm_ir_use_count = 2
+            return d
+
+# ---------------- function body ----------------
+wb: u8[]
+loc_of: int[]             # vreg -> local index
+fp_local = 0
+cur_frame = 0
+cur_wf: IrFn
+last_set_v = -1
+last_set_pos = 0
+last_set_end = 0
+
+op = (x: int): wb.push(u8(x))
+lget = (v: int):
+    if int(cur_wf.vtypes[v]) == VK:
+        i64c(cur_wf.kval[v])
+        return
+    # Keep an immediately consumed result on the operand stack. local.tee
+    # still writes the local, so later reads and loop-carried values are safe.
+    if v == last_set_v and wb.len() == last_set_end:
+        wb[last_set_pos] = 0x22
+        last_set_v = -1
+        return
+    op(0x20)
+    uleb(wb, loc_of[v])
+lset = (v: int):
+    last_set_pos = wb.len()
+    op(0x21)
+    uleb(wb, loc_of[v])
+    last_set_end = wb.len()
+    last_set_v = v
+i64c = (v: int):
+    op(0x42)
+    sleb(wb, v)
+i32c = (v: int):
+    op(0x41)
+    sleb(wb, v)
+# push the i32 address of a load/store; returns the static offset for its memarg
+waddr = (ins: Ins) -> int:
+    lget(int(ins.a))
+    ix = wasm_mem_index(ins)
+    if ix >= 0:
+        lget(ix)
+        sc = wasm_mem_scale(ins)
+        if sc > 0:
+            i64c(sc)
+            op(0x86)            # i64.shl
+        op(0x7C)                # i64.add
+    off = int(ins.imm)
+    if off < 0:
+        i64c(off)
+        op(0x7C)
+        off = 0
+    op(0xA7)                    # i32.wrap_i64
+    off
+
+# CALL_IF_SHARED, CALL_RC_INC and CALL_RC_DEC (ir.jo): the common case without the call
+w_guarded_call = (ins: Ins, lf: int):
+    a = int(ins.a)
+    d = int(ins.dst)
+    p = int(cur_wf.args[a])
+    if ins.c == CALL_IF_SHARED and d >= 0:
+        lget(p)
+        lset(d)                                 # (x itself, unless the call is made)
+    op(0x02); op(0x40)                          # block $done
+    lget(p); op(0x50); op(0x0D); uleb(wb, 0)    # br_if $done when x is 0
+    addr32(p); op(0x29); memarg(3, 0)           # its refcount
+    if ins.c == CALL_IF_SHARED:
+        i64c(1); op(0x51); op(0x0D); uleb(wb, 0)                # == 1: not shared
+    else:
+        if ins.c == CALL_RC_INC: i64c(0); op(0x57)             # <= 0: immortal
+        else: i64c(1); op(0x53)                                 # < 1: immortal
+        op(0x0D); uleb(wb, 0)
+        op(0x02); op(0x40)                                      # block $slow
+        if ins.c == CALL_RC_DEC:
+            addr32(p); op(0x29); memarg(3, 0)
+            i64c(1); op(0x51); op(0x0D); uleb(wb, 0)            # the last reference: the call frees
+        i32c(data_base + wasm_mt_active_off); op(0x2D); memarg(0, 0)  # __mt_active
+        op(0x0D); uleb(wb, 0)
+        addr32(p)
+        addr32(p); op(0x29); memarg(3, 0)
+        if ins.c == CALL_RC_INC: i64c(1)
+        else: i64c(-1)
+        op(0x7C); op(0x37); memarg(3, 0)                        # the refcount one more or less
+        op(0x0C); uleb(wb, 1)                                   # br $done
+        op(0x0B)                                                # end $slow
+    emit_call_args(a, int(ins.b), lf)
+    op(0x10)
+    uleb(wb, wfn_index[lf])
+    call_result(ins, lf)
+    op(0x0B)                                                    # end $done
+
+# (a call in the program's own code: where it is, for a panic's call trace in a page; the call
+# instruction's offset in the body, and its source position)
+w_sites: int[]
+w_site = (ins: Ins):
+    if ins.pos == 0 or not wasm_user_pos[int(ins.pos)]: return
+    w_sites.push(wb.len())
+    w_sites.push(int(ins.pos))
+
+addr32 = (v: int):
+    lget(v)
+    op(0xA7)              # i32.wrap_i64
+memarg = (align: int, off: int):
+    uleb(wb, align)
+    uleb(wb, off)
+to_i64_from_i32 = (): op(0xAD)    # i64.extend_i32_u
+restore_sp = ():
+    if cur_frame > 0:
+        op(0x20)
+        uleb(wb, fp_local)
+        i32c(cur_frame)
+        op(0x6A)          # i32.add
+        op(0x24)
+        uleb(wb, 0)       # global.set $sp
+
+bin64 = (code: int, ins: Ins):
+    lget(int(ins.a))
+    lget(int(ins.b))
+    op(code)
+    lset(int(ins.dst))
+
+cmp_res = (): to_i64_from_i32()
+
+emit_call_args = (start: int, n: int, lf: int):
+    imp = lf >= 0 and wasm_import_results[lf] != -2
+    pts: int[]
+    if imp:
+        pts = wasm_import_params[lf]
+    loop k in [0..n):
+        v = int(cur_wf.args[start + k])
+        lget(v)
+        if imp and pts[k] == WT_I32: op(0xA7)
+
+call_result = (ins: Ins, lf: int):
+    d = int(ins.dst)
+    imp = lf >= 0 and wasm_import_results[lf] != -2
+    if imp:
+        rt = wasm_import_results[lf]
+        if rt != -1:
+            if rt == WT_I32: to_i64_from_i32()
+            if d >= 0: lset(d)
+            else: op(0x1A)            # drop
+        return
+    if d >= 0: lset(d)
+    else if int(ins.ty) >= 0: op(0x1A)
+
+emit_wins = (ins: Ins):
+    o = ins.op
+    d = int(ins.dst)
+    a = int(ins.a)
+    bb = int(ins.b)
+    match o:
+        nop, assume: pass
+        vld, vst, vbin, vsplat, vzu, mulhs, mulhu, memeq, streq, findbyte, scanbytes, findb, rot32: wasm_error = 1
+        iconst:
+            i64c(ins.imm)
+            lset(d)
+        fconst:
+            if int(ins.ty) == VS:
+                op(0x43)
+                bits = ins.imm
+                loop k in [0..4): wb.push(u8((bits >> (8 * k)) & 255))
+            else:
+                op(0x44)
+                bits = ins.imm
+                loop k in [0..8): wb.push(u8((bits >> (8 * k)) & 255))
+            lset(d)
+        mov:
+            lget(a)
+            lset(d)
+        overflow_add, overflow_sub, overflow_mul:
+            wasm_error = 2
+        checked_add, checked_sub, checked_mul:
+            opcode = if o == .checked_add: 0x7C else if o == .checked_sub: 0x7D else: 0x7E
+            bin64(opcode, ins)
+            if ins.c != 0:
+                if o == .checked_mul:
+                    lget(a); i64c(0); op(0x52)
+                    op(0x04); op(0x7F)
+                    lget(d); lget(a); op(0x80) # unsigned quotient, guarded zero
+                    lget(bb); op(0x52)
+                    op(0x05); op(0x41); sleb(wb, 0); op(0x0B)
+                else:
+                    lget(if o == .checked_add: d else: a)
+                    lget(if o == .checked_add: a else: bb)
+                    op(0x54) # unsigned result < a, or a < b
+            else if o == .checked_mul:
+                # wasm has no overflow flags or high multiply. Check the quotient,
+                # guarding its own MIN/-1 trap and the zero divisor explicitly.
+                lget(a)
+                i64c(-1)
+                op(0x51)
+                op(0x04)
+                op(0x7F)             # if (result i32)
+                lget(bb)
+                i64c(-9223372036854775807 - 1)
+                op(0x51)
+                op(0x05)
+                lget(a)
+                i64c(0)
+                op(0x52)
+                op(0x04)
+                op(0x7F)
+                lget(d)
+                lget(a)
+                op(0x7F)             # i64.div_s
+                lget(bb)
+                op(0x52)
+                op(0x05)
+                op(0x41)
+                sleb(wb, 0)
+                op(0x0B)
+                op(0x0B)
+            else:
+                lget(a)
+                lget(d)
+                op(0x85)
+                if o == .checked_add:
+                    lget(bb)
+                    lget(d)
+                else:
+                    lget(a)
+                    lget(bb)
+                op(0x85)
+                op(0x83)
+                i64c(0)
+                op(0x53)             # (a xor result) & (b xor result) < 0
+            op(0x04)
+            op(0x40)
+            w_site(ins)
+            op(0x10)
+            uleb(wb, wfn_index[int(ins.imm)])
+            op(0x00)
+            op(0x0B)
+        add: bin64(0x7C, ins)
+        sub: bin64(0x7D, ins)
+        mul: bin64(0x7E, ins)
+        divs: bin64(0x7F, ins)
+        divu: bin64(0x80, ins)
+        rems: bin64(0x81, ins)
+        remu: bin64(0x82, ins)
+        and_: bin64(0x83, ins)
+        or_: bin64(0x84, ins)
+        xor: bin64(0x85, ins)
+        shl: bin64(0x86, ins)
+        shrs: bin64(0x87, ins)
+        shru: bin64(0x88, ins)
+        neg:
+            i64c(0)
+            lget(a)
+            op(0x7D)
+            lset(d)
+        not_:
+            lget(a)
+            i64c(-1)
+            op(0x85)
+            lset(d)
+        eq, ne, lts, ltu, gts, gtu, les, leu, ges, geu:
+            lget(a)
+            lget(bb)
+            c = 0x51
+            if o == .ne: c = 0x52
+            else if o == .lts: c = 0x53
+            else if o == .ltu: c = 0x54
+            else if o == .gts: c = 0x55
+            else if o == .gtu: c = 0x56
+            else if o == .les: c = 0x57
+            else if o == .leu: c = 0x58
+            else if o == .ges: c = 0x59
+            else if o == .geu: c = 0x5A
+            op(c)
+            cmp_res()
+            lset(d)
+        fadd, fsub, fmul, fdiv, fmin, fmax:
+            f32 = int(ins.ty) == VS
+            lget(a)
+            lget(bb)
+            base = 0xA0
+            if f32: base = 0x92
+            k = 0
+            if o == .fsub: k = 1
+            else if o == .fmul: k = 2
+            else if o == .fdiv: k = 3
+            else if o == .fmin: k = 4
+            else if o == .fmax: k = 5
+            op(base + k)
+            lset(d)
+        fneg, fabs, fsqrt, ffloor, fceil, ftrunc:
+            f32 = int(ins.ty) == VS
+            lget(a)
+            c = 0
+            if o == .fabs: c = 0x99
+            else if o == .fneg: c = 0x9A
+            else if o == .fceil: c = 0x9B
+            else if o == .ffloor: c = 0x9C
+            else if o == .ftrunc: c = 0x9D
+            else: c = 0x9F
+            if f32: c -= 14
+            op(c)
+            lset(d)
+        feq, fne, flt, fle, fgt, fge:
+            f32 = int(ins.ty) == VS
+            lget(a)
+            lget(bb)
+            c = 0x61
+            if o == .fne: c = 0x62
+            else if o == .flt: c = 0x63
+            else if o == .fgt: c = 0x64
+            else if o == .fle: c = 0x65
+            else if o == .fge: c = 0x66
+            if f32: c -= 6
+            op(c)
+            cmp_res()
+            lset(d)
+        sext8, sext16, sext32:
+            lget(a)
+            if o == .sext8: op(0xC2)
+            else if o == .sext16: op(0xC3)
+            else: op(0xC4)
+            lset(d)
+        zext8, zext16, zext32:
+            lget(a)
+            if o == .zext32:
+                op(0xA7)
+                op(0xAD)
+            else:
+                if o == .zext8: i64c(0xFF)
+                else: i64c(0xFFFF)
+                op(0x83)
+            lset(d)
+        i2f, u2f:
+            lget(a)
+            if int(ins.ty) == VS:
+                if o == .i2f: op(0xB4)
+                else: op(0xB5)
+            else:
+                if o == .i2f: op(0xB9)
+                else: op(0xBA)
+            lset(d)
+        f2i:
+            lget(a)
+            op(0xFC)
+            if int(ins.ty) == VS: uleb(wb, 4)
+            else: uleb(wb, 6)
+            lset(d)
+        f2f:
+            lget(a)
+            if int(ins.ty) == VF: op(0xBB)
+            else: op(0xB6)
+            lset(d)
+        bits2f:
+            lget(a)
+            if int(ins.ty) == VS:
+                op(0xA7)
+                op(0xBE)
+            else: op(0xBF)
+            lset(d)
+        f2bits:
+            lget(a)
+            if int(ins.ty) == VS:
+                op(0xBC)
+                op(0xAD)
+            else: op(0xBD)
+            lset(d)
+        load:
+            mode = int(ins.c)
+            size = mode & 15
+            off = waddr(ins)
+            if mode & M_FLOAT != 0:
+                if size == 4:
+                    op(0x2A)
+                    memarg(2, off)
+                else:
+                    op(0x2B)
+                    memarg(3, off)
+            else:
+                sg = mode & M_SIGNED != 0
+                if size == 8:
+                    op(0x29)
+                    memarg(3, off)
+                else if size == 4:
+                    if sg: op(0x34)
+                    else: op(0x35)
+                    memarg(2, off)
+                else if size == 2:
+                    if sg: op(0x32)
+                    else: op(0x33)
+                    memarg(1, off)
+                else:
+                    if sg: op(0x30)
+                    else: op(0x31)
+                    memarg(0, off)
+            lset(d)
+        store:
+            mode = int(ins.c)
+            size = mode & 15
+            off = waddr(ins)
+            lget(bb)
+            vt = vtype_of(bb)
+            if vt == VF:
+                op(0x39)
+                memarg(3, off)
+            else if vt == VS:
+                op(0x38)
+                memarg(2, off)
+            else if size == 8:
+                op(0x37)
+                memarg(3, off)
+            else if size == 4:
+                op(0x3E)
+                memarg(2, off)
+            else if size == 2:
+                op(0x3D)
+                memarg(1, off)
+            else:
+                op(0x3C)
+                memarg(0, off)
+        slot:
+            op(0x20)
+            uleb(wb, fp_local)
+            to_i64_from_i32()
+            i64c(slot_offs[a])
+            op(0x7C)
+            lset(d)
+        gaddr:
+            i64c(data_base + int(ins.imm))
+            lset(d)
+        daddr:
+            i64c(RO_BASE + int(ins.imm))
+            lset(d)
+        faddr:
+            i64c(tbl(int(ins.imm)))
+            lset(d)
+        copy:
+            addr32(a)
+            addr32(bb)
+            i32c(int(ins.imm))
+            op(0xFC)
+            uleb(wb, 10)
+            op(0)
+            op(0)
+        zero:
+            addr32(a)
+            i32c(0)
+            i32c(int(ins.imm))
+            op(0xFC)
+            uleb(wb, 11)
+            op(0)
+        memcpy:
+            addr32(a)
+            addr32(bb)
+            addr32(int(ins.c))
+            op(0xFC)
+            uleb(wb, 10)
+            op(0)
+            op(0)
+        vop:
+            # one f32 lane at a time
+            vcode = int(ins.imm)
+            n = (vcode >> 4) & 7
+            loop i in [0..n):
+                addr32(a)
+                if vcode & VOP_SPLAT_B != 0: lget(bb)
+                else:
+                    addr32(bb)
+                    op(0x2A)
+                    memarg(2, 4 * i)
+                if vcode & VOP_SPLAT_C != 0: lget(int(ins.c))
+                else:
+                    addr32(int(ins.c))
+                    op(0x2A)
+                    memarg(2, 4 * i)
+                op([0x92, 0x93, 0x94, 0x95][vcode & 3])                   # f32.add sub mul div
+                op(0x38)                                                 # f32.store
+                memarg(2, 4 * i)
+        memset:
+            addr32(a)
+            addr32(bb)
+            addr32(int(ins.c))
+            op(0xFC)
+            uleb(wb, 11)
+            op(0)
+        zeroslots:
+            loop k in [0..bb):
+                item = int(cur_wf.args[a + k])
+                if item & 1 == 1:
+                    v = item >> 1
+                    if vtype_of(v) == VF:
+                        op(0x44)
+                        loop z in [0..8): op(0)
+                    else if vtype_of(v) == VS:
+                        op(0x43)
+                        loop z in [0..4): op(0)
+                    else: i64c(0)
+                    lset(v)
+                else:
+                    s = item >> 1
+                    op(0x20)
+                    uleb(wb, fp_local)
+                    i32c(slot_offs[s])
+                    op(0x6A)
+                    i32c(0)
+                    i32c(int(cur_wf.slot_size[s]))
+                    op(0xFC)
+                    uleb(wb, 11)
+                    op(0)
+        call:
+            lf = int(ins.imm)
+            if wasm_grow[lf]:
+                lget(int(cur_wf.args[a]))
+                op(0xA7)
+                op(0x40)
+                op(0)
+                op(0xAC)                 # i64.extend_i32_s
+                if d >= 0: lset(d)
+                else: op(0x1A)
+                return
+            if ins.c == CALL_IF_SHARED or ins.c == CALL_RC_INC or ins.c == CALL_RC_DEC:
+                w_guarded_call(ins, lf)
+                return
+            emit_call_args(a, bb, lf)
+            w_site(ins)
+            op(0x10)
+            uleb(wb, wfn_index[lf])
+            call_result(ins, lf)
+            # Wasm imports/functions have no noreturn type. The optimizer may
+            # remove everything after a panic call, so express that fact here
+            # for the validator as well as the runtime.
+            if ins.c == 1: op(0x00)
+        calli, callc:
+            emit_call_args(a, bb, -1)
+            addr32(int(ins.c))
+            ps: int[]
+            loop k in [0..bb): ps.push(wt(vtype_of(int(cur_wf.args[a + k]))))
+            rs: int[]
+            if int(ins.ty) >= 0: rs.push(wt(int(ins.ty)))
+            w_site(ins)
+            op(0x11)
+            uleb(wb, sig_index(ps, rs))
+            op(0)
+            call_result(ins, -1)
+        syscall:
+            op(0x00)
+        intr:
+            i64c(0)
+            lset(d)
+        block:
+            op(0x02)
+            op(0x40)
+        loop:
+            op(0x03)
+            op(0x40)
+        if_:
+            lget(a)
+            op(0x50)       # i64.eqz
+            op(0x45)       # i32.eqz
+            op(0x04)
+            op(0x40)
+        else_: op(0x05)
+        end: op(0x0B)
+        br:
+            op(0x0C)
+            uleb(wb, int(ins.imm))
+        brif:
+            lget(a)
+            op(0x50)
+            op(0x45)
+            op(0x0D)
+            uleb(wb, int(ins.imm))
+        brtable:
+            # out-of-range indices (unsigned) select the default entry
+            lget(a)
+            op(0xA7)                    # i32.wrap_i64
+            i32c(bb)
+            lget(a)
+            i64c(bb)
+            op(0x54)                    # i64.lt_u
+            op(0x1B)                    # select
+            op(0x0E)
+            uleb(wb, bb)
+            loop k in [0..bb): uleb(wb, int(cur_wf.args[int(ins.c) + k]))
+            uleb(wb, int(ins.imm))
+        ret:
+            if a >= 0: lget(a)
+            restore_sp()
+            op(0x0F)
+        trap: op(0x00)
+        select:
+            lget(bb)
+            lget(int(ins.c))
+            lget(a)
+            op(0x50)                    # i64.eqz
+            op(0x45)                    # i32.eqz: nonzero condition
+            op(0x1B)
+            lset(d)
+
+vtype_of = (v: int) -> int:
+    t = int(cur_wf.vtypes[v])
+    if t == VK: return VI
+    t
+
+slot_offs: int[]
+
+wasm_group = (t: int) -> int:
+    if t == VF: return 1
+    if t == VS: return 2
+    0
+
+# where each value is first and last live (positions in the code; -1: never used), extended
+# over loops it is live in (as the x86-64 backend's analysis)
+wasm_live = (f: IrFn) -> (int[], int[]):
+    saved = cur_wf
+    cur_wf = f
+    nv = f.vtypes.len()
+    first = fill(INF_POS, nv)
+    last = fill(-1, nv)
+    loop_s: int[]
+    loop_e: int[]
+    kinds: int[]
+    starts: int[]
+    loop pos in 0.. and ins in f.code:
+        d = wasm_ir_operands(ins)
+        loop operand_index in [0..wasm_ir_use_count):
+            let u = wasm_ir_use(operand_index)
+            if pos < first[u]: first[u] = pos
+            if pos > last[u]: last[u] = pos
+        if d >= 0:
+            if pos < first[d]: first[d] = pos
+            if pos > last[d]: last[d] = pos
+        if ins.op == .zeroslots:
+            loop k in [0..int(ins.b)):
+                item = int(f.args[int(ins.a) + k])
+                if item & 1 == 1:
+                    v = item >> 1
+                    if pos < first[v]: first[v] = pos
+                    if pos > last[v]: last[v] = pos
+        if ins.op == .block or ins.op == .loop or ins.op == .if_:
+            kinds.push(int(ins.op))
+            starts.push(pos)
+        else if ins.op == .end:
+            k = kinds.pop()
+            st = starts.pop()
+            if k == int(Op.loop):
+                loop_s.push(st)
+                loop_e.push(pos)
+    cur_wf = saved
+    # loops in order of their start; a value live where a loop starts lives to its end
+    nl = loop_s.len()
+    order: int[]
+    loop i in [0..nl): order.push(i)
+    order.sort_by((i: int): loop_s[i])
+    ls: int[]
+    le: int[]
+    loop i in order:
+        ls.push(loop_s[i])
+        le.push(loop_e[i])
+    loop v in [0..nv):
+        if last[v] < 0: continue
+        fv = first[v]
+        if v < f.nparams: fv = -1
+        lo = 0
+        hi = nl
+        loop lo < hi:
+            mid = (lo + hi) / 2
+            if ls[mid] <= fv: lo = mid + 1
+            else: hi = mid
+        i = lo
+        loop i < nl and ls[i] <= last[v]:
+            if le[i] > last[v]: last[v] = le[i]
+            i += 1
+    (first, last)
+
+wasm_body = (f: IrFn) -> u8[]:
+    cur_wf = f
+    wasm_error = 0
+    last_set_v = -1
+    wb = []
+    w_sites = []
+    nv = f.vtypes.len()
+    loc_of = fill(0, nv)
+    # locals: params keep their indices; other values share locals of their type when they are
+    # not live at the same time (as registers are shared on x86-64: engines give every local a
+    # stack slot, and big frames make deep recursion run out of stack)
+    loop p in [0..f.nparams): loc_of[p] = p
+    first, last = wasm_live(f)
+    order: int[]
+    loop v in [f.nparams..nv):
+        if last[v] >= 0: order.push(v)
+    order.sort_by((v: int): first[v])
+    counts = [0, 0, 0]
+    free: int[][] = [[], [], []]
+    active: (int, int, int)[]           # (last, type group, local within the group)
+    loop v in order:
+        g = wasm_group(vtype_of(v))
+        k = 0
+        loop k < active.len():
+            if active[k].0 < first[v]:
+                free[active[k].1].push(active[k].2)
+                active[k] = active[active.len() - 1]
+                active.pop()
+            else: k += 1
+        idx = 0
+        if free[g].len() > 0: idx = free[g].pop()
+        else:
+            idx = counts[g]
+            counts[g] += 1
+        loc_of[v] = idx
+        active.push((last[v], g, idx))
+    # (values never used still need a local of their type)
+    loop v in [f.nparams..nv):
+        if last[v] < 0:
+            g = wasm_group(vtype_of(v))
+            if counts[g] == 0: counts[g] = 1
+            loc_of[v] = 0
+    next = f.nparams
+    base = [0, 0, 0]
+    groups: (int, int)[]
+    loop g in [0..3):
+        base[g] = next
+        next += counts[g]
+        if counts[g] > 0: groups.push((counts[g], wt([VI, VF, VS][g])))
+    loop v in [f.nparams..nv): loc_of[v] += base[wasm_group(vtype_of(v))]
+    fp_local = next
+    next += 1
+    groups.push((1, WT_I32))
+    # frame
+    slot_offs = fill(0, f.slot_size.len())
+    off = 0
+    loop s in [0..f.slot_size.len()):
+        al = int(f.slot_align[s])
+        off = wasm_align_up(off, al)
+        slot_offs[s] = off
+        off += int(f.slot_size[s])
+    cur_frame = wasm_align_up(off, 16)
+    max_frame = max(max_frame, cur_frame)
+    uleb(wb, groups.len())
+    loop g in groups:
+        uleb(wb, g.0)
+        wb.push(u8(g.1))
+    if cur_frame > 0:
+        # Never let a large frame or deep recursion overwrite globals/rodata.
+        op(0x23)
+        uleb(wb, 0)
+        i32c(wasm_align_up(data_base + wasm_data_size, 16) + cur_frame)
+        op(0x49)             # i32.lt_u: insufficient space before subtraction
+        op(0x04)
+        op(0x40)
+        op(0x00)             # unreachable: resource exhaustion
+        op(0x0B)
+        op(0x23)
+        uleb(wb, 0)          # global.get $sp
+        i32c(cur_frame)
+        op(0x6B)             # i32.sub
+        op(0x22)
+        uleb(wb, fp_local)   # local.tee $fp
+        op(0x24)
+        uleb(wb, 0)          # global.set $sp
+    loop ins in f.code:
+        emit_wins(ins)
+        if wasm_error != 0: break
+    op(0x0B)
+    out = wb
+    wb = []
+    out

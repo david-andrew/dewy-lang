@@ -92,6 +92,7 @@ are grouped. See the ownership sections for the live service contracts.
 | `constant_eval`, `constant_host`, `source_types` | Same stems + `.jo` | Dewy recursive constant-expression evaluation and borrowed source dialects | O(executed syntax + demanded checking/binding); local scalar operations; peak flagship phase +0.103% including layouts. |
 | `ir_types` | `ir_types.jo` | Dewy opcode and instruction/function/use-plan layouts | 107 ordinals, 30 fields; direct Jo consumers, no adapters; flagship phase change −0.0037% to +0.0030%. |
 | `ir_operands` | `ir_operands.jo` | Dewy final-IR layout construction and flags | O(opcodes) once per process; Jo consumes the table directly; flagship phase change −0.0001% to +0.0005%. |
+| `wasm_emit` | `wasm_emit.jo` | Dewy whole-function wasm emission, locals and frame layout | Module host supplies import/source facts once; no per-instruction host callbacks. |
 | `backend_analysis` | `backend_analysis.jo` | Dewy final-IR use/lifetime/call/loop analysis | Shared native workspace; direct allocator/emitter views, no host callbacks. |
 | `opt_returns` | `opt_returns.jo` | Dewy recursive return sinking | Borrows code/types at the release-pass boundary; guarded end-index construction, no host callbacks. |
 
@@ -371,8 +372,10 @@ this boundary: exposing or sharing it disables existing checker optimizations.
 No scalar operand or metadata request calls back into Jo. Register allocation
 and emission remain with their current owners.
 
-IR storage stays fixed throughout the call. Scratch arrays grow only at a new
-high-water mark and refresh their views before use; no view escapes into the IR
+IR storage stays fixed throughout the call. Lengths, parameter count, type and
+constant views are cached once; loop views are borrowed after construction ends.
+Scratch arrays grow only at a new high-water mark and refresh their views before
+use; no view escapes into the IR
 or emitted fragment. Only fields valid for a location kind may be read, and
 per-function use records, save flags and active list lengths are reset. The
 allocation index is optional; debug locals are traversed only in debug mode.
@@ -385,6 +388,40 @@ retains its existing worst-case O(V * L). Space is O(V + N + L), with the O(N)
 allocation-start index demanded only by callers that allocate through it. The
 frozen twin preserves the original walks and is required by both bootstrap
 source generations, under the same retirement rule as the optimizer twins.
+
+## Wasm emitter ownership boundary
+
+`wasm_emit.dewy` owns the complete function encoder, its local-lifetime analysis
+and allocation, frame layout and stack guard, all instruction and call encodings,
+source-site offsets, signature interning and indirect-function table registration.
+The Jo module host prepares import parameter/result types, the grow-import flag
+and user-source-position flags before entering the encoder. The metadata is
+indexed by the existing function/position IDs, built only for a wasm module in
+O(F + P + S) time and space for functions, imported parameters and source positions.
+No checker arena is exposed, and no instruction, operand, signature or byte
+requests a host callback. Jo retains module sections, exported adapters and HTML
+packaging; native emission is a separate ownership boundary.
+
+A function's IR is a read-only snapshot throughout both walks. Cache its lengths
+and borrow code/argument/type/constant views once; finalized local and slot maps
+stay fixed while encoding. The lifetime walk consumes the shared opcode layout
+table, using the fixed `Ins` tag and contiguous a/b/c ABI. The emitter owns
+its output, local and slot maps, and transient operand view; consume that view
+before decoding another instruction. Signature and table state lives for the
+module, while body bytes, source sites, peephole state and frame layout reset
+per function. `local.tee` selection, stable local ordering, loop extension,
+import conversions and guarded reference-count calls preserve the original
+algorithms and byte order. Unsupported native instructions return a status to
+the host, which issues the existing internal error before packaging.
+
+The existing walks cost O(N + U + B) for instructions, operand uses and bytes,
+plus O(L log L + V log V) sorting and the original O(V * L) loop-extension and
+O(V * A) active-local scans in the worst case. Space is O(N + V + L + B), with
+A active locals, V virtual registers and L loops. There is no extra IR pass.
+The frozen twin preserves the old switch-based operand walk and complete body
+encoder behind the same bulk-metadata interface; the bootstrap generations
+still require it. Whole-body differentials cover every opcode, import ABI,
+address mode, call policy, frame and reused-state transition.
 
 ## Parser ownership boundary
 

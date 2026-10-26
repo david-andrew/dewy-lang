@@ -56,16 +56,20 @@ backend_call_like=(ins:ptr<Ins> dbg_on:bool target_wasm:bool):>bool=>$unsafe {
     false
 }
 
-backend_call_ends_here=(@ir:IrFn pos:int64 ins:ptr<Ins> dbg_on:bool):>bool=>$unsafe {
-    if dbg_on or ins[0].dst <? 0 or BackendWord(pos) + 1 >=? ir.code.length {return false}
+backend_call_ends_here_views=(instructions:ptr<Ins> arguments:ptr<int32> types:ptr<int8> nc:int64 pos:int64 ins:ptr<Ins> dbg_on:bool):>bool=>$unsafe {
+    if dbg_on or ins[0].dst <? 0 or BackendWord(pos) + 1 >=? nc {return false}
     if ins[0].op not=? 'call' and ins[0].op not=? 'calli' and ins[0].op not=? 'callc' {return false}
-    let next=ir.code[BackendWord(pos) + 1]
+    let next=instructions[BackendWord(pos) + 1]
     if next.op not=? 'call' or next.c not=? 1 {return false}
     loop k in [0..int64(next.b)) {
-        let v=int64(ir.args[BackendWord(int64(next.a)) + BackendWord(k)])
-        if v not=? int64(ins[0].dst) and int64(ir.vtypes[v]) not=? 3 {return false}
+        let v=int64(arguments[BackendWord(int64(next.a)) + BackendWord(k)])
+        if v not=? int64(ins[0].dst) and int64(types[v]) not=? 3 {return false}
     }
     true
+}
+
+backend_call_ends_here=(@ir:IrFn pos:int64 ins:ptr<Ins> dbg_on:bool):>bool=>$unsafe {
+    backend_call_ends_here_views(ir.code.ptr ir.args.ptr ir.vtypes.ptr ir.code.length pos ins dbg_on)
 }
 
 # Complete final-IR analysis. The input arenas do not grow during this call.
@@ -76,6 +80,11 @@ backend_analyze=(@ir:IrFn @ir_operand_layout:array<int64> dbg_on:bool target_was
     x_has_narrow32=false
     x_has_overflow_pair=false
     let nv=ir.vtypes.length
+    let nc=ir.code.length
+    let np=ir.nparams
+    let nk=ir.kval.length
+    let types=ir.vtypes.ptr
+    let constants=ir.kval.ptr
     if v_live_storage.length <? nv {v_live_storage.resize(nv)}
     if vloc_storage.length <? nv {vloc_storage.resize(nv)}
     if vcval_storage.length <? nv {vcval_storage.resize(nv)}
@@ -103,16 +112,16 @@ backend_analyze=(@ir:IrFn @ir_operand_layout:array<int64> dbg_on:bool target_was
     loop_e.clear()
     let kinds:array<bool>=[]
     let starts:array<int64>=[]
-    loop p in [0..ir.nparams) {
+    loop p in [0..np) {
         v_live[p].first=0
         v_live[p].last=0
         v_live[p].ndef=1
     }
-    loop v in [0..ir.kval.length) {
-        if int64(ir.vtypes[v]) =? 3 {
+    loop v in [0..nk) {
+        if int64(types[v]) =? 3 {
             v_live[v].ndef=1
             vloc[v]=LOC_CONST
-            vcval[v]=ir.kval[v]
+            vcval[v]=constants[v]
         }
     }
     let depth:BackendWord=0
@@ -122,7 +131,7 @@ backend_analyze=(@ir:IrFn @ir_operand_layout:array<int64> dbg_on:bool target_was
     let arguments=ir.args.ptr
     let layouts=ir_operand_layout.ptr
     let features:int64=0
-    loop pos in [0..ir.code.length) {
+    loop pos in [0..nc) {
         let ins=instructions + pos
         if ins[0].op =? 'callc' {x_has_foreign_call=true}
         # Op's ABI tag is its first uint32, in ir_types declaration order.
@@ -198,7 +207,7 @@ backend_analyze=(@ir:IrFn @ir_operand_layout:array<int64> dbg_on:bool target_was
                 }
             }
         }
-        if mode & IR_CALL not=? 0 and backend_call_like(ins dbg_on target_wasm) and not backend_call_ends_here(@ir pos ins dbg_on) {
+        if mode & IR_CALL not=? 0 and backend_call_like(ins dbg_on target_wasm) and not backend_call_ends_here_views(instructions arguments types nc pos ins dbg_on) {
             call_pos.push(pos)
             if ins[0].op =? 'call' and ins[0].c =? 2 {call_w.push(1)}
             else {call_w.push(w)}
@@ -232,12 +241,12 @@ backend_analyze=(@ir:IrFn @ir_operand_layout:array<int64> dbg_on:bool target_was
         loop v in backend_debug_vregs {
             if v <? 0 or v >=? nv or v_live[v].last <? 0 {continue}
             dbg_keep[v]=true
-            v_live[v].last=ir.code.length
+            v_live[v].last=nc
             v_live[v].nuse=BackendWord(v_live[v].nuse) + 1
         }
     }
     if plan_starts {
-        let n=BackendWord(ir.code.length) + 1
+        let n=BackendWord(nc) + 1
         if v_start_storage.length <? n {v_start_storage.resize(n)}
         v_start=v_start_storage.ptr
         loop pos in [0..n) {v_start[pos]=-1}
@@ -251,7 +260,7 @@ backend_analyze=(@ir:IrFn @ir_operand_layout:array<int64> dbg_on:bool target_was
             vloc[v]=loc
         }
         if plan_starts and loc =? LOC_SPILL {
-            if live[0].last <? 0 or (live[0].nuse =? 0 and v >=? ir.nparams) {vloc[v]=LOC_NONE}
+            if live[0].last <? 0 or (live[0].nuse =? 0 and v >=? np) {vloc[v]=LOC_NONE}
             else {
                 live[0].next_start=v_start[live[0].first]
                 v_start[live[0].first]=v
@@ -259,19 +268,21 @@ backend_analyze=(@ir:IrFn @ir_operand_layout:array<int64> dbg_on:bool target_was
         }
     }
     if nl =? 0 {return}
+    let loop_starts=loop_s.ptr
+    let loop_ends=loop_e.ptr
     loop v in [0..nv) {
         if v_live[v].last <? 0 {continue}
-        let f=if v <? ir.nparams {-1} else {v_live[v].first}
+        let f=if v <? np {-1} else {v_live[v].first}
         let lo:BackendWord=0
         let hi:BackendWord=BackendWord(nl)
         loop lo <? hi {
             let mid=(lo + hi) // 2
-            if loop_s[mid] <=? f {lo=mid + 1} else {hi=mid}
+            if loop_starts[mid] <=? f {lo=mid + 1} else {hi=mid}
         }
         let i=lo
-        loop i <? nl and loop_s[i] <=? v_live[v].last {
+        loop i <? nl and loop_starts[i] <=? v_live[v].last {
             if ra_stat {ra_loop_visits=BackendWord(ra_loop_visits) + 1}
-            if loop_e[i] >? v_live[v].last {v_live[v].last=loop_e[i]}
+            if loop_ends[i] >? v_live[v].last {v_live[v].last=loop_ends[i]}
             i+=1
         }
     }

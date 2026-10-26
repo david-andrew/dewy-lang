@@ -1,0 +1,1351 @@
+$runtime_checks
+from p"ir_types.dewy" import (Ins IrFn)
+from p"leb128.dewy" import (uleb sleb)
+from p"ir_operands.dewy" import (ir_operand_layouts IR_DEF IR_ARGS IR_INDEX IR_STORE IR_INDIRECT IR_RETURN)
+# Fixed ABI layout table, shared with native analysis; no per-op host decoder.
+let wasm_operand_layout:array<int64>=ir_operand_layouts()
+WasmWord:type=int64<overflow='wrap'>
+
+# Whole-function wasm emitter. The module host supplies frozen metadata in bulk.
+# Integer tags and mode bits follow ir.jo; wasm_emit.jo is the bootstrap twin.
+const VI = 0
+const VF = 1
+const VS = 2
+const VK = 3
+const M_SIGNED = 16
+const M_FLOAT = 32
+const M_INDEX = 128
+const VOP_SPLAT_B = 256
+const VOP_SPLAT_C = 512
+const CALL_IF_SHARED = 3
+const CALL_RC_INC = 4
+const CALL_RC_DEC = 5
+const INF_POS = 1 << 60
+const RO_BASE = 1024
+let wasm_import_params:array<array<int64>>=[]
+let wasm_import_results:array<int64>=[] # -2: internal; -1: void import; otherwise wasm type
+let wasm_grow:array<bool>=[]
+let wasm_user_pos:array<bool>=[]
+let wasm_mt_active_off=0
+let wasm_data_size=0
+let wasm_error=0
+wasm_align_up=(n:int64 a:int64):>int64=>$unsafe {
+    (n + a - 1) & ((a - 1) xor -1)
+}
+const WT_I32 = 0x7F
+const WT_I64 = 0x7E
+const WT_F32 = 0x7D
+const WT_F64 = 0x7C
+wt=(vt:int64):>int64=>$unsafe {
+    if vt =? VF {
+        return WT_F64
+    }
+    if vt =? VS {
+        return WT_F32
+    }
+    WT_I64
+}
+let type_sigs:array<array<uint8>>=[]
+let type_index:dict<string int64>=[]
+sig_index=(params:array<int64> results:array<int64>):>int64=>$unsafe {
+    let key="{params}:{results}"
+    let found:int64?=type_index.get(key)
+    if found isnt? none {
+        return found
+    }
+    let s:array<uint8>=[0x60]
+    uleb(@s  params.length)
+    loop p in params {
+        s.push(uint8((p) & 255))
+    }
+    uleb(@s  results.length)
+    loop r in results {
+        s.push(uint8((r) & 255))
+    }
+    type_sigs.push(s)
+    let i=type_sigs.length - 1
+    type_index[key] = i
+    i
+}
+let wfn_index:array<int64>=[] # lfunc -> wasm function index
+let table_index:dict<int64 int64>=[]
+let table_funcs:array<int64>=[]
+let data_base=0
+let max_frame=0
+tbl=(lf:int64):>int64=>$unsafe {
+    let found:int64?=table_index.get(lf)
+    if found isnt? none {
+        return found
+    }
+    table_funcs.push(lf)
+    let i=table_funcs.length # index 0 stays null
+    table_index[lf] = i
+    i
+}
+wasm_mem_index=(ins:Ins):>int64=>$unsafe {
+    if WasmWord(ins.c) & M_INDEX =? 0 {
+        return -1
+    }
+    if ins.op =? 'store' {
+        return WasmWord(ins.dst)
+    }
+    WasmWord(ins.b)
+}
+wasm_mem_scale=(ins:Ins):>int64=>$unsafe {
+    (WasmWord(ins.c) >> 8) & 3
+}
+let wasm_ir_use_count=0
+let wasm_ir_use_values:[int64 int64 int64]=[0 0 0]
+let wasm_ir_use_span=-1
+let wasm_ir_use_span_count=0
+# A transient view of an instruction's uses: up to three inline operands, or
+# an existing call-argument span plus its indirect target. No temporary array
+# needs filling on each visit. Consume the view before another wasm_ir_operands call.
+wasm_ir_use=(i:int64):>int64=>$unsafe {
+    if wasm_ir_use_span >=? 0 {
+        if i <? wasm_ir_use_span_count {
+            return WasmWord(cur_wf.args[wasm_ir_use_span + i])
+        }
+        return wasm_ir_use_values[2]
+    }
+    # The three integer fields are contiguous. Every caller bounds i by the
+    # descriptor's count (at most three on this inline path).
+    if i =? 0 {
+        return wasm_ir_use_values[0]
+    }
+    if i =? 1 {
+        return wasm_ir_use_values[1]
+    }
+    wasm_ir_use_values[2]
+}
+wasm_ir_has_use=(v:int64):>bool=>$unsafe {
+    loop i in [0..wasm_ir_use_count) {
+        if wasm_ir_use(i) =? v {
+            return true
+        }
+    }
+    false
+}
+# Sets the operand view; returns the defined vreg or -1. zeroslots definitions
+# are carried in cur_wf.args and handled separately by the consumers.
+wasm_ir_operands=(ins:Ins):>int64=>$unsafe {
+    wasm_ir_use_count=0
+    wasm_ir_use_span=-1
+    let a=WasmWord(ins.a)
+    let bb=WasmWord(ins.b)
+    let d=WasmWord(ins.dst)
+    wasm_ir_use_values[0] = a
+    wasm_ir_use_values[1] = bb
+    wasm_ir_use_values[2] = WasmWord(ins.c)
+    match ins.op {
+        <'nop' | 'block' | 'loop' | 'end' | 'else_' | 'br' | 'trap' | 'zeroslots'> => {
+            return -1
+        }
+        <'iconst' | 'fconst' | 'slot' | 'gaddr' | 'daddr' | 'faddr'> => {
+            return d
+        }
+        <'intr' | 'call' | 'syscall'> => {
+            wasm_ir_use_span=a
+            wasm_ir_use_span_count=bb
+            wasm_ir_use_count=bb
+            return d
+        }
+        <'calli' | 'callc'> => {
+            wasm_ir_use_span=a
+            wasm_ir_use_span_count=bb
+            wasm_ir_use_count=bb + 1
+            return d
+        }
+        <'if_' | 'brif' | 'brtable' | 'assume'> => {
+            wasm_ir_use_count=1
+            return -1
+        }
+        <'ret'> => {
+            if a >=? 0 {
+                wasm_ir_use_count=1
+            }
+            return -1
+        }
+        <'store'> => {
+            wasm_ir_use_count=2
+            if WasmWord(ins.c) & M_INDEX not=? 0 {
+                wasm_ir_use_values[2] = d
+                wasm_ir_use_count=3
+            }
+            return -1
+        }
+        <'vst'> => {
+            wasm_ir_use_values[2] = d
+            wasm_ir_use_count=3
+            return -1
+        }
+        <'vsplat'> => {
+            wasm_ir_use_count=1
+            return d
+        }
+        <'vzu'> => {
+            return -1
+        }
+        <'copy'> => {
+            wasm_ir_use_count=2
+            return -1
+        }
+        <'zero'> => {
+            wasm_ir_use_count=1
+            return -1
+        }
+        <'memcpy' | 'memset' | 'vop'> => {
+            wasm_ir_use_count=3
+            return -1
+        }
+        <'select' | 'memeq' | 'findbyte' | 'scanbytes' | 'findb'> => {
+            wasm_ir_use_count=3
+            return d
+        }
+        <'load'> => {
+            wasm_ir_use_count=1
+            if WasmWord(ins.c) & M_INDEX not=? 0 {
+                wasm_ir_use_count=2
+            }
+            return d
+        }
+        <'mov' | 'neg' | 'not_' | 'fneg' | 'fsqrt' | 'fabs' | 'ffloor' | 'fceil' | 'ftrunc' | 'sext8' | 'sext16' | 'sext32' | 'zext8' | 'zext16' | 'zext32' | 'i2f' | 'u2f' | 'f2i' | 'f2f' | 'bits2f' | 'f2bits'> => {
+            wasm_ir_use_count=1
+            return d
+        }
+        _ => {
+            wasm_ir_use_count=2
+            return d
+        }
+    }
+}
+# ---------------- function body ----------------
+let wb:array<uint8>=[]
+let loc_of:array<int64>=[] # vreg -> local index
+let fp_local=0
+let cur_frame=0
+let cur_wf:IrFn=IrFn()
+let wasm_types:ptr<int8>=$unsafe (uint64(0) as ptr<int8>)
+let wasm_constants:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let wasm_arguments:ptr<int32>=$unsafe (uint64(0) as ptr<int32>)
+let wasm_slot_sizes:ptr<int32>=$unsafe (uint64(0) as ptr<int32>)
+let wasm_locals:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let wasm_slot_offsets:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let last_set_v=-1
+let last_set_pos=0
+let last_set_end=0
+op=(x:int64):>void=>$unsafe {
+    wb.push(uint8((x) & 255))
+}
+lget=(v:int64):>void=>$unsafe {
+    if WasmWord(wasm_types[v]) =? VK {
+        i64c(wasm_constants[v])
+        return
+    }
+    # Keep an immediately consumed result on the operand stack. local.tee
+    # still writes the local, so later reads and loop-carried values are safe.
+    if v =? last_set_v and wb.length =? last_set_end {
+        wb[last_set_pos] = 0x22
+        last_set_v=-1
+        return
+    }
+    op(0x20)
+    uleb(@wb  wasm_locals[v])
+}
+lset=(v:int64):>void=>$unsafe {
+    last_set_pos=wb.length
+    op(0x21)
+    uleb(@wb  wasm_locals[v])
+    last_set_end=wb.length
+    last_set_v=v
+}
+i64c=(v:int64):>void=>$unsafe {
+    op(0x42)
+    sleb(@wb  v)
+}
+i32c=(v:int64):>void=>$unsafe {
+    op(0x41)
+    sleb(@wb  v)
+}
+# push the i32 address of a load/store; returns the static offset for its memarg
+waddr=(ins:Ins):>int64=>$unsafe {
+    lget(WasmWord(ins.a))
+    let ix=wasm_mem_index(ins)
+    if ix >=? 0 {
+        lget(ix)
+        let sc=wasm_mem_scale(ins)
+        if sc >? 0 {
+            i64c(sc)
+            op(0x86) # i64.shl
+        }
+        op(0x7C) # i64.add
+    }
+    let off=WasmWord(ins.imm)
+    if off <? 0 {
+        i64c(off)
+        op(0x7C)
+        off=0
+    }
+    op(0xA7) # i32.wrap_i64
+    off
+}
+# CALL_IF_SHARED, CALL_RC_INC and CALL_RC_DEC (ir.jo): the common case without the call
+w_guarded_call=(ins:Ins lf:int64):>void=>$unsafe {
+    let a=WasmWord(ins.a)
+    let d=WasmWord(ins.dst)
+    let p=WasmWord(wasm_arguments[a])
+    if ins.c =? CALL_IF_SHARED and d >=? 0 {
+        lget(p)
+        lset(d) # (x itself, unless the call is made)
+    }
+    op(0x02); op(0x40) # block $done
+    lget(p); op(0x50); op(0x0D); uleb(@wb  0) # br_if $done when x is 0
+    addr32(p); op(0x29); memarg(3  0) # its refcount
+    if ins.c =? CALL_IF_SHARED {
+        i64c(1); op(0x51); op(0x0D); uleb(@wb  0) # == 1: not shared
+    }
+    else {
+        if ins.c =? CALL_RC_INC {
+            i64c(0); op(0x57)
+        }
+        else {
+            i64c(1); op(0x53)
+        }
+        op(0x0D); uleb(@wb  0)
+        op(0x02); op(0x40) # block $slow
+        if ins.c =? CALL_RC_DEC {
+            addr32(p); op(0x29); memarg(3  0)
+            i64c(1); op(0x51); op(0x0D); uleb(@wb  0) # the last reference: the call frees
+        }
+        i32c(data_base + wasm_mt_active_off); op(0x2D); memarg(0  0) # __mt_active
+        op(0x0D); uleb(@wb  0)
+        addr32(p)
+        addr32(p); op(0x29); memarg(3  0)
+        if ins.c =? CALL_RC_INC {
+            i64c(1)
+        }
+        else {
+            i64c(-1)
+        }
+        op(0x7C); op(0x37); memarg(3  0) # the refcount one more or less
+        op(0x0C); uleb(@wb  1) # br $done
+        op(0x0B) # end $slow
+    }
+    emit_call_args(a  WasmWord(ins.b)  lf)
+    op(0x10)
+    uleb(@wb  wfn_index[lf])
+    call_result(ins  lf)
+    op(0x0B) # end $done
+}
+# (a call in the program's own code: where it is, for a panic's call trace in a page; the call
+# instruction's offset in the body, and its source position)
+let w_sites:array<int64>=[]
+w_site=(ins:Ins):>void=>$unsafe {
+    if ins.pos =? 0 or not wasm_user_pos[WasmWord(ins.pos)] {
+        return
+    }
+    w_sites.push(wb.length)
+    w_sites.push(WasmWord(ins.pos))
+}
+addr32=(v:int64):>void=>$unsafe {
+    lget(v)
+    op(0xA7) # i32.wrap_i64
+}
+memarg=(align:int64 off:int64):>void=>$unsafe {
+    uleb(@wb  align)
+    uleb(@wb  off)
+}
+to_i64_from_i32=():>void=>$unsafe {
+    op(0xAD)
+}
+restore_sp=():>void=>$unsafe {
+    if cur_frame >? 0 {
+        op(0x20)
+        uleb(@wb  fp_local)
+        i32c(cur_frame)
+        op(0x6A) # i32.add
+        op(0x24)
+        uleb(@wb  0) # global.set $sp
+    }
+}
+bin64=(code:int64 ins:Ins):>void=>$unsafe {
+    lget(WasmWord(ins.a))
+    lget(WasmWord(ins.b))
+    op(code)
+    lset(WasmWord(ins.dst))
+}
+cmp_res=():>void=>$unsafe {
+    to_i64_from_i32()
+}
+emit_call_args=(start:int64 n:int64 lf:int64):>void=>$unsafe {
+    let imp=lf >=? 0 and wasm_import_results[lf] not=? -2
+    let pts:array<int64>=[]
+    if imp {
+        pts=wasm_import_params[lf]
+    }
+    loop k in [0..n) {
+        let v=WasmWord(wasm_arguments[start + k])
+        lget(v)
+        if imp and pts[k] =? WT_I32 {
+            op(0xA7)
+        }
+    }
+}
+call_result=(ins:Ins lf:int64):>void=>$unsafe {
+    let d=WasmWord(ins.dst)
+    let imp=lf >=? 0 and wasm_import_results[lf] not=? -2
+    if imp {
+        let rt=wasm_import_results[lf]
+        if rt not=? -1 {
+            if rt =? WT_I32 {
+                to_i64_from_i32()
+            }
+            if d >=? 0 {
+                lset(d)
+            }
+            else {
+                op(0x1A)
+            }
+        }
+        return
+    }
+    if d >=? 0 {
+        lset(d)
+    }
+    else if WasmWord(ins.ty) >=? 0 {
+        op(0x1A)
+    }
+}
+emit_wins=(ins:Ins):>void=>$unsafe {
+    let o=ins.op
+    let d=WasmWord(ins.dst)
+    let a=WasmWord(ins.a)
+    let bb=WasmWord(ins.b)
+    match o {
+        <'nop' | 'assume'> => {
+
+        }
+        <'vld' | 'vst' | 'vbin' | 'vsplat' | 'vzu' | 'mulhs' | 'mulhu' | 'memeq' | 'streq' | 'findbyte' | 'scanbytes' | 'findb' | 'rot32'> => {
+            wasm_error=1
+        }
+        <'iconst'> => {
+            i64c(ins.imm)
+            lset(d)
+        }
+        <'fconst'> => {
+            if WasmWord(ins.ty) =? VS {
+                op(0x43)
+                let bits=ins.imm
+                loop k in [0..4) {
+                    wb.push(uint8((bits >> (8 * k)) & 255))
+                }
+            }
+            else {
+                op(0x44)
+                let bits=ins.imm
+                loop k in [0..8) {
+                    wb.push(uint8((bits >> (8 * k)) & 255))
+                }
+            }
+            lset(d)
+        }
+        <'mov'> => {
+            lget(a)
+            lset(d)
+        }
+        <'overflow_add' | 'overflow_sub' | 'overflow_mul'> => {
+            wasm_error=2
+        }
+        <'checked_add' | 'checked_sub' | 'checked_mul'> => {
+            let opcode=if o =? 'checked_add' {0x7C} else {if o =? 'checked_sub' {0x7D} else {0x7E}}
+            bin64(opcode  ins)
+            if ins.c not=? 0 {
+                if o =? 'checked_mul' {
+                    lget(a); i64c(0); op(0x52)
+                    op(0x04); op(0x7F)
+                    lget(d); lget(a); op(0x80) # unsigned quotient, guarded zero
+                    lget(bb); op(0x52)
+                    op(0x05); op(0x41); sleb(@wb  0); op(0x0B)
+                }
+                else {
+                    lget( if o =? 'checked_add' {d} else {a})
+                    lget( if o =? 'checked_add' {a} else {bb})
+                    op(0x54) # unsigned result < a, or a < b
+                }
+            }
+            else if o =? 'checked_mul' {
+                # wasm has no overflow flags or high multiply. Check the quotient,
+                # guarding its own MIN/-1 trap and the zero divisor explicitly.
+                lget(a)
+                i64c(-1)
+                op(0x51)
+                op(0x04)
+                op(0x7F) # if (result i32)
+                lget(bb)
+                i64c(-9223372036854775807 - 1)
+                op(0x51)
+                op(0x05)
+                lget(a)
+                i64c(0)
+                op(0x52)
+                op(0x04)
+                op(0x7F)
+                lget(d)
+                lget(a)
+                op(0x7F) # i64.div_s
+                lget(bb)
+                op(0x52)
+                op(0x05)
+                op(0x41)
+                sleb(@wb  0)
+                op(0x0B)
+                op(0x0B)
+            }
+            else {
+                lget(a)
+                lget(d)
+                op(0x85)
+                if o =? 'checked_add' {
+                    lget(bb)
+                    lget(d)
+                }
+                else {
+                    lget(a)
+                    lget(bb)
+                }
+                op(0x85)
+                op(0x83)
+                i64c(0)
+                op(0x53) # (a xor result) & (b xor result) < 0
+            }
+            op(0x04)
+            op(0x40)
+            w_site(ins)
+            op(0x10)
+            uleb(@wb  wfn_index[WasmWord(ins.imm)])
+            op(0x00)
+            op(0x0B)
+        }
+        <'add'> => {
+            bin64(0x7C  ins)
+        }
+        <'sub'> => {
+            bin64(0x7D  ins)
+        }
+        <'mul'> => {
+            bin64(0x7E  ins)
+        }
+        <'divs'> => {
+            bin64(0x7F  ins)
+        }
+        <'divu'> => {
+            bin64(0x80  ins)
+        }
+        <'rems'> => {
+            bin64(0x81  ins)
+        }
+        <'remu'> => {
+            bin64(0x82  ins)
+        }
+        <'and_'> => {
+            bin64(0x83  ins)
+        }
+        <'or_'> => {
+            bin64(0x84  ins)
+        }
+        <'xor'> => {
+            bin64(0x85  ins)
+        }
+        <'shl'> => {
+            bin64(0x86  ins)
+        }
+        <'shrs'> => {
+            bin64(0x87  ins)
+        }
+        <'shru'> => {
+            bin64(0x88  ins)
+        }
+        <'neg'> => {
+            i64c(0)
+            lget(a)
+            op(0x7D)
+            lset(d)
+        }
+        <'not_'> => {
+            lget(a)
+            i64c(-1)
+            op(0x85)
+            lset(d)
+        }
+        <'eq' | 'ne' | 'lts' | 'ltu' | 'gts' | 'gtu' | 'les' | 'leu' | 'ges' | 'geu'> => {
+            lget(a)
+            lget(bb)
+            let c=0x51
+            if o =? 'ne' {
+                c=0x52
+            }
+            else if o =? 'lts' {
+                c=0x53
+            }
+            else if o =? 'ltu' {
+                c=0x54
+            }
+            else if o =? 'gts' {
+                c=0x55
+            }
+            else if o =? 'gtu' {
+                c=0x56
+            }
+            else if o =? 'les' {
+                c=0x57
+            }
+            else if o =? 'leu' {
+                c=0x58
+            }
+            else if o =? 'ges' {
+                c=0x59
+            }
+            else if o =? 'geu' {
+                c=0x5A
+            }
+            op(c)
+            cmp_res()
+            lset(d)
+        }
+        <'fadd' | 'fsub' | 'fmul' | 'fdiv' | 'fmin' | 'fmax'> => {
+            let f32=WasmWord(ins.ty) =? VS
+            lget(a)
+            lget(bb)
+            let base=0xA0
+            if f32 {
+                base=0x92
+            }
+            let k=0
+            if o =? 'fsub' {
+                k=1
+            }
+            else if o =? 'fmul' {
+                k=2
+            }
+            else if o =? 'fdiv' {
+                k=3
+            }
+            else if o =? 'fmin' {
+                k=4
+            }
+            else if o =? 'fmax' {
+                k=5
+            }
+            op(base + k)
+            lset(d)
+        }
+        <'fneg' | 'fabs' | 'fsqrt' | 'ffloor' | 'fceil' | 'ftrunc'> => {
+            let f32=WasmWord(ins.ty) =? VS
+            lget(a)
+            let c=0
+            if o =? 'fabs' {
+                c=0x99
+            }
+            else if o =? 'fneg' {
+                c=0x9A
+            }
+            else if o =? 'fceil' {
+                c=0x9B
+            }
+            else if o =? 'ffloor' {
+                c=0x9C
+            }
+            else if o =? 'ftrunc' {
+                c=0x9D
+            }
+            else {
+                c=0x9F
+            }
+            if f32 {
+                c -= 14
+            }
+            op(c)
+            lset(d)
+        }
+        <'feq' | 'fne' | 'flt' | 'fle' | 'fgt' | 'fge'> => {
+            let f32=WasmWord(ins.ty) =? VS
+            lget(a)
+            lget(bb)
+            let c=0x61
+            if o =? 'fne' {
+                c=0x62
+            }
+            else if o =? 'flt' {
+                c=0x63
+            }
+            else if o =? 'fgt' {
+                c=0x64
+            }
+            else if o =? 'fle' {
+                c=0x65
+            }
+            else if o =? 'fge' {
+                c=0x66
+            }
+            if f32 {
+                c -= 6
+            }
+            op(c)
+            cmp_res()
+            lset(d)
+        }
+        <'sext8' | 'sext16' | 'sext32'> => {
+            lget(a)
+            if o =? 'sext8' {
+                op(0xC2)
+            }
+            else if o =? 'sext16' {
+                op(0xC3)
+            }
+            else {
+                op(0xC4)
+            }
+            lset(d)
+        }
+        <'zext8' | 'zext16' | 'zext32'> => {
+            lget(a)
+            if o =? 'zext32' {
+                op(0xA7)
+                op(0xAD)
+            }
+            else {
+                if o =? 'zext8' {
+                    i64c(0xFF)
+                }
+                else {
+                    i64c(0xFFFF)
+                }
+                op(0x83)
+            }
+            lset(d)
+        }
+        <'i2f' | 'u2f'> => {
+            lget(a)
+            if WasmWord(ins.ty) =? VS {
+                if o =? 'i2f' {
+                    op(0xB4)
+                }
+                else {
+                    op(0xB5)
+                }
+            }
+            else {
+                if o =? 'i2f' {
+                    op(0xB9)
+                }
+                else {
+                    op(0xBA)
+                }
+            }
+            lset(d)
+        }
+        <'f2i'> => {
+            lget(a)
+            op(0xFC)
+            if WasmWord(ins.ty) =? VS {
+                uleb(@wb  4)
+            }
+            else {
+                uleb(@wb  6)
+            }
+            lset(d)
+        }
+        <'f2f'> => {
+            lget(a)
+            if WasmWord(ins.ty) =? VF {
+                op(0xBB)
+            }
+            else {
+                op(0xB6)
+            }
+            lset(d)
+        }
+        <'bits2f'> => {
+            lget(a)
+            if WasmWord(ins.ty) =? VS {
+                op(0xA7)
+                op(0xBE)
+            }
+            else {
+                op(0xBF)
+            }
+            lset(d)
+        }
+        <'f2bits'> => {
+            lget(a)
+            if WasmWord(ins.ty) =? VS {
+                op(0xBC)
+                op(0xAD)
+            }
+            else {
+                op(0xBD)
+            }
+            lset(d)
+        }
+        <'load'> => {
+            let mode=WasmWord(ins.c)
+            let size=mode & 15
+            let off=waddr(ins)
+            if mode & M_FLOAT not=? 0 {
+                if size =? 4 {
+                    op(0x2A)
+                    memarg(2  off)
+                }
+                else {
+                    op(0x2B)
+                    memarg(3  off)
+                }
+            }
+            else {
+                let sg=mode & M_SIGNED not=? 0
+                if size =? 8 {
+                    op(0x29)
+                    memarg(3  off)
+                }
+                else if size =? 4 {
+                    if sg {
+                        op(0x34)
+                    }
+                    else {
+                        op(0x35)
+                    }
+                    memarg(2  off)
+                }
+                else if size =? 2 {
+                    if sg {
+                        op(0x32)
+                    }
+                    else {
+                        op(0x33)
+                    }
+                    memarg(1  off)
+                }
+                else {
+                    if sg {
+                        op(0x30)
+                    }
+                    else {
+                        op(0x31)
+                    }
+                    memarg(0  off)
+                }
+            }
+            lset(d)
+        }
+        <'store'> => {
+            let mode=WasmWord(ins.c)
+            let size=mode & 15
+            let off=waddr(ins)
+            lget(bb)
+            let vt=vtype_of(bb)
+            if vt =? VF {
+                op(0x39)
+                memarg(3  off)
+            }
+            else if vt =? VS {
+                op(0x38)
+                memarg(2  off)
+            }
+            else if size =? 8 {
+                op(0x37)
+                memarg(3  off)
+            }
+            else if size =? 4 {
+                op(0x3E)
+                memarg(2  off)
+            }
+            else if size =? 2 {
+                op(0x3D)
+                memarg(1  off)
+            }
+            else {
+                op(0x3C)
+                memarg(0  off)
+            }
+        }
+        <'slot'> => {
+            op(0x20)
+            uleb(@wb  fp_local)
+            to_i64_from_i32()
+            i64c(wasm_slot_offsets[a])
+            op(0x7C)
+            lset(d)
+        }
+        <'gaddr'> => {
+            i64c(data_base + WasmWord(ins.imm))
+            lset(d)
+        }
+        <'daddr'> => {
+            i64c(RO_BASE + WasmWord(ins.imm))
+            lset(d)
+        }
+        <'faddr'> => {
+            i64c(tbl(WasmWord(ins.imm)))
+            lset(d)
+        }
+        <'copy'> => {
+            addr32(a)
+            addr32(bb)
+            i32c(WasmWord(ins.imm))
+            op(0xFC)
+            uleb(@wb  10)
+            op(0)
+            op(0)
+        }
+        <'zero'> => {
+            addr32(a)
+            i32c(0)
+            i32c(WasmWord(ins.imm))
+            op(0xFC)
+            uleb(@wb  11)
+            op(0)
+        }
+        <'memcpy'> => {
+            addr32(a)
+            addr32(bb)
+            addr32(WasmWord(ins.c))
+            op(0xFC)
+            uleb(@wb  10)
+            op(0)
+            op(0)
+        }
+        <'vop'> => {
+            # one f32 lane at a time
+            let vcode=WasmWord(ins.imm)
+            let n=(vcode >> 4) & 7
+            loop i in [0..n) {
+                addr32(a)
+                if vcode & VOP_SPLAT_B not=? 0 {
+                    lget(bb)
+                }
+                else {
+                    addr32(bb)
+                    op(0x2A)
+                    memarg(2  4 * i)
+                }
+                if vcode & VOP_SPLAT_C not=? 0 {
+                    lget(WasmWord(ins.c))
+                }
+                else {
+                    addr32(WasmWord(ins.c))
+                    op(0x2A)
+                    memarg(2  4 * i)
+                }
+                op([0x92  0x93  0x94  0x95][vcode & 3]) # f32.add sub mul div
+                op(0x38) # f32.store
+                memarg(2  4 * i)
+            }
+        }
+        <'memset'> => {
+            addr32(a)
+            addr32(bb)
+            addr32(WasmWord(ins.c))
+            op(0xFC)
+            uleb(@wb  11)
+            op(0)
+        }
+        <'zeroslots'> => {
+            loop k in [0..bb) {
+                let item=WasmWord(wasm_arguments[a + k])
+                if item & 1 =? 1 {
+                    let v=item >> 1
+                    if vtype_of(v) =? VF {
+                        op(0x44)
+                        loop z in [0..8) {
+                            op(0)
+                        }
+                    }
+                    else if vtype_of(v) =? VS {
+                        op(0x43)
+                        loop z in [0..4) {
+                            op(0)
+                        }
+                    }
+                    else {
+                        i64c(0)
+                    }
+                    lset(v)
+                }
+                else {
+                    let s=item >> 1
+                    op(0x20)
+                    uleb(@wb  fp_local)
+                    i32c(wasm_slot_offsets[s])
+                    op(0x6A)
+                    i32c(0)
+                    i32c(WasmWord(wasm_slot_sizes[s]))
+                    op(0xFC)
+                    uleb(@wb  11)
+                    op(0)
+                }
+            }
+        }
+        <'call'> => {
+            let lf=WasmWord(ins.imm)
+            if wasm_grow[lf] {
+                lget(WasmWord(wasm_arguments[a]))
+                op(0xA7)
+                op(0x40)
+                op(0)
+                op(0xAC) # i64.extend_i32_s
+                if d >=? 0 {
+                    lset(d)
+                }
+                else {
+                    op(0x1A)
+                }
+                return
+            }
+            if ins.c =? CALL_IF_SHARED or ins.c =? CALL_RC_INC or ins.c =? CALL_RC_DEC {
+                w_guarded_call(ins  lf)
+                return
+            }
+            emit_call_args(a  bb  lf)
+            w_site(ins)
+            op(0x10)
+            uleb(@wb  wfn_index[lf])
+            call_result(ins  lf)
+            # Wasm imports/functions have no noreturn type. The optimizer may
+            # remove everything after a panic call, so express that fact here
+            # for the validator as well as the runtime.
+            if ins.c =? 1 {
+                op(0x00)
+            }
+        }
+        <'calli' | 'callc'> => {
+            emit_call_args(a  bb  -1)
+            addr32(WasmWord(ins.c))
+            let ps:array<int64>=[]
+            loop k in [0..bb) {
+                ps.push(wt(vtype_of(WasmWord(wasm_arguments[a + k]))))
+            }
+            let rs:array<int64>=[]
+            if WasmWord(ins.ty) >=? 0 {
+                rs.push(wt(WasmWord(ins.ty)))
+            }
+            w_site(ins)
+            op(0x11)
+            uleb(@wb  sig_index(ps  rs))
+            op(0)
+            call_result(ins  -1)
+        }
+        <'syscall'> => {
+            op(0x00)
+        }
+        <'intr'> => {
+            i64c(0)
+            lset(d)
+        }
+        <'block'> => {
+            op(0x02)
+            op(0x40)
+        }
+        <'loop'> => {
+            op(0x03)
+            op(0x40)
+        }
+        <'if_'> => {
+            lget(a)
+            op(0x50) # i64.eqz
+            op(0x45) # i32.eqz
+            op(0x04)
+            op(0x40)
+        }
+        <'else_'> => {
+            op(0x05)
+        }
+        <'end'> => {
+            op(0x0B)
+        }
+        <'br'> => {
+            op(0x0C)
+            uleb(@wb  WasmWord(ins.imm))
+        }
+        <'brif'> => {
+            lget(a)
+            op(0x50)
+            op(0x45)
+            op(0x0D)
+            uleb(@wb  WasmWord(ins.imm))
+        }
+        <'brtable'> => {
+            # out-of-range indices (unsigned) select the default entry
+            lget(a)
+            op(0xA7) # i32.wrap_i64
+            i32c(bb)
+            lget(a)
+            i64c(bb)
+            op(0x54) # i64.lt_u
+            op(0x1B) # select
+            op(0x0E)
+            uleb(@wb  bb)
+            loop k in [0..bb) {
+                uleb(@wb  WasmWord(wasm_arguments[WasmWord(ins.c) + k]))
+            }
+            uleb(@wb  WasmWord(ins.imm))
+        }
+        <'ret'> => {
+            if a >=? 0 {
+                lget(a)
+            }
+            restore_sp()
+            op(0x0F)
+        }
+        <'trap'> => {
+            op(0x00)
+        }
+        <'select'> => {
+            lget(bb)
+            lget(WasmWord(ins.c))
+            lget(a)
+            op(0x50) # i64.eqz
+            op(0x45) # i32.eqz: nonzero condition
+            op(0x1B)
+            lset(d)
+        }
+    }
+}
+vtype_of=(v:int64):>int64=>$unsafe {
+    let t=WasmWord(wasm_types[v])
+    if t =? VK {
+        return VI
+    }
+    t
+}
+let slot_offs:array<int64>=[]
+wasm_group=(t:int64):>int64=>$unsafe {
+    if t =? VF {
+        return 1
+    }
+    if t =? VS {
+        return 2
+    }
+    0
+}
+# where each value is first and last live (positions in the code; -1: never used), extended
+# over loops it is live in (as the x86-64 backend's analysis)
+wasm_live=(f:IrFn):>[array<int64> array<int64>]=>$unsafe {
+    let nv=f.vtypes.length
+    let np=f.nparams
+    let nc=f.code.length
+    let code=f.code.ptr
+    let args=f.args.ptr
+    let layouts=wasm_operand_layout.ptr
+    let first:array<int64>=[loop unused in [0..nv) INF_POS]
+    let last:array<int64>=[loop unused in [0..nv) -1]
+    let first_at=first.ptr
+    let last_at=last.ptr
+    let loop_s:array<int64>=[]
+    let loop_e:array<int64>=[]
+    let kinds:array<bool>=[]
+    let starts:array<int64>=[]
+    loop pos in [0..nc) {
+        let ins=code + pos
+        let mode=layouts[int64((ins as ptr<uint32>)[0])]
+        let uses=(ins as ptr<int32>) + 3
+        let nuses=mode & 3
+        let extra:int64=-1
+        if mode & IR_ARGS not=? 0 {
+            uses=args + int64(ins[0].a)
+            nuses=int64(ins[0].b)
+            if mode & IR_INDIRECT not=? 0 {extra=int64(ins[0].c)}
+        } else if mode & IR_STORE not=? 0 {
+            if mode & IR_INDEX =? 0 or int64(ins[0].c) & 128 not=? 0 {extra=int64(ins[0].dst)}
+        } else if mode & IR_INDEX not=? 0 {
+            if int64(ins[0].c) & 128 not=? 0 {nuses=2}
+        } else if mode & IR_RETURN not=? 0 and ins[0].a <? 0 {nuses=0}
+        loop k in [0..nuses) {
+            let v=int64(uses[k])
+            if pos <? first_at[v] {first_at[v]=pos}
+            if pos >? last_at[v] {last_at[v]=pos}
+        }
+        if extra >=? 0 {
+            if pos <? first_at[extra] {first_at[extra]=pos}
+            if pos >? last_at[extra] {last_at[extra]=pos}
+        }
+        if mode & IR_DEF not=? 0 and ins[0].dst >=? 0 {
+            let v=int64(ins[0].dst)
+            if pos <? first_at[v] {first_at[v]=pos}
+            if pos >? last_at[v] {last_at[v]=pos}
+        }
+        if ins[0].op =? 'zeroslots' {
+            loop k in [0..int64(ins[0].b)) {
+                let item=int64(args[WasmWord(ins[0].a) + WasmWord(k)])
+                if item & 1 =? 1 {
+                    let v=item >> 1
+                    if pos <? first_at[v] {first_at[v]=pos}
+                    if pos >? last_at[v] {last_at[v]=pos}
+                }
+            }
+        }
+        if ins[0].op =? 'block' or ins[0].op =? 'loop' or ins[0].op =? 'if_' {
+            kinds.push(ins[0].op =? 'loop')
+            starts.push(pos)
+        } else if ins[0].op =? 'end' {
+            let k=kinds.pop()
+            let st=starts.pop()
+            if k {loop_s.push(st); loop_e.push(pos)}
+        }
+    }
+    # Retain the original stable ordering and loop-extension algorithm.
+    let nl=loop_s.length
+    let order:array<int64>=[]
+    loop i in [0..nl) {order.push(i)}
+    let starts_at=loop_s.ptr
+    order.sort(key=(i:int64)=>starts_at[i])
+    let ls:array<int64>=[]
+    let le:array<int64>=[]
+    loop i in order {ls.push(loop_s[i]); le.push(loop_e[i])}
+    let ls_at=ls.ptr
+    let le_at=le.ptr
+    loop v in [0..nv) {
+        if last_at[v] <? 0 {continue}
+        let fv=first_at[v]
+        if v <? np {fv=-1}
+        let lo:WasmWord=0
+        let hi:WasmWord=WasmWord(nl)
+        loop lo <? hi {
+            let mid=(lo + hi) // 2
+            if ls_at[mid] <=? fv {lo=mid + 1} else {hi=mid}
+        }
+        let i=lo
+        loop i <? nl and ls_at[i] <=? last_at[v] {
+            if le_at[i] >? last_at[v] {last_at[v]=le_at[i]}
+            i+=1
+        }
+    }
+    [first last]
+}
+wasm_body=(f:IrFn):>array<uint8>=>$unsafe {
+    cur_wf=f
+    wasm_types=cur_wf.vtypes.ptr
+    wasm_constants=cur_wf.kval.ptr
+    wasm_arguments=cur_wf.args.ptr
+    wasm_slot_sizes=cur_wf.slot_size.ptr
+    wasm_error=0
+    last_set_v=-1
+    wb=[]
+    w_sites=[]
+    let nv=f.vtypes.length
+    loc_of=[loop unused in [0..nv) 0]
+    wasm_locals=loc_of.ptr
+    # locals: params keep their indices; other values share locals of their type when they are
+    # not live at the same time (as registers are shared on x86-64: engines give every local a
+    # stack slot, and big frames make deep recursion run out of stack)
+    loop p in [0..f.nparams) {
+        wasm_locals[p] = p
+    }
+    let intervals=wasm_live(f)
+    let first=intervals[0].ptr
+    let last=intervals[1].ptr
+    let order:array<int64>=[]
+    loop v in [f.nparams..nv) {
+        if last[v] >=? 0 {
+            order.push(v)
+        }
+    }
+    order.sort(key=(v:int64)=>first[v])
+    let counts:array<int64>=[0  0  0]
+    let free:array<array<int64>>=[[]  []  []]
+    let active:array<[int64 int64 int64]>=[] # (last, type group, local within the group)
+    loop v in order {
+        let g=wasm_group(vtype_of(v))
+        let k=0
+        loop k <? active.length {
+            if active[k][0] <? first[v] {
+                free[active[k][1]].push(active[k][2])
+                active[k] = active[active.length - 1]
+                active.pop();
+            }
+            else {
+                k += 1
+            }
+        }
+        let idx=0
+        if free[g].length >? 0 {
+            idx=free[g].pop()
+        }
+        else {
+            idx=counts[g]
+            counts[g] += 1
+        }
+        wasm_locals[v] = idx
+        active.push([last[v]  g  idx])
+    }
+    # (values never used still need a local of their type)
+    loop v in [f.nparams..nv) {
+        if last[v] <? 0 {
+            let g=wasm_group(vtype_of(v))
+            if counts[g] =? 0 {
+                counts[g] = 1
+            }
+            wasm_locals[v] = 0
+        }
+    }
+    let next=f.nparams
+    let base:array<int64>=[0  0  0]
+    let groups:array<[int64 int64]>=[]
+    loop g in [0..3) {
+        base[g] = next
+        next += counts[g]
+        if counts[g] >? 0 {
+            groups.push([counts[g]  wt([VI  VF  VS][g])])
+        }
+    }
+    loop v in [f.nparams..nv) {
+        wasm_locals[v] += base[wasm_group(vtype_of(v))]
+    }
+    fp_local=next
+    next += 1
+    groups.push([1  WT_I32])
+    # frame
+    slot_offs=[loop unused in [0..f.slot_size.length) 0]
+    wasm_slot_offsets=slot_offs.ptr
+    let slot_align=f.slot_align.ptr
+    let off=0
+    loop s in [0..f.slot_size.length) {
+        let al=WasmWord(slot_align[s])
+        off=wasm_align_up(off  al)
+        wasm_slot_offsets[s] = off
+        off += WasmWord(wasm_slot_sizes[s])
+    }
+    cur_frame=wasm_align_up(off  16)
+    max_frame=max(max_frame  cur_frame)
+    uleb(@wb  groups.length)
+    loop g in groups {
+        uleb(@wb  g[0])
+        wb.push(uint8((g[1]) & 255))
+    }
+    if cur_frame >? 0 {
+        # Never let a large frame or deep recursion overwrite globals/rodata.
+        op(0x23)
+        uleb(@wb  0)
+        i32c(wasm_align_up(data_base + wasm_data_size  16) + cur_frame)
+        op(0x49) # i32.lt_u: insufficient space before subtraction
+        op(0x04)
+        op(0x40)
+        op(0x00) # unreachable: resource exhaustion
+        op(0x0B)
+        op(0x23)
+        uleb(@wb  0) # global.get $sp
+        i32c(cur_frame)
+        op(0x6B) # i32.sub
+        op(0x22)
+        uleb(@wb  fp_local) # local.tee $fp
+        op(0x24)
+        uleb(@wb  0) # global.set $sp
+    }
+    loop ins in f.code {
+        emit_wins(ins)
+        if wasm_error not=? 0 {break}
+    }
+    op(0x0B)
+    let out=wb
+    wb=[]
+    out
+}
