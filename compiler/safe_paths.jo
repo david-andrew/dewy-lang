@@ -1031,8 +1031,10 @@ ut_visit = (n: int):
         ut_mark_local(int(nodes[n].sym), o, ut_m)
     ut_visit(int(nodes[n].a))
     ut_visit(int(nodes[n].b))
-    ut_visit(int(nodes[n].c))
-    ut_visit(int(nodes[n].d))
+    # (a checked loop's c and d are locals, a partial's d a function instance: not nodes)
+    if k != .for_:
+        ut_visit(int(nodes[n].c))
+        if k != .partial: ut_visit(int(nodes[n].d))
     loop i in [0..nkids(n)): ut_visit(kid(n, i))
     if k != .match_ and k != .fn_:
         loop i in [0..nkids2(n)): ut_visit(kid2(n, i))
