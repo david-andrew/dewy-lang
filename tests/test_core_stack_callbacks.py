@@ -124,7 +124,7 @@ def test_known_callback_ir(compiler, tmp_path):
 
     root = Path(__file__).resolve().parents[1]
     source = tmp_path / 'devirtualize.jo'
-    source.write_text(f"use '{root}/compiler/ir.jo'\nuse '{root}/compiler/opt.jo'\n" + '''
+    source.write_text(f"use '{root}/compiler/ir_types.dewy'\nuse '{root}/compiler/ir.jo'\nuse '{root}/compiler/opt.jo'\n" + '''
 ir_begin("known", 0)
 ir.vtypes = [i8(0), i8(0), i8(0), i8(0)]
 ir.args = [i32(1)]

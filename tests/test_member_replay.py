@@ -267,7 +267,8 @@ def test_member_replay_is_exercised(compiler, tmp_path):
 def test_member_lowering_rejects_nonliteral_ir_differences(compiler, tmp_path):
     source = tmp_path / 'lowering.jo'
     source.write_text(''.join(f"use '{ROOT / 'compiler' / (name + '.jo')}'\n"
-                              for name in ('member_lowering', 'member_replay', 'lower', 'ir', 'util')) + '''
+                              for name in ('member_lowering', 'member_replay', 'lower', 'ir', 'util'))
+                      + f"use '{ROOT / 'compiler/ir_types.dewy'}'\n" + '''
 part = (scope: int, word: int) -> MemberLowered:
     p = MemberLowered(start = ir.code.len(), regs = ir.vtypes.len(), slots = ir.slot_size.len(), zeros = lower_zeros.len(), scope = scope)
     literal = k_vreg_new(word)

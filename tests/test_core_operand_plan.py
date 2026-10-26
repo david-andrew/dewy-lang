@@ -9,7 +9,7 @@ from tests.support import ROOT, compiler
 @pytest.mark.core_quick
 def test_backend_operand_layouts_match_optimizer(compiler, tmp_path):
     source = tmp_path / 'operands.jo'
-    source.write_text(f"use '{ROOT / 'compiler/x64.jo'}'\nuse '{ROOT / 'compiler/ir.jo'}'\n" + '''
+    source.write_text(f"use '{ROOT / 'compiler/x64.jo'}'\nuse '{ROOT / 'compiler/ir_types.dewy'}'\nuse '{ROOT / 'compiler/ir.jo'}'\n" + '''
 loop tag in [0..int(Op.findb) + 1):
     loop indexed in [0..2):
         op = Op(tag)

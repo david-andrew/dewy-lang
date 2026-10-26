@@ -90,6 +90,7 @@ are grouped. See the ownership sections for the live service contracts.
 | `refine_resolve`, `refine_resolve_host` | Same stems + `.jo` | Dewy recursive terms/predicates, typed semantic requests | Demand traversal and existing budgets; resolver increment ≤0.072%, state+resolver peak phase +0.234%. |
 | `evaluator_state` | `evaluator_state.jo` | Dewy immutable value, frame, place and scalar-result layouts | Stable IDs/ABI; Jo writers share storage; peak flagship phase +0.0001%. |
 | `constant_eval`, `constant_host`, `source_types` | Same stems + `.jo` | Dewy recursive constant-expression evaluation and borrowed source dialects | O(executed syntax + demanded checking/binding); local scalar operations; peak flagship phase +0.103% including layouts. |
+| `ir_types` | `ir_types.jo` | Dewy opcode and instruction/function/use-plan layouts | 107 ordinals, 30 fields; direct Jo consumers, no adapters; flagship phase change −0.0037% to +0.0030%. |
 
 ### Boundary lessons that constrain the next cutover
 
@@ -237,6 +238,69 @@ field reads avoid those copied-record and per-scalar-call costs. Measure the
 coarse cutover before extending it; a service is not permission to reintroduce
 those adapters. Every new leaf and service layout has a frozen Jo twin and
 independent differential coverage, then bootstrap and fixed-point validation.
+
+## Route beyond the checker
+
+Planning baseline: `3449ea6a1`; physical lines including comments/blanks, excluding
+frozen twins and `dewy_reader_seed.jo`. Counts describe migration scope, not
+progress. Compiler remainder: 100,194 Jo lines; library: 50,922 in 98 files.
+
+| Remaining subsystem | Jo lines / scope | Dependencies, exposure and boundary risk |
+|---|---|---|
+| Checker and evaluation | 30,711: `check`, `expr`, `types`, `refine`, `check_constant`, `comptime`, `math_comptime`, decimal/float/unit/temperature rules, juxtaposition, Dewy methods/nodes, places/methods/split, poly closures, sibling types, reflection, prelude | Recursive checker/AST/name/source arenas and lazy reader; hot per expression. High: callbacks can reenter and grow arenas; checked evaluator adapter already failed. |
+| Facts/effects and safety | 19,082: `facts`, `effects`, `effect_library`, definite, deadlock, concurrency, isolation, ownership, safe paths, secrets, partition, proofs, witness, string domains, warn-if, pcheck, member replay | Checked bodies/types, refinement and call graph. Hot repeated walks; high: per-node adapters or copied fact dictionaries exceed budget. Coordinate edits before choosing these files. |
+| Lowering, IR and generated runtime | 12,240: `lower`, `ir`, `arena`, `math_lower`, `member_lowering`, `parallel_lower`, `draw_context`, `oom`, `ffi` | Checker, safety results, target settings and IR; hot every emitted instruction. High for builder calls; low for shared layouts. Move recursive lowering groups with their scratch state. |
+| Optimizer | 8,333: `opt`, `inline`, `loops`, `fused`, `exact`, `exact_guards`, `exact_loop`, `growth`, `copies`, `callback_specialize`, `loop_ordered`, `scanloops` | IR plus some checker/type and lowering metadata. Hot per instruction/pass; high if operands become callbacks. Cut complete function passes, borrowing code/args and indexed tables. |
+| x64 | 4,568: `x64`, `x64_ordered` | IR, lowering symbols, types, object output; also exports shared native analysis. Very hot instruction selection and register allocation; high: isolate shared analysis before moving emitters. |
+| arm64 | 1,594: `arm64` | IR, x64 shared analysis, lowering and ELF. Hot emission; medium/high: borrow allocator/relocation state once per function. |
+| wasm | 1,119: `wasm` | IR, lowering/checker symbols, x64 shared state, LEB128 and packaging leaves. Hot instruction encoding; medium: whole-function encoder, not per-byte host requests. |
+| GPU | 4,064: `glsl`, `msl`, `spirv` | Checked AST/types, lowered functions and target libraries. Workload-specific hot paths; high if AST lookup becomes a service. |
+| Object/debug writers | 2,835: ELF, Mach-O, PE, DWARF, PDB | Backend code/relocations, names and source positions. Bulk bytes plus per-instruction debug rows; medium: borrow output buffers and line tables. |
+| Frontends and parser hosts | 5,919: AST, Jo lex/parse/scan, frontend, Dewy context/direct/directives/fast/FFI/fmt/reader services, lazy bodies, directives | Source/module loading, shared nodes and Dewy reader. Jo parser remains needed for unmigrated modules and bootstrap. High for byte cuts; cold directive services can move together. |
+| Driver and tools | 9,729: main, settings, util, errors, icount, fmt, ide, lsp, pkg, repl, watch, new, par | All phases, OS/process/files, source management and editor protocols. Mostly cold orchestration; medium for source/name helpers and diagnostic formatting. |
+| Runtime/library | 50,922: recursive `lib/**/*.jo` (core/std/game and top-level libraries/templates) | OS/FFI, allocator, strings/arrays/maps, tasks and graphics. Compiler-used core/std first; other libraries are separate from compiler-source completion. High for allocation/refcount/byte primitives; port whole operations preserving unchecked host byte semantics. |
+
+Order: establish the backend-independent IR boundary, move complete IR passes,
+then shared backend analysis and whole-function emitters (wasm, arm64, x64),
+followed by object/debug writers. In parallel in the work queue, move checker
+recursive groups and safety passes with their state; lowering follows their
+stable borrowed records. Finish source/module services, driver/tool entry points
+and compiler-used runtime/library modules. GPU and other library ports can follow
+without blocking a compiler built from Dewy sources. Retain a Jo compatibility
+frontend only if still required for user/library inputs; it can itself be Dewy.
+The checked evaluator joins its checker owners rather than retrying the rejected
+borrowed-context adapter unchanged.
+
+First three cutovers in this sequence (cost estimates unless marked shipped):
+
+1. **IR schema (shipped):** `Op`, `Ins`, `IrFn`, `IrUsePlan` into `ir_types.dewy` with
+   a frozen twin. Keep globals, constants, builders and all hot consumers in
+   place. No algorithm or new traversal; measured phase cost −0.0037% to +0.0030%,
+   with ordinal/layout/default and mutation differential tests.
+2. **Final-IR operand description:** move the opcode layout-table construction
+   and its constants as one leaf, keeping direct indexed consumption in Jo.
+   O(opcodes) once per compiler process, no per-instruction callback; expected
+   <0.1% per phase. Exhaustively compare every opcode and exceptional operand
+   form against the existing operand walker before extending consumers.
+3. **IR cleanup pass:** move the mutually dependent `opt.jo` rewrite/cleanup
+   group with its indexed scratch tables and borrowed `IrFn`; expose coarse
+   type/diagnostic requests only where demanded. Preserve existing pass order
+   and traversal complexity, no extra scan. Budget ±0.3% per flagship phase;
+   arithmetic checks, array COW and lost inlining are the main uncertainties.
+   Measure the whole group before committing to a wider optimizer migration.
+
+All three retain the ±0.3% limit on *each* flagship phase row. Schema migration
+unblocks direct Dewy IR consumers but does not claim the lowering/optimizer code
+has moved. Do not use aggregate speed to hide a phase regression.
+
+No frozen twin is removable under the current C → Jo generation 1 → generation 2
+chain: both source builds deliberately select all reachable twins. Once a trusted
+Dewy-capable bootstrap replaces that dependency (or the C seed reads these Dewy
+sources), pure leaves, shared layouts and then recursive reader/resolver/constant
+leaves can lose their twins together with the corresponding `FROZEN_TWINS`
+entries. The special reader seed and frontend/context stubs retire with that
+chain. Preserve independent bootstrap and fixed-point checks; deleting twins
+alone is not self-hosting progress.
 
 ## Parser ownership boundary
 

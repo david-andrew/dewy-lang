@@ -12,7 +12,7 @@ from tests.support import ROOT, compiler  # noqa: F401
                     reason='executes Linux x86-64 machine code')
 def test_padding_preserves_execution(compiler, tmp_path):
     source = tmp_path / 'padding.jo'
-    source.write_text(f"use '{ROOT / 'compiler/x64.jo'}'\nuse '{ROOT / 'compiler/ir.jo'}'\n" + '''
+    source.write_text(f"use '{ROOT / 'compiler/x64.jo'}'\nuse '{ROOT / 'compiler/ir_types.dewy'}'\nuse '{ROOT / 'compiler/ir.jo'}'\n" + '''
 fragments = [
     [0x48, 0xB8, 7, 0, 0, 0, 0, 0, 0, 0],
     [0x48, 0x89, 0xF8],

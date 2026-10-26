@@ -2,40 +2,8 @@
 # Integer vregs are always 64-bit; floats are f64 or f32. Aggregates live in frame slots
 # or on the heap and are handled through addresses.
 
+use 'ir_types.dewy'
 use 'util.jo'
-
-enum Op:
-    nop,
-    iconst, fconst, mov,
-    add, sub, mul, divs, divu, rems, remu, and_, or_, xor, shl, shrs, shru, neg, not_,
-    eq, ne, lts, les, gts, ges, ltu, leu, gtu, geu,
-    fadd, fsub, fmul, fdiv, fneg, fsqrt, fmin, fmax, ffloor, fceil, fabs, ftrunc,
-    feq, fne, flt, fle, fgt, fge,
-    sext8, sext16, sext32, zext8, zext16, zext32,
-    i2f, u2f, f2i, f2f, bits2f, f2bits,
-    load, store, slot, gaddr, daddr, faddr, copy, zero, memcpy, memset, zeroslots, vop,
-    call, calli, callc, syscall, intr,
-    block, loop, if_, else_, end, br, brif, ret, trap, select,
-    assume,           # a = vreg, imm = A_* fact (no code)
-    brtable,          # a = index, b = count, c = args start (depths), imm = default depth; index >= count (unsigned) -> default
-    # vectors (made by the loop vectorizer, x86-64 only); ty = VX or VY; lanes of one element
-    # kind (Ins.c for memory, Ins.imm otherwise): 0 f32, 1 f64, 2 i32, 3 i64
-    vld,              # dst = [a + b * element size + imm]; c>>8: f64 gather stride, b then a byte offset
-    vst,              # [a + dst * element size + imm] = b
-    vbin,             # dst = a op b, c: 0 add, 1 sub, 2 mul, 3 div, 4 min, 5 max, 6 and, 7 or, 8 xor
-                      # 9 sqrt(a); 10/11 ordered f64 fold a+b lanes / b lanes+a (ty=VF)
-    vsplat,           # dst = a (a scalar) in every lane
-    vzu,              # leave 256-bit code (vzeroupper)
-    mulhs             # dst = the high 64 bits of a * b, signed (division by a constant: x86-64 and arm64)
-    mulhu             # ... unsigned
-    memeq           # compare c bytes at a and b (bounded reads, x86-64 only)
-    checked_add, checked_sub, checked_mul # word result, c bit 0 unsigned, bit 5 native 32-bit; imm = overflow helper
-    overflow_add, overflow_sub, overflow_mul # bool: signed arithmetic overflow
-    rot32           # native unsigned 32-bit rotate left, b in 0..32
-    streq           # compare runtime strings a and b, including nil (x86-64 only)
-    findbyte        # dst = first offset of byte c in [a, a+b), or -1; imm=1 finds unequal bytes; bounded x86-64 reads
-    scanbytes       # bounded byte class search/count; imm low bits invert/count, upper bits rodata range descriptor + 1 (0: dynamic byte c)
-    findb           # dst = the first k in [b, c) whose byte a[k] is one of imm's four (packed, low byte first), or c (x86-64 only)
 
 const VI = 0
 const VF = 1
@@ -62,46 +30,6 @@ mem_scale = (ins: Ins) -> int: (int(ins.c) >> 8) & 3
 
 # facts for the optimizer (Op.assume)
 const A_RC1 = 1       # the array/string object a (if not null) has refcount 1
-
-struct Ins:
-    op: Op
-    ty: i32
-    dst: i32
-    a: i32
-    b: i32
-    c: i32
-    imm: int
-    pos: i32 = 0      # where in the source (an index into ir_positions; 0: not known)
-
-struct IrFn:
-    name: str
-    nparams: int
-    ret: int          # VI/VF/VS or -1 for none
-    vtypes: i8[]
-    slot_size: i32[]
-    slot_align: i32[]
-    code: Ins[]
-    args: i32[]
-    cabi: bool
-    noinline: bool    # (@noinline)
-    export_name: str
-    fn_index: int
-    raw_mem: bool     # dereferences raw pointers (disables type-based alias reasoning)
-    kval: int[]       # values of VK vregs (indexed by vreg; may be shorter than vtypes)
-    decl_pos: int     # the line of its declaration (an index into ir_positions; 0: none)
-    dbg_locals: int[] # (debug information: its parameters, then its other variables)
-
-# Final-IR use summaries: indexed by vreg, built only after the optimizer has
-# finished rewriting operands. Instruction operands remain in Ins and call
-# operands in IrFn.args; no duplicated operand arrays or stale optimizer cache.
-# All native backend consumers share the counts, intervals and allocation chain.
-struct IrUsePlan:
-    first: int = 1 << 60
-    last: int = -1
-    ndef: int = 0
-    nuse: int = 0
-    weight: int = 0
-    next_start: int = -1
 
 dbg_on = false        # debug information for debuggers: where variables are (sloppy build)
 rotate32_ok = true # x86-64 has the native 32-bit rotate selector
