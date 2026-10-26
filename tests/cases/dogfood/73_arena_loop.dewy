@@ -1,0 +1,102 @@
+# Fixed-step headless arena: two actors advance, fire projectiles, take
+# damage, and respawn. The log is deterministic so game rules can be replayed.
+
+Point:type = [x:int y:int]
+Actor:type = [name:string pos:Point health:int=3 score:int=0 cooldown:int=0]
+Shot:type = [owner:string pos:Point velocity:Point]
+Game:type = [actors:array<Actor length=2> shots:array<Shot>=[] tick:int=0]
+
+distance = (a:Point b:Point):>int => abs(a.x - b.x) + abs(a.y - b.y)
+
+move_toward = (at:Point goal:Point):>Point => {
+    if at.x <? goal.x return Point[at.x + 1 at.y]
+    if at.x >? goal.x return Point[at.x - 1 at.y]
+    if at.y <? goal.y return Point[at.x at.y + 1]
+    if at.y >? goal.y return Point[at.x at.y - 1]
+    at
+}
+
+aim = (source:Point to:Point):>Point => {
+    if abs(to.x - source.x) >=? abs(to.y - source.y) {
+        Point[if to.x >? source.x 1 else -1 0]
+    } else {
+        Point[0 if to.y >? source.y 1 else -1]
+    }
+}
+
+valid = (p:Point):>bool => 0 <=? p.x <? 9 and 0 <=? p.y <? 5
+
+step = (@g:Game):>void => {
+    g.tick += 1
+    # Actors move first. A tired actor waits a step between shots.
+    let a = g.actors[0]
+    let b = g.actors[1]
+    if distance(a.pos b.pos) >? 2 a.pos = move_toward(a.pos b.pos)
+    if distance(a.pos b.pos) >? 5 b.pos = move_toward(b.pos a.pos)
+    if a.cooldown >? 0 a.cooldown -= 1
+    if b.cooldown >? 0 b.cooldown -= 1
+    if a.cooldown =? 0 and distance(a.pos b.pos) <=? 4 {
+        g.shots.push(Shot[a.name a.pos aim(a.pos b.pos)])
+        a.cooldown = 3
+        printl"t{g.tick}: {a.name} fires"
+    }
+    if b.cooldown =? 0 and distance(b.pos a.pos) <=? 4 {
+        g.shots.push(Shot[b.name b.pos aim(b.pos a.pos)])
+        b.cooldown = 4
+        printl"t{g.tick}: {b.name} fires"
+    }
+    g.actors[0] = a
+    g.actors[1] = b
+
+    let flying:array<Shot> = []
+    loop shot in g.shots {
+        let moved = Point[shot.pos.x + shot.velocity.x shot.pos.y + shot.velocity.y]
+        if not valid(moved) continue
+        let hit = false
+        loop i in [0..g.actors.length) {
+            if g.actors[i].name not=? shot.owner and g.actors[i].pos =? moved {
+                g.actors[i].health -= 1
+                printl"t{g.tick}: {g.actors[i].name} hit, hp {g.actors[i].health}"
+                hit = true
+                if g.actors[i].health =? 0 {
+                    g.actors[i].health = 3
+                    g.actors[i].pos = if g.actors[i].name =? "red" Point[0 2] else Point[8 2]
+                    loop j in [0..g.actors.length) {
+                        if g.actors[j].name =? shot.owner g.actors[j].score += 1
+                    }
+                    printl"t{g.tick}: {g.actors[i].name} respawns"
+                }
+                break
+            }
+        }
+        if not hit flying.push(Shot[shot.owner moved shot.velocity])
+    }
+    g.shots = flying
+}
+
+render = (g:Game):>string => {
+    let board:array<array<string>> = [loop _ in [0..5) [loop _ in [0..9) "."]]
+    loop shot in g.shots {
+        if 0 <=? shot.pos.y <? board.length and 0 <=? shot.pos.x <? board[shot.pos.y].length {
+            board[shot.pos.y][shot.pos.x] = "*"
+        }
+    }
+    loop actor in g.actors {
+        if 0 <=? actor.pos.y <? board.length and 0 <=? actor.pos.x <? board[actor.pos.y].length {
+            board[actor.pos.y][actor.pos.x] = if actor.name =? "red" "R" else "B"
+        }
+    }
+    [loop row in board row.join("")].join("/")
+}
+
+main = () => {
+    let game = Game[[Actor["red" Point[0 2]] Actor["blue" Point[8 2]]]]
+    printl"start {render(game)}"
+    loop _ in [0..12) {
+        step(@game)
+        printl"t{game.tick}: {render(game)}"
+    }
+    loop actor in game.actors {
+        printl"{actor.name}: score {actor.score}, hp {actor.health}"
+    }
+}

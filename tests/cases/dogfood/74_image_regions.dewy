@@ -1,0 +1,82 @@
+# Analyze a binary image as a 2-D array. Count lit pixels by row, find
+# connected regions with flood fill, and report each region's bounding box.
+
+Point:type = [x:int y:int]
+Region:type = [area:int left:int top:int right:int bottom:int]
+
+pixel = (image:array<array<int>> p:Point):>int => {
+    let row = image.get(p.y) ?? []
+    row.get(p.x) ?? 0
+}
+
+image_from = (rows:array<string>):>array<array<int>> => [
+    loop text in rows [loop c in text.chars if c =? "#" 1 else 0]
+]
+
+show = (image:array<array<int>>):>void => {
+    loop row in image {
+        printl([loop value in row if value =? 1 "#" else "."].join(""))
+    }
+}
+
+regions = (image:array<array<int>>):>array<Region> => {
+    let seen:array<array<bool>> = [loop row in image [loop _ in row false]]
+    let found:array<Region> = []
+    loop y in [0..image.length) {
+        loop x in [0..image[y].length) {
+            if y >=? seen.length or x >=? seen[y].length continue
+            if image[y][x] =? 0 or seen[y][x] continue
+            let queue:array<Point> = [Point[x y]]
+            let at = 0
+            seen[y][x] = true
+            let box = Region[0 x y x y]
+            loop at <? queue.length {
+                let p = queue[at]
+                at += 1
+                box.area += 1
+                box.left = min(box.left p.x)
+                box.right = max(box.right p.x)
+                box.top = min(box.top p.y)
+                box.bottom = max(box.bottom p.y)
+                loop d in [Point[-1 0] Point[1 0] Point[0 -1] Point[0 1]] {
+                    let next = Point[p.x + d.x p.y + d.y]
+                    if pixel(image next) =? 0 continue
+                    if not (0 <=? next.y <? seen.length and 0 <=? next.x <? seen[next.y].length) continue
+                    if seen[next.y][next.x] continue
+                    seen[next.y][next.x] = true
+                    queue.push(next)
+                }
+            }
+            found.push(box)
+        }
+    }
+    found.sorted(key=(r:Region) => -r.area)
+}
+
+row_counts = (image:array<array<int>>):>array<int> =>
+    [loop row in image sum(row)]
+
+invert = (image:array<array<int>>):>array<array<int>> =>
+    [loop row in image [loop value in row 1 - value]]
+
+main = () => {
+    let image = image_from([
+        "##...#...."
+        ".#...#..##"
+        ".....#..#."
+        "..###...#."
+        "..#.....##"
+        ".......#.."
+    ])
+    printl"original:"
+    show(image)
+    printl"row counts: {row_counts(image)}"
+    let areas = regions(image)
+    printl"regions: {areas.length}"
+    loop i in 1.. and region in areas {
+        printl"  {i}: {region.area} pixels, ({region.left},{region.top})..({region.right},{region.bottom})"
+    }
+    let background = regions(invert(image))
+    printl"background regions: {background.length}"
+    if background.length >? 0 printl"largest background: {background[0].area} pixels"
+}

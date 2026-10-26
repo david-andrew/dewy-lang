@@ -1,0 +1,71 @@
+# A dispatch queue with arrival times, priorities, deadlines and one-second
+# execution slices. Cancellation and a late job appear in the fixed-step log.
+
+Task:type = [id:int name:string arrives:rational * Time
+             deadline:rational * Time work:rational * Time priority:int]
+Report:type = [completed:array<string> late:array<string> cancelled:array<string>]
+
+schedule = (tasks:array<Task> stop:rational * Time):>Report => {
+    let future = tasks
+    let ready:Heap<Task> = []
+    let complete:array<string> = []
+    let late:array<string> = []
+    let cancelled:array<string> = []
+    let now = 0s
+    loop now <? stop {
+        # A cancellation request arrives before the task is released.
+        if now =? 2s {
+            let kept:array<Task> = []
+            loop task in future {
+                if task.id =? 5 {
+                    cancelled.push(task.name)
+                    printl"{now}: cancelled {task.name}"
+                } else kept.push(task)
+            }
+            future = kept
+        }
+
+        let waiting:array<Task> = []
+        loop task in future {
+            if task.arrives <=? now {
+                ready.push(task -task.priority)
+                printl"{now}: ready {task.name} (p{task.priority})"
+            } else waiting.push(task)
+        }
+        future = waiting
+
+        if ready.length =? 0 {
+            printl"{now}: idle"
+        } else {
+            let task = ready.pop()
+            task.work -= 1s
+            printl"{now}: run {task.name}; {task.work} left"
+            if task.work >? 0s {
+                ready.push(task -task.priority)
+            } else {
+                let finished = now + 1s
+                complete.push(task.name)
+                if finished >? task.deadline {
+                    late.push(task.name)
+                    printl"{finished}: {task.name} missed deadline {task.deadline}"
+                } else printl"{finished}: {task.name} done on time"
+            }
+        }
+        now += 1s
+    }
+    Report[complete late cancelled]
+}
+
+main = () => {
+    let tasks = [
+        Task[1 "heartbeat" 0s 4s 1s 2]
+        Task[2 "urgent alert" 1s 3s 2s 5]
+        Task[3 "daily report" 0s 6s 3s 1]
+        Task[4 "sensor retry" 3s 6s 2s 3]
+        Task[5 "obsolete poll" 5s 9s 1s 4]
+    ]
+    let report = schedule(tasks 9s)
+    printl"completed: {report.completed.join(", ")}"
+    printl"late: {report.late.join(", ")}"
+    printl"cancelled: {report.cancelled.join(", ")}"
+}

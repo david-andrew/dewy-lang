@@ -1,0 +1,85 @@
+# A tiny document search engine. Index words with posting lists, answer AND
+# queries, score repeated terms, and keep a short result preview.
+
+Document:type = [id:int title:string body:string]
+Hit:type = [id:int title:string score:int preview:string]
+
+words = (text:string):>array<string> => {
+    let out:array<string> = []
+    let word = ""
+    loop c in text.lower().chars {
+        if c in? "abcdefghijklmnopqrstuvwxyz0123456789" {
+            word = "{word}{c}"
+        } else if word not=? "" {
+            out.push(word)
+            word = ""
+        }
+    }
+    if word not=? "" out.push(word)
+    out
+}
+
+Index:type = [
+    docs:dict<int Document> = []
+    postings:dict<string array<int>> = []
+    counts:dict<string int> = []
+
+    add = (doc:Document):>void => {
+        docs[doc.id] = doc
+        let seen:set<string> = set[]
+        loop word in words("{doc.title} {doc.body}") {
+            let key = "{doc.id}:{word}"
+            counts[key] = (counts.get(key) ?? 0) + 1
+            if word not in? seen {
+                let ids = postings.get(word) ?? []
+                ids.push(doc.id)
+                postings[word] = ids
+                seen.push(word)
+            }
+        }
+    }
+
+    search = (query:string):>array<Hit> => {
+        let terms = words(query)
+        if terms.is_empty return []
+        let first = postings.get(terms[0]) ?? []
+        let found:array<Hit> = []
+        loop id in first {
+            let score = 0
+            let matches = true
+            loop term in terms {
+                let count = counts.get("{id}:{term}") ?? 0
+                if count =? 0 matches = false
+                score += count
+            }
+            if matches {
+                let doc = docs.get(id)
+                if doc isnt? none {
+                    let preview = doc.body
+                    if preview.length >? 34 preview = "{preview[..34)}..."
+                    found.push(Hit[id doc.title score preview])
+                }
+            }
+        }
+        found.sorted(key=(h:Hit) => -h.score)
+    }
+]
+
+main = () => {
+    let index = Index[]
+    let library = [
+        Document[1 "The Moon Garden" "Moon flowers open when the garden gets dark."]
+        Document[2 "Garden Notes" "A garden needs water, sun, and patient hands."]
+        Document[3 "Night Sky" "The moon and stars brighten a dark night."]
+        Document[4 "Water Clock" "A clock can count time with drops of water."]
+        Document[5 "Darkroom" "A dark room turns light into a photograph."]
+    ]
+    loop doc in library index.add(doc)
+
+    printl"documents: {index.docs.length}, indexed words: {index.postings.length}"
+    loop query in ["garden" "moon dark" "water clock" "bright moon" "missing"] {
+        let hits = index.search(query)
+        printl"query '{query}': {hits.length} hit(s)"
+        loop h in hits printl"  #{h.id} {h.title} (score {h.score}) — {h.preview}"
+    }
+}

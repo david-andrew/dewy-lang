@@ -1,0 +1,72 @@
+# Weather stations exchange nested JSON packets. Build one packet, encode and
+# decode it, validate its readings, and reject a malformed incoming packet.
+
+Station:type = [id:string place:string elevation_m:int]
+Reading:type = [minute:int temp_tenths:int humidity:int good:bool]
+Packet:type = [version:int station:Station readings:array<Reading> labels:dict<string string>]
+
+Issue:type = [minute:int message:string]
+Summary:type = [good:int bad:int low:int high:int mean_tenths:int issues:array<Issue>]
+
+analyze = (packet:Packet):>Summary => {
+    let issues:array<Issue> = []
+    let count = 0
+    let bad = 0
+    let total = 0
+    let low = 10000
+    let high = -10000
+    let previous = -1
+    loop reading in packet.readings {
+        if reading.minute <=? previous issues.push(Issue[reading.minute "time is not increasing"])
+        if previous >=? 0 and reading.minute - previous >? 10 {
+            issues.push(Issue[reading.minute "gap of {reading.minute - previous} minutes"])
+        }
+        previous = reading.minute
+        if not reading.good or reading.humidity <? 0 or reading.humidity >? 100 {
+            bad += 1
+            continue
+        }
+        count += 1
+        total += reading.temp_tenths
+        low = min(low reading.temp_tenths)
+        high = max(high reading.temp_tenths)
+    }
+    Summary[count bad low high if count =? 0 0 else total // count issues]
+}
+
+temperature = (tenths:int):>string => {
+    let sign = if tenths <? 0 "-" else ""
+    let n = abs(tenths)
+    "{sign}{n // 10}.{n % 10} C"
+}
+
+main = () => {
+    let packet = Packet[
+        1
+        Station["WX-17" "north pier" 6]
+        [
+            Reading[0 183 62 true]
+            Reading[5 188 60 true]
+            Reading[10 190 58 true]
+            Reading[25 205 55 true]
+            Reading[30 211 108 true]
+            Reading[35 198 59 false]
+            Reading[40 194 61 true]
+        ]
+        ["sensor"->"roof" "owner"->"harbor"]
+    ]
+
+    let wire = to_json(packet 2)
+    let restored = from_json<Packet>(wire) or_throw
+    printl"station {restored.station.id} at {restored.station.place}"
+    printl"round-trip: {packet =? restored}"
+    printl"readings: {restored.readings.length}, labels: {restored.labels.length}"
+    let summary = analyze(restored)
+    printl"accepted {summary.good}, rejected {summary.bad}"
+    printl"range: {temperature(summary.low)} .. {temperature(summary.high)}"
+    printl"mean: {temperature(summary.mean_tenths)}"
+    loop issue in summary.issues printl"at {issue.minute}: {issue.message}"
+
+    let broken = from_json<Packet>(r'{"version": 1, "station": null}')
+    if broken is? error printl"incomplete packet: rejected"
+}
