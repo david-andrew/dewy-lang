@@ -50,24 +50,6 @@ a_encoder_binding = arm64_encoder_bind(&code)
 const A_V = 32
 a_saved: int[]              # callee-saved registers used here
 a_save_off = 0
-a_lits: (int, int)[]        # (position of an ldr, the bits it loads): float constants, put after the function
-
-# the function's float constants after its code (8 bytes each, a float's bits in the low 4), and
-# the ldr instructions reading them pointed at them
-a_put_lits = ():
-    if a_lits.len() == 0: return
-    if code.len() % 8 != 0: w32(0xD503201F)                       # (nop)
-    at: {int: int}
-    loop l in a_lits:
-        p = at.get(l.1) ?? -1
-        if p < 0:
-            p = code.len()
-            at[l.1] = p
-            w32(l.1 & 0xFFFFFFFF)
-            w32((l.1 >> 32) & 0xFFFFFFFF)
-        wr32(l.0, rd32(l.0) | ((((p - l.0) / 4) & 0x7FFFF) << 5))
-    a_lits = []
-
 a_kind = (r: int) -> int:        # 0 caller-saved, 1 argument register, 2 callee-saved
     n = r
     if r >= A_V: n = r - A_V

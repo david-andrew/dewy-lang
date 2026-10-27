@@ -230,3 +230,22 @@ a_patch_adrp = (p: int, text_addr: int, target: int):
     wr32(p, rd32(p) | (lo << 29) | (hi << 5))
     wr32(p + 4, rd32(p + 4) | ((target & 0xFFF) << 10))
 
+
+a_lits: (int, int)[]        # (position of an ldr, the bits it loads): float constants, put after the function
+
+# the function's float constants after its code (8 bytes each, a float's bits in the low 4), and
+# the ldr instructions reading them pointed at them
+a_put_lits = ():
+    if a_lits.len() == 0: return
+    if a_code[0].len() % 8 != 0: w32(0xD503201F)                       # (nop)
+    at: {int: int}
+    loop l in a_lits:
+        p = at.get(l.1) ?? -1
+        if p < 0:
+            p = a_code[0].len()
+            at[l.1] = p
+            w32(l.1 & 0xFFFFFFFF)
+            w32((l.1 >> 32) & 0xFFFFFFFF)
+        wr32(l.0, rd32(l.0) | ((((p - l.0) / 4) & 0x7FFFF) << 5))
+    a_lits = []
+

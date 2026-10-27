@@ -323,3 +323,25 @@ a_patch_adrp=(p:ArmWord text_addr:ArmWord target:ArmWord):>void=>$unsafe {
     wr32(p rd32(p) | (lo << 29) | (hi << 5))
     wr32(p + 4 rd32(p + 4) | ((target & 0xFFF) << 10))
 }
+
+# Pending literal loads belong to one function. The host records sites while
+# emitting; this operation owns deduplication, alignment, patching and reset.
+# Expected O(loads + unique words), with O(unique words) indexed scratch. No
+# byte view survives a write (which may grow or detach the output array).
+let a_lits:array<[int64 int64]>=[]
+a_put_lits=():>void=>$unsafe {
+    if a_lits.length =? 0 {return}
+    if a_code[0].length % 8 not=? 0 {w32(0xD503201F)}
+    let at:dict<int64 int64>=[]
+    loop l in a_lits {
+        let p:ArmWord=at.get(l[1]) ?? -1
+        if p <? 0 {
+            p=ArmWord(a_code[0].length)
+            at[l[1]]=p
+            w32(ArmWord(l[1]) & 0xFFFFFFFF)
+            w32((ArmWord(l[1]) >> 32) & 0xFFFFFFFF)
+        }
+        wr32(ArmWord(l[0]) ArmWord(rd32(ArmWord(l[0]))) | ((((p - ArmWord(l[0])) // 4) & 0x7FFFF) << 5))
+    }
+    a_lits=[]
+}
