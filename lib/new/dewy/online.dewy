@@ -32,7 +32,7 @@ tick = (state:Game pads:array<Pad>):>Game => {
         if (next.players[i].pos-next.coin).norm<?34.0 {
             next.players[i].score += 1
             next.taken += 1
-            next.coin = vec2(float32(100+int64(hash(next.taken*2)%1080)) float32(100+int64(hash(next.taken*2+1)%520)))
+            next.coin = vec2(float32(100+int64(hash(int(next.taken)*2)%1080)) float32(100+int64(hash(int(next.taken)*2+1)%520)))
             if next.players[i].score>=?WIN next.winner = i
         }
     }
@@ -43,7 +43,7 @@ tick = (state:Game pads:array<Pad>):>Game => {
 let Mode = [menu=0 online=1 practice=2]
 let mode = Mode.menu
 let session = netplay.session(Game[] @tick players=2 me=0)
-let friend = -1
+let friend:int64 = -1
 let practice = Game[]
 let spare:float64 = 0.0
 let status = ""
@@ -69,14 +69,17 @@ leave = () => {
 game = ():>Game => if mode=?Mode.online session.state else practice
 me = ():>int64 => if mode=?Mode.online session.me else 0
 
+# Quantize movement to -1, 0 or 1; half steps round to even (zero).
+pad_axis = (v:float64):>int64 => if v>?0.5 1 else if v<?-0.5 -1 else 0
+
 my_pad = ():>Pad => {
     let axis = input_axis()
-    let pad = Pad[x=int64(round(float64(axis.x))) y=int64(round(float64(axis.y)))]
+    let pad = Pad[x=pad_axis(float64(axis.x)) y=pad_axis(float64(axis.y))]
     let mine = game().players.get(me())
     if mouse_down(Mouse.left) and mine isnt? none {
         let d = mouse_pos()-mine.pos
-        if abs(d.x)>?8.0 pad.x = int64(sign(float64(d.x)))
-        if abs(d.y)>?8.0 pad.y = int64(sign(float64(d.y)))
+        if abs(d.x)>?8.0 pad.x = if d.x>?0.0 1 else -1
+        if abs(d.y)>?8.0 pad.y = if d.y>?0.0 1 else -1
     }
     return pad
 }
@@ -131,7 +134,7 @@ draw = () => {
         text_centered(if state.winner=?me() "You won" else "You lost" vec2(640 330) 72)
         text_centered("Leave to return to the menu" vec2(640 400) 24 gray(0.7))
     }
-    if mode=?Mode.online and session.waiting and session.silent(1-session.me)>?1.0 {
+    if mode=?Mode.online and session.waiting and session.silent(if session.me=?0 1 else 0)>?1.0 {
         text_centered("Waiting for your friend..." vec2(640 660) 24 gray(0.7))
     }
     if hud_button(Rect(1150 660 110 40) "Leave") leave()

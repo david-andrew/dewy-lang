@@ -1,0 +1,9 @@
+# modes: native native-release
+# A bounded int64 atomic increment is covered by the counter-progress axiom.
+main = () => {
+    let hits = atomic(0)
+    concurrent {
+        spawn { hits.add(1); }
+    }
+    printl(hits.load())
+}

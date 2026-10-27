@@ -3635,13 +3635,14 @@ $test
 save_reading = () => {
     reading=fresh()
     advance(@reading)
-    $expect reading.step.speaker=?"Mira" and reading.shown["mira"]=?"left"
+    $expect reading.step.speaker=?"Mira" and "mira" in? reading.shown and reading.shown["mira"]=?"left"
     on_quit()
 }
 $test
 load_reading = () => {
     $expect reading.step.speaker=?"Mira" and reading.step.text=?"You came! I wasn't sure you would."
-    $expect reading.shown["mira"]=?"left" and reading.background=?SCENES["square"]
+    $expect "mira" in? reading.shown and reading.shown["mira"]=?"left"
+    $expect "square" in? SCENES and reading.background=?SCENES["square"]
 }
 ''')
     env = {**os.environ, 'DISPLAY': '', 'WAYLAND_DISPLAY': '', 'DEWY_THREADS': '2',

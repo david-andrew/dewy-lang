@@ -3001,6 +3001,15 @@ fact_unit_erased = (from0: int, to0: int) -> bool:
     if types[to].kind == .quantity: to = prune(int(types[to].elem))
     from == to
 
+# A word cast into a payload-free enum only changes its representation type.
+# Evaluate the operand with its current facts; raw pointer and aggregate casts
+# remain opaque. No claim that an arbitrary integer names a declared variant.
+fact_enum_cast = (n: int) -> bool:
+    if nodes[n].kind != .cast or nodes[n].aux2 == 1: return false
+    from = representation_type(ntype(int(nodes[n].a)))
+    to = representation_type(ntype(n))
+    types[from].kind == .int_ and from != T_MATH_INT and types[to].kind == .enum_ and simple_enum(to)
+
 # Numeric conversions between floats and integers write nothing.
 fact_pure_conversion = (n: int) -> bool:
     aux = nodes[n].aux
@@ -6375,7 +6384,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
             else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and (nodes[n].op == i32(int(Tok.slash)) or nodes[n].op == i32(int(Tok.percent)) or fact_shift_obliged(n)): values.push(n)
         # (a closure writes only when called: fact_capture)
         else if k == .lambda and ownership_decls.len() == 0: pass
-        else if k == .lambda or k == .partial and fact_partial_opaque(n) or k == .fnref and fact_handle_opaque(n) or k == .map_lit or k == .cast or mask < 0: opaque_writes.push(n)
+        else if k == .lambda or k == .partial and fact_partial_opaque(n) or k == .fnref and fact_handle_opaque(n) or k == .map_lit or k == .cast and not fact_enum_cast(n) or mask < 0: opaque_writes.push(n)
         else if k == .str_lit and nodes[n].aux != 0: exposed_writes.push(n)
         if not summary and nd_mutable_signatures.len() != 0 and nd_mutable_handle(n): values.push(n)
     # (a fork closure's creation reads its captures: their definitions)
@@ -6802,6 +6811,9 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                 fact_add_projection(s, FactProjection(value, intern("denominator"), false, fact_constant(s, fraction.1)))
             return value
     if k == .block and has_flag(n, NF_COMPREHENSION) and nkids(n) > 1 and nodes[kid(n, 0)].kind == .vardecl: fact_comprehensions[kid(n, 1)] = int(nodes[kid(n, 0)].sym)
+    if k == .dotname and tkind(ntype(n)) == .enum_ and simple_enum(ntype(n)):
+        si = int(types[prune(ntype(n))].st)
+        return fact_constant(s, variants[int(structs[si].variants) + int(nodes[n].aux)].value, n)
     if k == .int_lit or k == .bool_lit:
         loop shared in fact_shared_literals:
             if shared.0 == n and fact_slot(s, shared.1) >= 0: return shared.1
@@ -7222,6 +7234,9 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             return fact_bitwise(s, n, op, a, b)
         if nodes[n].aux != 0 and not fact_pure_binary(n): fact_forget(s, n, .call)
         return fact_unmodeled(s, n, .unsupported)
+    if fact_enum_cast(n):
+        fact_capture(int(nodes[n].a), s)
+        return fact_fresh(s, ntype(n))
     if k == .conv:
         outer = fact_covered
         if nodes[n].aux == i32(int(CV.refinement)): fact_covered = fact_refinement_covers(n)
@@ -7253,6 +7268,9 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         b = fact_bound(s, a)
         from = fact_type(ntype(int(nodes[n].a)))
         to = fact_type(ntype(n))
+        if nodes[n].aux == i32(int(CV.int_)) and types[from].kind == .enum_ and simple_enum(from) and is_int(to):
+            if not b.wide and sa_fits(b.lo, to) and sa_fits(b.hi, to): return a
+            return fact_unmodeled(s, n, .unsupported)
         if nodes[n].aux == i32(int(CV.wrap_int)) or nodes[n].aux == i32(int(CV.saturate_int)):
             if not b.wide and from == to and (to == T_U64 or sa_fits(b.lo, to) and sa_fits(b.hi, to)): return a
             if not b.wide and to == T_U64 and from != T_U64 and b.lo >= 0:
@@ -7471,6 +7489,11 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             return 0
     if k == .call:
         if nodes[n].aux == 3:
+            # A payload-free enumeration is its ordinal, including in an
+            # explicit integer conversion. No payload expression executes.
+            if tkind(fact_type(ntype(n))) == .enum_ and simple_enum(fact_type(ntype(n))):
+                si = int(types[fact_type(ntype(n))].st)
+                return fact_constant(s, variants[int(structs[si].variants) + int(nodes[n].aux2)].value, n)
             payload = fact_capture(kid(n, 0), s)
             if ownership_decls.len() != 0: payload = fact_owner_value(kid(n, 0), payload, s)
             value = fact_new(s, FactBound(), FactTerm(type = ntype(n)))

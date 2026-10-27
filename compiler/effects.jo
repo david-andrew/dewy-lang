@@ -27,6 +27,7 @@ use 'lower.jo'
 use 'effect_library.jo'
 use 'node_store.dewy'
 use 'draw_context.jo'
+use 'exact.jo'
 
 struct EffectAtom:
     kind: EffectKind
@@ -781,7 +782,7 @@ effect_word_op = (op: Tok) -> bool:
 # box, custom lifecycle or managed field is never certified as a free copy.
 effect_plain = (t0: int, depth: int = 0) -> bool:
     t = representation_type(t0)
-    if effect_scalar(t) or effect_float(t): return true
+    if effect_scalar(t) or effect_float(t) or is_vec(t): return true
     if depth == 0:
         k = tkind(t)
         if k == .struct_ or k == .enum_ or k == .tuple or k == .fixed or k == .opt:
@@ -903,6 +904,7 @@ effect_caller_obligation = (n: int) -> bool:
 # or user spelling. -1 means unclassified. Bits are residual may-costs, not
 # authority to mutate the actual; place access is collected independently.
 effect_intrinsic_cost = (id: IN) -> int:
+    if fact_pure_intrinsic(id): return 0
     if id == .fixed_abs: return 0
     if id == .len or id == .arrcap or id == .sizeof or id == .alignof or id == .zeroed or id == .mul_hi: return 0
     if id == .hash: return 0 # resolved value hooks are separate call edges
@@ -1063,6 +1065,8 @@ effect_place_inventory = (n: int, depth: int = 0) -> bool:
     if effect_fixed_index(n): return effect_place_inventory(int(nodes[n].a), depth + 1)
     if k == .field:
         t = prune(ntype(int(nodes[n].a)))
+        # A swizzle accesses inline lanes of its vector, with no hooks or box.
+        if nodes[n].aux == -4 and is_vec(t): return effect_place_inventory(int(nodes[n].a), depth + 1)
         if types[t].kind != .struct_ or nodes[n].aux < 0: return false
         layout(t)
         fi = int(structs[int(types[t].st)].fields) + int(nodes[n].aux)
@@ -1110,6 +1114,8 @@ effect_route = (n: int, depth: int = 0) -> PlaceIdentity:
     if depth > 32: return PlaceIdentity(.local, 0, 0)
     k = nodes[n].kind
     if k == .addr or effect_fixed_index(n): return effect_route(int(nodes[n].a), depth + 1)
+    # A write of any lane conservatively writes the whole vector place.
+    if k == .field and nodes[n].aux == -4 and is_vec(ntype(int(nodes[n].a))): return effect_route(int(nodes[n].a), depth + 1)
     if k == .field and tkind(ntype(int(nodes[n].a))) == .struct_: return place_project(effect_route(int(nodes[n].a), depth + 1), int(nodes[n].name))
     if k == .ident and nodes[n].aux == i32(int(SK.local)) and int(locals[int(nodes[n].sym)].flags) & LF_ALIAS != 0:
         # (a binding narrowed by `is?` reads the optional's or union's own storage)
@@ -2219,6 +2225,30 @@ panic_device_literal = (n: int) -> bool:
         return true
     false
 
+# The accepted progress axiom also covers Atomic<int64>.add. A syntactically
+# bounded step needs no history. Otherwise only a stored, immutable scalar
+# parameter is admitted here: a load of the counter (including via a local)
+# could be geometric growth. Unknown steps keep the ordinary panic obligation.
+# This is an O(step-expression) query only at calls of the resolved primitive;
+# it creates no graph and never changes the checked implementation's trap.
+panic_atomic_progress = (n: int) -> bool:
+    if nkids(n) != 3 or nodes[n].aux != 0 or nodes[n].sym <= 0: return false
+    f = int(nodes[n].sym)
+    d = int(fns[f].decl)
+    if d == 0 or name_of(int(nodes[d].name)) != "add" or files[pos_file(nodes[d].pos)].path != lib_dir + "/std/thread.jo": return false
+    if fns[f].targs.len() != 1 or fns[f].targs[0] != T_INT: return false
+    if dir_value(dir_name_assumed_bounds, nodes[n].pos) == 1: return false
+    step = kid(n, 1)
+    literal = panic_literal(step)
+    if literal != 0: return true
+    if positive_bound(step, false) >= 0: return true
+    if exact_has_node(step): return false
+    step = fact_progress_strip(step)
+    if nodes[step].kind != .ident or nodes[step].aux != i32(int(SK.local)): return false
+    l = int(nodes[step].sym)
+    flags = int(locals[l].flags)
+    flags & (LF_PARAM | LF_VALUEPARAM) != 0 and flags & (LF_ASSIGNED | LF_MUTPARAM | LF_ALIAS | LF_BYREF | LF_ADDR | LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_EXPOSED) == 0
+
 # A program's `d[k]` (or `d[k] += 1`, `d.pop(k)`): the key's presence is its
 # obligation (facts.jo fact_map_check), proven, an error or its own check.
 panic_map_obligation = (n: int) -> bool:
@@ -2305,7 +2335,7 @@ panic_site = (f: int, n: int):
             return
         # (a call whose precondition is the caller's obligation, as a string
         # index or a divisor: proven, an error, or a check of the caller's own)
-        if nodes[n].sym > 0 and not (k == .call and (fact_string_call(n) >= 2 or fact_array_call(n) != 0 or fact_floor_call(n) != 0 or fact_divisors.has(n) or fact_power_call(n) or panic_format_literal(n) or panic_device_literal(n) or not panic_lib and (panic_map_obligation(n) or fact_range_call(n) or fact_nonempty_call(n)) or panic_literal_safe(n))): panic_edge(f, int(nodes[n].sym), n)
+        if nodes[n].sym > 0 and not (k == .call and (fact_string_call(n) >= 2 or fact_array_call(n) != 0 or fact_floor_call(n) != 0 or fact_divisors.has(n) or fact_power_call(n) or panic_format_literal(n) or panic_device_literal(n) or panic_atomic_progress(n) or not panic_lib and (panic_map_obligation(n) or fact_range_call(n) or fact_nonempty_call(n)) or panic_literal_safe(n))): panic_edge(f, int(nodes[n].sym), n)
     if k == .binary or k == .intrinsic:
         loop g in value_helper_calls(n): panic_edge(f, g, n)
 

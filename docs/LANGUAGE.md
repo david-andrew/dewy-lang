@@ -787,6 +787,9 @@ the check except under `$no_hidden_costs`.
 By default, the counter-progress axiom assumes additive updates of 64-bit
 counters and accumulators by a bounded machine-word amount cannot overflow.
 A bounded mathematical increment, such as `value and 65535`, also qualifies.
+`Atomic<int64>.add` also uses this axiom for literal or bounded increments and
+immutable scalar parameters. Loading the counter as its own increment still
+needs proof; `$no_assumed_bounds` keeps the atomic overflow obligation.
 It does not cover 32-bit or narrower storage, multiplication, or a wider exact
 increment. `$no_assumed_bounds` disables this axiom and the array-length bound
 (at most 2^56 bytes) in its scope, requiring ordinary proofs or explicitly
