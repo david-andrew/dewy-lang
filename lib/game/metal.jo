@@ -789,6 +789,8 @@ when TARGET == "macos":
     __vgp: __VgProg[] = [__VgProg()]
     __mg_depth_states: {int: *u8}
 
+    # These shaders and pipeline descriptors are generated internally. Driver
+    # rejection is an environment failure, not a caller precondition.
     # an MTLFunction from Metal source (entry point name)
     __mg_function = (src: str, name: str) -> *u8:
         pool = objc_autoreleasePoolPush()
@@ -796,11 +798,11 @@ when TARGET == "macos":
         lib = __mo_ppp(__mg_dev, __sel("newLibraryWithSource:options:error:"), __nsstr_tmp(src), null, (&err) as *u8)
         if lib == null:
             eprint(src)
-            panic("Metal: a shader did not compile: {__mg_err_text(err)}")
+            __environment_failure("Metal: a shader did not compile: {__mg_err_text(err)}")
         f = __oc_p(lib, __sel("newFunctionWithName:"), __nsstr(name))
         __mg_release(lib)
         objc_autoreleasePoolPop(pool)
-        if f == null: panic("Metal: no function {name} in a shader")
+        if f == null: __environment_failure("Metal: no function {name} in a shader")
         f
 
     # an NSString not kept (autoreleased in the caller's pool)
@@ -872,7 +874,7 @@ when TARGET == "macos":
         err: *u8 = null
         pl = __oc_pp(__mg_dev, __sel("newRenderPipelineStateWithDescriptor:error:"), d, (&err) as *u8)
         __mg_release(d)
-        if pl == null: panic("Metal: a pipeline could not be made: {__mg_err_text(err)}")
+        if pl == null: __environment_failure("Metal: a pipeline could not be made: {__mg_err_text(err)}")
         objc_autoreleasePoolPop(pool)
         __vgp[p].pipelines[key] = pl
         pl
@@ -1049,8 +1051,8 @@ when TARGET == "macos":
         pool = objc_autoreleasePoolPush()
         err: *u8 = null
         pl = __oc_pp(__mg_dev, __sel("newComputePipelineStateWithFunction:error:"), f, (&err) as *u8)
+        if pl == null: __environment_failure("Metal: a compute pipeline could not be made: {__mg_err_text(err)}")
         objc_autoreleasePoolPop(pool)
-        if pl == null: panic("Metal: a compute pipeline could not be made: {__mg_err_text(err)}")
         pl as int
 
     # run compute pipeline pl, its parameters the n bytes at p: over count ids (count2 0), a grid of
@@ -1117,8 +1119,8 @@ when TARGET == "macos":
         err: *u8 = null
         __mg_present_pl = __oc_pp(__mg_dev, __sel("newRenderPipelineStateWithDescriptor:error:"), d, (&err) as *u8)
         __mg_release(d)
+        if __mg_present_pl == null: __environment_failure("Metal: the present pipeline could not be made: {__mg_err_text(err)}")
         objc_autoreleasePoolPop(pool)
-        if __mg_present_pl == null: panic("Metal: the present pipeline could not be made: {__mg_err_text(err)}")
 
     # the window's layer (cocoa.jo puts it on the view)
     __mg_make_layer = () -> *u8:
