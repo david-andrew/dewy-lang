@@ -1,0 +1,102 @@
+use 'expr.jo'
+use 'lex.jo'
+use 'util.jo'
+use 'checker_tokens.dewy'
+use 'refinement_types.dewy'
+use 'ast.jo'
+use 'check.jo'
+use 'types.jo'
+use 'facts.jo'
+use 'ownership.jo'
+use 'refine.jo'
+# Demand-only summaries for small, closed Boolean expressions. The accepted
+# grammar has no calls, writes, indexing, narrowing or cleanup. Each cached
+# tree has at most 32 nodes; construction and instantiation are O(32 + params).
+# Leaves are parameter ordinals, never callee storage or caller syntax.
+struct FactPredicate:
+    op: Tok = .eof
+    parameter: int = -1
+    literal: int = 0
+    a: int = 0
+    b: int = 0
+    length: bool = false
+
+fact_predicate_nodes = [FactPredicate()]
+fact_predicates: {int: int} = {}
+
+fact_predicate_tree = (n: int, params: {int: int}, budget: mut int) -> int:
+    if n <= 0 or budget <= 0: return 0
+    budget -= 1
+    k = nodes[n].kind
+    if k == .block:
+        if nkids(n) == 0: return 0
+        scope = params
+        loop i in [0..nkids(n) - 1):
+            c = kid(n, i)
+            if budget <= 0 or nodes[c].kind != .vardecl or nodes[c].aux2 != 1 or nkids(c) != 0: return 0
+            budget -= 1
+            source = int(nodes[c].b)
+            if source <= 0 or nodes[source].kind != .ident or nodes[source].aux != i32(int(SK.local)) or not params.has(int(nodes[source].sym)): return 0
+            scope[int(nodes[c].sym)] = params[int(nodes[source].sym)]
+        return fact_predicate_tree(kid(n, nkids(n) - 1), scope, budget)
+    # Array length is an addr, widened to int by comparison checking.
+    if k == .conv and nodes[n].aux == i32(int(CV.int_)) and (ntype(n) == T_INT or ntype(n) == T_MATH_INT):
+        a = int(nodes[n].a)
+        if nodes[a].kind == .intrinsic and nodes[a].aux == i32(int(IN.len)): return fact_predicate_tree(a, params, budget)
+        return 0
+    if k == .return_ or k == .exprstmt: return fact_predicate_tree(int(nodes[n].a), params, budget)
+    term = FactPredicate()
+    if k == .ident and nodes[n].aux == i32(int(SK.local)):
+        if not params.has(int(nodes[n].sym)): return 0
+        term.parameter = params[int(nodes[n].sym)]
+    else if k == .int_lit or k == .bool_lit:
+        if fact_type(ntype(n)) == T_U64 or has_flag(n, NF_U64): return 0
+        term.literal = ref_encoded(nodes[n].ival, ntype(n))
+    else if k == .intrinsic and nodes[n].aux == i32(int(IN.len)) and nkids(n) == 1 and tkind(fact_type(ntype(kid(n, 0)))) == .array:
+        term.length = true
+        term.a = fact_predicate_tree(kid(n, 0), params, budget)
+        if term.a == 0: return 0
+    else if k == .not_:
+        term.op = .kw_not
+        term.a = fact_predicate_tree(int(nodes[n].a), params, budget)
+        if term.a == 0: return 0
+    else if k == .and_ or k == .or_ or k == .binary and nodes[n].aux == 0 and fact_comparison(nodes[n].op as Tok):
+        if k == .binary:
+            a = fact_type(ntype(int(nodes[n].a))); b = fact_type(ntype(int(nodes[n].b)))
+            if not is_int(a) or not is_int(b) or a == T_U64 or b == T_U64: return 0
+        term.op = if k == .and_: Tok.kw_and else if k == .or_: Tok.kw_or else: nodes[n].op as Tok
+        term.a = fact_predicate_tree(int(nodes[n].a), params, budget)
+        term.b = fact_predicate_tree(int(nodes[n].b), params, budget)
+        if term.a == 0 or term.b == 0: return 0
+    else: return 0
+    fact_predicate_nodes.push(term)
+    fact_predicate_nodes.len() - 1
+
+fact_predicate_summary = (f: int) -> int:
+    if ownership_fact_cleanup: return 0
+    if let known = fact_predicates.get(f): return known
+    if fns[f].state != 2: return 0
+    fact_predicates[f] = 0
+    if fns[f].body == 0 or fns[f].caps.len() != 0 or fns[f].kind == FK_INIT: return 0
+    params: {int: int} = {}
+    loop i in [0..fns[f].params.len()):
+        l = fns[f].params[i]
+        if int(locals[l].flags) & LF_MUTPARAM != 0: return 0
+        params[l] = i
+    start = fact_predicate_nodes.len()
+    budget = 32
+    root = fact_predicate_tree(int(fns[f].body), params, budget)
+    if root == 0: fact_predicate_nodes.truncate(start)
+    fact_predicates[f] = root
+    root
+
+fact_predicate_apply = (root: int, values: int[], s: mut FactState) -> int:
+    term = fact_predicate_nodes[root]
+    if term.parameter >= 0: return if term.parameter < values.len(): values[term.parameter] else: 0
+    if term.a == 0: return fact_constant(s, term.literal)
+    a = fact_predicate_apply(term.a, values, s)
+    if a == 0: return 0
+    if term.length: return fact_project(s, a, -1, false, T_INT)
+    b = if term.b == 0: 0 else: fact_predicate_apply(term.b, values, s)
+    if term.b != 0 and b == 0: return 0
+    fact_new(s, fact_domain(T_BOOL), FactTerm(term.op, a, b))

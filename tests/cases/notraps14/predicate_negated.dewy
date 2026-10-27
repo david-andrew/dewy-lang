@@ -1,0 +1,3 @@
+valid=(i:int xs:array<int>):>bool=>not (i <? 0 or i >=? xs.length)
+read=(i:int xs:array<int>):>int=>{let ok=valid(i xs); if ok xs[i] else 0}
+main=()=>printl(read(0 [13]) read(-1 [13]) read(1 [13]))

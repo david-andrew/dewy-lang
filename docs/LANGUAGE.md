@@ -4358,6 +4358,13 @@ An unproven obligation's error names the missing relation (`i <? xs.length`,
   position that cannot be negative can say so in its type
   (`pos:int64<(>=? 0)> = 0` in a record, `i:int64<0 <=? i and i <? xs.length>` as a parameter,
   which moves the proof to each caller).
+- A small Boolean helper can carry the same guard back to its caller:
+  `valid = (i:int xs:array<int>):>bool => 0 <=? i <? xs.length`, then
+  `if valid(i xs) xs[i] else 0`. This also works when its result is saved and
+  tested later. The compiler summarizes simple parameter comparisons, array
+  lengths, and `and`/`or`/`not`; calls, writes, captures, and narrowing conversions
+  inside the helper are not summarized. Facts describe the arguments as
+  evaluated, so changing an index or replacing an array still needs a new guard.
 - Take the missing case as a value: `xs.get(i) ?? fallback`, `d.get(k) ?? fallback`,
   and a function that cannot give a result returns an optional
   (`if xs.length =? 0 return none` before `xs[0]` and `xs.pop()`).

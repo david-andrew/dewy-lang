@@ -35,6 +35,7 @@ use 'directives.jo'
 use 'warn_if.jo'
 use 'string_domains.jo'
 use 'draw_context.jo'
+use 'predicate_facts.jo'
 use 'floats.jo'
 
 # One tombstone per invalidated route: the event that last replaced the
@@ -6477,6 +6478,8 @@ fact_slice_prepare = (f: int, summary: bool = false):
         else if k == .lambda: pass
         else if k == .call and fact_nd_call(n) != 0:
             loop arg in kids(n): values.push(arg)
+        else if k == .call and ntype(n) == T_BOOL and nodes[n].aux == 0 and nodes[n].sym > 0 and fact_predicate_summary(int(nodes[n].sym)) != 0:
+            loop arg in kids(n): values.push(arg)
         else if k == .call and fact_map_snapshot_call(n): values.push(kid(n, 0))
         # (a length-preserving call's length is its receiver's: `let ks = d.keys` then `ks.values`
         # needs ks's definition)
@@ -7696,6 +7699,11 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                 value = if kid(n, i) == 0: fact_constant(s, 0) else: values[i]
                 if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, name, false, value))
             return result
+        if ntype(n) == T_BOOL and nodes[n].aux == 0 and nodes[n].sym > 0:
+            predicate = fact_predicate_summary(int(nodes[n].sym))
+            if predicate != 0:
+                value = fact_predicate_apply(predicate, values, s)
+                if value != 0: return value
         if not fact_search_reads_only(n): fact_path_call_effects(n, s)
         floor = fact_floor_call(n)
         if floor != 0 and fact_type(ntype(n)) == T_U64: return fact_floor_unsigned(s, n, floor, values[0], values[1])
@@ -8240,6 +8248,8 @@ facts_finalize = ():
 fact_internal_policy = ""
 
 facts_reset = ():
+    fact_predicates = {}
+    fact_predicate_nodes = [FactPredicate()]
     fact_shared_literals = []
     fact_saving = false
     fact_constant_globals = {}
