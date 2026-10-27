@@ -16,7 +16,7 @@ from tests.support import compiler  # noqa: F401 (fixture)
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / 'tests/fixtures/selfhost'
 
-HINT = '`{...}` in a string holds an expression: write `\\{` and `\\}` for literal braces, or use a raw string `r"..."`'
+HINT = "`{...}` in a string holds an expression: write `\\{` and `\\}` for literal braces, or use a raw string `r'...'` when the text contains double quotes"
 OPEN = f'unterminated string: this `{{` starts a string interpolation that does not end ({HINT})'
 BLOCK = 'unterminated block comment: `#{` needs a matching `}#` (block comments nest)'
 

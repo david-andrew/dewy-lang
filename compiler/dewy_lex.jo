@@ -10,7 +10,7 @@ struct DewyLexer:
 
 DX_CLASSES: u8[]
 DX_LAZY: u8[]
-DX_BRACE_HINT = "`{{...}}` in a string holds an expression: write `\\{{` and `\\}}` for literal braces, or use a raw string `r\"...\"`"
+DX_BRACE_HINT = "`{{...}}` in a string holds an expression: write `\\{{` and `\\}}` for literal braces, or use a raw string `r'...'` when the text contains double quotes"
 
 dx_bytes = (source: str, start: int, stop: int) -> *u8:
     assert(0 <= start and start <= stop and stop <= len(source))

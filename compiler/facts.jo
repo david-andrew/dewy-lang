@@ -4063,6 +4063,10 @@ fact_name_insert = 0
 fact_name_reshape = 0
 fact_name_put_slice = 0
 fact_name_bcast = 0
+fact_single_bcast_call = (n: int) -> bool:
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) != 1: return false
+    d = int(fns[int(nodes[n].sym)].decl)
+    d != 0 and name_of(int(nodes[d].name)) == "__bcast" and files[pos_file(nodes[d].pos)].path == lib_dir + "/std/nd.jo"
 fact_name_reads: int[]
 fact_name_permutations: int[]
 fact_array_call = (n: int) -> int:
@@ -6497,7 +6501,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
             if nodes[n].aux == i32(int(IN.push)) and nkids(n) == 2 and tkind(fact_type(ntype(kid(n, 1)))) == .array: values.push(kid(n, 1))
             # (an integer comprehension's pushes join its element hull)
             if nodes[n].aux == i32(int(IN.push)) and nkids(n) == 2 and accumulators.has(fact_push_receiver(kid(n, 0))) and fact_scalar(ntype(kid(n, 1))) and is_int(ntype(kid(n, 1))): values.push(kid(n, 1))
-        else if k == .intrinsic and (nodes[n].aux == i32(int(IN.extend)) or nodes[n].aux == i32(int(IN.truncate)) or nodes[n].aux == i32(int(IN.resize))):
+        else if k == .intrinsic and (nodes[n].aux == i32(int(IN.extend)) or nodes[n].aux == i32(int(IN.truncate)) or nodes[n].aux == i32(int(IN.resize)) or nodes[n].aux == i32(int(IN.setlen))):
             values.push(kid(n, 0))
             values.push(kid(n, 1))
         else: fact_slice_push_children(values, n)
@@ -7341,6 +7345,17 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         return fact_new(s, FactBound(reason = .unsupported, witness = n))
     if k == .intrinsic:
         id = nodes[n].aux as IN
+        if id == .setlen:
+            size = fact_capture(kid(n, 1), s)
+            route = fact_route(kid(n, 0), s)
+            fresh = fact_new(s, FactBound(), FactTerm(type = ntype(kid(n, 0))))
+            # Only the compiler's private dotted output is known to have just
+            # been allocated and reserved. An arbitrary user call may detach
+            # a shared array and lose its spare capacity before this write.
+            if has_flag(n, NF_PRIVATE_SETLEN) and s.projections.len() < FACT_CAP:
+                fact_add_projection(s, FactProjection(fresh, -1, false, size))
+            fact_store_route(s, route, fresh, n, true)
+            return fact_fresh(s, ntype(n))
         if id == .lend:
             extra = fact_capture(kid(n, 1), s)
             base = fact_capture(kid(n, 0), s)
@@ -7549,6 +7564,15 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             if first >= 0 and values.len() == nkids(n): fact_step_check(n, s, values[first], values[first + 1], kid(n, first), kid(n, first + 1))
         # (a dictionary's or set's entry count is a length of its value)
         if fact_entry_count_call(n): return fact_project(s, values[0], -1, false, T_INT)
+        # __bcast([n]) returns n for every integer n. Use the evaluated
+        # argument's length and element facts, including values produced by a
+        # caller, rather than the syntax of the generated dotted expression.
+        if fact_single_bcast_call(n) and values.len() == 1 and values[0] != 0:
+            count = fact_project(s, values[0], -1, false, T_INT)
+            one = fact_constant(s, 1)
+            if fact_compare(s, .eq, count, one) == 1:
+                zero = fact_constant(s, 0)
+                return fact_project(s, values[0], zero, true, T_INT)
         if fact_same_length_call(n) and s.projections.len() < FACT_CAP:
             length = if values.len() == 1 and values[0] != 0: fact_project(s, values[0], -1, false, T_INT) else: fact_length_through(kid(n, 0), s, 0)
             if length != 0:

@@ -12444,7 +12444,9 @@ bc_loop_nd = (tmpl: int, arrs: str[], kinds: int[], pre: str, epre: str, pos: in
     if storage != 0: nodes[output].a = i32(type_node_of(storage, pos))
     stmts.push(output)
     stmts.push(bc_stmt(bc_method(bc_ident(out, pos), "reserve", [id("n")], pos), pos))
-    stmts.push(bc_stmt(bc_call("__set_len", [bc_ident(out, pos), id("n")], pos), pos))
+    setlen = bc_call("__set_len", [bc_ident(out, pos), id("n")], pos)
+    add_flag(setlen, NF_PRIVATE_SETLEN)
+    stmts.push(bc_stmt(setlen, pos))
     # (every operand has the result's size: element i of each is at i, one flat loop)
     fast = [bc_loop("{pre}i", id("n"), bc_body1(clone(tmpl), flat, pre, epre, out, false, pos), pos)]
     rowpre.push(bc_let("{pre}ob", bc_bin(.star, id("r"), id("in"), pos), pos))
@@ -12487,7 +12489,9 @@ bc_loop1 = (tmpl: int, arrs: str[], pre: str, epre: str, pos: int, storage: int 
     stmts.push(bc_stmt(bc_method(bc_ident(out, pos), "reserve", [bc_ident("{pre}n", pos)], pos), pos))
     # (room for every element is reserved, in an array of the loop's own: it has all its
     # elements from the start, zeros until written, and element i is written in step i)
-    stmts.push(bc_stmt(bc_call("__set_len", [bc_ident(out, pos), bc_ident("{pre}n", pos)], pos), pos))
+    setlen = bc_call("__set_len", [bc_ident(out, pos), bc_ident("{pre}n", pos)], pos)
+    add_flag(setlen, NF_PRIVATE_SETLEN)
+    stmts.push(bc_stmt(setlen, pos))
     # with every operand as long as the result (the usual case) element i of each is at i: a
     # loop the compiler can run several elements at a time; else operands are stretched
     all_one = 0

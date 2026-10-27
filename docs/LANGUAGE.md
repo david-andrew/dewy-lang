@@ -2578,7 +2578,9 @@ rationals, `.//` rounds down, and integer `.%` has the divisor's sign. Floating
 `//` and `%` have the same current limitations as their scalar forms.
 `f.(values other)` applies a function elementwise; scalar arguments are repeated.
 Array operands are evaluated once, left to right. CPU callbacks run in row-major
-order and may return managed values such as strings and arrays.
+order and may return managed values such as strings and arrays. With one array
+operand, the result has the same number of elements, which the checker can use
+to prove a following `reshape`.
 
 Shapes align at the last dimension. Equal dimensions match; a dimension of one
 stretches to the other operand's size, and missing leading dimensions behave as
