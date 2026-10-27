@@ -423,7 +423,25 @@ exact_prepare_node = (n: int, owner: int, store: bool):
     if exact_measure_on:
         if store: exact_measure_boundary(n, owner)
         else: exact_measure_visit(n, owner, false)
-    math = exact_operation(n)
+    # Classify only the relevant kind. This demanded walk already has k;
+    # unrelated nodes need neither arithmetic/type queries nor policy tests.
+    math = false
+    operator = false
+    cmp = false
+    conversion = false
+    policy = false
+    control = false
+    match k:
+        binary:
+            math = exact_operation(n)
+            operator = nodes[n].aux == 0 and exact_type(ntype(n), nodes[n].pos)
+            cmp = nodes[n].aux == 0 and ntype(n) == T_BOOL
+        unary, intrinsic: math = exact_operation(n)
+        conv:
+            conversion = (nodes[n].aux == i32(int(CV.int_)) or nodes[n].aux == i32(int(CV.none_))) and exact_type(ntype(n), nodes[n].pos)
+            policy = nodes[n].aux == i32(int(CV.wrap_int)) or nodes[n].aux == i32(int(CV.saturate_int)) or nodes[n].aux == i32(int(CV.int2float)) or ntype(n) == T_MATH_INT
+        if_, iflet, block, exprstmt, match_, arm, coalesce: control = true
+        else: pass
     if math and nodes[n].kind == .binary and (nodes[n].op == i32(int(Tok.shl)) or nodes[n].op == i32(int(Tok.starstar))):
         (known, count) = integer_constant(int(nodes[n].b))
         if count < 0 and not types[exact_representation(ntype(int(nodes[n].b)))].sign: known = false
@@ -432,11 +450,6 @@ exact_prepare_node = (n: int, owner: int, store: bool):
             exact_demands[owner] = true
             exact_count_nodes.push((n, owner))
             exact_marks[n] |= 128
-    operator = k == .binary and nodes[n].aux == 0 and exact_type(ntype(n), nodes[n].pos)
-    cmp = k == .binary and nodes[n].aux == 0 and ntype(n) == T_BOOL
-    conversion = k == .conv and (nodes[n].aux == i32(int(CV.int_)) or nodes[n].aux == i32(int(CV.none_))) and exact_type(ntype(n), nodes[n].pos)
-    policy = k == .conv and (nodes[n].aux == i32(int(CV.wrap_int)) or nodes[n].aux == i32(int(CV.saturate_int)) or nodes[n].aux == i32(int(CV.int2float)) or ntype(n) == T_MATH_INT)
-    control = k == .if_ or k == .iflet or k == .block or k == .exprstmt or k == .match_ or k == .arm or k == .coalesce
     previous_control = exact_control_head
     if k == .while_ or k == .for_:
         exact_control_values.push(int(nodes[n].a))

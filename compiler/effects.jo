@@ -131,6 +131,9 @@ effect_for_marks: {int: int[]} = {}
 # new keys); graph/exact rewrites invalidate them. Queries cost O(their sites).
 effect_ix_nodes = 0
 effect_ix_locals = 0
+effect_ix_writes: int[]
+effect_ix_uses: int[]
+effect_ix_built: int[] = [0, 0, 0]
 effect_ix_heads: int[][] = [[], [], []]
 effect_ix_tails: int[][] = [[], [], []]
 effect_ix_next: int[][] = [[], [], []]
@@ -573,30 +576,34 @@ effect_site_key = (kind: int, q: int) -> int:
     if p.root != .local: return 0
     p.declaration
 
-effect_index_build = ():
-    if effect_ix_nodes == nodes.len() and effect_ix_locals == locals.len(): return
-    # Finalized nodes do not change. Appended analysis/lowering nodes extend
-    # the index once, instead of rebuilding every earlier body's sites.
-    # O(new nodes + new keys), with ascending per-key chains maintained by tails.
+effect_index_build = (kind: int):
+    # Classify appended nodes once, but construct only the requested chain.
+    # Other kinds replay these sparse candidates, never the whole syntax tree.
+    # O(new nodes + demanded candidates + new keys); at most three chains.
     if effect_ix_nodes == 0:
         effect_ix_heads = [[], [], []]
         effect_ix_tails = [[], [], []]
         effect_ix_next = [[], [], []]
-    loop kind in [0..3):
-        limit = if kind == 2: fns.len() + 1 else: locals.len() + 1
-        if effect_ix_heads[kind].len() < limit:
-            effect_ix_heads[kind].resize(limit)
-            effect_ix_tails[kind].resize(limit)
-        effect_ix_next[kind].resize(nodes.len())
+        effect_ix_writes = []
+        effect_ix_uses = []
+        effect_ix_built = [0, 0, 0]
     loop q in [max(1, effect_ix_nodes)..nodes.len()):
         k = nodes[q].kind
-        if k == .vardecl or k == .assign:
-            effect_index_link(0, effect_site_key(0, q), q)
-            effect_index_link(1, effect_site_key(1, q), q)
-        else if k == .call or k == .fnref:
-            effect_index_link(2, effect_site_key(2, q), q)
+        if k == .vardecl or k == .assign: effect_ix_writes.push(q)
+        else if k == .call or k == .fnref: effect_ix_uses.push(q)
     effect_ix_nodes = nodes.len()
     effect_ix_locals = locals.len()
+    candidates = if kind == 2: effect_ix_uses else: effect_ix_writes
+    if effect_ix_built[kind] == candidates.len(): return
+    limit = if kind == 2: fns.len() + 1 else: locals.len() + 1
+    if effect_ix_heads[kind].len() < limit:
+        effect_ix_heads[kind].resize(limit)
+        effect_ix_tails[kind].resize(limit)
+    effect_ix_next[kind].resize(nodes.len())
+    loop i in [effect_ix_built[kind]..candidates.len()):
+        q = candidates[i]
+        effect_index_link(kind, effect_site_key(kind, q), q)
+    effect_ix_built[kind] = candidates.len()
 
 effect_index_link = (kind: int, key: int, q: int):
     if key <= 0: return
@@ -625,7 +632,7 @@ effect_sites = (kind: int, key: int) -> int[]:
             k = nodes[q].kind
             if (k == .vardecl or k == .assign) and effect_site_key(kind, q) == key: out.push(q)
         return out
-    effect_index_build()
+    effect_index_build(kind)
     q = if key < effect_ix_heads[kind].len(): effect_ix_heads[kind][key] else: 0
     loop q != 0:
         out.push(q)

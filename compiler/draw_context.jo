@@ -201,7 +201,7 @@ draw_context_begin = ():
     # function-value node. Its source position supplies an unknown caller;
     # do not infer exclusivity from user bodies alone. Reuse the final index,
     # visiting only the user functions' sites, O(indexed nodes + use sites).
-    effect_index_build()
+    effect_index_build(2)
     loop f in [1..m):
         if draw_library[f] or draw_root[f] != 0 or f >= effect_ix_heads[2].len(): continue
         n = effect_ix_heads[2][f]

@@ -6247,6 +6247,10 @@ fact_slice_prepare = (f: int, summary: bool = false):
     accumulators: {int: bool} = {}
     carried = false
     probe_only = false
+    # Preparation visits only exact owners. Gate its node indexes once per
+    # slice; unrelated bodies and summary slices have no exact value roots.
+    exact = not summary and exact_marks.len() > 0 and exact_owners.has(f)
+    representation = exact and f < exact_rep_owners.len() and exact_rep_owners[f]
     if summary or result_active: values.push(int(fns[f].body))
     if summary:
         loop l in fns[f].params:
@@ -6258,7 +6262,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
         if n == 0 or fact_mark_of(n) & FACT_MEMBER != 0: continue
         fact_mark_set(n, FACT_MEMBER)
         k = nodes[n].kind
-        if not summary and (fact_exact_demand(n) or n < exact_rep_demands.len() and exact_rep_demands[n]): values.push(n)
+        if exact and (fact_exact_demand(n) or representation and n < exact_rep_demands.len() and exact_rep_demands[n]): values.push(n)
         # (children visited in place, a, b, c then kids: no list per node)
         mask = isolation_children(k)
         if mask > 0:
