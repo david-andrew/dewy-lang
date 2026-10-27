@@ -30,7 +30,7 @@ carry = (@o:Field):>void => {
 }
 
 # Swap p and q when bit is 1, leave them when it is 0: the same work either way.
-swap = (@p:Field @q:Field bit:int64):>void => {
+swap = (@p:Field @q:Field bit:int64<i => i >=? 0 and i <=? 1>):>void => {
     let m = not (bit-1)
     loop i in [0..16) {
         let t = m and (p[i] xor q[i])

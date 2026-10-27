@@ -1,0 +1,4 @@
+#
+bounded=(k:int64<0 <=? k and k <? 63>):>int64=>1 << k
+explicit=(k:int64<0 <=? k and k <? 63>):>int64=>int64(1) << k
+main=()=>{printl(bounded(62) explicit(62))}

@@ -323,7 +323,7 @@ def test_core_debug_local_values(compiler, tmp_path):
 probe=():>int64=>{
 let result=Pair[20 21]
 result.right+=1
-let total=result.left+result.right
+let total:int64=result.left+result.right
 printl"{total}"
 return total
 }
@@ -4082,7 +4082,7 @@ conditional_runtime = () -> int:
 
 @pytest.mark.parametrize('source_text', [
     'divide=(a:float64 b:float64)=>a/b\nmain=():>void=>exit((if divide(3.0 2.0) =? 1.5 42 else 1))',
-    'BigInt:type=[value:int64]\n__truediv__=(a:BigInt b:BigInt)=>a.value//b.value\nmain=():>void=>exit(BigInt[84]/BigInt[2])',
+    'BigInt:type=[value:int64]\n__truediv__=(a:BigInt b:BigInt):>int64=>a.value//b.value\nmain=():>void=>exit(BigInt[84]/BigInt[2])',
 ], ids=['float', 'custom'])
 def test_core_division_without_exact_libraries(compiler, tmp_path, source_text):
     library = tmp_path / 'lib'

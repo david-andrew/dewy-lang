@@ -22,7 +22,8 @@ from p"bits.jo" import bits, frombits
 $runtime_checks
 values=(n:int64 x:int64):>array<int64>=>[loop i in [0..n) x+i%7]
 row=(a:NDArray<int64> b:NDArray<int64> c:NDArray<int64>):>array<int64>=>{
-    return max.(a .+ b .+ c .- 3 0).data
+    let result:NDArray<int64>=max.(a .+ b .+ c .- 3 0)
+    return result.data
 }
 rows=(n:int64 mode:int64):>int64=>{
     let ac=if mode=?1 or mode=?4 1 else n
@@ -98,7 +99,7 @@ negative_stride=(n:int64):>int64=>{
 main=(args:array<string>)=>{
     if args.length >? 2 and args[1]=?"overflow" {
         let edge=int64(to_int(args[2]) ?? 0)
-        printl(edge+1)
+        printl(int64(edge+1))
         return
     }
     loop n in [0..18) {

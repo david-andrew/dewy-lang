@@ -442,7 +442,7 @@ lx_vec_index = (code: Ins[], L: CLoop, checks: LCheck[], p: int, depth: int = 0)
 # the instructions a vector plan can take (outside the checks it drops)
 lx_vec_op = (op: Op) -> bool:
     match op:
-        block, end, nop, iconst, fconst, load, store, sext32, zext32, fneg, fsqrt, shl: true
+        block, end, nop, iconst, fconst, load, store, sext32, zext32, fneg, fsqrt, shl, shrs, shru: true
         add, sub, mul, and_, or_, xor, fadd, fsub, fmul, fdiv, fmin, fmax: true
         gts, lts, ges, les, select: true
         _: false
@@ -528,6 +528,14 @@ lx_vec_plan = (code: Ins[], L: CLoop, checks: LCheck[]) -> VPlan:
                 if let vk = kinds.get(v):
                     if vk != k and vk >= 0: return no
                 else if lx_defined_in(code, v, L.pl + 1, L.pe) or is_kv(v): return no
+            continue
+        if op == .shl or op == .shrs or op == .shru:
+            # Fixed qword shifts preserve the scalar bit semantics in each
+            # lane. Dynamic and out-of-word counts remain scalar.
+            count = int(ins.b)
+            if not is_kv(count) or kv_of(count) < 0 or kv_of(count) >= 64: return no
+            if (kinds.get(int(ins.a)) ?? -1) != 3 or not lx_within(code, d, L): return no
+            kinds[d] = 3
             continue
         if op == .sext32 or op == .zext32:
             # (keeps the low 32 bits: nothing to do in 32-bit lanes)
@@ -691,6 +699,13 @@ lx_vloop = (code: Ins[], L: CLoop, checks: LCheck[], plan: VPlan, bases: int[], 
         if op == .sext32 or op == .zext32:
             vmap[d] = vmap[int(ins.a)]
             kind[d] = 2
+            continue
+        if op == .shl or op == .shrs or op == .shru:
+            xa = lx_splat(pre, vmap, int(ins.a), 3, ty)
+            v = vreg(ty)
+            body.push(Ins(.vbin, i32(ty), i32(v), i32(xa), ins.b, i32(if op == .shl: 12 else if op == .shru: 13 else: 14), 3))
+            vmap[d] = v
+            kind[d] = 3
             continue
         if op == .fsqrt:
             k = if int(ins.ty) == VS: 0 else: 1

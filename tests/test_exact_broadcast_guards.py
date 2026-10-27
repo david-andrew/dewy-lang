@@ -46,7 +46,7 @@ def test_broadcast_rows_preserve_cancellation(compiler, tmp_path, release):
     source = tmp_path / 'rows.dewy'
     source.write_text(('''
 f=(m:array<int64 length=[4 4]> bias:array<int64> shift:array<int64> r:int64):>array<int64>=>{
-    let h=max.(m .+ bias[new ..] .+ shift[.. new] .- r 0)
+    let h:NDArray<int64>=max.(m .+ bias[new ..] .+ shift[.. new] .- r 0)
     return h.data
 }
 main=(args:array<string>)=>{

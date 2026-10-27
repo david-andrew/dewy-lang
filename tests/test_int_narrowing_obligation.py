@@ -38,7 +38,7 @@ def test_unguarded_rejected_bulletproof(compiler, tmp_path, form):
     before, body = FORMS[form]
     result = run(compiler, tmp_path, '$bulletproof\n' + before + MAIN + body + '}\n')
     # (unknown, or refuted: x - 10^13 is always negative)
-    message = 'does not fit uint64' if form == 'uint64' else 'for the conversion to '
+    message = 'for the conversion to '
     assert result.returncode != 0 and message in result.stderr, result.stdout + result.stderr
 
 

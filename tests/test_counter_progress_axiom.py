@@ -97,7 +97,8 @@ main=()=>{{let p=P(0 1);f(@p)}}
     normal = check(compiler, tmp_path, body)
     assert (normal.returncode == 0) == (kind == 'int64'), normal.stderr
     strict = check(compiler, tmp_path, '$no_assumed_bounds\n' + body)
-    assert strict.returncode != 0 and f'fits {kind}' in strict.stderr, strict.stderr
+    message = 'for the conversion to int64' if kind == 'int64' else f'fits {kind}'
+    assert strict.returncode != 0 and message in strict.stderr, strict.stderr
 
 
 def test_temporary_progress_does_not_follow_changed_index(compiler, tmp_path):

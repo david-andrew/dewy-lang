@@ -27,8 +27,8 @@ def test_group_joins_and_exports_results(compiler, tmp_path):
 work=(n:int64)=>n*2
 main=()=>{
  concurrent {let a=spawn work(21) let b=spawn work(20)}
- $runtime_assert(a is? int64 and a =? 42)
- $runtime_assert(b is? int64 and b =? 40)
+ $runtime_assert(a is? int and a =? 42)
+ $runtime_assert(b is? int and b =? 40)
 }
 ''')
 

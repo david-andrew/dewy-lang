@@ -31,7 +31,7 @@ sort=(@a:array<int64> @tmp:array<int64> threaded:bool):>void=>{
 }
 main=(args:array<string>):>void=>{
     let n=size_argument(args 262144)
-    let a=[loop i in [0..n) (i*1103515245+12345)%2147483648]
+    let a:array<int64>=[loop i in [0..n) (i*1103515245+12345)%2147483648]
     let tmp:array<int64>=[loop i in [0..n) 0 as int64]
     let start=clock()
     sort(@a @tmp args.length <=? 2)

@@ -15,6 +15,7 @@ use 'facts.jo'
 use 'refine.jo'
 use 'util.jo'
 use 'main.jo'
+use 'ownership.jo'
 use 'lex.jo'
 use 'exact.jo'
 use 'math_lower.jo'
@@ -238,6 +239,88 @@ exact_map_stores: {int: bool} = {}
 exm_scalars: int[]
 exm_broadcast = false
 exm_obligation = false
+exm_math_output = false
+exm_assignment = 0
+
+# Private generated arrays may carry their producer's bound into a later map.
+# The flag starts true at each allocation and every scalar fallback clears it.
+# Alias traversal accepts only unchanged, unexposed value bindings; the terminal
+# array itself is private generated storage. No property is cached by address.
+exm_produced_flags: {int: int} = {}
+exm_produced_widths: {int: int} = {}
+
+exm_fresh_array = (s: int):
+    init = int(nodes[s].b)
+    if init == 0 or nodes[init].kind != .array or nkids(init) != 0 or not has_flag(init, NF_BROADCAST): return
+    t = ntype(init)
+    if tkind(t) != .array or exact_representation(telem(t)) != T_MATH_INT: return
+    l = int(nodes[s].sym)
+    flag = vreg(VI); e_mov(flag, e_iconst(1))
+    exm_produced_flags[l] = flag
+    exm_produced_widths.remove(l)
+
+exm_producer = (node: int, bits: int) -> int:
+    n = node
+    loop depth in [0..32):
+        if nodes[n].kind == .block and nodes[n].aux != 0:
+            n = block_value(n)
+            continue
+        if nodes[n].kind == .call and (fact_library_call(n, "__array2") or fact_library_call(n, "__bcast_data") or fact_library_call(n, "__nd_new_axes") or fact_library_call(n, "__shape_value")):
+            n = kid(n, 0)
+            continue
+        if nodes[n].kind == .call and nodes[n].aux == 2 and is_nd(ntype(n)) and nkids(n) == 2:
+            d = int(structs[int(types[representation_type(ntype(n))].st)].decl)
+            if d == 0 or files[pos_file(nodes[d].pos)].path != lib_dir + "/std/nd.jo": return -1
+            n = kid(n, 0)
+            continue
+        if nodes[n].kind != .ident or nodes[n].aux != i32(int(SK.local)): return -1
+        l = int(nodes[n].sym)
+        if let width = exm_produced_widths.get(l):
+            if width <= bits: return exm_produced_flags.get(l) ?? -1
+            return -1
+        flags = int(locals[l].flags)
+        if flags & LF_HELDVIEW != 0: flags &= ~LF_BYREF
+        if flags & (LF_ASSIGNED | LF_MUTPARAM | LF_ADDR | LF_CAPTURE | LF_CAPTURED | LF_BYREF | LF_SHARED | LF_EXPOSED | LF_ALIAS) != 0: return -1
+        if l >= exact_initializers.len() or exact_initializers[l] == 0: return -1
+        n = exact_initializers[l]
+    -1
+
+# Scope exit still releases the array object and every shape owner. A proven
+# immediate-only payload has no element owners. The runtime producer flag is
+# tied to this immutable local value, not to an address that could be reused.
+exm_drop_local = (l: int) -> bool:
+    if exm_produced_widths.len() == 0 or ownership_type(int(locals[l].type)): return false
+    t = store_type(l)
+    matrix = false
+    if tkind(t) == .array:
+        if exact_representation(telem(t)) != T_MATH_INT: return false
+    else:
+        if not is_nd(t): return false
+        st = int(types[representation_type(t)].st)
+        d = int(structs[st].decl)
+        if d == 0 or files[pos_file(nodes[d].pos)].path != lib_dir + "/std/nd.jo": return false
+        layout(t)
+        first = int(structs[st].fields)
+        if structs[st].nfields != 2 or fields[first].offset != 0 or fields[first + 1].offset != 8 or tsize(t) != 16: return false
+        if tkind(int(fields[first].type)) != .array or exact_representation(telem(int(fields[first].type))) != T_MATH_INT or int(fields[first + 1].type) != mk_array(T_INT): return false
+        matrix = true
+    node = mk_ident_local(l, locals[l].pos)
+    flag = exm_producer(node, 63)
+    if flag < 0: return false
+    place = local_place(l, false)
+    iff(flag)
+    if matrix:
+        address = place_addr(place, t)
+        release(e_load(VI, address, 8, 8), mk_array(T_INT))
+        release(e_load(VI, address, 0, 8), mk_array(T_INT))
+    else: release(read_place(place, t), mk_array(T_INT))
+    els()
+    if place.mem: drop_at(place.v, t)
+    else: release(place.v, t)
+    endc()
+    if place.mem: e_zero(place.v, tsize(t))
+    else: e_mov(place.v, e_iconst(0))
+    true
 
 # Demand-created per-function censuses of immutable word-array parameters.
 # One scan on the first reached map, then one register read per map use.
@@ -286,7 +369,7 @@ exm_census = (l: int, node: int, bits: int) -> int:
     lop()
     address = e_bin(.add, VI, pointer, e_bin(.shl, VI, index, e_iconst(3)))
     value = e_load(VI, address, 24, 8)
-    magnitude = e_bin(.add, VI, value, e_iconst(1 << (bits - 1)))
+    magnitude = exm_magnitude(value, node, e_iconst(1 << (bits - 1)), bits)
     e_mov(combined, e_bin(.or_, VI, combined, magnitude))
     e_mov(index, e_addi(index, 1))
     brif_to(e_bin(.ltu, VI, index, length), ctl); endc(); endc(); endc()
@@ -294,16 +377,51 @@ exm_census = (l: int, node: int, bits: int) -> int:
     endc()
     combined
 
+# A tagged input must be immediate as well as inside the requested interval.
+# Put its tag above the accepted magnitude bits so the same OR census rejects it.
+exm_magnitude = (value: int, array: int, bias: int, bits: int) -> int:
+    if exact_representation(telem(ntype(array))) != T_MATH_INT: return e_bin(.add, VI, value, bias)
+    # Compare biased tagged words. A logical shift retains the outlier high
+    # bits and avoids synthesizing an arithmetic qword shift in the census.
+    shifted = e_bin(.shru, VI, e_bin(.add, VI, value, e_bin(.shl, VI, bias, e_iconst(1))), e_iconst(1))
+    e_bin(.or_, VI, shifted, e_bin(.shl, VI, math_tag(value), e_iconst(bits)))
+
+exm_element = (value: int, array: int) -> int:
+    if exact_representation(telem(ntype(array))) == T_MATH_INT: return math_untag(value)
+    value
+
+# Only generated fresh broadcast storage qualifies. Its slots start at zero,
+# are not exposed during the map, and each position is written exactly once.
+exm_store = (s: int) -> bool:
+    if not exact_map_active or not exm_math_output or s != exm_assignment: return false
+    target = int(nodes[s].a)
+    place = gen_place(target, true)
+    word = exm_tagged_word(int(nodes[s].b))
+    write_place(place, T_MATH_INT, word)
+    true
+
+exm_declaration = (s: int) -> bool:
+    if not exact_map_active: return false
+    l = int(nodes[s].sym)
+    if not exm_elements.contains(l): return false
+    value = gen_expr(int(nodes[s].b)).v
+    loop j in [0..exm_elements.len()):
+        if exm_elements[j] == l: e_mov(int(locals[l].vreg), value)
+    true
+
 exm_width = (n0: int, bits: int) -> int:
     if exact_has_store(n0) and not exact_proved(n0): exm_obligation = true; exact_map_stores[n0] = true
+    if nodes[n0].kind == .conv and nodes[n0].aux == i32(int(CV.int_)) and exact_representation(ntype(n0)) == T_INT and exact_representation(ntype(int(nodes[n0].a))) == T_MATH_INT:
+        exm_obligation = true; exact_map_stores[n0] = true
     n = exl_strip(n0)
-    if exact_representation(ntype(n)) != T_INT: return 10000
+    if exact_representation(ntype(n)) != T_INT and exact_representation(ntype(n)) != T_MATH_INT: return 10000
     k = nodes[n].kind
     if k == .int_lit: return exact_type_width(n) / 2
     if k == .ident:
         if nodes[n].aux != i32(int(SK.local)): return 10000
         l = int(nodes[n].sym)
         if exm_elements.contains(l): return bits
+        if exact_representation(ntype(n)) != T_INT and not math_proven_word(n): return 10000
         if int(locals[l].flags) & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_ALIAS | LF_ADDR | LF_BYREF | LF_MUTPARAM) != 0: return 10000
         if not exm_scalars.contains(n): exm_scalars.push(n)
         if exm_scalars.len() > 8: return 10000
@@ -318,6 +436,65 @@ exm_width = (n0: int, bits: int) -> int:
     if op == .star: return a + b
     if op == .amp or op == .pipe or op == .caret: return max(a, b)
     10000
+
+# The census proves this entire expression, including min/max call arguments.
+# Consume its internal words directly; the fallback keeps the tagged ABI.
+exm_word = (n0: int) -> int:
+    n = exl_strip(n0)
+    k = nodes[n].kind
+    if k == .int_lit: return e_iconst(nodes[n].ival)
+    if k == .ident and nodes[n].aux == i32(int(SK.local)):
+        l = int(nodes[n].sym)
+        loop j in [0..exm_elements.len()):
+            if exm_elements[j] == l: return exm_element(int(locals[l].vreg), exm_arrays[j])
+        return math_word_expr(n)
+    if k == .binary:
+        a = exm_word(int(nodes[n].a)); b = exm_word(int(nodes[n].b))
+        return e_bin(int_op(nodes[n].op as Tok, true), VI, a, b)
+    if k == .unary: return e_un(.neg, VI, exm_word(int(nodes[n].a)))
+    if k == .call:
+        a = exm_word(kid(n, 0)); b = exm_word(kid(n, 1))
+        maximum = fact_library_call(n, "max")
+        result = vreg(VI)
+        emit(.select, VI, result, e_bin(.gts, VI, a, b), (if maximum: a else: b), (if maximum: b else: a), 0)
+        return result
+    gen_expr(n).v
+
+# Carry the immediate's factor of two through linear arithmetic. The map's
+# census proves every intermediate fits the signed payload; multiplication
+# needs that factor on only one operand. No tagged value crosses the guard.
+exm_tagged_sources: {int: bool} = {}
+exm_tagged_source = (n0: int) -> bool:
+    n = exl_strip(n0)
+    if let found = exm_tagged_sources.get(n): return found
+    found = exm_find_tagged_source(n)
+    exm_tagged_sources[n] = found
+    found
+
+# Memoize syntax membership once per map; emitted stride versions share it.
+exm_find_tagged_source = (n: int) -> bool:
+    if nodes[n].kind == .ident and nodes[n].aux == i32(int(SK.local)):
+        l = int(nodes[n].sym)
+        loop j in [0..exm_elements.len()):
+            if exm_elements[j] == l: return exact_representation(telem(ntype(exm_arrays[j]))) == T_MATH_INT
+    if nodes[n].kind == .binary: return exm_tagged_source(int(nodes[n].a)) or exm_tagged_source(int(nodes[n].b))
+    if nodes[n].kind == .unary: return exm_tagged_source(int(nodes[n].a))
+    false
+
+exm_tagged_word = (n0: int) -> int:
+    n = exl_strip(n0)
+    if not exm_tagged_source(n): return e_bin(.shl, VI, exm_word(n), e_iconst(1))
+    k = nodes[n].kind
+    if k == .ident: return int(locals[int(nodes[n].sym)].vreg)
+    if k == .unary: return e_un(.neg, VI, exm_tagged_word(int(nodes[n].a)))
+    if k == .binary:
+        op = nodes[n].op as Tok
+        a = int(nodes[n].a); b = int(nodes[n].b)
+        if op == .star:
+            if exm_tagged_source(a): return e_bin(.mul, VI, exm_tagged_word(a), exm_word(b))
+            return e_bin(.mul, VI, exm_word(a), exm_tagged_word(b))
+        return e_bin(int_op(op, true), VI, exm_tagged_word(a), exm_tagged_word(b))
+    e_bin(.shl, VI, exm_word(n), e_iconst(1))
 
 # The range census already proved the arithmetic of this generated map. Make
 # at most four stride versions (all unit, or one splat among up to three inputs),
@@ -350,7 +527,10 @@ exm_stride_loop = (s: int, assignment: int, count: int, splat: int):
         if j == splat: continue
         address = e_bin(.add, VI, bases[j], e_bin(.shl, VI, ctr, e_iconst(3)))
         e_mov(int(locals[exm_elements[j]].vreg), e_load(VI, address, 24, 8))
+    mathematical = prune(int(locals[induction].type)) == T_MATH_INT
+    if mathematical: math_word_regs[induction] = ctr
     gen_stmt(assignment)
+    if mathematical: math_word_regs.remove(induction)
     e_mov(ctr, e_addi(ctr, 1))
     brif_to(e_bin(.lts, VI, ctr, count), ctl)
     endc()
@@ -364,9 +544,9 @@ exm_stride_loop = (s: int, assignment: int, count: int, splat: int):
 
 exm_stride_versions = (s: int, assignment: int, count: int) -> bool:
     induction = int(nodes[s].sym)
-    if exm_arrays.len() > 3 or exact_representation(int(locals[induction].type)) != T_INT or locals[induction].offset >= 0: return false
+    if exm_arrays.len() > 3 or not math_word_range(s) or not stable_loop_index(induction): return false
     loop l in exm_elements:
-        if locals[l].offset >= 0: return false
+        if locals[l].offset >= 0 and exact_representation(int(locals[l].type)) != T_MATH_INT: return false
     loop j in [0..exm_indices.len()):
         if exm_indices[j] == 0: continue
         loop k in [0..j):
@@ -399,9 +579,10 @@ exact_map_for = (s: int) -> bool:
     if nodes[it].kind != .range or has_flag(it, NF_STEP) or has_flag(it, NF_INCLUSIVE) or nodes[body].kind != .block: return false
     known, start = integer_constant(int(nodes[it].a))
     if not known or start != 0 or nodes[it].b == 0: return false
-    endnode = int(nodes[it].b)
+    endnode = exl_strip(int(nodes[it].b))
     if nodes[endnode].kind != .ident and nodes[endnode].kind != .int_lit: return false
-    exm_arrays = []; exm_elements = []; exm_indices = []; exm_steps = []; exm_scalars = []; exm_broadcast = false; exm_obligation = false; exact_map_stores = {}
+    exm_arrays = []; exm_elements = []; exm_indices = []; exm_steps = []; exm_scalars = []; exm_broadcast = false; exm_obligation = false; exact_map_stores = {}; exm_math_output = false; exm_assignment = 0
+    exm_tagged_sources = {}
     store = 0
     assignment = 0
     loop stmt in kids(body):
@@ -426,10 +607,10 @@ exact_map_for = (s: int) -> bool:
             continue
         if nodes[n].kind == .vardecl and nkids(n) == 0:
             value = int(nodes[n].b)
-            if value == 0 or nodes[value].kind != .index or nodes[value].aux != 0 or not has_flag(value, NF_INBOUNDS) or exact_representation(ntype(value)) != T_INT: return false
-            index = int(nodes[value].b); array = int(nodes[value].a)
+            if value == 0 or nodes[value].kind != .index or nodes[value].aux != 0 or not has_flag(value, NF_INBOUNDS) or not exl_word(ntype(value)): return false
+            index = exl_strip(int(nodes[value].b)); array = int(nodes[value].a)
             if nodes[index].kind != .ident or nodes[index].aux != i32(int(SK.local)) or nodes[array].kind != .ident or nodes[array].aux != i32(int(SK.local)): return false
-            if tkind(ntype(array)) != .array or exact_representation(telem(ntype(array))) != T_INT: return false
+            if tkind(ntype(array)) != .array or not exl_word(telem(ntype(array))): return false
             exm_arrays.push(array); exm_elements.push(int(nodes[n].sym))
             exm_indices.push(if nodes[index].sym == nodes[s].sym: 0 else: index)
             exm_steps.push(0)
@@ -439,7 +620,7 @@ exact_map_for = (s: int) -> bool:
             index = int(nodes[target].b); array = int(nodes[target].a)
             # Generated output positions are in bounds independently of the
             # element census. Their exact result therefore fits a word too.
-            if exact_has_store(index): exact_map_stores[index] = true
+            if exact_has_store(index) or (nodes[index].kind == .conv and nodes[index].aux == i32(int(CV.int_))): exact_map_stores[index] = true
             if nodes[array].kind != .ident or nodes[array].aux != i32(int(SK.local)): return false
             l = int(nodes[array].sym)
             if l >= exact_initializers.len(): return false
@@ -448,22 +629,36 @@ exact_map_for = (s: int) -> bool:
             if int(locals[l].flags) & (LF_CAPTURED | LF_SHARED | LF_ALIAS | LF_ADDR | LF_BYREF | LF_MUTPARAM) != 0: return false
             loop input in exm_arrays:
                 if nodes[input].sym == nodes[array].sym: return false
+            exm_math_output = exact_representation(ntype(target)) == T_MATH_INT
+            if exm_math_output and not has_flag(init, NF_BROADCAST): return false
             store = int(nodes[n].b)
             assignment = n
+            exm_assignment = n
         else: return false
     if store == 0 or exm_arrays.len() == 0 or exm_arrays.len() > 8: return false
+    loop l in exm_elements:
+        if locals[l].offset >= 0 and not exm_math_output: return false
     loop j in [0..exm_indices.len()):
         if exm_indices[j] != 0 and exm_steps[j] == 0: return false
     bits = 31
-    loop bits >= 2 and exm_width(store, bits) > 64: bits -= 1
-    if bits < 2 or not exm_broadcast or not exm_obligation: return false
+    limit_width = if exm_math_output: 63 else: 64
+    if exm_math_output:
+        tagged_input = false
+        loop input in exm_arrays:
+            if exact_representation(telem(ntype(input))) == T_MATH_INT: tagged_input = true
+        if not tagged_input: limit_width = 31
+    loop bits >= 2 and exm_width(store, bits) > limit_width: bits -= 1
+    if bits < 2 or not exm_broadcast or not (exm_obligation or exm_math_output): return false
+    output = if exm_math_output: int(nodes[int(nodes[int(nodes[assignment].a)].a)].sym) else: 0
+    output_flag = exm_produced_flags.get(output) ?? -1
+    if output_flag >= 0: exm_produced_widths[output] = exm_width(store, bits)
     # Adding the bias maps [-2^(bits-1), 2^(bits-1)) to [0, 2^bits).
     # Modular arithmetic is intentional in this guard: every outlier retains
     # a high bit, and OR cannot cancel it. The scan is itself SIMD-friendly.
     bias = e_iconst(1 << (bits - 1))
     limit = e_iconst(1 << bits)
     combined = vreg(VI); e_mov(combined, e_iconst(0))
-    loop node in exm_scalars: e_mov(combined, e_bin(.or_, VI, combined, e_bin(.add, VI, read_place(gen_place(node, false), T_INT), bias)))
+    loop node in exm_scalars: e_mov(combined, e_bin(.or_, VI, combined, e_bin(.add, VI, math_word_expr(node), bias)))
     count = math_count(endnode)
     bad = vreg(VI); e_mov(bad, e_iconst(0))
     scanned: (int, int, int)[]
@@ -477,9 +672,11 @@ exact_map_for = (s: int) -> bool:
             census = exm_census(parameter, node, bits)
             e_mov(bad, e_bin(.or_, VI, bad, e_bin(.geu, VI, census, limit)))
             continue
+        producer = exm_producer(node, bits)
         pointer = read_place(gen_place(node, false), ntype(node))
         start = if exm_indices[j] == 0: e_iconst(0) else: read_place(gen_place(exm_indices[j], false), T_INT)
         step = if exm_steps[j] == 0: e_iconst(1) else: read_place(gen_place(exm_steps[j], false), T_INT)
+        if producer >= 0: iff(e_bin(.eq, VI, producer, e_iconst(0)))
         duplicate = e_iconst(0)
         loop prior in scanned:
             same = e_bin(.and_, VI, e_bin(.eq, VI, pointer, prior.0), e_bin(.and_, VI, e_bin(.eq, VI, start, prior.1), e_bin(.eq, VI, step, prior.2)))
@@ -494,7 +691,7 @@ exact_map_for = (s: int) -> bool:
         base = e_bin(.add, VI, pointer, e_bin(.shl, VI, start, e_iconst(3)))
         iff(e_bin(.eq, VI, step, e_iconst(0)))
         value = e_load(VI, base, 24, 8)
-        e_mov(combined, e_bin(.or_, VI, combined, e_bin(.add, VI, value, bias)))
+        e_mov(combined, e_bin(.or_, VI, combined, exm_magnitude(value, node, bias, bits)))
         els()
         index = vreg(VI); e_mov(index, e_iconst(0))
         blk()
@@ -502,12 +699,13 @@ exact_map_for = (s: int) -> bool:
         lop()
         address = e_bin(.add, VI, base, e_bin(.shl, VI, index, e_iconst(3)))
         value = e_load(VI, address, 24, 8)
-        e_mov(combined, e_bin(.or_, VI, combined, e_bin(.add, VI, value, bias)))
+        e_mov(combined, e_bin(.or_, VI, combined, exm_magnitude(value, node, bias, bits)))
         e_mov(index, e_addi(index, 1))
         brif_to(e_bin(.ltu, VI, index, count), ctl); endc(); endc(); endc()
         els(); e_mov(bad, e_iconst(1)); endc(); endc()
         if scanned.len() > 0: endc()
         scanned.push((pointer, start, step))
+        if producer >= 0: endc()
     if ir.fn_index >= exact_map_functions.len(): exact_map_functions.resize(max(ir.fn_index + 1, lfuncs.len()))
     exact_map_functions[ir.fn_index] = true
     exm_emitting = true
@@ -526,6 +724,7 @@ exact_map_for = (s: int) -> bool:
     exact_map_active = false
     loop j in [0..versioned.len()): locals[versioned[j]].vreg = i32(old_regs[j])
     els()
+    if output_flag >= 0: e_mov(output_flag, e_iconst(0))
     gen_for(s)
     endc()
     exm_emitting = false

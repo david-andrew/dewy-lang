@@ -1,0 +1,11 @@
+#
+exercise=(a:int64 b:int64)=>{
+ let sum=a+b
+ let product=a*b
+ printl"{sum} {product} {sum-product} {product+sum}"
+}
+let inputs:array<int64>=[(-9223372036854775808) (-4611686018427387904) (-1) (0) (1) (4611686018427387904) (9223372036854775807)]
+loop x in inputs {
+ exercise(x 1)
+ exercise(x 3)
+}

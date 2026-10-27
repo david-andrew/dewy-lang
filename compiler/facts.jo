@@ -3008,7 +3008,7 @@ fact_enum_cast = (n: int) -> bool:
     if nodes[n].kind != .cast or nodes[n].aux2 == 1: return false
     from = representation_type(ntype(int(nodes[n].a)))
     to = representation_type(ntype(n))
-    types[from].kind == .int_ and from != T_MATH_INT and types[to].kind == .enum_ and simple_enum(to)
+    types[from].kind == .int_ and types[to].kind == .enum_ and simple_enum(to)
 
 # Numeric conversions between floats and integers write nothing.
 fact_pure_conversion = (n: int) -> bool:
@@ -3524,6 +3524,13 @@ fact_floor_unsigned = (s: mut FactState, n: int, kind: int, a: int, b: int) -> i
 # MIN); arithmetic bounds are converted before shifting or combining bits.
 fact_bitwise = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
     x = fact_bound(s, a); y = fact_bound(s, b)
+    # Shift counts use their numerical magnitude even when stored as uint64.
+    # Decode the interval engine's order-preserving unsigned coordinates only
+    # when both endpoints fit a nonnegative signed word.
+    if (op == .shl or op == .shr) and b != 0 and fact_type(fact_terms[b].type) == T_U64:
+        if y.wide or y.hi >= 0: return fact_unmodeled(s, n, .unsupported)
+        y.lo = y.lo xor FACT_MIN
+        y.hi = y.hi xor FACT_MIN
     # A finite nonnegative mask bounds even an arbitrarily wide exact operand.
     # Do not discard this proof just because the other side exceeded a word.
     if op == .amp and (x.wide or y.wide) and fact_type(ntype(n)) != T_U64:
@@ -3871,7 +3878,7 @@ fact_narrow_check = (n: int, s: mut FactState, value: int) -> bool:
     unsigned = fact_type(to) == T_U64
     if unsigned and hc != 1: hc = if fact_u64_capped(s, value): 1 else: -1
     # (a binding's covering set of written values: string_domains.jo)
-    proven = lc == 1 and hc == 1 or int_domain_proven.has(n) or exact_progress_math.has(n)
+    proven = lc == 1 and hc == 1 or int_domain_proven.has(n) or exact_progress_math.has(n) or exact_word_reads.has(n)
     if fact_speculating != 0: return proven
     if fact_probe_on:
         fact_probe_record(n, proven)
@@ -3895,6 +3902,7 @@ fact_narrow_check = (n: int, s: mut FactState, value: int) -> bool:
         if dir_defer(n, "{shown} does not fit {dt(ntype(n))}", true): return false
         wit_fail(nodes[n].pos, "{shown} does not fit {dt(ntype(n))}")
         return false
+    err_notes.push((-1, "help: widen the destination to `int`, state the domain as a refinement, or choose `overflow='wrap'|'saturate'`"))
     wit_unknown(n, fact_bound(s, value), "`{relation}` for the conversion to {dt(ntype(n))}", 0, relation, missing)
     false
 
@@ -4903,7 +4911,11 @@ fact_loop_header = (entry: mut FactState, back: FactState, old: FactState, at: i
             # (a mathematical int that entry and the backedge both hold
             # within int64 stays there, even when widened to the domain;
             # stability compares this representation too)
-            fact_bind(s, binding.place, fact_new(s, bound, FactTerm(type = fact_hull_type(t, source, v, predecessor, peer_value))))
+            # The header replaces the entry value just as a forgotten loop
+            # write does. Keep that diagnostic route through fixed-point
+            # iterations; representation demands must not erase its cause.
+            prior = if original >= 0: entry.bindings[original].value else: v
+            fact_rebind(s, binding.place, fact_new(s, bound, FactTerm(type = fact_hull_type(t, source, v, predecessor, peer_value))), at, prior)
     # A changing aggregate keeps the lengths and fields entry and backedge
     # share (an element write leaves its length); stability re-validates them.
     shape_steps = FACT_CAP
@@ -6246,7 +6258,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
         if n == 0 or fact_mark_of(n) & FACT_MEMBER != 0: continue
         fact_mark_set(n, FACT_MEMBER)
         k = nodes[n].kind
-        if not summary and fact_exact_demand(n): values.push(n)
+        if not summary and (fact_exact_demand(n) or n < exact_rep_demands.len() and exact_rep_demands[n]): values.push(n)
         # (children visited in place, a, b, c then kids: no list per node)
         mask = isolation_children(k)
         if mask > 0:
@@ -6756,7 +6768,10 @@ fact_scope_exit = (s: mut FactState, n: int, first: int):
 
 fact_capture = (n: int, s: mut FactState) -> int:
     marks = if n > 0 and n < exact_marks.len(): int(exact_marks[n]) else: 0
-    if marks & 67 == 0: return fact_capture_value(n, s)
+    if marks & 67 == 0:
+        value = fact_capture_value(n, s)
+        if n > 0 and fact_speculating == 0 and (fact_owner < exact_rep_owners.len() and exact_rep_owners[fact_owner]) and prune(ntype(n)) == T_MATH_INT: exact_value_fact(n, value, s)
+        return value
     if n > 0 and nodes[n].kind == .intrinsic and nodes[n].aux == i32(int(IN.fixed_abs)):
         value = fact_capture(kid(n, 0), s)
         b = fact_bound(s, value)
@@ -6777,7 +6792,7 @@ fact_capture = (n: int, s: mut FactState) -> int:
         return fact_new(s, fact_domain(ntype(n)), FactTerm(type = ntype(n)))
     if n > 0 and exact_has_store(n): return exact_fact_store(n, fact_capture(int(nodes[n].a), s), s)
     value = fact_capture_value(n, s)
-    if n > 0 and fact_speculating == 0 and exact_has_node(n): exact_value_fact(n, value, s)
+    if n > 0 and fact_speculating == 0 and (exact_has_node(n) or (fact_owner < exact_rep_owners.len() and exact_rep_owners[fact_owner]) and prune(ntype(n)) == T_MATH_INT): exact_value_fact(n, value, s)
     value
 
 fact_literal = (s: mut FactState, n: int) -> int:
@@ -7242,6 +7257,10 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         if nodes[n].aux == i32(int(CV.refinement)): fact_covered = fact_refinement_covers(n)
         a = fact_capture(int(nodes[n].a), s)
         fact_covered = outer
+        # Widening a signed word/exact word expression to int is the same
+        # mathematical value, even when its interval is unbounded. Reuse its
+        # value and provenance; unsigned coordinates still need decoding below.
+        if nodes[n].aux == i32(int(CV.int_)) and ntype(n) == T_MATH_INT and ntype(int(nodes[n].a)) == T_INT: return a
         if nodes[n].aux == i32(int(CV.opt)):
             if ownership_decls.len() != 0: a = fact_owner_value(int(nodes[n].a), a, s)
             value = fact_new(s, FactBound(), FactTerm(type = ntype(n)))
@@ -8036,6 +8055,13 @@ fact_progress_note = (assignment: int):
     if dir_scopes.len() > 0 and dir_value(dir_name_assumed_bounds, nodes[store].pos) == 1: return
     source = int(nodes[store].a)
     operation = fact_progress_strip(source)
+    # An inferred exact temporary is not a storage boundary. Recognize the
+    # same immutable update source at its eventual fixed-width assignment.
+    if mathematical and nodes[operation].kind == .ident and nodes[operation].aux == i32(int(SK.local)) and fact_progress_stable(target):
+        l = int(nodes[operation].sym)
+        if l > 0 and l < exact_initializers.len() and int(locals[l].flags) & (LF_ASSIGNED | LF_PARAM | LF_CAPTURE | LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_EXPOSED) == 0:
+            initial = exact_initializers[l]
+            if initial > 0: operation = fact_progress_strip(initial)
     if nodes[operation].kind != .binary or nodes[operation].aux != 0: return
     op = nodes[operation].op as Tok
     if op != .plus and op != .minus: return
@@ -8052,7 +8078,8 @@ fact_progress_note = (assignment: int):
     if mathematical:
         # A masked or otherwise bounded mathematical increment need not box
         # the fixed accumulator merely to add it. The axiom supplies the fit.
-        if not types[t].sign or positive_bound(increment, false) < 0: return
+        stored_word = not exact_has_node(increment) and is_int(it) and it != T_MATH_INT and types[it].bits <= 64
+        if not types[t].sign or not stored_word and positive_bound(increment, false) < 0: return
         exact_progress_math[store] = true
         exact_reserve(store)
         exact_marks[store] |= 64
@@ -8558,6 +8585,8 @@ array_len_expr: {int: int}      # array local A -> E when A := [x; E] and A is n
 # x and y always have the same value: literals, unchanging locals and + - * of those
 same_value = (x: int, y: int) -> bool:
     if x == 0 or y == 0 or nodes[x].kind != nodes[y].kind: return false
+    if nodes[x].kind == .conv:
+        return nodes[x].aux == nodes[y].aux and ntype(x) == ntype(y) and same_value(int(nodes[x].a), int(nodes[y].a))
     k = nodes[x].kind
     if k == .int_lit: return nodes[x].ival == nodes[y].ival
     if k == .ident:

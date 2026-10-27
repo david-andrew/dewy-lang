@@ -1,3 +1,4 @@
+use 'exact_reset_loop.jo'
 use 'ir_types.dewy'
 use 'checker_tokens.dewy'
 use 'refinement_types.dewy'
@@ -50,12 +51,19 @@ exact_candidate_nodes: int[]
 exact_candidate_next: int[]
 exact_demands: {int: bool} = {}
 exact_proof_demands: {int: bool} = {}
+exact_rep_demands: bool[]
+exact_rep_owners: bool[]
+exact_effect_owners: bool[]
+exact_local_widths: int[]
+exact_raw_values: u8[]
 exact_progress_math: {int: bool} = {}
+exact_word_reads: {int: bool} = {}
 exact_initializers: int[]
 exact_iteration_sources: int[]
 exact_progress_assignments: int[]
 exact_write_heads: int[]
 exact_write_values: int[]
+exact_write_plain: bool[]
 exact_write_targets: int[]
 exact_write_seen: int[]
 exact_write_controls: int[]
@@ -85,7 +93,7 @@ exact_decide = (n: int, proven: bool):
 exact_reserve = (n: int):
     if n >= exact_marks.len(): exact_marks.resize(max(n + 1, exact_marks.len() * 2 + 64))
 exact_mark = (n: int):
-    exact_reserve(n)
+    if n >= exact_marks.len(): exact_reserve(n)
     if exact_marks[n] & 1 == 0: exact_nodes.push(n)
     exact_marks[n] |= 1
 exact_unmark = (n: int):
@@ -100,6 +108,66 @@ exact_type = (t0: int, pos: int) -> bool:
     # Jo's implementation word remains a machine word. Narrow Jo integers
     # and every Dewy fixed-width integer have storage-only widths.
     dewy_at(pos) or types[t].bits < 64
+
+# Semantic int64 arithmetic returns int. A bounded expression can retain its
+# static-width computation behind the representation boundary until a consumer
+# needs a tagged value. Peeling this boundary never narrows the value.
+exact_math_operand = (n: int) -> int:
+    if ntype(n) != T_MATH_INT: return n
+    value = n
+    # A checked reveal/wrap pair changes visibility, never representation.
+    # The caller must already see int before looking through these wrappers.
+    loop nodes[value].kind == .conv and nodes[value].aux == i32(int(CV.none_)):
+        child = int(nodes[value].a)
+        if exact_representation(ntype(child)) != T_MATH_INT: break
+        value = child
+    if nodes[value].kind == .int_lit and (not has_flag(value, NF_U64) or nodes[value].ival >= 0):
+        word = nodes.len()
+        nodes.push(nodes[value])
+        nodes[word].type = i32(T_INT)
+        return word
+    if nodes[value].kind == .conv and nodes[value].aux == i32(int(CV.int_)):
+        a = int(nodes[value].a)
+        if ntype(a) == T_INT and exact_type(ntype(a), nodes[value].pos): return a
+    n
+
+# Distribute a demanded scalar conversion into selected value arms. This
+# preserves evaluation order and puts the fit check on the executed arm only.
+exact_narrow_control = (n: int, to: int) -> bool:
+    k = nodes[n].kind
+    if k == .block and nodes[n].aux != 0:
+        coerce(block_value(n), to)
+    else if k == .if_ or k == .iflet:
+        loop arm in [int(nodes[n].b), int(nodes[n].c)]:
+            if ntype(arm) != T_NEVER and not exact_narrow_control(arm, to): coerce(arm, to)
+    else if k == .match_:
+        loop arm in kids(n):
+            body = int(nodes[arm].b)
+            if ntype(body) != T_NEVER and not exact_narrow_control(body, to): coerce(body, to)
+    else: return false
+    nodes[n].type = i32(to)
+    true
+
+exact_word_formats: {int: bool} = {}
+
+exact_format_word = (n: int, writer: str, buffer: int, pos: int) -> bool:
+    if nodes[n].kind != .conv: return false
+    source = exact_math_operand(n)
+    if source == n: return false
+    # This runs before exact preparation. Source storage types are not yet
+    # arithmetic width facts; a positive remainder alone supplies its own bound.
+    if positive_modulus(source) <= 0: return false
+    decl = resolve_by_types(intern(writer), [buffer, T_MATH_INT], pos, true, true)
+    if writer == "__dewy_fmt":
+        if files[pos_file(nodes[decl].pos)].path != lib_dir + "/core/fmt.jo" or not fn_sig(decl).generic: return false
+        decl = resolve_by_types(intern("__fmt"), [buffer, T_MATH_INT], pos, true, true)
+    files[pos_file(nodes[decl].pos)].path == lib_dir + "/math_int.jo"
+
+exact_int_result = (n: int) -> int:
+    if ntype(n) != T_INT or not dewy_at(nodes[n].pos): return ntype(n)
+    wrap_conv(n, .int_, T_MATH_INT)
+    exact_note(int(nodes[n].a))
+    T_MATH_INT
 
 exact_operation = (n: int) -> bool:
     k = nodes[n].kind
@@ -124,6 +192,28 @@ exact_note = (n: int):
         exact_candidate_next.push(exact_candidate_heads[f])
         exact_candidate_heads[f] = exact_candidate_nodes.len()
 
+# The exact midpoint lo + floor((hi-lo)/2) is floor((lo+hi)/2),
+# hence remains a signed word even when the difference needs 65 bits.
+# Match only repeated plain local reads: no calls, aliases, or reordered effects.
+exact_midpoint = (n: int) -> (int, int):
+    empty = (0, 0)
+    if nodes[n].kind != .binary or nodes[n].aux != 0 or nodes[n].op != i32(int(Tok.plus)) or not dewy_at(nodes[n].pos): return empty
+    lo = int(nodes[n].a)
+    quotient = int(nodes[n].b)
+    if nodes[quotient].kind != .binary or nodes[quotient].aux != 0 or nodes[quotient].aux2 != -1 or nodes[quotient].op != i32(int(Tok.slash)): return empty
+    divisor = int(nodes[quotient].b)
+    if nodes[divisor].kind != .int_lit or nodes[divisor].ival != 2: return empty
+    difference = int(nodes[quotient].a)
+    if nodes[difference].kind != .binary or nodes[difference].aux != 0 or nodes[difference].op != i32(int(Tok.minus)): return empty
+    hi = int(nodes[difference].a)
+    repeated = int(nodes[difference].b)
+    loop value in [lo, hi, repeated]:
+        if nodes[value].kind != .ident or nodes[value].aux != i32(int(SK.local)) or ntype(value) != T_INT: return empty
+        fl = int(locals[int(nodes[value].sym)].flags)
+        if fl & (LF_MUTPARAM | LF_CAPTURE | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_EXPOSED) != 0: return empty
+    if nodes[lo].sym != nodes[repeated].sym: return empty
+    (lo, hi)
+
 # Context-free width facts are demanded only by a storage boundary. Cache one
 # signed width and a nonnegative bit per expression; 0 means not computed and
 # -1 means unknown. Each demanded edge is visited once: O(N+E) time/O(N) space.
@@ -134,7 +224,17 @@ exact_type_width = (n: int) -> int:
     t = exact_representation(ntype(n))
     result = -1
     k = nodes[n].kind
-    if k == .int_lit:
+    if exact_word_reads.has(n):
+        bound = exact_count_bound(int(nodes[n].a))
+        magnitude = max((if bound.lo < 0: -(bound.lo + 1) else: bound.lo), (if bound.hi < 0: -(bound.hi + 1) else: bound.hi))
+        bits = 1
+        loop shift in [32, 16, 8, 4, 2, 1]:
+            if magnitude >> shift != 0:
+                magnitude = magnitude >> shift
+                bits += shift
+        if magnitude != 0: bits += 1
+        result = bits * 2 + int(bound.lo >= 0)
+    else if k == .int_lit:
         value = nodes[n].ival
         if has_flag(n, NF_U64) and value < 0: result = 131
         else:
@@ -163,7 +263,15 @@ exact_type_width = (n: int) -> int:
             else if op == .pipe or op == .caret: result = max(a / 2, b / 2) * 2 + (a & b & 1)
         if op == .slash and a > 0:
             known, divisor = integer_constant(int(nodes[n].b))
-            if known and divisor != 0 and divisor != -1: result = (a / 2) * 2 + int(divisor > 0 and a & 1 != 0)
+            if known and divisor != 0 and divisor != -1:
+                bits = a / 2
+                # A positive divisor removes floor(log2(divisor)) magnitude
+                # bits, including the asymmetric negative signed endpoint.
+                if divisor > 1:
+                    loop divisor > 1:
+                        bits -= 1
+                        divisor = divisor >> 1
+                result = max(1, bits) * 2 + int(divisor > 0 and a & 1 != 0)
         if op == .percent and dewy_at(nodes[n].pos):
             known, divisor = integer_constant(int(nodes[n].b))
             if known and divisor > 0 and b > 0: result = b
@@ -183,6 +291,8 @@ exact_type_width = (n: int) -> int:
         if known and count >= 0 and count < 64:
             a = exact_type_width(int(nodes[n].a))
             if a > 0: result = max(1, a / 2 - count) * 2 + (a & 1)
+    midpoint = exact_midpoint(n)
+    if midpoint.0 != 0: result = 128
     exact_type_widths[n] = result
     result
 
@@ -220,6 +330,57 @@ exact_store = (n: int, owner: int):
     if n < exact_type_widths.len(): exact_type_widths[n] = 0
     if exact_measure_on: exact_measure_sites[n] = ExactMeasure(owner, t, "runtime-check")
 
+# After checking has seen every write, an immutable mathematical local with a
+# word-sized initializer can feed static exact arithmetic without a tagged
+# temporary. The conversion is a representation proof, not a fit obligation.
+exact_prepare_operand = (n: int) -> int:
+    word = exact_math_operand(n)
+    if word != n or prune(ntype(n)) != T_MATH_INT: return word
+    if nodes[n].kind != .ident or nodes[n].aux != i32(int(SK.local)): return n
+    bound = exact_count_bound(n)
+    if bound.wide: return n
+    word = mk(.conv, nodes[n].pos)
+    nodes[word].a = i32(n)
+    nodes[word].aux = i32(int(CV.int_))
+    nodes[word].type = i32(T_INT)
+    exact_word_reads[word] = true
+    word
+
+exact_prepare_math = (n: int) -> bool:
+    if nodes[n].kind != .call and nodes[n].kind != .binary: return false
+    if nodes[n].aux != 0 or prune(ntype(n)) != T_MATH_INT or not dewy_at(nodes[n].pos): return false
+    if nodes[n].kind == .call:
+        floor = fact_floor_call(n)
+        if floor < 1 or floor > 4: return false
+        a = exact_prepare_operand(kid(n, 0)); b = exact_prepare_operand(kid(n, 1))
+        if exact_representation(ntype(a)) != T_INT or exact_representation(ntype(b)) != T_INT: return false
+        nodes[n] = Node(kind = .binary, pos = nodes[n].pos, a = i32(a), b = i32(b), type = i32(T_INT), op = i32(int((if floor == 1: Tok.slash else if floor == 2: Tok.percent else if floor == 3: Tok.shr else: Tok.amp))), aux2 = -1, flags = i32(NF_CHECKED))
+        wrap_conv(n, .int_, T_MATH_INT)
+        return true
+    if nodes[n].kind != .binary: return false
+    op = nodes[n].op as Tok
+    right = int(nodes[n].b)
+    if op == .shl or op == .shr:
+        # Dynamic int64 shifts preserve unsigned count interpretation in a
+        # wrapper. A final nonnegative bound proves that wrapper is an identity.
+        count_type = exact_representation(ntype(right))
+        if nodes[right].kind == .conv and nodes[right].aux == i32(int(CV.wrap_int)) and is_int(count_type) and not types[count_type].sign and types[count_type].bits == 64:
+            source = int(nodes[right].a)
+            if exact_bounded_count(source): right = source
+        known, count = integer_constant(right)
+        if not known or count < 0 or count >= 1048576:
+            if not exact_bounded_count(right): return false
+    else if op != .plus and op != .minus and op != .star and op != .amp and op != .pipe and op != .caret: return false
+    a = exact_prepare_operand(int(nodes[n].a)); b = exact_prepare_operand(right)
+    if exact_representation(ntype(a)) != T_INT: return false
+    if exact_representation(ntype(b)) != T_INT:
+        # A bounded shift count keeps its original fixed storage width.
+        if op != .shl and op != .shr or not is_int(ntype(b)) or prune(ntype(b)) == T_MATH_INT: return false
+    nodes[n].a = i32(a); nodes[n].b = i32(b)
+    nodes[n].type = i32(T_INT)
+    wrap_conv(n, .int_, T_MATH_INT)
+    true
+
 # Children of arithmetic and value controls remain intermediates. Other
 # consumers take stored values (including call actuals and aggregate fields).
 exact_prepare_node = (n: int, owner: int, store: bool):
@@ -227,7 +388,7 @@ exact_prepare_node = (n: int, owner: int, store: bool):
     # Scalar leaves carry no arithmetic or writes. Strings may contain
     # interpolation expressions, so retain their ordinary child traversal.
     if (nodes[n].kind >= .int_lit and nodes[n].kind <= .ident) and nodes[n].kind != .str_lit: return
-    exact_reserve(n)
+    if n >= exact_marks.len(): exact_reserve(n)
     if exact_marks[n] & 4 != 0:
         if store: exact_store(n, owner)
         return
@@ -243,7 +404,20 @@ exact_prepare_node = (n: int, owner: int, store: bool):
         if kind != .binary and kind != .unary and kind != .ident and kind != .int_lit and not (kind == .conv and nodes[child].aux == i32(int(CV.none_))): break
         nodes[n] = nodes[child]
         nodes[n].type = i32(t)
+    # Local compound arithmetic has the same left-before-right evaluation as
+    # a simple binary assignment. Expose it before write/representation proofs.
+    if nodes[n].kind == .assign and nodes[n].aux == 0 and nodes[n].op != i32(int(Tok.assign)):
+        target = int(nodes[n].a)
+        if nodes[target].kind == .ident and nodes[target].aux == i32(int(SK.local)) and prune(ntype(target)) == T_MATH_INT:
+            op = compound_op(int(nodes[n].op)) as Tok
+            if op == .plus or op == .minus or op == .star or op == .amp or op == .pipe or op == .caret:
+                left = nodes.len(); nodes.push(nodes[target])
+                value = mk(.binary, nodes[n].pos)
+                nodes[value] = Node(kind = .binary, pos = nodes[n].pos, a = i32(left), b = nodes[n].b, op = i32(int(op)), type = i32(T_MATH_INT), flags = i32(NF_CHECKED))
+                nodes[n].b = i32(value)
+                nodes[n].op = i32(int(Tok.assign))
     k = nodes[n].kind
+    if k == .array and has_flag(n, NF_BROADCAST) and tkind(ntype(n)) == .array and exact_representation(telem(ntype(n))) == T_MATH_INT: exact_demands[owner] = true
     if exact_collect_writes and (k == .vardecl or k == .assign or k == .for_ or k == .while_ or k == .lambda or k == .fn_ or k == .return_ or k == .break_ or k == .continue_): exact_lower_sites.push(n)
     if k == .lambda or k == .fn_: return
     if exact_measure_on:
@@ -275,6 +449,20 @@ exact_prepare_node = (n: int, owner: int, store: bool):
         if mask & 4 != 0: exact_prepare_node(int(nodes[n].c), owner, not control)
         if mask & 16 != 0:
             loop i in [0..nkids(n)): exact_prepare_node(kid(n, i), owner, not math and k != .block and k != .match_)
+    if (k == .call or k == .binary) and prune(ntype(n)) == T_MATH_INT and exact_prepare_math(n):
+        exact_marks[n] &= 251
+        exact_prepare_node(n, owner, store)
+        return
+    if conversion and prune(ntype(int(nodes[n].a))) == T_MATH_INT:
+        exact_demands[owner] = true
+        source = int(nodes[n].a)
+        if nodes[source].kind == .conv and nodes[source].aux == i32(int(CV.int_)) and exact_type(ntype(int(nodes[source].a)), nodes[n].pos): nodes[n].a = nodes[source].a
+    # Arm coercion rewrites the tail after check_block cached its type.
+    # Keep both directions synchronized: a word arm widened to int must not
+    # be read as an untagged word, and a narrowed arm must expose its fit check.
+    if k == .block and nodes[n].aux != 0:
+        tail = block_value(n)
+        if prune(ntype(n)) == T_MATH_INT or prune(ntype(tail)) == T_MATH_INT: nodes[n].type = nodes[tail].type
     expanded = math or operator and (exact_has_node(int(nodes[n].a)) or exact_has_node(int(nodes[n].b)))
     if conversion or k == .exprstmt: expanded = exact_has_node(int(nodes[n].a))
     if k == .if_ or k == .iflet: expanded = exact_has_node(int(nodes[n].b)) or exact_has_node(int(nodes[n].c))
@@ -286,6 +474,24 @@ exact_prepare_node = (n: int, owner: int, store: bool):
     if cmp and (exact_has_node(int(nodes[n].a)) or exact_has_node(int(nodes[n].b))): exact_mark(n)
     if k == .coalesce and exact_has_node(int(nodes[n].b)) and exact_type(ntype(n), nodes[n].pos): exact_mark(n)
     if store or k == .conv and has_flag(n, NF_EXPLICIT_INTEGER): exact_store(n, owner)
+    # A dynamic mathematical shift may still have a word-sized value at this
+    # use. Ask the existing flow proof before choosing the tagged shift helper.
+    # This is representation demand, never an added source fit obligation.
+    if k == .binary and nodes[n].aux == 0 and nodes[n].op == i32(int(Tok.shl)) and prune(ntype(n)) == T_MATH_INT:
+        if owner >= exact_rep_owners.len(): exact_rep_owners.resize(max(owner + 1, fns.len()))
+        exact_rep_owners[owner] = true
+        if n >= exact_rep_demands.len(): exact_rep_demands.resize(nodes.len())
+        exact_rep_demands[n] = true
+        exact_proof_demands[owner] = true
+    if k == .for_ and nodes[n].aux == 0:
+        it = int(nodes[n].a)
+        loop endpoint in [int(nodes[it].a), int(nodes[it].b), int(nodes[it].c)]:
+            if endpoint != 0 and prune(ntype(endpoint)) == T_MATH_INT and exact_count_bound(endpoint).wide:
+                if owner >= exact_rep_owners.len(): exact_rep_owners.resize(max(owner + 1, fns.len()))
+                exact_rep_owners[owner] = true
+                if endpoint >= exact_rep_demands.len(): exact_rep_demands.resize(nodes.len())
+                exact_rep_demands[endpoint] = true
+                exact_proof_demands[owner] = true
     if k == .for_ and (nodes[n].aux == 0 or nodes[n].aux == 1) and nodes[n].sym > 0 and not has_flag(n, NF_MUT):
         l = int(nodes[n].sym)
         if l >= exact_iteration_sources.len(): exact_iteration_sources.resize(locals.len())
@@ -319,6 +525,7 @@ exact_prepare_node = (n: int, owner: int, store: bool):
             l = int(nodes[root].sym)
             if l >= exact_write_heads.len(): exact_write_heads.resize(max(l + 1, locals.len()))
             exact_write_values.push(int(nodes[n].b))
+            exact_write_plain.push(nodes[n].op == i32(int(Tok.assign)) and nodes[n].aux == 0)
             exact_write_targets.push(target)
             exact_write_seen.push(0)
             exact_write_controls.push(exact_control_head)
@@ -370,6 +577,8 @@ exact_prepare = ():
         # summary. Restore only demanded bodies before obligations are decided.
         pc_restore(f)
         if f <= 0 or f >= fns.len() or fns[f].state != 2 or effect_unavailable.has(f): continue
+        if f >= exact_effect_owners.len(): exact_effect_owners.resize(fns.len())
+        exact_effect_owners[f] = true
         body = int(fns[f].body)
         if exact_prepare_floats(f): continue
         loop key in [0..16): fact_slice_cache.remove((f << 4) | key)
@@ -405,13 +614,113 @@ exact_prepare = ():
     effect_ix_nodes = 0
     effect_ix_locals = 0
     if effect_seen.len() > 0: effect_seen.resize(nodes.len())
+    exact_local_widths = []
+    exact_raw_values = []
+
+# Representation plans are shared by effect checking and lowering. Only demanded
+# nonescaping locals are indexed; recursive definitions and growing writes stay
+# tagged. Finite trees use at most four signed words, never a heap allocation.
+# Queries memoize locals, with a 32-edge recursion budget. Marking raw consumers
+# visits each demanded expression edge once; unrelated bodies are not walked.
+exact_raw_value = (n: int) -> bool: n > 0 and n < exact_raw_values.len() and exact_raw_values[n] & 1 != 0
+
+exact_local_width = (l: int, depth: int = 0) -> int:
+    if l > 0 and l < exact_local_widths.len() and exact_local_widths[l] != 0: return max(0, exact_local_widths[l])
+    if depth > 32 or l <= 0 or l >= exact_initializers.len() or prune(int(locals[l].type)) != T_MATH_INT: return 0
+    if l >= exact_local_widths.len(): exact_local_widths.resize(locals.len())
+    exact_local_widths[l] = -1
+    flags = int(locals[l].flags)
+    if flags & (LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_QUIET | LF_EXPOSED | LF_SOAELEM | LF_ELEMALIAS) != 0: return 0
+    width = exact_plan_bits(exact_initializers[l], depth + 1)
+    if width <= 0 or width > 256: return 0
+    at = if l < exact_write_heads.len(): exact_write_heads[l] else: 0
+    if flags & LF_ASSIGNED != 0 and at == 0: return 0
+    loop at > 0:
+        target = exact_write_targets[at - 1]
+        if not exact_write_plain[at - 1]: return 0
+        if nodes[target].kind != .ident or nodes[target].sym != i32(l): return 0
+        w = exact_plan_bits(exact_write_values[at - 1], depth + 1)
+        if w <= 0 or w > width: return 0
+        at = exact_write_next[at - 1]
+    exact_local_widths[l] = width
+    width
+
+exact_plan_bits = (n: int, depth: int = 0) -> int:
+    if n <= 0 or depth > 32: return 0
+    t = exact_representation(ntype(n))
+    if not is_int(t): return 0
+    if t != T_MATH_INT:
+        width = exact_type_width(n)
+        return if width > 0: width / 2 else: 0
+    k = nodes[n].kind
+    if k == .int_lit: return if has_flag(n, NF_U64) and nodes[n].ival < 0: 65 else: 64
+    if k == .ident and nodes[n].aux == i32(int(SK.local)): return exact_local_width(int(nodes[n].sym), depth + 1)
+    if k == .conv and (nodes[n].aux == i32(int(CV.int_)) or nodes[n].aux == i32(int(CV.none_))): return exact_plan_bits(int(nodes[n].a), depth + 1)
+    if k == .binary and nodes[n].aux == 0:
+        a = exact_plan_bits(int(nodes[n].a), depth + 1); b = exact_plan_bits(int(nodes[n].b), depth + 1)
+        if a == 0 or b == 0: return 0
+        op = nodes[n].op as Tok
+        if op == .plus or op == .minus: return max(a, b) + 1
+        if op == .star: return a + b
+        if op == .amp or op == .pipe or op == .caret: return max(a, b)
+    if k == .unary:
+        a = exact_plan_bits(int(nodes[n].a), depth + 1)
+        if a > 0: return a + int(nodes[n].op == i32(int(Tok.minus)))
+    if k == .block and nodes[n].aux != 0: return exact_plan_bits(block_value(n), depth + 1)
+    if k == .if_:
+        a = exact_plan_bits(int(nodes[n].b), depth + 1); b = exact_plan_bits(int(nodes[n].c), depth + 1)
+        if a > 0 and b > 0: return max(a, b)
+    0
+
+# Mark only consumers that lowering evaluates directly as word vectors.
+# Calls, returns, aggregate stores and other escaping uses still pack the ABI.
+exact_raw_tree = (n: int):
+    if n <= 0 or exact_raw_value(n): return
+    # A fixed conversion can hide an unbounded operand. Its own result is
+    # finite, but producing that operand still uses the tagged allocating ABI.
+    if prune(ntype(n)) == T_MATH_INT:
+        width = exact_plan_bits(n)
+        if width <= 0 or width > 256: return
+    if n >= exact_raw_values.len(): exact_raw_values.resize(nodes.len())
+    exact_raw_values[n] |= 1
+    k = nodes[n].kind
+    if k == .binary:
+        exact_raw_tree(int(nodes[n].a)); exact_raw_tree(int(nodes[n].b))
+    else if k == .unary or k == .conv: exact_raw_tree(int(nodes[n].a))
+    else if k == .block and nodes[n].aux != 0: exact_raw_tree(block_value(n))
+    else if k == .if_:
+        exact_raw_tree(int(nodes[n].b)); exact_raw_tree(int(nodes[n].c))
+
+exact_effect_representation = (n: int):
+    if n < exact_raw_values.len() and exact_raw_values[n] & 2 != 0: return
+    if n >= exact_raw_values.len(): exact_raw_values.resize(nodes.len())
+    exact_raw_values[n] |= 2
+    k = nodes[n].kind
+    if k == .vardecl and nodes[n].sym > 0 and not has_flag(n, NF_GLOBAL):
+        if prune(int(locals[int(nodes[n].sym)].type)) != T_MATH_INT: return
+        if exact_local_width(int(nodes[n].sym)) > 0: exact_raw_tree(int(nodes[n].b))
+    else if k == .assign:
+        a = int(nodes[n].a)
+        if prune(ntype(a)) == T_MATH_INT and nodes[a].kind == .ident and nodes[a].aux == i32(int(SK.local)) and exact_local_width(int(nodes[a].sym)) > 0: exact_raw_tree(int(nodes[n].b))
+    else if k == .binary and nodes[n].aux == 0 and fact_comparison(nodes[n].op as Tok):
+        a = int(nodes[n].a); b = int(nodes[n].b)
+        if prune(ntype(a)) != T_MATH_INT and prune(ntype(b)) != T_MATH_INT: return
+        aw = exact_plan_bits(a); bw = exact_plan_bits(b)
+        if aw > 0 and bw > 0 and aw <= 256 and bw <= 256:
+            exact_raw_tree(a); exact_raw_tree(b)
+    else if k == .conv and nodes[n].aux == i32(int(CV.int_)) and exact_representation(ntype(n)) != T_MATH_INT:
+        a = int(nodes[n].a)
+        if prune(ntype(a)) != T_MATH_INT: return
+        width = exact_plan_bits(a)
+        if width > 0 and width <= 256: exact_raw_tree(a)
 
 # Shift extents first ask immutable definitions and declared scalar contracts.
 # This sparse, demand-only interval cache visits each expression/dependency
 # once. Cycles and unsafe aliases stay unknown and request the ordinary facts
 # pass. No function body is walked just to bound a masked shift count.
 exact_count_nodes: (int, int)[]
-exact_count_bounds: {int: FactBound} = {}
+exact_count_index: int[]
+exact_count_bounds: FactBound[]
 
 exact_count_refined = (t0: int) -> FactBound:
     t = prune(t0)
@@ -432,16 +741,22 @@ exact_count_refined = (t0: int) -> FactBound:
 
 exact_count_bound = (n: int) -> FactBound:
     if n == 0: return FactBound(wide = true)
-    if let bound = exact_count_bounds.get(n): return bound
+    if n < exact_count_index.len() and exact_count_index[n] != 0: return exact_count_bounds[exact_count_index[n] - 1]
     out = FactBound(wide = true)
-    exact_count_bounds[n] = out
+    if n >= exact_count_index.len(): exact_count_index.resize(nodes.len())
+    slot = exact_count_bounds.len()
+    exact_count_bounds.push(out)
+    exact_count_index[n] = slot + 1
     k = nodes[n].kind
     t = exact_representation(ntype(n))
     if k == .int_lit and not (has_flag(n, NF_U64) and nodes[n].ival < 0): out = FactBound(nodes[n].ival, nodes[n].ival)
     else if k == .ident and nodes[n].aux == i32(int(SK.local)):
         l = int(nodes[n].sym)
         flags = int(locals[l].flags)
-        if flags & (LF_ASSIGNED | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_EXPOSED) == 0:
+        loop flags & LF_CAPTURE != 0 and flags & LF_VALUECAP != 0 and flags & (LF_ASSIGNED | LF_SHARED | LF_ADDR | LF_BYREF | LF_ALIAS | LF_EXPOSED) == 0:
+            l = int(locals[l].outer)
+            flags = int(locals[l].flags)
+        if flags & (LF_ASSIGNED | LF_MUTPARAM | LF_CAPTURE | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_EXPOSED) == 0:
             if flags & LF_PARAM != 0:
                 f = int(locals[l].owner)
                 loop i in [0..fns[f].params.len()):
@@ -452,6 +767,12 @@ exact_count_bound = (n: int) -> FactBound:
     else if k == .conv and (nodes[n].aux == i32(int(CV.int_)) or nodes[n].aux == i32(int(CV.none_)) or nodes[n].aux == i32(int(CV.fixed_store)) or nodes[n].aux == i32(int(CV.wrap_int))):
         source = exact_count_bound(int(nodes[n].a))
         if not source.wide and (t == T_MATH_INT or is_int(t) and (if types[t].sign: sa_fits(source.lo, t) and sa_fits(source.hi, t) else: source.lo >= 0 and (types[t].bits == 64 or source.hi < 1 << int(types[t].bits)))): out = source
+    else if k == .unary and nodes[n].op == i32(int(Tok.tilde)):
+        source = exact_count_bound(int(nodes[n].a))
+        if not source.wide: out = FactBound(-1 - source.hi, -1 - source.lo)
+    else if k == .intrinsic and nodes[n].aux == i32(int(IN.len)) and nkids(n) == 1 and tkind(ntype(kid(n, 0))) == .array and not dir_assumed_bounds_any:
+        bytes = tsize(telem(ntype(kid(n, 0))))
+        out = FactBound(0, (if bytes > 0: (1 << 56) / bytes else: FACT_MAX))
     else:
         modulus = positive_modulus(n)
         if modulus > 0: out = FactBound(0, modulus - 1)
@@ -463,11 +784,49 @@ exact_count_bound = (n: int) -> FactBound:
                     if op == .minus:
                         low = -b.hi; b.hi = -b.lo; b.lo = low
                     if fact_add_fits(a.lo, b.lo) and fact_add_fits(a.hi, b.hi): out = FactBound(a.lo + b.lo, a.hi + b.hi)
+            else if op == .star:
+                a = exact_count_bound(int(nodes[n].a)); b = exact_count_bound(int(nodes[n].b))
+                if not a.wide and not b.wide and not math_word_overflow(2, a.lo, b.lo) and not math_word_overflow(2, a.lo, b.hi) and not math_word_overflow(2, a.hi, b.lo) and not math_word_overflow(2, a.hi, b.hi):
+                    out = FactBound(min(min(a.lo * b.lo, a.lo * b.hi), min(a.hi * b.lo, a.hi * b.hi)), max(max(a.lo * b.lo, a.lo * b.hi), max(a.hi * b.lo, a.hi * b.hi)))
+            else if op == .slash:
+                a = exact_count_bound(int(nodes[n].a)); b = exact_count_bound(int(nodes[n].b))
+                # Division by zero has its own obligation. For every nonzero
+                # integer divisor, floor division is bounded by |a| + 1.
+                if not a.wide and a.lo > FACT_MIN and a.hi < FACT_MAX:
+                    magnitude = max(abs(a.lo), abs(a.hi))
+                    if magnitude < FACT_MAX: out = FactBound(-magnitude - 1, magnitude + 1)
+                    if not b.wide and b.lo > 0 and a.lo >= 0: out = FactBound(0, a.hi)
+            else if op == .shr:
+                a = exact_count_bound(int(nodes[n].a))
+                known, count = integer_constant(int(nodes[n].b))
+                if not a.wide and known and count >= 0:
+                    count = min(count, 63)
+                    out = FactBound(a.lo >> count, a.hi >> count)
+            else if op == .amp:
+                a = exact_count_bound(int(nodes[n].a)); b = exact_count_bound(int(nodes[n].b))
+                if not a.wide and a.lo >= 0: out = FactBound(0, a.hi)
+                if not b.wide and b.lo >= 0: out = FactBound(0, (if out.wide: b.hi else: min(out.hi, b.hi)))
+    if out.wide and is_int(t) and t != T_MATH_INT and not exact_has_node(n) and (types[t].sign or types[t].bits < 64): out = fact_domain(t)
     if not out.wide and is_int(t) and t != T_MATH_INT and not exact_has_node(n):
         fits = if types[t].sign: sa_fits(out.lo, t) and sa_fits(out.hi, t) else: out.lo >= 0 and (types[t].bits == 64 or out.hi < 1 << int(types[t].bits))
         if not fits: out = FactBound(wide = true)
-    exact_count_bounds[n] = out
+    exact_count_bounds[slot] = out
     out
+
+# The cost scan can discharge a tagged-int allocation only after exact
+# preparation has marked its unrounded source. The same cached signed bounds
+# drive word lowering. A magnitude strictly below 2^62 fits the tagged payload.
+exact_small_math = (n: int) -> int:
+    if not exact_has_node(n) and prune(ntype(n)) != T_MATH_INT and exact_operation(n): return -1
+    bound = exact_count_bound(n)
+    if bound.wide or bound.lo <= -(1 << 62) or bound.hi >= 1 << 62: return -1
+    max(abs(bound.lo), abs(bound.hi))
+
+# A checked count refinement can retain the finite exact lowering path. The
+# ordinary obligation pass still proves its width after all writes are known.
+exact_bounded_count = (n: int) -> bool:
+    bound = exact_count_bound(n)
+    not bound.wide and bound.lo >= 0 and bound.hi < 1048576
 
 exact_shift_fact = (n: int, value: int, s: FactState):
     if fact_speculating > 0 or not exact_has_node(n) or (nodes[n].op != i32(int(Tok.shl)) and nodes[n].op != i32(int(Tok.starstar))): return
@@ -515,6 +874,9 @@ exact_fact_store = (n: int, value: int, s: mut FactState) -> int:
             return value
         return fact_new(s, bounded, FactTerm(type = t))
     if not ok:
+        independent = exact_count_bound(int(nodes[n].a))
+        if not independent.wide and sa_fits(independent.lo, t) and sa_fits(independent.hi, t): ok = true
+    if not ok:
         syntax_bound = positive_bound(int(nodes[n].a), false)
         if syntax_bound >= 0 and sa_fits(syntax_bound, t): ok = true
     if fact_speculating == 0:
@@ -532,7 +894,7 @@ exact_fact_store = (n: int, value: int, s: mut FactState) -> int:
             # arithmetic is exact, so the wider result fits an `int`)
             shown = wit_text(n)
             if shown != "": err_notes.push((-1, "note: nothing bounds `{shown}` within {dt(t)} here"))
-            err_notes.push((-1, "help: compute it in `int` (`let total:int = ...`, or an `int` parameter or result), bound the operands with a guard, or choose an overflow policy type; " + dir_panic_fix(nodes[n].pos, true)))
+            err_notes.push((-1, "help: widen the destination to `int`, state the domain as a refinement (or prove it with a guard), or choose `overflow='wrap'|'saturate'`; " + dir_panic_fix(nodes[n].pos, true)))
             fatal(nodes[n].pos, what)
     # The continuation is dominated by either a proof or its runtime check.
     if ok: return value
@@ -556,7 +918,7 @@ exact_bits = (n: int) -> int:
             if op == .plus or op == .minus: width += 1
             else if op == .star: width = a + b
             else if op == .slash: width = a + int(not (exact_range_flags(int(nodes[n].a)) & 2 != 0))
-            else if op == .percent: width = min(a, b)
+            else if op == .percent: width = if dewy_at(nodes[n].pos): b else: min(a, b)
             else if op == .shr: width = a
             else if op == .shl or op == .starstar:
                 limit = exact_shifts.get(n) ?? -1
@@ -929,6 +1291,12 @@ exact_low_word = (n: int) -> int:
 exact_value = (n: int) -> int[]:
     if exact_chain_active:
         if let saved = exact_chain_saved.get(n): return [saved]
+    midpoint = exact_midpoint(n)
+    if midpoint.0 != 0:
+        lo = gen_expr(midpoint.0).v
+        hi = gen_expr(midpoint.1).v
+        half = e_bin(.shrs, VI, e_bin(.xor, VI, lo, hi), e_iconst(1))
+        return [e_bin(.add, VI, e_bin(.and_, VI, lo, hi), half)]
     if nodes[n].kind == .block:
         scope_push()
         out: int[]
@@ -1185,6 +1553,10 @@ exact_offset_store = (n: int) -> int:
 exact_chain_store = (n: int) -> int:
     if target_wasm or target_arm64 or exact_chain_active: return -1
     source = int(nodes[n].a)
+    # Narrowing may retain an identity conversion around the exact tree.
+    # The outer store still checks fit; this wrapper needs no arithmetic.
+    loop nodes[source].kind == .conv and nodes[source].aux == i32(int(CV.int_)) and ntype(source) == ntype(int(nodes[source].a)):
+        source = int(nodes[source].a)
     plan: int[]
     if not exact_chain_plan(source, plan): return -1
     operations = 0
@@ -1331,7 +1703,7 @@ exact_value_fact = (n: int, value: int, s: FactState):
     old = int(exact_range_meta[n])
     if old & 4 != 0: flags &= old
     exact_range_meta[n] = u8(flags | 4)
-    if b.wide or b.reason == .unsupported:
+    if b.wide or b.reason == .unsupported or exact_representation(ntype(n)) == T_MATH_INT and not fact_host_finite(s, value):
         exact_ranges[n] = -1
         return
     if exact_ranges[n] < 0: return
@@ -1417,18 +1789,32 @@ exact_potential = (n: int) -> bool:
 # A deliberate conversion to mathematical int is an allocation boundary;
 # evaluating the fixed-width source above it never allocated a bigint.
 exact_gen_math = (n: int) -> Val:
-    words = exact_value(n)
-    out = math_word(words[words.len() - 1])
-    i = words.len() - 2
-    loop i >= 0:
-        borrow(out, T_MATH_INT)
-        shifted = math_shift(.shl, out.v, e_iconst(64), true)
-        borrow(shifted, T_MATH_INT)
-        low = math_call("__mi_unsigned", [words[i]])
-        borrow(low, T_MATH_INT)
-        out = math_binary(.plus, shifted.v, low.v)
-        i -= 1
-    out
+    if math_proven_word(n): return math_pack_word(n, exact_low_word(n))
+    exact_pack_words(n, exact_value(n))
+
+exact_pack_words = (n: int, words: int[]) -> Val:
+    if words.len() == 1: return math_pack_word(n, words[0])
+    # Most statically wide expressions still produce an immediate at runtime.
+    # Test its signed payload and extension words before constructing a bigint.
+    tagged = e_bin(.shl, VI, words[0], e_iconst(1))
+    small = e_bin(.eq, VI, e_bin(.shrs, VI, tagged, e_iconst(1)), words[0])
+    sign = e_bin(.shrs, VI, words[0], e_iconst(63))
+    loop i in [1..words.len()): small = e_bin(.and_, VI, small, e_bin(.eq, VI, words[i], sign))
+    result = vreg(VI)
+    iff(small)
+    e_mov(result, tagged)
+    els()
+    old = ir_cold
+    ir_cold = true
+    # This is a representation boundary, not a chain of bigint arithmetic.
+    # Copy the finite two's-complement words once; the runtime forms limbs in
+    # O(words) without pulling in shifts and every generic arithmetic helper.
+    buffer = e_slot(new_slot(words.len() * 8, 8))
+    loop i in [0..words.len()): e_store(buffer, i * 8, words[i], 8)
+    e_mov(result, e_call(rt("__mi_words"), [buffer, e_iconst(words.len())], VI))
+    ir_cold = old
+    endc()
+    V(result, true)
 
 # Round a static multiword integer directly to the destination float precision.
 # Reduction retains 63 bits plus a sticky bit (round-to-odd), so the hardware
@@ -1497,6 +1883,17 @@ exact_gen_float = (n: int, to: int) -> Val:
     V(result, false)
 
 exact_reset = ():
+    exr_plans.clear()
+    exr_call_target = 0
+    exr_fast = false
+    exr_locals = []
+    exact_word_formats.clear()
+    exact_rep_demands = []
+    exact_rep_owners = []
+    exact_effect_owners = []
+    exact_local_widths = []
+    exact_raw_values = []
+    math_word_captures = {}
     eg_lo = []; eg_hi = []; eg_owner = []; eg_version = []; eg_stack = []; eg_demanded = []
     exact_map_functions = []
     exact_progress_assignments = []; exact_write_heads = []; exact_write_values = []; exact_write_next = []; exact_write_targets = []; exact_write_seen = []; exact_progress_opaque = []
@@ -1513,6 +1910,7 @@ exact_reset = ():
     exact_demands = {}
     exact_proof_demands = {}
     exact_progress_math = {}
+    exact_word_reads = {}
     exact_initializers = []
     exact_iteration_sources = []
     exact_nodes = []
@@ -1521,7 +1919,8 @@ exact_reset = ():
     exact_type_widths = []
     exact_shifts = {}
     exact_count_nodes = []
-    exact_count_bounds = {}
+    exact_count_index = []
+    exact_count_bounds = []
     exact_marks = []
     exact_ranges = []
     exact_range_meta = []

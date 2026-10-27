@@ -1,0 +1,9 @@
+#
+bounded=(x:int64<x >=? 0 and x <=? 100>):>int64=>x*x+1
+Slot:type=[value:int64]
+main=()=>{
+ let a:int64=bounded(9)
+ let slot=Slot[value=bounded(3)]
+ let xs:array<int64>=[bounded(4)]
+ printl"{a} {slot.value} {xs}"
+}

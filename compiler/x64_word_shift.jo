@@ -1,0 +1,42 @@
+# Immediate qword shifts used by exact-int representation maps and censuses.
+# SSE2/AVX2 lack arithmetic qword right shift; replicate each lane's signed
+# high dword and combine its shifted sign with the logical qword result.
+use 'x64.jo'
+use 'ir_types.dewy'
+use 'ir.jo'
+use 'backend_analysis.dewy'
+
+x_word_shift = (dst: int, src: int, count: int, left: bool, ty: int):
+    ext = if left: 6 else: 2
+    if ty == VY:
+        vex(ext, dst, src, 1, 1, 0, 1); b(0x73); modrr(ext, src); b(count)
+    else:
+        vmov_rr(dst, src, ty)
+        sse_rr(0x66, 0x73, ext, dst); b(count)
+
+x_emit_word_shift = (ins: *Ins):
+    d = int(ins.dst)
+    if vloc[d] == LOC_NONE: return
+    ty = int(ins.ty)
+    count = vcval[int(ins.b)]
+    x = xdreg(d, 0)
+    a = xreg_of(int(ins.a), 1, ty)
+    if ins.c != 14 or count == 0:
+        x_word_shift(x, a, count, ins.c == 12, ty)
+    else:
+        # Preserve the logical part before the reserved source reload register
+        # becomes the sign mask. Destinations may overlap either source.
+        x_word_shift(0, a, count, false, ty)
+        vmov_rr(1, a, ty)
+        if ty == VY:
+            vex(4, 1, 1, 1, 1, 0, 1); b(0x72); modrr(4, 1); b(31)
+            vex(1, 0, 1, 1, 1, 0, 1); b(0x70); modrr(1, 1); b(0xF5)
+        else:
+            sse_rr(0x66, 0x72, 4, 1); b(31)
+            sse_rr(0x66, 0x70, 1, 1); b(0xF5)
+        x_word_shift(1, 1, 64 - count, true, ty)
+        if ty == VY: vop3(7, 3, x, 0, 1)
+        else:
+            vop2(7, 3, 0, 1)
+            vmov_rr(x, 0, ty)
+    sts(d, x, ty)

@@ -662,6 +662,15 @@ coerce = (n: int, target: int) -> int:
     from = prune(ntype(n))
     to = prune(target)
     if from == 0: ice("unchecked expression at {pos_str(nodes[n].pos)}")
+    # An immediately consumed exact arithmetic result needs no tagged boundary.
+    # The fixed-width consumer below remains the sole narrowing obligation.
+    if from == T_MATH_INT and (is_int(representation_type(to)) and representation_type(to) != T_MATH_INT or is_float(to)):
+        if not is_lit(n) and is_int(to) and int_policy(to) == 0: check_integer_boundary(n, from, to)
+        if exact_narrow_control(n, to): return n
+        source = exact_math_operand(n)
+        if source != n:
+            nodes[n] = nodes[source]
+            from = prune(ntype(n))
     if from != to and int_policy(to) != 0 and is_int(from):
         if is_lit(n):
             if nodes[n].kind == .int_lit:
@@ -3688,6 +3697,10 @@ conversion = (n: int, to0: int, args: int[]) -> int:
     a = args[0]
     check_expr(a, if tk == .float_ and nodes[a].kind == .float_lit: to else: 0)
     ft = prune(ntype(a))
+    if ft == T_MATH_INT and to != T_MATH_INT and (is_int(to) or is_float(to)):
+        if not is_lit(a) and is_int(to) and int_policy(to) == 0: check_integer_boundary(a, ft, to)
+        a = exact_math_operand(a)
+        ft = prune(ntype(a))
     if to != T_MATH_INT and int_policy(to) == 0 and is_int(to) and is_int(ft) and ft != T_MATH_INT and exact_potential(a):
         nodes[n] = Node(kind = .conv, pos = nodes[n].pos, a = i32(a), aux = i32(int(CV.int_)), type = i32(to), flags = i32(NF_CHECKED | NF_EXPLICIT_INTEGER))
         return to
@@ -4153,6 +4166,11 @@ dewy_arithmetic_call = (n: int, name: int, args: int[], expected: int) -> int:
         add_flag(last_checked, NF_CHECKED)
     a = checked[0]
     b = checked[1]
+    if (ntype(a) == T_MATH_INT or ntype(b) == T_MATH_INT) and dewy_at(nodes[n].pos):
+        wa = exact_math_operand(a); wb = exact_math_operand(b)
+        if is_int(ntype(wa)) and is_int(ntype(wb)) and ntype(wa) != T_MATH_INT and ntype(wb) != T_MATH_INT and int_policy(ntype(wa)) == 0 and int_policy(ntype(wb)) == 0:
+            a = wa; b = wb
+            checked[0] = a; checked[1] = b
     exact_operands = (is_numeric(ntype(a)) or bundled_rational_type(ntype(a)) or bundled_bigint_type(ntype(a))) and (is_numeric(ntype(b)) or bundled_rational_type(ntype(b)) or bundled_bigint_type(ntype(b)))
     if exact_operands and not is_float(expected) and not (is_float(ntype(a)) and not is_lit(a)) and not (is_float(ntype(b)) and not is_lit(b)):
         if nodes[a].kind == .float_lit and nodes[a].sval != 0 and is_lit(a): exact_decimal(a)
@@ -4224,13 +4242,18 @@ dewy_arithmetic_call = (n: int, name: int, args: int[], expected: int) -> int:
     # mask. Custom protocols receive the original operand, including 1 or 2^k.
     helper = name
     policy = int_policy(ntype(a))
+    if power and ntype(a) == T_INT and dewy_at(nodes[n].pos):
+        known, exponent = integer_constant(b)
+        if not known or exponent >= 1048576:
+            coerce(a, T_MATH_INT)
+            coerce(b, T_MATH_INT)
     if power and exact_type(ntype(a), nodes[n].pos) and is_int(ntype(b)):
         t = prune(ntype(a))
         if is_lit(b) and ntype(b) == T_MATH_INT:
             (known, exponent) = integer_constant(b)
             if known: coerce(b, T_INT)
         nodes[n] = Node(kind = .binary, pos = nodes[n].pos, a = i32(a), b = i32(b), type = i32(t), op = i32(int(Tok.starstar)), flags = i32(NF_CHECKED))
-        return t
+        return exact_int_result(n)
     if policy != 0 or not power and exact_type(ntype(a), nodes[n].pos):
         if power: helper = intern("__dewy_policy_power")
         else:
@@ -4240,7 +4263,7 @@ dewy_arithmetic_call = (n: int, name: int, args: int[], expected: int) -> int:
                 known_modulus, modulus = integer_constant(b)
                 if known_modulus and modulus > 0 and modulus & (modulus - 1) != 0: runtime_demand("__exact_i128_mod_pos")
             nodes[n] = Node(kind = .binary, pos = nodes[n].pos, a = i32(a), b = i32(b), type = i32(t), op = i32(int(if modulo: Tok.percent else: Tok.slash)), aux2 = -1, flags = i32(NF_CHECKED))
-            return t
+            return if policy == 0: exact_int_result(n) else: t
     divisor = nodes[b].ival
     if not power and literal_divisor and nodes[b].kind == .int_lit and divisor > 0 and not has_flag(b, NF_U64) and (divisor & (divisor - 1)) == 0:
         if modulo:
@@ -4413,7 +4436,7 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
             t = ntype(a)
             nodes[n] = Node(kind = .intrinsic, pos = nodes[n].pos, aux = i32(int(IN.fixed_abs)), type = i32(t), flags = i32(NF_CHECKED))
             set_list(n, [a])
-            return t
+            return exact_int_result(n)
     ii = intrinsic_of(name)
     # (`assert(cond)` is the implementation language's; Dewy's assertions are directives)
     hidden_assert = ii >= 0 and intrinsics[ii].id == .assert and dewy_at(nodes[n].pos) and nodes[n].aux2 != i32(RANGE_EXHAUSTION)
@@ -6273,7 +6296,7 @@ by_types_seen: {ByTypesKey: ByTypesChoice} = {}
 by_types_decl = 0
 by_types_binds: int[]
 
-resolve_by_types = (name: int, ts: int[], pos: int, required: bool) -> int:
+resolve_by_types = (name: int, ts: int[], pos: int, required: bool, choice_only: bool = false) -> int:
     settled = not ide_on
     loop t in ts:
         if has_var(t): settled = false
@@ -6282,7 +6305,7 @@ resolve_by_types = (name: int, ts: int[], pos: int, required: bool) -> int:
         if let c = by_types_seen.get(key):
             if c.gen == ml_stamp(name):
                 loop d in c.hidden: surface_hidden.push(d)
-                return get_fn_inst(c.decl, c.binds, pos)
+                return if choice_only: c.decl else: get_fn_inst(c.decl, c.binds, pos)
     gen = ml_stamp(name)
     hidden_mark = surface_hidden.len()
     decls: int[]
@@ -6295,7 +6318,7 @@ resolve_by_types = (name: int, ts: int[], pos: int, required: bool) -> int:
     decl = by_types_decl
     binds = by_types_binds
     if settled and ml_stamp(name) == gen: by_types_seen[key] = ByTypesChoice(gen, decl, binds, surface_hidden[hidden_mark..])
-    get_fn_inst(decl, binds, pos)
+    if choice_only: decl else: get_fn_inst(decl, binds, pos)
 
 resolve_from_types = (name: int, decls: int[], ts: int[], pos: int, required: bool) -> int:
     if not choose_from_types(name, decls, ts, pos, required): return 0
@@ -6396,7 +6419,13 @@ fmt_part = (part: int, pos: int):
     else:
         writer = "__fmt"
         if dewy_at(pos): writer = "__dewy_fmt"
-        nodes[part].sym = i32(resolve_by_types(intern(writer), [bt, t], pos, true))
+        # Select the representation before instantiating the generic formatter.
+        # The semantic overload is still chosen first; only the bundled default
+        # may use a proved word, with no new fixed-width storage obligation.
+        if t == T_MATH_INT and exact_format_word(int(nodes[part].a), writer, bt, pos):
+            exact_word_formats[part] = true
+            nodes[part].sym = i32(runtime_fn("__fmt_word"))
+        else: nodes[part].sym = i32(resolve_by_types(intern(writer), [bt, t], pos, true))
 
 is_dewy_grapheme_iter = (t: int) -> bool:
     p = prune(t)
@@ -6710,7 +6739,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         # Private library dispatch: signedness and overflow policy, erased now.
         nargs_check(n, nargs, 1, 1, "__integer_mode")
         t = representation_type(expr_as_type(args[0]))
-        mode = if not is_int(t) or t == T_MATH_INT: -1 else: 2 * int_policy(t) + int(types[t].sign)
+        mode = if t == T_MATH_INT: -2 else if not is_int(t): -1 else: 2 * int_policy(t) + int(types[t].sign)
         nodes[n] = Node(kind = .int_lit, pos = nodes[n].pos, ival = mode, type = i32(T_INT), flags = i32(NF_LITERAL | NF_CHECKED))
         return T_INT
     else if id == .sizeof or id == .alignof:
@@ -7725,6 +7754,14 @@ check_binary = (n: int, expected: int) -> int:
         if op == .star and is_nd(ta) and bk == .array and dewy_at(nodes[n].pos) and is_numeric(nd_elem(ta)): h = mk_array(nd_elem(ta))
         tb = prune(check_expr(b, h))
     if types[ta].kind == .secret or types[tb].kind == .secret: return secret_binary(n, op, a, b)
+    # Fuse static-width exact intermediates before choosing scalar arithmetic.
+    # Stored int locals are not peeled and continue through mathematical math.
+    if (ntype(a) == T_MATH_INT or ntype(b) == T_MATH_INT) and dewy_at(nodes[n].pos):
+        wa = exact_math_operand(a); wb = exact_math_operand(b)
+        if is_int(ntype(wa)) and is_int(ntype(wb)) and ntype(wa) != T_MATH_INT and ntype(wb) != T_MATH_INT and int_policy(ntype(wa)) == 0 and int_policy(ntype(wb)) == 0:
+            a = wa; b = wb
+            nodes[n].a = i32(a); nodes[n].b = i32(b)
+            ta = prune(ntype(a)); tb = prune(ntype(b))
     # (two plain numbers, neither a written fraction nor a character: none of the cases below
     # applies to them, so straight to the arithmetic)
     if not is_shift and ta != T_MATH_INT and tb != T_MATH_INT:
@@ -7924,7 +7961,25 @@ check_binary = (n: int, expected: int) -> int:
         if ta == T_MATH_INT:
             known_b, y = integer_constant(b)
             if known_b and y < 0 and types[tb].sign: fatal(nodes[n].pos, "shift count must be nonnegative")
+        # Fixed shifts only distinguish counts below their word width. Saturating
+        # a mathematical count to a signed word preserves that distinction,
+        # including negative counts interpreted as unsigned continuation counts.
+        if ta != T_MATH_INT and (ta != T_INT or op == .shr) and tb == T_MATH_INT and dewy_at(nodes[n].pos):
+            known, count = integer_constant(b)
+            coerce(b, (if known: T_INT else: policy_int(T_INT, 2, nodes[n].pos)))
         nodes[n].type = i32(ta)
+        if ta == T_INT and dewy_at(nodes[n].pos):
+            known, count = integer_constant(b)
+            if op == .shl and (not known or count >= 1048576):
+                # Preserve the fixed operand's unsigned count interpretation.
+                # Counts beyond a realizable bigint saturate before conversion;
+                # in particular zero shifted by a negative runtime count is zero.
+                if prune(ntype(b)) == T_MATH_INT: coerce(b, policy_int(T_INT, 2, nodes[n].pos))
+                coerce(b, policy_int(T_U64, 1, nodes[n].pos))
+                coerce(a, T_MATH_INT)
+                nodes[n].type = i32(T_MATH_INT)
+                return T_MATH_INT
+            return exact_int_result(n)
         return ta
     tka = types[ta].kind
     tkb = types[tb].kind
@@ -8134,6 +8189,7 @@ binary_numeric = (n: int, op: Tok, a: int, b: int, ta: int, tb: int, is_cmp: boo
         warn(nodes[n].pos, "this divides whole numbers before multiplying, dropping the fraction (3 / 4 * 100 is 0): `{an} * 100 / ...` multiplies first, `f64({an}) / ...` keeps the fraction")
     if is_cmp: nodes[n].type = i32(T_BOOL)
     else: nodes[n].type = i32(j)
+    if not is_cmp: return exact_int_result(n)
     ntype(n)
 
 
@@ -10039,6 +10095,13 @@ check_call_expr = (n: int, expected: int) -> int:
             fatal(nodes[n].pos, "integer literal does not fit in int's interim int64 representation; use an explicit BigInt annotation")
         nodes[n].aux2 = 0
     if has_flag(n, NF_BROADCAST): return check_dotted(n, expected)
+    # The generated shape check preserves the value's destination type. Pass
+    # that hint through before generic argument inference fixes its elements.
+    if ex != 0 and (exk == .array or is_nd(ex)) and nkids(n) == 2:
+        callee = int(nodes[n].a)
+        if nodes[callee].kind == .ident and name_of(int(nodes[callee].name)) == "__shape_value":
+            check_expr(kid(n, 0), ex)
+            set_kid(n, 0, last_checked)
     if is_unchecked_at(n):
         # __at(xs, i) in the core library: xs[i] where the library knows i is in bounds
         args = kids(n)
@@ -10703,6 +10766,9 @@ check_expr_other = (n: int, expected: int) -> int:
         else if nodes[n].op == i32(int(Tok.plus)):
             if not is_numeric(at) and not is_vec(at): fatal(nodes[n].pos, "unary '+' needs a number")
         t = at
+        if nodes[n].op == i32(int(Tok.minus)) and at == T_INT and dewy_at(nodes[n].pos):
+            nodes[n].type = i32(t)
+            t = exact_int_result(n)
     else if k == .and_ or k == .or_:
         # on integers, and/or are bitwise
         h = 0
@@ -10897,7 +10963,7 @@ check_expr_other = (n: int, expected: int) -> int:
             if not spread and nkids(n) != int(types[ex].nargs): fatal(nodes[n].pos, "{dt(ex)} has {int(types[ex].nargs)} positions, and this array gives {nkids(n)} values")
             if not spread:
                 nodes[n].kind = .tuple
-                return check_expr(n, expected)
+                return check_expr(n, ex)
         et = 0
         if ex != 0 and exk == .array: et = int(types[ex].elem)
         if nodes[n].b != 0:
@@ -12324,7 +12390,7 @@ dot_template = (n: int, leaves: mut int[], tag: str) -> int:
 # the result's last dimension is the inner loop and the outer loop finds where each operand's row
 # starts. The library checks each operand's data against its shape once, so the element reads
 # need no checks of their own.
-bc_loop_nd = (tmpl: int, arrs: str[], kinds: int[], pre: str, epre: str, pos: int) -> int[]:
+bc_loop_nd = (tmpl: int, arrs: str[], kinds: int[], pre: str, epre: str, pos: int, storage: int = 0) -> int[]:
     stmts: int[]
     rowpre: int[]
     body: int[]
@@ -12372,7 +12438,11 @@ bc_loop_nd = (tmpl: int, arrs: str[], kinds: int[], pre: str, epre: str, pos: in
         nodes[step].op = i32(int(Tok.pluseq))
         advance.push(step)
     # (room for every element, written in place: element i in step i)
-    stmts.push(bc_let(out, mk(.array, pos), pos))
+    output = bc_let(out, mk(.array, pos), pos)
+    # Private zeroed output, filled exactly once by these generated loops.
+    add_flag(int(nodes[output].b), NF_BROADCAST)
+    if storage != 0: nodes[output].a = i32(type_node_of(storage, pos))
+    stmts.push(output)
     stmts.push(bc_stmt(bc_method(bc_ident(out, pos), "reserve", [id("n")], pos), pos))
     stmts.push(bc_stmt(bc_call("__set_len", [bc_ident(out, pos), id("n")], pos), pos))
     # (every operand has the result's size: element i of each is at i, one flat loop)
@@ -12397,7 +12467,7 @@ bc_loop_nd = (tmpl: int, arrs: str[], kinds: int[], pre: str, epre: str, pos: in
 # the loop computing a dotted expression over 1-D arrays: arrs[k] names operand k's array ("" for
 # a number, whose element variable already exists); `pre` names the loop's variables, `epre` the
 # element variables the template uses. The last statement is the result.
-bc_loop1 = (tmpl: int, arrs: str[], pre: str, epre: str, pos: int) -> int[]:
+bc_loop1 = (tmpl: int, arrs: str[], pre: str, epre: str, pos: int, storage: int = 0) -> int[]:
     stmts: int[]
     out = "{pre}o"
     lens: int[]
@@ -12409,7 +12479,11 @@ bc_loop1 = (tmpl: int, arrs: str[], pre: str, epre: str, pos: int) -> int[]:
     loop k in 0.. and a in arrs:
         if len(a) == 0: continue
         stmts.push(bc_let("{pre}s{k}", bc_step(bc_call("len", [bc_ident(a, pos)], pos), pos), pos))
-    stmts.push(bc_let(out, mk(.array, pos), pos))
+    output = bc_let(out, mk(.array, pos), pos)
+    # Private zeroed output, filled exactly once by these generated loops.
+    add_flag(int(nodes[output].b), NF_BROADCAST)
+    if storage != 0: nodes[output].a = i32(type_node_of(storage, pos))
+    stmts.push(output)
     stmts.push(bc_stmt(bc_method(bc_ident(out, pos), "reserve", [bc_ident("{pre}n", pos)], pos), pos))
     # (room for every element is reserved, in an array of the loop's own: it has all its
     # elements from the start, zeros until written, and element i is written in step i)
@@ -12606,6 +12680,14 @@ check_dotted = (n: int, expected: int) -> int:
         stmts.push(bc_stmt(tmpl, pos))
         nodes[n] = nodes[bc_block(stmts, pos)]
         return check_expr(n, expected)
+    # The destination supplies the output element storage, just as for an
+    # array comprehension. Arithmetic stays exact until each element write.
+    storage = 0
+    if expected != 0:
+        target = representation_type(prune(expected))
+        if tkind(target) == .array: storage = target
+        else if is_nd(target): storage = mk_array(nd_elem(target))
+        if storage != 0 and not is_int(exact_representation(telem(storage))): storage = 0
     result = 0
     if gpu:
         # GPU arrays: one fragment program, or the same loop on the CPU where there is no GPU
@@ -12680,7 +12762,7 @@ check_dotted = (n: int, expected: int) -> int:
         loop k in [0..leaves.len()):
             if ranks[k] == 1: arrs.push("{pre}d{k}")
             else: arrs.push("")
-        ls = bc_loop1(tmpl, arrs, pre, pre, pos)
+        ls = bc_loop1(tmpl, arrs, pre, pre, pos, storage)
         loop i in [0..ls.len() - 1): stmts.push(ls[i])
         result = int(nodes[ls[ls.len() - 1]].a)
     else:
@@ -12689,12 +12771,21 @@ check_dotted = (n: int, expected: int) -> int:
         loop k in [0..leaves.len()):
             if ranks[k] == 1 or ranks[k] == 2: arrs.push("{pre}d{k}")
             else: arrs.push("")
-        ls = bc_loop_nd(tmpl, arrs, ranks, pre, pre, pos)
+        ls = bc_loop_nd(tmpl, arrs, ranks, pre, pre, pos, storage)
         loop i in [0..ls.len() - 1): stmts.push(ls[i])
         result = int(nodes[ls[ls.len() - 1]].a)
     stmts.push(bc_stmt(result, pos))
     nodes[n] = nodes[bc_block(stmts, pos)]
-    check_expr(n, expected)
+    result_type = check_expr(n, expected)
+    if cx >= 0 and not gpu:
+        t = prune(result_type)
+        elem = if tkind(t) == .array: telem(t) else if is_nd(t): nd_elem(t) else: 0
+        if elem == T_MATH_INT:
+            owner = int(ctxs[cx].inst)
+            if owner > 0:
+                exact_owners[owner] = true
+                exact_full_owners[owner] = true
+    result_type
 
 # ---------------- unions: `is` and narrowing ----------------
 # x is T: aux = the member's index for a union; -1 (is none) or -2 (has a value) for an optional

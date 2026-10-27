@@ -1,0 +1,15 @@
+#
+f=(a:int64)=>{
+ let x=a+0
+ x=if x <? int64.max {x=int64.max; x+1} else 0
+ printl(x)
+ let y=a+0
+ y+=int64.max
+ y+=int64.max
+ printl(y)
+ let z=a+0
+ z=if z <? {z=int64.max; int64.max} z+1 else 0
+ printl(z)
+}
+main=()=>f(1)
+$runtime_checks

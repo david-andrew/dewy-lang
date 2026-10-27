@@ -38,9 +38,11 @@ __fmt_u64 = (buf: mut u8[], v: u64, neg: bool, minw: int, pad: int):
         k -= 1
     (p as *int)[1] = old + width
 
-__fmt = (buf: mut u8[], x: int):
+__fmt_word = (buf: mut u8[], x: int):
     if x < 0: __fmt_u64(buf, u64(0) - u64(x), true, 0, ' ')
     else: __fmt_u64(buf, u64(x), false, 0, ' ')
+
+__fmt = (buf: mut u8[], x: int): __fmt_word(buf, x)
 
 __fmt = (buf: mut u8[], x: u64): __fmt_u64(buf, x, false, 0, ' ')
 __fmt = (buf: mut u8[], x: u32): __fmt_u64(buf, u64(x), false, 0, ' ')

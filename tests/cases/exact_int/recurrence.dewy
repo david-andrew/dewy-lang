@@ -1,0 +1,23 @@
+#
+bounded=(seed:int64)=>{
+ let word=seed%5003
+ let size=word%12+1
+ let letters=word
+ loop j in [0..size) {letters=letters//3+j}
+ return letters
+}
+descending=(seed:int64)=>{
+ let x=seed%5003
+ loop j in [0,-1..(-3)) {x=x//3+j}
+ return x
+}
+growing=(seed:int64)=>{
+ let x=seed%5003
+ loop j in [0..3) {x=x//3+j; x+=int64.max}
+ return x
+}
+main=()=>{
+ let seeds:array<int64>=[0 5002 (-1) int64.min int64.max]
+ loop seed in seeds {printl(bounded(seed) descending(seed) growing(seed))}
+}
+$runtime_checks

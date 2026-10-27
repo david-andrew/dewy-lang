@@ -1,0 +1,172 @@
+use 'ir_types.dewy'
+use 'checker_tokens.dewy'
+use 'ast.jo'
+use 'types.jo'
+use 'check.jo'
+use 'expr.jo'
+use 'ir.jo'
+use 'lower.jo'
+use 'math_lower.jo'
+use 'exact_loop.jo'
+use 'exact.jo'
+use 'scanloops.jo'
+use 'main.jo'
+use 'partition.jo'
+use 'refine.jo'
+use 'ownership.jo'
+
+# A repeated, closed record update can preserve a small-field invariant.
+# Demand is a two-statement counted loop calling one mutable-array function.
+# Inspect at most four reset locals and four nested record levels; memoize the
+# callee plan. One O(array bytes) entry census proves all repeated calls, with
+# the original loop retained for outliers. No source fit obligation is added.
+exr_plans: {int: int[]} = {}
+exr_call_target = 0
+exr_fast = false
+exr_locals: int[]
+const EXR_BOUND = 1073741824
+
+exr_stmt = (n: int) -> int:
+    if nodes[n].kind == .exprstmt: int(nodes[n].a) else: n
+
+exr_record = (t0: int, depth: int = 0) -> bool:
+    t = representation_type(t0)
+    if t == T_INT: return true
+    if depth >= 4 or tkind(t) != .struct_ or is_managed(t) or ownership_type(t): return false
+    layout(t)
+    if tsize(t) <= 0 or tsize(t) > 128: return false
+    st = int(types[t].st)
+    offset = 0
+    loop i in [0..int(structs[st].nfields)):
+        field = fields[int(structs[st].fields) + i]
+        if int(field.offset) != offset or not exr_record(int(field.type), depth + 1): return false
+        offset += tsize(int(field.type))
+    offset == tsize(t)
+
+exr_field = (n0: int, array: int, index: int) -> bool:
+    n = exl_strip(n0)
+    if representation_type(ntype(n)) != T_INT: return false
+    depth = 0
+    loop nodes[n].kind == .field and nodes[n].aux >= 0:
+        depth += 1
+        if depth > 4: return false
+        n = int(nodes[n].a)
+    if depth == 0 or nodes[n].kind != .index or nodes[n].aux != 0: return false
+    a = exl_strip(int(nodes[n].a)); i = exl_strip(int(nodes[n].b))
+    nodes[a].kind == .ident and nodes[a].aux == i32(int(SK.local)) and nodes[a].sym == i32(array) and math_local_is(i, index)
+
+exr_control = (n0: int, array: int, index: int, depth: int = 0) -> bool:
+    if n0 == 0 or depth > 8: return false
+    n = exl_strip(n0)
+    k = nodes[n].kind
+    if k == .int_lit or k == .bool_lit: return true
+    if math_local_is(n, index): return true
+    if k == .intrinsic and nodes[n].aux == i32(int(IN.len)) and nkids(n) == 1: return math_local_is(kid(n, 0), array)
+    if k == .not_: return exr_control(int(nodes[n].a), array, index, depth + 1)
+    if k == .binary and nodes[n].aux == 0 and (nodes[n].op == i32(int(Tok.eq)) or nodes[n].op == i32(int(Tok.ne)) or nodes[n].op == i32(int(Tok.lt)) or nodes[n].op == i32(int(Tok.le)) or nodes[n].op == i32(int(Tok.gt)) or nodes[n].op == i32(int(Tok.ge))) or k == .and_ or k == .or_:
+        return exr_control(int(nodes[n].a), array, index, depth + 1) and exr_control(int(nodes[n].b), array, index, depth + 1)
+    false
+
+exr_plan = (f: int) -> int[]:
+    if let plan = exr_plans.get(f): return plan
+    exr_plans[f] = []
+    if f <= 0 or fns[f].params.len() != 1 or fns[f].caps.len() != 0 or fns[f].ret != T_VOID: return []
+    array = fns[f].params[0]
+    if int(locals[array].flags) & LF_MUTPARAM == 0 or int(locals[array].flags) & (LF_CAPTURED | LF_SHARED | LF_EXPOSED) != 0: return []
+    at = representation_type(fns[f].ptypes[0])
+    if tkind(at) != .array or not exr_record(telem(at)): return []
+    body = int(fns[f].body)
+    if nodes[body].kind != .block or nkids(body) != 1: return []
+    loop_ = exr_stmt(kid(body, 0))
+    if nodes[loop_].kind != .for_ or nodes[loop_].aux != 0: return []
+    index = int(nodes[loop_].sym)
+    it = int(nodes[loop_].a)
+    if nodes[it].kind != .range or has_flag(it, NF_STEP): return []
+    if not exr_control(int(nodes[it].a), array, index): return []
+    if nodes[it].b != 0 and not exr_control(int(nodes[it].b), array, index): return []
+    block = int(nodes[loop_].b)
+    if nodes[block].kind != .block or nkids(block) == 0: return []
+    start = 0
+    first = exr_stmt(kid(block, 0))
+    if nodes[first].kind == .if_:
+        arm = int(nodes[first].b)
+        if nodes[first].c != 0 or not exr_control(int(nodes[first].a), array, index) or nkids(arm) != 1 or nodes[exr_stmt(kid(arm, 0))].kind != .break_: return []
+        start = 1
+    count = 0
+    loop start + count < nkids(block) and nodes[exr_stmt(kid(block, start + count))].kind == .vardecl: count += 1
+    if count == 0 or count > 4 or nkids(block) != start + count * 3: return []
+    plan: int[]
+    loop j in [0..count):
+        decl = exr_stmt(kid(block, start + j))
+        if nkids(decl) != 0: return []
+        l = int(nodes[decl].sym)
+        if int(locals[l].flags) & (LF_CAPTURED | LF_SHARED | LF_ADDR | LF_ALIAS | LF_BYREF | LF_EXPOSED) != 0: return []
+        init = exl_strip(int(nodes[decl].b))
+        if nodes[init].kind != .binary or nodes[init].aux != 0: return []
+        op = nodes[init].op as Tok
+        if op != .plus and op != .minus and op != .star: return []
+        if not exr_field(int(nodes[init].a), array, index) or not exr_field(int(nodes[init].b), array, index): return []
+        branch = exr_stmt(kid(block, start + count + j))
+        if nodes[branch].kind != .if_ or nodes[branch].c != 0: return []
+        cond = int(nodes[branch].a)
+        known, hi = math_reset_interval(cond, l)
+        if not known or hi > EXR_BOUND + 1: return []
+        lower = int(nodes[cond].a)
+        known_lo, lo = integer_constant(int(nodes[lower].b))
+        if not known_lo or lo < -EXR_BOUND: return []
+        arm = int(nodes[branch].b)
+        if nkids(arm) < 1 or nkids(arm) > 5: return []
+        loop k in [0..nkids(arm) - 1):
+            change = exr_stmt(kid(arm, k))
+            if nodes[change].kind != .assign or nodes[change].op != i32(int(Tok.assign)) or nodes[change].aux != 0 or not exr_field(int(nodes[change].a), array, index): return []
+            value = exl_strip(int(nodes[change].b))
+            if nodes[value].kind == .unary and nodes[value].op == i32(int(Tok.minus)):
+                value = int(nodes[value].a)
+            else if nodes[value].kind == .binary and nodes[value].op == i32(int(Tok.minus)) and nodes[value].aux == 0:
+                zero, number = integer_constant(int(nodes[value].a))
+                if not zero or number != 0: return []
+                value = int(nodes[value].b)
+            else: return []
+            if not exr_field(value, array, index): return []
+        reset = exr_stmt(kid(arm, nkids(arm) - 1))
+        if nodes[reset].kind != .assign or nodes[reset].op != i32(int(Tok.assign)) or nodes[reset].aux != 0 or not math_local_is(int(nodes[reset].a), l) or not exr_field(int(nodes[reset].b), array, index): return []
+        store = exr_stmt(kid(block, start + count * 2 + j))
+        if nodes[store].kind != .assign or nodes[store].op != i32(int(Tok.assign)) or nodes[store].aux != 0 or not exr_field(int(nodes[store].a), array, index) or not math_local_is(exl_strip(int(nodes[store].b)), l): return []
+        plan.push(l)
+    exr_plans[f] = plan
+    plan
+
+exr_loop = (s: int) -> bool:
+    if not exact_lower_active or dbg_on or target_wasm or target_arm64 or partition_active or exr_call_target != 0 or nodes[s].aux != 0: return false
+    body = int(nodes[s].b)
+    if nkids(body) != 2: return false
+    call = exr_stmt(kid(body, 0))
+    if nodes[call].kind != .call or nodes[call].aux != 0 or nkids(call) != 1: return false
+    f = int(nodes[call].sym)
+    cond = int(nodes[s].a)
+    if nodes[cond].kind != .binary or nodes[cond].aux != 0 or nodes[cond].op != i32(int(Tok.lt)): return false
+    counter = scan_local(int(nodes[cond].a))
+    if counter < 0 or not scan_word(int(nodes[cond].a)) or not scan_bound(int(nodes[cond].b), counter) or not scan_inc(exr_stmt(kid(body, 1)), counter): return false
+    array = kid(call, 0)
+    if nodes[array].kind != .ident or nodes[array].aux != i32(int(SK.local)): return false
+    l = int(nodes[array].sym)
+    if l == counter or int(locals[l].flags) & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_ALIAS | LF_EXPOSED) != 0: return false
+    if exr_plan(f).len() == 0: return false
+    pointer = read_place(gen_place(array, false), ntype(array))
+    length = arr_len(pointer)
+    words = e_bin(.mul, VI, length, e_iconst(tsize(telem(ntype(array))) / 8))
+    combined = vreg(VI); e_mov(combined, e_iconst(0))
+    index = vreg(VI); e_mov(index, e_iconst(0))
+    blk(); brif_to(e_bin(.ges, VI, index, words), ctl); lop()
+    value = e_load(VI, e_bin(.add, VI, pointer, e_bin(.shl, VI, index, e_iconst(3))), 24, 8)
+    e_mov(combined, e_bin(.or_, VI, combined, e_bin(.add, VI, value, e_iconst(EXR_BOUND))))
+    e_mov(index, e_addi(index, 1)); brif_to(e_bin(.lts, VI, index, words), ctl)
+    endc(); endc()
+    iff(e_bin(.ltu, VI, combined, e_iconst(EXR_BOUND * 2)))
+    exr_call_target = f
+    gen_while_scalar(s)
+    exr_call_target = 0
+    els()
+    gen_while_scalar(s)
+    endc()
+    true

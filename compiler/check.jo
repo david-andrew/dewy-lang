@@ -3696,7 +3696,7 @@ compound_checked = (s: int, left: int, right: int, target: int) -> int:
         nodes[int_update_lhs].name = nodes[left].name
         if nodes[left].name == 0: nodes[int_update_lhs].name = if nodes[left].aux == i32(int(SK.local)): locals[int(nodes[left].sym)].name else: globals[int(nodes[left].sym)].name
         int_update_pos = nodes[s].pos
-    result = prune(check_expr(n, 0))
+    result = prune(check_expr(n, (if has_flag(s, NF_BROADCAST): target else: 0)))
     quantity_update_right = 0
     if is_quantity(target) and quantity_point(target) and quantity_is_delta(result): fatal(nodes[s].pos, "this update leaves a difference, not a temperature point, so the point cannot hold it: subtract a difference (`5K`), or keep the difference in a new binding")
     quantity_float_update(s, target, result)

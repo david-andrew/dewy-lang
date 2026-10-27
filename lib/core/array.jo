@@ -84,6 +84,7 @@ count[T] = (xs: T[], f: (T) -> bool) -> int:
     n
 
 sum[T] = (xs: T[]) -> T:
+    when __integer_mode(T) == -2: return __mi_sum(xs)
     s: T
     when size_of(T) == 8 and __integer_mode(T) >= 0 and __integer_mode(T) < 2:
         # A vectorizable census proves every scalar prefix fits, not merely

@@ -27,6 +27,24 @@ __mi_unsigned = (value: u64) -> __dewy_int:
     if value <= u64(9223372036854775807): return __mi_word(int(value))
     __mi_pack(__bi._big(value))
 
+# Materialize a finite signed two's-complement value at the mathematical-int
+# ABI boundary. The borrowed words live in the caller's stack, low word first.
+__mi_words = (words: *u64, count: int) -> __dewy_int:
+    negative = (words[count - 1] >> 63) != 0
+    limbs: u64[]
+    limbs.reserve(count * 2)
+    carry: u64 = u64(int(negative))
+    loop i in [0..count):
+        word = words[i]
+        if negative:
+            word = ~word
+            next = word + carry
+            carry = u64(int(next < word))
+            word = next
+        limbs.push(word & 4294967295)
+        limbs.push(word >> 32)
+    __mi_pack(__bi._pack(negative, limbs))
+
 __mi_slow = (a: __dewy_int, b: __dewy_int, operation: int) -> __dewy_int:
     x = __mi_big(a)
     y = __mi_big(b)
@@ -275,3 +293,21 @@ __mi_requirement_fail = (requirement: str, loc: str, left: str, a: __dewy_int, r
         observed = observed + "{right} was " + __mi_text(b)
     if len(observed) == 0: __panic("{loc}: {requirement}")
     __panic("{loc}: {requirement} (observed: {observed})")
+
+# Try a SIMD-friendly reduction over immediate signed 32-bit elements. The
+# modular candidate is used only if the census proves every prefix fits the
+# signed 63-bit payload: (2^31-1) terms of magnitude at most 2^31.
+__mi_sum = (xs: __dewy_int[]) -> __dewy_int:
+    n = xs.len()
+    if n <= 2147483647:
+        bits: u64 = 0
+        candidate: int = 0
+        words = ((xs as *u8) + 24) as *u64
+        loop i in [0..n):
+            word = words[i]
+            candidate += word as int
+            bits |= (word + u64(4294967296)) | ((word & u64(1)) << 33)
+        if bits < u64(8589934592): return candidate as __dewy_int
+    result: __dewy_int = 0
+    loop x in xs: result += x
+    result

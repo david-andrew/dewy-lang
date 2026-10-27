@@ -302,7 +302,7 @@ refine_storage = (n: int, fallback: int) -> int:
         if types[t].kind == .tuple and nodes[n].aux == -2: return targ(t, nodes[n].ival)
         if types[t].kind == .struct_ and nodes[n].aux >= 0:
             return int(fields[int(structs[int(types[t].st)].fields) + int(nodes[n].aux)].type)
-    if nodes[n].kind == .index:
+    if nodes[n].kind == .index and nodes[n].aux == 0:
         t = representation_type(ntype(int(nodes[n].a)))
         if types[t].kind == .array or types[t].kind == .fixed: return int(types[t].elem)
     if nodes[n].kind == .ident:

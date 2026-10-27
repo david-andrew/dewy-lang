@@ -772,17 +772,28 @@ unimplemented.
 
 `int` is the mathematical integer type, distinct from `int64` in signatures,
 containers and generic arguments. Unannotated integer literals default to `int`.
-Arithmetic is arbitrary precision: word-sized values promote to a big integer
-when their exact result exceeds the signed 64-bit range. `int` has no `.min` or `.max` members.
+Arithmetic is arbitrary precision: results grow as needed. `int` has no `.min`
+or `.max` members.
 
 Explicit `int8` through `int64` and `uint8` through `uint64` have exact
-arithmetic; their widths describe storage. Intermediates use sufficiently wide
-machine words, including statically sized multiword values, without allocating
-big integers. A store into a binding, field, element, parameter or result narrows:
-a proven fit costs nothing; otherwise a runtime check requires an opt-in.
-`$runtime_checks=false` and `$no_hidden_costs` reject an unproven narrowing with
-suggestions to add a guard or choose an overflow policy. `$runtime_checks` permits
-the check except under `$no_hidden_costs`.
+arithmetic; their widths describe storage. Plain `int64` arithmetic yields `int`,
+including negation, `abs`, floor division, remainder, powers and shifts.
+An unannotated arithmetic local therefore stays `int`: `let total = a+b` does
+not require the sum to fit `int64`, even when both operands are `int64`.
+Only narrowing into a fixed-width binding, field, element, parameter or return
+requires a fit proof. A proven fit costs nothing; otherwise a runtime check
+requires an opt-in. `$runtime_checks=false` and `$no_hidden_costs` reject an
+unproven narrowing and offer three fixes: widen the destination to `int`, state
+the domain as a refinement (or prove it with a guard), or choose
+`overflow='wrap'|'saturate'`. `$runtime_checks` permits the check except under
+`$no_hidden_costs`.
+
+When their bounds are proven, nonescaping `int` locals can stay in machine
+registers. Fixed-width expressions consumed
+immediately by another operation or narrowing can use statically sized multiword
+intermediates without allocating a big integer. A result that needs arbitrary
+precision uses `int`'s bigint path; `$no_hidden_costs` reports that possible
+allocation rather than introducing a fit obligation at the arithmetic.
 
 By default, the counter-progress axiom assumes additive updates of 64-bit
 counters and accumulators by a bounded machine-word amount cannot overflow.
@@ -795,16 +806,19 @@ increment. `$no_assumed_bounds` disables this axiom and the array-length bound
 (at most 2^56 bytes) in its scope, requiring ordinary proofs or explicitly
 allowed runtime checks.
 
-An expression whose required width cannot be bounded by facts
-is a compile error. For a left shift or power, guard the count/exponent, compute
-in explicit `int`, or choose an overflow policy type. A bounded expression uses
+For fixed-width arithmetic that does not yield `int`, an expression whose
+required width cannot be bounded by facts is a compile error. For a left shift
+or power, guard the count/exponent, compute in explicit `int`, or choose an
+overflow policy type. Plain `int64` shifts and powers can use arbitrary precision
+when their count or exponent is not statically bounded. A bounded expression uses
 statically sized words even when its intermediate exceeds the eventual store. Floating types are `float32` and `float64`; text is `string`. The
 implementation's short names (`i64`, `u8`, `f64`, `str`, `byte`) are rejected. Literals in an explicit
 numeric context must fit that type exactly. A call parameter supplies that context
 to `if` and `match` branch values, just as a binding annotation does. In `=?`
 and `not=?`, array, record and dictionary literals take their element or field
 types from the typed operand on either side. Mixed `int`/fixed-width arithmetic
-uses `int`; a literal beside a fixed-width operand can take that operand's type.
+uses `int`; a literal beside a fixed-width operand can take that operand's type,
+without making an `int64` arithmetic result narrow.
 Implicit conversions involving `int` preserve the value; narrowing an `int` to a
 fixed width is the same proven conversion as a narrowing between fixed widths
 (below), an `int` index's being its bounds check (a known constant failure is a
@@ -1139,19 +1153,18 @@ Integer `/` produces an exact fraction; `/` with a floating operand uses floatin
 and `kind='euclid'` a remainder that is never negative; `kind='floor'`, the
 default, is `%`. It takes `int` and `int64` operands, and a divisor proven
 nonzero, as `%` does; `mod(x y)` of floats is floored.
-`int` division of the minimum stored word by −1 overflows; its remainder is zero.
-Mathematical shifts reject negative counts. A right shift of at least 64 bits
-returns the sign continuation (zero or −1); a left shift that cannot fit fails,
-except that shifting zero by any nonnegative count remains zero.
-Literals outside the checked `int` range need an explicit fixed-width context
-that fits, or `int` (`bigint`).
+`int64.min // (-1)` is the exact `int` value 9223372036854775808; its remainder
+is zero. Shifts of mathematical `int` operands reject negative counts. A right
+shift beyond the value's significant bits returns the sign continuation (zero
+or −1); a left shift produces the exact value, using a bigint when necessary.
 
 For fixed-width integers, shift counts are unsigned: a negative literal count
 is an error, and a negative runtime count acts as a huge one. A right shift by
 at least the width gives `0` for unsigned `>>` and the sign (`0` or `-1`) for
-signed `>>`: `int64(-2) >> 64` is `-1`. A plain fixed-width `<<` is exact, so its
-result must fit the type, an obligation like any other arithmetic
-(`uint64(1) << 64` is a compile error by default); a wrapping type keeps the low
+signed `>>`: `int64(-2) >> 64` is `-1`. Plain `int64` shifts return `int`, so
+`int64(1) << 64` is 18446744073709551616. Other plain fixed-width shifts remain
+exact intermediates that must fit when stored (`uint64(1) << 64` cannot be stored
+in `uint64` without an overflow policy); a wrapping type keeps the low
 bits, so `uint64<overflow='wrap'>(1) << 64` is `0`.
 
 Comparisons use `=?`, `<?`, `>?`, `<=?` and `>=?`. Comparisons chain in one

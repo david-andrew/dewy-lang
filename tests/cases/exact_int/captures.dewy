@@ -1,0 +1,18 @@
+#
+$runtime_checks
+make=(a:int64)=>{let word=a+0; return ()=>word}
+nested=(a:int64)=>{let word=a+0; return ()=>{let inner=()=>word; inner()}}
+private=(a:int64)=>{
+ let word=a+0
+ let step=($capture word)=>{word+=1; word}
+ let other=@step
+ printl(step() step() other())
+}
+main=()=>{
+ let inputs:array<int64>=[int64.min 0 int64.max]
+ loop a in inputs {
+  let read=make(a) let other=@read
+  printl(read() other() nested(a)())
+  private(a)
+ }
+}

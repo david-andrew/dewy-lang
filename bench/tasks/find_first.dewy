@@ -9,7 +9,7 @@ scan=(g:TaskGroup values:array<int64> first:int64 last:int64 wanted:int64 found:
 }
 main=(args:array<string>)=>{
  let n=size_argument(args 1000000)
- let values=[loop i in [0..n) i*17]
+ let values:array<int64>=[loop i in [0..n) i*17]
  let found=atomic(-1)
  let signaled=atomic(0)
  let start=clock()

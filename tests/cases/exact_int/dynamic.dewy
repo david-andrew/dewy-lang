@@ -1,0 +1,8 @@
+#
+$runtime_checks
+power=(a:int64 b:int64):>int=>a^b
+shift=(a:int64 b:uint64):>int=>a<<b
+printl"{power(2 100)} {shift(1 100)}"
+
+zero=(n:int):>int=>int64(0)<<n
+printl(zero(-1) zero(-(1<<100)))

@@ -1,4 +1,7 @@
+use 'exact_reset_loop.jo'
 use 'ir_types.dewy'
+use 'isolation.jo'
+use 'watch.jo'
 use 'checker_state.dewy'
 use 'checker_tokens.dewy'
 use 'facts.jo'
@@ -38,6 +41,7 @@ math_word = (word: int) -> Val:
 # Existing scalar domains prove narrow inputs fit the immediate payload.
 # Local/range upper bounds are demanded only at an actual tagged boundary.
 math_pack_word = (e: int, word: int) -> Val:
+    if exact_small_math(e) >= 0: return V(e_bin(.shl, VI, word, e_iconst(1)), false)
     t = representation_type(ntype(e))
     if t != T_MATH_INT and is_int(t) and types[t].bits < 63:
         bound = fact_domain(t)
@@ -192,12 +196,16 @@ math_main = (f: int):
 
 math_word_bound = (e: int) -> bool:
     if e == 0: return false
+    if e < exact_ranges.len() and exact_ranges[e] > 0 and exact_ranges[e] <= 64: return true
     # An expanded fixed-width expression keeps its storage type in the AST.
     # That type cannot justify discarding its high words at an int boundary.
-    if exact_has_node(e): return exact_bits(e) <= 64
+    if exact_has_node(e):
+        if exact_bits(e) <= 64: return true
+        return not exact_count_bound(e).wide
     t = prune(ntype(e))
     if t != T_MATH_INT: return is_int(t) and (types[t].sign or int(types[t].bits) < 64)
     if nodes[e].kind == .int_lit: return not has_flag(e, NF_U64) or nodes[e].ival >= 0
+    if not exact_count_bound(e).wide: return true
     if nodes[e].kind == .conv and nodes[e].aux == i32(int(CV.int_)): return math_word_bound(int(nodes[e].a))
     false
 
@@ -272,7 +280,250 @@ gen_math_for = (s: int):
 
 # Local representation proofs are scoped to an unmodified bounded induction
 # variable. Semantic types and escaping values still use the stable boundary.
+# Immutable captured ints with a proven signed-word domain use a raw word in
+# the private environment. Selection happens once at ordinary environment
+# layout; generic shared layouts retain their established representation.
+# The local-indexed table and cached initializer bounds cost O(captures +
+# demanded initializer nodes), with no scan of unrelated function bodies.
+math_word_captures: {int: bool}
+math_prepare_capture = (l: int):
+    if prune(int(locals[l].type)) != T_MATH_INT or dbg_on or watch_build: return
+    fl = int(locals[l].flags)
+    if fl & (LF_CAPTURE | LF_VALUECAP) != LF_CAPTURE | LF_VALUECAP or fl & (LF_ASSIGNED | LF_ADDR | LF_EXPOSED | LF_SHARED | LF_ALIAS | LF_BYREF | LF_OWNERBORROW | LF_PARTBORROW) != 0: return
+    n = mk_ident_local(l, locals[l].pos)
+    if not exact_count_bound(n).wide: math_word_captures[l] = true
+
 math_word_regs: {int: int}
+
+# Nonescaping int locals with finite source widths use a vector of registers.
+# Demand starts at a declaration; its indexed writes must preserve the initial
+# width. No growing recurrence is guessed. Expression traversal has a fixed
+# depth budget, and width is capped at four words; other values stay tagged.
+math_static_regs: {int: int[]}
+math_static_widths: {int: int}
+
+math_static_bits = (n: int, depth: int = 0) -> int:
+    if n == 0 or depth > 32: return 0
+    if math_proven_word(n): return 64
+    if math_local_is(n, int(nodes[n].sym)):
+        if let width = math_static_widths.get(int(nodes[n].sym)): return width
+    if exact_has_node(n): return exact_bits(n)
+    if is_int(ntype(n)) and prune(ntype(n)) != T_MATH_INT: return exact_bits(n)
+    k = nodes[n].kind
+    if k == .int_lit: return if has_flag(n, NF_U64) and nodes[n].ival < 0: 65 else: 64
+    if k == .conv and (nodes[n].aux == i32(int(CV.int_)) or nodes[n].aux == i32(int(CV.none_))): return math_static_bits(int(nodes[n].a), depth + 1)
+    if k == .binary and nodes[n].aux == 0:
+        a = math_static_bits(int(nodes[n].a), depth + 1)
+        b = math_static_bits(int(nodes[n].b), depth + 1)
+        if a == 0 or b == 0: return 0
+        op = nodes[n].op as Tok
+        if op == .plus or op == .minus: return max(a, b) + 1
+        if op == .star: return a + b
+        if op == .amp or op == .pipe or op == .caret: return max(a, b)
+    if k == .call and nodes[n].aux == 0:
+        helper = fact_floor_call(n)
+        if helper == 3 or helper == 4:
+            a = math_static_bits(kid(n, 0), depth + 1)
+            known, amount = integer_constant(kid(n, 1))
+            if a > 0 and known and amount >= 0:
+                if helper == 3: return max(1, a - amount)
+                return min(a, exact_type_width(kid(n, 1)) / 2)
+    if k == .unary:
+        a = math_static_bits(int(nodes[n].a), depth + 1)
+        return if a > 0: a + int(nodes[n].op == i32(int(Tok.minus))) else: 0
+    if k == .block and nodes[n].aux != 0: return math_static_bits(block_value(n), depth + 1)
+    if k == .if_:
+        a = math_static_bits(int(nodes[n].b), depth + 1)
+        b = math_static_bits(int(nodes[n].c), depth + 1)
+        return if a > 0 and b > 0: max(a, b) else: 0
+    0
+
+math_static_value = (n: int) -> int[]:
+    if math_local_is(n, int(nodes[n].sym)):
+        if let words = math_static_regs.get(int(nodes[n].sym)):
+            out: int[]
+            loop word in words: out.push(freeze_scalar(word, T_INT))
+            return out
+    if math_proven_word(n): return [freeze_scalar(math_word_expr(n), T_INT)]
+    if exact_has_node(n) or prune(ntype(n)) != T_MATH_INT: return exact_value(n)
+    k = nodes[n].kind
+    if k == .int_lit: return [e_iconst(nodes[n].ival), e_iconst(0)]
+    if k == .conv: return math_static_value(int(nodes[n].a))
+    count = (math_static_bits(n) + 63) / 64
+    if k == .unary:
+        words = math_static_value(int(nodes[n].a))
+        if nodes[n].op == i32(int(Tok.minus)): return exact_neg(words, count)
+        if nodes[n].op == i32(int(Tok.tilde)):
+            loop i in [0..words.len()): words[i] = e_un(.not_, VI, words[i])
+        return words
+    if k == .binary:
+        a = math_static_value(int(nodes[n].a)); b = math_static_value(int(nodes[n].b))
+        op = nodes[n].op as Tok
+        if op == .plus or op == .minus: return exact_add(a, b, count, op == .minus)
+        if op == .star: return exact_mul(a, b, count)
+        a = exact_extend(a, count); b = exact_extend(b, count)
+        out: int[]
+        loop i in [0..count): out.push(e_bin(int_op(op, true), VI, a[i], b[i]))
+        return out
+    if k == .call:
+        a = math_static_value(kid(n, 0))
+        known, amount = integer_constant(kid(n, 1))
+        if fact_floor_call(n) == 4: return [e_bin(.and_, VI, a[0], e_iconst(amount))]
+        return exact_extend(exact_shift_literal(a, amount, a.len(), true), count)
+    if k == .block:
+        scope_push()
+        out: int[]
+        loop i in [0..nkids(n)):
+            statement = kid(n, i)
+            if i == nkids(n) - 1:
+                stmt_begin()
+                loop word in math_static_value(int(nodes[statement].a)): out.push(freeze_scalar(word, T_INT))
+                stmt_end()
+            else: gen_stmt(statement)
+        scope_pop()
+        return out
+    out: int[]
+    loop i in [0..count): out.push(vreg(VI))
+    iff(gen_expr(int(nodes[n].a)).v)
+    yes = exact_extend(math_static_value(int(nodes[n].b)), count)
+    loop i in [0..count): e_mov(out[i], yes[i])
+    els()
+    no = exact_extend(math_static_value(int(nodes[n].c)), count)
+    loop i in [0..count): e_mov(out[i], no[i])
+    endc()
+    out
+
+# A bounded reset guard observes only whether a fresh exact value is outside
+# an interval of words. An overflow can use the interval's upper endpoint as
+# a temporary representative: either value selects the reset arm. The sole
+# write replaces it with a word before any other use can observe it.
+# Demand is one nonescaping declaration; the existing local-indexed writes
+# require one reset. At most eight following statements / 128 syntax nodes
+# are inspected, O(1) bounded work per candidate and no whole-body read scan.
+math_reset_unused = (n: int, l: int, budget: mut int) -> bool:
+    if n == 0: return true
+    budget -= 1
+    if budget < 0: return false
+    k = nodes[n].kind
+    if math_local_is(n, l): return false
+    if k == .lambda or k == .fn_ or k == .defer_ or k == .return_ or k == .break_ or k == .continue_ or k == .for_ or k == .while_: return false
+    mask = isolation_children(k)
+    if mask < 0: return false
+    if mask & 1 != 0 and not math_reset_unused(int(nodes[n].a), l, budget): return false
+    if mask & 2 != 0 and not math_reset_unused(int(nodes[n].b), l, budget): return false
+    if mask & 4 != 0 and not math_reset_unused(int(nodes[n].c), l, budget): return false
+    if mask & 16 != 0:
+        loop child in kids(n):
+            if not math_reset_unused(child, l, budget): return false
+    if mask & 32 != 0:
+        loop child in kids2(n):
+            if not math_reset_unused(child, l, budget): return false
+    true
+
+math_reset_interval = (n: int, l: int) -> (bool, int):
+    if nodes[n].kind != .or_: return (false, 0)
+    left = int(nodes[n].a); right = int(nodes[n].b)
+    if nodes[left].kind != .binary or nodes[right].kind != .binary or nodes[left].aux != 0 or nodes[right].aux != 0: return (false, 0)
+    if nodes[left].op != i32(int(Tok.lt)) or nodes[right].op != i32(int(Tok.ge)): return (false, 0)
+    if not math_local_is(word_integer_value(int(nodes[left].a)), l) or not math_local_is(word_integer_value(int(nodes[right].a)), l): return (false, 0)
+    known_lo, lo = integer_constant(int(nodes[left].b))
+    known_hi, hi = integer_constant(int(nodes[right].b))
+    if not known_lo or not known_hi or lo >= hi or has_flag(int(nodes[left].b), NF_U64) or has_flag(int(nodes[right].b), NF_U64): return (false, 0)
+    if exact_count_bound(int(nodes[left].b)).wide or exact_count_bound(int(nodes[right].b)).wide: return (false, 0)
+    (true, hi)
+
+math_reset_local_decl = (s: int) -> bool:
+    l = int(nodes[s].sym)
+    if prune(int(locals[l].type)) != T_MATH_INT or dbg_on or target_wasm or cur_block == 0 or kid(cur_block, cur_block_i) != s: return false
+    fl = int(locals[l].flags)
+    if fl & LF_ASSIGNED == 0 or fl & (LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_QUIET | LF_EXPOSED | LF_SOAELEM | LF_ELEMALIAS) != 0: return false
+    init = word_integer_value(int(nodes[s].b))
+    if nodes[init].kind != .binary or nodes[init].aux != 0: return false
+    op = nodes[init].op as Tok
+    if op != .plus and op != .minus and op != .star: return false
+    a = int(nodes[init].a); b = int(nodes[init].b)
+    if not math_proven_word(a) or not math_proven_word(b): return false
+    math_prepare_writes()
+    writes = math_writes.get(l) ?? []
+    if writes.len() != 1 or writes[0].1 != 0: return false
+    reset = writes[0].0
+    if nodes[reset].op != i32(int(Tok.assign)) or nodes[reset].aux != 0 or not math_proven_word(int(nodes[reset].b)): return false
+    budget = 128
+    loop i in [cur_block_i + 1..min(nkids(cur_block), cur_block_i + 9)):
+        next = kid(cur_block, i)
+        if nodes[next].kind == .exprstmt: next = int(nodes[next].a)
+        if nodes[next].kind == .if_:
+            known, replacement = math_reset_interval(int(nodes[next].a), l)
+            if known:
+                otherwise = int(nodes[next].c)
+                if otherwise != 0 and (nodes[otherwise].kind != .block or nkids(otherwise) != 0): return false
+                body = int(nodes[next].b)
+                if nodes[body].kind != .block or nkids(body) == 0 or kid(body, nkids(body) - 1) != reset: return false
+                loop j in [0..nkids(body) - 1):
+                    if not math_reset_unused(kid(body, j), l, budget): return false
+                av = freeze_scalar(math_word_expr(a), T_INT)
+                bv = freeze_scalar(math_word_expr(b), T_INT)
+                word = vreg(VI)
+                e_mov(word, e_bin((if op == .plus: Op.add else if op == .minus: Op.sub else: Op.mul), VI, av, bv))
+                if not exr_fast or not exr_locals.contains(l):
+                    iff(e_bin((if op == .plus: Op.overflow_add else if op == .minus: Op.overflow_sub else: Op.overflow_mul), VI, av, bv))
+                    e_mov(word, e_iconst(replacement))
+                    endc()
+                math_word_regs[l] = word
+                return true
+        if not math_reset_unused(next, l, budget): return false
+    false
+
+math_static_local_decl = (s: int) -> bool:
+    l = int(nodes[s].sym)
+    if prune(int(locals[l].type)) != T_MATH_INT or dbg_on and exact_local_width(l) == 0: return false
+    fl = int(locals[l].flags)
+    if fl & (LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_QUIET | LF_EXPOSED | LF_SOAELEM | LF_ELEMALIAS) != 0: return false
+    init = int(nodes[s].b)
+    width = math_static_bits(init)
+    if width <= 0 or width > 256: return false
+    math_static_widths[l] = width
+    if fl & LF_ASSIGNED != 0:
+        math_prepare_writes()
+        writes = math_writes.get(l) ?? []
+        if writes.len() == 0:
+            math_static_widths.remove(l)
+            return false
+        loop pair in writes:
+            w = math_static_bits(int(nodes[pair.0].b))
+            if nodes[pair.0].op != i32(int(Tok.assign)) or nodes[pair.0].aux != 0 or w <= 0 or w > width:
+                math_static_widths.remove(l)
+                return false
+    words = exact_extend(math_static_value(init), (width + 63) / 64)
+    regs: int[]
+    loop word in words:
+        r = vreg(VI)
+        e_mov(r, word)
+        regs.push(r)
+    math_static_regs[l] = regs
+    true
+
+math_static_narrow = (n: int, to: int) -> Val:
+    if to == T_INT and math_proven_word(n): return V(math_word_expr(n), false)
+    # A direct word operation narrowed to int64 has the same checked IR as
+    # fixed storage. Loop guards can discharge that boundary without tagging.
+    if to == T_INT and nodes[n].kind == .binary and nodes[n].aux == 0:
+        op = nodes[n].op as Tok
+        a = int(nodes[n].a); b = int(nodes[n].b)
+        if (op == .plus or op == .minus or op == .star) and math_proven_word(a) and math_proven_word(b):
+            av = freeze_scalar(math_word_expr(a), T_INT); bv = math_word_expr(b)
+            result = vreg(VI)
+            emit((if op == .plus: Op.checked_add else if op == .minus: Op.checked_sub else: Op.checked_mul), VI, result, av, bv, 0, rt("__int_overflow"))
+            return V(result, false)
+    words = math_static_value(n)
+    normalized = norm(words[0], to)
+    bad = e_bin(.ne, VI, normalized, words[0])
+    sign = if types[to].sign: e_bin(.shrs, VI, normalized, e_iconst(63)) else: e_iconst(0)
+    loop i in [1..words.len()): bad = e_bin(.or_, VI, bad, e_bin(.ne, VI, words[i], sign))
+    if not types[to].sign and words.len() == 1: bad = e_bin(.or_, VI, bad, e_bin(.lts, VI, words[0], e_iconst(0)))
+    math_int_guard(bad)
+    V(normalized, false)
+
 
 math_proven_word = (e: int) -> bool:
     if math_word_updates.has(e): return true
@@ -332,7 +583,10 @@ math_word_expr = (e: int) -> int:
     k = nodes[e].kind
     if k == .int_lit: return e_iconst(nodes[e].ival)
     if k == .ident and nodes[e].aux == i32(int(SK.local)):
-        if let word = math_word_regs.get(int(nodes[e].sym)): return word
+        l = int(nodes[e].sym)
+        if let word = math_word_regs.get(l): return word
+        if let words = math_static_regs.get(l): return words[0]
+        if math_word_captures.has(l): return read_place(local_place(l, false), T_INT)
     if k == .conv and nodes[e].aux == i32(int(CV.int_)): return math_word_expr(int(nodes[e].a))
     if k == .unary and nodes[e].op == i32(int(Tok.minus)): return e_un(.neg, VI, math_word_expr(int(nodes[e].a)))
     if k == .if_:
@@ -349,6 +603,8 @@ math_word_expr = (e: int) -> int:
         b = e_iconst(nodes[kid(e, 1)].ival)
         if helper == 1: return e_bin(.and_, VI, a, b)
         if helper == 2: return e_bin(.shrs, VI, a, b)
+        if positive_bound(kid(e, 0), true) >= 0:
+            return e_bin((if helper == 3: Op.remu else: Op.divu), VI, a, b)
         r = e_bin(.rems, VI, a, b)
         if helper == 3:
             result = vreg(VI)
@@ -365,11 +621,14 @@ math_word_expr = (e: int) -> int:
         return result
     if k == .binary and nodes[e].aux == 0:
         if nodes[e].op == i32(int(Tok.amp)):
-            return e_bin(.and_, VI, math_low_word(int(nodes[e].a)), math_low_word(int(nodes[e].b)))
-        a = math_word_expr(int(nodes[e].a))
+            a = freeze_scalar(math_low_word(int(nodes[e].a)), T_INT)
+            return e_bin(.and_, VI, a, math_low_word(int(nodes[e].b)))
+        a = freeze_scalar(math_word_expr(int(nodes[e].a)), T_INT)
         b = math_word_expr(int(nodes[e].b))
         return e_bin(int_op(nodes[e].op as Tok, true), VI, a, b)
-    math_signed(gen_borrowed(e).v)
+    value = gen_borrowed(e).v
+    if exact_small_math(e) >= 0: return math_untag(value)
+    math_signed(value)
 
 math_word_helper = (e: int) -> int:
     if nodes[e].kind != .call or nodes[e].aux != 0 or nkids(e) != 2: return 0
@@ -468,6 +727,15 @@ math_index_site = (n: int, enclosing: mut int[]):
         if l > 0 and (prune(int(locals[l].type)) == T_MATH_INT or prune(int(locals[l].type)) == T_INT): math_decl_depth[l] = enclosing.len()
     if k == .assign:
         a = int(nodes[n].a)
+        # Tuple writes use the ordinary place ABI. Record them as unsupported
+        # writes so a direct assignment elsewhere cannot hide the mutation.
+        if nodes[a].kind == .tuple:
+            loop target in kids(a):
+                if nodes[target].kind == .ident and nodes[target].aux == i32(int(SK.local)):
+                    l = int(nodes[target].sym)
+                    writes = math_writes.get(l) ?? []
+                    writes.push((n, -2))
+                    math_writes[l] = writes
         if nodes[a].kind == .ident and nodes[a].aux == i32(int(SK.local)):
             l = int(nodes[a].sym)
             if enclosing.len() > 0 and prune(ntype(a)) == T_MATH_INT:
@@ -614,11 +882,90 @@ math_guard_limit = (c: int, l: int) -> int:
     if op == .lt: end -= 1
     max(end, 0)
 
+# Prove a word invariant from the indexed writes, including resetting counters:
+# i = if i < limit i+1 else 0. Each update is guarded at the update itself, so
+# multiple writes and nested loops are safe. O(written expression nodes), with
+# no scan of unrelated statements and no assumptions about escaping locals.
+math_guarded_word = (n0: int, l: int, condition: int = 0, holds: bool = true, depth: int = 0) -> bool:
+    if depth > 32: return false
+    n = n0
+    loop nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.int_)): n = int(nodes[n].a)
+    if nodes[n].kind == .block and nodes[n].aux != 0:
+        # Statements before the value may change the guarded local.
+        if nkids(n) != 1: return false
+        return math_guarded_word(block_value(n), l, condition, holds, depth + 1)
+    if math_local_is(n, l): return true
+    if nodes[n].kind == .if_:
+        return math_guarded_word(int(nodes[n].b), l, int(nodes[n].a), true, depth + 1) and math_guarded_word(int(nodes[n].c), l, int(nodes[n].a), false, depth + 1)
+    if math_proven_word(n): return true
+    if condition == 0 or nodes[n].kind != .binary or nodes[n].aux != 0: return false
+    op = nodes[n].op as Tok
+    if op != .plus and op != .minus or not math_local_is(fact_progress_strip(int(nodes[n].a)), l): return false
+    known, step = integer_constant(int(nodes[n].b))
+    if not known or step != 1: return false
+    if nodes[condition].kind != .binary or nodes[condition].aux != 0: return false
+    cmp = nodes[condition].op as Tok
+    a = fact_progress_strip(int(nodes[condition].a)); b = int(nodes[condition].b)
+    if not math_local_is(a, l): return false
+    if not plain_read(b) or not math_proven_word(b): return false
+    if op == .plus: return holds and cmp == .lt or not holds and cmp == .ge
+    holds and cmp == .gt or not holds and cmp == .le
+
+# Prove [0, limit] inductive over every indexed write. Hypothetical bounds
+# remain on this recursion's stack, never in the shared expression caches.
+# O(written expression edges x loop depth), bounded to 32 expression levels.
+math_recurrence_bound = (n: int, l: int, limit: int, loop_: int, depth: int = 0) -> int:
+    if n == 0 or depth > 32: return -1
+    if math_local_is(n, l): return limit
+    k = nodes[n].kind
+    if k == .conv and nodes[n].aux == i32(int(CV.int_)):
+        return math_recurrence_bound(int(nodes[n].a), l, limit, loop_, depth + 1)
+    if k == .ident and nodes[n].aux == i32(int(SK.local)):
+        at = loop_
+        loop at > 0:
+            if nodes[at].kind == .for_ and nodes[at].aux == 0 and nodes[at].sym == nodes[n].sym and stable_loop_index(int(nodes[n].sym)):
+                it = int(nodes[at].a)
+                if nodes[it].kind != .range: return -1
+                start = int(nodes[it].a)
+                end = exact_count_bound(int(nodes[it].b))
+                if nodes[start].kind == .int_lit and nodes[start].ival == 0 and not has_flag(it, NF_STEP) and not end.wide and end.lo >= 0: return end.hi
+            at = math_loop_parent.get(at) ?? 0
+    bound = exact_count_bound(n)
+    if not bound.wide and bound.lo >= 0: return bound.hi
+    if k == .binary and nodes[n].aux == 0 and nodes[n].op == i32(int(Tok.plus)):
+        a = math_recurrence_bound(int(nodes[n].a), l, limit, loop_, depth + 1)
+        b = math_recurrence_bound(int(nodes[n].b), l, limit, loop_, depth + 1)
+        if a >= 0 and b >= 0 and a <= 9223372036854775807 - b: return a + b
+    if k == .call and nodes[n].aux == 0 and nkids(n) == 2:
+        f = int(nodes[n].sym)
+        if f <= 0: return -1
+        d = int(fns[f].decl)
+        if d == 0 or files[pos_file(nodes[d].pos)].path != lib_dir + "/math_int.jo" or name_of(int(nodes[d].name)) != "__floor_div": return -1
+        known, divisor = integer_constant(kid(n, 1))
+        if not known or divisor <= 0: return -1
+        a = math_recurrence_bound(kid(n, 0), l, limit, loop_, depth + 1)
+        if a >= 0: return a / divisor
+    -1
+
+math_recurrence_limit = (s: int, writes: (int, int)[]) -> int:
+    initial = exact_count_bound(int(nodes[s].b))
+    if initial.wide or initial.lo < 0: return -1
+    l = int(nodes[s].sym)
+    loop pair in writes:
+        w = pair.0
+        if nodes[w].op != i32(int(Tok.assign)) or nodes[w].aux != 0: return -1
+        bound = math_recurrence_bound(int(nodes[w].b), l, initial.hi, math_write_loop.get(w) ?? 0)
+        if bound < 0 or bound > initial.hi: return -1
+    initial.hi
+
 math_word_local_decl = (s: int) -> bool:
     l = int(nodes[s].sym)
     if prune(int(locals[l].type)) != T_MATH_INT or dbg_on: return false
     fl = int(locals[l].flags)
-    if fl & (LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_QUIET | LF_EXPOSED | LF_SOAELEM | LF_ELEMALIAS) != 0: return false
+    if fl & (LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_EXPOSED | LF_SOAELEM | LF_ELEMALIAS) != 0: return false
+    # Generated loop bindings are ordinary immutable copies. Mutable quiet
+    # bindings can have implicit writes absent from the assignment index.
+    if fl & (LF_QUIET | LF_ASSIGNED) == LF_QUIET | LF_ASSIGNED: return false
     init = int(nodes[s].b)
     if init == 0 or not math_proven_word(init): return false
     limit = positive_bound(init, true)
@@ -630,7 +977,11 @@ math_word_local_decl = (s: int) -> bool:
         if writes.len() == 0: return false
         limit = math_counter_limit(s, writes)
         if limit < 0: limit = math_length_counter_limit(s, writes)
-        if limit < 0 and not math_decrement_counter(s, writes): return false
+        if limit < 0: limit = math_recurrence_limit(s, writes)
+        if limit < 0 and not math_decrement_counter(s, writes):
+            loop pair in writes:
+                if nodes[pair.0].op != i32(int(Tok.assign)) or nodes[pair.0].aux != 0: return false
+                if not math_guarded_word(int(nodes[pair.0].b), l): return false
     word = vreg(VI)
     e_mov(word, math_word_expr(init))
     math_word_regs[l] = word
@@ -648,10 +999,15 @@ math_decrement_counter = (s: int, writes: (int, int)[]) -> bool:
     if update == 0 or loop_ <= 0 or nodes[loop_].kind != .while_ or nodes[update].op != i32(int(Tok.minus)): return false
     step = int(nodes[update].b)
     if nodes[step].kind != .int_lit or nodes[step].ival != 1: return false
-    cond = int(nodes[loop_].a)
+    math_decrement_guard(int(nodes[loop_].a), l)
+
+math_decrement_guard = (cond: int, l: int, depth: int = 0) -> bool:
+    if depth > 32: return false
+    if nodes[cond].kind == .and_:
+        return math_decrement_guard(int(nodes[cond].a), l, depth + 1) or math_decrement_guard(int(nodes[cond].b), l, depth + 1)
     if nodes[cond].kind != .binary or nodes[cond].aux != 0: return false
-    a = int(nodes[cond].a)
-    b = int(nodes[cond].b)
+    a = word_integer_value(int(nodes[cond].a))
+    b = word_integer_value(int(nodes[cond].b))
     if nodes[cond].op == i32(int(Tok.gt)): return math_local_is(a, l) and math_proven_word(b)
     if nodes[cond].op == i32(int(Tok.lt)): return math_local_is(b, l) and math_proven_word(a)
     false
@@ -790,3 +1146,23 @@ math_fresh_loop_regs = (n: int):
         if k != .partial: math_fresh_loop_regs(int(nodes[n].d))
     loop i in [0..nkids(n)): math_fresh_loop_regs(kid(n, i))
     loop i in [0..nkids2(n)): math_fresh_loop_regs(kid2(n, i))
+
+# Bypass only the bundled default decimal formatter, following its checked
+# forwarding wrappers. A user formatter or a format spec keeps its own call.
+math_default_formatter = (f0: int) -> bool:
+    f = f0
+    loop _ in [0..4):
+        if f <= 0 or fns[f].decl == 0: return false
+        d = int(fns[f].decl)
+        path = files[pos_file(nodes[d].pos)].path
+        name = name_of(int(nodes[d].name))
+        if path == lib_dir + "/math_int.jo" and name == "__fmt": return true
+        if path != lib_dir + "/core/fmt.jo" or name != "__dewy_fmt": return false
+        body = int(fns[f].body)
+        if nodes[body].kind != .block or nkids(body) != 1: return false
+        statement = kid(body, 0)
+        if nodes[statement].kind != .exprstmt: return false
+        call = int(nodes[statement].a)
+        if nodes[call].kind != .call or nodes[call].aux != 0: return false
+        f = int(nodes[call].sym)
+    false

@@ -10,7 +10,7 @@ block_sum=(a:array<int64> block:int64):>int64=>{
 }
 main=(args:array<string>):>void=>{
     let n=size_argument(args 16777216)
-    let a=[loop i in [0..n) i%1024]
+    let a:array<int64>=[loop i in [0..n) i%1024]
     let start=clock()
     let blocks=(n+4095)//4096
     let parts:array<int64>=if args.length >? 2 [loop i in [0..blocks) block_sum(a i)] else parallel_range(blocks (i:int64)=>block_sum(a i))

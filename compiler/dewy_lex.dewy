@@ -107,7 +107,7 @@ dx_ident_part=(c:uint8):>bool=>DX_CLASSES[c] & 3 not=? 0
 # when it does not end before stop. Its text is not code: strings and line comments inside
 # it are not.
 dx_block_comment_end=(p:ptr<uint8> i0:int64 stop:int64):>int64=>$unsafe {
-    let i=i0 + 2
+    let i:int64=i0 + 2
     let depth:int64=1
     loop i + 1 <? stop {
         if p[i] =? b'#' and p[i + 1] =? b'\{' {
@@ -195,7 +195,7 @@ dx_quote_end=(@lx:DewyLexer p:ptr<uint8> start:int64 stop:int64 nesting:int64 ra
     }
     let quote=p[start]
     let width=dx_quote_width(p start stop)
-    let i=start + width
+    let i:int64=start + width
     let first_brace:int64=-1
     if nesting =? 0 {lx.interpolation_open=-1}
     loop i <? stop {
@@ -243,7 +243,7 @@ dn_quote_end=(@lx:DewyLexer source:string start:int64 stop:int64 nesting:int64 r
 # Past the `}` closing the body whose `{` is at i0; -1: lex it (it does not close, or it holds
 # a metatag, a function, an import, `??`, a based or long literal, or a string with a brace)
 dx_lazy_end=(p:ptr<uint8> i0:int64 stop:int64):>int64=>$unsafe {
-    let i=i0 + 1
+    let i:int64=i0 + 1
     let depth:int64=1
     loop true {
         loop i <? stop and DX_LAZY[p[i]] =? 0 {i+=1}
@@ -251,7 +251,7 @@ dx_lazy_end=(p:ptr<uint8> i0:int64 stop:int64):>int64=>$unsafe {
         let c=p[i]
         let k=DX_LAZY[c]
         if k =? 1 {
-            let j=i + 1
+            let j:int64=i + 1
             loop j <? stop and DX_CLASSES[p[j]] & 34 not=? 0 {j+=1}
             if j - i =? 6 and c =? b'i' and p[i + 1] =? b'm' and p[i + 2] =? b'p' and p[i + 3] =? b'o' and p[i + 4] =? b'r' and p[i + 5] =? b't' {return -1}
             if j - i =? 4 and c =? b'f' and p[i + 1] =? b'r' and p[i + 2] =? b'o' and p[i + 3] =? b'm' {return -1}

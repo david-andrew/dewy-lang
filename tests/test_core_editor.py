@@ -357,7 +357,7 @@ def test_vscode_core_test_tasks(tmp_path):
 
 
 @pytest.mark.parametrize(('declarations', 'body', 'name', 'expected'), [
-    ('', 'let xs=[42] return xs[end]', 'end', 'int64'),
+    ('', 'let xs=[42] return xs[end]', 'end', 'int'),
     ('', 'let value=uint8.max return if value >? 0 42 else 1', 'max', 'uint8'),
     ('Byte:type=uint8\n', 'let value=Byte.min return if value =? 0 42 else 1', 'min', 'uint8'),
     ('', 'let value:uint64=42 return value as int64', 'value', 'uint64'),
@@ -388,7 +388,7 @@ def test_vscode_core_test_tasks(tmp_path):
     ('identity=<T>(x:T):>T=>x\n', 'return identity<int64>(42)', 'identity', 'identity=(x:int64):>int64'),
     ('identity=<T>(x:T):>T=>x\n', 'let callback=@identity<int64> return callback(42)', 'identity', 'identity=(x:int64):>int64'),
     ('choose=((value:int64)=>value+2)&((text:string)=>text.length)\n',
-     'return choose(40)', 'choose', 'choose=(value:int64):>int64'),
+     'return choose(40)', 'choose', 'choose=(value:int64):>int'),
     ('choose=((value:int64)=>value+2)&((text:string)=>text.length)\n',
      'return choose("answer")', 'choose', 'choose=(text:string):>int64'),
 

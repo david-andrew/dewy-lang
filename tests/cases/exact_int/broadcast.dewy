@@ -1,0 +1,15 @@
+#
+$runtime_checks
+kind=(a:array<int>):>string=>"int"
+kind=(a:array<int64>):>string=>"int64"
+step=(a:array<int64>):>array<int64>=>a .+ 1
+main=()=>{
+ let a:array<int64>=[1 2 3]
+ let exact=a .+ 1
+ let fixed:array<int64>=a .+ 1
+ printl(kind(exact) kind(fixed))
+ printl(exact fixed step(a))
+ let matrix=reshape(a 1 3)
+ let out:array<int64 length=[1 3]>=matrix .+ 1
+ printl(out)
+}

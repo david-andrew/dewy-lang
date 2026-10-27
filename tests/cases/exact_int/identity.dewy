@@ -1,0 +1,16 @@
+# quick
+kind=(n:int):>string=>"int"
+kind=(n:int64):>string=>"int64"
+identity=<T>(n:T):>T=>n
+check=(a:int64 b:int64)=>{
+ if b=?0 return
+ let sum=a+b
+ let product=a*b
+ printl"{kind(sum)} {kind(identity(product))} {kind(a-b)} {kind(-a)} {kind(abs(a))}"
+ printl"{kind(a//b)} {kind(a%b)} {kind(a<<1)} {kind(a>>1)} {kind(a^2)}"
+ printl"{sum} {product} {-a} {abs(a)} {a//b} {a%b}"
+ printl"{(a+b)-b} {(a*b)//b}"
+ sum+=1
+ printl(sum)
+}
+check(int64.min (-1))

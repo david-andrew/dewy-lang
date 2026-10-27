@@ -1,0 +1,12 @@
+#
+Pair:type=[left:string right:string]
+let pairs:array<Pair>=[Pair["x" "y"] Pair["a"*80 "a"*80]]
+replace=():>string=>{pairs=[Pair["x" "y"] Pair["b"*80 "b"*80]]; return "a"*80}
+probe=(at:int64)=>{
+ let index=at%2
+ printl(pairs[index].left =? pairs[index].right)
+ printl(pairs[index].left =? replace())
+ printl(pairs[index].left =? pairs[index].right)
+}
+main=()=>probe(7)
+$runtime_checks

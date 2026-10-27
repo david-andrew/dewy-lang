@@ -324,7 +324,7 @@ _mag_add_into=(@acc:array<uint64> x:array<uint64> shift:int64):>void=>{
         carry=t >> 32
         i=i+1
     }
-    let k=shift+x.length
+    let k:int64=shift+x.length
     loop carry not=? 0 {
         if k =? acc.length acc.push(0)
         let t=acc[k]+carry
@@ -480,7 +480,7 @@ _mag_from_chunks=(chunks:array<uint64> lo:int64 k:int64<0 <=? k and k <? 63> tre
     let count:int64=1 << k
     if k <=? 4 {
         let limbs:array<uint64>=[]
-        let i=lo+count
+        let i:int64=lo+count
         if i >? chunks.length i=chunks.length
         loop i >? lo {
             i=i-1
@@ -504,9 +504,9 @@ _mag_from_chunks=(chunks:array<uint64> lo:int64 k:int64<0 <=? k and k <? 63> tre
 # decimal digits (values 0 to 9, most significant first) as a magnitude
 _mag_from_digits=(digits:array<uint8>):>array<uint64>=>{
     let chunks:array<uint64>=[]
-    let stop=digits.length
+    let stop:int64=digits.length
     loop stop >? 0 {
-        let start=stop-9
+        let start:int64=stop-9
         if start <? 0 start=0
         let chunk:uint64=0
         loop i in [start..stop) chunk=chunk*10+digits[i]

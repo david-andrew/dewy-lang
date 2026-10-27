@@ -52,7 +52,7 @@ def test_fork_offset_overflow(compiler, tmp_path, expression, value):
     source = tmp_path / 'overflow.dewy'
     source.write_text('''
 f=(n:int64):>void=>{
- let r=parallel_range(2 (i:int64)=>EXPR)
+ let r=parallel_range(2 (i:int64):>int64=>EXPR)
  printl"{r[0]} {r[1]}"
 }
 main=()=>{f(VALUE)}

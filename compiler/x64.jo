@@ -15,6 +15,7 @@ use 'elf.jo'
 use 'pe.jo'
 use 'fused.jo'
 use 'x64_ordered.jo'
+use 'x64_word_shift.jo'
 
 x_int_fail: int[]
 x_int_fail_fn = 0
@@ -373,6 +374,7 @@ patch_branch = (pos: int, target: int):
     else: patch32(pos, delta - 4)
 # A forward entry inside a preceding encoding prevents growing it in place.
 x_padding_floor = 0
+x_padding_cmov = -1
 patch_here = (pos: int):
     x_padding_floor = code.len()
     patch_branch(pos, code.len())
@@ -398,8 +400,14 @@ const NOPS = [[0x90], [0x66, 0x90], [0x0F, 0x1F, 0x00], [0x0F, 0x1F, 0x40, 0x00]
 nop_pad = (n0: int):
     n = n0
     loop n > 0:
-        k = min(n, 9)
-        loop x in NOPS[k - 1]: b(x)
+        # Up to six operand-size prefixes plus the eight-byte NOP stay
+        # within x86's 15-byte instruction and decoder prefix limits.
+        k = min(n, 14)
+        if k > 9:
+            loop i in [0..k - 8): b(0x66)
+            loop x in NOPS[7]: b(x)
+        else:
+            loop x in NOPS[k - 1]: b(x)
         n -= k
 
 setcc = (cc: int):
@@ -3092,6 +3100,7 @@ x_emit_vst = (pos: int, ins: *Ins):
     cur_index = -1
 
 x_emit_vbin = (pos: int, ins: *Ins):
+    if ins.c >= 12 and ins.c <= 14: x_emit_word_shift(ins); return
     if ins.c == 9: x_emit_vector_sqrt(ins); return
     if ins.c == 10 or ins.c == 11: x_emit_ordered_fold(ins); return
     d = int(ins.dst)
@@ -3400,7 +3409,22 @@ x_emit_loop = (pos: int, ins: *Ins):
     # Padding belongs before the target so the backedge never executes it.
     if ra_on:
         pad_moves = true # moving a function by 16 changes this entry pad
-        nop_pad((32 - code.len() % 32) % 32)
+        padding = (32 - code.len() % 32) % 32
+        # A register conditional move immediately before the loop can absorb
+        # two ignored CS prefixes. Check its complete four-byte encoding and
+        # the last resolved entry before growing it; no relocation is moved.
+        # This avoids an extra executed NOP for 15/16-byte entry gaps.
+        if padding >= 15 and padding <= 16 and x_padding_cmov >= x_padding_floor and code.len() == x_padding_cmov + 4:
+            at = code.len() - 4
+            p = data(code) + at
+            if p[0] & 0xF8 == 0x48 and p[1] == 0x0F and p[2] >= 0x40 and p[2] <= 0x4F and p[3] >= 0xC0:
+                word = (p as *u32)[0]
+                x_bytes(2)
+                p = data(code) + at
+                p[0] = 0x2E; p[1] = 0x2E
+                ((p + 2) as *u32)[0] = word
+                padding -= 2
+        nop_pad(padding)
     xctl.push(XCtl(1, code.len(), [], []))
     x_loop_depth += 1
 
@@ -3509,11 +3533,13 @@ x_emit_select = (pos: int, ins: *Ins):
         rex(true, rc, 0, rc, false)
         b(0x85)
         modrr(rc, rc)
+    at = code.len()
     rex(true, r, 0, rb, false)
     b(0x0F)
     b(0x40 + cc)
     modrr(r, rb)
     st(d, r)
+    x_padding_cmov = if code.len() == at + 4: at else: -1
 
 # jumps taken when condition `cc` is false (fixup positions appended to fx)
 jfalse = (cc: int, fx: mut int[]):
@@ -3592,6 +3618,7 @@ x64_function = ():
     fn_addr[ir.fn_index] = code.len()
     fn_start = code.len()
     x_padding_floor = fn_start
+    x_padding_cmov = -1
     if ra_stat:
         ra_loop_visits = 0
         ra_expire_visits = 0

@@ -145,7 +145,7 @@ main=():>void=>exit(int64<overflow='wrap'>(f([1])))
     # A closure that is not a fork's runs later: its creator's facts say nothing.
     'stored_closure': ('''main=():>void=>{
     let xs:array<int64>=[1 2 3 4]
-    let mid=xs.length//2
+    let mid:int64=xs.length//2
     let later=(i:int64):>int64=>int64<overflow='wrap'>(xs[..mid).length)+int64<overflow='wrap'>(i)
     exit(int64<overflow='wrap'>(later(0)-2))
 }

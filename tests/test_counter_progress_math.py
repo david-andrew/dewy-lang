@@ -22,7 +22,7 @@ main=(args:array<string>)=>printl(f(int64(to_int(args[1]) ?? 0) to_int(args[2]) 
     built = subprocess.run([compiler, 'build', source, '--ir', '-o', binary], capture_output=True, text=True)
     assert built.returncode == 0, built.stderr
     function = next(b for b in re.split(r'^fn ', built.stdout, flags=re.MULTILINE) if b.startswith('f_f_'))
-    assert ('overflow_add' in function) == disabled
+    assert ('overflow_add' in function or 'checked_add' in function) == disabled
     increment = 2**100 + 37
     start = 2**62 + 5
     ran = subprocess.run([binary, str(start), str(increment)], capture_output=True, text=True)

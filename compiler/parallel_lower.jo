@@ -1,3 +1,4 @@
+use 'math_lower.jo'
 use 'refinement_types.dewy'
 # Scoped parallel regions survive checking. A small fixed collector whose only
 # uses are constant element reads needs neither a collection ABI nor a job on
@@ -146,7 +147,11 @@ parallel_scalar_decl = (s: int, l: int) -> bool:
             if split and tkind(int(locals[inn].type)) == .array:
                 e_store(env, int(locals[inn].env_off), partition_local_arg(outer, int(locals[inn].flags) & LF_VALUECAP == 0), 8)
                 continue
-            store_val(t, env, int(locals[inn].env_off), read_place(local_place(outer, false), t))
+            if math_word_captures.has(inn):
+                store_val(t, env, int(locals[inn].env_off), math_word_expr(mk_ident_local(outer, nodes[s].pos)))
+            else if math_word_regs.has(outer):
+                store_val(t, env, int(locals[inn].env_off), gen_borrowed(mk_ident_local(outer, nodes[s].pos)).v)
+            else: store_val(t, env, int(locals[inn].env_off), read_place(local_place(outer, false), t))
     results: int[]
     result_type = ret_vt(int(fns[f].ret))
     loop i in [0..region.count): results.push(vreg(result_type))

@@ -6,7 +6,7 @@ import pytest
 
 from tests.support import compiler  # noqa: F401
 
-SOURCE = '''split = (a:int64) => {
+SOURCE = '''split = (a:int64):>(int64 int64) => {
     loop a >? 1000000 { a -= 7 }
     a - 1
     a + 1

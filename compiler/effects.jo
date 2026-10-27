@@ -16,6 +16,7 @@ use 'places.jo'
 use 'isolation.jo'
 use 'refine.jo'
 use 'facts.jo'
+use 'exact.jo'
 use 'floats.jo'
 use 'ownership.jo'
 use 'ir.jo'
@@ -1163,6 +1164,8 @@ effect_counters: {int: int} = {}
 # products of them. Its magnitude bound, or -1.
 effect_small = (n: int, depth: int = 0) -> int:
     if n == 0 or depth > 8: return -1
+    bounded = exact_small_math(n)
+    if bounded >= 0: return bounded
     k = nodes[n].kind
     if k == .int_lit and is_int(ntype(n)) and not has_flag(n, NF_U64) and nodes[n].ival >= 0: return if nodes[n].ival < (1 << 31): nodes[n].ival else: -1
     if k == .ident and nodes[n].aux == i32(int(SK.local)) and prune(ntype(n)) == T_MATH_INT: return effect_counters.get(int(nodes[n].sym)) ?? -1
@@ -1353,11 +1356,15 @@ effect_oom_frame = (n: int) -> bool:
     name = effect_name(g)
     name in ["__oom_frame", "__oom_caught", "__oom_release", "__oom_unsupported"]
 
+effect_exact_rep = false
+
 effect_scan_node = (f: int, n: int):
     if n == 0 or effect_footprints_only and effect_summaries[f].footprint_opaque: return
     if effect_seen[n] == f: return
     effect_seen[n] = f
     k = nodes[n].kind
+    exact_rep = effect_exact_rep
+    if exact_rep and (k == .vardecl or k == .assign or k == .binary or k == .conv): exact_effect_representation(n)
     if k == .for_:
         marks = effect_for_marks.get(int(nodes[n].sym)) ?? []
         if not marks.contains(n):
@@ -1499,6 +1506,8 @@ effect_scan_node = (f: int, n: int):
         return
     if k == .ident and nodes[n].aux == i32(int(SK.local)):
         l = int(nodes[n].sym)
+        if exact_rep and prune(ntype(n)) == T_MATH_INT and not exact_raw_value(n) and exact_local_width(l) > 0 and effect_small(n) < 0:
+            effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
         if effect_small(n) >= 0: return
         t = representation_type(ntype(n))
         if is_fn_type(t) and effect_bare(n): return
@@ -1530,7 +1539,8 @@ effect_scan_node = (f: int, n: int):
         effect_bounds(f, n)
         return
     supported = false
-    if k == .intrinsic: supported = effect_intrinsic_cost(nodes[n].aux as IN) >= 0
+    if exact_rep and (k == .binary or k == .unary or k == .conv) and prune(ntype(n)) == T_MATH_INT and exact_raw_value(n): supported = true
+    else if k == .intrinsic: supported = effect_intrinsic_cost(nodes[n].aux as IN) >= 0
     else if k == .call and nodes[n].aux == 2: supported = effect_share(ntype(n))
     # (a member into a union of shares: `return Oops` from `:>(int64|Oops)`)
     else if k == .call and nodes[n].aux == 3: supported = effect_share(ntype(n))
@@ -1851,7 +1861,10 @@ effect_visit = (f: int):
                 l = fns[f].params[i]
                 t = representation_type(int(locals[l].type))
                 if int(locals[l].flags) & LF_MUTPARAM == 0 and not effect_value(t) and not is_fn_type(t): effect_opaque(f, d)
+            previous_exact = effect_exact_rep
+            effect_exact_rep = f < exact_effect_owners.len() and exact_effect_owners[f]
             effect_scan_node(f, int(fns[f].body))
+            effect_exact_rep = previous_exact
         if effect_body_cache:
             direct = effect_summaries[f]
             if not direct.capped and direct.events.len() < 32: effect_bodies[f] = EffectBody(direct.events, effect_body_panics, direct.edges, direct.isolation, direct.isolation_witness)

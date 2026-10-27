@@ -50,7 +50,7 @@ const VC_AGG = 3
 const LK_INST = 0
 const LK_HELPER = 1
 
-enum HK: drop, copy, move, arrrel, arruniq, arrcopy, eq, hash, thunk, envdrop, partial, envcopy, stackenvdrop, boxrel, boxdrop, boxuniq, math_main, owner_boxcopy, parallel_serial, parallel_job, partition, promote
+enum HK: drop, copy, move, arrrel, arruniq, arrcopy, eq, hash, thunk, envdrop, partial, envcopy, stackenvdrop, boxrel, boxdrop, boxuniq, math_main, owner_boxcopy, parallel_serial, parallel_job, partition, promote, reset_words
 
 struct LFunc:
     kind: int
@@ -769,6 +769,7 @@ emit_scope_exit = (i: int):
             loop value in parallel_scalars[l]:
                 release(value, parallel_owned[l])
                 e_mov(value, e_iconst(0))
+        else if exm_drop_local(l): pass
         else if locals[l].offset >= 0:
             a = e_slot(int(locals[l].offset))
             target = if tkind(t) == .fn_ or tkind(t) == .polyfn: stack_closure_target(l) else: -1
@@ -963,6 +964,7 @@ store_type = (l: int) -> int:
     t = int(locals[l].type)
     if int(locals[l].flags) & (LF_OWNERBORROW | LF_PARTBORROW) != 0: return mk_ptr(t)
     if is_shared(l): return mk_array(t)
+    if math_word_captures.has(l): return T_INT
     t
 
 cell_place = (l: int) -> Place:
@@ -2190,6 +2192,7 @@ gen_direct_call = (f: int, args: int[], order: int[] = [], call_node: int = 0) -
             if copy_consumes(f, i) and ownership_type(fns[f].ptypes[i]): owner_forget(argv[base + i])
     nr = not opt_release and not dbg_on and prune(ret) == T_NEVER
     target_lf = if callback_calls.len() == 0: -1 else: callback_calls.get(callback_key(ir.fn_index, call_node)) ?? -1
+    if exr_call_target == f: target_lf = lf_helper(.reset_words, 0, f)
     if target_lf < 0: target_lf = lf_of_inst(f)
     rv = if nr: e_call_nr(target_lf, argv, -1) else: e_call(target_lf, argv, ret_vt(ret))
     copy_back(mark)
@@ -2280,6 +2283,7 @@ env_layout = (f: int):
     off = if ownership_callable_cap(int(fns[f].fntype)) != 0: 32 else: 24
     loop cap in fns[f].caps:
         inn = int(cap.inner)
+        math_prepare_capture(inn)
         if is_shared(inn): check_cell_type(inn)
         t = store_type(inn)
         al = talign(t)
@@ -2508,6 +2512,11 @@ gen_lambda = (e: int, stack: bool = false) -> Val:
             continue
         t = int(locals[outer].type)
         id = if copies_on: ids[index] else: mk_ident_local(outer, nodes[e].pos)
+        if math_word_captures.has(inn):
+            store_val(T_INT, env, int(locals[inn].env_off), math_word_expr(id))
+            index += 1
+            if resource: hdr_store(env, 24, e_iconst(index))
+            continue
         val = own_at(id, gen_expr(id), t)
         if is_shared(inn):
             # A nested explicit capture may share this private snapshot. Give
@@ -2608,6 +2617,9 @@ gen_interp = (e: int) -> Val:
             continue
         f = int(nodes[p].sym)
         x = int(nodes[p].a)
+        if exact_word_formats.has(p) or nodes[p].sval < 0 and prune(ntype(x)) == T_MATH_INT and math_proven_word(x) and math_default_formatter(f):
+            e_call2(rt("__fmt_word"), e_slot(bs), math_word_expr(x), -1)
+            continue
         val = gen_expr(x)
         # (a __fmt of the program's may change where the value came from)
         if not val.owned and is_managed(ntype(x)) and not in_lib(nodes[int(fns[f].decl)].pos) and borrow_may_change(x, [], 0, f): val = own_at(x, val, ntype(x))
@@ -3266,6 +3278,12 @@ gen_binary = (e: int) -> Val:
         if sz > 1: d = e_bin(.divs, VI, d, e_iconst(sz))
         return V(d, false)
     if lt == T_MATH_INT:
+        if is_cmp or math_static_regs.len() > 0:
+            aw = math_static_bits(a); bw = math_static_bits(b)
+            if aw > 0 and bw > 0:
+                if is_cmp: return V(exact_compare(op, math_static_value(a), math_static_value(b)), false)
+                width = math_static_bits(e)
+                if width > 0 and width <= 256: return exact_pack_words(e, math_static_value(e))
         if is_cmp and math_proven_word(a) and math_proven_word(b):
             return V(e_bin(int_op(op, true), VI, math_word_expr(a), math_word_expr(b)), false)
         if is_cmp:
@@ -4771,10 +4789,14 @@ gen_conv = (e: int) -> Val:
     a = int(nodes[e].a)
     from = prune(ntype(a))
     cv = nodes[e].aux as CV
+    if exact_map_active and exact_map_stores.has(e) and cv == .int_: return V(exm_word(a), false)
+    # A proved signed word is unchanged by a signed 64-bit overflow policy.
+    # Keep bounded mathematical shift counts in registers, including 32-k.
+    if (cv == .wrap_int or cv == .saturate_int) and from == T_MATH_INT and types[to].bits == 64 and types[to].sign and math_proven_word(a): return V(math_word_expr(a), false)
     if (cv == .wrap_int or cv == .saturate_int) and exact_has_node(a): return exact_gen_policy(e)
     if (cv == .int_ or cv == .none_) and to == T_MATH_INT and exact_has_node(a): return exact_gen_math(a)
     if cv == .fixed_store: return exact_gen_store(e)
-    if exact_progress_math.len() > 0 and exact_progress_math.has(e): return V(math_word_expr(a), false)
+    if exact_word_reads.has(e) or exact_progress_math.len() > 0 and exact_progress_math.has(e): return V(math_word_expr(a), false)
     if cv == .int2float and exact_has_node(a): return exact_gen_float(a, to)
     if cv == .refinement: return refine_gen(e)
     if cv == .promote: return arena_gen_promote(e)
@@ -4827,6 +4849,9 @@ gen_conv = (e: int) -> Val:
             endc()
         return V(norm(result, to), false)
     if cv == .int_:
+        if from == T_MATH_INT and to != T_MATH_INT:
+            width = math_static_bits(a)
+            if width > 0 and width <= 256: return math_static_narrow(a, to)
         if from == T_MATH_INT and math_proven_word(a):
             v = math_word_expr(a)
             # The proof removes only the representation check, not narrowing.
@@ -5111,7 +5136,9 @@ gen_value_str_lit = (e: int) -> Val:
 gen_value_ident = (e: int) -> Val:
     t = prune(ntype(e))
     if t == T_MATH_INT and nodes[e].aux == i32(int(SK.local)):
+        if let words = math_static_regs.get(int(nodes[e].sym)): return exact_pack_words(e, words)
         if let word = math_word_regs.get(int(nodes[e].sym)): return math_pack_word(e, word)
+        if math_word_captures.has(int(nodes[e].sym)): return math_pack_word(e, read_place(local_place(int(nodes[e].sym), false), T_INT))
     if nodes[e].aux == i32(int(SK.local)) or nodes[e].aux == i32(int(SK.global)):
         p = gen_place(e, false)
         return V(read_place(p, t), false)
@@ -5744,14 +5771,14 @@ range_cmp = (e: int) -> (int, Tok, int):
     if nodes[e].kind != .binary or nodes[e].aux != 0: return (0, .eq, 0)
     op = nodes[e].op as Tok
     if op != .lt and op != .le and op != .gt and op != .ge: return (0, .eq, 0)
-    a = int(nodes[e].a)
-    b = int(nodes[e].b)
+    a = word_integer_value(int(nodes[e].a))
+    b = word_integer_value(int(nodes[e].b))
     if nodes[a].kind == .int_lit:
         tmp = a
         a = b
         b = tmp
         op = if op == .lt: .gt else if op == .le: .ge else if op == .gt: .lt else: .le
-    if nodes[b].kind != .int_lit: return (0, .eq, 0)
+    if nodes[b].kind != .int_lit or has_flag(b, NF_U64) and nodes[b].ival < 0: return (0, .eq, 0)
     at = prune(ntype(a))
     bt = prune(ntype(b))
     if not is_int(at) or not is_int(bt) or at == T_U64 or bt == T_U64: return (0, .eq, 0)
@@ -5788,7 +5815,8 @@ gen_range_cond = (e: int, invert: bool = false) -> int:
     b = range_cmp(int(nodes[e].b))
     if b.0 == 0 or not same_range_read(a.0, b.0): return -1
     first_read = a.0
-    if prune(ntype(first_read)) == T_MATH_INT: return -1
+    mathematical = prune(ntype(first_read)) == T_MATH_INT
+    if mathematical and not math_proven_word(first_read): return -1
     if k == .or_:
         a.1 = if a.1 == .lt: .ge else if a.1 == .le: .gt else if a.1 == .gt: .le else: .lt
         b.1 = if b.1 == .lt: .ge else if b.1 == .le: .gt else if b.1 == .gt: .le else: .lt
@@ -5808,7 +5836,7 @@ gen_range_cond = (e: int, invert: bool = false) -> int:
         else: high -= 1
     outside = (k == .or_) != invert
     # Even an empty interval must evaluate its first read and retain bounds checks.
-    value = gen_expr(first_read).v
+    value = if mathematical: math_word_expr(first_read) else: gen_expr(first_read).v
     if empty or low > high: return e_iconst((if outside: 1 else: 0))
     if low != 0: value = e_bin(.sub, VI, value, e_iconst(low))
     op = if outside: Op.gtu else: Op.leu
@@ -6079,10 +6107,15 @@ assign_to = (target: int, t: int, v: int):
         else: owner_register(owner_address_slot(pl.v), t)
 
 gen_assign = (s: int):
+    if exact_map_active and exm_math_output and exm_store(s): return
     a = int(nodes[s].a)
     t = quantity_base(ntype(a))
     aux = int(nodes[s].aux)
     if t == T_MATH_INT and math_local_is(a, int(nodes[a].sym)):
+        if let words = math_static_regs.get(int(nodes[a].sym)):
+            values = exact_extend(math_static_value(int(nodes[s].b)), words.len())
+            loop i in [0..words.len()): e_mov(words[i], values[i])
+            return
         if let word = math_word_regs.get(int(nodes[a].sym)):
             e_mov(word, math_word_expr(int(nodes[s].b)))
             return
@@ -6179,6 +6212,7 @@ gen_assign = (s: int):
     write_place(pl, t, r)
 
 gen_vardecl = (s: int):
+    if exact_lower_active: exm_fresh_array(s)
     if nodes[s].nlist > 0:
         tt = prune(ntype(int(nodes[s].b)))
         val = gen_owned(int(nodes[s].b))
@@ -6219,7 +6253,11 @@ gen_vardecl = (s: int):
         return
     if copies_on and copy_shared_decl(s, l): return
     if view_decl(s, l): return
-    if math_word_local_decl(s): return
+    if exact_map_active and exm_declaration(s): return
+    if prune(t) == T_MATH_INT:
+        if math_word_local_decl(s): return
+        if math_reset_local_decl(s): return
+        if math_static_local_decl(s): return
     if exact_lower_active: exact_counter_bound(s)
     if is_shared(l): new_cell(l)
     pl = local_place(l, true)
@@ -6322,8 +6360,8 @@ view_decl = (s: int, l: int) -> bool:
     locals[l].flags = i32(fl | LF_ELEMENTVIEW | (if array: 0 else: LF_BYREF))
     true
 
-# Only direct reads: custom getters, calls, conversions and computed indexes
-# outside this whitelist stay on the ordinary snapshot path. Alias identifiers
+# Only direct reads: custom getters, calls and computed indexes outside this
+# whitelist stay on the ordinary snapshot path. Alias identifiers
 # can expand into expressions, so do not assume that reading them is inert.
 plain_read = (n: int) -> bool:
     if n <= 0: return false
@@ -6333,6 +6371,9 @@ plain_read = (n: int) -> bool:
         if nodes[n].aux == i32(int(SK.global)): return true
         if nodes[n].aux == i32(int(SK.local)): return int(locals[int(nodes[n].sym)].flags) & LF_ALIAS == 0
         return false
+    # An implicit integer index narrowing reads its value without user code.
+    if k == .conv and nodes[n].aux == i32(int(CV.int_)) and prune(ntype(n)) == T_INT and is_int(ntype(int(nodes[n].a))):
+        return plain_read(int(nodes[n].a))
     if k == .field:
         a = int(nodes[n].a)
         return nodes[n].aux >= 0 and tkind(ntype(a)) == .struct_ and plain_read(a)
@@ -7732,9 +7773,11 @@ simple_cond = (e: int) -> bool:
     false
 
 use 'scanloops.jo'
+use 'exact_reset_loop.jo'
 
 gen_while = (s: int):
     if eg_stack.len() > 0: eg_loop()
+    if exr_loop(s): return
     if gen_scan_loop(s): return
     gen_while_scalar(s)
 
@@ -7868,6 +7911,8 @@ begin_fn = (name: str, idx: int):
     stack_closure_fn = -1
     stack_closure_params.clear()
     math_word_regs.clear()
+    math_static_regs.clear()
+    math_static_widths.clear()
     math_word_limits.clear()
     math_word_updates.clear()
     math_writes_ready = false
@@ -8032,6 +8077,7 @@ lower_inst = (lf: int, f: int):
         locals[l].vreg = i32(vreg(vt_of(t)))
         if is_managed(t): e_mov(int(locals[l].vreg), e_iconst(0))
     exm_censuses = {}; lower_entry = []
+    exm_produced_flags = {}; exm_produced_widths = {}
     exm_start = ir.code.len()
     if exact_loop_plan(f, body):
         guard = exact_loop_guard(body)
@@ -8085,9 +8131,11 @@ lop_watch = false       # (loops in this function count down to the web page's w
 lower_function = (lf: int):
     lower_epoch += 1
     lower_planning = true
+    exr_fast = lfuncs[lf].kind == LK_HELPER and lfuncs[lf].hkind == HK.reset_words
     parallel_serial = lfuncs[lf].kind == LK_HELPER and (lfuncs[lf].hkind == HK.parallel_serial or lfuncs[lf].hkind == HK.partition and lfuncs[lf].htype == 1)
     partition_mode = lfuncs[lf].kind == LK_HELPER and lfuncs[lf].hkind == HK.partition
-    if lfuncs[lf].kind == LK_INST or parallel_serial or partition_mode: pc_restore(lfuncs[lf].inst)
+    if lfuncs[lf].kind == LK_INST or parallel_serial or partition_mode or exr_fast: pc_restore(lfuncs[lf].inst)
+    exr_locals = if exr_fast: exr_plan(lfuncs[lf].inst) else: []
     fact_storage_cache.clear()
     lpath_ids.clear()
     lpath_parents.truncate(1)
@@ -8104,12 +8152,13 @@ lower_function = (lf: int):
         fi = f.inst
         if fns[fi].kind == FK_PARTIAL: lower_partial_thunk(lf, fi)
         else: lower_inst(lf, fi)
-    else if parallel_serial or partition_mode: lower_inst(lf, f.inst)
+    else if parallel_serial or partition_mode or exr_fast: lower_inst(lf, f.inst)
     else: lower_helper(lf)
     parallel_serial = false
     partition_mode = false
     lower_finish()
     lower_planning = false
+    exr_fast = false
 
 # Only functions with demanded insertions or construction/owner placeholders
 # need a final IR walk. P requested zeros cost O(P log P) ordering and one
@@ -8260,6 +8309,21 @@ helper_arrrel = (t: int):
     et = int(types[t].elem)
     iff(e_call1(rt("__rc_dec_test"), p, VI))
     n = hdr_load(p, 8)
+    # Mathematical integers use a word tag: an all-inline array has no
+    # element owners. Scan tags with an associative OR before the cold drops;
+    # the ordinary vectorizer can process this census without per-slot calls.
+    if quantity_base(et) == T_MATH_INT:
+        tags = vreg(VI); e_mov(tags, e_iconst(0))
+        j = vreg(VI); e_mov(j, e_iconst(0))
+        blk()
+        brif_to(e_bin(.ges, VI, j, n), ctl)
+        lop()
+        word = e_load(VI, e_bin(.add, VI, p, e_bin(.shl, VI, j, e_iconst(3))), 24, 8)
+        e_mov(tags, e_bin(.or_, VI, tags, word))
+        e_mov(j, e_addi(j, 1))
+        brif_to(e_bin(.lts, VI, j, n), ctl)
+        endc(); endc()
+        iff(math_tag(tags))
     i = vreg(VI)
     e_mov(i, e_iconst(0))
     blk()
@@ -8270,6 +8334,7 @@ helper_arrrel = (t: int):
     br_to(ctl)
     endc()
     endc()
+    if quantity_base(et) == T_MATH_INT: endc()
     e_call1(rt("__free_obj"), p, -1)
     endc()
     e_ret(-1)
@@ -8861,7 +8926,7 @@ lower_helper = (lf: int):
         boxuniq: helper_boxuniq(t)
         math_main: math_main(h.inst)
         owner_boxcopy: helper_owner_boxcopy(t)
-        parallel_serial, partition: ice("borrowed region helper must lower as an instance")
+        parallel_serial, partition, reset_words: ice("borrowed region helper must lower as an instance")
         parallel_job: parallel_job_helper(h.inst, h.htype & 1 != 0, h.htype & 2 != 0)
         promote: helper_promote(t)
 

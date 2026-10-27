@@ -1,0 +1,11 @@
+#
+$runtime_checks
+step=(a:array<int64 length=[m n]>):>array<int64 length=[m n]>=>a .+ 1
+main=()=>{
+ let a:array<int64>=[1 2 3 4]
+ let fixed:array<int64 length=[2 2]>=reshape(a 2 2)
+ printl(step(fixed))
+ let values:array<int64>=[1 2 3]
+ values[[true false true]] .+= 4
+ printl(values)
+}

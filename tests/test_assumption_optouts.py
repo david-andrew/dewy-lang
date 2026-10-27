@@ -30,8 +30,8 @@ def test_no_assumed_bounds_demand_proof_with_repair(compiler, tmp_path, expressi
     assert strict.returncode != 0, strict.stderr
     assert 'cannot prove exact integer result fits int64' in strict.stderr
     assert f'nothing bounds `{expression}`' in strict.stderr
-    assert 'help: compute it in `int`' in strict.stderr
-    assert 'bound the operands with a guard' in strict.stderr
+    assert 'help: widen the destination to `int`' in strict.stderr
+    assert 'state the domain as a refinement' in strict.stderr
 
 
 def test_local_assert_optout_demand_proof_with_repair(compiler, tmp_path):
