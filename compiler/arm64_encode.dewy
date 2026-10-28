@@ -345,3 +345,59 @@ a_put_lits=():>void=>$unsafe {
     }
     a_lits=[]
 }
+
+# Structured branch state is shared directly with the host's IR dispatch.
+# O(1) per emission/patch, amortized fixup append; no extra pass or callback.
+ACtl:type=[
+    kind:int64
+    start:int64
+    fixups:array<[int64 int64]>
+    ifx:array<[int64 int64]>
+]
+let actl:array<ACtl>=[]
+
+# Return before mutation on an out-of-range conditional branch. The host owns
+# the existing fatal diagnostic; unconditional branches retain masked offsets.
+a_try_patch=(f:[int64 int64] target:ArmWord):>bool=>$unsafe {
+    let d:ArmWord=(target - ArmWord(f[0])) // 4
+    let x:ArmWord=rd32(ArmWord(f[0]))
+    if f[1] =? 0 {x=x | (d & 0x3FFFFFF)}
+    else {
+        if d >=? 0x40000 or d <? -0x40000 {return false}
+        x=x | ((d & 0x7FFFF) << 5)
+    }
+    wr32(ArmWord(f[0]) x)
+    true
+}
+
+a_branch=(depth:ArmWord):>void=>$unsafe {
+    let c:ArmWord=ArmWord(actl.length) - 1 - depth
+    if actl[c].kind =? 1 {
+        w32(0x14000000 | (((ArmWord(actl[c].start) - ArmWord(a_code[0].length)) // 4) & 0x3FFFFFF))
+    } else {
+        actl[c].fixups.push([a_code[0].length 0])
+        w32(0x14000000)
+    }
+}
+
+a_branch_nz=(r:ArmWord depth:ArmWord):>void=>$unsafe {
+    let c:ArmWord=ArmWord(actl.length) - 1 - depth
+    if actl[c].kind =? 1 {
+        let d:ArmWord=(ArmWord(actl[c].start) - ArmWord(a_code[0].length)) // 4
+        w32(0xB5000000 | ((d & 0x7FFFF) << 5) | r)
+    } else {
+        actl[c].fixups.push([a_code[0].length 1])
+        w32(0xB5000000 | r)
+    }
+}
+
+a_branch_cc=(cc:ArmWord depth:ArmWord):>void=>$unsafe {
+    let c:ArmWord=ArmWord(actl.length) - 1 - depth
+    if actl[c].kind =? 1 {
+        let d:ArmWord=(ArmWord(actl[c].start) - ArmWord(a_code[0].length)) // 4
+        w32(0x54000000 | ((d & 0x7FFFF) << 5) | cc)
+    } else {
+        actl[c].fixups.push([a_code[0].length 1])
+        w32(0x54000000 | cc)
+    }
+}

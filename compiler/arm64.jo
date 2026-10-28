@@ -403,54 +403,11 @@ a_result = (ins: Ins):
     else: a_sts(d, 0, vtype(d))
 
 # ---------------- control flow ----------------
-# forward branches: (position, kind 0 = B imm26, 1 = B.cond / CBZ / CBNZ imm19)
-struct ACtl:
-    kind: int     # 0 block, 1 loop, 2 if
-    start: int
-    fixups: (int, int)[]
-    ifx: (int, int)[]
-
-actl: ACtl[]
-
+# The encoder owns control records and bytes; fatal diagnostics stay with the host.
 a_patch = (f: (int, int), target: int):
-    d = (target - f.0) / 4
-    x = rd32(f.0)
-    if f.1 == 0: x = x | (d & 0x3FFFFFF)
-    else:
-        if d >= 0x40000 or d < -0x40000: ice("arm64: a conditional branch is too far (a function over 1 MB)")
-        x = x | ((d & 0x7FFFF) << 5)
-    wr32(f.0, x)
+    if not a_try_patch(f, target): ice("arm64: a conditional branch is too far (a function over 1 MB)")
 
 a_patch_here = (f: (int, int)): a_patch(f, code.len())
-
-# B to the label of the enclosing construct at depth
-a_branch = (depth: int):
-    c = actl.len() - 1 - depth
-    if actl[c].kind == 1:
-        w32(0x14000000 | (((actl[c].start - code.len()) / 4) & 0x3FFFFFF))
-    else:
-        actl[c].fixups.push((code.len(), 0))
-        w32(0x14000000)
-
-# CBNZ r to the label at depth
-a_branch_nz = (r: int, depth: int):
-    c = actl.len() - 1 - depth
-    if actl[c].kind == 1:
-        d = (actl[c].start - code.len()) / 4
-        w32(0xB5000000 | ((d & 0x7FFFF) << 5) | r)
-    else:
-        actl[c].fixups.push((code.len(), 1))
-        w32(0xB5000000 | r)
-
-# B.cond to the label at depth
-a_branch_cc = (cc: int, depth: int):
-    c = actl.len() - 1 - depth
-    if actl[c].kind == 1:
-        d = (actl[c].start - code.len()) / 4
-        w32(0x54000000 | ((d & 0x7FFFF) << 5) | cc)
-    else:
-        actl[c].fixups.push((code.len(), 1))
-        w32(0x54000000 | cc)
 
 a_icc = (op: Op) -> int:
     match op:
