@@ -5238,8 +5238,7 @@ def test_core_encoded_word_buffers(compiler, tmp_path, release):
     directory = compiler.parent.parent / 'compiler'
     if not directory.exists():
         directory = Path(__file__).resolve().parents[1] / 'compiler'
-    writer = (directory / 'elf.jo').read_text()
-    helpers = writer[writer.index('put16 ='):writer.index('# the machine')]
+    helpers = f"use '{directory / 'elf_format.dewy'}'\n"
     source = tmp_path / 'encoded-words.jo'
     source.write_text(helpers + '''
 main = () -> int:
