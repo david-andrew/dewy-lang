@@ -165,7 +165,7 @@ exact_format_word = (n: int, writer: str, buffer: int, pos: int) -> bool:
 
 exact_int_result = (n: int, observe_unsigned: bool = false) -> int:
     if not dewy_at(nodes[n].pos): return ntype(n)
-    if ntype(n) != T_INT and not (observe_unsigned and exact_type(ntype(n), nodes[n].pos) and exact_operation(n)): return ntype(n)
+    if ntype(n) != T_INT and not (observe_unsigned and exact_type(ntype(n), nodes[n].pos) and exact_potential(n)): return ntype(n)
     wrap_conv(n, .int_, T_MATH_INT)
     exact_note(int(nodes[n].a))
     T_MATH_INT
@@ -177,14 +177,16 @@ exact_operation = (n: int) -> bool:
         if nodes[n].op != i32(int(Tok.minus)): return false
     else if k == .binary and nodes[n].aux == 0:
         op = nodes[n].op as Tok
-        if op != .plus and op != .minus and op != .star and op != .starstar and op != .slash and op != .shl and op != .amp and op != .pipe and op != .caret: return false
+        if op != .plus and op != .minus and op != .star and op != .starstar and op != .slash and op != .shl: return false
     else: return false
     if nodes[n].type == 0 or not exact_type(ntype(n), nodes[n].pos): return false
     k != .binary or nodes[n].op != i32(int(Tok.slash)) or types[exact_representation(ntype(n))].sign
 
 exact_note = (n: int):
     if cx < 0: return
-    if not exact_operation(n) and not (nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.int2float)) and exact_potential(int(nodes[n].a))) and not (exact_measure_on and exact_measure_candidate(n)): return
+    control = nodes[n].kind == .if_ or nodes[n].kind == .iflet or nodes[n].kind == .coalesce or nodes[n].kind == .match_
+    bitwise = nodes[n].kind == .binary and (nodes[n].op == i32(int(Tok.amp)) or nodes[n].op == i32(int(Tok.pipe)) or nodes[n].op == i32(int(Tok.caret)))
+    if not exact_operation(n) and not ((control or bitwise) and exact_potential(n)) and not (nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.int2float)) and exact_potential(int(nodes[n].a))) and not (exact_measure_on and exact_measure_candidate(n)): return
     f = int(ctxs[cx].inst)
     if f > 0:
         exact_owners[f] = true
@@ -1790,6 +1792,8 @@ exact_potential = (n: int) -> bool:
     if n <= 0: return false
     if exact_operation(n): return true
     k = nodes[n].kind
+    if k == .binary and (nodes[n].op == i32(int(Tok.amp)) or nodes[n].op == i32(int(Tok.pipe)) or nodes[n].op == i32(int(Tok.caret))):
+        return exact_potential(int(nodes[n].a)) or exact_potential(int(nodes[n].b))
     if k == .conv and (nodes[n].aux == i32(int(CV.int_)) or nodes[n].aux == i32(int(CV.none_))): return exact_potential(int(nodes[n].a))
     if k == .if_ or k == .iflet: return exact_potential(int(nodes[n].b)) or exact_potential(int(nodes[n].c))
     if k == .coalesce: return exact_potential(int(nodes[n].b))

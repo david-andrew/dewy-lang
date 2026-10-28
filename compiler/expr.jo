@@ -6381,7 +6381,7 @@ fmt_part = (part: int, pos: int):
     # Formatting observes the exact result; it is not a uint64 store.
     # Reveal an unsigned arithmetic node to mathematical int before overload selection.
     observed = int(nodes[part].a)
-    if dewy_at(pos) and exact_type(ntype(observed), pos) and not types[exact_representation(ntype(observed))].sign and exact_operation(observed): exact_int_result(observed, true)
+    if dewy_at(pos) and exact_type(ntype(observed), pos) and not types[exact_representation(ntype(observed))].sign and exact_potential(observed): exact_int_result(observed, true)
     t = prune(ntype(int(nodes[part].a)))
     shown = if is_quantity(t) and nodes[part].sval < 0 and dewy_at(pos): quantity_display(int(nodes[part].a)) else: 0
     if shown != 0:
@@ -11584,13 +11584,6 @@ check_if = (n: int, ex: int) -> int:
         nodes[va] = nodes[then_literal]
         check_expr(va, t2)
         nodes[b].type = i32(t2)
-    # An unannotated selection may choose a wide unsigned arithmetic result.
-    # Reveal that arm before joining the branches; neither arm is a store.
-    if dewy_at(nodes[n].pos):
-        at = prune(ntype(va))
-        if exact_type(at, nodes[va].pos) and not types[exact_representation(at)].sign and exact_potential(va): exact_int_result(va, true)
-        bt = prune(ntype(vb))
-        if exact_type(bt, nodes[vb].pos) and not types[exact_representation(bt)].sign and exact_potential(vb): exact_int_result(vb, true)
     join_types(va, vb, nodes[n].pos)
 
 # Does block b end in a container literal (array, dictionary or record)?
