@@ -696,7 +696,7 @@ wit_assertion = (cond: int, message: int, paths: FactPaths, entry: FactState):
     wit_unknown(cond, reason, "assertion", 0, relation, missing)
 
 # A builtin index: refuted (some bound is false) or unknown (some is missing).
-wit_index = (n: int, s: mut FactState, index: int, length: int, lo: int, hi: int, base_node: int = -1, index_node: int = -1):
+wit_index = (n: int, s: mut FactState, index: int, length: int, lo: int, hi: int, base_node: int = -1, index_node: int = -1, inclusive: bool = false):
     # (`pool[h].hp -= 1` indexes the pool's storage `items` at `__pool_index`'s
     # answer: what it needs is the handle's membership, said as the user wrote it)
     if has_flag(n, NF_LIB_INDEX):
@@ -720,12 +720,13 @@ wit_index = (n: int, s: mut FactState, index: int, length: int, lo: int, hi: int
     i = wit_side(index, if index_node >= 0: index_node else: int(nodes[n].b))
     zero = WitSide(fact_constant(s, 0), 0, "0", false, true)
     size = WitSide(length, a, (if base != "": "{base}.length" else: ""), true)
-    relation = wit_relation_text(.lt, i, size)
+    upper_op = if inclusive: Tok.le else: Tok.lt
+    relation = wit_relation_text(upper_op, i, size)
     if lo == 0 or hi == 0:
         if lo == 0:
             wit_relation(s, s, .ge, i, zero, true)
             relation = wit_relation_text(.ge, i, zero)
-        else: wit_relation(s, s, .lt, i, size, true)
+        else: wit_relation(s, s, upper_op, i, size, true)
         wit_context(0)
         wit_help(relation)
         if dir_defer(n, "{read} is not in bounds", true): return
@@ -741,7 +742,7 @@ wit_index = (n: int, s: mut FactState, index: int, length: int, lo: int, hi: int
         return
     if lo != 1: wit_relation(s, s, .ge, i, zero, false, "lower bound")
     if hi != 1:
-        wit_relation(s, s, .lt, i, size, false, "upper bound")
+        wit_relation(s, s, upper_op, i, size, false, "upper bound")
 
         wit_cause(fact_bound(s, length), n)
     wit_context(0)

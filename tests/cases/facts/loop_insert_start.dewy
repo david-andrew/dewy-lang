@@ -1,0 +1,7 @@
+place=(@xs:array<int64> key:int64)=>{
+    let pos=1
+    loop pos <? xs.length and xs[pos] <? key {pos+=1}
+    xs.insert(key pos)
+}
+let xs:array<int64>=[]
+place(@xs 2)

@@ -689,7 +689,11 @@ these facts can satisfy checked length contracts at a caller. An unconstrained
 record parameter still needs its own guard or contract.
 
 Index proofs retain nested array lengths through element writes in branches
-and loops. A checked helper that preserves or grows an array's length can
+and loops. A scan starting at zero and advancing by one while below an
+unchanged array length retains its inclusive upper bound after the loop,
+including when the array parameter is first read by the condition. This
+permits insertion at the resulting position; an element read still requires
+a strict upper bound. A checked helper that preserves or grows an array's length can
 preserve a caller's guarded index; an append helper's returned index can be
 proven below the array's post-call length. Every return must establish the
 relation. Replacing or shrinking the array, an unknown callback, and pending

@@ -5189,8 +5189,7 @@ fact_array_call_check = (n: int, s: mut FactState, values: int[], kind: int):
             continue
         if lo == 1 and hi == 1: continue
         # (an insertion position may be the length itself: one past the last index)
-        bound = if kind == 4: length else: fact_arithmetic(s, kid(n, 0), .plus, length, fact_constant(s, 1))
-        wit_index(n, s, index, bound, lo, hi, kid(n, 0), kid(n, i))
+        wit_index(n, s, index, length, lo, hi, kid(n, 0), kid(n, i), kind == 5)
         return
 
 # reshape's dimensions: each >= 0, their product the length (a product the
@@ -5360,7 +5359,12 @@ fact_loop_header = (entry: mut FactState, back: FactState, old: FactState, at: i
             fact_guarded_rows(int(nodes[at].a), back, changing, direct, 0)
             # Multiple advancing guard counters already use the lockstep
             # budget; do not crowd their shared endpoints with more rows.
-            if direct.len() == 1: carried.push(direct[0])
+            if direct.len() == 1:
+                row = direct[0]
+                other = if changing.has(row.a): row.b else: row.a
+                # The endpoint may first be read by the condition. It still
+                # denotes the same immutable entry projection as a direct row.
+                if fact_loop_materialize(entry, back, other): carried.push(row)
         # A counter stepped down (`high-=1`) stays at most its entry value,
         # and below what entry bounds that value by (`high=xs.length`: high
         # stays at most the length): candidates from entry, kept only when
@@ -5719,7 +5723,27 @@ fact_loop_body = (n: int, body: mut FactState) -> FactLoop:
     edges.back = fact_join(edges.back, body, n)
     edges
 
+# A scanner may first read its array parameter in the condition. Seed only
+# pure local roots on comparison/field/length spines before taking entry, so
+# that an unchanged root and its length retain their identity across headers.
+# No assumptions or effectful reads; at most 32 condition nodes, only for a
+# demanded loop. Ordinary stores and calls still replace these evaluations.
+fact_loop_roots = (n: int, s: mut FactState, budget: mut int):
+    if n <= 0 or budget <= 0: return
+    budget -= 1
+    k = nodes[n].kind
+    if k == .ident:
+        if fact_preread_local(n): fact_read(s, n)
+    else if k == .and_ or k == .or_ or k == .binary and nodes[n].aux == 0 and fact_comparison(nodes[n].op as Tok):
+        fact_loop_roots(int(nodes[n].a), s, budget)
+        fact_loop_roots(int(nodes[n].b), s, budget)
+    else if k == .conv or fact_field_node(n): fact_loop_roots(int(nodes[n].a), s, budget)
+    else if k == .call and fact_string_call(n) == 1 or k == .intrinsic and nodes[n].aux == i32(int(IN.len)) and nkids(n) == 1:
+        fact_loop_roots(kid(n, 0), s, budget)
+
 fact_while = (n: int, s: mut FactState):
+    roots = 32
+    fact_loop_roots(int(nodes[n].a), s, roots)
     outer = fact_speculating
     entry = s
     header = s

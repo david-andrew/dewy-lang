@@ -1,0 +1,21 @@
+# A parameter first read by the guard keeps its entry length identity.
+place=(@xs:array<int64> key:int64)=>{
+    let pos=0
+    loop pos <? xs.length and xs[pos] <? key {pos+=1}
+    xs.insert(key pos)
+}
+Page:type=[keys:array<int64>]
+place_page=(@p:Page key:int64)=>{
+    let pos=0
+    loop pos <? p.keys.length and p.keys[pos] <? key {pos+=1}
+    p.keys.insert(key pos)
+}
+let xs:array<int64>=[]
+place(@xs 2)
+place(@xs 1)
+place(@xs 3)
+printl(xs)
+let p=Page[[1 3]]
+place_page(@p 2)
+place_page(@p 4)
+printl(p.keys)
