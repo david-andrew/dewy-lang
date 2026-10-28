@@ -115,6 +115,12 @@ struct FactSlice:
     # (whether the function assigns a local of fact_carried_type, which only
     # a loop iterating its header bounds: fact_iterates)
     carried: bool = true
+    plan: int = 0
+    callees: int[]
+    versions: int[]
+    exact_demands: int[]
+    index_demands: int[]
+    float_context: bool = false
 
 fact_slice_flags = (n: int) -> int:
     if fact_slice.base < 0: return max(0, fact_index_get(fact_slice.flags, n))
@@ -124,6 +130,51 @@ fact_slice_flags = (n: int) -> int:
 
 fact_slice = FactSlice()
 fact_slice_cache: {int: FactSlice} = {}
+fact_plan_serial = 0
+
+# A plan reads the settled call row's writes, escapes and opacity, in order.
+# Generation/tick checks avoid revisiting unchanged rows; a graph rebuild may
+# keep the same dependency version, but widening or settlement invalidates it.
+struct FactPlanDependency:
+    stamp: int
+    tick: int
+    version: int
+    atoms: EffectAtom[]
+fact_plan_dependencies: {int: FactPlanDependency} = {}
+fact_plan_version = (f: int) -> int:
+    if f <= 0 or f >= effect_summaries.len() or not effect_summaries[f].done: return 0
+    stamp = effect_summaries[f].stamp
+    tick = effect_summaries[f].changed_at
+    old = fact_plan_dependencies.get(f) ?? FactPlanDependency(-1, -1, 0, [])
+    if old.stamp == stamp and old.tick == tick: return old.version
+    atoms: EffectAtom[]
+    loop event in effect_summaries[f].events:
+        if event.atom.kind == .write or event.atom.kind == .opaque or event.atom.kind == .escape: atoms.push(event.atom)
+    version = old.version
+    if version == 0 or old.atoms != atoms:
+        fact_plan_serial += 1
+        version = fact_plan_serial
+    fact_plan_dependencies[f] = FactPlanDependency(stamp, tick, version, atoms)
+    version
+
+# Body/demand rewrites discard every mode and any completed probe together.
+fact_plan_forget = (f: int):
+    loop key in [0..16): fact_slice_cache.remove((f << 4) | key)
+    fact_probe_runs.remove(f)
+
+# O(demand roots + direct callees + changed rows), rows bounded by the effect budget.
+# Cache hits never traverse the body again.
+fact_plan_current = (plan: FactSlice) -> bool:
+    if plan.float_context != (dir_floats_any or ff_conversions.has(fact_owner)): return false
+    # A probe may settle an exact store or index. Its old demand roots must
+    # not become the finalizer's roots after those obligations changed.
+    loop n in plan.exact_demands:
+        if not fact_exact_demand(n): return false
+    loop n in plan.index_demands:
+        if has_flag(n, NF_INBOUNDS): return false
+    loop i in [0..plan.callees.len()):
+        if fact_plan_version(plan.callees[i]) != plan.versions[i]: return false
+    true
 
 fact_loans: FactLoan[]
 
@@ -1424,6 +1475,7 @@ struct FactFootprint:
 struct FactProbeRun:
     proven: {int: bool}
     refine: bool
+    plan: int
     slice: int[]
     slice_base: int
     callees: int[]
@@ -1457,9 +1509,10 @@ fact_probe_note = (f: int):
 fact_probe_reusable = (f: int, run: FactProbeRun) -> bool:
     if fact_policy != .RequireStatic or proof_active or result_active or wi_fact_calls.len() > 0 or wit_collect and not wit_measure or run.refine != (refine_active or refine_requests.len() > 0): return false
     fact_slice_prepare(f)
-    if fact_slice.base != run.slice_base or fact_slice.flags.len() != run.slice.len(): return false
-    loop i in [0..run.slice.len()):
-        if fact_slice.flags[i] != run.slice[i]: return false
+    if fact_slice.plan != run.plan:
+        if fact_slice.base != run.slice_base or fact_slice.flags.len() != run.slice.len(): return false
+        loop i in [0..run.slice.len()):
+            if fact_slice.flags[i] != run.slice[i]: return false
     loop i in [0..run.callees.len()):
         if not fact_footprint_same(fact_footprint(run.callees[i]), run.footprints[i]): return false
     true
@@ -1519,7 +1572,7 @@ fact_probe_function = (f: int, disjoint: bool = false) -> {int: bool}:
         all = true
         loop _, ok in fact_probe:
             if not ok: all = false
-        if all: fact_probe_runs[f] = FactProbeRun(fact_probe, refine, fact_slice.flags, fact_slice.base, fact_probe_callees, fact_probe_footprints)
+        if all: fact_probe_runs[f] = FactProbeRun(fact_probe, refine, fact_slice.plan, fact_slice.flags, fact_slice.base, fact_probe_callees, fact_probe_footprints)
     fact_probe_callees = []
     fact_probe_footprints = []
     fact_slice = FactSlice()
@@ -6645,7 +6698,20 @@ fact_slice_contract_actuals = (call: int, arg: int, values: mut int[]):
 
 fact_slice_prepare = (f: int, summary: bool = false):
     key = (f << 4) | int(summary) | (int(fact_probe_on) << 1) | (int(fact_policy == .RequireStatic) << 2) | (int(result_active or proof_active) << 3)
+    # A mode retains its original plan through effect settlement, as before.
+    # Dependencies gate sharing with a mode that has not prepared its plan yet;
+    # refreshing an established mode would change its proof/witness budget.
     if let cached = fact_slice_cache.get(key): fact_slice = cached; return
+    # Static probes and finalizers have the same demand roots except floor
+    # probes. Share their canonical plan only with unchanged dependencies.
+    share = not summary and fact_policy == .RequireStatic
+    peer = key xor 2
+    if share:
+        if let cached = fact_slice_cache.get(peer):
+            if not cached.probe_only and fact_plan_current(cached):
+                fact_slice = cached
+                fact_slice_cache[key] = cached
+                return
     # (O(body nodes + edges) for the slice: node-indexed scratch marks, an
     # expected O(1) index for writers and for the finished slice)
     fact_mark_begin()
@@ -6659,6 +6725,11 @@ fact_slice_prepare = (f: int, summary: bool = false):
     active: int[]
     forks: int[]
     accumulators: {int: bool} = {}
+    dependencies: {int: bool} = {}
+    callees: int[]
+    versions: int[]
+    exact_demands: int[]
+    index_demands: int[]
     carried = false
     probe_only = false
     # Preparation visits only exact owners. Gate its node indexes once per
@@ -6676,7 +6747,11 @@ fact_slice_prepare = (f: int, summary: bool = false):
         if n == 0 or fact_mark_of(n) & FACT_MEMBER != 0: continue
         fact_mark_set(n, FACT_MEMBER)
         k = nodes[n].kind
-        if exact and (fact_exact_demand(n) or representation and n < exact_rep_demands.len() and exact_rep_demands[n]): values.push(n)
+        if exact:
+            if fact_exact_demand(n):
+                values.push(n)
+                if share: exact_demands.push(n)
+            else if representation and n < exact_rep_demands.len() and exact_rep_demands[n]: values.push(n)
         # (children visited in place, a, b, c then kids: no list per node)
         mask = isolation_children(k)
         if mask > 0:
@@ -6747,8 +6822,8 @@ fact_slice_prepare = (f: int, summary: bool = false):
                 active.push(n)
                 values.push(n)
                 loop arg in kids(n): values.push(arg)
-            else if fact_probe_on and fact_floor_call(n) != 0:
-                values.push(n)
+            else if (fact_probe_on or share) and fact_floor_call(n) != 0:
+                if fact_probe_on: values.push(n)
                 probe_only = true
             loop arg in kids(n):
                 if ownership_decls.len() != 0 and ownership_fact_type(ntype(arg)): active.push(n)
@@ -6761,6 +6836,10 @@ fact_slice_prepare = (f: int, summary: bool = false):
                 values.push(n)
                 loop arg in kids(n): values.push(arg)
             callee = int(nodes[n].sym)
+            if share and nodes[n].aux == 0 and callee > 0 and not dependencies.has(callee):
+                dependencies[callee] = true
+                callees.push(callee)
+                versions.push(fact_plan_version(callee))
             if nodes[n].aux == 0 and callee > 0 and ref_refined_result(int(fns[callee].ret)): values.push(n)
             if nodes[n].aux == 0 and callee > 0 and callee < effect_summaries.len() and effect_summaries[callee].done:
                 opaque = false
@@ -6799,6 +6878,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
             else if id != .len and not fact_pure_intrinsic(id): opaque_writes.push(n)
         else if k == .index:
             if not summary and (fact_probe_on or fact_policy == .RequireStatic) and not has_flag(n, NF_INBOUNDS) and fact_bounded_index(n):
+                if share: index_demands.push(n)
                 active.push(n)
                 values.push(int(nodes[n].b))
                 if types[fact_type(ntype(int(nodes[n].a)))].kind != .fixed: values.push(int(nodes[n].a))
@@ -6938,6 +7018,13 @@ fact_slice_prepare = (f: int, summary: bool = false):
         loop n in fact_mark_touched:
             if fact_mark_flags[n] != 0: fact_index_put(flags, n, fact_mark_flags[n])
         fact_slice = FactSlice(flags, probe_only, carried = carried)
+    fact_plan_serial += 1
+    fact_slice.plan = fact_plan_serial
+    fact_slice.callees = callees
+    fact_slice.versions = versions
+    fact_slice.exact_demands = exact_demands
+    fact_slice.index_demands = index_demands
+    if share: fact_slice.float_context = dir_floats_any or ff_conversions.has(fact_owner)
     fact_slice_cache[key] = fact_slice
 
 # At a fork closure's creation: its captures' facts, by capture. O(k^2)
@@ -8745,6 +8832,8 @@ facts_reset = ():
     exact_reset()
     fact_slice = FactSlice()
     fact_slice_cache = {}
+    fact_plan_dependencies = {}
+    fact_plan_serial = 0
     fact_fork_nodes = {}
     fact_fork_entries = {}
     fact_parallel_bounds = {}
@@ -9328,7 +9417,7 @@ fact_complete_deferred = (f: int):
     fact_deferred.remove(f)
     previous_proving = fact_deferred_proving
     fact_deferred_proving = true
-    loop key in [0..16): fact_slice_cache.remove((f << 4) | key)
+    fact_plan_forget(f)
     pending = fact_deferred_checks.get(f) ?? []
     fact_deferred_checks.remove(f)
     if pending.len() > 0:

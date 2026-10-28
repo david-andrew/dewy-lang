@@ -597,8 +597,7 @@ exact_prepare = ():
         exact_effect_owners[f] = true
         body = int(fns[f].body)
         if exact_prepare_floats(f): continue
-        loop key in [0..16): fact_slice_cache.remove((f << 4) | key)
-        fact_probe_runs.remove(f)
+        fact_plan_forget(f)
         # Reuse this demanded traversal for lowering's write inventory.
         # Each write/control boundary is recorded once, O(N+E); lowering
         # replays O(writes + controls) instead of walking the body again.
