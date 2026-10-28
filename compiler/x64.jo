@@ -1,3 +1,4 @@
+use 'native_debug.dewy'
 use 'pe_format.dewy'
 use 'elf_format.dewy'
 use 'x64_module.dewy'
@@ -46,20 +47,6 @@ fn_len: int[]               # lfunc -> its code's length (sloppy watch)
 
 row_line = -1
 
-# ---------------- debug information: where each variable is (dwarf.jo writes it) ----------------
-# a variable's place, while its code runs from lo to hi (offsets in .text; lo == hi: nowhere)
-const DL_NONE = 0
-const DL_REG = 1        # in register r
-const DL_MEM = 2        # in memory at register r + off
-const DL_MEMAT = 3      # in memory at the address kept at register r + off
-const DL_CONST = 4      # the value off
-const DL_FCONST = 5     # a float of size r, its bits off
-const DL_ADDR = 6       # the value is the address register r + off
-
-# for each function: its symbol (an index into elf_syms), start, length, frame register (DWARF's
-# number), variable count; then for each variable: its local, kind, r, off, lo, hi
-dbg_raw: int[]
-dbg_cfi: int[]
 x64_function = ():
     x_int_fail.clear()
     pad_moves = false
@@ -142,85 +129,10 @@ X64_DWREG = [0, 2, 1, 3, 7, 6, 4, 5, 8, 9, 10, 11, 12, 13, 14, 15]
 # the variables of the function just emitted (from start; its body from body): where each is,
 # from the registers the allocator gave and the frame (dwreg: DWARF numbers of the general
 # registers; vector registers from fp_base on are DWARF's fp_dw on; frame: the frame register)
-dbg_function = (start: int, body: int, dwreg: int[], fp_base: int, fp_dw: int, frame: int):
-    dbg_raw.push(elf_syms.len())
-    dbg_raw.push(start)
-    dbg_raw.push(code.len() - start)
-    dbg_raw.push(frame)
-    count_at = dbg_raw.len()
-    dbg_raw.push(0)
-    n = ir.code.len()
-    end = code.len()
-    nv = 0
-    loop l in ir.dbg_locals:
-        fl = int(locals[l].flags)
-        if fl & (LF_CAPTURE | LF_ALIAS) != 0 or locals[l].name == 0: continue
-        nv += 1
-        kind = DL_NONE
-        r = 0
-        off = 0
-        lo = body
-        hi = end
-        if locals[l].offset >= 0:
-            # (in a slot of the frame, all along)
-            kind = DL_MEM
-            r = frame
-            off = slot_off[int(locals[l].offset)]
-        else:
-            v = int(locals[l].vreg)
-            if v >= 0 and v < ir.vtypes.len():
-                # (the vreg holds the variable's address: by reference, a mut parameter, a struct parameter)
-                at = fl & LF_BYREF != 0 or fl & LF_PARAM != 0 and (fl & LF_MUTPARAM != 0 or vc(int(locals[l].type)) == VC_AGG)
-                s0 = if v < ir.nparams: -1 else: v_live[v].first
-                e = v_live[v].last
-                if s0 >= 0 and s0 < n: lo = dbg_pos[s0]
-                if e >= 0 and e + 1 <= n: hi = dbg_pos[e + 1]
-                loc = vloc[v]
-                if loc >= fp_base:
-                    kind = DL_REG
-                    r = fp_dw + loc - fp_base
-                else if loc >= 0:
-                    kind = DL_REG
-                    r = dwreg[loc]
-                    if at: kind = DL_MEM
-                else if loc == LOC_SPILL:
-                    kind = DL_MEM
-                    if at: kind = DL_MEMAT
-                    r = frame
-                    off = vspill[v]
-                else if loc == LOC_SLOT:
-                    kind = DL_ADDR
-                    if at: kind = DL_MEM
-                    r = frame
-                    off = slot_off[vslot[v]] + vsoff[v]
-                else if loc == LOC_CONST and not at:
-                    kind = DL_CONST
-                    off = vcval[v]
-                else if loc == LOC_FCONST and not at:
-                    kind = DL_FCONST
-                    r = 8
-                    if vtype(v) == VS: r = 4
-                    off = vcval[v]
-                if e < 0: hi = lo
-        if kind == DL_NONE: hi = lo
-        dbg_raw.push(l)
-        dbg_raw.push(kind)
-        dbg_raw.push(r)
-        dbg_raw.push(off)
-        dbg_raw.push(lo)
-        dbg_raw.push(hi)
-    dbg_raw[count_at] = nv
+dbg_aggregate = (t: int) -> bool: vc(t) == VC_AGG
 
-# store (before) or reload (after) caller-saved registers holding values live across the call at pos
-sym_name = (n: str) -> str:
-    if not starts_with(n, "f_"): return n
-    s = n[2..]
-    u = rfind(s, "_")
-    if u > 0:
-        loop c in s[u + 1..]:
-            if c < '0' or c > '9': return s
-        return s[..u)
-    s
+dbg_function = (start: int, body: int, dwreg: int[], fp_base: int, fp_dw: int, frame: int):
+    native_debug_function(&ir, code.len(), start, body, dwreg, fp_base, fp_dw, frame, dbg_aggregate)
 
 # the entry point of a Windows program: called with the stack 8 bytes off 16-byte alignment;
 # the initializers and main, then ExitProcess(0) from the import table
@@ -247,79 +159,6 @@ x64_entry = (inits: int[], main_lf: int) -> int:
 row_file = -1
 
 # (a row where the position changes; dwarf.jo leaves out those on the same line)
-x64_frame_table = () -> u8[]:
-    out = fill(u8(0), 8 + 4 * rsp_rows.len())
-    words = data(out) as *u32
-    words[0] = 0x31524653                 # SFR1
-    words[1] = u32(rsp_rows.len() / 2)
-    loop i in [0..rsp_rows.len()): words[i + 2] = u32(rsp_rows[i])
-    out
-
-# the ".dewy_lines" section: "SLN1", the files (u32 count, then u32 length and name each),
-# then u32 count and for each call site in address order: varints of the return address's
-# offset in .text since the previous one, the file and the line
-x64_line_table = () -> u8[]:
-    if call_sites.len() == 0: return []
-    out: u8[] = ['S', 'L', 'N', '1']
-    fidx = fill(-1, files.len())
-    fnames: str[]
-    ents: int[]
-    ents.reserve(call_sites.len() * 3 / 2)
-    k = 0
-    loop k < call_sites.len():
-        f = pos_file(ir_positions[call_sites[k + 1]])
-        if f < 0 or f >= files.len():
-            k += 2
-            continue
-        if fidx[f] < 0:
-            fidx[f] = fnames.len()
-            path = files[f].path
-            s = rfind(path, "/")
-            if s >= 0: path = path[s + 1..]
-            fnames.push(path)
-        ents.push(call_sites[k])
-        ents.push(fidx[f])
-        ents.push(ir_line(call_sites[k + 1]))
-        k += 2
-    put32(out, fnames.len())
-    loop nm in fnames:
-        put32(out, len(nm))
-        loop ch in nm: out.push(ch)
-    put32(out, ents.len() / 3)
-    out.reserve(out.len() + ents.len() * 2)
-    last = 0
-    k = 0
-    loop k < ents.len():
-        put_varint(out, ents[k] - last)
-        last = ents[k]
-        put_varint(out, ents[k + 1])
-        put_varint(out, ents[k + 2])
-        k += 3
-    out
-
-# (Windows programs: their .dewy section, compiler/pe.jo) "SLS1", the number of functions,
-# each as its offset in .text, size and name; then the line table (x64_line_table)
-pe_backtrace_info = () -> u8[]:
-    out: u8[] = ['S', 'L', 'S', '1']
-    put32(out, elf_syms.len())
-    loop s in elf_syms:
-        put32(out, s.1)
-        put32(out, s.2)
-        put32(out, len(s.0))
-        loop c in s.0: out.push(c)
-    append_bytes(out, x64_line_table())
-    out
-
-put_varint = (out: mut u8[], v0: int):
-    if v0 >= 0 and v0 < 128:
-        out.push(u8(v0))
-        return
-    v = v0
-    loop v >= 128:
-        out.push(u8((v & 127) | 128))
-        v = v >> 7
-    out.push(u8(v))
-
 x64_stubs = ():
     row_line = 0
     x64_emit_stubs()

@@ -1,0 +1,214 @@
+$runtime_checks
+from p"ir_types.dewy" import (IrFn)
+from p"dwarf_format.dewy" import (DL_ADDR DL_CONST DL_FCONST DL_MEM DL_MEMAT DL_NONE DL_REG LF_MUTPARAM LF_PARAM dw_inputs dw_pos_file)
+from p"x64_allocate.dewy" import (slot_off vspill)
+from p"x64_emit.dewy" import (call_sites dbg_pos rsp_rows)
+from p"backend_analysis.dewy" import (LOC_CONST LOC_FCONST LOC_SLOT LOC_SPILL v_live vcval vloc vslot vsoff)
+from p"elf_format.dewy" import (elf_append_bytes elf_syms put32)
+
+# Native variable locations and compact backtrace metadata, shared by x64 and ARM.
+NWord:type=int64<overflow='wrap'>
+const LF_CAPTURE=4
+const LF_ALIAS=8
+const LF_BYREF=32
+const VS=2
+let dbg_raw:array<int64>=[]
+let dbg_cfi:array<int64>=[]
+native_debug_function=(input:ptr<IrFn> code_end:NWord start:NWord body:NWord dwreg:array<int64> fp_base:NWord fp_dw:NWord frame:NWord aggregate:<(t:int64):>bool>):>void=>$unsafe {
+    let locals=dw_inputs[0].locals[0].ptr
+    let slot_offsets=slot_off.ptr
+    let spills=vspill.ptr
+    let positions=dbg_pos.ptr
+    let registers=dwreg.ptr
+    let vt=input[0].vtypes.ptr
+    let nt=NWord(input[0].vtypes.length)
+    let np=NWord(input[0].nparams)
+    let bindings=input[0].dbg_locals.ptr
+    let nb=NWord(input[0].dbg_locals.length)
+    dbg_raw.push(NWord(elf_syms.length))
+    dbg_raw.push(start)
+    dbg_raw.push(code_end - start)
+    dbg_raw.push(frame)
+    let count_at=dbg_raw.length
+    dbg_raw.push(0)
+    let n=NWord(input[0].code.length)
+    let end_=code_end
+    let nv:NWord=0
+    loop li in [NWord(0)..nb) {
+        let l=bindings[li]
+        let fl=NWord(locals[l].flags)
+        if fl & (LF_CAPTURE | LF_ALIAS) not=? 0 or locals[l].name =? 0 {continue}
+        nv += 1
+        let kind:NWord=DL_NONE
+        let r:NWord=0
+        let off:NWord=0
+        let lo=body
+        let hi=end_
+        if locals[l].offset >=? 0 {
+            # (in a slot of the frame, all along)
+            kind=DL_MEM
+            r=frame
+            off=slot_offsets[NWord(locals[l].offset)]
+        }
+        else {
+            let v=NWord(locals[l].vreg)
+            if v >=? 0 and v <? nt {
+                # (the vreg holds the variable's address: by reference, a mut parameter, a struct parameter)
+                let at=fl & LF_BYREF not=? 0 or fl & LF_PARAM not=? 0 and(fl & LF_MUTPARAM not=? 0 or aggregate(NWord(locals[l].type)))
+                let s0=if v <? np {-1} else {v_live[v].first}
+                let e=v_live[v].last
+                if s0 >=? 0 and s0 <? n {lo=positions[s0]}
+                if e >=? 0 and e + 1 <=? n {hi=positions[e + 1]}
+                let loc=vloc[v]
+                if loc >=? fp_base {
+                    kind=DL_REG
+                    r=fp_dw + loc - fp_base
+                }
+                else if loc >=? 0 {
+                    kind=DL_REG
+                    r=registers[loc]
+                    if at {kind=DL_MEM}
+                }
+                else if loc =? LOC_SPILL {
+                    kind=DL_MEM
+                    if at {kind=DL_MEMAT}
+                    r=frame
+                    off=spills[v]
+                }
+                else if loc =? LOC_SLOT {
+                    kind=DL_ADDR
+                    if at {kind=DL_MEM}
+                    r=frame
+                    off=slot_offsets[vslot[v]] + vsoff[v]
+                }
+                else if loc =? LOC_CONST and not at {
+                    kind=DL_CONST
+                    off=vcval[v]
+                }
+                else if loc =? LOC_FCONST and not at {
+                    kind=DL_FCONST
+                    r=8
+                    if NWord(vt[v]) =? VS {r=4}
+                    off=vcval[v]
+                }
+                if e <? 0 {hi=lo}
+            }
+        }
+        if kind =? DL_NONE {hi=lo}
+        dbg_raw.push(l)
+        dbg_raw.push(kind)
+        dbg_raw.push(r)
+        dbg_raw.push(off)
+        dbg_raw.push(lo)
+        dbg_raw.push(hi)
+    }
+    dbg_raw[count_at] = nv
+}
+sym_name=(n:string):>string=>$unsafe {
+    if not n.startswith("f_") {return n}
+    let s=n.byte_slice(2  (n as array<uint8>).length)
+    let u=nd_rfind(s  95)
+    if u >? 0 {
+        loop c in (s.byte_slice(u + 1  (s as array<uint8>).length) as array<uint8>) {
+            if c <? 48 or c >? 57 {return s}
+        }
+        return s.byte_slice(0  u)
+    }
+    s
+}
+x64_frame_table=():>array<uint8>=>$unsafe {
+    let out=fill(uint8((0) & 0xff)  8 + 4 * rsp_rows.length)
+    let words=out.ptr as ptr<uint32>
+    words[0] = 0x31524653 # SFR1
+    words[1] = uint32((rsp_rows.length // 2) & 0xffffffff)
+    loop i in [0..rsp_rows.length) {words[i + 2] = uint32((rsp_rows[i]) & 0xffffffff)}
+    out
+}
+
+# the ".dewy_lines" section: "SLN1", the files (u32 count, then u32 length and name each),
+# then u32 count and for each call site in address order: varints of the return address's
+# offset in .text since the previous one, the file and the line
+x64_line_table=():>array<uint8>=>$unsafe {
+    let nc=NWord(call_sites.length)
+    let calls=call_sites.ptr
+    let files=dw_inputs[0].files[0].ptr
+    let nf=NWord(dw_inputs[0].files[0].length)
+    let positions=dw_inputs[0].ir_positions[0].ptr
+    if nc =? 0 {return []}
+    let out:array<uint8>=[83  76  78  49]
+    let fidx:array<int64>=fill(-1  nf)
+    let fnames:array<string>=[]
+    let ents:array<int64>=[]
+    ents.reserve(nc * 3 // 2)
+    let k:NWord=0
+    loop k <? nc {
+        let f=dw_pos_file(positions[calls[k + 1]])
+        if f <? 0 or f >=? nf {
+            k += 2
+            continue
+        }
+        if fidx[f] <? 0 {
+            fidx[f] = fnames.length
+            let path=files[f].path
+            let s=nd_rfind(path  47)
+            if s >=? 0 {path=path.byte_slice(s + 1  (path as array<uint8>).length)}
+            fnames.push(path)
+        }
+        ents.push(calls[k])
+        ents.push(fidx[f])
+        ents.push(dw_inputs[0].host[0].ir_line(calls[k + 1]))
+        k += 2
+    }
+    put32(@out  fnames.length)
+    loop nm in fnames {
+        put32(@out  NWord((nm as array<uint8>).length))
+        loop ch in (nm as array<uint8>) {out.push(ch)}
+    }
+    put32(@out  ents.length // 3)
+    out.reserve(out.length + ents.length * 2)
+    let last:NWord=0
+    k=0
+    loop k <? ents.length {
+        put_varint(@out  ents[k] - last)
+        last=ents[k]
+        put_varint(@out  ents[k + 1])
+        put_varint(@out  ents[k + 2])
+        k += 3
+    }
+    out
+}
+
+# (Windows programs: their .dewy section, compiler/pe.jo) "SLS1", the number of functions,
+# each as its offset in .text, size and name; then the line table (x64_line_table)
+pe_backtrace_info=():>array<uint8>=>$unsafe {
+    let out:array<uint8>=[83  76  83  49]
+    put32(@out  elf_syms.length)
+    loop s in elf_syms {
+        put32(@out  s[1])
+        put32(@out  s[2])
+        put32(@out  NWord((s[0] as array<uint8>).length))
+        loop c in (s[0] as array<uint8>) {out.push(c)}
+    }
+    elf_append_bytes(@out  x64_line_table())
+    out
+}
+put_varint=(@out:array<uint8> v0:NWord):>void=>$unsafe {
+    if v0 >=? 0 and v0 <? 128 {
+        out.push(uint8((v0) & 0xff))
+        return
+    }
+    let v=v0
+    loop v >=? 128 {
+        out.push(uint8(((v & 127) | 128) & 0xff))
+        v=v >> 7
+    }
+    out.push(uint8((v) & 0xff))
+}
+
+nd_rfind=(text:string byte:uint8):>NWord=>$unsafe {
+    let bytes=text as array<uint8>
+    let p=bytes.ptr
+    let k=NWord(bytes.length)
+    loop k >? 0 {k -= 1; if p[k] =? byte {return k}}
+    -1
+}
