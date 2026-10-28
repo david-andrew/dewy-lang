@@ -127,9 +127,16 @@ op_rm=(opc:XWord w:bool reg:XWord base:XWord disp:XWord):>void=>$unsafe {
     mem(reg  base  disp)
 }
 op_rr=(opc:XWord w:bool reg:XWord rm:XWord):>void=>$unsafe {
-    rex(w  reg  0  rm  false)
-    b(opc)
-    modrr(reg  rm)
+    # One reservation for the complete register encoding. Keep rex's indexed
+    # flag behavior even when the caller has left an address index selected.
+    let prefix:XWord=0x40
+    if w {prefix |= 8}
+    if reg & 8 not=? 0 {prefix |= 4}
+    if cur_index >=? 0 and cur_index & 8 not=? 0 {prefix |= 2}
+    if rm not=? RIPREL and rm & 8 not=? 0 {prefix |= 1}
+    let encoded=(opc & 255) | ((0xC0 | ((reg & 7) << 3) | (rm & 7)) << 8)
+    if prefix =? 0x40 {b16(encoded)}
+    else {b24(prefix | (encoded << 8))}
 }
 mov_rm=(r:XWord base:XWord disp:XWord):>void=>$unsafe {
     op_rm(0x8B  true  r  base  disp)

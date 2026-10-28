@@ -80,13 +80,13 @@ hint_operand=(v:XWord pos:XWord):>XWord=>$unsafe {
     if v <? xr_ir[0].nparams or pos >=? XWord(xr_ir[0].code.length) {
         return -1
     }
-    let ins=xr_code[pos]
-    if XWord(ins.dst) not=? v or not hint_op(ins.op) {
+    let ins=xr_code + pos
+    if XWord(ins[0].dst) not=? v or not hint_op(ins[0].op) {
         return -1
     }
-    let a:XWord=XWord(ins.a)
-    if ins.op =? 'checked_sub' and xr_is_kv(a) and xr_kv_of(a) =? 0 {
-        a = XWord(ins.b)
+    let a:XWord=XWord(ins[0].a)
+    if ins[0].op =? 'checked_sub' and xr_is_kv(a) and xr_kv_of(a) =? 0 {
+        a = XWord(ins[0].b)
     }
     if a <? 0 or a =? v or vloc[a] <? 0 or v_live[a].last not=? pos {
         return -1
@@ -135,8 +135,20 @@ ra_remove=(active:ptr<int64> byreg:ptr<int64> n:XWord reg:XWord):>XWord=>$unsafe
     n - 1
 }
 allocate=():>void=>$unsafe {
+    # These arrays stay fixed for this allocation. Borrow once, preserving COW
+    # on the saved-register writes; the scan introduces no additional pass.
+    let saved_flags=is_callee.ptr
+    let keep=dbg_keep.ptr
+    let calls=call_pos.ptr
+    let ncalls:XWord=call_pos.length
+    let caller_regs=caller_pool.ptr
+    let callee_regs=callee_pool.ptr
+    let ncaller:XWord=caller_pool.length
+    let ncallee:XWord=callee_pool.length
+    let np:XWord=xr_ir[0].nparams
     let nv:XWord=XWord(xr_ir[0].vtypes.length)
     callee_off = fill(0  16)
+    let saved=callee_off.ptr
     if not ra_on {
         loop v in [0..nv) {
             if vloc[v] not=? LOC_CONST and vloc[v] not=? LOC_FCONST and vloc[v] not=? LOC_SLOT and vloc[v] not=? LOC_GLOBAL {
@@ -156,7 +168,7 @@ allocate=():>void=>$unsafe {
     let min_end:XWord=INF_POS
     let call_next:XWord=0
     loop pos in [0..n) {
-        loop call_next <? call_pos.length and call_pos[call_next] <=? pos {
+        loop call_next <? ncalls and calls[call_next] <=? pos {
             call_next += 1
         }
         let v:XWord=v_start[pos]
@@ -187,29 +199,30 @@ allocate=():>void=>$unsafe {
             }
         }
         loop v >=? 0 {
+            let vector=xr_vtype(v) not=? VI
             let next_call:XWord=call_next
-            if v <? xr_ir[0].nparams {
+            if v <? np {
                 next_call = 0
             }
-            let crosses=next_call <? call_pos.length and call_pos[next_call] <? v_live[v].last
+            let crosses=next_call <? ncalls and calls[next_call] <? v_live[v].last
             let reg:XWord=-1
             let h:XWord=hint_operand(v  pos)
-            if h >=? 0 and crosses and vloc[h] <? XMM and not is_callee[vloc[h]] {
+            if h >=? 0 and crosses and vloc[h] <? XMM and not saved_flags[vloc[h]] {
                 h = -1
             }
-            if h >=? 0 and crosses and xr_debug and dbg_keep[v] and vloc[h] >=? XMM {
+            if h >=? 0 and crosses and xr_debug and keep[v] and vloc[h] >=? XMM {
                 h = -1
             }
             if h >=? 0 and byreg[vloc[h]] >=? 0 and active[byreg[vloc[h]]] =? h {
                 reg = vloc[h]
                 nactive = ra_remove(active  byreg  nactive  reg)
-                vsave[v] = crosses and (reg >=? XMM or not is_callee[reg])
-                if reg <? XMM and is_callee[reg] {
-                    callee_off[reg] = 1
+                vsave[v] = crosses and (reg >=? XMM or not saved_flags[reg])
+                if reg <? XMM and saved_flags[reg] {
+                    saved[reg] = 1
                 }
             }
-            else if xr_vtype(v) not=? VI {
-                if not (crosses and xr_debug and dbg_keep[v]) {
+            else if vector {
+                if not (crosses and xr_debug and keep[v]) {
                     loop x in [2..15) {
                         if free & (1 << (XMM + x)) not=? 0 {
                             reg = XMM + x
@@ -221,7 +234,8 @@ allocate=():>void=>$unsafe {
             }
             else {
                 if not crosses {
-                    loop r in caller_pool {
+                    loop ri in [0..ncaller) {
+                        let r:XWord=caller_regs[ri]
                         if free & (1 << r) not=? 0 {
                             reg = r
                             break
@@ -229,15 +243,17 @@ allocate=():>void=>$unsafe {
                     }
                 }
                 if reg <? 0 {
-                    loop r in callee_pool {
+                    loop ri in [0..ncallee) {
+                        let r:XWord=callee_regs[ri]
                         if free & (1 << r) not=? 0 {
                             reg = r
                             break
                         }
                     }
                 }
-                if reg <? 0 and crosses and not (xr_debug and dbg_keep[v]) {
-                    loop r in caller_pool {
+                if reg <? 0 and crosses and not (xr_debug and keep[v]) {
+                    loop ri in [0..ncaller) {
+                        let r:XWord=caller_regs[ri]
                         if free & (1 << r) not=? 0 {
                             reg = r
                             vsave[v] = true
@@ -254,10 +270,10 @@ allocate=():>void=>$unsafe {
                 loop k in [0..nactive) {
                     let a:XWord=active[k]
                     let ra:XWord=vloc[a]
-                    if (ra >=? XMM) not=? (xr_vtype(v) not=? VI) {
+                    if (ra >=? XMM) not=? (vector) {
                         continue
                     }
-                    if crosses and xr_debug and dbg_keep[v] and (ra >=? XMM or not is_callee[ra]) {
+                    if crosses and xr_debug and keep[v] and (ra >=? XMM or not saved_flags[ra]) {
                         continue
                     }
                     if not spills_before(a  v) {
@@ -270,7 +286,7 @@ allocate=():>void=>$unsafe {
                 if best >=? 0 {
                     reg = vloc[best]
                     vloc[best] = LOC_SPILL
-                    vsave[v] = crosses and (reg >=? XMM or not is_callee[reg])
+                    vsave[v] = crosses and (reg >=? XMM or not saved_flags[reg])
                     nactive = ra_remove(active  byreg  nactive  reg)
                 }
             }
@@ -286,8 +302,8 @@ allocate=():>void=>$unsafe {
                 if v_live[v].last <? min_end {
                     min_end = v_live[v].last
                 }
-                if reg <? XMM and is_callee[reg] {
-                    callee_off[reg] = 1
+                if reg <? XMM and saved_flags[reg] {
+                    saved[reg] = 1
                 }
             }
             else {
