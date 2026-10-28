@@ -733,8 +733,8 @@ keys, in loops too); a nested dictionary's key is proven the same way through it
 entry (`if m not in? d[p] d[p][m] = 0` before `d[p][m] += 1`), while neither `d`
 nor that entry changes otherwise. These rules also apply to a dictionary lent by
 `@(m.lock())` and to a helper taking it by `@`, while the guard is held; `d.get(k)` and `d.pop(k default=v)` take a missing key as a value.
-Keys selected or iterated from `d.keys.values` or `d.keys.sorted()` remain
-members of that dictionary snapshot. Copying, slicing, sorting or reversing
+Keys with builtin equality and hashing selected or iterated from `d.keys.values`
+or `d.keys.sorted()` remain members of that dictionary snapshot. Copying, slicing, sorting or reversing
 the key array preserves this fact; replacing its elements or changing the
 dictionary can require a new membership guard.
 `pool[h]`, `pool[h] = x` and `pool[h].field += x` need `pool.has(h)`, proven by
@@ -2074,8 +2074,12 @@ including nested managed values and overlapping source/destination selections.
 They also work inside record fields, dictionaries and custom containers such as
 `Pool`. As with ordinary arrays, compound assignment to a selection needs an
 explicit loop.
-Spreading inline arrays into ordinary arrays works, and a spread literal can
-initialize a fixed array with a runtime length check: `let pair:Pair<int64> = [xs...]`.
+Spreading inline arrays into ordinary arrays works. Converting a growable array
+or spread literal to a fixed array requires its length to match:
+`let pair:Pair<int64> = [xs...]`. A known length or a guard such as
+`xs.length =? 2` proves a pair conversion. Otherwise, use `$runtime_assert`
+before it or opt into the length check with `$runtime_checks`; a proven
+conversion has no length check and can satisfy `& no panics`.
 
 Array literals can spread arrays and sets: `[head... item tail...]`. Operands run
 once, from left to right, and each spread appends its current elements before

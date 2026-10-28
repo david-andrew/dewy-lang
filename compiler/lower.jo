@@ -4976,14 +4976,15 @@ gen_conv = (e: int) -> Val:
         return Val(d, true, s)
     if cv == .arr2fixed:
         push = fact_fixed_comprehension(a, to)
-        if push != 0: return gen_fixed_comprehension(a, push, to)
+        if push != 0: return gen_fixed_comprehension(a, push, to, has_flag(e, NF_INBOUNDS))
         if copies_on: copy_components(e, to, "the fixed array contains heap payloads that must be copied")
         # Check the shape once, then copy the value into inline storage.
         src = gen_borrowed(a).v
         n = fixed_len(to)
-        iff(e_bin(.ne, VI, arr_len(src), e_iconst(n)))
-        e_call_nr1(rt("__panic"), e_daddr(str_data("fixed-size array needs {n} elements")), -1)
-        endc()
+        if not has_flag(e, NF_INBOUNDS):
+            iff(e_bin(.ne, VI, arr_len(src), e_iconst(n)))
+            e_call_nr1(rt("__panic"), e_daddr(str_data("fixed-size array needs {n} elements")), -1)
+            endc()
         s = new_temp(to)
         d = e_slot(s)
         if ownership_type(to):
@@ -7032,14 +7033,14 @@ fixed_fill_count = 0
 fixed_fill_type = 0
 fixed_fill_exact = false
 
-gen_fixed_comprehension = (b: int, push: int, to: int) -> Val:
+gen_fixed_comprehension = (b: int, push: int, to: int, proven: bool) -> Val:
     n = fixed_len(representation_type(to))
     s = new_temp(to)
     e_zero(e_slot(s), tsize(to))
     saved = (fixed_fill_push, fixed_fill_slot, fixed_fill_count, fixed_fill_type, fixed_fill_exact)
     count = vreg(VI)
     e_mov(count, e_iconst(0))
-    exact = fact_fixed_comprehension_exact(b, to)
+    exact = proven or fact_fixed_comprehension_exact(b, to)
     fixed_fill_push = push; fixed_fill_slot = s; fixed_fill_count = count; fixed_fill_type = to; fixed_fill_exact = exact
     scope_push()
     gen_stmt(kid(b, 0))

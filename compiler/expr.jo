@@ -813,6 +813,9 @@ coerce = (n: int, target: int) -> int:
     if fk == .array and tk == .fixed:
         if nodes[n].kind != .array and type_eq(int(types[from].elem), int(types[to].elem)):
             wrap_conv(n, .arr2fixed, to)
+            # Register the boundary, including deferred/opaque control paths.
+            # Its operand's evaluated length is proved only by the facts pass.
+            fact_fixed_requests.push(FactRequest(n, if cx >= 0: int(ctxs[cx].inst) else: 0))
             return n
         if not fixed_literal_ok(n, to):
             els = "{fixed_len(to)} elements"

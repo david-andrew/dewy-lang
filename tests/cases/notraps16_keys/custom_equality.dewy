@@ -1,0 +1,7 @@
+Key:type=[value:int64]
+hash=(key:Key):>uint64=>0
+__eq__=(a:Key b:Key):>bool=>false
+show=(d:dict<Key int64>):>void=>{
+    loop key in d.keys.values {printl(d[key])}
+}
+main=()=>show([Key[1]->7])

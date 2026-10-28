@@ -153,6 +153,7 @@ fact_loop_exhausted = false
 
 fact_divisors: {int: int} = {}
 fact_requests: FactRequest[]
+fact_fixed_requests: FactRequest[]
 fact_terms: FactTerm[]
 # Evaluated actuals of demanded record-returning calls. A field projection
 # requests its own cached return summary; no whole-program constructor census.
@@ -3156,7 +3157,7 @@ fact_pure_conversion = (n: int) -> bool:
     aux = nodes[n].aux
     # (a union's value re-tagged for a wider or narrower union, `or_throw`'s
     # remaining members: no copy hook runs, nothing is written)
-    if aux == i32(int(CV.union_)): return ownership_decls.len() == 0 or not ownership_fact_type(ntype(n))
+    if aux == i32(int(CV.union_)) or aux == i32(int(CV.arr2fixed)): return ownership_decls.len() == 0 or not ownership_fact_type(ntype(n))
     aux == i32(int(CV.int2float)) or aux == i32(int(CV.float2int)) or aux == i32(int(CV.float_)) or aux == i32(int(CV.wrap_int)) or aux == i32(int(CV.saturate_int))
 
 fact_reads_only = (id: IN) -> bool:
@@ -5381,6 +5382,26 @@ fact_while = (n: int, s: mut FactState):
     edges = fact_loop_body(n, paths.yes)
     s = fact_join(paths.no, edges.exits, n)
 
+# A dynamic-to-fixed conversion has one length equality obligation. Demand
+# only its operand and existing length projection; O(1) lookup plus the bounded
+# difference query. Every analyzed visit must prove it to erase the check.
+fact_fixed_check = (n: int, s: mut FactState, value: int):
+    if fact_speculating != 0 or not s.live: return
+    count = fixed_len(representation_type(ntype(n)))
+    length = 0
+    proven = false
+    if value != 0:
+        length = fact_project(s, value, -1, false, T_INT)
+        expected = fact_constant(s, count)
+        proven = fact_compare(s, .eq, length, expected) == 1
+    if fact_probe_on:
+        fact_probe_record(n, proven)
+        return
+    fact_validated[n] = true
+    dir_index(n, proven)
+    if not proven and (fact_policy == .RequireStatic or fact_query):
+        wit_unknown(n, fact_bound(s, length), "fixed-size array conversion needs {count} elements")
+
 # A comprehension that fills a fixed-size array of plain elements in place:
 # `let acc=[]`, one range or array loop whose body is straight-line
 # declarations ending in one push onto acc, then acc. Its push, or 0.
@@ -6581,7 +6602,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
                 if types[fact_type(ntype(int(nodes[n].a)))].kind != .fixed: values.push(int(nodes[n].a))
         else if k == .conv:
             if ff_integer_demand(n): values.push(n)
-            if nodes[n].aux == i32(int(CV.refinement)): values.push(n)
+            if nodes[n].aux == i32(int(CV.refinement)) or nodes[n].aux == i32(int(CV.arr2fixed)): values.push(n)
             # (an `int` narrowed to a fixed width: an obligation, and effect_failure asks whether it fits)
             else if (fact_probe_on or fact_policy == .RequireStatic) and not summary and nodes[n].aux == i32(int(CV.int_)) and prune(ntype(int(nodes[n].a))) == T_MATH_INT and prune(ntype(n)) != T_MATH_INT: values.push(n)
             else if ownership_decls.len() != 0 and nodes[n].aux == i32(int(CV.explicit_copy)) and ownership_fact_type(ntype(n)): opaque_writes.push(n)
@@ -6885,7 +6906,7 @@ fact_obligation_node = (n: int) -> bool:
     if k == .for_: return fact_stepped_loop(n) or fact_open_range(n)
     if k == .conv:
         if ff_integer_demand(n): return true
-        if exact_has_store(n) and not exact_decided(n) or nodes[n].aux == i32(int(CV.refinement)): return true
+        if exact_has_store(n) and not exact_decided(n) or nodes[n].aux == i32(int(CV.refinement)) or nodes[n].aux == i32(int(CV.arr2fixed)): return true
         return nodes[n].aux == i32(int(CV.int_)) and prune(ntype(int(nodes[n].a))) == T_MATH_INT and prune(ntype(n)) != T_MATH_INT
     if k == .call:
         if wi_fact_calls.has(n) or fact_divisors.has(n) or fact_range_call(n) or nd_mutable_call(n): return true
@@ -7485,6 +7506,10 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                 return fact_new(s, fact_domain(ntype(n), .call, n), FactTerm(type = ntype(n)))
             return a
         if nodes[n].aux == i32(int(CV.fixed2arr)): return a
+        if nodes[n].aux == i32(int(CV.arr2fixed)):
+            fact_fixed_check(n, s, a)
+            if not fact_pure_conversion(n): fact_forget(s, n, .call)
+            return fact_fresh(s, ntype(n))
         if ff_integer_demand(n):
             ff_integer_record(n, a, s)
             return fact_fresh(s, ntype(n))
@@ -7669,7 +7694,8 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                 added = if tkind(ot) == .fixed: fact_constant(s, fixed_len(ot)) else if tkind(ot) == .array: fact_project(s, operand, -1, false, T_INT) else: 0
                 grown = if added != 0: fact_bound(s, added) else: FactBound(0, fact_length_max())
                 lo = if old.lo >= 0 and grown.lo >= 0 and fact_add_fits(old.lo, grown.lo): min(old.lo + grown.lo, fact_length_max()) else: 0
-                size = fact_new(s, FactBound(lo, fact_length_max(), reason = .write, witness = n))
+                hi = if old.hi >= 0 and grown.hi >= 0 and fact_add_fits(old.hi, grown.hi): min(old.hi + grown.hi, fact_length_max()) else: fact_length_max()
+                size = fact_new(s, FactBound(lo, hi, reason = .write, witness = n))
                 fact_difference(s, length, size, 0, n)
                 if added != 0 and grown.lo == grown.hi:
                     fact_difference(s, size, length, grown.lo, n)
@@ -7781,7 +7807,10 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                 source = if values.len() == 1: values[0] else: 0
                 if is_map_type(fact_type(ntype(kid(n, 0)))):
                     name = name_of(int(nodes[int(fns[int(nodes[n].sym)].decl)].name))
-                    if source != 0 and name != "values" and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(fresh, FACT_KEYS_SOURCE, false, source))
+                    kt = representation_type(struct_targ(int(types[fact_type(ntype(kid(n, 0)))].st), 0))
+                    # User equality/hash hooks need their own proof; even a
+                    # snapshot key need not compare equal to itself.
+                    if source != 0 and name != "values" and (fact_scalar(kt) or kt == T_STR) and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(fresh, FACT_KEYS_SOURCE, false, source))
                 else: fact_keys_copy(s, source, fresh)
                 return fresh
         endpoint = fact_endpoint_call(n)
@@ -8366,7 +8395,7 @@ fn_dewy = (f: int) -> bool:
 facts_finalize = ():
     draw_context_finalize()
     if proof_active: proof_prepare()
-    if loan_owners.len() == 0 and fact_requests.len() == 0 and refine_requests.len() == 0 and wi_fact_requests.len() == 0 and proof_calls.len() == 0 and not proof_active and not result_active and fact_policy == .RuntimeAllowed and exact_stores.len() == 0 and exact_owners.len() == 0 and not dir_floats_any and ff_conversions.len() == 0: return
+    if loan_owners.len() == 0 and fact_requests.len() == 0 and fact_fixed_requests.len() == 0 and refine_requests.len() == 0 and wi_fact_requests.len() == 0 and proof_calls.len() == 0 and not proof_active and not result_active and fact_policy == .RuntimeAllowed and exact_stores.len() == 0 and exact_owners.len() == 0 and not dir_floats_any and ff_conversions.len() == 0: return
     demanded: {int: bool} = {}
     loop request in wi_fact_requests: demanded[request.owner] = true
     loop f, _ in loan_owners: demanded[f] = true
@@ -8379,6 +8408,7 @@ facts_finalize = ():
         loop f in [1..fns.len()):
             if result_contracts.has(int(fns[f].decl)): demanded[f] = true
     mandatory = demanded
+    loop request in fact_fixed_requests: demanded[request.owner] = true
     loop request in refine_requests: demanded[request.owner] = true
     loop f, _ in exact_proof_demands: demanded[f] = true
     if fact_policy == .RequireStatic or dir_floats_any or ff_conversions.len() > 0:
@@ -8400,7 +8430,8 @@ facts_finalize = ():
         if let run = fact_probe_runs.get(f):
             if fact_probe_reusable(f, run):
                 loop n, _ in run.proven:
-                    if nodes[n].kind == .index and not has_flag(n, NF_INBOUNDS): dir_index(n, true)
+                    if (nodes[n].kind == .index or nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.arr2fixed))) and not has_flag(n, NF_INBOUNDS): dir_index(n, true)
+                    if nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.arr2fixed)): fact_validated[n] = true
                 ic_restore(icb)
                 continue
         fact_owner = f
@@ -8452,10 +8483,20 @@ facts_finalize = ():
             refine_entry = []
             fact_retry_owner = request.owner
             fact_capture(request.node, state)
+    loop request in fact_fixed_requests:
+        if fact_validated.has(request.node): continue
+        fact_terms = [FactTerm()]
+        fact_constructor_actuals = {}
+        state = FactState()
+        fact_retry_owner = request.owner
+        # Runtime-enabled bodies remain deferred until a caller needs their
+        # panic answer. Do not evaluate their operand to report the boundary.
+        fact_fixed_check(request.node, state, 0)
+    fact_fixed_requests = []
     fact_retry_owner = 0
     loop request in fact_requests:
         # (an unpacking's length left unproven stays, a runtime check)
-        if nodes[request.node].aux == i32(int(IN.static_assert)): set_list(request.node, [])
+        if nodes[request.node].kind == .intrinsic and nodes[request.node].aux == i32(int(IN.static_assert)): set_list(request.node, [])
     fact_requests = []
     fact_terms = []
     fact_constructor_actuals = {}
@@ -8506,6 +8547,7 @@ facts_reset = ():
     fact_summary_assumed = []
     fact_summary_used = false
     fact_requests = []
+    fact_fixed_requests = []
     fact_divisors = {}
     fact_validated = {}
     fact_query = false
@@ -9072,6 +9114,7 @@ fact_complete_deferred = (f: int):
         loop n in pending:
             if exact_has_store(n): exact_marks[n] &= 231
             fact_validated.remove(n)
+            if nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.arr2fixed)): dir_proven.remove(n)
     icb = ic_fn(IC_FACTS, f)
     fact_owner = f
     fact_terms = [FactTerm()]
