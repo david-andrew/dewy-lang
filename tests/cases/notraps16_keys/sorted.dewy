@@ -1,0 +1,7 @@
+show=(d:dict<string int64>):>void=>{
+    loop k in d.keys.sorted() {printl"{k}: {d[k]}"}
+    let ks=d.keys.values
+    ks.reverse()
+    loop k in ks {printl(d[k])}
+}
+main=()=>show(["b"->2 "a"->1])

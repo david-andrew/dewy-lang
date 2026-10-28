@@ -1,0 +1,6 @@
+show=(d:dict<string int64>):>void=>{
+    let ks=d.keys.values
+    ks.push("missing")
+    loop key in ks {printl(d[key])}
+}
+main=()=>show(["a"->1])

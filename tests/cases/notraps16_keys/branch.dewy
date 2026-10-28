@@ -1,0 +1,6 @@
+show=(d:dict<string int64> choose:bool):>void=>{
+    let ks=d.keys.values
+    if choose {ks=["missing"]}
+    loop key in ks {printl(d[key])}
+}
+main=()=>show(["a"->1] true)

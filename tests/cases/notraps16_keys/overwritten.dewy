@@ -1,0 +1,7 @@
+show=(d:dict<string int64>):>void=>{
+    let ks=d.keys.values
+    if ks.length =? 0 return
+    ks[0]="missing"
+    loop key in ks {printl(d[key])}
+}
+main=()=>show(["a"->1])

@@ -198,6 +198,10 @@ const FACT_POOL_POSITIONS = -20
 const FACT_MAP_DENSE = -21
 # Matching row lengths, indexed by the same position in an immutable source.
 const FACT_ROW_SOURCE = -22
+# A key collection belongs to one immutable dictionary snapshot; each selected
+# key retains that identity. Neither tag promises membership in a later value.
+const FACT_KEYS_SOURCE = -23
+const FACT_KEY_SOURCE = -24
 fact_name_vals = 0
 
 # A runtime-child walk, never into nested function bodies. Closed calls
@@ -838,7 +842,7 @@ fact_endpoint = (n: int, s: mut FactState, base: int, kind: int) -> int:
     fact_project(s, base, index, true, ntype(n))
 
 # Reviewed copies: sorted returns one element per input element; graphemes
-# uses the same cursor as Dewy's string length. No element facts are copied.
+# uses the same cursor as Dewy's string length. Key provenance survives sorting.
 # Demand-driven O(1) recognition, exact library identity, immutable entry value.
 fact_name_sorted = 0
 fact_name_sorted_by = 0
@@ -854,7 +858,7 @@ fact_copy_length_call = (n: int) -> bool:
     if tkind(fact_type(ntype(n))) != .array: return false
     path = files[pos_file(nodes[d].pos)].path
     if name == fact_name_sorted or name == fact_name_sorted_by:
-        return path == lib_dir + "/core/array.jo" and tkind(fact_type(ntype(kid(n, 0)))) == .array
+        return path == lib_dir + "/core/array.jo" and tkind(fact_type(ntype(kid(n, 0)))) == .array or name == fact_name_sorted and path == lib_dir + "/std/dewy_sets.jo" and is_dewy_set_type(fact_type(ntype(kid(n, 0))))
     # Jo strings use byte length: only the Dewy grapheme projection relates.
     path == lib_dir + "/std/graphemes.jo" and files[pos_file(nodes[n].pos)].is_dewy and fact_type(ntype(kid(n, 0))) == T_STR
 
@@ -1075,7 +1079,7 @@ fact_replace = (s: mut FactState, base: int, selector: int, element: bool, value
     loop pi >= 0:
         p = old[pi]
         pi = links[pi]
-        if element and not p.element and (p.selector == FACT_ELEMENT_LENGTH or p.selector == FACT_ELEMENT_VALUE or p.selector == FACT_ELEMENT_COPY): continue
+        if element and not p.element and (p.selector == FACT_ELEMENT_LENGTH or p.selector == FACT_ELEMENT_VALUE or p.selector == FACT_ELEMENT_COPY or p.selector == FACT_KEYS_SOURCE): continue
         if element and not p.element and p.selector == FACT_ROW_SOURCE:
             row = fact_project(s, base, selector, true, telem(fact_type(t)))
             if fact_compare(s, .eq, fact_project(s, row, -1, false, T_INT), fact_project(s, value, -1, false, T_INT)) != 1: continue
@@ -4519,7 +4523,20 @@ fact_stable_key = (e: int, depth: int = 0) -> int:
     fact_key_paths[key] = made
     made
 
+# Only demanded key collections and reads use this indexed provenance. O(1)
+# lookup/transfer, with the ordinary projection budget; no collection scan.
+fact_keys_copy = (s: mut FactState, before: int, after: int):
+    source = fact_index_get(s.index[0].projection_index, fact_projection_key(before, FACT_KEYS_SOURCE, false))
+    if source >= 0 and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(after, FACT_KEYS_SOURCE, false, s.projections[source].value))
+
+fact_keys_element = (s: mut FactState, base: int, value: int) -> int:
+    source = fact_index_get(s.index[0].projection_index, fact_projection_key(base, FACT_KEYS_SOURCE, false))
+    if source >= 0 and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(value, FACT_KEY_SOURCE, false, s.projections[source].value))
+    value
+
 fact_map_member = (s: mut FactState, n: int, map: int, key: int) -> int:
+    source = fact_index_get(s.index[0].projection_index, fact_projection_key(key, FACT_KEY_SOURCE, false))
+    if source >= 0 and s.projections[source].value == map: return fact_constant(s, 1)
     fact_project(s, map, fact_map_key(s, kid(n, 1), key), true, T_BOOL)
 
 # A dictionary's entries (no traps): the entry of key k in a dictionary's value
@@ -4696,6 +4713,7 @@ fact_map_loop = (n: int, base: int, s: mut FactState):
 # on a demanded slice, never a scan of unrelated values or program nodes.
 fact_slice_elements = (s: mut FactState, base: int, value: int, lo: int, hi: int):
     if base == 0 or value == 0: return
+    fact_keys_copy(s, base, value)
     uniform = fact_index_get(s.index[0].projection_index, fact_projection_key(base, FACT_ELEMENT_COPY, false))
     if uniform >= 0 and s.projections.len() < FACT_CAP:
         fact_add_projection(s, FactProjection(value, FACT_ELEMENT_COPY, false, s.projections[uniform].value))
@@ -6172,6 +6190,11 @@ fact_loop_index = (n: int, base: int, s: mut FactState):
 fact_loop_elements = (n: int, base: int, s: mut FactState):
     l = int(nodes[n].sym)
     if nodes[n].aux != 1 or l <= 0 or base == 0: return
+    source = fact_index_get(s.index[0].projection_index, fact_projection_key(base, FACT_KEYS_SOURCE, false))
+    if source >= 0:
+        value = fact_keys_element(s, base, fact_fresh(s, int(locals[l].type)))
+        fact_bind(s, PlaceIdentity(.local, int(locals[l].owner), l), value)
+        return
     uniform = fact_index_get(s.index[0].projection_index, fact_projection_key(base, FACT_ELEMENT_COPY, false))
     if uniform >= 0:
         fact_bind(s, PlaceIdentity(.local, int(locals[l].owner), l), s.projections[uniform].value)
@@ -7110,7 +7133,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                     dir_index(n, lo == 1 and hi == 1)
                     if lo != 1 or hi != 1: wit_index(n, s, index, length, lo, hi)
                 if lo != 1 or hi != 1: fact_index_success(n, s, index, length)
-            return fact_project(s, base, index, true, int(types[t].elem))
+            return fact_keys_element(s, base, fact_project(s, base, index, true, int(types[t].elem)))
         return fact_unmodeled(s, n, .unsupported)
     # `fill(x n)`, an array of n copies (none when n is negative): the value,
     # then the count, which is the length.
@@ -7755,6 +7778,11 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             if length != 0:
                 fresh = fact_new(s, FactBound(), FactTerm(type = ntype(n)))
                 fact_add_projection(s, FactProjection(fresh, -1, false, length))
+                source = if values.len() == 1: values[0] else: 0
+                if is_map_type(fact_type(ntype(kid(n, 0)))):
+                    name = name_of(int(nodes[int(fns[int(nodes[n].sym)].decl)].name))
+                    if source != 0 and name != "values" and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(fresh, FACT_KEYS_SOURCE, false, source))
+                else: fact_keys_copy(s, source, fresh)
                 return fresh
         endpoint = fact_endpoint_call(n)
         if endpoint != 0: return fact_endpoint(n, s, values[0], endpoint)
@@ -7796,6 +7824,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                 fact_path_call_effects(n, s)
                 fresh = fact_new(s, FactBound(), FactTerm(type = ntype(kid(n, 0))))
                 fact_add_projection(s, FactProjection(fresh, -1, false, length))
+                if plain or reverse: fact_keys_copy(s, held[held.len() - 1], fresh)
                 fact_store_route(s, route, fresh, n)
                 return 0
         if array == 5 and (ownership_decls.len() == 0 or not ownership_fact_type(ntype(kid(n, 0)))):
@@ -7916,6 +7945,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                     fact_add_projection(s, FactProjection(result, -1, false, fact_project(s, entry[0], -1, false, T_INT)))
             if fact_copy_length_call(n) and s.projections.len() < FACT_CAP:
                 fact_add_projection(s, FactProjection(result, -1, false, fact_project(s, entry[0], -1, false, T_INT)))
+                fact_keys_copy(s, entry[0], result)
             if fact_words_call(n) and s.projections.len() < FACT_CAP:
                 fact_add_projection(s, FactProjection(result, FACT_ELEMENT_LENGTH, false, fact_new(s, FactBound(1, fact_length_max()))))
             if fact_lines_call(n):

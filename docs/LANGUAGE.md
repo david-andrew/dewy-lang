@@ -733,6 +733,10 @@ keys, in loops too); a nested dictionary's key is proven the same way through it
 entry (`if m not in? d[p] d[p][m] = 0` before `d[p][m] += 1`), while neither `d`
 nor that entry changes otherwise. These rules also apply to a dictionary lent by
 `@(m.lock())` and to a helper taking it by `@`, while the guard is held; `d.get(k)` and `d.pop(k default=v)` take a missing key as a value.
+Keys selected or iterated from `d.keys.values` or `d.keys.sorted()` remain
+members of that dictionary snapshot. Copying, slicing, sorting or reversing
+the key array preserves this fact; replacing its elements or changing the
+dictionary can require a new membership guard.
 `pool[h]`, `pool[h] = x` and `pool[h].field += x` need `pool.has(h)`, proven by
 `h = pool.add(x)` or a guard (`if pool.has(h)`) with nothing since that may have
 removed `h`: stores, updates and loops that do not remove keep it, and so does

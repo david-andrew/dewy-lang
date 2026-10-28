@@ -1,0 +1,8 @@
+show=(d:dict<string int64>):>void=>{
+    let keys=d.keys.sorted(key=($capture @d k:string):>string=>{
+        d.clear()
+        return k
+    })
+    loop key in keys {printl(d[key])}
+}
+main=()=>show(["a"->1 "b"->2])

@@ -1,0 +1,13 @@
+show=(d:dict<int64 string>):>void=>{
+    let ks=d.keys.sorted(reverse=true)
+    if ks.length =? 0 return
+    printl(d[ks[0]])
+    let k=ks[0]
+    printl(d[k])
+    let tail=ks[1..]
+    loop key in tail {printl(d[key])}
+    let copied=ks
+    ks.clear()
+    loop key in copied {printl(d[key])}
+}
+main=()=>show([2->"b" 1->"a"])
