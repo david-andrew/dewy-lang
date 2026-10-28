@@ -5,6 +5,7 @@ use 'type_layout.dewy'
 use 'type_format.dewy'
 use 'type_factory.dewy'
 use 'type_properties.dewy'
+use 'type_constructors.dewy'
 use 'checker_types.dewy'
 use 'type_intern.dewy'
 use 'concurrency.jo'
@@ -112,40 +113,29 @@ __type_same = (id: int, t: TypeInfo, args: int[]) -> bool: type_intern_same(id, 
 __type_rehash = (): type_intern_rehash()
 mk_type = (t: TypeInfo, args: int[]) -> int: type_intern(&t, args)
 
-basic = (kind: TK, bits: int, sign: bool, size: int) -> int:
-    t = TypeInfo(kind = kind, bits = i32(bits), sign = sign, size = i32(size), align = i32(size))
-    if size == 0: t.align = 1
-    t.flags = i32(TF_LAID_OUT)
-    mk_type(t, [])
+basic = (kind: TK, bits: int, sign: bool, size: int) -> int: tb_basic(kind, bits, sign, size)
 
-mk_array = (e: int) -> int:
-    mk_type(TypeInfo(kind = .array, elem = i32(e)), [])
-mk_fixed = (e: int, n: int) -> int:
-    mk_type(TypeInfo(kind = .fixed, elem = i32(e), bits = i32(n)), [])
+mk_array = (e: int) -> int: tb_mk_array(e)
+
+mk_fixed = (e: int, n: int) -> int: tb_mk_fixed(e, n)
+
 fixed_len = (t: int) -> int: int(types[prune(t)].bits)
-mk_ptr = (e: int) -> int: mk_type(TypeInfo(kind = .ptr, elem = i32(e)), [])
-mk_box = (e: int) -> int: mk_type(TypeInfo(kind = .box, elem = i32(e)), [])
-mk_opt = (e: int) -> int: mk_type(TypeInfo(kind = .opt, elem = i32(e)), [])
+mk_ptr = (e: int) -> int: tb_mk_ptr(e)
+
+mk_box = (e: int) -> int: tb_mk_box(e)
+
+mk_opt = (e: int) -> int: tb_mk_opt(e)
+
 # secret<T> (docs/design/decisions.md): T's value under a compile-time wrapper. Its
 # representation is T's (layout, lowering: quantity_base strips it); only the checker tells them
 # apart, so the value reaches no output except as `<redacted>` and leaves only through `.reveal`.
 secrets_seen = false     # (a secret type was made: until then secret_repr has nothing to do)
-mk_secret = (e: int) -> int:
-    if types[prune(e)].kind == .secret: return prune(e)
-    secrets_seen = true
-    mk_type(TypeInfo(kind = .secret, elem = i32(e)), [])
+mk_secret = (e: int) -> int: tb_mk_secret(e)
+
 is_secret = (t: int) -> bool: types[prune(t)].kind == .secret
 # t's representation: t with its secrets, and those of what it is made of, replaced by their values
-secret_repr = (t0: int) -> int:
-    t = prune(t0)
-    k = types[t].kind
-    if k == .secret: return secret_repr(int(types[t].elem))
-    if k == .array: return mk_array(secret_repr(int(types[t].elem)))
-    if k == .opt: return mk_opt(secret_repr(int(types[t].elem)))
-    if k == .fixed: return mk_fixed(secret_repr(int(types[t].elem)), int(types[t].bits))
-    if k == .box: return mk_box(secret_repr(int(types[t].elem)))
-    if k == .ptr: return mk_ptr(secret_repr(int(types[t].elem)))
-    t
+secret_repr = (t0: int) -> int: tb_secret_repr(t0)
+
 # Callable labels are compile-time metadata, interned as a newline-separated
 # name tuple in st (unused by fn_ layout). Positional implementation-language
 # callables retain zero, without any label allocation or ABI change.
@@ -177,75 +167,41 @@ decl_fn_labels = (decl: int) -> int:
 # Kept in bits: part of the type's identity, ignored by the calling convention.
 # (`pack`: the function gives several values: ret is `(int64 int64)` when their number is
 # fixed, returned in place, or the array of them when it varies)
-mk_fn = (params: int[], ret: int, mutmask: int, labels: int = 0, defaults: int = 0, pack: bool = false) -> int: mk_type(TypeInfo(kind = .fn_, elem = i32(ret), mutmask = i32(mutmask), st = i32(labels), bits = i32(defaults), sign = pack), params)
+mk_fn = (params: int[], ret: int, mutmask: int, labels: int = 0, defaults: int = 0, pack: bool = false) -> int: tb_mk_fn(params, ret, mutmask, labels, defaults, pack)
+
 fn_type_pack = (t: int) -> bool: types[t].kind == .fn_ and types[t].sign
-mk_cfn = (params: int[], ret: int) -> int: mk_type(TypeInfo(kind = .cfn, elem = i32(ret)), params)
+mk_cfn = (params: int[], ret: int) -> int: tb_mk_cfn(params, ret)
+
 # (`values`: several values, `(int64 int64)` in Dewy: what `pair = (1 2)` holds, not a
 # container; laid out as a tuple. docs/design/multi_expressions.md)
-mk_tuple = (elems: int[], values: bool = false) -> int: mk_type(TypeInfo(kind = .tuple, sign = values), elems)
+mk_tuple = (elems: int[], values: bool = false) -> int: tb_mk_tuple(elems, values)
+
 values_any = false   # (some value of several values was made: their checks run only then)
-mk_values = (elems: int[]) -> int:
-    values_any = true
-    mk_tuple(elems, true)
+mk_values = (elems: int[]) -> int: tb_mk_values(elems)
+
 is_values = (t0: int) -> bool:
     if t0 == 0: return false
     t = prune(t0)
     types[t].kind == .tuple and types[t].sign
 var_counter = 0
+constructor_host = TypeConstructorHost(mk_type)
+constructor_input = TypeConstructorInput(&types, &ptr_size, &var_counter, &secrets_seen, &values_any, &T_VOID, &T_BOOL, &T_INT, &T_MATH_INT, &T_I8, &T_I16, &T_I32, &T_U8, &T_U16, &T_U32, &T_U64, &T_FLOAT, &T_F32, &T_STR, &T_NULL, &T_RANGE, &T_NONE, &T_NEVER, &T_RAWPTR, &T_VEC2, &T_VEC3, &T_VEC4, &T_MAT4, &T_IVEC2, &T_IVEC3, &T_IVEC4, &constructor_host)
+constructor_binding = type_constructor_bind(&constructor_input)
 # (each binding of a type variable: a body checked with neither a new variable nor a binding
 # has no type a zonk would change)
 type_binds = 0
 inference_host = TypeInferenceHost(mk_callable_contract, effect_subst, effect_type, mk_refined, ref_subst, mk_quantity, get_struct_inst, mk_type, mk_union)
 inference_input = TypeInferenceInput(&types, &structs, &type_args, &type_binds, &inference_host)
 inference_binding = type_inference_bind(&inference_input)
-mk_var = () -> int:
-    var_counter += 1
-    mk_type(TypeInfo(kind = .var, id = i32(var_counter)), [])
-mk_param = (idx: int) -> int: mk_type(TypeInfo(kind = .param, id = i32(idx), bits = i32(idx)), [])
-mk_typeval = (t: int) -> int:
-    types.push(TypeInfo(kind = .typeval, elem = i32(t), flags = i32(TF_LAID_OUT)))
-    types.len() - 1
-mk_modval = (m: int) -> int:
-    types.push(TypeInfo(kind = .module, mod = i32(m), flags = i32(TF_LAID_OUT)))
-    types.len() - 1
+mk_var = () -> int: tb_mk_var()
 
-init_types = ():
-    T_VOID = basic(.void_, 0, false, 0)
-    T_BOOL = basic(.bool_, 8, false, 1)
-    T_INT = basic(.int_, 64, true, 8)
-    T_MATH_INT = mk_type(TypeInfo(kind = .int_, bits = 64, sign = true, st = -1, size = 8, align = 8, flags = i32(TF_LAID_OUT | TF_MANAGED), rep = .tagged_int), [])
-    T_I8 = basic(.int_, 8, true, 1)
-    T_I16 = basic(.int_, 16, true, 2)
-    T_I32 = basic(.int_, 32, true, 4)
-    T_U8 = basic(.int_, 8, false, 1)
-    T_U16 = basic(.int_, 16, false, 2)
-    T_U32 = basic(.int_, 32, false, 4)
-    T_U64 = basic(.int_, 64, false, 8)
-    T_FLOAT = basic(.float_, 64, true, 8)
-    T_F32 = basic(.float_, 32, true, 4)
-    T_STR = basic(.str_, 0, false, ptr_size)
-    types[T_STR].flags = i32(TF_LAID_OUT | TF_MANAGED)
-    T_NULL = basic(.null_, 0, false, ptr_size)
-    T_RANGE = basic(.range, 0, false, 16)
-    types[T_RANGE].align = 8
-    T_NONE = basic(.none_lit, 0, false, 0)
-    T_NEVER = basic(.void_, 1, false, 0)
-    types[T_NEVER].flags = i32(TF_LAID_OUT | TF_NEVER)
-    T_RAWPTR = mk_ptr(T_U8)
-    T_VEC2 = basic(.vec, 2, false, 8)
-    types[T_VEC2].align = 4
-    T_VEC3 = basic(.vec, 3, false, 12)
-    types[T_VEC3].align = 4
-    T_VEC4 = basic(.vec, 4, false, 16)
-    types[T_VEC4].align = 4
-    T_MAT4 = basic(.vec, 16, false, 64)
-    types[T_MAT4].align = 4
-    T_IVEC2 = basic(.vec, 2, true, 8)
-    types[T_IVEC2].align = 4
-    T_IVEC3 = basic(.vec, 3, true, 12)
-    types[T_IVEC3].align = 4
-    T_IVEC4 = basic(.vec, 4, true, 16)
-    types[T_IVEC4].align = 4
+mk_param = (idx: int) -> int: tb_mk_param(idx)
+
+mk_typeval = (t: int) -> int: tb_mk_typeval(t)
+
+mk_modval = (m: int) -> int: tb_mk_modval(m)
+
+init_types = (): tb_init_types()
 
 prune = (t0: int) -> int:
     t = t0

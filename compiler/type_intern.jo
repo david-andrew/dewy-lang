@@ -71,3 +71,14 @@ type_intern = (t0: *TypeInfo, args: int[]) -> int:
     ti_types[0].push(t)
     ti_types[0].len() - 1
 
+
+type_intern_var = (id: int) -> int:
+    t = TypeInfo(kind=.var, id=i32(id))
+    type_intern(&t, [])
+
+type_intern_element = (kind: TK, elem: int) -> int:
+    t = TypeInfo(kind=kind, elem=i32(elem))
+    type_intern(&t, [])
+type_intern_param = (idx: int) -> int:
+    t = TypeInfo(kind=.param, id=i32(idx), bits=i32(idx))
+    type_intern(&t, [])

@@ -1,5 +1,5 @@
 $runtime_checks
-from p"checker_types.dewy" import (TypeInfo)
+from p"checker_types.dewy" import (TK TypeInfo)
 
 # Complete type interning over the existing stable arena headers. No callback
 # enters checking; arena element views end before append or table replacement.
@@ -8,6 +8,11 @@ IWord:type=int64<overflow='wrap'>
 let ti_types:ptr<array<TypeInfo>>=$unsafe (uint64(0) as ptr<array<TypeInfo>>)
 let ti_args:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
 let ti_table:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
+# Canonical scalar constructors reuse two private request records. Interning is
+# synchronous, does not call the checker, and never retains either pointer.
+# The owner array and its cached element pointer are never replaced or exposed.
+let ti_requests:array<TypeInfo>=[TypeInfo[] TypeInfo[kind='param']]
+let ti_request:ptr<TypeInfo>=$unsafe ti_requests.ptr
 type_intern_bind=(types:ptr<array<TypeInfo>> args:ptr<array<int32>> table:ptr<array<int32>>):>IWord=>{
     ti_types=types; ti_args=args; ti_table=table; 0
 }
@@ -106,3 +111,21 @@ type_intern=(input:ptr<TypeInfo> args:array<int64>):>IWord=>$unsafe {
 
 ti_has_var=(t:IWord):>bool=>$unsafe {(ti_types[0].ptr[t].flags & TI_HAS_VAR) not=? 0}
 ti_targ=(t:IWord i:IWord):>IWord=>$unsafe {IWord(ti_args[0].ptr[IWord(ti_types[0].ptr[t].args) + i])}
+
+# Inference variables are always fresh and have no type arguments or hash entry.
+# This is the interner's existing fresh-entry case, without a host record copy.
+type_intern_var=(id:IWord):>IWord=>$unsafe {
+    ti_types[0].push(TypeInfo[kind='var' id=int32<overflow='wrap'>(id) flags=TI_HAS_VAR args=int32<overflow='wrap'>(ti_args[0].length)])
+    IWord(ti_types[0].length) - 1
+}
+
+type_intern_element=(kind:TK elem:IWord):>IWord=>$unsafe {
+    ti_request[0].kind=kind
+    ti_request[0].elem=int32<overflow='wrap'>(elem)
+    type_intern(ti_request [])
+}
+type_intern_param=(idx:IWord):>IWord=>$unsafe {
+    ti_request[1].id=int32<overflow='wrap'>(idx)
+    ti_request[1].bits=int32<overflow='wrap'>(idx)
+    type_intern(ti_request + 1 [])
+}

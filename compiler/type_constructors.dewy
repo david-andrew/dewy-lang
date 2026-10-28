@@ -1,0 +1,142 @@
+$runtime_checks
+from p"checker_types.dewy" import (TK TypeInfo)
+from p"type_inference.dewy" import (tu_prune)
+from p"type_intern.dewy" import (type_intern_var type_intern_element type_intern_param)
+# Builtin initialization and recursive constructors preserve IDs and demand
+# flags. Scalar requests enter the interner directly; general records use its
+# thin host ABI adapter.
+BWord:type=int64<overflow='wrap'>
+const TF_HAS_VAR=1
+const TF_LAID_OUT=2
+const TF_MANAGED=4
+const TF_NEVER=8
+TypeConstructorHost:type=[mk_type:<(t:TypeInfo args:array<int64>):>int64>]
+TypeConstructorInput:type=[
+    types:ptr<array<TypeInfo>>
+    ptr_size:ptr<int64>
+    var_counter:ptr<int64>
+    secrets_seen:ptr<bool>
+    values_any:ptr<bool>
+    T_VOID:ptr<int64>
+    T_BOOL:ptr<int64>
+    T_INT:ptr<int64>
+    T_MATH_INT:ptr<int64>
+    T_I8:ptr<int64>
+    T_I16:ptr<int64>
+    T_I32:ptr<int64>
+    T_U8:ptr<int64>
+    T_U16:ptr<int64>
+    T_U32:ptr<int64>
+    T_U64:ptr<int64>
+    T_FLOAT:ptr<int64>
+    T_F32:ptr<int64>
+    T_STR:ptr<int64>
+    T_NULL:ptr<int64>
+    T_RANGE:ptr<int64>
+    T_NONE:ptr<int64>
+    T_NEVER:ptr<int64>
+    T_RAWPTR:ptr<int64>
+    T_VEC2:ptr<int64>
+    T_VEC3:ptr<int64>
+    T_VEC4:ptr<int64>
+    T_MAT4:ptr<int64>
+    T_IVEC2:ptr<int64>
+    T_IVEC3:ptr<int64>
+    T_IVEC4:ptr<int64>
+    host:ptr<TypeConstructorHost>
+]
+let tb_inputs:ptr<TypeConstructorInput>=$unsafe (uint64(0) as ptr<TypeConstructorInput>)
+type_constructor_bind=(input:ptr<TypeConstructorInput>):>BWord=>{tb_inputs=input;0}
+tb_basic=(kind:TK bits:BWord sign:bool size:BWord):>BWord=>$unsafe {
+    let t=TypeInfo[kind = kind  bits = int32<overflow='wrap'>(bits)  sign = sign  size = int32<overflow='wrap'>(size)  align = int32<overflow='wrap'>(size)]
+    if size =? 0 {t.align = 1}
+    t.flags = int32<overflow='wrap'>(TF_LAID_OUT)
+    tb_inputs[0].host[0].mk_type(t  [])
+}
+tb_mk_array=(e:BWord):>BWord=>type_intern_element('array' e)
+tb_mk_fixed=(e:BWord n:BWord):>BWord=>$unsafe {
+    tb_inputs[0].host[0].mk_type(TypeInfo[kind ='fixed'  elem = int32<overflow='wrap'>(e)  bits = int32<overflow='wrap'>(n)]  [])
+}
+tb_mk_ptr=(e:BWord):>BWord=>type_intern_element('ptr' e)
+tb_mk_box=(e:BWord):>BWord=>type_intern_element('box' e)
+tb_mk_opt=(e:BWord):>BWord=>type_intern_element('opt' e)
+tb_mk_secret=(e:BWord):>BWord=>$unsafe {
+    if tb_inputs[0].types[0].ptr[tu_prune(e)].kind =? 'secret' {return tu_prune(e)}
+    tb_inputs[0].secrets_seen[0] = true
+    tb_inputs[0].host[0].mk_type(TypeInfo[kind ='secret'  elem = int32<overflow='wrap'>(e)]  [])
+}
+tb_secret_repr=(t0:BWord):>BWord=>$unsafe {
+    let t=tu_prune(t0)
+    let k=tb_inputs[0].types[0].ptr[t].kind
+    if k =? 'secret' {return tb_secret_repr(BWord(tb_inputs[0].types[0].ptr[t].elem))}
+    if k =? 'array' {return tb_mk_array(tb_secret_repr(BWord(tb_inputs[0].types[0].ptr[t].elem)))}
+    if k =? 'opt' {return tb_mk_opt(tb_secret_repr(BWord(tb_inputs[0].types[0].ptr[t].elem)))}
+    if k =? 'fixed' {return tb_mk_fixed(tb_secret_repr(BWord(tb_inputs[0].types[0].ptr[t].elem))  BWord(tb_inputs[0].types[0].ptr[t].bits))}
+    if k =? 'box' {return tb_mk_box(tb_secret_repr(BWord(tb_inputs[0].types[0].ptr[t].elem)))}
+    if k =? 'ptr' {return tb_mk_ptr(tb_secret_repr(BWord(tb_inputs[0].types[0].ptr[t].elem)))}
+    t
+}
+tb_mk_fn=(params:array<int64> ret:BWord mutmask:BWord labels:BWord=0 defaults:BWord=0 pack:bool=false):>BWord=>$unsafe {
+    tb_inputs[0].host[0].mk_type(TypeInfo[kind ='fn_'  elem = int32<overflow='wrap'>(ret)  mutmask = int32<overflow='wrap'>(mutmask)  st = int32<overflow='wrap'>(labels)  bits = int32<overflow='wrap'>(defaults)  sign = pack]  params)
+}
+tb_mk_cfn=(params:array<int64> ret:BWord):>BWord=>$unsafe {
+    tb_inputs[0].host[0].mk_type(TypeInfo[kind ='cfn'  elem = int32<overflow='wrap'>(ret)]  params)
+}
+tb_mk_tuple=(elems:array<int64> values:bool=false):>BWord=>$unsafe {
+    tb_inputs[0].host[0].mk_type(TypeInfo[kind ='tuple'  sign = values]  elems)
+}
+tb_mk_values=(elems:array<int64>):>BWord=>$unsafe {
+    tb_inputs[0].values_any[0] = true
+    tb_mk_tuple(elems  true)
+}
+tb_mk_var=():>BWord=>$unsafe {
+    tb_inputs[0].var_counter[0] += 1
+    type_intern_var(tb_inputs[0].var_counter[0])
+}
+tb_mk_param=(idx:BWord):>BWord=>type_intern_param(idx)
+tb_mk_typeval=(t:BWord):>BWord=>$unsafe {
+    tb_inputs[0].types[0].push(TypeInfo[kind ='typeval'  elem = int32<overflow='wrap'>(t)  flags = int32<overflow='wrap'>(TF_LAID_OUT)])
+    tb_inputs[0].types[0].length - 1
+}
+tb_mk_modval=(m:BWord):>BWord=>$unsafe {
+    tb_inputs[0].types[0].push(TypeInfo[kind ='module'  mod = int32<overflow='wrap'>(m)  flags = int32<overflow='wrap'>(TF_LAID_OUT)])
+    tb_inputs[0].types[0].length - 1
+}
+tb_init_types=():>void=>$unsafe {
+    tb_inputs[0].T_VOID[0] = tb_basic('void_'  0  false  0)
+    tb_inputs[0].T_BOOL[0] = tb_basic('bool_'  8  false  1)
+    tb_inputs[0].T_INT[0] = tb_basic('int_'  64  true  8)
+    tb_inputs[0].T_MATH_INT[0] = tb_inputs[0].host[0].mk_type(TypeInfo[kind ='int_'  bits = 64  sign = true  st = - 1  size = 8  align = 8  flags = int32<overflow='wrap'>(TF_LAID_OUT | TF_MANAGED)  rep ='tagged_int']  [])
+    tb_inputs[0].T_I8[0] = tb_basic('int_'  8  true  1)
+    tb_inputs[0].T_I16[0] = tb_basic('int_'  16  true  2)
+    tb_inputs[0].T_I32[0] = tb_basic('int_'  32  true  4)
+    tb_inputs[0].T_U8[0] = tb_basic('int_'  8  false  1)
+    tb_inputs[0].T_U16[0] = tb_basic('int_'  16  false  2)
+    tb_inputs[0].T_U32[0] = tb_basic('int_'  32  false  4)
+    tb_inputs[0].T_U64[0] = tb_basic('int_'  64  false  8)
+    tb_inputs[0].T_FLOAT[0] = tb_basic('float_'  64  true  8)
+    tb_inputs[0].T_F32[0] = tb_basic('float_'  32  true  4)
+    tb_inputs[0].T_STR[0] = tb_basic('str_'  0  false  tb_inputs[0].ptr_size[0])
+    tb_inputs[0].types[0][tb_inputs[0].T_STR[0]].flags = int32<overflow='wrap'>(TF_LAID_OUT | TF_MANAGED)
+    tb_inputs[0].T_NULL[0] = tb_basic('null_'  0  false  tb_inputs[0].ptr_size[0])
+    tb_inputs[0].T_RANGE[0] = tb_basic('range'  0  false  16)
+    tb_inputs[0].types[0][tb_inputs[0].T_RANGE[0]].align = 8
+    tb_inputs[0].T_NONE[0] = tb_basic('none_lit'  0  false  0)
+    tb_inputs[0].T_NEVER[0] = tb_basic('void_'  1  false  0)
+    tb_inputs[0].types[0][tb_inputs[0].T_NEVER[0]].flags = int32<overflow='wrap'>(TF_LAID_OUT | TF_NEVER)
+    tb_inputs[0].T_RAWPTR[0] = tb_mk_ptr(tb_inputs[0].T_U8[0])
+    tb_inputs[0].T_VEC2[0] = tb_basic('vec'  2  false  8)
+    tb_inputs[0].types[0][tb_inputs[0].T_VEC2[0]].align = 4
+    tb_inputs[0].T_VEC3[0] = tb_basic('vec'  3  false  12)
+    tb_inputs[0].types[0][tb_inputs[0].T_VEC3[0]].align = 4
+    tb_inputs[0].T_VEC4[0] = tb_basic('vec'  4  false  16)
+    tb_inputs[0].types[0][tb_inputs[0].T_VEC4[0]].align = 4
+    tb_inputs[0].T_MAT4[0] = tb_basic('vec'  16  false  64)
+    tb_inputs[0].types[0][tb_inputs[0].T_MAT4[0]].align = 4
+    tb_inputs[0].T_IVEC2[0] = tb_basic('vec'  2  true  8)
+    tb_inputs[0].types[0][tb_inputs[0].T_IVEC2[0]].align = 4
+    tb_inputs[0].T_IVEC3[0] = tb_basic('vec'  3  true  12)
+    tb_inputs[0].types[0][tb_inputs[0].T_IVEC3[0]].align = 4
+    tb_inputs[0].T_IVEC4[0] = tb_basic('vec'  4  true  16)
+    tb_inputs[0].types[0][tb_inputs[0].T_IVEC4[0]].align = 4
+}
