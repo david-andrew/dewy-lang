@@ -137,9 +137,13 @@ x64_line_table=():>array<uint8>=>$unsafe {
     if nc =? 0 {return []}
     let out:array<uint8>=[83  76  78  49]
     let fidx:array<int64>=fill(-1  nf)
+    let file_index=fidx.ptr
     let fnames:array<string>=[]
-    let ents:array<int64>=[]
-    ents.reserve(nc * 3 // 2)
+    # Every call contributes at most three words. Fill one private buffer and
+    # borrow it for this walk; source filtering only shortens the final prefix.
+    let ents:array<int64>=fill(0 nc * 3 // 2)
+    let entries=ents.ptr
+    let ne:NWord=0
     let k:NWord=0
     loop k <? nc {
         let f=dw_pos_file(positions[calls[k + 1]])
@@ -147,16 +151,17 @@ x64_line_table=():>array<uint8>=>$unsafe {
             k += 2
             continue
         }
-        if fidx[f] <? 0 {
-            fidx[f] = fnames.length
+        if file_index[f] <? 0 {
+            file_index[f] = fnames.length
             let path=files[f].path
             let s=nd_rfind(path  47)
             if s >=? 0 {path=path.byte_slice(s + 1  (path as array<uint8>).length)}
             fnames.push(path)
         }
-        ents.push(calls[k])
-        ents.push(fidx[f])
-        ents.push(dw_inputs[0].host[0].ir_line(calls[k + 1]))
+        entries[ne]=calls[k]
+        entries[ne + 1]=file_index[f]
+        entries[ne + 2]=dw_inputs[0].host[0].ir_line(calls[k + 1])
+        ne += 3
         k += 2
     }
     put32(@out  fnames.length)
@@ -164,15 +169,15 @@ x64_line_table=():>array<uint8>=>$unsafe {
         put32(@out  NWord((nm as array<uint8>).length))
         loop ch in (nm as array<uint8>) {out.push(ch)}
     }
-    put32(@out  ents.length // 3)
-    out.reserve(out.length + ents.length * 2)
+    put32(@out  ne // 3)
+    out.reserve(NWord(out.length) + ne * 2)
     let last:NWord=0
     k=0
-    loop k <? ents.length {
-        put_varint(@out  ents[k] - last)
-        last=ents[k]
-        put_varint(@out  ents[k + 1])
-        put_varint(@out  ents[k + 2])
+    loop k <? ne {
+        put_varint(@out  entries[k] - last)
+        last=entries[k]
+        put_varint(@out  entries[k + 1])
+        put_varint(@out  entries[k + 2])
         k += 3
     }
     out
