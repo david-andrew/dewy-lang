@@ -14,7 +14,7 @@ from tests.support import ROOT, compiler
                     reason='executes Linux x86-64 machine code')
 def test_spill_compare_flags(compiler, tmp_path):
     source = tmp_path / 'spill_compare.jo'
-    source.write_text(f"use '{ROOT / 'compiler/x64.jo'}'\nuse '{ROOT / 'compiler/x64_encode.dewy'}'\nuse '{ROOT / 'compiler/backend_analysis.dewy'}'\n" + '''
+    source.write_text(f"use '{ROOT / 'compiler/x64.jo'}'\nuse '{ROOT / 'compiler/x64_allocate.dewy'}'\nuse '{ROOT / 'compiler/x64_encode.dewy'}'\nuse '{ROOT / 'compiler/backend_analysis.dewy'}'\n" + '''
 vloc_storage = [LOC_SPILL, LOC_CONST]
 vloc = data(vloc_storage)
 vcval_storage = [0, 0]

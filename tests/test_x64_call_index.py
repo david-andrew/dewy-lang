@@ -6,7 +6,7 @@ from tests.support import ROOT, compiler
 
 def test_release_call_boundary_index(compiler, tmp_path):
     source = tmp_path / 'call_index.jo'
-    source.write_text(f"use '{ROOT / 'compiler/x64.jo'}'\nuse '{ROOT / 'compiler/x64_encode.dewy'}'\nuse '{ROOT / 'compiler/ir.jo'}'\n"
+    source.write_text(f"use '{ROOT / 'compiler/x64.jo'}'\nuse '{ROOT / 'compiler/x64_allocate.dewy'}'\nuse '{ROOT / 'compiler/x64_encode.dewy'}'\nuse '{ROOT / 'compiler/ir.jo'}'\n"
                       f"use '{ROOT / 'compiler/ir_types.dewy'}'\nuse '{ROOT / 'compiler/backend_analysis.dewy'}'\nuse '{ROOT / 'compiler/ir_operands.dewy'}'\n" + '''
 loop length in [4, 65, 7, 129, 3]:
     loop stride in [1, 2, 5, 200]:
@@ -21,7 +21,7 @@ loop length in [4, 65, 7, 129, 3]:
                 ir.code[p] = Ins(.call, 0, -1, 0, 0, if cold: 2 else: 0, 0)
                 call_pos.push(p)
                 call_w.push(if cold: 1 else: 1 << (p % 7))
-        allocate_release()
+        x64_allocate(&ir, true, false, false)
         loop s in [-1..length):
             loop e in [0..length + 1):
                 weight = 0
@@ -37,7 +37,7 @@ loop length in [4, 65, 7, 129, 3]:
                 assert(ra_cross_w(s, e) == weight, "call boundary")
     ir_begin("empty", 0)
     backend_analyze(ir, ir_operand_layout, false, false, false, true)
-    allocate_release()
+    x64_allocate(&ir, true, false, false)
     assert(ra_cross_w(-1, 0) == 0, "empty after reuse")
 print("ok")
 ''')

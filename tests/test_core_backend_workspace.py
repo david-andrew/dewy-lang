@@ -8,7 +8,7 @@ from tests.support import ROOT, compiler
 
 def test_backend_workspace_reuses_storage_without_locations(compiler, tmp_path):
     source = tmp_path / 'workspace.jo'
-    source.write_text(f"use '{ROOT / 'compiler/backend_analysis.dewy'}'\nuse '{ROOT / 'compiler/x64.jo'}'\nuse '{ROOT / 'compiler/x64_encode.dewy'}'\nuse '{ROOT / 'compiler/ir.jo'}'\n" + '''
+    source.write_text(f"use '{ROOT / 'compiler/backend_analysis.dewy'}'\nuse '{ROOT / 'compiler/x64.jo'}'\nuse '{ROOT / 'compiler/x64_allocate.dewy'}'\nuse '{ROOT / 'compiler/x64_encode.dewy'}'\nuse '{ROOT / 'compiler/ir.jo'}'\n" + '''
 ir_begin("large", 0)
 loop i in [0..256):
     v = vreg(VI)
@@ -37,7 +37,7 @@ backend_analyze(ir, ir_operand_layout, false, false, false, true)
 assert(vgkind[0] == 0 and vgoff[0] == 96, "data after global")
 ir_begin("empty", 3)
 backend_analyze(ir, ir_operand_layout, false, false, false, true)
-allocate()
+x64_allocate(&ir, false, false, false)
 print("ok")
 ''')
     binary = tmp_path / 'workspace'
