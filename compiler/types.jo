@@ -3,6 +3,7 @@ use 'type_inference.dewy'
 use 'type_unions.dewy'
 use 'type_layout.dewy'
 use 'type_format.dewy'
+use 'type_factory.dewy'
 use 'checker_types.dewy'
 use 'type_intern.dewy'
 use 'concurrency.jo'
@@ -517,6 +518,13 @@ union_inst = (ms: int[]) -> int: uu_union_inst(ms)
 # ---------- struct-of-arrays ----------
 # soa T[] behaves like T[] but keeps each field of T in an array of its own (see check_soa_*)
 soa_decl = 0       # the declaration node standing for all soa types
+factory_declaration = (decl: int) -> TypeDeclInfo:
+    TypeDeclInfo(name_of(int(nodes[decl].name)), has_flag(decl, NF_RECORD), nodes[decl].kind == .enum_)
+factory_nesting_error = (decl: int):
+    fatal(nodes[decl].pos, "the generic type '{name_of(int(nodes[decl].name))}' expands without end: its type arguments nest more than {MAX_TYPE_NESTING} deep (does a field use it with a bigger type argument than its own?)")
+factory_host = TypeFactoryHost(check_struct_fields, mk_array, factory_declaration, factory_nesting_error)
+factory_input = TypeFactoryInput(&types, &structs, &type_args, &fields, &soa_decl, &factory_host)
+factory_binding = type_factory_bind(&factory_input)
 
 is_soa = (t0: int) -> bool:
     t = prune(t0)
@@ -524,52 +532,11 @@ is_soa = (t0: int) -> bool:
 
 soa_elem = (t: int) -> int: struct_targ(int(types[prune(t)].st), 0)
 
-soa_inst = (p: int) -> int:
-    loop i in 0.. and si in structs:
-        if si.soa_ and type_eq(struct_targ(i, 0), p): return int(si.type)
-    pt = prune(p)
-    # (of a type parameter: no fields until it is known, as substituting makes it again)
-    psi = -1
-    if types[pt].kind != .param:
-        psi = int(types[pt].st)
-        check_struct_fields(psi)
-    si = StructInfo(decl = i32(soa_decl), ntargs = 1, name = "soa {type_str(p)}[]", soa_ = true, resolved = true)
-    si.targs = i32(type_args.len())
-    type_args.push(i32(p))
-    si.fields = i32(fields.len())
-    if psi >= 0:
-        si.nfields = structs[psi].nfields
-        loop i in [0..int(structs[psi].nfields)):
-            f = fields[int(structs[psi].fields) + i]
-            fields.push(Field(name = f.name, type = i32(mk_array(int(f.type)))))
-    idx = structs.len()
-    structs.push(si)
-    flags = 0
-    if has_var(pt): flags = TF_HAS_VAR
-    types.push(TypeInfo(kind = .struct_, st = i32(idx), flags = i32(flags)))
-    structs[idx].type = i32(types.len() - 1)
-    types.len() - 1
+soa_inst = (p: int) -> int: tc_soa_inst(p)
 
 # how deeply a type nests (counted up to lim; remembered per type once known exactly, so a type
 # sharing parts, (F, F) -> int, is not walked once per path)
-nesting_memo: {int: int} = {}
-nesting_least: {int: int} = {}
-type_nesting = (t0: int, lim: int) -> int:
-    if lim <= 0 or t0 <= 0: return 0
-    t = prune(t0)
-    if let m = nesting_memo.get(t): return min(m, lim)
-    if let m = nesting_least.get(t):
-        if m >= lim: return lim
-    d = 0
-    if int(types[t].elem) > 0: d = type_nesting(int(types[t].elem), lim - 1)
-    loop i in [0..int(types[t].nargs)): d = max(d, type_nesting(targ(t, i), lim - 1))
-    if (types[t].kind == .struct_ or types[t].kind == .enum_) and int(types[t].st) < structs.len():
-        si = int(types[t].st)
-        loop i in [0..int(structs[si].ntargs)): d = max(d, type_nesting(struct_targ(si, i), lim - 1))
-    if int(types[t].flags) & TF_HAS_VAR == 0:
-        if d + 1 < lim: nesting_memo[t] = d + 1
-        else: nesting_least[t] = lim         # (at least that deep: cut off there)
-    d + 1
+type_nesting = (t: int, lim: int) -> int: tc_nesting(t, lim)
 
 const MAX_TYPE_NESTING = 48
 
@@ -577,59 +544,4 @@ const MAX_TYPE_NESTING = 48
 # Concrete argument lists have canonical instances. Inference-bearing requests
 # still match structurally; zonking them must produce a concrete instance rather
 # than returning an earlier record whose TF_HAS_VAR flag can never clear.
-struct StructInstanceKey:
-    decl: int
-    args: int[]
-
-struct_instances: {StructInstanceKey: int} = {}
-struct_instance_groups: int[][]
-struct_instance_group: {int: int} = {}
-
-get_struct_inst = (decl: int, targs: int[]) -> int:
-    if decl == 0: return mk_union(targs)
-    if decl == soa_decl: return soa_inst(targs[0])
-    stable = true
-    loop t in targs:
-        # Test the stored argument, not prune(t): a bound inference variable
-        # still has a different ID from its eventual concrete type.
-        if has_var(t): stable = false
-    indexed = stable and targs.len() > 0
-    group = struct_instance_group.get(decl) ?? -1
-    instances: int[]
-    if indexed:
-        if let found = struct_instances.get(StructInstanceKey(decl, targs)): return int(structs[found].type)
-    else if group >= 0: instances = struct_instance_groups[group]
-    loop i in instances:
-        si = structs[i]
-        if int(si.ntargs) != targs.len(): continue
-        same = true
-        loop k in [0..targs.len()):
-            if not type_eq(struct_targ(i, k), targs[k]):
-                same = false
-                break
-        if same: return int(si.type)
-    # (a generic struct whose fields use it with bigger type arguments would expand without end)
-    loop t in targs:
-        if type_nesting(t, MAX_TYPE_NESTING + 1) > MAX_TYPE_NESTING:
-            fatal(nodes[decl].pos, "the generic type '{name_of(int(nodes[decl].name))}' expands without end: its type arguments nest more than {MAX_TYPE_NESTING} deep (does a field use it with a bigger type argument than its own?)")
-    si = StructInfo(decl = i32(decl), ntargs = i32(targs.len()), name = name_of(int(nodes[decl].name)), record_ = has_flag(decl, NF_RECORD))
-    si.targs = i32(type_args.len())
-    loop t in targs:
-        type_args.push(i32(t))
-    idx = structs.len()
-    structs.push(si)
-    kind = TK.struct_
-    if nodes[decl].kind == .enum_: kind = .enum_
-    flags = 0
-    if not stable: flags = TF_HAS_VAR
-    types.push(TypeInfo(kind = kind, st = i32(idx), flags = i32(flags)))
-    structs[idx].type = i32(types.len() - 1)
-    if group < 0:
-        group = struct_instance_groups.len()
-        struct_instance_groups.push([])
-        struct_instance_group[decl] = group
-    # Release the lookup snapshot before appending to the group's owned array.
-    instances = []
-    struct_instance_groups[group].push(idx)
-    if indexed: struct_instances[StructInstanceKey(decl, targs)] = idx
-    types.len() - 1
+get_struct_inst = (decl: int, args: int[]) -> int: tc_struct_inst(decl, args)

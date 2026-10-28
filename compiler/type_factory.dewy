@@ -1,0 +1,151 @@
+$runtime_checks
+from p"checker_types.dewy" import (TK TypeInfo StructInfo Field)
+from p"type_inference.dewy" import (tu_prune tu_has_var tu_equal tu_targ tu_struct_targ)
+from p"type_unions.dewy" import (uu_mk_union)
+from p"type_format.dewy" import (tf_string)
+
+# Instance canonicalization and bounded nesting own their indexed state.
+# Lazy fields and type constructors may replace arenas; retain only IDs.
+CWord:type=int64<overflow='wrap'>
+const TF_HAS_VAR=1
+const MAX_TYPE_NESTING=48
+TypeDeclInfo:type=[name:string record:bool enum_:bool]
+StructInstanceKey:type=[decl:int64 args:array<int64>]
+TypeFactoryHost:type=[
+    check_struct_fields:<(p0:int64):>void>
+    mk_array:<(p0:int64):>int64>
+    declaration:<(p0:int64):>TypeDeclInfo>
+    nesting_error:<(p0:int64):>void>
+]
+TypeFactoryInput:type=[
+    types:ptr<array<TypeInfo>>
+    structs:ptr<array<StructInfo>>
+    args:ptr<array<int32>>
+    fields:ptr<array<Field>>
+    soa_decl:ptr<int64>
+    host:ptr<TypeFactoryHost>
+]
+let tc_inputs:ptr<TypeFactoryInput>=$unsafe (uint64(0) as ptr<TypeFactoryInput>)
+let tc_nesting_memo:dict<int64 int64>=[]
+let tc_nesting_least:dict<int64 int64>=[]
+let tc_instances:dict<StructInstanceKey int64>=[]
+let tc_instance_groups:array<array<int64>>=[]
+let tc_instance_group:dict<int64 int64>=[]
+type_factory_bind=(input:ptr<TypeFactoryInput>):>CWord=>{
+    tc_inputs=input; tc_nesting_memo=[]; tc_nesting_least=[]; tc_instances=[]; tc_instance_groups=[]; tc_instance_group=[]; 0
+}
+tc_type_string=(t:CWord):>string=>tf_string(t false)
+tc_soa_inst=(p:CWord):>CWord=>$unsafe {
+    loop i in [CWord(0)..CWord(tc_inputs[0].structs[0].length)) {
+        let si=tc_inputs[0].structs[0].ptr + i
+        if si[0].soa_ and tu_equal(tu_struct_targ(i  0)  p) {return CWord(si[0].type)}
+    }
+    let pt=tu_prune(p)
+    # (of a type parameter: no fields until it is known, as substituting makes it again)
+    let psi:CWord=-1
+    if tc_inputs[0].types[0].ptr[pt].kind not=? 'param' {
+        psi=CWord(tc_inputs[0].types[0].ptr[pt].st)
+        tc_inputs[0].host[0].check_struct_fields(psi)
+    }
+    let si=StructInfo[decl = int32(tc_inputs[0].soa_decl[0])  ntargs = 1  name = "soa {tc_type_string(p)}[]"  soa_ = true  resolved = true]
+    si.targs = int32(tc_inputs[0].args[0].length)
+    tc_inputs[0].args[0].push(int32(p))
+    si.fields = int32(tc_inputs[0].fields[0].length)
+    if psi >=? 0 {
+        si.nfields = tc_inputs[0].structs[0].ptr[psi].nfields
+        loop i in [0..CWord(tc_inputs[0].structs[0].ptr[psi].nfields)) {
+            let f=tc_inputs[0].fields[0].ptr[CWord(tc_inputs[0].structs[0].ptr[psi].fields) + i]
+            tc_inputs[0].fields[0].push(Field[name = f.name  type = int32(tc_inputs[0].host[0].mk_array(CWord(f.type)))])
+        }
+    }
+    let idx=tc_inputs[0].structs[0].length
+    tc_inputs[0].structs[0].push(si)
+    let flags:CWord=0
+    if tu_has_var(pt) {flags=TF_HAS_VAR}
+    tc_inputs[0].types[0].push(TypeInfo[kind='struct_'  st = int32(idx)  flags = int32(flags)])
+    tc_inputs[0].structs[0][idx].type = int32(tc_inputs[0].types[0].length - 1)
+    tc_inputs[0].types[0].length - 1
+}
+tc_nesting=(t0:CWord lim:CWord):>CWord=>$unsafe {
+    if lim <=? 0 or t0 <=? 0 {return 0}
+    let t=tu_prune(t0)
+    let exact=tc_nesting_memo.get(t)
+    if exact isnt? none {return min(exact as int64 lim)}
+    let least=tc_nesting_least.get(t)
+    if least isnt? none {
+        let m=least as int64
+        if m >=? lim {return lim}
+    }
+    let d:CWord=0
+    if CWord(tc_inputs[0].types[0].ptr[t].elem) >? 0 {d=tc_nesting(CWord(tc_inputs[0].types[0].ptr[t].elem)  lim - 1)}
+    loop i in [0..CWord(tc_inputs[0].types[0].ptr[t].nargs)) {d=max(d  tc_nesting(tu_targ(t  i)  lim - 1))}
+    if(tc_inputs[0].types[0].ptr[t].kind =? 'struct_' or tc_inputs[0].types[0].ptr[t].kind =? 'enum_') and CWord(tc_inputs[0].types[0].ptr[t].st) <? tc_inputs[0].structs[0].length {
+        let si=CWord(tc_inputs[0].types[0].ptr[t].st)
+        loop i in [0..CWord(tc_inputs[0].structs[0].ptr[si].ntargs)) {d=max(d  tc_nesting(tu_struct_targ(si  i)  lim - 1))}
+    }
+    if CWord(tc_inputs[0].types[0].ptr[t].flags) & TF_HAS_VAR =? 0 {
+        if d + 1 <? lim {tc_nesting_memo[t] = d + 1}
+        else {tc_nesting_least[t] = lim} # (at least that deep: cut off there)
+    }
+    d + 1
+}
+tc_struct_inst=(decl:CWord targs:array<int64>):>CWord=>$unsafe {
+    if decl =? 0 {return uu_mk_union(targs)}
+    if decl =? tc_inputs[0].soa_decl[0] {return tc_soa_inst(targs[0])}
+    let stable=true
+    loop t in targs {
+        # Test the stored argument, not prune(t): a bound inference variable
+        # still has a different ID from its eventual concrete type.
+        if tu_has_var(t) {stable=false}
+    }
+    let indexed=stable and targs.length >? 0
+    let group=tc_instance_group.get(decl) ?? - 1
+    let instances:array<int64>=[]
+    if indexed {
+        let found=tc_instances.get(StructInstanceKey[decl targs])
+        if found isnt? none {return CWord(tc_inputs[0].structs[0].ptr[found as int64].type)}
+    }
+    else if group >=? 0 {instances=tc_instance_groups[group]}
+    loop i in instances {
+        let si=tc_inputs[0].structs[0].ptr + i
+        if CWord(si[0].ntargs) not=? targs.length {continue}
+        let same=true
+        loop k in [0..targs.length) {
+            if not tu_equal(tu_struct_targ(i  k)  targs[k]) {
+                same=false
+                break
+            }
+        }
+        if same {return CWord(si[0].type)}
+    }
+    # (a generic struct whose fields use it with bigger type arguments would expand without end)
+    loop t in targs {
+        if tc_nesting(t  MAX_TYPE_NESTING + 1) >? MAX_TYPE_NESTING {
+            tc_inputs[0].host[0].nesting_error(decl)
+        }
+    }
+    let info=tc_inputs[0].host[0].declaration(decl)
+    let si=StructInfo[decl = int32(decl)  ntargs = int32(targs.length)  name = info.name  record_ = info.record]
+    si.targs = int32(tc_inputs[0].args[0].length)
+    loop t in targs {
+        tc_inputs[0].args[0].push(int32(t))
+    }
+    let idx=tc_inputs[0].structs[0].length
+    tc_inputs[0].structs[0].push(si)
+    let kind:TK='struct_'
+    if info.enum_ {kind='enum_'}
+    let flags:CWord=0
+    if not stable {flags=TF_HAS_VAR}
+    tc_inputs[0].types[0].push(TypeInfo[kind = kind  st = int32(idx)  flags = int32(flags)])
+    tc_inputs[0].structs[0][idx].type = int32(tc_inputs[0].types[0].length - 1)
+    if group <? 0 {
+        group=tc_instance_groups.length
+        tc_instance_groups.push([])
+        tc_instance_group[decl] = group
+    }
+    # Release the lookup snapshot before appending to the group's owned array.
+    instances=[]
+    tc_instance_groups[group].push(idx)
+    if indexed {tc_instances[StructInstanceKey[decl  targs]] = idx}
+    tc_inputs[0].types[0].length - 1
+}

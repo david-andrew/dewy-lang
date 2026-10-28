@@ -1,0 +1,132 @@
+use 'checker_types.dewy'
+use 'type_inference.dewy'
+use 'type_unions.dewy'
+use 'type_format.dewy'
+const TF_HAS_VAR = 1
+const MAX_TYPE_NESTING = 48
+struct TypeDeclInfo:
+    name: str
+    record: bool
+    enum_: bool
+struct StructInstanceKey:
+    decl: int
+    args: int[]
+struct TypeFactoryHost:
+    check_struct_fields: (int) -> void
+    mk_array: (int) -> int
+    declaration: (int) -> TypeDeclInfo
+    nesting_error: (int) -> void
+struct TypeFactoryInput:
+    types: *(TypeInfo[])
+    structs: *(StructInfo[])
+    args: *(i32[])
+    fields: *(Field[])
+    soa_decl: *(int)
+    host: *TypeFactoryHost
+tc_inputs: *TypeFactoryInput
+tc_nesting_memo: {int: int} = {}
+tc_nesting_least: {int: int} = {}
+tc_instances: {StructInstanceKey: int} = {}
+tc_instance_groups: int[][]
+tc_instance_group: {int: int} = {}
+type_factory_bind = (input: *TypeFactoryInput) -> int:
+    tc_inputs = input
+    tc_nesting_memo = {}
+    tc_nesting_least = {}
+    tc_instances = {}
+    tc_instance_groups = []
+    tc_instance_group = {}
+    0
+tc_type_string = (t: int) -> str: tf_string(t, false)
+tc_soa_inst = (p: int) -> int:
+    loop i in 0.. and si in tc_inputs[0].structs[0]:
+        if si.soa_ and tu_equal(tu_struct_targ(i, 0), p): return int(si.type)
+    pt = tu_prune(p)
+    # (of a type parameter: no fields until it is known, as substituting makes it again)
+    psi = -1
+    if tc_inputs[0].types[0][pt].kind != .param:
+        psi = int(tc_inputs[0].types[0][pt].st)
+        tc_inputs[0].host[0].check_struct_fields(psi)
+    si = StructInfo(decl = i32(tc_inputs[0].soa_decl[0]), ntargs = 1, name = "soa {tc_type_string(p)}[]", soa_ = true, resolved = true)
+    si.targs = i32(tc_inputs[0].args[0].len())
+    tc_inputs[0].args[0].push(i32(p))
+    si.fields = i32(tc_inputs[0].fields[0].len())
+    if psi >= 0:
+        si.nfields = tc_inputs[0].structs[0][psi].nfields
+        loop i in [0..int(tc_inputs[0].structs[0][psi].nfields)):
+            f = tc_inputs[0].fields[0][int(tc_inputs[0].structs[0][psi].fields) + i]
+            tc_inputs[0].fields[0].push(Field(name = f.name, type = i32(tc_inputs[0].host[0].mk_array(int(f.type)))))
+    idx = tc_inputs[0].structs[0].len()
+    tc_inputs[0].structs[0].push(si)
+    flags = 0
+    if tu_has_var(pt): flags = TF_HAS_VAR
+    tc_inputs[0].types[0].push(TypeInfo(kind = .struct_, st = i32(idx), flags = i32(flags)))
+    tc_inputs[0].structs[0][idx].type = i32(tc_inputs[0].types[0].len() - 1)
+    tc_inputs[0].types[0].len() - 1
+
+tc_nesting = (t0: int, lim: int) -> int:
+    if lim <= 0 or t0 <= 0: return 0
+    t = tu_prune(t0)
+    if let m = tc_nesting_memo.get(t): return min(m, lim)
+    if let m = tc_nesting_least.get(t):
+        if m >= lim: return lim
+    d = 0
+    if int(tc_inputs[0].types[0][t].elem) > 0: d = tc_nesting(int(tc_inputs[0].types[0][t].elem), lim - 1)
+    loop i in [0..int(tc_inputs[0].types[0][t].nargs)): d = max(d, tc_nesting(tu_targ(t, i), lim - 1))
+    if (tc_inputs[0].types[0][t].kind == .struct_ or tc_inputs[0].types[0][t].kind == .enum_) and int(tc_inputs[0].types[0][t].st) < tc_inputs[0].structs[0].len():
+        si = int(tc_inputs[0].types[0][t].st)
+        loop i in [0..int(tc_inputs[0].structs[0][si].ntargs)): d = max(d, tc_nesting(tu_struct_targ(si, i), lim - 1))
+    if int(tc_inputs[0].types[0][t].flags) & TF_HAS_VAR == 0:
+        if d + 1 < lim: tc_nesting_memo[t] = d + 1
+        else: tc_nesting_least[t] = lim         # (at least that deep: cut off there)
+    d + 1
+
+tc_struct_inst = (decl: int, targs: int[]) -> int:
+    if decl == 0: return uu_mk_union(targs)
+    if decl == tc_inputs[0].soa_decl[0]: return tc_soa_inst(targs[0])
+    stable = true
+    loop t in targs:
+        # Test the stored argument, not prune(t): a bound inference variable
+        # still has a different ID from its eventual concrete type.
+        if tu_has_var(t): stable = false
+    indexed = stable and targs.len() > 0
+    group = tc_instance_group.get(decl) ?? -1
+    instances: int[]
+    if indexed:
+        if let found = tc_instances.get(StructInstanceKey(decl, targs)): return int(tc_inputs[0].structs[0][found].type)
+    else if group >= 0: instances = tc_instance_groups[group]
+    loop i in instances:
+        si = tc_inputs[0].structs[0][i]
+        if int(si.ntargs) != targs.len(): continue
+        same = true
+        loop k in [0..targs.len()):
+            if not tu_equal(tu_struct_targ(i, k), targs[k]):
+                same = false
+                break
+        if same: return int(si.type)
+    # (a generic struct whose fields use it with bigger type arguments would expand without end)
+    loop t in targs:
+        if tc_nesting(t, MAX_TYPE_NESTING + 1) > MAX_TYPE_NESTING:
+            tc_inputs[0].host[0].nesting_error(decl)
+    info = tc_inputs[0].host[0].declaration(decl)
+    si = StructInfo(decl = i32(decl), ntargs = i32(targs.len()), name = info.name, record_ = info.record)
+    si.targs = i32(tc_inputs[0].args[0].len())
+    loop t in targs:
+        tc_inputs[0].args[0].push(i32(t))
+    idx = tc_inputs[0].structs[0].len()
+    tc_inputs[0].structs[0].push(si)
+    kind = TK.struct_
+    if info.enum_: kind = .enum_
+    flags = 0
+    if not stable: flags = TF_HAS_VAR
+    tc_inputs[0].types[0].push(TypeInfo(kind = kind, st = i32(idx), flags = i32(flags)))
+    tc_inputs[0].structs[0][idx].type = i32(tc_inputs[0].types[0].len() - 1)
+    if group < 0:
+        group = tc_instance_groups.len()
+        tc_instance_groups.push([])
+        tc_instance_group[decl] = group
+    # Release the lookup snapshot before appending to the group's owned array.
+    instances = []
+    tc_instance_groups[group].push(idx)
+    if indexed: tc_instances[StructInstanceKey(decl, targs)] = idx
+    tc_inputs[0].types[0].len() - 1
