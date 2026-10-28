@@ -49,6 +49,14 @@ struct EffectEdge:
     callee: int
     origin: int
     actuals: PlaceIdentity[]
+# One demanded edge's consumed prefix of its callee's canonical summary.
+# The function ID names the summary; its stamp names a widening generation.
+# The origin node remains the obligation ID and the diagnostic witness.
+struct EffectDelta:
+    stamp: int = -1
+    end: int = 0
+    obligation: int = -1
+
 struct EffectSummary:
     footprint_only: bool = false
     footprint_opaque: bool = false
@@ -66,6 +74,7 @@ struct EffectSummary:
     # atoms, which the row already absorbed. Computed once per function.
     unique: int[]
     unique_ready: bool = false
+    deltas: EffectDelta[]
     # Modification tick, and the tick at which its last propagation began.
     changed_at: int = 0
     propagated_at: int = 0
@@ -1739,6 +1748,7 @@ effect_unique_edges = (f: int):
         seen[key] = true
         unique.push(i)
     effect_summaries[f].unique = unique
+    effect_summaries[f].deltas = fill(EffectDelta(), unique.len())
     effect_summaries[f].unique_ready = true
 
 # Re-propagating f is a no-op when no callee changed since f's last pass:
@@ -1751,17 +1761,26 @@ effect_stale = (f: int) -> bool:
         if g > 0 and g < effect_limit and effect_summaries[g].changed_at > since: return true
     false
 
+# Append-only generations offer each (edge, event) once. A widened callee
+# replays its new row, preserving the original order and first witnesses.
+# O(unique edges + newly offered events) per active SCC pass; O(unique edges)
+# cursor storage, allocated only when a demanded summary first propagates.
 effect_propagate = (f: int) -> bool:
     if not effect_summaries[f].unique_ready: effect_unique_edges(f)
     if not effect_stale(f): return false
     effect_ticks += 1
     effect_summaries[f].propagated_at = effect_ticks
     changed = false
-    loop index in effect_summaries[f].unique:
+    loop di in [0..effect_summaries[f].unique.len()):
+        delta = effect_summaries[f].deltas[di]
+        # A closed declared row or an unavailable callee has no later delta.
+        if delta.end < 0: continue
+        index = effect_summaries[f].unique[di]
         edge = effect_summaries[f].edges[index]
         g = edge.callee
         if g <= 0 or g >= effect_limit:
             if effect_add(f, EffectEvent(EffectAtom(.opaque), edge.origin)): changed = true
+            effect_summaries[f].deltas[di].end = -1
             continue
         declared = effect_declared_row(g)
         if declared != 0:
@@ -1774,17 +1793,24 @@ effect_propagate = (f: int) -> bool:
                 e = effect_edge_event(f, edge, EffectEvent(atom, d))
                 if (e.atom.kind == .read or e.atom.kind == .write) and e.atom.place.declaration != 0 and e.atom.place.root == .local: continue
                 if effect_add(f, e): changed = true
+            effect_summaries[f].deltas[di].end = -1
             continue
-        # Snapshot: self-edges can append to this same arena row.
+        # Snapshot both row and generation: a self-edge can append or widen
+        # this same summary while it is consumed. The next pass sees the delta.
+        stamp = effect_summaries[g].stamp
         events = effect_summaries[g].events
-        obligation = -1
-        loop event in events:
+        first = if delta.stamp == stamp: delta.end else: 0
+        loop ei in [first..events.len()):
+            event = events[ei]
             if event.atom.kind == .panic:
-                if obligation < 0: obligation = int(effect_caller_obligation(edge.origin))
-                if obligation == 1: continue
+                if delta.obligation < 0: delta.obligation = int(effect_caller_obligation(edge.origin))
+                if delta.obligation == 1: continue
             e = effect_edge_event(f, edge, event)
             if (e.atom.kind == .read or e.atom.kind == .write) and e.atom.place.declaration != 0 and e.atom.place.root == .local: continue
             if effect_add(f, e): changed = true
+        delta.stamp = stamp
+        delta.end = events.len()
+        effect_summaries[f].deltas[di] = delta
     changed
 
 # Whether facts may treat a call of f as opaque by its signature alone, without
