@@ -1,0 +1,1359 @@
+$runtime_checks
+# Own whole-function instruction selection, calls, fixups and source rows.
+# Borrow immutable IR and fixed frame views for one sequential function.
+# Work follows emitted instructions/bytes plus the existing allocation scans;
+# no per-instruction host requests or additional whole-IR pass.
+from p"arm64_encode.dewy" import (ArmWord)
+from p"ir_types.dewy" import (Op Ins IrFn)
+from p"backend_analysis.dewy" import (LOC_SPILL LOC_CONST LOC_SLOT LOC_NONE LOC_GLOBAL LOC_FCONST vgkind vgoff vloc vcval vslot vsoff backend_debug_vregs v_live backend_analyze)
+from p"arm64_allocate.dewy" import (a_scratch A_V a_saved a_save_off a_allocate a_layout)
+from p"arm64_encode.dewy" import (a_code A_SP A_ZR A_FP AC_EQ AC_NE AC_HS AC_LO AC_MI AC_HI AC_LS AC_GE AC_LT AC_GT AC_LE w32 rd32 wr32 a_movz a_mov_imm a_mov a_add_imm a_sub_imm a_rrr A_ADD A_SUB A_AND A_ORR A_EOR A_SDIV A_UDIV A_LSLV A_LSRV A_ASRV a_mul a_msub a_cmp a_cmp_imm a_cset a_add_lsl a_ubfm a_sbfm a_bl a_blr a_br a_ret a_svc a_mem a_ldr a_str fty a_fop a_fun AF_ADD AF_SUB AF_MUL AF_DIV AF_SQRT AF_NEG AF_ABS AF_MOV AF_FLOOR AF_CEIL AF_TRUNC a_fcmp a_fcsel a_fmov_from a_fmov_to a_mem_idx a_logimm a_fimm8 a_lits ACtl actl a_try_patch a_branch a_branch_nz a_branch_cc)
+const VI = 0
+const VF = 1
+const VS = 2
+const M_SIGNED = 16
+const M_FLOAT = 32
+const M_INDEX = 128
+const VOP_SPLAT_B = 256
+const VOP_SPLAT_C = 512
+const CALL_IF_SHARED = 3
+const CALL_RC_INC = 4
+const CALL_RC_DEC = 5
+let a_types:ptr<int8>=$unsafe (uint64(0) as ptr<int8>)
+let a_arguments:ptr<int32>=$unsafe (uint64(0) as ptr<int32>)
+let a_instructions:ptr<Ins>=$unsafe (uint64(0) as ptr<Ins>)
+let a_slot_sizes:ptr<int32>=$unsafe (uint64(0) as ptr<int32>)
+let a_spill_view:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let a_slot_view:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let a_ir:ptr<IrFn>=$unsafe (uint64(0) as ptr<IrFn>)
+let a_spill:array<int64>=[]
+let a_slots:array<int64>=[]
+let a_frame_size:int64=0
+let a_debug = false
+let a_macos = false
+let a_mt_active:ArmWord=0
+let a_function_name = ""
+let a_emit_error = ""
+let a_emit_failed:bool=false
+let a_epis:array<int64>=[]
+let a_positions:array<int64>=[]
+let a_emit_lines:array<int64>=[]
+let a_emit_sites:array<int64>=[]
+let a_row_pos:ArmWord=-1
+let a_int_fail:array<int64>=[]
+let a_int_fail_fn:ArmWord=0
+let a_call_fix:array<[int64 int64]>=[]
+let a_stub_fix:array<[int64 int64]>=[]
+let a_faddr_fix:array<[int64 int64]>=[]
+let a_data_fix:array<[int64 int64 int64]>=[]
+a_vtype=(v:ArmWord):>ArmWord=>$unsafe {
+    let t=ArmWord(a_types[v])
+    if t =? 3 {return VI}
+    t
+}
+a_slot_disp=(v:ArmWord):>ArmWord=>$unsafe {
+    ArmWord(a_slot_view[vslot[v]]) + ArmWord(vsoff[v])
+}
+a_mem_scale=(ins:Ins):>ArmWord=>$unsafe {
+    (ArmWord(ins.c) >> 8) & 3
+}
+a_call_site=(ins:Ins):>void=>$unsafe {
+    if ins.pos =? 0 {
+        return
+    }
+    a_emit_sites.push(ArmWord(a_code[0].length))
+    a_emit_sites.push(ArmWord(ins.pos))
+}
+a_line_row=(pos:ArmWord @positions:array<int64> fused:bool):>void=>$unsafe {
+    if pos =? 0 {
+        return
+    }
+    let at=pos
+    if fused {
+        at = positions[pos]
+    }
+    if at =? a_row_pos {
+        return
+    }
+    a_row_pos = at
+    a_emit_lines.push(ArmWord(a_code[0].length))
+    a_emit_lines.push(pos)
+}
+a_ld=(r:ArmWord v:ArmWord):>void=>$unsafe {
+    let l=ArmWord(vloc[v])
+    if l =? LOC_SPILL {
+        a_ldr(r  A_SP  a_spill_view[v])
+    }
+    else if l =? LOC_CONST or l =? LOC_FCONST {
+        a_mov_imm(r  vcval[v])
+    }
+    else if l =? LOC_SLOT {
+        a_add_imm(r  A_SP  a_slot_disp(v))
+    }
+    else if l =? LOC_GLOBAL {
+        a_adr_data(r  vgkind[v]  vgoff[v])
+    }
+    else if l >=? A_V {
+        a_fmov_to(a_vtype(v)  r  l - A_V)
+    }
+    else if l >=? 0 {
+        a_mov(r  l)
+    }
+    else {
+        a_movz(r  0  0)
+    }
+}
+a_st=(v:ArmWord r:ArmWord):>void=>$unsafe {
+    let l=ArmWord(vloc[v])
+    if l =? LOC_SPILL {
+        a_str(r  A_SP  a_spill_view[v])
+    }
+    else if l >=? A_V {
+        a_fmov_from(a_vtype(v)  l - A_V  r)
+    }
+    else if l >=? 0 {
+        a_mov(l  r)
+    }
+}
+a_src=(v:ArmWord r:ArmWord):>ArmWord=>$unsafe {
+    let l=ArmWord(vloc[v])
+    if l >=? 0 and l <? A_V {
+        return l
+    }
+    a_ld(r  v)
+    r
+}
+a_dst=(v:ArmWord r:ArmWord):>ArmWord=>$unsafe {
+    let l=ArmWord(vloc[v])
+    if l >=? 0 and l <? A_V {
+        return l
+    }
+    r
+}
+a_lds=(f:ArmWord v:ArmWord ty:ArmWord):>void=>$unsafe {
+    let l=ArmWord(vloc[v])
+    let sz:ArmWord=8
+    if ty =? VS {
+        sz = 4
+    }
+    if l =? LOC_SPILL {
+        a_mem(true  f  A_SP  a_spill_view[v]  sz  false  true)
+    }
+    else if l >=? A_V {
+        if l - A_V not=? f {
+            a_fun(AF_MOV  ty  f  l - A_V)
+        }
+    }
+    else if l =? LOC_FCONST and vcval[v] =? 0 {
+        a_fmov_from(ty  f  A_ZR)
+    }
+    else if l =? LOC_FCONST and a_fimm8(vcval[v]  ty) >=? 0 {
+        w32(0x1E201000 | (fty(ty) << 22) | (a_fimm8(vcval[v]  ty) << 13) | f)
+    }
+    else if l =? LOC_FCONST {
+        a_lits.push([ArmWord(a_code[0].length)  vcval[v]])
+        if ty =? VS {
+            w32(0x1C000000 | f)
+        }
+        else {
+            w32(0x5C000000 | f)
+        }
+    }
+    else {
+        a_ld(17  v)
+        a_fmov_from(ty  f  17)
+    }
+}
+a_sts=(v:ArmWord f:ArmWord ty:ArmWord):>void=>$unsafe {
+    let l=ArmWord(vloc[v])
+    let sz:ArmWord=8
+    if ty =? VS {
+        sz = 4
+    }
+    if l =? LOC_SPILL {
+        a_mem(false  f  A_SP  a_spill_view[v]  sz  false  true)
+    }
+    else if l >=? A_V {
+        if l - A_V not=? f {
+            a_fun(AF_MOV  ty  l - A_V  f)
+        }
+    }
+    else if l >=? 0 {
+        a_fmov_to(ty  l  f)
+    }
+}
+a_fsrc=(v:ArmWord f:ArmWord ty:ArmWord):>ArmWord=>$unsafe {
+    let l=ArmWord(vloc[v])
+    if l >=? A_V {
+        return l - A_V
+    }
+    a_lds(f  v  ty)
+    f
+}
+a_fdst=(v:ArmWord f:ArmWord):>ArmWord=>$unsafe {
+    let l=ArmWord(vloc[v])
+    if l >=? A_V {
+        return l - A_V
+    }
+    f
+}
+a_adr_data=(r:ArmWord kind:ArmWord off:ArmWord):>void=>$unsafe {
+    a_data_fix.push([ArmWord(a_code[0].length)  kind  off])
+    w32(0x90000000 | r)
+    w32(0x91000000 | (r << 5) | r)
+}
+a_addr=(v:ArmWord scratch:ArmWord):>[int64 int64]=>$unsafe {
+    if vloc[v] =? LOC_SLOT {
+        return [A_SP  a_slot_disp(v)]
+    }
+    [a_src(v  scratch)  0]
+}
+a_save=(load:bool):>void=>$unsafe {
+    let saved=a_saved.ptr
+    loop i in [ArmWord(0)..ArmWord(a_saved.length)) {
+        let r=ArmWord(saved[i])
+        if r >=? A_V {
+            a_mem(load  r - A_V  A_SP  ArmWord(a_save_off) + 8 * i  8  false  true)
+        }
+        else {
+            a_mem(load  r  A_SP  ArmWord(a_save_off) + 8 * i  8  false  false)
+        }
+    }
+}
+a_prologue=():>void=>$unsafe {
+    w32(0xA9BF7BFD)
+    w32(0x910003FD)
+    if a_frame_size >? 0 {
+        a_sub_imm(A_SP  A_SP  a_frame_size)
+    }
+    a_save(false)
+    let ni:ArmWord=0
+    let nf:ArmWord=0
+    let stack_k:ArmWord=0
+    loop p in [0..a_ir[0].nparams) {
+        let ty=a_vtype(p)
+        if ty =? VI {
+            if ni <? 8 {
+                a_st(p  ni)
+                ni += 1
+                continue
+            }
+        }
+        else {
+            if nf <? 8 {
+                a_sts(p  nf  ty)
+                nf += 1
+                continue
+            }
+        }
+        if vloc[p] not=? LOC_NONE {
+            if ty =? VI {
+                a_ldr(9  A_FP  16 + 8 * stack_k)
+                a_st(p  9)
+            }
+            else {
+                let sz:ArmWord=8
+                if ty =? VS {
+                    sz = 4
+                }
+                a_mem(true  16  A_FP  16 + 8 * stack_k  sz  false  true)
+                a_sts(p  16  ty)
+            }
+        }
+        stack_k += 1
+    }
+}
+a_epilogue=():>void=>$unsafe {
+    a_save(true)
+    w32(0x910003BF)
+    w32(0xA8C17BFD)
+    if a_debug {
+        a_epis.push(ArmWord(a_code[0].length))
+    }
+    a_ret()
+}
+a_on_stack=(ins:Ins k:ArmWord):>bool=>$unsafe {
+    a_macos and ins.op =? 'callc' and ArmWord(ins.imm) >? 0 and k >=? ArmWord(ins.imm) - 1
+}
+a_call_args=(ins:Ins):>void=>$unsafe {
+    let start=ArmWord(ins.a)
+    let n=ArmWord(ins.b)
+    let ni:ArmWord=0
+    let nf:ArmWord=0
+    let ns:ArmWord=0
+    loop k in [0..n) {
+        let v=ArmWord(a_arguments[start + k])
+        let ty=a_vtype(v)
+        if a_on_stack(ins  k) {
+            if ty =? VI {
+                a_ld(9  v)
+            }
+            else {
+                a_lds(16  v  ty)
+                if ty =? VS {
+                    w32(0x1E22C210)
+                }
+                w32(0x9E660209)
+            }
+            a_str(9  A_SP  8 * ns)
+            ns += 1
+        }
+        else if ty =? VI {
+            if ni <? 8 {
+                a_ld(ni  v)
+                ni += 1
+            }
+            else {
+                a_ld(9  v)
+                a_str(9  A_SP  8 * ns)
+                ns += 1
+            }
+        }
+        else {
+            if nf <? 8 {
+                a_lds(nf  v  ty)
+                nf += 1
+            }
+            else {
+                a_lds(16  v  ty)
+                a_mem(false  16  A_SP  8 * ns  8  false  true)
+                ns += 1
+            }
+        }
+    }
+}
+a_result=(ins:Ins):>void=>$unsafe {
+    let d=ArmWord(ins.dst)
+    if d <? 0 or vloc[d] =? LOC_NONE {
+        return
+    }
+    if a_vtype(d) =? VI {
+        a_st(d  0)
+    }
+    else {
+        a_sts(d  0  a_vtype(d))
+    }
+}
+a_patch=(f:[int64 int64] target:ArmWord):>void=>$unsafe {
+    if not a_try_patch(f  target) {
+        a_emit_failed=true
+        a_emit_error = "arm64: a conditional branch is too far (a function over 1 MB)"
+    }
+}
+a_patch_here=(f:[int64 int64]):>void=>$unsafe {
+    a_patch(f  ArmWord(a_code[0].length))
+}
+a_icc=(op:Op):>ArmWord=>$unsafe {
+    match op {
+        <'eq'> => {
+            AC_EQ
+        }
+        <'ne'> => {
+            AC_NE
+        }
+        <'lts'> => {
+            AC_LT
+        }
+        <'les'> => {
+            AC_LE
+        }
+        <'gts'> => {
+            AC_GT
+        }
+        <'ges'> => {
+            AC_GE
+        }
+        <'ltu'> => {
+            AC_LO
+        }
+        <'leu'> => {
+            AC_LS
+        }
+        <'gtu'> => {
+            AC_HI
+        }
+        <'geu'> => {
+            AC_HS
+        }
+        _ => {
+            -1
+        }
+    }
+}
+a_fcc=(op:Op):>ArmWord=>$unsafe {
+    match op {
+        <'feq'> => {
+            AC_EQ
+        }
+        <'fne'> => {
+            AC_NE
+        }
+        <'flt'> => {
+            AC_MI
+        }
+        <'fle'> => {
+            AC_LS
+        }
+        <'fgt'> => {
+            AC_GT
+        }
+        <'fge'> => {
+            AC_GE
+        }
+        _ => {
+            -1
+        }
+    }
+}
+let A_SYS:array<int64> = [0  63  0  1  64  0  2  56  1  3  57  0  7  73  5  8  62  0  9  222  0  10  226  0  11  215  0  13  134  0  16  29  0  17  67  0  21  48  1  25  216  0  27  232  0  28  233  0  33  24  6  35  101  0  39  172  0  41  198  0  42  203  0  44  206  0  45  207  0  49  200  0  50  201  0  54  208  0  55  209  0  288  242  0  46  211  0  47  212  0  57  220  4  59  221  0  60  93  0  61  260  0  62  129  0  72  25  0  77  46  0  79  17  0  82  276  3  83  34  1  87  35  2  89  78  1  90  53  1  112  157  0  131  132  0  186  178  0  202  98  0  204  123  0  217  61  0  228  113  0  218  96  0  234  131  0  231  94  0  254  27  0  255  28  0  293  59  0  294  26  0  318  278  0  319  279  0  84  35  7  5  80  0  80  49  0  316  276  0  51  204  0  74  82  0]
+a_sys=(n:ArmWord):>[int64 int64]=>$unsafe {
+    let k:ArmWord=0
+    loop k <? A_SYS.length {
+        if A_SYS[k] =? n {
+            return [A_SYS[k + 1]  A_SYS[k + 2]]
+        }
+        k += 3
+    }
+    [-1  0]
+}
+a_syscall=(ins:Ins):>void=>$unsafe {
+    let a=ArmWord(ins.a)
+    let n=ArmWord(ins.b)
+    let nv=ArmWord(a_arguments[a])
+    if vloc[nv] not=? LOC_CONST {
+        a_emit_failed=true
+        a_emit_error = "arm64: a system call number must be a constant"
+        return
+    }
+    if a_macos {
+        a_emit_failed=true
+        a_emit_error = "macOS: {a_function_name} makes Linux system call {vcval[nv]} (the library has no macOS version of it yet)"
+        return
+    }
+    let [sn how]=a_sys(vcval[nv])
+    if sn <? 0 {
+        a_emit_failed=true
+        a_emit_error = "arm64: system call {vcval[nv]} is not translated (see a_sys in compiler/arm64.jo)"
+        return
+    }
+    let regs:array<int64>=[]
+    if how =? 1 or how =? 2 or how =? 7 {
+        a_mov_imm(regs_next(@regs)  -100)
+    }
+    if how =? 4 {
+        a_mov_imm(regs_next(@regs)  17)
+        loop k in [0..4) {
+            a_movz(regs_next(@regs)  0  0)
+        }
+    }
+    else if how =? 3 {
+        a_mov_imm(regs_next(@regs)  -100)
+        a_ld(regs_next(@regs)  ArmWord(a_arguments[a + 1]))
+        a_mov_imm(regs_next(@regs)  -100)
+        a_ld(regs_next(@regs)  ArmWord(a_arguments[a + 2]))
+        a_movz(regs_next(@regs)  0  0)
+    }
+    else if how =? 5 {
+        a_ld(0  ArmWord(a_arguments[a + 1]))
+        a_ld(1  ArmWord(a_arguments[a + 2]))
+        a_ld(9  ArmWord(a_arguments[a + 3]))
+        a_movz(2  0  0)
+        let t=ArmWord(a_code[0].length)
+        w32(0xB7000000 | (31 << 19) | 9)
+        a_mov_imm(10  1000)
+        w32(A_UDIV | (10 << 16) | (9 << 5) | 11)
+        a_msub(12  11  10  9)
+        a_mov_imm(10  1000000)
+        a_mul(12  12  10)
+        a_add_imm(2  A_SP  a_scratch)
+        w32(0xA9000000 | (12 << 10) | (2 << 5) | 11)
+        wr32(t  rd32(t) | ((((ArmWord(a_code[0].length) - t) // 4) & 0x3FFF) << 5))
+        a_movz(3  0  0)
+        a_movz(4  0  0)
+    }
+    else {
+        loop k in [1..n) {
+            a_ld(regs_next(@regs)  ArmWord(a_arguments[a + k]))
+        }
+        if how =? 2 or how =? 6 {
+            a_movz(regs_next(@regs)  0  0)
+        }
+        if how =? 7 {
+            a_mov_imm(regs_next(@regs)  0x200)
+        }
+        if vcval[nv] =? 2 and n >=? 3 {
+            let r:ArmWord=2
+            a_mov_imm(10  0xC000)
+            a_rrr(A_AND  11  r  10)
+            a_mov_imm(10  0x30000)
+            a_rrr(A_AND  12  r  10)
+            a_mov_imm(10  (0x3C000 xor -1))
+            a_rrr(A_AND  r  r  10)
+            a_ubfm(11  11  62  61)
+            a_ubfm(12  12  2  63)
+            a_rrr(A_ORR  r  r  11)
+            a_rrr(A_ORR  r  r  12)
+        }
+    }
+    a_mov_imm(8  sn)
+    a_svc()
+    let d=ArmWord(ins.dst)
+    if d >=? 0 {
+        a_st(d  0)
+    }
+}
+regs_next=(@regs:array<int64>):>ArmWord=>$unsafe {
+    regs.push(regs.length)
+    regs.length - 1
+}
+a_copy_loop=():>void=>$unsafe {
+    a_cmp_imm(11  8)
+    w32(0x54000000 | (5 << 5) | AC_LO)
+    w32(0xF8408540 | 12)
+    w32(0xF8008520 | 12)
+    w32(0xD1002000 | (11 << 5) | 11)
+    w32(0x14000000 | ((-5) & 0x3FFFFFF))
+    w32(0xB4000000 | (5 << 5) | 11)
+    w32(0x38401540 | 12)
+    w32(0x38001520 | 12)
+    w32(0xD1000400 | (11 << 5) | 11)
+    w32(0x14000000 | ((-4) & 0x3FFFFFF))
+}
+a_fill_loop=():>void=>$unsafe {
+    w32(0x92401D4A)
+    a_mov_imm(12  0x0101010101010101)
+    a_mul(10  10  12)
+    a_cmp_imm(11  8)
+    w32(0x54000000 | (4 << 5) | AC_LO)
+    w32(0xF8008520 | 10)
+    w32(0xD1002000 | (11 << 5) | 11)
+    w32(0x14000000 | ((-4) & 0x3FFFFFF))
+    w32(0xB4000000 | (4 << 5) | 11)
+    w32(0x38001520 | 10)
+    w32(0xD1000400 | (11 << 5) | 11)
+    w32(0x14000000 | ((-3) & 0x3FFFFFF))
+}
+a_int_bin=(base:ArmWord ins:Ins):>void=>$unsafe {
+    let d=ArmWord(ins.dst)
+    if vloc[d] =? LOC_NONE {
+        return
+    }
+    let rn=a_src(ArmWord(ins.a)  9)
+    let rm=a_src(ArmWord(ins.b)  10)
+    let rd=a_dst(d  11)
+    a_rrr(base  rd  rn  rm)
+    a_st(d  rd)
+}
+a_imm12=(v:ArmWord):>ArmWord=>$unsafe {
+    if vloc[v] =? LOC_CONST and vcval[v] >=? 0 and vcval[v] <? 4096 {
+        return vcval[v]
+    }
+    -1
+}
+a_fbin=(base:ArmWord ins:Ins):>void=>$unsafe {
+    let ty=ArmWord(ins.ty)
+    let d=ArmWord(ins.dst)
+    if vloc[d] =? LOC_NONE {
+        return
+    }
+    let fa=a_fsrc(ArmWord(ins.a)  16  ty)
+    let fm=a_fsrc(ArmWord(ins.b)  17  ty)
+    let fd=a_fdst(d  18)
+    a_fop(base  ty  fd  fa  fm)
+    a_sts(d  fd  ty)
+}
+a_funary=(base:ArmWord ins:Ins):>void=>$unsafe {
+    let ty=ArmWord(ins.ty)
+    let d=ArmWord(ins.dst)
+    if vloc[d] =? LOC_NONE {
+        return
+    }
+    let fa=a_fsrc(ArmWord(ins.a)  16  ty)
+    let fd=a_fdst(d  18)
+    a_fun(base  ty  fd  fa)
+    a_sts(d  fd  ty)
+}
+a_mem_op=(load:bool rt:ArmWord ins:Ins idx_v:ArmWord size:ArmWord signed:bool fp:bool):>void=>$unsafe {
+    let mode=ArmWord(ins.c)
+    let [base off]=a_addr(ArmWord(ins.a)  9)
+    off += ArmWord(ArmWord(ins.imm))
+    if mode & M_INDEX not=? 0 {
+        let ri=a_src(idx_v  10)
+        let sh=a_mem_scale(ins)
+        if off =? 0 and a_mem_idx(load  rt  base  ri  sh  size  signed  fp) {
+            return
+        }
+        if base =? A_SP {
+            a_add_imm(9  A_SP  0)
+            base = 9
+        }
+        a_add_lsl(9  base  ri  sh)
+        base = 9
+    }
+    a_mem(load  rt  base  off  size  signed  fp)
+}
+let a_pend:ArmWord=-1
+let a_pend_cc:ArmWord=0
+a_fuses=(v:ArmWord pos:ArmWord):>bool=>$unsafe {
+    if v_live[v].nuse not=? 1 or pos + 1 >=? a_ir[0].code.length {
+        return false
+    }
+    let n=a_instructions[pos + 1]
+    if ArmWord(n.a) not=? v {
+        return false
+    }
+    if n.op =? 'if_' or n.op =? 'brif' {
+        return true
+    }
+    (n.op =? 'eq' or n.op =? 'ne') and vloc[ArmWord(n.b)] =? LOC_CONST and vcval[ArmWord(n.b)] =? 0
+}
+a_set_cc=(d:ArmWord cc:ArmWord pos:ArmWord):>void=>$unsafe {
+    if a_fuses(d  pos) {
+        a_pend = d
+        a_pend_cc = cc
+        return
+    }
+    let rd=a_dst(d  11)
+    a_cset(rd  cc)
+    a_st(d  rd)
+}
+arm64_ins=(pos:ArmWord ins:Ins):>void=>$unsafe {
+    let op=ins.op
+    let d=ArmWord(ins.dst)
+    let a=ArmWord(ins.a)
+    let bb=ArmWord(ins.b)
+    if a_icc(op) >=? 0 {
+        if a =? a_pend {
+            let cc=a_pend_cc
+            if op =? 'eq' {
+                cc = cc xor 1
+            }
+            a_pend = -1
+            a_set_cc(d  cc  pos)
+            return
+        }
+        let rn=a_src(a  9)
+        let k=a_imm12(bb)
+        if k >=? 0 {
+            a_cmp_imm(rn  k)
+        }
+        else {
+            a_cmp(rn  a_src(bb  10))
+        }
+        a_set_cc(d  a_icc(op)  pos)
+        return
+    }
+    if a_fcc(op) >=? 0 {
+        let ty=ArmWord(ins.ty)
+        let fa=a_fsrc(a  16  ty)
+        let fm=a_fsrc(bb  17  ty)
+        a_fcmp(ty  fa  fm)
+        a_set_cc(d  a_fcc(op)  pos)
+        return
+    }
+    match op {
+        <'nop' | 'assume'> => {
+
+        }
+        <'iconst' | 'fconst'> => {
+            if vloc[d] =? LOC_CONST or vloc[d] =? LOC_FCONST or vloc[d] =? LOC_NONE {
+                return
+            }
+            let rd=a_dst(d  9)
+            a_mov_imm(rd  ArmWord(ins.imm))
+            a_st(d  rd)
+        }
+        <'mov'> => {
+            if vloc[d] =? LOC_NONE {
+                return
+            }
+            let ty=a_vtype(d)
+            if ty not=? VI and a_vtype(a) =? ty {
+                a_sts(d  a_fsrc(a  16  ty)  ty)
+            }
+            else if ty =? VI and a_vtype(a) =? VI {
+                a_st(d  a_src(a  9))
+            }
+            else {
+                a_ld(9  a)
+                a_st(d  9)
+            }
+        }
+        <'overflow_add' | 'overflow_sub' | 'overflow_mul'> => {
+            let rn=a_src(a  9)
+            let rm=a_src(bb  10)
+            let cc:ArmWord=6
+            if op =? 'overflow_mul' {
+                w32(0x9B407C00 | (rm << 16) | (rn << 5) | 12)
+                a_mul(11  rn  rm)
+                w32(0xEB00001F | (2 << 22) | (11 << 16) | (63 << 10) | (12 << 5))
+                cc = AC_NE
+            }
+            else {
+                let base:ArmWord=if op =? 'overflow_add' {0xAB000000} else {0xEB000000}
+                w32(base | (rm << 16) | (rn << 5) | 11)
+            }
+            a_cset(11  cc)
+            a_st(d  11)
+        }
+        <'checked_add' | 'checked_sub' | 'checked_mul'> => {
+            let rn=a_src(a  9)
+            let rd=a_dst(d  11)
+            let cc:ArmWord=if ins.c =? 0 {6} else {if op =? 'checked_sub' {3} else {2}}
+            if op =? 'checked_mul' {
+                let rm=a_src(bb  10)
+                w32((if ins.c not=? 0 {0x9BC07C00} else {0x9B407C00}) | (rm << 16) | (rn << 5) | 12)
+                a_mul(rd  rn  rm)
+                if ins.c not=? 0 {
+                    w32(0xF100001F | (12 << 5))
+                }
+                else {
+                    w32(0xEB00001F | (2 << 22) | (rd << 16) | (63 << 10) | (12 << 5))
+                }
+                cc = AC_NE
+            }
+            else if vloc[bb] =? LOC_CONST and vcval[bb] >? -4096 and vcval[bb] <? 4096 and (ins.c =? 0 or vcval[bb] >=? 0) {
+                let k=ArmWord(vcval[bb])
+                if op =? 'checked_sub' {
+                    k = -k
+                }
+                let base:ArmWord=0xB1000000
+                if k <? 0 {
+                    k = -k
+                    base = 0xF1000000
+                }
+                w32(base | (k << 10) | (rn << 5) | rd)
+            }
+            else {
+                let rm=a_src(bb  10)
+                let base:ArmWord=if op =? 'checked_add' {0xAB000000} else {0xEB000000}
+                w32(base | (rm << 16) | (rn << 5) | rd)
+            }
+            a_int_fail.push(ArmWord(a_code[0].length))
+            w32(0x54000000 | cc)
+            a_int_fail_fn = ArmWord(ArmWord(ins.imm))
+            a_st(d  rd)
+        }
+        <'add' | 'sub'> => {
+            if vloc[d] =? LOC_NONE or vloc[d] =? LOC_SLOT {
+                return
+            }
+            if vloc[bb] =? LOC_CONST and vcval[bb] >? -4096 and vcval[bb] <? 4096 {
+                let k=ArmWord(vcval[bb])
+                if op =? 'sub' {
+                    k = -k
+                }
+                let rn=a_src(a  9)
+                let rd=a_dst(d  11)
+                a_add_imm(rd  rn  k)
+                a_st(d  rd)
+            }
+            else if op =? 'add' {
+                a_int_bin(A_ADD  ins)
+            }
+            else {
+                a_int_bin(A_SUB  ins)
+            }
+        }
+        <'and_' | 'or_' | 'xor'> => {
+            if vloc[d] =? LOC_NONE {
+                return
+            }
+            let li:ArmWord=-1
+            if vloc[bb] =? LOC_CONST {
+                li = a_logimm(vcval[bb])
+            }
+            if li >=? 0 {
+                let rn=a_src(a  9)
+                let rd=a_dst(d  11)
+                let x:ArmWord=0x92000000
+                if op =? 'or_' {
+                    x = 0xB2000000
+                }
+                else if op =? 'xor' {
+                    x = 0xD2000000
+                }
+                w32(x | (li << 10) | (rn << 5) | rd)
+                a_st(d  rd)
+            }
+            else if op =? 'and_' {
+                a_int_bin(A_AND  ins)
+            }
+            else if op =? 'or_' {
+                a_int_bin(A_ORR  ins)
+            }
+            else {
+                a_int_bin(A_EOR  ins)
+            }
+        }
+        <'shl' | 'shrs' | 'shru'> => {
+            if vloc[d] =? LOC_NONE {
+                return
+            }
+            if vloc[bb] =? LOC_CONST {
+                let k=ArmWord(vcval[bb]) & 63
+                let rn=a_src(a  9)
+                let rd=a_dst(d  11)
+                if op =? 'shl' {
+                    a_ubfm(rd  rn  (64 - k) & 63  63 - k)
+                }
+                else if op =? 'shrs' {
+                    a_sbfm(rd  rn  k  63)
+                }
+                else {
+                    a_ubfm(rd  rn  k  63)
+                }
+                a_st(d  rd)
+            }
+            else if op =? 'shl' {
+                a_int_bin(A_LSLV  ins)
+            }
+            else if op =? 'shrs' {
+                a_int_bin(A_ASRV  ins)
+            }
+            else {
+                a_int_bin(A_LSRV  ins)
+            }
+        }
+        <'divs'> => {
+            a_int_bin(A_SDIV  ins)
+        }
+        <'mulhs'> => {
+            a_int_bin(0x9B407C00  ins)
+        }
+        <'mulhu'> => {
+            a_int_bin(0x9BC07C00  ins)
+        }
+        <'divu'> => {
+            a_int_bin(A_UDIV  ins)
+        }
+        <'mul'> => {
+            if vloc[d] =? LOC_NONE {
+                return
+            }
+            let rn=a_src(a  9)
+            let rm=a_src(bb  10)
+            let rd=a_dst(d  11)
+            a_mul(rd  rn  rm)
+            a_st(d  rd)
+        }
+        <'rems' | 'remu'> => {
+            let rn=a_src(a  9)
+            let rm=a_src(bb  10)
+            if op =? 'rems' {
+                a_rrr(A_SDIV  11  rn  rm)
+            }
+            else {
+                a_rrr(A_UDIV  11  rn  rm)
+            }
+            let rd=a_dst(d  11)
+            a_msub(rd  11  rm  rn)
+            a_st(d  rd)
+        }
+        <'neg' | 'not_'> => {
+            let rn=a_src(a  9)
+            let rd=a_dst(d  11)
+            if op =? 'neg' {
+                a_rrr(A_SUB  rd  A_ZR  rn)
+            }
+            else {
+                w32(0xAA200000 | (rn << 16) | (A_ZR << 5) | rd)
+            }
+            a_st(d  rd)
+        }
+        <'fadd'> => {
+            a_fbin(AF_ADD  ins)
+        }
+        <'fsub'> => {
+            a_fbin(AF_SUB  ins)
+        }
+        <'fmul'> => {
+            a_fbin(AF_MUL  ins)
+        }
+        <'fdiv'> => {
+            a_fbin(AF_DIV  ins)
+        }
+        <'fmin' | 'fmax'> => {
+            let ty=ArmWord(ins.ty)
+            let fa=a_fsrc(a  16  ty)
+            let fm=a_fsrc(bb  17  ty)
+            a_fcmp(ty  fa  fm)
+            let fd=a_fdst(d  18)
+            if op =? 'fmin' {
+                a_fcsel(ty  fd  fa  fm  AC_MI)
+            }
+            else {
+                a_fcsel(ty  fd  fa  fm  AC_GT)
+            }
+            a_sts(d  fd  ty)
+        }
+        <'fsqrt'> => {
+            a_funary(AF_SQRT  ins)
+        }
+        <'fneg'> => {
+            a_funary(AF_NEG  ins)
+        }
+        <'fabs'> => {
+            a_funary(AF_ABS  ins)
+        }
+        <'ffloor'> => {
+            a_funary(AF_FLOOR  ins)
+        }
+        <'fceil'> => {
+            a_funary(AF_CEIL  ins)
+        }
+        <'ftrunc'> => {
+            a_funary(AF_TRUNC  ins)
+        }
+        <'sext8' | 'sext16' | 'sext32' | 'zext8' | 'zext16' | 'zext32'> => {
+            let rn=a_src(a  9)
+            let rd=a_dst(d  11)
+            if op =? 'sext8' {
+                a_sbfm(rd  rn  0  7)
+            }
+            else if op =? 'sext16' {
+                a_sbfm(rd  rn  0  15)
+            }
+            else if op =? 'sext32' {
+                a_sbfm(rd  rn  0  31)
+            }
+            else if op =? 'zext8' {
+                a_ubfm(rd  rn  0  7)
+            }
+            else if op =? 'zext16' {
+                a_ubfm(rd  rn  0  15)
+            }
+            else {
+                a_ubfm(rd  rn  0  31)
+            }
+            a_st(d  rd)
+        }
+        <'i2f' | 'u2f'> => {
+            let ty=ArmWord(ins.ty)
+            let rn=a_src(a  9)
+            let fd=a_fdst(d  18)
+            let x:ArmWord=0x9E220000
+            if op =? 'u2f' {
+                x = 0x9E230000
+            }
+            w32(x | (fty(ty) << 22) | (rn << 5) | fd)
+            a_sts(d  fd  ty)
+        }
+        <'f2i'> => {
+            let ty=ArmWord(ins.ty)
+            let fa=a_fsrc(a  16  ty)
+            let rd=a_dst(d  11)
+            w32(0x9E380000 | (fty(ty) << 22) | (fa << 5) | rd)
+            a_st(d  rd)
+        }
+        <'f2f'> => {
+            let fd=a_fdst(d  18)
+            if ArmWord(ins.ty) =? VF {
+                let fa=a_fsrc(a  16  VS)
+                w32(0x1E22C000 | (fa << 5) | fd)
+                a_sts(d  fd  VF)
+            }
+            else {
+                let fa=a_fsrc(a  16  VF)
+                w32(0x1E624000 | (fa << 5) | fd)
+                a_sts(d  fd  VS)
+            }
+        }
+        <'bits2f'> => {
+            let ty=ArmWord(ins.ty)
+            let rn=a_src(a  9)
+            let fd=a_fdst(d  18)
+            a_fmov_from(ty  fd  rn)
+            a_sts(d  fd  ty)
+        }
+        <'f2bits'> => {
+            let ty=ArmWord(ins.ty)
+            let fa=a_fsrc(a  16  ty)
+            let rd=a_dst(d  11)
+            a_fmov_to(ty  rd  fa)
+            a_st(d  rd)
+        }
+        <'load'> => {
+            if vloc[d] =? LOC_NONE {
+                return
+            }
+            let mode=ArmWord(ins.c)
+            let size=mode & 15
+            if mode & M_FLOAT not=? 0 {
+                let fd=a_fdst(d  16)
+                a_mem_op(true  fd  ins  bb  size  false  true)
+                a_sts(d  fd  a_vtype(d))
+            }
+            else {
+                let rd=a_dst(d  11)
+                a_mem_op(true  rd  ins  bb  size  mode & M_SIGNED not=? 0  false)
+                a_st(d  rd)
+            }
+        }
+        <'store'> => {
+            let size=ArmWord(ins.c) & 15
+            if a_vtype(bb) not=? VI {
+                a_mem_op(false  a_fsrc(bb  16  a_vtype(bb))  ins  d  size  false  true)
+            }
+            else if vloc[bb] =? LOC_CONST and vcval[bb] =? 0 {
+                a_mem_op(false  A_ZR  ins  d  size  false  false)
+            }
+            else {
+                a_mem_op(false  a_src(bb  11)  ins  d  size  false  false)
+            }
+        }
+        <'slot'> => {
+            if vloc[d] =? LOC_SLOT or vloc[d] =? LOC_NONE {
+                return
+            }
+            let rd=a_dst(d  9)
+            a_add_imm(rd  A_SP  a_slot_view[a])
+            a_st(d  rd)
+        }
+        <'gaddr' | 'daddr'> => {
+            if vloc[d] =? LOC_GLOBAL or vloc[d] =? LOC_NONE {
+                return
+            }
+            let kind:ArmWord=1
+            if op =? 'daddr' {
+                kind = 0
+            }
+            let rd=a_dst(d  9)
+            a_adr_data(rd  kind  ArmWord(ArmWord(ins.imm)))
+            a_st(d  rd)
+        }
+        <'faddr'> => {
+            let rd=a_dst(d  9)
+            a_faddr_fix.push([ArmWord(a_code[0].length)  ArmWord(ArmWord(ins.imm))])
+            w32(0x90000000 | rd)
+            w32(0x91000000 | (rd << 5) | rd)
+            a_st(d  rd)
+        }
+        <'copy' | 'memcpy'> => {
+            a_ld(9  a)
+            a_ld(10  bb)
+            if op =? 'copy' {
+                a_mov_imm(11  ArmWord(ins.imm))
+            }
+            else {
+                a_ld(11  ArmWord(ins.c))
+            }
+            a_copy_loop()
+        }
+        <'zero'> => {
+            a_ld(9  a)
+            a_movz(10  0  0)
+            a_mov_imm(11  ArmWord(ins.imm))
+            a_fill_loop()
+        }
+        <'memset'> => {
+            a_ld(9  a)
+            a_ld(10  bb)
+            a_ld(11  ArmWord(ins.c))
+            a_fill_loop()
+        }
+        <'zeroslots'> => {
+            loop k in [0..bb) {
+                let item=ArmWord(a_arguments[a + k])
+                if item & 1 =? 1 {
+                    let v=item >> 1
+                    if vloc[v] not=? LOC_NONE {
+                        a_st(v  A_ZR)
+                    }
+                }
+                else {
+                    let s=item >> 1
+                    let size=ArmWord(a_slot_sizes[s])
+                    let j:ArmWord=0
+                    loop j <? size {
+                        a_str(A_ZR  A_SP  a_slot_view[s] + j)
+                        j += 8
+                    }
+                }
+            }
+        }
+        <'vop'> => {
+            let k=ArmWord(ArmWord(ins.imm))
+            let n=(k >> 4) & 7
+            let operations:array<int64>=[AF_ADD AF_SUB AF_MUL AF_DIV]
+            let fo=operations[k & 3]
+            a_ld(9  a)
+            if k & VOP_SPLAT_B not=? 0 {
+                a_lds(16  bb  VS)
+            }
+            else {
+                a_ld(10  bb)
+            }
+            if k & VOP_SPLAT_C not=? 0 {
+                a_lds(17  ArmWord(ins.c)  VS)
+            }
+            else {
+                a_ld(11  ArmWord(ins.c))
+            }
+            loop i in [0..n) {
+                if k & VOP_SPLAT_B =? 0 {
+                    a_mem(true  16  10  4 * i  4  false  true)
+                }
+                if k & VOP_SPLAT_C =? 0 {
+                    a_mem(true  17  11  4 * i  4  false  true)
+                }
+                a_fop(fo  VS  18  16  17)
+                a_mem(false  18  9  4 * i  4  false  true)
+            }
+        }
+        <'call'> => {
+            if ins.c =? CALL_IF_SHARED or ins.c =? CALL_RC_INC or ins.c =? CALL_RC_DEC {
+                a_guarded_call(ins)
+            }
+            else {
+                a_call_args(ins)
+                a_call_fix.push([ArmWord(a_code[0].length)  ArmWord(ArmWord(ins.imm))])
+                a_bl()
+                a_call_site(ins)
+                a_result(ins)
+            }
+        }
+        <'calli' | 'callc'> => {
+            a_call_args(ins)
+            a_ld(16  ArmWord(ins.c))
+            a_blr(16)
+            a_call_site(ins)
+            a_result(ins)
+        }
+        <'syscall'> => {
+            a_syscall(ins)
+        }
+        <'intr'> => {
+            if ArmWord(ins.imm) =? 1 {
+                a_adr_data(9  1  0)
+                a_ldr(9  9  0)
+                a_st(d  9)
+            }
+            else if ArmWord(ins.imm) >=? 2 and ArmWord(ins.imm) <=? 9 or ArmWord(ins.imm) =? 11 {
+                a_call_args(ins)
+                a_stub_fix.push([ArmWord(a_code[0].length)  ArmWord(ArmWord(ins.imm))])
+                a_bl()
+                if d >=? 0 and vloc[d] not=? LOC_NONE {
+                    a_st(d  0)
+                }
+            }
+            else {
+                a_emit_failed=true
+                a_emit_error = "arm64: intrinsic {ArmWord(ins.imm)}"
+            }
+        }
+        <'block'> => {
+            actl.push(ACtl(0  ArmWord(a_code[0].length)  []  []))
+        }
+        <'loop'> => {
+            actl.push(ACtl(1  ArmWord(a_code[0].length)  []  []))
+        }
+        <'if_'> => {
+            let fx:array<[int64 int64]>=[]
+            if a =? a_pend {
+                fx.push([ArmWord(a_code[0].length)  1])
+                w32(0x54000000 | (a_pend_cc xor 1))
+                a_pend = -1
+            }
+            else {
+                let r=a_src(a  9)
+                fx.push([ArmWord(a_code[0].length)  1])
+                w32(0xB4000000 | r)
+            }
+            actl.push(ACtl(2  ArmWord(a_code[0].length)  []  fx))
+        }
+        <'else_'> => {
+            let c=actl.length - 1
+            actl[c].fixups.push([ArmWord(a_code[0].length)  0])
+            w32(0x14000000)
+            loop f in actl[c].ifx {
+                a_patch_here(f)
+            }
+            actl[c].ifx = []
+        }
+        <'end'> => {
+            let c=actl.pop()
+            loop f in c.fixups {
+                a_patch_here(f)
+            }
+            loop f in c.ifx {
+                a_patch_here(f)
+            }
+        }
+        <'br'> => {
+            a_branch(ArmWord(ArmWord(ins.imm)))
+        }
+        <'brif'> => {
+            if a =? a_pend {
+                a_branch_cc(a_pend_cc  ArmWord(ArmWord(ins.imm)))
+                a_pend = -1
+            }
+            else {
+                a_branch_nz(a_src(a  9)  ArmWord(ArmWord(ins.imm)))
+            }
+        }
+        <'brtable'> => {
+            let r=a_src(a  9)
+            a_mov_imm(10  bb)
+            a_cmp(r  10)
+            a_branch_cc(AC_HS  ArmWord(ArmWord(ins.imm)))
+            w32(0x10000000 | (3 << 5) | 10)
+            a_add_lsl(10  10  r  2)
+            a_br(10)
+            loop k in [0..bb) {
+                a_branch(ArmWord(a_arguments[ArmWord(ins.c) + k]))
+            }
+        }
+        <'ret'> => {
+            if a >=? 0 {
+                let ty=a_vtype(a)
+                if ty =? VI {
+                    a_ld(0  a)
+                }
+                else {
+                    a_lds(0  a  ty)
+                }
+            }
+            a_epilogue()
+        }
+        <'select'> => {
+            a_ld(9  a)
+            a_ld(10  bb)
+            a_ld(11  ArmWord(ins.c))
+            a_cmp_imm(9  0)
+            w32(0x9A800000 | (11 << 16) | (AC_NE << 12) | (10 << 5) | 9)
+            a_st(d  9)
+        }
+        <'trap'> => {
+            w32(0)
+        }
+        _ => {
+            a_emit_failed=true
+            a_emit_error = "arm64: {op} is not supported"
+        }
+    }
+}
+a_fix19=(p:ArmWord):>void=>$unsafe {
+    wr32(p  rd32(p) | ((((ArmWord(a_code[0].length) - p) // 4) & 0x7FFFF) << 5))
+}
+a_fix26=(p:ArmWord):>void=>$unsafe {
+    wr32(p  rd32(p) | (((ArmWord(a_code[0].length) - p) // 4) & 0x3FFFFFF))
+}
+a_guarded_call=(ins:Ins):>void=>$unsafe {
+    a_ld(9  ArmWord(a_arguments[ArmWord(ins.a)]))
+    let done:array<int64>=[]
+    done.push(ArmWord(a_code[0].length))
+    w32(0xB4000000 | 9)
+    a_ldr(10  9  0)
+    let slow:array<int64>=[]
+    if ins.c =? CALL_IF_SHARED {
+        a_cmp_imm(10  1)
+        done.push(ArmWord(a_code[0].length))
+        w32(0x54000000 | AC_EQ)
+    }
+    else {
+        if ins.c =? CALL_RC_INC {
+            a_cmp_imm(10  0)
+            done.push(ArmWord(a_code[0].length))
+            w32(0x54000000 | AC_LE)
+        }
+        else {
+            a_cmp_imm(10  1)
+            done.push(ArmWord(a_code[0].length))
+            w32(0x54000000 | AC_LT)
+            slow.push(ArmWord(a_code[0].length))
+            w32(0x54000000 | AC_EQ)
+        }
+        a_adr_data(11  1  a_mt_active)
+        w32(0x39400000 | (11 << 5) | 11)
+        slow.push(ArmWord(a_code[0].length))
+        w32(0x35000000 | 11)
+        if ins.c =? CALL_RC_INC {
+            a_add_imm(10  10  1)
+        }
+        else {
+            a_sub_imm(10  10  1)
+        }
+        a_str(10  9  0)
+        done.push(ArmWord(a_code[0].length))
+        w32(0x14000000)
+    }
+    loop p in slow {
+        a_fix19(p)
+    }
+    a_faddr_fix.push([ArmWord(a_code[0].length)  ArmWord(ArmWord(ins.imm))])
+    w32(0x90000000 | 17)
+    w32(0x91000000 | (17 << 5) | 17)
+    a_stub_fix.push([ArmWord(a_code[0].length)  12])
+    a_bl()
+    a_call_site(ins)
+    loop p in done {
+        if rd32(p) & 0xFC000000 =? 0x14000000 {
+            a_fix26(p)
+        }
+        else {
+            a_fix19(p)
+        }
+    }
+    let d=ArmWord(ins.dst)
+    if d >=? 0 and vloc[d] not=? LOC_NONE {
+        a_st(d  9)
+    }
+}
+arm64_emit=(input:ptr<IrFn> @layouts:array<int64> @positions:array<int64> fused:bool debug:bool macos:bool stats:bool mt_active:ArmWord function_name:string):>ArmWord=>$unsafe {
+    a_ir = input
+    a_types=input[0].vtypes.ptr
+    a_arguments=input[0].args.ptr
+    a_instructions=input[0].code.ptr
+    a_slot_sizes=input[0].slot_size.ptr
+    a_debug = debug
+    a_macos = macos
+    a_mt_active = mt_active
+    a_function_name = function_name
+    a_emit_error = ""
+    a_emit_failed=false
+    a_emit_lines.clear()
+    a_emit_sites.clear()
+    a_int_fail.clear()
+    backend_analyze(@input[0] @layouts  debug  false  stats)
+    a_allocate(@input[0])
+    a_frame_size = a_layout(@input[0] macos @a_spill @a_slots)
+    a_spill_view=a_spill.ptr
+    a_slot_view=a_slots.ptr
+    actl = []
+    a_row_pos = -1
+    if input[0].decl_pos not=? 0 {
+        a_line_row(input[0].decl_pos @positions fused)
+    }
+    a_prologue()
+    let body_start=ArmWord(a_code[0].length)
+    if debug {
+        if a_positions.length <? input[0].code.length + 1 {
+            a_positions = fill(0  input[0].code.length + 64)
+        }
+        a_epis.clear()
+    }
+    loop pos in [int64(0)..input[0].code.length) {
+        let ins=a_instructions[pos]
+        if ins.pos not=? 0 {a_line_row(ArmWord(ins.pos) @positions fused)}
+        if debug {
+            a_positions[pos] = ArmWord(a_code[0].length)
+        }
+        arm64_ins(pos  ins)
+        if a_emit_failed {
+            return body_start
+        }
+    }
+    if a_int_fail.length >? 0 {
+        loop fix in a_int_fail {
+            wr32(fix  rd32(fix) | (((ArmWord(a_code[0].length) - fix) // 4) << 5))
+        }
+        a_call_fix.push([ArmWord(a_code[0].length)  a_int_fail_fn])
+        a_bl()
+        w32(0xD4200000)
+    }
+    if debug {
+        a_positions[input[0].code.length] = ArmWord(a_code[0].length)
+    }
+    body_start
+}
