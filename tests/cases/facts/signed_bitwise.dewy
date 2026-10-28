@@ -1,0 +1,13 @@
+# Signed flags retain the common sign-extension width through widening.
+set_flag=(x:int32):>int32=>int32(int64(x) or 4)
+flip_flag=(x:int32):>int32=>int32(int64(x) xor 4)
+clear_flag=(x:int32):>int32=>int32(int64(x) and -5)
+join=(x:int8 y:int8):>int8=>int8(int64(x) or int64(y))
+flip=(x:int8 y:int8):>int8=>int8(int64(x) xor int64(y))
+keep=(x:int8 y:int8):>int8=>int8(int64(x) and int64(y))
+negative=(x:int64< -128 <=? x and x <? 0> y:int64< -128 <=? y and y <? 0>):>uint8=>uint8(x xor y)
+printl(set_flag(int32.min) flip_flag(-1) clear_flag(-1))
+printl(join(-128 127) flip(-128 127) keep(-128 127) negative(-128 -1))
+# A finite word result keeps finite endpoints after widening to exact int.
+word=(x:int64 y:int64):>int64=>int64(int(x) xor int(y))
+printl(word(int64.min int64.max))

@@ -3875,6 +3875,22 @@ fact_bitwise = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
         # (an open `int` end makes no mask: `n | MAX` is at least MAX, not MAX)
         if x.hi == FACT_MAX and fact_open_endpoint(s, a, true) or y.hi == FACT_MAX and fact_open_endpoint(s, b, true):
             r = fact_open_bound(r.lo, FACT_MAX, false, true)
+    else if (op == .amp or op == .pipe or op == .caret) and fact_host_finite(s, a) and fact_host_finite(s, b):
+        # Finite signed operands have a common sign-extension width. Boolean
+        # bit operations cannot introduce a bit beyond it. Retain their possible
+        # signs separately, including negative AND and opposite-sign XOR.
+        # Demand-only O(word bits); no new facts or expression traversal.
+        top = max(max(x.hi, -1 - x.lo), max(y.hi, -1 - y.lo))
+        mask = 0
+        loop mask < top: mask = (mask << 1) | 1
+        negative = if op == .amp: x.lo < 0 and y.lo < 0 else if op == .pipe: x.lo < 0 or y.lo < 0 else: x.lo < 0 and y.hi >= 0 or y.lo < 0 and x.hi >= 0
+        positive = if op == .amp: x.hi >= 0 or y.hi >= 0 else if op == .pipe: x.hi >= 0 and y.hi >= 0 else: x.lo < 0 and y.lo < 0 or x.hi >= 0 and y.hi >= 0
+        r.lo = if negative: -1 - mask else: 0
+        r.hi = if positive: mask else: -1
+        r.nz = r.lo > 0 or r.hi < 0
+        # These endpoints are finite even at MIN/MAX; mathematical int must
+        # not reinterpret the sign-extension envelope as unbounded.
+        return fact_new(s, r, FactTerm(.eof, a, b, n, (if fact_type(ntype(n)) == T_MATH_INT: T_INT else: ntype(n))))
     else if op == .shr and y.lo >= 0 and y.hi <= 63:
         # Arithmetic right shift is monotone in x. For negative x increasing
         # the count raises the result; for nonnegative x it lowers it.
