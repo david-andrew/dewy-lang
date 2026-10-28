@@ -5416,6 +5416,12 @@ gen_value_coalesce = (e: int) -> Val:
     if nodes[e].aux == 1:
         vv = own_at(a, V(pa, false), ot)
         store_val(ot, e_slot(rs), 0, vv.v)
+    else if t == T_MATH_INT and inner != T_MATH_INT:
+        # The optional contains a stored word, but the selected expression
+        # is mathematical int. Build its tagged representation before storing.
+        word = opt_value(pa, inner)
+        value = if not types[inner].sign and types[inner].bits == 64: math_call("__mi_unsigned", [word]) else: math_word(word)
+        store_val(t, e_slot(rs), 0, value.v)
     else:
         vv = own_at(a, V(opt_value(pa, inner), false), inner)
         store_val(inner, e_slot(rs), 0, vv.v)

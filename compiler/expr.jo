@@ -10857,6 +10857,10 @@ check_expr_other = (n: int, expected: int) -> int:
             coerce(int(nodes[n].b), at)
             t = at
             nodes[n].aux = 1
+        else if dewy_at(nodes[n].pos) and ex == 0 and is_int(inner) and inner != T_MATH_INT and btt == T_MATH_INT and exact_potential(int(nodes[n].b)):
+            # Reading an optional beside an exact fallback widens the read;
+            # the fallback has no fixed-width destination to narrow into.
+            t = T_MATH_INT
         else:
             coerce(int(nodes[n].b), inner)
             t = inner
@@ -11580,6 +11584,13 @@ check_if = (n: int, ex: int) -> int:
         nodes[va] = nodes[then_literal]
         check_expr(va, t2)
         nodes[b].type = i32(t2)
+    # An unannotated selection may choose a wide unsigned arithmetic result.
+    # Reveal that arm before joining the branches; neither arm is a store.
+    if dewy_at(nodes[n].pos):
+        at = prune(ntype(va))
+        if exact_type(at, nodes[va].pos) and not types[exact_representation(at)].sign and exact_potential(va): exact_int_result(va, true)
+        bt = prune(ntype(vb))
+        if exact_type(bt, nodes[vb].pos) and not types[exact_representation(bt)].sign and exact_potential(vb): exact_int_result(vb, true)
     join_types(va, vb, nodes[n].pos)
 
 # Does block b end in a container literal (array, dictionary or record)?
