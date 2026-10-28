@@ -19,3 +19,10 @@ def test_seed_2689964_continues_after_wide_collector():
     output, status = program.outcome()
     assert status == 0
     assert '= [-24758800785707605497982484480 0 1 -175921860444160]\n' in output
+
+
+def test_seed_2689392_checks_later_wide_element():
+    program, _ = g.generate(2689392)
+    output, status = program.outcome()
+    assert status == 101
+    assert '[27670116110564327424]' not in output

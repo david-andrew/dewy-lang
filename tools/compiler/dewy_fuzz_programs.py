@@ -507,12 +507,19 @@ class MultiLit(Expr):
         return '[' + ' '.join(render(x, typed) for x in self.items) + ']'
 
     def eval(self, m, env):
+        # The first element fixes an unannotated collector's element type.
+        # Arithmetic yields int, while a stored int64 read keeps its width.
+        first = self.items[0]
+        while isinstance(first, (MultiBlock, MultiIf)):
+            first = (first.items if isinstance(first, MultiBlock) else first.then or first.other or ())[0]
+        element = INT if (first.ty == INT or isinstance(first, (Bin, Unary)) and first.ty in (I, U)) else first.ty
         out = []
         for x in self.items:
             if isinstance(x, (MultiBlock, MultiIf)):
-                out += m.eval(x, env)
+                for value in m.eval(x, env):
+                    out.append(copy.deepcopy(store(value, element)))
             else:
-                out.append(copy.deepcopy(m.eval(x, env)))
+                out.append(copy.deepcopy(store(m.eval(x, env), element)))
         return out
 
 

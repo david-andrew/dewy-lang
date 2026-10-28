@@ -6164,12 +6164,12 @@ gen_assign = (s: int):
         # (Dewy's xs[f()] = g(): the destination's indices first, then the right side, which may
         # change them or resize the array; the destination is located again with the indices kept)
         held: int[]
-        if (nodes[a].kind == .index or nodes[a].kind == .field) and dewy_at(nodes[s].pos) and assign_rhs_effects(rhs):
+        if (nodes[a].kind == .index or nodes[a].kind == .field) and dewy_at(nodes[s].pos) and (assign_rhs_effects(rhs) or assign_rhs_effects(a)):
             x = a
             steps: int[]
             loop true:
                 xk = nodes[x].kind
-                if xk == .index and nodes[x].b != 0 and not has_flag(x, NF_RELOOKUP) and not index_stable(int(nodes[x].b), rhs): steps.insert(0, int(nodes[x].b))
+                if xk == .index and nodes[x].b != 0 and not has_flag(x, NF_RELOOKUP) and (assign_rhs_effects(int(nodes[x].b)) or not index_stable(int(nodes[x].b), rhs)): steps.insert(0, int(nodes[x].b))
                 if xk == .field or xk == .index or xk == .unwrap or xk == .narrow: x = int(nodes[x].a)
                 else: break
             loop ib in steps:

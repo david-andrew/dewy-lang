@@ -1,0 +1,8 @@
+$runtime_checks
+main=():>void=>{
+    let n:int64=2
+    let xs:array<int64>=[0 0]
+    let bump=(i:int64 $capture @n):>int64=>{n*=2 return i}
+    xs[bump(0)] = n
+    printl(xs n)
+}
