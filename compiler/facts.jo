@@ -179,6 +179,7 @@ fact_plan_current = (plan: FactSlice) -> bool:
 fact_loans: FactLoan[]
 
 fact_returns_cache: {int: bool} = {}
+fact_return_escapes_cache: {int: bool} = {}
 
 fact_loops: FactLoop[]
 # Open element-hull frames of enclosing range and array loops (fact_push_open).
@@ -3366,12 +3367,33 @@ fact_partial_place = (n: int) -> bool:
 # forget what the function writes), unless ownership may move an owner. O(1).
 fact_handle_opaque = (n: int) -> bool: ownership_decls.len() != 0
 
-# Conservative loop fallback: pre-kill every syntactically changing route.
+# A return expression can itself break/continue before the return executes.
+# Only those expressions can carry their writes to a loop edge. Inspect checked
+# children, excluding deferred function bodies; unknown/deep syntax stays
+# conservative. Demanded only by a return in loop havoc, memoized by node:
+# O(visited expression nodes + edges), depth <= 32, no state-wide scan.
+fact_return_escapes = (n: int, depth: int = 0) -> bool:
+    if n == 0: return false
+    if depth >= 32: return true
+    if let known = fact_return_escapes_cache.get(n): return known
+    k = nodes[n].kind
+    if k == .lambda: return false
+    escapes = k == .break_ or k == .continue_ or isolation_children(k) < 0
+    if not escapes:
+        loop child in fact_slice_children(n):
+            if fact_return_escapes(child, depth + 1): escapes = true; break
+    fact_return_escapes_cache[n] = escapes
+    escapes
+
+# Conservative loop fallback: pre-kill every syntactically changing route
+# that can reach a loop edge. Returning expressions still run in the ordinary
+# transfer (including their own obligations), but cannot affect later trips.
 # This is also used for iterators whose backedge transfer is not modeled.
 fact_changes = (n: int, s: mut FactState, at: int, reason: FactReason = .loop_):
     if n == 0: return
     if fact_slice_flags(n) & (FACT_MEMBER | FACT_ACTIVE) == FACT_MEMBER: return
     k = nodes[n].kind
+    if k == .return_ and not fact_return_escapes(int(nodes[n].a)): return
     # (an element or field store havocs only its route within its root: fact_change_route)
     if k == .assign and not fact_bounded_change(n, s, at, reason): fact_change_route(s, int(nodes[n].a), false, at, reason)
     if k == .intrinsic:
@@ -8874,6 +8896,7 @@ facts_reset = ():
     fact_policy_default = false
     fact_probe_runs = {}
     fact_returns_cache = {}
+    fact_return_escapes_cache = {}
     fact_carried_cache = {}
     fact_comprehensions = {}
     fact_owner = 0

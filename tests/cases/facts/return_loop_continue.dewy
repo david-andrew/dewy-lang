@@ -1,0 +1,9 @@
+bad=(@xs:array<int>):>int=>{
+    loop i in [0..xs.length) {
+        if i =? 0 return {xs.clear(); continue}
+        if xs[i] =? 1 return 1
+    }
+    0
+}
+let xs=[1 2]
+printl(bad(@xs))

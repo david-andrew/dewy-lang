@@ -1,0 +1,18 @@
+# Removing only on a returning edge cannot shorten a later iteration.
+take=(@xs:array<int> wanted:int):>int|none=>{
+    loop i in [0..xs.length) {
+        if xs[i] =? wanted return xs.pop(i)
+    }
+    none
+}
+Item:type=[name:string]
+Bag:type=[items:array<Item> remove=(name:string):>Item|none=>{
+    loop i in [0..items.length) {
+        if items[i].name =? name return items.pop(i)
+    }
+    none
+}]
+let xs=[4 5 6]
+printl(take(@xs 5) xs take(@xs 9))
+let bag=Bag[[Item["a"] Item["b"]]]
+printl(bag.remove("b") is? Item bag.items.length)
