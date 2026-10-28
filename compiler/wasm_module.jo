@@ -1,0 +1,325 @@
+use 'ir_types.dewy'
+use 'wasm_emit.dewy'
+use 'leb128.dewy'
+use 'base64.dewy'
+use 'source_types.dewy'
+struct WasmABI:
+    imported: bool
+    name: str
+    params: int[]
+    ret: int = -1
+    signed: bool[]
+struct WasmModuleHost:
+    files: *(SrcFile[])
+    positions: *(int[])
+    ir_line: (int) -> int
+    sym_name: (str) -> str
+    read_js: (str) -> str
+wm_host: *WasmModuleHost
+wm_bind = (host: *WasmModuleHost) -> int:
+    wm_host = host
+    0
+wm_abi: WasmABI[]
+wm_error = 0
+wm_error_lf = -1
+html_missing = ""
+stack_top = 0
+const STACK_SIZE = 1 << 20
+wm_pos_file = (p: int) -> int: p >> 40
+wfuncs: IrFn[]            # lowered functions, by lfunc index
+wf_present: bool[]
+
+wasm_collect_function = (ir: IrFn):
+    loop wfuncs.len() <= ir.fn_index:
+        wfuncs.push(IrFn())
+        wf_present.push(false)
+    wfuncs[ir.fn_index] = ir
+    wf_present[ir.fn_index] = true
+
+wstr = (o: mut u8[], s: str):
+    uleb(o, len(s))
+    loop c in s: o.push(c)
+
+section = (out: mut u8[], id: int, body: u8[]):
+    out.push(u8(id))
+    uleb(out, body.len())
+    wm_append_bytes(out, body)
+
+fn_sig_of = (f: IrFn) -> int:
+    ps: int[]
+    loop p in [0..f.nparams): ps.push(wt(int(f.vtypes[p])))
+    rs: int[]
+    if f.ret >= 0: rs.push(wt(f.ret))
+    sig_index(ps, rs)
+
+import_sig = (lf: int) -> int:
+    rs: int[]
+    if wm_abi[lf].ret >= 0: rs.push(wm_abi[lf].ret)
+    sig_index(wm_abi[lf].params, rs)
+wasm_image = (inits: int[], main_lf: int, main_code: bool, main_exit_lf: int, rodata: u8[], data_size: int, mt_active_off: int) -> u8[]:
+    wm_error = 0
+    wm_error_lf = -1
+    nf = wm_abi.len()
+    wfn_index = fill(-1, nf)
+    imports: int[]
+    defined: int[]
+    loop lf in [0..nf):
+        if wm_abi[lf].imported: imports.push(lf)
+        else if lf < wf_present.len() and wf_present[lf]: defined.push(lf)
+    # Freeze checker-owned import/source facts before the complete Dewy encoder.
+    # Linear in functions, imported parameters and source positions, only for wasm.
+    wasm_import_params = []
+    wasm_import_results = fill(-2, nf)
+    wasm_grow = fill(false, nf)
+    loop lf in [0..nf): wasm_import_params.push([])
+    loop lf in imports:
+        wasm_import_params[lf] = wm_abi[lf].params
+        wasm_import_results[lf] = wm_abi[lf].ret
+        wasm_grow[lf] = wm_abi[lf].name == "__wasm_grow"
+    wasm_mt_active_off = mt_active_off
+    wasm_data_size = data_size
+    k = 0
+    loop lf in imports:
+        wfn_index[lf] = k
+        k += 1
+    loop lf in defined:
+        wfn_index[lf] = k
+        k += 1
+    start_index = k
+    # exported functions get adapters with JavaScript-friendly parameter types (i32/f32/f64)
+    exp_lfs: int[]
+    loop lf in defined:
+        if len(wfuncs[lf].export_name) > 0: exp_lfs.push(lf)
+    adapter_base = start_index + 1
+    data_base = wasm_align_up(RO_BASE + rodata.len(), 16)
+    max_frame = 0
+    # bodies (this also registers table entries and signatures)
+    bodies: u8[][]
+    body_sites: int[][]
+    body_names: str[]
+    loop lf in defined:
+        bodies.push(wasm_body(wfuncs[lf]))
+        if wasm_error == 1:
+            wm_error = 1
+            return []
+        if wasm_error == 2:
+            wm_error = 2
+            return []
+        body_sites.push(w_sites)
+        body_names.push(wm_host[0].sym_name(wfuncs[lf].name))
+    # Reserve the largest frame plus the ordinary nesting budget. The frame
+    # maximum is collected during emission, without another IR traversal.
+    stack_top = wasm_align_up(data_base + data_size + max_frame + STACK_SIZE, 16)
+    pages = (stack_top + 65535) / 65536 + 1
+    # entry function: initializers then main
+    eb: u8[] = [0]
+    if main_code: eb = [1, 1, 0x7E]          # (a local: main's result)
+    loop f in inits:
+        eb.push(0x10)
+        uleb(eb, wfn_index[f])
+    if main_lf >= 0:
+        eb.push(0x10)
+        uleb(eb, wfn_index[main_lf])
+        if main_code:
+            # main = () -> int: a code other than 0 ends the program with it (0: as without one,
+            # a page goes on to its frames)
+            ex = main_exit_lf
+            if ex < 0 or wfn_index[ex] < 0: eb.push(0x1A)          # drop
+            else:
+                eb.push(0x22)                 # local.tee 0
+                eb.push(0)
+                eb.push(0x50)                 # i64.eqz
+                eb.push(0x45)                 # i32.eqz
+                eb.push(0x04)                 # if
+                eb.push(0x40)
+                eb.push(0x20)                 # local.get 0
+                eb.push(0)
+                eb.push(0x10)
+                uleb(eb, wfn_index[ex])
+                eb.push(0x0B)
+    eb.push(0x0B)
+    start_sig = sig_index([], [])
+    adapter_sigs: int[]
+    adapter_bodies: u8[][]
+    loop lf in exp_lfs:
+        ps = wm_abi[lf].params
+        rs: int[]
+        rt = wm_abi[lf].ret
+        if rt >= 0: rs.push(rt)
+        adapter_sigs.push(sig_index(ps, rs))
+        ab: u8[] = [0]
+        loop i in [0..ps.len()):
+            ab.push(0x20)
+            uleb(ab, i)
+            if ps[i] == WT_I32:
+                if wm_abi[lf].signed[i]: ab.push(0xAC)
+                else: ab.push(0xAD)
+        ab.push(0x10)
+        uleb(ab, wfn_index[lf])
+        if rt == WT_I32: ab.push(0xA7)
+        ab.push(0x0B)
+        adapter_bodies.push(ab)
+    sigs: int[]
+    loop lf in imports: sigs.push(import_sig(lf))
+    loop lf in defined: sigs.push(fn_sig_of(wfuncs[lf]))
+    out: u8[] = [0, 'a', 's', 'm', 1, 0, 0, 0]
+    # type section
+    s: u8[]
+    uleb(s, type_sigs.len())
+    loop t in type_sigs:
+        wm_append_bytes(s, t)
+    section(out, 1, s)
+    # imports
+    s = []
+    uleb(s, imports.len())
+    loop i in [0..imports.len()):
+        lf = imports[i]
+        wstr(s, "env")
+        wstr(s, wm_abi[lf].name)
+        s.push(0)
+        uleb(s, sigs[i])
+    section(out, 2, s)
+    # functions
+    s = []
+    uleb(s, defined.len() + 1 + exp_lfs.len())
+    loop i in [0..defined.len()): uleb(s, sigs[imports.len() + i])
+    uleb(s, start_sig)
+    loop a in adapter_sigs: uleb(s, a)
+    section(out, 3, s)
+    # table
+    s = [1, 0x70, 0]
+    uleb(s, table_funcs.len() + 1)
+    section(out, 4, s)
+    # memory
+    s = [1, 0]
+    uleb(s, pages)
+    section(out, 5, s)
+    # globals: $sp
+    s = [1, WT_I32, 1, 0x41]
+    sleb(s, stack_top)
+    s.push(0x0B)
+    section(out, 6, s)
+    # exports
+    s = []
+    exports: (str, int)[]
+    exports.push(("__start", start_index))
+    loop i in [0..exp_lfs.len()): exports.push((wfuncs[exp_lfs[i]].export_name, adapter_base + i))
+    uleb(s, exports.len() + 2)
+    wstr(s, "memory")
+    s.push(2)
+    uleb(s, 0)
+    wstr(s, "table")
+    s.push(1)
+    uleb(s, 0)
+    loop e in exports:
+        wstr(s, e.0)
+        s.push(0)
+        uleb(s, e.1)
+    section(out, 7, s)
+    # elements: table[1..] = address-taken functions
+    s = [1, 0, 0x41, 1, 0x0B]
+    uleb(s, table_funcs.len())
+    loop lf in table_funcs:
+        if wfn_index[lf] < 0:
+            wm_error = 3
+            wm_error_lf = lf
+            return []
+        uleb(s, wfn_index[lf])
+    section(out, 9, s)
+    # code
+    s = []
+    uleb(s, defined.len() + 1 + exp_lfs.len())
+    body_at: int[]
+    loop bd in bodies:
+        uleb(s, bd.len())
+        body_at.push(s.len())
+        wm_append_bytes(s, bd)
+    uleb(s, eb.len())
+    wm_append_bytes(s, eb)
+    loop ab in adapter_bodies:
+        uleb(s, ab.len())
+        loop c in ab: s.push(c)
+    section(out, 10, s)
+    code_at = out.len() - s.len()
+    # data: rodata
+    s = [1, 0, 0x41]
+    sleb(s, RO_BASE)
+    s.push(0x0B)
+    uleb(s, rodata.len())
+    loop c in rodata: s.push(c)
+    section(out, 11, s)
+    w_line_section(out, code_at, body_at, body_sites, body_names)
+    out
+
+w_line_section = (out: mut u8[], code_at: int, body_at: int[], body_sites: int[][], body_names: str[]):
+    fidx = fill(-1, wm_host[0].files[0].len())
+    fnames: str[]
+    names: str[]
+    ents: int[]
+    loop k in [0..body_sites.len()):
+        sites = body_sites[k]
+        ni = -1
+        j = 0
+        loop j < sites.len():
+            f = wm_pos_file(wm_host[0].positions[0][sites[j + 1]])
+            if f >= 0 and f < wm_host[0].files[0].len():
+                if fidx[f] < 0:
+                    fidx[f] = fnames.len()
+                    path = wm_host[0].files[0][f].path
+                    sl = rfind(path, "/")
+                    if sl >= 0: path = path[sl + 1..]
+                    fnames.push(path)
+                if ni < 0:
+                    ni = names.len()
+                    names.push(body_names[k])
+                ents.push(code_at + body_at[k] + sites[j])
+                ents.push(fidx[f])
+                ents.push(wm_host[0].ir_line(sites[j + 1]))
+                ents.push(ni)
+            j += 2
+    if ents.len() == 0: return
+    s: u8[]
+    nm = "dewy_lines"
+    uleb(s, len(nm))
+    loop c in nm: s.push(c)
+    uleb(s, fnames.len())
+    loop fname in fnames:
+        uleb(s, len(fname))
+        loop c in fname: s.push(c)
+    uleb(s, names.len())
+    loop fname in names:
+        uleb(s, len(fname))
+        loop c in fname: s.push(c)
+    uleb(s, ents.len() / 4)
+    last = 0
+    j = 0
+    loop j < ents.len():
+        uleb(s, ents[j] - last)
+        last = ents[j]
+        uleb(s, ents[j + 1])
+        uleb(s, ents[j + 2])
+        uleb(s, ents[j + 3])
+        j += 4
+    section(out, 0, s)
+
+html_image = (wasm: u8[], title: str, icon: u8[], program_js: str) -> str:
+    html_missing = ""
+    link = ""
+    if icon.len() > 0: link = "<link rel=\"icon\" href=\"data:image/png;base64,{base64(icon)}\">\n"
+    else: link = "<link rel=\"icon\" href=\"data:,\">\n"      # (no icon: no request for /favicon.ico)
+    js = ""
+    loop part in ["runtime.js", "gfx.js", "audio.js", "boot.js"]:
+        # (the program's own JavaScript, from the build block's js: before it starts)
+        if part == "boot.js" and len(program_js) > 0: js += program_js + "\n"
+        src = wm_host[0].read_js(part)
+        if len(src) == 0 and part != "audio.js":
+            html_missing = part
+            return ""
+        js += src + "\n"
+    html = "<!doctype html>\n<html><head><meta charset=\"utf-8\"><title>{title}</title>\n{link}<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<style>html,body\{margin:0;height:100%;background:#111;color:#ddd;font:14px monospace}canvas\{display:block;margin:auto;outline:none}#log\{white-space:pre-wrap;margin:8px;max-height:40vh;overflow:auto}</style>\n</head><body><canvas id=\"dewy-canvas\" tabindex=\"1\" width=\"0\" height=\"0\"></canvas><div id=\"log\"></div>\n<div id=\"dewy-loading\" style=\"position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);color:#888\">loading…</div>\n<script>\nconst DEWY_WASM = \"{base64(wasm)}\";\n{js}\n</script></body></html>\n"
+    html
+
+wm_append_bytes = (out: mut u8[], b: u8[]):
+    n = out.len()
+    out.resize(n + b.len())
+    if b.len() > 0: mem_copy(data(out) + n, data(b), b.len())

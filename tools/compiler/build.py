@@ -23,7 +23,8 @@ ROOT = HERE.parents[1]
 # Steps 1 and 2 cannot read Dewy, so there every `use 'X.dewy'` in compiler/
 # names X.dewy's frozen implementation-language twin instead. Steps 3 on
 # compile the Dewy modules, so the compiler that ships runs them.
-FROZEN_TWINS = {'native_debug.dewy': 'native_debug.jo',
+FROZEN_TWINS = {'wasm_module.dewy': 'wasm_module.jo',
+               'native_debug.dewy': 'native_debug.jo',
                'pdb_format.dewy': 'pdb_format.jo',
                'dwarf_format.dewy': 'dwarf_format.jo',
                'macho_format.dewy': 'macho_format.jo',

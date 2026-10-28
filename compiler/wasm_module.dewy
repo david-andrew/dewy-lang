@@ -1,0 +1,367 @@
+$runtime_checks
+from p"ir_types.dewy" import (IrFn)
+from p"wasm_emit.dewy" import (RO_BASE WT_I32 data_base max_frame sig_index table_funcs type_sigs w_sites wasm_align_up wasm_body wasm_data_size wasm_error wasm_grow wasm_import_params wasm_import_results wasm_mt_active_off wfn_index wt)
+from p"leb128.dewy" import (sleb uleb)
+from p"base64.dewy" import (base64)
+from p"source_types.dewy" import (SrcFile)
+
+# Complete wasm module, export adapters, source map and HTML assembly.
+WWord:type=int64<overflow='wrap'>
+WasmABI:type=[imported:bool=false name:string="" params:array<int64>=[] ret:int64=-1 signed:array<bool>=[]]
+WasmModuleHost:type=[
+    files:ptr<array<SrcFile>>
+    positions:ptr<array<int64>>
+    ir_line:<(id:int64):>int64>
+    sym_name:<(name:string):>string>
+    read_js:<(part:string):>string>
+]
+let wm_host:ptr<WasmModuleHost>=$unsafe (uint64(0) as ptr<WasmModuleHost>)
+wm_bind=(host:ptr<WasmModuleHost>):>WWord=>{wm_host=host;0}
+let wm_abi:array<WasmABI>=[]
+let wm_error:WWord=0
+let wm_error_lf:WWord=-1
+let html_missing=""
+let stack_top:WWord=0
+const STACK_SIZE=1 << 20
+wm_pos_file=(p:WWord):>WWord=>$unsafe {p >> 40}
+let wfuncs:array<IrFn>=[] # lowered functions, by lfunc index
+let wf_present:array<bool>=[]
+wasm_collect_function=(ir:IrFn):>void=>$unsafe {
+    loop wfuncs.length <=? ir.fn_index {
+        wfuncs.push(IrFn())
+        wf_present.push(false)
+    }
+    wfuncs[ir.fn_index] = ir
+    wf_present[ir.fn_index] = true
+}
+wstr=(@o:array<uint8> s:string):>void=>$unsafe {
+    uleb(@o  WWord((s as array<uint8>).length))
+    loop c in (s as array<uint8>) {o.push(c)}
+}
+section=(@out:array<uint8> id:WWord body:array<uint8>):>void=>$unsafe {
+    out.push(uint8((id) & 0xff))
+    uleb(@out  body.length)
+    wm_append_bytes(@out  body)
+}
+fn_sig_of=(f:IrFn):>WWord=>$unsafe {
+    let ps:array<int64>=[]
+    loop p in [0..f.nparams) {ps.push(wt(WWord(f.vtypes[p])))}
+    let rs:array<int64>=[]
+    if f.ret >=? 0 {rs.push(wt(f.ret))}
+    sig_index(ps  rs)
+}
+import_sig=(lf:WWord):>WWord=>$unsafe {
+    let rs:array<int64>=[]
+    if wm_abi[lf].ret >=? 0 {rs.push(wm_abi[lf].ret)}
+    sig_index(wm_abi[lf].params  rs)
+}
+wasm_image=(inits:array<int64> main_lf:WWord main_code:bool main_exit_lf:WWord rodata:array<uint8> data_size:WWord mt_active_off:WWord):>array<uint8>=>$unsafe {
+    wm_error=0
+    wm_error_lf=-1
+    let nf=wm_abi.length
+    wfn_index=fill(-1  nf)
+    let imports:array<int64>=[]
+    let defined:array<int64>=[]
+    loop lf in [0..nf) {
+        if wm_abi[lf].imported {imports.push(lf)}
+        else if lf <? wf_present.length and wf_present[lf] {defined.push(lf)}
+    }
+    # Freeze checker-owned import/source facts before the complete Dewy encoder.
+    # Linear in functions, imported parameters and source positions, only for wasm.
+    wasm_import_params=[]
+    wasm_import_results=fill(-2  nf)
+    wasm_grow=fill(false  nf)
+    loop lf in [0..nf) {wasm_import_params.push([])}
+    loop lf in imports {
+        wasm_import_params[lf] = wm_abi[lf].params
+        wasm_import_results[lf] = wm_abi[lf].ret
+        wasm_grow[lf] = wm_abi[lf].name =? "__wasm_grow"
+    }
+    wasm_mt_active_off=mt_active_off
+    wasm_data_size=data_size
+    let k:WWord=0
+    loop lf in imports {
+        wfn_index[lf] = k
+        k += 1
+    }
+    loop lf in defined {
+        wfn_index[lf] = k
+        k += 1
+    }
+    let start_index=k
+    # exported functions get adapters with JavaScript-friendly parameter types (i32/f32/f64)
+    let exp_lfs:array<int64>=[]
+    loop lf in defined {
+        if WWord((wfuncs[lf].export_name as array<uint8>).length) >? 0 {exp_lfs.push(lf)}
+    }
+    let adapter_base=start_index + 1
+    data_base=wasm_align_up(RO_BASE + rodata.length  16)
+    max_frame=0
+    # bodies (this also registers table entries and signatures)
+    let bodies:array<array<uint8>>=[]
+    let body_sites:array<array<int64>>=[]
+    let body_names:array<string>=[]
+    loop lf in defined {
+        bodies.push(wasm_body(wfuncs[lf]))
+        if wasm_error =? 1 {
+            wm_error=1
+            return []
+        }
+        if wasm_error =? 2 {
+            wm_error=2
+            return []
+        }
+        body_sites.push(w_sites)
+        body_names.push(wm_host[0].sym_name(wfuncs[lf].name))
+    }
+    # Reserve the largest frame plus the ordinary nesting budget. The frame
+    # maximum is collected during emission, without another IR traversal.
+    stack_top=wasm_align_up(data_base + data_size + max_frame + STACK_SIZE  16)
+    let pages=(stack_top + 65535) // 65536 + 1
+    # entry function: initializers then main
+    let eb:array<uint8>=[0]
+    if main_code {eb=[1  1  0x7E]} # (a local: main's result)
+    loop f in inits {
+        eb.push(0x10)
+        uleb(@eb  wfn_index[f])
+    }
+    if main_lf >=? 0 {
+        eb.push(0x10)
+        uleb(@eb  wfn_index[main_lf])
+        if main_code {
+            # main = () -> int: a code other than 0 ends the program with it (0: as without one,
+            # a page goes on to its frames)
+            let ex=main_exit_lf
+            if ex <? 0 or wfn_index[ex] <? 0 {eb.push(0x1A)} # drop
+            else {
+                eb.push(0x22) # local.tee 0
+                eb.push(0)
+                eb.push(0x50) # i64.eqz
+                eb.push(0x45) # i32.eqz
+                eb.push(0x04) # if
+                eb.push(0x40)
+                eb.push(0x20) # local.get 0
+                eb.push(0)
+                eb.push(0x10)
+                uleb(@eb  wfn_index[ex])
+                eb.push(0x0B)
+            }
+        }
+    }
+    eb.push(0x0B)
+    let start_sig=sig_index([]  [])
+    let adapter_sigs:array<int64>=[]
+    let adapter_bodies:array<array<uint8>>=[]
+    loop lf in exp_lfs {
+        let ps=wm_abi[lf].params
+        let rs:array<int64>=[]
+        let rt=wm_abi[lf].ret
+        if rt >=? 0 {rs.push(rt)}
+        adapter_sigs.push(sig_index(ps  rs))
+        let ab:array<uint8>=[0]
+        loop i in [0..ps.length) {
+            ab.push(0x20)
+            uleb(@ab  i)
+            if ps[i] =? WT_I32 {
+                if wm_abi[lf].signed[i] {ab.push(0xAC)}
+                else {ab.push(0xAD)}
+            }
+        }
+        ab.push(0x10)
+        uleb(@ab  wfn_index[lf])
+        if rt =? WT_I32 {ab.push(0xA7)}
+        ab.push(0x0B)
+        adapter_bodies.push(ab)
+    }
+    let sigs:array<int64>=[]
+    loop lf in imports {sigs.push(import_sig(lf))}
+    loop lf in defined {sigs.push(fn_sig_of(wfuncs[lf]))}
+    let out:array<uint8>=[0  97  115  109  1  0  0  0]
+    # type section
+    let s:array<uint8>=[]
+    uleb(@s  type_sigs.length)
+    loop t in type_sigs {
+        wm_append_bytes(@s  t)
+    }
+    section(@out  1  s)
+    # imports
+    s=[]
+    uleb(@s  imports.length)
+    loop i in [0..imports.length) {
+        lf=imports[i]
+        wstr(@s  "env")
+        wstr(@s  wm_abi[lf].name)
+        s.push(0)
+        uleb(@s  sigs[i])
+    }
+    section(@out  2  s)
+    # functions
+    s=[]
+    uleb(@s  defined.length + 1 + exp_lfs.length)
+    loop i in [0..defined.length) {uleb(@s  sigs[imports.length + i])}
+    uleb(@s  start_sig)
+    loop a in adapter_sigs {uleb(@s  a)}
+    section(@out  3  s)
+    # table
+    s=[1  0x70  0]
+    uleb(@s  table_funcs.length + 1)
+    section(@out  4  s)
+    # memory
+    s=[1  0]
+    uleb(@s  pages)
+    section(@out  5  s)
+    # globals: $sp
+    s=[1  WT_I32  1  0x41]
+    sleb(@s  stack_top)
+    s.push(0x0B)
+    section(@out  6  s)
+    # exports
+    s=[]
+    let exports:array<[string int64]>=[]
+    exports.push(["__start"  start_index])
+    loop i in [0..exp_lfs.length) {exports.push([wfuncs[exp_lfs[i]].export_name  adapter_base + i])}
+    uleb(@s  exports.length + 2)
+    wstr(@s  "memory")
+    s.push(2)
+    uleb(@s  0)
+    wstr(@s  "table")
+    s.push(1)
+    uleb(@s  0)
+    loop e in exports {
+        wstr(@s  e[0])
+        s.push(0)
+        uleb(@s  e[1])
+    }
+    section(@out  7  s)
+    # elements: table[1..] = address-taken functions
+    s=[1  0  0x41  1  0x0B]
+    uleb(@s  table_funcs.length)
+    loop lf in table_funcs {
+        if wfn_index[lf] <? 0 {
+            wm_error=3
+            wm_error_lf=lf
+            return []
+        }
+        uleb(@s  wfn_index[lf])
+    }
+    section(@out  9  s)
+    # code
+    s=[]
+    uleb(@s  defined.length + 1 + exp_lfs.length)
+    let body_at:array<int64>=[]
+    loop bd in bodies {
+        uleb(@s  bd.length)
+        body_at.push(s.length)
+        wm_append_bytes(@s  bd)
+    }
+    uleb(@s  eb.length)
+    wm_append_bytes(@s  eb)
+    loop ab in adapter_bodies {
+        uleb(@s  ab.length)
+        loop c in ab {s.push(c)}
+    }
+    section(@out  10  s)
+    let code_at=out.length - s.length
+    # data: rodata
+    s=[1  0  0x41]
+    sleb(@s  RO_BASE)
+    s.push(0x0B)
+    uleb(@s  rodata.length)
+    loop c in rodata {s.push(c)}
+    section(@out  11  s)
+    w_line_section(@out  code_at  body_at  body_sites  body_names)
+    out
+}
+w_line_section=(@out:array<uint8> code_at:WWord body_at:array<int64> body_sites:array<array<int64>> body_names:array<string>):>void=>$unsafe {
+    let nf=WWord(wm_host[0].files[0].length)
+    let files=wm_host[0].files[0].ptr
+    let positions=wm_host[0].positions[0].ptr
+    let starts=body_at.ptr
+    let labels=body_names.ptr
+    let bodies=body_sites.ptr
+    let nb=WWord(body_sites.length)
+    let fidx:array<int64>=fill(-1  nf)
+    let fnames:array<string>=[]
+    let names:array<string>=[]
+    let ents:array<int64>=[]
+    loop k in [WWord(0)..nb) {
+        let sites=bodies[k].ptr
+        let ns=WWord(bodies[k].length)
+        let ni:WWord=-1
+        let j:WWord=0
+        loop j <? ns {
+            let f=wm_pos_file(positions[sites[j + 1]])
+            if f >=? 0 and f <? nf {
+                if fidx[f] <? 0 {
+                    fidx[f] = fnames.length
+                    let path=files[f].path
+                    let sl=wm_slash(path)
+                    if sl >=? 0 {path=path.byte_slice(sl + 1  (path as array<uint8>).length)}
+                    fnames.push(path)
+                }
+                if ni <? 0 {
+                    ni=names.length
+                    names.push(labels[k])
+                }
+                ents.push(code_at + starts[k] + sites[j])
+                ents.push(fidx[f])
+                ents.push(wm_host[0].ir_line(sites[j + 1]))
+                ents.push(ni)
+            }
+            j += 2
+        }
+    }
+    if ents.length =? 0 {return}
+    let s:array<uint8>=[]
+    let nm="dewy_lines"
+    uleb(@s  WWord((nm as array<uint8>).length))
+    loop c in (nm as array<uint8>) {s.push(c)}
+    uleb(@s  fnames.length)
+    loop fname in fnames {
+        uleb(@s  WWord((fname as array<uint8>).length))
+        loop c in (fname as array<uint8>) {s.push(c)}
+    }
+    uleb(@s  names.length)
+    loop fname in names {
+        uleb(@s  WWord((fname as array<uint8>).length))
+        loop c in (fname as array<uint8>) {s.push(c)}
+    }
+    uleb(@s  ents.length // 4)
+    let last:WWord=0
+    let j:WWord=0
+    loop j <? ents.length {
+        uleb(@s  ents[j] - last)
+        last=ents[j]
+        uleb(@s  ents[j + 1])
+        uleb(@s  ents[j + 2])
+        uleb(@s  ents[j + 3])
+        j += 4
+    }
+    section(@out  0  s)
+}
+html_image=(wasm:array<uint8> title:string icon:array<uint8> program_js:string):>string=>$unsafe {
+    html_missing=""
+    let link=""
+    if icon.length >? 0 {link="<link rel=\"icon\" href=\"data:image/png;base64,{base64(icon)}\">\n"}
+    else {link="<link rel=\"icon\" href=\"data:,\">\n"} # (no icon: no request for /favicon.ico)
+    let js=""
+    loop part in ["runtime.js"  "gfx.js"  "audio.js"  "boot.js"] {
+        # (the program's own JavaScript, from the build block's js: before it starts)
+        if part =? "boot.js" and WWord((program_js as array<uint8>).length) >? 0 {js="{js}{program_js}\n"}
+        let src=wm_host[0].read_js(part)
+        if WWord((src as array<uint8>).length) =? 0 and part not=? "audio.js" {
+            html_missing=part
+            return ""
+        }
+        js="{js}{src}\n"
+    }
+    let html="<!doctype html>\n<html><head><meta charset=\"utf-8\"><title>{title}</title>\n{link}<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<style>html,body\{margin:0;height:100%;background:#111;color:#ddd;font:14px monospace}canvas\{display:block;margin:auto;outline:none}#log\{white-space:pre-wrap;margin:8px;max-height:40vh;overflow:auto}</style>\n</head><body><canvas id=\"dewy-canvas\" tabindex=\"1\" width=\"0\" height=\"0\"></canvas><div id=\"log\"></div>\n<div id=\"dewy-loading\" style=\"position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);color:#888\">loading…</div>\n<script>\nconst DEWY_WASM = \"{base64(wasm)}\";\n{js}\n</script></body></html>\n"
+    html
+}
+wm_append_bytes=(@out:array<uint8> b:array<uint8>):>void=>{out.extend(b)}
+wm_slash=(path:string):>WWord=>$unsafe {
+    let bytes=path as array<uint8>
+    let i=WWord(bytes.length)
+    loop i >? 0 {i -= 1; if bytes[i] =? 47 {return i}}
+    -1
+}
