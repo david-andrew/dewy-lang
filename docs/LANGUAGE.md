@@ -2532,7 +2532,9 @@ indexing work too. Scalar indexing requires the rank to equal the number of
 indices and `0 <=? index <? matrix.length[axis]` on every axis. Constructors,
 literals, `reshape` and shaped parameters supply these facts; loops over the
 extents and guards on `.length` prove the bounds without a runtime-check opt-in.
-Element writes keep the shape. Replacing an array or its shape invalidates old
+Element writes keep the shape, including across direct helpers whose analyzed
+returns preserve both the shape and data length. Read-only shape helpers keep
+the caller's evidence too. Replacing an array or its shape invalidates old
 extent facts; resizing `.data` also requires proving that its element count
 still matches the shape before indexing.
 

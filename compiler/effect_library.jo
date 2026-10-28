@@ -28,6 +28,9 @@ use 'util.jo'
 use 'lex.jo'
 use 'types.jo'
 use 'check.jo'
+use 'refine.jo'
+use 'effects.jo'
+use 'expr.jo'
 
 enum EffectClass: unclassified, reads, allocates, allocates_panics
 
@@ -68,6 +71,11 @@ effect_library_classify = (g: int) -> EffectClass:
     if not starts_with(path, lib_root): return .unclassified
     file = path[len(lib_root)..]
     name = name_of(int(nodes[d].name))
+    # Exact builtin declarations: these return shape/data snapshots or their
+    # lengths, without element hooks or shape assertions.
+    if file == "/std/nd.jo" and name in ["__nd_length", "ndim", "size", "flatten"] and fns[g].params.len() == 1:
+        t = representation_type(int(locals[fns[g].params[0]].type))
+        if is_nd(t) and effect_share(nd_elem(t)): return .reads
     if file == "/core/fmt.jo" or file == "/math_int.jo":
         if name in ["__fmt", "__dewy_fmt", "__fmt_elem", "__dewy_fmt_elem", "__fmt_u64", "__fmt_hex", "__fmt_float", "__fmt_fixed"]:
             return if effect_library_formatter(g): .allocates else: .unclassified

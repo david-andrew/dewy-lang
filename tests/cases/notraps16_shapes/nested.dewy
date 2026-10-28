@@ -1,0 +1,5 @@
+put=(@g:array<int length=[r c]>):>void=>{
+    loop row in [0..r) loop col in [0..c) g[row col]=5
+}
+twice=(@g:array<int length=[r c]>):>void=>{put(@g); put(@g)}
+main=()=>{let grid=zeros<int>(2 3); twice(@grid); twice(@grid); printl(grid[1 2])}

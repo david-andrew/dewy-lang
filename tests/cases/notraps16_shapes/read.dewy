@@ -1,0 +1,10 @@
+read=(g:array<int length=[r c]>):>int=>g.length[0]
+put=(@g:array<int length=[r c]>):>void=>{
+    let n=read(g)
+    loop row in [0..r) loop col in [0..c) g[row col]=n
+}
+main=()=>{
+    let grid=zeros<int>(4 8)
+    loop n in [1 2] put(@grid)
+    printl(grid[3 7])
+}

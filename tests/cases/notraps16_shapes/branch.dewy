@@ -1,0 +1,9 @@
+put=(@g:array<int length=[r c]> early:bool):>void=>{
+    if early return
+    loop row in [0..r) loop col in [0..c) g[row col]=9
+}
+main=()=>{
+    let grid=zeros<int>(2 3)
+    loop early in [true false true] put(@grid early)
+    printl(grid[1 2])
+}

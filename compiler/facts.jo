@@ -1548,6 +1548,7 @@ struct FactSummary:
     host: bool = false       # every scalar return has finite host endpoints
     post: int = -1           # scalar result < this mutable array's EXIT length
     lengths: int[]           # mutable array parameters: 0 unknown, 1 same, 2 grows
+    shapes: int = 0          # bit i: mutable N-D parameter i keeps shape/data length
 
 fact_summaries: {int: FactSummary} = {}
 fact_summary_owner = 0
@@ -1561,6 +1562,7 @@ fact_summary_used = false
 fact_retry_owner = 0
 fact_summary_acc = FactSummary()
 fact_summary_entry: int[]    # each array parameter's entry length value (0: none)
+fact_summary_shapes: (int, int, int)[] # demanded N-D shape/data-length entry identities
 
 # The parameter whose entry length the result length equals plus a constant in
 # [-2, 2]: at most a few distance queries per array parameter and return.
@@ -1644,7 +1646,18 @@ fact_summary_record = (s: mut FactState, r0: int):
         lengths.push(mode)
         useful = useful or mode != 0
     if not useful: lengths = []
-    fact_summary_acc = FactSummary(length, value, true, same, delta, upper, upper_delta, host, post, lengths)
+    shapes = 0
+    loop entry in fact_summary_shapes:
+        i = entry.0
+        keeps = false
+        if entry.1 != 0 and (not fact_summary_acc.seen or fact_summary_acc.shapes & (1 << i) != 0) and fact_pending_defers == 0 and not ownership_fact_cleanup:
+            l = fns[fact_summary_owner].params[i]
+            b = fact_binding(s, PlaceIdentity(.local, int(locals[l].owner), l))
+            if b >= 0:
+                current = s.bindings[b].value
+                keeps = fact_nd_shape(s, current) == entry.1 and fact_nd_data_length(s, current) == entry.2
+        if keeps: shapes |= 1 << i
+    fact_summary_acc = FactSummary(length, value, true, same, delta, upper, upper_delta, host, post, lengths, shapes)
     # A hull only widens. Once it says nothing the result's own domain does
     # not, and no argument-length relation survives (once lost, it stays
     # lost), the rest of the run cannot bound anything a caller asks: stop it
@@ -1654,7 +1667,7 @@ fact_summary_record = (s: mut FactState, r0: int):
         fact_loop_exhausted = true
 
 fact_summary_vacuous = (acc: FactSummary, t: int) -> bool:
-    if acc.lengths.len() > 0: return false
+    if acc.lengths.len() > 0 or acc.shapes != 0: return false
     if tkind(t) == .array: return acc.length.lo <= 0 and acc.length.hi >= fact_length_max()
     d = fact_domain(t)
     acc.value.lo <= d.lo and acc.value.hi >= d.hi and not acc.value.nz and not acc.host
@@ -1744,6 +1757,8 @@ fact_summary = (f: int, places: bool = false, field: int = 0) -> FactSummary:
     saved_acc = fact_summary_acc
     saved_slice = fact_slice
     saved_lengths = fact_summary_entry
+    saved_shapes = fact_summary_shapes
+    fact_summary_shapes = []
     saved_assumed = fact_summary_assumed
     saved_used = fact_summary_used
     fact_summary_assumed = []
@@ -1782,6 +1797,9 @@ fact_summary = (f: int, places: bool = false, field: int = 0) -> FactSummary:
             else if tkind(t) == .array and fact_scalar(pt) and is_int(pt) and pt != T_U64:
                 v = fact_clamped(state, fact_read(state, mk_ident_local(l, locals[l].pos)))
             fact_summary_entry.push(v)
+            if places and int(locals[l].flags) & LF_MUTPARAM != 0 and fact_summary_entry.len() <= 62 and tkind(pt) == .struct_ and is_nd(pt):
+                value = fact_read(state, mk_ident_local(l, locals[l].pos))
+                fact_summary_shapes.push((fact_summary_entry.len() - 1, fact_nd_shape(state, value), fact_nd_data_length(state, value)))
     fact_slice_prepare(f, true)
     if places:
         loop i in [0..fact_summary_entry.len()):
@@ -1822,6 +1840,7 @@ fact_summary = (f: int, places: bool = false, field: int = 0) -> FactSummary:
     fact_summary_acc = saved_acc
     fact_slice = saved_slice
     fact_summary_entry = saved_lengths
+    fact_summary_shapes = saved_shapes
     fact_summary_assumed = saved_assumed
     fact_summary_used = saved_used
     fact_summary_field = saved_field
@@ -2005,22 +2024,42 @@ fact_ends_path = (n: int) -> bool: ntype(n) == T_NEVER or nodes[n].aux == 0 and 
 fact_path_call_effects = (n: int, s: mut FactState):
     if fact_ends_path(n): effects_demand(0, true); return
     lengths: (int, int)[]
+    shapes: (int, int, int)[]
     if nodes[n].aux == 0 and nodes[n].sym > 0 and checked_call_mutmask(n) != 0:
         f = int(nodes[n].sym)
         loop i in [0..min(nkids(n), fns[f].params.len())):
             l = fns[f].params[i]
-            if int(locals[l].flags) & LF_MUTPARAM == 0 or tkind(fact_type(int(locals[l].type))) != .array: continue
+            if int(locals[l].flags) & LF_MUTPARAM == 0: continue
+            pt = fact_type(int(locals[l].type))
+            if tkind(pt) != .array and (tkind(pt) != .struct_ or not is_nd(pt)): continue
             v = fact_summary_actual(n, i, s, true)
             if v == 0: continue
-            p = fact_index_get(s.index[0].projection_index, fact_projection_key(v, -1, false))
-            if p >= 0: lengths.push((i, s.projections[p].value))
+            if tkind(pt) != .array:
+                p = fact_index_get(s.index[0].projection_index, fact_projection_key(v, intern("shape"), false))
+                if p >= 0: shapes.push((i, s.projections[p].value, fact_nd_data_length(s, v)))
+            else:
+                p = fact_index_get(s.index[0].projection_index, fact_projection_key(v, -1, false))
+                if p >= 0: lengths.push((i, s.projections[p].value))
     summary = FactSummary()
-    if lengths.len() > 0:
+    if shapes.len() > 0: effects_demand(int(nodes[n].sym), true)
+    if lengths.len() > 0 or shapes.len() > 0:
         if int(nodes[n].sym) == fact_summary_owner and fact_summary_assumed.len() > 0:
             fact_summary_used = true
             summary.lengths = fact_summary_assumed
         else: summary = fact_summary(int(nodes[n].sym), true)
     fact_call_effects(n, s)
+    # Only an already demanded shape requests the bounded body summary. On
+    # every returning path it must preserve both immutable identities; an
+    # unknown write, replacement, callback or pending cleanup refuses reuse.
+    # O(actual routes + tracked shapes), within the existing summary budget.
+    loop entry in shapes:
+        i = entry.0
+        if i >= 62 or summary.shapes & (1 << i) == 0: continue
+        v = fact_summary_actual(n, i, s)
+        if v == 0 or s.projections.len() + 3 >= FACT_CAP: continue
+        fact_add_projection(s, FactProjection(v, intern("shape"), false, entry.1))
+        data = fact_project(s, v, intern("data"), false, mk_array(nd_elem(representation_type(fact_terms[v].type))))
+        fact_add_projection(s, FactProjection(data, -1, false, entry.2))
     loop pair in lengths:
         i = pair.0
         if i >= summary.lengths.len() or summary.lengths[i] == 0: continue
@@ -3237,7 +3276,7 @@ fact_changes = (n: int, s: mut FactState, at: int, reason: FactReason = .loop_):
     else if k == .call and nodes[n].aux == 0 and fact_pool_call(n) == 4: fact_pool_store_changes(n, s)
     else if k == .call and nodes[n].aux == 0 and fact_map_store_call(n): fact_map_store_changes(n, s, at, reason)
     else if k == .call and nodes[n].aux == 0 and (fact_map_reads_only(n) or fact_nd_reads_only(n)): s = s
-    else if k == .call and nodes[n].aux == 0 and nodes[n].sym == i32(fact_owner): fact_path_call_effects(n, s)
+    else if k == .call and nodes[n].aux == 0 and (nodes[n].sym == i32(fact_owner) or nd_mutable_call(n)): fact_path_call_effects(n, s)
     else if k == .call and nodes[n].aux == 0: fact_call_effects(n, s)
     else if k == .call and nodes[n].aux == 2: s = s
     else if k == .intrinsic and fact_reads_only(nodes[n].aux as IN): s = s
@@ -6493,7 +6532,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
     if summary or result_active: values.push(int(fns[f].body))
     if summary:
         loop l in fns[f].params:
-            if int(locals[l].flags) & LF_MUTPARAM != 0 and tkind(fact_type(int(locals[l].type))) == .array:
+            if int(locals[l].flags) & LF_MUTPARAM != 0 and (tkind(fact_type(int(locals[l].type))) == .array or is_nd(fact_type(int(locals[l].type)))):
                 values.push(mk_ident_local(l, locals[l].pos))
     cursor = 0
     loop cursor < work.len():
@@ -6892,7 +6931,10 @@ fact_slice_capture = (n: int, s: mut FactState) -> int:
                 arg = kid(n, i)
                 value = fact_capture(arg, s)
                 if ownership_decls.len() != 0: fact_owner_value(arg, value, s)
-        if nodes[n].aux != 2 and nodes[n].aux != 3: fact_path_call_effects(n, s)
+        nd = fact_nd_call(n)
+        if nd == 111 and fact_nd_plain_store(n): fact_nd_store(n, s, n, .write)
+        else if nd != 0 and fact_nd_reads_only(n): s = s
+        else if nodes[n].aux != 2 and nodes[n].aux != 3: fact_path_call_effects(n, s)
         if fact_ends_path(n): s.live = false
         return 0
     if k == .vardecl or k == .assign:

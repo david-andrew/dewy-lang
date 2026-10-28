@@ -16,6 +16,7 @@ use 'places.jo'
 use 'isolation.jo'
 use 'refine.jo'
 use 'facts.jo'
+use 'nd_contracts.jo'
 use 'exact.jo'
 use 'floats.jo'
 use 'ownership.jo'
@@ -889,6 +890,8 @@ effect_share_type = (t: int, depth: int) -> bool:
 effect_value = (t0: int) -> bool:
     t = representation_type(t0)
     if tkind(t) == .array: return effect_share(telem(t))
+    # The builtin tensor copies its two COW arrays; no element hook runs.
+    if is_nd(t): return effect_share(nd_elem(t))
     effect_share(t)
 
 # A reviewed library operation's class (effect_library.jo) as its summary: its
@@ -1461,6 +1464,9 @@ effect_scan_node = (f: int, n: int):
         loop c in kids(n): effect_scan_node(f, c)
         if fact_floor_call(n) <= 2: effect_failure(f, n)
         return
+    if effect_footprints_only and k == .call and fact_nd_reads_only(n) and effect_value(ntype(kid(n, 0))):
+        loop arg in kids(n): effect_scan_node(f, arg)
+        return
     if k == .call and nodes[n].aux == 0:
         g = int(nodes[n].sym)
         routes: PlaceIdentity[]
@@ -1638,7 +1644,7 @@ effect_scan_node = (f: int, n: int):
     else if k == .conv and nodes[n].aux == i32(int(CV.explicit_copy)) and ownership_scalar(ntype(n)): supported = true
     else if k == .conv and nodes[n].aux == i32(int(CV.refinement)):
         # A proven refinement check is erased; an unproven one may fail.
-        supported = effect_plain(ntype(n))
+        supported = effect_plain(ntype(n)) or effect_footprints_only and nd_shape_predicates.has(int(types[zonk(int(nodes[n].aux2))].st)) and effect_value(ntype(n))
         if supported and not type_eq(ntype(int(nodes[n].a)), int(nodes[n].aux2)): effect_failure(f, n)
     # (wrapping a value as an optional, or one union as a wider one, fills the
     # flag or tag and the payload in place)
@@ -1821,6 +1827,7 @@ effect_signature_opaque = (f: int) -> bool:
 effect_signature_value = (t0: int) -> bool:
     t = representation_type(t0)
     if effect_plain(t) or ownership_scalar(t) or t == T_MATH_INT: return true
+    if is_nd(t): return effect_share(nd_elem(t))
     tkind(t) == .array and (effect_scalar(telem(t)) or representation_type(telem(t)) == T_MATH_INT)
 
 # (its opaque conditions imply effect_signature_opaque's)
