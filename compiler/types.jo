@@ -1,5 +1,6 @@
 use 'type_queries.dewy'
 use 'checker_types.dewy'
+use 'type_intern.dewy'
 use 'concurrency.jo'
 # Type representation: all types live in `types` and are referred to by index.
 # Concrete types are interned (equal types have equal ids); types containing
@@ -30,6 +31,7 @@ const TF_BOXED = 16    # inline storage contains recursive managed boxes
 types: TypeInfo[] = [TypeInfo()]
 type_args: i32[]
 type_ht: i32[]
+type_intern_binding = type_intern_bind(&types, &type_args, &type_ht)
 structs: StructInfo[]
 fields: Field[]
 variants: Variant[]
@@ -87,64 +89,11 @@ tkind = (t: int) -> TK: types[prune(t)].kind
 telem = (t: int) -> int: int(types[prune(t)].elem)
 has_var = (t: int) -> bool: int(types[t].flags) & TF_HAS_VAR != 0
 
-__type_hash = (t: TypeInfo, args: int[]) -> u64:
-    h = u64(int(t.kind)) * 31 + u64(int(t.elem)) * 7 + u64(int(t.st)) * 13 + u64(int(t.bits)) + u64(int(t.mutmask)) * 17 + u64(int(t.rep)) * 10007
-    if t.sign: h += 1000003
-    loop a in args: h = h * 131 + u64(a)
-    (h xor (h >> 29))
-
-__type_same = (id: int, t: TypeInfo, args: int[]) -> bool:
-    x = types[id]
-    if x.rep != t.rep or x.kind != t.kind or x.elem != t.elem or x.st != t.st or int(x.nargs) != args.len() or x.bits != t.bits or x.mutmask != t.mutmask or x.sign != t.sign: return false
-    loop i in 0.. and a in args:
-        if int(type_args[int(x.args) + i]) != a: return false
-    true
-
-__type_rehash = ():
-    n = type_ht.len() * 2
-    if n < 4096: n = 4096
-    # Records, unions and type values can append types without using mk_type.
-    # One doubling may no longer fit them when interning resumes.
-    loop n < types.len() * 2: n *= 2
-    type_ht = fill(0 as i32, n)
-    loop id in [1..types.len()):
-        if int(types[id].flags) & TF_HAS_VAR != 0: continue
-        if types[id].kind == .var or types[id].kind == .param: continue
-        args: int[]
-        loop i in [0..int(types[id].nargs)): args.push(targ(id, i))
-        h = int(__type_hash(types[id], args)) & (n - 1)
-        loop type_ht[h] != 0: h = (h + 1) & (n - 1)
-        type_ht[h] = i32(id)
-
-# intern a type with the given args
-mk_type = (t0: TypeInfo, args: int[]) -> int:
-    t = t0
-    hv = false
-    if t.elem != 0 and has_var(int(t.elem)): hv = true
-    loop a in args:
-        if has_var(a): hv = true
-    if t.kind == .var or t.kind == .param: hv = true
-    if hv: t.flags = i32(int(t.flags) | TF_HAS_VAR)
-    if not hv or t.kind == .param:
-        if type_ht.len() == 0 or types.len() * 2 >= type_ht.len(): __type_rehash()
-        mask = type_ht.len() - 1
-        h = int(__type_hash(t, args)) & mask
-        loop type_ht[h] != 0:
-            id = int(type_ht[h])
-            if __type_same(id, t, args): return id
-            h = (h + 1) & mask
-        t.args = i32(type_args.len())
-        t.nargs = i32(args.len())
-        loop a in args: type_args.push(i32(a))
-        id = types.len()
-        types.push(t)
-        type_ht[h] = i32(id)
-        return id
-    t.args = i32(type_args.len())
-    t.nargs = i32(args.len())
-    loop a in args: type_args.push(i32(a))
-    types.push(t)
-    types.len() - 1
+# Complete interning runs in Dewy over these shared arena headers.
+__type_hash = (t: TypeInfo, args: int[]) -> u64: type_intern_hash(&t, args)
+__type_same = (id: int, t: TypeInfo, args: int[]) -> bool: type_intern_same(id, &t, args)
+__type_rehash = (): type_intern_rehash()
+mk_type = (t: TypeInfo, args: int[]) -> int: type_intern(&t, args)
 
 basic = (kind: TK, bits: int, sign: bool, size: int) -> int:
     t = TypeInfo(kind = kind, bits = i32(bits), sign = sign, size = i32(size), align = i32(size))

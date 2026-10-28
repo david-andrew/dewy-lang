@@ -1,0 +1,73 @@
+use 'checker_types.dewy'
+ti_types: *(TypeInfo[])
+ti_args: *(i32[])
+ti_table: *(i32[])
+type_intern_bind = (types: *(TypeInfo[]), args: *(i32[]), table: *(i32[])) -> int:
+    ti_types = types
+    ti_args = args
+    ti_table = table
+    0
+const TI_HAS_VAR = 1
+ti_has_var = (t: int) -> bool: int(ti_types[0][t].flags) & TI_HAS_VAR != 0
+ti_targ = (t: int, i: int) -> int: int(ti_args[0][int(ti_types[0][t].args) + i])
+type_intern_hash = (input: *TypeInfo, args: int[]) -> u64:
+    t = input[0]
+    h = u64(int(t.kind)) * 31 + u64(int(t.elem)) * 7 + u64(int(t.st)) * 13 + u64(int(t.bits)) + u64(int(t.mutmask)) * 17 + u64(int(t.rep)) * 10007
+    if t.sign: h += 1000003
+    loop a in args: h = h * 131 + u64(a)
+    (h xor (h >> 29))
+
+type_intern_same = (id: int, input: *TypeInfo, args: int[]) -> bool:
+    t = input[0]
+    x = ti_types[0][id]
+    if x.rep != t.rep or x.kind != t.kind or x.elem != t.elem or x.st != t.st or int(x.nargs) != args.len() or x.bits != t.bits or x.mutmask != t.mutmask or x.sign != t.sign: return false
+    loop i in 0.. and a in args:
+        if int(ti_args[0][int(x.args) + i]) != a: return false
+    true
+
+type_intern_rehash = ():
+    n = ti_table[0].len() * 2
+    if n < 4096: n = 4096
+    # Records, unions and type values can append ti_types[0] without using type_intern.
+    # One doubling may no longer fit them when interning resumes.
+    loop n < ti_types[0].len() * 2: n *= 2
+    ti_table[0] = fill(0 as i32, n)
+    loop id in [1..ti_types[0].len()):
+        if int(ti_types[0][id].flags) & TI_HAS_VAR != 0: continue
+        if ti_types[0][id].kind == .var or ti_types[0][id].kind == .param: continue
+        args: int[]
+        loop i in [0..int(ti_types[0][id].nargs)): args.push(ti_targ(id, i))
+        h = int(type_intern_hash(&ti_types[0][id], args)) & (n - 1)
+        loop ti_table[0][h] != 0: h = (h + 1) & (n - 1)
+        ti_table[0][h] = i32(id)
+
+# intern a type with the given args
+type_intern = (t0: *TypeInfo, args: int[]) -> int:
+    t = t0[0]
+    hv = false
+    if t.elem != 0 and ti_has_var(int(t.elem)): hv = true
+    loop a in args:
+        if ti_has_var(a): hv = true
+    if t.kind == .var or t.kind == .param: hv = true
+    if hv: t.flags = i32(int(t.flags) | TI_HAS_VAR)
+    if not hv or t.kind == .param:
+        if ti_table[0].len() == 0 or ti_types[0].len() * 2 >= ti_table[0].len(): type_intern_rehash()
+        mask = ti_table[0].len() - 1
+        h = int(type_intern_hash(&t, args)) & mask
+        loop ti_table[0][h] != 0:
+            id = int(ti_table[0][h])
+            if type_intern_same(id, &t, args): return id
+            h = (h + 1) & mask
+        t.args = i32(ti_args[0].len())
+        t.nargs = i32(args.len())
+        loop a in args: ti_args[0].push(i32(a))
+        id = ti_types[0].len()
+        ti_types[0].push(t)
+        ti_table[0][h] = i32(id)
+        return id
+    t.args = i32(ti_args[0].len())
+    t.nargs = i32(args.len())
+    loop a in args: ti_args[0].push(i32(a))
+    ti_types[0].push(t)
+    ti_types[0].len() - 1
+

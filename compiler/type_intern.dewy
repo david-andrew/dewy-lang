@@ -1,0 +1,108 @@
+$runtime_checks
+from p"checker_types.dewy" import (TypeInfo)
+
+# Complete type interning over the existing stable arena headers. No callback
+# enters checking; arena element views end before append or table replacement.
+# Expected O(arguments + probes), with amortized table growth and linear rehash.
+IWord:type=int64<overflow='wrap'>
+let ti_types:ptr<array<TypeInfo>>=$unsafe (uint64(0) as ptr<array<TypeInfo>>)
+let ti_args:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
+let ti_table:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
+type_intern_bind=(types:ptr<array<TypeInfo>> args:ptr<array<int32>> table:ptr<array<int32>>):>IWord=>{
+    ti_types=types; ti_args=args; ti_table=table; 0
+}
+const TI_HAS_VAR:int32=1
+
+ti_hash_seed=(input:ptr<TypeInfo>):>IWord=>$unsafe {
+    # The frozen ABI stores both literal-union discriminants as 32-bit ordinals.
+    # Borrow their fields directly; hashing their text would change table order.
+    let t=input[0]
+    let words=input as ptr<int32>
+    let kind=words[0]
+    let rep=words[14]
+    let h=IWord(kind) * 31 + IWord(t.elem) * 7 + IWord(t.st) * 13 + IWord(t.bits) + IWord(t.mutmask) * 17 + IWord(rep) * 10007
+    if t.sign {h += 1000003}
+    h
+}
+ti_hash_end=(h:IWord):>uint64=>$unsafe {
+    let bits=h transmute uint64
+    bits xor (bits >> 29)
+}
+type_intern_hash=(input:ptr<TypeInfo> args:array<int64>):>uint64=>$unsafe {
+    let h=ti_hash_seed(input)
+    let p=args.ptr
+    let n=IWord(args.length)
+    loop i in [IWord(0)..n) {h=h * 131 + p[i]}
+    ti_hash_end(h)
+}
+type_intern_same=(id:IWord input:ptr<TypeInfo> args:array<int64>):>bool=>$unsafe {
+    let t=input[0]
+    let x=ti_types[0].ptr[id]
+    let n=IWord(args.length)
+    if x.rep not=? t.rep or x.kind not=? t.kind or x.elem not=? t.elem or x.st not=? t.st or IWord(x.nargs) not=? n or x.bits not=? t.bits or x.mutmask not=? t.mutmask or x.sign not=? t.sign {return false}
+    let stored=ti_args[0].ptr
+    let values=args.ptr
+    let first=IWord(x.args)
+    loop i in [IWord(0)..n) {if IWord(stored[first + i]) not=? values[i] {return false}}
+    true
+}
+type_intern_rehash=():>void=>$unsafe {
+    let n=IWord(ti_table[0].length) * 2
+    if n <? 4096 {n=4096}
+    let count=IWord(ti_types[0].length)
+    loop n <? count * 2 {n *= 2}
+    ti_table[0]=fill(int32(0) n)
+    let table=ti_table[0].ptr
+    let types=ti_types[0].ptr
+    let args=ti_args[0].ptr
+    loop id in [IWord(1)..count) {
+        let t=types[id]
+        if (t.flags & TI_HAS_VAR) not=? 0 {continue}
+        if t.kind =? 'var' or t.kind =? 'param' {continue}
+        let h=ti_hash_seed(types + id)
+        let first=IWord(t.args)
+        let last=first + IWord(t.nargs)
+        loop i in [first..last) {h=h * 131 + IWord(args[i])}
+        h=(ti_hash_end(h) transmute int64) & (n - 1)
+        loop table[h] not=? 0 {h=(h + 1) & (n - 1)}
+        table[h]=int32(id)
+    }
+}
+type_intern=(t0:ptr<TypeInfo> args:array<int64>):>IWord=>$unsafe {
+    let t=t0[0]
+    let types=ti_types[0].ptr
+    let values=args.ptr
+    let count=IWord(args.length)
+    let hv=false
+    if t.elem not=? 0 and (types[IWord(t.elem)].flags & TI_HAS_VAR) not=? 0 {hv=true}
+    loop i in [IWord(0)..count) {if (types[values[i]].flags & TI_HAS_VAR) not=? 0 {hv=true}}
+    if t.kind =? 'var' or t.kind =? 'param' {hv=true}
+    if hv {t.flags=t.flags | TI_HAS_VAR}
+    if not hv or t.kind =? 'param' {
+        if ti_table[0].length =? 0 or IWord(ti_types[0].length) * 2 >=? IWord(ti_table[0].length) {type_intern_rehash()}
+        let mask=IWord(ti_table[0].length) - 1
+        let table=ti_table[0].ptr
+        let h=(type_intern_hash(t0 args) transmute int64) & mask
+        loop table[h] not=? 0 {
+            let id=IWord(table[h])
+            if type_intern_same(id t0 args) {return id}
+            h=(h + 1) & mask
+        }
+        t.args=int32(ti_args[0].length)
+        t.nargs=int32(count)
+        loop i in [IWord(0)..count) {ti_args[0].push(int32(values[i]))}
+        let id=IWord(ti_types[0].length)
+        ti_types[0].push(t)
+        # Indexed mutation preserves a retained table snapshot's copy-on-write.
+        ti_table[0][h]=int32(id)
+        return id
+    }
+    t.args=int32(ti_args[0].length)
+    t.nargs=int32(count)
+    loop i in [IWord(0)..count) {ti_args[0].push(int32(values[i]))}
+    ti_types[0].push(t)
+    IWord(ti_types[0].length) - 1
+}
+
+ti_has_var=(t:IWord):>bool=>$unsafe {(ti_types[0].ptr[t].flags & TI_HAS_VAR) not=? 0}
+ti_targ=(t:IWord i:IWord):>IWord=>$unsafe {IWord(ti_args[0].ptr[IWord(ti_types[0].ptr[t].args) + i])}
