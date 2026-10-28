@@ -1,3 +1,4 @@
+use 'x64_module.dewy'
 use 'x64_emit.dewy'
 use 'x64_allocate.dewy'
 use 'x64_encode.dewy'
@@ -222,182 +223,25 @@ sym_name = (n: str) -> str:
 # the entry point of a Windows program: called with the stack 8 bytes off 16-byte alignment;
 # the initializers and main, then ExitProcess(0) from the import table
 # VirtualAlloc(at, size, kind, read/write/run) through the import table: its result in rax
-win_virtual_alloc = (at: int, size: int, kind: int):
-    mov_imm(RCX, at)
-    mov_imm(RDX, size)
-    mov_imm(8, kind)
-    mov_imm(9, 0x40)
-    rex(true, 0, 0, RSP, false)               # sub rsp, 32 (shadow space)
-    b(0x83)
-    modrr(5, RSP)
-    b(32)
-    b16(0x15FF); b32(0)                  # call [rip + VirtualAlloc]
-    data_fix.push((code.len() - 4, 1, pe_iat_off(3)))
-    rex(true, 0, 0, RSP, false)               # add rsp, 32
-    b(0x83)
-    modrr(0, RSP)
-    b(32)
-
 x64_entry_win = (inits: int[], main_lf: int) -> int:
-    loop code.len() % 16 != 0: b(0xCC)
-    start = code.len()
-    line_rows.push(code.len())
-    line_rows.push(0)
-    row_pos = 0
-    rex(true, 0, 0, RSP, false)               # sub rsp, 8
-    b(0x83)
-    modrr(5, RSP)
-    b(8)
-    if watch_build:
-        # (sloppy watch: room for the code of later builds, reserved before anything else can be
-        # put there, its pages committed as patches use them; its first word tells
-        # lib/std/watch.jo it is there)
-        win_virtual_alloc(WATCH_CODE_AT, WATCH_CODE_SIZE, 0x2000)          # MEM_RESERVE
-        mov_imm(RCX, WATCH_CODE_AT)
-        b24(0xC83948)             # cmp rax, rcx
-        b16(0x0075)                         # jne over the rest
-        j = code.len()
-        win_virtual_alloc(WATCH_CODE_AT, 4096, 0x1000)                     # MEM_COMMIT
-        b24(0xC08548)             # test rax, rax
-        b16(0x0074)                         # je over the mark
-        k = code.len()
-        mov_imm(RDX, 0x6A6F74776174636B)
-        mov_mr(RAX, 0, RDX)
-        code[k - 1] = u8(code.len() - k)
-        code[j - 1] = u8(code.len() - j)
-    loop f in inits:
-        b(0xE8)
-        b32(0)
-        call_fix.push((code.len() - 4, f))
-    b16(0xDB31)                          # xor ebx, ebx (the exit code)
-    if main_lf >= 0:
-        b(0xE8)
-        b32(0)
-        call_fix.push((code.len() - 4, main_lf))
-        if main_code: mov_rr(RBX, RAX)
-    if entry_end_lf >= 0:
-        b(0xE8)
-        b32(0)
-        call_fix.push((code.len() - 4, entry_end_lf))
-    mov_rr(RCX, RBX)
-    rex(true, 0, 0, RSP, false)               # sub rsp, 32 (shadow space)
-    b(0x83)
-    modrr(5, RSP)
-    b(32)
-    b16(0x15FF); b32(0)                  # call [rip + ExitProcess]
-    data_fix.push((code.len() - 4, 1, pe_iat_off(0)))
-    b(0xCC)
+    start = x64_emit_entry_win(inits, main_lf, main_code, entry_end_lf, watch_build, WATCH_CODE_AT, WATCH_CODE_SIZE, pe_iat_off(0))
     elf_syms.push(("_start", start, code.len() - start))
     unwind_fns.push((start, code.len(), UW_ENTRY, 8))
     start
 
-# Windows calls a @cabi function (a window procedure...) with its own convention: an adapter
-# moves the arguments where Sloppy code expects them and keeps what Windows expects kept
-# (rdi, rsi, xmm6-15). Taking the function's address gives the adapter's (cabi_fix).
-cabi_adapter: {int: int} = {}       # function -> its adapter's offset
 x64_cabi_adapter = (lf: int, ptypes: int[]) -> int:
     nin = 0
     loop t in ptypes:
         if t == VI: nin += 1
     if nin > 6 or ptypes.len() - nin > 8: fatal(0, "a @cabi function called from C on Windows takes at most 6 integer and 8 float parameters ({lfuncs[lf].name} takes {ptypes.len()})")
-    loop code.len() % 16 != 0: b(0xCC)
-    start = code.len()
-    cabi_adapter[lf] = start
-    b(0x55)                                   # push rbp
-    mov_rr(RBP, RSP)
-    b(0x57)                                   # push rdi
-    b(0x56)                                   # push rsi
-    rex(true, 0, 0, RSP, false)               # sub rsp, 160
-    b(0x81)
-    modrr(5, RSP)
-    b32(160)
-    loop i in [0..10): vmov_mr(RSP, 16 * i, 6 + i, VX)
-    # (in order: no argument is overwritten before it is moved)
-    wregs = [RCX, RDX, 8, 9]
-    ni = 0
-    nf = 0
-    loop k in 0.. and t in ptypes:
-        # (from the fifth on, on the caller's stack: above the return address and 32 bytes of
-        # shadow space)
-        if t == VI:
-            if k < 4: mov_rr(int_arg_regs[ni], wregs[k])
-            else: mov_rm(int_arg_regs[ni], RBP, 48 + 8 * (k - 4))
-            ni += 1
-        else:
-            if k < 4: vmov_rr(nf, k, VX)
-            else: sse_rm(0xF2, 0x10, nf, RBP, 48 + 8 * (k - 4))      # movsd
-            nf += 1
-    b(0xE8)
-    b32(0)
-    call_fix.push((code.len() - 4, lf))
-    loop i in [0..10): vmov_rm(6 + i, RSP, 16 * i, VX)
-    rex(true, 0, 0, RSP, false)               # add rsp, 160
-    b(0x81)
-    modrr(0, RSP)
-    b32(160)
-    b(0x5E)                                   # pop rsi
-    b(0x5F)                                   # pop rdi
-    b(0x5D)                                   # pop rbp
-    b(0xC3)
-    start
+    x64_emit_adapter(lf, ptypes)
 
 x64_entry = (inits: int[], main_lf: int) -> int:
-    loop code.len() % 16 != 0: b(0xCC)
-    start = code.len()
-    if rsp_rows.len() > 0: rsp_row(-2)
-    # (no source line: line 0)
-    line_rows.push(code.len())
-    line_rows.push(0)
-    row_pos = 0
     row_line = 0
-    rel_fixup_lea(RAX, 1, 0)
-    mov_mr(RAX, 0, RSP)                       # save initial stack pointer (argc/argv)
-    rex(true, 0, 0, RSP, false)
-    b(0x83)
-    modrr(4, RSP)
-    b(0xF0)                                   # and rsp, -16
-    if watch_build:
-        # (sloppy watch: room for the code of later builds, taken before anything else can be put
-        # there; its first word tells lib/std/watch.jo it is there)
-        mov_imm(RDI, WATCH_CODE_AT)
-        mov_imm(RSI, WATCH_CODE_SIZE)
-        mov_imm(RDX, 7)
-        mov_imm(10, 0x104022)                 # private, anonymous, no reserve, fixed (no replace)
-        mov_imm(8, -1)
-        mov_imm(9, 0)
-        mov_imm(RAX, 9)
-        b16(0x050F)                      # mmap
-        mov_imm(RCX, WATCH_CODE_AT)
-        b24(0xC83948)             # cmp rax, rcx
-        b16(0x0075)                         # jne over the mark
-        j = code.len()
-        mov_imm(RDX, 0x6A6F74776174636B)
-        mov_mr(RAX, 0, RDX)
-        code[j - 1] = u8(code.len() - j)
-    loop f in inits:
-        b(0xE8)
-        b32(0)
-        call_fix.push((code.len() - 4, f))
-    b16(0xDB31)                          # xor ebx, ebx (the exit code)
-    if main_lf >= 0:
-        b(0xE8)
-        b32(0)
-        call_fix.push((code.len() - 4, main_lf))
-        if main_code: mov_rr(RBX, RAX)
-    if entry_end_lf >= 0:
-        b(0xE8)
-        b32(0)
-        call_fix.push((code.len() - 4, entry_end_lf))
-    mov_rr(RDI, RBX)
-    mov_imm(RAX, 231)
-    b16(0x050F)                          # exit_group
-    # (the entry point: debuggers stop unwinding here)
+    start = x64_emit_entry(inits, main_lf, main_code, entry_end_lf, watch_build, WATCH_CODE_AT, WATCH_CODE_SIZE)
     elf_syms.push(("_start", start, code.len() - start))
-    if rsp_rows.len() > 0: rsp_row(-1)
     start
 
-# where each call returns to, and the source position of the call (an index into
-# ir_positions): the line table of backtraces (lib/std/backtrace.jo)
 row_file = -1
 
 # (a row where the position changes; dwarf.jo leaves out those on the same line)
@@ -474,169 +318,18 @@ put_varint = (out: mut u8[], v0: int):
         v = v >> 7
     out.push(u8(v))
 
-stub_addr: int[] = [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1]
-
-# machine code stubs for non-local control transfer
 x64_stubs = ():
-    frames = rsp_rows.len() > 0
-    loop code.len() % 16 != 0: b(0xCC)
-    if frames: rsp_row(0)
-    line_rows.push(code.len())
-    line_rows.push(0)
-    row_pos = 0
     row_line = 0
-    # setjmp(rdi = buf): save callee-saved registers, stack pointer and return address
-    stub_addr[2] = code.len()
-    loop i in 0.. and r in [RBX, RBP, 12, 13, 14, 15]: mov_mr(RDI, 8 * i, r)
-    lea(RAX, RSP, 8)
-    mov_mr(RDI, 48, RAX)
-    mov_rm(RAX, RSP, 0)
-    mov_mr(RDI, 56, RAX)
-    b16(0xC031)                     # xor eax, eax
-    b(0xC3)
-    # longjmp(rdi = buf, rsi = value)
-    loop code.len() % 16 != 0: b(0xCC)
-    stub_addr[3] = code.len()
-    loop i in 0.. and r in [RBX, RBP, 12, 13, 14, 15]: mov_rm(r, RDI, 8 * i)
-    mov_rm(RSP, RDI, 48)
-    mov_rr(RAX, RSI)
-    rex(false, 0, 0, RDI, false)
-    b(0xFF)
-    mem(4, RDI, 56)                       # jmp [rdi+56]
-    # jump(rdi = entry, rsi = stack): switch stacks and jump (rdx = 0 for ld.so)
-    loop code.len() % 16 != 0: b(0xCC)
-    stub_addr[4] = code.len()
-    mov_rr(RSP, RSI)
-    b16(0xD231)                     # xor edx, edx
-    rex(false, 0, 0, RDI, false)
-    b(0xFF)
-    modrr(4, RDI)                          # jmp rdi
-    # clone_thread(rdi = entry, rsi = arg, rdx = stack top): the child calls entry(arg) on the
-    # new stack, then exits the thread; the parent gets the thread id (or -errno)
-    loop code.len() % 16 != 0: b(0xCC)
-    stub_addr[5] = code.len()
-    loop x in [0x48, 0x83, 0xEA, 0x10,        # sub rdx, 16
-              0x48, 0x89, 0x3A,              # mov [rdx], rdi
-              0x48, 0x89, 0x72, 0x08,        # mov [rdx+8], rsi
-              0x48, 0x89, 0xD6,              # mov rsi, rdx
-              0xBF, 0x00, 0x0F, 0x05, 0x00,  # mov edi, CLONE_VM|FS|FILES|SIGHAND|THREAD|SYSVSEM
-              0x31, 0xD2,                    # xor edx, edx
-              0x45, 0x31, 0xD2,              # xor r10d, r10d
-              0x45, 0x31, 0xC0,              # xor r8d, r8d
-              0xB8, 0x38, 0x00, 0x00, 0x00,  # mov eax, 56 (clone)
-              0x0F, 0x05,                    # syscall
-              0x48, 0x85, 0xC0,              # test rax, rax
-              0x74, 0x01,                    # jz child
-              0xC3]: b(x)                    # ret in the parent
-    if frames: rsp_row(-2)
-    loop x in [0x58,                          # child: pop rax
-              0x5F,                          # pop rdi
-              0xFF, 0xD0,                    # call rax
-              0xB8, 0x3C, 0x00, 0x00, 0x00,  # mov eax, 60 (exit this thread)
-              0x31, 0xFF,                    # xor edi, edi
-              0x0F, 0x05,                    # syscall
-              0x0F, 0x0B]: b(x)              # ud2
-    # atomic_add(rdi = p, rsi = v) -> old value
-    loop code.len() % 16 != 0: b(0xCC)
-    stub_addr[6] = code.len()
-    if frames: rsp_row(0)
-    loop x in [0x48, 0x89, 0xF0, 0xF0, 0x48, 0x0F, 0xC1, 0x07, 0xC3]: b(x)     # mov rax, rsi; lock xadd [rdi], rax; ret
-    # atomic_cas(rdi = p, rsi = expected, rdx = desired) -> old value
-    loop code.len() % 16 != 0: b(0xCC)
-    stub_addr[7] = code.len()
-    loop x in [0x48, 0x89, 0xF0, 0xF0, 0x48, 0x0F, 0xB1, 0x17, 0xC3]: b(x)     # mov rax, rsi; lock cmpxchg [rdi], rdx; ret
-    # stack_ptr() -> the caller's stack pointer
-    loop code.len() % 16 != 0: b(0xCC)
-    stub_addr[8] = code.len()
-    loop x in [0x48, 0x8D, 0x44, 0x24, 0x08, 0xC3]: b(x)                        # lea rax, [rsp+8]; ret
-    # cpu_features() -> bit 0: AVX2 usable (cpuid 1: OSXSAVE and AVX; xgetbv: the system saves
-    # xmm and ymm state; cpuid 7: AVX2)
-    loop code.len() % 16 != 0: b(0xCC)
-    stub_addr[9] = code.len()
-    b(0x53)                             # push rbx
-    if frames: rsp_row(8)
-    loop x in [
-               0xB8, 0x01, 0x00, 0x00, 0x00,             # mov eax, 1
-               0x31, 0xC9,                               # xor ecx, ecx
-               0x0F, 0xA2,                               # cpuid
-               0x41, 0x89, 0xC8,                         # mov r8d, ecx
-               0x41, 0x81, 0xE0, 0x00, 0x00, 0x00, 0x18, # and r8d, (1 << 27) | (1 << 28)
-               0x41, 0x81, 0xF8, 0x00, 0x00, 0x00, 0x18, # cmp r8d, (1 << 27) | (1 << 28)
-               0x75, 0x20,                               # jne no
-               0x31, 0xC9,                               # xor ecx, ecx
-               0x0F, 0x01, 0xD0,                         # xgetbv
-               0x83, 0xE0, 0x06,                         # and eax, 6
-               0x83, 0xF8, 0x06,                         # cmp eax, 6
-               0x75, 0x13,                               # jne no
-               0xB8, 0x07, 0x00, 0x00, 0x00,             # mov eax, 7
-               0x31, 0xC9,                               # xor ecx, ecx
-               0x0F, 0xA2,                               # cpuid
-               0x89, 0xD8,                               # mov eax, ebx
-               0xC1, 0xE8, 0x05,                         # shr eax, 5
-               0x83, 0xE0, 0x01,                         # and eax, 1
-               0x5B]: b(x)                               # pop rbx
-    if frames: rsp_row(0)
-    b(0xC3)
-    if frames: rsp_row(8)
-    loop x in [0x31, 0xC0, 0x5B]: b(x)                    # no: xor eax, eax; pop rbx
-    if frames: rsp_row(0)
-    b(0xC3)
-    # code_sync(p, n): nothing to do (x86-64 keeps the instruction cache coherent)
-    loop code.len() % 16 != 0: b(0xCC)
-    stub_addr[11] = code.len()
-    loop x in [0x31, 0xC0, 0xC3]: b(x)                                          # xor eax, eax; ret
-    # call rcx with rax as its argument, keeping every register but rax and rcx (a call the
-    # register allocator need not know of: CALL_IF_SHARED's when it is taken)
-    loop code.len() % 16 != 0: b(0xCC)
-    stub_addr[12] = code.len()
-    loop x in [0x55, 0x48, 0x89, 0xE5]: b(x)          # push rbp; mov rbp,rsp
-    if frames: rsp_row(-1)
-    loop x in [
-               0x57, 0x56, 0x52, 0x41, 0x50, 0x41, 0x51,     # push rdi, rsi, rdx, r8, r9
-               0x41, 0x52, 0x41, 0x53,                       # push r10, r11
-               0x48, 0x83, 0xE4, 0xF0,                       # and rsp, -16
-               0x48, 0x81, 0xEC, 0x00, 0x01, 0x00, 0x00]: b(x)  # sub rsp, 256
-    loop i in [0..16): xmm_spill(true, i)
-    loop x in [0x48, 0x89, 0xC7, 0xFF, 0xD1]: b(x)           # mov rdi, rax; call rcx
-    loop i in [0..16): xmm_spill(false, i)
-    loop x in [0x48, 0x8D, 0x65, 0xC8,                       # lea rsp, [rbp - 56]
-               0x41, 0x5B, 0x41, 0x5A, 0x41, 0x59, 0x41, 0x58,  # pop r11, r10, r9, r8
-               0x5A, 0x5E, 0x5F, 0x5D]: b(x)                # pop rdx, rsi, rdi, rbp
-    if frames: rsp_row(0)
-    b(0xC3)
-
-# movdqu [rsp + 16 i], xmm i (or back)
-xmm_spill = (store: bool, i: int):
-    b(0xF3)
-    if i >= 8: b(0x44)
-    b(0x0F)
-    if store: b(0x7F)
-    else: b(0x6F)
-    b(0x84 | ((i & 7) << 3))
-    b(0x24)
-    b32(16 * i)
+    x64_emit_stubs()
 
 lf_is_cabi = (lf: int) -> bool: lfuncs[lf].kind == LK_INST and fns[lfuncs[lf].inst].cabi
 
 x64_resolve = (text_addr: int, ro_addr: int, data_addr: int):
-    if stub_fix.len() > 0 and stub_addr[2] < 0: ice("stubs not emitted")
-    loop f in cabi_fix:
-        a = cabi_adapter.get(f.1) ?? -1
-        if a < 0: ice("no adapter for {lfuncs[f.1].name}")
-        patch32(f.0, a - (f.0 + 4))
-    loop f in stub_fix: patch32(f.0, stub_addr[f.1] - (f.0 + 4))
-    loop f in call_fix:
-        target = fn_addr[f.1]
-        if target < 0: ice("unresolved function {lfuncs[f.1].name}")
-        patch32(f.0, target - (f.0 + 4))
-    loop f in data_fix:
-        base = ro_addr
-        if f.1 == 1: base = data_addr
-        target = base + f.2
-        patch32(f.0, target - (text_addr + f.0 + 4))
+    error, lf = x64_patch_module(text_addr, ro_addr, data_addr, fn_addr)
+    if error == 1: ice("stubs not emitted")
+    if error == 2: ice("no adapter for {lfuncs[lf].name}")
+    if error == 3: ice("unresolved function {lfuncs[lf].name}")
 
-# Shared output headers retain their existing module lifetime. Constant
-# publication may notify fused emission; ordinary metadata never calls out.
 x_emit_host = X64EmitHost(fz_note_ro)
 x_emit_binding = x64_emitter_bind(&rodata, &ro_starts, &uw_data, &fused_on, &x_emit_host)
 x_cabi_flags: bool[]

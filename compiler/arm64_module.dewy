@@ -193,25 +193,35 @@ arm64_emit_entry_mac=(inits:array<int64> main_lf:ArmWord main_code:bool entry_en
     start
 }
 arm64_patch_module=(text_addr:ArmWord ro_addr:ArmWord data_addr:ArmWord @fn_addr:array<int64> @stub_addr:array<int64>):>ArmWord=>$unsafe {
-    loop f in a_call_fix {
-        let t:ArmWord=fn_addr[f[1]]
+    let targets=fn_addr.ptr as ptr<ArmWord>
+    let stubs=stub_addr.ptr as ptr<ArmWord>
+    let fixes0=a_call_fix.ptr as ptr<[ArmWord ArmWord]>
+    loop i in [ArmWord(0)..ArmWord(a_call_fix.length)) {
+        let f=fixes0[i]
+        let t:ArmWord=targets[f[1]]
         if t <? 0 {
             return f[1]
         }
         wr32(f[0]  rd32(f[0]) | (((t - ArmWord(f[0])) // 4) & 0x3FFFFFF))
     }
-    loop f in a_stub_fix {
-        let t:ArmWord=stub_addr[f[1]]
+    let fixes1=a_stub_fix.ptr as ptr<[ArmWord ArmWord]>
+    loop i in [ArmWord(0)..ArmWord(a_stub_fix.length)) {
+        let f=fixes1[i]
+        let t:ArmWord=stubs[f[1]]
         wr32(f[0]  rd32(f[0]) | (((t - ArmWord(f[0])) // 4) & 0x3FFFFFF))
     }
-    loop f in a_faddr_fix {
-        let t:ArmWord=fn_addr[f[1]]
+    let fixes2=a_faddr_fix.ptr as ptr<[ArmWord ArmWord]>
+    loop i in [ArmWord(0)..ArmWord(a_faddr_fix.length)) {
+        let f=fixes2[i]
+        let t:ArmWord=targets[f[1]]
         if t <? 0 {
             return f[1]
         }
         a_patch_adrp(f[0]  text_addr  text_addr + t)
     }
-    loop f in a_data_fix {
+    let fixes3=a_data_fix.ptr as ptr<[ArmWord ArmWord ArmWord]>
+    loop i in [ArmWord(0)..ArmWord(a_data_fix.length)) {
+        let f=fixes3[i]
         let base=ro_addr
         if f[1] =? 1 {
             base = data_addr

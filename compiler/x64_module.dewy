@@ -1,0 +1,335 @@
+$runtime_checks
+
+# Complete x64 module emission and relocation walks. Fixed input tables are
+# borrowed through each walk; code patches retain copy-on-write behavior.
+from p"x64_encode.dewy" import (RAX RBP RBX RCX RDI RDX RSI RSP VX XWord b b16 b24 b32 lea mem modrr mov_imm mov_mr mov_rm mov_rr patch32 rel_fixup_lea rex sse_rm vmov_mr vmov_rm vmov_rr x_code x_data_fix)
+from p"x64_emit.dewy" import (CALL_IF_SHARED VI cabi_fix call_fix int_arg_regs ld line_rows row_pos rsp_row rsp_rows stub_fix)
+win_virtual_alloc=(at:XWord size:XWord kind:XWord iat:XWord):>void=>$unsafe {
+    mov_imm(RCX  at)
+    mov_imm(RDX  size)
+    mov_imm(8  kind)
+    mov_imm(9  0x40)
+    rex(true  0  0  RSP  false) # sub rsp, 32 (shadow space)
+    b(0x83)
+    modrr(5  RSP)
+    b(32)
+    b16(0x15FF)
+    b32(0) # call [rip + VirtualAlloc]
+    x_data_fix[0].push([XWord(x_code[0].length) - 4  1  iat + 24])
+    rex(true  0  0  RSP  false) # add rsp, 32
+    b(0x83)
+    modrr(0  RSP)
+    b(32)
+}
+x64_emit_entry_win=(inits:array<int64> main_lf:XWord main_code:bool entry_end_lf:XWord watch_build:bool WATCH_CODE_AT:XWord WATCH_CODE_SIZE:XWord iat:XWord):>XWord=>$unsafe {
+    loop XWord(x_code[0].length) % 16 not=? 0 {b(0xCC)}
+    let start=XWord(x_code[0].length)
+    line_rows.push(XWord(x_code[0].length))
+    line_rows.push(0)
+    row_pos=0
+    rex(true  0  0  RSP  false) # sub rsp, 8
+    b(0x83)
+    modrr(5  RSP)
+    b(8)
+    if watch_build {
+        # (sloppy watch: room for the code of later builds, reserved before anything else can be
+        # put there, its pages committed as patches use them; its first word tells
+        # lib/std/watch.jo it is there)
+        win_virtual_alloc(WATCH_CODE_AT  WATCH_CODE_SIZE  0x2000  iat) # MEM_RESERVE
+        mov_imm(RCX  WATCH_CODE_AT)
+        b24(0xC83948) # cmp rax, rcx
+        b16(0x0075) # jne over the rest
+        let j=XWord(x_code[0].length)
+        win_virtual_alloc(WATCH_CODE_AT  4096  0x1000  iat) # MEM_COMMIT
+        b24(0xC08548) # test rax, rax
+        b16(0x0074) # je over the mark
+        let k=XWord(x_code[0].length)
+        mov_imm(RDX  0x6A6F74776174636B)
+        mov_mr(RAX  0  RDX)
+        x_code[0][k - 1] = uint8((XWord(x_code[0].length) - k) & 0xff)
+        x_code[0][j - 1] = uint8((XWord(x_code[0].length) - j) & 0xff)
+    }
+    loop f in inits {
+        b(0xE8)
+        b32(0)
+        call_fix.push([XWord(x_code[0].length) - 4  f])
+    }
+    b16(0xDB31) # xor ebx, ebx (the exit x_code[0])
+    if main_lf >=? 0 {
+        b(0xE8)
+        b32(0)
+        call_fix.push([XWord(x_code[0].length) - 4  main_lf])
+        if main_code {mov_rr(RBX  RAX)}
+    }
+    if entry_end_lf >=? 0 {
+        b(0xE8)
+        b32(0)
+        call_fix.push([XWord(x_code[0].length) - 4  entry_end_lf])
+    }
+    mov_rr(RCX  RBX)
+    rex(true  0  0  RSP  false) # sub rsp, 32 (shadow space)
+    b(0x83)
+    modrr(5  RSP)
+    b(32)
+    b16(0x15FF)
+    b32(0) # call [rip + ExitProcess]
+    x_data_fix[0].push([XWord(x_code[0].length) - 4  1  iat])
+    b(0xCC)
+    start
+}
+
+# Windows calls a @cabi function (a window procedure...) with its own convention: an adapter
+# moves the arguments where Sloppy code expects them and keeps what Windows expects kept
+# (rdi, rsi, xmm6-15). Taking the function's address gives the adapter's (cabi_fix).
+let cabi_adapter:dict<int64 int64>=[] # function -> its adapter's offset
+x64_emit_adapter=(lf:XWord ptypes:array<int64>):>XWord=>$unsafe {
+    loop XWord(x_code[0].length) % 16 not=? 0 {b(0xCC)}
+    let start=XWord(x_code[0].length)
+    cabi_adapter[lf] = start
+    b(0x55) # push rbp
+    mov_rr(RBP  RSP)
+    b(0x57) # push rdi
+    b(0x56) # push rsi
+    rex(true  0  0  RSP  false) # sub rsp, 160
+    b(0x81)
+    modrr(5  RSP)
+    b32(160)
+    loop i in [0..10) {vmov_mr(RSP  16 * i  6 + i  VX)}
+    # (in order: no argument is overwritten before it is moved)
+    let wregs:array<int64>=[RCX  RDX  8  9]
+    let ni:XWord=0
+    let nf:XWord=0
+    loop k in [XWord(0)..XWord(ptypes.length)) {
+        let t=ptypes[k]
+        # (from the fifth on, on the caller's stack: above the return address and 32 bytes of
+        # shadow space)
+        if t =? VI {
+            if k <? 4 {mov_rr(int_arg_regs[ni]  wregs[k])}
+            else {mov_rm(int_arg_regs[ni]  RBP  48 + 8 * (k - 4))}
+            ni += 1
+        }
+        else {
+            if k <? 4 {vmov_rr(nf  k  VX)}
+            else {sse_rm(0xF2  0x10  nf  RBP  48 + 8 * (k - 4))} # movsd
+            nf += 1
+        }
+    }
+    b(0xE8)
+    b32(0)
+    call_fix.push([XWord(x_code[0].length) - 4  lf])
+    loop i in [0..10) {vmov_rm(6 + i  RSP  16 * i  VX)}
+    rex(true  0  0  RSP  false) # add rsp, 160
+    b(0x81)
+    modrr(0  RSP)
+    b32(160)
+    b(0x5E) # pop rsi
+    b(0x5F) # pop rdi
+    b(0x5D) # pop rbp
+    b(0xC3)
+    start
+}
+x64_emit_entry=(inits:array<int64> main_lf:XWord main_code:bool entry_end_lf:XWord watch_build:bool WATCH_CODE_AT:XWord WATCH_CODE_SIZE:XWord):>XWord=>$unsafe {
+    loop XWord(x_code[0].length) % 16 not=? 0 {b(0xCC)}
+    let start=XWord(x_code[0].length)
+    if XWord(rsp_rows.length) >? 0 {rsp_row(-2)}
+    # (no source line: line 0)
+    line_rows.push(XWord(x_code[0].length))
+    line_rows.push(0)
+    row_pos=0
+    rel_fixup_lea(RAX  1  0)
+    mov_mr(RAX  0  RSP) # save initial stack pointer (argc/argv)
+    rex(true  0  0  RSP  false)
+    b(0x83)
+    modrr(4  RSP)
+    b(0xF0) # and rsp, -16
+    if watch_build {
+        # (sloppy watch: room for the code of later builds, taken before anything else can be put
+        # there; its first word tells lib/std/watch.jo it is there)
+        mov_imm(RDI  WATCH_CODE_AT)
+        mov_imm(RSI  WATCH_CODE_SIZE)
+        mov_imm(RDX  7)
+        mov_imm(10  0x104022) # private, anonymous, no reserve, fixed (no replace)
+        mov_imm(8  -1)
+        mov_imm(9  0)
+        mov_imm(RAX  9)
+        b16(0x050F) # mmap
+        mov_imm(RCX  WATCH_CODE_AT)
+        b24(0xC83948) # cmp rax, rcx
+        b16(0x0075) # jne over the mark
+        let j=XWord(x_code[0].length)
+        mov_imm(RDX  0x6A6F74776174636B)
+        mov_mr(RAX  0  RDX)
+        x_code[0][j - 1] = uint8((XWord(x_code[0].length) - j) & 0xff)
+    }
+    loop f in inits {
+        b(0xE8)
+        b32(0)
+        call_fix.push([XWord(x_code[0].length) - 4  f])
+    }
+    b16(0xDB31) # xor ebx, ebx (the exit x_code[0])
+    if main_lf >=? 0 {
+        b(0xE8)
+        b32(0)
+        call_fix.push([XWord(x_code[0].length) - 4  main_lf])
+        if main_code {mov_rr(RBX  RAX)}
+    }
+    if entry_end_lf >=? 0 {
+        b(0xE8)
+        b32(0)
+        call_fix.push([XWord(x_code[0].length) - 4  entry_end_lf])
+    }
+    mov_rr(RDI  RBX)
+    mov_imm(RAX  231)
+    b16(0x050F) # exit_group
+    # (the entry point: debuggers stop unwinding here)
+    if XWord(rsp_rows.length) >? 0 {rsp_row(-1)}
+    start
+}
+
+# where each call returns to, and the source position of the call (an index into
+# ir_positions): the line table of backtraces (lib/std/backtrace.jo)
+let stub_addr:array<int64>=[-1  -1  -1  -1  -1  -1  -1  -1  -1  -1  -1  -1  -1]
+
+# machine code stubs for non-local control transfer
+x64_emit_stubs=():>void=>$unsafe {
+    let frames=XWord(rsp_rows.length) >? 0
+    loop XWord(x_code[0].length) % 16 not=? 0 {b(0xCC)}
+    if frames {rsp_row(0)}
+    line_rows.push(XWord(x_code[0].length))
+    line_rows.push(0)
+    row_pos=0
+    # setjmp(rdi = buf): save callee-saved registers, stack pointer and return address
+    stub_addr[2] = XWord(x_code[0].length)
+    loop i in 0.. and r in [RBX  RBP  12  13  14  15] {mov_mr(RDI  8 * i  r)}
+    lea(RAX  RSP  8)
+    mov_mr(RDI  48  RAX)
+    mov_rm(RAX  RSP  0)
+    mov_mr(RDI  56  RAX)
+    b16(0xC031) # xor eax, eax
+    b(0xC3)
+    # longjmp(rdi = buf, rsi = value)
+    loop XWord(x_code[0].length) % 16 not=? 0 {b(0xCC)}
+    stub_addr[3] = XWord(x_code[0].length)
+    loop i in 0.. and r in [RBX  RBP  12  13  14  15] {mov_rm(r  RDI  8 * i)}
+    mov_rm(RSP  RDI  48)
+    mov_rr(RAX  RSI)
+    rex(false  0  0  RDI  false)
+    b(0xFF)
+    mem(4  RDI  56) # jmp [rdi+56]
+    # jump(rdi = entry, rsi = stack): switch stacks and jump (rdx = 0 for ld.so)
+    loop XWord(x_code[0].length) % 16 not=? 0 {b(0xCC)}
+    stub_addr[4] = XWord(x_code[0].length)
+    mov_rr(RSP  RSI)
+    b16(0xD231) # xor edx, edx
+    rex(false  0  0  RDI  false)
+    b(0xFF)
+    modrr(4  RDI) # jmp rdi
+    # clone_thread(rdi = entry, rsi = arg, rdx = stack top): the child calls entry(arg) on the
+    # new stack, then exits the thread; the parent gets the thread id (or -errno)
+    loop XWord(x_code[0].length) % 16 not=? 0 {b(0xCC)}
+    stub_addr[5] = XWord(x_code[0].length)
+    let xm_bytes12:array<int64>=[0x48  0x83  0xEA  0x10  0x48  0x89  0x3A  0x48  0x89  0x72  0x08  0x48  0x89  0xD6  0xBF  0x00  0x0F  0x05  0x00  0x31  0xD2  0x45  0x31  0xD2  0x45  0x31  0xC0  0xB8  0x38  0x00  0x00  0x00  0x0F  0x05  0x48  0x85  0xC0  0x74  0x01  0xC3]
+    loop x in xm_bytes12 {b(x)}
+    if frames {rsp_row(-2)}
+    let xm_bytes11:array<int64>=[0x58  0x5F  0xFF  0xD0  0xB8  0x3C  0x00  0x00  0x00  0x31  0xFF  0x0F  0x05  0x0F  0x0B]
+    loop x in xm_bytes11 {b(x)}
+    # atomic_add(rdi = p, rsi = v) -> old value
+    loop XWord(x_code[0].length) % 16 not=? 0 {b(0xCC)}
+    stub_addr[6] = XWord(x_code[0].length)
+    if frames {rsp_row(0)}
+    let xm_bytes10:array<int64>=[0x48  0x89  0xF0  0xF0  0x48  0x0F  0xC1  0x07  0xC3]
+    loop x in xm_bytes10 {b(x)} # mov rax, rsi; lock xadd [rdi], rax; ret
+    # atomic_cas(rdi = p, rsi = expected, rdx = desired) -> old value
+    loop XWord(x_code[0].length) % 16 not=? 0 {b(0xCC)}
+    stub_addr[7] = XWord(x_code[0].length)
+    let xm_bytes9:array<int64>=[0x48  0x89  0xF0  0xF0  0x48  0x0F  0xB1  0x17  0xC3]
+    loop x in xm_bytes9 {b(x)} # mov rax, rsi; lock cmpxchg [rdi], rdx; ret
+    # stack_ptr() -> the caller's stack pointer
+    loop XWord(x_code[0].length) % 16 not=? 0 {b(0xCC)}
+    stub_addr[8] = XWord(x_code[0].length)
+    let xm_bytes8:array<int64>=[0x48  0x8D  0x44  0x24  0x08  0xC3]
+    loop x in xm_bytes8 {b(x)} # lea rax, [rsp+8]; ret
+    # cpu_features() -> bit 0: AVX2 usable (cpuid 1: OSXSAVE and AVX; xgetbv: the system saves
+    # xmm and ymm state; cpuid 7: AVX2)
+    loop XWord(x_code[0].length) % 16 not=? 0 {b(0xCC)}
+    stub_addr[9] = XWord(x_code[0].length)
+    b(0x53) # push rbx
+    if frames {rsp_row(8)}
+    let xm_bytes7:array<int64>=[0xB8  0x01  0x00  0x00  0x00  0x31  0xC9  0x0F  0xA2  0x41  0x89  0xC8  0x41  0x81  0xE0  0x00  0x00  0x00  0x18  0x41  0x81  0xF8  0x00  0x00  0x00  0x18  0x75  0x20  0x31  0xC9  0x0F  0x01  0xD0  0x83  0xE0  0x06  0x83  0xF8  0x06  0x75  0x13  0xB8  0x07  0x00  0x00  0x00  0x31  0xC9  0x0F  0xA2  0x89  0xD8  0xC1  0xE8  0x05  0x83  0xE0  0x01  0x5B]
+    loop x in xm_bytes7 {b(x)}
+    if frames {rsp_row(0)}
+    b(0xC3)
+    if frames {rsp_row(8)}
+    let xm_bytes6:array<int64>=[0x31  0xC0  0x5B]
+    loop x in xm_bytes6 {b(x)} # no: xor eax, eax; pop rbx
+    if frames {rsp_row(0)}
+    b(0xC3)
+    # code_sync(p, n): nothing to do (x86-64 keeps the instruction cache coherent)
+    loop XWord(x_code[0].length) % 16 not=? 0 {b(0xCC)}
+    stub_addr[11] = XWord(x_code[0].length)
+    let xm_bytes5:array<int64>=[0x31  0xC0  0xC3]
+    loop x in xm_bytes5 {b(x)} # xor eax, eax; ret
+    # call rcx with rax as its argument, keeping every register but rax and rcx (a call the
+    # register allocator need not know of: CALL_IF_SHARED's when it is taken)
+    loop XWord(x_code[0].length) % 16 not=? 0 {b(0xCC)}
+    stub_addr[12] = XWord(x_code[0].length)
+    let xm_bytes4:array<int64>=[0x55  0x48  0x89  0xE5]
+    loop x in xm_bytes4 {b(x)} # push rbp; mov rbp,rsp
+    if frames {rsp_row(-1)}
+    let xm_bytes3:array<int64>=[0x57  0x56  0x52  0x41  0x50  0x41  0x51  0x41  0x52  0x41  0x53  0x48  0x83  0xE4  0xF0  0x48  0x81  0xEC  0x00  0x01  0x00  0x00]
+    loop x in xm_bytes3 {b(x)}
+    loop i in [0..16) {xmm_spill(true  i)}
+    let xm_bytes2:array<int64>=[0x48  0x89  0xC7  0xFF  0xD1]
+    loop x in xm_bytes2 {b(x)} # mov rdi, rax; call rcx
+    loop i in [0..16) {xmm_spill(false  i)}
+    let xm_bytes1:array<int64>=[0x48  0x8D  0x65  0xC8  0x41  0x5B  0x41  0x5A  0x41  0x59  0x41  0x58  0x5A  0x5E  0x5F  0x5D]
+    loop x in xm_bytes1 {b(x)}
+    if frames {rsp_row(0)}
+    b(0xC3)
+}
+
+# movdqu [rsp + 16 i], xmm i (or back)
+xmm_spill=(store:bool i:XWord):>void=>$unsafe {
+    b(0xF3)
+    if i >=? 8 {b(0x44)}
+    b(0x0F)
+    if store {b(0x7F)}
+    else {b(0x6F)}
+    b(0x84 | ((i & 7) << 3))
+    b(0x24)
+    b32(16 * i)
+}
+x64_patch_module=(text_addr:XWord ro_addr:XWord data_addr:XWord @fn_addr:array<int64>):>[int64 int64]=>$unsafe {
+    let targets=fn_addr.ptr as ptr<XWord>
+    let stubs=stub_addr.ptr as ptr<XWord>
+    if XWord(stub_fix.length) >? 0 and stub_addr[2] <? 0 {return [1  -1]}
+    let fixes0=cabi_fix.ptr as ptr<[XWord XWord]>
+    loop i in [XWord(0)..XWord(cabi_fix.length)) {
+        let f=fixes0[i]
+        let a:XWord=-1
+        if f[1] in? cabi_adapter {a=cabi_adapter[f[1]]}
+        if a <? 0 {return [2  f[1]]}
+        patch32(f[0]  a - (f[0] + 4))
+    }
+    let fixes1=stub_fix.ptr as ptr<[XWord XWord]>
+    loop i in [XWord(0)..XWord(stub_fix.length)) {
+        let f=fixes1[i]
+        patch32(f[0] stubs[f[1]] - (f[0] + 4))
+    }
+    let fixes2=call_fix.ptr as ptr<[XWord XWord]>
+    loop i in [XWord(0)..XWord(call_fix.length)) {
+        let f=fixes2[i]
+        let target=targets[f[1]]
+        if target <? 0 {return [3  f[1]]}
+        patch32(f[0]  target - (f[0] + 4))
+    }
+    let fixes3=x_data_fix[0].ptr as ptr<[XWord XWord XWord]>
+    loop i in [XWord(0)..XWord(x_data_fix[0].length)) {
+        let f=fixes3[i]
+        let base=ro_addr
+        if f[1] =? 1 {base=data_addr}
+        let target=base + f[2]
+        patch32(f[0]  target - (text_addr + f[0] + 4))
+    }
+    [0  -1]
+}
