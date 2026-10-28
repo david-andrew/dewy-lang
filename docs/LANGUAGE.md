@@ -4107,7 +4107,11 @@ match regex(user_pattern) {
 A pattern whose repeats
 written out exceed 50,000 instructions (`(a{1000}){1000}`), or that nests groups
 or repeats over 200 deep, is refused like one that cannot be read. An empty match advances
-one code point before the next search; unmatched capture groups contain `""`.
+one code point before the next search; unmatched capture groups contain `""`. A successful
+regex search retains its pattern's capture count, so a literal pattern's group
+indices can be proven in bounds. A dynamic `Regex` needs a guard on its
+`groups` count or on the returned match's `groups.length`. The evidence belongs
+to the returned match; changing its group array invalidates the old length.
 `replace` accepts `$0` for the match, `$1` onward for captures, `$$` for a dollar,
 or a `(Match):>string` callback. `split` returns the text between matches.
 

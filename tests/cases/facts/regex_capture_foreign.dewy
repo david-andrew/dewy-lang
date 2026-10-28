@@ -1,0 +1,3 @@
+__dewy_find=(text:string r:Regex start:int64):>Match|Missing=>Match[0 0 "" []]
+let found=__dewy_find("ab" regex(r"(a)(b)") 0)
+if found isnt? Missing printl(found.groups[0])

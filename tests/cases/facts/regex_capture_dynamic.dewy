@@ -1,0 +1,8 @@
+read=(pattern:string text:string):>string=>{
+    let r=regex(pattern)
+    if r is? RegexError return "invalid"
+    let found=text.find(r)
+    if found is? Missing return "missing"
+    found.groups[0]
+}
+printl(read("ab" "ab"))

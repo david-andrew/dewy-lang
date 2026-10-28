@@ -23,6 +23,7 @@ use 'expr.jo'
 use 'lower.jo'
 use 'check.jo'
 use 'comptime.jo'
+use 'check_constant.jo'
 use 'isolation.jo'
 use 'refine.jo'
 use 'nd_contracts.jo'
@@ -1159,6 +1160,74 @@ fact_search_result = (n: int, result: int, values: int[], s: mut FactState):
     payload = fact_project(s, result, -4, false, T_INT)
     predicate = if not fact_text_search_call(n): fact_search_predicate else if nkids(n) == 3 and int(nodes[int(fns[f].decl)].name) == fact_name_find: fact_text_from_predicate else: fact_text_search_predicate
     s.conditional.push(ResultEvidence(selector, tag, predicate, values, fns[f].ptypes, payload, T_INT))
+
+# The bundled regex search constructs one capture string per group, including
+# unmatched optional groups (empty strings). Attach the count to the successful
+# Match payload of this evaluated result, not to a pattern spelling or a place.
+# Only demanded calls use this reviewed contract: O(result members), then
+# indexed projections. Constant patterns use the library's bounded parser once
+# per interned pattern, cached for this compilation; no duplicated grammar or
+# matching-table construction. Hooks may change returned aggregates on copy.
+fact_name_regex = 0
+fact_name_regex_find = 0
+fact_regex_counts: {int: int} = {}
+fact_regex_call = (n: int) -> bool:
+    if nkids(n) != 1 and nkids(n) != 3 or nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0: return false
+    d = int(fns[int(nodes[n].sym)].decl)
+    if d == 0: return false
+    if fact_name_regex == 0:
+        fact_name_regex = intern("regex")
+        fact_name_regex_find = intern("__dewy_find")
+    name = int(nodes[d].name)
+    (name == fact_name_regex and nkids(n) == 1 or name == fact_name_regex_find and nkids(n) == 3) and files[pos_file(nodes[d].pos)].path == lib_dir + "/std/regex.jo"
+
+fact_regex_search_result = (n: int, result: int, values: int[], s: mut FactState):
+    if not fact_regex_call(n): return
+    named = name_of(int(nodes[int(fns[int(nodes[n].sym)].decl)].name))
+    if named == "regex" and nkids(n) == 1:
+        if ownership_decls.len() != 0 and ownership_fact_type(ntype(n)): return
+        text = cc_constant(kid(n, 0))
+        if text < 0: return
+        count = fact_regex_counts.get(text) ?? -1
+        if count < 0:
+            # Interpret the library implementation, never a second regex parser.
+            # Only a checked constant string enters the evaluator.
+            arg = mk(.str_lit, nodes[n].pos)
+            nodes[arg].sval = i32(text); nodes[arg].type = i32(T_STR)
+            add_flag(arg, NF_CHECKED)
+            d = int(fns[int(nodes[n].sym)].decl)
+            helper = module_lookup(int(nodes[d].mod), intern("__re_parse"))
+            if helper == 0 or syms[helper].kind != .fns: return
+            f = get_fn_inst(int(syms[helper].decl), [], nodes[n].pos)
+            run = mk(.call, nodes[n].pos)
+            nodes[run].sym = i32(f); nodes[run].type = fns[f].ret
+            add_flag(run, NF_CHECKED); set_list(run, [arg])
+            value = ct_values[ct_run(run)]
+            if value.items.len() != 2: return
+            payload = ct_values[value.items[0]]
+            if tkind(payload.type) != .struct_: return
+            si = int(types[payload.type].st)
+            loop i in [0..int(structs[si].nfields)):
+                if name_of(int(fields[int(structs[si].fields) + i].name)) == "groups": count = ct_values[payload.items[i]].i
+            if count < 0: return
+            fact_regex_counts[text] = count
+        loop t in union_members(fact_type(ntype(n))):
+            if fact_call_field_type(t, intern("groups")) != T_INT: continue
+            payload = fact_project(s, result, -4, false, t)
+            if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(payload, intern("groups"), false, fact_constant(s, count)))
+        return
+    if nkids(n) != 3 or named != "__dewy_find": return
+    if ownership_decls.len() != 0 and ownership_fact_type(ntype(n)): return
+    name = intern("groups")
+    loop t in union_members(fact_type(ntype(n))):
+        gt = fact_call_field_type(t, name)
+        if tkind(gt) != .array or telem(gt) != T_STR: continue
+        count = fact_project(s, values[1], name, false, T_INT)
+        length = fact_clamped(s, count, n)
+        payload = fact_project(s, result, -4, false, t)
+        groups = fact_project(s, payload, name, false, gt)
+        if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(groups, -1, false, length))
+        return
 
 # The fields of record value base, by ordinal, for a dependent field contract.
 # O(fields); each sibling is projected once per record value.
@@ -7101,6 +7170,8 @@ fact_slice_prepare = (f: int, summary: bool = false):
         else if k == .call and ntype(n) == T_BOOL and nodes[n].aux == 0 and nodes[n].sym > 0 and fact_predicate_summary(int(nodes[n].sym)) != 0:
             loop arg in kids(n): values.push(arg)
         else if k == .call and fact_map_snapshot_call(n): values.push(kid(n, 0))
+        else if k == .call and fact_regex_call(n):
+            loop arg in kids(n): values.push(arg)
         else if k == .call and fact_integer_gcd_call(n):
             loop arg in kids(n): values.push(arg)
         # (a length-preserving call's length is its receiver's: `let ks = d.keys` then `ks.values`
@@ -8414,6 +8485,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             ref_assume(int(fns[f].ret), result, values, s)
             ref_arm_publish(f, result, values, s)
             if fact_search_call(n): fact_search_result(n, result, entry, s)
+            if nkids(n) == 1 or nkids(n) == 3: fact_regex_search_result(n, result, entry, s)
             if result_active: result_publish(f, result, values, s)
             # (reviewed prelude contracts: `parallel_range(n f)` has max(0, n)
             # results, `parallel_map(xs f)` one per element)
@@ -8968,6 +9040,7 @@ facts_reset = ():
     fact_saving = false
     fact_sum_operand = 0
     fact_constant_globals = {}
+    fact_regex_counts = {}
     fact_call_field_types = {}
     draw_context_reset()
     fact_search_predicate = 0

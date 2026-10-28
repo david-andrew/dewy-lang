@@ -78,10 +78,16 @@ const __RE_NWORDB = 10
 # what is wrong with a pattern, or none when regex() can read it
 #   if let why = regex_error(pat): fail("bad pattern: {why}")
 regex_error = (pattern: str) -> str?:
-    p = __ReParser(pattern, chars(pattern))
-    __re_read(p)
+    p, _ = __re_parse(pattern)
     if len(p.err) == 0: return none
     p.err
+
+# Shared by validation and construction, including demand-time capture counts.
+# This parser result needs no runtime byte-buffer casts or matching tables.
+__re_parse = (pattern: str) -> (__ReParser, int):
+    p = __ReParser(pattern, chars(pattern))
+    root = __re_read(p)
+    (p, root)
 
 # (the pattern read into p's nodes: its root, or p.err says what is wrong)
 __re_read = (p: mut __ReParser) -> int:
@@ -98,8 +104,7 @@ __re_read = (p: mut __ReParser) -> int:
 # literal pattern is checked while compiling: it is a Regex, or a compile error.
 @check_constant(regex_error(pattern), "not a valid pattern")
 regex = (pattern: str) -> Regex | RegexError:
-    p = __ReParser(pattern, chars(pattern))
-    ast = __re_read(p)
+    p, ast = __re_parse(pattern)
     if len(p.err) > 0: return RegexError(p.err)
     r = Regex(pattern, [], [], 0)
     r.icase = p.icase

@@ -1,0 +1,30 @@
+match_pair=(text:string):>string=>{
+    let found=text.find(regex(r"([a-z]+):([0-9]+)"))
+    if found is? Missing return "missing"
+    "{found.groups[0]}={found.groups[1]}"
+}
+optional=(text:string):>string=>{
+    let found=text.find(regex(r"(a)?(b)"))
+    if found is? Missing return "missing"
+    "[{found.groups[0]}][{found.groups[1]}]"
+}
+printl(match_pair("id:42") match_pair("none") optional("b"))
+complex=(text:string):>string=>{
+    let found=text.find(regex(r"(?i)([()])(?:a)(b)?"))
+    if found is? Missing return "missing"
+    "[{found.groups[0]}][{found.groups[1]}]"
+}
+guarded=(r:Regex text:string):>string=>{
+    if r.groups <? 2 return "short"
+    let found=text.find(r)
+    if found is? Missing return "missing"
+    "{found.groups[0]}:{found.groups[1]}"
+}
+snapshot=()=>{
+    let r=regex(r"(a)(b)")
+    let found="ab".find(r)
+    r=regex(r"(?:a)(?:b)")
+    if found is? Missing return "missing"
+    "{found.groups[0]}{found.groups[1]}"
+}
+printl(complex("(A") guarded(regex(r"(a)(b)") "ab") snapshot())
