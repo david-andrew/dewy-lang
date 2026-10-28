@@ -784,7 +784,7 @@ class Interp(Expr):
         return '"' + ''.join(escape(p) if isinstance(p, str) else '{' + render(p) + '}' for p in self.parts) + '"'
 
     def eval(self, m, env):
-        return ''.join(p if isinstance(p, str) else show(store(m.eval(p, env), p.ty)) for p in self.parts)
+        return ''.join(p if isinstance(p, str) else show(m.eval(p, env)) for p in self.parts)
 
 
 @dataclass(frozen=True)
@@ -807,7 +807,7 @@ class Conv(Expr):
     def eval(self, m, env):
         value = m.eval(self.x, env)
         if self.ty == S:
-            return show(store(value, self.x.ty))
+            return show(value)
         if self.ty == F:
             return float(value)
         wrapped = wrap(value, self.ty)
@@ -1381,7 +1381,7 @@ class Machine:
         elif isinstance(s, Do):
             self.eval(s.expr, env)
         elif isinstance(s, Print):
-            self.output.append(show(store(self.eval(s.expr, env), s.expr.ty)) + '\n')
+            self.output.append(show(self.eval(s.expr, env)) + '\n')
         elif isinstance(s, If):
             self.execute(s.then if self.eval(s.test, env) else s.other, Scope({}, env))
         elif isinstance(s, Loop):
