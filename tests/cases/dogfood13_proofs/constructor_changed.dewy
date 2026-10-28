@@ -1,0 +1,8 @@
+Pair:type = [items:array<int>]
+make = ():>Pair => Pair[[4 7]]
+first = (xs:array<int><length =? 2>):>int => xs[0]
+main = () => {
+    let p = make()
+    p.items.clear()
+    printl(first(p.items))
+}

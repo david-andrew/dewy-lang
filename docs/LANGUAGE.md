@@ -680,6 +680,14 @@ holds inside a later `$runtime_checks=false` block. The first check remains a
 possible panic; replacing or resizing the array, or changing the index, does
 not transfer its bounds to the new values. A check on only one branch or in a
 possibly empty loop supplies no fact after the join.
+
+Nested comprehensions that append one equal-length row per input row retain
+that positional length relationship, including through cell writes. Changing
+a row's length invalidates it. Small constructor helpers retain array-field
+lengths proved across their returns, including lengths derived from arguments;
+these facts can satisfy checked length contracts at a caller. An unconstrained
+record parameter still needs its own guard or contract.
+
 Index proofs retain nested array lengths through element writes in branches
 and loops. A checked helper that preserves or grows an array's length can
 preserve a caller's guarded index; an append helper's returned index can be

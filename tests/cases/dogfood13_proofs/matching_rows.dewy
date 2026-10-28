@@ -1,0 +1,8 @@
+mark = (image:array<array<int>>) => {
+    let seen = [loop row in image [loop _ in row false]]
+    loop y in [0..image.length) {
+        loop x in [0..image[y].length) seen[y][x] = true
+    }
+    printl(seen)
+}
+main = () => {mark([[1 2] [] [3 4 5]]) mark([])}

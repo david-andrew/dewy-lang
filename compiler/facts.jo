@@ -139,6 +139,8 @@ struct FactPushes:
     seen: bool[]
     sites: int[][]
     recorded: {int: bool}
+    rows: int = 0
+    matching: bool = false
 
 fact_push_frames: FactPushes[]
 fact_comprehensions: {int: int} = {}   # a comprehension's loop -> its accumulator
@@ -152,6 +154,12 @@ fact_loop_exhausted = false
 fact_divisors: {int: int} = {}
 fact_requests: FactRequest[]
 fact_terms: FactTerm[]
+# Evaluated actuals of demanded record-returning calls. A field projection
+# requests its own cached return summary; no whole-program constructor census.
+fact_constructor_actuals: {int: int[]} = {}
+fact_constructor_types: {int: bool} = {}
+fact_constructor_bodies: {int: bool} = {}
+fact_constructor_calls: {int: bool} = {}
 
 # A fork's closure (the function argument of `parallel_range`/`parallel_map`,
 # which call it before they return) starts from what its creator knew of its
@@ -173,6 +181,7 @@ fact_query = false
 fact_policy = FactPolicy.RuntimeAllowed
 const FACT_CAP = 256
 const FACT_STEPS = 4096
+fact_step_limit = FACT_STEPS
 # Projection selector of an integer's nonnegative part, max(0, n): the length
 # `fill(x n)` gets, shared by every fill of the same count.
 const FACT_CLAMPED = -7
@@ -187,6 +196,8 @@ const FACT_MAP_POSITIONS = -18
 const FACT_ELEMENT_COPY = -19
 const FACT_POOL_POSITIONS = -20
 const FACT_MAP_DENSE = -21
+# Matching row lengths, indexed by the same position in an immutable source.
+const FACT_ROW_SOURCE = -22
 fact_name_vals = 0
 
 # A runtime-child walk, never into nested function bodies. Closed calls
@@ -718,12 +729,21 @@ fact_project = (s: mut FactState, base: int, selector: int, element: bool, t: in
         if hull >= 0:
             b = fact_bound(s, v); h = fact_bound(s, s.projections[hull].value)
             fact_set_bound(s, v, FactBound(max(b.lo, h.lo), min(b.hi, h.hi), b.nz or h.nz))
+    if element and tkind(fact_type(t)) == .array:
+        source = fact_index_get(s.index[0].projection_index, fact_projection_key(base, FACT_ROW_SOURCE, false))
+        if source >= 0 and s.projections.len() + 2 < FACT_CAP:
+            other = s.projections[source].value
+            row = fact_project(s, other, selector, true, telem(fact_type(fact_terms[other].type)))
+            length = fact_project(s, row, -1, false, T_INT)
+            fact_add_projection(s, FactProjection(v, -1, false, length))
     # Element-length hulls describe each selected value separately: two
     # arbitrary elements have the same bounds, not necessarily equal lengths.
     if element and (fact_type(t) == T_STR or tkind(fact_type(t)) == .array):
         hull = fact_index_get(s.index[0].projection_index, fact_projection_key(base, FACT_ELEMENT_LENGTH, false))
-        if hull >= 0 and s.projections.len() < FACT_CAP:
+        if hull >= 0 and s.projections.len() < FACT_CAP and fact_index_get(s.index[0].projection_index, fact_projection_key(v, -1, false)) < 0:
             fact_add_projection(s, FactProjection(v, -1, false, fact_new(s, fact_bound(s, s.projections[hull].value), FactTerm(type = T_INT))))
+    if not element and selector >= 0 and fact_constructor_actuals.len() > 0 and tkind(fact_type(t)) == .array and fact_constructor_actuals.has(base):
+        fact_constructor_field(s, base, selector, v)
     # (an element of a literal, by an index not known: what all of them share)
     if element:
         parts = fact_inventory(s, base)
@@ -736,6 +756,27 @@ fact_project = (s: mut FactState, base: int, selector: int, element: bool, t: in
         if not element and selector >= 0 and ref_has_fields(t): args = fact_field_args(s, base)
         ref_assume(t, v, args, s)
     v
+
+# Summarize only a demanded array field, over every return. Expected O(1)
+# lookup; at most 32 syntax nodes per callee, 128 transfer visits per field query.
+fact_constructor_field = (s: mut FactState, base: int, selector: int, v: int):
+    call = fact_terms[base].origin
+    summary = fact_summary(int(nodes[call].sym), false, selector)
+    if summary.seen:
+        length = fact_project(s, v, -1, false, T_INT)
+        old = fact_bound(s, length)
+        fact_set_bound(s, length, FactBound(max(old.lo, summary.length.lo), min(old.hi, summary.length.hi)))
+        actuals = fact_constructor_actuals[base]
+        if summary.same >= 0 and summary.same < actuals.len():
+            arg = actuals[summary.same]
+            pt = fact_type(ntype(kid(call, summary.same)))
+            other = if tkind(pt) == .array: fact_project(s, arg, -1, false, T_INT) else: fact_clamped(s, arg, call)
+            fact_difference(s, length, other, summary.delta, call)
+            fact_difference(s, other, length, -summary.delta, call)
+            b = fact_bound(s, length); o = fact_bound(s, other)
+            lo = if o.lo >= 0 and fact_add_fits(o.lo, summary.delta): max(b.lo, o.lo + summary.delta) else: b.lo
+            hi = if o.hi <= fact_length_max() and fact_add_fits(o.hi, summary.delta): min(b.hi, o.hi + summary.delta) else: b.hi
+            fact_set_bound(s, length, FactBound(lo, hi))
 
 # max(0, n) as a projection of n, so every use of one count (fills of the same
 # n, a callee's result length summarized by its count parameter) has one value.
@@ -1028,6 +1069,9 @@ fact_replace = (s: mut FactState, base: int, selector: int, element: bool, value
         p = old[pi]
         pi = links[pi]
         if element and not p.element and (p.selector == FACT_ELEMENT_LENGTH or p.selector == FACT_ELEMENT_VALUE or p.selector == FACT_ELEMENT_COPY): continue
+        if element and not p.element and p.selector == FACT_ROW_SOURCE:
+            row = fact_project(s, base, selector, true, telem(fact_type(t)))
+            if fact_compare(s, .eq, fact_project(s, row, -1, false, T_INT), fact_project(s, value, -1, false, T_INT)) != 1: continue
         if private and p.element: continue
         if private and p.selector == FACT_POOL_POSITIONS: continue
         if p.selector == FACT_MAP_POSITIONS and not p.element and (element or selector != fact_name_vals): continue
@@ -1446,6 +1490,7 @@ fact_probe_function = (f: int, disjoint: bool = false) -> {int: bool}:
     fact_probe_disjoint = if disjoint: f else: 0
     fact_owner = f
     fact_terms = [FactTerm()]
+    fact_constructor_actuals = {}
     state = FactState()
     refine = refine_active or refine_requests.len() > 0
     if refine: refine_fact_entry(f, state)
@@ -1466,6 +1511,7 @@ fact_probe_function = (f: int, disjoint: bool = false) -> {int: bool}:
     fact_slice = FactSlice()
     fact_owner = 0
     fact_terms = []
+    fact_constructor_actuals = {}
     fact_probe_on = false
     fact_probe_disjoint = 0
     proof_active = saved_proof
@@ -1493,6 +1539,8 @@ struct FactSummary:
 
 fact_summaries: {int: FactSummary} = {}
 fact_summary_owner = 0
+fact_summary_field = 0
+fact_constructor_budget = -1
 # Private induction hypothesis for a direct self-call only. Never published
 # in fact_summaries until every returning path verifies it.
 fact_summary_assumed: int[]
@@ -1512,8 +1560,12 @@ fact_summary_relation = (s: FactState, length: int) -> (int, int):
             if fact_distance(s, length, l, c) and fact_distance(s, l, length, -c): return (i, c)
     (-1, 0)
 
-fact_summary_record = (s: mut FactState, r: int):
+fact_summary_record = (s: mut FactState, r0: int):
     t = fact_type(int(fns[fact_summary_owner].ret))
+    r = r0
+    if fact_summary_field != 0:
+        t = fact_type(shape_field_type(t, fact_summary_field))
+        if r != 0: r = fact_project(s, r, fact_summary_field, false, t)
     length = FactBound()
     value = FactBound()
     same = -1
@@ -1595,14 +1647,82 @@ fact_summary_vacuous = (acc: FactSummary, t: int) -> bool:
     d = fact_domain(t)
     acc.value.lo <= d.lo and acc.value.hi >= d.hi and not acc.value.nz and not acc.host
 
-fact_summary = (f: int, places: bool = false) -> FactSummary:
-    if let known = fact_summaries.get(f): return known
+# Ordinary record fields only. Shaped tensors have their own contracts;
+# nested records, variants and ownership hooks are outside this summary.
+# Type-indexed, O(fields) once per demanded return type.
+fact_constructor_type = (t: int) -> bool:
+    if tkind(t) != .struct_: return false
+    if let known = fact_constructor_types.get(t): return known
+    si = int(types[t].st)
+    eligible = not is_nd(t) and structs[si].nvariants == 0 and not structs[si].union_ and not structs[si].soa_
+    found = false
+    if eligible:
+        loop i in [0..int(structs[si].nfields)):
+            if tkind(fact_type(int(fields[int(structs[si].fields) + i].type))) == .array: found = true
+    if found and ownership_decls.len() != 0 and ownership_fact_type(t): found = false
+    fact_constructor_types[t] = found
+    found
+
+# Bound slice construction too, before it allocates indexes for a large
+# algorithm merely because its return type happens to contain an array.
+fact_constructor_body = (f: int) -> bool:
+    if let known = fact_constructor_bodies.get(f): return known
+    work = [int(fns[f].body)]
+    cursor = 0
+    loop cursor < work.len() and work.len() <= 32:
+        n = work[cursor]
+        cursor += 1
+        if n != 0 and nodes[n].kind != .lambda:
+            if nkids(n) > 32:
+                fact_constructor_bodies[f] = false
+                return false
+            fact_slice_push_children(work, n)
+    small = work.len() <= 32
+    fact_constructor_bodies[f] = small
+    small
+
+# A demanded constructor field survives a conditional value just as
+# separate return statements do. No other fields need to be visited.
+fact_constructor_join = (n: int, paths0: FactPaths, y: int, z: int, result: FactBound, hull: int, s: mut FactState) -> int:
+    paths = paths0
+    field = fact_summary_field
+    ft = fact_type(shape_field_type(fact_type(ntype(n)), field))
+    a = fact_project(paths.yes, fact_project(paths.yes, y, field, false, ft), -1, false, T_INT)
+    b = fact_project(paths.no, fact_project(paths.no, z, field, false, ft), -1, false, T_INT)
+    length = if not paths.yes.live: fact_bound(paths.no, b) else if not paths.no.live: fact_bound(paths.yes, a) else: fact_hull(fact_bound(paths.yes, a), fact_bound(paths.no, b), n)
+    left = fact_summary_relation(paths.yes, a)
+    right = fact_summary_relation(paths.no, b)
+    relation = if not paths.yes.live: right else if not paths.no.live or left == right: left else: (-1, 0)
+    s = fact_join(paths.yes, paths.no, n)
+    value = fact_new(s, result, FactTerm(type = hull))
+    part = fact_project(s, value, field, false, ft)
+    count = fact_project(s, part, -1, false, T_INT)
+    fact_set_bound(s, count, length)
+    if relation.0 >= 0:
+        other = fact_summary_entry[relation.0]
+        fact_difference(s, count, other, relation.1, n)
+        fact_difference(s, other, count, -relation.1, n)
+    value
+
+fact_summary = (f: int, places: bool = false, field: int = 0) -> FactSummary:
+    key = if field == 0: f else: fact_pair_key(f, field)
+    if let known = fact_summaries.get(key): return known
     unknown = FactSummary(FactBound(), FactBound())
     d = int(fns[f].decl)
     t = fact_type(int(fns[f].ret))
     if fns[f].state != 2 or fns[f].body == 0 or fns[f].kind == FK_INIT or fns[f].caps.len() != 0 or d != 0 and has_flag(d, NF_EXTERN) or effect_unavailable.has(f): return unknown
+    if field != 0: t = fact_type(shape_field_type(t, field))
     if tkind(t) != .array and not (fact_scalar(t) and is_int(t)) and not places: return unknown
-    fact_summaries[f] = unknown
+    if (field != 0 or fact_constructor_budget >= 0) and not fact_constructor_body(f):
+        if field != 0: fact_summaries[key] = unknown
+        return unknown
+    fact_summaries[key] = unknown
+    constructor_root = field != 0 and fact_constructor_budget < 0
+    if constructor_root: fact_constructor_budget = 128
+    saved_field = fact_summary_field
+    saved_limit = fact_step_limit
+    fact_step_limit = if field != 0: 128 else: FACT_STEPS
+    fact_summary_field = field
     saved = (fact_owner, fact_summary_owner, fact_speculating, fact_loop_steps, fact_loop_exhausted, proof_active, result_active, fact_pending_defers, fact_probe_on, fact_query)
     saved_entry = refine_entry
     saved_loops = fact_loops
@@ -1672,7 +1792,7 @@ fact_summary = (f: int, places: bool = false) -> FactSummary:
         state = entry
         r = fact_capture(int(fns[f].body), state)
         if state.live: fact_summary_record(state, r)
-    result = if fact_loop_exhausted or not fact_summary_acc.seen: unknown else: fact_summary_acc
+    result = if fact_loop_exhausted or fact_constructor_budget == 0 or not fact_summary_acc.seen: unknown else: fact_summary_acc
     fact_owner = saved.0
     fact_summary_owner = saved.1
     fact_speculating = saved.2
@@ -1692,7 +1812,13 @@ fact_summary = (f: int, places: bool = false) -> FactSummary:
     fact_summary_entry = saved_lengths
     fact_summary_assumed = saved_assumed
     fact_summary_used = saved_used
-    fact_summaries[f] = result
+    fact_summary_field = saved_field
+    fact_step_limit = saved_limit
+    # A constructor's tighter budget must not poison an ordinary summary
+    # requested independently later. Keep its recursion sentinel only while running.
+    if fact_constructor_budget >= 0 and field == 0: fact_summaries.remove(key)
+    else: fact_summaries[key] = result
+    if constructor_root: fact_constructor_budget = -1
     result
 
 # A postcondition's current mutable actual. Place routes contain only named
@@ -2934,6 +3060,9 @@ fact_change_shape = (s: mut FactState, old0: int, fresh0: int, chain: int[], j0:
             # (the length of the old value is an evaluation too, even if unread so far)
             length = fact_project(s, old, -1, false, T_INT)
             if length != 0 and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(fresh, -1, false, length))
+            if j > 0 and nodes[chain[j - 1]].kind == .index:
+                source = fact_index_get(s.index[0].projection_index, fact_projection_key(old, FACT_ROW_SOURCE, false))
+                if source >= 0 and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(fresh, FACT_ROW_SOURCE, false, s.projections[source].value))
             if j > 0:
                 parts: FactProjection[]
                 pi = fact_index_get(s.index[0].projection_head, old)
@@ -5798,7 +5927,7 @@ fact_push_only = (n: int, l: int, sites: mut int[]) -> bool:
             if not fact_push_only(c, l, sites): return false
     true
 
-fact_push_open = (n: int, s: mut FactState) -> bool:
+fact_push_open = (n: int, s: mut FactState, base: int = 0) -> bool:
     acc = fact_comprehensions.get(n) ?? 0
     if acc <= 0: return false
     frame = FactPushes(n)
@@ -5822,6 +5951,13 @@ fact_push_open = (n: int, s: mut FactState) -> bool:
         else if fact_bound(s, fact_project(s, value, -1, false, T_INT)).hi != 0: continue
         sites: int[]
         if fact_mentions(int(nodes[n].a), l) or not fact_push_only(int(nodes[n].b), l, sites) or sites.len() == 0: continue
+        # Only empty, one-push-per-iteration row maps can preserve positions.
+        # The forward transfer below must additionally prove every row length.
+        if base != 0 and tkind(e) == .array and nodes[n].aux == 1 and not seen and tkind(fact_type(telem(fact_type(ntype(int(nodes[n].a)))))) == .array:
+            flow = fact_push_flow(int(nodes[n].b), l)
+            if flow.0 == 1 and flow.1 == -2:
+                frame.rows = base
+                frame.matching = true
         frame.locals.push(l)
         frame.lengths.push(sized)
         frame.bounds.push(bound)
@@ -5838,6 +5974,14 @@ fact_push_record = (n: int, s: mut FactState, value: int):
         loop j in [0..fact_push_frames[f].locals.len()):
             if fact_push_frames[f].locals[j] != l: continue
             v = if fact_push_frames[f].lengths[j]: fact_project(s, value, -1, false, T_INT) else: value
+            if fact_push_frames[f].matching:
+                loop_ = fact_push_frames[f].at
+                index = fact_binding(s, PlaceIdentity(.local, fact_owner, int(nodes[loop_].c)))
+                if index < 0: fact_push_frames[f].matching = false
+                else:
+                    row = fact_project(s, fact_push_frames[f].rows, s.bindings[index].value, true, int(locals[int(nodes[loop_].sym)].type))
+                    length = fact_project(s, row, -1, false, T_INT)
+                    if fact_compare(s, .eq, v, length) != 1: fact_push_frames[f].matching = false
             b = fact_bound(s, v)
             fact_push_frames[f].bounds[j] = if fact_push_frames[f].seen[j]: fact_hull(fact_push_frames[f].bounds[j], b, n) else: b
             fact_push_frames[f].seen[j] = true
@@ -5851,9 +5995,15 @@ fact_push_close = (n: int, s: mut FactState):
         loop site in frame.sites[j]:
             if not frame.recorded.has(site): all = false
         b = frame.bounds[j]
-        if not all or b.wide or s.projections.len() >= FACT_CAP: continue
+        if not all or s.projections.len() >= FACT_CAP: continue
         l = frame.locals[j]
         i = fact_binding(s, PlaceIdentity(.local, int(locals[l].owner), l))
+        if i >= 0 and frame.matching:
+            source = frame.rows
+            prior = fact_index_get(s.index[0].projection_index, fact_projection_key(source, FACT_ROW_SOURCE, false))
+            if prior >= 0: source = s.projections[prior].value
+            fact_add_projection(s, FactProjection(s.bindings[i].value, FACT_ROW_SOURCE, false, source))
+        if b.wide: continue
         selector = if frame.lengths[j]: FACT_ELEMENT_LENGTH else: FACT_ELEMENT_VALUE
         if i < 0 or fact_index_get(s.index[0].projection_index, fact_projection_key(s.bindings[i].value, selector, false)) >= 0: continue
         b.reason = .loop_; b.witness = n
@@ -6022,6 +6172,12 @@ fact_loop_elements = (n: int, base: int, s: mut FactState):
     t = fact_type(int(locals[l].type))
     sized = t == T_STR or tkind(t) == .array
     if not fact_scalar(t) and not sized and tkind(t) != .tuple and tkind(t) != .struct_: return
+    if sized and fact_push_frames.len() > 0:
+        index = fact_binding(s, PlaceIdentity(.local, fact_owner, int(nodes[n].c)))
+        if index >= 0:
+            value = fact_project(s, base, s.bindings[index].value, true, t)
+            fact_bind(s, PlaceIdentity(.local, int(locals[l].owner), l), value)
+            return
     if sized:
         pi = fact_index_get(s.index[0].projection_index, fact_projection_key(base, FACT_ELEMENT_LENGTH, false))
         if pi >= 0:
@@ -6489,7 +6645,9 @@ fact_slice_prepare = (f: int, summary: bool = false):
             # facts do not depend on the actual values. Argument obligations
             # and effects remain separate roots of this slice.
             ret = fact_type(int(fns[int(nodes[n].sym)].ret))
-            array_result = tkind(ret) == .array
+            constructor = types[ret].kind == .struct_ and fact_constructor_type(ret) and fact_constructor_body(int(nodes[n].sym))
+            if constructor: fact_constructor_calls[n] = true
+            array_result = tkind(ret) == .array or constructor
             # Array lengths also bound scalar search results. Demand these
             # actuals only for result kinds the summary domain can describe.
             if array_result or fact_scalar(ret) and is_int(ret) and ret != T_U64:
@@ -6818,8 +6976,13 @@ fact_literal = (s: mut FactState, n: int) -> int:
 fact_capture_value = (n: int, s: mut FactState) -> int:
     if n == 0 or not s.live: return 0
     if fact_speculating > 0:
+        if fact_constructor_budget >= 0:
+            if fact_constructor_budget == 0:
+                fact_loop_exhausted = true
+                return 0
+            fact_constructor_budget -= 1
         fact_loop_steps += 1
-        if fact_loop_steps > FACT_STEPS:
+        if fact_loop_steps > fact_step_limit:
             fact_loop_exhausted = true
             return 0
     mark = fact_slice_flags(n)
@@ -7131,6 +7294,8 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         hull = fact_hull_type(ntype(n), paths.yes, y, paths.no, z)
         if not paths.yes.live: result = fact_bound(paths.no, z); hull = fact_terms[z].type
         if not paths.no.live: result = fact_bound(paths.yes, y); hull = fact_terms[y].type
+        if fact_summary_field != 0 and type_eq(fact_type(ntype(n)), fact_type(int(fns[fact_summary_owner].ret))):
+            return fact_constructor_join(n, paths, y, z, result, hull, s)
         s = fact_join(paths.yes, paths.no, n)
         return fact_new(s, result, FactTerm(type = hull))
     if k == .and_ or k == .or_:
@@ -7194,7 +7359,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                 b = fact_bound(s, fact_project(s, base, -1, false, T_INT))
                 if not b.wide: trips = max(0, min(trips, b.hi))
             sums = fact_counted_sums(n, s, trips)
-        hulls = indexed and fact_push_open(n, s)
+        hulls = indexed and fact_push_open(n, s, base)
         iterated = indexed and fact_iterate(n, s, false, base, 0, 0, pushes, sums)
         if not iterated:
             fact_changes(n, s, n)
@@ -7711,6 +7876,9 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         if fact_extremum_call(n): return fact_extremum(s, n, values[0], values[1], fact_prelude_call(n, "min"))
         if fact_ends_path(n): s.live = false
         result = fact_new(s, fact_domain(ntype(n), .missing, n), FactTerm(type = ntype(n)))
+        if result != 0 and fact_constructor_calls.has(n):
+            fact_terms[result].origin = n
+            fact_constructor_actuals[result] = values
         if nodes[n].aux == 0 and nodes[n].sym > 0:
             f = int(nodes[n].sym)
             entry = values
@@ -8188,6 +8356,7 @@ facts_finalize = ():
                 continue
         fact_owner = f
         fact_terms = [FactTerm()]
+        fact_constructor_actuals = {}
         state = FactState()
         previous_policy = fact_policy
         if proof_active and proof_decls.has(int(fns[f].decl)): fact_policy = .RequireStatic
@@ -8222,12 +8391,14 @@ facts_finalize = ():
     loop request in fact_requests:
         if not fact_validated.has(request.node):
             fact_terms = [FactTerm()]
+            fact_constructor_actuals = {}
             state = FactState()
             fact_retry_owner = request.owner
             fact_capture(request.node, state)
     loop request in refine_requests:
         if not fact_validated.has(request.node) and not fact_validated.has(ref_wrapped_check(request.node)):
             fact_terms = [FactTerm()]
+            fact_constructor_actuals = {}
             state = FactState()
             refine_entry = []
             fact_retry_owner = request.owner
@@ -8238,6 +8409,7 @@ facts_finalize = ():
         if nodes[request.node].aux == i32(int(IN.static_assert)): set_list(request.node, [])
     fact_requests = []
     fact_terms = []
+    fact_constructor_actuals = {}
     if proof_active: proof_erase()
     if wi_fact_requests.len() > 0: wi_fact_finish()
     if wit_collected > 0 and not wit_measure: stop(1)
@@ -8276,6 +8448,11 @@ facts_reset = ():
     fact_comprehensions = {}
     fact_owner = 0
     fact_summaries = {}
+    fact_constructor_types = {}
+    fact_constructor_bodies = {}
+    fact_constructor_calls = {}
+    fact_summary_field = 0
+    fact_constructor_budget = -1
     fact_summary_owner = 0
     fact_summary_assumed = []
     fact_summary_used = false
@@ -8849,6 +9026,7 @@ fact_complete_deferred = (f: int):
     icb = ic_fn(IC_FACTS, f)
     fact_owner = f
     fact_terms = [FactTerm()]
+    fact_constructor_actuals = {}
     state = FactState()
     # Width conversions request refinements without enabling declared contracts.
     # A summary/deferred walk still needs its own entry, never its caller's slots.
@@ -8863,6 +9041,7 @@ fact_complete_deferred = (f: int):
     fact_retry_owner = f
     loop n in pending:
         fact_terms = [FactTerm()]
+        fact_constructor_actuals = {}
         state = FactState()
         if exact_has_store(n):
             if not exact_decided(n): exact_fact_store(n, 0, state)
@@ -8871,6 +9050,7 @@ fact_complete_deferred = (f: int):
             fact_capture(n, state)
     fact_retry_owner = 0
     fact_terms = []
+    fact_constructor_actuals = {}
     fact_slice = FactSlice()
     directives_after_facts()
     fact_deferred_proving = previous_proving
