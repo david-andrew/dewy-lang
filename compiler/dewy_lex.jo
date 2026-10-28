@@ -146,7 +146,13 @@ dx_quote_end = (lx: mut DewyLexer, p: *u8, start: int, stop: int, nesting: int, 
             if nesting == 0: lx.interpolation_open = first_brace
             if lx.suspect_brace < 0 and i + 1 < stop and p[i + 1] == quote: lx.suspect_brace = i
             close = dx_interpolation_end(lx, p, i + 1, stop, nesting + 1, incomplete)
-            if close < 0: return -1
+            if close < 0:
+                if not incomplete and nesting == 0 and i + 6 < stop and p[i + 1] == 'm' and p[i + 2] == 'a' and p[i + 3] == 't' and p[i + 4] == 'c' and p[i + 5] == 'h' and p[i + 6] == ' ':
+                    j = i + 7
+                    loop j + 1 < stop:
+                        if p[j] == '\\' and p[j + 1] == '"': return dx_fail(lx, i, "cannot read a nested `match` in this string interpolation; bind the match result first, then interpolate its name")
+                        j += 1
+                return -1
             i = close + 1
             continue
         i += 1

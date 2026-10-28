@@ -153,6 +153,9 @@ rt_dc_cut_off = (cut: int):
 rt_dc_keyword_in_statement = (at: int):
     token = dc_parser.tokens[at]
     if token.symbol == .kw_import or token.symbol == .kw_from: return
+    if token.symbol == .kw_let or token.symbol == .kw_const:
+        name = dc_parser.tokens[at + 1]
+        if name.symbol == .kw_parallel: fatal(mkpos(dc_parser.file, name.start), rt_dc_keyword_text(name.symbol))
     k = at + 1
     loop dc_parser.tokens[k].kind != .eof and not dc_parser.tokens[k].newline:
         if dc_parser.tokens[k].symbol == .kw_from or dc_parser.tokens[k].symbol == .kw_import: fatal(mkpos(dc_parser.file, dc_parser.tokens[k].start), rt_dc_keyword_text(dc_parser.tokens[k].symbol))
@@ -4897,7 +4900,9 @@ rt_dc_pattern = () -> int:
         return p
     if token.kind != .identifier or (token.symbol != .none and token.symbol != .kw_test): return 0
     # (`none => 2`: dw_pattern_names' mistake, should nothing else read it)
-    if rt_dn_reserved(int(token.name)): return rt_dc_hint(pos, dewy_reserved_text(rt_dn_payload(token)))
+    if rt_dn_reserved(int(token.name)):
+        if int(token.name) == dc_parser.reader.dn_none_id: return rt_dc_hint(pos, "match an empty optional with `<none>`, or use `_` for any remaining value")
+        return rt_dc_hint(pos, dewy_reserved_text(rt_dn_payload(token)))
     dc_parser.at += 1
     named = rt_dc_word(int(token.name)) != DC_HOLE
     if not rt_dn_accept(.colon):

@@ -803,6 +803,13 @@ fact_library_call = (n: int, name: str) -> bool:
     d = int(fns[int(nodes[n].sym)].decl)
     d != 0 and pos_in_lib(nodes[d].pos) and name_of(int(nodes[d].name)) == name
 
+# The exact integer prelude implementation, not another library's same-named
+# helper. Its zero-result law is used only for demanded calls below; O(1).
+fact_integer_gcd_call = (n: int) -> bool:
+    if not fact_library_call(n, "gcd"): return false
+    d = int(fns[int(nodes[n].sym)].decl)
+    files[pos_file(nodes[d].pos)].path == lib_dir + "/prelude/integers.dewy"
+
 # The prelude's single-element first/last are reads of this array snapshot.
 # User overloads and slicing overloads have no such contract. O(1).
 fact_name_first = 0
@@ -6637,6 +6644,8 @@ fact_slice_prepare = (f: int, summary: bool = false):
         else if k == .call and ntype(n) == T_BOOL and nodes[n].aux == 0 and nodes[n].sym > 0 and fact_predicate_summary(int(nodes[n].sym)) != 0:
             loop arg in kids(n): values.push(arg)
         else if k == .call and fact_map_snapshot_call(n): values.push(kid(n, 0))
+        else if k == .call and fact_integer_gcd_call(n):
+            loop arg in kids(n): values.push(arg)
         # (a length-preserving call's length is its receiver's: `let ks = d.keys` then `ks.values`
         # needs ks's definition)
         else if k == .call and (fact_copy_length_call(n) or fact_endpoint_call(n) != 0 or fact_same_length_call(n)): values.push(kid(n, 0))
@@ -7869,6 +7878,10 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             if predicate != 0:
                 value = fact_predicate_apply(predicate, values, s)
                 if value != 0: return value
+        gcd_nonzero = false
+        if values.len() == 2 and fact_integer_gcd_call(n):
+            zero = fact_constant(s, 0)
+            gcd_nonzero = fact_compare(s, .ne, values[0], zero) == 1 or fact_compare(s, .ne, values[1], zero) == 1
         if not fact_search_reads_only(n): fact_path_call_effects(n, s)
         floor = fact_floor_call(n)
         if floor != 0 and fact_type(ntype(n)) == T_U64: return fact_floor_unsigned(s, n, floor, values[0], values[1])
@@ -7876,6 +7889,12 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         if fact_extremum_call(n): return fact_extremum(s, n, values[0], values[1], fact_prelude_call(n, "min"))
         if fact_ends_path(n): s.live = false
         result = fact_new(s, fact_domain(ntype(n), .missing, n), FactTerm(type = ntype(n)))
+        # gcd(a, b) is zero exactly when both inputs are zero. Evaluate this
+        # reviewed prelude contract only at a demanded call; O(1) fact queries.
+        if result != 0 and gcd_nonzero:
+            bound = fact_bound(s, result)
+            bound.nz = true
+            fact_set_bound(s, result, bound)
         if result != 0 and fact_constructor_calls.has(n):
             fact_terms[result].origin = n
             fact_constructor_actuals[result] = values

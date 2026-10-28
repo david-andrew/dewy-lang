@@ -4560,6 +4560,12 @@ rd_dc_keyword_in_statement=(@reader_ctx:ParserContext at:int64):>void=>$unsafe {
     if ((token.symbol =? 'kw_import') or (token.symbol =? 'kw_from')) {
         return
     }
+    if ((token.symbol =? 'kw_let') or (token.symbol =? 'kw_const')) {
+        let name:DewyLexeme=reader_ctx.tokens[(int64<overflow='wrap'>(at) + 1)]
+        if (name.symbol =? 'kw_parallel') {
+            reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file name.start) rd_dc_keyword_text(name.symbol));
+        }
+    }
     let k:int64=(int64<overflow='wrap'>(at) + 1)
     loop (reader_ctx.tokens[k].kind not=? 'eof') and (not reader_ctx.tokens[k].newline) {
         if ((reader_ctx.tokens[k].symbol =? 'kw_from') or (reader_ctx.tokens[k].symbol =? 'kw_import')) {
@@ -7631,6 +7637,9 @@ rd_dc_pattern=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$uns
     }
     # (`none => 2`: dw_pattern_names' mistake, should nothing else read it)
     if rd_dn_reserved(@reader_ctx int64<overflow='wrap'>(token.name)) {
+        if int64<overflow='wrap'>(token.name) =? reader_ctx.reader.dn_none_id {
+            return rd_dc_hint(@reader_ctx pos "match an empty optional with `<none>`, or use `_` for any remaining value")
+        }
         return rd_dc_hint(@reader_ctx pos rd_dewy_reserved_text(rd_dn_payload(@reader_ctx token)))
     }
     reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
