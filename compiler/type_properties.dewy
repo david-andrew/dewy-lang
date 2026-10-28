@@ -1,0 +1,167 @@
+$runtime_checks
+from p"checker_types.dewy" import (TypeInfo StructInfo Field Variant)
+from p"type_layout.dewy" import (tl_layout)
+from p"type_format.dewy" import (tf_string)
+
+# Type-property queries retain IDs across layout and lazy field callbacks.
+# Function containment caches only completed roots, preserving cyclic searches.
+PWord:type=int64<overflow='wrap'>
+const TF_MANAGED=4
+TypePropertyHost:type=[is_lib_texture:<(si:int64):>bool> check_struct_fields:<(si:int64):>void>]
+TypePropertyInput:type=[
+    types:ptr<array<TypeInfo>>
+    structs:ptr<array<StructInfo>>
+    args:ptr<array<int32>>
+    fields:ptr<array<Field>>
+    variants:ptr<array<Variant>>
+    refine_active:ptr<bool>
+    math_int:ptr<int64>
+    host:ptr<TypePropertyHost>
+]
+let tp_inputs:ptr<TypePropertyInput>=$unsafe (uint64(0) as ptr<TypePropertyInput>)
+let tp_has_fn_memo:dict<int64 int64>=[]
+type_property_bind=(input:ptr<TypePropertyInput>):>PWord=>{tp_inputs=input; tp_has_fn_memo=[]; 0}
+tp_type_string=(t:PWord):>string=>tf_string(t false)
+tp_follow=(types:ptr<TypeInfo> t0:PWord):>PWord=>$unsafe {
+    let t=t0
+    loop t not=? 0 and types[t].kind =? 'var' and types[t].ref not=? 0 {t=PWord(types[t].ref)}
+    t
+}
+tp_prune=(t:PWord):>PWord=>$unsafe {tp_follow(tp_inputs[0].types[0].ptr t)}
+tp_base=(t0:PWord):>PWord=>$unsafe {
+    let types=tp_inputs[0].types[0].ptr
+    let t=tp_follow(types t0)
+    if types[t].kind =? 'secret' {t=tp_follow(types PWord(types[t].elem))}
+    if types[t].kind =? 'callable' {t=tp_follow(types PWord(types[t].elem))}
+    if tp_inputs[0].refine_active[0] and types[t].kind =? 'refined' {t=tp_follow(types PWord(types[t].elem))}
+    if types[t].kind =? 'quantity' {return tp_follow(types PWord(types[t].elem))}
+    t
+}
+tp_targ=(t:PWord i:PWord):>PWord=>$unsafe {
+    PWord(tp_inputs[0].args[0].ptr[PWord(tp_inputs[0].types[0].ptr[t].args) + i])
+}
+tp_struct_targ=(si:PWord i:PWord):>PWord=>$unsafe {
+    PWord(tp_inputs[0].args[0].ptr[PWord(tp_inputs[0].structs[0].ptr[si].targs) + i])
+}
+tp_simple_enum=(t:PWord):>bool=>$unsafe {
+    tl_layout(t)
+    tp_inputs[0].structs[0].ptr[PWord(tp_inputs[0].types[0].ptr[tp_prune(t)].st)].simple_enum
+}
+tp_is_managed=(t0:PWord):>bool=>$unsafe {
+    let t=tp_base(t0)
+    if tp_inputs[0].types[0].ptr[t].rep =? 'tagged_int' {return true}
+    let k=tp_inputs[0].types[0].ptr[t].kind
+    if k =? 'str_' or k =? 'array' or k =? 'fn_' or k =? 'polyfn' or k =? 'callable' or k =? 'box' {return true}
+    if k =? 'struct_' or k =? 'enum_' or k =? 'tuple' or k =? 'opt' or k =? 'fixed' {
+        tl_layout(t)
+        return PWord(tp_inputs[0].types[0].ptr[t].flags) & TF_MANAGED not=? 0
+    }
+    false
+}
+
+# what in a value of this type is not plain data (numbers, bools, vectors, and structs, tuples,
+# enums and fixed arrays of them): a string, array, function, pointer...; "" when nothing is
+tp_plain_problem=(t0:PWord):>string=>$unsafe {
+    let t=tp_base(t0)
+    let k=tp_inputs[0].types[0].ptr[t].kind
+    if k =? 'str_' or k =? 'array' or k =? 'fn_' or k =? 'polyfn' or k =? 'ptr' or k =? 'cfn' or k =? 'null_' {return tp_type_string(t)}
+    if k =? 'opt' or k =? 'fixed' {return tp_plain_problem(PWord(tp_inputs[0].types[0].ptr[t].elem))}
+    if k =? 'tuple' {
+        loop i in [0..PWord(tp_inputs[0].types[0].ptr[t].nargs)) {
+            let p=tp_plain_problem(tp_targ(t  i))
+            if p not=? "" {return p}
+        }
+        return ""
+    }
+    if k not=? 'struct_' and k not=? 'enum_' {return ""}
+    tl_layout(t)
+    let si=PWord(tp_inputs[0].types[0].ptr[t].st)
+    # (a Texture is the GL name of a GPU resource, not data the GPU can use from a buffer)
+    if tp_inputs[0].host[0].is_lib_texture(si) {return "Texture"}
+    if tp_inputs[0].structs[0].ptr[si].union_ {
+        loop i in [0..PWord(tp_inputs[0].structs[0].ptr[si].ntargs)) {
+            let p=tp_plain_problem(tp_struct_targ(si  i))
+            if p not=? "" {return p}
+        }
+    }
+    # (a boxed field is a pointer to its value)
+    loop i in [0..PWord(tp_inputs[0].structs[0].ptr[si].nfields)) {
+        let f=PWord(tp_inputs[0].structs[0].ptr[si].fields) + i
+        if tp_inputs[0].fields[0].ptr[f].boxed {return tp_type_string(PWord(tp_inputs[0].fields[0].ptr[f].type))}
+        let p=tp_plain_problem(PWord(tp_inputs[0].fields[0].ptr[f].type))
+        if p not=? "" {return p}
+    }
+    loop v in [0..PWord(tp_inputs[0].structs[0].ptr[si].nvariants)) {
+        let vi=PWord(tp_inputs[0].structs[0].ptr[si].variants) + v
+        loop i in [0..PWord(tp_inputs[0].variants[0].ptr[vi].nfields)) {
+            let f=PWord(tp_inputs[0].variants[0].ptr[vi].fields) + i
+            if tp_inputs[0].fields[0].ptr[f].boxed {return tp_type_string(PWord(tp_inputs[0].fields[0].ptr[f].type))}
+            let p=tp_plain_problem(PWord(tp_inputs[0].fields[0].ptr[f].type))
+            if p not=? "" {return p}
+        }
+    }
+    ""
+}
+
+# Search the complete reachable type graph; memoize only the completed root.
+tp_type_has_fn=(t0:PWord):>bool=>$unsafe {
+    let root=tp_prune(t0)
+    let root_cached=tp_has_fn_memo.get(root)
+    if root_cached isnt? none {return (root_cached as int64) =? 2}
+    let pending=[root]
+    let seen:dict<int64 bool>=[]
+    let found=false
+    loop pending.length >? 0 {
+        let t=tp_prune(pending.pop())
+        if t in? seen {continue}
+        seen[t] = true
+        let k=tp_inputs[0].types[0].ptr[t].kind
+        if k =? 'fn_' or k =? 'polyfn' or k =? 'callable' {
+            found=true
+            break
+        }
+        let entry=tp_has_fn_memo.get(t)
+        if entry isnt? none {
+            let cached=entry as int64
+            if cached =? 2 {
+                found=true
+                break
+            }
+            continue
+        }
+        if k =? 'array' or k =? 'opt' or k =? 'fixed' or k =? 'box' {pending.push(PWord(tp_inputs[0].types[0].ptr[t].elem))}
+        else if k =? 'tuple' {
+            loop i in [0..PWord(tp_inputs[0].types[0].ptr[t].nargs)) {pending.push(tp_targ(t  i))}
+        }
+        else if k =? 'struct_' or k =? 'enum_' {
+            let si=PWord(tp_inputs[0].types[0].ptr[t].st)
+            tp_inputs[0].host[0].check_struct_fields(si)
+            if tp_inputs[0].structs[0].ptr[si].union_ {
+                loop i in [0..PWord(tp_inputs[0].structs[0].ptr[si].ntargs)) {pending.push(tp_struct_targ(si  i))}
+            }
+            loop i in [0..PWord(tp_inputs[0].structs[0].ptr[si].nfields)) {pending.push(PWord(tp_inputs[0].fields[0].ptr[PWord(tp_inputs[0].structs[0].ptr[si].fields) + i].type))}
+            loop v in [0..PWord(tp_inputs[0].structs[0].ptr[si].nvariants)) {
+                let vi=PWord(tp_inputs[0].structs[0].ptr[si].variants) + v
+                loop i in [0..PWord(tp_inputs[0].variants[0].ptr[vi].nfields)) {pending.push(PWord(tp_inputs[0].fields[0].ptr[PWord(tp_inputs[0].variants[0].ptr[vi].fields) + i].type))}
+            }
+        }
+    }
+    # A back edge alone does not prove a subtree has no functions. Cache the
+    # completed root result, never a provisional answer inside a recursive type.
+    tp_has_fn_memo[root] = if found {2} else {3}
+    found
+}
+
+# Optional mathematical integers invert the low bit: zero is none, odd is
+# a small integer, and a nonzero even word is a BigInt header.
+tp_math_optional=(t:PWord):>bool=>$unsafe {
+    tp_inputs[0].types[0].ptr[t].kind =? 'opt' and tp_base(PWord(tp_inputs[0].types[0].ptr[t].elem)) =? tp_inputs[0].math_int[0]
+}
+tp_is_aggregate=(t0:PWord):>bool=>$unsafe {
+    let t=tp_base(t0)
+    if tp_math_optional(t) {return false}
+    let k=tp_inputs[0].types[0].ptr[t].kind
+    if k =? 'struct_' or k =? 'tuple' or k =? 'opt' or k =? 'fn_' or k =? 'polyfn' or k =? 'callable' or k =? 'range' or k =? 'vec' or k =? 'fixed' {return true}
+    if k =? 'enum_' {return not tp_simple_enum(t)}
+    false
+}

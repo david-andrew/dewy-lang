@@ -1,0 +1,136 @@
+use 'checker_types.dewy'
+use 'type_layout.dewy'
+use 'type_format.dewy'
+const TF_MANAGED = 4
+struct TypePropertyHost:
+    is_lib_texture: (int) -> bool
+    check_struct_fields: (int) -> void
+struct TypePropertyInput:
+    types: *(TypeInfo[])
+    structs: *(StructInfo[])
+    args: *(i32[])
+    fields: *(Field[])
+    variants: *(Variant[])
+    refine_active: *(bool)
+    math_int: *(int)
+    host: *TypePropertyHost
+tp_inputs: *TypePropertyInput
+tp_has_fn_memo: {int: int} = {}
+type_property_bind = (input: *TypePropertyInput) -> int:
+    tp_inputs = input
+    tp_has_fn_memo = {}
+    0
+tp_type_string = (t: int) -> str: tf_string(t, false)
+tp_prune = (t0: int) -> int:
+    t = t0
+    loop t != 0 and tp_inputs[0].types[0][t].kind == .var and tp_inputs[0].types[0][t].ref != 0: t = int(tp_inputs[0].types[0][t].ref)
+    t
+tp_base = (t0: int) -> int:
+    t = tp_prune(t0)
+    if tp_inputs[0].types[0][t].kind == .secret: t = tp_prune(int(tp_inputs[0].types[0][t].elem))
+    if tp_inputs[0].types[0][t].kind == .callable: t = tp_prune(int(tp_inputs[0].types[0][t].elem))
+    if tp_inputs[0].refine_active[0] and tp_inputs[0].types[0][t].kind == .refined: t = tp_prune(int(tp_inputs[0].types[0][t].elem))
+    if tp_inputs[0].types[0][t].kind == .quantity: return tp_prune(int(tp_inputs[0].types[0][t].elem))
+    t
+tp_targ = (t: int, i: int) -> int: int(tp_inputs[0].args[0][int(tp_inputs[0].types[0][t].args) + i])
+tp_struct_targ = (si: int, i: int) -> int: int(tp_inputs[0].args[0][int(tp_inputs[0].structs[0][si].targs) + i])
+tp_simple_enum = (t: int) -> bool:
+    tl_layout(t)
+    tp_inputs[0].structs[0][int(tp_inputs[0].types[0][tp_prune(t)].st)].simple_enum
+
+tp_is_managed = (t0: int) -> bool:
+    t = tp_base(t0)
+    if tp_inputs[0].types[0][t].rep == .tagged_int: return true
+    k = tp_inputs[0].types[0][t].kind
+    if k == .str_ or k == .array or k == .fn_ or k == .polyfn or k == .callable or k == .box: return true
+    if k == .struct_ or k == .enum_ or k == .tuple or k == .opt or k == .fixed:
+        tl_layout(t)
+        return int(tp_inputs[0].types[0][t].flags) & TF_MANAGED != 0
+    false
+
+# what in a value of this type is not plain data (numbers, bools, vectors, and structs, tuples,
+# enums and fixed arrays of them): a string, array, function, pointer...; "" when nothing is
+tp_plain_problem = (t0: int) -> str:
+    t = tp_base(t0)
+    k = tp_inputs[0].types[0][t].kind
+    if k == .str_ or k == .array or k == .fn_ or k == .polyfn or k == .ptr or k == .cfn or k == .null_: return tp_type_string(t)
+    if k == .opt or k == .fixed: return tp_plain_problem(int(tp_inputs[0].types[0][t].elem))
+    if k == .tuple:
+        loop i in [0..int(tp_inputs[0].types[0][t].nargs)):
+            p = tp_plain_problem(tp_targ(t, i))
+            if p != "": return p
+        return ""
+    if k != .struct_ and k != .enum_: return ""
+    tl_layout(t)
+    si = int(tp_inputs[0].types[0][t].st)
+    # (a Texture is the GL name of a GPU resource, not data the GPU can use from a buffer)
+    if tp_inputs[0].host[0].is_lib_texture(si): return "Texture"
+    if tp_inputs[0].structs[0][si].union_:
+        loop i in [0..int(tp_inputs[0].structs[0][si].ntargs)):
+            p = tp_plain_problem(tp_struct_targ(si, i))
+            if p != "": return p
+    # (a boxed field is a pointer to its value)
+    loop i in [0..int(tp_inputs[0].structs[0][si].nfields)):
+        f = int(tp_inputs[0].structs[0][si].fields) + i
+        if tp_inputs[0].fields[0][f].boxed: return tp_type_string(int(tp_inputs[0].fields[0][f].type))
+        p = tp_plain_problem(int(tp_inputs[0].fields[0][f].type))
+        if p != "": return p
+    loop v in [0..int(tp_inputs[0].structs[0][si].nvariants)):
+        vi = int(tp_inputs[0].structs[0][si].variants) + v
+        loop i in [0..int(tp_inputs[0].variants[0][vi].nfields)):
+            f = int(tp_inputs[0].variants[0][vi].fields) + i
+            if tp_inputs[0].fields[0][f].boxed: return tp_type_string(int(tp_inputs[0].fields[0][f].type))
+            p = tp_plain_problem(int(tp_inputs[0].fields[0][f].type))
+            if p != "": return p
+    ""
+
+# Search the complete reachable type graph; memoize only the completed root.
+tp_type_has_fn = (t0: int) -> bool:
+    root = tp_prune(t0)
+    if let cached = tp_has_fn_memo.get(root): return cached == 2
+    pending = [root]
+    seen: {int: bool} = {}
+    found = false
+    loop pending.len() > 0:
+        t = tp_prune(pending.pop())
+        if seen.has(t): continue
+        seen[t] = true
+        k = tp_inputs[0].types[0][t].kind
+        if k == .fn_ or k == .polyfn or k == .callable:
+            found = true
+            break
+        if let cached = tp_has_fn_memo.get(t):
+            if cached == 2:
+                found = true
+                break
+            continue
+        if k == .array or k == .opt or k == .fixed or k == .box: pending.push(int(tp_inputs[0].types[0][t].elem))
+        else if k == .tuple:
+            loop i in [0..int(tp_inputs[0].types[0][t].nargs)): pending.push(tp_targ(t, i))
+        else if k == .struct_ or k == .enum_:
+            si = int(tp_inputs[0].types[0][t].st)
+            tp_inputs[0].host[0].check_struct_fields(si)
+            if tp_inputs[0].structs[0][si].union_:
+                loop i in [0..int(tp_inputs[0].structs[0][si].ntargs)): pending.push(tp_struct_targ(si, i))
+            loop i in [0..int(tp_inputs[0].structs[0][si].nfields)): pending.push(int(tp_inputs[0].fields[0][int(tp_inputs[0].structs[0][si].fields) + i].type))
+            loop v in [0..int(tp_inputs[0].structs[0][si].nvariants)):
+                vi = int(tp_inputs[0].structs[0][si].variants) + v
+                loop i in [0..int(tp_inputs[0].variants[0][vi].nfields)): pending.push(int(tp_inputs[0].fields[0][int(tp_inputs[0].variants[0][vi].fields) + i].type))
+    # A back edge alone does not prove a subtree has no functions. Cache the
+    # completed root result, never a provisional answer inside a recursive type.
+    tp_has_fn_memo[root] = if found: 2 else: 3
+    found
+
+# Optional mathematical integers invert the low bit: zero is none, odd is
+# a small integer, and a nonzero even word is a BigInt header.
+tp_math_optional = (t: int) -> bool:
+    tp_inputs[0].types[0][t].kind == .opt and tp_base(int(tp_inputs[0].types[0][t].elem)) == tp_inputs[0].math_int[0]
+
+tp_is_aggregate = (t0: int) -> bool:
+    t = tp_base(t0)
+    if tp_math_optional(t): return false
+    k = tp_inputs[0].types[0][t].kind
+    if k == .struct_ or k == .tuple or k == .opt or k == .fn_ or k == .polyfn or k == .callable or k == .range or k == .vec or k == .fixed: return true
+    if k == .enum_: return not tp_simple_enum(t)
+    false
+

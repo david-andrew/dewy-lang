@@ -4,6 +4,7 @@ use 'type_unions.dewy'
 use 'type_layout.dewy'
 use 'type_format.dewy'
 use 'type_factory.dewy'
+use 'type_properties.dewy'
 use 'checker_types.dewy'
 use 'type_intern.dewy'
 use 'concurrency.jo'
@@ -50,6 +51,9 @@ T_VOID = 0
 T_BOOL = 0
 T_INT = 0
 T_MATH_INT = 0    # semantic integer, independent of its selected storage representation
+property_host = TypePropertyHost(is_lib_texture, check_struct_fields)
+property_input = TypePropertyInput(&types, &structs, &type_args, &fields, &variants, &refine_active, &T_MATH_INT, &property_host)
+property_binding = type_property_bind(&property_input)
 T_I8 = 0
 T_I16 = 0
 T_I32 = 0
@@ -290,57 +294,10 @@ type_eq = (a0: int, b0: int) -> bool:
 unify = (a: int, b: int) -> bool: tu_unify(a, b)
 unify_unions = (a: int, b: int) -> bool: tu_unify_unions(a, b)
 
-simple_enum = (t: int) -> bool:
-    layout(t)
-    structs[int(types[prune(t)].st)].simple_enum
+simple_enum = (t: int) -> bool: tp_simple_enum(t)
+is_managed = (t: int) -> bool: tp_is_managed(t)
+plain_problem = (t: int) -> str: tp_plain_problem(t)
 
-is_managed = (t0: int) -> bool:
-    t = quantity_base(t0)
-    if types[t].rep == .tagged_int: return true
-    k = types[t].kind
-    if k == .str_ or k == .array or k == .fn_ or k == .polyfn or k == .callable or k == .box: return true
-    if k == .struct_ or k == .enum_ or k == .tuple or k == .opt or k == .fixed:
-        layout(t)
-        return int(types[t].flags) & TF_MANAGED != 0
-    false
-
-# what in a value of this type is not plain data (numbers, bools, vectors, and structs, tuples,
-# enums and fixed arrays of them): a string, array, function, pointer...; "" when nothing is
-plain_problem = (t0: int) -> str:
-    t = quantity_base(t0)
-    k = types[t].kind
-    if k == .str_ or k == .array or k == .fn_ or k == .polyfn or k == .ptr or k == .cfn or k == .null_: return type_str(t)
-    if k == .opt or k == .fixed: return plain_problem(int(types[t].elem))
-    if k == .tuple:
-        loop i in [0..int(types[t].nargs)):
-            p = plain_problem(targ(t, i))
-            if p != "": return p
-        return ""
-    if k != .struct_ and k != .enum_: return ""
-    layout(t)
-    si = int(types[t].st)
-    # (a Texture is the GL name of a GPU resource, not data the GPU can use from a buffer)
-    if is_lib_texture(si): return "Texture"
-    if structs[si].union_:
-        loop i in [0..int(structs[si].ntargs)):
-            p = plain_problem(struct_targ(si, i))
-            if p != "": return p
-    # (a boxed field is a pointer to its value)
-    loop i in [0..int(structs[si].nfields)):
-        f = int(structs[si].fields) + i
-        if fields[f].boxed: return type_str(int(fields[f].type))
-        p = plain_problem(int(fields[f].type))
-        if p != "": return p
-    loop v in [0..int(structs[si].nvariants)):
-        vi = int(structs[si].variants) + v
-        loop i in [0..int(variants[vi].nfields)):
-            f = int(variants[vi].fields) + i
-            if fields[f].boxed: return type_str(int(fields[f].type))
-            p = plain_problem(int(fields[f].type))
-            if p != "": return p
-    ""
-
-# is struct si the library's Texture (lib/game/draw2d.jo), not one of the program's?
 is_lib_texture = (si: int) -> bool:
     if structs[si].name != "Texture" or structs[si].decl == 0: return false
     fi = pos_file(nodes[int(structs[si].decl)].pos)
@@ -348,56 +305,9 @@ is_lib_texture = (si: int) -> bool:
 
 # can a value of this type hold a function value (a closure)? (through arrays, optionals, tuples,
 # struct and enum fields, and union members)
-has_fn_memo: {int: int} = {}          # 2: yes, 3: no; only completed graph searches
-
-type_has_fn = (t0: int) -> bool:
-    root = prune(t0)
-    if let cached = has_fn_memo.get(root): return cached == 2
-    pending = [root]
-    seen: {int: bool} = {}
-    found = false
-    loop pending.len() > 0:
-        t = prune(pending.pop())
-        if seen.has(t): continue
-        seen[t] = true
-        k = types[t].kind
-        if k == .fn_ or k == .polyfn or k == .callable:
-            found = true
-            break
-        if let cached = has_fn_memo.get(t):
-            if cached == 2:
-                found = true
-                break
-            continue
-        if k == .array or k == .opt or k == .fixed or k == .box: pending.push(int(types[t].elem))
-        else if k == .tuple:
-            loop i in [0..int(types[t].nargs)): pending.push(targ(t, i))
-        else if k == .struct_ or k == .enum_:
-            si = int(types[t].st)
-            check_struct_fields(si)
-            if structs[si].union_:
-                loop i in [0..int(structs[si].ntargs)): pending.push(struct_targ(si, i))
-            loop i in [0..int(structs[si].nfields)): pending.push(int(fields[int(structs[si].fields) + i].type))
-            loop v in [0..int(structs[si].nvariants)):
-                vi = int(structs[si].variants) + v
-                loop i in [0..int(variants[vi].nfields)): pending.push(int(fields[int(variants[vi].fields) + i].type))
-    # A back edge alone does not prove a subtree has no functions. Cache the
-    # completed root result, never a provisional answer inside a recursive type.
-    has_fn_memo[root] = if found: 2 else: 3
-    found
-
-# Optional mathematical integers invert the low bit: zero is none, odd is
-# a small integer, and a nonzero even word is a BigInt header.
-math_optional = (t: int) -> bool:
-    types[t].kind == .opt and quantity_base(int(types[t].elem)) == T_MATH_INT
-
-is_aggregate = (t0: int) -> bool:
-    t = quantity_base(t0)
-    if math_optional(t): return false
-    k = types[t].kind
-    if k == .struct_ or k == .tuple or k == .opt or k == .fn_ or k == .polyfn or k == .callable or k == .range or k == .vec or k == .fixed: return true
-    if k == .enum_: return not simple_enum(t)
-    false
+type_has_fn = (t: int) -> bool: tp_type_has_fn(t)
+math_optional = (t: int) -> bool: tp_math_optional(t)
+is_aggregate = (t: int) -> bool: tp_is_aggregate(t)
 
 align_up = (x: int, a: int) -> int: (x + a - 1) & ~(a - 1)
 tsize = (t: int) -> int:
