@@ -1,0 +1,254 @@
+$runtime_checks
+from p"checker_types.dewy" import (TK TypeInfo StructInfo Field)
+from p"type_inference.dewy" import (tu_prune tu_struct_targ tu_is_union tu_targ)
+
+# Recursive type spelling owns its 150-part budget and refreshes arena views
+# after lazy field resolution. Source spelling and byte boundaries stay exact.
+FWord:type=int64<overflow='wrap'>
+const TF_NEVER=8
+TypeFormatHost:type=[
+    int_intervals:<(p0:int64):>[bool array<int64>]>
+    small_span:<(p0:int64 p1:int64 p2:int64):>bool>
+    dimension_str:<(p0:int64):>string>
+    name_of:<(p0:int64):>string>
+    str_set_text:<(p0:int64):>string>
+    check_struct_fields:<(p0:int64):>void>
+    bundled_rational_type:<(p0:int64):>bool>
+    bundled_word_rational_type:<(p0:int64):>bool>
+    is_dewy_set_type:<(p0:int64):>bool>
+]
+TypeFormatInput:type=[
+    types:ptr<array<TypeInfo>>
+    structs:ptr<array<StructInfo>>
+    args:ptr<array<int32>>
+    fields:ptr<array<Field>>
+    params:ptr<array<int64>>
+    parents:ptr<dict<int64 int64>>
+    math_int:ptr<int64>
+    int_type:ptr<int64>
+    mat4:ptr<int64>
+    host:ptr<TypeFormatHost>
+]
+let tf_inputs:ptr<TypeFormatInput>=$unsafe (uint64(0) as ptr<TypeFormatInput>)
+let tf_depth:FWord=0
+let tf_left:FWord=0
+type_format_bind=(input:ptr<TypeFormatInput>):>FWord=>{tf_inputs=input;tf_depth=0;tf_left=0;0}
+tf_split_labels=(s:string):>array<string>=>$unsafe {
+    let bytes=s as array<uint8>
+    let out:array<string>=[]
+    let start:int64=0
+    loop i in [0..int64(bytes.length)) {
+        if bytes[i] =? 10 {out.push(s.byte_slice(start i)); start=i+1}
+    }
+    out.push(s.byte_slice(start int64(bytes.length)))
+    out
+}
+tf_join=(parts:array<string> sep:string):>string=>{
+    let s=""
+    loop i in [0..int64(parts.length)) {
+        if i >? 0 {s="{s}{sep}"}
+        s="{s}{parts[i]}"
+    }
+    s
+}
+tf_kind=(t:FWord):>TK=>$unsafe {
+    tf_inputs[0].types[0].ptr[tu_prune(t)].kind
+}
+tf_values=(t0:FWord):>bool=>$unsafe {
+    let t=tu_prune(t0)
+    tf_inputs[0].types[0].ptr[t].kind =? 'tuple' and tf_inputs[0].types[0].ptr[t].sign
+}
+tf_postfix=(t:FWord dewy:bool=false):>string=>$unsafe {
+    if tf_kind(t) =? 'fn_' and not dewy or tu_is_union(t) {return "({tf_string(t  dewy)})"}
+    tf_string(t  dewy)
+}
+tf_string=(t0:FWord dewy:bool=false):>string=>$unsafe {
+    if tf_depth =? 0 {tf_left = 150}
+    if tf_left <=? 0 {return "…"}
+    tf_left -= 1
+    tf_depth += 1
+    let s=tf_string_in(t0  dewy)
+    tf_depth -= 1
+    s
+}
+tf_string_in=(t0:FWord dewy:bool):>string=>$unsafe {
+    let t=tu_prune(t0)
+    if t =? 0 {return "?"}
+    let ti=tf_inputs[0].types[0].ptr[t]
+    match ti.kind {
+        <'effect'> => {"Effect"}
+        <'callable'> => {"{tf_string(FWord(ti.elem)  dewy)} & <effects>"}
+        <'refined'> => {
+            if ti.bits =? - 1 {
+                let m=tu_prune(FWord(ti.elem))
+                if dewy {return "totaldict<{tf_string(tu_struct_targ(FWord(tf_inputs[0].types[0].ptr[m].st)  0)  dewy)} {tf_string(tu_struct_targ(FWord(tf_inputs[0].types[0].ptr[m].st)  1)  dewy)}>"}
+                return "totaldict[{tf_string(tu_struct_targ(FWord(tf_inputs[0].types[0].ptr[m].st)  0)  dewy)}, {tf_string(tu_struct_targ(FWord(tf_inputs[0].types[0].ptr[m].st)  1)  dewy)}]"
+            }
+            let xe_pair1=tf_inputs[0].host[0].int_intervals(t)
+            let known=xe_pair1[0]
+            let values=xe_pair1[1]
+            if known and values.length >? 0 and values.length <=? 32 {
+                let text=""
+                loop k in [0..values.length // 2) {
+                    if not tf_inputs[0].host[0].small_span(values[2 * k]  values[2 * k + 1]  16) {return "{tf_string(FWord(ti.elem)  dewy)}<refinement>"}
+                    loop v in [values[2 * k]..values[2 * k + 1]] {
+                        if int64((text as array<uint8>).length) >? 0 {text="{text} | "}
+                        text="{text}{v}"
+                    }
+                }
+                return text
+            }
+            "{tf_string(FWord(ti.elem)  dewy)}<refinement>"
+        }
+        <'quantity'> => {"{tf_string(FWord(ti.elem)  dewy)} * {tf_inputs[0].host[0].dimension_str(FWord(ti.st))}"}
+        <'secret'> => {if dewy {"secret<{tf_string(FWord(ti.elem) dewy)}>"} else {"secret[{tf_string(FWord(ti.elem) dewy)}]"}}
+        <'dimension'> => {tf_inputs[0].host[0].dimension_str(FWord(ti.st))}
+        <'void_'> => {
+            if FWord(ti.flags) & TF_NEVER not=? 0 {return "never"}
+            "void"
+        }
+        <'bool_'> => {"bool"}
+        <'int_'> => {
+            if t =? tf_inputs[0].math_int[0] {return "int"}
+            if dewy {
+                let base=if ti.sign {"int{ti.bits}"} else {"uint{ti.bits}"}
+                if ti.st not=? 0 {
+                    let policy=if ti.st =? 1 {"wrap"} else {"saturate"}
+                    return "{base}<overflow='{policy}'>"
+                }
+                return base
+            }
+            if t =? tf_inputs[0].int_type[0] {return "int"}
+            if ti.sign {return "i{ti.bits}"}
+            "u{ti.bits}"
+        }
+        <'float_'> => {
+            if dewy {return "float{ti.bits}"}
+            if ti.bits =? 64 {return "f64"}
+            "f32"
+        }
+        <'str_'> => {if dewy {"string"} else {"str"}}
+        <'array'> => {
+            if dewy {return "array<{tf_string(FWord(ti.elem)  dewy)}>"}
+            "{tf_postfix(FWord(ti.elem)  dewy)}[]"
+        }
+        <'fixed'> => {
+            if dewy {return "array<{tf_string(FWord(ti.elem)  dewy)} length={ti.bits}>"}
+            "{tf_postfix(FWord(ti.elem)  dewy)}[{ti.bits}]"
+        }
+        <'ptr'> => {
+            if dewy {return "ptr<{tf_string(FWord(ti.elem)  dewy)}>"}
+            "*{tf_string(FWord(ti.elem)  dewy)}"
+        }
+        <'opt'> => {
+            # (a bare none, whose other type is not known yet)
+            if dewy and tf_kind(FWord(ti.elem)) =? 'var' {return "none"}
+            "{tf_postfix(FWord(ti.elem)  dewy)}?"
+        }
+        <'box'> => {tf_string(FWord(ti.elem) dewy)}
+        <'null_'> => {"null"}
+        <'range'> => {"range"}
+        <'none_lit'> => {"none"}
+        <'var'> => {"?T{ti.id}"}
+        <'param'> => {
+            let k=FWord(ti.id)
+            if k <? tf_inputs[0].params[0].length and tf_inputs[0].params[0].ptr[k] not=? 0 {return tf_inputs[0].host[0].name_of(tf_inputs[0].params[0].ptr[k])}
+            if k <? 6 {return "TUVWXY".byte_slice(k k + 1)}
+            "T{k}"
+        }
+        <'module'> => {"module"}
+        <'typeval'> => {"type"}
+        <'vec'> => {
+            if t =? tf_inputs[0].mat4[0] {return "mat4"}
+            if ti.sign {return "ivec{ti.bits}"}
+            "vec{ti.bits}"
+        }
+        <'polyfn'> => {"generic closure"}
+        <'fn_' | 'cfn'> => {
+            let s="("
+            let labels:array<string>=[]
+            if dewy and ti.kind =? 'fn_' and ti.st not=? 0 {labels=tf_split_labels(tf_inputs[0].host[0].name_of(FWord(ti.st)))}
+            if ti.kind =? 'cfn' {s="cfn("}
+            if dewy {s="<("}
+            loop i in [0..FWord(ti.nargs)) {
+                if i >? 0 {s="{s}{if dewy {" "} else {", "}}"}
+                if FWord(ti.mutmask) & (FWord(1) << (i & 63)) not=? 0 {s="{s}{if dewy {"@"} else {"mut "}}"}
+                if dewy {
+                    let label=if i <? labels.length and labels[i] not=? "" {labels[i]} else {"_"}
+                    s="{s}{label}:"
+                }
+                s="{s}{tf_string(tu_targ(t i) dewy)}"
+            }
+            s="{s})"
+            # (several values: `:>(int64 int64)`, a fixed number; `:>(int64 ...)`, any number)
+            if dewy and ti.kind =? 'fn_' and ti.sign and tf_values(FWord(ti.elem)) {s="{s}:>{tf_string(FWord(ti.elem) dewy)}>"}
+            else if dewy and ti.kind =? 'fn_' and ti.sign {s="{s}:>({tf_string(FWord(tf_inputs[0].types[0].ptr[tu_prune(FWord(ti.elem))].elem) dewy)} ...)>"}
+            else if dewy {s="{s}:>{tf_string(FWord(ti.elem) dewy)}>"}
+            else if tf_kind(FWord(ti.elem)) not=? 'void_' {s="{s} -> {tf_string(FWord(ti.elem) dewy)}"}
+            else if ti.kind =? 'fn_' {s="{s} -> void"}
+            s
+        }
+        <'tuple'> => {
+            # (Dewy's `[int64 string]`: an array with a type per position; `(int64 int64)`: several values)
+            let s=if dewy and not ti.sign {"["} else {"("}
+            loop i in [0..FWord(ti.nargs)) {
+                if i >? 0 {s="{s}{if dewy {" "} else {", "}}"}
+                s="{s}{tf_string(tu_targ(t i) dewy)}"
+            }
+            "{s}{if dewy and not ti.sign {"]"} else {")"}}"
+        }
+        <'struct_' | 'enum_'> => {
+            let si=FWord(ti.st)
+            if tf_inputs[0].structs[0].ptr[si].lit_set not=? 0 {return tf_inputs[0].host[0].str_set_text(FWord(tf_inputs[0].structs[0].ptr[si].lit_set))}
+            let nm=tf_inputs[0].structs[0].ptr[si].name
+            if tf_inputs[0].structs[0].ptr[si].record_ {
+                tf_inputs[0].host[0].check_struct_fields(si)
+                let parts:array<string>=[]
+                loop i in [0..FWord(tf_inputs[0].structs[0].ptr[si].nfields)) {
+                    let field=tf_inputs[0].fields[0].ptr[FWord(tf_inputs[0].structs[0].ptr[si].fields) + i]
+                    let sep=if dewy {":"} else {": "}
+                    parts.push("{tf_inputs[0].host[0].name_of(FWord(field.name))}{sep}{tf_string(FWord(field.type) dewy)}")
+                }
+                return "[{tf_join(parts " ")}]"
+            }
+            if dewy and tf_inputs[0].structs[0].ptr[si].union_ {
+                let parts:array<string>=[]
+                let ms:array<int64>=[]
+                loop i in [0..FWord(tf_inputs[0].structs[0].ptr[si].ntargs)) {ms.push(tu_prune(tu_struct_targ(si  i)))}
+                # (`error` stands for its whole family: its members are not listed again)
+                loop m in ms {
+                    let covered=false
+                    let up=(tf_inputs[0].parents[0].get(m) ?? 0)
+                    loop up not=? 0 and not covered {
+                        if ms.contains(up) {covered=true}
+                        up=(tf_inputs[0].parents[0].get(up) ?? 0)
+                    }
+                    if not covered {parts.push(tf_postfix(m true))}
+                }
+                return tf_join(parts  " | ")
+            }
+            if tf_inputs[0].structs[0].ptr[si].union_ or tf_inputs[0].structs[0].ptr[si].soa_ {return nm}
+            # (the bundled exact fraction is the builtin `rational`)
+            if dewy and nm =? "Rational" and tf_inputs[0].host[0].bundled_rational_type(t0) {return "rational"}
+            if dewy and nm =? "RationalWord" and tf_inputs[0].host[0].bundled_word_rational_type(t0) {return "rational<int64>"}
+            if dewy and nm =? "Set" and FWord(tf_inputs[0].structs[0].ptr[si].ntargs) =? 1 and tf_inputs[0].host[0].is_dewy_set_type(t0) {
+                return "set<{tf_string(tu_struct_targ(si  0)  true)}>"
+            }
+            if dewy and nm =? "Map" and FWord(tf_inputs[0].structs[0].ptr[si].ntargs) =? 2 {
+                return "dict<{tf_string(tu_struct_targ(si  0)  true)} {tf_string(tu_struct_targ(si  1)  true)}>"
+            }
+            if not dewy and nm =? "NDArray" and FWord(tf_inputs[0].structs[0].ptr[si].ntargs) =? 1 {return "{tf_postfix(tu_struct_targ(si  0)  false)}[,]"}
+            if nm =? "Map" and FWord(tf_inputs[0].structs[0].ptr[si].ntargs) =? 2 {return "\{{tf_string(tu_struct_targ(si  0)  dewy)}: {tf_string(tu_struct_targ(si  1)  dewy)}}"}
+            let s=nm
+            if FWord(tf_inputs[0].structs[0].ptr[si].ntargs) >? 0 {
+                s="{s}{if dewy {"<"} else {"["}}"
+                loop i in [0..FWord(tf_inputs[0].structs[0].ptr[si].ntargs)) {
+                    if i >? 0 {s="{s}{if dewy {" "} else {", "}}"}
+                    s="{s}{tf_string(tu_struct_targ(si i) dewy)}"
+                }
+                s="{s}{if dewy {">"} else {"]"}}"
+            }
+            s
+        }
+    }
+}

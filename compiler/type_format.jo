@@ -1,0 +1,196 @@
+use 'checker_types.dewy'
+use 'type_inference.dewy'
+const TF_NEVER = 8
+struct TypeFormatHost:
+    int_intervals: (int) -> (bool, int[])
+    small_span: (int, int, int) -> bool
+    dimension_str: (int) -> str
+    name_of: (int) -> str
+    str_set_text: (int) -> str
+    check_struct_fields: (int) -> void
+    bundled_rational_type: (int) -> bool
+    bundled_word_rational_type: (int) -> bool
+    is_dewy_set_type: (int) -> bool
+struct TypeFormatInput:
+    types: *(TypeInfo[])
+    structs: *(StructInfo[])
+    args: *(i32[])
+    fields: *(Field[])
+    params: *(int[])
+    parents: *({int: int})
+    math_int: *(int)
+    int_type: *(int)
+    mat4: *(int)
+    host: *TypeFormatHost
+tf_inputs: *TypeFormatInput
+tf_depth = 0
+tf_left = 0
+type_format_bind = (input: *TypeFormatInput) -> int:
+    tf_inputs = input
+    tf_depth = 0
+    tf_left = 0
+    0
+tf_kind = (t: int) -> TK: tf_inputs[0].types[0][tu_prune(t)].kind
+tf_values = (t0: int) -> bool:
+    t = tu_prune(t0)
+    tf_inputs[0].types[0][t].kind == .tuple and tf_inputs[0].types[0][t].sign
+tf_postfix = (t: int, dewy: bool = false) -> str:
+    if tf_kind(t) == .fn_ and not dewy or tu_is_union(t): return "({tf_string(t, dewy)})"
+    tf_string(t, dewy)
+
+tf_string = (t0: int, dewy: bool = false) -> str:
+    if tf_depth == 0: tf_left = 150
+    if tf_left <= 0: return "…"
+    tf_left -= 1
+    tf_depth += 1
+    s = tf_string_in(t0, dewy)
+    tf_depth -= 1
+    s
+
+tf_string_in = (t0: int, dewy: bool) -> str:
+    t = tu_prune(t0)
+    if t == 0: return "?"
+    ti = tf_inputs[0].types[0][t]
+    match ti.kind:
+        effect: "Effect"
+        callable: "{tf_string(int(ti.elem), dewy)} & <effects>"
+        refined:
+            if ti.bits == -1:
+                m = tu_prune(int(ti.elem))
+                if dewy: return "totaldict<{tf_string(tu_struct_targ(int(tf_inputs[0].types[0][m].st), 0), dewy)} {tf_string(tu_struct_targ(int(tf_inputs[0].types[0][m].st), 1), dewy)}>"
+                return "totaldict[{tf_string(tu_struct_targ(int(tf_inputs[0].types[0][m].st), 0), dewy)}, {tf_string(tu_struct_targ(int(tf_inputs[0].types[0][m].st), 1), dewy)}]"
+            known, values = tf_inputs[0].host[0].int_intervals(t)
+            if known and values.len() > 0 and values.len() <= 32:
+                text = ""
+                loop k in [0..values.len() / 2):
+                    if not tf_inputs[0].host[0].small_span(values[2 * k], values[2 * k + 1], 16): return "{tf_string(int(ti.elem), dewy)}<refinement>"
+                    loop v in [values[2 * k]..values[2 * k + 1]]:
+                        if len(text) > 0: text += " | "
+                        text += "{v}"
+                return text
+            "{tf_string(int(ti.elem), dewy)}<refinement>"
+        quantity: "{tf_string(int(ti.elem), dewy)} * {tf_inputs[0].host[0].dimension_str(int(ti.st))}"
+        secret: if dewy: "secret<{tf_string(int(ti.elem), dewy)}>" else: "secret[{tf_string(int(ti.elem), dewy)}]"
+        dimension: tf_inputs[0].host[0].dimension_str(int(ti.st))
+        void_:
+            if int(ti.flags) & TF_NEVER != 0: return "never"
+            "void"
+        bool_: "bool"
+        int_:
+            if t == tf_inputs[0].math_int[0]: return "int"
+            if dewy:
+                base = if ti.sign: "int{ti.bits}" else: "uint{ti.bits}"
+                if ti.st != 0:
+                    policy = if ti.st == 1: "wrap" else: "saturate"
+                    return "{base}<overflow='{policy}'>"
+                return base
+            if t == tf_inputs[0].int_type[0]: return "int"
+            if ti.sign: return "i{ti.bits}"
+            "u{ti.bits}"
+        float_:
+            if dewy: return "float{ti.bits}"
+            if ti.bits == 64: return "f64"
+            "f32"
+        str_: if dewy: "string" else: "str"
+        array:
+            if dewy: return "array<{tf_string(int(ti.elem), dewy)}>"
+            "{tf_postfix(int(ti.elem), dewy)}[]"
+        fixed:
+            if dewy: return "array<{tf_string(int(ti.elem), dewy)} length={ti.bits}>"
+            "{tf_postfix(int(ti.elem), dewy)}[{ti.bits}]"
+        ptr:
+            if dewy: return "ptr<{tf_string(int(ti.elem), dewy)}>"
+            "*{tf_string(int(ti.elem), dewy)}"
+        opt:
+            # (a bare none, whose other type is not known yet)
+            if dewy and tf_kind(int(ti.elem)) == .var: return "none"
+            "{tf_postfix(int(ti.elem), dewy)}?"
+        box: tf_string(int(ti.elem), dewy)
+        null_: "null"
+        range: "range"
+        none_lit: "none"
+        var: "?T{ti.id}"
+        param:
+            k = int(ti.id)
+            if k < tf_inputs[0].params[0].len() and tf_inputs[0].params[0][k] != 0: return tf_inputs[0].host[0].name_of(tf_inputs[0].params[0][k])
+            if k < 6: return "TUVWXY"[k..k + 1)
+            "T{k}"
+        module: "module"
+        typeval: "type"
+        vec:
+            if t == tf_inputs[0].mat4[0]: return "mat4"
+            if ti.sign: return "ivec{ti.bits}"
+            "vec{ti.bits}"
+        polyfn: "generic closure"
+        fn_, cfn:
+            s = "("
+            labels: str[]
+            if dewy and ti.kind == .fn_ and ti.st != 0: labels = split(tf_inputs[0].host[0].name_of(int(ti.st)), "\n")
+            if ti.kind == .cfn: s = "cfn("
+            if dewy: s = "<("
+            loop i in [0..int(ti.nargs)):
+                if i > 0: s += if dewy: " " else: ", "
+                if int(ti.mutmask) & (1 << i) != 0: s += if dewy: "@" else: "mut "
+                if dewy:
+                    label = if i < labels.len() and labels[i] != "": labels[i] else: "_"
+                    s += label + ":"
+                s += tf_string(tu_targ(t, i), dewy)
+            s += ")"
+            # (several values: `:>(int64 int64)`, a fixed number; `:>(int64 ...)`, any number)
+            if dewy and ti.kind == .fn_ and ti.sign and tf_values(int(ti.elem)): s += ":>" + tf_string(int(ti.elem), dewy) + ">"
+            else if dewy and ti.kind == .fn_ and ti.sign: s += ":>(" + tf_string(int(tf_inputs[0].types[0][tu_prune(int(ti.elem))].elem), dewy) + " ...)>"
+            else if dewy: s += ":>" + tf_string(int(ti.elem), dewy) + ">"
+            else if tf_kind(int(ti.elem)) != .void_: s += " -> " + tf_string(int(ti.elem), dewy)
+            else if ti.kind == .fn_: s += " -> void"
+            s
+        tuple:
+            # (Dewy's `[int64 string]`: an array with a type per position; `(int64 int64)`: several values)
+            s = if dewy and not ti.sign: "[" else: "("
+            loop i in [0..int(ti.nargs)):
+                if i > 0: s += (if dewy: " " else: ", ")
+                s += tf_string(tu_targ(t, i), dewy)
+            s + (if dewy and not ti.sign: "]" else: ")")
+        struct_, enum_:
+            si = int(ti.st)
+            if tf_inputs[0].structs[0][si].lit_set != 0: return tf_inputs[0].host[0].str_set_text(int(tf_inputs[0].structs[0][si].lit_set))
+            nm = tf_inputs[0].structs[0][si].name
+            if tf_inputs[0].structs[0][si].record_:
+                tf_inputs[0].host[0].check_struct_fields(si)
+                parts: str[]
+                loop i in [0..int(tf_inputs[0].structs[0][si].nfields)):
+                    field = tf_inputs[0].fields[0][int(tf_inputs[0].structs[0][si].fields) + i]
+                    sep = if dewy: ":" else: ": "
+                    parts.push(tf_inputs[0].host[0].name_of(int(field.name)) + sep + tf_string(int(field.type), dewy))
+                return "[" + join(parts, " ") + "]"
+            if dewy and tf_inputs[0].structs[0][si].union_:
+                parts: str[]
+                ms: int[]
+                loop i in [0..int(tf_inputs[0].structs[0][si].ntargs)): ms.push(tu_prune(tu_struct_targ(si, i)))
+                # (`error` stands for its whole family: its members are not listed again)
+                loop m in ms:
+                    covered = false
+                    up = tf_inputs[0].parents[0].get(m, 0)
+                    loop up != 0 and not covered:
+                        if ms.contains(up): covered = true
+                        up = tf_inputs[0].parents[0].get(up, 0)
+                    if not covered: parts.push(tf_postfix(m, true))
+                return join(parts, " | ")
+            if tf_inputs[0].structs[0][si].union_ or tf_inputs[0].structs[0][si].soa_: return nm
+            # (the bundled exact fraction is the builtin `rational`)
+            if dewy and nm == "Rational" and tf_inputs[0].host[0].bundled_rational_type(t0): return "rational"
+            if dewy and nm == "RationalWord" and tf_inputs[0].host[0].bundled_word_rational_type(t0): return "rational<int64>"
+            if dewy and nm == "Set" and int(tf_inputs[0].structs[0][si].ntargs) == 1 and tf_inputs[0].host[0].is_dewy_set_type(t0):
+                return "set<{tf_string(tu_struct_targ(si, 0), true)}>"
+            if dewy and nm == "Map" and int(tf_inputs[0].structs[0][si].ntargs) == 2:
+                return "dict<{tf_string(tu_struct_targ(si, 0), true)} {tf_string(tu_struct_targ(si, 1), true)}>"
+            if not dewy and nm == "NDArray" and int(tf_inputs[0].structs[0][si].ntargs) == 1: return "{tf_postfix(tu_struct_targ(si, 0), false)}[,]"
+            if nm == "Map" and int(tf_inputs[0].structs[0][si].ntargs) == 2: return "\{{tf_string(tu_struct_targ(si, 0), dewy)}: {tf_string(tu_struct_targ(si, 1), dewy)}}"
+            s = nm
+            if int(tf_inputs[0].structs[0][si].ntargs) > 0:
+                s += if dewy: "<" else: "["
+                loop i in [0..int(tf_inputs[0].structs[0][si].ntargs)):
+                    if i > 0: s += if dewy: " " else: ", "
+                    s += tf_string(tu_struct_targ(si, i), dewy)
+                s += if dewy: ">" else: "]"
+            s
+

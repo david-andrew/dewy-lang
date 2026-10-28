@@ -2,6 +2,7 @@ use 'type_queries.dewy'
 use 'type_inference.dewy'
 use 'type_unions.dewy'
 use 'type_layout.dewy'
+use 'type_format.dewy'
 use 'checker_types.dewy'
 use 'type_intern.dewy'
 use 'concurrency.jo'
@@ -433,14 +434,10 @@ layout_cache_padded = (t: int) -> bool:
     structs[si].decl != 0 and nodes[int(structs[si].decl)].name == i32(intern("CachePadded")) and concurrency_builtin_type(t, "CachePadded")
 
 # a type followed by [] or ? or |: function types and unions need parentheses there
-type_str_postfix = (t: int, dewy: bool = false) -> str:
-    if tkind(t) == .fn_ and not dewy or is_union(t): return "({type_str(t, dewy)})"
-    type_str(t, dewy)
+type_str_postfix = (t: int, dewy: bool = false) -> str: tf_postfix(t, dewy)
 
 # (a type's text is cut short past 150 of its parts: types built from aliases of aliases,
 # (F, F) -> int with F = (G, G) -> int..., would spell out exponentially)
-ts_depth = 0
-ts_left = 0
 
 # Diagnostics name types the way the program being compiled spells them:
 # int64, float64, string and array<T> for Dewy; int, f64, str and T[] for Sloppy.
@@ -456,162 +453,12 @@ dt_named = (t: int) -> str:
 # (the names of the type parameters of the declaration whose types are being shown: a
 # parameter that has none shows as T, U, ... by its place)
 ts_params: int[]
+format_host = TypeFormatHost(int_intervals, small_span, dimension_str, name_of, str_set_text, check_struct_fields, bundled_rational_type, bundled_word_rational_type, is_dewy_set_type)
+format_input = TypeFormatInput(&types, &structs, &type_args, &fields, &ts_params, &nominal_parent, &T_MATH_INT, &T_INT, &T_MAT4, &format_host)
+format_binding = type_format_bind(&format_input)
 
-type_str = (t0: int, dewy: bool = false) -> str:
-    if ts_depth == 0: ts_left = 150
-    if ts_left <= 0: return "…"
-    ts_left -= 1
-    ts_depth += 1
-    s = type_str_in(t0, dewy)
-    ts_depth -= 1
-    s
-
-type_str_in = (t0: int, dewy: bool) -> str:
-    t = prune(t0)
-    if t == 0: return "?"
-    ti = types[t]
-    match ti.kind:
-        effect: "Effect"
-        callable: "{type_str(int(ti.elem), dewy)} & <effects>"
-        refined:
-            if ti.bits == -1:
-                m = prune(int(ti.elem))
-                if dewy: return "totaldict<{type_str(struct_targ(int(types[m].st), 0), dewy)} {type_str(struct_targ(int(types[m].st), 1), dewy)}>"
-                return "totaldict[{type_str(struct_targ(int(types[m].st), 0), dewy)}, {type_str(struct_targ(int(types[m].st), 1), dewy)}]"
-            known, values = int_intervals(t)
-            if known and values.len() > 0 and values.len() <= 32:
-                text = ""
-                loop k in [0..values.len() / 2):
-                    if not small_span(values[2 * k], values[2 * k + 1], 16): return "{type_str(int(ti.elem), dewy)}<refinement>"
-                    loop v in [values[2 * k]..values[2 * k + 1]]:
-                        if len(text) > 0: text += " | "
-                        text += "{v}"
-                return text
-            "{type_str(int(ti.elem), dewy)}<refinement>"
-        quantity: "{type_str(int(ti.elem), dewy)} * {dimension_str(int(ti.st))}"
-        secret: if dewy: "secret<{type_str(int(ti.elem), dewy)}>" else: "secret[{type_str(int(ti.elem), dewy)}]"
-        dimension: dimension_str(int(ti.st))
-        void_:
-            if int(ti.flags) & TF_NEVER != 0: return "never"
-            "void"
-        bool_: "bool"
-        int_:
-            if t == T_MATH_INT: return "int"
-            if dewy:
-                base = if ti.sign: "int{ti.bits}" else: "uint{ti.bits}"
-                if ti.st != 0:
-                    policy = if ti.st == 1: "wrap" else: "saturate"
-                    return "{base}<overflow='{policy}'>"
-                return base
-            if t == T_INT: return "int"
-            if ti.sign: return "i{ti.bits}"
-            "u{ti.bits}"
-        float_:
-            if dewy: return "float{ti.bits}"
-            if ti.bits == 64: return "f64"
-            "f32"
-        str_: if dewy: "string" else: "str"
-        array:
-            if dewy: return "array<{type_str(int(ti.elem), dewy)}>"
-            "{type_str_postfix(int(ti.elem), dewy)}[]"
-        fixed:
-            if dewy: return "array<{type_str(int(ti.elem), dewy)} length={ti.bits}>"
-            "{type_str_postfix(int(ti.elem), dewy)}[{ti.bits}]"
-        ptr:
-            if dewy: return "ptr<{type_str(int(ti.elem), dewy)}>"
-            "*{type_str(int(ti.elem), dewy)}"
-        opt:
-            # (a bare none, whose other type is not known yet)
-            if dewy and tkind(int(ti.elem)) == .var: return "none"
-            "{type_str_postfix(int(ti.elem), dewy)}?"
-        box: type_str(int(ti.elem), dewy)
-        null_: "null"
-        range: "range"
-        none_lit: "none"
-        var: "?T{ti.id}"
-        param:
-            k = int(ti.id)
-            if k < ts_params.len() and ts_params[k] != 0: return name_of(ts_params[k])
-            if k < 6: return "TUVWXY"[k..k + 1)
-            "T{k}"
-        module: "module"
-        typeval: "type"
-        vec:
-            if t == T_MAT4: return "mat4"
-            if ti.sign: return "ivec{ti.bits}"
-            "vec{ti.bits}"
-        polyfn: "generic closure"
-        fn_, cfn:
-            s = "("
-            labels: str[]
-            if dewy and ti.kind == .fn_ and ti.st != 0: labels = split(name_of(int(ti.st)), "\n")
-            if ti.kind == .cfn: s = "cfn("
-            if dewy: s = "<("
-            loop i in [0..int(ti.nargs)):
-                if i > 0: s += if dewy: " " else: ", "
-                if int(ti.mutmask) & (1 << i) != 0: s += if dewy: "@" else: "mut "
-                if dewy:
-                    label = if i < labels.len() and labels[i] != "": labels[i] else: "_"
-                    s += label + ":"
-                s += type_str(targ(t, i), dewy)
-            s += ")"
-            # (several values: `:>(int64 int64)`, a fixed number; `:>(int64 ...)`, any number)
-            if dewy and ti.kind == .fn_ and ti.sign and is_values(int(ti.elem)): s += ":>" + type_str(int(ti.elem), dewy) + ">"
-            else if dewy and ti.kind == .fn_ and ti.sign: s += ":>(" + type_str(int(types[prune(int(ti.elem))].elem), dewy) + " ...)>"
-            else if dewy: s += ":>" + type_str(int(ti.elem), dewy) + ">"
-            else if tkind(int(ti.elem)) != .void_: s += " -> " + type_str(int(ti.elem), dewy)
-            else if ti.kind == .fn_: s += " -> void"
-            s
-        tuple:
-            # (Dewy's `[int64 string]`: an array with a type per position; `(int64 int64)`: several values)
-            s = if dewy and not ti.sign: "[" else: "("
-            loop i in [0..int(ti.nargs)):
-                if i > 0: s += (if dewy: " " else: ", ")
-                s += type_str(targ(t, i), dewy)
-            s + (if dewy and not ti.sign: "]" else: ")")
-        struct_, enum_:
-            si = int(ti.st)
-            if structs[si].lit_set != 0: return str_set_text(int(structs[si].lit_set))
-            nm = structs[si].name
-            if structs[si].record_:
-                check_struct_fields(si)
-                parts: str[]
-                loop i in [0..int(structs[si].nfields)):
-                    field = fields[int(structs[si].fields) + i]
-                    sep = if dewy: ":" else: ": "
-                    parts.push(name_of(int(field.name)) + sep + type_str(int(field.type), dewy))
-                return "[" + join(parts, " ") + "]"
-            if dewy and structs[si].union_:
-                parts: str[]
-                ms: int[]
-                loop i in [0..int(structs[si].ntargs)): ms.push(prune(struct_targ(si, i)))
-                # (`error` stands for its whole family: its members are not listed again)
-                loop m in ms:
-                    covered = false
-                    up = nominal_parent.get(m, 0)
-                    loop up != 0 and not covered:
-                        if ms.contains(up): covered = true
-                        up = nominal_parent.get(up, 0)
-                    if not covered: parts.push(type_str_postfix(m, true))
-                return join(parts, " | ")
-            if structs[si].union_ or structs[si].soa_: return nm
-            # (the bundled exact fraction is the builtin `rational`)
-            if dewy and nm == "Rational" and bundled_rational_type(t0): return "rational"
-            if dewy and nm == "RationalWord" and bundled_word_rational_type(t0): return "rational<int64>"
-            if dewy and nm == "Set" and int(structs[si].ntargs) == 1 and is_dewy_set_type(t0):
-                return "set<{type_str(struct_targ(si, 0), true)}>"
-            if dewy and nm == "Map" and int(structs[si].ntargs) == 2:
-                return "dict<{type_str(struct_targ(si, 0), true)} {type_str(struct_targ(si, 1), true)}>"
-            if not dewy and nm == "NDArray" and int(structs[si].ntargs) == 1: return "{type_str_postfix(struct_targ(si, 0), false)}[,]"
-            if nm == "Map" and int(structs[si].ntargs) == 2: return "\{{type_str(struct_targ(si, 0), dewy)}: {type_str(struct_targ(si, 1), dewy)}}"
-            s = nm
-            if int(structs[si].ntargs) > 0:
-                s += if dewy: "<" else: "["
-                loop i in [0..int(structs[si].ntargs)):
-                    if i > 0: s += if dewy: " " else: ", "
-                    s += type_str(struct_targ(si, i), dewy)
-                s += if dewy: ">" else: "]"
-            s
+type_str = (t: int, dewy: bool = false) -> str: tf_string(t, dewy)
+type_str_in = (t: int, dewy: bool) -> str: tf_string_in(t, dewy)
 
 # ---------- unions ----------
 # A | B | C is a tagged value laid out like an enum: variant i holds member i. Members are flat,
