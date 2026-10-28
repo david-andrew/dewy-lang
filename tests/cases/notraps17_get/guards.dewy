@@ -1,0 +1,16 @@
+read=(d:dict<string int> k:string):>int=>{
+    if d.get(k) is? none return 0
+    return d[k]
+}
+read_bound=(d:dict<string int> k:string):>int=>{
+    let result=d.get(k)
+    if result is? int return d[k]
+    return 0
+}
+main=()=>{
+    let d:dict<string int>=["yes"->4]
+    printl(read(d "yes"))
+    printl(read(d "no"))
+    printl(read_bound(d "yes"))
+    printl(read_bound(d "no"))
+}

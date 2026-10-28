@@ -1,0 +1,9 @@
+Row:type=[key:string]
+main=()=>{
+    let counts:dict<string int>=[]
+    loop row in [Row["a"] Row["b"] Row["a"]] {
+        if counts.get(row.key) is? none counts[row.key]=0
+        counts[row.key]+=1
+    }
+    printl(counts)
+}

@@ -695,6 +695,9 @@ proven below the array's post-call length. Every return must establish the
 relation. Replacing or shrinking the array, an unknown callback, and pending
 return cleanup still invalidate facts they could falsify. Module `const` values,
 including their lengths and guarded elements, retain facts across calls.
+For a dictionary with non-optional values and builtin keys, a successful
+`d.get(k)` supplies membership in that evaluated dictionary. A later change
+to the dictionary or key does not inherit that evidence.
 Immutable literal tables supply key membership and element-field bounds;
 `text.lines` is nonempty when `text` is nonempty. Read-only array-loop elements
 keep guarded field facts across unrelated calls. A successful integer narrowing

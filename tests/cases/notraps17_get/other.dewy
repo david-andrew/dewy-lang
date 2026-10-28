@@ -1,0 +1,5 @@
+read=(d:dict<string int> other:dict<string int> k:string):>int=>{
+    if d.get(k) is? int return other[k]
+    return 0
+}
+main=()=>printl(read(["a"->3] ["unused"->0] "a"))

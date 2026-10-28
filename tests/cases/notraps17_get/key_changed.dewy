@@ -1,0 +1,8 @@
+read=(d:dict<string int> k:string):>int=>{
+    let key=k
+    let result=d.get(key)
+    key="missing"
+    if result is? int return d[key]
+    return 0
+}
+main=()=>printl(read(["a"->3] "a"))

@@ -1,0 +1,8 @@
+read=(d:dict<string int> k:string):>int=>{
+    let current=d
+    let result=current.get(k)
+    current=[]
+    if result is? int return current[k]
+    return 0
+}
+main=()=>printl(read(["a"->3] "a"))

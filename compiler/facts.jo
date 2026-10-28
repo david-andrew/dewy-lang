@@ -4308,7 +4308,7 @@ fact_put_slice_kind = (n: int) -> int:
 # of d's value on k's (an element projection: a dictionary has no other), true
 # after a guard or a store into d[k]; any other change of d gives d a new
 # value. O(1) per call. 1 `in?`, 2 read, 3 changed entry, 4 pop, 5 stored
-# entry, or 0.
+# entry, 6 optional get, or 0.
 fact_name_contains = 0
 fact_name_has = 0
 fact_name_read = 0
@@ -4316,6 +4316,7 @@ fact_name_present = 0
 fact_name_pop = 0
 fact_name_entry = 0
 fact_name_store = 0
+fact_name_get = 0
 fact_map_call = (n: int) -> int:
     if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) < 2: return 0
     d = int(fns[int(nodes[n].sym)].decl)
@@ -4328,8 +4329,9 @@ fact_map_call = (n: int) -> int:
         fact_name_pop = intern("pop")
         fact_name_entry = intern("__map_entry")
         fact_name_store = intern("[]=")
+        fact_name_get = intern("get")
     name = int(nodes[d].name)
-    k = if name == fact_name_contains or name == fact_name_has: 1 else if name == fact_name_read: 2 else if name == fact_name_present: 3 else if name == fact_name_pop: 4 else if name == fact_name_entry or name == fact_name_store: 5 else: 0
+    k = if name == fact_name_contains or name == fact_name_has: 1 else if name == fact_name_read: 2 else if name == fact_name_present: 3 else if name == fact_name_pop: 4 else if name == fact_name_entry or name == fact_name_store: 5 else if name == fact_name_get: 6 else: 0
     if k == 0 or k != 5 and nkids(n) != 2 or not pos_in_lib(nodes[d].pos): return 0
     # (a set's membership is its entries' keys: `v in? s` and `s.pop(v)`)
     t = representation_type(ntype(kid(n, 0)))
@@ -4621,9 +4623,23 @@ fact_map_entry = (s: mut FactState, n: int, map: int, key: int) -> int:
 
 # A dictionary's membership test, read or entry position for a builtin key
 # reads the dictionary alone (the transfer's own rule). O(1).
+# get(k)'s optional tag is membership only when the stored type cannot itself
+# be none. Defaulted overloads and user hash/equality/lifecycle hooks supply no
+# such contract. The result describes the evaluated dictionary snapshot, never
+# a later replacement. O(1) on a demanded map call; two indexed projections.
+fact_map_optional = (n: int) -> bool:
+    result = fact_type(ntype(n))
+    map = fact_type(ntype(kid(n, 0)))
+    if tkind(result) != .opt or not is_map_type(map): return false
+    stored = struct_targ(int(types[map].st), 1)
+    if fact_type(telem(result)) != fact_type(stored): return false
+    if tkind(fact_type(stored)) == .opt or is_union(fact_type(stored)): return false
+    ownership_decls.len() == 0 or not ownership_fact_type(map)
+
 fact_map_reads_only = (n: int) -> bool:
     m = fact_map_call(n)
-    if m < 1 or m > 3: return false
+    if m < 1 or m > 3 and m != 6: return false
+    if m == 6 and not fact_map_optional(n): return false
     kt = representation_type(ntype(kid(n, 1)))
     fact_scalar(kt) or kt == T_STR
 
@@ -7977,6 +7993,11 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             if map == 5 and fact_map_store_call(n):
                 stored = fact_map_store(n, s, values, before)
                 if stored != 0: return stored
+            if map == 6 and builtin and fact_map_optional(n):
+                result = fact_fresh(s, ntype(n))
+                member = fact_map_member(s, n, values[0], values[1])
+                if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, -3, false, member))
+                return result
             if map > 3 or not builtin: fact_path_call_effects(n, s)
             if map == 1: return fact_map_member(s, n, before, values[1])
             # (the entry, of the dictionary's value after the hashing's calls)
