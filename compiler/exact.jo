@@ -177,7 +177,7 @@ exact_operation = (n: int) -> bool:
         if nodes[n].op != i32(int(Tok.minus)): return false
     else if k == .binary and nodes[n].aux == 0:
         op = nodes[n].op as Tok
-        if op != .plus and op != .minus and op != .star and op != .starstar and op != .slash and op != .shl: return false
+        if op != .plus and op != .minus and op != .star and op != .starstar and op != .slash and op != .shl and op != .amp and op != .pipe and op != .caret: return false
     else: return false
     if nodes[n].type == 0 or not exact_type(ntype(n), nodes[n].pos): return false
     k != .binary or nodes[n].op != i32(int(Tok.slash)) or types[exact_representation(ntype(n))].sign

@@ -474,7 +474,8 @@ class MultiBlock(Expr):
         return '{' + ' '.join(render(x, typed) for x in self.items) + '}'
 
     def eval(self, m, env):
-        return [copy.deepcopy(store(m.eval(x, env), x.ty)) for x in self.items]
+        # The enclosing unannotated collector can infer int for exact results.
+        return [copy.deepcopy(m.eval(x, env)) for x in self.items]
 
 
 @dataclass(frozen=True)
@@ -493,7 +494,7 @@ class MultiIf(Expr):
 
     def eval(self, m, env):
         arm = self.then if m.eval(self.test, env) else (self.other or ())
-        return [copy.deepcopy(store(m.eval(x, env), x.ty)) for x in arm]
+        return [copy.deepcopy(m.eval(x, env)) for x in arm]
 
 
 @dataclass(frozen=True)
@@ -511,7 +512,7 @@ class MultiLit(Expr):
             if isinstance(x, (MultiBlock, MultiIf)):
                 out += m.eval(x, env)
             else:
-                out.append(copy.deepcopy(store(m.eval(x, env), x.ty)))
+                out.append(copy.deepcopy(m.eval(x, env)))
         return out
 
 
