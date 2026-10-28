@@ -23,7 +23,7 @@ def run_source(compiler, tmp_path, text, flags=()):
 def test_encoding_reservations_preserve_shared_buffers(compiler, tmp_path):
     # Invoke the actual emitter with empty, shared and growing buffers. The
     # expected bytes are independent of the emitter's reserve/store strategy.
-    source = f"use '{ROOT / 'compiler/x64.jo'}'\n" + '''
+    source = f"use '{ROOT / 'compiler/x64.jo'}'\nuse '{ROOT / 'compiler/x64_encode.dewy'}'\n" + '''
 code = []
 b16(0x1234)
 original = code

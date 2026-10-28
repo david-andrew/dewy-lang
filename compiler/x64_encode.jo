@@ -1,0 +1,370 @@
+const RAX = 0
+const RCX = 1
+const RDX = 2
+const RBX = 3
+const RSP = 4
+const RBP = 5
+const RSI = 6
+const RDI = 7
+const R8 = 8
+const R9 = 9
+const R10 = 10
+const R11 = 11
+
+const RIPREL = 99
+const XMM = 16
+const VX = 4
+const VY = 5
+frame_size = 0
+x_code: *(u8[])
+x_data_fix: *((int, int, int)[])
+x64_encoder_bind = (output: *(u8[]), fixups: *((int, int, int)[])) -> int:
+    x_code = output
+    x_data_fix = fixups
+    0
+b = (x: int): x_code[0].push(u8(x & 255))
+# Reserve a complete encoding once. The compiler's byte array has the runtime
+# header (references, length, capacity); keep COW semantics on the slow path.
+# No pointer survives this write or another reservation. All supported hosts
+# are little endian and permit unaligned integer stores.
+x_bytes = (n: int) -> *u8:
+    slot = &x_code[0] as **u8
+    p = slot[0]
+    old = x_code[0].len()
+    if p == null or (p as *int)[0] != 1:
+        __arr_make_unique(slot, 1)
+        p = slot[0]
+    if p == null or (p as *int)[2] < old + n:
+        __arr_grow(slot, 1, old + n)
+        p = slot[0]
+    (p as *int)[1] = old + n
+    p + 24 + old
+
+b16 = (x: int): (x_bytes(2) as *u16)[0] = u16(x)
+b24 = (x: int):
+    p = x_bytes(3)
+    (p as *u16)[0] = u16(x)
+    p[2] = u8(x >> 16)
+b32 = (x: int):
+    (x_bytes(4) as *u32)[0] = u32(x)
+b64 = (x: int):
+    (x_bytes(8) as *int)[0] = x
+# Patch an already emitted four-byte field. Keep the byte buffer unique before
+# taking its address, just as x_bytes does for appended encodings.
+patch32 = (pos: int, v: int):
+    if pos < 0 or pos > x_code[0].len() - 4: panic("fixup outside x_code[0] buffer")
+    slot = &x_code[0] as **u8
+    __arr_make_unique(slot, 1)
+    ((slot[0] + 24 + pos) as *u32)[0] = u32(v)
+
+rip_kind = 0
+# index register for the next memory operand ([base + index << scale + disp]); -1: none
+cur_index = -1
+cur_scale = 0
+
+use_index = (ix: int, scale: int):
+    cur_index = ix
+    cur_scale = scale
+
+# an indexed access needs a real base register (rip-relative addressing takes no index)
+indexed_base = (base: int, disp: int, imm: int) -> (int, int):
+    if base != RIPREL: return (base, disp)
+    rel_fixup_lea(RCX, rip_kind, disp - imm)
+    (RCX, imm)
+
+rex = (w: bool, r: int, x: int, bb0: int, force: bool):
+    bb = bb0
+    if bb == RIPREL: bb = 0
+    v = 0x40
+    if w: v |= 8
+    if r & 8 != 0: v |= 4
+    if x & 8 != 0 or (cur_index >= 0 and cur_index & 8 != 0): v |= 2
+    if bb & 8 != 0: v |= 1
+    if v != 0x40 or force: b(v)
+
+# ModRM + optional SIB + displacement for [base + disp]
+rsp_frame = false
+rsp_extra = 0
+mem = (reg: int, base0: int, disp0: int):
+    base = base0
+    disp = disp0
+    if rsp_frame and base == RBP:
+        base = RSP
+        disp += frame_size + rsp_extra
+    r = reg & 7
+    if cur_index >= 0:
+        sib = (cur_scale << 6) | ((cur_index & 7) << 3) | (base & 7)
+        if disp == 0 and base & 7 != 5:
+            b((r << 3) | 4)
+            b(sib)
+        else if disp >= -128 and disp <= 127:
+            b(0x40 | (r << 3) | 4)
+            b(sib)
+            b(disp)
+        else:
+            b(0x80 | (r << 3) | 4)
+            b(sib)
+            b32(disp)
+        return
+    if base == RIPREL:
+        b((r << 3) | 5)
+        b32(0)
+        x_data_fix[0].push((x_code[0].len() - 4, rip_kind, disp))
+        return
+    bs = base & 7
+    if disp == 0 and bs != 5:
+        b((r << 3) | bs)
+        if bs == 4: b(0x24)
+    else if disp >= -128 and disp <= 127:
+        b(0x40 | (r << 3) | bs)
+        if bs == 4: b(0x24)
+        b(disp)
+    else:
+        b(0x80 | (r << 3) | bs)
+        if bs == 4: b(0x24)
+        b32(disp)
+
+modrr = (reg: int, rm: int): b(0xC0 | ((reg & 7) << 3) | (rm & 7))
+
+# op r64, [base+disp]   (e.g. 0x8B mov, 0x03 add ...)
+op_rm = (opc: int, w: bool, reg: int, base: int, disp: int):
+    rex(w, reg, 0, base, false)
+    b(opc)
+    mem(reg, base, disp)
+
+op_rr = (opc: int, w: bool, reg: int, rm: int):
+    rex(w, reg, 0, rm, false)
+    b(opc)
+    modrr(reg, rm)
+
+mov_rm = (r: int, base: int, disp: int): op_rm(0x8B, true, r, base, disp)     # mov r, [m]
+mov_mr = (base: int, disp: int, r: int): op_rm(0x89, true, r, base, disp)     # mov [m], r
+mov_rr = (d: int, s: int): op_rr(0x89, true, s, d)
+lea = (r: int, base: int, disp: int): op_rm(0x8D, true, r, base, disp)
+
+mov_imm = (r: int, v: int):
+    if v >= 0 and v <= 0xFFFFFFFF:
+        rex(false, 0, 0, r, false)
+        b(0xB8 + (r & 7))
+        b32(v)
+    else if v >= -2147483648 and v <= 2147483647:
+        rex(true, 0, 0, r, false)
+        b(0xC7)
+        modrr(0, r)
+        b32(v)
+    else:
+        rex(true, 0, 0, r, false)
+        b(0xB8 + (r & 7))
+        b64(v)
+
+# sized load from [base+disp] into r (zero/sign extended to 64 bits)
+load_sized = (r: int, base: int, disp: int, size: int, signed: bool):
+    if size == 8: mov_rm(r, base, disp)
+    else if size == 4:
+        if signed: op_rm(0x63, true, r, base, disp)       # movsxd
+        else: op_rm(0x8B, false, r, base, disp)           # mov r32
+    else if size == 2:
+        rex(true, r, 0, base, false)
+        b(0x0F)
+        if signed: b(0xBF)
+        else: b(0xB7)
+        mem(r, base, disp)
+    else:
+        rex(true, r, 0, base, false)
+        b(0x0F)
+        if signed: b(0xBE)
+        else: b(0xB6)
+        mem(r, base, disp)
+
+store_sized = (base: int, disp: int, r: int, size: int):
+    if size == 8: mov_mr(base, disp, r)
+    else if size == 4: op_rm(0x89, false, r, base, disp)
+    else if size == 2:
+        b(0x66)
+        op_rm(0x89, false, r, base, disp)
+    else:
+        rex(false, r, 0, base, r >= 4)
+        b(0x88)
+        mem(r, base, disp)
+
+# SSE: prefix (F2 for sd, F3 for ss, 66 for pd), 0F, opc, modrm mem
+sse_rm = (prefix: int, opc: int, x: int, base: int, disp: int):
+    if prefix != 0: b(prefix)
+    rex(false, x, 0, base, false)
+    b(0x0F)
+    b(opc)
+    mem(x, base, disp)
+sse_rr = (prefix: int, opc: int, x: int, y: int):
+    if prefix != 0: b(prefix)
+    rex(false, x, 0, y, false)
+    b(0x0F)
+    b(opc)
+    modrr(x, y)
+
+# ---- vectors ----
+is_vreg_vec = (ty: int) -> bool: ty == VX or ty == VY
+
+# VEX prefix (3-byte form): map 1 = 0F, 2 = 0F38; pp 0 none, 1 = 66, 2 = F3, 3 = F2; l 1 for
+# 256 bits; reg and vvvv are xmm numbers, rm a register or a memory base (the index is cur_index)
+vex = (reg: int, vvvv: int, rm: int, map: int, pp: int, w: int, l: int):
+    rb = rm
+    if rb == RIPREL: rb = 0
+    x = 0
+    if cur_index >= 0 and cur_index & 8 != 0: x = 1
+    b(0xC4)
+    b(((1 - ((reg >> 3) & 1)) << 7) | ((1 - x) << 6) | ((1 - ((rb >> 3) & 1)) << 5) | map)
+    b((w << 7) | ((15 - (vvvv & 15)) << 3) | (l << 2) | pp)
+
+vmov_rr = (x: int, y: int, ty: int):
+    if x == y: return
+    if ty == VY:
+        vex(x, 0, y, 1, 0, 0, 1)
+        b(0x28)                                         # vmovaps ymm, ymm
+        modrr(x, y)
+    else: sse_rr(0, 0x28, x, y)                         # movaps
+vmov_rm = (x: int, base: int, disp: int, ty: int):
+    if ty == VY:
+        vex(x, 0, base, 1, 0, 0, 1)
+        b(0x10)                                         # vmovups ymm, [m]
+        mem(x, base, disp)
+    else: sse_rm(0, 0x10, x, base, disp)                # movups xmm, [m]
+vmov_mr = (base: int, disp: int, x: int, ty: int):
+    if ty == VY:
+        vex(x, 0, base, 1, 0, 0, 1)
+        b(0x11)                                         # vmovups [m], ymm
+        mem(x, base, disp)
+    else: sse_rm(0, 0x11, x, base, disp)                # movups [m], xmm
+
+vec_esize = (k: int) -> int:
+    if k == 0 or k == 2: return 4
+    8
+
+# the opcode (after 0F) of vector operation op on element kind k (66 prefix for f64 and ints)
+jmp32 = () -> int:
+    b(0xE9)
+    b32(0)
+    x_code[0].len() - 4
+jcc32 = (cc: int) -> int:
+    b(0x0F)
+    b(0x80 + cc)
+    b32(0)
+    x_code[0].len() - 4
+# Keep six-byte branch slots fixed. A short encoding avoids a decoder-boundary
+# crossing. Backedges at offsets 30/31 move within the slot using NOPs;
+# forward conditional branches keep their near encoding when entry NOPs are needed.
+patch_branch = (pos: int, target: int):
+    delta = target - pos
+    if x_code[0][pos - 1] == 0xE9:
+        offset = (pos - 1) & 31
+        pad = if offset >= 30: 32 - offset else: 0
+        short = delta - 1 - pad
+        if offset >= 27 and short >= -128 and short <= 127:
+            if pad == 1: x_code[0][pos - 1] = 0x90
+            else if pad == 2:
+                x_code[0][pos - 1] = 0x66
+                x_code[0][pos] = 0x90
+            x_code[0][pos - 1 + pad] = 0xEB
+            x_code[0][pos + pad] = u8(short & 255)
+            if pad == 0:
+                x_code[0][pos + 1] = 0x0F
+                x_code[0][pos + 2] = 0x1F
+                x_code[0][pos + 3] = 0
+            else if pad == 1:
+                x_code[0][pos + 2] = 0x66
+                x_code[0][pos + 3] = 0x90
+            else: x_code[0][pos + 3] = 0x90
+        else: patch32(pos, delta - 4)
+        return
+    offset = (pos - 2) & 31
+    pad = if offset >= 30: 32 - offset else: 0
+    short = delta - pad
+    if pos >= 2 and offset >= 26 and (offset < 30 or delta < 0) and short >= -128 and short <= 127 and x_code[0][pos - 2] == 0x0F and x_code[0][pos - 1] >= 0x80 and x_code[0][pos - 1] <= 0x8F:
+        cc = x_code[0][pos - 1] - 0x10
+        if pad == 1: x_code[0][pos - 2] = 0x90
+        else if pad == 2:
+            x_code[0][pos - 2] = 0x66
+            x_code[0][pos - 1] = 0x90
+        x_code[0][pos - 2 + pad] = cc
+        x_code[0][pos - 1 + pad] = u8(short & 255)
+        if pad == 0: patch32(pos, 0x00401F0F)
+        else if pad == 1:
+            x_code[0][pos + 1] = 0x0F
+            x_code[0][pos + 2] = 0x1F
+            x_code[0][pos + 3] = 0
+        else:
+            x_code[0][pos + 2] = 0x66
+            x_code[0][pos + 3] = 0x90
+        # Fold the unused suffix into a following scalar instruction. CS is
+        # ignored for these x86-64 operations; their end (including RIP-relative
+        # addressing) stays fixed. Four prefixes keep each encoding below 15 bytes.
+        next = pos + 4
+        if next + 1 < x_code[0].len() and x_code[0][next] & 0xF0 == 0x40:
+            op = int(x_code[0][next + 1])
+            if op == 0x89 or op == 0x8B or op == 0x8D or op == 0x85 or (op < 0x40 and (op & 7 == 1 or op & 7 == 3)) or (op >= 0xB8 and op <= 0xBF) or ((op == 0x81 or op == 0x83 or op == 0xC7) and next + 2 < x_code[0].len() and x_code[0][next + 2] >= 0xC0):
+                loop i in [pos + pad..pos + 4): x_code[0][i] = 0x2E
+    else: patch32(pos, delta - 4)
+# A forward entry inside a preceding encoding prevents growing it in place.
+x_padding_floor = 0
+x_padding_cmov = -1
+patch_here = (pos: int):
+    x_padding_floor = x_code[0].len()
+    patch_branch(pos, x_code[0].len())
+jmp_back = (target: int):
+    pos = jmp32()
+    patch_branch(pos, target)
+
+const CC_E = 4
+const CC_NE = 5
+const CC_L = 0xC
+const CC_GE = 0xD
+const CC_LE = 0xE
+const CC_G = 0xF
+const CC_B = 2
+const CC_AE = 3
+const CC_BE = 6
+const CC_A = 7
+const CC_P = 0xA
+const CC_NP = 0xB
+
+# n bytes of no-ops, in as few instructions as possible
+const NOPS = [[0x90], [0x66, 0x90], [0x0F, 0x1F, 0x00], [0x0F, 0x1F, 0x40, 0x00], [0x0F, 0x1F, 0x44, 0x00, 0x00], [0x66, 0x0F, 0x1F, 0x44, 0x00, 0x00], [0x0F, 0x1F, 0x80, 0x00, 0x00, 0x00, 0x00], [0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00], [0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00]]
+nop_pad = (n0: int):
+    n = n0
+    loop n > 0:
+        # Up to six operand-size prefixes plus the eight-byte NOP stay
+        # within x86's 15-byte instruction and decoder prefix limits.
+        k = min(n, 14)
+        if k > 9:
+            loop i in [0..k - 8): b(0x66)
+            loop x in NOPS[7]: b(x)
+        else:
+            loop x in NOPS[k - 1]: b(x)
+        n -= k
+
+setcc = (cc: int):
+    b(0x0F)
+    b(0x90 + cc)
+    b(0xC0)        # al
+    b(0x0F)
+    b(0xB6)
+    b(0xC0)        # movzx eax, al
+
+
+# A Boolean result can be produced directly in its assigned register. The
+# 32-bit zero-extension writes the complete 64-bit value, including high GPRs.
+setcc_reg = (cc: int, r: int):
+    rex(false, 0, 0, r, r >= 4)
+    b(0x0F)
+    b(0x90 + cc)
+    modrr(0, r)
+    rex(false, r, 0, r, r >= 4)
+    b(0x0F)
+    b(0xB6)
+    modrr(r, r)
+
+rel_fixup_lea = (r: int, kind: int, off: int):
+    rex(true, r, 0, 0, false)
+    b(0x8D)
+    b(((r & 7) << 3) | 5)
+    b32(0)
+    x_data_fix[0].push((x_code[0].len() - 4, kind, off))

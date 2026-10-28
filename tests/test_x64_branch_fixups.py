@@ -5,7 +5,7 @@ from tests.support import ROOT, compiler  # noqa: F401
 
 def test_forward_branch_destinations(compiler, tmp_path):
     source = tmp_path / 'fixups.jo'
-    source.write_text(f"use '{ROOT / 'compiler/x64.jo'}'\n" + '''
+    source.write_text(f"use '{ROOT / 'compiler/x64.jo'}'\nuse '{ROOT / 'compiler/x64_encode.dewy'}'\n" + '''
 loop backward in [false, true]:
     loop offset in [0..160):
         loop cc in [0..17):

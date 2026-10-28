@@ -6,7 +6,7 @@ from tests.support import ROOT, compiler
 
 def test_release_call_boundary_index(compiler, tmp_path):
     source = tmp_path / 'call_index.jo'
-    source.write_text(f"use '{ROOT / 'compiler/x64.jo'}'\nuse '{ROOT / 'compiler/ir.jo'}'\n"
+    source.write_text(f"use '{ROOT / 'compiler/x64.jo'}'\nuse '{ROOT / 'compiler/x64_encode.dewy'}'\nuse '{ROOT / 'compiler/ir.jo'}'\n"
                       f"use '{ROOT / 'compiler/ir_types.dewy'}'\nuse '{ROOT / 'compiler/backend_analysis.dewy'}'\nuse '{ROOT / 'compiler/ir_operands.dewy'}'\n" + '''
 loop length in [4, 65, 7, 129, 3]:
     loop stride in [1, 2, 5, 200]:
