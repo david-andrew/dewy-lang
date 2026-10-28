@@ -831,6 +831,8 @@ and `not=?`, array, record and dictionary literals take their element or field
 types from the typed operand on either side. Mixed `int`/fixed-width arithmetic
 uses `int`; a literal beside a fixed-width operand can take that operand's type,
 without making an `int64` arithmetic result narrow.
+Unsigned arithmetic is exact when observed: `uint64(2) - uint64(34)` prints
+`-32`, and a later fixed-width store checks whether the value fits.
 Implicit conversions involving `int` preserve the value; narrowing an `int` to a
 fixed width is the same proven conversion as a narrowing between fixed widths
 (below), an `int` index's being its bounds check (a known constant failure is a

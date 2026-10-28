@@ -163,8 +163,9 @@ exact_format_word = (n: int, writer: str, buffer: int, pos: int) -> bool:
         decl = resolve_by_types(intern("__fmt"), [buffer, T_MATH_INT], pos, true, true)
     files[pos_file(nodes[decl].pos)].path == lib_dir + "/math_int.jo"
 
-exact_int_result = (n: int) -> int:
-    if ntype(n) != T_INT or not dewy_at(nodes[n].pos): return ntype(n)
+exact_int_result = (n: int, observe_unsigned: bool = false) -> int:
+    if not dewy_at(nodes[n].pos): return ntype(n)
+    if ntype(n) != T_INT and not (observe_unsigned and exact_type(ntype(n), nodes[n].pos) and exact_operation(n)): return ntype(n)
     wrap_conv(n, .int_, T_MATH_INT)
     exact_note(int(nodes[n].a))
     T_MATH_INT

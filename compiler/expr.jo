@@ -6378,6 +6378,10 @@ nargs_check = (n: int, nargs: int, lo: int, hi: int, name: str):
         fatal(nodes[n].pos, "{name} expects {lo} to {hi} arguments, got {nargs}")
 
 fmt_part = (part: int, pos: int):
+    # Formatting observes the exact result; it is not a uint64 store.
+    # Reveal an unsigned arithmetic node to mathematical int before overload selection.
+    observed = int(nodes[part].a)
+    if dewy_at(pos) and exact_type(ntype(observed), pos) and not types[exact_representation(ntype(observed))].sign and exact_operation(observed): exact_int_result(observed, true)
     t = prune(ntype(int(nodes[part].a)))
     shown = if is_quantity(t) and nodes[part].sval < 0 and dewy_at(pos): quantity_display(int(nodes[part].a)) else: 0
     if shown != 0:
@@ -7961,6 +7965,10 @@ check_binary = (n: int, expected: int) -> int:
         ta = prune(ntype(a))
         tb = prune(ntype(b))
         if not is_int(ta) or not is_int(tb): fatal(nodes[n].pos, "shift operands must be integers")
+        # An unsigned subtraction may be negative before the shift. Keep its
+        # exact signed value instead of first narrowing it to an unsigned word.
+        if op == .shr and ta == T_U64 and nodes[a].kind == .binary and nodes[a].op == i32(int(Tok.minus)) and exact_operation(a):
+            ta = exact_int_result(a, true)
         if ta == T_MATH_INT:
             known_b, y = integer_constant(b)
             if known_b and y < 0 and types[tb].sign: fatal(nodes[n].pos, "shift count must be nonnegative")
