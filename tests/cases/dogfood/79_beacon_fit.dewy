@@ -1,0 +1,73 @@
+# Surveyors reconstruct a beacon's planar position from linearized range
+# differences. Parallel baselines deliberately yield Singular, not a panic.
+
+Point:type = [x:float64 y:float64]
+Reading:type = [station:Point squared_range:float64]
+Estimate:type = [point:Point residual:float64]
+
+squared = (p:Point):>float64 => p.x^2 + p.y^2
+
+distance_squared = (a:Point b:Point):>float64 =>
+    (a.x - b.x)^2 + (a.y - b.y)^2
+
+reading = (station:Point beacon:Point):>Reading =>
+    Reading[station distance_squared(station beacon)]
+
+fit = (samples:array<Reading>):>Estimate | Singular => {
+    $runtime_checks  # matrix shape and indexing of externally supplied readings
+    let origin = samples[0]
+    let second = samples[1]
+    let third = samples[2]
+    let a = reshape([
+        2.0 * (second.station.x - origin.station.x)
+        2.0 * (second.station.y - origin.station.y)
+        2.0 * (third.station.x - origin.station.x)
+        2.0 * (third.station.y - origin.station.y)
+    ] 2 2)
+    let rhs = [
+        squared(second.station) - squared(origin.station) - second.squared_range + origin.squared_range
+        squared(third.station) - squared(origin.station) - third.squared_range + origin.squared_range
+    ]
+    let answer = solve(a rhs)
+    match answer {
+        coordinates:array<float64> => {
+            let point = Point[coordinates[0] coordinates[1]]
+            let residual = 0.0
+            loop sample in samples {
+                residual += abs(distance_squared(sample.station point) - sample.squared_range)
+            }
+            Estimate[point residual]
+        }
+        <Singular> => Singular
+    }
+}
+
+report = (label:string samples:array<Reading>):>void => {
+    match fit(samples) {
+        estimate:Estimate => printl"{label}: ({estimate.point.x:.2f}, {estimate.point.y:.2f}), residual {estimate.residual:.3f}"
+        <Singular> => printl"{label}: singular baselines"
+    }
+}
+
+main = () => {
+    let beacon = Point[3.0 4.0]
+    let good = [
+        reading(Point[0.0 0.0] beacon)
+        reading(Point[6.0 0.0] beacon)
+        reading(Point[0.0 8.0] beacon)
+    ]
+    let collinear = [
+        reading(Point[0.0 0.0] beacon)
+        reading(Point[2.0 0.0] beacon)
+        reading(Point[5.0 0.0] beacon)
+    ]
+    printl"known beacon: ({beacon.x}, {beacon.y})"
+    report("triangle" good)
+    report("line" collinear)
+    let shifted = [
+        Reading[good[0].station good[0].squared_range + 1.0]
+        good[1]
+        good[2]
+    ]
+    report("shifted range" shifted)
+}

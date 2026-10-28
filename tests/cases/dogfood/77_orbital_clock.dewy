@@ -1,0 +1,79 @@
+# A mission clock computes exact repeat dates for several artificial orbits.
+# Its tick counts cross machine-word boundaries without losing integer digits.
+
+Orbit:type = [name:string period:int phase:int]
+Window:type = [start:int stop:int]
+
+gcd_exact = (a:int b:int):>int => {
+    let x = abs(a)
+    let y = abs(b)
+    loop y not=? 0 {
+        let rest = x % y
+        x = y
+        y = rest
+    }
+    x
+}
+
+lcm_exact = (a:int b:int):>int => {
+    let divisor = gcd_exact(a b)
+    if divisor =? 0 return 0
+    a // divisor * b
+}
+
+period_of = (orbits:array<Orbit>):>int => {
+    let repeat = 1
+    loop orbit in orbits repeat = lcm_exact(repeat orbit.period)
+    repeat
+}
+
+aligned = (orbit:Orbit tick:int):>bool =>
+    orbit.period not=? 0 and (tick - orbit.phase) % orbit.period =? 0
+
+next_alignment = (orbit:Orbit after:int):>int => {
+    if orbit.period =? 0 return after
+    let offset = (orbit.phase - after) % orbit.period
+    after + offset
+}
+
+calendar = (orbits:array<Orbit> window:Window):>array<string> => {
+    let notes:array<string> = []
+    loop orbit in orbits {
+        let next = next_alignment(orbit window.start)
+        loop next <? window.stop {
+            notes.push("{orbit.name}@{next - window.start}")
+            next += orbit.period
+        }
+    }
+    notes.sorted()
+}
+
+checksum = (digits:array<int>):>int => {
+    let total = 0
+    loop digit in digits total = total * 10 + digit
+    total
+}
+
+main = () => {
+    let epoch = checksum([9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9])
+    let orbits = [
+        Orbit["Aster" 12 3]
+        Orbit["Boreal" 18 9]
+        Orbit["Cinder" 35 5]
+    ]
+    let cycle = period_of(orbits)
+    if cycle =? 0 return
+    let window = Window[epoch epoch + 45]
+    printl"epoch: {epoch}"
+    printl"repeat period: {cycle}"
+    printl"cycle offset at huge epoch: {epoch % cycle}"
+    loop orbit in orbits {
+        let next = next_alignment(orbit epoch)
+        printl"{orbit.name}: next in {next - epoch}, aligned {aligned(orbit next)}"
+    }
+    printl"calendar: {calendar(orbits window).join(", ")}"
+    let beyond = epoch * epoch + 17
+    printl"square digits: {"{beyond}".length}"
+    printl"square residue: {beyond % 97}"
+    printl"gcd of epoch and cycle: {gcd_exact(epoch cycle)}"
+}

@@ -1,0 +1,69 @@
+# A commissary divides measured ingredients among lunch batches. It imports
+# a checked batch selector and explicitly accepts that external module's
+# panic effect at its own call boundary.
+
+from p"../../fixtures/dogfood14_portions.dewy" import double_portion
+
+Ingredient:type = [name:string grams:int]
+Recipe:type = [name:string serves:int ingredients:array<Ingredient>]
+Order:type = [customer:string portions:int]
+
+scale = (recipe:Recipe portions:int):>array<Ingredient> => {
+    if recipe.serves =? 0 return []
+    [loop item in recipe.ingredients
+        Ingredient[item.name item.grams * portions // recipe.serves]]
+}
+
+total_portions = (orders:array<Order>):>int => {
+    let total = 0
+    loop order in orders total += order.portions
+    total
+}
+
+shopping = (recipe:Recipe orders:array<Order>):>array<Ingredient> =>
+    scale(recipe total_portions(orders))
+
+show_ingredients = (items:array<Ingredient>):>void => {
+    loop item in items printl"  {item.name}: {item.grams} g"
+}
+
+pack = (orders:array<Order> capacity:int):>array<int> => {
+    let batches:array<int> = []
+    let current = 0
+    loop order in orders {
+        if current + order.portions >? capacity {
+            batches.push(current)
+            current = 0
+        }
+        current += order.portions
+    }
+    if current >? 0 batches.push(current)
+    batches
+}
+
+main = () => {
+    let recipe = Recipe["lentil bowls" 4 [
+        Ingredient["lentils" 320]
+        Ingredient["rice" 240]
+        Ingredient["carrots" 160]
+        Ingredient["spice" 12]
+    ]]
+    let orders = [
+        Order["north desk" 3]
+        Order["archive" 2]
+        Order["studio" 4]
+        Order["garden" 1]
+    ]
+    printl"recipe: {recipe.name}, base serves {recipe.serves}"
+    loop order in orders printl"{order.customer}: {order.portions} portions"
+    printl"total: {total_portions(orders)} portions"
+    printl"shopping list:"
+    show_ingredients(shopping(recipe orders))
+    let batches = pack(orders 5)
+    printl"batches: {batches}"
+    {
+        $runtime_checks  # imported selector can panic; index comes from a batch plan
+        printl"second batch doubled: {double_portion(batches 1)}"
+    }
+    printl"packed total: {sum(batches)}"
+}

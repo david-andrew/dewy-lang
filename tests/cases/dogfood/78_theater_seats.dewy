@@ -1,0 +1,78 @@
+# Theater seat allocation keeps a genuine rectangular matrix, including its
+# rank and extents at a function boundary. An aisle is represented by X.
+
+Seat:type = [row:int64 col:int64]
+Request:type = [name:string count:int]
+Booking:type = [name:string row:int first:int count:int]
+
+open_seat = (grid:array<int length=[r c]> seat:Seat):>bool =>
+    0 <=? seat.row <? r and 0 <=? seat.col <? c and grid[seat.row seat.col] =? 0
+
+find_run = (grid:array<int length=[r c]> needed:int):>Seat? => {
+    loop row in [0..r) {
+        let first = 0
+        let run = 0
+        loop col in [0..c) {
+            if open_seat(grid Seat[row col]) {
+                if run =? 0 first = col
+                run += 1
+                if run =? needed return Seat[row first]
+            } else run = 0
+        }
+    }
+    none
+}
+
+reserve = (@grid:array<int length=[r c]> request:Request):>Booking? => {
+    $runtime_checks  # writes to a shaped @ parameter currently lose rank facts
+    let start = find_run(grid request.count)
+    if start is? none return none
+    let seat = start or_throw
+    loop col in [0..c) {
+        if col >=? seat.col and col <? seat.col + request.count grid[seat.row col] = 1
+    }
+    Booking[request.name seat.row seat.col request.count]
+}
+
+count_state = (grid:array<int length=[r c]> state:int):>int => {
+    let total = 0
+    loop row in [0..r) loop col in [0..c) {
+        if grid[row col] =? state total += 1
+    }
+    total
+}
+
+show = (grid:array<int length=[r c]>):>void => {
+    loop row in [0..r) {
+        let text = ""
+        loop col in [0..c) {
+            let mark = if grid[row col] =? 0 "." else if grid[row col] =? 1 "#" else "X"
+            text = "{text}{mark}"
+        }
+        printl"{row}: {text}"
+    }
+}
+
+main = () => {
+    let grid = zeros<int>(4 8)
+    loop row in [0..grid.length[0]) grid[row 3] = 2
+    grid[0 0] = 1
+    grid[2 7] = 1
+    let requests = [
+        Request["Mira" 3]
+        Request["Leo" 2]
+        Request["Nia" 4]
+        Request["Omar" 3]
+        Request["Paz" 5]
+    ]
+    $runtime_checks  # repeated mutable 2-D contract calls lose shape evidence
+    loop request in requests {
+        match reserve(@grid request) {
+            booking:Booking => printl"{booking.name}: row {booking.row}, seats {booking.first}..{booking.first + booking.count - 1}"
+            _ => printl"{request.name}: waitlist"
+        }
+    }
+    show(grid)
+    printl"free: {count_state(grid 0)}, booked: {count_state(grid 1)}"
+    printl"shape: {grid.length}"
+}

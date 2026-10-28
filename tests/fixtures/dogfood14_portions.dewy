@@ -1,0 +1,10 @@
+# Production kitchen's guarded batch selection. The checked index is handled
+# by this module; external callers still see its panics effect.
+
+portion = (batches:array<int> index:int):>int => {
+    $runtime_checks
+    batches[index]
+}
+
+double_portion = (batches:array<int> index:int):>int =>
+    portion(batches index) * 2

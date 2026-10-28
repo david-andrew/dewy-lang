@@ -1,0 +1,66 @@
+# A fixed network router decodes short packets and tallies destinations.
+# Boolean helper facts guard byte access and destination table indexing.
+
+Packet:type = [bytes:array<int>]
+Route:type = [name:string count:int]
+
+has_header = (bytes:array<int>):>bool => bytes.length >=? 3
+
+valid_destination = (routes:array<Route> id:int):>bool =>
+    0 <=? id <? routes.length
+
+checksum = (bytes:array<int>):>int => {
+    let total = 0
+    loop byte in bytes total += byte
+    total % 256
+}
+
+decode = (packet:Packet routes:array<Route>):>string => {
+    let bytes = packet.bytes
+    if not has_header(bytes) return "short packet"
+    let destination = bytes[0]
+    let kind = bytes[1]
+    let declared = bytes[2]
+    if not valid_destination(routes destination) return "unknown destination {destination}"
+    if declared not=? bytes.length - 3 return "length mismatch"
+    if kind not in? [1 2] return "unknown kind {kind}"
+    let payload = 0
+    loop i in [3..bytes.length) payload += bytes[i]
+    "{routes[destination].name}: kind {kind}, payload {payload}"
+}
+
+route = (@routes:array<Route> packet:Packet):>void => {
+    let result = decode(packet routes)
+    printl"{result}"
+    if has_header(packet.bytes) {
+        let id = packet.bytes[0]
+        if valid_destination(routes id) and packet.bytes[1] in? [1 2] and packet.bytes[2] =? packet.bytes.length - 3 {
+            routes[id].count += 1
+        }
+    }
+}
+
+report = (routes:array<Route>):>void => {
+    let total = 0
+    loop route in routes {
+        printl"{route.name}: {route.count} packet(s)"
+        total += route.count
+    }
+    printl"accepted: {total}"
+}
+
+main = () => {
+    let routes = [Route["archive" 0] Route["monitor" 0] Route["printer" 0]]
+    let packets = [
+        Packet[[0 1 2 9 8]]
+        Packet[[2 2 1 42]]
+        Packet[[1 1 0]]
+        Packet[[9 1 1 3]]
+        Packet[[0 2 3 4]]
+        Packet[[1 7 1 6]]
+        Packet[[2 1]]
+    ]
+    loop packet in packets route(@routes packet)
+    report(routes)
+    printl"sample checksum: {checksum(packets[0].bytes)}"
+}
