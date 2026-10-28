@@ -1,0 +1,60 @@
+$runtime_checks
+from p"node_store.dewy" import Node
+from p"source_types.dewy" import SrcFile
+
+# Callable label metadata preserves byte spellings and source dialect. Interning
+# may reenter or grow any arena, so finish borrowed reads before each call.
+NWord:type=int64<overflow='wrap'>
+TypeLabelInput:type=[
+    names:ptr<array<string>>
+    nodes:ptr<array<Node>>
+    lists:ptr<array<int32>>
+    files:ptr<array<SrcFile>>
+    intern:<(text:string):>int64>
+]
+let tn_inputs:ptr<TypeLabelInput>=$unsafe (uint64(0) as ptr<TypeLabelInput>)
+type_label_bind=(input:ptr<TypeLabelInput>):>NWord=>{tn_inputs=input;0}
+tn_label_key=(names:array<int64>):>NWord=>$unsafe {
+    let key=""
+    let named=false
+    let ids=names.ptr
+    let texts=tn_inputs[0].names[0].ptr
+    loop i in [NWord(0)..NWord(names.length)) {
+        if i >? 0 {key="{key}\n"}
+        let value=texts[ids[i]]
+        let bytes=value as array<uint8>
+        if value =? "_" or (bytes.length >? 0 and bytes.ptr[0] =? 36) {value=""}
+        if value not=? "" {named=true}
+        key="{key}{value}"
+    }
+    if named {tn_inputs[0].intern(key)} else {0}
+}
+tn_label_names=(key:NWord count:NWord):>array<int64>=>$unsafe {
+    if key =? 0 {return fill(int64(0) count)}
+    let text=tn_inputs[0].names[0].ptr[key]
+    let bytes=text as array<uint8>
+    let out:array<int64>=[]
+    let start:NWord=0
+    loop i in [NWord(0)..NWord(bytes.length)) {
+        if bytes.ptr[i] =? 10 {
+            let name=text.byte_slice(start i)
+            out.push(if name =? "" {0} else {tn_inputs[0].intern(name)})
+            start=i+1
+        }
+    }
+    let name=text.byte_slice(start NWord(bytes.length))
+    out.push(if name =? "" {0} else {tn_inputs[0].intern(name)})
+    out
+}
+tn_decl_labels=(decl:NWord):>NWord=>$unsafe {
+    if decl =? 0 {return 0}
+    let nodes=tn_inputs[0].nodes[0].ptr
+    let file=nodes[decl].pos >> 40
+    if not tn_inputs[0].files[0].ptr[file].is_dewy {return 0}
+    let first=NWord(nodes[decl].list)
+    let count=NWord(nodes[decl].nlist)
+    let children=tn_inputs[0].lists[0].ptr
+    let names:array<int64>=[]
+    loop i in [NWord(0)..count) {names.push(NWord(nodes[NWord(children[first+i])].name))}
+    tn_label_key(names)
+}

@@ -1,0 +1,33 @@
+use 'node_store.dewy'
+use 'source_types.dewy'
+struct TypeLabelInput:
+    names: *(str[])
+    nodes: *(Node[])
+    lists: *(i32[])
+    files: *(SrcFile[])
+    intern: (str) -> int
+tn_inputs: *TypeLabelInput
+type_label_bind = (input: *TypeLabelInput) -> int:
+    tn_inputs = input
+    0
+tn_label_key = (names: int[]) -> int:
+    key = ""
+    named = false
+    loop i in 0.. and name in names:
+        if i > 0: key += "\n"
+        value = tn_inputs[0].names[0][name]
+        if value == "_" or (len(value) > 0 and value[0] == '$'): value = ""
+        if value != "": named = true
+        key += value
+    if named: tn_inputs[0].intern(key) else: 0
+tn_label_names = (key: int, count: int) -> int[]:
+    if key == 0: return fill(0, count)
+    out: int[]
+    loop name in split(tn_inputs[0].names[0][key], "\n"):
+        out.push(if name == "": 0 else: tn_inputs[0].intern(name))
+    out
+tn_decl_labels = (decl: int) -> int:
+    if decl == 0 or not tn_inputs[0].files[0][tn_inputs[0].nodes[0][decl].pos >> 40].is_dewy: return 0
+    names: int[]
+    loop p in node_kids(tn_inputs[0].nodes[0], tn_inputs[0].lists[0], decl): names.push(int(tn_inputs[0].nodes[0][p].name))
+    tn_label_key(names)

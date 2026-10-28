@@ -6,6 +6,7 @@ use 'type_format.dewy'
 use 'type_factory.dewy'
 use 'type_properties.dewy'
 use 'type_constructors.dewy'
+use 'type_labels.dewy'
 use 'checker_types.dewy'
 use 'type_intern.dewy'
 use 'concurrency.jo'
@@ -139,28 +140,11 @@ secret_repr = (t0: int) -> int: tb_secret_repr(t0)
 # Callable labels are compile-time metadata, interned as a newline-separated
 # name tuple in st (unused by fn_ layout). Positional implementation-language
 # callables retain zero, without any label allocation or ABI change.
-fn_label_key = (names: int[]) -> int:
-    key = ""
-    named = false
-    loop i in 0.. and name in names:
-        if i > 0: key += "\n"
-        value = name_of(name)
-        if value == "_" or (len(value) > 0 and value[0] == '$'): value = ""
-        if value != "": named = true
-        key += value
-    if named: intern(key) else: 0
-
-fn_label_names = (key: int, count: int) -> int[]:
-    if key == 0: return fill(0, count)
-    out: int[]
-    loop name in split(name_of(key), "\n"): out.push(if name == "": 0 else: intern(name))
-    out
-
-decl_fn_labels = (decl: int) -> int:
-    if decl == 0 or not files[pos_file(nodes[decl].pos)].is_dewy: return 0
-    names: int[]
-    loop p in kids(decl): names.push(int(nodes[p].name))
-    fn_label_key(names)
+label_input = TypeLabelInput(&names, &nodes, &lists, &files, intern)
+label_binding = type_label_bind(&label_input)
+fn_label_key = (names: int[]) -> int: tn_label_key(names)
+fn_label_names = (key: int, count: int) -> int[]: tn_label_names(key, count)
+decl_fn_labels = (decl: int) -> int: tn_decl_labels(decl)
 
 # defaults: the function instance whose parameter defaults a call through the
 # value fills in (`g = @f` keeps f's defaults); 0 when none travel with it.
