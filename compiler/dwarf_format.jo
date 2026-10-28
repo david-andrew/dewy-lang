@@ -1,0 +1,762 @@
+use 'checker_types.dewy'
+use 'checker_state.dewy'
+use 'source_types.dewy'
+use 'elf_format.dewy'
+use 'leb128.dewy'
+use 'module_paths.dewy'
+struct DwarfHost:
+    type_str: (int, bool) -> str
+    layout: (int) -> void
+    store_type: (int) -> int
+    field_store_type: (int) -> int
+    ir_line: (int) -> int
+    user_module: (int) -> bool
+struct DwarfInput:
+    types: *(TypeInfo[])
+    type_args: *(i32[])
+    structs: *(StructInfo[])
+    fields: *(Field[])
+    variants: *(Variant[])
+    locals: *(Local[])
+    globals: *(Global[])
+    names: *(str[])
+    files: *(SrcFile[])
+    global_ids: *(int[])
+    ir_positions: *(int[])
+    dbg_raw: *(int[])
+    dbg_cfi: *(int[])
+    line_rows: *(int[])
+    T_VOID: *int
+    T_BOOL: *int
+    T_INT: *int
+    T_MATH_INT: *int
+    T_U8: *int
+    T_F32: *int
+    T_I32: *int
+    global_off: *({int: int})
+    arm: *bool
+    host: *DwarfHost
+dw_inputs: *DwarfInput
+dwarf_bind = (input: *DwarfInput) -> int:
+    dw_inputs = input
+    0
+const LF_PARAM = 1
+const LF_MUTPARAM = 2
+const LF_ASSIGNED = 16
+const LF_VALUEPARAM = 524288
+const DL_NONE = 0
+const DL_REG = 1
+const DL_MEM = 2
+const DL_MEMAT = 3
+const DL_CONST = 4
+const DL_FCONST = 5
+const DL_ADDR = 6
+# DIEs of types go in dw_tb (the unit's first children), of functions in dw_sb; a reference to a
+# type is patched in at the end (dw_fix: (0 dw_tb or 1 dw_sb, position, type)), so types can
+# refer to each other in any order (a struct with an array of itself)
+dw_off: int[]                   # real types: their DIE's offset (-1: none yet)
+dw_tb: u8[]
+dw_sb: u8[]
+dw_fix: (int, int, int)[]
+dw_memo: {int: int} = {}        # type -> its DIE's offset in the unit
+dw_todo: int[]
+dw_base = 0                     # where dw_tb starts in the unit
+# made-up types (not in types[]): keys below 0
+const DW_LONG = -1
+const DW_BYTE = -2
+const DW_VOIDP = -3
+const DW_STRHDR = -4
+const DW_STRPTR = -5
+const DW_BOX = -10              # - (DW_BOX + e): the box a boxed field keeps a value of type e in
+const DW_BOXP = -500000         # a pointer to that box
+const DW_HDR = -1000000         # - (DW_HDR + e)... the header of an array of e
+const DW_FLEX = -2000000        # an array of e of unknown length
+const DW_PTR = -3000000         # a pointer to the header of an array of e
+const DW_TAGS = -4000000        # the tags of enum t
+const DW_VARIANT = -5000000     # - (DW_VARIANT + 256 t + v): the fields of variant v of enum t
+
+cstr = (out: mut u8[], s: str):
+    n = out.len()
+    out.resize(n + len(s) + 1)
+    if len(s) > 0: mem_copy(data(out) + n, data(s), len(s))
+    out[n + len(s)] = 0
+
+# the .debug_abbrev, .debug_info and .debug_line sections for code at text_addr
+dw_data_addr = 0            # where the globals' data starts (set before dwarf_sections)
+
+# A Dewy program's types carry their Dewy spellings (`int` is the tagged
+# integer, `int64` the word): lib/debug's printers read them.
+dw_dewy = false
+dw_name = (t: int) -> str: dw_inputs[0].host[0].type_str(t, dw_dewy)
+
+dwarf_image = (text_addr: int, text_len: int, main_path: str, version: str, dir: str) -> (str, u8[])[]:
+    if dw_inputs[0].line_rows[0].len() == 0: return []
+    dw_dewy = ends_with(main_path, ".dewy")
+    abs = (p: str) -> str:
+        if is_abs_path(p): return p
+        "{dir}/{p}"
+    # files, numbered from 1
+    fidx = fill(0, dw_inputs[0].files[0].len())
+    fnames: str[]
+    k = 0
+    loop k < dw_inputs[0].line_rows[0].len():
+        if dw_inputs[0].line_rows[0][k + 1] == 0:
+            k += 2
+            continue
+        f = dw_pos_file(dw_inputs[0].ir_positions[0][dw_inputs[0].line_rows[0][k + 1]])
+        if f >= 0 and f < dw_inputs[0].files[0].len() and fidx[f] == 0:
+            fnames.push(abs(dw_inputs[0].files[0][f].path))
+            fidx[f] = fnames.len()
+        k += 2
+    # .debug_line: header, then the program (one sequence over all of .text)
+    hdr: u8[]
+    hdr.push(1)                 # minimum_instruction_length
+    hdr.push(1)                 # maximum_operations_per_instruction
+    hdr.push(1)                 # default_is_stmt
+    hdr.push(u8(-5 & 255))      # line_base
+    hdr.push(14)                # line_range
+    hdr.push(13)                # opcode_base
+    loop x in [0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1]: hdr.push(u8(x))
+    hdr.push(0)                 # no include directories
+    loop nm in fnames:
+        cstr(hdr, nm)
+        hdr.push(0)             # directory, mtime, length
+        hdr.push(0)
+        hdr.push(0)
+    hdr.push(0)
+    prog: u8[]
+    prog.reserve(dw_inputs[0].line_rows[0].len() * 3 + 64)
+    prog.push(0)                # DW_LNE_set_address
+    uleb(prog, 9)
+    prog.push(2)
+    put64(prog, text_addr)
+    addr = 0
+    line = 1
+    file = 1
+    k = 0
+    loop k < dw_inputs[0].line_rows[0].len():
+        p = dw_inputs[0].ir_positions[0][dw_inputs[0].line_rows[0][k + 1]]
+        f = file
+        l = 0                       # (0: code with no source line)
+        if dw_inputs[0].line_rows[0][k + 1] != 0:
+            pf = dw_pos_file(p)
+            f = 0
+            if pf >= 0 and pf < dw_inputs[0].files[0].len(): f = fidx[pf]
+            if f == 0:
+                k += 2
+                continue
+            l = dw_inputs[0].host[0].ir_line(dw_inputs[0].line_rows[0][k + 1])
+        if f == file and l == line and dw_inputs[0].line_rows[0][k + 1] != 0 and k > 0:
+            k += 2
+            continue
+        if f != file:
+            prog.push(4)            # DW_LNS_set_file
+            uleb(prog, f)
+            file = f
+        if l != line:
+            prog.push(3)            # DW_LNS_advance_line
+            sleb(prog, l - line)
+            line = l
+        if dw_inputs[0].line_rows[0][k] != addr:
+            prog.push(2)            # DW_LNS_advance_pc
+            uleb(prog, dw_inputs[0].line_rows[0][k] - addr)
+            addr = dw_inputs[0].line_rows[0][k]
+        prog.push(1)                # DW_LNS_copy
+        k += 2
+    if text_len > addr:
+        prog.push(2)
+        uleb(prog, text_len - addr)
+    prog.push(0)                    # DW_LNE_end_sequence
+    uleb(prog, 1)
+    prog.push(1)
+    line_sec: u8[]
+    put32(line_sec, 2 + 4 + hdr.len() + prog.len())
+    put16(line_sec, 4)
+    put32(line_sec, hdr.len())
+    elf_append_bytes(line_sec, hdr)
+    elf_append_bytes(line_sec, prog)
+    ab = dw_abbrevs()
+    # .debug_info: the unit, its types, its functions with their variables; .debug_loc: where
+    # each variable is while its code runs
+    cu: u8[]
+    uleb(cu, 1)
+    cstr(cu, "dewy-core {version}")    # DW_AT_producer
+    put16(cu, 0x0002)               # DW_AT_language: DW_LANG_C (the closest a debugger knows)
+    cstr(cu, abs(main_path))        # DW_AT_name
+    cstr(cu, dir)                   # DW_AT_comp_dir
+    put64(cu, text_addr)            # DW_AT_low_pc
+    put64(cu, text_len)             # DW_AT_high_pc (a length)
+    put32(cu, 0)                    # DW_AT_stmt_list
+    dw_tb = []
+    dw_sb = []
+    dw_fix = []
+    dw_memo = {}
+    dw_todo = []
+    dw_off = fill(-1, dw_inputs[0].types[0].len())
+    dw_base = 11 + cu.len()
+    # the variables' types first (and the types they are made of), then the functions
+    k = 0
+    loop k < dw_inputs[0].dbg_raw[0].len():
+        nv = dw_inputs[0].dbg_raw[0][k + 4]
+        k += 5
+        loop _ in [0..nv):
+            dw_type_die(dw_inputs[0].host[0].store_type(dw_inputs[0].dbg_raw[0][k]))
+            k += 6
+    # (the program's own globals, top-level variables included: their types too)
+    gl: int[]
+    loop g in dw_inputs[0].global_ids[0]:
+        if dw_inputs[0].global_off[0].get(g) == none or dw_inputs[0].globals[0][g].is_const: continue
+        m = int(dw_inputs[0].globals[0][g].mod)
+        if not dw_inputs[0].host[0].user_module(m): continue
+        gl.push(g)
+        dw_type_die(dw_prune(int(dw_inputs[0].globals[0][g].type)))
+    loop dw_todo.len() > 0: dw_type_die(dw_todo.pop())
+    loop fx in dw_fix: dw_put32_at(dw_tb, fx.1, dw_offset(fx.2))
+    loc: u8[]
+    k = 0
+    loop k < dw_inputs[0].dbg_raw[0].len():
+        dw_sb.push(12)
+        cstr(dw_sb, elf_syms[dw_inputs[0].dbg_raw[0][k]].0)
+        dw_w64(dw_sb, text_addr + dw_inputs[0].dbg_raw[0][k + 1])
+        dw_w64(dw_sb, dw_inputs[0].dbg_raw[0][k + 2])
+        dw_sb.push(1)                   # DW_AT_frame_base: exprloc of one byte
+        dw_sb.push(u8(0x50 + dw_inputs[0].dbg_raw[0][k + 3]))      # DW_OP_reg
+        k0 = k
+        k += 5 + 6 * dw_inputs[0].dbg_raw[0][k + 4]
+        loop v in dbg_vars(k0):
+            e = v.0
+            l = dw_inputs[0].dbg_raw[0][e]
+            lo = dw_inputs[0].dbg_raw[0][e + 4]
+            hi = dw_inputs[0].dbg_raw[0][e + 5]
+            c = 16
+            if v.1: c = 15
+            if lo < hi: c -= 2
+            dw_sb.push(u8(c))
+            cstr(dw_sb, dw_inputs[0].names[0][int(dw_inputs[0].locals[0][l].name)])
+            dw_w32(dw_sb, dw_off[dw_inputs[0].host[0].store_type(l)])
+            if lo < hi:
+                dw_w32(dw_sb, loc.len())
+                dw_w64(loc, lo)
+                dw_w64(loc, hi)
+                at = loc.len()
+                put16(loc, 0)
+                dw_loc_expr(loc, dw_inputs[0].dbg_raw[0][e + 1], dw_inputs[0].dbg_raw[0][e + 2], dw_inputs[0].dbg_raw[0][e + 3])
+                n = loc.len() - at - 2
+                loc[at] = u8(n & 255)
+                loc[at + 1] = u8(n >> 8)
+                dw_w64(loc, 0)
+                dw_w64(loc, 0)
+        dw_sb.push(0)
+    loop g in gl:
+        dw_sb.push(19)
+        cstr(dw_sb, dw_inputs[0].names[0][int(dw_inputs[0].globals[0][g].name)])
+        dw_w32(dw_sb, dw_off[dw_prune(int(dw_inputs[0].globals[0][g].type))])
+        dw_sb.push(9)                   # exprloc: DW_OP_addr and the address
+        dw_sb.push(0x03)
+        dw_w64(dw_sb, dw_data_addr + (dw_inputs[0].global_off[0].get(g) ?? 0))
+    info: u8[]
+    put32(info, 2 + 4 + 1 + cu.len() + dw_tb.len() + dw_sb.len() + 1)
+    put16(info, 4)
+    put32(info, 0)                  # abbreviations at 0
+    info.push(8)                    # address size
+    elf_append_bytes(info, cu)
+    elf_append_bytes(info, dw_tb)
+    elf_append_bytes(info, dw_sb)
+    info.push(0)                    # (the unit's children end)
+    out = [(".debug_abbrev", ab), (".debug_info", info), (".debug_line", line_sec)]
+    if loc.len() > 0: out.push((".debug_loc", loc))
+    if dw_inputs[0].dbg_cfi[0].len() > 0: out.push((".debug_frame", dw_frames(text_addr)))
+    out
+
+# .debug_frame: one CIE, then an FDE for each function. x86-64: at its start the CFA (the stack
+# pointer before the call) is rsp + 8 with the return address below it; after push rbp, rsp + 16
+# with rbp below the return address; after mov rbp, rsp, rbp + 16 until the epilogue pops rbp
+# (then rsp + 8 again, for the ret). arm64: the CFA is sp at the start; after stp x29, x30,
+# [sp, -16]! it is sp + 16 with x29 and x30 below it; after mov x29, sp, x29 + 16 until the
+# epilogue's ldp (then sp, for the ret). The callee-saved registers are at fixed offsets from it.
+dw_frames = (text_addr: int) -> u8[]:
+    arm = dw_inputs[0].arm[0]
+    f: u8[]
+    cie: u8[]
+    put32(cie, -1)                  # CIE id
+    cie.push(4)                     # version
+    cie.push(0)                     # augmentation ""
+    cie.push(8)                     # address size
+    cie.push(0)                     # segment selector size
+    if arm:
+        uleb(cie, 4)                # code alignment (instructions)
+        sleb(cie, -8)
+        uleb(cie, 30)               # the return address: x30
+        cie.push(0x0c)              # DW_CFA_def_cfa sp, 0
+        uleb(cie, 31)
+        uleb(cie, 0)
+    else:
+        uleb(cie, 1)                # code alignment
+        sleb(cie, -8)               # data alignment
+        uleb(cie, 16)               # the return address: "register" 16
+        cie.push(0x0c)              # DW_CFA_def_cfa rsp, 8
+        uleb(cie, 7)
+        uleb(cie, 8)
+        cie.push(0x80 | 16)         # DW_CFA_offset: the return address at CFA - 8
+        uleb(cie, 1)
+    loop (cie.len() + 4) % 8 != 0: cie.push(0)
+    put32(f, cie.len())
+    elf_append_bytes(f, cie)
+    unit = 1                        # (bytes per advance)
+    if arm: unit = 4
+    k = 0
+    loop k < dw_inputs[0].dbg_cfi[0].len():
+        start = dw_inputs[0].dbg_cfi[0][k]
+        len_ = dw_inputs[0].dbg_cfi[0][k + 1]
+        body = dw_inputs[0].dbg_cfi[0][k + 2]
+        ns = dw_inputs[0].dbg_cfi[0][k + 3]
+        k += 4
+        x: u8[]
+        put32(x, 0)                 # the CIE, at 0
+        put64(x, text_addr + start)
+        put64(x, len_)
+        at = 0
+        if arm:
+            x.push(0x40 | 1)        # after stp x29, x30, [sp, -16]!
+            x.push(0x0e)            # DW_CFA_def_cfa_offset 16
+            uleb(x, 16)
+            x.push(0x80 | 29)       # x29 at CFA - 16, x30 at CFA - 8
+            uleb(x, 2)
+            x.push(0x80 | 30)
+            uleb(x, 1)
+            x.push(0x40 | 1)        # after mov x29, sp
+            x.push(0x0d)            # DW_CFA_def_cfa_register x29
+            uleb(x, 29)
+            at = 8
+        else:
+            x.push(0x40 | 1)        # after push rbp
+            x.push(0x0e)            # DW_CFA_def_cfa_offset 16
+            uleb(x, 16)
+            x.push(0x80 | 6)        # rbp at CFA - 16
+            uleb(x, 2)
+            x.push(0x40 | 3)        # after mov rbp, rsp
+            x.push(0x0d)            # DW_CFA_def_cfa_register rbp
+            uleb(x, 6)
+            at = 4
+        dw_advance(x, (body - at) / unit)
+        at = body
+        loop _ in [0..ns):
+            r = dw_inputs[0].dbg_cfi[0][k]
+            o = -dw_inputs[0].dbg_cfi[0][k + 1] / 8
+            if r < 64:
+                x.push(u8(0x80 | r))
+                uleb(x, o)
+            else:
+                x.push(0x05)        # DW_CFA_offset_extended
+                uleb(x, r)
+                uleb(x, o)
+            k += 2
+        ne = dw_inputs[0].dbg_cfi[0][k]
+        k += 1
+        loop _ in [0..ne):
+            e = dw_inputs[0].dbg_cfi[0][k]
+            k += 1
+            dw_advance(x, (e - at) / unit)
+            x.push(0x0a)            # DW_CFA_remember_state
+            x.push(0x0c)            # DW_CFA_def_cfa: the stack pointer, where it was at the start
+            if arm:
+                uleb(x, 31)
+                uleb(x, 0)
+                x.push(0x08)        # DW_CFA_same_value x29
+                uleb(x, 29)
+            else:
+                uleb(x, 7)
+                uleb(x, 8)
+                x.push(0x08)        # DW_CFA_same_value rbp
+                uleb(x, 6)
+            x.push(0x40 | 1)        # after the ret
+            x.push(0x0b)            # DW_CFA_restore_state
+            at = e + unit
+        loop (x.len() + 4) % 8 != 0: x.push(0)
+        put32(f, x.len())
+        elf_append_bytes(f, x)
+    f
+
+dw_advance = (x: mut u8[], d: int):
+    if d <= 0: return
+    if d < 64: x.push(u8(0x40 | d))
+    else if d < 256:
+        x.push(0x02)
+        x.push(u8(d))
+    else if d < 65536:
+        x.push(0x03)
+        put16(x, d)
+    else:
+        x.push(0x04)
+        put32(x, d)
+
+# ---------------- the abbreviations: (code, tag, children, [(attribute, form)]) ----------------
+dw_ab: u8[]
+
+dw_abbrev = (code: int, tag: int, kids: bool, attrs: (int, int)[]):
+    uleb(dw_ab, code)
+    uleb(dw_ab, tag)
+    if kids: dw_ab.push(1)
+    else: dw_ab.push(0)
+    loop a in attrs:
+        uleb(dw_ab, a.0)
+        uleb(dw_ab, a.1)
+    dw_ab.push(0)
+    dw_ab.push(0)
+
+dw_abbrevs = () -> u8[]:
+    dw_ab = []
+    STR = 0x08
+    D1 = 0x0b
+    D4 = 0x06
+    REF = 0x13
+    dw_abbrev(1, 0x11, true, [(0x25, STR), (0x13, 0x05), (0x03, STR), (0x1b, STR), (0x11, 0x01), (0x12, 0x07), (0x10, 0x17)])
+    dw_abbrev(2, 0x24, false, [(0x03, STR), (0x3e, D1), (0x0b, D1)])                 # base type
+    dw_abbrev(3, 0x0f, false, [(0x0b, D1), (0x49, REF)])                             # pointer
+    dw_abbrev(4, 0x16, false, [(0x03, STR), (0x49, REF)])                            # typedef
+    dw_abbrev(5, 0x13, true, [(0x03, STR), (0x0b, D4)])                              # struct
+    dw_abbrev(6, 0x0d, false, [(0x03, STR), (0x49, REF), (0x38, D4)])                # member
+    dw_abbrev(7, 0x01, true, [(0x49, REF)])                                          # array
+    dw_abbrev(8, 0x21, false, [])                                                    # its bounds: unknown
+    dw_abbrev(9, 0x21, false, [(0x37, D4)])                                          # its bounds: a count
+    dw_abbrev(10, 0x04, true, [(0x03, STR), (0x0b, D1)])                             # enumeration
+    dw_abbrev(11, 0x28, false, [(0x03, STR), (0x1c, 0x0d)])                          # enumerator
+    dw_abbrev(12, 0x2e, true, [(0x03, STR), (0x11, 0x01), (0x12, 0x07), (0x40, 0x18)])     # function
+    dw_abbrev(13, 0x05, false, [(0x03, STR), (0x49, REF), (0x02, 0x17)])             # parameter
+    dw_abbrev(14, 0x34, false, [(0x03, STR), (0x49, REF), (0x02, 0x17)])             # variable
+    dw_abbrev(15, 0x05, false, [(0x03, STR), (0x49, REF)])                           # (nowhere)
+    dw_abbrev(16, 0x34, false, [(0x03, STR), (0x49, REF)])
+    dw_abbrev(17, 0x13, false, [(0x03, STR), (0x0b, D4)])                            # struct, no fields
+    dw_abbrev(18, 0x0f, false, [(0x0b, D1)])                                         # pointer to nothing
+    dw_abbrev(19, 0x34, false, [(0x03, STR), (0x49, REF), (0x02, 0x18)])             # a global: at an address
+    dw_ab.push(0)
+    dw_ab
+
+# ---------------- types ----------------
+dw_put32_at = (b: mut u8[], at: int, v: int):
+    loop i in [0..4): b[at + i] = u8((v >> (8 * i)) & 255)
+
+
+# where type t's DIE is (made-up types: in dw_memo)
+dw_offset = (t: int) -> int:
+    if t >= 0: return dw_off[t]
+    dw_memo[t]
+
+# a reference to type t in a type's DIE (patched when every type is written)
+dw_ref = (which: int, t: int):
+    dw_fix.push((0, dw_tb.len(), t))
+    put32(dw_tb, 0)
+    if t >= 0:
+        if (t >= dw_off.len() or dw_off[t] < 0) and dw_todo.index_of(t) < 0: dw_todo.push(t)
+    else if dw_memo.get(t) == none and dw_todo.index_of(t) < 0: dw_todo.push(t)
+
+# 8 and 4 bytes at the end of b
+dw_w64 = (b: mut u8[], v: int):
+    n = b.len()
+    b.resize(n + 8)
+    ((data(b) + n) as *int)[0] = v
+
+dw_w32 = (b: mut u8[], v: int):
+    n = b.len()
+    b.resize(n + 4)
+    ((data(b) + n) as *i32)[0] = i32(v)
+
+dw_base_type = (name: str, enc: int, size: int):
+    dw_tb.push(2)
+    cstr(dw_tb, name)
+    dw_tb.push(u8(enc))
+    dw_tb.push(u8(size))
+
+dw_member = (name: str, t: int, off: int):
+    dw_tb.push(6)
+    cstr(dw_tb, name)
+    dw_ref(0, t)
+    put32(dw_tb, off)
+
+# the header every array and string points to: [rc][len][cap][data...]
+dw_header = (name: str, data: int):
+    dw_tb.push(5)
+    cstr(dw_tb, name)
+    put32(dw_tb, 24)
+    dw_member("rc", DW_LONG, 0)
+    dw_member("len", DW_LONG, 8)
+    dw_member("cap", DW_LONG, 16)
+    dw_member("data", data, 24)
+    dw_tb.push(0)
+
+dw_type_die = (t0: int):
+    if t0 >= 0:
+        loop dw_off.len() <= t0: dw_off.push(-1)
+        if dw_off[t0] >= 0: return
+        dw_off[t0] = dw_base + dw_tb.len()
+    else:
+        if dw_memo.get(t0) != none: return
+        dw_memo[t0] = dw_base + dw_tb.len()
+    if t0 < 0:
+        if t0 <= DW_VARIANT:
+            t = (DW_VARIANT - t0) >> 8
+            si = int(dw_inputs[0].types[0][t].st)
+            vi = int(dw_inputs[0].structs[0][si].variants) + ((DW_VARIANT - t0) & 255)
+            poff = int(dw_inputs[0].structs[0][si].payload_off)
+            dw_tb.push(5)
+            cstr(dw_tb, "{dw_name(t)}.{dw_inputs[0].names[0][int(dw_inputs[0].variants[0][vi].name)]}")
+            put32(dw_tb, dw_tsize(t) - poff)
+            loop i in [0..int(dw_inputs[0].variants[0][vi].nfields)):
+                fi = int(dw_inputs[0].variants[0][vi].fields) + i
+                dw_member(dw_inputs[0].names[0][int(dw_inputs[0].fields[0][fi].name)], dw_inputs[0].host[0].field_store_type(fi), int(dw_inputs[0].fields[0][fi].offset) - poff)
+            dw_tb.push(0)
+            return
+        if t0 == DW_LONG: dw_base_type("long", 0x05, 8)
+        else if t0 == DW_BYTE: dw_base_type("u8", 0x08, 1)
+        else if t0 == DW_VOIDP:
+            dw_tb.push(18)
+            dw_tb.push(8)
+        else if t0 == DW_STRHDR: dw_header("str header", DW_FLEX - dw_inputs[0].T_U8[0])
+        else if t0 == DW_STRPTR:
+            dw_tb.push(3)
+            dw_tb.push(8)
+            dw_ref(0, DW_STRHDR)
+        else if t0 <= DW_TAGS:
+            t = DW_TAGS - t0
+            si = int(dw_inputs[0].types[0][t].st)
+            dw_tb.push(10)
+            cstr(dw_tb, dw_inputs[0].structs[0][si].name + " tag")
+            dw_tb.push(4)
+            loop v in [0..int(dw_inputs[0].structs[0][si].nvariants)):
+                vi = int(dw_inputs[0].structs[0][si].variants) + v
+                dw_tb.push(11)
+                cstr(dw_tb, dw_inputs[0].names[0][int(dw_inputs[0].variants[0][vi].name)])
+                if dw_inputs[0].structs[0][si].simple_enum: sleb(dw_tb, dw_inputs[0].variants[0][vi].value)
+                else: sleb(dw_tb, int(dw_inputs[0].variants[0][vi].tag))
+            dw_tb.push(0)
+        else if t0 <= DW_PTR:
+            dw_tb.push(3)
+            dw_tb.push(8)
+            dw_ref(0, DW_HDR - (DW_PTR - t0))
+        else if t0 <= DW_FLEX:
+            dw_tb.push(7)
+            e = DW_FLEX - t0
+            if e == dw_inputs[0].T_U8[0]: dw_ref(0, DW_BYTE)
+            else: dw_ref(0, e)
+            dw_tb.push(8)
+            dw_tb.push(0)
+        else if t0 <= DW_HDR: dw_header("{dw_name(DW_HDR - t0)}[] header", DW_FLEX - (DW_HDR - t0))
+        else if t0 <= DW_BOXP:
+            dw_tb.push(3)
+            dw_tb.push(8)
+            dw_ref(0, DW_BOX - (DW_BOXP - t0))
+        else if t0 <= DW_BOX:
+            # [rc][value] (lib/debug's printers show the value, or the default for none)
+            e = DW_BOX - t0
+            dw_tb.push(5)
+            cstr(dw_tb, "{dw_name(e)} box")
+            put32(dw_tb, 8 + dw_tsize(e))
+            dw_member("rc", DW_LONG, 0)
+            dw_member("value", e, 8)
+            dw_tb.push(0)
+        return
+    t = dw_prune(t0)
+    k = dw_inputs[0].types[0][t].kind
+    size = dw_tsize(t)
+    if k == .int_ and dw_dewy and t == dw_inputs[0].T_MATH_INT[0]:
+        # (the tagged `int`: a name over its word, which debuggers keep)
+        dw_tb.push(4)
+        cstr(dw_tb, "int")
+        dw_ref(0, dw_inputs[0].T_INT[0])
+    else if k == .int_:
+        enc = 0x07
+        if dw_inputs[0].types[0][t].sign: enc = 0x05
+        dw_base_type(dw_name(t), enc, size)
+    else if k == .bool_: dw_base_type("bool", 0x02, 1)
+    else if k == .float_: dw_base_type(dw_name(t), 0x04, size)
+    else if k == .str_:
+        dw_tb.push(4)
+        cstr(dw_tb, if dw_dewy: "string" else: "str")
+        dw_ref(0, DW_STRPTR)
+    else if k == .array:
+        dw_tb.push(4)
+        cstr(dw_tb, dw_name(t))
+        dw_ref(0, DW_PTR - int(dw_inputs[0].types[0][t].elem))
+    else if k == .box:
+        # (a boxed field: named as its type is, a pointer to the box)
+        dw_tb.push(4)
+        cstr(dw_tb, dw_name(t))
+        dw_ref(0, DW_BOXP - int(dw_inputs[0].types[0][t].elem))
+    else if k == .ptr:
+        e = int(dw_inputs[0].types[0][t].elem)
+        if e == dw_inputs[0].T_VOID[0] or dw_tkind(e) == .void_:
+            dw_tb.push(18)
+            dw_tb.push(8)
+        else:
+            dw_tb.push(3)
+            dw_tb.push(8)
+            dw_ref(0, e)
+    else if k == .cfn or k == .null_:
+        dw_tb.push(18)
+        dw_tb.push(8)
+    else if k == .struct_:
+        si = int(dw_inputs[0].types[0][t].st)
+        dw_tb.push(5)
+        cstr(dw_tb, dw_name(t))
+        put32(dw_tb, size)
+        loop i in [0..int(dw_inputs[0].structs[0][si].nfields)):
+            fi = int(dw_inputs[0].structs[0][si].fields) + i
+            dw_member(dw_inputs[0].names[0][int(dw_inputs[0].fields[0][fi].name)], dw_inputs[0].host[0].field_store_type(fi), int(dw_inputs[0].fields[0][fi].offset))
+        dw_tb.push(0)
+    else if k == .enum_:
+        si = int(dw_inputs[0].types[0][t].st)
+        if dw_inputs[0].structs[0][si].simple_enum:
+            dw_tb.push(10)
+            cstr(dw_tb, dw_name(t))
+            dw_tb.push(u8(size))
+            loop v in [0..int(dw_inputs[0].structs[0][si].nvariants)):
+                vi = int(dw_inputs[0].structs[0][si].variants) + v
+                dw_tb.push(11)
+                cstr(dw_tb, dw_inputs[0].names[0][int(dw_inputs[0].variants[0][vi].name)])
+                sleb(dw_tb, dw_inputs[0].variants[0][vi].value)
+            dw_tb.push(0)
+        else:
+            dw_tb.push(5)
+            cstr(dw_tb, dw_name(t))
+            put32(dw_tb, size)
+            dw_member("tag", DW_TAGS - t, 0)
+            # (each variant's fields, where they are: lib/debug's printers show the tag's)
+            loop v in [0..min(int(dw_inputs[0].structs[0][si].nvariants), 256)):
+                vi = int(dw_inputs[0].structs[0][si].variants) + v
+                if int(dw_inputs[0].variants[0][vi].nfields) > 0: dw_member(dw_inputs[0].names[0][int(dw_inputs[0].variants[0][vi].name)], DW_VARIANT - (256 * t + v), int(dw_inputs[0].structs[0][si].payload_off))
+            dw_tb.push(0)
+    else if k == .tuple:
+        dw_tb.push(5)
+        cstr(dw_tb, dw_name(t))
+        put32(dw_tb, size)
+        off = 0
+        loop i in [0..int(dw_inputs[0].types[0][t].nargs)):
+            e = dw_targ(t, i)
+            off = dw_align_up(off, dw_talign(e))
+            dw_member("{i}", e, off)
+            off += dw_tsize(e)
+        dw_tb.push(0)
+    else if k == .vec:
+        n = int(dw_inputs[0].types[0][t].bits)
+        e = dw_inputs[0].T_F32[0]
+        if dw_inputs[0].types[0][t].sign: e = dw_inputs[0].T_I32[0]
+        dw_tb.push(5)
+        cstr(dw_tb, dw_name(t))
+        put32(dw_tb, size)
+        if n <= 4:
+            loop i in [0..n): dw_member(["x", "y", "z", "w"][i], e, 4 * i)
+        else:
+            loop i in [0..n): dw_member("m{i}", e, 4 * i)
+        dw_tb.push(0)
+    else if k == .opt:
+        e = int(dw_inputs[0].types[0][t].elem)
+        dw_tb.push(5)
+        cstr(dw_tb, dw_name(t))
+        put32(dw_tb, size)
+        dw_member("value", e, 0)
+        dw_member("has", dw_inputs[0].T_BOOL[0], dw_tsize(e))
+        dw_tb.push(0)
+    else if k == .fn_:
+        dw_tb.push(5)
+        cstr(dw_tb, dw_name(t))
+        put32(dw_tb, 16)
+        dw_member("code", DW_VOIDP, 0)
+        dw_member("env", DW_VOIDP, 8)
+        dw_tb.push(0)
+    else if k == .secret:
+        # (a secret: its bytes are not described, so a debugger shows none of them; lib/debug's
+        # printers show `<redacted>`)
+        dw_tb.push(17)
+        cstr(dw_tb, dw_name(t))
+        put32(dw_tb, size)
+    else if k == .fixed:
+        dw_tb.push(7)
+        dw_ref(0, int(dw_inputs[0].types[0][t].elem))
+        dw_tb.push(9)
+        put32(dw_tb, int(dw_inputs[0].types[0][t].bits))
+        dw_tb.push(0)
+    else:
+        # (what a debugger cannot show: its bytes, as a struct without fields)
+        dw_tb.push(17)
+        cstr(dw_tb, dw_name(t))
+        put32(dw_tb, size)
+
+dw_breg = (e: mut u8[], r: int, off: int):
+    if r < 32: e.push(u8(0x70 + r))
+    else:
+        e.push(0x92)
+        uleb(e, r)
+    sleb(e, off)
+
+# the variables of the function whose dbg_raw entry starts at k0, as a debugger shows them: each
+# one's entry and whether it is a formal parameter. A Dewy value parameter's own binding
+# (LF_VALUEPARAM) is the parameter in the source: it takes its hidden parameter's place, which
+# stays only for an unchanged binding that has no location.
+dbg_vars = (k0: int) -> (int, bool)[]:
+    nv = dw_inputs[0].dbg_raw[0][k0 + 4]
+    own: {int: int} = {}            # name -> entry of the value parameter's own binding
+    loop i in [0..nv):
+        e = k0 + 5 + 6 * i
+        if int(dw_inputs[0].locals[0][dw_inputs[0].dbg_raw[0][e]].flags) & LF_VALUEPARAM != 0: own[int(dw_inputs[0].locals[0][dw_inputs[0].dbg_raw[0][e]].name)] = e
+    paired: {int: bool} = {}        # own bindings whose hidden parameter is listed
+    loop i in [0..nv):
+        e = k0 + 5 + 6 * i
+        fl = int(dw_inputs[0].locals[0][dw_inputs[0].dbg_raw[0][e]].flags)
+        if fl & (LF_PARAM | LF_MUTPARAM) == LF_PARAM:
+            if let c = own.get(int(dw_inputs[0].locals[0][dw_inputs[0].dbg_raw[0][e]].name)): paired[c] = true
+    out: (int, bool)[]
+    loop i in [0..nv):
+        e = k0 + 5 + 6 * i
+        l = dw_inputs[0].dbg_raw[0][e]
+        fl = int(dw_inputs[0].locals[0][l].flags)
+        if fl & LF_VALUEPARAM != 0:
+            if not paired.contains(e): out.push((e, true))
+            continue
+        if fl & LF_PARAM == 0:
+            out.push((e, false))
+            continue
+        c = e
+        if fl & LF_MUTPARAM == 0: c = own.get(int(dw_inputs[0].locals[0][l].name)) ?? e
+        # (its own binding, unless that is unchanged and has no location)
+        if c != e and (int(dw_inputs[0].locals[0][dw_inputs[0].dbg_raw[0][c]].flags) & LF_ASSIGNED != 0 or dw_inputs[0].dbg_raw[0][c + 4] < dw_inputs[0].dbg_raw[0][c + 5]): e = c
+        out.push((e, true))
+    out
+
+# a variable's place (x64.jo's dbg_function: kind, r, off) as a DWARF expression, at the end of e
+dw_loc_expr = (e: mut u8[], kind: int, r: int, off: int):
+    if kind == DL_REG:
+        if r < 32: e.push(u8(0x50 + r))
+        else:
+            e.push(0x90)
+            uleb(e, r)
+    else if kind == DL_MEM: dw_breg(e, r, off)
+    else if kind == DL_MEMAT:
+        dw_breg(e, r, off)
+        e.push(0x06)                # DW_OP_deref
+    else if kind == DL_ADDR:
+        dw_breg(e, r, off)
+        e.push(0x9f)                # DW_OP_stack_value
+    else if kind == DL_CONST:
+        e.push(0x11)                # DW_OP_consts
+        sleb(e, off)
+        e.push(0x9f)
+    else if kind == DL_FCONST:
+        e.push(0x9e)                # DW_OP_implicit_value
+        uleb(e, r)
+        loop i in [0..r): e.push(u8((off >> (8 * i)) & 255))
+dw_prune = (t0: int) -> int:
+    t = t0
+    loop t != 0 and dw_inputs[0].types[0][t].kind == .var and dw_inputs[0].types[0][t].ref != 0: t = int(dw_inputs[0].types[0][t].ref)
+    t
+dw_tkind = (t: int) -> TK: dw_inputs[0].types[0][dw_prune(t)].kind
+dw_targ = (t: int, i: int) -> int: int(dw_inputs[0].type_args[0][int(dw_inputs[0].types[0][t].args) + i])
+dw_tsize = (t: int) -> int:
+    dw_inputs[0].host[0].layout(t)
+    int(dw_inputs[0].types[0][dw_prune(t)].size)
+dw_talign = (t: int) -> int:
+    dw_inputs[0].host[0].layout(t)
+    a = int(dw_inputs[0].types[0][dw_prune(t)].align)
+    if a == 0: return 1
+    a
+dw_align_up = (x: int, a: int) -> int: (x + a - 1) & ~(a - 1)
+dw_pos_file = (p: int) -> int: p >> 40
