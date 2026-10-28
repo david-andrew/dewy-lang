@@ -1,0 +1,17 @@
+count=(xs:array<int>):>int=>xs.length
+inner=(@g:array<int length=[r c]>):>void=>{
+    loop row in [0..r) loop col in [0..c) g[row col]=7
+}
+outer=(@g:array<int length=[r c]>):>void=>{
+    let n=count([1 2])
+    inner(@g)
+    if n=?2 inner(@g)
+}
+main=()=>{
+    let first=zeros<int>(2 3)
+    let second=zeros<int>(4 5)
+    outer(@first)
+    outer(@second)
+    printl(first[1 2])
+    printl(second[3 4])
+}

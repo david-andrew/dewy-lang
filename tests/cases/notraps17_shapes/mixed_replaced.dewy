@@ -1,0 +1,12 @@
+inner=(@g:array<int length=[r c]>):>void=>{
+    loop row in [0..r) loop col in [0..c) g[row col]=7
+}
+outer=(@g:array<int length=[r c]> replace:bool):>void=>{
+    inner(@g)
+    if replace g=zeros<int>(1 1)
+}
+main=()=>{
+    let grid=zeros<int>(2 3)
+    outer(@grid true)
+    printl(grid[1 2])
+}

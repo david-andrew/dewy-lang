@@ -1548,7 +1548,6 @@ struct FactSummary:
     host: bool = false       # every scalar return has finite host endpoints
     post: int = -1           # scalar result < this mutable array's EXIT length
     lengths: int[]           # mutable array parameters: 0 unknown, 1 same, 2 grows
-    shapes: int = 0          # bit i: mutable N-D parameter i keeps shape/data length
 
 fact_summaries: {int: FactSummary} = {}
 fact_summary_owner = 0
@@ -1562,6 +1561,10 @@ fact_summary_used = false
 fact_retry_owner = 0
 fact_summary_acc = FactSummary()
 fact_summary_entry: int[]    # each array parameter's entry length value (0: none)
+# N-D state is separate: ordinary scalar/length summaries do not carry or copy it.
+# Only demanded mutable N-D parameters populate this cache (one mask per callee).
+fact_shape_summaries: {int: int} = {}
+fact_summary_shape_mask = 0
 fact_summary_shapes: (int, int, int)[] # demanded N-D shape/data-length entry identities
 
 # The parameter whose entry length the result length equals plus a constant in
@@ -1646,28 +1649,33 @@ fact_summary_record = (s: mut FactState, r0: int):
         lengths.push(mode)
         useful = useful or mode != 0
     if not useful: lengths = []
+    if fact_summary_shapes.len() > 0: fact_summary_record_shapes(s)
+    fact_summary_acc = FactSummary(length, value, true, same, delta, upper, upper_delta, host, post, lengths)
+    # A hull only widens. Once it says nothing the result's own domain does
+    # not, and no argument-length relation survives (once lost, it stays
+    # lost), the rest of the run cannot bound anything a caller asks: stop it
+    # (an unbounded summary counts the same as none).
+    if same < 0 and upper < 0 and post < 0 and fact_summary_shape_mask == 0 and fact_summary_vacuous(fact_summary_acc, t):
+        fact_loop_steps = FACT_STEPS + 1
+        fact_loop_exhausted = true
+
+# O(demanded N-D parameters) per return, under the ordinary summary budget.
+fact_summary_record_shapes = (s: mut FactState):
     shapes = 0
     loop entry in fact_summary_shapes:
         i = entry.0
         keeps = false
-        if entry.1 != 0 and (not fact_summary_acc.seen or fact_summary_acc.shapes & (1 << i) != 0) and fact_pending_defers == 0 and not ownership_fact_cleanup:
+        if entry.1 != 0 and (not fact_summary_acc.seen or fact_summary_shape_mask & (1 << i) != 0) and fact_pending_defers == 0 and not ownership_fact_cleanup:
             l = fns[fact_summary_owner].params[i]
             b = fact_binding(s, PlaceIdentity(.local, int(locals[l].owner), l))
             if b >= 0:
                 current = s.bindings[b].value
                 keeps = fact_nd_shape(s, current) == entry.1 and fact_nd_data_length(s, current) == entry.2
         if keeps: shapes |= 1 << i
-    fact_summary_acc = FactSummary(length, value, true, same, delta, upper, upper_delta, host, post, lengths, shapes)
-    # A hull only widens. Once it says nothing the result's own domain does
-    # not, and no argument-length relation survives (once lost, it stays
-    # lost), the rest of the run cannot bound anything a caller asks: stop it
-    # (an unbounded summary counts the same as none).
-    if same < 0 and upper < 0 and post < 0 and fact_summary_vacuous(fact_summary_acc, t):
-        fact_loop_steps = FACT_STEPS + 1
-        fact_loop_exhausted = true
+    fact_summary_shape_mask = shapes
 
 fact_summary_vacuous = (acc: FactSummary, t: int) -> bool:
-    if acc.lengths.len() > 0 or acc.shapes != 0: return false
+    if acc.lengths.len() > 0: return false
     if tkind(t) == .array: return acc.length.lo <= 0 and acc.length.hi >= fact_length_max()
     d = fact_domain(t)
     acc.value.lo <= d.lo and acc.value.hi >= d.hi and not acc.value.nz and not acc.host
@@ -1758,7 +1766,9 @@ fact_summary = (f: int, places: bool = false, field: int = 0) -> FactSummary:
     saved_slice = fact_slice
     saved_lengths = fact_summary_entry
     saved_shapes = fact_summary_shapes
+    saved_shape_mask = fact_summary_shape_mask
     fact_summary_shapes = []
+    fact_summary_shape_mask = 0
     saved_assumed = fact_summary_assumed
     saved_used = fact_summary_used
     fact_summary_assumed = []
@@ -1819,10 +1829,13 @@ fact_summary = (f: int, places: bool = false, field: int = 0) -> FactSummary:
         fact_summary_assumed = []
         fact_summary_used = false
         fact_summary_acc = FactSummary()
+        fact_summary_shape_mask = 0
         state = entry
         r = fact_capture(int(fns[f].body), state)
         if state.live: fact_summary_record(state, r)
     result = if fact_loop_exhausted or fact_constructor_budget == 0 or not fact_summary_acc.seen: unknown else: fact_summary_acc
+    if fact_summary_shapes.len() > 0 and fact_constructor_budget < 0 and field == 0:
+        fact_shape_summaries[f] = if result.seen: fact_summary_shape_mask else: 0
     fact_owner = saved.0
     fact_summary_owner = saved.1
     fact_speculating = saved.2
@@ -1841,6 +1854,7 @@ fact_summary = (f: int, places: bool = false, field: int = 0) -> FactSummary:
     fact_slice = saved_slice
     fact_summary_entry = saved_lengths
     fact_summary_shapes = saved_shapes
+    fact_summary_shape_mask = saved_shape_mask
     fact_summary_assumed = saved_assumed
     fact_summary_used = saved_used
     fact_summary_field = saved_field
@@ -2041,12 +2055,15 @@ fact_path_call_effects = (n: int, s: mut FactState):
                 p = fact_index_get(s.index[0].projection_index, fact_projection_key(v, -1, false))
                 if p >= 0: lengths.push((i, s.projections[p].value))
     summary = FactSummary()
+    shape_mask = 0
     if shapes.len() > 0: effects_demand(int(nodes[n].sym), true)
     if lengths.len() > 0 or shapes.len() > 0:
         if int(nodes[n].sym) == fact_summary_owner and fact_summary_assumed.len() > 0:
             fact_summary_used = true
             summary.lengths = fact_summary_assumed
-        else: summary = fact_summary(int(nodes[n].sym), true)
+        else:
+            summary = fact_summary(int(nodes[n].sym), true)
+            if shapes.len() > 0: shape_mask = fact_shape_summaries.get(int(nodes[n].sym)) ?? 0
     fact_call_effects(n, s)
     # Only an already demanded shape requests the bounded body summary. On
     # every returning path it must preserve both immutable identities; an
@@ -2054,7 +2071,7 @@ fact_path_call_effects = (n: int, s: mut FactState):
     # O(actual routes + tracked shapes), within the existing summary budget.
     loop entry in shapes:
         i = entry.0
-        if i >= 62 or summary.shapes & (1 << i) == 0: continue
+        if i >= 62 or shape_mask & (1 << i) == 0: continue
         v = fact_summary_actual(n, i, s)
         if v == 0 or s.projections.len() + 3 >= FACT_CAP: continue
         fact_add_projection(s, FactProjection(v, intern("shape"), false, entry.1))
@@ -8608,6 +8625,9 @@ facts_reset = ():
     fact_comprehensions = {}
     fact_owner = 0
     fact_summaries = {}
+    fact_shape_summaries = {}
+    fact_summary_shape_mask = 0
+    fact_summary_shapes = []
     fact_constructor_types = {}
     fact_constructor_bodies = {}
     fact_constructor_calls = {}
