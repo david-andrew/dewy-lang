@@ -477,12 +477,60 @@ fact_add_value = (s: mut FactState, v: int, b: FactBound):
     s.ids.push(v)
     s.bounds.push(b)
 
+# Small projection sets keep only their ordered records. Build the indexes
+# on the first insertion reaching FACT_PROJECTION_SCAN, then maintain them.
+# O(P) queries while P < 32; expected O(1) indexed queries above that, with
+# O(P) promotion once per growing state. No new facts or budget are introduced.
+const FACT_PROJECTION_SCAN = 32
+
+fact_projections_indexed = (s: FactState) -> bool: s.index[0].projection_next.len() != 0
+
+fact_projection_find = (s: FactState, base: int, selector: int, element: bool) -> int:
+    if fact_projections_indexed(s): return fact_index_get(s.index[0].projection_index, fact_projection_key(base, selector, element))
+    loop i in [0..s.projections.len()):
+        if s.projections[i].base == base and s.projections[i].selector == selector and s.projections[i].element == element: return i
+    -1
+
+fact_projection_first = (s: FactState, base: int) -> int:
+    if fact_projections_indexed(s): return fact_index_get(s.index[0].projection_head, base)
+    loop i in [0..s.projections.len()):
+        if s.projections[i].base == base: return i
+    -1
+
+fact_projection_after = (s: FactState, i: int) -> int:
+    fact_projection_next_in(s.projections, s.index[0].projection_next, i)
+
+# A write may append projections or compact its state while traversing the
+# old projections. Keep the records and links from the same snapshot.
+fact_projection_next_in = (projections: FactProjection[], links: int[], i: int) -> int:
+    if links.len() != 0: return links[i]
+    base = projections[i].base
+    loop j in [i + 1..projections.len()):
+        if projections[j].base == base: return j
+    -1
+
+fact_projection_origin = (s: FactState, value: int) -> int:
+    if fact_projections_indexed(s): return fact_index_get(s.index[0].projection_value, value)
+    loop i in [0..s.projections.len()):
+        if not s.projections[i].element and s.projections[i].value == value: return i
+    -1
+
 fact_add_projection = (s: mut FactState, p: FactProjection):
+    existing = fact_projection_find(s, p.base, p.selector, p.element)
+    if existing >= 0 and s.projections[existing].value == p.value: return
+    if not fact_projections_indexed(s):
+        if s.projections.len() + 1 < FACT_PROJECTION_SCAN:
+            s.projections.push(p)
+            return
+        projections = s.projections
+        s.projections = []
+        loop projection in projections: fact_index_projection(s, projection)
+    fact_index_projection(s, p)
+
+fact_index_projection = (s: mut FactState, p: FactProjection):
     i = s.projections.len()
     key = fact_projection_key(p.base, p.selector, p.element)
-    existing = fact_index_get(s.index[0].projection_index, key)
-    if existing >= 0 and s.projections[existing].value == p.value: return
-    if existing < 0: fact_index_put(s.index[0].projection_index, key, i)
+    if fact_index_get(s.index[0].projection_index, key) < 0: fact_index_put(s.index[0].projection_index, key, i)
     if not p.element and fact_index_get(s.index[0].projection_value, p.value) < 0: fact_index_put(s.index[0].projection_value, p.value, i)
     tail = fact_index_get(s.index[0].projection_tail, p.base)
     if tail >= 0: s.index[0].projection_next[tail] = i
@@ -625,10 +673,10 @@ fact_compact = (s: mut FactState):
             work.push(fact_terms[v].b)
             depth.push(d + 1)
             depth.push(d + 1)
-        pi = fact_index_get(s.index[0].projection_head, v)
+        pi = fact_projection_first(s, v)
         loop pi >= 0:
             p = s.projections[pi]
-            pi = s.index[0].projection_next[pi]
+            pi = fact_projection_after(s, pi)
             work.push(p.value)
             depth.push(d)
             if p.element:
@@ -697,10 +745,10 @@ fact_collect = (s: mut FactState, boundary: int, result: int):
             work.push(fact_terms[v].b)
             depth.push(d + 1)
             depth.push(d + 1)
-        pi = fact_index_get(s.index[0].projection_head, v)
+        pi = fact_projection_first(s, v)
         loop pi >= 0:
             p = s.projections[pi]
-            pi = s.index[0].projection_next[pi]
+            pi = fact_projection_after(s, pi)
             work.push(p.value)
             depth.push(d)
             if p.element:
@@ -770,26 +818,26 @@ fact_rebind = (s: mut FactState, p: PlaceIdentity, v: int, at: int, prior: int):
 fact_project = (s: mut FactState, base: int, selector: int, element: bool, t: int) -> int:
     if base == 0: return fact_fresh(s, t)
     if not element:
-        i = fact_index_get(s.index[0].projection_index, fact_projection_key(base, selector, false))
+        i = fact_projection_find(s, base, selector, false)
         if i >= 0: return s.projections[i].value
     else:
-        i = fact_index_get(s.index[0].projection_head, base)
+        i = fact_projection_first(s, base)
         loop i >= 0:
             p = s.projections[i]
-            i = s.index[0].projection_next[i]
+            i = fact_projection_after(s, i)
             if p.element and (p.selector == selector or fact_compare(s, .eq, p.selector, selector) == 1): return p.value
-        i = fact_index_get(s.index[0].projection_index, fact_projection_key(base, FACT_ELEMENT_COPY, false))
+        i = fact_projection_find(s, base, FACT_ELEMENT_COPY, false)
         if i >= 0: return s.projections[i].value
     v = fact_new(s, fact_domain(t), FactTerm(type = t))
     if not element and selector == -1:
         fact_set_bound(s, v, FactBound(0, fact_length_max()))
     if element and fact_hull_owner == fact_owner:
-        hull = fact_index_get(s.index[0].projection_index, fact_projection_key(base, FACT_ELEMENT_VALUE, false))
+        hull = fact_projection_find(s, base, FACT_ELEMENT_VALUE, false)
         if hull >= 0:
             b = fact_bound(s, v); h = fact_bound(s, s.projections[hull].value)
             fact_set_bound(s, v, FactBound(max(b.lo, h.lo), min(b.hi, h.hi), b.nz or h.nz))
     if element and tkind(fact_type(t)) == .array:
-        source = fact_index_get(s.index[0].projection_index, fact_projection_key(base, FACT_ROW_SOURCE, false))
+        source = fact_projection_find(s, base, FACT_ROW_SOURCE, false)
         if source >= 0 and s.projections.len() + 2 < FACT_CAP:
             other = s.projections[source].value
             row = fact_project(s, other, selector, true, telem(fact_type(fact_terms[other].type)))
@@ -798,8 +846,8 @@ fact_project = (s: mut FactState, base: int, selector: int, element: bool, t: in
     # Element-length hulls describe each selected value separately: two
     # arbitrary elements have the same bounds, not necessarily equal lengths.
     if element and (fact_type(t) == T_STR or tkind(fact_type(t)) == .array):
-        hull = fact_index_get(s.index[0].projection_index, fact_projection_key(base, FACT_ELEMENT_LENGTH, false))
-        if hull >= 0 and s.projections.len() < FACT_CAP and fact_index_get(s.index[0].projection_index, fact_projection_key(v, -1, false)) < 0:
+        hull = fact_projection_find(s, base, FACT_ELEMENT_LENGTH, false)
+        if hull >= 0 and s.projections.len() < FACT_CAP and fact_projection_find(s, v, -1, false) < 0:
             fact_add_projection(s, FactProjection(v, -1, false, fact_new(s, fact_bound(s, s.projections[hull].value), FactTerm(type = T_INT))))
     if not element and selector >= 0 and fact_constructor_actuals.len() > 0 and tkind(fact_type(t)) == .array and fact_constructor_actuals.has(base):
         fact_constructor_field(s, base, selector, v)
@@ -1130,10 +1178,10 @@ fact_replace = (s: mut FactState, base: int, selector: int, element: bool, value
     private = not element and selector >= 0 and fact_pool_type(t) and starts_with(name_of(selector), "__")
     old = s.projections
     links = s.index[0].projection_next
-    pi = fact_index_get(s.index[0].projection_head, base)
+    pi = fact_projection_first(s, base)
     loop pi >= 0:
         p = old[pi]
-        pi = links[pi]
+        pi = fact_projection_next_in(old, links, pi)
         if element and not p.element and (p.selector == FACT_ELEMENT_LENGTH or p.selector == FACT_ELEMENT_VALUE or p.selector == FACT_ELEMENT_COPY or p.selector == FACT_ELEMENT_SOURCE or p.selector == FACT_KEYS_SOURCE): continue
         if element and not p.element and p.selector == FACT_ROW_SOURCE:
             row = fact_project(s, base, selector, true, telem(fact_type(t)))
@@ -1935,7 +1983,7 @@ fact_summary_actual = (n: int, i: int, s: mut FactState, known: bool = false) ->
         if b < 0: return 0
         v = s.bindings[b].value
         loop j in [0..route.selectors.len()):
-            p = fact_index_get(s.index[0].projection_index, fact_projection_key(v, route.selectors[j], false))
+            p = fact_projection_find(s, v, route.selectors[j], false)
             if p < 0: return 0
             v = s.projections[p].value
         return v
@@ -2105,10 +2153,10 @@ fact_path_call_effects = (n: int, s: mut FactState):
             v = fact_summary_actual(n, i, s, true)
             if v == 0: continue
             if tkind(pt) != .array:
-                p = fact_index_get(s.index[0].projection_index, fact_projection_key(v, intern("shape"), false))
+                p = fact_projection_find(s, v, intern("shape"), false)
                 if p >= 0: shapes.push((i, s.projections[p].value, fact_nd_data_length(s, v)))
             else:
-                p = fact_index_get(s.index[0].projection_index, fact_projection_key(v, -1, false))
+                p = fact_projection_find(s, v, -1, false)
                 if p >= 0: lengths.push((i, s.projections[p].value))
     summary = FactSummary()
     shape_mask = 0
@@ -2200,7 +2248,7 @@ fact_call_effects = (n: int, s: mut FactState):
             if fact_exposed(p): fact_forget(s, n, .call, false, p)
             continue
         old = s.bindings[i].value
-        if path.len() == 0 or fact_index_get(s.index[0].projection_head, old) < 0:
+        if path.len() == 0 or fact_projection_first(s, old) < 0:
             if fact_exposed(p): fact_forget(s, n, .call, false, p, true)
             t = if p.root == .local: int(locals[p.declaration].type) else: int(globals[p.declaration].type)
             value = fact_new(s, fact_domain(t, .call, n), FactTerm(type = t))
@@ -2245,7 +2293,7 @@ fact_call_write = (s: mut FactState, old: int, t: int, paths: int[][], depth: in
     loop path in paths:
         if depth >= path.len(): whole = true
     fresh = fact_new(s, fact_domain(t, .call, at), FactTerm(type = t))
-    pi = fact_index_get(s.index[0].projection_head, old)
+    pi = fact_projection_first(s, old)
     if whole or pi < 0 or tkind(fact_type(t)) != .struct_ or is_map_type(fact_type(t)) or fact_pool_type(t):
         fact_holds_contract(s, t, fresh)
         return fresh
@@ -2263,7 +2311,7 @@ fact_call_write = (s: mut FactState, old: int, t: int, paths: int[][], depth: in
     links = s.index[0].projection_next
     loop pi >= 0:
         p = prior[pi]
-        pi = links[pi]
+        pi = fact_projection_next_in(prior, links, pi)
         if p.element or p.selector < 0 or fact_index_get(replaced, p.selector) >= 0: continue
         routes = by_field.get(p.selector) ?? []
         value = p.value
@@ -2952,10 +3000,10 @@ fact_join = (a: FactState, b: FactState, at: int) -> FactState:
         # (b holds p when p is on b's chain for p.base: every projection is chained)
         loop p in a.projections:
             if fact_slot(s, p.base) < 0 or fact_slot(s, p.value) < 0: continue
-            qi = fact_index_get(b.index[0].projection_head, p.base)
+            qi = fact_projection_first(b, p.base)
             loop qi >= 0:
                 if b.projections[qi] == p: break
-                qi = b.index[0].projection_next[qi]
+                qi = fact_projection_after(b, qi)
             if qi >= 0: fact_add_projection(s, p)
     if a.bindings == b.bindings and a.projections == b.projections:
         s.bindings = a.bindings
@@ -3017,12 +3065,12 @@ fact_join = (a: FactState, b: FactState, at: int) -> FactState:
     element_keys: {(int, int): int} = {}
     element_keys_ready = false
     loop cursor < merged.len() and merged.len() < FACT_CAP:
-        pi = fact_index_get(a.index[0].projection_head, left[cursor])
+        pi = fact_projection_first(a, left[cursor])
         loop pi >= 0:
             p = a.projections[pi]
-            pi = a.index[0].projection_next[pi]
+            pi = fact_projection_after(a, pi)
             selector = p.selector
-            qi = fact_index_get(b.index[0].projection_index, fact_projection_key(right[cursor], selector, p.element))
+            qi = fact_projection_find(b, right[cursor], selector, p.element)
             if p.element:
                 key = fact_bound(a, selector)
                 if key.lo == key.hi and not key.wide:
@@ -3221,14 +3269,14 @@ fact_change_shape = (s: mut FactState, old0: int, fresh0: int, chain: int[], j0:
             length = fact_project(s, old, -1, false, T_INT)
             if length != 0 and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(fresh, -1, false, length))
             if j > 0 and nodes[chain[j - 1]].kind == .index:
-                source = fact_index_get(s.index[0].projection_index, fact_projection_key(old, FACT_ROW_SOURCE, false))
+                source = fact_projection_find(s, old, FACT_ROW_SOURCE, false)
                 if source >= 0 and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(fresh, FACT_ROW_SOURCE, false, s.projections[source].value))
             if j > 0:
                 parts: FactProjection[]
-                pi = fact_index_get(s.index[0].projection_head, old)
+                pi = fact_projection_first(s, old)
                 loop pi >= 0:
                     p = s.projections[pi]
-                    pi = s.index[0].projection_next[pi]
+                    pi = fact_projection_after(s, pi)
                     if p.element: parts.push(p)
                 loop p in parts:
                     if s.projections.len() >= FACT_CAP: break
@@ -3246,10 +3294,10 @@ fact_change_shape = (s: mut FactState, old0: int, fresh0: int, chain: int[], j0:
         kept: FactProjection[]
         # (a dictionary's entries changing keep its keys and their positions)
         entries = selector == fact_name_vals and nodes[c].aux >= 0 and is_map_type(representation_type(ntype(int(nodes[c].a))))
-        qi = fact_index_get(s.index[0].projection_head, old)
+        qi = fact_projection_first(s, old)
         loop qi >= 0:
             q = s.projections[qi]
-            qi = s.index[0].projection_next[qi]
+            qi = fact_projection_after(s, qi)
             if q.selector == FACT_POOL_POSITIONS and not q.element and selector >= 0 and starts_with(name_of(selector), "__"): continue
             if q.element:
                 if entries and fact_truth(s, q.value) == 1: kept.push(FactProjection(fresh, q.selector, true, q.value))
@@ -4334,7 +4382,7 @@ fact_byte_view = (s: mut FactState, text: int) -> int:
     # lookup and interned-string length, with no Unicode/grapheme scan.
     n = fact_terms[text].origin
     if view != 0 and n > 0 and nodes[n].kind == .str_lit and nodes[n].aux == 0 and nkids(n) == 0 and nodes[n].sval >= 0 and s.projections.len() < FACT_CAP:
-        known = fact_index_get(s.index[0].projection_index, fact_projection_key(view, -1, false))
+        known = fact_projection_find(s, view, -1, false)
         if known < 0: fact_add_projection(s, FactProjection(view, -1, false, fact_constant(s, len(name_of(int(nodes[n].sval))))))
     view
 
@@ -4373,10 +4421,10 @@ fact_char_boundary = (s: mut FactState, view: int, length: int, at: int) -> bool
     zero = fact_constant(s, 0)
     if fact_compare(s, .le, at, zero) == 1 or fact_compare(s, .ge, at, length) == 1: return true
     # ASCII belongs to the immutable string, never a mutable byte array.
-    pi = fact_index_get(s.index[0].projection_value, view)
+    pi = fact_projection_origin(s, view)
     if pi >= 0:
         p = s.projections[pi]
-        if p.selector == FACT_BYTE_VIEW and fact_index_get(s.index[0].projection_index, fact_projection_key(p.base, FACT_ASCII_TEXT, false)) >= 0: return true
+        if p.selector == FACT_BYTE_VIEW and fact_projection_find(s, p.base, FACT_ASCII_TEXT, false) >= 0: return true
     byte = fact_project(s, view, at, true, T_U8)
     b = fact_bound(s, byte)
     if b.hi < 0x80 or b.lo >= 0xc0: return true
@@ -4548,10 +4596,10 @@ fact_pool_keep = (s: mut FactState, from: int, to: int, except: int = 0):
     if from == to or from == 0 or to == 0: return
     gone = if except != 0: fact_bound(s, fact_pool_member(s, from, except)) else: FactBound(0, 0)
     kept: FactProjection[]
-    i = fact_index_get(s.index[0].projection_head, from)
+    i = fact_projection_first(s, from)
     loop i >= 0:
         q = s.projections[i]
-        i = s.index[0].projection_next[i]
+        i = fact_projection_after(s, i)
         if not q.element: continue
         b = fact_bound(s, q.value)
         if b.lo < 1 or b.wide: continue
@@ -4563,10 +4611,10 @@ fact_pool_keep = (s: mut FactState, from: int, to: int, except: int = 0):
 # The highest finite rank among the members of `pool` (0 when none).
 fact_pool_rank = (s: FactState, pool: int) -> int:
     top = 0
-    i = fact_index_get(s.index[0].projection_head, pool)
+    i = fact_projection_first(s, pool)
     loop i >= 0:
         q = s.projections[i]
-        i = s.index[0].projection_next[i]
+        i = fact_projection_after(s, i)
         if not q.element: continue
         b = fact_bound(s, q.value)
         if b.lo >= 1 and not b.wide and b.hi < (1 << 40): top = max(top, b.hi)
@@ -4653,10 +4701,10 @@ fact_pool_values = (n: int, s: mut FactState, before: int, after: int, values: i
         # require scalar comparison of an opaque Handle to retain positions.
         next = fact_new(s, FactBound(), FactTerm(type = T_INT))
         kept: FactProjection[]
-        pi = fact_index_get(s.index[0].projection_head, positions)
+        pi = fact_projection_first(s, positions)
         loop pi >= 0:
             p = s.projections[pi]
-            pi = s.index[0].projection_next[pi]
+            pi = fact_projection_after(s, pi)
             if p.element: kept.push(FactProjection(next, p.selector, true, p.value))
         loop p in kept:
             if s.projections.len() < FACT_CAP: fact_add_projection(s, p)
@@ -4757,16 +4805,16 @@ fact_stable_field = (base: int, name: int) -> int:
 # Only demanded key collections and reads use this indexed provenance. O(1)
 # lookup/transfer, with the ordinary projection budget; no collection scan.
 fact_keys_copy = (s: mut FactState, before: int, after: int):
-    source = fact_index_get(s.index[0].projection_index, fact_projection_key(before, FACT_KEYS_SOURCE, false))
+    source = fact_projection_find(s, before, FACT_KEYS_SOURCE, false)
     if source >= 0 and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(after, FACT_KEYS_SOURCE, false, s.projections[source].value))
 
 fact_keys_element = (s: mut FactState, base: int, value: int) -> int:
-    source = fact_index_get(s.index[0].projection_index, fact_projection_key(base, FACT_KEYS_SOURCE, false))
+    source = fact_projection_find(s, base, FACT_KEYS_SOURCE, false)
     if source >= 0 and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(value, FACT_KEY_SOURCE, false, s.projections[source].value))
     value
 
 fact_map_member = (s: mut FactState, n: int, map: int, key: int) -> int:
-    source = fact_index_get(s.index[0].projection_index, fact_projection_key(key, FACT_KEY_SOURCE, false))
+    source = fact_projection_find(s, key, FACT_KEY_SOURCE, false)
     if source >= 0 and s.projections[source].value == map: return fact_constant(s, 1)
     fact_project(s, map, fact_map_key(s, kid(n, 1), key), true, T_BOOL)
 
@@ -4839,10 +4887,10 @@ fact_map_store_changes = (n: int, s: mut FactState, at: int, reason: FactReason)
     if i < 0: return
     after = s.bindings[i].value
     keys: int[]
-    j = fact_index_get(s.index[0].projection_head, before)
+    j = fact_projection_first(s, before)
     loop j >= 0:
         q = s.projections[j]
-        j = s.index[0].projection_next[j]
+        j = fact_projection_after(s, j)
         if q.element and fact_truth(s, q.value) == 1: keys.push(q.selector)
     loop key in keys: fact_assume(s, fact_project(s, after, key, true, T_BOOL), true)
 
@@ -4857,10 +4905,10 @@ fact_map_store = (n: int, s: mut FactState, values: int[], before: int) -> int:
     after = fact_new(s, FactBound(), FactTerm(type = ntype(target)))
     fact_store_route(s, route, after, n)
     keys: int[]
-    i = fact_index_get(s.index[0].projection_head, before)
+    i = fact_projection_first(s, before)
     loop i >= 0:
         q = s.projections[i]
-        i = s.index[0].projection_next[i]
+        i = fact_projection_after(s, i)
         if q.element and fact_truth(s, q.value) == 1: keys.push(q.selector)
     loop key in keys: fact_assume(s, fact_project(s, after, key, true, T_BOOL), true)
     fact_assume(s, fact_map_member(s, n, after, values[1]), true)
@@ -4927,7 +4975,7 @@ fact_map_snapshot = (n: int, s: mut FactState, map: int) -> int:
     if ownership_decls.len() != 0 and ownership_fact_type(ntype(kid(n, 0))):
         fact_path_call_effects(n, s)
         return fact_fresh(s, ntype(n))
-    if map == 0 or fact_index_get(s.index[0].projection_index, fact_projection_key(map, FACT_MAP_DENSE, false)) < 0: return fact_fresh(s, ntype(n))
+    if map == 0 or fact_projection_find(s, map, FACT_MAP_DENSE, false) < 0: return fact_fresh(s, ntype(n))
     t = fact_type(ntype(n))
     value = fact_fresh(s, t)
     loop i in [0..2):
@@ -4959,7 +5007,7 @@ fact_map_loop = (n: int, base: int, s: mut FactState):
 fact_slice_elements = (s: mut FactState, base: int, value: int, lo: int, hi: int):
     if base == 0 or value == 0: return
     fact_keys_copy(s, base, value)
-    uniform = fact_index_get(s.index[0].projection_index, fact_projection_key(base, FACT_ELEMENT_COPY, false))
+    uniform = fact_projection_find(s, base, FACT_ELEMENT_COPY, false)
     if uniform >= 0 and s.projections.len() < FACT_CAP:
         fact_add_projection(s, FactProjection(value, FACT_ELEMENT_COPY, false, s.projections[uniform].value))
         return
@@ -4967,10 +5015,10 @@ fact_slice_elements = (s: mut FactState, base: int, value: int, lo: int, hi: int
     upper = fact_bound(s, hi)
     if lower.wide or lower.lo != lower.hi or lower.lo < 0: return
     parts: FactProjection[]
-    pi = fact_index_get(s.index[0].projection_head, base)
+    pi = fact_projection_first(s, base)
     loop pi >= 0:
         p = s.projections[pi]
-        pi = s.index[0].projection_next[pi]
+        pi = fact_projection_after(s, pi)
         if p.element: parts.push(p)
     loop p in parts:
         index = fact_bound(s, p.selector)
@@ -5157,7 +5205,7 @@ fact_entails = (s: FactState, a: int, b: int, limit: int) -> bool:
 fact_loop_materialize = (entry: mut FactState, back: FactState, v: int, depth: int = 0) -> bool:
     if fact_slot(entry, v) >= 0: return true
     if depth > 2 or entry.ids.len() >= FACT_CAP or entry.projections.len() >= FACT_CAP: return false
-    pi = fact_index_get(back.index[0].projection_value, v)
+    pi = fact_projection_origin(back, v)
     if pi >= 0:
         p = back.projections[pi]
         if not fact_loop_materialize(entry, back, p.base, depth + 1): return false
@@ -5409,7 +5457,7 @@ fact_guard_value = (e: int, s: FactState, depth: int = 0) -> int:
         base = fact_guard_value(kid(e, 0), s, depth + 1)
         selector = -1
     if base == 0: return 0
-    i = fact_index_get(s.index[0].projection_index, fact_projection_key(base, selector, false))
+    i = fact_projection_find(s, base, selector, false)
     if i >= 0: return s.projections[i].value
     0
 
@@ -5448,16 +5496,16 @@ fact_guarded_rows = (e: int, back: FactState, changing: {int: bool}, carried: mu
 fact_loop_shape = (s: mut FactState, a: FactState, b: FactState, x: int, y: int, into: int, steps: mut int, depth: int):
     if depth >= 32 or x == 0 or y == 0 or into == 0: return
     pool = fact_pool_type(fact_terms[x].type) or is_map_type(representation_type(fact_terms[x].type))
-    pi = fact_index_get(a.index[0].projection_head, x)
+    pi = fact_projection_first(a, x)
     loop pi >= 0:
         if steps <= 0: return
         steps -= 1
         p = a.projections[pi]
-        pi = a.index[0].projection_next[pi]
+        pi = fact_projection_after(a, pi)
         if s.projections.len() >= FACT_CAP: return
         if fact_slot(s, p.value) < 0 or p.element and fact_slot(s, p.selector) < 0: continue
         if p.element and pool and fact_bound(a, p.value).lo < 1: continue
-        qi = fact_index_get(b.index[0].projection_index, fact_projection_key(y, p.selector, p.element))
+        qi = fact_projection_find(b, y, p.selector, p.element)
         if b.live and qi < 0: continue
         other = if qi >= 0: b.projections[qi].value else: p.value
         v = p.value
@@ -5467,7 +5515,7 @@ fact_loop_shape = (s: mut FactState, a: FactState, b: FactState, x: int, y: int,
             v = fact_new(s, fact_domain(t), FactTerm(type = t))
             if v == 0: return
             fact_loop_shape(s, a, b, p.value, other, v, steps, depth + 1)
-            if fact_index_get(s.index[0].projection_head, v) < 0: continue
+            if fact_projection_first(s, v) < 0: continue
         if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(into, p.selector, p.element, v))
 
 # Rows v - o <= d (upper) or o - v <= d from back's paths out of changing v to
@@ -5508,7 +5556,7 @@ fact_loop_paths = (entry: mut FactState, back: FactState, v: int, upper: bool, c
 
 # Nothing is known of v beyond its interval: no projections, no rows.
 fact_top = (s: FactState, v: int) -> bool:
-    fact_index_get(s.index[0].projection_head, v) < 0 and fact_incident(s, v) < 0
+    fact_projection_first(s, v) < 0 and fact_incident(s, v) < 0
 
 # Two header aggregates whose contents changed (an element written each
 # iteration) are settled when they carry the same projection skeleton:
@@ -5516,24 +5564,24 @@ fact_top = (s: FactState, v: int) -> bool:
 fact_same_shape = (a: FactState, b: FactState, x: int, y: int, steps: mut int, depth: int = 0) -> bool:
     if depth >= 32: return false
     count = 0
-    pi = fact_index_get(a.index[0].projection_head, x)
+    pi = fact_projection_first(a, x)
     loop pi >= 0:
         if steps <= 0: return false
         steps -= 1
         p = a.projections[pi]
-        pi = a.index[0].projection_next[pi]
+        pi = fact_projection_after(a, pi)
         count += 1
-        qi = fact_index_get(b.index[0].projection_index, fact_projection_key(y, p.selector, p.element))
+        qi = fact_projection_find(b, y, p.selector, p.element)
         if qi < 0: return false
         other = b.projections[qi].value
         if p.value != other:
             t = fact_terms[p.value].type
             if t == 0 or fact_scalar(t) or fact_terms[other].type != t or fact_bound(a, p.value) != fact_bound(b, other): return false
             if not fact_same_shape(a, b, p.value, other, steps, depth + 1): return false
-    qi = fact_index_get(b.index[0].projection_head, y)
+    qi = fact_projection_first(b, y)
     loop qi >= 0:
         count -= 1
-        qi = b.index[0].projection_next[qi]
+        qi = fact_projection_after(b, qi)
     count == 0 and fact_incident(a, x) < 0 and fact_incident(b, y) < 0
 
 fact_loop_stable = (a: FactState, b: FactState) -> bool:
@@ -6248,7 +6296,7 @@ fact_push_open = (n: int, s: mut FactState, base: int = 0) -> bool:
         bound = FactBound()
         seen = false
         selector = if sized: FACT_ELEMENT_LENGTH else: FACT_ELEMENT_VALUE
-        hull = fact_index_get(s.index[0].projection_index, fact_projection_key(value, selector, false))
+        hull = fact_projection_find(s, value, selector, false)
         if hull >= 0:
             bound = fact_bound(s, s.projections[hull].value)
             seen = true
@@ -6304,12 +6352,12 @@ fact_push_close = (n: int, s: mut FactState):
         i = fact_binding(s, PlaceIdentity(.local, int(locals[l].owner), l))
         if i >= 0 and frame.matching:
             source = frame.rows
-            prior = fact_index_get(s.index[0].projection_index, fact_projection_key(source, FACT_ROW_SOURCE, false))
+            prior = fact_projection_find(s, source, FACT_ROW_SOURCE, false)
             if prior >= 0: source = s.projections[prior].value
             fact_add_projection(s, FactProjection(s.bindings[i].value, FACT_ROW_SOURCE, false, source))
         if b.wide: continue
         selector = if frame.lengths[j]: FACT_ELEMENT_LENGTH else: FACT_ELEMENT_VALUE
-        if i < 0 or fact_index_get(s.index[0].projection_index, fact_projection_key(s.bindings[i].value, selector, false)) >= 0: continue
+        if i < 0 or fact_projection_find(s, s.bindings[i].value, selector, false) >= 0: continue
         b.reason = .loop_; b.witness = n
         fact_hull_owner = fact_owner
         fact_add_projection(s, FactProjection(s.bindings[i].value, selector, false, fact_new(s, b)))
@@ -6469,12 +6517,12 @@ fact_loop_index = (n: int, base: int, s: mut FactState):
 fact_loop_elements = (n: int, base: int, s: mut FactState):
     l = int(nodes[n].sym)
     if nodes[n].aux != 1 or l <= 0 or base == 0: return
-    source = fact_index_get(s.index[0].projection_index, fact_projection_key(base, FACT_KEYS_SOURCE, false))
+    source = fact_projection_find(s, base, FACT_KEYS_SOURCE, false)
     if source >= 0:
         value = fact_keys_element(s, base, fact_fresh(s, int(locals[l].type)))
         fact_bind(s, PlaceIdentity(.local, int(locals[l].owner), l), value)
         return
-    uniform = fact_index_get(s.index[0].projection_index, fact_projection_key(base, FACT_ELEMENT_COPY, false))
+    uniform = fact_projection_find(s, base, FACT_ELEMENT_COPY, false)
     if uniform >= 0:
         fact_bind(s, PlaceIdentity(.local, int(locals[l].owner), l), s.projections[uniform].value)
         return
@@ -6488,14 +6536,14 @@ fact_loop_elements = (n: int, base: int, s: mut FactState):
             fact_bind(s, PlaceIdentity(.local, int(locals[l].owner), l), value)
             return
     if sized:
-        pi = fact_index_get(s.index[0].projection_index, fact_projection_key(base, FACT_ELEMENT_LENGTH, false))
+        pi = fact_projection_find(s, base, FACT_ELEMENT_LENGTH, false)
         if pi >= 0:
             value = fact_new(s, FactBound(), FactTerm(type = t))
             if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(value, -1, false, fact_new(s, fact_bound(s, s.projections[pi].value), FactTerm(type = T_INT))))
             fact_bind(s, PlaceIdentity(.local, int(locals[l].owner), l), value)
             return
     # (an element hull, without a complete inventory)
-    hull = if not fact_scalar(t) or fact_hull_owner != fact_owner: -1 else: fact_index_get(s.index[0].projection_index, fact_projection_key(base, FACT_ELEMENT_VALUE, false))
+    hull = if not fact_scalar(t) or fact_hull_owner != fact_owner: -1 else: fact_projection_find(s, base, FACT_ELEMENT_VALUE, false)
     if hull >= 0: fact_bind(s, PlaceIdentity(.local, int(locals[l].owner), l), fact_new(s, fact_bound(s, s.projections[hull].value), FactTerm(type = t)))
     parts = fact_inventory(s, base)
     if parts.len() == 0: return
@@ -6512,11 +6560,11 @@ fact_permuted_elements = (s: mut FactState, before: int, after: int):
     t = fact_type(fact_terms[before].type)
     if tkind(t) != .array and tkind(t) != .fixed: return
     if ownership_decls.len() != 0 and ownership_fact_type(telem(t)): return
-    uniform = fact_index_get(s.index[0].projection_index, fact_projection_key(before, FACT_ELEMENT_COPY, false))
+    uniform = fact_projection_find(s, before, FACT_ELEMENT_COPY, false)
     if uniform >= 0:
         fact_add_projection(s, FactProjection(after, FACT_ELEMENT_COPY, false, s.projections[uniform].value))
         return
-    source = fact_index_get(s.index[0].projection_index, fact_projection_key(before, FACT_ELEMENT_SOURCE, false))
+    source = fact_projection_find(s, before, FACT_ELEMENT_SOURCE, false)
     original = if source >= 0: s.projections[source].value else: before
     fact_add_projection(s, FactProjection(after, FACT_ELEMENT_SOURCE, false, original))
 
@@ -6524,18 +6572,18 @@ fact_permuted_elements = (s: mut FactState, before: int, after: int):
 # (a literal's, at most 64 of them); none otherwise. O(base's projections).
 fact_inventory = (s: FactState, base0: int) -> int[]:
     base = base0
-    source = fact_index_get(s.index[0].projection_index, fact_projection_key(base, FACT_ELEMENT_SOURCE, false))
+    source = fact_projection_find(s, base, FACT_ELEMENT_SOURCE, false)
     if source >= 0: base = s.projections[source].value
     parts: int[]
-    li = fact_index_get(s.index[0].projection_index, fact_projection_key(base, -1, false))
+    li = fact_projection_find(s, base, -1, false)
     if li < 0: return parts
     length = fact_bound(s, s.projections[li].value)
     if length.wide or length.lo != length.hi or length.lo <= 0 or length.hi > 64: return parts
     seen: {int: bool} = {}
-    pi = fact_index_get(s.index[0].projection_head, base)
+    pi = fact_projection_first(s, base)
     loop pi >= 0:
         p = s.projections[pi]
-        pi = s.index[0].projection_next[pi]
+        pi = fact_projection_after(s, pi)
         if not p.element: continue
         key = fact_bound(s, p.selector)
         if key.wide or key.lo != key.hi or key.lo < 0 or key.lo >= length.lo or seen.has(key.lo): continue
@@ -7119,7 +7167,7 @@ fact_parallel_record = (n: int, s: mut FactState, base: int):
     t = fact_type(int(locals[fns[f].params[0]].type))
     if not fact_scalar(t) or t == T_U64: return
     bound = fact_domain(t)
-    pi = fact_index_get(s.index[0].projection_index, fact_projection_key(base, FACT_ELEMENT_VALUE, false))
+    pi = fact_projection_find(s, base, FACT_ELEMENT_VALUE, false)
     if pi >= 0: bound = fact_bound(s, s.projections[pi].value)
     parts = fact_inventory(s, base)
     if parts.len() > 0:
@@ -8258,10 +8306,10 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                 after = fact_map_receiver(s, n, values[0])
                 if after != before:
                     keys: int[]
-                    i = fact_index_get(s.index[0].projection_head, before)
+                    i = fact_projection_first(s, before)
                     loop i >= 0:
                         q = s.projections[i]
-                        i = s.index[0].projection_next[i]
+                        i = fact_projection_after(s, i)
                         if q.element and fact_truth(s, q.value) == 1: keys.push(q.selector)
                     loop key in keys: fact_assume(s, fact_project(s, after, key, true, T_BOOL), true)
                 fact_assume(s, fact_map_member(s, n, after, values[1]), true)
