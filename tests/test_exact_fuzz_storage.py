@@ -1,4 +1,4 @@
-"""The differential oracle checks stores introduced by multi-value collection."""
+"""The differential oracle distinguishes fixed-width unpack stores from inferred collectors."""
 import subprocess
 
 import pytest
@@ -16,7 +16,8 @@ def test_multi_value_storage_checks_exact_result(kind):
                 'if': g.MultiIf(g.MULTI, g.Lit(g.B, True), (value,)),
                 'literal': value}[kind]
         statement = g.Print(g.MultiLit(g.AI, (item,)))
-    assert g.Program((), (statement,)).outcome() == ('', 101)
+    expected = ('', 101) if kind == 'unpack' else ('[27670116110564327424]\n', 0)
+    assert g.Program((), (statement,)).outcome() == expected
 
 
 @pytest.mark.parametrize('group', [False, True], ids=['array', 'group'])
