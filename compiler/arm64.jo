@@ -1,4 +1,5 @@
 use 'arm64_encode.dewy'
+use 'arm64_allocate.dewy'
 use 'backend_analysis.dewy'
 use 'ir_types.dewy'
 # arm64 (AArch64) code generator: Linux on 64-bit ARM (`--target aarch64-linux`).
@@ -28,9 +29,6 @@ use 'x64.jo'
 a_int_fail: int[]
 a_int_fail_fn = 0
 
-a_out_size = 0               # bytes of stack arguments the calls need
-a_scratch = 0                # offset of the 16 scratch bytes
-
 # fixups resolved by arm64_resolve: (position, lfunc / stub / (kind, offset))
 a_call_fix: (int, int)[]     # BL to a function
 a_stub_fix: (int, int)[]     # BL to a stub
@@ -39,125 +37,6 @@ a_data_fix: (int, int, int)[]    # ADRP + ADD of rodata (kind 0) or data (kind 1
 
 # Bind the shared code-array variable once, including Mach-O/REPL users.
 a_encoder_binding = arm64_encoder_bind(&code)
-
-# ---------------- registers ----------------
-# A value in a register has vloc x0-x30 as themselves, v0-v31 as A_V + n. Values living across
-# a call get the callee-saved registers (x19-x28, d8-d15; those used are saved in the prologue)
-# or stay in the frame; the others take x8, x13-x15 and v19-v31, or x0-x7 and v0-v7 when no
-# call is anywhere in their lifetime (calls put their arguments there) and they are not
-# parameters (which arrive there). Linear scan over the intervals backend_analyze makes (as x64.jo's
-# allocate, which also decides which value gives up its register when there are too few).
-const A_V = 32
-a_saved: int[]              # callee-saved registers used here
-a_save_off = 0
-a_kind = (r: int) -> int:        # 0 caller-saved, 1 argument register, 2 callee-saved
-    n = r
-    if r >= A_V: n = r - A_V
-    if n < 8: return 1
-    if r < A_V and n >= 19 and n <= 28: return 2
-    if r >= A_V and n >= 8 and n <= 15: return 2
-    0
-
-# is there a call at any of the instructions s..e?
-a_call_in = (s: int, e: int) -> bool:
-    lo = 0
-    hi = call_pos.len()
-    loop lo < hi:
-        mid = (lo + hi) / 2
-        if call_pos[mid] < s: lo = mid + 1
-        else: hi = mid
-    lo < call_pos.len() and call_pos[lo] <= e
-
-a_int_pool = [8, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28]
-a_fp_pool = [19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
-
-a_allocate = ():
-    nv = ir.vtypes.len()
-    a_saved = []
-    n = ir.code.len() + 1
-    head = fill(-1, n)
-    nxt = fill(-1, nv)
-    loop v in [0..nv):
-        if vloc[v] == LOC_CONST or vloc[v] == LOC_FCONST or vloc[v] == LOC_SLOT or vloc[v] == LOC_GLOBAL: continue
-        if v_live[v].last < 0 or (v_live[v].nuse == 0 and v >= ir.nparams):
-            vloc[v] = LOC_NONE
-            continue
-        f = v_live[v].first
-        nxt[v] = head[f]
-        head[f] = v
-    # (a parameter may keep the register it arrives in)
-    arrive = fill(-1, ir.nparams)
-    ni = 0
-    nf = 0
-    loop p in [0..ir.nparams):
-        if vtype(p) == VI:
-            if ni < 8: arrive[p] = ni
-            ni += 1
-        else:
-            if nf < 8: arrive[p] = A_V + nf
-            nf += 1
-    free = fill(true, 2 * A_V)
-    used = fill(false, 2 * A_V)
-    active: int[]
-    min_end = INF_POS
-    loop pos in [0..n):
-        v = head[pos]
-        if v >= 0 and min_end < pos:
-            min_end = INF_POS
-            k = 0
-            loop k < active.len():
-                u = active[k]
-                if v_live[u].last < pos:
-                    free[vloc[u]] = true
-                    active[k] = active[active.len() - 1]
-                    active.pop()
-                else:
-                    if v_live[u].last < min_end: min_end = v_live[u].last
-                    k += 1
-        loop v >= 0:
-            s = live_start(v)
-            # the registers v may have: 0 any, 1 not an argument register, 2 callee-saved ones
-            w = 0
-            if crosses_call(s, v_live[v].last): w = 2
-            else if v < ir.nparams or a_call_in(s, v_live[v].last): w = 1
-            fp = vtype(v) != VI
-            base = 0
-            pool = a_int_pool
-            if fp:
-                base = A_V
-                pool = a_fp_pool
-            reg = -1
-            if v < ir.nparams and w == 1 and arrive[v] >= 0 and free[arrive[v]] and not a_call_in(s, v_live[v].last): reg = arrive[v]
-            loop r in pool:
-                if reg >= 0: break
-                k = a_kind(base + r)
-                if free[base + r] and (w == 0 or (w == 1 and k != 1) or k == 2):
-                    reg = base + r
-                    break
-            if reg < 0:
-                # take the register of the active value cheapest to spill, if it is cheaper than v
-                best = -1
-                loop u in active:
-                    ru = vloc[u]
-                    if (ru >= A_V) != fp: continue
-                    k = a_kind(ru)
-                    if not (w == 0 or (w == 1 and k != 1) or k == 2): continue
-                    if not spills_before(u, v): continue
-                    if best < 0 or spills_before(u, best): best = u
-                if best >= 0:
-                    reg = vloc[best]
-                    vloc[best] = LOC_SPILL
-                    active.remove(active.index_of(best))
-            if reg >= 0:
-                vloc[v] = reg
-                free[reg] = false
-                active.push(v)
-                if v_live[v].last < min_end: min_end = v_live[v].last
-                if a_kind(reg) == 2 and not used[reg]:
-                    used[reg] = true
-                    a_saved.push(reg)
-            else: vloc[v] = LOC_SPILL
-            v = nxt[v]
 
 # ---------------- operands ----------------
 # int vreg v into register r
@@ -242,76 +121,6 @@ a_addr = (v: int, scratch: int) -> (int, int):
     (a_src(v, scratch), 0)
 
 # ---------------- frame ----------------
-a_layout = ():
-    # stack arguments of the calls here
-    most = 0
-    loop ins in ir.code:
-        op = ins.op
-        if op == .call or op == .calli or op == .callc or op == .intr:
-            ni = 0
-            nf = 0
-            ns = 0
-            loop k in [0..int(ins.b)):
-                v = int(ir.args[int(ins.a) + k])
-                if a_on_stack(ins, k): ns += 1
-                else if vtype(v) == VI:
-                    if ni < 8: ni += 1
-                    else: ns += 1
-                else:
-                    if nf < 8: nf += 1
-                    else: ns += 1
-            if ns > most: most = ns
-    a_out_size = align_up(most * 8, 16)
-    a_scratch = a_out_size
-    off = a_out_size + 16
-    nv = ir.vtypes.len()
-    vspill = fill(0, nv)
-    # values whose lifetimes do not overlap share a slot (the intervals the x86-64 allocator
-    # gives registers by: analyze extends them over the loops they are live in), which keeps
-    # frames small for deep recursion: in order of their start, each takes a slot freed before
-    n = ir.code.len() + 1
-    head = fill(-1, n + 1)
-    nxt = fill(-1, nv)
-    loop v in [0..nv):
-        if vloc[v] != LOC_SPILL: continue
-        if v_live[v].last < 0:
-            vloc[v] = LOC_NONE
-            continue
-        s = live_start(v) + 1
-        nxt[v] = head[s]
-        head[s] = v
-    free: int[]
-    active: int[]
-    loop s in [0..n + 1):
-        v = head[s]
-        if v < 0: continue
-        k = 0
-        loop k < active.len():
-            u = active[k]
-            if v_live[u].last < s - 1:
-                free.push(vspill[u])
-                active[k] = active[active.len() - 1]
-                active.pop()
-            else: k += 1
-        loop v >= 0:
-            if free.len() > 0: vspill[v] = free.pop()
-            else:
-                vspill[v] = off
-                off += 8
-            active.push(v)
-            v = nxt[v]
-    slot_off = fill(0, ir.slot_size.len())
-    loop s in [0..ir.slot_size.len()):
-        sz = int(ir.slot_size[s])
-        al = int(ir.slot_align[s])
-        off = align_up(off, al)
-        slot_off[s] = off
-        off += sz
-    off = align_up(off, 8)
-    a_save_off = off
-    off += 8 * a_saved.len()
-    frame_size = align_up(off, 16)
-
 a_save = (load: bool):
     loop i in 0.. and r in a_saved:
         if r >= A_V: a_mem(load, r - A_V, A_SP, a_save_off + 8 * i, 8, false, true)
@@ -1008,8 +817,8 @@ arm64_function = ():
     fn_start = code.len()
     if dbg_on: backend_debug_bindings()
     backend_analyze(ir, ir_operand_layout, dbg_on, target_wasm, ra_stat)
-    a_allocate()
-    a_layout()
+    a_allocate(ir)
+    frame_size = a_layout(ir, target_macos, vspill, slot_off)
     actl = []
     row_pos = -1
     row_line = -1

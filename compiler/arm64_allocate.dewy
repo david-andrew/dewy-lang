@@ -1,0 +1,328 @@
+$runtime_checks
+from p"ir_types.dewy" import (IrFn)
+from p"backend_analysis.dewy" import (LOC_SPILL LOC_CONST LOC_FCONST LOC_SLOT LOC_NONE LOC_GLOBAL vloc v_live call_pos)
+# Own allocation and frame layout; borrow final IR and shared lifetime views.
+# O(N + V*R + V*A) with bounded register pool R and active spills A; the
+# spill scan retains its original quadratic worst case. No host callbacks.
+AllocWord:type=int64<overflow='wrap'>
+const VI = 0
+const VK = 3
+const INF_POS = 1 << 60
+let a_out_size:int64 = 0
+let a_scratch:int64 = 0
+a_frame_align=(n:AllocWord a:AllocWord):>int64=>$unsafe {
+    (n + a - 1) & ((a - 1) xor -1)
+}
+a_live_start=(nparams:int64 v:int64):>int64=>$unsafe {
+    if v <? nparams {
+        return -1
+    }
+    AllocWord(v_live[v].first)
+}
+a_crosses_call=(s:int64 e:int64):>bool=>$unsafe {
+    let lo:AllocWord=0
+    let calls=call_pos.ptr
+    let hi:AllocWord=AllocWord(call_pos.length)
+    loop lo <? hi {
+        let mid:AllocWord=(lo + hi) // 2
+        if calls[mid] <=? s {
+            lo = mid + 1
+        }
+        else {
+            hi = mid
+        }
+    }
+    lo <? AllocWord(call_pos.length) and calls[lo] <? e
+}
+a_spills_before=(nparams:int64 a:int64 b:int64):>bool=>$unsafe {
+    let la:AllocWord=AllocWord(v_live[a].last) - a_live_start(nparams  a) + 1
+    let lb:AllocWord=AllocWord(v_live[b].last) - a_live_start(nparams  b) + 1
+    let x:AllocWord=AllocWord(v_live[a].weight) * AllocWord(lb)
+    let y:AllocWord=AllocWord(v_live[b].weight) * AllocWord(la)
+    x <? y or (x =? y and AllocWord(v_live[a].last) >? AllocWord(v_live[b].last))
+}
+const A_V = 32
+# Callee saves retain allocation order; frame slots retain start/tie order.
+let a_saved:array<int64>=[]
+let a_save_off:int64 = 0
+a_kind=(r:int64):>int64=>$unsafe {
+    let n:AllocWord=r
+    if r >=? A_V {
+        n = r - A_V
+    }
+    if n <? 8 {
+        return 1
+    }
+    if r <? A_V and n >=? 19 and n <=? 28 {
+        return 2
+    }
+    if r >=? A_V and n >=? 8 and n <=? 15 {
+        return 2
+    }
+    0
+}
+a_call_in=(s:int64 e:int64):>bool=>$unsafe {
+    let lo:AllocWord=0
+    let calls=call_pos.ptr
+    let hi:AllocWord=AllocWord(call_pos.length)
+    loop lo <? hi {
+        let mid:AllocWord=(lo + hi) // 2
+        if calls[mid] <? s {
+            lo = mid + 1
+        }
+        else {
+            hi = mid
+        }
+    }
+    lo <? AllocWord(call_pos.length) and calls[lo] <=? e
+}
+let a_int_pool:array<int64> = [8  13  14  15  0  1  2  3  4  5  6  7  19  20  21  22  23  24  25  26  27  28]
+let a_fp_pool:array<int64> = [19  20  21  22  23  24  25  26  27  28  29  30  31  0  1  2  3  4  5  6  7  8  9  10  11  12  13  14  15]
+a_allocate=(@ir:IrFn):>void=>$unsafe {
+    let types=ir.vtypes.ptr
+    let nv:AllocWord=AllocWord(ir.vtypes.length)
+    a_saved = []
+    let n:AllocWord= AllocWord(ir.code.length) + 1
+    let head_storage:array<int64>=fill(-1  n)
+    let head=head_storage.ptr
+    let nxt_storage:array<int64>=fill(-1  nv)
+    let nxt=nxt_storage.ptr
+    loop v in [0..nv) {
+        if vloc[v] =? LOC_CONST or vloc[v] =? LOC_FCONST or vloc[v] =? LOC_SLOT or vloc[v] =? LOC_GLOBAL {
+            continue
+        }
+        if AllocWord(v_live[v].last) <? 0 or (v_live[v].nuse =? 0 and v >=? AllocWord(ir.nparams)) {
+            vloc[v] = LOC_NONE
+            continue
+        }
+        let f:AllocWord=AllocWord(v_live[v].first)
+        nxt[v] = head[f]
+        head[f] = v
+    }
+    let arrive_storage:array<int64>=fill(-1  AllocWord(ir.nparams))
+    let arrive=arrive_storage.ptr
+    let ni:AllocWord=0
+    let nf:AllocWord=0
+    loop p in [0..AllocWord(ir.nparams)) {
+        if (int64(types[p]) =? VI or int64(types[p]) =? VK) {
+            if ni <? 8 {
+                arrive[p] = ni
+            }
+            ni += 1
+        }
+        else {
+            if nf <? 8 {
+                arrive[p] = A_V + nf
+            }
+            nf += 1
+        }
+    }
+    let free_storage=fill(true  2 * A_V)
+    let free=free_storage.ptr
+    let used_storage=fill(false  2 * A_V)
+    let used=used_storage.ptr
+    let active:array<int64>=[]
+    let min_end:AllocWord=INF_POS
+    loop pos in [0..n) {
+        let v:AllocWord=head[pos]
+        if v >=? 0 and min_end <? pos {
+            min_end = INF_POS
+            let k:AllocWord=0
+            loop k <? AllocWord(active.length) {
+                let u:AllocWord=active[k]
+                if AllocWord(v_live[u].last) <? pos {
+                    free[vloc[u]] = true
+                    active[k] = active[AllocWord(active.length) - 1]
+                    active.pop();
+                }
+                else {
+                    if AllocWord(v_live[u].last) <? min_end {
+                        min_end = AllocWord(v_live[u].last)
+                    }
+                    k += 1
+                }
+            }
+        }
+        loop v >=? 0 {
+            let s:AllocWord=a_live_start(AllocWord(ir.nparams)  v)
+            let w:AllocWord=0
+            if a_crosses_call(s  AllocWord(v_live[v].last)) {
+                w = 2
+            }
+            else if v <? AllocWord(ir.nparams) or a_call_in(s  AllocWord(v_live[v].last)) {
+                w = 1
+            }
+            let fp=int64(types[v]) not=? VI and int64(types[v]) not=? VK
+            let base:AllocWord=0
+            let pool=a_int_pool.ptr
+            let pool_count:AllocWord=AllocWord(a_int_pool.length)
+            if fp {
+                base = A_V
+                pool = a_fp_pool.ptr
+                pool_count=AllocWord(a_fp_pool.length)
+            }
+            let reg:AllocWord=-1
+            if v <? AllocWord(ir.nparams) and w =? 1 and arrive[v] >=? 0 and free[arrive[v]] and not a_call_in(s  AllocWord(v_live[v].last)) {
+                reg = arrive[v]
+            }
+            loop pi in [0..pool_count) {
+                let r:AllocWord=AllocWord(pool[pi])
+                if reg >=? 0 {
+                    break
+                }
+                let k:AllocWord=a_kind(base + r)
+                if free[base + r] and (w =? 0 or (w =? 1 and k not=? 1) or k =? 2) {
+                    reg = base + r
+                    break
+                }
+            }
+            if reg <? 0 {
+                let best:AllocWord=-1
+                loop u in active {
+                    let ru:AllocWord=vloc[u]
+                    if (ru >=? A_V) not=? fp {
+                        continue
+                    }
+                    let k:AllocWord=a_kind(ru)
+                    if not (w =? 0 or (w =? 1 and k not=? 1) or k =? 2) {
+                        continue
+                    }
+                    if not a_spills_before(AllocWord(ir.nparams)  u  v) {
+                        continue
+                    }
+                    if best <? 0 or a_spills_before(AllocWord(ir.nparams)  u  best) {
+                        best = u
+                    }
+                }
+                if best >=? 0 {
+                    reg = vloc[best]
+                    vloc[best] = LOC_SPILL
+                    let index:AllocWord=0
+                    loop active[index] not=? best {index += 1}
+                    active.pop(index);
+                }
+            }
+            if reg >=? 0 {
+                vloc[v] = reg
+                free[reg] = false
+                active.push(v)
+                if AllocWord(v_live[v].last) <? min_end {
+                    min_end = AllocWord(v_live[v].last)
+                }
+                if a_kind(reg) =? 2 and not used[reg] {
+                    used[reg] = true
+                    a_saved.push(reg)
+                }
+            }
+            else {
+                vloc[v] = LOC_SPILL
+            }
+            v = nxt[v]
+        }
+    }
+}
+a_layout=(@ir:IrFn target_macos:bool @vspill:array<int64> @slot_off:array<int64>):>int64=>$unsafe {
+    let types=ir.vtypes.ptr
+    let most:AllocWord=0
+    let instructions=ir.code.ptr
+    let arguments=ir.args.ptr
+    loop ip in [0..AllocWord(ir.code.length)) {
+        let ins=instructions[ip]
+        let op=ins.op
+        if op =? 'call' or op =? 'calli' or op =? 'callc' or op =? 'intr' {
+            let ni:AllocWord=0
+            let nf:AllocWord=0
+            let ns:AllocWord=0
+            loop k in [0..int64(ins.b)) {
+                let v:AllocWord=int64(arguments[AllocWord(ins.a) + AllocWord(k)])
+                if (target_macos and ins.op =? 'callc' and ins.imm >? 0 and k >=? AllocWord(ins.imm) - 1) {
+                    ns += 1
+                }
+                else if (int64(types[v]) =? VI or int64(types[v]) =? VK) {
+                    if ni <? 8 {
+                        ni += 1
+                    }
+                    else {
+                        ns += 1
+                    }
+                }
+                else {
+                    if nf <? 8 {
+                        nf += 1
+                    }
+                    else {
+                        ns += 1
+                    }
+                }
+            }
+            if ns >? most {
+                most = ns
+            }
+        }
+    }
+    a_out_size = a_frame_align(most * 8  16)
+    a_scratch = a_out_size
+    let off:AllocWord=AllocWord(a_out_size) + 16
+    let nv:AllocWord=AllocWord(ir.vtypes.length)
+    vspill = fill(0  nv)
+    let n:AllocWord= AllocWord(ir.code.length) + 1
+    let head_storage:array<int64>=fill(-1  n + 1)
+    let head=head_storage.ptr
+    let nxt_storage:array<int64>=fill(-1  nv)
+    let nxt=nxt_storage.ptr
+    loop v in [0..nv) {
+        if vloc[v] not=? LOC_SPILL {
+            continue
+        }
+        if AllocWord(v_live[v].last) <? 0 {
+            vloc[v] = LOC_NONE
+            continue
+        }
+        let s:AllocWord=a_live_start(AllocWord(ir.nparams)  v) + 1
+        nxt[v] = head[s]
+        head[s] = v
+    }
+    let free:array<int64>=[]
+    let active:array<int64>=[]
+    loop s in [0..n + 1) {
+        let v:AllocWord=head[s]
+        if v <? 0 {
+            continue
+        }
+        let k:AllocWord=0
+        loop k <? AllocWord(active.length) {
+            let u:AllocWord=active[k]
+            if AllocWord(v_live[u].last) <? s - 1 {
+                free.push(vspill[u])
+                active[k] = active[AllocWord(active.length) - 1]
+                active.pop();
+            }
+            else {
+                k += 1
+            }
+        }
+        loop v >=? 0 {
+            if AllocWord(free.length) >? 0 {
+                vspill[v] = free.pop()
+            }
+            else {
+                vspill[v] = off
+                off += 8
+            }
+            active.push(v)
+            v = nxt[v]
+        }
+    }
+    slot_off = fill(0  AllocWord(ir.slot_size.length))
+    loop s in [0..AllocWord(ir.slot_size.length)) {
+        let sz:AllocWord=int64(ir.slot_size[s])
+        let al:AllocWord=int64(ir.slot_align[s])
+        off = a_frame_align(off  al)
+        slot_off[s] = off
+        off += sz
+    }
+    off = a_frame_align(off  8)
+    a_save_off = off
+    off += 8 * AllocWord(a_saved.length)
+    a_frame_align(off  16)
+}
