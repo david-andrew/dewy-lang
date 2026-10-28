@@ -2499,7 +2499,77 @@ x_emit_sub = (pos: int, ins: *Ins):
     if vloc[bb] == LOC_CONST and lea_add(d, a, bb, -1): return
     int_bin(0x29, 5, ins[0])
 
+# A mask tested for zero needs flags, not an intermediate integer result.
+# Selection inspects at most two successors; no per-function analysis is added.
+x_test_ops = (a: int, bb: int, branch: bool):
+    left = a
+    right = bb
+    if vloc[left] == LOC_CONST or (vloc[right] == LOC_SPILL and vloc[left] != LOC_SPILL):
+        left = bb
+        right = a
+    immediate = vloc[right] == LOC_CONST and fits32(vcval[right])
+    memory = vloc[left] == LOC_SPILL
+    r = 0
+    base = RBP
+    disp = 0
+    if memory: disp = vspill[left]
+    else: base = reg_of(left, RAX)
+    if not immediate: r = reg_of(right, RCX)
+    if branch and ra_on:
+        span = 3
+        if memory:
+            actual = disp
+            if rsp_frame:
+                actual += frame_size + rsp_extra
+                span += 1
+            if actual < -128 or actual > 127: span += 4
+            else: span += 1
+        if immediate: span += 4
+        cmp_branch_pad(span + 6)
+    if immediate:
+        rex(true, 0, 0, base, false)
+        b(0xF7)
+        if memory: mem(0, base, disp)
+        else: modrr(0, base)
+        b32(vcval[right])
+    else:
+        if memory: op_rm(0x85, true, r, base, disp)
+        else: op_rr(0x85, true, r, base)
+
+x_mask_test = (pos: int, ins: *Ins) -> bool:
+    d = int(ins.dst)
+    if dbg_on or pos + 1 >= ir.code.len() or v_live[d].ndef != 1 or v_live[d].nuse != 1: return false
+    next = data(ir.code) + pos + 1
+    if (next.op == .if_ or next.op == .brif) and int(next.a) == d:
+        x_branch_pos = pos + 1
+        x_test_ops(int(ins.a), int(ins.b), true)
+        x_branch_pos = -1
+        fused_cc = CC_NE
+        return true
+    if next.op != .eq and next.op != .ne: return false
+    other = -1
+    if int(next.a) == d: other = int(next.b)
+    else if int(next.b) == d: other = int(next.a)
+    if other < 0 or vloc[other] != LOC_CONST or vcval[other] != 0: return false
+    result = int(next.dst)
+    branch = false
+    if pos + 2 < ir.code.len() and v_live[result].nuse == 1:
+        consumer = data(ir.code) + pos + 2
+        branch = (consumer.op == .if_ or consumer.op == .brif) and int(consumer.a) == result
+    if branch: x_branch_pos = pos + 2
+    x_test_ops(int(ins.a), int(ins.b), branch)
+    x_branch_pos = -1
+    cc = if next.op == .eq: CC_E else: CC_NE
+    if branch: fused_cc = cc
+    else:
+        r = dreg(result, RAX)
+        setcc_reg(cc, r)
+        st(result, r)
+    fuse_skip = pos + 1
+    true
+
 x_emit_and_ = (pos: int, ins: *Ins):
+    if x_mask_test(pos, ins): return
     int_bin(0x21, 4, ins[0])
 
 x_emit_or_ = (pos: int, ins: *Ins):
