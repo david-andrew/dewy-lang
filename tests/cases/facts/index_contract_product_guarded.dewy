@@ -1,0 +1,6 @@
+at=(xs:array<int> i:int step:int):>int=>{
+    let offset=i*step
+    if offset <? 0 or offset >=? xs.length return -1
+    xs[offset]
+}
+printl(at([7 8] 1 1) at([7 8] -1 1))

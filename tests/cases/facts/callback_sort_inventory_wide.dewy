@@ -1,0 +1,6 @@
+f=(x:int64):>uint8=>{
+    let xs:array<int64>=[x 9 5]
+    xs.sort(key=(k:int64):>int=> -k)
+    uint8(xs[0])
+}
+printl(f(1000))

@@ -1,0 +1,8 @@
+bad=(d:dict<string int>):>int=>{
+    let keys=["foreign"]
+    keys.extend(d.keys.values)
+    let total=0
+    loop key in keys {total+=d[key]}
+    total
+}
+printl(bad(["a"->1]))

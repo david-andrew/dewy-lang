@@ -722,13 +722,19 @@ wit_index = (n: int, s: mut FactState, index: int, length: int, lo: int, hi: int
     size = WitSide(length, a, (if base != "": "{base}.length" else: ""), true)
     relation = wit_relation_text(.lt, i, size)
     if lo == 0 or hi == 0:
-        if lo == 0: wit_relation(s, s, .ge, i, zero, true)
+        if lo == 0:
+            wit_relation(s, s, .ge, i, zero, true)
+            relation = wit_relation_text(.ge, i, zero)
         else: wit_relation(s, s, .lt, i, size, true)
         wit_context(0)
         wit_help(relation)
         if dir_defer(n, "{read} is not in bounds", true): return
         wit_fail(nodes[n].pos, "{read} is not in bounds")
         return
+    # An opaque or budget-limited index still owes both bounds. Name the
+    # same contract as an ordinary missing bound, not just its upper half.
+    if lo != 1 and hi != 1: relation = if relation != "": "0 <=? {relation}" else: ""
+    else if lo != 1: relation = wit_relation_text(.ge, i, zero)
     b = fact_bound(s, index)
     if b.reason == .unsupported or b.reason == .budget or b.reason == .callee:
         wit_unknown(n, b, "{read} is in bounds", 0, relation)
@@ -739,9 +745,6 @@ wit_index = (n: int, s: mut FactState, index: int, length: int, lo: int, hi: int
 
         wit_cause(fact_bound(s, length), n)
     wit_context(0)
-    # (the help names what is missing: `i >=? 0`, `i <? xs.length`, or both)
-    if lo != 1 and hi != 1: relation = if relation != "": "0 <=? {relation}" else: ""
-    else if lo != 1: relation = wit_relation_text(.ge, i, zero)
     wit_help(relation)
     which = if lo != 1 and hi != 1: "lower and upper bounds" else if lo != 1: "lower bound" else: "upper bound"
     if dir_defer(n, "cannot prove {read} is in bounds: missing {which}", true): return

@@ -1,0 +1,9 @@
+f=():>int=>{
+    let d:dict<string int>=["a"->1 "b"->2]
+    let keys=[d.keys...]
+    keys.sort(key=(k:string $capture @d):>int=>{d.clear(); k.length})
+    let result=0
+    loop key in keys {result+=d[key]}
+    result
+}
+printl(f())

@@ -1,0 +1,6 @@
+f=():>uint8=>{
+    let xs:array<int64>=[1 2 3]
+    xs.sort(key=(k:int64 $capture @xs):>int=>{xs=[1000 2000 3000]; k})
+    uint8(xs[0])
+}
+printl(f())

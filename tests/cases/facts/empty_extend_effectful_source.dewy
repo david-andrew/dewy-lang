@@ -1,0 +1,8 @@
+bad=():>uint8=>{
+    let out:array<int64>=[]
+    source=($capture @out):>array<int64>=>{out.push(1000); [1 2]}
+    out.extend(source())
+    if out.length =? 0 return 0
+    uint8(out[0])
+}
+printl(bad())

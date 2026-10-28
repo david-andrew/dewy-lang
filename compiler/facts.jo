@@ -8018,6 +8018,13 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                 else if added != 0 and old.lo == 0 and old.hi == 0: size = added
             fresh = fact_new(s, FactBound(), FactTerm(type = ntype(a)))
             if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(fresh, -1, false, size))
+            # Extending an empty value copies exactly the evaluated source.
+            # Keep its key provenance and element inventory, never its mutable
+            # place or exact positions. Hooked copies retain no such evidence.
+            # O(1) indexed transfer, demanded by a later element consumer.
+            if id == .extend and not old.wide and old.lo == 0 and old.hi == 0 and (ownership_decls.len() == 0 or not ownership_fact_type(ntype(a))):
+                fact_keys_copy(s, operand, fresh)
+                fact_permuted_elements(s, operand, fresh)
             fact_store_route(s, route, fresh, n, true)
             return fact_fresh(s, ntype(n))
         if id == .panic or id == .unreachable:
@@ -8170,7 +8177,11 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                 fact_path_call_effects(n, s)
                 fresh = fact_new(s, FactBound(), FactTerm(type = ntype(kid(n, 0))))
                 fact_add_projection(s, FactProjection(fresh, -1, false, length))
-                if plain or reverse:
+                # A callback receives scalar/string values, not their slots.
+                # With an unexposed receiver it cannot change the inventory.
+                # Its ordinary effects above still invalidate other roots; key
+                # provenance names the old dictionary, never its replacement.
+                if plain or reverse or callback and (fact_scalar(element) or element == T_STR) and not fact_exposed(p):
                     fact_keys_copy(s, held[held.len() - 1], fresh)
                     fact_permuted_elements(s, held[held.len() - 1], fresh)
                 fact_store_route(s, route, fresh, n)

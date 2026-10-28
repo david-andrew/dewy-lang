@@ -1,0 +1,22 @@
+# Spread and explicit extension of an empty array retain the source facts.
+copy=(x:int64<0 <=? x and x <? 128>):>uint8=>{
+    let source:array<int64>=[x 7]
+    let out:array<int64>=[]
+    out.extend(source)
+    source=[1000 2000]
+    uint8(out[0])
+}
+keys=(d:dict<string int>):>int=>{
+    let snapshot=[d.keys...]
+    let result=0
+    loop key in snapshot {result+=d[key]}
+    result
+}
+indices=(xs:array<int> i:int count:int64<(>? 0)>):>int=>{
+    if i <? 0 or i >=? xs.length return 0
+    let source=fill(i count)
+    let out:array<int>=[]
+    out.extend(source)
+    xs[out[0]]
+}
+printl(copy(9) keys(["a"->10 "b"->20]) indices([4 8] 1 2))

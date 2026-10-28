@@ -1,0 +1,20 @@
+# A private array's scalar values survive callback-based permutations.
+small=(x:int64<0 <=? x and x <? 10>):>uint8=>{
+    let xs:array<int64>=[x 9 5]
+    xs.sort(key=(k:int64):>int=> -k)
+    let a=uint8(xs[0])
+    xs.sort(key=(k:int64):>int=>k)
+    let b=uint8(xs[0])
+    xs.sort_with((a:int64 b:int64):>bool=>a >? b)
+    let c=uint8(xs[0])
+    printl(a b c)
+    c
+}
+total=(d:dict<string int>):>int=>{
+    let keys=[d.keys...]
+    keys.sort(key=(k:string):>int=>k.length)
+    let result=0
+    loop key in keys {result+=d[key]}
+    result
+}
+printl(small(2) total(["b"->2 "aaa"->1]))
