@@ -1,0 +1,206 @@
+use 'ir_types.dewy'
+use 'opt_returns.dewy'
+struct DriverState:
+    ir: *IrFn
+    kc_fn: *int
+    rel_fns: *(IrFn[])
+    rel_by_index: *(int[])
+    lower_only: *bool
+    opt_release: *bool
+    dbg_on: *bool
+    watch_build: *bool
+    repl_image: *bool
+    host_ir: *bool
+    dump: *bool
+    target_wasm: *bool
+    target_arm64: *bool
+    fz_ready: *bool
+
+struct DriverHost:
+    optimize: () -> void
+    fast_inline_into: () -> void
+    fast_vectorize: () -> void
+    loop_versioning: () -> void
+    o_licm: (Ins[]) -> Ins[]
+    dump_host_ir: () -> void
+    dump_ir: () -> void
+    wasm_collect: () -> void
+    arm64_function: () -> void
+    x64_function: () -> void
+    inlinable: (IrFn) -> int
+    inline_into: (int, IrFn[], int[]) -> bool
+    fast_inline_prepare: (IrFn[]) -> void
+    emit_parallel: (IrFn[], bool[]) -> bool
+    fz_emit: (IrFn[]) -> void
+    ic_phase: (int) -> int
+    ic_lf: (int, int) -> int
+    ic_restore: (int) -> void
+    clock: () -> f64
+    release_timing: (f64, f64, f64) -> void
+    emit_timing: (f64) -> void
+
+driver_state: *DriverState
+driver_host: *DriverHost
+driver_bind = (state: *DriverState, host: *DriverHost) -> int:
+    driver_state = state
+    driver_host = host
+    0
+
+# (functions lowered, waiting for their machine code: emit_queued, after all are lowered, so
+# that the code can be made on several processors)
+emit_queue: IrFn[]
+emit_queue_rel: bool[]          # (a release function still to version and LICM: rel_finish)
+queue_emit = false
+
+emit_function = ():
+    if driver_state[0].lower_only[0]: return
+    if queue_emit:
+        emit_queue.push(driver_state[0].ir[0])
+        emit_queue_rel.push(false)
+        return
+    emit_now(false)
+
+# a release build's last passes over a function, before its code is made
+rel_finish = ():
+    driver_state[0].kc_fn[0] += 1
+    opt_ret_sink(driver_state[0].ir[0].code, driver_state[0].ir[0].vtypes, driver_state[0].ir[0].fn_index)
+    driver_host[0].loop_versioning()
+    driver_state[0].ir[0].code = driver_host[0].o_licm(driver_state[0].ir[0].code)
+
+emit_now = (finish: bool):
+    icb = driver_host[0].ic_phase(6)
+    if finish: rel_finish()
+    else if not driver_state[0].opt_release[0] and not driver_state[0].dbg_on[0]:
+        # Tiny leaves expand before the local pass; short array/float kernels
+        # also get vectorization. Debug builds retain original local locations.
+        driver_state[0].kc_fn[0] += 1
+        if not driver_state[0].watch_build[0] and not driver_state[0].repl_image[0]: driver_host[0].fast_inline_into()
+        driver_host[0].optimize()
+        if not driver_state[0].watch_build[0] and not driver_state[0].repl_image[0]: driver_host[0].fast_vectorize()
+    driver_host[0].ic_restore(icb)
+    if driver_state[0].host_ir[0]:
+        driver_host[0].dump_host_ir()
+        return
+    if driver_state[0].dump[0]: driver_host[0].dump_ir()
+    if driver_state[0].target_wasm[0]: driver_host[0].wasm_collect()
+    else if driver_state[0].target_arm64[0]: driver_host[0].arm64_function()
+    else: driver_host[0].x64_function()
+
+# release builds: optimize everything, inline small functions, optimize callers again, emit
+release_pipeline = ():
+    icb = driver_host[0].ic_phase(6)
+    rt0 = driver_host[0].clock()
+    loop k in [0..driver_state[0].rel_fns[0].len()):
+        driver_state[0].ir[0] = driver_state[0].rel_fns[0][k]
+        driver_state[0].kc_fn[0] += 1
+        driver_host[0].optimize()
+        driver_state[0].rel_fns[0][k] = driver_state[0].ir[0]
+    rt1 = driver_host[0].clock()
+    snap = driver_state[0].rel_fns[0]
+    can = fill(0, snap.len())
+    loop k in 0.. and f in snap: can[k] = driver_host[0].inlinable(f)
+    # callees before callers: a function is inlined with what it inlined itself (so whether it
+    # is small enough is judged by what it finally is)
+    loop k in callee_order(snap):
+        driver_state[0].ir[0] = snap[k]
+        driver_state[0].kc_fn[0] += 1
+        if driver_host[0].inline_into(k, snap, can):
+            driver_host[0].optimize()
+            snap[k] = driver_state[0].ir[0]
+            can[k] = driver_host[0].inlinable(driver_state[0].ir[0])
+    rt2 = driver_host[0].clock()
+    driver_host[0].ic_restore(icb)
+    loop k in [0..snap.len()):
+        driver_state[0].ir[0] = snap[k]
+        if queue_emit:
+            # (versioned and LICM'd with its code: where code is made in parallel, there too)
+            emit_queue.push(driver_state[0].ir[0])
+            emit_queue_rel.push(true)
+            continue
+        rel_finish()
+        emit_function()
+    driver_state[0].rel_fns[0] = []
+    driver_host[0].release_timing(rt0, rt1, rt2)
+
+# Inlining and constant folding can remove a lowered function's last caller.
+# Keep entry points, exports, and functions reached by calls or stored addresses.
+prune_emit_queue = (roots: int[], function_count: int):
+    by_index = fill(-1, function_count)
+    loop k in 0.. and f in emit_queue: by_index[f.fn_index] = k
+    live = fill(false, emit_queue.len())
+    todo = roots
+    loop f in emit_queue:
+        if len(f.export_name) > 0: todo.push(f.fn_index)
+    loop todo.len() > 0:
+        lf = todo.pop()
+        if lf < 0: continue
+        k = by_index[lf]
+        if k < 0 or live[k]: continue
+        live[k] = true
+        loop ins in emit_queue[k].code:
+            if ins.op == .call or ins.op == .faddr or ins.op == .checked_add or ins.op == .checked_sub or ins.op == .checked_mul: todo.push(int(ins.imm))
+    n = 0
+    loop k in [0..emit_queue.len()):
+        if not live[k]: continue
+        emit_queue[n] = emit_queue[k]
+        emit_queue_rel[n] = emit_queue_rel[k]
+        n += 1
+    emit_queue.truncate(n)
+    emit_queue_rel.truncate(n)
+
+# the machine code of the queued functions, in order
+emit_queued = ():
+    q = emit_queue
+    fin = emit_queue_rel
+    emit_queue = []
+    emit_queue_rel = []
+    queue_emit = false
+    if driver_state[0].fz_ready[0]:
+        driver_state[0].fz_ready[0] = false
+        driver_host[0].fz_emit(q)
+        return
+    if not driver_state[0].opt_release[0] and not driver_state[0].dbg_on[0]: driver_host[0].fast_inline_prepare(q)
+    if not driver_state[0].host_ir[0] and driver_host[0].emit_parallel(q, fin): return
+    t0 = driver_host[0].clock()
+    loop k in 0.. and f in q:
+        driver_state[0].ir[0] = f
+        icb = driver_host[0].ic_lf(7, f.fn_index)
+        emit_now(fin[k])
+        driver_host[0].ic_restore(icb)
+    driver_host[0].emit_timing(t0)
+
+# the functions in an order where each comes after the ones it calls (but in cycles)
+callee_order = (fs: IrFn[]) -> int[]:
+    n = fs.len()
+    state = fill(0, n)              # 0 not seen, 1 on the path, 2 placed
+    order: int[]
+    stack: int[]
+    next_ins: int[]                 # per stack entry: where to continue scanning its code
+    loop r in [0..n):
+        if state[r] != 0: continue
+        stack.push(r)
+        next_ins.push(0)
+        state[r] = 1
+        loop stack.len() > 0:
+            top = stack.len() - 1
+            k = stack[top]
+            fc = fs[k].code
+            i = next_ins[top]
+            child = -1
+            loop i < fc.len() and child < 0:
+                ins = fc[i]
+                i += 1
+                if ins.op == .call and ins.c != 1 and ins.imm < driver_state[0].rel_by_index[0].len():
+                    j = driver_state[0].rel_by_index[0][int(ins.imm)]
+                    if j >= 0 and state[j] == 0: child = j
+            next_ins[top] = i
+            if child >= 0:
+                state[child] = 1
+                stack.push(child)
+                next_ins.push(0)
+            else:
+                state[k] = 2
+                order.push(k)
+                stack.pop()
+                next_ins.pop()
+    order

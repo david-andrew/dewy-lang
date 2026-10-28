@@ -1,0 +1,258 @@
+$runtime_checks
+from p"ir_types.dewy" import (IrFn Ins)
+from p"opt_returns.dewy" import (opt_ret_sink)
+DriverWord:type=int64<overflow='wrap'>
+# Existing graph walks take O(functions + scanned instructions), indexed by
+# function ID; optimization work is demanded only by the original build policy.
+# Stable host places and coarse pass services; no per-instruction callbacks.
+# Callbacks may replace IR and grow its arrays. Borrow the header, never retain
+# an element pointer across a pass. Queue snapshots survive reentrant emission.
+DriverState:type=[
+    ir:ptr<IrFn>
+    kc_fn:ptr<int64>
+    rel_fns:ptr<array<IrFn>>
+    rel_by_index:ptr<array<int64>>
+    lower_only:ptr<bool>
+    opt_release:ptr<bool>
+    dbg_on:ptr<bool>
+    watch_build:ptr<bool>
+    repl_image:ptr<bool>
+    host_ir:ptr<bool>
+    dump:ptr<bool>
+    target_wasm:ptr<bool>
+    target_arm64:ptr<bool>
+    fz_ready:ptr<bool>
+]
+DriverHost:type=[
+    optimize:<():>void>
+    fast_inline_into:<():>void>
+    fast_vectorize:<():>void>
+    loop_versioning:<():>void>
+    o_licm:<(a0:array<Ins>):>array<Ins>>
+    dump_host_ir:<():>void>
+    dump_ir:<():>void>
+    wasm_collect:<():>void>
+    arm64_function:<():>void>
+    x64_function:<():>void>
+    inlinable:<(a0:IrFn):>int64>
+    inline_into:<(a0:int64 a1:array<IrFn> a2:array<int64>):>bool>
+    fast_inline_prepare:<(a0:array<IrFn>):>void>
+    emit_parallel:<(a0:array<IrFn> a1:array<bool>):>bool>
+    fz_emit:<(a0:array<IrFn>):>void>
+    ic_phase:<(a0:int64):>int64>
+    ic_lf:<(a0:int64 a1:int64):>int64>
+    ic_restore:<(a0:int64):>void>
+    clock:<():>float64>
+    release_timing:<(a0:float64 a1:float64 a2:float64):>void>
+    emit_timing:<(a0:float64):>void>
+]
+let driver_state:ptr<DriverState>=$unsafe (uint64(0) as ptr<DriverState>)
+let driver_host:ptr<DriverHost>=$unsafe (uint64(0) as ptr<DriverHost>)
+driver_bind=(state:ptr<DriverState> host:ptr<DriverHost>):>int64=>$unsafe {
+    driver_state = state
+    driver_host = host
+    0
+}
+let emit_queue:array<IrFn>=[]
+let emit_queue_rel:array<bool>=[]
+let queue_emit = false
+emit_function=():>void=>$unsafe {
+    if driver_state[0].lower_only[0] {
+        return
+    }
+    if queue_emit {
+        emit_queue.push(driver_state[0].ir[0])
+        emit_queue_rel.push(false)
+        return
+    }
+    emit_now(false)
+}
+rel_finish=():>void=>$unsafe {
+    driver_state[0].kc_fn[0] += 1
+    opt_ret_sink(@driver_state[0].ir[0].code  @driver_state[0].ir[0].vtypes  driver_state[0].ir[0].fn_index)
+    driver_host[0].loop_versioning()
+    driver_state[0].ir[0].code = driver_host[0].o_licm(driver_state[0].ir[0].code)
+}
+emit_now=(finish:bool):>void=>$unsafe {
+    let icb=driver_host[0].ic_phase(6)
+    if finish {
+        rel_finish()
+    }
+    else if not driver_state[0].opt_release[0] and not driver_state[0].dbg_on[0] {
+        driver_state[0].kc_fn[0] += 1
+        if not driver_state[0].watch_build[0] and not driver_state[0].repl_image[0] {
+            driver_host[0].fast_inline_into()
+        }
+        driver_host[0].optimize()
+        if not driver_state[0].watch_build[0] and not driver_state[0].repl_image[0] {
+            driver_host[0].fast_vectorize()
+        }
+    }
+    driver_host[0].ic_restore(icb)
+    if driver_state[0].host_ir[0] {
+        driver_host[0].dump_host_ir()
+        return
+    }
+    if driver_state[0].dump[0] {
+        driver_host[0].dump_ir()
+    }
+    if driver_state[0].target_wasm[0] {
+        driver_host[0].wasm_collect()
+    }
+    else if driver_state[0].target_arm64[0] {
+        driver_host[0].arm64_function()
+    }
+    else {
+        driver_host[0].x64_function()
+    }
+}
+release_pipeline=():>void=>$unsafe {
+    let icb=driver_host[0].ic_phase(6)
+    let rt0:float64=driver_host[0].clock()
+    loop k in [0..driver_state[0].rel_fns[0].length) {
+        driver_state[0].ir[0] = driver_state[0].rel_fns[0][k]
+        driver_state[0].kc_fn[0] += 1
+        driver_host[0].optimize()
+        driver_state[0].rel_fns[0][k] = driver_state[0].ir[0]
+    }
+    let rt1:float64=driver_host[0].clock()
+    let snap=driver_state[0].rel_fns[0]
+    let can:array<int64>=fill(int64(0) snap.length)
+    loop k in 0.. and f in snap {
+        can[k] = driver_host[0].inlinable(f)
+    }
+    loop k in callee_order(snap) {
+        driver_state[0].ir[0] = snap[k]
+        driver_state[0].kc_fn[0] += 1
+        if driver_host[0].inline_into(k  snap  can) {
+            driver_host[0].optimize()
+            snap[k] = driver_state[0].ir[0]
+            can[k] = driver_host[0].inlinable(driver_state[0].ir[0])
+        }
+    }
+    let rt2:float64=driver_host[0].clock()
+    driver_host[0].ic_restore(icb)
+    loop k in [0..snap.length) {
+        driver_state[0].ir[0] = snap[k]
+        if queue_emit {
+            emit_queue.push(driver_state[0].ir[0])
+            emit_queue_rel.push(true)
+            continue
+        }
+        rel_finish()
+        emit_function()
+    }
+    driver_state[0].rel_fns[0] = []
+    driver_host[0].release_timing(rt0  rt1  rt2)
+}
+prune_emit_queue=(roots:array<int64> function_count:int64):>void=>$unsafe {
+    let by_index:array<int64>=fill(int64(-1) function_count)
+    loop k in 0.. and f in emit_queue {
+        by_index[f.fn_index] = k
+    }
+    let live=fill(false  emit_queue.length)
+    let todo=roots
+    loop f in emit_queue {
+        if f.export_name not=? "" {
+            todo.push(f.fn_index)
+        }
+    }
+    loop todo.length >? 0 {
+        let lf=todo.pop()
+        if lf <? 0 {
+            continue
+        }
+        let k=by_index[lf]
+        if k <? 0 or live[k] {
+            continue
+        }
+        live[k] = true
+        loop ins in emit_queue[k].code {
+            if ins.op =? 'call' or ins.op =? 'faddr' or ins.op =? 'checked_add' or ins.op =? 'checked_sub' or ins.op =? 'checked_mul' {
+                todo.push(DriverWord(ins.imm))
+            }
+        }
+    }
+    let n:DriverWord=0
+    loop k in [0..emit_queue.length) {
+        if not live[k] {
+            continue
+        }
+        emit_queue[n] = emit_queue[k]
+        emit_queue_rel[n] = emit_queue_rel[k]
+        n += 1
+    }
+    emit_queue.truncate(n)
+    emit_queue_rel.truncate(n)
+}
+emit_queued=():>void=>$unsafe {
+    let q=emit_queue
+    let fin=emit_queue_rel
+    emit_queue = []
+    emit_queue_rel = []
+    queue_emit = false
+    if driver_state[0].fz_ready[0] {
+        driver_state[0].fz_ready[0] = false
+        driver_host[0].fz_emit(q)
+        return
+    }
+    if not driver_state[0].opt_release[0] and not driver_state[0].dbg_on[0] {
+        driver_host[0].fast_inline_prepare(q)
+    }
+    if not driver_state[0].host_ir[0] and driver_host[0].emit_parallel(q  fin) {
+        return
+    }
+    let t0=driver_host[0].clock()
+    loop k in 0.. and f in q {
+        driver_state[0].ir[0] = f
+        let icb=driver_host[0].ic_lf(7  f.fn_index)
+        emit_now(fin[k])
+        driver_host[0].ic_restore(icb)
+    }
+    driver_host[0].emit_timing(t0)
+}
+callee_order=(fs:array<IrFn>):>array<int64>=>$unsafe {
+    let n=fs.length
+    let state:array<int64>=fill(int64(0) n)
+    let order:array<int64>=[]
+    let stack:array<int64>=[]
+    let next_ins:array<int64>=[]
+    loop r in [0..n) {
+        if state[r] not=? 0 {
+            continue
+        }
+        stack.push(r)
+        next_ins.push(0)
+        state[r] = 1
+        loop stack.length >? 0 {
+            let top=stack.length - 1
+            let k=stack[top]
+            let fc=fs[k].code
+            let i=next_ins[top]
+            let child:DriverWord=-1
+            loop i <? fc.length and child <? 0 {
+                let ins=fc[i]
+                i += 1
+                if ins.op =? 'call' and ins.c not=? 1 and ins.imm <? driver_state[0].rel_by_index[0].length {
+                    let j=driver_state[0].rel_by_index[0][DriverWord(ins.imm)]
+                    if j >=? 0 and state[j] =? 0 {
+                        child = j
+                    }
+                }
+            }
+            next_ins[top] = i
+            if child >=? 0 {
+                state[child] = 1
+                stack.push(child)
+                next_ins.push(0)
+            }
+            else {
+                state[k] = 2
+                order.push(k)
+                stack.pop();
+                next_ins.pop();
+            }
+        }
+    }
+    order
+}

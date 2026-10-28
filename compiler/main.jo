@@ -1,3 +1,4 @@
+use 'driver_pipeline.dewy'
 use 'x64_allocate.dewy'
 use 'ir_types.dewy'
 use 'errors.jo'
@@ -273,45 +274,14 @@ img_text_addr = 0
 img_ro_addr = 0
 img_data_addr = 0
 
-# (functions lowered, waiting for their machine code: emit_queued, after all are lowered, so
-# that the code can be made on several processors)
-emit_queue: IrFn[]
-emit_queue_rel: bool[]          # (a release function still to version and LICM: rel_finish)
-queue_emit = false
-
-emit_function = ():
-    if lower_only: return
-    if queue_emit:
-        emit_queue.push(ir)
-        emit_queue_rel.push(false)
-        return
-    emit_now(false)
-
-# a release build's last passes over a function, before its code is made
-rel_finish = ():
-    kc_fn += 1
-    opt_ret_sink(ir.code, ir.vtypes, ir.fn_index)
-    loop_versioning()
-    ir.code = o_licm(ir.code)
-
-emit_now = (finish: bool):
-    icb = ic_phase(IC_OPT)
-    if finish: rel_finish()
-    else if not opt_release and not dbg_on:
-        # Tiny leaves expand before the local pass; short array/float kernels
-        # also get vectorization. Debug builds retain original local locations.
-        kc_fn += 1
-        if not watch_build and not repl_image: fast_inline_into()
-        optimize()
-        if not watch_build and not repl_image: fast_vectorize()
-    ic_restore(icb)
-    if host_ir:
-        dump_host_ir()
-        return
-    if dump: dump_ir()
-    if target_wasm: wasm_collect()
-    else if target_arm64: arm64_function()
-    else: x64_function()
+driver_release_timing = (rt0: f64, rt1: f64, rt2: f64):
+    if env("DEWY_PAR_TIME") != none: eprint("release: optimize {(rt1 - rt0) * 1000.0:.1} ms, inline {(rt2 - rt1) * 1000.0:.1} ms, versioning and licm {(time() - rt2) * 1000.0:.1} ms")
+driver_emit_timing = (t0: f64):
+    if env("DEWY_PAR_TIME") != none: eprint("emit: here, {(time() - t0) * 1000.0:.1} ms")
+driver_context = DriverState(&ir, &kc_fn, &rel_fns, &rel_by_index, &lower_only, &opt_release, &dbg_on, &watch_build, &repl_image, &host_ir, &dump, &target_wasm, &target_arm64, &fz_ready)
+driver_version = (): loop_versioning()
+driver_services = DriverHost(optimize, fast_inline_into, fast_vectorize, driver_version, o_licm, dump_host_ir, dump_ir, wasm_collect, arm64_function, x64_function, inlinable, inline_into, fast_inline_prepare, emit_parallel, fz_emit, ic_phase, ic_lf, ic_restore, time, driver_release_timing, driver_emit_timing)
+driver_binding = driver_bind(&driver_context, &driver_services)
 
 # Versioned build-tool interchange, not a public program backend. Export after
 # the ordinary scalar optimization passes; unknown operations fail in c_host.py.
@@ -331,125 +301,6 @@ dump_host_ir = ():
     dump_host_values("ARGS", ir.args)
     loop x in ir.code: print("I {x.op} {x.ty} {x.dst} {x.a} {x.b} {x.c} {x.imm}")
     print("END")
-
-# release builds: optimize everything, inline small functions, optimize callers again, emit
-release_pipeline = ():
-    icb = ic_phase(IC_OPT)
-    rt0 = time()
-    loop k in [0..rel_fns.len()):
-        ir = rel_fns[k]
-        kc_fn += 1
-        optimize()
-        rel_fns[k] = ir
-    rt1 = time()
-    snap = rel_fns
-    can = fill(0, snap.len())
-    loop k in 0.. and f in snap: can[k] = inlinable(f)
-    # callees before callers: a function is inlined with what it inlined itself (so whether it
-    # is small enough is judged by what it finally is)
-    loop k in callee_order(snap):
-        ir = snap[k]
-        kc_fn += 1
-        if inline_into(k, snap, can):
-            optimize()
-            snap[k] = ir
-            can[k] = inlinable(ir)
-    rt2 = time()
-    ic_restore(icb)
-    loop k in [0..snap.len()):
-        ir = snap[k]
-        if queue_emit:
-            # (versioned and LICM'd with its code: where code is made in parallel, there too)
-            emit_queue.push(ir)
-            emit_queue_rel.push(true)
-            continue
-        rel_finish()
-        emit_function()
-    rel_fns = []
-    if env("DEWY_PAR_TIME") != none: eprint("release: optimize {(rt1 - rt0) * 1000.0:.1} ms, inline {(rt2 - rt1) * 1000.0:.1} ms, versioning and licm {(time() - rt2) * 1000.0:.1} ms")
-
-# Inlining and constant folding can remove a lowered function's last caller.
-# Keep entry points, exports, and functions reached by calls or stored addresses.
-prune_emit_queue = (roots: int[]):
-    by_index = fill(-1, lfuncs.len())
-    loop k in 0.. and f in emit_queue: by_index[f.fn_index] = k
-    live = fill(false, emit_queue.len())
-    todo = roots
-    loop f in emit_queue:
-        if len(f.export_name) > 0: todo.push(f.fn_index)
-    loop todo.len() > 0:
-        lf = todo.pop()
-        if lf < 0: continue
-        k = by_index[lf]
-        if k < 0 or live[k]: continue
-        live[k] = true
-        loop ins in emit_queue[k].code:
-            if ins.op == .call or ins.op == .faddr or ins.op == .checked_add or ins.op == .checked_sub or ins.op == .checked_mul: todo.push(int(ins.imm))
-    n = 0
-    loop k in [0..emit_queue.len()):
-        if not live[k]: continue
-        emit_queue[n] = emit_queue[k]
-        emit_queue_rel[n] = emit_queue_rel[k]
-        n += 1
-    emit_queue.truncate(n)
-    emit_queue_rel.truncate(n)
-
-# the machine code of the queued functions, in order
-emit_queued = ():
-    q = emit_queue
-    fin = emit_queue_rel
-    emit_queue = []
-    emit_queue_rel = []
-    queue_emit = false
-    if fz_ready:
-        fz_ready = false
-        fz_emit(q)
-        return
-    if not opt_release and not dbg_on: fast_inline_prepare(q)
-    if not host_ir and emit_parallel(q, fin): return
-    t0 = time()
-    loop k in 0.. and f in q:
-        ir = f
-        icb = ic_lf(IC_EMIT, f.fn_index)
-        emit_now(fin[k])
-        ic_restore(icb)
-    if env("DEWY_PAR_TIME") != none: eprint("emit: here, {(time() - t0) * 1000.0:.1} ms")
-
-# the functions in an order where each comes after the ones it calls (but in cycles)
-callee_order = (fs: IrFn[]) -> int[]:
-    n = fs.len()
-    state = fill(0, n)              # 0 not seen, 1 on the path, 2 placed
-    order: int[]
-    stack: int[]
-    next_ins: int[]                 # per stack entry: where to continue scanning its code
-    loop r in [0..n):
-        if state[r] != 0: continue
-        stack.push(r)
-        next_ins.push(0)
-        state[r] = 1
-        loop stack.len() > 0:
-            top = stack.len() - 1
-            k = stack[top]
-            fc = fs[k].code
-            i = next_ins[top]
-            child = -1
-            loop i < fc.len() and child < 0:
-                ins = fc[i]
-                i += 1
-                if ins.op == .call and ins.c != 1 and ins.imm < rel_by_index.len():
-                    j = rel_by_index[int(ins.imm)]
-                    if j >= 0 and state[j] == 0: child = j
-            next_ins[top] = i
-            if child >= 0:
-                state[child] = 1
-                stack.push(child)
-                next_ins.push(0)
-            else:
-                state[k] = 2
-                order.push(k)
-                stack.pop()
-                next_ins.pop()
-    order
 
 # Count physical source lines, including comments and blank lines. Loaded
 # library bodies may remain lazy, so this is input volume, not checked LOC.
@@ -648,7 +499,7 @@ compile = (path: str, out0: str) -> str:
     if opt_release: release_pipeline()
     if queue_emit:
         if opt_release and not watch_build and not repl_image:
-            prune_emit_queue(roots + [main_lf, main_exit_lf, entry_end_lf])
+            prune_emit_queue(roots + [main_lf, main_exit_lf, entry_end_lf], lfuncs.len())
         emit_queued()
     t2 = time()
     ic_switch(IC_OTHER, IC_SHARED)
