@@ -1,0 +1,1087 @@
+$runtime_checks
+
+# Complete MSF/PDB and CodeView construction. Shared debug metadata comes
+# from the same borrowed headers and growth-safe services as DWARF.
+from p"elf_format.dewy" import (elf_append_bytes elf_syms put16 put32 put64)
+from p"module_paths.dewy" import (is_abs_path)
+from p"dwarf_format.dewy" import (DL_CONST DL_MEM DL_MEMAT DL_REG DW_BOX DW_BOXP DW_BYTE DW_FLEX DW_HDR DW_LONG DW_PTR DW_STRHDR DW_STRPTR DW_TAGS DW_VARIANT DW_VOIDP dbg_vars dw_align_up dw_inputs dw_pos_file dw_prune dw_talign dw_targ dw_tkind dw_tsize)
+PWord:type=int64<overflow='wrap'>
+const PDB_BLOCK=4096
+
+# (sloppy build -g: the type records, below)
+let cv_tpi:array<uint8>=[]
+let cv_hash:array<int64>=[] # each record's hash, into 0x3FFFF buckets
+let cv_offs:array<int64>=[] # where each starts in cv_tpi
+let cv_memo:dict<int64 int64>=[] # a type -> its index
+let cv_busy:dict<int64 int64>=[] # structs being written -> their forward reference (0: none yet)
+let cv_crc_table:array<int64>=[]
+
+# hashStringV1 (Microsoft's LHashPbCb): the hash of names in /names and of symbols
+pdb_hash=(s:string):>PWord=>$unsafe {
+    let r:PWord=0
+    let n=PWord((s as array<uint8>).length)
+    let i:PWord=0
+    loop i + 4 <=? n {
+        r=r xor(PWord((s as array<uint8>)[i]) | (PWord((s as array<uint8>)[i + 1]) << 8) | (PWord((s as array<uint8>)[i + 2]) << 16) | (PWord((s as array<uint8>)[i + 3]) << 24))
+        i += 4
+    }
+    if n - i >=? 2 {
+        r=r xor(PWord((s as array<uint8>)[i]) | (PWord((s as array<uint8>)[i + 1]) << 8))
+        i += 2
+    }
+    if n - i =? 1 {r=r xor PWord((s as array<uint8>)[i])}
+    r=r | 0x20202020
+    r=r xor(r >> 11)
+    (r xor(r >> 16)) & 0xFFFFFFFF
+}
+
+# what the program's debug directory names: the PDB's file name (debuggers look for it beside
+# the program; a full path would make the same program differ by where it was built)
+pdb_name=(path:string):>string=>$unsafe {
+    let bytes=path as array<uint8>
+    let i=PWord(bytes.length) - 1
+    loop i >=? 0 and bytes[i] not=? 47 {i -= 1}
+    if i >=? 0 {return path.byte_slice(i + 1 bytes.length)}
+    path
+}
+pdb_cstr=(@out:array<uint8> s:string):>void=>$unsafe {
+    loop c in (s as array<uint8>) {out.push(c)}
+    out.push(0)
+}
+pdb_align4=(@out:array<uint8>):>void=>$unsafe {
+    loop PWord(out.length) % 4 not=? 0 {out.push(0)}
+}
+
+# a symbol record: its length, kind and body, padded to 4 bytes
+pdb_record=(@out:array<uint8> kind:PWord body:array<uint8>):>void=>$unsafe {
+    let pad=(4 - (PWord(body.length) + 4) % 4) % 4
+    put16(@out  PWord(body.length) + 2 + pad)
+    put16(@out  kind)
+    elf_append_bytes(@out  body)
+    loop i in [0..pad) {out.push(0)}
+}
+
+# a string table (/names, and the DBI's EC names): header, the strings, a hash table of their
+# offsets, the count; offsets of the strings given
+PdbStrings:type=[
+    bytes:array<uint8>=[]
+    offsets:dict<string int64>=[]
+    names:array<string>=[]
+]
+pdb_strings=():>PdbStrings=>$unsafe {
+    let t=PdbStrings[]
+    t.bytes.push(0)
+    t
+}
+pdb_string=(@t:PdbStrings s:string):>PWord=>$unsafe {
+    let found=t.offsets.get(s)
+    if found isnt? none {return found}
+    let o=PWord(t.bytes.length)
+    pdb_cstr(@t.bytes  s)
+    t.offsets[s] = o
+    t.names.push(s)
+    o
+}
+pdb_string_table=(t:PdbStrings):>array<uint8>=>$unsafe {
+    let out:array<uint8>=[]
+    put32(@out  0xEFFEEFFE)
+    put32(@out  1) # hash version
+    put32(@out  PWord(t.bytes.length))
+    elf_append_bytes(@out  t.bytes)
+    let nb=max(1  PWord(t.names.length) * 2)
+    let buckets=fill(0  nb)
+    loop s in t.names {
+        let h=pdb_hash(s) % nb
+        loop buckets[h] not=? 0 {h=(h + 1) % nb}
+        buckets[h] = t.offsets[s]
+    }
+    put32(@out  nb)
+    loop b in buckets {put32(@out  b)}
+    put32(@out  PWord(t.names.length))
+    out
+}
+
+# the TPI and IPI streams' header, for no records
+pdb_types=():>array<uint8>=>$unsafe {
+    let out:array<uint8>=[]
+    put32(@out  20040203) # V80
+    put32(@out  56)
+    put32(@out  0x1000)
+    put32(@out  0x1000)
+    put32(@out  0)
+    put16(@out  0xFFFF) # no hash stream
+    put16(@out  0xFFFF)
+    put32(@out  4)
+    put32(@out  0x3FFFF)
+    loop i in [0..6) {put32(@out  0)}
+    out
+}
+
+# a GSI hash (globals, publics): the records (offsets into the symbol records + 1) by bucket,
+# a bitmap of the buckets used, where each starts
+pdb_gsi=(syms:array<[string int64]>):>array<uint8>=>$unsafe {
+    let nb:PWord=4096
+    let by:array<[int64 string int64]>=[]
+    # (within a bucket: shorter names first, then without regard to case)
+    loop s in syms {by.push([pdb_hash(s[0]) % nb  "{(s[0] as array<uint8>).length:8}{s[0].lower()}"  s[1]])}
+    by.sort(key=(x:[int64 string int64]):>int64=>x[0])
+    # (each bucket's run sorted)
+    let k:PWord=0
+    loop k <? PWord(by.length) {
+        let e=k
+        loop e <? PWord(by.length) and by[e][0] =? by[k][0] {e += 1}
+        let run=by[k..e)
+        run.sort(key=(x:[int64 string int64]):>string=>x[1])
+        loop j in [k..e) {by[j] = run[j - k]}
+        k=e
+    }
+    let out:array<uint8>=[]
+    put32(@out  0xFFFFFFFF)
+    put32(@out  0xEFFE0000 + 19990810)
+    put32(@out  8 * PWord(by.length))
+    let words=(nb + 32) // 32
+    let starts:array<int64>=[]
+    let bitmap=fill(0  words)
+    loop i in [PWord(0)..PWord(PWord(by.length))) {
+        let x=by[i]
+
+        if i =? 0 or by[i - 1][0] not=? x[0] {
+            bitmap[x[0] // 32] = bitmap[x[0] // 32] | (PWord(1) << (x[0] % 32))
+            starts.push(i * 12)
+        }
+    }
+    put32(@out  4 * words + 4 * PWord(starts.length))
+    loop x in by {
+        put32(@out  x[2] + 1)
+        put32(@out  1)
+    }
+    loop w in bitmap {put32(@out  w)}
+    loop s in starts {put32(@out  s)}
+    out
+}
+
+# the 128-bit GUID and the signature (a hash of the code: the same program, the same PDB)
+pdb_guid=(text:array<uint8>):>array<uint8>=>$unsafe {
+    let h1:PWord=0x6A09E667F3BCC908
+    let h2:PWord=0x3C6EF372FE94F82B
+    loop i in [0..PWord(text.length)) {
+        h1=(h1 xor PWord(text[i])) * 0x100000001B3
+        h2=(h2 + PWord(text[i]) + 1) * 0x5851F42D4C957F2D
+    }
+    let out:array<uint8>=[]
+    put64(@out  h1)
+    put64(@out  h2 xor PWord(text.length))
+    out
+}
+
+# write the PDB for the code just compiled (functions: elf_syms; lines: line_rows; sections:
+# their headers as in the program)
+pdb_image=(guid:array<uint8> text_len:PWord sections:array<uint8> main_path:string producer:string dir:string):>array<uint8>=>$unsafe {
+    let abs=(p:string):>string=>{
+        let q=p
+        if not is_abs_path(q) {q="{dir}/{q}"}
+        q.replace("/" "\\")
+    }
+    let strtab=pdb_strings()
+    # the source files: their strtab in /strtab, a checksum entry each (no checksum)
+    let fidx=fill(-1  PWord(dw_inputs[0].files[0].length))
+    let file_names:array<string>=[]
+    let chk:array<uint8>=[]
+    let k:PWord=0
+    loop k <? PWord(dw_inputs[0].line_rows[0].length) {
+        if dw_inputs[0].line_rows[0].ptr[k + 1] not=? 0 {
+            let f=dw_pos_file(dw_inputs[0].ir_positions[0].ptr[dw_inputs[0].line_rows[0].ptr[k + 1]])
+            if f >=? 0 and f <? PWord(dw_inputs[0].files[0].length) and fidx[f] <? 0 {
+                fidx[f] = PWord(chk.length)
+                let nm=abs(dw_inputs[0].files[0].ptr[f].path)
+                file_names.push(nm)
+                put32(@chk  pdb_string(@strtab  nm))
+                put32(@chk  0) # checksum size and kind: none
+            }
+        }
+        k += 2
+    }
+    # the module's symbols: a compile record, then a procedure (and its end) per function
+    let msyms:array<uint8>=[]
+    put32(@msyms  4) # C13
+    let ob:array<uint8>=[]
+    put32(@ob  0)
+    pdb_cstr(@ob  abs(main_path))
+    pdb_record(@msyms  0x1101  ob) # S_OBJNAME
+    let cp:array<uint8>=[]
+    put32(@cp  1) # language: C++ (the closest a debugger knows)
+    put16(@cp  0xD0) # x64
+    loop i in [0..8) {put16(@cp  0)} # front and back end versions
+    pdb_cstr(@cp  producer)
+    pdb_record(@msyms  0x113C  cp) # S_COMPILE3
+    let order:array<int64>=[]
+    loop i in [0..PWord(elf_syms.length)) {order.push(i)}
+    order.sort(key=(i:int64):>int64=>elf_syms[i][1])
+    let pfns:array<[string int64 int64]>=[]
+    loop i in order {pfns.push(elf_syms[i])}
+    # (sloppy build -g: each function's variables, dbg_raw)
+    cv_tpi=[]
+    cv_hash=[]
+    cv_offs=[]
+    cv_memo=[]
+    cv_busy=[]
+    let dbg_at=fill(-1  PWord(elf_syms.length))
+    k=0
+    loop k <? PWord(dw_inputs[0].dbg_raw[0].length) {
+        dbg_at[dw_inputs[0].dbg_raw[0].ptr[k]] = k
+        k += 5 + 6 * dw_inputs[0].dbg_raw[0].ptr[k + 4]
+    }
+    # (a function's type, for debuggers that want one: void (), its parameters are its S_LOCALs)
+    let proc_type:PWord=0
+    if PWord(dw_inputs[0].dbg_raw[0].length) >? 0 {
+        let al:array<uint8>=[]
+        put32(@al  0)
+        let pt:array<uint8>=[]
+        put32(@pt  0x0003)
+        pt.push(0) # near C
+        pt.push(0)
+        put16(@pt  0)
+        put32(@pt  cv_rec(0x1201  al  "")) # LF_ARGLIST
+        proc_type=cv_rec(0x1008  pt  "") # LF_PROCEDURE
+    }
+    let proc_at:array<int64>=[]
+    loop j in [PWord(0)..PWord(PWord(pfns.length))) {
+        let s=pfns[j]
+
+        let at=PWord(msyms.length)
+        proc_at.push(at)
+        let body:array<uint8>=[]
+        put32(@body  0) # parent
+        let end_at=PWord(body.length)
+        put32(@body  0) # end (below)
+        put32(@body  0) # next
+        put32(@body  s[2]) # code size
+        put32(@body  0) # debug start, end
+        put32(@body  s[2])
+        put32(@body  proc_type) # type (-g)
+        put32(@body  s[1]) # offset in .text
+        put16(@body  1) # section
+        body.push(1) # flags: a frame pointer
+        pdb_cstr(@body  s[0])
+        pdb_record(@msyms  0x1110  body) # S_GPROC32
+        if dbg_at[order[j]] >=? 0 {cv_locals(@msyms  dbg_at[order[j]])}
+        let e=PWord(msyms.length)
+        put32_at(@msyms  at + 4 + end_at  e)
+        pdb_record(@msyms  0x0006  []) # S_END
+    }
+    # the lines: per function, its rows by file (each line a statement)
+    let lines:array<uint8>=[]
+    pdb_subsection(@lines  0xF4  chk) # DEBUG_S_FILECHKSMS
+    let rows:PWord=0
+    loop s in pfns {
+        let lo=s[1]
+        let hi=s[1] + s[2]
+        loop rows <? PWord(dw_inputs[0].line_rows[0].length) and dw_inputs[0].line_rows[0].ptr[rows] <? lo {rows += 2}
+        let blocks:array<uint8>=[]
+        let cur:PWord=-1
+        let ents:array<uint8>=[]
+        let n:PWord=0
+        let last_line:PWord=-1
+        let r=rows
+        loop r <? PWord(dw_inputs[0].line_rows[0].length) and dw_inputs[0].line_rows[0].ptr[r] <? hi {
+            if dw_inputs[0].line_rows[0].ptr[r + 1] not=? 0 {
+                let p=dw_inputs[0].ir_positions[0].ptr[dw_inputs[0].line_rows[0].ptr[r + 1]]
+                let f=dw_pos_file(p)
+                if f >=? 0 and f <? PWord(dw_inputs[0].files[0].length) and fidx[f] >=? 0 {
+                    let l=dw_inputs[0].host[0].ir_line(dw_inputs[0].line_rows[0].ptr[r + 1])
+                    if fidx[f] not=? cur {
+                        pdb_line_block(@blocks  cur  n  ents)
+                        cur=fidx[f]
+                        ents=[]
+                        n=0
+                        last_line=-1
+                    }
+                    if l not=? last_line {
+                        put32(@ents  dw_inputs[0].line_rows[0].ptr[r] - lo)
+                        put32(@ents  0x80000000 | (l & 0xFFFFFF))
+                        n += 1
+                        last_line=l
+                    }
+                }
+            }
+            r += 2
+        }
+        pdb_line_block(@blocks  cur  n  ents)
+        if PWord(blocks.length) =? 0 {continue}
+        let sub:array<uint8>=[]
+        put32(@sub  lo)
+        put16(@sub  1)
+        put16(@sub  0) # no columns
+        put32(@sub  s[2])
+        elf_append_bytes(@sub  blocks)
+        pdb_subsection(@lines  0xF2  sub) # DEBUG_S_LINES
+    }
+    let module:array<uint8>=[]
+    elf_append_bytes(@module  msyms)
+    elf_append_bytes(@module  lines)
+    put32(@module  0) # global references: none
+    # the symbol records: a public and a reference to the procedure per function
+    let recs:array<uint8>=[]
+    let pubs:array<[string int64]>=[]
+    let globs:array<[string int64]>=[]
+    let addr_map:array<int64>=[]
+    loop i in [PWord(0)..PWord(PWord(pfns.length))) {
+        let s=pfns[i]
+
+        pubs.push([s[0]  PWord(recs.length)])
+        addr_map.push(PWord(recs.length))
+        let pb:array<uint8>=[]
+        put32(@pb  2) # a function
+        put32(@pb  s[1])
+        put16(@pb  1)
+        pdb_cstr(@pb  s[0])
+        pdb_record(@recs  0x110E  pb) # S_PUB32
+        globs.push([s[0]  PWord(recs.length)])
+        let rb:array<uint8>=[]
+        put32(@rb  0)
+        put32(@rb  proc_at[i])
+        put16(@rb  1) # module 1 (counting from 1)
+        pdb_cstr(@rb  s[0])
+        pdb_record(@recs  0x1125  rb) # S_PROCREF
+    }
+    let gsi=pdb_gsi(globs)
+    let pgsi=pdb_gsi(pubs)
+    let publics:array<uint8>=[]
+    put32(@publics  PWord(pgsi.length))
+    put32(@publics  4 * PWord(addr_map.length))
+    loop i in [0..5) {put32(@publics  0)} # thunks, sections: none
+    elf_append_bytes(@publics  pgsi)
+    loop a in addr_map {put32(@publics  a)} # (by address: pfns are)
+    # DBI: the module, the contribution of .text, the section map, the files
+    let sc:array<uint8>=[]
+    put16(@sc  1)
+    put16(@sc  0)
+    put32(@sc  0)
+    put32(@sc  text_len)
+    put32(@sc  0x60000020)
+    put16(@sc  0)
+    put16(@sc  0)
+    put32(@sc  0)
+    put32(@sc  0)
+    let mi:array<uint8>=[]
+    put32(@mi  0)
+    elf_append_bytes(@mi  sc)
+    put16(@mi  0) # flags
+    put16(@mi  5) # its symbols' stream
+    put32(@mi  PWord(msyms.length))
+    put32(@mi  0) # C11 lines
+    put32(@mi  PWord(lines.length))
+    put16(@mi  PWord(file_names.length))
+    put16(@mi  0)
+    put32(@mi  0)
+    put32(@mi  0)
+    put32(@mi  0)
+    pdb_cstr(@mi  abs(main_path))
+    pdb_cstr(@mi  abs(main_path))
+    pdb_align4(@mi)
+    let contrib:array<uint8>=[]
+    put32(@contrib  0xEFFE0000 + 19970605)
+    elf_append_bytes(@contrib  sc)
+    let nsec=PWord(sections.length) // 40
+    let secmap:array<uint8>=[]
+    put16(@secmap  nsec + 1)
+    put16(@secmap  nsec + 1)
+    loop i in [0..nsec) {
+        let ch=__u32_le(sections  40 * i + 36)
+        let fl:PWord=0x108 # a selector, 32-bit addresses
+        if ch & 0x40000000 not=? 0 {fl=fl | 1}
+        if ch & 0x80000000 not=? 0 {fl=fl | 2}
+        if ch & 0x20000000 not=? 0 {fl=fl | 4}
+        put16(@secmap  fl)
+        put16(@secmap  0)
+        put16(@secmap  0)
+        put16(@secmap  i + 1)
+        put16(@secmap  0xFFFF)
+        put16(@secmap  0xFFFF)
+        put32(@secmap  0)
+        put32(@secmap  __u32_le(sections  40 * i + 8))
+    }
+    put16(@secmap  0x208) # the absolute "section"
+    put16(@secmap  0)
+    put16(@secmap  0)
+    put16(@secmap  nsec + 1)
+    put16(@secmap  0xFFFF)
+    put16(@secmap  0xFFFF)
+    put32(@secmap  0)
+    put32(@secmap  0xFFFFFFFF)
+    let finfo:array<uint8>=[]
+    put16(@finfo  1)
+    put16(@finfo  PWord(file_names.length))
+    put16(@finfo  0)
+    put16(@finfo  PWord(file_names.length))
+    let fbuf:array<uint8>=[]
+    loop nm in file_names {
+        put32(@finfo  PWord(fbuf.length))
+        pdb_cstr(@fbuf  nm)
+    }
+    elf_append_bytes(@finfo  fbuf)
+    pdb_align4(@finfo)
+    let ec=pdb_string_table(pdb_strings())
+    let dbg:array<uint8>=[]
+    loop i in [0..11) {
+        if i =? 5 {put16(@dbg  10)} # the section headers' stream
+        else {put16(@dbg  0xFFFF)}
+    }
+    let dbi:array<uint8>=[]
+    put32(@dbi  0xFFFFFFFF)
+    put32(@dbi  19990903) # V70
+    put32(@dbi  1) # age
+    put16(@dbi  6) # globals
+    put16(@dbi  0x8E00) # build number: new format, 14.0
+    put16(@dbi  7) # publics
+    put16(@dbi  0)
+    put16(@dbi  8) # symbol records
+    put16(@dbi  0)
+    put32(@dbi  PWord(mi.length))
+    put32(@dbi  PWord(contrib.length))
+    put32(@dbi  PWord(secmap.length))
+    put32(@dbi  PWord(finfo.length))
+    put32(@dbi  0) # type server map
+    put32(@dbi  0)
+    put32(@dbi  PWord(dbg.length))
+    put32(@dbi  PWord(ec.length))
+    put16(@dbi  0) # flags
+    put16(@dbi  0x8664)
+    put32(@dbi  0)
+    elf_append_bytes(@dbi  mi)
+    elf_append_bytes(@dbi  contrib)
+    elf_append_bytes(@dbi  secmap)
+    elf_append_bytes(@dbi  finfo)
+    elf_append_bytes(@dbi  ec)
+    elf_append_bytes(@dbi  dbg)
+    # the PDB info stream: version, signature, age, GUID, then the named streams ("/names")
+    let info:array<uint8>=[]
+    put32(@info  20000404) # VC70
+    put32(@info  __u32_le(guid  0))
+    put32(@info  1)
+    elf_append_bytes(@info  guid)
+    let nm_buf:array<uint8>=[]
+    pdb_cstr(@nm_buf  "/names")
+    put32(@info  PWord(nm_buf.length))
+    elf_append_bytes(@info  nm_buf)
+    let cap:PWord=8
+    put32(@info  1) # entries
+    put32(@info  cap)
+    put32(@info  1) # present: one word
+    put32(@info  1 << ((pdb_hash("/names") & 0xFFFF) % cap))
+    put32(@info  0) # deleted: none
+    put32(@info  0) # "/names" (at 0) is stream 9
+    put32(@info  9)
+    put32(@info  20140508) # VC140
+    let streams:array<array<uint8>>=[[]  info  pdb_types()  dbi  pdb_types()  module  gsi  publics  recs  pdb_string_table(strtab)  sections]
+    if PWord(cv_hash.length) >? 0 {
+        streams[2] = cv_tpi_stream(11)
+        streams.push(cv_hash_stream())
+    }
+    msf(streams)
+}
+put32_at=(@b:array<uint8> at:PWord v:PWord):>void=>$unsafe {
+    loop i in [0..4) {b[at + i] = uint8(((v >> (8 * i)) & 255) & 0xff)}
+}
+__u32_le=(b:array<uint8> at:PWord):>PWord=>$unsafe {
+    PWord(b[at]) | (PWord(b[at + 1]) << 8) | (PWord(b[at + 2]) << 16) | (PWord(b[at + 3]) << 24)
+}
+
+# a C13 subsection: kind, length, the data padded to 4 bytes
+pdb_subsection=(@out:array<uint8> kind:PWord body:array<uint8>):>void=>$unsafe {
+    put32(@out  kind)
+    put32(@out  PWord(body.length))
+    elf_append_bytes(@out  body)
+    pdb_align4(@out)
+}
+
+# a block of a function's lines in one file (file: where its checksum entry is)
+pdb_line_block=(@out:array<uint8> file:PWord n:PWord ents:array<uint8>):>void=>$unsafe {
+    if file <? 0 or n =? 0 {return}
+    put32(@out  file)
+    put32(@out  n)
+    put32(@out  12 + PWord(ents.length))
+    elf_append_bytes(@out  ents)
+}
+
+# the first block from k that is not a free block map's
+msf_free=(k:PWord):>PWord=>$unsafe {
+    let i=k
+    loop i % PDB_BLOCK =? 1 or i % PDB_BLOCK =? 2 {i += 1}
+    i
+}
+
+# the MSF container: the superblock, the free block maps (blocks 1 and 2 of every 4096), the
+# streams' blocks, the directory (stream sizes, then each one's blocks) and the block that
+# lists the directory's blocks
+msf=(streams:array<array<uint8>>):>array<uint8>=>$unsafe {
+    let next:PWord=3
+    let blocks:array<array<int64>>=[]
+    loop s in streams {
+        let bl:array<int64>=[]
+        loop i in [0..(PWord(s.length) + PDB_BLOCK - 1) // PDB_BLOCK) {
+            next=msf_free(next)
+            bl.push(next)
+            next += 1
+        }
+        blocks.push(bl)
+    }
+    let dir:array<uint8>=[]
+    put32(@dir  PWord(streams.length))
+    loop s in streams {put32(@dir  PWord(s.length))}
+    loop bl in blocks {
+        loop x in bl {put32(@dir  x)}
+    }
+    let dir_blocks:array<int64>=[]
+    loop i in [0..(PWord(dir.length) + PDB_BLOCK - 1) // PDB_BLOCK) {
+        next=msf_free(next)
+        dir_blocks.push(next)
+        next += 1
+    }
+    let map_block=msf_free(next)
+    let n=map_block + 1
+    let out=fill(uint8((0) & 0xff)  n * PDB_BLOCK)
+    let magic="Microsoft C/C++ MSF 7.00\r\n\u{1a}DS\0\0\0"
+    loop i in [0..32) {out[i] = (magic as array<uint8>)[i]}
+    put32_at(@out  32  PDB_BLOCK)
+    put32_at(@out  36  1) # the free block map in use
+    put32_at(@out  40  n)
+    put32_at(@out  44  PWord(dir.length))
+    put32_at(@out  52  map_block)
+    # free block maps: a bit per block, set if free (those past the end)
+    let fpm:PWord=1
+    loop fpm <? n {
+        loop half in [0..2) {
+            let mb=(fpm + half) * PDB_BLOCK
+            if mb + PDB_BLOCK >? PWord(out.length) {continue}
+            loop i in [0..PDB_BLOCK) {out[mb + i] = 0xFF}
+            # (this map's bits cover blocks from (fpm - 1) * 8)
+            let first=(fpm - 1) * 8
+            loop blk in [first..min(n  first + PDB_BLOCK * 8)) {
+                let o=blk - first
+                out[mb + o // 8] = out[mb + o // 8] & uint8((((PWord(1) << (o % 8)) xor -1) & 255) & 0xff)
+            }
+        }
+        fpm += PDB_BLOCK
+    }
+    loop i in [PWord(0)..PWord(PWord(streams.length))) {
+        let s=streams[i]
+
+        loop j in [PWord(0)..PWord(PWord(blocks[i].length))) {
+            let x=blocks[i][j]
+
+            let m=min(PDB_BLOCK  PWord(s.length) - j * PDB_BLOCK)
+            mem_copy(out.ptr + x * PDB_BLOCK  s.ptr + j * PDB_BLOCK  m)
+        }
+    }
+    loop j in [PWord(0)..PWord(PWord(dir_blocks.length))) {
+        let x=dir_blocks[j]
+
+        let m=min(PDB_BLOCK  PWord(dir.length) - j * PDB_BLOCK)
+        mem_copy(out.ptr + x * PDB_BLOCK  dir.ptr + j * PDB_BLOCK  m)
+    }
+    loop j in [PWord(0)..PWord(PWord(dir_blocks.length))) {
+        let x=dir_blocks[j]
+put32_at(@out  map_block * PDB_BLOCK + 4 * j  x)}
+    out
+}
+
+# ---------------- types and variables (sloppy build -g) ----------------
+# The TPI stream's records, as CodeView has them: a type refers to types written before it; a
+# struct that holds itself (through an array) refers to a forward reference, which debuggers
+# match to the struct by its unique name, through the hash of each record (the TPI hash stream).
+# Types are keyed as in dwarf.jo (made-up ones: DW_* below 0). Names are C++-like, for natvis
+# (lib/debug/dewy.natvis): a string points to `str`, an array to `array<int>`, an optional is
+# `optional<int>`, a tuple `tuple<int, str>`, a variant of an enum `Shape::rect`.
+const CV_BUCKETS=0x3FFFF
+const CV_VOIDP=0x0603
+const CV_CHAR=0x0070
+const CV_LONG=0x0076
+
+# CRC-32 as LLVM's JamCRC: no final inversion, starting from 0 (hashBufferV8)
+cv_crc=(b:array<uint8> first:PWord to:PWord):>PWord=>$unsafe {
+    if PWord(cv_crc_table.length) =? 0 {
+        loop n in [0..256) {
+            let c=n
+            loop _ in [0..8) {
+                if c & 1 not=? 0 {c=0xEDB88320 xor(c >> 1)}
+                else {c=c >> 1}
+            }
+            cv_crc_table.push(c)
+        }
+    }
+    let c:PWord=0
+    loop i in [first..to) {c=cv_crc_table[(c xor PWord(b[i])) & 255] xor(c >> 8)}
+    c
+}
+
+# a numeric leaf: small values as they are, others after their kind
+cv_num=(@out:array<uint8> v:PWord):>void=>$unsafe {
+    if v >=? 0 and v <? 0x8000 {put16(@out  v)}
+    else if v >=? - 0x80000000 and v <? 0x80000000 {
+        put16(@out  0x8003) # LF_LONG
+        put32(@out  v)
+    }
+    else {
+        put16(@out  0x8009) # LF_QUADWORD
+        put64(@out  v)
+    }
+}
+
+# padding to 4 bytes, as type records have it (LF_PAD1..3)
+cv_pad=(@b:array<uint8>):>void=>$unsafe {
+    loop PWord(b.length) % 4 not=? 0 {b.push(uint8((0xF0 + 4 - PWord(b.length) % 4) & 0xff))}
+}
+
+# a type record: its index (name: a struct's or enum's, which its hash is of; "": the record's)
+cv_rec=(kind:PWord body0:array<uint8> name:string):>PWord=>$unsafe {
+    let body=body0
+    cv_pad(@body)
+    let at=PWord(cv_tpi.length)
+    cv_offs.push(at)
+    put16(@cv_tpi  PWord(body.length) + 2)
+    put16(@cv_tpi  kind)
+    elf_append_bytes(@cv_tpi  body)
+    let h:PWord=0
+    if PWord((name as array<uint8>).length) >? 0 {h=pdb_hash(name)}
+    else {h=cv_crc(cv_tpi  at  PWord(cv_tpi.length))}
+    cv_hash.push(h % CV_BUCKETS)
+    0x1000 + PWord(cv_hash.length) - 1
+}
+cv_pointer=(ti:PWord ref:bool):>PWord=>$unsafe {
+    let b:array<uint8>=[]
+    put32(@b  ti)
+    if ref {put32(@b  0x1002C)} # 64-bit, an lvalue reference, 8 bytes
+    else {put32(@b  0x1000C)} # 64-bit, a pointer, 8 bytes
+    cv_rec(0x1002  b  "") # LF_POINTER
+}
+cv_array=(ti:PWord size:PWord):>PWord=>$unsafe {
+    let b:array<uint8>=[]
+    put32(@b  ti)
+    put32(@b  0x23) # indexed by u64
+    cv_num(@b  size)
+    b.push(0)
+    cv_rec(0x1503  b  "") # LF_ARRAY
+}
+
+# a struct record (and its fields' list) for key: fields' names, types (keys) and offsets
+cv_struct=(key:PWord name:string size:PWord fnames:array<string> ftypes:array<int64> foffs:array<int64>):>PWord=>$unsafe {
+    cv_busy[key] = 0
+    let tis:array<int64>=[]
+    loop t in ftypes {tis.push(cv_type(t))}
+    let fl:array<uint8>=[]
+    loop i in [PWord(0)..PWord(PWord(fnames.length))) {
+        let nm=fnames[i]
+
+        put16(@fl  0x150D) # LF_MEMBER, public
+        put16(@fl  3)
+        put32(@fl  tis[i])
+        cv_num(@fl  foffs[i])
+        pdb_cstr(@fl  nm)
+        cv_pad(@fl)
+    }
+    let fli=cv_rec(0x1203  fl  "") # LF_FIELDLIST
+    cv_busy.remove(key);
+    let b:array<uint8>=[]
+    put16(@b  PWord(fnames.length))
+    put16(@b  0x200) # a unique name
+    put32(@b  fli)
+    put32(@b  0) # derived from, vtable shape: none
+    put32(@b  0)
+    cv_num(@b  size)
+    pdb_cstr(@b  name)
+    pdb_cstr(@b  "{name}@{key}")
+    cv_rec(0x1505  b  name) # LF_STRUCTURE
+}
+
+# the forward reference to the struct key is (for a struct that holds itself)
+cv_forward=(key:PWord):>PWord=>$unsafe {
+    let nm=cv_struct_name(key)
+    let b:array<uint8>=[]
+    put16(@b  0)
+    put16(@b  0x280) # a forward reference, a unique name
+    put32(@b  0)
+    put32(@b  0)
+    put32(@b  0)
+    cv_num(@b  0)
+    pdb_cstr(@b  nm)
+    pdb_cstr(@b  "{nm}@{key}")
+    cv_rec(0x1505  b  "")
+}
+cv_enum=(key:PWord name:string under:PWord vnames:array<string> values:array<int64>):>PWord=>$unsafe {
+    let fl:array<uint8>=[]
+    loop i in [PWord(0)..PWord(PWord(vnames.length))) {
+        let nm=vnames[i]
+
+        put16(@fl  0x1502) # LF_ENUMERATE, public
+        put16(@fl  3)
+        cv_num(@fl  values[i])
+        pdb_cstr(@fl  nm)
+        cv_pad(@fl)
+    }
+    let fli=cv_rec(0x1203  fl  "")
+    let b:array<uint8>=[]
+    put16(@b  PWord(vnames.length))
+    put16(@b  0x200)
+    put32(@b  under)
+    put32(@b  fli)
+    pdb_cstr(@b  name)
+    pdb_cstr(@b  "{name}@{key}")
+    cv_rec(0x1507  b  name) # LF_ENUM
+}
+
+# a type's name as a C++ debugger (and natvis) can read it
+cv_name=(t0:PWord):>string=>$unsafe {
+    let t=dw_prune(t0)
+    let k=dw_inputs[0].types[0].ptr[t].kind
+    if k =? 'array' {return "array<{cv_name(PWord(dw_inputs[0].types[0].ptr[t].elem))}>"}
+    if k =? 'opt' {return "optional<{cv_name(PWord(dw_inputs[0].types[0].ptr[t].elem))}>"}
+    if k =? 'secret' {return "secret<{cv_name(PWord(dw_inputs[0].types[0].ptr[t].elem))}>"}
+    if k =? 'ptr' {return "{cv_name(PWord(dw_inputs[0].types[0].ptr[t].elem))}*"}
+    if k =? 'fn_' or k =? 'cfn' {return "fn"}
+    if k =? 'tuple' {
+        let s="tuple<"
+        loop i in [0..PWord(dw_inputs[0].types[0].ptr[t].nargs)) {
+            if i >? 0 {s="{s}, "}
+            s="{s}{cv_name(dw_targ(t i))}"
+        }
+        return "{s}>"
+    }
+    if k =? 'struct_' or k =? 'enum_' {
+        let si=PWord(dw_inputs[0].types[0].ptr[t].st)
+        let s=dw_inputs[0].structs[0].ptr[si].name
+        if PWord(dw_inputs[0].structs[0].ptr[si].ntargs) =? 0 {return s}
+        s="{s}<"
+        loop i in [0..PWord(dw_inputs[0].structs[0].ptr[si].ntargs)) {
+            if i >? 0 {s="{s}, "}
+            s="{s}{cv_name(cv_struct_targ(si i))}"
+        }
+        return "{s}>"
+    }
+    dw_inputs[0].host[0].type_str(t  false)
+}
+
+# the name of a struct-like key (for its forward reference)
+cv_struct_name=(key:PWord):>string=>$unsafe {
+    if key =? DW_STRHDR {return "str"}
+    if key <=? DW_VARIANT {
+        let t=(DW_VARIANT - key) >> 8
+        let vi=PWord(dw_inputs[0].structs[0].ptr[PWord(dw_inputs[0].types[0].ptr[t].st)].variants) + ((DW_VARIANT - key) & 255)
+        return "{cv_name(t)}::{dw_inputs[0].names[0].ptr[PWord(dw_inputs[0].variants[0].ptr[vi].name)]}"
+    }
+    if key <=? DW_TAGS {return "{cv_name(DW_TAGS - key)}::tag"}
+    if key <=? DW_PTR {return ""}
+    if key <=? DW_FLEX {return ""}
+    if key <=? DW_HDR {return "array<{cv_name(DW_HDR - key)}>"}
+    if key <=? DW_BOXP {return ""}
+    if key <=? DW_BOX {return "box<{cv_name(DW_BOX - key)}>"}
+    cv_name(key)
+}
+
+# the index of type t (a key: dwarf.jo's)
+cv_type=(t:PWord):>PWord=>$unsafe {
+    let found=cv_memo.get(t)
+    if found isnt? none {return found}
+    let forward=cv_busy.get(t)
+    if forward isnt? none {
+        let f=forward
+        if f not=? 0 {return f}
+        let f2=cv_forward(t)
+        cv_busy[t] = f2
+        return f2
+    }
+    let x=cv_type_new(t)
+    cv_memo[t] = x
+    x
+}
+
+# the header a string or an array points to: [rc][len][cap][data...]
+cv_header=(key:PWord data:PWord):>PWord=>$unsafe {
+    cv_struct(key  cv_struct_name(key)  24  ["rc"  "len"  "cap"  "data"]  [DW_LONG  DW_LONG  DW_LONG  data]  [0  8  16  24])
+}
+cv_type_new=(t0:PWord):>PWord=>$unsafe {
+    if t0 <? 0 {
+        if t0 =? DW_LONG {return CV_LONG}
+        if t0 =? DW_BYTE {return 0x69}
+        if t0 =? DW_VOIDP {return CV_VOIDP}
+        if t0 =? DW_STRHDR {return cv_header(t0  DW_FLEX - dw_inputs[0].T_VOID[0])}
+        if t0 =? DW_STRPTR {return cv_pointer(cv_type(DW_STRHDR)  false)}
+        if t0 <=? DW_VARIANT {
+            let t=(DW_VARIANT - t0) >> 8
+            let si=PWord(dw_inputs[0].types[0].ptr[t].st)
+            let vi=PWord(dw_inputs[0].structs[0].ptr[si].variants) + ((DW_VARIANT - t0) & 255)
+            let poff=PWord(dw_inputs[0].structs[0].ptr[si].payload_off)
+            let fnm:array<string>=[]
+            let ft:array<int64>=[]
+            let fo:array<int64>=[]
+            loop i in [0..PWord(dw_inputs[0].variants[0].ptr[vi].nfields)) {
+                let fi=PWord(dw_inputs[0].variants[0].ptr[vi].fields) + i
+                fnm.push(dw_inputs[0].names[0].ptr[PWord(dw_inputs[0].fields[0].ptr[fi].name)])
+                ft.push(dw_inputs[0].host[0].field_store_type(fi))
+                fo.push(PWord(dw_inputs[0].fields[0].ptr[fi].offset) - poff)
+            }
+            return cv_struct(t0  cv_struct_name(t0)  dw_tsize(t) - poff  fnm  ft  fo)
+        }
+        if t0 <=? DW_TAGS {
+            let t=DW_TAGS - t0
+            let si=PWord(dw_inputs[0].types[0].ptr[t].st)
+            let vn:array<string>=[]
+            let vv:array<int64>=[]
+            loop v in [0..PWord(dw_inputs[0].structs[0].ptr[si].nvariants)) {
+                let vi=PWord(dw_inputs[0].structs[0].ptr[si].variants) + v
+                vn.push(dw_inputs[0].names[0].ptr[PWord(dw_inputs[0].variants[0].ptr[vi].name)])
+                if dw_inputs[0].structs[0].ptr[si].simple_enum {vv.push(dw_inputs[0].variants[0].ptr[vi].value)}
+                else {vv.push(PWord(dw_inputs[0].variants[0].ptr[vi].tag))}
+            }
+            return cv_enum(t0  cv_struct_name(t0)  0x74  vn  vv)
+        }
+        if t0 <=? DW_PTR {return cv_pointer(cv_type(DW_HDR - (DW_PTR - t0))  false)}
+        if t0 <=? DW_FLEX {
+            let e=DW_FLEX - t0
+            if e =? dw_inputs[0].T_VOID[0] {return cv_array(CV_CHAR  0)} # (a string's bytes)
+            if e =? dw_inputs[0].T_U8[0] {return cv_array(0x69  0)}
+            return cv_array(cv_type(e)  0)
+        }
+        if t0 <=? DW_HDR {return cv_header(t0  DW_FLEX - (DW_HDR - t0))}
+        if t0 <=? DW_BOXP {return cv_pointer(cv_type(DW_BOX - (DW_BOXP - t0))  false)}
+        let e=DW_BOX - t0
+        return cv_struct(t0  cv_struct_name(t0)  8 + dw_tsize(e)  ["rc"  "value"]  [DW_LONG  e]  [0  8])
+    }
+    let t=dw_prune(t0)
+    let k=dw_inputs[0].types[0].ptr[t].kind
+    let size=dw_tsize(t)
+    if k =? 'int_' {
+        let b=PWord(dw_inputs[0].types[0].ptr[t].bits)
+        if b =? 8 {
+            if dw_inputs[0].types[0].ptr[t].sign {return 0x68}
+            return 0x69
+        }
+        if b =? 16 {
+            if dw_inputs[0].types[0].ptr[t].sign {return 0x72}
+            return 0x73
+        }
+        if b =? 32 {
+            if dw_inputs[0].types[0].ptr[t].sign {return 0x74}
+            return 0x75
+        }
+        if dw_inputs[0].types[0].ptr[t].sign {return 0x76}
+        return 0x77
+    }
+    if k =? 'bool_' {return 0x30}
+    if k =? 'float_' {
+        if size =? 4 {return 0x40}
+        return 0x41
+    }
+    if k =? 'str_' {return cv_type(DW_STRPTR)}
+    if k =? 'array' {return cv_type(DW_PTR - PWord(dw_inputs[0].types[0].ptr[t].elem))}
+    if k =? 'box' {return cv_type(DW_BOXP - PWord(dw_inputs[0].types[0].ptr[t].elem))}
+    if k =? 'ptr' {
+        let e=PWord(dw_inputs[0].types[0].ptr[t].elem)
+        if e =? dw_inputs[0].T_VOID[0] or dw_tkind(e) =? 'void_' {return CV_VOIDP}
+        return cv_pointer(cv_type(e)  false)
+    }
+    if k =? 'cfn' or k =? 'null_' {return CV_VOIDP}
+    if k =? 'fixed' {
+        return cv_array(cv_type(PWord(dw_inputs[0].types[0].ptr[t].elem))  size)
+    }
+    let fnm:array<string>=[]
+    let ft:array<int64>=[]
+    let fo:array<int64>=[]
+    if k =? 'struct_' {
+        let si=PWord(dw_inputs[0].types[0].ptr[t].st)
+        loop i in [0..PWord(dw_inputs[0].structs[0].ptr[si].nfields)) {
+            let fi=PWord(dw_inputs[0].structs[0].ptr[si].fields) + i
+            fnm.push(dw_inputs[0].names[0].ptr[PWord(dw_inputs[0].fields[0].ptr[fi].name)])
+            ft.push(dw_inputs[0].host[0].field_store_type(fi))
+            fo.push(PWord(dw_inputs[0].fields[0].ptr[fi].offset))
+        }
+    }
+    else if k =? 'enum_' {
+        let si=PWord(dw_inputs[0].types[0].ptr[t].st)
+        if dw_inputs[0].structs[0].ptr[si].simple_enum {
+            let vn:array<string>=[]
+            let vv:array<int64>=[]
+            loop v in [0..PWord(dw_inputs[0].structs[0].ptr[si].nvariants)) {
+                let vi=PWord(dw_inputs[0].structs[0].ptr[si].variants) + v
+                vn.push(dw_inputs[0].names[0].ptr[PWord(dw_inputs[0].variants[0].ptr[vi].name)])
+                vv.push(dw_inputs[0].variants[0].ptr[vi].value)
+            }
+            let under:PWord=0x74
+            if size =? 1 {under=0x68}
+            else if size =? 2 {under=0x72}
+            else if size =? 8 {under=0x76}
+            return cv_enum(t  cv_name(t)  under  vn  vv)
+        }
+        fnm.push("tag")
+        ft.push(DW_TAGS - t)
+        fo.push(0)
+        loop v in [0..min(PWord(dw_inputs[0].structs[0].ptr[si].nvariants)  256)) {
+            let vi=PWord(dw_inputs[0].structs[0].ptr[si].variants) + v
+            if PWord(dw_inputs[0].variants[0].ptr[vi].nfields) >? 0 {
+                fnm.push(dw_inputs[0].names[0].ptr[PWord(dw_inputs[0].variants[0].ptr[vi].name)])
+                ft.push(DW_VARIANT - (256 * t + v))
+                fo.push(PWord(dw_inputs[0].structs[0].ptr[si].payload_off))
+            }
+        }
+    }
+    else if k =? 'tuple' {
+        let off:PWord=0
+        loop i in [0..PWord(dw_inputs[0].types[0].ptr[t].nargs)) {
+            let e=dw_targ(t  i)
+            off=dw_align_up(off  dw_talign(e))
+            fnm.push("{i}")
+            ft.push(e)
+            fo.push(off)
+            off += dw_tsize(e)
+        }
+    }
+    else if k =? 'vec' {
+        let n=PWord(dw_inputs[0].types[0].ptr[t].bits)
+        let e=dw_inputs[0].T_F32[0]
+        if dw_inputs[0].types[0].ptr[t].sign {e=dw_inputs[0].T_I32[0]}
+        loop i in [0..n) {
+            if n <=? 4 {fnm.push(["x"  "y"  "z"  "w"][i])}
+            else {fnm.push("m{i}")}
+            ft.push(e)
+            fo.push(4 * i)
+        }
+    }
+    else if k =? 'opt' {
+        let e=PWord(dw_inputs[0].types[0].ptr[t].elem)
+        fnm=["value"  "has"]
+        ft=[e  dw_inputs[0].T_BOOL[0]]
+        fo=[0  dw_tsize(e)]
+    }
+    else if k =? 'fn_' {
+        fnm=["code"  "env"]
+        ft=[DW_VOIDP  DW_VOIDP]
+        fo=[0  8]
+    }
+    cv_struct(t  cv_name(t)  size  fnm  ft  fo)
+}
+
+# the TPI stream (its header and records), and its hash stream (stream hs): each record's hash,
+# then where every 8 KB of records starts
+cv_tpi_stream=(hs:PWord):>array<uint8>=>$unsafe {
+    let n=PWord(cv_hash.length)
+    let offs:array<uint8>=[]
+    let last:PWord=-8192
+    loop i in [0..n) {
+        if cv_offs[i] >=? last + 8192 {
+            put32(@offs  0x1000 + i)
+            put32(@offs  cv_offs[i])
+            last=cv_offs[i]
+        }
+    }
+    let out:array<uint8>=[]
+    put32(@out  20040203) # V80
+    put32(@out  56)
+    put32(@out  0x1000)
+    put32(@out  0x1000 + n)
+    put32(@out  PWord(cv_tpi.length))
+    put16(@out  hs)
+    put16(@out  0xFFFF)
+    put32(@out  4)
+    put32(@out  CV_BUCKETS)
+    put32(@out  0) # the hashes
+    put32(@out  4 * n)
+    put32(@out  4 * n) # the index offsets
+    put32(@out  PWord(offs.length))
+    put32(@out  4 * n + PWord(offs.length)) # adjustments: none
+    put32(@out  0)
+    elf_append_bytes(@out  cv_tpi)
+    out
+}
+cv_hash_stream=():>array<uint8>=>$unsafe {
+    let out:array<uint8>=[]
+    loop h in cv_hash {put32(@out  h)}
+    let last:PWord=-8192
+    loop i in [0..PWord(cv_hash.length)) {
+        if cv_offs[i] >=? last + 8192 {
+            put32(@out  0x1000 + i)
+            put32(@out  cv_offs[i])
+            last=cv_offs[i]
+        }
+    }
+    out
+}
+
+# CodeView's numbers of the registers DWARF numbers r (x86-64)
+cv_reg=(r:PWord):>PWord=>$unsafe {
+    if r <? 8 {return [328  331  330  329  332  333  334  335][r]} # rax rdx rcx rbx rsi rdi rbp rsp
+    if r <? 16 {return 336 + r - 8} # r8..r15
+    if r <? 25 {return 154 + r - 17} # xmm0..xmm7
+    252 + r - 25 # xmm8..xmm15
+}
+
+# where a variable is from lo to hi (a record per 64 KB): in register reg (base < 0), or in
+# memory at base + off
+cv_ranges=(@out:array<uint8> reg:PWord base:PWord off:PWord lo:PWord hi:PWord):>void=>$unsafe {
+    let a=lo
+    loop a <? hi {
+        let n=min(hi - a  0xFFFF)
+        let b:array<uint8>=[]
+        if base <? 0 {
+            put16(@b  reg)
+            put16(@b  0)
+        }
+        else {
+            put16(@b  base)
+            put16(@b  0)
+            put32(@b  off)
+        }
+        put32(@b  a)
+        put16(@b  1)
+        put16(@b  n)
+        if base <? 0 {pdb_record(@out  0x1141  b)} # S_DEFRANGE_REGISTER
+        else {pdb_record(@out  0x1145  b)} # S_DEFRANGE_REGISTER_REL
+        a += n
+    }
+}
+
+# the variables of the function whose entry in dbg_raw starts at k (x64.jo's dbg_function), as
+# S_LOCAL records each followed by where it is
+cv_locals=(@out:array<uint8> k0:PWord):>void=>$unsafe {
+    let fr:array<uint8>=[]
+    loop i in [0..5) {put32(@fr  0)} # frame, padding, saved registers' size...
+    put16(@fr  0)
+    put32(@fr  (2 << 14) | (2 << 16)) # locals and parameters from rbp
+    pdb_record(@out  0x1012  fr) # S_FRAMEPROC
+    let frame=cv_reg(dw_inputs[0].dbg_raw[0].ptr[k0 + 3])
+    loop v in dbg_vars(k0) {
+        let k=v[0]
+        let l=dw_inputs[0].dbg_raw[0].ptr[k]
+        let kind=dw_inputs[0].dbg_raw[0].ptr[k + 1]
+        let r=dw_inputs[0].dbg_raw[0].ptr[k + 2]
+        let off=dw_inputs[0].dbg_raw[0].ptr[k + 3]
+        let lo=dw_inputs[0].dbg_raw[0].ptr[k + 4]
+        let hi=dw_inputs[0].dbg_raw[0].ptr[k + 5]
+        let ti=cv_type(dw_inputs[0].host[0].store_type(l))
+        let nm=dw_inputs[0].names[0].ptr[PWord(dw_inputs[0].locals[0].ptr[l].name)]
+        if kind =? DL_CONST and lo <? hi {
+            let b:array<uint8>=[]
+            put32(@b  ti)
+            cv_num(@b  off)
+            pdb_cstr(@b  nm)
+            pdb_record(@out  0x1107  b) # S_CONSTANT
+            continue
+        }
+        let fl:PWord=0
+        if v[1] {fl=1}
+        let where=lo <? hi and(kind =? DL_REG or kind =? DL_MEM or kind =? DL_MEMAT)
+        if not where {fl=fl | 0x100} # optimized out
+        if kind =? DL_MEMAT {ti=cv_pointer(ti  true)}
+        let b:array<uint8>=[]
+        put32(@b  ti)
+        put16(@b  fl)
+        pdb_cstr(@b  nm)
+        pdb_record(@out  0x113E  b) # S_LOCAL
+        if not where {continue}
+        if kind =? DL_REG {cv_ranges(@out  cv_reg(r)  -1  0  lo  hi)}
+        else if kind =? DL_MEM and r not=? dw_inputs[0].dbg_raw[0].ptr[k0 + 3] {cv_ranges(@out  0  cv_reg(r)  off  lo  hi)}
+        else {cv_ranges(@out  0  frame  off  lo  hi)}
+    }
+}
+cv_struct_targ=(si:PWord i:PWord):>PWord=>$unsafe {
+    PWord(dw_inputs[0].type_args[0].ptr[PWord(dw_inputs[0].structs[0].ptr[si].targs) + i])
+}
