@@ -5382,6 +5382,18 @@ fact_while = (n: int, s: mut FactState):
     edges = fact_loop_body(n, paths.yes)
     s = fact_join(paths.no, edges.exits, n)
 
+# Optional/union coercions wrap an already requested boundary in place.
+# Follow just that value spine, as ref_wrapped_check does for refinements.
+fact_fixed_node = (n0: int) -> int:
+    n = n0
+    loop depth in [0..32):
+        if nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.arr2fixed)): return n
+        if nodes[n].kind == .conv and nodes[n].a != 0: n = int(nodes[n].a)
+        else if nodes[n].kind == .call and nodes[n].aux == 3 and nkids(n) == 1: n = kid(n, 0)
+        else: break
+    fatal(nodes[n0].pos, "cannot locate fixed-size array conversion after wrapping")
+    n0
+
 # A dynamic-to-fixed conversion has one length equality obligation. Demand
 # only its operand and existing length projection; O(1) lookup plus the bounded
 # difference query. Every analyzed visit must prove it to erase the check.
@@ -6281,6 +6293,21 @@ fact_inventory_bound = (s: mut FactState, value: int, parts: int[], t: int, at: 
         if joined.wide: return
         old = fact_bound(s, value)
         fact_set_bound(s, value, FactBound(max(old.lo, joined.lo), min(old.hi, joined.hi), old.nz or joined.nz))
+        # A hull touching a host sentinel can still have a finite endpoint:
+        # every constituent must establish that side. Keep it as a value row,
+        # never by changing the mathematical integer's representation type.
+        # Only endpoint hulls demand this O(parts x bounded incident rows) query.
+        if t == T_MATH_INT:
+            if joined.lo == FACT_MIN:
+                finite = true
+                loop part in parts:
+                    if not fact_host_endpoint(s, part, false): finite = false; break
+                if finite: fact_difference(s, fact_constant(s, FACT_MIN), value, 0)
+            if joined.hi == FACT_MAX:
+                finite = true
+                loop part in parts:
+                    if not fact_host_endpoint(s, part, true): finite = false; break
+                if finite: fact_difference(s, value, fact_constant(s, FACT_MAX), 0)
         return
     record = tkind(t) == .struct_ and structs[int(types[t].st)].nvariants == 0 and not structs[int(types[t].st)].union_ and not structs[int(types[t].st)].soa_
     components = if record: min(int(structs[int(types[t].st)].nfields), 8) else if tkind(t) == .tuple: min(int(types[t].nargs), 8) else: 1
@@ -8484,14 +8511,15 @@ facts_finalize = ():
             fact_retry_owner = request.owner
             fact_capture(request.node, state)
     loop request in fact_fixed_requests:
-        if fact_validated.has(request.node): continue
+        n = fact_fixed_node(request.node)
+        if fact_validated.has(n): continue
         fact_terms = [FactTerm()]
         fact_constructor_actuals = {}
         state = FactState()
         fact_retry_owner = request.owner
         # Runtime-enabled bodies remain deferred until a caller needs their
         # panic answer. Do not evaluate their operand to report the boundary.
-        fact_fixed_check(request.node, state, 0)
+        fact_fixed_check(n, state, 0)
     fact_fixed_requests = []
     fact_retry_owner = 0
     loop request in fact_requests:

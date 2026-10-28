@@ -854,6 +854,8 @@ that range together with the loop's entry value; other writes still participate.
 Literal-initialized script integers that are never written also supply bounds
 inside helpers. A fixed-width value widened to `int` retains its bounds;
 guards at both inclusive `int64` endpoints also prove a conversion back to `int64`.
+Elements selected or iterated from a known literal array retain those finite endpoints
+when every element fits `int64`; a larger or unconstrained element prevents that proof.
 An `int` that only ever holds fixed-width values or literals (a branch, a function's
 returns, a loop's running `max`) stays within `int64`. A counter that a loop changes
 at most once per iteration by a small fixed step (`n += 1`, `t += b` for a byte `b`)

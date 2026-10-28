@@ -1,0 +1,16 @@
+Absent:type=[]
+pair=(xs:array<int64>):>(array<int64 length=2> | Absent)=>{
+    if xs.length not=? 2 return Absent[]
+    return xs
+}
+optional=(xs:array<int64>):>array<int64 length=2>?=>{
+    if xs.length not=? 2 return none
+    return xs
+}
+main=()=>{
+    match pair([5 6]) {
+        xs:array<int64 length=2>=>{printl(xs[0]); printl(xs[1])}
+        _=>printl("absent")
+    }
+    printl(optional([7 8]))
+}

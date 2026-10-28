@@ -1,0 +1,6 @@
+identity=(n:int64):>int64=>n
+work=(value:int):>void=>{
+    if value <? int64.min or value >? int64.max return
+    loop n in [value int64.min int64.max] {printl(identity(n))}
+}
+main=()=>work(42)
