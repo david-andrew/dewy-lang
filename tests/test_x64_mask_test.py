@@ -16,7 +16,9 @@ pytestmark = pytest.mark.skipif(
 @pytest.mark.core_quick
 def test_mask_flags_and_frames(compiler, tmp_path):
     source = tmp_path / 'mask_flags.jo'
-    source.write_text(f"use '{ROOT / 'compiler/x64.jo'}'\nuse '{ROOT / 'compiler/backend_analysis.dewy'}'\n" + '''
+    source.write_text(''.join(f"use '{ROOT / 'compiler' / module}'\n" for module in
+                              ('x64.jo', 'x64_encode.dewy', 'x64_allocate.dewy',
+                               'backend_analysis.dewy')) + '''
 vloc_storage = [RDI, RSI]
 vloc = data(vloc_storage)
 vcval_storage = [0, 0]
