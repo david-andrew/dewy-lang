@@ -1,0 +1,287 @@
+use 'checker_types.dewy'
+const TF_HAS_VAR = 1
+const TF_LAID_OUT = 2
+const TF_MANAGED = 4
+const TF_BOXED = 16
+struct TypeLayoutHost:
+    check_struct_fields: (int) -> void
+    mk_box: (int) -> int
+    quantity_base: (int) -> int
+    math_optional: (int) -> bool
+    endless_error: (int, int, int) -> void
+    layout_error: (int) -> void
+    cache_padded: (int) -> bool
+struct TypeLayoutInput:
+    types: *(TypeInfo[])
+    structs: *(StructInfo[])
+    args: *(i32[])
+    fields: *(Field[])
+    variants: *(Variant[])
+    ptr_size: *(int)
+    host: *TypeLayoutHost
+tl_inputs: *TypeLayoutInput
+tl_holds_seen: i32[]
+tl_holds_gen = 0
+tl_box_dflt: {int: int} = {}
+tl_box_dflt_busy: int[]
+type_layout_bind = (input: *TypeLayoutInput) -> int:
+    tl_inputs = input
+    tl_holds_seen = []
+    tl_holds_gen = 0
+    tl_box_dflt = {}
+    tl_box_dflt_busy = []
+    0
+tl_prune = (t0: int) -> int:
+    t = t0
+    loop t != 0 and tl_inputs[0].types[0][t].kind == .var and tl_inputs[0].types[0][t].ref != 0: t = int(tl_inputs[0].types[0][t].ref)
+    t
+tl_targ = (t: int, i: int) -> int: int(tl_inputs[0].args[0][int(tl_inputs[0].types[0][t].args) + i])
+tl_align_up = (x: int, a: int) -> int: (x + a - 1) & ~(a - 1)
+tl_size = (t: int) -> int:
+    tl_layout(t)
+    int(tl_inputs[0].types[0][tl_prune(t)].size)
+tl_align = (t: int) -> int:
+    tl_layout(t)
+    a = int(tl_inputs[0].types[0][tl_prune(t)].align)
+    if a == 0: return 1
+    a
+tl_managed = (t0: int) -> bool:
+    t = tl_inputs[0].host[0].quantity_base(t0)
+    if tl_inputs[0].types[0][t].rep == .tagged_int: return true
+    k = tl_inputs[0].types[0][t].kind
+    if k == .str_ or k == .array or k == .fn_ or k == .polyfn or k == .callable or k == .box: return true
+    if k == .struct_ or k == .enum_ or k == .tuple or k == .opt or k == .fixed:
+        tl_layout(t)
+        return int(tl_inputs[0].types[0][t].flags) & TF_MANAGED != 0
+    false
+
+tl_type_holds = (t: int, target: int) -> bool:
+    tl_holds_gen += 1
+    tl_holds_in(t, target, tl_holds_gen)
+
+tl_holds_in = (t0: int, target: int, gen: int) -> bool:
+    t = tl_prune(t0)
+    if t == target: return true
+    k = tl_inputs[0].types[0][t].kind
+    if k == .opt or k == .fixed: return tl_holds_in(int(tl_inputs[0].types[0][t].elem), target, gen)
+    if k == .tuple:
+        loop i in [0..int(tl_inputs[0].types[0][t].nargs)):
+            if tl_holds_in(tl_targ(t, i), target, gen): return true
+        return false
+    if k != .struct_ and k != .enum_: return false
+    loop tl_holds_seen.len() <= t: tl_holds_seen.push(0)
+    if int(tl_holds_seen[t]) == gen: return false
+    tl_holds_seen[t] = i32(gen)
+    si = int(tl_inputs[0].types[0][t].st)
+    if tl_inputs[0].structs[0][si].soa_: return false
+    tl_inputs[0].host[0].check_struct_fields(si)
+    loop i in [0..int(tl_inputs[0].structs[0][si].nfields)):
+        if tl_holds_in(int(tl_inputs[0].fields[0][int(tl_inputs[0].structs[0][si].fields) + i].type), target, gen): return true
+    loop v in [0..int(tl_inputs[0].structs[0][si].nvariants)):
+        vi = int(tl_inputs[0].structs[0][si].variants) + v
+        loop i in [0..int(tl_inputs[0].variants[0][vi].nfields)):
+            if tl_holds_in(int(tl_inputs[0].fields[0][int(tl_inputs[0].variants[0][vi].fields) + i].type), target, gen): return true
+    false
+
+tl_decide_boxes = (si: int):
+    if tl_inputs[0].structs[0][si].boxes_done: return
+    tl_inputs[0].structs[0][si].boxes_done = true
+    if tl_inputs[0].structs[0][si].union_ or tl_inputs[0].structs[0][si].soa_: return
+    tl_inputs[0].host[0].check_struct_fields(si)
+    t = int(tl_inputs[0].structs[0][si].type)
+    loop i in [0..int(tl_inputs[0].structs[0][si].nfields)):
+        f = int(tl_inputs[0].structs[0][si].fields) + i
+        tl_inputs[0].fields[0][f].boxed = tl_type_holds(int(tl_inputs[0].fields[0][f].type), t)
+    loop v in [0..int(tl_inputs[0].structs[0][si].nvariants)):
+        vi = int(tl_inputs[0].structs[0][si].variants) + v
+        loop i in [0..int(tl_inputs[0].variants[0][vi].nfields)):
+            f = int(tl_inputs[0].variants[0][vi].fields) + i
+            tl_inputs[0].fields[0][f].boxed = tl_type_holds(int(tl_inputs[0].fields[0][f].type), t)
+
+# A box not made yet (a field of a value made zero, `n: Node`) reads as its type's default: zero,
+# when zero holds no box whose type lacks a default (it may: an enum whose first variant holds the
+# enum, a union whose first member does), else the first variant of an enum or union that has one.
+# -1: zero, v >= 0: variant v, -2: no value of the type ends (struct Bad: me: Bad)
+
+tl_box_default = (t0: int) -> int:
+    t = tl_prune(t0)
+    if let r = tl_box_dflt.get(t): return r
+    if tl_box_dflt_busy.contains(t): return -2
+    tl_box_dflt_busy.push(t)
+    r = -2
+    if tl_zero_ends(t): r = -1
+    else if tl_inputs[0].types[0][t].kind == .enum_:
+        si = int(tl_inputs[0].types[0][t].st)
+        loop v in [1..int(tl_inputs[0].structs[0][si].nvariants)):
+            if tl_variant_ends(si, v):
+                r = v
+                break
+    tl_box_dflt_busy.pop()
+    # (none found while another type was being worked out may have been for want of that one's)
+    if r != -2 or tl_box_dflt_busy.len() == 0: tl_box_dflt[t] = r
+    r
+
+# does the zero value of type t end (each box in it, empty, reading as a default)?
+tl_zero_ends = (t0: int) -> bool:
+    t = tl_prune(t0)
+    k = tl_inputs[0].types[0][t].kind
+    if k == .fixed: return int(tl_inputs[0].types[0][tl_prune(t)].bits) == 0 or tl_zero_ends(int(tl_inputs[0].types[0][t].elem))
+    if k == .tuple:
+        loop i in [0..int(tl_inputs[0].types[0][t].nargs)):
+            if not tl_zero_ends(tl_targ(t, i)): return false
+        return true
+    if k != .struct_ and k != .enum_: return true
+    si = int(tl_inputs[0].types[0][t].st)
+    tl_decide_boxes(si)
+    if k == .enum_: return int(tl_inputs[0].structs[0][si].nvariants) == 0 or tl_variant_ends(si, 0)
+    tl_fields_end(int(tl_inputs[0].structs[0][si].fields), int(tl_inputs[0].structs[0][si].nfields))
+
+tl_variant_ends = (si: int, v: int) -> bool:
+    vi = int(tl_inputs[0].structs[0][si].variants) + v
+    tl_fields_end(int(tl_inputs[0].variants[0][vi].fields), int(tl_inputs[0].variants[0][vi].nfields))
+
+tl_fields_end = (f0: int, n: int) -> bool:
+    loop f in [f0..f0 + n):
+        if tl_inputs[0].fields[0][f].boxed:
+            if tl_box_default(int(tl_inputs[0].fields[0][f].type)) == -2: return false
+        else if not tl_zero_ends(int(tl_inputs[0].fields[0][f].type)): return false
+    true
+
+# a struct or enum whose boxed field has a type no value of which ends: Bad holds a Bad, which holds
+# a Bad... (an optional ends with none, an enum with a variant that does)
+tl_endless_check = (si: int):
+    loop f in [int(tl_inputs[0].structs[0][si].fields)..int(tl_inputs[0].structs[0][si].fields) + int(tl_inputs[0].structs[0][si].nfields)): tl_endless_field(si, f, -1)
+    loop v in [0..int(tl_inputs[0].structs[0][si].nvariants)):
+        vi = int(tl_inputs[0].structs[0][si].variants) + v
+        loop f in [int(tl_inputs[0].variants[0][vi].fields)..int(tl_inputs[0].variants[0][vi].fields) + int(tl_inputs[0].variants[0][vi].nfields)): tl_endless_field(si, f, vi)
+
+tl_endless_field = (si: int, f: int, vi: int):
+    if not tl_inputs[0].fields[0][f].boxed: return
+    ft = int(tl_inputs[0].fields[0][f].type)
+    if tl_box_default(ft) != -2: return
+    tl_inputs[0].host[0].endless_error(si, f, vi)
+
+tl_layout = (t0: int):
+    t = tl_prune(t0)
+    if int(tl_inputs[0].types[0][t].flags) & TF_LAID_OUT != 0: return
+    k = tl_inputs[0].types[0][t].kind
+    size = 0
+    al = 1
+    m = false
+    boxed = false
+    if k == .quantity or k == .refined or k == .callable or k == .secret:
+        base = int(tl_inputs[0].types[0][t].elem)
+        tl_layout(base)
+        tl_inputs[0].types[0][t].size = tl_inputs[0].types[0][base].size
+        tl_inputs[0].types[0][t].align = tl_inputs[0].types[0][base].align
+        tl_inputs[0].types[0][t].flags = tl_inputs[0].types[0][base].flags | (tl_inputs[0].types[0][t].flags & i32(TF_HAS_VAR))
+        return
+    if k == .array or k == .ptr or k == .null_ or k == .cfn or k == .box:
+        size = tl_inputs[0].ptr_size[0]
+        al = tl_inputs[0].ptr_size[0]
+        m = k == .array or k == .box
+        boxed = k == .box
+    else if k == .fn_ or k == .polyfn:
+        size = 2 * tl_inputs[0].ptr_size[0]
+        al = tl_inputs[0].ptr_size[0]
+        m = true
+    else if k == .opt:
+        e = int(tl_inputs[0].types[0][t].elem)
+        tl_layout(e)
+        al = tl_align(e)
+        size = if tl_inputs[0].host[0].math_optional(t): 8 else: tl_align_up(tl_size(e) + 1, al)
+        m = tl_managed(e)
+        boxed = int(tl_inputs[0].types[0][tl_prune(e)].flags) & TF_BOXED != 0
+    else if k == .fixed:
+        e = int(tl_inputs[0].types[0][t].elem)
+        tl_layout(e)
+        al = tl_align(e)
+        size = tl_size(e) * int(tl_inputs[0].types[0][t].bits)
+        m = tl_managed(e)
+        boxed = int(tl_inputs[0].types[0][tl_prune(e)].flags) & TF_BOXED != 0
+    else if k == .tuple:
+        off = 0
+        loop i in [0..int(tl_inputs[0].types[0][t].nargs)):
+            e = tl_targ(t, i)
+            tl_layout(e)
+            off = tl_align_up(off, tl_align(e))
+            off += tl_size(e)
+            if tl_align(e) > al: al = tl_align(e)
+            if tl_managed(e): m = true
+            if int(tl_inputs[0].types[0][tl_prune(e)].flags) & TF_BOXED != 0: boxed = true
+        size = tl_align_up(off, al)
+    else if k == .struct_:
+        si = int(tl_inputs[0].types[0][t].st)
+        tl_inputs[0].host[0].check_struct_fields(si)
+        if tl_inputs[0].structs[0][si].resolving: tl_inputs[0].host[0].layout_error(si)
+        tl_decide_boxes(si)
+        tl_inputs[0].structs[0][si].resolving = true
+        off = 0
+        loop i in [0..int(tl_inputs[0].structs[0][si].nfields)):
+            fi = int(tl_inputs[0].structs[0][si].fields) + i
+            e = int(tl_inputs[0].fields[0][fi].type)
+            # (a boxed field holds a pointer: its type, which holds this one, is laid out apart)
+            if tl_inputs[0].fields[0][fi].boxed: e = tl_inputs[0].host[0].mk_box(e)
+            tl_layout(e)
+            off = tl_align_up(off, tl_align(e))
+            tl_inputs[0].fields[0][fi].offset = i32(off)
+            off += tl_size(e)
+            if tl_align(e) > al: al = tl_align(e)
+            if tl_managed(e): m = true
+            if int(tl_inputs[0].types[0][tl_prune(e)].flags) & TF_BOXED != 0: boxed = true
+        tl_inputs[0].structs[0][si].resolving = false
+        tl_endless_check(si)
+        size = tl_align_up(off, al)
+        # Padding is a tl_layout fact; retain the payload's natural alignment.
+        # An extra line also isolates payloads at an unaligned array base.
+        if tl_inputs[0].host[0].cache_padded(t): size = tl_align_up(size + 127, 128)
+    else if k == .enum_:
+        si = int(tl_inputs[0].types[0][t].st)
+        tl_inputs[0].host[0].check_struct_fields(si)
+        if tl_inputs[0].structs[0][si].resolving: tl_inputs[0].host[0].layout_error(si)
+        tl_decide_boxes(si)
+        tl_inputs[0].structs[0][si].resolving = true
+        psize = 0
+        pal = 4
+        loop v in [0..int(tl_inputs[0].structs[0][si].nvariants)):
+            vi = int(tl_inputs[0].structs[0][si].variants) + v
+            off = 0
+            loop i in [0..int(tl_inputs[0].variants[0][vi].nfields)):
+                fi = int(tl_inputs[0].variants[0][vi].fields) + i
+                e = int(tl_inputs[0].fields[0][fi].type)
+                if tl_inputs[0].fields[0][fi].boxed: e = tl_inputs[0].host[0].mk_box(e)
+                tl_layout(e)
+                off = tl_align_up(off, tl_align(e))
+                tl_inputs[0].fields[0][fi].offset = i32(off)
+                off += tl_size(e)
+                if tl_align(e) > pal: pal = tl_align(e)
+                if tl_managed(e): m = true
+                if int(tl_inputs[0].types[0][tl_prune(e)].flags) & TF_BOXED != 0: boxed = true
+            if off > psize: psize = off
+        tl_inputs[0].structs[0][si].resolving = false
+        tl_endless_check(si)
+        # General unions use address-based tag remapping and narrowing even
+        # when all alternatives are unit records (nominal errors, for example).
+        tl_inputs[0].structs[0][si].simple_enum = psize == 0 and not tl_inputs[0].structs[0][si].union_
+        poff = tl_align_up(4, pal)
+        tl_inputs[0].structs[0][si].payload_off = i32(poff)
+        loop v in [0..int(tl_inputs[0].structs[0][si].nvariants)):
+            vi = int(tl_inputs[0].structs[0][si].variants) + v
+            loop i in [0..int(tl_inputs[0].variants[0][vi].nfields)):
+                fi = int(tl_inputs[0].variants[0][vi].fields) + i
+                tl_inputs[0].fields[0][fi].offset = i32(int(tl_inputs[0].fields[0][fi].offset) + poff)
+        if psize == 0:
+            size = 4
+            al = 4
+        else:
+            size = tl_align_up(poff + psize, pal)
+            al = pal
+    else:
+        tl_inputs[0].types[0][t].flags = i32(int(tl_inputs[0].types[0][t].flags) | TF_LAID_OUT)
+        return
+    tl_inputs[0].types[0][t].size = i32(size)
+    tl_inputs[0].types[0][t].align = i32(al)
+    f = int(tl_inputs[0].types[0][t].flags) | TF_LAID_OUT
+    if m: f |= TF_MANAGED
+    if boxed: f |= TF_BOXED
+    tl_inputs[0].types[0][t].flags = i32(f)

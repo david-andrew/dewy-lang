@@ -1,0 +1,336 @@
+$runtime_checks
+from p"checker_types.dewy" import (TypeInfo StructInfo Field Variant)
+
+# Recursive boxing, finite defaults and layout share stable arena headers.
+# Lazy field resolution and type constructors may reenter and replace storage.
+LWord:type=int64<overflow='wrap'>
+const TF_HAS_VAR=1
+const TF_LAID_OUT=2
+const TF_MANAGED=4
+const TF_BOXED=16
+TypeLayoutHost:type=[
+    check_struct_fields:<(p0:int64):>void>
+    mk_box:<(p0:int64):>int64>
+    quantity_base:<(p0:int64):>int64>
+    math_optional:<(p0:int64):>bool>
+    endless_error:<(p0:int64 p1:int64 p2:int64):>void>
+    layout_error:<(p0:int64):>void>
+    cache_padded:<(p0:int64):>bool>
+]
+TypeLayoutInput:type=[
+    types:ptr<array<TypeInfo>>
+    structs:ptr<array<StructInfo>>
+    args:ptr<array<int32>>
+    fields:ptr<array<Field>>
+    variants:ptr<array<Variant>>
+    ptr_size:ptr<int64>
+    host:ptr<TypeLayoutHost>
+]
+let tl_inputs:ptr<TypeLayoutInput>=$unsafe (uint64(0) as ptr<TypeLayoutInput>)
+let tl_holds_seen:array<int32>=[]
+let tl_holds_gen:LWord=0
+let tl_box_dflt:dict<int64 int64>=[]
+let tl_box_dflt_busy:array<int64>=[]
+type_layout_bind=(input:ptr<TypeLayoutInput>):>LWord=>{
+    tl_inputs=input; tl_holds_seen=[]; tl_holds_gen=0; tl_box_dflt=[]; tl_box_dflt_busy=[]; 0
+}
+tl_prune=(t0:LWord):>LWord=>$unsafe {
+    let t=t0
+    loop t not=? 0 and tl_inputs[0].types[0].ptr[t].kind =? 'var' and tl_inputs[0].types[0].ptr[t].ref not=? 0 {t=LWord(tl_inputs[0].types[0].ptr[t].ref)}
+    t
+}
+tl_targ=(t:LWord i:LWord):>LWord=>$unsafe {
+    LWord(tl_inputs[0].args[0].ptr[LWord(tl_inputs[0].types[0].ptr[t].args) + i])
+}
+tl_align_up=(x:LWord a:LWord):>LWord=>$unsafe {
+    (x + a - 1) & ((a - 1) xor -1)
+}
+tl_size=(t:LWord):>LWord=>$unsafe {
+    tl_layout(t)
+    LWord(tl_inputs[0].types[0].ptr[tl_prune(t)].size)
+}
+tl_align=(t:LWord):>LWord=>$unsafe {
+    tl_layout(t)
+    let a=LWord(tl_inputs[0].types[0].ptr[tl_prune(t)].align)
+    if a =? 0 {return 1}
+    a
+}
+tl_managed=(t0:LWord):>bool=>$unsafe {
+    let t=tl_inputs[0].host[0].quantity_base(t0)
+    if tl_inputs[0].types[0].ptr[t].rep =? 'tagged_int' {return true}
+    let k=tl_inputs[0].types[0].ptr[t].kind
+    if k =? 'str_' or k =? 'array' or k =? 'fn_' or k =? 'polyfn' or k =? 'callable' or k =? 'box' {return true}
+    if k =? 'struct_' or k =? 'enum_' or k =? 'tuple' or k =? 'opt' or k =? 'fixed' {
+        tl_layout(t)
+        return LWord(tl_inputs[0].types[0].ptr[t].flags) & TF_MANAGED not=? 0
+    }
+    false
+}
+
+tl_type_holds=(t:LWord target:LWord):>bool=>$unsafe {
+    tl_holds_gen += 1
+    tl_holds_in(t  target  tl_holds_gen)
+}
+tl_holds_in=(t0:LWord target:LWord gen:LWord):>bool=>$unsafe {
+    let t=tl_prune(t0)
+    if t =? target {return true}
+    let k=tl_inputs[0].types[0].ptr[t].kind
+    if k =? 'opt' or k =? 'fixed' {return tl_holds_in(LWord(tl_inputs[0].types[0].ptr[t].elem)  target  gen)}
+    if k =? 'tuple' {
+        loop i in [0..LWord(tl_inputs[0].types[0].ptr[t].nargs)) {
+            if tl_holds_in(tl_targ(t  i)  target  gen) {return true}
+        }
+        return false
+    }
+    if k not=? 'struct_' and k not=? 'enum_' {return false}
+    loop tl_holds_seen.length <=? t {tl_holds_seen.push(0)}
+    if LWord(tl_holds_seen[t]) =? gen {return false}
+    tl_holds_seen[t] = int32(gen)
+    let si=LWord(tl_inputs[0].types[0].ptr[t].st)
+    if tl_inputs[0].structs[0].ptr[si].soa_ {return false}
+    tl_inputs[0].host[0].check_struct_fields(si)
+    loop i in [0..LWord(tl_inputs[0].structs[0].ptr[si].nfields)) {
+        if tl_holds_in(LWord(tl_inputs[0].fields[0].ptr[LWord(tl_inputs[0].structs[0].ptr[si].fields) + i].type)  target  gen) {return true}
+    }
+    loop v in [0..LWord(tl_inputs[0].structs[0].ptr[si].nvariants)) {
+        let vi=LWord(tl_inputs[0].structs[0].ptr[si].variants) + v
+        loop i in [0..LWord(tl_inputs[0].variants[0].ptr[vi].nfields)) {
+            if tl_holds_in(LWord(tl_inputs[0].fields[0].ptr[LWord(tl_inputs[0].variants[0].ptr[vi].fields) + i].type)  target  gen) {return true}
+        }
+    }
+    false
+}
+tl_decide_boxes=(si:LWord):>void=>$unsafe {
+    if tl_inputs[0].structs[0].ptr[si].boxes_done {return}
+    tl_inputs[0].structs[0][si].boxes_done = true
+    if tl_inputs[0].structs[0].ptr[si].union_ or tl_inputs[0].structs[0].ptr[si].soa_ {return}
+    tl_inputs[0].host[0].check_struct_fields(si)
+    let t=LWord(tl_inputs[0].structs[0].ptr[si].type)
+    loop i in [0..LWord(tl_inputs[0].structs[0].ptr[si].nfields)) {
+        let f=LWord(tl_inputs[0].structs[0].ptr[si].fields) + i
+        tl_inputs[0].fields[0][f].boxed = tl_type_holds(LWord(tl_inputs[0].fields[0].ptr[f].type)  t)
+    }
+    loop v in [0..LWord(tl_inputs[0].structs[0].ptr[si].nvariants)) {
+        let vi=LWord(tl_inputs[0].structs[0].ptr[si].variants) + v
+        loop i in [0..LWord(tl_inputs[0].variants[0].ptr[vi].nfields)) {
+            let f=LWord(tl_inputs[0].variants[0].ptr[vi].fields) + i
+            tl_inputs[0].fields[0][f].boxed = tl_type_holds(LWord(tl_inputs[0].fields[0].ptr[f].type)  t)
+        }
+    }
+}
+
+# A box not made yet (a field of a value made zero, `n: Node`) reads as its type's default: zero,
+# when zero holds no box whose type lacks a default (it may: an enum whose first variant holds the
+# enum, a union whose first member does), else the first variant of an enum or union that has one.
+# -1: zero, v >= 0: variant v, -2: no value of the type ends (struct Bad: me: Bad)
+tl_box_default=(t0:LWord):>LWord=>$unsafe {
+    let t=tl_prune(t0)
+    let cached=tl_box_dflt.get(t)
+    if cached isnt? none {return cached as int64}
+    if tl_box_dflt_busy.contains(t) {return - 2}
+    tl_box_dflt_busy.push(t)
+    let r:LWord=-2
+    if tl_zero_ends(t) {r=-1}
+    else if tl_inputs[0].types[0].ptr[t].kind =? 'enum_' {
+        let si=LWord(tl_inputs[0].types[0].ptr[t].st)
+        loop v in [1..LWord(tl_inputs[0].structs[0].ptr[si].nvariants)) {
+            if tl_variant_ends(si  v) {
+                r=v
+                break
+            }
+        }
+    }
+    tl_box_dflt_busy.pop();
+    # (none found while another type was being worked out may have been for want of that one's)
+    if r not=? - 2 or tl_box_dflt_busy.length =? 0 {tl_box_dflt[t] = r}
+    r
+}
+
+# does the zero value of type t end (each box in it, empty, reading as a default)?
+tl_zero_ends=(t0:LWord):>bool=>$unsafe {
+    let t=tl_prune(t0)
+    let k=tl_inputs[0].types[0].ptr[t].kind
+    if k =? 'fixed' {return LWord(tl_inputs[0].types[0].ptr[tl_prune(t)].bits) =? 0 or tl_zero_ends(LWord(tl_inputs[0].types[0].ptr[t].elem))}
+    if k =? 'tuple' {
+        loop i in [0..LWord(tl_inputs[0].types[0].ptr[t].nargs)) {
+            if not tl_zero_ends(tl_targ(t  i)) {return false}
+        }
+        return true
+    }
+    if k not=? 'struct_' and k not=? 'enum_' {return true}
+    let si=LWord(tl_inputs[0].types[0].ptr[t].st)
+    tl_decide_boxes(si)
+    if k =? 'enum_' {return LWord(tl_inputs[0].structs[0].ptr[si].nvariants) =? 0 or tl_variant_ends(si  0)}
+    tl_fields_end(LWord(tl_inputs[0].structs[0].ptr[si].fields)  LWord(tl_inputs[0].structs[0].ptr[si].nfields))
+}
+tl_variant_ends=(si:LWord v:LWord):>bool=>$unsafe {
+    let vi=LWord(tl_inputs[0].structs[0].ptr[si].variants) + v
+    tl_fields_end(LWord(tl_inputs[0].variants[0].ptr[vi].fields)  LWord(tl_inputs[0].variants[0].ptr[vi].nfields))
+}
+tl_fields_end=(f0:LWord n:LWord):>bool=>$unsafe {
+    loop f in [f0..f0 + n) {
+        if tl_inputs[0].fields[0].ptr[f].boxed {
+            if tl_box_default(LWord(tl_inputs[0].fields[0].ptr[f].type)) =? - 2 {return false}
+        }
+        else if not tl_zero_ends(LWord(tl_inputs[0].fields[0].ptr[f].type)) {return false}
+    }
+    true
+}
+
+# a struct or enum whose boxed field has a type no value of which ends: Bad holds a Bad, which holds
+# a Bad... (an optional ends with none, an enum with a variant that does)
+tl_endless_check=(si:LWord):>void=>$unsafe {
+    loop f in [LWord(tl_inputs[0].structs[0].ptr[si].fields)..LWord(tl_inputs[0].structs[0].ptr[si].fields) + LWord(tl_inputs[0].structs[0].ptr[si].nfields)) {tl_endless_field(si  f  -1)}
+    loop v in [0..LWord(tl_inputs[0].structs[0].ptr[si].nvariants)) {
+        let vi=LWord(tl_inputs[0].structs[0].ptr[si].variants) + v
+        loop f in [LWord(tl_inputs[0].variants[0].ptr[vi].fields)..LWord(tl_inputs[0].variants[0].ptr[vi].fields) + LWord(tl_inputs[0].variants[0].ptr[vi].nfields)) {tl_endless_field(si  f  vi)}
+    }
+}
+tl_endless_field=(si:LWord f:LWord vi:LWord):>void=>$unsafe {
+    if not tl_inputs[0].fields[0].ptr[f].boxed {return}
+    let ft=LWord(tl_inputs[0].fields[0].ptr[f].type)
+    if tl_box_default(ft) not=? - 2 {return}
+    tl_inputs[0].host[0].endless_error(si  f  vi)
+}
+tl_layout=(t0:LWord):>void=>$unsafe {
+    let t=tl_prune(t0)
+    if LWord(tl_inputs[0].types[0].ptr[t].flags) & TF_LAID_OUT not=? 0 {return}
+    let k=tl_inputs[0].types[0].ptr[t].kind
+    let size:LWord=0
+    let al:LWord=1
+    let m=false
+    let boxed=false
+    if k =? 'quantity' or k =? 'refined' or k =? 'callable' or k =? 'secret' {
+        let base=LWord(tl_inputs[0].types[0].ptr[t].elem)
+        tl_layout(base)
+        tl_inputs[0].types[0][t].size = tl_inputs[0].types[0].ptr[base].size
+        tl_inputs[0].types[0][t].align = tl_inputs[0].types[0].ptr[base].align
+        tl_inputs[0].types[0][t].flags = tl_inputs[0].types[0].ptr[base].flags | (tl_inputs[0].types[0].ptr[t].flags & int32(TF_HAS_VAR))
+        return
+    }
+    if k =? 'array' or k =? 'ptr' or k =? 'null_' or k =? 'cfn' or k =? 'box' {
+        size=tl_inputs[0].ptr_size[0]
+        al=tl_inputs[0].ptr_size[0]
+        m=k =? 'array' or k =? 'box'
+        boxed=k =? 'box'
+    }
+    else if k =? 'fn_' or k =? 'polyfn' {
+        size=2 * tl_inputs[0].ptr_size[0]
+        al=tl_inputs[0].ptr_size[0]
+        m=true
+    }
+    else if k =? 'opt' {
+        let e=LWord(tl_inputs[0].types[0].ptr[t].elem)
+        tl_layout(e)
+        al=tl_align(e)
+        size=if tl_inputs[0].host[0].math_optional(t) {8} else {tl_align_up(tl_size(e) + 1  al)}
+        m=tl_managed(e)
+        boxed=LWord(tl_inputs[0].types[0].ptr[tl_prune(e)].flags) & TF_BOXED not=? 0
+    }
+    else if k =? 'fixed' {
+        let e=LWord(tl_inputs[0].types[0].ptr[t].elem)
+        tl_layout(e)
+        al=tl_align(e)
+        size=tl_size(e) * LWord(tl_inputs[0].types[0].ptr[t].bits)
+        m=tl_managed(e)
+        boxed=LWord(tl_inputs[0].types[0].ptr[tl_prune(e)].flags) & TF_BOXED not=? 0
+    }
+    else if k =? 'tuple' {
+        let off:LWord=0
+        loop i in [0..LWord(tl_inputs[0].types[0].ptr[t].nargs)) {
+            let e=tl_targ(t  i)
+            tl_layout(e)
+            off=tl_align_up(off  tl_align(e))
+            off += tl_size(e)
+            if tl_align(e) >? al {al=tl_align(e)}
+            if tl_managed(e) {m=true}
+            if LWord(tl_inputs[0].types[0].ptr[tl_prune(e)].flags) & TF_BOXED not=? 0 {boxed=true}
+        }
+        size=tl_align_up(off  al)
+    }
+    else if k =? 'struct_' {
+        let si=LWord(tl_inputs[0].types[0].ptr[t].st)
+        tl_inputs[0].host[0].check_struct_fields(si)
+        if tl_inputs[0].structs[0].ptr[si].resolving {tl_inputs[0].host[0].layout_error(si)}
+        tl_decide_boxes(si)
+        tl_inputs[0].structs[0][si].resolving = true
+        let off:LWord=0
+        loop i in [0..LWord(tl_inputs[0].structs[0].ptr[si].nfields)) {
+            let fi=LWord(tl_inputs[0].structs[0].ptr[si].fields) + i
+            let e=LWord(tl_inputs[0].fields[0].ptr[fi].type)
+            # (a boxed field holds a pointer: its type, which holds this one, is laid out apart)
+            if tl_inputs[0].fields[0].ptr[fi].boxed {e=tl_inputs[0].host[0].mk_box(e)}
+            tl_layout(e)
+            off=tl_align_up(off  tl_align(e))
+            tl_inputs[0].fields[0][fi].offset = int32(off)
+            off += tl_size(e)
+            if tl_align(e) >? al {al=tl_align(e)}
+            if tl_managed(e) {m=true}
+            if LWord(tl_inputs[0].types[0].ptr[tl_prune(e)].flags) & TF_BOXED not=? 0 {boxed=true}
+        }
+        tl_inputs[0].structs[0][si].resolving = false
+        tl_endless_check(si)
+        size=tl_align_up(off  al)
+        # Padding is a tl_layout fact; retain the payload's natural alignment.
+        # An extra line also isolates payloads at an unaligned array base.
+        if tl_inputs[0].host[0].cache_padded(t) {size=tl_align_up(size + 127  128)}
+    }
+    else if k =? 'enum_' {
+        let si=LWord(tl_inputs[0].types[0].ptr[t].st)
+        tl_inputs[0].host[0].check_struct_fields(si)
+        if tl_inputs[0].structs[0].ptr[si].resolving {tl_inputs[0].host[0].layout_error(si)}
+        tl_decide_boxes(si)
+        tl_inputs[0].structs[0][si].resolving = true
+        let psize:LWord=0
+        let pal:LWord=4
+        loop v in [0..LWord(tl_inputs[0].structs[0].ptr[si].nvariants)) {
+            let vi=LWord(tl_inputs[0].structs[0].ptr[si].variants) + v
+            let off:LWord=0
+            loop i in [0..LWord(tl_inputs[0].variants[0].ptr[vi].nfields)) {
+                let fi=LWord(tl_inputs[0].variants[0].ptr[vi].fields) + i
+                let e=LWord(tl_inputs[0].fields[0].ptr[fi].type)
+                if tl_inputs[0].fields[0].ptr[fi].boxed {e=tl_inputs[0].host[0].mk_box(e)}
+                tl_layout(e)
+                off=tl_align_up(off  tl_align(e))
+                tl_inputs[0].fields[0][fi].offset = int32(off)
+                off += tl_size(e)
+                if tl_align(e) >? pal {pal=tl_align(e)}
+                if tl_managed(e) {m=true}
+                if LWord(tl_inputs[0].types[0].ptr[tl_prune(e)].flags) & TF_BOXED not=? 0 {boxed=true}
+            }
+            if off >? psize {psize=off}
+        }
+        tl_inputs[0].structs[0][si].resolving = false
+        tl_endless_check(si)
+        # General unions use address-based tag remapping and narrowing even
+        # when all alternatives are unit records (nominal errors, for example).
+        tl_inputs[0].structs[0][si].simple_enum = psize =? 0 and not tl_inputs[0].structs[0].ptr[si].union_
+        let poff=tl_align_up(4  pal)
+        tl_inputs[0].structs[0][si].payload_off = int32(poff)
+        loop v in [0..LWord(tl_inputs[0].structs[0].ptr[si].nvariants)) {
+            let vi=LWord(tl_inputs[0].structs[0].ptr[si].variants) + v
+            loop i in [0..LWord(tl_inputs[0].variants[0].ptr[vi].nfields)) {
+                let fi=LWord(tl_inputs[0].variants[0].ptr[vi].fields) + i
+                tl_inputs[0].fields[0][fi].offset = int32(LWord(tl_inputs[0].fields[0].ptr[fi].offset) + poff)
+            }
+        }
+        if psize =? 0 {
+            size=4
+            al=4
+        }
+        else {
+            size=tl_align_up(poff + psize  pal)
+            al=pal
+        }
+    }
+    else {
+        tl_inputs[0].types[0][t].flags = int32(LWord(tl_inputs[0].types[0].ptr[t].flags) | TF_LAID_OUT)
+        return
+    }
+    tl_inputs[0].types[0][t].size = int32(size)
+    tl_inputs[0].types[0][t].align = int32(al)
+    let f=LWord(tl_inputs[0].types[0].ptr[t].flags) | TF_LAID_OUT
+    if m {f |= TF_MANAGED}
+    if boxed {f |= TF_BOXED}
+    tl_inputs[0].types[0][t].flags = int32(f)
+}

@@ -1,5 +1,6 @@
 use 'type_queries.dewy'
 use 'type_inference.dewy'
+use 'type_layout.dewy'
 use 'checker_types.dewy'
 use 'type_intern.dewy'
 use 'concurrency.jo'
@@ -37,6 +38,9 @@ structs: StructInfo[]
 fields: Field[]
 variants: Variant[]
 ptr_size = 8     # 4 for wasm32
+layout_host = TypeLayoutHost(check_struct_fields, mk_box, quantity_base, math_optional, layout_endless_error, layout_cycle_error, layout_cache_padded)
+layout_input = TypeLayoutInput(&types, &structs, &type_args, &fields, &variants, &ptr_size, &layout_host)
+layout_binding = type_layout_bind(&layout_input)
 
 # built-in types (indices fixed at startup)
 T_VOID = 0
@@ -397,254 +401,30 @@ talign = (t: int) -> int:
     if a == 0: return 1
     a
 
-# ---------------- recursive types ----------------
-# A field whose type holds the struct or enum it is in, in place (struct Node: next: Node?, and
-# through a union, a tuple or another struct that holds it: `bin(l: Expr, r: Expr)`), cannot be
-# laid out inside it: it keeps its value in a box, [rc][value] on the heap that copies share until
-# one changes it (lower.jo). Every field on such a cycle is boxed, whichever type comes first; a
-# union's members never are (the struct field holding the union is). An array, a map or a pointer
-# holds its elements apart already.
-holds_seen: i32[]
-holds_gen = 0
+# Complete recursive boxing, finite defaults and layout execute in Dewy.
+type_holds = (t: int, target: int) -> bool: tl_type_holds(t, target)
+holds_in = (t: int, target: int, gen: int) -> bool: tl_holds_in(t, target, gen)
+decide_boxes = (si: int): tl_decide_boxes(si)
+box_default = (t: int) -> int: tl_box_default(t)
+zero_ends = (t: int) -> bool: tl_zero_ends(t)
+variant_ends = (si: int, v: int) -> bool: tl_variant_ends(si, v)
+fields_end = (f: int, n: int) -> bool: tl_fields_end(f, n)
+endless_check = (si: int): tl_endless_check(si)
+endless_field = (si: int, f: int, vi: int): tl_endless_field(si, f, vi)
+layout = (t: int): tl_layout(t)
 
-# does a value of type t hold one of type `target` in place?
-type_holds = (t: int, target: int) -> bool:
-    holds_gen += 1
-    holds_in(t, target, holds_gen)
-
-holds_in = (t0: int, target: int, gen: int) -> bool:
-    t = prune(t0)
-    if t == target: return true
-    k = types[t].kind
-    if k == .opt or k == .fixed: return holds_in(int(types[t].elem), target, gen)
-    if k == .tuple:
-        loop i in [0..int(types[t].nargs)):
-            if holds_in(targ(t, i), target, gen): return true
-        return false
-    if k != .struct_ and k != .enum_: return false
-    loop holds_seen.len() <= t: holds_seen.push(0)
-    if int(holds_seen[t]) == gen: return false
-    holds_seen[t] = i32(gen)
-    si = int(types[t].st)
-    if structs[si].soa_: return false
-    check_struct_fields(si)
-    loop i in [0..int(structs[si].nfields)):
-        if holds_in(int(fields[int(structs[si].fields) + i].type), target, gen): return true
-    loop v in [0..int(structs[si].nvariants)):
-        vi = int(structs[si].variants) + v
-        loop i in [0..int(variants[vi].nfields)):
-            if holds_in(int(fields[int(variants[vi].fields) + i].type), target, gen): return true
-    false
-
-decide_boxes = (si: int):
-    if structs[si].boxes_done: return
-    structs[si].boxes_done = true
-    if structs[si].union_ or structs[si].soa_: return
-    check_struct_fields(si)
-    t = int(structs[si].type)
-    loop i in [0..int(structs[si].nfields)):
-        f = int(structs[si].fields) + i
-        fields[f].boxed = type_holds(int(fields[f].type), t)
-    loop v in [0..int(structs[si].nvariants)):
-        vi = int(structs[si].variants) + v
-        loop i in [0..int(variants[vi].nfields)):
-            f = int(variants[vi].fields) + i
-            fields[f].boxed = type_holds(int(fields[f].type), t)
-
-# A box not made yet (a field of a value made zero, `n: Node`) reads as its type's default: zero,
-# when zero holds no box whose type lacks a default (it may: an enum whose first variant holds the
-# enum, a union whose first member does), else the first variant of an enum or union that has one.
-# -1: zero, v >= 0: variant v, -2: no value of the type ends (struct Bad: me: Bad)
-box_dflt: {int: int} = {}
-box_dflt_busy: int[]
-
-box_default = (t0: int) -> int:
-    t = prune(t0)
-    if let r = box_dflt.get(t): return r
-    if box_dflt_busy.contains(t): return -2
-    box_dflt_busy.push(t)
-    r = -2
-    if zero_ends(t): r = -1
-    else if types[t].kind == .enum_:
-        si = int(types[t].st)
-        loop v in [1..int(structs[si].nvariants)):
-            if variant_ends(si, v):
-                r = v
-                break
-    box_dflt_busy.pop()
-    # (none found while another type was being worked out may have been for want of that one's)
-    if r != -2 or box_dflt_busy.len() == 0: box_dflt[t] = r
-    r
-
-# does the zero value of type t end (each box in it, empty, reading as a default)?
-zero_ends = (t0: int) -> bool:
-    t = prune(t0)
-    k = types[t].kind
-    if k == .fixed: return fixed_len(t) == 0 or zero_ends(int(types[t].elem))
-    if k == .tuple:
-        loop i in [0..int(types[t].nargs)):
-            if not zero_ends(targ(t, i)): return false
-        return true
-    if k != .struct_ and k != .enum_: return true
-    si = int(types[t].st)
-    decide_boxes(si)
-    if k == .enum_: return int(structs[si].nvariants) == 0 or variant_ends(si, 0)
-    fields_end(int(structs[si].fields), int(structs[si].nfields))
-
-variant_ends = (si: int, v: int) -> bool:
-    vi = int(structs[si].variants) + v
-    fields_end(int(variants[vi].fields), int(variants[vi].nfields))
-
-fields_end = (f0: int, n: int) -> bool:
-    loop f in [f0..f0 + n):
-        if fields[f].boxed:
-            if box_default(int(fields[f].type)) == -2: return false
-        else if not zero_ends(int(fields[f].type)): return false
-    true
-
-# a struct or enum whose boxed field has a type no value of which ends: Bad holds a Bad, which holds
-# a Bad... (an optional ends with none, an enum with a variant that does)
-endless_check = (si: int):
-    loop f in [int(structs[si].fields)..int(structs[si].fields) + int(structs[si].nfields)): endless_field(si, f, -1)
-    loop v in [0..int(structs[si].nvariants)):
-        vi = int(structs[si].variants) + v
-        loop f in [int(variants[vi].fields)..int(variants[vi].fields) + int(variants[vi].nfields)): endless_field(si, f, vi)
-
-endless_field = (si: int, f: int, vi: int):
-    if not fields[f].boxed: return
+layout_endless_error = (si: int, f: int, vi: int):
     ft = int(fields[f].type)
-    if box_default(ft) != -2: return
     nm = structs[si].name
     fname = name_of(int(fields[f].name))
     dewy = files[pos_file(nodes[int(structs[si].decl)].pos)].is_dewy
     fix = "`{fname}: {type_str_postfix(ft, dewy)}?`"
     if vi >= 0: fix = "`{name_of(int(variants[vi].name))}({fname}: {type_str_postfix(ft, dewy)}?)`"
     fatal(nodes[int(structs[si].decl)].pos, "recursive type '{nm}' has no finite value: field '{fname}' keeps containing {type_str(ft, dewy)}; make it optional ({fix}) or an array")
-
-layout = (t0: int):
-    t = prune(t0)
-    if int(types[t].flags) & TF_LAID_OUT != 0: return
-    k = types[t].kind
-    size = 0
-    al = 1
-    m = false
-    boxed = false
-    if k == .quantity or k == .refined or k == .callable or k == .secret:
-        base = int(types[t].elem)
-        layout(base)
-        types[t].size = types[base].size
-        types[t].align = types[base].align
-        types[t].flags = types[base].flags | (types[t].flags & i32(TF_HAS_VAR))
-        return
-    if k == .array or k == .ptr or k == .null_ or k == .cfn or k == .box:
-        size = ptr_size
-        al = ptr_size
-        m = k == .array or k == .box
-        boxed = k == .box
-    else if k == .fn_ or k == .polyfn:
-        size = 2 * ptr_size
-        al = ptr_size
-        m = true
-    else if k == .opt:
-        e = int(types[t].elem)
-        layout(e)
-        al = talign(e)
-        size = if math_optional(t): 8 else: align_up(tsize(e) + 1, al)
-        m = is_managed(e)
-        boxed = int(types[prune(e)].flags) & TF_BOXED != 0
-    else if k == .fixed:
-        e = int(types[t].elem)
-        layout(e)
-        al = talign(e)
-        size = tsize(e) * int(types[t].bits)
-        m = is_managed(e)
-        boxed = int(types[prune(e)].flags) & TF_BOXED != 0
-    else if k == .tuple:
-        off = 0
-        loop i in [0..int(types[t].nargs)):
-            e = targ(t, i)
-            layout(e)
-            off = align_up(off, talign(e))
-            off += tsize(e)
-            if talign(e) > al: al = talign(e)
-            if is_managed(e): m = true
-            if int(types[prune(e)].flags) & TF_BOXED != 0: boxed = true
-        size = align_up(off, al)
-    else if k == .struct_:
-        si = int(types[t].st)
-        check_struct_fields(si)
-        if structs[si].resolving: ice("{structs[si].name} laid out inside itself")
-        decide_boxes(si)
-        structs[si].resolving = true
-        off = 0
-        loop i in [0..int(structs[si].nfields)):
-            fi = int(structs[si].fields) + i
-            e = int(fields[fi].type)
-            # (a boxed field holds a pointer: its type, which holds this one, is laid out apart)
-            if fields[fi].boxed: e = mk_box(e)
-            layout(e)
-            off = align_up(off, talign(e))
-            fields[fi].offset = i32(off)
-            off += tsize(e)
-            if talign(e) > al: al = talign(e)
-            if is_managed(e): m = true
-            if int(types[prune(e)].flags) & TF_BOXED != 0: boxed = true
-        structs[si].resolving = false
-        endless_check(si)
-        size = align_up(off, al)
-        # Padding is a layout fact; retain the payload's natural alignment.
-        # An extra line also isolates payloads at an unaligned array base.
-        if structs[si].decl != 0 and nodes[int(structs[si].decl)].name == i32(intern("CachePadded")) and concurrency_builtin_type(t, "CachePadded"): size = align_up(size + 127, 128)
-    else if k == .enum_:
-        si = int(types[t].st)
-        check_struct_fields(si)
-        if structs[si].resolving: ice("{structs[si].name} laid out inside itself")
-        decide_boxes(si)
-        structs[si].resolving = true
-        psize = 0
-        pal = 4
-        loop v in [0..int(structs[si].nvariants)):
-            vi = int(structs[si].variants) + v
-            off = 0
-            loop i in [0..int(variants[vi].nfields)):
-                fi = int(variants[vi].fields) + i
-                e = int(fields[fi].type)
-                if fields[fi].boxed: e = mk_box(e)
-                layout(e)
-                off = align_up(off, talign(e))
-                fields[fi].offset = i32(off)
-                off += tsize(e)
-                if talign(e) > pal: pal = talign(e)
-                if is_managed(e): m = true
-                if int(types[prune(e)].flags) & TF_BOXED != 0: boxed = true
-            if off > psize: psize = off
-        structs[si].resolving = false
-        endless_check(si)
-        # General unions use address-based tag remapping and narrowing even
-        # when all alternatives are unit records (nominal errors, for example).
-        structs[si].simple_enum = psize == 0 and not structs[si].union_
-        poff = align_up(4, pal)
-        structs[si].payload_off = i32(poff)
-        loop v in [0..int(structs[si].nvariants)):
-            vi = int(structs[si].variants) + v
-            loop i in [0..int(variants[vi].nfields)):
-                fi = int(variants[vi].fields) + i
-                fields[fi].offset = i32(int(fields[fi].offset) + poff)
-        if psize == 0:
-            size = 4
-            al = 4
-        else:
-            size = align_up(poff + psize, pal)
-            al = pal
-    else:
-        types[t].flags = i32(int(types[t].flags) | TF_LAID_OUT)
-        return
-    types[t].size = i32(size)
-    types[t].align = i32(al)
-    f = int(types[t].flags) | TF_LAID_OUT
-    if m: f |= TF_MANAGED
-    if boxed: f |= TF_BOXED
-    types[t].flags = i32(f)
+layout_cycle_error = (si: int): ice("{structs[si].name} laid out inside itself")
+layout_cache_padded = (t: int) -> bool:
+    si = int(types[t].st)
+    structs[si].decl != 0 and nodes[int(structs[si].decl)].name == i32(intern("CachePadded")) and concurrency_builtin_type(t, "CachePadded")
 
 # a type followed by [] or ? or |: function types and unions need parentheses there
 type_str_postfix = (t: int, dewy: bool = false) -> str:
