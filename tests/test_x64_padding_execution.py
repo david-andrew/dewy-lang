@@ -12,7 +12,7 @@ from tests.support import ROOT, compiler  # noqa: F401
                     reason='executes Linux x86-64 machine code')
 def test_padding_preserves_execution(compiler, tmp_path):
     source = tmp_path / 'padding.jo'
-    source.write_text(f"use '{ROOT / 'compiler/backend_analysis.dewy'}'\nuse '{ROOT / 'compiler/x64.jo'}'\nuse '{ROOT / 'compiler/x64_encode.dewy'}'\nuse '{ROOT / 'compiler/ir_types.dewy'}'\nuse '{ROOT / 'compiler/ir.jo'}'\n" + '''
+    source.write_text(f"use '{ROOT / 'compiler/backend_analysis.dewy'}'\nuse '{ROOT / 'compiler/x64.jo'}'\nuse '{ROOT / 'compiler/x64_emit.dewy'}'\nuse '{ROOT / 'compiler/x64_encode.dewy'}'\nuse '{ROOT / 'compiler/ir_types.dewy'}'\nuse '{ROOT / 'compiler/ir.jo'}'\n" + '''
 fragments = [
     [0x48, 0xB8, 7, 0, 0, 0, 0, 0, 0, 0],
     [0x48, 0x89, 0xF8],
@@ -53,6 +53,7 @@ loop blocks in [0..9):
         ir.code.push(Ins(.eq, 0, 2, 0, 2, 0, 0))
         x_branch_pos = ir.code.len()
         ir.code.push(Ins(.brif, 0, -1, 2, 0, 0, 0))
+        x64_emitter_ir(&ir)
         assert(x_absorb_padding(padding), "padding not absorbed")
         assert(original.len() == 10 and original[3] == 0x48, "shared bytes changed")
         b(0xC3)
@@ -81,9 +82,11 @@ loop blocks in [0..9):
         x_branch_pos = ir.code.len()
         ir.code.push(Ins(.brif, 0, -1, 2, 0, 0, 0))
         x_padding_floor = code.len()
+        x64_emitter_ir(&ir)
         assert(not x_absorb_padding(padding), "moved a branch destination")
         assert(code == original, "rejected padding changed bytes")
         x_padding_floor = 3
+        x64_emitter_ir(&ir)
         assert(x_absorb_padding(padding), "narrow padding not absorbed")
         assert(original.len() == 7 and original[3] == 0x48, "shared bytes changed")
         b(0xC3)

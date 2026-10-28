@@ -17,14 +17,15 @@ pytestmark = pytest.mark.skipif(
 def test_mask_flags_and_frames(compiler, tmp_path):
     source = tmp_path / 'mask_flags.jo'
     source.write_text(''.join(f"use '{ROOT / 'compiler' / module}'\n" for module in
-                              ('x64.jo', 'x64_encode.dewy', 'x64_allocate.dewy',
-                               'backend_analysis.dewy')) + '''
+                              ('x64.jo', 'x64_emit.dewy', 'x64_encode.dewy', 'x64_allocate.dewy',
+                               'backend_analysis.dewy', 'ir.jo')) + '''
 vloc_storage = [RDI, RSI]
 vloc = data(vloc_storage)
 vcval_storage = [0, 0]
 vcval = data(vcval_storage)
 vspill = [-8, -16]
 frame_size = 256
+x64_emitter_ir(&ir)
 loop rsp in [false, true]:
     loop mode in [0..5):
         loop mask in [-9223372036854775807 - 1, -2147483648, -1, 0, 1, 127, 128, 2147483647, 2147483648, 4294967295, 9223372036854775807]:
