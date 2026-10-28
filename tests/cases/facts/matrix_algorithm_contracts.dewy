@@ -1,0 +1,22 @@
+# Singularity is a result, and successful results retain their input sizes.
+let a=reshape<float64>([3.0 1.0 1.0 2.0] 2 2)
+let b:array<float64>=[9.0 8.0]
+let x=solve(a b)
+if x isnt? Singular {printl(x[0] x[1])}
+let inv=inverse(a)
+if inv isnt? Singular {printl(abs(inv[0 0]-0.4) <? 1e-9 abs(inv[1 1]-0.6) <? 1e-9)}
+printl(det(a))
+printl(solve(zeros(2 2) [1.0 1.0]) is? Singular)
+let empty=inverse(zeros(0 0))
+if empty isnt? Singular {printl(rows(empty) cols(empty))}
+a=zeros(1 1)
+b=[]
+if x isnt? Singular {printl(x[1])}
+first=(a:array<float64 length=[n n]> b:array<float64 length=[n]>):>float64=>{
+    if n =? 0 return 0.0
+    let answer=solve(a b)
+    if answer is? Singular return 0.0
+    $assert(answer.length =? b.length)
+    answer[0]
+}
+printl(first(eye(2) [7.0 9.0]))

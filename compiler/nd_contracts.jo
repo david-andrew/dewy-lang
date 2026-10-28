@@ -2,6 +2,8 @@
 # Internal paths: -2 is rank, -3-axis is an extent; ordinary array length is -1.
 # Signature work is O(parameters + dimensions), only for written shapes. Call
 # transfer is O(rank), capped at four for scalar indexing, with indexed facts.
+# Floating matrix algorithms use at most two axes and immutable successful
+# result projections; classification is cached, and only demanded calls run it.
 use 'checker_tokens.dewy'
 use 'checker_types.dewy'
 use 'refinement_types.dewy'
@@ -175,6 +177,10 @@ fact_nd_classify = (n: int) -> int:
         fact_nd_names[intern("ndarray")] = 106
         fact_nd_names[intern("[]")] = 110
         fact_nd_names[intern("[]=")] = 111
+        fact_nd_names[intern("inverse")] = 120
+        fact_nd_names[intern("solve")] = 121
+        fact_nd_names[intern("det")] = 122
+        fact_nd_names[intern("*")] = 130
     kind = fact_nd_names.get(int(nodes[d].name)) ?? 0
     if kind == 0 or nkids(n) == 0: return 0
     path = files[pos_file(nodes[d].pos)].path
@@ -182,6 +188,18 @@ fact_nd_classify = (n: int) -> int:
     if kind <= 3: return if is_nd(representation_type(ntype(n))): kind else: 0
     base = representation_type(ntype(kid(n, 0)))
     if not is_nd(base) and not (kind >= 102 and kind <= 106 or kind == 6) : return 0
+    if kind >= 120 and kind <= 122:
+        if nkids(n) != (if kind == 121: 2 else: 1) or nd_elem(base) != T_FLOAT: return 0
+        if ownership_decls.len() != 0 and ownership_fact_type(base): return 0
+    if kind == 130:
+        if nkids(n) != 2 or nd_elem(base) != T_FLOAT and nd_elem(base) != T_F32: return 0
+        other = representation_type(ntype(kid(n, 1)))
+        if is_nd(other):
+            if nd_elem(other) != nd_elem(base): return 0
+        else:
+            if tkind(other) != .array or telem(other) != nd_elem(base): return 0
+            kind = 131
+        if ownership_decls.len() != 0 and ownership_fact_type(base): return 0
     if kind == 110 or kind == 111:
         if ownership_type(nd_elem(base)) or not effect_share(nd_elem(base)): return 0
         count = nkids(n) - (if kind == 110: 1 else: 2)
@@ -226,7 +244,32 @@ fact_nd_check = (n: int, s: mut FactState, values: int[], kind: int):
     rank = fact_nd_rank(s, values[0], t)
     text = wit_text(kid(n, 0))
     if text == "": text = "the array"
-    if kind == 100 or kind == 101 or kind == 105 or kind == 110 or kind == 111:
+    if kind == 130 or kind == 131:
+        fact_nd_need(n, s, .eq, rank, fact_constant(s, 2), "{text}.length.length =? 2")
+        fact_nd_need(n, s, .eq, fact_nd_valid(s, values[0]), fact_constant(s, 1), "{text}.data.length matches its shape")
+        left = fact_nd_dim(s, values[0], t, fact_constant(s, 1))
+        other = wit_text(kid(n, 1))
+        if other == "": other = "the right array"
+        right = fact_project(s, values[1], -1, false, T_INT)
+        relation = "{text}.length[1] =? {other}.length"
+        if kind == 130:
+            fact_nd_need(n, s, .eq, fact_nd_rank(s, values[1], ntype(kid(n, 1))), fact_constant(s, 2), "{other}.length.length =? 2")
+            fact_nd_need(n, s, .eq, fact_nd_valid(s, values[1]), fact_constant(s, 1), "{other}.data.length matches its shape")
+            right = fact_nd_dim(s, values[1], ntype(kid(n, 1)), fact_constant(s, 0))
+            relation += "[0]"
+        fact_nd_need(n, s, .eq, left, right, relation)
+    else if kind >= 120:
+        # Numeric linear algebra touches only a square matrix's own storage.
+        # These are the actual boundary obligations; singularity is a result.
+        fact_nd_need(n, s, .eq, rank, fact_constant(s, 2), "{text}.length.length =? 2")
+        fact_nd_need(n, s, .eq, fact_nd_valid(s, values[0]), fact_constant(s, 1), "{text}.data.length matches its shape")
+        rows = fact_nd_dim(s, values[0], t, fact_constant(s, 0))
+        cols = fact_nd_dim(s, values[0], t, fact_constant(s, 1))
+        fact_nd_need(n, s, .eq, rows, cols, "{text}.length[0] =? {text}.length[1]")
+        if kind == 121:
+            length = fact_project(s, values[1], -1, false, T_INT)
+            fact_nd_need(n, s, .eq, length, rows, "{wit_text(kid(n, 1))}.length =? {text}.length[0]")
+    else if kind == 100 or kind == 101 or kind == 105 or kind == 110 or kind == 111:
         count = if kind == 105: 1 else if kind < 110: 2 else: nkids(n) - (if kind == 110: 1 else: 2)
         fact_nd_need(n, s, .eq, rank, fact_constant(s, count), "{text}.length.length =? {count}")
         if kind < 110: return
@@ -262,11 +305,11 @@ fact_nd_check = (n: int, s: mut FactState, values: int[], kind: int):
             extent = fact_nd_dim(s, values[0], t, index)
             fact_nd_need(n, s, .eq, extent, expected, "{text}.length[{axis}] matches its declared extent")
 
-fact_nd_make = (n: int, s: mut FactState, dims: int[], data: int = 0) -> int:
+fact_nd_make = (n: int, s: mut FactState, dims: int[], data: int = 0, result_type: int = 0) -> int:
     shape = fact_new(s, FactBound(), FactTerm(type = mk_array(T_INT)))
     fact_add_projection(s, FactProjection(shape, -1, false, fact_constant(s, dims.len())))
     loop i in [0..dims.len()): fact_add_projection(s, FactProjection(shape, fact_constant(s, i), true, dims[i]))
-    result = fact_new(s, FactBound(), FactTerm(type = ntype(n)))
+    result = fact_new(s, FactBound(), FactTerm(type = (if result_type != 0: result_type else: ntype(n))))
     fact_add_projection(s, FactProjection(result, intern("shape"), false, shape))
     # A literal helper receives its flat storage; unlike allocating
     # constructors it does not check that storage against its dimensions.
@@ -324,6 +367,36 @@ fact_nd_capture = (n: int, s: mut FactState, values: int[], kind: int) -> int:
         fact_set_bound(s, fact_nd_valid(s, result), FactBound(1, 1, true))
         return result
     if kind >= 100 or kind == 6: fact_nd_check(n, s, values, (if kind == 6: 107 else: kind))
+    if kind == 130 or kind == 131:
+        rows = fact_nd_dim(s, values[0], ntype(kid(n, 0)), fact_constant(s, 0))
+        if kind == 130:
+            cols = fact_nd_dim(s, values[1], ntype(kid(n, 1)), fact_constant(s, 1))
+            return fact_nd_make(n, s, [rows, cols])
+        result = fact_fresh(s, ntype(n))
+        length = fact_clamped(s, rows, n)
+        if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, -1, false, length))
+        return result
+    if kind == 120 or kind == 121:
+        result = fact_fresh(s, ntype(n))
+        loop t in union_members(fact_type(ntype(n))):
+            if kind == 120 and is_nd(t):
+                extent = fact_nd_dim(s, values[0], ntype(kid(n, 0)), fact_constant(s, 0))
+                value = fact_nd_make(n, s, [extent, extent], 0, t)
+                if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, -4, false, value))
+                break
+            if kind == 121 and tkind(t) == .array:
+                value = fact_fresh(s, t)
+                length = fact_project(s, values[1], -1, false, T_INT)
+                # Returning solve checked that this immutable RHS count is
+                # its row count. Retain bounds known from either identity.
+                rows = fact_nd_dim(s, values[0], ntype(kid(n, 0)), fact_constant(s, 0))
+                b = fact_bound(s, length); r = fact_bound(s, rows)
+                b.lo = max(b.lo, r.lo); b.hi = min(b.hi, r.hi); b.nz = b.nz or r.nz
+                fact_set_bound(s, length, b)
+                if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(value, -1, false, length))
+                if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, -4, false, value))
+                break
+        return result
     if kind == 1: return fact_nd_make(n, s, values)
     if kind == 2: return fact_nd_make(n, s, [values[0], values[0]])
     if kind == 3: return fact_nd_make(n, s, values[1..], values[0])
@@ -435,7 +508,7 @@ nd_mutable_check = (n: int, s: mut FactState, values: int[]):
 # callbacks. Numeric element reads have the same property.
 fact_nd_reads_only = (n: int) -> bool:
     k = fact_nd_call(n)
-    if k >= 4 and k <= 8 or k >= 100 and k <= 105: return true
+    if k >= 4 and k <= 8 or k >= 100 and k <= 105 or k >= 120 and k <= 122 or k == 130 or k == 131: return true
     k == 110 and effect_share(nd_elem(representation_type(ntype(kid(n, 0)))))
 
 # Mutable entry contracts are separate from the callable's storage type.

@@ -2541,7 +2541,6 @@ parameter still needs `$runtime_checks`; direct calls can prove its entry shape.
 
 
 ```dewy
-$runtime_checks                  # matrix multiplication has further checks
 product = (a:array<float64 length=[m n]> b:array<float64 length=[n p]>) => a*b
 width = (rows:array<int64 length=[r 2]>):>int64 => r   # r is rows' first dimension
 ```
@@ -2584,7 +2583,17 @@ column vector. `a+b` and `a-b` require matching shapes. `sum`, `mean`, `min` and
 `max` reduce the elements. `solve(matrix values)`, `inverse(matrix)` and
 `det(matrix)` provide linear algebra on square `float64` matrices; a singular
 matrix gives `Singular` as an error value from `solve` and `inverse`; use
-`or_throw`, `??`, or `match` to handle it.
+`or_throw`, `??`, or `match` to handle it. Their checked contracts require
+rank two, equal row and column counts, and storage matching the shape; `solve`
+also requires one right-hand-side value per row. These relations can be proven
+from constructors or shaped parameters. A successful `solve` retains the
+right-hand side's length, and a successful `inverse` retains the square shape.
+Later changes to an input do not alter the returned value's facts.
+Matrix products on `float32` and `float64` require rank-two operands, matching
+storage and equal inner dimensions; a matrix-vector product instead requires
+its vector length to equal the matrix's column count. Their results retain the
+outer dimensions, including zero extents. Integer and custom element products
+retain their arithmetic or operator obligations.
 
 `dot(a b)` computes a dot product. `norm(values)` computes the Euclidean length
 of a `float64` array; `hypot(x y)` computes the length of two coordinates.

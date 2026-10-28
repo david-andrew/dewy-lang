@@ -1,0 +1,23 @@
+let a=reshape<float64>([1.0 2.0 3.0 4.0] 2 2)
+let b=eye(2)
+let product=a*b
+printl(product[0 0] product[1 1])
+let vector=a*[1.0 2.0]
+printl(vector[0] vector[1])
+let saved=product
+a.data=[]
+b=zeros(1 1)
+printl(saved[1 0])
+let empty=zeros(2 0)*zeros(0 3)
+printl(rows(empty) cols(empty) empty[1 2])
+let small=zeros<float32>(2 3)*zeros<float32>(3 1)
+printl(rows(small) cols(small) small[1 0])
+let left=eye(2)
+let snapshot=left*{left.data=[]; eye(2)}
+printl(snapshot[0 0])
+first_product=(a:array<float64 length=[m n]> b:array<float64 length=[n p]>):>float64=>{
+    if m =? 0 or p =? 0 return 0.0
+    let out=a*b
+    out[0 0]
+}
+printl(first_product(eye(2) eye(2)))
