@@ -192,9 +192,16 @@ tl_endless_field=(si:LWord f:LWord vi:LWord):>void=>$unsafe {
     if tl_box_default(ft) not=? - 2 {return}
     tl_inputs[0].host[0].endless_error(si  f  vi)
 }
+# Keep the already-laid-out path outside the recursive worker's spill frame.
+# This view ends before the worker can call lazy resolution or grow an arena.
 tl_layout=(t0:LWord):>void=>$unsafe {
-    let t=tl_prune(t0)
-    if LWord(tl_inputs[0].types[0].ptr[t].flags) & TF_LAID_OUT not=? 0 {return}
+    let types=tl_inputs[0].types[0].ptr
+    let t=t0
+    loop t not=? 0 and types[t].kind =? 'var' and types[t].ref not=? 0 {t=LWord(types[t].ref)}
+    if LWord(types[t].flags) & TF_LAID_OUT not=? 0 {return}
+    tl_layout_body(t)
+}
+tl_layout_body=(t:LWord):>void=>$unsafe {
     let k=tl_inputs[0].types[0].ptr[t].kind
     let size:LWord=0
     let al:LWord=1

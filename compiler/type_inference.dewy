@@ -48,11 +48,14 @@ tu_occurs=(v:TWord t0:TWord):>bool=>$unsafe {
     type_query_occurs_children(@tu_inputs[0].types[0]  @tu_inputs[0].structs[0]  @tu_inputs[0].args[0]  v  t)
 }
 tu_equal=(a0:TWord b0:TWord):>bool=>$unsafe {
-    let a=tu_prune(a0)
-    let b=tu_prune(b0)
+    let types=tu_inputs[0].types[0].ptr
+    let a=a0
+    let b=b0
+    loop a not=? 0 and types[a].kind =? 'var' and types[a].ref not=? 0 {a=TWord(types[a].ref)}
+    loop b not=? 0 and types[b].kind =? 'var' and types[b].ref not=? 0 {b=TWord(types[b].ref)}
     if a =? b {return true}
     if a =? 0 or b =? 0 {return false}
-    if not tu_has_var(a) and not tu_has_var(b) {return false}
+    if (types[a].flags & 1) =? 0 and (types[b].flags & 1) =? 0 {return false}
     type_query_equal_shape(@tu_inputs[0].types[0]  @tu_inputs[0].structs[0]  @tu_inputs[0].args[0]  a  b)
 }
 tu_is_union=(t0:TWord):>bool=>$unsafe {
@@ -67,8 +70,13 @@ tu_union_members=(t0:TWord):>array<int64>=>$unsafe {
 }
 
 tu_zonk=(t0:TWord):>TWord=>$unsafe {
-    let t=tu_prune(t0)
-    if t =? 0 or not tu_has_var(t) or tu_inputs[0].types[0].ptr[t].kind =? 'var' or tu_inputs[0].types[0].ptr[t].kind =? 'param' {return t}
+    let types=tu_inputs[0].types[0].ptr
+    let t=t0
+    loop t not=? 0 and types[t].kind =? 'var' and types[t].ref not=? 0 {t=TWord(types[t].ref)}
+    if t =? 0 or (types[t].flags & 1) =? 0 or types[t].kind =? 'var' or types[t].kind =? 'param' {return t}
+    tu_zonk_children(t)
+}
+tu_zonk_children=(t:TWord):>TWord=>$unsafe {
     let k=tu_inputs[0].types[0].ptr[t].kind
     if k =? 'callable' {return tu_inputs[0].host[0].mk_callable_contract(tu_zonk(TWord(tu_inputs[0].types[0].ptr[t].elem))  tu_inputs[0].host[0].effect_subst(TWord(tu_inputs[0].types[0].ptr[t].st)  []  true)  TWord(tu_inputs[0].types[0].ptr[t].bits))}
     if k =? 'effect' {return tu_inputs[0].host[0].effect_type(tu_inputs[0].host[0].effect_subst(TWord(tu_inputs[0].types[0].ptr[t].st)  []  true))}
@@ -88,10 +96,18 @@ tu_zonk=(t0:TWord):>TWord=>$unsafe {
     loop i in [0..TWord(tu_inputs[0].types[0].ptr[t].nargs)) {args.push(tu_zonk(tu_targ(t  i)))}
     tu_inputs[0].host[0].mk_type(c  args)
 }
+# Identity needs no recursive frame or mutable view. Borrow through pruning,
+# then end that view before a structural unification can replace arena storage.
 tu_unify=(a0:TWord b0:TWord):>bool=>$unsafe {
-    let a=tu_prune(a0)
-    let b=tu_prune(b0)
+    let types=tu_inputs[0].types[0].ptr
+    let a=a0
+    let b=b0
+    loop a not=? 0 and types[a].kind =? 'var' and types[a].ref not=? 0 {a=TWord(types[a].ref)}
+    loop b not=? 0 and types[b].kind =? 'var' and types[b].ref not=? 0 {b=TWord(types[b].ref)}
     if a =? b {return true}
+    tu_unify_pair(a b)
+}
+tu_unify_pair=(a:TWord b:TWord):>bool=>$unsafe {
     if tu_inputs[0].types[0].ptr[a].kind =? 'var' {
         if tu_occurs(a  b) {return false}
         tu_inputs[0].types[0][a].ref = int32(b)

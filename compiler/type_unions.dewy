@@ -44,8 +44,14 @@ uu_mk_union=(ms0:array<int64>):>UWord=>$unsafe {
             has_none=true
             work.push(UWord(uu_inputs[0].types[0].ptr[m].elem))
         }
-        else if tu_is_union(m) {
-            loop x in tu_union_members(m) {work.push(x)}
+        else if k =? 'enum_' and uu_inputs[0].structs[0].ptr[UWord(uu_inputs[0].types[0].ptr[m].st)].union_ {
+            # m is already pruned. Growing this private work list cannot move
+            # the type argument arena; borrow that fixed member run once.
+            let si=UWord(uu_inputs[0].types[0].ptr[m].st)
+            let first=UWord(uu_inputs[0].structs[0].ptr[si].targs)
+            let count=UWord(uu_inputs[0].structs[0].ptr[si].ntargs)
+            let members=uu_inputs[0].args[0].ptr
+            loop i in [UWord(0)..count) {work.push(UWord(members[first + i]))}
         }
         else {
             let dup=false
@@ -96,8 +102,10 @@ uu_mk_union=(ms0:array<int64>):>UWord=>$unsafe {
 }
 uu_union_inst=(ms:array<int64>):>UWord=>$unsafe {
     let stable=true
-    loop m in ms {
-        if tu_has_var(m) {stable=false}
+    let types=uu_inputs[0].types[0].ptr
+    let values=ms.ptr
+    loop i in [UWord(0)..UWord(ms.length)) {
+        if (types[values[i]].flags & 1) not=? 0 {stable=false}
     }
     if stable {
         let cached=uu_instances.get(ms)
@@ -105,8 +113,8 @@ uu_union_inst=(ms:array<int64>):>UWord=>$unsafe {
     }
     else {
         loop i in uu_candidates {
-            let si=uu_inputs[0].structs[0].ptr[i]
-            if UWord(si.ntargs) not=? ms.length {continue}
+            let si=uu_inputs[0].structs[0].ptr + i
+            if UWord(si[0].ntargs) not=? ms.length {continue}
             let same=true
             loop k in [0..ms.length) {
                 if not tu_equal(tu_struct_targ(i  k)  ms[k]) {
@@ -114,9 +122,14 @@ uu_union_inst=(ms:array<int64>):>UWord=>$unsafe {
                     break
                 }
             }
-            if same {return UWord(si.type)}
+            if same {return UWord(si[0].type)}
         }
     }
+    uu_create(ms stable)
+}
+# Name rendering can reenter and grow storage; only a missing canonical union
+# enters this worker. The read-only candidate probe retains no record snapshots.
+uu_create=(ms:array<int64> stable:bool):>UWord=>$unsafe {
     let name=""
     let hv=false
     loop i in [0..int64(ms.length)) {
