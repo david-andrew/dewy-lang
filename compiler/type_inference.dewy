@@ -1,0 +1,156 @@
+$runtime_checks
+from p"checker_types.dewy" import (TypeInfo StructInfo)
+from p"type_queries.dewy" import (type_query_occurs_children type_query_equal_shape)
+
+# Recursive inference and substitution own their walks. Constructors and
+# checker services may grow arenas; retain IDs, never element views across them.
+TWord:type=int64<overflow='wrap'>
+const TF_HAS_VAR=1
+const TF_LAID_OUT=2
+TypeInferenceHost:type=[
+    mk_callable_contract:<(p0:int64 p1:int64 p2:int64):>int64>
+    effect_subst:<(p0:int64 p1:array<int64> p2:bool):>int64>
+    effect_type:<(p0:int64):>int64>
+    mk_refined:<(p0:int64 p1:int64):>int64>
+    ref_subst:<(p0:int64 p1:array<int64> p2:bool):>int64>
+    mk_quantity:<(p0:int64 p1:int64 p2:int64 p3:int64):>int64>
+    get_struct_inst:<(p0:int64 p1:array<int64>):>int64>
+    mk_type:<(p0:TypeInfo p1:array<int64>):>int64>
+    mk_union:<(p0:array<int64>):>int64>
+ ]
+TypeInferenceInput:type=[
+    types:ptr<array<TypeInfo>>
+    structs:ptr<array<StructInfo>>
+    args:ptr<array<int32>>
+    binds:ptr<int64>
+    host:ptr<TypeInferenceHost>
+]
+let tu_inputs:ptr<TypeInferenceInput>=$unsafe (uint64(0) as ptr<TypeInferenceInput>)
+type_inference_bind=(input:ptr<TypeInferenceInput>):>TWord=>{tu_inputs=input;0}
+tu_prune=(t0:TWord):>TWord=>$unsafe {
+    let t=t0
+    loop t not=? 0 and tu_inputs[0].types[0].ptr[t].kind =? 'var' and tu_inputs[0].types[0].ptr[t].ref not=? 0 {t=TWord(tu_inputs[0].types[0].ptr[t].ref)}
+    t
+}
+tu_has_var=(t:TWord):>bool=>$unsafe {
+    TWord(tu_inputs[0].types[0].ptr[t].flags) & 1 not=? 0
+}
+tu_targ=(t:TWord i:TWord):>TWord=>$unsafe {
+    TWord(tu_inputs[0].args[0].ptr[TWord(tu_inputs[0].types[0].ptr[t].args) + i])
+}
+tu_struct_targ=(si:TWord i:TWord):>TWord=>$unsafe {
+    TWord(tu_inputs[0].args[0].ptr[TWord(tu_inputs[0].structs[0].ptr[si].targs) + i])
+}
+tu_occurs=(v:TWord t0:TWord):>bool=>$unsafe {
+    let t=tu_prune(t0)
+    if t =? v {return true}
+    if not tu_has_var(t) {return false}
+    type_query_occurs_children(@tu_inputs[0].types[0]  @tu_inputs[0].structs[0]  @tu_inputs[0].args[0]  v  t)
+}
+tu_equal=(a0:TWord b0:TWord):>bool=>$unsafe {
+    let a=tu_prune(a0)
+    let b=tu_prune(b0)
+    if a =? b {return true}
+    if a =? 0 or b =? 0 {return false}
+    if not tu_has_var(a) and not tu_has_var(b) {return false}
+    type_query_equal_shape(@tu_inputs[0].types[0]  @tu_inputs[0].structs[0]  @tu_inputs[0].args[0]  a  b)
+}
+tu_is_union=(t0:TWord):>bool=>$unsafe {
+    let t=tu_prune(t0)
+    tu_inputs[0].types[0].ptr[t].kind =? 'enum_' and tu_inputs[0].structs[0].ptr[TWord(tu_inputs[0].types[0].ptr[t].st)].union_
+}
+tu_union_members=(t0:TWord):>array<int64>=>$unsafe {
+    let si=TWord(tu_inputs[0].types[0].ptr[tu_prune(t0)].st)
+    let out:array<int64>=[]
+    loop i in [0..TWord(tu_inputs[0].structs[0].ptr[si].ntargs)) {out.push(tu_struct_targ(si  i))}
+    out
+}
+
+tu_zonk=(t0:TWord):>TWord=>$unsafe {
+    let t=tu_prune(t0)
+    if t =? 0 or not tu_has_var(t) or tu_inputs[0].types[0].ptr[t].kind =? 'var' or tu_inputs[0].types[0].ptr[t].kind =? 'param' {return t}
+    let k=tu_inputs[0].types[0].ptr[t].kind
+    if k =? 'callable' {return tu_inputs[0].host[0].mk_callable_contract(tu_zonk(TWord(tu_inputs[0].types[0].ptr[t].elem))  tu_inputs[0].host[0].effect_subst(TWord(tu_inputs[0].types[0].ptr[t].st)  []  true)  TWord(tu_inputs[0].types[0].ptr[t].bits))}
+    if k =? 'effect' {return tu_inputs[0].host[0].effect_type(tu_inputs[0].host[0].effect_subst(TWord(tu_inputs[0].types[0].ptr[t].st)  []  true))}
+    if k =? 'refined' {return tu_inputs[0].host[0].mk_refined(tu_zonk(TWord(tu_inputs[0].types[0].ptr[t].elem))  tu_inputs[0].host[0].ref_subst(TWord(tu_inputs[0].types[0].ptr[t].st)  []  true))}
+    if k =? 'quantity' {return tu_inputs[0].host[0].mk_quantity(tu_zonk(TWord(tu_inputs[0].types[0].ptr[t].elem))  TWord(tu_inputs[0].types[0].ptr[t].st)  0  TWord(tu_inputs[0].types[0].ptr[t].bits))}
+    if k =? 'struct_' or k =? 'enum_' {
+        let si=TWord(tu_inputs[0].types[0].ptr[t].st)
+        let args:array<int64>=[]
+        loop i in [0..TWord(tu_inputs[0].structs[0].ptr[si].ntargs)) {args.push(tu_zonk(TWord(tu_inputs[0].args[0].ptr[TWord(tu_inputs[0].structs[0].ptr[si].targs) + i])))}
+        return tu_inputs[0].host[0].get_struct_inst(TWord(tu_inputs[0].structs[0].ptr[si].decl)  args)
+    }
+    if k =? 'typeval' or k =? 'module' {return t}
+    let c=tu_inputs[0].types[0].ptr[t]
+    c.flags = int32(TWord(c.flags) & ((TF_HAS_VAR | TF_LAID_OUT) xor -1))
+    if c.elem not=? 0 {c.elem = int32(tu_zonk(TWord(c.elem)))}
+    let args:array<int64>=[]
+    loop i in [0..TWord(tu_inputs[0].types[0].ptr[t].nargs)) {args.push(tu_zonk(tu_targ(t  i)))}
+    tu_inputs[0].host[0].mk_type(c  args)
+}
+tu_unify=(a0:TWord b0:TWord):>bool=>$unsafe {
+    let a=tu_prune(a0)
+    let b=tu_prune(b0)
+    if a =? b {return true}
+    if tu_inputs[0].types[0].ptr[a].kind =? 'var' {
+        if tu_occurs(a  b) {return false}
+        tu_inputs[0].types[0][a].ref = int32(b)
+        tu_inputs[0].binds[0] += 1
+        return true
+    }
+    if tu_inputs[0].types[0].ptr[b].kind =? 'var' {
+        if tu_occurs(b  a) {return false}
+        tu_inputs[0].types[0][b].ref = int32(a)
+        tu_inputs[0].binds[0] += 1
+        return true
+    }
+    if tu_is_union(a) and tu_is_union(b) and(tu_has_var(a) or tu_has_var(b)) {return tu_unify_unions(a  b)}
+    let ta=tu_inputs[0].types[0].ptr[a]
+    let tb=tu_inputs[0].types[0].ptr[b]
+    if ta.kind not=? tb.kind or ta.nargs not=? tb.nargs or ta.bits not=? tb.bits or ta.sign not=? tb.sign {return false}
+    if ta.kind =? 'struct_' or ta.kind =? 'enum_' {
+        if ta.st =? tb.st {return true}
+        let sa=TWord(ta.st)
+        let sb=TWord(tb.st)
+        if tu_inputs[0].structs[0].ptr[sa].decl not=? tu_inputs[0].structs[0].ptr[sb].decl or tu_inputs[0].structs[0].ptr[sa].ntargs not=? tu_inputs[0].structs[0].ptr[sb].ntargs {return false}
+        loop i in [0..TWord(tu_inputs[0].structs[0].ptr[sa].ntargs)) {
+            if not tu_unify(tu_struct_targ(sa  i)  tu_struct_targ(sb  i)) {return false}
+        }
+        return true
+    }
+    if(ta.kind =? 'int_' or ta.kind =? 'quantity' or ta.kind =? 'dimension' or ta.kind =? 'effect' or ta.kind =? 'callable' or ta.kind =? 'refined') and ta.st not=? tb.st {return false}
+    if ta.elem not=? 0 or tb.elem not=? 0 {
+        if ta.elem =? 0 or tb.elem =? 0 or not tu_unify(TWord(ta.elem)  TWord(tb.elem)) {return false}
+    }
+    loop i in [0..TWord(ta.nargs)) {
+        if not tu_unify(tu_targ(a  i)  tu_targ(b  i)) {return false}
+    }
+    if ta.kind =? 'polyfn' and ta.st not=? tb.st {return false}
+    if ta.kind =? 'fn_' and ta.mutmask not=? tb.mutmask {return false}
+    true
+}
+
+# unions with type variables: members that are equal match each other, and a single variable
+# member of one side stands for the other side's remaining members
+tu_unify_unions=(a:TWord b:TWord):>bool=>$unsafe {
+    if tu_has_var(b) and not tu_has_var(a) {return tu_unify_unions(b  a)}
+    let ams=tu_union_members(a)
+    let bms=tu_union_members(b)
+    let rest:array<int64>=[]
+    loop m in bms {
+        let same=false
+        loop am in ams {
+            if not tu_has_var(am) and tu_equal(am  m) {same=true}
+        }
+        if not same {rest.push(m)}
+    }
+    let vars:array<int64>=[]
+    loop am in ams {
+        if tu_has_var(am) {vars.push(am)}
+    }
+    if vars.length not=? 1 or tu_inputs[0].types[0].ptr[tu_prune(vars[0])].kind not=? 'var' or rest.length =? 0 {return false}
+    if not tu_unify(vars[0]  tu_inputs[0].host[0].mk_union(rest)) {return false}
+    # The variable may now hold a union itself. Flatten and canonicalize the
+    # resolved alternatives before comparing their shapes.
+    tu_equal(tu_zonk(a)  tu_zonk(b))
+}

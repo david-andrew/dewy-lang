@@ -1,0 +1,130 @@
+use 'checker_types.dewy'
+use 'type_queries.dewy'
+const TF_HAS_VAR = 1
+const TF_LAID_OUT = 2
+struct TypeInferenceHost:
+    mk_callable_contract: (int, int, int) -> int
+    effect_subst: (int, int[], bool) -> int
+    effect_type: (int) -> int
+    mk_refined: (int, int) -> int
+    ref_subst: (int, int[], bool) -> int
+    mk_quantity: (int, int, int, int) -> int
+    get_struct_inst: (int, int[]) -> int
+    mk_type: (TypeInfo, int[]) -> int
+    mk_union: (int[]) -> int
+struct TypeInferenceInput:
+    types: *(TypeInfo[])
+    structs: *(StructInfo[])
+    args: *(i32[])
+    binds: *int
+    host: *TypeInferenceHost
+tu_inputs: *TypeInferenceInput
+type_inference_bind = (input: *TypeInferenceInput) -> int:
+    tu_inputs = input
+    0
+tu_prune = (t0: int) -> int:
+    t = t0
+    loop t != 0 and tu_inputs[0].types[0][t].kind == .var and tu_inputs[0].types[0][t].ref != 0: t = int(tu_inputs[0].types[0][t].ref)
+    t
+tu_has_var = (t: int) -> bool: int(tu_inputs[0].types[0][t].flags) & 1 != 0
+tu_targ = (t: int, i: int) -> int: int(tu_inputs[0].args[0][int(tu_inputs[0].types[0][t].args) + i])
+tu_struct_targ = (si: int, i: int) -> int: int(tu_inputs[0].args[0][int(tu_inputs[0].structs[0][si].targs) + i])
+tu_occurs = (v: int, t0: int) -> bool:
+    t = tu_prune(t0)
+    if t == v: return true
+    if not tu_has_var(t): return false
+    type_query_occurs_children(tu_inputs[0].types[0], tu_inputs[0].structs[0], tu_inputs[0].args[0], v, t)
+tu_equal = (a0: int, b0: int) -> bool:
+    a = tu_prune(a0)
+    b = tu_prune(b0)
+    if a == b: return true
+    if a == 0 or b == 0: return false
+    if not tu_has_var(a) and not tu_has_var(b): return false
+    type_query_equal_shape(tu_inputs[0].types[0], tu_inputs[0].structs[0], tu_inputs[0].args[0], a, b)
+tu_is_union = (t0: int) -> bool:
+    t = tu_prune(t0)
+    tu_inputs[0].types[0][t].kind == .enum_ and tu_inputs[0].structs[0][int(tu_inputs[0].types[0][t].st)].union_
+
+tu_union_members = (t0: int) -> int[]:
+    si = int(tu_inputs[0].types[0][tu_prune(t0)].st)
+    out: int[]
+    loop i in [0..int(tu_inputs[0].structs[0][si].ntargs)): out.push(tu_struct_targ(si, i))
+    out
+
+tu_zonk = (t0: int) -> int:
+    t = tu_prune(t0)
+    if t == 0 or not tu_has_var(t) or tu_inputs[0].types[0][t].kind == .var or tu_inputs[0].types[0][t].kind == .param: return t
+    k = tu_inputs[0].types[0][t].kind
+    if k == .callable: return tu_inputs[0].host[0].mk_callable_contract(tu_zonk(int(tu_inputs[0].types[0][t].elem)), tu_inputs[0].host[0].effect_subst(int(tu_inputs[0].types[0][t].st), [], true), int(tu_inputs[0].types[0][t].bits))
+    if k == .effect: return tu_inputs[0].host[0].effect_type(tu_inputs[0].host[0].effect_subst(int(tu_inputs[0].types[0][t].st), [], true))
+    if k == .refined: return tu_inputs[0].host[0].mk_refined(tu_zonk(int(tu_inputs[0].types[0][t].elem)), tu_inputs[0].host[0].ref_subst(int(tu_inputs[0].types[0][t].st), [], true))
+    if k == .quantity: return tu_inputs[0].host[0].mk_quantity(tu_zonk(int(tu_inputs[0].types[0][t].elem)), int(tu_inputs[0].types[0][t].st), 0, int(tu_inputs[0].types[0][t].bits))
+    if k == .struct_ or k == .enum_:
+        si = int(tu_inputs[0].types[0][t].st)
+        args: int[]
+        loop i in [0..int(tu_inputs[0].structs[0][si].ntargs)): args.push(tu_zonk(int(tu_inputs[0].args[0][int(tu_inputs[0].structs[0][si].targs) + i])))
+        return tu_inputs[0].host[0].get_struct_inst(int(tu_inputs[0].structs[0][si].decl), args)
+    if k == .typeval or k == .module: return t
+    c = tu_inputs[0].types[0][t]
+    c.flags = i32(int(c.flags) & ~(TF_HAS_VAR | TF_LAID_OUT))
+    if c.elem != 0: c.elem = i32(tu_zonk(int(c.elem)))
+    args: int[]
+    loop i in [0..int(tu_inputs[0].types[0][t].nargs)): args.push(tu_zonk(tu_targ(t, i)))
+    tu_inputs[0].host[0].mk_type(c, args)
+
+tu_unify = (a0: int, b0: int) -> bool:
+    a = tu_prune(a0)
+    b = tu_prune(b0)
+    if a == b: return true
+    if tu_inputs[0].types[0][a].kind == .var:
+        if tu_occurs(a, b): return false
+        tu_inputs[0].types[0][a].ref = i32(b)
+        tu_inputs[0].binds[0] += 1
+        return true
+    if tu_inputs[0].types[0][b].kind == .var:
+        if tu_occurs(b, a): return false
+        tu_inputs[0].types[0][b].ref = i32(a)
+        tu_inputs[0].binds[0] += 1
+        return true
+    if tu_is_union(a) and tu_is_union(b) and (tu_has_var(a) or tu_has_var(b)): return tu_unify_unions(a, b)
+    ta = tu_inputs[0].types[0][a]
+    tb = tu_inputs[0].types[0][b]
+    if ta.kind != tb.kind or ta.nargs != tb.nargs or ta.bits != tb.bits or ta.sign != tb.sign: return false
+    if ta.kind == .struct_ or ta.kind == .enum_:
+        if ta.st == tb.st: return true
+        sa = int(ta.st)
+        sb = int(tb.st)
+        if tu_inputs[0].structs[0][sa].decl != tu_inputs[0].structs[0][sb].decl or tu_inputs[0].structs[0][sa].ntargs != tu_inputs[0].structs[0][sb].ntargs: return false
+        loop i in [0..int(tu_inputs[0].structs[0][sa].ntargs)):
+            if not tu_unify(tu_struct_targ(sa, i), tu_struct_targ(sb, i)): return false
+        return true
+    if (ta.kind == .int_ or ta.kind == .quantity or ta.kind == .dimension or ta.kind == .effect or ta.kind == .callable or ta.kind == .refined) and ta.st != tb.st: return false
+    if ta.elem != 0 or tb.elem != 0:
+        if ta.elem == 0 or tb.elem == 0 or not tu_unify(int(ta.elem), int(tb.elem)): return false
+    loop i in [0..int(ta.nargs)):
+        if not tu_unify(tu_targ(a, i), tu_targ(b, i)): return false
+    if ta.kind == .polyfn and ta.st != tb.st: return false
+    if ta.kind == .fn_ and ta.mutmask != tb.mutmask: return false
+    true
+
+# unions with type variables: members that are equal match each other, and a single variable
+# member of one side stands for the other side's remaining members
+tu_unify_unions = (a: int, b: int) -> bool:
+    if tu_has_var(b) and not tu_has_var(a): return tu_unify_unions(b, a)
+    ams = tu_union_members(a)
+    bms = tu_union_members(b)
+    rest: int[]
+    loop m in bms:
+        same = false
+        loop am in ams:
+            if not tu_has_var(am) and tu_equal(am, m): same = true
+        if not same: rest.push(m)
+    vars: int[]
+    loop am in ams:
+        if tu_has_var(am): vars.push(am)
+    if vars.len() != 1 or tu_inputs[0].types[0][tu_prune(vars[0])].kind != .var or rest.len() == 0: return false
+    if not tu_unify(vars[0], tu_inputs[0].host[0].mk_union(rest)): return false
+    # The variable may now hold a union itself. Flatten and canonicalize the
+    # resolved alternatives before comparing their shapes.
+    tu_equal(tu_zonk(a), tu_zonk(b))
+
