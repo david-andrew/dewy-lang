@@ -1,0 +1,14 @@
+f=(a:int64 b:int64):>int64=>{
+    let result:int=(a+b)*2
+    if int64.min <=? result and result <=? int64.max return result
+    return 0
+}
+g=(a:uint8 b:uint8):>uint8=>{
+    let result:int=a+b
+    if uint8.min <=? result and result <=? uint8.max return result
+    return 0
+}
+main=()=>{
+    printl(f(2 8) f(9223372036854775807 1))
+    printl(g(2 8) g(255 1))
+}

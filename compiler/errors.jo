@@ -268,6 +268,8 @@ forward_member = (n: int, receiver: int, t: int, expected: int) -> int:
     name = "$receiver{n}"
     add_flag(receiver, NF_CHECKED)
     members = value_members(t)
+    source = (receiver, int(nodes[n].name))
+    selections: int[]
     chain = 0
     j = members.len() - 1
     loop j >= 0:
@@ -276,6 +278,7 @@ forward_member = (n: int, receiver: int, t: int, expected: int) -> int:
         value = base
         if member == T_NONE: value = mk(.none_lit, pos)
         else if own or not exception_member(member): value = bc_field(base, name_of(int(nodes[n].name)), pos)
+        selections.push(value)
         body = bc_block([bc_stmt(value, pos)], pos)
         if chain == 0: chain = body
         else:
@@ -290,7 +293,12 @@ forward_member = (n: int, receiver: int, t: int, expected: int) -> int:
             chain = bc_block([bc_stmt(branch, pos)], pos)
         j -= 1
     nodes[n] = nodes[bc_block([bc_let(name, receiver, pos), bc_stmt(chain, pos)], pos)]
-    check_expr(n, 0)
+    result = check_expr(n, 0)
+    direct = true
+    loop selection in selections:
+        if nodes[selection].kind != .field or nodes[selection].aux < 0: direct = false; break
+    if direct: union_field_sources[n] = source
+    result
 
 # A union or optional with an exception alternative and a value alternative.
 forwards_exceptions = (t0: int) -> bool:

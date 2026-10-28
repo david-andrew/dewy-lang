@@ -1,0 +1,16 @@
+f=(a:int64 b:int64):>int64=>{
+    let result:int=a+b
+    if int64.min <=? result and result <=? int64.max return result
+    return 0
+}
+g=(a:int64 b:int64):>int64=>{
+    let result:int=a-b
+    if result <=? int64.max and int64.min <=? result return result
+    return 0
+}
+main=()=>{
+    printl(f(9223372036854775807 0) f(-9223372036854775808 0))
+    printl(f(9223372036854775807 1) f(-9223372036854775808 -1))
+    printl(g(9223372036854775807 0) g(-9223372036854775808 0))
+    printl(g(9223372036854775807 -1) g(-9223372036854775808 1))
+}

@@ -1,0 +1,6 @@
+Event:type=type of any & [account:string]
+Opened:type=type of Event
+f=(events:array<Event> counts:dict<string int>):>void=>{
+    loop e in events printl(counts[e.account])
+}
+main=()=>f([Opened["missing"]] ["a"->1])

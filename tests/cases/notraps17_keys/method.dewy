@@ -1,0 +1,15 @@
+let turn=0
+Event:type=type of any & [
+    key=():>string=>{
+        turn=if turn=?0 1 else 0
+        if turn=?1 "a" else "missing"
+    }
+]
+Opened:type=type of Event
+main=()=>{
+    let counts:dict<string int>=["a"->1]
+    let events:array<Event>=[Opened]
+    loop e in events {
+        if counts.get(e.key) is? int counts[e.key]+=1
+    }
+}

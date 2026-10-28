@@ -114,6 +114,10 @@ wit_text = (e0: int, depth: int = 0) -> str:
     loop nodes[e].kind == .narrow or nodes[e].kind == .conv and (wit_same_value(e) or nodes[e].aux == i32(int(CV.refinement)) or nodes[e].aux == i32(int(CV.set_text))):
         e = int(nodes[e].a)
     k = nodes[e].kind
+    if k == .block:
+        if let source = union_field_sources.get(e):
+            base = wit_text(source.0, depth + 1)
+            if base != "": return "{base}.{name_of(source.1)}"
     if k == .ident and nodes[e].name != 0:
         name = name_of(int(nodes[e].name))
         # (`d[v * n // 256] += 1` holds its index in a temporary: it is shown as written)

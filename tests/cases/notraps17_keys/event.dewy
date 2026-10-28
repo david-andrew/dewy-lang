@@ -1,0 +1,11 @@
+Event:type=type of any & [account:string]
+Opened:type=type of Event
+main=()=>{
+    let counts:dict<string int64> = []
+    let log:array<Event>=[Opened["a"] Opened["b"]]
+    loop e in log {
+        if counts.get(e.account) is? none counts[e.account]=0
+        counts[e.account]+=1
+    }
+    printl(counts)
+}

@@ -1,0 +1,10 @@
+Event:type=type of any & [account:string]
+Opened:type=type of Event
+main=()=>{
+    let counts:dict<string int>=["a"->1]
+    let e:Event=Opened["a"]
+    if counts.get(e.account) is? int {
+        e=Opened["missing"]
+        counts[e.account]+=1
+    }
+}

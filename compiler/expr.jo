@@ -5022,6 +5022,9 @@ union_dispatch = (n: int, name: int, decls: int[], args: int[], expected: int) -
 
 # x.f where x is a union whose members are all structs with a field f of one type: n becomes
 # `let u = x; if u is A: u.f else ...` (x itself when it is a variable or field); -1 if not
+# Common-field lowering retains its source route for witnesses and stable keys.
+# Indexed only for these generated blocks; no extra whole-program traversal.
+union_field_sources: {int: (int, int)} = {}
 union_field = (n: int, ut: int, fname: int) -> int:
     ms = union_members(ut)
     ft = 0
@@ -5068,6 +5071,7 @@ union_field = (n: int, ut: int, fname: int) -> int:
     blk = 0
     if place: blk = bc_block([chain], pos)
     else: blk = bc_block([bc_let(un, a, pos), chain], pos)
+    union_field_sources[n] = (a, fname)
     nodes[n] = nodes[blk]
     n
 

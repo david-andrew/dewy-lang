@@ -1,0 +1,11 @@
+sum=(a:int64 b:int64):>int64=>{let result=(a+b)>>1; return result}
+difference=(a:int64 b:int64):>int64=>{let result=(a-b)>>1; return result}
+floor_sum=(a:int64 b:int64):>int64=>{let result=(a+b)//2; return result}
+main=()=>{
+    printl(sum(9223372036854775807 9223372036854775807))
+    printl(sum(-9223372036854775808 -9223372036854775808))
+    printl(sum(-3 0) floor_sum(-3 0))
+    printl(difference(9223372036854775807 -9223372036854775808))
+    printl(difference(-9223372036854775808 9223372036854775807))
+    printl(floor_sum(9223372036854775807 9223372036854775807))
+}

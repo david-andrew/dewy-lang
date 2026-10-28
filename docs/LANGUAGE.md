@@ -697,7 +697,8 @@ return cleanup still invalidate facts they could falsify. Module `const` values,
 including their lengths and guarded elements, retain facts across calls.
 For a dictionary with non-optional values and builtin keys, a successful
 `d.get(k)` supplies membership in that evaluated dictionary. A later change
-to the dictionary or key does not inherit that evidence.
+to the dictionary or key does not inherit that evidence. Common fields of an
+immutable tagged value retain key identity through a compound dictionary update.
 Immutable literal tables supply key membership and element-field bounds;
 `text.lines` is nonempty when `text` is nonempty. Read-only array-loop elements
 keep guarded field facts across unrelated calls. A successful integer narrowing
@@ -706,6 +707,10 @@ relation; its original narrowing check can still make the helper panic.
 A saved conjunction can retain its captured guard's bounds, and symbolic
 `max(lo min(hi value))` retains both bounds when `lo <=? hi` is known.
 Integer-to-float conversions use the integer bounds known at that conversion.
+A wide integer result guarded between a fixed-width type's `.min` and `.max`
+can be stored in that type. Halving an exact sum or difference of `int64`
+values retains its finite bounds through a local variable, including endpoint
+values and negative floor rounding.
 A sorted copy has its input value's length and retains bounds shared by all
 known input elements, including record fields. Sorting or reversing in place
 retains those bounds for builtin values. Element writes, unknown mutations and

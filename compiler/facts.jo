@@ -2653,6 +2653,13 @@ fact_assume = (s: mut FactState, v: int, truth: bool):
             y.wide = false
             fact_set_bound(s, b, y, not fact_open_endpoint(s, a, false))
             y = fact_bound(s, b)
+        # A first guard may bound only one end of a wide result. Keep its
+        # captured relation so a later guard can establish the other end.
+        if x.wide or y.wide:
+            if not y.wide and (y.hi != FACT_MAX or fact_host_value(s, b)) or not x.wide and (x.lo != FACT_MIN or fact_host_value(s, a)):
+                fact_difference(s, a, b, (if op == .lt: -1 else: 0), t.origin)
+            if x.wide: fact_guarded_word(s, a); x = fact_bound(s, a)
+            if y.wide: fact_guarded_word(s, b); y = fact_bound(s, b)
         # (below an `int` literal in [2^63, 2^64): a row, the only place
         # that ceiling fits, for a conversion to uint64)
         if y.wide and not x.wide and fact_u64_literal(b) < 0: fact_difference(s, a, b, (if op == .lt: -1 else: 0), t.origin)
@@ -2704,6 +2711,35 @@ fact_assume = (s: mut FactState, v: int, truth: bool):
     if op == .lt or op == .le:
         fact_offset_narrow(s, a, x)
         fact_offset_narrow(s, b, y)
+
+# Two current bounds can bring a wide intermediate back into the host domain.
+# Each endpoint needs a finite captured neighbor, never a cycle of wide terms.
+# Demand-only O(incident rows), already capped at 16 per value by fact_difference.
+fact_guarded_word = (s: mut FactState, value: int):
+    bound = fact_bound(s, value)
+    lower = bound.lo > FACT_MIN
+    upper = bound.hi < FACT_MAX
+    loop side in [0..2):
+        ri = fact_difference_head(s, value, side)
+        loop ri >= 0:
+            row = s.differences[ri]
+            ri = fact_difference_next(s, ri, side)
+            other = if side == 1: row.b else: row.a
+            q = fact_bound(s, other)
+            if q.wide: continue
+            if side == 1:
+                if (q.hi != FACT_MAX or fact_host_value(s, other)) and fact_add_fits(q.hi, row.limit):
+                    bound.hi = min(bound.hi, q.hi + row.limit)
+                    upper = true
+            else if row.limit != FACT_MIN:
+                if (q.lo != FACT_MIN or fact_host_value(s, other)) and fact_add_fits(q.lo, -row.limit):
+                    bound.lo = max(bound.lo, q.lo - row.limit)
+                    lower = true
+    if lower and upper:
+        bound.wide = false
+        bound.reason = .missing
+        bound.witness = 0
+        fact_set_bound(s, value, bound, true)
 
 # A compared offset `i+c` (or `i-c`) narrows i too: `i+1 <? stop` bounds i
 # below stop-1, so a counter guarded at an offset stays below a length. O(1).
@@ -3413,6 +3449,15 @@ fact_relational = (s: FactState, v: int, upper: bool) -> int:
         visits += s.differences.len() - 1 - previous
     best
 
+# Only a quotient/shift consumer requests a 65-bit mathematical sum term.
+# Do not retain arbitrary wide loop updates and perturb their fixed point.
+# One current AST identity, restored across nested captures: O(1) state.
+fact_sum_operand = 0
+fact_sum_source = (n: int) -> int:
+    e = n
+    loop nodes[e].kind == .conv or nodes[e].kind == .narrow: e = int(nodes[e].a)
+    e
+
 fact_arithmetic = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
     if fact_type(ntype(n)) == T_U64: return exact_unsigned_fact(s, n, op, a, b)
     x = fact_bound(s, a); y = fact_bound(s, b)
@@ -3462,7 +3507,7 @@ fact_arithmetic = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
         sums = fact_sum_rows(s, a, b)
     if op == .minus:
         if y.lo == FACT_MIN:
-            if exact_has_node(n): return fact_new(s, FactBound(wide = true), FactTerm(op, a, b, n, ntype(n)))
+            if exact_has_node(n) or n == fact_sum_operand and fact_type(ntype(n)) == T_MATH_INT and fact_host_finite(s, a) and fact_host_finite(s, b): return fact_new(s, FactBound(wide = true), FactTerm(op, a, b, n, ntype(n)))
             return fact_unmodeled(s, n, .unsupported)
         lo = -y.hi
         y.hi = -y.lo
@@ -3495,7 +3540,7 @@ fact_arithmetic = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
             if c.lo != FACT_MIN and r.limit != FACT_MIN and fact_add_fits(c.lo, -r.limit) and (not low or c.lo - r.limit > lo):
                 lo = c.lo - r.limit; low = true
     if not low or not high:
-        if exact_has_node(n) or n < exact_marks.len() and exact_marks[n] & 32 != 0: return fact_new(s, FactBound(lo, hi, lo > 0 or hi < 0, wide = true), FactTerm(op, a, b, n, ntype(n)))
+        if exact_has_node(n) or n == fact_sum_operand and fact_type(ntype(n)) == T_MATH_INT and fact_host_finite(s, a) and fact_host_finite(s, b) or n < exact_marks.len() and exact_marks[n] & 32 != 0: return fact_new(s, FactBound(lo, hi, lo > 0 or hi < 0, wide = true), FactTerm(op, a, b, n, ntype(n)))
         return fact_unmodeled(s, n, .unsupported)
     if not exact_has_node(n) and (not sa_fits(lo, ntype(n)) or not sa_fits(hi, ntype(n))): return fact_unmodeled(s, n, .unsupported)
     # (`i+2` again names the value the last `i+2` made: a scanner's reads
@@ -3621,7 +3666,9 @@ fact_sum_quotient = (s: mut FactState, n: int, a: int, d: int) -> int:
     low = fact_sum_quotient_endpoint(x.lo, (if subtract: y.hi else: y.lo), d, subtract)
     high = fact_sum_quotient_endpoint(x.hi, (if subtract: y.lo else: y.hi), d, subtract)
     if not low.0 or not high.0: return 0
-    fact_new(s, FactBound(low.1, high.1, low.1 > 0 or high.1 < 0), FactTerm(type = ntype(n)))
+    # Endpoint arithmetic above certified real host endpoints, including MIN/MAX.
+    t = if fact_type(ntype(n)) == T_MATH_INT: T_INT else: ntype(n)
+    fact_new(s, FactBound(low.1, high.1, low.1 > 0 or high.1 < 0), FactTerm(type = t))
 
 # Integer `//` and `%` by a nonzero divisor (kind 1, 2), or by a power of two
 # as a shift count or mask (3, 4). Dewy's remainder has the divisor's sign, so
@@ -3731,6 +3778,12 @@ fact_bitwise = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
         if y.wide or y.hi >= 0: return fact_unmodeled(s, n, .unsupported)
         y.lo = y.lo xor FACT_MIN
         y.hi = y.hi xor FACT_MIN
+    # An exact sum/difference may need 65 bits before a right shift. Reuse
+    # the checked quotient endpoints rather than clipping it to a host word.
+    # Demand-only O(1) plus the existing indexed endpoint queries.
+    if op == .shr and x.wide and not y.wide and y.lo == y.hi and y.lo >= 1 and y.lo <= 62 and fact_type(ntype(n)) != T_U64:
+        divided = fact_sum_quotient(s, n, a, 1 << y.lo)
+        if divided != 0: return divided
     # A finite nonnegative mask bounds even an arbitrarily wide exact operand.
     # Do not discard this proof just because the other side exceeded a word.
     if op == .amp and (x.wide or y.wide) and fact_type(ntype(n)) != T_U64:
@@ -4103,7 +4156,8 @@ fact_narrow_check = (n: int, s: mut FactState, value: int) -> bool:
         wit_fail(nodes[n].pos, "{shown} does not fit {dt(ntype(n))}")
         return false
     err_notes.push((-1, "help: widen the destination to `int`, state the domain as a refinement, or choose `overflow='wrap'|'saturate'`"))
-    wit_unknown(n, fact_bound(s, value), "`{relation}` for the conversion to {dt(ntype(n))}", 0, relation, missing)
+    repair = if lc != 1 and hc != 1: "{low} <=? {side.text} and {side.text} <=? {shown_limit}" else: relation
+    wit_unknown(n, fact_bound(s, value), "`{relation}` for the conversion to {dt(ntype(n))}", 0, repair, missing)
     false
 
 # The builtin floor helper a Dewy `//` or `%` resolved to (fact_floor's kind), or 0.
@@ -4570,15 +4624,31 @@ fact_map_key = (s: mut FactState, e0: int, value: int) -> int:
 # (and so is a field path of one, `s.region`: one value per declaration and
 # path, numbered in fact_key_paths. O(path depth))
 fact_key_paths: {(int, int): int}
+# Captured selectors are keyed by checked local identity, never by spelling.
+# Only a declaration holding the exact recorded source node enters this map.
+fact_selector_sources: {int: int}
 fact_stable_key = (e: int, depth: int = 0) -> int:
     if nodes[e].kind == .ident and nodes[e].aux == i32(int(SK.local)) and not has_flag(e, NF_GLOBAL):
         l = int(nodes[e].sym)
-        if l > 0 and int(locals[l].flags) & (LF_PARAM | LF_MUTPARAM | LF_ASSIGNED | LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_ADDR | LF_ELEMALIAS | LF_SOAMUT) == 0 and fact_dewy_local(l): return (2 << 42) + l
+        if l > 0 and int(locals[l].flags) & (LF_PARAM | LF_MUTPARAM | LF_ASSIGNED | LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_ADDR | LF_ELEMALIAS | LF_SOAMUT) == 0 and fact_dewy_local(l):
+            if depth < 8:
+                if let source = fact_selector_sources.get(l):
+                    stable = fact_stable_key(source, depth + 1)
+                    if stable != 0: return stable
+            return (2 << 42) + l
         return 0
-    if depth >= 8 or not fact_field_node(e) or nodes[e].aux < 0: return 0
-    base = fact_stable_key(int(nodes[e].a), depth + 1)
+    if depth >= 8: return 0
+    if nodes[e].kind == .block:
+        if let source = union_field_sources.get(e):
+            if ownership_decls.len() != 0 and ownership_fact_type(ntype(source.0)): return 0
+            return fact_stable_field(fact_stable_key(source.0, depth + 1), source.1)
+        return 0
+    if not fact_field_node(e) or nodes[e].aux < 0: return 0
+    fact_stable_field(fact_stable_key(int(nodes[e].a), depth + 1), int(nodes[e].name))
+
+fact_stable_field = (base: int, name: int) -> int:
     if base == 0: return 0
-    key = (base, int(nodes[e].name))
+    key = (base, name)
     if let known = fact_key_paths.get(key): return known
     made = (3 << 42) + fact_key_paths.len() + 1
     fact_key_paths[key] = made
@@ -7398,6 +7468,9 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         s.live = false
         return 0
     if k == .vardecl:
+        if nodes[n].sym > 0 and not has_flag(n, NF_GLOBAL) and index_update_sources.len() > 0:
+            if let source = index_update_sources.get(int(nodes[n].name)):
+                if source == int(nodes[n].b): fact_selector_sources[int(nodes[n].sym)] = source
         saving = fact_saving
         fact_saving = fact_saved_boolean(int(nodes[n].b))
         r = if nodes[n].b != 0: fact_capture(int(nodes[n].b), s) else: fact_constant(s, 0, n)
@@ -7567,7 +7640,10 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         b = if v < 0: fact_domain(T_BOOL) else: FactBound(1 - v, 1 - v, v == 0)
         return fact_new(s, b, FactTerm(.kw_not, a, 0, n))
     if k == .binary:
+        sum_operand = fact_sum_operand
+        if nodes[n].op == i32(int(Tok.shr)) or nodes[n].op == i32(int(Tok.slash)): fact_sum_operand = fact_sum_source(int(nodes[n].a))
         a = fact_capture(int(nodes[n].a), s)
+        fact_sum_operand = sum_operand
         if result_active and nodes[int(nodes[n].b)].kind == .none_lit and tkind(ntype(int(nodes[n].a))) == .opt:
             tag = fact_project(s, a, -3, false, T_INT)
             zero = fact_constant(s, 0)
@@ -7895,7 +7971,10 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         fact_capture(int(nodes[n].a), s)
         outer_call = fact_route_call
         fact_route_call = n
+        sum_operand = fact_sum_operand
+        if fact_floor_call(n) == 1: fact_sum_operand = fact_sum_source(kid(n, 0))
         values = fact_call_arguments(n, s)
+        fact_sum_operand = sum_operand
         fact_route_call = outer_call
         if fact_map_snapshot_call(n): return fact_map_snapshot(n, s, values[0])
         if fact_parallel_array(n): fact_parallel_record(n, s, values[0])
@@ -8647,6 +8726,7 @@ facts_reset = ():
     fact_predicate_nodes = [FactPredicate()]
     fact_shared_literals = []
     fact_saving = false
+    fact_sum_operand = 0
     fact_constant_globals = {}
     fact_call_field_types = {}
     draw_context_reset()
@@ -8671,6 +8751,7 @@ facts_reset = ():
     fact_comprehensions = {}
     fact_owner = 0
     fact_summaries = {}
+    fact_selector_sources = {}
     fact_shape_summaries = {}
     fact_summary_shape_mask = 0
     fact_summary_shapes = []
