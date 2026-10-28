@@ -1,0 +1,7 @@
+choose=(xs:array<int> i:int j:int pick:int64<0 <=? pick and pick <? 2>):>int=>{
+    if i <? 0 or i >=? xs.length or j <? 0 or j >=? xs.length return 0
+    let choices=[i j]
+    xs.clear()
+    xs[choices[pick]]
+}
+printl(choose([4 8] 0 1 1))

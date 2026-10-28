@@ -713,8 +713,11 @@ values retains its finite bounds through a local variable, including endpoint
 values and negative floor rounding.
 A sorted copy has its input value's length and retains bounds shared by all
 known input elements, including record fields. Sorting or reversing in place
-retains those bounds for builtin values. Element writes, unknown mutations and
-copy hooks discard evidence they can change. `text.chars()` has `text.length`
+retains those bounds for builtin values. Finite element inventories also retain
+scalar relations established for every entry, such as an index being below
+another array's length. A write to a known position in a short `fill` retains
+facts about its untouched entries. Element writes, unknown mutations and copy
+hooks discard evidence they can change. `text.chars()` has `text.length`
 elements; a comprehension collecting the same number of values for every element,
 `[loop x in xs {1.0 x x^2}]`, has that many times `xs.length`. A method called
 on a dictionary entry (`accounts[name].withdraw(n) or_throw`) changes that entry

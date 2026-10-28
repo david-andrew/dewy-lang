@@ -1182,7 +1182,9 @@ fact_replace = (s: mut FactState, base: int, selector: int, element: bool, value
     loop pi >= 0:
         p = old[pi]
         pi = fact_projection_next_in(old, links, pi)
-        if element and not p.element and (p.selector == FACT_ELEMENT_LENGTH or p.selector == FACT_ELEMENT_VALUE or p.selector == FACT_ELEMENT_COPY or p.selector == FACT_ELEMENT_SOURCE or p.selector == FACT_KEYS_SOURCE): continue
+        if element and not p.element and (p.selector == FACT_ELEMENT_LENGTH or p.selector == FACT_ELEMENT_VALUE or p.selector == FACT_ELEMENT_COPY or p.selector == FACT_ELEMENT_SOURCE or p.selector == FACT_KEYS_SOURCE):
+            if p.selector == FACT_ELEMENT_COPY: fact_fill_remainder(s, base, v, selector, p.value)
+            continue
         if element and not p.element and p.selector == FACT_ROW_SOURCE:
             row = fact_project(s, base, selector, true, telem(fact_type(t)))
             if fact_compare(s, .eq, fact_project(s, row, -1, false, T_INT), fact_project(s, value, -1, false, T_INT)) != 1: continue
@@ -1197,6 +1199,21 @@ fact_replace = (s: mut FactState, base: int, selector: int, element: bool, value
         if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(v, p.selector, p.element, p.value))
     if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(v, selector, element, value))
     v
+
+# An element store replaces a fill's uniform promise. For a short, fixed
+# length and a constant position, retain the other entries' immutable values
+# as an ordinary inventory. No new analysis: O(length), capped at the same 64
+# entries as fact_inventory, and only on a demanded store to a uniform value.
+fact_fill_remainder = (s: mut FactState, before: int, after: int, selector: int, uniform: int):
+    index = fact_bound(s, selector)
+    if index.wide or index.lo != index.hi or index.lo < 0: return
+    li = fact_projection_find(s, before, -1, false)
+    if li < 0: return
+    length = fact_bound(s, s.projections[li].value)
+    if length.wide or length.lo != length.hi or length.lo <= index.lo or length.hi > 64: return
+    loop i in [0..length.lo):
+        if i != index.lo and s.projections.len() < FACT_CAP:
+            fact_add_projection(s, FactProjection(after, fact_constant(s, i), true, uniform))
 
 fact_read = (s: mut FactState, e: int) -> int:
     if nodes[e].kind == .ident and nodes[e].aux == i32(int(SK.local)):
@@ -6592,6 +6609,33 @@ fact_inventory = (s: FactState, base0: int) -> int[]:
     if seen.len() != length.lo: parts.clear()
     parts
 
+# A selected scalar satisfies only relations shared by every inventory entry.
+# Candidate rows come from the first entry's indexed incident list; each other
+# entry must entail the substituted row. Demand-only O(parts x incident rows x
+# bounded entailment), within the existing inventory and difference budgets.
+fact_inventory_rows = (s: mut FactState, value: int, parts: int[], at: int):
+    first = parts[0]
+    if first == 0 or value == 0: return
+    loop direction in [0..2):
+        rows: FactDifference[]
+        ri = fact_difference_head(s, first, direction)
+        loop ri >= 0:
+            rows.push(s.differences[ri])
+            ri = fact_difference_next(s, ri, direction)
+        loop row in rows:
+            shared = true
+            loop j in [1..parts.len()):
+                a = if direction == 1: parts[j] else: row.a
+                b = if direction == 0: parts[j] else: row.b
+                if fact_distance(s, a, b, row.limit): continue
+                x = fact_bound(s, a); y = fact_bound(s, b)
+                # Mathematical integer endpoints are sentinels until proved
+                # finite; they cannot establish a row by interval arithmetic.
+                if x.wide or y.wide or y.lo == FACT_MIN or x.hi == FACT_MAX and fact_open_endpoint(s, a, true) or not fact_add_fits(x.hi, -y.lo) or x.hi - y.lo > row.limit:
+                    shared = false
+                    break
+            if shared: fact_difference(s, (if direction == 1: value else: row.a), (if direction == 0: value else: row.b), row.limit, at)
+
 # What every element of an inventory shares, given to value (one element, of
 # type t): a scalar's hull, a string's or array's length hull, or each scalar
 # component's hull for tuples/records, nesting at most four levels and eight
@@ -6607,6 +6651,7 @@ fact_inventory_bound = (s: mut FactState, value: int, parts: int[], t: int, at: 
         if joined.wide: return
         old = fact_bound(s, value)
         fact_set_bound(s, value, FactBound(max(old.lo, joined.lo), min(old.hi, joined.hi), old.nz or joined.nz))
+        fact_inventory_rows(s, value, parts, at)
         # A hull touching a host sentinel can still have a finite endpoint:
         # every constituent must establish that side. Keep it as a value row,
         # never by changing the mathematical integer's representation type.

@@ -1,0 +1,7 @@
+read=(xs:array<int> i:int pick:int64<0 <=? pick and pick <? 3>):>int=>{
+    if i <? 0 or i >=? xs.length return 0
+    let choices=fill(i 3)
+    choices[pick]=xs.length
+    xs[choices[0]]
+}
+printl(read([4 8] 0 0))

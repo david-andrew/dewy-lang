@@ -1,0 +1,18 @@
+# Every selected value shares the source indices' relation to xs.length.
+choose=(xs:array<int> i:int j:int pick:int64<0 <=? pick and pick <? 2>):>int=>{
+    if i <? 0 or i >=? xs.length or j <? 0 or j >=? xs.length return 0
+    let choices=[i j]
+    xs[choices[pick]]
+}
+iterate=(xs:array<int> i:int j:int):>int=>{
+    if i <? 0 or i >=? xs.length or j <? 0 or j >=? xs.length return 0
+    let result=0
+    loop at in [i j] {result+=xs[at]}
+    result
+}
+sorted=(xs:array<int> i:int j:int):>int=>{
+    if i <? 0 or i >=? xs.length or j <? 0 or j >=? xs.length return 0
+    let choices=[i j].sorted()
+    xs[choices[0]]
+}
+printl(choose([4 8] 1 0 1) iterate([4 8] 1 0) sorted([4 8] 1 0))

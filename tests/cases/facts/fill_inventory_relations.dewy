@@ -1,0 +1,25 @@
+# A store into a short fill keeps the untouched values and their relations.
+read=(xs:array<int> i:int j:int pick:int64<0 <=? pick and pick <? 3>):>int=>{
+    if i <? 0 or i >=? xs.length or j <? 0 or j >=? xs.length return 0
+    let choices=fill(i 3)
+    choices[1]=j
+    xs[choices[pick]]
+}
+iterate=(xs:array<int> i:int j:int):>int=>{
+    if i <? 0 or i >=? xs.length or j <? 0 or j >=? xs.length return 0
+    let choices=fill(i 3)
+    choices[1]=j
+    choices[2]=j
+    let result=0
+    loop at in choices {result+=xs[at]}
+    result
+}
+copies=()=>{
+    let rows=fill([10 20] 3)
+    let snapshot=rows
+    rows[1]=[30]
+    rows[0][0]=40
+    printl(snapshot[0][0] rows[2][1] rows[0][0] rows[1][0])
+}
+printl(read([4 8] 0 1 0) read([4 8] 0 1 1) iterate([4 8] 0 1))
+copies()
