@@ -4236,7 +4236,16 @@ fact_find_start = (n: int, s: mut FactState, start: int, length: int):
 # its length and the bytes guards read relate to every view of the same text.
 const FACT_BYTE_VIEW = -6
 const FACT_ASCII_TEXT = -15
-fact_byte_view = (s: mut FactState, text: int) -> int: fact_project(s, text, FACT_BYTE_VIEW, false, mk_array(T_U8))
+fact_byte_view = (s: mut FactState, text: int) -> int:
+    view = fact_project(s, text, FACT_BYTE_VIEW, false, mk_array(T_U8))
+    # A decoded literal has an exact byte count even when it is not ASCII
+    # (or contains CR). Materialize only on byte-view demand: O(1) indexed
+    # lookup and interned-string length, with no Unicode/grapheme scan.
+    n = fact_terms[text].origin
+    if view != 0 and n > 0 and nodes[n].kind == .str_lit and nodes[n].aux == 0 and nkids(n) == 0 and nodes[n].sval >= 0 and s.projections.len() < FACT_CAP:
+        known = fact_index_get(s.index[0].projection_index, fact_projection_key(view, -1, false))
+        if known < 0: fact_add_projection(s, FactProjection(view, -1, false, fact_constant(s, len(name_of(int(nodes[n].sval))))))
+    view
 
 # `text.byte_slice(a b)`: 0 <=? a <=? b <=? the text's byte length, and each end a char
 # boundary: 0, the byte length, or an index whose byte the facts hold below 0x80 or at
@@ -5556,7 +5565,9 @@ fact_fixed_check = (n: int, s: mut FactState, value: int):
     fact_validated[n] = true
     dir_index(n, proven)
     if not proven and (fact_policy == .RequireStatic or fact_query):
-        wit_unknown(n, fact_bound(s, length), "fixed-size array conversion needs {count} elements")
+        shown = wit_text(int(nodes[n].a))
+        if shown == "": shown = "the array"
+        wit_unknown(n, fact_bound(s, length), "fixed-size array conversion needs {count} elements", 0, "{shown}.length =? {count}")
 
 # A comprehension that fills a fixed-size array of plain elements in place:
 # `let acc=[]`, one range or array loop whose body is straight-line
@@ -7270,7 +7281,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                 fact_add_projection(s, FactProjection(fact_byte_view(s, value), -1, false, count))
             return value
         # (another is one value too, so guards on its byte view reach `byte_slice`)
-        if nodes[n].aux == 0 and nkids(n) == 0: return fact_new(s, FactBound(), FactTerm(type = T_STR))
+        if nodes[n].aux == 0 and nkids(n) == 0: return fact_new(s, FactBound(), FactTerm(origin = n, type = T_STR))
     # An optional's or union's tag (-3: 0 for none, 1 for a value, or the
     # member) and payload (-4) are projections of its immutable evaluation.
     if k == .istype:

@@ -1,0 +1,3 @@
+valid=(xs:array<int64> i:int):>bool=>xs.length >? 0 and xs[int64<overflow='wrap'>(i)] >=? 0
+probe=(xs:array<int64> i:int)=>{if valid(xs i) printl(xs[i])}
+main=()=>probe([123] 18446744073709551616)

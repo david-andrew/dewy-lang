@@ -1,0 +1,8 @@
+based=(b:array<uint8>):>bool=>b.length >=? 3 and b[2] =? b':'
+probe=(b:array<uint8>)=>{
+    let ok=based(b)
+    let copy=b
+    b=[]
+    if ok printl(copy[1])
+}
+main=()=>{probe([48 120 58]);probe([])}

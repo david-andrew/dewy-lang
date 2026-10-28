@@ -10,8 +10,10 @@ use 'facts.jo'
 use 'ownership.jo'
 use 'refine.jo'
 # Demand-only summaries for small, closed Boolean expressions. The accepted
-# grammar has no calls, writes, indexing, narrowing or cleanup. Each cached
-# tree has at most 32 nodes; construction and instantiation are O(32 + params).
+# grammar has no calls, writes, narrowing or cleanup. Scalar array reads keep
+# their captured array/index identities; they do not assert an index is valid.
+# Each cached tree has at most 32 nodes; construction and instantiation are
+# O(32 + params), plus the existing bounded projection lookup per element.
 # Leaves are parameter ordinals, never callee storage or caller syntax.
 struct FactPredicate:
     op: Tok = .eof
@@ -20,6 +22,7 @@ struct FactPredicate:
     a: int = 0
     b: int = 0
     length: bool = false
+    element: int = 0
 
 fact_predicate_nodes = [FactPredicate()]
 fact_predicates: {int: int} = {}
@@ -39,10 +42,13 @@ fact_predicate_tree = (n: int, params: {int: int}, budget: mut int) -> int:
             if source <= 0 or nodes[source].kind != .ident or nodes[source].aux != i32(int(SK.local)) or not params.has(int(nodes[source].sym)): return 0
             scope[int(nodes[c].sym)] = params[int(nodes[source].sym)]
         return fact_predicate_tree(kid(n, nkids(n) - 1), scope, budget)
-    # Array length is an addr, widened to int by comparison checking.
+    # Comparison checking widens lengths and scalar elements to int. Only
+    # integer widenings into a signed host word or mathematical int preserve
+    # these values; float conversions and uint64's biased encoding do not.
     if k == .conv and nodes[n].aux == i32(int(CV.int_)) and (ntype(n) == T_INT or ntype(n) == T_MATH_INT):
         a = int(nodes[n].a)
-        if nodes[a].kind == .intrinsic and nodes[a].aux == i32(int(IN.len)): return fact_predicate_tree(a, params, budget)
+        t = fact_type(ntype(a))
+        if is_int(t) and t != T_U64 and (t != T_MATH_INT or ntype(n) == T_MATH_INT): return fact_predicate_tree(a, params, budget)
         return 0
     if k == .return_ or k == .exprstmt: return fact_predicate_tree(int(nodes[n].a), params, budget)
     term = FactPredicate()
@@ -56,6 +62,21 @@ fact_predicate_tree = (n: int, params: {int: int}, budget: mut int) -> int:
         term.length = true
         term.a = fact_predicate_tree(kid(n, 0), params, budget)
         if term.a == 0: return 0
+    else if k == .index and nodes[n].b != 0:
+        t = fact_type(ntype(int(nodes[n].a)))
+        e = fact_type(ntype(n))
+        if (tkind(t) != .array and tkind(t) != .fixed) or not fact_scalar(e) or e == T_U64 or not is_int(e) and e != T_BOOL: return 0
+        term.element = ntype(n)
+        term.a = fact_predicate_tree(int(nodes[n].a), params, budget)
+        index = int(nodes[n].b)
+        # Index checking inserts a checked host-word boundary for `int`.
+        # On a returning read it preserves the index. Never peel a written
+        # conversion, wrapping/saturating policy, or arbitrary narrowed value.
+        if budget > 0 and nodes[index].kind == .conv and nodes[index].aux == i32(int(CV.int_)) and ntype(index) == T_INT and ntype(int(nodes[index].a)) == T_MATH_INT and not has_flag(index, NF_EXPLICIT_INTEGER):
+            budget -= 1
+            index = int(nodes[index].a)
+        term.b = fact_predicate_tree(index, params, budget)
+        if term.a == 0 or term.b == 0: return 0
     else if k == .not_:
         term.op = .kw_not
         term.a = fact_predicate_tree(int(nodes[n].a), params, budget)
@@ -99,4 +120,5 @@ fact_predicate_apply = (root: int, values: int[], s: mut FactState) -> int:
     if term.length: return fact_project(s, a, -1, false, T_INT)
     b = if term.b == 0: 0 else: fact_predicate_apply(term.b, values, s)
     if term.b != 0 and b == 0: return 0
+    if term.element != 0: return fact_project(s, a, b, true, term.element)
     fact_new(s, fact_domain(T_BOOL), FactTerm(term.op, a, b))

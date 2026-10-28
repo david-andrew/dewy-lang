@@ -1,0 +1,3 @@
+based=(b:array<uint8>):>bool=>b.length >=? 3 and b[2] =? b':'
+probe=(b:array<uint8>)=>{if not based(b) printl(b[0])}
+main=()=>probe([])

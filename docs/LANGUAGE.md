@@ -2092,8 +2092,10 @@ explicit loop.
 Spreading inline arrays into ordinary arrays works. Converting a growable array
 or spread literal to a fixed array requires its length to match:
 `let pair:Pair<int64> = [xs...]`. A known length or a guard such as
-`xs.length =? 2` proves a pair conversion. Otherwise, use `$runtime_assert`
-before it or opt into the length check with `$runtime_checks`; a proven
+`xs.length =? 2` proves a pair conversion. A decoded byte literal or the byte
+view of a text literal has a known byte length, including non-ASCII bytes;
+this does not equate byte length with character length. Otherwise, use
+`$runtime_assert` before it or opt into the length check with `$runtime_checks`; a proven
 conversion has no length check and can satisfy `& no panics`.
 
 Array literals can spread arrays and sets: `[head... item tail...]`. Operands run
@@ -4395,7 +4397,9 @@ An unproven obligation's error names the missing relation (`i <? xs.length`,
   `valid = (i:int xs:array<int>):>bool => 0 <=? i <? xs.length`, then
   `if valid(i xs) xs[i] else 0`. This also works when its result is saved and
   tested later. The compiler summarizes simple parameter comparisons, array
-  lengths, and `and`/`or`/`not`; calls, writes, captures, and narrowing conversions
+  lengths, scalar array reads, and `and`/`or`/`not`. For example, a helper
+  testing `b.length >=? 3 and b[2] =? b':'` establishes the length when true.
+  Calls, writes, captures, and explicit narrowing conversions
   inside the helper are not summarized. Facts describe the arguments as
   evaluated, so changing an index or replacing an array still needs a new guard.
 - Take the missing case as a value: `xs.get(i) ?? fallback`, `d.get(k) ?? fallback`,

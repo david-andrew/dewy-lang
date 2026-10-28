@@ -1,0 +1,7 @@
+valid=(xs:array<int64> i:int):>bool=>0 <=? i <? xs.length and xs[i] >=? 0 and xs[i] <=? 255
+probe=(xs:array<int64> i:int)=>{
+    let ok=valid(xs i)
+    i+=1
+    if ok {let byte:uint8=xs[i];printl(byte)}
+}
+main=()=>probe([123] 0)
