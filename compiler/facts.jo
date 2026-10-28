@@ -197,6 +197,8 @@ const FACT_MAP_POSITIONS = -18
 const FACT_ELEMENT_COPY = -19
 const FACT_POOL_POSITIONS = -20
 const FACT_MAP_DENSE = -21
+# An immutable inventory whose elements were permuted, never position identities.
+const FACT_ELEMENT_SOURCE = -22
 # Matching row lengths, indexed by the same position in an immutable source.
 const FACT_ROW_SOURCE = -22
 # A key collection belongs to one immutable dictionary snapshot; each selected
@@ -1080,7 +1082,7 @@ fact_replace = (s: mut FactState, base: int, selector: int, element: bool, value
     loop pi >= 0:
         p = old[pi]
         pi = links[pi]
-        if element and not p.element and (p.selector == FACT_ELEMENT_LENGTH or p.selector == FACT_ELEMENT_VALUE or p.selector == FACT_ELEMENT_COPY or p.selector == FACT_KEYS_SOURCE): continue
+        if element and not p.element and (p.selector == FACT_ELEMENT_LENGTH or p.selector == FACT_ELEMENT_VALUE or p.selector == FACT_ELEMENT_COPY or p.selector == FACT_ELEMENT_SOURCE or p.selector == FACT_KEYS_SOURCE): continue
         if element and not p.element and p.selector == FACT_ROW_SOURCE:
             row = fact_project(s, base, selector, true, telem(fact_type(t)))
             if fact_compare(s, .eq, fact_project(s, row, -1, false, T_INT), fact_project(s, value, -1, false, T_INT)) != 1: continue
@@ -6329,9 +6331,29 @@ fact_loop_elements = (n: int, base: int, s: mut FactState):
     fact_inventory_bound(s, value, parts, t, n)
     fact_bind(s, PlaceIdentity(.local, int(locals[l].owner), l), value)
 
+# Permutations keep an immutable element inventory, not the positions of its
+# values. Flatten the source link: O(1) transfer, then the existing bounded
+# inventory query only when a consumer reads an element. Hooked elements can
+# change on copy, so they supply no inventory. All element writes drop the link.
+fact_permuted_elements = (s: mut FactState, before: int, after: int):
+    if before == 0 or after == 0 or s.projections.len() >= FACT_CAP: return
+    t = fact_type(fact_terms[before].type)
+    if tkind(t) != .array and tkind(t) != .fixed: return
+    if ownership_decls.len() != 0 and ownership_fact_type(telem(t)): return
+    uniform = fact_index_get(s.index[0].projection_index, fact_projection_key(before, FACT_ELEMENT_COPY, false))
+    if uniform >= 0:
+        fact_add_projection(s, FactProjection(after, FACT_ELEMENT_COPY, false, s.projections[uniform].value))
+        return
+    source = fact_index_get(s.index[0].projection_index, fact_projection_key(before, FACT_ELEMENT_SOURCE, false))
+    original = if source >= 0: s.projections[source].value else: before
+    fact_add_projection(s, FactProjection(after, FACT_ELEMENT_SOURCE, false, original))
+
 # The values of all of base's elements, when each is known by a constant index
 # (a literal's, at most 64 of them); none otherwise. O(base's projections).
-fact_inventory = (s: FactState, base: int) -> int[]:
+fact_inventory = (s: FactState, base0: int) -> int[]:
+    base = base0
+    source = fact_index_get(s.index[0].projection_index, fact_projection_key(base, FACT_ELEMENT_SOURCE, false))
+    if source >= 0: base = s.projections[source].value
     parts: int[]
     li = fact_index_get(s.index[0].projection_index, fact_projection_key(base, -1, false))
     if li < 0: return parts
@@ -7955,7 +7977,9 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                 fact_path_call_effects(n, s)
                 fresh = fact_new(s, FactBound(), FactTerm(type = ntype(kid(n, 0))))
                 fact_add_projection(s, FactProjection(fresh, -1, false, length))
-                if plain or reverse: fact_keys_copy(s, held[held.len() - 1], fresh)
+                if plain or reverse:
+                    fact_keys_copy(s, held[held.len() - 1], fresh)
+                    fact_permuted_elements(s, held[held.len() - 1], fresh)
                 fact_store_route(s, route, fresh, n)
                 return 0
         if array == 5 and (ownership_decls.len() == 0 or not ownership_fact_type(ntype(kid(n, 0)))):
@@ -8082,6 +8106,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             if fact_copy_length_call(n) and s.projections.len() < FACT_CAP:
                 fact_add_projection(s, FactProjection(result, -1, false, fact_project(s, entry[0], -1, false, T_INT)))
                 fact_keys_copy(s, entry[0], result)
+                fact_permuted_elements(s, entry[0], result)
             if fact_words_call(n) and s.projections.len() < FACT_CAP:
                 fact_add_projection(s, FactProjection(result, FACT_ELEMENT_LENGTH, false, fact_new(s, FactBound(1, fact_length_max()))))
             if fact_lines_call(n):

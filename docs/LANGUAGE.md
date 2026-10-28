@@ -706,7 +706,10 @@ relation; its original narrowing check can still make the helper panic.
 A saved conjunction can retain its captured guard's bounds, and symbolic
 `max(lo min(hi value))` retains both bounds when `lo <=? hi` is known.
 Integer-to-float conversions use the integer bounds known at that conversion.
-A sorted copy has its input value's length, and `text.chars()` has `text.length`
+A sorted copy has its input value's length and retains bounds shared by all
+known input elements, including record fields. Sorting or reversing in place
+retains those bounds for builtin values. Element writes, unknown mutations and
+copy hooks discard evidence they can change. `text.chars()` has `text.length`
 elements; a comprehension collecting the same number of values for every element,
 `[loop x in xs {1.0 x x^2}]`, has that many times `xs.length`. A method called
 on a dictionary entry (`accounts[name].withdraw(n) or_throw`) changes that entry

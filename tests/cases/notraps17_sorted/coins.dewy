@@ -1,0 +1,9 @@
+coins=(amount:int64):>array<int64>=>{
+    let left=amount
+    let out:array<int64>=[]
+    loop coin in [5 10 25 100].sorted(reverse=true) {
+        loop left >=? coin {out.push(coin); left-=coin}
+    }
+    out
+}
+main=()=>printl(coins(135))
