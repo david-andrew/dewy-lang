@@ -1,5 +1,6 @@
 use 'type_queries.dewy'
 use 'type_inference.dewy'
+use 'type_unions.dewy'
 use 'type_layout.dewy'
 use 'checker_types.dewy'
 use 'type_intern.dewy'
@@ -61,6 +62,11 @@ T_NULL = 0
 T_RANGE = 0
 T_NONE = 0
 T_NEVER = 0
+union_type_name = (t: int) -> str: type_str(t)
+union_postfix_name = (t: int) -> str: type_str_postfix(t)
+union_host = TypeUnionHost(mk_opt, str_set_of, str_set_type, union_postfix_name, union_type_name, intern)
+union_input = TypeUnionInput(&types, &structs, &type_args, &fields, &variants, &str_sets, &T_NEVER, &T_NONE, &union_host)
+union_binding = type_union_bind(&union_input)
 T_RAWPTR = 0
 T_VEC2 = 0
 T_VEC3 = 0
@@ -643,61 +649,10 @@ union_holder = (u: int, m: int, whole: bool) -> int:
             return j
     -1
 
-mk_union = (ms0: int[]) -> int:
-    ms: int[]
-    has_none = false
-    work = ms0
-    i = 0
-    loop i < work.len():
-        m = prune(work[i])
-        i += 1
-        k = types[m].kind
-        if m == T_NEVER: continue           # (a value that never exists adds nothing)
-        if k == .none_lit: has_none = true
-        else if k == .opt:
-            has_none = true
-            work.push(int(types[m].elem))
-        else if is_union(m):
-            loop x in union_members(m): work.push(x)
-        else:
-            dup = false
-            loop x in ms:
-                if type_eq(x, m): dup = true
-            if not dup: ms.push(m)
-    # Literal string sets join into one set: `Damage | 'none'` with
-    # `Damage = 'torn' | 'checksum'` is the set of all three.
-    if str_sets.len() > 2:
-        sets = 0
-        loop m in ms:
-            if str_set_of(m) != 0: sets += 1
-        if sets > 1:
-            texts: str[]
-            rest: int[]
-            loop m in ms:
-                set = str_set_of(m)
-                if set == 0: rest.push(m)
-                else:
-                    loop text in str_sets[set]:
-                        if not texts.contains(text): texts.push(text)
-            rest.push(str_set_type(texts))
-            ms = rest
-    # sort by type id (few members: insertion sort)
-    loop i in [1..ms.len()):
-        j = i
-        loop j > 0 and ms[j - 1] > ms[j]:
-            tmp = ms[j]
-            ms[j] = ms[j - 1]
-            ms[j - 1] = tmp
-            j -= 1
-    r = T_NONE
-    if ms.len() == 1: r = ms[0]
-    else if ms.len() > 1: r = union_inst(ms)
-    if has_none and ms.len() > 0: r = mk_opt(r)
-    r
+mk_union = (ms: int[]) -> int: uu_mk_union(ms)
 
 # mk_union supplies flat, sorted member IDs. Concrete unions are canonical;
 # unresolved members still need structural matching until inference finishes.
-union_instances: {int[]: int} = {}
 # (a Dewy union the program names with one non-generic alias, `Value:type=int64|string`:
 # diagnostics show the alias; 0 when two aliases name it)
 union_alias_names: {int: int} = {}
@@ -709,47 +664,8 @@ union_alias_note = (t0: int, name: int):
         if seen != name: union_alias_names[t] = 0
         return
     union_alias_names[t] = name
-union_candidates: int[]
 
-union_inst = (ms: int[]) -> int:
-    stable = true
-    loop m in ms:
-        if has_var(m): stable = false
-    if stable:
-        if let found = union_instances.get(ms): return found
-    else:
-        loop i in union_candidates:
-            si = structs[i]
-            if int(si.ntargs) != ms.len(): continue
-            same = true
-            loop k in [0..ms.len()):
-                if not type_eq(struct_targ(i, k), ms[k]):
-                    same = false
-                    break
-            if same: return int(si.type)
-    name = ""
-    hv = false
-    loop i in 0.. and m in ms:
-        if i > 0: name += " | "
-        name += type_str_postfix(m)
-        if has_var(prune(m)): hv = true
-    si = StructInfo(decl = 0, ntargs = i32(ms.len()), name = name, union_ = true, resolved = true)
-    si.targs = i32(type_args.len())
-    loop m in ms: type_args.push(i32(m))
-    si.variants = i32(variants.len())
-    si.nvariants = i32(ms.len())
-    loop i in 0.. and m in ms:
-        variants.push(Variant(name = i32(intern(type_str(m))), fields = i32(fields.len()), nfields = 1, tag = i32(i), value = i))
-        fields.push(Field(name = i32(intern("0")), type = i32(m)))
-    idx = structs.len()
-    structs.push(si)
-    flags = 0
-    if hv: flags = TF_HAS_VAR
-    types.push(TypeInfo(kind = .enum_, st = i32(idx), flags = i32(flags)))
-    structs[idx].type = i32(types.len() - 1)
-    union_candidates.push(idx)
-    if stable: union_instances[ms] = types.len() - 1
-    types.len() - 1
+union_inst = (ms: int[]) -> int: uu_union_inst(ms)
 
 # ---------- struct-of-arrays ----------
 # soa T[] behaves like T[] but keeps each field of T in an array of its own (see check_soa_*)

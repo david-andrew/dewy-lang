@@ -1,0 +1,120 @@
+use 'checker_types.dewy'
+use 'type_inference.dewy'
+const TF_HAS_VAR = 1
+struct TypeUnionHost:
+    mk_opt: (int) -> int
+    str_set_of: (int) -> int
+    str_set_type: (str[]) -> int
+    type_str_postfix: (int) -> str
+    type_str: (int) -> str
+    intern: (str) -> int
+struct TypeUnionInput:
+    types: *(TypeInfo[])
+    structs: *(StructInfo[])
+    args: *(i32[])
+    fields: *(Field[])
+    variants: *(Variant[])
+    sets: *(str[][])
+    never: *(int)
+    none_: *(int)
+    host: *TypeUnionHost
+uu_inputs: *TypeUnionInput
+uu_instances: {int[]: int} = {}
+uu_candidates: int[]
+type_union_bind = (input: *TypeUnionInput) -> int:
+    uu_inputs = input
+    uu_instances = {}
+    uu_candidates = []
+    0
+uu_mk_union = (ms0: int[]) -> int:
+    ms: int[]
+    has_none = false
+    work = ms0
+    i = 0
+    loop i < work.len():
+        m = tu_prune(work[i])
+        i += 1
+        k = uu_inputs[0].types[0][m].kind
+        if m == uu_inputs[0].never[0]: continue           # (a value that never exists adds nothing)
+        if k == .none_lit: has_none = true
+        else if k == .opt:
+            has_none = true
+            work.push(int(uu_inputs[0].types[0][m].elem))
+        else if tu_is_union(m):
+            loop x in tu_union_members(m): work.push(x)
+        else:
+            dup = false
+            loop x in ms:
+                if tu_equal(x, m): dup = true
+            if not dup: ms.push(m)
+    # Literal string sets join into one set: `Damage | 'none'` with
+    # `Damage = 'torn' | 'checksum'` is the set of all three.
+    if uu_inputs[0].sets[0].len() > 2:
+        sets = 0
+        loop m in ms:
+            if uu_inputs[0].host[0].str_set_of(m) != 0: sets += 1
+        if sets > 1:
+            texts: str[]
+            rest: int[]
+            loop m in ms:
+                set = uu_inputs[0].host[0].str_set_of(m)
+                if set == 0: rest.push(m)
+                else:
+                    loop text in uu_inputs[0].sets[0][set]:
+                        if not texts.contains(text): texts.push(text)
+            rest.push(uu_inputs[0].host[0].str_set_type(texts))
+            ms = rest
+    # sort by type id (few members: insertion sort)
+    loop i in [1..ms.len()):
+        j = i
+        loop j > 0 and ms[j - 1] > ms[j]:
+            tmp = ms[j]
+            ms[j] = ms[j - 1]
+            ms[j - 1] = tmp
+            j -= 1
+    r = uu_inputs[0].none_[0]
+    if ms.len() == 1: r = ms[0]
+    else if ms.len() > 1: r = uu_union_inst(ms)
+    if has_none and ms.len() > 0: r = uu_inputs[0].host[0].mk_opt(r)
+    r
+
+uu_union_inst = (ms: int[]) -> int:
+    stable = true
+    loop m in ms:
+        if tu_has_var(m): stable = false
+    if stable:
+        if let found = uu_instances.get(ms): return found
+    else:
+        loop i in uu_candidates:
+            si = uu_inputs[0].structs[0][i]
+            if int(si.ntargs) != ms.len(): continue
+            same = true
+            loop k in [0..ms.len()):
+                if not tu_equal(tu_struct_targ(i, k), ms[k]):
+                    same = false
+                    break
+            if same: return int(si.type)
+    name = ""
+    hv = false
+    loop i in 0.. and m in ms:
+        if i > 0: name += " | "
+        name += uu_inputs[0].host[0].type_str_postfix(m)
+        if tu_has_var(tu_prune(m)): hv = true
+    si = StructInfo(decl = 0, ntargs = i32(ms.len()), name = name, union_ = true, resolved = true)
+    si.targs = i32(uu_inputs[0].args[0].len())
+    loop m in ms: uu_inputs[0].args[0].push(i32(m))
+    si.variants = i32(uu_inputs[0].variants[0].len())
+    si.nvariants = i32(ms.len())
+    loop i in 0.. and m in ms:
+        uu_inputs[0].variants[0].push(Variant(name = i32(uu_inputs[0].host[0].intern(uu_inputs[0].host[0].type_str(m))), fields = i32(uu_inputs[0].fields[0].len()), nfields = 1, tag = i32(i), value = i))
+        uu_inputs[0].fields[0].push(Field(name = i32(uu_inputs[0].host[0].intern("0")), type = i32(m)))
+    idx = uu_inputs[0].structs[0].len()
+    uu_inputs[0].structs[0].push(si)
+    flags = 0
+    if hv: flags = TF_HAS_VAR
+    uu_inputs[0].types[0].push(TypeInfo(kind = .enum_, st = i32(idx), flags = i32(flags)))
+    uu_inputs[0].structs[0][idx].type = i32(uu_inputs[0].types[0].len() - 1)
+    uu_candidates.push(idx)
+    if stable: uu_instances[ms] = uu_inputs[0].types[0].len() - 1
+    uu_inputs[0].types[0].len() - 1
+
