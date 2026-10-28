@@ -1,0 +1,222 @@
+$runtime_checks
+# Complete module encodings and relocation walks. The host supplies addresses
+# and policy once; output symbol/debug publication stays with object writers.
+let arm64_stub_pairs:array<[int64 int64]>=[[0 1] [2 3] [4 5] [6 7] [8 13] [14 15]]
+from p"arm64_encode.dewy" import (ArmWord)
+from p"arm64_encode.dewy" import (a_code A_SP AC_NE AC_LO w32 rd32 wr32 a_movz a_mov_imm a_mov a_add_imm a_sub_imm a_rrr A_ADD a_cmp a_bl a_blr a_br a_ret a_svc a_ldr a_str a_patch_adrp)
+from p"arm64_emit.dewy" import (CALL_IF_SHARED a_call_fix a_stub_fix a_faddr_fix a_data_fix a_adr_data arm64_emit)
+arm64_emit_stubs=(@stub_addr:array<int64>):>void=>$unsafe {
+    stub_addr[2] = ArmWord(a_code[0].length)
+    loop i in [ArmWord(0)..ArmWord(6)) {
+        w32(0xA9000000 | ((2 * i) << 15) | ((20 + 2 * i) << 10) | (0 << 5) | (19 + 2 * i))
+    }
+    w32(0x910003F0)
+    a_str(16  0  96)
+    loop i in [ArmWord(0)..ArmWord(4)) {
+        w32(0x6D000000 | ((13 + 2 * i) << 15) | ((9 + 2 * i) << 10) | (0 << 5) | (8 + 2 * i))
+    }
+    a_movz(0  0  0)
+    a_ret()
+    stub_addr[3] = ArmWord(a_code[0].length)
+    loop i in [ArmWord(0)..ArmWord(6)) {
+        w32(0xA9400000 | ((2 * i) << 15) | ((20 + 2 * i) << 10) | (0 << 5) | (19 + 2 * i))
+    }
+    a_ldr(16  0  96)
+    w32(0x9100021F)
+    loop i in [ArmWord(0)..ArmWord(4)) {
+        w32(0x6D400000 | ((13 + 2 * i) << 15) | ((9 + 2 * i) << 10) | (0 << 5) | (8 + 2 * i))
+    }
+    a_mov(0  1)
+    a_ret()
+    stub_addr[4] = ArmWord(a_code[0].length)
+    a_mov(16  0)
+    w32(0x9100003F)
+    a_movz(0  0  0)
+    a_br(16)
+    stub_addr[5] = ArmWord(a_code[0].length)
+    a_sub_imm(2  2  16)
+    w32(0xA9000440)
+    a_mov(1  2)
+    a_mov_imm(0  0x50F00)
+    a_movz(2  0  0)
+    a_movz(3  0  0)
+    a_movz(4  0  0)
+    a_mov_imm(8  220)
+    a_svc()
+    w32(0xB4000000 | (2 << 5) | 0)
+    a_ret()
+    w32(0xA9400000 | (0 << 10) | (31 << 5) | 9)
+    w32(0x910043FF)
+    a_blr(9)
+    a_movz(0  0  0)
+    a_mov_imm(8  93)
+    a_svc()
+    w32(0)
+    stub_addr[6] = ArmWord(a_code[0].length)
+    w32(0xC85FFC02)
+    a_rrr(A_ADD  3  2  1)
+    w32(0xC804FC03)
+    w32(0x35000000 | (((-3) & 0x7FFFF) << 5) | 4)
+    a_mov(0  2)
+    a_ret()
+    stub_addr[7] = ArmWord(a_code[0].length)
+    w32(0xC85FFC03)
+    a_cmp(3  1)
+    w32(0x54000000 | (4 << 5) | AC_NE)
+    w32(0xC804FC02)
+    w32(0x35000000 | (((-4) & 0x7FFFF) << 5) | 4)
+    w32(0x14000002)
+    w32(0xD503305F)
+    a_mov(0  3)
+    a_ret()
+    stub_addr[8] = ArmWord(a_code[0].length)
+    w32(0x910003E0)
+    a_ret()
+    stub_addr[9] = ArmWord(a_code[0].length)
+    a_movz(0  0  0)
+    a_ret()
+    stub_addr[12] = ArmWord(a_code[0].length)
+    w32(0xA9BF7BFD)
+    w32(0x910003FD)
+    a_sub_imm(A_SP  A_SP  608)
+    loop i in [ArmWord(0)..ArmWord(6)) {
+        let pr=arm64_stub_pairs[i]
+        w32(0xA9000000 | ((2 * i) << 15) | (ArmWord(pr[1]) << 10) | (A_SP << 5) | ArmWord(pr[0]))
+    }
+    loop k in [ArmWord(0)..ArmWord(16)) {
+        w32(0xAD000000 | ((6 + 2 * k) << 15) | ((2 * k + 1) << 10) | (A_SP << 5) | (2 * k))
+    }
+    a_mov(0  9)
+    a_blr(17)
+    a_mov(9  0)
+    loop i in [ArmWord(0)..ArmWord(6)) {
+        let pr=arm64_stub_pairs[i]
+        w32(0xA9400000 | ((2 * i) << 15) | (ArmWord(pr[1]) << 10) | (A_SP << 5) | ArmWord(pr[0]))
+    }
+    loop k in [ArmWord(0)..ArmWord(16)) {
+        w32(0xAD400000 | ((6 + 2 * k) << 15) | ((2 * k + 1) << 10) | (A_SP << 5) | (2 * k))
+    }
+    w32(0x910003BF)
+    w32(0xA8C17BFD)
+    a_ret()
+    stub_addr[11] = ArmWord(a_code[0].length)
+    w32(0xD344FC09)
+    w32(0xD37CED29)
+    a_rrr(A_ADD  10  0  1)
+    a_mov(11  9)
+    w32(0xD50B7B20 | 11)
+    a_add_imm(11  11  16)
+    a_cmp(11  10)
+    w32(0x54000000 | (((-3) & 0x7FFFF) << 5) | AC_LO)
+    w32(0xD5033B9F)
+    a_mov(11  9)
+    w32(0xD50B7520 | 11)
+    a_add_imm(11  11  16)
+    a_cmp(11  10)
+    w32(0x54000000 | (((-3) & 0x7FFFF) << 5) | AC_LO)
+    w32(0xD5033B9F)
+    w32(0xD5033FDF)
+    a_movz(0  0  0)
+    a_ret()
+}
+arm64_emit_entry=(inits:array<int64> main_lf:ArmWord main_code:bool entry_end_lf:ArmWord watch_build:bool WATCH_CODE_AT:ArmWord WATCH_CODE_SIZE:ArmWord):>ArmWord=>$unsafe {
+    let start=ArmWord(a_code[0].length)
+    w32(0x910003E9)
+    a_adr_data(10  1  0)
+    a_str(9  10  0)
+    if watch_build {
+        a_mov_imm(0  WATCH_CODE_AT)
+        a_mov_imm(1  WATCH_CODE_SIZE)
+        a_movz(2  7  0)
+        a_mov_imm(3  0x104022)
+        a_mov_imm(4  -1)
+        a_movz(5  0  0)
+        a_mov_imm(8  222)
+        a_svc()
+        a_mov_imm(9  WATCH_CODE_AT)
+        a_cmp(0  9)
+        let j=ArmWord(a_code[0].length)
+        w32(0x54000000 | AC_NE)
+        a_mov_imm(10  0x6A6F74776174636B)
+        a_str(10  9  0)
+        wr32(j  rd32(j) | ((((ArmWord(a_code[0].length) - j) // 4) & 0x7FFFF) << 5))
+    }
+    loop f in inits {
+        a_call_fix.push([ArmWord(a_code[0].length)  f])
+        a_bl()
+    }
+    a_movz(19  0  0)
+    if main_lf >=? 0 {
+        a_call_fix.push([ArmWord(a_code[0].length)  main_lf])
+        a_bl()
+        if main_code {
+            a_mov(19  0)
+        }
+    }
+    if entry_end_lf >=? 0 {
+        a_call_fix.push([ArmWord(a_code[0].length)  entry_end_lf])
+        a_bl()
+    }
+    a_mov(0  19)
+    a_mov_imm(8  94)
+    a_svc()
+    start
+}
+arm64_emit_entry_mac=(inits:array<int64> main_lf:ArmWord main_code:bool entry_end_lf:ArmWord):>ArmWord=>$unsafe {
+    let start=ArmWord(a_code[0].length)
+    w32(0xA9BF7BFD)
+    w32(0x910003FD)
+    w32(0xA9BF53F3)
+    a_sub_imm(9  1  8)
+    a_adr_data(10  1  0)
+    a_str(9  10  0)
+    loop f in inits {
+        a_call_fix.push([ArmWord(a_code[0].length)  f])
+        a_bl()
+    }
+    a_movz(19  0  0)
+    if main_lf >=? 0 {
+        a_call_fix.push([ArmWord(a_code[0].length)  main_lf])
+        a_bl()
+        if main_code {
+            a_mov(19  0)
+        }
+    }
+    if entry_end_lf >=? 0 {
+        a_call_fix.push([ArmWord(a_code[0].length)  entry_end_lf])
+        a_bl()
+    }
+    a_mov(0  19)
+    w32(0xA8C153F3)
+    w32(0xA8C17BFD)
+    a_ret()
+    start
+}
+arm64_patch_module=(text_addr:ArmWord ro_addr:ArmWord data_addr:ArmWord @fn_addr:array<int64> @stub_addr:array<int64>):>ArmWord=>$unsafe {
+    loop f in a_call_fix {
+        let t:ArmWord=fn_addr[f[1]]
+        if t <? 0 {
+            return f[1]
+        }
+        wr32(f[0]  rd32(f[0]) | (((t - ArmWord(f[0])) // 4) & 0x3FFFFFF))
+    }
+    loop f in a_stub_fix {
+        let t:ArmWord=stub_addr[f[1]]
+        wr32(f[0]  rd32(f[0]) | (((t - ArmWord(f[0])) // 4) & 0x3FFFFFF))
+    }
+    loop f in a_faddr_fix {
+        let t:ArmWord=fn_addr[f[1]]
+        if t <? 0 {
+            return f[1]
+        }
+        a_patch_adrp(f[0]  text_addr  text_addr + t)
+    }
+    loop f in a_data_fix {
+        let base=ro_addr
+        if f[1] =? 1 {
+            base = data_addr
+        }
+        a_patch_adrp(f[0]  text_addr  base + ArmWord(f[2]))
+    }
+    -1
+}

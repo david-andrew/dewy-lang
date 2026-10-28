@@ -1,3 +1,4 @@
+use 'arm64_module.dewy'
 use 'arm64_encode.dewy'
 use 'arm64_emit.dewy'
 use 'arm64_allocate.dewy'
@@ -82,209 +83,26 @@ arm64_stubs = ():
     line_rows.push(0)
     row_pos = 0
     row_line = 0
-    # setjmp(x0 = buf): callee-saved registers, x29, x30, sp, d8-d15 (168 bytes)
-    stub_addr[2] = code.len()
-    loop i in [0..6): w32(0xA9000000 | ((2 * i) << 15) | ((20 + 2 * i) << 10) | (0 << 5) | (19 + 2 * i))   # stp x19+2i, x20+2i, [x0, #16i]
-    w32(0x910003F0)                                             # mov x16, sp
-    a_str(16, 0, 96)
-    loop i in [0..4): w32(0x6D000000 | ((13 + 2 * i) << 15) | ((9 + 2 * i) << 10) | (0 << 5) | (8 + 2 * i))    # stp d8+2i, d9+2i, [x0, #104+16i]
-    a_movz(0, 0, 0)
-    a_ret()
-    # longjmp(x0 = buf, x1 = value)
-    stub_addr[3] = code.len()
-    loop i in [0..6): w32(0xA9400000 | ((2 * i) << 15) | ((20 + 2 * i) << 10) | (0 << 5) | (19 + 2 * i))   # ldp
-    a_ldr(16, 0, 96)
-    w32(0x9100021F)                                             # mov sp, x16
-    loop i in [0..4): w32(0x6D400000 | ((13 + 2 * i) << 15) | ((9 + 2 * i) << 10) | (0 << 5) | (8 + 2 * i))    # ldp d
-    a_mov(0, 1)
-    a_ret()
-    # jump(x0 = entry, x1 = stack): switch stacks and jump (x0 = 0 for ld.so)
-    stub_addr[4] = code.len()
-    a_mov(16, 0)
-    w32(0x9100003F)                                             # mov sp, x1
-    a_movz(0, 0, 0)
-    a_br(16)
-    # clone_thread(x0 = entry, x1 = arg, x2 = stack top): the child calls entry(arg) on the new
-    # stack, then exits the thread; the parent gets the thread id (or -errno)
-    stub_addr[5] = code.len()
-    a_sub_imm(2, 2, 16)
-    w32(0xA9000440)                                             # stp x0, x1, [x2]
-    a_mov(1, 2)
-    a_mov_imm(0, 0x50F00)                                       # CLONE_VM|FS|FILES|SIGHAND|THREAD|SYSVSEM
-    a_movz(2, 0, 0)
-    a_movz(3, 0, 0)
-    a_movz(4, 0, 0)
-    a_mov_imm(8, 220)
-    a_svc()
-    w32(0xB4000000 | (2 << 5) | 0)                              # cbz x0, child
-    a_ret()
-    w32(0xA9400000 | (0 << 10) | (31 << 5) | 9)                 # child: ldp x9, x0, [sp]
-    w32(0x910043FF)                                             # add sp, sp, #16
-    a_blr(9)
-    a_movz(0, 0, 0)
-    a_mov_imm(8, 93)                                            # exit this thread
-    a_svc()
-    w32(0)
-    # atomic_add(x0 = p, x1 = v) -> old value
-    stub_addr[6] = code.len()
-    w32(0xC85FFC02)                                             # ldaxr x2, [x0]
-    a_rrr(A_ADD, 3, 2, 1)
-    w32(0xC804FC03)                                             # stlxr w4, x3, [x0]
-    w32(0x35000000 | (((-3) & 0x7FFFF) << 5) | 4)               # cbnz w4, retry
-    a_mov(0, 2)
-    a_ret()
-    # atomic_cas(x0 = p, x1 = expected, x2 = desired) -> old value
-    stub_addr[7] = code.len()
-    w32(0xC85FFC03)                                             # ldaxr x3, [x0]
-    a_cmp(3, 1)
-    w32(0x54000000 | (4 << 5) | AC_NE)                          # b.ne fail
-    w32(0xC804FC02)                                             # stlxr w4, x2, [x0]
-    w32(0x35000000 | (((-4) & 0x7FFFF) << 5) | 4)               # cbnz w4, retry
-    w32(0x14000002)                                             # b done
-    w32(0xD503305F)                                             # fail: clrex
-    a_mov(0, 3)
-    a_ret()
-    # stack_ptr() -> the caller's stack pointer
-    stub_addr[8] = code.len()
-    w32(0x910003E0)                                             # mov x0, sp
-    a_ret()
-    # cpu_features() -> 0 (no AVX2 here)
-    stub_addr[9] = code.len()
-    a_movz(0, 0, 0)
-    a_ret()
-    # call x17 with x9 as its argument, its result back in x9, keeping x0-x8, x13-x15 and every
-    # vector register whole (CALL_IF_SHARED and the refcount calls when they are taken)
-    stub_addr[12] = code.len()
-    w32(0xA9BF7BFD)                                             # stp x29, x30, [sp, #-16]!
-    w32(0x910003FD)                                             # mov x29, sp
-    a_sub_imm(A_SP, A_SP, 608)
-    loop i in 0.. and pr in [(0, 1), (2, 3), (4, 5), (6, 7), (8, 13), (14, 15)]:
-        w32(0xA9000000 | ((2 * i) << 15) | (pr.1 << 10) | (A_SP << 5) | pr.0)     # stp
-    loop k in [0..16): w32(0xAD000000 | ((6 + 2 * k) << 15) | ((2 * k + 1) << 10) | (A_SP << 5) | (2 * k))  # stp q
-    a_mov(0, 9)
-    a_blr(17)
-    a_mov(9, 0)
-    loop i in 0.. and pr in [(0, 1), (2, 3), (4, 5), (6, 7), (8, 13), (14, 15)]:
-        w32(0xA9400000 | ((2 * i) << 15) | (pr.1 << 10) | (A_SP << 5) | pr.0)     # ldp
-    loop k in [0..16): w32(0xAD400000 | ((6 + 2 * k) << 15) | ((2 * k + 1) << 10) | (A_SP << 5) | (2 * k))  # ldp q
-    w32(0x910003BF)                                             # mov sp, x29
-    w32(0xA8C17BFD)                                             # ldp x29, x30, [sp], #16
-    a_ret()
-    # code_sync(x0 = p, x1 = n): machine code written there made ready to run: the data cache
-    # cleaned to where instructions are fetched from, then the instruction cache invalidated, by
-    # 16 bytes (no cache line is smaller)
-    stub_addr[11] = code.len()
-    w32(0xD344FC09)                                             # lsr x9, x0, #4
-    w32(0xD37CED29)                                             # lsl x9, x9, #4
-    a_rrr(A_ADD, 10, 0, 1)                                      # x10 = end
-    a_mov(11, 9)
-    w32(0xD50B7B20 | 11)                                        # dc cvau, x11
-    a_add_imm(11, 11, 16)
-    a_cmp(11, 10)
-    w32(0x54000000 | (((-3) & 0x7FFFF) << 5) | AC_LO)           # b.lo
-    w32(0xD5033B9F)                                             # dsb ish
-    a_mov(11, 9)
-    w32(0xD50B7520 | 11)                                        # ic ivau, x11
-    a_add_imm(11, 11, 16)
-    a_cmp(11, 10)
-    w32(0x54000000 | (((-3) & 0x7FFFF) << 5) | AC_LO)           # b.lo
-    w32(0xD5033B9F)                                             # dsb ish
-    w32(0xD5033FDF)                                             # isb
-    a_movz(0, 0, 0)
-    a_ret()
+    arm64_emit_stubs(stub_addr)
 
-# the entry point: save the initial stack pointer (argc, argv) in data's first word, run the
-# initializers and main, exit
 arm64_entry = (inits: int[], main_lf: int) -> int:
-    start = code.len()
     line_rows.push(code.len())
     line_rows.push(0)
     row_pos = 0
     row_line = 0
-    w32(0x910003E9)                                             # mov x9, sp
-    a_adr_data(10, 1, 0)
-    a_str(9, 10, 0)
-    if watch_build:
-        # (sloppy watch: room for the code of later builds, taken before anything else can be put
-        # there; its first word tells lib/std/watch.jo it is there)
-        a_mov_imm(0, WATCH_CODE_AT)
-        a_mov_imm(1, WATCH_CODE_SIZE)
-        a_movz(2, 7, 0)
-        a_mov_imm(3, 0x104022)                                  # private, anonymous, no reserve, fixed (no replace)
-        a_mov_imm(4, -1)
-        a_movz(5, 0, 0)
-        a_mov_imm(8, 222)                                       # mmap
-        a_svc()
-        a_mov_imm(9, WATCH_CODE_AT)
-        a_cmp(0, 9)
-        j = code.len()
-        w32(0x54000000 | AC_NE)                                 # b.ne over the mark
-        a_mov_imm(10, 0x6A6F74776174636B)
-        a_str(10, 9, 0)
-        wr32(j, rd32(j) | ((((code.len() - j) / 4) & 0x7FFFF) << 5))
-    loop f in inits:
-        a_call_fix.push((code.len(), f))
-        a_bl()
-    a_movz(19, 0, 0)                                            # (the exit code)
-    if main_lf >= 0:
-        a_call_fix.push((code.len(), main_lf))
-        a_bl()
-        if main_code: a_mov(19, 0)
-    if entry_end_lf >= 0:
-        a_call_fix.push((code.len(), entry_end_lf))
-        a_bl()
-    a_mov(0, 19)
-    a_mov_imm(8, 94)                                            # exit_group
-    a_svc()
+    start = arm64_emit_entry(inits, main_lf, main_code, entry_end_lf, watch_build, WATCH_CODE_AT, WATCH_CODE_SIZE)
     elf_syms.push(("_start", start, code.len() - start))
     start
 
-# macOS: dyld calls the entry point as main(argc, argv, envp), with argv just after argc on the
-# stack, so data's first word gets argv - 8 (what the library reads as Linux's stack pointer)
 arm64_entry_mac = (inits: int[], main_lf: int) -> int:
-    start = code.len()
     line_rows.push(code.len())
     line_rows.push(0)
     row_pos = 0
     row_line = 0
-    w32(0xA9BF7BFD)                                             # stp x29, x30, [sp, #-16]!
-    w32(0x910003FD)                                             # mov x29, sp
-    w32(0xA9BF53F3)                                             # stp x19, x20, [sp, #-16]! (x19: the exit code, kept for dyld)
-    a_sub_imm(9, 1, 8)
-    a_adr_data(10, 1, 0)
-    a_str(9, 10, 0)
-    loop f in inits:
-        a_call_fix.push((code.len(), f))
-        a_bl()
-    a_movz(19, 0, 0)                                            # (the exit code)
-    if main_lf >= 0:
-        a_call_fix.push((code.len(), main_lf))
-        a_bl()
-        if main_code: a_mov(19, 0)
-    if entry_end_lf >= 0:
-        a_call_fix.push((code.len(), entry_end_lf))
-        a_bl()
-    a_mov(0, 19)
-    w32(0xA8C153F3)                                             # ldp x19, x20, [sp], #16
-    w32(0xA8C17BFD)                                             # ldp x29, x30, [sp], #16
-    a_ret()
+    start = arm64_emit_entry_mac(inits, main_lf, main_code, entry_end_lf)
     elf_syms.push(("_main", start, code.len() - start))
     start
 
-# (a forward branch at p, patched to here: imm19 for CBZ/B.cond, imm26 for B)
 arm64_resolve = (text_addr: int, ro_addr: int, data_addr: int):
-    loop f in a_call_fix:
-        t = fn_addr[f.1]
-        if t < 0: ice("unresolved function {lfuncs[f.1].name}")
-        wr32(f.0, rd32(f.0) | (((t - f.0) / 4) & 0x3FFFFFF))
-    loop f in a_stub_fix:
-        t = stub_addr[f.1]
-        wr32(f.0, rd32(f.0) | (((t - f.0) / 4) & 0x3FFFFFF))
-    loop f in a_faddr_fix:
-        t = fn_addr[f.1]
-        if t < 0: ice("unresolved function {lfuncs[f.1].name}")
-        a_patch_adrp(f.0, text_addr, text_addr + t)
-    loop f in a_data_fix:
-        base = ro_addr
-        if f.1 == 1: base = data_addr
-        a_patch_adrp(f.0, text_addr, base + f.2)
+    missing = arm64_patch_module(text_addr, ro_addr, data_addr, fn_addr, stub_addr)
+    if missing >= 0: ice("unresolved function {lfuncs[missing].name}")
