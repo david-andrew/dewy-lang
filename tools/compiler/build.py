@@ -23,7 +23,8 @@ ROOT = HERE.parents[1]
 # Steps 1 and 2 cannot read Dewy, so there every `use 'X.dewy'` in compiler/
 # names X.dewy's frozen implementation-language twin instead. Steps 3 on
 # compile the Dewy modules, so the compiler that ships runs them.
-FROZEN_TWINS = {'type_labels.dewy': 'type_labels.jo',
+FROZEN_TWINS = {'quantity_algebra.dewy': 'quantity_algebra.jo',
+               'type_labels.dewy': 'type_labels.jo',
                'type_constructors.dewy': 'type_constructors.jo',
                'type_properties.dewy': 'type_properties.jo',
                'type_factory.dewy': 'type_factory.jo',

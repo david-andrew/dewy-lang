@@ -1,0 +1,227 @@
+$runtime_checks
+
+# Canonical dimension algebra and quantity display ladders share stable headers.
+# Only exponent diagnostics enter the host; all walks and interning execute here.
+QWord:type=int64<overflow='wrap'>
+QuantityScale:type=[numerator:int64 denominator:int64 shown:int64=0]
+QuantityUnit:type=[sym:string num:int64 den:int64 onum:int64 oden:int64]
+QuantityTag:type=[display:int64 origin:int64 delta:bool]
+QuantityLadder:type=[units:array<int64> base:int64]
+const QUANTITY_POWER_DEN:QWord=720720
+const QUANTITY_POWER_MAX:QWord=32767 * 720720
+QuantityAlgebraInput:type=[
+    quantity_dimensions:ptr<array<array<int64>>>
+    quantity_dimension_names:ptr<array<string>>
+    quantity_scales:ptr<array<QuantityScale>>
+    quantity_units:ptr<array<QuantityUnit>>
+    quantity_tags:ptr<array<QuantityTag>>
+    quantity_si_prefixes:ptr<array<string>>
+    quantity_base_order:ptr<array<int64>>
+    quantity_base_symbols:ptr<array<string>>
+    quantity_named_symbols:ptr<array<string>>
+    quantity_named_powers:ptr<array<array<int64>>>
+    report:<(pos:int64 text:string):>void>
+]
+let qa_inputs:ptr<QuantityAlgebraInput>=$unsafe (uint64(0) as ptr<QuantityAlgebraInput>)
+quantity_algebra_bind=(input:ptr<QuantityAlgebraInput>):>QWord=>{qa_inputs=input;0}
+# Dimensions are fixed eight-word vectors; no view crosses the later append.
+qa_intern_dimension=(powers:array<int64>):>QWord=>$unsafe {
+    let dimensions=qa_inputs[0].quantity_dimensions[0].ptr
+    let values=powers.ptr
+    loop i in [QWord(0)..QWord(qa_inputs[0].quantity_dimensions[0].length)) {
+        let entry=dimensions[i].ptr
+        let same=true
+        loop j in [QWord(0)..QWord(8)) {if entry[j] not=? values[j] {same=false}}
+        if same {return i}
+    }
+    qa_inputs[0].quantity_dimensions[0].push(powers)
+    qa_inputs[0].quantity_dimensions[0].length - 1
+}
+qa_combine_dimensions=(a:QWord b:QWord sign:QWord pos:QWord):>QWord=>$unsafe {
+    let powers:array<int64>=[]
+    loop i in [0..8) {
+        let power=QWord(qa_inputs[0].quantity_dimensions[0][a][i]) + sign * QWord(qa_inputs[0].quantity_dimensions[0][b][i])
+        if power <? - QUANTITY_POWER_MAX or power >? QUANTITY_POWER_MAX {qa_inputs[0].report(pos  "physical dimension exponent is too large")}
+        powers.push(power)
+    }
+    qa_intern_dimension(powers)
+}
+qa_power_dimension=(dim:QWord num:QWord pos:QWord den:QWord=1):>QWord=>$unsafe {
+    if num <? - 32767 or num >? 32767 or den <? 1 or den >? 32767 {qa_inputs[0].report(pos  "physical dimension exponent is too large")}
+    let powers:array<int64>=[]
+    loop i in [0..8) {
+        let value=QWord(qa_inputs[0].quantity_dimensions[0][dim][i]) * num
+        if value <? - QUANTITY_POWER_MAX or value >? QUANTITY_POWER_MAX {qa_inputs[0].report(pos  "physical dimension exponent is too large")}
+        if mod(value den kind='trunc') not=? 0 {qa_inputs[0].report(pos  "physical dimension exponent {qa_quantity_power_text(qa_inputs[0].quantity_dimensions[0][dim][i])} divided by {den} is finer than Dewy tracks")}
+        powers.push(value // den)
+    }
+    qa_intern_dimension(powers)
+}
+qa_quantity_power_text=(stored:QWord):>string=>$unsafe {
+    let g=qa_quantity_gcd(stored  QUANTITY_POWER_DEN)
+    let num=stored // g
+    let den=QUANTITY_POWER_DEN // g
+    if den =? 1 {return "{num}"}
+    "{num}/{den}"
+}
+qa_dimension_str=(dim:QWord):>string=>$unsafe {
+    let text=""
+    loop i in [0..8) {
+        let power=qa_inputs[0].quantity_dimensions[0][dim][i]
+        if power =? 0 {continue}
+        if text not=? "" {text="{text} * "}
+        text="{text}{qa_inputs[0].quantity_dimension_names[0][i]}"
+        if power not=? QUANTITY_POWER_DEN {
+            let shown=qa_quantity_power_text(power)
+            if shown.contains("/") {text="{text}^({shown})"}
+            else {text="{text}^{shown}"}
+        }
+    }
+    if text =? "" {return "dimensionless"}
+    text
+}
+qa_quantity_gcd=(a0:QWord b0:QWord):>QWord=>$unsafe {
+    let a=abs(a0)
+    let b=abs(b0)
+    loop b not=? 0 {
+        let r=mod(a b kind='trunc')
+        a=b
+        b=r
+    }
+    if a =? 0 {return 1}
+    a
+}
+qa_quantity_scale=(num0:QWord den0:QWord shown:QWord=0):>QWord=>$unsafe {
+    let num=num0
+    let den=den0
+    if den <? 0 {
+        num=-num
+        den=-den
+    }
+    let g=qa_quantity_gcd(num  den)
+    qa_inputs[0].quantity_scales[0].push(QuantityScale[num // g  den // g  shown])
+    qa_inputs[0].quantity_scales[0].length - 1
+}
+qa_base_dimension=(i:QWord):>QWord=>$unsafe {
+    let powers=fill(int64(0) 8)
+    powers[i] = QUANTITY_POWER_DEN
+    qa_intern_dimension(powers)
+}
+qa_intern_quantity_unit=(sym:string num:QWord den:QWord onum:QWord oden:QWord):>QWord=>$unsafe {
+    loop i in [1..qa_inputs[0].quantity_units[0].length) {
+        let u=qa_inputs[0].quantity_units[0].ptr + i
+        if u[0].sym =? sym and u[0].num =? num and u[0].den =? den and u[0].onum =? onum and u[0].oden =? oden {return i}
+    }
+    qa_inputs[0].quantity_units[0].push(QuantityUnit[sym  num  den  onum  oden])
+    qa_inputs[0].quantity_units[0].length - 1
+}
+qa_intern_quantity_tag=(display:QWord origin:QWord delta:bool):>QWord=>$unsafe {
+    loop i in [0..qa_inputs[0].quantity_tags[0].length) {
+        let q=qa_inputs[0].quantity_tags[0].ptr + i
+        if q[0].display =? display and q[0].origin =? origin and q[0].delta =? delta {return i}
+    }
+    qa_inputs[0].quantity_tags[0].push(QuantityTag[display  origin  delta])
+    qa_inputs[0].quantity_tags[0].length - 1
+}
+qa_quantity_si_ladder=(sym:string):>QuantityLadder=>$unsafe {
+    let units:array<int64>=[]
+    loop i in [0..7) {
+        let num:QWord=1
+        let den:QWord=1
+        loop j in [i..3) {den *= 1000}
+        loop j in [3..i) {num *= 1000}
+        units.push(qa_intern_quantity_unit("{qa_inputs[0].quantity_si_prefixes[0][i]}{sym}"  num  den  0  1))
+    }
+    QuantityLadder[units  3]
+}
+qa_quantity_one_unit=(sym:string num:QWord den:QWord):>QuantityLadder=>$unsafe {
+    QuantityLadder[[qa_intern_quantity_unit(sym  num  den  0  1)]  0]
+}
+qa_quantity_named_dimension=(i:QWord):>QWord=>$unsafe {
+    let powers=fill(int64(0) 8)
+    loop j in [0..4) {powers[j] = qa_inputs[0].quantity_named_powers[0][i][j] * QUANTITY_POWER_DEN}
+    qa_intern_dimension(powers)
+}
+qa_quantity_power_suffix=(stored:QWord):>string=>$unsafe {
+    if stored =? QUANTITY_POWER_DEN {return ""}
+    let shown=qa_quantity_power_text(stored)
+    if shown.contains("/") or stored <? 0 {return "^({shown})"}
+    "^{shown}"
+}
+qa_quantity_composite_text=(named:string powers:array<int64>):>string=>$unsafe {
+    let top=named
+    let bottom=""
+    loop i in qa_inputs[0].quantity_base_order[0] {
+        let p=powers[i]
+        # (a fractional power of time is one of frequency: V/Hz^(1/2), not V*s^(1/2))
+        if i =? 0 and mod(p QUANTITY_POWER_DEN kind='trunc') not=? 0 {p=-p}
+        let sym=if i =? 0 and p not=? powers[i] {"Hz"} else {qa_inputs[0].quantity_base_symbols[0][i]}
+        if p >? 0 {
+            if top not=? "" {top="{top}*"}
+            top="{top}{sym}{qa_quantity_power_suffix(p)}"
+        }
+        else if p <? 0 {bottom="{bottom}/{sym}{qa_quantity_power_suffix(-p)}"}
+    }
+    if top =? "" and bottom =? "" {return ""}
+    if top =? "" {top="1"}
+    "{top}{bottom}"
+}
+qa_quantity_factor_count=(powers:array<int64>):>QWord=>$unsafe {
+    let count:QWord=0
+    loop p in powers {
+        if p not=? 0 {count += 1}
+    }
+    count
+}
+qa_quantity_ladder=(dim:QWord):>QuantityLadder=>$unsafe {
+    let powers=qa_inputs[0].quantity_dimensions[0][dim]
+    if dim =? qa_base_dimension(0) {
+        let units:array<int64>=[]
+        let steps:array<[string int64 int64]>=[["ns"  1  1000000000]  ["µs"  1  1000000]  ["ms"  1  1000]  ["s"  1  1]  ["min"  60  1]  ["h"  3600  1]]
+        loop item in steps {
+            units.push(qa_intern_quantity_unit(item[0]  item[1]  item[2]  0  1))
+        }
+        return QuantityLadder[units  3]
+    }
+    if dim =? qa_base_dimension(1) {
+        let ladder=qa_quantity_si_ladder("m")
+        return QuantityLadder[ladder.units[0..5)  3]
+    }
+    if dim =? qa_base_dimension(2) {
+        let units:array<int64>=[]
+        let steps:array<[string int64 int64]>=[["mg"  1  1000000]  ["g"  1  1000]  ["kg"  1  1]]
+        loop item in steps {
+            units.push(qa_intern_quantity_unit(item[0]  item[1]  item[2]  0  1))
+        }
+        return QuantityLadder[units  2]
+    }
+    if dim =? qa_base_dimension(7) {return qa_quantity_one_unit("°"  1  360)}
+    if dim =? qa_base_dimension(4) {return qa_quantity_one_unit("K"  1  1)}
+    if dim =? qa_base_dimension(6) {return qa_quantity_one_unit("cd"  1  1)}
+    if dim =? qa_base_dimension(3) {return qa_quantity_si_ladder("A")}
+    if dim =? qa_base_dimension(5) {return qa_quantity_si_ladder("mol")}
+    loop i in [0..qa_inputs[0].quantity_named_symbols[0].length) {
+        if qa_quantity_named_dimension(i) =? dim {return qa_quantity_si_ladder(qa_inputs[0].quantity_named_symbols[0][i])}
+    }
+    # Fewest factors: base units alone, or one named unit times base units.
+    let best=qa_quantity_composite_text(""  powers)
+    let cost=qa_quantity_factor_count(powers)
+    loop i in [0..qa_inputs[0].quantity_named_symbols[0].length) {
+        # Interning may append and replace the dimension arena. Finish it before
+        # evaluating the array receiver, then acquire the resulting value by ID.
+        let rest_dim=qa_combine_dimensions(dim  qa_quantity_named_dimension(i)  -1  0)
+        let rest=qa_inputs[0].quantity_dimensions[0][rest_dim]
+        if qa_quantity_factor_count(rest) + 1 <? cost {
+            cost=qa_quantity_factor_count(rest) + 1
+            best=qa_quantity_composite_text(qa_inputs[0].quantity_named_symbols[0][i]  rest)
+        }
+    }
+    # (angles in degrees, as alone: 90°/s, not 1/4 turn/s)
+    if powers[7] =? QUANTITY_POWER_DEN or powers[7] =? - QUANTITY_POWER_DEN {
+        let rest=fill(int64(0) 8)
+        loop i in [0..7) {rest[i] = powers[i]}
+        if powers[7] >? 0 {return qa_quantity_one_unit(qa_quantity_composite_text("°"  rest)  1  360)}
+        return qa_quantity_one_unit("{qa_quantity_composite_text("" rest)}/°"  360  1)
+    }
+    qa_quantity_one_unit(best  1  1)
+}

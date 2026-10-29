@@ -96,7 +96,10 @@ type_intern=(input:ptr<TypeInfo> args:array<int64>):>IWord=>$unsafe {
         if ti_table[0].length =? 0 or IWord(ti_types[0].length) * 2 >=? IWord(ti_table[0].length) {type_intern_rehash()}
         let mask=IWord(ti_table[0].length) - 1
         let table=ti_table[0].ptr
-        let h=(type_intern_hash(input args) transmute int64) & mask
+        # Reuse this call's argument view instead of opening another hash frame.
+        let hash=ti_hash_seed(input)
+        loop i in [IWord(0)..count) {hash=hash * 131 + values[i]}
+        let h=(ti_hash_end(hash) transmute int64) & mask
         loop table[h] not=? 0 {
             let id=IWord(table[h])
             if type_intern_same(id input args) {return id}

@@ -1,0 +1,231 @@
+struct QuantityScale:
+    numerator: int
+    denominator: int
+    shown: int = 0   # how an exact value prints (rational.dewy's `_shown`: 1 decimal, 2 fraction)
+
+struct QuantityUnit:
+    sym: str
+    num: int        # one unit is num/den canonical units
+    den: int
+    onum: int       # the unit's zero, in canonical units (0 °C is 5463/20 K)
+    oden: int
+
+struct QuantityTag:
+    display: int    # the unit it shows in (0: chosen from the dimension and magnitude)
+    origin: int     # the offset unit it was written in (0: none)
+    delta: bool     # a difference of temperatures: shown without the unit's offset
+
+struct QuantityLadder:
+    units: int[]
+    base: int
+
+
+const QUANTITY_POWER_DEN = 720720
+const QUANTITY_POWER_MAX = 32767 * 720720
+struct QuantityAlgebraInput:
+    quantity_dimensions: *(int[][])
+    quantity_dimension_names: *(str[])
+    quantity_scales: *(QuantityScale[])
+    quantity_units: *(QuantityUnit[])
+    quantity_tags: *(QuantityTag[])
+    quantity_si_prefixes: *(str[])
+    quantity_base_order: *(int[])
+    quantity_base_symbols: *(str[])
+    quantity_named_symbols: *(str[])
+    quantity_named_powers: *(int[][])
+    report: (int, str) -> void
+qa_inputs: *QuantityAlgebraInput
+quantity_algebra_bind = (input: *QuantityAlgebraInput) -> int:
+    qa_inputs = input
+    0
+qa_intern_dimension = (powers: int[]) -> int:
+    loop i in [0..qa_inputs[0].quantity_dimensions[0].len()):
+        same = true
+        loop j in [0..8):
+            if qa_inputs[0].quantity_dimensions[0][i][j] != powers[j]: same = false
+        if same: return i
+    qa_inputs[0].quantity_dimensions[0].push(powers)
+    qa_inputs[0].quantity_dimensions[0].len() - 1
+
+
+qa_combine_dimensions = (a: int, b: int, sign: int, pos: int) -> int:
+    powers: int[]
+    loop i in [0..8):
+        power = qa_inputs[0].quantity_dimensions[0][a][i] + sign * qa_inputs[0].quantity_dimensions[0][b][i]
+        if power < -QUANTITY_POWER_MAX or power > QUANTITY_POWER_MAX: qa_inputs[0].report(pos, "physical dimension exponent is too large")
+        powers.push(power)
+    qa_intern_dimension(powers)
+
+
+qa_power_dimension = (dim: int, num: int, pos: int, den: int = 1) -> int:
+    if num < -32767 or num > 32767 or den < 1 or den > 32767: qa_inputs[0].report(pos, "physical dimension exponent is too large")
+    powers: int[]
+    loop i in [0..8):
+        value = qa_inputs[0].quantity_dimensions[0][dim][i] * num
+        if value < -QUANTITY_POWER_MAX or value > QUANTITY_POWER_MAX: qa_inputs[0].report(pos, "physical dimension exponent is too large")
+        if value % den != 0: qa_inputs[0].report(pos, "physical dimension exponent {qa_quantity_power_text(qa_inputs[0].quantity_dimensions[0][dim][i])} divided by {den} is finer than Dewy tracks")
+        powers.push(value / den)
+    qa_intern_dimension(powers)
+
+
+qa_quantity_power_text = (stored: int) -> str:
+    g = qa_quantity_gcd(stored, QUANTITY_POWER_DEN)
+    num = stored / g
+    den = QUANTITY_POWER_DEN / g
+    if den == 1: return "{num}"
+    "{num}/{den}"
+
+
+qa_dimension_str = (dim: int) -> str:
+    text = ""
+    loop i in [0..8):
+        power = qa_inputs[0].quantity_dimensions[0][dim][i]
+        if power == 0: continue
+        if text != "": text += " * "
+        text += qa_inputs[0].quantity_dimension_names[0][i]
+        if power != QUANTITY_POWER_DEN:
+            shown = qa_quantity_power_text(power)
+            if find_byte(shown, '/') >= 0: text += "^({shown})"
+            else: text += "^{shown}"
+    if text == "": return "dimensionless"
+    text
+
+
+qa_quantity_gcd = (a0: int, b0: int) -> int:
+    a = abs(a0)
+    b = abs(b0)
+    loop b != 0:
+        r = a % b
+        a = b
+        b = r
+    if a == 0: return 1
+    a
+
+
+qa_quantity_scale = (num0: int, den0: int, shown: int = 0) -> int:
+    num = num0
+    den = den0
+    if den < 0:
+        num = -num
+        den = -den
+    g = qa_quantity_gcd(num, den)
+    qa_inputs[0].quantity_scales[0].push(QuantityScale(num / g, den / g, shown))
+    qa_inputs[0].quantity_scales[0].len() - 1
+
+
+qa_base_dimension = (i: int) -> int:
+    powers = fill(0, 8)
+    powers[i] = QUANTITY_POWER_DEN
+    qa_intern_dimension(powers)
+
+
+qa_intern_quantity_unit = (sym: str, num: int, den: int, onum: int, oden: int) -> int:
+    loop i in [1..qa_inputs[0].quantity_units[0].len()):
+        u = qa_inputs[0].quantity_units[0][i]
+        if u.sym == sym and u.num == num and u.den == den and u.onum == onum and u.oden == oden: return i
+    qa_inputs[0].quantity_units[0].push(QuantityUnit(sym, num, den, onum, oden))
+    qa_inputs[0].quantity_units[0].len() - 1
+
+
+qa_intern_quantity_tag = (display: int, origin: int, delta: bool) -> int:
+    loop i in [0..qa_inputs[0].quantity_tags[0].len()):
+        q = qa_inputs[0].quantity_tags[0][i]
+        if q.display == display and q.origin == origin and q.delta == delta: return i
+    qa_inputs[0].quantity_tags[0].push(QuantityTag(display, origin, delta))
+    qa_inputs[0].quantity_tags[0].len() - 1
+
+
+qa_quantity_si_ladder = (sym: str) -> QuantityLadder:
+    units: int[]
+    loop i in [0..7):
+        num = 1
+        den = 1
+        loop j in [i..3): den *= 1000
+        loop j in [3..i): num *= 1000
+        units.push(qa_intern_quantity_unit(qa_inputs[0].quantity_si_prefixes[0][i] + sym, num, den, 0, 1))
+    QuantityLadder(units, 3)
+
+
+qa_quantity_one_unit = (sym: str, num: int, den: int) -> QuantityLadder:
+    QuantityLadder([qa_intern_quantity_unit(sym, num, den, 0, 1)], 0)
+
+
+qa_quantity_named_dimension = (i: int) -> int:
+    powers = fill(0, 8)
+    loop j in [0..4): powers[j] = qa_inputs[0].quantity_named_powers[0][i][j] * QUANTITY_POWER_DEN
+    qa_intern_dimension(powers)
+
+
+qa_quantity_power_suffix = (stored: int) -> str:
+    if stored == QUANTITY_POWER_DEN: return ""
+    shown = qa_quantity_power_text(stored)
+    if find_byte(shown, '/') >= 0 or stored < 0: return "^({shown})"
+    "^{shown}"
+
+
+qa_quantity_composite_text = (named: str, powers: int[]) -> str:
+    top = named
+    bottom = ""
+    loop i in qa_inputs[0].quantity_base_order[0]:
+        p = powers[i]
+        # (a fractional power of time is one of frequency: V/Hz^(1/2), not V*s^(1/2))
+        if i == 0 and p % QUANTITY_POWER_DEN != 0: p = -p
+        sym = if i == 0 and p != powers[i]: "Hz" else: qa_inputs[0].quantity_base_symbols[0][i]
+        if p > 0:
+            if top != "": top += "*"
+            top += sym + qa_quantity_power_suffix(p)
+        else if p < 0: bottom += "/" + sym + qa_quantity_power_suffix(-p)
+    if top == "" and bottom == "": return ""
+    if top == "": top = "1"
+    top + bottom
+
+
+qa_quantity_factor_count = (powers: int[]) -> int:
+    count = 0
+    loop p in powers:
+        if p != 0: count += 1
+    count
+
+
+qa_quantity_ladder = (dim: int) -> QuantityLadder:
+    powers = qa_inputs[0].quantity_dimensions[0][dim]
+    if dim == qa_base_dimension(0):
+        units: int[]
+        loop item in [("ns", 1, 1000000000), ("µs", 1, 1000000), ("ms", 1, 1000), ("s", 1, 1), ("min", 60, 1), ("h", 3600, 1)]:
+            units.push(qa_intern_quantity_unit(item.0, item.1, item.2, 0, 1))
+        return QuantityLadder(units, 3)
+    if dim == qa_base_dimension(1):
+        ladder = qa_quantity_si_ladder("m")
+        return QuantityLadder(ladder.units[0..5), 3)
+    if dim == qa_base_dimension(2):
+        units: int[]
+        loop item in [("mg", 1, 1000000), ("g", 1, 1000), ("kg", 1, 1)]:
+            units.push(qa_intern_quantity_unit(item.0, item.1, item.2, 0, 1))
+        return QuantityLadder(units, 2)
+    if dim == qa_base_dimension(7): return qa_quantity_one_unit("°", 1, 360)
+    if dim == qa_base_dimension(4): return qa_quantity_one_unit("K", 1, 1)
+    if dim == qa_base_dimension(6): return qa_quantity_one_unit("cd", 1, 1)
+    if dim == qa_base_dimension(3): return qa_quantity_si_ladder("A")
+    if dim == qa_base_dimension(5): return qa_quantity_si_ladder("mol")
+    loop i in [0..qa_inputs[0].quantity_named_symbols[0].len()):
+        if qa_quantity_named_dimension(i) == dim: return qa_quantity_si_ladder(qa_inputs[0].quantity_named_symbols[0][i])
+    # Fewest factors: base units alone, or one named unit times base units.
+    best = qa_quantity_composite_text("", powers)
+    cost = qa_quantity_factor_count(powers)
+    loop i in [0..qa_inputs[0].quantity_named_symbols[0].len()):
+        # The borrowed receiver is acquired after interning, as with the original
+        # global receiver. Interning can replace the dimension arena.
+        rest_dim = qa_combine_dimensions(dim, qa_quantity_named_dimension(i), -1, 0)
+        rest = qa_inputs[0].quantity_dimensions[0][rest_dim]
+        if qa_quantity_factor_count(rest) + 1 < cost:
+            cost = qa_quantity_factor_count(rest) + 1
+            best = qa_quantity_composite_text(qa_inputs[0].quantity_named_symbols[0][i], rest)
+    # (angles in degrees, as alone: 90°/s, not 1/4 turn/s)
+    if powers[7] == QUANTITY_POWER_DEN or powers[7] == -QUANTITY_POWER_DEN:
+        rest = fill(0, 8)
+        loop i in [0..7): rest[i] = powers[i]
+        if powers[7] > 0: return qa_quantity_one_unit(qa_quantity_composite_text("°", rest), 1, 360)
+        return qa_quantity_one_unit(qa_quantity_composite_text("", rest) + "/°", 360, 1)
+    qa_quantity_one_unit(best, 1, 1)
+
+
