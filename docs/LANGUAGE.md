@@ -2505,6 +2505,8 @@ not an unvisited written endpoint. Scalar and array assignments check each selec
 array replacements also need the selected element count. Stored selectors keep
 their captured endpoints, including when an update's right-hand side changes
 the destination. A changed selector needs its bounds established again.
+Checked script-global shape facts survive builtin scalar/text printing;
+formatters, argument evaluation and other calls still apply their write effects.
 
 Dotted N-D operations prove trailing-axis compatibility from known shapes:
 corresponding extents must match or one must be `1`. Each operand also needs

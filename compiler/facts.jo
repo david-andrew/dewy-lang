@@ -30,6 +30,7 @@ use 'nd_contracts.jo'
 use 'proofs.jo'
 use 'places.jo'
 use 'effects.jo'
+use 'effect_library.jo'
 use 'ownership.jo'
 use 'witness.jo'
 use 'directives.jo'
@@ -2204,10 +2205,15 @@ fact_exposed_bound = (s: FactState) -> bool:
 
 # A write through an exposed place p forgets every exposed root but those
 # disjoint from p.
-fact_forget = (s: mut FactState, at: int, reason: FactReason, all: bool = false, written: PlaceIdentity = PlaceIdentity(.local, 0, 0), keep_written: bool = false):
+fact_forget = (s: mut FactState, at: int, reason: FactReason, all: bool = false, written: PlaceIdentity = PlaceIdentity(.local, 0, 0), keep_written: bool = false, text_sink: bool = false):
     loop i in [0..s.bindings.len()):
         p = s.bindings[i].place
         if not all and not fact_exposed(p): continue
+        # Output's internal buffers remain mutable. Preserve only checked
+        # program globals that cannot alias those buffers through an escape.
+        if text_sink and p.root == .global and not globals[p.declaration].exposed:
+            d = int(globals[p.declaration].decl)
+            if d != 0 and dewy_at(nodes[d].pos) and not pos_in_lib(nodes[d].pos): continue
         if not all and (fact_disjoint(written, p) or keep_written and p == written): continue
         t = if p.root == .local: int(locals[p.declaration].type) else: int(globals[p.declaration].type)
         v = fact_new(s, fact_domain(t, reason, at), FactTerm(type = t))
@@ -2291,6 +2297,10 @@ fact_path_call_effects = (n: int, s: mut FactState):
 fact_call_effects = (n: int, s: mut FactState):
     f = int(nodes[n].sym)
     fact_forget_mutable_maps(n, s)
+    # Formatting operands have already run. These bundled text sinks touch
+    # runtime output buffers only, never a program's global or lent places.
+    # Keep their full I/O/cost effects; this is solely a write-footprint rule.
+    if nodes[n].aux == 0 and fact_text_sink(f): fact_forget(s, n, .call, text_sink = true); return
     # (a callee opaque by its signature forgets the same exposed roots its
     # summary would: its call tree is not visited for it)
     if nodes[n].aux == 0 and f > 0 and f < fns.len() and not (fns[f].body != 0 and fns[f].state != 2) and effect_signature_opaque(f):
@@ -2359,6 +2369,29 @@ fact_call_effects = (n: int, s: mut FactState):
         t = if p.root == .local: int(locals[p.declaration].type) else: int(globals[p.declaration].type)
         value = fact_call_write(s, old, t, group.paths, 0, n)
         fact_rebind(s, p, value, n, old)
+
+# Scalars can select a program formatter. Only the resolved builtin word
+# leaf or reviewed library formatter has no external writes.
+fact_builtin_formatter = (part: int) -> bool:
+    f = int(nodes[part].sym)
+    if f <= 0: return false
+    if f == (runtime_insts.get("__fmt_word") ?? 0): return true
+    effect_library_class(f) != .unclassified
+
+# Exact bundled declarations, cached once per instantiated sink. No user
+# spelling match or callback exemption; O(1) at each demanded call.
+fact_text_sinks: {int: bool} = {}
+fact_text_sink = (f: int) -> bool:
+    if f <= 0 or f >= fns.len(): return false
+    if let known = fact_text_sinks.get(f): return known
+    d = int(fns[f].decl)
+    known = false
+    if d != 0 and nodes[d].kind == .fn_ and fns[f].params.len() == 1:
+        name = name_of(int(nodes[d].name))
+        path = files[pos_file(nodes[d].pos)].path
+        known = (name == "__print_str" and path == lib_dir + "/core/rt.jo" or name == "write" and path == lib_dir + "/core/os.jo") and int(locals[fns[f].params[0]].type) == T_STR
+    fact_text_sinks[f] = known
+    known
 
 struct FactCallWrites:
     place: PlaceIdentity
@@ -7736,8 +7769,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         loop part in kids(n):
             if nodes[part].kind != .pair: continue
             fact_capture(int(nodes[part].a), s)
-            pt = prune(ntype(int(nodes[part].a)))
-            if types[pt].kind != .int_ and types[pt].kind != .float_ and types[pt].kind != .bool_ and types[pt].kind != .str_: fact_forget(s, part, .call)
+            if not fact_builtin_formatter(part): fact_forget(s, part, .call)
         return fact_new(s, FactBound(reason = .unsupported, witness = n))
     if k == .addr or k == .parallel_region: return fact_capture(int(nodes[n].a), s)
     # Creating a closure evaluates nothing (defaults are the actuals of its
@@ -9076,6 +9108,7 @@ facts_reset = ():
     fact_saving = false
     fact_sum_operand = 0
     fact_constant_globals = {}
+    fact_text_sinks = {}
     fact_regex_counts = {}
     fact_call_field_types = {}
     draw_context_reset()
