@@ -1,0 +1,1095 @@
+use 'evaluator_state.dewy'
+use 'checker_tokens.dewy'
+use 'checker_types.dewy'
+use 'checker_state.dewy'
+use 'refinement_types.dewy'
+use 'node_store.dewy'
+use 'source_types.dewy'
+use 'type_inference.dewy'
+use 'type_layout.dewy'
+use 'type_format.dewy'
+use 'type_unions.dewy'
+const NF_INCLUSIVE = 2
+const NF_EXTERN = 4
+const NF_CHECKED = 128
+const NF_STEP = 32768         # range `a,b..c`: c holds the second value
+const NF_U64 = 2097152        # an integer literal above the i64 range (written so, or computed from one)
+const LF_MUTPARAM = 2
+const LF_ALIAS = 8
+enum CXIN:
+    none_, len, push, pop, insert, remove, clear, reserve, slice, syscall, memcpy, memset, sizeof, arrdata, panic, assert, print, embed, from_bytes, to_bytes, argv, setlen, truncate, resize, hash, alignof, unreachable, arrcap, fmt_struct, sqrt, vec_ctor, cfn_cast, wasm_call, callc, floor_, ceil_, fabs, fmin, fmax, setjmp, longjmp, jump, shader, extend, clone_thread, atomic_add, atomic_cas, stack_ptr, fill, fmt_elem, gpu_kernel, cpu_features, code_sync, compute, compute_spirv, compute_textures, read_fields, default_init, offset_unit, embed_dir, dewy_iter, dewy_iter_done, dewy_iter_value, json_fields, dewy_iter_pair, dewy_set, static_assert, runtime_assert, dewy_print, dewy_fmt, dewy_fmt_elem, lend, loan_address, loan_load, loan_store, loan_length, zeroed, relocate, take_slot, live_len, task_report, task_data, task_duration, arena_result, arrdata_permute, mul_hi, secret_wrap, secret_value, range_max, fixed_abs, integer_mode
+enum CXCV:
+    none_, int_, int2float, float2int, float_, opt, ptr, bits, fn2clos, union_, fixed2arr, arr2fixed, quantity_const, explicit_copy, refinement, big2math, math2big, set_text, promote, wrap_int, saturate_int, fixed_store
+struct CheckedEvalHost:
+    binding_const_init: (int, int, int) -> int
+    call_eval_order: (int) -> int[]
+    check_fn_body: (int) -> void
+    check_struct_fields: (int) -> void
+    compound_op: (int) -> int
+    dewy_at: (int) -> bool
+    exact_type: (int, int) -> bool
+    fatal: (int, str) -> void
+    int_fits: (int, int) -> bool
+    int_widens: (int, int) -> bool
+    intern: (str) -> int
+    math_rep_type: (int) -> bool
+    pos_str: (int) -> str
+    representation_type: (int) -> int
+    runtime_fn: (str) -> int
+    str_set_of: (int) -> int
+    wrap_conv: (int, int, int) -> void
+    byte_cut: (str, int, int) -> str
+    str_from_bytes: (u8[]) -> str
+struct CheckedEvalInput:
+    ct_values: *(CTValue[])
+    nodes: *(Node[])
+    lists: *(i32[])
+    names: *(str[])
+    types: *(TypeInfo[])
+    type_args: *(i32[])
+    structs: *(StructInfo[])
+    fields: *(Field[])
+    variants: *(Variant[])
+    fns: *(FnInst[])
+    globals: *(Global[])
+    locals: *(Local[])
+    files: *(SrcFile[])
+    ref_predicates: *(RefAtom[][])
+    ref_narrowing: *({int: int})
+    str_sets: *(str[][])
+    T_BOOL: *(int)
+    T_INT: *(int)
+    T_MATH_INT: *(int)
+    T_STR: *(int)
+    T_U64: *(int)
+    T_U8: *(int)
+    ts_dewy: *(bool)
+    lib_dir: *(str)
+    host: *CheckedEvalHost
+cx_ct_values: *(CTValue[])
+cx_nodes: *(Node[])
+cx_lists: *(i32[])
+cx_names: *(str[])
+cx_types: *(TypeInfo[])
+cx_type_args: *(i32[])
+cx_structs: *(StructInfo[])
+cx_fields: *(Field[])
+cx_variants: *(Variant[])
+cx_fns: *(FnInst[])
+cx_globals: *(Global[])
+cx_locals: *(Local[])
+cx_files: *(SrcFile[])
+cx_ref_predicates: *(RefAtom[][])
+cx_ref_narrowing: *({int: int})
+cx_str_sets: *(str[][])
+cx_T_BOOL: *(int)
+cx_T_INT: *(int)
+cx_T_MATH_INT: *(int)
+cx_T_STR: *(int)
+cx_T_U64: *(int)
+cx_T_U8: *(int)
+cx_ts_dewy: *(bool)
+cx_lib_dir: *(str)
+cx_host: *CheckedEvalHost
+checked_eval_bind = (input: *CheckedEvalInput) -> int:
+    cx_ct_values = input[0].ct_values
+    cx_nodes = input[0].nodes
+    cx_lists = input[0].lists
+    cx_names = input[0].names
+    cx_types = input[0].types
+    cx_type_args = input[0].type_args
+    cx_structs = input[0].structs
+    cx_fields = input[0].fields
+    cx_variants = input[0].variants
+    cx_fns = input[0].fns
+    cx_globals = input[0].globals
+    cx_locals = input[0].locals
+    cx_files = input[0].files
+    cx_ref_predicates = input[0].ref_predicates
+    cx_ref_narrowing = input[0].ref_narrowing
+    cx_str_sets = input[0].str_sets
+    cx_T_BOOL = input[0].T_BOOL
+    cx_T_INT = input[0].T_INT
+    cx_T_MATH_INT = input[0].T_MATH_INT
+    cx_T_STR = input[0].T_STR
+    cx_T_U64 = input[0].T_U64
+    cx_T_U8 = input[0].T_U8
+    cx_ts_dewy = input[0].ts_dewy
+    cx_lib_dir = input[0].lib_dir
+    cx_host = input[0].host
+    0
+cx_prune = (t: int) -> int: tu_prune(t)
+cx_tkind = (t: int) -> TK: cx_types[0][tu_prune(t)].kind
+cx_telem = (t: int) -> int: int(cx_types[0][tu_prune(t)].elem)
+cx_fixed_len = (t: int) -> int: int(cx_types[0][tu_prune(t)].bits)
+cx_targ = (t: int, i: int) -> int: int(cx_type_args[0][int(cx_types[0][t].args) + i])
+cx_is_int = (t: int) -> bool: cx_types[0][tu_prune(t)].kind == .int_
+cx_is_float = (t: int) -> bool: cx_types[0][tu_prune(t)].kind == .float_
+cx_int_policy = (t: int) -> int:
+    let t = tu_prune(t)
+    if cx_types[0][t].kind != .int_ or t == cx_T_MATH_INT[0]: return 0
+    int(cx_types[0][t].st)
+cx_has_flag = (n: int, f: int) -> bool: int(cx_nodes[0][n].flags) & f != 0
+cx_add_flag = (n: int, f: int): cx_nodes[0][n].flags = i32(int(cx_nodes[0][n].flags) | f)
+cx_ntype = (n: int) -> int: int(cx_nodes[0][n].type)
+cx_nkids = (n: int) -> int: int(cx_nodes[0][n].nlist)
+cx_kid = (n: int, i: int) -> int: int(cx_lists[0][int(cx_nodes[0][n].list) + i])
+cx_kids = (n: int) -> int[]: node_kids(cx_nodes[0], cx_lists[0], n)
+cx_name_of = (id: int) -> str: cx_names[0][id]
+cx_pos_file = (p: int) -> int: p >> 40
+cx_dt = (t: int) -> str: tf_string(t, cx_ts_dewy[0])
+cx_tsize = (t: int) -> int:
+    tl_layout(t)
+    int(cx_types[0][tu_prune(t)].size)
+cx_mk = (kind: NK, pos: int) -> int: node_mk(cx_nodes[0], kind, pos)
+cx_set_list = (n: int, xs: int[]): node_set_list(cx_nodes[0], cx_lists[0], n, xs)
+# Ordinary checked Dewy bodies, interpreted on demand. Values are immutable;
+# frames and places belong to the evaluator, never to the checker or backend.
+# No fuel counter: general compile-time execution is trusted.
+
+cx_frames: CTFrame[]
+cx_places: CTPlace[]
+cx_stack: int[]
+cx_global_cache: {int: int}
+cx_pending: int[]
+cx_frame = -1
+
+cx_fail = (e: int, why: str):
+    trail = ""
+    loop call in cx_stack:
+        f = int(cx_nodes[0][call].sym)
+        name = if f > 0 and cx_fns[0][f].decl != 0: cx_name_of(int(cx_nodes[0][int(cx_fns[0][f].decl)].name)) else: "<expression>"
+        trail += "\n  compile-time call to {name} at {cx_host[0].pos_str(cx_nodes[0][call].pos)}"
+    cx_host[0].fatal(cx_nodes[0][e].pos, "compile-time evaluation: {why}{trail}")
+
+cx_add = (v: CTValue) -> int:
+    cx_ct_values[0].push(v)
+    cx_ct_values[0].len() - 1
+
+cx_int = (t: int, i: int) -> int:
+    let i = i
+    let t = cx_prune(t)
+    if cx_is_int(t) and int(cx_types[0][t].bits) < 64:
+        bits = int(cx_types[0][t].bits)
+        if cx_types[0][t].sign: i = (i << (64 - bits)) >> (64 - bits)
+        else: i &= (1 << bits) - 1
+    cx_add(CTValue(type = t, i = i))
+
+cx_float = (t: int, f: f64) -> int:
+    cx_add(CTValue(type = t, f = if int(cx_types[0][t].bits) == 32: f64(f32(f)) else: f))
+
+cx_zero = (t0: int) -> int:
+    t = cx_prune(t0)
+    v = CTValue(type = t)
+    k = cx_tkind(t)
+    if k == .struct_:
+        si = int(cx_types[0][t].st)
+        cx_host[0].check_struct_fields(si)
+        loop i in [0..int(cx_structs[0][si].nfields)): v.items.push(cx_zero(int(cx_fields[0][int(cx_structs[0][si].fields) + i].type)))
+    else if k == .enum_:
+        si = int(cx_types[0][t].st)
+        cx_host[0].check_struct_fields(si)
+        vi = int(cx_structs[0][si].variants)
+        loop i in [0..int(cx_variants[0][vi].nfields)): v.items.push(cx_zero(int(cx_fields[0][int(cx_variants[0][vi].fields) + i].type)))
+    else if k == .tuple:
+        loop i in [0..int(cx_types[0][t].nargs)): v.items.push(cx_zero(cx_targ(t, i)))
+    else if k == .fixed:
+        loop i in [0..cx_fixed_len(t)): v.items.push(cx_zero(cx_telem(t)))
+    cx_add(v)
+
+cx_equal = (a: int, b: int, e: int = 0) -> bool:
+    x = cx_value(a)
+    y = cx_value(b)
+    if cx_is_int(x.type) and cx_is_int(y.type) and (x.type == cx_T_MATH_INT[0] or y.type == cx_T_MATH_INT[0]) and (x.items.len() > 0 or y.items.len() > 0):
+        return cx_value(cx_math_binary(e, .eq, cx_exact_operand(a, e), cx_exact_operand(b, e))).i != 0
+    if x.i != y.i or x.s != y.s or x.items.len() != y.items.len(): return false
+    if cx_is_float(x.type) and x.f != y.f: return false
+    loop i in [0..x.items.len()):
+        if not cx_equal(x.items[i], y.items[i], e): return false
+    true
+
+# The evaluator can use its compile-time mathematical representation; emitted
+# fixed-width code uses only statically sized machine words.
+cx_fixed_internal = 0
+
+cx_exact_operand = (v: int, e: int) -> int:
+    x = cx_value(v)
+    if x.type == cx_T_MATH_INT[0]: return v
+    if not cx_types[0][x.type].sign and x.i < 0: return cx_math_unpack(cx_math_runtime("__mi_unsigned", [v], e))
+    cx_int(cx_T_MATH_INT[0], x.i)
+
+cx_store = (v: int, t0: int, e: int) -> int:
+    t = cx_host[0].representation_type(t0)
+    if cx_fixed_internal > 0 or v == 0 or not cx_host[0].exact_type(t, cx_nodes[0][e].pos): return v
+    x = cx_value(v)
+    if x.type != cx_T_MATH_INT[0]: return v
+    word = x.i
+    if x.items.len() > 0:
+        checked = cx_math_runtime((if cx_types[0][t].sign: "__mi_signed" else: "__mi_to_unsigned"), [cx_math_rep(v)], e)
+        word = cx_value(checked).i
+    else if not cx_types[0][t].sign and word < 0: cx_fail(e, "exact integer result does not fit {cx_dt(t)}")
+    if int(cx_types[0][t].bits) < 64 and not cx_host[0].int_fits(word, t): cx_fail(e, "exact integer result does not fit {cx_dt(t)}")
+    cx_int(t, word)
+
+cx_binary = (e: int, op: Tok, a: int, b: int, t: int) -> int:
+    x = cx_value(a)
+    y = cx_value(b)
+    if (op == .slash or op == .percent) and cx_is_int(y.type) and y.i == 0 and y.items.len() == 0: cx_fail(e, "division by zero")
+    if cx_fixed_internal == 0 and cx_is_int(x.type) and cx_is_int(y.type) and (cx_host[0].exact_type(t, cx_nodes[0][e].pos) or x.type == cx_T_MATH_INT[0] or y.type == cx_T_MATH_INT[0]) and cx_int_policy(t) == 0:
+        return cx_math_binary(e, op, cx_exact_operand(a, e), cx_exact_operand(b, e))
+    if x.type == cx_T_MATH_INT[0] and (x.items.len() > 0 or y.items.len() > 0): return cx_math_binary(e, op, a, b)
+    if cx_tkind(x.type) == .ptr:
+        if cx_tkind(t) != .ptr or (op != .plus and op != .minus): cx_fail(e, "pointer comparisons and host addresses are not allowed")
+        x.i += (if op == .plus: y.i else: -y.i) * cx_tsize(cx_telem(x.type))
+        return cx_add(x)
+    if op == .eq or op == .ne:
+        eq = cx_equal(a, b, e)
+        return cx_int(cx_T_BOOL[0], int(if op == .eq: eq else: not eq))
+    if cx_tkind(x.type) == .str_:
+        if op == .plus: return cx_add(CTValue(type = cx_T_STR[0], s = x.s + y.s))
+        if op == .lt: return cx_int(cx_T_BOOL[0], int(x.s < y.s))
+        if op == .le: return cx_int(cx_T_BOOL[0], int(x.s <= y.s))
+        if op == .gt: return cx_int(cx_T_BOOL[0], int(x.s > y.s))
+        if op == .ge: return cx_int(cx_T_BOOL[0], int(x.s >= y.s))
+    if cx_tkind(x.type) == .array and op == .plus: return cx_add(CTValue(type = t, items = x.items + y.items))
+    if cx_is_float(x.type):
+        if op == .lt: return cx_int(cx_T_BOOL[0], int(x.f < y.f))
+        if op == .le: return cx_int(cx_T_BOOL[0], int(x.f <= y.f))
+        if op == .gt: return cx_int(cx_T_BOOL[0], int(x.f > y.f))
+        if op == .ge: return cx_int(cx_T_BOOL[0], int(x.f >= y.f))
+        if op == .plus: return cx_float(t, x.f + y.f)
+        if op == .minus: return cx_float(t, x.f - y.f)
+        if op == .star: return cx_float(t, x.f * y.f)
+        if op == .slash: return cx_float(t, x.f / y.f)
+        cx_fail(e, "this floating operation is not supported")
+    if not cx_is_int(x.type) and cx_tkind(x.type) != .bool_: cx_fail(e, "this operation on {cx_dt(x.type)} is not supported")
+    sg = cx_types[0][x.type].sign
+    p = x.i
+    q = y.i
+    if not sg:
+        p = p xor (-9223372036854775807 - 1)
+        q = q xor (-9223372036854775807 - 1)
+    if op == .lt: return cx_int(cx_T_BOOL[0], int(p < q))
+    if op == .le: return cx_int(cx_T_BOOL[0], int(p <= q))
+    if op == .gt: return cx_int(cx_T_BOOL[0], int(p > q))
+    if op == .ge: return cx_int(cx_T_BOOL[0], int(p >= q))
+    if cx_int_policy(t) == 2 and (op == .plus or op == .minus or op == .star or op == .shl):
+        left = cx_int(cx_T_MATH_INT[0], x.i)
+        right = cx_int(cx_T_MATH_INT[0], y.i)
+        if not cx_types[0][x.type].sign and x.i < 0: left = cx_math_unpack(cx_math_runtime("__mi_unsigned", [a], e))
+        if not cx_types[0][y.type].sign and y.i < 0: right = cx_math_unpack(cx_math_runtime("__mi_unsigned", [b], e))
+        if op == .shl and (y.i < 0 or y.i >= 64):
+            if x.i == 0: return cx_int(t, 0)
+            bits = int(cx_types[0][t].bits)
+            if cx_types[0][t].sign:
+                return cx_int(t, if x.i < 0: -(1 << (bits - 1)) else: (1 << (bits - 1)) - 1)
+            return cx_int(t, if bits == 64: -1 else: (1 << bits) - 1)
+        value = cx_math_binary(e, op, left, right)
+        bits = int(cx_types[0][t].bits)
+        hi = if bits == 64: -1 else: (1 << bits) - 1
+        lo = 0
+        if cx_types[0][t].sign:
+            hi = int(u64(hi) >> 1)
+            lo = -hi - 1
+        clamped = cx_math_runtime("__mi_clamp_word", [cx_math_rep(value), cx_int(cx_T_INT[0], lo), cx_int(cx_T_INT[0], hi), cx_int(cx_T_INT[0], int(not cx_types[0][t].sign))], e)
+        return cx_int(t, cx_value(clamped).i)
+    p = x.i
+    q = y.i
+    r = 0
+    if op == .plus: r = p + q
+    else if op == .minus: r = p - q
+    else if op == .star: r = p * q
+    else if op == .slash or op == .percent:
+        if q == 0: cx_fail(e, "division by zero")
+        if sg and p == -9223372036854775807 - 1 and q == -1:
+            r = if op == .slash: p else: 0
+        else if sg: r = if op == .slash: p / q else: p % q
+        else: r = int(if op == .slash: u64(p) / u64(q) else: u64(p) % u64(q))
+    else if op == .amp: r = p & q
+    else if op == .pipe: r = p | q
+    else if op == .caret: r = p xor q
+    else if op == .shl or op == .shr:
+        if cx_host[0].dewy_at(cx_nodes[0][e].pos) and (q < 0 or q >= 64):
+            r = if op == .shr and sg: p >> 63 else: 0
+        else if op == .shl: r = p << q
+        else if sg: r = p >> q
+        else: r = int(u64(p) >> q)
+    else: cx_fail(e, "unsupported arithmetic operator")
+    if cx_nodes[0][e].kind == .binary and cx_nodes[0][e].aux2 == -1 and sg and (op == .slash or op == .percent):
+        if op == .slash and q == -1:
+            if cx_int_policy(t) == 2 and p == -(1 << (int(cx_types[0][t].bits) - 1)): r = (1 << (int(cx_types[0][t].bits) - 1)) - 1
+        else if q != -1:
+            remainder = p % q
+            if remainder != 0 and (remainder < 0) != (q < 0):
+                if op == .slash: r -= 1
+                else: r += q
+    cx_int(t, r)
+
+cx_member = (e: int) -> int:
+    if cx_nodes[0][e].aux == -3: return int(cx_nodes[0][e].ival)
+    if cx_tkind(cx_ntype(int(cx_nodes[0][e].a))) == .tuple: return int(cx_nodes[0][e].ival)
+    int(cx_nodes[0][e].aux)
+
+cx_read_place = (p: CTPlace) -> int:
+    v = cx_frames[p.frame].values[p.local]
+    loop index in p.path: v = cx_value(v).items[index]
+    v
+
+cx_replace = (v: int, path: int[], at: int, value: int) -> int:
+    if at == path.len(): return value
+    copy = cx_value(v)
+    copy.items[path[at]] = cx_replace(copy.items[path[at]], path, at + 1, value)
+    cx_add(copy)
+
+cx_write_place = (p: CTPlace, value: int):
+    old = cx_frames[p.frame].values[p.local]
+    cx_frames[p.frame].values[p.local] = cx_replace(old, p.path, 0, value)
+
+cx_place = (e: int) -> CTPlace:
+    k = cx_nodes[0][e].kind
+    if k == .ident and cx_nodes[0][e].aux == i32(int(1)):
+        l = int(cx_nodes[0][e].sym)
+        if let r = cx_frames[cx_frame].refs.get(l): return cx_places[r]
+        if int(cx_locals[0][l].flags) & LF_ALIAS != 0: return cx_place(int(cx_locals[0][l].alias))
+        if not cx_frames[cx_frame].values.has(l): cx_fail(e, "a runtime local has no compile-time value")
+        return CTPlace(frame = cx_frame, local = l)
+    if k == .field or k == .index or k == .narrow or k == .unwrap:
+        p = cx_place(int(cx_nodes[0][e].a))
+        v = cx_read_place(p)
+        index = 0
+        if k == .field: index = cx_member(e)
+        else if k == .index: index = cx_value(cx_expr(int(cx_nodes[0][e].b))).i
+        if cx_frames[cx_frame].signal != 0: return p
+        if index < 0 or index >= cx_value(v).items.len(): cx_fail(e, "index out of bounds or absent value")
+        p.path.push(index)
+        return p
+    cx_fail(e, "mutation requires evaluator-owned local storage; host and global writes are not allowed")
+    CTPlace()
+
+cx_global = (e: int, g: int) -> int:
+    if let v = cx_global_cache.get(g): return v
+    if cx_pending.contains(g): cx_fail(e, "cyclic constant initialization")
+    initial = cx_host[0].binding_const_init(2, g, cx_nodes[0][e].pos)
+    if initial == 0: cx_fail(e, "mutable global '{cx_name_of(int(cx_globals[0][g].name))}' is not a compile-time constant; host effects are not allowed")
+    cx_pending.push(g)
+    # A global initializer cannot see its caller's locals.
+    saved = cx_frame
+    cx_frames.push(CTFrame())
+    cx_frame = cx_frames.len() - 1
+    v = cx_expr(initial)
+    cx_frames.pop()
+    cx_frame = saved
+    cx_pending.pop()
+    cx_global_cache[g] = v
+    # Materialize demanded constant tables: no evaluator call runs at startup.
+    cx_nodes[0][int(cx_globals[0][g].decl)].b = i32(cx_literal(v, cx_nodes[0][initial].pos))
+    v
+
+cx_call = (e: int) -> int:
+    f = int(cx_nodes[0][e].sym)
+    if cx_nodes[0][e].aux != 0 or f <= 0: cx_fail(e, "indirect calls are not supported")
+    cx_stack.push(e)
+    if cx_fns[0][f].decl != 0 and cx_has_flag(int(cx_fns[0][f].decl), NF_EXTERN): cx_fail(e, "external calls and host effects are not allowed")
+    cx_host[0].check_fn_body(f)
+    if cx_fns[0][f].state != 2: cx_fail(e, "the function body is still being checked")
+    if cx_fns[0][f].has_env: cx_fail(e, "capturing closures are not supported")
+    frame = CTFrame()
+    # The checker records source argument order separately from parameter order.
+    order: int[]
+    if cx_nodes[0][e].c != 0: order = cx_host[0].call_eval_order(e)
+    else:
+        loop i in [0..cx_nkids(e)): order.push(i)
+    loop i in order:
+        l = cx_fns[0][f].params[i]
+        if int(cx_locals[0][l].flags) & LF_MUTPARAM != 0:
+            p = cx_place(cx_kid(e, i))
+            frame.refs[l] = cx_places.len()
+            cx_places.push(p)
+        else: frame.values[l] = cx_store(cx_expr(cx_kid(e, i)), int(cx_locals[0][l].type), e)
+        if cx_frames[cx_frame].signal != 0:
+            cx_stack.pop()
+            return cx_frames[cx_frame].result
+    saved = cx_frame
+    cx_frames.push(frame)
+    cx_frame = cx_frames.len() - 1
+    v = cx_block(int(cx_fns[0][f].body))
+    if cx_frames[cx_frame].signal == 1: v = cx_frames[cx_frame].result
+    v = cx_store(v, int(cx_fns[0][f].ret), e)
+    cx_frames.pop()
+    cx_frame = saved
+    cx_stack.pop()
+    v
+
+# Evaluate a self-contained contract where the value is actually constructed.
+# This is demanded only by a refinement conversion during constant execution;
+# dependent formals/lexicals still require their own environment support.
+cx_ref_term = (e: int, term: RefTerm, self: int) -> int:
+    value = self
+    if term.kind == 1: value = cx_int((if term.unsigned: cx_T_U64[0] else: cx_T_INT[0]), term.value)
+    else if term.kind != 0: cx_fail(e, "dependent refinement is not supported in compile-time execution")
+    loop selector in term.path:
+        x = cx_value(value)
+        if selector == -1:
+            if cx_tkind(x.type) == .str_:
+                call = cx_mk(.call, cx_nodes[0][e].pos)
+                cx_nodes[0][call].sym = i32(cx_host[0].runtime_fn("__dewy_string_length"))
+                cx_nodes[0][call].type = i32(cx_T_INT[0])
+                cx_set_list(call, [cx_literal(value, cx_nodes[0][e].pos)])
+                value = cx_call(call)
+            else if cx_tkind(x.type) == .array or cx_tkind(x.type) == .fixed: value = cx_int(cx_T_INT[0], x.items.len())
+            else: cx_fail(e, "refinement length needs a collection")
+        else:
+            base = cx_host[0].representation_type(x.type)
+            if cx_tkind(base) != .struct_: cx_fail(e, "refinement projection needs a record")
+            si = int(cx_types[0][base].st)
+            cx_host[0].check_struct_fields(si)
+            index = -1
+            loop i in [0..int(cx_structs[0][si].nfields)):
+                if int(cx_fields[0][int(cx_structs[0][si].fields) + i].name) == selector: index = i
+            if index < 0 or index >= x.items.len(): cx_fail(e, "refinement projection is not available")
+            value = x.items[index]
+    if not cx_is_int(cx_value(value).type): cx_fail(e, "refinement needs an integer value")
+    value = cx_exact_operand(value, e)
+    if term.offset != 0: value = cx_math_binary(e, .plus, value, cx_int(cx_T_MATH_INT[0], term.offset))
+    value
+
+cx_refinement = (e: int, value: int):
+    t = cx_prune(int(cx_nodes[0][e].aux2))
+    if t <= 0 or cx_types[0][t].kind != .refined: cx_fail(e, "refinement contract is not available")
+    loop atom in cx_ref_predicates[0][int(cx_types[0][t].st)]:
+        a = cx_ref_term(e, atom.a, value)
+        b = cx_ref_term(e, atom.b, value)
+        if cx_value(cx_math_binary(e, atom.op, a, b)).i == 0: cx_fail(e, "refinement failed for {cx_dt(t)}")
+
+cx_convert = (e: int, v: int) -> int:
+    t = cx_prune(cx_ntype(e))
+    x = cx_value(v)
+    cv = cx_nodes[0][e].aux as CXCV
+    if cv == .fixed_store: return cx_store(v, t, e)
+    if cv == .math2big: return cx_math_runtime("__mi_big", [cx_math_rep(v)], e)
+    if cv == .big2math: return cx_math_unpack(cx_math_runtime("__mi_pack", [v], e))
+    if cv == .none_ and x.type == cx_T_MATH_INT[0] and cx_host[0].math_rep_type(t): return cx_math_rep(v)
+    if cv == .none_ and t == cx_T_MATH_INT[0] and cx_host[0].math_rep_type(x.type): return cx_math_unpack(v)
+    if cv == .wrap_int or cv == .saturate_int:
+        bits = int(cx_types[0][t].bits)
+        hi = if bits == 64: -1 else: (1 << bits) - 1
+        lo = 0
+        if cx_types[0][t].sign:
+            hi = int(u64(hi) >> 1)
+            lo = -hi - 1
+        if x.type == cx_T_MATH_INT[0]:
+            value = if cv == .wrap_int: cx_math_runtime("__mi_low_word", [cx_math_rep(v)], e) else: cx_math_runtime("__mi_clamp_word", [cx_math_rep(v), cx_int(cx_T_INT[0], lo), cx_int(cx_T_INT[0], hi), cx_int(cx_T_INT[0], int(not cx_types[0][t].sign))], e)
+            return cx_int(t, cx_value(value).i)
+        word = x.i
+        if cv == .saturate_int:
+            if cx_types[0][x.type].sign and word < lo: word = lo
+            else if (cx_types[0][t].sign and cx_types[0][x.type].sign and word > hi) or ((not cx_types[0][t].sign or not cx_types[0][x.type].sign) and u64(word) > u64(hi)): word = hi
+        return cx_int(t, word)
+    if cv == .int_:
+        if t == cx_T_MATH_INT[0] and cx_is_int(x.type) and not cx_types[0][x.type].sign and x.i < 0: return cx_math_unpack(cx_math_runtime("__mi_unsigned", [v], e))
+        if x.type == cx_T_MATH_INT[0] and x.items.len() > 0:
+            checked = cx_math_runtime((if cx_types[0][t].sign: "__mi_signed" else: "__mi_to_unsigned"), [cx_math_rep(v)], e)
+            x = cx_value(checked)
+        if (x.type == cx_T_MATH_INT[0] or t == cx_T_MATH_INT[0]) and not cx_host[0].int_widens(x.type, t):
+            fits = cx_host[0].int_fits(x.i, t)
+            if not cx_types[0][x.type].sign and x.i < 0 and cx_types[0][t].sign: fits = false
+            if not fits: cx_fail(e, "integer overflow in conversion to {cx_dt(t)}")
+        return cx_int(t, x.i)
+    if cv == .int2float:
+        if x.type == cx_T_MATH_INT[0] and x.items.len() > 0:
+            value = cx_math_runtime("__mi_float", [cx_math_rep(v)], e)
+            return cx_float(t, cx_value(value).f)
+        f = if cx_types[0][x.type].sign: f64(x.i) else: f64(u64(x.i))
+        return cx_float(t, f)
+    if cv == .float_: return cx_float(t, x.f)
+    if cv == .float2int:
+        if t == cx_T_MATH_INT[0] and not (x.f >= -9223372036854775808.0 and x.f < 9223372036854775808.0):
+            return cx_math_unpack(cx_math_runtime("__mi_from_float", [v], e))
+        bits = int(cx_types[0][t].bits)
+        if t != cx_T_MATH_INT[0] and cx_host[0].dewy_at(cx_nodes[0][e].pos):
+            sg = cx_types[0][t].sign
+            lo = if sg and bits == 64: -9223372036854775809.0 else if sg: -f64(1 << (bits - 1)) - 1.0 else: -1.0
+            hi = if bits == 64 and not sg: 18446744073709551616.0 else if bits == 64: 9223372036854775808.0 else if sg: f64(1 << (bits - 1)) else: f64(1 << bits)
+            # (-2^63 - 1 rounds to -2^63, which fits: the lower test is inclusive there)
+            fits = x.f < hi and (if sg and bits == 64: x.f >= lo else: x.f > lo)
+            if not fits: cx_fail(e, "{x.f} does not fit {cx_dt(t)}")
+        if bits == 64 and not cx_types[0][t].sign:
+            r = 0
+            if x.f >= 9223372036854775808.0: r = int(x.f - 9223372036854775808.0) xor (-9223372036854775807 - 1)
+            else: r = max(0, int(x.f))
+            return cx_int(t, r)
+        r = int(x.f)
+        if bits < 64:
+            lo = if cx_types[0][t].sign: -(1 << (bits - 1)) else: 0
+            hi = if cx_types[0][t].sign: (1 << (bits - 1)) - 1 else: (1 << bits) - 1
+            r = min(hi, max(lo, r))
+        return cx_int(t, r)
+    if cv == .refinement and cx_ref_narrowing[0].has(e):
+        # (a proven integer conversion, uint8(n): the value must fit)
+        to = cx_ref_narrowing[0][e]
+        fits = cx_host[0].int_fits(x.i, to)
+        if not cx_types[0][x.type].sign and x.i < 0: fits = false
+        if not fits: cx_fail(e, "integer overflow: value does not fit {cx_dt(to)}")
+        x.type = t
+        return cx_add(x)
+    if cv == .refinement:
+        cx_refinement(e, v)
+        x.type = t
+        return cx_add(x)
+    if cv == .opt:
+        if cx_tkind(x.type) == .opt: x.type = t
+        else: x = CTValue(type = t, i = 1, items = [v])
+        return cx_add(x)
+    if cv == .union_:
+        member = tu_union_members(x.type)[x.i]
+        x.i = uu_holder(t, member, false)
+        if x.i < 0: cx_fail(e, "the value is not a member of {cx_dt(t)}")
+        held = tu_union_members(t)[x.i]
+        if not tu_equal(held, member):
+            # (a string set's word in the wider set: the same member's)
+            word = cx_value(x.items[0])
+            k = cx_str_sets[0][cx_host[0].str_set_of(held)].index_of(cx_str_sets[0][cx_host[0].str_set_of(member)][word.i])
+            if k < 0: cx_fail(e, "the value is not a member of {cx_dt(t)}")
+            x.items = [cx_add(CTValue(type = held, i = k))]
+    else if cv == .arr2fixed:
+        if x.items.len() != cx_fixed_len(t): cx_fail(e, "array length does not match fixed array")
+    else if cv != .none_ and cv != .explicit_copy and cv != .fixed2arr and cv != .quantity_const:
+        cx_fail(e, "raw pointer and representation conversions are not allowed")
+    x.type = t
+    cx_add(x)
+
+cx_intrinsic = (e: int) -> int:
+    if cx_nodes[0][e].aux == i32(int(CXIN.fixed_abs)):
+        a = cx_exact_operand(cx_expr(cx_kid(e, 0)), e)
+        if cx_value(cx_math_binary(e, .lt, a, cx_int(cx_T_MATH_INT[0], 0))).i != 0: return cx_math_binary(e, .minus, cx_int(cx_T_MATH_INT[0], 0), a)
+        return a
+    id = cx_nodes[0][e].aux as CXIN
+    t = cx_prune(cx_ntype(e))
+    if id == .static_assert: return 0
+    if id == .panic or id == .unreachable:
+        why = "unreachable code executed"
+        if cx_nkids(e) > 0: why = cx_value(cx_expr(cx_kid(e, 0))).s
+        cx_fail(e, why)
+    if id == .assert or id == .runtime_assert:
+        condition = cx_value(cx_expr(cx_kid(e, 0))).i
+        if cx_frames[cx_frame].signal != 0: return cx_frames[cx_frame].result
+        if condition == 0:
+            why = "assertion failed"
+            if cx_nkids(e) > 1: why = cx_value(cx_expr(cx_kid(e, 1))).s
+            cx_fail(e, why)
+        return 0
+    if id == .len:
+        x = cx_value(cx_expr(cx_kid(e, 0)))
+        return cx_int(t, if cx_tkind(x.type) == .str_: len(x.s) else: x.items.len())
+    if id == .to_bytes:
+        x = cx_value(cx_expr(cx_kid(e, 0)))
+        items: int[]
+        loop byte in x.s: items.push(cx_int(cx_T_U8[0], int(byte)))
+        return cx_add(CTValue(type = t, items = items))
+    if id == .embed:
+        items: int[]
+        loop byte in cx_name_of(int(cx_nodes[0][e].sval)): items.push(cx_int(cx_T_U8[0], int(byte)))
+        return cx_add(CTValue(type = t, items = items))
+    if id == .arrdata:
+        # A bounded immutable view into evaluator storage, never a host address.
+        return cx_add(CTValue(type = t, items = [cx_expr(cx_kid(e, 0))]))
+    if id == .from_bytes:
+        x = cx_value(cx_expr(cx_kid(e, 0)))
+        data: u8[]
+        loop item in x.items: data.push(u8(cx_value(item).i))
+        return cx_add(CTValue(type = t, s = cx_host[0].str_from_bytes(data)))
+    if id == .push or id == .pop or id == .clear or id == .extend or id == .reserve or id == .resize or id == .truncate or id == .insert or id == .remove:
+        p = cx_place(cx_kid(e, 0))
+        if cx_frames[cx_frame].signal != 0: return cx_frames[cx_frame].result
+        args: int[]
+        loop i in [1..cx_nkids(e)):
+            args.push(cx_expr(cx_kid(e, i)))
+            if cx_frames[cx_frame].signal != 0: return cx_frames[cx_frame].result
+        x = cx_value(cx_read_place(p))
+        result = 0
+        if id == .push: x.items.push(args[0])
+        else if id == .extend:
+            extra = cx_value(args[0]).items
+            x.items = x.items + extra
+        else if id == .pop:
+            if x.items.len() == 0: cx_fail(e, "pop from an empty array")
+            result = x.items.pop()
+        else if id == .clear: x.items = []
+        else if id == .insert or id == .remove:
+            index = cx_value(args[0]).i
+            if index < 0 or index > x.items.len() or (id == .remove and index == x.items.len()): cx_fail(e, "index out of bounds")
+            if id == .insert: x.items.insert(index, args[1])
+            else:
+                result = x.items[index]
+                x.items.remove(index)
+        else:
+            count = cx_value(args[0]).i
+            if count < 0: cx_fail(e, "negative array length")
+            if id != .reserve:
+                loop x.items.len() > count: x.items.pop()
+                if id == .resize:
+                    loop x.items.len() < count: x.items.push(cx_zero(cx_telem(x.type)))
+        cx_write_place(p, cx_add(x))
+        return result
+    if id == .sqrt: return cx_float(t, sqrt(cx_value(cx_expr(cx_kid(e, 0))).f))
+    if id == .default_init: return cx_zero(t)
+    cx_fail(e, "operation is not supported at compile time (I/O, host effects and raw memory are not allowed)")
+    0
+
+cx_pattern = (p: int, v: int) -> bool:
+    x = cx_value(v)
+    k = cx_nodes[0][p].kind
+    if k == .pwild: return true
+    if k == .ptype:
+        if tu_is_union(x.type):
+            member = tu_union_members(x.type)[x.i]
+            return tu_union_members(cx_ntype(p)).contains(member)
+        return x.i != 0
+    if k == .pvariant: return x.i == int(cx_nodes[0][p].aux2)
+    if k == .plit:
+        if tu_is_union(x.type):
+            if x.i != int(cx_nodes[0][p].aux2): return false
+            return cx_pattern(p, x.items[0])
+        if cx_tkind(x.type) == .opt:
+            if cx_nodes[0][int(cx_nodes[0][p].a)].kind == .none_lit: return x.i == 0
+            return x.i != 0 and cx_pattern(p, x.items[0])
+        return cx_equal(v, cx_expr(int(cx_nodes[0][p].a)), p)
+    if k == .prange:
+        lo = cx_expr(int(cx_nodes[0][p].a))
+        hi = cx_expr(int(cx_nodes[0][p].b))
+        upper = if cx_has_flag(p, NF_INCLUSIVE): Tok.le else: Tok.lt
+        return cx_value(cx_binary(p, .ge, v, lo, cx_T_BOOL[0])).i != 0 and cx_value(cx_binary(p, upper, v, hi, cx_T_BOOL[0])).i != 0
+    cx_fail(p, "unsupported match pattern")
+    false
+
+cx_expr = (e: int) -> int:
+    if cx_frames[cx_frame].signal != 0: return cx_frames[cx_frame].result
+    v = cx_expr_impl(e)
+    if cx_frames[cx_frame].signal != 0: return cx_frames[cx_frame].result
+    v
+
+cx_expr_impl = (e: int) -> int:
+    if e == 0: return 0
+    k = cx_nodes[0][e].kind
+    t = cx_prune(cx_ntype(e))
+    if k == .int_lit or k == .bool_lit:
+        if t == cx_T_MATH_INT[0] and cx_has_flag(e, NF_U64) and cx_nodes[0][e].ival < 0:
+            return cx_math_unpack(cx_math_runtime("__mi_unsigned", [cx_int(cx_T_U64[0], cx_nodes[0][e].ival)], e))
+        return cx_int(t, cx_nodes[0][e].ival)
+    if k == .float_lit: return cx_float(t, cx_nodes[0][e].fval)
+    if k == .none_lit: return cx_zero(t)
+    if k == .str_lit:
+        if cx_nodes[0][e].aux != 0:
+            # (Dewy joins text by interpolation: strings, machine integers and booleans here)
+            text = ""
+            loop part in cx_kids(e):
+                if cx_nodes[0][part].kind == .str_lit and cx_nodes[0][part].aux == 0:
+                    text += cx_name_of(int(cx_nodes[0][part].sval))
+                    continue
+                if cx_nodes[0][part].kind != .pair or cx_nodes[0][part].sval != -1: cx_fail(e, "this string interpolation is not supported at compile time (text, machine integers and booleans are)")
+                pv = cx_value(cx_expr(int(cx_nodes[0][part].a)))
+                if cx_frames[cx_frame].signal != 0: return cx_frames[cx_frame].result
+                pt = cx_prune(pv.type)
+                if cx_tkind(pt) == .str_: text += pv.s
+                else if pt == cx_T_BOOL[0]: text += if pv.i != 0: "true" else: "false"
+                else if cx_is_int(pt) and pt != cx_T_MATH_INT[0] and (cx_types[0][pt].sign or pv.i >= 0): text += "{pv.i}"
+                else: cx_fail(e, "this string interpolation is not supported at compile time (text, machine integers and booleans are)")
+            return cx_add(CTValue(type = t, s = text))
+        return cx_add(CTValue(type = t, s = cx_name_of(int(cx_nodes[0][e].sval))))
+    if k == .ident:
+        if cx_nodes[0][e].aux == i32(int(2)): return cx_global(e, int(cx_nodes[0][e].sym))
+        if cx_nodes[0][e].aux == i32(int(1)):
+            l = int(cx_nodes[0][e].sym)
+            if cx_frames[cx_frame].refs.has(l) or int(cx_locals[0][l].flags) & LF_ALIAS != 0: return cx_read_place(cx_place(e))
+            if let v = cx_frames[cx_frame].values.get(l): return v
+            initial = cx_host[0].binding_const_init(1, l, cx_nodes[0][e].pos)
+            if initial != 0: return cx_expr(initial)
+        cx_fail(e, "'{cx_name_of(int(cx_nodes[0][e].name))}' is not a compile-time constant")
+    if k == .array or k == .tuple:
+        v = CTValue(type = t)
+        loop child in cx_kids(e):
+            v.items.push(cx_store(cx_expr(child), cx_ntype(child), e))
+            if cx_frames[cx_frame].signal != 0: return cx_frames[cx_frame].result
+        if cx_nodes[0][e].b != 0:
+            count = cx_value(cx_expr(int(cx_nodes[0][e].b))).i
+            if cx_frames[cx_frame].signal != 0: return cx_frames[cx_frame].result
+            if count < 0: cx_fail(e, "negative array length")
+            item = v.items[0]
+            v.items = []
+            loop _ in [0..count): v.items.push(item)
+        if cx_tkind(t) == .fixed and v.items.len() == 0: return cx_zero(t)
+        return cx_add(v)
+    if k == .field:
+        v = cx_value(cx_expr(int(cx_nodes[0][e].a)))
+        if cx_frames[cx_frame].signal != 0: return cx_frames[cx_frame].result
+        index = cx_member(e)
+        if index < 0 or index >= v.items.len(): cx_fail(e, "unsupported field access")
+        return v.items[index]
+    if k == .index:
+        v = cx_value(cx_expr(int(cx_nodes[0][e].a)))
+        if cx_frames[cx_frame].signal != 0: return cx_frames[cx_frame].result
+        if cx_nodes[0][e].aux == 1:
+            range = int(cx_nodes[0][e].b)
+            size = if cx_tkind(v.type) == .str_: len(v.s) else: v.items.len()
+            lo = if cx_nodes[0][range].a != 0: cx_value(cx_expr(int(cx_nodes[0][range].a))).i else: 0
+            hi = if cx_nodes[0][range].b != 0: cx_value(cx_expr(int(cx_nodes[0][range].b))).i else: size
+            if cx_frames[cx_frame].signal != 0: return cx_frames[cx_frame].result
+            if cx_nodes[0][range].b != 0 and cx_has_flag(range, NF_INCLUSIVE): hi += 1
+            if lo < 0 or hi > size or lo > hi: cx_fail(e, "slice out of bounds")
+            if cx_tkind(v.type) == .str_: return cx_add(CTValue(type = t, s = v.s[lo..hi)))
+            return cx_add(CTValue(type = t, items = v.items[lo..hi)))
+        index = cx_value(cx_expr(int(cx_nodes[0][e].b))).i
+        if cx_frames[cx_frame].signal != 0: return cx_frames[cx_frame].result
+        if cx_tkind(v.type) == .ptr: return cx_load(e, v, index, t)
+        if cx_tkind(v.type) == .str_:
+            if index < 0 or index >= len(v.s): cx_fail(e, "string index out of bounds")
+            return cx_int(t, int(v.s[index]))
+        if index < 0 or index >= v.items.len(): cx_fail(e, "index out of bounds")
+        return v.items[index]
+    if k == .narrow or k == .unwrap:
+        v = cx_value(cx_expr(int(cx_nodes[0][e].a)))
+        if cx_frames[cx_frame].signal != 0: return cx_frames[cx_frame].result
+        if v.items.len() == 0: cx_fail(e, "unwrapping an absent value")
+        return v.items[0]
+    if k == .istype:
+        if cx_nodes[0][e].aux == -3: return cx_int(cx_T_BOOL[0], 1)
+        v = cx_value(cx_expr(int(cx_nodes[0][e].a)))
+        if cx_frames[cx_frame].signal != 0: return cx_frames[cx_frame].result
+        tag = int(cx_nodes[0][e].aux)
+        return cx_int(cx_T_BOOL[0], int(if tag == -1: v.i == 0 else if tag == -2: v.i != 0 else: v.i == tag))
+    if k == .dotname: return cx_add(CTValue(type = t, i = int(cx_nodes[0][e].aux)))
+    if k == .call:
+        if cx_nodes[0][e].aux == 2 or cx_nodes[0][e].aux == 3:
+            v = CTValue(type = t)
+            if cx_nodes[0][e].aux == 3:
+                v.i = int(cx_nodes[0][e].aux2)
+                if tu_is_union(t) and cx_nkids(e) == 1: v.i = uu_index(t, cx_ntype(cx_kid(e, 0)))
+            loop _ in cx_kids(e): v.items.push(0)
+            order: int[]
+            if cx_nodes[0][e].c != 0: order = cx_host[0].call_eval_order(e)
+            else:
+                loop i in [0..cx_nkids(e)): order.push(i)
+            loop i in order:
+                child = cx_kid(e, i)
+                if child != 0: v.items[i] = cx_store(cx_expr(child), cx_ntype(child), e)
+                else if cx_nodes[0][e].aux == 2:
+                    fi = int(cx_structs[0][int(cx_types[0][t].st)].fields) + i
+                    v.items[i] = cx_zero(int(cx_fields[0][fi].type))
+                if cx_frames[cx_frame].signal != 0: return cx_frames[cx_frame].result
+            return cx_add(v)
+        return cx_call(e)
+    if k == .intrinsic: return cx_intrinsic(e)
+    if k == .conv:
+        value = cx_expr(int(cx_nodes[0][e].a))
+        if cx_frames[cx_frame].signal != 0: return cx_frames[cx_frame].result
+        return cx_convert(e, value)
+    if k == .cast:
+        v = cx_value(cx_expr(int(cx_nodes[0][e].a)))
+        if cx_frames[cx_frame].signal != 0: return cx_frames[cx_frame].result
+        # The bundled IEEE helpers are pure and needed by exact conversions.
+        if cx_files[0][cx_pos_file(cx_nodes[0][e].pos)].path == cx_lib_dir[0] + "/core/math.jo":
+            if cx_is_float(v.type) and cx_is_int(t):
+                return cx_int(t, if cx_tsize(v.type) == 4: int(f32_bits(f32(v.f))) else: int(f64_bits(v.f)))
+            if cx_is_int(v.type) and cx_is_float(t):
+                return cx_float(t, if cx_tsize(t) == 4: f64(f32_from_bits(u32(v.i))) else: f64_from_bits(u64(v.i)))
+        if cx_tkind(v.type) != .ptr or cx_tkind(t) != .ptr: cx_fail(e, "raw representation casts are not supported")
+        v.type = t
+        return cx_add(v)
+    if k == .not_: return cx_int(cx_T_BOOL[0], int(cx_value(cx_expr(int(cx_nodes[0][e].a))).i == 0))
+    if k == .unary:
+        a = cx_expr(int(cx_nodes[0][e].a))
+        if cx_frames[cx_frame].signal != 0: return cx_frames[cx_frame].result
+        op = cx_nodes[0][e].op as Tok
+        if op == .plus: return a
+        if op == .minus:
+            if cx_is_float(t): return cx_float(t, -cx_value(a).f)
+            return cx_binary(e, .minus, cx_int(t, 0), a, t)
+        if t == cx_T_MATH_INT[0]: return cx_binary(e, .minus, cx_int(t, -1), a, t)
+        return cx_int(t, ~cx_value(a).i)
+    if k == .and_ or k == .or_:
+        a = cx_expr(int(cx_nodes[0][e].a))
+        if cx_frames[cx_frame].signal != 0: return cx_frames[cx_frame].result
+        if (cx_value(a).i == 0) == (k == .and_): return a
+        return cx_expr(int(cx_nodes[0][e].b))
+    if k == .binary:
+        a = cx_expr(int(cx_nodes[0][e].a))
+        if cx_frames[cx_frame].signal != 0: return cx_frames[cx_frame].result
+        b = cx_expr(int(cx_nodes[0][e].b))
+        if cx_frames[cx_frame].signal != 0: return cx_frames[cx_frame].result
+        if cx_nodes[0][e].aux == 6:
+            return cx_int(cx_T_BOOL[0], int(if cx_nodes[0][e].op == i32(int(Tok.eq)): cx_value(a).i == 0 else: cx_value(a).i != 0))
+        return cx_binary(e, cx_nodes[0][e].op as Tok, a, b, t)
+    if k == .if_:
+        yes = cx_value(cx_expr(int(cx_nodes[0][e].a))).i != 0
+        return cx_block(if yes: int(cx_nodes[0][e].b) else: int(cx_nodes[0][e].c))
+    if k == .iflet:
+        v = cx_value(cx_expr(int(cx_nodes[0][e].a)))
+        if cx_frames[cx_frame].signal != 0: return cx_frames[cx_frame].result
+        if v.i == 0: return cx_block(int(cx_nodes[0][e].c))
+        cx_frames[cx_frame].values[int(cx_nodes[0][e].sym)] = v.items[0]
+        return cx_block(int(cx_nodes[0][e].b))
+    if k == .coalesce:
+        v = cx_value(cx_expr(int(cx_nodes[0][e].a)))
+        if cx_frames[cx_frame].signal != 0: return cx_frames[cx_frame].result
+        if v.i != 0: return v.items[0]
+        return cx_expr(int(cx_nodes[0][e].b))
+    if k == .match_:
+        v = cx_expr(int(cx_nodes[0][e].a))
+        if cx_frames[cx_frame].signal != 0: return cx_frames[cx_frame].result
+        cx_frames[cx_frame].values[int(cx_nodes[0][e].sym)] = v
+        loop arm in cx_kids(e):
+            loop p in cx_kids(arm):
+                if cx_pattern(p, v): return cx_block(int(cx_nodes[0][arm].b))
+        cx_fail(e, "no match arm matched")
+    if k == .block: return cx_block(e)
+    cx_fail(e, "this expression is not supported at compile time")
+    0
+
+# Library scanners can read their own byte buffers with ordinary pointer code.
+# Writes, fabricated addresses and escaping these views remain unsupported.
+cx_load = (e: int, pointer: CTValue, index: int, t: int) -> int:
+    if not cx_is_int(t) or pointer.items.len() != 1: cx_fail(e, "only bounded integer loads from evaluator storage are supported")
+    source = cx_value(pointer.items[0])
+    string = cx_tkind(source.type) == .str_
+    size = 1
+    if not string:
+        if not cx_is_int(cx_telem(source.type)): cx_fail(e, "pointer loads require an integer array")
+        size = cx_tsize(cx_telem(source.type))
+    length = if string: len(source.s) else: source.items.len() * size
+    at = pointer.i + index * cx_tsize(t)
+    if at < 0 or at > length - cx_tsize(t): cx_fail(e, "pointer read outside evaluator storage")
+    result: u64 = 0
+    loop j in [0..cx_tsize(t)):
+        offset = at + j
+        byte: u64 = 0
+        if string: byte = u64(source.s[offset])
+        else: byte = (u64(cx_value(source.items[offset / size]).i) >> ((offset % size) * 8)) & 255
+        result |= byte << (j * 8)
+    cx_int(t, int(result))
+
+# Consume a jump belonging to this loop; propagate exits from outer loops.
+cx_loop_exit = () -> bool:
+    signal = cx_frames[cx_frame].signal
+    if signal == 0: return false
+    if signal == 1: return true
+    if cx_frames[cx_frame].depth > 0:
+        cx_frames[cx_frame].depth -= 1
+        return true
+    cx_frames[cx_frame].signal = 0
+    signal == 2
+
+cx_stmt = (s: int) -> int:
+    k = cx_nodes[0][s].kind
+    if k == .vardecl:
+        v = if cx_nodes[0][s].b != 0: cx_expr(int(cx_nodes[0][s].b)) else: cx_zero(int(cx_locals[0][int(cx_nodes[0][s].sym)].type))
+        if cx_nkids(s) == 0:
+            value = cx_store(v, int(cx_locals[0][int(cx_nodes[0][s].sym)].type), s)
+            cx_frames[cx_frame].values[int(cx_nodes[0][s].sym)] = value
+        else:
+            loop i in [0..cx_nkids(s)):
+                if cx_nodes[0][cx_kid(s, i)].kind != .hole: cx_frames[cx_frame].values[int(cx_nodes[0][cx_kid(s, i)].sym)] = cx_value(v).items[i]
+    else if k == .assign:
+        p = cx_place(int(cx_nodes[0][s].a))
+        if cx_frames[cx_frame].signal != 0: return cx_frames[cx_frame].result
+        old = cx_read_place(p)
+        v = cx_expr(int(cx_nodes[0][s].b))
+        if cx_frames[cx_frame].signal != 0: return v
+        if cx_nodes[0][s].op != i32(int(Tok.assign)):
+            op = cx_host[0].compound_op(int(cx_nodes[0][s].op)) as Tok
+            v = cx_binary(s, op, old, v, cx_ntype(int(cx_nodes[0][s].a)))
+        cx_write_place(p, cx_store(v, cx_ntype(int(cx_nodes[0][s].a)), s))
+    else if k == .exprstmt: return cx_expr(int(cx_nodes[0][s].a))
+    else if k == .block: return cx_block(s)
+    else if k == .if_ or k == .iflet: return cx_expr(s)
+    else if k == .return_:
+        cx_frames[cx_frame].result = cx_expr(int(cx_nodes[0][s].a))
+        cx_frames[cx_frame].signal = 1
+    else if k == .break_ or k == .continue_:
+        cx_frames[cx_frame].signal = if k == .break_: 2 else: 3
+        cx_frames[cx_frame].depth = int(cx_nodes[0][s].ival)
+    else if k == .while_:
+        loop true:
+            v = cx_value(cx_expr(int(cx_nodes[0][s].a)))
+            if cx_frames[cx_frame].signal != 0: break
+            if v.i == 0: break
+            if cx_nodes[0][s].aux == 1: cx_frames[cx_frame].values[int(cx_nodes[0][s].sym)] = v.items[0]
+            cx_block(int(cx_nodes[0][s].b))
+            if cx_loop_exit(): break
+    else if k == .for_:
+        it = int(cx_nodes[0][s].a)
+        if cx_nodes[0][it].kind == .range and cx_prune(int(cx_locals[0][int(cx_nodes[0][s].sym)].type)) == cx_T_MATH_INT[0]:
+            cx_math_for(s)
+        else if cx_nodes[0][it].kind == .range:
+            i = cx_value(cx_expr(int(cx_nodes[0][it].a))).i
+            end = if cx_nodes[0][it].b != 0: cx_value(cx_expr(int(cx_nodes[0][it].b))).i else: 9223372036854775807
+            step = if cx_has_flag(it, NF_STEP): cx_value(cx_expr(int(cx_nodes[0][it].c))).i - i else: 1
+            if cx_frames[cx_frame].signal != 0: return cx_frames[cx_frame].result
+            if step == 0: cx_fail(s, "zero range step")
+            loop true:
+                inside = if step > 0: i < end else: i > end
+                if cx_has_flag(it, NF_INCLUSIVE) and i == end: inside = true
+                if not inside: break
+                cx_frames[cx_frame].values[int(cx_nodes[0][s].sym)] = cx_int(int(cx_locals[0][int(cx_nodes[0][s].sym)].type), i)
+                cx_block(int(cx_nodes[0][s].b))
+                if cx_loop_exit() or i == end: break
+                next = i + step
+                if (step > 0 and next < i) or (step < 0 and next > i): break
+                i = next
+        else:
+            v = cx_value(cx_expr(it))
+            if cx_frames[cx_frame].signal != 0: return cx_frames[cx_frame].result
+            if cx_nodes[0][s].aux != 1 and cx_nodes[0][s].aux != 2: cx_fail(s, "this iterator is not supported")
+            loop i in [0..v.items.len()):
+                cx_frames[cx_frame].values[int(cx_nodes[0][s].c)] = cx_int(cx_T_INT[0], i)
+                cx_frames[cx_frame].values[int(cx_nodes[0][s].d)] = cx_add(v)
+                if cx_nodes[0][s].aux == 1: cx_frames[cx_frame].values[int(cx_nodes[0][s].sym)] = v.items[i]
+                cx_block(int(cx_nodes[0][s].b))
+                if cx_loop_exit(): break
+    else: cx_fail(s, "this statement is not supported at compile time")
+    0
+
+cx_block = (b: int) -> int:
+    if cx_frames[cx_frame].signal != 0: return cx_frames[cx_frame].result
+    if b == 0: return 0
+    result = 0
+    deferred: int[]
+    loop s in cx_kids(b):
+        if cx_nodes[0][s].kind == .defer_: deferred.push(int(cx_nodes[0][s].a))
+        else: result = cx_stmt(s)
+        if cx_frames[cx_frame].signal != 0: break
+    signal = cx_frames[cx_frame].signal
+    cx_frames[cx_frame].signal = 0
+    i = deferred.len()
+    loop i > 0:
+        i -= 1
+        cx_stmt(deferred[i])
+    cx_frames[cx_frame].signal = signal
+    if signal == 1: return cx_frames[cx_frame].result
+    result
+
+# Reify only values, never evaluated source. The backend gets ordinary checked
+# literals and constructors, with the same ownership rules as runtime values.
+cx_literal = (v: int, pos: int) -> int:
+    x = cx_value(v)
+    k = cx_tkind(x.type)
+    if x.type == cx_T_MATH_INT[0] and x.items.len() > 0:
+        n = cx_literal(x.items[0], pos)
+        cx_host[0].wrap_conv(n, 15, cx_T_MATH_INT[0])
+        return n
+    n = cx_mk(.int_lit, pos)
+    cx_nodes[0][n].type = i32(x.type)
+    cx_nodes[0][n].ival = x.i
+    cx_add_flag(n, NF_CHECKED)
+    if k == .str_:
+        cx_nodes[0][n].kind = .str_lit
+        cx_nodes[0][n].sval = i32(cx_host[0].intern(x.s))
+    else if k == .float_:
+        cx_nodes[0][n].kind = .float_lit
+        cx_nodes[0][n].fval = x.f
+    else if k == .bool_: cx_nodes[0][n].kind = .bool_lit
+    else if k == .array or k == .fixed or k == .tuple or k == .struct_ or k == .enum_ or k == .opt:
+        items: int[]
+        loop item in x.items: items.push(cx_literal(item, pos))
+        cx_set_list(n, items)
+        if k == .array or k == .fixed: cx_nodes[0][n].kind = .array
+        else if k == .tuple: cx_nodes[0][n].kind = .tuple
+        else if k == .opt:
+            if x.i == 0: cx_nodes[0][n].kind = .none_lit
+            else:
+                cx_nodes[0][n].kind = .conv
+                cx_nodes[0][n].aux = i32(int(CXCV.opt))
+                cx_nodes[0][n].a = i32(items[0])
+                cx_set_list(n, [])
+        else:
+            cx_nodes[0][n].kind = .call
+            cx_nodes[0][n].aux = if k == .struct_: 2 else: 3
+            cx_nodes[0][n].aux2 = i32(x.i)
+    else if not cx_is_int(x.type): cx_fail(n, "this value cannot be materialized")
+    n
+
+cx_run = (e: int) -> int:
+    saved = cx_frame
+    cx_frames.push(CTFrame())
+    cx_frame = cx_frames.len() - 1
+    v = cx_expr(e)
+    cx_frames.pop()
+    cx_frame = saved
+    v
+
+# Reuse the bundled arithmetic inside the evaluator. CT mathematical integers
+# have a word or one immutable BigInt value, independent of the tagged runtime boundary.
+
+cx_math_runtime = (name: str, args: int[], e: int) -> int:
+    f = cx_host[0].runtime_fn("__mc_" + name[5..])
+    call = cx_mk(.call, cx_nodes[0][e].pos)
+    cx_nodes[0][call].sym = i32(f)
+    cx_nodes[0][call].type = cx_fns[0][f].ret
+    actual: int[]
+    loop value in args: actual.push(cx_literal(value, cx_nodes[0][e].pos))
+    cx_set_list(call, actual)
+    cx_fixed_internal += 1
+    result = cx_call(call)
+    cx_fixed_internal -= 1
+    result
+
+cx_math_rep = (value: int) -> int:
+    x = cx_value(value)
+    f = cx_host[0].runtime_fn("__mc_compare")
+    rep = cx_prune(cx_fns[0][f].ptypes[0])
+    tl_layout(rep)
+    handle = int(cx_fields[0][int(cx_structs[0][int(cx_types[0][rep].st)].fields) + 1].type)
+    word = cx_int(cx_T_INT[0], x.i)
+    big = cx_add(CTValue(type = handle, items = x.items))
+    cx_add(CTValue(type = rep, items = [word, big]))
+
+cx_math_unpack = (value: int) -> int:
+    x = cx_value(value)
+    cx_add(CTValue(type = cx_T_MATH_INT[0], i = cx_value(x.items[0]).i, items = cx_value(x.items[1]).items))
+
+cx_math_binary = (e: int, op: Tok, a: int, b: int) -> int:
+    if op == .starstar:
+        exponent = cx_value(b).i
+        if exponent < 0 or cx_value(b).items.len() > 0: cx_fail(e, "power exponent must be a nonnegative bounded integer")
+        result = cx_int(cx_T_MATH_INT[0], 1)
+        base = a
+        loop exponent > 0:
+            if exponent & 1 != 0: result = cx_math_binary(e, .star, result, base)
+            exponent = exponent >> 1
+            if exponent > 0: base = cx_math_binary(e, .star, base, base)
+        return result
+    x = cx_math_rep(a)
+    if op == .shl or op == .shr:
+        count = cx_value(b).i
+        if cx_value(b).items.len() > 0:
+            count = cx_value(cx_math_runtime("__mi_count", [cx_math_rep(b)], e)).i
+        if count < 0: cx_fail(e, "shift count must be nonnegative")
+        value = cx_math_runtime("__mi_shift", [x, cx_int(cx_T_INT[0], count), cx_int(cx_T_BOOL[0], int(op == .shr))], e)
+        return cx_math_unpack(value)
+    y = cx_math_rep(b)
+    if op == .eq or op == .ne or op == .lt or op == .le or op == .gt or op == .ge:
+        result = cx_math_runtime("__mi_compare", [x, y], e)
+        return cx_binary(e, op, result, cx_int(cx_T_INT[0], 0), cx_T_BOOL[0])
+    operation = if op == .plus: 0 else if op == .minus: 1 else if op == .star: 2 else if op == .slash: 3 else if op == .percent: 4 else if op == .amp: 5 else if op == .pipe: 6 else: 7
+    if cx_nodes[0][e].kind == .binary and cx_nodes[0][e].aux2 == -1 and (op == .slash or op == .percent): operation += 5
+    cx_math_unpack(cx_math_runtime("__mi_slow", [x, y, cx_int(cx_T_INT[0], operation)], e))
+
+cx_math_for = (s: int):
+    it = int(cx_nodes[0][s].a)
+    counter = cx_expr(int(cx_nodes[0][it].a))
+    open_end = cx_nodes[0][it].b == 0
+    bound = if open_end: cx_int(cx_T_MATH_INT[0], 0) else: cx_expr(int(cx_nodes[0][it].b))
+    step = cx_int(cx_T_MATH_INT[0], 1)
+    if cx_has_flag(it, NF_STEP): step = cx_binary(s, .minus, cx_expr(int(cx_nodes[0][it].c)), counter, cx_T_MATH_INT[0])
+    if cx_frames[cx_frame].signal != 0: return
+    zero = cx_int(cx_T_MATH_INT[0], 0)
+    if cx_value(cx_binary(s, .eq, step, zero, cx_T_BOOL[0])).i != 0: cx_fail(s, "zero range step")
+    up = cx_value(cx_binary(s, .gt, step, zero, cx_T_BOOL[0])).i != 0
+    inclusive = cx_has_flag(it, NF_INCLUSIVE)
+    op = if up: (if inclusive: Tok.le else: Tok.lt) else: (if inclusive: Tok.ge else: Tok.gt)
+    loop true:
+        if not open_end and cx_value(cx_binary(s, op, counter, bound, cx_T_BOOL[0])).i == 0: break
+        cx_frames[cx_frame].values[int(cx_nodes[0][s].sym)] = counter
+        cx_block(int(cx_nodes[0][s].b))
+        if cx_loop_exit(): break
+        counter = cx_binary(s, .plus, counter, step, cx_T_MATH_INT[0])
+cx_value = (id: int) -> CTValue: cx_ct_values[0][id]

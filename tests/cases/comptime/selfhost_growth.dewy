@@ -1,0 +1,31 @@
+$runtime_checks
+Pair:type=[left:int64 right:int64]
+add=(@xs:array<int64> n:int64):>int64=> {
+    xs.push(n)
+    return n+1
+}
+recur=(n:int64):>int64=> {
+    if n =? 0 { return 1 }
+    return recur(n-1)+1
+}
+compute=(n:int64):>array<int64>=> {
+    let xs:array<int64>=[]
+    loop i in [0..n) { xs.push(add(@xs i)) }
+    let saved=xs
+    let nested=[xs xs]
+    nested[0][0]=999
+    $runtime_assert nested[1][0] =? 0 and saved[0] =? 0
+    let record=Pair[recur(25) recur(15)]
+    let word:uint64<overflow='wrap'>=18446744073709551615
+    word+=2
+    let signed:int64<overflow='wrap'>=9223372036854775807
+    signed+=1
+    return [xs.length xs[0] xs[end] record.left record.right int64(word) signed]
+}
+const VALUES=compute(300)
+$assert VALUES =? [600 0 300 26 16 1 -9223372036854775808]
+main=()=> {
+    let count:int64=300
+    $runtime_assert VALUES =? compute(count)
+    printl("evaluator growth agrees")
+}

@@ -1,0 +1,1317 @@
+$runtime_checks
+# Checked ordinary and mathematical execution share private evaluator state.
+# The public value arena lends one stable header; type operations enter their
+# Dewy owners directly, and only coarse checking/host services cross to Jo.
+CWord:type=int64<overflow='wrap'>
+from p"evaluator_state.dewy" import (CTValue CTFrame CTPlace)
+from p"checker_tokens.dewy" import (Tok)
+from p"checker_types.dewy" import (TK TypeInfo StructInfo Field Variant)
+from p"checker_state.dewy" import (FnInst Global Local)
+from p"refinement_types.dewy" import (RefAtom RefTerm)
+from p"node_store.dewy" import (Node NK node_kids node_mk node_set_list)
+from p"source_types.dewy" import (SrcFile)
+from p"type_inference.dewy" import (tu_prune tu_equal tu_is_union tu_union_members)
+from p"type_layout.dewy" import (tl_layout)
+from p"type_format.dewy" import (tf_string)
+from p"type_unions.dewy" import (uu_index uu_holder)
+const NF_INCLUSIVE = 2
+const NF_EXTERN = 4
+const NF_CHECKED = 128
+const NF_STEP = 32768         # range `a,b..c`: c holds the second value
+const NF_U64 = 2097152        # an integer literal above the i64 range (written so, or computed from one)
+const LF_MUTPARAM = 2
+const LF_ALIAS = 8
+CXIN:type='none_' | 'len' | 'push' | 'pop' | 'insert' | 'remove' | 'clear' | 'reserve' | 'slice' | 'syscall' | 'memcpy' | 'memset' | 'sizeof' | 'arrdata' | 'panic' | 'assert' | 'print' | 'embed' | 'from_bytes' | 'to_bytes' | 'argv' | 'setlen' | 'truncate' | 'resize' | 'hash' | 'alignof' | 'unreachable' | 'arrcap' | 'fmt_struct' | 'sqrt' | 'vec_ctor' | 'cfn_cast' | 'wasm_call' | 'callc' | 'floor_' | 'ceil_' | 'fabs' | 'fmin' | 'fmax' | 'setjmp' | 'longjmp' | 'jump' | 'shader' | 'extend' | 'clone_thread' | 'atomic_add' | 'atomic_cas' | 'stack_ptr' | 'fill' | 'fmt_elem' | 'gpu_kernel' | 'cpu_features' | 'code_sync' | 'compute' | 'compute_spirv' | 'compute_textures' | 'read_fields' | 'default_init' | 'offset_unit' | 'embed_dir' | 'dewy_iter' | 'dewy_iter_done' | 'dewy_iter_value' | 'json_fields' | 'dewy_iter_pair' | 'dewy_set' | 'static_assert' | 'runtime_assert' | 'dewy_print' | 'dewy_fmt' | 'dewy_fmt_elem' | 'lend' | 'loan_address' | 'loan_load' | 'loan_store' | 'loan_length' | 'zeroed' | 'relocate' | 'take_slot' | 'live_len' | 'task_report' | 'task_data' | 'task_duration' | 'arena_result' | 'arrdata_permute' | 'mul_hi' | 'secret_wrap' | 'secret_value' | 'range_max' | 'fixed_abs' | 'integer_mode'
+CXCV:type='none_' | 'int_' | 'int2float' | 'float2int' | 'float_' | 'opt' | 'ptr' | 'bits' | 'fn2clos' | 'union_' | 'fixed2arr' | 'arr2fixed' | 'quantity_const' | 'explicit_copy' | 'refinement' | 'big2math' | 'math2big' | 'set_text' | 'promote' | 'wrap_int' | 'saturate_int' | 'fixed_store'
+CheckedEvalHost:type=[
+    binding_const_init:<(p0:int64 p1:int64 p2:int64):>int64>
+    call_eval_order:<(p0:int64):>array<int64>>
+    check_fn_body:<(p0:int64):>void>
+    check_struct_fields:<(p0:int64):>void>
+    compound_op:<(p0:int64):>int64>
+    dewy_at:<(p0:int64):>bool>
+    exact_type:<(p0:int64 p1:int64):>bool>
+    fatal:<(p0:int64 p1:string):>void>
+    int_fits:<(p0:int64 p1:int64):>bool>
+    int_widens:<(p0:int64 p1:int64):>bool>
+    intern:<(p0:string):>int64>
+    math_rep_type:<(p0:int64):>bool>
+    pos_str:<(p0:int64):>string>
+    representation_type:<(p0:int64):>int64>
+    runtime_fn:<(p0:string):>int64>
+    str_set_of:<(p0:int64):>int64>
+    wrap_conv:<(p0:int64 p1:int64 p2:int64):>void>
+    byte_cut:<(text:string start:int64 end_:int64):>string>
+    str_from_bytes:<(p0:array<uint8>):>string>
+]
+CheckedEvalInput:type=[
+    ct_values:ptr<array<CTValue>>
+    nodes:ptr<array<Node>>
+    lists:ptr<array<int32>>
+    names:ptr<array<string>>
+    types:ptr<array<TypeInfo>>
+    type_args:ptr<array<int32>>
+    structs:ptr<array<StructInfo>>
+    fields:ptr<array<Field>>
+    variants:ptr<array<Variant>>
+    fns:ptr<array<FnInst>>
+    globals:ptr<array<Global>>
+    locals:ptr<array<Local>>
+    files:ptr<array<SrcFile>>
+    ref_predicates:ptr<array<array<RefAtom>>>
+    ref_narrowing:ptr<dict<int64 int64>>
+    str_sets:ptr<array<array<string>>>
+    T_BOOL:ptr<int64>
+    T_INT:ptr<int64>
+    T_MATH_INT:ptr<int64>
+    T_STR:ptr<int64>
+    T_U64:ptr<int64>
+    T_U8:ptr<int64>
+    ts_dewy:ptr<bool>
+    lib_dir:ptr<string>
+    host:ptr<CheckedEvalHost>
+]
+let cx_ct_values:ptr<array<CTValue>>=$unsafe (uint64<overflow='wrap'>(0) as ptr<array<CTValue>>)
+let cx_nodes:ptr<array<Node>>=$unsafe (uint64<overflow='wrap'>(0) as ptr<array<Node>>)
+let cx_lists:ptr<array<int32>>=$unsafe (uint64<overflow='wrap'>(0) as ptr<array<int32>>)
+let cx_names:ptr<array<string>>=$unsafe (uint64<overflow='wrap'>(0) as ptr<array<string>>)
+let cx_types:ptr<array<TypeInfo>>=$unsafe (uint64<overflow='wrap'>(0) as ptr<array<TypeInfo>>)
+let cx_type_args:ptr<array<int32>>=$unsafe (uint64<overflow='wrap'>(0) as ptr<array<int32>>)
+let cx_structs:ptr<array<StructInfo>>=$unsafe (uint64<overflow='wrap'>(0) as ptr<array<StructInfo>>)
+let cx_fields:ptr<array<Field>>=$unsafe (uint64<overflow='wrap'>(0) as ptr<array<Field>>)
+let cx_variants:ptr<array<Variant>>=$unsafe (uint64<overflow='wrap'>(0) as ptr<array<Variant>>)
+let cx_fns:ptr<array<FnInst>>=$unsafe (uint64<overflow='wrap'>(0) as ptr<array<FnInst>>)
+let cx_globals:ptr<array<Global>>=$unsafe (uint64<overflow='wrap'>(0) as ptr<array<Global>>)
+let cx_locals:ptr<array<Local>>=$unsafe (uint64<overflow='wrap'>(0) as ptr<array<Local>>)
+let cx_files:ptr<array<SrcFile>>=$unsafe (uint64<overflow='wrap'>(0) as ptr<array<SrcFile>>)
+let cx_ref_predicates:ptr<array<array<RefAtom>>>=$unsafe (uint64<overflow='wrap'>(0) as ptr<array<array<RefAtom>>>)
+let cx_ref_narrowing:ptr<dict<int64 int64>>=$unsafe (uint64<overflow='wrap'>(0) as ptr<dict<int64 int64>>)
+let cx_str_sets:ptr<array<array<string>>>=$unsafe (uint64<overflow='wrap'>(0) as ptr<array<array<string>>>)
+let cx_T_BOOL:ptr<int64>=$unsafe (uint64<overflow='wrap'>(0) as ptr<int64>)
+let cx_T_INT:ptr<int64>=$unsafe (uint64<overflow='wrap'>(0) as ptr<int64>)
+let cx_T_MATH_INT:ptr<int64>=$unsafe (uint64<overflow='wrap'>(0) as ptr<int64>)
+let cx_T_STR:ptr<int64>=$unsafe (uint64<overflow='wrap'>(0) as ptr<int64>)
+let cx_T_U64:ptr<int64>=$unsafe (uint64<overflow='wrap'>(0) as ptr<int64>)
+let cx_T_U8:ptr<int64>=$unsafe (uint64<overflow='wrap'>(0) as ptr<int64>)
+let cx_ts_dewy:ptr<bool>=$unsafe (uint64<overflow='wrap'>(0) as ptr<bool>)
+let cx_lib_dir:ptr<string>=$unsafe (uint64(0) as ptr<string>)
+let cx_host:ptr<CheckedEvalHost>=$unsafe (uint64<overflow='wrap'>(0) as ptr<CheckedEvalHost>)
+checked_eval_bind=(input:ptr<CheckedEvalInput>):>CWord=>$unsafe {
+    cx_ct_values=input[0].ct_values
+    cx_nodes=input[0].nodes
+    cx_lists=input[0].lists
+    cx_names=input[0].names
+    cx_types=input[0].types
+    cx_type_args=input[0].type_args
+    cx_structs=input[0].structs
+    cx_fields=input[0].fields
+    cx_variants=input[0].variants
+    cx_fns=input[0].fns
+    cx_globals=input[0].globals
+    cx_locals=input[0].locals
+    cx_files=input[0].files
+    cx_ref_predicates=input[0].ref_predicates
+    cx_ref_narrowing=input[0].ref_narrowing
+    cx_str_sets=input[0].str_sets
+    cx_T_BOOL=input[0].T_BOOL
+    cx_T_INT=input[0].T_INT
+    cx_T_MATH_INT=input[0].T_MATH_INT
+    cx_T_STR=input[0].T_STR
+    cx_T_U64=input[0].T_U64
+    cx_T_U8=input[0].T_U8
+    cx_ts_dewy=input[0].ts_dewy
+    cx_lib_dir=input[0].lib_dir
+    cx_host=input[0].host
+    0
+}
+cx_prune=(t:CWord):>CWord=>$unsafe {
+    tu_prune(t)
+}
+cx_tkind=(t:CWord):>TK=>$unsafe {
+    cx_types[0].ptr[tu_prune(t)].kind
+}
+cx_telem=(t:CWord):>CWord=>$unsafe {
+    CWord(cx_types[0].ptr[tu_prune(t)].elem)
+}
+cx_fixed_len=(t:CWord):>CWord=>$unsafe {
+    CWord(cx_types[0].ptr[tu_prune(t)].bits)
+}
+cx_targ=(t:CWord i:CWord):>CWord=>$unsafe {
+    CWord(cx_type_args[0].ptr[CWord(cx_types[0].ptr[t].args) + i])
+}
+cx_is_int=(t:CWord):>bool=>$unsafe {
+    cx_types[0].ptr[tu_prune(t)].kind =? 'int_'
+}
+cx_is_float=(t:CWord):>bool=>$unsafe {
+    cx_types[0].ptr[tu_prune(t)].kind =? 'float_'
+}
+cx_int_policy=(t:CWord):>CWord=>$unsafe {
+    let t = tu_prune(t)
+    if cx_types[0].ptr[t].kind not=? 'int_' or t =? cx_T_MATH_INT[0] {return 0}
+    CWord(cx_types[0].ptr[t].st)
+}
+cx_has_flag=(n:CWord f:CWord):>bool=>$unsafe {
+    CWord(cx_nodes[0].ptr[n].flags) & f not=? 0
+}
+cx_add_flag=(n:CWord f:CWord):>void=>$unsafe {
+    cx_nodes[0].ptr[n].flags = int32<overflow='wrap'>(CWord(cx_nodes[0].ptr[n].flags) | f)
+}
+cx_ntype=(n:CWord):>CWord=>$unsafe {
+    CWord(cx_nodes[0].ptr[n].type)
+}
+cx_nkids=(n:CWord):>CWord=>$unsafe {
+    CWord(cx_nodes[0].ptr[n].nlist)
+}
+cx_kid=(n:CWord i:CWord):>CWord=>$unsafe {
+    CWord(cx_lists[0].ptr[CWord(cx_nodes[0].ptr[n].list) + i])
+}
+cx_kids=(n:CWord):>array<int64>=>$unsafe {
+    node_kids(@cx_nodes[0]  @cx_lists[0]  n)
+}
+cx_name_of=(id:CWord):>string=>$unsafe {
+    cx_names[0][id]
+}
+cx_pos_file=(p:CWord):>CWord=>$unsafe {
+    p >> 40
+}
+cx_dt=(t:CWord):>string=>$unsafe {
+    tf_string(t  cx_ts_dewy[0])
+}
+cx_tsize=(t:CWord):>CWord=>$unsafe {
+    tl_layout(t)
+    CWord(cx_types[0].ptr[tu_prune(t)].size)
+}
+cx_mk=(kind:NK pos:CWord):>CWord=>$unsafe {
+    node_mk(@cx_nodes[0]  kind  pos)
+}
+cx_set_list=(n:CWord xs:array<int64>):>void=>$unsafe {
+    node_set_list(@cx_nodes[0]  @cx_lists[0]  n  xs)
+}
+# Ordinary checked Dewy bodies, interpreted on demand. Values are immutable;
+# frames and places belong to the evaluator, never to the checker or backend.
+# No fuel counter: general compile-time execution is trusted.
+let cx_frames:array<CTFrame>=[]
+let cx_places:array<CTPlace>=[]
+let cx_stack:array<int64>=[]
+let cx_global_cache:dict<int64 int64>=[]
+let cx_pending:array<int64>=[]
+let cx_frame:CWord=-1
+cx_fail=(e:CWord why:string):>void=>$unsafe {
+    let trail=""
+    loop call in cx_stack {
+        let f=CWord(cx_nodes[0].ptr[call].sym)
+        let name=if f >? 0 and cx_fns[0][f].decl not=? 0 {cx_name_of(CWord(cx_nodes[0].ptr[CWord(cx_fns[0][f].decl)].name))} else {"<expression>"}
+        trail = "{trail}\n  compile-time call to {name} at {cx_host[0].pos_str(cx_nodes[0].ptr[call].pos)}"
+    }
+    cx_host[0].fatal(cx_nodes[0].ptr[e].pos  "compile-time evaluation: {why}{trail}")
+}
+cx_add=(v:CTValue):>CWord=>$unsafe {
+    cx_ct_values[0].push(v)
+    cx_ct_values[0].length - 1
+}
+cx_int=(t:CWord i:CWord):>CWord=>$unsafe {
+    let i = i
+    let t = cx_prune(t)
+    if cx_is_int(t) and CWord(cx_types[0].ptr[t].bits) <? 64 {
+        let bits=CWord(cx_types[0].ptr[t].bits)
+        if cx_types[0].ptr[t].sign {i=(i << (64 - bits)) >> (64 - bits)}
+        else {i &= (CWord(1) << bits) - 1}
+    }
+    cx_add(CTValue[type = t  i = i])
+}
+cx_float=(t:CWord f:float64):>CWord=>$unsafe {
+    cx_add(CTValue[type = t  f = if CWord(cx_types[0].ptr[t].bits) =? 32 {float64(float32(f))} else {f}])
+}
+cx_zero=(t0:CWord):>CWord=>$unsafe {
+    let t=cx_prune(t0)
+    let v=CTValue[type = t]
+    let k=cx_tkind(t)
+    if k =? 'struct_' {
+        let si=CWord(cx_types[0].ptr[t].st)
+        cx_host[0].check_struct_fields(si)
+        loop i in [0..CWord(cx_structs[0].ptr[si].nfields)) {v.items.push(cx_zero(CWord(cx_fields[0].ptr[CWord(cx_structs[0].ptr[si].fields) + i].type)))}
+    }
+    else if k =? 'enum_' {
+        let si=CWord(cx_types[0].ptr[t].st)
+        cx_host[0].check_struct_fields(si)
+        let vi=CWord(cx_structs[0].ptr[si].variants)
+        loop i in [0..CWord(cx_variants[0].ptr[vi].nfields)) {v.items.push(cx_zero(CWord(cx_fields[0].ptr[CWord(cx_variants[0].ptr[vi].fields) + i].type)))}
+    }
+    else if k =? 'tuple' {
+        loop i in [0..CWord(cx_types[0].ptr[t].nargs)) {v.items.push(cx_zero(cx_targ(t  i)))}
+    }
+    else if k =? 'fixed' {
+        loop i in [0..cx_fixed_len(t)) {v.items.push(cx_zero(cx_telem(t)))}
+    }
+    cx_add(v)
+}
+cx_equal=(a:CWord b:CWord e:CWord=0):>bool=>$unsafe {
+    let x=cx_value(a)
+    let y=cx_value(b)
+    if cx_is_int(x.type) and cx_is_int(y.type) and(x.type =? cx_T_MATH_INT[0] or y.type =? cx_T_MATH_INT[0]) and(x.items.length >? 0 or y.items.length >? 0) {
+        return cx_value(cx_math_binary(e  'eq'  cx_exact_operand(a  e)  cx_exact_operand(b  e))).i not=? 0
+    }
+    if x.i not=? y.i or x.s not=? y.s or x.items.length not=? y.items.length {return false}
+    if cx_is_float(x.type) and x.f not=? y.f {return false}
+    loop i in [0..x.items.length) {
+        if not cx_equal(x.items[i]  y.items[i]  e) {return false}
+    }
+    true
+# The evaluator can use its compile-time mathematical representation; emitted
+# fixed-width code uses only statically sized machine words.
+}
+let cx_fixed_internal:CWord=0
+cx_exact_operand=(v:CWord e:CWord):>CWord=>$unsafe {
+    let x=cx_value(v)
+    if x.type =? cx_T_MATH_INT[0] {return v}
+    if not cx_types[0].ptr[x.type].sign and x.i <? 0 {return cx_math_unpack(cx_math_runtime("__mi_unsigned"  [v]  e))}
+    cx_int(cx_T_MATH_INT[0]  x.i)
+}
+cx_store=(v:CWord t0:CWord e:CWord):>CWord=>$unsafe {
+    let t=cx_host[0].representation_type(t0)
+    if cx_fixed_internal >? 0 or v =? 0 or not cx_host[0].exact_type(t  cx_nodes[0].ptr[e].pos) {return v}
+    let x=cx_value(v)
+    if x.type not=? cx_T_MATH_INT[0] {return v}
+    let word=x.i
+    if x.items.length >? 0 {
+        let checked=cx_math_runtime((if cx_types[0].ptr[t].sign {"__mi_signed"} else {"__mi_to_unsigned"})  [cx_math_rep(v)]  e)
+        word=cx_value(checked).i
+    }
+    else if not cx_types[0].ptr[t].sign and word <? 0 {cx_fail(e  "exact integer result does not fit {cx_dt(t)}")}
+    if CWord(cx_types[0].ptr[t].bits) <? 64 and not cx_host[0].int_fits(word  t) {cx_fail(e  "exact integer result does not fit {cx_dt(t)}")}
+    cx_int(t  word)
+}
+cx_binary=(e:CWord op:Tok a:CWord b:CWord t:CWord):>CWord=>$unsafe {
+    let x=cx_value(a)
+    let y=cx_value(b)
+    if(op =? 'slash' or op =? 'percent') and cx_is_int(y.type) and y.i =? 0 and y.items.length =? 0 {cx_fail(e  "division by zero")}
+    if cx_fixed_internal =? 0 and cx_is_int(x.type) and cx_is_int(y.type) and(cx_host[0].exact_type(t  cx_nodes[0].ptr[e].pos) or x.type =? cx_T_MATH_INT[0] or y.type =? cx_T_MATH_INT[0]) and cx_int_policy(t) =? 0 {
+        return cx_math_binary(e  op  cx_exact_operand(a  e)  cx_exact_operand(b  e))
+    }
+    if x.type =? cx_T_MATH_INT[0] and(x.items.length >? 0 or y.items.length >? 0) {return cx_math_binary(e  op  a  b)}
+    if cx_tkind(x.type) =? 'ptr' {
+        if cx_tkind(t) not=? 'ptr' or(op not=? 'plus' and op not=? 'minus') {cx_fail(e  "pointer comparisons and host addresses are not allowed")}
+        x.i = CWord(x.i) + (if op =? 'plus' {CWord(y.i)} else {-CWord(y.i)}) * cx_tsize(cx_telem(x.type))
+        return cx_add(x)
+    }
+    if op =? 'eq' or op =? 'ne' {
+        let eq=cx_equal(a  b  e)
+        return cx_int(cx_T_BOOL[0]  int64(if op =? 'eq' {eq} else {not eq}))
+    }
+    if cx_tkind(x.type) =? 'str_' {
+        if op =? 'plus' {return cx_add(CTValue[type = cx_T_STR[0]  s = "{x.s}{y.s}"])}
+        if op =? 'lt' {return cx_int(cx_T_BOOL[0]  int64(x.s <? y.s))}
+        if op =? 'le' {return cx_int(cx_T_BOOL[0]  int64(x.s <=? y.s))}
+        if op =? 'gt' {return cx_int(cx_T_BOOL[0]  int64(x.s >? y.s))}
+        if op =? 'ge' {return cx_int(cx_T_BOOL[0]  int64(x.s >=? y.s))}
+    }
+    if cx_tkind(x.type) =? 'array' and op =? 'plus' {return cx_add(CTValue[type = t  items = [x.items... y.items...]])}
+    if cx_is_float(x.type) {
+        if op =? 'lt' {return cx_int(cx_T_BOOL[0]  int64(x.f <? y.f))}
+        if op =? 'le' {return cx_int(cx_T_BOOL[0]  int64(x.f <=? y.f))}
+        if op =? 'gt' {return cx_int(cx_T_BOOL[0]  int64(x.f >? y.f))}
+        if op =? 'ge' {return cx_int(cx_T_BOOL[0]  int64(x.f >=? y.f))}
+        if op =? 'plus' {return cx_float(t  x.f + y.f)}
+        if op =? 'minus' {return cx_float(t  x.f - y.f)}
+        if op =? 'star' {return cx_float(t  x.f * y.f)}
+        if op =? 'slash' {return cx_float(t  x.f / y.f)}
+        cx_fail(e  "this floating operation is not supported")
+    }
+    if not cx_is_int(x.type) and cx_tkind(x.type) not=? 'bool_' {cx_fail(e  "this operation on {cx_dt(x.type)} is not supported")}
+    let sg=cx_types[0].ptr[x.type].sign
+    let p=CWord(x.i)
+    let q=CWord(y.i)
+    if not sg {
+        p=p xor(-9223372036854775807 - 1)
+        q=q xor(-9223372036854775807 - 1)
+    }
+    if op =? 'lt' {return cx_int(cx_T_BOOL[0]  int64(p <? q))}
+    if op =? 'le' {return cx_int(cx_T_BOOL[0]  int64(p <=? q))}
+    if op =? 'gt' {return cx_int(cx_T_BOOL[0]  int64(p >? q))}
+    if op =? 'ge' {return cx_int(cx_T_BOOL[0]  int64(p >=? q))}
+    if cx_int_policy(t) =? 2 and(op =? 'plus' or op =? 'minus' or op =? 'star' or op =? 'shl') {
+        let left=cx_int(cx_T_MATH_INT[0]  x.i)
+        let right=cx_int(cx_T_MATH_INT[0]  y.i)
+        if not cx_types[0].ptr[x.type].sign and x.i <? 0 {left=cx_math_unpack(cx_math_runtime("__mi_unsigned"  [a]  e))}
+        if not cx_types[0].ptr[y.type].sign and y.i <? 0 {right=cx_math_unpack(cx_math_runtime("__mi_unsigned"  [b]  e))}
+        if op =? 'shl' and(y.i <? 0 or y.i >=? 64) {
+            if x.i =? 0 {return cx_int(t  0)}
+            let bits=CWord(cx_types[0].ptr[t].bits)
+            if cx_types[0].ptr[t].sign {
+                return cx_int(t  if x.i <? 0 {-(CWord(1) << (bits - 1))} else {(CWord(1) << (bits - 1)) - 1})
+            }
+            return cx_int(t  if bits =? 64 {-1} else {(CWord(1) << bits) - 1})
+        }
+        let value=cx_math_binary(e  op  left  right)
+        let bits=CWord(cx_types[0].ptr[t].bits)
+        let hi=if bits =? 64 {-1} else {(CWord(1) << bits) - 1}
+        let lo:CWord=0
+        if cx_types[0].ptr[t].sign {
+            hi=CWord(uint64<overflow='wrap'>(hi) >> 1)
+            lo=-hi - 1
+        }
+        let clamped=cx_math_runtime("__mi_clamp_word"  [cx_math_rep(value)  cx_int(cx_T_INT[0]  lo)  cx_int(cx_T_INT[0]  hi)  cx_int(cx_T_INT[0]  int64(not cx_types[0].ptr[t].sign))]  e)
+        return cx_int(t  cx_value(clamped).i)
+    }
+    p=x.i
+    q=y.i
+    let r:CWord=0
+    if op =? 'plus' {r=p + q}
+    else if op =? 'minus' {r=p - q}
+    else if op =? 'star' {r=p * q}
+    else if op =? 'slash' or op =? 'percent' {
+        if q =? 0 {cx_fail(e  "division by zero")}
+        if sg and p =? - 9223372036854775807 - 1 and q =? - 1 {
+            r=if op =? 'slash' {p} else {0}
+        }
+        else if sg {r=if op =? 'slash' {cx_divide(p q)} else {mod(p q kind='trunc')}}
+        else {r=CWord(if op =? 'slash' {uint64<overflow='wrap'>(p) // uint64<overflow='wrap'>(q)} else {uint64<overflow='wrap'>(p) % uint64<overflow='wrap'>(q)})}
+    }
+    else if op =? 'amp' {r=p & q}
+    else if op =? 'pipe' {r=p | q}
+    else if op =? 'caret' {r=p xor q}
+    else if op =? 'shl' or op =? 'shr' {
+        if cx_host[0].dewy_at(cx_nodes[0].ptr[e].pos) and(q <? 0 or q >=? 64) {
+            r=if op =? 'shr' and sg {p >> 63} else {0}
+        }
+        else if op =? 'shl' {r=p << (q & 63)}
+        else if sg {r=p >> (q & 63)}
+        else {r=CWord(uint64<overflow='wrap'>(p) >> (q & 63))}
+    }
+    else {cx_fail(e  "unsupported arithmetic operator")}
+    if cx_nodes[0].ptr[e].kind =? 'binary' and cx_nodes[0].ptr[e].aux2 =? - 1 and sg and(op =? 'slash' or op =? 'percent') {
+        if op =? 'slash' and q =? - 1 {
+            if cx_int_policy(t) =? 2 and p =? - (CWord(1) << (CWord(cx_types[0].ptr[t].bits) - 1)) {r=(CWord(1) << (CWord(cx_types[0].ptr[t].bits) - 1)) - 1}
+        }
+        else if q not=? - 1 {
+            let remainder=mod(p q kind='trunc')
+            if remainder not=? 0 and(remainder <? 0) not=? (q <? 0) {
+                if op =? 'slash' {r -= 1}
+                else {r += q}
+            }
+        }
+    }
+    cx_int(t  r)
+}
+cx_member=(e:CWord):>CWord=>$unsafe {
+    if cx_nodes[0].ptr[e].aux =? - 3 {return CWord(cx_nodes[0].ptr[e].ival)}
+    if cx_tkind(cx_ntype(CWord(cx_nodes[0].ptr[e].a))) =? 'tuple' {return CWord(cx_nodes[0].ptr[e].ival)}
+    CWord(cx_nodes[0].ptr[e].aux)
+}
+cx_read_place=(p:CTPlace):>CWord=>$unsafe {
+    let v=cx_frames[p.frame].values[p.local]
+    loop index in p.path {v=cx_value(v).items[index]}
+    v
+}
+cx_replace=(v:CWord path:array<int64> at:CWord value:CWord):>CWord=>$unsafe {
+    if at =? path.length {return value}
+    let copy=cx_value(v)
+    copy.items[path[at]] = cx_replace(copy.items[path[at]]  path  at + 1  value)
+    cx_add(copy)
+}
+cx_write_place=(p:CTPlace value:CWord):>void=>$unsafe {
+    let old=cx_frames[p.frame].values[p.local]
+    let produced1=cx_replace(old  p.path  0  value)
+    cx_frames[p.frame].values[p.local] = produced1
+}
+cx_place=(e:CWord):>CTPlace=>$unsafe {
+    let k=cx_nodes[0].ptr[e].kind
+    if k =? 'ident' and cx_nodes[0].ptr[e].aux =? int32<overflow='wrap'>(CWord(1)) {
+        let l=CWord(cx_nodes[0].ptr[e].sym)
+        let reference=cx_frames[cx_frame].refs.get(l)
+        if reference isnt? none {return cx_places[reference as int64]}
+        if CWord(cx_locals[0].ptr[l].flags) & LF_ALIAS not=? 0 {return cx_place(CWord(cx_locals[0].ptr[l].alias))}
+        if not (l in? cx_frames[cx_frame].values) {cx_fail(e  "a runtime local has no compile-time value")}
+        return CTPlace[frame = cx_frame  local = l]
+    }
+    if k =? 'field' or k =? 'index' or k =? 'narrow' or k =? 'unwrap' {
+        let p=cx_place(CWord(cx_nodes[0].ptr[e].a))
+        let v=cx_read_place(p)
+        let index:CWord=0
+        if k =? 'field' {index=cx_member(e)}
+        else if k =? 'index' {index=cx_value(cx_expr(CWord(cx_nodes[0].ptr[e].b))).i}
+        if cx_frames[cx_frame].signal not=? 0 {return p}
+        if index <? 0 or index >=? cx_value(v).items.length {cx_fail(e  "index out of bounds or absent value")}
+        p.path.push(index)
+        return p
+    }
+    cx_fail(e  "mutation requires evaluator-owned local storage; host and global writes are not allowed")
+    CTPlace[]
+}
+cx_global=(e:CWord g:CWord):>CWord=>$unsafe {
+    let cached=cx_global_cache.get(g)
+    if cached isnt? none {return cached as int64}
+    if cx_pending.contains(g) {cx_fail(e  "cyclic constant initialization")}
+    let initial=cx_host[0].binding_const_init(2  g  cx_nodes[0].ptr[e].pos)
+    if initial =? 0 {cx_fail(e  "mutable global '{cx_name_of(CWord(cx_globals[0].ptr[g].name))}' is not a compile-time constant; host effects are not allowed")}
+    cx_pending.push(g)
+# A global initializer cannot see its caller's locals.
+    let saved=cx_frame
+    cx_frames.push(CTFrame[])
+    cx_frame=cx_frames.length - 1
+    let v=cx_expr(initial)
+    cx_frames.pop();
+    cx_frame=saved
+    cx_pending.pop();
+    cx_global_cache[g] = v
+# Materialize demanded constant tables: no evaluator call runs at startup.
+    let produced2=int32<overflow='wrap'>(cx_literal(v  cx_nodes[0].ptr[initial].pos))
+    cx_nodes[0].ptr[CWord(cx_globals[0].ptr[g].decl)].b = produced2
+    v
+}
+cx_call=(e:CWord):>CWord=>$unsafe {
+    let f=CWord(cx_nodes[0].ptr[e].sym)
+    if cx_nodes[0].ptr[e].aux not=? 0 or f <=? 0 {cx_fail(e  "indirect calls are not supported")}
+    cx_stack.push(e)
+    if cx_fns[0][f].decl not=? 0 and cx_has_flag(CWord(cx_fns[0][f].decl)  NF_EXTERN) {cx_fail(e  "external calls and host effects are not allowed")}
+    cx_host[0].check_fn_body(f)
+    if cx_fns[0][f].state not=? 2 {cx_fail(e  "the function body is still being checked")}
+    if cx_fns[0][f].has_env {cx_fail(e  "capturing closures are not supported")}
+    let frame=CTFrame[]
+# The checker records source argument order separately from parameter order.
+    let order:array<int64>=[]
+    if cx_nodes[0].ptr[e].c not=? 0 {order=cx_host[0].call_eval_order(e)}
+    else {
+        loop i in [0..cx_nkids(e)) {order.push(i)}
+    }
+    loop i in order {
+        let l=cx_fns[0][f].params[i]
+        if CWord(cx_locals[0].ptr[l].flags) & LF_MUTPARAM not=? 0 {
+            let p=cx_place(cx_kid(e  i))
+            frame.refs[l] = cx_places.length
+            cx_places.push(p)
+        }
+        else {frame.values[l] = cx_store(cx_expr(cx_kid(e  i))  CWord(cx_locals[0].ptr[l].type)  e)}
+        if cx_frames[cx_frame].signal not=? 0 {
+            cx_stack.pop();
+            return cx_frames[cx_frame].result
+        }
+    }
+    let saved=cx_frame
+    cx_frames.push(frame)
+    cx_frame=cx_frames.length - 1
+    let v=cx_block(CWord(cx_fns[0][f].body))
+    if cx_frames[cx_frame].signal =? 1 {v=cx_frames[cx_frame].result}
+    v=cx_store(v  CWord(cx_fns[0][f].ret)  e)
+    cx_frames.pop();
+    cx_frame=saved
+    cx_stack.pop();
+    v
+# Evaluate a self-contained contract where the value is actually constructed.
+# This is demanded only by a refinement conversion during constant execution;
+# dependent formals/lexicals still require their own environment support.
+}
+cx_ref_term=(e:CWord term:RefTerm self:CWord):>CWord=>$unsafe {
+    let value=self
+    if term.kind =? 1 {value=cx_int((if term.unsigned {cx_T_U64[0]} else {cx_T_INT[0]})  term.value)}
+    else if term.kind not=? 0 {cx_fail(e  "dependent refinement is not supported in compile-time execution")}
+    loop selector in term.path {
+        let x=cx_value(value)
+        if selector =? - 1 {
+            if cx_tkind(x.type) =? 'str_' {
+                let call=cx_mk('call'  cx_nodes[0].ptr[e].pos)
+                cx_nodes[0].ptr[call].sym = int32<overflow='wrap'>(cx_host[0].runtime_fn("__dewy_string_length"))
+                cx_nodes[0].ptr[call].type = int32<overflow='wrap'>(cx_T_INT[0])
+                cx_set_list(call  [cx_literal(value  cx_nodes[0].ptr[e].pos)])
+                value=cx_call(call)
+            }
+            else if cx_tkind(x.type) =? 'array' or cx_tkind(x.type) =? 'fixed' {value=cx_int(cx_T_INT[0]  x.items.length)}
+            else {cx_fail(e  "refinement length needs a collection")}
+        }
+        else {
+            let base=cx_host[0].representation_type(x.type)
+            if cx_tkind(base) not=? 'struct_' {cx_fail(e  "refinement projection needs a record")}
+            let si=CWord(cx_types[0].ptr[base].st)
+            cx_host[0].check_struct_fields(si)
+            let index:CWord=-1
+            loop i in [0..CWord(cx_structs[0].ptr[si].nfields)) {
+                if CWord(cx_fields[0].ptr[CWord(cx_structs[0].ptr[si].fields) + i].name) =? selector {index=i}
+            }
+            if index <? 0 or index >=? x.items.length {cx_fail(e  "refinement projection is not available")}
+            value=x.items[index]
+        }
+    }
+    if not cx_is_int(cx_value(value).type) {cx_fail(e  "refinement needs an integer value")}
+    value=cx_exact_operand(value  e)
+    if term.offset not=? 0 {value=cx_math_binary(e  'plus'  value  cx_int(cx_T_MATH_INT[0]  term.offset))}
+    value
+}
+cx_refinement=(e:CWord value:CWord):>void=>$unsafe {
+    let t=cx_prune(CWord(cx_nodes[0].ptr[e].aux2))
+    if t <=? 0 or cx_types[0].ptr[t].kind not=? 'refined' {cx_fail(e  "refinement contract is not available")}
+    loop atom in cx_ref_predicates[0][CWord(cx_types[0].ptr[t].st)] {
+        let a=cx_ref_term(e  atom.a  value)
+        let b=cx_ref_term(e  atom.b  value)
+        if cx_value(cx_math_binary(e  atom.op  a  b)).i =? 0 {cx_fail(e  "refinement failed for {cx_dt(t)}")}
+    }
+}
+cx_convert=(e:CWord v:CWord):>CWord=>$unsafe {
+    let t=cx_prune(cx_ntype(e))
+    let x=cx_value(v)
+    let cv=cx_conversion(CWord(cx_nodes[0].ptr[e].aux))
+    if cv =? 'fixed_store' {return cx_store(v  t  e)}
+    if cv =? 'math2big' {return cx_math_runtime("__mi_big"  [cx_math_rep(v)]  e)}
+    if cv =? 'big2math' {return cx_math_unpack(cx_math_runtime("__mi_pack"  [v]  e))}
+    if cv =? 'none_' and x.type =? cx_T_MATH_INT[0] and cx_host[0].math_rep_type(t) {return cx_math_rep(v)}
+    if cv =? 'none_' and t =? cx_T_MATH_INT[0] and cx_host[0].math_rep_type(x.type) {return cx_math_unpack(v)}
+    if cv =? 'wrap_int' or cv =? 'saturate_int' {
+        let bits=CWord(cx_types[0].ptr[t].bits)
+        let hi=if bits =? 64 {-1} else {(CWord(1) << bits) - 1}
+        let lo:CWord=0
+        if cx_types[0].ptr[t].sign {
+            hi=CWord(uint64<overflow='wrap'>(hi) >> 1)
+            lo=-hi - 1
+        }
+        if x.type =? cx_T_MATH_INT[0] {
+            let value=if cv =? 'wrap_int' {cx_math_runtime("__mi_low_word"  [cx_math_rep(v)]  e)} else {cx_math_runtime("__mi_clamp_word"  [cx_math_rep(v)  cx_int(cx_T_INT[0]  lo)  cx_int(cx_T_INT[0]  hi)  cx_int(cx_T_INT[0]  int64(not cx_types[0].ptr[t].sign))]  e)}
+            return cx_int(t  cx_value(value).i)
+        }
+        let word=x.i
+        if cv =? 'saturate_int' {
+            if cx_types[0].ptr[x.type].sign and word <? lo {word=lo}
+            else if(cx_types[0].ptr[t].sign and cx_types[0].ptr[x.type].sign and word >? hi) or((not cx_types[0].ptr[t].sign or not cx_types[0].ptr[x.type].sign) and uint64<overflow='wrap'>(word) >? uint64<overflow='wrap'>(hi)) {word=hi}
+        }
+        return cx_int(t  word)
+    }
+    if cv =? 'int_' {
+        if t =? cx_T_MATH_INT[0] and cx_is_int(x.type) and not cx_types[0].ptr[x.type].sign and x.i <? 0 {return cx_math_unpack(cx_math_runtime("__mi_unsigned"  [v]  e))}
+        if x.type =? cx_T_MATH_INT[0] and x.items.length >? 0 {
+            let checked=cx_math_runtime((if cx_types[0].ptr[t].sign {"__mi_signed"} else {"__mi_to_unsigned"})  [cx_math_rep(v)]  e)
+            x=cx_value(checked)
+        }
+        if(x.type =? cx_T_MATH_INT[0] or t =? cx_T_MATH_INT[0]) and not cx_host[0].int_widens(x.type  t) {
+            let fits=cx_host[0].int_fits(x.i  t)
+            if not cx_types[0].ptr[x.type].sign and x.i <? 0 and cx_types[0].ptr[t].sign {fits=false}
+            if not fits {cx_fail(e  "integer overflow in conversion to {cx_dt(t)}")}
+        }
+        return cx_int(t  x.i)
+    }
+    if cv =? 'int2float' {
+        if x.type =? cx_T_MATH_INT[0] and x.items.length >? 0 {
+            let value=cx_math_runtime("__mi_float"  [cx_math_rep(v)]  e)
+            return cx_float(t  cx_value(value).f)
+        }
+        let f=if cx_types[0].ptr[x.type].sign {float64(x.i)} else {float64(uint64<overflow='wrap'>(x.i))}
+        return cx_float(t  f)
+    }
+    if cv =? 'float_' {return cx_float(t  x.f)}
+    if cv =? 'float2int' {
+        if t =? cx_T_MATH_INT[0] and not(x.f >=? - 9223372036854775808.0 and x.f <? 9223372036854775808.0) {
+            return cx_math_unpack(cx_math_runtime("__mi_from_float"  [v]  e))
+        }
+        let bits=CWord(cx_types[0].ptr[t].bits)
+        if t not=? cx_T_MATH_INT[0] and cx_host[0].dewy_at(cx_nodes[0].ptr[e].pos) {
+            let sg=cx_types[0].ptr[t].sign
+            let lo=if sg and bits =? 64 {-9223372036854775809.0} else {if sg {-float64(CWord(1) << (bits - 1)) - 1.0} else {-1.0}}
+            let hi=if bits =? 64 and not sg {18446744073709551616.0} else {if bits =? 64 {9223372036854775808.0} else {if sg {float64(CWord(1) << (bits - 1))} else {float64(CWord(1) << bits)}}}
+# (-2^63 - 1 rounds to -2^63, which fits: the lower test is inclusive there)
+            let fits=x.f <? hi and(if sg and bits =? 64 {x.f >=? lo} else {x.f >? lo})
+            if not fits {cx_fail(e  "{x.f} does not fit {cx_dt(t)}")}
+        }
+        if bits =? 64 and not cx_types[0].ptr[t].sign {
+            let r:CWord=0
+            if x.f >=? 9223372036854775808.0 {r=CWord(int64(x.f - 9223372036854775808.0)) xor(-9223372036854775807 - 1)}
+            else {r=max(0  CWord(int64(x.f)))}
+            return cx_int(t  r)
+        }
+        let r=CWord(int64(x.f))
+        if bits <? 64 {
+            let lo=if cx_types[0].ptr[t].sign {-(CWord(1) << (bits - 1))} else {0}
+            let hi=if cx_types[0].ptr[t].sign {(CWord(1) << (bits - 1)) - 1} else {(CWord(1) << bits) - 1}
+            r=min(hi  max(lo  r))
+        }
+        return cx_int(t  r)
+    }
+    if cv =? 'refinement' and e in? cx_ref_narrowing[0] {
+# (a proven integer conversion, uint8(n): the value must fit)
+        let to=cx_ref_narrowing[0][e]
+        let fits=cx_host[0].int_fits(x.i  to)
+        if not cx_types[0].ptr[x.type].sign and x.i <? 0 {fits=false}
+        if not fits {cx_fail(e  "integer overflow: value does not fit {cx_dt(to)}")}
+        x.type = t
+        return cx_add(x)
+    }
+    if cv =? 'refinement' {
+        cx_refinement(e  v)
+        x.type = t
+        return cx_add(x)
+    }
+    if cv =? 'opt' {
+        if cx_tkind(x.type) =? 'opt' {x.type = t}
+        else {x=CTValue[type = t  i = 1  items = [v]]}
+        return cx_add(x)
+    }
+    if cv =? 'union_' {
+        let member=tu_union_members(x.type)[x.i]
+        x.i = uu_holder(t  member  false)
+        if x.i <? 0 {cx_fail(e  "the value is not a member of {cx_dt(t)}")}
+        let held=tu_union_members(t)[x.i]
+        if not tu_equal(held  member) {
+# (a string set's word in the wider set: the same member's)
+            let word=cx_value(x.items[0])
+            let k=cx_str_sets[0][cx_host[0].str_set_of(held)].index_of(cx_str_sets[0][cx_host[0].str_set_of(member)][word.i]) ?? -1
+            if k <? 0 {cx_fail(e  "the value is not a member of {cx_dt(t)}")}
+            x.items = [cx_add(CTValue[type = held  i = k])]
+        }
+    }
+    else if cv =? 'arr2fixed' {
+        if x.items.length not=? cx_fixed_len(t) {cx_fail(e  "array length does not match fixed array")}
+    }
+    else if cv not=? 'none_' and cv not=? 'explicit_copy' and cv not=? 'fixed2arr' and cv not=? 'quantity_const' {
+        cx_fail(e  "raw pointer and representation conversions are not allowed")
+    }
+    x.type = t
+    cx_add(x)
+}
+cx_intrinsic=(e:CWord):>CWord=>$unsafe {
+    if cx_nodes[0].ptr[e].aux =? int32<overflow='wrap'>(89) {
+        let a=cx_exact_operand(cx_expr(cx_kid(e  0))  e)
+        if cx_value(cx_math_binary(e  'lt'  a  cx_int(cx_T_MATH_INT[0]  0))).i not=? 0 {return cx_math_binary(e  'minus'  cx_int(cx_T_MATH_INT[0]  0)  a)}
+        return a
+    }
+    let id=cx_intrinsic_kind(CWord(cx_nodes[0].ptr[e].aux))
+    let t=cx_prune(cx_ntype(e))
+    if id =? 'static_assert' {return 0}
+    if id =? 'panic' or id =? 'unreachable' {
+        let why="unreachable code executed"
+        if cx_nkids(e) >? 0 {why=cx_value(cx_expr(cx_kid(e  0))).s}
+        cx_fail(e  why)
+    }
+    if id =? 'assert' or id =? 'runtime_assert' {
+        let condition=cx_value(cx_expr(cx_kid(e  0))).i
+        if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
+        if condition =? 0 {
+            let why="assertion failed"
+            if cx_nkids(e) >? 1 {why=cx_value(cx_expr(cx_kid(e  1))).s}
+            cx_fail(e  why)
+        }
+        return 0
+    }
+    if id =? 'len' {
+        let x=cx_value(cx_expr(cx_kid(e  0)))
+        return cx_int(t  if cx_tkind(x.type) =? 'str_' {cx_bytes(x.s).length} else {x.items.length})
+    }
+    if id =? 'to_bytes' {
+        let x=cx_value(cx_expr(cx_kid(e  0)))
+        let items:array<int64>=[]
+        loop byte in cx_bytes(x.s) {items.push(cx_int(cx_T_U8[0]  CWord(byte)))}
+        return cx_add(CTValue[type = t  items = items])
+    }
+    if id =? 'embed' {
+        let items:array<int64>=[]
+        loop byte in cx_bytes(cx_name_of(CWord(cx_nodes[0].ptr[e].sval))) {items.push(cx_int(cx_T_U8[0]  CWord(byte)))}
+        return cx_add(CTValue[type = t  items = items])
+    }
+    if id =? 'arrdata' {
+# A bounded immutable view into evaluator storage, never a host address.
+        return cx_add(CTValue[type = t  items = [cx_expr(cx_kid(e  0))]])
+    }
+    if id =? 'from_bytes' {
+        let x=cx_value(cx_expr(cx_kid(e  0)))
+        let data:array<uint8>=[]
+        loop item in x.items {data.push(uint8((cx_value(item).i) & 0xff))}
+        return cx_add(CTValue[type = t  s = cx_host[0].str_from_bytes(data)])
+    }
+    if id =? 'push' or id =? 'pop' or id =? 'clear' or id =? 'extend' or id =? 'reserve' or id =? 'resize' or id =? 'truncate' or id =? 'insert' or id =? 'remove' {
+        let p=cx_place(cx_kid(e  0))
+        if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
+        let args:array<int64>=[]
+        loop i in [1..cx_nkids(e)) {
+            args.push(cx_expr(cx_kid(e  i)))
+            if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
+        }
+        let x=cx_value(cx_read_place(p))
+        let result:CWord=0
+        if id =? 'push' {x.items.push(args[0])}
+        else if id =? 'extend' {
+            let extra=cx_value(args[0]).items
+            x.items = [x.items... extra...]
+        }
+        else if id =? 'pop' {
+            if x.items.length =? 0 {cx_fail(e  "pop from an empty array")}
+            result=x.items.pop()
+        }
+        else if id =? 'clear' {x.items = []}
+        else if id =? 'insert' or id =? 'remove' {
+            let index=cx_value(args[0]).i
+            if index <? 0 or index >? x.items.length or(id =? 'remove' and index =? x.items.length) {cx_fail(e  "index out of bounds")}
+            if id =? 'insert' {x.items.insert(args[1] index)}
+            else {
+                result=x.items[index]
+                x.items.pop(index);
+            }
+        }
+        else {
+            let count=cx_value(args[0]).i
+            if count <? 0 {cx_fail(e  "negative array length")}
+            if id not=? 'reserve' {
+                loop x.items.length >? count {x.items.pop();}
+                if id =? 'resize' {
+                    loop x.items.length <? count {x.items.push(cx_zero(cx_telem(x.type)))}
+                }
+            }
+        }
+        cx_write_place(p  cx_add(x))
+        return result
+    }
+    if id =? 'sqrt' {return cx_float(t  sqrt(cx_value(cx_expr(cx_kid(e  0))).f))}
+    if id =? 'default_init' {return cx_zero(t)}
+    cx_fail(e  "operation is not supported at compile time (I/O, host effects and raw memory are not allowed)")
+    0
+}
+cx_pattern=(p:CWord v:CWord):>bool=>$unsafe {
+    let x=cx_value(v)
+    let k=cx_nodes[0].ptr[p].kind
+    if k =? 'pwild' {return true}
+    if k =? 'ptype' {
+        if tu_is_union(x.type) {
+            let member=tu_union_members(x.type)[x.i]
+            return tu_union_members(cx_ntype(p)).contains(member)
+        }
+        return x.i not=? 0
+    }
+    if k =? 'pvariant' {return x.i =? CWord(cx_nodes[0].ptr[p].aux2)}
+    if k =? 'plit' {
+        if tu_is_union(x.type) {
+            if x.i not=? CWord(cx_nodes[0].ptr[p].aux2) {return false}
+            return cx_pattern(p  x.items[0])
+        }
+        if cx_tkind(x.type) =? 'opt' {
+            if cx_nodes[0].ptr[CWord(cx_nodes[0].ptr[p].a)].kind =? 'none_lit' {return x.i =? 0}
+            return x.i not=? 0 and cx_pattern(p  x.items[0])
+        }
+        return cx_equal(v  cx_expr(CWord(cx_nodes[0].ptr[p].a))  p)
+    }
+    if k =? 'prange' {
+        let lo=cx_expr(CWord(cx_nodes[0].ptr[p].a))
+        let hi=cx_expr(CWord(cx_nodes[0].ptr[p].b))
+        let upper=if cx_has_flag(p  NF_INCLUSIVE) {Tok.le} else {Tok.lt}
+        return cx_value(cx_binary(p  'ge'  v  lo  cx_T_BOOL[0])).i not=? 0 and cx_value(cx_binary(p  upper  v  hi  cx_T_BOOL[0])).i not=? 0
+    }
+    cx_fail(p  "unsupported match pattern")
+    false
+}
+cx_expr=(e:CWord):>CWord=>$unsafe {
+    if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
+    let v=cx_expr_impl(e)
+    if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
+    v
+}
+cx_expr_impl=(e:CWord):>CWord=>$unsafe {
+    if e =? 0 {return 0}
+    let k=cx_nodes[0].ptr[e].kind
+    let t=cx_prune(cx_ntype(e))
+    if k =? 'int_lit' or k =? 'bool_lit' {
+        if t =? cx_T_MATH_INT[0] and cx_has_flag(e  NF_U64) and cx_nodes[0].ptr[e].ival <? 0 {
+            return cx_math_unpack(cx_math_runtime("__mi_unsigned"  [cx_int(cx_T_U64[0]  cx_nodes[0].ptr[e].ival)]  e))
+        }
+        return cx_int(t  cx_nodes[0].ptr[e].ival)
+    }
+    if k =? 'float_lit' {return cx_float(t  cx_nodes[0].ptr[e].fval)}
+    if k =? 'none_lit' {return cx_zero(t)}
+    if k =? 'str_lit' {
+        if cx_nodes[0].ptr[e].aux not=? 0 {
+# (Dewy joins text by interpolation: strings, machine integers and booleans here)
+            let text=""
+            loop part in cx_kids(e) {
+                if cx_nodes[0].ptr[part].kind =? 'str_lit' and cx_nodes[0].ptr[part].aux =? 0 {
+                    text = "{text}{cx_name_of(CWord(cx_nodes[0].ptr[part].sval))}"
+                    continue
+                }
+                if cx_nodes[0].ptr[part].kind not=? 'pair' or cx_nodes[0].ptr[part].sval not=? - 1 {cx_fail(e  "this string interpolation is not supported at compile time (text, machine integers and booleans are)")}
+                let pv=cx_value(cx_expr(CWord(cx_nodes[0].ptr[part].a)))
+                if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
+                let pt=cx_prune(pv.type)
+                if cx_tkind(pt) =? 'str_' {text = "{text}{pv.s}"}
+                else if pt =? cx_T_BOOL[0] {text = "{text}{if pv.i not=? 0 {"true"} else {"false"}}"}
+                else if cx_is_int(pt) and pt not=? cx_T_MATH_INT[0] and(cx_types[0].ptr[pt].sign or pv.i >=? 0) {text = "{text}{pv.i}"}
+                else {cx_fail(e  "this string interpolation is not supported at compile time (text, machine integers and booleans are)")}
+            }
+            return cx_add(CTValue[type = t  s = text])
+        }
+        return cx_add(CTValue[type = t  s = cx_name_of(CWord(cx_nodes[0].ptr[e].sval))])
+    }
+    if k =? 'ident' {
+        if cx_nodes[0].ptr[e].aux =? int32<overflow='wrap'>(CWord(2)) {return cx_global(e  CWord(cx_nodes[0].ptr[e].sym))}
+        if cx_nodes[0].ptr[e].aux =? int32<overflow='wrap'>(CWord(1)) {
+            let l=CWord(cx_nodes[0].ptr[e].sym)
+            if l in? cx_frames[cx_frame].refs or CWord(cx_locals[0].ptr[l].flags) & LF_ALIAS not=? 0 {return cx_read_place(cx_place(e))}
+            let cached=cx_frames[cx_frame].values.get(l)
+            if cached isnt? none {return cached as int64}
+            let initial=cx_host[0].binding_const_init(1  l  cx_nodes[0].ptr[e].pos)
+            if initial not=? 0 {return cx_expr(initial)}
+        }
+        cx_fail(e  "'{cx_name_of(CWord(cx_nodes[0].ptr[e].name))}' is not a compile-time constant")
+    }
+    if k =? 'array' or k =? 'tuple' {
+        let v=CTValue[type = t]
+        loop child in cx_kids(e) {
+            v.items.push(cx_store(cx_expr(child)  cx_ntype(child)  e))
+            if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
+        }
+        if cx_nodes[0].ptr[e].b not=? 0 {
+            let count=cx_value(cx_expr(CWord(cx_nodes[0].ptr[e].b))).i
+            if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
+            if count <? 0 {cx_fail(e  "negative array length")}
+            let item=v.items[0]
+            v.items = []
+            loop _ in [0..count) {v.items.push(item)}
+        }
+        if cx_tkind(t) =? 'fixed' and v.items.length =? 0 {return cx_zero(t)}
+        return cx_add(v)
+    }
+    if k =? 'field' {
+        let v=cx_value(cx_expr(CWord(cx_nodes[0].ptr[e].a)))
+        if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
+        let index=cx_member(e)
+        if index <? 0 or index >=? v.items.length {cx_fail(e  "unsupported field access")}
+        return v.items[index]
+    }
+    if k =? 'index' {
+        let v=cx_value(cx_expr(CWord(cx_nodes[0].ptr[e].a)))
+        if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
+        if cx_nodes[0].ptr[e].aux =? 1 {
+            let range=CWord(cx_nodes[0].ptr[e].b)
+            let size=if cx_tkind(v.type) =? 'str_' {cx_bytes(v.s).length} else {v.items.length}
+            let lo=if cx_nodes[0].ptr[range].a not=? 0 {cx_value(cx_expr(CWord(cx_nodes[0].ptr[range].a))).i} else {0}
+            let hi=if cx_nodes[0].ptr[range].b not=? 0 {cx_value(cx_expr(CWord(cx_nodes[0].ptr[range].b))).i} else {size}
+            if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
+            if cx_nodes[0].ptr[range].b not=? 0 and cx_has_flag(range  NF_INCLUSIVE) {hi += 1}
+            if lo <? 0 or hi >? size or lo >? hi {cx_fail(e  "slice out of bounds")}
+            if cx_tkind(v.type) =? 'str_' {return cx_add(CTValue[type = t  s = cx_host[0].byte_cut(v.s lo hi)])}
+            return cx_add(CTValue[type = t  items = v.items[lo..hi)])
+        }
+        let index=cx_value(cx_expr(CWord(cx_nodes[0].ptr[e].b))).i
+        if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
+        if cx_tkind(v.type) =? 'ptr' {return cx_load(e  v  index  t)}
+        if cx_tkind(v.type) =? 'str_' {
+            if index <? 0 or index >=? cx_bytes(v.s).length {cx_fail(e  "string index out of bounds")}
+            return cx_int(t  CWord(cx_bytes(v.s)[index]))
+        }
+        if index <? 0 or index >=? v.items.length {cx_fail(e  "index out of bounds")}
+        return v.items[index]
+    }
+    if k =? 'narrow' or k =? 'unwrap' {
+        let v=cx_value(cx_expr(CWord(cx_nodes[0].ptr[e].a)))
+        if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
+        if v.items.length =? 0 {cx_fail(e  "unwrapping an absent value")}
+        return v.items[0]
+    }
+    if k =? 'istype' {
+        if cx_nodes[0].ptr[e].aux =? - 3 {return cx_int(cx_T_BOOL[0]  1)}
+        let v=cx_value(cx_expr(CWord(cx_nodes[0].ptr[e].a)))
+        if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
+        let tag=CWord(cx_nodes[0].ptr[e].aux)
+        return cx_int(cx_T_BOOL[0]  int64(if tag =? - 1 {v.i =? 0} else {if tag =? - 2 {v.i not=? 0} else {v.i =? tag}}))
+    }
+    if k =? 'dotname' {return cx_add(CTValue[type = t  i = CWord(cx_nodes[0].ptr[e].aux)])}
+    if k =? 'call' {
+        if cx_nodes[0].ptr[e].aux =? 2 or cx_nodes[0].ptr[e].aux =? 3 {
+            let v=CTValue[type = t]
+            if cx_nodes[0].ptr[e].aux =? 3 {
+                v.i = CWord(cx_nodes[0].ptr[e].aux2)
+                if tu_is_union(t) and cx_nkids(e) =? 1 {v.i = uu_index(t  cx_ntype(cx_kid(e  0)))}
+            }
+            loop _ in cx_kids(e) {v.items.push(0)}
+            let order:array<int64>=[]
+            if cx_nodes[0].ptr[e].c not=? 0 {order=cx_host[0].call_eval_order(e)}
+            else {
+                loop i in [0..cx_nkids(e)) {order.push(i)}
+            }
+            loop i in order {
+                let child=cx_kid(e  i)
+                if child not=? 0 {v.items[i] = cx_store(cx_expr(child)  cx_ntype(child)  e)}
+                else if cx_nodes[0].ptr[e].aux =? 2 {
+                    let fi=CWord(cx_structs[0].ptr[CWord(cx_types[0].ptr[t].st)].fields) + i
+                    v.items[i] = cx_zero(CWord(cx_fields[0].ptr[fi].type))
+                }
+                if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
+            }
+            return cx_add(v)
+        }
+        return cx_call(e)
+    }
+    if k =? 'intrinsic' {return cx_intrinsic(e)}
+    if k =? 'conv' {
+        let value=cx_expr(CWord(cx_nodes[0].ptr[e].a))
+        if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
+        return cx_convert(e  value)
+    }
+    if k =? 'cast' {
+        let v=cx_value(cx_expr(CWord(cx_nodes[0].ptr[e].a)))
+        if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
+# The bundled IEEE helpers are pure and needed by exact conversions.
+        if cx_files[0][cx_pos_file(cx_nodes[0].ptr[e].pos)].path =? "{cx_lib_dir[0]}/core/math.jo" {
+            if cx_is_float(v.type) and cx_is_int(t) {
+                return cx_int(t  if cx_tsize(v.type) =? 4 {CWord((float32(v.f) transmute uint32))} else {CWord((v.f transmute uint64))})
+            }
+            if cx_is_int(v.type) and cx_is_float(t) {
+                return cx_float(t  if cx_tsize(t) =? 4 {float64((uint32((v.i) & 0xffffffff) transmute float32))} else {(uint64<overflow='wrap'>(v.i) transmute float64)})
+            }
+        }
+        if cx_tkind(v.type) not=? 'ptr' or cx_tkind(t) not=? 'ptr' {cx_fail(e  "raw representation casts are not supported")}
+        v.type = t
+        return cx_add(v)
+    }
+    if k =? 'not_' {return cx_int(cx_T_BOOL[0]  int64(cx_value(cx_expr(CWord(cx_nodes[0].ptr[e].a))).i =? 0))}
+    if k =? 'unary' {
+        let a=cx_expr(CWord(cx_nodes[0].ptr[e].a))
+        if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
+        let op=cx_token(CWord(cx_nodes[0].ptr[e].op))
+        if op =? 'plus' {return a}
+        if op =? 'minus' {
+            if cx_is_float(t) {return cx_float(t  -cx_value(a).f)}
+            return cx_binary(e  'minus'  cx_int(t  0)  a  t)
+        }
+        if t =? cx_T_MATH_INT[0] {return cx_binary(e  'minus'  cx_int(t  -1)  a  t)}
+        return cx_int(t  (CWord(cx_value(a).i) xor -1))
+    }
+    if k =? 'and_' or k =? 'or_' {
+        let a=cx_expr(CWord(cx_nodes[0].ptr[e].a))
+        if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
+        if(cx_value(a).i =? 0) =? (k =? 'and_') {return a}
+        return cx_expr(CWord(cx_nodes[0].ptr[e].b))
+    }
+    if k =? 'binary' {
+        let a=cx_expr(CWord(cx_nodes[0].ptr[e].a))
+        if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
+        let b=cx_expr(CWord(cx_nodes[0].ptr[e].b))
+        if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
+        if cx_nodes[0].ptr[e].aux =? 6 {
+            return cx_int(cx_T_BOOL[0]  int64(if cx_nodes[0].ptr[e].op =? int32<overflow='wrap'>(69) {cx_value(a).i =? 0} else {cx_value(a).i not=? 0}))
+        }
+        return cx_binary(e  cx_token(CWord(cx_nodes[0].ptr[e].op))  a  b  t)
+    }
+    if k =? 'if_' {
+        let yes=cx_value(cx_expr(CWord(cx_nodes[0].ptr[e].a))).i not=? 0
+        return cx_block(if yes {CWord(cx_nodes[0].ptr[e].b)} else {CWord(cx_nodes[0].ptr[e].c)})
+    }
+    if k =? 'iflet' {
+        let v=cx_value(cx_expr(CWord(cx_nodes[0].ptr[e].a)))
+        if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
+        if v.i =? 0 {return cx_block(CWord(cx_nodes[0].ptr[e].c))}
+        cx_frames[cx_frame].values[CWord(cx_nodes[0].ptr[e].sym)] = v.items[0]
+        return cx_block(CWord(cx_nodes[0].ptr[e].b))
+    }
+    if k =? 'coalesce' {
+        let v=cx_value(cx_expr(CWord(cx_nodes[0].ptr[e].a)))
+        if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
+        if v.i not=? 0 {return v.items[0]}
+        return cx_expr(CWord(cx_nodes[0].ptr[e].b))
+    }
+    if k =? 'match_' {
+        let v=cx_expr(CWord(cx_nodes[0].ptr[e].a))
+        if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
+        cx_frames[cx_frame].values[CWord(cx_nodes[0].ptr[e].sym)] = v
+        loop arm in cx_kids(e) {
+            loop p in cx_kids(arm) {
+                if cx_pattern(p  v) {return cx_block(CWord(cx_nodes[0].ptr[arm].b))}
+            }
+        }
+        cx_fail(e  "no match arm matched")
+    }
+    if k =? 'block' {return cx_block(e)}
+    cx_fail(e  "this expression is not supported at compile time")
+    0
+# Library scanners can read their own byte buffers with ordinary pointer code.
+# Writes, fabricated addresses and escaping these views remain unsupported.
+}
+cx_load=(e:CWord pointer:CTValue index:CWord t:CWord):>CWord=>$unsafe {
+    if not cx_is_int(t) or pointer.items.length not=? 1 {cx_fail(e  "only bounded integer loads from evaluator storage are supported")}
+    let source=cx_value(pointer.items[0])
+    let string=cx_tkind(source.type) =? 'str_'
+    let size:CWord=1
+    if not string {
+        if not cx_is_int(cx_telem(source.type)) {cx_fail(e  "pointer loads require an integer array")}
+        size=cx_tsize(cx_telem(source.type))
+    }
+    let length=if string {cx_bytes(source.s).length} else {source.items.length * size}
+    let at=pointer.i + index * cx_tsize(t)
+    if at <? 0 or at >? length - cx_tsize(t) {cx_fail(e  "pointer read outside evaluator storage")}
+    let result:uint64=0
+    loop j in [0..cx_tsize(t)) {
+        let offset=at + j
+        let byte:uint64=0
+        if string {byte=uint64<overflow='wrap'>(cx_bytes(source.s)[offset])}
+        else {byte=(uint64<overflow='wrap'>(cx_value(source.items[offset // size]).i) >> ((offset % size) * 8)) & 255}
+        result |= uint64<overflow='wrap'>(byte) << ((j * 8) & 63)
+    }
+    cx_int(t  CWord(result))
+# Consume a jump belonging to this loop; propagate exits from outer loops.
+}
+cx_loop_exit=():>bool=>$unsafe {
+    let signal=cx_frames[cx_frame].signal
+    if signal =? 0 {return false}
+    if signal =? 1 {return true}
+    if cx_frames[cx_frame].depth >? 0 {
+        cx_frames[cx_frame].depth -= 1
+        return true
+    }
+    cx_frames[cx_frame].signal = 0
+    signal =? 2
+}
+cx_stmt=(s:CWord):>CWord=>$unsafe {
+    let k=cx_nodes[0].ptr[s].kind
+    if k =? 'vardecl' {
+        let v=if cx_nodes[0].ptr[s].b not=? 0 {cx_expr(CWord(cx_nodes[0].ptr[s].b))} else {cx_zero(CWord(cx_locals[0].ptr[CWord(cx_nodes[0].ptr[s].sym)].type))}
+        if cx_nkids(s) =? 0 {
+            let value=cx_store(v  CWord(cx_locals[0].ptr[CWord(cx_nodes[0].ptr[s].sym)].type)  s)
+            cx_frames[cx_frame].values[CWord(cx_nodes[0].ptr[s].sym)] = value
+        }
+        else {
+            loop i in [0..cx_nkids(s)) {
+                if cx_nodes[0].ptr[cx_kid(s  i)].kind not=? 'hole' {cx_frames[cx_frame].values[CWord(cx_nodes[0].ptr[cx_kid(s  i)].sym)] = cx_value(v).items[i]}
+            }
+        }
+    }
+    else if k =? 'assign' {
+        let p=cx_place(CWord(cx_nodes[0].ptr[s].a))
+        if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
+        let old=cx_read_place(p)
+        let v=cx_expr(CWord(cx_nodes[0].ptr[s].b))
+        if cx_frames[cx_frame].signal not=? 0 {return v}
+        if cx_nodes[0].ptr[s].op not=? int32<overflow='wrap'>(47) {
+            let op=cx_token(cx_host[0].compound_op(CWord(cx_nodes[0].ptr[s].op)))
+            v=cx_binary(s  op  old  v  cx_ntype(CWord(cx_nodes[0].ptr[s].a)))
+        }
+        cx_write_place(p  cx_store(v  cx_ntype(CWord(cx_nodes[0].ptr[s].a))  s))
+    }
+    else if k =? 'exprstmt' {return cx_expr(CWord(cx_nodes[0].ptr[s].a))}
+    else if k =? 'block' {return cx_block(s)}
+    else if k =? 'if_' or k =? 'iflet' {return cx_expr(s)}
+    else if k =? 'return_' {
+        let produced3=cx_expr(CWord(cx_nodes[0].ptr[s].a))
+        cx_frames[cx_frame].result = produced3
+        cx_frames[cx_frame].signal = 1
+    }
+    else if k =? 'break_' or k =? 'continue_' {
+        cx_frames[cx_frame].signal = if k =? 'break_' {2} else {3}
+        cx_frames[cx_frame].depth = CWord(cx_nodes[0].ptr[s].ival)
+    }
+    else if k =? 'while_' {
+        loop true {
+            let v=cx_value(cx_expr(CWord(cx_nodes[0].ptr[s].a)))
+            if cx_frames[cx_frame].signal not=? 0 {break}
+            if v.i =? 0 {break}
+            if cx_nodes[0].ptr[s].aux =? 1 {cx_frames[cx_frame].values[CWord(cx_nodes[0].ptr[s].sym)] = v.items[0]}
+            cx_block(CWord(cx_nodes[0].ptr[s].b));
+            if cx_loop_exit() {break}
+        }
+    }
+    else if k =? 'for_' {
+        let it=CWord(cx_nodes[0].ptr[s].a)
+        if cx_nodes[0].ptr[it].kind =? 'range' and cx_prune(CWord(cx_locals[0].ptr[CWord(cx_nodes[0].ptr[s].sym)].type)) =? cx_T_MATH_INT[0] {
+            cx_math_for(s)
+        }
+        else if cx_nodes[0].ptr[it].kind =? 'range' {
+            let i=cx_value(cx_expr(CWord(cx_nodes[0].ptr[it].a))).i
+            let end_=if cx_nodes[0].ptr[it].b not=? 0 {cx_value(cx_expr(CWord(cx_nodes[0].ptr[it].b))).i} else {9223372036854775807}
+            let step=if cx_has_flag(it  NF_STEP) {cx_value(cx_expr(CWord(cx_nodes[0].ptr[it].c))).i - i} else {1}
+            if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
+            if step =? 0 {cx_fail(s  "zero range step")}
+            loop true {
+                let inside=if step >? 0 {i <? end_} else {i >? end_}
+                if cx_has_flag(it  NF_INCLUSIVE) and i =? end_ {inside=true}
+                if not inside {break}
+                let produced4=cx_int(CWord(cx_locals[0].ptr[CWord(cx_nodes[0].ptr[s].sym)].type)  i)
+                cx_frames[cx_frame].values[CWord(cx_nodes[0].ptr[s].sym)] = produced4
+                cx_block(CWord(cx_nodes[0].ptr[s].b));
+                if cx_loop_exit() or i =? end_ {break}
+                let next=i + step
+                if(step >? 0 and next <? i) or(step <? 0 and next >? i) {break}
+                i=next
+            }
+        }
+        else {
+            let v=cx_value(cx_expr(it))
+            if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
+            if cx_nodes[0].ptr[s].aux not=? 1 and cx_nodes[0].ptr[s].aux not=? 2 {cx_fail(s  "this iterator is not supported")}
+            loop i in [0..v.items.length) {
+                let produced5=cx_int(cx_T_INT[0]  i)
+                cx_frames[cx_frame].values[CWord(cx_nodes[0].ptr[s].c)] = produced5
+                let produced6=cx_add(v)
+                cx_frames[cx_frame].values[CWord(cx_nodes[0].ptr[s].d)] = produced6
+                if cx_nodes[0].ptr[s].aux =? 1 {cx_frames[cx_frame].values[CWord(cx_nodes[0].ptr[s].sym)] = v.items[i]}
+                cx_block(CWord(cx_nodes[0].ptr[s].b));
+                if cx_loop_exit() {break}
+            }
+        }
+    }
+    else {cx_fail(s  "this statement is not supported at compile time")}
+    0
+}
+cx_block=(b:CWord):>CWord=>$unsafe {
+    if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
+    if b =? 0 {return 0}
+    let result:CWord=0
+    let deferred:array<int64>=[]
+    loop s in cx_kids(b) {
+        if cx_nodes[0].ptr[s].kind =? 'defer_' {deferred.push(CWord(cx_nodes[0].ptr[s].a))}
+        else {result=cx_stmt(s)}
+        if cx_frames[cx_frame].signal not=? 0 {break}
+    }
+    let signal=cx_frames[cx_frame].signal
+    cx_frames[cx_frame].signal = 0
+    let i=deferred.length
+    loop i >? 0 {
+        i -= 1
+        cx_stmt(deferred[i]);
+    }
+    cx_frames[cx_frame].signal = signal
+    if signal =? 1 {return cx_frames[cx_frame].result}
+    result
+# Reify only values, never evaluated source. The backend gets ordinary checked
+# literals and constructors, with the same ownership rules as runtime values.
+}
+cx_literal=(v:CWord pos:CWord):>CWord=>$unsafe {
+    let x=cx_value(v)
+    let k=cx_tkind(x.type)
+    if x.type =? cx_T_MATH_INT[0] and x.items.length >? 0 {
+        let n=cx_literal(x.items[0]  pos)
+        cx_host[0].wrap_conv(n  15  cx_T_MATH_INT[0])
+        return n
+    }
+    let n=cx_mk('int_lit'  pos)
+    cx_nodes[0].ptr[n].type = int32<overflow='wrap'>(x.type)
+    cx_nodes[0].ptr[n].ival = x.i
+    cx_add_flag(n  NF_CHECKED)
+    if k =? 'str_' {
+        cx_nodes[0].ptr[n].kind ='str_lit'
+        cx_nodes[0].ptr[n].sval = int32<overflow='wrap'>(cx_host[0].intern(x.s))
+    }
+    else if k =? 'float_' {
+        cx_nodes[0].ptr[n].kind ='float_lit'
+        cx_nodes[0].ptr[n].fval = x.f
+    }
+    else if k =? 'bool_' {cx_nodes[0].ptr[n].kind ='bool_lit'}
+    else if k =? 'array' or k =? 'fixed' or k =? 'tuple' or k =? 'struct_' or k =? 'enum_' or k =? 'opt' {
+        let items:array<int64>=[]
+        loop item in x.items {items.push(cx_literal(item  pos))}
+        cx_set_list(n  items)
+        if k =? 'array' or k =? 'fixed' {cx_nodes[0].ptr[n].kind ='array'}
+        else if k =? 'tuple' {cx_nodes[0].ptr[n].kind ='tuple'}
+        else if k =? 'opt' {
+            if x.i =? 0 {cx_nodes[0].ptr[n].kind ='none_lit'}
+            else {
+                cx_nodes[0].ptr[n].kind ='conv'
+                cx_nodes[0].ptr[n].aux = int32<overflow='wrap'>(5)
+                cx_nodes[0].ptr[n].a = int32<overflow='wrap'>(items[0])
+                cx_set_list(n  [])
+            }
+        }
+        else {
+            cx_nodes[0].ptr[n].kind ='call'
+            cx_nodes[0].ptr[n].aux = if k =? 'struct_' {2} else {3}
+            cx_nodes[0].ptr[n].aux2 = int32<overflow='wrap'>(x.i)
+        }
+    }
+    else if not cx_is_int(x.type) {cx_fail(n  "this value cannot be materialized")}
+    n
+}
+cx_run=(e:CWord):>CWord=>$unsafe {
+    let saved=cx_frame
+    cx_frames.push(CTFrame[])
+    cx_frame=cx_frames.length - 1
+    let v=cx_expr(e)
+    cx_frames.pop();
+    cx_frame=saved
+    v
+# Reuse the bundled arithmetic inside the evaluator. CT mathematical integers
+# have a word or one immutable BigInt value, independent of the tagged runtime boundary.
+}
+cx_math_runtime=(name:string args:array<int64> e:CWord):>CWord=>$unsafe {
+    let f=cx_host[0].runtime_fn("__mc_{name.byte_slice(5 int64(cx_bytes(name).length))}")
+    let call=cx_mk('call'  cx_nodes[0].ptr[e].pos)
+    cx_nodes[0].ptr[call].sym = int32<overflow='wrap'>(f)
+    cx_nodes[0].ptr[call].type = cx_fns[0][f].ret
+    let actual:array<int64>=[]
+    loop value in args {actual.push(cx_literal(value  cx_nodes[0].ptr[e].pos))}
+    cx_set_list(call  actual)
+    cx_fixed_internal += 1
+    let result=cx_call(call)
+    cx_fixed_internal -= 1
+    result
+}
+cx_math_rep=(value:CWord):>CWord=>$unsafe {
+    let x=cx_value(value)
+    let f=cx_host[0].runtime_fn("__mc_compare")
+    let rep=cx_prune(cx_fns[0][f].ptypes[0])
+    tl_layout(rep)
+    let handle=CWord(cx_fields[0].ptr[CWord(cx_structs[0].ptr[CWord(cx_types[0].ptr[rep].st)].fields) + 1].type)
+    let word=cx_int(cx_T_INT[0]  x.i)
+    let big=cx_add(CTValue[type = handle  items = x.items])
+    cx_add(CTValue[type = rep  items = [word  big]])
+}
+cx_math_unpack=(value:CWord):>CWord=>$unsafe {
+    let x=cx_value(value)
+    cx_add(CTValue[type = cx_T_MATH_INT[0]  i = cx_value(x.items[0]).i  items = cx_value(x.items[1]).items])
+}
+cx_math_binary=(e:CWord op:Tok a:CWord b:CWord):>CWord=>$unsafe {
+    if op =? 'starstar' {
+        let exponent=cx_value(b).i
+        if exponent <? 0 or cx_value(b).items.length >? 0 {cx_fail(e  "power exponent must be a nonnegative bounded integer")}
+        let result=cx_int(cx_T_MATH_INT[0]  1)
+        let base=a
+        loop exponent >? 0 {
+            if exponent & 1 not=? 0 {result=cx_math_binary(e  'star'  result  base)}
+            exponent=exponent >> 1
+            if exponent >? 0 {base=cx_math_binary(e  'star'  base  base)}
+        }
+        return result
+    }
+    let x=cx_math_rep(a)
+    if op =? 'shl' or op =? 'shr' {
+        let count=cx_value(b).i
+        if cx_value(b).items.length >? 0 {
+            count=cx_value(cx_math_runtime("__mi_count"  [cx_math_rep(b)]  e)).i
+        }
+        if count <? 0 {cx_fail(e  "shift count must be nonnegative")}
+        let value=cx_math_runtime("__mi_shift"  [x  cx_int(cx_T_INT[0]  count)  cx_int(cx_T_BOOL[0]  int64(op =? 'shr'))]  e)
+        return cx_math_unpack(value)
+    }
+    let y=cx_math_rep(b)
+    if op =? 'eq' or op =? 'ne' or op =? 'lt' or op =? 'le' or op =? 'gt' or op =? 'ge' {
+        let result=cx_math_runtime("__mi_compare"  [x  y]  e)
+        return cx_binary(e  op  result  cx_int(cx_T_INT[0]  0)  cx_T_BOOL[0])
+    }
+    let operation=if op =? 'plus' {0} else {if op =? 'minus' {1} else {if op =? 'star' {2} else {if op =? 'slash' {3} else {if op =? 'percent' {4} else {if op =? 'amp' {5} else {if op =? 'pipe' {6} else {7}}}}}}}
+    if cx_nodes[0].ptr[e].kind =? 'binary' and cx_nodes[0].ptr[e].aux2 =? - 1 and(op =? 'slash' or op =? 'percent') {operation += 5}
+    cx_math_unpack(cx_math_runtime("__mi_slow"  [x  y  cx_int(cx_T_INT[0]  operation)]  e))
+}
+cx_math_for=(s:CWord):>void=>$unsafe {
+    let it=CWord(cx_nodes[0].ptr[s].a)
+    let counter=cx_expr(CWord(cx_nodes[0].ptr[it].a))
+    let open_end=cx_nodes[0].ptr[it].b =? 0
+    let bound=if open_end {cx_int(cx_T_MATH_INT[0]  0)} else {cx_expr(CWord(cx_nodes[0].ptr[it].b))}
+    let step=cx_int(cx_T_MATH_INT[0]  1)
+    if cx_has_flag(it  NF_STEP) {step=cx_binary(s  'minus'  cx_expr(CWord(cx_nodes[0].ptr[it].c))  counter  cx_T_MATH_INT[0])}
+    if cx_frames[cx_frame].signal not=? 0 {return}
+    let zero=cx_int(cx_T_MATH_INT[0]  0)
+    if cx_value(cx_binary(s  'eq'  step  zero  cx_T_BOOL[0])).i not=? 0 {cx_fail(s  "zero range step")}
+    let up=cx_value(cx_binary(s  'gt'  step  zero  cx_T_BOOL[0])).i not=? 0
+    let inclusive=cx_has_flag(it  NF_INCLUSIVE)
+    let op=if up {(if inclusive {Tok.le} else {Tok.lt})} else {(if inclusive {Tok.ge} else {Tok.gt})}
+    loop true {
+        if not open_end and cx_value(cx_binary(s  op  counter  bound  cx_T_BOOL[0])).i =? 0 {break}
+        cx_frames[cx_frame].values[CWord(cx_nodes[0].ptr[s].sym)] = counter
+        cx_block(CWord(cx_nodes[0].ptr[s].b));
+        if cx_loop_exit() {break}
+        counter=cx_binary(s  'plus'  counter  step  cx_T_MATH_INT[0])
+    }
+}
+
+# Arguments finish before this immutable-value snapshot borrows the live header.
+cx_value=(id:CWord):>CTValue=>$unsafe {cx_ct_values[0][id]}
+cx_divide=(a:CWord b:CWord):>CWord=>{
+    let q=a // b
+    if (a <? 0) not=? (b <? 0) and mod(a b kind='trunc') not=? 0 {return q + 1}
+    q
+}
+
+cx_bytes=(text:string):>array<uint8>=>$unsafe {text as array<uint8>}
+let cx_token_values:array<Tok>=[Tok.eof Tok.newline Tok.indent Tok.dedent Tok.ident Tok.int_lit Tok.float_lit Tok.str_lit Tok.kw_struct Tok.kw_enum Tok.kw_if Tok.kw_else Tok.kw_in Tok.kw_break Tok.kw_continue Tok.kw_return Tok.kw_match Tok.kw_import Tok.kw_as Tok.kw_const Tok.kw_true Tok.kw_false Tok.kw_none Tok.kw_null Tok.kw_and Tok.kw_or Tok.kw_not Tok.kw_mut Tok.kw_when Tok.kw_defer Tok.kw_extern Tok.kw_test Tok.kw_build Tok.kw_use Tok.kw_pass Tok.lparen Tok.rparen Tok.lbrack Tok.rbrack Tok.lbrace Tok.rbrace Tok.comma Tok.colon Tok.semi Tok.dot Tok.dotdot Tok.arrow Tok.assign Tok.pluseq Tok.minuseq Tok.stareq Tok.slasheq Tok.percenteq Tok.ampeq Tok.pipeeq Tok.careteq Tok.shleq Tok.shreq Tok.plus Tok.minus Tok.star Tok.slash Tok.percent Tok.amp Tok.pipe Tok.caret Tok.tilde Tok.shl Tok.shr Tok.eq Tok.ne Tok.lt Tok.le Tok.gt Tok.ge Tok.question Tok.qq Tok.bang Tok.at Tok.starstar Tok.kw_loop Tok.kw_let Tok.kw_xor Tok.kw_is Tok.ellipsis Tok.dotop Tok.lazy]
+cx_token=(value:CWord):>Tok=>$unsafe {cx_token_values[value]}
+let cx_conversion_values:array<CXCV>=[CXCV.none_ CXCV.int_ CXCV.int2float CXCV.float2int CXCV.float_ CXCV.opt CXCV.ptr CXCV.bits CXCV.fn2clos CXCV.union_ CXCV.fixed2arr CXCV.arr2fixed CXCV.quantity_const CXCV.explicit_copy CXCV.refinement CXCV.big2math CXCV.math2big CXCV.set_text CXCV.promote CXCV.wrap_int CXCV.saturate_int CXCV.fixed_store]
+cx_conversion=(value:CWord):>CXCV=>$unsafe {cx_conversion_values[value]}
+let cx_intrinsic_kind_values:array<CXIN>=[CXIN.none_ CXIN.len CXIN.push CXIN.pop CXIN.insert CXIN.remove CXIN.clear CXIN.reserve CXIN.slice CXIN.syscall CXIN.memcpy CXIN.memset CXIN.sizeof CXIN.arrdata CXIN.panic CXIN.assert CXIN.print CXIN.embed CXIN.from_bytes CXIN.to_bytes CXIN.argv CXIN.setlen CXIN.truncate CXIN.resize CXIN.hash CXIN.alignof CXIN.unreachable CXIN.arrcap CXIN.fmt_struct CXIN.sqrt CXIN.vec_ctor CXIN.cfn_cast CXIN.wasm_call CXIN.callc CXIN.floor_ CXIN.ceil_ CXIN.fabs CXIN.fmin CXIN.fmax CXIN.setjmp CXIN.longjmp CXIN.jump CXIN.shader CXIN.extend CXIN.clone_thread CXIN.atomic_add CXIN.atomic_cas CXIN.stack_ptr CXIN.fill CXIN.fmt_elem CXIN.gpu_kernel CXIN.cpu_features CXIN.code_sync CXIN.compute CXIN.compute_spirv CXIN.compute_textures CXIN.read_fields CXIN.default_init CXIN.offset_unit CXIN.embed_dir CXIN.dewy_iter CXIN.dewy_iter_done CXIN.dewy_iter_value CXIN.json_fields CXIN.dewy_iter_pair CXIN.dewy_set CXIN.static_assert CXIN.runtime_assert CXIN.dewy_print CXIN.dewy_fmt CXIN.dewy_fmt_elem CXIN.lend CXIN.loan_address CXIN.loan_load CXIN.loan_store CXIN.loan_length CXIN.zeroed CXIN.relocate CXIN.take_slot CXIN.live_len CXIN.task_report CXIN.task_data CXIN.task_duration CXIN.arena_result CXIN.arrdata_permute CXIN.mul_hi CXIN.secret_wrap CXIN.secret_value CXIN.range_max CXIN.fixed_abs CXIN.integer_mode]
+cx_intrinsic_kind=(value:CWord):>CXIN=>$unsafe {cx_intrinsic_kind_values[value]}
