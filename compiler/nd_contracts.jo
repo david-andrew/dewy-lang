@@ -168,6 +168,7 @@ fact_nd_classify = (n: int) -> int:
         fact_nd_names[intern("size")] = 7
         fact_nd_names[intern("flatten")] = 8
         fact_nd_names[intern("transpose")] = 9
+        fact_nd_names[intern("__nd_count")] = 10
         fact_nd_names[intern("rows")] = 100
         fact_nd_names[intern("cols")] = 101
         fact_nd_names[intern("__shape_rank")] = 102
@@ -182,14 +183,17 @@ fact_nd_classify = (n: int) -> int:
         fact_nd_names[intern("solve")] = 121
         fact_nd_names[intern("det")] = 122
         fact_nd_names[intern("*")] = 130
+        fact_nd_names[intern("__bcast_shape")] = 140
+        fact_nd_names[intern("__bcast_data")] = 141
     kind = fact_nd_names.get(int(nodes[d].name)) ?? 0
     if kind == 0 or nkids(n) == 0: return 0
     path = files[pos_file(nodes[d].pos)].path
     if path != lib_dir + "/std/nd.jo" and path != lib_dir + "/prelude/nd.dewy": return 0
     if kind <= 3: return if is_nd(representation_type(ntype(n))): kind else: 0
+    if kind == 140 or kind == 10: return if nkids(n) == 1: kind else: 0
     base = representation_type(ntype(kid(n, 0)))
     if not is_nd(base) and not (kind >= 102 and kind <= 106 or kind == 6) : return 0
-    if kind == 9:
+    if kind == 9 or kind == 141:
         if nkids(n) != 1 or not effect_share(nd_elem(base)): return 0
         if ownership_decls.len() != 0 and ownership_fact_type(base): return 0
     if kind >= 120 and kind <= 122:
@@ -244,7 +248,15 @@ fact_nd_need = (n: int, s: mut FactState, op: Tok, a: int, b: int, relation: str
     truth == 1
 
 fact_nd_check = (n: int, s: mut FactState, values: int[], kind: int):
+    if kind == 140:
+        fact_nd_broadcast(n, s, values[0])
+        return
     t = ntype(kid(n, 0))
+    if kind == 141:
+        text = wit_text(kid(n, 0))
+        relation = if text != "": "{text}.data.length matches its nonnegative shape" else: "the broadcast operand's data length matches its nonnegative shape"
+        fact_nd_need(n, s, .eq, fact_nd_valid(s, values[0]), fact_constant(s, 1), relation)
+        return
     rank = fact_nd_rank(s, values[0], t)
     text = wit_text(kid(n, 0))
     if text == "": text = "the array"
@@ -342,6 +354,8 @@ fact_nd_make = (n: int, s: mut FactState, dims: int[], data: int = 0, result_typ
 
 fact_nd_capture = (n: int, s: mut FactState, values: int[], kind: int) -> int:
     if kind != 111 and not fact_nd_reads_only(n): fact_path_call_effects(n, s)
+    if kind == 140: return fact_nd_broadcast(n, s, values[0])
+    if kind == 10: return fact_nd_count(s, values[0])
     if kind == 106:
         data = values[0]
         if is_nd(representation_type(ntype(kid(n, 0)))): data = fact_project(s, data, intern("data"), false, mk_array(nd_elem(representation_type(ntype(kid(n, 0))))))
@@ -410,7 +424,7 @@ fact_nd_capture = (n: int, s: mut FactState, values: int[], kind: int) -> int:
     if kind == 4: return fact_nd_shape(s, values[0])
     if kind == 5: return fact_nd_projection(s, values[0], -2)
     if kind == 6: return fact_nd_dim(s, values[0], ntype(kid(n, 0)), values[1])
-    if kind == 7 or kind == 8 or kind == 105:
+    if kind == 7 or kind == 8 or kind == 105 or kind == 141:
         data = fact_project(s, values[0], intern("data"), false, mk_array(nd_elem(representation_type(ntype(kid(n, 0))))))
         return if kind == 7: fact_project(s, data, -1, false, T_INT) else: data
     if kind == 100 or kind == 101: return fact_nd_projection(s, values[0], -3 - (kind - 100))
@@ -419,6 +433,79 @@ fact_nd_capture = (n: int, s: mut FactState, values: int[], kind: int) -> int:
         if fact_nd_plain_store(n): fact_nd_store(n, s, n, .write)
         else: fact_path_call_effects(n, s)
     fact_fresh(s, ntype(n))
+
+# __nd_count returns the exact product on its normal edge (a product beyond
+# int64 exits as allocation exhaustion). Its zero shortcut does not validate
+# negative peer dimensions: publish storage validity only after proving every
+# dimension nonnegative. O(rank <= 32), only for a demanded count.
+fact_nd_count = (s: mut FactState, shape: int) -> int:
+    rank = fact_bound(s, fact_project(s, shape, -1, false, T_INT))
+    result = fact_new(s, FactBound(0, FACT_MAX), FactTerm(type = T_INT))
+    if rank.wide or rank.lo != rank.hi or rank.lo < 0 or rank.hi > 32: return result
+    valid = true
+    known = true
+    zero = false
+    count = 1
+    loop axis in [0..rank.lo):
+        dim = fact_bound(s, fact_project(s, shape, fact_constant(s, axis), true, T_INT))
+        if dim.wide or dim.lo < 0: valid = false
+        if not dim.wide and dim.lo == 0 and dim.hi == 0: zero = true
+        if dim.wide or dim.lo != dim.hi or dim.lo < 0 or math_word_overflow(2, count, dim.lo): known = false
+        else if known: count *= dim.lo
+    if known or zero: fact_set_bound(s, result, FactBound((if zero: 0 else: count), (if zero: 0 else: count)), true)
+    if valid:
+        shapes = fact_project(s, result, ND_STORAGE_SHAPES, false, T_INT)
+        fact_set_bound(s, fact_project(s, shapes, shape, true, T_INT), FactBound(1, 1, true))
+    result
+
+# Dotted N-D operations align trailing axes; each pair must agree or have
+# an extent of one. Only demanded calls inspect shapes, with indexed element
+# projections and at most 32 operands/rank and 128 total axes. No body scan.
+fact_nd_broadcast = (n: int, s: mut FactState, input: int) -> int:
+    count = fact_bound(s, fact_project(s, input, -1, false, T_INT))
+    if count.wide or count.lo != count.hi or count.lo < 0 or count.hi > 32:
+        fact_nd_need(n, s, .eq, fact_fresh(s, T_INT), fact_constant(s, 1), "broadcast operand shapes have compatible trailing dimensions (equal or one)")
+        return fact_fresh(s, ntype(n))
+    shapes: int[]
+    ranks: int[]
+    rank = 0
+    axes = 0
+    same = true
+    loop i in [0..count.lo):
+        shape = fact_project(s, input, fact_constant(s, i), true, mk_array(T_INT))
+        if shapes.len() > 0 and shape != shapes[0]: same = false
+        shapes.push(shape)
+    # One operand (or repeated immutable shapes) needs no rank enumeration.
+    if shapes.len() > 0 and same:
+        if fact_probe_on: fact_probe_record(n, true)
+        return shapes[0]
+    loop shape in shapes:
+        extent = fact_bound(s, fact_project(s, shape, -1, false, T_INT))
+        if extent.wide or extent.lo != extent.hi or extent.lo < 0 or extent.hi > 32 or axes + extent.lo > 128:
+            fact_nd_need(n, s, .eq, fact_fresh(s, T_INT), fact_constant(s, 1), "broadcast operand shapes have compatible trailing dimensions (equal or one)")
+            return fact_fresh(s, ntype(n))
+        ranks.push(extent.lo)
+        rank = max(rank, extent.lo)
+        axes += extent.lo
+    one = fact_constant(s, 1)
+    dims = fill(one, rank)
+    loop i in [0..shapes.len()):
+        loop axis in [0..ranks[i]):
+            at = rank - ranks[i] + axis
+            dim = fact_project(s, shapes[i], fact_constant(s, axis), true, T_INT)
+            prior = dims[at]
+            if fact_compare(s, .eq, prior, one) == 1: dims[at] = dim
+            else if fact_compare(s, .eq, dim, one) != 1:
+                if not fact_nd_need(n, s, .eq, dim, prior, "broadcast operand {i + 1} axis {axis} is compatible with the aligned extent (equal or either is one)"):
+                    # A deferred check can also succeed because the old
+                    # extent was one. Its result then takes the new extent.
+                    dims[at] = fact_fresh(s, T_INT)
+    if fact_probe_on: fact_probe_record(n, true)
+    result = fact_fresh(s, ntype(n))
+    if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, -1, false, fact_constant(s, rank)))
+    loop axis in [0..rank):
+        if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, fact_constant(s, axis), true, dims[axis]))
+    result
 
 # A transpose reverses axes and copies exactly the input storage count.
 # Transfer only a demanded result, O(rank <= 32); unknown/larger ranks retain
@@ -539,7 +626,7 @@ nd_mutable_check = (n: int, s: mut FactState, values: int[]):
 # callbacks. Numeric element reads have the same property.
 fact_nd_reads_only = (n: int) -> bool:
     k = fact_nd_call(n)
-    if k >= 4 and k <= 9 or k >= 100 and k <= 105 or k >= 120 and k <= 122 or k == 130 or k == 131: return true
+    if k >= 4 and k <= 10 or k >= 100 and k <= 105 or k >= 120 and k <= 122 or k == 130 or k == 131 or k == 140 or k == 141: return true
     k == 110 and effect_share(nd_elem(representation_type(ntype(kid(n, 0)))))
 
 # Mutable entry contracts are separate from the callable's storage type.

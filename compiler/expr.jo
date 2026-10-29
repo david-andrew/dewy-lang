@@ -6106,6 +6106,14 @@ check_call = (n: int, expected: int) -> int:
         if reflect_active: reflect_member(callee)
     args = kids(n)
     ck = nodes[callee].kind
+    # Generated coordinates rely on the bundled helper's word arithmetic.
+    # A user function with the same spelling must never replace that helper.
+    if has_flag(n, NF_PRIVATE_COORD) and ck == .ident and name_of(int(nodes[callee].name)) == "__bcast_index":
+        loop arg in args: finish_arg(arg, T_INT, false)
+        nodes[n].aux = 0
+        nodes[n].sym = i32(runtime_fn("__bcast_index"))
+        nodes[n].type = i32(T_INT)
+        return T_INT
     if ck == .typeapply:
         base = int(nodes[callee].a)
         name = int(nodes[base].name)
@@ -12403,6 +12411,11 @@ dot_template = (n: int, leaves: mut int[], tag: str) -> int:
     leaves.push(n)
     bc_ident("__b{tag}e{leaves.len() - 1}", pos)
 
+bc_bcast_index = (args: int[], pos: int) -> int:
+    call = bc_call("__bcast_index", args, pos)
+    add_flag(call, NF_PRIVATE_COORD)
+    call
+
 # the loops computing a dotted expression over n-dimensional arrays: kinds[k] is 1 for a 1-D
 # array, 2 for an n-dimensional one, 0 for a number; arrs[k] names the array. When no operand is
 # stretched (the usual case) one flat loop runs over every element, as for 1-D arrays; otherwise
@@ -12453,8 +12466,8 @@ bc_loop_nd = (tmpl: int, arrs: str[], kinds: int[], pre: str, epre: str, pos: in
         body.push(bc_let("{epre}e{k}", ix, pos))
         step = mk(.assign, pos)
         nodes[step].a = i32(id("q{k}"))
-        nodes[step].b = i32(id("ls{k}"))
-        nodes[step].op = i32(int(Tok.pluseq))
+        nodes[step].b = i32(bc_bcast_index([bc_int(1, pos), id("q{k}"), id("ls{k}")], pos))
+        nodes[step].op = i32(int(Tok.assign))
         advance.push(step)
     # (room for every element, written in place: element i in step i)
     output = bc_let(out, mk(.array, pos), pos)
@@ -12468,10 +12481,13 @@ bc_loop_nd = (tmpl: int, arrs: str[], kinds: int[], pre: str, epre: str, pos: in
     stmts.push(bc_stmt(setlen, pos))
     # (every operand has the result's size: element i of each is at i, one flat loop)
     fast = [bc_loop("{pre}i", id("n"), bc_body1(clone(tmpl), flat, pre, epre, out, false, pos), pos)]
-    rowpre.push(bc_let("{pre}ob", bc_bin(.star, id("r"), id("in"), pos), pos))
+    # These are private coordinates of the checked broadcast, as the
+    # NF_INBOUNDS reads above are. Keep their arithmetic in the library's
+    # word domain; the user's element expression still has exact arithmetic.
+    rowpre.push(bc_let("{pre}ob", bc_bcast_index([id("r"), id("in"), bc_int(0, pos)], pos), pos))
     ixo = mk(.index, pos)
     nodes[ixo].a = i32(bc_ident(out, pos))
-    nodes[ixo].b = i32(bc_bin(.plus, id("ob"), id("j"), pos))
+    nodes[ixo].b = i32(bc_bcast_index([bc_int(1, pos), id("ob"), id("j")], pos))
     add_flag(ixo, NF_INBOUNDS)
     store = mk(.assign, pos)
     nodes[store].a = i32(ixo)
@@ -12694,6 +12710,8 @@ check_dotted = (n: int, expected: int) -> int:
             gpu = true
         ranks.push(r)
         if r > rank and r < 3: rank = r
+        # Contract diagnostics refer to the captured source, not __b temporaries.
+        index_update_sources[intern("{pre}d{k}")] = lf
         stmts.push(bc_let("{pre}d{k}", lf, pos))
     d = (k: int) -> int: bc_ident("{pre}d{k}", pos)
     # scalars: the same value for every element

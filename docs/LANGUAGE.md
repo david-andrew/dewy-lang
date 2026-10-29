@@ -2498,6 +2498,12 @@ remains independent of the source. An empty input raises an error.
 
 ## Numeric arrays and matrices
 
+Dotted N-D operations prove trailing-axis compatibility from known shapes:
+corresponding extents must match or one must be `1`. Each operand also needs
+storage whose length matches its nonnegative shape. Shape annotations,
+constructors and unchanged broadcast results carry these facts; incompatible
+or changed storage is diagnosed at the operation.
+
 The bundled numeric library uses ordinary value semantics. Make a matrix with
 `zeros(rows cols)`, `ones(rows cols)`, `eye(n)` or `reshape(values rows cols)`.
 Decimal literals are exact fractions unless their context is floating, so
