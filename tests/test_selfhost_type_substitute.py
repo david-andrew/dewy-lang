@@ -82,6 +82,10 @@ main = ():
         assert(partial[0] != 0 and before[0] == 0 and types[partial[0]].kind == .var)
         assert(tu_targ(pr, 1) == partial[0] and types[pr].elem == i32(T_STR))
         assert(ts_partial(p, partial) == partial[0])
+        linked = int(tb_mk_var()); types[linked].ref = i32(fn)
+        assert(tu_equal(ts_partial(linked, partial), pr), "partial substitution follows linked types")
+        empty: int[]
+        assert(ts_partial(0, empty) == 0 and ts_partial(T_INT, empty) == T_INT)
         assert(ts_partial(cf, partial) == cf, "partial C functions retain the existing policy")
         assert(saved_types.len() < types.len() and saved_args.len() < args.len())
         ef = TypeInfo(kind=.effect, st=5, flags=1)
