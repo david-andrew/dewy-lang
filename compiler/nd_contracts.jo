@@ -23,6 +23,7 @@ use 'facts.jo'
 use 'refine.jo'
 use 'effects.jo'
 use 'ownership.jo'
+use 'nd_slices.jo'
 
 const ND_STORAGE_VALID = -2147483647
 const ND_STORAGE_SHAPES = -2147483646
@@ -169,6 +170,9 @@ fact_nd_classify = (n: int) -> int:
         fact_nd_names[intern("flatten")] = 8
         fact_nd_names[intern("transpose")] = 9
         fact_nd_names[intern("__nd_count")] = 10
+        fact_nd_names[intern("__nd_axis_slice")] = 11
+        fact_nd_names[intern("__nd_axis")] = 12
+        fact_nd_names[intern("__dewy_range")] = 13
         fact_nd_names[intern("rows")] = 100
         fact_nd_names[intern("cols")] = 101
         fact_nd_names[intern("__shape_rank")] = 102
@@ -185,12 +189,18 @@ fact_nd_classify = (n: int) -> int:
         fact_nd_names[intern("*")] = 130
         fact_nd_names[intern("__bcast_shape")] = 140
         fact_nd_names[intern("__bcast_data")] = 141
+        fact_nd_names[intern("__nd_slice")] = 150
+        fact_nd_names[intern("__nd_slice_set")] = 151
+        fact_nd_names[intern("__nd_bound_part")] = 154
     kind = fact_nd_names.get(int(nodes[d].name)) ?? 0
     if kind == 0 or nkids(n) == 0: return 0
     path = files[pos_file(nodes[d].pos)].path
+    if kind == 13: return if nkids(n) == 5 and path == lib_dir + "/std/dewy_ranges.jo": kind else: 0
     if path != lib_dir + "/std/nd.jo" and path != lib_dir + "/prelude/nd.dewy": return 0
     if kind <= 3: return if is_nd(representation_type(ntype(n))): kind else: 0
-    if kind == 140 or kind == 10: return if nkids(n) == 1: kind else: 0
+    if kind == 140 or kind == 10 or kind == 12: return if nkids(n) == 1: kind else: 0
+    if kind == 11: return if nkids(n) == 7: kind else: 0
+    if kind == 154: return if nkids(n) == 2: kind else: 0
     base = representation_type(ntype(kid(n, 0)))
     if not is_nd(base) and not (kind >= 102 and kind <= 106 or kind == 6) : return 0
     if kind == 9 or kind == 141:
@@ -208,6 +218,13 @@ fact_nd_classify = (n: int) -> int:
             if tkind(other) != .array or telem(other) != nd_elem(base): return 0
             kind = 131
         if ownership_decls.len() != 0 and ownership_fact_type(base): return 0
+    if kind == 150 or kind == 151:
+        if nkids(n) != (if kind == 150: 2 else: 3): return 0
+        if ownership_type(nd_elem(base)) or not effect_share(nd_elem(base)): return 0
+        if kind == 151:
+            other = representation_type(ntype(kid(n, 2)))
+            if is_nd(other): kind = 153
+            else if tkind(other) == .array: kind = 152
     if kind == 110 or kind == 111:
         if ownership_type(nd_elem(base)) or not effect_share(nd_elem(base)): return 0
         count = nkids(n) - (if kind == 110: 1 else: 2)
@@ -248,6 +265,9 @@ fact_nd_need = (n: int, s: mut FactState, op: Tok, a: int, b: int, relation: str
     truth == 1
 
 fact_nd_check = (n: int, s: mut FactState, values: int[], kind: int):
+    if kind >= 150 and kind <= 154:
+        fact_nd_slice(n, s, values, kind)
+        return
     if kind == 140:
         fact_nd_broadcast(n, s, values[0])
         return
@@ -353,7 +373,9 @@ fact_nd_make = (n: int, s: mut FactState, dims: int[], data: int = 0, result_typ
     result
 
 fact_nd_capture = (n: int, s: mut FactState, values: int[], kind: int) -> int:
-    if kind != 111 and not fact_nd_reads_only(n): fact_path_call_effects(n, s)
+    if kind != 111 and not (kind >= 151 and kind <= 153) and not fact_nd_reads_only(n): fact_path_call_effects(n, s)
+    if kind >= 150 and kind <= 154: return fact_nd_slice(n, s, values, kind)
+    if kind >= 11 and kind <= 13: return fact_nd_remember(n, s, values, ntype(n))
     if kind == 140: return fact_nd_broadcast(n, s, values[0])
     if kind == 10: return fact_nd_count(s, values[0])
     if kind == 106:
@@ -534,7 +556,8 @@ fact_nd_transpose = (n: int, s: mut FactState, input: int) -> int:
 # Stores without lifecycle hooks replace only data; shape is unchanged even
 # in loop havoc. Types with user lifecycle hooks retain the ordinary effect transfer.
 fact_nd_plain_store = (n: int) -> bool:
-    if fact_nd_call(n) != 111: return false
+    k = fact_nd_call(n)
+    if k != 111 and not (k >= 151 and k <= 153): return false
     t = nd_elem(representation_type(ntype(kid(n, 0))))
     effect_share(t)
 
@@ -626,7 +649,7 @@ nd_mutable_check = (n: int, s: mut FactState, values: int[]):
 # callbacks. Numeric element reads have the same property.
 fact_nd_reads_only = (n: int) -> bool:
     k = fact_nd_call(n)
-    if k >= 4 and k <= 10 or k >= 100 and k <= 105 or k >= 120 and k <= 122 or k == 130 or k == 131 or k == 140 or k == 141: return true
+    if k >= 4 and k <= 13 or k >= 100 and k <= 105 or k >= 120 and k <= 122 or k == 130 or k == 131 or k == 140 or k == 141 or k == 150 or k == 154: return true
     k == 110 and effect_share(nd_elem(representation_type(ntype(kid(n, 0)))))
 
 # Mutable entry contracts are separate from the callable's storage type.
@@ -640,7 +663,7 @@ nd_mutable_handle = (n: int) -> bool:
 # evaluated. A later argument may have replaced an earlier array. Re-read
 # only the borrowed routes used by these contracts, reusing their selectors.
 nd_call_entry = (n: int, s: mut FactState, values: mut int[]):
-    if fact_nd_call(n) == 111: values[0] = fact_after_call(n, kid(n, 0), s)
+    if fact_nd_plain_store(n): values[0] = fact_after_call(n, kid(n, 0), s)
     if not nd_mutable_call(n): return
     contracts = nd_mutable_types(int(nodes[n].sym))
     loop i in [0..contracts.len()):

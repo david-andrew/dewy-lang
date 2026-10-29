@@ -2498,6 +2498,12 @@ remains independent of the source. An empty input raises an error.
 
 ## Numeric arrays and matrices
 
+Contiguous matrix slices carry their selected shape into subsequent indexing
+and dotted operations. Scalar and array assignments check each selected axis;
+array replacements also need the selected element count. Stored selectors keep
+their captured endpoints, including when an update's right-hand side changes
+the destination. A changed selector needs its bounds established again.
+
 Dotted N-D operations prove trailing-axis compatibility from known shapes:
 corresponding extents must match or one must be `1`. Each operand also needs
 storage whose length matches its nonnegative shape. Shape annotations,

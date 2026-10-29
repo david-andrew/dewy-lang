@@ -7393,7 +7393,7 @@ fact_slice_capture = (n: int, s: mut FactState) -> int:
                 value = fact_capture(arg, s)
                 if ownership_decls.len() != 0: fact_owner_value(arg, value, s)
         nd = fact_nd_call(n)
-        if nd == 111 and fact_nd_plain_store(n): fact_nd_store(n, s, n, .write)
+        if nd != 0 and fact_nd_plain_store(n): fact_nd_store(n, s, n, .write)
         else if nd != 0 and fact_nd_reads_only(n): s = s
         else if nodes[n].aux != 2 and nodes[n].aux != 3: fact_path_call_effects(n, s)
         if fact_ends_path(n): s.live = false

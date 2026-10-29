@@ -1,0 +1,149 @@
+# Contiguous N-D selector contracts. Capture constructor arguments only when
+# demanded; their immutable result identity is retired by every field write.
+# Reuse the indexed constructor-actual table and its existing owner lifetime.
+# Each operation visits at most 32 axes; no library body or unrelated AST scan.
+use 'facts.jo'
+use 'nd_contracts.jo'
+use 'expr.jo'
+use 'witness.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'refine.jo'
+use 'checker_types.dewy'
+use 'checker_tokens.dewy'
+use 'refinement_types.dewy'
+
+# Keep captured endpoints reachable through the normal sparse projection
+# graph, including across the generated selection block's scope collection.
+# A changed struct has no constructor origin, so copied metadata grants no fact.
+fact_nd_remember = (n: int, s: mut FactState, values: int[], t: int) -> int:
+    result = fact_new(s, FactBound(), FactTerm(type = t, origin = n))
+    fact_constructor_actuals[result] = values
+    loop i in [0..values.len()):
+        if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, -2147483600 + i, false, values[i]))
+    result
+
+struct FactNDAxis:
+    first: int = 0
+    stop: int = 0
+    keep: bool = true
+    known: bool = false
+
+fact_nd_axis = (n: int, s: mut FactState, value: int, extent: int) -> FactNDAxis:
+    if value == 0: return FactNDAxis(fact_constant(s, 0), extent, true, true)
+    origin = fact_terms[value].origin
+    if origin == 0 or nodes[origin].kind != .call: return FactNDAxis()
+    kind = fact_nd_call(origin)
+    actuals = fact_constructor_actuals.get(value) ?? []
+    if kind == 154 and actuals.len() == 3:
+        keep = fact_bound(s, actuals[2])
+        if keep.lo != keep.hi: return FactNDAxis()
+        return FactNDAxis(actuals[0], actuals[1], keep.lo != 0, true)
+    if kind == 12 and actuals.len() == 1:
+        t = representation_type(ntype(kid(origin, 0)))
+        if is_int(t): return FactNDAxis(actuals[0], 0, false, true)
+        if is_dewy_range_type(t, "IntRange"): return fact_nd_axis(n, s, actuals[0], extent)
+        return FactNDAxis()
+    if kind != 11 and kind != 13: return FactNDAxis()
+    if actuals.len() != (if kind == 11: 7 else: 5): return FactNDAxis()
+    stepped = fact_bound(s, actuals[if kind == 11: 5 else: 3])
+    if stepped.wide or stepped.lo != 0 or stepped.hi != 0: return FactNDAxis()
+    if kind == 11:
+        exclusive = fact_bound(s, actuals[6])
+        if exclusive.wide or exclusive.lo != 0 or exclusive.hi != 0: return FactNDAxis()
+    bounded = if kind == 13: FactBound(1, 1) else: fact_bound(s, actuals[4])
+    if bounded.wide or bounded.lo != bounded.hi: return FactNDAxis()
+    stop = extent
+    if bounded.lo != 0:
+        inclusive = fact_bound(s, actuals[if kind == 11: 3 else: 4])
+        if inclusive.wide or inclusive.lo != inclusive.hi: return FactNDAxis()
+        stop = actuals[2]
+        if inclusive.lo != 0:
+            stop = fact_arithmetic(s, kid(origin, 2), .plus, stop, fact_constant(s, 1))
+    FactNDAxis(actuals[0], stop, true, true)
+
+fact_nd_slice = (n: int, s: mut FactState, values: int[], kind: int) -> int:
+    bound = kind == 154
+    shape = if bound: values[0] else: fact_nd_shape(s, values[0])
+    text = wit_text(kid(n, 0))
+    if text == "": text = "the sliced array"
+    shape_text = if bound: text else: "{text}.length"
+    rank = fact_bound(s, fact_project(s, shape, -1, false, T_INT))
+    spec = values[1]
+    count = fact_bound(s, fact_project(s, spec, -1, false, T_INT))
+    storage = false
+    if not bound:
+        storage = fact_nd_need(n, s, .eq, fact_nd_valid(s, values[0]), fact_constant(s, 1), "{text}.data.length matches its shape")
+    if rank.wide or rank.lo != rank.hi or rank.lo < 0 or rank.hi > 32 or count.wide or count.lo != count.hi or count.lo < 0 or count.lo > rank.lo:
+        fact_nd_need(n, s, .eq, fact_fresh(s, T_INT), fact_constant(s, 1), "slice selectors fit {text}'s rank and axis bounds")
+        if kind >= 151 and kind <= 153: fact_nd_store(n, s, n, .write)
+        return fact_fresh(s, ntype(n))
+    dims: int[]
+    selected: int[]
+    axes: int[]
+    complete = true
+    axis_type = telem(representation_type(ntype(kid(n, 1))))
+    loop axis in [0..rank.lo):
+        index = fact_constant(s, axis)
+        extent = if bound: fact_project(s, shape, index, true, T_INT) else: fact_nd_dim(s, values[0], ntype(kid(n, 0)), index)
+        selector = if axis < count.lo: fact_project(s, spec, index, true, axis_type) else: 0
+        part = fact_nd_axis(n, s, selector, extent)
+        if not part.known:
+            fact_nd_need(n, s, .eq, fact_fresh(s, T_INT), fact_constant(s, 1), "slice axis {axis} selects only positions in {shape_text}[{axis}]")
+            complete = false
+            continue
+        zero = fact_constant(s, 0)
+        size = fact_constant(s, 1)
+        if not part.keep:
+            fact_nd_need(n, s, .le, zero, part.first, "slice axis {axis} index is nonnegative")
+            fact_nd_need(n, s, .lt, part.first, extent, "slice axis {axis} index is below {shape_text}[{axis}]")
+        else:
+            # Empty ascending selections visit no positions, even when the
+            # written endpoints lie beyond the source. Otherwise prove the
+            # conventional half-open bounds before publishing a result size.
+            empty = fact_compare(s, .ge, part.first, part.stop) == 1
+            if empty: size = zero
+            else:
+                fact_nd_need(n, s, .le, zero, part.first, "slice axis {axis} start is nonnegative")
+                fact_nd_need(n, s, .le, part.first, part.stop, "slice axis {axis} start is at most its end")
+                fact_nd_need(n, s, .le, part.stop, extent, "slice axis {axis} end is at most {shape_text}[{axis}]")
+                origin = bc_int(0, nodes[n].pos)
+                nodes[origin].type = i32(T_INT)
+                size = fact_arithmetic(s, origin, .minus, part.stop, part.first)
+                span = fact_bound(s, size)
+                if span.wide or span.lo < 0:
+                    # An axis is not an allocated array length: with a zero
+                    # peer, it can exceed fact_length_max. On a valid source's
+                    # normal edge the selected range count still fits int64.
+                    size = fact_new(s, FactBound(0, (if span.wide: FACT_MAX else: max(0, span.hi))), FactTerm(type = T_INT))
+            dims.push(size)
+        selected.push(size)
+        if bound:
+            value = fact_nd_remember(n, s, [part.first, part.stop, fact_constant(s, int(part.keep))], axis_type)
+            axes.push(value)
+    if not complete:
+        if kind >= 151 and kind <= 153: fact_nd_store(n, s, n, .write)
+        return fact_fresh(s, ntype(n))
+    if kind == 152 or kind == 153:
+        length = if kind == 153: fact_nd_data_length(s, values[2]) else: fact_project(s, values[2], -1, false, T_INT)
+        total = fact_constant(s, 1)
+        origin = bc_int(0, nodes[n].pos)
+        nodes[origin].type = i32(T_INT)
+        loop size in selected: total = fact_arithmetic(s, origin, .star, total, size)
+        fact_nd_need(n, s, .eq, length, total, "assigned data length equals the slice's selected element count")
+    if kind >= 151 and kind <= 153:
+        fact_nd_store(n, s, n, .write)
+        return fact_fresh(s, ntype(n))
+    if bound:
+        result = fact_fresh(s, ntype(n))
+        if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, -1, false, fact_constant(s, axes.len())))
+        loop axis in [0..axes.len()):
+            if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, fact_constant(s, axis), true, axes[axis]))
+        return result
+    # The rank-zero library slice returns empty storage, not the scalar count
+    # of an empty shape. Do not promise a valid NDArray for that special case.
+    # The library validates individual positions, not the full source storage
+    # invariant. Deferred malformed shapes can wrap their product and return
+    # malformed storage; do not turn that opt-in path into a valid result fact.
+    if rank.lo == 0 or not storage: return fact_fresh(s, ntype(n))
+    fact_nd_make(n, s, dims)

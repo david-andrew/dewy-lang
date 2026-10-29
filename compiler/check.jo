@@ -4188,6 +4188,7 @@ dewy_selection_update = (s: int, matrix: bool = false) -> int:
     selector = "$selection_index{elem_tmp_n}"
     value = "$selection_value{elem_tmp_n}"
     captured = "$selection{elem_tmp_n}"
+    index_update_sources[intern(source)] = int(nodes[lhs].a)
     reads = [bc_let(source, clone(int(nodes[lhs].a)), pos)]
     spec = int(nodes[lhs].b)
     if matrix:
