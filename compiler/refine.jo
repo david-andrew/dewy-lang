@@ -1,3 +1,4 @@
+use 'type_substitute.dewy'
 use 'ir_types.dewy'
 use 'refine_resolve.dewy'
 use 'refine_resolve_host.dewy'
@@ -70,6 +71,8 @@ representation_deep = (t0: int) -> int:
 str_sets: str[][] = [[]]
 str_set_types: int[] = [0]
 ref_intern_host = CheckerInternHost(intern)
+substitution_refinements = TypeSubstituteRefinements(&ref_predicates, ref_span_copy)
+substitution_refinement_binding = type_substitute_refinements(&substitution_refinements)
 
 # (a set keeps its first spelling's order: its words, which Jo code switching on a
 # Dewy enumeration shares; `members(U)` has its own, canonical order)
@@ -764,16 +767,7 @@ ref_resolve_limit = (term: RefTerm) -> RefTerm:
     domain = fact_domain(t)
     RefTerm(1, if term.unsigned: domain.hi else: domain.lo)
 
-ref_subst = (predicate: int, args: int[], zonking: bool = false) -> int:
-    atoms: RefAtom[]
-    loop original in ref_predicates[predicate]:
-        atom = original
-        if atom.a.kind == 4: atom.a.value = if zonking: zonk(atom.a.value) else: subst(atom.a.value, args)
-        if atom.b.kind == 4: atom.b.value = if zonking: zonk(atom.b.value) else: subst(atom.b.value, args)
-        atoms.push(atom)
-    result = ref_intern(atoms)
-    ref_span_copy(predicate, result)
-    result
+ref_subst = (predicate: int, args: int[], zonking: bool = false) -> int: ts_ref_subst(predicate, args, zonking)
 
 # One shared, noncapturing service; resolution owns its reentrant context.
 ref_fields_host = CheckerFieldsHost(check_struct_fields)

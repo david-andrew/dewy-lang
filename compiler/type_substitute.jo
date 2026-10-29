@@ -1,4 +1,6 @@
 use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'refine_predicates.dewy'
 use 'type_inference.dewy'
 use 'type_constructors.dewy'
 ts_inputs: *TypeInferenceInput
@@ -67,3 +69,21 @@ ts_partial = (pat0: int, binds: mut int[]) -> int:
     pat
 
 
+
+struct TypeSubstituteRefinements:
+    predicates: *(RefAtom[][])
+    copy_span: (int, int) -> void
+ts_refinements: *TypeSubstituteRefinements
+type_substitute_refinements = (input: *TypeSubstituteRefinements) -> int:
+    ts_refinements = input
+    0
+ts_ref_subst = (predicate: int, args: int[], zonking: bool = false) -> int:
+    atoms: RefAtom[]
+    loop original in ts_refinements[0].predicates[0][predicate]:
+        atom = original
+        if atom.a.kind == 4: atom.a.value = if zonking: tu_zonk(atom.a.value) else: ts_subst(atom.a.value, args)
+        if atom.b.kind == 4: atom.b.value = if zonking: tu_zonk(atom.b.value) else: ts_subst(atom.b.value, args)
+        atoms.push(atom)
+    result = ref_atoms_intern(ts_refinements[0].predicates[0], atoms)
+    ts_refinements[0].copy_span(predicate, result)
+    result
