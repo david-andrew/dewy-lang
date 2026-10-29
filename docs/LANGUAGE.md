@@ -2498,8 +2498,10 @@ remains independent of the source. An empty input raises an error.
 
 ## Numeric arrays and matrices
 
-Contiguous matrix slices carry their selected shape into subsequent indexing
-and dotted operations. Scalar and array assignments check each selected axis;
+Matrix slices carry their selected shape into subsequent indexing and dotted
+operations. This includes exact stepped ranges and short index arrays whose
+elements are each proven in bounds; stepped bounds use the visited positions,
+not an unvisited written endpoint. Scalar and array assignments check each selected axis;
 array replacements also need the selected element count. Stored selectors keep
 their captured endpoints, including when an update's right-hand side changes
 the destination. A changed selector needs its bounds established again.

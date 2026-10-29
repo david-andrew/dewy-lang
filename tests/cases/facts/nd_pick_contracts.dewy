@@ -1,0 +1,16 @@
+main=()=>{
+ let m=[1 2 3 ; 4 5 6 ; 7 8 9]
+ let picks:array<int64>=[2 0 2]
+ let selected=m[picks [..]]
+ printl(selected.data)
+ picks[0]=1
+ printl(selected[2 2])
+ printl(m[picks [0,2..2]].data)
+ let empty:array<int64>=[]
+ printl(m[empty [..]].data)
+ m[picks [0..1)]=[10 20 30]
+ printl(m.data)
+ let axis=__nd_axis(picks)
+ picks[0]=99
+ printl(__nd_slice(m [axis]).data)
+}

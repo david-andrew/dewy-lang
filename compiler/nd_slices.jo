@@ -1,4 +1,4 @@
-# Contiguous N-D selector contracts. Capture constructor arguments only when
+# N-D selector contracts. Capture constructor arguments only when
 # demanded; their immutable result identity is retired by every field write.
 # Reuse the indexed constructor-actual table and its existing owner lifetime.
 # Each operation visits at most 32 axes; no library body or unrelated AST scan.
@@ -20,7 +20,7 @@ fact_nd_remember = (n: int, s: mut FactState, values: int[], t: int) -> int:
     result = fact_new(s, FactBound(), FactTerm(type = t, origin = n))
     fact_constructor_actuals[result] = values
     loop i in [0..values.len()):
-        if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, -2147483600 + i, false, values[i]))
+        if values[i] != 0 and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, -2147483600 + i, false, values[i]))
     result
 
 struct FactNDAxis:
@@ -28,6 +28,8 @@ struct FactNDAxis:
     stop: int = 0
     keep: bool = true
     known: bool = false
+    count: int = 0
+    picks: int = 0
 
 fact_nd_axis = (n: int, s: mut FactState, value: int, extent: int) -> FactNDAxis:
     if value == 0: return FactNDAxis(fact_constant(s, 0), extent, true, true)
@@ -35,19 +37,21 @@ fact_nd_axis = (n: int, s: mut FactState, value: int, extent: int) -> FactNDAxis
     if origin == 0 or nodes[origin].kind != .call: return FactNDAxis()
     kind = fact_nd_call(origin)
     actuals = fact_constructor_actuals.get(value) ?? []
-    if kind == 154 and actuals.len() == 3:
+    if kind == 154 and actuals.len() == 5:
         keep = fact_bound(s, actuals[2])
         if keep.lo != keep.hi: return FactNDAxis()
-        return FactNDAxis(actuals[0], actuals[1], keep.lo != 0, true)
+        return FactNDAxis(actuals[0], actuals[1], keep.lo != 0, true, actuals[3], actuals[4])
     if kind == 12 and actuals.len() == 1:
         t = representation_type(ntype(kid(origin, 0)))
         if is_int(t): return FactNDAxis(actuals[0], 0, false, true)
         if is_dewy_range_type(t, "IntRange"): return fact_nd_axis(n, s, actuals[0], extent)
+        if tkind(t) == .array: return FactNDAxis(known = true, picks = actuals[0])
         return FactNDAxis()
     if kind != 11 and kind != 13: return FactNDAxis()
     if actuals.len() != (if kind == 11: 7 else: 5): return FactNDAxis()
     stepped = fact_bound(s, actuals[if kind == 11: 5 else: 3])
-    if stepped.wide or stepped.lo != 0 or stepped.hi != 0: return FactNDAxis()
+    if stepped.wide or stepped.lo != stepped.hi: return FactNDAxis()
+    if stepped.lo != 0: return fact_nd_stepped(s, actuals, extent, kind)
     if kind == 11:
         exclusive = fact_bound(s, actuals[6])
         if exclusive.wide or exclusive.lo != 0 or exclusive.hi != 0: return FactNDAxis()
@@ -61,6 +65,49 @@ fact_nd_axis = (n: int, s: mut FactState, value: int, extent: int) -> FactNDAxis
         if inclusive.lo != 0:
             stop = fact_arithmetic(s, kid(origin, 2), .plus, stop, fact_constant(s, 1))
     FactNDAxis(actuals[0], stop, true, true)
+
+# Exact stepped selectors: O(1), demanded only by a selection. Normalize to
+# visited extrema and count, not written endpoints. Reject signed-overflow
+# arithmetic before doing it; the library can represent wider unsigned spans.
+fact_nd_stepped = (s: mut FactState, actuals: int[], extent: int, kind: int) -> FactNDAxis:
+    first = fact_bound(s, actuals[0])
+    second = fact_bound(s, actuals[1])
+    inclusive = fact_bound(s, actuals[if kind == 11: 3 else: 4])
+    bounded = if kind == 11: fact_bound(s, actuals[4]) else: FactBound(1, 1)
+    tail = if kind == 11: fact_bound(s, actuals[6]) else: FactBound(0, 0)
+    if first.wide or first.lo != first.hi or second.wide or second.lo != second.hi or inclusive.wide or inclusive.lo != inclusive.hi or bounded.wide or bounded.lo != bounded.hi or tail.wide or tail.lo != tail.hi: return FactNDAxis()
+    if first.lo == FACT_MIN or not fact_add_fits(second.lo, -first.lo): return FactNDAxis()
+    step = second.lo - first.lo
+    if step == 0 or step == FACT_MIN: return FactNDAxis()
+    last = fact_bound(s, actuals[2])
+    if bounded.lo == 0:
+        if step < 0: last = FactBound(0, 0)
+        else:
+            last = fact_bound(s, extent)
+            if last.wide or last.lo != last.hi or last.lo == FACT_MIN: return FactNDAxis()
+            last = FactBound(last.lo - 1, last.lo - 1)
+        inclusive = FactBound(1, 1)
+    if last.wide or last.lo != last.hi: return FactNDAxis()
+    count = 0
+    start = first.lo
+    end = start
+    empty = if step > 0: start > last.lo else: start < last.lo
+    if start == last.lo and inclusive.lo == 0: empty = true
+    if not empty:
+        if last.lo == FACT_MIN or not fact_add_fits(start, -last.lo) or not fact_add_fits(last.lo, -start): return FactNDAxis()
+        distance = if step > 0: last.lo - start else: start - last.lo
+        if distance < 0: return FactNDAxis()
+        if inclusive.lo == 0: distance -= 1
+        stride = abs(step)
+        quotient = distance / stride
+        if quotient == FACT_MAX: return FactNDAxis()
+        count = quotient + 1
+        # quotient * stride <= distance, and end lies between the endpoints.
+        end = if step > 0: start + quotient * stride else: start - quotient * stride
+        if tail.lo != 0:
+            count -= 1
+            if count > 0: start += step
+    FactNDAxis(fact_constant(s, min(start, end)), fact_constant(s, max(start, end)), true, true, fact_constant(s, count))
 
 fact_nd_slice = (n: int, s: mut FactState, values: int[], kind: int) -> int:
     bound = kind == 154
@@ -94,7 +141,25 @@ fact_nd_slice = (n: int, s: mut FactState, values: int[], kind: int) -> int:
             continue
         zero = fact_constant(s, 0)
         size = fact_constant(s, 1)
-        if not part.keep:
+        if part.picks != 0:
+            size = fact_project(s, part.picks, -1, false, T_INT)
+            length = fact_bound(s, size)
+            entries = fact_inventory(s, part.picks)
+            if length.wide or length.lo != length.hi or length.lo != entries.len():
+                fact_nd_need(n, s, .eq, fact_fresh(s, T_INT), fact_constant(s, 1), "slice axis {axis} index array contains only positions in {shape_text}[{axis}]")
+                complete = false
+                continue
+            loop entry in entries:
+                fact_nd_need(n, s, .le, zero, entry, "slice axis {axis} index is nonnegative")
+                fact_nd_need(n, s, .lt, entry, extent, "slice axis {axis} index is below {shape_text}[{axis}]")
+            dims.push(size)
+        else if part.count != 0:
+            size = part.count
+            if fact_compare(s, .eq, size, zero) != 1:
+                fact_nd_need(n, s, .le, zero, part.first, "slice axis {axis} start is nonnegative")
+                fact_nd_need(n, s, .lt, part.stop, extent, "slice axis {axis} last selected index is below {shape_text}[{axis}]")
+            dims.push(size)
+        else if not part.keep:
             fact_nd_need(n, s, .le, zero, part.first, "slice axis {axis} index is nonnegative")
             fact_nd_need(n, s, .lt, part.first, extent, "slice axis {axis} index is below {shape_text}[{axis}]")
         else:
@@ -119,7 +184,7 @@ fact_nd_slice = (n: int, s: mut FactState, values: int[], kind: int) -> int:
             dims.push(size)
         selected.push(size)
         if bound:
-            value = fact_nd_remember(n, s, [part.first, part.stop, fact_constant(s, int(part.keep))], axis_type)
+            value = fact_nd_remember(n, s, [part.first, part.stop, fact_constant(s, int(part.keep)), part.count, part.picks], axis_type)
             axes.push(value)
     if not complete:
         if kind >= 151 and kind <= 153: fact_nd_store(n, s, n, .write)
