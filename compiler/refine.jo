@@ -1,3 +1,4 @@
+use 'type_refinement.dewy'
 use 'type_substitute.dewy'
 use 'ir_types.dewy'
 use 'refine_resolve.dewy'
@@ -53,17 +54,7 @@ representation_type = (t0: int) -> int:
 
 # t with every refinement inside it dropped, as a reader sees it: formatting writes a value out
 # and never stores into it, so an array of refined elements reads as an array of their base
-representation_deep = (t0: int) -> int:
-    t = representation_type(t0)
-    k = types[t].kind
-    if k == .array: return mk_array(representation_deep(int(types[t].elem)))
-    if k == .fixed: return mk_fixed(representation_deep(int(types[t].elem)), fixed_len(t))
-    if k == .opt: return mk_opt(representation_deep(int(types[t].elem)))
-    if k == .tuple:
-        a: int[]
-        loop i in [0..int(types[t].nargs)): a.push(representation_deep(targ(t, i)))
-        return mk_tuple(a, types[t].sign)
-    t
+representation_deep = (t0: int) -> int: tr_deep(t0)
 
 # String literal sets (`'a'|'b'`): an enum whose variant i is member i, so a
 # value is one word at run time (the member's index); `=?`, `is?` and `match`
@@ -71,6 +62,7 @@ representation_deep = (t0: int) -> int:
 str_sets: str[][] = [[]]
 str_set_types: int[] = [0]
 ref_intern_host = CheckerInternHost(intern)
+type_refinement_host = TypeRefinementHost(ref_span_copy, fact_domain, int_fits, fatal)
 substitution_refinements = TypeSubstituteRefinements(&ref_predicates, ref_span_copy)
 substitution_refinement_binding = type_substitute_refinements(&substitution_refinements)
 
@@ -191,38 +183,7 @@ ref_span_copy = (from: int, to: int):
 # Predicate tables stay with their owner; the leaf borrows the interner.
 ref_intern = (atoms: RefAtom[]) -> int: ref_atoms_intern(ref_predicates, atoms)
 
-mk_refined = (base0: int, predicate: int) -> int:
-    base = prune(base0)
-    declared = predicate
-    let predicate = predicate
-    if types[base].kind == .refined:
-        predicate = ref_intern(ref_predicates[int(types[base].st)] + ref_predicates[predicate])
-        base = int(types[base].elem)
-    normalized: RefAtom[]
-    dependencies: int[]
-    loop original in ref_predicates[predicate]:
-        atom = original
-        atom.a = ref_resolve_limit(atom.a)
-        atom.b = ref_resolve_limit(atom.b)
-        loop term in [atom.a, atom.b]:
-            if term.kind == 4: dependencies.push(term.value)
-        # (a length never reaches 2^63, so against a length `uint64.max` compares as the
-        # largest int64: `length <=? uint64.max` holds for every array)
-        if types[base].kind == .array or types[base].kind == .str_:
-            if atom.a.kind == 1 and atom.a.unsigned and atom.a.value < 0: atom.a = RefTerm(1, 9223372036854775807)
-            if atom.b.kind == 1 and atom.b.unsigned and atom.b.value < 0: atom.b = RefTerm(1, 9223372036854775807)
-        normalized.push(atom)
-    predicate = ref_intern(normalized)
-    ref_span_copy(declared, predicate)
-    if not is_int(base) and types[base].kind != .array and not has_var(base) and not is_nd(base) and not (types[base].kind == .str_ and ref_length_only(predicate)): fatal(-1, "refinement requires an integer, array or string base")
-    if not has_var(base) and is_int(base):
-        loop atom in ref_predicates[predicate]:
-            loop term in [atom.a, atom.b]:
-                if term.kind != 1: continue
-                if term.unsigned and base != T_U64 or not term.unsigned and not int_fits(term.value, base):
-                    fatal(-1, "refinement bound is outside its integer representation")
-    refine_active = true
-    mk_type(TypeInfo(kind = .refined, elem = i32(base), st = i32(predicate)), dependencies)
+mk_refined = (base0: int, predicate: int) -> int: tr_make(base0, predicate)
 
 # A string is refined only by its length (`string<length >? 0>`).
 ref_length_only = (predicate: int) -> bool: ref_atoms_length_only(ref_predicates[predicate])
@@ -758,14 +719,7 @@ ref_decl_mask = (decl: int) -> int:
 
 # Generic type limits are substituted together with the base. Dependencies in
 # the descriptor's argument list propagate TF_HAS_VAR without a new type field.
-ref_resolve_limit = (term: RefTerm) -> RefTerm:
-    if term.kind != 4: return term
-    t = prune(term.value)
-    if has_var(t): return term
-    if not is_int(t): fatal(-1, "refinement type limit requires an integer type")
-    if t == T_U64: return RefTerm(1, (if term.unsigned: -1 else: 0), term.unsigned)
-    domain = fact_domain(t)
-    RefTerm(1, if term.unsigned: domain.hi else: domain.lo)
+ref_resolve_limit = (term: RefTerm) -> RefTerm: tr_limit(term)
 
 ref_subst = (predicate: int, args: int[], zonking: bool = false) -> int: ts_ref_subst(predicate, args, zonking)
 

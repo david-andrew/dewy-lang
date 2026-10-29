@@ -1,3 +1,4 @@
+use 'type_refinement.dewy'
 use 'type_match.dewy'
 use 'type_substitute.dewy'
 use 'type_queries.dewy'
@@ -180,6 +181,7 @@ inference_host = TypeInferenceHost(mk_callable_contract, effect_subst, effect_ty
 inference_input = TypeInferenceInput(&types, &structs, &type_args, &type_binds, &inference_host)
 inference_binding = type_inference_bind(&inference_input)
 substitution_binding = type_substitute_bind(&inference_input)
+type_refinement_binding = type_refinement_bind(&inference_input, &ref_predicates, &refine_active, &T_U64, &type_refinement_host)
 type_match_host = TypeMatchHost(can_coerce, caller_dewy, effect_match)
 type_match_binding = type_match_bind(&inference_input, &refine_active, &T_NEVER, &T_MATH_INT, &type_match_host)
 

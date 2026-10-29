@@ -1,0 +1,95 @@
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'refine_predicates.dewy'
+use 'type_inference.dewy'
+use 'type_constructors.dewy'
+struct TypeRefinementHost:
+    copy_span: (int, int) -> void
+    domain: (int, FactReason, int) -> FactBound
+    int_fits: (int, int) -> bool
+    fatal: (int, str) -> void
+tr_types: *(TypeInfo[])
+tr_structs: *(StructInfo[])
+tr_predicates: *(RefAtom[][])
+tr_inference: *TypeInferenceInput
+tr_active: *bool
+tr_u64: *int
+tr_host: *TypeRefinementHost
+type_refinement_bind = (input: *TypeInferenceInput, predicates: *(RefAtom[][]), active: *bool, u64_type: *int, host: *TypeRefinementHost) -> int:
+    tr_inference = input
+    tr_types = input[0].types
+    tr_structs = input[0].structs
+    tr_predicates = predicates
+    tr_active = active
+    tr_u64 = u64_type
+    tr_host = host
+    0
+tr_intern = (atoms: RefAtom[]) -> int: ref_atoms_intern(tr_predicates[0], atoms)
+tr_length_only = (predicate: int) -> bool: ref_atoms_length_only(tr_predicates[0][predicate])
+tr_fixed_len = (t: int) -> int: int(tr_types[0][tu_prune(t)].bits)
+tr_is_int = (t: int) -> bool: tr_types[0][tu_prune(t)].kind == .int_
+tr_is_nd = (t0: int) -> bool:
+    t = tu_prune(t0)
+    tr_types[0][t].kind == .struct_ and tr_structs[0][int(tr_types[0][t].st)].name == "NDArray"
+tr_representation = (t0: int) -> int:
+    t = tu_prune(t0)
+    if tr_types[0][t].kind == .refined: return tu_prune(int(tr_types[0][t].elem))
+    t
+
+
+tr_deep = (t0: int) -> int:
+    t = tr_representation(t0)
+    k = tr_types[0][t].kind
+    if k == .array: return tb_mk_array(tr_deep(int(tr_types[0][t].elem)))
+    if k == .fixed: return tb_mk_fixed(tr_deep(int(tr_types[0][t].elem)), tr_fixed_len(t))
+    if k == .opt: return tb_mk_opt(tr_deep(int(tr_types[0][t].elem)))
+    if k == .tuple:
+        a: int[]
+        loop i in [0..int(tr_types[0][t].nargs)): a.push(tr_deep(tu_targ(t, i)))
+        return tb_mk_tuple(a, tr_types[0][t].sign)
+    t
+
+
+tr_make = (base0: int, predicate0: int) -> int:
+    base = tu_prune(base0)
+    declared = predicate0
+    let predicate = predicate0
+    if tr_types[0][base].kind == .refined:
+        predicate = tr_intern(tr_predicates[0][int(tr_types[0][base].st)] + tr_predicates[0][predicate])
+        base = int(tr_types[0][base].elem)
+    normalized: RefAtom[]
+    dependencies: int[]
+    loop original in tr_predicates[0][predicate]:
+        atom = original
+        atom.a = tr_limit(atom.a)
+        atom.b = tr_limit(atom.b)
+        loop term in [atom.a, atom.b]:
+            if term.kind == 4: dependencies.push(term.value)
+        # (a length never reaches 2^63, so against a length `uint64.max` compares as the
+        # largest int64: `length <=? uint64.max` holds for every array)
+        if tr_types[0][base].kind == .array or tr_types[0][base].kind == .str_:
+            if atom.a.kind == 1 and atom.a.unsigned and atom.a.value < 0: atom.a = RefTerm(1, 9223372036854775807)
+            if atom.b.kind == 1 and atom.b.unsigned and atom.b.value < 0: atom.b = RefTerm(1, 9223372036854775807)
+        normalized.push(atom)
+    predicate = tr_intern(normalized)
+    tr_host[0].copy_span(declared, predicate)
+    if not tr_is_int(base) and tr_types[0][base].kind != .array and not tu_has_var(base) and not tr_is_nd(base) and not (tr_types[0][base].kind == .str_ and tr_length_only(predicate)): tr_host[0].fatal(-1, "refinement requires an integer, array or string base")
+    if not tu_has_var(base) and tr_is_int(base):
+        loop atom in tr_predicates[0][predicate]:
+            loop term in [atom.a, atom.b]:
+                if term.kind != 1: continue
+                if term.unsigned and base != tr_u64[0] or not term.unsigned and not tr_host[0].int_fits(term.value, base):
+                    tr_host[0].fatal(-1, "refinement bound is outside its integer representation")
+    tr_active[0] = true
+    tr_inference[0].host[0].mk_type(TypeInfo(kind = .refined, elem = i32(base), st = i32(predicate)), dependencies)
+
+
+tr_limit = (term: RefTerm) -> RefTerm:
+    if term.kind != 4: return term
+    t = tu_prune(term.value)
+    if tu_has_var(t): return term
+    if not tr_is_int(t): tr_host[0].fatal(-1, "refinement type limit requires an integer type")
+    if t == tr_u64[0]: return RefTerm(1, (if term.unsigned: -1 else: 0), term.unsigned)
+    domain = tr_host[0].domain(t, .missing, 0)
+    RefTerm(1, if term.unsigned: domain.hi else: domain.lo)
+
