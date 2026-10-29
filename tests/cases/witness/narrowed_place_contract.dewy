@@ -1,0 +1,6 @@
+Box:type=[items:array<int>|Missing]
+read=(box:Box):>int=>{
+    if box.items is? Missing return 0
+    box.items[0]
+}
+printl(read(Box[[]]))

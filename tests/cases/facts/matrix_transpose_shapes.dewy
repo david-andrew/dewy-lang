@@ -1,0 +1,18 @@
+let a=reshape<float64>([1.0 2.0 3.0 4.0 5.0 6.0] 2 3)
+let t=transpose(a)
+printl(rows(t) cols(t) t[2 1])
+let product=t*a
+printl(rows(product) cols(product) product[0 0])
+let saved=t
+a.data=[]
+printl(saved[1 1])
+let empty=transpose(zeros(0 3))
+printl(rows(empty) cols(empty))
+let cube=transpose(zeros(2 3 4))
+printl(cube[3 2 1])
+first=(a:array<float64 length=[m n]>):>float64=>{
+    if m =? 0 or n =? 0 return 0.0
+    let b=transpose(a)
+    b[0 0]
+}
+printl(first(eye(2)))

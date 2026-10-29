@@ -1183,9 +1183,13 @@ fact_regex_call = (n: int) -> bool:
 
 fact_regex_search_result = (n: int, result: int, values: int[], s: mut FactState):
     if not fact_regex_call(n): return
+    if ownership_decls.len() != 0:
+        # Union containers do not themselves report member lifecycle hooks.
+        loop t in union_members(fact_type(ntype(n))):
+            if ownership_fact_type(t): return
+        if nkids(n) == 3 and ownership_fact_type(ntype(kid(n, 1))): return
     named = name_of(int(nodes[int(fns[int(nodes[n].sym)].decl)].name))
     if named == "regex" and nkids(n) == 1:
-        if ownership_decls.len() != 0 and ownership_fact_type(ntype(n)): return
         text = cc_constant(kid(n, 0))
         if text < 0: return
         count = fact_regex_counts.get(text) ?? -1
@@ -1217,7 +1221,6 @@ fact_regex_search_result = (n: int, result: int, values: int[], s: mut FactState
             if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(payload, intern("groups"), false, fact_constant(s, count)))
         return
     if nkids(n) != 3 or named != "__dewy_find": return
-    if ownership_decls.len() != 0 and ownership_fact_type(ntype(n)): return
     name = intern("groups")
     loop t in union_members(fact_type(ntype(n))):
         gt = fact_call_field_type(t, name)

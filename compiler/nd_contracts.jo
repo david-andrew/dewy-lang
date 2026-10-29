@@ -167,6 +167,7 @@ fact_nd_classify = (n: int) -> int:
         fact_nd_names[intern("__shape_dim")] = 6
         fact_nd_names[intern("size")] = 7
         fact_nd_names[intern("flatten")] = 8
+        fact_nd_names[intern("transpose")] = 9
         fact_nd_names[intern("rows")] = 100
         fact_nd_names[intern("cols")] = 101
         fact_nd_names[intern("__shape_rank")] = 102
@@ -188,6 +189,9 @@ fact_nd_classify = (n: int) -> int:
     if kind <= 3: return if is_nd(representation_type(ntype(n))): kind else: 0
     base = representation_type(ntype(kid(n, 0)))
     if not is_nd(base) and not (kind >= 102 and kind <= 106 or kind == 6) : return 0
+    if kind == 9:
+        if nkids(n) != 1 or not effect_share(nd_elem(base)): return 0
+        if ownership_decls.len() != 0 and ownership_fact_type(base): return 0
     if kind >= 120 and kind <= 122:
         if nkids(n) != (if kind == 121: 2 else: 1) or nd_elem(base) != T_FLOAT: return 0
         if ownership_decls.len() != 0 and ownership_fact_type(base): return 0
@@ -268,7 +272,9 @@ fact_nd_check = (n: int, s: mut FactState, values: int[], kind: int):
         fact_nd_need(n, s, .eq, rows, cols, "{text}.length[0] =? {text}.length[1]")
         if kind == 121:
             length = fact_project(s, values[1], -1, false, T_INT)
-            fact_nd_need(n, s, .eq, length, rows, "{wit_text(kid(n, 1))}.length =? {text}.length[0]")
+            rhs = wit_text(kid(n, 1))
+            if rhs == "": rhs = "the right-hand side"
+            fact_nd_need(n, s, .eq, length, rows, "{rhs}.length =? {text}.length[0]")
     else if kind == 100 or kind == 101 or kind == 105 or kind == 110 or kind == 111:
         count = if kind == 105: 1 else if kind < 110: 2 else: nkids(n) - (if kind == 110: 1 else: 2)
         fact_nd_need(n, s, .eq, rank, fact_constant(s, count), "{text}.length.length =? {count}")
@@ -367,6 +373,7 @@ fact_nd_capture = (n: int, s: mut FactState, values: int[], kind: int) -> int:
         fact_set_bound(s, fact_nd_valid(s, result), FactBound(1, 1, true))
         return result
     if kind >= 100 or kind == 6: fact_nd_check(n, s, values, (if kind == 6: 107 else: kind))
+    if kind == 9: return fact_nd_transpose(n, s, values[0])
     if kind == 130 or kind == 131:
         rows = fact_nd_dim(s, values[0], ntype(kid(n, 0)), fact_constant(s, 0))
         if kind == 130:
@@ -412,6 +419,30 @@ fact_nd_capture = (n: int, s: mut FactState, values: int[], kind: int) -> int:
         if fact_nd_plain_store(n): fact_nd_store(n, s, n, .write)
         else: fact_path_call_effects(n, s)
     fact_fresh(s, ntype(n))
+
+# A transpose reverses axes and copies exactly the input storage count.
+# Transfer only a demanded result, O(rank <= 32); unknown/larger ranks retain
+# only rank and storage count. This is a result fact, not a no-failure promise.
+# The validity marker transfers only when the input's own invariant is known.
+fact_nd_transpose = (n: int, s: mut FactState, input: int) -> int:
+    rank = fact_nd_rank(s, input, ntype(kid(n, 0)))
+    count = fact_bound(s, rank)
+    length = fact_nd_data_length(s, input)
+    data = fact_fresh(s, mk_array(nd_elem(representation_type(ntype(n)))))
+    if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(data, -1, false, length))
+    result = 0
+    if not count.wide and count.lo == count.hi and count.lo >= 0 and count.hi <= 32:
+        dims: int[]
+        loop axis in [0..count.lo): dims.push(fact_nd_dim(s, input, ntype(kid(n, 0)), fact_constant(s, count.lo - 1 - axis)))
+        result = fact_nd_make(n, s, dims, data)
+    else:
+        result = fact_fresh(s, ntype(n))
+        shape = fact_nd_shape(s, result)
+        if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(shape, -1, false, rank))
+        if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, intern("data"), false, data))
+    valid = fact_bound(s, fact_nd_valid(s, input))
+    if valid.lo == 1 and valid.hi == 1: fact_set_bound(s, fact_nd_valid(s, result), FactBound(1, 1, true))
+    result
 
 # Stores without lifecycle hooks replace only data; shape is unchanged even
 # in loop havoc. Types with user lifecycle hooks retain the ordinary effect transfer.
@@ -508,7 +539,7 @@ nd_mutable_check = (n: int, s: mut FactState, values: int[]):
 # callbacks. Numeric element reads have the same property.
 fact_nd_reads_only = (n: int) -> bool:
     k = fact_nd_call(n)
-    if k >= 4 and k <= 8 or k >= 100 and k <= 105 or k >= 120 and k <= 122 or k == 130 or k == 131: return true
+    if k >= 4 and k <= 9 or k >= 100 and k <= 105 or k >= 120 and k <= 122 or k == 130 or k == 131: return true
     k == 110 and effect_share(nd_elem(representation_type(ntype(kid(n, 0)))))
 
 # Mutable entry contracts are separate from the callable's storage type.

@@ -122,6 +122,15 @@ wit_text = (e0: int, depth: int = 0) -> str:
         name = name_of(int(nodes[e].name))
         # (`d[v * n // 256] += 1` holds its index in a temporary: it is shown as written)
         if let source = index_update_sources.get(int(nodes[e].name)): return wit_text(source, depth + 1)
+        # Narrowed globals and fields use generated path names internally.
+        # Follow their checked alias back to the user's place, bounded by the
+        # ordinary spelling depth. User-written aliases keep their own names.
+        if nodes[e].aux == i32(int(SK.local)) and (starts_with(name, "#L") or starts_with(name, "#G")):
+            l = int(nodes[e].sym)
+            if int(locals[l].flags) & LF_ALIAS != 0 and locals[l].alias != 0:
+                source = int(locals[l].alias)
+                if nodes[source].kind == .unwrap: source = int(nodes[source].a)
+                return wit_text(source, depth + 1)
         return if wit_hidden_name(name): "" else: name
     if k == .int_lit and not has_flag(e, NF_U64): return "{nodes[e].ival}"
     if k == .str_lit: return wit_quoted(e)

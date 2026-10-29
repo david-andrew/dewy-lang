@@ -2571,7 +2571,8 @@ fit the supported array size. A zero dimension produces an empty array.
 `reshape` takes one to four dimensions (`reshape(values 4)` is 1-D) or a
 shape array (`reshape(values [2 3])`) and checks the number of elements;
 `flatten`, `row` and `col` return independent array values. `transpose`
-reverses the axes. `size(matrix)` counts all elements; `rows` and `cols`
+reverses the axes and retains known extents, storage length and storage
+validity in its independent result. `size(matrix)` counts all elements; `rows` and `cols`
 inspect a two-dimensional shape. Use these constructors rather than changing
 `shape` independently of `data`.
 `linspace(start stop count)` is a 1-D `array<float64>` of `count` evenly
