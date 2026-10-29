@@ -1,3 +1,4 @@
+use 'type_substitute.dewy'
 use 'checker_state.dewy'
 use 'refine_intervals.dewy'
 use 'intervals.dewy'
@@ -1717,33 +1718,7 @@ match_union = (pat: int, a: int, binds: mut int[], depth: int) -> int:
     if r < 0: return -1
     r + widen
 
-subst_partial = (pat0: int, binds: mut int[]) -> int:
-    pat = prune(pat0)
-    if not has_var(pat): return pat
-    k = types[pat].kind
-    if k == .param:
-        id = int(types[pat].id)
-        if binds[id] == 0: binds[id] = mk_var()
-        return binds[id]
-    if k == .array: return mk_array(subst_partial(int(types[pat].elem), binds))
-    if k == .callable: return mk_callable_contract(subst_partial(int(types[pat].elem), binds), effect_subst(int(types[pat].st), binds), int(types[pat].bits))
-    if k == .refined: return mk_refined(subst_partial(int(types[pat].elem), binds), ref_subst(int(types[pat].st), binds))
-    if k == .quantity: return mk_quantity(subst_partial(int(types[pat].elem), binds), int(types[pat].st), 0, int(types[pat].bits))
-    if k == .secret: return mk_secret(subst_partial(int(types[pat].elem), binds))
-    if k == .fixed: return mk_fixed(subst_partial(int(types[pat].elem), binds), fixed_len(pat))
-    if k == .ptr: return mk_ptr(subst_partial(int(types[pat].elem), binds))
-    if k == .opt: return mk_opt(subst_partial(int(types[pat].elem), binds))
-    if k == .fn_ or k == .tuple:
-        a: int[]
-        loop i in [0..int(types[pat].nargs)): a.push(subst_partial(targ(pat, i), binds))
-        if k == .tuple: return mk_tuple(a, types[pat].sign)
-        return mk_fn(a, subst_partial(int(types[pat].elem), binds), int(types[pat].mutmask), int(types[pat].st), 0, types[pat].sign)
-    if k == .struct_ or k == .enum_:
-        si = int(types[pat].st)
-        a: int[]
-        loop i in [0..int(structs[si].ntargs)): a.push(subst_partial(struct_targ(si, i), binds))
-        return get_struct_inst(int(structs[si].decl), a)
-    pat
+subst_partial = (pat0: int, binds: mut int[]) -> int: ts_partial(pat0, binds)
 
 find_variant = (si: int, name: int) -> int:
     check_struct_fields(si)

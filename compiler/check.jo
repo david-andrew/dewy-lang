@@ -1,3 +1,4 @@
+use 'type_substitute.dewy'
 use 'constant_eval.dewy'
 use 'constant_host.dewy'
 use 'source_types.dewy'
@@ -1295,36 +1296,7 @@ resolve_alias = (d: int, targs: int[], use_pos: int) -> int:
     if ntp == 0 and dewy_at(nodes[d].pos) and not pos_in_lib(nodes[d].pos): union_alias_note(t, int(nodes[d].name))
     t
 
-subst = (t0: int, targs: int[]) -> int:
-    t = prune(t0)
-    if t == 0 or not has_var(t): return t
-    k = types[t].kind
-    if k == .param:
-        id = int(types[t].id)
-        if id < targs.len() and targs[id] != 0: return targs[id]
-        return t
-    if k == .var: return t
-    if k == .effect: return effect_type(effect_subst(int(types[t].st), targs))
-    if k == .callable: return mk_callable_contract(subst(int(types[t].elem), targs), effect_subst(int(types[t].st), targs), int(types[t].bits))
-    if k == .refined: return mk_refined(subst(int(types[t].elem), targs), ref_subst(int(types[t].st), targs))
-    if k == .quantity: return mk_quantity(subst(int(types[t].elem), targs), int(types[t].st), 0, int(types[t].bits))
-    if k == .secret: return mk_secret(subst(int(types[t].elem), targs))
-    if k == .array: return mk_array(subst(int(types[t].elem), targs))
-    if k == .fixed: return mk_fixed(subst(int(types[t].elem), targs), fixed_len(t))
-    if k == .ptr: return mk_ptr(subst(int(types[t].elem), targs))
-    if k == .opt: return mk_opt(subst(int(types[t].elem), targs))
-    if k == .fn_ or k == .tuple or k == .cfn:
-        a: int[]
-        loop i in [0..int(types[t].nargs)): a.push(subst(targ(t, i), targs))
-        if k == .tuple: return mk_tuple(a, types[t].sign)
-        if k == .cfn: return mk_cfn(a, subst(int(types[t].elem), targs))
-        return mk_fn(a, subst(int(types[t].elem), targs), int(types[t].mutmask), int(types[t].st), 0, types[t].sign)
-    if k == .struct_ or k == .enum_:
-        si = int(types[t].st)
-        a: int[]
-        loop i in [0..int(structs[si].ntargs)): a.push(subst(struct_targ(si, i), targs))
-        return get_struct_inst(int(structs[si].decl), a)
-    t
+subst = (t0: int, targs: int[]) -> int: ts_subst(t0, targs)
 
 push_type_params = (decl: int, targs: int[]):
     loop i in [0..nkids2(decl)):

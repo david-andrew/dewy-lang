@@ -1,0 +1,69 @@
+use 'checker_types.dewy'
+use 'type_inference.dewy'
+use 'type_constructors.dewy'
+ts_inputs: *TypeInferenceInput
+type_substitute_bind = (input: *TypeInferenceInput) -> int:
+    ts_inputs = input
+    0
+ts_fixed_len = (t: int) -> int: int(ts_inputs[0].types[0][tu_prune(t)].bits)
+ts_subst = (t0: int, targs: int[]) -> int:
+    t = tu_prune(t0)
+    if t == 0 or not tu_has_var(t): return t
+    k = ts_inputs[0].types[0][t].kind
+    if k == .param:
+        id = int(ts_inputs[0].types[0][t].id)
+        if id < targs.len() and targs[id] != 0: return targs[id]
+        return t
+    if k == .var: return t
+    if k == .effect: return ts_inputs[0].host[0].effect_type(ts_inputs[0].host[0].effect_subst(int(ts_inputs[0].types[0][t].st), targs, false))
+    if k == .callable: return ts_inputs[0].host[0].mk_callable_contract(ts_subst(int(ts_inputs[0].types[0][t].elem), targs), ts_inputs[0].host[0].effect_subst(int(ts_inputs[0].types[0][t].st), targs, false), int(ts_inputs[0].types[0][t].bits))
+    if k == .refined: return ts_inputs[0].host[0].mk_refined(ts_subst(int(ts_inputs[0].types[0][t].elem), targs), ts_inputs[0].host[0].ref_subst(int(ts_inputs[0].types[0][t].st), targs, false))
+    if k == .quantity: return ts_inputs[0].host[0].mk_quantity(ts_subst(int(ts_inputs[0].types[0][t].elem), targs), int(ts_inputs[0].types[0][t].st), 0, int(ts_inputs[0].types[0][t].bits))
+    if k == .secret: return tb_mk_secret(ts_subst(int(ts_inputs[0].types[0][t].elem), targs))
+    if k == .array: return tb_mk_array(ts_subst(int(ts_inputs[0].types[0][t].elem), targs))
+    if k == .fixed: return tb_mk_fixed(ts_subst(int(ts_inputs[0].types[0][t].elem), targs), ts_fixed_len(t))
+    if k == .ptr: return tb_mk_ptr(ts_subst(int(ts_inputs[0].types[0][t].elem), targs))
+    if k == .opt: return tb_mk_opt(ts_subst(int(ts_inputs[0].types[0][t].elem), targs))
+    if k == .fn_ or k == .tuple or k == .cfn:
+        a: int[]
+        loop i in [0..int(ts_inputs[0].types[0][t].nargs)): a.push(ts_subst(tu_targ(t, i), targs))
+        if k == .tuple: return tb_mk_tuple(a, ts_inputs[0].types[0][t].sign)
+        if k == .cfn: return tb_mk_cfn(a, ts_subst(int(ts_inputs[0].types[0][t].elem), targs))
+        return tb_mk_fn(a, ts_subst(int(ts_inputs[0].types[0][t].elem), targs), int(ts_inputs[0].types[0][t].mutmask), int(ts_inputs[0].types[0][t].st), 0, ts_inputs[0].types[0][t].sign)
+    if k == .struct_ or k == .enum_:
+        si = int(ts_inputs[0].types[0][t].st)
+        a: int[]
+        loop i in [0..int(ts_inputs[0].structs[0][si].ntargs)): a.push(ts_subst(tu_struct_targ(si, i), targs))
+        return ts_inputs[0].host[0].get_struct_inst(int(ts_inputs[0].structs[0][si].decl), a)
+    t
+
+
+ts_partial = (pat0: int, binds: mut int[]) -> int:
+    pat = tu_prune(pat0)
+    if not tu_has_var(pat): return pat
+    k = ts_inputs[0].types[0][pat].kind
+    if k == .param:
+        id = int(ts_inputs[0].types[0][pat].id)
+        if binds[id] == 0: binds[id] = tb_mk_var()
+        return binds[id]
+    if k == .array: return tb_mk_array(ts_partial(int(ts_inputs[0].types[0][pat].elem), binds))
+    if k == .callable: return ts_inputs[0].host[0].mk_callable_contract(ts_partial(int(ts_inputs[0].types[0][pat].elem), binds), ts_inputs[0].host[0].effect_subst(int(ts_inputs[0].types[0][pat].st), binds, false), int(ts_inputs[0].types[0][pat].bits))
+    if k == .refined: return ts_inputs[0].host[0].mk_refined(ts_partial(int(ts_inputs[0].types[0][pat].elem), binds), ts_inputs[0].host[0].ref_subst(int(ts_inputs[0].types[0][pat].st), binds, false))
+    if k == .quantity: return ts_inputs[0].host[0].mk_quantity(ts_partial(int(ts_inputs[0].types[0][pat].elem), binds), int(ts_inputs[0].types[0][pat].st), 0, int(ts_inputs[0].types[0][pat].bits))
+    if k == .secret: return tb_mk_secret(ts_partial(int(ts_inputs[0].types[0][pat].elem), binds))
+    if k == .fixed: return tb_mk_fixed(ts_partial(int(ts_inputs[0].types[0][pat].elem), binds), ts_fixed_len(pat))
+    if k == .ptr: return tb_mk_ptr(ts_partial(int(ts_inputs[0].types[0][pat].elem), binds))
+    if k == .opt: return tb_mk_opt(ts_partial(int(ts_inputs[0].types[0][pat].elem), binds))
+    if k == .fn_ or k == .tuple:
+        a: int[]
+        loop i in [0..int(ts_inputs[0].types[0][pat].nargs)): a.push(ts_partial(tu_targ(pat, i), binds))
+        if k == .tuple: return tb_mk_tuple(a, ts_inputs[0].types[0][pat].sign)
+        return tb_mk_fn(a, ts_partial(int(ts_inputs[0].types[0][pat].elem), binds), int(ts_inputs[0].types[0][pat].mutmask), int(ts_inputs[0].types[0][pat].st), 0, ts_inputs[0].types[0][pat].sign)
+    if k == .struct_ or k == .enum_:
+        si = int(ts_inputs[0].types[0][pat].st)
+        a: int[]
+        loop i in [0..int(ts_inputs[0].structs[0][si].ntargs)): a.push(ts_partial(tu_struct_targ(si, i), binds))
+        return ts_inputs[0].host[0].get_struct_inst(int(ts_inputs[0].structs[0][si].decl), a)
+    pat
+
+

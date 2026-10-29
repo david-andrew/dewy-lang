@@ -1,3 +1,4 @@
+use 'type_substitute.dewy'
 use 'type_queries.dewy'
 use 'type_inference.dewy'
 use 'type_unions.dewy'
@@ -177,6 +178,7 @@ type_binds = 0
 inference_host = TypeInferenceHost(mk_callable_contract, effect_subst, effect_type, mk_refined, ref_subst, mk_quantity, get_struct_inst, mk_type, mk_union)
 inference_input = TypeInferenceInput(&types, &structs, &type_args, &type_binds, &inference_host)
 inference_binding = type_inference_bind(&inference_input)
+substitution_binding = type_substitute_bind(&inference_input)
 mk_var = () -> int: tb_mk_var()
 
 mk_param = (idx: int) -> int: tb_mk_param(idx)

@@ -1,0 +1,75 @@
+$runtime_checks
+from p"checker_types.dewy" import (TypeInfo StructInfo)
+from p"type_inference.dewy" import (TypeInferenceInput tu_prune tu_has_var tu_targ tu_struct_targ)
+from p"type_constructors.dewy" import (tb_mk_secret tb_mk_array tb_mk_fixed tb_mk_ptr tb_mk_opt tb_mk_tuple tb_mk_cfn tb_mk_fn tb_mk_var)
+# Recursive full and partial substitution retain type IDs across constructors.
+# Partial requests share bindings by place; completed types stay canonical.
+SWord:type=int64<overflow='wrap'>
+let ts_inputs:ptr<TypeInferenceInput>=$unsafe (uint64(0) as ptr<TypeInferenceInput>)
+type_substitute_bind=(input:ptr<TypeInferenceInput>):>SWord=>{ts_inputs=input;0}
+ts_fixed_len=(t:SWord):>SWord=>$unsafe {SWord(ts_inputs[0].types[0].ptr[tu_prune(t)].bits)}
+ts_subst=(t0:SWord targs:array<int64>):>SWord=>$unsafe {
+    let t=tu_prune(t0)
+    if t =? 0 or not tu_has_var(t) {return t}
+    let k=ts_inputs[0].types[0].ptr[t].kind
+    if k =? 'param' {
+        let id=SWord(ts_inputs[0].types[0].ptr[t].id)
+        if id <? targs.length and targs[id] not=? 0 {return targs[id]}
+        return t
+    }
+    if k =? 'var' {return t}
+    if k =? 'effect' {return ts_inputs[0].host[0].effect_type(ts_inputs[0].host[0].effect_subst(SWord(ts_inputs[0].types[0].ptr[t].st)  targs  false))}
+    if k =? 'callable' {return ts_inputs[0].host[0].mk_callable_contract(ts_subst(SWord(ts_inputs[0].types[0].ptr[t].elem)  targs)  ts_inputs[0].host[0].effect_subst(SWord(ts_inputs[0].types[0].ptr[t].st)  targs  false)  SWord(ts_inputs[0].types[0].ptr[t].bits))}
+    if k =? 'refined' {return ts_inputs[0].host[0].mk_refined(ts_subst(SWord(ts_inputs[0].types[0].ptr[t].elem)  targs)  ts_inputs[0].host[0].ref_subst(SWord(ts_inputs[0].types[0].ptr[t].st)  targs  false))}
+    if k =? 'quantity' {return ts_inputs[0].host[0].mk_quantity(ts_subst(SWord(ts_inputs[0].types[0].ptr[t].elem)  targs)  SWord(ts_inputs[0].types[0].ptr[t].st)  0  SWord(ts_inputs[0].types[0].ptr[t].bits))}
+    if k =? 'secret' {return tb_mk_secret(ts_subst(SWord(ts_inputs[0].types[0].ptr[t].elem)  targs))}
+    if k =? 'array' {return tb_mk_array(ts_subst(SWord(ts_inputs[0].types[0].ptr[t].elem)  targs))}
+    if k =? 'fixed' {return tb_mk_fixed(ts_subst(SWord(ts_inputs[0].types[0].ptr[t].elem)  targs)  ts_fixed_len(t))}
+    if k =? 'ptr' {return tb_mk_ptr(ts_subst(SWord(ts_inputs[0].types[0].ptr[t].elem)  targs))}
+    if k =? 'opt' {return tb_mk_opt(ts_subst(SWord(ts_inputs[0].types[0].ptr[t].elem)  targs))}
+    if k =? 'fn_' or k =? 'tuple' or k =? 'cfn' {
+        let a:array<int64>=[]
+        loop i in [0..SWord(ts_inputs[0].types[0].ptr[t].nargs)) {a.push(ts_subst(tu_targ(t  i)  targs))}
+        if k =? 'tuple' {return tb_mk_tuple(a  ts_inputs[0].types[0].ptr[t].sign)}
+        if k =? 'cfn' {return tb_mk_cfn(a  ts_subst(SWord(ts_inputs[0].types[0].ptr[t].elem)  targs))}
+        return tb_mk_fn(a  ts_subst(SWord(ts_inputs[0].types[0].ptr[t].elem)  targs)  SWord(ts_inputs[0].types[0].ptr[t].mutmask)  SWord(ts_inputs[0].types[0].ptr[t].st)  0  ts_inputs[0].types[0].ptr[t].sign)
+    }
+    if k =? 'struct_' or k =? 'enum_' {
+        let si=SWord(ts_inputs[0].types[0].ptr[t].st)
+        let a:array<int64>=[]
+        loop i in [0..SWord(ts_inputs[0].structs[0].ptr[si].ntargs)) {a.push(ts_subst(tu_struct_targ(si  i)  targs))}
+        return ts_inputs[0].host[0].get_struct_inst(SWord(ts_inputs[0].structs[0].ptr[si].decl)  a)
+    }
+    t
+}
+ts_partial=(pat0:SWord @binds:array<int64>):>SWord=>$unsafe {
+    let pat=tu_prune(pat0)
+    if not tu_has_var(pat) {return pat}
+    let k=ts_inputs[0].types[0].ptr[pat].kind
+    if k =? 'param' {
+        let id=SWord(ts_inputs[0].types[0].ptr[pat].id)
+        if binds[id] =? 0 {binds[id] = tb_mk_var()}
+        return binds[id]
+    }
+    if k =? 'array' {return tb_mk_array(ts_partial(SWord(ts_inputs[0].types[0].ptr[pat].elem) @binds))}
+    if k =? 'callable' {return ts_inputs[0].host[0].mk_callable_contract(ts_partial(SWord(ts_inputs[0].types[0].ptr[pat].elem) @binds)  ts_inputs[0].host[0].effect_subst(SWord(ts_inputs[0].types[0].ptr[pat].st)  binds  false)  SWord(ts_inputs[0].types[0].ptr[pat].bits))}
+    if k =? 'refined' {return ts_inputs[0].host[0].mk_refined(ts_partial(SWord(ts_inputs[0].types[0].ptr[pat].elem) @binds)  ts_inputs[0].host[0].ref_subst(SWord(ts_inputs[0].types[0].ptr[pat].st)  binds  false))}
+    if k =? 'quantity' {return ts_inputs[0].host[0].mk_quantity(ts_partial(SWord(ts_inputs[0].types[0].ptr[pat].elem) @binds)  SWord(ts_inputs[0].types[0].ptr[pat].st)  0  SWord(ts_inputs[0].types[0].ptr[pat].bits))}
+    if k =? 'secret' {return tb_mk_secret(ts_partial(SWord(ts_inputs[0].types[0].ptr[pat].elem) @binds))}
+    if k =? 'fixed' {return tb_mk_fixed(ts_partial(SWord(ts_inputs[0].types[0].ptr[pat].elem) @binds)  ts_fixed_len(pat))}
+    if k =? 'ptr' {return tb_mk_ptr(ts_partial(SWord(ts_inputs[0].types[0].ptr[pat].elem) @binds))}
+    if k =? 'opt' {return tb_mk_opt(ts_partial(SWord(ts_inputs[0].types[0].ptr[pat].elem) @binds))}
+    if k =? 'fn_' or k =? 'tuple' {
+        let a:array<int64>=[]
+        loop i in [0..SWord(ts_inputs[0].types[0].ptr[pat].nargs)) {a.push(ts_partial(tu_targ(pat  i) @binds))}
+        if k =? 'tuple' {return tb_mk_tuple(a  ts_inputs[0].types[0].ptr[pat].sign)}
+        return tb_mk_fn(a  ts_partial(SWord(ts_inputs[0].types[0].ptr[pat].elem) @binds)  SWord(ts_inputs[0].types[0].ptr[pat].mutmask)  SWord(ts_inputs[0].types[0].ptr[pat].st)  0  ts_inputs[0].types[0].ptr[pat].sign)
+    }
+    if k =? 'struct_' or k =? 'enum_' {
+        let si=SWord(ts_inputs[0].types[0].ptr[pat].st)
+        let a:array<int64>=[]
+        loop i in [0..SWord(ts_inputs[0].structs[0].ptr[si].ntargs)) {a.push(ts_partial(tu_struct_targ(si  i) @binds))}
+        return ts_inputs[0].host[0].get_struct_inst(SWord(ts_inputs[0].structs[0].ptr[si].decl)  a)
+    }
+    pat
+}
