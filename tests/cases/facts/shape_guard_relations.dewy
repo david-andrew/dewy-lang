@@ -1,0 +1,24 @@
+first=(a:array<int length=[n]> b:array<int length=[n]>):>int=>{
+    if n =? 0 return 0
+    $assert(b.length >? 0)
+    min(b) + b[0]
+}
+cell=(a:array<int length=[r c]> b:array<int length=[r c]>):>int=>{
+    if r =? 0 or c =? 0 return 0
+    b[0 0]
+}
+chained=(a:array<int> b:array<int> c:array<int>):>int=>{
+    if a.length not=? b.length or b.length not=? c.length return 0
+    if a.length =? 0 return 0
+    c[0]
+}
+snapshot=(a:array<int length=[n]> b:array<int length=[n]>):>int=>{
+    a=[]
+    if n >? 0 return b[0]
+    0
+}
+printl(first([4] [8]))
+printl(first([] []))
+printl(cell([1 2 ; 3 4] [5 6 ; 7 8]))
+printl(chained([1] [2] [3]))
+printl(snapshot([4] [9]))

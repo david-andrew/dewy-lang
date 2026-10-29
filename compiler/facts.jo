@@ -2447,6 +2447,15 @@ fact_distance = (s: FactState, a: int, b: int, limit: int) -> bool:
         cursor += 1
         source = terms[index]
         distance = distances[index]
+        # A path can end at an interval, not only the same value identity.
+        # Guards narrow bounds after equality rows were recorded (for example,
+        # a shape binder becoming nonempty). Query only these visited values;
+        # no eager propagation or new rows. Open/wide endpoints prove nothing.
+        x = fact_bound(s, a)
+        y = fact_bound(s, source)
+        if not x.wide and not y.wide and x.hi != FACT_MAX and y.lo != FACT_MIN and fact_add_fits(x.hi, -y.lo):
+            gap = x.hi - y.lo
+            if fact_add_fits(gap, distance) and gap + distance <= limit: return true
         previous = -1
         ri = fact_difference_head(s, source, 0)
         loop ri >= 0:
