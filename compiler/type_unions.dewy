@@ -28,7 +28,8 @@ TypeUnionInput:type=[
 let uu_inputs:ptr<TypeUnionInput>=$unsafe (uint64(0) as ptr<TypeUnionInput>)
 let uu_instances:dict<array<int64> int64>=[]
 let uu_candidates:array<int64>=[]
-type_union_bind=(input:ptr<TypeUnionInput>):>UWord=>{uu_inputs=input; uu_instances=[]; uu_candidates=[]; 0}
+let uu_alias_names:dict<int64 int64>=[]
+type_union_bind=(input:ptr<TypeUnionInput>):>UWord=>{uu_inputs=input; uu_instances=[]; uu_candidates=[]; uu_alias_names=[]; 0}
 uu_mk_union=(ms0:array<int64>):>UWord=>$unsafe {
     let ms:array<int64>=[]
     let has_none=false
@@ -158,3 +159,51 @@ uu_create=(ms:array<int64> stable:bool):>UWord=>$unsafe {
     if stable {uu_instances[ms] = uu_inputs[0].types[0].length - 1}
     uu_inputs[0].types[0].length - 1
 }
+
+# Membership retains the original first structural match. No service can grow
+# arenas inside this walk; literal-set publication below reacquires after calls.
+uu_index=(u:UWord m:UWord):>UWord=>$unsafe {
+    let si=UWord(uu_inputs[0].types[0].ptr[tu_prune(u)].st)
+    let first=UWord(uu_inputs[0].structs[0].ptr[si].targs)
+    let count=UWord(uu_inputs[0].structs[0].ptr[si].ntargs)
+    let members=uu_inputs[0].args[0].ptr
+    loop i in [UWord(0)..count) {
+        if tu_equal(UWord(members[first + i]) m) {return i}
+    }
+    -1
+}
+uu_holder=(u:UWord m:UWord whole:bool):>UWord=>$unsafe {
+    let i=uu_index(u m)
+    let ms=uu_inputs[0].host[0].str_set_of(m)
+    if i >=? 0 or ms =? 0 {return i}
+    let members=tu_union_members(u)
+    let j:UWord=0
+    loop x in members {
+        let xs=uu_inputs[0].host[0].str_set_of(x)
+        if xs not=? 0 {
+            if whole {
+                loop value in uu_inputs[0].sets[0][ms] {
+                    if not uu_inputs[0].sets[0][xs].contains(value) {return -1}
+                }
+            }
+            return j
+        }
+        j += 1
+    }
+    -1
+}
+# A second spelling permanently makes an alias ambiguous; a cached zero is a
+# real entry. Binding a fresh compilation resets this owner-local metadata.
+uu_alias_note=(t0:UWord name:UWord):>void=>$unsafe {
+    let t=tu_prune(t0)
+    let k=uu_inputs[0].types[0].ptr[t].kind
+    if k not=? 'struct_' and k not=? 'enum_' {return}
+    if not uu_inputs[0].structs[0].ptr[UWord(uu_inputs[0].types[0].ptr[t].st)].union_ {return}
+    let seen=uu_alias_names.get(t)
+    if seen isnt? none {
+        if (seen as int64) not=? name {uu_alias_names[t]=0}
+        return
+    }
+    uu_alias_names[t]=name
+}
+uu_alias_name=(t:UWord):>UWord=>uu_alias_names.get(tu_prune(t)) ?? 0

@@ -21,10 +21,12 @@ struct TypeUnionInput:
 uu_inputs: *TypeUnionInput
 uu_instances: {int[]: int} = {}
 uu_candidates: int[]
+uu_alias_names: {int: int} = {}
 type_union_bind = (input: *TypeUnionInput) -> int:
     uu_inputs = input
     uu_instances = {}
     uu_candidates = []
+    uu_alias_names = {}
     0
 uu_mk_union = (ms0: int[]) -> int:
     ms: int[]
@@ -118,3 +120,35 @@ uu_union_inst = (ms: int[]) -> int:
     if stable: uu_instances[ms] = uu_inputs[0].types[0].len() - 1
     uu_inputs[0].types[0].len() - 1
 
+
+uu_index = (u: int, m: int) -> int:
+    si = int(uu_inputs[0].types[0][tu_prune(u)].st)
+    loop i in [0..int(uu_inputs[0].structs[0][si].ntargs)):
+        if tu_equal(tu_struct_targ(si, i), m): return i
+    -1
+
+
+uu_holder = (u: int, m: int, whole: bool) -> int:
+    i = uu_index(u, m)
+    ms = uu_inputs[0].host[0].str_set_of(m)
+    if i >= 0 or ms == 0: return i
+    loop j in 0.. and x in tu_union_members(u):
+        xs = uu_inputs[0].host[0].str_set_of(x)
+        if xs != 0:
+            if whole:
+                loop value in uu_inputs[0].sets[0][ms]:
+                    if not uu_inputs[0].sets[0][xs].contains(value): return -1
+            return j
+    -1
+
+
+uu_alias_note = (t0: int, name: int):
+    t = tu_prune(t0)
+    if uu_inputs[0].types[0][tu_prune(t)].kind != .struct_ and uu_inputs[0].types[0][tu_prune(t)].kind != .enum_ or not uu_inputs[0].structs[0][int(uu_inputs[0].types[0][t].st)].union_: return
+    if let seen = uu_alias_names.get(t):
+        if seen != name: uu_alias_names[t] = 0
+        return
+    uu_alias_names[t] = name
+
+
+uu_alias_name = (t: int) -> int: uu_alias_names.get(tu_prune(t)) ?? 0

@@ -298,7 +298,7 @@ tsd = (jo: str, dewy: str) -> str: if ts_dewy: dewy else: jo
 dt = (t: int) -> str: type_str(t, ts_dewy)
 # (a type mismatch's side: a Dewy union by the alias the program names it with)
 dt_named = (t: int) -> str:
-    alias = if ts_dewy: union_alias_names.get(prune(t)) ?? 0 else: 0
+    alias = if ts_dewy: uu_alias_name(t) else: 0
     if alias != 0: return name_of(alias)
     dt(t)
 # (the names of the type parameters of the declaration whose types are being shown: a
@@ -325,27 +325,12 @@ union_members = (t0: int) -> int[]:
     out
 
 # the index of member m in union u (-1 if it is not one)
-union_index = (u: int, m: int) -> int:
-    si = int(types[prune(u)].st)
-    loop i in [0..int(structs[si].ntargs)):
-        if type_eq(struct_targ(si, i), m): return i
-    -1
+union_index = (u: int, m: int) -> int: uu_index(u, m)
 
 # the member of union u that holds union member m: m itself, or else u's string set when
 # m is one too (a union has at most one), holding all of m's members when `whole`
 # (`'b'|'c'` in `'a'|'b'|'c' | int64`); -1 if none
-union_holder = (u: int, m: int, whole: bool) -> int:
-    i = union_index(u, m)
-    ms = str_set_of(m)
-    if i >= 0 or ms == 0: return i
-    loop j in 0.. and x in union_members(u):
-        xs = str_set_of(x)
-        if xs != 0:
-            if whole:
-                loop value in str_sets[ms]:
-                    if not str_sets[xs].contains(value): return -1
-            return j
-    -1
+union_holder = (u: int, m: int, whole: bool) -> int: uu_holder(u, m, whole)
 
 mk_union = (ms: int[]) -> int: uu_mk_union(ms)
 
@@ -353,15 +338,8 @@ mk_union = (ms: int[]) -> int: uu_mk_union(ms)
 # unresolved members still need structural matching until inference finishes.
 # (a Dewy union the program names with one non-generic alias, `Value:type=int64|string`:
 # diagnostics show the alias; 0 when two aliases name it)
-union_alias_names: {int: int} = {}
 
-union_alias_note = (t0: int, name: int):
-    t = prune(t0)
-    if tkind(t) != .struct_ and tkind(t) != .enum_ or not structs[int(types[t].st)].union_: return
-    if let seen = union_alias_names.get(t):
-        if seen != name: union_alias_names[t] = 0
-        return
-    union_alias_names[t] = name
+union_alias_note = (t0: int, name: int): uu_alias_note(t0, name)
 
 union_inst = (ms: int[]) -> int: uu_union_inst(ms)
 
