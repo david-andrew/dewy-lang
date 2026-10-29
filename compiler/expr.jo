@@ -1,3 +1,4 @@
+use 'type_match.dewy'
 use 'type_substitute.dewy'
 use 'checker_state.dewy'
 use 'refine_intervals.dewy'
@@ -1592,131 +1593,14 @@ save_call_order = (n: int, given: int[], final: int[]):
     set_list(metadata, entries)
     nodes[n].c = i32(metadata)
 
-match_type = (pat0: int, a0: int, binds: mut int[], depth: int) -> int:
-    pat = prune(pat0)
-    a = prune(a0)
-    if types[pat].kind == .callable:
-        if not effect_match(callable_contract(a), callable_contract(pat), binds): return -1
-        return match_type(callable_base(pat), callable_base(a), binds, depth)
-    if types[a].kind == .callable and types[pat].kind != .param: a = callable_base(a)
-    # (inside a container a type parameter takes the elements' refinement too: array<Pos> is
-    # array<T> with T a Pos, not an int64, so the instance stores and returns Pos values)
-    whole = a
-    if refine_active:
-        pat = representation_type(pat)
-        a = representation_type(a)
-    if a == T_NEVER: return 0
-    pk = types[pat].kind
-    ak = types[a].kind
-    if pk == .param:
-        id = int(types[pat].id)
-        if binds[id] == 0:
-            binds[id] = if depth > 0: whole else: a
-            if depth == 0: return 3
-            return 0
-        if type_eq(binds[id], a): return 0
-        if has_var(prune(binds[id])) and unify(binds[id], a): return 0
-        if can_coerce(0, a, binds[id]): return 1
-        return -1
-    if not has_var(pat):
-        if type_eq(pat, a): return 0
-        if has_var(a):
-            if ak == .var: return 0
-            if ak == pk and ak == .array and match_type(int(types[pat].elem), int(types[a].elem), binds, depth + 1) >= 0: return 0
-            if ak == .opt and pk == .opt: return 0
-        if ak == .none_lit and pk == .opt: return 0
-        if can_coerce(0, a, pat):
-            if pat == T_MATH_INT and ak == .int_: return 2
-            if a == T_MATH_INT and pk == .int_ and not int_widens(a, pat): return 2
-            if ak == .float_ and pk == .float_:
-                if int(types[a].bits) < int(types[pat].bits): return 4
-                return 5
-            if (ak == .int_ and pk == .float_) or pk == .opt: return 2
-            return 1
-        # (a narrowing is a proven conversion: the last resort among overloads)
-        if ak == .int_ and pk == .int_ and caller_dewy(): return 20
-        return -1
-    if ak == .var: return 0
-    if is_union(pat): return match_union(pat, a, binds, depth)
-    if pk == .opt and ak != .opt:
-        if ak == .none_lit: return 0
-        r = match_type(int(types[pat].elem), a, binds, depth + 1)
-        if r < 0: return -1
-        return r + 4
-    if pk == .quantity:
-        if ak != .quantity or types[pat].st != types[a].st: return -1
-        return match_type(quantity_base(pat), quantity_base(a), binds, depth + 1)
-    if pk == .array and ak == .fixed:
-        # (passed as a copy in a new array)
-        r = match_type(int(types[pat].elem), int(types[a].elem), binds, depth + 1)
-        if r < 0: return -1
-        return r + 2
-    if pk != ak: return -1
-    if pk == .array or pk == .ptr or pk == .opt or pk == .secret: return match_type(int(types[pat].elem), int(types[a].elem), binds, depth + 1)
-    if pk == .fixed:
-        if types[pat].bits != types[a].bits: return -1
-        return match_type(int(types[pat].elem), int(types[a].elem), binds, depth + 1)
-    if pk == .fn_ or pk == .tuple or pk == .cfn:
-        if types[pat].nargs != types[a].nargs: return -1
-        cost = 0
-        loop i in [0..int(types[pat].nargs)):
-            r = match_type(targ(pat, i), targ(a, i), binds, depth + 1)
-            if r < 0: return -1
-            cost += r
-        if pk != .tuple:
-            r = match_type(int(types[pat].elem), int(types[a].elem), binds, depth + 1)
-            if r < 0: return -1
-            cost += r
-        return cost
-    if pk == .struct_ or pk == .enum_:
-        sp = int(types[pat].st)
-        sa = int(types[a].st)
-        if structs[sp].decl != structs[sa].decl: return -1
-        cost = 0
-        loop i in [0..int(structs[sp].ntargs)):
-            r = match_type(struct_targ(sp, i), struct_targ(sa, i), binds, depth + 1)
-            if r < 0: return -1
-            cost += r
-        return cost
-    -1
+match_type = (pat0: int, a0: int, binds: mut int[], depth: int) -> int: tm_match(pat0, a0, binds, depth)
 
 # type parameter id is a member of a union in type t
-param_in_union = (t0: int, id: int) -> bool:
-    t = prune(t0)
-    if not has_var(t): return false
-    k = types[t].kind
-    if is_union(t):
-        loop m in union_members(t):
-            if types[prune(m)].kind == .param and int(types[prune(m)].id) == id: return true
-    if k == .array or k == .opt or k == .ptr: return param_in_union(int(types[t].elem), id)
-    if k == .struct_ or k == .enum_:
-        si = int(types[t].st)
-        loop j in [0..int(structs[si].ntargs)):
-            if param_in_union(struct_targ(si, j), id): return true
-    false
+param_in_union = (t0: int, id: int) -> bool: tm_param_in_union(t0, id)
 
 # T | Err against int | str | Err: the members the pattern names match themselves, and its type
 # parameter stands for the rest (int | str); a lone member (Err, or int) matches the same way
-match_union = (pat: int, a: int, binds: mut int[], depth: int) -> int:
-    pms = union_members(pat)
-    ams = [a]
-    if is_union(a): ams = union_members(a)
-    rest: int[]
-    loop m in ams:
-        named = false
-        loop pm in pms:
-            if not has_var(pm) and type_eq(pm, m): named = true
-        if not named: rest.push(m)
-    params: int[]
-    loop pm in pms:
-        if has_var(pm): params.push(pm)
-    if params.len() != 1 or types[prune(params[0])].kind != .param: return -1
-    widen = 0
-    if not is_union(a): widen = 1
-    if rest.len() == 0: return widen        # (the parameter is decided by other arguments)
-    r = match_type(params[0], mk_union(rest), binds, depth + 1)
-    if r < 0: return -1
-    r + widen
+match_union = (pat: int, a: int, binds: mut int[], depth: int) -> int: tm_union(pat, a, binds, depth)
 
 subst_partial = (pat0: int, binds: mut int[]) -> int: ts_partial(pat0, binds)
 

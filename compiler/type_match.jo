@@ -1,0 +1,176 @@
+use 'checker_types.dewy'
+use 'type_inference.dewy'
+struct TypeMatchHost:
+    can_coerce: (int, int, int) -> bool
+    caller_dewy: () -> bool
+    effect_match: (int, int, mut int[]) -> bool
+tm_types: *(TypeInfo[])
+tm_structs: *(StructInfo[])
+tm_inference: *TypeInferenceInput
+tm_active: *bool
+tm_never: *int
+tm_math: *int
+tm_host: *TypeMatchHost
+type_match_bind = (input: *TypeInferenceInput, active: *bool, never: *int, math: *int, host: *TypeMatchHost) -> int:
+    tm_inference = input
+    tm_types = input[0].types
+    tm_structs = input[0].structs
+    tm_active = active
+    tm_never = never
+    tm_math = math
+    tm_host = host
+    0
+tm_quantity_base = (t: int) -> int: int(tm_types[0][tu_prune(t)].elem)
+tm_match = (pat0: int, a0: int, binds: mut int[], depth: int) -> int:
+    pat = tu_prune(pat0)
+    a = tu_prune(a0)
+    if tm_types[0][pat].kind == .callable:
+        if not tm_host[0].effect_match(tm_contract(a), tm_contract(pat), binds): return -1
+        return tm_match(tm_callable_base(pat), tm_callable_base(a), binds, depth)
+    if tm_types[0][a].kind == .callable and tm_types[0][pat].kind != .param: a = tm_callable_base(a)
+    # (inside a container a type parameter takes the elements' refinement too: array<Pos> is
+    # array<T> with T a Pos, not an int64, so the instance stores and returns Pos values)
+    whole = a
+    if tm_active[0]:
+        pat = tm_representation(pat)
+        a = tm_representation(a)
+    if a == tm_never[0]: return 0
+    pk = tm_types[0][pat].kind
+    ak = tm_types[0][a].kind
+    if pk == .param:
+        id = int(tm_types[0][pat].id)
+        if binds[id] == 0:
+            binds[id] = if depth > 0: whole else: a
+            if depth == 0: return 3
+            return 0
+        if tu_equal(binds[id], a): return 0
+        if tu_has_var(tu_prune(binds[id])) and tu_unify(binds[id], a): return 0
+        if tm_host[0].can_coerce(0, a, binds[id]): return 1
+        return -1
+    if not tu_has_var(pat):
+        if tu_equal(pat, a): return 0
+        if tu_has_var(a):
+            if ak == .var: return 0
+            if ak == pk and ak == .array and tm_match(int(tm_types[0][pat].elem), int(tm_types[0][a].elem), binds, depth + 1) >= 0: return 0
+            if ak == .opt and pk == .opt: return 0
+        if ak == .none_lit and pk == .opt: return 0
+        if tm_host[0].can_coerce(0, a, pat):
+            if pat == tm_math[0] and ak == .int_: return 2
+            if a == tm_math[0] and pk == .int_ and not tm_int_widens(a, pat): return 2
+            if ak == .float_ and pk == .float_:
+                if int(tm_types[0][a].bits) < int(tm_types[0][pat].bits): return 4
+                return 5
+            if (ak == .int_ and pk == .float_) or pk == .opt: return 2
+            return 1
+        # (a narrowing is a proven conversion: the last resort among overloads)
+        if ak == .int_ and pk == .int_ and tm_host[0].caller_dewy(): return 20
+        return -1
+    if ak == .var: return 0
+    if tu_is_union(pat): return tm_union(pat, a, binds, depth)
+    if pk == .opt and ak != .opt:
+        if ak == .none_lit: return 0
+        r = tm_match(int(tm_types[0][pat].elem), a, binds, depth + 1)
+        if r < 0: return -1
+        return r + 4
+    if pk == .quantity:
+        if ak != .quantity or tm_types[0][pat].st != tm_types[0][a].st: return -1
+        return tm_match(tm_quantity_base(pat), tm_quantity_base(a), binds, depth + 1)
+    if pk == .array and ak == .fixed:
+        # (passed as a copy in a new array)
+        r = tm_match(int(tm_types[0][pat].elem), int(tm_types[0][a].elem), binds, depth + 1)
+        if r < 0: return -1
+        return r + 2
+    if pk != ak: return -1
+    if pk == .array or pk == .ptr or pk == .opt or pk == .secret: return tm_match(int(tm_types[0][pat].elem), int(tm_types[0][a].elem), binds, depth + 1)
+    if pk == .fixed:
+        if tm_types[0][pat].bits != tm_types[0][a].bits: return -1
+        return tm_match(int(tm_types[0][pat].elem), int(tm_types[0][a].elem), binds, depth + 1)
+    if pk == .fn_ or pk == .tuple or pk == .cfn:
+        if tm_types[0][pat].nargs != tm_types[0][a].nargs: return -1
+        cost = 0
+        loop i in [0..int(tm_types[0][pat].nargs)):
+            r = tm_match(tu_targ(pat, i), tu_targ(a, i), binds, depth + 1)
+            if r < 0: return -1
+            cost += r
+        if pk != .tuple:
+            r = tm_match(int(tm_types[0][pat].elem), int(tm_types[0][a].elem), binds, depth + 1)
+            if r < 0: return -1
+            cost += r
+        return cost
+    if pk == .struct_ or pk == .enum_:
+        sp = int(tm_types[0][pat].st)
+        sa = int(tm_types[0][a].st)
+        if tm_structs[0][sp].decl != tm_structs[0][sa].decl: return -1
+        cost = 0
+        loop i in [0..int(tm_structs[0][sp].ntargs)):
+            r = tm_match(tu_struct_targ(sp, i), tu_struct_targ(sa, i), binds, depth + 1)
+            if r < 0: return -1
+            cost += r
+        return cost
+    -1
+
+
+tm_param_in_union = (t0: int, id: int) -> bool:
+    t = tu_prune(t0)
+    if not tu_has_var(t): return false
+    k = tm_types[0][t].kind
+    if tu_is_union(t):
+        loop m in tu_union_members(t):
+            if tm_types[0][tu_prune(m)].kind == .param and int(tm_types[0][tu_prune(m)].id) == id: return true
+    if k == .array or k == .opt or k == .ptr: return tm_param_in_union(int(tm_types[0][t].elem), id)
+    if k == .struct_ or k == .enum_:
+        si = int(tm_types[0][t].st)
+        loop j in [0..int(tm_structs[0][si].ntargs)):
+            if tm_param_in_union(tu_struct_targ(si, j), id): return true
+    false
+
+
+tm_union = (pat: int, a: int, binds: mut int[], depth: int) -> int:
+    pms = tu_union_members(pat)
+    ams = [a]
+    if tu_is_union(a): ams = tu_union_members(a)
+    rest: int[]
+    loop m in ams:
+        named = false
+        loop pm in pms:
+            if not tu_has_var(pm) and tu_equal(pm, m): named = true
+        if not named: rest.push(m)
+    params: int[]
+    loop pm in pms:
+        if tu_has_var(pm): params.push(pm)
+    if params.len() != 1 or tm_types[0][tu_prune(params[0])].kind != .param: return -1
+    widen = 0
+    if not tu_is_union(a): widen = 1
+    if rest.len() == 0: return widen        # (the parameter is decided by other arguments)
+    r = tm_match(params[0], tm_inference[0].host[0].mk_union(rest), binds, depth + 1)
+    if r < 0: return -1
+    r + widen
+
+
+tm_callable_base = (t0: int) -> int:
+    t = tu_prune(t0)
+    if tm_types[0][t].kind == .callable: return int(tm_types[0][t].elem)
+    t
+
+
+tm_contract = (t0: int) -> int:
+    t = tu_prune(t0)
+    if tm_types[0][t].kind == .callable: return int(tm_types[0][t].st)
+    0
+
+
+tm_representation = (t0: int) -> int:
+    t = tu_prune(t0)
+    if tm_types[0][t].kind == .refined: return tu_prune(int(tm_types[0][t].elem))
+    t
+
+
+tm_int_widens = (f: int, t: int) -> bool:
+    if t == tm_math[0]: return true
+    if f == tm_math[0]: return false
+    fb = int(tm_types[0][f].bits)
+    tb = int(tm_types[0][t].bits)
+    if tm_types[0][f].sign == tm_types[0][t].sign: return tb >= fb
+    if not tm_types[0][f].sign and tm_types[0][t].sign: return tb > fb
+    false
+

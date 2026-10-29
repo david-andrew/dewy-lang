@@ -1,0 +1,197 @@
+$runtime_checks
+from p"checker_types.dewy" import (TypeInfo StructInfo)
+from p"type_inference.dewy" import (TypeInferenceInput tu_prune tu_has_var tu_equal tu_unify tu_is_union tu_union_members tu_targ tu_struct_targ)
+# Generic matching retains the existing overload costs and partial bindings.
+# Callbacks may reenter checking; only stable IDs survive those calls.
+MWord:type=int64<overflow='wrap'>
+TypeMatchHost:type=[
+    can_coerce:<(n:int64 source:int64 dest:int64):>bool>
+    caller_dewy:<():>bool>
+    effect_match:<(source:int64 dest:int64 @binds:array<int64>):>bool>
+]
+let tm_types:ptr<array<TypeInfo>>=$unsafe (uint64(0) as ptr<array<TypeInfo>>)
+let tm_structs:ptr<array<StructInfo>>=$unsafe (uint64(0) as ptr<array<StructInfo>>)
+let tm_inference:ptr<TypeInferenceInput>=$unsafe (uint64(0) as ptr<TypeInferenceInput>)
+let tm_active:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+let tm_never:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let tm_math:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let tm_host:ptr<TypeMatchHost>=$unsafe (uint64(0) as ptr<TypeMatchHost>)
+type_match_bind=(input:ptr<TypeInferenceInput> active:ptr<bool> never:ptr<int64> math:ptr<int64> host:ptr<TypeMatchHost>):>MWord=>$unsafe {
+    tm_inference=input; tm_types=input[0].types; tm_structs=input[0].structs
+    tm_active=active; tm_never=never; tm_math=math; tm_host=host; 0
+}
+tm_quantity_base=(t:MWord):>MWord=>$unsafe {MWord(tm_types[0].ptr[tu_prune(t)].elem)}
+tm_match=(pat0:MWord a0:MWord @binds:array<int64> depth:MWord):>MWord=>$unsafe {
+    let types=tm_types[0].ptr
+    let pat=pat0
+    let a=a0
+    loop pat not=? 0 and types[pat].kind =? 'var' and types[pat].ref not=? 0 {pat=MWord(types[pat].ref)}
+    loop a not=? 0 and types[a].kind =? 'var' and types[a].ref not=? 0 {a=MWord(types[a].ref)}
+    if tm_types[0].ptr[pat].kind =? 'callable' {
+        if not tm_host[0].effect_match(tm_contract(a)  tm_contract(pat)  @binds) {return - 1}
+        return tm_match(tm_callable_base(pat)  tm_callable_base(a)  @binds  depth)
+    }
+    if tm_types[0].ptr[a].kind =? 'callable' and tm_types[0].ptr[pat].kind not=? 'param' {a=tm_callable_base(a)}
+# (inside a container a type parameter takes the elements' refinement too: array<Pos> is
+# array<T> with T a Pos, not an int64, so the instance stores and returns Pos values)
+    let whole=a
+    if tm_active[0] {
+        pat=tm_representation(pat)
+        a=tm_representation(a)
+    }
+    if a =? tm_never[0] {return 0}
+    let pk=tm_types[0].ptr[pat].kind
+    let ak=tm_types[0].ptr[a].kind
+    if pk =? 'param' {
+        let id=MWord(tm_types[0].ptr[pat].id)
+        if binds[id] =? 0 {
+            binds[id] = if depth >? 0 {whole} else {a}
+            if depth =? 0 {return 3}
+            return 0
+        }
+        if tu_equal(binds[id]  a) {return 0}
+        if tu_has_var(tu_prune(binds[id])) and tu_unify(binds[id]  a) {return 0}
+        if tm_host[0].can_coerce(0  a  binds[id]) {return 1}
+        return - 1
+    }
+    if (tm_types[0].ptr[pat].flags & 1) =? 0 {
+        if pat =? a or tu_equal(pat  a) {return 0}
+        if tu_has_var(a) {
+            if ak =? 'var' {return 0}
+            if ak =? pk and ak =? 'array' and tm_match(MWord(tm_types[0].ptr[pat].elem)  MWord(tm_types[0].ptr[a].elem)  @binds  depth + 1) >=? 0 {return 0}
+            if ak =? 'opt' and pk =? 'opt' {return 0}
+        }
+        if ak =? 'none_lit' and pk =? 'opt' {return 0}
+        if tm_host[0].can_coerce(0  a  pat) {
+            if pat =? tm_math[0] and ak =? 'int_' {return 2}
+            if a =? tm_math[0] and pk =? 'int_' and not tm_int_widens(a  pat) {return 2}
+            if ak =? 'float_' and pk =? 'float_' {
+                if MWord(tm_types[0].ptr[a].bits) <? MWord(tm_types[0].ptr[pat].bits) {return 4}
+                return 5
+            }
+            if(ak =? 'int_' and pk =? 'float_') or pk =? 'opt' {return 2}
+            return 1
+# (a narrowing is a proven conversion: the last resort among overloads)
+        }
+        if ak =? 'int_' and pk =? 'int_' and tm_host[0].caller_dewy() {return 20}
+        return - 1
+    }
+    if ak =? 'var' {return 0}
+    if tu_is_union(pat) {return tm_union(pat  a  @binds  depth)}
+    if pk =? 'opt' and ak not=? 'opt' {
+        if ak =? 'none_lit' {return 0}
+        let r=tm_match(MWord(tm_types[0].ptr[pat].elem)  a  @binds  depth + 1)
+        if r <? 0 {return - 1}
+        return r + 4
+    }
+    if pk =? 'quantity' {
+        if ak not=? 'quantity' or tm_types[0].ptr[pat].st not=? tm_types[0].ptr[a].st {return - 1}
+        return tm_match(tm_quantity_base(pat)  tm_quantity_base(a)  @binds  depth + 1)
+    }
+    if pk =? 'array' and ak =? 'fixed' {
+# (passed as a copy in a new array)
+        let r=tm_match(MWord(tm_types[0].ptr[pat].elem)  MWord(tm_types[0].ptr[a].elem)  @binds  depth + 1)
+        if r <? 0 {return - 1}
+        return r + 2
+    }
+    if pk not=? ak {return - 1}
+    if pk =? 'array' or pk =? 'ptr' or pk =? 'opt' or pk =? 'secret' {return tm_match(MWord(tm_types[0].ptr[pat].elem)  MWord(tm_types[0].ptr[a].elem)  @binds  depth + 1)}
+    if pk =? 'fixed' {
+        if tm_types[0].ptr[pat].bits not=? tm_types[0].ptr[a].bits {return - 1}
+        return tm_match(MWord(tm_types[0].ptr[pat].elem)  MWord(tm_types[0].ptr[a].elem)  @binds  depth + 1)
+    }
+    if pk =? 'fn_' or pk =? 'tuple' or pk =? 'cfn' {
+        if tm_types[0].ptr[pat].nargs not=? tm_types[0].ptr[a].nargs {return - 1}
+        let cost:MWord=0
+        loop i in [0..MWord(tm_types[0].ptr[pat].nargs)) {
+            let r=tm_match(tu_targ(pat  i)  tu_targ(a  i)  @binds  depth + 1)
+            if r <? 0 {return - 1}
+            cost += r
+        }
+        if pk not=? 'tuple' {
+            let r=tm_match(MWord(tm_types[0].ptr[pat].elem)  MWord(tm_types[0].ptr[a].elem)  @binds  depth + 1)
+            if r <? 0 {return - 1}
+            cost += r
+        }
+        return cost
+    }
+    if pk =? 'struct_' or pk =? 'enum_' {
+        let sp=MWord(tm_types[0].ptr[pat].st)
+        let sa=MWord(tm_types[0].ptr[a].st)
+        if tm_structs[0].ptr[sp].decl not=? tm_structs[0].ptr[sa].decl {return - 1}
+        let cost:MWord=0
+        loop i in [0..MWord(tm_structs[0].ptr[sp].ntargs)) {
+            let r=tm_match(tu_struct_targ(sp  i)  tu_struct_targ(sa  i)  @binds  depth + 1)
+            if r <? 0 {return - 1}
+            cost += r
+        }
+        return cost
+    }
+    -1
+}
+tm_param_in_union=(t0:MWord id:MWord):>bool=>$unsafe {
+    let t=tu_prune(t0)
+    if not tu_has_var(t) {return false}
+    let k=tm_types[0].ptr[t].kind
+    if tu_is_union(t) {
+        loop m in tu_union_members(t) {
+            if tm_types[0].ptr[tu_prune(m)].kind =? 'param' and MWord(tm_types[0].ptr[tu_prune(m)].id) =? id {return true}
+        }
+    }
+    if k =? 'array' or k =? 'opt' or k =? 'ptr' {return tm_param_in_union(MWord(tm_types[0].ptr[t].elem)  id)}
+    if k =? 'struct_' or k =? 'enum_' {
+        let si=MWord(tm_types[0].ptr[t].st)
+        loop j in [0..MWord(tm_structs[0].ptr[si].ntargs)) {
+            if tm_param_in_union(tu_struct_targ(si  j)  id) {return true}
+        }
+    }
+    false
+}
+tm_union=(pat:MWord a:MWord @binds:array<int64> depth:MWord):>MWord=>$unsafe {
+    let pms=tu_union_members(pat)
+    let ams:array<int64>=[a]
+    if tu_is_union(a) {ams=tu_union_members(a)}
+    let rest:array<int64>=[]
+    loop m in ams {
+        let named=false
+        loop pm in pms {
+            if not tu_has_var(pm) and tu_equal(pm  m) {named=true}
+        }
+        if not named {rest.push(m)}
+    }
+    let params:array<int64>=[]
+    loop pm in pms {
+        if tu_has_var(pm) {params.push(pm)}
+    }
+    if params.length not=? 1 or tm_types[0].ptr[tu_prune(params[0])].kind not=? 'param' {return - 1}
+    let widen:MWord=0
+    if not tu_is_union(a) {widen=1}
+    if rest.length =? 0 {return widen} # (the parameter is decided by other arguments)
+    let r=tm_match(params[0]  tm_inference[0].host[0].mk_union(rest)  @binds  depth + 1)
+    if r <? 0 {return - 1}
+    r + widen
+}
+tm_callable_base=(t0:MWord):>MWord=>$unsafe {
+    let t=tu_prune(t0)
+    if tm_types[0].ptr[t].kind =? 'callable' {return MWord(tm_types[0].ptr[t].elem)}
+    t
+}
+tm_contract=(t0:MWord):>MWord=>$unsafe {
+    let t=tu_prune(t0)
+    if tm_types[0].ptr[t].kind =? 'callable' {return MWord(tm_types[0].ptr[t].st)}
+    0
+}
+tm_representation=(t0:MWord):>MWord=>$unsafe {
+    let t=tu_prune(t0)
+    if tm_types[0].ptr[t].kind =? 'refined' {return tu_prune(MWord(tm_types[0].ptr[t].elem))}
+    t
+}
+tm_int_widens=(f:MWord t:MWord):>bool=>$unsafe {
+    if t =? tm_math[0] {return true}
+    if f =? tm_math[0] {return false}
+    let fb=MWord(tm_types[0].ptr[f].bits)
+    let tb=MWord(tm_types[0].ptr[t].bits)
+    if tm_types[0].ptr[f].sign =? tm_types[0].ptr[t].sign {return tb >=? fb}
+    if not tm_types[0].ptr[f].sign and tm_types[0].ptr[t].sign {return tb >? fb}
+    false
+}
