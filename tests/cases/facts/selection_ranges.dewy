@@ -1,0 +1,18 @@
+main=()=>{
+ let xs=[10 20 30 40 50]
+ printl(xs[0,2..4])
+ printl(xs[4,2..0])
+ printl(xs[0,2..])
+ printl(xs[4,2..])
+ let range=[0,2..4]
+ let selected=xs[range]
+ printl(selected[2])
+ let empty=[8,9..8)
+ printl(xs[empty])
+ xs[range]=[1 2 3]
+ printl(xs)
+ xs[4,2..0]=7
+ printl(xs)
+ xs[0,2..4] .+= 1
+ printl(xs)
+}

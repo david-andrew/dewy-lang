@@ -37,6 +37,8 @@ fact_nd_axis = (n: int, s: mut FactState, value: int, extent: int) -> FactNDAxis
     if origin == 0 or nodes[origin].kind != .call: return FactNDAxis()
     kind = fact_nd_call(origin)
     actuals = fact_constructor_actuals.get(value) ?? []
+    if kind == 14 and actuals.len() == 7:
+        return fact_nd_range(n, s, actuals[1..7) + [fact_constant(s, 0)], actuals[0], 11)
     if kind == 154 and actuals.len() == 5:
         keep = fact_bound(s, actuals[2])
         if keep.lo != keep.hi: return FactNDAxis()
@@ -48,6 +50,9 @@ fact_nd_axis = (n: int, s: mut FactState, value: int, extent: int) -> FactNDAxis
         if tkind(t) == .array: return FactNDAxis(known = true, picks = actuals[0])
         return FactNDAxis()
     if kind != 11 and kind != 13: return FactNDAxis()
+    fact_nd_range(n, s, actuals, extent, kind)
+
+fact_nd_range = (n: int, s: mut FactState, actuals: int[], extent: int, kind: int) -> FactNDAxis:
     if actuals.len() != (if kind == 11: 7 else: 5): return FactNDAxis()
     stepped = fact_bound(s, actuals[if kind == 11: 5 else: 3])
     if stepped.wide or stepped.lo != stepped.hi: return FactNDAxis()
@@ -63,7 +68,9 @@ fact_nd_axis = (n: int, s: mut FactState, value: int, extent: int) -> FactNDAxis
         if inclusive.wide or inclusive.lo != inclusive.hi: return FactNDAxis()
         stop = actuals[2]
         if inclusive.lo != 0:
-            stop = fact_arithmetic(s, kid(origin, 2), .plus, stop, fact_constant(s, 1))
+            origin = bc_int(0, nodes[n].pos)
+            nodes[origin].type = i32(T_INT)
+            stop = fact_arithmetic(s, origin, .plus, stop, fact_constant(s, 1))
     FactNDAxis(actuals[0], stop, true, true)
 
 # Exact stepped selectors: O(1), demanded only by a selection. Normalize to
@@ -109,6 +116,19 @@ fact_nd_stepped = (s: mut FactState, actuals: int[], extent: int, kind: int) -> 
             if count > 0: start += step
     FactNDAxis(fact_constant(s, min(start, end)), fact_constant(s, max(start, end)), true, true, fact_constant(s, count))
 
+# An inventory lists every selected index. A published element hull or fill
+# value instead represents every element, including comprehensions of unknown
+# length. All three certificates belong to the immutable array identity.
+fact_selector_entries = (s: FactState, picks: int, size: int) -> (int[], bool):
+    entries = fact_inventory(s, picks)
+    length = fact_bound(s, size)
+    if not length.wide and length.lo == length.hi and length.lo == entries.len(): return (entries, true)
+    uniform = fact_projection_find(s, picks, FACT_ELEMENT_COPY, false)
+    if uniform >= 0: return ([s.projections[uniform].value], true)
+    hull = fact_projection_find(s, picks, FACT_ELEMENT_VALUE, false)
+    if hull >= 0: return ([s.projections[hull].value], true)
+    (entries, false)
+
 fact_nd_slice = (n: int, s: mut FactState, values: int[], kind: int) -> int:
     bound = kind == 154
     shape = if bound: values[0] else: fact_nd_shape(s, values[0])
@@ -143,9 +163,8 @@ fact_nd_slice = (n: int, s: mut FactState, values: int[], kind: int) -> int:
         size = fact_constant(s, 1)
         if part.picks != 0:
             size = fact_project(s, part.picks, -1, false, T_INT)
-            length = fact_bound(s, size)
-            entries = fact_inventory(s, part.picks)
-            if length.wide or length.lo != length.hi or length.lo != entries.len():
+            entries, complete_picks = fact_selector_entries(s, part.picks, size)
+            if not complete_picks:
                 fact_nd_need(n, s, .eq, fact_fresh(s, T_INT), fact_constant(s, 1), "slice axis {axis} index array contains only positions in {shape_text}[{axis}]")
                 complete = false
                 continue

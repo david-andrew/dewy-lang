@@ -2314,6 +2314,10 @@ Contiguous slices accept the same assignments:
 `values[1..3] = [10 20 30]`, `values[1..3) = [10 20]`, or `values[..] = 42`.
 These assignments retain the array's length. Dotted updates such as
 `values[1..3) .+= 10` also work on slices, stepped ranges, index lists and masks.
+Known range endpoints and short index lists prove selected bounds and result
+lengths. Boolean masks require the source length; a known mask also proves
+its selected count for result indexing and array replacements. Mutating a
+selector or destination requires checking its current values again.
 Stepped string slicing is not implemented.
 
 Comprehensions are eager. Nested loops and block bodies work; every value a body

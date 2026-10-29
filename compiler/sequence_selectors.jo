@@ -1,0 +1,122 @@
+# One-dimensional selection contracts reuse N-D range snapshots and bounded
+# inventories. O(1) for exact ranges, O(projections + <=64 entries) for picks
+# and masks, only at demanded calls. No traversal of unrelated library bodies.
+use 'facts.jo'
+use 'nd_contracts.jo'
+use 'nd_slices.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'effects.jo'
+use 'checker_types.dewy'
+use 'checker_tokens.dewy'
+use 'refinement_types.dewy'
+use 'expr.jo'
+use 'refine.jo'
+use 'ownership.jo'
+use 'util.jo'
+use 'check.jo'
+
+fact_sequence_classify = (n: int, kind: int, path: str) -> int:
+    ranged = kind < 166
+    if path != lib_dir + (if ranged: "/std/dewy_ranges.jo" else: "/core/array.jo"): return 0
+    read = kind == 160 or kind == 163 or kind == 166 or kind == 169
+    literal = kind == 163 or kind == 164
+    argc = if literal: (if read: 7 else: 8) else: (if read: 2 else: 3)
+    if nkids(n) != argc: return 0
+    # Contiguous literal stores already have their own bounds diagnostics.
+    if kind == 164 and nodes[kid(n, 6)].kind == .bool_lit and nodes[kid(n, 6)].ival == 0: return 0
+    t = representation_type(ntype(kid(n, 0)))
+    if tkind(t) != .array and tkind(t) != .fixed: return 0
+    if read and representation_type(ntype(n)) != mk_array(telem(t)): return 0
+    if not effect_share(telem(t)): return 0
+    if ownership_decls.len() != 0 and ownership_fact_type(t): return 0
+    if not ranged:
+        picks = representation_type(ntype(kid(n, 1)))
+        if tkind(picks) != .array and tkind(picks) != .fixed: return 0
+        if kind < 169 and not is_int(telem(picks)): return 0
+        if kind >= 169 and telem(picks) != T_BOOL: return 0
+    if not read:
+        replacement = representation_type(ntype(kid(n, argc - 1)))
+        if tkind(replacement) == .array and replacement == mk_array(telem(t)): return kind + 1
+        if replacement != telem(t): return 0
+    kind
+
+fact_sequence_length = (s: mut FactState, value: int, t: int) -> int:
+    if tkind(representation_type(t)) == .fixed: return fact_constant(s, fixed_len(representation_type(t)))
+    fact_project(s, value, -1, false, T_INT)
+
+fact_sequence_select = (n: int, s: mut FactState, values: int[], kind: int) -> int:
+    read = kind == 160 or kind == 163 or kind == 166 or kind == 169
+    t = ntype(kid(n, 0))
+    base = values[0]
+    # Mutable arguments are reacquired after the RHS; old selector values
+    # remain snapshots, but bounds refer to the destination actually written.
+    if not read:
+        held = fact_route_values(s, fact_receiver_route(n, s))
+        if held.len() > 0: base = held[held.len() - 1]
+    length = fact_sequence_length(s, base, t)
+    zero = fact_constant(s, 0)
+    count = 0
+    if kind < 166:
+        part = FactNDAxis()
+        if kind >= 163:
+            actuals = values[1..7) + [zero]
+            part = fact_nd_range(n, s, actuals, length, 11)
+        else: part = fact_nd_axis(n, s, values[1], length)
+        if not part.known:
+            fact_nd_need(n, s, .eq, fact_fresh(s, T_INT), fact_constant(s, 1), "range selects only positions in the array")
+        else if part.count != 0:
+            count = part.count
+            if fact_compare(s, .eq, count, zero) != 1:
+                fact_nd_need(n, s, .le, zero, part.first, "range first selected index is nonnegative")
+                fact_nd_need(n, s, .lt, part.stop, length, "range last selected index is below array length")
+        else if fact_compare(s, .ge, part.first, part.stop) == 1: count = zero
+        else:
+            fact_nd_need(n, s, .le, zero, part.first, "range start is nonnegative")
+            ordered = fact_nd_need(n, s, .le, part.first, part.stop, "range start is at most its end")
+            fact_nd_need(n, s, .le, part.stop, length, "range end is at most array length")
+            if ordered:
+                origin = bc_int(0, nodes[n].pos)
+                nodes[origin].type = i32(T_INT)
+                count = fact_arithmetic(s, origin, .minus, part.stop, part.first)
+    else:
+        picks = values[1]
+        size = fact_sequence_length(s, picks, ntype(kid(n, 1)))
+        entries = fact_inventory(s, picks)
+        size_bound = fact_bound(s, size)
+        complete = not size_bound.wide and size_bound.lo == size_bound.hi and size_bound.lo == entries.len()
+        if kind >= 169:
+            fact_nd_need(n, s, .eq, size, length, "mask length equals array length")
+            selected = 0
+            exact = complete
+            loop entry in entries:
+                b = fact_bound(s, entry)
+                if b.wide or b.lo != b.hi: exact = false
+                else if b.lo != 0: selected += 1
+            if exact: count = fact_constant(s, selected)
+            else: count = fact_new(s, FactBound(0, fact_length_max()), FactTerm(type = T_INT))
+        else:
+            entries, complete = fact_selector_entries(s, picks, size)
+            count = size
+            if not complete:
+                fact_nd_need(n, s, .eq, fact_fresh(s, T_INT), fact_constant(s, 1), "index array contains only positions in the array")
+            else:
+                loop entry in entries:
+                    fact_nd_need(n, s, .le, zero, entry, "selected index is nonnegative")
+                    fact_nd_need(n, s, .lt, entry, length, "selected index is below array length")
+    if count == 0: count = fact_new(s, FactBound(0, fact_length_max()), FactTerm(type = T_INT))
+    if kind == 162 or kind == 165 or kind == 168 or kind == 171:
+        expected = fact_sequence_length(s, values[values.len() - 1], ntype(kid(n, nkids(n) - 1)))
+        fact_nd_need(n, s, .eq, expected, count, "replacement length equals selected element count")
+    if not read:
+        route = fact_receiver_route(n, s)
+        target = kid(n, 0)
+        loop nodes[target].kind == .addr or nodes[target].kind == .conv: target = int(nodes[target].a)
+        fact_change_route(s, target, true, n, .write)
+        fresh = fact_fresh(s, t)
+        if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(fresh, -1, false, length))
+        fact_store_route(s, route, fresh, n)
+        return fact_fresh(s, ntype(n))
+    result = fact_fresh(s, ntype(n))
+    if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, -1, false, count))
+    result
