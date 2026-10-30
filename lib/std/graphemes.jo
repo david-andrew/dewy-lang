@@ -286,3 +286,16 @@ __dewy_grapheme_value = (it: mut __DewyGraphemeIter) -> str:
     next_byte = __grapheme_next(it.text, it.cursor)
     assert(next_byte >= 0, "invalid UTF-8 in grapheme operation")
     it.text[start..next_byte)
+
+# Dewy's text.get(i): grapheme i as text[i] counts it, or none past either end
+get = (s: str, index: int) -> str?:
+    if index < 0: return none
+    c = __GraphemeCursor()
+    at = 0
+    loop c.offset < len(s):
+        start = c.offset
+        next_byte = __grapheme_next(s, c)
+        assert(next_byte >= 0, "invalid UTF-8 in grapheme operation")
+        if at == index: return s[start..next_byte)
+        at += 1
+    none

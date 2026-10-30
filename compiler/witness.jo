@@ -966,8 +966,20 @@ wit_refinement = (n: int, t: int, atom: RefAtom, self: int, a: int, b: int, s: F
         wit_help(relation)
         wit_fail(nodes[n].pos, "{shown} does not fit {dt(ref_narrowing[n])}")
         return
-    missing = wit_relation(s, s, op, x, y, refuted)
     contract = ref_spans.get(int(types[t].st)) ?? 0
+    # (a shape contract: the parameter of the call this argument is for, and
+    # its storage relation said as one, with no internal marker's bounds)
+    storage = false
+    if nd_shape_predicates.has(int(types[t].st)):
+        call = wit_call_holding(n)
+        d = if call > 0 and nodes[call].aux == 0 and nodes[call].sym > 0: int(fns[int(nodes[call].sym)].decl) else: 0
+        if d != 0 and nodes[d].kind == .fn_:
+            loop i in [0..min(nkids(call), nkids(d))):
+                if kid(call, i) == n: contract = nodes[kid(d, i)].pos
+        loop term in [atom.a, atom.b]:
+            if term.path.len() == 1 and term.path[0] == ND_STORAGE_VALID: storage = true
+    if storage: relation = "{shown}.data.length matches its shape"
+    missing = if storage: "" else: wit_relation(s, s, op, x, y, refuted)
     if refuted:
         wit_context(contract)
         wit_help(relation)

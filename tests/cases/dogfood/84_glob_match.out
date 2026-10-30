@@ -1,0 +1,12 @@
+*.dewy       -> main.dewy util.dewy test_main.dewy test_util.dewy
+test_*       -> test_main.dewy test_util.dewy
+data?.csv    -> data1.csv data2.csv
+data*.csv    -> data1.csv data2.csv data10.csv
+[A-Z]*       -> README.md Makefile
+*.[!d]*      -> README.md notes.txt data1.csv data2.csv data10.csv image.png a.out café.txt
+?????.txt    -> notes.txt
+[mu]*.dewy   -> main.dewy util.dewy
+*            -> main.dewy util.dewy README.md notes.txt data1.csv data2.csv data10.csv image.png Makefile test_main.dewy test_util.dewy a.out café.txt run
+[abc         -> (none)
+most matches: *.[!d]* (8) after '*'
+only '*' matches: ["run"]

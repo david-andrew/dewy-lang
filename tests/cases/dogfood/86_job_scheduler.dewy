@@ -1,0 +1,70 @@
+# A single print server runs jobs by priority. Jobs arrive over time with a
+# duration in minutes or seconds; the scheduler always starts the waiting job
+# with the highest priority (earliest arrival breaks ties) and reports waits.
+
+Job:type = [name:string priority:int arrival:int * Time duration:int * Time]
+
+const JOBS = [
+    Job["payroll" 3 0s 4minute]
+    Job["logo-draft" 1 30s 90s]
+    Job["invoice-17" 2 1minute 45s]
+    Job["poster" 1 2minute 3minute]
+    Job["invoice-18" 2 2minute 45s]
+    Job["urgent-memo" 5 5minute 20s]
+    Job["brochure" 2 6minute 2minute]
+    Job["receipt" 4 11minute 10s]
+]
+
+# Smaller sorts first: higher priority, then earlier arrival, then name.
+runs_before = (a:Job b:Job):>bool => {
+    if a.priority not=? b.priority return a.priority >? b.priority
+    if a.arrival not=? b.arrival return a.arrival <? b.arrival
+    a.name <? b.name
+}
+
+pick = (waiting:array<Job>):>int? => {
+    if waiting.is_empty return none
+    let best = 0
+    loop i in [1..waiting.length) {
+        if runs_before(waiting[i] waiting[best]) best = i
+    }
+    best
+}
+
+clock = (t:int * Time):>string => {
+    let total = int(t / s)
+    let minutes = total // 60
+    let seconds = total % 60
+    "{minutes:02}:{seconds:02}"
+}
+
+main = () => {
+    let pending = JOBS.sorted(key=(j:Job) => j.arrival)
+    let waiting:array<Job> = []
+    let now = 0s
+    let next_arrival = 0
+    let total_wait = 0s
+    let longest = [name="" wait=0s]
+    loop next_arrival <? pending.length or not waiting.is_empty {
+        loop next_arrival <? pending.length and pending[next_arrival].arrival <=? now {
+            waiting.push(pending[next_arrival])
+            next_arrival += 1
+        }
+        let chosen = pick(waiting)
+        if chosen is? none {
+            # idle until the next job arrives
+            if next_arrival >=? pending.length break
+            now = pending[next_arrival].arrival
+            continue
+        }
+        let job = waiting.pop(chosen)
+        let wait = now - job.arrival
+        total_wait += wait
+        if wait >? longest.wait longest = [name=job.name wait=wait]
+        printl"{clock(now)} start {job.name:<12} p{job.priority} waited {clock(wait)}"
+        now += job.duration
+    }
+    printl"{clock(now)} all done"
+    printl"average wait: {total_wait / JOBS.length / s:.1f} s"
+    printl"longest wait: {longest.name} ({clock(longest.wait)}, {longest.wait})"
+}

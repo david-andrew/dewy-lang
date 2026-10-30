@@ -1782,6 +1782,14 @@ fact_summary_relation = (s: FactState, length: int) -> (int, int):
 fact_summary_record = (s: mut FactState, r0: int):
     t = fact_type(int(fns[fact_summary_owner].ret))
     r = r0
+    payload = fact_summary_payload(t)
+    if payload != 0 and fact_summary_field == 0:
+        # (a present return's payload; a known `none` adds nothing)
+        if r != 0:
+            tag = fact_bound(s, fact_project(s, r, -3, false, T_INT))
+            if tag.lo == 0 and tag.hi == 0 and not tag.wide: return
+            r = fact_project(s, r, -4, false, payload)
+        t = payload
     if fact_summary_field != 0:
         selector = if tkind(t) == .tuple: fact_summary_field - 1 else: fact_summary_field
         t = fact_summary_field_type(t, fact_summary_field)
@@ -1876,6 +1884,13 @@ fact_summary_record_shapes = (s: mut FactState):
                 keeps = fact_nd_shape(s, current) == entry.1 and fact_nd_data_length(s, current) == entry.2
         if keeps: shapes |= 1 << i
     fact_summary_shape_mask = shapes
+
+# An optional integer result (`:>int?`, a position or none): its summary
+# describes the payload of the present returns. O(1).
+fact_summary_payload = (t: int) -> int:
+    if tkind(t) != .opt: return 0
+    e = fact_type(int(types[t].elem))
+    if fact_scalar(e) and is_int(e) and e != T_U64: e else: 0
 
 fact_summary_vacuous = (acc: FactSummary, t: int) -> bool:
     if acc.lengths.len() > 0: return false
@@ -1976,6 +1991,7 @@ fact_summary = (f: int, places: bool = false, field: int = 0) -> FactSummary:
     t = fact_type(int(fns[f].ret))
     if fns[f].state != 2 or fns[f].body == 0 or fns[f].kind == FK_INIT or fns[f].caps.len() != 0 or d != 0 and has_flag(d, NF_EXTERN) or effect_unavailable.has(f): return unknown
     if field != 0: t = fact_summary_field_type(t, field)
+    else if fact_summary_payload(t) != 0: t = fact_summary_payload(t)
     if tkind(t) != .array and not (fact_scalar(t) and is_int(t)) and not places: return unknown
     if (field != 0 or fact_constructor_budget >= 0) and not fact_constructor_body(f):
         if field != 0: fact_summaries[key] = unknown
@@ -2096,6 +2112,26 @@ fact_summary = (f: int, places: bool = false, field: int = 0) -> FactSummary:
     else: fact_summaries[key] = result
     if constructor_root: fact_constructor_budget = -1
     result
+
+# A present payload of an optional integer result lies in its summary's
+# interval and below the related argument's entry length: conditional
+# evidence that a test establishing the present arm activates, as a refined
+# arm's (ref_arm_publish). O(1) per demanded call.
+fact_summary_payload_publish = (f: int, result: int, entry: int[], payload: int, summary: FactSummary, s: mut FactState):
+    if result == 0 or s.conditional.len() >= 32: return
+    atoms: RefAtom[]
+    if summary.value.lo != FACT_MIN and not summary.value.wide: atoms.push(RefAtom(.ge, RefTerm(), RefTerm(1, summary.value.lo)))
+    if summary.value.hi != FACT_MAX and not summary.value.wide: atoms.push(RefAtom(.le, RefTerm(), RefTerm(1, summary.value.hi)))
+    if summary.upper >= 0 and summary.upper < entry.len():
+        # (materialized now, so the argument's length stays related after the call)
+        fact_project(s, entry[summary.upper], -1, false, T_INT)
+        atoms.push(RefAtom(.le, RefTerm(), RefTerm(2, summary.upper, path = [-1], offset = summary.upper_delta)))
+    if atoms.len() == 0: return
+    selector = fact_project(s, result, -3, false, T_INT)
+    b = fact_bound(s, selector)
+    fact_set_bound(s, selector, FactBound(max(0, b.lo), min(1, b.hi)))
+    value = fact_project(s, result, -4, false, payload)
+    s.conditional.push(ResultEvidence(selector, 1, ref_intern(atoms), entry, fns[f].ptypes, value, payload))
 
 # A postcondition's current mutable actual. Place routes contain only named
 # fields; a missing/unsupported route supplies no evidence. O(route depth).
@@ -3659,6 +3695,19 @@ fact_condition = (n: int, entry: FactState) -> FactPaths:
         reason = if a.yes.live and a.no.live: a.reason else: b.reason
         if k == .and_: return FactPaths(b.yes, fact_join(a.no, b.no, n), reason)
         return FactPaths(fact_join(a.yes, b.yes, n), b.no, reason)
+    # (a comparison chain holding an operand in a temporary, `-1 <=? i <? n`:
+    # `{let $chain1 = -1; $chain1 <=? i and i <? n}` declares, then tests as
+    # its last expression does; the temporaries leave scope on both paths.
+    # O(block statements))
+    if fact_condition_block(n):
+        s = entry
+        first = s.bindings.len()
+        loop i in [0..nkids(n) - 1): fact_capture(kid(n, i), s)
+        last = kid(n, nkids(n) - 1)
+        p = fact_condition((if nodes[last].kind == .exprstmt: int(nodes[last].a) else: last), s)
+        if p.yes.live and p.yes.bindings.len() > first: fact_scope_exit(p.yes, n, first)
+        if p.no.live and p.no.bindings.len() > first: fact_scope_exit(p.no, n, first)
+        return p
     yes = entry
     v = fact_capture(n, yes)
     no = yes
@@ -3670,6 +3719,14 @@ fact_condition = (n: int, entry: FactState) -> FactPaths:
         result_activate(yes)
         result_activate(no)
     FactPaths(yes, no, reason, v, entry_state)
+
+# A block of local declarations ending in its value: a condition's temporaries.
+fact_condition_block = (n: int) -> bool:
+    if nodes[n].kind != .block or nkids(n) < 2 or nkids(n) > 8: return false
+    loop i in [0..nkids(n) - 1):
+        c = kid(n, i)
+        if nodes[c].kind != .vardecl or has_flag(c, NF_GLOBAL) or nkids(c) != 0: return false
+    true
 
 # Assume an optional's or union's tag is (or is not) wanted.
 fact_tag = (s: mut FactState, value: int, wanted: int, truth: bool):
@@ -4215,6 +4272,20 @@ fact_rational_zero_test = (n: int) -> int:
             if parts.0 == 0: return 1 - i
     -1
 
+# `rational(numerator denominator)` of integers: its one failure is a zero
+# denominator, the caller's obligation as a division's divisor. O(1).
+fact_name_rational = 0
+fact_rational_constructor = (n: int) -> bool:
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) != 2: return false
+    d = int(fns[int(nodes[n].sym)].decl)
+    if d == 0: return false
+    if fact_name_rational == 0: fact_name_rational = intern("rational")
+    if int(nodes[d].name) != fact_name_rational: return false
+    path = files[pos_file(nodes[d].pos)].path
+    if path != lib_dir + "/prelude/fractions.dewy" and path != lib_dir + "/rational.dewy": return false
+    t = representation_type(ntype(kid(n, 1)))
+    is_int(t) or t == T_MATH_INT
+
 # A library integer or rational power, `x^n` with an integer n: every one fails
 # only for a negative exponent (a rational's for a zero base as well), so n >= 0
 # is the caller's obligation.
@@ -4234,7 +4305,21 @@ fact_power_call = (n: int) -> bool:
     e = representation_type(ntype(kid(n, 1)))
     (is_int(e) or e == T_MATH_INT) and pos_in_lib(nodes[d].pos)
 
-fact_power_check = (n: int, s: mut FactState, exponent: int): fact_nonnegative(n, s, exponent, kid(n, 1), "the exponent")
+fact_power_check = (n: int, s: mut FactState, exponent: int, base: int):
+    # (a rational base tested nonzero, `if q =? 0 return`, takes any exponent)
+    if base != 0 and fact_power_rational(n):
+        b = fact_bound(s, fact_project(s, base, intern("numerator"), false, T_MATH_INT))
+        if b.nz or b.lo > 0 or b.hi < 0:
+            if fact_speculating == 0 and fact_probe_on: fact_probe_record(n, true)
+            return
+    fact_nonnegative(n, s, exponent, kid(n, 1), "the exponent")
+
+fact_power_rational = (n: int) -> bool:
+    t = prune(representation_type(ntype(kid(n, 0))))
+    if types[t].kind != .struct_: return false
+    si = int(types[t].st)
+    d = int(structs[si].decl)
+    d != 0 and structs[si].name == "Rational" and files[pos_file(nodes[d].pos)].path == lib_dir + "/rational.dewy"
 
 # An `int` shifted by a signed count (`x << n`, `x >>= n`): a negative count
 # fails, so n >= 0 is an obligation. A fixed width's count is unsigned: total.
@@ -7112,7 +7197,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
                 if fact_parallel_array(n):
                     values.push(n)
                     values.push(kid(n, 0))
-            if result_active or proof_active or fact_divisors.has(n): values.push(n)
+            if result_active or proof_active or fact_divisors.has(n) or fact_rational_constructor(n): values.push(n)
             else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and fact_string_call(n) >= 2: values.push(n)
             else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and fact_rational_zero_test(n) >= 0:
                 values.push(n)
@@ -7120,6 +7205,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
             else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and fact_power_call(n):
                 values.push(n)
                 values.push(kid(n, 1))
+                values.push(kid(n, 0))
             else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and fact_range_call(n):
                 first = fact_range_first(n, true)
                 values.push(n)
@@ -7284,7 +7370,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
         # (a length-preserving call's length is its receiver's: `let ks = d.keys` then `ks.values`
         # needs ks's definition)
         else if k == .call and (fact_copy_length_call(n) or fact_endpoint_call(n) != 0 or fact_same_length_call(n)): values.push(kid(n, 0))
-        else if k == .call and nodes[n].aux == 0 and not result_active and not proof_active and not fact_divisors.has(n) and fact_floor_call(n) == 0 and fact_string_call(n) == 0 and not fact_extremum_call(n) and not fact_empty_array_call(n) and not fact_entry_count_call(n) and not fact_split_call(n) and not fact_words_call(n) and not fact_lines_call(n) and not fact_search_call(n) and not fact_affix_call(n) and not fact_parallel_array(n) and not ref_refined_result(int(fns[int(nodes[n].sym)].ret)):
+        else if k == .call and nodes[n].aux == 0 and not result_active and not proof_active and not fact_divisors.has(n) and not fact_rational_constructor(n) and fact_floor_call(n) == 0 and fact_string_call(n) == 0 and not fact_extremum_call(n) and not fact_empty_array_call(n) and not fact_entry_count_call(n) and not fact_split_call(n) and not fact_words_call(n) and not fact_lines_call(n) and not fact_search_call(n) and not fact_affix_call(n) and not fact_parallel_array(n) and not ref_refined_result(int(fns[int(nodes[n].sym)].ret)):
             # Ordinary summaries start from unknown formals: their return
             # facts do not depend on the actual values. Argument obligations
             # and effects remain separate roots of this slice.
@@ -7294,7 +7380,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
             array_result = tkind(ret) == .array or constructor
             # Array lengths also bound scalar search results. Demand these
             # actuals only for result kinds the summary domain can describe.
-            if array_result or fact_scalar(ret) and is_int(ret) and ret != T_U64:
+            if array_result or fact_scalar(ret) and is_int(ret) and ret != T_U64 or fact_summary_payload(ret) != 0:
                 loop arg in kids(n):
                     at = fact_type(ntype(arg))
                     if tkind(at) == .array or tkind(at) == .fixed or array_result and fact_scalar(at) and is_int(at) and at != T_U64: values.push(arg)
@@ -7511,7 +7597,7 @@ fact_obligation_node = (n: int) -> bool:
         if exact_has_store(n) and not exact_decided(n) or nodes[n].aux == i32(int(CV.refinement)) or nodes[n].aux == i32(int(CV.arr2fixed)): return true
         return nodes[n].aux == i32(int(CV.int_)) and prune(ntype(int(nodes[n].a))) == T_MATH_INT and prune(ntype(n)) != T_MATH_INT
     if k == .call:
-        if wi_fact_calls.has(n) or fact_divisors.has(n) or fact_range_call(n) or nd_mutable_call(n): return true
+        if wi_fact_calls.has(n) or fact_divisors.has(n) or fact_range_call(n) or nd_mutable_call(n) or fact_rational_constructor(n) and not fact_literal_nonzero(kid(n, 1)): return true
         if (fact_floor_call(n) != 0 and not fact_literal_nonzero(kid(n, 1))) or fact_string_call(n) >= 2 or fact_array_call(n) != 0 or fact_power_call(n): return true
         map = fact_map_call(n)
         if map >= 2 and map <= 4 or fact_nonempty_call(n): return true
@@ -7796,7 +7882,8 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                 if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(value, key, true, fact_constant(s, 1)))
             fact_map_literal(n, s, value, keys, raw, payloads)
             return value
-    if result_active and k == .none_lit:
+    # (a summary's `none` too: an optional result's present arm excludes it)
+    if (result_active or fact_summary_owner != 0) and k == .none_lit:
         value = fact_new(s, FactBound(), FactTerm(type = ntype(n)))
         fact_add_projection(s, FactProjection(value, -3, false, fact_constant(s, 0)))
         return value
@@ -8397,12 +8484,12 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             floor_probe = fact_probe_on and nkids(n) == 2 and (fact_floor_call(n) == 1 or fact_floor_call(n) == 2)
             # (a divisor's call keeps its two operands: a wrapper takes the
             # obligation along, expr.jo move_divisor)
-            obligation = if values.len() == 2: fact_divisors.get(n) ?? 0 else: 0
+            obligation = if values.len() == 2: fact_divisors.get(n) ?? (if fact_rational_constructor(n): 1 else: 0) else: 0
             if obligation != 0:
                 proven = fact_divisor(s, n, values[0], values[1], obligation == 2)
                 if floor_probe: fact_probe_record(n, proven)
             else if floor_probe: fact_probe_divisor(n, s, values[1], kid(n, 1))
-            if values.len() == 2 and fact_power_call(n): fact_power_check(n, s, values[1])
+            if values.len() == 2 and fact_power_call(n): fact_power_check(n, s, values[1], values[0])
             first = fact_range_first(n, true)
             if first >= 0 and values.len() == nkids(n): fact_step_check(n, s, values[first], values[first + 1], kid(n, first), kid(n, first + 1))
         # (a dictionary's or set's entry count is a length of its value)
@@ -8568,6 +8655,10 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         if values.len() == 2 and fact_integer_gcd_call(n):
             zero = fact_constant(s, 0)
             gcd_nonzero = fact_compare(s, .ne, values[0], zero) == 1 or fact_compare(s, .ne, values[1], zero) == 1
+        # (an exact `int` power returns only for a nonnegative exponent: a base
+        # of at least one gives at least one, a nonzero base a nonzero power)
+        power_base = FactBound(0, 0)
+        if values.len() == 2 and fact_power_call(n) and fact_type(ntype(n)) == T_MATH_INT: power_base = fact_bound(s, values[0])
         if not fact_search_reads_only(n): fact_path_call_effects(n, s)
         floor = fact_floor_call(n)
         if floor != 0 and fact_type(ntype(n)) == T_U64: return fact_floor_unsigned(s, n, floor, values[0], values[1])
@@ -8580,6 +8671,11 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         if result != 0 and gcd_nonzero:
             bound = fact_bound(s, result)
             bound.nz = true
+            fact_set_bound(s, result, bound)
+        if result != 0 and not power_base.wide and (power_base.nz or power_base.lo > 0 or power_base.hi < 0):
+            bound = fact_bound(s, result)
+            bound.nz = true
+            if power_base.lo >= 1: bound.lo = max(bound.lo, 1)
             fact_set_bound(s, result, bound)
         if result != 0 and fact_constructor_calls.has(n):
             fact_terms[result].origin = n
@@ -8628,7 +8724,9 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                 fact_difference(s, result, length, 0, n)
             summary = if counted: FactSummary() else: fact_summary(f)
             if summary.seen:
-                if tkind(fact_type(int(fns[f].ret))) == .array:
+                payload = fact_summary_payload(fact_type(int(fns[f].ret)))
+                if payload != 0: fact_summary_payload_publish(f, result, entry, payload, summary, s)
+                else if tkind(fact_type(int(fns[f].ret))) == .array:
                     length = fact_project(s, result, -1, false, T_INT)
                     b = fact_bound(s, length)
                     fact_set_bound(s, length, FactBound(max(b.lo, summary.length.lo), min(b.hi, summary.length.hi)))

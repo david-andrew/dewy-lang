@@ -369,7 +369,7 @@ quantity_arithmetic_plain = (n: int, name: int, a: int, b: int, expected: int) -
             if q.numerator == 1 and q.denominator == 1:
                 nodes[n] = nodes[quantity_number(a)]
                 return quantity_result(n, dim)
-    else: fatal(nodes[n].pos, "floor division and remainder are not defined for physical quantities")
+    else: fatal(nodes[n].pos, "floor division and remainder are not defined for physical quantities: divide by a unit first to count in it, as `(t/s) // 60` or `(t/minute) % 1`")
     operands = quantity_operands(a, b)
     if power and quantity_scales[quantity_constant_scale(b)].numerator < 0 and is_int(ntype(operands[0])):
         pos = nodes[n].pos

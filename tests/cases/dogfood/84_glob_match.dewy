@@ -1,0 +1,91 @@
+# A tiny shell-style glob matcher: `*` matches any run of characters, `?`
+# exactly one, and `[...]` a class with ranges and `!` negation. It filters
+# a directory listing and counts matches per pattern.
+
+# Does the class starting just after `[` at pattern[start] accept ch?
+# Gives the answer and the index just past the closing `]`, or none when the
+# class is unterminated.
+match_class = (pattern:string start:int ch:string):>[bool int]? => {
+    if start <? 0 return none
+    let i = start
+    let negate = false
+    if i <? pattern.length and pattern[i] =? "!" {
+        negate = true
+        i += 1
+    }
+    let found = false
+    let first = true
+    loop i <? pattern.length {
+        let c = pattern[i]
+        if c =? "]" and not first return [found not=? negate i+1]
+        first = false
+        if i+2 <? pattern.length and pattern[i+1] =? "-" and pattern[i+2] not=? "]" {
+            if pattern[i] <=? ch <=? pattern[i+2] found = true
+            i += 3
+        } else {
+            if c =? ch found = true
+            i += 1
+        }
+    }
+    none
+}
+
+glob = (pattern:string name:string):>bool => {
+    # greedy scan with backtracking to the most recent `*`
+    let p = 0
+    let n:int64 = 0
+    let star_p = -1
+    let star_n:int64 = 0
+    loop n <? name.length {
+        let pc = pattern.get(p) ?? ""
+        if pc =? "*" {
+            star_p = p
+            star_n = n
+            p += 1
+            continue
+        }
+        if pc =? "?" {
+            p += 1
+            n += 1
+            continue
+        }
+        if pc =? "[" {
+            let cls = match_class(pattern p+1 name[n])
+            if cls isnt? none and cls[0] {
+                p = cls[1]
+                n += 1
+                continue
+            }
+        } else if pc =? name[n] {
+            p += 1
+            n += 1
+            continue
+        }
+        if star_p <? 0 return false
+        p = star_p + 1
+        star_n += 1
+        n = star_n
+    }
+    loop pattern.get(p) =? "*" p += 1
+    p =? pattern.length
+}
+
+main = () => {
+    let files = [
+        "main.dewy" "util.dewy" "README.md" "notes.txt" "data1.csv"
+        "data2.csv" "data10.csv" "image.png" "Makefile" "test_main.dewy"
+        "test_util.dewy" "a.out" "café.txt" "run"
+    ]
+    let patterns = ["*.dewy" "test_*" "data?.csv" "data*.csv" "[A-Z]*" "*.[!d]*" "?????.txt" "[mu]*.dewy" "*" "[abc"]
+    let counts:dict<string int> = []
+    loop pattern in patterns {
+        let hits = [loop f in files if glob(pattern f) f]
+        counts[pattern] = hits.length
+        let shown = if hits.is_empty "(none)" else hits.join(" ")
+        printl"{pattern:<12} -> {shown}"
+    }
+    let ranked = [loop [k v] in counts [pattern=k hits=v]].sorted(key=(e) => e.hits reverse=true)
+    if ranked.length >? 1 printl"most matches: {ranked[1].pattern} ({ranked[1].hits}) after '{ranked[0].pattern}'"
+    let unmatched = [loop f in files if not patterns.any((pat:string) => pat not=? "*" and glob(pat f)) f]
+    printl"only '*' matches: {unmatched}"
+}

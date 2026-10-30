@@ -1526,7 +1526,9 @@ Constant fractions and decimal literals are reduced at compilation; a constant
 zero divisor of `/` is a compile error.
 
 `rational(numerator denominator)` takes integers; the denominator defaults to
-one. From text, `rational(text)` reads an integer or `numerator/denominator`
+one. A nonzero denominator is the caller's obligation, as a divisor's: a
+literal, a guard (`if d =? 0 return ...`) or a power of a positive base
+(`rational(digits 10^k)`) proves it. From text, `rational(text)` reads an integer or `numerator/denominator`
 and `rational(numerator denominator)` two decimal integers; both return
 `rational|none`, `none` for invalid text, including a zero denominator.
 Decimal points and whitespace inside the text are not accepted.
@@ -1572,7 +1574,8 @@ exact fractions, and `sign(q)` is an `int`; beside a float they give a float. A 
 integer division's, when the divisor is an integer or a constant (`x/n` after
 `n not=? 0`, `x/0.5`, and `a/b` after `b not=? 0kg` for an exact quantity); a rational divisor computed at run time, a zero
 denominator and negative powers of zero fail: they are compile errors by
-default, and panic under `$runtime_checks`. Zero to the zeroth power is one. Copies are independent, and
+default, and panic under `$runtime_checks`; a base tested nonzero (`if q =? 0
+return ...`) takes any whole exponent. Zero to the zeroth power is one. Copies are independent, and
 normalized values can be dictionary keys.
 
 `.to_float32()` and `.to_float64()` round the exact ratio once, to nearest with
@@ -4094,6 +4097,8 @@ that end when it has it (once), and the text unchanged otherwise.
 blank text), `text.lines` gives the lines without their breaks (a final break adds no empty
 line), `text.chars` its graphemes (as `graphemes(text)`), `text.count(part)` the
 nonoverlapping occurrences and `text.is_empty` whether it has none.
+`text.get(i)` gives grapheme `i`, as `text[i]` counts it, or `none` past either
+end (negative included), as `xs.get(i)` does for an array.
 `text.byte_slice(start stop)` gives the bytes `[start..stop)` as a string without
 reading graphemes; the offsets are UTF-8 byte offsets, as `text as array<uint8>`
 indexes them. Both ends are an obligation: `0 <=? start <=? stop <=?` the byte
@@ -4460,8 +4465,11 @@ An unproven obligation's error names the missing relation (`i <? xs.length`,
   inside the helper are not summarized. Facts describe the arguments as
   evaluated, so changing an index or replacing an array still needs a new guard.
 - Take the missing case as a value: `xs.get(i) ?? fallback`, `d.get(k) ?? fallback`,
-  and a function that cannot give a result returns an optional
-  (`if xs.length =? 0 return none` before `xs[0]` and `xs.pop()`).
+  `text.get(i) ?? ""`, and a function that cannot give a result returns an optional
+  (`if xs.length =? 0 return none` before `xs[0]` and `xs.pop()`). A helper giving
+  an optional position (`:>int?`) carries its bounds to the present arm: after
+  `if c isnt? none` or in a typed `match` arm, `xs[c]` needs no guard when
+  every value it returns lies below the length of its argument `xs`.
 - Slice the way Python does with `xs[$clamp a..b)`: `rows[$clamp 1..]` skips a header
   line and `ranked[$clamp 0..5)` takes at most five.
 - Key a table by a literal union with a `totaldict<K V>` (`const RANK:totaldict<Severity int>

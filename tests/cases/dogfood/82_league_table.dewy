@@ -1,0 +1,84 @@
+# A five-a-side league reads match results as text lines, builds the
+# standings table and ranks teams by points, goal difference and goals.
+
+Standing:type = [
+    team:string
+    played:int = 0
+    won:int = 0
+    drawn:int = 0
+    lost:int = 0
+    scored:int = 0
+    conceded:int = 0
+]
+
+points = (s:Standing):>int => 3*s.won + s.drawn
+difference = (s:Standing):>int => s.scored - s.conceded
+
+Result:type = [home:string away:string home_goals:int away_goals:int]
+
+parse_result = (line:string):>Result? => {
+    # "Rovers 3-1 Albion"
+    let words = line.split(" ")
+    if words.length not=? 3 return none
+    let score = words[1].split("-")
+    if score.length not=? 2 return none
+    let h = to_int(score[0]) ?? -1
+    let a = to_int(score[1]) ?? -1
+    if h <? 0 or a <? 0 return none
+    Result[words[0] words[2] h a]
+}
+
+record = (@table:dict<string Standing> team:string mine:int theirs:int):>void => {
+    if team not in? table table[team] = Standing[team]
+    table[team].played += 1
+    table[team].scored += mine
+    table[team].conceded += theirs
+    if mine >? theirs table[team].won += 1
+    else if mine =? theirs table[team].drawn += 1
+    else table[team].lost += 1
+}
+
+rank_before = (a:Standing b:Standing):>bool => {
+    if points(a) not=? points(b) return points(a) >? points(b)
+    if difference(a) not=? difference(b) return difference(a) >? difference(b)
+    if a.scored not=? b.scored return a.scored >? b.scored
+    a.team <? b.team
+}
+
+main = () => {
+    let lines = [
+        "Rovers 3-1 Albion"
+        "Comets 2-2 Harriers"
+        "Albion 0-0 Comets"
+        "Harriers 4-2 Rovers"
+        "Rovers 1-1 Comets"
+        "Albion 2-3 Harriers"
+        "bogus line here"
+        "Comets 5-x Rovers"
+        "Harriers 1-2 Albion"
+    ]
+    let table:dict<string Standing> = []
+    let rejected = 0
+    loop line in lines {
+        let result = parse_result(line)
+        if result is? none {
+            rejected += 1
+            printl"skipped: {line}"
+            continue
+        }
+        record(@table result.home result.home_goals result.away_goals)
+        record(@table result.away result.away_goals result.home_goals)
+    }
+    let standings = table.values
+    standings.sort_with(@rank_before)
+    printl"{"team":<11} P  W  D  L  GD  Pts"
+    loop i in 0.. and s in standings {
+        let gd = difference(s)
+        printl"{i+1}. {s.team:<8} {s.played}  {s.won}  {s.drawn}  {s.lost}  {gd:<+3} {points(s):>3}"
+    }
+    if standings.is_empty return
+    let leader = standings[0]
+    printl"leader: {leader.team} with {points(leader)} points"
+    let total_goals = sum([loop s in standings s.scored])
+    printl"goals: {total_goals} in {lines.length - rejected} matches"
+}

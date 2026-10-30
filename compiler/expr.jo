@@ -4271,7 +4271,7 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
         if not has_flag(a0, NF_CHECKED):
             check_expr(a0, 0)
             add_flag(a0, NF_CHECKED)
-        if tkind(prune(ntype(a0))) == .array:
+        if tkind(prune(ntype(a0))) == .array or tkind(prune(ntype(a0))) == .str_:
             a1 = args[1]
             if not has_flag(a1, NF_CHECKED):
                 check_expr(a1, 0)
@@ -9395,8 +9395,8 @@ fn_value = (n: int, expected: int, explicit_types: int[] = [], mod: int = -1, cl
         if et != 0 and types[et].kind == .fn_:
             nm = name_of(int(nodes[n].name))
             hint = ""
-            if nm == "update": hint = " (the game calls update each frame with the seconds since the last one: {jd(nodes[n].pos, "`update = (dt: f64): ...`", "`update = (dt:float64) => ...`")})"
-            if nm == "draw": hint = " (the game calls draw with nothing: {jd(nodes[n].pos, "`draw = (): ...`", "`draw = () => ...`")})"
+            if nm == "update": hint = " (the game calls update each frame with the seconds since the last one: {jd(nodes[n].pos, "`update = (dt: f64): ...`", "`update = (dt:float64) => ...`")}{game_name_hint(nodes[n].pos, nm)})"
+            if nm == "draw": hint = " (the game calls draw with nothing: {jd(nodes[n].pos, "`draw = (): ...`", "`draw = () => ...`")}{game_name_hint(nodes[n].pos, nm)})"
             fatal(nodes[n].pos, "no version of '{nm}' matches {dt(et)}{hint}")
         fatal(nodes[n].pos, "cannot use overloaded or generic function '{name_of(int(nodes[n].name))}' as a value without a known type{bare_variant_hint(int(nodes[n].name))}")
     mm = 0
@@ -13339,3 +13339,9 @@ take_call = (n: int, args: int[]) -> int:
     set_list(n, args)
     nodes[n].type = i32(telem(t))
     telem(t)
+
+# A program with a top-level `draw` or `update` is a game: a helper that only
+# shares the name (`draw(board)`) wants another one. Dewy wording only.
+game_name_hint = (pos: int, nm: str) -> str:
+    if not dewy_at(pos): return ""
+    "; a program with a top-level `{nm}` is a game, so a function of your own that is no game callback needs another name, as `{nm}_board`"

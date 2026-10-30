@@ -56,6 +56,18 @@ nd_mutable_signatures: {int: int[]} = {}
 nd_mutable_instances: {int: int[]} = {}
 nd_mutable_checks: {int: int[]} = {}
 
+# A shape written in two places interns to one predicate: a diagnostic then
+# names neither declaration rather than whichever was read last. O(1).
+nd_span_shared: {int: bool} = {}
+nd_span = (predicate: int, pos: int):
+    if nd_span_shared.has(predicate): return
+    if let at = ref_spans.get(predicate):
+        if at == pos: return
+        ref_spans.remove(predicate)
+        nd_span_shared[predicate] = true
+        return
+    ref_spans[predicate] = pos
+
 nd_signature = (decl: int, params: mut int[], result: int = 0) -> int:
     refine_bindings.formals = []
     loop p in kids(decl): refine_bindings.formals.push(int(nodes[p].name))
@@ -90,7 +102,7 @@ nd_signature = (decl: int, params: mut int[], result: int = 0) -> int:
             ref_add(.eq, RefTerm(path = path), term, atoms)
         if atoms.len() > 0:
             predicate = ref_intern(atoms)
-            ref_spans[predicate] = nodes[p].pos
+            nd_span(predicate, nodes[p].pos)
             if nd: runtime_fn("__nd_storage_valid")
             refined = mk_refined(params[i], predicate)
             nd_shape_predicates[int(types[refined].st)] = true
@@ -119,7 +131,7 @@ nd_signature = (decl: int, params: mut int[], result: int = 0) -> int:
         if term.kind == 2 and has_flag(kid(decl, term.value), NF_MUT): return result
         ref_add(.eq, RefTerm(path = (if nd: [-3 - axis] else: [-1])), term, atoms)
     predicate = ref_intern(atoms)
-    ref_spans[predicate] = nodes[tn].pos
+    nd_span(predicate, nodes[tn].pos)
     if nd: runtime_fn("__nd_storage_valid")
     refined = mk_refined(result, predicate)
     nd_shape_predicates[int(types[refined].st)] = true
@@ -693,6 +705,7 @@ nd_call_entry = (n: int, s: mut FactState, values: mut int[]):
         if contracts[i] != 0: values[i] = fact_after_call(n, kid(n, i), s)
 
 nd_contracts_reset = ():
+    nd_span_shared = {}
     nd_shape_predicates = {}
     nd_mutable_signatures = {}
     nd_mutable_instances = {}

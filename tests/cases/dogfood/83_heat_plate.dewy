@@ -1,0 +1,75 @@
+# A metal plate is heated along one edge and cooled along the opposite one.
+# Jacobi iterations relax the interior temperatures on a 2-D grid until the
+# largest change falls below a tolerance, then the plate is drawn as text.
+
+const ROWS = 8
+const COLS = 12
+
+make_plate = ():>array<float64 length=[ROWS COLS]> => {
+    let plate = zeros(ROWS COLS)
+    loop c in [0..COLS) {
+        plate[0 c] = 100.0          # hot top edge
+        plate[ROWS-1 c] = 0.0       # cold bottom edge
+    }
+    loop r in [1..ROWS-1) {
+        plate[r 0] = 50.0
+        plate[r COLS-1] = 50.0
+    }
+    plate
+}
+
+step = (plate:array<float64 length=[ROWS COLS]>):>array<float64 length=[ROWS COLS]> => {
+    let next = plate
+    loop r in [1..ROWS-1) {
+        loop c in [1..COLS-1) {
+            next[r c] = (plate[r-1 c] + plate[r+1 c] + plate[r c-1] + plate[r c+1]) / 4
+        }
+    }
+    next
+}
+
+largest_change = (a:array<float64 length=[ROWS COLS]> b:array<float64 length=[ROWS COLS]>):>float64 => {
+    let worst = 0.0
+    loop r in [0..ROWS) loop c in [0..COLS) {
+        let d = abs(a[r c] - b[r c])
+        if d >? worst worst = d
+    }
+    worst
+}
+
+shade = (t:float64):>string => {
+    const ramp = " .:-=+*#%@"
+    let level = t / 100.0 * 9.0
+    if not (0.0 <=? level <=? 9.0) return "?"
+    ramp[min(9 max(0 int(level)))]
+}
+
+show_plate = (plate:array<float64 length=[ROWS COLS]>):>void => {
+    loop r in [0..ROWS) {
+        let line = [loop c in [0..COLS) shade(plate[r c])].join("")
+        printl"|{line}|"
+    }
+}
+
+main = () => {
+    let plate = make_plate()
+    let iterations = 0
+    loop true {
+        $runtime_checks  # a shape carried around a loop is not proven yet
+        let next = step(plate)
+        let change = largest_change(plate next)
+        plate = next
+        iterations += 1
+        if change <? 0.01 or iterations >=? 500 break
+    }
+    printl"converged after {iterations} iterations"
+    show_plate(plate)
+    let centre = plate[ROWS//2 COLS//2]
+    printl"centre: {centre:.2f}"
+    let middle_row = plate[ROWS//2 [..]]
+    printl"middle row mean: {mean(middle_row):.2f}"
+    printl"interior mean: {mean(plate[[1..ROWS-1) [1..COLS-1)]):.2f}"
+    let hot = 0
+    loop r in [0..ROWS) loop c in [0..COLS) if plate[r c] >? 60.0 hot += 1
+    printl"cells above 60: {hot}"
+}

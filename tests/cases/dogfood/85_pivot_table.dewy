@@ -1,0 +1,87 @@
+# A CSV of sales lines is pivoted into a region-by-quarter table of totals,
+# with row and column sums, a grand total and each region's best quarter.
+
+const SALES = "region,quarter,product,units,price
+north,Q1,lamp,12,19.99
+south,Q1,desk,3,149.00
+north,Q2,lamp,7,19.99
+east,Q1,chair,10,45.50
+south,Q3,lamp,20,18.50
+north,Q3,desk,2,149.00
+east,Q2,lamp,5,19.99
+east,Q2,desk,1,155.00
+south,Q4,chair,8,45.50
+north,Q4,chair,6,44.00
+west,Q2,lamp,oops,19.99
+east,Q4,lamp,9,19.99
+"
+
+Sale:type = [region:string quarter:string units:int price:float64]
+
+parse = (line:string):>Sale? => {
+    let cells = line.split(",")
+    if cells.length not=? 5 return none
+    let units = to_int(cells[3]) ?? -1
+    let price = to_float(cells[4]) ?? -1.0
+    if units <? 0 or price <? 0.0 return none
+    Sale[cells[0] cells[1] units price]
+}
+
+main = () => {
+    let sales:array<Sale> = []
+    let bad = 0
+    let lines = SALES.lines
+    loop line in lines[$clamp 1..] {
+        let sale = parse(line)
+        if sale is? none {
+            bad += 1
+            continue
+        }
+        sales.push(sale)
+    }
+    printl"{sales.length} sales read, {bad} rejected"
+
+    # pivot: region -> quarter -> revenue
+    let pivot:dict<string dict<string float64>> = []
+    let quarters:set<string> = set[]
+    loop sale in sales {
+        quarters.push(sale.quarter)
+        if sale.region not in? pivot pivot[sale.region] = []
+        if sale.quarter not in? pivot[sale.region] pivot[sale.region][sale.quarter] = 0.0
+        pivot[sale.region][sale.quarter] += sale.units * sale.price
+    }
+    let columns = quarters.sorted
+    let regions = [pivot.keys...].sorted
+
+    print"{"region":<8}"
+    loop q in columns print"{q:>10}"
+    printl"{"total":>10}"
+    let column_totals:dict<string float64> = []
+    let grand = 0.0
+    loop region in regions {
+        let row = pivot[region]
+        print"{region:<8}"
+        let row_total = 0.0
+        loop q in columns {
+            let value = row.get(q) ?? 0.0
+            print"{value:>10.2f}"
+            row_total += value
+            if q not in? column_totals column_totals[q] = 0.0
+            column_totals[q] += value
+        }
+        printl"{row_total:>10.2f}"
+        grand += row_total
+    }
+    print"{"total":<8}"
+    loop q in columns print"{column_totals.get(q) ?? 0.0:>10.2f}"
+    printl"{grand:>10.2f}"
+
+    printl""
+    loop region in regions {
+        let entries = [loop [q v] in pivot[region] [quarter=q revenue=v]]
+        if entries.is_empty continue
+        let best = entries.max_by((e) => e.revenue)
+        let share = 100.0 * best.revenue / grand
+        printl"{region}: best {best.quarter} ({best.revenue:.2f}, {share:.1f}% of all sales)"
+    }
+}
