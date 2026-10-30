@@ -1,0 +1,114 @@
+# Frozen tuple and dictionary literal checker extracted from expr.jo.
+use 'node_store.dewy'
+use 'checker_types.dewy'
+use 'source_types.dewy'
+use 'type_inference.dewy'
+use 'type_constructors.dewy'
+struct CheckerCollectionHost:
+    check: (int, int) -> int
+    coerce: (int, int) -> int
+    finalize: (int) -> int
+    values: (int, int) -> int
+    float_key: (int) -> bool
+    float_obligation: (int) -> void
+    key_name: (int) -> void
+    map_decl: (int) -> int
+    instance: (int, int, int) -> int
+    setter: (int, int, int, int) -> int
+    can_coerce: (int, int, int) -> bool
+    error: (int, int, int, int) -> void
+struct CheckerCollectionInput:
+    nodes: *(Node[])
+    lists: *(i32[])
+    types: *(TypeInfo[])
+    structs: *(StructInfo[])
+    args: *(i32[])
+    files: *(SrcFile[])
+    void_type: *int
+    host: *CheckerCollectionHost
+xk_nodes: *(Node[])
+xk_lists: *(i32[])
+xk_types: *(TypeInfo[])
+xk_structs: *(StructInfo[])
+xk_args: *(i32[])
+xk_files: *(SrcFile[])
+xk_void_type: *int
+xk_host: *CheckerCollectionHost
+checker_collections_bind = (input: *CheckerCollectionInput) -> int:
+    xk_nodes = input[0].nodes
+    xk_lists = input[0].lists
+    xk_types = input[0].types
+    xk_structs = input[0].structs
+    xk_args = input[0].args
+    xk_files = input[0].files
+    xk_void_type = input[0].void_type
+    xk_host = input[0].host
+    0
+xk_kid = (n: int, i: int) -> int: int(xk_lists[0][int(xk_nodes[0][n].list) + i])
+xk_count = (n: int) -> int: int(xk_nodes[0][n].nlist)
+xk_dewy = (n: int) -> bool:
+    pos = xk_nodes[0][n].pos
+    f = pos >> 40
+    pos > 0 and f < xk_files[0].len() and xk_files[0][f].is_dewy
+struct CheckerCollectionResult:
+    type: int
+    bypass: bool
+xk_tuple = (n: int, ex: int, exk: TK) -> CheckerCollectionResult:
+    if xk_nodes[0][n].aux == 7: return CheckerCollectionResult(xk_host[0].values(n, ex), true)
+    count = xk_count(n)
+    if count == 0: return CheckerCollectionResult(xk_void_type[0], false)
+    elements: int[]
+    loop i in [0..count):
+        c = xk_kid(n, i)
+        e = 0
+        if ex != 0 and exk == .tuple and int(xk_types[0][ex].nargs) == xk_count(n): e = int(xk_args[0][int(xk_types[0][ex].args) + i])
+        xk_host[0].check(c, e)
+        if e != 0: xk_host[0].coerce(c, e)
+        else: xk_host[0].finalize(c)
+        elements.push(int(xk_nodes[0][c].type))
+    if int(xk_nodes[0][n].flags) & 33554432 != 0 and xk_host[0].float_key(elements[0]): xk_host[0].float_obligation(xk_kid(n, 0))
+    CheckerCollectionResult(int(tb_mk_tuple(elements)), false)
+xk_map = (n: int, ex: int, exk: TK) -> CheckerCollectionResult:
+    count = xk_count(n)
+    loop i in [0..count):
+        key = int(xk_nodes[0][xk_kid(n, i)].a)
+        if xk_nodes[0][key].kind == .ident: xk_host[0].key_name(key)
+    md = xk_host[0].map_decl(n)
+    kt = 0
+    vt = 0
+    if ex != 0 and exk == .struct_:
+        si = int(xk_types[0][ex].st)
+        if int(xk_structs[0][si].decl) == md:
+            targs = int(xk_structs[0][si].targs)
+            kt = int(xk_args[0][targs])
+            vt = int(xk_args[0][targs + 1])
+    if kt == 0:
+        if xk_count(n) == 0: xk_host[0].error(n, 1, 0, 0)
+        p0 = xk_kid(n, 0)
+        xk_host[0].check(int(xk_nodes[0][p0].a), 0)
+        kt = xk_host[0].finalize(int(xk_nodes[0][p0].a))
+        xk_host[0].check(int(xk_nodes[0][p0].b), 0)
+        vt = xk_host[0].finalize(int(xk_nodes[0][p0].b))
+    loop i in [0..count):
+        p = xk_kid(n, i)
+        key = int(xk_nodes[0][p].a)
+        xk_host[0].check(key, kt)
+        xk_host[0].coerce(key, kt)
+        vb = int(xk_nodes[0][p].b)
+        if i > 0 and ex == 0:
+            bt = int(tu_prune(xk_host[0].check(vb, vt)))
+            if not tu_equal(bt, tu_prune(vt)) and not xk_host[0].can_coerce(vb, bt, vt): xk_host[0].error(vb, 2, vt, bt)
+            xk_host[0].coerce(vb, vt)
+        else:
+            xk_host[0].check(vb, vt)
+            xk_host[0].coerce(vb, vt)
+    if xk_dewy(n) and xk_host[0].float_key(kt):
+        loop i in [0..xk_count(n)): xk_host[0].float_obligation(int(xk_nodes[0][xk_kid(n, i)].a))
+    t = xk_host[0].instance(md, kt, vt)
+    if xk_count(n) > 0: xk_nodes[0][n].sym = i32(xk_host[0].setter(n, t, kt, vt))
+    CheckerCollectionResult(t, false)
+xk_check = (n: int, expected: int, ex: int) -> CheckerCollectionResult:
+    exk = TK.void_
+    if ex != 0: exk = xk_types[0][ex].kind
+    if xk_nodes[0][n].kind == .tuple: return xk_tuple(n, ex, exk)
+    xk_map(n, ex, exk)

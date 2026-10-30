@@ -1,0 +1,137 @@
+$runtime_checks
+from p"node_store.dewy" import Node
+from p"checker_types.dewy" import (TypeInfo StructInfo TK)
+from p"source_types.dewy" import SrcFile
+from p"type_inference.dewy" import (tu_prune tu_equal)
+from p"type_constructors.dewy" import tb_mk_tuple
+# Tuple and dictionary literals own element hints, key/value typing and their
+# float-key obligations. Work is O(entries + inference links + demanded semantic
+# work). Host calls may reenter and grow every arena: entries are reread by ID.
+XKWord:type=int64<overflow='wrap'>
+CheckerCollectionHost:type=[
+    check:<(node:int64 expected:int64):>int64>
+    coerce:<(node:int64 type_id:int64):>int64>
+    finalize:<(node:int64):>int64>
+    values:<(node:int64 expected:int64):>int64>
+    float_key:<(type_id:int64):>bool>
+    float_obligation:<(node:int64):>void>
+    key_name:<(node:int64):>void>
+    map_decl:<(node:int64):>int64>
+    instance:<(decl:int64 key:int64 value:int64):>int64>
+    setter:<(node:int64 type_id:int64 key:int64 value:int64):>int64>
+    can_coerce:<(node:int64 source:int64 target:int64):>bool>
+    error:<(node:int64 code:int64 first:int64 second:int64):>void>
+]
+CheckerCollectionInput:type=[
+    nodes:ptr<array<Node>>
+    lists:ptr<array<int32>>
+    types:ptr<array<TypeInfo>>
+    structs:ptr<array<StructInfo>>
+    args:ptr<array<int32>>
+    files:ptr<array<SrcFile>>
+    void_type:ptr<int64>
+    host:ptr<CheckerCollectionHost>
+]
+let xk_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let xk_lists:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
+let xk_types:ptr<array<TypeInfo>>=$unsafe (uint64(0) as ptr<array<TypeInfo>>)
+let xk_structs:ptr<array<StructInfo>>=$unsafe (uint64(0) as ptr<array<StructInfo>>)
+let xk_args:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
+let xk_files:ptr<array<SrcFile>>=$unsafe (uint64(0) as ptr<array<SrcFile>>)
+let xk_void_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xk_host:ptr<CheckerCollectionHost>=$unsafe (uint64(0) as ptr<CheckerCollectionHost>)
+checker_collections_bind=(input:ptr<CheckerCollectionInput>):>XKWord=>$unsafe {
+    xk_nodes=input[0].nodes
+    xk_lists=input[0].lists
+    xk_types=input[0].types
+    xk_structs=input[0].structs
+    xk_args=input[0].args
+    xk_files=input[0].files
+    xk_void_type=input[0].void_type
+    xk_host=input[0].host
+    0
+}
+xk_kid=(n:XKWord i:XKWord):>XKWord=>$unsafe {XKWord(xk_lists[0][XKWord(xk_nodes[0].ptr[n].list) + i])}
+xk_count=(n:XKWord):>XKWord=>$unsafe {XKWord(xk_nodes[0].ptr[n].nlist)}
+xk_dewy=(n:XKWord):>bool=>$unsafe {
+    let pos=xk_nodes[0].ptr[n].pos
+    let f=pos >> 40
+    pos >? 0 and f <? xk_files[0].length and xk_files[0].ptr[f].is_dewy
+}
+# A bypass returns directly: a semantic owner already published it.
+CheckerCollectionResult:type=[type:int64 bypass:bool]
+xk_tuple=(n:XKWord ex:XKWord exk:TK):>CheckerCollectionResult=>$unsafe {
+    # A group of several values (`(a b)` where they are taken apart).
+    if xk_nodes[0].ptr[n].aux =? 7 {return [type=xk_host[0].values(n ex) bypass=true]}
+    let count=xk_count(n)
+    if count =? 0 {return [type=xk_void_type[0] bypass=false]}
+    let elements:array<int64>=[]
+    loop i in [0..count) {
+        let c=xk_kid(n i)
+        let e:XKWord=0
+        if ex not=? 0 and exk =? 'tuple' and XKWord(xk_types[0].ptr[ex].nargs) =? xk_count(n) {
+            e=XKWord(xk_args[0][XKWord(xk_types[0].ptr[ex].args) + i])
+        }
+        xk_host[0].check(c e);
+        if e not=? 0 {xk_host[0].coerce(c e);} else {xk_host[0].finalize(c);}
+        elements.push(int64(xk_nodes[0].ptr[c].type))
+    }
+    # A dictionary comprehension's (key, value): a float key needs its obligation.
+    if XKWord(xk_nodes[0].ptr[n].flags) & 33554432 not=? 0 and xk_host[0].float_key(elements[0]) {xk_host[0].float_obligation(xk_kid(n 0))}
+    [type=tb_mk_tuple(elements) bypass=false]
+}
+xk_map=(n:XKWord ex:XKWord exk:TK):>CheckerCollectionResult=>$unsafe {
+    let count=xk_count(n)
+    # Keys naming nothing: JavaScript's object, with names the program does not have.
+    loop i in [0..count) {
+        let key=XKWord(xk_nodes[0].ptr[xk_kid(n i)].a)
+        if xk_nodes[0].ptr[key].kind =? 'ident' {xk_host[0].key_name(key)}
+    }
+    let md=xk_host[0].map_decl(n)
+    let kt:XKWord=0
+    let vt:XKWord=0
+    if ex not=? 0 and exk =? 'struct_' {
+        let si=XKWord(xk_types[0].ptr[ex].st)
+        if XKWord(xk_structs[0].ptr[si].decl) =? md {
+            let targs=XKWord(xk_structs[0].ptr[si].targs)
+            kt=XKWord(xk_args[0][targs])
+            vt=XKWord(xk_args[0][targs + 1])
+        }
+    }
+    if kt =? 0 {
+        if xk_count(n) =? 0 {xk_host[0].error(n 1 0 0)}
+        let p0=xk_kid(n 0)
+        xk_host[0].check(XKWord(xk_nodes[0].ptr[p0].a) 0);
+        kt=xk_host[0].finalize(XKWord(xk_nodes[0].ptr[p0].a))
+        xk_host[0].check(XKWord(xk_nodes[0].ptr[p0].b) 0);
+        vt=xk_host[0].finalize(XKWord(xk_nodes[0].ptr[p0].b))
+    }
+    loop i in [0..count) {
+        let p=xk_kid(n i)
+        let key=XKWord(xk_nodes[0].ptr[p].a)
+        xk_host[0].check(key kt);
+        xk_host[0].coerce(key kt);
+        let vb=XKWord(xk_nodes[0].ptr[p].b)
+        if i >? 0 and ex =? 0 {
+            # Values of several types: a record with named fields, not a dictionary.
+            let bt=tu_prune(xk_host[0].check(vb vt))
+            if not tu_equal(bt tu_prune(vt)) and not xk_host[0].can_coerce(vb bt vt) {xk_host[0].error(vb 2 vt bt)}
+            xk_host[0].coerce(vb vt);
+        } else {
+            xk_host[0].check(vb vt);
+            xk_host[0].coerce(vb vt);
+        }
+    }
+    if xk_dewy(n) and xk_host[0].float_key(kt) {
+        loop i in [0..xk_count(n)) {xk_host[0].float_obligation(XKWord(xk_nodes[0].ptr[xk_kid(n i)].a))}
+    }
+    let t=xk_host[0].instance(md kt vt)
+    if xk_count(n) >? 0 {xk_nodes[0][n].sym=int32<overflow='wrap'>(xk_host[0].setter(n t kt vt))}
+    [type=t bypass=false]
+}
+xk_check=(n:XKWord expected:XKWord ex:XKWord):>CheckerCollectionResult=>$unsafe {
+    let exk:TK='void_'
+    if ex not=? 0 {exk=xk_types[0].ptr[ex].kind}
+    if xk_nodes[0].ptr[n].kind =? 'tuple' {return xk_tuple(n ex exk)}
+    xk_map(n ex exk)
+}

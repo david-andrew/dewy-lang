@@ -1,3 +1,4 @@
+use 'checker_collections.dewy'
 use 'checker_cast.dewy'
 use 'checker_unary.dewy'
 use 'checker_logic.dewy'
@@ -10086,6 +10087,27 @@ cast_error = (n: int, a: int, ft: int, tt: int, code: int):
 cast_host = CheckerCastHost(check_expr, cast_unit, finalize_literal, quantity_transmute, cast_size, cast_refine, secret_cast, can_coerce, coerce, cast_type_text, cast_set_coerce, cast_bundled, cast_conversion, cast_helper, cast_record, cast_text, pos_in_lib, cast_storage, cast_error)
 cast_input = CheckerCastInput(&nodes, &types, &structs, &files, &last_checked, &T_STR, &T_U8, &T_MATH_INT, &cast_host)
 cast_binding = checker_cast_bind(&cast_input)
+collection_float_key = (t: int) -> bool: key_holds_float(t)
+collection_float_obligation = (key: int) -> void: float_key_obligation(key)
+# ({x: 1, y: 2}: JavaScript's object, with names the program does not have)
+collection_key_name = (key: int) -> void:
+    if lookup(int(nodes[key].name)) != 0: return
+    kn = name_of(int(nodes[key].name))
+    if dewy_at(nodes[key].pos): fatal(nodes[key].pos, "unknown name '{kn}' (a dictionary's keys are values: `[\"{kn}\" -> ...]`; for named fields, a record: `[{kn}=...]`)")
+    fatal(nodes[key].pos, "unknown name '{kn}' (a map's keys are values: `\{\"{kn}\": ...}`; for named fields, declare `struct Name:` with them and make one with `Name({kn} = ...)`)")
+collection_map_decl = (n: int) -> int:
+    ms = prelude.get(intern("Map")) ?? 0
+    if ms == 0: fatal(nodes[n].pos, "Map is not available")
+    int(syms[ms].ref)
+collection_instance = (md: int, kt: int, vt: int) -> int: get_struct_inst(md, [kt, vt])
+collection_setter = (n: int, t: int, kt: int, vt: int) -> int: resolve_by_types(intern("[]="), [t, kt, vt], nodes[n].pos, true)
+collection_error = (n: int, code: int, vt: int, bt: int) -> void:
+    if code == 1: fatal(nodes[n].pos, "cannot infer the type of an empty map; add a type annotation: {jd(nodes[n].pos, "`m: \{K: V} = \{}`", "`let m:dict<K V> = []`")}")
+    # ({"name": "Drone", "cost": 10.0}: JavaScript's object, values of several types)
+    fatal(nodes[n].pos, "a map's values are all of one type, and the first is {a_type(vt)}, this {a_type(bt)}: for a record with named fields of their own types, declare {jd(nodes[n].pos, "`struct Name:`", "`Name:type = [field:T ...]`")} with them")
+collection_host = CheckerCollectionHost(check_expr, coerce, finalize_literal, values_group, collection_float_key, collection_float_obligation, collection_key_name, collection_map_decl, collection_instance, collection_setter, can_coerce, collection_error)
+collection_input = CheckerCollectionInput(&nodes, &lists, &types, &structs, &type_args, &files, &T_VOID, &collection_host)
+collection_binding = checker_collections_bind(&collection_input)
 
 optional_error = (n: int, at: int, unwrap: bool):
     if unwrap: fatal(nodes[n].pos, "'!' needs an optional value, found {dt(at)}")
@@ -10877,58 +10899,10 @@ check_expr_other = (n: int, expected: int) -> int:
                 if spread: nodes[n].aux = 2
                 if et != 0 and tkind(prune(et)) != .var: t = ex
                 else: t = mk_array(elt)
-    else if k == .map_lit:
-        # ({x: 1, y: 2}: JavaScript's object, with names the program does not have)
-        loop i in [0..nkids(n)):
-            key = int(nodes[kid(n, i)].a)
-            if nodes[key].kind == .ident and lookup(int(nodes[key].name)) == 0:
-                kn = name_of(int(nodes[key].name))
-                if dewy_at(nodes[key].pos): fatal(nodes[key].pos, "unknown name '{kn}' (a dictionary's keys are values: `[\"{kn}\" -> ...]`; for named fields, a record: `[{kn}=...]`)")
-                fatal(nodes[key].pos, "unknown name '{kn}' (a map's keys are values: `\{\"{kn}\": ...}`; for named fields, declare `struct Name:` with them and make one with `Name({kn} = ...)`)")
-        ms = prelude.get(intern("Map")) ?? 0
-        if ms == 0: fatal(nodes[n].pos, "Map is not available")
-        md = int(syms[ms].ref)
-        kt = 0
-        vt = 0
-        if ex != 0 and exk == .struct_ and int(structs[int(types[ex].st)].decl) == md:
-            kt = struct_targ(int(types[ex].st), 0)
-            vt = struct_targ(int(types[ex].st), 1)
-        if kt == 0:
-            if nkids(n) == 0: fatal(nodes[n].pos, "cannot infer the type of an empty map; add a type annotation: {jd(nodes[n].pos, "`m: \{K: V} = \{}`", "`let m:dict<K V> = []`")}")
-            p0 = kid(n, 0)
-            check_expr(int(nodes[p0].a), 0)
-            kt = finalize_literal(int(nodes[p0].a))
-            check_expr(int(nodes[p0].b), 0)
-            vt = finalize_literal(int(nodes[p0].b))
-        loop i in [0..nkids(n)):
-            p = kid(n, i)
-            check_to(int(nodes[p].a), kt)
-            vb = int(nodes[p].b)
-            # ({"name": "Drone", "cost": 10.0}: JavaScript's object, values of several types)
-            if i > 0 and ex == 0:
-                bt = prune(check_expr(vb, vt))
-                if not type_eq(bt, prune(vt)) and not can_coerce(vb, bt, vt): fatal(nodes[vb].pos, "a map's values are all of one type, and the first is {a_type(vt)}, this {a_type(bt)}: for a record with named fields of their own types, declare {jd(nodes[vb].pos, "`struct Name:`", "`Name:type = [field:T ...]`")} with them")
-                coerce(vb, vt)
-            else: check_to(vb, vt)
-        if dewy_at(nodes[n].pos) and key_holds_float(kt):
-            loop p in kids(n): float_key_obligation(int(nodes[p].a))
-        t = get_struct_inst(md, [kt, vt])
-        if nkids(n) > 0: nodes[n].sym = i32(resolve_by_types(intern("[]="), [t, kt, vt], nodes[n].pos, true))
-    else if k == .tuple and nodes[n].aux == i32(TUPLE_VALUES): return values_group(n, ex)
-    else if k == .tuple:
-        if nkids(n) == 0: t = T_VOID
-        else:
-            el: int[]
-            loop i in [0..nkids(n)):
-                c = kid(n, i)
-                e = 0
-                if ex != 0 and exk == .tuple and int(types[ex].nargs) == nkids(n): e = targ(ex, i)
-                check_expr(c, e)
-                if e != 0: coerce(c, e)
-                else: finalize_literal(c)
-                el.push(ntype(c))
-            if has_flag(n, NF_MAP_PAIR) and key_holds_float(el[0]): float_key_obligation(kid(n, 0))
-            t = mk_tuple(el)
+    else if k == .map_lit or k == .tuple:
+        result = xk_check(n, expected, ex)
+        if result.bypass: return result.type
+        t = result.type
     else if k == .iflet: t = check_iflet(n, ex)
     else if k == .match_: t = check_match(n, expected)
     else if k == .cast:
