@@ -1,0 +1,136 @@
+# Frozen lambda-expression checker extracted from expr.jo.
+use 'node_store.dewy'
+use 'checker_types.dewy'
+use 'checker_state.dewy'
+use 'type_inference.dewy'
+use 'type_constructors.dewy'
+use 'checker_resolve.dewy'
+struct CheckerLambdaHost:
+    poly: (int, int) -> int
+    callable_base: (int) -> int
+    instance: () -> int
+    shaped: (int, int, mut int[], int) -> void
+    entry: (int, int) -> void
+    body: (int, int, int) -> void
+    zonk_tree: (int) -> void
+    labels: (int) -> int
+    contract: (int, int, int[]) -> int
+    effects: (int, int) -> int
+    verify: (int, int, int) -> void
+    ownership: (int, int) -> int
+    error: (int, int, int, int) -> void
+struct CheckerLambdaInput:
+    nodes: *(Node[])
+    lists: *(i32[])
+    types: *(TypeInfo[])
+    args: *(i32[])
+    fns: *(FnInst[])
+    locals: *(Local[])
+    binders: *RefineBindings
+    refine: *bool
+    effects: *bool
+    sink_pack: *int
+    host: *CheckerLambdaHost
+xm_nodes: *(Node[])
+xm_lists: *(i32[])
+xm_types: *(TypeInfo[])
+xm_args: *(i32[])
+xm_fns: *(FnInst[])
+xm_locals: *(Local[])
+xm_binders: *RefineBindings
+xm_refine: *bool
+xm_effects: *bool
+xm_sink_pack: *int
+xm_host: *CheckerLambdaHost
+checker_lambdas_bind = (input: *CheckerLambdaInput) -> int:
+    xm_nodes = input[0].nodes
+    xm_lists = input[0].lists
+    xm_types = input[0].types
+    xm_args = input[0].args
+    xm_fns = input[0].fns
+    xm_locals = input[0].locals
+    xm_binders = input[0].binders
+    xm_refine = input[0].refine
+    xm_effects = input[0].effects
+    xm_sink_pack = input[0].sink_pack
+    xm_host = input[0].host
+    0
+xm_count = (n: int) -> int: int(xm_nodes[0][n].nlist)
+xm_kid = (n: int, i: int) -> int: int(xm_lists[0][int(xm_nodes[0][n].list) + i])
+xm_targ = (t: int, i: int) -> int: int(xm_args[0][int(xm_types[0][t].args) + i])
+xm_formals = (lam: int) -> int[]:
+    out: int[]
+    loop i in [0..xm_count(lam)): out.push(int(xm_nodes[0][xm_kid(lam, i)].name))
+    out
+xm_pack_type = (t: int) -> bool: xm_types[0][t].kind == .fn_ and xm_types[0][t].sign
+xm_lambda = (lam: int, expected: int) -> int:
+    if int(xm_nodes[0][lam].flags) & 64 != 0: return xm_host[0].poly(lam, expected)
+    et = xm_host[0].callable_base(expected)
+    if expected != 0 and xm_types[0][et].kind != .fn_: et = 0
+    if expected == 0: et = 0
+    np = xm_count(lam)
+    if et != 0 and int(xm_types[0][et].nargs) != np: xm_host[0].error(lam, 1, np, int(xm_types[0][et].nargs))
+    f = xm_host[0].instance()
+    xm_fns[0][f].decl = i32(lam)
+    xm_fns[0][f].has_env = true
+    xm_fns[0][f].body = xm_nodes[0][lam].b
+    old_formals = xm_binders[0].formals
+    old_self = xm_binders[0].self
+    if xm_refine[0]: xm_binders[0].formals = xm_formals(lam)
+    mm = 0
+    pts: int[]
+    shaped = false
+    loop i in [0..np):
+        p = xm_kid(lam, i)
+        xm_binders[0].self = int(xm_nodes[0][p].name)
+        pt = 0
+        if xm_nodes[0][p].a != 0:
+            pt = int(ct_resolve_type(int(xm_nodes[0][p].a)))
+            if et != 0 and not tu_unify(pt, xm_targ(et, i)): xm_host[0].error(p, 2, pt, xm_targ(et, i))
+        else if et != 0: pt = xm_targ(et, i)
+        else: xm_host[0].error(p, 3, i, 0)
+        if int(xm_nodes[0][p].flags) & 1 != 0: mm = mm | (1 << i)
+        if et != 0 and int(xm_types[0][et].mutmask) & (1 << i) != 0:
+            mm = mm | (1 << i)
+            xm_nodes[0][p].flags = i32(int(xm_nodes[0][p].flags) | 1)
+        pts.push(pt)
+        tn = int(xm_nodes[0][p].a)
+        if tn != 0 and xm_nodes[0][tn].kind == .tarray and xm_nodes[0][tn].ival == 1: shaped = true
+    if shaped: xm_host[0].shaped(lam, f, mut pts, mm)
+    xm_host[0].entry(lam, int(xm_nodes[0][lam].b))
+    xm_binders[0].formals = old_formals
+    xm_binders[0].self = old_self
+    xm_fns[0][f].ptypes = pts
+    ret_hint = 0
+    if et != 0: ret_hint = int(xm_types[0][et].elem)
+    if et != 0 and xm_pack_type(et) and xm_nodes[0][lam].a == 0: xm_sink_pack[0] = int(tu_prune(ret_hint))
+    xm_host[0].body(f, lam, ret_hint)
+    lang_body = int(xm_nodes[0][lam].flags) & 33554432 != 0
+    packs = xm_fns[0][f].pack != 0
+    if et != 0 and not lang_body and xm_pack_type(et) != packs: xm_host[0].error(lam, 4, f, et)
+    zp: int[]
+    loop t in xm_fns[0][f].ptypes: zp.push(int(tu_zonk(t)))
+    xm_fns[0][f].ptypes = zp
+    xm_fns[0][f].ret = i32(int(tu_zonk(int(xm_fns[0][f].ret))))
+    xm_host[0].zonk_tree(int(xm_fns[0][f].body))
+    loop i in [0..xm_fns[0][f].locals.len()):
+        l = xm_fns[0][f].locals[i]
+        xm_locals[0][l].type = i32(int(tu_zonk(int(xm_locals[0][l].type))))
+    xm_nodes[0][lam].sym = i32(f)
+    labels = 0
+    if et != 0: labels = int(xm_types[0][et].st)
+    else: labels = xm_host[0].labels(lam)
+    t = int(tb_mk_fn(zp, int(xm_fns[0][f].ret), mm, labels, 0, xm_fns[0][f].pack != 0 and not lang_body))
+    if xm_nodes[0][lam].sval != 0: t = xm_host[0].contract(t, lam, zp)
+    xm_nodes[0][lam].type = i32(t)
+    if xm_effects[0]: t = xm_host[0].effects(lam, expected)
+    xm_host[0].verify(t, expected, lam)
+    t = xm_host[0].ownership(t, f)
+    xm_nodes[0][lam].type = i32(t)
+    xm_fns[0][f].fntype = i32(t)
+    if xm_nodes[0][lam].sval != 0:
+        declaration = xm_nodes[0].len()
+        copy = xm_nodes[0][lam]
+        xm_nodes[0].push(copy)
+        xm_fns[0][f].decl = i32(declaration)
+    t

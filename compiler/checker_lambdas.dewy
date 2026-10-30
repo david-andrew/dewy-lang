@@ -1,0 +1,157 @@
+$runtime_checks
+from p"node_store.dewy" import Node
+from p"checker_types.dewy" import (TypeInfo TK)
+from p"checker_state.dewy" import (FnInst Local RefineBindings)
+from p"type_inference.dewy" import (tu_prune tu_unify tu_zonk)
+from p"type_constructors.dewy" import tb_mk_fn
+from p"checker_resolve.dewy" import ct_resolve_type
+# Lambda expressions own their instance: parameter types from annotations or the
+# expected function type, mutability, refinement formals, the body's result and
+# pack agreement, zonked signature and the callable type. Work is O(parameters +
+# instance locals) plus demanded body checking; body, effects, ownership and
+# diagnostics are host services that may grow every arena (fns included), so
+# instances, nodes and locals are reread by ID.
+XMWord:type=int64<overflow='wrap'>
+CheckerLambdaHost:type=[
+    poly:<(node:int64 expected:int64):>int64>
+    callable_base:<(type_id:int64):>int64>
+    instance:<():>int64>
+    shaped:<(node:int64 instance:int64 @ptypes:array<int64> mutmask:int64):>void>
+    entry:<(node:int64 body:int64):>void>
+    body:<(instance:int64 node:int64 result:int64):>void>
+    zonk_tree:<(node:int64):>void>
+    labels:<(node:int64):>int64>
+    contract:<(type_id:int64 node:int64 ptypes:array<int64>):>int64>
+    effects:<(node:int64 expected:int64):>int64>
+    verify:<(type_id:int64 expected:int64 node:int64):>void>
+    ownership:<(type_id:int64 instance:int64):>int64>
+    error:<(node:int64 code:int64 first:int64 second:int64):>void>
+]
+CheckerLambdaInput:type=[
+    nodes:ptr<array<Node>>
+    lists:ptr<array<int32>>
+    types:ptr<array<TypeInfo>>
+    args:ptr<array<int32>>
+    fns:ptr<array<FnInst>>
+    locals:ptr<array<Local>>
+    binders:ptr<RefineBindings>
+    refine:ptr<bool>
+    effects:ptr<bool>
+    sink_pack:ptr<int64>
+    host:ptr<CheckerLambdaHost>
+]
+let xm_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let xm_lists:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
+let xm_types:ptr<array<TypeInfo>>=$unsafe (uint64(0) as ptr<array<TypeInfo>>)
+let xm_args:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
+let xm_fns:ptr<array<FnInst>>=$unsafe (uint64(0) as ptr<array<FnInst>>)
+let xm_locals:ptr<array<Local>>=$unsafe (uint64(0) as ptr<array<Local>>)
+let xm_binders:ptr<RefineBindings>=$unsafe (uint64(0) as ptr<RefineBindings>)
+let xm_refine:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+let xm_effects:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+let xm_sink_pack:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xm_host:ptr<CheckerLambdaHost>=$unsafe (uint64(0) as ptr<CheckerLambdaHost>)
+checker_lambdas_bind=(input:ptr<CheckerLambdaInput>):>XMWord=>$unsafe {
+    xm_nodes=input[0].nodes
+    xm_lists=input[0].lists
+    xm_types=input[0].types
+    xm_args=input[0].args
+    xm_fns=input[0].fns
+    xm_locals=input[0].locals
+    xm_binders=input[0].binders
+    xm_refine=input[0].refine
+    xm_effects=input[0].effects
+    xm_sink_pack=input[0].sink_pack
+    xm_host=input[0].host
+    0
+}
+xm_count=(n:XMWord):>XMWord=>$unsafe {XMWord(xm_nodes[0].ptr[n].nlist)}
+xm_kid=(n:XMWord i:XMWord):>XMWord=>$unsafe {XMWord(xm_lists[0][XMWord(xm_nodes[0].ptr[n].list) + i])}
+xm_targ=(t:XMWord i:XMWord):>XMWord=>$unsafe {XMWord(xm_args[0][XMWord(xm_types[0].ptr[t].args) + i])}
+# The parameters' names, as refinement formals.
+xm_formals=(lam:XMWord):>array<int64>=>$unsafe {
+    let out:array<int64>=[]
+    loop i in [0..xm_count(lam)) {out.push(int64(xm_nodes[0].ptr[xm_kid(lam i)].name))}
+    out
+}
+# A function type giving several values.
+xm_pack_type=(t:XMWord):>bool=>$unsafe {xm_types[0].ptr[t].kind =? 'fn_' and xm_types[0].ptr[t].sign}
+xm_lambda=(lam:XMWord expected:XMWord):>XMWord=>$unsafe {
+    if XMWord(xm_nodes[0].ptr[lam].flags) & 64 not=? 0 {return xm_host[0].poly(lam expected)}
+    let et=xm_host[0].callable_base(expected)
+    if expected not=? 0 and xm_types[0].ptr[et].kind not=? 'fn_' {et=0}
+    if expected =? 0 {et=0}
+    let np=xm_count(lam)
+    if et not=? 0 and XMWord(xm_types[0].ptr[et].nargs) not=? np {xm_host[0].error(lam 1 np XMWord(xm_types[0].ptr[et].nargs))}
+    let f=xm_host[0].instance()
+    xm_fns[0][f].decl=int32<overflow='wrap'>(lam)
+    xm_fns[0][f].has_env=true
+    xm_fns[0][f].body=xm_nodes[0].ptr[lam].b
+    let old_formals=xm_binders[0].formals
+    let old_self=xm_binders[0].self
+    if xm_refine[0] {xm_binders[0].formals=xm_formals(lam)}
+    let mm:XMWord=0
+    let pts:array<int64>=[]
+    let shaped=false
+    loop i in [0..np) {
+        let p=xm_kid(lam i)
+        xm_binders[0].self=int64(xm_nodes[0].ptr[p].name)
+        let pt:XMWord=0
+        if xm_nodes[0].ptr[p].a not=? 0 {
+            pt=ct_resolve_type(XMWord(xm_nodes[0].ptr[p].a))
+            if et not=? 0 and not tu_unify(pt xm_targ(et i)) {xm_host[0].error(p 2 pt xm_targ(et i))}
+        } else if et not=? 0 {pt=xm_targ(et i)}
+        else {xm_host[0].error(p 3 i 0)}
+        if XMWord(xm_nodes[0].ptr[p].flags) & 1 not=? 0 {mm=mm | (1 << i)}
+        if et not=? 0 and XMWord(xm_types[0].ptr[et].mutmask) & (1 << i) not=? 0 {
+            mm=mm | (1 << i)
+            xm_nodes[0][p].flags=xm_nodes[0].ptr[p].flags | 1
+        }
+        pts.push(int64(pt))
+        # An n-dimensional parameter with a written shape.
+        let tn=XMWord(xm_nodes[0].ptr[p].a)
+        if tn not=? 0 and xm_nodes[0].ptr[tn].kind =? 'tarray' and xm_nodes[0].ptr[tn].ival =? 1 {shaped=true}
+    }
+    if shaped {xm_host[0].shaped(lam f @pts mm)}
+    xm_host[0].entry(lam XMWord(xm_nodes[0].ptr[lam].b))
+    xm_binders[0].formals=old_formals
+    xm_binders[0].self=old_self
+    xm_fns[0][f].ptypes=pts
+    let ret_hint:XMWord=0
+    if et not=? 0 {ret_hint=XMWord(xm_types[0].ptr[et].elem)}
+    # Checked as `<():>(int64 int64)>`: its body gives several values of that type.
+    if et not=? 0 and xm_pack_type(et) and xm_nodes[0].ptr[lam].a =? 0 {xm_sink_pack[0]=tu_prune(ret_hint)}
+    xm_host[0].body(f lam ret_hint)
+    # A parallel or spawn body the compiler made keeps its values as the array it collects.
+    let lang_body=XMWord(xm_nodes[0].ptr[lam].flags) & 33554432 not=? 0
+    let packs=xm_fns[0].ptr[f].pack not=? 0
+    if et not=? 0 and not lang_body and xm_pack_type(et) not=? packs {xm_host[0].error(lam 4 f et)}
+    let zp:array<int64>=[]
+    loop t in xm_fns[0].ptr[f].ptypes {zp.push(int64(tu_zonk(t)))}
+    xm_fns[0][f].ptypes=zp
+    xm_fns[0][f].ret=int32<overflow='wrap'>(tu_zonk(XMWord(xm_fns[0].ptr[f].ret)))
+    xm_host[0].zonk_tree(XMWord(xm_fns[0].ptr[f].body))
+    loop i in [0..xm_fns[0].ptr[f].locals.length) {
+        let l=xm_fns[0].ptr[f].locals[i]
+        xm_locals[0][l].type=int32<overflow='wrap'>(tu_zonk(XMWord(xm_locals[0].ptr[l].type)))
+    }
+    xm_nodes[0][lam].sym=int32<overflow='wrap'>(f)
+    let labels=if et not=? 0 {XMWord(xm_types[0].ptr[et].st)} else {xm_host[0].labels(lam)}
+    let t=tb_mk_fn(zp XMWord(xm_fns[0].ptr[f].ret) mm labels 0 xm_fns[0].ptr[f].pack not=? 0 and not lang_body)
+    if xm_nodes[0].ptr[lam].sval not=? 0 {t=xm_host[0].contract(t lam zp)}
+    xm_nodes[0][lam].type=int32<overflow='wrap'>(t)
+    if xm_effects[0] {t=xm_host[0].effects(lam expected)}
+    xm_host[0].verify(t expected lam)
+    t=xm_host[0].ownership(t f)
+    xm_nodes[0][lam].type=int32<overflow='wrap'>(t)
+    xm_fns[0][f].fntype=int32<overflow='wrap'>(t)
+    if xm_nodes[0].ptr[lam].sval not=? 0 {
+        # Later conversions may wrap or rewrite the expression; keep the declaration
+        # immutable so final verification cannot lose its effect row.
+        let declaration=xm_nodes[0].length
+        let copy=xm_nodes[0].ptr[lam]
+        xm_nodes[0].push(copy)
+        xm_fns[0][f].decl=int32<overflow='wrap'>(declaration)
+    }
+    t
+}

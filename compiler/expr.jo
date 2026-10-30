@@ -1,3 +1,4 @@
+use 'checker_lambdas.dewy'
 use 'checker_aggregates.dewy'
 use 'checker_type_apply.dewy'
 use 'checker_conditionals.dewy'
@@ -9165,101 +9166,53 @@ member_arms_as_variants = (ps: int[], result: int):
         nodes[p].aux2 = nodes[e].aux
 
 # ---------------- lambdas ----------------
-check_lambda = (lam: int, expected: int) -> int:
-    if has_flag(lam, NF_GENERIC): return check_poly_lambda(lam, expected)
-    et = callable_base(expected)
-    if expected != 0 and types[et].kind != .fn_: et = 0
-    if expected == 0: et = 0
-    np = nkids(lam)
-    if et != 0 and int(types[et].nargs) != np: fatal(nodes[lam].pos, "lambda has {np} parameter(s) but {types[et].nargs} are expected")
-    f = new_inst(FK_LAMBDA, cur_mod(), "lambda")
-    fns[f].decl = i32(lam)
-    fns[f].has_env = true
-    fns[f].body = nodes[lam].b
-    old_formals = refine_bindings.formals
-    old_self = refine_bindings.self
-    if refine_active:
-        refine_bindings.formals = []
-        loop p in kids(lam): refine_bindings.formals.push(int(nodes[p].name))
-    mm = 0
-    pts: int[]
-    shaped = false
-    loop i in [0..np):
-        p = kid(lam, i)
-        refine_bindings.self = int(nodes[p].name)
-        pt = 0
-        if nodes[p].a != 0:
-            pt = resolve_type(int(nodes[p].a))
-            if et != 0 and not unify(pt, targ(et, i)): fatal(nodes[p].pos, "parameter type {dt(pt)} does not match expected {dt(targ(et, i))}")
-        else if et != 0: pt = targ(et, i)
-        else:
-            pn = name_of(int(nodes[p].name))
-            if i == 0 and (pn == "self" or pn == "this"):
-                fatal(nodes[p].pos, "structs have no methods: write the function at the top level (not inside the struct), taking what it works on first, as {jd(nodes[p].pos, "`move = (p: mut Player, dt: f64): ...`", "`move = (@p:Player dt:float64) => ...`")}; `p.move(dt)` calls it")
-            if pn == "$partial": fatal(nodes[p].pos, "partial operator needs a function type; add a function-type annotation or pass it to a typed callback parameter")
-            # (`($capture @html @para) => ...`: the second shared local lost its `$capture`)
-            if has_flag(p, NF_MUT) and dewy_at(nodes[p].pos):
-                outer = lookup(int(nodes[p].name))
-                if outer != 0 and syms[outer].kind == .local: fatal(nodes[p].pos, "cannot infer the type of parameter '{pn}': to share the enclosing '{pn}' instead, write `$capture @{pn}` (each capture takes its own `$capture`)")
-            fatal(nodes[p].pos, "cannot infer the type of parameter '{pn}'; add a type annotation")
-        if has_flag(p, NF_MUT): mm |= 1 << i
-        if et != 0 and int(types[et].mutmask) & (1 << i) != 0:
-            mm |= 1 << i
-            add_flag(p, NF_MUT)
-        pts.push(pt)
-        if nd_has_shape(int(nodes[p].a)): shaped = true
-    if shaped:
-        refine_bindings.formals = []
-        loop p in kids(lam): refine_bindings.formals.push(int(nodes[p].name))
-        nd_signature(lam, pts)
-        if nd_mutable_signatures.has(lam): nd_mutable_instances[f] = nd_mutable_signatures[lam]
-        ref_validate_signature(pts, 0, mm, nodes[lam].pos)
-    dir_function_entry(lam, int(nodes[lam].b))
-    refine_bindings.formals = old_formals
-    refine_bindings.self = old_self
-    fns[f].ptypes = pts
-    ret_hint = 0
-    if et != 0: ret_hint = int(types[et].elem)
-    # (checked as `<():>(int64 int64)>`: its body gives several values of that type)
-    if et != 0 and fn_type_pack(et) and nodes[lam].a == 0: sink_lambda_pack = prune(ret_hint)
+# Lambdas run in checker_lambdas.dewy; these are its services.
+check_lambda = (lam: int, expected: int) -> int: xm_lambda(lam, expected)
+lambda_instance = () -> int: new_inst(FK_LAMBDA, cur_mod(), "lambda")
+lambda_shaped = (lam: int, f: int, pts: mut int[], mm: int):
+    refine_bindings.formals = []
+    loop p in kids(lam): refine_bindings.formals.push(int(nodes[p].name))
+    nd_signature(lam, pts)
+    if nd_mutable_signatures.has(lam): nd_mutable_instances[f] = nd_mutable_signatures[lam]
+    ref_validate_signature(pts, 0, mm, nodes[lam].pos)
+lambda_entry = (lam: int, body: int):
+    dir_function_entry(lam, body)
+    return
+lambda_body = (f: int, lam: int, ret_hint: int):
     check_lambda_body(f, lam, ret_hint)
-    # (a parallel or spawn body the compiler made keeps its values as the array it collects)
-    lang_body = has_flag(lam, NF_LANG_BODY)
-    if et != 0 and not lang_body and fn_type_pack(et) != (fns[f].pack != 0):
-        if fns[f].pack != 0:
-            # (`key=(e) => (e.at e.step)`, Python's tuple: parentheses list values, a tuple is one)
-            parts = if fns[f].pack_k > 1: fns[f].pack_k else: 2
-            elem = int(types[prune(int(fns[f].ret))].elem)
-            shown = if elem > 0 and tkind(prune(elem)) != .var: dt(elem) else: "T"
-            tuple = "[{" ".join(fill(shown, parts))}]"
-            if dewy_at(nodes[lam].pos): err_notes.push((-1, "help: parentheses list several values; they make no tuple. For one value of several parts, give a tuple and its type: `(...):>{tuple} => [...]`"))
-            fatal(nodes[lam].pos, "this function gives several values, and the function wanted here gives one")
-        fatal(nodes[lam].pos, "this function gives one value, and {dt(et)} gives several: express each one in its body, `() => \{ 1 2 }`")
-    zp: int[]
-    loop t in fns[f].ptypes: zp.push(zonk(t))
-    fns[f].ptypes = zp
-    fns[f].ret = i32(zonk(int(fns[f].ret)))
-    zonk_tree(int(fns[f].body))
-    loop l in fns[f].locals: locals[l].type = i32(zonk(int(locals[l].type)))
-    nodes[lam].sym = i32(f)
-    labels = if et != 0: int(types[et].st) else: decl_fn_labels(lam)
-    t = mk_fn(zp, int(fns[f].ret), mm, labels, 0, fns[f].pack != 0 and not lang_body)
-    if nodes[lam].sval != 0:
-        t = mk_callable_contract(t, effect_decl_contract(lam, zp))
-    nodes[lam].type = i32(t)
-    if effects_active: t = effect_infer_callable(lam, expected)
+    return
+lambda_zonk_tree = (root: int):
+    zonk_tree(root)
+    return
+lambda_contract = (t: int, lam: int, zp: int[]) -> int: mk_callable_contract(t, effect_decl_contract(lam, zp))
+lambda_verify = (t: int, expected: int, lam: int):
     if callable_contract(expected) != 0 and not has_var(expected) and not effect_contract_fits(t, expected): fatal(nodes[lam].pos, "cannot prove callable effect contract")
-    t = ownership_lambda_type(t, f)
-    nodes[lam].type = i32(t)
-    fns[f].fntype = i32(t)
-    if nodes[lam].sval != 0:
-        # The expression can be wrapped/rewritten by later conversions. Keep
-        # the declaration immutable so final verification cannot lose its row.
-        declaration = nodes.len()
-        nodes.push(nodes[lam])
-        fns[f].decl = i32(declaration)
-    t
-
+lambda_error = (n: int, code: int, a: int, b: int):
+    if code == 1: fatal(nodes[n].pos, "lambda has {a} parameter(s) but {b} are expected")
+    if code == 2: fatal(nodes[n].pos, "parameter type {dt(a)} does not match expected {dt(b)}")
+    if code == 3:
+        pn = name_of(int(nodes[n].name))
+        if a == 0 and (pn == "self" or pn == "this"):
+            fatal(nodes[n].pos, "structs have no methods: write the function at the top level (not inside the struct), taking what it works on first, as {jd(nodes[n].pos, "`move = (p: mut Player, dt: f64): ...`", "`move = (@p:Player dt:float64) => ...`")}; `p.move(dt)` calls it")
+        if pn == "$partial": fatal(nodes[n].pos, "partial operator needs a function type; add a function-type annotation or pass it to a typed callback parameter")
+        # (`($capture @html @para) => ...`: the second shared local lost its `$capture`)
+        if has_flag(n, NF_MUT) and dewy_at(nodes[n].pos):
+            outer = lookup(int(nodes[n].name))
+            if outer != 0 and syms[outer].kind == .local: fatal(nodes[n].pos, "cannot infer the type of parameter '{pn}': to share the enclosing '{pn}' instead, write `$capture @{pn}` (each capture takes its own `$capture`)")
+        fatal(nodes[n].pos, "cannot infer the type of parameter '{pn}'; add a type annotation")
+    f = a
+    et = b
+    if fns[f].pack != 0:
+        # (`key=(e) => (e.at e.step)`, Python's tuple: parentheses list values, a tuple is one)
+        parts = 2
+        if fns[f].pack_k > 1: parts = fns[f].pack_k
+        elem = int(types[prune(int(fns[f].ret))].elem)
+        shown = "T"
+        if elem > 0 and tkind(prune(elem)) != .var: shown = dt(elem)
+        tuple = "[{" ".join(fill(shown, parts))}]"
+        if dewy_at(nodes[n].pos): err_notes.push((-1, "help: parentheses list several values; they make no tuple. For one value of several parts, give a tuple and its type: `(...):>{tuple} => [...]`"))
+        fatal(nodes[n].pos, "this function gives several values, and the function wanted here gives one")
+    fatal(nodes[n].pos, "this function gives one value, and {dt(et)} gives several: express each one in its body, `() => \{ 1 2 }`")
 # Does declaration d accept every parameter of function type et (by value) and
 # give a result et's result accepts?
 fn_adapts = (d: int, et: int) -> bool:
@@ -11024,6 +10977,9 @@ aggregate_error = (n: int, code: int, t: int):
 aggregate_host = CheckerAggregateHost(check_expr, check_to, coerce, finalize_literal, decimal_type, aggregate_spread, aggregate_record_spread, aggregate_reflect, dewy_record_type, is_map_type, dewy_positional_record, aggregate_construct, aggregate_fixed, values_elements, sibling_parent, sibling_literal, aggregate_coerce, aggregate_error)
 aggregate_input = CheckerAggregateInput(&nodes, &lists, &types, &files, &last_checked, &sink_pack_site, &sink_pack_hit, &T_INT, &T_MATH_INT, &T_FLOAT, &T_STR, &T_U64, &aggregate_host)
 aggregate_binding = checker_aggregates_bind(&aggregate_input)
+lambda_host = CheckerLambdaHost(check_poly_lambda, callable_base, lambda_instance, lambda_shaped, lambda_entry, lambda_body, lambda_zonk_tree, decl_fn_labels, lambda_contract, effect_infer_callable, lambda_verify, ownership_lambda_type, lambda_error)
+lambda_input = CheckerLambdaInput(&nodes, &lists, &types, &type_args, &fns, &locals, &refine_bindings, &refine_active, &effects_active, &sink_lambda_pack, &lambda_host)
+lambda_binding = checker_lambdas_bind(&lambda_input)
 
 # the expression a nonempty block ends in
 block_tail = (b: int) -> int:
