@@ -1,0 +1,195 @@
+$runtime_checks
+from p"node_store.dewy" import Node
+from p"checker_types.dewy" import (TypeInfo StructInfo Field TK)
+from p"source_types.dewy" import SrcFile
+from p"type_inference.dewy" import tu_prune
+# `x.f` owns member selection once its receiver is checked: secrets, string sets,
+# copies, union forwarding, length and data spellings, modules, type members,
+# tuple positions, vectors, record fields with methods and narrowed paths, and
+# the missing-member tail. Work is O(fields of the receiver's record + inference
+# links) plus demanded semantic work; rewrites, lookups and diagnostics are host
+# services that may grow every arena, so nodes and records are reread by ID.
+XDWord:type=int64<overflow='wrap'>
+CheckerMemberHost:type=[
+    receiver:<(node:int64 expected:int64):>int64>
+    secret:<(node:int64 type_id:int64):>int64>
+    coerce:<(node:int64 type_id:int64):>int64>
+    set_type:<(type_id:int64):>bool>
+    map_type:<(type_id:int64):>bool>
+    copy:<(node:int64 type_id:int64):>int64>
+    forward:<(node:int64 type_id:int64 expected:int64):>int64>
+    complete:<(type_id:int64):>void>
+    len_check:<(node:int64 type_id:int64):>void>
+    call_member:<(node:int64 data:bool expected:int64):>int64>
+    module_member:<(node:int64 type_id:int64 expected:int64 callee:bool):>int64>
+    type_member:<(node:int64 type_id:int64 expected:int64 callee:bool @bypass:bool):>int64>
+    vector_member:<(node:int64 type_id:int64 expected:int64 @bypass:bool):>int64>
+    deref:<(pos:int64 type_id:int64):>void>
+    fields:<(structure:int64):>void>
+    field_ref:<(node:int64 structure:int64 field:int64 type_id:int64):>void>
+    method:<(type_id:int64):>int64>
+    method_value:<(node:int64 method:int64 callee:bool expected:int64):>int64>
+    fn_value:<(node:int64 type_id:int64 callee:bool expected:int64):>int64>
+    narrow_path:<(node:int64 type_id:int64):>int64>
+    missing:<(node:int64 type_id:int64 expected:int64 @bypass:bool):>int64>
+    error:<(node:int64 code:int64 type_id:int64):>void>
+]
+CheckerMemberInput:type=[
+    nodes:ptr<array<Node>>
+    types:ptr<array<TypeInfo>>
+    structs:ptr<array<StructInfo>>
+    fields:ptr<array<Field>>
+    args:ptr<array<int32>>
+    files:ptr<array<SrcFile>>
+    sentinel:ptr<int64>
+    ide:ptr<bool>
+    len_name:ptr<int64>
+    ptr_name:ptr<int64>
+    path_narrows:ptr<int64>
+    no_narrow_at:ptr<int64>
+    string_type:ptr<int64>
+    host:ptr<CheckerMemberHost>
+]
+let xd_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let xd_types:ptr<array<TypeInfo>>=$unsafe (uint64(0) as ptr<array<TypeInfo>>)
+let xd_structs:ptr<array<StructInfo>>=$unsafe (uint64(0) as ptr<array<StructInfo>>)
+let xd_fields:ptr<array<Field>>=$unsafe (uint64(0) as ptr<array<Field>>)
+let xd_args:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
+let xd_files:ptr<array<SrcFile>>=$unsafe (uint64(0) as ptr<array<SrcFile>>)
+let xd_sentinel:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xd_ide:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+let xd_len_name:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xd_ptr_name:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xd_path_narrows:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xd_no_narrow_at:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xd_string_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xd_host:ptr<CheckerMemberHost>=$unsafe (uint64(0) as ptr<CheckerMemberHost>)
+checker_members_bind=(input:ptr<CheckerMemberInput>):>XDWord=>$unsafe {
+    xd_nodes=input[0].nodes
+    xd_types=input[0].types
+    xd_structs=input[0].structs
+    xd_fields=input[0].fields
+    xd_args=input[0].args
+    xd_files=input[0].files
+    xd_sentinel=input[0].sentinel
+    xd_ide=input[0].ide
+    xd_len_name=input[0].len_name
+    xd_ptr_name=input[0].ptr_name
+    xd_path_narrows=input[0].path_narrows
+    xd_no_narrow_at=input[0].no_narrow_at
+    xd_string_type=input[0].string_type
+    xd_host=input[0].host
+    0
+}
+xd_kind=(t:XDWord):>TK=>$unsafe {xd_types[0].ptr[tu_prune(t)].kind}
+xd_in_dewy=(n:XDWord):>bool=>$unsafe {xd_files[0][xd_nodes[0].ptr[n].pos >> 40].is_dewy}
+xd_dewy=(n:XDWord):>bool=>$unsafe {
+    let pos=xd_nodes[0].ptr[n].pos
+    let f=pos >> 40
+    pos >? 0 and f <? xd_files[0].length and xd_files[0].ptr[f].is_dewy
+}
+xd_union=(t0:XDWord):>bool=>$unsafe {
+    let t=tu_prune(t0)
+    xd_types[0].ptr[t].kind =? 'enum_' and xd_structs[0].ptr[XDWord(xd_types[0].ptr[t].st)].union_
+}
+xd_set=(t0:XDWord):>XDWord=>$unsafe {
+    let t=tu_prune(t0)
+    if xd_types[0].ptr[t].kind not=? 'enum_' {return 0}
+    XDWord(xd_structs[0].ptr[XDWord(xd_types[0].ptr[t].st)].lit_set)
+}
+xd_representation=(t0:XDWord):>XDWord=>$unsafe {
+    let t=tu_prune(t0)
+    if xd_types[0].ptr[t].kind =? 'refined' {return tu_prune(XDWord(xd_types[0].ptr[t].elem))}
+    t
+}
+xd_fn_type=(t:XDWord):>bool=>{
+    let k=xd_kind(t)
+    k =? 'fn_' or k =? 'cfn' or k =? 'polyfn' or k =? 'callable'
+}
+# A record field: its index (the last of that name), resolving the record's fields first.
+xd_field=(si:XDWord name:XDWord):>XDWord=>$unsafe {
+    if not xd_structs[0][si].resolved {xd_host[0].fields(si)}
+    let first=XDWord(xd_structs[0].ptr[si].fields)
+    let fi:XDWord=-1
+    loop i in [0..XDWord(xd_structs[0].ptr[si].nfields)) {
+        if XDWord(xd_fields[0][first + i].name) =? name {fi=i}
+    }
+    fi
+}
+# A bypass returns directly: a rewrite, owner or bare call already published it.
+CheckerMemberResult:type=[type:int64 bypass:bool]
+# `spelled` marks the member's spelling: 1 `add`, 2 `length`, 4 `copy` (the caller
+# compares the text once).
+xd_member=(n:XDWord expected:XDWord spelled:XDWord is_callee:bool):>CheckerMemberResult=>$unsafe {
+    let bt=tu_prune(xd_host[0].receiver(n expected))
+    let fname=XDWord(xd_nodes[0].ptr[n].name)
+    if xd_types[0].ptr[bt].kind =? 'secret' {return [type=xd_host[0].secret(n bt) bypass=true]}
+    # A union of string literals is read as text.
+    if xd_set(bt) not=? 0 {
+        xd_host[0].coerce(XDWord(xd_nodes[0].ptr[n].a) xd_string_type[0]);
+        bt=xd_string_type[0]
+    }
+    if spelled & 1 not=? 0 and xd_host[0].set_type(bt) and xd_dewy(n) {xd_host[0].error(n 1 bt)}
+    if spelled & 4 not=? 0 {
+        let copied=xd_host[0].copy(n bt)
+        if copied >=? 0 {return [type=copied bypass=true]}
+    }
+    if (xd_union(bt) or xd_kind(bt) =? 'opt') and xd_in_dewy(n) {return [type=xd_host[0].forward(n bt expected) bypass=true]}
+    if xd_sentinel[0] not=? 0 and fname =? xd_sentinel[0] {xd_host[0].complete(bt)}
+    let bk=xd_types[0].ptr[bt].kind
+    if fname =? xd_len_name[0] {xd_host[0].len_check(n bt)}
+    # Dewy's `xs.length` of a container is `xs.len()`; `xs.ptr` of an array is `xs.data()`.
+    if spelled & 2 not=? 0 and (bk =? 'array' or bk =? 'fixed' or bk =? 'str_' or xd_host[0].map_type(bt) or xd_host[0].set_type(bt)) and xd_in_dewy(n) {
+        return [type=xd_host[0].call_member(n false expected) bypass=true]
+    }
+    if xd_kind(xd_representation(bt)) =? 'array' and fname =? xd_ptr_name[0] and xd_in_dewy(n) {
+        return [type=xd_host[0].call_member(n true expected) bypass=true]
+    }
+    if bk =? 'module' {return [type=xd_host[0].module_member(n bt expected is_callee) bypass=true]}
+    let t:XDWord=0
+    if bk =? 'typeval' {
+        let bypass=false
+        t=xd_host[0].type_member(n bt expected is_callee @bypass)
+        if bypass {return [type=t bypass=true]}
+    } else if xd_nodes[0].ptr[n].aux =? -2 {
+        # `pair.0`: a tuple's position.
+        if bk not=? 'tuple' {xd_host[0].error(n 2 bt)}
+        let i=xd_nodes[0].ptr[n].ival
+        if i <? 0 or i >=? XDWord(xd_types[0].ptr[bt].nargs) {xd_host[0].error(n 3 bt)}
+        t=XDWord(xd_args[0][XDWord(xd_types[0].ptr[bt].args) + i])
+    } else if bk =? 'vec' {
+        let bypass=false
+        t=xd_host[0].vector_member(n bt expected @bypass)
+        if bypass {return [type=t bypass=true]}
+    } else {
+        let st=bt
+        if bk =? 'ptr' {
+            xd_host[0].deref(xd_nodes[0].ptr[n].pos bt)
+            st=tu_prune(XDWord(xd_types[0].ptr[bt].elem))
+        }
+        if xd_types[0].ptr[st].kind =? 'struct_' {
+            let si=XDWord(xd_types[0].ptr[st].st)
+            let fi=xd_field(si fname)
+            if fi >=? 0 {
+                xd_nodes[0][n].aux=int32<overflow='wrap'>(fi)
+                t=XDWord(xd_fields[0][XDWord(xd_structs[0].ptr[si].fields) + fi].type)
+                if xd_ide[0] {xd_host[0].field_ref(n si fi t)}
+                # A method held in a field is called; a function-valued field read bare is too.
+                let method:XDWord=0
+                if xd_kind(t) =? 'polyfn' {method=xd_host[0].method(t)}
+                if method not=? 0 and not is_callee {return [type=xd_host[0].method_value(n method is_callee expected) bypass=true]}
+                if xd_fn_type(t) {
+                    let called=xd_host[0].fn_value(n t is_callee expected)
+                    if called >=? 0 {return [type=called bypass=true]}
+                }
+                if xd_path_narrows[0] >? 0 and n not=? xd_no_narrow_at[0] and bk =? 'struct_' {t=xd_host[0].narrow_path(n t)}
+            }
+        }
+        if t =? 0 {
+            let bypass=false
+            t=xd_host[0].missing(n bt expected @bypass)
+            if bypass {return [type=t bypass=true]}
+        }
+    }
+    [type=t bypass=false]
+}

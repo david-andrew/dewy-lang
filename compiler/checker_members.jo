@@ -1,0 +1,161 @@
+# Frozen member-selection checker extracted from expr.jo.
+use 'node_store.dewy'
+use 'checker_types.dewy'
+use 'source_types.dewy'
+use 'type_inference.dewy'
+struct CheckerMemberHost:
+    receiver: (int, int) -> int
+    secret: (int, int) -> int
+    coerce: (int, int) -> int
+    set_type: (int) -> bool
+    map_type: (int) -> bool
+    copy: (int, int) -> int
+    forward: (int, int, int) -> int
+    complete: (int) -> void
+    len_check: (int, int) -> void
+    call_member: (int, bool, int) -> int
+    module_member: (int, int, int, bool) -> int
+    type_member: (int, int, int, bool, mut bool) -> int
+    vector_member: (int, int, int, mut bool) -> int
+    deref: (int, int) -> void
+    fields: (int) -> void
+    field_ref: (int, int, int, int) -> void
+    method: (int) -> int
+    method_value: (int, int, bool, int) -> int
+    fn_value: (int, int, bool, int) -> int
+    narrow_path: (int, int) -> int
+    missing: (int, int, int, mut bool) -> int
+    error: (int, int, int) -> void
+struct CheckerMemberInput:
+    nodes: *(Node[])
+    types: *(TypeInfo[])
+    structs: *(StructInfo[])
+    fields: *(Field[])
+    args: *(i32[])
+    files: *(SrcFile[])
+    sentinel: *int
+    ide: *bool
+    len_name: *int
+    ptr_name: *int
+    path_narrows: *int
+    no_narrow_at: *int
+    string_type: *int
+    host: *CheckerMemberHost
+xd_nodes: *(Node[])
+xd_types: *(TypeInfo[])
+xd_structs: *(StructInfo[])
+xd_fields: *(Field[])
+xd_args: *(i32[])
+xd_files: *(SrcFile[])
+xd_sentinel: *int
+xd_ide: *bool
+xd_len_name: *int
+xd_ptr_name: *int
+xd_path_narrows: *int
+xd_no_narrow_at: *int
+xd_string_type: *int
+xd_host: *CheckerMemberHost
+checker_members_bind = (input: *CheckerMemberInput) -> int:
+    xd_nodes = input[0].nodes
+    xd_types = input[0].types
+    xd_structs = input[0].structs
+    xd_fields = input[0].fields
+    xd_args = input[0].args
+    xd_files = input[0].files
+    xd_sentinel = input[0].sentinel
+    xd_ide = input[0].ide
+    xd_len_name = input[0].len_name
+    xd_ptr_name = input[0].ptr_name
+    xd_path_narrows = input[0].path_narrows
+    xd_no_narrow_at = input[0].no_narrow_at
+    xd_string_type = input[0].string_type
+    xd_host = input[0].host
+    0
+xd_kind = (t: int) -> TK: xd_types[0][tu_prune(t)].kind
+xd_in_dewy = (n: int) -> bool: xd_files[0][xd_nodes[0][n].pos >> 40].is_dewy
+xd_dewy = (n: int) -> bool:
+    pos = xd_nodes[0][n].pos
+    f = pos >> 40
+    pos > 0 and f < xd_files[0].len() and xd_files[0][f].is_dewy
+xd_union = (t0: int) -> bool:
+    t = int(tu_prune(t0))
+    xd_types[0][t].kind == .enum_ and xd_structs[0][int(xd_types[0][t].st)].union_
+xd_set = (t0: int) -> int:
+    t = int(tu_prune(t0))
+    if xd_types[0][t].kind != .enum_: return 0
+    int(xd_structs[0][int(xd_types[0][t].st)].lit_set)
+xd_representation = (t0: int) -> int:
+    t = int(tu_prune(t0))
+    if xd_types[0][t].kind == .refined: return int(tu_prune(int(xd_types[0][t].elem)))
+    t
+xd_fn_type = (t: int) -> bool:
+    k = xd_kind(t)
+    k == .fn_ or k == .cfn or k == .polyfn or k == .callable
+xd_field = (si: int, name: int) -> int:
+    if not xd_structs[0][si].resolved: xd_host[0].fields(si)
+    first = int(xd_structs[0][si].fields)
+    fi = -1
+    loop i in [0..int(xd_structs[0][si].nfields)):
+        if int(xd_fields[0][first + i].name) == name: fi = i
+    fi
+struct CheckerMemberResult:
+    type: int
+    bypass: bool
+xd_member = (n: int, expected: int, spelled: int, is_callee: bool) -> CheckerMemberResult:
+    bt = int(tu_prune(xd_host[0].receiver(n, expected)))
+    fname = int(xd_nodes[0][n].name)
+    if xd_types[0][bt].kind == .secret: return CheckerMemberResult(xd_host[0].secret(n, bt), true)
+    if xd_set(bt) != 0:
+        xd_host[0].coerce(int(xd_nodes[0][n].a), xd_string_type[0])
+        bt = xd_string_type[0]
+    if spelled & 1 != 0 and xd_host[0].set_type(bt) and xd_dewy(n): xd_host[0].error(n, 1, bt)
+    if spelled & 4 != 0:
+        copied = xd_host[0].copy(n, bt)
+        if copied >= 0: return CheckerMemberResult(copied, true)
+    if (xd_union(bt) or xd_kind(bt) == .opt) and xd_in_dewy(n): return CheckerMemberResult(xd_host[0].forward(n, bt, expected), true)
+    if xd_sentinel[0] != 0 and fname == xd_sentinel[0]: xd_host[0].complete(bt)
+    bk = xd_types[0][bt].kind
+    if fname == xd_len_name[0]: xd_host[0].len_check(n, bt)
+    if spelled & 2 != 0 and (bk == .array or bk == .fixed or bk == .str_ or xd_host[0].map_type(bt) or xd_host[0].set_type(bt)) and xd_in_dewy(n):
+        return CheckerMemberResult(xd_host[0].call_member(n, false, expected), true)
+    if xd_kind(xd_representation(bt)) == .array and fname == xd_ptr_name[0] and xd_in_dewy(n):
+        return CheckerMemberResult(xd_host[0].call_member(n, true, expected), true)
+    if bk == .module: return CheckerMemberResult(xd_host[0].module_member(n, bt, expected, is_callee), true)
+    t = 0
+    if bk == .typeval:
+        bypass = false
+        t = xd_host[0].type_member(n, bt, expected, is_callee, mut bypass)
+        if bypass: return CheckerMemberResult(t, true)
+    else if xd_nodes[0][n].aux == -2:
+        if bk != .tuple: xd_host[0].error(n, 2, bt)
+        i = xd_nodes[0][n].ival
+        if i < 0 or i >= int(xd_types[0][bt].nargs): xd_host[0].error(n, 3, bt)
+        t = int(xd_args[0][int(xd_types[0][bt].args) + i])
+    else if bk == .vec:
+        bypass = false
+        t = xd_host[0].vector_member(n, bt, expected, mut bypass)
+        if bypass: return CheckerMemberResult(t, true)
+    else:
+        st = bt
+        if bk == .ptr:
+            xd_host[0].deref(xd_nodes[0][n].pos, bt)
+            st = int(tu_prune(int(xd_types[0][bt].elem)))
+        if xd_types[0][st].kind == .struct_:
+            si = int(xd_types[0][st].st)
+            fi = xd_field(si, fname)
+            if fi >= 0:
+                xd_nodes[0][n].aux = i32(fi)
+                t = int(xd_fields[0][int(xd_structs[0][si].fields) + fi].type)
+                if xd_ide[0]: xd_host[0].field_ref(n, si, fi, t)
+                method = 0
+                if xd_kind(t) == .polyfn: method = xd_host[0].method(t)
+                if method != 0 and not is_callee: return CheckerMemberResult(xd_host[0].method_value(n, method, is_callee, expected), true)
+                if xd_fn_type(t):
+                    called = xd_host[0].fn_value(n, t, is_callee, expected)
+                    if called >= 0: return CheckerMemberResult(called, true)
+                if xd_path_narrows[0] > 0 and n != xd_no_narrow_at[0] and bk == .struct_: t = xd_host[0].narrow_path(n, t)
+        if t == 0:
+            bypass = false
+            t = xd_host[0].missing(n, bt, expected, mut bypass)
+            if bypass: return CheckerMemberResult(t, true)
+    CheckerMemberResult(t, false)

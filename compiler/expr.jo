@@ -1,3 +1,4 @@
+use 'checker_members.dewy'
 use 'checker_lambdas.dewy'
 use 'checker_aggregates.dewy'
 use 'checker_type_apply.dewy'
@@ -10126,6 +10127,7 @@ literal_host = CheckerLiteralHost(coerce, effect_infer_callable, exact_note, cha
 literal_input = CheckerLiteralInput(&nodes, &lists, &types, &files, &refine_active, &effects_active, &exact_measure_on, &last_checked, &T_STR, &T_FLOAT, &T_BOOL, &T_NULL, &T_INT, &T_MATH_INT, &literal_host)
 literal_binding = checker_literals_bind(&literal_input)
 
+# Member selection runs in checker_members.dewy; these are its services.
 check_field_expr = (n: int, expected: int) -> int:
     if has_flag(n, NF_JUXT): juxt_member_check(n)
     t = 0
@@ -10157,244 +10159,258 @@ check_field_expr = (n: int, expected: int) -> int:
             nodes[f].name = nodes[n].name
             nodes[n] = Node(kind = .index, pos = nodes[n].pos, a = i32(f), b = nodes[a0].b)
             return check_expr(n, expected)
+    nm = name_of(int(nodes[n].name))
+    spelled = 0
+    if nm == "add": spelled = 1
+    else if nm == "length": spelled = 2
+    else if nm == "copy": spelled = 4
+    result = xd_member(n, expected, spelled, is_callee)
+    if result.bypass: return result.type
+    ce_finish(n, result.type, expected)
+member_receiver = (n: int, expected: int) -> int:
     saved_receiver = type_receiver_at
     type_receiver_at = int(nodes[n].a)
-    bt = prune(check_expr(int(nodes[n].a), receiver_literal_hint(int(nodes[n].a), int(nodes[n].name), 0, expected, nodes[n].pos)))
+    bt = check_expr(int(nodes[n].a), receiver_literal_hint(int(nodes[n].a), int(nodes[n].name), 0, expected, nodes[n].pos))
     type_receiver_at = saved_receiver
     nodes[n].a = i32(last_checked)
+    bt
+member_copy = (n: int, bt: int) -> int:
+    if not synthetic_copy(bt, int(nodes[n].name), nodes[n].pos): return -1
+    check_copy(n, int(nodes[n].a), bt)
+member_forward = (n: int, bt: int, expected: int) -> int: forward_member(n, int(nodes[n].a), bt, expected)
+member_len_check = (n: int, bt: int):
+    dewy_len_check(n, true, bt, int(nodes[n].a))
+    return
+# (Dewy's `xs.length` is `xs.len()`; `xs.ptr`, where an array's elements are, is
+# `xs.data()`: a ptr<T> for C (provisional spelling))
+member_call = (n: int, data: bool, expected: int) -> int:
+    method = mk(.field, nodes[n].pos)
+    nodes[method].a = nodes[n].a
+    if data: nodes[method].name = i32(intern("data"))
+    else: nodes[method].name = i32(intern("len"))
+    nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(method))
+    check_expr(n, expected)
+member_module = (n: int, bt: int, expected: int, is_callee: bool) -> int:
     fname = int(nodes[n].name)
-    if types[bt].kind == .secret: return secret_member(n, bt)
-    if str_sets.len() > 1 and str_set_of(bt) != 0:
-        coerce(int(nodes[n].a), T_STR)
-        bt = T_STR
-    if name_of(fname) == "add" and is_dewy_set_type(bt) and dewy_at(nodes[n].pos): fatal(nodes[n].pos, "sets insert with push: replace `.add(value)` with `.push(value)`")
-    if synthetic_copy(bt, fname, nodes[n].pos): return check_copy(n, int(nodes[n].a), bt)
-    if (is_union(bt) or tkind(bt) == .opt) and files[pos_file(nodes[n].pos)].is_dewy:
-        return forward_member(n, int(nodes[n].a), bt, expected)
-    if ide_sentinel != 0 and fname == ide_sentinel: ide_complete_members(bt)
-    bk = types[bt].kind
-    if fname == id_dewy_len: dewy_len_check(n, true, bt, int(nodes[n].a))
-    if name_of(fname) == "length" and (bk == .array or bk == .fixed or bk == .str_ or is_map_type(bt) or is_dewy_set_type(bt)) and files[pos_file(nodes[n].pos)].is_dewy:
-        method = mk(.field, nodes[n].pos)
-        nodes[method].a = nodes[n].a
-        nodes[method].name = i32(intern("len"))
-        nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(method))
-        return check_expr(n, expected)
-    # (Dewy's `xs.ptr`: where an array's elements are, a ptr<T> for C (provisional spelling))
-    if tkind(representation_type(bt)) == .array and fname == id_dewy_ptr and files[pos_file(nodes[n].pos)].is_dewy:
-        method = mk(.field, nodes[n].pos)
-        nodes[method].a = nodes[n].a
-        nodes[method].name = i32(intern("data"))
-        nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(method))
-        return check_expr(n, expected)
-    if bk == .module:
-        m = int(types[bt].mod)
-        s = module_lookup(m, fname)
-        qualifier = int(nodes[n].a)
-        if nodes[qualifier].kind != .ident or name_of(int(nodes[qualifier].name))[0] != '$':
-            if dewy_at(nodes[n].pos): rational_one_spelling(m, fname, nodes[n].pos, "")
-        if s == 0:
-            if name_of(fname) == "path" and not dewy_at(nodes[n].pos): fatal(nodes[n].pos, "paths are plain functions: `join_path(a, b)`, `file_name(p)`, `dir_name(p)`, `extension(p)`, `file_exists(p)`")
-            fatal(nodes[n].pos, "module '{name_of(int(modules[m].name))}' has no member '{name_of(fname)}'")
-        nodes[n] = Node(kind = .ident, pos = nodes[n].pos, name = i32(fname), flags = i32(int(nodes[n].flags) & NF_MUT))
-        if is_callee: callee_at = n
-        t = check_expr_in_module(n, m, expected)
-        last_checked = n
-        return t
-    if bk == .typeval:
-        tt = prune(int(types[bt].elem))
-        if tt == ref_addr_type and (name_of(fname) == "min" or name_of(fname) == "max"):
-            nodes[n] = nodes[bc_int((if name_of(fname) == "max": ref_addr_max() else: 0), nodes[n].pos)]
-            return check_expr(n, T_INT)
-        if tt == T_MATH_INT and (name_of(fname) == "min" or name_of(fname) == "max"):
-            fatal(nodes[n].pos, "mathematical int has no min or max; int64 describes the interim storage limits")
-        if tt != 0 and is_int(tt) and (name_of(fname) == "min" or name_of(fname) == "max"):
-            if ide_on: ide_ref(nodes[n].pos, fname, IK_CONST, 0, tt, 0)
-            bits = int(types[tt].bits)
-            value = 0
-            if name_of(fname) == "min":
-                if types[tt].sign: value = 1 << (bits - 1)
-                if types[tt].sign and bits < 64: value = -value
-            else:
-                if bits == 64: value = -1
-                else: value = (1 << bits) - 1
-                if types[tt].sign: value = int(u64(value) >> 1)
-            lit = mk(.int_lit, nodes[n].pos)
-            nodes[lit].ival = value
-            # Keep the bound's type when a constant/default is cloned and checked again.
-            nodes[n] = Node(kind = .conv, pos = nodes[n].pos, a = i32(lit), aux = i32(int(CV.int_)), aux2 = 1, type = i32(tt))
-            if not types[tt].sign and value < 0: add_flag(lit, NF_U64)
-            check_expr(lit, tt)
-            t = tt
-        else if tt != 0 and types[tt].kind == .struct_ and not is_callee and dewy_type_method(int(structs[int(types[tt].st)].decl), fname) >= 0:
-            # `Type.method`: a static method of no arguments is called by its name
-            callee = mk(.field, nodes[n].pos)
-            nodes[callee].a = nodes[n].a
-            nodes[callee].name = i32(fname)
-            nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(callee))
-            return check_expr(n, expected)
-        else if tt != 0 and types[tt].kind == .enum_:
-            vi = find_variant(int(types[tt].st), fname)
-            if vi < 0: fatal(nodes[n].pos, "{dt(tt)} has no variant '{name_of(fname)}'{variant_hint_for(tt, name_of(fname))}")
-            if variants[int(structs[int(types[tt].st)].variants) + vi].nfields != 0: fatal(nodes[n].pos, "variant '{name_of(fname)}' needs arguments")
-            if ide_on: ide_variant_ref(nodes[n].pos, fname, tt, vi)
-            nodes[n].kind = .dotname
-            nodes[n].aux = i32(vi)
-            nodes[n].a = 0
-            t = tt
+    m = int(types[bt].mod)
+    s = module_lookup(m, fname)
+    qualifier = int(nodes[n].a)
+    if nodes[qualifier].kind != .ident or name_of(int(nodes[qualifier].name))[0] != '$':
+        if dewy_at(nodes[n].pos): rational_one_spelling(m, fname, nodes[n].pos, "")
+    if s == 0:
+        if name_of(fname) == "path" and not dewy_at(nodes[n].pos): fatal(nodes[n].pos, "paths are plain functions: `join_path(a, b)`, `file_name(p)`, `dir_name(p)`, `extension(p)`, `file_exists(p)`")
+        fatal(nodes[n].pos, "module '{name_of(int(modules[m].name))}' has no member '{name_of(fname)}'")
+    nodes[n] = Node(kind = .ident, pos = nodes[n].pos, name = i32(fname), flags = i32(int(nodes[n].flags) & NF_MUT))
+    if is_callee: callee_at = n
+    t = check_expr_in_module(n, m, expected)
+    last_checked = n
+    return t
+member_type = (n: int, bt: int, expected: int, is_callee: bool, bypass: mut bool) -> int:
+    fname = int(nodes[n].name)
+    t = 0
+    tt = prune(int(types[bt].elem))
+    if tt == ref_addr_type and (name_of(fname) == "min" or name_of(fname) == "max"):
+        nodes[n] = nodes[bc_int((if name_of(fname) == "max": ref_addr_max() else: 0), nodes[n].pos)]
+        bypass = true
+        return check_expr(n, T_INT)
+    if tt == T_MATH_INT and (name_of(fname) == "min" or name_of(fname) == "max"):
+        fatal(nodes[n].pos, "mathematical int has no min or max; int64 describes the interim storage limits")
+    if tt != 0 and is_int(tt) and (name_of(fname) == "min" or name_of(fname) == "max"):
+        if ide_on: ide_ref(nodes[n].pos, fname, IK_CONST, 0, tt, 0)
+        bits = int(types[tt].bits)
+        value = 0
+        if name_of(fname) == "min":
+            if types[tt].sign: value = 1 << (bits - 1)
+            if types[tt].sign and bits < 64: value = -value
         else:
-            # (vec3.up, Vector3.zero: written out here)
-            if tt != 0 and is_vec(tt):
-                vn = name_of(fname)
-                dims = vec_n(tt)
-                lit = ""
-                if vn == "zero": lit = "0"
-                else if vn == "one": lit = "1"
-                else if dims == 3:
-                    if vn == "up": lit = "0, 1, 0"
-                    else if vn == "down": lit = "0, -1, 0"
-                    else if vn == "left": lit = "-1, 0, 0"
-                    else if vn == "right": lit = "1, 0, 0"
-                    else if vn == "forward": lit = "0, 0, -1"
-                    else if vn == "back": lit = "0, 0, 1"
-                else if dims == 2:
-                    if vn == "up": lit = "0, -1"
-                    else if vn == "down": lit = "0, 1"
-                    else if vn == "left": lit = "-1, 0"
-                    else if vn == "right": lit = "1, 0"
-                if len(lit) > 0:
-                    why = ""
-                    if vn == "forward": why = " (forward is -z, the way a camera looks)"
-                    if dims == 2 and (vn == "up" or vn == "down"): why = " (y goes down the screen)"
-                    fatal(nodes[n].pos, "write it out: `{dt(tt)}({lit})`{why}")
-            fatal(nodes[n].pos, "type has no member '{name_of(fname)}'")
-    else if nodes[n].aux == -2:
-        if bk != .tuple: fatal(nodes[n].pos, "'.{nodes[n].ival}' needs a tuple, found {dt(bt)}")
-        if nodes[n].ival < 0 or nodes[n].ival >= int(types[bt].nargs): fatal(nodes[n].pos, "tuple index out of range")
-        t = targ(bt, nodes[n].ival)
-    else if bk == .vec and files[pos_file(nodes[n].pos)].is_dewy and not swizzle_name(fname) and fn_name_for(bt, fname) and member_call_without_arguments(bt, fname):
+            if bits == 64: value = -1
+            else: value = (1 << bits) - 1
+            if types[tt].sign: value = int(u64(value) >> 1)
+        lit = mk(.int_lit, nodes[n].pos)
+        nodes[lit].ival = value
+        # Keep the bound's type when a constant/default is cloned and checked again.
+        nodes[n] = Node(kind = .conv, pos = nodes[n].pos, a = i32(lit), aux = i32(int(CV.int_)), aux2 = 1, type = i32(tt))
+        if not types[tt].sign and value < 0: add_flag(lit, NF_U64)
+        check_expr(lit, tt)
+        t = tt
+    else if tt != 0 and types[tt].kind == .struct_ and not is_callee and dewy_type_method(int(structs[int(types[tt].st)].decl), fname) >= 0:
+        # `Type.method`: a static method of no arguments is called by its name
+        callee = mk(.field, nodes[n].pos)
+        nodes[callee].a = nodes[n].a
+        nodes[callee].name = i32(fname)
+        nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(callee))
+        bypass = true
+        return check_expr(n, expected)
+    else if tt != 0 and types[tt].kind == .enum_:
+        vi = find_variant(int(types[tt].st), fname)
+        if vi < 0: fatal(nodes[n].pos, "{dt(tt)} has no variant '{name_of(fname)}'{variant_hint_for(tt, name_of(fname))}")
+        if variants[int(structs[int(types[tt].st)].variants) + vi].nfields != 0: fatal(nodes[n].pos, "variant '{name_of(fname)}' needs arguments")
+        if ide_on: ide_variant_ref(nodes[n].pos, fname, tt, vi)
+        nodes[n].kind = .dotname
+        nodes[n].aux = i32(vi)
+        nodes[n].a = 0
+        t = tt
+    else:
+        # (vec3.up, Vector3.zero: written out here)
+        if tt != 0 and is_vec(tt):
+            vn = name_of(fname)
+            dims = vec_n(tt)
+            lit = ""
+            if vn == "zero": lit = "0"
+            else if vn == "one": lit = "1"
+            else if dims == 3:
+                if vn == "up": lit = "0, 1, 0"
+                else if vn == "down": lit = "0, -1, 0"
+                else if vn == "left": lit = "-1, 0, 0"
+                else if vn == "right": lit = "1, 0, 0"
+                else if vn == "forward": lit = "0, 0, -1"
+                else if vn == "back": lit = "0, 0, 1"
+            else if dims == 2:
+                if vn == "up": lit = "0, -1"
+                else if vn == "down": lit = "0, 1"
+                else if vn == "left": lit = "-1, 0"
+                else if vn == "right": lit = "1, 0"
+            if len(lit) > 0:
+                why = ""
+                if vn == "forward": why = " (forward is -z, the way a camera looks)"
+                if dims == 2 and (vn == "up" or vn == "down"): why = " (y goes down the screen)"
+                fatal(nodes[n].pos, "write it out: `{dt(tt)}({lit})`{why}")
+        fatal(nodes[n].pos, "type has no member '{name_of(fname)}'")
+    t
+member_vector = (n: int, bt: int, expected: int, bypass: mut bool) -> int:
+    fname = int(nodes[n].name)
+    if files[pos_file(nodes[n].pos)].is_dewy and not swizzle_name(fname) and fn_name_for(bt, fname) and member_call_without_arguments(bt, fname):
         # (`v.norm` is `v.norm()`: a vector's function, called with a dot as a container's are)
         method = mk(.field, nodes[n].pos)
         nodes[method].a = nodes[n].a
         nodes[method].name = i32(fname)
         nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(method), aux2 = -9)
+        bypass = true
         return check_expr(n, expected)
-    else if bk == .vec:
-        t = check_swizzle(n, bt)
-        if ide_on: ide_ref(nodes[n].pos, fname, IK_FIELD, 0, t, 0)
-    else:
-        st = bt
-        if bk == .ptr:
-            ffi_deref(nodes[n].pos, bt)
-            st = prune(int(types[bt].elem))
-        if types[st].kind == .struct_:
-            si = int(types[st].st)
-            check_struct_fields(si)
-            fi = -1
-            loop i in [0..int(structs[si].nfields)):
-                if int(fields[int(structs[si].fields) + i].name) == fname: fi = i
-            if fi >= 0:
-                nodes[n].aux = i32(fi)
-                t = int(fields[int(structs[si].fields) + fi].type)
-                if ide_on: ide_field_ref(nodes[n].pos, fname, int(structs[si].decl), fi, t)
-                method = dewy_method_field(t)
-                if method != 0 and not is_callee:
-                    text = "{receiver_text(int(nodes[n].a))}.{name_of(fname)}"
-                    if not dewy_bare_fn(n, is_callee): fatal(nodes[n].pos, "'{text}' is a method, which is not a value yet: call it, `{text}()`")
-                    loop i in [1..nkids(method)):
-                        if nodes[kid(method, i)].b == 0: bare_fn_error(n, text, true)
-                    add_flag(int(nodes[n].a), NF_CHECKED)
-                    return bare_call(n, expected)
-                if is_fn_type(t) and dewy_bare_fn(n, is_callee):
-                    add_flag(int(nodes[n].a), NF_CHECKED)
-                    return bare_fn_value(n, t, "{receiver_text(int(nodes[n].a))}.{name_of(fname)}", expected)
-                if path_narrows > 0 and n != no_narrow_at and bk == .struct_:
-                    al = path_alias(n)
-                    if al >= 0:
-                        nodes[n] = nodes[mk_ident_local(al, nodes[n].pos)]
-                        t = int(locals[al].type)
-        # (`pair.length` of a `[int64 string]`: its number of positions)
-        if t == 0 and bk == .tuple and (fname == id_dewy_len or name_of(fname) == "length") and files[pos_file(nodes[n].pos)].is_dewy:
-            receiver = int(nodes[n].a)
-            add_flag(receiver, NF_CHECKED)
-            count = bc_int(int(types[bt].nargs), nodes[n].pos)
-            # (a receiver that could do something still runs)
-            if nodes[receiver].kind != .ident: count = bc_block([bc_stmt(receiver, nodes[n].pos), bc_stmt(count, nodes[n].pos)], nodes[n].pos)
-            nodes[n] = nodes[count]
-            return check_expr(n, expected)
-        if t == 0:
-            if bk == .opt:
-                et = prune(int(types[bt].elem))
-                has = false
-                if types[et].kind == .struct_:
-                    esi = int(types[et].st)
-                    check_struct_fields(esi)
-                    loop i in [0..int(structs[esi].nfields)):
-                        if int(fields[int(structs[esi].fields) + i].name) == fname: has = true
-                if has:
-                    if files[pos_file(nodes[n].pos)].is_dewy:
-                        fatal(nodes[n].pos, "this {dt(bt)} may be none (nothing), which has no {name_of(fname)}: check it with `is?none` before accessing the field")
-                    fatal(nodes[n].pos, "this {dt(bt)} may be none (nothing), which has no {name_of(fname)}: `x!.{name_of(fname)}` when it cannot be none, or `if let v = x: v.{name_of(fname)}`")
-            # (transform.position: a function's name, with a field after it)
-            if tkind(bt) == .fn_:
-                bn = int(nodes[n].a)
-                fnn = ""
-                if nodes[bn].kind == .ident: fnn = name_of(int(nodes[bn].name))
-                else if nodes[bn].kind == .fnref and nodes[bn].sym > 0 and fns[int(nodes[bn].sym)].decl != 0: fnn = name_of(int(nodes[int(fns[int(nodes[bn].sym)].decl)].name))
-                if fnn == "transform": fatal(nodes[n].pos, "there are no GameObjects or transforms: where a thing is, is a field of your struct (`pos: vec3`), drawn with `draw_mesh(mesh, translation(pos))`")
-                if len(fnn) > 0: fatal(nodes[n].pos, "'{fnn}' is a function, which has no field '{name_of(fname)}': `{fnn}(...)` gives what it makes")
-            # (b.velocity, b.position on a physics Body: a handle, asked of its world)
-            if types[bt].kind == .struct_ and dt(bt) == "Body" and pos_in_lib(nodes[int(structs[int(types[bt].st)].decl)].pos):
-                fatal(nodes[n].pos, "a Body is a handle into its world: ask the world, `w.pos(b)`, `w.velocity(b)`, `w.rotation(b)`, and change it there, `w.set_pos(b, p)`, `w.set_velocity(b, v)`, `w.push(b, impulse)`")
-            # (Dewy's length of an n-dimensional array: its shape, tensors.md)
-            if name_of(fname) == "length" and is_nd(bt) and files[pos_file(nodes[n].pos)].is_dewy and not (cur_assign != 0 and int(nodes[cur_assign].a) == n):
-                nodes[n] = nodes[bc_call("__nd_length", [int(nodes[n].a)], nodes[n].pos)]
-                return check_expr(n, expected)
-            # (Dewy's length of a library container or a sequence, as Heap and Pool: its `len`)
-            if files[pos_file(nodes[n].pos)].is_dewy and name_of(fname) == "length" and fn_name_for(bt, intern("len")) and library_len_fits(bt) and not (cur_assign != 0 and int(nodes[cur_assign].a) == n):
-                # (a member: found through the object, as methods are, whatever `len` names here)
-                method = mk(.field, nodes[n].pos)
-                nodes[method].a = nodes[n].a
-                nodes[method].name = i32(intern("len"))
-                nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(method))
-                return check_expr(n, expected)
-            if fn_name_for(bt, fname):
+    t = check_swizzle(n, bt)
+    if ide_on: ide_ref(nodes[n].pos, fname, IK_FIELD, 0, t, 0)
+    t
+member_deref = (pos: int, bt: int):
+    ffi_deref(pos, bt)
+    return
+member_fields = (si: int):
+    check_struct_fields(si)
+    return
+member_field_ref = (n: int, si: int, fi: int, t: int):
+    ide_field_ref(nodes[n].pos, int(nodes[n].name), int(structs[si].decl), fi, t)
+    return
+member_method_value = (n: int, method: int, is_callee: bool, expected: int) -> int:
+    text = "{receiver_text(int(nodes[n].a))}.{name_of(int(nodes[n].name))}"
+    if not dewy_bare_fn(n, is_callee): fatal(nodes[n].pos, "'{text}' is a method, which is not a value yet: call it, `{text}()`")
+    loop i in [1..nkids(method)):
+        if nodes[kid(method, i)].b == 0: bare_fn_error(n, text, true)
+    add_flag(int(nodes[n].a), NF_CHECKED)
+    bare_call(n, expected)
+member_fn_value = (n: int, t: int, is_callee: bool, expected: int) -> int:
+    if not dewy_bare_fn(n, is_callee): return -1
+    add_flag(int(nodes[n].a), NF_CHECKED)
+    bare_fn_value(n, t, "{receiver_text(int(nodes[n].a))}.{name_of(int(nodes[n].name))}", expected)
+member_narrow_path = (n: int, t: int) -> int:
+    al = path_alias(n)
+    if al < 0: return t
+    nodes[n] = nodes[mk_ident_local(al, nodes[n].pos)]
+    int(locals[al].type)
+member_missing = (n: int, bt: int, expected: int, bypass: mut bool) -> int:
+    fname = int(nodes[n].name)
+    bk = types[bt].kind
+    t = 0
+    # (`pair.length` of a `[int64 string]`: its number of positions)
+    if t == 0 and bk == .tuple and (fname == id_dewy_len or name_of(fname) == "length") and files[pos_file(nodes[n].pos)].is_dewy:
+        receiver = int(nodes[n].a)
+        add_flag(receiver, NF_CHECKED)
+        count = bc_int(int(types[bt].nargs), nodes[n].pos)
+        # (a receiver that could do something still runs)
+        if nodes[receiver].kind != .ident: count = bc_block([bc_stmt(receiver, nodes[n].pos), bc_stmt(count, nodes[n].pos)], nodes[n].pos)
+        nodes[n] = nodes[count]
+        bypass = true
+        return check_expr(n, expected)
+    if t == 0:
+        if bk == .opt:
+            et = prune(int(types[bt].elem))
+            has = false
+            if types[et].kind == .struct_:
+                esi = int(types[et].st)
+                check_struct_fields(esi)
+                loop i in [0..int(structs[esi].nfields)):
+                    if int(fields[int(structs[esi].fields) + i].name) == fname: has = true
+            if has:
                 if files[pos_file(nodes[n].pos)].is_dewy:
-                    # Zero-argument calls may omit their parentheses:
-                    # `xs.pop` is `xs.pop()`. A field of that name wins.
-                    if member_call_without_arguments(bt, fname):
-                        add_flag(int(nodes[n].a), NF_MUT)
-                        method = mk(.field, nodes[n].pos)
-                        nodes[method].a = nodes[n].a
-                        nodes[method].name = i32(fname)
-                        nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(method), aux2 = -9)
-                        return check_expr(n, expected)
-                    fatal(nodes[n].pos, "'{name_of(fname)}' needs arguments: `{receiver_text(int(nodes[n].a))}.{name_of(fname)}(...)`")
-                fatal(nodes[n].pos, "'{name_of(fname)}' is a function: call it, `x.{name_of(fname)}()`")
-            if is_union(bt):
-                # (a field every member has, of one type: read from whichever it holds)
-                if not (cur_assign != 0 and int(nodes[cur_assign].a) == n):
-                    uf = union_field(n, bt, fname)
-                    if uf >= 0:
-                        last_checked = n
-                        return check_expr(n, expected)
-                fatal(nodes[n].pos, "{dt(bt)} has no field '{name_of(fname)}' (it is one of its members: find out which first, with {jd(nodes[n].pos, "`match x:` and an arm for each, or `if x is ...:`", "`match x \{ ... }` and an arm for each, or `if x is? ... \{ }`")})")
-            if is_map_type(bt): fatal(nodes[n].pos, "{dt(bt)} has no field '{name_of(fname)}' (a map's entries are `m[\"{name_of(fname)}\"]`; for fields by name, make a struct)")
-            # (an element of enemies = [] read before anything checked so far pushed one)
-            loop g in open_globals:
-                gt = prune(int(globals[g].type))
-                if tkind(gt) == .array and prune(int(types[gt].elem)) == bt:
-                    gn = name_of(int(globals[g].name))
-                    et = pushed_type(gn)
-                    if len(et) == 0: et = "Thing"
-                    fatal(nodes[n].pos, "the type of what '{gn}' holds is not known here (it starts empty): write it where '{gn}' is made, as {jd(nodes[n].pos, "`{gn}: {et}[] = []`", "`let {gn}:array<{et}> = []`")}")
-            never_cascade(nodes[n].pos, bt)
-            cands = fn_names_for(bt)
-            if types[bt].kind == .struct_:
-                si = int(types[bt].st)
-                loop i in [0..int(structs[si].nfields)): cands.push(int(fields[int(structs[si].fields) + i].name))
-            fatal(nodes[n].pos, "{dt(bt)} has no field '{name_of(fname)}'{suggestion(name_of(fname), surface_names(cands, nodes[n].pos), bt)}")
-    ce_finish(n, t, expected)
+                    fatal(nodes[n].pos, "this {dt(bt)} may be none (nothing), which has no {name_of(fname)}: check it with `is?none` before accessing the field")
+                fatal(nodes[n].pos, "this {dt(bt)} may be none (nothing), which has no {name_of(fname)}: `x!.{name_of(fname)}` when it cannot be none, or `if let v = x: v.{name_of(fname)}`")
+        # (transform.position: a function's name, with a field after it)
+        if tkind(bt) == .fn_:
+            bn = int(nodes[n].a)
+            fnn = ""
+            if nodes[bn].kind == .ident: fnn = name_of(int(nodes[bn].name))
+            else if nodes[bn].kind == .fnref and nodes[bn].sym > 0 and fns[int(nodes[bn].sym)].decl != 0: fnn = name_of(int(nodes[int(fns[int(nodes[bn].sym)].decl)].name))
+            if fnn == "transform": fatal(nodes[n].pos, "there are no GameObjects or transforms: where a thing is, is a field of your struct (`pos: vec3`), drawn with `draw_mesh(mesh, translation(pos))`")
+            if len(fnn) > 0: fatal(nodes[n].pos, "'{fnn}' is a function, which has no field '{name_of(fname)}': `{fnn}(...)` gives what it makes")
+        # (b.velocity, b.position on a physics Body: a handle, asked of its world)
+        if types[bt].kind == .struct_ and dt(bt) == "Body" and pos_in_lib(nodes[int(structs[int(types[bt].st)].decl)].pos):
+            fatal(nodes[n].pos, "a Body is a handle into its world: ask the world, `w.pos(b)`, `w.velocity(b)`, `w.rotation(b)`, and change it there, `w.set_pos(b, p)`, `w.set_velocity(b, v)`, `w.push(b, impulse)`")
+        # (Dewy's length of an n-dimensional array: its shape, tensors.md)
+        if name_of(fname) == "length" and is_nd(bt) and files[pos_file(nodes[n].pos)].is_dewy and not (cur_assign != 0 and int(nodes[cur_assign].a) == n):
+            nodes[n] = nodes[bc_call("__nd_length", [int(nodes[n].a)], nodes[n].pos)]
+            bypass = true
+            return check_expr(n, expected)
+        # (Dewy's length of a library container or a sequence, as Heap and Pool: its `len`)
+        if files[pos_file(nodes[n].pos)].is_dewy and name_of(fname) == "length" and fn_name_for(bt, intern("len")) and library_len_fits(bt) and not (cur_assign != 0 and int(nodes[cur_assign].a) == n):
+            # (a member: found through the object, as methods are, whatever `len` names here)
+            method = mk(.field, nodes[n].pos)
+            nodes[method].a = nodes[n].a
+            nodes[method].name = i32(intern("len"))
+            nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(method))
+            bypass = true
+            return check_expr(n, expected)
+        if fn_name_for(bt, fname):
+            if files[pos_file(nodes[n].pos)].is_dewy:
+                # Zero-argument calls may omit their parentheses:
+                # `xs.pop` is `xs.pop()`. A field of that name wins.
+                if member_call_without_arguments(bt, fname):
+                    add_flag(int(nodes[n].a), NF_MUT)
+                    method = mk(.field, nodes[n].pos)
+                    nodes[method].a = nodes[n].a
+                    nodes[method].name = i32(fname)
+                    nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(method), aux2 = -9)
+                    bypass = true
+                    return check_expr(n, expected)
+                fatal(nodes[n].pos, "'{name_of(fname)}' needs arguments: `{receiver_text(int(nodes[n].a))}.{name_of(fname)}(...)`")
+            fatal(nodes[n].pos, "'{name_of(fname)}' is a function: call it, `x.{name_of(fname)}()`")
+        if is_union(bt):
+            # (a field every member has, of one type: read from whichever it holds)
+            if not (cur_assign != 0 and int(nodes[cur_assign].a) == n):
+                uf = union_field(n, bt, fname)
+                if uf >= 0:
+                    last_checked = n
+                    bypass = true
+                    return check_expr(n, expected)
+            fatal(nodes[n].pos, "{dt(bt)} has no field '{name_of(fname)}' (it is one of its members: find out which first, with {jd(nodes[n].pos, "`match x:` and an arm for each, or `if x is ...:`", "`match x \{ ... }` and an arm for each, or `if x is? ... \{ }`")})")
+        if is_map_type(bt): fatal(nodes[n].pos, "{dt(bt)} has no field '{name_of(fname)}' (a map's entries are `m[\"{name_of(fname)}\"]`; for fields by name, make a struct)")
+        # (an element of enemies = [] read before anything checked so far pushed one)
+        loop g in open_globals:
+            gt = prune(int(globals[g].type))
+            if tkind(gt) == .array and prune(int(types[gt].elem)) == bt:
+                gn = name_of(int(globals[g].name))
+                et = pushed_type(gn)
+                if len(et) == 0: et = "Thing"
+                fatal(nodes[n].pos, "the type of what '{gn}' holds is not known here (it starts empty): write it where '{gn}' is made, as {jd(nodes[n].pos, "`{gn}: {et}[] = []`", "`let {gn}:array<{et}> = []`")}")
+        never_cascade(nodes[n].pos, bt)
+        cands = fn_names_for(bt)
+        if types[bt].kind == .struct_:
+            si = int(types[bt].st)
+            loop i in [0..int(structs[si].nfields)): cands.push(int(fields[int(structs[si].fields) + i].name))
+        fatal(nodes[n].pos, "{dt(bt)} has no field '{name_of(fname)}'{suggestion(name_of(fname), surface_names(cands, nodes[n].pos), bt)}")
+    0
+member_error = (n: int, code: int, bt: int):
+    if code == 1: fatal(nodes[n].pos, "sets insert with push: replace `.add(value)` with `.push(value)`")
+    if code == 2: fatal(nodes[n].pos, "'.{nodes[n].ival}' needs a tuple, found {dt(bt)}")
+    fatal(nodes[n].pos, "tuple index out of range")
+
 
 # `mean[t1 t2]`: a function named before an array literal is called with it, as with a
 # string literal (`printl"hi"`). A function that takes nothing is called first instead
@@ -12620,6 +12636,9 @@ narrow_expr = (root: int, ms: int[], pos: int, name: int):
 path_narrows = 0                # (none yet: field accesses need not look)
 no_narrow_at = 0                # (the target of an assignment: the field or global itself, not what it narrows to; a narrowed
                                 # path it is a part of, as x in x.hp = 7, is still narrowed)
+member_host = CheckerMemberHost(member_receiver, secret_member, coerce, is_dewy_set_type, is_map_type, member_copy, member_forward, ide_complete_members, member_len_check, member_call, member_module, member_type, member_vector, member_deref, member_fields, member_field_ref, dewy_method_field, member_method_value, member_fn_value, member_narrow_path, member_missing, member_error)
+member_input = CheckerMemberInput(&nodes, &types, &structs, &fields, &type_args, &files, &ide_sentinel, &ide_on, &id_dewy_len, &id_dewy_ptr, &path_narrows, &no_narrow_at, &T_STR, &member_host)
+member_binding = checker_members_bind(&member_input)
 
 path_key = (n: int) -> str:
     k = nodes[n].kind
