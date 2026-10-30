@@ -1,0 +1,132 @@
+$runtime_checks
+from p"node_store.dewy" import (Node node_kids)
+from p"source_types.dewy" import SrcFile
+# Demand-only walks: O(visited nodes + child edges), plus pending-name scans
+# and requested host checking. Arena headers are borrowed across reentrant calls.
+CRWord:type=int64<overflow='wrap'>
+CheckerResultCandidate:type=[type_id:int64=0 literal:bool=false]
+CheckerResultHost:type=[
+    lookup:<(name:int64):>int64>
+    pending:<(name:int64):>array<int64>>
+    candidate:<(node:int64 need_literal:bool):>CheckerResultCandidate>
+]
+let cr_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let cr_lists:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
+let cr_files:ptr<array<SrcFile>>=$unsafe (uint64(0) as ptr<array<SrcFile>>)
+let cr_host:ptr<CheckerResultHost>=$unsafe (uint64(0) as ptr<CheckerResultHost>)
+const CR_DISCARD:CRWord=8
+checker_results_bind=(store:ptr<array<Node>> runs:ptr<array<int32>> files:ptr<array<SrcFile>> host:ptr<CheckerResultHost>):>CRWord=>$unsafe {
+    cr_nodes=store; cr_lists=runs; cr_files=files; cr_host=host; 0
+}
+cr_pos_file=(p:CRWord):>CRWord=>{p >> 40}
+cr_nkids=(n:CRWord):>CRWord=>$unsafe {CRWord(cr_nodes[0].ptr[n].nlist)}
+cr_kid=(n:CRWord i:CRWord):>CRWord=>$unsafe {CRWord(cr_lists[0].ptr[CRWord(cr_nodes[0].ptr[n].list) + i])}
+cr_kid_c=(n:CRWord):>CRWord=>$unsafe {if cr_nodes[0].ptr[n].kind =? 'for_' {0} else {CRWord(cr_nodes[0].ptr[n].c)}}
+cr_kids=(n:CRWord):>array<int64>=>$unsafe {node_kids(@cr_nodes[0] @cr_lists[0] n)}
+cr_has_flag=(n:CRWord flag:CRWord):>bool=>$unsafe {(CRWord(cr_nodes[0].ptr[n].flags) & flag) not=? 0}
+cr_has_value_return=(n:CRWord):>bool=>$unsafe {
+    if n =? 0 {return false}
+    let nd=cr_nodes[0].ptr[n]
+    let k=nd.kind
+    if k =? 'return_' {return nd.a not=? 0}
+    if k =? 'lambda' {return false}
+    if nd.a not=? 0 and cr_has_value_return(CRWord(nd.a)) {return true}
+    if nd.b not=? 0 and cr_has_value_return(CRWord(nd.b)) {return true}
+    if k not=? 'for_' and nd.c not=? 0 and cr_has_value_return(CRWord(nd.c)) {return true}
+    loop i in [0..CRWord(nd.nlist)) {
+        if cr_has_value_return(CRWord(cr_lists[0].ptr[CRWord(nd.list) + i])) {return true}
+    }
+    false
+}
+cr_value_leaves=(n:CRWord @out:array<int64>):>void=>$unsafe {
+    if n =? 0 {return}
+    let k=cr_nodes[0].ptr[n].kind
+    if k =? 'block' {
+        if cr_nkids(n) >? 0 {cr_value_leaves(cr_kid(n  cr_nkids(n) - 1)  @out)}
+    }
+    else if k =? 'exprstmt' or k =? 'return_' {cr_value_leaves(CRWord(cr_nodes[0].ptr[n].a)  @out)}
+    else if k =? 'if_' {
+# (an `if` without `else` is a statement: what its arm expresses is not the value)
+        if cr_nodes[0].ptr[n].c =? 0 and cr_files[0][cr_pos_file(cr_nodes[0].ptr[n].pos)].is_dewy {return}
+        cr_value_leaves(CRWord(cr_nodes[0].ptr[n].b)  @out)
+        cr_value_leaves(CRWord(cr_nodes[0].ptr[n].c)  @out)
+    }
+    else if k =? 'match_' {
+        loop arm in cr_kids(n) {cr_value_leaves(CRWord(cr_nodes[0].ptr[arm].b)  @out)}
+    }
+    else {out.push(n)}
+}
+cr_returned_values=(n:CRWord @out:array<int64>):>void=>$unsafe {
+    if n =? 0 or cr_nodes[0].ptr[n].kind =? 'lambda' {return}
+    if cr_nodes[0].ptr[n].kind =? 'return_' and cr_nodes[0].ptr[n].a not=? 0 {cr_value_leaves(CRWord(cr_nodes[0].ptr[n].a)  @out)}
+    cr_returned_values(CRWord(cr_nodes[0].ptr[n].a)  @out)
+    cr_returned_values(CRWord(cr_nodes[0].ptr[n].b)  @out)
+    cr_returned_values(cr_kid_c(n)  @out)
+    loop i in [0..cr_nkids(n)) {cr_returned_values(cr_kid(n  i)  @out)}
+}
+cr_base_case=(n:CRWord pending:array<int64>):>bool=>$unsafe {
+    if n =? 0 {return true}
+    let k=cr_nodes[0].ptr[n].kind
+    if k =? 'lambda' or k =? 'block' or k =? 'match_' {return false}
+    if k =? 'ident' and(CRWord(cr_nodes[0].ptr[n].name) in? pending or cr_host[0].lookup(CRWord(cr_nodes[0].ptr[n].name)) =? 0) {return false}
+    if not cr_base_case(CRWord(cr_nodes[0].ptr[n].a)  pending) or not cr_base_case(CRWord(cr_nodes[0].ptr[n].b)  pending) or not cr_base_case(CRWord(cr_nodes[0].ptr[n].c)  pending) {return false}
+    loop i in [0..cr_nkids(n)) {
+        if not cr_base_case(cr_kid(n  i)  pending) {return false}
+    }
+    true
+}
+cr_syntactic_void=(body:CRWord):>bool=>$unsafe {
+    if body =? 0 or cr_nkids(body) =? 0 {return true}
+# (the last line first: what it says needs no walk of the body)
+    let last=cr_kid(body  cr_nkids(body) - 1)
+    let k=cr_nodes[0].ptr[last].kind
+    if k =? 'exprstmt' {return false}
+    if(k =? 'if_' or k =? 'iflet') and cr_nodes[0].ptr[last].c not=? 0 {return false}
+    not cr_has_value_return(body)
+}
+cr_has_propagate=(n:CRWord):>bool=>$unsafe {
+    if n =? 0 {return false}
+    let nd=cr_nodes[0].ptr[n]
+    let k=nd.kind
+    if k =? 'propagate' {return true}
+    if k =? 'lambda' {return false}
+    if nd.a not=? 0 and cr_has_propagate(CRWord(nd.a)) {return true}
+    if nd.b not=? 0 and cr_has_propagate(CRWord(nd.b)) {return true}
+    if k not=? 'for_' and nd.c not=? 0 and cr_has_propagate(CRWord(nd.c)) {return true}
+    loop i in [0..CRWord(nd.nlist)) {
+        if cr_has_propagate(CRWord(cr_lists[0].ptr[CRWord(nd.list) + i])) {return true}
+    }
+    false
+}
+cr_may_express=(n:CRWord):>bool=>$unsafe {
+    if n =? 0 {return false}
+    let k=cr_nodes[0].ptr[n].kind
+    if k =? 'exprstmt' {return true}
+    if k =? 'block' {
+        if cr_has_flag(n  CR_DISCARD) {return false}
+        loop i in [0..cr_nkids(n)) {
+            if cr_may_express(cr_kid(n  i)) {return true}
+        }
+        return false
+    }
+    if k =? 'if_' or k =? 'iflet' or k =? 'loopx' {return cr_may_express(CRWord(cr_nodes[0].ptr[n].b)) or cr_may_express(CRWord(cr_nodes[0].ptr[n].c))}
+    if k =? 'for_' or k =? 'while_' {return cr_may_express(CRWord(cr_nodes[0].ptr[n].b))}
+    false
+}
+cr_recursive_base_type=(b:CRWord name:CRWord):>CRWord=>$unsafe {
+    let pending=cr_host[0].pending(name)
+    let leaves:array<int64>=[]
+    cr_value_leaves(b  @leaves)
+    cr_returned_values(b  @leaves)
+    let literal:CRWord=0
+    loop leaf in leaves {
+        if not cr_base_case(leaf  pending) {continue}
+        let candidate=cr_host[0].candidate(leaf literal =? 0)
+        if candidate.literal {
+            if literal =? 0 {literal=candidate.type_id}
+            continue
+        }
+        if candidate.type_id not=? 0 {return candidate.type_id}
+    }
+    literal
+}

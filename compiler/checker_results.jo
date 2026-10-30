@@ -1,0 +1,121 @@
+use 'node_store.dewy'
+use 'source_types.dewy'
+struct CheckerResultCandidate:
+    type_id: int
+    literal: bool
+struct CheckerResultHost:
+    lookup: (int) -> int
+    pending: (int) -> int[]
+    candidate: (int, bool) -> CheckerResultCandidate
+cr_nodes: *(Node[])
+cr_lists: *(i32[])
+cr_files: *(SrcFile[])
+cr_host: *CheckerResultHost
+const CR_DISCARD = 8
+checker_results_bind = (store: *(Node[]), runs: *(i32[]), files: *(SrcFile[]), host: *CheckerResultHost) -> int:
+    cr_nodes = store
+    cr_lists = runs
+    cr_files = files
+    cr_host = host
+    0
+cr_pos_file = (p: int) -> int: p >> 40
+cr_nkids = (n: int) -> int: int(cr_nodes[0][n].nlist)
+cr_kid = (n: int, i: int) -> int: int(cr_lists[0][int(cr_nodes[0][n].list) + i])
+cr_kid_c = (n: int) -> int: if cr_nodes[0][n].kind == .for_: 0 else: int(cr_nodes[0][n].c)
+cr_kids = (n: int) -> int[]: node_kids(cr_nodes[0], cr_lists[0], n)
+cr_has_flag = (n: int, flag: int) -> bool: (int(cr_nodes[0][n].flags) & flag) != 0
+cr_has_value_return = (n: int) -> bool:
+    if n == 0: return false
+    nd = cr_nodes[0][n]
+    k = nd.kind
+    if k == .return_: return nd.a != 0
+    if k == .lambda: return false
+    if nd.a != 0 and cr_has_value_return(int(nd.a)): return true
+    if nd.b != 0 and cr_has_value_return(int(nd.b)): return true
+    if k != .for_ and nd.c != 0 and cr_has_value_return(int(nd.c)): return true
+    loop i in [0..int(nd.nlist)):
+        if cr_has_value_return(int(cr_lists[0][int(nd.list) + i])): return true
+    false
+
+cr_value_leaves = (n: int, out: mut int[]):
+    if n == 0: return
+    k = cr_nodes[0][n].kind
+    if k == .block:
+        if cr_nkids(n) > 0: cr_value_leaves(cr_kid(n, cr_nkids(n) - 1), out)
+    else if k == .exprstmt or k == .return_: cr_value_leaves(int(cr_nodes[0][n].a), out)
+    else if k == .if_:
+        # (an `if` without `else` is a statement: what its arm expresses is not the value)
+        if cr_nodes[0][n].c == 0 and cr_files[0][cr_pos_file(cr_nodes[0][n].pos)].is_dewy: return
+        cr_value_leaves(int(cr_nodes[0][n].b), out)
+        cr_value_leaves(int(cr_nodes[0][n].c), out)
+    else if k == .match_:
+        loop arm in cr_kids(n): cr_value_leaves(int(cr_nodes[0][arm].b), out)
+    else: out.push(n)
+
+cr_returned_values = (n: int, out: mut int[]):
+    if n == 0 or cr_nodes[0][n].kind == .lambda: return
+    if cr_nodes[0][n].kind == .return_ and cr_nodes[0][n].a != 0: cr_value_leaves(int(cr_nodes[0][n].a), out)
+    cr_returned_values(int(cr_nodes[0][n].a), out)
+    cr_returned_values(int(cr_nodes[0][n].b), out)
+    cr_returned_values(cr_kid_c(n), out)
+    loop i in [0..cr_nkids(n)): cr_returned_values(cr_kid(n, i), out)
+
+cr_base_case = (n: int, pending: int[]) -> bool:
+    if n == 0: return true
+    k = cr_nodes[0][n].kind
+    if k == .lambda or k == .block or k == .match_: return false
+    if k == .ident and (int(cr_nodes[0][n].name) in pending or cr_host[0].lookup(int(cr_nodes[0][n].name)) == 0): return false
+    if not cr_base_case(int(cr_nodes[0][n].a), pending) or not cr_base_case(int(cr_nodes[0][n].b), pending) or not cr_base_case(int(cr_nodes[0][n].c), pending): return false
+    loop i in [0..cr_nkids(n)):
+        if not cr_base_case(cr_kid(n, i), pending): return false
+    true
+
+cr_syntactic_void = (body: int) -> bool:
+    if body == 0 or cr_nkids(body) == 0: return true
+    # (the last line first: what it says needs no walk of the body)
+    last = cr_kid(body, cr_nkids(body) - 1)
+    k = cr_nodes[0][last].kind
+    if k == .exprstmt: return false
+    if (k == .if_ or k == .iflet) and cr_nodes[0][last].c != 0: return false
+    not cr_has_value_return(body)
+
+cr_has_propagate = (n: int) -> bool:
+    if n == 0: return false
+    nd = cr_nodes[0][n]
+    k = nd.kind
+    if k == .propagate: return true
+    if k == .lambda: return false
+    if nd.a != 0 and cr_has_propagate(int(nd.a)): return true
+    if nd.b != 0 and cr_has_propagate(int(nd.b)): return true
+    if k != .for_ and nd.c != 0 and cr_has_propagate(int(nd.c)): return true
+    loop i in [0..int(nd.nlist)):
+        if cr_has_propagate(int(cr_lists[0][int(nd.list) + i])): return true
+    false
+
+cr_may_express = (n: int) -> bool:
+    if n == 0: return false
+    k = cr_nodes[0][n].kind
+    if k == .exprstmt: return true
+    if k == .block:
+        if cr_has_flag(n, CR_DISCARD): return false
+        loop i in [0..cr_nkids(n)):
+            if cr_may_express(cr_kid(n, i)): return true
+        return false
+    if k == .if_ or k == .iflet or k == .loopx: return cr_may_express(int(cr_nodes[0][n].b)) or cr_may_express(int(cr_nodes[0][n].c))
+    if k == .for_ or k == .while_: return cr_may_express(int(cr_nodes[0][n].b))
+    false
+
+cr_recursive_base_type = (b: int, name: int) -> int:
+    pending = cr_host[0].pending(name)
+    leaves: int[]
+    cr_value_leaves(b, leaves)
+    cr_returned_values(b, leaves)
+    literal = 0
+    loop leaf in leaves:
+        if not cr_base_case(leaf, pending): continue
+        candidate = cr_host[0].candidate(leaf, literal == 0)
+        if candidate.literal:
+            if literal == 0: literal = candidate.type_id
+            continue
+        if candidate.type_id != 0: return candidate.type_id
+    literal

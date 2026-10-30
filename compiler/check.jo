@@ -1,3 +1,4 @@
+use 'checker_results.dewy'
 use 'type_substitute.dewy'
 use 'constant_eval.dewy'
 use 'constant_host.dewy'
@@ -1601,76 +1602,38 @@ new_inst = (kind: int, m: int, base: str) -> int:
     fns.push(FnInst(kind = i32(kind), mod = i32(m), sym = "f_{base}_{inst_counter}"))
     fns.len() - 1
 
-has_value_return = (n: int) -> bool:
-    if n == 0: return false
-    nd = nodes[n]
-    k = nd.kind
-    if k == .return_: return nd.a != 0
-    if k == .lambda: return false
-    if nd.a != 0 and has_value_return(int(nd.a)): return true
-    if nd.b != 0 and has_value_return(int(nd.b)): return true
-    if k != .for_ and nd.c != 0 and has_value_return(int(nd.c)): return true
-    loop i in [0..int(nd.nlist)):
-        if has_value_return(int(lists[int(nd.list) + i])): return true
-    false
+has_value_return = (n: int) -> bool: cr_has_value_return(n)
 
 # The type of a value the body `b` of the function `name` ends with that does not call it, nor
 # any function whose result is still being worked out (is_even and is_odd calling each other),
 # (a typed one before a literal), or 0. Each candidate is checked as a copy, here, so it may only
 # use names already in scope.
-recursive_base_type = (b: int, name: int) -> int:
+recursive_base_type = (b: int, name: int) -> int: cr_recursive_base_type(b, name)
+
+result_pending = (name: int) -> int[]:
     pending = [name]
     loop c in ctxs:
         f = int(c.inst)
         if f > 0 and f < fns.len() and fns[f].state == 1 and fns[f].ret == 0 and fns[f].decl != 0:
             pending.push(int(nodes[int(fns[f].decl)].name))
-    leaves: int[]
-    value_leaves(b, leaves)
-    returned_values(b, leaves)
-    literal = 0
-    loop leaf in leaves:
-        if not base_case(leaf, pending): continue
-        e = clone(leaf)
-        t = check_expr(e, 0)
-        if has_flag(e, NF_LITERAL):
-            if literal == 0: literal = lit_default(e)
-            continue
-        if t != 0 and tkind(t) != .var and tkind(t) != .void_ and t != T_NEVER: return prune(t)
-    literal
+    pending
 
-value_leaves = (n: int, out: mut int[]):
-    if n == 0: return
-    k = nodes[n].kind
-    if k == .block:
-        if nkids(n) > 0: value_leaves(kid(n, nkids(n) - 1), out)
-    else if k == .exprstmt or k == .return_: value_leaves(int(nodes[n].a), out)
-    else if k == .if_:
-        # (an `if` without `else` is a statement: what its arm expresses is not the value)
-        if nodes[n].c == 0 and files[pos_file(nodes[n].pos)].is_dewy: return
-        value_leaves(int(nodes[n].b), out)
-        value_leaves(int(nodes[n].c), out)
-    else if k == .match_:
-        loop arm in kids(n): value_leaves(int(nodes[arm].b), out)
-    else: out.push(n)
+result_candidate = (leaf: int, need_literal: bool) -> CheckerResultCandidate:
+    e = clone(leaf)
+    t = check_expr(e, 0)
+    if has_flag(e, NF_LITERAL): return CheckerResultCandidate(if need_literal: lit_default(e) else: 0, true)
+    if t != 0 and tkind(t) != .var and tkind(t) != .void_ and t != T_NEVER: return CheckerResultCandidate(prune(t), false)
+    CheckerResultCandidate()
 
-returned_values = (n: int, out: mut int[]):
-    if n == 0 or nodes[n].kind == .lambda: return
-    if nodes[n].kind == .return_ and nodes[n].a != 0: value_leaves(int(nodes[n].a), out)
-    returned_values(int(nodes[n].a), out)
-    returned_values(int(nodes[n].b), out)
-    returned_values(kid_c(n), out)
-    loop i in [0..nkids(n)): returned_values(kid(n, i), out)
+result_host = CheckerResultHost(lookup, result_pending, result_candidate)
+result_binding = checker_results_bind(&nodes, &lists, &files, &result_host)
+
+value_leaves = (n: int, out: mut int[]): cr_value_leaves(n, out)
+
+returned_values = (n: int, out: mut int[]): cr_returned_values(n, out)
 
 # (an expression that names none of the functions `pending` and nothing out of scope here)
-base_case = (n: int, pending: int[]) -> bool:
-    if n == 0: return true
-    k = nodes[n].kind
-    if k == .lambda or k == .block or k == .match_: return false
-    if k == .ident and (int(nodes[n].name) in pending or lookup(int(nodes[n].name)) == 0): return false
-    if not base_case(int(nodes[n].a), pending) or not base_case(int(nodes[n].b), pending) or not base_case(int(nodes[n].c), pending): return false
-    loop i in [0..nkids(n)):
-        if not base_case(kid(n, i), pending): return false
-    true
+base_case = (n: int, pending: int[]) -> bool: cr_base_case(n, pending)
 
 # the name of the type a Dewy method belongs to, or ""
 method_type_name = (d: int) -> str:
@@ -1678,44 +1641,15 @@ method_type_name = (d: int) -> str:
     if t == 0 or nodes[t].kind != .tname: return ""
     name_of(int(nodes[t].name))
 
-syntactic_void = (body: int) -> bool:
-    if body == 0 or nkids(body) == 0: return true
-    # (the last line first: what it says needs no walk of the body)
-    last = kid(body, nkids(body) - 1)
-    k = nodes[last].kind
-    if k == .exprstmt: return false
-    if (k == .if_ or k == .iflet) and nodes[last].c != 0: return false
-    not has_value_return(body)
+syntactic_void = (body: int) -> bool: cr_syntactic_void(body)
 
 # (Dewy: an `or_throw` outside a nested function, whose failures a body expressing
 # nothing still gives back, as `void | E`; one walk of the body)
-has_propagate = (n: int) -> bool:
-    if n == 0: return false
-    nd = nodes[n]
-    k = nd.kind
-    if k == .propagate: return true
-    if k == .lambda: return false
-    if nd.a != 0 and has_propagate(int(nd.a)): return true
-    if nd.b != 0 and has_propagate(int(nd.b)): return true
-    if k != .for_ and nd.c != 0 and has_propagate(int(nd.c)): return true
-    loop i in [0..int(nd.nlist)):
-        if has_propagate(int(lists[int(nd.list) + i])): return true
-    false
+has_propagate = (n: int) -> bool: cr_has_propagate(n)
 
 # (Dewy: a statement that may express a value, `xs.pop()` in a loop, so that what the
 # body gives is inferred: multi_expressions.md)
-may_express = (n: int) -> bool:
-    if n == 0: return false
-    k = nodes[n].kind
-    if k == .exprstmt: return true
-    if k == .block:
-        if has_flag(n, NF_DISCARD): return false
-        loop i in [0..nkids(n)):
-            if may_express(kid(n, i)): return true
-        return false
-    if k == .if_ or k == .iflet or k == .loopx: return may_express(int(nodes[n].b)) or may_express(int(nodes[n].c))
-    if k == .for_ or k == .while_: return may_express(int(nodes[n].b))
-    false
+may_express = (n: int) -> bool: cr_may_express(n)
 
 # (@no_web("why"): a function that does nothing in a browser, said where a web build's program
 # calls it)
