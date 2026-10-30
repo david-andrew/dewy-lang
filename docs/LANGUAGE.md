@@ -2736,6 +2736,11 @@ matrix[selected_rows [0, 2..end]] .+= 10
 
 An array of indexes selects those positions of an axis, in order:
 `matrix[[2 0] [..]]` takes rows 2 and 0, and assigning to it writes them.
+Both `array<int>` and `array<int64>` indexes are accepted. Semantic integers
+must fit signed index coordinates before conversion, then satisfy the axis
+bounds; oversized integers never wrap into valid positions. Index arrays also
+work without a range axis: `matrix[row_indexes column_indexes]` or
+`matrix[row_indexes]`, which keeps the remaining axes whole.
 The first two values define a step, as they do in ordinary array ranges. A
 range keeps its axis even when it selects zero or one element. Bounds proofs
 cover full-width constant strides and symbolic steps whose direction and

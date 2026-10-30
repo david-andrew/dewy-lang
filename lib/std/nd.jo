@@ -176,6 +176,16 @@ __nd_axis = (selection: IntRange) -> __NDAxis: __NDAxis(selection, 1)
 # (`m[rows [..]]` with an array of indexes: those, in order; flag 8)
 __nd_axis = (picks: int[]) -> __NDAxis: __NDAxis(__dewy_range(0, 0, 0, false, true), 9, picks)
 
+# Semantic integers keep their values until the index-coordinate boundary.
+# Validate before narrowing so huge indexes cannot wrap into valid positions.
+__nd_axis = (picks: __dewy_int[]) -> __NDAxis:
+    words: int[]
+    loop pick in picks:
+        if pick < -9223372036854775807 - 1 or pick > 9223372036854775807: panic("matrix index does not fit int64")
+        words.push(int(pick))
+    __nd_axis(words)
+
+
 __nd_axis_slice = (first: int, second: int, last: int, inclusive: bool, bounded: bool, stepped: bool, exclusive_first: bool) -> __NDAxis:
     flags = 1
     if not bounded: flags |= 2

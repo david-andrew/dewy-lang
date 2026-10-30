@@ -11805,7 +11805,7 @@ dewy_range_value = (range: int) -> int:
     if has_flag(range, NF_EXCL_FIRST): result = bc_call("__dewy_range_tail", [result], pos)
     result
 
-# A matrix part can use literal ranges or ordinary stored IntRange values.
+# A matrix part can use literal ranges, stored IntRange values or index arrays.
 is_part_index = (n: int, receiver: int = 0) -> bool:
     ixs = kids(n)
     if nodes[n].b != 0: ixs = [int(nodes[n].b)]
@@ -11813,7 +11813,9 @@ is_part_index = (n: int, receiver: int = 0) -> bool:
         if nodes[x].kind == .range: return true
     if is_nd(receiver):
         loop x in ixs:
-            if is_dewy_range_type(check_expr(clone(x), 0), "IntRange"): return true
+            t = representation_type(check_expr(clone(x), 0))
+            if is_dewy_range_type(t, "IntRange"): return true
+            if (tkind(t) == .array or tkind(t) == .fixed) and is_int(telem(t)): return true
     false
 
 # Convert each axis to a small selector. The library binds open endpoints to

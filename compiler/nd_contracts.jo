@@ -209,6 +209,9 @@ fact_nd_classify = (n: int) -> int:
     if kind == 13 or kind == 14: return if nkids(n) == (if kind == 13: 5 else: 7) and path == lib_dir + "/std/dewy_ranges.jo": kind else: 0
     if path != lib_dir + "/std/nd.jo" and path != lib_dir + "/prelude/nd.dewy": return 0
     if kind <= 3: return if is_nd(representation_type(ntype(n))): kind else: 0
+    if kind == 12 and nkids(n) == 1:
+        picks = representation_type(ntype(kid(n, 0)))
+        if tkind(picks) == .array and telem(picks) == T_MATH_INT: return 155
     if kind == 140 or kind == 10 or kind == 12: return if nkids(n) == 1: kind else: 0
     if kind == 11: return if nkids(n) == 7: kind else: 0
     if kind == 154: return if nkids(n) == 2: kind else: 0
@@ -277,6 +280,9 @@ fact_nd_need = (n: int, s: mut FactState, op: Tok, a: int, b: int, relation: str
 
 fact_nd_check = (n: int, s: mut FactState, values: int[], kind: int):
     if kind >= 160: fact_sequence_select(n, s, values, kind); return
+    if kind == 155:
+        fact_nd_integer_picks(n, s, values[0])
+        return
     if kind >= 150 and kind <= 154:
         fact_nd_slice(n, s, values, kind)
         return
@@ -385,6 +391,9 @@ fact_nd_make = (n: int, s: mut FactState, dims: int[], data: int = 0, result_typ
     result
 
 fact_nd_capture = (n: int, s: mut FactState, values: int[], kind: int) -> int:
+    if kind == 155:
+        fact_nd_integer_picks(n, s, values[0])
+        return fact_nd_remember(n, s, values, ntype(n))
     if kind >= 160: return fact_sequence_select(n, s, values, kind)
     if kind != 111 and not (kind >= 151 and kind <= 153) and not fact_nd_reads_only(n): fact_path_call_effects(n, s)
     if kind >= 150 and kind <= 154: return fact_nd_slice(n, s, values, kind)
@@ -663,7 +672,7 @@ nd_mutable_check = (n: int, s: mut FactState, values: int[]):
 fact_nd_reads_only = (n: int) -> bool:
     k = fact_nd_call(n)
     if k == 160 or k == 163 or k == 166 or k == 169: return true
-    if k >= 4 and k <= 14 or k >= 100 and k <= 105 or k >= 120 and k <= 122 or k == 130 or k == 131 or k == 140 or k == 141 or k == 150 or k == 154: return true
+    if k >= 4 and k <= 14 or k >= 100 and k <= 105 or k >= 120 and k <= 122 or k == 130 or k == 131 or k == 140 or k == 141 or k == 150 or k == 154 or k == 155: return true
     k == 110 and effect_share(nd_elem(representation_type(ntype(kid(n, 0)))))
 
 # Mutable entry contracts are separate from the callable's storage type.

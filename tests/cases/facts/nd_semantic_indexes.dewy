@@ -1,0 +1,13 @@
+main=()=>{
+ let m=[1 2 ; 3 4 ; 5 6]
+ let picks:array<int>=[2 0 2]
+ printl(m[picks [..]].data)
+ m[picks [..]]=[10 20 30 40 50 60]
+ printl(m.data)
+ let chosen=m[picks [..]]
+ printl(chosen[2 1])
+ let empty:array<int>=[]
+ printl(m[empty [..]].data)
+ let bounded=[loop i in [0..3) i]
+ printl(m[bounded [..]].data)
+}

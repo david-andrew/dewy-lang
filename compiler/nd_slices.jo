@@ -43,7 +43,7 @@ fact_nd_axis = (n: int, s: mut FactState, value: int, extent: int) -> FactNDAxis
         keep = fact_bound(s, actuals[2])
         if keep.lo != keep.hi: return FactNDAxis()
         return FactNDAxis(actuals[0], actuals[1], keep.lo != 0, true, actuals[3], actuals[4])
-    if kind == 12 and actuals.len() == 1:
+    if (kind == 12 or kind == 155) and actuals.len() == 1:
         t = representation_type(ntype(kid(origin, 0)))
         if is_int(t): return FactNDAxis(actuals[0], 0, false, true)
         if is_dewy_range_type(t, "IntRange"): return fact_nd_axis(n, s, actuals[0], extent)
@@ -262,3 +262,16 @@ fact_nd_slice = (n: int, s: mut FactState, values: int[], kind: int) -> int:
     # malformed storage; do not turn that opt-in path into a valid result fact.
     if rank.lo == 0 or not storage: return fact_fresh(s, ntype(n))
     fact_nd_make(n, s, dims)
+
+# The semantic-int overload copies the same coordinates into signed words.
+# Prove every narrowing using the snapshot's bounded inventory or hull.
+# O(demanded projections + <=64 entries), only for this overload's calls.
+fact_nd_integer_picks = (n: int, s: mut FactState, picks: int):
+    size = fact_project(s, picks, -1, false, T_INT)
+    entries, complete = fact_selector_entries(s, picks, size)
+    if not complete:
+        fact_nd_need(n, s, .eq, fact_fresh(s, T_INT), fact_constant(s, 1), "index array elements fit int64")
+        return
+    loop entry in entries:
+        fact_nd_need(n, s, (if fact_host_endpoint(s, entry, false): Tok.le else: Tok.lt), fact_constant(s, FACT_MIN), entry, "selected index fits int64's lower bound")
+        fact_nd_need(n, s, (if fact_host_endpoint(s, entry, true): Tok.le else: Tok.lt), entry, fact_constant(s, FACT_MAX), "selected index fits int64's upper bound")
