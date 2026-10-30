@@ -1,3 +1,4 @@
+use 'checker_zonk.dewy'
 use 'checker_body_results.dewy'
 use 'checker_bodies.dewy'
 use 'checker_instances.dewy'
@@ -4890,41 +4891,22 @@ body_result_error = (n: int, code: int, r: int, decl: int):
 body_result_host = CheckerBodyResultHost(body_result_entry, body_result_init, body_result_check, stmt_terminates, lit_default, coerce, __never_skip, body_result_throws, body_result_hint, void_arm_end, body_result_error)
 body_result_input = CheckerBodyResultInput(&nodes, &lists, &types, &files, &fns, &ctxs, &cx, &T_VOID, &T_NEVER, &body_result_host)
 body_result_binding = checker_body_results_bind(&body_result_input)
-body_finalize = (f: int, vars0: int, binds0: int, exposed0: int, da_mark: int):
-    body = int(fns[f].body)
-    index_mark = zonk_indexes
-    global_mark = zonk_user_globals
-    saved_sites = zonk_write_sites
-    saved_collect = zonk_collect_writes
-    zonk_write_sites = []
-    zonk_collect_writes = false
-    # Other functions retain the demanded lowering walk. No proof is needed
-    # merely because a body contains arithmetic or a read-only integer.
-    if fns[f].kind == FK_NORMAL:
-        loop l in fns[f].locals:
-            if prune(int(locals[l].type)) == T_MATH_INT and int(locals[l].flags) & LF_ASSIGNED != 0: zonk_collect_writes = true
-    # (a normal body checked without making or binding a type variable, nor taking a return
-    # type still being worked out, has no type a zonk would change: only the counts are wanted)
-    quiet = fns[f].kind == FK_NORMAL and not zonk_collect_writes and var_counter == vars0 and type_binds == binds0 and type_exposures == exposed0
-    if quiet: zonk_summary(body)
-    else: zonk_tree(body)
-    fns[f].write_sites = zonk_write_sites
-    fns[f].writes_ready = zonk_collect_writes
-    zonk_write_sites = saved_sites
-    zonk_collect_writes = saved_collect
-    fns[f].no_indexes = fns[f].kind == FK_NORMAL and zonk_indexes == index_mark
-    fns[f].no_user_globals = fns[f].kind == FK_NORMAL and zonk_user_globals == global_mark
-    loop l in fns[f].locals:
-        locals[l].type = i32(zonk(int(locals[l].type)))
-        if has_var(prune(int(locals[l].type))):
-            ln = name_of(int(locals[l].name))
-            # (a variable the compiler made, as for a loop: said of what it holds)
-            if len(ln) == 0 or starts_with(ln, "__"): fatal(locals[l].pos, "cannot infer the type of what this goes through: write the type where the array is made, as {jd(locals[l].pos, "`xs: int[] = []`", "`let xs:array<int64> = []`")}")
-            # (a comprehension whose body ends in a statement collects nothing)
-            if starts_with(ln, "$dewy_collection"): fatal(locals[l].pos, "this loop collects nothing: its body must end with the value to collect, as `[loop i in xs \{ i * 2 }]`")
-            fatal(locals[l].pos, "cannot infer the type of '{ln}'; add a type annotation{empty_hint(ln, int(locals[l].type))}")
+# Finalization runs in checker_zonk.dewy; these are its services.
+body_finalize = (f: int, vars0: int, binds0: int, exposed0: int, da_mark: int): xz_finalize(f, vars0, binds0, exposed0, da_mark)
+zonk_prelude = (m: int) -> bool: modules[m].is_prelude
+zonk_local_error = (l: int):
+    ln = name_of(int(locals[l].name))
+    # (a variable the compiler made, as for a loop: said of what it holds)
+    if len(ln) == 0 or starts_with(ln, "__"): fatal(locals[l].pos, "cannot infer the type of what this goes through: write the type where the array is made, as {jd(locals[l].pos, "`xs: int[] = []`", "`let xs:array<int64> = []`")}")
+    # (a comprehension whose body ends in a statement collects nothing)
+    if starts_with(ln, "$dewy_collection"): fatal(locals[l].pos, "this loop collects nothing: its body must end with the value to collect, as `[loop i in xs \{ i * 2 }]`")
+    fatal(locals[l].pos, "cannot infer the type of '{ln}'; add a type annotation{empty_hint(ln, int(locals[l].type))}")
+zonk_copy_warnings = (f: int):
     copy_write_warnings(f)
-    if da_decls.len() > da_mark: da_check_fn(body, da_mark)
+    return
+zonk_definite = (body: int, mark: int):
+    da_check_fn(body, mark)
+    return
 
 body_host = CheckerBodyHost(load_body, dewy_at, body_context, body_recursive_error, body_restore, ic_fn, ic_restore, decimal_wants, decimal_check_body, body_force, push_type_params, new_local, body_skip, scope_reset, body_infer, body_expression, body_finalize)
 body_input = CheckerBodyInput(&nodes, &lists, &types, &fns, &ctxs, &locals, &names, &err_trail, &err_trail_names, &err_trail_fns, &check_scopes, &da_decls, &cx, &var_counter, &type_binds, &type_exposures, &T_VOID, &T_NEVER, &ide_skipped_never, &body_host)
@@ -5230,117 +5212,11 @@ settle_open_globals = ():
 zonk_indexes = 0
 zonk_user_globals = 0
 
-# zonk_tree's counts for a body whose types it would leave as they are: the walk stops once it
-# has found an index and a user global, which settle both. (The counts do not depend on the order
-# the nodes are visited in: the stack is a plain buffer, read through pointers, nothing copied.)
-zs_stack: int[]
-zonk_summary = (root: int):
-    if root == 0: return
-    if zs_stack.len() < 256: zs_stack.resize(256)
-    st = data(zs_stack)
-    cap = zs_stack.len()
-    st[0] = root
-    sp = 1
-    index = false
-    global = false
-    ns = data(nodes)
-    ls = data(lists)
-    loop sp > 0:
-        sp -= 1
-        n = st[sp]
-        k = ns[n].kind
-        if k == .index and not index:
-            zonk_indexes += 1
-            index = true
-            if global: break
-        if k == .ident and not global:
-            if ns[n].aux == i32(int(SK.global)):
-                if not modules[int(globals[int(ns[n].sym)].mod)].is_prelude: global = true
-            else if ns[n].aux == i32(int(SK.local)) and int(locals[int(ns[n].sym)].flags) & LF_ALIAS != 0: global = true
-            if global:
-                zonk_user_globals += 1
-                if index: break
-        if k == .lambda: continue
-        n1 = int(ns[n].nlist)
-        n2 = int(ns[n].nlist2)
-        if sp + n1 + n2 + 4 > cap:
-            cap = (sp + n1 + n2 + 4) * 2
-            zs_stack.resize(cap)
-            st = data(zs_stack)
-        l = int(ns[n].list2)
-        loop i in [0..n2):
-            x = int(ls[l + i])
-            if x != 0:
-                st[sp] = x
-                sp += 1
-        l = int(ns[n].list)
-        loop i in [0..n1):
-            x = int(ls[l + i])
-            if x != 0:
-                st[sp] = x
-                sp += 1
-        if k != .for_:
-            if k != .partial and ns[n].d != 0:
-                st[sp] = int(ns[n].d)
-                sp += 1
-            if ns[n].c != 0:
-                st[sp] = int(ns[n].c)
-                sp += 1
-        if ns[n].b != 0:
-            st[sp] = int(ns[n].b)
-            sp += 1
-        if ns[n].a != 0:
-            st[sp] = int(ns[n].a)
-            sp += 1
-
-# (pre-order, as a recursive walk would go: a, b, c, d, the lists; a for/while's -n marks the
-# end of its children. Only a type with variables in it can change, and only those are zonked.)
-zonk_stack: int[]
-zonk_tree = (root: int):
-    if root == 0: return
-    base = zonk_stack.len()
-    zonk_stack.push(root)
-    loop zonk_stack.len() > base:
-        n = zonk_stack.pop()
-        if n < 0:
-            if zonk_collect_writes: zonk_write_sites.push(n)
-            continue
-        # (one read of the node: its fields after are the copy's)
-        nd = nodes[n]
-        t = int(nd.type)
-        if t != 0 and has_var(t): nodes[n].type = i32(zonk(t))
-        k = nd.kind
-        if k == .index: zonk_indexes += 1
-        if k == .ident:
-            if nd.aux == i32(int(SK.global)):
-                if not modules[int(globals[int(nd.sym)].mod)].is_prelude: zonk_user_globals += 1
-            else if nd.aux == i32(int(SK.local)) and int(locals[int(nd.sym)].flags) & LF_ALIAS != 0:
-                # Narrowed locals may hide a reference to global storage.
-                zonk_user_globals += 1
-        # Unlike zonking, the write walk stops at function templates. Keep the
-        # fallback for a body containing one instead of recording its children.
-        if k == .fn_: zonk_collect_writes = false
-        if zonk_collect_writes:
-            if k == .vardecl or k == .assign or k == .for_ or k == .while_ or k == .lambda or k == .return_ or k == .break_ or k == .continue_: zonk_write_sites.push(n)
-        if k == .lambda: continue
-        if k == .for_ or k == .while_: zonk_stack.push(-n)
-        l = int(nd.list2)
-        i = int(nd.nlist2) - 1
-        loop i >= 0:
-            x = int(lists[l + i])
-            if x != 0: zonk_stack.push(x)
-            i -= 1
-        l = int(nd.list)
-        i = int(nd.nlist) - 1
-        loop i >= 0:
-            x = int(lists[l + i])
-            if x != 0: zonk_stack.push(x)
-            i -= 1
-        if k != .for_:
-            if k != .partial and nd.d != 0: zonk_stack.push(int(nd.d))
-            if nd.c != 0: zonk_stack.push(int(nd.c))
-        if nd.b != 0: zonk_stack.push(int(nd.b))
-        if nd.a != 0: zonk_stack.push(int(nd.a))
+zonk_summary = (root: int): xz_summary(root)
+zonk_tree = (root: int): xz_tree(root)
+zonk_host = CheckerZonkHost(zonk_prelude, zonk_local_error, zonk_copy_warnings, zonk_definite)
+zonk_input = CheckerZonkInput(&nodes, &lists, &types, &locals, &globals, &fns, &zonk_write_sites, &zonk_collect_writes, &zonk_indexes, &zonk_user_globals, &var_counter, &type_binds, &type_exposures, &da_decls, &T_MATH_INT, &zonk_host)
+zonk_binding = checker_zonk_bind(&zonk_input)
 
 # ---------------- compile-time evaluation ----------------
 # Coarse evaluator services: checking may re-enter ceval and grow shared arenas.

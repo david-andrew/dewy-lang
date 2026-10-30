@@ -1,0 +1,286 @@
+$runtime_checks
+from p"node_store.dewy" import Node
+from p"checker_types.dewy" import TypeInfo
+from p"checker_state.dewy" import (FnInst Local Global)
+from p"type_inference.dewy" import (tu_prune tu_zonk)
+# Body finalization owns zonking: every node's type with an inference variable is
+# replaced by what it resolved to, index and user-global summaries are counted, and
+# write sites are collected for integer write proofs; a body that made no variable
+# is only summarized. Work is O(nodes of the body), with private stacks; only a
+# global's module (prelude or not) and diagnostics are host requests.
+XZWord:type=int64<overflow='wrap'>
+CheckerZonkHost:type=[
+    prelude:<(module:int64):>bool>
+    local_error:<(local:int64):>void>
+    copy_warnings:<(instance:int64):>void>
+    definite:<(body:int64 mark:int64):>void>
+]
+CheckerZonkInput:type=[
+    nodes:ptr<array<Node>>
+    lists:ptr<array<int32>>
+    types:ptr<array<TypeInfo>>
+    locals:ptr<array<Local>>
+    globals:ptr<array<Global>>
+    fns:ptr<array<FnInst>>
+    write_sites:ptr<array<int64>>
+    collect:ptr<bool>
+    indexes:ptr<int64>
+    user_globals:ptr<int64>
+    var_counter:ptr<int64>
+    type_binds:ptr<int64>
+    type_exposures:ptr<int64>
+    da_decls:ptr<array<int64>>
+    math_int:ptr<int64>
+    host:ptr<CheckerZonkHost>
+]
+let xz_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let xz_lists:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
+let xz_types:ptr<array<TypeInfo>>=$unsafe (uint64(0) as ptr<array<TypeInfo>>)
+let xz_locals:ptr<array<Local>>=$unsafe (uint64(0) as ptr<array<Local>>)
+let xz_globals:ptr<array<Global>>=$unsafe (uint64(0) as ptr<array<Global>>)
+let xz_fns:ptr<array<FnInst>>=$unsafe (uint64(0) as ptr<array<FnInst>>)
+let xz_sites:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+let xz_collect:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+let xz_indexes:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xz_user_globals:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xz_var_counter:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xz_type_binds:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xz_type_exposures:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xz_da_decls:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+let xz_math_int:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xz_host:ptr<CheckerZonkHost>=$unsafe (uint64(0) as ptr<CheckerZonkHost>)
+# Private walk stacks; their storage is reused between bodies.
+let xz_stack:array<int64>=[]
+let xz_summary_stack:array<int64>=[]
+checker_zonk_bind=(input:ptr<CheckerZonkInput>):>XZWord=>$unsafe {
+    xz_nodes=input[0].nodes
+    xz_lists=input[0].lists
+    xz_types=input[0].types
+    xz_locals=input[0].locals
+    xz_globals=input[0].globals
+    xz_fns=input[0].fns
+    xz_sites=input[0].write_sites
+    xz_collect=input[0].collect
+    xz_indexes=input[0].indexes
+    xz_user_globals=input[0].user_globals
+    xz_var_counter=input[0].var_counter
+    xz_type_binds=input[0].type_binds
+    xz_type_exposures=input[0].type_exposures
+    xz_da_decls=input[0].da_decls
+    xz_math_int=input[0].math_int
+    xz_host=input[0].host
+    0
+}
+# A name that may reach user storage: a non-prelude global, or a narrowed alias
+# (which may hide a reference to global storage). Frozen SK ordinals: local 1, global 2.
+xz_user_global=(aux:int32 sym:int32):>bool=>$unsafe {
+    if aux =? 2 {return not xz_host[0].prelude(XZWord(xz_globals[0].ptr[XZWord(sym)].mod))}
+    aux =? 1 and XZWord(xz_locals[0].ptr[XZWord(sym)].flags) & 8 not=? 0
+}
+# The counts zonking would make, for a body whose types it would leave as they are:
+# the walk stops once it has found an index and a user global, which settle both
+# (the counts do not depend on the order the nodes are visited in). The stack is a
+# private buffer read through its pointer; zonking never grows the node arena.
+xz_summary=(root:XZWord):>void=>$unsafe {
+    if root =? 0 {return}
+    if xz_summary_stack.length <? 256 {xz_summary_stack.resize(256)}
+    let st=xz_summary_stack.ptr
+    let cap=xz_summary_stack.length
+    let lists=xz_lists[0].ptr
+    st[0]=int64(root)
+    let sp:XZWord=1
+    let index=false
+    let global=false
+    loop sp >? 0 {
+        sp=sp - 1
+        let n=XZWord(st[sp])
+        let node=xz_nodes[0].ptr + n
+        let k=node[0].kind
+        if k =? 'index' and not index {
+            xz_indexes[0]=xz_indexes[0] + 1
+            index=true
+            if global {break}
+        }
+        if k =? 'ident' and not global and xz_user_global(node[0].aux node[0].sym) {
+            global=true
+            xz_user_globals[0]=xz_user_globals[0] + 1
+            if index {break}
+        }
+        if k =? 'lambda' {continue}
+        # Every child, so the first pops first: the lists (second, then first), then d,
+        # c, b and a, as a recursive walk visits them.
+        let n1=XZWord(node[0].nlist)
+        let n2=XZWord(node[0].nlist2)
+        if sp + n1 + n2 + 4 >? cap {
+            cap=(sp + n1 + n2 + 4) * 2
+            xz_summary_stack.resize(cap)
+            st=xz_summary_stack.ptr
+        }
+        let l2=XZWord(node[0].list2)
+        let i=n2 - 1
+        loop i >=? 0 {
+            let x=lists[l2 + i]
+            if x not=? 0 {
+                st[sp]=int64(x)
+                sp=sp + 1
+            }
+            i=i - 1
+        }
+        let l1=XZWord(node[0].list)
+        i=n1 - 1
+        loop i >=? 0 {
+            let x=lists[l1 + i]
+            if x not=? 0 {
+                st[sp]=int64(x)
+                sp=sp + 1
+            }
+            i=i - 1
+        }
+        if k not=? 'for_' {
+            if k not=? 'partial' and node[0].d not=? 0 {
+                st[sp]=int64(node[0].d)
+                sp=sp + 1
+            }
+            if node[0].c not=? 0 {
+                st[sp]=int64(node[0].c)
+                sp=sp + 1
+            }
+        }
+        if node[0].b not=? 0 {
+            st[sp]=int64(node[0].b)
+            sp=sp + 1
+        }
+        if node[0].a not=? 0 {
+            st[sp]=int64(node[0].a)
+            sp=sp + 1
+        }
+    }
+}
+# Pre-order, as a recursive walk would go; a for or while loop's -n marks the end of
+# its children. Only a type with variables in it can change, and only those are zonked.
+# Reentrant through nothing: zonking only reads and makes types.
+xz_tree=(root:XZWord):>void=>$unsafe {
+    if root =? 0 {return}
+    if xz_stack.length <? 256 {xz_stack.resize(256)}
+    let st=xz_stack.ptr
+    let cap=xz_stack.length
+    let lists=xz_lists[0].ptr
+    st[0]=int64(root)
+    let sp:XZWord=1
+    loop sp >? 0 {
+        sp=sp - 1
+        let n=XZWord(st[sp])
+        if n <? 0 {
+            if xz_collect[0] {xz_sites[0].push(int64(n))}
+            continue
+        }
+        let node=xz_nodes[0].ptr + n
+        let t=XZWord(node[0].type)
+        if t not=? 0 and XZWord(xz_types[0].ptr[t].flags) & 1 not=? 0 {
+            let zonked=tu_zonk(t)
+            node=xz_nodes[0].ptr + n
+            node[0].type=int32<overflow='wrap'>(zonked)
+        }
+        let k=node[0].kind
+        if k =? 'index' {xz_indexes[0]=xz_indexes[0] + 1}
+        if k =? 'ident' and xz_user_global(node[0].aux node[0].sym) {xz_user_globals[0]=xz_user_globals[0] + 1}
+        # Unlike zonking, the write walk stops at function templates. Keep the fallback
+        # for a body containing one instead of recording its children.
+        if k =? 'fn_' {xz_collect[0]=false}
+        if xz_collect[0] and (k =? 'vardecl' or k =? 'assign' or k =? 'for_' or k =? 'while_' or k =? 'lambda' or k =? 'return_' or k =? 'break_' or k =? 'continue_') {xz_sites[0].push(int64(n))}
+        if k =? 'lambda' {continue}
+        if k =? 'for_' or k =? 'while_' {
+            if sp + 1 >? cap {
+                cap=(sp + 1) * 2
+                xz_stack.resize(cap)
+                st=xz_stack.ptr
+            }
+            st[sp]=int64(0 - n)
+            sp=sp + 1
+        }
+        # Every child, so the first pops first: the lists (second, then first), then d,
+        # c, b and a, as a recursive walk visits them.
+        let n1=XZWord(node[0].nlist)
+        let n2=XZWord(node[0].nlist2)
+        if sp + n1 + n2 + 4 >? cap {
+            cap=(sp + n1 + n2 + 4) * 2
+            xz_stack.resize(cap)
+            st=xz_stack.ptr
+        }
+        let l2=XZWord(node[0].list2)
+        let i=n2 - 1
+        loop i >=? 0 {
+            let x=lists[l2 + i]
+            if x not=? 0 {
+                st[sp]=int64(x)
+                sp=sp + 1
+            }
+            i=i - 1
+        }
+        let l1=XZWord(node[0].list)
+        i=n1 - 1
+        loop i >=? 0 {
+            let x=lists[l1 + i]
+            if x not=? 0 {
+                st[sp]=int64(x)
+                sp=sp + 1
+            }
+            i=i - 1
+        }
+        if k not=? 'for_' {
+            if k not=? 'partial' and node[0].d not=? 0 {
+                st[sp]=int64(node[0].d)
+                sp=sp + 1
+            }
+            if node[0].c not=? 0 {
+                st[sp]=int64(node[0].c)
+                sp=sp + 1
+            }
+        }
+        if node[0].b not=? 0 {
+            st[sp]=int64(node[0].b)
+            sp=sp + 1
+        }
+        if node[0].a not=? 0 {
+            st[sp]=int64(node[0].a)
+            sp=sp + 1
+        }
+    }
+}
+# Frozen FK_NORMAL ordinal 0 and LF_ASSIGNED 16.
+xz_finalize=(f:XZWord vars0:XZWord binds0:XZWord exposed0:XZWord da_mark:XZWord):>void=>$unsafe {
+    let body=XZWord(xz_fns[0].ptr[f].body)
+    let index_mark=xz_indexes[0]
+    let global_mark=xz_user_globals[0]
+    let saved_sites=xz_sites[0]
+    let saved_collect=xz_collect[0]
+    xz_sites[0]=[]
+    xz_collect[0]=false
+    let normal=xz_fns[0].ptr[f].kind =? 0
+    # Other functions retain the demanded lowering walk. No proof is needed merely
+    # because a body contains arithmetic or a read-only integer.
+    if normal {
+        loop l in xz_fns[0].ptr[f].locals {
+            if tu_prune(XZWord(xz_locals[0].ptr[l].type)) =? xz_math_int[0] and XZWord(xz_locals[0].ptr[l].flags) & 16 not=? 0 {xz_collect[0]=true}
+        }
+    }
+    # A normal body checked without making or binding a type variable, nor taking a
+    # result still being worked out, has no type a zonk would change.
+    let quiet=normal and not xz_collect[0] and xz_var_counter[0] =? vars0 and xz_type_binds[0] =? binds0 and xz_type_exposures[0] =? exposed0
+    if quiet {xz_summary(body)} else {xz_tree(body)}
+    xz_fns[0][f].write_sites=xz_sites[0]
+    xz_fns[0][f].writes_ready=xz_collect[0]
+    xz_sites[0]=saved_sites
+    xz_collect[0]=saved_collect
+    xz_fns[0][f].no_indexes=normal and xz_indexes[0] =? index_mark
+    xz_fns[0][f].no_user_globals=normal and xz_user_globals[0] =? global_mark
+    let count=xz_fns[0].ptr[f].locals.length
+    loop i in [0..count) {
+        let l=xz_fns[0].ptr[f].locals[i]
+        let zonked=tu_zonk(XZWord(xz_locals[0].ptr[l].type))
+        xz_locals[0][l].type=int32<overflow='wrap'>(zonked)
+        if XZWord(xz_types[0].ptr[tu_prune(zonked)].flags) & 1 not=? 0 {xz_host[0].local_error(l)}
+    }
+    xz_host[0].copy_warnings(f)
+    if xz_da_decls[0].length >? da_mark {xz_host[0].definite(body da_mark)}
+}

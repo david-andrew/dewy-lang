@@ -1,0 +1,202 @@
+# Frozen body finalization and zonking extracted from check.jo.
+use 'node_store.dewy'
+use 'checker_types.dewy'
+use 'checker_state.dewy'
+use 'type_inference.dewy'
+struct CheckerZonkHost:
+    prelude: (int) -> bool
+    local_error: (int) -> void
+    copy_warnings: (int) -> void
+    definite: (int, int) -> void
+struct CheckerZonkInput:
+    nodes: *(Node[])
+    lists: *(i32[])
+    types: *(TypeInfo[])
+    locals: *(Local[])
+    globals: *(Global[])
+    fns: *(FnInst[])
+    write_sites: *(int[])
+    collect: *bool
+    indexes: *int
+    user_globals: *int
+    var_counter: *int
+    type_binds: *int
+    type_exposures: *int
+    da_decls: *(int[])
+    math_int: *int
+    host: *CheckerZonkHost
+xz_nodes: *(Node[])
+xz_lists: *(i32[])
+xz_types: *(TypeInfo[])
+xz_locals: *(Local[])
+xz_globals: *(Global[])
+xz_fns: *(FnInst[])
+xz_sites: *(int[])
+xz_collect: *bool
+xz_indexes: *int
+xz_user_globals: *int
+xz_var_counter: *int
+xz_type_binds: *int
+xz_type_exposures: *int
+xz_da_decls: *(int[])
+xz_math_int: *int
+xz_host: *CheckerZonkHost
+xz_stack: int[]
+xz_summary_stack: int[]
+checker_zonk_bind = (input: *CheckerZonkInput) -> int:
+    xz_nodes = input[0].nodes
+    xz_lists = input[0].lists
+    xz_types = input[0].types
+    xz_locals = input[0].locals
+    xz_globals = input[0].globals
+    xz_fns = input[0].fns
+    xz_sites = input[0].write_sites
+    xz_collect = input[0].collect
+    xz_indexes = input[0].indexes
+    xz_user_globals = input[0].user_globals
+    xz_var_counter = input[0].var_counter
+    xz_type_binds = input[0].type_binds
+    xz_type_exposures = input[0].type_exposures
+    xz_da_decls = input[0].da_decls
+    xz_math_int = input[0].math_int
+    xz_host = input[0].host
+    0
+xz_user_global = (aux: i32, sym: i32) -> bool:
+    if aux == 2: return not xz_host[0].prelude(int(xz_globals[0][int(sym)].mod))
+    aux == 1 and int(xz_locals[0][int(sym)].flags) & 8 != 0
+xz_summary = (root: int):
+    if root == 0: return
+    if xz_summary_stack.len() < 256: xz_summary_stack.resize(256)
+    xz_summary_stack[0] = root
+    sp = 1
+    index = false
+    global = false
+    loop sp > 0:
+        sp = sp - 1
+        n = xz_summary_stack[sp]
+        k = xz_nodes[0][n].kind
+        if k == .index and not index:
+            xz_indexes[0] = xz_indexes[0] + 1
+            index = true
+            if global: break
+        if k == .ident and not global and xz_user_global(xz_nodes[0][n].aux, xz_nodes[0][n].sym):
+            global = true
+            xz_user_globals[0] = xz_user_globals[0] + 1
+            if index: break
+        if k == .lambda: continue
+        n1 = int(xz_nodes[0][n].nlist)
+        n2 = int(xz_nodes[0][n].nlist2)
+        if sp + n1 + n2 + 4 > xz_summary_stack.len(): xz_summary_stack.resize((sp + n1 + n2 + 4) * 2)
+        l2 = int(xz_nodes[0][n].list2)
+        i = n2 - 1
+        loop i >= 0:
+            x = int(xz_lists[0][l2 + i])
+            if x != 0:
+                xz_summary_stack[sp] = x
+                sp = sp + 1
+            i = i - 1
+        l1 = int(xz_nodes[0][n].list)
+        i = n1 - 1
+        loop i >= 0:
+            x = int(xz_lists[0][l1 + i])
+            if x != 0:
+                xz_summary_stack[sp] = x
+                sp = sp + 1
+            i = i - 1
+        if k != .for_:
+            if k != .partial and xz_nodes[0][n].d != 0:
+                xz_summary_stack[sp] = int(xz_nodes[0][n].d)
+                sp = sp + 1
+            if xz_nodes[0][n].c != 0:
+                xz_summary_stack[sp] = int(xz_nodes[0][n].c)
+                sp = sp + 1
+        if xz_nodes[0][n].b != 0:
+            xz_summary_stack[sp] = int(xz_nodes[0][n].b)
+            sp = sp + 1
+        if xz_nodes[0][n].a != 0:
+            xz_summary_stack[sp] = int(xz_nodes[0][n].a)
+            sp = sp + 1
+xz_tree = (root: int):
+    if root == 0: return
+    if xz_stack.len() < 256: xz_stack.resize(256)
+    xz_stack[0] = root
+    sp = 1
+    loop sp > 0:
+        sp = sp - 1
+        n = xz_stack[sp]
+        if n < 0:
+            if xz_collect[0]: xz_sites[0].push(n)
+            continue
+        t = int(xz_nodes[0][n].type)
+        if t != 0 and int(xz_types[0][t].flags) & 1 != 0: xz_nodes[0][n].type = i32(int(tu_zonk(t)))
+        k = xz_nodes[0][n].kind
+        if k == .index: xz_indexes[0] = xz_indexes[0] + 1
+        if k == .ident and xz_user_global(xz_nodes[0][n].aux, xz_nodes[0][n].sym): xz_user_globals[0] = xz_user_globals[0] + 1
+        if k == .fn_: xz_collect[0] = false
+        if xz_collect[0] and (k == .vardecl or k == .assign or k == .for_ or k == .while_ or k == .lambda or k == .return_ or k == .break_ or k == .continue_): xz_sites[0].push(n)
+        if k == .lambda: continue
+        if k == .for_ or k == .while_:
+            if sp + 1 > xz_stack.len(): xz_stack.resize((sp + 1) * 2)
+            xz_stack[sp] = 0 - n
+            sp = sp + 1
+        n1 = int(xz_nodes[0][n].nlist)
+        n2 = int(xz_nodes[0][n].nlist2)
+        if sp + n1 + n2 + 4 > xz_stack.len(): xz_stack.resize((sp + n1 + n2 + 4) * 2)
+        l2 = int(xz_nodes[0][n].list2)
+        i = n2 - 1
+        loop i >= 0:
+            x = int(xz_lists[0][l2 + i])
+            if x != 0:
+                xz_stack[sp] = x
+                sp = sp + 1
+            i = i - 1
+        l1 = int(xz_nodes[0][n].list)
+        i = n1 - 1
+        loop i >= 0:
+            x = int(xz_lists[0][l1 + i])
+            if x != 0:
+                xz_stack[sp] = x
+                sp = sp + 1
+            i = i - 1
+        if k != .for_:
+            if k != .partial and xz_nodes[0][n].d != 0:
+                xz_stack[sp] = int(xz_nodes[0][n].d)
+                sp = sp + 1
+            if xz_nodes[0][n].c != 0:
+                xz_stack[sp] = int(xz_nodes[0][n].c)
+                sp = sp + 1
+        if xz_nodes[0][n].b != 0:
+            xz_stack[sp] = int(xz_nodes[0][n].b)
+            sp = sp + 1
+        if xz_nodes[0][n].a != 0:
+            xz_stack[sp] = int(xz_nodes[0][n].a)
+            sp = sp + 1
+xz_finalize = (f: int, vars0: int, binds0: int, exposed0: int, da_mark: int):
+    body = int(xz_fns[0][f].body)
+    index_mark = xz_indexes[0]
+    global_mark = xz_user_globals[0]
+    saved_sites = xz_sites[0]
+    saved_collect = xz_collect[0]
+    xz_sites[0] = []
+    xz_collect[0] = false
+    normal = xz_fns[0][f].kind == 0
+    if normal:
+        loop l in xz_fns[0][f].locals:
+            if int(tu_prune(int(xz_locals[0][l].type))) == xz_math_int[0] and int(xz_locals[0][l].flags) & 16 != 0: xz_collect[0] = true
+    quiet = normal and not xz_collect[0] and xz_var_counter[0] == vars0 and xz_type_binds[0] == binds0 and xz_type_exposures[0] == exposed0
+    if quiet: xz_summary(body)
+    else: xz_tree(body)
+    xz_fns[0][f].write_sites = xz_sites[0]
+    xz_fns[0][f].writes_ready = xz_collect[0]
+    xz_sites[0] = saved_sites
+    xz_collect[0] = saved_collect
+    xz_fns[0][f].no_indexes = normal and xz_indexes[0] == index_mark
+    xz_fns[0][f].no_user_globals = normal and xz_user_globals[0] == global_mark
+    count = xz_fns[0][f].locals.len()
+    loop i in [0..count):
+        l = xz_fns[0][f].locals[i]
+        zonked = int(tu_zonk(int(xz_locals[0][l].type)))
+        xz_locals[0][l].type = i32(zonked)
+        if int(xz_types[0][int(tu_prune(zonked))].flags) & 1 != 0: xz_host[0].local_error(l)
+    xz_host[0].copy_warnings(f)
+    if xz_da_decls[0].len() > da_mark: xz_host[0].definite(body, da_mark)
