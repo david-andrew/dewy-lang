@@ -1,3 +1,4 @@
+use 'checker_variants.dewy'
 use 'checker_places.dewy'
 use 'checker_collections.dewy'
 use 'checker_cast.dewy'
@@ -10120,6 +10121,23 @@ place_error = (n: int, code: int) -> void:
 place_host = CheckerPlaceHost(check_expr, place_contract, place_storage, place_error)
 place_input = CheckerPlaceInput(&nodes, &locals, &refine_active, &last_checked, &place_host)
 place_binding = checker_places_bind(&place_input)
+variant_fields = (si: int) -> void: check_struct_fields(si)
+variant_complete = (ex: int) -> void: ide_complete_variants(ex)
+variant_reference = (n: int, et: int, vi: int) -> void: ide_variant_ref(nodes[n].pos, int(nodes[n].name), et, vi)
+variant_error = (n: int, et: int, code: int) -> void:
+    nm = int(nodes[n].name)
+    if code == 1:
+        vh = bare_variant_hint(nm)
+        if len(vh) > 0:
+            # (screen = .title where nothing says it is a Screen: the enum's name says it)
+            en = vh[find(vh, "else `") + 6..len(vh) - 2)
+            fatal(nodes[n].pos, "which enum '.{name_of(nm)}' belongs to is not known here: write `{en}`")
+        fatal(nodes[n].pos, "cannot infer the enum type for '.{name_of(nm)}'")
+    if code == 2: fatal(nodes[n].pos, "{dt(et)} has no variant '{name_of(nm)}'{variant_hint_for(et, name_of(nm))}")
+    fatal(nodes[n].pos, "variant '{name_of(nm)}' needs arguments")
+variant_host = CheckerVariantHost(variant_fields, variant_complete, variant_reference, variant_error)
+variant_input = CheckerVariantInput(&nodes, &types, &structs, &type_args, &variants, &ide_sentinel, &ide_on, &variant_host)
+variant_binding = checker_variants_bind(&variant_input)
 
 optional_error = (n: int, at: int, unwrap: bool):
     if unwrap: fatal(nodes[n].pos, "'!' needs an optional value, found {dt(at)}")
@@ -10646,24 +10664,7 @@ check_expr_other = (n: int, expected: int) -> int:
     if k == .propagate: return check_propagate(n, expected)
     if k == .unit_lit:
         return quantity_constant(n, nodes[n].ival, int(nodes[n].aux), int(nodes[n].aux2), expected)
-    if k == .dotname:
-        if ide_sentinel != 0 and int(nodes[n].name) == ide_sentinel: ide_complete_variants(ex)
-        et = ex
-        if et != 0 and exk == .opt: et = prune(int(types[et].elem))
-        if et != 0: et = variant_enum(et, int(nodes[n].name))
-        if et == 0 or types[et].kind != .enum_:
-            vh = bare_variant_hint(int(nodes[n].name))
-            if len(vh) > 0:
-                # (screen = .title where nothing says it is a Screen: the enum's name says it)
-                en = vh[find(vh, "else `") + 6..len(vh) - 2)
-                fatal(nodes[n].pos, "which enum '.{name_of(int(nodes[n].name))}' belongs to is not known here: write `{en}`")
-            fatal(nodes[n].pos, "cannot infer the enum type for '.{name_of(int(nodes[n].name))}'")
-        vi = find_variant(int(types[et].st), int(nodes[n].name))
-        if vi < 0: fatal(nodes[n].pos, "{dt(et)} has no variant '{name_of(int(nodes[n].name))}'{variant_hint_for(et, name_of(int(nodes[n].name)))}")
-        if variants[int(structs[int(types[et].st)].variants) + vi].nfields != 0: fatal(nodes[n].pos, "variant '{name_of(int(nodes[n].name))}' needs arguments")
-        if ide_on: ide_variant_ref(nodes[n].pos, int(nodes[n].name), et, vi)
-        nodes[n].aux = i32(vi)
-        t = et
+    if k == .dotname: t = xv_check(n, ex)
     else if k == .typeapply:
         is_callee = n == callee_at
         base = int(nodes[n].a)

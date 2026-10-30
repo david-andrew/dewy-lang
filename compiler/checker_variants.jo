@@ -1,0 +1,68 @@
+# Frozen bare-variant checker extracted from expr.jo.
+use 'node_store.dewy'
+use 'checker_types.dewy'
+use 'type_inference.dewy'
+struct CheckerVariantHost:
+    fields: (int) -> void
+    complete: (int) -> void
+    reference: (int, int, int) -> void
+    error: (int, int, int) -> void
+struct CheckerVariantInput:
+    nodes: *(Node[])
+    types: *(TypeInfo[])
+    structs: *(StructInfo[])
+    args: *(i32[])
+    variants: *(Variant[])
+    sentinel: *int
+    ide: *bool
+    host: *CheckerVariantHost
+xv_nodes: *(Node[])
+xv_types: *(TypeInfo[])
+xv_structs: *(StructInfo[])
+xv_args: *(i32[])
+xv_variants: *(Variant[])
+xv_sentinel: *int
+xv_ide: *bool
+xv_host: *CheckerVariantHost
+checker_variants_bind = (input: *CheckerVariantInput) -> int:
+    xv_nodes = input[0].nodes
+    xv_types = input[0].types
+    xv_structs = input[0].structs
+    xv_args = input[0].args
+    xv_variants = input[0].variants
+    xv_sentinel = input[0].sentinel
+    xv_ide = input[0].ide
+    xv_host = input[0].host
+    0
+xv_find = (si: int, name: int) -> int:
+    if not xv_structs[0][si].resolved: xv_host[0].fields(si)
+    loop v in [0..int(xv_structs[0][si].nvariants)):
+        if int(xv_variants[0][int(xv_structs[0][si].variants) + v].name) == name: return v
+    -1
+xv_union = (t: int) -> bool: xv_types[0][t].kind == .enum_ and xv_structs[0][int(xv_types[0][t].st)].union_
+xv_enum = (t0: int, name: int) -> int:
+    t = int(tu_prune(t0))
+    if not xv_union(t): return t
+    si = int(xv_types[0][t].st)
+    found = 0
+    loop i in [0..int(xv_structs[0][si].ntargs)):
+        pm = int(tu_prune(int(xv_args[0][int(xv_structs[0][si].targs) + i])))
+        if xv_types[0][pm].kind == .enum_ and not xv_union(pm) and xv_find(int(xv_types[0][pm].st), name) >= 0:
+            if found != 0: return t
+            found = pm
+    if found == 0: return t
+    found
+xv_check = (n: int, ex: int) -> int:
+    name = int(xv_nodes[0][n].name)
+    if xv_sentinel[0] != 0 and name == xv_sentinel[0]: xv_host[0].complete(ex)
+    et = ex
+    if et != 0 and xv_types[0][et].kind == .opt: et = int(tu_prune(int(xv_types[0][et].elem)))
+    if et != 0: et = xv_enum(et, name)
+    if et == 0 or xv_types[0][et].kind != .enum_: xv_host[0].error(n, et, 1)
+    si = int(xv_types[0][et].st)
+    vi = xv_find(si, name)
+    if vi < 0: xv_host[0].error(n, et, 2)
+    if xv_variants[0][int(xv_structs[0][si].variants) + vi].nfields != 0: xv_host[0].error(n, et, 3)
+    if xv_ide[0]: xv_host[0].reference(n, et, vi)
+    xv_nodes[0][n].aux = i32(vi)
+    et

@@ -1,0 +1,87 @@
+$runtime_checks
+from p"node_store.dewy" import Node
+from p"checker_types.dewy" import (TypeInfo StructInfo Variant TK)
+from p"type_inference.dewy" import tu_prune
+# Bare enum variants (`.name`) own their enum selection from the expected type,
+# including the one union member declaring the name. Work is O(union members *
+# variants) plus lazy field resolution of an unresolved enum, a host request.
+XVWord:type=int64<overflow='wrap'>
+CheckerVariantHost:type=[
+    fields:<(structure:int64):>void>
+    complete:<(type_id:int64):>void>
+    reference:<(node:int64 type_id:int64 variant:int64):>void>
+    error:<(node:int64 type_id:int64 code:int64):>void>
+]
+CheckerVariantInput:type=[
+    nodes:ptr<array<Node>>
+    types:ptr<array<TypeInfo>>
+    structs:ptr<array<StructInfo>>
+    args:ptr<array<int32>>
+    variants:ptr<array<Variant>>
+    sentinel:ptr<int64>
+    ide:ptr<bool>
+    host:ptr<CheckerVariantHost>
+]
+let xv_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let xv_types:ptr<array<TypeInfo>>=$unsafe (uint64(0) as ptr<array<TypeInfo>>)
+let xv_structs:ptr<array<StructInfo>>=$unsafe (uint64(0) as ptr<array<StructInfo>>)
+let xv_args:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
+let xv_variants:ptr<array<Variant>>=$unsafe (uint64(0) as ptr<array<Variant>>)
+let xv_sentinel:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xv_ide:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+let xv_host:ptr<CheckerVariantHost>=$unsafe (uint64(0) as ptr<CheckerVariantHost>)
+checker_variants_bind=(input:ptr<CheckerVariantInput>):>XVWord=>$unsafe {
+    xv_nodes=input[0].nodes
+    xv_types=input[0].types
+    xv_structs=input[0].structs
+    xv_args=input[0].args
+    xv_variants=input[0].variants
+    xv_sentinel=input[0].sentinel
+    xv_ide=input[0].ide
+    xv_host=input[0].host
+    0
+}
+# Variant `name`'s index in structure si, -1 if it has none; resolves its fields first.
+xv_find=(si:XVWord name:XVWord):>XVWord=>$unsafe {
+    if not xv_structs[0][si].resolved {xv_host[0].fields(si)}
+    let first=XVWord(xv_structs[0].ptr[si].variants)
+    loop v in [0..XVWord(xv_structs[0].ptr[si].nvariants)) {
+        if XVWord(xv_variants[0][first + v].name) =? name {return v}
+    }
+    -1
+}
+xv_union=(t:XVWord):>bool=>$unsafe {
+    xv_types[0].ptr[t].kind =? 'enum_' and xv_structs[0].ptr[XVWord(xv_types[0].ptr[t].st)].union_
+}
+# The enum that declares `name`: t itself, or the one plain-enum member of union t.
+xv_enum=(t0:XVWord name:XVWord):>XVWord=>$unsafe {
+    let t=tu_prune(t0)
+    if not xv_union(t) {return t}
+    let si=XVWord(xv_types[0].ptr[t].st)
+    let found:XVWord=0
+    loop i in [0..XVWord(xv_structs[0].ptr[si].ntargs)) {
+        let pm=tu_prune(XVWord(xv_args[0][XVWord(xv_structs[0].ptr[si].targs) + i]))
+        if xv_types[0].ptr[pm].kind =? 'enum_' and not xv_union(pm) and xv_find(XVWord(xv_types[0].ptr[pm].st) name) >=? 0 {
+            if found not=? 0 {return t}
+            found=pm
+        }
+    }
+    if found =? 0 {return t}
+    found
+}
+# The variant's enum type; errors (codes 1-3) never return.
+xv_check=(n:XVWord ex:XVWord):>XVWord=>$unsafe {
+    let name=XVWord(xv_nodes[0].ptr[n].name)
+    if xv_sentinel[0] not=? 0 and name =? xv_sentinel[0] {xv_host[0].complete(ex)}
+    let et=ex
+    if et not=? 0 and xv_types[0].ptr[et].kind =? 'opt' {et=tu_prune(XVWord(xv_types[0].ptr[et].elem))}
+    if et not=? 0 {et=xv_enum(et name)}
+    if et =? 0 or xv_types[0].ptr[et].kind not=? 'enum_' {xv_host[0].error(n et 1)}
+    let si=XVWord(xv_types[0].ptr[et].st)
+    let vi=xv_find(si name)
+    if vi <? 0 {xv_host[0].error(n et 2)}
+    if xv_variants[0][XVWord(xv_structs[0].ptr[si].variants) + vi].nfields not=? 0 {xv_host[0].error(n et 3)}
+    if xv_ide[0] {xv_host[0].reference(n et vi)}
+    xv_nodes[0][n].aux=int32<overflow='wrap'>(vi)
+    et
+}
