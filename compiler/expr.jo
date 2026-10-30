@@ -3832,10 +3832,15 @@ collect_module = (m: int, name: int, out: mut int[]):
     else:
         collect_in(modules[m].names, name, out)
         hide_private = true
-        loop u in modules[m].uses:
-            hide_lib_only = modules[u].is_prelude
-            if modules[u].is_prelude: collect_in(prelude, name, out)
-            else: collect_in(modules[u].names, name, out)
+        h = use_home(m, name)
+        if h == -2:
+            loop u in modules[m].uses:
+                hide_lib_only = modules[u].is_prelude
+                if modules[u].is_prelude: collect_in(prelude, name, out)
+                else if bound_in(u, name): collect_in(modules[u].names, name, out)
+        else:
+            if modules[m].uses.len() > 0: hide_lib_only = false
+            if h >= 0: collect_in(modules[h].names, name, out)
         hide_private = false
 
 collect_fns = (name: int, out: mut int[]):

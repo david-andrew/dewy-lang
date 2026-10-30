@@ -217,7 +217,7 @@ scope_add_module = (m: int, name: int, kind: SK, r: int, decl: int) -> int:
     if kind == .fns and decl != 0 and modules[m].is_prelude: syms[s].surface = i32(dewy_surface(name, decl))
     if modules[m].is_prelude: prelude[name] = s
     else:
-        modules[m].names[name] = s
+        bind_module_name(m, name, s)
         if kind == .const_:
             loop own_consts.len() <= name: own_consts.push(false)
             own_consts[name] = true
@@ -261,6 +261,58 @@ ml_stamp = (name: int) -> int:
     if name < ml_name_tick.len() and ml_name_tick[name] > ml_struct: return ml_name_tick[name]
     ml_struct
 
+# By name, the modules (not the prelude) whose own tables bind it: a list through home_next from
+# home_first[name] (an entry + 1; 0 ends it), built from every table when first asked (most
+# programs' modules use none: Dewy imports) and kept from then on by bind_module_name. A table
+# only grows, and only through bind_module_name, so a module not listed binds nothing of the name:
+# the lookups through a module's uses ask the listed ones alone. Flat arrays: no allocation a name.
+homes_built = false
+home_first: int[]
+home_mod: int[]
+home_next: int[]
+bind_module_name = (m: int, name: int, s: int):
+    modules[m].names[name] = s
+    if homes_built: home_add(m, name)
+home_add = (m: int, name: int):
+    if home_first.len() <= name: home_first.resize(name * 2 + 64)
+    h = home_first[name]
+    if h != 0 and home_mod[h - 1] == m: return
+    home_mod.push(m)
+    home_next.push(h)
+    home_first[name] = home_mod.len()
+homes_build = ():
+    homes_built = true
+    loop m in [0..modules.len()):
+        if modules[m].is_prelude: continue
+        loop k, v in modules[m].names: home_add(m, k)
+bound_in = (m: int, name: int) -> bool:
+    if name >= home_first.len(): return false
+    h = home_first[name]
+    loop h != 0:
+        if home_mod[h - 1] == m: return true
+        h = home_next[h - 1]
+    false
+
+# (by module, whether a prelude module is among its uses: then each use is asked in turn)
+prelude_used: bool[]
+use_added = (m: int, u: int):
+    modules[m].uses.push(u)
+    if modules[u].is_prelude:
+        if prelude_used.len() <= m: prelude_used.resize(m * 2 + 16)
+        prelude_used[m] = true
+
+# The one use of module m whose table can bind name, -1 for none; -2 when its uses must each be
+# asked in order (a prelude among them, or more than one module binding the name; bound_in
+# tells which may). O(uses).
+use_home = (m: int, name: int) -> int:
+    if modules[m].uses.len() == 0: return -1
+    if not homes_built: homes_build()
+    if m < prelude_used.len() and prelude_used[m]: return -2
+    if name >= home_first.len() or home_first[name] == 0: return -1
+    h = home_first[name] - 1
+    if home_next[h] != 0: return -2
+    if modules[m].uses.contains(home_mod[h]): home_mod[h] else: -1
+
 # module_lookup's last answer for each name: the module asked from, the binding, and its stamp
 ml_sym: int[]
 ml_mod: int[]
@@ -297,13 +349,17 @@ module_lookup_now = (m: int, name: int) -> int:
             if let s = prelude.get(name): return s
         else:
             if let s = modules[m].names.get(name): return s
-            loop u in modules[m].uses:
-                if modules[u].is_prelude:
-                    if let s = prelude.get(name):
-                        if not lib_private(name): return s
-                else:
-                    if let s = modules[u].names.get(name):
-                        if not is_private(name): return s
+            h = use_home(m, name)
+            if h >= 0 and not is_private(name):
+                if let s = modules[h].names.get(name): return s
+            if h == -2:
+                loop u in modules[m].uses:
+                    if modules[u].is_prelude:
+                        if let s = prelude.get(name):
+                            if not lib_private(name): return s
+                    else if bound_in(u, name):
+                        if let s = modules[u].names.get(name):
+                            if not is_private(name): return s
             if files[int(modules[m].file)].is_dewy and not is_private(name):
                 s = dewy_prelude_lookup(name)
                 if s != 0: return s
@@ -385,7 +441,7 @@ bind_from_imports = (start: int = 0):
                     if syms[ex].decl != 0: where = "at {pos_str(nodes[int(syms[ex].decl)].pos)}"
                     fatal(nodes[id].pos, "cannot import '{name_of(alias)}': this module has a '{name_of(alias)}' ({where}); import it with another name: {name_of(nm)} as ...")
                 ml_bump_name(alias)
-                modules[m].names[alias] = new_sym(alias, syms[s].kind, int(syms[s].ref), int(syms[s].decl))
+                bind_module_name(m, alias, new_sym(alias, syms[s].kind, int(syms[s].ref), int(syms[s].decl)))
 
 # The module a binding belongs to: where its declaration is (an imported binding
 # keeps its declaration, so it names the module it came from).
@@ -461,7 +517,7 @@ bind_imported = (m: int, name: int, kind: SK, owned: (int, int)[]):
     ml_bump_name(name)
     loop i in [0..owned.len()):
         o = owned[i]
-        if i == 0: modules[m].names[name] = new_sym(name, kind, o.0, o.1)
+        if i == 0: bind_module_name(m, name, new_sym(name, kind, o.0, o.1))
         else: scope_add_module(m, name, kind, o.0, o.1)
 
 # import p"x.dewy": each top-level binding x declares, bound here as if selected
@@ -1002,7 +1058,7 @@ register_decls = (m: int, decls: int[]):
             import_edge_added()
             if nodes[d].aux == 1:
                 ml_bump()
-                modules[m].uses.push(im)
+                use_added(m, im)
                 register_module(im)
             else if nodes[d].aux == 2 or nodes[d].aux == 3:
                 # from x import a, b (and Dewy's import p"x.dewy", every name): bound once every
