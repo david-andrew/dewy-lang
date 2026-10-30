@@ -103,6 +103,7 @@ node_set_list2=(@store:array<Node> @lists:array<int32> n:int64 xs:array<int64>)=
 # a run of lists as an array
 node_run_of=(@lists:array<int32> start:int64 count:int64):>array<int64>=>{
     let out:array<int64>=[]
+    out.reserve(count)
     loop i in [start..start + count) {out.push(lists[i])}
     out
 }

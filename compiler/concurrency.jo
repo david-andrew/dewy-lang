@@ -202,10 +202,12 @@ concurrency_blocks_node = (n: int, seen: mut {int: bool}, sharing: bool = false)
     if mask & 2 != 0 and concurrency_blocks_node(int(nodes[n].b), seen, sharing): return true
     if mask & 4 != 0 and concurrency_blocks_node(int(nodes[n].c), seen, sharing): return true
     if mask & 16 != 0:
-        loop c in kids(n):
+        loop i in [0..nkids(n)):
+            c = kid(n, i)
             if concurrency_blocks_node(c, seen, sharing): return true
     if mask & 32 != 0:
-        loop c in kids2(n):
+        loop i in [0..nkids2(n)):
+            c = kid2(n, i)
             if concurrency_blocks_node(c, seen, sharing): return true
     false
 
@@ -217,7 +219,8 @@ concurrency_callback = (a: int, waiting: bool = false):
     if nodes[a].kind != .lambda and nodes[a].kind != .fnref and nodes[a].kind != .partial: return
     if f <= 0: return
     if nodes[a].kind == .partial:
-        loop arg in kids(a):
+        loop i in [0..nkids(a)):
+            arg = kid(a, i)
             if nodes[arg].kind == .hole: continue
             seen: {int: bool}
             if not concurrency_transfer(ntype(arg), seen): fatal(nodes[arg].pos, "bound task argument does not satisfy inferred Send/Sync{concurrency_why()}")
@@ -275,7 +278,8 @@ concurrency_finalize = ():
     loop n in concurrency_calls:
         if in_lib(nodes[n].pos): continue
         f = int(nodes[n].sym)
-        loop a in kids(n):
+        loop j in [0..nkids(n)):
+            a = kid(n, j)
             if tkind(ntype(a)) == .fn_: concurrency_callback(a)
             else:
                 seen: {int: bool}
@@ -360,9 +364,9 @@ concurrency_task_globals_node = (n: int, seen: mut {int: bool}):
     if mask & 2 != 0: concurrency_task_globals_node(int(nodes[n].b), seen)
     if mask & 4 != 0: concurrency_task_globals_node(int(nodes[n].c), seen)
     if mask & 16 != 0:
-        loop child in kids(n): concurrency_task_globals_node(child, seen)
+        loop i in [0..nkids(n)): concurrency_task_globals_node(kid(n, i), seen)
     if mask & 32 != 0:
-        loop child in kids2(n): concurrency_task_globals_node(child, seen)
+        loop i in [0..nkids2(n)): concurrency_task_globals_node(kid2(n, i), seen)
 
 # Zero-fill must not fabricate an identity whose private storage needs a factory.
 # Only complete root queries are memoized; recursive backedges stay query-local.

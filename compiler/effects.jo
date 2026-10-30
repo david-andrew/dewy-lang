@@ -489,7 +489,7 @@ effect_prepare_node = (n: int, seen: mut int[], depth: int):
     if mask & 2 != 0: effect_prepare_node(int(nodes[n].b), seen, depth + 1)
     if mask & 4 != 0: effect_prepare_node(int(nodes[n].c), seen, depth + 1)
     if mask & 16 != 0:
-        loop c in kids(n): effect_prepare_node(c, seen, depth + 1)
+        loop i in [0..nkids(n)): effect_prepare_node(kid(n, i), seen, depth + 1)
 
 effect_prepare = (f: int, seen: mut int[], depth: int):
     if f <= 0 or f >= fns.len() or depth > 32 or seen.contains(f): return
@@ -566,7 +566,7 @@ effect_returns = (n: int, out: mut int[]):
     if mask & 2 != 0: effect_returns(int(nodes[n].b), out)
     if mask & 4 != 0: effect_returns(int(nodes[n].c), out)
     if mask & 16 != 0:
-        loop c in kids(n): effect_returns(c, out)
+        loop i in [0..nkids(n)): effect_returns(kid(n, i), out)
 
 # The local an assignment target writes through field/index selectors, or 0.
 effect_write_root = (q: int) -> int:
@@ -699,7 +699,8 @@ effect_source_row = (n: int, path: int[] = [], depth: int = 0) -> int:
         rest = path[1..]
         if k == .array and path[0] == -1:
             row = 0
-            loop child in kids(n):
+            loop j in [0..nkids(n)):
+                child = kid(n, j)
                 r = effect_source_row(child, rest, depth + 1)
                 row = if row == 0: r else: effect_join(row, r)
             return if row == 0: effect_top() else: row
@@ -1174,7 +1175,7 @@ effect_target_parts = (f: int, n: int, depth: int = 0):
     k = nodes[n].kind
     if effect_fixed_index(n):
         effect_scan_node(f, int(nodes[n].b))
-        loop c in kids(n): effect_scan_node(f, c)
+        loop i in [0..nkids(n)): effect_scan_node(f, kid(n, i))
         effect_bounds(f, n)
     if k == .addr or k == .field or effect_fixed_index(n): effect_target_parts(f, int(nodes[n].a), depth + 1)
 
@@ -1241,7 +1242,8 @@ effect_range_loop = (n: int) -> bool:
 effect_fixed_literal = (n: int) -> bool:
     t = representation_type(ntype(n))
     if nodes[n].kind != .array or nodes[n].b != 0 or tkind(t) != .fixed or not effect_plain(t): return false
-    loop c in kids(n):
+    loop i in [0..nkids(n)):
+        c = kid(n, i)
         if has_flag(c, NF_SPREAD): return false
     true
 
@@ -1256,7 +1258,8 @@ effect_const_literal = (g: int) -> bool:
     if init == 0: return false
     if nodes[init].kind == .conv and nodes[init].aux == i32(int(CV.none_)): init = int(nodes[init].a)
     if nodes[init].kind != .array or nodes[init].b != 0 or tkind(representation_type(int(globals[g].type))) != .fixed: return false
-    loop c in kids(init):
+    loop i in [0..nkids(init)):
+        c = kid(init, i)
         if nodes[c].kind != .int_lit and nodes[c].kind != .bool_lit or has_flag(c, NF_SPREAD): return false
     true
 
@@ -1474,11 +1477,11 @@ effect_scan_node = (f: int, n: int):
     # (a builtin floor `//` or `%` on words is the inline word operation; only
     # a divisor not proven nonzero can fail)
     if k == .call and nodes[n].aux == 0 and effect_scalar(ntype(n)) and fact_floor_call(n) != 0:
-        loop c in kids(n): effect_scan_node(f, c)
+        loop j in [0..nkids(n)): effect_scan_node(f, kid(n, j))
         if fact_floor_call(n) <= 2: effect_failure(f, n)
         return
     if effect_footprints_only and k == .call and fact_nd_reads_only(n) and effect_value(ntype(kid(n, 0))):
-        loop arg in kids(n): effect_scan_node(f, arg)
+        loop j in [0..nkids(n)): effect_scan_node(f, kid(n, j))
         return
     if k == .call and nodes[n].aux == 0:
         g = int(nodes[n].sym)
@@ -1515,7 +1518,7 @@ effect_scan_node = (f: int, n: int):
             effect_target_parts(f, int(nodes[target].a))
             effect_access(f, int(nodes[target].a), true)
             effect_scan_node(f, int(nodes[target].b))
-            loop c in kids(target): effect_scan_node(f, c)
+            loop j in [0..nkids(target)): effect_scan_node(f, kid(target, j))
             effect_bounds(f, target)
             effect_plan_cost(f, n, (1 << int(EffectKind.alloc)) | (1 << int(EffectKind.detach)))
             effect_scan_node(f, int(nodes[n].b))
@@ -1547,8 +1550,10 @@ effect_scan_node = (f: int, n: int):
         if effect_share(t) and int(locals[l].flags) & LF_BYREF != 0:
             loop q in effect_for_marks.get(l) ?? []:
                 if effect_seen[q] == f and nodes[q].kind == .for_ and nodes[q].sym == i32(l) and not has_flag(q, NF_MUT) and tkind(ntype(int(nodes[q].a))) == .array: return
-        loop q in kids(int(fns[f].body)):
-            if nodes[q].kind == .vardecl and not has_flag(q, NF_GLOBAL) and nodes[q].sym == i32(l) and effect_readonly_binding(q): return
+        fb = int(fns[f].body)
+        loop qi in [0..nkids(fb)):
+            st = kid(fb, qi)
+            if nodes[st].kind == .vardecl and not has_flag(st, NF_GLOBAL) and nodes[st].sym == i32(l) and effect_readonly_binding(st): return
     if k == .ident or k == .field:
         effect_access(f, n, false)
         return
@@ -1561,7 +1566,7 @@ effect_scan_node = (f: int, n: int):
     if effect_index_read(n):
         effect_scan_node(f, int(nodes[n].a))
         effect_scan_node(f, int(nodes[n].b))
-        loop c in kids(n): effect_scan_node(f, c)
+        loop j in [0..nkids(n)): effect_scan_node(f, kid(n, j))
         effect_bounds(f, n)
         return
     supported = false
@@ -1587,7 +1592,8 @@ effect_scan_node = (f: int, n: int):
     else if k == .vardecl and nkids(n) > 0:
         # (unpacking plain components into private locals)
         supported = effect_plain(ntype(int(nodes[n].b))) and not has_flag(n, NF_GLOBAL)
-        loop c in kids(n):
+        loop j in [0..nkids(n)):
+            c = kid(n, j)
             if nodes[c].kind == .hole: continue
             if has_flag(c, NF_GLOBAL) or nodes[c].sym <= 0: supported = false
             else if int(locals[int(nodes[c].sym)].flags) & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF) != 0: supported = false
@@ -1707,9 +1713,9 @@ effect_scan_node = (f: int, n: int):
     if mask & 2 != 0: effect_scan_node(f, int(nodes[n].b))
     if mask & 4 != 0: effect_scan_node(f, int(nodes[n].c))
     if mask & 16 != 0:
-        loop c in kids(n): effect_scan_node(f, c)
+        loop j in [0..nkids(n)): effect_scan_node(f, kid(n, j))
     if mask & 32 != 0:
-        loop c in kids2(n): effect_scan_node(f, c)
+        loop j in [0..nkids2(n)): effect_scan_node(f, kid2(n, j))
 
 effect_edge_event = (f: int, edge: EffectEdge, event0: EffectEvent) -> EffectEvent:
     event = event0
@@ -2432,7 +2438,7 @@ panic_node = (f: int, n: int):
     if mask & 2 != 0: panic_node(f, int(nodes[n].b))
     if mask & 4 != 0: panic_node(f, int(nodes[n].c))
     if mask & 16 != 0:
-        loop c in kids(n): panic_node(f, c)
+        loop i in [0..nkids(n)): panic_node(f, kid(n, i))
 
 panic_scan = (f: int):
     fact_complete_deferred(f)
@@ -2702,7 +2708,7 @@ loan_visit = (n: int) -> int:
     if active and (k == .lambda or k == .fnref or k == .partial): loan_error(n, "closure capture during a loan is not supported")
     if k == .block:
         result = 0
-        loop child in kids(n): result = loan_visit(child)
+        loop j in [0..nkids(n)): result = loan_visit(kid(n, j))
         return result
     if k == .vardecl:
         tainted = loan_visit(int(nodes[n].b))
@@ -2733,7 +2739,7 @@ loan_visit = (n: int) -> int:
         if mask & 2 != 0: tainted = loan_visit(int(nodes[n].b)) | tainted
         if mask & 4 != 0: tainted = loan_visit(int(nodes[n].c)) | tainted
         if mask & 16 != 0:
-            loop child in kids(n): tainted = loan_visit(child) | tainted
+            loop j in [0..nkids(n)): tainted = loan_visit(kid(n, j)) | tainted
     else if active: loan_error(n, "unsupported address transform")
     if active and k == .call:
         if tainted != 0: loan_error(n, "address cannot escape through a call or record field")

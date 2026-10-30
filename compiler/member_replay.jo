@@ -238,7 +238,7 @@ member_copy = (n: int, t: MemberTemplate, text: str, lm: {int: int}, nm: mut {in
     if mask & 4 != 0: nodes[c].c = i32(member_copy(int(nd.c), t, text, lm, nm))
     if mask & 16 != 0:
         children: int[]
-        loop child in kids(n): children.push(member_copy(child, t, text, lm, nm))
+        loop i in [0..nkids(n)): children.push(member_copy(kid(n, i), t, text, lm, nm))
         set_list(c, children)
     if let divisor = fact_divisors.get(n): fact_divisors[c] = divisor
     exact_note(c)

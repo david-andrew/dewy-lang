@@ -7266,7 +7266,8 @@ unpack_length_check = (src: int, k: int, exact: bool, pos: int, message: str) ->
 # (an array literal with a group of values among its elements, not checked yet)
 values_grouped = (n: int) -> bool:
     if nodes[n].type != 0: return false
-    loop c in kids(n):
+    loop j in [0..nkids(n)):
+        c = kid(n, j)
         if nodes[c].kind == .tuple and nodes[c].aux == i32(TUPLE_VALUES) and not has_flag(c, NF_CHECKED): return true
     false
 

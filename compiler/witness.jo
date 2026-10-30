@@ -352,7 +352,8 @@ wit_owner_calls = () -> int[]:
         visits += 1
         if e <= 0 or e >= nodes.len() or nodes[e].kind == .lambda: continue
         if nodes[e].kind == .call and nodes[e].aux == 0 and checked_call_mutmask(e) != 0 and wit_call_text(e, 0) != "": wit_calls.push(e)
-        loop child in [int(nodes[e].a), int(nodes[e].b), kid_c(e), kid_d(e)] + kids(e):
+        loop slot in [0..4 + nkids(e)):
+            child = if slot == 0: int(nodes[e].a) else if slot == 1: int(nodes[e].b) else if slot == 2: kid_c(e) else if slot == 3: kid_d(e) else: kid(e, slot - 4)
             if child <= 0 or child >= nodes.len() or wit_parents.has(child): continue
             wit_parents[child] = e
             stack.push(child)
@@ -404,7 +405,8 @@ wit_reaches = (c: int, site: int) -> bool:
         if nodes[b].kind == .while_ or nodes[b].kind == .for_: inner = true
         if nodes[b].kind == .block:
             after = false
-            loop s in kids(b):
+            loop j in [0..nkids(b)):
+                s = kid(b, j)
                 if after and wit_leaves(s, inner): return false
                 if s == chain[i - 1]: after = true
         i -= 1
@@ -801,7 +803,8 @@ wit_constant_keys = (r0: int) -> str:
     loop init > 0 and nodes[init].kind == .conv: init = int(nodes[init].a)
     if init <= 0 or nodes[init].kind != .map_lit or nkids(init) == 0 or nkids(init) > 8: return ""
     parts: str[]
-    loop pair in kids(init):
+    loop i in [0..nkids(init)):
+        pair = kid(init, i)
         k = int(nodes[pair].a)
         loop k > 0 and nodes[k].kind == .conv: k = int(nodes[k].a)
         if k <= 0 or nodes[k].kind != .str_lit or nkids(k) != 0 or nodes[k].sval < 0: return ""
@@ -944,10 +947,11 @@ wit_call_holding = (n: int) -> int:
         visits += 1
         if e <= 0 or e >= nodes.len() or nodes[e].kind == .lambda: continue
         if nodes[e].kind == .call:
-            loop child in kids(e):
+            loop i in [0..nkids(e)):
+                child = kid(e, i)
                 if child == n: return e
         stack.push(int(nodes[e].a)); stack.push(int(nodes[e].b)); stack.push(kid_c(e)); stack.push(kid_d(e))
-        loop child in kids(e): stack.push(child)
+        loop i in [0..nkids(e)): stack.push(kid(e, i))
     0
 
 # A refinement obligation at its use, with the contract's declaration span.

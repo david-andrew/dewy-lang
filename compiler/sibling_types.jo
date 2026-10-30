@@ -43,7 +43,8 @@ sibling_parent = (n: int) -> int:
     if nkids(n) < 2: return 0
     first = prune(ntype(kid(n, 0)))
     distinct = false
-    loop c in kids(n):
+    loop i in [0..nkids(n)):
+        c = kid(n, i)
         t = prune(ntype(c))
         if tkind(t) != .struct_ or is_lit(c): return 0
         if not type_eq(t, first): distinct = true
@@ -51,7 +52,8 @@ sibling_parent = (n: int) -> int:
     p = first
     loop p != 0:
         all = true
-        loop c in kids(n):
+        loop j in [0..nkids(n)):
+            c = kid(n, j)
             if all and not sibling_descends(ntype(c), p): all = false
         if all: return p
         p = nominal_parent.get(p, 0)

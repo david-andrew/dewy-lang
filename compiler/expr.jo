@@ -2230,13 +2230,15 @@ default_uses_names = (n: int, names: int[], hidden: int[] = []) -> bool:
         return default_uses_names(int(nodes[n].b), names, hidden)
     if nodes[n].kind == .lambda:
         local_hidden = hidden
-        loop param in kids(n):
+        loop i in [0..nkids(n)):
+            param = kid(n, i)
             if default_uses_names(int(nodes[param].b), names, local_hidden): return true
             local_hidden.push(int(nodes[param].name))
         return default_uses_names(int(nodes[n].b), names, local_hidden)
     if nodes[n].kind == .block:
         local_hidden = hidden
-        loop statement in kids(n):
+        loop i in [0..nkids(n)):
+            statement = kid(n, i)
             if default_uses_names(statement, names, local_hidden): return true
             if nodes[statement].kind == .vardecl:
                 local_hidden.push(int(nodes[statement].name))
@@ -2249,15 +2251,18 @@ default_uses_names = (n: int, names: int[], hidden: int[] = []) -> bool:
         return default_uses_names(int(nodes[n].b), names, local_hidden)
     if nodes[n].kind == .match_:
         if default_uses_names(int(nodes[n].a), names, hidden): return true
-        loop arm in kids(n):
+        loop i in [0..nkids(n)):
+            arm = kid(n, i)
             local_hidden = hidden
-            loop pattern in kids(arm):
+            loop j in [0..nkids(arm)):
+                pattern = kid(arm, j)
                 if nodes[pattern].name != 0: local_hidden.push(int(nodes[pattern].name))
             if default_uses_names(int(nodes[arm].b), names, local_hidden): return true
         return false
     if default_uses_names(int(nodes[n].a), names, hidden) or default_uses_names(int(nodes[n].b), names, hidden): return true
     if default_uses_names(int(nodes[n].c), names, hidden) or default_uses_names(int(nodes[n].d), names, hidden): return true
-    loop child in kids(n):
+    loop i in [0..nkids(n)):
+        child = kid(n, i)
         if default_uses_names(child, names, hidden): return true
     false
 
@@ -3081,7 +3086,8 @@ literal_union_member = (n: int, expected: int) -> int:
             if mkind == .struct_ and not is_map_type(m) and not structs[int(types[m].st)].union_:
                 si = int(types[m].st)
                 fits = true
-                loop entry in kids(n):
+                loop j in [0..nkids(n)):
+                    entry = kid(n, j)
                     named = false
                     loop i in [0..int(structs[si].nfields)):
                         if fields[int(structs[si].fields) + i].name == nodes[entry].name: named = true
@@ -3090,7 +3096,8 @@ literal_union_member = (n: int, expected: int) -> int:
                     f = fields[int(structs[si].fields) + i]
                     if f.defval != 0: continue
                     given = false
-                    loop entry in kids(n):
+                    loop ki in [0..nkids(n)):
+                        entry = kid(n, ki)
                         if nodes[entry].name == f.name: given = true
                     if not given: fits = false
         else if k == .map_lit: fits = is_map_type(m)
@@ -8290,8 +8297,10 @@ shape_match_wanted = (m: int) -> bool:
     if nodes[int(nodes[m].a)].kind == .tuple: return true
     guarded = false
     int_guarded = false
-    loop arm in kids(m):
-        loop p in kids(arm):
+    loop i in [0..nkids(m)):
+        arm = kid(m, i)
+        loop j in [0..nkids(arm)):
+            p = kid(arm, j)
             k = nodes[p].kind
             if k == .pshape or k == .pseq: return true
             if k == .ptype and nodes[int(nodes[p].a)].kind == .trefined:

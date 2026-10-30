@@ -280,7 +280,7 @@ fact_open = (e: int) -> bool:
         if mask & 2 != 0: todo.push(int(nodes[n].b))
         if mask & 4 != 0: todo.push(int(nodes[n].c))
         if mask & 16 != 0:
-            loop c in kids(n): todo.push(c)
+            loop i in [0..nkids(n)): todo.push(kid(n, i))
     false
 
 # Length facts and callee summaries can cross lexical scopes. When any scope
@@ -318,7 +318,8 @@ fact_pure = (e: int, budget: mut int) -> int:
     if k == .field and (nodes[e].aux >= 0 and tkind(ntype(int(nodes[e].a))) == .struct_ or nodes[e].aux == -2 and tkind(ntype(int(nodes[e].a))) == .tuple):
         return fact_pure(int(nodes[e].a), budget)
     if k == .call and fact_nd_reads_only(e) and (fact_nd_call(e) == 4 or fact_nd_call(e) == 5 or fact_nd_call(e) == 6):
-        loop arg in kids(e):
+        loop i in [0..nkids(e)):
+            arg = kid(e, i)
             bad = fact_pure(arg, budget)
             if bad != 0: return bad
         return 0
@@ -1372,7 +1373,8 @@ fact_constant_tree = (n: int, budget: mut int, scope: {int: bool} = {}) -> bool:
     if k == .if_ and scope.len() > 0:
         return fact_constant_tree(int(nodes[n].a), budget, scope) and fact_constant_tree(int(nodes[n].b), budget, scope) and (nodes[n].c == 0 or fact_constant_tree(int(nodes[n].c), budget, scope))
     if k == .block and scope.len() > 0:
-        loop child in kids(n):
+        loop i in [0..nkids(n)):
+            child = kid(n, i)
             if not fact_constant_tree(child, budget, scope): return false
         return true
     if k == .intrinsic:
@@ -1392,14 +1394,16 @@ fact_constant_tree = (n: int, budget: mut int, scope: {int: bool} = {}) -> bool:
     if k == .map_lit:
         kt = struct_targ(int(types[fact_type(ntype(n))].st), 0)
         if not fact_scalar(kt) and kt != T_STR: return false
-        loop pair in kids(n):
+        loop i in [0..nkids(n)):
+            pair = kid(n, i)
             if not fact_constant_tree(int(nodes[pair].a), budget, scope) or not fact_constant_tree(int(nodes[pair].b), budget, scope): return false
         return true
     if k == .call:
         if nodes[n].aux != 2 and not fact_lines_call(n) and not fact_split_call(n) and not fact_words_call(n): return false
         if ownership_decls.len() != 0 and ownership_fact_type(ntype(n)): return false
     else if k != .tuple and not (k == .array and nodes[n].a == 0 and nodes[n].b == 0 and nodes[n].aux == 0): return false
-    loop child in kids(n):
+    loop i in [0..nkids(n)):
+        child = kid(n, i)
         if has_flag(child, NF_SPREAD) or not fact_constant_tree(child, budget, scope): return false
     true
 
@@ -3431,7 +3435,7 @@ fact_change_route = (s: mut FactState, target: int, resize: bool, at: int, reaso
     if fact_name_vals == 0: fact_name_vals = intern("vals")
     if target != 0 and nodes[target].kind == .hole: return
     if target != 0 and nodes[target].kind == .tuple:
-        loop c in kids(target): fact_change_route(s, c, resize, at, reason)
+        loop j in [0..nkids(target)): fact_change_route(s, kid(target, j), resize, at, reason)
         return
     chain: int[]
     e = target
@@ -3614,7 +3618,8 @@ fact_bounded_change = (n: int, s: mut FactState, at: int, reason: FactReason) ->
 # (`@x`: lowering rejects a `mut` one) or may move an owner. O(arguments).
 fact_partial_opaque = (n: int) -> bool: ownership_decls.len() != 0 or fact_partial_place(n)
 fact_partial_place = (n: int) -> bool:
-    loop child in kids(n):
+    loop i in [0..nkids(n)):
+        child = kid(n, i)
         e = child
         loop nodes[e].kind == .conv: e = int(nodes[e].a)
         if nodes[e].kind == .addr: return true
@@ -3679,7 +3684,7 @@ fact_changes = (n: int, s: mut FactState, at: int, reason: FactReason = .loop_):
     if mask & 2 != 0: fact_changes(int(nodes[n].b), s, at, reason)
     if mask & 4 != 0: fact_changes(int(nodes[n].c), s, at, reason)
     if mask & 16 != 0:
-        loop c in kids(n): fact_changes(c, s, at, reason)
+        loop i in [0..nkids(n)): fact_changes(kid(n, i), s, at, reason)
 
 struct FactPaths:
     yes: FactState
@@ -5367,7 +5372,8 @@ fact_map_store = (n: int, s: mut FactState, values: int[], before: int) -> int:
 # Demand-only, indexed O(entries) construction, bounded by FACT_CAP.
 fact_map_literal = (n: int, s: mut FactState, map: int, keys: int[], raw: int[], payloads: int[]):
     if map == 0 or keys.len() == 0 or keys.len() != nkids(n): return
-    loop pair in kids(n):
+    loop j in [0..nkids(n)):
+        pair = kid(n, j)
         key = domain_leaf(int(nodes[pair].a))
         if nodes[key].kind != .int_lit and nodes[key].kind != .bool_lit and not (nodes[key].kind == .str_lit and nkids(key) == 0 and nodes[key].sval >= 0): return
     loop key in keys:
@@ -6284,7 +6290,8 @@ fact_mentions = (n: int, l: int) -> bool:
     if mask & 2 != 0 and fact_mentions(int(nodes[n].b), l): return true
     if mask & 4 != 0 and fact_mentions(int(nodes[n].c), l): return true
     if mask & 16 != 0:
-        loop c in kids(n):
+        loop i in [0..nkids(n)):
+            c = kid(n, i)
             if fact_mentions(c, l): return true
     false
 
@@ -6298,7 +6305,8 @@ fact_labeled_exit = (n: int) -> bool:
     if mask & 2 != 0 and fact_labeled_exit(int(nodes[n].b)): return true
     if mask & 4 != 0 and fact_labeled_exit(int(nodes[n].c)): return true
     if mask & 16 != 0:
-        loop c in kids(n):
+        loop i in [0..nkids(n)):
+            c = kid(n, i)
             if fact_labeled_exit(c): return true
     false
 
@@ -6353,12 +6361,14 @@ fact_push_flow = (n: int, l: int) -> (int, int):
         if fact_mentions(int(nodes[n].a), l): return (-1, -1)
         common = (-2, -2)
         exhaustive = false
-        loop arm in kids(n):
+        loop i in [0..nkids(n)):
+            arm = kid(n, i)
             if fact_mentions(int(nodes[arm].a), l) or fact_mentions(int(nodes[arm].c), l): return (-1, -1)
             loop guard in [int(nodes[arm].a), int(nodes[arm].c)]:
                 g = fact_push_flow(guard, l)
                 if g.0 == -1 or g.1 != -2: return (-1, -1)
-            loop p in kids(arm):
+            loop j in [0..nkids(arm)):
+                p = kid(arm, j)
                 if fact_mentions(p, l): return (-1, -1)
                 if nodes[p].kind == .pwild and nodes[arm].a == 0 and nodes[arm].c == 0: exhaustive = true
             c = fact_push_flow(int(nodes[arm].b), l)
@@ -6463,7 +6473,7 @@ fact_push_candidates = (n: int, out: mut int[]):
     if mask & 2 != 0: fact_push_candidates(int(nodes[n].b), out)
     if mask & 4 != 0: fact_push_candidates(int(nodes[n].c), out)
     if mask & 16 != 0:
-        loop c in kids(n): fact_push_candidates(c, out)
+        loop i in [0..nkids(n)): fact_push_candidates(kid(n, i), out)
 
 # After the loop: each counted local's length is its entry length plus count.
 fact_counted_lengths = (n: int, s: mut FactState, pushes: (int, int)[], count: int):
@@ -6622,7 +6632,7 @@ fact_counted_sums = (n: int, s: FactState, count: int) -> (int, FactBound)[]:
         if mask & 2 != 0: work.push(int(nodes[e].b))
         if mask & 4 != 0: work.push(int(nodes[e].c))
         if mask & 16 != 0:
-            loop c in kids(e): work.push(c)
+            loop j in [0..nkids(e)): work.push(kid(e, j))
     loop item in stores:
         l = item.0; e = item.1
         if bad.has(l) or int(locals[l].flags) & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_ADDR | LF_BYREF | LF_ALIAS | LF_MUTPARAM | LF_EXPOSED) != 0: continue
@@ -6787,7 +6797,8 @@ fact_push_only = (n: int, l: int, sites: mut int[]) -> bool:
     if mask & 2 != 0 and not fact_push_only(int(nodes[n].b), l, sites): return false
     if mask & 4 != 0 and not fact_push_only(int(nodes[n].c), l, sites): return false
     if mask & 16 != 0:
-        loop c in kids(n):
+        loop i in [0..nkids(n)):
+            c = kid(n, i)
             if not fact_push_only(c, l, sites): return false
     true
 
@@ -6971,9 +6982,9 @@ fact_index_carried = (body: int, l: int) -> int[]:
         if mask & 2 != 0: work.push(int(nodes[e].b))
         if mask & 4 != 0: work.push(int(nodes[e].c))
         if mask & 16 != 0:
-            loop c in kids(e): work.push(c)
+            loop j in [0..nkids(e)): work.push(kid(e, j))
         if mask & 32 != 0:
-            loop c in kids2(e): work.push(c)
+            loop j in [0..nkids2(e)): work.push(kid2(e, j))
     loop store in stores:
         if not copies.has(store.1) or copies.has(store.0): bad[store.0] = true
     out: int[]
@@ -7285,7 +7296,7 @@ fact_slice_writer = (writers: mut FactSliceEdges, p: PlaceIdentity, n: int):
 
 fact_slice_target = (writers: mut FactSliceEdges, n: int, at: int):
     if nodes[n].kind == .tuple:
-        loop c in kids(n): fact_slice_target(writers, c, at)
+        loop i in [0..nkids(n)): fact_slice_target(writers, kid(n, i), at)
         return
     fact_slice_writer(writers, fact_slice_root(n), at)
 
@@ -7396,7 +7407,8 @@ fact_slice_prepare = (f: int, summary: bool = false):
             if l != 0:
                 p = if has_flag(n, NF_GLOBAL): PlaceIdentity(.global, 0, l) else: PlaceIdentity(.local, int(locals[l].owner), l)
                 fact_slice_writer(writers, p, n)
-            loop c in kids(n):
+            loop j in [0..nkids(n)):
+                c = kid(n, j)
                 l = int(nodes[c].sym)
                 if l > 0 and not has_flag(c, NF_GLOBAL): fact_slice_writer(writers, PlaceIdentity(.local, int(locals[l].owner), l), n)
         if k == .assign:
@@ -7427,7 +7439,8 @@ fact_slice_prepare = (f: int, summary: bool = false):
         else if k == .call:
             if ntype(n) == T_NEVER or nodes[n].aux == 0 and library_exit_call(n): active.push(n)
             if not summary and (fact_probe_on or fact_policy == .RequireStatic) and (fact_library_call(n, "parallel_range") or fact_library_call(n, "parallel_map") or fact_parallel_array(n)):
-                loop arg in kids(n):
+                loop j in [0..nkids(n)):
+                    arg = kid(n, j)
                     if nodes[arg].kind == .lambda and nodes[arg].sym > 0:
                         fact_fork_nodes[arg] = true
                         forks.push(arg)
@@ -7451,11 +7464,12 @@ fact_slice_prepare = (f: int, summary: bool = false):
             else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and (nd_mutable_call(n) or fact_array_call(n) != 0 or fact_map_call(n) != 0 or fact_nonempty_call(n) or fact_pool_call(n) != 0):
                 active.push(n)
                 values.push(n)
-                loop arg in kids(n): values.push(arg)
+                loop j in [0..nkids(n)): values.push(kid(n, j))
             else if (fact_probe_on or share) and fact_floor_call(n) != 0:
                 if fact_probe_on: values.push(n)
                 probe_only = true
-            loop arg in kids(n):
+            loop j in [0..nkids(n)):
+                arg = kid(n, j)
                 if ownership_decls.len() != 0 and ownership_fact_type(ntype(arg)): active.push(n)
                 if nodes[arg].kind == .conv and nodes[arg].aux == i32(int(CV.refinement)):
                     if nodes[n].aux == 0 and nodes[n].sym > 0:
@@ -7464,7 +7478,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
                     else: values.push(n)
             if wi_fact_calls.len() > 0 and wi_fact_calls.has(n):
                 values.push(n)
-                loop arg in kids(n): values.push(arg)
+                loop j in [0..nkids(n)): values.push(kid(n, j))
             callee = int(nodes[n].sym)
             if share and nodes[n].aux == 0 and callee > 0 and not dependencies.has(callee):
                 dependencies[callee] = true
@@ -7558,8 +7572,9 @@ fact_slice_prepare = (f: int, summary: bool = false):
             if k == .if_ or k == .while_ or k == .for_ or k == .iflet or k == .match_ or k == .and_ or k == .or_ or k == .coalesce:
                 values.push(int(nodes[n].a))
                 if k == .match_:
-                    loop arm in kids(n):
-                        loop p in kids(arm): values.push(p)
+                    loop j in [0..nkids(n)):
+                        arm = kid(n, j)
+                        loop ki in [0..nkids(arm)): values.push(kid(arm, ki))
             continue
         n = values[cursor]; cursor += 1
         if n == 0: continue
@@ -7596,14 +7611,14 @@ fact_slice_prepare = (f: int, summary: bool = false):
         # (a fork closure's creation reads its captures, pushed above, not its body)
         else if k == .lambda: pass
         else if k == .call and fact_nd_call(n) != 0:
-            loop arg in kids(n): values.push(arg)
+            loop j in [0..nkids(n)): values.push(kid(n, j))
         else if k == .call and ntype(n) == T_BOOL and nodes[n].aux == 0 and nodes[n].sym > 0 and fact_predicate_summary(int(nodes[n].sym)) != 0:
-            loop arg in kids(n): values.push(arg)
+            loop j in [0..nkids(n)): values.push(kid(n, j))
         else if k == .call and fact_map_snapshot_call(n): values.push(kid(n, 0))
         else if k == .call and fact_regex_call(n):
-            loop arg in kids(n): values.push(arg)
+            loop j in [0..nkids(n)): values.push(kid(n, j))
         else if k == .call and fact_integer_gcd_call(n):
-            loop arg in kids(n): values.push(arg)
+            loop j in [0..nkids(n)): values.push(kid(n, j))
         # (a length-preserving call's length is its receiver's: `let ks = d.keys` then `ks.values`
         # needs ks's definition)
         else if k == .call and (fact_copy_length_call(n) or fact_endpoint_call(n) != 0 or fact_same_length_call(n)): values.push(kid(n, 0))
@@ -7618,7 +7633,8 @@ fact_slice_prepare = (f: int, summary: bool = false):
             # Array lengths also bound scalar search results. Demand these
             # actuals only for result kinds the summary domain can describe.
             if array_result or fact_scalar(ret) and is_int(ret) and ret != T_U64 or fact_summary_payload(ret) != 0:
-                loop arg in kids(n):
+                loop j in [0..nkids(n)):
+                    arg = kid(n, j)
                     at = fact_type(ntype(arg))
                     if tkind(at) == .array or tkind(at) == .fixed or array_result and fact_scalar(at) and is_int(at) and at != T_U64: values.push(arg)
         else if k == .intrinsic and nodes[n].aux == i32(int(IN.remove)):
@@ -7843,7 +7859,8 @@ fact_obligation_node = (n: int) -> bool:
         if pool >= 2 and pool <= 4: return true
         # A fork closure's obligations start from its creator's facts.
         if fact_library_call(n, "parallel_range") or fact_library_call(n, "parallel_map") or fact_parallel_array(n):
-            loop arg in kids(n):
+            loop i in [0..nkids(n)):
+                arg = kid(n, i)
                 if nodes[arg].kind == .lambda:
                     fact_panic_collect = false
                     if fact_obliged(int(nodes[arg].b)): return true
@@ -7880,7 +7897,8 @@ fact_obliged = (n: int) -> bool:
     if mask & 2 != 0 and fact_obliged(int(nodes[n].b)): return true
     if mask & 4 != 0 and fact_obliged(int(nodes[n].c)): return true
     if mask & 16 != 0:
-        loop child in kids(n):
+        loop j in [0..nkids(n)):
+            child = kid(n, j)
             if fact_obliged(child): return true
     if mask & 32 != 0:
         loop i in [0..nkids2(n)):
@@ -7895,12 +7913,14 @@ fact_obliged = (n: int) -> bool:
 fact_scope_exit = (s: mut FactState, n: int, first: int):
     owner = 0
     declared: int[]
-    loop c in kids(n):
+    loop j in [0..nkids(n)):
+        c = kid(n, j)
         if nodes[c].kind != .vardecl or has_flag(c, NF_GLOBAL): continue
         if nkids(c) == 0:
             if nodes[c].sym != 0: declared.push(int(nodes[c].sym))
         else:
-            loop d in kids(c):
+            loop ki in [0..nkids(c)):
+                d = kid(c, ki)
                 if nodes[d].sym != 0 and not has_flag(d, NF_GLOBAL): declared.push(int(nodes[d].sym))
     if declared.len() == 0: return
     kept: FactBinding[]
@@ -8110,7 +8130,8 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             keys: int[]
             raw: int[]
             payloads: int[]
-            loop pair in kids(n):
+            loop j in [0..nkids(n)):
+                pair = kid(n, j)
                 e = int(nodes[pair].a)
                 key = fact_capture(e, s)
                 keys.push(fact_map_key(s, e, key))
@@ -8131,7 +8152,8 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         # Interpolation evaluates each part in order, then calls its formatter,
         # which (like any opaque call) may write exposed roots; a builtin
         # number's, boolean's or string's writes nothing.
-        loop part in kids(n):
+        loop j in [0..nkids(n)):
+            part = kid(n, j)
             if nodes[part].kind != .pair: continue
             fact_capture(int(nodes[part].a), s)
             if not fact_builtin_formatter(part): fact_forget(s, part, .call)
@@ -8149,7 +8171,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
     # calls forget what the function may write)
     if k == .lambda or k == .fnref or k == .partial:
         fact_capture(int(nodes[n].a), s)
-        loop child in kids(n): fact_capture(child, s)
+        loop j in [0..nkids(n)): fact_capture(kid(n, j), s)
         if k == .lambda or k == .partial and fact_partial_opaque(n) or k == .fnref and fact_handle_opaque(n): fact_forget(s, n, .call, k == .partial and fact_partial_place(n))
         return 0
     if k == .unary:
@@ -8167,7 +8189,8 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         boundary = fact_terms.len()
         collect_at = max(32, s.ids.len() * 2)
         long_block = nkids(n) > 32
-        loop c in kids(n):
+        loop j in [0..nkids(n)):
+            c = kid(n, j)
             if nodes[c].kind == .defer_:
                 defers.push(int(nodes[c].a))
                 fact_pending_defers += 1
@@ -8566,7 +8589,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         # (a float square root, rounding, min/max or vector constructor reads
         # its operands and writes nothing)
         if fact_pure_intrinsic(id):
-            loop c in kids(n): fact_capture(c, s)
+            loop j in [0..nkids(n)): fact_capture(kid(n, j), s)
             return fact_fresh(s, ntype(n))
         # (`bytes(text)`, which `text as array<uint8>` is: the text's byte view)
         if id == .to_bytes and nkids(n) == 1 and tkind(ntype(kid(n, 0))) == .str_: return fact_byte_view(s, fact_capture(kid(n, 0), s))
@@ -8664,7 +8687,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             return fact_fresh(s, ntype(n))
         if id == .panic or id == .unreachable:
             # Never returns: its message is evaluated, then the path ends.
-            loop c in kids(n): fact_capture(c, s)
+            loop j in [0..nkids(n)): fact_capture(kid(n, j), s)
             s.live = false
             return 0
         if id == .assert and nodes[n].aux2 == i32(RANGE_EXHAUSTION):
@@ -9042,7 +9065,8 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
     if k == .map_lit:
         # (each entry is inserted by a call: an unknown callee's effects)
         keys: (int, int)[]
-        loop p in kids(n):
+        loop j in [0..nkids(n)):
+            p = kid(n, j)
             keys.push((int(nodes[p].a), fact_capture(int(nodes[p].a), s)))
             fact_capture(int(nodes[p].b), s)
             fact_forget(s, n, .call)
@@ -9061,11 +9085,13 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         exits = FactState(live = false)
         result = FactBound()
         first = true
-        loop arm in kids(n):
+        loop j in [0..nkids(n)):
+            arm = kid(n, j)
             wild = false
             low = 0
             high = 0
-            loop p in kids(arm):
+            loop ki in [0..nkids(arm)):
+                p = kid(arm, ki)
                 if nodes[p].kind == .pwild: wild = true
                 if nodes[p].kind == .plit or nodes[p].kind == .prange: low = fact_capture(int(nodes[p].a), s)
                 if nodes[p].kind == .prange: high = fact_capture(int(nodes[p].b), s)
@@ -9106,7 +9132,8 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
     if mask & 2 != 0 and mask >= 0: fact_capture(int(nodes[n].b), s)
     if mask & 4 != 0 and mask >= 0: fact_capture(int(nodes[n].c), s)
     if mask & 16 != 0 and mask >= 0:
-        loop c in kids(n):
+        loop j in [0..nkids(n)):
+            c = kid(n, j)
             fact_forget(s, n, .unsupported, true)
             fact_capture(c, s)
     fact_forget(s, n, .unsupported, true)
@@ -9291,7 +9318,8 @@ fact_progress_depends = (n: int, target: int) -> bool:
     if mask & 2 != 0 and fact_progress_depends(int(nodes[n].b), target): return true
     if mask & 4 != 0 and fact_progress_depends(int(nodes[n].c), target): return true
     if mask & 16 != 0:
-        loop child in kids(n):
+        loop i in [0..nkids(n)):
+            child = kid(n, i)
             if fact_progress_depends(child, target): return true
     false
 
