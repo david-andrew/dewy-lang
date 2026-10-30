@@ -1,3 +1,4 @@
+use 'checker_range_values.dewy'
 use 'checker_match.dewy'
 use 'checker_indexes.dewy'
 use 'checker_members.dewy'
@@ -10712,26 +10713,10 @@ literal_tree = (e: int) -> bool:
 
 # ---------------- ranges as values ----------------
 # a range used as a value is the array of its numbers: [0..n) is [0, 1, ... n-1]
-check_range_value = (n: int, expected: int) -> int:
-    pos = nodes[n].pos
-    if nodes[n].b == 0: fatal(pos, "a range with no end (a..) can only be looped over")
-    inner = nodes.len()
-    nodes.push(nodes[n])
-    on = "__rv{bc_count}"
-    iv = "__ri{bc_count}"
-    bc_count += 1
-    od = mk(.vardecl, pos)
-    nodes[od].name = i32(intern(on))
-    ty = mk(.tname, pos)
-    nodes[ty].aux = -7
-    nodes[ty].ival = mk_array(T_INT)
-    nodes[od].a = i32(ty)
-    f = mk(.for_, pos)
-    set_list(f, [bc_ident(iv, pos)])
-    nodes[f].a = i32(inner)
-    nodes[f].b = i32(bc_block([bc_stmt(bc_method(bc_ident(on, pos), "push", [bc_ident(iv, pos)], pos), pos)], pos))
-    nodes[n] = nodes[bc_block([od, f, bc_stmt(bc_ident(on, pos), pos)], pos)]
-    check_expr(n, expected)
+# A range as a value runs in checker_range_values.dewy; these are its services.
+check_range_value = (n: int, expected: int) -> int: xn_check(n, expected)
+range_value_error = (n: int):
+    fatal(nodes[n].pos, "a range with no end (a..) can only be looped over")
 
 # Dewy interval membership evaluates the needle and both endpoints exactly once,
 # in written order, before testing either bound. No range array is constructed.
@@ -11006,6 +10991,9 @@ check_matrix = (n: int, expected: int) -> int:
 # that are not themselves dotted operations are evaluated once, and the operation applies to their
 # elements, broadcast like numpy (a dimension of length 1, or a missing leading one, stretches).
 bc_count = 0
+range_value_host = CheckerRangeValueHost(intern, check_expr, range_value_error)
+range_value_input = CheckerRangeValueInput(&nodes, &lists, &bc_count, &T_INT, &range_value_host)
+range_value_binding = checker_range_values_bind(&range_value_input)
 
 # Brackets also construct records and call user-defined indexing operators. Keep
 # range syntax until the receiver type is known: NDArray uses axis slices, while

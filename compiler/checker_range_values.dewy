@@ -1,0 +1,86 @@
+$runtime_checks
+from p"node_store.dewy" import (Node node_mk node_set_list)
+from p"type_constructors.dewy" import tb_mk_array
+# A range used as a value (`let xs = 1..5`) owns its desugaring: an array built by a
+# loop over the range, `{ let r:array<int64> = []; loop i in a..b { r.push(i) }; r }`,
+# then checked. Work is O(1) nodes plus the demanded check; names are interned and
+# checked by the host, which may grow every arena, so nodes are written by ID.
+XNWord:type=int64<overflow='wrap'>
+CheckerRangeValueHost:type=[
+    intern:<(text:string):>int64>
+    check:<(node:int64 expected:int64):>int64>
+    error:<(node:int64):>void>
+]
+CheckerRangeValueInput:type=[
+    nodes:ptr<array<Node>>
+    lists:ptr<array<int32>>
+    counter:ptr<int64>
+    int_type:ptr<int64>
+    host:ptr<CheckerRangeValueHost>
+]
+let xn_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let xn_lists:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
+let xn_counter:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xn_int_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xn_host:ptr<CheckerRangeValueHost>=$unsafe (uint64(0) as ptr<CheckerRangeValueHost>)
+checker_range_values_bind=(input:ptr<CheckerRangeValueInput>):>XNWord=>$unsafe {
+    xn_nodes=input[0].nodes
+    xn_lists=input[0].lists
+    xn_counter=input[0].counter
+    xn_int_type=input[0].int_type
+    xn_host=input[0].host
+    0
+}
+xn_ident=(text:string pos:int64):>XNWord=>$unsafe {
+    let n=node_mk(@xn_nodes[0] 'ident' pos)
+    xn_nodes[0][n].name=int32<overflow='wrap'>(xn_host[0].intern(text))
+    n
+}
+xn_stmt=(e:XNWord pos:int64):>XNWord=>$unsafe {
+    let s=node_mk(@xn_nodes[0] 'exprstmt' pos)
+    xn_nodes[0][s].a=int32<overflow='wrap'>(e)
+    s
+}
+xn_block=(statements:array<int64> pos:int64):>XNWord=>$unsafe {
+    let b=node_mk(@xn_nodes[0] 'block' pos)
+    node_set_list(@xn_nodes[0] @xn_lists[0] b statements)
+    b
+}
+# Nodes are made in the order the original builders made them, so node and name
+# IDs (and so the output) are unchanged.
+xn_check=(n:XNWord expected:XNWord):>XNWord=>$unsafe {
+    let pos=xn_nodes[0].ptr[n].pos
+    if xn_nodes[0].ptr[n].b =? 0 {xn_host[0].error(n)}
+    let inner=xn_nodes[0].length
+    let copy=xn_nodes[0].ptr[n]
+    xn_nodes[0].push(copy)
+    let count=xn_counter[0]
+    let on="__rv{count}"
+    let iv="__ri{count}"
+    xn_counter[0]=count + 1
+    let od=node_mk(@xn_nodes[0] 'vardecl' pos)
+    xn_nodes[0][od].name=int32<overflow='wrap'>(xn_host[0].intern(on))
+    let ty=node_mk(@xn_nodes[0] 'tname' pos)
+    xn_nodes[0][ty].aux=-7
+    xn_nodes[0][ty].ival=int64(tb_mk_array(xn_int_type[0]))
+    xn_nodes[0][od].a=int32<overflow='wrap'>(ty)
+    let f=node_mk(@xn_nodes[0] 'for_' pos)
+    let index=xn_ident(iv pos)
+    node_set_list(@xn_nodes[0] @xn_lists[0] f [int64(index)])
+    xn_nodes[0][f].a=int32<overflow='wrap'>(inner)
+    # `r.push(i)`: the receiver, the argument, then the method and the call.
+    let receiver=xn_ident(on pos)
+    let argument=xn_ident(iv pos)
+    let method=node_mk(@xn_nodes[0] 'field' pos)
+    xn_nodes[0][method].a=int32<overflow='wrap'>(receiver)
+    xn_nodes[0][method].name=int32<overflow='wrap'>(xn_host[0].intern("push"))
+    let call=node_mk(@xn_nodes[0] 'call' pos)
+    xn_nodes[0][call].a=int32<overflow='wrap'>(method)
+    node_set_list(@xn_nodes[0] @xn_lists[0] call [int64(argument)])
+    let push=xn_stmt(call pos)
+    xn_nodes[0][f].b=int32<overflow='wrap'>(xn_block([int64(push)] pos))
+    let result=xn_stmt(xn_ident(on pos) pos)
+    let b=xn_block([int64(od) int64(f) int64(result)] pos)
+    xn_nodes[0][n]=xn_nodes[0].ptr[b]
+    xn_host[0].check(n expected)
+}

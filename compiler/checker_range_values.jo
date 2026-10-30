@@ -1,0 +1,71 @@
+# Frozen range-value desugaring extracted from expr.jo.
+use 'node_store.dewy'
+use 'type_constructors.dewy'
+struct CheckerRangeValueHost:
+    intern: (str) -> int
+    check: (int, int) -> int
+    error: (int) -> void
+struct CheckerRangeValueInput:
+    nodes: *(Node[])
+    lists: *(i32[])
+    counter: *int
+    int_type: *int
+    host: *CheckerRangeValueHost
+xn_nodes: *(Node[])
+xn_lists: *(i32[])
+xn_counter: *int
+xn_int_type: *int
+xn_host: *CheckerRangeValueHost
+checker_range_values_bind = (input: *CheckerRangeValueInput) -> int:
+    xn_nodes = input[0].nodes
+    xn_lists = input[0].lists
+    xn_counter = input[0].counter
+    xn_int_type = input[0].int_type
+    xn_host = input[0].host
+    0
+xn_ident = (text: str, pos: int) -> int:
+    n = int(node_mk(mut xn_nodes[0], .ident, pos))
+    xn_nodes[0][n].name = i32(xn_host[0].intern(text))
+    n
+xn_stmt = (e: int, pos: int) -> int:
+    s = int(node_mk(mut xn_nodes[0], .exprstmt, pos))
+    xn_nodes[0][s].a = i32(e)
+    s
+xn_block = (statements: int[], pos: int) -> int:
+    b = int(node_mk(mut xn_nodes[0], .block, pos))
+    node_set_list(mut xn_nodes[0], mut xn_lists[0], b, statements)
+    b
+xn_check = (n: int, expected: int) -> int:
+    pos = xn_nodes[0][n].pos
+    if xn_nodes[0][n].b == 0: xn_host[0].error(n)
+    inner = xn_nodes[0].len()
+    copy = xn_nodes[0][n]
+    xn_nodes[0].push(copy)
+    count = xn_counter[0]
+    on = "__rv{count}"
+    iv = "__ri{count}"
+    xn_counter[0] = count + 1
+    od = int(node_mk(mut xn_nodes[0], .vardecl, pos))
+    xn_nodes[0][od].name = i32(xn_host[0].intern(on))
+    ty = int(node_mk(mut xn_nodes[0], .tname, pos))
+    xn_nodes[0][ty].aux = -7
+    xn_nodes[0][ty].ival = int(tb_mk_array(xn_int_type[0]))
+    xn_nodes[0][od].a = i32(ty)
+    f = int(node_mk(mut xn_nodes[0], .for_, pos))
+    index = xn_ident(iv, pos)
+    node_set_list(mut xn_nodes[0], mut xn_lists[0], f, [index])
+    xn_nodes[0][f].a = i32(inner)
+    receiver = xn_ident(on, pos)
+    argument = xn_ident(iv, pos)
+    method = int(node_mk(mut xn_nodes[0], .field, pos))
+    xn_nodes[0][method].a = i32(receiver)
+    xn_nodes[0][method].name = i32(xn_host[0].intern("push"))
+    call = int(node_mk(mut xn_nodes[0], .call, pos))
+    xn_nodes[0][call].a = i32(method)
+    node_set_list(mut xn_nodes[0], mut xn_lists[0], call, [argument])
+    push = xn_stmt(call, pos)
+    xn_nodes[0][f].b = i32(xn_block([push], pos))
+    result = xn_stmt(xn_ident(on, pos), pos)
+    b = xn_block([od, f, result], pos)
+    xn_nodes[0][n] = xn_nodes[0][b]
+    xn_host[0].check(n, expected)
