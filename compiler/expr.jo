@@ -1,3 +1,4 @@
+use 'checker_places.dewy'
 use 'checker_collections.dewy'
 use 'checker_cast.dewy'
 use 'checker_unary.dewy'
@@ -10108,6 +10109,17 @@ collection_error = (n: int, code: int, vt: int, bt: int) -> void:
 collection_host = CheckerCollectionHost(check_expr, coerce, finalize_literal, values_group, collection_float_key, collection_float_obligation, collection_key_name, collection_map_decl, collection_instance, collection_setter, can_coerce, collection_error)
 collection_input = CheckerCollectionInput(&nodes, &lists, &types, &structs, &type_args, &files, &T_VOID, &collection_host)
 collection_binding = checker_collections_bind(&collection_input)
+place_contract = (a: int, at: int) -> bool: ref_storage_contract(refine_storage(a, at))
+place_storage = (a: int) -> void: note_storage_access(a)
+place_error = (n: int, code: int) -> void:
+    if code == 1: fatal(nodes[n].pos, "mutable refinement access awaits storage invariant checking")
+    if code == 2: fatal(nodes[n].pos, "can only take the address of a variable, field or element")
+    if code == 3: fatal(nodes[n].pos, "cannot take the address of a captured variable")
+    if code == 4: fatal(nodes[n].pos, "'_' can only be used as a function argument (partial application)")
+    fatal(nodes[n].pos, "named arguments are only allowed in calls")
+place_host = CheckerPlaceHost(check_expr, place_contract, place_storage, place_error)
+place_input = CheckerPlaceInput(&nodes, &locals, &refine_active, &last_checked, &place_host)
+place_binding = checker_places_bind(&place_input)
 
 optional_error = (n: int, at: int, unwrap: bool):
     if unwrap: fatal(nodes[n].pos, "'!' needs an optional value, found {dt(at)}")
@@ -10909,33 +10921,8 @@ check_expr_other = (n: int, expected: int) -> int:
         result = xc_check(n, expected)
         if result.bypass: return result.type
         t = result.type
-    else if k == .parallel_region:
-        t = check_expr(int(nodes[n].a), expected)
-        nodes[n].a = i32(last_checked)
     else if k == .range: return check_range_value(n, expected)
-    else if k == .addr:
-        at = check_expr(int(nodes[n].a), 0)
-        if refine_active and ref_storage_contract(refine_storage(int(nodes[n].a), at)): fatal(nodes[n].pos, "mutable refinement access awaits storage invariant checking")
-        ak = nodes[int(nodes[n].a)].kind
-        if ak != .ident and ak != .field and ak != .index: fatal(nodes[n].pos, "can only take the address of a variable, field or element")
-        if ak == .ident and nodes[int(nodes[n].a)].aux == i32(int(SK.local)):
-            l = int(nodes[int(nodes[n].a)].sym)
-            if int(locals[l].flags) & LF_CAPTURE != 0: fatal(nodes[n].pos, "cannot take the address of a captured variable")
-            locals[l].flags = i32(int(locals[l].flags) | LF_ADDR)
-        note_storage_access(int(nodes[n].a))
-        t = mk_ptr(at)
-    else if k == .hole: fatal(nodes[n].pos, "'_' can only be used as a function argument (partial application)")
-    else if k == .namedarg: fatal(nodes[n].pos, "named arguments are only allowed in calls")
-    else if k == .fnref: t = ntype(n)
-    else if k == .conv:
-        # (a conversion copied, as a default using an int argument given for an f64: what it
-        # converts is checked again)
-        ca = int(nodes[n].a)
-        if ca != 0 and not has_flag(ca, NF_CHECKED):
-            hint = if nodes[n].aux2 == 1: ntype(n) else: 0 # fixed-width .min/.max literal
-            check_expr(ca, hint)
-            nodes[n].a = i32(last_checked)
-        t = ntype(n)
+    else if k == .addr or k == .conv or k == .fnref or k == .parallel_region or k == .hole or k == .namedarg: t = xp_check(n, expected)
     else if k == .block:
         if has_flag(n, NF_COMPREHENSION) and ex != 0 and exk == .array:
             nodes[kid(n, 0)].a = i32(type_node_of(ex, nodes[n].pos))

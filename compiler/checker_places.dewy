@@ -1,0 +1,74 @@
+$runtime_checks
+from p"node_store.dewy" import Node
+from p"checker_state.dewy" import Local
+from p"type_constructors.dewy" import tb_mk_ptr
+# Address-of, parallel regions and checker-made conversions and function references.
+# Work is O(1) plus demanded operand checking; a taken address marks its local
+# once. Host calls may reenter and grow every arena: retain IDs, never views.
+XPWord:type=int64<overflow='wrap'>
+CheckerPlaceHost:type=[
+    check:<(node:int64 expected:int64):>int64>
+    contract:<(node:int64 type_id:int64):>bool>
+    storage:<(node:int64):>void>
+    error:<(node:int64 code:int64):>void>
+]
+CheckerPlaceInput:type=[
+    nodes:ptr<array<Node>>
+    locals:ptr<array<Local>>
+    refine:ptr<bool>
+    last:ptr<int64>
+    host:ptr<CheckerPlaceHost>
+]
+let xp_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let xp_locals:ptr<array<Local>>=$unsafe (uint64(0) as ptr<array<Local>>)
+let xp_refine:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+let xp_last:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xp_host:ptr<CheckerPlaceHost>=$unsafe (uint64(0) as ptr<CheckerPlaceHost>)
+checker_places_bind=(input:ptr<CheckerPlaceInput>):>XPWord=>$unsafe {
+    xp_nodes=input[0].nodes
+    xp_locals=input[0].locals
+    xp_refine=input[0].refine
+    xp_last=input[0].last
+    xp_host=input[0].host
+    0
+}
+# The node's type before publication; errors (codes 1-4) never return.
+xp_check=(n:XPWord expected:XPWord):>XPWord=>$unsafe {
+    let k=xp_nodes[0].ptr[n].kind
+    if k =? 'parallel_region' {
+        let t=xp_host[0].check(XPWord(xp_nodes[0].ptr[n].a) expected)
+        xp_nodes[0][n].a=int32<overflow='wrap'>(xp_last[0])
+        return t
+    }
+    if k =? 'addr' {
+        let at=xp_host[0].check(XPWord(xp_nodes[0].ptr[n].a) 0)
+        if xp_refine[0] and xp_host[0].contract(XPWord(xp_nodes[0].ptr[n].a) at) {xp_host[0].error(n 1)}
+        let a=XPWord(xp_nodes[0].ptr[n].a)
+        let ak=xp_nodes[0].ptr[a].kind
+        if ak not=? 'ident' and ak not=? 'field' and ak not=? 'index' {xp_host[0].error(n 2)}
+        # A local's address: never a captured one; the local then lives in memory.
+        if ak =? 'ident' and xp_nodes[0].ptr[a].aux =? 1 {
+            let l=XPWord(xp_nodes[0].ptr[a].sym)
+            if XPWord(xp_locals[0][l].flags) & 4 not=? 0 {xp_host[0].error(n 3)}
+            xp_locals[0][l].flags=xp_locals[0].ptr[l].flags | 64
+        }
+        xp_host[0].storage(XPWord(xp_nodes[0].ptr[n].a))
+        return tb_mk_ptr(at)
+    }
+    if k =? 'conv' {
+        # A conversion copied (a default's argument): what it converts is checked again.
+        let ca=XPWord(xp_nodes[0].ptr[n].a)
+        if ca not=? 0 and XPWord(xp_nodes[0].ptr[ca].flags) & 128 =? 0 {
+            let hint:XPWord=0
+            # A fixed-width .min/.max literal keeps its type.
+            if xp_nodes[0].ptr[n].aux2 =? 1 {hint=XPWord(xp_nodes[0].ptr[n].type)}
+            xp_host[0].check(ca hint);
+            xp_nodes[0][n].a=int32<overflow='wrap'>(xp_last[0])
+        }
+        return XPWord(xp_nodes[0].ptr[n].type)
+    }
+    if k =? 'fnref' {return XPWord(xp_nodes[0].ptr[n].type)}
+    if k =? 'hole' {xp_host[0].error(n 4)}
+    xp_host[0].error(n 5)
+    0
+}

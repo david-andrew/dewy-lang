@@ -1,0 +1,57 @@
+# Frozen address-of and checker-made form checker extracted from expr.jo.
+use 'node_store.dewy'
+use 'checker_state.dewy'
+use 'type_constructors.dewy'
+struct CheckerPlaceHost:
+    check: (int, int) -> int
+    contract: (int, int) -> bool
+    storage: (int) -> void
+    error: (int, int) -> void
+struct CheckerPlaceInput:
+    nodes: *(Node[])
+    locals: *(Local[])
+    refine: *bool
+    last: *int
+    host: *CheckerPlaceHost
+xp_nodes: *(Node[])
+xp_locals: *(Local[])
+xp_refine: *bool
+xp_last: *int
+xp_host: *CheckerPlaceHost
+checker_places_bind = (input: *CheckerPlaceInput) -> int:
+    xp_nodes = input[0].nodes
+    xp_locals = input[0].locals
+    xp_refine = input[0].refine
+    xp_last = input[0].last
+    xp_host = input[0].host
+    0
+xp_check = (n: int, expected: int) -> int:
+    k = xp_nodes[0][n].kind
+    if k == .parallel_region:
+        t = xp_host[0].check(int(xp_nodes[0][n].a), expected)
+        xp_nodes[0][n].a = i32(xp_last[0])
+        return t
+    if k == .addr:
+        at = xp_host[0].check(int(xp_nodes[0][n].a), 0)
+        if xp_refine[0] and xp_host[0].contract(int(xp_nodes[0][n].a), at): xp_host[0].error(n, 1)
+        a = int(xp_nodes[0][n].a)
+        ak = xp_nodes[0][a].kind
+        if ak != .ident and ak != .field and ak != .index: xp_host[0].error(n, 2)
+        if ak == .ident and xp_nodes[0][a].aux == 1:
+            l = int(xp_nodes[0][a].sym)
+            if int(xp_locals[0][l].flags) & 4 != 0: xp_host[0].error(n, 3)
+            xp_locals[0][l].flags = i32(int(xp_locals[0][l].flags) | 64)
+        xp_host[0].storage(int(xp_nodes[0][n].a))
+        return int(tb_mk_ptr(at))
+    if k == .conv:
+        ca = int(xp_nodes[0][n].a)
+        if ca != 0 and int(xp_nodes[0][ca].flags) & 128 == 0:
+            hint = 0
+            if xp_nodes[0][n].aux2 == 1: hint = int(xp_nodes[0][n].type)
+            xp_host[0].check(ca, hint)
+            xp_nodes[0][n].a = i32(xp_last[0])
+        return int(xp_nodes[0][n].type)
+    if k == .fnref: return int(xp_nodes[0][n].type)
+    if k == .hole: xp_host[0].error(n, 4)
+    xp_host[0].error(n, 5)
+    0
