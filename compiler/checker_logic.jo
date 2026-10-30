@@ -1,0 +1,71 @@
+# Frozen logical-expression checker extracted from expr.jo.
+use 'node_store.dewy'
+use 'checker_types.dewy'
+use 'checker_state.dewy'
+use 'checker_tokens.dewy'
+use 'type_inference.dewy'
+struct CheckerLogicHost:
+    check: (int, int) -> int
+    coerce: (int, int) -> int
+    simple_enum: (int) -> bool
+    overload: (int, str) -> int
+    narrow: (int, bool) -> void
+    reset: (int) -> void
+    mask: (int) -> bool
+    broadcast: (int) -> void
+struct CheckerLogicInput:
+    nodes: *(Node[])
+    types: *(TypeInfo[])
+    scopes: *CheckerScope
+    last: *int
+    bool_type: *int
+    host: *CheckerLogicHost
+xg_input: *CheckerLogicInput
+checker_logic_bind = (input: *CheckerLogicInput) -> int:
+    xg_input = input
+    0
+struct CheckerLogicResult:
+    type: int
+    bypass: bool
+xg_check = (n: int, expected: int, ex: int) -> CheckerLogicResult:
+    k = xg_input[0].nodes[0][n].kind
+    h = 0
+    if ex != 0 and xg_input[0].types[0][tu_prune(ex)].kind == .int_: h = ex
+    ta = int(tu_prune(xg_input[0].host[0].check(int(xg_input[0].nodes[0][n].a), h)))
+    xg_input[0].nodes[0][n].a = i32(xg_input[0].last[0])
+    tk = xg_input[0].types[0][tu_prune(ta)].kind
+    if tk == .struct_ or tk == .tuple or (tk == .enum_ and not xg_input[0].host[0].simple_enum(ta)):
+        op = "~"
+        if k != .not_:
+            xg_input[0].host[0].check(int(xg_input[0].nodes[0][n].b), 0)
+            xg_input[0].nodes[0][n].b = i32(xg_input[0].last[0])
+            op = if k == .and_: "&" else: "|"
+        r = xg_input[0].host[0].overload(n, op)
+        if r != 0:
+            xg_input[0].last[0] = n
+            return CheckerLogicResult(r, true)
+    if xg_input[0].types[0][tu_prune(ta)].kind == .int_:
+        a = int(xg_input[0].nodes[0][n].a)
+        xg_input[0].nodes[0][a].flags = xg_input[0].nodes[0][a].flags | 128
+        if k == .not_:
+            xg_input[0].nodes[0][n].kind = .unary
+            xg_input[0].nodes[0][n].op = i32(int(Tok.tilde))
+        else:
+            xg_input[0].nodes[0][n].kind = .binary
+            xg_input[0].nodes[0][n].op = i32(int(if k == .and_: Tok.amp else: Tok.pipe))
+        return CheckerLogicResult(xg_input[0].host[0].check(n, expected), true)
+    if k == .not_ and xg_input[0].host[0].mask(ta):
+        a = int(xg_input[0].nodes[0][n].a)
+        xg_input[0].nodes[0][a].flags = xg_input[0].nodes[0][a].flags | 128
+        xg_input[0].host[0].broadcast(n)
+        return CheckerLogicResult(xg_input[0].host[0].check(n, expected), true)
+    a = xg_input[0].host[0].coerce(int(xg_input[0].nodes[0][n].a), xg_input[0].bool_type[0])
+    xg_input[0].nodes[0][n].a = i32(a)
+    if k != .not_:
+        mark = xg_input[0].scopes[0].names.len()
+        xg_input[0].host[0].narrow(int(xg_input[0].nodes[0][n].a), k == .and_)
+        b = int(xg_input[0].nodes[0][n].b)
+        xg_input[0].host[0].check(b, xg_input[0].bool_type[0])
+        xg_input[0].host[0].coerce(b, xg_input[0].bool_type[0])
+        xg_input[0].host[0].reset(mark)
+    CheckerLogicResult(xg_input[0].bool_type[0], false)

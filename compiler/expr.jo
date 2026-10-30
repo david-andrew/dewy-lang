@@ -1,3 +1,4 @@
+use 'checker_logic.dewy'
 use 'checker_optional.dewy'
 use 'checker_literals.dewy'
 use 'type_match.dewy'
@@ -9989,6 +9990,16 @@ check_call_expr = (n: int, expected: int) -> int:
 
 check_str_expr = (n: int, expected: int) -> int: xl_check_str(n, expected)
 
+logic_mask = (ta: int) -> bool:
+    (types[ta].kind == .array and prune(int(types[ta].elem)) == T_BOOL) or (is_nd(ta) and prune(nd_elem(ta)) == T_BOOL)
+logic_broadcast = (n: int):
+    c = bc_call("__not", [int(nodes[n].a)], nodes[n].pos)
+    add_flag(c, NF_BROADCAST)
+    nodes[n] = nodes[c]
+logic_host = CheckerLogicHost(check_expr, coerce, simple_enum, op_overload, narrow_by, scope_reset, logic_mask, logic_broadcast)
+logic_input = CheckerLogicInput(&nodes, &types, &check_scopes, &last_checked, &T_BOOL, &logic_host)
+logic_binding = checker_logic_bind(&logic_input)
+
 optional_error = (n: int, at: int, unwrap: bool):
     if unwrap: fatal(nodes[n].pos, "'!' needs an optional value, found {dt(at)}")
     lhs = int(nodes[n].a)
@@ -10607,57 +10618,11 @@ check_expr_other = (n: int, expected: int) -> int:
         if nodes[n].op == i32(int(Tok.minus)) and at == T_INT and dewy_at(nodes[n].pos):
             nodes[n].type = i32(t)
             t = exact_int_result(n)
-    else if k == .and_ or k == .or_:
-        # on integers, and/or are bitwise
-        h = 0
-        if ex != 0 and is_int(ex): h = ex
-        ta = prune(check_expr(int(nodes[n].a), h))
-        nodes[n].a = i32(last_checked)
-        if is_struct_like(ta):
-            check_expr(int(nodes[n].b), 0)
-            nodes[n].b = i32(last_checked)
-            r = op_overload(n, if k == .and_: "&" else: "|")
-            if r != 0:
-                last_checked = n
-                return r
-        if is_int(ta):
-            add_flag(int(nodes[n].a), NF_CHECKED)
-            nodes[n].kind = .binary
-            if k == .and_: nodes[n].op = i32(int(Tok.amp))
-            else: nodes[n].op = i32(int(Tok.pipe))
-            return check_expr(n, expected)
-        nodes[n].a = i32(coerce(int(nodes[n].a), T_BOOL))
-        # x is T and f(x): x is a T on the right
-        mark = scope_mark()
-        narrow_by(int(nodes[n].a), k == .and_)
-        check_to(int(nodes[n].b), T_BOOL)
-        scope_reset(mark)
-        t = T_BOOL
+    else if k == .and_ or k == .or_ or k == .not_:
+        result = xg_check(n, expected, ex)
+        if result.bypass: return result.type
+        t = result.type
     else if k == .istype: t = check_istype(n)
-    else if k == .not_:
-        h = 0
-        if ex != 0 and is_int(ex): h = ex
-        ta = prune(check_expr(int(nodes[n].a), h))
-        nodes[n].a = i32(last_checked)
-        if is_struct_like(ta):
-            r = op_overload(n, "~")
-            if r != 0:
-                last_checked = n
-                return r
-        if is_int(ta):
-            add_flag(int(nodes[n].a), NF_CHECKED)
-            nodes[n].kind = .unary
-            nodes[n].op = i32(int(Tok.tilde))
-            return check_expr(n, expected)
-        # (not mask: each element's, as NumPy's ~mask)
-        if (types[ta].kind == .array and prune(int(types[ta].elem)) == T_BOOL) or (is_nd(ta) and prune(nd_elem(ta)) == T_BOOL):
-            add_flag(int(nodes[n].a), NF_CHECKED)
-            c = bc_call("__not", [int(nodes[n].a)], nodes[n].pos)
-            add_flag(c, NF_BROADCAST)
-            nodes[n] = nodes[c]
-            return check_expr(n, expected)
-        nodes[n].a = i32(coerce(int(nodes[n].a), T_BOOL))
-        t = T_BOOL
     else if k == .coalesce or k == .unwrap:
         result = xo_check(n, expected, ex)
         if result.bypass: return result.type

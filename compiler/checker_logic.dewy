@@ -1,0 +1,81 @@
+$runtime_checks
+from p"node_store.dewy" import Node
+from p"checker_types.dewy" import TypeInfo
+from p"checker_state.dewy" import CheckerScope
+from p"type_inference.dewy" import tu_prune
+# Logical expressions own operand order, integer rewrites and narrowing lifetime.
+# Work follows only demanded operands and existing scope rollback; arena elements
+# are reacquired after each reentrant semantic service.
+XGWord:type=int64<overflow='wrap'>
+CheckerLogicHost:type=[
+    check:<(node:int64 expected:int64):>int64>
+    coerce:<(node:int64 type_id:int64):>int64>
+    simple_enum:<(type_id:int64):>bool>
+    overload:<(node:int64 op:string):>int64>
+    narrow:<(node:int64 holds:bool):>void>
+    reset:<(mark:int64):>void>
+    mask:<(type_id:int64):>bool>
+    broadcast:<(node:int64):>void>
+]
+CheckerLogicInput:type=[
+    nodes:ptr<array<Node>>
+    types:ptr<array<TypeInfo>>
+    scopes:ptr<CheckerScope>
+    last:ptr<int64>
+    bool_type:ptr<int64>
+    host:ptr<CheckerLogicHost>
+]
+let xg_input:ptr<CheckerLogicInput>=$unsafe (uint64(0) as ptr<CheckerLogicInput>)
+checker_logic_bind=(input:ptr<CheckerLogicInput>):>XGWord=>{xg_input=input;0}
+CheckerLogicResult:type=[type:int64 bypass:bool]
+xg_check=(n:XGWord expected:XGWord ex:XGWord):>CheckerLogicResult=>$unsafe {
+    let k=xg_input[0].nodes[0].ptr[n].kind
+    let h:XGWord=0
+    if ex not=? 0 and xg_input[0].types[0].ptr[tu_prune(ex)].kind =? 'int_' {h=ex}
+    let ta=tu_prune(xg_input[0].host[0].check(XGWord(xg_input[0].nodes[0].ptr[n].a) h))
+    xg_input[0].nodes[0][n].a=int32<overflow='wrap'>(xg_input[0].last[0])
+    let tk=xg_input[0].types[0].ptr[tu_prune(ta)].kind
+    if tk =? 'struct_' or tk =? 'tuple' or (tk =? 'enum_' and not xg_input[0].host[0].simple_enum(ta)) {
+        let op="~"
+        if k not=? 'not_' {
+            xg_input[0].host[0].check(XGWord(xg_input[0].nodes[0].ptr[n].b) 0);
+            xg_input[0].nodes[0][n].b=int32<overflow='wrap'>(xg_input[0].last[0])
+            op=if k =? 'and_' {"&"} else {"|"}
+        }
+        let r=xg_input[0].host[0].overload(n op)
+        if r not=? 0 {
+            xg_input[0].last[0]=n
+            return [type=r bypass=true]
+        }
+    }
+    if xg_input[0].types[0].ptr[tu_prune(ta)].kind =? 'int_' {
+        let a=XGWord(xg_input[0].nodes[0].ptr[n].a)
+        xg_input[0].nodes[0][a].flags=xg_input[0].nodes[0].ptr[a].flags | 128
+        if k =? 'not_' {
+            xg_input[0].nodes[0][n].kind='unary'
+            # Frozen Tok ordinals; the differential checks against checker_tokens.
+            xg_input[0].nodes[0][n].op=66
+        } else {
+            xg_input[0].nodes[0][n].kind='binary'
+            xg_input[0].nodes[0][n].op=if k =? 'and_' {63} else {64}
+        }
+        return [type=xg_input[0].host[0].check(n expected) bypass=true]
+    }
+    if k =? 'not_' and xg_input[0].host[0].mask(ta) {
+        let a=XGWord(xg_input[0].nodes[0].ptr[n].a)
+        xg_input[0].nodes[0][a].flags=xg_input[0].nodes[0].ptr[a].flags | 128
+        xg_input[0].host[0].broadcast(n)
+        return [type=xg_input[0].host[0].check(n expected) bypass=true]
+    }
+    let a=xg_input[0].host[0].coerce(XGWord(xg_input[0].nodes[0].ptr[n].a) xg_input[0].bool_type[0])
+    xg_input[0].nodes[0][n].a=int32<overflow='wrap'>(a)
+    if k not=? 'not_' {
+        let mark=xg_input[0].scopes[0].names.length
+        xg_input[0].host[0].narrow(XGWord(xg_input[0].nodes[0].ptr[n].a) k =? 'and_')
+        let b=XGWord(xg_input[0].nodes[0].ptr[n].b)
+        xg_input[0].host[0].check(b xg_input[0].bool_type[0]);
+        xg_input[0].host[0].coerce(b xg_input[0].bool_type[0]);
+        xg_input[0].host[0].reset(mark)
+    }
+    [type=xg_input[0].bool_type[0] bypass=false]
+}
