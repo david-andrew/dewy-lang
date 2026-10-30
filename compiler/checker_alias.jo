@@ -1,0 +1,49 @@
+use 'node_store.dewy'
+struct CheckerAliasScope:
+    context: int
+    mark: int
+struct CheckerAliasHost:
+    resume: (int) -> void
+    error: (int, int, int, int) -> void
+    atomic_order: () -> int
+    enter: (int, int[]) -> CheckerAliasScope
+    leave: (CheckerAliasScope) -> void
+    resolve_type: (int) -> int
+    name: (int) -> str
+    policy: (int, int, int) -> int
+    note: (int, int) -> void
+ca_nodes: *(Node[])
+ca_lists: *(i32[])
+ca_host: *CheckerAliasHost
+checker_alias_bind = (nodes: *(Node[]), lists: *(i32[]), host: *CheckerAliasHost) -> int:
+    ca_nodes = nodes
+    ca_lists = lists
+    ca_host = host
+    0
+ca_resolve_alias = (d: int, targs: int[], use_pos: int) -> int:
+    ca_host[0].resume(d)
+    ntp = int(ca_nodes[0][d].nlist2)
+    if targs.len() != ntp: ca_host[0].error(1, d, use_pos, targs.len())
+    if ntp == 0 and ca_nodes[0][d].type != 0: return int(ca_nodes[0][d].type)
+    if ca_nodes[0][d].aux == -7:
+        ca_nodes[0][d].type = i32(ca_host[0].atomic_order())
+        return int(ca_nodes[0][d].type)
+    if ca_nodes[0][d].aux == 1: ca_host[0].error(2, d, use_pos, 0)
+    ca_nodes[0][d].aux = 1
+    scope = ca_host[0].enter(d, targs)
+    t = ca_host[0].resolve_type(int(ca_nodes[0][d].a))
+    if ca_nodes[0][d].c != 0:
+        attributes = int(ca_nodes[0][d].c)
+        loop i in [0..int(ca_nodes[0][attributes].nlist)):
+            attribute = int(ca_lists[0][int(ca_nodes[0][attributes].list) + i])
+            if ca_host[0].name(int(ca_nodes[0][attribute].name)) != "overflow": continue
+            value = int(ca_nodes[0][attribute].a)
+            if value == 0 or ca_nodes[0][value].kind != .str_lit: ca_host[0].error(3, attribute, 0, 0)
+            policy = ca_host[0].name(int(ca_nodes[0][value].sval))
+            if policy != "wrap" and policy != "saturate": ca_host[0].error(4, attribute, 0, 0)
+            t = ca_host[0].policy(t, (if policy == "wrap": 1 else: 2), ca_nodes[0][attribute].pos)
+    ca_host[0].leave(scope)
+    ca_nodes[0][d].aux = 0
+    if ntp == 0: ca_nodes[0][d].type = i32(t)
+    if ntp == 0: ca_host[0].note(d, t)
+    t

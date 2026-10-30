@@ -1,0 +1,209 @@
+use 'node_store.dewy'
+use 'checker_types.dewy'
+use 'checker_state.dewy'
+use 'checker_alias.dewy'
+use 'type_inference.dewy'
+use 'type_constructors.dewy'
+use 'type_unions.dewy'
+use 'type_labels.dewy'
+# Name result kinds: 0 resolved, 1 alias, 2 record/enum declaration,
+# 3 type with arguments, 4 secret, 5 rational. ref is a type or declaration ID.
+struct CheckerTypeName:
+    kind: int
+    ref: int
+struct CheckerResolveHost:
+    name: (int) -> CheckerTypeName
+    policy: (int,int,int) -> int
+    refinement: (int) -> int
+    quantity: (int) -> int
+    ide: (int) -> void
+    effect_argument: (int) -> int
+    nominal: (int) -> int
+    fixed_arg: (int) -> bool
+    fixed_size: (int) -> int
+    fixed: (int,int,int) -> int
+    instance: (int,int[]) -> int
+    decimal: (int) -> int
+    word_rational: (int) -> int
+    error: (int,int,int) -> void
+    record: (int,int[]) -> int
+    validate_record: (int,int) -> void
+    nd: (int,int) -> int
+    soa: (int,int) -> int
+    map_decl: (int) -> int
+    total_dict: (int,int) -> int
+    validate_signature: (int[],int,int,int) -> void
+    pack_count: (int) -> int
+    contract: (int,int,int[],int[],int) -> int
+    pack_error: (int,int,int,int) -> void
+struct CheckerResolveInput:
+    nodes: *(Node[])
+    lists: *(i32[])
+    types: *(TypeInfo[])
+    names: *(str[])
+    binders: *RefineBindings
+    refine: *bool
+    values: *bool
+    pack: *bool
+    void_type: *int
+    int_type: *int
+    host: *CheckerResolveHost
+ct_input: *CheckerResolveInput
+checker_resolve_bind = (input: *CheckerResolveInput) -> int:
+    ct_input = input
+    0
+ct_nkids = (n: int) -> int: int(ct_input[0].nodes[0][n].nlist)
+ct_kid = (n: int, i: int) -> int: int(ct_input[0].lists[0][int(ct_input[0].nodes[0][n].list) + i])
+ct_nkids2 = (n: int) -> int: int(ct_input[0].nodes[0][n].nlist2)
+ct_kid2 = (n: int, i: int) -> int: int(ct_input[0].lists[0][int(ct_input[0].nodes[0][n].list2) + i])
+ct_kids = (n: int) -> int[]: node_kids(mut ct_input[0].nodes[0], mut ct_input[0].lists[0], n)
+ct_kids2 = (n: int) -> int[]: node_kids2(mut ct_input[0].nodes[0], mut ct_input[0].lists[0], n)
+ct_has_flag = (n: int, flag: int) -> bool: int(ct_input[0].nodes[0][n].flags) & flag != 0
+ct_kind = (t: int) -> TK: ct_input[0].types[0][tu_prune(t)].kind
+ct_resolve_type = (tn: int) -> int:
+    if ct_input[0].nodes[0][tn].kind == .tname and ct_input[0].nodes[0][tn].aux == -9: return ct_input[0].host[0].policy(ct_resolve_type(int(ct_input[0].nodes[0][tn].a)), int(ct_input[0].nodes[0][tn].ival), ct_input[0].nodes[0][tn].pos)
+    if ct_input[0].nodes[0][tn].kind == .tname and ct_input[0].nodes[0][tn].aux == -7: return int(ct_input[0].nodes[0][tn].ival)
+    k = ct_input[0].nodes[0][tn].kind
+    # (several values are a binding's whole type, not part of another)
+    values_ok = ct_input[0].values[0]
+    ct_input[0].values[0] = false
+    if k == .trefined: return ct_input[0].host[0].refinement(tn)
+    if k == .tquantity: return ct_input[0].host[0].quantity(tn)
+    if k == .tarray or k == .tmap: ct_input[0].host[0].ide(tn)
+    if k == .tname:
+        named = ct_input[0].host[0].name(tn)
+        if named.kind == 0: return named.ref
+        if named.kind == 5:
+            if ct_nkids(tn) == 0: return ct_input[0].host[0].decimal(ct_input[0].nodes[0][tn].pos)
+            if ct_nkids(tn) == 1 and ct_resolve_type(ct_kid(tn, 0)) == ct_input[0].int_type[0]: return ct_input[0].host[0].word_rational(ct_input[0].nodes[0][tn].pos)
+            ct_input[0].host[0].error(8, tn, 0)
+        if named.kind == 4: return tb_mk_secret(ct_resolve_type(ct_kid(tn, 0)))
+        if named.kind == 1:
+            targs: int[]
+            d = named.ref
+            loop i in [0..ct_nkids(tn)):
+                if i < ct_nkids2(d) and ct_input[0].nodes[0][ct_kid2(d, i)].aux == 1: targs.push(ct_input[0].host[0].effect_argument(ct_kid(tn, i)))
+                else: targs.push(ct_resolve_type(ct_kid(tn, i)))
+            return ct_input[0].host[0].nominal(ca_resolve_alias(d, targs, ct_input[0].nodes[0][tn].pos))
+        if named.kind == 3:
+            if ct_kind(named.ref) == .effect: ct_input[0].host[0].error(5, tn, 0)
+            if ct_input[0].nodes[0][tn].nlist > 0:
+                if ct_input[0].host[0].fixed_arg(tn): return ct_input[0].host[0].fixed(named.ref, ct_input[0].host[0].fixed_size(ct_kid(tn, 0)), ct_input[0].nodes[0][tn].pos)
+                ct_input[0].host[0].error(6, tn, 0)
+            return ct_input[0].host[0].nominal(named.ref)
+        d = named.ref
+        ntp = ct_nkids2(d)
+        if ntp == 0 and ct_input[0].host[0].fixed_arg(tn):
+            return ct_input[0].host[0].fixed(ct_input[0].host[0].instance(d, []), ct_input[0].host[0].fixed_size(ct_kid(tn, 0)), ct_input[0].nodes[0][tn].pos)
+        if ct_nkids(tn) != ntp: ct_input[0].host[0].error(7, tn, ntp)
+        targs: int[]
+        loop i in [0..ntp): targs.push(ct_resolve_type(ct_kid(tn, i)))
+        return ct_input[0].host[0].nominal(ct_input[0].host[0].instance(d, targs))
+    if k == .trecord:
+        let fields = ct_kids(tn)
+        seen: {int: bool} = {}
+        old_fields = ct_input[0].binders[0].fields
+        if ct_input[0].refine[0]:
+            ct_input[0].binders[0].fields = []
+            loop field in fields:
+                name = int(ct_input[0].nodes[0][field].name)
+                i = 0
+                loop i < ct_input[0].binders[0].fields.len() and ct_input[0].names[0][ct_input[0].binders[0].fields[i]] < ct_input[0].names[0][name]: i += 1
+                ct_input[0].binders[0].fields.insert(i, name)
+        loop field in fields:
+            name = int(ct_input[0].nodes[0][field].name)
+            if seen.has(name): ct_input[0].host[0].error(2, field, 0)
+            seen[name] = true
+            t = ct_resolve_type(int(ct_input[0].nodes[0][field].a))
+            if ct_kind(t) == .void_ or ct_kind(t) == .typeval:
+                ct_input[0].host[0].error(3, field, 0)
+            ct_input[0].nodes[0][field].type = i32(t)
+        ct_input[0].binders[0].fields = old_fields
+        t = ct_input[0].host[0].record(tn, fields)
+        if ct_input[0].refine[0]: ct_input[0].host[0].validate_record(t, ct_input[0].nodes[0][tn].pos)
+        return t
+    if k == .tarray:
+        if ct_input[0].nodes[0][tn].ival < 0: return ct_pack_result(tn)
+        # (a shape, `array<T length=[m n]>`: dynamic, with dimensions checked where values enter)
+        if ct_input[0].nodes[0][tn].ival == 1:
+            et = ct_resolve_type(int(ct_input[0].nodes[0][tn].a))
+            if ct_input[0].nodes[0][tn].aux >= 2: return ct_input[0].host[0].nd(et, ct_input[0].nodes[0][tn].pos)
+            return tb_mk_array(et)
+        if ct_input[0].nodes[0][tn].b != 0: return ct_input[0].host[0].fixed(ct_resolve_type(int(ct_input[0].nodes[0][tn].a)), ct_input[0].host[0].fixed_size(int(ct_input[0].nodes[0][tn].b)), ct_input[0].nodes[0][tn].pos)
+        if ct_input[0].nodes[0][tn].aux >= 2: return ct_input[0].host[0].nd(ct_resolve_type(int(ct_input[0].nodes[0][tn].a)), ct_input[0].nodes[0][tn].pos)
+        if ct_has_flag(tn, 131072):
+            et = ct_resolve_type(int(ct_input[0].nodes[0][tn].a))
+            return ct_input[0].host[0].soa(et, ct_input[0].nodes[0][tn].pos)
+        return tb_mk_array(ct_resolve_type(int(ct_input[0].nodes[0][tn].a)))
+    if k == .tmap:
+        d = ct_input[0].host[0].map_decl(tn)
+        mt = ct_input[0].host[0].instance(d, [ct_resolve_type(int(ct_input[0].nodes[0][tn].a)), ct_resolve_type(int(ct_input[0].nodes[0][tn].b))])
+        if ct_input[0].nodes[0][tn].aux == 1: return ct_input[0].host[0].total_dict(mt, ct_input[0].nodes[0][tn].pos)
+        return mt
+    if k == .ttuple:
+        values = ct_input[0].nodes[0][tn].aux == i32(7)
+        if values and not values_ok: ct_input[0].host[0].error(4, tn, 0)
+        el: int[]
+        loop i in [0..ct_nkids(tn)): el.push(ct_resolve_type(ct_kid(tn, i)))
+        if el.len() == 0: return ct_input[0].void_type[0]
+        if values: return tb_mk_values(el)
+        return tb_mk_tuple(el)
+    if k == .topt: return tb_mk_opt(ct_resolve_type(int(ct_input[0].nodes[0][tn].a)))
+    if k == .tunion:
+        ms: int[]
+        loop i in [0..ct_nkids(tn)): ms.push(ct_resolve_type(ct_kid(tn, i)))
+        return uu_mk_union(ms)
+    if k == .tptr: return tb_mk_ptr(ct_resolve_type(int(ct_input[0].nodes[0][tn].a)))
+    if k == .tfn:
+        old_formals = ct_input[0].binders[0].formals
+        old_self = ct_input[0].binders[0].self
+        if ct_input[0].refine[0]:
+            ct_input[0].binders[0].formals = []
+            loop p in ct_kids2(tn): ct_input[0].binders[0].formals.push(int(ct_input[0].nodes[0][p].name))
+        ps: int[]
+        mm = 0
+        loop i in [0..ct_nkids(tn)):
+            if i < ct_input[0].binders[0].formals.len(): ct_input[0].binders[0].self = ct_input[0].binders[0].formals[i]
+            ps.push(ct_resolve_type(ct_kid(tn, i)))
+            if ct_has_flag(ct_kid(tn, i), 1): mm |= 1 << i
+        ret = ct_input[0].void_type[0]
+        ct_input[0].binders[0].self = 0
+        if ct_input[0].nodes[0][tn].a != 0: ret = ct_resolve_result(int(ct_input[0].nodes[0][tn].a))
+        if ct_input[0].refine[0]: ct_input[0].host[0].validate_signature(ps, ret, mm, ct_input[0].nodes[0][tn].pos)
+        ct_input[0].binders[0].formals = old_formals
+        ct_input[0].binders[0].self = old_self
+        if ct_has_flag(tn, 8192): return tb_mk_cfn(ps, ret)
+        key = 0
+        if ct_nkids2(tn) > 0:
+            labels: int[]
+            loop p in ct_kids2(tn): labels.push(int(ct_input[0].nodes[0][p].name))
+            key = tn_label_key(labels)
+        base = tb_mk_fn(ps, ret, mm, key, 0, ct_input[0].host[0].pack_count(int(ct_input[0].nodes[0][tn].a)) > 0)
+        if ct_input[0].nodes[0][tn].sval == 0: return base
+        names: int[]
+        loop p in ct_kids2(tn): names.push(int(ct_input[0].nodes[0][p].name))
+        return ct_input[0].host[0].contract(tn, base, ps, names, mm)
+    ct_input[0].host[0].error(1, tn, 0)
+    0
+
+ct_resolve_binding = (tn: int) -> int:
+    ct_input[0].values[0] = true
+    t = ct_resolve_type(tn)
+    ct_input[0].values[0] = false
+    t
+ct_resolve_result = (tn: int) -> int:
+    saved = ct_input[0].pack[0]
+    ct_input[0].pack[0] = true
+    t = ct_resolve_type(tn)
+    ct_input[0].pack[0] = saved
+    t
+ct_pack_result = (tn: int) -> int:
+    if not ct_input[0].pack[0]: ct_input[0].host[0].pack_error(tn, -1, 0, 0)
+    ct_input[0].pack[0] = false
+    first = ct_resolve_type(ct_kid(tn, 0))
+    ts = [first]
+    loop i in [1..ct_nkids(tn)):
+        t = ct_resolve_type(ct_kid(tn, i))
+        if not tu_equal(t, first): ct_input[0].host[0].pack_error(tn, i, t, first)
+        ts.push(t)
+    tb_mk_values(ts)

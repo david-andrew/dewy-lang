@@ -1,0 +1,54 @@
+$runtime_checks
+from p"node_store.dewy" import Node
+# Demand-only alias expansion: O(arguments + attributes) plus the resolved body.
+# Borrow arena headers across nested resolution; only the active scope is restored.
+CAWord:type=int64<overflow='wrap'>
+CheckerAliasScope:type=[context:int64=0 mark:int64=0]
+CheckerAliasHost:type=[
+    resume:<(decl:int64):>void>
+    error:<(kind:int64 node:int64 position:int64 count:int64):>void>
+    atomic_order:<():>int64>
+    enter:<(decl:int64 args:array<int64>):>CheckerAliasScope>
+    leave:<(scope:CheckerAliasScope):>void>
+    resolve_type:<(node:int64):>int64>
+    name:<(id:int64):>string>
+    policy:<(type_id:int64 policy:int64 position:int64):>int64>
+    note:<(decl:int64 type_id:int64):>void>
+]
+let ca_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let ca_lists:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
+let ca_host:ptr<CheckerAliasHost>=$unsafe (uint64(0) as ptr<CheckerAliasHost>)
+checker_alias_bind=(nodes:ptr<array<Node>> lists:ptr<array<int32>> host:ptr<CheckerAliasHost>):>CAWord=>{
+    ca_nodes=nodes; ca_lists=lists; ca_host=host; 0
+}
+ca_resolve_alias=(d:CAWord targs:array<int64> use_pos:CAWord):>CAWord=>$unsafe {
+    ca_host[0].resume(d)
+    let ntp=CAWord(ca_nodes[0].ptr[d].nlist2)
+    if targs.length not=? ntp {ca_host[0].error(1 d use_pos targs.length)}
+    if ntp =? 0 and ca_nodes[0].ptr[d].type not=? 0 {return CAWord(ca_nodes[0].ptr[d].type)}
+    if ca_nodes[0].ptr[d].aux =? -7 {
+        ca_nodes[0][d].type = int32<overflow='wrap'>(ca_host[0].atomic_order())
+        return CAWord(ca_nodes[0].ptr[d].type)
+    }
+    if ca_nodes[0].ptr[d].aux =? 1 {ca_host[0].error(2 d use_pos 0)}
+    ca_nodes[0][d].aux = 1
+    let scope=ca_host[0].enter(d targs)
+    let t=ca_host[0].resolve_type(CAWord(ca_nodes[0].ptr[d].a))
+    if ca_nodes[0].ptr[d].c not=? 0 {
+        let attributes=CAWord(ca_nodes[0].ptr[d].c)
+        loop i in [0..CAWord(ca_nodes[0].ptr[attributes].nlist)) {
+            let attribute=CAWord(ca_lists[0].ptr[CAWord(ca_nodes[0].ptr[attributes].list) + i])
+            if ca_host[0].name(CAWord(ca_nodes[0].ptr[attribute].name)) not=? "overflow" {continue}
+            let value=CAWord(ca_nodes[0].ptr[attribute].a)
+            if value =? 0 or ca_nodes[0].ptr[value].kind not=? 'str_lit' {ca_host[0].error(3 attribute 0 0)}
+            let policy=ca_host[0].name(CAWord(ca_nodes[0].ptr[value].sval))
+            if policy not=? "wrap" and policy not=? "saturate" {ca_host[0].error(4 attribute 0 0)}
+            t=ca_host[0].policy(t (if policy =? "wrap" {1} else {2}) ca_nodes[0].ptr[attribute].pos)
+        }
+    }
+    ca_host[0].leave(scope)
+    ca_nodes[0][d].aux = 0
+    if ntp =? 0 {ca_nodes[0][d].type = int32<overflow='wrap'>(t)}
+    if ntp =? 0 {ca_host[0].note(d t)}
+    t
+}

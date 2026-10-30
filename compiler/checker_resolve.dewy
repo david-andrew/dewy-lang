@@ -1,0 +1,256 @@
+$runtime_checks
+from p"node_store.dewy" import (Node node_kids node_kids2)
+from p"checker_types.dewy" import (TK TypeInfo)
+from p"checker_state.dewy" import (RefineBindings)
+from p"checker_alias.dewy" import (ca_resolve_alias)
+from p"type_inference.dewy" import (tu_prune tu_equal)
+from p"type_constructors.dewy" import (tb_mk_array tb_mk_opt tb_mk_ptr tb_mk_tuple tb_mk_values tb_mk_fn tb_mk_cfn tb_mk_secret)
+from p"type_unions.dewy" import (uu_mk_union)
+from p"type_labels.dewy" import (tn_label_key)
+# Demand-only type syntax recursion. No arena elements survive semantic calls.
+# Work follows visited syntax and requested semantic services; record binder sorting
+# retains O(F²), with O(F) field/name storage. Scope state is restored individually.
+CTWord:type=int64<overflow='wrap'>
+# Name result kinds: 0 resolved, 1 alias, 2 record/enum declaration,
+# 3 type with arguments, 4 secret, 5 rational. ref is a type or declaration ID.
+CheckerTypeName:type=[kind:int64=0 ref:int64=0]
+CheckerResolveHost:type=[
+    name:<(p0:int64):>CheckerTypeName>
+    policy:<(p0:int64 p1:int64 p2:int64):>int64>
+    refinement:<(p0:int64):>int64>
+    quantity:<(p0:int64):>int64>
+    ide:<(p0:int64):>void>
+    effect_argument:<(p0:int64):>int64>
+    nominal:<(p0:int64):>int64>
+    fixed_arg:<(p0:int64):>bool>
+    fixed_size:<(p0:int64):>int64>
+    fixed:<(p0:int64 p1:int64 p2:int64):>int64>
+    instance:<(p0:int64 p1:array<int64>):>int64>
+    decimal:<(p0:int64):>int64>
+    word_rational:<(p0:int64):>int64>
+    error:<(p0:int64 p1:int64 p2:int64):>void>
+    record:<(p0:int64 p1:array<int64>):>int64>
+    validate_record:<(p0:int64 p1:int64):>void>
+    nd:<(p0:int64 p1:int64):>int64>
+    soa:<(p0:int64 p1:int64):>int64>
+    map_decl:<(p0:int64):>int64>
+    total_dict:<(p0:int64 p1:int64):>int64>
+    validate_signature:<(p0:array<int64> p1:int64 p2:int64 p3:int64):>void>
+    pack_count:<(p0:int64):>int64>
+    contract:<(p0:int64 p1:int64 p2:array<int64> p3:array<int64> p4:int64):>int64>
+    pack_error:<(p0:int64 p1:int64 p2:int64 p3:int64):>void>
+]
+CheckerResolveInput:type=[
+    nodes:ptr<array<Node>>
+    lists:ptr<array<int32>>
+    types:ptr<array<TypeInfo>>
+    names:ptr<array<string>>
+    binders:ptr<RefineBindings>
+    refine:ptr<bool>
+    values:ptr<bool>
+    pack:ptr<bool>
+    void_type:ptr<int64>
+    int_type:ptr<int64>
+    host:ptr<CheckerResolveHost>
+]
+let ct_input:ptr<CheckerResolveInput>=$unsafe (uint64(0) as ptr<CheckerResolveInput>)
+checker_resolve_bind=(input:ptr<CheckerResolveInput>):>CTWord=>$unsafe {
+    ct_input=input
+    0
+}
+ct_nkids=(n:CTWord):>CTWord=>$unsafe {
+    CTWord(ct_input[0].nodes[0].ptr[n].nlist)
+}
+ct_kid=(n:CTWord i:CTWord):>CTWord=>$unsafe {
+    CTWord(ct_input[0].lists[0].ptr[CTWord(ct_input[0].nodes[0].ptr[n].list) + i])
+}
+ct_nkids2=(n:CTWord):>CTWord=>$unsafe {
+    CTWord(ct_input[0].nodes[0].ptr[n].nlist2)
+}
+ct_kid2=(n:CTWord i:CTWord):>CTWord=>$unsafe {
+    CTWord(ct_input[0].lists[0].ptr[CTWord(ct_input[0].nodes[0].ptr[n].list2) + i])
+}
+ct_kids=(n:CTWord):>array<int64>=>$unsafe {
+    node_kids(@ct_input[0].nodes[0]   @ct_input[0].lists[0]   n)
+}
+ct_kids2=(n:CTWord):>array<int64>=>$unsafe {
+    node_kids2(@ct_input[0].nodes[0]   @ct_input[0].lists[0]   n)
+}
+ct_has_flag=(n:CTWord flag:CTWord):>bool=>$unsafe {
+    (CTWord(ct_input[0].nodes[0].ptr[n].flags) & flag) not=? 0
+}
+ct_kind=(t:CTWord):>TK=>$unsafe {
+    ct_input[0].types[0].ptr[tu_prune(t)].kind
+}
+ct_resolve_type=(tn:CTWord):>CTWord=>$unsafe {
+    let nd=ct_input[0].nodes[0].ptr + tn
+    let k=nd[0].kind
+    if k =? 'tname' and nd[0].aux =? -9 {return ct_input[0].host[0].policy(ct_resolve_type(CTWord(nd[0].a)) CTWord(ct_input[0].nodes[0].ptr[tn].ival) ct_input[0].nodes[0].ptr[tn].pos)}
+    if k =? 'tname' and nd[0].aux =? -7 {return CTWord(nd[0].ival)}
+    let values_ok=ct_input[0].values[0]
+    ct_input[0].values[0] = false
+    if k =? 'trefined' {return ct_input[0].host[0].refinement(tn)}
+    if k =? 'tquantity' {return ct_input[0].host[0].quantity(tn)}
+    if k =? 'tarray' or k =? 'tmap' {ct_input[0].host[0].ide(tn)}
+    if k =? 'tname' {
+        let named=ct_input[0].host[0].name(tn)
+        if named.kind =? 0 {return named.ref}
+        if named.kind =? 5 {
+            if ct_nkids(tn) =? 0 {return ct_input[0].host[0].decimal(ct_input[0].nodes[0].ptr[tn].pos)}
+            if ct_nkids(tn) =? 1 and ct_resolve_type(ct_kid(tn   0)) =? ct_input[0].int_type[0] {return ct_input[0].host[0].word_rational(ct_input[0].nodes[0].ptr[tn].pos)}
+            ct_input[0].host[0].error(8   tn   0)
+        }
+        if named.kind =? 4 {return tb_mk_secret(ct_resolve_type(ct_kid(tn   0)))}
+        if named.kind =? 1 {
+            let targs:array<int64>=[]
+            let d=named.ref
+            loop i in [0..ct_nkids(tn)) {
+                if i <? ct_nkids2(d) and ct_input[0].nodes[0].ptr[ct_kid2(d   i)].aux =? 1 {targs.push(ct_input[0].host[0].effect_argument(ct_kid(tn   i)))}
+                else {targs.push(ct_resolve_type(ct_kid(tn   i)))}
+            }
+            return ct_input[0].host[0].nominal(ca_resolve_alias(d   targs   ct_input[0].nodes[0].ptr[tn].pos))
+        }
+        if named.kind =? 3 {
+            if ct_kind(named.ref) =? 'effect' {ct_input[0].host[0].error(5   tn   0)}
+            if ct_input[0].nodes[0].ptr[tn].nlist >? 0 {
+                if ct_input[0].host[0].fixed_arg(tn) {return ct_input[0].host[0].fixed(named.ref   ct_input[0].host[0].fixed_size(ct_kid(tn   0))   ct_input[0].nodes[0].ptr[tn].pos)}
+                ct_input[0].host[0].error(6   tn   0)
+            }
+            return ct_input[0].host[0].nominal(named.ref)
+        }
+        let d=named.ref
+        let ntp=ct_nkids2(d)
+        if ntp =? 0 and ct_input[0].host[0].fixed_arg(tn) {
+            return ct_input[0].host[0].fixed(ct_input[0].host[0].instance(d   [])   ct_input[0].host[0].fixed_size(ct_kid(tn   0))   ct_input[0].nodes[0].ptr[tn].pos)
+        }
+        if ct_nkids(tn) not=? ntp {ct_input[0].host[0].error(7   tn   ntp)}
+        let targs:array<int64>=[]
+        loop i in [0..ntp) {targs.push(ct_resolve_type(ct_kid(tn   i)))}
+        return ct_input[0].host[0].nominal(ct_input[0].host[0].instance(d   targs))
+    }
+    if k =? 'trecord' {
+        let fields=ct_kids(tn)
+        let seen:dict<int64 bool>=[]
+        let old_fields=ct_input[0].binders[0].fields
+        if ct_input[0].refine[0] {
+            ct_input[0].binders[0].fields = []
+            loop field in fields {
+                let name=CTWord(ct_input[0].nodes[0].ptr[field].name)
+                let i:CTWord=0
+                loop i <? ct_input[0].binders[0].fields.length and ct_input[0].names[0].ptr[ct_input[0].binders[0].fields[i]] <? ct_input[0].names[0].ptr[name] {i += 1}
+                ct_input[0].binders[0].fields.insert(name   i)
+            }
+        }
+        loop field in fields {
+            let name=CTWord(ct_input[0].nodes[0].ptr[field].name)
+            if seen.has(name) {ct_input[0].host[0].error(2   field   0)}
+            seen[name] = true
+            let t=ct_resolve_type(CTWord(ct_input[0].nodes[0].ptr[field].a))
+            if ct_kind(t) =? 'void_' or ct_kind(t) =? 'typeval' {
+                ct_input[0].host[0].error(3   field   0)
+            }
+            ct_input[0].nodes[0][field].type = int32<overflow='wrap'>(t)
+        }
+        ct_input[0].binders[0].fields = old_fields
+        let t=ct_input[0].host[0].record(tn   fields)
+        if ct_input[0].refine[0] {ct_input[0].host[0].validate_record(t   ct_input[0].nodes[0].ptr[tn].pos)}
+        return t
+    }
+    if k =? 'tarray' {
+        if ct_input[0].nodes[0].ptr[tn].ival <? 0 {return ct_pack_result(tn)}
+        if ct_input[0].nodes[0].ptr[tn].ival =? 1 {
+            let et=ct_resolve_type(CTWord(ct_input[0].nodes[0].ptr[tn].a))
+            if ct_input[0].nodes[0].ptr[tn].aux >=? 2 {return ct_input[0].host[0].nd(et   ct_input[0].nodes[0].ptr[tn].pos)}
+            return tb_mk_array(et)
+        }
+        if ct_input[0].nodes[0].ptr[tn].b not=? 0 {return ct_input[0].host[0].fixed(ct_resolve_type(CTWord(ct_input[0].nodes[0].ptr[tn].a))   ct_input[0].host[0].fixed_size(CTWord(ct_input[0].nodes[0].ptr[tn].b))   ct_input[0].nodes[0].ptr[tn].pos)}
+        if ct_input[0].nodes[0].ptr[tn].aux >=? 2 {return ct_input[0].host[0].nd(ct_resolve_type(CTWord(ct_input[0].nodes[0].ptr[tn].a))   ct_input[0].nodes[0].ptr[tn].pos)}
+        if ct_has_flag(tn   131072) {
+            let et=ct_resolve_type(CTWord(ct_input[0].nodes[0].ptr[tn].a))
+            return ct_input[0].host[0].soa(et   ct_input[0].nodes[0].ptr[tn].pos)
+        }
+        return tb_mk_array(ct_resolve_type(CTWord(ct_input[0].nodes[0].ptr[tn].a)))
+    }
+    if k =? 'tmap' {
+        let d=ct_input[0].host[0].map_decl(tn)
+        let mt=ct_input[0].host[0].instance(d   [ct_resolve_type(CTWord(ct_input[0].nodes[0].ptr[tn].a))   ct_resolve_type(CTWord(ct_input[0].nodes[0].ptr[tn].b))])
+        if ct_input[0].nodes[0].ptr[tn].aux =? 1 {return ct_input[0].host[0].total_dict(mt   ct_input[0].nodes[0].ptr[tn].pos)}
+        return mt
+    }
+    if k =? 'ttuple' {
+        let values=ct_input[0].nodes[0].ptr[tn].aux =? int32<overflow='wrap'>(7)
+        if values and not values_ok {ct_input[0].host[0].error(4   tn   0)}
+        let el:array<int64>=[]
+        loop i in [0..ct_nkids(tn)) {el.push(ct_resolve_type(ct_kid(tn   i)))}
+        if el.length =? 0 {return ct_input[0].void_type[0]}
+        if values {return tb_mk_values(el)}
+        return tb_mk_tuple(el)
+    }
+    if k =? 'topt' {return tb_mk_opt(ct_resolve_type(CTWord(ct_input[0].nodes[0].ptr[tn].a)))}
+    if k =? 'tunion' {
+        let ms:array<int64>=[]
+        loop i in [0..ct_nkids(tn)) {ms.push(ct_resolve_type(ct_kid(tn   i)))}
+        return uu_mk_union(ms)
+    }
+    if k =? 'tptr' {return tb_mk_ptr(ct_resolve_type(CTWord(ct_input[0].nodes[0].ptr[tn].a)))}
+    if k =? 'tfn' {
+        let old_formals=ct_input[0].binders[0].formals
+        let old_self=ct_input[0].binders[0].self
+        if ct_input[0].refine[0] {
+            ct_input[0].binders[0].formals = []
+            loop p in ct_kids2(tn) {ct_input[0].binders[0].formals.push(CTWord(ct_input[0].nodes[0].ptr[p].name))}
+        }
+        let ps:array<int64>=[]
+        let mm:CTWord=0
+        loop i in [0..ct_nkids(tn)) {
+            if i <? ct_input[0].binders[0].formals.length {ct_input[0].binders[0].self = ct_input[0].binders[0].formals[i]}
+            ps.push(ct_resolve_type(ct_kid(tn   i)))
+            if ct_has_flag(ct_kid(tn   i)   1) {mm |= 1 << i}
+        }
+        let ret=ct_input[0].void_type[0]
+        ct_input[0].binders[0].self = 0
+        if ct_input[0].nodes[0].ptr[tn].a not=? 0 {ret=ct_resolve_result(CTWord(ct_input[0].nodes[0].ptr[tn].a))}
+        if ct_input[0].refine[0] {ct_input[0].host[0].validate_signature(ps   ret   mm   ct_input[0].nodes[0].ptr[tn].pos)}
+        ct_input[0].binders[0].formals = old_formals
+        ct_input[0].binders[0].self = old_self
+        if ct_has_flag(tn   8192) {return tb_mk_cfn(ps   ret)}
+        let key:CTWord=0
+        if ct_nkids2(tn) >? 0 {
+            let labels:array<int64>=[]
+            loop p in ct_kids2(tn) {labels.push(CTWord(ct_input[0].nodes[0].ptr[p].name))}
+            key=tn_label_key(labels)
+        }
+        let base=tb_mk_fn(ps   ret   mm   key   0   ct_input[0].host[0].pack_count(CTWord(ct_input[0].nodes[0].ptr[tn].a)) >? 0)
+        if ct_input[0].nodes[0].ptr[tn].sval =? 0 {return base}
+        let names:array<int64>=[]
+        loop p in ct_kids2(tn) {names.push(CTWord(ct_input[0].nodes[0].ptr[p].name))}
+        return ct_input[0].host[0].contract(tn   base   ps   names   mm)
+    }
+    ct_input[0].host[0].error(1   tn   0)
+    0
+}
+ct_resolve_binding=(tn:CTWord):>CTWord=>$unsafe {
+    ct_input[0].values[0] = true
+    let t=ct_resolve_type(tn)
+    ct_input[0].values[0] = false
+    t
+}
+ct_resolve_result=(tn:CTWord):>CTWord=>$unsafe {
+    let saved=ct_input[0].pack[0]
+    ct_input[0].pack[0] = true
+    let t=ct_resolve_type(tn)
+    ct_input[0].pack[0] = saved
+    t
+}
+ct_pack_result=(tn:CTWord):>CTWord=>$unsafe {
+    if not ct_input[0].pack[0] {ct_input[0].host[0].pack_error(tn   -1   0   0)}
+    ct_input[0].pack[0] = false
+    let first=ct_resolve_type(ct_kid(tn   0))
+    let ts:array<int64>=[first]
+    loop i in [1..ct_nkids(tn)) {
+        let t=ct_resolve_type(ct_kid(tn   i))
+        if not tu_equal(t   first) {ct_input[0].host[0].pack_error(tn   i   t   first)}
+        ts.push(t)
+    }
+    tb_mk_values(ts)
+}

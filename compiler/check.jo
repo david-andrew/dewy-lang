@@ -1,3 +1,5 @@
+use 'checker_resolve.dewy'
+use 'checker_alias.dewy'
 use 'checker_fields.dewy'
 use 'checker_results.dewy'
 use 'type_substitute.dewy'
@@ -1045,173 +1047,88 @@ new_global = (name: int, decl: int, m: int) -> int:
 
 # ---------------- type resolution ----------------
 values_type_ok = false   # (resolve_binding_type: a binding's whole type may be several values)
-resolve_type = (tn: int) -> int:
-    if nodes[tn].kind == .tname and nodes[tn].aux == -9: return policy_int(resolve_type(int(nodes[tn].a)), int(nodes[tn].ival), nodes[tn].pos)
-    if nodes[tn].kind == .tname and nodes[tn].aux == -7: return int(nodes[tn].ival)
-    k = nodes[tn].kind
-    # (several values are a binding's whole type, not part of another)
-    values_ok = values_type_ok
-    values_type_ok = false
-    if k == .trefined: return resolve_refinement(tn)
-    if k == .tquantity: return resolve_quantity_type(tn)
-    # (Dewy's array<T> and dict<K V>: the type words, for the editor)
-    if ide_on and (k == .tarray or k == .tmap) and nodes[tn].pos > 0 and files[pos_file(nodes[tn].pos)].is_dewy:
-        ide_ref(nodes[tn].pos, intern(if k == .tarray: "array" else: "dict"), IK_TYPE, 0, 0, 0)
-    if k == .tname:
-        if nodes[tn].aux == -8: fatal(nodes[tn].pos, "Effect row is not a value type")
-        nm = int(nodes[tn].name)
-        s = 0
-        if nodes[tn].sval != 0:
-            ms = lookup(int(nodes[tn].sval))
-            if ms != 0 and syms[ms].kind == .reflected and name_of(nm) == "type": return int(fields[int(syms[ms].ref)].type)
-            if ms == 0 or syms[ms].kind != .module: fatal(nodes[tn].pos, "unknown module '{name_of(int(nodes[tn].sval))}'")
-            s = module_lookup(int(syms[ms].ref), nm)
-            if name_of(int(nodes[tn].sval))[0] != '$' and files[pos_file(nodes[tn].pos)].is_dewy: rational_one_spelling(int(syms[ms].ref), nm, nodes[tn].pos, "")
-        else:
-            if ide_sentinel != 0 and nm == ide_sentinel: ide_complete_types()
-            s = lookup(nm)
-            jo_type_spelling(nm, s, nodes[tn].pos)
-            if nm == ut_safe_name: ut_note_type_name(nm, nodes[tn].pos)
-            # `rational`: the builtin exact type (the bundled library's), unless a type shadows it.
-            if name_of(nm) == "rational" and (s == 0 or syms[s].kind == .fns) and files[pos_file(nodes[tn].pos)].is_dewy:
-                if nkids(tn) == 0: return decimal_type(nodes[tn].pos)
-                if nkids(tn) == 1 and resolve_type(kid(tn, 0)) == T_INT: return word_rational_type(nodes[tn].pos)
-                fatal(nodes[tn].pos, "`rational` is the exact type and `rational<int64>` its one fixed-width form")
-        # `secret<T>`: the builtin wrapper (types.jo's mk_secret), unless a type shadows it
-        if nm == secret_name and nodes[tn].sval == 0 and (s == 0 or not secret_type_sym(syms[s].kind)):
-            if nkids(tn) != 1: fatal(nodes[tn].pos, jd(nodes[tn].pos, "`secret` takes one type argument: `secret[str]`", "`secret` takes one type argument: `secret<string>`"))
-            return mk_secret(resolve_type(kid(tn, 0)))
-        if s == 0:
-            if name_of(nm) == "none": return T_NONE
-            # (push = (h: mut Heap[T], x: T): a generic function names its type parameters)
-            tn_s = name_of(nm)
-            if len(tn_s) <= 2 and tn_s[0] >= 'A' and tn_s[0] <= 'Z' and cx >= 0 and fns.len() > int(ctxs[cx].inst):
-                fatal(nodes[tn].pos, jd(nodes[tn].pos, "unknown type '{tn_s}' (a generic function names its type parameters after its name: `f[{tn_s}] = (x: {tn_s}) -> {tn_s}: ...`; a generic struct, `struct Heap[{tn_s}]:`)", "unknown type '{tn_s}' (a generic function declares its type parameters first: `f = <{tn_s}>(x:{tn_s}):>{tn_s} => ...`; a generic record, `Heap:type = <{tn_s}>[items:array<{tn_s}>]`)"))
-            if name_of(nm) == "Cancelled": fatal(nodes[tn].pos, "unknown type `Cancelled`; use `Canceled` (US spelling)")
-            fatal(nodes[tn].pos, "unknown type '{name_of(nm)}'{suggestion(name_of(nm), type_names())}")
-        sk = syms[s].kind
-        # (str = (b: Big) -> str: a function of the program's named as a type, its `str` there
-        # still the type)
-        if sk == .fns:
-            if let u = universe.get(nm):
-                s = u
-                sk = syms[s].kind
-        if ide_on: ide_sym_ref(tn, s)
-        if sk == .alias_:
-            targs: int[]
-            d = int(syms[s].ref)
-            loop i in [0..nkids(tn)):
-                if i < nkids2(d) and nodes[kid2(d, i)].aux == 1: targs.push(effect_argument(kid(tn, i)))
-                else: targs.push(resolve_type(kid(tn, i)))
-            return nominal_family(resolve_alias(int(syms[s].ref), targs, nodes[tn].pos))
-        if sk == .type_:
-            if tkind(int(syms[s].ref)) == .effect: fatal(nodes[tn].pos, "Effect row is not a value type")
-            if nodes[tn].nlist > 0:
-                if fixed_size_arg(tn): return mk_fixed_checked(int(syms[s].ref), fixed_size(kid(tn, 0)), nodes[tn].pos)
-                fatal(nodes[tn].pos, "type '{name_of(nm)}' takes no type arguments")
-            return nominal_family(int(syms[s].ref))
-        if sk == .struct_ or sk == .enum_:
-            d = int(syms[s].ref)
-            ntp = nkids2(d)
-            if ntp == 0 and fixed_size_arg(tn):
-                return mk_fixed_checked(get_struct_inst(d, []), fixed_size(kid(tn, 0)), nodes[tn].pos)
-            if nkids(tn) != ntp: fatal(nodes[tn].pos, "type '{name_of(nm)}' expects {ntp} type argument(s), got {nkids(tn)}")
-            targs: int[]
-            loop i in [0..ntp): targs.push(resolve_type(kid(tn, i)))
-            return nominal_family(get_struct_inst(d, targs))
-        h = habit_name(name_of(nm))
-        if len(h) > 0: fatal(nodes[tn].pos, "'{name_of(nm)}' is not a type (use {h})")
-        fatal(nodes[tn].pos, "'{name_of(nm)}' is not a type")
-    if k == .trecord:
-        let fields = kids(tn)
-        seen: {int: bool} = {}
-        old_fields = refine_bindings.fields
-        if refine_active:
-            refine_bindings.fields = []
-            loop field in fields:
-                name = int(nodes[field].name)
-                i = 0
-                loop i < refine_bindings.fields.len() and name_of(refine_bindings.fields[i]) < name_of(name): i += 1
-                refine_bindings.fields.insert(i, name)
-        loop field in fields:
-            name = int(nodes[field].name)
-            if seen.has(name): fatal(nodes[field].pos, "duplicate record field '{name_of(name)}'")
-            seen[name] = true
-            t = resolve_type(int(nodes[field].a))
-            if tkind(t) == .void_ or tkind(t) == .typeval:
-                fatal(nodes[field].pos, "inline record fields need value types")
-            nodes[field].type = i32(t)
-        refine_bindings.fields = old_fields
-        t = dewy_record_schema(tn, fields)
-        if refine_active: ref_validate_record(t, nodes[tn].pos)
-        return t
-    if k == .tarray:
-        if nodes[tn].ival < 0: return pack_result_type(tn)
-        # (a shape, `array<T length=[m n]>`: dynamic, with dimensions checked where values enter)
-        if nodes[tn].ival == 1:
-            et = resolve_type(int(nodes[tn].a))
-            if nodes[tn].aux >= 2: return nd_of(et, nodes[tn].pos)
-            return mk_array(et)
-        if nodes[tn].b != 0: return mk_fixed_checked(resolve_type(int(nodes[tn].a)), fixed_size(int(nodes[tn].b)), nodes[tn].pos)
-        if nodes[tn].aux >= 2: return nd_of(resolve_type(int(nodes[tn].a)), nodes[tn].pos)
-        if has_flag(tn, NF_SOA):
-            et = resolve_type(int(nodes[tn].a))
-            # (soa T[] of a generic function's T: a struct once it is known)
-            if (tkind(et) != .struct_ and tkind(et) != .param) or is_soa(et): fatal(nodes[tn].pos, "soa T[] needs a struct type T, not {dt(et)}")
-            if soa_decl == 0: soa_decl = mk(.struct_, 0)
-            return soa_inst(et)
-        return mk_array(resolve_type(int(nodes[tn].a)))
-    if k == .tmap:
-        s = prelude.get(intern("Map")) ?? 0
-        if s == 0: fatal(nodes[tn].pos, "Map type is not available")
-        mt = get_struct_inst(int(syms[s].ref), [resolve_type(int(nodes[tn].a)), resolve_type(int(nodes[tn].b))])
-        if nodes[tn].aux == 1: return total_dict_type(mt, nodes[tn].pos)
-        return mt
-    if k == .ttuple:
-        values = nodes[tn].aux == i32(TUPLE_VALUES)
-        if values and not values_ok: fatal(nodes[tn].pos, "parentheses group several values only as a binding's type, `let p:(int64 int64) = ...`, or a function's result, `:>(int64 int64)`")
-        el: int[]
-        loop i in [0..nkids(tn)): el.push(resolve_type(kid(tn, i)))
-        if el.len() == 0: return T_VOID
-        if values: return mk_values(el)
-        return mk_tuple(el)
-    if k == .topt: return mk_opt(resolve_type(int(nodes[tn].a)))
-    if k == .tunion:
-        ms: int[]
-        loop i in [0..nkids(tn)): ms.push(resolve_type(kid(tn, i)))
-        return mk_union(ms)
-    if k == .tptr: return mk_ptr(resolve_type(int(nodes[tn].a)))
-    if k == .tfn:
-        old_formals = refine_bindings.formals
-        old_self = refine_bindings.self
-        if refine_active:
-            refine_bindings.formals = []
-            loop p in kids2(tn): refine_bindings.formals.push(int(nodes[p].name))
-        ps: int[]
-        mm = 0
-        loop i in [0..nkids(tn)):
-            if i < refine_bindings.formals.len(): refine_bindings.self = refine_bindings.formals[i]
-            ps.push(resolve_type(kid(tn, i)))
-            if has_flag(kid(tn, i), NF_MUT): mm |= 1 << i
-        ret = T_VOID
-        refine_bindings.self = 0
-        if nodes[tn].a != 0: ret = resolve_result_type(int(nodes[tn].a))
-        if refine_active: ref_validate_signature(ps, ret, mm, nodes[tn].pos)
-        refine_bindings.formals = old_formals
-        refine_bindings.self = old_self
-        if has_flag(tn, NF_CABI): return mk_cfn(ps, ret)
-        key = 0
-        if nkids2(tn) > 0:
-            labels: int[]
-            loop p in kids2(tn): labels.push(int(nodes[p].name))
-            key = fn_label_key(labels)
-        base = mk_fn(ps, ret, mm, key, 0, pack_result_count(int(nodes[tn].a)) > 0)
-        if nodes[tn].sval == 0: return base
-        names: int[]
-        loop p in kids2(tn): names.push(int(nodes[p].name))
-        return mk_callable_contract(base, effect_contract(tn, ps, names, mm))
-    fatal(nodes[tn].pos, "invalid type")
-    0
+resolve_type = (tn: int) -> int: ct_resolve_type(tn)
+resolve_type_name = (tn: int) -> CheckerTypeName:
+    if nodes[tn].aux == -8: fatal(nodes[tn].pos, "Effect row is not a value type")
+    nm = int(nodes[tn].name)
+    s = 0
+    if nodes[tn].sval != 0:
+        ms = lookup(int(nodes[tn].sval))
+        if ms != 0 and syms[ms].kind == .reflected and name_of(nm) == "type": return CheckerTypeName(0, int(fields[int(syms[ms].ref)].type))
+        if ms == 0 or syms[ms].kind != .module: fatal(nodes[tn].pos, "unknown module '{name_of(int(nodes[tn].sval))}'")
+        s = module_lookup(int(syms[ms].ref), nm)
+        if name_of(int(nodes[tn].sval))[0] != '$' and files[pos_file(nodes[tn].pos)].is_dewy: rational_one_spelling(int(syms[ms].ref), nm, nodes[tn].pos, "")
+    else:
+        if ide_sentinel != 0 and nm == ide_sentinel: ide_complete_types()
+        s = lookup(nm)
+        jo_type_spelling(nm, s, nodes[tn].pos)
+        if nm == ut_safe_name: ut_note_type_name(nm, nodes[tn].pos)
+        # `rational`: the builtin exact type (the bundled library's), unless a type shadows it.
+        if name_of(nm) == "rational" and (s == 0 or syms[s].kind == .fns) and files[pos_file(nodes[tn].pos)].is_dewy:
+            return CheckerTypeName(5, 0)
+    # `secret<T>`: the builtin wrapper (types.jo's mk_secret), unless a type shadows it
+    if nm == secret_name and nodes[tn].sval == 0 and (s == 0 or not secret_type_sym(syms[s].kind)):
+        if nkids(tn) != 1: fatal(nodes[tn].pos, jd(nodes[tn].pos, "`secret` takes one type argument: `secret[str]`", "`secret` takes one type argument: `secret<string>`"))
+        return CheckerTypeName(4, 0)
+    if s == 0:
+        if name_of(nm) == "none": return CheckerTypeName(0, T_NONE)
+        # (push = (h: mut Heap[T], x: T): a generic function names its type parameters)
+        tn_s = name_of(nm)
+        if len(tn_s) <= 2 and tn_s[0] >= 'A' and tn_s[0] <= 'Z' and cx >= 0 and fns.len() > int(ctxs[cx].inst):
+            fatal(nodes[tn].pos, jd(nodes[tn].pos, "unknown type '{tn_s}' (a generic function names its type parameters after its name: `f[{tn_s}] = (x: {tn_s}) -> {tn_s}: ...`; a generic struct, `struct Heap[{tn_s}]:`)", "unknown type '{tn_s}' (a generic function declares its type parameters first: `f = <{tn_s}>(x:{tn_s}):>{tn_s} => ...`; a generic record, `Heap:type = <{tn_s}>[items:array<{tn_s}>]`)"))
+        if name_of(nm) == "Cancelled": fatal(nodes[tn].pos, "unknown type `Cancelled`; use `Canceled` (US spelling)")
+        fatal(nodes[tn].pos, "unknown type '{name_of(nm)}'{suggestion(name_of(nm), type_names())}")
+    sk = syms[s].kind
+    # (str = (b: Big) -> str: a function of the program's named as a type, its `str` there
+    # still the type)
+    if sk == .fns:
+        if let u = universe.get(nm):
+            s = u
+            sk = syms[s].kind
+    if ide_on: ide_sym_ref(tn, s)
+    if sk == .alias_: return CheckerTypeName(1, int(syms[s].ref))
+    if sk == .type_:
+        t = int(syms[s].ref)
+        if nodes[tn].nlist == 0:
+            if tkind(t) == .effect: fatal(nodes[tn].pos, "Effect row is not a value type")
+            return CheckerTypeName(0, nominal_family(t))
+        return CheckerTypeName(3, t)
+    if sk == .struct_ or sk == .enum_:
+        d = int(syms[s].ref)
+        if nkids2(d) == 0 and nkids(tn) == 0: return CheckerTypeName(0, nominal_family(get_struct_inst(d, [])))
+        return CheckerTypeName(2, d)
+    h = habit_name(name_of(nm))
+    if len(h) > 0: fatal(nodes[tn].pos, "'{name_of(nm)}' is not a type (use {h})")
+    fatal(nodes[tn].pos, "'{name_of(nm)}' is not a type")
+    CheckerTypeName()
+
+resolve_type_ide = (tn: int):
+    if ide_on and nodes[tn].pos > 0 and files[pos_file(nodes[tn].pos)].is_dewy:
+        ide_ref(nodes[tn].pos, intern(if nodes[tn].kind == .tarray: "array" else: "dict"), IK_TYPE, 0, 0, 0)
+resolve_type_soa = (et: int, pos: int) -> int:
+    if (tkind(et) != .struct_ and tkind(et) != .param) or is_soa(et): fatal(pos, "soa T[] needs a struct type T, not {dt(et)}")
+    if soa_decl == 0: soa_decl = mk(.struct_, 0)
+    soa_inst(et)
+resolve_type_map_decl = (tn: int) -> int:
+    s = prelude.get(intern("Map")) ?? 0
+    if s == 0: fatal(nodes[tn].pos, "Map type is not available")
+    int(syms[s].ref)
+resolve_type_contract = (tn: int, base: int, ps: int[], names: int[], mm: int) -> int:
+    mk_callable_contract(base, effect_contract(tn, ps, names, mm))
+resolve_type_error = (kind: int, tn: int, count: int):
+    pos = nodes[tn].pos
+    if kind == 2: fatal(pos, "duplicate record field '{name_of(int(nodes[tn].name))}'")
+    if kind == 3: fatal(pos, "inline record fields need value types")
+    if kind == 4: fatal(pos, "parentheses group several values only as a binding's type, `let p:(int64 int64) = ...`, or a function's result, `:>(int64 int64)`")
+    if kind == 5: fatal(pos, "Effect row is not a value type")
+    if kind == 6: fatal(pos, "type '{name_of(int(nodes[tn].name))}' takes no type arguments")
+    if kind == 7: fatal(pos, "type '{name_of(int(nodes[tn].name))}' expects {count} type argument(s), got {nkids(tn)}")
+    if kind == 8: fatal(pos, "`rational` is the exact type and `rational<int64>` its one fixed-width form")
+    fatal(pos, "invalid type")
+resolve_type_pack_error = (tn: int, i: int, t: int, first: int):
+    if i < 0: fatal(nodes[tn].pos, "parentheses group several values only as a function's result, `:>(int64 int64)`, or a binding's type, `let p:(int64 int64) = ...`")
+    if dewy_at(nodes[tn].pos): err_notes.push((-1, "help: for values of different types, give a record, `:>[first:{dt(first)} second:{dt(t)}]`, and take it apart with `let [first second] = f(...)`"))
+    fatal(nodes[kid(tn, i)].pos, "the values a function gives have one type for now: this is {dt(t)}, and the first is {dt(first)}")
 
 readonly_global = (g: int) -> bool:
     d = int(globals[g].decl)
@@ -1262,41 +1179,33 @@ nd_of = (t: int, pos: int) -> int:
     get_struct_inst(int(syms[s].ref), [t])
 
 # type Name[T] = ...: the type it stands for, given its type arguments
-resolve_alias = (d: int, targs: int[], use_pos: int) -> int:
+resolve_alias = (d: int, targs: int[], use_pos: int) -> int: ca_resolve_alias(d, targs, use_pos)
+alias_resume = (d: int):
     if refine_deferred.len() > 0: refine_resume(int(nodes[d].mod))
-    ntp = nkids2(d)
+alias_error = (kind: int, d: int, use_pos: int, count: int):
     nm = name_of(int(nodes[d].name))
-    if targs.len() != ntp: fatal(use_pos, "type '{nm}' expects {ntp} type argument(s), got {targs.len()}")
-    if ntp == 0 and nodes[d].type != 0: return int(nodes[d].type)
-    if nodes[d].aux == -7:
-        nodes[d].type = i32(str_set_type(["relaxed", "acquire", "release", "acq_rel", "seq_cst"]))
-        return int(nodes[d].type)
-    if nodes[d].aux == 1:
-        # (`Table:type = dict<string Value>` with Value naming Table: recursion goes through a record)
+    if kind == 1: fatal(use_pos, "type '{nm}' expects {nkids2(d)} type argument(s), got {count}")
+    if kind == 2:
         if dewy_at(nodes[d].pos): fatal(nodes[d].pos, "type '{nm}' is defined in terms of itself: a type contains itself only through a record's field, as `Node:type = [value:int next:Node?]` does; make '{nm}' a record holding the rest (`{nm}:type = [entries:...]`)")
         fatal(nodes[d].pos, "type '{nm}' is defined in terms of itself")
-    nodes[d].aux = 1
+    if kind == 3: fatal(nodes[d].pos, "overflow policy requires a string")
+    fatal(nodes[d].pos, "unknown overflow policy")
+alias_atomic_order = () -> int: str_set_type(["relaxed", "acquire", "release", "acq_rel", "seq_cst"])
+alias_enter = (d: int, targs: int[]) -> CheckerAliasScope:
     saved = cx
     ctxs.push(FnCtx(i32(new_inst(FK_INIT, int(nodes[d].mod), "typedef")), -1, i32(T_VOID), false, 0, nodes[d].mod, i32(check_scopes.names.len())))
     cx = ctxs.len() - 1
     mark = scope_mark()
     push_type_params(d, targs)
-    t = resolve_type(int(nodes[d].a))
-    if nodes[d].c != 0:
-        loop attribute in kids(int(nodes[d].c)):
-            if name_of(int(nodes[attribute].name)) != "overflow": continue
-            value = int(nodes[attribute].a)
-            if value == 0 or nodes[value].kind != .str_lit: fatal(nodes[attribute].pos, "overflow policy requires a string")
-            policy = name_of(int(nodes[value].sval))
-            if policy != "wrap" and policy != "saturate": fatal(nodes[attribute].pos, "unknown overflow policy")
-            t = policy_int(t, (if policy == "wrap": 1 else: 2), nodes[attribute].pos)
-    scope_reset(mark)
+    CheckerAliasScope(saved, mark)
+alias_leave = (scope: CheckerAliasScope):
+    scope_reset(scope.mark)
     ctxs.pop()
-    cx = saved
-    nodes[d].aux = 0
-    if ntp == 0: nodes[d].type = i32(t)
-    if ntp == 0 and dewy_at(nodes[d].pos) and not pos_in_lib(nodes[d].pos): union_alias_note(t, int(nodes[d].name))
-    t
+    cx = scope.context
+alias_note = (d: int, t: int):
+    if dewy_at(nodes[d].pos) and not pos_in_lib(nodes[d].pos): union_alias_note(t, int(nodes[d].name))
+alias_host = CheckerAliasHost(alias_resume, alias_error, alias_atomic_order, alias_enter, alias_leave, resolve_type, name_of, policy_int, alias_note)
+alias_binding = checker_alias_bind(&nodes, &lists, &alias_host)
 
 subst = (t0: int, targs: int[]) -> int: ts_subst(t0, targs)
 
@@ -2845,35 +2754,10 @@ set_block_value = (b: int, e: int): nodes[kid(b, nkids(b) - 1)].a = i32(e)
 pack_result_count = (tn: int) -> int: if tn != 0 and nodes[tn].kind == .tarray and nodes[tn].ival < 0: int(-nodes[tn].ival) else: 0
 
 # A binding's written type, where several values may be written, `let p:(int64 int64) = ...`.
-resolve_binding_type = (tn: int) -> int:
-    values_type_ok = true
-    t = resolve_type(tn)
-    values_type_ok = false
-    t
-
-# A function's written result type, where a pack of several values may be written.
+resolve_binding_type = (tn: int) -> int: ct_resolve_binding(tn)
 pack_result_ok = false
-resolve_result_type = (tn: int) -> int:
-    saved = pack_result_ok
-    pack_result_ok = true
-    t = resolve_type(tn)
-    pack_result_ok = saved
-    t
-
-# `(int64 int64)` as a result: several values of one type, `(T T)`, returned in place.
-pack_result_type = (tn: int) -> int:
-    if not pack_result_ok: fatal(nodes[tn].pos, "parentheses group several values only as a function's result, `:>(int64 int64)`, or a binding's type, `let p:(int64 int64) = ...`")
-    pack_result_ok = false
-    first = resolve_type(kid(tn, 0))
-    ts = [first]
-    loop i in [1..nkids(tn)):
-        t = resolve_type(kid(tn, i))
-        if not type_eq(t, first):
-            # (a record gives values of several types, and a pattern takes it apart the same way)
-            if dewy_at(nodes[tn].pos): err_notes.push((-1, "help: for values of different types, give a record, `:>[first:{dt(first)} second:{dt(t)}]`, and take it apart with `let [first second] = f(...)`"))
-            fatal(nodes[kid(tn, i)].pos, "the values a function gives have one type for now: this is {dt(t)}, and the first is {dt(first)}")
-        ts.push(t)
-    mk_values(ts)
+resolve_result_type = (tn: int) -> int: ct_resolve_result(tn)
+pack_result_type = (tn: int) -> int: ct_pack_result(tn)
 
 # loop p in ps (ps a soa array): loop i in [0..len(ps)): p = ps[i]
 soa_loop = (s: int):
@@ -7544,3 +7428,7 @@ values_elements = (n: int, i: int, v: int, expected: int) -> int:
     nodes[n] = nodes[b]
     last_checked = n
     t
+
+resolve_host = CheckerResolveHost(resolve_type_name, policy_int, resolve_refinement, resolve_quantity_type, resolve_type_ide, effect_argument, nominal_family, fixed_size_arg, fixed_size, mk_fixed_checked, get_struct_inst, decimal_type, word_rational_type, resolve_type_error, dewy_record_schema, ref_validate_record, nd_of, resolve_type_soa, resolve_type_map_decl, total_dict_type, ref_validate_signature, pack_result_count, resolve_type_contract, resolve_type_pack_error)
+resolve_input = CheckerResolveInput(&nodes, &lists, &types, &names, &refine_bindings, &refine_active, &values_type_ok, &pack_result_ok, &T_VOID, &T_INT, &resolve_host)
+resolve_binding = checker_resolve_bind(&resolve_input)
