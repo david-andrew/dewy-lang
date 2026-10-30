@@ -1,3 +1,4 @@
+use 'checker_unary.dewy'
 use 'checker_logic.dewy'
 use 'checker_optional.dewy'
 use 'checker_literals.dewy'
@@ -9999,6 +10000,19 @@ logic_broadcast = (n: int):
 logic_host = CheckerLogicHost(check_expr, coerce, simple_enum, op_overload, narrow_by, scope_reset, logic_mask, logic_broadcast)
 logic_input = CheckerLogicInput(&nodes, &types, &check_scopes, &last_checked, &T_BOOL, &logic_host)
 logic_binding = checker_logic_bind(&logic_input)
+unary_quantity = (n: int, expected: int, literal: bool) -> int:
+    quantity_unary_literal = literal
+    quantity_unary(n, expected)
+unary_overload = (n: int) -> int: op_overload(n, "-")
+unary_exact = (n: int) -> int: exact_int_result(n)
+unary_error = (n: int, at: int, code: int):
+    if code == 1: fatal(nodes[n].pos, "'~' needs an integer")
+    if code == 2: fatal(nodes[n].pos, "unary '+' needs a number")
+    never_cascade(nodes[n].pos, at)
+    fatal(nodes[n].pos, "cannot negate {dt(at)}")
+unary_host = CheckerUnaryHost(check_expr, check_dotted, bundled_bigint_type, simple_enum, secret_unary, unary_quantity, unary_overload, coerce, unary_exact, unary_error)
+unary_input = CheckerUnaryInput(&nodes, &types, &files, &last_checked, &T_INT, &T_MATH_INT, &unary_host)
+unary_binding = checker_unary_bind(&unary_input)
 
 optional_error = (n: int, at: int, unwrap: bool):
     if unwrap: fatal(nodes[n].pos, "'!' needs an optional value, found {dt(at)}")
@@ -10575,49 +10589,9 @@ check_expr_other = (n: int, expected: int) -> int:
             t = fn_value(n, expected, targs, closure = base)
         else: t = mk_typeval(resolve_type(int(nodes[n].c)))
     else if k == .unary:
-        if has_flag(n, NF_BROADCAST): return check_dotted(n, expected)
-        hint = 0
-        if ex != 0 and (is_numeric(ex) or is_vec(ex) or bundled_bigint_type(ex)): hint = ex
-        q_lit = quantity_literal_syntax(int(nodes[n].a))
-        at = prune(check_expr(int(nodes[n].a), hint))
-        if types[at].kind == .secret: return secret_unary(n)
-        if types[at].kind == .quantity:
-            quantity_unary_literal = q_lit
-            return quantity_unary(n, expected)
-        if nodes[n].op == i32(int(Tok.minus)):
-            if is_struct_like(at):
-                r = op_overload(n, "-")
-                if r != 0:
-                    last_checked = n
-                    return r
-            if not is_numeric(at) and not is_vec(at):
-                never_cascade(nodes[n].pos, at)
-                fatal(nodes[n].pos, "cannot negate {dt(at)}")
-            a = int(nodes[n].a)
-            if is_lit(a):
-                # fold -literal into a literal (keeps it untyped, e.g. -PI or -1)
-                if nodes[a].kind == .int_lit:
-                    if lit_default(n) == T_MATH_INT and not has_flag(a, NF_U64) and nodes[a].ival == -9223372036854775807 - 1:
-                        nodes[n].a = i32(coerce(a, T_MATH_INT))
-                        nodes[n].type = i32(T_MATH_INT)
-                        last_checked = n
-                        return T_MATH_INT
-                    nodes[n] = Node(kind = .int_lit, pos = nodes[n].pos, ival = -nodes[a].ival, flags = i32(NF_LITERAL | NF_CHECKED), type = nodes[a].type)
-                    last_checked = n
-                    return ntype(n)
-                if nodes[a].kind == .float_lit:
-                    nodes[n] = Node(kind = .float_lit, pos = nodes[n].pos, fval = -nodes[a].fval, flags = i32(NF_LITERAL | NF_CHECKED), type = nodes[a].type)
-                    last_checked = n
-                    return ntype(n)
-                add_flag(n, NF_LITERAL)
-        else if nodes[n].op == i32(int(Tok.tilde)):
-            if not is_int(at): fatal(nodes[n].pos, "'~' needs an integer")
-        else if nodes[n].op == i32(int(Tok.plus)):
-            if not is_numeric(at) and not is_vec(at): fatal(nodes[n].pos, "unary '+' needs a number")
-        t = at
-        if nodes[n].op == i32(int(Tok.minus)) and at == T_INT and dewy_at(nodes[n].pos):
-            nodes[n].type = i32(t)
-            t = exact_int_result(n)
+        result = xu_check(n, expected, ex)
+        if result.bypass: return result.type
+        t = result.type
     else if k == .and_ or k == .or_ or k == .not_:
         result = xg_check(n, expected, ex)
         if result.bypass: return result.type

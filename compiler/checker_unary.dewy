@@ -1,0 +1,131 @@
+$runtime_checks
+from p"node_store.dewy" import Node
+from p"checker_types.dewy" import TypeInfo
+from p"source_types.dewy" import SrcFile
+from p"type_inference.dewy" import tu_prune
+# Unary expressions own operand hints, literal folding and operator validation.
+# Work is O(operand quantity syntax + inference links + demanded semantic work).
+# Host calls may reenter and grow every arena: retain IDs, never element views.
+XUWord:type=int64<overflow='wrap'>
+CheckerUnaryHost:type=[
+    check:<(node:int64 expected:int64):>int64>
+    dotted:<(node:int64 expected:int64):>int64>
+    bigint:<(type_id:int64):>bool>
+    simple_enum:<(type_id:int64):>bool>
+    secret:<(node:int64):>int64>
+    quantity:<(node:int64 expected:int64 literal:bool):>int64>
+    overload:<(node:int64):>int64>
+    coerce:<(node:int64 type_id:int64):>int64>
+    exact:<(node:int64):>int64>
+    error:<(node:int64 type_id:int64 code:int64):>void>
+]
+CheckerUnaryInput:type=[
+    nodes:ptr<array<Node>>
+    types:ptr<array<TypeInfo>>
+    files:ptr<array<SrcFile>>
+    last:ptr<int64>
+    int_type:ptr<int64>
+    math_int:ptr<int64>
+    host:ptr<CheckerUnaryHost>
+]
+let xu_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let xu_types:ptr<array<TypeInfo>>=$unsafe (uint64(0) as ptr<array<TypeInfo>>)
+let xu_files:ptr<array<SrcFile>>=$unsafe (uint64(0) as ptr<array<SrcFile>>)
+let xu_last:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xu_int_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xu_math_int:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xu_host:ptr<CheckerUnaryHost>=$unsafe (uint64(0) as ptr<CheckerUnaryHost>)
+checker_unary_bind=(input:ptr<CheckerUnaryInput>):>XUWord=>$unsafe {
+    xu_nodes=input[0].nodes
+    xu_types=input[0].types
+    xu_files=input[0].files
+    xu_last=input[0].last
+    xu_int_type=input[0].int_type
+    xu_math_int=input[0].math_int
+    xu_host=input[0].host
+    0
+}
+xu_dewy=(n:XUWord):>bool=>$unsafe {
+    let pos=xu_nodes[0].ptr[n].pos
+    let f=pos >> 40
+    pos >? 0 and f <? xu_files[0].length and xu_files[0].ptr[f].is_dewy
+}
+# A quantity literal as written: `-3 * km`, under any unary prefixes, unchecked.
+xu_quantity_literal=(e0:XUWord):>bool=>$unsafe {
+    let e=e0
+    loop e not=? 0 and XUWord(xu_nodes[0].ptr[e].flags) & 128 =? 0 {
+        let k=xu_nodes[0].ptr[e].kind
+        if k =? 'unary' {e=XUWord(xu_nodes[0].ptr[e].a)}
+        else {
+            # Frozen Tok.star ordinal; the differential checks against checker_tokens.
+            if k not=? 'binary' or xu_nodes[0].ptr[e].op not=? 60 {return false}
+            let x=xu_nodes[0].ptr[XUWord(xu_nodes[0].ptr[e].a)].kind
+            return (x =? 'int_lit' or x =? 'float_lit') and xu_nodes[0].ptr[XUWord(xu_nodes[0].ptr[e].b)].kind =? 'ident'
+        }
+    }
+    false
+}
+# A bypass returns directly: rewriting or a semantic owner already published it.
+CheckerUnaryResult:type=[type:int64 bypass:bool]
+xu_check=(n:XUWord expected:XUWord ex:XUWord):>CheckerUnaryResult=>$unsafe {
+    if XUWord(xu_nodes[0].ptr[n].flags) & 16384 not=? 0 {return [type=xu_host[0].dotted(n expected) bypass=true]}
+    let hint:XUWord=0
+    if ex not=? 0 {
+        let ek=xu_types[0].ptr[tu_prune(ex)].kind
+        if ek =? 'int_' or ek =? 'float_' or ek =? 'vec' or (ek =? 'struct_' and xu_host[0].bigint(ex)) {hint=ex}
+    }
+    let q_lit=xu_quantity_literal(XUWord(xu_nodes[0].ptr[n].a))
+    let at=tu_prune(xu_host[0].check(XUWord(xu_nodes[0].ptr[n].a) hint))
+    let ak=xu_types[0].ptr[at].kind
+    if ak =? 'secret' {return [type=xu_host[0].secret(n) bypass=true]}
+    if ak =? 'quantity' {return [type=xu_host[0].quantity(n expected q_lit) bypass=true]}
+    # Frozen Tok ordinals (plus 58, minus 59, tilde 66); the differential checks them.
+    let op=xu_nodes[0].ptr[n].op
+    let numeric=ak =? 'int_' or ak =? 'float_' or ak =? 'vec'
+    if op =? 59 {
+        if ak =? 'struct_' or ak =? 'tuple' or (ak =? 'enum_' and not xu_host[0].simple_enum(at)) {
+            let r=xu_host[0].overload(n)
+            if r not=? 0 {
+                xu_last[0]=n
+                return [type=r bypass=true]
+            }
+        }
+        if not numeric {xu_host[0].error(n at 0)}
+        let a=XUWord(xu_nodes[0].ptr[n].a)
+        let flags=XUWord(xu_nodes[0].ptr[a].flags)
+        if flags & 256 not=? 0 {
+            let lk=xu_nodes[0].ptr[a].kind
+            if lk =? 'int_lit' {
+                # The literal's default: the semantic integer in Dewy source.
+                let fi=xu_nodes[0].ptr[a].pos >> 40
+                if xu_files[0][fi].is_dewy and flags & 2097152 =? 0 and xu_nodes[0].ptr[a].ival =? -9223372036854775807 - 1 {
+                    let c=xu_host[0].coerce(a xu_math_int[0])
+                    xu_nodes[0][n].a=int32<overflow='wrap'>(c)
+                    xu_nodes[0][n].type=int32<overflow='wrap'>(xu_math_int[0])
+                    xu_last[0]=n
+                    return [type=xu_math_int[0] bypass=true]
+                }
+                let value:XUWord=0 - XUWord(xu_nodes[0].ptr[a].ival)
+                xu_nodes[0][n]=Node[kind='int_lit' pos=xu_nodes[0].ptr[n].pos ival=int64(value) flags=384 type=xu_nodes[0].ptr[a].type]
+                xu_last[0]=n
+                return [type=XUWord(xu_nodes[0].ptr[n].type) bypass=true]
+            }
+            if lk =? 'float_lit' {
+                xu_nodes[0][n]=Node[kind='float_lit' pos=xu_nodes[0].ptr[n].pos fval=-xu_nodes[0].ptr[a].fval flags=384 type=xu_nodes[0].ptr[a].type]
+                xu_last[0]=n
+                return [type=XUWord(xu_nodes[0].ptr[n].type) bypass=true]
+            }
+            xu_nodes[0][n].flags=xu_nodes[0].ptr[n].flags | 256
+        }
+    } else if op =? 66 {
+        if ak not=? 'int_' {xu_host[0].error(n at 1)}
+    } else if op =? 58 {
+        if not numeric {xu_host[0].error(n at 2)}
+    }
+    let t=at
+    if op =? 59 and at =? xu_int_type[0] and xu_dewy(n) {
+        xu_nodes[0][n].type=int32<overflow='wrap'>(t)
+        t=xu_host[0].exact(n)
+    }
+    [type=t bypass=false]
+}

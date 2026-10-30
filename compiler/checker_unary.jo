@@ -1,0 +1,105 @@
+# Frozen unary-expression checker extracted from expr.jo.
+use 'node_store.dewy'
+use 'checker_types.dewy'
+use 'source_types.dewy'
+use 'checker_tokens.dewy'
+use 'type_inference.dewy'
+struct CheckerUnaryHost:
+    check: (int, int) -> int
+    dotted: (int, int) -> int
+    bigint: (int) -> bool
+    simple_enum: (int) -> bool
+    secret: (int) -> int
+    quantity: (int, int, bool) -> int
+    overload: (int) -> int
+    coerce: (int, int) -> int
+    exact: (int) -> int
+    error: (int, int, int) -> void
+struct CheckerUnaryInput:
+    nodes: *(Node[])
+    types: *(TypeInfo[])
+    files: *(SrcFile[])
+    last: *int
+    int_type: *int
+    math_int: *int
+    host: *CheckerUnaryHost
+xu_nodes: *(Node[])
+xu_types: *(TypeInfo[])
+xu_files: *(SrcFile[])
+xu_last: *int
+xu_int_type: *int
+xu_math_int: *int
+xu_host: *CheckerUnaryHost
+checker_unary_bind = (input: *CheckerUnaryInput) -> int:
+    xu_nodes = input[0].nodes
+    xu_types = input[0].types
+    xu_files = input[0].files
+    xu_last = input[0].last
+    xu_int_type = input[0].int_type
+    xu_math_int = input[0].math_int
+    xu_host = input[0].host
+    0
+xu_dewy = (n: int) -> bool:
+    pos = xu_nodes[0][n].pos
+    f = pos >> 40
+    pos > 0 and f < xu_files[0].len() and xu_files[0][f].is_dewy
+xu_quantity_literal = (e: int) -> bool:
+    if e == 0 or int(xu_nodes[0][e].flags) & 128 != 0: return false
+    k = xu_nodes[0][e].kind
+    if k == .unary: return xu_quantity_literal(int(xu_nodes[0][e].a))
+    if k == .binary and xu_nodes[0][e].op == i32(int(Tok.star)):
+        x = xu_nodes[0][int(xu_nodes[0][e].a)].kind
+        return (x == .int_lit or x == .float_lit) and xu_nodes[0][int(xu_nodes[0][e].b)].kind == .ident
+    false
+struct CheckerUnaryResult:
+    type: int
+    bypass: bool
+xu_check = (n: int, expected: int, ex: int) -> CheckerUnaryResult:
+    if int(xu_nodes[0][n].flags) & 16384 != 0: return CheckerUnaryResult(xu_host[0].dotted(n, expected), true)
+    hint = 0
+    if ex != 0:
+        ek = xu_types[0][tu_prune(ex)].kind
+        if ek == .int_ or ek == .float_ or ek == .vec or (ek == .struct_ and xu_host[0].bigint(ex)): hint = ex
+    q_lit = xu_quantity_literal(int(xu_nodes[0][n].a))
+    at = int(tu_prune(xu_host[0].check(int(xu_nodes[0][n].a), hint)))
+    ak = xu_types[0][at].kind
+    if ak == .secret: return CheckerUnaryResult(xu_host[0].secret(n), true)
+    if ak == .quantity: return CheckerUnaryResult(xu_host[0].quantity(n, expected, q_lit), true)
+    op = xu_nodes[0][n].op
+    numeric = ak == .int_ or ak == .float_ or ak == .vec
+    if op == i32(int(Tok.minus)):
+        if ak == .struct_ or ak == .tuple or (ak == .enum_ and not xu_host[0].simple_enum(at)):
+            r = xu_host[0].overload(n)
+            if r != 0:
+                xu_last[0] = n
+                return CheckerUnaryResult(r, true)
+        if not numeric: xu_host[0].error(n, at, 0)
+        a = int(xu_nodes[0][n].a)
+        flags = int(xu_nodes[0][a].flags)
+        if flags & 256 != 0:
+            lk = xu_nodes[0][a].kind
+            if lk == .int_lit:
+                fi = xu_nodes[0][a].pos >> 40
+                if xu_files[0][fi].is_dewy and flags & 2097152 == 0 and xu_nodes[0][a].ival == -9223372036854775807 - 1:
+                    c = xu_host[0].coerce(a, xu_math_int[0])
+                    xu_nodes[0][n].a = i32(c)
+                    xu_nodes[0][n].type = i32(xu_math_int[0])
+                    xu_last[0] = n
+                    return CheckerUnaryResult(xu_math_int[0], true)
+                xu_nodes[0][n] = Node(kind = .int_lit, pos = xu_nodes[0][n].pos, ival = -xu_nodes[0][a].ival, flags = i32(384), type = xu_nodes[0][a].type)
+                xu_last[0] = n
+                return CheckerUnaryResult(int(xu_nodes[0][n].type), true)
+            if lk == .float_lit:
+                xu_nodes[0][n] = Node(kind = .float_lit, pos = xu_nodes[0][n].pos, fval = -xu_nodes[0][a].fval, flags = i32(384), type = xu_nodes[0][a].type)
+                xu_last[0] = n
+                return CheckerUnaryResult(int(xu_nodes[0][n].type), true)
+            xu_nodes[0][n].flags = i32(int(xu_nodes[0][n].flags) | 256)
+    else if op == i32(int(Tok.tilde)):
+        if ak != .int_: xu_host[0].error(n, at, 1)
+    else if op == i32(int(Tok.plus)):
+        if not numeric: xu_host[0].error(n, at, 2)
+    t = at
+    if op == i32(int(Tok.minus)) and at == xu_int_type[0] and xu_dewy(n):
+        xu_nodes[0][n].type = i32(t)
+        t = xu_host[0].exact(n)
+    CheckerUnaryResult(t, false)
