@@ -728,16 +728,19 @@ __dtls_keys = (c: mut __Conn, pre: u8[]):
     seed = c.d_srand
     seed.extend(c.d_crand)
     kb = __prf(c.d_master, "key expansion", seed, 40)
-    ck = crypto.aes_key(kb[0..16))
-    sk = crypto.aes_key(kb[16..32))
+    ck: u8[16]
+    sk: u8[16]
+    loop i in [0..16):
+        ck[i] = kb[i]
+        sk[i] = kb[16 + i]
     if c.d_client:
-        c.d_wkey = ck
-        c.d_rkey = sk
+        c.d_wkey = crypto.__aes_key16(ck)
+        c.d_rkey = crypto.__aes_key16(sk)
         c.d_wiv = kb[32..36)
         c.d_riv = kb[36..40)
     else:
-        c.d_wkey = sk
-        c.d_rkey = ck
+        c.d_wkey = crypto.__aes_key16(sk)
+        c.d_rkey = crypto.__aes_key16(ck)
         c.d_wiv = kb[36..40)
         c.d_riv = kb[32..36)
 

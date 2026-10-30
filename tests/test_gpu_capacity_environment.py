@@ -90,7 +90,8 @@ def test_texture_slots_exhaust_before_driver_call(compiler, tmp_path):
 def test_api_misuse_is_still_a_panic(compiler, tmp_path, source, message):
     (tmp_path / 'main.dewy').write_text('import p"@lib/physics.jo" as physics\nmain=()=>{' + source + '}\n')
     checked = invoke(compiler, tmp_path, 'check', 'main.dewy')
-    assert checked.returncode == 1 and 'may panic' in checked.stderr, checked.stdout + checked.stderr
+    # (a panic of the callee's, or its stated contract unproven at the call)
+    assert checked.returncode == 1 and ('may panic' in checked.stderr or 'cannot prove' in checked.stderr), checked.stdout + checked.stderr
     (tmp_path / 'main.dewy').write_text('import p"@lib/physics.jo" as physics\n$runtime_checks\nmain=()=>{' + source + '}\n')
     ran = invoke(compiler, tmp_path, 'run', 'main.dewy', DEWY_NO_GPU='1')
     assert ran.returncode == 101 and message in ran.stderr, ran.stdout + ran.stderr

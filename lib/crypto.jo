@@ -14,11 +14,12 @@ use 'core/overflow.jo'
 # session, as WebRTC's are; not for long-lived keys on shared machines.)
 
 # ---------------- random bytes ----------------
-# n bytes from the operating system's random source (for keys and nonces: not seeded, not repeatable)
+# n bytes from the operating system's random source (for keys and nonces: not seeded, not repeatable).
+# A system that gives none is an environment failure: the program ends with a report.
 random_bytes = (n: int) -> u8[]:
     b = fill(u8(0), n)
     if n == 0: return b
-    if not __os_entropy(data(b), n): panic("random_bytes: the system gave no random bytes")
+    if not __os_entropy(data(b), n): __environment_failure("random_bytes: the system gave no random bytes")
     b
 
 # ---------------- bytes ----------------
@@ -283,6 +284,12 @@ struct AesKey:
 
 aes_key = (key: u8[]) -> AesKey:
     if key.len() != 16: panic("aes_key: an AES-128 key is 16 bytes, not {key.len()}")
+    k: u8[16]
+    loop i in [0..16): k[i] = key[i]
+    __aes_key16(k)
+
+# (the library's own keys: 16 bytes by their type)
+__aes_key16 = (key: u8[16]) -> AesKey:
     k = AesKey()
     loop i in [0..16): k.w[i] = key[i]
     rcon = u8(1)
@@ -419,19 +426,23 @@ __gcm_ctr = (k: AesKey, j0: u8[16], src: u8[]) -> u8[]:
         i += 16
     out
 
-__gcm_j0 = (nonce: u8[]) -> u8[16]:
-    if nonce.len() != 12: panic("aes_gcm: the nonce is 12 bytes, not {nonce.len()}")
+# (the pre-counter block: a 12-byte nonce and a 1; any other length, GHASH of the nonce, as
+# NIST SP 800-38D defines it)
+__gcm_j0 = (h: u8[16], nonce: u8[]) -> u8[16]:
+    empty: u8[]
+    if nonce.len() != 12: return __ghash(h, empty, nonce)
     j0: u8[16]
     loop i in [0..12): j0[i] = nonce[i]
     j0[15] = 1
     j0
 
-# the message encrypted, then its 16-byte tag: nonce (12 bytes) must never repeat for one key;
+# the message encrypted, then its 16-byte tag: nonce (12 bytes; other lengths are hashed, as the
+# standard says) must never repeat for one key;
 # aad is bytes the tag covers that travel unencrypted
 aes_gcm_seal = (key: AesKey, nonce: u8[], aad: u8[], message: u8[]) -> u8[]:
     zero: u8[16]
     h = aes_encrypt_block(key, zero)
-    j0 = __gcm_j0(nonce)
+    j0 = __gcm_j0(h, nonce)
     c = __gcm_ctr(key, j0, message)
     s = __ghash(h, aad, c)
     t = aes_encrypt_block(key, j0)
@@ -445,7 +456,7 @@ aes_gcm_open = (key: AesKey, nonce: u8[], aad: u8[], sealed: u8[]) -> u8[]?:
     c = sealed[..sealed.len() - 16)
     zero: u8[16]
     h = aes_encrypt_block(key, zero)
-    j0 = __gcm_j0(nonce)
+    j0 = __gcm_j0(h, nonce)
     s = __ghash(h, aad, c)
     t = aes_encrypt_block(key, j0)
     diff = u8(0)

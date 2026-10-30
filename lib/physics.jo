@@ -202,9 +202,9 @@ add_circle = (w: mut World, pos: vec2, radius: f64, kind: BodyKind = .dynamic, d
     __set_mass(b, m, m * f32(radius * radius) / 2.0)
     __given_mass(w, __add(w, b), mass)
 
-# (mass = ...: that instead of the density's)
+# (mass = ...: that instead of the density's; b was just added, so its place is its id)
 __given_mass = (w: mut World, b: Body, mass: f64) -> Body:
-    if mass > 0.0: w.set_mass(b, mass)
+    if mass > 0.0: __mass_at(w, b.id, mass)
     b
 
 add_box = (w: mut World, pos: vec2, size: vec2, angle: f64 = 0, kind: BodyKind = .dynamic, density: f64 = 1.0, friction: f64 = 0.5, bounce: f64 = 0.0, sensor: bool = false, mass: f64 = 0) -> Body:
@@ -421,7 +421,10 @@ __join_convex = (ps: vec2[], p: int[], q: int[]) -> int[]:
 # give a dynamic body another mass (its turning inertia changes with it)
 set_mass = (w: mut World, b: Body, m: f64):
     if m <= 0.0: panic("a mass must be more than 0 (a body that never moves is `kind = .fixed`)")
-    i = __id(w, b)
+    __mass_at(w, __id(w, b), m)
+
+# (the body at place i: m more than 0)
+__mass_at = (w: mut World, i: int, m: f64):
     if w.bodies[i].kind != .dynamic or w.bodies[i].inv_mass == 0.0: return
     k = f32(1.0 / (f64(w.bodies[i].inv_mass) * m))
     w.bodies[i].inv_mass = f32(1.0 / m)

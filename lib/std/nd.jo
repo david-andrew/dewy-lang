@@ -760,7 +760,10 @@ __nd_reduce[T] = (m: T[,], axis: int, op: int) -> T[,]:
 # differently from adding in order, the same for the same input every time)
 dot = (a: f64[], b: f64[]) -> f64:
     if a.len() != b.len(): panic("dot: lengths {a.len()} and {b.len()} differ")
-    n = a.len()
+    __dot(a, b, a.len())
+
+# (the first n values of each: a and b have at least n, as one array has its own length)
+__dot = (a: f64[], b: f64[], n: int) -> f64:
     s0 = 0.0
     s1 = 0.0
     s2 = 0.0
@@ -778,7 +781,7 @@ dot = (a: f64[], b: f64[]) -> f64:
     (s0 + s1) + (s2 + s3)
 
 norm = (a: f64[]) -> f64:
-    squared = dot(a, a)
+    squared = __dot(a, a, a.len())
     if squared >= 2.2250738585072014e-308 and squared < INF: return sqrt(squared)
     # Preserve NaN propagation. A finite norm can still have an overflowing
     # sum of squares, or one too small to represent accurately before sqrt.

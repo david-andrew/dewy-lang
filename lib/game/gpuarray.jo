@@ -118,16 +118,22 @@ gpu = (xs: __GpuInt[]) -> GpuArray[__GpuInt]: __gpu_upload(xs, [xs.len()])
 gpu = (xs: i32[]) -> GpuArray[__GpuInt]: gpu(__GpuInt.(xs))
 gpu = (xs: int[]) -> GpuArray[__GpuInt]: gpu(__GpuInt.(xs))
 gpu = (xs: bool[]) -> GpuArray[f32]: gpu(__to_f32.(xs))
-gpu = (m: f32[,]) -> GpuArray[f32]: __gpu_upload(m.data, m.shape)
-gpu = (m: f64[,]) -> GpuArray[f32]: __gpu_upload(f32.(m.data), m.shape)
-gpu = (m: __GpuInt[,]) -> GpuArray[__GpuInt]: __gpu_upload(m.data, m.shape)
-gpu = (m: i32[,]) -> GpuArray[__GpuInt]: __gpu_upload(__GpuInt.(m.data), m.shape)
-gpu = (m: int[,]) -> GpuArray[__GpuInt]: __gpu_upload(__GpuInt.(m.data), m.shape)
+gpu = (m: f32[,]) -> GpuArray[f32]: __gpu_upload_nd(m.data, m.shape)
+gpu = (m: f64[,]) -> GpuArray[f32]: __gpu_upload_nd(f32.(m.data), m.shape)
+gpu = (m: __GpuInt[,]) -> GpuArray[__GpuInt]: __gpu_upload_nd(m.data, m.shape)
+gpu = (m: i32[,]) -> GpuArray[__GpuInt]: __gpu_upload_nd(__GpuInt.(m.data), m.shape)
+gpu = (m: int[,]) -> GpuArray[__GpuInt]: __gpu_upload_nd(__GpuInt.(m.data), m.shape)
 
-__gpu_upload[T] = (xs: T[], shape: int[]) -> GpuArray[T]:
+# (an N-D array's: the caller proves its rank and storage, compiler/nd_contracts.jo)
+__gpu_upload_nd[T] = (xs: T[], shape: int[]) -> GpuArray[T]:
     if shape.len() > 4: panic("GPU arrays have at most 4 dimensions (this one has shape {__shape_str(shape)})")
+    if __nd_storage_valid(shape, xs.len()) == 0: panic("array data does not match its shape")
+    __gpu_upload(xs, shape)
+
+# (shape: at most 4 nonnegative dimensions, xs.len() values)
+__gpu_upload[T] = (xs: T[], shape: int[]) -> GpuArray[T]:
     if not gpu_available(): return GpuArray(n = xs.len(), host = xs, token = fill(u8(0), 1), shape = shape)
-    g = __gpu_alloc(xs, shape)
+    g = __gpu_alloc_n(xs, shape, xs.len())
     when TARGET != "wasm":
         if __gpu_vk:
             if xs.len() > 0: __vg_copy_to_buffer(__gvk[g.tex].buffer, 0, data(xs) as *u8, xs.len() * 4)
@@ -332,8 +338,10 @@ __gpu_unused = (token: u8[]) -> bool: (token as *int)[0] == 1
 
 # a texture for an array of shape `shape` (like xs: f32 or i32 values): one no array uses any
 # more if there is one of the right size (others no array uses are deleted), else a new one
-__gpu_alloc[T] = (xs: T[], shape: int[]) -> GpuArray[T]:
-    n = __nd_size(shape)
+__gpu_alloc[T] = (xs: T[], shape: int[]) -> GpuArray[T]: __gpu_alloc_n(xs, shape, __nd_size(shape))
+
+# (n: the count of shape's values)
+__gpu_alloc_n[T] = (xs: T[], shape: int[], n: int) -> GpuArray[T]:
     texels = max((n + 3) / 4, 1)
     w = min(texels, __gpu_maxw)
     h = (texels + w - 1) / w

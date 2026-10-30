@@ -769,8 +769,9 @@ in a slice (`xs[a,b..]`, `m[a,b..c ..]`) and an open counter (`[a,b..]`) as in a
 A literal can rule a failure out: a power with a literal exponent `>=? 0` and a
 rational with a literal nonzero denominator cannot panic. Other library failures (a bad format
 specification) still make the call panic. Running out of memory or GPU capacity
-(buffer room, texture slots, or driver allocation) is an environmental failure:
-it reports the failure and exits with status 1, and is not a `panics` effect. The editor's hover
+(buffer room, texture slots, or driver allocation), a GPU lacking an operation a
+compute function uses, and a system that gives no random bytes are environmental failures:
+each reports the failure and exits with status 1, and none is a `panics` effect. The editor's hover
 shows `& panics` on a function that may panic, and `dewy check --obligations`
 lists each library call that may panic where runtime checks are allowed.
 
@@ -2604,7 +2605,9 @@ fit the supported array size. A zero dimension produces an empty array.
 
 `reshape` takes one to four dimensions (`reshape(values 4)` is 1-D) or a
 shape array (`reshape(values [2 3])`) and checks the number of elements;
-`flatten`, `row` and `col` return independent array values. `transpose`
+`flatten`, `row` and `col` return independent array values; `row(m i)` and
+`col(m j)` need a rank-two `m` whose storage matches its shape and the index within
+that axis (`0 <=? i <? m.length[0]`), proven as an index is. `transpose`
 reverses the axes and retains known extents, storage length and storage
 validity in its independent result. `size(matrix)` counts all elements; `rows` and `cols`
 inspect a two-dimensional shape. Use these constructors rather than changing
@@ -2630,7 +2633,8 @@ its vector length to equal the matrix's column count. Their results retain the
 outer dimensions, including zero extents. Integer and custom element products
 retain their arithmetic or operator obligations.
 
-`dot(a b)` computes a dot product. `norm(values)` computes the Euclidean length
+`dot(a b)` computes a dot product of two `float64` arrays of equal length
+(`a.length =? b.length`, the caller's obligation). `norm(values)` computes the Euclidean length
 of a `float64` array; `hypot(x y)` computes the length of two coordinates.
 They rescale extreme values so that squaring a large or tiny coordinate does
 not unnecessarily overflow or underflow: both `norm([3e200 4e200])` and
@@ -2810,7 +2814,9 @@ so placement currently returns the value unchanged.
 `gpu(values)` uploads a numeric array or `NDArray`; `cpu(value)` downloads an
 independent `NDArray` with the same shape. Floating inputs become `float32`,
 integer inputs become `int32<overflow='wrap'>` (the GPU's modular word format),
-and arrays may have up to four dimensions:
+and arrays may have up to four dimensions: an `NDArray`'s upload needs
+`m.length.length <=? 4` and storage matching its shape, proven from its
+constructor or a shaped parameter as other array contracts are.
 
 ```dewy
 $runtime_checks                  # shapes are checked
@@ -4413,7 +4419,8 @@ unproven one follows the obligation settings. These generators are predictable
 from their state and are not for secrets: keys, tokens and nonces come from
 `crypto.random_bytes(n)` (`import crypto`), which reads the operating system's
 secure random source (getrandom, getentropy, RtlGenRandom, or
-`crypto.getRandomValues` on the web).
+`crypto.getRandomValues` on the web); a system that gives none ends the program
+with a report, as running out of memory does.
 
 ## Directives
 

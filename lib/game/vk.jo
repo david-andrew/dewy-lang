@@ -1901,7 +1901,7 @@ when TARGET != "wasm" and TARGET != "macos":
             w = data(code) as *u32
             loop i in [5..len(code) / 4 - 1):
                 if w[i] != u32(0x20011): break
-                if w[i + 1] == u32(61): panic("this GPU ({__vk_device_name}) lacks the subgroup operations a compute function uses (DEWY_VULKAN=0 runs it on the CPU)")
+                if w[i + 1] == u32(61): __environment_failure("this GPU ({__vk_device_name}) lacks the subgroup operations a compute function uses (DEWY_VULKAN=0 runs it on the CPU)")
         m = __vk_module(code)
         info = VkComputePipelineCreateInfo(stype = 29, stage = VkPipelineShaderStageCreateInfo(stype = 18, stage = 0x20, module = m, name = data("main")), layout = __vk_layout, base_index = -1)
         pl = 0

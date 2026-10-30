@@ -2339,6 +2339,7 @@ panic_map_obligation = (n: int) -> bool:
 # literal exponent >= 0 (every library `pow` and `__pow__` fails only for a
 # negative one), a rational with a literal nonzero denominator.
 panic_name_power = 0
+panic_name_policy_power = 0
 panic_name_rational = 0
 panic_name_pow = 0
 panic_name_pow_op = 0
@@ -2355,6 +2356,8 @@ panic_literal_safe = (n: int) -> bool:
     if d == 0 or not pos_in_lib(nodes[d].pos): return false
     if panic_name_power == 0:
         panic_name_power = intern("__dewy_power")
+        # (a wrapping or saturating word's power: its products cannot fail)
+        panic_name_policy_power = intern("__dewy_policy_power")
         panic_name_rational = intern("rational")
         panic_name_pow = intern("pow")
         panic_name_pow_op = intern("__pow__")
@@ -2367,7 +2370,7 @@ panic_literal_safe = (n: int) -> bool:
         a = panic_literal(kid(n, first))
         b = panic_literal(kid(n, first + 1))
         return a != 0 and b != 0 and nodes[a].ival != nodes[b].ival
-    if (name == panic_name_power or name == panic_name_pow or name == panic_name_pow_op) and nkids(n) == 2:
+    if (name == panic_name_power or name == panic_name_policy_power or name == panic_name_pow or name == panic_name_pow_op) and nkids(n) == 2:
         e = panic_literal(kid(n, 1))
         return e != 0 and nodes[e].ival >= 0
     if (name == panic_name_rational or name == panic_name_fraction) and nkids(n) == 2:

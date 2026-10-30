@@ -1,0 +1,10 @@
+# An N-D upload needs at most four dimensions and storage matching its shape:
+# reshape and shaped parameters prove both, and 1-D uploads need nothing.
+upload=(m:array<float32 length=[2 3]>):>array<float32>=>cpu(gpu(m)).data
+main=()=>{
+    let axis:array<float32>=[0.0 1.0 2.0 3.0 4.0 5.0]
+    let grid=gpu(reshape(axis 2 3))
+    printl(cpu(grid).length)
+    printl(upload(reshape(axis 2 3)))
+    printl(sum(cpu(gpu(axis))))
+}

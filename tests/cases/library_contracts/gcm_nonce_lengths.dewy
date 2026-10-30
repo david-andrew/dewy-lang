@@ -1,0 +1,16 @@
+# aes_gcm takes a nonce of any length (NIST SP 800-38D): 12 bytes directly, others
+# through GHASH. Test cases 4 and 5 of the GCM specification, sealed and opened.
+import p"@lib/crypto.jo" as crypto
+bytes_of=(text:string):>array<uint8>=>crypto.hex_bytes(text) ?? []
+main=()=>{
+    $runtime_checks
+    let key=crypto.aes_key(bytes_of("feffe9928665731c6d6a8f9467308308"))
+    let message=bytes_of("d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a721c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b39")
+    let aad=bytes_of("feedfacedeadbeeffeedfacedeadbeefabaddad2")
+    loop nonce in ["cafebabefacedbaddecaf888" "cafebabefacedbad"] {
+        let sealed=crypto.aes_gcm_seal(key bytes_of(nonce) aad message)
+        printl(crypto.hex_text(sealed[sealed.length-16..]))
+        let opened=crypto.aes_gcm_open(key bytes_of(nonce) aad sealed) ?? []
+        printl(opened =? message)
+    }
+}

@@ -1,0 +1,12 @@
+# norm(v) is total: dot(v v)'s lengths are one array's own. dot of two arrays
+# needs equal lengths, which a guard or a literal proves.
+main=()=>{
+    let v:array<float64>=[3.0 4.0]
+    printl(norm(v))
+    let empty:array<float64>=[]
+    printl(norm(empty))
+    let w:array<float64>=[1.0 2.0]
+    printl(dot(v w))
+    let u:array<float64>=[loop i in [0..v.length) float64(i)]
+    if u.length =? v.length printl(dot(u v))
+}
