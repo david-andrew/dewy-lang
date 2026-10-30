@@ -6356,7 +6356,9 @@ check_program = (main_path: str):
     loop nm in runtime_names: runtime_fn(nm)
     runtime_memeq = runtime_fn("__mem_eq")
     runtime_streq = runtime_fn("__str_eq")
-    loop nm in optional_runtime: runtime_demand(nm)
+    # (__mac_syscall lives in macos.jo's `when TARGET == "macos"`: elsewhere asking parses it for nothing)
+    loop nm in optional_runtime:
+        if nm != "__mac_syscall" or target_macos: runtime_demand(nm)
     if float_int_demanded: runtime_demand("__float_int_fail")
     # (@cabi functions set __c_threads: lib/core/rt.jo)
     if let ct = prelude.get(intern("__c_threads")):

@@ -65,33 +65,34 @@ defer_prelude = (path: str, sub: str) -> bool:
     icb = ic_switch(IC_LOAD, IC_LIB)
     r = scan_source(src!)
     eager: int[]
+    # (a unit's module and parsed mark; then its names posted to the index)
+    first = pu_mod.len()
+    pu_mod.resize(first + r.1 - r.0)
+    pu_done.resize(first + r.1 - r.0)
+    mods = data(pu_mod)
+    loop k in [first..pu_mod.len()): mods[k] = mi
+    p = data(src!)
+    flags = data(su_flags)
+    name0 = data(su_name0)
+    name_at = data(su_name_at)
+    name_len = data(su_name_len)
     loop u in [r.0..r.1):
-        pu_mod.push(mi)
-        pu_done.push(false)
-        if su_flags[u] & (SU_EAGER | SU_NOMINAL) != 0: eager.push(u)
+        if flags[u] & (SU_EAGER | SU_NOMINAL) != 0: eager.push(u)
         else:
             # (exports join once their module is in use: with its first unit asked for)
-            if su_flags[u] & SU_EXPORT != 0:
+            if flags[u] & SU_EXPORT != 0:
                 xs = pm_exports.get(mi) ?? []
                 xs.push(u)
                 pm_exports[mi] = xs
-            p = data(src!)
-            loop x in [su_name0[u]..su_name0[u + 1]):
-                e = pn_entry(p + su_name_at[x], su_name_len[x])
-                last = int(pn_entries[e].last)
-                if last < 0 or int(pn_posts[last].unit) != u:
-                    k = pn_posts.len()
-                    pn_posts.push(PnPost(i32(u), -1))
-                    if last < 0: pn_entries[e].post = i32(k)
-                    else: pn_posts[last].next = i32(k)
-                    pn_entries[e].last = i32(k)
+            loop x in [name0[u]..name0[u + 1]): pn_post(pn_entry(p + name_at[x], name_len[x]), u)
     modules[mi].decls = prelude_parse_units(eager)
     ic_restore(icb)
     true
 
 # The index entry of the name at p[0..n), made if it is new
 pn_entry = (p: *u8, n: int) -> int:
-    if pn_slots.len() == 0: pn_slots = fill(i32(0), 1 << 13)
+    # (room for the library's names without growing)
+    if pn_slots.len() == 0: pn_slots = fill(i32(0), 1 << 14)
     h = hash_bytes(p, n)
     mask = pn_slots.len() - 1
     i = h & mask
@@ -118,6 +119,17 @@ pn_entry = (p: *u8, n: int) -> int:
             loop slots[j] != 0: j = (j + 1) & mask
             slots[j] = i32(k + 1)
     e
+
+# Unit u among the units declaring entry e (once, however many of its names it is)
+pn_post = (e: int, u: int):
+    entries = data(pn_entries)
+    last = int(entries[e].last)
+    if last >= 0 and int(pn_posts[last].unit) == u: return
+    k = pn_posts.len()
+    pn_posts.push(PnPost(i32(u), -1))
+    if last < 0: entries[e].post = i32(k)
+    else: pn_posts[last].next = i32(k)
+    entries[e].last = i32(k)
 
 # The entry of an interned name, or -1 (looked for once per name)
 pn_find = (name: int) -> int:

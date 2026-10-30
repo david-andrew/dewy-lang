@@ -85,16 +85,19 @@ sc_line_end = (i0: int) -> int:
 
 sc_word_is = (j: int, w: str) -> bool:
     k = len(w)
-    if j + k > sc_n: return false
+    n = sc_n
+    if j + k > n: return false
     p = sc_p + j
     q = data(w)
     loop t in [0..k):
         if p[t] != q[t]: return false
-    j + k >= sc_n or sc_cls[int(p[k])] & SC_NAME == 0
+    j + k >= n or sc_cls[int(p[k])] & SC_NAME == 0
 
 sc_spaces = (j0: int) -> int:
+    p = sc_p
+    n = sc_n
     j = j0
-    loop j < sc_n and (sc_p[j] == ' ' or sc_p[j] == '\t'): j += 1
+    loop j < n and (p[j] == ' ' or p[j] == '\t'): j += 1
     j
 
 sc_ident_end = (j0: int) -> int:
@@ -107,10 +110,12 @@ sc_ident_end = (j0: int) -> int:
 
 # past a bracketed group starting at j ('[' or '('), on this line; -1 when it does not close here
 sc_group_end = (j0: int) -> int:
+    p = sc_p
+    n = sc_n
     depth = 0
     j = j0
-    loop j < sc_n and sc_p[j] != '\n':
-        c = sc_p[j]
+    loop j < n and p[j] != '\n':
+        c = p[j]
         if c == '[' or c == '(': depth += 1
         else if c == ']' or c == ')':
             depth -= 1
@@ -122,7 +127,7 @@ sc_unit = -1
 sc_attr_open = false
 sc_src = ""
 
-sc_name = (src: str, a: int, b: int):
+sc_name = (a: int, b: int):
     if b > a:
         su_name_at.push(a)
         su_name_len.push(b - a)
@@ -132,13 +137,15 @@ sc_name = (src: str, a: int, b: int):
 sc_classify = (src: str, j0: int) -> bool:
     j = j0
     p = sc_p
+    n = sc_n
     attrs = false
-    loop j < sc_n and p[j] == '@':
+    loop j < n and p[j] == '@':
         e = sc_ident_end(j + 1)
-        if sc_word_is(j + 1, "nominal"): su_flags[sc_unit] |= SU_NOMINAL
-        if sc_word_is(j + 1, "export"): su_flags[sc_unit] |= SU_EXPORT
+        a0 = p[j + 1]
+        if a0 == 'n' and sc_word_is(j + 1, "nominal"): su_flags[sc_unit] |= SU_NOMINAL
+        if a0 == 'e' and sc_word_is(j + 1, "export"): su_flags[sc_unit] |= SU_EXPORT
         j = e
-        if j < sc_n and p[j] == '(':
+        if j < n and p[j] == '(':
             g = sc_group_end(j)
             if g < 0:
                 su_flags[sc_unit] |= SU_EAGER
@@ -146,29 +153,29 @@ sc_classify = (src: str, j0: int) -> bool:
             j = g
         j = sc_spaces(j)
         attrs = true
-    if j >= sc_n or p[j] == '\n' or p[j] == '#' or p[j] == '\r': return attrs
+    if j >= n or p[j] == '\n' or p[j] == '#' or p[j] == '\r': return attrs
     # (keywords by their first letter: most lines start with a name)
     c0 = p[j]
     if c0 == 'w' and sc_word_is(j, "when"):
         su_flags[sc_unit] |= SU_WHEN
         return false
-    if (c0 == 'c' and sc_word_is(j, "const")) or (c0 == 's' and sc_word_is(j, "struct")) or (c0 == 'e' and (sc_word_is(j, "enum") or sc_word_is(j, "extern"))):
+    if (c0 == 'c' and sc_word_is(j, "const")) or (c0 == 's' and sc_word_is(j, "struct")) or (c0 == 'e' and ((p[j + 1] == 'n' and sc_word_is(j, "enum")) or (p[j + 1] == 'x' and sc_word_is(j, "extern")))):
         k = sc_spaces(sc_ident_end(j))
-        sc_name(src, k, sc_ident_end(k))
+        sc_name(k, sc_ident_end(k))
         return false
     if c0 == 't' and sc_word_is(j, "type"):
         k = sc_spaces(sc_ident_end(j))
         e = sc_ident_end(k)
         a = sc_spaces(e)
         if e > k and a < sc_n and (p[a] == '=' or p[a] == '['):
-            sc_name(src, k, e)
+            sc_name(k, e)
             return false
     if p[j] == '(':
         # an operator's declaration: ([]=)[K, V] = ...
         k = j + 1
         loop k < sc_n and p[k] != ')' and p[k] != '\n': k += 1
         if k < sc_n and p[k] == ')':
-            sc_name(src, j + 1, k)
+            sc_name(j + 1, k)
             return false
         su_flags[sc_unit] |= SU_EAGER
         return false
@@ -178,7 +185,7 @@ sc_classify = (src: str, j0: int) -> bool:
         k = j
         loop true:
             e = sc_ident_end(k)
-            sc_name(src, k, e)
+            sc_name(k, e)
             k = sc_spaces(e)
             if k < sc_n and p[k] == '[':
                 g = sc_group_end(k)
@@ -233,11 +240,18 @@ scan_source = (src: str) -> (int, int):
         if c == '\n':
             i += 1
             continue
-        if c == ' ' or c == '\t' or c == '\r' or c == '#':
-            # (an indented line here: the file's first, or one after a comment line)
+        if c == '#':
+            # (a comment's line: a run of them read one by one, then the search goes on)
+            i = __find_newline(p, i, n)
+            if i >= n: break
+            if i + 1 < n and p[i + 1] == '#': i += 1
+            else: i = sc_next_line(i, 0)
+            continue
+        if c == ' ' or c == '\t' or c == '\r':
+            # (an indented line here: the file's first)
             i = sc_next_line(i, 0)
             continue
-        if sc_unit >= 0 and su_flags[sc_unit] & SU_WHEN != 0 and c == 'e' and sc_word_is(i, "else"):
+        if c == 'e' and sc_unit >= 0 and su_flags[sc_unit] & SU_WHEN != 0 and sc_word_is(i, "else"):
             i = sc_when_lines(i)
             continue
         if c == ')' or c == ']' or c == '}':
@@ -260,7 +274,11 @@ scan_source = (src: str) -> (int, int):
 sc_when_lines = (i0: int) -> int:
     p = sc_p
     n = sc_n
+    # (the branches' indentations, innermost last: branch[0..nb), its top bt; -1 until a
+    # branch's first line sets it)
     branch: int[] = [-1]
+    nb = 1
+    bt = -1
     i = sc_line_end(i0) + 1
     loop i < n:
         j = i
@@ -275,19 +293,26 @@ sc_when_lines = (i0: int) -> int:
             i = __find_newline(p, j, n) + 1
             continue
         if ind == 0: return i
-        loop branch.len() > 0 and branch[branch.len() - 1] >= 0 and ind < branch[branch.len() - 1]: branch.pop()
+        loop nb > 0 and bt >= 0 and ind < bt:
+            nb -= 1
+            if nb > 0: bt = branch[nb - 1]
         w = -1
-        if branch.len() > 0:
-            top = branch.len() - 1
-            if branch[top] < 0: branch[top] = ind
-            if ind == branch[top]:
-                if sc_word_is(j, "when") or sc_word_is(j, "else"): branch.push(-1)
+        if nb > 0:
+            if bt < 0:
+                bt = ind
+                branch[nb - 1] = ind
+            if ind == bt:
+                if (c == 'w' and sc_word_is(j, "when")) or (c == 'e' and p[j + 1] == 'l' and sc_word_is(j, "else")):
+                    if nb < branch.len(): branch[nb] = -1
+                    else: branch.push(-1)
+                    nb += 1
+                    bt = -1
                 else:
                     f = su_flags[sc_unit]
                     sc_classify(sc_src, j)
                     # (a statement in a branch: the unit is still a `when`, kept whole)
                     su_flags[sc_unit] = su_flags[sc_unit] | (f & SU_WHEN)
-            w = branch[branch.len() - 1]
+            w = bt
         i = sc_next_line(j, w)
     n
 
