@@ -610,6 +610,8 @@ quantity_operation = (op: Tok, a: int, b: int, pos: int) -> int:
 # (n becomes the checked e, tagged)
 quantity_become = (n: int, e: int, tag: int) -> int:
     nodes[n] = nodes[e]
+    # (an exact division's divisor obligation moves with its call)
+    move_divisor(e, n)
     last_checked = n
     if is_quantity(ntype(n)): return quantity_retag(n, tag)
     ntype(n)

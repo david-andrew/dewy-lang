@@ -33,9 +33,9 @@ match_class = (pattern:string start:int ch:string):>[bool int]? => {
 glob = (pattern:string name:string):>bool => {
     # greedy scan with backtracking to the most recent `*`
     let p = 0
-    let n:int64 = 0
+    let n = 0
     let star_p = -1
-    let star_n:int64 = 0
+    let star_n = 0
     loop n <? name.length {
         let pc = pattern.get(p) ?? ""
         if pc =? "*" {

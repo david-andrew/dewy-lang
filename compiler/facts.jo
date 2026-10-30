@@ -4415,16 +4415,51 @@ fact_rational_zero_test = (n: int) -> int:
 # `rational(numerator denominator)` of integers: its one failure is a zero
 # denominator, the caller's obligation as a division's divisor. O(1).
 fact_name_rational = 0
-fact_rational_constructor = (n: int) -> bool:
-    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) != 2: return false
+fact_rational_constructor = (n: int, count: int = 2) -> bool:
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) != count: return false
     d = int(fns[int(nodes[n].sym)].decl)
     if d == 0: return false
     if fact_name_rational == 0: fact_name_rational = intern("rational")
     if int(nodes[d].name) != fact_name_rational: return false
     path = files[pos_file(nodes[d].pos)].path
     if path != lib_dir + "/prelude/fractions.dewy" and path != lib_dir + "/rational.dewy": return false
-    t = representation_type(ntype(kid(n, 1)))
+    t = fact_quantity_number(ntype(kid(n, count - 1)))
     is_int(t) or t == T_MATH_INT
+
+# (a quantity's number type, as lowering erases the unit; any other type's representation)
+fact_quantity_number = (t0: int) -> int:
+    t = prune(t0)
+    if types[t].kind == .quantity: t = prune(int(types[t].elem))
+    representation_type(t)
+
+# `rational(a)` of an integer (an integer promoted, as `d/e` promotes e): its
+# numerator is a. O(1).
+fact_rational_promotion = (n: int) -> bool: nodes[n].kind == .call and nkids(n) == 1 and fact_rational_constructor(n, 1)
+
+# The value of `rational(a b)` (a call that returned, so b is nonzero): its
+# reduced numerator is a / gcd(a b) with b's sign folded in, so it is zero
+# exactly when a is, and for b > 0 it keeps a's sign within a's interval. A
+# constant pair is the reduced constant. Only a demanded constructor call (a
+# divisor's, or its own denominator's) gets here. O(1).
+fact_rational_made = (s: mut FactState, n: int, a: int, b: int) -> int:
+    result = fact_new(s, FactBound(), FactTerm(type = ntype(n)))
+    t = fact_quantity_number(ntype(kid(n, 0)))
+    if not is_int(t) and t != T_MATH_INT or s.projections.len() + 2 >= FACT_CAP: return result
+    x = fact_bound(s, a); y = fact_bound(s, b)
+    numerator = 0
+    if not x.wide and not y.wide and x.lo == x.hi and y.lo == y.hi and y.lo != 0 and x.lo != FACT_MIN and y.lo != FACT_MIN:
+        parts = rational_constant_parts(x.lo, y.lo)
+        numerator = fact_constant(s, parts.0)
+    else:
+        r = fact_domain(T_MATH_INT)
+        if y.lo > 0 and not y.wide and not x.wide:
+            if x.lo > 0: r = FactBound(1, x.hi, true)
+            else if x.hi < 0: r = FactBound(x.lo, -1, true)
+            else: r = FactBound(x.lo, x.hi, x.nz)
+        else: r.nz = x.nz or x.lo > 0 or x.hi < 0
+        numerator = fact_new(s, r, FactTerm(type = T_MATH_INT))
+    fact_add_projection(s, FactProjection(result, intern("numerator"), false, numerator))
+    result
 
 # A library integer or rational power, `x^n` with an integer n: every one fails
 # only for a negative exponent (a rational's for a zero base as well), so n >= 0
@@ -7399,7 +7434,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
                 if fact_parallel_array(n):
                     values.push(n)
                     values.push(kid(n, 0))
-            if result_active or proof_active or fact_divisors.has(n) or fact_rational_constructor(n): values.push(n)
+            if result_active or proof_active or fact_divisors.has(n) or fact_rational_constructor(n) or fact_rational_promotion(n): values.push(n)
             else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and fact_string_call(n) >= 2: values.push(n)
             else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and fact_rational_zero_test(n) >= 0:
                 values.push(n)
@@ -7572,7 +7607,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
         # (a length-preserving call's length is its receiver's: `let ks = d.keys` then `ks.values`
         # needs ks's definition)
         else if k == .call and (fact_copy_length_call(n) or fact_endpoint_call(n) != 0 or fact_same_length_call(n)): values.push(kid(n, 0))
-        else if k == .call and nodes[n].aux == 0 and not result_active and not proof_active and not fact_divisors.has(n) and not fact_rational_constructor(n) and fact_floor_call(n) == 0 and fact_string_call(n) == 0 and not fact_extremum_call(n) and not fact_empty_array_call(n) and not fact_entry_count_call(n) and not fact_split_call(n) and not fact_words_call(n) and not fact_lines_call(n) and not fact_search_call(n) and not fact_affix_call(n) and not fact_parallel_array(n) and not ref_refined_result(int(fns[int(nodes[n].sym)].ret)):
+        else if k == .call and nodes[n].aux == 0 and not result_active and not proof_active and not fact_divisors.has(n) and not fact_rational_constructor(n) and not fact_rational_promotion(n) and fact_floor_call(n) == 0 and fact_string_call(n) == 0 and not fact_extremum_call(n) and not fact_empty_array_call(n) and not fact_entry_count_call(n) and not fact_split_call(n) and not fact_words_call(n) and not fact_lines_call(n) and not fact_search_call(n) and not fact_affix_call(n) and not fact_parallel_array(n) and not ref_refined_result(int(fns[int(nodes[n].sym)].ret)):
             # Ordinary summaries start from unknown formals: their return
             # facts do not depend on the actual values. Argument obligations
             # and effects remain separate roots of this slice.
@@ -8420,7 +8455,8 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         if nodes[n].aux == i32(int(CV.set_text)): return fact_new(s, FactBound(), FactTerm(type = ntype(n)))
         # (an exact quantity and its number are one value: lowering erases the
         # unit, so `b not=? 0kg` guards `a / b`'s rational divisor. O(1))
-        if nodes[n].aux == i32(int(CV.none_)) and not fact_scalar(ntype(n)) and fact_unit_erased(ntype(int(nodes[n].a)), ntype(n)): return a
+        # (an integer quantity's number too, and a unit constant, `3s` or `cm`, is its number)
+        if (nodes[n].aux == i32(int(CV.none_)) or nodes[n].aux == i32(int(CV.quantity_const))) and fact_unit_erased(ntype(int(nodes[n].a)), ntype(n)): return a
         b = fact_bound(s, a)
         from = fact_type(ntype(int(nodes[n].a)))
         to = fact_type(ntype(n))
@@ -8848,6 +8884,11 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         if zero_test >= 0 and values[zero_test] != 0:
             numerator = fact_project(s, values[zero_test], intern("numerator"), false, T_MATH_INT)
             return fact_new(s, fact_domain(T_BOOL), FactTerm(.eq, numerator, fact_constant(s, 0)))
+        if values.len() == 2 and values[0] != 0 and values[1] != 0 and fact_rational_constructor(n): return fact_rational_made(s, n, values[0], values[1])
+        if values.len() == 1 and values[0] != 0 and fact_rational_promotion(n):
+            result = fact_new(s, FactBound(), FactTerm(type = ntype(n)))
+            if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, intern("numerator"), false, values[0]))
+            return result
         string = fact_string_call(n)
         if string == 4: return fact_byte_slice(n, s, values)
         if string == 5: fact_find_start(n, s, values[2], fact_project(s, values[0], -1, false, T_INT))

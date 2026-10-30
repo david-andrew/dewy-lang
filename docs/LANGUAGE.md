@@ -1576,7 +1576,9 @@ truncates toward zero. Exact numbers round as people do, a half away from zero:
 fractions. `abs`, `min` and `max` of fractions (an integer beside one included) are
 exact fractions, and `sign(q)` is an `int`; beside a float they give a float. A nonzero divisor of `/`, `//` and `%` is an obligation, as an
 integer division's, when the divisor is an integer or a constant (`x/n` after
-`n not=? 0`, `x/0.5`, and `a/b` after `b not=? 0kg` for an exact quantity); a rational divisor computed at run time, a zero
+`n not=? 0`, `x/0.5`, and `a/b` after `b not=? 0kg` for an exact quantity). A unit (`d/cm`,
+`t/°C`), a quantity constant (`let e = 3s` then `d/e`) and `rational(a b)` with `a` known
+nonzero are nonzero divisors. Any other rational divisor computed at run time, a zero
 denominator and negative powers of zero fail: they are compile errors by
 default, and panic under `$runtime_checks`; a base tested nonzero (`if q =? 0
 return ...`) takes any whole exponent. Zero to the zeroth power is one. Copies are independent, and
