@@ -1,3 +1,4 @@
+use 'checker_signature.dewy'
 use 'checker_resolve.dewy'
 use 'checker_alias.dewy'
 use 'checker_fields.dewy'
@@ -1302,10 +1303,8 @@ method_modules = (t0: int) -> int[]:
 
 # ---------------- functions ----------------
 decl_info = (decl: int) -> int:
-    if nodes[decl].sym == 0:
-        decl_infos.push(DeclInfo())
-        nodes[decl].sym = i32(decl_infos.len() - 1)
-    int(nodes[decl].sym)
+    if nodes[decl].sym != 0: return int(nodes[decl].sym)
+    cs_decl_info(decl)
 
 # Modules whose parse would have turned the program-wide refinement machinery on, held off
 # until one of their declarations is resolved (dewy_prelude_module): `mod` of floats does not
@@ -1319,23 +1318,16 @@ refine_resume = (m: int):
 
 # a refinement written in the type annotations under node n (a declaration's parameters and
 # result, say)
-written_refinement = (n: int) -> bool:
-    if n == 0: return false
-    k = nodes[n].kind
-    if k == .trefined or (k == .tmap and nodes[n].aux == 1) or k == .tarray and nodes[n].ival == 1: return true
-    if k == .block or k == .lambda: return false
-    if (k == .param or k == .fn_) and written_refinement(int(nodes[n].a)): return true
-    if k != .param and k != .fn_ and (written_refinement(int(nodes[n].a)) or written_refinement(int(nodes[n].b))): return true
-    loop i in [0..nkids(n)):
-        if written_refinement(kid(n, i)): return true
-    false
+written_refinement = (n: int) -> bool: cs_written_refinement(n)
 
 fn_sig = (decl: int) -> FnSig:
-    di = decl_info(decl)
-    if decl_infos[di].sig.done: return decl_infos[di].sig
+    # Preserve the frequently requested cached signature without a service entry.
+    di = int(nodes[decl].sym)
+    if di != 0 and decl_infos[di].sig.done: return decl_infos[di].sig
+    cs_fn_sig(decl)
+signature_resume = (decl: int):
     if refine_deferred.len() > 0 and not refine_active and refine_deferred.has(int(nodes[decl].mod)) and written_refinement(decl): refine_resume(int(nodes[decl].mod))
-    sig = FnSig(done = true)
-    sig.nexplicit = i32(nkids2(decl))
+signature_enter = (decl: int) -> CheckerSignatureScope:
     saved = cx
     parent = if nodes[decl].kind == .lambda: cx else: -1
     floor = if parent >= 0: ctxs[parent].floor else: i32(check_scopes.names.len())
@@ -1348,28 +1340,12 @@ fn_sig = (decl: int) -> FnSig:
         pt = mk_param(i)
         if nodes[kid2(decl, i)].aux == 1: pt = effect_type(effect_intern([], [], [pt]))
         push_scope_sym(nm, new_sym(nm, .type_, pt, 0))
-    old_formals = refine_bindings.formals
-    old_self = refine_bindings.self
-    refine_bindings.formals = []
-    if refine_active:
-        loop p in kids(decl): refine_bindings.formals.push(int(nodes[p].name))
-    mm = 0
-    shaped = nd_has_shape(int(nodes[decl].a))
-    loop i in [0..nkids(decl)):
-        p = kid(decl, i)
-        refine_bindings.self = int(nodes[p].name)
-        if nd_has_shape(int(nodes[p].a)): shaped = true
-        if nodes[p].a != 0: sig.params.push(resolve_type(int(nodes[p].a)))
-        else:
-            sig.params.push(mk_param(ntp))
-            ntp += 1
-        if has_flag(p, NF_MUT): mm |= 1 << i
-    sig.mutmask = i32(mm)
-    sig.ntp = i32(ntp)
-    sig.generic = ntp > 0
-    refine_bindings.self = 0
-    if nodes[decl].a != 0: sig.ret = i32(resolve_result_type(int(nodes[decl].a)))
-    else if has_flag(decl, NF_VOID): sig.ret = i32(T_VOID)
+    CheckerSignatureScope(saved, mark)
+signature_leave = (scope: CheckerSignatureScope):
+    scope_reset(scope.mark)
+    ctxs.pop()
+    cx = scope.context
+signature_finish = (decl: int, sig: mut FnSig, shaped: bool, mask: int):
     if shaped: sig.ret = i32(nd_signature(decl, sig.params, int(sig.ret)))
     if result_active: result_signature(decl, sig.params, int(sig.ret))
     if proof_active and proof_decls.has(decl):
@@ -1383,7 +1359,7 @@ fn_sig = (decl: int) -> FnSig:
         loop atom in atoms: proof_atom_type(atom, sig.params, nodes[decl].pos)
         proof_predicates[decl] = ref_intern(atoms)
     if refine_active:
-        ref_validate_signature(sig.params, int(sig.ret), mm, nodes[decl].pos)
+        ref_validate_signature(sig.params, int(sig.ret), mask, nodes[decl].pos)
         if has_flag(decl, NF_EXTERN):
             loop t in sig.params + [int(sig.ret)]:
                 if ref_storage_contract(t): fatal(nodes[decl].pos, "extern refinement contracts require a checked implementation")
@@ -1394,13 +1370,9 @@ fn_sig = (decl: int) -> FnSig:
     if nodes[decl].c != 0 and nodes[decl].kind == .fn_:
         wi_read_decl(decl)
         cc_read_decl(decl)
-    scope_reset(mark)
-    ctxs.pop()
-    cx = saved
-    refine_bindings.formals = old_formals
-    refine_bindings.self = old_self
-    decl_infos[di].sig = sig
-    sig
+signature_host = CheckerSignatureHost(signature_resume, signature_enter, signature_leave, signature_finish)
+signature_input = CheckerSignatureInput(&nodes, &lists, &decl_infos, &refine_bindings, &refine_active, &T_VOID, &signature_host)
+signature_binding = checker_signature_bind(&signature_input)
 
 # (operators get names: ([]) is op_index, shown as such in backtraces: lib/std/backtrace.jo)
 OP_NAMES = ["[]", "index", "[]=", "set", "+", "add", "-", "sub", "*", "mul", "/", "div", "%", "mod", "==", "eq", "<", "lt", "^", "pow"]

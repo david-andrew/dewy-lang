@@ -1,0 +1,82 @@
+use 'node_store.dewy'
+use 'checker_state.dewy'
+use 'checker_resolve.dewy'
+use 'type_constructors.dewy'
+struct CheckerSignatureScope:
+    context: int
+    mark: int
+struct CheckerSignatureHost:
+    resume: (int) -> void
+    enter: (int) -> CheckerSignatureScope
+    leave: (CheckerSignatureScope) -> void
+    finish: (int, mut FnSig, bool, int) -> void
+struct CheckerSignatureInput:
+    nodes: *(Node[])
+    lists: *(i32[])
+    declarations: *(DeclInfo[])
+    binders: *RefineBindings
+    refine: *bool
+    void_type: *int
+    host: *CheckerSignatureHost
+cs_input: *CheckerSignatureInput
+checker_signature_bind = (input: *CheckerSignatureInput) -> int:
+    cs_input = input
+    0
+cs_decl_info = (decl: int) -> int:
+    if cs_input[0].nodes[0][decl].sym == 0:
+        cs_input[0].declarations[0].push(DeclInfo())
+        cs_input[0].nodes[0][decl].sym = i32(cs_input[0].declarations[0].len() - 1)
+    int(cs_input[0].nodes[0][decl].sym)
+cs_nkids = (n: int) -> int: int(cs_input[0].nodes[0][n].nlist)
+cs_kid = (n: int, i: int) -> int: int(cs_input[0].lists[0][int(cs_input[0].nodes[0][n].list) + i])
+cs_has_flag = (n: int, flag: int) -> bool: int(cs_input[0].nodes[0][n].flags) & flag != 0
+cs_has_shape = (n: int) -> bool:
+    n != 0 and cs_input[0].nodes[0][n].kind == .tarray and cs_input[0].nodes[0][n].ival == 1
+cs_written_refinement = (n: int) -> bool:
+    if n == 0: return false
+    k = cs_input[0].nodes[0][n].kind
+    if k == .trefined or (k == .tmap and cs_input[0].nodes[0][n].aux == 1) or k == .tarray and cs_input[0].nodes[0][n].ival == 1: return true
+    if k == .block or k == .lambda: return false
+    if (k == .param or k == .fn_) and cs_written_refinement(int(cs_input[0].nodes[0][n].a)): return true
+    if k != .param and k != .fn_ and (cs_written_refinement(int(cs_input[0].nodes[0][n].a)) or cs_written_refinement(int(cs_input[0].nodes[0][n].b))): return true
+    loop i in [0..cs_nkids(n)):
+        if cs_written_refinement(cs_kid(n, i)): return true
+    false
+
+cs_fn_sig = (decl: int) -> FnSig:
+    di = cs_decl_info(decl)
+    if cs_input[0].declarations[0][di].sig.done: return cs_input[0].declarations[0][di].sig
+    cs_input[0].host[0].resume(decl)
+    sig = FnSig(done = true)
+    sig.nexplicit = cs_input[0].nodes[0][decl].nlist2
+    scope = cs_input[0].host[0].enter(decl)
+    ntp = int(cs_input[0].nodes[0][decl].nlist2)
+    old_formals = cs_input[0].binders[0].formals
+    old_self = cs_input[0].binders[0].self
+    cs_input[0].binders[0].formals = []
+    if cs_input[0].refine[0]:
+        loop i in [0..cs_nkids(decl)):
+            cs_input[0].binders[0].formals.push(int(cs_input[0].nodes[0][cs_kid(decl, i)].name))
+    mm = 0
+    shaped = cs_has_shape(int(cs_input[0].nodes[0][decl].a))
+    loop i in [0..cs_nkids(decl)):
+        p = cs_kid(decl, i)
+        cs_input[0].binders[0].self = int(cs_input[0].nodes[0][p].name)
+        if cs_has_shape(int(cs_input[0].nodes[0][p].a)): shaped = true
+        if cs_input[0].nodes[0][p].a != 0: sig.params.push(ct_resolve_type(int(cs_input[0].nodes[0][p].a)))
+        else:
+            sig.params.push(tb_mk_param(ntp))
+            ntp += 1
+        if cs_has_flag(p, 1): mm |= 1 << i
+    sig.mutmask = i32(mm)
+    sig.ntp = i32(ntp)
+    sig.generic = ntp > 0
+    cs_input[0].binders[0].self = 0
+    if cs_input[0].nodes[0][decl].a != 0: sig.ret = i32(ct_resolve_result(int(cs_input[0].nodes[0][decl].a)))
+    else if cs_has_flag(decl, 4194304): sig.ret = i32(cs_input[0].void_type[0])
+    cs_input[0].host[0].finish(decl, sig, shaped, mm)
+    cs_input[0].host[0].leave(scope)
+    cs_input[0].binders[0].formals = old_formals
+    cs_input[0].binders[0].self = old_self
+    cs_input[0].declarations[0][di].sig = sig
+    sig

@@ -1,0 +1,94 @@
+$runtime_checks
+from p"node_store.dewy" import Node
+from p"checker_state.dewy" import (FnSig DeclInfo RefineBindings)
+from p"checker_resolve.dewy" import (ct_resolve_type ct_resolve_result)
+from p"type_constructors.dewy" import tb_mk_param
+# Demand-only signature construction: O(parameters + visited type syntax), plus
+# the existing semantic obligations. Cache IDs survive nested arena growth.
+# The host borrows the local signature for validation; no per-field callbacks.
+CSWord:type=int64<overflow='wrap'>
+CheckerSignatureScope:type=[context:int64=0 mark:int64=0]
+CheckerSignatureHost:type=[
+    resume:<(decl:int64):>void>
+    enter:<(decl:int64):>CheckerSignatureScope>
+    leave:<(scope:CheckerSignatureScope):>void>
+    finish:<(decl:int64 @sig:FnSig shaped:bool mask:int64):>void>
+]
+CheckerSignatureInput:type=[
+    nodes:ptr<array<Node>>
+    lists:ptr<array<int32>>
+    declarations:ptr<array<DeclInfo>>
+    binders:ptr<RefineBindings>
+    refine:ptr<bool>
+    void_type:ptr<int64>
+    host:ptr<CheckerSignatureHost>
+]
+let cs_input:ptr<CheckerSignatureInput>=$unsafe (uint64(0) as ptr<CheckerSignatureInput>)
+checker_signature_bind=(input:ptr<CheckerSignatureInput>):>CSWord=>{cs_input=input;0}
+cs_decl_info=(decl:CSWord):>CSWord=>$unsafe {
+    if cs_input[0].nodes[0].ptr[decl].sym =? 0 {
+        cs_input[0].declarations[0].push(DeclInfo[])
+        cs_input[0].nodes[0][decl].sym = int32<overflow='wrap'>(cs_input[0].declarations[0].length - 1)
+    }
+    CSWord(cs_input[0].nodes[0].ptr[decl].sym)
+}
+cs_nkids=(n:CSWord):>CSWord=>$unsafe {CSWord(cs_input[0].nodes[0].ptr[n].nlist)}
+cs_kid=(n:CSWord i:CSWord):>CSWord=>$unsafe {CSWord(cs_input[0].lists[0].ptr[CSWord(cs_input[0].nodes[0].ptr[n].list) + i])}
+cs_has_flag=(n:CSWord flag:CSWord):>bool=>$unsafe {(CSWord(cs_input[0].nodes[0].ptr[n].flags) & flag) not=? 0}
+cs_has_shape=(n:CSWord):>bool=>$unsafe {
+    n not=? 0 and cs_input[0].nodes[0].ptr[n].kind =? 'tarray' and cs_input[0].nodes[0].ptr[n].ival =? 1
+}
+cs_written_refinement=(n:CSWord):>bool=>$unsafe {
+    if n =? 0 {return false}
+    # This pure walk cannot grow nodes or lists, so retain the borrowed record.
+    let nd=cs_input[0].nodes[0].ptr + n
+    let k=nd[0].kind
+    if k =? 'trefined' or (k =? 'tmap' and nd[0].aux =? 1) or (k =? 'tarray' and nd[0].ival =? 1) {return true}
+    if k =? 'block' or k =? 'lambda' {return false}
+    if (k =? 'param' or k =? 'fn_') and cs_written_refinement(CSWord(nd[0].a)) {return true}
+    if k not=? 'param' and k not=? 'fn_' and (cs_written_refinement(CSWord(nd[0].a)) or cs_written_refinement(CSWord(nd[0].b))) {return true}
+    loop i in [0..CSWord(nd[0].nlist)) {
+        if cs_written_refinement(CSWord(cs_input[0].lists[0].ptr[CSWord(nd[0].list) + i])) {return true}
+    }
+    false
+}
+cs_fn_sig=(decl:CSWord):>FnSig=>$unsafe {
+    let di=cs_decl_info(decl)
+    if cs_input[0].declarations[0].ptr[di].sig.done {return cs_input[0].declarations[0].ptr[di].sig}
+    cs_input[0].host[0].resume(decl)
+    let sig=FnSig[done=true]
+    sig.nexplicit = cs_input[0].nodes[0].ptr[decl].nlist2
+    let scope=cs_input[0].host[0].enter(decl)
+    let ntp=CSWord(cs_input[0].nodes[0].ptr[decl].nlist2)
+    let old_formals=cs_input[0].binders[0].formals
+    let old_self=cs_input[0].binders[0].self
+    cs_input[0].binders[0].formals = []
+    if cs_input[0].refine[0] {
+        loop i in [0..cs_nkids(decl)) {cs_input[0].binders[0].formals.push(CSWord(cs_input[0].nodes[0].ptr[cs_kid(decl i)].name))}
+    }
+    let mm:CSWord=0
+    let shaped=cs_has_shape(CSWord(cs_input[0].nodes[0].ptr[decl].a))
+    loop i in [0..cs_nkids(decl)) {
+        let p=cs_kid(decl i)
+        cs_input[0].binders[0].self = CSWord(cs_input[0].nodes[0].ptr[p].name)
+        if cs_has_shape(CSWord(cs_input[0].nodes[0].ptr[p].a)) {shaped=true}
+        if cs_input[0].nodes[0].ptr[p].a not=? 0 {sig.params.push(ct_resolve_type(CSWord(cs_input[0].nodes[0].ptr[p].a)))}
+        else {
+            sig.params.push(tb_mk_param(ntp))
+            ntp += 1
+        }
+        if cs_has_flag(p 1) {mm |= 1 << i}
+    }
+    sig.mutmask = int32<overflow='wrap'>(mm)
+    sig.ntp = int32<overflow='wrap'>(ntp)
+    sig.generic = ntp >? 0
+    cs_input[0].binders[0].self = 0
+    if cs_input[0].nodes[0].ptr[decl].a not=? 0 {sig.ret = int32<overflow='wrap'>(ct_resolve_result(CSWord(cs_input[0].nodes[0].ptr[decl].a)))}
+    else if cs_has_flag(decl 4194304) {sig.ret = int32<overflow='wrap'>(cs_input[0].void_type[0])}
+    cs_input[0].host[0].finish(decl @sig shaped mm)
+    cs_input[0].host[0].leave(scope)
+    cs_input[0].binders[0].formals = old_formals
+    cs_input[0].binders[0].self = old_self
+    cs_input[0].declarations[0][di].sig = sig
+    sig
+}
