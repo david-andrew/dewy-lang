@@ -103,7 +103,7 @@ def compare(compiler: Path, source: Path, mode: str, directory: Path, *,
         if selection == 'trace':
             lines = stderr.splitlines(keepends=True)
             trace = [line for line in lines if line.startswith(
-                (b'member syntax rejected ', b'member template ', b'member lowering '))]
+                (b'member syntax rejected ', b'member template ', b'member facts ', b'member lowering '))]
             stderr = b''.join(line for line in lines if line not in trace)
             folded = any(line.startswith(b'member lowering ') and b': true,' in line for line in trace)
         files = {str(p.relative_to(output)): hashlib.sha256(p.read_bytes()).hexdigest()

@@ -294,6 +294,10 @@ dir_policy = (p: int) -> int:
 dir_defer = (n: int, what: str, deferrable: bool) -> bool:
     # (an `$assert` condition, and what it reads, must be proven)
     if not deferrable or n <= 0 or fact_query: return false
+    # (a shared member decision is tentative: the body is decided again)
+    if fact_member_shared:
+        fact_member_failed = true
+        return true
     # (erased proofs have no runtime fallback)
     if proof_active and fact_owner > 0 and fact_owner < fns.len() and proof_decls.has(int(fns[fact_owner].decl)): return false
     p = nodes[n].pos
@@ -326,6 +330,7 @@ dir_obligation_text = (what: str) -> str:
 # Every analyzed visit of an index must prove it before its check is dropped.
 dir_index = (n: int, proven: bool):
     if fact_speculating > 0: return
+    if not proven and fact_member_shared: fact_member_failed = true
     if not proven: dir_proven[n] = false
     else if not dir_proven.has(n): dir_proven[n] = true
 

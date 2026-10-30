@@ -40,6 +40,7 @@ use 'string_domains.jo'
 use 'draw_context.jo'
 use 'predicate_facts.jo'
 use 'floats.jo'
+use 'member_replay.jo'
 
 # One tombstone per invalidated route: the event that last replaced the
 # place and the value it replaced. Witnesses only; never evidence.
@@ -5175,7 +5176,7 @@ fact_map_key = (s: mut FactState, e0: int, value: int) -> int:
     e = e0
     loop nodes[e].kind == .narrow or nodes[e].kind == .conv: e = int(nodes[e].a)
     if has_flag(e, NF_MAP_KEY) and nodes[e].kind == .ident: return value
-    if nodes[e].kind == .str_lit and nkids(e) == 0 and nodes[e].sval >= 0: return fact_constant(s, (1 << 42) + int(nodes[e].sval))
+    if nodes[e].kind == .str_lit and nkids(e) == 0 and nodes[e].sval >= 0 and not fact_member_literal(e): return fact_constant(s, (1 << 42) + int(nodes[e].sval))
     stable = fact_stable_key(e)
     if stable > 0: return fact_constant(s, stable)
     value
@@ -7322,6 +7323,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
     index_demands: int[]
     carried = false
     probe_only = false
+    members = fact_member_shared and f == fact_member_owner and not summary
     # Preparation visits only exact owners. Gate its node indexes once per
     # slice; unrelated bodies and summary slices have no exact value roots.
     exact = not summary and exact_marks.len() > 0 and exact_owners.has(f)
@@ -7349,7 +7351,9 @@ fact_slice_prepare = (f: int, summary: bool = false):
             if mask & 2 != 0: fact_slice_member(parents, work, int(nodes[n].b), n)
             if mask & 4 != 0: fact_slice_member(parents, work, int(nodes[n].c), n)
             if mask & 16 != 0:
-                loop i in [0..nkids(n)): fact_slice_member(parents, work, kid(n, i), n)
+                walk = nkids(n)
+                if members and k == .block and walk > 1 and fact_member_admit(n): walk = 1
+                loop i in [0..walk): fact_slice_member(parents, work, kid(n, i), n)
         if k == .block and has_flag(n, NF_COMPREHENSION) and nkids(n) > 0 and nodes[kid(n, 0)].kind == .vardecl: accumulators[int(nodes[kid(n, 0)].sym)] = true
         if k == .vardecl:
             if ownership_decls.len() != 0 and nodes[n].b != 0 and ownership_fact_type(ntype(int(nodes[n].b))): active.push(n)
@@ -7618,7 +7622,8 @@ fact_slice_prepare = (f: int, summary: bool = false):
     fact_slice.exact_demands = exact_demands
     fact_slice.index_demands = index_demands
     if share: fact_slice.float_context = dir_floats_any or ff_conversions.has(fact_owner)
-    fact_slice_cache[key] = fact_slice
+    # (a plan that walks only member templates serves only the shared decide run)
+    if not members or fact_member_admitted.len() == 0: fact_slice_cache[key] = fact_slice
 
 # At a fork closure's creation: its captures' facts, by capture. O(k^2)
 # bounded relaxations for k <= 16 captured terms.
@@ -7946,6 +7951,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         loop shared in fact_shared_literals:
             if shared.0 == n and fact_slot(s, shared.1) >= 0: return shared.1
         return fact_literal(s, n)
+    if k == .str_lit and fact_member_template >= 0 and fact_member_literal(n): return fact_new(s, FactBound(), FactTerm(type = T_STR))
     # (an ASCII string literal's length is its byte count; "\r\n" is one grapheme)
     if k == .str_lit and nodes[n].aux != 1 and fact_type(ntype(n)) == T_STR and nodes[n].sval >= 0:
         text = name_of(int(nodes[n].sval))
@@ -8118,6 +8124,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         return fact_unmodeled(s, n, .unsupported)
     if k == .exprstmt: return fact_capture(int(nodes[n].a), s)
     if k == .block:
+        if fact_member_shared and nkids(n) > 1 and fact_member_block(n, s): return 0
         r = 0
         defers: int[]
         pending = fact_pending_defers
@@ -9332,6 +9339,128 @@ fn_dewy = (f: int) -> bool:
         return file >= 0 and file < files.len() and files[file].is_dewy
     files[pos_file(nodes[int(fns[f].body)].pos)].is_dewy
 
+# Admitted members(U) copies (member_replay.jo) differ only in their member
+# literal. A decide run analyses such a block once: its first copy, from the
+# entry with every place that copy changes havocked and its member literals
+# unknown text. That state covers every copy's entry (the entry after earlier
+# copies' changes) and that analysis every copy's, so each proof holds in each
+# copy, and its exit covers the block's. A parallel walk copies the template's
+# decisions to the other copies. A failure or deferral anywhere in the body
+# restores the decisions before and decides it again copy by copy, with the
+# full plan: shared or not, a body gets the decisions of the copy-by-copy run.
+# O(B + M*B) node visits in place of M transfers and plans (B template nodes).
+fact_member_shared = false
+fact_member_failed = false
+fact_member_owner = 0
+fact_member_template = -1
+fact_member_admitted: {int: int[]}
+
+fact_member_literal = (n: int) -> bool: fact_member_template >= 0 and member_templates[fact_member_template].positions.has(nodes[n].pos)
+
+fact_member_candidate = (f: int) -> bool:
+    if member_templates.len() == 0 or fact_policy != .RequireStatic or fact_probe_on or fact_query or wit_tentative or proof_active or result_active or ide_on: return false
+    if ownership_decls.len() != 0 or exact_owners.has(f) or fact_summary_owner != 0: return false
+    loop i in [0..member_templates.len()):
+        if member_templates[i].owner == f and member_templates[i].okay: return true
+    false
+
+# x and y are the same checked syntax but for member literals and local
+# copies. Pairs of the nodes a decision can mark (dir_index, fact_validated)
+# go onto pairs. O(nodes), field reads only.
+fact_member_same = (x: int, y: int, index: int, pairs: mut int[]) -> bool:
+    if x == 0 or y == 0: return x == y
+    k = nodes[x].kind
+    if k != nodes[y].kind or nodes[x].pos != nodes[y].pos or nodes[x].type != nodes[y].type or nodes[x].flags != nodes[y].flags or nodes[x].op != nodes[y].op: return false
+    if nodes[x].ival != nodes[y].ival or nodes[x].name != nodes[y].name or nodes[x].aux2 != nodes[y].aux2 or nodes[x].d != nodes[y].d or nodes[x].nlist != nodes[y].nlist or nodes[x].nlist2 != 0 or nodes[y].nlist2 != 0: return false
+    if x < exact_marks.len() and exact_marks[x] != 0 or y < exact_marks.len() and exact_marks[y] != 0: return false
+    if rational_constants.len() != 0 and (rational_constants.has(x) or rational_constants.has(y)): return false
+    if (k == .str_lit or k == .dotname) and member_templates[index].positions.has(nodes[x].pos):
+        if k == .dotname and tkind(ntype(x)) == .enum_ or k == .str_lit and (nodes[x].aux != 0 or nodes[x].nlist != 0): return false
+    else if nodes[x].sval != nodes[y].sval or nodes[x].aux != nodes[y].aux: return false
+    if nodes[x].sym != nodes[y].sym:
+        if not (k == .vardecl or k == .ident and nodes[x].aux == i32(int(SK.local))) or nodes[x].sym <= 0 or nodes[y].sym <= 0: return false
+        lx = int(nodes[x].sym)
+        ly = int(nodes[y].sym)
+        if locals[lx].type != locals[ly].type or locals[lx].flags != locals[ly].flags: return false
+    if k == .index or k == .intrinsic or k == .conv:
+        if k == .conv and ff_integer_demand(x): return false
+        pairs.push(x)
+        pairs.push(y)
+    mask = isolation_children(k)
+    if mask < 0: return false
+    if mask & 1 != 0 and not fact_member_same(int(nodes[x].a), int(nodes[y].a), index, pairs): return false
+    if mask & 2 != 0 and not fact_member_same(int(nodes[x].b), int(nodes[y].b), index, pairs): return false
+    if mask & 4 != 0 and not fact_member_same(int(nodes[x].c), int(nodes[y].c), index, pairs): return false
+    if mask & 16 != 0:
+        loop i in [0..nkids(x)):
+            if not fact_member_same(kid(x, i), kid(y, i), index, pairs): return false
+    true
+
+# (the plan's admission of block b: member_lower_block's, every copy the same)
+fact_member_admit = (b: int) -> bool:
+    index = member_scopes.get(kid(b, 0)) ?? -1
+    if index < 0 or not member_templates[index].okay or nkids(b) != member_templates[index].texts.len(): return false
+    if member_templates[index].requests.len() != 0 or member_templates[index].refinements.len() != 0: return false
+    template = kid(b, 0)
+    pairs: int[]
+    loop i in [0..nkids(b)):
+        scope = kid(b, i)
+        if (member_scopes.get(scope) ?? -1) != index or not member_scope_locals.has(scope): return false
+        if i > 0 and not fact_member_same(template, scope, index, pairs): return false
+    fact_member_admitted[b] = pairs
+    true
+
+fact_member_block = (b: int, s: mut FactState) -> bool:
+    if not fact_member_admitted.has(b) or fact_owner != fact_member_owner or fact_summary_owner != 0 or fact_probe_on or fact_member_template >= 0: return false
+    template = kid(b, 0)
+    fact_changes(template, s, b)
+    fact_member_template = member_scopes[template]
+    fact_capture(template, s)
+    fact_member_template = -1
+    # (the template's decisions, at the same nodes of every other copy)
+    if fact_speculating == 0:
+        pairs = fact_member_admitted[b]
+        loop i in [0..pairs.len() / 2):
+            x = pairs[2 * i]
+            y = pairs[2 * i + 1]
+            if let proven = dir_proven.get(x): dir_index(y, proven)
+            if fact_validated.has(x): fact_validated[y] = true
+    true
+
+# f decided with shared member blocks; false: no decision kept, decide it again.
+fact_member_decide = (f: int) -> bool:
+    proven = dir_proven
+    validated = fact_validated
+    notes = err_notes
+    fact_member_shared = true
+    fact_member_owner = f
+    fact_member_failed = false
+    fact_member_admitted = {}
+    wit_tentative = true
+    wit_tentative_failed = false
+    state = FactState()
+    if refine_active or refine_requests.len() > 0: refine_fact_entry(f, state)
+    if fact_fork_entries.len() > 0 or fact_parallel_bounds.len() > 0: fact_fork_seed(f, state)
+    fact_slice_prepare(f)
+    fact_capture(int(fns[f].body), state)
+    failed = fact_member_failed or wit_tentative_failed
+    if member_trace and fact_member_admitted.len() != 0:
+        verdict = "shared"
+        if failed: verdict = "decided again"
+        eprint("member facts {pos_str(nodes[int(fns[f].body)].pos)}: {fact_member_admitted.len()} blocks, {verdict}")
+    wit_tentative = false
+    wit_tentative_failed = false
+    fact_member_shared = false
+    fact_member_owner = 0
+    fact_member_admitted = {}
+    if not failed: return true
+    dir_proven = proven
+    fact_validated = validated
+    err_notes = notes
+    fact_terms = [FactTerm()]
+    fact_constructor_actuals = {}
+    false
+
 facts_finalize = ():
     draw_context_finalize()
     if proof_active: proof_prepare()
@@ -9394,6 +9523,10 @@ facts_finalize = ():
             ic_restore(icb)
             continue
         fact_panic_collect = false
+        if fact_member_candidate(f) and fact_member_decide(f):
+            fact_policy = previous_policy
+            ic_restore(icb)
+            continue
         if refine_active or refine_requests.len() > 0: refine_fact_entry(f, state)
         if fact_fork_entries.len() > 0 or fact_parallel_bounds.len() > 0: fact_fork_seed(f, state)
         fact_slice_prepare(f)
