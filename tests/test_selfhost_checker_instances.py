@@ -100,3 +100,13 @@ def test_checker_instances_twins(compiler, tmp_path, release):  # noqa: F811
     assert compare(compiler, tmp_path, release, DRIVER,
                    extra_stems=('checker_signature', 'type_substitute',
                                 'checker_results', 'checker_instances')).endswith(b'ok\n')
+
+
+@pytest.mark.parametrize('statement,status', [
+    ('ci_get_fn_inst(d, [int(tb_mk_var())], 901)', 19),
+    ('contexts.push(FnCtx(inst = i32(f))); context = 0; functions[f].gdepth = 500; ci_get_fn_inst(d, [T_FLOAT], 902)', 20),
+])
+def test_checker_instances_reject_unbounded_requests(compiler, tmp_path, statement, status):  # noqa: F811
+    compare(compiler, tmp_path, False, DRIVER.replace('    print(events)', '    ' + statement + '\n    print(events)'),
+            status=status, extra_stems=('checker_signature', 'type_substitute',
+                                       'checker_results', 'checker_instances'))

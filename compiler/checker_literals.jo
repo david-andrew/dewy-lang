@@ -1,0 +1,146 @@
+# Frozen literal checker extracted from expr.jo.
+use 'node_store.dewy'
+use 'checker_types.dewy'
+use 'type_inference.dewy'
+use 'type_constructors.dewy'
+struct CheckerLiteralHost:
+    default_type: (int) -> int
+    coerce: (int, int) -> int
+    effect: (int, int) -> int
+    exact: (int) -> void
+    charlike: (int) -> void
+    check: (int, int) -> int
+    finalize: (int) -> int
+    format_part: (int, int) -> void
+    interpolation_warning: (int) -> void
+    float_error: (int) -> void
+struct CheckerLiteralInput:
+    nodes: *(Node[])
+    lists: *(i32[])
+    types: *(TypeInfo[])
+    refine: *(bool)
+    effects: *(bool)
+    exact_measure: *(bool)
+    last: *(int)
+    string_type: *(int)
+    float_type: *(int)
+    bool_type: *(int)
+    null_type: *(int)
+    host: *(CheckerLiteralHost)
+xl_nodes: *(Node[])
+xl_lists: *(i32[])
+xl_types: *(TypeInfo[])
+xl_refine: *(bool)
+xl_effects: *(bool)
+xl_exact_measure: *(bool)
+xl_last: *(int)
+xl_string_type: *(int)
+xl_float_type: *(int)
+xl_bool_type: *(int)
+xl_null_type: *(int)
+xl_host: *(CheckerLiteralHost)
+checker_literals_bind = (input: *CheckerLiteralInput) -> int:
+    xl_nodes = input[0].nodes
+    xl_lists = input[0].lists
+    xl_types = input[0].types
+    xl_refine = input[0].refine
+    xl_effects = input[0].effects
+    xl_exact_measure = input[0].exact_measure
+    xl_last = input[0].last
+    xl_string_type = input[0].string_type
+    xl_float_type = input[0].float_type
+    xl_bool_type = input[0].bool_type
+    xl_null_type = input[0].null_type
+    xl_host = input[0].host
+    0
+xl_representation = (t0: int) -> int:
+    t = tu_prune(t0)
+    if xl_types[0][t].kind == .refined: return tu_prune(int(xl_types[0][t].elem))
+    t
+xl_numeric = (t: int) -> bool:
+    k = xl_types[0][tu_prune(t)].kind
+    k == .int_ or k == .float_
+xl_expected = (expected: int) -> int:
+    if expected == 0: return 0
+    ex = tu_prune(expected)
+    if xl_refine[0]: ex = xl_representation(ex)
+    ex
+
+# (an expression's type, recorded once its kind is checked)
+xl_publish = (node: mut Node, t: int):
+    node.type = i32(t)
+    node.flags |= 128
+xl_finish = (n: int, t0: int, expected: int) -> int:
+    t = t0
+    if xl_refine[0] and xl_types[0][t].kind == .refined: t = int(xl_types[0][t].elem)
+    xl_nodes[0][n].type = i32(t)
+    if xl_effects[0]: t = xl_host[0].effect(n, expected); xl_nodes[0][n].type = i32(t)
+    xl_nodes[0][n].flags |= 128
+    if xl_exact_measure[0] or xl_nodes[0][n].kind == .binary or xl_nodes[0][n].kind == .unary or xl_nodes[0][n].kind == .intrinsic or xl_nodes[0][n].kind == .conv and xl_nodes[0][n].aux == 2: xl_host[0].exact(n)
+    xl_last[0] = n
+    t
+
+xl_check_int = (n: int, expected: int) -> int:
+    ex = xl_expected(expected)
+    exk = TK.void_
+    if ex != 0: exk = xl_types[0][ex].kind
+    t = 0
+    xl_nodes[0][n].flags |= 256
+    xl_nodes[0][n].type = i32(xl_host[0].default_type(n))
+    if ex != 0 and exk == .int_:
+        xl_host[0].coerce(n, ex)
+        t = ex
+    else if ex != 0 and exk == .float_:
+        xl_host[0].coerce(n, ex)
+        t = ex
+    else if ex != 0 and exk == .opt and xl_numeric(int(xl_types[0][ex].elem)):
+        xl_host[0].coerce(n, tu_prune(int(xl_types[0][ex].elem)))
+        t = int(xl_nodes[0][n].type)
+    else:
+        t = xl_host[0].default_type(n)
+    xl_finish(n, t, expected)
+
+xl_check_str = (n: int, expected: int) -> int:
+    ex = xl_expected(expected)
+    t = 0
+    if int(xl_nodes[0][n].flags) & 512 != 0 and ex != 0 and xl_types[0][tu_prune(ex)].kind == .int_:
+        xl_host[0].charlike(n)
+        return xl_host[0].check(n, expected)
+    else:
+        if xl_nodes[0][n].aux != 0:
+            loop i in [0..int(xl_nodes[0][n].nlist)):
+                part = int(xl_lists[0][int(xl_nodes[0][n].list) + i])
+                if xl_nodes[0][part].kind != .pair: continue
+                e = int(xl_nodes[0][part].a)
+                xl_host[0].interpolation_warning(e)
+                xl_host[0].check(e, 0)
+                xl_host[0].finalize(e)
+                xl_host[0].format_part(part, xl_nodes[0][part].pos)
+        t = xl_string_type[0]
+    xl_finish(n, t, expected)
+
+xl_check_scalar = (n: int, expected: int) -> int:
+    ex = xl_expected(expected)
+    exk = TK.void_
+    if ex != 0: exk = xl_types[0][ex].kind
+    k = xl_nodes[0][n].kind
+    t = 0
+    if k == .float_lit:
+        if ex != 0 and exk == .float_:
+            if xl_nodes[0][n].sval != 0 and xl_nodes[0][n].fval - xl_nodes[0][n].fval != 0.0: xl_host[0].float_error(n)
+            xl_nodes[0][n].flags &= ~256
+            t = ex
+        else if ex != 0 and exk == .opt and xl_types[0][tu_prune(int(xl_types[0][ex].elem))].kind == .float_:
+            xl_nodes[0][n].flags &= ~256
+            t = tu_prune(int(xl_types[0][ex].elem))
+        else:
+            xl_nodes[0][n].flags |= 256
+            t = xl_float_type[0]
+    else if k == .bool_lit: t = xl_bool_type[0]
+    else if k == .none_lit:
+        if ex != 0 and exk == .opt: t = ex
+        else: t = tb_mk_opt(tb_mk_var())
+    else if k == .null_lit:
+        if ex != 0 and (exk == .ptr or exk == .cfn): t = ex
+        else: t = xl_null_type[0]
+    xl_finish(n, t, expected)

@@ -1,0 +1,161 @@
+$runtime_checks
+from p"node_store.dewy" import Node
+from p"checker_types.dewy" import (TypeInfo TK)
+from p"type_inference.dewy" import tu_prune
+from p"type_constructors.dewy" import (tb_mk_var tb_mk_opt)
+# Literal expression checking and common type publication. Scalar paths are O(1)
+# plus inference links; interpolation visits only its parts and demanded checks.
+# The host retains coercion/effects, exactness and source diagnostic obligations;
+# repay these services with their own semantic groups, preserving callback order.
+XLWord:type=int64<overflow='wrap'>
+CheckerLiteralHost:type=[
+    default_type:<(node:int64):>int64>
+    coerce:<(node:int64 type_id:int64):>int64>
+    effect:<(node:int64 expected:int64):>int64>
+    exact:<(node:int64):>void>
+    charlike:<(node:int64):>void>
+    check:<(node:int64 expected:int64):>int64>
+    finalize:<(node:int64):>int64>
+    format_part:<(node:int64 pos:int64):>void>
+    interpolation_warning:<(node:int64):>void>
+    float_error:<(node:int64):>void>
+]
+CheckerLiteralInput:type=[
+    nodes:ptr<array<Node>>
+    lists:ptr<array<int32>>
+    types:ptr<array<TypeInfo>>
+    refine:ptr<bool>
+    effects:ptr<bool>
+    exact_measure:ptr<bool>
+    last:ptr<int64>
+    string_type:ptr<int64>
+    float_type:ptr<int64>
+    bool_type:ptr<int64>
+    null_type:ptr<int64>
+    host:ptr<CheckerLiteralHost>
+]
+let xl_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let xl_lists:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
+let xl_types:ptr<array<TypeInfo>>=$unsafe (uint64(0) as ptr<array<TypeInfo>>)
+let xl_refine:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+let xl_effects:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+let xl_exact_measure:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+let xl_last:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xl_string_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xl_float_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xl_bool_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xl_null_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xl_host:ptr<CheckerLiteralHost>=$unsafe (uint64(0) as ptr<CheckerLiteralHost>)
+checker_literals_bind=(input:ptr<CheckerLiteralInput>):>XLWord=>$unsafe {
+    xl_nodes=input[0].nodes
+    xl_lists=input[0].lists
+    xl_types=input[0].types
+    xl_refine=input[0].refine
+    xl_effects=input[0].effects
+    xl_exact_measure=input[0].exact_measure
+    xl_last=input[0].last
+    xl_string_type=input[0].string_type
+    xl_float_type=input[0].float_type
+    xl_bool_type=input[0].bool_type
+    xl_null_type=input[0].null_type
+    xl_host=input[0].host
+    0
+}
+xl_representation=(t0:XLWord):>XLWord=>$unsafe {
+    let t=tu_prune(t0)
+    if xl_types[0].ptr[t].kind =? 'refined' {return tu_prune(XLWord(xl_types[0].ptr[t].elem))}
+    t
+}
+xl_numeric=(t:XLWord):>bool=>$unsafe {
+    let k=xl_types[0].ptr[tu_prune(t)].kind
+    k =? 'int_' or k =? 'float_'
+}
+xl_expected=(expected:XLWord):>XLWord=>$unsafe {
+    if expected =? 0 {return 0}
+    let ex=tu_prune(expected)
+    if xl_refine[0] {ex=xl_representation(ex)}
+    ex
+}
+# A single mutable element borrow checks/detaches once for the final two writes.
+xl_publish=(@node:Node t:XLWord):>void=>{
+    node.type=int32<overflow='wrap'>(t)
+    node.flags |= 128
+}
+xl_finish=(n:XLWord t0:XLWord expected:XLWord):>XLWord=>$unsafe {
+    let t=t0
+    if xl_refine[0] and xl_types[0].ptr[t].kind =? 'refined' {t=XLWord(xl_types[0].ptr[t].elem)}
+    if xl_effects[0] {
+        xl_nodes[0][n].type=int32<overflow='wrap'>(t)
+        t=xl_host[0].effect(n expected)
+    }
+    xl_publish(@xl_nodes[0][n] t)
+    # No host call until the predicate finishes: one borrowed element view.
+    let node=xl_nodes[0].ptr + n
+    let k=node[0].kind
+    if xl_exact_measure[0] or k =? 'binary' or k =? 'unary' or k =? 'intrinsic' or (k =? 'conv' and node[0].aux =? 2) {xl_host[0].exact(n)}
+    xl_last[0]=n
+    t
+}
+xl_check_int=(n:XLWord expected:XLWord):>XLWord=>$unsafe {
+    let ex=xl_expected(expected)
+    let exk:TK='void_'
+    if ex not=? 0 {exk=xl_types[0].ptr[ex].kind}
+    let t:XLWord=0
+    xl_nodes[0][n].flags=xl_nodes[0].ptr[n].flags | 256
+    let initial=xl_host[0].default_type(n)
+    xl_nodes[0][n].type=int32<overflow='wrap'>(initial)
+    if ex not=? 0 and (exk =? 'int_' or exk =? 'float_') {
+        xl_host[0].coerce(n ex);
+        t=ex
+    } else if ex not=? 0 and exk =? 'opt' and xl_numeric(XLWord(xl_types[0].ptr[ex].elem)) {
+        xl_host[0].coerce(n tu_prune(XLWord(xl_types[0].ptr[ex].elem)));
+        t=XLWord(xl_nodes[0].ptr[n].type)
+    } else {t=xl_host[0].default_type(n)}
+    xl_finish(n t expected)
+}
+xl_check_str=(n:XLWord expected:XLWord):>XLWord=>$unsafe {
+    let ex=xl_expected(expected)
+    if (XLWord(xl_nodes[0].ptr[n].flags) & 512) not=? 0 and ex not=? 0 and xl_types[0].ptr[tu_prune(ex)].kind =? 'int_' {
+        xl_host[0].charlike(n)
+        return xl_host[0].check(n expected)
+    }
+    if xl_nodes[0].ptr[n].aux not=? 0 {
+        loop i in [0..XLWord(xl_nodes[0].ptr[n].nlist)) {
+            let part=XLWord(xl_lists[0].ptr[XLWord(xl_nodes[0].ptr[n].list) + i])
+            if xl_nodes[0].ptr[part].kind not=? 'pair' {continue}
+            let e=XLWord(xl_nodes[0].ptr[part].a)
+            xl_host[0].interpolation_warning(e)
+            xl_host[0].check(e 0);
+            xl_host[0].finalize(e);
+            xl_host[0].format_part(part xl_nodes[0].ptr[part].pos)
+        }
+    }
+    xl_finish(n xl_string_type[0] expected)
+}
+# Called only for float/bool/none/null literals by the existing kind dispatcher.
+xl_check_scalar=(n:XLWord expected:XLWord):>XLWord=>$unsafe {
+    let ex=xl_expected(expected)
+    let exk:TK='void_'
+    if ex not=? 0 {exk=xl_types[0].ptr[ex].kind}
+    let k=xl_nodes[0].ptr[n].kind
+    let t:XLWord=0
+    if k =? 'float_lit' {
+        if ex not=? 0 and exk =? 'float_' {
+            if xl_nodes[0].ptr[n].sval not=? 0 and xl_nodes[0].ptr[n].fval - xl_nodes[0].ptr[n].fval not=? 0.0 {xl_host[0].float_error(n)}
+            xl_nodes[0][n].flags=xl_nodes[0].ptr[n].flags & ~256
+            t=ex
+        } else if ex not=? 0 and exk =? 'opt' and xl_types[0].ptr[tu_prune(XLWord(xl_types[0].ptr[ex].elem))].kind =? 'float_' {
+            xl_nodes[0][n].flags=xl_nodes[0].ptr[n].flags & ~256
+            t=tu_prune(XLWord(xl_types[0].ptr[ex].elem))
+        } else {
+            xl_nodes[0][n].flags=xl_nodes[0].ptr[n].flags | 256
+            t=xl_float_type[0]
+        }
+    } else if k =? 'bool_lit' {t=xl_bool_type[0]}
+    else if k =? 'none_lit' {
+        if ex not=? 0 and exk =? 'opt' {t=ex} else {t=tb_mk_opt(tb_mk_var())}
+    } else {
+        if ex not=? 0 and (exk =? 'ptr' or exk =? 'cfn') {t=ex} else {t=xl_null_type[0]}
+    }
+    xl_finish(n t expected)
+}

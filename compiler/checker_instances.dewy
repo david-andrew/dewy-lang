@@ -40,8 +40,12 @@ checker_instances_bind=(input:ptr<CheckerInstanceInput>):>CIWord=>{ci_input=inpu
 ci_get_fn_inst=(decl:CIWord targs:array<int64> use_pos:CIWord):>CIWord=>$unsafe {
     if ci_input[0].nodes[0].ptr[decl].kind =? 'lambda' {return ci_input[0].host[0].poly(decl targs use_pos)}
     ci_input[0].host[0].preflight(decl use_pos)
-    let di=cs_decl_info(decl)
-    let sig=cs_fn_sig(decl)
+    # Preserve the original hot cached-signature guard without entering the
+    # recursive signature constructor (which saves a full working frame).
+    let di=CIWord(ci_input[0].nodes[0].ptr[decl].sym)
+    if di =? 0 {di=cs_decl_info(decl)}
+    let sig=ci_input[0].declarations[0].ptr[di].sig
+    if not sig.done {sig=cs_fn_sig(decl)}
     let concrete=targs.length >? 0
     loop t in targs {if tu_has_var(t) {concrete=false}}
     if concrete {

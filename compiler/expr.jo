@@ -1,3 +1,4 @@
+use 'checker_literals.dewy'
 use 'type_match.dewy'
 use 'type_substitute.dewy'
 use 'checker_state.dewy'
@@ -9768,40 +9769,9 @@ check_expr = (n: int, expected: int) -> int:
 # (the expected type as checking reads it: a refinement's representation)
 ce_expected = (expected: int) -> int:
     if expected == 0: return 0
-    ex = prune(expected)
-    if refine_active: ex = representation_type(ex)
-    ex
-
-# (an expression's type, recorded once its kind is checked)
-ce_finish = (n: int, t0: int, expected: int) -> int:
-    t = t0
-    if refine_active and types[t].kind == .refined: t = int(types[t].elem)
-    nodes[n].type = i32(t)
-    if effects_active: t = effect_infer_callable(n, expected); nodes[n].type = i32(t)
-    add_flag(n, NF_CHECKED)
-    if exact_measure_on or nodes[n].kind == .binary or nodes[n].kind == .unary or nodes[n].kind == .intrinsic or nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.int2float)): exact_note(n)
-    last_checked = n
-    t
-
-check_int_expr = (n: int, expected: int) -> int:
-    ex = ce_expected(expected)
-    exk = TK.void_
-    if ex != 0: exk = types[ex].kind
-    t = 0
-    add_flag(n, NF_LITERAL)
-    nodes[n].type = i32(lit_default(n))
-    if ex != 0 and exk == .int_:
-        coerce(n, ex)
-        t = ex
-    else if ex != 0 and exk == .float_:
-        coerce(n, ex)
-        t = ex
-    else if ex != 0 and exk == .opt and is_numeric(int(types[ex].elem)):
-        coerce(n, prune(int(types[ex].elem)))
-        t = ntype(n)
-    else:
-        t = lit_default(n)
-    ce_finish(n, t, expected)
+    xl_expected(expected)
+ce_finish = (n: int, t: int, expected: int) -> int: xl_finish(n, t, expected)
+check_int_expr = (n: int, expected: int) -> int: xl_check_int(n, expected)
 
 check_ident_expr = (n: int, expected: int) -> int:
     ex = ce_expected(expected)
@@ -10016,26 +9986,16 @@ check_call_expr = (n: int, expected: int) -> int:
     else if nodes[n].aux == 1 and fn_type_pack(callable_base(prune(ntype(int(nodes[n].a))))): sink_pack_call(n)
     ce_finish(n, t, expected)
 
-check_str_expr = (n: int, expected: int) -> int:
-    ex = ce_expected(expected)
-    t = 0
-    if has_flag(n, NF_CHARLIKE) and ex != 0 and is_int(ex):
-        charlike_to_int(n)
-        return check_expr(n, expected)
-    else:
-        if nodes[n].aux != 0:
-            loop i in [0..nkids(n)):
-                part = kid(n, i)
-                if nodes[part].kind != .pair: continue
-                e = int(nodes[part].a)
-                # ("[0-9]{4}" for a regular expression: {4} puts the number 4 in the text)
-                if (nodes[e].kind == .int_lit or (nodes[e].kind == .tuple and nkids(e) > 0 and nodes[kid(e, 0)].kind == .int_lit)) and not pos_in_lib(nodes[e].pos) and not files[pos_file(nodes[e].pos)].is_dewy and brace_before(nodes[e].pos):
-                    warn(nodes[e].pos, "`\{...}` with a number in it puts that number in the text: for the characters themselves (a regular expression's repeat), write `\{\{4}}}}`, or a raw string `r\"[0-9]\{4}\"`")
-                check_expr(e, 0)
-                finalize_literal(e)
-                fmt_part(part, nodes[part].pos)
-        t = T_STR
-    ce_finish(n, t, expected)
+check_str_expr = (n: int, expected: int) -> int: xl_check_str(n, expected)
+
+literal_interpolation_warning = (e: int):
+    # ("[0-9]{4}" for a regular expression: {4} puts the number 4 in the text)
+    if (nodes[e].kind == .int_lit or (nodes[e].kind == .tuple and nkids(e) > 0 and nodes[kid(e, 0)].kind == .int_lit)) and not pos_in_lib(nodes[e].pos) and not files[pos_file(nodes[e].pos)].is_dewy and brace_before(nodes[e].pos):
+        warn(nodes[e].pos, "`\{...}` with a number in it puts that number in the text: for the characters themselves (a regular expression's repeat), write `\{\{4}}}}`, or a raw string `r\"[0-9]\{4}\"`")
+literal_float_error = (n: int): fatal(nodes[n].pos, "real literal exceeds float64")
+literal_host = CheckerLiteralHost(lit_default, coerce, effect_infer_callable, exact_note, charlike_to_int, check_expr, finalize_literal, fmt_part, literal_interpolation_warning, literal_float_error)
+literal_input = CheckerLiteralInput(&nodes, &lists, &types, &refine_active, &effects_active, &exact_measure_on, &last_checked, &T_STR, &T_FLOAT, &T_BOOL, &T_NULL, &literal_host)
+literal_binding = checker_literals_bind(&literal_input)
 
 check_field_expr = (n: int, expected: int) -> int:
     if has_flag(n, NF_JUXT): juxt_member_check(n)
@@ -10512,6 +10472,7 @@ check_index_expr = (n: int, expected: int) -> int:
     ce_finish(n, t, expected)
 
 check_expr_other = (n: int, expected: int) -> int:
+    if nodes[n].kind == .float_lit or nodes[n].kind == .bool_lit or nodes[n].kind == .none_lit or nodes[n].kind == .null_lit: return xl_check_scalar(n, expected)
     t = 0
     ex = prune(expected)
     if refine_active: ex = representation_type(ex)
@@ -10540,25 +10501,7 @@ check_expr_other = (n: int, expected: int) -> int:
     if k == .propagate: return check_propagate(n, expected)
     if k == .unit_lit:
         return quantity_constant(n, nodes[n].ival, int(nodes[n].aux), int(nodes[n].aux2), expected)
-    if k == .float_lit:
-        if ex != 0 and exk == .float_:
-            if nodes[n].sval != 0 and nodes[n].fval - nodes[n].fval != 0.0: fatal(nodes[n].pos, "real literal exceeds float64")
-            clear_flag(n, NF_LITERAL)
-            t = ex
-        else if ex != 0 and exk == .opt and is_float(int(types[ex].elem)):
-            clear_flag(n, NF_LITERAL)
-            t = prune(int(types[ex].elem))
-        else:
-            add_flag(n, NF_LITERAL)
-            t = T_FLOAT
-    else if k == .bool_lit: t = T_BOOL
-    else if k == .none_lit:
-        if ex != 0 and exk == .opt: t = ex
-        else: t = mk_opt(mk_var())
-    else if k == .null_lit:
-        if ex != 0 and (exk == .ptr or exk == .cfn): t = ex
-        else: t = T_NULL
-    else if k == .dotname:
+    if k == .dotname:
         if ide_sentinel != 0 and int(nodes[n].name) == ide_sentinel: ide_complete_variants(ex)
         et = ex
         if et != 0 and exk == .opt: et = prune(int(types[et].elem))
@@ -11182,13 +11125,7 @@ check_expr_other = (n: int, expected: int) -> int:
         t = check_block(n, expected, true)
     else if k == .matrix: return check_matrix(n, expected)
     else: fatal(nodes[n].pos, "invalid expression")
-    if refine_active and types[t].kind == .refined: t = int(types[t].elem)
-    nodes[n].type = i32(t)
-    if effects_active: t = effect_infer_callable(n, expected); nodes[n].type = i32(t)
-    add_flag(n, NF_CHECKED)
-    if exact_measure_on or nodes[n].kind == .binary or nodes[n].kind == .unary or nodes[n].kind == .intrinsic or nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.int2float)): exact_note(n)
-    last_checked = n
-    t
+    ce_finish(n, t, expected)
 
 # The `__as__` conversion from a record type ft to tt (its declared result), or 0.
 as_conversion = (ft: int, tt: int) -> int:
