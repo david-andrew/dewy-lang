@@ -2690,7 +2690,9 @@ values come from the original array; writeback reacquires the destination if the
 right side resizes it. Open range endpoints are fixed before that right side
 runs, and the result must have exactly the selected length. Repeated indices
 read the same original value and write in selection order, with the last write
-winning. Saved copies remain independent. These operations allocate the selected
+winning. Saved copies remain independent. The checker retains the destination
+length across repeated selection stores in loops; replacing or resizing that
+array still invalidates its old bounds. These operations allocate the selected
 values and result; an otherwise unique destination does not need a full-array
 copy merely to keep the temporary input snapshot alive.
 

@@ -1,3 +1,4 @@
+use 'sequence_selectors.jo'
 use 'checker_tokens.dewy'
 use 'checker_types.dewy'
 use 'refinement_types.dewy'
@@ -3581,7 +3582,8 @@ fact_changes = (n: int, s: mut FactState, at: int, reason: FactReason = .loop_):
             fact_change_route(s, kid(n, 0), true, at, reason)
     # (a direct call havocs what its summary writes; reading lengths and
     # erased or failing assertions write nothing; a record is built in place)
-    if k == .call and nodes[n].aux == 0 and fact_nd_plain_store(n): fact_nd_store(n, s, at, reason)
+    if k == .call and nodes[n].aux == 0 and fact_sequence_store_call(n): fact_sequence_store(n, s, at, reason)
+    else if k == .call and nodes[n].aux == 0 and fact_nd_plain_store(n): fact_nd_store(n, s, at, reason)
     else if k == .call and nodes[n].aux == 0 and fact_pool_call(n) == 4: fact_pool_store_changes(n, s)
     else if k == .call and nodes[n].aux == 0 and fact_map_store_call(n): fact_map_store_changes(n, s, at, reason)
     else if k == .call and nodes[n].aux == 0 and (fact_map_reads_only(n) or fact_nd_reads_only(n)): s = s
@@ -7426,7 +7428,8 @@ fact_slice_capture = (n: int, s: mut FactState) -> int:
                 value = fact_capture(arg, s)
                 if ownership_decls.len() != 0: fact_owner_value(arg, value, s)
         nd = fact_nd_call(n)
-        if nd != 0 and fact_nd_plain_store(n): fact_nd_store(n, s, n, .write)
+        if nd >= 160 and fact_sequence_store_call(n): fact_sequence_store(n, s, n, .write)
+        else if nd != 0 and fact_nd_plain_store(n): fact_nd_store(n, s, n, .write)
         else if nd != 0 and fact_nd_reads_only(n): s = s
         else if nodes[n].aux != 2 and nodes[n].aux != 3: fact_path_call_effects(n, s)
         if fact_ends_path(n): s.live = false

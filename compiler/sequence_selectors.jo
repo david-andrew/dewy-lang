@@ -120,3 +120,23 @@ fact_sequence_select = (n: int, s: mut FactState, values: int[], kind: int) -> i
     result = fact_fresh(s, ntype(n))
     if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, -1, false, count))
     result
+
+# Selection stores replace elements, never the selected array's length.
+# Loop fallback visits only demanded writes; this reuses its captured route
+# and indexed projection, O(route depth), without retaining element facts.
+fact_sequence_store = (n: int, s: mut FactState, at: int, reason: FactReason):
+    route = fact_receiver_route(n, s)
+    held = fact_route_values(s, route)
+    if held.len() == 0: fact_path_call_effects(n, s); return
+    t = ntype(kid(n, 0))
+    length = fact_sequence_length(s, held[held.len() - 1], t)
+    target = kid(n, 0)
+    loop nodes[target].kind == .addr or nodes[target].kind == .conv: target = int(nodes[target].a)
+    fact_change_route(s, target, true, at, reason)
+    fresh = fact_new(s, FactBound(), FactTerm(type = t))
+    if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(fresh, -1, false, length))
+    fact_store_route(s, route, fresh, at)
+
+fact_sequence_store_call = (n: int) -> bool:
+    kind = fact_nd_call(n)
+    kind >= 161 and kind <= 171 and kind != 163 and kind != 166 and kind != 169
