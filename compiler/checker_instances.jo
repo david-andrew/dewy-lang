@@ -1,0 +1,86 @@
+# Frozen instance resolver extracted from check.jo.
+use 'node_store.dewy'
+use 'checker_state.dewy'
+use 'checker_signature.dewy'
+use 'type_inference.dewy'
+use 'type_substitute.dewy'
+use 'checker_results.dewy'
+struct CheckerInstanceHost:
+    poly: (int, int[], int) -> int
+    preflight: (int, int) -> void
+    create: (int, int) -> int
+    bad_arg: (int, int, int) -> void
+    depth_error: (int, int) -> void
+    load: (int, int, bool) -> void
+    pack: (int, int) -> void
+    is_dewy: (int) -> bool
+    validate: (int, FnSig, int) -> void
+    clone: (int) -> int
+    attributes: (int, int, int[], int) -> void
+    ensure: (int, int) -> void
+struct CheckerInstanceInput:
+    nodes: *(Node[])
+    functions: *(FnInst[])
+    declarations: *(DeclInfo[])
+    index: *({FnInstanceKey: int})
+    contexts: *(FnCtx[])
+    context: *(int)
+    void_type: *(int)
+    host: *(CheckerInstanceHost)
+ci_input: *CheckerInstanceInput
+checker_instances_bind = (input: *CheckerInstanceInput) -> int:
+    ci_input = input
+    0
+ci_get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
+    if ci_input[0].nodes[0][decl].kind == .lambda: return ci_input[0].host[0].poly(decl, targs, use_pos)
+    ci_input[0].host[0].preflight(decl, use_pos)
+    di = cs_decl_info(decl)
+    sig = cs_fn_sig(decl)
+    concrete = targs.len() > 0
+    loop t in targs:
+        if tu_has_var(t): concrete = false
+    if concrete:
+        if let f = ci_input[0].index[0].get(FnInstanceKey(decl, targs)):
+            ci_input[0].host[0].ensure(f, use_pos)
+            return f
+    else:
+        loop f in ci_input[0].declarations[0][di].insts:
+            same = ci_input[0].functions[0][f].targs.len() == targs.len()
+            loop k in [0..targs.len()):
+                if not same: break
+                if not tu_equal(ci_input[0].functions[0][f].targs[k], targs[k]):
+                    same = false
+                    break
+            if same:
+                ci_input[0].host[0].ensure(f, use_pos)
+                return f
+    f = ci_input[0].host[0].create(decl, use_pos)
+    zt: int[]
+    loop t in targs:
+        z = tu_zonk(t)
+        if tu_has_var(tu_prune(z)):
+            ci_input[0].host[0].bad_arg(decl, z, use_pos)
+        # (a generic function that calls itself with bigger type arguments would expand without end)
+        zt.push(z)
+    ci_input[0].functions[0][f].targs = zt
+    # (made while checking another generic instance: one more link of a chain of them, which a
+    # function calling itself with ever bigger types makes without end)
+    if ci_input[0].context[0] >= 0 and int(ci_input[0].contexts[0][ci_input[0].context[0]].inst) > 0 and ci_input[0].functions[0][int(ci_input[0].contexts[0][ci_input[0].context[0]].inst)].targs.len() > 0:
+        ci_input[0].functions[0][f].gdepth = ci_input[0].functions[0][int(ci_input[0].contexts[0][ci_input[0].context[0]].inst)].gdepth + 1
+        if ci_input[0].functions[0][f].gdepth > 500: ci_input[0].host[0].depth_error(decl, use_pos)
+    loop i in [0..int(ci_input[0].nodes[0][decl].nlist)): ci_input[0].functions[0][f].ptypes.push(ts_subst(sig.params[i], zt))
+    ci_input[0].host[0].load(decl, f, sig.generic)
+    if sig.ret != 0: ci_input[0].functions[0][f].ret = i32(ts_subst(int(sig.ret), zt))
+    ci_input[0].host[0].pack(f, int(ci_input[0].nodes[0][decl].a))
+    if sig.ret != 0: pass
+    else if ci_input[0].nodes[0][decl].b != 0 and cr_syntactic_void(int(ci_input[0].nodes[0][decl].b)) and not (ci_input[0].host[0].is_dewy(ci_input[0].nodes[0][decl].pos) and (cr_may_express(int(ci_input[0].nodes[0][decl].b)) or cr_has_propagate(int(ci_input[0].nodes[0][decl].b)))): ci_input[0].functions[0][f].ret = i32(ci_input[0].void_type[0])
+    ci_input[0].host[0].validate(f, sig, use_pos)
+    if sig.generic: ci_input[0].functions[0][f].body = i32(ci_input[0].host[0].clone(int(ci_input[0].nodes[0][decl].b)))
+    else: ci_input[0].functions[0][f].body = ci_input[0].nodes[0][decl].b
+    if int(ci_input[0].nodes[0][decl].flags) & 4 != 0 and ci_input[0].functions[0][f].ret == 0: ci_input[0].functions[0][f].ret = i32(ci_input[0].void_type[0])
+    ci_input[0].host[0].attributes(decl, f, zt, use_pos)
+    ci_input[0].declarations[0][di].insts.push(f)
+    if zt.len() > 0: ci_input[0].index[0][FnInstanceKey(decl, zt)] = f
+    ci_input[0].host[0].ensure(f, use_pos)
+    f
+

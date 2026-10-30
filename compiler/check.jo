@@ -1,3 +1,4 @@
+use 'checker_instances.dewy'
 use 'checker_signature.dewy'
 use 'checker_resolve.dewy'
 use 'checker_alias.dewy'
@@ -1471,67 +1472,36 @@ load_body = (decl: int, f: int):
     ensure_body(decl)
     ic_restore(icl)
 
-get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
-    if nodes[decl].kind == .lambda: return poly_inst(decl, targs, use_pos)
+get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int: ci_get_fn_inst(decl, targs, use_pos)
+
+instance_preflight = (decl: int, use_pos: int):
     if has_flag(decl, NF_EXTERN): ffi_extern_use(decl, use_pos)
     if target_wasm and nodes[decl].c != 0: no_web_check(decl, use_pos)
-    di = decl_info(decl)
-    sig = fn_sig(decl)
-    concrete = targs.len() > 0
-    loop t in targs:
-        if has_var(t): concrete = false
-    if concrete:
-        if let f = fn_instances.get(FnInstanceKey(decl, targs)):
-            ensure_ret(f, use_pos)
-            return f
-    else:
-        loop f in decl_infos[di].insts:
-            same = fns[f].targs.len() == targs.len()
-            loop k in [0..targs.len()):
-                if not same: break
-                if not type_eq(fns[f].targs[k], targs[k]):
-                    same = false
-                    break
-            if same:
-                ensure_ret(f, use_pos)
-                return f
+instance_create = (decl: int, use_pos: int) -> int:
     f = new_inst(FK_NORMAL, int(nodes[decl].mod), sanitize(name_of(int(nodes[decl].name))))
     fns[f].decl = i32(decl)
     fns[f].atomic_api = int(nodes[decl].mod) == concurrency_thread_module
     fns[f].task_api = int(nodes[decl].mod) == concurrency_task_module and name_of(int(nodes[decl].name)) in ["__task_spawn", "within", "race"] or int(nodes[decl].mod) == concurrency_protocol_module and name_of(int(nodes[decl].name)) in ["serve", "pipeline"]
     fns[f].use_pos = use_pos
     if cx >= 0: fns[f].made_in = ctxs[cx].inst
-    zt: int[]
-    loop t in targs:
-        z = zonk(t)
-        if has_var(prune(z)):
-            fname = name_of(int(nodes[decl].name))
-            pz = prune(z)
-            # (an empty [] or {} argument: nothing says what it holds)
-            if starts_with(fname, "__fmt") or starts_with(fname, "__dewy_fmt"): fatal(use_pos, "cannot tell what kind of value this is yet (an empty `[]` says nothing of what it will hold): write its type where it is made, {jd(use_pos, "`xs: int[] = []`", "`let xs:array<int64> = []`")}, or put something in it first")
-            if types[pz].kind == .array: fatal(use_pos, "cannot tell what the array given to '{fname}' holds (an empty `[]` says nothing): write the type where the result goes, {jd(use_pos, "`scores: int[] = {fname}(...)`", "`let scores:array<int64> = {fname}(...)`")}, or pass a variable of a known type")
-            if is_map_type(pz): fatal(use_pos, "cannot tell what the map given to '{fname}' holds (an empty {jd(use_pos, "`\{}`", "`[]`")} says nothing): write the type where the result goes, {jd(use_pos, "`m: \{str: int} = {fname}(...)`", "`let m:dict<string int64> = {fname}(...)`")}, or pass a variable of a known type")
-            fatal(use_pos, "cannot infer the type of an argument to '{fname}'; write the type where the result goes ({jd(use_pos, "`x: T = {fname}(...)`", "`let x:T = {fname}(...)`")}) or give the argument a type")
-        # (a generic function that calls itself with bigger type arguments would expand without end)
-        zt.push(z)
-    fns[f].targs = zt
-    # (made while checking another generic instance: one more link of a chain of them, which a
-    # function calling itself with ever bigger types makes without end)
-    if cx >= 0 and int(ctxs[cx].inst) > 0 and fns[int(ctxs[cx].inst)].targs.len() > 0:
-        fns[f].gdepth = fns[int(ctxs[cx].inst)].gdepth + 1
-        if fns[f].gdepth > 500: fatal(use_pos, "the generic function '{name_of(int(nodes[decl].name))}' expands without end: generic functions call each other with ever new types (more than 500 deep)")
-    loop i in [0..nkids(decl)): fns[f].ptypes.push(subst(sig.params[i], zt))
-    if sig.generic: source_force_body(decl)
+    f
+instance_bad_arg = (decl: int, z: int, use_pos: int):
+    fname = name_of(int(nodes[decl].name))
+    pz = prune(z)
+    # (an empty [] or {} argument: nothing says what it holds)
+    if starts_with(fname, "__fmt") or starts_with(fname, "__dewy_fmt"): fatal(use_pos, "cannot tell what kind of value this is yet (an empty `[]` says nothing of what it will hold): write its type where it is made, {jd(use_pos, "`xs: int[] = []`", "`let xs:array<int64> = []`")}, or put something in it first")
+    if types[pz].kind == .array: fatal(use_pos, "cannot tell what the array given to '{fname}' holds (an empty `[]` says nothing): write the type where the result goes, {jd(use_pos, "`scores: int[] = {fname}(...)`", "`let scores:array<int64> = {fname}(...)`")}, or pass a variable of a known type")
+    if is_map_type(pz): fatal(use_pos, "cannot tell what the map given to '{fname}' holds (an empty {jd(use_pos, "`\{}`", "`[]`")} says nothing): write the type where the result goes, {jd(use_pos, "`m: \{str: int} = {fname}(...)`", "`let m:dict<string int64> = {fname}(...)`")}, or pass a variable of a known type")
+    fatal(use_pos, "cannot infer the type of an argument to '{fname}'; write the type where the result goes ({jd(use_pos, "`x: T = {fname}(...)`", "`let x:T = {fname}(...)`")}) or give the argument a type")
+instance_depth_error = (decl: int, use_pos: int):
+    fatal(use_pos, "the generic function '{name_of(int(nodes[decl].name))}' expands without end: generic functions call each other with ever new types (more than 500 deep)")
+instance_load = (decl: int, f: int, generic: bool):
+    if generic: source_force_body(decl)
     load_body(decl, f)
-    if sig.ret != 0: fns[f].ret = i32(subst(int(sig.ret), zt))
-    pack_written(f, int(nodes[decl].a))
-    if sig.ret != 0: pass
-    else if nodes[decl].b != 0 and syntactic_void(int(nodes[decl].b)) and not (files[pos_file(nodes[decl].pos)].is_dewy and (may_express(int(nodes[decl].b)) or has_propagate(int(nodes[decl].b)))): fns[f].ret = i32(T_VOID)
+instance_validate = (f: int, sig: FnSig, use_pos: int):
     if refine_active and sig.generic: ref_validate_signature(fns[f].ptypes, int(fns[f].ret), int(sig.mutmask), use_pos)
-    if sig.generic and pl_on: pl_inst_decls.push(decl)
-    if sig.generic: fns[f].body = i32(clone(int(nodes[decl].b)))
-    else: fns[f].body = nodes[decl].b
-    if has_flag(decl, NF_EXTERN) and fns[f].ret == 0: fns[f].ret = i32(T_VOID)
+    if sig.generic and pl_on: pl_inst_decls.push(int(fns[f].decl))
+instance_attributes = (decl: int, f: int, zt: int[], use_pos: int):
     # attributes
     if nodes[decl].c != 0:
         ab = int(nodes[decl].c)
@@ -1580,10 +1550,10 @@ get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
         ffi_check_signature(f, decl)
         loop t in fns[f].ptypes: check_c_boxes(t, nodes[decl].pos)
         if fns[f].ret != 0: check_c_boxes(int(fns[f].ret), nodes[decl].pos)
-    decl_infos[di].insts.push(f)
-    if zt.len() > 0: fn_instances[FnInstanceKey(decl, zt)] = f
-    ensure_ret(f, use_pos)
-    f
+
+instance_host = CheckerInstanceHost(poly_inst, instance_preflight, instance_create, instance_bad_arg, instance_depth_error, instance_load, pack_written, dewy_at, instance_validate, clone, instance_attributes, ensure_ret)
+instance_input = CheckerInstanceInput(&nodes, &fns, &decl_infos, &fn_instances, &ctxs, &cx, &T_VOID, &instance_host)
+instance_binding = checker_instances_bind(&instance_input)
 
 # Recursive value fields use private managed boxes, so their containing layout
 # cannot be passed to C as an ordinary struct (including through a typed pointer).

@@ -1,0 +1,105 @@
+$runtime_checks
+from p"node_store.dewy" import Node
+from p"checker_state.dewy" import (FnInst FnSig FnCtx DeclInfo FnInstanceKey)
+from p"checker_signature.dewy" import (cs_decl_info cs_fn_sig)
+from p"type_inference.dewy" import (tu_has_var tu_prune tu_zonk tu_equal)
+from p"type_substitute.dewy" import ts_subst
+from p"checker_results.dewy" import (cr_syntactic_void cr_may_express cr_has_propagate)
+# Demand-only instance resolution. Concrete lookup is indexed; unresolved lookup
+# scans this declaration's instances and type arguments. Substitution and body
+# walks retain their existing costs. Hosts may reenter and grow every arena.
+# Debt: attributes/FFI and diagnostic rendering move with those semantic owners;
+# lambda instantiation moves with closure checking, not a second instance cache.
+CIWord:type=int64<overflow='wrap'>
+CheckerInstanceHost:type=[
+    poly:<(decl:int64 args:array<int64> pos:int64):>int64>
+    preflight:<(decl:int64 pos:int64):>void>
+    create:<(decl:int64 pos:int64):>int64>
+    bad_arg:<(decl:int64 type_id:int64 pos:int64):>void>
+    depth_error:<(decl:int64 pos:int64):>void>
+    load:<(decl:int64 inst:int64 generic:bool):>void>
+    pack:<(inst:int64 node:int64):>void>
+    is_dewy:<(pos:int64):>bool>
+    validate:<(inst:int64 sig:FnSig pos:int64):>void>
+    clone:<(node:int64):>int64>
+    attributes:<(decl:int64 inst:int64 args:array<int64> pos:int64):>void>
+    ensure:<(inst:int64 pos:int64):>void>
+]
+CheckerInstanceInput:type=[
+    nodes:ptr<array<Node>>
+    functions:ptr<array<FnInst>>
+    declarations:ptr<array<DeclInfo>>
+    index:ptr<dict<FnInstanceKey int64>>
+    contexts:ptr<array<FnCtx>>
+    context:ptr<int64>
+    void_type:ptr<int64>
+    host:ptr<CheckerInstanceHost>
+]
+let ci_input:ptr<CheckerInstanceInput>=$unsafe (uint64(0) as ptr<CheckerInstanceInput>)
+checker_instances_bind=(input:ptr<CheckerInstanceInput>):>CIWord=>{ci_input=input;0}
+ci_get_fn_inst=(decl:CIWord targs:array<int64> use_pos:CIWord):>CIWord=>$unsafe {
+    if ci_input[0].nodes[0].ptr[decl].kind =? 'lambda' {return ci_input[0].host[0].poly(decl targs use_pos)}
+    ci_input[0].host[0].preflight(decl use_pos)
+    let di=cs_decl_info(decl)
+    let sig=cs_fn_sig(decl)
+    let concrete=targs.length >? 0
+    loop t in targs {if tu_has_var(t) {concrete=false}}
+    if concrete {
+        let found=ci_input[0].index[0].get(FnInstanceKey[decl targs])
+        if found not=? none {
+            let f=found ?? 0
+            ci_input[0].host[0].ensure(f use_pos)
+            return f
+        }
+    } else {
+        loop f in ci_input[0].declarations[0].ptr[di].insts {
+            let same=ci_input[0].functions[0].ptr[f].targs.length =? targs.length
+            loop k in [0..targs.length) {
+                if not same {break}
+                if not tu_equal(ci_input[0].functions[0].ptr[f].targs[k] targs[k]) {same=false;break}
+            }
+            if same {ci_input[0].host[0].ensure(f use_pos);return f}
+        }
+    }
+    let f=ci_input[0].host[0].create(decl use_pos)
+    let zt:array<int64>=[]
+    loop t in targs {
+        let z=tu_zonk(t)
+        if tu_has_var(tu_prune(z)) {ci_input[0].host[0].bad_arg(decl z use_pos)}
+        zt.push(z)
+    }
+    ci_input[0].functions[0][f].targs=zt
+    if ci_input[0].context[0] >=? 0 {
+        let parent=CIWord(ci_input[0].contexts[0].ptr[ci_input[0].context[0]].inst)
+        if parent >? 0 and ci_input[0].functions[0].ptr[parent].targs.length >? 0 {
+            ci_input[0].functions[0][f].gdepth=ci_input[0].functions[0].ptr[parent].gdepth + 1
+            if ci_input[0].functions[0].ptr[f].gdepth >? 500 {ci_input[0].host[0].depth_error(decl use_pos)}
+        }
+    }
+    loop i in [0..CIWord(ci_input[0].nodes[0].ptr[decl].nlist)) {
+        let pt=ts_subst(sig.params[i] zt)
+        ci_input[0].functions[0][f].ptypes.push(pt)
+    }
+    ci_input[0].host[0].load(decl f sig.generic)
+    if sig.ret not=? 0 {
+        let ret=ts_subst(CIWord(sig.ret) zt)
+        ci_input[0].functions[0][f].ret=int32<overflow='wrap'>(ret)
+    }
+    ci_input[0].host[0].pack(f CIWord(ci_input[0].nodes[0].ptr[decl].a))
+    if sig.ret =? 0 and ci_input[0].nodes[0].ptr[decl].b not=? 0 and cr_syntactic_void(CIWord(ci_input[0].nodes[0].ptr[decl].b)) and not (ci_input[0].host[0].is_dewy(ci_input[0].nodes[0].ptr[decl].pos) and (cr_may_express(CIWord(ci_input[0].nodes[0].ptr[decl].b)) or cr_has_propagate(CIWord(ci_input[0].nodes[0].ptr[decl].b)))) {
+        ci_input[0].functions[0][f].ret=int32<overflow='wrap'>(ci_input[0].void_type[0])
+    }
+    ci_input[0].host[0].validate(f sig use_pos)
+    if sig.generic {
+        let body=ci_input[0].host[0].clone(CIWord(ci_input[0].nodes[0].ptr[decl].b))
+        ci_input[0].functions[0][f].body=int32<overflow='wrap'>(body)
+    } else {ci_input[0].functions[0][f].body=ci_input[0].nodes[0].ptr[decl].b}
+    if (CIWord(ci_input[0].nodes[0].ptr[decl].flags) & 4) not=? 0 and ci_input[0].functions[0].ptr[f].ret =? 0 {
+        ci_input[0].functions[0][f].ret=int32<overflow='wrap'>(ci_input[0].void_type[0])
+    }
+    ci_input[0].host[0].attributes(decl f zt use_pos)
+    ci_input[0].declarations[0][di].insts.push(f)
+    if zt.length >? 0 {ci_input[0].index[0][FnInstanceKey[decl zt]]=f}
+    ci_input[0].host[0].ensure(f use_pos)
+    f
+}
