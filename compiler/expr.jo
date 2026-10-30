@@ -1,3 +1,4 @@
+use 'checker_cast.dewy'
 use 'checker_unary.dewy'
 use 'checker_logic.dewy'
 use 'checker_optional.dewy'
@@ -10013,6 +10014,78 @@ unary_error = (n: int, at: int, code: int):
 unary_host = CheckerUnaryHost(check_expr, check_dotted, bundled_bigint_type, simple_enum, secret_unary, unary_quantity, unary_overload, coerce, unary_exact, unary_error)
 unary_input = CheckerUnaryInput(&nodes, &types, &files, &last_checked, &T_INT, &T_MATH_INT, &unary_host)
 unary_binding = checker_unary_bind(&unary_input)
+cast_unit = (n: int) -> int:
+    if not quantity_unit_syntax(int(nodes[n].b)): return -1
+    quantity_as_unit(n)
+cast_size = (t: int) -> int: tsize(t)
+cast_refine = (n: int, t: int):
+    refine_coerce(n, t)
+    return
+cast_type_text = (n: int, ft: int) -> int:
+    nodes[n] = nodes[bc_str(type_str(int(types[ft].elem), true), nodes[n].pos)]
+    check_expr(n, T_STR)
+cast_set_coerce = (n: int, t: int):
+    str_set_coerce(n, t)
+    return
+cast_bundled = (t: int, bigint: bool) -> bool:
+    if bigint: return bundled_bigint_type(t)
+    bundled_rational_type(t)
+cast_conversion = (n: int, t: int, a: int) -> int: conversion(n, t, [a])
+cast_helper = (n: int, a: int, decode: bool, expected: int) -> int:
+    helper = "bytes"
+    if decode: helper = "__dewy_decode_utf8"
+    nodes[n] = nodes[bc_call(helper, [a], nodes[n].pos)]
+    check_expr(n, expected)
+# (a record's own conversion, `__as__ = (x:T):>U => ...`: `x as U` calls it)
+cast_record = (n: int, a: int, ft: int, tt: int) -> int:
+    conv = as_conversion(ft, tt)
+    if conv == 0: return -1
+    add_flag(a, NF_CHECKED)
+    nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(bc_ident("__as__", nodes[n].pos)))
+    set_list(n, [a])
+    t = resolve_fn_call(n, intern("__as__"), [conv], [a], tt)
+    nodes[n].type = i32(t)
+    add_flag(n, NF_CHECKED)
+    last_checked = n
+    t
+# (any other value converts to string as it prints: "{x}")
+cast_text = (n: int, a: int, expected: int) -> int:
+    text = mk(.str_lit, nodes[n].pos)
+    nodes[text].aux = 1
+    part = mk(.pair, nodes[n].pos)
+    nodes[part].a = i32(a)
+    nodes[part].sval = -1
+    set_list(text, [part])
+    nodes[n] = nodes[text]
+    check_expr(n, expected)
+cast_storage = (a: int) -> void: note_storage_access(a)
+cast_error = (n: int, a: int, ft: int, tt: int, code: int):
+    pos = nodes[n].pos
+    if code == 1: fatal(pos, "transmute requires an explicit fixed-width type; mathematical int has no fixed bit representation")
+    if code == 2: fatal(pos, "transmute needs integer or float values of equal width (found {dt(ft)} to {dt(tt)})")
+    if code == 3: fatal(pos, "a {dt(ft)} converts to no other type: its value is hidden{secret_hint(a)}")
+    if code == 4: fatal(pos, "`bytes as string` needs a proof that the bytes are valid UTF-8: `bytes as string | none` decodes them, giving none when they are not valid, and `bytes as string ?? fallback` replaces that none")
+    if code == 5:
+        # (Rust's `x as f64` converts: here it would keep the bits)
+        conv = "{dt(tt)}(x)"
+        bits = "f64_bits(x) / f64_from_bits(b)"
+        if tsize(ft) == 4 or tsize(tt) == 4: bits = "f32_bits(x) / f32_from_bits(b)"
+        fatal(pos, "`as` between a whole number and a float keeps the bits, not the number: {conv} converts the value ({bits} for the bits themselves)")
+    if code == 6: str_set_unnumbered(pos, ft)
+    # (the runtime's: the header; a program means the bytes, which data(x) gives)
+    if code == 7: fatal(pos, "`x as {dt(tt)}` would be where the {dt(ft)}'s header is, not its contents: `data(x)` is a pointer to its first element (what C wants; a str's bytes end with a 0)")
+    why = ""
+    if is_union(ft) and union_index(ft, tt) >= 0: why = if dewy_at(pos): " (a union is not cast: inside `if x is? {dt(tt)} \{ }` (or after `x is? {dt(tt)} and`), x is one)" else: " (a union is not cast: after `if x is {dt(tt)}:` (or in `x is {dt(tt)} and ...`), x is one)"
+    # (`(int64 | string)? as int64`: the payload's member, tested the same way)
+    fo = prune(ft)
+    if why == "" and dewy_at(pos) and types[fo].kind == .opt:
+        inner = int(types[fo].elem)
+        if type_eq(inner, tt) or (is_union(inner) and union_index(inner, tt) >= 0):
+            why = " (an optional is not cast: inside `if x is? {dt(tt)} \{ }` (or after `x is? {dt(tt)} and`), x is one; `match x` takes each member, `x ?? fallback` gives a default)"
+    fatal(pos, "cannot cast {dt(ft)} to {dt(tt)}{why}")
+cast_host = CheckerCastHost(check_expr, cast_unit, finalize_literal, quantity_transmute, cast_size, cast_refine, secret_cast, can_coerce, coerce, cast_type_text, cast_set_coerce, cast_bundled, cast_conversion, cast_helper, cast_record, cast_text, pos_in_lib, cast_storage, cast_error)
+cast_input = CheckerCastInput(&nodes, &types, &structs, &files, &last_checked, &T_STR, &T_U8, &T_MATH_INT, &cast_host)
+cast_binding = checker_cast_bind(&cast_input)
 
 optional_error = (n: int, at: int, unwrap: bool):
     if unwrap: fatal(nodes[n].pos, "'!' needs an optional value, found {dt(at)}")
@@ -10859,150 +10932,9 @@ check_expr_other = (n: int, expected: int) -> int:
     else if k == .iflet: t = check_iflet(n, ex)
     else if k == .match_: t = check_match(n, expected)
     else if k == .cast:
-        a = int(nodes[n].a)
-        # (x as km: the quantity shown in a unit; units are values, not types)
-        if nodes[n].aux2 != 1 and dewy_at(nodes[n].pos) and quantity_unit_syntax(int(nodes[n].b)): return quantity_as_unit(n)
-        tt = prune(resolve_type(int(nodes[n].b)))
-        if nodes[n].aux2 == 1:
-            # The written source type determines its bits. In particular the
-            # destination must not coerce a literal before reinterpretation.
-            check_expr(a, 0)
-            a = last_checked
-            nodes[n].a = i32(a)
-            finalize_literal(a)
-            ft = prune(ntype(a))
-            if is_quantity(ft) or is_quantity(tt):
-                return quantity_transmute(n, a, ft, tt)
-            if ft == T_MATH_INT or tt == T_MATH_INT: fatal(nodes[n].pos, "transmute requires an explicit fixed-width type; mathematical int has no fixed bit representation")
-            if not is_numeric(ft) or not is_numeric(tt) or tsize(ft) != tsize(tt):
-                fatal(nodes[n].pos, "transmute needs integer or float values of equal width (found {dt(ft)} to {dt(tt)})")
-            nodes[n].type = i32(tt)
-            add_flag(n, NF_CHECKED)
-            last_checked = n
-            return tt
-        if types[tt].kind == .refined:
-            check_expr(a, int(types[tt].elem))
-            nodes[n] = nodes[last_checked]
-            refine_coerce(n, tt)
-            last_checked = n
-            return ntype(n)
-        if types[tt].kind == .secret: return secret_cast(n, a, tt)
-        ak = nodes[a].kind
-        if ak == .array or ak == .map_lit or ak == .tuple or ((ak == .int_lit or ak == .float_lit) and (is_numeric(tt))):
-            # `[1, 2] as [u8]`, `0.5 as f32`: the target type guides the literal
-            check_expr(a, tt)
-            if can_coerce(a, ntype(a), tt):
-                coerce(a, tt)
-                nodes[n] = nodes[a]
-                last_checked = n
-                return tt
-        check_expr(a, 0)
-        finalize_literal(a)
-        ft = prune(ntype(a))
-        if types[ft].kind == .secret: fatal(nodes[n].pos, "a {dt(ft)} converts to no other type: its value is hidden{secret_hint(a)}")
-        # (`bytes as string` claims valid UTF-8, which runtime bytes cannot prove)
-        if tt == T_STR and dewy_at(nodes[n].pos) and not pos_in_lib(nodes[n].pos) and (ft == mk_array(T_U8) or tkind(ft) == .fixed and prune(int(types[ft].elem)) == T_U8):
-            fatal(nodes[n].pos, "`bytes as string` needs a proof that the bytes are valid UTF-8: `bytes as string | none` decodes them, giving none when they are not valid, and `bytes as string ?? fallback` replaces that none")
-        # (`int64 as string`: a type's spelling)
-        if tt == T_STR and types[ft].kind == .typeval and dewy_at(nodes[n].pos):
-            nodes[n] = nodes[bc_str(type_str(int(types[ft].elem), true), nodes[n].pos)]
-            return check_expr(n, T_STR)
-        if has_var(ft) and unify(ft, tt):
-            nodes[n] = nodes[a]
-            last_checked = n
-            return tt
-        if type_eq(ft, tt):
-            nodes[n] = nodes[a]
-            last_checked = n
-            return tt
-        # ('red' as Color, s as Color, Color a union of string literals: the conversion a typed
-        # store makes, a member literal as it is, another literal an error, other text checked)
-        if str_set_of(tt) != 0 and (types[ft].kind == .str_ or str_set_of(ft) != 0) and dewy_at(nodes[n].pos):
-            nodes[n] = nodes[a]
-            str_set_coerce(n, tt)
-            last_checked = n
-            return ntype(n)
-        fk = types[ft].kind
-        tk = types[tt].kind
-        if fk == .quantity or tk == .quantity:
-            coerce(a, tt)
-            nodes[n] = nodes[a]
-            last_checked = n
-            return ntype(n)
-        if ((fk == .array and tk == .fixed) or (fk == .fixed and tk == .array)) and can_coerce(a, ft, tt):
-            coerce(a, tt)
-            nodes[n] = nodes[a]
-            last_checked = n
-            return tt
-        if files[pos_file(nodes[n].pos)].is_dewy:
-            if (is_numeric(ft) and is_numeric(tt)) or (bundled_rational_type(ft) and is_float(tt)) or (ft == T_MATH_INT and bundled_bigint_type(tt)) or (bundled_bigint_type(ft) and tt == T_MATH_INT):
-                add_flag(a, NF_CHECKED)
-                t = conversion(n, tt, [a])
-                last_checked = n
-                return t
-            helper = ""
-            if fk == .array and telem(ft) == T_U8 and tk == .opt and telem(tt) == T_STR: helper = "__dewy_decode_utf8"
-            else if fk == .str_ and tk == .array and telem(tt) == T_U8: helper = "bytes"
-            if helper != "":
-                add_flag(a, NF_CHECKED)
-                nodes[n] = nodes[bc_call(helper, [a], nodes[n].pos)]
-                return check_expr(n, expected)
-            # (a record's own conversion, `__as__ = (x:T):>U => ...`: `x as U` calls it)
-            if fk == .struct_:
-                conv = as_conversion(ft, tt)
-                if conv != 0:
-                    add_flag(a, NF_CHECKED)
-                    nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(bc_ident("__as__", nodes[n].pos)))
-                    set_list(n, [a])
-                    t = resolve_fn_call(n, intern("__as__"), [conv], [a], tt)
-                    nodes[n].type = i32(t)
-                    add_flag(n, NF_CHECKED)
-                    last_checked = n
-                    return t
-            # (any other value converts to string as it prints: "{x}")
-            if tt == T_STR and fk != .void_ and fk != .typeval and fk != .module:
-                text = mk(.str_lit, nodes[n].pos)
-                nodes[text].aux = 1
-                part = mk(.pair, nodes[n].pos)
-                nodes[part].a = i32(a)
-                nodes[part].sval = -1
-                set_list(text, [part])
-                nodes[n] = nodes[text]
-                return check_expr(n, expected)
-        ok = false
-        if (fk == .ptr or fk == .int_ or fk == .null_ or fk == .cfn) and (tk == .ptr or tk == .int_ or tk == .cfn): ok = true
-        if (fk == .int_ or fk == .float_) and (tk == .int_ or tk == .float_):
-            ok = tsize(ft) == tsize(tt) or (fk == .int_ and tk == .int_)
-            # (Rust's `x as f64` converts: here it would keep the bits)
-            if fk != tk and not pos_in_lib(nodes[n].pos):
-                conv = "{dt(tt)}(x)"
-                bits = "f64_bits(x) / f64_from_bits(b)"
-                if tsize(ft) == 4 or tsize(tt) == 4: bits = "f32_bits(x) / f32_from_bits(b)"
-                fatal(nodes[n].pos, "`as` between a whole number and a float keeps the bits, not the number: {conv} converts the value ({bits} for the bits themselves)")
-        if fk == .enum_ and not is_union(ft) and tk == .int_: ok = true
-        if fk == .int_ and tk == .enum_ and not is_union(tt): ok = true
-        # (a string-literal union's word is its member's place in one spelling of the set)
-        if ok and (fk == .enum_ or tk == .enum_) and dewy_at(nodes[n].pos) and not pos_in_lib(nodes[n].pos):
-            set = if fk == .enum_: ft else: tt
-            if str_set_of(set) != 0: str_set_unnumbered(nodes[n].pos, set)
-        if fk == .bool_ and tk == .int_: ok = true
-        if (fk == .str_ or fk == .array) and tk == .ptr:
-            # (the runtime's: the header; a program means the bytes, which data(x) gives)
-            if not pos_in_lib(nodes[n].pos): fatal(nodes[n].pos, "`x as {dt(tt)}` would be where the {dt(ft)}'s header is, not its contents: `data(x)` is a pointer to its first element (what C wants; a str's bytes end with a 0)")
-            note_storage_access(a)
-            ok = true
-        if fk == .ptr and (tk == .str_ or tk == .array): ok = true
-        if not ok:
-            why = ""
-            if is_union(ft) and union_index(ft, tt) >= 0: why = if dewy_at(nodes[n].pos): " (a union is not cast: inside `if x is? {dt(tt)} \{ }` (or after `x is? {dt(tt)} and`), x is one)" else: " (a union is not cast: after `if x is {dt(tt)}:` (or in `x is {dt(tt)} and ...`), x is one)"
-            # (`(int64 | string)? as int64`: the payload's member, tested the same way)
-            fo = prune(ft)
-            if why == "" and dewy_at(nodes[n].pos) and types[fo].kind == .opt:
-                inner = int(types[fo].elem)
-                if type_eq(inner, tt) or (is_union(inner) and union_index(inner, tt) >= 0):
-                    why = " (an optional is not cast: inside `if x is? {dt(tt)} \{ }` (or after `x is? {dt(tt)} and`), x is one; `match x` takes each member, `x ?? fallback` gives a default)"
-            fatal(nodes[n].pos, "cannot cast {dt(ft)} to {dt(tt)}{why}")
-        t = tt
+        result = xc_check(n, expected)
+        if result.bypass: return result.type
+        t = result.type
     else if k == .parallel_region:
         t = check_expr(int(nodes[n].a), expected)
         nodes[n].a = i32(last_checked)

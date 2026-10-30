@@ -1,0 +1,175 @@
+# Frozen `as`-expression checker extracted from expr.jo.
+use 'node_store.dewy'
+use 'checker_types.dewy'
+use 'source_types.dewy'
+use 'type_inference.dewy'
+use 'type_constructors.dewy'
+use 'checker_resolve.dewy'
+struct CheckerCastHost:
+    check: (int, int) -> int
+    unit: (int) -> int
+    finalize: (int) -> int
+    reinterpret: (int, int, int, int) -> int
+    size: (int) -> int
+    refine: (int, int) -> void
+    secret: (int, int, int) -> int
+    can_coerce: (int, int, int) -> bool
+    coerce: (int, int) -> int
+    type_text: (int, int) -> int
+    set_coerce: (int, int) -> void
+    bundled: (int, bool) -> bool
+    conversion: (int, int, int) -> int
+    helper: (int, int, bool, int) -> int
+    record: (int, int, int, int) -> int
+    text: (int, int, int) -> int
+    library: (int) -> bool
+    storage: (int) -> void
+    error: (int, int, int, int, int) -> void
+struct CheckerCastInput:
+    nodes: *(Node[])
+    types: *(TypeInfo[])
+    structs: *(StructInfo[])
+    files: *(SrcFile[])
+    last: *int
+    string_type: *int
+    u8_type: *int
+    math_int: *int
+    host: *CheckerCastHost
+xc_nodes: *(Node[])
+xc_types: *(TypeInfo[])
+xc_structs: *(StructInfo[])
+xc_files: *(SrcFile[])
+xc_last: *int
+xc_string_type: *int
+xc_u8_type: *int
+xc_math_int: *int
+xc_host: *CheckerCastHost
+checker_cast_bind = (input: *CheckerCastInput) -> int:
+    xc_nodes = input[0].nodes
+    xc_types = input[0].types
+    xc_structs = input[0].structs
+    xc_files = input[0].files
+    xc_last = input[0].last
+    xc_string_type = input[0].string_type
+    xc_u8_type = input[0].u8_type
+    xc_math_int = input[0].math_int
+    xc_host = input[0].host
+    0
+xc_dewy = (n: int) -> bool:
+    pos = xc_nodes[0][n].pos
+    f = pos >> 40
+    pos > 0 and f < xc_files[0].len() and xc_files[0][f].is_dewy
+xc_kind = (t: int) -> TK: xc_types[0][tu_prune(t)].kind
+xc_numeric = (t: int) -> bool:
+    k = xc_kind(t)
+    k == .int_ or k == .float_
+xc_elem = (t: int) -> int: int(xc_types[0][tu_prune(t)].elem)
+xc_set = (t0: int) -> int:
+    t = int(tu_prune(t0))
+    if xc_types[0][t].kind != .enum_: return 0
+    int(xc_structs[0][int(xc_types[0][t].st)].lit_set)
+xc_union = (t0: int) -> bool:
+    t = int(tu_prune(t0))
+    xc_types[0][t].kind == .enum_ and xc_structs[0][int(xc_types[0][t].st)].union_
+xc_bundled = (t: int, bigint: bool) -> bool: xc_kind(t) == .struct_ and xc_host[0].bundled(t, bigint)
+xc_take = (n: int, a: int):
+    xc_nodes[0][n] = xc_nodes[0][a]
+    xc_last[0] = n
+xc_mark = (a: int): xc_nodes[0][a].flags = i32(int(xc_nodes[0][a].flags) | 128)
+struct CheckerCastResult:
+    type: int
+    bypass: bool
+xc_check = (n: int, expected: int) -> CheckerCastResult:
+    a = int(xc_nodes[0][n].a)
+    bits = xc_nodes[0][n].aux2 == 1
+    if not bits and xc_dewy(n):
+        u = xc_host[0].unit(n)
+        if u >= 0: return CheckerCastResult(u, true)
+    tt = int(tu_prune(ct_resolve_type(int(xc_nodes[0][n].b))))
+    if bits:
+        xc_host[0].check(a, 0)
+        a = xc_last[0]
+        xc_nodes[0][n].a = i32(a)
+        xc_host[0].finalize(a)
+        ft = int(tu_prune(int(xc_nodes[0][a].type)))
+        if xc_kind(ft) == .quantity or xc_kind(tt) == .quantity:
+            return CheckerCastResult(xc_host[0].reinterpret(n, a, ft, tt), true)
+        if ft == xc_math_int[0] or tt == xc_math_int[0]: xc_host[0].error(n, a, ft, tt, 1)
+        if not xc_numeric(ft) or not xc_numeric(tt) or xc_host[0].size(ft) != xc_host[0].size(tt): xc_host[0].error(n, a, ft, tt, 2)
+        xc_nodes[0][n].type = i32(tt)
+        xc_mark(n)
+        xc_last[0] = n
+        return CheckerCastResult(tt, true)
+    if xc_types[0][tt].kind == .refined:
+        xc_host[0].check(a, int(xc_types[0][tt].elem))
+        xc_nodes[0][n] = xc_nodes[0][xc_last[0]]
+        xc_host[0].refine(n, tt)
+        xc_last[0] = n
+        return CheckerCastResult(int(xc_nodes[0][n].type), true)
+    if xc_types[0][tt].kind == .secret: return CheckerCastResult(xc_host[0].secret(n, a, tt), true)
+    ak = xc_nodes[0][a].kind
+    if ak == .array or ak == .map_lit or ak == .tuple or ((ak == .int_lit or ak == .float_lit) and xc_numeric(tt)):
+        xc_host[0].check(a, tt)
+        if xc_host[0].can_coerce(a, int(xc_nodes[0][a].type), tt):
+            xc_host[0].coerce(a, tt)
+            xc_take(n, a)
+            return CheckerCastResult(tt, true)
+    xc_host[0].check(a, 0)
+    xc_host[0].finalize(a)
+    ft = int(tu_prune(int(xc_nodes[0][a].type)))
+    if xc_types[0][ft].kind == .secret: xc_host[0].error(n, a, ft, tt, 3)
+    if tt == xc_string_type[0] and xc_dewy(n) and not xc_host[0].library(xc_nodes[0][n].pos):
+        if ft == int(tb_mk_array(xc_u8_type[0])) or (xc_kind(ft) == .fixed and int(tu_prune(int(xc_types[0][ft].elem))) == xc_u8_type[0]): xc_host[0].error(n, a, ft, tt, 4)
+    if tt == xc_string_type[0] and xc_types[0][ft].kind == .typeval and xc_dewy(n):
+        return CheckerCastResult(xc_host[0].type_text(n, ft), true)
+    if (int(xc_types[0][ft].flags) & 1 != 0 and tu_unify(ft, tt)) or tu_equal(ft, tt):
+        xc_take(n, a)
+        return CheckerCastResult(tt, true)
+    if xc_set(tt) != 0 and (xc_types[0][ft].kind == .str_ or xc_set(ft) != 0) and xc_dewy(n):
+        xc_nodes[0][n] = xc_nodes[0][a]
+        xc_host[0].set_coerce(n, tt)
+        xc_last[0] = n
+        return CheckerCastResult(int(xc_nodes[0][n].type), true)
+    fk = xc_types[0][ft].kind
+    tk = xc_types[0][tt].kind
+    if fk == .quantity or tk == .quantity:
+        xc_host[0].coerce(a, tt)
+        xc_take(n, a)
+        return CheckerCastResult(int(xc_nodes[0][n].type), true)
+    if ((fk == .array and tk == .fixed) or (fk == .fixed and tk == .array)) and xc_host[0].can_coerce(a, ft, tt):
+        xc_host[0].coerce(a, tt)
+        xc_take(n, a)
+        return CheckerCastResult(tt, true)
+    if xc_files[0][xc_nodes[0][n].pos >> 40].is_dewy:
+        if (xc_numeric(ft) and xc_numeric(tt)) or (xc_bundled(ft, false) and xc_kind(tt) == .float_) or (ft == xc_math_int[0] and xc_bundled(tt, true)) or (xc_bundled(ft, true) and tt == xc_math_int[0]):
+            xc_mark(a)
+            t = xc_host[0].conversion(n, tt, a)
+            xc_last[0] = n
+            return CheckerCastResult(t, true)
+        decode = fk == .array and xc_elem(ft) == xc_u8_type[0] and tk == .opt and xc_elem(tt) == xc_string_type[0]
+        if decode or (fk == .str_ and tk == .array and xc_elem(tt) == xc_u8_type[0]):
+            xc_mark(a)
+            return CheckerCastResult(xc_host[0].helper(n, a, decode, expected), true)
+        if fk == .struct_:
+            r = xc_host[0].record(n, a, ft, tt)
+            if r >= 0: return CheckerCastResult(r, true)
+        if tt == xc_string_type[0] and fk != .void_ and fk != .typeval and fk != .module:
+            return CheckerCastResult(xc_host[0].text(n, a, expected), true)
+    ok = false
+    if (fk == .ptr or fk == .int_ or fk == .null_ or fk == .cfn) and (tk == .ptr or tk == .int_ or tk == .cfn): ok = true
+    if (fk == .int_ or fk == .float_) and (tk == .int_ or tk == .float_):
+        ok = xc_host[0].size(ft) == xc_host[0].size(tt) or (fk == .int_ and tk == .int_)
+        if fk != tk and not xc_host[0].library(xc_nodes[0][n].pos): xc_host[0].error(n, a, ft, tt, 5)
+    if fk == .enum_ and not xc_union(ft) and tk == .int_: ok = true
+    if fk == .int_ and tk == .enum_ and not xc_union(tt): ok = true
+    if ok and (fk == .enum_ or tk == .enum_) and xc_dewy(n) and not xc_host[0].library(xc_nodes[0][n].pos):
+        set = if fk == .enum_: ft else: tt
+        if xc_set(set) != 0: xc_host[0].error(n, a, set, tt, 6)
+    if fk == .bool_ and tk == .int_: ok = true
+    if (fk == .str_ or fk == .array) and tk == .ptr:
+        if not xc_host[0].library(xc_nodes[0][n].pos): xc_host[0].error(n, a, ft, tt, 7)
+        xc_host[0].storage(a)
+        ok = true
+    if fk == .ptr and (tk == .str_ or tk == .array): ok = true
+    if not ok: xc_host[0].error(n, a, ft, tt, 8)
+    CheckerCastResult(tt, false)

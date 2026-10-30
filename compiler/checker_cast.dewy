@@ -1,0 +1,222 @@
+$runtime_checks
+from p"node_store.dewy" import Node
+from p"checker_types.dewy" import (TypeInfo StructInfo TK)
+from p"source_types.dewy" import SrcFile
+from p"type_inference.dewy" import (tu_prune tu_equal tu_unify)
+from p"type_constructors.dewy" import tb_mk_array
+from p"checker_resolve.dewy" import ct_resolve_type
+# `as` expressions own the conversion decision: transmutes, literal-guided targets,
+# identity, string sets, quantities, Dewy conversions and the cast table.
+# Work is O(inference links + demanded semantic work); no additional traversal.
+# Unit and record-conversion requests answer -1 when they do not apply.
+# Host calls may reenter and grow every arena: retain IDs, never element views.
+XCWord:type=int64<overflow='wrap'>
+CheckerCastHost:type=[
+    check:<(node:int64 expected:int64):>int64>
+    unit:<(node:int64):>int64>
+    finalize:<(node:int64):>int64>
+    reinterpret:<(node:int64 operand:int64 source:int64 target:int64):>int64>
+    size:<(type_id:int64):>int64>
+    refine:<(node:int64 type_id:int64):>void>
+    secret:<(node:int64 operand:int64 type_id:int64):>int64>
+    can_coerce:<(node:int64 source:int64 target:int64):>bool>
+    coerce:<(node:int64 type_id:int64):>int64>
+    type_text:<(node:int64 type_id:int64):>int64>
+    set_coerce:<(node:int64 type_id:int64):>void>
+    bundled:<(type_id:int64 big:bool):>bool>
+    conversion:<(node:int64 type_id:int64 operand:int64):>int64>
+    helper:<(node:int64 operand:int64 decode:bool expected:int64):>int64>
+    record:<(node:int64 operand:int64 source:int64 target:int64):>int64>
+    text:<(node:int64 operand:int64 expected:int64):>int64>
+    library:<(pos:int64):>bool>
+    storage:<(node:int64):>void>
+    error:<(node:int64 operand:int64 source:int64 target:int64 code:int64):>void>
+]
+CheckerCastInput:type=[
+    nodes:ptr<array<Node>>
+    types:ptr<array<TypeInfo>>
+    structs:ptr<array<StructInfo>>
+    files:ptr<array<SrcFile>>
+    last:ptr<int64>
+    string_type:ptr<int64>
+    u8_type:ptr<int64>
+    math_int:ptr<int64>
+    host:ptr<CheckerCastHost>
+]
+let xc_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let xc_types:ptr<array<TypeInfo>>=$unsafe (uint64(0) as ptr<array<TypeInfo>>)
+let xc_structs:ptr<array<StructInfo>>=$unsafe (uint64(0) as ptr<array<StructInfo>>)
+let xc_files:ptr<array<SrcFile>>=$unsafe (uint64(0) as ptr<array<SrcFile>>)
+let xc_last:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xc_string_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xc_u8_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xc_math_int:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xc_host:ptr<CheckerCastHost>=$unsafe (uint64(0) as ptr<CheckerCastHost>)
+checker_cast_bind=(input:ptr<CheckerCastInput>):>XCWord=>$unsafe {
+    xc_nodes=input[0].nodes
+    xc_types=input[0].types
+    xc_structs=input[0].structs
+    xc_files=input[0].files
+    xc_last=input[0].last
+    xc_string_type=input[0].string_type
+    xc_u8_type=input[0].u8_type
+    xc_math_int=input[0].math_int
+    xc_host=input[0].host
+    0
+}
+xc_dewy=(n:XCWord):>bool=>$unsafe {
+    let pos=xc_nodes[0].ptr[n].pos
+    let f=pos >> 40
+    pos >? 0 and f <? xc_files[0].length and xc_files[0].ptr[f].is_dewy
+}
+xc_kind=(t:XCWord):>TK=>$unsafe {xc_types[0].ptr[tu_prune(t)].kind}
+xc_numeric=(t:XCWord):>bool=>{
+    let k=xc_kind(t)
+    k =? 'int_' or k =? 'float_'
+}
+xc_elem=(t:XCWord):>XCWord=>$unsafe {XCWord(xc_types[0].ptr[tu_prune(t)].elem)}
+# A string-literal set's index, 0 for any other type.
+xc_set=(t0:XCWord):>XCWord=>$unsafe {
+    let t=tu_prune(t0)
+    if xc_types[0].ptr[t].kind not=? 'enum_' {return 0}
+    XCWord(xc_structs[0].ptr[XCWord(xc_types[0].ptr[t].st)].lit_set)
+}
+xc_union=(t0:XCWord):>bool=>$unsafe {
+    let t=tu_prune(t0)
+    xc_types[0].ptr[t].kind =? 'enum_' and xc_structs[0].ptr[XCWord(xc_types[0].ptr[t].st)].union_
+}
+# The bundled big-integer and rational records are structures; nothing else is either.
+xc_bundled=(t:XCWord big:bool):>bool=>$unsafe {
+    xc_kind(t) =? 'struct_' and xc_host[0].bundled(t big)
+}
+# The cast node takes its operand's node, published as checked.
+xc_take=(n:XCWord a:XCWord):>void=>$unsafe {
+    xc_nodes[0][n]=xc_nodes[0].ptr[a]
+    xc_last[0]=n
+}
+xc_mark=(a:XCWord):>void=>$unsafe {xc_nodes[0][a].flags=xc_nodes[0].ptr[a].flags | 128}
+# A bypass returns directly: a rewrite or a semantic owner already published it.
+CheckerCastResult:type=[type:int64 bypass:bool]
+xc_check=(n:XCWord expected:XCWord):>CheckerCastResult=>$unsafe {
+    let a=XCWord(xc_nodes[0].ptr[n].a)
+    let bits=xc_nodes[0].ptr[n].aux2 =? 1
+    if not bits and xc_dewy(n) {
+        let u=xc_host[0].unit(n)
+        if u >=? 0 {return [type=u bypass=true]}
+    }
+    let tt=tu_prune(ct_resolve_type(XCWord(xc_nodes[0].ptr[n].b)))
+    if bits {
+        # The written source type determines its bits: no destination hint.
+        xc_host[0].check(a 0);
+        a=xc_last[0]
+        xc_nodes[0][n].a=int32<overflow='wrap'>(a)
+        xc_host[0].finalize(a);
+        let ft=tu_prune(XCWord(xc_nodes[0].ptr[a].type))
+        if xc_kind(ft) =? 'quantity' or xc_kind(tt) =? 'quantity' {
+            return [type=xc_host[0].reinterpret(n a ft tt) bypass=true]
+        }
+        if ft =? xc_math_int[0] or tt =? xc_math_int[0] {xc_host[0].error(n a ft tt 1)}
+        if not xc_numeric(ft) or not xc_numeric(tt) or xc_host[0].size(ft) not=? xc_host[0].size(tt) {xc_host[0].error(n a ft tt 2)}
+        xc_nodes[0][n].type=int32<overflow='wrap'>(tt)
+        xc_mark(n)
+        xc_last[0]=n
+        return [type=tt bypass=true]
+    }
+    if xc_types[0].ptr[tt].kind =? 'refined' {
+        xc_host[0].check(a XCWord(xc_types[0].ptr[tt].elem));
+        xc_nodes[0][n]=xc_nodes[0].ptr[xc_last[0]]
+        xc_host[0].refine(n tt)
+        xc_last[0]=n
+        return [type=XCWord(xc_nodes[0].ptr[n].type) bypass=true]
+    }
+    if xc_types[0].ptr[tt].kind =? 'secret' {return [type=xc_host[0].secret(n a tt) bypass=true]}
+    let ak=xc_nodes[0].ptr[a].kind
+    if ak =? 'array' or ak =? 'map_lit' or ak =? 'tuple' or ((ak =? 'int_lit' or ak =? 'float_lit') and xc_numeric(tt)) {
+        # The target type guides the literal: `[1 2] as array<uint8>`, `0.5 as float32`.
+        xc_host[0].check(a tt);
+        if xc_host[0].can_coerce(a XCWord(xc_nodes[0].ptr[a].type) tt) {
+            xc_host[0].coerce(a tt);
+            xc_take(n a)
+            return [type=tt bypass=true]
+        }
+    }
+    xc_host[0].check(a 0);
+    xc_host[0].finalize(a);
+    let ft=tu_prune(XCWord(xc_nodes[0].ptr[a].type))
+    if xc_types[0].ptr[ft].kind =? 'secret' {xc_host[0].error(n a ft tt 3)}
+    # `bytes as string` claims valid UTF-8, which runtime bytes cannot prove.
+    if tt =? xc_string_type[0] and xc_dewy(n) and not xc_host[0].library(xc_nodes[0].ptr[n].pos) {
+        if ft =? tb_mk_array(xc_u8_type[0]) or (xc_kind(ft) =? 'fixed' and tu_prune(XCWord(xc_types[0].ptr[ft].elem)) =? xc_u8_type[0]) {xc_host[0].error(n a ft tt 4)}
+    }
+    if tt =? xc_string_type[0] and xc_types[0].ptr[ft].kind =? 'typeval' and xc_dewy(n) {
+        return [type=xc_host[0].type_text(n ft) bypass=true]
+    }
+    if (XCWord(xc_types[0].ptr[ft].flags) & 1 not=? 0 and tu_unify(ft tt)) or tu_equal(ft tt) {
+        xc_take(n a)
+        return [type=tt bypass=true]
+    }
+    # A union of string literals converts as a typed store does.
+    if xc_set(tt) not=? 0 and (xc_types[0].ptr[ft].kind =? 'str_' or xc_set(ft) not=? 0) and xc_dewy(n) {
+        xc_nodes[0][n]=xc_nodes[0].ptr[a]
+        xc_host[0].set_coerce(n tt)
+        xc_last[0]=n
+        return [type=XCWord(xc_nodes[0].ptr[n].type) bypass=true]
+    }
+    let fk=xc_types[0].ptr[ft].kind
+    let tk=xc_types[0].ptr[tt].kind
+    if fk =? 'quantity' or tk =? 'quantity' {
+        xc_host[0].coerce(a tt);
+        xc_take(n a)
+        return [type=XCWord(xc_nodes[0].ptr[n].type) bypass=true]
+    }
+    if ((fk =? 'array' and tk =? 'fixed') or (fk =? 'fixed' and tk =? 'array')) and xc_host[0].can_coerce(a ft tt) {
+        xc_host[0].coerce(a tt);
+        xc_take(n a)
+        return [type=tt bypass=true]
+    }
+    if xc_files[0][xc_nodes[0].ptr[n].pos >> 40].is_dewy {
+        if (xc_numeric(ft) and xc_numeric(tt)) or (xc_bundled(ft false) and xc_kind(tt) =? 'float_') or (ft =? xc_math_int[0] and xc_bundled(tt true)) or (xc_bundled(ft true) and tt =? xc_math_int[0]) {
+            xc_mark(a)
+            let t=xc_host[0].conversion(n tt a)
+            xc_last[0]=n
+            return [type=t bypass=true]
+        }
+        let decode=fk =? 'array' and xc_elem(ft) =? xc_u8_type[0] and tk =? 'opt' and xc_elem(tt) =? xc_string_type[0]
+        if decode or (fk =? 'str_' and tk =? 'array' and xc_elem(tt) =? xc_u8_type[0]) {
+            xc_mark(a)
+            return [type=xc_host[0].helper(n a decode expected) bypass=true]
+        }
+        # A record's own `__as__` conversion.
+        if fk =? 'struct_' {
+            let r=xc_host[0].record(n a ft tt)
+            if r >=? 0 {return [type=r bypass=true]}
+        }
+        # Any other value converts to string as it prints: "{x}".
+        if tt =? xc_string_type[0] and fk not=? 'void_' and fk not=? 'typeval' and fk not=? 'module' {
+            return [type=xc_host[0].text(n a expected) bypass=true]
+        }
+    }
+    let ok=false
+    if (fk =? 'ptr' or fk =? 'int_' or fk =? 'null_' or fk =? 'cfn') and (tk =? 'ptr' or tk =? 'int_' or tk =? 'cfn') {ok=true}
+    if (fk =? 'int_' or fk =? 'float_') and (tk =? 'int_' or tk =? 'float_') {
+        ok=xc_host[0].size(ft) =? xc_host[0].size(tt) or (fk =? 'int_' and tk =? 'int_')
+        # Rust's `x as f64` converts; here it would keep the bits.
+        if fk not=? tk and not xc_host[0].library(xc_nodes[0].ptr[n].pos) {xc_host[0].error(n a ft tt 5)}
+    }
+    if fk =? 'enum_' and not xc_union(ft) and tk =? 'int_' {ok=true}
+    if fk =? 'int_' and tk =? 'enum_' and not xc_union(tt) {ok=true}
+    # A string-literal union's word is its member's place in one spelling of the set.
+    if ok and (fk =? 'enum_' or tk =? 'enum_') and xc_dewy(n) and not xc_host[0].library(xc_nodes[0].ptr[n].pos) {
+        let set=if fk =? 'enum_' {ft} else {tt}
+        if xc_set(set) not=? 0 {xc_host[0].error(n a set tt 6)}
+    }
+    if fk =? 'bool_' and tk =? 'int_' {ok=true}
+    if (fk =? 'str_' or fk =? 'array') and tk =? 'ptr' {
+        if not xc_host[0].library(xc_nodes[0].ptr[n].pos) {xc_host[0].error(n a ft tt 7)}
+        xc_host[0].storage(a)
+        ok=true
+    }
+    if fk =? 'ptr' and (tk =? 'str_' or tk =? 'array') {ok=true}
+    if not ok {xc_host[0].error(n a ft tt 8)}
+    [type=tt bypass=false]
+}
