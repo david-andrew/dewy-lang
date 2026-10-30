@@ -1,0 +1,67 @@
+use 'node_store.dewy'
+use 'checker_types.dewy'
+use 'source_types.dewy'
+use 'type_inference.dewy'
+use 'type_constructors.dewy'
+struct CheckerOptionalHost:
+    check: (int, int) -> int
+    coerce: (int, int) -> int
+    narrow: (int) -> int
+    exceptions: (int) -> bool
+    failures: (int, int, int) -> int
+    exact: (int) -> bool
+    error: (int, int, bool) -> void
+struct CheckerOptionalInput:
+    nodes: *(Node[])
+    types: *(TypeInfo[])
+    files: *(SrcFile[])
+    math_int: *(int)
+    host: *(CheckerOptionalHost)
+xo_nodes: *(Node[])
+xo_types: *(TypeInfo[])
+xo_files: *(SrcFile[])
+xo_math_int: *(int)
+xo_host: *(CheckerOptionalHost)
+checker_optional_bind = (input: *(CheckerOptionalInput)) -> int:
+    xo_nodes = input[0].nodes
+    xo_types = input[0].types
+    xo_files = input[0].files
+    xo_math_int = input[0].math_int
+    xo_host = input[0].host
+    0
+xo_dewy = (n: int) -> bool:
+    pos = xo_nodes[0][n].pos
+    f = pos >> 40
+    pos > 0 and f < xo_files[0].len() and xo_files[0][f].is_dewy
+# A nonzero bypass returns directly: exception rewriting already published it.
+struct CheckerOptionalResult:
+    type: int
+    bypass: bool
+xo_check = (n: int, expected: int, ex: int) -> CheckerOptionalResult:
+    unwrap = xo_nodes[0][n].kind == .unwrap
+    h = 0
+    if ex != 0:
+        if not unwrap and xo_types[0][ex].kind == .opt: h = ex
+        else: h = int(tb_mk_opt(ex))
+    at = int(tu_prune(xo_host[0].check(int(xo_nodes[0][n].a), h)))
+    if not unwrap and xo_dewy(n) and (xo_nodes[0][n].c != 0 or xo_host[0].exceptions(at)):
+        return CheckerOptionalResult(xo_host[0].failures(n, at, expected), true)
+    if xo_types[0][at].kind != .opt:
+        narrowed = xo_host[0].narrow(int(xo_nodes[0][n].a))
+        xo_nodes[0][n].a = i32(narrowed)
+        at = int(tu_prune(int(xo_nodes[0][int(xo_nodes[0][n].a)].type)))
+    if xo_types[0][at].kind != .opt: xo_host[0].error(n, at, unwrap)
+    inner = int(xo_types[0][at].elem)
+    if unwrap: return CheckerOptionalResult(inner, false)
+    h2 = inner
+    if ex != 0: h2 = ex
+    btt = int(tu_prune(xo_host[0].check(int(xo_nodes[0][n].b), h2)))
+    t = inner
+    if xo_types[0][btt].kind == .opt:
+        xo_host[0].coerce(int(xo_nodes[0][n].b), at)
+        t = at
+        xo_nodes[0][n].aux = 1
+    else if xo_dewy(n) and ex == 0 and xo_types[0][int(tu_prune(inner))].kind == .int_ and inner != xo_math_int[0] and btt == xo_math_int[0] and xo_host[0].exact(int(xo_nodes[0][n].b)):
+        t = xo_math_int[0]
+    else: xo_host[0].coerce(int(xo_nodes[0][n].b), inner)
+    CheckerOptionalResult(t, false)

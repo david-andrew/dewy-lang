@@ -1,0 +1,78 @@
+$runtime_checks
+from p"node_store.dewy" import Node
+from p"checker_types.dewy" import TypeInfo
+from p"source_types.dewy" import SrcFile
+from p"type_inference.dewy" import tu_prune
+from p"type_constructors.dewy" import tb_mk_opt
+# Optional expressions own recursive operand checking and result selection.
+# Work is O(inference links + demanded semantic work); no additional traversal.
+# Host calls may reenter and grow every arena: retain IDs, never element views.
+XOWord:type=int64<overflow='wrap'>
+CheckerOptionalHost:type=[
+    check:<(node:int64 expected:int64):>int64>
+    coerce:<(node:int64 type_id:int64):>int64>
+    narrow:<(node:int64):>int64>
+    exceptions:<(type_id:int64):>bool>
+    failures:<(node:int64 type_id:int64 expected:int64):>int64>
+    exact:<(node:int64):>bool>
+    error:<(node:int64 type_id:int64 unwrap:bool):>void>
+]
+CheckerOptionalInput:type=[
+    nodes:ptr<array<Node>>
+    types:ptr<array<TypeInfo>>
+    files:ptr<array<SrcFile>>
+    math_int:ptr<int64>
+    host:ptr<CheckerOptionalHost>
+]
+let xo_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let xo_types:ptr<array<TypeInfo>>=$unsafe (uint64(0) as ptr<array<TypeInfo>>)
+let xo_files:ptr<array<SrcFile>>=$unsafe (uint64(0) as ptr<array<SrcFile>>)
+let xo_math_int:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xo_host:ptr<CheckerOptionalHost>=$unsafe (uint64(0) as ptr<CheckerOptionalHost>)
+checker_optional_bind=(input:ptr<CheckerOptionalInput>):>XOWord=>$unsafe {
+    xo_nodes=input[0].nodes
+    xo_types=input[0].types
+    xo_files=input[0].files
+    xo_math_int=input[0].math_int
+    xo_host=input[0].host
+    0
+}
+xo_dewy=(n:XOWord):>bool=>$unsafe {
+    let pos=xo_nodes[0].ptr[n].pos
+    let f=pos >> 40
+    pos >? 0 and f <? xo_files[0].length and xo_files[0].ptr[f].is_dewy
+}
+# A bypass returns directly: exception rewriting already published its result.
+CheckerOptionalResult:type=[type:int64 bypass:bool]
+xo_check=(n:XOWord expected:XOWord ex:XOWord):>CheckerOptionalResult=>$unsafe {
+    let unwrap=xo_nodes[0].ptr[n].kind =? 'unwrap'
+    let h:XOWord=0
+    if ex not=? 0 {
+        if not unwrap and xo_types[0].ptr[ex].kind =? 'opt' {h=ex}
+        else {h=tb_mk_opt(ex)}
+    }
+    let at=tu_prune(xo_host[0].check(XOWord(xo_nodes[0].ptr[n].a) h))
+    if not unwrap and xo_dewy(n) and (xo_nodes[0].ptr[n].c not=? 0 or xo_host[0].exceptions(at)) {
+        return [type=xo_host[0].failures(n at expected) bypass=true]
+    }
+    if xo_types[0].ptr[at].kind not=? 'opt' {
+        let narrowed=xo_host[0].narrow(XOWord(xo_nodes[0].ptr[n].a))
+        xo_nodes[0][n].a=int32<overflow='wrap'>(narrowed)
+        at=tu_prune(XOWord(xo_nodes[0].ptr[XOWord(xo_nodes[0].ptr[n].a)].type))
+    }
+    if xo_types[0].ptr[at].kind not=? 'opt' {xo_host[0].error(n at unwrap)}
+    let inner=XOWord(xo_types[0].ptr[at].elem)
+    if unwrap {return [type=inner bypass=false]}
+    let h2=inner
+    if ex not=? 0 {h2=ex}
+    let btt=tu_prune(xo_host[0].check(XOWord(xo_nodes[0].ptr[n].b) h2))
+    let t=inner
+    if xo_types[0].ptr[btt].kind =? 'opt' {
+        xo_host[0].coerce(XOWord(xo_nodes[0].ptr[n].b) at);
+        t=at
+        xo_nodes[0][n].aux=1
+    } else if xo_dewy(n) and ex =? 0 and xo_types[0].ptr[tu_prune(inner)].kind =? 'int_' and inner not=? xo_math_int[0] and btt =? xo_math_int[0] and xo_host[0].exact(XOWord(xo_nodes[0].ptr[n].b)) {
+        t=xo_math_int[0]
+    } else {xo_host[0].coerce(XOWord(xo_nodes[0].ptr[n].b) inner);}
+    [type=t bypass=false]
+}

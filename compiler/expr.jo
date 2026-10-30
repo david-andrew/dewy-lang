@@ -1,3 +1,4 @@
+use 'checker_optional.dewy'
 use 'checker_literals.dewy'
 use 'type_match.dewy'
 use 'type_substitute.dewy'
@@ -9988,6 +9989,18 @@ check_call_expr = (n: int, expected: int) -> int:
 
 check_str_expr = (n: int, expected: int) -> int: xl_check_str(n, expected)
 
+optional_error = (n: int, at: int, unwrap: bool):
+    if unwrap: fatal(nodes[n].pos, "'!' needs an optional value, found {dt(at)}")
+    lhs = int(nodes[n].a)
+    lp = int(nodes[lhs].pos)
+    lf = pos_file(lp)
+    if lf >= 0 and lf < files.len() and pos_off(lp) < len(files[lf].src) and files[lf].src[pos_off(lp)] == '[':
+        fatal(nodes[n].pos, "'??' needs an optional on the left, found {dt(at)} (indexing gives the element itself; m.get(k) gives an optional, m.get(k, default) a value)")
+    fatal(nodes[n].pos, "'??' needs an optional on the left, found {dt(at)}")
+optional_host = CheckerOptionalHost(check_expr, coerce, narrow_optional_source, coalesce_exceptions, coalesce_failures, exact_potential, optional_error)
+optional_input = CheckerOptionalInput(&nodes, &types, &files, &T_MATH_INT, &optional_host)
+optional_binding = checker_optional_bind(&optional_input)
+
 literal_interpolation_warning = (e: int):
     # ("[0-9]{4}" for a regular expression: {4} puts the number 4 in the text)
     if (nodes[e].kind == .int_lit or (nodes[e].kind == .tuple and nkids(e) > 0 and nodes[kid(e, 0)].kind == .int_lit)) and not pos_in_lib(nodes[e].pos) and not files[pos_file(nodes[e].pos)].is_dewy and brace_before(nodes[e].pos):
@@ -10645,48 +10658,10 @@ check_expr_other = (n: int, expected: int) -> int:
             return check_expr(n, expected)
         nodes[n].a = i32(coerce(int(nodes[n].a), T_BOOL))
         t = T_BOOL
-    else if k == .coalesce:
-        h = 0
-        if ex != 0:
-            if exk == .opt: h = ex
-            else: h = mk_opt(ex)
-        at = prune(check_expr(int(nodes[n].a), h))
-        if dewy_at(nodes[n].pos) and (nodes[n].c != 0 or coalesce_exceptions(at)): return coalesce_failures(n, at, expected)
-        if types[at].kind != .opt:
-            nodes[n].a = i32(narrow_optional_source(int(nodes[n].a)))
-            at = prune(ntype(int(nodes[n].a)))
-        if types[at].kind != .opt:
-            lhs = int(nodes[n].a)
-            # (an index into a map has become a call by now; its position is still the '[')
-            lp = int(nodes[lhs].pos)
-            lf = pos_file(lp)
-            if lf >= 0 and lf < files.len() and pos_off(lp) < len(files[lf].src) and files[lf].src[pos_off(lp)] == '[':
-                fatal(nodes[n].pos, "'??' needs an optional on the left, found {dt(at)} (indexing gives the element itself; m.get(k) gives an optional, m.get(k, default) a value)")
-            fatal(nodes[n].pos, "'??' needs an optional on the left, found {dt(at)}")
-        inner = int(types[at].elem)
-        h2 = inner
-        if ex != 0: h2 = ex
-        btt = prune(check_expr(int(nodes[n].b), h2))
-        if types[btt].kind == .opt:
-            coerce(int(nodes[n].b), at)
-            t = at
-            nodes[n].aux = 1
-        else if dewy_at(nodes[n].pos) and ex == 0 and is_int(inner) and inner != T_MATH_INT and btt == T_MATH_INT and exact_potential(int(nodes[n].b)):
-            # Reading an optional beside an exact fallback widens the read;
-            # the fallback has no fixed-width destination to narrow into.
-            t = T_MATH_INT
-        else:
-            coerce(int(nodes[n].b), inner)
-            t = inner
-    else if k == .unwrap:
-        h = 0
-        if ex != 0: h = mk_opt(ex)
-        at = prune(check_expr(int(nodes[n].a), h))
-        if types[at].kind != .opt:
-            nodes[n].a = i32(narrow_optional_source(int(nodes[n].a)))
-            at = prune(ntype(int(nodes[n].a)))
-        if types[at].kind != .opt: fatal(nodes[n].pos, "'!' needs an optional value, found {dt(at)}")
-        t = int(types[at].elem)
+    else if k == .coalesce or k == .unwrap:
+        result = xo_check(n, expected, ex)
+        if result.bypass: return result.type
+        t = result.type
     else if k == .lambda: t = check_lambda(n, expected)
     else if k == .array and has_flag(n, NF_TYPE_EXPR):
         # (thorns = Rect[]: an empty array of Rects is declared with a colon)
