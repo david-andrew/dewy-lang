@@ -1135,7 +1135,9 @@ both sides of a branch. Range loops use their captured endpoints. While-loop
 invariants are validated across entry, condition effects, continues and exits;
 bounded widening and narrowing fall back to unknown when analysis exhausts its
 budget. Assertions never supply assumed loop invariants. Calls preserve facts
-only when a settled effect summary rules out interference.
+only when a settled effect summary rules out interference. Small tuple-returning
+functions can supply integer bounds and array lengths for each demanded
+component, provided every return establishes them.
 
 `$proof` marks an erased procedure. Its fact-only result is checked at every
 normal exit, including bare returns:

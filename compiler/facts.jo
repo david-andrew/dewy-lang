@@ -210,7 +210,7 @@ fact_divisors: {int: int} = {}
 fact_requests: FactRequest[]
 fact_fixed_requests: FactRequest[]
 fact_terms: FactTerm[]
-# Evaluated actuals of demanded record-returning calls. A field projection
+# Evaluated actuals of demanded record/tuple-returning calls. A field projection
 # requests its own cached return summary; no whole-program constructor census.
 fact_constructor_actuals: {int: int[]} = {}
 fact_constructor_types: {int: bool} = {}
@@ -852,7 +852,7 @@ fact_project = (s: mut FactState, base: int, selector: int, element: bool, t: in
         hull = fact_projection_find(s, base, FACT_ELEMENT_LENGTH, false)
         if hull >= 0 and s.projections.len() < FACT_CAP and fact_projection_find(s, v, -1, false) < 0:
             fact_add_projection(s, FactProjection(v, -1, false, fact_new(s, fact_bound(s, s.projections[hull].value), FactTerm(type = T_INT))))
-    if not element and selector >= 0 and fact_constructor_actuals.len() > 0 and tkind(fact_type(t)) == .array and fact_constructor_actuals.has(base):
+    if not element and selector >= 0 and fact_constructor_actuals.len() > 0 and (tkind(fact_type(t)) == .array or tkind(fact_type(fact_terms[base].type)) == .tuple and fact_scalar(t) and is_int(t)) and fact_constructor_actuals.has(base):
         fact_constructor_field(s, base, selector, v)
     # (an element of a literal, by an index not known: what all of them share)
     if element:
@@ -867,11 +867,18 @@ fact_project = (s: mut FactState, base: int, selector: int, element: bool, t: in
         ref_assume(t, v, args, s)
     v
 
-# Summarize only a demanded array field, over every return. Expected O(1)
-# lookup; at most 32 syntax nodes per callee, 128 transfer visits per field query.
+# Summarize only a demanded array field or integer tuple slot, over every
+# return. Expected O(1) lookup; at most 32 syntax nodes per callee, 128 transfer visits per field query.
 fact_constructor_field = (s: mut FactState, base: int, selector: int, v: int):
     call = fact_terms[base].origin
-    summary = fact_summary(int(nodes[call].sym), false, selector)
+    tuple = tkind(fact_type(fact_terms[base].type)) == .tuple
+    summary = fact_summary(int(nodes[call].sym), false, if tuple: selector + 1 else: selector)
+    if tuple and fact_scalar(fact_terms[v].type) and is_int(fact_terms[v].type):
+        if summary.seen and not summary.value.wide:
+            old = fact_bound(s, v)
+            if summary.host and v != 0: fact_terms[v].type = T_INT
+            fact_set_bound(s, v, FactBound(max(old.lo, summary.value.lo), min(old.hi, summary.value.hi), old.nz or summary.value.nz))
+        return
     if summary.seen:
         length = fact_project(s, v, -1, false, T_INT)
         old = fact_bound(s, length)
@@ -1776,8 +1783,9 @@ fact_summary_record = (s: mut FactState, r0: int):
     t = fact_type(int(fns[fact_summary_owner].ret))
     r = r0
     if fact_summary_field != 0:
-        t = fact_type(shape_field_type(t, fact_summary_field))
-        if r != 0: r = fact_project(s, r, fact_summary_field, false, t)
+        selector = if tkind(t) == .tuple: fact_summary_field - 1 else: fact_summary_field
+        t = fact_summary_field_type(t, fact_summary_field)
+        if r != 0: r = fact_project(s, r, selector, false, t)
     length = FactBound()
     value = FactBound()
     same = -1
@@ -1875,12 +1883,21 @@ fact_summary_vacuous = (acc: FactSummary, t: int) -> bool:
     d = fact_domain(t)
     acc.value.lo <= d.lo and acc.value.hi >= d.hi and not acc.value.nz and not acc.host
 
-# Ordinary record fields only. Shaped tensors have their own contracts;
-# nested records, variants and ownership hooks are outside this summary.
-# Type-indexed, O(fields) once per demanded return type.
+# Ordinary array record fields and flat tuple slots. Shaped tensors have
+# their own contracts; nested records, variants and hooks stay outside this
+# summary. Type-indexed, O(fields), at most 32 tuple slots per demanded type.
 fact_constructor_type = (t: int) -> bool:
-    if tkind(t) != .struct_: return false
+    if tkind(t) != .struct_ and tkind(t) != .tuple: return false
     if let known = fact_constructor_types.get(t): return known
+    if tkind(t) == .tuple:
+        found = false
+        if types[t].nargs > 32: fact_constructor_types[t] = false; return false
+        loop i in [0..int(types[t].nargs)):
+            part = fact_type(type_args[int(types[t].args) + i])
+            if tkind(part) == .array or fact_scalar(part) and is_int(part) and part != T_U64: found = true
+        if found and ownership_decls.len() != 0 and ownership_fact_type(t): found = false
+        fact_constructor_types[t] = found
+        return found
     si = int(types[t].st)
     eligible = not is_nd(t) and structs[si].nvariants == 0 and not structs[si].union_ and not structs[si].soa_
     found = false
@@ -1914,7 +1931,18 @@ fact_constructor_body = (f: int) -> bool:
 fact_constructor_join = (n: int, paths0: FactPaths, y: int, z: int, result: FactBound, hull: int, s: mut FactState) -> int:
     paths = paths0
     field = fact_summary_field
-    ft = fact_type(shape_field_type(fact_type(ntype(n)), field))
+    ft = fact_summary_field_type(fact_type(ntype(n)), field)
+    if tkind(fact_type(ntype(n))) == .tuple: field -= 1
+    if fact_scalar(ft) and is_int(ft):
+        a = fact_project(paths.yes, y, field, false, ft)
+        b = fact_project(paths.no, z, field, false, ft)
+        bound = if not paths.yes.live: fact_bound(paths.no, b) else if not paths.no.live: fact_bound(paths.yes, a) else: fact_hull(fact_bound(paths.yes, a), fact_bound(paths.no, b), n)
+        part_type = if not paths.yes.live: fact_terms[b].type else if not paths.no.live: fact_terms[a].type else: fact_hull_type(ft, paths.yes, a, paths.no, b)
+        s = fact_join(paths.yes, paths.no, n)
+        value = fact_new(s, result, FactTerm(type = hull))
+        part = fact_new(s, bound, FactTerm(type = part_type))
+        if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(value, field, false, part))
+        return value
     a = fact_project(paths.yes, fact_project(paths.yes, y, field, false, ft), -1, false, T_INT)
     b = fact_project(paths.no, fact_project(paths.no, z, field, false, ft), -1, false, T_INT)
     length = if not paths.yes.live: fact_bound(paths.no, b) else if not paths.no.live: fact_bound(paths.yes, a) else: fact_hull(fact_bound(paths.yes, a), fact_bound(paths.no, b), n)
@@ -1932,6 +1960,14 @@ fact_constructor_join = (n: int, paths0: FactPaths, y: int, z: int, result: Fact
         fact_difference(s, other, count, -relation.1, n)
     value
 
+# Tuple summary keys use slot+1 because zero denotes the whole result.
+# Function identity keeps those keys disjoint from named record fields.
+fact_summary_field_type = (t: int, field: int) -> int:
+    if tkind(t) == .tuple:
+        if field <= 0 or field > int(types[t].nargs): return T_VOID
+        return fact_type(type_args[int(types[t].args) + field - 1])
+    fact_type(shape_field_type(t, field))
+
 fact_summary = (f: int, places: bool = false, field: int = 0) -> FactSummary:
     key = if field == 0: f else: fact_pair_key(f, field)
     if let known = fact_summaries.get(key): return known
@@ -1939,7 +1975,7 @@ fact_summary = (f: int, places: bool = false, field: int = 0) -> FactSummary:
     d = int(fns[f].decl)
     t = fact_type(int(fns[f].ret))
     if fns[f].state != 2 or fns[f].body == 0 or fns[f].kind == FK_INIT or fns[f].caps.len() != 0 or d != 0 and has_flag(d, NF_EXTERN) or effect_unavailable.has(f): return unknown
-    if field != 0: t = fact_type(shape_field_type(t, field))
+    if field != 0: t = fact_summary_field_type(t, field)
     if tkind(t) != .array and not (fact_scalar(t) and is_int(t)) and not places: return unknown
     if (field != 0 or fact_constructor_budget >= 0) and not fact_constructor_body(f):
         if field != 0: fact_summaries[key] = unknown
@@ -7253,7 +7289,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
             # facts do not depend on the actual values. Argument obligations
             # and effects remain separate roots of this slice.
             ret = fact_type(int(fns[int(nodes[n].sym)].ret))
-            constructor = types[ret].kind == .struct_ and fact_constructor_type(ret) and fact_constructor_body(int(nodes[n].sym))
+            constructor = (types[ret].kind == .struct_ or types[ret].kind == .tuple) and fact_constructor_type(ret) and fact_constructor_body(int(nodes[n].sym))
             if constructor: fact_constructor_calls[n] = true
             array_result = tkind(ret) == .array or constructor
             # Array lengths also bound scalar search results. Demand these

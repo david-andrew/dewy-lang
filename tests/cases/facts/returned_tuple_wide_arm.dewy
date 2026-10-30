@@ -1,0 +1,3 @@
+make=(flag:bool):>(int int)=>{(if flag {1} else {18446744073709551616}) 3}
+consume=(flag:bool):>int64=>{let (a b)=make(flag); return int64(a)}
+printl(consume(false))

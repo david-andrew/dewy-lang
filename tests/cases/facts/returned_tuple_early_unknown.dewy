@@ -1,0 +1,6 @@
+import p"../../../tests/fixtures/programs/returned_tuple_bounds.jo" as tuples
+consume=(n:int):>int64=>{
+ let (a b)=tuples.unknown(false n)
+ return int64(a)
+}
+printl(consume(18446744073709551616))
