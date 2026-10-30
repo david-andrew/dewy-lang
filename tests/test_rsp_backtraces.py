@@ -25,7 +25,6 @@ MIXED = RECURSION + ('@noinline\nwide = (' + ', '.join(f'x{i}: int' for i in ran
                      + 'print(wide(' + ', '.join(str(i + 4) for i in range(24)) + '))\n')
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('flags', [[], ['--release'], ['-g']], ids=['default', 'release', 'debug'])
 @pytest.mark.parametrize('worker', [False, True], ids=['direct', 'worker'])
 def test_rsp_panic_backtrace(compiler, tmp_path, flags, worker):

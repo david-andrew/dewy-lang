@@ -2457,7 +2457,6 @@ return x.value
 
 @pytest.mark.parametrize('extension', ['dewy', 'jo'])
 @pytest.mark.parametrize('style', ['selected', 'splat', 'module-alias', 'name-alias'])
-@pytest.mark.core_quick
 def test_core_imports(compiler, tmp_path, extension, style):
     dependency = tmp_path / f'helper.{extension}'
     dependency.write_text('twice=(x:int64):>int64=>x*2\n$runtime_checks\n' if extension == 'dewy'

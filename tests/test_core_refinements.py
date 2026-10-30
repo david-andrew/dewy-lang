@@ -39,7 +39,6 @@ def test_refinement_runtime_and_strict(compiler, tmp_path, release, source):
         assert ('cannot prove exact integer result fits' if 'f(127)' in source else 'cannot prove refinement') in result.stderr and 'help:' in result.stderr, result.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True])
 def test_refinement_proven_erasure(compiler, tmp_path, release):
     path = tmp_path / 'erase.dewy'
@@ -52,7 +51,6 @@ def test_refinement_proven_erasure(compiler, tmp_path, release):
     assert all('__assert_fail' not in body for body in bodies)
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('source,diagnostic', [
     ('main=()=>{let x:int64<i => i >? 0>; printl(x)}', 'is read before it is given a value'),
     ('main=()=>{let x:int64<i => i >? 0>=1; x=0; printl(x)}', 'refinement refuted'),

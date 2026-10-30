@@ -44,7 +44,6 @@ def frozen_evaluator(compiler, tmp_path_factory):  # noqa: F811
     return binary
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checked_eval_twins(compiler, frozen_evaluator, tmp_path, release):  # noqa: F811
     sources = [ROOT / f'tests/cases/comptime/{name}.dewy' for name in

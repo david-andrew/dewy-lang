@@ -9,7 +9,6 @@ import pytest
 from tests.support import ROOT, compiler
 
 
-@pytest.mark.core_quick
 @pytest.mark.skipif(platform.system() != 'Linux' or platform.machine() != 'x86_64',
                     reason='executes Linux x86-64 machine code')
 def test_spill_compare_flags(compiler, tmp_path):

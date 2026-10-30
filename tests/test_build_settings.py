@@ -109,7 +109,6 @@ def test_file_target_outranks_the_output_name(compiler, tmp_path):
     assert ran.stdout == f'debug\n{HOST}\n'
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('option', ['--runtime-checks', '--runtime_checks=false', '$no_hidden_costs',
                                     '--bulletproof', '--fast-math', '--unsafe'])
 @pytest.mark.parametrize('command', [(), ('build',)])

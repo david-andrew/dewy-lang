@@ -112,7 +112,7 @@ def run(program, op, x, y=0):
 
 
 @pytest.mark.parametrize('op,x,y,expected', [
-    pytest.param('add', MAX-1, 1, MAX, marks=pytest.mark.core_quick), ('add', MIN, 0, MIN), ('sub', MIN+1, 1, MIN),
+    pytest.param('add', MAX-1, 1, MAX), ('add', MIN, 0, MIN), ('sub', MIN+1, 1, MIN),
     ('mul', MIN//2, 2, MIN), ('mul', MAX, 1, MAX), ('mul', MIN, 0, 0),
     ('neg', MAX, 0, -MAX), ('abs', -MAX, 0, MAX),
     ('pow', -2, 63, MIN), ('pow', 0, 0, 1), ('pow-call', 2, 62, 1 << 62),
@@ -135,7 +135,7 @@ def run(program, op, x, y=0):
     ('fixed-narrow-pow', 2, 63, 0), ('fixed-narrow-floor', 7, 2, 'int64'),
     ('fixed-div', MIN, -1, MIN), ('fixed-pow', 2, 63, MIN), ('narrow-wrap', 0, 0, -128),
     ('compound', MAX-1, 1, MAX), ('wrap', MAX, 1, MIN),
-    pytest.param('identity', 1, 2, 'int int int int64\nint int int', marks=pytest.mark.core_quick),
+    pytest.param('identity', 1, 2, 'int int int int64\nint int int'),
     ('format', MIN, 0, f'{MIN} {MIN}'),
     ('indices', 0, 0, '[10 30]\n[11 20 32]'), ('fixed-u-div', 0, 0, MAX),
     ('index', 2, 0, '30 3'),
@@ -148,7 +148,7 @@ def test_int_values(int_program, op, x, y, expected):
 
 @pytest.mark.parametrize('op,x,y', [
     ('shl', 1, -1), ('shr', 1, -1),
-    pytest.param('i8', 128, 0, marks=pytest.mark.core_quick), ('i8', -129, 0),
+    pytest.param('i8', 128, 0), ('i8', -129, 0),
     ('i16', -32769, 0), ('i16', 32768, 0), ('u16', -1, 0), ('u16', 65536, 0),
     ('i32', -(1 << 31)-1, 0), ('i32', 1 << 31, 0), ('u32', -1, 0), ('u32', 1 << 32, 0),
     ('u8', -1, 0), ('u8', 256, 0), ('u64', -1, 0), ('float-nan', 0, 0),

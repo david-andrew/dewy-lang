@@ -13,7 +13,6 @@ pytestmark = pytest.mark.skipif(
     reason='executes Linux x86-64 machine code')
 
 
-@pytest.mark.core_quick
 def test_mask_flags_and_frames(compiler, tmp_path):
     source = tmp_path / 'mask_flags.jo'
     source.write_text(''.join(f"use '{ROOT / 'compiler' / module}'\n" for module in

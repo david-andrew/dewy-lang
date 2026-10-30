@@ -11,7 +11,6 @@ import pytest
 from tools import core
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('phase,status,code,output,expected', [
     ('run', 'complete', 0, b'answer', 'pass'),
     ('run', 'complete', 0, b'wrong', 'mismatch'),

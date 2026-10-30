@@ -10,7 +10,6 @@ import pytest
 
 from tests.support import target_name
 
-quick = pytest.mark.core_quick
 
 
 @pytest.fixture(scope='module')
@@ -158,8 +157,7 @@ main = () => {
 }
 
 
-@pytest.mark.parametrize('name', [pytest.param(name, marks=quick if name == 'runtime-assert-forms' else ())
-                                  for name in DIRECTIVE_RUNS])
+@pytest.mark.parametrize('name', list(DIRECTIVE_RUNS))
 def test_surface_directive_runs(compiler, tmp_path, name):
     source, expected, code = DIRECTIVE_RUNS[name]
     ran = run(compiler, tmp_path, source)
@@ -193,8 +191,7 @@ DIRECTIVE_ERRORS = {
 }
 
 
-@pytest.mark.parametrize('name', [pytest.param(name, marks=quick if name in {'assert-unknown-local', 'explicit-copies', 'assert-refuted'} else ())
-                                  for name in DIRECTIVE_ERRORS])
+@pytest.mark.parametrize('name', list(DIRECTIVE_ERRORS))
 def test_surface_directive_errors(compiler, tmp_path, name):
     source, expected = DIRECTIVE_ERRORS[name]
     assert expected in diagnose(compiler, tmp_path, source)
@@ -273,8 +270,7 @@ NATIVE_DIAGNOSTICS = {
 }
 
 
-@pytest.mark.parametrize('name', [pytest.param(name, marks=quick if name == 'union-comparison' else ())
-                                  for name in NATIVE_DIAGNOSTICS])
+@pytest.mark.parametrize('name', list(NATIVE_DIAGNOSTICS))
 def test_surface_native_diagnostics(compiler, tmp_path, name):
     source, expected = NATIVE_DIAGNOSTICS[name]
     line = diagnose(compiler, tmp_path, source)
@@ -331,7 +327,7 @@ def shift_expected():
     return lines
 
 
-@pytest.mark.parametrize('target', [pytest.param('native', marks=quick), 'wasm', 'linux-arm64'])
+@pytest.mark.parametrize('target', ['native', 'wasm', 'linux-arm64'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_surface_wide_shifts(compiler, tmp_path, target, release):
     ran = run(compiler, tmp_path, SHIFT_PROGRAM, target, release)

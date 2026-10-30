@@ -46,7 +46,7 @@ main=()=>printl(f(5) f({MAX}))''', '6 0\n'),
 }
 
 
-@pytest.mark.parametrize('name', [pytest.param(name, marks=pytest.mark.core_quick) if name == 'sum_below' else name for name in REJECTED])
+@pytest.mark.parametrize('name', [pytest.param(name) if name == 'sum_below' else name for name in REJECTED])
 def test_int_open_end_rejected(compiler, tmp_path, name):
     source, expected = REJECTED[name]
     path = tmp_path / 'open.dewy'

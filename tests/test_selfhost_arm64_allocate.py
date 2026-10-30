@@ -90,7 +90,6 @@ main = ():
 '''
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_arm64_allocate_twins(compiler, tmp_path, release):  # noqa: F811
     outputs = []

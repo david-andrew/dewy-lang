@@ -116,7 +116,6 @@ main = ():
 '''
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_backend_analysis_twins(compiler, tmp_path, release):  # noqa: F811
     outputs = []
@@ -143,7 +142,6 @@ def test_backend_analysis_twins(compiler, tmp_path, release):  # noqa: F811
     assert outputs[0].endswith('ok\n')
 
 
-@pytest.mark.core_quick
 def test_backend_analysis_ir_abi():
     """The leaf reads Ins tags/a-b-c through their fixed mixed-language ABI."""
     ir = (ROOT / 'compiler/ir.jo').read_text()

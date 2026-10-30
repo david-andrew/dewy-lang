@@ -123,7 +123,6 @@ main = ():
 '''
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_opt_rewrite_twins(compiler, tmp_path, release):  # noqa: F811
     original = (ROOT / 'compiler/opt.jo').read_text()
@@ -167,7 +166,6 @@ def ref(op, x, y):
     return 1, wrap(value)
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_opt_word_oracle(compiler, tmp_path, release):  # noqa: F811
     values = [-(1 << 63), -(1 << 63) + 1, -(1 << 32), -65537, -129,

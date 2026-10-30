@@ -135,7 +135,6 @@ def function(text, name):
     return re.search(rf'^{name} =.*?(?=^\w|\Z)', text, re.M | re.S)[0]
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_opt_cleanup_twins(compiler, tmp_path, release):  # noqa: F811
     original = (ROOT / 'compiler/opt.jo').read_text()

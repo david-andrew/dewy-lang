@@ -71,6 +71,8 @@ python3 -m tools.core ladder [--update-ratchet]     # acceptance-ladder scoreboa
   optional header ([format](../tests/cases/README.md)). Pytest
   (`tests/test_core_*.py`, shared helpers in `tests/support.py`) is for
   multi-file programs, servers, timing, the editor and IR inspection.
+- New tests are not quick by default. Add `# quick` or `core_quick` only for a
+  representative, low-cost smoke check; leave exhaustive variants in the full gate.
 - `test` runs the cases first (`--quick`: those marked `# quick`), then, for
   the full gate, the ladder's core versions and its ratchet, then pytest. `-k`
   and `-n` apply to all of them.

@@ -94,7 +94,7 @@ main=()=>printl(f(3 5))''', '10\n'),
 }
 
 
-@pytest.mark.parametrize('name', [pytest.param(name, marks=pytest.mark.core_quick) if name == 'minus_one' else name for name in REJECTED])
+@pytest.mark.parametrize('name', [pytest.param(name) if name == 'minus_one' else name for name in REJECTED])
 def test_int_open_end_rejected(compiler, tmp_path, name):
     path = tmp_path / 'open.dewy'
     path.write_text(REJECTED[name] + '\n')
@@ -105,7 +105,7 @@ def test_int_open_end_rejected(compiler, tmp_path, name):
     assert expected in output, output
 
 
-@pytest.mark.parametrize('name', [pytest.param(name, marks=pytest.mark.core_quick) if name == 'between_edges' else name for name in PROVED])
+@pytest.mark.parametrize('name', [pytest.param(name) if name == 'between_edges' else name for name in PROVED])
 def test_int_real_edge_proves(compiler, tmp_path, name):
     source, expected = PROVED[name]
     path = tmp_path / 'edge.dewy'

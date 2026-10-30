@@ -50,7 +50,6 @@ main = ():
 '''
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_opt_borrowed_views(compiler, tmp_path, release):  # noqa: F811
     original = (ROOT / 'compiler/opt.jo').read_text()

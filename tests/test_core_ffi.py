@@ -24,7 +24,6 @@ def variadic_library(tmp_path_factory):
     return library
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('mode', ['default', 'release', 'debug'])
 def test_core_c_variadic_arguments(compiler, tmp_path, variadic_library, mode):
     # A fixed float stays f32; variadic f32 becomes double; narrow integers

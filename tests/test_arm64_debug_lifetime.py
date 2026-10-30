@@ -6,7 +6,6 @@ import pytest
 from tests.support import compiler  # noqa: F401
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('target', ['aarch64-linux', 'aarch64-mac'])
 def test_arm64_debug_lifetime_without_x64_state(compiler, tmp_path, target):  # noqa: F811
     source = tmp_path / 'locals.dewy'

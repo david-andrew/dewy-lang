@@ -142,7 +142,6 @@ NEGATIVE = {
 }
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('name', list(REJECTED))
 def test_resizing_by_value_sources_is_rejected(compiler, tmp_path, name):
     source, pattern = REJECTED[name]

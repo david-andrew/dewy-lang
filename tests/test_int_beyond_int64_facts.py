@@ -91,7 +91,7 @@ main=()=>printl(f(18446744073709551615 10) f(3 0))''', '5 0\n'),
 QUICK = {'at_least_not_max', 'loop_exit'}
 
 
-@pytest.mark.parametrize('name', [pytest.param(name, marks=pytest.mark.core_quick) if name in QUICK else name for name in REJECTED])
+@pytest.mark.parametrize('name', [pytest.param(name) if name in QUICK else name for name in REJECTED])
 def test_int_beyond_int64_branch_is_live(compiler, tmp_path, name):
     path = tmp_path / 'beyond.dewy'
     path.write_text(REJECTED[name] + '\n')

@@ -30,7 +30,6 @@ def shown(path):
 
 
 @pytest.mark.parametrize('flags', [[], ['--release']])
-@pytest.mark.core_quick
 def test_core_native_tests(compiler, tmp_path, flags):
     source = tmp_path / 'tests.dewy'
     source.write_text((r'''let values = [20 22]

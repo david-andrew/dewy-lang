@@ -100,7 +100,6 @@ def compare_twins(compiler, tmp_path, release, driver, status=0):
     return outputs[0]
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_type_refinement_twins(compiler, tmp_path, release):  # noqa: F811
     assert compare_twins(compiler, tmp_path, release, DRIVER).endswith(b'ok\n')

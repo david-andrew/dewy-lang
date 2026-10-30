@@ -125,7 +125,6 @@ def test_wasm_emitter_twins(compiler, tmp_path, release):  # noqa: F811
     assert outputs[0].endswith('ok\n')
 
 
-@pytest.mark.core_quick
 def test_wasm_emitter_ir_constants():
     """The closed encoder's small numeric ABI follows the shared IR schema."""
     import re

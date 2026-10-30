@@ -15,7 +15,6 @@ def check(compiler, tmp_path, text, mode='check'):
                           capture_output=True, text=True, timeout=60)
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('body', ['sleep(1ms)', 'waiter()'])
 def test_parallel_rejects_waiting(compiler, tmp_path, body):
     result = check(compiler, tmp_path,

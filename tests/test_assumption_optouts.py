@@ -13,7 +13,6 @@ def check(compiler, tmp_path, source):
     return subprocess.run([compiler, 'check', path], capture_output=True, text=True, timeout=60)
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('expression,setup', [
     ('count + step',
      'f=(step:int64):>int64=>{let count:int64=0;loop i in [0..10) {count+=step};return count}\n'

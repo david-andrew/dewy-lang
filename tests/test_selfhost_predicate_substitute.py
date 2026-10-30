@@ -52,7 +52,6 @@ main = ():
         loop atom in predicates[out]: print("{int(atom.op)}:{atom.a.kind}:{atom.a.value}:{atom.a.unsigned}:{atom.a.path}:{atom.a.offset}:{atom.b.kind}:{atom.b.value}:{atom.b.unsigned}:{atom.b.path}:{atom.b.offset}")
     print("ok")
 '''
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_predicate_substitute_twins(compiler, tmp_path, release):  # noqa: F811
     outputs = []

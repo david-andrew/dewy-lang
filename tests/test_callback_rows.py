@@ -76,7 +76,6 @@ main=():>void=>exit(entry()) entry=():>int64=>restricted(@callback)
         assert subprocess.run([tmp_path / 'program'], timeout=10).returncode == 2
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('declaration,message', [
     ('Bad:type=Action<int64>', 'expected Effect'),
     ('bad=<E:Effect>(x:E):>int64=>0', 'not a value type'),

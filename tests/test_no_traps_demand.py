@@ -4,7 +4,6 @@ import pytest
 from tests.support import compiler  # noqa: F401
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('body,ok', [
     ('f=(xs:array<int64> i:int64):>int64=>{$runtime_checks\nreturn xs[i]}\nprintl(f([1] 2))', False),
     ('f=():>int64=>{$runtime_checks\nlet xs:array<int64>=[1 2]\nreturn xs[1]}\nprintl(f())', True),
