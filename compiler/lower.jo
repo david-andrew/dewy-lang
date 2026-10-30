@@ -534,7 +534,9 @@ drop_at = (addr: int, t0: int):
     if vc(t) == VC_INT:
         release(e_load(VI, addr, 0, ptr_size), t)
         return
+    env_guard(addr, t)
     e_call1(lf_helper(.drop, t, 0), addr, -1)
+    if env_guarded(t): endc()
 
 copy_at = (addr: int, t0: int):
     t = quantity_base(t0)
@@ -542,7 +544,19 @@ copy_at = (addr: int, t0: int):
     if vc(t) == VC_INT:
         e_store(addr, 0, copy_ref(e_load(VI, addr, 0, ptr_size), t), ptr_size)
         return
+    env_guard(addr, t)
     e_call1(lf_helper(.copy, t, 0), addr, -1)
+    if env_guarded(t): endc()
+
+# A function value's one managed part is its environment, and its drop and copy helpers
+# (helper_drop) do nothing to a value without one (a plain function's: env 0). Test that inline
+# and call the helper only for an environment. (Owner-capturing callables keep their hooks.)
+env_guarded = (t: int) -> bool:
+    k = types[t].kind
+    (k == .fn_ or k == .polyfn or k == .callable) and not ownership_type(t)
+
+env_guard = (addr: int, t: int):
+    if env_guarded(t): iff(e_bin(.ne, VI, e_load(VI, addr, ptr_size, ptr_size), e_iconst(0)))
 
 # Arrays containing callable values must copy their environments too. Ordinary
 # data arrays retain the normal COW path. This eager path is deliberately small:
@@ -9039,8 +9053,13 @@ lower_extern_thunk = (lf: int, f: int):
 # temporary owner until the enclosing object is complete.
 drop_embedded = (addr: int, t: int):
     if not is_managed(t): return
-    if vc(t) == VC_INT: release(e_load(VI, addr, 0, ptr_size), t)
-    else: e_call1(lf_helper(.drop, t, 0), addr, -1)
+    if vc(t) == VC_INT:
+        release(e_load(VI, addr, 0, ptr_size), t)
+        return
+    b = quantity_base(t)
+    env_guard(addr, b)
+    e_call1(lf_helper(.drop, t, 0), addr, -1)
+    if env_guarded(b): endc()
 
 helper_move = (t: int):
     ps = helper_params(2)

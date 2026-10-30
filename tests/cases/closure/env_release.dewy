@@ -1,0 +1,48 @@
+# exit: 42
+#
+# One function type holds plain functions (no environment: nothing to release or copy),
+# closures and partial applications (an environment each). Copies, containers, pinned calls
+# and replacements release exactly the environments, and keep each alive while it is held.
+Op:type=<(value:int64):>int64>
+Holder:type=[op:Op rows:array<Op>]
+double=(value:int64):>int64=>value*2
+add=(a:int64 b:int64):>int64=>a+b
+counter=(start:int64):>Op=>{let rows=[start] let n=0
+return ($capture rows $capture n value:int64):>int64=>{n+=1 rows.push(value); rows[0]+n+value}}
+apply=(f:Op value:int64):>int64=>f(value)
+swap=(@ops:array<Op> value:int64):>int64=>{ops[0]=@double; value}
+work=(k:int64):>int64=>{
+ let plain:Op=@double
+ let copied=@plain
+ let closure=counter(k)
+ let partial:Op=@add(k)
+ let ops=[@plain @closure @double @partial @copied]
+ let held=ops
+ let holder=Holder[@partial [@double @closure]]
+ let other=holder
+ let maybe:Op?=@double
+ let none_yet:Op?=none
+ let table=["plain"->@double "closure"->counter(1) "partial"->@add(2)]
+ let total=0
+ loop op in ops total+=op(1)
+ loop op in held total+=apply(@op 2)
+ total+=holder.op(3)+other.rows[1](4)+table["plain"](5)+table["closure"](6)+table["partial"](7)
+ if maybe is? Op total+=maybe(8)
+ if none_yet is? Op total+=1000
+ ops[1]=@double
+ ops[3]=counter(k)
+ total+=ops[0](swap(@ops 9))+ops[0](1)
+ let private=@closure
+ total+=private(1)+closure(1)
+ return total}
+run=()=>{let first=work(1)
+let before=alloc_count()
+loop i in [0..25) if work(1) not=?first return 1
+if alloc_count() not=?before return 2
+let keep=counter(5)
+let again=@keep
+if keep(1) not=?7 or keep(1) not=?8 or again(1) not=?7 return 3
+return if alloc_count()>?before 42 else 4}
+main=()=>exit(run())
+
+$runtime_checks
