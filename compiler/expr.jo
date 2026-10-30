@@ -1,3 +1,4 @@
+use 'checker_conditionals.dewy'
 use 'checker_type_tests.dewy'
 use 'checker_variants.dewy'
 use 'checker_places.dewy'
@@ -9766,7 +9767,7 @@ check_expr = (n: int, expected: int) -> int:
     if k == .binary: return ce_finish(n, check_binary(n, expected), expected)
     if k == .call: return check_call_expr(n, expected)
     if k == .field: return check_field_expr(n, expected)
-    if k == .if_: return ce_finish(n, check_if(n, ce_expected(expected)), expected)
+    if k == .if_: return ce_finish(n, xf_if(n, ce_expected(expected)), expected)
     if k == .index:
         it = check_index_expr(n, expected)
         if sibling_known.len() > 0: it = sibling_index_narrow(n, it)
@@ -10917,7 +10918,7 @@ check_expr_other = (n: int, expected: int) -> int:
         result = xk_check(n, expected, ex)
         if result.bypass: return result.type
         t = result.type
-    else if k == .iflet: t = check_iflet(n, ex)
+    else if k == .iflet: t = xf_iflet(n, ex)
     else if k == .match_: t = check_match(n, expected)
     else if k == .cast:
         result = xc_check(n, expected)
@@ -11071,143 +11072,50 @@ opt_unwrap_alias = (l: int, pos: int) -> int:
 is_chain_end = (cond: int) -> bool:
     nodes[cond].kind == .istype and files[pos_file(nodes[cond].pos)].is_dewy
 
-check_if = (n: int, ex: int) -> int:
-    is_stmt = has_flag(n, NF_STMT)
-    # (checking may rewrite the test, `x is? error` over a library union, so
-    # ask whether it ends a chain as it was written)
-    chain = is_chain_end(int(nodes[n].a))
-    check_to(int(nodes[n].a), T_BOOL)
-    cond = int(nodes[n].a)
-    b = int(nodes[n].b)
-    c = int(nodes[n].c)
-    # (`if v is? A x else if v is? B y` over A|B, ending a value: the last test
-    # always holds, as the earlier ones narrowed v, so its body is the value;
-    # otherwise the else-less `if` stays a statement)
-    if not is_stmt and c == 0 and (chain or is_chain_end(cond)):
-        if is_chain_end(cond) and nodes[cond].aux == -3 and nodes[int(nodes[cond].a)].kind == .ident:
-            t = check_block(b, ex, true)
-            if nodes[b].aux != 0:
-                v = block_value(b)
-                if ex != 0: coerce(v, ex)
-                else: finalize_literal(v)
-                t = ntype(v)
-            nodes[n] = nodes[b]
-            return t
-        # (a result that may be void, `:>void|Oops`, lets the test fall through)
-        if ex != 0 and tkind(ex) != .void_ and tkind(ex) != .var and not union_has_void(ex):
-            if not is_chain_end(cond): fatal(nodes[n].pos, "this `if` must give {a_type(ex)}, but it has no `else`")
-            subject = if nodes[int(nodes[cond].a)].kind == .ident: "`{name_of(int(nodes[int(nodes[cond].a)].name))}`" else: "the value"
-            fatal(nodes[n].pos, "this `if` must give {a_type(ex)}, but it has no `else`: when {subject} is not {a_type(resolve_type(int(nodes[cond].b)))}, it gives nothing (add `else` with a value, or a test for each remaining type)")
-        is_stmt = true
-        add_flag(n, NF_STMT)
-    if is_stmt:
-        mark = scope_mark()
-        before_b = locals.len()
-        narrow_by(cond, true)
-        after_b = locals.len()
-        changes = narrow_changes.len()
-        jumps = narrow_jumps.len()
-        fill = opt_fill_subject(cond)
-        if fill != 0: opt_fill_watch.push(OptFill(i32(fill), i32(b), 0))
-        check_block(b, 0, false)
-        # (`if v is? none { v = x }`: v holds a value at the end of the branch)
-        filled = false
-        if fill != 0:
-            nl = int(opt_fill_watch.pop().alias)
-            filled = nl != 0 and int(locals[nl].flags) & LF_UNNARROWED == 0 and not stmt_terminates(b)
-        if narrow_changes.len() != changes: narrow_returned(changes, jumps, b)
-        scope_reset(mark)
-        before_c = 0
-        after_c = 0
-        if c != 0:
-            first = narrow_restore(changes)
-            before_c = locals.len()
-            narrow_by(cond, false)
-            after_c = locals.len()
-            jumps = narrow_jumps.len()
-            check_block(c, 0, false)
-            # (and in the else branch, v keeps the value it was tested to hold)
-            if filled and not stmt_terminates(c): filled = opt_filled(fill)
-            if narrow_changes.len() != changes: narrow_returned(changes, jumps, c)
-            scope_reset(mark)
-            narrow_merge(first)
-        # Reuse the surviving arm's still-valid facts. Retesting the old
-        # condition here would resurrect facts invalidated by that arm's writes.
-        if stmt_terminates(b) and (c == 0 or not stmt_terminates(c)):
-            if c == 0: narrow_by(cond, false)
-            else: narrow_promote(before_c, after_c)
-        else if c != 0 and stmt_terminates(c) and not stmt_terminates(b): narrow_promote(before_b, after_b)
-        # (every path on holds a value: v stands for it from here, as after an early exit)
-        if filled: narrow_by(cond, false)
-        return T_VOID
-    if c == 0: fatal(nodes[n].pos, "an if expression needs an else branch")
-    mark = scope_mark()
-    narrow_by(cond, true)
-    changes = narrow_changes.len()
+# `if` and `if let` run in checker_conditionals.dewy; these are its services.
+cond_block = (b: int, expected: int, value: bool, jumps: mut int) -> int:
     jumps = narrow_jumps.len()
-    branch_expected = ex
-    if nodes[n].aux2 == -8: branch_expected = 0
-    # `if flag [42] else xs`: a then-branch literal of literals is checked again
-    # at the other branch's type (kept unchecked here)
-    then_literal = 0
-    if branch_expected == 0 and nodes[n].aux2 != -8 and container_tail(b) and not container_tail(c) and literal_tree(block_tail(b)): then_literal = clone(block_tail(b))
-    if n == sink_final: sink_arm(n, b)
-    t1 = check_block(b, branch_expected, true)
-    if narrow_changes.len() != changes: narrow_returned(changes, jumps, b)
-    scope_reset(mark)
-    first = narrow_restore(changes)
-    narrow_by(cond, false)
-    jumps = narrow_jumps.len()
-    else_expected = branch_expected
-    # `if flag xs else []`: a container literal takes the other branch's type.
-    if else_expected == 0 and nodes[n].aux2 != -8 and container_tail(c) and t1 != T_NEVER and not has_var(t1):
-        tk = tkind(t1)
-        if tk == .array or tk == .fixed or tk == .struct_ or tk == .enum_ and is_union(t1): else_expected = t1
-    if n == sink_final: sink_arm(n, c)
-    t2 = check_block(c, else_expected, true)
-    if narrow_changes.len() != changes: narrow_returned(changes, jumps, c)
-    scope_reset(mark)
-    narrow_merge(first)
-    if t1 == T_NEVER and t2 == T_NEVER: return T_NEVER
-    if t1 != T_NEVER and nodes[b].aux == 0 and tkind(t1) == .void_: return T_VOID
-    if t2 != T_NEVER and nodes[c].aux == 0 and tkind(t2) == .void_ and ex == 0: return T_VOID
-    if t1 == T_NEVER:
-        v = block_value(c)
-        if ex != 0: coerce(v, ex)
-        else: finalize_literal(v)
-        return ntype(v)
-    if t2 == T_NEVER:
-        v = block_value(b)
-        if ex != 0: coerce(v, ex)
-        else: finalize_literal(v)
-        return ntype(v)
-    if nodes[b].aux == 0 or nodes[c].aux == 0: fatal(nodes[n].pos, "both branches of an if expression need a value")
-    va = block_value(b)
-    vb = block_value(c)
-    if nodes[n].aux2 == -8:
-        ta = finalize_literal(va)
-        tb = finalize_literal(vb)
-        if nodes[va].kind == .none_lit: ta = T_NONE
-        if nodes[vb].kind == .none_lit: tb = T_NONE
-        result = mk_union([ta, tb])
-        coerce(va, result)
-        coerce(vb, result)
-        return result
-    if ex != 0:
-        coerce(va, ex)
-        coerce(vb, ex)
-        return ex
-    if then_literal != 0 and not has_var(t2) and not type_eq(t1, t2) and (tkind(t2) == .array or tkind(t2) == .fixed or is_map_type(t2)):
-        nodes[va] = nodes[then_literal]
-        check_expr(va, t2)
-        nodes[b].type = i32(t2)
-    join_types(va, vb, nodes[n].pos)
-
-# Does block b end in a container literal (array, dictionary or record)?
-container_tail = (b: int) -> bool:
-    if b == 0 or nodes[b].kind != .block or nkids(b) == 0: return false
-    k = nodes[block_tail(b)].kind
-    k == .array or k == .map_lit or k == .record_lit
+    check_block(b, expected, value)
+cond_returned = (changes: int, jumps: int, body: int) -> void: narrow_returned(changes, jumps, body)
+cond_narrow = (cond: int, holds: bool) -> void: narrow_by(cond, holds)
+cond_reset = (mark: int) -> void: scope_reset(mark)
+# (the writes an earlier branch logged, restored for its sibling and merged after it;
+# a stack, as conditionals nest)
+cond_restored: int[][]
+cond_restore = (changes: int) -> void: cond_restored.push(narrow_restore(changes))
+cond_merge = () -> void: narrow_merge(cond_restored.pop())
+cond_promote = (first: int, limit: int) -> void: narrow_promote(first, limit)
+cond_fill_subject = (cond: int, b: int) -> int:
+    fill = opt_fill_subject(cond)
+    if fill != 0: opt_fill_watch.push(OptFill(i32(fill), i32(b), 0))
+    fill
+cond_fill_end = (b: int) -> bool:
+    nl = int(opt_fill_watch.pop().alias)
+    nl != 0 and int(locals[nl].flags) & LF_UNNARROWED == 0 and not stmt_terminates(b)
+cond_then_literal = (b: int) -> int:
+    if not literal_tree(block_tail(b)): return 0
+    clone(block_tail(b))
+cond_sink = (n: int, b: int) -> void: sink_arm(n, b)
+cond_union = (a: int, b: int) -> int: mk_union([a, b])
+# (both values take the expected type; without one, their join)
+cond_join = (va: int, vb: int, ex: int, pos: int) -> int:
+    if ex == 0: return join_types(va, vb, pos)
+    coerce(va, ex)
+    coerce(vb, ex)
+    ex
+cond_error = (n: int, t: int, code: int) -> void:
+    if code == 1:
+        cond = int(nodes[n].a)
+        ex = t
+        if not is_chain_end(cond): fatal(nodes[n].pos, "this `if` must give {a_type(ex)}, but it has no `else`")
+        subject = if nodes[int(nodes[cond].a)].kind == .ident: "`{name_of(int(nodes[int(nodes[cond].a)].name))}`" else: "the value"
+        fatal(nodes[n].pos, "this `if` must give {a_type(ex)}, but it has no `else`: when {subject} is not {a_type(resolve_type(int(nodes[cond].b)))}, it gives nothing (add `else` with a value, or a test for each remaining type)")
+    if code == 2: fatal(nodes[n].pos, "an if expression needs an else branch")
+    if code == 3: fatal(nodes[n].pos, "both branches of an if expression need a value")
+    fatal(nodes[int(nodes[n].a)].pos, "'if let x = value' needs an optional value, found {dt(t)}")
+cond_host = CheckerConditionalHost(check_expr, check_to, coerce, finalize_literal, cond_block, cond_returned, stmt_terminates, cond_narrow, cond_reset, cond_restore, cond_merge, cond_promote, cond_fill_subject, cond_fill_end, opt_filled, union_has_void, cond_then_literal, cond_sink, cond_union, is_map_type, cond_join, narrow_optional_source, new_local, cond_error)
+cond_input = CheckerConditionalInput(&nodes, &lists, &types, &structs, &files, &locals, &check_scopes, &narrow_changes, &sink_final, &T_VOID, &T_BOOL, &T_NONE, &T_NEVER, &cond_host)
+cond_binding = checker_conditionals_bind(&cond_input)
 
 # the expression a nonempty block ends in
 block_tail = (b: int) -> int:
@@ -13002,52 +12910,6 @@ path_forget = (key: str, same_type: int = 0):
                     # parent was narrowed, rather than the original path text.
                     path_forget("#L{l}")
         i -= 1
-
-check_iflet = (n: int, ex: int) -> int:
-    is_stmt = has_flag(n, NF_STMT)
-    ot = prune(check_expr(int(nodes[n].a), 0))
-    if types[ot].kind != .opt:
-        nodes[n].a = i32(narrow_optional_source(int(nodes[n].a)))
-        ot = prune(ntype(int(nodes[n].a)))
-    if types[ot].kind != .opt: fatal(nodes[int(nodes[n].a)].pos, "'if let x = value' needs an optional value, found {dt(ot)}")
-    mark = scope_mark()
-    l = new_local(int(nodes[n].name), int(types[ot].elem), nodes[n].pos)
-    nodes[n].sym = i32(l)
-    b = int(nodes[n].b)
-    c = int(nodes[n].c)
-    e1 = ex
-    if is_stmt: e1 = 0
-    changes = narrow_changes.len()
-    jumps = narrow_jumps.len()
-    t1 = check_block(b, e1, not is_stmt)
-    if narrow_changes.len() != changes: narrow_returned(changes, jumps, b)
-    scope_reset(mark)
-    t2 = T_VOID
-    if c != 0:
-        first = narrow_restore(changes)
-        e2 = ex
-        if e2 == 0: e2 = t1
-        if is_stmt: e2 = 0
-        jumps = narrow_jumps.len()
-        t2 = check_block(c, e2, not is_stmt)
-        if narrow_changes.len() != changes: narrow_returned(changes, jumps, c)
-        narrow_merge(first)
-    if is_stmt: return T_VOID
-    if c == 0: fatal(nodes[n].pos, "an if expression needs an else branch")
-    # (branches that are statements, as at the end of a function: no value, as check_if)
-    if t1 == T_NEVER and t2 == T_NEVER: return T_NEVER
-    if t1 != T_NEVER and nodes[b].aux == 0 and tkind(t1) == .void_: return T_VOID
-    if t2 != T_NEVER and nodes[c].aux == 0 and tkind(t2) == .void_ and ex == 0: return T_VOID
-    if t1 == T_NEVER: return t2
-    if t2 == T_NEVER: return t1
-    if nodes[b].aux == 0 or nodes[c].aux == 0: fatal(nodes[n].pos, "both branches of an if expression need a value")
-    va = block_value(b)
-    vb = block_value(c)
-    if ex != 0:
-        coerce(va, ex)
-        coerce(vb, ex)
-        return ex
-    join_types(va, vb, nodes[n].pos)
 
 relocate_name = intern("__relocate_at")
 relocate_call = (n: int, args: int[]) -> int:

@@ -1,0 +1,268 @@
+# Frozen `if` / `if let` checker extracted from expr.jo.
+use 'node_store.dewy'
+use 'checker_types.dewy'
+use 'source_types.dewy'
+use 'checker_state.dewy'
+use 'type_inference.dewy'
+struct CheckerConditionalHost:
+    check: (int, int) -> int
+    check_to: (int, int) -> int
+    coerce: (int, int) -> int
+    finalize: (int) -> int
+    block: (int, int, bool, mut int) -> int
+    returned: (int, int, int) -> void
+    terminates: (int) -> bool
+    narrow: (int, bool) -> void
+    reset: (int) -> void
+    restore: (int) -> void
+    merge: () -> void
+    promote: (int, int) -> void
+    fill_subject: (int, int) -> int
+    fill_end: (int) -> bool
+    filled: (int) -> bool
+    void_member: (int) -> bool
+    then_literal: (int) -> int
+    sink: (int, int) -> void
+    union: (int, int) -> int
+    map_type: (int) -> bool
+    join: (int, int, int, int) -> int
+    optional_source: (int) -> int
+    binding: (int, int, int) -> int
+    error: (int, int, int) -> void
+struct CheckerConditionalInput:
+    nodes: *(Node[])
+    lists: *(i32[])
+    types: *(TypeInfo[])
+    structs: *(StructInfo[])
+    files: *(SrcFile[])
+    locals: *(Local[])
+    scopes: *CheckerScope
+    changes: *(int[])
+    sink: *int
+    void_type: *int
+    bool_type: *int
+    none_type: *int
+    never_type: *int
+    host: *CheckerConditionalHost
+xf_nodes: *(Node[])
+xf_lists: *(i32[])
+xf_types: *(TypeInfo[])
+xf_structs: *(StructInfo[])
+xf_files: *(SrcFile[])
+xf_locals: *(Local[])
+xf_scopes: *CheckerScope
+xf_changes: *(int[])
+xf_sink: *int
+xf_void_type: *int
+xf_bool_type: *int
+xf_none_type: *int
+xf_never_type: *int
+xf_host: *CheckerConditionalHost
+checker_conditionals_bind = (input: *CheckerConditionalInput) -> int:
+    xf_nodes = input[0].nodes
+    xf_lists = input[0].lists
+    xf_types = input[0].types
+    xf_structs = input[0].structs
+    xf_files = input[0].files
+    xf_locals = input[0].locals
+    xf_scopes = input[0].scopes
+    xf_changes = input[0].changes
+    xf_sink = input[0].sink
+    xf_void_type = input[0].void_type
+    xf_bool_type = input[0].bool_type
+    xf_none_type = input[0].none_type
+    xf_never_type = input[0].never_type
+    xf_host = input[0].host
+    0
+xf_kind = (t: int) -> TK: xf_types[0][tu_prune(t)].kind
+xf_count = (n: int) -> int: int(xf_nodes[0][n].nlist)
+xf_kid = (n: int, i: int) -> int: int(xf_lists[0][int(xf_nodes[0][n].list) + i])
+xf_value = (b: int) -> int: int(xf_nodes[0][xf_kid(b, xf_count(b) - 1)].a)
+xf_mark = () -> int: xf_scopes[0].names.len()
+xf_local_count = () -> int: xf_locals[0].len()
+xf_change_count = () -> int: xf_changes[0].len()
+xf_chain_end = (cond: int) -> bool: xf_nodes[0][cond].kind == .istype and xf_files[0][xf_nodes[0][cond].pos >> 40].is_dewy
+xf_container_tail = (b: int) -> bool:
+    if b == 0 or xf_nodes[0][b].kind != .block or xf_count(b) == 0: return false
+    last = xf_kid(b, xf_count(b) - 1)
+    if xf_nodes[0][last].kind == .exprstmt: last = int(xf_nodes[0][last].a)
+    k = xf_nodes[0][last].kind
+    k == .array or k == .map_lit or k == .record_lit
+xf_union = (t0: int) -> bool:
+    t = int(tu_prune(t0))
+    xf_types[0][t].kind == .enum_ and xf_structs[0][int(xf_types[0][t].st)].union_
+xf_ends = (s: int) -> bool:
+    if s == 0: return false
+    k = xf_nodes[0][s].kind
+    if k == .return_ or k == .break_ or k == .continue_: return true
+    if k == .block:
+        if int(xf_nodes[0][s].flags) & 1073741824 != 0: return true
+        count = xf_count(s)
+        return count > 0 and xf_ends(xf_kid(s, count - 1))
+    if k == .if_: return xf_nodes[0][s].c != 0 and xf_ends(int(xf_nodes[0][s].b)) and xf_ends(int(xf_nodes[0][s].c))
+    if k == .exprstmt:
+        e = int(xf_nodes[0][s].a)
+        if int(xf_nodes[0][e].type) == xf_never_type[0]: return true
+        ek = xf_nodes[0][e].kind
+        if ek == .call or ek == .match_ or ek == .if_: return xf_host[0].terminates(s)
+        return false
+    if k == .while_: return xf_host[0].terminates(s)
+    false
+xf_none_test = (c: int) -> bool:
+    op = xf_nodes[0][c].op
+    xf_nodes[0][c].kind == .binary and (op == 69 or op == 70) and xf_nodes[0][int(xf_nodes[0][c].b)].kind == .none_lit
+xf_narrow = (c: int, holds: bool):
+    k = xf_nodes[0][c].kind
+    if k == .istype or k == .not_ or k == .and_ or k == .or_ or xf_none_test(c): xf_host[0].narrow(c, holds)
+xf_reset = (mark: int):
+    if xf_mark() != mark: xf_host[0].reset(mark)
+xf_branch = (b: int, expected: int, value: bool, changes: int) -> int:
+    jumps = 0
+    t = xf_host[0].block(b, expected, value, mut jumps)
+    if xf_change_count() != changes: xf_host[0].returned(changes, jumps, b)
+    t
+xf_settle = (b: int, ex: int) -> int:
+    v = xf_value(b)
+    if ex != 0: xf_host[0].coerce(v, ex)
+    else: xf_host[0].finalize(v)
+    int(xf_nodes[0][v].type)
+xf_join = (n: int, ex: int, b: int, c: int, t1: int, t2: int) -> int:
+    never = xf_never_type[0]
+    if t1 == never and t2 == never: return never
+    if t1 != never and xf_nodes[0][b].aux == 0 and xf_kind(t1) == .void_: return xf_void_type[0]
+    if t2 != never and xf_nodes[0][c].aux == 0 and xf_kind(t2) == .void_ and ex == 0: return xf_void_type[0]
+    0 - 1
+xf_statement = (cond: int, b: int, c: int) -> int:
+    mark = xf_mark()
+    before_b = xf_local_count()
+    xf_narrow(cond, true)
+    after_b = xf_local_count()
+    changes = xf_change_count()
+    jumps = 0
+    fill = 0
+    if (xf_nodes[0][cond].kind == .istype and xf_nodes[0][cond].aux == -1) or (xf_none_test(cond) and xf_nodes[0][cond].op == 69): fill = xf_host[0].fill_subject(cond, b)
+    xf_host[0].block(b, 0, false, mut jumps)
+    filled = false
+    if fill != 0: filled = xf_host[0].fill_end(b)
+    if xf_change_count() != changes: xf_host[0].returned(changes, jumps, b)
+    xf_reset(mark)
+    before_c = 0
+    after_c = 0
+    if c != 0:
+        restored = xf_change_count() != changes
+        if restored: xf_host[0].restore(changes)
+        before_c = xf_local_count()
+        xf_narrow(cond, false)
+        after_c = xf_local_count()
+        jumps = 0
+        xf_host[0].block(c, 0, false, mut jumps)
+        if filled and not xf_ends(c): filled = xf_host[0].filled(fill)
+        if xf_change_count() != changes: xf_host[0].returned(changes, jumps, c)
+        xf_reset(mark)
+        if restored: xf_host[0].merge()
+    ends_b = xf_ends(b)
+    ends_c = c != 0 and xf_ends(c)
+    if ends_b and (c == 0 or not ends_c):
+        if c == 0: xf_narrow(cond, false)
+        else: xf_host[0].promote(before_c, after_c)
+    else if c != 0 and ends_c and not ends_b: xf_host[0].promote(before_b, after_b)
+    if filled: xf_narrow(cond, false)
+    xf_void_type[0]
+xf_if = (n: int, ex: int) -> int:
+    is_stmt = int(xf_nodes[0][n].flags) & 16 != 0
+    chain = xf_chain_end(int(xf_nodes[0][n].a))
+    xf_host[0].check_to(int(xf_nodes[0][n].a), xf_bool_type[0])
+    cond = int(xf_nodes[0][n].a)
+    b = int(xf_nodes[0][n].b)
+    c = int(xf_nodes[0][n].c)
+    if not is_stmt and c == 0 and (chain or xf_chain_end(cond)):
+        if xf_chain_end(cond) and xf_nodes[0][cond].aux == -3 and xf_nodes[0][int(xf_nodes[0][cond].a)].kind == .ident:
+            jumps = 0
+            t = xf_host[0].block(b, ex, true, mut jumps)
+            if xf_nodes[0][b].aux != 0: t = xf_settle(b, ex)
+            xf_nodes[0][n] = xf_nodes[0][b]
+            return t
+        if ex != 0 and xf_kind(ex) != .void_ and xf_kind(ex) != .var and not (xf_union(ex) and xf_host[0].void_member(ex)): xf_host[0].error(n, ex, 1)
+        is_stmt = true
+        xf_nodes[0][n].flags = i32(int(xf_nodes[0][n].flags) | 16)
+    if is_stmt: return xf_statement(cond, b, c)
+    if c == 0: xf_host[0].error(n, 0, 2)
+    mark = xf_mark()
+    xf_narrow(cond, true)
+    changes = xf_change_count()
+    branch_expected = ex
+    if xf_nodes[0][n].aux2 == -8: branch_expected = 0
+    then_literal = 0
+    if branch_expected == 0 and xf_nodes[0][n].aux2 != -8 and xf_container_tail(b) and not xf_container_tail(c): then_literal = xf_host[0].then_literal(b)
+    if n == xf_sink[0]: xf_host[0].sink(n, b)
+    t1 = xf_branch(b, branch_expected, true, changes)
+    xf_reset(mark)
+    restored = xf_change_count() != changes
+    if restored: xf_host[0].restore(changes)
+    xf_narrow(cond, false)
+    else_expected = branch_expected
+    if else_expected == 0 and xf_nodes[0][n].aux2 != -8 and xf_container_tail(c) and t1 != xf_never_type[0] and int(xf_types[0][t1].flags) & 1 == 0:
+        tk = xf_kind(t1)
+        if tk == .array or tk == .fixed or tk == .struct_ or (tk == .enum_ and xf_union(t1)): else_expected = t1
+    if n == xf_sink[0]: xf_host[0].sink(n, c)
+    t2 = xf_branch(c, else_expected, true, changes)
+    xf_reset(mark)
+    if restored: xf_host[0].merge()
+    settled = xf_join(n, ex, b, c, t1, t2)
+    if settled >= 0: return settled
+    if t1 == xf_never_type[0]: return xf_settle(c, ex)
+    if t2 == xf_never_type[0]: return xf_settle(b, ex)
+    if xf_nodes[0][b].aux == 0 or xf_nodes[0][c].aux == 0: xf_host[0].error(n, 0, 3)
+    va = xf_value(b)
+    vb = xf_value(c)
+    if xf_nodes[0][n].aux2 == -8:
+        ta = xf_host[0].finalize(va)
+        tb = xf_host[0].finalize(vb)
+        if xf_nodes[0][va].kind == .none_lit: ta = xf_none_type[0]
+        if xf_nodes[0][vb].kind == .none_lit: tb = xf_none_type[0]
+        result = xf_host[0].union(ta, tb)
+        xf_host[0].coerce(va, result)
+        xf_host[0].coerce(vb, result)
+        return result
+    if ex == 0 and then_literal != 0 and int(xf_types[0][t2].flags) & 1 == 0 and not tu_equal(t1, t2) and (xf_kind(t2) == .array or xf_kind(t2) == .fixed or xf_host[0].map_type(t2)):
+        xf_nodes[0][va] = xf_nodes[0][then_literal]
+        xf_host[0].check(va, t2)
+        xf_nodes[0][b].type = i32(t2)
+    xf_host[0].join(va, vb, ex, xf_nodes[0][n].pos)
+xf_iflet = (n: int, ex: int) -> int:
+    is_stmt = int(xf_nodes[0][n].flags) & 16 != 0
+    ot = int(tu_prune(xf_host[0].check(int(xf_nodes[0][n].a), 0)))
+    if xf_types[0][ot].kind != .opt:
+        source = xf_host[0].optional_source(int(xf_nodes[0][n].a))
+        xf_nodes[0][n].a = i32(source)
+        ot = int(tu_prune(int(xf_nodes[0][int(xf_nodes[0][n].a)].type)))
+    if xf_types[0][ot].kind != .opt: xf_host[0].error(n, ot, 4)
+    mark = xf_mark()
+    l = xf_host[0].binding(int(xf_nodes[0][n].name), int(xf_types[0][ot].elem), xf_nodes[0][n].pos)
+    xf_nodes[0][n].sym = i32(l)
+    b = int(xf_nodes[0][n].b)
+    c = int(xf_nodes[0][n].c)
+    e1 = ex
+    if is_stmt: e1 = 0
+    changes = xf_change_count()
+    t1 = xf_branch(b, e1, not is_stmt, changes)
+    xf_reset(mark)
+    t2 = xf_void_type[0]
+    if c != 0:
+        restored = xf_change_count() != changes
+        if restored: xf_host[0].restore(changes)
+        e2 = ex
+        if e2 == 0: e2 = t1
+        if is_stmt: e2 = 0
+        t2 = xf_branch(c, e2, not is_stmt, changes)
+        if restored: xf_host[0].merge()
+    if is_stmt: return xf_void_type[0]
+    if c == 0: xf_host[0].error(n, 0, 2)
+    settled = xf_join(n, ex, b, c, t1, t2)
+    if settled >= 0: return settled
+    if t1 == xf_never_type[0]: return t2
+    if t2 == xf_never_type[0]: return t1
+    if xf_nodes[0][b].aux == 0 or xf_nodes[0][c].aux == 0: xf_host[0].error(n, 0, 3)
+    va = xf_value(b)
+    vb = xf_value(c)
+    xf_host[0].join(va, vb, ex, xf_nodes[0][n].pos)
