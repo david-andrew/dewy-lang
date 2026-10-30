@@ -1,0 +1,160 @@
+$runtime_checks
+from p"node_store.dewy" import Node
+from p"checker_types.dewy" import (TypeInfo StructInfo TK)
+from p"source_types.dewy" import SrcFile
+from p"type_inference.dewy" import tu_prune
+from p"type_constructors.dewy" import tb_mk_array
+# `x[i]` owns its reading once the receiver is checked: type constructors and
+# positions in Dewy, type values, soa elements, n-dimensional parts, slices,
+# operator indexing, picks by mask or index arrays, and element types of arrays,
+# strings, pointers and vectors. Work is O(indexes + inference links) plus demanded
+# checking; rewrites and diagnostics are host services that may grow every arena.
+XXWord:type=int64<overflow='wrap'>
+CheckerIndexHost:type=[
+    check:<(node:int64 expected:int64):>int64>
+    check_to:<(node:int64 type_id:int64):>int64>
+    construct:<(node:int64 type_id:int64 expected:int64):>int64>
+    position:<(node:int64 type_id:int64 expected:int64):>int64>
+    type_value:<(node:int64):>int64>
+    soa:<(node:int64 expected:int64):>int64>
+    part:<(node:int64 type_id:int64 expected:int64):>int64>
+    negative:<(node:int64):>void>
+    operator:<(node:int64 index:int64 expected:int64):>int64>
+    int_range:<(type_id:int64):>bool>
+    select:<(node:int64 index:int64 receiver:int64 kind:int64 expected:int64):>int64>
+    deref:<(pos:int64 type_id:int64):>void>
+    error:<(node:int64 code:int64 type_id:int64):>void>
+]
+CheckerIndexInput:type=[
+    nodes:ptr<array<Node>>
+    lists:ptr<array<int32>>
+    types:ptr<array<TypeInfo>>
+    structs:ptr<array<StructInfo>>
+    files:ptr<array<SrcFile>>
+    int_type:ptr<int64>
+    math_int:ptr<int64>
+    u8_type:ptr<int64>
+    range_type:ptr<int64>
+    mat4_type:ptr<int64>
+    vec4_type:ptr<int64>
+    i32_type:ptr<int64>
+    f32_type:ptr<int64>
+    host:ptr<CheckerIndexHost>
+]
+let xx_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let xx_lists:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
+let xx_types:ptr<array<TypeInfo>>=$unsafe (uint64(0) as ptr<array<TypeInfo>>)
+let xx_structs:ptr<array<StructInfo>>=$unsafe (uint64(0) as ptr<array<StructInfo>>)
+let xx_files:ptr<array<SrcFile>>=$unsafe (uint64(0) as ptr<array<SrcFile>>)
+let xx_int_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xx_math_int:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xx_u8_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xx_range_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xx_mat4_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xx_vec4_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xx_i32_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xx_f32_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xx_host:ptr<CheckerIndexHost>=$unsafe (uint64(0) as ptr<CheckerIndexHost>)
+checker_indexes_bind=(input:ptr<CheckerIndexInput>):>XXWord=>$unsafe {
+    xx_nodes=input[0].nodes
+    xx_lists=input[0].lists
+    xx_types=input[0].types
+    xx_structs=input[0].structs
+    xx_files=input[0].files
+    xx_int_type=input[0].int_type
+    xx_math_int=input[0].math_int
+    xx_u8_type=input[0].u8_type
+    xx_range_type=input[0].range_type
+    xx_mat4_type=input[0].mat4_type
+    xx_vec4_type=input[0].vec4_type
+    xx_i32_type=input[0].i32_type
+    xx_f32_type=input[0].f32_type
+    xx_host=input[0].host
+    0
+}
+xx_in_dewy=(n:XXWord):>bool=>$unsafe {xx_files[0][xx_nodes[0].ptr[n].pos >> 40].is_dewy}
+# A soa array: a record with an array for each field of its element type.
+xx_soa=(t0:XXWord):>bool=>$unsafe {
+    let t=tu_prune(t0)
+    xx_types[0].ptr[t].kind =? 'struct_' and xx_structs[0].ptr[XXWord(xx_types[0].ptr[t].st)].soa_
+}
+# How index b picks from an array: 0 one element, 1 an integer range, 2 a mask,
+# 3 index array. Checks b; other arrays of indexes are an error.
+xx_pick=(b:XXWord):>XXWord=>$unsafe {
+    let hint=xx_int_type[0]
+    if xx_nodes[0].ptr[b].kind =? 'array' and xx_nodes[0].ptr[b].nlist =? 0 and xx_nodes[0].ptr[b].b =? 0 {hint=tb_mk_array(xx_int_type[0])}
+    let it=tu_prune(xx_host[0].check(b hint))
+    let k=xx_types[0].ptr[it].kind
+    if k =? 'struct_' and xx_host[0].int_range(it) {return 1}
+    if k not=? 'array' and k not=? 'fixed' {return 0}
+    let et=tu_prune(XXWord(xx_types[0].ptr[it].elem))
+    if xx_types[0].ptr[et].kind =? 'bool_' {return 2}
+    if et =? xx_int_type[0] or et =? xx_math_int[0] {return 3}
+    xx_host[0].error(b 1 it)
+    0
+}
+# A bypass returns directly: a rewrite already published its result.
+CheckerIndexResult:type=[type:int64 bypass:bool]
+xx_index=(n:XXWord expected:XXWord bt:XXWord):>CheckerIndexResult=>$unsafe {
+    let bk=xx_types[0].ptr[bt].kind
+    let b=XXWord(xx_nodes[0].ptr[n].b)
+    # `Point[3 4]` in Dewy: the type's constructor.
+    if bk =? 'typeval' and xx_in_dewy(n) {return [type=xx_host[0].construct(n bt expected) bypass=true]}
+    if bk =? 'tuple' and xx_in_dewy(n) {return [type=xx_host[0].position(n bt expected) bypass=true]}
+    if bk =? 'typeval' {return [type=xx_host[0].type_value(n) bypass=false]}
+    if b not=? 0 and xx_nodes[0].ptr[b].kind not=? 'range' and xx_soa(bt) {return [type=xx_host[0].soa(n expected) bypass=true]}
+    if bk =? 'struct_' {
+        # m[i, ..], m[1..2, 0..]: a part of an n-dimensional array.
+        let part=xx_host[0].part(n bt expected)
+        if part >=? 0 {return [type=part bypass=true]}
+    }
+    if b not=? 0 and xx_nodes[0].ptr[b].kind =? 'range' {
+        let lo=XXWord(xx_nodes[0].ptr[b].a)
+        if lo not=? 0 {
+            xx_host[0].check_to(lo xx_int_type[0]);
+            xx_host[0].negative(lo)
+        }
+        let hi=XXWord(xx_nodes[0].ptr[b].b)
+        if hi not=? 0 {
+            xx_host[0].check_to(hi xx_int_type[0]);
+            xx_host[0].negative(hi)
+        }
+        xx_nodes[0][b].type=int32<overflow='wrap'>(xx_range_type[0])
+        if bk not=? 'array' and bk not=? 'fixed' and bk not=? 'str_' {xx_host[0].error(n 2 bt)}
+        xx_nodes[0][n].aux=1
+        if bk =? 'fixed' {return [type=tb_mk_array(XXWord(xx_types[0].ptr[bt].elem)) bypass=false]}
+        return [type=bt bypass=false]
+    }
+    # m[i, j]: the `[]` operator with several indexes.
+    if b =? 0 and xx_nodes[0].ptr[n].nlist >? 0 and bk =? 'struct_' {return [type=xx_host[0].operator(n 0 expected) bypass=true]}
+    if b =? 0 {xx_host[0].error(n 3 bt)}
+    if (bk =? 'array' or bk =? 'str_') and xx_nodes[0].ptr[b].kind =? 'int_lit' {xx_host[0].negative(b)}
+    if bk =? 'array' or bk =? 'fixed' {
+        # xs[mask], xs[idxs]: the elements picked, as an array.
+        let pick=xx_pick(b)
+        if pick not=? 0 {return [type=xx_host[0].select(n b bt pick expected) bypass=true]}
+        xx_host[0].check_to(b xx_int_type[0]);
+        let t=XXWord(xx_types[0].ptr[bt].elem)
+        let ib=XXWord(xx_nodes[0].ptr[n].b)
+        if bk =? 'fixed' and xx_nodes[0].ptr[ib].kind =? 'int_lit' and (xx_nodes[0].ptr[ib].ival <? 0 or xx_nodes[0].ptr[ib].ival >=? XXWord(xx_types[0].ptr[tu_prune(bt)].bits)) {xx_host[0].error(ib 4 bt)}
+        return [type=t bypass=false]
+    }
+    if bk =? 'str_' {
+        xx_host[0].check_to(b xx_int_type[0]);
+        return [type=xx_u8_type[0] bypass=false]
+    }
+    if bk =? 'ptr' {
+        xx_host[0].deref(xx_nodes[0].ptr[n].pos bt)
+        xx_host[0].check_to(b xx_int_type[0]);
+        return [type=XXWord(xx_types[0].ptr[bt].elem) bypass=false]
+    }
+    if bk =? 'vec' {
+        xx_host[0].check_to(b xx_int_type[0]);
+        if bt =? xx_mat4_type[0] {return [type=xx_vec4_type[0] bypass=false]}
+        if xx_types[0].ptr[tu_prune(bt)].sign {return [type=xx_i32_type[0] bypass=false]}
+        return [type=xx_f32_type[0] bypass=false]
+    }
+    if bk =? 'struct_' {return [type=xx_host[0].operator(n b expected) bypass=true]}
+    xx_host[0].error(n 5 bt)
+    [type=0 bypass=false]
+}

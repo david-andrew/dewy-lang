@@ -1,0 +1,134 @@
+# Frozen index-expression checker extracted from expr.jo.
+use 'node_store.dewy'
+use 'checker_types.dewy'
+use 'source_types.dewy'
+use 'type_inference.dewy'
+use 'type_constructors.dewy'
+struct CheckerIndexHost:
+    check: (int, int) -> int
+    check_to: (int, int) -> int
+    construct: (int, int, int) -> int
+    position: (int, int, int) -> int
+    type_value: (int) -> int
+    soa: (int, int) -> int
+    part: (int, int, int) -> int
+    negative: (int) -> void
+    operator: (int, int, int) -> int
+    int_range: (int) -> bool
+    select: (int, int, int, int, int) -> int
+    deref: (int, int) -> void
+    error: (int, int, int) -> void
+struct CheckerIndexInput:
+    nodes: *(Node[])
+    lists: *(i32[])
+    types: *(TypeInfo[])
+    structs: *(StructInfo[])
+    files: *(SrcFile[])
+    int_type: *int
+    math_int: *int
+    u8_type: *int
+    range_type: *int
+    mat4_type: *int
+    vec4_type: *int
+    i32_type: *int
+    f32_type: *int
+    host: *CheckerIndexHost
+xx_nodes: *(Node[])
+xx_lists: *(i32[])
+xx_types: *(TypeInfo[])
+xx_structs: *(StructInfo[])
+xx_files: *(SrcFile[])
+xx_int_type: *int
+xx_math_int: *int
+xx_u8_type: *int
+xx_range_type: *int
+xx_mat4_type: *int
+xx_vec4_type: *int
+xx_i32_type: *int
+xx_f32_type: *int
+xx_host: *CheckerIndexHost
+checker_indexes_bind = (input: *CheckerIndexInput) -> int:
+    xx_nodes = input[0].nodes
+    xx_lists = input[0].lists
+    xx_types = input[0].types
+    xx_structs = input[0].structs
+    xx_files = input[0].files
+    xx_int_type = input[0].int_type
+    xx_math_int = input[0].math_int
+    xx_u8_type = input[0].u8_type
+    xx_range_type = input[0].range_type
+    xx_mat4_type = input[0].mat4_type
+    xx_vec4_type = input[0].vec4_type
+    xx_i32_type = input[0].i32_type
+    xx_f32_type = input[0].f32_type
+    xx_host = input[0].host
+    0
+xx_in_dewy = (n: int) -> bool: xx_files[0][xx_nodes[0][n].pos >> 40].is_dewy
+xx_soa = (t0: int) -> bool:
+    t = int(tu_prune(t0))
+    xx_types[0][t].kind == .struct_ and xx_structs[0][int(xx_types[0][t].st)].soa_
+xx_pick = (b: int) -> int:
+    hint = xx_int_type[0]
+    if xx_nodes[0][b].kind == .array and xx_nodes[0][b].nlist == 0 and xx_nodes[0][b].b == 0: hint = int(tb_mk_array(xx_int_type[0]))
+    it = int(tu_prune(xx_host[0].check(b, hint)))
+    k = xx_types[0][it].kind
+    if k == .struct_ and xx_host[0].int_range(it): return 1
+    if k != .array and k != .fixed: return 0
+    et = int(tu_prune(int(xx_types[0][it].elem)))
+    if xx_types[0][et].kind == .bool_: return 2
+    if et == xx_int_type[0] or et == xx_math_int[0]: return 3
+    xx_host[0].error(b, 1, it)
+    0
+struct CheckerIndexResult:
+    type: int
+    bypass: bool
+xx_index = (n: int, expected: int, bt: int) -> CheckerIndexResult:
+    bk = xx_types[0][bt].kind
+    b = int(xx_nodes[0][n].b)
+    if bk == .typeval and xx_in_dewy(n): return CheckerIndexResult(xx_host[0].construct(n, bt, expected), true)
+    if bk == .tuple and xx_in_dewy(n): return CheckerIndexResult(xx_host[0].position(n, bt, expected), true)
+    if bk == .typeval: return CheckerIndexResult(xx_host[0].type_value(n), false)
+    if b != 0 and xx_nodes[0][b].kind != .range and xx_soa(bt): return CheckerIndexResult(xx_host[0].soa(n, expected), true)
+    if bk == .struct_:
+        part = xx_host[0].part(n, bt, expected)
+        if part >= 0: return CheckerIndexResult(part, true)
+    if b != 0 and xx_nodes[0][b].kind == .range:
+        lo = int(xx_nodes[0][b].a)
+        if lo != 0:
+            xx_host[0].check_to(lo, xx_int_type[0])
+            xx_host[0].negative(lo)
+        hi = int(xx_nodes[0][b].b)
+        if hi != 0:
+            xx_host[0].check_to(hi, xx_int_type[0])
+            xx_host[0].negative(hi)
+        xx_nodes[0][b].type = i32(xx_range_type[0])
+        if bk != .array and bk != .fixed and bk != .str_: xx_host[0].error(n, 2, bt)
+        xx_nodes[0][n].aux = 1
+        if bk == .fixed: return CheckerIndexResult(int(tb_mk_array(int(xx_types[0][bt].elem))), false)
+        return CheckerIndexResult(bt, false)
+    if b == 0 and xx_nodes[0][n].nlist > 0 and bk == .struct_: return CheckerIndexResult(xx_host[0].operator(n, 0, expected), true)
+    if b == 0: xx_host[0].error(n, 3, bt)
+    if (bk == .array or bk == .str_) and xx_nodes[0][b].kind == .int_lit: xx_host[0].negative(b)
+    if bk == .array or bk == .fixed:
+        pick = xx_pick(b)
+        if pick != 0: return CheckerIndexResult(xx_host[0].select(n, b, bt, pick, expected), true)
+        xx_host[0].check_to(b, xx_int_type[0])
+        t = int(xx_types[0][bt].elem)
+        ib = int(xx_nodes[0][n].b)
+        if bk == .fixed and xx_nodes[0][ib].kind == .int_lit and (xx_nodes[0][ib].ival < 0 or xx_nodes[0][ib].ival >= int(xx_types[0][int(tu_prune(bt))].bits)): xx_host[0].error(ib, 4, bt)
+        return CheckerIndexResult(t, false)
+    if bk == .str_:
+        xx_host[0].check_to(b, xx_int_type[0])
+        return CheckerIndexResult(xx_u8_type[0], false)
+    if bk == .ptr:
+        xx_host[0].deref(xx_nodes[0][n].pos, bt)
+        xx_host[0].check_to(b, xx_int_type[0])
+        return CheckerIndexResult(int(xx_types[0][bt].elem), false)
+    if bk == .vec:
+        xx_host[0].check_to(b, xx_int_type[0])
+        if bt == xx_mat4_type[0]: return CheckerIndexResult(xx_vec4_type[0], false)
+        if xx_types[0][int(tu_prune(bt))].sign: return CheckerIndexResult(xx_i32_type[0], false)
+        return CheckerIndexResult(xx_f32_type[0], false)
+    if bk == .struct_: return CheckerIndexResult(xx_host[0].operator(n, b, expected), true)
+    xx_host[0].error(n, 5, bt)
+    CheckerIndexResult(0, false)

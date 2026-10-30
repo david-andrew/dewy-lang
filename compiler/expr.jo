@@ -1,3 +1,4 @@
+use 'checker_indexes.dewy'
 use 'checker_members.dewy'
 use 'checker_lambdas.dewy'
 use 'checker_aggregates.dewy'
@@ -10515,106 +10516,83 @@ check_index_expr = (n: int, expected: int) -> int:
             call = bc_call("__dewy_string_index", [base, b], pos)
         nodes[n] = nodes[call]
         return check_expr(n, expected)
-    if bk == .typeval and files[pos_file(nodes[n].pos)].is_dewy:
-        # Checking a qualified type replaces its field node with a resolved
-        # identifier. Use that resolved type rather than looking up its bare
-        # name again in the caller's module.
-        target = prune(telem(bt))
-        nodes[n].kind = .call
-        nodes[n].b = 0
-        if target != 0 and types[target].kind == .struct_:
-            t = struct_ctor(n, target, int(structs[int(types[target].st)].decl), kids(n), expected)
-            nodes[n].type = i32(t)
-            add_flag(n, NF_CHECKED)
-            last_checked = n
-            return t
-        return check_expr(n, expected)
-    if bk == .tuple and files[pos_file(nodes[n].pos)].is_dewy: return dewy_position_index(n, bt, expected)
-    if bk == .typeval: t = mk_typeval(expr_as_type(n))
-    else if b != 0 and nodes[b].kind != .range and is_soa(bt): return check_soa_index(n, expected)
-    else if bk == .struct_ and is_part_index(n, bt):
-        # m[i, ..], m[1..2, 0..]: a part of an n-dimensional array
-        call = bc_call("__nd_slice", [int(nodes[n].a), part_spec(n)], nodes[n].pos)
-        add_flag(int(nodes[n].a), NF_CHECKED)
-        nodes[n] = nodes[call]
-        t = check_expr(n, expected)
+    result = xx_index(n, expected, bt)
+    if result.bypass: return result.type
+    ce_finish(n, result.type, expected)
+
+# Indexing runs in checker_indexes.dewy; these are its services.
+# (`Point[3 4]` in Dewy: checking a qualified type replaces its field node with a
+# resolved identifier; use that resolved type rather than looking up its bare name
+# again in the caller's module)
+index_construct = (n: int, bt: int, expected: int) -> int:
+    target = prune(telem(bt))
+    nodes[n].kind = .call
+    nodes[n].b = 0
+    if target != 0 and types[target].kind == .struct_:
+        t = struct_ctor(n, target, int(structs[int(types[target].st)].decl), kids(n), expected)
+        nodes[n].type = i32(t)
+        add_flag(n, NF_CHECKED)
         last_checked = n
         return t
-    else if b != 0 and nodes[b].kind == .range:
-        if nodes[b].a != 0:
-            check_to(int(nodes[b].a), T_INT)
-            neg_index_check(int(nodes[b].a))
-        if nodes[b].b != 0:
-            check_to(int(nodes[b].b), T_INT)
-            neg_index_check(int(nodes[b].b))
-        nodes[b].type = i32(T_RANGE)
-        if bk != .array and bk != .fixed and bk != .str_: fatal(nodes[n].pos, "cannot slice {dt(bt)}")
-        nodes[n].aux = 1
-        t = bt
-        if bk == .fixed: t = mk_array(int(types[bt].elem))
-    else if b == 0 and nkids(n) > 0 and bk == .struct_:
-        # m[i, j]: the `[]` operator with several indexes
-        call = mk(.call, nodes[n].pos)
-        callee = mk(.ident, nodes[n].pos)
-        nodes[callee].name = i32(intern("[]"))
-        nodes[call].a = i32(callee)
-        add_flag(int(nodes[n].a), NF_CHECKED)
-        set_list(call, [int(nodes[n].a)] + kids(n))
-        if has_flag(n, NF_MUT): add_flag(call, NF_MUT)
-        nodes[n] = nodes[call]
-        t = check_expr(n, expected)
-        last_checked = n
-        return t
-    else:
-        if b == 0: fatal(nodes[n].pos, "invalid index")
-        if (bk == .array or bk == .str_) and nodes[b].kind == .int_lit: neg_index_check(b)
-        if bk == .array or bk == .fixed:
-            pick = index_array_fn(b, "__pick")
-            if len(pick) > 0:
-                # xs[mask], xs[idxs]: the elements picked, as an array
-                call = dewy_array_selection_call(pick, [int(nodes[n].a), b], bt, nodes[n].pos)
-                add_flag(int(nodes[n].a), NF_CHECKED)
-                nodes[n] = nodes[call]
-                t = check_expr(n, expected)
-                last_checked = n
-                return t
-            check_to(b, T_INT)
-            t = int(types[bt].elem)
-            ib = int(nodes[n].b)
-            if bk == .fixed and nodes[ib].kind == .int_lit and (nodes[ib].ival < 0 or nodes[ib].ival >= fixed_len(bt)): fatal(nodes[ib].pos, "index {nodes[ib].ival} is out of bounds for {dt(bt)}")
-        else if bk == .str_:
-            check_to(b, T_INT)
-            t = T_U8
-        else if bk == .ptr:
-            ffi_deref(nodes[n].pos, bt)
-            check_to(b, T_INT)
-            t = int(types[bt].elem)
-        else if bk == .vec:
-            check_to(b, T_INT)
-            if bt == T_MAT4: t = T_VEC4
-            else: t = vec_comp_type(bt)
-        else if bk == .struct_:
-            call = mk(.call, nodes[n].pos)
-            callee = mk(.ident, nodes[n].pos)
-            nodes[callee].name = i32(intern("[]"))
-            nodes[call].a = i32(callee)
-            add_flag(int(nodes[n].a), NF_CHECKED)
-            set_list(call, [int(nodes[n].a), b])
-            if has_flag(n, NF_MUT): add_flag(call, NF_MUT)
-            nodes[n] = nodes[call]
-            t = check_expr(n, expected)
-            last_checked = n
-            return t
-        else:
-            if tkind(bt) == .tuple: fatal(nodes[n].pos, "a tuple's parts are `t.0`, `t.1` (an index in brackets is for arrays)")
-            if tkind(bt) == .opt and dewy_at(nodes[n].pos):
-                fatal(nodes[n].pos, "cannot index a value of type {dt(bt)}: it may be none (a member read through an optional is optional too). Check the value first, `if x isnt? none \{ ... }`, which narrows x inside, or give a fallback, `(x ?? default)[i]`")
-            if is_union(bt) and dewy_at(nodes[n].pos):
-                loop m in union_members(bt):
-                    if m != T_NONE and exception_member(m): fatal(nodes[n].pos, "cannot index a value of type {dt(bt)}: it may be {dt(m)} (a member read through it forwards {dt(m)} too). Check the value first, `if x isnt? {dt(m)} \{ ... }`, which narrows x inside")
-            never_cascade(nodes[n].pos, bt)
-            fatal(nodes[n].pos, "cannot index a value of type {dt(bt)}")
-    ce_finish(n, t, expected)
+    check_expr(n, expected)
+index_type_value = (n: int) -> int: mk_typeval(expr_as_type(n))
+# m[i, ..], m[1..2, 0..]: a part of an n-dimensional array
+index_part = (n: int, bt: int, expected: int) -> int:
+    if not is_part_index(n, bt): return -1
+    call = bc_call("__nd_slice", [int(nodes[n].a), part_spec(n)], nodes[n].pos)
+    add_flag(int(nodes[n].a), NF_CHECKED)
+    nodes[n] = nodes[call]
+    t = check_expr(n, expected)
+    last_checked = n
+    t
+index_negative = (b: int):
+    neg_index_check(b)
+    return
+# m[i] and m[i, j] of a record: its `[]` operator
+index_operator = (n: int, b: int, expected: int) -> int:
+    call = mk(.call, nodes[n].pos)
+    callee = mk(.ident, nodes[n].pos)
+    nodes[callee].name = i32(intern("[]"))
+    nodes[call].a = i32(callee)
+    add_flag(int(nodes[n].a), NF_CHECKED)
+    if b == 0: set_list(call, [int(nodes[n].a)] + kids(n))
+    else: set_list(call, [int(nodes[n].a), b])
+    if has_flag(n, NF_MUT): add_flag(call, NF_MUT)
+    nodes[n] = nodes[call]
+    t = check_expr(n, expected)
+    last_checked = n
+    t
+index_int_range = (t: int) -> bool: is_dewy_range_type(t, "IntRange")
+# xs[mask], xs[idxs]: the elements picked, as an array
+index_select = (n: int, b: int, bt: int, kind: int, expected: int) -> int:
+    pick = "__pick"
+    if kind == 2: pick = "__pick_mask"
+    if kind == 3: pick = "__pick_indices"
+    call = dewy_array_selection_call(pick, [int(nodes[n].a), b], bt, nodes[n].pos)
+    add_flag(int(nodes[n].a), NF_CHECKED)
+    nodes[n] = nodes[call]
+    t = check_expr(n, expected)
+    last_checked = n
+    t
+index_deref = (pos: int, bt: int):
+    ffi_deref(pos, bt)
+    return
+index_error = (n: int, code: int, bt: int):
+    if code == 1: fatal(nodes[n].pos, jd(nodes[n].pos, "an array of indexes is int[], or a mask bool[] (found {dt(bt)})", "an array of indexes is array<int64>, or a mask array<bool> (found {dt(bt)})"))
+    if code == 2: fatal(nodes[n].pos, "cannot slice {dt(bt)}")
+    if code == 3: fatal(nodes[n].pos, "invalid index")
+    if code == 4: fatal(nodes[n].pos, "index {nodes[n].ival} is out of bounds for {dt(bt)}")
+    if tkind(bt) == .tuple: fatal(nodes[n].pos, "a tuple's parts are `t.0`, `t.1` (an index in brackets is for arrays)")
+    if tkind(bt) == .opt and dewy_at(nodes[n].pos):
+        fatal(nodes[n].pos, "cannot index a value of type {dt(bt)}: it may be none (a member read through an optional is optional too). Check the value first, `if x isnt? none \{ ... }`, which narrows x inside, or give a fallback, `(x ?? default)[i]`")
+    if is_union(bt) and dewy_at(nodes[n].pos):
+        loop m in union_members(bt):
+            if m != T_NONE and exception_member(m): fatal(nodes[n].pos, "cannot index a value of type {dt(bt)}: it may be {dt(m)} (a member read through it forwards {dt(m)} too). Check the value first, `if x isnt? {dt(m)} \{ ... }`, which narrows x inside")
+    never_cascade(nodes[n].pos, bt)
+    fatal(nodes[n].pos, "cannot index a value of type {dt(bt)}")
+index_host = CheckerIndexHost(check_expr, check_to, index_construct, dewy_position_index, index_type_value, check_soa_index, index_part, index_negative, index_operator, index_int_range, index_select, index_deref, index_error)
+index_input = CheckerIndexInput(&nodes, &lists, &types, &structs, &files, &T_INT, &T_MATH_INT, &T_U8, &T_RANGE, &T_MAT4, &T_VEC4, &T_I32, &T_F32, &index_host)
+index_binding = checker_indexes_bind(&index_input)
 
 check_expr_other = (n: int, expected: int) -> int:
     if nodes[n].kind == .float_lit or nodes[n].kind == .bool_lit or nodes[n].kind == .none_lit or nodes[n].kind == .null_lit: return xl_check_scalar(n, expected)
