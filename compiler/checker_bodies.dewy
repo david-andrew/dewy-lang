@@ -1,0 +1,172 @@
+$runtime_checks
+from p"node_store.dewy" import Node
+from p"checker_types.dewy" import TypeInfo
+from p"checker_state.dewy" import (FnInst FnCtx Local CheckerScope)
+from p"type_inference.dewy" import (tu_prune tu_has_var tu_unify)
+from p"type_constructors.dewy" import tb_mk_var
+from p"checker_results.dewy" import (cr_recursive_base_type cr_has_value_return)
+# Demand-only body lifetime and recursive return resolution. Parameter setup is
+# O(parameters); error ancestry is capped at 32. Persistent arenas survive nested
+# checking. Only active contexts, scope bindings and diagnostic trails roll back.
+# Debt: expression/result obligations move with expression checking; finalization
+# moves with zonking and lowering proofs. Neither service owns body state/context.
+CBWord:type=int64<overflow='wrap'>
+CheckerBodyHost:type=[
+    load:<(decl:int64 inst:int64):>void>
+    is_dewy:<(pos:int64):>bool>
+    context_for:<(inst:int64):>int64>
+    recursive_error:<(inst:int64 pos:int64):>void>
+    restore:<(inst:int64):>void>
+    measure:<(phase:int64 inst:int64):>int64>
+    unmeasure:<(saved:int64):>void>
+    decimal:<(inst:int64):>bool>
+    decimal_check:<(inst:int64):>void>
+    force:<(decl:int64 inst:int64):>void>
+    type_params:<(decl:int64 args:array<int64>):>void>
+    local:<(name:int64 type_id:int64 pos:int64):>int64>
+    skip:<(decl:int64):>bool>
+    reset_scope:<(mark:int64):>void>
+    infer:<(inst:int64 decl:int64):>void>
+    expression:<(inst:int64 decl:int64):>void>
+    finalize:<(inst:int64 vars:int64 binds:int64 exposed:int64 definite:int64):>void>
+]
+CheckerBodyInput:type=[
+    nodes:ptr<array<Node>>
+    lists:ptr<array<int32>>
+    types:ptr<array<TypeInfo>>
+    functions:ptr<array<FnInst>>
+    contexts:ptr<array<FnCtx>>
+    locals:ptr<array<Local>>
+    names:ptr<array<string>>
+    trail:ptr<array<int64>>
+    trail_names:ptr<array<string>>
+    trail_fns:ptr<array<int64>>
+    scopes:ptr<CheckerScope>
+    definite_decls:ptr<array<int64>>
+    context:ptr<int64>
+    vars:ptr<int64>
+    binds:ptr<int64>
+    exposures:ptr<int64>
+    void_type:ptr<int64>
+    never_type:ptr<int64>
+    skipped_never:ptr<bool>
+    host:ptr<CheckerBodyHost>
+]
+let cb_input:ptr<CheckerBodyInput>=$unsafe (uint64(0) as ptr<CheckerBodyInput>)
+checker_bodies_bind=(input:ptr<CheckerBodyInput>):>CBWord=>{cb_input=input;0}
+cb_ensure_ret=(f:CBWord use_pos:CBWord):>void=>$unsafe {
+    if cb_input[0].functions[0].ptr[f].ret not=? 0 {return}
+    if cb_input[0].functions[0].ptr[f].decl not=? 0 {cb_input[0].host[0].load(CBWord(cb_input[0].functions[0].ptr[f].decl) f)}
+    if cb_input[0].functions[0].ptr[f].state =? 1 and cb_input[0].functions[0].ptr[f].decl not=? 0 and cb_input[0].host[0].is_dewy(cb_input[0].nodes[0].ptr[CBWord(cb_input[0].functions[0].ptr[f].decl)].pos) {
+        let c=cb_input[0].host[0].context_for(f)
+        if c >=? 0 and cb_input[0].contexts[0].ptr[c].infer_ret {
+            let g=tu_prune(CBWord(cb_input[0].contexts[0].ptr[c].ret))
+            if cb_input[0].types[0].ptr[tu_prune(g)].kind =? 'var' {
+                g=cr_recursive_base_type(CBWord(cb_input[0].functions[0].ptr[f].body) CBWord(cb_input[0].nodes[0].ptr[CBWord(cb_input[0].functions[0].ptr[f].decl)].name))
+                if g not=? 0 {tu_unify(CBWord(cb_input[0].contexts[0].ptr[c].ret) g);}
+            }
+            if g not=? 0 {
+                if tu_has_var(g) {cb_input[0].exposures[0] += 1}
+                cb_input[0].functions[0][f].ret=int32<overflow='wrap'>(g)
+                return
+            }
+        }
+    }
+    if cb_input[0].functions[0].ptr[f].state =? 1 and cb_input[0].functions[0].ptr[f].decl not=? 0 and not cr_has_value_return(CBWord(cb_input[0].nodes[0].ptr[CBWord(cb_input[0].functions[0].ptr[f].decl)].b)) {
+        cb_input[0].functions[0][f].ret=int32<overflow='wrap'>(cb_input[0].void_type[0])
+        cb_input[0].functions[0][f].aux_void=true
+        return
+    }
+    if cb_input[0].functions[0].ptr[f].state =? 1 {cb_input[0].host[0].recursive_error(f use_pos)}
+    cb_check_fn_body(f)
+}
+cb_check_fn_body=(f:CBWord):>void=>$unsafe {
+    cb_input[0].host[0].restore(f)
+    if cb_input[0].functions[0].ptr[f].state not=? 0 {return}
+    if cb_input[0].functions[0].ptr[f].targs.length =? 0 or cb_input[0].functions[0].ptr[f].decl =? 0 {
+        if cb_input[0].trail[0].length =? 0 {cb_check_measured(f)} else {
+            let trail=cb_input[0].trail[0]
+            let tnames=cb_input[0].trail_names[0]
+            let fs=cb_input[0].trail_fns[0]
+            cb_input[0].trail[0]=[]
+            cb_input[0].trail_names[0]=[]
+            cb_input[0].trail_fns[0]=[]
+            cb_check_measured(f)
+            cb_input[0].trail[0]=trail
+            cb_input[0].trail_names[0]=tnames
+            cb_input[0].trail_fns[0]=fs
+        }
+        return
+    }
+    let chain:array<int64>=[]
+    let g=f
+    loop g >? 0 and chain.length <? 32 and cb_input[0].functions[0].ptr[g].targs.length >? 0 and cb_input[0].functions[0].ptr[g].decl not=? 0 {
+        chain.insert(g 0)
+        g=CBWord(cb_input[0].functions[0].ptr[g].made_in)
+    }
+    loop g2 in chain {
+        cb_input[0].trail[0].push(cb_input[0].functions[0].ptr[g2].use_pos)
+        cb_input[0].trail_names[0].push(cb_input[0].names[0][CBWord(cb_input[0].nodes[0].ptr[CBWord(cb_input[0].functions[0].ptr[g2].decl)].name)])
+        cb_input[0].trail_fns[0].push(g2)
+    }
+    cb_check_measured(f)
+    loop item in chain {
+        cb_input[0].trail[0].pop();
+        cb_input[0].trail_names[0].pop();
+        cb_input[0].trail_fns[0].pop();
+    }
+}
+cb_check_measured=(f:CBWord):>void=>$unsafe {
+    if cb_input[0].functions[0].ptr[f].state not=? 0 {return}
+    let icb=cb_input[0].host[0].measure(1 f)
+    if cb_input[0].host[0].decimal(f) {cb_input[0].host[0].decimal_check(f)} else {cb_check_body_now(f)}
+    cb_input[0].host[0].unmeasure(icb)
+}
+cb_check_body_now=(f:CBWord):>void=>$unsafe {
+    cb_input[0].functions[0][f].state=1
+    let vars0=cb_input[0].vars[0]
+    let binds0=cb_input[0].binds[0]
+    let exposed0=cb_input[0].exposures[0]
+    let decl=CBWord(cb_input[0].functions[0].ptr[f].decl)
+    if decl not=? 0 {cb_input[0].host[0].force(decl f)}
+    let saved=cb_input[0].context[0]
+    cb_input[0].contexts[0].push(FnCtx[int32<overflow='wrap'>(f) -1 0 false 0 cb_input[0].functions[0].ptr[f].mod int32<overflow='wrap'>(cb_input[0].scopes[0].names.length)])
+    cb_input[0].context[0]=cb_input[0].contexts[0].length - 1
+    let mark=cb_input[0].scopes[0].names.length
+    let da_mark=cb_input[0].definite_decls[0].length
+    if decl not=? 0 and cb_input[0].nodes[0].ptr[decl].kind =? 'fn_' {
+        cb_input[0].host[0].type_params(decl cb_input[0].functions[0].ptr[f].targs)
+        loop i in [0..cb_input[0].functions[0].ptr[f].ptypes.length) {
+            let p=CBWord(cb_input[0].lists[0].ptr[CBWord(cb_input[0].nodes[0].ptr[decl].list) + i])
+            let l=cb_input[0].host[0].local(CBWord(cb_input[0].nodes[0].ptr[p].name) cb_input[0].functions[0].ptr[f].ptypes[i] cb_input[0].nodes[0].ptr[p].pos)
+            let fl:CBWord=1
+            if (CBWord(cb_input[0].nodes[0].ptr[p].flags) & 1) not=? 0 {fl |= 2}
+            cb_input[0].locals[0][l].flags=int32<overflow='wrap'>(fl)
+            cb_input[0].functions[0][f].params.push(l)
+        }
+    }
+    if decl not=? 0 and ((CBWord(cb_input[0].nodes[0].ptr[decl].flags) & 4) not=? 0 or cb_input[0].host[0].skip(decl)) {
+        if cb_input[0].functions[0].ptr[f].ret =? 0 {
+            cb_input[0].functions[0][f].ret=int32<overflow='wrap'>(cb_input[0].never_type[0])
+            if (CBWord(cb_input[0].nodes[0].ptr[decl].flags) & 4) =? 0 {cb_input[0].skipped_never[0]=true}
+        }
+        cb_input[0].functions[0][f].state=2
+        cb_input[0].host[0].reset_scope(mark)
+        cb_input[0].contexts[0].pop();
+        cb_input[0].context[0]=saved
+        return
+    }
+    if cb_input[0].functions[0].ptr[f].ret not=? 0 {cb_input[0].contexts[0][cb_input[0].context[0]].ret=cb_input[0].functions[0].ptr[f].ret}
+    else {
+        let ret=tb_mk_var()
+        cb_input[0].contexts[0][cb_input[0].context[0]].ret=int32<overflow='wrap'>(ret)
+        cb_input[0].contexts[0][cb_input[0].context[0]].infer_ret=true
+        cb_input[0].host[0].infer(f decl)
+    }
+    cb_input[0].host[0].expression(f decl)
+    cb_input[0].host[0].finalize(f vars0 binds0 exposed0 da_mark)
+    cb_input[0].functions[0][f].state=2
+    cb_input[0].host[0].reset_scope(mark)
+    cb_input[0].contexts[0].pop();
+    cb_input[0].context[0]=saved
+}

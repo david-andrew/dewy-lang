@@ -1,0 +1,159 @@
+# Frozen body lifecycle and return resolver extracted from check.jo.
+use 'node_store.dewy'
+use 'checker_types.dewy'
+use 'checker_state.dewy'
+use 'type_inference.dewy'
+use 'type_constructors.dewy'
+use 'checker_results.dewy'
+struct CheckerBodyHost:
+    load: (int, int) -> void
+    is_dewy: (int) -> bool
+    context_for: (int) -> int
+    recursive_error: (int, int) -> void
+    restore: (int) -> void
+    measure: (int, int) -> int
+    unmeasure: (int) -> void
+    decimal: (int) -> bool
+    decimal_check: (int) -> void
+    force: (int, int) -> void
+    type_params: (int, int[]) -> void
+    local: (int, int, int) -> int
+    skip: (int) -> bool
+    reset_scope: (int) -> void
+    infer: (int, int) -> void
+    expression: (int, int) -> void
+    finalize: (int, int, int, int, int) -> void
+struct CheckerBodyInput:
+    nodes: *(Node[])
+    lists: *(i32[])
+    types: *(TypeInfo[])
+    functions: *(FnInst[])
+    contexts: *(FnCtx[])
+    locals: *(Local[])
+    names: *(str[])
+    trail: *(int[])
+    trail_names: *(str[])
+    trail_fns: *(int[])
+    scopes: *(CheckerScope)
+    definite_decls: *(int[])
+    context: *(int)
+    vars: *(int)
+    binds: *(int)
+    exposures: *(int)
+    void_type: *(int)
+    never_type: *(int)
+    skipped_never: *(bool)
+    host: *(CheckerBodyHost)
+cb_input: *CheckerBodyInput
+checker_bodies_bind = (input: *CheckerBodyInput) -> int:
+    cb_input = input
+    0
+cb_ensure_ret = (f: int, use_pos: int):
+    if cb_input[0].functions[0][f].ret != 0: return
+    if cb_input[0].functions[0][f].decl != 0: cb_input[0].host[0].load(int(cb_input[0].functions[0][f].decl), f)
+    # (a Dewy function whose value is its last expression, `fact = (n:int64) => if n <=? 1 1
+    # else n * fact(n - 1)`: its result is that of a branch that does not call it)
+    if cb_input[0].functions[0][f].state == 1 and cb_input[0].functions[0][f].decl != 0 and cb_input[0].host[0].is_dewy(cb_input[0].nodes[0][int(cb_input[0].functions[0][f].decl)].pos):
+        c = cb_input[0].host[0].context_for(f)
+        if c >= 0 and cb_input[0].contexts[0][c].infer_ret:
+            # (or the type an earlier `return` gave it)
+            g = tu_prune(int(cb_input[0].contexts[0][c].ret))
+            if cb_input[0].types[0][tu_prune(g)].kind == .var:
+                g = cr_recursive_base_type(int(cb_input[0].functions[0][f].body), int(cb_input[0].nodes[0][int(cb_input[0].functions[0][f].decl)].name))
+                if g != 0: tu_unify(int(cb_input[0].contexts[0][c].ret), g)
+            if g != 0:
+                if tu_has_var(g): cb_input[0].exposures[0] += 1
+                cb_input[0].functions[0][f].ret = i32(g)
+                return
+    if cb_input[0].functions[0][f].state == 1 and cb_input[0].functions[0][f].decl != 0 and not cr_has_value_return(int(cb_input[0].nodes[0][int(cb_input[0].functions[0][f].decl)].b)):
+        cb_input[0].functions[0][f].ret = i32(cb_input[0].void_type[0])
+        cb_input[0].functions[0][f].aux_void = true
+        return
+    if cb_input[0].functions[0][f].state == 1: cb_input[0].host[0].recursive_error(f, use_pos)
+    cb_check_fn_body(f)
+
+cb_check_fn_body = (f: int):
+    cb_input[0].host[0].restore(f)
+    if cb_input[0].functions[0][f].state != 0: return
+    if cb_input[0].functions[0][f].targs.len() == 0 or cb_input[0].functions[0][f].decl == 0:
+        # (an ordinary function's body: not part of the generic instance that led to it)
+        if cb_input[0].trail[0].len() == 0: cb_check_measured(f)
+        else:
+            trail = cb_input[0].trail[0]
+            tnames = cb_input[0].trail_names[0]
+            fs = cb_input[0].trail_fns[0]
+            cb_input[0].trail[0] = []
+            cb_input[0].trail_names[0] = []
+            cb_input[0].trail_fns[0] = []
+            cb_check_measured(f)
+            cb_input[0].trail[0] = trail
+            cb_input[0].trail_names[0] = tnames
+            cb_input[0].trail_fns[0] = fs
+        return
+    # (the calls that led here, outermost first, even when this body is checked later)
+    chain: int[]
+    g = f
+    loop g > 0 and chain.len() < 32 and cb_input[0].functions[0][g].targs.len() > 0 and cb_input[0].functions[0][g].decl != 0:
+        chain.insert(0, g)
+        g = int(cb_input[0].functions[0][g].made_in)
+    loop g2 in chain:
+        cb_input[0].trail[0].push(cb_input[0].functions[0][g2].use_pos)
+        cb_input[0].trail_names[0].push(cb_input[0].names[0][int(cb_input[0].nodes[0][int(cb_input[0].functions[0][g2].decl)].name)])
+        cb_input[0].trail_fns[0].push(g2)
+    cb_check_measured(f)
+    loop _ in chain:
+        cb_input[0].trail[0].pop()
+        cb_input[0].trail_names[0].pop()
+        cb_input[0].trail_fns[0].pop()
+
+cb_check_measured = (f: int):
+    if cb_input[0].functions[0][f].state != 0: return
+    icb = cb_input[0].host[0].measure(1, f)
+    if cb_input[0].host[0].decimal(f): cb_input[0].host[0].decimal_check(f)
+    else: cb_check_body_now(f)
+    cb_input[0].host[0].unmeasure(icb)
+
+cb_check_body_now = (f: int):
+    cb_input[0].functions[0][f].state = 1
+    vars0 = cb_input[0].vars[0]
+    binds0 = cb_input[0].binds[0]
+    exposed0 = cb_input[0].exposures[0]
+    decl = int(cb_input[0].functions[0][f].decl)
+    if decl != 0:
+        cb_input[0].host[0].force(decl, f)
+    saved = cb_input[0].context[0]
+    cb_input[0].contexts[0].push(FnCtx(i32(f), -1, 0, false, 0, cb_input[0].functions[0][f].mod, i32(cb_input[0].scopes[0].names.len())))
+    cb_input[0].context[0] = cb_input[0].contexts[0].len() - 1
+    mark = cb_input[0].scopes[0].names.len()
+    da_mark = cb_input[0].definite_decls[0].len()
+    if decl != 0 and cb_input[0].nodes[0][decl].kind == .fn_:
+        cb_input[0].host[0].type_params(decl, cb_input[0].functions[0][f].targs)
+        loop i in [0..cb_input[0].functions[0][f].ptypes.len()):
+            p = int(cb_input[0].lists[0][int(cb_input[0].nodes[0][decl].list) + i])
+            l = cb_input[0].host[0].local(int(cb_input[0].nodes[0][p].name), cb_input[0].functions[0][f].ptypes[i], cb_input[0].nodes[0][p].pos)
+            fl = 1
+            if int(cb_input[0].nodes[0][p].flags) & 1 != 0: fl |= 2
+            cb_input[0].locals[0][l].flags = i32(fl)
+            cb_input[0].functions[0][f].params.push(l)
+    if decl != 0 and (int(cb_input[0].nodes[0][decl].flags) & 4 != 0 or cb_input[0].host[0].skip(decl)):
+        if cb_input[0].functions[0][f].ret == 0:
+            cb_input[0].functions[0][f].ret = i32(cb_input[0].never_type[0])
+            if not int(cb_input[0].nodes[0][decl].flags) & 4 != 0: cb_input[0].skipped_never[0] = true
+        cb_input[0].functions[0][f].state = 2
+        cb_input[0].host[0].reset_scope(mark)
+        cb_input[0].contexts[0].pop()
+        cb_input[0].context[0] = saved
+        return
+    if cb_input[0].functions[0][f].ret != 0: cb_input[0].contexts[0][cb_input[0].context[0]].ret = cb_input[0].functions[0][f].ret
+    else:
+        cb_input[0].contexts[0][cb_input[0].context[0]].ret = i32(tb_mk_var())
+        cb_input[0].contexts[0][cb_input[0].context[0]].infer_ret = true
+        cb_input[0].host[0].infer(f, decl)
+    cb_input[0].host[0].expression(f, decl)
+    cb_input[0].host[0].finalize(f, vars0, binds0, exposed0, da_mark)
+    cb_input[0].functions[0][f].state = 2
+    cb_input[0].host[0].reset_scope(mark)
+    cb_input[0].contexts[0].pop()
+    cb_input[0].context[0] = saved
+
+
