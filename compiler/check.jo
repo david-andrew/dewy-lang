@@ -1,3 +1,4 @@
+use 'checker_fields.dewy'
 use 'checker_results.dewy'
 use 'type_substitute.dewy'
 use 'constant_eval.dewy'
@@ -1312,51 +1313,18 @@ intersection_parts: {int: int[]} = {}
 
 # the fields of an intersection's operands, merged by name: a field on one side
 # is kept, one on both takes the intersection of its types (never: an error)
-intersection_fields = (si: int, d: int, own: int[]) -> Field[]:
-    out: Field[]
-    parts: int[]
-    loop c in struct_components.get(d) ?? []:
-        t = prune(resolve_type(c))
-        if types[t].kind != .struct_ or is_map_type(t): fatal(nodes[c].pos, "an intersection of records needs record types, found {dt(t)}")
-        if nominal_parent.has(t): fatal(nodes[c].pos, "an intersection with a minted type is not supported yet (`type of` makes one)")
-        parts.push(t)
-        csi = int(types[t].st)
-        check_struct_fields(csi)
-        loop i in [0..int(structs[csi].nfields)): intersection_merge(out, fields[int(structs[csi].fields) + i], nodes[d].pos)
-    intersection_parts[int(structs[si].type)] = parts
-    out
+intersection_fields = (si: int, d: int, own: int[]) -> Field[]: cf_intersection_fields(si, d, own)
 
-intersection_merge = (out: mut Field[], field: Field, pos: int):
-    loop i in 0.. and f in out:
-        if f.name != field.name: continue
-        t = intersect_types(int(f.type), int(field.type))
-        if t == 0: fatal(pos, "this intersection has no values: field '{name_of(int(field.name))}' would be {dt(int(f.type))} & {dt(int(field.type))}")
-        out[i].type = i32(t)
-        if field.defval != 0: out[i].defval = field.defval
-        return
-    out.push(field)
+intersection_merge = (out: mut Field[], field: Field, pos: int): cf_intersection_merge(out, field, pos)
 
 # a & b for field types: the same type, or the members both unions share; 0 for never
-intersect_types = (a0: int, b0: int) -> int:
-    a = prune(a0)
-    b = prune(b0)
-    if type_eq(a, b): return a
-    if is_union(a) and union_index(a, b) >= 0: return b
-    if is_union(b) and union_index(b, a) >= 0: return a
-    if is_union(a) and is_union(b):
-        both: int[]
-        loop m in union_members(a):
-            if union_index(b, m) >= 0: both.push(m)
-        if both.len() == 0: return 0
-        return mk_union(both)
-    if types[a].kind == .opt and type_eq(prune(int(types[a].elem)), b): return b
-    if types[b].kind == .opt and type_eq(prune(int(types[b].elem)), a): return a
-    0
+intersect_types = (a0: int, b0: int) -> int: cf_intersect_types(a0, b0)
 
 check_struct_fields = (si: int):
     if structs[si].resolved: return
-    structs[si].resolved = true
-    d = int(structs[si].decl)
+    cf_check_struct_fields(si)
+
+field_enter = (d: int, si: int) -> CheckerFieldScope:
     if refine_deferred.len() > 0 and d != 0: refine_resume(int(nodes[d].mod))
     targs: int[]
     loop i in [0..int(structs[si].ntargs)): targs.push(struct_targ(si, i))
@@ -1365,95 +1333,46 @@ check_struct_fields = (si: int):
     cx = ctxs.len() - 1
     mark = scope_mark()
     push_type_params(d, targs)
-    if nodes[d].kind == .struct_:
-        n = nkids(d)
-        inherited: Field[]
-        if struct_components.has(d): inherited = intersection_fields(si, d, [])
-        parent = nominal_parent.get(int(structs[si].type), 0)
-        if parent != 0:
-            psi = int(types[parent].st)
-            check_struct_fields(psi)
-            loop i in [0..int(structs[psi].nfields)): inherited.push(fields[int(structs[psi].fields) + i])
-        structs[si].fields = i32(fields.len())
-        structs[si].nfields = i32(n + inherited.len())
-        loop field in inherited: fields.push(field)
-        loop i in [0..n): fields.push(Field())
-        old_fields = refine_bindings.fields
-        if refine_active:
-            refine_bindings.fields = []
-            loop field in inherited: refine_bindings.fields.push(int(field.name))
-            loop i in [0..n): refine_bindings.fields.push(int(nodes[kid(d, i)].name))
-        loop i in [0..n):
-            f = kid(d, i)
-            fi = int(structs[si].fields) + inherited.len() + i
-            fields[fi].name = nodes[f].name
-            fields[fi].defval = nodes[f].b
-            if nodes[f].a != 0: fields[fi].type = i32(resolve_type(int(nodes[f].a)))
-            else if nodes[f].b != 0:
-                cl = clone(int(nodes[f].b))
-                # (a default may name the fields before it)
-                inner = scope_mark()
-                if files[pos_file(nodes[d].pos)].is_dewy:
-                    loop j in [0..inherited.len() + i):
-                        earlier = fields[int(structs[si].fields) + j]
-                        if earlier.type != 0: new_local(int(earlier.name), int(earlier.type), nodes[f].pos)
-                t = check_expr(cl, 0)
-                scope_reset(inner)
-                if has_flag(cl, NF_LITERAL):
-                    t = lit_default(cl)
-                fields[fi].type = i32(zonk(t))
-            else: fatal(nodes[f].pos, "field needs a type")
-            if nodes[f].name == i32(intern("exit_code")) and files[pos_file(nodes[d].pos)].is_dewy and exception_type != 0 and nominal_descends(int(structs[si].type), exception_type): fields[fi].type = i32(exit_code_field_type(int(fields[fi].type), f, structs[si].type))
-            loop k in [0..inherited.len() + i):
-                if fields[int(structs[si].fields) + k].name == nodes[f].name:
-                    if k >= inherited.len() or not struct_components.has(d): fatal(nodes[f].pos, "duplicate field '{name_of(int(nodes[f].name))}'")
-                    # (an intersection's own field meets an operand's: the intersection of the two)
-                    t = intersect_types(int(fields[int(structs[si].fields) + k].type), int(fields[fi].type))
-                    if t == 0: fatal(nodes[f].pos, "this intersection has no values: field '{name_of(int(nodes[f].name))}' would be {dt(int(fields[int(structs[si].fields) + k].type))} & {dt(int(fields[fi].type))}")
-                    fields[int(structs[si].fields) + k].type = i32(t)
-                    if fields[fi].defval != 0: fields[int(structs[si].fields) + k].defval = fields[fi].defval
-                    fields[fi].name = 0
-        if struct_components.has(d):
-            # (own fields merged into an operand's leave their slots)
-            start = int(structs[si].fields)
-            kept = 0
-            loop i in [0..int(structs[si].nfields)):
-                if fields[start + i].name == 0: continue
-                fields[start + kept] = fields[start + i]
-                kept += 1
-            structs[si].nfields = i32(kept)
-        refine_bindings.fields = old_fields
-        if refine_active: ref_validate_record(int(structs[si].type), nodes[d].pos)
-    else:
-        nv = nkids(d)
-        structs[si].variants = i32(variants.len())
-        structs[si].nvariants = i32(nv)
-        loop v in [0..nv): variants.push(Variant())
-        next_val = 0
-        loop v in [0..nv):
-            vn = kid(d, v)
-            vi = int(structs[si].variants) + v
-            variants[vi].name = nodes[vn].name
-            variants[vi].tag = i32(v)
-            if nodes[vn].a != 0:
-                if nodes[int(nodes[vn].a)].kind != .int_lit: fatal(nodes[vn].pos, "enum value must be an integer literal")
-                next_val = nodes[int(nodes[vn].a)].ival
-            variants[vi].value = next_val
-            next_val += 1
-            nf = nkids(vn)
-            variants[vi].fields = i32(fields.len())
-            variants[vi].nfields = i32(nf)
-            loop i in [0..nf): fields.push(Field())
-            loop i in [0..nf):
-                fn_ = kid(vn, i)
-                fi = int(variants[vi].fields) + i
-                fields[fi].name = nodes[fn_].name
-                fields[fi].type = i32(resolve_type(int(nodes[fn_].a)))
-            loop k in [0..v):
-                if variants[int(structs[si].variants) + k].name == nodes[vn].name: fatal(nodes[vn].pos, "duplicate variant '{name_of(int(nodes[vn].name))}'")
-    scope_reset(mark)
+    CheckerFieldScope(saved, mark)
+
+field_leave = (scope: CheckerFieldScope):
+    scope_reset(scope.mark)
     ctxs.pop()
-    cx = saved
+    cx = scope.context
+
+field_default = (f: int, si: int, before: int) -> int:
+    d = int(structs[si].decl)
+    cl = clone(int(nodes[f].b))
+    # (a default may name the fields before it)
+    inner = scope_mark()
+    if files[pos_file(nodes[d].pos)].is_dewy:
+        loop j in [0..before):
+            earlier = fields[int(structs[si].fields) + j]
+            if earlier.type != 0: new_local(int(earlier.name), int(earlier.type), nodes[f].pos)
+    t = check_expr(cl, 0)
+    scope_reset(inner)
+    if has_flag(cl, NF_LITERAL):
+        t = lit_default(cl)
+    zonk(t)
+
+field_exit_name = () -> int: intern("exit_code")
+field_exit_type = (t: int, f: int, st: int, d: int) -> int:
+    if files[pos_file(nodes[d].pos)].is_dewy and exception_type != 0 and nominal_descends(st, exception_type): return exit_code_field_type(t, f, st)
+    t
+
+field_error = (kind: int, n: int, a: int, b: int):
+    if kind == 1: fatal(nodes[n].pos, "an intersection of records needs record types, found {dt(a)}")
+    if kind == 2: fatal(nodes[n].pos, "an intersection with a minted type is not supported yet (`type of` makes one)")
+    if kind == 3: fatal(nodes[n].pos, "field needs a type")
+    if kind == 4: fatal(nodes[n].pos, "duplicate field '{name_of(int(nodes[n].name))}'")
+    if kind == 5: fatal(nodes[n].pos, "enum value must be an integer literal")
+    if kind == 6: fatal(nodes[n].pos, "duplicate variant '{name_of(int(nodes[n].name))}'")
+
+field_intersection_error = (pos: int, name: int, a: int, b: int):
+    fatal(pos, "this intersection has no values: field '{name_of(name)}' would be {dt(a)} & {dt(b)}")
+
+field_host = CheckerFieldHost(field_enter, field_leave, resolve_type, field_default, field_exit_name, field_exit_type, is_map_type, ref_validate_record, field_error, field_intersection_error)
+field_binding = checker_fields_bind(&nodes, &lists, &types, &structs, &fields, &variants, &struct_components, &intersection_parts, &nominal_parent, &refine_bindings, &refine_active, &field_host)
 
 module_of_type = (t0: int) -> int:
     t = prune(t0)
@@ -1621,7 +1540,7 @@ result_pending = (name: int) -> int[]:
 result_candidate = (leaf: int, need_literal: bool) -> CheckerResultCandidate:
     e = clone(leaf)
     t = check_expr(e, 0)
-    if has_flag(e, NF_LITERAL): return CheckerResultCandidate(if need_literal: lit_default(e) else: 0, true)
+    if has_flag(e, NF_LITERAL): return CheckerResultCandidate((if need_literal: lit_default(e) else: 0), true)
     if t != 0 and tkind(t) != .var and tkind(t) != .void_ and t != T_NEVER: return CheckerResultCandidate(prune(t), false)
     CheckerResultCandidate()
 

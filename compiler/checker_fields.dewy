@@ -1,0 +1,193 @@
+$runtime_checks
+from p"node_store.dewy" import Node
+from p"checker_types.dewy" import (TypeInfo StructInfo Field Variant)
+from p"checker_state.dewy" import RefineBindings
+from p"type_inference.dewy" import (tu_prune tu_equal tu_is_union tu_union_members)
+from p"type_unions.dewy" import (uu_index uu_mk_union)
+# Demand-only recursive field publication. Preserve the resolved-before-recursion
+# marker and stable field/variant IDs; borrow headers across semantic services.
+# Existing duplicate/merge scans cost O(F² + V²), plus inherited-field copies
+# and demanded type intersections/checking; output space is O(F + V).
+CFWord:type=int64<overflow='wrap'>
+CheckerFieldScope:type=[context:int64=0 mark:int64=0]
+CheckerFieldHost:type=[
+    enter:<(decl:int64 structure:int64):>CheckerFieldScope>
+    leave:<(scope:CheckerFieldScope):>void>
+    resolve_type:<(node:int64):>int64>
+    default_type:<(node:int64 structure:int64 before:int64):>int64>
+    exit_name:<():>int64>
+    exit_type:<(type_id:int64 field:int64 structure_type:int64 decl:int64):>int64>
+    is_map_type:<(type_id:int64):>bool>
+    validate_record:<(type_id:int64 position:int64):>void>
+    error:<(kind:int64 node:int64 a:int64 b:int64):>void>
+    intersection_error:<(position:int64 name:int64 a:int64 b:int64):>void>
+]
+let cf_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let cf_lists:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
+let cf_types:ptr<array<TypeInfo>>=$unsafe (uint64(0) as ptr<array<TypeInfo>>)
+let cf_structs:ptr<array<StructInfo>>=$unsafe (uint64(0) as ptr<array<StructInfo>>)
+let cf_fields:ptr<array<Field>>=$unsafe (uint64(0) as ptr<array<Field>>)
+let cf_variants:ptr<array<Variant>>=$unsafe (uint64(0) as ptr<array<Variant>>)
+let cf_components:ptr<dict<int64 array<int64>>>=$unsafe (uint64(0) as ptr<dict<int64 array<int64>>>)
+let cf_parts:ptr<dict<int64 array<int64>>>=$unsafe (uint64(0) as ptr<dict<int64 array<int64>>>)
+let cf_parents:ptr<dict<int64 int64>>=$unsafe (uint64(0) as ptr<dict<int64 int64>>)
+let cf_binders:ptr<RefineBindings>=$unsafe (uint64(0) as ptr<RefineBindings>)
+let cf_refine:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+let cf_host:ptr<CheckerFieldHost>=$unsafe (uint64(0) as ptr<CheckerFieldHost>)
+checker_fields_bind=(nodes:ptr<array<Node>> lists:ptr<array<int32>> types:ptr<array<TypeInfo>> structs:ptr<array<StructInfo>> fields:ptr<array<Field>> variants:ptr<array<Variant>> components:ptr<dict<int64 array<int64>>> parts:ptr<dict<int64 array<int64>>> parents:ptr<dict<int64 int64>> binders:ptr<RefineBindings> refine:ptr<bool> host:ptr<CheckerFieldHost>):>CFWord=>$unsafe {
+    cf_nodes=nodes
+    cf_lists=lists
+    cf_types=types
+    cf_structs=structs
+    cf_fields=fields
+    cf_variants=variants
+    cf_components=components
+    cf_parts=parts
+    cf_parents=parents
+    cf_binders=binders
+    cf_refine=refine
+    cf_host=host
+    0
+}
+cf_nkids=(n:CFWord):>CFWord=>$unsafe {CFWord(cf_nodes[0].ptr[n].nlist)}
+cf_kid=(n:CFWord i:CFWord):>CFWord=>$unsafe {CFWord(cf_lists[0].ptr[CFWord(cf_nodes[0].ptr[n].list) + i])}
+cf_intersection_fields=(si:CFWord d:CFWord own:array<int64>):>array<Field>=>$unsafe {
+    let out:array<Field>=[]
+    let parts:array<int64>=[]
+    loop c in (cf_components[0].get(d) ?? []) {
+        let t=tu_prune(cf_host[0].resolve_type(c))
+        if cf_types[0].ptr[t].kind not=? 'struct_' or cf_host[0].is_map_type(t) {cf_host[0].error(1  c  t  0)}
+        if cf_parents[0].has(t) {cf_host[0].error(2  c  0  0)}
+        parts.push(t)
+        let csi=CFWord(cf_types[0].ptr[t].st)
+        cf_check_struct_fields(csi)
+        loop i in [0..CFWord(cf_structs[0][csi].nfields)) {cf_intersection_merge(@out  cf_fields[0][CFWord(cf_structs[0][csi].fields) + i]  cf_nodes[0].ptr[d].pos)}
+    }
+    cf_parts[0][CFWord(cf_structs[0][si].type)] = parts
+    out
+}
+cf_intersection_merge=(@out:array<Field> field:Field pos:CFWord):>void=>$unsafe {
+    loop i in 0.. and f in out {
+        if f.name not=? field.name {continue}
+        let t=cf_intersect_types(CFWord(f.type)  CFWord(field.type))
+        if t =? 0 {cf_host[0].intersection_error(pos  CFWord(field.name)  CFWord(f.type)  CFWord(field.type))}
+        out[i].type = int32<overflow='wrap'>(t)
+        if field.defval not=? 0 {out[i].defval = field.defval}
+        return
+    }
+    out.push(field)
+}
+cf_intersect_types=(a0:CFWord b0:CFWord):>CFWord=>$unsafe {
+    let a=tu_prune(a0)
+    let b=tu_prune(b0)
+    if tu_equal(a  b) {return a}
+    if tu_is_union(a) and uu_index(a  b) >=? 0 {return b}
+    if tu_is_union(b) and uu_index(b  a) >=? 0 {return a}
+    if tu_is_union(a) and tu_is_union(b) {
+        let both:array<int64>=[]
+        loop m in tu_union_members(a) {
+            if uu_index(b  m) >=? 0 {both.push(m)}
+        }
+        if both.length =? 0 {return 0}
+        return uu_mk_union(both)
+    }
+    if cf_types[0].ptr[a].kind =? 'opt' and tu_equal(tu_prune(CFWord(cf_types[0].ptr[a].elem))  b) {return b}
+    if cf_types[0].ptr[b].kind =? 'opt' and tu_equal(tu_prune(CFWord(cf_types[0].ptr[b].elem))  a) {return a}
+    0
+}
+cf_check_struct_fields=(si:CFWord):>void=>$unsafe {
+    if cf_structs[0][si].resolved {return}
+    cf_structs[0][si].resolved = true
+    let d=CFWord(cf_structs[0][si].decl)
+    let scope=cf_host[0].enter(d  si)
+    if cf_nodes[0].ptr[d].kind =? 'struct_' {
+        let n=cf_nkids(d)
+        let inherited:array<Field>=[]
+        if cf_components[0].has(d) {inherited=cf_intersection_fields(si  d  [])}
+        let parent=cf_parents[0].get(CFWord(cf_structs[0][si].type)  0)
+        if parent not=? 0 {
+            let psi=CFWord(cf_types[0].ptr[parent].st)
+            cf_check_struct_fields(psi)
+            loop i in [0..CFWord(cf_structs[0][psi].nfields)) {inherited.push(cf_fields[0][CFWord(cf_structs[0][psi].fields) + i])}
+        }
+        cf_structs[0][si].fields = int32<overflow='wrap'>(cf_fields[0].length)
+        cf_structs[0][si].nfields = int32<overflow='wrap'>(n + inherited.length)
+        loop field in inherited {cf_fields[0].push(field)}
+        loop i in [0..n) {cf_fields[0].push(Field[])}
+        let old_fields=cf_binders[0].fields
+        if cf_refine[0] {
+            cf_binders[0].fields = []
+            loop field in inherited {cf_binders[0].fields.push(CFWord(field.name))}
+            loop i in [0..n) {cf_binders[0].fields.push(CFWord(cf_nodes[0].ptr[cf_kid(d  i)].name))}
+        }
+        loop i in [0..n) {
+            let f=cf_kid(d  i)
+            let fi=CFWord(cf_structs[0][si].fields) + inherited.length + i
+            cf_fields[0][fi].name = cf_nodes[0].ptr[f].name
+            cf_fields[0][fi].defval = cf_nodes[0].ptr[f].b
+            if cf_nodes[0].ptr[f].a not=? 0 {cf_fields[0][fi].type = int32<overflow='wrap'>(cf_host[0].resolve_type(CFWord(cf_nodes[0].ptr[f].a)))}
+            else if cf_nodes[0].ptr[f].b not=? 0 {
+                cf_fields[0][fi].type = int32<overflow='wrap'>(cf_host[0].default_type(f  si  inherited.length + i))
+            }
+            else {cf_host[0].error(3  f  0  0)}
+            if cf_nodes[0].ptr[f].name =? int32<overflow='wrap'>(cf_host[0].exit_name()) {cf_fields[0][fi].type = int32<overflow='wrap'>(cf_host[0].exit_type(CFWord(cf_fields[0][fi].type)  f  CFWord(cf_structs[0][si].type)  d))}
+            loop k in [0..inherited.length + i) {
+                if cf_fields[0][CFWord(cf_structs[0][si].fields) + k].name =? cf_nodes[0].ptr[f].name {
+                    if k >=? inherited.length or not cf_components[0].has(d) {cf_host[0].error(4  f  0  0)}
+# (an intersection's own field meets an operand's: the intersection of the two)
+                    let t=cf_intersect_types(CFWord(cf_fields[0][CFWord(cf_structs[0][si].fields) + k].type)  CFWord(cf_fields[0][fi].type))
+                    if t =? 0 {cf_host[0].intersection_error(cf_nodes[0].ptr[f].pos  CFWord(cf_nodes[0].ptr[f].name)  CFWord(cf_fields[0][CFWord(cf_structs[0][si].fields) + k].type)  CFWord(cf_fields[0][fi].type))}
+                    cf_fields[0][CFWord(cf_structs[0][si].fields) + k].type = int32<overflow='wrap'>(t)
+                    if cf_fields[0][fi].defval not=? 0 {cf_fields[0][CFWord(cf_structs[0][si].fields) + k].defval = cf_fields[0][fi].defval}
+                    cf_fields[0][fi].name = 0
+                }
+            }
+        }
+        if cf_components[0].has(d) {
+# (own cf_fields[0] merged into an operand's leave their slots)
+            let start=CFWord(cf_structs[0][si].fields)
+            let kept:CFWord=0
+            loop i in [0..CFWord(cf_structs[0][si].nfields)) {
+                if cf_fields[0][start + i].name =? 0 {continue}
+                cf_fields[0][start + kept] = cf_fields[0][start + i]
+                kept += 1
+            }
+            cf_structs[0][si].nfields = int32<overflow='wrap'>(kept)
+        }
+        cf_binders[0].fields = old_fields
+        if cf_refine[0] {cf_host[0].validate_record(CFWord(cf_structs[0][si].type)  cf_nodes[0].ptr[d].pos)}
+    }
+    else {
+        let nv=cf_nkids(d)
+        cf_structs[0][si].variants = int32<overflow='wrap'>(cf_variants[0].length)
+        cf_structs[0][si].nvariants = int32<overflow='wrap'>(nv)
+        loop v in [0..nv) {cf_variants[0].push(Variant[])}
+        let next_val:CFWord=0
+        loop v in [0..nv) {
+            let vn=cf_kid(d  v)
+            let vi=CFWord(cf_structs[0][si].variants) + v
+            cf_variants[0][vi].name = cf_nodes[0].ptr[vn].name
+            cf_variants[0][vi].tag = int32<overflow='wrap'>(v)
+            if cf_nodes[0].ptr[vn].a not=? 0 {
+                if cf_nodes[0].ptr[CFWord(cf_nodes[0].ptr[vn].a)].kind not=? 'int_lit' {cf_host[0].error(5  vn  0  0)}
+                next_val=cf_nodes[0].ptr[CFWord(cf_nodes[0].ptr[vn].a)].ival
+            }
+            cf_variants[0][vi].value = next_val
+            next_val += 1
+            let nf=cf_nkids(vn)
+            cf_variants[0][vi].fields = int32<overflow='wrap'>(cf_fields[0].length)
+            cf_variants[0][vi].nfields = int32<overflow='wrap'>(nf)
+            loop i in [0..nf) {cf_fields[0].push(Field[])}
+            loop i in [0..nf) {
+                let fn_=cf_kid(vn  i)
+                let fi=CFWord(cf_variants[0][vi].fields) + i
+                cf_fields[0][fi].name = cf_nodes[0].ptr[fn_].name
+                cf_fields[0][fi].type = int32<overflow='wrap'>(cf_host[0].resolve_type(CFWord(cf_nodes[0].ptr[fn_].a)))
+            }
+            loop k in [0..v) {
+                if cf_variants[0][CFWord(cf_structs[0][si].variants) + k].name =? cf_nodes[0].ptr[vn].name {cf_host[0].error(6  vn  0  0)}
+            }
+        }
+    }
+    cf_host[0].leave(scope)
+}

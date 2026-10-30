@@ -1,0 +1,168 @@
+use 'node_store.dewy'
+use 'checker_types.dewy'
+use 'checker_state.dewy'
+use 'type_inference.dewy'
+use 'type_unions.dewy'
+struct CheckerFieldScope:
+    context: int
+    mark: int
+struct CheckerFieldHost:
+    enter: (int, int) -> CheckerFieldScope
+    leave: (CheckerFieldScope) -> void
+    resolve_type: (int) -> int
+    default_type: (int, int, int) -> int
+    exit_name: () -> int
+    exit_type: (int, int, int, int) -> int
+    is_map_type: (int) -> bool
+    validate_record: (int, int) -> void
+    error: (int, int, int, int) -> void
+    intersection_error: (int, int, int, int) -> void
+cf_nodes: *(Node[])
+cf_lists: *(i32[])
+cf_types: *(TypeInfo[])
+cf_structs: *(StructInfo[])
+cf_fields: *(Field[])
+cf_variants: *(Variant[])
+cf_components: *({int: int[]})
+cf_parts: *({int: int[]})
+cf_parents: *({int: int})
+cf_binders: *(RefineBindings)
+cf_refine: *(bool)
+cf_host: *(CheckerFieldHost)
+checker_fields_bind = (nodes: *(Node[]), lists: *(i32[]), types: *(TypeInfo[]), structs: *(StructInfo[]), fields: *(Field[]), variants: *(Variant[]), components: *({int: int[]}), parts: *({int: int[]}), parents: *({int: int}), binders: *(RefineBindings), refine: *(bool), host: *(CheckerFieldHost)) -> int:
+    cf_nodes = nodes
+    cf_lists = lists
+    cf_types = types
+    cf_structs = structs
+    cf_fields = fields
+    cf_variants = variants
+    cf_components = components
+    cf_parts = parts
+    cf_parents = parents
+    cf_binders = binders
+    cf_refine = refine
+    cf_host = host
+    0
+cf_nkids = (n: int) -> int: int(cf_nodes[0][n].nlist)
+cf_kid = (n: int, i: int) -> int: int(cf_lists[0][int(cf_nodes[0][n].list) + i])
+cf_intersection_fields = (si: int, d: int, own: int[]) -> Field[]:
+    out: Field[]
+    parts: int[]
+    loop c in cf_components[0].get(d) ?? []:
+        t = tu_prune(cf_host[0].resolve_type(c))
+        if cf_types[0][t].kind != .struct_ or cf_host[0].is_map_type(t): cf_host[0].error(1, c, t, 0)
+        if cf_parents[0].has(t): cf_host[0].error(2, c, 0, 0)
+        parts.push(t)
+        csi = int(cf_types[0][t].st)
+        cf_check_struct_fields(csi)
+        loop i in [0..int(cf_structs[0][csi].nfields)): cf_intersection_merge(out, cf_fields[0][int(cf_structs[0][csi].fields) + i], cf_nodes[0][d].pos)
+    cf_parts[0][int(cf_structs[0][si].type)] = parts
+    out
+
+cf_intersection_merge = (out: mut Field[], field: Field, pos: int):
+    loop i in 0.. and f in out:
+        if f.name != field.name: continue
+        t = cf_intersect_types(int(f.type), int(field.type))
+        if t == 0: cf_host[0].intersection_error(pos, int(field.name), int(f.type), int(field.type))
+        out[i].type = i32(t)
+        if field.defval != 0: out[i].defval = field.defval
+        return
+    out.push(field)
+
+cf_intersect_types = (a0: int, b0: int) -> int:
+    a = tu_prune(a0)
+    b = tu_prune(b0)
+    if tu_equal(a, b): return a
+    if tu_is_union(a) and uu_index(a, b) >= 0: return b
+    if tu_is_union(b) and uu_index(b, a) >= 0: return a
+    if tu_is_union(a) and tu_is_union(b):
+        both: int[]
+        loop m in tu_union_members(a):
+            if uu_index(b, m) >= 0: both.push(m)
+        if both.len() == 0: return 0
+        return uu_mk_union(both)
+    if cf_types[0][a].kind == .opt and tu_equal(tu_prune(int(cf_types[0][a].elem)), b): return b
+    if cf_types[0][b].kind == .opt and tu_equal(tu_prune(int(cf_types[0][b].elem)), a): return a
+    0
+
+cf_check_struct_fields = (si: int):
+    if cf_structs[0][si].resolved: return
+    cf_structs[0][si].resolved = true
+    d = int(cf_structs[0][si].decl)
+    scope = cf_host[0].enter(d, si)
+    if cf_nodes[0][d].kind == .struct_:
+        n = cf_nkids(d)
+        inherited: Field[]
+        if cf_components[0].has(d): inherited = cf_intersection_fields(si, d, [])
+        parent = cf_parents[0].get(int(cf_structs[0][si].type), 0)
+        if parent != 0:
+            psi = int(cf_types[0][parent].st)
+            cf_check_struct_fields(psi)
+            loop i in [0..int(cf_structs[0][psi].nfields)): inherited.push(cf_fields[0][int(cf_structs[0][psi].fields) + i])
+        cf_structs[0][si].fields = i32(cf_fields[0].len())
+        cf_structs[0][si].nfields = i32(n + inherited.len())
+        loop field in inherited: cf_fields[0].push(field)
+        loop i in [0..n): cf_fields[0].push(Field())
+        old_fields = cf_binders[0].fields
+        if cf_refine[0]:
+            cf_binders[0].fields = []
+            loop field in inherited: cf_binders[0].fields.push(int(field.name))
+            loop i in [0..n): cf_binders[0].fields.push(int(cf_nodes[0][cf_kid(d, i)].name))
+        loop i in [0..n):
+            f = cf_kid(d, i)
+            fi = int(cf_structs[0][si].fields) + inherited.len() + i
+            cf_fields[0][fi].name = cf_nodes[0][f].name
+            cf_fields[0][fi].defval = cf_nodes[0][f].b
+            if cf_nodes[0][f].a != 0: cf_fields[0][fi].type = i32(cf_host[0].resolve_type(int(cf_nodes[0][f].a)))
+            else if cf_nodes[0][f].b != 0:
+                cf_fields[0][fi].type = i32(cf_host[0].default_type(f, si, inherited.len() + i))
+            else: cf_host[0].error(3, f, 0, 0)
+            if cf_nodes[0][f].name == i32(cf_host[0].exit_name()): cf_fields[0][fi].type = i32(cf_host[0].exit_type(int(cf_fields[0][fi].type), f, int(cf_structs[0][si].type), d))
+            loop k in [0..inherited.len() + i):
+                if cf_fields[0][int(cf_structs[0][si].fields) + k].name == cf_nodes[0][f].name:
+                    if k >= inherited.len() or not cf_components[0].has(d): cf_host[0].error(4, f, 0, 0)
+                    # (an intersection's own field meets an operand's: the intersection of the two)
+                    t = cf_intersect_types(int(cf_fields[0][int(cf_structs[0][si].fields) + k].type), int(cf_fields[0][fi].type))
+                    if t == 0: cf_host[0].intersection_error(cf_nodes[0][f].pos, int(cf_nodes[0][f].name), int(cf_fields[0][int(cf_structs[0][si].fields) + k].type), int(cf_fields[0][fi].type))
+                    cf_fields[0][int(cf_structs[0][si].fields) + k].type = i32(t)
+                    if cf_fields[0][fi].defval != 0: cf_fields[0][int(cf_structs[0][si].fields) + k].defval = cf_fields[0][fi].defval
+                    cf_fields[0][fi].name = 0
+        if cf_components[0].has(d):
+            # (own cf_fields[0] merged into an operand's leave their slots)
+            start = int(cf_structs[0][si].fields)
+            kept = 0
+            loop i in [0..int(cf_structs[0][si].nfields)):
+                if cf_fields[0][start + i].name == 0: continue
+                cf_fields[0][start + kept] = cf_fields[0][start + i]
+                kept += 1
+            cf_structs[0][si].nfields = i32(kept)
+        cf_binders[0].fields = old_fields
+        if cf_refine[0]: cf_host[0].validate_record(int(cf_structs[0][si].type), cf_nodes[0][d].pos)
+    else:
+        nv = cf_nkids(d)
+        cf_structs[0][si].variants = i32(cf_variants[0].len())
+        cf_structs[0][si].nvariants = i32(nv)
+        loop v in [0..nv): cf_variants[0].push(Variant())
+        next_val = 0
+        loop v in [0..nv):
+            vn = cf_kid(d, v)
+            vi = int(cf_structs[0][si].variants) + v
+            cf_variants[0][vi].name = cf_nodes[0][vn].name
+            cf_variants[0][vi].tag = i32(v)
+            if cf_nodes[0][vn].a != 0:
+                if cf_nodes[0][int(cf_nodes[0][vn].a)].kind != .int_lit: cf_host[0].error(5, vn, 0, 0)
+                next_val = cf_nodes[0][int(cf_nodes[0][vn].a)].ival
+            cf_variants[0][vi].value = next_val
+            next_val += 1
+            nf = cf_nkids(vn)
+            cf_variants[0][vi].fields = i32(cf_fields[0].len())
+            cf_variants[0][vi].nfields = i32(nf)
+            loop i in [0..nf): cf_fields[0].push(Field())
+            loop i in [0..nf):
+                fn_ = cf_kid(vn, i)
+                fi = int(cf_variants[0][vi].fields) + i
+                cf_fields[0][fi].name = cf_nodes[0][fn_].name
+                cf_fields[0][fi].type = i32(cf_host[0].resolve_type(int(cf_nodes[0][fn_].a)))
+            loop k in [0..v):
+                if cf_variants[0][int(cf_structs[0][si].variants) + k].name == cf_nodes[0][vn].name: cf_host[0].error(6, vn, 0, 0)
+    cf_host[0].leave(scope)
