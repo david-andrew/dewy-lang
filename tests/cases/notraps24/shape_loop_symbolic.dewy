@@ -1,0 +1,13 @@
+# Shape binders pass the loop's own extents back: they stay the entry's.
+step = (p:array<float64 length=[R C]>):>array<float64 length=[R C]> => p
+run = (rows:int64 cols:int64):>float64 => {
+    if rows <? 1 or cols <? 1 return 0.0
+    let plate = zeros(rows cols)
+    let i = 0
+    loop i <? 3 {
+        plate = step(plate)
+        i += 1
+    }
+    plate[rows - 1 cols - 1]
+}
+main = () => printl(run(3 4))

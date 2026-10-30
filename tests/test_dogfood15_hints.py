@@ -37,6 +37,7 @@ main = () => {
     let i = 0
     loop i <? 3 {
         plate = step(plate)
+        if i =? 1 plate = zeros(4 5)
         i += 1
     }
     show(plate)

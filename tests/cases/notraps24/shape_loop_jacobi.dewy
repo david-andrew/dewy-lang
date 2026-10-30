@@ -1,0 +1,29 @@
+# Jacobi relaxation until convergence: the grid is replaced every sweep.
+const ROWS = 5
+const COLS = 6
+
+sweep = (g:array<float64 length=[ROWS COLS]>):>array<float64 length=[ROWS COLS]> => {
+    let next = g
+    loop r in [1..ROWS-1) loop c in [1..COLS-1) next[r c] = (g[r-1 c] + g[r+1 c] + g[r c-1] + g[r c+1]) / 4
+    next
+}
+
+change = (a:array<float64 length=[ROWS COLS]> b:array<float64 length=[ROWS COLS]>):>float64 => {
+    let worst = 0.0
+    loop r in [0..ROWS) loop c in [0..COLS) worst = max(worst abs(a[r c] - b[r c]))
+    worst
+}
+
+main = () => {
+    let grid = zeros(ROWS COLS)
+    loop c in [0..COLS) grid[0 c] = 100.0
+    let sweeps = 0
+    loop true {
+        let next = sweep(grid)
+        let delta = change(grid next)
+        grid = next
+        sweeps += 1
+        if delta <? 0.5 or sweeps >=? 100 break
+    }
+    printl"{sweeps} {grid[1 1]:.1f}"
+}

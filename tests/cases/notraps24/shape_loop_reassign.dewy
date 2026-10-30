@@ -1,0 +1,15 @@
+# A shaped array reassigned in a loop keeps its declared shape.
+step = (p:array<float64 length=[4 4]>):>array<float64 length=[4 4]> => {
+    let q = p
+    q[1 1] = p[0 1] + 1.0
+    q
+}
+main = () => {
+    let plate:array<float64 length=[4 4]> = zeros(4 4)
+    let i = 0
+    loop i <? 3 {
+        plate = step(plate)
+        i += 1
+    }
+    printl(plate[1 1])
+}

@@ -281,10 +281,15 @@ ref_refined_result = (t0: int) -> bool:
     t = prune(t0)
     types[t].kind == .refined or ref_refined_arms(t)
 
-result_activate = (s: mut FactState):
+result_activate = (s: mut FactState, leaf: int = 0):
     loop evidence in s.conditional:
-        wanted = fact_constant(s, evidence.tag)
-        if evidence.tag >= 0:
+        if evidence.tag == -2:
+            # (an implication, fact_either: its antecedent holds, so its
+            # consequent does; after a leaf condition, only one it tested)
+            if (leaf == 0 or fact_implication_reads(evidence, leaf)) and fact_implied(s, evidence, 0) and not fact_implied(s, evidence, 1): fact_imply(s, evidence)
+            continue
+        else if evidence.tag >= 0:
+            wanted = fact_constant(s, evidence.tag)
             bound = fact_bound(s, evidence.result)
             if bound.nz and bound.lo == 0: bound.lo = 1
             if fact_compare(s, .eq, evidence.result, wanted) != 1 and not (bound.lo == evidence.tag and bound.hi == evidence.tag): continue
@@ -334,9 +339,14 @@ result_replaced = (value: int, at: int, s: mut FactState):
     if s.conditional.len() == 0: return
     replaced = false
     loop evidence in s.conditional:
+        # (an implication between immutable values outlives any store)
+        if evidence.tag == -2: continue
         if evidence.result == value: replaced = true
         loop projection in s.projections:
             if projection.base == value and projection.value == evidence.result: replaced = true
     if not replaced: return
-    s.conditional = []
+    kept: ResultEvidence[]
+    loop evidence in s.conditional:
+        if evidence.tag == -2: kept.push(evidence)
+    s.conditional = kept
     fact_forget(s, at, .write, true)

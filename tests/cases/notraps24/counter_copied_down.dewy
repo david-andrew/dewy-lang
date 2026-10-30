@@ -1,0 +1,16 @@
+# Near miss: the copied counter steps down, so it may go below zero.
+scan = (xs:array<int>):>int => {
+    let n = 0
+    let back = 0
+    loop n <? xs.length {
+        if xs[n] =? 1 {
+            back = n
+            n += 1
+        } else {
+            back -= 1
+            n = back
+        }
+    }
+    back
+}
+main = () => printl(scan([1 0 1 1 0]))

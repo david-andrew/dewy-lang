@@ -626,6 +626,11 @@ fact_nd_valid = (s: mut FactState, value: int) -> int:
     known = fact_project(s, length, ND_STORAGE_SHAPES, false, T_INT)
     valid = fact_project(s, known, shape, true, T_INT)
     if fact_bound(s, valid).lo == 1: return valid
+    # (a loop header's value carries the marker its edges agreed on)
+    marker = fact_projection_find(s, value, ND_STORAGE_VALID, false)
+    if marker >= 0 and fact_bound(s, s.projections[marker].value).lo == 1:
+        fact_set_bound(s, valid, FactBound(1, 1, true))
+        return valid
     rank_value = fact_project(s, shape, -1, false, T_INT)
     rank = fact_bound(s, rank_value)
     if rank.lo != rank.hi or rank.lo < 0 or rank.hi > 32: return valid
@@ -638,6 +643,23 @@ fact_nd_valid = (s: mut FactState, value: int) -> int:
     expected = fact_constant(s, product)
     if fact_compare(s, .eq, length, expected) == 1: fact_set_bound(s, valid, FactBound(1, 1, true))
     valid
+
+# Whether a state already knows value's data matches its shape, without
+# materializing anything: the header marker or the (length, shape) pair. O(1)
+# indexed lookups.
+fact_nd_valid_held = (s: FactState, value: int) -> bool:
+    if not s.live or value == 0: return false
+    i = fact_projection_find(s, value, ND_STORAGE_VALID, false)
+    if i >= 0: return fact_bound(s, s.projections[i].value).lo == 1
+    i = fact_projection_find(s, value, intern("shape"), false)
+    j = fact_projection_find(s, value, intern("data"), false)
+    if i < 0 or j < 0: return false
+    j = fact_projection_find(s, s.projections[j].value, -1, false)
+    if j < 0: return false
+    j = fact_projection_find(s, s.projections[j].value, ND_STORAGE_SHAPES, false)
+    if j < 0: return false
+    j = fact_projection_find(s, s.projections[j].value, s.projections[i].value, true)
+    j >= 0 and fact_bound(s, s.projections[j].value).lo == 1
 
 # A shaped @ parameter constrains its entry value, as the original shaped
 # prologue did; the caller's storage need not permanently have that shape.

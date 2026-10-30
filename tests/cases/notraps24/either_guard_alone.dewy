@@ -1,0 +1,7 @@
+# Near miss: without b on the later path, not (a and b) says nothing of a.
+pick = (n:int64 m:int64 xs:array<int>):>int => {
+    if n <? 0 and m =? 0 return -1
+    if n <? xs.length return xs[n]
+    0
+}
+main = () => printl(pick(1 0 [4 5]))

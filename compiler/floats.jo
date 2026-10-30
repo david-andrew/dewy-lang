@@ -280,6 +280,9 @@ ff_conversions: {int: bool} = {} # functions converting a float to an integer (e
 ff_fn = 0                       # the function being walked
 ff_probing = false              # effects ask which conversions a body proves: nothing is reported
 ff_probe: {int: bool} = {}      # (while probing) conversion node -> proven
+ff_ranging = false              # facts ask what a float-to-integer conversion's operand holds
+ff_operands: {int: FR} = {}     # float-to-integer conversion node -> its operand's range (hulled)
+ff_ranged: {int: bool} = {}     # functions walked for ff_operands
 
 floats_reset = ():
     ff_checks = {}
@@ -294,6 +297,8 @@ floats_notes_reset = ():
     ff_indirect = {}
     ff_keys = {}
     ff_conversions = {}
+    ff_operands = {}
+    ff_ranged = {}
 
 # expr.jo: a float converted to an integer in the function being checked
 ff_note_conversion = ():
@@ -877,6 +882,7 @@ ff_conv = (n: int) -> FR:
         hi = if b.hi == FACT_MAX: 18446744073709551616.0 else: f64(b.hi)
         return FR(lo, hi)
     if cv == i32(int(CV.float2int)):
+        if ff_ranging: ff_operands[n] = if let prior = ff_operands.get(n): ff_hull(prior, x) else: x
         # (a proven range drops the conversion's runtime check)
         proven = not x.nan and ff_int_fits(x, prune(to))
         if proven and to != T_MATH_INT: ff_int_proven[n] = true
@@ -960,6 +966,30 @@ ff_probe_function = (f: int) -> {int: bool}:
     ff_fn = saved.2
     ff_probing = false
     ff_probe
+
+# facts.jo: the range of a float-to-integer conversion's operand in f, from
+# the guards before it, as checking would find it; a conversion the walk does
+# not reach (a lambda's) has none. One silent walk of f's body per function
+# with a demanded conversion, memoized: O(body).
+ff_conversion_operand = (f: int, n: int) -> FR?:
+    if not ff_ranged.has(f):
+        if ff_probing or ff_ranging or not ff_conversions.has(f): return none
+        ff_ranged[f] = true
+        body = int(fns[f].body)
+        if body == 0 or fns[f].state != 2: return none
+        saved = (ff_env, ff_assume, ff_fn, ff_probe)
+        ff_probing = true
+        ff_ranging = true
+        ff_probe = {}
+        ff_assume = ff_mode_at(nodes[body].pos)
+        ff_walk(f)
+        ff_env = saved.0
+        ff_assume = saved.1
+        ff_fn = saved.2
+        ff_probe = saved.3
+        ff_probing = false
+        ff_ranging = false
+    ff_operands.get(n)
 
 ff_walk = (f: int):
     body = int(fns[f].body)

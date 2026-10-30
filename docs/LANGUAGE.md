@@ -710,7 +710,11 @@ preserves the converted value, including a helper's count-to-result-length
 relation; its original narrowing check can still make the helper panic.
 A saved conjunction can retain its captured guard's bounds, and symbolic
 `max(lo min(hi value))` retains both bounds when `lo <=? hi` is known.
-Integer-to-float conversions use the integer bounds known at that conversion.
+Integer-to-float conversions use the integer bounds known at that conversion,
+and a float-to-integer conversion keeps the range the float's guards establish
+(after `if 0.0 <=? x <=? 9.0`, `int(x)` indexes ten elements). An early exit
+on a conjunction leaves its refutation: after `if n <? 0 and q =? 0 return`, a
+later `q =? 0` gives `n >=? 0`, and `q ^ n` on a rational needs exactly this.
 A wide integer result guarded between a fixed-width type's `.min` and `.max`
 can be stored in that type. Halving an exact sum or difference of `int64`
 values retains its finite bounds through a local variable, including endpoint
@@ -2578,6 +2582,8 @@ indexing work too. Scalar indexing requires the rank to equal the number of
 indices and `0 <=? index <? matrix.length[axis]` on every axis. Constructors,
 literals, `reshape` and shaped parameters supply these facts; loops over the
 extents and guards on `.length` prove the bounds without a runtime-check opt-in.
+A shaped array replaced in a loop keeps its shape when every replacement has it
+(`plate = step(plate)` with a shaped result).
 Element writes keep the shape, including across direct helpers whose analyzed
 returns preserve both the shape and data length. Read-only shape helpers keep
 the caller's evidence too. Replacing an array or its shape invalidates old

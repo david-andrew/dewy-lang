@@ -1,0 +1,11 @@
+# A rational power fails only for a zero base with a negative exponent:
+# `not (n <? 0 and q =? 0)` is exactly what it needs.
+power = (q:rational n:int64):>rational => {
+    if n <? 0 and q =? 0 return 0
+    q ^ n
+}
+either = (q:rational n:int64):>rational => {
+    if n <? 0 or q =? 0 return 0
+    q ^ n
+}
+main = () => printl"{power(2 3)} {power(0 2)} {power(1/2 -2)} {power(0 -1)} {either(2 -1)}"

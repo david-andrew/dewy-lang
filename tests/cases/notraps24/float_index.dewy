@@ -1,0 +1,12 @@
+# A float guarded into a range indexes after converting to `int`.
+const ramp = " .:-=+*#%@"
+shade = (level:float64):>string => {
+    if 0.0 <=? level <=? 9.0 return ramp[int(level)]
+    "?"
+}
+cell = (t:float64):>int => {
+    let xs = [5 6 7 8]
+    if not (0.0 <=? t <? 4.0) return -1
+    xs[int(t)]
+}
+main = () => printl"[{shade(0.0)}{shade(4.5)}{shade(9.0)}{shade(12.0)}] {cell(3.99)} {cell(-0.5)}"

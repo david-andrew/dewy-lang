@@ -1,0 +1,7 @@
+# Near miss: 10.0 truncates to 10, past the last of ten graphemes.
+const ramp = " .:-=+*#%@"
+shade = (level:float64):>string => {
+    if 0.0 <=? level <=? 10.0 return ramp[int(level)]
+    "?"
+}
+main = () => printl(shade(3.0))

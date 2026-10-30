@@ -1,0 +1,14 @@
+# `if a and b return` leaves `not a or not b`: b on a later path gives not a.
+pick = (n:int64 m:int64 xs:array<int>):>int => {
+    if n <? 0 and m =? 0 return -1
+    if m =? 0 and n <? xs.length return xs[n]
+    0
+}
+# `if a or b` holds one of them: not a gives b.
+first = (n:int64 strict:bool xs:array<int>):>int => {
+    if n >=? 0 or strict {
+        if not strict and n <? xs.length return xs[n]
+    }
+    0
+}
+main = () => printl"{pick(1 0 [4 5])} {pick(-3 0 [4 5])} {pick(-3 1 [4 5])} {first(1 false [4 5])}"

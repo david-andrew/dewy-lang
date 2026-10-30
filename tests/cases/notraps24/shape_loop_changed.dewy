@@ -1,0 +1,11 @@
+# Near miss: the loop replaces the array with another shape.
+step = (p:array<float64 length=[4 4]>):>array<float64 length=[4 4]> => p
+main = () => {
+    let plate = zeros(4 4)
+    let i = 0
+    loop i <? 3 {
+        plate = step(plate)
+        plate = zeros(4 5)
+        i += 1
+    }
+}

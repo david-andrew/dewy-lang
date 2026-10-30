@@ -1273,6 +1273,8 @@ fact_replace = (s: mut FactState, base: int, selector: int, element: bool, value
         if private and p.selector == FACT_POOL_POSITIONS: continue
         if p.selector == FACT_MAP_POSITIONS and not p.element and (element or selector != fact_name_vals): continue
         if p.selector == FACT_MAP_DENSE and not p.element and (element or selector != fact_name_vals): continue
+        # (an N-D header's validity marker describes the value replaced)
+        if not p.element and p.selector == ND_STORAGE_VALID: continue
         if p.element == element:
             if not element and p.selector == selector: continue
             # Different selector identities do not prove different elements.
@@ -3147,7 +3149,9 @@ fact_join = (a: FactState, b: FactState, at: int) -> FactState:
         fact_hull_all(s, a, b, s.bounds.len(), at)
         return s
     s = FactState()
-    if a.conditional.len() > 0 and b.conditional.len() > 0:
+    # (both paths usually inherit one list: keep it without hashing)
+    if a.conditional == b.conditional: s.conditional = a.conditional
+    else if a.conditional.len() > 0 and b.conditional.len() > 0:
         evidence_index: {ResultEvidence: bool} = {}
         loop evidence in b.conditional: evidence_index[evidence] = true
         loop evidence in a.conditional:
@@ -3507,6 +3511,7 @@ fact_change_shape = (s: mut FactState, old0: int, fresh0: int, chain: int[], j0:
                 if entries and fact_truth(s, q.value) == 1: kept.push(FactProjection(fresh, q.selector, true, q.value))
                 continue
             if q.selector == selector: child = q.value
+            else if q.selector == ND_STORAGE_VALID: continue
             else if q.selector != FACT_MAP_POSITIONS and q.selector != FACT_MAP_DENSE or selector == fact_name_vals: kept.push(FactProjection(fresh, q.selector, false, q.value))
         loop q in kept:
             if s.projections.len() < FACT_CAP: fact_add_projection(s, q)
@@ -3693,8 +3698,14 @@ fact_condition = (n: int, entry: FactState) -> FactPaths:
         a = fact_condition(int(nodes[n].a), entry)
         b = fact_condition(int(nodes[n].b), if k == .and_: a.yes else: a.no)
         reason = if a.yes.live and a.no.live: a.reason else: b.reason
-        if k == .and_: return FactPaths(b.yes, fact_join(a.no, b.no, n), reason)
-        return FactPaths(fact_join(a.yes, b.yes, n), b.no, reason)
+        if k == .and_:
+            no = fact_join(a.no, b.no, n)
+            # (`not (a and b)`: each side's refutation implies the other's)
+            if fact_either_wanted & 2 != 0 and a.no.live and b.no.live and a.value != 0 and b.value != 0: fact_either(no, a.value, a.no, false, b.value, b.no, false)
+            return FactPaths(b.yes, no, reason)
+        yes = fact_join(a.yes, b.yes, n)
+        if fact_either_wanted & 1 != 0 and a.yes.live and b.yes.live and a.value != 0 and b.value != 0: fact_either(yes, a.value, a.yes, true, b.value, b.yes, true)
+        return FactPaths(yes, b.no, reason)
     # (a comparison chain holding an operand in a temporary, `-1 <=? i <? n`:
     # `{let $chain1 = -1; $chain1 <=? i and i <? n}` declares, then tests as
     # its last expression does; the temporaries leave scope on both paths.
@@ -3716,8 +3727,8 @@ fact_condition = (n: int, entry: FactState) -> FactPaths:
     fact_assume(yes, v, true)
     fact_assume(no, v, false)
     if yes.conditional.len() > 0:
-        result_activate(yes)
-        result_activate(no)
+        result_activate(yes, v)
+        result_activate(no, v)
     FactPaths(yes, no, reason, v, entry_state)
 
 # A block of local declarations ending in its value: a condition's temporaries.
@@ -3727,6 +3738,130 @@ fact_condition_block = (n: int) -> bool:
         c = kid(n, i)
         if nodes[c].kind != .vardecl or has_flag(c, NF_GLOBAL) or nkids(c) != 0: return false
     true
+
+# After a join of two leaf conditions' paths, `x is x_truth or y is
+# y_truth` holds (`if a and b return` leaves `not a or not b`; y's operands
+# may be read under x's outcome, as y was evaluated there). Each side's
+# refutation implying the other is conditional evidence (tag -2) that
+# result_activate applies once the state entails its antecedent: a later
+# guard, or a case split (fact_split_entails). At most two records per join,
+# only for leaf comparisons of integer values present after the join or
+# constants. O(1) each.
+fact_either = (s: mut FactState, x: int, xs: mut FactState, x_truth: bool, y: int, ys: mut FactState, y_truth: bool):
+    # (a loop's speculative rounds go without: its header keeps those of entry)
+    if not s.live or fact_speculating != 0 or s.conditional.len() + 2 > 32: return
+    held = 0
+    loop evidence in s.conditional: held += int(evidence.tag == -2)
+    if held + 2 > 8: return
+    p = fact_leaf_literal(s, x, xs, x_truth)
+    if p.0 == .eof: return
+    q = fact_leaf_literal(s, y, ys, y_truth)
+    if q.0 == .eof: return
+    # (not p implies q, not q implies p)
+    fact_implication(s, (fact_inverse(p.0), p.1, p.2, p.3, p.4), q)
+    fact_implication(s, (fact_inverse(q.0), q.1, q.2, q.3, q.4), p)
+
+# Leaf v (captured in state vs) at truth as (op, left kind, left, right
+# kind, right): kind 0 a value present in s, kind 1 a constant; op eof when
+# it has no such form.
+fact_leaf_literal = (s: mut FactState, v: int, vs: mut FactState, truth: bool) -> (Tok, int, int, int, int):
+    blank = (Tok.eof, 0, 0, 0, 0)
+    t = fact_terms[v]
+    op = Tok.eq
+    a = v; b = int(truth)
+    kb = 1
+    if fact_comparison(t.op) and t.a != 0 and t.b != 0:
+        op = if truth: t.op else: fact_inverse(t.op)
+        a = t.a; b = t.b; kb = 0
+    else if t.op != .eof or t.type != 0 and fact_type(t.type) != T_BOOL: return blank
+    ka = 0
+    if fact_type(fact_terms[a].type) == T_U64 or kb == 0 and fact_type(fact_terms[b].type) == T_U64: return blank
+    a = fact_leaf_operand(s, a, vs)
+    if kb == 0: b = fact_leaf_operand(s, b, vs)
+    if fact_slot(s, a) < 0:
+        x = fact_bound(vs, a)
+        if x.wide or x.lo != x.hi: return blank
+        ka = 1; a = x.lo
+    if kb == 0 and fact_slot(s, b) < 0:
+        y = fact_bound(vs, b)
+        if y.wide or y.lo != y.hi: return blank
+        kb = 1; b = y.lo
+    # (two constants: decided where it was evaluated, so it says nothing more)
+    if ka == 1 and kb == 1: return blank
+    (op, ka, a, kb, b)
+
+# An operand evaluated on one path that names a field of a value present
+# after the join (`q =? 0` tests q's numerator) names that field there too.
+# O(1) indexed lookups.
+fact_leaf_operand = (s: mut FactState, x: int, vs: FactState) -> int:
+    if fact_slot(s, x) >= 0: return x
+    pi = fact_projection_origin(vs, x)
+    if pi < 0: return x
+    p = vs.projections[pi]
+    if p.element or fact_slot(s, p.base) < 0 or s.projections.len() >= FACT_CAP: return x
+    fact_project(s, p.base, p.selector, false, fact_terms[x].type)
+
+# Implication records, append-only: a state's evidence names one by index
+# (ResultEvidence tag -2, base = index + 1), so copying a state copies no
+# arrays. The antecedent is (op0, a0, b0), the consequent (op1, a1, b1); an
+# operand is a value, or a constant when its kind bit (k: 1 a0, 2 b0, 4 a1,
+# 8 b1) is set.
+struct FactImplication:
+    op0: Tok
+    a0: int
+    b0: int
+    op1: Tok
+    a1: int
+    b1: int
+    k: int
+
+fact_implications: FactImplication[]
+fact_either_wanted = 0   # (an if's condition: 1 its `or` paths, 2 its `and` refutations)
+
+fact_implication = (s: mut FactState, ante: (Tok, int, int, int, int), then: (Tok, int, int, int, int)):
+    fact_implications.push(FactImplication(ante.0, ante.2, ante.4, then.0, then.2, then.4, ante.1 | (ante.3 << 1) | (then.1 << 2) | (then.3 << 3)))
+    # (result names a value it reads, which compaction then keeps)
+    s.conditional.push(ResultEvidence((if ante.1 == 0: ante.2 else: ante.4), -2, 0, [], [], 0, fact_implications.len()))
+
+# Whether implication e's antecedent (part 0) or consequent (part 1) holds
+# in s, allocating nothing: intervals against a constant, else fact_compare.
+# O(1) or one bounded relation query.
+fact_implied = (s: FactState, e: ResultEvidence, part: int) -> bool:
+    r = fact_implications[e.base - 1]
+    op = if part == 0: r.op0 else: r.op1
+    x = if part == 0: r.a0 else: r.a1
+    y = if part == 0: r.b0 else: r.b1
+    kx = (r.k >> (part * 2)) & 1
+    ky = (r.k >> (part * 2 + 1)) & 1
+    if kx == 0 and ky == 0: return fact_compare(s, op, x, y) == 1
+    v = x; c = y
+    if kx == 1:
+        v = y; c = x
+        op = if op == .lt: Tok.gt else if op == .le: Tok.ge else if op == .gt: Tok.lt else if op == .ge: Tok.le else: op
+    b = fact_bound(s, v)
+    if b.wide: return false
+    if op == .lt: return b.hi < c
+    if op == .le: return b.hi <= c
+    if op == .gt: return b.lo > c
+    if op == .ge: return b.lo >= c
+    if op == .eq: return b.lo == c and b.hi == c
+    if op == .ne: return b.hi < c or b.lo > c or c == 0 and b.nz
+    false
+
+# Whether leaf condition v tests a value implication e's antecedent reads.
+fact_implication_reads = (e: ResultEvidence, v: int) -> bool:
+    r = fact_implications[e.base - 1]
+    t = fact_terms[v]
+    loop x in [v, t.a, t.b]:
+        if x != 0 and (r.k & 1 == 0 and r.a0 == x or r.k & 2 == 0 and r.b0 == x): return true
+    false
+
+# Assume implication e's consequent in s.
+fact_imply = (s: mut FactState, e: ResultEvidence):
+    r = fact_implications[e.base - 1]
+    a = if r.k & 4 == 0: r.a1 else: fact_constant(s, r.a1)
+    b = if r.k & 8 == 0: r.b1 else: fact_constant(s, r.b1)
+    fact_assume(s, fact_new(s, fact_domain(T_BOOL), FactTerm(r.op1, a, b)), true)
 
 # Assume an optional's or union's tag is (or is not) wanted.
 fact_tag = (s: mut FactState, value: int, wanted: int, truth: bool):
@@ -3890,7 +4025,11 @@ fact_arithmetic = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
                 lo = c.lo - r.limit; low = true
     if not low or not high:
         if exact_has_node(n) or n == fact_sum_operand and fact_type(ntype(n)) == T_MATH_INT and fact_host_finite(s, a) and fact_host_finite(s, b) or n < exact_marks.len() and exact_marks[n] & 32 != 0: return fact_new(s, FactBound(lo, hi, lo > 0 or hi < 0, wide = true), FactTerm(op, a, b, n, ntype(n)))
-        return fact_unmodeled(s, n, .unsupported)
+        # (an `int` end beyond the host word is open, not unknown: a counter
+        # at most int64's MAX plus one keeps its lower bound)
+        if fact_type(ntype(n)) != T_MATH_INT or not low and not high: return fact_unmodeled(s, n, .unsupported)
+        if not low: lo = FACT_MIN; lo_open = true
+        if not high: hi = FACT_MAX; hi_open = true
     if not exact_has_node(n) and (not sa_fits(lo, ntype(n)) or not sa_fits(hi, ntype(n))): return fact_unmodeled(s, n, .unsupported)
     # (`i+2` again names the value the last `i+2` made: a scanner's reads
     # `b[i] b[i+1] b[i+2]` and its guard `i+2 <? n` share rows instead of
@@ -4312,7 +4451,25 @@ fact_power_check = (n: int, s: mut FactState, exponent: int, base: int):
         if b.nz or b.lo > 0 or b.hi < 0:
             if fact_speculating == 0 and fact_probe_on: fact_probe_record(n, true)
             return
+    # (`if n <? 0 and q =? 0 return`: a case split on the base, whose zero
+    # case the refuted conjunction gives a nonnegative exponent. One state
+    # copy, only with an implication present: fact_either)
+    if base != 0 and fact_power_rational(n) and fact_holds_implication(s):
+        split = s
+        numerator = fact_project(split, base, intern("numerator"), false, T_MATH_INT)
+        nothing = fact_constant(split, 0)
+        fact_assume(split, fact_new(split, fact_domain(T_BOOL), FactTerm(.eq, numerator, nothing)), true)
+        result_activate(split)
+        zero = fact_constant(split, 0)
+        if not split.live or fact_compare(split, .ge, exponent, zero) == 1:
+            if fact_speculating == 0 and fact_probe_on: fact_probe_record(n, true)
+            return
     fact_nonnegative(n, s, exponent, kid(n, 1), "the exponent")
+
+fact_holds_implication = (s: FactState) -> bool:
+    loop evidence in s.conditional:
+        if evidence.tag == -2: return true
+    false
 
 fact_power_rational = (n: int) -> bool:
     t = prune(representation_type(ntype(kid(n, 0))))
@@ -5584,7 +5741,11 @@ fact_loop_header = (entry: mut FactState, back: FactState, old: FactState, at: i
     s.live = entry.live or back.live
     s.full = false
     s.bindings = []
-    s.conditional = []
+    # (implications between immutable values hold on every iteration)
+    kept: ResultEvidence[]
+    loop evidence in entry.conditional:
+        if evidence.tag == -2 and (not back.live or evidence in back.conditional): kept.push(evidence)
+    s.conditional = kept
     s.index[0].roots = []
     loop binding in source.bindings:
         v = binding.value
@@ -5764,17 +5925,52 @@ fact_loop_shape = (s: mut FactState, a: FactState, b: FactState, x: int, y: int,
         if fact_slot(s, p.value) < 0 or p.element and fact_slot(s, p.selector) < 0: continue
         if p.element and pool and fact_bound(a, p.value).lo < 1: continue
         qi = fact_projection_find(b, y, p.selector, p.element)
+        if qi < 0 and p.element and b.live: qi = fact_projection_constant(a, b, y, p.selector)
         if b.live and qi < 0: continue
         other = if qi >= 0: b.projections[qi].value else: p.value
         v = p.value
         if v != other:
             t = fact_terms[v].type
-            if t == 0 or fact_scalar(t) or fact_terms[other].type != t or p.element and pool: continue
-            v = fact_new(s, fact_domain(t), FactTerm(type = t))
+            if p.element and pool: continue
+            if (t == 0 or fact_scalar(t)) and (fact_terms[other].type == 0 or fact_scalar(fact_terms[other].type)):
+                # (a changed scalar both edges hold at one constant, as a
+                # shape's extent or a data length: that constant; any other
+                # changed scalar is dropped, so this settles at once)
+                x0 = fact_bound(a, p.value); y0 = fact_bound(b, other)
+                # (or the backedge's value equals entry's immutable one, as a
+                # shape binder's extent passed through: that identity)
+                if b.live and fact_slot(b, p.value) >= 0 and fact_entails(b, other, p.value, 0) and fact_entails(b, p.value, other, 0): v = p.value
+                else if x0.wide or y0.wide or x0.lo != x0.hi or y0.lo != x0.lo or y0.hi != x0.hi: continue
+                else: v = fact_new(s, FactBound(x0.lo, x0.hi, x0.nz), FactTerm(type = t))
+            else:
+                if t == 0 or fact_scalar(t) or fact_terms[other].type != t: continue
+                v = fact_new(s, fact_domain(t), FactTerm(type = t))
+                if v == 0: return
+                fact_loop_shape(s, a, b, p.value, other, v, steps, depth + 1)
+                if fact_projection_first(s, v) < 0: continue
             if v == 0: return
-            fact_loop_shape(s, a, b, p.value, other, v, steps, depth + 1)
-            if fact_projection_first(s, v) < 0: continue
         if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(into, p.selector, p.element, v))
+    # (an N-D value whose data both edges know matches its shape keeps that
+    # marker on the header value itself: the pair it is keyed by is fresh)
+    if is_nd(representation_type(fact_terms[into].type)) and s.projections.len() < FACT_CAP and fact_nd_valid_held(a, x) and (not b.live or fact_nd_valid_held(b, y)):
+        fact_add_projection(s, FactProjection(into, ND_STORAGE_VALID, false, fact_new(s, FactBound(1, 1, true), FactTerm(type = T_INT))))
+
+# The element projection of y in b whose selector is the same constant as
+# selector in a (each edge evaluates its own `0` for an axis), or -1.
+# O(projections of y), at most FACT_PROJECTION_SCAN.
+fact_projection_constant = (a: FactState, b: FactState, y: int, selector: int) -> int:
+    k = fact_bound(a, selector)
+    if k.wide or k.lo != k.hi: return -1
+    qi = fact_projection_first(b, y)
+    scanned = 0
+    loop qi >= 0 and scanned < FACT_PROJECTION_SCAN:
+        q = b.projections[qi]
+        if q.element:
+            c = fact_bound(b, q.selector)
+            if not c.wide and c.lo == k.lo and c.hi == k.hi: return qi
+        qi = fact_projection_after(b, qi)
+        scanned += 1
+    -1
 
 # Rows v - o <= d (upper) or o - v <= d from back's paths out of changing v to
 # values entry holds (or materializes) that do not change, beyond direct rows.
@@ -5834,7 +6030,9 @@ fact_same_shape = (a: FactState, b: FactState, x: int, y: int, steps: mut int, d
         other = b.projections[qi].value
         if p.value != other:
             t = fact_terms[p.value].type
-            if t == 0 or fact_scalar(t) or fact_terms[other].type != t or fact_bound(a, p.value) != fact_bound(b, other): return false
+            if fact_terms[other].type != t or fact_bound(a, p.value) != fact_bound(b, other): return false
+            if t == 0 and fact_projection_first(a, p.value) >= 0: return false
+            # (fresh header scalars agree when their bounds and skeletons do)
             if not fact_same_shape(a, b, p.value, other, steps, depth + 1): return false
     qi = fact_projection_first(b, y)
     loop qi >= 0:
@@ -8015,7 +8213,12 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         fact_store_route(s, route, r, n, op == .assign)
         return r
     if k == .if_:
+        # (a refuted conjunction continues only past a branch that leaves, or
+        # into an else: fact_either)
+        outer_either = fact_either_wanted
+        fact_either_wanted = 1 | (if nodes[n].c != 0 or ff_diverges(int(nodes[n].b)): 2 else: 0)
         paths = fact_condition(int(nodes[n].a), s)
+        fact_either_wanted = outer_either
         y = fact_capture(int(nodes[n].b), paths.yes)
         z = fact_capture(int(nodes[n].c), paths.no)
         # Allocate the shared result only after its operands finish: a long
@@ -8260,6 +8463,15 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             fits = sa_fits(b.lo, ntype(n)) and sa_fits(b.hi, ntype(n))
             if fits: return a
             return fact_unmodeled(s, n, .unsupported)
+        # (a float truncated to an integer: within the truncated ends of the
+        # range the float walk finds for it, as the conversion fails outside
+        # the target and for NaN. O(1) after one memoized walk of the owner)
+        if nodes[n].aux == i32(int(CV.float2int)) and fact_scalar(ntype(n)) and is_int(to) and to != T_U64:
+            if let r = ff_conversion_operand(fact_owner, n):
+                if r.lo > -9.0e18 and r.hi < 9.0e18 and r.lo <= r.hi:
+                    domain = fact_domain(to)
+                    lo = max(int(r.lo), domain.lo); hi = min(int(r.hi), domain.hi)
+                    if lo <= hi: return fact_new(s, FactBound(lo, hi, lo > 0 or hi < 0), FactTerm(type = ntype(n)))
         if not fact_pure_conversion(n): fact_forget(s, n, .call)
         return fact_new(s, FactBound(reason = .unsupported, witness = n))
     if k == .intrinsic:
