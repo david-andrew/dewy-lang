@@ -1,0 +1,5 @@
+take=(m:array<int length=[r c]> step:int64<(>? 0)>):>NDArray<int>=>m[[0,step..r) [..]]
+main=()=>{
+ let m=[1 2 ; 3 4 ; 5 6]
+ printl(take(m 2).data)
+}

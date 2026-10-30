@@ -56,7 +56,7 @@ fact_nd_range = (n: int, s: mut FactState, actuals: int[], extent: int, kind: in
     if actuals.len() != (if kind == 11: 7 else: 5): return FactNDAxis()
     stepped = fact_bound(s, actuals[if kind == 11: 5 else: 3])
     if stepped.wide or stepped.lo != stepped.hi: return FactNDAxis()
-    if stepped.lo != 0: return fact_nd_stepped(s, actuals, extent, kind)
+    if stepped.lo != 0: return fact_nd_stepped(n, s, actuals, extent, kind)
     if kind == 11:
         exclusive = fact_bound(s, actuals[6])
         if exclusive.wide or exclusive.lo != 0 or exclusive.hi != 0: return FactNDAxis()
@@ -73,48 +73,79 @@ fact_nd_range = (n: int, s: mut FactState, actuals: int[], extent: int, kind: in
             stop = fact_arithmetic(s, origin, .plus, stop, fact_constant(s, 1))
     FactNDAxis(actuals[0], stop, true, true)
 
-# Exact stepped selectors: O(1), demanded only by a selection. Normalize to
-# visited extrema and count, not written endpoints. Reject signed-overflow
-# arithmetic before doing it; the library can represent wider unsigned spans.
-fact_nd_stepped = (s: mut FactState, actuals: int[], extent: int, kind: int) -> FactNDAxis:
+# Constant stepped selectors use unsigned distances, just like IntRange.
+# Every signed endpoint pair fits that span, including a stride above 2^63.
+# Convert only visited endpoints back to signed words; decline counts > INT64_MAX.
+# O(1), requested only at a selection.
+fact_nd_stepped = (n: int, s: mut FactState, actuals: int[], extent: int, kind: int) -> FactNDAxis:
     first = fact_bound(s, actuals[0])
     second = fact_bound(s, actuals[1])
     inclusive = fact_bound(s, actuals[if kind == 11: 3 else: 4])
     bounded = if kind == 11: fact_bound(s, actuals[4]) else: FactBound(1, 1)
     tail = if kind == 11: fact_bound(s, actuals[6]) else: FactBound(0, 0)
-    if first.wide or first.lo != first.hi or second.wide or second.lo != second.hi or inclusive.wide or inclusive.lo != inclusive.hi or bounded.wide or bounded.lo != bounded.hi or tail.wide or tail.lo != tail.hi: return FactNDAxis()
-    if first.lo == FACT_MIN or not fact_add_fits(second.lo, -first.lo): return FactNDAxis()
-    step = second.lo - first.lo
-    if step == 0 or step == FACT_MIN: return FactNDAxis()
+    if inclusive.wide or inclusive.lo != inclusive.hi or bounded.wide or bounded.lo != bounded.hi or tail.wide or tail.lo != tail.hi: return FactNDAxis()
+    if first.wide or first.lo != first.hi or second.wide or second.lo != second.hi: return fact_nd_symbolic_step(n, s, actuals, extent, kind)
+    if first.lo == second.lo: return FactNDAxis()
+    up = second.lo > first.lo
+    stride = if up: u64(second.lo) - u64(first.lo) else: u64(first.lo) - u64(second.lo)
     last = fact_bound(s, actuals[2])
     if bounded.lo == 0:
-        if step < 0: last = FactBound(0, 0)
+        if not up: last = FactBound(0, 0)
         else:
             last = fact_bound(s, extent)
-            if last.wide or last.lo != last.hi or last.lo == FACT_MIN: return FactNDAxis()
+            if last.wide or last.lo != last.hi: return fact_nd_symbolic_step(n, s, actuals, extent, kind)
+            if last.lo == FACT_MIN: return FactNDAxis()
             last = FactBound(last.lo - 1, last.lo - 1)
         inclusive = FactBound(1, 1)
-    if last.wide or last.lo != last.hi: return FactNDAxis()
+    if last.wide or last.lo != last.hi: return fact_nd_symbolic_step(n, s, actuals, extent, kind)
     count = 0
     start = first.lo
     end = start
-    empty = if step > 0: start > last.lo else: start < last.lo
+    empty = if up: start > last.lo else: start < last.lo
     if start == last.lo and inclusive.lo == 0: empty = true
     if not empty:
-        if last.lo == FACT_MIN or not fact_add_fits(start, -last.lo) or not fact_add_fits(last.lo, -start): return FactNDAxis()
-        distance = if step > 0: last.lo - start else: start - last.lo
-        if distance < 0: return FactNDAxis()
+        distance = if up: u64(last.lo) - u64(start) else: u64(start) - u64(last.lo)
         if inclusive.lo == 0: distance -= 1
-        stride = abs(step)
         quotient = distance / stride
-        if quotient == FACT_MAX: return FactNDAxis()
-        count = quotient + 1
-        # quotient * stride <= distance, and end lies between the endpoints.
-        end = if step > 0: start + quotient * stride else: start - quotient * stride
+        # A full-width count can wrap to zero in IntRange. Never publish it
+        # as an empty selector, nor narrow a count that does not fit.
+        if quotient >= u64(FACT_MAX): return FactNDAxis()
+        count = int(quotient) + 1
+        end = int(if up: u64(start) + quotient * stride else: u64(start) - quotient * stride)
         if tail.lo != 0:
             count -= 1
-            if count > 0: start += step
+            if count > 0: start = int(if up: u64(start) + stride else: u64(start) - stride)
     FactNDAxis(fact_constant(s, min(start, end)), fact_constant(s, max(start, end)), true, true, fact_constant(s, count))
+
+# A symbolic monotone selector visits a subset of its endpoint interval.
+# Keep that conservative hull and an unknown count; no divisibility or exact
+# replacement-count claim. Value comparisons use the existing indexed facts.
+fact_nd_symbolic_step = (n: int, s: mut FactState, actuals: int[], extent: int, kind: int) -> FactNDAxis:
+    first = actuals[0]
+    second = actuals[1]
+    up = fact_compare(s, .lt, first, second) == 1
+    down = fact_compare(s, .gt, first, second) == 1
+    if not up and not down: return FactNDAxis()
+    inclusive = fact_bound(s, actuals[if kind == 11: 3 else: 4])
+    bounded = if kind == 11: fact_bound(s, actuals[4]) else: FactBound(1, 1)
+    last = actuals[2]
+    # Half-open endpoints become inclusive hull bounds without overflowing
+    # signed arithmetic. Empty ranges are resolved before this adjustment.
+    if bounded.lo == 0:
+        last = if up: extent else: fact_constant(s, 0)
+        inclusive = FactBound(int(not up), int(not up))
+    empty = fact_compare(s, (if up: (if inclusive.lo != 0: Tok.gt else: Tok.ge) else: (if inclusive.lo != 0: Tok.lt else: Tok.le)), first, last) == 1
+    if empty: return FactNDAxis(first, first, true, true, fact_constant(s, 0))
+    if inclusive.lo == 0:
+        origin = bc_int(0, nodes[n].pos)
+        nodes[origin].type = i32(T_INT)
+        last = fact_arithmetic(s, origin, .plus, last, fact_constant(s, if up: -1 else: 1))
+    low = if up: first else: last
+    high = if up: last else: first
+    # The endpoints may be reversed at runtime (an empty selection). A
+    # nonnegative count is safe either way; extrema are used only as bounds.
+    count = fact_new(s, FactBound(0, FACT_MAX), FactTerm(type = T_INT))
+    FactNDAxis(low, high, true, true, count)
 
 # An inventory lists every selected index. A published element hull or fill
 # value instead represents every element, including comprehensions of unknown

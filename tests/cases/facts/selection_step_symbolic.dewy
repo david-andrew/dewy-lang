@@ -1,0 +1,10 @@
+take=(xs:array<int> step:int64<(>? 0)>):>array<int>=>xs[0,step..xs.length)
+back=(xs:array<int>):>array<int>=>{
+ if xs.length >? 0 {return xs[xs.length-1,xs.length-2..0]}
+ return []
+}
+main=()=>{
+ printl(take([10 20 30 40 50] 2))
+ printl(take([] 2))
+ printl(back([10 20 30]))
+}
