@@ -1,0 +1,98 @@
+$runtime_checks
+from p"node_store.dewy" import Node
+from p"checker_types.dewy" import (TypeInfo TK)
+from p"type_inference.dewy" import tu_prune
+from p"type_constructors.dewy" import tb_mk_typeval
+from p"checker_resolve.dewy" import ct_resolve_type
+# `f<T>` and `Type<T>` own their reading: a generic function's value or bare call,
+# a generic callable's instance, else a type value. Work is O(type arguments)
+# plus the demanded lookup, checking and instantiation; host calls may reenter
+# and grow every arena, so nodes are reread by ID.
+XAWord:type=int64<overflow='wrap'>
+CheckerTypeApplyHost:type=[
+    check:<(node:int64 expected:int64):>int64>
+    lookup:<(name:int64 module:int64 @kind:int64):>int64>
+    bare:<(node:int64 callee:bool):>bool>
+    bare_calls:<(name:int64 module:int64):>int64>
+    bare_call:<(node:int64 expected:int64):>int64>
+    generic_arg:<(node:int64):>int64>
+    fn_value:<(node:int64 expected:int64 targs:array<int64> module:int64 closure:int64):>int64>
+    reference:<(pos:int64 name:int64 symbol:int64):>void>
+    error:<(node:int64 name:int64 code:int64):>void>
+]
+CheckerTypeApplyInput:type=[
+    nodes:ptr<array<Node>>
+    lists:ptr<array<int32>>
+    types:ptr<array<TypeInfo>>
+    callee:ptr<int64>
+    ide:ptr<bool>
+    host:ptr<CheckerTypeApplyHost>
+]
+let xa_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let xa_lists:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
+let xa_types:ptr<array<TypeInfo>>=$unsafe (uint64(0) as ptr<array<TypeInfo>>)
+let xa_callee:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xa_ide:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+let xa_host:ptr<CheckerTypeApplyHost>=$unsafe (uint64(0) as ptr<CheckerTypeApplyHost>)
+checker_type_apply_bind=(input:ptr<CheckerTypeApplyInput>):>XAWord=>$unsafe {
+    xa_nodes=input[0].nodes
+    xa_lists=input[0].lists
+    xa_types=input[0].types
+    xa_callee=input[0].callee
+    xa_ide=input[0].ide
+    xa_host=input[0].host
+    0
+}
+xa_fn_type=(t:XAWord):>bool=>$unsafe {
+    let k=xa_types[0].ptr[tu_prune(t)].kind
+    k =? 'fn_' or k =? 'cfn' or k =? 'polyfn' or k =? 'callable'
+}
+# The written type arguments, as effect-aware generic arguments.
+xa_targs=(n:XAWord):>array<int64>=>$unsafe {
+    let out:array<int64>=[]
+    loop i in [0..XAWord(xa_nodes[0].ptr[n].nlist)) {
+        out.push(xa_host[0].generic_arg(XAWord(xa_lists[0][XAWord(xa_nodes[0].ptr[n].list) + i])))
+    }
+    out
+}
+# A bypass returns directly: a bare call already published its result.
+CheckerTypeApplyResult:type=[type:int64 bypass:bool]
+xa_check=(n:XAWord expected:XAWord ex:XAWord):>CheckerTypeApplyResult=>$unsafe {
+    let is_callee=n =? xa_callee[0]
+    let base=XAWord(xa_nodes[0].ptr[n].a)
+    let name=XAWord(xa_nodes[0].ptr[base].name)
+    let s:XAWord=0
+    let kind:int64=0
+    let mod:XAWord=-1
+    if xa_nodes[0].ptr[base].kind =? 'ident' {s=xa_host[0].lookup(name -1 @kind)}
+    else if xa_nodes[0].ptr[base].kind =? 'field' {
+        let mt=tu_prune(xa_host[0].check(XAWord(xa_nodes[0].ptr[base].a) 0))
+        if xa_types[0].ptr[mt].kind =? 'module' {
+            mod=XAWord(xa_types[0].ptr[mt].mod)
+            s=xa_host[0].lookup(name mod @kind)
+        }
+    }
+    # Symbol kinds follow the frozen SK ordinals: local 1, global 2, functions 3.
+    if s not=? 0 and kind =? 3 {
+        if xa_host[0].bare(n is_callee) {
+            let calls=xa_host[0].bare_calls(name mod)
+            let wants_fn=expected not=? 0 and xa_fn_type(ex)
+            if (wants_fn and calls not=? 2) or calls =? 0 {xa_host[0].error(n name if calls =? 0 and not wants_fn {1} else {2})}
+            return [type=xa_host[0].bare_call(n expected) bypass=true]
+        }
+        let targs=xa_targs(n)
+        xa_nodes[0][n].name=int32<overflow='wrap'>(name)
+        let t=xa_host[0].fn_value(n expected targs mod 0)
+        if xa_ide[0] {xa_host[0].reference(xa_nodes[0].ptr[base].pos name XAWord(xa_nodes[0].ptr[n].sym))}
+        return [type=t bypass=false]
+    }
+    if (s not=? 0 and (kind =? 1 or kind =? 2)) or (xa_nodes[0].ptr[base].kind not=? 'ident' and mod <? 0) {
+        if s not=? 0 and xa_host[0].bare(n is_callee) {xa_host[0].error(n name 3)}
+        xa_callee[0]=base
+        xa_host[0].check(base 0);
+        if xa_types[0].ptr[tu_prune(XAWord(xa_nodes[0].ptr[base].type))].kind not=? 'polyfn' {xa_host[0].error(n name 4)}
+        let targs=xa_targs(n)
+        return [type=xa_host[0].fn_value(n expected targs -1 base) bypass=false]
+    }
+    [type=tb_mk_typeval(ct_resolve_type(XAWord(xa_nodes[0].ptr[n].c))) bypass=false]
+}

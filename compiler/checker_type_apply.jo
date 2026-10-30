@@ -1,0 +1,81 @@
+# Frozen `f<T>` / `Type<T>` checker extracted from expr.jo.
+use 'node_store.dewy'
+use 'checker_types.dewy'
+use 'type_inference.dewy'
+use 'type_constructors.dewy'
+use 'checker_resolve.dewy'
+struct CheckerTypeApplyHost:
+    check: (int, int) -> int
+    lookup: (int, int, mut int) -> int
+    bare: (int, bool) -> bool
+    bare_calls: (int, int) -> int
+    bare_call: (int, int) -> int
+    generic_arg: (int) -> int
+    fn_value: (int, int, int[], int, int) -> int
+    reference: (int, int, int) -> void
+    error: (int, int, int) -> void
+struct CheckerTypeApplyInput:
+    nodes: *(Node[])
+    lists: *(i32[])
+    types: *(TypeInfo[])
+    callee: *int
+    ide: *bool
+    host: *CheckerTypeApplyHost
+xa_nodes: *(Node[])
+xa_lists: *(i32[])
+xa_types: *(TypeInfo[])
+xa_callee: *int
+xa_ide: *bool
+xa_host: *CheckerTypeApplyHost
+checker_type_apply_bind = (input: *CheckerTypeApplyInput) -> int:
+    xa_nodes = input[0].nodes
+    xa_lists = input[0].lists
+    xa_types = input[0].types
+    xa_callee = input[0].callee
+    xa_ide = input[0].ide
+    xa_host = input[0].host
+    0
+xa_fn_type = (t: int) -> bool:
+    k = xa_types[0][tu_prune(t)].kind
+    k == .fn_ or k == .cfn or k == .polyfn or k == .callable
+xa_targs = (n: int) -> int[]:
+    out: int[]
+    loop i in [0..int(xa_nodes[0][n].nlist)): out.push(xa_host[0].generic_arg(int(xa_lists[0][int(xa_nodes[0][n].list) + i])))
+    out
+struct CheckerTypeApplyResult:
+    type: int
+    bypass: bool
+xa_check = (n: int, expected: int, ex: int) -> CheckerTypeApplyResult:
+    is_callee = n == xa_callee[0]
+    base = int(xa_nodes[0][n].a)
+    name = int(xa_nodes[0][base].name)
+    s = 0
+    kind = 0
+    mod = -1
+    if xa_nodes[0][base].kind == .ident: s = xa_host[0].lookup(name, -1, mut kind)
+    else if xa_nodes[0][base].kind == .field:
+        mt = int(tu_prune(xa_host[0].check(int(xa_nodes[0][base].a), 0)))
+        if xa_types[0][mt].kind == .module:
+            mod = int(xa_types[0][mt].mod)
+            s = xa_host[0].lookup(name, mod, mut kind)
+    if s != 0 and kind == 3:
+        if xa_host[0].bare(n, is_callee):
+            calls = xa_host[0].bare_calls(name, mod)
+            wants_fn = expected != 0 and xa_fn_type(ex)
+            code = 2
+            if calls == 0 and not wants_fn: code = 1
+            if (wants_fn and calls != 2) or calls == 0: xa_host[0].error(n, name, code)
+            return CheckerTypeApplyResult(xa_host[0].bare_call(n, expected), true)
+        targs = xa_targs(n)
+        xa_nodes[0][n].name = i32(name)
+        t = xa_host[0].fn_value(n, expected, targs, mod, 0)
+        if xa_ide[0]: xa_host[0].reference(xa_nodes[0][base].pos, name, int(xa_nodes[0][n].sym))
+        return CheckerTypeApplyResult(t, false)
+    if (s != 0 and (kind == 1 or kind == 2)) or (xa_nodes[0][base].kind != .ident and mod < 0):
+        if s != 0 and xa_host[0].bare(n, is_callee): xa_host[0].error(n, name, 3)
+        xa_callee[0] = base
+        xa_host[0].check(base, 0)
+        if xa_types[0][int(tu_prune(int(xa_nodes[0][base].type)))].kind != .polyfn: xa_host[0].error(n, name, 4)
+        targs = xa_targs(n)
+        return CheckerTypeApplyResult(xa_host[0].fn_value(n, expected, targs, -1, base), false)
+    CheckerTypeApplyResult(int(tb_mk_typeval(ct_resolve_type(int(xa_nodes[0][n].c)))), false)

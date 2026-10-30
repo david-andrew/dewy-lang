@@ -1,3 +1,4 @@
+use 'checker_type_apply.dewy'
 use 'checker_conditionals.dewy'
 use 'checker_type_tests.dewy'
 use 'checker_variants.dewy'
@@ -10677,36 +10678,9 @@ check_expr_other = (n: int, expected: int) -> int:
         return quantity_constant(n, nodes[n].ival, int(nodes[n].aux), int(nodes[n].aux2), expected)
     if k == .dotname: t = xv_check(n, ex)
     else if k == .typeapply:
-        is_callee = n == callee_at
-        base = int(nodes[n].a)
-        name = int(nodes[base].name)
-        s = 0
-        mod = -1
-        if nodes[base].kind == .ident: s = lookup(name)
-        else if nodes[base].kind == .field:
-            mt = prune(check_expr(int(nodes[base].a), 0))
-            if types[mt].kind == .module:
-                mod = int(types[mt].mod)
-                s = module_lookup(mod, name)
-        if s != 0 and syms[s].kind == .fns and dewy_bare_fn(n, is_callee):
-            calls = bare_fns_call(name, mod)
-            if (expected != 0 and is_fn_type(ex) and calls != 2) or calls == 0: bare_fn_error(n, "{name_of(name)}<...>", calls == 0 and not (expected != 0 and is_fn_type(ex)))
-            return bare_call(n, expected)
-        if s != 0 and syms[s].kind == .fns:
-            targs: int[]
-            loop arg in kids(n): targs.push(effect_generic_argument(arg))
-            nodes[n].name = i32(name)
-            t = fn_value(n, expected, targs, mod)
-            if ide_on: ide_fn_ref(nodes[base].pos, name, int(nodes[n].sym))
-        else if (s != 0 and (syms[s].kind == .local or syms[s].kind == .global)) or (nodes[base].kind != .ident and mod < 0):
-            if s != 0 and dewy_bare_fn(n, is_callee): fatal(nodes[n].pos, "'{name_of(name)}<...>' needs arguments: call it, or write `@{name_of(name)}<...>` for the function itself")
-            callee_at = base
-            check_expr(base, 0)
-            if tkind(ntype(base)) != .polyfn: fatal(nodes[n].pos, "type arguments require a generic callable")
-            targs: int[]
-            loop arg in kids(n): targs.push(effect_generic_argument(arg))
-            t = fn_value(n, expected, targs, closure = base)
-        else: t = mk_typeval(resolve_type(int(nodes[n].c)))
+        result = xa_check(n, expected, ex)
+        if result.bypass: return result.type
+        t = result.type
     else if k == .unary:
         result = xu_check(n, expected, ex)
         if result.bypass: return result.type
@@ -11125,6 +11099,26 @@ cond_error = (n: int, t: int, code: int) -> void:
 cond_host = CheckerConditionalHost(check_expr, check_to, coerce, finalize_literal, cond_block, cond_returned, stmt_terminates, cond_narrow, cond_reset, cond_restore, cond_merge, cond_promote, cond_fill_subject, cond_fill_end, opt_filled, union_has_void, cond_then_literal, cond_sink, cond_union, is_map_type, cond_join, narrow_optional_source, new_local, cond_error)
 cond_input = CheckerConditionalInput(&nodes, &lists, &types, &structs, &files, &locals, &check_scopes, &narrow_changes, &sink_final, &T_VOID, &T_BOOL, &T_NONE, &T_NEVER, &cond_host)
 cond_binding = checker_conditionals_bind(&cond_input)
+# `f<T>` runs in checker_type_apply.dewy; these are its services.
+apply_lookup = (name: int, mod: int, kind: mut int) -> int:
+    s = 0
+    if mod < 0: s = lookup(name)
+    else: s = module_lookup(mod, name)
+    kind = 0
+    if s != 0: kind = int(syms[s].kind)
+    s
+apply_fn_value = (n: int, expected: int, targs: int[], mod: int, closure: int) -> int: fn_value(n, expected, targs, mod, closure)
+apply_reference = (pos: int, name: int, sym: int):
+    ide_fn_ref(pos, name, sym)
+    return
+apply_error = (n: int, name: int, code: int):
+    if code == 1: bare_fn_error(n, "{name_of(name)}<...>", true)
+    if code == 2: bare_fn_error(n, "{name_of(name)}<...>", false)
+    if code == 3: fatal(nodes[n].pos, "'{name_of(name)}<...>' needs arguments: call it, or write `@{name_of(name)}<...>` for the function itself")
+    fatal(nodes[n].pos, "type arguments require a generic callable")
+apply_host = CheckerTypeApplyHost(check_expr, apply_lookup, dewy_bare_fn, bare_fns_call, bare_call, effect_generic_argument, apply_fn_value, apply_reference, apply_error)
+apply_input = CheckerTypeApplyInput(&nodes, &lists, &types, &callee_at, &ide_on, &apply_host)
+apply_binding = checker_type_apply_bind(&apply_input)
 
 # the expression a nonempty block ends in
 block_tail = (b: int) -> int:
