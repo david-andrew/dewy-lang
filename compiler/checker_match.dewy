@@ -1,0 +1,605 @@
+$runtime_checks
+from p"node_store.dewy" import (Node node_mk node_set_list)
+from p"checker_types.dewy" import (TypeInfo StructInfo Field Variant TK)
+from p"source_types.dewy" import SrcFile
+from p"checker_state.dewy" import (Local CheckerScope)
+from p"type_inference.dewy" import (tu_prune tu_equal)
+from p"type_unions.dewy" import uu_index
+from p"checker_resolve.dewy" import ct_resolve_type
+from p"intervals.dewy" import (interval_missing interval_meet_all interval_text)
+# `match` owns its arms: pattern reading (type, literal, variant, range and wildcard
+# patterns, with their bindings), unreachable arms, per-arm narrowing of the subject,
+# the arms' joined result and exhaustiveness over enums, unions, optionals, integer
+# domains and string sets. Work is O(arms * patterns + union members + interval
+# work) plus demanded checking; bodies, narrowing, domain proofs and diagnostics are
+# host services that may grow every arena, so nodes, locals and arms are reread by ID.
+XHWord:type=int64<overflow='wrap'>
+CheckerMatchHost:type=[
+    check:<(node:int64 expected:int64):>int64>
+    finalize:<(node:int64):>int64>
+    coerce:<(node:int64 type_id:int64):>int64>
+    check_to:<(node:int64 type_id:int64):>int64>
+    binding:<(name:int64 type_id:int64 pos:int64):>int64>
+    fields:<(structure:int64):>void>
+    intervals:<(type_id:int64 @domain:array<int64> @high:array<int64>):>bool>
+    path_key:<(node:int64):>string>
+    refined:<(arm:int64 domain:array<int64> type_id:int64 high:array<int64>):>void>
+    string_patterns:<(arm:int64 type_id:int64 covered:array<string> literals:array<string>):>void>
+    ident:<(local:int64 pos:int64):>int64>
+    bare_warning:<(pos:int64 name:int64):>void>
+    catch_all:<(local:int64 type_id:int64 seen:array<bool> finite:int64 members:array<int64> pos:int64):>int64>
+    family_part:<(type_id:int64 union:int64):>int64>
+    within:<(first:int64 second:int64):>bool>
+    target:<(node:int64 type_id:int64 union:int64):>int64>
+    literal_seen:<(pattern:int64 node:int64 member:int64 type_id:int64 @literals:array<string> @seen:array<bool>):>void>
+    wrap_union:<(node:int64 type_id:int64):>void>
+    union_part:<(node:int64 union:int64 keep:array<int64> pos:int64):>int64>
+    none_name:<():>int64>
+    narrow_local:<(local:int64 members:array<int64> pos:int64):>void>
+    opt_wild:<(local:int64 type_id:int64 members:array<int64> none_seen:bool pos:int64):>void>
+    opt_wild_path:<(node:int64 key:string type_id:int64 members:array<int64> none_seen:bool pos:int64):>void>
+    narrow_path:<(node:int64 members:array<int64> pos:int64 key:string):>void>
+    block:<(node:int64 expected:int64 value:bool @jumps:int64):>int64>
+    returned:<(changes:int64 jumps:int64 body:int64):>void>
+    reset:<(mark:int64):>void>
+    restore:<(changes:int64):>array<int64>>
+    merge:<(changed:array<int64>):>void>
+    sink:<(node:int64 body:int64):>void>
+    void_hint:<(on:bool):>void>
+    join:<(first:int64 second:int64 pos:int64):>int64>
+    string_domain:<(node:int64):>bool>
+    int_domain:<(node:int64 covered:array<int64>):>bool>
+    member_arms:<(arms:array<int64> type_id:int64):>void>
+    enum_missing:<(node:int64 type_id:int64 seen:array<bool> literals:array<string>):>void>
+    string_missing:<(node:int64):>void>
+    optional_missing:<(node:int64 type_id:int64 finite:int64 members:array<int64>):>void>
+    error:<(node:int64 code:int64 first:int64 second:int64 text:string):>void>
+]
+CheckerMatchInput:type=[
+    nodes:ptr<array<Node>>
+    lists:ptr<array<int32>>
+    types:ptr<array<TypeInfo>>
+    structs:ptr<array<StructInfo>>
+    fields:ptr<array<Field>>
+    variants:ptr<array<Variant>>
+    args:ptr<array<int32>>
+    files:ptr<array<SrcFile>>
+    locals:ptr<array<Local>>
+    names:ptr<array<string>>
+    sets:ptr<array<array<string>>>
+    scopes:ptr<CheckerScope>
+    changes:ptr<array<int64>>
+    path_narrows:ptr<int64>
+    sink:ptr<int64>
+    void_type:ptr<int64>
+    bool_type:ptr<int64>
+    string_type:ptr<int64>
+    math_int:ptr<int64>
+    none_type:ptr<int64>
+    never_type:ptr<int64>
+    host:ptr<CheckerMatchHost>
+]
+let xh_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let xh_lists:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
+let xh_types:ptr<array<TypeInfo>>=$unsafe (uint64(0) as ptr<array<TypeInfo>>)
+let xh_structs:ptr<array<StructInfo>>=$unsafe (uint64(0) as ptr<array<StructInfo>>)
+let xh_fields:ptr<array<Field>>=$unsafe (uint64(0) as ptr<array<Field>>)
+let xh_variants:ptr<array<Variant>>=$unsafe (uint64(0) as ptr<array<Variant>>)
+let xh_args:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
+let xh_files:ptr<array<SrcFile>>=$unsafe (uint64(0) as ptr<array<SrcFile>>)
+let xh_locals:ptr<array<Local>>=$unsafe (uint64(0) as ptr<array<Local>>)
+let xh_names:ptr<array<string>>=$unsafe (uint64(0) as ptr<array<string>>)
+let xh_sets:ptr<array<array<string>>>=$unsafe (uint64(0) as ptr<array<array<string>>>)
+let xh_scopes:ptr<CheckerScope>=$unsafe (uint64(0) as ptr<CheckerScope>)
+let xh_changes:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+let xh_path_narrows:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xh_sink:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xh_void_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xh_bool_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xh_string_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xh_math_int:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xh_none_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xh_never_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xh_host:ptr<CheckerMatchHost>=$unsafe (uint64(0) as ptr<CheckerMatchHost>)
+checker_match_bind=(input:ptr<CheckerMatchInput>):>XHWord=>$unsafe {
+    xh_nodes=input[0].nodes
+    xh_lists=input[0].lists
+    xh_types=input[0].types
+    xh_structs=input[0].structs
+    xh_fields=input[0].fields
+    xh_variants=input[0].variants
+    xh_args=input[0].args
+    xh_files=input[0].files
+    xh_locals=input[0].locals
+    xh_names=input[0].names
+    xh_sets=input[0].sets
+    xh_scopes=input[0].scopes
+    xh_changes=input[0].changes
+    xh_path_narrows=input[0].path_narrows
+    xh_sink=input[0].sink
+    xh_void_type=input[0].void_type
+    xh_bool_type=input[0].bool_type
+    xh_string_type=input[0].string_type
+    xh_math_int=input[0].math_int
+    xh_none_type=input[0].none_type
+    xh_never_type=input[0].never_type
+    xh_host=input[0].host
+    0
+}
+xh_count=(n:XHWord):>XHWord=>$unsafe {XHWord(xh_nodes[0].ptr[n].nlist)}
+xh_kid=(n:XHWord i:XHWord):>XHWord=>$unsafe {XHWord(xh_lists[0][XHWord(xh_nodes[0].ptr[n].list) + i])}
+xh_kind=(t:XHWord):>TK=>$unsafe {xh_types[0].ptr[tu_prune(t)].kind}
+xh_elem=(t:XHWord):>XHWord=>$unsafe {XHWord(xh_types[0].ptr[tu_prune(t)].elem)}
+xh_mark=():>XHWord=>$unsafe {xh_scopes[0].names.length}
+xh_flag=(n:XHWord f:XHWord):>void=>$unsafe {xh_nodes[0][n].flags=xh_nodes[0].ptr[n].flags | int32<overflow='wrap'>(f)}
+xh_union=(t0:XHWord):>bool=>$unsafe {
+    let t=tu_prune(t0)
+    xh_types[0].ptr[t].kind =? 'enum_' and xh_structs[0].ptr[XHWord(xh_types[0].ptr[t].st)].union_
+}
+xh_members=(t0:XHWord):>array<int64>=>$unsafe {
+    let si=XHWord(xh_types[0].ptr[tu_prune(t0)].st)
+    let out:array<int64>=[]
+    loop i in [0..XHWord(xh_structs[0].ptr[si].ntargs)) {out.push(int64(xh_args[0][XHWord(xh_structs[0].ptr[si].targs) + i]))}
+    out
+}
+xh_struct_targ=(si:XHWord i:XHWord):>XHWord=>$unsafe {XHWord(xh_args[0][XHWord(xh_structs[0].ptr[si].targs) + i])}
+xh_set=(t0:XHWord):>XHWord=>$unsafe {
+    let t=tu_prune(t0)
+    if xh_types[0].ptr[t].kind not=? 'enum_' {return 0}
+    XHWord(xh_structs[0].ptr[XHWord(xh_types[0].ptr[t].st)].lit_set)
+}
+xh_representation=(t0:XHWord):>XHWord=>$unsafe {
+    let t=tu_prune(t0)
+    if xh_types[0].ptr[t].kind =? 'refined' {return tu_prune(XHWord(xh_types[0].ptr[t].elem))}
+    t
+}
+xh_literal_member=(pt:XHWord):>bool=>$unsafe {
+    let r=xh_representation(pt)
+    xh_kind(r) =? 'int_' or pt =? xh_bool_type[0] or xh_kind(r) =? 'str_' or xh_set(pt) not=? 0
+}
+# A literal behind the conversions checking gave it.
+xh_lit=(e0:XHWord):>XHWord=>$unsafe {
+    let e=e0
+    loop xh_nodes[0].ptr[e].kind =? 'conv' {e=XHWord(xh_nodes[0].ptr[e].a)}
+    e
+}
+xh_find_variant=(si:XHWord name:XHWord):>XHWord=>$unsafe {
+    if not xh_structs[0][si].resolved {xh_host[0].fields(si)}
+    loop v in [0..XHWord(xh_structs[0].ptr[si].nvariants)) {
+        if XHWord(xh_variants[0][XHWord(xh_structs[0].ptr[si].variants) + v].name) =? name {return v}
+    }
+    -1
+}
+# A checked node of `kind` holding `a`: a narrowing (member vi) or an unwrapping.
+xh_node=(kind:'narrow'|'unwrap' a:XHWord aux:XHWord t:XHWord pos:int64):>XHWord=>$unsafe {
+    let e=node_mk(@xh_nodes[0] kind pos)
+    xh_nodes[0][e].a=int32<overflow='wrap'>(a)
+    if kind =? 'narrow' {xh_nodes[0][e].aux=int32<overflow='wrap'>(aux)}
+    xh_nodes[0][e].type=int32<overflow='wrap'>(t)
+    xh_flag(e 128)
+    e
+}
+# The match's state shared by its arms and the exhaustiveness decision.
+MatchState:type=[
+    seen:array<bool>=[]
+    finite:int64=0
+    union_bool:int64=0
+    opt_members:array<int64>=[]
+    has_wild:bool=false
+    str_covered:array<string>=[]
+    member_arms:array<int64>=[]
+    union_lits:array<string>=[]
+    covered:array<int64>=[]
+]
+# One arm's patterns: reads each, binds its value, and records what it covers.
+ArmState:type=[
+    members:array<int64>=[]
+    values:array<int64>=[]
+    wild:bool=false
+]
+xh_pattern=(@ms:MatchState @arm_state:ArmState arm:XHWord p:XHWord st:XHWord hidden:XHWord dewy:bool seen_before:array<bool> finite_before:XHWord domain_known:bool int_dom:bool str_domain:XHWord):>void=>$unsafe {
+    let pk=xh_nodes[0].ptr[p].kind
+    let pos=xh_nodes[0].ptr[p].pos
+    # Dewy bindings are ordinary independent values initialized from the once-evaluated
+    # scrutinee. Type patterns reuse union tag dispatch.
+    let binding:XHWord=0
+    let value:XHWord=0
+    if dewy and (pk =? 'ptype' or pk =? 'plit' or pk =? 'pwild' or pk =? 'prange') {
+        binding=XHWord(xh_nodes[0].ptr[p].name)
+        xh_nodes[0][p].name=0
+        if binding not=? 0 {value=xh_host[0].ident(hidden pos)}
+        if pk =? 'pwild' and binding not=? 0 {
+            xh_host[0].bare_warning(pos binding)
+            value=xh_host[0].catch_all(hidden st seen_before finite_before ms.opt_members pos)
+        }
+    }
+    if pk =? 'ptype' {
+        let pt=tu_prune(ct_resolve_type(XHWord(xh_nodes[0].ptr[p].a)))
+        # `e:error`: the error kinds the value may hold.
+        if dewy and xh_union(pt) and not tu_equal(pt st) {
+            let whole=if xh_types[0].ptr[st].kind =? 'opt' {tu_prune(xh_elem(st))} else {st}
+            let held=xh_host[0].family_part(pt whole)
+            if held not=? 0 {pt=tu_prune(held)}
+        }
+        if tu_equal(pt st) {xh_nodes[0][p].kind='pwild'}
+        else if xh_union(st) and uu_index(st pt) >=? 0 {
+            let vi=uu_index(st pt)
+            let si=XHWord(xh_types[0].ptr[st].st)
+            xh_nodes[0][p].kind='pvariant'
+            xh_nodes[0][p].name=xh_variants[0][XHWord(xh_structs[0].ptr[si].variants) + vi].name
+            if binding not=? 0 {value=xh_node('narrow' value vi pt pos)}
+        } else if xh_union(st) and xh_union(pt) and xh_host[0].within(pt st) {
+            xh_nodes[0][p].type=int32<overflow='wrap'>(pt)
+            loop member in xh_members(pt) {
+                ms.seen[uu_index(st member)]=true
+                arm_state.members.push(member)
+            }
+            if binding not=? 0 {xh_host[0].wrap_union(value pt)}
+        } else if xh_types[0].ptr[st].kind =? 'opt' and tu_equal(pt xh_elem(st)) {
+            ms.finite=ms.finite | 1
+            arm_state.members.push(int64(pt))
+            if binding not=? 0 {value=xh_node('unwrap' value 0 pt pos)}
+        } else if xh_types[0].ptr[st].kind =? 'opt' and xh_union(xh_elem(st)) and (uu_index(xh_elem(st) pt) >=? 0 or (xh_union(pt) and xh_host[0].within(pt xh_elem(st)))) {
+            # x:A where the value is an (A | B)?: present, and holding an A.
+            let u=tu_prune(xh_elem(st))
+            xh_nodes[0][p].type=int32<overflow='wrap'>(pt)
+            xh_nodes[0][p].aux2=1
+            let pms:array<int64>=[int64(pt)]
+            if xh_union(pt) {pms=xh_members(pt)}
+            loop member in pms {
+                if not ms.opt_members.contains(member) {ms.opt_members.push(member)}
+            }
+            if ms.opt_members.length =? xh_members(u).length {ms.finite=ms.finite | 1}
+            if binding not=? 0 {
+                let e=xh_node('unwrap' value 0 u pos)
+                value=e
+                if xh_union(pt) {xh_host[0].wrap_union(value pt)}
+                else {value=xh_node('narrow' e uu_index(u pt) pt pos)}
+            }
+        } else {xh_host[0].error(p 2 pt st "")}
+        pk=xh_nodes[0].ptr[p].kind
+    }
+    if dewy and pk =? 'plit' and xh_union(st) {
+        let e=XHWord(xh_nodes[0].ptr[p].a)
+        xh_host[0].check(e 0);
+        let vi=xh_host[0].target(e XHWord(xh_nodes[0].ptr[e].type) st)
+        if vi <? 0 {xh_host[0].error(p 3 st 0 "")}
+        let pt=XHWord(xh_members(st)[vi])
+        if not xh_literal_member(pt) {xh_host[0].error(p 4 0 0 "")}
+        xh_host[0].coerce(e pt);
+        xh_nodes[0][p].aux2=int32<overflow='wrap'>(vi)
+        arm_state.members.push(int64(pt))
+        if xh_types[0].ptr[pt].kind =? 'refined' or xh_set(pt) not=? 0 {xh_host[0].literal_seen(p e vi pt @ms.union_lits @ms.seen)}
+        # A value pattern only covers part of a member. Both boolean literals together
+        # cover bool, allowing an exhaustive match.
+        if pt =? xh_bool_type[0] {
+            ms.union_bool=ms.union_bool | (if xh_nodes[0].ptr[e].ival not=? 0 {1} else {2})
+            if ms.union_bool =? 3 {ms.seen[vi]=true}
+        }
+        if binding not=? 0 {value=xh_node('narrow' value vi pt pos)}
+    }
+    let opt_lit=dewy and pk =? 'plit' and xh_types[0].ptr[st].kind =? 'opt' and xh_union(xh_elem(st)) and xh_nodes[0].ptr[XHWord(xh_nodes[0].ptr[p].a)].kind not=? 'none_lit'
+    if opt_lit {
+        # `<true>` where the value is an (int64 | bool)?: present, and that member's value.
+        let u=tu_prune(xh_elem(st))
+        let e=XHWord(xh_nodes[0].ptr[p].a)
+        xh_host[0].check(e 0);
+        let vi=xh_host[0].target(e XHWord(xh_nodes[0].ptr[e].type) u)
+        if vi <? 0 {xh_host[0].error(p 3 st 0 "")}
+        let pt=XHWord(xh_members(u)[vi])
+        if not xh_literal_member(pt) {xh_host[0].error(p 4 0 0 "")}
+        xh_host[0].coerce(e pt);
+        xh_nodes[0][p].aux2=int32<overflow='wrap'>(vi)
+        if pt =? xh_bool_type[0] {
+            ms.union_bool=ms.union_bool | (if xh_nodes[0].ptr[e].ival not=? 0 {1} else {2})
+            if ms.union_bool =? 3 and not ms.opt_members.contains(pt) {
+                ms.opt_members.push(int64(pt))
+                if ms.opt_members.length =? xh_members(u).length {ms.finite=ms.finite | 1}
+            }
+        }
+        if binding not=? 0 {
+            let present=xh_node('unwrap' value 0 u pos)
+            value=xh_host[0].union_part(present u [int64(pt)] pos)
+        }
+    }
+    if binding not=? 0 {
+        if pk =? 'plit' and xh_nodes[0].ptr[p].type not=? 0 and xh_set(XHWord(xh_nodes[0].ptr[value].type)) =? 0 {xh_nodes[0][value].type=xh_nodes[0].ptr[p].type}
+        let d=node_mk(@xh_nodes[0] 'vardecl' pos)
+        xh_nodes[0][d].name=int32<overflow='wrap'>(binding)
+        xh_nodes[0][d].b=int32<overflow='wrap'>(value)
+        let body=XHWord(xh_nodes[0].ptr[arm].b)
+        let statements:array<int64>=[int64(d)]
+        loop i in [0..xh_count(body)) {statements.push(int64(xh_kid(body i)))}
+        node_set_list(@xh_nodes[0] @xh_lists[0] body statements)
+    }
+    if pk =? 'ptype' {return}
+    if pk =? 'pwild' {
+        ms.has_wild=true
+        arm_state.wild=true
+        return
+    }
+    if pk =? 'pvariant' and xh_types[0].ptr[st].kind =? 'enum_' {
+        let si=XHWord(xh_types[0].ptr[st].st)
+        let vi=xh_find_variant(si XHWord(xh_nodes[0].ptr[p].name))
+        if vi <? 0 {xh_host[0].error(p 5 st 0 "")}
+        xh_nodes[0][p].aux2=int32<overflow='wrap'>(vi)
+        if dewy and xh_structs[0].ptr[si].union_ and ms.seen[vi] {xh_host[0].error(p 6 xh_struct_targ(si vi) 0 "")}
+        ms.seen[vi]=true
+        let v=XHWord(xh_structs[0].ptr[si].variants) + vi
+        if xh_structs[0].ptr[si].union_ {arm_state.members.push(int64(xh_fields[0][XHWord(xh_variants[0].ptr[v].fields)].type))}
+        if xh_count(p) >? 0 {
+            if xh_count(p) not=? XHWord(xh_variants[0].ptr[v].nfields) {xh_host[0].error(p 7 v 0 "")}
+            if xh_count(arm) >? 1 {xh_host[0].error(p 8 0 0 "")}
+            loop f in [0..xh_count(p)) {
+                let b=xh_kid(p f)
+                if xh_names[0][XHWord(xh_nodes[0].ptr[b].name)] =? "_" {continue}
+                let ft=XHWord(xh_fields[0][XHWord(xh_variants[0].ptr[v].fields) + f].type)
+                let l=xh_host[0].binding(XHWord(xh_nodes[0].ptr[b].name) ft xh_nodes[0].ptr[b].pos)
+                xh_locals[0][l].flags=xh_locals[0].ptr[l].flags | 8
+                let fa=node_mk(@xh_nodes[0] 'field' xh_nodes[0].ptr[b].pos)
+                let base=xh_host[0].ident(hidden xh_nodes[0].ptr[b].pos)
+                xh_nodes[0][fa].a=int32<overflow='wrap'>(base)
+                xh_nodes[0][fa].aux=-3
+                xh_nodes[0][fa].aux2=int32<overflow='wrap'>(vi)
+                xh_nodes[0][fa].ival=int64(f)
+                xh_nodes[0][fa].type=int32<overflow='wrap'>(ft)
+                xh_flag(fa 128)
+                xh_locals[0][l].alias=int32<overflow='wrap'>(fa)
+                xh_nodes[0][b].sym=int32<overflow='wrap'>(l)
+            }
+        }
+        return
+    }
+    if pk =? 'pvariant' {
+        if xh_nodes[0].ptr[p].aux not=? 0 {xh_host[0].error(p 9 0 0 "")}
+        let id=node_mk(@xh_nodes[0] 'ident' pos)
+        xh_nodes[0][id].name=xh_nodes[0].ptr[p].name
+        xh_nodes[0][p]=Node[kind='plit' pos=pos a=int32<overflow='wrap'>(id)]
+        pk='plit'
+    }
+    if pk =? 'plit' and xh_nodes[0].ptr[XHWord(xh_nodes[0].ptr[p].a)].kind =? 'none_lit' and xh_types[0].ptr[st].kind =? 'enum_' {
+        # `none:` matching an enum with a variant named none is that variant.
+        let none_id=xh_host[0].none_name()
+        if xh_find_variant(XHWord(xh_types[0].ptr[st].st) none_id) >=? 0 {
+            let d=node_mk(@xh_nodes[0] 'dotname' pos)
+            xh_nodes[0][d].name=int32<overflow='wrap'>(xh_host[0].none_name())
+            xh_nodes[0][p].a=int32<overflow='wrap'>(d)
+        }
+    }
+    if pk =? 'plit' {
+        let e=XHWord(xh_nodes[0].ptr[p].a)
+        if dewy and (xh_union(st) or opt_lit) {return}
+        if xh_types[0].ptr[st].kind =? 'opt' and xh_nodes[0].ptr[e].kind =? 'none_lit' {
+            ms.finite=ms.finite | 2
+            arm_state.members.push(xh_none_type[0])
+        }
+        if st =? xh_bool_type[0] and xh_nodes[0].ptr[e].kind =? 'bool_lit' {
+            ms.finite=ms.finite | (if xh_nodes[0].ptr[e].ival not=? 0 {1} else {2})
+        }
+        xh_host[0].check(e st);
+        xh_host[0].coerce(e st);
+        if str_domain not=? 0 and xh_nodes[0].ptr[e].kind =? 'dotname' {
+            let text=xh_sets[0][str_domain][XHWord(xh_nodes[0].ptr[e].aux)]
+            if ms.str_covered.contains(text) {xh_host[0].error(p 10 0 0 text)}
+            ms.str_covered.push(text)
+        }
+        if xh_types[0].ptr[st].kind =? 'enum_' and xh_nodes[0].ptr[e].kind =? 'dotname' {
+            ms.seen[XHWord(xh_nodes[0].ptr[e].aux)]=true
+            if str_domain not=? 0 {ms.member_arms.push(int64(p))}
+        }
+        let lit=xh_lit(e)
+        if (domain_known or int_dom) and xh_nodes[0].ptr[lit].kind =? 'int_lit' {
+            arm_state.values.push(xh_nodes[0].ptr[lit].ival)
+            arm_state.values.push(xh_nodes[0].ptr[lit].ival)
+        }
+        return
+    }
+    if pk =? 'prange' {
+        if xh_kind(xh_representation(st)) not=? 'int_' {xh_host[0].error(p 11 0 0 "")}
+        xh_host[0].check_to(XHWord(xh_nodes[0].ptr[p].a) st);
+        xh_host[0].check_to(XHWord(xh_nodes[0].ptr[p].b) st);
+        let lo=xh_lit(XHWord(xh_nodes[0].ptr[p].a))
+        let hi=xh_lit(XHWord(xh_nodes[0].ptr[p].b))
+        if (domain_known or int_dom) and XHWord(xh_nodes[0].ptr[p].flags) & 2 not=? 0 and xh_nodes[0].ptr[lo].kind =? 'int_lit' and xh_nodes[0].ptr[hi].kind =? 'int_lit' {
+            arm_state.values.push(xh_nodes[0].ptr[lo].ival)
+            arm_state.values.push(xh_nodes[0].ptr[hi].ival)
+        }
+        return
+    }
+    xh_host[0].error(p 12 0 0 "")
+}
+# The members a wildcard arm leaves the subject holding (none or the unmatched ones).
+xh_wild_members=(@arm_state:ArmState st:XHWord seen_before:array<bool> finite_before:XHWord opt_members:array<int64>):>bool=>$unsafe {
+    arm_state.members=[]
+    if xh_types[0].ptr[st].kind =? 'opt' {
+        if finite_before & 1 =? 0 and opt_members.length >? 0 {return true}
+        if finite_before & 2 not=? 0 and finite_before & 1 =? 0 {arm_state.members.push(int64(xh_elem(st)))}
+        return false
+    }
+    let all=xh_members(st)
+    loop vi in [0..all.length) {
+        if not seen_before[vi] {arm_state.members.push(all[vi])}
+    }
+    false
+}
+xh_match=(m:XHWord expected:XHWord):>XHWord=>$unsafe {
+    let is_stmt=XHWord(xh_nodes[0].ptr[m].flags) & 16 not=? 0
+    let sc=XHWord(xh_nodes[0].ptr[m].a)
+    xh_host[0].check(sc 0);
+    xh_host[0].finalize(sc);
+    sc=XHWord(xh_nodes[0].ptr[m].a)
+    let st=tu_prune(XHWord(xh_nodes[0].ptr[sc].type))
+    let mark=xh_mark()
+    let hidden=xh_host[0].binding(0 st xh_nodes[0].ptr[m].pos)
+    xh_locals[0][hidden].flags=64
+    xh_nodes[0][m].sym=int32<overflow='wrap'>(hidden)
+    let result:XHWord=0
+    let first_val:XHWord=0
+    let ms:MatchState=[]
+    let dewy=xh_files[0][xh_nodes[0].ptr[m].pos >> 40].is_dewy
+    if xh_types[0].ptr[st].kind =? 'enum_' {
+        let si=XHWord(xh_types[0].ptr[st].st)
+        if not xh_structs[0][si].resolved {xh_host[0].fields(si)}
+        loop i in [0..XHWord(xh_structs[0].ptr[si].nvariants)) {ms.seen.push(false)}
+    }
+    let domain_known=false
+    let domain:array<int64>=[]
+    let str_domain:XHWord=0
+    let str_patterns=dewy and xh_sets[0].length >? 1
+    let int_dom=dewy and st =? xh_math_int[0]
+    let domain_open=false
+    let domain_high:array<int64>=[]
+    if dewy and not xh_union(st) {
+        let declared=st
+        # A refined binding reads as its base: its declared type has the values.
+        if xh_nodes[0].ptr[sc].kind =? 'ident' and xh_nodes[0].ptr[sc].aux =? 1 {
+            let lt=XHWord(xh_locals[0][XHWord(xh_nodes[0].ptr[sc].sym)].type)
+            if tu_equal(xh_representation(lt) st) {declared=lt}
+        }
+        domain_known=xh_host[0].intervals(declared @domain @domain_high)
+        str_domain=xh_set(declared)
+        # A uint64 that may hold values from 2^63 on: its type patterns become ranges,
+        # its arms not counted for coverage.
+        if domain_known and domain_high.length >? 0 {
+            domain_known=false
+            domain_open=true
+        }
+    }
+    let sum_type=xh_union(st) or xh_types[0].ptr[st].kind =? 'opt'
+    let narrows=sum_type and xh_nodes[0].ptr[sc].kind =? 'ident' and xh_nodes[0].ptr[sc].aux =? 1
+    # A field path or a global: narrowed like `if x.f is? T`.
+    let pkey=""
+    if sum_type and not narrows {pkey=xh_host[0].path_key(sc)}
+    let changed:array<int64>=[]
+    loop i in [0..xh_count(m)) {
+        let arm=xh_kid(m i)
+        let amark=xh_mark()
+        let changes=xh_changes[0].length
+        let arm_state:ArmState=[]
+        let seen_before=ms.seen
+        let finite_before=ms.finite
+        if dewy and ms.has_wild {xh_host[0].error(arm 1 0 0 "")}
+        if domain_known {xh_host[0].refined(arm domain st [])}
+        else if domain_open {xh_host[0].refined(arm domain st domain_high)}
+        if str_patterns {xh_host[0].string_patterns(arm st ms.str_covered ms.union_lits)}
+        loop k in [0..xh_count(arm)) {
+            xh_pattern(@ms @arm_state arm xh_kid(arm k) st hidden dewy seen_before finite_before domain_known int_dom str_domain)
+        }
+        if dewy and domain_known and arm_state.values.length >? 0 and not arm_state.wild {
+            if interval_missing(interval_meet_all(arm_state.values domain) ms.covered).length =? 0 {xh_host[0].error(arm 13 0 0 "")}
+            loop v in arm_state.values {ms.covered.push(v)}
+        } else if int_dom and not arm_state.wild {
+            loop v in arm_state.values {ms.covered.push(v)}
+        }
+        if narrows {
+            # match x { T => ... }: x is a T in the arm (T U: a T | U; _: the members
+            # not matched yet).
+            if arm_state.wild and xh_wild_members(@arm_state st seen_before finite_before ms.opt_members) {
+                xh_host[0].opt_wild(XHWord(xh_nodes[0].ptr[sc].sym) st ms.opt_members finite_before & 2 not=? 0 xh_nodes[0].ptr[arm].pos)
+            }
+            xh_host[0].narrow_local(XHWord(xh_nodes[0].ptr[sc].sym) arm_state.members xh_nodes[0].ptr[arm].pos)
+        } else if pkey.length >? 0 {
+            if arm_state.wild and xh_wild_members(@arm_state st seen_before finite_before ms.opt_members) {
+                xh_host[0].opt_wild_path(sc pkey st ms.opt_members finite_before & 2 not=? 0 xh_nodes[0].ptr[arm].pos)
+            }
+            xh_path_narrows[0]=xh_path_narrows[0] + 1
+            xh_host[0].narrow_path(sc arm_state.members xh_nodes[0].ptr[arm].pos pkey)
+        }
+        let body=XHWord(xh_nodes[0].ptr[arm].b)
+        let body_changes=xh_changes[0].length
+        let jumps:int64=0
+        if is_stmt {xh_host[0].block(body 0 false @jumps);}
+        else {
+            let exp=expected
+            # A later arm takes the match's expected type when it has one, not the first arm's.
+            if result not=? 0 and (expected =? 0 or xh_kind(expected) =? 'var') {exp=result}
+            # One arm prints, another gives a number: as a function's last line, the match
+            # is what it gives back.
+            let hint=result not=? 0 and xh_kind(result) =? 'void_' and (expected =? 0 or xh_kind(expected) =? 'var')
+            if hint {xh_host[0].void_hint(true)}
+            if m =? xh_sink[0] {xh_host[0].sink(m body)}
+            let t=xh_host[0].block(body exp true @jumps)
+            if t not=? xh_never_type[0] {
+                if xh_nodes[0].ptr[body].aux =? 0 and xh_kind(t) =? 'void_' {
+                    if result not=? 0 and xh_kind(result) not=? 'void_' and expected not=? 0 {xh_host[0].error(arm 14 0 0 "")}
+                    result=xh_void_type[0]
+                } else if result =? 0 {
+                    result=t
+                    first_val=body
+                } else {
+                    let vp=XHWord(xh_nodes[0].ptr[xh_kid(body xh_count(body) - 1)].a)
+                    if expected not=? 0 {xh_host[0].coerce(vp expected);}
+                    else if first_val not=? 0 {result=xh_host[0].join(XHWord(xh_nodes[0].ptr[xh_kid(first_val xh_count(first_val) - 1)].a) vp xh_nodes[0].ptr[arm].pos)}
+                    else {xh_host[0].coerce(vp result);}
+                }
+            }
+            xh_host[0].void_hint(false)
+        }
+        if xh_changes[0].length not=? body_changes {xh_host[0].returned(body_changes jumps body)}
+        xh_host[0].reset(amark)
+        loop l in xh_host[0].restore(changes) {changed.push(l)}
+    }
+    xh_host[0].reset(mark)
+    xh_host[0].merge(changed)
+    let exhaustive=ms.has_wild or ms.finite =? 3
+    if not exhaustive and domain_known and ms.covered.length >? 0 {
+        let missing=interval_missing(domain ms.covered)
+        if missing.length =? 0 {exhaustive=true}
+        else if not is_stmt {xh_host[0].error(m 15 0 0 interval_text(missing))}
+    }
+    if not exhaustive and str_domain not=? 0 {
+        let missing=""
+        let count:XHWord=0
+        loop value in xh_sets[0][str_domain] {
+            if not ms.str_covered.contains(value) {
+                if count >? 0 {missing="{missing}, "}
+                missing="{missing}'{value}'"
+                count=count + 1
+            }
+        }
+        if count =? 0 {exhaustive=true}
+        else if not is_stmt {xh_host[0].error(m 16 0 0 missing)}
+    }
+    if not exhaustive and xh_types[0].ptr[st].kind =? 'enum_' {
+        exhaustive=true
+        loop s in ms.seen {if not s {exhaustive=false}}
+    }
+    if not exhaustive and dewy and st =? xh_string_type[0] and xh_host[0].string_domain(m) {exhaustive=true}
+    if not exhaustive and dewy and st =? xh_math_int[0] and xh_host[0].int_domain(m ms.covered) {exhaustive=true}
+    xh_nodes[0][m].aux2=if exhaustive {1} else {0}
+    # An enum's or a union's match names each of its variants, or has `_`; a statement
+    # too, so that a state added later is not left out quietly.
+    if is_stmt and (exhaustive or (not dewy and xh_types[0].ptr[st].kind not=? 'enum_')) {
+        xh_host[0].member_arms(ms.member_arms xh_void_type[0])
+        xh_nodes[0][m].type=int32<overflow='wrap'>(xh_void_type[0])
+        return xh_void_type[0]
+    }
+    if not exhaustive {
+        if xh_types[0].ptr[st].kind =? 'enum_' {xh_host[0].enum_missing(m st ms.seen ms.union_lits)}
+        if dewy and st =? xh_string_type[0] and xh_sets[0].length >? 1 {xh_host[0].string_missing(m)}
+        if dewy and xh_types[0].ptr[st].kind =? 'opt' and str_domain =? 0 and not domain_known and ms.union_bool =? 0 and ms.union_lits.length =? 0 and ms.member_arms.length =? 0 {
+            xh_host[0].optional_missing(m st ms.finite ms.opt_members)
+        }
+        xh_host[0].error(m 20 if dewy {1} else {0} 0 "")
+    }
+    if result =? 0 {result=xh_never_type[0]}
+    if expected not=? 0 and result not=? xh_never_type[0] {
+        loop i in [0..xh_count(m)) {
+            let b=XHWord(xh_nodes[0].ptr[xh_kid(m i)].b)
+            if xh_nodes[0].ptr[b].aux not=? 0 {xh_host[0].coerce(XHWord(xh_nodes[0].ptr[xh_kid(b xh_count(b) - 1)].a) expected);}
+        }
+        result=expected
+    } else {
+        loop i in [0..xh_count(m)) {
+            let b=XHWord(xh_nodes[0].ptr[xh_kid(m i)].b)
+            if xh_nodes[0].ptr[b].aux not=? 0 {
+                let v=XHWord(xh_nodes[0].ptr[xh_kid(b xh_count(b) - 1)].a)
+                xh_host[0].finalize(v);
+                xh_host[0].coerce(XHWord(xh_nodes[0].ptr[xh_kid(b xh_count(b) - 1)].a) result);
+            }
+        }
+    }
+    xh_host[0].member_arms(ms.member_arms result)
+    xh_nodes[0][m].type=int32<overflow='wrap'>(result)
+    result
+}

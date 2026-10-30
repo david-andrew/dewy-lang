@@ -1,3 +1,4 @@
+use 'checker_match.dewy'
 use 'checker_indexes.dewy'
 use 'checker_members.dewy'
 use 'checker_lambdas.dewy'
@@ -8761,404 +8762,114 @@ union_part = (e: int, u: int, keep: int[], pos: int) -> int:
 check_match = (m: int, expected: int) -> int:
     if nodes[int(nodes[m].a)].kind == .call and nodes[int(nodes[m].a)].aux2 == i32(AUX2_PLACE): return place_match(m, expected)
     if files[pos_file(nodes[m].pos)].is_dewy and shape_match_wanted(m): return check_shaped_match(m, expected)
-    is_stmt = has_flag(m, NF_STMT)
-    check_expr(int(nodes[m].a), 0)
-    finalize_literal(int(nodes[m].a))
-    st = prune(ntype(int(nodes[m].a)))
-    mark = scope_mark()
-    hidden = new_local(0, st, nodes[m].pos)
-    locals[hidden].flags = i32(LF_ADDR)
-    nodes[m].sym = i32(hidden)
-    result = 0
-    first_val = 0
-    has_wild = false
-    finite_seen = 0
-    union_bool_seen = 0
-    opt_members: int[]
-    dewy = files[pos_file(nodes[m].pos)].is_dewy
-    seen: bool[]
-    if types[st].kind == .enum_:
-        check_struct_fields(int(types[st].st))
-        seen = fill(false, int(structs[int(types[st].st)].nvariants))
-    sc = int(nodes[m].a)
-    domain_known = false
-    domain: int[]
-    covered: int[]
-    str_domain = 0
-    str_covered: str[]
-    member_arms: int[]          # (literal arms naming a member of a union of string literals)
-    str_patterns = dewy and str_sets.len() > 1
-    int_dom = dewy and st == T_MATH_INT
-    union_lits: str[]
-    domain_open = false
-    domain_high: int[]
-    if dewy and not is_union(st):
-        declared = st
-        # (a refined binding reads as its base: its declared type has the values)
-        if nodes[sc].kind == .ident and nodes[sc].aux == i32(int(SK.local)) and type_eq(representation_type(int(locals[int(nodes[sc].sym)].type)), st): declared = int(locals[int(nodes[sc].sym)].type)
-        domain_known, domain, domain_high = int_intervals_wide(declared)
-        str_domain = str_set_of(declared)
-        # (a uint64 that may hold values from 2^63 on: its type patterns become ranges, its
-        # arms not counted for coverage)
-        if domain_known and domain_high.len() > 0:
-            domain_known = false
-            domain_open = true
-    narrows = (is_union(st) or types[st].kind == .opt) and nodes[sc].kind == .ident and nodes[sc].aux == i32(int(SK.local))
-    # (a field path or a global: narrowed like `if x.f is T`)
-    pkey = ""
-    if (is_union(st) or types[st].kind == .opt) and not narrows: pkey = path_key(sc)
-    changed: int[]
-    loop i in [0..nkids(m)):
-        arm = kid(m, i)
-        amark = scope_mark()
-        changes = narrow_changes.len()
-        arm_members: int[]
-        arm_values: int[]
-        arm_wild = false
-        seen_before = seen
-        finite_before = finite_seen
-        if dewy and has_wild: fatal(nodes[arm].pos, "this arm is unreachable: an earlier arm already matches every value")
-        if domain_known: refined_patterns(arm, domain, st)
-        else if domain_open: refined_patterns(arm, domain, st, domain_high)
-        if str_patterns: str_set_patterns(arm, st, str_covered, union_lits)
-        loop k in [0..nkids(arm)):
-            p = kid(arm, k)
-            pk = nodes[p].kind
-            # Dewy bindings are ordinary independent values initialized from the
-            # once-evaluated scrutinee. Type patterns reuse union tag dispatch.
-            binding = 0
-            value = 0
-            if dewy and (pk == .ptype or pk == .plit or pk == .pwild or pk == .prange):
-                binding = int(nodes[p].name)
-                nodes[p].name = 0
-                if binding != 0: value = mk_ident_local(hidden, nodes[p].pos)
-                if pk == .pwild and binding != 0:
-                    bare_arm_warning(nodes[p].pos, binding)
-                    value = catch_all_value(hidden, st, seen_before, finite_before, opt_members, nodes[p].pos)
-            if pk == .ptype:
-                pt = prune(resolve_type(int(nodes[p].a)))
-                # (`e:error`: the error kinds the value may hold)
-                if dewy and is_union(pt) and not type_eq(pt, st):
-                    held = nominal_family_part(pt, if types[st].kind == .opt: prune(telem(st)) else: st)
-                    if held != 0: pt = prune(held)
-                if type_eq(pt, st):
-                    nodes[p].kind = .pwild
-                else if is_union(st) and union_index(st, pt) >= 0:
-                    vi = union_index(st, pt)
-                    si = int(types[st].st)
-                    nodes[p].kind = .pvariant
-                    nodes[p].name = variants[int(structs[si].variants) + vi].name
-                    if binding != 0:
-                        e = mk(.narrow, nodes[p].pos)
-                        nodes[e].a = i32(value)
-                        nodes[e].aux = i32(vi)
-                        nodes[e].type = i32(pt)
-                        add_flag(e, NF_CHECKED)
-                        value = e
-                else if is_union(st) and is_union(pt) and union_within(pt, st):
-                    nodes[p].type = i32(pt)
-                    loop member in union_members(pt):
-                        seen[union_index(st, member)] = true
-                        arm_members.push(member)
-                    if binding != 0: wrap_conv(value, .union_, pt)
-                else if types[st].kind == .opt and type_eq(pt, telem(st)):
-                    finite_seen |= 1
-                    arm_members.push(pt)
-                    if binding != 0:
-                        e = mk(.unwrap, nodes[p].pos)
-                        nodes[e].a = i32(value)
-                        nodes[e].type = i32(pt)
-                        add_flag(e, NF_CHECKED)
-                        value = e
-                else if types[st].kind == .opt and is_union(telem(st)) and (union_index(telem(st), pt) >= 0 or is_union(pt) and union_within(pt, telem(st))):
-                    # (x:A where the value is an (A | B)?: present, and holding an A)
-                    u = prune(telem(st))
-                    nodes[p].type = i32(pt)
-                    nodes[p].aux2 = 1
-                    ms = [pt]
-                    if is_union(pt): ms = union_members(pt)
-                    loop member in ms:
-                        if not opt_members.contains(member): opt_members.push(member)
-                    if opt_members.len() == union_members(u).len(): finite_seen |= 1
-                    if binding != 0:
-                        e = mk(.unwrap, nodes[p].pos)
-                        nodes[e].a = i32(value)
-                        nodes[e].type = i32(u)
-                        add_flag(e, NF_CHECKED)
-                        value = e
-                        if is_union(pt): wrap_conv(value, .union_, pt)
-                        else:
-                            nv = mk(.narrow, nodes[p].pos)
-                            nodes[nv].a = i32(e)
-                            nodes[nv].aux = i32(union_index(u, pt))
-                            nodes[nv].type = i32(pt)
-                            add_flag(nv, NF_CHECKED)
-                            value = nv
-                else: fatal(nodes[p].pos, "type pattern {type_str(pt, true)} is not a member of {type_str(st, true)}")
-                pk = nodes[p].kind
-            if dewy and pk == .plit and is_union(st):
-                e = int(nodes[p].a)
-                check_expr(e, 0)
-                vi = union_target(e, ntype(e), st)
-                if vi < 0: fatal(nodes[p].pos, "literal pattern is not a member of {type_str(st, true)}")
-                pt = union_members(st)[vi]
-                if not is_int(representation_type(pt)) and pt != T_BOOL and tkind(representation_type(pt)) != .str_ and str_set_of(pt) == 0:
-                    fatal(nodes[p].pos, "literal patterns need an integer, bool or string member")
-                coerce(e, pt)
-                nodes[p].aux2 = i32(vi)
-                arm_members.push(pt)
-                if types[pt].kind == .refined or str_set_of(pt) != 0: union_literal_seen(p, e, vi, pt, union_lits, seen)
-                # A value pattern only covers part of a member. Both boolean
-                # literals together cover bool, allowing an exhaustive match.
-                if pt == T_BOOL:
-                    union_bool_seen |= if nodes[e].ival != 0: 1 else: 2
-                    if union_bool_seen == 3: seen[vi] = true
-                if binding != 0:
-                    narrowed = mk(.narrow, nodes[p].pos)
-                    nodes[narrowed].a = i32(value)
-                    nodes[narrowed].aux = i32(vi)
-                    nodes[narrowed].type = i32(pt)
-                    add_flag(narrowed, NF_CHECKED)
-                    value = narrowed
-            opt_lit = dewy and pk == .plit and types[st].kind == .opt and is_union(telem(st)) and nodes[int(nodes[p].a)].kind != .none_lit
-            if opt_lit:
-                # (`<true>` where the value is an (int64 | bool)?: present, and that member's value)
-                u = prune(telem(st))
-                e = int(nodes[p].a)
-                check_expr(e, 0)
-                vi = union_target(e, ntype(e), u)
-                if vi < 0: fatal(nodes[p].pos, "literal pattern is not a member of {type_str(st, true)}")
-                pt = union_members(u)[vi]
-                if not is_int(representation_type(pt)) and pt != T_BOOL and tkind(representation_type(pt)) != .str_ and str_set_of(pt) == 0:
-                    fatal(nodes[p].pos, "literal patterns need an integer, bool or string member")
-                coerce(e, pt)
-                nodes[p].aux2 = i32(vi)
-                if pt == T_BOOL:
-                    union_bool_seen |= if nodes[e].ival != 0: 1 else: 2
-                    if union_bool_seen == 3 and not opt_members.contains(pt):
-                        opt_members.push(pt)
-                        if opt_members.len() == union_members(u).len(): finite_seen |= 1
-                if binding != 0:
-                    present = mk(.unwrap, nodes[p].pos)
-                    nodes[present].a = i32(value)
-                    nodes[present].type = i32(u)
-                    add_flag(present, NF_CHECKED)
-                    value = union_part(present, u, [pt], nodes[p].pos)
-            if binding != 0:
-                if pk == .plit and nodes[p].type != 0 and str_set_of(ntype(value)) == 0: nodes[value].type = nodes[p].type
-                d = mk(.vardecl, nodes[p].pos)
-                nodes[d].name = i32(binding)
-                nodes[d].b = i32(value)
-                body = int(nodes[arm].b)
-                statements = [d]
-                loop statement in kids(body): statements.push(statement)
-                set_list(body, statements)
-            if pk == .ptype: continue
-            if pk == .pwild:
-                has_wild = true
-                arm_wild = true
-                continue
-            if pk == .pvariant and types[st].kind == .enum_:
-                si = int(types[st].st)
-                vi = find_variant(si, int(nodes[p].name))
-                if vi < 0: fatal(nodes[p].pos, "{dt(st)} has no variant '{name_of(int(nodes[p].name))}'{variant_hint_for(st, name_of(int(nodes[p].name)))}")
-                nodes[p].aux2 = i32(vi)
-                if dewy and structs[si].union_ and seen[vi]: fatal(nodes[p].pos, "this arm is unreachable: earlier arms already match every {dt(struct_targ(si, vi))}")
-                seen[vi] = true
-                v = int(structs[si].variants) + vi
-                if structs[si].union_: arm_members.push(int(fields[int(variants[v].fields)].type))
-                if nkids(p) > 0:
-                    if nkids(p) != int(variants[v].nfields): fatal(nodes[p].pos, "variant '{name_of(int(variants[v].name))}' has {variants[v].nfields} field(s), pattern binds {nkids(p)}")
-                    if nkids(arm) > 1: fatal(nodes[p].pos, "patterns with bindings cannot be combined with other patterns")
-                    loop f in [0..nkids(p)):
-                        b = kid(p, f)
-                        if name_of(int(nodes[b].name)) == "_": continue
-                        ft = int(fields[int(variants[v].fields) + f].type)
-                        l = new_local(int(nodes[b].name), ft, nodes[b].pos)
-                        locals[l].flags = i32(int(locals[l].flags) | LF_ALIAS)
-                        fa = mk(.field, nodes[b].pos)
-                        nodes[fa].a = i32(mk_ident_local(hidden, nodes[b].pos))
-                        nodes[fa].aux = -3
-                        nodes[fa].aux2 = i32(vi)
-                        nodes[fa].ival = f
-                        nodes[fa].type = i32(ft)
-                        add_flag(fa, NF_CHECKED)
-                        locals[l].alias = i32(fa)
-                        nodes[b].sym = i32(l)
-                continue
-            if pk == .pvariant:
-                if nodes[p].aux != 0: fatal(nodes[p].pos, "variant patterns need an enum value")
-                id = mk(.ident, nodes[p].pos)
-                nodes[id].name = nodes[p].name
-                nodes[p] = Node(kind = .plit, pos = nodes[p].pos, a = i32(id))
-                pk = .plit
-            if pk == .plit and nodes[int(nodes[p].a)].kind == .none_lit and types[st].kind == .enum_ and find_variant(int(types[st].st), intern("none")) >= 0:
-                # `none:` matching an enum with a variant named none is that variant
-                d = mk(.dotname, nodes[p].pos)
-                nodes[d].name = i32(intern("none"))
-                nodes[p].a = i32(d)
-            if pk == .plit:
-                e = int(nodes[p].a)
-                if dewy and (is_union(st) or opt_lit): continue
-                if types[st].kind == .opt and nodes[e].kind == .none_lit:
-                    finite_seen |= 2
-                    arm_members.push(T_NONE)
-                if st == T_BOOL and nodes[e].kind == .bool_lit:
-                    finite_seen |= if nodes[e].ival != 0: 1 else: 2
-                check_expr(e, st)
-                coerce(e, st)
-                if str_domain != 0 and nodes[e].kind == .dotname:
-                    text = str_sets[str_domain][int(nodes[e].aux)]
-                    if str_covered.contains(text): fatal(nodes[p].pos, "this arm is unreachable: an earlier arm already matches '{text}'")
-                    str_covered.push(text)
-                if types[st].kind == .enum_ and nodes[e].kind == .dotname:
-                    seen[int(nodes[e].aux)] = true
-                    if str_domain != 0: member_arms.push(p)
-                if (domain_known or int_dom) and nodes[kid_lit(e)].kind == .int_lit: arm_values += [nodes[kid_lit(e)].ival, nodes[kid_lit(e)].ival]
-                continue
-            if pk == .prange:
-                if not is_int(representation_type(st)): fatal(nodes[p].pos, "range patterns need an integer value")
-                check_to(int(nodes[p].a), st)
-                check_to(int(nodes[p].b), st)
-                if (domain_known or int_dom) and has_flag(p, NF_INCLUSIVE) and nodes[kid_lit(int(nodes[p].a))].kind == .int_lit and nodes[kid_lit(int(nodes[p].b))].kind == .int_lit:
-                    arm_values += [nodes[kid_lit(int(nodes[p].a))].ival, nodes[kid_lit(int(nodes[p].b))].ival]
-                continue
-            fatal(nodes[p].pos, "invalid pattern")
-        if dewy and domain_known and arm_values.len() > 0 and not arm_wild:
-            if interval_missing(interval_meet_all(arm_values, domain), covered).len() == 0: fatal(nodes[arm].pos, "this arm is unreachable: earlier arms already match every value it does")
-            covered += arm_values
-        else if int_dom and not arm_wild: covered += arm_values
-        if narrows:
-            # match x: T: ...   x is a T in the arm (T, U: ... a T | U; _: the members not matched yet)
-            if arm_wild:
-                arm_members.clear()
-                if types[st].kind == .opt:
-                    if finite_before & 1 == 0 and opt_members.len() > 0: opt_wild_narrow(int(nodes[sc].sym), st, opt_members, finite_before & 2 != 0, nodes[arm].pos)
-                    else if finite_before & 2 != 0 and finite_before & 1 == 0: arm_members.push(telem(st))
-                else:
-                    loop vi in 0.. and um in union_members(st):
-                        if not seen_before[vi]: arm_members.push(um)
-            narrow_local(int(nodes[sc].sym), arm_members, nodes[arm].pos)
-        else if len(pkey) > 0:
-            if arm_wild:
-                arm_members.clear()
-                if types[st].kind == .opt:
-                    if finite_before & 1 == 0 and opt_members.len() > 0: opt_wild_narrow_path(sc, pkey, st, opt_members, finite_before & 2 != 0, nodes[arm].pos)
-                    else if finite_before & 2 != 0 and finite_before & 1 == 0: arm_members.push(telem(st))
-                else:
-                    loop vi in 0.. and um in union_members(st):
-                        if not seen_before[vi]: arm_members.push(um)
-            path_narrows += 1
-            narrow_expr(copy_path(sc), arm_members, nodes[arm].pos, path_name(pkey))
-        body = int(nodes[arm].b)
-        body_changes = narrow_changes.len()
-        jumps = narrow_jumps.len()
-        if is_stmt: check_block(body, 0, false)
-        else:
-            exp = expected
-            # (a later arm takes the match's expected type when it has one, not the first arm's:
-            # `:>int | bool => match e { <0> => 5  _ => if c false else 7 }`)
-            if result != 0 and (expected == 0 or tkind(expected) == .var): exp = result
-            # (one arm prints, another gives a number: as a function's last line, the match is
-            # what it gives back)
-            if result != 0 and tkind(result) == .void_ and (expected == 0 or tkind(expected) == .var): coerce_hint = " (an arm above gives no value, so this match gives none: where it ends a function, its arms are what the function gives back; `-> void` after the function's parameters says it gives back nothing)"
-            if m == sink_final: sink_arm(m, body)
-            t = check_block(body, exp, true)
-            if t != T_NEVER:
-                if nodes[body].aux == 0 and tkind(t) == .void_:
-                    if result != 0 and tkind(result) != .void_ and expected != 0: fatal(nodes[arm].pos, "match arm has no value")
-                    result = T_VOID
-                else if result == 0:
-                    result = t
-                    first_val = body
-                else:
-                    vp = block_value(body)
-                    if expected != 0: coerce(vp, expected)
-                    else if first_val != 0: result = join_types(block_value(first_val), vp, nodes[arm].pos)
-                    else: coerce(vp, result)
-            coerce_hint = ""
-        if narrow_changes.len() != body_changes: narrow_returned(body_changes, jumps, body)
-        scope_reset(amark)
-        loop l in narrow_restore(changes): changed.push(l)
+    xh_match(m, expected)
+
+# `match` runs in checker_match.dewy; these are its services.
+match_intervals = (t: int, domain: mut int[], high: mut int[]) -> bool:
+    known, d, h = int_intervals_wide(t)
+    domain = d
+    high = h
+    known
+match_refined = (arm: int, domain: int[], st: int, high: int[]):
+    refined_patterns(arm, domain, st, high)
+    return
+match_string_patterns = (arm: int, st: int, covered: str[], lits: str[]):
+    str_set_patterns(arm, st, covered, lits)
+    return
+match_wrap_union = (n: int, t: int):
+    wrap_conv(n, .union_, t)
+    return
+match_none_name = () -> int: intern("none")
+match_narrow_local = (l: int, ms: int[], pos: int):
+    narrow_local(l, ms, pos)
+    return
+match_opt_wild = (l: int, st: int, ms: int[], none_seen: bool, pos: int):
+    opt_wild_narrow(l, st, ms, none_seen, pos)
+    return
+match_opt_wild_path = (sc: int, key: str, st: int, ms: int[], none_seen: bool, pos: int):
+    opt_wild_narrow_path(sc, key, st, ms, none_seen, pos)
+    return
+match_narrow_path = (sc: int, ms: int[], pos: int, key: str):
+    narrow_expr(copy_path(sc), ms, pos, path_name(key))
+    return
+match_block = (b: int, expected: int, value: bool, jumps: mut int) -> int:
+    jumps = narrow_jumps.len()
+    check_block(b, expected, value)
+match_returned = (changes: int, jumps: int, body: int):
+    narrow_returned(changes, jumps, body)
+    return
+match_reset = (mark: int):
     scope_reset(mark)
+    return
+match_merge = (changed: int[]):
     narrow_merge(changed)
-    exhaustive = has_wild or finite_seen == 3
-    if not exhaustive and domain_known and covered.len() > 0:
-        missing = interval_missing(domain, covered)
-        if missing.len() == 0: exhaustive = true
-        else if not is_stmt: fatal(nodes[m].pos, "this match has no arm for {interval_text(missing)} (add one, or a `_ => ...` arm for the rest)")
-    if not exhaustive and str_domain != 0:
-        missing: str[]
-        loop value in str_sets[str_domain]:
-            if not str_covered.contains(value): missing.push("'{value}'")
-        if missing.len() == 0: exhaustive = true
-        else if not is_stmt: fatal(nodes[m].pos, "this match has no arm for {join(missing, ", ")} (add one, or a `_ => ...` arm for the rest)")
-    if not exhaustive and types[st].kind == .enum_:
-        exhaustive = true
-        loop s in seen:
-            if not s: exhaustive = false
-    if not exhaustive and dewy and st == T_STR and string_domain_match(m): exhaustive = true
-    if not exhaustive and dewy and st == T_MATH_INT and int_domain_match(m, covered): exhaustive = true
-    nodes[m].aux2 = i32(int(exhaustive))
-    # (an enum's or a union's match names each of its variants, or has `_:`; a statement too, so
-    # that a state added later is not left out quietly)
-    if is_stmt and (exhaustive or (not dewy and types[st].kind != .enum_)):
-        member_arms_as_variants(member_arms, T_VOID)
-        nodes[m].type = i32(T_VOID)
-        return T_VOID
-    if not exhaustive:
-        if types[st].kind == .enum_:
-            miss = ""
-            si = int(types[st].st)
-            loop vi in 0.. and s in seen:
-                if s: continue
-                if len(miss) > 0: miss += ", "
-                # (a union's members by their type names: a family's parent is one of its own)
-                if dewy and structs[si].union_: miss += union_literal_missing(vi, struct_targ(si, vi), union_lits)
-                else: miss += ".{name_of(int(variants[int(structs[si].variants) + vi].name))}"
-            fatal(nodes[m].pos, "this match has no arm for {miss} (add one, or a {jd(nodes[m].pos, "`_:`", "`_ => ...`")} arm for the rest)")
-        # (match word { <'go'> ... <'stop'> ... } on a string, even after `word is? Cmd`: a string
-        # is not narrowed to the union, so other text still needs an arm)
-        if dewy and st == T_STR and str_sets.len() > 1:
-            written: str[]
-            loop arm in kids(m):
-                loop p in kids(arm):
-                    if nodes[p].kind == .plit and nodes[int(nodes[p].a)].kind == .str_lit: written.push(name_of(int(nodes[int(nodes[p].a)].sval)))
-            if written.len() > 0:
-                spelled: str[]
-                loop w in written: spelled.push("'{w}'")
-                fatal(nodes[m].pos, "match is not exhaustive: this is a string, which may hold other text than {join(spelled, ", ")} (add a `_ => ...` arm, or match the literal union instead: `match x as U \{...}` after `x is? U` holds)")
-        # (an optional subject: name what no arm takes, `none` or a member of the payload)
-        if dewy and types[st].kind == .opt and str_domain == 0 and not domain_known and union_bool_seen == 0 and union_lits.len() == 0 and member_arms.len() == 0:
-            miss: str[]
-            if finite_seen & 2 == 0: miss.push("none")
-            u = prune(telem(st))
-            if finite_seen & 1 == 0:
-                if is_union(u):
-                    loop member in union_members(u):
-                        taken = false
-                        loop o in opt_members:
-                            if type_eq(o, member): taken = true
-                        if not taken: miss.push(dt(member))
-                else: miss.push(dt(u))
-            if miss.len() > 0: fatal(nodes[m].pos, "this match has no arm for {join(miss, ", ")} (add one, or a `_ => ...` arm for the rest)")
-        if dewy: fatal(nodes[m].pos, "match is not exhaustive (add a `_ => ...` arm or `else`)")
-        fatal(nodes[m].pos, "match expression is not exhaustive (add a `_:` arm)")
-    if result == 0: result = T_NEVER
-    if expected != 0 and result != T_NEVER:
-        loop i in [0..nkids(m)):
-            b = int(nodes[kid(m, i)].b)
-            if nodes[b].aux != 0: coerce(block_value(b), expected)
-        result = expected
-    else:
-        loop i in [0..nkids(m)):
-            b = int(nodes[kid(m, i)].b)
-            if nodes[b].aux != 0:
-                finalize_literal(block_value(b))
-                coerce(block_value(b), result)
-    member_arms_as_variants(member_arms, result)
-    nodes[m].type = i32(result)
-    result
+    return
+match_sink = (m: int, body: int):
+    sink_arm(m, body)
+    return
+# (one arm prints, another gives a number: as a function's last line, the match is
+# what it gives back)
+match_void_hint = (on: bool):
+    if on: coerce_hint = " (an arm above gives no value, so this match gives none: where it ends a function, its arms are what the function gives back; `-> void` after the function's parameters says it gives back nothing)"
+    else: coerce_hint = ""
+match_member_arms = (arms: int[], result: int):
+    member_arms_as_variants(arms, result)
+    return
+match_enum_missing = (m: int, st: int, seen: bool[], union_lits: str[]):
+    dewy = files[pos_file(nodes[m].pos)].is_dewy
+    miss = ""
+    si = int(types[st].st)
+    loop vi in 0.. and s in seen:
+        if s: continue
+        if len(miss) > 0: miss += ", "
+        # (a union's members by their type names: a family's parent is one of its own)
+        if dewy and structs[si].union_: miss += union_literal_missing(vi, struct_targ(si, vi), union_lits)
+        else: miss += ".{name_of(int(variants[int(structs[si].variants) + vi].name))}"
+    fatal(nodes[m].pos, "this match has no arm for {miss} (add one, or a {jd(nodes[m].pos, "`_:`", "`_ => ...`")} arm for the rest)")
+# (match word { <'go'> ... <'stop'> ... } on a string, even after `word is? Cmd`: a string
+# is not narrowed to the union, so other text still needs an arm)
+match_string_missing = (m: int):
+    written: str[]
+    loop arm in kids(m):
+        loop p in kids(arm):
+            if nodes[p].kind == .plit and nodes[int(nodes[p].a)].kind == .str_lit: written.push(name_of(int(nodes[int(nodes[p].a)].sval)))
+    if written.len() > 0:
+        spelled: str[]
+        loop w in written: spelled.push("'{w}'")
+        fatal(nodes[m].pos, "match is not exhaustive: this is a string, which may hold other text than {join(spelled, ", ")} (add a `_ => ...` arm, or match the literal union instead: `match x as U \{...}` after `x is? U` holds)")
+# (an optional subject: name what no arm takes, `none` or a member of the payload)
+match_optional_missing = (m: int, st: int, finite: int, opt_members: int[]):
+    miss: str[]
+    if finite & 2 == 0: miss.push("none")
+    u = prune(telem(st))
+    if finite & 1 == 0:
+        if is_union(u):
+            loop member in union_members(u):
+                taken = false
+                loop o in opt_members:
+                    if type_eq(o, member): taken = true
+                if not taken: miss.push(dt(member))
+        else: miss.push(dt(u))
+    if miss.len() > 0: fatal(nodes[m].pos, "this match has no arm for {join(miss, ", ")} (add one, or a `_ => ...` arm for the rest)")
+match_error = (n: int, code: int, a: int, b: int, text: str):
+    pos = nodes[n].pos
+    if code == 1: fatal(pos, "this arm is unreachable: an earlier arm already matches every value")
+    if code == 2: fatal(pos, "type pattern {type_str(a, true)} is not a member of {type_str(b, true)}")
+    if code == 3: fatal(pos, "literal pattern is not a member of {type_str(a, true)}")
+    if code == 4: fatal(pos, "literal patterns need an integer, bool or string member")
+    if code == 5: fatal(pos, "{dt(a)} has no variant '{name_of(int(nodes[n].name))}'{variant_hint_for(a, name_of(int(nodes[n].name)))}")
+    if code == 6: fatal(pos, "this arm is unreachable: earlier arms already match every {dt(a)}")
+    if code == 7: fatal(pos, "variant '{name_of(int(variants[a].name))}' has {variants[a].nfields} field(s), pattern binds {nkids(n)}")
+    if code == 8: fatal(pos, "patterns with bindings cannot be combined with other patterns")
+    if code == 9: fatal(pos, "variant patterns need an enum value")
+    if code == 10: fatal(pos, "this arm is unreachable: an earlier arm already matches '{text}'")
+    if code == 11: fatal(pos, "range patterns need an integer value")
+    if code == 12: fatal(pos, "invalid pattern")
+    if code == 13: fatal(pos, "this arm is unreachable: earlier arms already match every value it does")
+    if code == 14: fatal(pos, "match arm has no value")
+    if code == 15 or code == 16: fatal(pos, "this match has no arm for {text} (add one, or a `_ => ...` arm for the rest)")
+    if a != 0: fatal(pos, "match is not exhaustive (add a `_ => ...` arm or `else`)")
+    fatal(pos, "match expression is not exhaustive (add a `_:` arm)")
 
 # A literal arm naming a member of a union of string literals (`<'lparen'>`) becomes the variant
 # pattern a Sloppy enum's arm is, so the match dispatches through a table instead of comparing
@@ -12622,6 +12333,9 @@ no_narrow_at = 0                # (the target of an assignment: the field or glo
 member_host = CheckerMemberHost(member_receiver, secret_member, coerce, is_dewy_set_type, is_map_type, member_copy, member_forward, ide_complete_members, member_len_check, member_call, member_module, member_type, member_vector, member_deref, member_fields, member_field_ref, dewy_method_field, member_method_value, member_fn_value, member_narrow_path, member_missing, member_error)
 member_input = CheckerMemberInput(&nodes, &types, &structs, &fields, &type_args, &files, &ide_sentinel, &ide_on, &id_dewy_len, &id_dewy_ptr, &path_narrows, &no_narrow_at, &T_STR, &member_host)
 member_binding = checker_members_bind(&member_input)
+match_host = CheckerMatchHost(check_expr, finalize_literal, coerce, check_to, new_local, check_struct_fields, match_intervals, path_key, match_refined, match_string_patterns, mk_ident_local, bare_arm_warning, catch_all_value, nominal_family_part, union_within, union_target, union_literal_seen, match_wrap_union, union_part, match_none_name, match_narrow_local, match_opt_wild, match_opt_wild_path, match_narrow_path, match_block, match_returned, match_reset, narrow_restore, match_merge, match_sink, match_void_hint, join_types, string_domain_match, int_domain_match, match_member_arms, match_enum_missing, match_string_missing, match_optional_missing, match_error)
+match_input = CheckerMatchInput(&nodes, &lists, &types, &structs, &fields, &variants, &type_args, &files, &locals, &names, &str_sets, &check_scopes, &narrow_changes, &path_narrows, &sink_final, &T_VOID, &T_BOOL, &T_STR, &T_MATH_INT, &T_NONE, &T_NEVER, &match_host)
+match_binding = checker_match_bind(&match_input)
 
 path_key = (n: int) -> str:
     k = nodes[n].kind

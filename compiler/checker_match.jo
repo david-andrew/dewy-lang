@@ -1,0 +1,511 @@
+# Frozen `match` checker extracted from expr.jo.
+use 'node_store.dewy'
+use 'checker_types.dewy'
+use 'source_types.dewy'
+use 'checker_state.dewy'
+use 'type_inference.dewy'
+use 'type_unions.dewy'
+use 'checker_resolve.dewy'
+use 'intervals.dewy'
+struct CheckerMatchHost:
+    check: (int, int) -> int
+    finalize: (int) -> int
+    coerce: (int, int) -> int
+    check_to: (int, int) -> int
+    binding: (int, int, int) -> int
+    fields: (int) -> void
+    intervals: (int, mut int[], mut int[]) -> bool
+    path_key: (int) -> str
+    refined: (int, int[], int, int[]) -> void
+    string_patterns: (int, int, str[], str[]) -> void
+    ident: (int, int) -> int
+    bare_warning: (int, int) -> void
+    catch_all: (int, int, bool[], int, int[], int) -> int
+    family_part: (int, int) -> int
+    within: (int, int) -> bool
+    target: (int, int, int) -> int
+    literal_seen: (int, int, int, int, mut str[], mut bool[]) -> void
+    wrap_union: (int, int) -> void
+    union_part: (int, int, int[], int) -> int
+    none_name: () -> int
+    narrow_local: (int, int[], int) -> void
+    opt_wild: (int, int, int[], bool, int) -> void
+    opt_wild_path: (int, str, int, int[], bool, int) -> void
+    narrow_path: (int, int[], int, str) -> void
+    block: (int, int, bool, mut int) -> int
+    returned: (int, int, int) -> void
+    reset: (int) -> void
+    restore: (int) -> int[]
+    merge: (int[]) -> void
+    sink: (int, int) -> void
+    void_hint: (bool) -> void
+    join: (int, int, int) -> int
+    string_domain: (int) -> bool
+    int_domain: (int, int[]) -> bool
+    member_arms: (int[], int) -> void
+    enum_missing: (int, int, bool[], str[]) -> void
+    string_missing: (int) -> void
+    optional_missing: (int, int, int, int[]) -> void
+    error: (int, int, int, int, str) -> void
+struct CheckerMatchInput:
+    nodes: *(Node[])
+    lists: *(i32[])
+    types: *(TypeInfo[])
+    structs: *(StructInfo[])
+    fields: *(Field[])
+    variants: *(Variant[])
+    args: *(i32[])
+    files: *(SrcFile[])
+    locals: *(Local[])
+    names: *(str[])
+    sets: *(str[][])
+    scopes: *CheckerScope
+    changes: *(int[])
+    path_narrows: *int
+    sink: *int
+    void_type: *int
+    bool_type: *int
+    string_type: *int
+    math_int: *int
+    none_type: *int
+    never_type: *int
+    host: *CheckerMatchHost
+xh_nodes: *(Node[])
+xh_lists: *(i32[])
+xh_types: *(TypeInfo[])
+xh_structs: *(StructInfo[])
+xh_fields: *(Field[])
+xh_variants: *(Variant[])
+xh_args: *(i32[])
+xh_files: *(SrcFile[])
+xh_locals: *(Local[])
+xh_names: *(str[])
+xh_sets: *(str[][])
+xh_scopes: *CheckerScope
+xh_changes: *(int[])
+xh_path_narrows: *int
+xh_sink: *int
+xh_void_type: *int
+xh_bool_type: *int
+xh_string_type: *int
+xh_math_int: *int
+xh_none_type: *int
+xh_never_type: *int
+xh_host: *CheckerMatchHost
+checker_match_bind = (input: *CheckerMatchInput) -> int:
+    xh_nodes = input[0].nodes
+    xh_lists = input[0].lists
+    xh_types = input[0].types
+    xh_structs = input[0].structs
+    xh_fields = input[0].fields
+    xh_variants = input[0].variants
+    xh_args = input[0].args
+    xh_files = input[0].files
+    xh_locals = input[0].locals
+    xh_names = input[0].names
+    xh_sets = input[0].sets
+    xh_scopes = input[0].scopes
+    xh_changes = input[0].changes
+    xh_path_narrows = input[0].path_narrows
+    xh_sink = input[0].sink
+    xh_void_type = input[0].void_type
+    xh_bool_type = input[0].bool_type
+    xh_string_type = input[0].string_type
+    xh_math_int = input[0].math_int
+    xh_none_type = input[0].none_type
+    xh_never_type = input[0].never_type
+    xh_host = input[0].host
+    0
+xh_count = (n: int) -> int: int(xh_nodes[0][n].nlist)
+xh_kid = (n: int, i: int) -> int: int(xh_lists[0][int(xh_nodes[0][n].list) + i])
+xh_kind = (t: int) -> TK: xh_types[0][tu_prune(t)].kind
+xh_elem = (t: int) -> int: int(xh_types[0][tu_prune(t)].elem)
+xh_mark = () -> int: xh_scopes[0].names.len()
+xh_flag = (n: int, f: int): xh_nodes[0][n].flags = i32(int(xh_nodes[0][n].flags) | f)
+xh_union = (t0: int) -> bool:
+    t = int(tu_prune(t0))
+    xh_types[0][t].kind == .enum_ and xh_structs[0][int(xh_types[0][t].st)].union_
+xh_members = (t0: int) -> int[]:
+    si = int(xh_types[0][int(tu_prune(t0))].st)
+    out: int[]
+    loop i in [0..int(xh_structs[0][si].ntargs)): out.push(int(xh_args[0][int(xh_structs[0][si].targs) + i]))
+    out
+xh_struct_targ = (si: int, i: int) -> int: int(xh_args[0][int(xh_structs[0][si].targs) + i])
+xh_set = (t0: int) -> int:
+    t = int(tu_prune(t0))
+    if xh_types[0][t].kind != .enum_: return 0
+    int(xh_structs[0][int(xh_types[0][t].st)].lit_set)
+xh_representation = (t0: int) -> int:
+    t = int(tu_prune(t0))
+    if xh_types[0][t].kind == .refined: return int(tu_prune(int(xh_types[0][t].elem)))
+    t
+xh_literal_member = (pt: int) -> bool:
+    r = xh_representation(pt)
+    xh_kind(r) == .int_ or pt == xh_bool_type[0] or xh_kind(r) == .str_ or xh_set(pt) != 0
+xh_lit = (e0: int) -> int:
+    e = e0
+    loop xh_nodes[0][e].kind == .conv: e = int(xh_nodes[0][e].a)
+    e
+xh_find_variant = (si: int, name: int) -> int:
+    if not xh_structs[0][si].resolved: xh_host[0].fields(si)
+    loop v in [0..int(xh_structs[0][si].nvariants)):
+        if int(xh_variants[0][int(xh_structs[0][si].variants) + v].name) == name: return v
+    -1
+xh_node = (kind: NK, a: int, aux: int, t: int, pos: int) -> int:
+    e = int(node_mk(mut xh_nodes[0], kind, pos))
+    xh_nodes[0][e].a = i32(a)
+    if kind == .narrow: xh_nodes[0][e].aux = i32(aux)
+    xh_nodes[0][e].type = i32(t)
+    xh_flag(e, 128)
+    e
+struct MatchState:
+    seen: bool[]
+    finite: int = 0
+    union_bool: int = 0
+    opt_members: int[]
+    has_wild: bool = false
+    str_covered: str[]
+    member_arms: int[]
+    union_lits: str[]
+    covered: int[]
+struct ArmState:
+    members: int[]
+    values: int[]
+    wild: bool = false
+xh_pattern = (ms: mut MatchState, arm_state: mut ArmState, arm: int, p: int, st: int, hidden: int, dewy: bool, seen_before: bool[], finite_before: int, domain_known: bool, int_dom: bool, str_domain: int):
+    pk = xh_nodes[0][p].kind
+    pos = xh_nodes[0][p].pos
+    binding = 0
+    value = 0
+    if dewy and (pk == .ptype or pk == .plit or pk == .pwild or pk == .prange):
+        binding = int(xh_nodes[0][p].name)
+        xh_nodes[0][p].name = 0
+        if binding != 0: value = xh_host[0].ident(hidden, pos)
+        if pk == .pwild and binding != 0:
+            xh_host[0].bare_warning(pos, binding)
+            value = xh_host[0].catch_all(hidden, st, seen_before, finite_before, ms.opt_members, pos)
+    if pk == .ptype:
+        pt = int(tu_prune(ct_resolve_type(int(xh_nodes[0][p].a))))
+        if dewy and xh_union(pt) and not tu_equal(pt, st):
+            whole = st
+            if xh_types[0][st].kind == .opt: whole = int(tu_prune(xh_elem(st)))
+            held = xh_host[0].family_part(pt, whole)
+            if held != 0: pt = int(tu_prune(held))
+        if tu_equal(pt, st): xh_nodes[0][p].kind = .pwild
+        else if xh_union(st) and uu_index(st, pt) >= 0:
+            vi = int(uu_index(st, pt))
+            si = int(xh_types[0][st].st)
+            xh_nodes[0][p].kind = .pvariant
+            xh_nodes[0][p].name = xh_variants[0][int(xh_structs[0][si].variants) + vi].name
+            if binding != 0: value = xh_node(.narrow, value, vi, pt, pos)
+        else if xh_union(st) and xh_union(pt) and xh_host[0].within(pt, st):
+            xh_nodes[0][p].type = i32(pt)
+            loop member in xh_members(pt):
+                ms.seen[int(uu_index(st, member))] = true
+                arm_state.members.push(member)
+            if binding != 0: xh_host[0].wrap_union(value, pt)
+        else if xh_types[0][st].kind == .opt and tu_equal(pt, xh_elem(st)):
+            ms.finite = ms.finite | 1
+            arm_state.members.push(pt)
+            if binding != 0: value = xh_node(.unwrap, value, 0, pt, pos)
+        else if xh_types[0][st].kind == .opt and xh_union(xh_elem(st)) and (uu_index(xh_elem(st), pt) >= 0 or (xh_union(pt) and xh_host[0].within(pt, xh_elem(st)))):
+            u = int(tu_prune(xh_elem(st)))
+            xh_nodes[0][p].type = i32(pt)
+            xh_nodes[0][p].aux2 = 1
+            pms = [pt]
+            if xh_union(pt): pms = xh_members(pt)
+            loop member in pms:
+                if not ms.opt_members.contains(member): ms.opt_members.push(member)
+            if ms.opt_members.len() == xh_members(u).len(): ms.finite = ms.finite | 1
+            if binding != 0:
+                e = xh_node(.unwrap, value, 0, u, pos)
+                value = e
+                if xh_union(pt): xh_host[0].wrap_union(value, pt)
+                else: value = xh_node(.narrow, e, int(uu_index(u, pt)), pt, pos)
+        else: xh_host[0].error(p, 2, pt, st, "")
+        pk = xh_nodes[0][p].kind
+    if dewy and pk == .plit and xh_union(st):
+        e = int(xh_nodes[0][p].a)
+        xh_host[0].check(e, 0)
+        vi = xh_host[0].target(e, int(xh_nodes[0][e].type), st)
+        if vi < 0: xh_host[0].error(p, 3, st, 0, "")
+        pt = xh_members(st)[vi]
+        if not xh_literal_member(pt): xh_host[0].error(p, 4, 0, 0, "")
+        xh_host[0].coerce(e, pt)
+        xh_nodes[0][p].aux2 = i32(vi)
+        arm_state.members.push(pt)
+        if xh_types[0][pt].kind == .refined or xh_set(pt) != 0: xh_host[0].literal_seen(p, e, vi, pt, mut ms.union_lits, mut ms.seen)
+        if pt == xh_bool_type[0]:
+            bit = 2
+            if xh_nodes[0][e].ival != 0: bit = 1
+            ms.union_bool = ms.union_bool | bit
+            if ms.union_bool == 3: ms.seen[vi] = true
+        if binding != 0: value = xh_node(.narrow, value, vi, pt, pos)
+    opt_lit = dewy and pk == .plit and xh_types[0][st].kind == .opt and xh_union(xh_elem(st)) and xh_nodes[0][int(xh_nodes[0][p].a)].kind != .none_lit
+    if opt_lit:
+        u = int(tu_prune(xh_elem(st)))
+        e = int(xh_nodes[0][p].a)
+        xh_host[0].check(e, 0)
+        vi = xh_host[0].target(e, int(xh_nodes[0][e].type), u)
+        if vi < 0: xh_host[0].error(p, 3, st, 0, "")
+        pt = xh_members(u)[vi]
+        if not xh_literal_member(pt): xh_host[0].error(p, 4, 0, 0, "")
+        xh_host[0].coerce(e, pt)
+        xh_nodes[0][p].aux2 = i32(vi)
+        if pt == xh_bool_type[0]:
+            bit = 2
+            if xh_nodes[0][e].ival != 0: bit = 1
+            ms.union_bool = ms.union_bool | bit
+            if ms.union_bool == 3 and not ms.opt_members.contains(pt):
+                ms.opt_members.push(pt)
+                if ms.opt_members.len() == xh_members(u).len(): ms.finite = ms.finite | 1
+        if binding != 0:
+            present = xh_node(.unwrap, value, 0, u, pos)
+            value = xh_host[0].union_part(present, u, [pt], pos)
+    if binding != 0:
+        if pk == .plit and xh_nodes[0][p].type != 0 and xh_set(int(xh_nodes[0][value].type)) == 0: xh_nodes[0][value].type = xh_nodes[0][p].type
+        d = int(node_mk(mut xh_nodes[0], .vardecl, pos))
+        xh_nodes[0][d].name = i32(binding)
+        xh_nodes[0][d].b = i32(value)
+        body = int(xh_nodes[0][arm].b)
+        statements = [d]
+        loop i in [0..xh_count(body)): statements.push(xh_kid(body, i))
+        node_set_list(mut xh_nodes[0], mut xh_lists[0], body, statements)
+    if pk == .ptype: return
+    if pk == .pwild:
+        ms.has_wild = true
+        arm_state.wild = true
+        return
+    if pk == .pvariant and xh_types[0][st].kind == .enum_:
+        si = int(xh_types[0][st].st)
+        vi = xh_find_variant(si, int(xh_nodes[0][p].name))
+        if vi < 0: xh_host[0].error(p, 5, st, 0, "")
+        xh_nodes[0][p].aux2 = i32(vi)
+        if dewy and xh_structs[0][si].union_ and ms.seen[vi]: xh_host[0].error(p, 6, xh_struct_targ(si, vi), 0, "")
+        ms.seen[vi] = true
+        v = int(xh_structs[0][si].variants) + vi
+        if xh_structs[0][si].union_: arm_state.members.push(int(xh_fields[0][int(xh_variants[0][v].fields)].type))
+        if xh_count(p) > 0:
+            if xh_count(p) != int(xh_variants[0][v].nfields): xh_host[0].error(p, 7, v, 0, "")
+            if xh_count(arm) > 1: xh_host[0].error(p, 8, 0, 0, "")
+            loop f in [0..xh_count(p)):
+                b = xh_kid(p, f)
+                if xh_names[0][int(xh_nodes[0][b].name)] == "_": continue
+                ft = int(xh_fields[0][int(xh_variants[0][v].fields) + f].type)
+                l = xh_host[0].binding(int(xh_nodes[0][b].name), ft, xh_nodes[0][b].pos)
+                xh_locals[0][l].flags = i32(int(xh_locals[0][l].flags) | 8)
+                fa = int(node_mk(mut xh_nodes[0], .field, xh_nodes[0][b].pos))
+                base = xh_host[0].ident(hidden, xh_nodes[0][b].pos)
+                xh_nodes[0][fa].a = i32(base)
+                xh_nodes[0][fa].aux = -3
+                xh_nodes[0][fa].aux2 = i32(vi)
+                xh_nodes[0][fa].ival = f
+                xh_nodes[0][fa].type = i32(ft)
+                xh_flag(fa, 128)
+                xh_locals[0][l].alias = i32(fa)
+                xh_nodes[0][b].sym = i32(l)
+        return
+    if pk == .pvariant:
+        if xh_nodes[0][p].aux != 0: xh_host[0].error(p, 9, 0, 0, "")
+        id = int(node_mk(mut xh_nodes[0], .ident, pos))
+        xh_nodes[0][id].name = xh_nodes[0][p].name
+        xh_nodes[0][p] = Node(kind = .plit, pos = pos, a = i32(id))
+        pk = .plit
+    if pk == .plit and xh_nodes[0][int(xh_nodes[0][p].a)].kind == .none_lit and xh_types[0][st].kind == .enum_:
+        none_id = xh_host[0].none_name()
+        if xh_find_variant(int(xh_types[0][st].st), none_id) >= 0:
+            d = int(node_mk(mut xh_nodes[0], .dotname, pos))
+            xh_nodes[0][d].name = i32(xh_host[0].none_name())
+            xh_nodes[0][p].a = i32(d)
+    if pk == .plit:
+        e = int(xh_nodes[0][p].a)
+        if dewy and (xh_union(st) or opt_lit): return
+        if xh_types[0][st].kind == .opt and xh_nodes[0][e].kind == .none_lit:
+            ms.finite = ms.finite | 2
+            arm_state.members.push(xh_none_type[0])
+        if st == xh_bool_type[0] and xh_nodes[0][e].kind == .bool_lit:
+            bit = 2
+            if xh_nodes[0][e].ival != 0: bit = 1
+            ms.finite = ms.finite | bit
+        xh_host[0].check(e, st)
+        xh_host[0].coerce(e, st)
+        if str_domain != 0 and xh_nodes[0][e].kind == .dotname:
+            text = xh_sets[0][str_domain][int(xh_nodes[0][e].aux)]
+            if ms.str_covered.contains(text): xh_host[0].error(p, 10, 0, 0, text)
+            ms.str_covered.push(text)
+        if xh_types[0][st].kind == .enum_ and xh_nodes[0][e].kind == .dotname:
+            ms.seen[int(xh_nodes[0][e].aux)] = true
+            if str_domain != 0: ms.member_arms.push(p)
+        lit = xh_lit(e)
+        if (domain_known or int_dom) and xh_nodes[0][lit].kind == .int_lit:
+            arm_state.values.push(xh_nodes[0][lit].ival)
+            arm_state.values.push(xh_nodes[0][lit].ival)
+        return
+    if pk == .prange:
+        if xh_kind(xh_representation(st)) != .int_: xh_host[0].error(p, 11, 0, 0, "")
+        xh_host[0].check_to(int(xh_nodes[0][p].a), st)
+        xh_host[0].check_to(int(xh_nodes[0][p].b), st)
+        lo = xh_lit(int(xh_nodes[0][p].a))
+        hi = xh_lit(int(xh_nodes[0][p].b))
+        if (domain_known or int_dom) and int(xh_nodes[0][p].flags) & 2 != 0 and xh_nodes[0][lo].kind == .int_lit and xh_nodes[0][hi].kind == .int_lit:
+            arm_state.values.push(xh_nodes[0][lo].ival)
+            arm_state.values.push(xh_nodes[0][hi].ival)
+        return
+    xh_host[0].error(p, 12, 0, 0, "")
+xh_wild_members = (arm_state: mut ArmState, st: int, seen_before: bool[], finite_before: int, opt_members: int[]) -> bool:
+    arm_state.members = []
+    if xh_types[0][st].kind == .opt:
+        if finite_before & 1 == 0 and opt_members.len() > 0: return true
+        if finite_before & 2 != 0 and finite_before & 1 == 0: arm_state.members.push(xh_elem(st))
+        return false
+    all = xh_members(st)
+    loop vi in [0..all.len()):
+        if not seen_before[vi]: arm_state.members.push(all[vi])
+    false
+xh_match = (m: int, expected: int) -> int:
+    is_stmt = int(xh_nodes[0][m].flags) & 16 != 0
+    sc = int(xh_nodes[0][m].a)
+    xh_host[0].check(sc, 0)
+    xh_host[0].finalize(sc)
+    sc = int(xh_nodes[0][m].a)
+    st = int(tu_prune(int(xh_nodes[0][sc].type)))
+    mark = xh_mark()
+    hidden = xh_host[0].binding(0, st, xh_nodes[0][m].pos)
+    xh_locals[0][hidden].flags = 64
+    xh_nodes[0][m].sym = i32(hidden)
+    result = 0
+    first_val = 0
+    ms = MatchState()
+    dewy = xh_files[0][xh_nodes[0][m].pos >> 40].is_dewy
+    if xh_types[0][st].kind == .enum_:
+        si = int(xh_types[0][st].st)
+        if not xh_structs[0][si].resolved: xh_host[0].fields(si)
+        loop i in [0..int(xh_structs[0][si].nvariants)): ms.seen.push(false)
+    domain_known = false
+    domain: int[]
+    str_domain = 0
+    str_patterns = dewy and xh_sets[0].len() > 1
+    int_dom = dewy and st == xh_math_int[0]
+    domain_open = false
+    domain_high: int[]
+    if dewy and not xh_union(st):
+        declared = st
+        if xh_nodes[0][sc].kind == .ident and xh_nodes[0][sc].aux == 1:
+            lt = int(xh_locals[0][int(xh_nodes[0][sc].sym)].type)
+            if tu_equal(xh_representation(lt), st): declared = lt
+        domain_known = xh_host[0].intervals(declared, mut domain, mut domain_high)
+        str_domain = xh_set(declared)
+        if domain_known and domain_high.len() > 0:
+            domain_known = false
+            domain_open = true
+    sum_type = xh_union(st) or xh_types[0][st].kind == .opt
+    narrows = sum_type and xh_nodes[0][sc].kind == .ident and xh_nodes[0][sc].aux == 1
+    pkey = ""
+    if sum_type and not narrows: pkey = xh_host[0].path_key(sc)
+    changed: int[]
+    loop i in [0..xh_count(m)):
+        arm = xh_kid(m, i)
+        amark = xh_mark()
+        changes = xh_changes[0].len()
+        arm_state = ArmState()
+        seen_before = ms.seen
+        finite_before = ms.finite
+        if dewy and ms.has_wild: xh_host[0].error(arm, 1, 0, 0, "")
+        if domain_known: xh_host[0].refined(arm, domain, st, [])
+        else if domain_open: xh_host[0].refined(arm, domain, st, domain_high)
+        if str_patterns: xh_host[0].string_patterns(arm, st, ms.str_covered, ms.union_lits)
+        loop k in [0..xh_count(arm)): xh_pattern(mut ms, mut arm_state, arm, xh_kid(arm, k), st, hidden, dewy, seen_before, finite_before, domain_known, int_dom, str_domain)
+        if dewy and domain_known and arm_state.values.len() > 0 and not arm_state.wild:
+            if interval_missing(interval_meet_all(arm_state.values, domain), ms.covered).len() == 0: xh_host[0].error(arm, 13, 0, 0, "")
+            loop v in arm_state.values: ms.covered.push(v)
+        else if int_dom and not arm_state.wild:
+            loop v in arm_state.values: ms.covered.push(v)
+        if narrows:
+            if arm_state.wild and xh_wild_members(mut arm_state, st, seen_before, finite_before, ms.opt_members):
+                xh_host[0].opt_wild(int(xh_nodes[0][sc].sym), st, ms.opt_members, finite_before & 2 != 0, xh_nodes[0][arm].pos)
+            xh_host[0].narrow_local(int(xh_nodes[0][sc].sym), arm_state.members, xh_nodes[0][arm].pos)
+        else if len(pkey) > 0:
+            if arm_state.wild and xh_wild_members(mut arm_state, st, seen_before, finite_before, ms.opt_members):
+                xh_host[0].opt_wild_path(sc, pkey, st, ms.opt_members, finite_before & 2 != 0, xh_nodes[0][arm].pos)
+            xh_path_narrows[0] = xh_path_narrows[0] + 1
+            xh_host[0].narrow_path(sc, arm_state.members, xh_nodes[0][arm].pos, pkey)
+        body = int(xh_nodes[0][arm].b)
+        body_changes = xh_changes[0].len()
+        jumps = 0
+        if is_stmt: xh_host[0].block(body, 0, false, mut jumps)
+        else:
+            exp = expected
+            if result != 0 and (expected == 0 or xh_kind(expected) == .var): exp = result
+            hint = result != 0 and xh_kind(result) == .void_ and (expected == 0 or xh_kind(expected) == .var)
+            if hint: xh_host[0].void_hint(true)
+            if m == xh_sink[0]: xh_host[0].sink(m, body)
+            t = xh_host[0].block(body, exp, true, mut jumps)
+            if t != xh_never_type[0]:
+                if xh_nodes[0][body].aux == 0 and xh_kind(t) == .void_:
+                    if result != 0 and xh_kind(result) != .void_ and expected != 0: xh_host[0].error(arm, 14, 0, 0, "")
+                    result = xh_void_type[0]
+                else if result == 0:
+                    result = t
+                    first_val = body
+                else:
+                    vp = int(xh_nodes[0][xh_kid(body, xh_count(body) - 1)].a)
+                    if expected != 0: xh_host[0].coerce(vp, expected)
+                    else if first_val != 0: result = xh_host[0].join(int(xh_nodes[0][xh_kid(first_val, xh_count(first_val) - 1)].a), vp, xh_nodes[0][arm].pos)
+                    else: xh_host[0].coerce(vp, result)
+            xh_host[0].void_hint(false)
+        if xh_changes[0].len() != body_changes: xh_host[0].returned(body_changes, jumps, body)
+        xh_host[0].reset(amark)
+        loop l in xh_host[0].restore(changes): changed.push(l)
+    xh_host[0].reset(mark)
+    xh_host[0].merge(changed)
+    exhaustive = ms.has_wild or ms.finite == 3
+    if not exhaustive and domain_known and ms.covered.len() > 0:
+        missing = interval_missing(domain, ms.covered)
+        if missing.len() == 0: exhaustive = true
+        else if not is_stmt: xh_host[0].error(m, 15, 0, 0, interval_text(missing))
+    if not exhaustive and str_domain != 0:
+        missing = ""
+        count = 0
+        loop value in xh_sets[0][str_domain]:
+            if not ms.str_covered.contains(value):
+                if count > 0: missing = "{missing}, "
+                missing = "{missing}'{value}'"
+                count = count + 1
+        if count == 0: exhaustive = true
+        else if not is_stmt: xh_host[0].error(m, 16, 0, 0, missing)
+    if not exhaustive and xh_types[0][st].kind == .enum_:
+        exhaustive = true
+        loop s in ms.seen:
+            if not s: exhaustive = false
+    if not exhaustive and dewy and st == xh_string_type[0] and xh_host[0].string_domain(m): exhaustive = true
+    if not exhaustive and dewy and st == xh_math_int[0] and xh_host[0].int_domain(m, ms.covered): exhaustive = true
+    if exhaustive: xh_nodes[0][m].aux2 = 1
+    else: xh_nodes[0][m].aux2 = 0
+    if is_stmt and (exhaustive or (not dewy and xh_types[0][st].kind != .enum_)):
+        xh_host[0].member_arms(ms.member_arms, xh_void_type[0])
+        xh_nodes[0][m].type = i32(xh_void_type[0])
+        return xh_void_type[0]
+    if not exhaustive:
+        if xh_types[0][st].kind == .enum_: xh_host[0].enum_missing(m, st, ms.seen, ms.union_lits)
+        if dewy and st == xh_string_type[0] and xh_sets[0].len() > 1: xh_host[0].string_missing(m)
+        if dewy and xh_types[0][st].kind == .opt and str_domain == 0 and not domain_known and ms.union_bool == 0 and ms.union_lits.len() == 0 and ms.member_arms.len() == 0:
+            xh_host[0].optional_missing(m, st, ms.finite, ms.opt_members)
+        flag = 0
+        if dewy: flag = 1
+        xh_host[0].error(m, 20, flag, 0, "")
+    if result == 0: result = xh_never_type[0]
+    if expected != 0 and result != xh_never_type[0]:
+        loop i in [0..xh_count(m)):
+            b = int(xh_nodes[0][xh_kid(m, i)].b)
+            if xh_nodes[0][b].aux != 0: xh_host[0].coerce(int(xh_nodes[0][xh_kid(b, xh_count(b) - 1)].a), expected)
+        result = expected
+    else:
+        loop i in [0..xh_count(m)):
+            b = int(xh_nodes[0][xh_kid(m, i)].b)
+            if xh_nodes[0][b].aux != 0:
+                v = int(xh_nodes[0][xh_kid(b, xh_count(b) - 1)].a)
+                xh_host[0].finalize(v)
+                xh_host[0].coerce(int(xh_nodes[0][xh_kid(b, xh_count(b) - 1)].a), result)
+    xh_host[0].member_arms(ms.member_arms, result)
+    xh_nodes[0][m].type = i32(result)
+    result
