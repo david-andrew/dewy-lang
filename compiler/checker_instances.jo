@@ -33,7 +33,8 @@ checker_instances_bind = (input: *CheckerInstanceInput) -> int:
     0
 ci_get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
     if ci_input[0].nodes[0][decl].kind == .lambda: return ci_input[0].host[0].poly(decl, targs, use_pos)
-    ci_input[0].host[0].preflight(decl, use_pos)
+    # (the host's preflight acts only on extern or attributed declarations)
+    if int(ci_input[0].nodes[0][decl].flags) & 4 != 0 or ci_input[0].nodes[0][decl].c != 0: ci_input[0].host[0].preflight(decl, use_pos)
     di = cs_decl_info(decl)
     sig = cs_fn_sig(decl)
     concrete = targs.len() > 0
@@ -41,7 +42,7 @@ ci_get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
         if tu_has_var(t): concrete = false
     if concrete:
         if let f = ci_input[0].index[0].get(FnInstanceKey(decl, targs)):
-            ci_input[0].host[0].ensure(f, use_pos)
+            if ci_input[0].functions[0][f].ret == 0: ci_input[0].host[0].ensure(f, use_pos)
             return f
     else:
         loop f in ci_input[0].declarations[0][di].insts:
@@ -52,7 +53,7 @@ ci_get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
                     same = false
                     break
             if same:
-                ci_input[0].host[0].ensure(f, use_pos)
+                if ci_input[0].functions[0][f].ret == 0: ci_input[0].host[0].ensure(f, use_pos)
                 return f
     f = ci_input[0].host[0].create(decl, use_pos)
     zt: int[]
@@ -81,6 +82,6 @@ ci_get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
     ci_input[0].host[0].attributes(decl, f, zt, use_pos)
     ci_input[0].declarations[0][di].insts.push(f)
     if zt.len() > 0: ci_input[0].index[0][FnInstanceKey(decl, zt)] = f
-    ci_input[0].host[0].ensure(f, use_pos)
+    if ci_input[0].functions[0][f].ret == 0: ci_input[0].host[0].ensure(f, use_pos)
     f
 

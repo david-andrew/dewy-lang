@@ -11,10 +11,6 @@ literal_last = 0
 literal_grow = false
 literal_snapshot: Node[]
 literal_effect_grow = false
-literal_default = (n: int) -> int:
-    assert(int(nodes[n].flags) & 256 != 0)
-    events.push("default:{n}")
-    T_INT
 literal_coerce = (n: int, t: int) -> int:
     assert(nodes[n].type == i32(T_INT))
     events.push("coerce:{n}:{t}")
@@ -52,8 +48,8 @@ literal_format = (n: int, pos: int):
     loop i in [0..128): nodes.push(Node()); lists.push(0)
 literal_warning = (n: int): events.push("warning:{n}")
 literal_float_error = (n: int): print("float-error"); exit(22)
-literal_host = CheckerLiteralHost(literal_default, literal_coerce, literal_effect, literal_note, literal_charlike, literal_check, literal_finalize, literal_format, literal_warning, literal_float_error)
-literal_input = CheckerLiteralInput(&nodes, &lists, &types, &refine, &literal_effects, &literal_exact, &literal_last, &T_STR, &T_FLOAT, &T_BOOL, &T_NULL, &literal_host)
+literal_host = CheckerLiteralHost(literal_coerce, literal_effect, literal_note, literal_charlike, literal_check, literal_finalize, literal_format, literal_warning, literal_float_error)
+literal_input = CheckerLiteralInput(&nodes, &lists, &types, &files, &refine, &literal_effects, &literal_exact, &literal_last, &T_STR, &T_FLOAT, &T_BOOL, &T_NULL, &T_INT, &T_MATH_INT, &literal_host)
 literal_binding = checker_literals_bind(&literal_input)
 main = ():
     prepare()
@@ -70,6 +66,11 @@ main = ():
     opt = int(tb_mk_opt(T_FLOAT))
     assert(xl_check_int(node(.int_lit), opt) == T_FLOAT)
     assert(xl_check_int(node(.int_lit), 0) == T_INT)
+    # (a Dewy file's unexpected integer literal is the semantic integer)
+    files[0].is_dewy = true
+    n = node(.int_lit)
+    assert(xl_check_int(n, 0) == T_MATH_INT and nodes[n].type == i32(T_MATH_INT) and int(nodes[n].flags) & 256 != 0)
+    files[0].is_dewy = false
     assert(xl_check_int(node(.int_lit), refined) == T_INT)
     f = node(.float_lit); nodes[f].flags = 256
     assert(xl_check_scalar(f, T_FLOAT) == T_FLOAT and int(nodes[f].flags) & 256 == 0)
@@ -92,12 +93,15 @@ main = ():
     text = node(.str_lit, 0, 0, 1, [first, node(.str_lit), second])
     count = events.len()
     assert(xl_check_str(text, 0) == T_STR)
-    assert(events[count] == "warning:{nodes[first].a}" and events[count + 5] == "format:{first}:{nodes[first].pos}")
-    assert(events[count + 6] == "warning:{nodes[second].a}")
+    assert(events[count] == "warning:{nodes[first].a}" and events[count + 3] == "format:{first}:{nodes[first].pos}")
+    assert(events[count + 4] == "warning:{nodes[second].a}")
     literal_effects = true; literal_effect_grow = true
     n = node(.ident)
     assert(xl_finish(n, refined, T_INT) == T_BOOL and nodes[n].type == i32(T_BOOL))
     assert(literal_last == n and nodes[n].kind == .unary)
+    # (no expected type: callable inference has nothing to apply)
+    n = node(.ident)
+    count = events.len(); assert(xl_finish(n, T_INT, 0) == T_INT and events.len() == count)
     literal_effects = false
     n = node(.conv); nodes[n].aux = 2
     count = events.len(); xl_finish(n, T_INT, 0); assert(events.len() == count + 1 and literal_last == n)

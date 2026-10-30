@@ -39,7 +39,8 @@ let ci_input:ptr<CheckerInstanceInput>=$unsafe (uint64(0) as ptr<CheckerInstance
 checker_instances_bind=(input:ptr<CheckerInstanceInput>):>CIWord=>{ci_input=input;0}
 ci_get_fn_inst=(decl:CIWord targs:array<int64> use_pos:CIWord):>CIWord=>$unsafe {
     if ci_input[0].nodes[0].ptr[decl].kind =? 'lambda' {return ci_input[0].host[0].poly(decl targs use_pos)}
-    ci_input[0].host[0].preflight(decl use_pos)
+    # The host's preflight only acts on extern or attributed declarations.
+    if (CIWord(ci_input[0].nodes[0].ptr[decl].flags) & 4) not=? 0 or ci_input[0].nodes[0].ptr[decl].c not=? 0 {ci_input[0].host[0].preflight(decl use_pos)}
     # Preserve the original hot cached-signature guard without entering the
     # recursive signature constructor (which saves a full working frame).
     let di=CIWord(ci_input[0].nodes[0].ptr[decl].sym)
@@ -52,7 +53,7 @@ ci_get_fn_inst=(decl:CIWord targs:array<int64> use_pos:CIWord):>CIWord=>$unsafe 
         let found=ci_input[0].index[0].get(FnInstanceKey[decl targs])
         if found not=? none {
             let f=found ?? 0
-            ci_input[0].host[0].ensure(f use_pos)
+            if ci_input[0].functions[0].ptr[f].ret =? 0 {ci_input[0].host[0].ensure(f use_pos)}
             return f
         }
     } else {
@@ -62,7 +63,10 @@ ci_get_fn_inst=(decl:CIWord targs:array<int64> use_pos:CIWord):>CIWord=>$unsafe 
                 if not same {break}
                 if not tu_equal(ci_input[0].functions[0].ptr[f].targs[k] targs[k]) {same=false;break}
             }
-            if same {ci_input[0].host[0].ensure(f use_pos);return f}
+            if same {
+                if ci_input[0].functions[0].ptr[f].ret =? 0 {ci_input[0].host[0].ensure(f use_pos)}
+                return f
+            }
         }
     }
     let f=ci_input[0].host[0].create(decl use_pos)
@@ -104,6 +108,6 @@ ci_get_fn_inst=(decl:CIWord targs:array<int64> use_pos:CIWord):>CIWord=>$unsafe 
     ci_input[0].host[0].attributes(decl f zt use_pos)
     ci_input[0].declarations[0][di].insts.push(f)
     if zt.length >? 0 {ci_input[0].index[0][FnInstanceKey[decl zt]]=f}
-    ci_input[0].host[0].ensure(f use_pos)
+    if ci_input[0].functions[0].ptr[f].ret =? 0 {ci_input[0].host[0].ensure(f use_pos)}
     f
 }

@@ -1,6 +1,7 @@
 $runtime_checks
 from p"node_store.dewy" import Node
 from p"checker_types.dewy" import (TypeInfo TK)
+from p"source_types.dewy" import SrcFile
 from p"type_inference.dewy" import tu_prune
 from p"type_constructors.dewy" import (tb_mk_var tb_mk_opt)
 # Literal expression checking and common type publication. Scalar paths are O(1)
@@ -9,7 +10,6 @@ from p"type_constructors.dewy" import (tb_mk_var tb_mk_opt)
 # repay these services with their own semantic groups, preserving callback order.
 XLWord:type=int64<overflow='wrap'>
 CheckerLiteralHost:type=[
-    default_type:<(node:int64):>int64>
     coerce:<(node:int64 type_id:int64):>int64>
     effect:<(node:int64 expected:int64):>int64>
     exact:<(node:int64):>void>
@@ -24,6 +24,7 @@ CheckerLiteralInput:type=[
     nodes:ptr<array<Node>>
     lists:ptr<array<int32>>
     types:ptr<array<TypeInfo>>
+    files:ptr<array<SrcFile>>
     refine:ptr<bool>
     effects:ptr<bool>
     exact_measure:ptr<bool>
@@ -32,11 +33,14 @@ CheckerLiteralInput:type=[
     float_type:ptr<int64>
     bool_type:ptr<int64>
     null_type:ptr<int64>
+    int_type:ptr<int64>
+    math_int:ptr<int64>
     host:ptr<CheckerLiteralHost>
 ]
 let xl_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
 let xl_lists:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
 let xl_types:ptr<array<TypeInfo>>=$unsafe (uint64(0) as ptr<array<TypeInfo>>)
+let xl_files:ptr<array<SrcFile>>=$unsafe (uint64(0) as ptr<array<SrcFile>>)
 let xl_refine:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
 let xl_effects:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
 let xl_exact_measure:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
@@ -45,11 +49,14 @@ let xl_string_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let xl_float_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let xl_bool_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let xl_null_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xl_int_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xl_math_int:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let xl_host:ptr<CheckerLiteralHost>=$unsafe (uint64(0) as ptr<CheckerLiteralHost>)
 checker_literals_bind=(input:ptr<CheckerLiteralInput>):>XLWord=>$unsafe {
     xl_nodes=input[0].nodes
     xl_lists=input[0].lists
     xl_types=input[0].types
+    xl_files=input[0].files
     xl_refine=input[0].refine
     xl_effects=input[0].effects
     xl_exact_measure=input[0].exact_measure
@@ -58,6 +65,8 @@ checker_literals_bind=(input:ptr<CheckerLiteralInput>):>XLWord=>$unsafe {
     xl_float_type=input[0].float_type
     xl_bool_type=input[0].bool_type
     xl_null_type=input[0].null_type
+    xl_int_type=input[0].int_type
+    xl_math_int=input[0].math_int
     xl_host=input[0].host
     0
 }
@@ -84,7 +93,8 @@ xl_publish=(@node:Node t:XLWord):>void=>{
 xl_finish=(n:XLWord t0:XLWord expected:XLWord):>XLWord=>$unsafe {
     let t=t0
     if xl_refine[0] and xl_types[0].ptr[t].kind =? 'refined' {t=XLWord(xl_types[0].ptr[t].elem)}
-    if xl_effects[0] {
+    # Without an expected type the host's callable inference returns the type as published.
+    if xl_effects[0] and expected not=? 0 {
         xl_nodes[0][n].type=int32<overflow='wrap'>(t)
         t=xl_host[0].effect(n expected)
     }
@@ -96,13 +106,18 @@ xl_finish=(n:XLWord t0:XLWord expected:XLWord):>XLWord=>$unsafe {
     xl_last[0]=n
     t
 }
+# An integer literal's default type: the semantic integer in Dewy source.
+xl_int_default=(n:XLWord):>XLWord=>$unsafe {
+    if xl_files[0][xl_nodes[0].ptr[n].pos >> 40].is_dewy {return xl_math_int[0]}
+    xl_int_type[0]
+}
 xl_check_int=(n:XLWord expected:XLWord):>XLWord=>$unsafe {
     let ex=xl_expected(expected)
     let exk:TK='void_'
     if ex not=? 0 {exk=xl_types[0].ptr[ex].kind}
     let t:XLWord=0
     xl_nodes[0][n].flags=xl_nodes[0].ptr[n].flags | 256
-    let initial=xl_host[0].default_type(n)
+    let initial=xl_int_default(n)
     xl_nodes[0][n].type=int32<overflow='wrap'>(initial)
     if ex not=? 0 and (exk =? 'int_' or exk =? 'float_') {
         xl_host[0].coerce(n ex);
@@ -110,7 +125,7 @@ xl_check_int=(n:XLWord expected:XLWord):>XLWord=>$unsafe {
     } else if ex not=? 0 and exk =? 'opt' and xl_numeric(XLWord(xl_types[0].ptr[ex].elem)) {
         xl_host[0].coerce(n tu_prune(XLWord(xl_types[0].ptr[ex].elem)));
         t=XLWord(xl_nodes[0].ptr[n].type)
-    } else {t=xl_host[0].default_type(n)}
+    } else {t=initial}
     xl_finish(n t expected)
 }
 xl_check_str=(n:XLWord expected:XLWord):>XLWord=>$unsafe {

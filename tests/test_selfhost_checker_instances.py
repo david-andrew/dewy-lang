@@ -86,6 +86,11 @@ main = ():
     plain = ci_get_fn_inst(instance_nested, [], 12)
     assert(functions[plain].body == nodes[instance_nested].b)
     assert(ci_get_fn_inst(instance_nested, [], 13) == plain)
+    assert(not events.contains("preflight:{instance_nested}:13"))
+    nodes[instance_nested].c = 1
+    assert(ci_get_fn_inst(instance_nested, [], 16) == plain)
+    assert(events.contains("preflight:{instance_nested}:16"))
+    nodes[instance_nested].c = 0
     inferred = instance_decl(false, 0)
     assert(functions[ci_get_fn_inst(inferred, [], 14)].ret == i32(T_VOID))
     assert(ci_get_fn_inst(node(.lambda), [], 15) == 1234)

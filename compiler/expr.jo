@@ -10017,8 +10017,8 @@ literal_interpolation_warning = (e: int):
     if (nodes[e].kind == .int_lit or (nodes[e].kind == .tuple and nkids(e) > 0 and nodes[kid(e, 0)].kind == .int_lit)) and not pos_in_lib(nodes[e].pos) and not files[pos_file(nodes[e].pos)].is_dewy and brace_before(nodes[e].pos):
         warn(nodes[e].pos, "`\{...}` with a number in it puts that number in the text: for the characters themselves (a regular expression's repeat), write `\{\{4}}}}`, or a raw string `r\"[0-9]\{4}\"`")
 literal_float_error = (n: int): fatal(nodes[n].pos, "real literal exceeds float64")
-literal_host = CheckerLiteralHost(lit_default, coerce, effect_infer_callable, exact_note, charlike_to_int, check_expr, finalize_literal, fmt_part, literal_interpolation_warning, literal_float_error)
-literal_input = CheckerLiteralInput(&nodes, &lists, &types, &refine_active, &effects_active, &exact_measure_on, &last_checked, &T_STR, &T_FLOAT, &T_BOOL, &T_NULL, &literal_host)
+literal_host = CheckerLiteralHost(coerce, effect_infer_callable, exact_note, charlike_to_int, check_expr, finalize_literal, fmt_part, literal_interpolation_warning, literal_float_error)
+literal_input = CheckerLiteralInput(&nodes, &lists, &types, &files, &refine_active, &effects_active, &exact_measure_on, &last_checked, &T_STR, &T_FLOAT, &T_BOOL, &T_NULL, &T_INT, &T_MATH_INT, &literal_host)
 literal_binding = checker_literals_bind(&literal_input)
 
 check_field_expr = (n: int, expected: int) -> int:
