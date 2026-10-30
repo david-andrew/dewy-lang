@@ -1,0 +1,68 @@
+$runtime_checks
+from p"node_store.dewy" import Node
+from p"checker_state.dewy" import (FnInst FnCtx)
+from p"type_inference.dewy" import tu_prune
+# `value or_throw` owns which alternatives propagate: the enclosing function's
+# declared (or inferred) result, the operand's exception members and their fit.
+# Work is O(members of the operand's type) plus demanded checking; the return
+# rewrite and diagnostics are host services that may grow every arena.
+XQWord:type=int64<overflow='wrap'>
+CheckerPropagateHost:type=[
+    check:<(node:int64 expected:int64):>int64>
+    inferring:<(instance:int64):>bool>
+    members:<(type_id:int64):>array<int64>>
+    exception:<(type_id:int64):>bool>
+    can_coerce:<(node:int64 source:int64 target:int64):>bool>
+    rewrite:<(node:int64 operand:int64 exceptions:array<int64> members:int64 expected:int64):>int64>
+    error:<(node:int64 code:int64 type_id:int64 operand_type:int64):>void>
+]
+CheckerPropagateInput:type=[
+    nodes:ptr<array<Node>>
+    fns:ptr<array<FnInst>>
+    contexts:ptr<array<FnCtx>>
+    context:ptr<int64>
+    last:ptr<int64>
+    none_type:ptr<int64>
+    host:ptr<CheckerPropagateHost>
+]
+let xq_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let xq_fns:ptr<array<FnInst>>=$unsafe (uint64(0) as ptr<array<FnInst>>)
+let xq_contexts:ptr<array<FnCtx>>=$unsafe (uint64(0) as ptr<array<FnCtx>>)
+let xq_context:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xq_last:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xq_none_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xq_host:ptr<CheckerPropagateHost>=$unsafe (uint64(0) as ptr<CheckerPropagateHost>)
+checker_propagate_bind=(input:ptr<CheckerPropagateInput>):>XQWord=>$unsafe {
+    xq_nodes=input[0].nodes
+    xq_fns=input[0].fns
+    xq_contexts=input[0].contexts
+    xq_context=input[0].context
+    xq_last=input[0].last
+    xq_none_type=input[0].none_type
+    xq_host=input[0].host
+    0
+}
+# Frozen FK_INIT ordinal: module initialization has no result to propagate to.
+xq_check=(n:XQWord expected:XQWord):>XQWord=>$unsafe {
+    let inst=XQWord(xq_contexts[0][xq_context[0]].inst)
+    let infer=xq_contexts[0][xq_context[0]].infer_ret
+    # A Dewy function without a declared result infers the kinds it throws.
+    let inferring=infer and xq_host[0].inferring(inst)
+    if xq_fns[0][inst].kind =? 4 or (infer and not inferring) {xq_host[0].error(n 1 0 0)}
+    let at=tu_prune(xq_host[0].check(XQWord(xq_nodes[0].ptr[n].a) 0))
+    let a=xq_last[0]
+    xq_nodes[0][a].flags=xq_nodes[0].ptr[a].flags | 128
+    let members=xq_host[0].members(at)
+    let exceptions:array<int64>=[]
+    loop t in members {
+        if not xq_host[0].exception(t) {continue}
+        if inferring and t =? xq_none_type[0] {xq_host[0].error(n 2 t at)}
+        if not inferring and not xq_host[0].can_coerce(0 t XQWord(xq_contexts[0][xq_context[0]].ret)) {xq_host[0].error(n 3 t at)}
+        exceptions.push(t)
+    }
+    if exceptions.length =? 0 {
+        xq_nodes[0][n]=xq_nodes[0].ptr[a]
+        return xq_host[0].check(n expected)
+    }
+    xq_host[0].rewrite(n a exceptions members.length expected)
+}

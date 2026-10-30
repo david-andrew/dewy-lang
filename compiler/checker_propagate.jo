@@ -1,0 +1,55 @@
+# Frozen `or_throw` propagation checker extracted from errors.jo.
+use 'node_store.dewy'
+use 'checker_state.dewy'
+use 'type_inference.dewy'
+struct CheckerPropagateHost:
+    check: (int, int) -> int
+    inferring: (int) -> bool
+    members: (int) -> int[]
+    exception: (int) -> bool
+    can_coerce: (int, int, int) -> bool
+    rewrite: (int, int, int[], int, int) -> int
+    error: (int, int, int, int) -> void
+struct CheckerPropagateInput:
+    nodes: *(Node[])
+    fns: *(FnInst[])
+    contexts: *(FnCtx[])
+    context: *int
+    last: *int
+    none_type: *int
+    host: *CheckerPropagateHost
+xq_nodes: *(Node[])
+xq_fns: *(FnInst[])
+xq_contexts: *(FnCtx[])
+xq_context: *int
+xq_last: *int
+xq_none_type: *int
+xq_host: *CheckerPropagateHost
+checker_propagate_bind = (input: *CheckerPropagateInput) -> int:
+    xq_nodes = input[0].nodes
+    xq_fns = input[0].fns
+    xq_contexts = input[0].contexts
+    xq_context = input[0].context
+    xq_last = input[0].last
+    xq_none_type = input[0].none_type
+    xq_host = input[0].host
+    0
+xq_check = (n: int, expected: int) -> int:
+    inst = int(xq_contexts[0][xq_context[0]].inst)
+    infer = xq_contexts[0][xq_context[0]].infer_ret
+    inferring = infer and xq_host[0].inferring(inst)
+    if xq_fns[0][inst].kind == 4 or (infer and not inferring): xq_host[0].error(n, 1, 0, 0)
+    at = int(tu_prune(xq_host[0].check(int(xq_nodes[0][n].a), 0)))
+    a = xq_last[0]
+    xq_nodes[0][a].flags = i32(int(xq_nodes[0][a].flags) | 128)
+    members = xq_host[0].members(at)
+    exceptions: int[]
+    loop t in members:
+        if not xq_host[0].exception(t): continue
+        if inferring and t == xq_none_type[0]: xq_host[0].error(n, 2, t, at)
+        if not inferring and not xq_host[0].can_coerce(0, t, int(xq_contexts[0][xq_context[0]].ret)): xq_host[0].error(n, 3, t, at)
+        exceptions.push(t)
+    if exceptions.len() == 0:
+        xq_nodes[0][n] = xq_nodes[0][a]
+        return xq_host[0].check(n, expected)
+    xq_host[0].rewrite(n, a, exceptions, members.len(), expected)

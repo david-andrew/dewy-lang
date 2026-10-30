@@ -1,3 +1,4 @@
+use 'checker_propagate.dewy'
 use 'checker_state.dewy'
 # Nominal exception families share the existing tagged-union representation.
 # The program's declarations are closed before signatures are checked, so parent
@@ -203,36 +204,26 @@ infer_finish = (f: int, body: int) -> int:
 
 # A propagation is ordinary control flow, so gen_return performs all temporary,
 # partial-expression, defer and enclosing-scope cleanup on the early path.
-check_propagate = (n: int, expected: int) -> int:
+# `or_throw` runs in checker_propagate.dewy; these are its services.
+check_propagate = (n: int, expected: int) -> int: xq_check(n, expected)
+propagate_inferring = (inst: int) -> bool: infer_throws.has(inst)
+propagate_error = (n: int, code: int, t: int, at: int):
     pos = nodes[n].pos
-    inst = int(ctxs[cx].inst)
-    # (a Dewy function without a declared result infers the kinds it throws)
-    inferring = ctxs[cx].infer_ret and infer_throws.has(inst)
-    if fns[inst].kind == FK_INIT or (ctxs[cx].infer_ret and not inferring):
-        fatal(pos, "or_throw requires an enclosing function with a declared return type")
-    at = prune(check_expr(int(nodes[n].a), 0))
-    a = last_checked
-    add_flag(a, NF_CHECKED)
-    members = value_members(at)
-    exceptions: int[]
-    loop t in members:
-        if not exception_member(t): continue
-        if inferring and t == T_NONE: fatal(pos, "or_throw cannot propagate none from a function without a declared result type: declare it, as `:>T?`, or handle none here")
-        if not inferring and not can_coerce(0, t, int(ctxs[cx].ret)):
-            # (an optional result with errors: `none` is an exception too, so
-            # keeping the optional takes a match that forwards only the errors)
-            errors = ""
-            loop m in members:
-                if m != T_NONE and exception_member(m):
-                    if errors != "": errors += " "
-                    errors += "failure:{dt(m)} => return failure"
-            if t == T_NONE and errors != "" and dewy_at(pos):
-                fatal(pos, "or_throw cannot propagate none: it forwards every exception alternative, and `none` is one (`T?` is `T | none`), but the declared return type is {dt(int(ctxs[cx].ret))}; to forward only the errors and keep the optional, match the value: `match value \{ {errors} ... }`")
-            fatal(pos, "or_throw cannot propagate {dt(t)}: the declared return type is {dt(int(ctxs[cx].ret))}")
-        exceptions.push(t)
-    if exceptions.len() == 0:
-        nodes[n] = nodes[a]
-        return check_expr(n, expected)
+    if code == 1: fatal(pos, "or_throw requires an enclosing function with a declared return type")
+    if code == 2: fatal(pos, "or_throw cannot propagate none from a function without a declared result type: declare it, as `:>T?`, or handle none here")
+    # (an optional result with errors: `none` is an exception too, so
+    # keeping the optional takes a match that forwards only the errors)
+    errors = ""
+    loop m in value_members(at):
+        if m != T_NONE and exception_member(m):
+            if errors != "": errors += " "
+            errors += "failure:{dt(m)} => return failure"
+    if t == T_NONE and errors != "" and dewy_at(pos):
+        fatal(pos, "or_throw cannot propagate none: it forwards every exception alternative, and `none` is one (`T?` is `T | none`), but the declared return type is {dt(int(ctxs[cx].ret))}; to forward only the errors and keep the optional, match the value: `match value \{ {errors} ... }`")
+    fatal(pos, "or_throw cannot propagate {dt(t)}: the declared return type is {dt(int(ctxs[cx].ret))}")
+# Each propagated alternative returns; the rest is the value.
+propagate_rewrite = (n: int, a: int, exceptions: int[], count: int, expected: int) -> int:
+    pos = nodes[n].pos
     name = "$propagate{n}"
     stmts = [bc_let(name, a, pos)]
     loop t in exceptions:
@@ -240,7 +231,7 @@ check_propagate = (n: int, expected: int) -> int:
         or_throw_returns[pos] = true
         if t == T_NONE: nodes[ret].a = i32(mk(.none_lit, pos))
         else: nodes[ret].a = i32(bc_ident(name, pos))
-        if exceptions.len() == members.len() and t == exceptions[exceptions.len() - 1]:
+        if exceptions.len() == count and t == exceptions[exceptions.len() - 1]:
             stmts.push(ret)
             break
         condition = mk(.istype, pos)
@@ -251,9 +242,12 @@ check_propagate = (n: int, expected: int) -> int:
         nodes[branch].b = i32(bc_block([ret], pos))
         add_flag(branch, NF_STMT)
         stmts.push(branch)
-    if exceptions.len() != members.len(): stmts.push(bc_stmt(bc_ident(name, pos), pos))
+    if exceptions.len() != count: stmts.push(bc_stmt(bc_ident(name, pos), pos))
     nodes[n] = nodes[bc_block(stmts, pos)]
     check_expr(n, expected)
+propagate_host = CheckerPropagateHost(check_expr, propagate_inferring, value_members, exception_member, can_coerce, propagate_rewrite, propagate_error)
+propagate_input = CheckerPropagateInput(&nodes, &fns, &ctxs, &cx, &last_checked, &T_NONE, &propagate_host)
+propagate_binding = checker_propagate_bind(&propagate_input)
 
 # Read-only receiver navigation. Only the receiver forwards, never arguments.
 # A narrowed concrete error still exposes its own payload fields normally.
