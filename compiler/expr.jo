@@ -1,3 +1,4 @@
+use 'checker_aggregates.dewy'
 use 'checker_type_apply.dewy'
 use 'checker_conditionals.dewy'
 use 'checker_type_tests.dewy'
@@ -10695,208 +10696,14 @@ check_expr_other = (n: int, expected: int) -> int:
         if result.bypass: return result.type
         t = result.type
     else if k == .lambda: t = check_lambda(n, expected)
-    else if k == .array and has_flag(n, NF_TYPE_EXPR):
-        # (thorns = Rect[]: an empty array of Rects is declared with a colon)
-        vn = name_before_eq(nodes[n].pos)
-        if len(vn) > 0:
-            tt = "Rect[]"
-            if nkids(n) == 1 and nodes[kid(n, 0)].kind == .ident: tt = "{name_of(int(nodes[kid(n, 0)].name))}[]"
-            fatal(nodes[n].pos, "an empty array of a type is written with a colon: {jd(nodes[n].pos, "`{vn}: {tt}`", "`let {vn}:{tt} = []`")} (`=` gives a value, `:` a type)")
-        fatal(nodes[n].pos, "this is a type (an array of that); a value is needed here (an empty array: [])")
-    else if k == .array and nodes[n].b == 0 and array_has_spread(n):
-        # [a... b c...] builds the array: t = []; t.extend(a); t.push(b); t.extend(c); t
-        spread_count += 1
-        # Internal bindings must not shadow an operand's user-written name.
-        acc = intern("$spread{spread_count}")
-        pos = nodes[n].pos
-        stmts: int[]
-        d = mk(.vardecl, pos)
-        nodes[d].name = i32(acc)
-        nodes[d].b = i32(mk(.array, pos))
-        if ex != 0 and exk == .array: nodes[d].a = i32(type_node_of(ex, pos))
-        if ex != 0 and exk == .fixed: nodes[d].a = i32(type_node_of(mk_array(int(types[ex].elem)), pos))
-        stmts.push(d)
-        loop i in [0..nkids(n)):
-            c = kid(n, i)
-            callee = mk(.field, pos)
-            nodes[callee].a = i32(mk_name(acc, pos))
-            # (`[pair()...]` of a function expressing several values: the values, spread; a
-            # fixed number of them, `(int64 int64)`, collected first, as `[pair()]` would)
-            if has_flag(c, NF_SPREAD) and nodes[c].kind == .call:
-                if values_spread_call(c) and is_values(dewy_spread_source_type(c)):
-                    clear_flag(c, NF_SPREAD)
-                    collected = mk(.array, pos)
-                    set_list(collected, [c])
-                    add_flag(collected, NF_SPREAD)
-                    c = collected
-                else: sink_spread_calls[c] = true
-            if has_flag(c, NF_SPREAD):
-                clear_flag(c, NF_SPREAD)
-                nodes[callee].name = i32(intern("extend"))
-            else: nodes[callee].name = i32(intern("push"))
-            call = mk(.call, pos)
-            nodes[call].a = i32(callee)
-            set_list(call, [c])
-            st = mk(.exprstmt, pos)
-            nodes[st].a = i32(call)
-            stmts.push(st)
-        r = mk(.exprstmt, pos)
-        nodes[r].a = i32(mk_name(acc, pos))
-        stmts.push(r)
-        b = mk(.block, pos)
-        set_list(b, stmts)
-        nodes[n] = nodes[b]
-        return check_expr(n, expected)
     else if k == .record_loop:
         reflect_record(n)
         return check_expr(n, expected)
     else if k == .new_axis: return dewy_new_axis(n, expected)
-    else if k == .record_lit:
-        loop entry in kids(n):
-            if nodes[entry].kind == .namedarg: reflect_name(entry)
-        if array_has_spread(n):
-            stmts: int[]
-            members = dewy_record_spread_entries(n, expected, stmts, true)
-            result = mk(.record_lit, nodes[n].pos)
-            set_list(result, members)
-            stmts.push(bc_stmt(result, nodes[n].pos))
-            nodes[n] = nodes[bc_block(stmts, nodes[n].pos)]
-            return check_expr(n, expected)
-        target = ex
-        if exk == .opt: target = prune(int(types[ex].elem))
-        if target == 0 or types[target].kind == .var or types[target].kind == .param:
-            target = dewy_record_type(n)
-        if types[target].kind != .struct_ or is_map_type(target): fatal(nodes[n].pos, "record literal needs a record type, found {dt(target)}")
-        t = struct_ctor(n, target, int(structs[int(types[target].st)].decl), kids(n), expected)
-    else if k == .array and nkids(n) == 0 and nodes[n].b == 0 and dewy_record_target(ex) != 0 and files[pos_file(nodes[n].pos)].is_dewy:
-        target = dewy_record_target(ex)
-        t = struct_ctor(n, target, int(structs[int(types[target].st)].decl), [], expected)
-    else if k == .array and nodes[n].b == 0 and dewy_positional_record(n, ex) != 0:
-        # [3 4] where a Dewy object type is expected: its fields in declaration order, as the
-        # constructor call Point(3 4) takes them
-        target = dewy_positional_record(n, ex)
-        t = struct_ctor(n, target, int(structs[int(types[target].st)].decl), kids(n), expected)
-    else if k == .array and ex != 0 and exk == .fixed and fixed_literal_ok(n, ex):
-        # [a, b, c] (or [] for zeros, or [v] * N) as a fixed-size array
-        et = int(types[ex].elem)
-        if nodes[n].b != 0:
-            check_expr(kid(n, 0), et)
-            check_to(int(nodes[n].b), T_INT)
-        else:
-            loop i in [0..nkids(n)): check_expr(kid(n, i), et)
-        nodes[n].type = i32(mk_array(et))
-        fixed_literal(n, ex)
-        t = ex
-    else if k == .array:
-        if nkids(n) == 0 and ex != 0 and is_map_type(ex) and files[pos_file(nodes[n].pos)].is_dewy:
-            nodes[n].kind = .map_lit
-            return check_expr(n, expected)
-        # (`[1 "a"]` where a `[int64 string]` goes: a value per position)
-        if ex != 0 and exk == .tuple and nodes[n].b == 0 and files[pos_file(nodes[n].pos)].is_dewy:
-            spread = false
-            loop c in kids(n):
-                if has_flag(c, NF_SPREAD): spread = true
-            if not spread and nkids(n) != int(types[ex].nargs): fatal(nodes[n].pos, "{dt(ex)} has {int(types[ex].nargs)} positions, and this array gives {nkids(n)} values")
-            if not spread:
-                nodes[n].kind = .tuple
-                return check_expr(n, ex)
-        et = 0
-        if ex != 0 and exk == .array: et = int(types[ex].elem)
-        if nodes[n].b != 0:
-            v = kid(n, 0)
-            vt = check_expr(v, et)
-            if et != 0: coerce(v, et)
-            else: vt = finalize_literal(v)
-            check_to(int(nodes[n].b), T_INT)
-            if et != 0: t = mk_array(et)
-            else: t = mk_array(vt)
-            nodes[n].aux = 1
-        else if nkids(n) == 0:
-            if ex != 0 and exk == .array: t = ex
-            else: t = mk_array(mk_var())
-        else:
-            # spread elements (xs...) bring their arrays' elements
-            elt = et
-            # (a generic parameter's T, not known yet: the elements say what it is)
-            if elt != 0 and tkind(prune(elt)) == .var: elt = 0
-            anyfloat = false
-            decimal = 0
-            anyunsigned = false
-            allchar = true
-            spread = false
-            repack = false
-            loop i in [0..nkids(n)):
-                c = kid(n, i)
-                if has_flag(c, NF_SPREAD):
-                    spread = true
-                    h = 0
-                    if elt != 0: h = mk_array(elt)
-                    saved_site = sink_pack_site
-                    sink_pack_site = c
-                    st = prune(check_expr(c, h))
-                    sink_pack_site = saved_site
-                    hit = sink_pack_hit != 0
-                    sink_pack_hit = 0
-                    # (`[pair()... 3]`, pair giving a fixed number of values: they are elements)
-                    if hit and is_values(st):
-                        clear_flag(c, NF_SPREAD)
-                        return values_elements(n, i, last_checked, expected)
-                    if types[st].kind != .array: fatal(nodes[c].pos, "only arrays can be spread into an array (found {dt(st)})")
-                    if elt == 0: elt = int(types[st].elem)
-                    allchar = false
-                    continue
-                saved_site = sink_pack_site
-                sink_pack_site = c
-                it = check_expr(c, elt)
-                sink_pack_site = saved_site
-                if sink_pack_hit != 0:
-                    sink_pack_hit = 0
-                    # (`[pair]`, pair holding several values: they are elements)
-                    if is_values(it): return values_elements(n, i, last_checked, expected)
-                    # (`[pair()]`: the values of a function expressing several, spread here;
-                    # the other elements are looked at first, for more of them)
-                    add_flag(c, NF_SPREAD)
-                    repack = true
-                    if elt == 0 and types[prune(it)].kind == .array: elt = int(types[prune(it)].elem)
-                    continue
-                if not charlike(c): allchar = false
-                if is_lit(c):
-                    if nodes[c].kind == .float_lit: anyfloat = true
-                    if nodes[c].kind == .float_lit and nodes[c].sval != 0: decimal = c
-                    if lit_default(c) == T_U64: anyunsigned = true
-                    # ([Kind.a, .b]: the first names the enum for the rest)
-                    if elt == 0 and it != 0 and tkind(it) == .enum_: elt = it
-                else if elt == 0 and not charlike(c): elt = it
-            # (`[0 f()]`, f giving int64 values: the literals take their type)
-            if repack: return check_expr(n, if expected == 0 and elt != 0 and tkind(prune(elt)) != .var: mk_array(elt) else: expected)
-            # (`[Circle[...] Square[...]]`: siblings keep their positions, sibling_types.jo)
-            if et == 0 and not spread and dewy_at(nodes[n].pos) and sibling_parent(n) != 0: t = sibling_literal(n)
-            else:
-                if elt == 0:
-                    if allchar: elt = T_STR
-                    else if decimal != 0: elt = lit_default(decimal)
-                    else if anyfloat: elt = T_FLOAT
-                    else if anyunsigned: elt = T_U64
-                    else: elt = if files[pos_file(nodes[n].pos)].is_dewy: T_MATH_INT else: T_INT
-                # ([1, "two", 3]: an array holds one kind of value)
-                coerce_hint = jd(nodes[n].pos, " (an array holds one kind of value, here {dt(elt)}; for values of several kinds, make a struct or a union)", " (an array holds one kind of value, here {dt(elt)}; for values of several kinds, use a record type or a union such as `array<int64|string>`)")
-                # ([name count], Python's tuple: a type per position says so)
-                if dewy_at(nodes[n].pos) and not spread and nkids(n) >= 2 and nkids(n) <= 4:
-                    spelled: str[]
-                    loop c in kids(n):
-                        if nodes[c].type != 0: spelled.push(dt(ntype(c)))
-                    if spelled.len() == nkids(n): coerce_hint = " (an array holds one kind of value, here {dt(elt)}; a few values of their own kinds are a tuple, a type per position: `let pair:[{join(spelled, " ")}] = ...`; for many, a record type or a union such as `array<int64|string>`)"
-                # ([Bool[true] Null]: siblings of a minted family are held as their parent)
-                if nominal_parent.get(prune(elt), 0) != 0 and dewy_at(nodes[n].pos):
-                    coerce_hint = " (an array holds one kind of value, here {dt(elt)}, taken from the first element; for any member of its family, name the parent: `let values:array<{dt(nominal_parent[prune(elt)])}> = [...]`)"
-                loop i in [0..nkids(n)):
-                    c = kid(n, i)
-                    if has_flag(c, NF_SPREAD): coerce(c, mk_array(elt))
-                    else: coerce(c, elt)
-                coerce_hint = ""
-                if spread: nodes[n].aux = 2
-                if et != 0 and tkind(prune(et)) != .var: t = ex
-                else: t = mk_array(elt)
+    else if k == .array or k == .record_lit:
+        result = xr_check(n, expected, ex)
+        if result.bypass: return result.type
+        t = result.type
     else if k == .map_lit or k == .tuple:
         result = xk_check(n, expected, ex)
         if result.bypass: return result.type
@@ -11119,6 +10926,104 @@ apply_error = (n: int, name: int, code: int):
 apply_host = CheckerTypeApplyHost(check_expr, apply_lookup, dewy_bare_fn, bare_fns_call, bare_call, effect_generic_argument, apply_fn_value, apply_reference, apply_error)
 apply_input = CheckerTypeApplyInput(&nodes, &lists, &types, &callee_at, &ide_on, &apply_host)
 apply_binding = checker_type_apply_bind(&apply_input)
+# Array and record literals run in checker_aggregates.dewy; these are its services.
+# (thorns = Rect[]: an empty array of Rects is declared with a colon)
+aggregate_type_error = (n: int):
+    vn = name_before_eq(nodes[n].pos)
+    if len(vn) > 0:
+        tt = "Rect[]"
+        if nkids(n) == 1 and nodes[kid(n, 0)].kind == .ident: tt = "{name_of(int(nodes[kid(n, 0)].name))}[]"
+        fatal(nodes[n].pos, "an empty array of a type is written with a colon: {jd(nodes[n].pos, "`{vn}: {tt}`", "`let {vn}:{tt} = []`")} (`=` gives a value, `:` a type)")
+    fatal(nodes[n].pos, "this is a type (an array of that); a value is needed here (an empty array: [])")
+# [a... b c...] builds the array: t = []; t.extend(a); t.push(b); t.extend(c); t
+aggregate_spread = (n: int, ex: int, expected: int) -> int:
+    exk = TK.void_
+    if ex != 0: exk = types[ex].kind
+    spread_count += 1
+    # Internal bindings must not shadow an operand's user-written name.
+    acc = intern("$spread{spread_count}")
+    pos = nodes[n].pos
+    stmts: int[]
+    d = mk(.vardecl, pos)
+    nodes[d].name = i32(acc)
+    nodes[d].b = i32(mk(.array, pos))
+    if ex != 0 and exk == .array: nodes[d].a = i32(type_node_of(ex, pos))
+    if ex != 0 and exk == .fixed: nodes[d].a = i32(type_node_of(mk_array(int(types[ex].elem)), pos))
+    stmts.push(d)
+    loop i in [0..nkids(n)):
+        c = kid(n, i)
+        callee = mk(.field, pos)
+        nodes[callee].a = i32(mk_name(acc, pos))
+        # (`[pair()...]` of a function expressing several values: the values, spread; a
+        # fixed number of them, `(int64 int64)`, collected first, as `[pair()]` would)
+        if has_flag(c, NF_SPREAD) and nodes[c].kind == .call:
+            if values_spread_call(c) and is_values(dewy_spread_source_type(c)):
+                clear_flag(c, NF_SPREAD)
+                collected = mk(.array, pos)
+                set_list(collected, [c])
+                add_flag(collected, NF_SPREAD)
+                c = collected
+            else: sink_spread_calls[c] = true
+        if has_flag(c, NF_SPREAD):
+            clear_flag(c, NF_SPREAD)
+            nodes[callee].name = i32(intern("extend"))
+        else: nodes[callee].name = i32(intern("push"))
+        call = mk(.call, pos)
+        nodes[call].a = i32(callee)
+        set_list(call, [c])
+        st = mk(.exprstmt, pos)
+        nodes[st].a = i32(call)
+        stmts.push(st)
+    r = mk(.exprstmt, pos)
+    nodes[r].a = i32(mk_name(acc, pos))
+    stmts.push(r)
+    b = mk(.block, pos)
+    set_list(b, stmts)
+    nodes[n] = nodes[b]
+    check_expr(n, expected)
+aggregate_record_spread = (n: int, expected: int) -> int:
+    stmts: int[]
+    members = dewy_record_spread_entries(n, expected, stmts, true)
+    result = mk(.record_lit, nodes[n].pos)
+    set_list(result, members)
+    stmts.push(bc_stmt(result, nodes[n].pos))
+    nodes[n] = nodes[bc_block(stmts, nodes[n].pos)]
+    check_expr(n, expected)
+aggregate_reflect = (entry: int):
+    reflect_name(entry)
+    return
+aggregate_construct = (n: int, target: int, entries: bool, expected: int) -> int:
+    args: int[]
+    if entries: args = kids(n)
+    struct_ctor(n, target, int(structs[int(types[target].st)].decl), args, expected)
+aggregate_fixed = (n: int, ex: int):
+    fixed_literal(n, ex)
+    return
+# ([1, "two", 3]: an array holds one kind of value)
+aggregate_coerce = (n: int, elt: int, spread: bool):
+    coerce_hint = jd(nodes[n].pos, " (an array holds one kind of value, here {dt(elt)}; for values of several kinds, make a struct or a union)", " (an array holds one kind of value, here {dt(elt)}; for values of several kinds, use a record type or a union such as `array<int64|string>`)")
+    # ([name count], Python's tuple: a type per position says so)
+    if dewy_at(nodes[n].pos) and not spread and nkids(n) >= 2 and nkids(n) <= 4:
+        spelled: str[]
+        loop c in kids(n):
+            if nodes[c].type != 0: spelled.push(dt(ntype(c)))
+        if spelled.len() == nkids(n): coerce_hint = " (an array holds one kind of value, here {dt(elt)}; a few values of their own kinds are a tuple, a type per position: `let pair:[{join(spelled, " ")}] = ...`; for many, a record type or a union such as `array<int64|string>`)"
+    # ([Bool[true] Null]: siblings of a minted family are held as their parent)
+    if nominal_parent.get(prune(elt), 0) != 0 and dewy_at(nodes[n].pos):
+        coerce_hint = " (an array holds one kind of value, here {dt(elt)}, taken from the first element; for any member of its family, name the parent: `let values:array<{dt(nominal_parent[prune(elt)])}> = [...]`)"
+    loop i in [0..nkids(n)):
+        c = kid(n, i)
+        if has_flag(c, NF_SPREAD): coerce(c, mk_array(elt))
+        else: coerce(c, elt)
+    coerce_hint = ""
+aggregate_error = (n: int, code: int, t: int):
+    if code == 1: aggregate_type_error(n)
+    if code == 2: fatal(nodes[n].pos, "{dt(t)} has {int(types[t].nargs)} positions, and this array gives {nkids(n)} values")
+    if code == 3: fatal(nodes[n].pos, "only arrays can be spread into an array (found {dt(t)})")
+    fatal(nodes[n].pos, "record literal needs a record type, found {dt(t)}")
+aggregate_host = CheckerAggregateHost(check_expr, check_to, coerce, finalize_literal, decimal_type, aggregate_spread, aggregate_record_spread, aggregate_reflect, dewy_record_type, is_map_type, dewy_positional_record, aggregate_construct, aggregate_fixed, values_elements, sibling_parent, sibling_literal, aggregate_coerce, aggregate_error)
+aggregate_input = CheckerAggregateInput(&nodes, &lists, &types, &files, &last_checked, &sink_pack_site, &sink_pack_hit, &T_INT, &T_MATH_INT, &T_FLOAT, &T_STR, &T_U64, &aggregate_host)
+aggregate_binding = checker_aggregates_bind(&aggregate_input)
 
 # the expression a nonempty block ends in
 block_tail = (b: int) -> int:

@@ -1,0 +1,228 @@
+# Frozen array and record literal checker extracted from expr.jo.
+use 'node_store.dewy'
+use 'checker_types.dewy'
+use 'source_types.dewy'
+use 'type_inference.dewy'
+use 'type_constructors.dewy'
+struct CheckerAggregateHost:
+    check: (int, int) -> int
+    check_to: (int, int) -> int
+    coerce: (int, int) -> int
+    finalize: (int) -> int
+    decimal: (int) -> int
+    spread: (int, int, int) -> int
+    record_spread: (int, int) -> int
+    reflect_name: (int) -> void
+    record_type: (int) -> int
+    map_type: (int) -> bool
+    positional: (int, int) -> int
+    construct: (int, int, bool, int) -> int
+    fixed: (int, int) -> void
+    values_elements: (int, int, int, int) -> int
+    sibling_parent: (int) -> int
+    sibling_literal: (int) -> int
+    coerce_elements: (int, int, bool) -> void
+    error: (int, int, int) -> void
+struct CheckerAggregateInput:
+    nodes: *(Node[])
+    lists: *(i32[])
+    types: *(TypeInfo[])
+    files: *(SrcFile[])
+    last: *int
+    pack_site: *int
+    pack_hit: *int
+    int_type: *int
+    math_int: *int
+    float_type: *int
+    string_type: *int
+    u64_type: *int
+    host: *CheckerAggregateHost
+xr_nodes: *(Node[])
+xr_lists: *(i32[])
+xr_types: *(TypeInfo[])
+xr_files: *(SrcFile[])
+xr_last: *int
+xr_pack_site: *int
+xr_pack_hit: *int
+xr_int_type: *int
+xr_math_int: *int
+xr_float_type: *int
+xr_string_type: *int
+xr_u64_type: *int
+xr_host: *CheckerAggregateHost
+checker_aggregates_bind = (input: *CheckerAggregateInput) -> int:
+    xr_nodes = input[0].nodes
+    xr_lists = input[0].lists
+    xr_types = input[0].types
+    xr_files = input[0].files
+    xr_last = input[0].last
+    xr_pack_site = input[0].pack_site
+    xr_pack_hit = input[0].pack_hit
+    xr_int_type = input[0].int_type
+    xr_math_int = input[0].math_int
+    xr_float_type = input[0].float_type
+    xr_string_type = input[0].string_type
+    xr_u64_type = input[0].u64_type
+    xr_host = input[0].host
+    0
+xr_count = (n: int) -> int: int(xr_nodes[0][n].nlist)
+xr_kid = (n: int, i: int) -> int: int(xr_lists[0][int(xr_nodes[0][n].list) + i])
+xr_kind = (t: int) -> TK: xr_types[0][tu_prune(t)].kind
+xr_flag = (n: int, f: int) -> bool: int(xr_nodes[0][n].flags) & f != 0
+xr_in_dewy = (n: int) -> bool: xr_files[0][xr_nodes[0][n].pos >> 40].is_dewy
+xr_dewy = (n: int) -> bool:
+    pos = xr_nodes[0][n].pos
+    f = pos >> 40
+    pos > 0 and f < xr_files[0].len() and xr_files[0][f].is_dewy
+xr_has_spread = (n: int) -> bool:
+    loop i in [0..xr_count(n)):
+        if xr_flag(xr_kid(n, i), 1024): return true
+    false
+xr_charlike = (n: int) -> bool: xr_nodes[0][n].kind == .str_lit and xr_flag(n, 512)
+xr_values = (t0: int) -> bool:
+    if t0 == 0: return false
+    t = int(tu_prune(t0))
+    xr_types[0][t].kind == .tuple and xr_types[0][t].sign
+xr_default = (n: int) -> int:
+    k = xr_nodes[0][n].kind
+    if k == .float_lit and xr_nodes[0][n].sval != 0: return xr_host[0].decimal(xr_nodes[0][n].pos)
+    if k == .float_lit: return xr_float_type[0]
+    if k == .unary or k == .conv: return xr_default(int(xr_nodes[0][n].a))
+    if k == .binary:
+        if xr_default(int(xr_nodes[0][n].a)) == xr_float_type[0] or xr_default(int(xr_nodes[0][n].b)) == xr_float_type[0]: return xr_float_type[0]
+    if xr_in_dewy(n): return xr_math_int[0]
+    xr_int_type[0]
+xr_record_target = (expected: int) -> int:
+    target = int(tu_prune(expected))
+    if target == 0: return 0
+    if xr_types[0][target].kind == .opt: target = int(tu_prune(int(xr_types[0][target].elem)))
+    if xr_types[0][target].kind == .struct_ and not xr_host[0].map_type(target): return target
+    0
+struct CheckerAggregateResult:
+    type: int
+    bypass: bool
+xr_record = (n: int, expected: int, ex: int, exk: TK) -> CheckerAggregateResult:
+    loop i in [0..xr_count(n)):
+        entry = xr_kid(n, i)
+        if xr_nodes[0][entry].kind == .namedarg: xr_host[0].reflect_name(entry)
+    if xr_has_spread(n): return CheckerAggregateResult(xr_host[0].record_spread(n, expected), true)
+    target = ex
+    if exk == .opt: target = int(tu_prune(int(xr_types[0][ex].elem)))
+    if target == 0 or xr_types[0][target].kind == .var or xr_types[0][target].kind == .param: target = xr_host[0].record_type(n)
+    if xr_types[0][target].kind != .struct_ or xr_host[0].map_type(target): xr_host[0].error(n, 4, target)
+    CheckerAggregateResult(xr_host[0].construct(n, target, true, expected), false)
+xr_elements = (n: int, expected: int, ex: int, et: int) -> CheckerAggregateResult:
+    elt = et
+    if elt != 0 and xr_kind(elt) == .var: elt = 0
+    anyfloat = false
+    decimal = 0
+    anyunsigned = false
+    allchar = true
+    spread = false
+    repack = false
+    loop i in [0..xr_count(n)):
+        c = xr_kid(n, i)
+        if xr_flag(c, 1024):
+            spread = true
+            h = 0
+            if elt != 0: h = int(tb_mk_array(elt))
+            saved = xr_pack_site[0]
+            xr_pack_site[0] = c
+            st = int(tu_prune(xr_host[0].check(c, h)))
+            xr_pack_site[0] = saved
+            hit = xr_pack_hit[0] != 0
+            xr_pack_hit[0] = 0
+            if hit and xr_values(st):
+                xr_nodes[0][c].flags = i32(int(xr_nodes[0][c].flags) & ~1024)
+                return CheckerAggregateResult(xr_host[0].values_elements(n, i, xr_last[0], expected), true)
+            if xr_types[0][st].kind != .array: xr_host[0].error(c, 3, st)
+            if elt == 0: elt = int(xr_types[0][st].elem)
+            allchar = false
+            continue
+        saved = xr_pack_site[0]
+        xr_pack_site[0] = c
+        it = xr_host[0].check(c, elt)
+        xr_pack_site[0] = saved
+        if xr_pack_hit[0] != 0:
+            xr_pack_hit[0] = 0
+            if xr_values(it): return CheckerAggregateResult(xr_host[0].values_elements(n, i, xr_last[0], expected), true)
+            xr_nodes[0][c].flags = i32(int(xr_nodes[0][c].flags) | 1024)
+            repack = true
+            if elt == 0 and xr_kind(it) == .array: elt = int(xr_types[0][int(tu_prune(it))].elem)
+            continue
+        if not xr_charlike(c): allchar = false
+        if xr_flag(c, 256):
+            if xr_nodes[0][c].kind == .float_lit: anyfloat = true
+            if xr_nodes[0][c].kind == .float_lit and xr_nodes[0][c].sval != 0: decimal = c
+            if xr_default(c) == xr_u64_type[0]: anyunsigned = true
+            if elt == 0 and it != 0 and xr_kind(it) == .enum_: elt = it
+        else if elt == 0 and not xr_charlike(c): elt = it
+    if repack:
+        again = expected
+        if expected == 0 and elt != 0 and xr_kind(elt) != .var: again = int(tb_mk_array(elt))
+        return CheckerAggregateResult(xr_host[0].check(n, again), true)
+    if et == 0 and not spread and xr_dewy(n) and xr_host[0].sibling_parent(n) != 0:
+        return CheckerAggregateResult(xr_host[0].sibling_literal(n), false)
+    if elt == 0:
+        if allchar: elt = xr_string_type[0]
+        else if decimal != 0: elt = xr_default(decimal)
+        else if anyfloat: elt = xr_float_type[0]
+        else if anyunsigned: elt = xr_u64_type[0]
+        else if xr_in_dewy(n): elt = xr_math_int[0]
+        else: elt = xr_int_type[0]
+    xr_host[0].coerce_elements(n, elt, spread)
+    if spread: xr_nodes[0][n].aux = 2
+    if et != 0 and xr_kind(et) != .var: return CheckerAggregateResult(ex, false)
+    CheckerAggregateResult(int(tb_mk_array(elt)), false)
+xr_dewy_map = (n: int, ex: int) -> bool: xr_host[0].map_type(ex) and xr_in_dewy(n)
+xr_array = (n: int, expected: int, ex: int, exk: TK) -> CheckerAggregateResult:
+    if xr_flag(n, 1048576): xr_host[0].error(n, 1, 0)
+    repeat = int(xr_nodes[0][n].b)
+    if repeat == 0 and xr_has_spread(n): return CheckerAggregateResult(xr_host[0].spread(n, ex, expected), true)
+    if xr_count(n) == 0 and repeat == 0:
+        target = xr_record_target(ex)
+        if target != 0 and xr_in_dewy(n): return CheckerAggregateResult(xr_host[0].construct(n, target, false, expected), false)
+    if repeat == 0:
+        target = xr_host[0].positional(n, ex)
+        if target != 0: return CheckerAggregateResult(xr_host[0].construct(n, target, true, expected), false)
+    if ex != 0 and exk == .fixed and int(xr_nodes[0][n].aux) != 2 and (repeat != 0 or xr_count(n) == 0 or xr_count(n) == int(xr_types[0][int(tu_prune(ex))].bits)):
+        et = int(xr_types[0][ex].elem)
+        if repeat != 0:
+            xr_host[0].check(xr_kid(n, 0), et)
+            xr_host[0].check_to(repeat, xr_int_type[0])
+        else:
+            loop i in [0..xr_count(n)): xr_host[0].check(xr_kid(n, i), et)
+        xr_nodes[0][n].type = i32(int(tb_mk_array(et)))
+        xr_host[0].fixed(n, ex)
+        return CheckerAggregateResult(ex, false)
+    if xr_count(n) == 0 and ex != 0 and xr_dewy_map(n, ex):
+        xr_nodes[0][n].kind = .map_lit
+        return CheckerAggregateResult(xr_host[0].check(n, expected), true)
+    if ex != 0 and exk == .tuple and repeat == 0 and xr_in_dewy(n):
+        spread = xr_has_spread(n)
+        if not spread and xr_count(n) != int(xr_types[0][ex].nargs): xr_host[0].error(n, 2, ex)
+        if not spread:
+            xr_nodes[0][n].kind = .tuple
+            return CheckerAggregateResult(xr_host[0].check(n, ex), true)
+    et = 0
+    if ex != 0 and exk == .array: et = int(xr_types[0][ex].elem)
+    if repeat != 0:
+        v = xr_kid(n, 0)
+        vt = xr_host[0].check(v, et)
+        if et != 0: xr_host[0].coerce(v, et)
+        else: vt = xr_host[0].finalize(v)
+        xr_host[0].check_to(int(xr_nodes[0][n].b), xr_int_type[0])
+        t = 0
+        if et != 0: t = int(tb_mk_array(et))
+        else: t = int(tb_mk_array(vt))
+        xr_nodes[0][n].aux = 1
+        return CheckerAggregateResult(t, false)
+    if xr_count(n) == 0:
+        if ex != 0 and exk == .array: return CheckerAggregateResult(ex, false)
+        return CheckerAggregateResult(int(tb_mk_array(int(tb_mk_var()))), false)
+    xr_elements(n, expected, ex, et)
+xr_check = (n: int, expected: int, ex: int) -> CheckerAggregateResult:
+    exk = TK.void_
+    if ex != 0: exk = xr_types[0][ex].kind
+    if xr_nodes[0][n].kind == .record_lit: return xr_record(n, expected, ex, exk)
+    xr_array(n, expected, ex, exk)

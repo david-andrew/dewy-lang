@@ -1,0 +1,279 @@
+$runtime_checks
+from p"node_store.dewy" import Node
+from p"checker_types.dewy" import (TypeInfo TK)
+from p"source_types.dewy" import SrcFile
+from p"type_inference.dewy" import tu_prune
+from p"type_constructors.dewy" import (tb_mk_array tb_mk_var)
+# Array and record literals own their reading: positional records, fixed and
+# repeated arrays, tuples and dictionaries written as arrays, element typing with
+# spreads and multi-value packs, and the element type a literal defaults to.
+# Work is O(elements + inference links) plus demanded checking; spread rewrites,
+# constructors, sibling families and diagnostics are host services. Host calls
+# may reenter and grow every arena: elements are reread by ID.
+XRWord:type=int64<overflow='wrap'>
+CheckerAggregateHost:type=[
+    check:<(node:int64 expected:int64):>int64>
+    check_to:<(node:int64 type_id:int64):>int64>
+    coerce:<(node:int64 type_id:int64):>int64>
+    finalize:<(node:int64):>int64>
+    decimal:<(pos:int64):>int64>
+    spread:<(node:int64 expected_type:int64 expected:int64):>int64>
+    record_spread:<(node:int64 expected:int64):>int64>
+    reflect_name:<(node:int64):>void>
+    record_type:<(node:int64):>int64>
+    map_type:<(type_id:int64):>bool>
+    positional:<(node:int64 expected_type:int64):>int64>
+    construct:<(node:int64 type_id:int64 entries:bool expected:int64):>int64>
+    fixed:<(node:int64 type_id:int64):>void>
+    values_elements:<(node:int64 index:int64 value:int64 expected:int64):>int64>
+    sibling_parent:<(node:int64):>int64>
+    sibling_literal:<(node:int64):>int64>
+    coerce_elements:<(node:int64 element:int64 spread:bool):>void>
+    error:<(node:int64 code:int64 type_id:int64):>void>
+]
+CheckerAggregateInput:type=[
+    nodes:ptr<array<Node>>
+    lists:ptr<array<int32>>
+    types:ptr<array<TypeInfo>>
+    files:ptr<array<SrcFile>>
+    last:ptr<int64>
+    pack_site:ptr<int64>
+    pack_hit:ptr<int64>
+    int_type:ptr<int64>
+    math_int:ptr<int64>
+    float_type:ptr<int64>
+    string_type:ptr<int64>
+    u64_type:ptr<int64>
+    host:ptr<CheckerAggregateHost>
+]
+let xr_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let xr_lists:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
+let xr_types:ptr<array<TypeInfo>>=$unsafe (uint64(0) as ptr<array<TypeInfo>>)
+let xr_files:ptr<array<SrcFile>>=$unsafe (uint64(0) as ptr<array<SrcFile>>)
+let xr_last:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xr_pack_site:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xr_pack_hit:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xr_int_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xr_math_int:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xr_float_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xr_string_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xr_u64_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xr_host:ptr<CheckerAggregateHost>=$unsafe (uint64(0) as ptr<CheckerAggregateHost>)
+checker_aggregates_bind=(input:ptr<CheckerAggregateInput>):>XRWord=>$unsafe {
+    xr_nodes=input[0].nodes
+    xr_lists=input[0].lists
+    xr_types=input[0].types
+    xr_files=input[0].files
+    xr_last=input[0].last
+    xr_pack_site=input[0].pack_site
+    xr_pack_hit=input[0].pack_hit
+    xr_int_type=input[0].int_type
+    xr_math_int=input[0].math_int
+    xr_float_type=input[0].float_type
+    xr_string_type=input[0].string_type
+    xr_u64_type=input[0].u64_type
+    xr_host=input[0].host
+    0
+}
+xr_count=(n:XRWord):>XRWord=>$unsafe {XRWord(xr_nodes[0].ptr[n].nlist)}
+xr_kid=(n:XRWord i:XRWord):>XRWord=>$unsafe {XRWord(xr_lists[0][XRWord(xr_nodes[0].ptr[n].list) + i])}
+xr_kind=(t:XRWord):>TK=>$unsafe {xr_types[0].ptr[tu_prune(t)].kind}
+xr_flag=(n:XRWord f:XRWord):>bool=>$unsafe {XRWord(xr_nodes[0].ptr[n].flags) & f not=? 0}
+xr_in_dewy=(n:XRWord):>bool=>$unsafe {xr_files[0][xr_nodes[0].ptr[n].pos >> 40].is_dewy}
+xr_dewy=(n:XRWord):>bool=>$unsafe {
+    let pos=xr_nodes[0].ptr[n].pos
+    let f=pos >> 40
+    pos >? 0 and f <? xr_files[0].length and xr_files[0].ptr[f].is_dewy
+}
+# Any element spread (`xs...`)?
+xr_has_spread=(n:XRWord):>bool=>{
+    loop i in [0..xr_count(n)) {if xr_flag(xr_kid(n i) 1024) {return true}}
+    false
+}
+# A one-character string literal (an integer where one is expected).
+xr_charlike=(n:XRWord):>bool=>$unsafe {xr_nodes[0].ptr[n].kind =? 'str_lit' and xr_flag(n 512)}
+# A type of several values (a function expressing them).
+xr_values=(t0:XRWord):>bool=>$unsafe {
+    if t0 =? 0 {return false}
+    let t=tu_prune(t0)
+    xr_types[0].ptr[t].kind =? 'tuple' and xr_types[0].ptr[t].sign
+}
+# An untyped literal's own type: decimals are rationals, the semantic integer in Dewy.
+xr_default=(n:XRWord):>XRWord=>$unsafe {
+    let k=xr_nodes[0].ptr[n].kind
+    if k =? 'float_lit' and xr_nodes[0].ptr[n].sval not=? 0 {return xr_host[0].decimal(xr_nodes[0].ptr[n].pos)}
+    if k =? 'float_lit' {return xr_float_type[0]}
+    if k =? 'unary' or k =? 'conv' {return xr_default(XRWord(xr_nodes[0].ptr[n].a))}
+    if k =? 'binary' {
+        if xr_default(XRWord(xr_nodes[0].ptr[n].a)) =? xr_float_type[0] or xr_default(XRWord(xr_nodes[0].ptr[n].b)) =? xr_float_type[0] {return xr_float_type[0]}
+    }
+    if xr_in_dewy(n) {return xr_math_int[0]}
+    xr_int_type[0]
+}
+# The record a literal builds where `expected` is a record (or an optional one).
+xr_record_target=(expected:XRWord):>XRWord=>$unsafe {
+    let target=tu_prune(expected)
+    if target =? 0 {return 0}
+    if xr_types[0].ptr[target].kind =? 'opt' {target=tu_prune(XRWord(xr_types[0].ptr[target].elem))}
+    if xr_types[0].ptr[target].kind =? 'struct_' and not xr_host[0].map_type(target) {return target}
+    0
+}
+# A bypass returns directly: a rewrite or a constructor already published it.
+CheckerAggregateResult:type=[type:int64 bypass:bool]
+xr_record=(n:XRWord expected:XRWord ex:XRWord exk:TK):>CheckerAggregateResult=>$unsafe {
+    loop i in [0..xr_count(n)) {
+        let entry=xr_kid(n i)
+        if xr_nodes[0].ptr[entry].kind =? 'namedarg' {xr_host[0].reflect_name(entry)}
+    }
+    if xr_has_spread(n) {return [type=xr_host[0].record_spread(n expected) bypass=true]}
+    let target=ex
+    if exk =? 'opt' {target=tu_prune(XRWord(xr_types[0].ptr[ex].elem))}
+    if target =? 0 or xr_types[0].ptr[target].kind =? 'var' or xr_types[0].ptr[target].kind =? 'param' {target=xr_host[0].record_type(n)}
+    if xr_types[0].ptr[target].kind not=? 'struct_' or xr_host[0].map_type(target) {xr_host[0].error(n 4 target)}
+    [type=xr_host[0].construct(n target true expected) bypass=false]
+}
+# Elements without a shape: each checked against the element type known so far.
+xr_elements=(n:XRWord expected:XRWord ex:XRWord et:XRWord):>CheckerAggregateResult=>$unsafe {
+    let elt=et
+    # A generic parameter's T, not known yet: the elements say what it is.
+    if elt not=? 0 and xr_kind(elt) =? 'var' {elt=0}
+    let anyfloat=false
+    let decimal:XRWord=0
+    let anyunsigned=false
+    let allchar=true
+    let spread=false
+    let repack=false
+    loop i in [0..xr_count(n)) {
+        let c=xr_kid(n i)
+        if xr_flag(c 1024) {
+            spread=true
+            let h:XRWord=0
+            if elt not=? 0 {h=tb_mk_array(elt)}
+            let saved=xr_pack_site[0]
+            xr_pack_site[0]=c
+            let st=tu_prune(xr_host[0].check(c h))
+            xr_pack_site[0]=saved
+            let hit=xr_pack_hit[0] not=? 0
+            xr_pack_hit[0]=0
+            # `[pair()... 3]`, pair giving a fixed number of values: they are elements.
+            if hit and xr_values(st) {
+                xr_nodes[0][c].flags=xr_nodes[0].ptr[c].flags & ~1024
+                return [type=xr_host[0].values_elements(n i xr_last[0] expected) bypass=true]
+            }
+            if xr_types[0].ptr[st].kind not=? 'array' {xr_host[0].error(c 3 st)}
+            if elt =? 0 {elt=XRWord(xr_types[0].ptr[st].elem)}
+            allchar=false
+            continue
+        }
+        let saved=xr_pack_site[0]
+        xr_pack_site[0]=c
+        let it=xr_host[0].check(c elt)
+        xr_pack_site[0]=saved
+        if xr_pack_hit[0] not=? 0 {
+            xr_pack_hit[0]=0
+            # `[pair]` holding several values: they are elements; `[pair()]`, a function
+            # expressing several, spreads them here after the others are looked at.
+            if xr_values(it) {return [type=xr_host[0].values_elements(n i xr_last[0] expected) bypass=true]}
+            xr_nodes[0][c].flags=xr_nodes[0].ptr[c].flags | 1024
+            repack=true
+            if elt =? 0 and xr_kind(it) =? 'array' {elt=XRWord(xr_types[0].ptr[tu_prune(it)].elem)}
+            continue
+        }
+        if not xr_charlike(c) {allchar=false}
+        if xr_flag(c 256) {
+            if xr_nodes[0].ptr[c].kind =? 'float_lit' {anyfloat=true}
+            if xr_nodes[0].ptr[c].kind =? 'float_lit' and xr_nodes[0].ptr[c].sval not=? 0 {decimal=c}
+            if xr_default(c) =? xr_u64_type[0] {anyunsigned=true}
+            # `[Kind.a .b]`: the first names the enum for the rest.
+            if elt =? 0 and it not=? 0 and xr_kind(it) =? 'enum_' {elt=it}
+        } else if elt =? 0 and not xr_charlike(c) {elt=it}
+    }
+    # `[0 f()]`, f giving int64 values: the literals take their type.
+    if repack {
+        let again=expected
+        if expected =? 0 and elt not=? 0 and xr_kind(elt) not=? 'var' {again=tb_mk_array(elt)}
+        return [type=xr_host[0].check(n again) bypass=true]
+    }
+    # `[Circle[...] Square[...]]`: siblings keep their positions.
+    if et =? 0 and not spread and xr_dewy(n) and xr_host[0].sibling_parent(n) not=? 0 {
+        return [type=xr_host[0].sibling_literal(n) bypass=false]
+    }
+    if elt =? 0 {
+        if allchar {elt=xr_string_type[0]}
+        else if decimal not=? 0 {elt=xr_default(decimal)}
+        else if anyfloat {elt=xr_float_type[0]}
+        else if anyunsigned {elt=xr_u64_type[0]}
+        else if xr_in_dewy(n) {elt=xr_math_int[0]}
+        else {elt=xr_int_type[0]}
+    }
+    xr_host[0].coerce_elements(n elt spread)
+    if spread {xr_nodes[0][n].aux=2}
+    if et not=? 0 and xr_kind(et) not=? 'var' {return [type=ex bypass=false]}
+    [type=tb_mk_array(elt) bypass=false]
+}
+xr_array=(n:XRWord expected:XRWord ex:XRWord exk:TK):>CheckerAggregateResult=>$unsafe {
+    # `Rect[]` where a value goes: a type, not an empty array.
+    if xr_flag(n 1048576) {xr_host[0].error(n 1 0)}
+    let repeat=XRWord(xr_nodes[0].ptr[n].b)
+    # `[a... b c...]` builds the array by pushes and extends.
+    if repeat =? 0 and xr_has_spread(n) {return [type=xr_host[0].spread(n ex expected) bypass=true]}
+    if xr_count(n) =? 0 and repeat =? 0 {
+        let target=xr_record_target(ex)
+        if target not=? 0 and xr_in_dewy(n) {return [type=xr_host[0].construct(n target false expected) bypass=false]}
+    }
+    # `[3 4]` where a Dewy object type is expected: its fields in declaration order.
+    if repeat =? 0 {
+        let target=xr_host[0].positional(n ex)
+        if target not=? 0 {return [type=xr_host[0].construct(n target true expected) bypass=false]}
+    }
+    # `[a b c]`, `[]` or `[v] * N` as a fixed-size array.
+    if ex not=? 0 and exk =? 'fixed' and XRWord(xr_nodes[0].ptr[n].aux) not=? 2 and (repeat not=? 0 or xr_count(n) =? 0 or xr_count(n) =? XRWord(xr_types[0].ptr[tu_prune(ex)].bits)) {
+        let et=XRWord(xr_types[0].ptr[ex].elem)
+        if repeat not=? 0 {
+            xr_host[0].check(xr_kid(n 0) et);
+            xr_host[0].check_to(repeat xr_int_type[0]);
+        } else {
+            loop i in [0..xr_count(n)) {xr_host[0].check(xr_kid(n i) et);}
+        }
+        xr_nodes[0][n].type=int32<overflow='wrap'>(tb_mk_array(et))
+        xr_host[0].fixed(n ex)
+        return [type=ex bypass=false]
+    }
+    if xr_count(n) =? 0 and ex not=? 0 and xr_dewy_map(n ex) {
+        xr_nodes[0][n].kind='map_lit'
+        return [type=xr_host[0].check(n expected) bypass=true]
+    }
+    # `[1 "a"]` where a `[int64 string]` goes: a value per position.
+    if ex not=? 0 and exk =? 'tuple' and repeat =? 0 and xr_in_dewy(n) {
+        let spread=xr_has_spread(n)
+        if not spread and xr_count(n) not=? XRWord(xr_types[0].ptr[ex].nargs) {xr_host[0].error(n 2 ex)}
+        if not spread {
+            xr_nodes[0][n].kind='tuple'
+            return [type=xr_host[0].check(n ex) bypass=true]
+        }
+    }
+    let et:XRWord=0
+    if ex not=? 0 and exk =? 'array' {et=XRWord(xr_types[0].ptr[ex].elem)}
+    if repeat not=? 0 {
+        let v=xr_kid(n 0)
+        let vt=xr_host[0].check(v et)
+        if et not=? 0 {xr_host[0].coerce(v et);} else {vt=xr_host[0].finalize(v)}
+        xr_host[0].check_to(XRWord(xr_nodes[0].ptr[n].b) xr_int_type[0]);
+        let t=if et not=? 0 {tb_mk_array(et)} else {tb_mk_array(vt)}
+        xr_nodes[0][n].aux=1
+        return [type=t bypass=false]
+    }
+    if xr_count(n) =? 0 {
+        if ex not=? 0 and exk =? 'array' {return [type=ex bypass=false]}
+        return [type=tb_mk_array(tb_mk_var()) bypass=false]
+    }
+    xr_elements(n expected ex et)
+}
+# An empty literal where a dictionary is expected, in Dewy: `[]` is an empty one.
+xr_dewy_map=(n:XRWord ex:XRWord):>bool=>$unsafe {xr_host[0].map_type(ex) and xr_in_dewy(n)}
+xr_check=(n:XRWord expected:XRWord ex:XRWord):>CheckerAggregateResult=>$unsafe {
+    let exk:TK='void_'
+    if ex not=? 0 {exk=xr_types[0].ptr[ex].kind}
+    if xr_nodes[0].ptr[n].kind =? 'record_lit' {return xr_record(n expected ex exk)}
+    xr_array(n expected ex exk)
+}
