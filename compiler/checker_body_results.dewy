@@ -1,0 +1,118 @@
+$runtime_checks
+from p"node_store.dewy" import Node
+from p"checker_types.dewy" import (TypeInfo TK)
+from p"source_types.dewy" import SrcFile
+from p"checker_state.dewy" import (FnInst FnCtx)
+from p"type_inference.dewy" import (tu_prune tu_unify tu_zonk)
+# A function body's result obligations: an inferred result from its value, its end
+# or nothing; a declared result given on every path; `never` functions not finishing;
+# inferred throws finished. Work is O(1) beyond checking the body and the demanded
+# termination queries; the body, sinks and diagnostics are host services that may
+# grow every arena, so nodes, contexts and instances are reread by ID.
+XEWord:type=int64<overflow='wrap'>
+CheckerBodyResultHost:type=[
+    entry:<(decl:int64 body:int64):>void>
+    init_body:<(instance:int64 body:int64):>void>
+    check_body:<(instance:int64 decl:int64 body:int64 infer:bool want:bool expected:int64):>int64>
+    terminates:<(node:int64):>bool>
+    literal_default:<(node:int64):>int64>
+    coerce:<(node:int64 type_id:int64):>int64>
+    never_skip:<(decl:int64):>bool>
+    finish_throws:<(instance:int64 body:int64):>void>
+    ide_hint:<(instance:int64 decl:int64):>void>
+    void_arm_end:<(body:int64 type_id:int64):>bool>
+    error:<(node:int64 code:int64 type_id:int64 decl:int64):>void>
+]
+CheckerBodyResultInput:type=[
+    nodes:ptr<array<Node>>
+    lists:ptr<array<int32>>
+    types:ptr<array<TypeInfo>>
+    files:ptr<array<SrcFile>>
+    fns:ptr<array<FnInst>>
+    contexts:ptr<array<FnCtx>>
+    context:ptr<int64>
+    void_type:ptr<int64>
+    never_type:ptr<int64>
+    host:ptr<CheckerBodyResultHost>
+]
+let xe_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let xe_lists:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
+let xe_types:ptr<array<TypeInfo>>=$unsafe (uint64(0) as ptr<array<TypeInfo>>)
+let xe_files:ptr<array<SrcFile>>=$unsafe (uint64(0) as ptr<array<SrcFile>>)
+let xe_fns:ptr<array<FnInst>>=$unsafe (uint64(0) as ptr<array<FnInst>>)
+let xe_contexts:ptr<array<FnCtx>>=$unsafe (uint64(0) as ptr<array<FnCtx>>)
+let xe_context:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xe_void_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xe_never_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xe_host:ptr<CheckerBodyResultHost>=$unsafe (uint64(0) as ptr<CheckerBodyResultHost>)
+checker_body_results_bind=(input:ptr<CheckerBodyResultInput>):>XEWord=>$unsafe {
+    xe_nodes=input[0].nodes
+    xe_lists=input[0].lists
+    xe_types=input[0].types
+    xe_files=input[0].files
+    xe_fns=input[0].fns
+    xe_contexts=input[0].contexts
+    xe_context=input[0].context
+    xe_void_type=input[0].void_type
+    xe_never_type=input[0].never_type
+    xe_host=input[0].host
+    0
+}
+xe_count=(n:XEWord):>XEWord=>$unsafe {XEWord(xe_nodes[0].ptr[n].nlist)}
+xe_kid=(n:XEWord i:XEWord):>XEWord=>$unsafe {XEWord(xe_lists[0][XEWord(xe_nodes[0].ptr[n].list) + i])}
+xe_kind=(t:XEWord):>TK=>$unsafe {xe_types[0].ptr[tu_prune(t)].kind}
+xe_ret=():>XEWord=>$unsafe {XEWord(xe_contexts[0][xe_context[0]].ret)}
+# The value a block ends with, and replacing it.
+xe_value=(b:XEWord):>XEWord=>$unsafe {XEWord(xe_nodes[0].ptr[xe_kid(b xe_count(b) - 1)].a)}
+xe_set_value=(b:XEWord e:XEWord):>void=>$unsafe {xe_nodes[0][xe_kid(b xe_count(b) - 1)].a=int32<overflow='wrap'>(e)}
+# Does the body's last statement end every path?
+xe_ends=(body:XEWord):>bool=>$unsafe {
+    let n=xe_count(body)
+    n >? 0 and xe_host[0].terminates(xe_kid(body n - 1))
+}
+# Frozen FK_INIT ordinal: a module's initialization statements give nothing.
+xe_body=(f:XEWord decl:XEWord):>void=>$unsafe {
+    let body=XEWord(xe_fns[0].ptr[f].body)
+    xe_host[0].entry(decl body)
+    if xe_fns[0].ptr[f].kind =? 4 {
+        xe_host[0].init_body(f body)
+        xe_fns[0][f].ret=int32<overflow='wrap'>(xe_void_type[0])
+        return
+    }
+    let infer=xe_contexts[0][xe_context[0]].infer_ret
+    let want=infer or xe_kind(xe_ret()) not=? 'void_'
+    let exp:XEWord=0
+    if not infer {exp=xe_ret()}
+    let bt=xe_host[0].check_body(f decl body infer want exp)
+    let r=tu_prune(xe_ret())
+    let n=xe_count(body)
+    if infer {
+        if xe_types[0].ptr[r].kind =? 'var' {
+            if xe_nodes[0].ptr[body].aux not=? 0 {
+                let v=xe_value(body)
+                if XEWord(xe_nodes[0].ptr[v].flags) & 256 not=? 0 {
+                    bt=xe_host[0].literal_default(v)
+                    xe_set_value(body xe_host[0].coerce(v bt))
+                }
+                tu_unify(r bt);
+            } else if n >? 0 and decl not=? 0 and xe_nodes[0].ptr[decl].kind =? 'fn_' and xe_ends(body) and not xe_host[0].never_skip(decl) {
+                # die = (msg:string) => {eprint(msg); exit(2)}: its last line never returns,
+                # nor does it, so a call ends its branch as exit's does.
+                tu_unify(r xe_never_type[0]);
+            } else {tu_unify(r xe_void_type[0]);}
+        } else if xe_types[0].ptr[r].kind =? 'void_' {xe_nodes[0][body].aux=0}
+        else if xe_nodes[0].ptr[body].aux not=? 0 {xe_set_value(body xe_host[0].coerce(xe_value(body) r))}
+        else if bt not=? xe_never_type[0] and not xe_ends(body) {xe_host[0].error(decl 1 r decl)}
+        xe_host[0].finish_throws(f body)
+        xe_fns[0][f].ret=int32<overflow='wrap'>(tu_zonk(xe_ret()))
+        xe_host[0].ide_hint(f decl)
+        if xe_fns[0].ptr[f].aux_void and xe_kind(XEWord(xe_fns[0].ptr[f].ret)) not=? 'void_' {xe_host[0].error(decl 2 0 decl)}
+    } else if r =? xe_never_type[0] and decl not=? 0 and xe_files[0][xe_nodes[0].ptr[decl].pos >> 40].is_dewy and bt not=? xe_never_type[0] and not xe_ends(body) {
+        xe_host[0].error(decl 3 0 decl)
+    } else if want {
+        if xe_nodes[0].ptr[body].aux not=? 0 {xe_set_value(body xe_host[0].coerce(xe_value(body) r))}
+        else if bt not=? xe_never_type[0] and not xe_ends(body) {
+            if not xe_host[0].void_arm_end(body r) {xe_host[0].error(body 4 r decl)}
+        }
+    }
+}

@@ -1,3 +1,4 @@
+use 'checker_body_results.dewy'
 use 'checker_bodies.dewy'
 use 'checker_instances.dewy'
 use 'checker_signature.dewy'
@@ -4836,74 +4837,59 @@ body_context = (f: int) -> int:
 body_recursive_error = (f: int, use_pos: int):
     fatal(use_pos, "recursive function '{name_of(int(nodes[int(fns[f].decl)].name))}' needs an explicit return type (add {jd(use_pos, "`-> Type`", "`:>Type`")})")
 # Repay with statement/expression checking and lowering-proof finalization cutovers.
-body_expression = (f: int, decl: int):
-    body = int(fns[f].body)
-    dir_function_entry(decl, body)
+# A body's result obligations run in checker_body_results.dewy; these are its services.
+body_expression = (f: int, decl: int): xe_body(f, decl)
+body_result_init = (f: int, body: int):
     saved_sink = sink_fn
-    if fns[f].kind == FK_INIT:
-        sink_open(body, SINK_NONE)
-        sink_fn = sinks.len() - 1
-        loop i in [0..nkids(body)): check_stmt(kid(body, i))
-        sinks.pop()
-        sink_fn = saved_sink
-        fns[f].ret = i32(T_VOID)
-    else:
-        infer = ctxs[cx].infer_ret
-        want = infer or tkind(int(ctxs[cx].ret)) != .void_
-        exp = 0
-        if not infer: exp = int(ctxs[cx].ret)
-        if want and nkids(body) > 0 and nodes[kid(body, nkids(body) - 1)].kind == .exprstmt: returned_place(int(nodes[kid(body, nkids(body) - 1)].a))
-        sink_body_mode = sink_body_kind(body, infer, want, int(ctxs[cx].ret), not infer and sink_written(decl))
-        if fns[f].pack_n > 0: exp = sink_pack_body(f)
-        sink_fn = sinks.len()
-        bt = check_block(body, exp, want)
-        sink_fn = saved_sink
-        r = prune(int(ctxs[cx].ret))
-        n = nkids(body)
-        if infer:
-            if types[r].kind == .var:
-                if nodes[body].aux != 0:
-                    v = block_value(body)
-                    if has_flag(v, NF_LITERAL):
-                        bt = lit_default(v)
-                        set_block_value(body, coerce(v, bt))
-                    unify(r, bt)
-                # (die = (msg: str): eprint(msg); exit(2): no return, its last line never
-                # returns: neither does it, so a call ends its branch as exit's does)
-                else if n > 0 and decl != 0 and nodes[decl].kind == .fn_ and stmt_terminates(kid(body, n - 1)) and not __never_skip(decl): unify(r, T_NEVER)
-                else: unify(r, T_VOID)
-            else if types[r].kind == .void_: nodes[body].aux = 0
-            else if nodes[body].aux != 0: set_block_value(body, coerce(block_value(body), r))
-            else if bt != T_NEVER and not (n > 0 and stmt_terminates(kid(body, n - 1))):
-                fatal(nodes[decl].pos, "function must return a value of type {dt(r)} on all paths")
-            if infer_throws.has(f):
-                infer_finish(f, body)
-                infer_throws.remove(f)
-                infer_returns.remove(f)
-            fns[f].ret = i32(zonk(int(ctxs[cx].ret)))
-            if ide_on and decl != 0 and nodes[decl].kind == .fn_ and ide_indexed(pos_file(nodes[decl].pos)): ide_hint_fns.push(f)
-            if fns[f].aux_void and tkind(int(fns[f].ret)) != .void_: fatal(nodes[decl].pos, "recursive function '{name_of(int(nodes[decl].name))}' returns a value; add an explicit return type ({jd(nodes[decl].pos, "`-> Type`", "`:>Type`")})")
-        else if r == T_NEVER and decl != 0 and files[pos_file(nodes[decl].pos)].is_dewy and bt != T_NEVER and not (n > 0 and stmt_terminates(kid(body, n - 1))):
-            fatal(nodes[decl].pos, "a function giving `never` must not finish: end each path with `exit(...)`, a panic or an endless loop")
-        else if want:
-            if nodes[body].aux != 0: set_block_value(body, coerce(block_value(body), r))
-            else if bt != T_NEVER and not (n > 0 and stmt_terminates(kid(body, n - 1))) and void_arm_end(body, r): pass
-            else if bt != T_NEVER and not (n > 0 and stmt_terminates(kid(body, n - 1))):
-                p = nodes[body].pos
-                if decl != 0: p = nodes[decl].pos
-                # (total = a + b as the last line: total is made, and not given back)
-                if n > 0:
-                    ls = kid(body, n - 1)
-                    vn = ""
-                    if nodes[ls].kind == .vardecl and nodes[ls].name > 0: vn = name_of(int(nodes[ls].name))
-                    else if nodes[ls].kind == .assign and nodes[ls].a != 0 and nodes[int(nodes[ls].a)].kind == .ident: vn = name_of(int(nodes[int(nodes[ls].a)].name))
-                    if len(vn) > 0:
-                        fatal(nodes[ls].pos, "the function gives back {a_type(r)}, but its last line gives nothing: a last line `{vn}` gives {vn} back")
-                    # (if n > 0: x, with no else: nothing when it does not hold)
-                    if (nodes[ls].kind == .if_ or nodes[ls].kind == .iflet) and nodes[ls].c == 0:
-                        fatal(nodes[ls].pos, "the function gives back {a_type(r)}, but an `if` without `else` gives nothing when it does not hold: add {jd(nodes[ls].pos, "`else:` and the value then", "`else` and the value then")}")
-                    fatal(nodes[ls].pos, "the function gives back {a_type(r)}, but its last line gives nothing: end it with the value to give back (or `return value`)")
-                fatal(p, "missing return value: function returns {dt(r)}")
+    sink_open(body, SINK_NONE)
+    sink_fn = sinks.len() - 1
+    loop i in [0..nkids(body)): check_stmt(kid(body, i))
+    sinks.pop()
+    sink_fn = saved_sink
+body_result_check = (f: int, decl: int, body: int, infer: bool, want: bool, expected: int) -> int:
+    saved_sink = sink_fn
+    exp = expected
+    if want and nkids(body) > 0 and nodes[kid(body, nkids(body) - 1)].kind == .exprstmt: returned_place(int(nodes[kid(body, nkids(body) - 1)].a))
+    sink_body_mode = sink_body_kind(body, infer, want, int(ctxs[cx].ret), not infer and sink_written(decl))
+    if fns[f].pack_n > 0: exp = sink_pack_body(f)
+    sink_fn = sinks.len()
+    bt = check_block(body, exp, want)
+    sink_fn = saved_sink
+    bt
+body_result_throws = (f: int, body: int):
+    if infer_throws.has(f):
+        infer_finish(f, body)
+        infer_throws.remove(f)
+        infer_returns.remove(f)
+body_result_hint = (f: int, decl: int):
+    if ide_on and decl != 0 and nodes[decl].kind == .fn_ and ide_indexed(pos_file(nodes[decl].pos)): ide_hint_fns.push(f)
+body_result_entry = (decl: int, body: int):
+    dir_function_entry(decl, body)
+    return
+body_result_error = (n: int, code: int, r: int, decl: int):
+    if code == 1: fatal(nodes[decl].pos, "function must return a value of type {dt(r)} on all paths")
+    if code == 2: fatal(nodes[decl].pos, "recursive function '{name_of(int(nodes[decl].name))}' returns a value; add an explicit return type ({jd(nodes[decl].pos, "`-> Type`", "`:>Type`")})")
+    if code == 3: fatal(nodes[decl].pos, "a function giving `never` must not finish: end each path with `exit(...)`, a panic or an endless loop")
+    body = n
+    nb = nkids(body)
+    p = nodes[body].pos
+    if decl != 0: p = nodes[decl].pos
+    # (total = a + b as the last line: total is made, and not given back)
+    if nb > 0:
+        ls = kid(body, nb - 1)
+        vn = ""
+        if nodes[ls].kind == .vardecl and nodes[ls].name > 0: vn = name_of(int(nodes[ls].name))
+        else if nodes[ls].kind == .assign and nodes[ls].a != 0 and nodes[int(nodes[ls].a)].kind == .ident: vn = name_of(int(nodes[int(nodes[ls].a)].name))
+        if len(vn) > 0:
+            fatal(nodes[ls].pos, "the function gives back {a_type(r)}, but its last line gives nothing: a last line `{vn}` gives {vn} back")
+        # (if n > 0: x, with no else: nothing when it does not hold)
+        if (nodes[ls].kind == .if_ or nodes[ls].kind == .iflet) and nodes[ls].c == 0:
+            fatal(nodes[ls].pos, "the function gives back {a_type(r)}, but an `if` without `else` gives nothing when it does not hold: add {jd(nodes[ls].pos, "`else:` and the value then", "`else` and the value then")}")
+        fatal(nodes[ls].pos, "the function gives back {a_type(r)}, but its last line gives nothing: end it with the value to give back (or `return value`)")
+    fatal(p, "missing return value: function returns {dt(r)}")
+body_result_host = CheckerBodyResultHost(body_result_entry, body_result_init, body_result_check, stmt_terminates, lit_default, coerce, __never_skip, body_result_throws, body_result_hint, void_arm_end, body_result_error)
+body_result_input = CheckerBodyResultInput(&nodes, &lists, &types, &files, &fns, &ctxs, &cx, &T_VOID, &T_NEVER, &body_result_host)
+body_result_binding = checker_body_results_bind(&body_result_input)
 body_finalize = (f: int, vars0: int, binds0: int, exposed0: int, da_mark: int):
     body = int(fns[f].body)
     index_mark = zonk_indexes

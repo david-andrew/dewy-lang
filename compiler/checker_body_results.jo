@@ -1,0 +1,97 @@
+# Frozen function-body result obligations extracted from check.jo.
+use 'node_store.dewy'
+use 'checker_types.dewy'
+use 'source_types.dewy'
+use 'checker_state.dewy'
+use 'type_inference.dewy'
+struct CheckerBodyResultHost:
+    entry: (int, int) -> void
+    init_body: (int, int) -> void
+    check_body: (int, int, int, bool, bool, int) -> int
+    terminates: (int) -> bool
+    literal_default: (int) -> int
+    coerce: (int, int) -> int
+    never_skip: (int) -> bool
+    finish_throws: (int, int) -> void
+    ide_hint: (int, int) -> void
+    void_arm_end: (int, int) -> bool
+    error: (int, int, int, int) -> void
+struct CheckerBodyResultInput:
+    nodes: *(Node[])
+    lists: *(i32[])
+    types: *(TypeInfo[])
+    files: *(SrcFile[])
+    fns: *(FnInst[])
+    contexts: *(FnCtx[])
+    context: *int
+    void_type: *int
+    never_type: *int
+    host: *CheckerBodyResultHost
+xe_nodes: *(Node[])
+xe_lists: *(i32[])
+xe_types: *(TypeInfo[])
+xe_files: *(SrcFile[])
+xe_fns: *(FnInst[])
+xe_contexts: *(FnCtx[])
+xe_context: *int
+xe_void_type: *int
+xe_never_type: *int
+xe_host: *CheckerBodyResultHost
+checker_body_results_bind = (input: *CheckerBodyResultInput) -> int:
+    xe_nodes = input[0].nodes
+    xe_lists = input[0].lists
+    xe_types = input[0].types
+    xe_files = input[0].files
+    xe_fns = input[0].fns
+    xe_contexts = input[0].contexts
+    xe_context = input[0].context
+    xe_void_type = input[0].void_type
+    xe_never_type = input[0].never_type
+    xe_host = input[0].host
+    0
+xe_count = (n: int) -> int: int(xe_nodes[0][n].nlist)
+xe_kid = (n: int, i: int) -> int: int(xe_lists[0][int(xe_nodes[0][n].list) + i])
+xe_kind = (t: int) -> TK: xe_types[0][tu_prune(t)].kind
+xe_ret = () -> int: int(xe_contexts[0][xe_context[0]].ret)
+xe_value = (b: int) -> int: int(xe_nodes[0][xe_kid(b, xe_count(b) - 1)].a)
+xe_set_value = (b: int, e: int): xe_nodes[0][xe_kid(b, xe_count(b) - 1)].a = i32(e)
+xe_ends = (body: int) -> bool:
+    n = xe_count(body)
+    n > 0 and xe_host[0].terminates(xe_kid(body, n - 1))
+xe_body = (f: int, decl: int):
+    body = int(xe_fns[0][f].body)
+    xe_host[0].entry(decl, body)
+    if xe_fns[0][f].kind == 4:
+        xe_host[0].init_body(f, body)
+        xe_fns[0][f].ret = i32(xe_void_type[0])
+        return
+    infer = xe_contexts[0][xe_context[0]].infer_ret
+    want = infer or xe_kind(xe_ret()) != .void_
+    exp = 0
+    if not infer: exp = xe_ret()
+    bt = xe_host[0].check_body(f, decl, body, infer, want, exp)
+    r = int(tu_prune(xe_ret()))
+    n = xe_count(body)
+    if infer:
+        if xe_types[0][r].kind == .var:
+            if xe_nodes[0][body].aux != 0:
+                v = xe_value(body)
+                if int(xe_nodes[0][v].flags) & 256 != 0:
+                    bt = xe_host[0].literal_default(v)
+                    xe_set_value(body, xe_host[0].coerce(v, bt))
+                tu_unify(r, bt)
+            else if n > 0 and decl != 0 and xe_nodes[0][decl].kind == .fn_ and xe_ends(body) and not xe_host[0].never_skip(decl): tu_unify(r, xe_never_type[0])
+            else: tu_unify(r, xe_void_type[0])
+        else if xe_types[0][r].kind == .void_: xe_nodes[0][body].aux = 0
+        else if xe_nodes[0][body].aux != 0: xe_set_value(body, xe_host[0].coerce(xe_value(body), r))
+        else if bt != xe_never_type[0] and not xe_ends(body): xe_host[0].error(decl, 1, r, decl)
+        xe_host[0].finish_throws(f, body)
+        xe_fns[0][f].ret = i32(int(tu_zonk(xe_ret())))
+        xe_host[0].ide_hint(f, decl)
+        if xe_fns[0][f].aux_void and xe_kind(int(xe_fns[0][f].ret)) != .void_: xe_host[0].error(decl, 2, 0, decl)
+    else if r == xe_never_type[0] and decl != 0 and xe_files[0][xe_nodes[0][decl].pos >> 40].is_dewy and bt != xe_never_type[0] and not xe_ends(body):
+        xe_host[0].error(decl, 3, 0, decl)
+    else if want:
+        if xe_nodes[0][body].aux != 0: xe_set_value(body, xe_host[0].coerce(xe_value(body), r))
+        else if bt != xe_never_type[0] and not xe_ends(body):
+            if not xe_host[0].void_arm_end(body, r): xe_host[0].error(body, 4, r, decl)
