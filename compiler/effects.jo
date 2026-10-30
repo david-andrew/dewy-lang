@@ -1020,7 +1020,11 @@ effect_add = (f: int, event: EffectEvent) -> bool:
     if effect_summaries[f].capped: return false
     # (a whole-root event already covers its fields)
     if covered and effect_event_index.has(EffectEventKey(stamp, EffectAtom(event.atom.kind, root))): return false
-    if effect_summaries[f].events.len() >= 32:
+    # (the one placeless possible failure takes no room: discharging it never
+    # changes how the summary widens)
+    budget = 32
+    if effect_summaries[f].events.len() >= 32 and (event.atom.kind == .panic or effect_event_index.has(EffectEventKey(stamp, EffectAtom(.panic)))): budget = 33
+    if effect_summaries[f].events.len() >= budget:
         # Past the budget every place event widens to its whole root, still an
         # upper bound: a kernel touching many fields of one record stays exact
         # about which records it reads and writes.
@@ -1039,7 +1043,7 @@ effect_add = (f: int, event: EffectEvent) -> bool:
                 effect_summaries[f].events = kept
                 effect_restamp(f)
                 return true
-        if kept.len() < 32:
+        if kept.len() < budget:
             kept.push(wide)
             effect_summaries[f].events = kept
             effect_restamp(f)
@@ -1989,13 +1993,17 @@ effect_root = (f: int) -> bool:
 # Summaries first charge every unproven element access a possible failure.
 # One facts probe per owning body then discharges what its own facts prove,
 # and the graph is solved again. Probe answers depend only on callees' write
-# footprints, which discharging a failure cannot change.
+# footprints, which discharging a failure cannot change. Discharging only
+# removes failures, so it is demanded only when the charged graph breaks a
+# contract (effect_contracts_hold); no other summary use reads failures.
 effect_settle_bounds = ():
     effect_body_cache = true
     effect_bound_sites = []
     loop obligation in effect_obligations: effect_source_row(obligation.source)
     loop f in [1..effect_limit):
         if effect_root(f) and effect_summaries[f].index == 0: effect_visit(f)
+
+effect_discharge_bounds = ():
     sites = effect_bound_sites
     effect_bound_sites = []
     if sites.len() == 0: return
@@ -2026,9 +2034,19 @@ effects_finalize = ():
     effect_final = true
     effect_graph_reset()
     effect_settle_bounds()
+    if effect_bound_sites.len() > 0 and effect_contracts_hold(false):
+        effect_bound_sites = []
+        return
+    effect_discharge_bounds()
+    effect_contracts_hold(true)
+
+# Whether every obligation and contract root's row admits its summary; report:
+# the first that does not is an error. O(roots' events + obligations).
+effect_contracts_hold = (report: bool) -> bool:
     loop obligation in effect_obligations:
         actual = effect_source_row(obligation.source)
         if not effect_rows_fit(actual, obligation.bound):
+            if not report: return false
             fatal(nodes[obligation.source].pos, "cannot prove callable effect contract: a reaching source exceeds the inferred row")
     loop f in [1..effect_limit):
         if not effect_root(f): continue
@@ -2053,6 +2071,7 @@ effects_finalize = ():
                 atom.place = place_append(PlaceIdentity(.formal, 0, base.declaration), atom.place)
             prohibited = policy_root and (effect_policy.prohibitions & (1 << int(atom.kind)) != 0 or atom.kind == .opaque)
             if (contract == 0 or effect_allows(contract, atom)) and not prohibited: continue
+            if not report: return false
             at = if event.via != 0: event.via else: event.witness
             if at == 0: at = d
             what = if atom.kind == .write: "mutation" else if atom.kind == .read: "read" else if atom.kind == .alloc: "allocation" else if atom.kind == .panic: "possible failure" else if atom.kind == .detach: "storage detach" else if atom.kind == .io: "I/O" else if atom.kind == .block: "blocking operation" else if atom.kind == .costly_copy: "costly copy" else if atom.kind == .escape: "escape" else if atom.kind == .spawn: "spawn" else: "opaque operation or unproved implementation cost"
@@ -2063,6 +2082,7 @@ effects_finalize = ():
             why = if contract == 0: "is forbidden by the effect policy" else if row.exclusions.len() > 0 and effect_excluded(row, atom): "exceeds the contract (its row excludes it)" else if row.atoms.len() == 0 and row.variables.len() == 0 and not row.open: "exceeds the closed row (no_effects permits none)" else: "exceeds the closed row (the contract does not permit it)"
             hint = if arena_fns.len() > 0 and event.witness > 0: arena_capacity_hint(event.witness) else: ""
             fatal(nodes[at].pos, "effect contract violation in '{effect_name(f)}': {what} {why}; {chain}{origin}{hint}{dir_row_origin(d)}")
+    true
 
 # Facts request only summaries of calls they actually analyze. Ordinary code
 # with no refinement consumers pays neither an arena allocation nor a walk.
