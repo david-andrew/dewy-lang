@@ -15,6 +15,7 @@ CheckerOptionalHost:type=[
     exceptions:<(type_id:int64):>bool>
     failures:<(node:int64 type_id:int64 expected:int64):>int64>
     exact:<(node:int64):>bool>
+    union:<(type_id:int64):>bool>
     error:<(node:int64 type_id:int64 unwrap:bool):>void>
 ]
 CheckerOptionalInput:type=[
@@ -52,7 +53,7 @@ xo_check=(n:XOWord expected:XOWord ex:XOWord):>CheckerOptionalResult=>$unsafe {
         else {h=tb_mk_opt(ex)}
     }
     let at=tu_prune(xo_host[0].check(XOWord(xo_nodes[0].ptr[n].a) h))
-    if not unwrap and xo_dewy(n) and (xo_nodes[0].ptr[n].c not=? 0 or xo_host[0].exceptions(at)) {
+    if not unwrap and xo_dewy(n) and (xo_nodes[0].ptr[n].c not=? 0 or xo_host[0].exceptions(at) or ex not=? 0 and xo_host[0].union(ex)) {
         return [type=xo_host[0].failures(n at expected) bypass=true]
     }
     if xo_types[0].ptr[at].kind not=? 'opt' {
@@ -73,6 +74,9 @@ xo_check=(n:XOWord expected:XOWord ex:XOWord):>CheckerOptionalResult=>$unsafe {
         xo_nodes[0][n].aux=1
     } else if xo_dewy(n) and ex =? 0 and xo_types[0].ptr[tu_prune(inner)].kind =? 'int_' and inner not=? xo_math_int[0] and btt =? xo_math_int[0] and xo_host[0].exact(XOWord(xo_nodes[0].ptr[n].b)) {
         t=xo_math_int[0]
+    } else if ex not=? 0 and xo_host[0].union(ex) {
+        xo_host[0].coerce(XOWord(xo_nodes[0].ptr[n].b) ex);
+        t=ex
     } else {xo_host[0].coerce(XOWord(xo_nodes[0].ptr[n].b) inner);}
     [type=t bypass=false]
 }

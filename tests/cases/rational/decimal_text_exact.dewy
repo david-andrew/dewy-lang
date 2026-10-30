@@ -1,0 +1,11 @@
+# exit: 42
+$runtime_checks
+main=()=>{
+    exit(run())
+}
+run=():>int=>{
+    let a=rational("19.99")??0
+    let b=rational("1.5e3")??0
+    let c=rational("2.5E-2")??0
+    return if a =? rational(1999 100) and b =? 1500 and c =? rational(1 40) and rational("1.2.3") is? none and rational("1e") is? none and rational("1e+") is? none and rational("1. 2") is? none 42 else 1
+}

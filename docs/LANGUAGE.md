@@ -1535,7 +1535,7 @@ literal, a guard (`if d =? 0 return ...`) or a power of a positive base
 (`rational(digits 10^k)`) proves it. From text, `rational(text)` reads an integer or `numerator/denominator`
 and `rational(numerator denominator)` two decimal integers; both return
 `rational|none`, `none` for invalid text, including a zero denominator.
-Decimal points and whitespace inside the text are not accepted.
+Decimal points and base-ten exponents are accepted exactly: `rational("19.99")` is `1999/100`, and `rational("2.5E-2")` is `1/40`. Whitespace inside the text is not accepted.
 
 Values keep a positive denominator and coprime `int` parts. Zero is `0/1`.
 A part is a machine word while it fits and grows into a big integer beyond, so
@@ -2501,6 +2501,7 @@ sorting is needed, then cached while integer positions are sorted. Records and
 their managed fields keep ordinary independent-value behavior; modifying a
 record in `leaderboard` leaves `players` unchanged.
 
+`values.sorted_with(less)` returns a stable sorted copy and leaves the original array unchanged.
 `values.sort_with(less)` takes a comparison function with two arguments for
 orderings that depend on both values. It is stable too: values for which neither
 argument compares less than the other retain their order. A comparator should
@@ -3604,7 +3605,7 @@ failure passes on as the result, for `or_throw` or a `match`. Listing a kind the
 value never holds is an error. Zero, `false` and empty
 collections are present values. Chains associate right, so
 `first ?? second ?? default` picks the first present value. A final optional
-fallback keeps the result optional. Arithmetic binds more tightly than `??`,
+fallback keeps the result optional. With an expected union type that admits both sides, `??` returns that union; without an expected type, it uses the existing fallback inference. Arithmetic binds more tightly than `??`,
 while comparisons and boolean operators bind less tightly:
 `to_int(text) ?? 0 >? 10` compares the selected number with 10. Since
 `count ?? 0 + 1` is `count ?? (0 + 1)`, a literal fallback followed by
@@ -4105,6 +4106,7 @@ that end when it has it (once), and the text unchanged otherwise.
 blank text), `text.lines` gives the lines without their breaks (a final break adds no empty
 line), `text.chars` its graphemes (as `graphemes(text)`), `text.count(part)` the
 nonoverlapping occurrences and `text.is_empty` whether it has none.
+`text.is_alpha`, `.is_digit`, `.is_space` and `.is_alnum` are true when the text is nonempty and every Unicode grapheme belongs to that class; combining marks follow their leading character.
 `text.get(i)` gives grapheme `i`, as `text[i]` counts it, or `none` past either
 end (negative included), as `xs.get(i)` does for an array.
 `text.byte_slice(start stop)` gives the bytes `[start..stop)` as a string without

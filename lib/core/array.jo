@@ -505,6 +505,12 @@ sort[T, K] = (xs: mut T[], key: (T) -> K, reverse: bool = false): xs.sort_by(key
 sort_with[T] = (xs: mut T[], less: (T, T) -> bool):
     __merge_sort(xs, less)
 
+# a stable sorted copy using a comparison function
+sorted_with[T] = (xs: T[], less: (T, T) -> bool) -> T[]:
+    out = xs
+    out.sort_with(less)
+    out
+
 # sort in place by a key, smallest first or largest first (equal keys keep their order: sort by
 # name, then by score, for the scores in order of name)
 sort_by[T, K] = (xs: mut T[], key: (T) -> K, descending: bool = false):

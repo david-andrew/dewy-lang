@@ -37,10 +37,11 @@ xo_failure_host = (n: int, t: int, expected: int) -> int:
 xo_exact_host = (n: int) -> bool:
     events.push("exact:{n}")
     xo_exact
+xo_union_host = (t: int) -> bool: false
 xo_error_host = (n: int, t: int, unwrap: bool):
     print("error:{t}:{unwrap}")
     exit(19)
-xo_services = CheckerOptionalHost(xo_check_host, xo_coerce_host, xo_narrow_host, xo_exception_host, xo_failure_host, xo_exact_host, xo_error_host)
+xo_services = CheckerOptionalHost(xo_check_host, xo_coerce_host, xo_narrow_host, xo_exception_host, xo_failure_host, xo_exact_host, xo_union_host, xo_error_host)
 xo_input = CheckerOptionalInput(&nodes, &types, &files, &T_MATH_INT, &xo_services)
 xo_binding = checker_optional_bind(&xo_input)
 operand = (t: int) -> int:

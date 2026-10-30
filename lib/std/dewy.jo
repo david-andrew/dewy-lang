@@ -61,6 +61,28 @@ all = (xs: bool[]) -> bool:
 
 is_empty = (s: str) -> bool: len(s) == 0
 
+# Unicode 16 character classes, tested over extended grapheme clusters.
+# Combining marks belong to the class of the grapheme's leading scalar.
+__dewy_class = (scalar: int) -> int:
+    __grapheme_property(embed("unicode/classification.bin"), scalar)
+
+__dewy_text_class = (s: str, mask: int) -> bool:
+    if len(s) == 0: return false
+    loop g in graphemes(s):
+        first = true
+        loop scalar in chars(g):
+            bits = __dewy_class(scalar)
+            if first:
+                if bits & mask == 0: return false
+                first = false
+            else if bits & 8 == 0: return false
+    true
+
+is_alpha = (s: str) -> bool: __dewy_text_class(s, 1)
+is_digit = (s: str) -> bool: __dewy_text_class(s, 2)
+is_space = (s: str) -> bool: __dewy_text_class(s, 4)
+is_alnum = (s: str) -> bool: __dewy_text_class(s, 3)
+
 # text without a prefix or suffix it has, else the text as it is (once, not repeatedly)
 remove_prefix = (s: str, prefix: str) -> str:
     if starts_with(s, prefix): return s[len(prefix)..]

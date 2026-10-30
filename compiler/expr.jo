@@ -5397,7 +5397,7 @@ coalesce_failures = (n: int, at: int, expected: int) -> int:
     values: int[]
     loop i in 0.. and m in members:
         if not covers[i]: values.push(m)
-    target = if values.len() == 1: values[0] else: mk_union(values)
+    target = if expected != 0 and is_union(expected): expected else if values.len() == 1: values[0] else: mk_union(values)
     probe = clone(fallback)
     pt = prune(check_expr(probe, target))
     if tkind(pt) == .opt or pt == T_NONE: target = mk_opt(target)
@@ -10008,7 +10008,7 @@ optional_error = (n: int, at: int, unwrap: bool):
     if lf >= 0 and lf < files.len() and pos_off(lp) < len(files[lf].src) and files[lf].src[pos_off(lp)] == '[':
         fatal(nodes[n].pos, "'??' needs an optional on the left, found {dt(at)} (indexing gives the element itself; m.get(k) gives an optional, m.get(k, default) a value)")
     fatal(nodes[n].pos, "'??' needs an optional on the left, found {dt(at)}")
-optional_host = CheckerOptionalHost(check_expr, coerce, narrow_optional_source, coalesce_exceptions, coalesce_failures, exact_potential, optional_error)
+optional_host = CheckerOptionalHost(check_expr, coerce, narrow_optional_source, coalesce_exceptions, coalesce_failures, exact_potential, is_union, optional_error)
 optional_input = CheckerOptionalInput(&nodes, &types, &files, &T_MATH_INT, &optional_host)
 optional_binding = checker_optional_bind(&optional_input)
 

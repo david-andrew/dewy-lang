@@ -1,0 +1,13 @@
+# exit: 42
+$runtime_checks
+NotFound:type=type of error & [key:string]
+main=()=>{
+    exit(run())
+}
+run=():>int=>{
+    let d:dict<string int>=["x"->7]
+    let found:int|NotFound=d.get("x")??NotFound["x"]
+    let missing:int|NotFound=d.get("y")??NotFound["y"]
+    let ordinary=d.get("x")??0
+    return if found is? int and missing is? NotFound and ordinary =? 7 and d.get("y")??0 =? 0 42 else 1
+}
