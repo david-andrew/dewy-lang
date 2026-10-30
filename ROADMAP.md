@@ -7,15 +7,15 @@ day; keep it under 150 lines. Accepted designs live in [docs/design](docs/design
 
 ## North star
 
-| Measure | Now (2026-10-26) | Goal |
+| Measure | Now (2026-10-30) | Goal |
 |---|---|---|
-| Acceptance ladder, design surface | 120/122 (2 decided, awaiting implementation) | all |
+| Acceptance ladder, design surface | 122/122 (saturated; new rungs needed) | all |
 | Tier-4 flagship programs (1–5k lines each) | 7/7 pass | all pass |
-| No traps by default | census 1,793 sites / 429 programs (3,600 / 2,252); ~52% wait on #98/#95/#106 | ordinary code proves without opt-ins |
-| Compile throughput, single thread, default build, every processed line | flagships 142k lines/s (min 99_dewy_frontend 95k) | 200–250k on every flagship |
+| No traps by default | census 1,430 sites / 429 programs (2,730 / 2,252), down from 1,793 / 3,600 on 10-26 | ordinary code proves without opt-ins |
+| Compile throughput, single thread, default build, every processed line | flagships 153.6k lines/s (min 99_dewy_frontend 113.9k) | 200–250k on every flagship |
 | Hello-world compile | 8.0 ms (instruction-derived) | ≤20 ms |
 | Kernels vs C -O2 (time, default) | broadcast 0.75×, Jacobi 0.59×, arena 3.2×; mergesort 0.62× OpenMP | ≤1.2× |
-| Quick / full suite | ~20–33 s / ~4 min (loaded machine) | ≤30 s / ≤5 min |
+| Quick / full suite | ~100 s loaded (reselect) / ~5 min | ≤30 s / ≤5 min |
 
 Ladder: `python3 -m tools.core ladder` (`tests/ladder/ladder.json`). Compile:
 `speed` (single-thread instructions; the gate) and `speed --cycles` for layout
@@ -24,18 +24,20 @@ changes. Wall clock only on a quiet pinned machine or a CI runner. Kernels:
 
 ## Next
 
-1. **No traps: ordinary code proves** (top capability; the default flipped).
-   Largest unblocked families: index bounds (376 sites), integer-fit
-   conversions, dictionary membership, fixed-width refinements. Blocked on
-   design calls: unconstrained `int64` arithmetic (503), 2-D shapes (221),
-   drawing/GPU capacity (202). Dogfood programs are the yardstick.
-2. **Compile speed** (200–250k lines/s single-thread on every flagship; every
-   processed line counts). Register allocation family closed (one pilot
-   rejected); next lever awaits the strategy call (reopen near-miss pilots,
-   allow 1–3% cuts).
-3. **Self-hosting** ([readiness](docs/design/self_hosting.md)): the front end
-   (lexer, reader, file driver) and integer write domains are Dewy. Next: the
-   name-store adapter and closed checker leaves; facts last.
+1. **No traps: ordinary code proves** (top capability). #95, #96, #98 and #106
+   are implemented. Remaining families: index bounds and integer fit on inputs
+   without stated contracts (diagnostics name the contract), loop-carried
+   selector lengths, stepped ranges. Dogfood rounds alternate discovery and fix.
+2. **Compile speed** (200–250k lines/s on every flagship). 99_dewy_frontend
+   needs ~44% fewer instructions per line. Of the four strategy programs,
+   register allocation, isel and dense storage measured ≤1.6% each; the facts
+   representation gave 1–2% on 99/100 and is the only lever with exposure left.
+   A strategy decision is open (see the pending questions).
+3. **Self-hosting** ([readiness](docs/design/self_hosting.md)): the front end, the
+   checker state, the optimizer, the shared backend analysis, and the wasm, arm64
+   and x64 emitters run in Dewy. Next: close milestone 1 (Dewy owns all subsystem
+   execution), then milestone 3 (a pinned C-reproducible seed that retires the
+   frozen twins).
 4. **Runtime speed vs C:** allocation and growth in `arena`, `push` vs C
    (~2.3× instructions). Fork-join one-worker overhead ≤1.03×; mergesort's
    gap to OpenMP is per-instruction cost (memory), not instruction count.
