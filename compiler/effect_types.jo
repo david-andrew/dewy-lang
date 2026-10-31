@@ -15,6 +15,11 @@ struct EffectAtom:
     kind: EffectKind = .read
     place: PlaceIdentity = PlaceIdentity(.local, 0, 0)
     row: int = 0
+struct EffectEvent:
+    atom: EffectAtom = EffectAtom()
+    witness: int = 0
+    via: int = 0
+    via_fn: int = 0
 struct EffectContract:
     atoms: EffectAtom[]
     exclusions: EffectAtom[]

@@ -1,0 +1,254 @@
+$runtime_checks
+from p"node_store.dewy" import (NK Node)
+from p"checker_state.dewy" import (Local FnInst)
+from p"effect_types.dewy" import (PlaceIdentity EffectEvent)
+from p"effect_lattice.dewy" import (place_base place_covers)
+from p"ownership_checks.dewy" import oc_children
+# Scoped byte loans (`lend`): within a loan, raw loads and stores need a
+# loan-derived address, and no address, call, closure or replacement may let
+# the owner's storage escape or change. Demanded only for functions holding
+# byte operations (expr.jo marks them). Each body is walked to a fixed point of
+# monotone address origins (at most 8 origin bits, so at most 8 rounds per
+# loop nesting), capped at 65536 steps a function. Host calls: the place route
+# of an owner or binding, a callee's summary demand and events, a formal's
+# actual place, and the diagnostic.
+CWord:type=int64<overflow='wrap'>
+const NF_MUT=1
+const NF_GLOBAL=2048
+const LF_MUTPARAM=2
+const LF_CAPTURE=4
+const LF_ALIAS=8
+const LF_SHARED=1024
+const LF_EXPOSED=1048576
+ByteLoan:type=[
+    node:int64=0
+    place:PlaceIdentity=PlaceIdentity[]
+    writable:bool=false
+    first_local:int64=0
+    origin:int64=0
+]
+EffectLoanHost:type=[
+    error:<(n:int64 reason:string):>void>
+    route:<(n:int64):>PlaceIdentity>
+    append:<(n:int64 p:PlaceIdentity):>PlaceIdentity>
+    demand:<(f:int64):>bool>
+    events:<(f:int64):>array<EffectEvent>>
+]
+EffectLoanInput:type=[
+    nodes:ptr<array<Node>>
+    lists:ptr<array<int32>>
+    locals:ptr<array<Local>>
+    fns:ptr<array<FnInst>>
+    owners:ptr<dict<int64 bool>>
+    # Checker intrinsic ordinals (expr.jo's IN): lend, loan_address,
+    # loan_length, loan_load, loan_store, len, runtime_assert, static_assert
+    # and assert.
+    in_lend:int64
+    in_address:int64
+    in_length:int64
+    in_load:int64
+    in_store:int64
+    in_len:int64
+    in_runtime_assert:int64
+    in_static_assert:int64
+    in_assert:int64
+    host:ptr<EffectLoanHost>
+]
+let el:ptr<EffectLoanInput>=$unsafe (uint64(0) as ptr<EffectLoanInput>)
+let el_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let el_lists:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
+let loan_stack:array<ByteLoan>=[]
+let loan_origins:dict<int64 int64>=[]
+let loan_ids:array<int64>=[]
+let loan_generation:CWord=0
+let loan_steps:CWord=0
+effect_loans_bind=(input:ptr<EffectLoanInput>):>CWord=>$unsafe {
+    el=input
+    el_nodes=input[0].nodes
+    el_lists=input[0].lists
+    0
+}
+loan_kid=(n:CWord i:CWord):>CWord=>$unsafe {CWord(el_lists[0].ptr[CWord(el_nodes[0].ptr[n].list) + i])}
+loan_fail=(n:CWord reason:string):>void=>$unsafe {el[0].host[0].error(n "scoped loan: {reason}")}
+loan_owner=(n:CWord):>CWord=>$unsafe {
+    let p=el[0].host[0].route(n)
+    loop i in [0..CWord(loan_stack.length)) {
+        if place_covers(loan_stack[i].place p) or place_covers(p loan_stack[i].place) {return i}
+    }
+    -1
+}
+loan_mark=(local:CWord origins:CWord):>void=>$unsafe {
+    let old:CWord=CWord(loan_origins.get(local) ?? 0)
+    if old | origins not=? old {
+        loan_origins[local] = old | origins
+        loan_generation += 1
+    }
+}
+loan_publish=(n:CWord p:PlaceIdentity origins:CWord):>void=>$unsafe {
+    loop loan in loan_stack {
+        if origins & CWord(loan.origin) =? 0 {continue}
+        if p.root not=? 'local' or p.parent not=? 0 or p.declaration <? loan.first_local {
+            loan_fail(n "address cannot escape the scoped expression through a store")
+        }
+    }
+}
+loan_call=(n:CWord):>void=>$unsafe {
+    let node=el_nodes[0].ptr[n]
+    if node.aux =? 2 {return}
+    if node.aux not=? 0 or not el[0].host[0].demand(node.sym) {
+        loan_fail(n "call has no checked nonescaping storage contract")
+    }
+    loop event in el[0].host[0].events(node.sym) {
+        let a=event.atom
+        if a.kind =? 'opaque' or a.kind =? 'escape' or a.kind =? 'remainder' {
+            loan_fail(n "call may escape or invalidate loan storage")
+        }
+        let p=a.place
+        let base=place_base(p)
+        if base.root =? 'capture' or base.root =? 'global' {loan_fail(n "call may access nonlocal loan storage")}
+        if base.root =? 'formal' {
+            let i:CWord=CWord(base.declaration) - 1
+            if i >=? 0 and i <? CWord(node.nlist) {p=el[0].host[0].append(loan_kid(n i) p)}
+        }
+        loop loan in loan_stack {
+            if p.declaration not=? 0 and (place_covers(p loan.place) or place_covers(loan.place p)) {
+                loan_fail(n "call may access the active loan owner")
+            }
+        }
+    }
+}
+loan_visit=(n:CWord):>CWord=>$unsafe {
+    if n =? 0 {return 0}
+    loan_steps += 1
+    if loan_steps >? 65536 {loan_fail(n "address analysis budget exhausted")}
+    let node=el_nodes[0].ptr[n]
+    let k=node.kind
+    let active=loan_stack.length not=? 0
+    if k =? 'intrinsic' {
+        let id:CWord=CWord(node.aux)
+        if id =? el[0].in_lend {
+            let owner=loan_kid(n 0)
+            if loan_owner(owner) >=? 0 {loan_fail(n "nested conflicting loan")}
+            if loan_visit(loan_kid(n 1)) not=? 0 {loan_fail(n "address-derived reservation")}
+            let p=el[0].host[0].route(owner)
+            if p.declaration =? 0 or p.parent not=? 0 {loan_fail(n "owner must have stable named storage")}
+            if p.root =? 'local' and CWord(el[0].locals[0].ptr[p.declaration].flags) & (LF_ALIAS | LF_EXPOSED | LF_SHARED | LF_CAPTURE | LF_MUTPARAM) not=? 0 {
+                loan_fail(n "owner has a conflicting alias or exposed storage view")
+            }
+            if not loan_ids.contains(n) {loan_ids.push(n)}
+            let origin:CWord=-1
+            let count:CWord=CWord(loan_ids.length)
+            if count >? 8 {count=8}
+            loop i in [0..count) {
+                if CWord(loan_ids[i]) =? n {origin=1 << i}
+            }
+            loan_stack.push(ByteLoan[node=n place=p writable=CWord(node.flags) & NF_MUT not=? 0 first_local=node.ival origin=origin])
+            let tainted=loan_visit(loan_kid(n 2))
+            loan_stack.pop();
+            if tainted & origin not=? 0 {loan_fail(n "address cannot escape the scoped expression as its result")}
+            return tainted
+        }
+        if id =? el[0].in_address or id =? el[0].in_length {
+            let i=loan_owner(loan_kid(n 0))
+            if i <? 0 {loan_fail(n "byte operation requires an active owner loan")}
+            if id =? el[0].in_address {return CWord(loan_stack[i].origin)}
+            if not loan_stack[i].writable {loan_fail(n "set_length requires a writable loan")}
+            if loan_visit(loan_kid(n 1)) not=? 0 {loan_fail(n "address-derived length cannot be published")}
+            return 0
+        }
+        if id =? el[0].in_load or id =? el[0].in_store {
+            if not active {loan_fail(n "raw byte operation requires a scoped loan")}
+            if id =? el[0].in_load {
+                if loan_visit(loan_kid(n 0)) =? 0 {loan_fail(n "raw load requires a loan-derived address")}
+            } else {
+                if loan_visit(loan_kid(n 0)) not=? 0 {loan_fail(n "address cannot escape through a raw store")}
+                let origins=loan_visit(loan_kid(n 1))
+                if origins =? 0 {loan_fail(n "raw store requires a loan-derived address")}
+                loop loan in loan_stack {
+                    if origins & CWord(loan.origin) not=? 0 and not loan.writable {loan_fail(n "raw write through a readonly loan")}
+                }
+            }
+            return 0
+        }
+        if active and id =? el[0].in_len and loan_owner(loan_kid(n 0)) >=? 0 {return 0}
+    }
+    if k =? 'ident' {
+        if active and loan_owner(n) >=? 0 {loan_fail(n "owner cannot be copied, resized, replaced or aliased during a loan")}
+        let p=el[0].host[0].route(n)
+        return if p.root =? 'local' {CWord(loan_origins.get(p.declaration) ?? 0)} else {0}
+    }
+    if active and (k =? 'lambda' or k =? 'fnref' or k =? 'partial') {loan_fail(n "closure capture during a loan is not supported")}
+    if k =? 'block' {
+        let result:CWord=0
+        loop j in [0..CWord(node.nlist)) {result=loan_visit(loan_kid(n j))}
+        return result
+    }
+    if k =? 'vardecl' {
+        let tainted=loan_visit(CWord(node.b))
+        if tainted not=? 0 {
+            let p=PlaceIdentity[root=if CWord(node.flags) & NF_GLOBAL not=? 0 {'global'} else {'local'} owner=0 declaration=node.sym]
+            loan_publish(n p tainted)
+            loan_mark(CWord(p.declaration) tainted)
+        }
+        return 0
+    }
+    if k =? 'assign' {
+        if active and place_base(el[0].host[0].route(CWord(node.a))).root not=? 'local' {
+            loan_fail(n "nonlocal replacement may invalidate loan storage")
+        }
+        let tainted=loan_visit(CWord(node.b))
+        let old=loan_visit(CWord(node.a))
+        if tainted | old not=? 0 {
+            let p=el[0].host[0].route(CWord(node.a))
+            loan_publish(n p tainted | old)
+            loan_mark(CWord(p.declaration) tainted | old)
+        }
+        return 0
+    }
+    if k =? 'return_' {
+        if loan_visit(CWord(node.a)) not=? 0 {loan_fail(n "address cannot escape through return")}
+        return 0
+    }
+    if active and (k =? 'if_' or k =? 'while_' or k =? 'for_' or k =? 'match_' or k =? 'iflet' or k =? 'and_' or k =? 'or_' or k =? 'coalesce') {
+        if loan_visit(CWord(node.a)) not=? 0 {loan_fail(n "address-derived control flow cannot publish loan bits")}
+    }
+    let mask=oc_children(k)
+    let tainted:CWord=0
+    if mask >=? 0 {
+        if mask & 1 not=? 0 {tainted=loan_visit(CWord(node.a)) | tainted}
+        if mask & 2 not=? 0 {tainted=loan_visit(CWord(node.b)) | tainted}
+        if mask & 4 not=? 0 {tainted=loan_visit(CWord(node.c)) | tainted}
+        if mask & 16 not=? 0 {
+            loop j in [0..CWord(node.nlist)) {tainted=loan_visit(loan_kid(n j)) | tainted}
+        }
+    } else if active {loan_fail(n "unsupported address transform")}
+    if active and k =? 'call' {
+        if tainted not=? 0 {loan_fail(n "address cannot escape through a call or record field")}
+        loan_call(n)
+    }
+    if active and k =? 'intrinsic' {
+        if tainted not=? 0 {loan_fail(n "intrinsic has no reviewed address-retention contract")}
+        let id:CWord=CWord(node.aux)
+        if id not=? el[0].in_len and id not=? el[0].in_runtime_assert and id not=? el[0].in_static_assert and id not=? el[0].in_assert {
+            loan_fail(n "intrinsic may invalidate loan storage")
+        }
+    }
+    if tainted not=? 0 and (k =? 'tuple' or k =? 'array') {loan_fail(n "address cannot escape through aggregate storage")}
+    tainted
+}
+loans_finalize=():>void=>$unsafe {
+    loop [f _] in el[0].owners[0] {
+        loan_origins = []
+        loan_ids = []
+        loan_generation = 0
+        loan_stack = []
+        loan_steps = 0
+        # Monotone place origins reach a fixed point across loop backedges.
+        loop true {
+            let before=loan_generation
+            loan_visit(CWord(el[0].fns[0].ptr[f].body));
+            if loan_generation =? before {break}
+        }
+    }
+    loan_origins = []
+}
