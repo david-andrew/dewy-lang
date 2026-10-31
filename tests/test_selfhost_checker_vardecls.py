@@ -73,12 +73,27 @@ dv_binding = (name: int, t: int, pos: int) -> int:
     events.push("binding:{name}:{t}:{pos}")
     locals.push(Local(name = i32(name), type = i32(t)))
     locals.len() - 1
+dv_pattern_type = 0
+dv_pattern_global = 0
+dv_pattern_fail = false
+# (1 a global pattern's answer, 2 the unpacked type, 3 a shape refusal when told to fail,
+# 4 an element alias's value as checked)
+dv_pattern = (s: int, t: int, code: int) -> int:
+    events.push("pattern:{s}:{t}:{code}")
+    if code == 1: return dv_pattern_global
+    if code == 2: return if dv_pattern_type != 0: dv_pattern_type else: int(nodes[int(nodes[s].b)].type)
+    if code == 3 and dv_pattern_fail:
+        print(events)
+        print("error:{s}:{t}:3")
+        exit(19)
+    if code == 4: return int(nodes[s].b)
+    0
 dv_after = (s: int, l: int, t: int, code: int): events.push("after:{s}:{l}:{t}:{code}")
 dv_error = (s: int, t: int, code: int):
     print(events)
     print("error:{s}:{t}:{code}")
     exit(19)
-dv_services = CheckerDeclHost(dv_form, dv_binding_type, dv_default, dv_syntax_type, dv_values, dv_annotated, dv_coerce, dv_sibling, dv_literal, dv_storage, dv_value_param, dv_temperature, dv_binding, dv_after, dv_error)
+dv_services = CheckerDeclHost(dv_form, dv_binding_type, dv_default, dv_syntax_type, dv_values, dv_annotated, dv_coerce, dv_sibling, dv_literal, dv_storage, dv_value_param, dv_temperature, dv_binding, dv_pattern, dv_after, dv_error)
 dv_inputs = CheckerDeclInput(&nodes, &lists, &types, &structs, &files, &locals, &ctxs, &cx, &last, &dv_refining, &dv_effects, &dv_ide, &dv_literals, &dv_pending, &dv_block, &dv_index, &dv_flow_next, &dv_flow_local, &dv_parents, &dv_quat_nodes, &dv_quat_locals, &dv_tk, &dv_watch, &dv_cached, &dv_growth_pending, &dv_whole, &T_STR, &T_MATH_INT, &dv_services)
 dv_bound = checker_vardecls_bind(&dv_inputs)
 DEWY = 1 << 40
@@ -207,9 +222,27 @@ main = ():
     shaped = typed(.tarray, T_INT); nodes[shaped].ival = 1
     run(decl(24, typed(.ident, T_INT), shaped))
     pattern = decl(24, typed(.ident, tup))
-    node_set_list(mut nodes, mut lists, pattern, [node(.ident)])
+    node_set_list(mut nodes, mut lists, pattern, [node(.hole)])
     run(pattern)
     run(decl(24, typed(.ident, T_INT), 0, 2048))
+    # Patterns: names bound to elements (constants, value parameters), discards, globals;
+    # element aliases.
+    dv_pattern_type = int(tb_mk_tuple([T_INT, T_STR, T_I32]))
+    loop flags in [0, 262144, 2048]:
+        pattern = decl(25, typed(.call, T_INT), 0, flags)
+        a = node(.ident); nodes[a].name = 26; nodes[a].pos = 7
+        c = node(.ident); nodes[c].name = 27; nodes[c].pos = 9
+        node_set_list(mut nodes, mut lists, pattern, [a, node(.hole), c])
+        if flags == 0: nodes[pattern].aux2 = 1
+        run(pattern)
+        print("  {nodes[a].sym}:{locals[int(nodes[a].sym)].flags}:{locals[int(nodes[a].sym)].type}:{nodes[c].sym}:{locals[int(nodes[c].sym)].flags}:{locals[int(nodes[c].sym)].type}:{nodes[pattern].type}")
+    dv_pattern_global = 1
+    run(pattern)
+    dv_pattern_global = 0
+    dv_pattern_type = 0
+    alias = decl(28, typed(.index, T_I32), 0, 8388608)
+    run(alias)
+    print("  {locals.len()}:{locals[locals.len() - 1].flags}:{locals[locals.len() - 1].alias}:{locals[locals.len() - 1].type}:{nodes[alias].nlist}")
     print("ok")
 '''
 
@@ -227,6 +260,7 @@ def test_checker_vardecls_twins(compiler, tmp_path, release):  # noqa: F811
     ('run(decl(11, typed(.ident, mk_type(.null_))))', 4),
     ('run(decl(11, typed(.ident, mk_type(.typeval))))', 5),
     ('run(decl(11, typed(.ident, mk_type(.module))))', 5),
+    ('dv_pattern_fail = true; p = decl(11, typed(.ident, T_INT)); node_set_list(mut nodes, mut lists, p, [node(.ident)]); run(p)', 3),
 ])
 def test_checker_vardecls_errors(compiler, tmp_path, case, code):  # noqa: F811
     main = f'''

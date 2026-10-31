@@ -18,6 +18,7 @@ struct CheckerDeclHost:
     value_param: (int, int) -> int
     temperature: (int, int, int) -> int
     binding: (int, int, int) -> int
+    pattern: (int, int, int) -> int
     after: (int, int, int, int) -> void
     error: (int, int, int) -> void
 struct CheckerDeclInput:
@@ -135,11 +136,36 @@ vd_scalar_followed = (s: int, t: int) -> bool:
     i = vd_sibling_index[0]
     if b == 0 or i >= int(vd_nodes[0][b].nlist) or vd_kid(b, i) != s: return false
     vd_parents[0].get(tu_prune(t), 0) != 0 and i + 1 < int(vd_nodes[0][b].nlist)
+vd_element_alias = (s: int) -> bool:
+    ix = vd_host[0].pattern(s, 0, 4)
+    l = vd_host[0].binding(int(vd_nodes[0][s].name), int(vd_nodes[0][ix].type), vd_nodes[0][s].pos)
+    vd_locals[0][l].flags = i32(16392)
+    vd_locals[0][l].alias = i32(ix)
+    vd_nodes[0][s].kind = .block
+    vd_nodes[0][s].nlist = 0
+    true
+vd_pattern = (s: int) -> bool:
+    if int(vd_nodes[0][s].flags) & 2048 != 0 and vd_host[0].pattern(s, 0, 1) != 0: return true
+    t = vd_host[0].pattern(s, 0, 2)
+    n = int(vd_nodes[0][s].nlist)
+    if vd_types[0][t].kind != .tuple or int(vd_types[0][t].nargs) != n: vd_host[0].pattern(s, t, 3)
+    i = 0
+    loop i < n:
+        id = vd_kid(s, i)
+        if vd_nodes[0][id].kind != .hole:
+            l = vd_host[0].binding(int(vd_nodes[0][id].name), tu_targ(t, i), vd_nodes[0][id].pos)
+            f = if int(vd_nodes[0][s].flags) & 262144 != 0: 197120 else: 66048
+            if vd_nodes[0][s].aux2 == 1: f = f | 524288
+            vd_locals[0][l].flags = i32(f)
+            vd_nodes[0][id].sym = i32(l)
+        i = i + 1
+    vd_nodes[0][s].type = i32(t)
+    true
 vd_forms = (s: int) -> bool:
     b = int(vd_nodes[0][s].b)
     if b > 0 and vd_nodes[0][b].kind == .call and vd_nodes[0][b].aux2 == 17: vd_host[0].form(s, 1)
     if vd_flag(s, 131072): return vd_host[0].form(s, 2)
-    if vd_flag(s, 8388608): return vd_host[0].form(s, 3)
+    if vd_flag(s, 8388608): return vd_element_alias(s)
     if b != 0:
         c = b
         if vd_nodes[0][c].kind == .propagate: c = int(vd_nodes[0][c].a)
@@ -147,7 +173,7 @@ vd_forms = (s: int) -> bool:
         if vd_nodes[0][s].a == 0 and vd_nodes[0][s].nlist == 0 and not vd_flag(s, 2048) and not vd_flag(s, 262144) and vd_flag(b, 1) and vd_file_dewy(vd_nodes[0][s].pos) and vd_host[0].form(s, 5): return true
     tn = int(vd_nodes[0][s].a)
     if tn != 0 and b != 0 and vd_nodes[0][tn].kind == .tarray and vd_nodes[0][tn].ival == 1: vd_host[0].form(s, 6)
-    if vd_nodes[0][s].nlist > 0: return vd_host[0].form(s, 7)
+    if vd_nodes[0][s].nlist > 0: return vd_pattern(s)
     if vd_flag(s, 2048): return vd_host[0].form(s, 8)
     false
 vd_decl = (s: int):

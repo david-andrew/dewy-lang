@@ -3,7 +3,7 @@ from p"node_store.dewy" import Node
 from p"checker_types.dewy" import (TypeInfo StructInfo TK)
 from p"source_types.dewy" import SrcFile
 from p"checker_state.dewy" import (Local FnCtx StatementWatch)
-from p"type_inference.dewy" import tu_prune
+from p"type_inference.dewy" import (tu_prune tu_targ)
 # `let name = value`, `let name:T`, `let name:T = value`, once its other forms (a
 # spawned task's handle, soa and element aliases, lent and local places, shaped
 # values, patterns, globals) are passed to their host services: the written type
@@ -30,6 +30,7 @@ CheckerDeclHost:type=[
     value_param:<(node:int64 type_id:int64):>int64>
     temperature:<(node:int64 type_id:int64 unit:int64):>int64>
     binding:<(name:int64 type_id:int64 pos:int64):>int64>
+    pattern:<(node:int64 type_id:int64 code:int64):>int64>
     after:<(node:int64 local:int64 type_id:int64 code:int64):>void>
     error:<(node:int64 type_id:int64 code:int64):>void>
 ]
@@ -158,6 +159,42 @@ vd_scalar_followed=(s:VWord t:VWord):>bool=>$unsafe {
     if b =? 0 or i >=? VWord(vd_nodes[0].ptr[b].nlist) or vd_kid(b i) not=? s {return false}
     vd_parents[0].get(tu_prune(t) 0) not=? 0 and i + 1 <? VWord(vd_nodes[0].ptr[b].nlist)
 }
+# The element of a `mut x in xs` in a combined loop: a name for xs[k] itself (pattern
+# service 4: the value checked as a place, a soa array's element refused; LF_ALIAS 8,
+# LF_ELEMALIAS 16384). The declaration is spent.
+vd_element_alias=(s:VWord):>bool=>$unsafe {
+    let ix=VWord(vd_host[0].pattern(s 0 4))
+    let l=VWord(vd_host[0].binding(VWord(vd_nodes[0].ptr[s].name) VWord(vd_nodes[0].ptr[ix].type) VWord(vd_nodes[0].ptr[s].pos)))
+    vd_locals[0][l].flags=int32<overflow='wrap'>(16392)
+    vd_locals[0][l].alias=int32<overflow='wrap'>(ix)
+    vd_nodes[0][s].kind='block'
+    vd_nodes[0][s].nlist=0
+    true
+}
+# `let (a b) = value`: each name bound to its element (pattern services: 1 a global's,
+# declared there (1) unless all are discards, 2 the value checked and unpacked (its type),
+# 3 a value of another shape refused; LF_DECL 512 | LF_QUIET 65536, LF_CONST 131072,
+# LF_VALUEPARAM 524288 for a value parameter's, aux2 1).
+vd_pattern=(s:VWord):>bool=>$unsafe {
+    if VWord(vd_nodes[0].ptr[s].flags) & 2048 not=? 0 and vd_host[0].pattern(s 0 1) not=? 0 {return true}
+    let t=VWord(vd_host[0].pattern(s 0 2))
+    let n=VWord(vd_nodes[0].ptr[s].nlist)
+    if vd_types[0].ptr[t].kind not=? 'tuple' or VWord(vd_types[0].ptr[t].nargs) not=? n {vd_host[0].pattern(s t 3);}
+    let i:VWord=0
+    loop i <? n {
+        let id=vd_kid(s i)
+        if vd_nodes[0].ptr[id].kind not=? 'hole' {
+            let l=VWord(vd_host[0].binding(VWord(vd_nodes[0].ptr[id].name) tu_targ(t i) VWord(vd_nodes[0].ptr[id].pos)))
+            let f:VWord=if VWord(vd_nodes[0].ptr[s].flags) & 262144 not=? 0 {197120} else {66048}
+            if vd_nodes[0].ptr[s].aux2 =? 1 {f=f | 524288}
+            vd_locals[0][l].flags=int32<overflow='wrap'>(f)
+            vd_nodes[0][id].sym=int32<overflow='wrap'>(l)
+        }
+        i=i + 1
+    }
+    vd_nodes[0][s].type=int32<overflow='wrap'>(t)
+    true
+}
 # The forms another service declares (NF_SOA 131072, NF_ALIASDECL 8388608, NF_MUT 1,
 # NF_GLOBAL 2048, NF_RDONLY 262144; a spawn's call aux2 17, a lent place's -11):
 # true when one did.
@@ -165,7 +202,7 @@ vd_forms=(s:VWord):>bool=>$unsafe {
     let b=VWord(vd_nodes[0].ptr[s].b)
     if b >? 0 and vd_nodes[0].ptr[b].kind =? 'call' and vd_nodes[0].ptr[b].aux2 =? 17 {vd_host[0].form(s 1);}
     if VWord(vd_nodes[0].ptr[s].flags) & 131072 not=? 0 {return vd_host[0].form(s 2)}
-    if VWord(vd_nodes[0].ptr[s].flags) & 8388608 not=? 0 {return vd_host[0].form(s 3)}
+    if VWord(vd_nodes[0].ptr[s].flags) & 8388608 not=? 0 {return vd_element_alias(s)}
     if b not=? 0 {
         let c=b
         if vd_nodes[0].ptr[c].kind =? 'propagate' {c=VWord(vd_nodes[0].ptr[c].a)}
@@ -174,7 +211,7 @@ vd_forms=(s:VWord):>bool=>$unsafe {
     }
     let tn=VWord(vd_nodes[0].ptr[s].a)
     if tn not=? 0 and b not=? 0 and vd_nodes[0].ptr[tn].kind =? 'tarray' and vd_nodes[0].ptr[tn].ival =? 1 {vd_host[0].form(s 6);}
-    if vd_nodes[0].ptr[s].nlist >? 0 {return vd_host[0].form(s 7)}
+    if vd_nodes[0].ptr[s].nlist >? 0 {return vd_pattern(s)}
     if VWord(vd_nodes[0].ptr[s].flags) & 2048 not=? 0 {return vd_host[0].form(s 8)}
     false
 }
