@@ -2,6 +2,8 @@
 use 'node_store.dewy'
 use 'source_types.dewy'
 use 'checker_state.dewy'
+use 'checker_types.dewy'
+use 'type_inference.dewy'
 use 'checker_vardecls.dewy'
 use 'checker_assigns.dewy'
 use 'checker_statements.dewy'
@@ -12,20 +14,24 @@ use 'checker_returns.dewy'
 use 'checker_conditionals.dewy'
 use 'checker_literals.dewy'
 struct CheckerBlockHost:
-    open: (int, bool) -> int
+    open: (int, int) -> int
     expand: (int) -> void
     direct: (int) -> void
     final: (int, int, int, int) -> int
     sibling: (int, int, int) -> void
-    finish: (int, int, int, int, bool) -> int
+    close: (int, int) -> int
     reset: (int) -> void
     special: (int, int) -> void
     assign: (int) -> bool
     error: (int, int) -> void
+    check: (int, int) -> int
+    terminates: (int) -> bool
 struct CheckerBlockInput:
     nodes: *(Node[])
     lists: *(i32[])
     files: *(SrcFile[])
+    types: *(TypeInfo[])
+    last: *int
     scopes: *CheckerScope
     context: *int
     watch: *StatementWatch
@@ -43,6 +49,8 @@ struct CheckerBlockInput:
 bk_nodes: *(Node[])
 bk_lists: *(i32[])
 bk_files: *(SrcFile[])
+bk_types: *(TypeInfo[])
+bk_last: *int
 bk_scopes: *CheckerScope
 bk_context: *int
 bk_watch: *StatementWatch
@@ -61,6 +69,8 @@ checker_blocks_bind = (input: *CheckerBlockInput) -> int:
     bk_nodes = input[0].nodes
     bk_lists = input[0].lists
     bk_files = input[0].files
+    bk_types = input[0].types
+    bk_last = input[0].last
     bk_scopes = input[0].scopes
     bk_context = input[0].context
     bk_watch = input[0].watch
@@ -126,6 +136,46 @@ bk_if = (s: int):
     bk_nodes[0][s].flags = i32(f | 16)
     xl_finish(s, xf_if(s, 0), 0)
     if bk_watch[0].expectations > 0: bk_host[0].special(s, 5)
+bk_open = (b: int, want_value: bool) -> int:
+    mode = -1
+    if bk_body_mode[0] >= 0:
+        mode = bk_body_mode[0]
+        bk_body_mode[0] = -1
+    else if bk_flag(b, 8): return bk_host[0].open(b, if want_value: -2 else: -1)
+    else if want_value and bk_files[0][bk_nodes[0][b].pos >> 40].is_dewy:
+        if bk_flag(b, 67108864): mode = 4
+        else if bk_arm_next[0] == b: mode = 3
+        else if bk_bind_next[0] == b: mode = 6
+        else: mode = 1
+    bk_arm_next[0] = 0
+    bk_bind_next[0] = 0
+    if mode >= 0:
+        bk_host[0].open(b, mode)
+        bk_discarding[0] = false
+    mode
+bk_final = (b: int, i: int, expected: int, mode: int) -> int:
+    s = int(bk_lists[0][int(bk_nodes[0][b].list) + i])
+    k = bk_nodes[0][s].kind
+    if k == .if_ or k == .iflet: return bk_host[0].final(b, i, expected, mode)
+    if k != .exprstmt: return -1
+    e = int(bk_nodes[0][s].a)
+    if bk_nodes[0][e].kind == .call and bk_nodes[0][e].aux2 == 17: return -1
+    if mode == 2 or mode == 3 or mode == 6: return bk_host[0].final(b, i, expected, mode)
+    if bk_nodes[0][e].kind == .match_: bk_nodes[0][e].flags = i32(int(bk_nodes[0][e].flags) & -17)
+    result = bk_host[0].check(e, expected)
+    bk_nodes[0][s].a = i32(bk_last[0])
+    if bk_types[0][tu_prune(result)].kind != .void_: bk_nodes[0][b].aux = 1
+    if result == bk_never_type[0]: bk_nodes[0][b].aux = 0
+    bk_nodes[0][s].flags = i32(int(bk_nodes[0][s].flags) | 128)
+    result
+bk_finish = (b: int, result0: int, mode: int, n: int, want_value: bool) -> int:
+    result = result0
+    if want_value:
+        if bk_nodes[0][b].aux == 0 and n > 0 and bk_host[0].terminates(int(bk_lists[0][int(bk_nodes[0][b].list) + n - 1])): result = bk_never_type[0]
+        if bk_flag(b, 1073741824): result = bk_never_type[0]
+        if result != 0 and int(bk_types[0][result].flags) & 1 != 0: result = tu_zonk(result)
+    if mode >= 0: result = bk_host[0].close(b, result)
+    result
 bk_block = (b: int, expected: int, want_value: bool) -> int:
     pos = bk_nodes[0][b].pos
     if want_value and bk_flag(b, 131072) and bk_files[0][pos >> 40].is_dewy:
@@ -135,7 +185,7 @@ bk_block = (b: int, expected: int, want_value: bool) -> int:
         return result
     mode = -1
     was_discarding = bk_discarding[0]
-    if want_value or bk_body_mode[0] >= 0 or bk_flag(b, 8): mode = bk_host[0].open(b, want_value)
+    if want_value or bk_body_mode[0] >= 0 or bk_flag(b, 8): mode = bk_open(b, want_value)
     else:
         bk_arm_next[0] = 0
         bk_bind_next[0] = 0
@@ -161,7 +211,7 @@ bk_block = (b: int, expected: int, want_value: bool) -> int:
         bk_sibling_index[0] = i
         if counted: bk_host[0].direct(s)
         value = -1
-        if i == n - 1 and want_value: value = bk_host[0].final(b, i, expected, mode)
+        if i == n - 1 and want_value: value = bk_final(b, i, expected, mode)
         if value >= 0: result = value
         else:
             if bk_watch[0].sibling_flow > 0: bk_host[0].sibling(s, 0, 1)
@@ -175,7 +225,7 @@ bk_block = (b: int, expected: int, want_value: bool) -> int:
     if bk_watch[0].sibling_flow > 0: bk_host[0].sibling(b, 0, 4)
     bk_sibling_block[0] = saved_block
     bk_sibling_index[0] = saved_index
-    if want_value or mode >= 0: result = bk_host[0].finish(b, result, mode, n, want_value)
+    if want_value or mode >= 0: result = bk_finish(b, result, mode, n, want_value)
     if mode >= 0: bk_discarding[0] = was_discarding
     bk_nodes[0][b].type = i32(result)
     if transparent: bk_nodes[0][b].aux = 5

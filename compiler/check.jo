@@ -2624,9 +2624,16 @@ sink_close = (b: int, result: int) -> int:
 
 check_block = (b: int, expected: int, want_value: bool) -> int: bk_block(b, expected, want_value)
 # Blocks run in checker_blocks.dewy; these are its services.
+# (a sink opened for b in mode; mode -1 or -2 (wanting a value): how a discarding block's
+# values go, worked out here)
+block_open = (b: int, mode: int) -> int:
+    if mode >= 0:
+        sink_open(b, mode)
+        return mode
+    block_sink_mode(b, mode == -2)
 # (how a block's values go: a function body's, a collector's, an arm's, a binding's, or
 # dropped; -1 for none)
-block_open = (b: int, want_value: bool) -> int:
+block_sink_mode = (b: int, want_value: bool) -> int:
     sink_mode = -1
     if sink_body_mode >= 0:
         sink_mode = sink_body_mode
@@ -2692,15 +2699,6 @@ block_sibling = (n: int, m: int, code: int):
     else if code == 2: sibling_statement(n, m)
     else if code == 3: sibling_flow_start(n, m)
     else: sibling_flow_end(n)
-block_finish = (b: int, result0: int, sink_mode: int, n: int, want_value: bool) -> int:
-    result = result0
-    if want_value and nodes[b].aux == 0 and n > 0 and stmt_terminates(kid(b, n - 1)): result = T_NEVER
-    if want_value and has_flag(b, NF_FLOW_RETURNS): result = T_NEVER
-    # (an array built by pushing has a solved inference variable inside its type: the plain type
-    # matches overloads exactly)
-    if want_value and result != 0 and int(types[result].flags) & TF_HAS_VAR != 0: result = zonk(result)
-    if sink_mode >= 0: result = sink_close(b, result)
-    result
 
 # the value expression of a value block
 block_value = (b: int) -> int: int(nodes[kid(b, nkids(b) - 1)].a)
@@ -4573,8 +4571,8 @@ stmt_error = (s: int, code: int):
     if code == 1: fatal(nodes[s].pos, "declarations are only allowed at the top level")
     if code == 2: fatal(nodes[s].pos, "invalid statement")
     spawn_value_error(nodes[int(nodes[s].b)].pos)
-block_host = CheckerBlockHost(block_open, block_expand, block_direct, block_final, block_sibling, block_finish, scope_reset, stmt_special, stmt_assign, stmt_error)
-block_input = CheckerBlockInput(&nodes, &lists, &files, &check_scopes, &cx, &statement_watch, &sibling_block, &sibling_index, &sibling_flow_l, &sink_body_mode, &sink_arm_next, &sink_bind_next, &discarding, &exact_measure_on, &T_VOID, &T_NEVER, &block_host)
+block_host = CheckerBlockHost(block_open, block_expand, block_direct, block_final, block_sibling, sink_close, scope_reset, stmt_special, stmt_assign, stmt_error, check_expr, stmt_terminates)
+block_input = CheckerBlockInput(&nodes, &lists, &files, &types, &last_checked, &check_scopes, &cx, &statement_watch, &sibling_block, &sibling_index, &sibling_flow_l, &sink_body_mode, &sink_arm_next, &sink_bind_next, &discarding, &exact_measure_on, &T_VOID, &T_NEVER, &block_host)
 block_binding = checker_blocks_bind(&block_input)
 
 # Loop statements run in checker_loops.dewy; these are its services.

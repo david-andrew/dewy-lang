@@ -34,8 +34,10 @@ db_exact = false
 db_mode = -1
 db_final = -1
 db_declares = false
-db_open = (b: int, want: bool) -> int:
-    events.push("open:{b}:{want}:{db_body_mode}")
+# (mode >= 0: a sink opened; -1, -2 (wanting a value): a discarding block's mode, db_mode)
+db_open = (b: int, mode: int) -> int:
+    events.push("open:{b}:{mode}:{db_body_mode}:{db_arm}:{db_bind}")
+    if mode >= 0: return mode
     db_body_mode = -1
     if db_mode >= 0: db_discarding = false
     db_arm = 0; db_bind = 0
@@ -54,9 +56,17 @@ db_final_host = (b: int, i: int, expected: int, mode: int) -> int:
 db_sibling = (n: int, m: int, code: int):
     events.push("sibling:{n}:{m}:{code}")
     if code == 2: bk_stmt(n)
-db_finish = (b: int, result: int, mode: int, n: int, want: bool) -> int:
-    events.push("finish:{b}:{result}:{mode}:{n}:{want}")
+db_close = (b: int, result: int) -> int:
+    events.push("close:{b}:{result}")
     result + 100
+db_check = (n: int, expected: int) -> int:
+    events.push("check:{n}:{expected}:{nodes[n].flags}")
+    last = n
+    if nodes[n].ival != 0: last = typed(.ident, int(nodes[n].type))
+    int(nodes[n].type)
+db_terminates = (s: int) -> bool:
+    events.push("terminates:{s}")
+    nodes[s].ival != 0
 db_reset = (mark: int):
     events.push("reset:{mark}")
     scopes.names.truncate(mark)
@@ -71,8 +81,8 @@ db_error = (s: int, code: int):
     print(events)
     print("error:{s}:{code}")
     exit(19)
-db_services = CheckerBlockHost(db_open, db_expand, db_direct, db_final_host, db_sibling, db_finish, db_reset, db_special, db_assign, db_error)
-db_inputs = CheckerBlockInput(&nodes, &lists, &files, &scopes, &cx, &da_watch, &dv_block, &dv_index, &dv_flow_local, &db_body_mode, &db_arm, &db_bind, &db_discarding, &db_exact, &T_VOID, &T_NEVER, &db_services)
+db_services = CheckerBlockHost(db_open, db_expand, db_direct, db_final_host, db_sibling, db_close, db_reset, db_special, db_assign, db_error, db_check, db_terminates)
+db_inputs = CheckerBlockInput(&nodes, &lists, &files, &types, &last, &scopes, &cx, &da_watch, &dv_block, &dv_index, &dv_flow_local, &db_body_mode, &db_arm, &db_bind, &db_discarding, &db_exact, &T_VOID, &T_NEVER, &db_services)
 db_bound = checker_blocks_bind(&db_inputs)
 DEWY = 1 << 40
 dewy_node = (k: NK, a: int = 0) -> int:
@@ -167,6 +177,40 @@ main = ():
     run(block_of([if_of(), let_of(18, T_INT), if_of(true)]))
     da_watch.expectations = 0
     literal_exact = false
+    # Value blocks' sinks and final values: bodies, Dewy places (comprehensions, arms,
+    # bindings), discarding blocks; spawns, collected values, matches, void and never;
+    # ends that terminate, solved variables.
+    db_mode = -1; db_final = -1
+    value = typed(.call, T_INT); nodes[value].ival = 1
+    run(block_of([let_of(30, T_INT), dewy_node(.exprstmt, value)]), T_INT, true)
+    run(block_of([dewy_node(.test_)]), 0, true)
+    m = typed(.match_, T_VOID); nodes[m].flags = i32(16)
+    run(block_of([dewy_node(.exprstmt, m)]), 0, true)
+    run(block_of([dewy_node(.exprstmt, typed(.call, T_NEVER))]), 0, true)
+    ends = dewy_node(.test_); nodes[ends].ival = 1
+    run(block_of([ends]), 0, true)
+    run(block_of([dewy_node(.exprstmt, typed(.call, T_INT))], 67108864), 0, true)
+    run(block_of([dewy_node(.exprstmt, typed(.call, T_INT))], 1073741824), 0, true)
+    db_final = T_I32
+    loop b in [block_of([dewy_node(.exprstmt, typed(.call, T_INT))]), block_of([dewy_node(.exprstmt, typed(.call, T_INT))])]:
+        db_arm = b
+        run(b, 0, true)
+        db_bind = b
+        run(b, 0, true)
+    db_arm = 0; db_bind = 0
+    jo = block_of([node(.exprstmt, typed(.call, T_INT))]); nodes[jo].pos = 0
+    run(jo, 0, true)
+    loop mode in [2, 3, 6]:
+        db_body_mode = mode
+        run(block_of([dewy_node(.exprstmt, typed(.call, T_INT))]), 0, true)
+    db_body_mode = -1
+    db_final = -1
+    db_mode = 0
+    run(block_of([dewy_node(.exprstmt, typed(.call, T_INT))], 8), 0, true)
+    run(block_of([dewy_node(.test_)], 8))
+    db_mode = -1
+    types.push(TypeInfo(kind = .var, flags = i32(1), ref = i32(T_INT))); solved = types.len() - 1
+    run(block_of([dewy_node(.exprstmt, typed(.call, solved))]), 0, true)
     print("ok")
 '''
 
