@@ -23,124 +23,18 @@ ROOT = HERE.parents[1]
 # Steps 1 and 2 cannot read Dewy, so there every `use 'X.dewy'` in compiler/
 # names X.dewy's frozen implementation-language twin instead. Steps 3 on
 # compile the Dewy modules, so the compiler that ships runs them.
-FROZEN_TWINS = {'checker_expr.dewy': 'checker_expr.jo',
-                'effect_loans.dewy': 'effect_loans.jo',
-                'effect_lattice.dewy': 'effect_lattice.jo',
-                'effect_types.dewy': 'effect_types.jo',
-                'effect_panics.dewy': 'effect_panics.jo',
-                'checker_blocks.dewy': 'checker_blocks.jo',
-                'checker_assigns.dewy': 'checker_assigns.jo',
-                'checker_vardecls.dewy': 'checker_vardecls.jo',
-                'ownership_checks.dewy': 'ownership_checks.jo',
-                'ownership_types.dewy': 'ownership_types.jo',
-                'checker_for_loops.dewy': 'checker_for_loops.jo',
-                'checker_statements.dewy': 'checker_statements.jo',
-                'checker_exprstmts.dewy': 'checker_exprstmts.jo',
-                'checker_receivers.dewy': 'checker_receivers.jo',
-                'checker_returns.dewy': 'checker_returns.jo',
-                'checker_loops.dewy': 'checker_loops.jo',
-                'checker_numeric.dewy': 'checker_numeric.jo',
-                'checker_in_range.dewy': 'checker_in_range.jo',
-                'checker_idents.dewy': 'checker_idents.jo',
-                'checker_zonk.dewy': 'checker_zonk.jo',
-                'checker_body_results.dewy': 'checker_body_results.jo',
-                'checker_range_values.dewy': 'checker_range_values.jo',
-                'checker_match.dewy': 'checker_match.jo',
-                'checker_propagate.dewy': 'checker_propagate.jo',
-                'checker_indexes.dewy': 'checker_indexes.jo',
-                'checker_members.dewy': 'checker_members.jo',
-                'checker_lambdas.dewy': 'checker_lambdas.jo',
-                'checker_aggregates.dewy': 'checker_aggregates.jo',
-                'checker_type_apply.dewy': 'checker_type_apply.jo',
-                'checker_conditionals.dewy': 'checker_conditionals.jo',
-                'checker_type_tests.dewy': 'checker_type_tests.jo',
-                'checker_variants.dewy': 'checker_variants.jo',
-                'checker_places.dewy': 'checker_places.jo',
-                'checker_collections.dewy': 'checker_collections.jo',
-                'checker_cast.dewy': 'checker_cast.jo',
-                'checker_unary.dewy': 'checker_unary.jo',
-                'checker_logic.dewy': 'checker_logic.jo',
-                'checker_optional.dewy': 'checker_optional.jo',
-                'checker_literals.dewy': 'checker_literals.jo',
-               'checker_bodies.dewy': 'checker_bodies.jo',
-               'checker_instances.dewy': 'checker_instances.jo',
-               'checker_signature.dewy': 'checker_signature.jo',
-               'checker_resolve.dewy': 'checker_resolve.jo',
-               'checker_alias.dewy': 'checker_alias.jo',
-               'checker_fields.dewy': 'checker_fields.jo',
-               'checker_results.dewy': 'checker_results.jo',
-               'type_refinement.dewy': 'type_refinement.jo',
-               'type_match.dewy': 'type_match.jo',
-               'type_substitute.dewy': 'type_substitute.jo',
-               'checked_eval.dewy': 'checked_eval.jo',
-               'quantity_algebra.dewy': 'quantity_algebra.jo',
-               'type_labels.dewy': 'type_labels.jo',
-               'type_constructors.dewy': 'type_constructors.jo',
-               'type_properties.dewy': 'type_properties.jo',
-               'type_factory.dewy': 'type_factory.jo',
-               'type_format.dewy': 'type_format.jo',
-               'type_unions.dewy': 'type_unions.jo',
-               'type_layout.dewy': 'type_layout.jo',
-               'type_inference.dewy': 'type_inference.jo',
-               'type_intern.dewy': 'type_intern.jo',
-               'wasm_module.dewy': 'wasm_module.jo',
-               'native_debug.dewy': 'native_debug.jo',
-               'pdb_format.dewy': 'pdb_format.jo',
-               'dwarf_format.dewy': 'dwarf_format.jo',
-               'macho_format.dewy': 'macho_format.jo',
-               'pe_format.dewy': 'pe_format.jo',
-               'elf_format.dewy': 'elf_format.jo',
-               'x64_module.dewy': 'x64_module.jo',
-               'x64_emit.dewy': 'x64_emit.jo',
-               'driver_pipeline.dewy': 'driver_pipeline.jo',
-               'x64_allocate.dewy': 'x64_allocate.jo',
-               'x64_encode.dewy': 'x64_encode.jo',
-               'arm64_module.dewy': 'arm64_module.jo',
-               'arm64_emit.dewy': 'arm64_emit.jo',
-               'arm64_allocate.dewy': 'arm64_allocate.jo',
-               'arm64_encode.dewy': 'arm64_encode.jo',
-               'wasm_emit.dewy': 'wasm_emit.jo',
-               'backend_analysis.dewy': 'backend_analysis.jo',
-               'opt_returns.dewy': 'opt_returns.jo',
-               'opt_cleanup.dewy': 'opt_cleanup.jo',
-               'opt_rewrite.dewy': 'opt_rewrite.jo',
-               'opt_workspace.dewy': 'opt_workspace.jo',
-               'ir_operands.dewy': 'ir_operands.jo',
-               'ir_types.dewy': 'ir_types.jo',
-               'constant_eval.dewy': 'constant_eval.jo',
-               'constant_host.dewy': 'constant_host.jo',
-               'source_types.dewy': 'source_types.jo',
-               'evaluator_state.dewy': 'evaluator_state.jo',
-               'refine_resolve.dewy': 'refine_resolve.jo',
-               'refine_resolve_host.dewy': 'refine_resolve_host.jo',
-               'checker_state.dewy': 'checker_state.jo',
-               'refine_projection.dewy': 'refine_projection.jo',
-               'refine_storage.dewy': 'refine_storage.jo',
-               'checker_services.dewy': 'checker_services.jo',
-               'refine_strings.dewy': 'refine_strings.jo',
-               'refine_keys.dewy': 'refine_keys.jo',
-               'type_queries.dewy': 'type_queries.jo',
-               'refine_intervals.dewy': 'refine_intervals.jo',
-               'refine_queries.dewy': 'refine_queries.jo',
-               'refine_predicates.dewy': 'refine_predicates.jo',
-               'checker_tokens.dewy': 'checker_tokens.jo', 'checker_types.dewy': 'checker_types.jo',
-               'refinement_types.dewy': 'refinement_types.jo',
-               'dewy_lexer.dewy': 'dewy_lexer.jo', 'dewy_file.dewy': 'dewy_file.jo', 'dewy_reader.dewy': 'dewy_reader.jo', 'dewy_reader_state.dewy': 'dewy_reader_state.jo',
-               'dewy_reader_host.dewy': 'dewy_reader_host.jo', 'dewy_reader_types.dewy': 'dewy_reader_types.jo',
-               'zip.dewy': 'zip.jo', 'spelling.dewy': 'spelling.jo', 'leb128.dewy': 'leb128.jo',
-               'base64.dewy': 'base64.jo', 'line_table.dewy': 'line_table.jo', 'sha.dewy': 'sha.jo',
-               'icns.dewy': 'icns.jo', 'targets.dewy': 'targets.jo',
-               'json_doc.dewy': 'json_doc.jo', 'manifest.dewy': 'manifest.jo',
-               'literals.dewy': 'literals.jo', 'dewy_tokens.dewy': 'dewy_tokens.jo',
-               'habits.dewy': 'habits.jo', 'dewy_layout.dewy': 'dewy_layout.jo',
-               'dewy_lex.dewy': 'dewy_lex.jo', 'module_paths.dewy': 'module_paths.jo',
-               'dewy_syntax.dewy': 'dewy_syntax.jo', 'dewy_grammar.dewy': 'dewy_grammar.jo',
-               'dewy_scan.dewy': 'dewy_scan.jo', 'dewy_parser.dewy': 'dewy_parser.jo',
-               'dewy_builders.dewy': 'dewy_builders.jo', 'dewy_walk.dewy': 'dewy_walk.jo',
-               'dewy_reach.dewy': 'dewy_reach.jo',
-               'witness_text.dewy': 'witness_text.jo', 'literal_domains.dewy': 'literal_domains.jo',
-               'int_domains.dewy': 'int_domains.jo', 'text_domains.dewy': 'text_domains.jo', 'intervals.dewy': 'intervals.jo',
-               'node_store.dewy': 'node_store.jo', 'intern.dewy': 'intern.jo'}
+# Each compiler/X.dewy has the twin compiler/X.jo (derived, not listed: a new
+# Dewy module needs only its twin).
+def frozen_twins(compiler: Path) -> dict[str, str]:
+    """Every compiler/X.dewy mapped to its twin X.jo, in sorted order."""
+    twins = {path.name: path.with_suffix('.jo').name for path in sorted(compiler.glob('*.dewy'))}
+    missing = [twin for twin in twins.values() if not (compiler / twin).is_file()]
+    if missing:
+        raise RuntimeError(f'compiler/ has no frozen twin {", ".join(missing)}')
+    return twins
+
+
+FROZEN_TWINS = frozen_twins(ROOT / 'compiler')
 
 
 def identity(path: Path) -> str:
@@ -155,7 +49,7 @@ def use_frozen_twins(compiler: Path, stubbed: bool = False) -> dict[Path, str]:
         line = f"use '{module}'\n"
         importers = [path for path in sorted(compiler.glob('*.jo')) if line in path.read_text()]
         if not importers and not stubbed:
-            raise RuntimeError(f'no compiler module uses {module}; update FROZEN_TWINS')
+            raise RuntimeError(f'no compiler module uses {module}; import it or delete it')
         for path in importers:
             text = path.read_text()
             originals.setdefault(path, text)
