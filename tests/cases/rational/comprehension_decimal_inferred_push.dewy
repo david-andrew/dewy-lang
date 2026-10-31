@@ -1,0 +1,13 @@
+# Comprehensions infer their initially empty accumulator through push.
+# Direct pushes must materialize an exact literal by the same coercion path.
+main=():>void=>{
+    let decimals=[]
+    decimals.push(0.5)
+    decimals.push(1.5)
+    printl(decimals)
+    let integers=[]
+    integers.push(42)
+    printl(integers)
+    printl([loop p in ["a" "b"] p -> 42])
+    printl([loop p in ["a" "b"] p -> "value"])
+}

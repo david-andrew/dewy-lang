@@ -799,8 +799,9 @@ coerce = (n: int, target: int) -> int:
             return n
         if tk == .var:
             d = lit_default(n)
-            nodes[n].type = i32(d)
-            clear_flag(n, NF_LITERAL)
+            # Defaulting must construct the value too: an exact decimal's
+            # rational representation is not its parsed floating-point bits.
+            coerce(n, d)
             unify(to, d)
             return n
         if tk == .vec and nodes[n].kind == .int_lit or tk == .vec and nodes[n].kind == .float_lit: pass
