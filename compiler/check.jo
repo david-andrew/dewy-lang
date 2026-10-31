@@ -1,3 +1,4 @@
+use 'checker_exprstmts.dewy'
 use 'checker_returns.dewy'
 use 'checker_loops.dewy'
 use 'checker_zonk.dewy'
@@ -2090,28 +2091,7 @@ const SINK_COLLECTOR = 4  # loop capture, `[...]` with blocks: pushes onto its a
 const SINK_VOID = 5       # a body written `:>void` (or `:>void | E`): expressing a value is an error
 const SINK_BIND = 6       # a binding's value, `x = { 1 2 }`: one value, or several it holds as `(T T)`
 
-struct Sink:
-    mode: int
-    block: int
-    root: int       # (ARM: the BODY sink its values go to)
-    acc: int        # the accumulator local, 0 until one is needed
-    loops: int      # loop_serials.len() at the block
-    pending: int    # sink_pending.len() at the block
-    decl: int       # the accumulator's declaration, put first in the block when it closes
-    first: int      # position of the first value before the end
-    returns: int    # position of a `return value` in a BODY
-    finals: int[]   # BODY: the `if`/`match` nodes whose arms were ARM sinks
-    want: int       # BODY of a written `:>(T T)`: how many values it gives (0: any number)
-    elem: int       # ... and their type
-    count: int      # ... the values expressed so far, each directly in the body's block
-    vague: int      # ... where a value whose number is not known statically is (0: none)
-    direct: int     # (the statement of the body's block being checked)
-    tuple: bool     # BODY/BIND: several values with a static count are held in locals and given
-                    # as `(T T)`, returned in place (no array); false: always pushed (a parallel body)
-    held: int[]     # ... the statements whose values are held so far (sink_splice says how) ...
-    hlocals: int[]  # ... and the locals holding them, one per value, in order
-    hcount: int[]   # ... how many of those each statement holds
-
+# (Sink and its modes: checker_exprstmts.dewy)
 sinks: Sink[]
 # (values a BODY expressed before it needed an accumulator: exprstmts, and whether
 # each is a last value, its own or an ARM's)
@@ -4665,47 +4645,7 @@ check_stmt = (s: int):
         r = check_assign(s)
         if r != s:
             nodes[s] = nodes[r]
-    else if k == .exprstmt:
-        if has_flag(s, NF_CHECKED): return
-        e = int(nodes[s].a)
-        if repl_sig_query and nodes[e].kind == .ident:
-            # (`:type name` at the REPL, for a function: its versions as written, with their notes)
-            sy = lookup(int(nodes[e].name))
-            if sy != 0 and syms[sy].kind == .fns:
-                ds: int[]
-                collect_fns(int(nodes[e].name), ds)
-                loop d in ds:
-                    if len(repl_sig) > 0: repl_sig += "\n"
-                    repl_sig += ide_fn_header(d)
-                    doc = ide_doc_of(nodes[d].pos)
-                    if len(doc) > 0: repl_sig += "\n    " + replace(doc, "\n", "\n    ")
-                nodes[e] = Node(kind = .int_lit, pos = nodes[e].pos)
-        if nodes[e].kind == .match_: add_flag(e, NF_STMT)
-        named = nodes[e].kind == .ident or nodes[e].kind == .field
-        raw = nodes[e]
-        saved_site = sink_pack_site
-        sink_pack_site = e
-        dropped = discarding
-        t = check_expr(e, 0)
-        sink_pack_site = saved_site
-        pack = sink_pack_hit != 0 and sink_pack_hit == e
-        sink_pack_hit = 0
-        if named and (tkind(t) == .fn_ or tkind(t) == .cfn):
-            nm = name_of(int(nodes[e].name))
-            fatal(nodes[e].pos, "'{nm}' is a function and is not called here: `{nm}()` calls it")
-        nodes[s].a = i32(last_checked)
-        # (a Dewy block expresses the value: multi_expressions.md)
-        # (a `spawn` statement hands its task to the group and expresses nothing)
-        spawned = raw.kind == .call and raw.aux2 == 17
-        # (`[loop x in xs spawn work(x)]`: a spawn gives the collection nothing)
-        if spawned and not dropped and sinks.len() > 0 and sinks[sinks.len() - 1].mode == SINK_COLLECTOR: spawn_value_error(raw.pos)
-        if not dropped and not spawned and sinks.len() > 0 and sinks[sinks.len() - 1].mode != SINK_NONE and t != T_NEVER and tkind(t) != .void_:
-            # (`void | E` expresses E when it fails, and nothing when it succeeds)
-            if union_has_void(t): sink_void_error(s, t)
-            sink_express(s, t, pack, false)
-            return
-        unused_result(last_checked, nodes[e].pos)
-        unused_value(raw, t)
+    else if k == .exprstmt: es_statement(s)
     else if k == .if_ or k == .iflet:
         add_flag(s, NF_STMT)
         check_expr(s, 0)
@@ -4755,6 +4695,32 @@ loop_error = (n: int, t: int, code: int):
 loop_host = CheckerLoopHost(check_expr, coerce, narrow_by, narrow_optional_source, new_local, loop_body, scope_reset, loop_error)
 loop_input = CheckerLoopInput(&nodes, &types, &ctxs, &cx, &check_scopes, &loop_serials, &loop_serial_next, &loop_labels, &narrow_jumps, &last_checked, &T_BOOL, &loop_host)
 loop_binding = checker_loops_bind(&loop_input)
+# Expression statements run in checker_exprstmts.dewy; these are its services.
+# (`:type name` at the REPL, for a function: its versions as written, with their notes)
+exprstmt_repl = (e: int):
+    sy = lookup(int(nodes[e].name))
+    if sy != 0 and syms[sy].kind == .fns:
+        ds: int[]
+        collect_fns(int(nodes[e].name), ds)
+        loop d in ds:
+            if len(repl_sig) > 0: repl_sig += "\n"
+            repl_sig += ide_fn_header(d)
+            doc = ide_doc_of(nodes[d].pos)
+            if len(doc) > 0: repl_sig += "\n    " + replace(doc, "\n", "\n    ")
+        nodes[e] = Node(kind = .int_lit, pos = nodes[e].pos)
+# (`void | E` expresses E when it fails, and nothing when it succeeds)
+exprstmt_express = (s: int, t: int, pack: bool):
+    if union_has_void(t): sink_void_error(s, t)
+    sink_express(s, t, pack, false)
+exprstmt_unused_value = (code: int, op: int, a: int, pos: int, t: int):
+    kinds: NK[] = [.nil, .binary, .and_, .or_, .not_, .bool_lit, .int_lit, .float_lit, .ident, .none_lit]
+    unused_value(Node(kind = kinds[code], op = i32(op), a = i32(a), pos = pos), t)
+exprstmt_error = (e: int):
+    nm = name_of(int(nodes[e].name))
+    fatal(nodes[e].pos, "'{nm}' is a function and is not called here: `{nm}()` calls it")
+exprstmt_host = CheckerExprStmtHost(check_expr, exprstmt_repl, exprstmt_express, unused_result, exprstmt_unused_value, spawn_value_error, exprstmt_error)
+exprstmt_input = CheckerExprStmtInput(&nodes, &types, &fns, &sinks, &repl_sig_query, &discarding, &sink_pack_site, &sink_pack_hit, &last_checked, &T_NEVER, &exprstmt_host)
+exprstmt_binding = checker_exprstmts_bind(&exprstmt_input)
 # Return statements run in checker_returns.dewy; these are its services.
 return_place = (v: int):
     returned_place(v)

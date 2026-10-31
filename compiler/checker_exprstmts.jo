@@ -1,0 +1,126 @@
+# Frozen expression statement checker extracted from check.jo.
+use 'node_store.dewy'
+use 'checker_types.dewy'
+use 'checker_state.dewy'
+use 'type_inference.dewy'
+struct Sink:
+    mode: int
+    block: int
+    root: int
+    acc: int
+    loops: int
+    pending: int
+    decl: int
+    first: int
+    returns: int
+    finals: int[]
+    want: int
+    elem: int
+    count: int
+    vague: int
+    direct: int
+    tuple: bool
+    held: int[]
+    hlocals: int[]
+    hcount: int[]
+struct CheckerExprStmtHost:
+    check: (int, int) -> int
+    repl: (int) -> void
+    express: (int, int, bool) -> void
+    unused_result: (int, int) -> void
+    unused_value: (int, int, int, int, int) -> void
+    spawned: (int) -> void
+    error: (int) -> void
+struct CheckerExprStmtInput:
+    nodes: *(Node[])
+    types: *(TypeInfo[])
+    fns: *(FnInst[])
+    sinks: *(Sink[])
+    repl: *bool
+    discarding: *bool
+    pack_site: *int
+    pack_hit: *int
+    last: *int
+    never_type: *int
+    host: *CheckerExprStmtHost
+es_nodes: *(Node[])
+es_types: *(TypeInfo[])
+es_fns: *(FnInst[])
+es_sinks: *(Sink[])
+es_repl: *bool
+es_discarding: *bool
+es_pack_site: *int
+es_pack_hit: *int
+es_last: *int
+es_never_type: *int
+es_host: *CheckerExprStmtHost
+checker_exprstmts_bind = (input: *CheckerExprStmtInput) -> int:
+    es_nodes = input[0].nodes
+    es_types = input[0].types
+    es_fns = input[0].fns
+    es_sinks = input[0].sinks
+    es_repl = input[0].repl
+    es_discarding = input[0].discarding
+    es_pack_site = input[0].pack_site
+    es_pack_hit = input[0].pack_hit
+    es_last = input[0].last
+    es_never_type = input[0].never_type
+    es_host = input[0].host
+    0
+es_kind = (t: int) -> TK: es_types[0][tu_prune(t)].kind
+es_flag = (n: int, f: int) -> bool: int(es_nodes[0][n].flags) & f != 0
+es_unused_result = (x: int, pos: int):
+    if es_discarding[0]: return
+    if es_nodes[0][x].kind != .call or es_nodes[0][x].a != 0 or es_nodes[0][x].sym <= 0 or es_nodes[0][x].nlist == 0: return
+    f = int(es_nodes[0][x].sym)
+    d = int(es_fns[0][f].decl)
+    if d == 0: return
+    count = es_fns[0][f].ptypes.len()
+    if count == 0 or int(es_nodes[0][d].nlist) != count or es_flag(d, 4): return
+    r = int(tu_prune(int(es_fns[0][f].ret)))
+    rk = es_types[0][r].kind
+    if rk == .void_ or r == es_never_type[0]: return
+    if rk == .str_ or rk == .array or rk == .vec or rk == .struct_ or rk == .fixed: es_host[0].unused_result(x, pos)
+es_unused_value = (k: NK, op: int, a: int, pos: int, t: int):
+    if es_discarding[0]: return
+    if es_kind(t) == .void_ or t == es_never_type[0]: return
+    code = 0
+    if k == .binary: code = 1
+    else if k == .and_: code = 2
+    else if k == .or_: code = 3
+    else if k == .not_: code = 4
+    else if k == .bool_lit: code = 5
+    else if k == .int_lit: code = 6
+    else if k == .float_lit: code = 7
+    else if k == .ident: code = 8
+    else if k == .none_lit: code = 9
+    if code != 0: es_host[0].unused_value(code, op, a, pos, t)
+es_statement = (s: int):
+    if es_flag(s, 128): return
+    e = int(es_nodes[0][s].a)
+    if es_repl[0] and es_nodes[0][e].kind == .ident: es_host[0].repl(e)
+    if es_nodes[0][e].kind == .match_: es_nodes[0][e].flags = es_nodes[0][e].flags | i32(16)
+    k = es_nodes[0][e].kind
+    named = k == .ident or k == .field
+    op = int(es_nodes[0][e].op)
+    a = int(es_nodes[0][e].a)
+    pos = es_nodes[0][e].pos
+    spawned = k == .call and es_nodes[0][e].aux2 == 17
+    saved_site = es_pack_site[0]
+    es_pack_site[0] = e
+    dropped = es_discarding[0]
+    t = es_host[0].check(e, 0)
+    es_pack_site[0] = saved_site
+    pack = es_pack_hit[0] != 0 and es_pack_hit[0] == e
+    es_pack_hit[0] = 0
+    if named:
+        tk = es_kind(t)
+        if tk == .fn_ or tk == .cfn: es_host[0].error(e)
+    es_nodes[0][s].a = i32(es_last[0])
+    count = es_sinks[0].len()
+    if spawned and not dropped and count > 0 and es_sinks[0][count - 1].mode == 4: es_host[0].spawned(pos)
+    if not dropped and not spawned and count > 0 and es_sinks[0][count - 1].mode != 0 and t != es_never_type[0] and es_kind(t) != .void_:
+        es_host[0].express(s, t, pack)
+        return
+    es_unused_result(es_last[0], es_nodes[0][e].pos)
+    es_unused_value(k, op, a, pos, t)

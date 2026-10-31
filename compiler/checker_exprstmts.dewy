@@ -1,0 +1,157 @@
+$runtime_checks
+from p"node_store.dewy" import (Node NK)
+from p"checker_types.dewy" import (TypeInfo TK)
+from p"checker_state.dewy" import FnInst
+from p"type_inference.dewy" import tu_prune
+# A statement that is an expression: the value made and checked, a function named
+# and not called, a value expressed into the enclosing block's sink (a Dewy block's
+# value, a collection's element) or dropped, and the warnings for one dropped that
+# changes nothing. O(1) plus the demanded checking of the expression; it, the REPL's
+# signature query, sinks and warnings are host services that may grow every arena,
+# so nodes, functions and sinks are reread by ID.
+ESWord:type=int64<overflow='wrap'>
+# Sink modes: 0 dropped (module code, a body giving `void`); 1 one value (a block's
+# last expression; another is an error); 2 an inferred function body (one value, or a
+# pack of several); 3 an arm of the `if`/`match` ending a BODY (or ARM), expressing into
+# the BODY; 4 a collector (loop capture, `[...]` with blocks) pushing onto its
+# accumulator; 5 a body written `:>void` (or `:>void | E`): expressing a value is an
+# error; 6 a binding's value, `x = { 1 2 }`: one value, or several it holds as `(T T)`.
+Sink:type=[
+    mode:int64=0
+    block:int64=0
+    root:int64=0 # (ARM: the BODY sink its values go to)
+    acc:int64=0 # the accumulator local, 0 until one is needed
+    loops:int64=0 # loop_serials.len() at the block
+    pending:int64=0 # sink_pending.len() at the block
+    decl:int64=0 # the accumulator's declaration, put first in the block when it closes
+    first:int64=0 # position of the first value before the end
+    returns:int64=0 # position of a `return value` in a BODY
+    finals:array<int64>=[] # BODY: the `if`/`match` nodes whose arms were ARM sinks
+    want:int64=0 # BODY of a written `:>(T T)`: how many values it gives (0: any number)
+    elem:int64=0 # ... and their type
+    count:int64=0 # ... the values expressed so far, each directly in the body's block
+    vague:int64=0 # ... where a value whose number is not known statically is (0: none)
+    direct:int64=0 # (the statement of the body's block being checked)
+    tuple:bool=false # BODY/BIND: several values with a static count are held in locals and given as `(T T)`, returned in place (no array); false: always pushed (a parallel body)
+    held:array<int64>=[] # ... the statements whose values are held so far (sink_splice says how) ...
+    hlocals:array<int64>=[] # ... and the locals holding them, one per value, in order
+    hcount:array<int64>=[] # ... how many of those each statement holds
+]
+CheckerExprStmtHost:type=[
+    check:<(node:int64 expected:int64):>int64>
+    repl:<(node:int64):>void>
+    express:<(node:int64 type_id:int64 pack:bool):>void>
+    unused_result:<(node:int64 pos:int64):>void>
+    unused_value:<(kind:int64 op:int64 operand:int64 pos:int64 type_id:int64):>void>
+    spawned:<(pos:int64):>void>
+    error:<(node:int64):>void>
+]
+CheckerExprStmtInput:type=[
+    nodes:ptr<array<Node>>
+    types:ptr<array<TypeInfo>>
+    fns:ptr<array<FnInst>>
+    sinks:ptr<array<Sink>>
+    repl:ptr<bool>
+    discarding:ptr<bool>
+    pack_site:ptr<int64>
+    pack_hit:ptr<int64>
+    last:ptr<int64>
+    never_type:ptr<int64>
+    host:ptr<CheckerExprStmtHost>
+]
+let es_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let es_types:ptr<array<TypeInfo>>=$unsafe (uint64(0) as ptr<array<TypeInfo>>)
+let es_fns:ptr<array<FnInst>>=$unsafe (uint64(0) as ptr<array<FnInst>>)
+let es_sinks:ptr<array<Sink>>=$unsafe (uint64(0) as ptr<array<Sink>>)
+let es_repl:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+let es_discarding:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+let es_pack_site:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let es_pack_hit:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let es_last:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let es_never_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let es_host:ptr<CheckerExprStmtHost>=$unsafe (uint64(0) as ptr<CheckerExprStmtHost>)
+checker_exprstmts_bind=(input:ptr<CheckerExprStmtInput>):>ESWord=>$unsafe {
+    es_nodes=input[0].nodes
+    es_types=input[0].types
+    es_fns=input[0].fns
+    es_sinks=input[0].sinks
+    es_repl=input[0].repl
+    es_discarding=input[0].discarding
+    es_pack_site=input[0].pack_site
+    es_pack_hit=input[0].pack_hit
+    es_last=input[0].last
+    es_never_type=input[0].never_type
+    es_host=input[0].host
+    0
+}
+es_kind=(t:ESWord):>TK=>$unsafe {es_types[0].ptr[tu_prune(t)].kind}
+es_flag=(n:ESWord f:ESWord):>bool=>$unsafe {ESWord(es_nodes[0].ptr[n].flags) & f not=? 0}
+# A library function giving back a new value of its first argument's type, called
+# as a statement, does nothing (NF_EXTERN 4). The host decides what is the library's.
+es_unused_result=(x:ESWord pos:ESWord):>void=>$unsafe {
+    if es_discarding[0] {return}
+    if es_nodes[0].ptr[x].kind not=? 'call' or es_nodes[0].ptr[x].a not=? 0 or es_nodes[0].ptr[x].sym <=? 0 or es_nodes[0].ptr[x].nlist =? 0 {return}
+    let f=ESWord(es_nodes[0].ptr[x].sym)
+    let d=ESWord(es_fns[0].ptr[f].decl)
+    if d =? 0 {return}
+    let count=es_fns[0].ptr[f].ptypes.length
+    if count =? 0 or ESWord(es_nodes[0].ptr[d].nlist) not=? count or es_flag(d 4) {return}
+    let r=tu_prune(ESWord(es_fns[0].ptr[f].ret))
+    let rk=es_types[0].ptr[r].kind
+    if rk =? 'void_' or r =? es_never_type[0] {return}
+    if rk =? 'str_' or rk =? 'array' or rk =? 'vec' or rk =? 'struct_' or rk =? 'fixed' {es_host[0].unused_result(x pos)}
+}
+# A dropped value that changes nothing, by its kind as written: 1 binary, 2 and,
+# 3 or, 4 not, 5 bool, 6 int, 7 float, 8 name, 9 none.
+es_unused_value=(k:NK op:ESWord a:ESWord pos:ESWord t:ESWord):>void=>$unsafe {
+    if es_discarding[0] {return}
+    if es_kind(t) =? 'void_' or t =? es_never_type[0] {return}
+    let code:ESWord=0
+    if k =? 'binary' {code=1}
+    else if k =? 'and_' {code=2}
+    else if k =? 'or_' {code=3}
+    else if k =? 'not_' {code=4}
+    else if k =? 'bool_lit' {code=5}
+    else if k =? 'int_lit' {code=6}
+    else if k =? 'float_lit' {code=7}
+    else if k =? 'ident' {code=8}
+    else if k =? 'none_lit' {code=9}
+    if code not=? 0 {es_host[0].unused_value(code op a pos t)}
+}
+# (NF_CHECKED 128, NF_STMT 16; a spawn call has aux2 17.)
+es_statement=(s:ESWord):>void=>$unsafe {
+    if es_flag(s 128) {return}
+    let e=ESWord(es_nodes[0].ptr[s].a)
+    # `:type name` at the REPL, for a function: its versions as written.
+    if es_repl[0] and es_nodes[0].ptr[e].kind =? 'ident' {es_host[0].repl(e)}
+    if es_nodes[0].ptr[e].kind =? 'match_' {es_nodes[0][e].flags=es_nodes[0].ptr[e].flags | 16}
+    let k=es_nodes[0].ptr[e].kind
+    let named=k =? 'ident' or k =? 'field'
+    let op=ESWord(es_nodes[0].ptr[e].op)
+    let a=ESWord(es_nodes[0].ptr[e].a)
+    let pos=es_nodes[0].ptr[e].pos
+    # A `spawn` statement hands its task to the group and expresses nothing.
+    let spawned=k =? 'call' and es_nodes[0].ptr[e].aux2 =? 17
+    let saved_site=es_pack_site[0]
+    es_pack_site[0]=e
+    let dropped=es_discarding[0]
+    let t=es_host[0].check(e 0)
+    es_pack_site[0]=saved_site
+    let pack=es_pack_hit[0] not=? 0 and es_pack_hit[0] =? e
+    es_pack_hit[0]=0
+    if named {
+        let tk=es_kind(t)
+        if tk =? 'fn_' or tk =? 'cfn' {es_host[0].error(e)}
+    }
+    es_nodes[0][s].a=int32<overflow='wrap'>(es_last[0])
+    # A Dewy block expresses the value (multi_expressions.md); `[loop x in xs spawn
+    # work(x)]`: a spawn gives the collection nothing.
+    let count=es_sinks[0].length
+    if spawned and not dropped and count >? 0 and es_sinks[0].ptr[count - 1].mode =? 4 {es_host[0].spawned(pos)}
+    if not dropped and not spawned and count >? 0 and es_sinks[0].ptr[count - 1].mode not=? 0 and t not=? es_never_type[0] and es_kind(t) not=? 'void_' {
+        es_host[0].express(s t pack)
+        return
+    }
+    es_unused_result(es_last[0] es_nodes[0].ptr[e].pos)
+    es_unused_value(k op a pos t)
+}
