@@ -21,8 +21,7 @@ dv_parents: {int: int} = {}
 dv_quat_nodes: {int: bool} = {}
 dv_quat_locals: {int: bool} = {}
 dv_tk: {int: int} = {}
-dv_adapted: {int: int} = {}
-dv_growth: {int: bool} = {}
+dv_watch = StatementWatch()
 dv_cached = 0
 dv_growth_pending = 0
 dv_whole = false
@@ -80,7 +79,7 @@ dv_error = (s: int, t: int, code: int):
     print("error:{s}:{t}:{code}")
     exit(19)
 dv_services = CheckerDeclHost(dv_form, dv_binding_type, dv_default, dv_syntax_type, dv_values, dv_annotated, dv_coerce, dv_sibling, dv_literal, dv_storage, dv_value_param, dv_temperature, dv_binding, dv_after, dv_error)
-dv_inputs = CheckerDeclInput(&nodes, &lists, &types, &structs, &files, &locals, &ctxs, &cx, &last, &dv_refining, &dv_effects, &dv_ide, &dv_literals, &dv_pending, &dv_block, &dv_index, &dv_flow_next, &dv_flow_local, &dv_parents, &dv_quat_nodes, &dv_quat_locals, &dv_tk, &dv_adapted, &dv_growth, &dv_cached, &dv_growth_pending, &dv_whole, &T_STR, &T_MATH_INT, &dv_services)
+dv_inputs = CheckerDeclInput(&nodes, &lists, &types, &structs, &files, &locals, &ctxs, &cx, &last, &dv_refining, &dv_effects, &dv_ide, &dv_literals, &dv_pending, &dv_block, &dv_index, &dv_flow_next, &dv_flow_local, &dv_parents, &dv_quat_nodes, &dv_quat_locals, &dv_tk, &dv_watch, &dv_cached, &dv_growth_pending, &dv_whole, &T_STR, &T_MATH_INT, &dv_services)
 dv_bound = checker_vardecls_bind(&dv_inputs)
 DEWY = 1 << 40
 # let name[:tn] = value (flags on the declaration)
@@ -162,18 +161,18 @@ main = ():
     dv_literal_type = rec
     run(decl(19, lit(.float_lit, rec)))
     dv_literal_type = T_INT
-    dv_adapted[5] = 5
+    dv_watch.decimal_adapted = 1
     run(decl(19, lit(.int_lit, T_INT)))
     dv_growth_pending = 1
     run(decl(20, typed(.ident, T_INT)))
     dv_growth_pending = 0
     ctxs[cx].loop_depth = 1
     run(decl(20, typed(.ident, T_INT)))
-    dv_growth[3] = true
+    dv_watch.growth = 1
     run(decl(20, typed(.ident, T_INT)))
     run(decl(20, typed(.ident, T_INT), typed(.tname, T_INT)))
     ctxs[cx].loop_depth = 0
-    q = typed(.call, rec); dv_quat_nodes[q] = true
+    q = typed(.call, rec); dv_quat_nodes[q] = true; dv_watch.quaternions = 1
     run(decl(21, q))
     # Flags: constants, loop counts, value parameters; effects and the editor.
     run(decl(22, typed(.ident, T_INT), 0, 262144))

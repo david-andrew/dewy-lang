@@ -277,6 +277,9 @@ decimal_check_body = (f: int):
 
 # the function whose body the code being checked is in (lambdas: the enclosing one; a global's
 # initializer: its module's top-level code)
+# (the statement layer's view of the decimal bindings' tables)
+decimal_watch = (): statement_watch.decimals = decimal_locals.len() + decimal_global_inits.len()
+
 decimal_root = () -> int:
     c = cx
     if c < 0: return -1
@@ -294,6 +297,7 @@ decimal_binding_type = (pos: int, t: int) -> int:
 decimal_local = (l: int, pos: int, t: int):
     if bundled_rational_type(t) and dewy_at(pos):
         decimal_locals[l] = pos
+        decimal_watch()
         decimal_local_fns[l] = decimal_root()
     else if decimal_adapted.len() > 0 and decimal_adapted.has(pos): decimal_adapted_locals[l] = pos
 
@@ -383,6 +387,7 @@ decimal_writers_first = ():
                     names[int(nodes[d].name)] = true
                     dc_force_module(int(globals[g].mod))
                     decimal_global_inits[g] = clone(int(nodes[d].b))
+                    decimal_watch()
                     decimal_modules[int(globals[g].mod)] = true
     if names.len() == 0: return
     dc_force_all()
@@ -419,13 +424,16 @@ decimal_writers_first = ():
 # become float64 when the same input writes them a float (as decimal_writers_first finds them).
 # An earlier input's ran exact already: a float written to it later is the usual type error.
 decimal_input_globals = (m: int, stmts: int[]):
-    if decimal_global_inits.len() > 0: decimal_global_inits = {}
+    if decimal_global_inits.len() > 0:
+        decimal_global_inits = {}
+        decimal_watch()
     if decimal_lets == 0: return
     loop d in stmts:
         if nodes[d].kind == .vardecl and nodes[d].nlist == 0 and nodes[d].a == 0 and nodes[d].b != 0 and not has_flag(d, NF_RDONLY) and dewy_at(nodes[d].pos) and decimal_literal_tree(int(nodes[d].b)):
             g = int(nodes[d].sym)
             if g > 0 and globals[g].state == 0 and int(globals[g].decl) == d:
                 decimal_global_inits[g] = clone(int(nodes[d].b))
+                decimal_watch()
                 decimal_modules[m] = true
 
 decimal_writes = (n: int, names: {int: bool}) -> bool:
@@ -451,6 +459,7 @@ const DECIMAL_ADAPTED_FIX = "annotate `float64` (or another explicit representat
 
 decimal_adapted_warn = (decl: int, name: str):
     decimal_adapted[decl] = decimal_target_at
+    statement_watch.decimal_adapted = decimal_adapted.len()
 
 # (the unchecked operands of an exact comparison: the names in them of bindings made float64)
 decimal_compared = (e: int):

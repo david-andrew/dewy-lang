@@ -248,7 +248,9 @@ growth_decl_after = (s: int, l: int, t: int):
         growth_temps[l] = growth_pending_temps
         growth_pending_temps = []
         growth_pending_n = 0
-    if nodes[s].a == 0 and tkind(t) == .struct_ and bundled_rational_type(t) and dewy_at(nodes[s].pos) and not has_flag(s, NF_RDONLY): growth_inferred[l] = growth_start_whole
+    if nodes[s].a == 0 and tkind(t) == .struct_ and bundled_rational_type(t) and dewy_at(nodes[s].pos) and not has_flag(s, NF_RDONLY):
+        growth_inferred[l] = growth_start_whole
+        statement_watch.growth = growth_inferred.len()
 
 # the carried bindings (and temporaries made from them) that expression n reads
 growth_keys_in = (n: int, keys: mut int[]):

@@ -450,6 +450,7 @@ temperature_binding = (s: int, t: int, unit: int, global: bool) -> int:
         tk_reads_on = true
         return t
     loop w in tks.writes: tk_difference_writes[w] = true
+    statement_watch.temperature_writes = tk_difference_writes.len()
     b = int(nodes[s].b)
     d = temperature_difference(b)
     nodes[s].b = i32(d)

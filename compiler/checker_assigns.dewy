@@ -2,13 +2,12 @@ $runtime_checks
 from p"node_store.dewy" import Node
 from p"checker_types.dewy" import (TypeInfo StructInfo TK)
 from p"source_types.dewy" import SrcFile
-from p"checker_state.dewy" import (FnCtx OptFill)
+from p"checker_state.dewy" import (FnCtx OptFill StatementWatch)
 from p"type_inference.dewy" import tu_prune
 # `target = value` and `target op= value`, once the source's forms (`[end]` updates,
 # appends, soa elements), tuples, custom and captured element targets and indexed
 # targets are passed to their host services: the target checked as a place (written,
-# not read), dictionary selectors captured before the value, copies written through
-# noted, refinements and text and integer domains told, then the value checked and
+# not read), a field or element target's selectors and copies told, refinements and text and integer domains told, then the value checked and
 # converted to the target's type with the paths and optionals it narrows or fills; a
 # compound update is one host service. Growth, decimal and sibling bindings are asked
 # about only while their tables are live. O(1) per assignment plus the demanded
@@ -23,7 +22,7 @@ CheckerAssignHost:type=[
     index:<(node:int64):>int64>
     check:<(node:int64 expected:int64):>int64>
     place:<(node:int64):>void>
-    capture:<(node:int64 value:int64):>void>
+    capture:<(node:int64 target:int64 dewy:bool):>void>
     refine:<(node:int64 type_id:int64 code:int64):>int64>
     value:<(node:int64 type_id:int64):>int64>
     write:<(node:int64 value_type:int64 type_id:int64 code:int64):>int64>
@@ -45,17 +44,10 @@ CheckerAssignInput:type=[
     no_narrow_at:ptr<int64>
     current:ptr<int64>
     root:ptr<int64>
-    copy_writes:ptr<dict<int64 int64>>
-    global_copy_writes:ptr<dict<int64 int64>>
     before:ptr<array<int64>>
-    sibling_flow:ptr<dict<int64 int64>>
-    decimal_locals:ptr<dict<int64 int64>>
-    decimal_inits:ptr<dict<int64 int64>>
+    watch:ptr<StatementWatch>
     decimal_target:ptr<int64>
-    growth_inferred:ptr<dict<int64 bool>>
     decimal_cached:ptr<int64>
-    text_domains:ptr<dict<int64 array<int64>>>
-    temperature_writes:ptr<dict<int64 bool>>
     fills:ptr<array<OptFill>>
     str_type:ptr<int64>
     math_int_type:ptr<int64>
@@ -73,17 +65,10 @@ let va_path_narrows:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let va_no_narrow_at:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let va_current:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let va_root:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
-let va_copy_writes:ptr<dict<int64 int64>>=$unsafe (uint64(0) as ptr<dict<int64 int64>>)
-let va_global_copy_writes:ptr<dict<int64 int64>>=$unsafe (uint64(0) as ptr<dict<int64 int64>>)
 let va_before:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
-let va_sibling_flow:ptr<dict<int64 int64>>=$unsafe (uint64(0) as ptr<dict<int64 int64>>)
-let va_decimal_locals:ptr<dict<int64 int64>>=$unsafe (uint64(0) as ptr<dict<int64 int64>>)
-let va_decimal_inits:ptr<dict<int64 int64>>=$unsafe (uint64(0) as ptr<dict<int64 int64>>)
+let va_watch:ptr<StatementWatch>=$unsafe (uint64(0) as ptr<StatementWatch>)
 let va_decimal_target:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
-let va_growth_inferred:ptr<dict<int64 bool>>=$unsafe (uint64(0) as ptr<dict<int64 bool>>)
 let va_decimal_cached:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
-let va_text_domains:ptr<dict<int64 array<int64>>>=$unsafe (uint64(0) as ptr<dict<int64 array<int64>>>)
-let va_temperature_writes:ptr<dict<int64 bool>>=$unsafe (uint64(0) as ptr<dict<int64 bool>>)
 let va_fills:ptr<array<OptFill>>=$unsafe (uint64(0) as ptr<array<OptFill>>)
 let va_str_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let va_math_int_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
@@ -101,17 +86,10 @@ checker_assigns_bind=(input:ptr<CheckerAssignInput>):>AWord=>$unsafe {
     va_no_narrow_at=input[0].no_narrow_at
     va_current=input[0].current
     va_root=input[0].root
-    va_copy_writes=input[0].copy_writes
-    va_global_copy_writes=input[0].global_copy_writes
     va_before=input[0].before
-    va_sibling_flow=input[0].sibling_flow
-    va_decimal_locals=input[0].decimal_locals
-    va_decimal_inits=input[0].decimal_inits
+    va_watch=input[0].watch
     va_decimal_target=input[0].decimal_target
-    va_growth_inferred=input[0].growth_inferred
     va_decimal_cached=input[0].decimal_cached
-    va_text_domains=input[0].text_domains
-    va_temperature_writes=input[0].temperature_writes
     va_fills=input[0].fills
     va_str_type=input[0].str_type
     va_math_int_type=input[0].math_int_type
@@ -140,25 +118,13 @@ va_place_root=(n:AWord):>AWord=>$unsafe {
 }
 va_growth_on=():>bool=>$unsafe {
     let c=va_context[0]
-    c >=? 0 and va_contexts[0].ptr[c].loop_depth >? 0 and (va_growth_inferred[0].length >? 0 or va_decimal_cached[0] not=? 0)
-}
-# A local or global whose fields or elements are written (frozen SK ordinals: local 1,
-# global 2): where first, for copies changed and never read.
-va_copy_write=(lhs:AWord pos:AWord):>void=>$unsafe {
-    let r=va_place_root(lhs)
-    if r =? 0 or va_nodes[0].ptr[r].kind not=? 'ident' {return}
-    let sym=AWord(va_nodes[0].ptr[r].sym)
-    if va_nodes[0].ptr[r].aux =? 1 {
-        if not va_copy_writes[0].has(sym) {va_copy_writes[0][sym]=pos}
-    } else if va_nodes[0].ptr[r].aux =? 2 {
-        if not va_global_copy_writes[0].has(sym) {va_global_copy_writes[0][sym]=pos}
-    }
+    c >=? 0 and va_contexts[0].ptr[c].loop_depth >? 0 and (va_watch[0].growth >? 0 or va_decimal_cached[0] not=? 0)
 }
 # `target = value` (Tok.assign 47; a release's zero bytes, IN.zeroed 76, are no value
 # of the target's type: nothing reads them).
 va_store=(s:AWord lhs:AWord lt:AWord):>AWord=>$unsafe {
     let rt=va_host[0].value(s lt)
-    if va_temperature_writes[0].length >? 0 {rt=va_host[0].write(s rt lt 1)}
+    if va_watch[0].temperature_writes >? 0 {rt=va_host[0].write(s rt lt 1)}
     if va_decimal_target[0] not=? 0 and va_host[0].write(s rt lt 2) not=? 0 {return s}
     let lk=va_nodes[0].ptr[lhs].kind
     let aux=va_nodes[0].ptr[lhs].aux
@@ -172,9 +138,22 @@ va_store=(s:AWord lhs:AWord lt:AWord):>AWord=>$unsafe {
     if fill >=? 0 {va_host[0].write(s fill lt 7);}
     s
 }
+# Whether the source's forms may apply: a variable written (appends, narrowing, soa
+# elements), or a target indexed from the end (`xs[end] = v`, an index's sval).
+va_sourced=(lhs:AWord):>bool=>$unsafe {
+    if va_nodes[0].ptr[lhs].kind =? 'ident' {return true}
+    let p=lhs
+    loop va_part(p) {
+        if va_nodes[0].ptr[p].kind =? 'index' and va_nodes[0].ptr[p].sval not=? 0 {return true}
+        p=AWord(va_nodes[0].ptr[p].a)
+    }
+    false
+}
 va_check=(s:AWord):>AWord=>$unsafe {
-    let update=va_host[0].prelude(s)
-    if update not=? 0 {return update}
+    if va_sourced(AWord(va_nodes[0].ptr[s].a)) {
+        let update=va_host[0].prelude(s)
+        if update not=? 0 {return update}
+    }
     let lhs=AWord(va_nodes[0].ptr[s].a)
     let op=AWord(va_nodes[0].ptr[s].op)
     let k=va_nodes[0].ptr[lhs].kind
@@ -201,16 +180,15 @@ va_check=(s:AWord):>AWord=>$unsafe {
     va_nodes[0][s].a=int32<overflow='wrap'>(lhs)
     va_host[0].place(lhs)
     let pos=va_nodes[0].ptr[s].pos
-    if va_part(lhs) {
-        if va_dewy_at(pos) {va_host[0].capture(lhs AWord(va_nodes[0].ptr[s].b))}
-        va_copy_write(lhs pos)
-    }
+    # (dictionary selectors captured before the value, in Dewy; the variable written
+    # through noted, for copies changed and never read)
+    if va_part(lhs) {va_host[0].capture(s lhs va_dewy_at(pos))}
     if va_refining[0] {
         lt=va_host[0].refine(s lt 1)
         let replacement=va_host[0].refine(s lt 2)
         if replacement not=? 0 {return replacement}
     }
-    if lt =? va_str_type[0] and va_text_domains[0].length >? 0 {va_host[0].refine(s lt 3);}
+    if lt =? va_str_type[0] and va_watch[0].text_domains >? 0 {va_host[0].refine(s lt 3);}
     if lt =? va_math_int_type[0] and va_dewy_at(pos) {va_host[0].refine(s lt 4);}
     if op =? 47 {return va_store(s lhs lt)}
     va_host[0].compound(s lt)
@@ -218,14 +196,14 @@ va_check=(s:AWord):>AWord=>$unsafe {
 va_assign=(s:AWord):>AWord=>$unsafe {
     if va_growth_on() {va_host[0].begin(s 1);}
     let saved=va_decimal_target[0]
-    if va_decimal_locals[0].length >? 0 or va_decimal_inits[0].length >? 0 {saved=va_host[0].begin(s 2)}
+    if va_watch[0].decimals >? 0 {saved=va_host[0].begin(s 2)}
     else {va_decimal_target[0]=0}
     let literal:AWord=0
-    if va_sibling_flow[0].length >? 0 {literal=va_host[0].begin(s 3)}
+    if va_watch[0].sibling_flow >? 0 {literal=va_host[0].begin(s 3)}
     let mark=va_before[0].length
     let r=va_check(s)
     va_decimal_target[0]=saved
-    if va_sibling_flow[0].length >? 0 {va_host[0].flow(r literal)}
+    if va_watch[0].sibling_flow >? 0 {va_host[0].flow(r literal)}
     if va_before[0].length >? mark {return va_host[0].wrap(s r mark)}
     r
 }

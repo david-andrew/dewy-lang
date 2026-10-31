@@ -29,9 +29,12 @@ string_domain_captures: {int: int} = {}
 string_domain_declare = (binding: int, value: int):
     if value != 0 and nodes[value].kind == .str_lit and nodes[value].aux != 1:
         string_domains[binding] = [int(nodes[value].sval)]
+        statement_watch.text_domains = string_domains.len()
         return
     values: int[]
-    if domain_literals(value, true, values): string_domains[binding] = values
+    if domain_literals(value, true, values):
+        string_domains[binding] = values
+        statement_watch.text_domains = string_domains.len()
 
 string_domain_binding = (n: int) -> int:
     if nodes[n].kind != .ident: return 0
@@ -53,6 +56,7 @@ string_domain_write = (lhs: int, value: int):
     values: int[]
     known = domain_literals(value, true, values)
     sd_write(string_domains, binding, values, known)
+    statement_watch.text_domains = string_domains.len()
 
 string_domain_match = (m: int) -> bool:
     binding = string_domain_binding(int(nodes[m].a))
@@ -88,6 +92,7 @@ string_domain_capture = (inner: int, outer: int):
     root = outer
     loop int(locals[root].flags) & LF_CAPTURE != 0 and int(locals[root].flags) & LF_VALUECAP == 0: root = int(locals[root].outer)
     sd_capture(string_domains, string_domain_captures, inner, root)
+    statement_watch.text_domains = string_domains.len()
 
 string_domain_values = (binding: int) -> int[]:
     sd_values(string_domains, string_domain_captures, binding)

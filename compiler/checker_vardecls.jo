@@ -43,8 +43,7 @@ struct CheckerDeclInput:
     quat_nodes: *({int: bool})
     quat_locals: *({int: bool})
     tk_bindings: *({int: int})
-    decimal_adapted: *({int: int})
-    growth_inferred: *({int: bool})
+    watch: *StatementWatch
     decimal_cached: *int
     growth_pending: *int
     growth_whole: *bool
@@ -73,8 +72,7 @@ vd_parents: *({int: int})
 vd_quat_nodes: *({int: bool})
 vd_quat_locals: *({int: bool})
 vd_tk_bindings: *({int: int})
-vd_decimal_adapted: *({int: int})
-vd_growth_inferred: *({int: bool})
+vd_watch: *StatementWatch
 vd_decimal_cached: *int
 vd_growth_pending: *int
 vd_growth_whole: *bool
@@ -104,8 +102,7 @@ checker_vardecls_bind = (input: *CheckerDeclInput) -> int:
     vd_quat_nodes = input[0].quat_nodes
     vd_quat_locals = input[0].quat_locals
     vd_tk_bindings = input[0].tk_bindings
-    vd_decimal_adapted = input[0].decimal_adapted
-    vd_growth_inferred = input[0].growth_inferred
+    vd_watch = input[0].watch
     vd_decimal_cached = input[0].decimal_cached
     vd_growth_pending = input[0].growth_pending
     vd_growth_whole = input[0].growth_whole
@@ -136,7 +133,7 @@ vd_literal_unit = (e: int) -> int:
     int(vd_nodes[0][u].name)
 vd_growth_on = () -> bool:
     c = vd_context[0]
-    c >= 0 and vd_contexts[0][c].loop_depth > 0 and (vd_growth_inferred[0].len() > 0 or vd_decimal_cached[0] != 0)
+    c >= 0 and vd_contexts[0][c].loop_depth > 0 and (vd_watch[0].growth > 0 or vd_decimal_cached[0] != 0)
 vd_growth_before = (s: int):
     init = int(vd_nodes[0][s].b)
     typed = vd_nodes[0][s].a != 0
@@ -211,10 +208,10 @@ vd_decl = (s: int):
     if vd_sibling_pending[0].len() > 0: vd_host[0].after(s, l, t, 3)
     if vd_flow_next[0] != 0: vd_flow_local[0] = l
     if unit != 0: vd_tk_bindings[0][l] = s
-    if literal_init and (vd_kind(t) == .struct_ or vd_decimal_adapted[0].len() > 0): vd_host[0].after(s, l, t, 4)
+    if literal_init and (vd_kind(t) == .struct_ or vd_watch[0].decimal_adapted > 0): vd_host[0].after(s, l, t, 4)
     if vd_growth_pending[0] != 0 or (not typed and vd_kind(t) == .struct_ and vd_dewy_at(pos) and not vd_flag(s, 262144)): vd_host[0].after(s, l, t, 5)
     b = int(vd_nodes[0][s].b)
-    if b != 0 and vd_quat_nodes[0].len() > 0 and vd_quat_nodes[0].has(b): vd_quat_locals[0][l] = true
+    if b != 0 and vd_watch[0].quaternions > 0 and vd_quat_nodes[0].has(b): vd_quat_locals[0][l] = true
     vd_set_flags(l, 512)
     if not typed and vd_dewy_at(pos):
         if t == vd_str_type[0]: vd_host[0].after(s, l, t, 6)

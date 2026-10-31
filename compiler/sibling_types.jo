@@ -143,11 +143,14 @@ sibling_route_name = (n0: int) -> int:
 sibling_establish = (l: int):
     if sibling_pending.len() == 0: return
     sibling_known[l] = SiblingKnown(types = sibling_pending, owner = int(ctxs[cx].inst), depth = int(ctxs[cx].loop_depth), block = sibling_block)
+    statement_watch.sibling_known = sibling_known.len()
     sibling_pending = []
 
 # A write the knowledge cannot follow ends it.
 sibling_forget = (l: int):
-    if l != sibling_extending and sibling_known.has(l): sibling_known.remove(l)
+    if l != sibling_extending and sibling_known.has(l):
+        sibling_known.remove(l)
+        statement_watch.sibling_known = sibling_known.len()
 
 # A statement of block b while some binding's contents are known: `xs.push(v)`
 # as a statement of the declaring block appends v's record type.
@@ -178,6 +181,7 @@ sibling_statement = (s: int, b: int):
     known = sibling_known[l]
     if known.block != b or known.owner != int(ctxs[cx].inst) or known.depth != int(ctxs[cx].loop_depth) or known.types.len() >= SIBLING_CAP or t == 0 or tkind(t) != .struct_:
         sibling_known.remove(l)
+        statement_watch.sibling_known = sibling_known.len()
         return
     known.types.push(t)
     sibling_known[l] = known
@@ -314,6 +318,7 @@ sibling_annotated = (d: int, t: int, vt: int) -> bool:
 sibling_flow_start = (l: int, pos: int):
     sibling_flow_next = 0
     sibling_flow[l] = sibling_block
+    statement_watch.sibling_flow = sibling_flow.len()
     narrow_local(l, [sibling_flow_member], pos)
 
 # The variable a local name stands for (through its narrowing aliases).
@@ -373,3 +378,4 @@ sibling_flow_end = (b: int):
     loop l, block in sibling_flow:
         if block == b: done.push(l)
     loop l in done: sibling_flow.remove(l)
+    statement_watch.sibling_flow = sibling_flow.len()

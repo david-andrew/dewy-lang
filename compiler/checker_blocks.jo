@@ -26,8 +26,7 @@ struct CheckerBlockInput:
     files: *(SrcFile[])
     scopes: *CheckerScope
     context: *int
-    sibling_flow: *({int: int})
-    sibling_known: *({int: SiblingKnown})
+    watch: *StatementWatch
     sibling_block: *int
     sibling_index: *int
     flow_local: *int
@@ -44,8 +43,7 @@ bk_lists: *(i32[])
 bk_files: *(SrcFile[])
 bk_scopes: *CheckerScope
 bk_context: *int
-bk_sibling_flow: *({int: int})
-bk_sibling_known: *({int: SiblingKnown})
+bk_watch: *StatementWatch
 bk_sibling_block: *int
 bk_sibling_index: *int
 bk_flow_local: *int
@@ -63,8 +61,7 @@ checker_blocks_bind = (input: *CheckerBlockInput) -> int:
     bk_files = input[0].files
     bk_scopes = input[0].scopes
     bk_context = input[0].context
-    bk_sibling_flow = input[0].sibling_flow
-    bk_sibling_known = input[0].sibling_known
+    bk_watch = input[0].watch
     bk_sibling_block = input[0].sibling_block
     bk_sibling_index = input[0].sibling_index
     bk_flow_local = input[0].flow_local
@@ -157,15 +154,15 @@ bk_block = (b: int, expected: int, want_value: bool) -> int:
         if i == n - 1 and want_value: value = bk_host[0].final(b, i, expected, mode)
         if value >= 0: result = value
         else:
-            if bk_sibling_flow[0].len() > 0: bk_host[0].sibling(s, 0, 1)
-            if bk_sibling_known[0].len() > 0: bk_host[0].sibling(s, b, 2)
+            if bk_watch[0].sibling_flow > 0: bk_host[0].sibling(s, 0, 1)
+            if bk_watch[0].sibling_known > 0: bk_host[0].sibling(s, b, 2)
             else: bk_stmt(s)
             l = bk_flow_local[0]
             if l != 0:
                 bk_host[0].sibling(l, bk_nodes[0][s].pos, 3)
                 bk_flow_local[0] = 0
         i = i + 1
-    if bk_sibling_flow[0].len() > 0: bk_host[0].sibling(b, 0, 4)
+    if bk_watch[0].sibling_flow > 0: bk_host[0].sibling(b, 0, 4)
     bk_sibling_block[0] = saved_block
     bk_sibling_index[0] = saved_index
     if want_value or mode >= 0: result = bk_host[0].finish(b, result, mode, n, want_value)

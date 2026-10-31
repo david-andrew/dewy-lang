@@ -12,7 +12,7 @@ struct CheckerAssignHost:
     index: (int) -> int
     check: (int, int) -> int
     place: (int) -> void
-    capture: (int, int) -> void
+    capture: (int, int, bool) -> void
     refine: (int, int, int) -> int
     value: (int, int) -> int
     write: (int, int, int, int) -> int
@@ -33,17 +33,10 @@ struct CheckerAssignInput:
     no_narrow_at: *int
     current: *int
     root: *int
-    copy_writes: *({int: int})
-    global_copy_writes: *({int: int})
     before: *(int[])
-    sibling_flow: *({int: int})
-    decimal_locals: *({int: int})
-    decimal_inits: *({int: int})
+    watch: *StatementWatch
     decimal_target: *int
-    growth_inferred: *({int: bool})
     decimal_cached: *int
-    text_domains: *({int: int[]})
-    temperature_writes: *({int: bool})
     fills: *(OptFill[])
     str_type: *int
     math_int_type: *int
@@ -60,17 +53,10 @@ va_path_narrows: *int
 va_no_narrow_at: *int
 va_current: *int
 va_root: *int
-va_copy_writes: *({int: int})
-va_global_copy_writes: *({int: int})
 va_before: *(int[])
-va_sibling_flow: *({int: int})
-va_decimal_locals: *({int: int})
-va_decimal_inits: *({int: int})
+va_watch: *StatementWatch
 va_decimal_target: *int
-va_growth_inferred: *({int: bool})
 va_decimal_cached: *int
-va_text_domains: *({int: int[]})
-va_temperature_writes: *({int: bool})
 va_fills: *(OptFill[])
 va_str_type: *int
 va_math_int_type: *int
@@ -88,17 +74,10 @@ checker_assigns_bind = (input: *CheckerAssignInput) -> int:
     va_no_narrow_at = input[0].no_narrow_at
     va_current = input[0].current
     va_root = input[0].root
-    va_copy_writes = input[0].copy_writes
-    va_global_copy_writes = input[0].global_copy_writes
     va_before = input[0].before
-    va_sibling_flow = input[0].sibling_flow
-    va_decimal_locals = input[0].decimal_locals
-    va_decimal_inits = input[0].decimal_inits
+    va_watch = input[0].watch
     va_decimal_target = input[0].decimal_target
-    va_growth_inferred = input[0].growth_inferred
     va_decimal_cached = input[0].decimal_cached
-    va_text_domains = input[0].text_domains
-    va_temperature_writes = input[0].temperature_writes
     va_fills = input[0].fills
     va_str_type = input[0].str_type
     va_math_int_type = input[0].math_int_type
@@ -121,18 +100,10 @@ va_place_root = (n: int) -> int:
     0
 va_growth_on = () -> bool:
     c = va_context[0]
-    c >= 0 and va_contexts[0][c].loop_depth > 0 and (va_growth_inferred[0].len() > 0 or va_decimal_cached[0] != 0)
-va_copy_write = (lhs: int, pos: int):
-    r = va_place_root(lhs)
-    if r == 0 or va_nodes[0][r].kind != .ident: return
-    sym = int(va_nodes[0][r].sym)
-    if va_nodes[0][r].aux == 1:
-        if not va_copy_writes[0].has(sym): va_copy_writes[0][sym] = pos
-    else if va_nodes[0][r].aux == 2:
-        if not va_global_copy_writes[0].has(sym): va_global_copy_writes[0][sym] = pos
+    c >= 0 and va_contexts[0][c].loop_depth > 0 and (va_watch[0].growth > 0 or va_decimal_cached[0] != 0)
 va_store = (s: int, lhs: int, lt: int) -> int:
     rt = va_host[0].value(s, lt)
-    if va_temperature_writes[0].len() > 0: rt = va_host[0].write(s, rt, lt, 1)
+    if va_watch[0].temperature_writes > 0: rt = va_host[0].write(s, rt, lt, 1)
     if va_decimal_target[0] != 0 and va_host[0].write(s, rt, lt, 2) != 0: return s
     lk = va_nodes[0][lhs].kind
     aux = va_nodes[0][lhs].aux
@@ -145,9 +116,17 @@ va_store = (s: int, lhs: int, lt: int) -> int:
     else if va_path_narrows[0] > 0 and lk == .ident: va_host[0].write(s, rt, lt, 6)
     if fill >= 0: va_host[0].write(s, fill, lt, 7)
     s
+va_sourced = (lhs: int) -> bool:
+    if va_nodes[0][lhs].kind == .ident: return true
+    p = lhs
+    loop va_part(p):
+        if va_nodes[0][p].kind == .index and va_nodes[0][p].sval != 0: return true
+        p = int(va_nodes[0][p].a)
+    false
 va_check = (s: int) -> int:
-    update = va_host[0].prelude(s)
-    if update != 0: return update
+    if va_sourced(int(va_nodes[0][s].a)):
+        update = va_host[0].prelude(s)
+        if update != 0: return update
     lhs = int(va_nodes[0][s].a)
     op = int(va_nodes[0][s].op)
     k = va_nodes[0][lhs].kind
@@ -170,27 +149,25 @@ va_check = (s: int) -> int:
     va_nodes[0][s].a = i32(lhs)
     va_host[0].place(lhs)
     pos = va_nodes[0][s].pos
-    if va_part(lhs):
-        if va_dewy_at(pos): va_host[0].capture(lhs, int(va_nodes[0][s].b))
-        va_copy_write(lhs, pos)
+    if va_part(lhs): va_host[0].capture(s, lhs, va_dewy_at(pos))
     if va_refining[0]:
         lt = va_host[0].refine(s, lt, 1)
         replacement = va_host[0].refine(s, lt, 2)
         if replacement != 0: return replacement
-    if lt == va_str_type[0] and va_text_domains[0].len() > 0: va_host[0].refine(s, lt, 3)
+    if lt == va_str_type[0] and va_watch[0].text_domains > 0: va_host[0].refine(s, lt, 3)
     if lt == va_math_int_type[0] and va_dewy_at(pos): va_host[0].refine(s, lt, 4)
     if op == 47: return va_store(s, lhs, lt)
     va_host[0].compound(s, lt)
 va_assign = (s: int) -> int:
     if va_growth_on(): va_host[0].begin(s, 1)
     saved = va_decimal_target[0]
-    if va_decimal_locals[0].len() > 0 or va_decimal_inits[0].len() > 0: saved = va_host[0].begin(s, 2)
+    if va_watch[0].decimals > 0: saved = va_host[0].begin(s, 2)
     else: va_decimal_target[0] = 0
     literal = 0
-    if va_sibling_flow[0].len() > 0: literal = va_host[0].begin(s, 3)
+    if va_watch[0].sibling_flow > 0: literal = va_host[0].begin(s, 3)
     mark = va_before[0].len()
     r = va_check(s)
     va_decimal_target[0] = saved
-    if va_sibling_flow[0].len() > 0: va_host[0].flow(r, literal)
+    if va_watch[0].sibling_flow > 0: va_host[0].flow(r, literal)
     if va_before[0].len() > mark: return va_host[0].wrap(s, r, mark)
     r

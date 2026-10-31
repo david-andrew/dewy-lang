@@ -17,7 +17,6 @@ def hosts(driver):
 
 
 DRIVER = LOOPS + hosts(DECLS) + hosts(ASSIGNS) + r'''
-db_known: {int: SiblingKnown} = {}
 db_body_mode = -1
 db_arm = 0
 db_bind = 0
@@ -64,7 +63,7 @@ db_error = (s: int, code: int):
     print("error:{s}:{code}")
     exit(19)
 db_services = CheckerBlockHost(db_open, db_expand, db_direct, db_final_host, db_sibling, db_finish, db_reset, db_special, db_assign, db_error)
-db_inputs = CheckerBlockInput(&nodes, &lists, &files, &scopes, &cx, &da_flow, &db_known, &dv_block, &dv_index, &dv_flow_local, &db_body_mode, &db_arm, &db_bind, &db_discarding, &db_exact, &T_VOID, &T_NEVER, &db_services)
+db_inputs = CheckerBlockInput(&nodes, &lists, &files, &scopes, &cx, &da_watch, &dv_block, &dv_index, &dv_flow_local, &db_body_mode, &db_arm, &db_bind, &db_discarding, &db_exact, &T_VOID, &T_NEVER, &db_services)
 db_bound = checker_blocks_bind(&db_inputs)
 DEWY = 1 << 40
 dewy_node = (k: NK, a: int = 0) -> int:
@@ -133,12 +132,12 @@ main = ():
     run(block_of([dewy_node(.if_)], 8))
     # `when` expanded; sibling records followed and known.
     run(block_of([dewy_node(.when_), let_of(15, T_INT), dewy_node(.when_)]))
-    da_flow[3] = 1
+    da_watch.sibling_flow = 1
     dv_flow_next = 1
     run(block_of([let_of(16, T_INT), assign_of(T_INT)]))
     dv_flow_next = 0
-    da_flow = {}
-    db_known[4] = SiblingKnown(owner = 1)
+    da_watch.sibling_flow = 0
+    da_watch.sibling_known = 1
     run(block_of([let_of(17, T_INT), dewy_node(.test_)]))
     print("ok")
 '''

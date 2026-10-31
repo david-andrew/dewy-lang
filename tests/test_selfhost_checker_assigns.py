@@ -12,17 +12,10 @@ da_narrows = 0
 da_no_narrow = 0
 da_current = 0
 da_root = 0
-da_copies: {int: int} = {}
-da_global_copies: {int: int} = {}
 da_before: int[]
-da_flow: {int: int} = {}
-da_decimal_locals: {int: int} = {}
-da_decimal_inits: {int: int} = {}
+da_watch = StatementWatch()
 da_decimal_target = 0
-da_growth: {int: bool} = {}
 da_cached = 0
-da_domains: {int: int[]} = {}
-da_temperatures: {int: bool} = {}
 da_fills: OptFill[]
 da_results: {int: int} = {}
 da_value_type = 0
@@ -58,9 +51,9 @@ da_check = (n: int, expected: int) -> int:
     last = n
     int(nodes[n].type)
 da_place = (n: int): events.push("place:{n}")
-da_capture = (n: int, v: int):
-    events.push("capture:{n}:{v}")
-    da_before.push(v)
+da_capture = (s: int, n: int, dewy: bool):
+    events.push("capture:{s}:{n}:{dewy}")
+    if dewy: da_before.push(int(nodes[s].b))
 da_refine = (s: int, t: int, code: int) -> int:
     events.push("refine:{s}:{t}:{code}")
     if code == 1: return t
@@ -87,7 +80,7 @@ da_wrap = (s: int, r: int, mark: int) -> int:
     da_before.truncate(mark)
     node(.block)
 da_services = CheckerAssignHost(da_begin, da_prelude, da_tuple, da_element, da_index, da_check, da_place, da_capture, da_refine, da_value, da_write, da_coerce, da_compound, da_flow_host, da_wrap)
-da_inputs = CheckerAssignInput(&nodes, &types, &structs, &files, &ctxs, &cx, &last, &da_refining, &da_narrows, &da_no_narrow, &da_current, &da_root, &da_copies, &da_global_copies, &da_before, &da_flow, &da_decimal_locals, &da_decimal_inits, &da_decimal_target, &da_growth, &da_cached, &da_domains, &da_temperatures, &da_fills, &T_STR, &T_MATH_INT, &da_services)
+da_inputs = CheckerAssignInput(&nodes, &types, &structs, &files, &ctxs, &cx, &last, &da_refining, &da_narrows, &da_no_narrow, &da_current, &da_root, &da_before, &da_watch, &da_decimal_target, &da_cached, &da_fills, &T_STR, &T_MATH_INT, &da_services)
 da_bound = checker_assigns_bind(&da_inputs)
 DEWY = 1 << 40
 # target op= value (Tok.assign 47, pluseq 48)
@@ -105,7 +98,7 @@ mk_type = (k: TK) -> int:
     types.push(TypeInfo(kind = k)); types.len() - 1
 run = (s: int):
     r = va_assign(s)
-    print("{s}:{r}:{nodes[s].a}:{nodes[s].b}:{da_decimal_target}:{da_copies}:{da_global_copies}:{da_before}")
+    print("{s}:{r}:{nodes[s].a}:{nodes[s].b}:{da_decimal_target}:{da_before}")
     print("  {events}")
     events = []
 prepare_assigns = ():
@@ -163,20 +156,20 @@ main = ():
     da_results[12] = 0
     da_refining = false
     run(assign(var(T_STR), typed(.str_lit, T_STR)))
-    da_domains[5] = [1]
+    da_watch.text_domains = 1
     run(assign(var(T_STR), typed(.str_lit, T_STR)))
     run(assign(var(T_MATH_INT), typed(.int_lit, T_MATH_INT)))
     run(assign(var(T_MATH_INT), typed(.int_lit, T_MATH_INT), 47, false))
-    da_temperatures[3] = true
+    da_watch.temperature_writes = 1
     run(assign(var(T_INT), typed(.int_lit, T_INT)))
     da_decimal_target = 4
     run(assign(var(T_INT), typed(.int_lit, T_INT)))
-    da_decimal_locals[5] = 3
+    da_watch.decimals = 1
     run(assign(var(T_INT), typed(.int_lit, T_INT)))
     da_results[22] = 1
     run(assign(var(T_INT), typed(.int_lit, T_INT)))
     da_results[22] = 0
-    da_decimal_locals = {}
+    da_watch.decimals = 0
     da_fills.push(OptFill(subject = 3))
     run(assign(var(T_INT), typed(.int_lit, T_INT)))
     da_results[24] = 2
@@ -185,13 +178,13 @@ main = ():
     # Growth in loops, followed siblings, compound updates.
     ctxs[cx].loop_depth = 1
     run(assign(var(T_INT), typed(.int_lit, T_INT), 48))
-    da_growth[5] = true
+    da_watch.growth = 1
     run(assign(var(T_INT), typed(.int_lit, T_INT), 48))
     ctxs[cx].loop_depth = 0
-    da_flow[5] = 1
+    da_watch.sibling_flow = 1
     da_results[103] = rec
     run(assign(var(shape), typed(.call, rec)))
-    da_flow = {}
+    da_watch.sibling_flow = 0
     run(assign(var(T_INT), typed(.int_lit, T_INT), 48))
     print("ok")
 '''
@@ -207,7 +200,7 @@ def test_checker_assigns_twins(compiler, tmp_path, release):  # noqa: F811
 @pytest.mark.parametrize('case,code', [
     ('da_fail = 1; run(assign(var(T_INT), typed(.int_lit, T_INT)))', 1),
     ('da_fail = 23; run(assign(var(T_INT), typed(.ident, T_I32)))', 23),
-    ('da_fail = 13; da_domains[5] = [1]; run(assign(var(T_STR), typed(.str_lit, T_STR)))', 13),
+    ('da_fail = 13; da_watch.text_domains = 1; run(assign(var(T_STR), typed(.str_lit, T_STR)))', 13),
     ('da_fail = 14; run(assign(var(T_MATH_INT), typed(.int_lit, T_MATH_INT)))', 14),
     ('da_fail = 25; run(assign(part(.field, var(rec_type()), mk_type(.opt)), typed(.call, T_INT)))', 25),
 ])

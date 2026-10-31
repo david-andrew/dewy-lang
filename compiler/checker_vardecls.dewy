@@ -2,7 +2,7 @@ $runtime_checks
 from p"node_store.dewy" import Node
 from p"checker_types.dewy" import (TypeInfo StructInfo TK)
 from p"source_types.dewy" import SrcFile
-from p"checker_state.dewy" import (Local FnCtx)
+from p"checker_state.dewy" import (Local FnCtx StatementWatch)
 from p"type_inference.dewy" import tu_prune
 # `let name = value`, `let name:T`, `let name:T = value`, once its other forms (a
 # spawned task's handle, soa and element aliases, lent and local places, shaped
@@ -56,8 +56,7 @@ CheckerDeclInput:type=[
     quat_nodes:ptr<dict<int64 bool>>
     quat_locals:ptr<dict<int64 bool>>
     tk_bindings:ptr<dict<int64 int64>>
-    decimal_adapted:ptr<dict<int64 int64>>
-    growth_inferred:ptr<dict<int64 bool>>
+    watch:ptr<StatementWatch>
     decimal_cached:ptr<int64>
     growth_pending:ptr<int64>
     growth_whole:ptr<bool>
@@ -87,8 +86,7 @@ let vd_parents:ptr<dict<int64 int64>>=$unsafe (uint64(0) as ptr<dict<int64 int64
 let vd_quat_nodes:ptr<dict<int64 bool>>=$unsafe (uint64(0) as ptr<dict<int64 bool>>)
 let vd_quat_locals:ptr<dict<int64 bool>>=$unsafe (uint64(0) as ptr<dict<int64 bool>>)
 let vd_tk_bindings:ptr<dict<int64 int64>>=$unsafe (uint64(0) as ptr<dict<int64 int64>>)
-let vd_decimal_adapted:ptr<dict<int64 int64>>=$unsafe (uint64(0) as ptr<dict<int64 int64>>)
-let vd_growth_inferred:ptr<dict<int64 bool>>=$unsafe (uint64(0) as ptr<dict<int64 bool>>)
+let vd_watch:ptr<StatementWatch>=$unsafe (uint64(0) as ptr<StatementWatch>)
 let vd_decimal_cached:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let vd_growth_pending:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let vd_growth_whole:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
@@ -118,8 +116,7 @@ checker_vardecls_bind=(input:ptr<CheckerDeclInput>):>VWord=>$unsafe {
     vd_quat_nodes=input[0].quat_nodes
     vd_quat_locals=input[0].quat_locals
     vd_tk_bindings=input[0].tk_bindings
-    vd_decimal_adapted=input[0].decimal_adapted
-    vd_growth_inferred=input[0].growth_inferred
+    vd_watch=input[0].watch
     vd_decimal_cached=input[0].decimal_cached
     vd_growth_pending=input[0].growth_pending
     vd_growth_whole=input[0].growth_whole
@@ -158,7 +155,7 @@ vd_literal_unit=(e:VWord):>VWord=>$unsafe {
 # loop carrying an exact binding (or a reading left over) asks the host.
 vd_growth_on=():>bool=>$unsafe {
     let c=vd_context[0]
-    c >=? 0 and vd_contexts[0].ptr[c].loop_depth >? 0 and (vd_growth_inferred[0].length >? 0 or vd_decimal_cached[0] not=? 0)
+    c >=? 0 and vd_contexts[0].ptr[c].loop_depth >? 0 and (vd_watch[0].growth >? 0 or vd_decimal_cached[0] not=? 0)
 }
 vd_growth_before=(s:VWord):>void=>$unsafe {
     let init=VWord(vd_nodes[0].ptr[s].b)
@@ -253,10 +250,10 @@ vd_decl=(s:VWord):>void=>$unsafe {
     if vd_sibling_pending[0].length >? 0 {vd_host[0].after(s l t 3)}
     if vd_flow_next[0] not=? 0 {vd_flow_local[0]=l}
     if unit not=? 0 {vd_tk_bindings[0][l]=s}
-    if literal_init and (vd_kind(t) =? 'struct_' or vd_decimal_adapted[0].length >? 0) {vd_host[0].after(s l t 4)}
+    if literal_init and (vd_kind(t) =? 'struct_' or vd_watch[0].decimal_adapted >? 0) {vd_host[0].after(s l t 4)}
     if vd_growth_pending[0] not=? 0 or (not typed and vd_kind(t) =? 'struct_' and vd_dewy_at(pos) and not vd_flag(s 262144)) {vd_host[0].after(s l t 5)}
     let b=VWord(vd_nodes[0].ptr[s].b)
-    if b not=? 0 and vd_quat_nodes[0].length >? 0 and vd_quat_nodes[0].has(b) {vd_quat_locals[0][l]=true}
+    if b not=? 0 and vd_watch[0].quaternions >? 0 and vd_quat_nodes[0].has(b) {vd_quat_locals[0][l]=true}
     vd_set_flags(l 512)
     if not typed and vd_dewy_at(pos) {
         if t =? vd_str_type[0] {vd_host[0].after(s l t 6)}

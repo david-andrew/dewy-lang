@@ -2729,7 +2729,9 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
         shader_draw_check(decl, cd.args)
         angle_check(decl, cd.args)
         qn = name_of(int(nodes[decl].name))
-        if (starts_with(qn, "quat_") and qn != "quat_rotate" and qn != "quat_to_mat4") or qn == "slerp": quat_nodes[n] = true
+        if (starts_with(qn, "quat_") and qn != "quat_rotate" and qn != "quat_to_mat4") or qn == "slerp":
+            quat_nodes[n] = true
+            statement_watch.quaternions = quat_nodes.len()
         # (random_int(1, 6) for a die: its upper end is left out, as in [1..6))
         rhi = -1
         if name_of(int(nodes[decl].name)) == "random_int" and cd.args.len() == 2 and written_int(cd.args[0]) == 1: rhi = written_int(cd.args[1])
