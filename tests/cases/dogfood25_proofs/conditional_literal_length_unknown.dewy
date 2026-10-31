@@ -1,0 +1,6 @@
+# One arm is an array of unknown length: the index stays unproven.
+f = (c:bool ys:array<int>):>int => {
+    let xs = if c [1 2 3] else ys
+    xs[2]
+}
+main = () => printl(f(true [1]))

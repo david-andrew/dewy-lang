@@ -3184,6 +3184,12 @@ fact_assume = (s: mut FactState, v: int, truth: bool):
         # one grapheme, even when combining marks merge at the boundary.
         if truth and t.origin != 0 and fact_affix_call(t.origin) and fact_bound(s, t.b).lo > 0:
             fact_assume(s, fact_new(s, fact_domain(T_BOOL), FactTerm(.ge, t.a, fact_constant(s, 1))), true)
+        # A byte prefix has no more graphemes than its text: a boundary is
+        # decided by the scalars before it and the one after, so the prefix's
+        # inner boundaries are the text's, and its end is at most the text's.
+        # (Not a suffix: `ZWJ emoji` alone splits where `emoji ZWJ emoji` joins.)
+        if truth and t.origin != 0 and fact_affix_call(t.origin) and nodes[int(fns[int(nodes[t.origin].sym)].decl)].name == i32(fact_name_starts_with):
+            fact_assume(s, fact_new(s, fact_domain(T_BOOL), FactTerm(.le, t.b, t.a)), true)
         return
     op = if truth: t.op else: fact_inverse(t.op)
     a = t.a
@@ -3374,6 +3380,26 @@ fact_hull_all = (s: mut FactState, a: FactState, b: FactState, count: int, at: i
 # Different representations whose values both have finite host endpoints (a
 # fixed signed or narrow word, a singleton) share int64's: the hull is finite.
 # uint64's biased encoding joins only itself. O(1) per differing binding.
+# A conditional array keeps the hull of its live arms' lengths (`let [a b]
+# = if c [x y] else [z w]` unpacks two). Only when every arm's length is
+# known; demanded values only. O(1) indexed projection lookups.
+fact_join_length = (s: mut FactState, v: int, a: FactState, x: int, b: FactState, y: int, at: int):
+    if tkind(fact_type(fact_terms[v].type)) != .array or s.projections.len() >= FACT_CAP or not a.live and not b.live: return
+    bound = FactBound()
+    seen = false
+    loop arm in [0..2):
+        st = if arm == 0: a else: b
+        if not st.live: continue
+        w = if arm == 0: x else: y
+        if w == 0: return
+        pi = fact_projection_find(st, w, -1, false)
+        if pi < 0: return
+        c = fact_bound(st, st.projections[pi].value)
+        if c.wide: return
+        bound = if seen: fact_hull(bound, c, at) else: c
+        seen = true
+    fact_add_projection(s, FactProjection(v, -1, false, fact_new(s, bound, FactTerm(type = T_INT))))
+
 fact_join_term = (sa: FactState, a: int, sb: FactState, b: int) -> FactTerm:
     t = fact_terms[a].type
     if t == fact_terms[b].type: return FactTerm(type = t)
@@ -4388,6 +4414,12 @@ fact_arithmetic = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
     if y.lo == y.hi and y.lo != FACT_MIN:
         fact_difference(s, value, a, y.lo, 0, 16)
         fact_difference(s, a, value, -y.lo, 0, 16)
+    else if op == .minus:
+        # (a sign-definite subtrahend: value - a is -b, within [y.lo, y.hi],
+        # so `n - 1 - k` with k >= 0 stays at most n - 1. O(1), one row
+        # for a given sign; sums keep their intervals, which bound them)
+        if y.hi <= 0: fact_difference(s, value, a, y.hi, n)
+        if y.lo >= 0 and y.lo != FACT_MAX: fact_difference(s, a, value, -y.lo, n)
     if op == .plus and x.lo == x.hi and x.lo != FACT_MIN:
         fact_difference(s, value, b, x.lo, 0, 16)
         fact_difference(s, b, value, -x.lo, 0, 16)
@@ -7025,22 +7057,26 @@ fact_scaled_lengths = (n: int, s: mut FactState, pushes: (int, int, int)[], coun
         fact_add_projection(s, FactProjection(s.bindings[i].value, -1, false, total))
 
 # A counted push never shrinks its receiver. Seed the entry lower bound at
-# each head; its upper bound remains unknown until the counted exit.
+# each head; its upper bound remains unknown until the counted exit. An entry
+# length with rows (`d <=? out.length`) is also at most the current length,
+# so those rows reach it (LZ77's `out[out.length - d]` while pushing).
 # O(candidate arrays), using the same checked inventory as counted lengths.
 fact_growing_lengths = (s: mut FactState, pushes: (int, int)[]):
     loop item in pushes:
         lower = fact_bound(s, item.1).lo
-        if lower <= 0: continue
+        related = fact_slot(s, item.1) >= 0 and fact_incident(s, item.1) >= 0
+        if lower <= 0 and not related: continue
         i = fact_binding(s, PlaceIdentity(.local, int(locals[item.0].owner), item.0))
         if i < 0: continue
         length = fact_project(s, s.bindings[i].value, -1, false, T_INT)
         b = fact_bound(s, length)
         b.lo = max(b.lo, lower)
         fact_set_bound(s, length, b)
+        if related: fact_difference(s, item.1, length, 0)
 
 # Each other local of loop n that the body changes only by pushes, however
 # many (`if keep(x) out.push(x)`), with its entry length when that has a
-# positive lower bound: a length that never shrinks keeps it at every head
+# positive lower bound or rows: a length that never shrinks keeps it at every head
 # and exit (fact_growing_lengths). O(candidate arrays x body).
 fact_growing_pushes = (n: int, s: mut FactState, counted: (int, int)[]) -> (int, int)[]:
     found: (int, int)[]
@@ -7056,7 +7092,7 @@ fact_growing_pushes = (n: int, s: mut FactState, counted: (int, int)[]) -> (int,
         i = fact_binding(s, PlaceIdentity(.local, int(locals[l].owner), l))
         if i < 0: continue
         length = fact_project(s, s.bindings[i].value, -1, false, T_INT)
-        if fact_bound(s, length).lo <= 0: continue
+        if fact_bound(s, length).lo <= 0 and fact_incident(s, length) < 0: continue
         sites: int[]
         if fact_push_only(body, l, sites): found.push((l, length))
     found
@@ -9340,7 +9376,9 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         if fact_summary_field != 0 and type_eq(fact_type(ntype(n)), fact_type(int(fns[fact_summary_owner].ret))):
             return fact_constructor_join(n, paths, y, z, result, hull, s)
         s = fact_join(paths.yes, paths.no, n)
-        return fact_new(s, result, FactTerm(type = hull))
+        joined = fact_new(s, result, FactTerm(type = hull))
+        if mark & FACT_VALUE != 0: fact_join_length(s, joined, paths.yes, y, paths.no, z, n)
+        return joined
     if k == .and_ or k == .or_:
         if fact_summary_owner != 0 or mark != 0 and mark & FACT_VALUE == 0:
             paths = fact_condition(n, s)

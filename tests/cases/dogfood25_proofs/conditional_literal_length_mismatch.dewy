@@ -1,0 +1,6 @@
+# One arm has a single element: the unpacking stays unproven.
+f = (c:bool):>string => {
+    let [a b] = if c ["x" "y"] else ["z"]
+    "{a}{b}"
+}
+main = () => printl(f(true))

@@ -1,0 +1,9 @@
+# A loop that may also pop keeps no row to the entry length: refused.
+f = (out:array<int> d:int) => {
+    if not (1 <=? d <=? out.length) return
+    loop k in [0..4) {
+        out.push(out[out.length - d])
+        if k =? 2 out.pop()
+    }
+}
+main = () => { let xs = [1 2] f(xs 2) printl(xs) }

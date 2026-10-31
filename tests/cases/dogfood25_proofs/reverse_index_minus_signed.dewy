@@ -1,0 +1,6 @@
+# A counter that may be negative keeps no row to the minuend: refused.
+f = (xs:array<int> k:int):>int => {
+    if xs.length <? 1 or k >? 0 or k <? (-2) return 0
+    xs[xs.length - 1 - k]
+}
+main = () => printl(f([1 2 3] 0))

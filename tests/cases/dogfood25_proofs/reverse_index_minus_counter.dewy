@@ -1,0 +1,26 @@
+# Subtracting a nonnegative counter stays at most the minuend:
+# `xs.length - 1 - k` indexes xs for every k in [0..xs.length).
+reverse_sum = (xs:array<int>):>int => {
+    let t = 0
+    loop k in [0..xs.length) t += xs[xs.length - 1 - k]
+    t
+}
+reverse_sum_n = (xs:array<int>):>int => {
+    let n = xs.length
+    let t = 0
+    loop k in [0..n) t = t * 10 + xs[n - k - 1]
+    t
+}
+mirrored = (xs:array<int>):>bool => {
+    loop i in [0..xs.length) {
+        let j = xs.length - 1 - i
+        if xs[i] not=? xs[j] return false
+    }
+    true
+}
+main = () => {
+    printl(reverse_sum([1 2 3 4]))
+    printl(reverse_sum_n([1 2 3 4]))
+    printl(mirrored([1 2 3 2 1]))
+    printl(mirrored([1 2 3]))
+}

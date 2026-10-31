@@ -1,0 +1,6 @@
+# d may be 0, so `out.length - d` may be out.length: refused.
+f = (out:array<int> d:int) => {
+    if not (0 <=? d <=? out.length) return
+    loop _ in [0..4) out.push(out[out.length - d])
+}
+main = () => { let xs = [1 2] f(xs 1) printl(xs) }

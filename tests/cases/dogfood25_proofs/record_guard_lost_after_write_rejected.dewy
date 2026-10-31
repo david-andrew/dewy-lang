@@ -1,0 +1,14 @@
+# A call that may move the cursor forgets the guard: refused.
+Reader:type = [chars:array<string> pos:int=0]
+advance = (@r:Reader) => { r.pos += 1 }
+current = (@r:Reader):>string => {
+    if r.pos >=? 0 and r.pos <? r.chars.length {
+        advance(@r)
+        return r.chars[r.pos]
+    }
+    ""
+}
+main = () => {
+    let r = Reader["ab".chars]
+    printl(current(@r))
+}

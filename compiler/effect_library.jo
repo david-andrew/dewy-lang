@@ -15,7 +15,7 @@
 #                       trim, trim_start, trim_end, split, lines, join,
 #                       replace, upper, lower, remove_prefix, remove_suffix,
 #                       find, rfind, to_int (big results), `+ - *` on `int`,
-#                       is_alpha, is_digit, is_space, is_alnum
+#                       is_alpha, is_digit, is_space, is_alnum, set"..."
 #   allocates, panics   indexing and slicing, byte_slice (each the caller's
 #                       obligation where a direct call states it: its facts
 #                       discharge it), find(part start), and a format
@@ -114,4 +114,9 @@ effect_library_classify = (g: int) -> EffectClass:
         if name in ["is_alpha", "is_digit", "is_space", "is_alnum"] and fns[g].params.len() == 1 and prune(int(locals[fns[g].params[0]].type)) == T_STR: return .allocates
         if name == "remove_prefix" or name == "remove_suffix": return .allocates
         if name == "__dewy_byte_slice": return .allocates_panics
+    # (`set"..."`: a fresh set of the text's graphemes, as a character class
+    # collects them; it writes only its own result)
+    if file == "/std/dewy_sets.jo" and name == "set" and fns[g].params.len() == 1 and prune(int(locals[fns[g].params[0]].type)) == T_STR:
+        effect_class_text[g] = true
+        return .allocates
     .unclassified

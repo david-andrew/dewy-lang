@@ -1,0 +1,7 @@
+# With k up to xs.length inclusive, `xs.length - 1 - k` reaches -1: refused.
+f = (xs:array<int>):>int => {
+    let t = 0
+    loop k in [0..xs.length] t += xs[xs.length - 1 - k]
+    t
+}
+main = () => printl(f([1 2 3]))

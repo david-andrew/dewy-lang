@@ -1,0 +1,25 @@
+# Mirrored indices in other spellings: a palindrome over half a string, a
+# reversing comprehension, and an in-place swap of the two ends.
+palindrome = (s:string):>bool => {
+    loop i in [0..s.length // 2) if s[i] not=? s[s.length - 1 - i] return false
+    true
+}
+rev = (xs:array<int>):>array<int> => [loop k in [0..xs.length) xs[xs.length - k - 1]]
+swap_ends = (xs:array<int>):>array<int> => {
+    let ys = xs
+    let i = 0
+    loop i <? ys.length // 2 {
+        let j = ys.length - 1 - i
+        let t = ys[i]
+        ys[i] = ys[j]
+        ys[j] = t
+        i += 1
+    }
+    ys
+}
+main = () => {
+    printl(palindrome("racecar"))
+    printl(palindrome("ab"))
+    printl(rev([1 2 3]))
+    printl(swap_ends([1 2 3 4 5]))
+}

@@ -1,0 +1,7 @@
+# A suffix may have more graphemes than its text (a joiner it starts with
+# splits alone): endswith gives no length order, so this is refused.
+rest = (word:string p:string):>string => {
+    if word.endswith(p) return word[p.length..]
+    word
+}
+main = () => printl(rest("ab" "b"))

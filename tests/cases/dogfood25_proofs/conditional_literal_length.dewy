@@ -1,0 +1,15 @@
+# A conditional array keeps the lengths both arms give it: two 2-element
+# literals unpack into two names, and a 3- or 4-element one indexes at 2.
+brackets = (object:bool):>string => {
+    let [open close] = if object ["\{" "}"] else ["[" "]"]
+    "{open} {close}"
+}
+third = (long:bool):>int => {
+    let xs = if long [1 2 3 4] else [5 6 7]
+    xs[2]
+}
+main = () => {
+    printl(brackets(true))
+    printl(brackets(false))
+    printl(third(true) + third(false))
+}

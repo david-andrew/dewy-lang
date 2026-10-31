@@ -1,0 +1,20 @@
+# Building `set"..."` writes nothing but its own result: guards on an `@`
+# record parameter's fields hold across it.
+Reader:type = [chars:array<string> pos:int<(>=? 0)>=0]
+at_separator = (@r:Reader):>bool => {
+    if r.pos <? r.chars.length {
+        let separators = set" ,"
+        return r.chars[r.pos] in? separators
+    }
+    false
+}
+skip_word = (@r:Reader) => {
+    loop r.pos <? r.chars.length and not (r.chars[r.pos] in? set" ,") r.pos += 1
+}
+main = () => {
+    let r = Reader["ab, cd".chars]
+    printl(at_separator(@r))
+    skip_word(@r)
+    printl(r.pos)
+    printl(at_separator(@r))
+}
