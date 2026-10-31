@@ -1,0 +1,10 @@
+# Swapping by a pattern keeps what is known of each value.
+const T = [1 2 3 4 5 6 7 8]
+pick = (p:int64 q:int64):>int64 => {
+    if p <? 0 or p >=? 8 or q <? 0 or q >=? 8 return 0
+    let a = p
+    let b = q
+    if a <? b [a b] = [b a]
+    T[a] * 10 + T[b]
+}
+main = () => printl(pick(2 5))

@@ -725,7 +725,8 @@ comprehension's, `[loop i in [0..n) i].sorted(key=f)` holds numbers in `0..n-1`'
 interval, each below `n`). A key callback written in the call
 (`sorted`, `sort`, `min_by`, `max_by`, `group_by`) is given only the receiver's
 elements, so `[loop i in [0..n) i].sorted(key=(i) => -rank[i])` needs no guard
-when `rank.length` is `n`. Sorting or reversing in place
+when `rank.length` is `n`; the element `min_by` or `max_by` returns is one of the
+receiver's, so what holds of every element holds of it. Sorting or reversing in place
 retains those bounds for builtin values. Finite element inventories also retain
 scalar relations established for every entry, such as an index being below
 another array's length. A write to a known position in a short `fill` retains
@@ -780,7 +781,9 @@ only its entries change (`loop k in d.keys.values d[k] += 1`). Copying, slicing,
 the key array preserves this fact; replacing its elements or otherwise changing the
 dictionary can require a new membership guard. A dictionary built by a comprehension
 that makes one entry keyed by the loop's element on every iteration, `[loop p in people p -> 0]`,
-has every element of that `people` value as a key (with no filter, `break` or `continue`).
+has every element of that `people` value as a key (with no filter, `break` or `continue`),
+including each name of a `const` table it walks. The entries of a dictionary whose value type
+is refined (`dict<string Slot>`) keep that contract when read, as array elements do.
 So does a loop over an array that ends each iteration with its element a key and
 removes none (no `break`), `loop name in [white black] { if name not in? d d[name] = 0 }`
 (Python's `setdefault` over a few names): after it, `d[white]` needs no guard.
@@ -1081,7 +1084,7 @@ partial operator (`int64<(>? 0)>`, `int64<(>=? a)>`); keep a lambda
 local to its predicate. A parameter may use its own name
 (`d:int64<d >? 0>`); conjunctions,
 one-direction comparison chains, scalar exclusion (`int64 & ~0`), and membership in literal ranges are also
-supported. Bounds may use integer literals, fixed-width `.min`/`.max`, other
+supported. Bounds may use integer literals, module consts (`const N = NAMES.length`), fixed-width `.min`/`.max`, other
 scalar value parameters of the same representation, an array or string
 parameter's length (`i:uint64<(<? b.length)>`, `n:uint64<(<=? text.length)>`), or
 stable local bindings, and on a signed integer each may add or subtract a

@@ -1,0 +1,19 @@
+# A tuple literal checks each position against its component: refined
+# positions take the refinement conversion, and keep their type.
+C:type = int64<x => 0 <=? x and x <? 8>
+Cell:type = [C C]
+clamp = (z:int64):>[C C] => {
+    if 0 <=? z and z <? 8 return [z 7]
+    [0 0]
+}
+total = ([r c]:Cell):>int64 => r * 8 + c
+main = () => {
+    let a:[C C] = [0 1]
+    let x:C = 2
+    let y:C = 3
+    let b:[C C] = [x y]
+    let cells:array<Cell> = [a b [4 5]]
+    cells.push(clamp(5))
+    cells.push(clamp(11))
+    loop [r c] in cells printl"{r},{c} -> {total([r c])}"
+}

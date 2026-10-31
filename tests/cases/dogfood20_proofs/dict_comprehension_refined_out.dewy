@@ -1,0 +1,6 @@
+# Near miss: a value outside the refinement.
+House:type = int64<h => 0 <=? h and h <? 8>
+main = () => {
+    let f:dict<string House> = [loop i in [0..9) "x{i}" -> i]
+    printl"{f}"
+}

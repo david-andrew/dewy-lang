@@ -1,0 +1,11 @@
+# A module const computed from a table bounds a refinement and sizes a fill.
+const NAMES = ["a" "b" "c" "d"]
+const N = NAMES.length
+Slot:type = int64<i => 0 <=? i and i <? N>
+Table:type = [owner:array<Slot length=N> load:array<int length=N>]
+main = () => {
+    let t = Table[[loop i in [0..N) i] fill(0 N)]
+    let s:Slot = 3
+    t.load[s] += 5
+    printl"{NAMES[t.owner[s]]} {t.load}"
+}

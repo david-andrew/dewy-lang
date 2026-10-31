@@ -1,0 +1,13 @@
+# min_by and max_by return one of the receiver's elements: every element's
+# bounds hold of the result.
+main = () => {
+    let scores = [5 9 2 7]
+    let idx = [loop i in [0..scores.length) i]
+    let best = idx.max_by(key=(i) => scores[i])
+    let worst = idx.min_by(key=(i) => scores[i])
+    printl"best {best} = {scores[best]}, worst {worst} = {scores[worst]}"
+    let small = [3 1 4 1 5]
+    let pick = small.max_by(key=(v) => -v)
+    let table = [10 20 30 40 50 60]
+    printl(table[pick])
+}

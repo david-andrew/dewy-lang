@@ -1,0 +1,8 @@
+# Near miss: a function of the same name that is not the library's.
+min_by = (xs:array<int64> key:<(value:int64):>int64>):>int64 => key(0 - xs.length)
+main = () => {
+    let scores = [5 9 2 7]
+    let idx:array<int64> = [0 1 2 3]
+    let worst = min_by(idx (i) => i)
+    printl(scores[worst])
+}

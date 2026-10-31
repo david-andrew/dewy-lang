@@ -63,9 +63,12 @@ xk_tuple = (n: int, ex: int, exk: TK) -> CheckerCollectionResult:
         e = 0
         if ex != 0 and exk == .tuple and int(xk_types[0][ex].nargs) == xk_count(n): e = int(xk_args[0][int(xk_types[0][ex].args) + i])
         xk_host[0].check(c, e)
-        if e != 0: xk_host[0].coerce(c, e)
-        else: xk_host[0].finalize(c)
-        elements.push(int(xk_nodes[0][c].type))
+        if e != 0:
+            xk_host[0].coerce(c, e)
+            elements.push(e)
+        else:
+            xk_host[0].finalize(c)
+            elements.push(int(xk_nodes[0][c].type))
     if int(xk_nodes[0][n].flags) & 33554432 != 0 and xk_host[0].float_key(elements[0]): xk_host[0].float_obligation(xk_kid(n, 0))
     CheckerCollectionResult(int(tb_mk_tuple(elements)), false)
 xk_map = (n: int, ex: int, exk: TK) -> CheckerCollectionResult:

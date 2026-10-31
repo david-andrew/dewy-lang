@@ -191,7 +191,8 @@ ref_length_only = (predicate: int) -> bool: ref_atoms_length_only(ref_predicates
 ref_resolve_value = (n: int) -> RefTerm:
     name = int(nodes[n].name)
     sym = lookup(name)
-    if sym != 0 and syms[sym].kind == .const_:
+    # (a module const, `const N = NAMES.length` too: its value while compiling)
+    if sym != 0 and (syms[sym].kind == .const_ or syms[sym].kind == .global and readonly_global(int(syms[sym].ref)) and dewy_at(nodes[n].pos)):
         value = clone(n)
         check_expr(value, 0)
         if not is_int(ntype(value)): fatal(nodes[n].pos, "refinement bound must be an integer")

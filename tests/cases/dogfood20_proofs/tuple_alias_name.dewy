@@ -1,0 +1,7 @@
+# Near miss: an array is not a tuple; the error names the components' alias.
+C:type = int64<x => 0 <=? x and x <? 8>
+main = () => {
+    let t = [1 2]
+    let a:[C C] = t
+    printl"{a}"
+}

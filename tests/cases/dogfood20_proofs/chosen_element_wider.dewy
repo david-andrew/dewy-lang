@@ -1,0 +1,7 @@
+# Near miss: the receiver's elements reach past the indexed array.
+main = () => {
+    let scores = [5 9 2 7]
+    let idx = [loop i in [0..scores.length] i]
+    let best = idx.max_by(key=(i) => -i)
+    printl(scores[best])
+}

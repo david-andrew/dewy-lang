@@ -1,0 +1,9 @@
+# A dictionary comprehension into a refined value type: each value takes the
+# refinement conversion, proven from the loop's bounds.
+const NAMES = ["mill" "forge" "inn"]
+House:type = int64<h => 0 <=? h and h <? 8>
+main = () => {
+    let index:dict<string House> = [loop i in 0.. and name in NAMES name -> i]
+    let squares:dict<string House> = [loop i in [0..3) "x{i}" -> i * 2]
+    printl"{index} {squares}"
+}

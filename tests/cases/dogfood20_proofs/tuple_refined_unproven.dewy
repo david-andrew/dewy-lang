@@ -1,0 +1,4 @@
+# Near miss: an unguarded value in a refined position.
+C:type = int64<x => 0 <=? x and x <? 8>
+pick = (z:int64):>[C C] => [z 1]
+main = () => printl"{pick(3)}"

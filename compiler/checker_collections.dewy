@@ -73,8 +73,15 @@ xk_tuple=(n:XKWord ex:XKWord exk:TK):>CheckerCollectionResult=>$unsafe {
             e=XKWord(xk_args[0][XKWord(xk_types[0].ptr[ex].args) + i])
         }
         xk_host[0].check(c e);
-        if e not=? 0 {xk_host[0].coerce(c e);} else {xk_host[0].finalize(c);}
-        elements.push(int64(xk_nodes[0].ptr[c].type))
+        # Checked against its component, a position keeps that type: a refined
+        # one's conversion leaves its base on the element, which is no tuple's.
+        if e not=? 0 {
+            xk_host[0].coerce(c e);
+            elements.push(e)
+        } else {
+            xk_host[0].finalize(c);
+            elements.push(int64(xk_nodes[0].ptr[c].type))
+        }
     }
     # A dictionary comprehension's (key, value): a float key needs its obligation.
     if XKWord(xk_nodes[0].ptr[n].flags) & 33554432 not=? 0 and xk_host[0].float_key(elements[0]) {xk_host[0].float_obligation(xk_kid(n 0))}

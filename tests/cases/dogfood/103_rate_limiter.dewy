@@ -1,0 +1,87 @@
+# Replay an API gateway's request log through two rate limiters per client,
+# a token bucket and a sliding window, and report which requests each would
+# reject. Times are in milliseconds; each client has its own plan.
+
+const LOG = """
+0 alice GET /items
+120 alice GET /items
+150 bob POST /orders
+200 alice GET /items/7
+210 alice GET /items/8
+260 alice GET /items/9
+900 bob POST /orders
+950 bob POST /orders
+980 bob POST /orders
+1000 bob POST /orders
+1010 carol GET /health
+1500 alice GET /items
+2100 alice GET /items
+2150 alice GET /items
+2160 alice GET /items
+2170 alice GET /items
+oops
+2400 bob GET /orders/1
+"""
+
+Plan:type = [burst:int64 per_second:int64 window:int64 limit:int64]
+
+const PLANS = ["alice" -> Plan[3 2 1000 4] "bob" -> Plan[2 1 1000 3]]
+const DEFAULT = Plan[1 1 1000 1]
+
+Request:type = [at:int64 client:string path:string]
+
+# A bucket holds up to `burst` tokens and refills `per_second` each second.
+# Tokens are kept in thousandths so refills stay exact.
+Bucket:type = [tokens:int last:int64]
+
+take = (@b:Bucket plan:Plan now:int64):>bool => {
+    let full = plan.burst * 1000
+    b.tokens = min(full b.tokens + (now - b.last) * plan.per_second)
+    b.last = now
+    if b.tokens <? 1000 return false
+    b.tokens -= 1000
+    true
+}
+
+# A sliding window allows `limit` requests in any `window` milliseconds.
+admit = (@recent:array<int64> plan:Plan now:int64):>bool => {
+    loop not recent.is_empty and recent[0] <=? now - plan.window recent.pop(0);
+    if recent.length >=? plan.limit return false
+    recent.push(now)
+    true
+}
+
+parse = (line:string):>Request? => {
+    let words = line.split()
+    if words.length <? 3 return none
+    let at = to_int(words[0])
+    if at is? exception or at <? 0 or at >? 86400000 return none
+    Request[at words[1] words[2..].join(" ")]
+}
+
+Client:type = [bucket:Bucket recent:array<int64>=[] denied:array<int length=2>=[0 0]]
+
+main = () => {
+    let clients:dict<string Client> = []
+    let bad = 0
+    printl"  time  client  path           bucket  window"
+    loop line in LOG.lines {
+        if line.is_empty continue
+        let r = parse(line)
+        if r is? none {
+            bad += 1
+            continue
+        }
+        let plan = PLANS.get(r.client) ?? DEFAULT
+        if r.client not in? clients clients[r.client] = Client[Bucket[plan.burst * 1000 r.at]]
+        let by_bucket = take(@clients[r.client].bucket plan r.at)
+        let by_window = admit(@clients[r.client].recent plan r.at)
+        if not by_bucket clients[r.client].denied[0] += 1
+        if not by_window clients[r.client].denied[1] += 1
+        let mark = (ok:bool) => if ok "ok" else "DENY"
+        printl"{r.at:>6}  {r.client:<6}  {r.path:<13}  {mark(by_bucket):<6}  {mark(by_window)}"
+    }
+    printl""
+    loop [client c] in clients printl"{client}: bucket denied {c.denied[0]}, window denied {c.denied[1]}"
+    if bad >? 0 printl"{bad} unreadable line(s)"
+}

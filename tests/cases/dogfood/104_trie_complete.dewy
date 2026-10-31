@@ -1,0 +1,96 @@
+# Autocomplete from a search log: build a trie of the queries (each node owns
+# its children, keyed by character), count how often each query was made,
+# then suggest the three most frequent completions of some prefixes and the
+# longest prefix every query shares.
+
+const SEARCHES = """
+weather today
+weather tomorrow
+weather today
+web fonts
+webcam test
+weather radar
+wedding venues
+web fonts
+weather today
+west coast trains
+web fonts
+wee hours
+"""
+
+Node:type = [children:dict<string Node>=[] count:int=0]
+
+# Add the rest of `word` after its first `skip` characters below `node`.
+insert = (@node:Node chars:array<string> skip:int64<(>=? 0)>):>void => {
+    if skip >=? chars.length {
+        node.count += 1
+        return
+    }
+    let ch = chars[skip]
+    if ch not in? node.children node.children[ch] = Node[]
+    insert(@node.children[ch] chars skip + 1)
+}
+
+# The node a prefix leads to, if any.
+walk = (root:Node prefix:string):>Node? => {
+    let at = root
+    loop ch in prefix {
+        let next = at.children.get(ch)
+        if next is? none return none
+        at = next
+    }
+    at
+}
+
+Hit:type = [word:string count:int]
+
+# Every complete word below a node, with its count.
+collect = (node:Node prefix:string @found:array<Hit>):>void => {
+    if node.count >? 0 found.push(Hit[prefix node.count])
+    loop [ch child] in node.children collect(child "{prefix}{ch}" @found)
+}
+
+suggest = (root:Node prefix:string):>array<string> => {
+    let start = walk(root prefix)
+    if start is? none return []
+    let words:array<Hit> = []
+    collect(start prefix @words)
+    words.sort(key=(w):>[int string] => [-w.count w.word])
+    [loop w in words[$clamp ..3) "{w.word} ({w.count})"]
+}
+
+# Follow single children from the root while no word ends there.
+shared_prefix = (root:Node):>string => {
+    let at = root
+    let text = ""
+    loop at.children.length =? 1 and at.count =? 0 {
+        let [[ch child]] = at.children
+        text = "{text}{ch}"
+        at = child
+    }
+    text
+}
+
+depth = (node:Node):>int => {
+    let deepest = 0
+    loop [_ child] in node.children deepest = max(deepest 1 + depth(child))
+    deepest
+}
+
+main = () => {
+    let root = Node[]
+    let total = 0
+    loop line in SEARCHES.lines {
+        if line.is_empty continue
+        insert(@root line.chars() 0)
+        total += 1
+    }
+    printl"{total} searches"
+    loop prefix in ["wea" "web" "we" "west" "x" ""] {
+        let shown = suggest(root prefix)
+        let label = if prefix.is_empty "(all)" else prefix
+        printl"{label:<6} -> {if shown.is_empty "nothing" else shown.join(", ")}"
+    }
+    printl"every search starts with '{shared_prefix(root)}'"
+    printl"longest search: {depth(root)} characters"
+}

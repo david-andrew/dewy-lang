@@ -1,0 +1,16 @@
+ignored run: mill well 3
+already joined:
+  mill + forge
+  inn + school
+cables to lay (5 runs, cost 24):
+  farm    - dairy     2
+  inn     - chapel    4
+  chapel  - farm      5
+  dairy   - smithy    6
+  forge   - inn       7
+single points of failure:
+  farm-dairy cuts off dairy, smithy
+  inn-chapel cuts off chapel, farm, dairy, smithy
+  chapel-farm cuts off farm, dairy, smithy
+  dairy-smithy cuts off smithy
+  forge-inn cuts off inn, school, chapel, farm, dairy, smithy

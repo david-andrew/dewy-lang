@@ -992,6 +992,30 @@ fact_endpoint = (n: int, s: mut FactState, base: int, kind: int) -> int:
             fact_difference(s, length, index, 1)
     fact_project(s, base, index, true, ntype(n))
 
+# The prelude's `xs.min_by(key)` and `xs.max_by(key)` return one of the
+# receiver's elements (its body reads xs[i] and returns one), so the result
+# is an element read at a position below the length: what holds of every
+# element (a hull, a bound below a value, a literal's inventory) holds of
+# it. Exact library identity; O(1).
+fact_name_min_by = 0
+fact_name_max_by = 0
+fact_chosen_call = (n: int) -> bool:
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) != 2: return false
+    d = int(fns[int(nodes[n].sym)].decl)
+    if d == 0: return false
+    if fact_name_min_by == 0: fact_name_min_by = intern("min_by"); fact_name_max_by = intern("max_by")
+    name = int(nodes[d].name)
+    if name != fact_name_min_by and name != fact_name_max_by: return false
+    if files[pos_file(nodes[d].pos)].path != lib_dir + "/prelude/arrays.dewy" or tkind(fact_type(ntype(kid(n, 0)))) != .array: return false
+    not (ownership_decls.len() != 0 and ownership_fact_type(ntype(n)))
+
+fact_chosen = (n: int, s: mut FactState, base: int) -> int:
+    length = fact_project(s, base, -1, false, T_INT)
+    b = fact_bound(s, length)
+    index = fact_new(s, FactBound(0, max(0, b.hi - 1)), FactTerm(type = T_INT))
+    fact_difference(s, index, length, -1)
+    fact_project(s, base, index, true, ntype(n))
+
 # Reviewed copies: sorted returns one element per input element; graphemes
 # uses the same cursor as Dewy's string length. Key provenance survives sorting.
 # Demand-driven O(1) recognition, exact library identity, immutable entry value.
@@ -1721,9 +1745,12 @@ fact_store_pattern = (s: mut FactState, target: int, value: int, at: int, depth:
     k = nodes[target].kind
     if k == .hole: return
     if k == .tuple and depth < 32:
+        # (an assignment's pattern has no type of its own: the stored value's)
+        t = ntype(target)
+        if t == 0 and value != 0: t = fact_terms[value].type
         loop i in [0..nkids(target)):
             c = kid(target, i)
-            if nodes[c].kind != .hole: fact_store_pattern(s, c, fact_component(s, value, ntype(target), i, ntype(c)), at, depth + 1)
+            if nodes[c].kind != .hole: fact_store_pattern(s, c, fact_component(s, value, t, i, ntype(c)), at, depth + 1)
         return
     route = fact_route(target, s)
     fact_store_route(s, route, value, at, true)
@@ -5511,8 +5538,14 @@ fact_map_position = (s: mut FactState, n: int, map: int, key: int) -> int:
 fact_map_entry = (s: mut FactState, n: int, map: int, key: int) -> int:
     position = fact_map_position(s, n, map, key)
     t = prune(fact_terms[map].type)
+    # (a value made without a type, a comprehension's dictionary: the receiver's)
+    if (t == 0 or types[t].kind != .struct_) and nkids(n) > 0: t = fact_type(ntype(kid(n, 0)))
     vt = if types[t].kind == .struct_ and int(structs[int(types[t].st)].nfields) > 1: int(fields[int(structs[int(types[t].st)].fields) + 1].type) else: T_INT
-    fact_project(s, fact_project(s, map, fact_name_vals, false, vt), position, true, ntype(n))
+    # (a refined value type's contract held when each entry was stored: the
+    # entry is read as the stored type, as an array element is)
+    et = ntype(n)
+    if tkind(vt) == .array and tkind(telem(vt)) == .refined and fact_type(representation_type(telem(vt))) == fact_type(et): et = telem(vt)
+    fact_project(s, fact_project(s, map, fact_name_vals, false, vt), position, true, et)
 
 # A dictionary's membership test, read or entry position for a builtin key
 # reads the dictionary alone (the transfer's own rule). O(1).
@@ -5706,6 +5739,7 @@ fact_map_of = (n: int, s: mut FactState) -> int:
     if fact_name_vals == 0: fact_name_vals = intern("vals")
     if positions != 0:
         fact_add_projection(s, FactProjection(result, FACT_MAP_POSITIONS, false, positions))
+        fact_literal_keys(s, int(nodes[loop_].a), result)
         return result
     fact_add_projection(s, FactProjection(source, FACT_KEYS_SOURCE, false, result))
     fact_add_projection(s, FactProjection(source, FACT_KEYS_POSITIONS, false, fact_project(s, result, FACT_MAP_POSITIONS, false, T_INT)))
@@ -5718,6 +5752,12 @@ fact_map_of = (n: int, s: mut FactState) -> int:
 fact_literal_keys = (s: mut FactState, e0: int, map: int):
     e = e0
     loop nodes[e].kind == .conv: e = int(nodes[e].a)
+    # (a module const's literal, `const NAMES = [...]`: the same elements)
+    if nodes[e].kind == .ident and nodes[e].aux == i32(int(SK.global)):
+        g = int(nodes[e].sym)
+        if not readonly_global(g) or globals[g].exposed or not fact_constant_global(g): return
+        e = int(nodes[int(globals[g].decl)].b)
+        loop nodes[e].kind == .conv: e = int(nodes[e].a)
     if nodes[e].kind != .array or nodes[e].aux != 0 or nodes[e].b != 0: return
     loop i in [0..nkids(e)):
         c = kid(e, i)
@@ -8178,7 +8218,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
             loop j in [0..nkids(n)): values.push(kid(n, j))
         # (a length-preserving call's length is its receiver's: `let ks = d.keys` then `ks.values`
         # needs ks's definition)
-        else if k == .call and (fact_copy_length_call(n) or fact_endpoint_call(n) != 0 or fact_same_length_call(n)): values.push(kid(n, 0))
+        else if k == .call and (fact_copy_length_call(n) or fact_endpoint_call(n) != 0 or fact_same_length_call(n) or fact_chosen_call(n)): values.push(kid(n, 0))
         else if k == .call and nodes[n].aux == 0 and not result_active and not proof_active and not fact_divisors.has(n) and not fact_rational_constructor(n) and not fact_rational_promotion(n) and not fact_rational_divmod(n) and fact_floor_call(n) == 0 and fact_string_call(n) == 0 and not fact_extremum_call(n) and not fact_empty_array_call(n) and not fact_entry_count_call(n) and not fact_split_call(n) and not fact_words_call(n) and not fact_lines_call(n) and not fact_search_call(n) and not fact_affix_call(n) and not fact_parallel_array(n) and not ref_refined_result(int(fns[int(nodes[n].sym)].ret)):
             # Ordinary summaries start from unknown formals: their return
             # facts do not depend on the actual values. Argument obligations
@@ -9443,6 +9483,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                 return fresh
         endpoint = fact_endpoint_call(n)
         if endpoint != 0: return fact_endpoint(n, s, values[0], endpoint)
+        if fact_chosen_call(n) and values.len() >= 1: return fact_chosen(n, s, values[0])
         if fact_affix_call(n):
             length = fact_project(s, values[0], -1, false, T_INT)
             pattern = fact_project(s, values[1], -1, false, T_INT)

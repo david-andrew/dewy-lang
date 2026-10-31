@@ -1,0 +1,6 @@
+# Near miss: a literal outside the component's contract.
+C:type = int64<x => 0 <=? x and x <? 8>
+main = () => {
+    let a:[C C] = [9 1]
+    printl"{a}"
+}

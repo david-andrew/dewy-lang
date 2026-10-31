@@ -1,0 +1,8 @@
+# Near miss: the const's value is the bound.
+const NAMES = ["a" "b" "c" "d"]
+const N = NAMES.length
+Slot:type = int64<i => 0 <=? i and i <? N>
+main = () => {
+    let s:Slot = 4
+    printl(s)
+}

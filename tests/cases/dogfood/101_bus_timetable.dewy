@@ -1,0 +1,107 @@
+# Merge the timetables of three bus routes into one departure board for the
+# interchange, then plan journeys: the earliest arrival at a stop, leaving no
+# earlier than a given time, with any number of changes (each needing at least
+# two minutes at the interchange).
+
+const ROUTES = """
+route 4: Mill Lane 07:05 | Interchange 07:20 | Harbour 07:41
+route 4: Mill Lane 07:35 | Interchange 07:50 | Harbour 08:11
+route 4: Mill Lane 08:05 | Interchange 08:20 | Harbour 08:41
+route 9: Station 07:10 | Interchange 07:22 | Hospital 07:30 | Park 07:44
+route 9: Station 07:40 | Interchange 07:52 | Hospital 08:00 | Park 08:14
+route 12: Harbour 07:15 | Interchange 07:36 | Station 07:47
+route 12: Harbour 07:55 | Interchange 08:16 | Station 08:27
+route 12: Harbour 08:35 | Interchange 08:56 | Station 9:07
+route 7: Park 07:00 | Nowhere
+"""
+
+const CHANGE = 2
+
+Stop:type = [place:string at:int64]
+Trip:type = [route:string stops:array<Stop length >=? 2>]
+
+# "07:41" -> minutes after midnight; none for anything else.
+minutes = (text:string):>int64? => {
+    let parts = text.split(":")
+    if parts.length not=? 2 or parts[0].length not=? 2 or parts[1].length not=? 2 return none
+    let h = to_int(parts[0]) ?? -1
+    let m = to_int(parts[1]) ?? -1
+    if h <? 0 or h >? 23 or m <? 0 or m >? 59 return none
+    h * 60 + m
+}
+
+clock = (t:int64):>string => "{t // 60:02}:{t % 60:02}"
+
+parse = (line:string):>Trip? => {
+    let parts = line.split(": " max=1)
+    if parts.length not=? 2 return none
+    let [head body] = parts
+    let stops:array<Stop> = []
+    loop part in body.split(" | ") {
+        let words = part.trim.split()
+        if words.length <? 2 return none
+        let at = minutes(words[end])
+        if at is? none return none
+        stops.push(Stop[words[..end).join(" ") at])
+    }
+    if stops.length <? 2 return none
+    Trip[head stops]
+}
+
+# Earliest arrival everywhere from `origin` leaving at `start`: relax trips in
+# departure order until nothing improves (a handful of passes at most).
+plan = (trips:array<Trip> origin:string start:int64):>dict<string [int64 string]> => {
+    let best:dict<string [int64 string]> = [origin -> [start "start"]]
+    let changed = true
+    loop changed {
+        changed = false
+        loop trip in trips {
+            let boarded = false
+            loop stop in trip.stops {
+                if boarded {
+                    let known = best.get(stop.place)
+                    if known is? none or stop.at <? known[0] {
+                        best[stop.place] = [stop.at trip.route]
+                        changed = true
+                    }
+                } else {
+                    let here = best.get(stop.place)
+                    let margin = if stop.place =? origin 0 else CHANGE
+                    if here isnt? none and here[0] + margin <=? stop.at boarded = true
+                }
+            }
+        }
+    }
+    best
+}
+
+main = () => {
+    let trips:array<Trip> = []
+    loop line in ROUTES.lines {
+        if line.trim.is_empty continue
+        let trip = parse(line)
+        if trip is? none {
+            printl"skipped: {line}"
+            continue
+        }
+        trips.push(trip)
+    }
+
+    printl"Interchange departures"
+    let board = [loop trip in trips {
+        loop stop in trip.stops and next in trip.stops[1..] {
+            if stop.place =? "Interchange" [at=stop.at route=trip.route toward=next.place]
+        }
+    }]
+    board.sort(key=(row) => row.at)
+    loop [at route toward] in board printl"  {clock(at)}  {route:<9} toward {toward}"
+
+    let queries = [["Mill Lane" "07:00" "Station"] ["Station" "07:30" "Harbour"] ["Harbour" "08:00" "Park"] ["Park" "07:00" "Harbour"]]
+    loop [source leave dest] in queries {
+        let start = minutes(leave) ?? 0
+        let best = plan(trips source start)
+        let arrival = best.get(dest)
+        if arrival is? none printl"{source} {leave} -> {dest}: no journey"
+        else printl"{source} {leave} -> {dest}: arrive {clock(arrival[0])} on {arrival[1]}"
+    }
+}

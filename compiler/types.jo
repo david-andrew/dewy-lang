@@ -305,10 +305,30 @@ ts_dewy = false
 tsd = (jo: str, dewy: str) -> str: if ts_dewy: dewy else: jo
 dt = (t: int) -> str: type_str(t, ts_dewy)
 # (a type mismatch's side: a Dewy union by the alias the program names it with)
+# (and a refined type by its alias, `C:type = int64<...>`, inside a tuple or array too)
+refined_alias_names: {int: int} = {}
 dt_named = (t: int) -> str:
     alias = if ts_dewy: uu_alias_name(t) else: 0
     if alias != 0: return name_of(alias)
+    if not ts_dewy: return dt(t)
+    p = prune(t)
+    if types[p].kind == .refined and (refined_alias_names.get(p) ?? 0) != 0: return name_of(refined_alias_names[p])
+    if types[p].kind == .tuple and dt_named_inner(p):
+        parts: str[]
+        loop i in [0..int(types[p].nargs)): parts.push(dt_named(targ(p, i)))
+        return "[{join(parts, " ")}]"
+    if types[p].kind == .array and dt_named_inner(p): return "array<{dt_named(int(types[p].elem))}>"
     dt(t)
+# (a tuple's or array's parts include a named union or refinement)
+dt_named_inner = (p: int) -> bool:
+    parts: int[]
+    if types[p].kind == .tuple:
+        loop i in [0..int(types[p].nargs)): parts.push(prune(targ(p, i)))
+    else: parts.push(prune(int(types[p].elem)))
+    loop c in parts:
+        if uu_alias_name(c) != 0 or (refined_alias_names.get(c) ?? 0) != 0: return true
+        if (types[c].kind == .tuple or types[c].kind == .array) and dt_named_inner(c): return true
+    false
 # (the names of the type parameters of the declaration whose types are being shown: a
 # parameter that has none shows as T, U, ... by its place)
 ts_params: int[]
@@ -347,7 +367,15 @@ mk_union = (ms: int[]) -> int: uu_mk_union(ms)
 # (a Dewy union the program names with one non-generic alias, `Value:type=int64|string`:
 # diagnostics show the alias; 0 when two aliases name it)
 
-union_alias_note = (t0: int, name: int): uu_alias_note(t0, name)
+union_alias_note = (t0: int, name: int):
+    uu_alias_note(t0, name)
+    t = prune(t0)
+    if types[t].kind != .refined or types[t].bits == -1: return
+    # (a second spelling makes it ambiguous: 0, shown expanded)
+    if let seen = refined_alias_names.get(t):
+        if seen != name: refined_alias_names[t] = 0
+        return
+    refined_alias_names[t] = name
 
 union_inst = (ms: int[]) -> int: uu_union_inst(ms)
 

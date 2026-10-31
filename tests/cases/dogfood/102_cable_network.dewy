@@ -1,0 +1,104 @@
+# Plan a village's fibre network with a disjoint-set forest: read candidate
+# cable runs with their costs, report which houses are already joined by
+# existing ducts, then pick the cheapest runs that connect everything
+# (Kruskal), and list what a single broken run would cut off.
+
+const HOUSES = ["mill" "forge" "inn" "school" "chapel" "farm" "dairy" "smithy"]
+
+const DUCTS = [["mill" "forge"] ["inn" "school"]]
+
+const RUNS = """
+mill forge 4
+forge inn 7
+inn school 3
+school chapel 9
+chapel farm 5
+farm dairy 2
+dairy smithy 6
+smithy mill 8
+inn chapel 4
+forge dairy 11
+school farm 7
+mill well 3
+"""
+
+const N = HOUSES.length
+House:type = int64<h => 0 <=? h and h <? N>
+Forest:type = [parent:array<House length=N> size:array<int length=N>]
+
+forest = ():>Forest => Forest[[loop i in [0..N) i] fill(1 N)]
+
+# The representative of x's set, halving the path on the way up.
+find = (@f:Forest x:House):>House => {
+    let at = x
+    loop f.parent[at] not=? at {
+        f.parent[at] = f.parent[f.parent[at]]
+        at = f.parent[at]
+    }
+    at
+}
+
+# Join the sets of a and b, the smaller under the larger; false if already one.
+union = (@f:Forest a:House b:House):>bool => {
+    let ra = find(@f a)
+    let rb = find(@f b)
+    if ra =? rb return false
+    if f.size[ra] <? f.size[rb] [ra rb] = [rb ra]
+    f.parent[rb] = ra
+    f.size[ra] += f.size[rb]
+    true
+}
+
+Run:type = [a:House b:House cost:int]
+
+main = () => {
+    let index:dict<string House> = [loop i in 0.. and name in HOUSES name -> i]
+    let runs:array<Run> = []
+    loop line in RUNS.lines {
+        let words = line.split()
+        if words.length not=? 3 continue
+        let a = index.get(words[0])
+        let b = index.get(words[1])
+        let cost = to_int(words[2])
+        if a is? none or b is? none or cost is? exception {
+            printl"ignored run: {line}"
+            continue
+        }
+        runs.push(Run[a b cost])
+    }
+
+    let ducts = forest()
+    loop [x y] in DUCTS {
+        let a = index.get(x)
+        let b = index.get(y)
+        if a isnt? none and b isnt? none union(@ducts a b);
+    }
+    let groups:dict<int64 array<string>> = []
+    loop i in 0.. and name in HOUSES {
+        let root = find(@ducts i)
+        if root not in? groups groups[root] = []
+        groups[root].push(name)
+    }
+    printl"already joined:"
+    loop [_ members] in groups if members.length >? 1 printl"  {members.join(" + ")}"
+
+    # Existing ducts are free: start from them and add the cheapest runs.
+    let net = ducts
+    let chosen:array<Run> = []
+    loop run in runs.sorted(key=(r) => r.cost) {
+        if union(@net run.a run.b) chosen.push(run)
+    }
+    let total = sum([loop r in chosen r.cost])
+    printl"cables to lay ({chosen.length} runs, cost {total}):"
+    loop r in chosen printl"  {HOUSES[r.a]:<7} - {HOUSES[r.b]:<7} {r.cost:>3}"
+
+    # Without one chosen run, which houses lose the mill?
+    printl"single points of failure:"
+    loop skip in chosen {
+        let f = ducts
+        loop r in chosen if r not=? skip union(@f r.a r.b);
+        let mill = find(@f index["mill"])
+        let lost = [loop i in 0.. and name in HOUSES if find(@f i) not=? mill name]
+        if not lost.is_empty printl"  {HOUSES[skip.a]}-{HOUSES[skip.b]} cuts off {lost.join(", ")}"
+    }
+}

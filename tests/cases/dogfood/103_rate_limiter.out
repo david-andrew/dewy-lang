@@ -1,0 +1,23 @@
+  time  client  path           bucket  window
+     0  alice   GET /items     ok      ok
+   120  alice   GET /items     ok      ok
+   150  bob     POST /orders   ok      ok
+   200  alice   GET /items/7   ok      ok
+   210  alice   GET /items/8   DENY    ok
+   260  alice   GET /items/9   DENY    DENY
+   900  bob     POST /orders   ok      ok
+   950  bob     POST /orders   DENY    ok
+   980  bob     POST /orders   DENY    DENY
+  1000  bob     POST /orders   DENY    DENY
+  1010  carol   GET /health    ok      ok
+  1500  alice   GET /items     ok      ok
+  2100  alice   GET /items     ok      ok
+  2150  alice   GET /items     ok      ok
+  2160  alice   GET /items     ok      ok
+  2170  alice   GET /items     DENY    DENY
+  2400  bob     GET /orders/1  ok      ok
+
+alice: bucket denied 3, window denied 2
+bob: bucket denied 3, window denied 2
+carol: bucket denied 0, window denied 0
+1 unreadable line(s)

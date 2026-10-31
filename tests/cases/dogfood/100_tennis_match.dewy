@@ -1,0 +1,109 @@
+# Score tennis matches point by point: deuce and advantage within a game,
+# a tiebreak at six games all, best of three sets. Each match is a string of
+# point winners ('a' or 'b'); the report shows the running score at each set
+# and the final result.
+
+Side:type = 'a' | 'b'
+
+Pair:type = array<int64 length=2>
+Match:type = [
+    names:[string string]
+    points:Pair=[0 0]
+    games:Pair=[0 0]
+    sets:array<Pair>=[]
+    won:Pair=[0 0]
+    tiebreak:bool=false
+    winner:Side?=none
+]
+
+const CALLS = ["0" "15" "30" "40"]
+
+other = (s:Side):>Side => if s =? 'a' 'b' else 'a'
+slot = (s:Side):>int64 => if s =? 'a' 0 else 1
+
+# The score of the current game, as an umpire calls it.
+call = (m:Match):>string => {
+    let [p q] = m.points
+    if m.tiebreak return "{p}-{q}"
+    if p >=? 3 and q >=? 3 {
+        if p =? q return "deuce"
+        let ahead = if p >? q m.names[0] else m.names[1]
+        return "advantage {ahead}"
+    }
+    if 0 <=? p <=? 3 and 0 <=? q <=? 3 return "{CALLS[p]}-{CALLS[q]}"
+    "{p}-{q}"
+}
+
+finish_set = (@m:Match s:Side):>void => {
+    m.sets.push(m.games)
+    m.won[slot(s)] += 1
+    m.games = [0 0]
+    m.tiebreak = false
+    if m.won[slot(s)] =? 2 m.winner = s
+}
+
+win_game = (@m:Match s:Side):>void => {
+    m.points = [0 0]
+    m.games[slot(s)] += 1
+    let mine = m.games[slot(s)]
+    let theirs = m.games[slot(other(s))]
+    if mine =? 7 or mine =? 6 and theirs <=? 4 {
+        finish_set(@m s)
+    } else if mine =? 6 and theirs =? 6 {
+        m.tiebreak = true
+    }
+}
+
+point = (@m:Match s:Side):>void => {
+    if m.winner isnt? none return
+    m.points[slot(s)] += 1
+    let mine = m.points[slot(s)]
+    let theirs = m.points[slot(other(s))]
+    let needed = if m.tiebreak 7 else 4
+    if mine >=? needed and mine - theirs >=? 2 win_game(@m s)
+}
+
+play = (names:[string string] rally:string):>void => {
+    let m = Match[names]
+    let set_count = 0
+    let bad = 0
+    loop ch in rally {
+        let side:Side? = match ch {
+            <"a"> => 'a'
+            <"b"> => 'b'
+            _ => none
+        }
+        if side is? none {
+            bad += 1
+            continue
+        }
+        point(@m side)
+        if m.sets.length >? set_count {
+            set_count = m.sets.length
+            let [ga gb] = m.sets[end]
+            printl"  set {set_count}: {ga}-{gb}"
+        }
+    }
+    let sets = if m.sets.is_empty "none" else [loop [ga gb] in m.sets "{ga}-{gb}"].join(" ")
+    if m.winner is? none {
+        printl"  unfinished: sets {sets}, games {m.games[0]}-{m.games[1]}, {call(m)}"
+    } else {
+        printl"  {m.names[slot(m.winner)]} wins {sets}"
+    }
+    if bad >? 0 printl"  ({bad} unreadable points skipped)"
+}
+
+# A game won to love is "aaaa"; repeat helpers keep the scripts short.
+games = (side:string n:int64):>string => (side * 4) * n
+
+main = () => {
+    printl"Ana vs Bo"
+    play(["Ana" "Bo"] "{games("a" 6)}{games("b" 3)}{games("a" 6)}")
+    printl"Cy vs Di"
+    let tb = "{games("a" 5)}{games("b" 5)}{games("a" 1)}{games("b" 1)}abababbbbb"
+    let second = "{games("b" 4)}{games("a" 6)}"
+    let third = "{games("a" 5)}{games("b" 5)}{games("a" 2)}"
+    play(["Cy" "Di"] "{tb}{second}{third}aaaa")
+    printl"Ed vs Flo"
+    play(["Ed" "Flo"] "{games("a" 2)}aaabbbabxbab")
+}

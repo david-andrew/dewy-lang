@@ -2381,6 +2381,11 @@ sink_hold = (i: int, s: int, pack: bool):
             if elem == 0: elem = if is_lit(p): lit_default(p) else: t
             else if not is_lit(p) and not can_coerce(p, t, elem):
                 sink_main_value(i, nodes[p].pos)
+                # (`key=(w) => (-w.count w.word)`: Python's tuple, which is one value of several parts)
+                if parts.len() > 1 and dewy_at(nodes[p].pos):
+                    shown: str[]
+                    loop q in parts: shown.push(dt(if is_lit(q): lit_default(q) else: ntype(q)))
+                    err_notes.push((-1, "help: for one value of several parts (a sort key, say), give a tuple and its type: `(x):>[{join(shown, " ")}] => [...]`"))
                 fatal(nodes[p].pos, "this expresses {a_type(t)}, and the values expressed before it are {dt(elem)}: the values one block expresses have one type; attach `;` to discard this one, as in `f();`, or convert it")
             p = coerce(p, elem)
             t = elem

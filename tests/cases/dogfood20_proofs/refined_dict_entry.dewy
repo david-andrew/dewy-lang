@@ -1,0 +1,14 @@
+# A dictionary's refined values keep their contract when read back.
+House:type = int64<h => 0 <=? h and h <? 8>
+const T = [1 2 3 4 5 6 7 8]
+const NAMES = ["a" "b" "c"]
+f = (d:dict<string House>):>void => {
+    if "a" in? d printl(T[d["a"]])
+    let g = d.get("b")
+    if g isnt? none printl(T[g])
+}
+main = () => {
+    f(["a" -> 3 "b" -> 1])
+    let d:dict<string House> = [loop i in 0.. and name in NAMES name -> i]
+    printl(T[d["c"]])
+}

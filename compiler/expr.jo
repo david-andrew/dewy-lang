@@ -976,6 +976,14 @@ fixed_literal = (n: int, to: int):
             nodes[int(nodes[n].b)].type = i32(T_INT)
     if nodes[n].b != 0:
         c = int(nodes[n].b)
+        # (a module const's count, `fill(1 N)` with `const N = NAMES.length`: its value)
+        root = c
+        loop nodes[root].kind == .conv: root = int(nodes[root].a)
+        if nodes[root].kind == .ident and dewy_at(nodes[n].pos) and (nodes[root].aux == i32(int(SK.global)) and readonly_global(int(nodes[root].sym)) or nodes[root].aux == i32(int(SK.const_))):
+            if ceval(root).i == fixed_len(to):
+                nodes[n].b = i32(bc_int(fixed_len(to), nodes[n].pos))
+                c = int(nodes[n].b)
+                nodes[c].type = i32(T_INT)
         if nodes[c].kind != .int_lit or nodes[c].ival != fixed_len(to): fatal(nodes[n].pos, "a fixed-size array of {fixed_len(to)} elements needs the count {fixed_len(to)} here")
         coerce(kid(n, 0), et)
     else:
@@ -4223,6 +4231,13 @@ dewy_position_index = (n: int, bt: int, expected: int) -> int:
         nodes[n].b = 0
         set_list(n, [])
         return check_expr(n, expected)
+    # (`t[i] += 1`: a runtime index reads a copy of the positions, which nothing writes back)
+    if cur_assign != 0 and nodes[cur_assign].a == i32(n):
+        same = true
+        loop i in [1..count):
+            if not type_eq(targ(bt, i), targ(bt, 0)): same = false
+        fix = if same: ", or declare it `array<{dt(targ(bt, 0))} length={count}>`, whose elements take any index" else: ""
+        fatal(pos, "a position of this {dt_named(bt)} is changed through a constant index (`t[0] = ...`){fix}")
     members: int[]
     loop i in [0..count): members.push(targ(bt, i))
     source = "$positions{n}"
@@ -9589,6 +9604,16 @@ check_call_expr = (n: int, expected: int) -> int:
         callee = int(nodes[n].a)
         if nodes[callee].kind == .ident and name_of(int(nodes[callee].name)) == "__shape_value":
             check_expr(kid(n, 0), ex)
+            set_kid(n, 0, last_checked)
+    # (`let d:dict<string House> = [loop ... k -> v]`: its pairs are made as the
+    # dictionary's key and value types, so a refined value takes its conversion)
+    if ex != 0 and is_map_type(ex) and nkids(n) == 1 and dewy_at(nodes[n].pos):
+        callee = int(nodes[n].a)
+        block = kid(n, 0)
+        if nodes[callee].kind == .ident and name_of(int(nodes[callee].name)) == "__map_of" and nodes[block].kind == .block and has_flag(block, NF_COMPREHENSION) and nkids(block) > 0 and nodes[kid(block, 0)].kind == .vardecl and nodes[kid(block, 0)].a == 0:
+            si = int(types[ex].st)
+            pair = mk_tuple([struct_targ(si, 0), struct_targ(si, 1)])
+            check_expr(block, mk_array(pair))
             set_kid(n, 0, last_checked)
     if is_unchecked_at(n):
         # __at(xs, i) in the core library: xs[i] where the library knows i is in bounds

@@ -1,0 +1,107 @@
+# Solve small linear systems exactly with fractions: Gauss-Jordan elimination
+# with row swaps, reporting a unique solution, no solution, or a family of
+# solutions with free variables. Each system is written as rows of
+# coefficients followed by the right-hand side.
+
+const SYSTEMS = [
+    ["blend" "2 1 -1 = 8 ; -3 -1 2 = -11 ; -2 1 2 = -3"]
+    ["fractions" "1/2 1/3 = 1 ; 1/4 -1/6 = 0"]
+    ["inconsistent" "1 1 = 2 ; 2 2 = 5"]
+    ["family" "1 2 -1 = 3 ; 2 4 -2 = 6 ; 0 1 1 = 1"]
+    ["bad" "1 x = 2"]
+]
+
+Row:type = array<rational>
+
+# "1 2 = 3 ; 4 5 = 6" -> [[1 2 3] [4 5 6]]; none for unreadable text or ragged rows.
+parse = (text:string):>array<Row>? => {
+    let rows:array<Row> = []
+    loop part in text.split(";") {
+        let sides = part.split("=")
+        if sides.length not=? 2 return none
+        let row:Row = []
+        loop word in [sides[0].split()... sides[1].trim] {
+            let q = rational(word)
+            if q is? none return none
+            row.push(q)
+        }
+        if not rows.is_empty and row.length not=? rows[0].length return none
+        rows.push(row)
+    }
+    rows
+}
+
+show = (q:rational):>string => "{q}"
+
+Reduced:type = [rows:array<Row> pivots:array<int64>]
+
+# Reduced row echelon form, with the pivot column of each pivot row.
+eliminate = (rows:array<Row>):>Reduced => {
+    let m = rows
+    let pivots:array<int64> = []
+    if m.is_empty return Reduced[m pivots]
+    let width = m[0].length - 1
+    let r = 0
+    loop c in [0..width) {
+        if r >=? m.length break
+        # The first row at or below r with a nonzero entry in column c.
+        let found = -1
+        loop i in [r..m.length) if (m[i].get(c) ?? 0) not=? 0 {
+            found = i
+            break
+        }
+        if found <? 0 continue
+        m.swap(r found)
+        let p = m[r].get(c) ?? 0
+        if p =? 0 continue
+        m[r] = [loop x in m[r] x / p]
+        loop i in [0..m.length) {
+            if i =? r continue
+            let f = m[i].get(c) ?? 0
+            if f =? 0 continue
+            m[i] = [loop x in m[i] and y in m[r] x - f * y]
+        }
+        pivots.push(c)
+        r += 1
+    }
+    Reduced[m pivots]
+}
+
+var_name = (j:int64):>string => "x{j + 1}"
+
+solve = (name:string text:string):>void => {
+    let parsed = parse(text)
+    if parsed is? none {
+        printl"{name}: cannot read '{text}'"
+        return
+    }
+    let [rows as m pivots] = eliminate(parsed)
+    let width = if m.is_empty 0 else m[0].length - 1
+    # Each pivot row gives its variable as the right-hand side minus the free terms.
+    let free = [loop j in [0..width) if j not in? pivots j]
+    let parts:array<string> = []
+    loop row in m {
+        if row.is_empty continue
+        let lead = pivots.get(parts.length)
+        let rhs = row[end]
+        if lead is? none {
+            # A zero row with a nonzero right-hand side has no solution.
+            if rhs not=? 0 {
+                printl"{name}: no solution"
+                return
+            }
+            continue
+        }
+        let terms = [loop j in free {
+            let k = -(row.get(j) ?? 0)
+            if k <? 0 "- {show(-k)}*{var_name(j)}" else if k >? 0 "+ {show(k)}*{var_name(j)}"
+        }]
+        parts.push([var_name(lead) "=" show(rhs) terms...].join(" "))
+    }
+    if free.is_empty printl"{name}: {parts.join(", ")}"
+    else printl"{name}: {parts.join(", ")} (free: {[loop j in free var_name(j)].join(", ")})"
+}
+
+main = () => {
+    loop [name text] in SYSTEMS solve(name text)
+}
