@@ -1,0 +1,276 @@
+$runtime_checks
+from p"node_store.dewy" import (NK Node)
+from p"source_types.dewy" import SrcFile
+from p"checker_types.dewy" import (TypeInfo StructInfo Field)
+from p"checker_state.dewy" import (Local Global FnInst)
+from p"ownership_types.dewy" import (ownership_type ownership_contains ownership_copyable ownership_layout ownership_fact_type ownership_callable_cap ownership_decl_copyable ow_kind ow_prune ow_elem ow_is_map)
+# Ownership diagnostics after checking: the owning-parameter ABI, the program
+# validation walk and closure capabilities. Runs only when a lifecycle hook is
+# declared. The walk reads checked nodes directly, O(nodes + locals + globals)
+# plus the type queries' visited components; its host calls are the failure
+# diagnostic, the copy-escape analysis per library parameter candidate and
+# callable-type construction per owner-capturing closure.
+CWord:type=int64<overflow='wrap'>
+const LF_MUTPARAM=2
+const LF_CAPTURE=4
+const LF_ALIAS=8
+const LF_BYREF=32
+const LF_SHARED=1024
+const LF_VALUECAP=262144
+const LF_OWNERBORROW=8388608
+const NF_GLOBAL=2048
+OwnershipCheckHost:type=[
+    error:<(pos:int64 message:string):>void>
+    escapes:<(body:int64 local:int64):>bool>
+    contract:<(t:int64):>int64>
+    callable:<(t:int64 contract:int64 capability:int64):>int64>
+]
+OwnershipCheckInput:type=[
+    nodes:ptr<array<Node>>
+    lists:ptr<array<int32>>
+    types:ptr<array<TypeInfo>>
+    structs:ptr<array<StructInfo>>
+    fields:ptr<array<Field>>
+    locals:ptr<array<Local>>
+    globals:ptr<array<Global>>
+    fns:ptr<array<FnInst>>
+    files:ptr<array<SrcFile>>
+    names:ptr<array<string>>
+    decls:ptr<dict<int64 int64>>
+    hooks:ptr<dict<int64 int64>>
+    functions:ptr<dict<int64 bool>>
+    inputs:ptr<dict<int64 bool>>
+    bindings:ptr<dict<int64 bool>>
+    # Checker enumeration ordinals: IN.arrdata, IN.resize, IN.setlen,
+    # CV.explicit_copy and SK.local.
+    in_arrdata:int64
+    in_resize:int64
+    in_setlen:int64
+    cv_copy:int64
+    sk_local:int64
+    host:ptr<OwnershipCheckHost>
+]
+let oc:ptr<OwnershipCheckInput>=$unsafe (uint64(0) as ptr<OwnershipCheckInput>)
+let oc_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let oc_lists:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
+let oc_locals:ptr<array<Local>>=$unsafe (uint64(0) as ptr<array<Local>>)
+let oc_fns:ptr<array<FnInst>>=$unsafe (uint64(0) as ptr<array<FnInst>>)
+ownership_checks_bind=(input:ptr<OwnershipCheckInput>):>CWord=>$unsafe {
+    oc=input
+    oc_nodes=input[0].nodes
+    oc_lists=input[0].lists
+    oc_locals=input[0].locals
+    oc_fns=input[0].fns
+    0
+}
+oc_kid=(n:CWord i:CWord):>CWord=>$unsafe {CWord(oc_lists[0].ptr[CWord(oc_nodes[0].ptr[n].list) + i])}
+oc_nkids=(n:CWord):>CWord=>$unsafe {CWord(oc_nodes[0].ptr[n].nlist)}
+oc_ntype=(n:CWord):>CWord=>$unsafe {CWord(oc_nodes[0].ptr[n].type)}
+oc_fail=(n:CWord message:string):>void=>$unsafe {oc[0].host[0].error(oc_nodes[0].ptr[n].pos message)}
+oc_local_fail=(l:CWord message:string):>void=>$unsafe {oc[0].host[0].error(oc_locals[0].ptr[l].pos message)}
+# Runtime children by kind (isolation.jo's isolation_children): 1 a, 2 b, 4 c,
+# 16 the list; -1 a declaration or type, never walked. A closure is a blocker.
+oc_children=(k:NK):>CWord=>match k {
+    <'int_lit' | 'float_lit' | 'bool_lit' | 'none_lit' | 'null_lit' | 'ident' | 'dotname' | 'hole' | 'break_' | 'continue_' | 'pwild'> => 0
+    <'str_lit' | 'block' | 'tuple' | 'map_lit' | 'matrix'> => 16
+    <'field' | 'unary' | 'not_' | 'unwrap' | 'narrow' | 'cast' | 'conv' | 'addr' | 'exprstmt' | 'return_' | 'defer_' | 'istype' | 'plit'> => 1
+    <'binary' | 'and_' | 'or_' | 'coalesce' | 'assign' | 'while_' | 'for_' | 'prange'> => 3
+    <'if_' | 'iflet' | 'range'> => 7
+    <'vardecl'> => 2
+    <'array'> => 18
+    <'call' | 'partial' | 'intrinsic' | 'match_'> => 17
+    <'index' | 'pair'> => 19
+    <'arm'> => 23
+    <'pvariant'> => 16
+    <'fnref'> => 1
+    <'lambda'> => 0
+    _ => -1
+}
+# Owners passed to Dewy's synthetic parameter bindings, and library parameters
+# that publish an owner, use the consuming ABI (copies.jo's copy_inputs).
+ownership_parameters=():>void=>$unsafe {
+    if oc[0].decls[0].length =? 0 {return}
+    ownership_library_parameters()
+    loop f in [1..oc_fns[0].length) {
+        let body=CWord(oc_fns[0].ptr[f].body)
+        let nlocals=oc_fns[0].ptr[f].locals.length
+        loop i in [0..nlocals) {
+            if ownership_type(CWord(oc_locals[0].ptr[oc_fns[0].ptr[f].locals[i]].type)) {oc[0].functions[0][f] = true}
+        }
+        if body =? 0 {continue}
+        loop i in [0..oc_nkids(body)) {
+            let s=oc_kid(body i)
+            if oc_nodes[0].ptr[s].kind not=? 'vardecl' or oc_nodes[0].ptr[s].aux2 not=? 1 {break}
+            if oc_nkids(s) >? 0 {continue}
+            let l=CWord(oc_nodes[0].ptr[s].sym)
+            if not ownership_type(CWord(oc_locals[0].ptr[l].type)) {continue}
+            let source=CWord(oc_nodes[0].ptr[s].b)
+            if oc_nodes[0].ptr[source].kind not=? 'ident' {continue}
+            let p=CWord(oc_nodes[0].ptr[source].sym)
+            if CWord(oc_locals[0].ptr[p].flags) & LF_MUTPARAM not=? 0 {continue}
+            if oc_fns[0].ptr[f].cabi or oc_fns[0].ptr[f].has_env or (oc_fns[0].ptr[f].export_name as array<uint8>).length not=? 0 {
+                oc_fail(s "owning parameters require a closed direct call")
+            }
+            oc[0].inputs[0][p] = true
+            oc[0].bindings[0][l] = true
+        }
+    }
+}
+# Implementation-library parameters which publish an owner use the same
+# consuming ABI as Dewy's private parameter bindings. Propagate through calls.
+ownership_library_parameters=():>void=>$unsafe {
+    let changed=true
+    loop changed {
+        changed=false
+        loop f in [1..oc_fns[0].length) {
+            let body=CWord(oc_fns[0].ptr[f].body)
+            let decl=CWord(oc_fns[0].ptr[f].decl)
+            if body =? 0 or decl =? 0 or oc[0].files[0].ptr[oc_nodes[0].ptr[decl].pos >> 40].is_dewy {continue}
+            let nparams=oc_fns[0].ptr[f].params.length
+            loop i in [0..nparams) {
+                let p=oc_fns[0].ptr[f].params[i]
+                if p in? oc[0].inputs[0] or CWord(oc_locals[0].ptr[p].flags) & LF_MUTPARAM not=? 0 or not ownership_type(CWord(oc_locals[0].ptr[p].type)) {continue}
+                if oc[0].host[0].escapes(body p) {
+                    oc[0].inputs[0][p] = true
+                    changed=true
+                }
+            }
+        }
+    }
+}
+# An owner beside a defer, other than the hidden guard of a place a method lent
+# (`let a = @(m.lock())`: compiler/place_methods.jo), which is never moved but
+# into its release at the place's last use, and otherwise dropped with its block
+# after the block's defers, as every scope exit already orders them.
+ownership_defer_conflict=(f:CWord):>bool=>$unsafe {
+    let nlocals=oc_fns[0].ptr[f].locals.length
+    loop i in [0..nlocals) {
+        let l=oc_fns[0].ptr[f].locals[i]
+        if ownership_type(CWord(oc_locals[0].ptr[l].type)) and not oc_guard(oc[0].names[0].ptr[CWord(oc_locals[0].ptr[l].name)]) {return true}
+    }
+    false
+}
+oc_guard=(name:string):>bool=>$unsafe {
+    let bytes=name as array<uint8>
+    let prefix="$guard" as array<uint8>
+    if bytes.length <? prefix.length {return false}
+    loop i in [0..prefix.length) {
+        if bytes[i] not=? prefix[i] {return false}
+    }
+    true
+}
+ownership_validate_node=(n:CWord f:CWord):>void=>$unsafe {
+    if n =? 0 {return}
+    let t=oc_ntype(n)
+    if t >? 0 and ownership_contains(t) and not ownership_type(t) {oc_fail(n "resource containers require aggregate ownership support")}
+    if ownership_type(t) and not ownership_layout(t) {oc_fail(n "resource fields currently require an inline record layout")}
+    let k=oc_nodes[0].ptr[n].kind
+    if k =? 'partial' {
+        let a=CWord(oc_nodes[0].ptr[n].a)
+        if a not=? 0 and ownership_type(oc_ntype(a)) {oc_fail(n "partial application of owners requires a consuming callback plan; use a function literal")}
+        loop i in [0..oc_nkids(n)) {
+            if ownership_type(oc_ntype(oc_kid(n i))) {oc_fail(n "partial application of owners requires a consuming callback plan; use a function literal")}
+        }
+    }
+    if k =? 'array' and ow_kind(t) =? 'fixed' and ownership_type(t) {
+        let count=CWord(oc[0].types[0].ptr[ow_prune(t)].bits)
+        if oc_nkids(n) =? 0 and count >? 0 {oc_fail(n "owning array elements require completed construction")}
+        if oc_nodes[0].ptr[n].b not=? 0 and count >? 1 and not ownership_copyable(ow_elem(t)) {oc_fail(n "cannot repeat a move-only owner")}
+    }
+    if k =? 'intrinsic' and oc_nkids(n) >? 0 and ownership_type(oc_ntype(oc_kid(n 0))) {
+        let id=CWord(oc_nodes[0].ptr[n].aux)
+        if id =? oc[0].in_arrdata {oc_fail(n "raw resource array access requires a live-slot protocol")}
+        if id =? oc[0].in_resize or id =? oc[0].in_setlen {oc_fail(n "owning array elements require completed construction; use push")}
+    }
+    if (k =? 'call' and oc_nodes[0].ptr[n].aux =? 0) or k =? 'fnref' {
+        let g=CWord(oc_nodes[0].ptr[n].sym)
+        if g >? 0 and CWord(oc_fns[0].ptr[g].decl) in? oc[0].hooks[0] {oc_fail(n "lifecycle hooks are compiler-only operations")}
+        if k =? 'fnref' and g >? 0 and g in? oc[0].functions[0] {oc_fail(n "owners require direct calls; callable ownership is not supported yet")}
+    }
+    if k =? 'call' and oc_nodes[0].ptr[n].aux =? 2 and ownership_type(t) {
+        let si=CWord(oc[0].types[0].ptr[ow_prune(t)].st)
+        loop i in [0..CWord(oc[0].structs[0].ptr[si].nfields)) {
+            let ft=CWord(oc[0].fields[0].ptr[CWord(oc[0].structs[0].ptr[si].fields) + i].type)
+            if ownership_type(ft) and ow_kind(ft) not=? 'opt' and (i >=? oc_nkids(n) or oc_kid(n i) =? 0) {oc_fail(n "an owning field requires completed construction")}
+        }
+    }
+    if k =? 'vardecl' and CWord(oc_nodes[0].ptr[n].flags) & NF_GLOBAL =? 0 and oc_nkids(n) =? 0 and oc_nodes[0].ptr[n].sym >? 0 {
+        let lt=CWord(oc_locals[0].ptr[CWord(oc_nodes[0].ptr[n].sym)].type)
+        if ownership_type(lt) and oc_nodes[0].ptr[n].b =? 0 and ow_kind(lt) not=? 'array' and ow_kind(lt) not=? 'opt' and not ow_is_map(lt) {
+            oc_fail(n "an owner requires completed construction before registration")
+        }
+    }
+    if k =? 'assign' and ownership_type(oc_ntype(CWord(oc_nodes[0].ptr[n].a))) {
+        let target=CWord(oc_nodes[0].ptr[n].a)
+        if oc_nodes[0].ptr[target].kind =? 'ident' and CWord(oc_nodes[0].ptr[target].aux) =? oc[0].sk_local {
+            let l=CWord(oc_nodes[0].ptr[target].sym)
+            if CWord(oc_locals[0].ptr[l].flags) & (LF_MUTPARAM | LF_ALIAS | LF_BYREF | LF_CAPTURE) not=? 0 {oc_fail(n "cannot replace a borrowed owner")}
+        } else if oc_nodes[0].ptr[target].kind not=? 'index' or ow_kind(oc_ntype(CWord(oc_nodes[0].ptr[target].a))) not=? 'array' {
+            oc_fail(n "owner replacement requires a whole local or growable array element")
+        }
+    }
+    if k =? 'defer_' and f in? oc[0].functions[0] and ownership_defer_conflict(f) {
+        oc_fail(n "an owner with defer requires a unified defer unwind plan; transfer is not proven safe")
+    }
+    if k =? 'conv' and CWord(oc_nodes[0].ptr[n].aux) =? oc[0].cv_copy and ownership_type(t) and not ownership_copyable(t) {
+        oc_fail(n "cannot copy a move-only owner: no $__copy__ hook")
+    }
+    let mask=oc_children(k)
+    if mask <? 0 {return}
+    if mask & 1 not=? 0 {ownership_validate_node(CWord(oc_nodes[0].ptr[n].a) f)}
+    if mask & 2 not=? 0 {ownership_validate_node(CWord(oc_nodes[0].ptr[n].b) f)}
+    if mask & 4 not=? 0 {ownership_validate_node(CWord(oc_nodes[0].ptr[n].c) f)}
+    if mask & 16 not=? 0 {
+        loop i in [0..oc_nkids(n)) {ownership_validate_node(oc_kid(n i) f)}
+    }
+}
+ownership_validate=():>void=>$unsafe {
+    if oc[0].decls[0].length =? 0 {return}
+    loop f in oc[0].functions[0].keys {
+        if oc_fns[0].ptr[f].cabi or (oc_fns[0].ptr[f].export_name as array<uint8>).length not=? 0 {
+            oc_fail(CWord(oc_fns[0].ptr[f].decl) "foreign entry points with owners require per-foreign-thread cleanup storage")
+        }
+    }
+    loop g in [0..oc[0].globals[0].length) {
+        let gt=CWord(oc[0].globals[0].ptr[g].type)
+        if gt >? 0 and ownership_contains(gt) {oc_fail(CWord(oc[0].globals[0].ptr[g].decl) "global owners require a program-lifetime cleanup plan")}
+    }
+    loop f in [1..oc_fns[0].length) {
+        let nlocals=oc_fns[0].ptr[f].locals.length
+        loop i in [0..nlocals) {
+            let l=oc_fns[0].ptr[f].locals[i]
+            let lt=CWord(oc_locals[0].ptr[l].type)
+            if not ownership_contains(lt) {continue}
+            if not ownership_type(lt) {oc_local_fail(l "resource containers require aggregate ownership support")}
+            let flags=CWord(oc_locals[0].ptr[l].flags)
+            if flags & LF_CAPTURE not=? 0 and ownership_callable_cap(CWord(oc_fns[0].ptr[f].fntype)) =? 0 {oc_local_fail(l "this callable requires a checked ownership capability")}
+            if flags & LF_SHARED not=? 0 {oc_local_fail(l "captured owners require closure ownership support")}
+        }
+        ownership_validate_node(CWord(oc_fns[0].ptr[f].body) f)
+    }
+}
+# A closure capturing owners carries its capability in its callable type.
+ownership_lambda_type=(t:int64 f:int64):>int64=>$unsafe {
+    if oc[0].decls[0].length =? 0 {return t}
+    let capability:int64=0
+    let borrowed=false
+    let ncaps=oc_fns[0].ptr[f].caps.length
+    loop i in [0..ncaps) {
+        let l=CWord(oc_fns[0].ptr[f].caps[i].inner)
+        let flags=CWord(oc_locals[0].ptr[l].flags)
+        if flags & LF_OWNERBORROW not=? 0 {borrowed=true}
+        if flags & LF_VALUECAP =? 0 {continue}
+        let ct=CWord(oc_locals[0].ptr[l].type)
+        if ownership_callable_cap(ct) not=? 0 or ownership_fact_type(ct) {
+            let level:int64=if ownership_decl_copyable(ct) {1} else {2}
+            if level >? capability {capability=level}
+            if ownership_callable_cap(ct) >=? 3 {borrowed=true}
+        }
+    }
+    if borrowed {
+        if capability <? 1 {capability=1}
+        capability=capability + 2
+    }
+    if capability =? 0 {return t}
+    oc[0].host[0].callable(t oc[0].host[0].contract(t) capability)
+}

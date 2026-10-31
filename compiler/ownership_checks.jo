@@ -1,0 +1,196 @@
+# Frozen ownership diagnostics extracted from ownership.jo.
+use 'node_store.dewy'
+use 'source_types.dewy'
+use 'checker_types.dewy'
+use 'checker_state.dewy'
+use 'ownership_types.dewy'
+const LF_MUTPARAM = 2
+const LF_CAPTURE = 4
+const LF_ALIAS = 8
+const LF_BYREF = 32
+const LF_SHARED = 1024
+const LF_VALUECAP = 262144
+const LF_OWNERBORROW = 8388608
+const NF_GLOBAL = 2048
+struct OwnershipCheckHost:
+    error: (int, str) -> void
+    escapes: (int, int) -> bool
+    contract: (int) -> int
+    callable: (int, int, int) -> int
+struct OwnershipCheckInput:
+    nodes: *(Node[])
+    lists: *(i32[])
+    types: *(TypeInfo[])
+    structs: *(StructInfo[])
+    fields: *(Field[])
+    locals: *(Local[])
+    globals: *(Global[])
+    fns: *(FnInst[])
+    files: *(SrcFile[])
+    names: *(str[])
+    decls: *({int: int})
+    hooks: *({int: int})
+    functions: *({int: bool})
+    inputs: *({int: bool})
+    bindings: *({int: bool})
+    in_arrdata: int
+    in_resize: int
+    in_setlen: int
+    cv_copy: int
+    sk_local: int
+    host: *OwnershipCheckHost
+oc: *OwnershipCheckInput
+oc_nodes: *(Node[])
+oc_lists: *(i32[])
+oc_locals: *(Local[])
+oc_fns: *(FnInst[])
+ownership_checks_bind = (input: *OwnershipCheckInput) -> int:
+    oc = input
+    oc_nodes = input[0].nodes
+    oc_lists = input[0].lists
+    oc_locals = input[0].locals
+    oc_fns = input[0].fns
+    0
+oc_kid = (n: int, i: int) -> int: int(oc_lists[0][int(oc_nodes[0][n].list) + i])
+oc_nkids = (n: int) -> int: int(oc_nodes[0][n].nlist)
+oc_ntype = (n: int) -> int: int(oc_nodes[0][n].type)
+oc_fail = (n: int, message: str): oc[0].host[0].error(oc_nodes[0][n].pos, message)
+oc_local_fail = (l: int, message: str): oc[0].host[0].error(oc_locals[0][l].pos, message)
+oc_children = (k: NK) -> int:
+    match k:
+        int_lit, float_lit, bool_lit, none_lit, null_lit, ident, dotname, hole, break_, continue_, pwild: return 0
+        str_lit, block, tuple, map_lit, matrix: return 16
+        field, unary, not_, unwrap, narrow, cast, conv, addr, exprstmt, return_, defer_, istype, plit: return 1
+        binary, and_, or_, coalesce, assign, while_, for_, prange: return 3
+        if_, iflet, range: return 7
+        vardecl: return 2
+        array: return 2 | 16
+        call, partial, intrinsic, match_: return 1 | 16
+        index, pair: return 3 | 16
+        arm: return 7 | 16
+        pvariant: return 16
+        fnref: return 1
+        lambda: return 0
+        else: return -1
+ownership_parameters = ():
+    if oc[0].decls[0].len() == 0: return
+    ownership_library_parameters()
+    loop f in [1..oc_fns[0].len()):
+        body = int(oc_fns[0][f].body)
+        loop l in oc_fns[0][f].locals:
+            if ownership_type(int(oc_locals[0][l].type)): oc[0].functions[0][f] = true
+        if body == 0: continue
+        loop i in [0..oc_nkids(body)):
+            s = oc_kid(body, i)
+            if oc_nodes[0][s].kind != .vardecl or oc_nodes[0][s].aux2 != 1: break
+            if oc_nkids(s) > 0: continue
+            l = int(oc_nodes[0][s].sym)
+            if not ownership_type(int(oc_locals[0][l].type)): continue
+            source = int(oc_nodes[0][s].b)
+            if oc_nodes[0][source].kind != .ident: continue
+            p = int(oc_nodes[0][source].sym)
+            if int(oc_locals[0][p].flags) & LF_MUTPARAM != 0: continue
+            if oc_fns[0][f].cabi or oc_fns[0][f].has_env or len(oc_fns[0][f].export_name) != 0:
+                oc_fail(s, "owning parameters require a closed direct call")
+            oc[0].inputs[0][p] = true
+            oc[0].bindings[0][l] = true
+ownership_library_parameters = ():
+    changed = true
+    loop changed:
+        changed = false
+        loop f in [1..oc_fns[0].len()):
+            body = int(oc_fns[0][f].body)
+            decl = int(oc_fns[0][f].decl)
+            if body == 0 or decl == 0 or oc[0].files[0][oc_nodes[0][decl].pos >> 40].is_dewy: continue
+            loop p in oc_fns[0][f].params:
+                if oc[0].inputs[0].has(p) or int(oc_locals[0][p].flags) & LF_MUTPARAM != 0 or not ownership_type(int(oc_locals[0][p].type)): continue
+                if oc[0].host[0].escapes(body, p):
+                    oc[0].inputs[0][p] = true
+                    changed = true
+ownership_defer_conflict = (f: int) -> bool:
+    loop l in oc_fns[0][f].locals:
+        if ownership_type(int(oc_locals[0][l].type)) and not starts_with(oc[0].names[0][int(oc_locals[0][l].name)], "$guard"): return true
+    false
+ownership_validate_node = (n: int, f: int):
+    if n == 0: return
+    t = oc_ntype(n)
+    if t > 0 and ownership_contains(t) and not ownership_type(t): oc_fail(n, "resource containers require aggregate ownership support")
+    if ownership_type(t) and not ownership_layout(t): oc_fail(n, "resource fields currently require an inline record layout")
+    k = oc_nodes[0][n].kind
+    if k == .partial:
+        a = int(oc_nodes[0][n].a)
+        if a != 0 and ownership_type(oc_ntype(a)): oc_fail(n, "partial application of owners requires a consuming callback plan; use a function literal")
+        loop i in [0..oc_nkids(n)):
+            if ownership_type(oc_ntype(oc_kid(n, i))): oc_fail(n, "partial application of owners requires a consuming callback plan; use a function literal")
+    if k == .array and ow_kind(t) == .fixed and ownership_type(t):
+        count = int(oc[0].types[0][ow_prune(t)].bits)
+        if oc_nkids(n) == 0 and count > 0: oc_fail(n, "owning array elements require completed construction")
+        if oc_nodes[0][n].b != 0 and count > 1 and not ownership_copyable(ow_elem(t)): oc_fail(n, "cannot repeat a move-only owner")
+    if k == .intrinsic and oc_nkids(n) > 0 and ownership_type(oc_ntype(oc_kid(n, 0))):
+        id = int(oc_nodes[0][n].aux)
+        if id == oc[0].in_arrdata: oc_fail(n, "raw resource array access requires a live-slot protocol")
+        if id == oc[0].in_resize or id == oc[0].in_setlen: oc_fail(n, "owning array elements require completed construction; use push")
+    if k == .call and oc_nodes[0][n].aux == 0 or k == .fnref:
+        g = int(oc_nodes[0][n].sym)
+        if g > 0 and oc[0].hooks[0].has(int(oc_fns[0][g].decl)): oc_fail(n, "lifecycle hooks are compiler-only operations")
+        if k == .fnref and g > 0 and oc[0].functions[0].has(g): oc_fail(n, "owners require direct calls; callable ownership is not supported yet")
+    if k == .call and oc_nodes[0][n].aux == 2 and ownership_type(t):
+        si = int(oc[0].types[0][ow_prune(t)].st)
+        loop i in [0..int(oc[0].structs[0][si].nfields)):
+            ft = int(oc[0].fields[0][int(oc[0].structs[0][si].fields) + i].type)
+            if ownership_type(ft) and ow_kind(ft) != .opt and (i >= oc_nkids(n) or oc_kid(n, i) == 0): oc_fail(n, "an owning field requires completed construction")
+    if k == .vardecl and int(oc_nodes[0][n].flags) & NF_GLOBAL == 0 and oc_nkids(n) == 0 and oc_nodes[0][n].sym > 0:
+        lt = int(oc_locals[0][int(oc_nodes[0][n].sym)].type)
+        if ownership_type(lt) and oc_nodes[0][n].b == 0 and ow_kind(lt) != .array and ow_kind(lt) != .opt and not ow_is_map(lt):
+            oc_fail(n, "an owner requires completed construction before registration")
+    if k == .assign and ownership_type(oc_ntype(int(oc_nodes[0][n].a))):
+        target = int(oc_nodes[0][n].a)
+        if oc_nodes[0][target].kind == .ident and int(oc_nodes[0][target].aux) == oc[0].sk_local:
+            l = int(oc_nodes[0][target].sym)
+            if int(oc_locals[0][l].flags) & (LF_MUTPARAM | LF_ALIAS | LF_BYREF | LF_CAPTURE) != 0: oc_fail(n, "cannot replace a borrowed owner")
+        else if oc_nodes[0][target].kind != .index or ow_kind(oc_ntype(int(oc_nodes[0][target].a))) != .array:
+            oc_fail(n, "owner replacement requires a whole local or growable array element")
+    if k == .defer_ and oc[0].functions[0].has(f) and ownership_defer_conflict(f):
+        oc_fail(n, "an owner with defer requires a unified defer unwind plan; transfer is not proven safe")
+    if k == .conv and int(oc_nodes[0][n].aux) == oc[0].cv_copy and ownership_type(t) and not ownership_copyable(t):
+        oc_fail(n, "cannot copy a move-only owner: no $__copy__ hook")
+    mask = oc_children(k)
+    if mask < 0: return
+    if mask & 1 != 0: ownership_validate_node(int(oc_nodes[0][n].a), f)
+    if mask & 2 != 0: ownership_validate_node(int(oc_nodes[0][n].b), f)
+    if mask & 4 != 0: ownership_validate_node(int(oc_nodes[0][n].c), f)
+    if mask & 16 != 0:
+        loop i in [0..oc_nkids(n)): ownership_validate_node(oc_kid(n, i), f)
+ownership_validate = ():
+    if oc[0].decls[0].len() == 0: return
+    loop f, active in oc[0].functions[0]:
+        if oc_fns[0][f].cabi or len(oc_fns[0][f].export_name) != 0:
+            oc_fail(int(oc_fns[0][f].decl), "foreign entry points with owners require per-foreign-thread cleanup storage")
+    loop g in [0..oc[0].globals[0].len()):
+        gt = int(oc[0].globals[0][g].type)
+        if gt > 0 and ownership_contains(gt): oc_fail(int(oc[0].globals[0][g].decl), "global owners require a program-lifetime cleanup plan")
+    loop f in [1..oc_fns[0].len()):
+        loop l in oc_fns[0][f].locals:
+            lt = int(oc_locals[0][l].type)
+            if not ownership_contains(lt): continue
+            if not ownership_type(lt): oc_local_fail(l, "resource containers require aggregate ownership support")
+            flags = int(oc_locals[0][l].flags)
+            if flags & LF_CAPTURE != 0 and ownership_callable_cap(int(oc_fns[0][f].fntype)) == 0: oc_local_fail(l, "this callable requires a checked ownership capability")
+            if flags & LF_SHARED != 0: oc_local_fail(l, "captured owners require closure ownership support")
+        ownership_validate_node(int(oc_fns[0][f].body), f)
+ownership_lambda_type = (t: int, f: int) -> int:
+    if oc[0].decls[0].len() == 0: return t
+    capability = 0
+    borrowed = false
+    loop capture in oc_fns[0][f].caps:
+        l = int(capture.inner)
+        flags = int(oc_locals[0][l].flags)
+        if flags & LF_OWNERBORROW != 0: borrowed = true
+        if flags & LF_VALUECAP == 0: continue
+        ct = int(oc_locals[0][l].type)
+        if ownership_callable_cap(ct) != 0 or ownership_fact_type(ct):
+            capability = max(capability, if ownership_decl_copyable(ct): 1 else: 2)
+            if ownership_callable_cap(ct) >= 3: borrowed = true
+    if borrowed: capability = max(1, capability) + 2
+    if capability == 0: return t
+    oc[0].host[0].callable(t, oc[0].host[0].contract(t), capability)

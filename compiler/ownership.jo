@@ -1,5 +1,6 @@
 use 'ir_types.dewy'
 use 'ownership_types.dewy'
+use 'ownership_checks.dewy'
 use 'prelude.jo'
 # Nominal lifecycle metadata. No ownership walk or summary demand for ordinary
 # programs; hook identity is deliberately separate from structural equality.
@@ -27,6 +28,15 @@ owner_map_copies: {int: int}
 # Resource-type predicates run in ownership_types.dewy over these tables.
 ownership_type_input = OwnershipTypeInput(&types, &structs, &type_args, &fields, &variants, &fns, &ownership_decls, &ownership_copies, &ownership_moves, &ownership_contained, &nominal_parent, &T_MATH_INT)
 ownership_type_binding = ownership_types_bind(&ownership_type_input)
+# Owning parameters, the validation walk and closure capabilities run in
+# ownership_checks.dewy; these are its services.
+ownership_functions: {int: bool}
+ownership_check_error = (pos: int, message: str): fatal(pos, message)
+ownership_check_escapes = (body: int, l: int) -> bool: copy_escapes(body, l)
+ownership_check_callable = (t: int, contract: int, capability: int) -> int: mk_callable_contract(t, contract, capability)
+ownership_check_host = OwnershipCheckHost(ownership_check_error, ownership_check_escapes, callable_contract, ownership_check_callable)
+ownership_check_input = OwnershipCheckInput(&nodes, &lists, &types, &structs, &fields, &locals, &globals, &fns, &files, &names, &ownership_decls, &ownership_hooks, &ownership_functions, &copy_inputs, &copy_bindings, int(IN.arrdata), int(IN.resize), int(IN.setlen), int(CV.explicit_copy), int(SK.local), &ownership_check_host)
+ownership_check_binding = ownership_checks_bind(&ownership_check_input)
 
 ownership_declare = (decl: int, hook: int, role: int):
     if nkids(hook) != 1: fatal(nodes[hook].pos, "lifecycle hooks have no explicit parameters")
@@ -122,44 +132,6 @@ ownership_finalize = ():
 
 # The call plan records incoming owners separately from borrowed place inputs.
 # Synthetic Dewy parameter bindings adopt the incoming value without copying.
-ownership_functions: {int: bool}
-ownership_parameters = ():
-    if ownership_decls.len() == 0: return
-    ownership_library_parameters()
-    loop f in [1..fns.len()):
-        body = int(fns[f].body)
-        loop l in fns[f].locals:
-            if ownership_type(int(locals[l].type)): ownership_functions[f] = true
-        if body == 0: continue
-        loop i in [0..nkids(body)):
-            s = kid(body, i)
-            if nodes[s].kind != .vardecl or nodes[s].aux2 != 1: break
-            if nkids(s) > 0: continue
-            l = int(nodes[s].sym)
-            if not ownership_type(int(locals[l].type)): continue
-            source = int(nodes[s].b)
-            if nodes[source].kind != .ident: continue
-            p = int(nodes[source].sym)
-            if int(locals[p].flags) & LF_MUTPARAM != 0: continue
-            if fns[f].cabi or fns[f].has_env or len(fns[f].export_name) != 0:
-                fatal(nodes[s].pos, "owning parameters require a closed direct call")
-            copy_inputs[p] = true
-            copy_bindings[l] = true
-
-# Implementation-library parameters which publish an owner use the same
-# consuming ABI as Dewy's private parameter bindings. Propagate through calls.
-ownership_library_parameters = ():
-    changed = true
-    loop changed:
-        changed = false
-        loop f in [1..fns.len()):
-            body = int(fns[f].body)
-            if body == 0 or fns[f].decl == 0 or files[pos_file(nodes[int(fns[f].decl)].pos)].is_dewy: continue
-            loop p in fns[f].params:
-                if copy_inputs.has(p) or int(locals[p].flags) & LF_MUTPARAM != 0 or not ownership_type(int(locals[p].type)): continue
-                if copy_escapes(body, p):
-                    copy_inputs[p] = true
-                    changed = true
 
 # Lowering adapter: sparse stack records, allocated only for demanded owners.
 # Linking publishes successful initialization; unlinking consumes ownership.
@@ -283,85 +255,6 @@ owner_drop = (addr: int):
     else: e_call(rt("__owner_drop"), [e_slot(owner_record(slot))], -1)
     if concurrency.concurrency_runtime_needed: e_call(rt("__task_shield_leave"), [], -1)
 
-ownership_validate_node = (n: int, f: int):
-    if n == 0: return
-    t = ntype(n)
-    if t > 0 and ownership_contains(t) and not ownership_type(t):
-        fatal(nodes[n].pos, "resource containers require aggregate ownership support")
-    if ownership_type(t) and not ownership_layout(t):
-        fatal(nodes[n].pos, "resource fields currently require an inline record layout")
-    k = nodes[n].kind
-    if k == .partial:
-        if nodes[n].a != 0 and ownership_type(ntype(int(nodes[n].a))):
-            fatal(nodes[n].pos, "partial application of owners requires a consuming callback plan; use a function literal")
-        loop i in [0..nkids(n)):
-            if ownership_type(ntype(kid(n, i))):
-                fatal(nodes[n].pos, "partial application of owners requires a consuming callback plan; use a function literal")
-    if k == .array and tkind(t) == .fixed and ownership_type(t):
-        if nkids(n) == 0 and fixed_len(t) > 0:
-            fatal(nodes[n].pos, "owning array elements require completed construction")
-        if nodes[n].b != 0 and fixed_len(t) > 1 and not ownership_copyable(telem(t)):
-            fatal(nodes[n].pos, "cannot repeat a move-only owner")
-    if k == .intrinsic and nkids(n) > 0 and ownership_type(ntype(kid(n, 0))):
-        id = nodes[n].aux as IN
-        if id == .arrdata: fatal(nodes[n].pos, "raw resource array access requires a live-slot protocol")
-        if id == .resize or id == .setlen:
-            fatal(nodes[n].pos, "owning array elements require completed construction; use push")
-    if k == .call and nodes[n].aux == 0 or k == .fnref:
-        g = int(nodes[n].sym)
-        if g > 0 and ownership_hooks.has(int(fns[g].decl)):
-            fatal(nodes[n].pos, "lifecycle hooks are compiler-only operations")
-        if k == .fnref and g > 0 and ownership_functions.has(g):
-            fatal(nodes[n].pos, "owners require direct calls; callable ownership is not supported yet")
-    if k == .call and nodes[n].aux == 2 and ownership_type(t):
-        si = int(types[prune(t)].st)
-        loop i in [0..int(structs[si].nfields)):
-            if ownership_type(int(fields[int(structs[si].fields) + i].type)) and tkind(int(fields[int(structs[si].fields) + i].type)) != .opt and (i >= nkids(n) or kid(n, i) == 0):
-                fatal(nodes[n].pos, "an owning field requires completed construction")
-    if k == .vardecl and not has_flag(n, NF_GLOBAL) and nkids(n) == 0 and nodes[n].sym > 0 and ownership_type(int(locals[int(nodes[n].sym)].type)) and nodes[n].b == 0 and tkind(int(locals[int(nodes[n].sym)].type)) != .array and tkind(int(locals[int(nodes[n].sym)].type)) != .opt and not is_map_type(int(locals[int(nodes[n].sym)].type)):
-        fatal(nodes[n].pos, "an owner requires completed construction before registration")
-    if k == .assign and ownership_type(ntype(int(nodes[n].a))):
-        target = int(nodes[n].a)
-        if nodes[target].kind == .ident and nodes[target].aux == i32(int(SK.local)):
-            l = int(nodes[target].sym)
-            if int(locals[l].flags) & (LF_MUTPARAM | LF_ALIAS | LF_BYREF | LF_CAPTURE) != 0:
-                fatal(nodes[n].pos, "cannot replace a borrowed owner")
-        else if nodes[target].kind != .index or tkind(ntype(int(nodes[target].a))) != .array:
-            fatal(nodes[n].pos, "owner replacement requires a whole local or growable array element")
-    if k == .defer_ and ownership_functions.has(f) and ownership_defer_conflict(f):
-        fatal(nodes[n].pos, "an owner with defer requires a unified defer unwind plan; transfer is not proven safe")
-    if k == .conv and nodes[n].aux == i32(int(CV.explicit_copy)) and ownership_type(ntype(n)) and not ownership_copyable(ntype(n)):
-        fatal(nodes[n].pos, "cannot copy a move-only owner: no $__copy__ hook")
-    loop c in copy_children(n): ownership_validate_node(c, f)
-
-# An owner beside a defer, other than the hidden guard of a place a method lent
-# (`let a = @(m.lock())`: compiler/place_methods.jo), which is never moved but
-# into its release at the place's last use, and otherwise dropped with its block
-# after the block's defers, as every scope exit already orders them.
-ownership_defer_conflict = (f: int) -> bool:
-    loop l in fns[f].locals:
-        if ownership_type(int(locals[l].type)) and not starts_with(name_of(int(locals[l].name)), "$guard"): return true
-    false
-
-ownership_validate = ():
-    if ownership_decls.len() == 0: return
-    loop f, active in ownership_functions:
-        if fns[f].cabi or len(fns[f].export_name) != 0:
-            fatal(nodes[int(fns[f].decl)].pos, "foreign entry points with owners require per-foreign-thread cleanup storage")
-    loop g in globals:
-        if g.type > 0 and ownership_contains(int(g.type)):
-            fatal(nodes[int(g.decl)].pos, "global owners require a program-lifetime cleanup plan")
-    loop f in [1..fns.len()):
-        loop l in fns[f].locals:
-            t = int(locals[l].type)
-            if not ownership_contains(t): continue
-            if not ownership_type(t): fatal(locals[l].pos, "resource containers require aggregate ownership support")
-            if int(locals[l].flags) & LF_CAPTURE != 0 and ownership_callable_cap(int(fns[f].fntype)) == 0:
-                fatal(locals[l].pos, "this callable requires a checked ownership capability")
-            if int(locals[l].flags) & LF_SHARED != 0:
-                fatal(locals[l].pos, "captured owners require closure ownership support")
-        ownership_validate_node(int(fns[f].body), f)
-
 # The literal-only diagnostic path has no allocation or language failure. It
 # flushes earlier output, then uses the runtime's best-effort raw write. Dynamic
 # formatting remains subject to the ordinary conservative failure summary.
@@ -441,19 +334,3 @@ owner_adopt_result = (n: int):
         owner_adopt_result(kid(n, nkids(n) - 1))
     else if k == .exprstmt: owner_adopt_result(int(nodes[n].a))
     else: owner_adoptions[n] = true
-
-ownership_lambda_type = (t: int, f: int) -> int:
-    if ownership_decls.len() == 0: return t
-    capability = 0
-    borrowed = false
-    loop capture in fns[f].caps:
-        l = int(capture.inner)
-        if int(locals[l].flags) & LF_OWNERBORROW != 0: borrowed = true
-        if int(locals[l].flags) & LF_VALUECAP == 0: continue
-        ct = int(locals[l].type)
-        if ownership_callable_cap(ct) != 0 or ownership_fact_type(ct):
-            capability = max(capability, if ownership_decl_copyable(ct): 1 else: 2)
-            if ownership_callable_cap(ct) >= 3: borrowed = true
-    if borrowed: capability = max(1, capability) + 2
-    if capability == 0: return t
-    mk_callable_contract(t, callable_contract(t), capability)

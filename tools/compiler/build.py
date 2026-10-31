@@ -23,7 +23,8 @@ ROOT = HERE.parents[1]
 # Steps 1 and 2 cannot read Dewy, so there every `use 'X.dewy'` in compiler/
 # names X.dewy's frozen implementation-language twin instead. Steps 3 on
 # compile the Dewy modules, so the compiler that ships runs them.
-FROZEN_TWINS = {'ownership_types.dewy': 'ownership_types.jo',
+FROZEN_TWINS = {'ownership_checks.dewy': 'ownership_checks.jo',
+                'ownership_types.dewy': 'ownership_types.jo',
                 'checker_for_loops.dewy': 'checker_for_loops.jo',
                 'checker_statements.dewy': 'checker_statements.jo',
                 'checker_exprstmts.dewy': 'checker_exprstmts.jo',
