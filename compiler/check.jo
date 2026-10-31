@@ -4551,7 +4551,7 @@ shape_returned = (value: int, rt: int) -> int:
 
 check_stmt = (s: int): bk_stmt(s)
 # (1 an exact-width measure's owner, 2 a shaped parameter's dimension, 3 a reflected scope,
-# 4 an `if` statement)
+# 4 an `if` statement checked whole, 5 a `$expect` test after its `if`)
 stmt_special = (s: int, code: int):
     if code == 1:
         owner = int(ctxs[cx].inst)
@@ -4568,6 +4568,8 @@ stmt_special = (s: int, code: int):
         reflect_active = active
         scope_reset(mark)
         nodes[s] = nodes[body]
+    else if code == 5:
+        if expectation_ifs.has(s): expectation_refuted(s)
     else:
         add_flag(s, NF_STMT)
         check_expr(s, 0)

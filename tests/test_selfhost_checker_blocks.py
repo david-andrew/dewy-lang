@@ -3,12 +3,14 @@ import pytest
 
 from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_assigns import DRIVER as ASSIGNS
+from tests.test_selfhost_checker_conditionals import DRIVER as CONDITIONALS
+from tests.test_selfhost_checker_literals import DRIVER as LITERALS
 from tests.test_selfhost_checker_loops import DRIVER as LOOPS
 from tests.test_selfhost_checker_vardecls import DRIVER as DECLS
-from tests.test_selfhost_checker_resolve import compare
+from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER, compare
 
 STEMS = ('checker_loops', 'checker_vardecls', 'checker_assigns', 'checker_exprstmts', 'checker_statements',
-         'checker_for_loops', 'checker_returns', 'checker_blocks')
+         'checker_for_loops', 'checker_returns', 'checker_conditionals', 'checker_literals', 'checker_blocks')
 
 
 def hosts(driver):
@@ -16,7 +18,14 @@ def hosts(driver):
     return driver[len(LOOPS):driver.index('DEWY = 1 << 40')]
 
 
-DRIVER = LOOPS + hosts(DECLS) + hosts(ASSIGNS) + r'''
+def leaf_hosts(driver, end):
+    """A resolver-based leaf driver's state and services (locals come from the declarations')."""
+    prefix = RESOLVER.split('main = ():')[0]
+    return driver[len(prefix):driver.index(end)].replace('locals: Local[] = [Local()]\n', '')
+
+
+LEAVES = LOOPS + hosts(DECLS) + hosts(ASSIGNS) + leaf_hosts(CONDITIONALS, 'DEWY = 1 << 40') + leaf_hosts(LITERALS, 'main = ():')
+DRIVER = LEAVES + r'''
 db_body_mode = -1
 db_arm = 0
 db_bind = 0
@@ -52,7 +61,7 @@ db_reset = (mark: int):
     events.push("reset:{mark}")
     scopes.names.truncate(mark)
 db_special = (s: int, code: int):
-    events.push("special:{s}:{code}")
+    events.push("special:{s}:{code}:{nodes[s].flags}")
     if code == 2: nodes[s].kind = .test_
     if code == 4: scopes.names.push(s)
 db_assign = (s: int) -> bool:
@@ -84,9 +93,16 @@ assign_of = (t: int, op: int = 47, lhs: NK = .ident) -> int:
     nodes[s].b = i32(typed(.int_lit, t))
     nodes[s].op = i32(op)
     s
+# A statement `if` on a condition with else-less (or else) bodies the conditional host checks.
+if_of = (other: bool = false, flags: int = 0) -> int:
+    n = dewy_node(.if_, typed(.ident, T_BOOL))
+    nodes[n].b = i32(typed(.block, T_VOID))
+    if other: nodes[n].c = i32(typed(.block, T_VOID))
+    nodes[n].flags = i32(flags)
+    n
 run = (b: int, expected: int = 0, want: bool = false):
     r = bk_block(b, expected, want)
-    print("{b}:{r}:{nodes[b].type}:{nodes[b].aux}:{nodes[b].nlist}:{dv_block}:{dv_index}:{dv_flow_local}:{db_discarding}:{db_arm}:{scopes.names.len()}")
+    print("{b}:{r}:{nodes[b].type}:{nodes[b].aux}:{nodes[b].nlist}:{dv_block}:{dv_index}:{dv_flow_local}:{db_discarding}:{db_arm}:{scopes.names.len()}:{literal_last}:{xf_scope.names.len()}")
     print("  {events}")
     events = []
 prepare_blocks = ():
@@ -139,6 +155,18 @@ main = ():
     da_watch.sibling_flow = 0
     da_watch.sibling_known = 1
     run(block_of([let_of(17, T_INT), dewy_node(.test_)]))
+    # `if` statements: checked by the conditional leaf and published, once checked
+    # again whole by the host; `$expect` tests asked about while there are any; `if let`.
+    da_watch.sibling_known = 0
+    stmts = [if_of(), if_of(true), if_of(false, 128), if_of(false, 16), dewy_node(.iflet)]
+    nodes[stmts[2]].type = i32(T_VOID)
+    run(block_of(stmts))
+    loop s in stmts: print("{s}:{nodes[s].type}:{nodes[s].flags}")
+    da_watch.expectations = 1
+    literal_exact = true
+    run(block_of([if_of(), let_of(18, T_INT), if_of(true)]))
+    da_watch.expectations = 0
+    literal_exact = false
     print("ok")
 '''
 
@@ -153,6 +181,7 @@ def test_checker_blocks_twins(compiler, tmp_path, release):  # noqa: F811
     ('run(block_of([dewy_node(.fn_)]))', 1),
     ('run(block_of([dewy_node(.import_)]))', 1),
     ('run(block_of([dewy_node(.int_lit)]))', 2),
+    ('run(block_of([if_of(), dewy_node(.struct_)]))', 1),
     ('s = assign_of(T_INT, 48); spawned = typed(.call, T_INT); nodes[spawned].aux2 = 17; nodes[s].b = i32(spawned); run(block_of([s]))', 3),
 ])
 def test_checker_blocks_errors(compiler, tmp_path, case, code):  # noqa: F811

@@ -9,6 +9,8 @@ use 'checker_exprstmts.dewy'
 use 'checker_loops.dewy'
 use 'checker_for_loops.dewy'
 use 'checker_returns.dewy'
+use 'checker_conditionals.dewy'
+use 'checker_literals.dewy'
 struct CheckerBlockHost:
     open: (int, bool) -> int
     expand: (int) -> void
@@ -105,7 +107,8 @@ bk_stmt = (s: int):
     else if k == .const_: st_const(s)
     else if k == .assign: bk_assign(s)
     else if k == .exprstmt: es_statement(s)
-    else if k == .if_ or k == .iflet: bk_host[0].special(s, 4)
+    else if k == .if_: bk_if(s)
+    else if k == .iflet: bk_host[0].special(s, 4)
     else if k == .while_: xb_while(s)
     else if k == .for_: fl_for(s)
     else if k == .return_: xt_return(s)
@@ -115,6 +118,14 @@ bk_stmt = (s: int):
     else if k == .block: bk_block(s, 0, false)
     else if k == .fn_ or k == .struct_ or k == .enum_ or k == .import_: bk_host[0].error(s, 1)
     else if k != .test_ and k != .build_: bk_host[0].error(s, 2)
+bk_if = (s: int):
+    f = int(bk_nodes[0][s].flags)
+    if f & 128 != 0 and bk_nodes[0][s].type != 0:
+        bk_host[0].special(s, 4)
+        return
+    bk_nodes[0][s].flags = i32(f | 16)
+    xl_finish(s, xf_if(s, 0), 0)
+    if bk_watch[0].expectations > 0: bk_host[0].special(s, 5)
 bk_block = (b: int, expected: int, want_value: bool) -> int:
     pos = bk_nodes[0][b].pos
     if want_value and bk_flag(b, 131072) and bk_files[0][pos >> 40].is_dewy:

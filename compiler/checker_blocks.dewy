@@ -9,10 +9,12 @@ from p"checker_exprstmts.dewy" import es_statement
 from p"checker_loops.dewy" import (xb_while xb_jump)
 from p"checker_for_loops.dewy" import fl_for
 from p"checker_returns.dewy" import xt_return
+from p"checker_conditionals.dewy" import xf_if
+from p"checker_literals.dewy" import xl_finish
 # A block's statements in its scope, and each statement sent to its checker: a
 # declaration, an assignment (or the declaration it makes, or a dropped value), an
-# expression, a loop, a return or jump, a local constant, `defer` and `when` run in
-# their Dewy leaves; `if`, reflected scopes, shaped dimensions and the value a value
+# expression, a loop, a return or jump, a local constant, `defer`, `when` and an `if`
+# run in their Dewy leaves; `if let`, a checked `if` again, `$expect` tests, reflected scopes, shaped dimensions and the value a value
 # block ends with are host services, as are its sinks (where a body's, an arm's or a
 # binding's values go) when it has them. Sibling records followed through the block
 # are asked about only while their tables are live. O(statements) plus their checking;
@@ -118,7 +120,8 @@ bk_stmt=(s:BWord):>void=>$unsafe {
     else if k =? 'const_' {st_const(s)}
     else if k =? 'assign' {bk_assign(s)}
     else if k =? 'exprstmt' {es_statement(s)}
-    else if k =? 'if_' or k =? 'iflet' {bk_host[0].special(s 4)}
+    else if k =? 'if_' {bk_if(s)}
+    else if k =? 'iflet' {bk_host[0].special(s 4)}
     else if k =? 'while_' {xb_while(s)}
     else if k =? 'for_' {fl_for(s)}
     else if k =? 'return_' {xt_return(s)}
@@ -128,6 +131,18 @@ bk_stmt=(s:BWord):>void=>$unsafe {
     else if k =? 'block' {bk_block(s 0 false);}
     else if k =? 'fn_' or k =? 'struct_' or k =? 'enum_' or k =? 'import_' {bk_host[0].error(s 1)}
     else if k not=? 'test_' and k not=? 'build_' {bk_host[0].error(s 2)}
+}
+# An `if` statement (NF_STMT 16); one checked before (NF_CHECKED 128 with its type) goes
+# to the host whole. (A frame of its own: the dispatcher's stays as small as it was.)
+bk_if=(s:BWord):>void=>$unsafe {
+    let f=BWord(bk_nodes[0].ptr[s].flags)
+    if f & 128 not=? 0 and bk_nodes[0].ptr[s].type not=? 0 {
+        bk_host[0].special(s 4)
+        return
+    }
+    bk_nodes[0][s].flags=int32<overflow='wrap'>(f | 16)
+    xl_finish(s xf_if(s 0) 0);
+    if bk_watch[0].expectations >? 0 {bk_host[0].special(s 5)}
 }
 # A block (its statements' tests are written out: a call costs more than they do;
 # NF_LOOP_SETUP 131072, NF_FLOW_RETURNS 1073741824, NF_DISCARD 8; sinks: body
