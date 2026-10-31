@@ -1,0 +1,236 @@
+$runtime_checks
+from p"node_store.dewy" import Node
+from p"checker_types.dewy" import (TypeInfo StructInfo Field TK)
+from p"source_types.dewy" import SrcFile
+from p"checker_state.dewy" import (Local CheckerScope)
+from p"type_inference.dewy" import tu_prune
+from p"checker_loops.dewy" import (xb_enter xb_leave)
+# `loop x in source`, once the source's rewrites (live, reflected, soa, unpacked,
+# nested, cursor, tidied-map, iterator and sequence loops) are done: a range's
+# endpoints checked and joined to one integer type, or an array's, text's, range
+# value's or dictionary's elements bound (by value, by reference or in place), then
+# the body in its loop. O(1) per loop plus the demanded checking of its parts;
+# rewrites, bindings, places and the body are host services that may grow every
+# arena, so nodes, types and locals are reread by ID.
+FWord:type=int64<overflow='wrap'>
+# Arrays a Dewy loop iterates by value (`loop x in xs`), while their bodies are
+# checked: the loop sees the value at entry, so changing the array's length in the
+# body is an error naming the two meanings the program could have wanted.
+ValueLoop:type=[
+    context:int64=0
+    route:int64=0 # the checked source: a binding or a field path of one
+    name:int64=0 # the element's name
+]
+CheckerForHost:type=[
+    rewrite:<(node:int64):>bool>
+    check:<(node:int64 expected:int64):>int64>
+    coerce:<(node:int64 type_id:int64):>int64>
+    literal:<(node:int64):>int64>
+    binding:<(name:int64 type_id:int64 pos:int64):>int64>
+    open_range:<(node:int64):>void>
+    map_view:<(node:int64 type_id:int64):>int64>
+    entries:<(type_id:int64):>bool>
+    collide:<(node:int64):>void>
+    element:<(node:int64 name:int64 type_id:int64 index:int64 fixed:bool):>int64>
+    route:<(node:int64):>bool>
+    struct_fields:<(structure:int64):>void>
+    map_value:<(node:int64 name:int64 type_id:int64 index:int64):>int64>
+    map_value_ref:<(local:int64):>void>
+    body:<(node:int64):>void>
+    reset:<(mark:int64):>void>
+    error:<(node:int64 type_id:int64 code:int64):>void>
+]
+CheckerForInput:type=[
+    nodes:ptr<array<Node>>
+    lists:ptr<array<int32>>
+    types:ptr<array<TypeInfo>>
+    structs:ptr<array<StructInfo>>
+    fields:ptr<array<Field>>
+    files:ptr<array<SrcFile>>
+    locals:ptr<array<Local>>
+    scopes:ptr<CheckerScope>
+    serials:ptr<array<int64>>
+    serial_next:ptr<int64>
+    value_loops:ptr<array<ValueLoop>>
+    context:ptr<int64>
+    last:ptr<int64>
+    int_type:ptr<int64>
+    u8_type:ptr<int64>
+    host:ptr<CheckerForHost>
+]
+let fl_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let fl_lists:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
+let fl_types:ptr<array<TypeInfo>>=$unsafe (uint64(0) as ptr<array<TypeInfo>>)
+let fl_structs:ptr<array<StructInfo>>=$unsafe (uint64(0) as ptr<array<StructInfo>>)
+let fl_fields:ptr<array<Field>>=$unsafe (uint64(0) as ptr<array<Field>>)
+let fl_files:ptr<array<SrcFile>>=$unsafe (uint64(0) as ptr<array<SrcFile>>)
+let fl_locals:ptr<array<Local>>=$unsafe (uint64(0) as ptr<array<Local>>)
+let fl_scopes:ptr<CheckerScope>=$unsafe (uint64(0) as ptr<CheckerScope>)
+let fl_serials:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+let fl_serial_next:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let fl_value_loops:ptr<array<ValueLoop>>=$unsafe (uint64(0) as ptr<array<ValueLoop>>)
+let fl_context:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let fl_last:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let fl_int_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let fl_u8_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let fl_host:ptr<CheckerForHost>=$unsafe (uint64(0) as ptr<CheckerForHost>)
+checker_for_loops_bind=(input:ptr<CheckerForInput>):>FWord=>$unsafe {
+    fl_nodes=input[0].nodes
+    fl_lists=input[0].lists
+    fl_types=input[0].types
+    fl_structs=input[0].structs
+    fl_fields=input[0].fields
+    fl_files=input[0].files
+    fl_locals=input[0].locals
+    fl_scopes=input[0].scopes
+    fl_serials=input[0].serials
+    fl_serial_next=input[0].serial_next
+    fl_value_loops=input[0].value_loops
+    fl_context=input[0].context
+    fl_last=input[0].last
+    fl_int_type=input[0].int_type
+    fl_u8_type=input[0].u8_type
+    fl_host=input[0].host
+    0
+}
+fl_kind=(t:FWord):>TK=>$unsafe {fl_types[0].ptr[tu_prune(t)].kind}
+fl_flag=(n:FWord f:FWord):>bool=>$unsafe {FWord(fl_nodes[0].ptr[n].flags) & f not=? 0}
+fl_kid=(n:FWord i:FWord):>FWord=>$unsafe {FWord(fl_lists[0][FWord(fl_nodes[0].ptr[n].list) + i])}
+fl_dewy_at=(pos:FWord):>bool=>$unsafe {
+    let f=pos >> 40
+    pos >? 0 and f <? fl_files[0].length and fl_files[0].ptr[f].is_dewy
+}
+fl_named=(t:FWord name:string):>bool=>$unsafe {
+    fl_types[0].ptr[t].kind =? 'struct_' and fl_structs[0].ptr[FWord(fl_types[0].ptr[t].st)].name =? name
+}
+fl_or_flags=(l:FWord f:FWord):>void=>$unsafe {fl_locals[0][l].flags=int32<overflow='wrap'>(FWord(fl_locals[0].ptr[l].flags) | f)}
+# `loop i in [a..b)` (NF_LITERAL 256, NF_STEP 32768): the endpoints (and step) checked
+# and joined; literal ones take the other's type, or their default.
+fl_range=(s:FWord it:FWord nv:FWord n1:FWord is_mut:bool pos:FWord):>void=>$unsafe {
+    if fl_nodes[0].ptr[it].a =? 0 {fl_host[0].error(it 0 1)}
+    let t=fl_host[0].check(FWord(fl_nodes[0].ptr[it].a) 0)
+    fl_nodes[0][it].a=int32<overflow='wrap'>(fl_last[0])
+    let la=fl_flag(FWord(fl_nodes[0].ptr[it].a) 256)
+    let lb=true
+    if fl_nodes[0].ptr[it].b not=? 0 {
+        fl_host[0].check(FWord(fl_nodes[0].ptr[it].b) 0);
+        fl_nodes[0][it].b=int32<overflow='wrap'>(fl_last[0])
+        lb=fl_flag(FWord(fl_nodes[0].ptr[it].b) 256)
+        if la and not lb {t=FWord(fl_nodes[0].ptr[FWord(fl_nodes[0].ptr[it].b)].type)}
+    }
+    let step=fl_flag(it 32768)
+    if step {
+        fl_host[0].check(FWord(fl_nodes[0].ptr[it].c) 0);
+        fl_nodes[0][it].c=int32<overflow='wrap'>(fl_last[0])
+        if la and lb and not fl_flag(FWord(fl_nodes[0].ptr[it].c) 256) {t=FWord(fl_nodes[0].ptr[FWord(fl_nodes[0].ptr[it].c)].type)}
+    }
+    if la and lb and (not step or fl_flag(FWord(fl_nodes[0].ptr[it].c) 256)) {t=fl_host[0].literal(FWord(fl_nodes[0].ptr[it].a))}
+    if fl_kind(t) =? 'str_' {fl_host[0].error(it 0 2)}
+    if fl_kind(t) not=? 'int_' or fl_nodes[0].ptr[FWord(fl_nodes[0].ptr[it].a)].kind =? 'float_lit' or fl_nodes[0].ptr[FWord(fl_nodes[0].ptr[it].b)].kind =? 'float_lit' {fl_host[0].error(it t 3)}
+    fl_nodes[0][it].a=int32<overflow='wrap'>(fl_host[0].coerce(FWord(fl_nodes[0].ptr[it].a) t))
+    if fl_nodes[0].ptr[it].b not=? 0 {fl_nodes[0][it].b=int32<overflow='wrap'>(fl_host[0].coerce(FWord(fl_nodes[0].ptr[it].b) t))}
+    if step {fl_nodes[0][it].c=int32<overflow='wrap'>(fl_host[0].coerce(FWord(fl_nodes[0].ptr[it].c) t))}
+    if nv not=? 1 {fl_host[0].error(s 0 4)}
+    if is_mut {fl_host[0].error(s 0 5)}
+    let l=fl_host[0].binding(n1 t pos)
+    fl_nodes[0][s].sym=int32<overflow='wrap'>(l)
+    fl_nodes[0][s].aux=0
+    # An unbounded range in Dewy may ask for an exact, promoting cursor.
+    if fl_nodes[0].ptr[it].b =? 0 and fl_dewy_at(pos) {fl_host[0].open_range(s)}
+}
+# The element bindings over an array, text or fixed array (LF_BYREF 32,
+# LF_VALUEITER 33554432): by value, or in place (`loop @x in xs`).
+fl_elements=(s:FWord it:FWord t:FWord k:TK nv:FWord n1:FWord n2:FWord is_mut:bool pos:FWord):>void=>$unsafe {
+    let et=fl_u8_type[0]
+    if k =? 'array' or k =? 'fixed' {et=FWord(fl_types[0].ptr[t].elem)}
+    let index_name:FWord=0
+    if nv =? 2 {index_name=n1}
+    fl_host[0].collide(s)
+    let index=fl_host[0].binding(index_name fl_int_type[0] pos)
+    let snapshot=fl_host[0].binding(0 t pos)
+    let name=n1
+    if nv =? 2 {name=n2}
+    let el:FWord=0
+    if is_mut {
+        if k =? 'str_' {fl_host[0].error(s 0 6)}
+        el=fl_host[0].element(s name et index k =? 'fixed')
+        fl_nodes[0][s].aux=2
+    } else {
+        el=fl_host[0].binding(name et pos)
+        fl_or_flags(el 32)
+        let dewy=fl_dewy_at(pos)
+        if k =? 'array' and dewy {fl_or_flags(el 33554432)}
+        fl_nodes[0][s].aux=1
+        if k =? 'array' and dewy and fl_host[0].route(it) {fl_value_loops[0].push(ValueLoop[context=fl_context[0] route=it name=name])}
+    }
+    fl_nodes[0][s].sym=int32<overflow='wrap'>(el)
+    fl_nodes[0][s].c=int32<overflow='wrap'>(index)
+    fl_nodes[0][s].d=int32<overflow='wrap'>(snapshot)
+}
+# A dictionary's (or its entries') keys, and values by reference or in place.
+fl_entries=(s:FWord it:FWord t:FWord nv:FWord n1:FWord n2:FWord is_mut:bool pos:FWord):>void=>$unsafe {
+    let si=FWord(fl_types[0].ptr[t].st)
+    fl_host[0].struct_fields(si)
+    let first=FWord(fl_structs[0].ptr[si].fields)
+    let kt=FWord(fl_fields[0].ptr[first].type)
+    let vt=FWord(fl_fields[0].ptr[first + 1].type)
+    fl_host[0].collide(s)
+    let index=fl_host[0].binding(0 fl_int_type[0] pos)
+    let snapshot=fl_host[0].binding(0 t pos)
+    let kl=fl_host[0].binding(n1 FWord(fl_types[0].ptr[tu_prune(kt)].elem) pos)
+    fl_or_flags(kl 32)
+    let vl:FWord=0
+    if nv =? 2 {
+        if is_mut {vl=fl_host[0].map_value(s n2 vt index)}
+        else {
+            vl=fl_host[0].binding(n2 FWord(fl_types[0].ptr[tu_prune(vt)].elem) pos)
+            fl_or_flags(vl 32)
+            fl_host[0].map_value_ref(vl)
+        }
+    } else if is_mut {fl_host[0].error(s 0 7)}
+    fl_nodes[0][s].aux=3
+    fl_nodes[0][s].sym=int32<overflow='wrap'>(kl)
+    fl_nodes[0][s].c=int32<overflow='wrap'>(index)
+    fl_nodes[0][s].d=int32<overflow='wrap'>(snapshot)
+    fl_nodes[0][s].aux2=int32<overflow='wrap'>(vl)
+}
+# (NF_MUT 1; aux: 0 range, 1 elements, 2 elements in place, 3 dictionary, 4 range value)
+fl_for=(s:FWord):>void=>$unsafe {
+    if fl_host[0].rewrite(s) {return}
+    let mark=fl_scopes[0].names.length
+    let value_mark=fl_value_loops[0].length
+    fl_serial_next[0]=fl_serial_next[0] + 1
+    fl_serials[0].push(fl_serial_next[0])
+    let it=FWord(fl_nodes[0].ptr[s].a)
+    let is_mut=fl_flag(s 1)
+    let nv=FWord(fl_nodes[0].ptr[s].nlist)
+    let n1=FWord(fl_nodes[0].ptr[fl_kid(s 0)].name)
+    let n2:FWord=0
+    if nv >? 1 {n2=FWord(fl_nodes[0].ptr[fl_kid(s 1)].name)}
+    let pos=fl_nodes[0].ptr[s].pos
+    if fl_nodes[0].ptr[it].kind =? 'range' {fl_range(s it nv n1 is_mut pos)}
+    else {
+        let t=tu_prune(fl_host[0].check(it 0))
+        it=fl_last[0]
+        fl_nodes[0][s].a=int32<overflow='wrap'>(it)
+        # A dictionary goes over its entries, or (counted) its keys.
+        if fl_named(t "Map") or fl_named(t "__MapEntries") {
+            t=fl_host[0].map_view(s t)
+            it=FWord(fl_nodes[0].ptr[s].a)
+        }
+        let k=fl_types[0].ptr[t].kind
+        if k =? 'range' {
+            let l=fl_host[0].binding(n1 fl_int_type[0] pos)
+            fl_nodes[0][s].sym=int32<overflow='wrap'>(l)
+            fl_nodes[0][s].aux=4
+        } else if k =? 'array' or k =? 'str_' or k =? 'fixed' {fl_elements(s it t k nv n1 n2 is_mut pos)}
+        else if fl_named(t "Map") or (fl_named(t "__MapEntries") and fl_host[0].entries(t)) {fl_entries(s it t nv n1 n2 is_mut pos)}
+        else {fl_host[0].error(it t 8)}
+    }
+    xb_enter(s)
+    fl_host[0].body(FWord(fl_nodes[0].ptr[s].b))
+    loop fl_value_loops[0].length >? value_mark {fl_value_loops[0].pop();}
+    fl_serials[0].pop();
+    xb_leave(s)
+    if fl_scopes[0].names.length not=? mark {fl_host[0].reset(mark)}
+}

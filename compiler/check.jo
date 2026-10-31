@@ -1,3 +1,4 @@
+use 'checker_for_loops.dewy'
 use 'checker_statements.dewy'
 use 'checker_exprstmts.dewy'
 use 'checker_returns.dewy'
@@ -3100,11 +3101,14 @@ op_text = (op: Tok, pos: int) -> str:
         ne: "not=?"
         _: tok_text(op)
 
-check_for = (s: int):
+check_for = (s: int): fl_for(s)
+# For loops run in checker_for_loops.dewy; these are its services.
+# (the source's rewrites: true when the loop was made another statement, and checked)
+for_rewrite = (s: int) -> bool:
     if dewy_live_sources.has(int(nodes[s].a)) and dewy_at(nodes[s].pos):
         check_live_loop(s)
-        return
-    if dewy_at(nodes[s].pos) and reflect_loop(s): return
+        return true
+    if dewy_at(nodes[s].pos) and reflect_loop(s): return true
     if has_flag(s, NF_MUT) and files[pos_file(nodes[s].pos)].is_dewy:
         source_type = prune(check_expr(int(nodes[s].a), 0))
         nodes[s].a = i32(last_checked)
@@ -3121,163 +3125,102 @@ check_for = (s: int):
     soa_loop(s)
     unpack_loop(s)
     dewy_nested_loop_bindings(s)
-    if dewy_cursor_loop(s): return
-    if map_tidy_first(s): return
-    if dewy_iterator_loop(s): return
-    if dewy_sequence_loop(s): return
-    mark = scope_mark()
-    value_mark = value_loops.len()
-    enter_loop()
+    if dewy_cursor_loop(s): return true
+    if map_tidy_first(s): return true
+    if dewy_iterator_loop(s): return true
+    if dewy_sequence_loop(s): return true
+    false
+for_open_range = (s: int):
+    if fact_open_range(s): fact_requests.push(FactRequest(s, int(ctxs[cx].inst)))
+# (a map with entries removed has them still in place, marked gone: the loop goes over a
+# copy without them; a `loop mut` had the map itself made so, by map_tidy_first)
+for_map_view = (s: int, t0: int) -> int:
+    t = t0
     it = int(nodes[s].a)
-    is_mut = has_flag(s, NF_MUT)
-    nv = nkids(s)
-    n1 = int(nodes[kid(s, 0)].name)
-    n2 = 0
-    if nv > 1: n2 = int(nodes[kid(s, 1)].name)
     pos = nodes[s].pos
-    if nodes[it].kind == .range:
-        if nodes[it].a == 0: fatal(nodes[it].pos, "a loop range needs a start")
-        t = check_expr(int(nodes[it].a), 0)
-        nodes[it].a = i32(last_checked)
-        la = has_flag(int(nodes[it].a), NF_LITERAL)
-        lb = true
-        if nodes[it].b != 0:
-            check_expr(int(nodes[it].b), 0)
-            nodes[it].b = i32(last_checked)
-            lb = has_flag(int(nodes[it].b), NF_LITERAL)
-            if la and not lb: t = int(nodes[int(nodes[it].b)].type)
-        if has_flag(it, NF_STEP):
-            check_expr(int(nodes[it].c), 0)
-            nodes[it].c = i32(last_checked)
-            if la and lb and not has_flag(int(nodes[it].c), NF_LITERAL): t = int(nodes[int(nodes[it].c)].type)
-        if la and lb and (not has_flag(it, NF_STEP) or has_flag(int(nodes[it].c), NF_LITERAL)): t = lit_default(int(nodes[it].a))
-        if tkind(t) == .str_: fatal(nodes[it].pos, "text is joined with `+` (or put in a string: \"\{a}\{b}\"); `..` makes a range of numbers")
-        if not is_int(t) or nodes[int(nodes[it].a)].kind == .float_lit or nodes[int(nodes[it].b)].kind == .float_lit:
-            if is_int(t): t = T_FLOAT
-            fatal(nodes[it].pos, "a range counts in whole numbers, not {dt(t)} (for 0.0 to 1.0 in tenths, count to 10 and divide: {jd(nodes[it].pos, "`loop i in [0..10): x = f64(i) / 10.0`", "`loop i in [0..10] \{ let x = float64(i) / 10 }`")})")
-        nodes[it].a = i32(coerce(int(nodes[it].a), t))
-        if nodes[it].b != 0: nodes[it].b = i32(coerce(int(nodes[it].b), t))
-        if has_flag(it, NF_STEP): nodes[it].c = i32(coerce(int(nodes[it].c), t))
-        if nv != 1: fatal(pos, "a range loop has one loop variable")
-        if is_mut: fatal(pos, "`{mutable_loop_syntax(pos)}` needs an array (a range's numbers are not stored anywhere)")
-        l = new_local(n1, t, pos)
-        nodes[s].sym = i32(l)
-        nodes[s].aux = 0
-        if fact_open_range(s): fact_requests.push(FactRequest(s, int(ctxs[cx].inst)))
-    else:
-        t = prune(check_expr(it, 0))
+    if is_map_type(t) and not has_flag(s, NF_MUT) and not ownership_fact_type(t):
+        add_flag(it, NF_CHECKED)
+        lv = int(nodes[synth_call("__map_entries", [it], pos)].a)
+        t = prune(check_expr(lv, 0))
         it = last_checked
         nodes[s].a = i32(it)
-        # (a map with entries removed has them still in place, marked gone: the loop goes over a
-        # copy without them; a `loop mut` had the map itself made so, by map_tidy_first)
-        if is_map_type(t) and not is_mut and not ownership_fact_type(t):
-            add_flag(it, NF_CHECKED)
-            lv = int(nodes[synth_call("__map_entries", [it], pos)].a)
-            t = prune(check_expr(lv, 0))
-            it = last_checked
-            nodes[s].a = i32(it)
-        if (is_map_type(t) or is_map_entries_type(t)) and nodes[s].ival == 1:
-            # `i in 0.. and key in map` counts keys. The native two-binding
-            # map loop otherwise means key/value, so iterate its key snapshot.
-            add_flag(it, NF_CHECKED)
-            t = prune(check_expr(bc_map_keys(it, pos), 0))
-            it = last_checked
-            nodes[s].a = i32(it)
-        k = types[t].kind
-        if k == .range:
-            l = new_local(n1, T_INT, pos)
-            nodes[s].sym = i32(l)
-            nodes[s].aux = 4
-        else if k == .array or k == .str_ or k == .fixed:
-            et = T_U8
-            if k == .array or k == .fixed: et = int(types[t].elem)
-            idxname = 0
-            if nv == 2: idxname = n1
-            collide_local(s)
-            idx = new_local(idxname, T_INT, pos)
-            snap = new_local(0, t, pos)
-            elname = n1
-            if nv == 2: elname = n2
-            el = 0
-            if is_mut:
-                if k == .str_: fatal(pos, "strings are immutable; 'for mut' needs an array")
-                cp_inner += 1                  # only the elements change, not the array's length
-                check_place(it, true)
-                cp_inner -= 1
-                el = new_local(elname, et, pos)
-                locals[el].flags = i32(int(locals[el].flags) | LF_ALIAS)
-                ix = mk(.index, pos)
-                # (it is checked; m[k] of a map was made the place in it by check_place)
-                base = copy_place(it)
-                nodes[ix].a = i32(base)
-                nodes[ix].b = i32(mk_ident_local(idx, pos))
-                nodes[ix].type = i32(et)
-                add_flag(ix, NF_CHECKED)
-                if k == .fixed: add_flag(ix, NF_INBOUNDS)
-                locals[el].alias = i32(ix)
-                nodes[s].aux = 2
-            else:
-                el = new_local(elname, et, pos)
-                locals[el].flags = i32(int(locals[el].flags) | LF_BYREF)
-                if k == .array and dewy_at(pos): locals[el].flags |= i32(LF_VALUEITER)
-                nodes[s].aux = 1
-                if k == .array and dewy_at(pos) and route_text(it) != "": value_loops.push(ValueLoop(cx, it, elname))
-            nodes[s].sym = i32(el)
-            nodes[s].c = i32(idx)
-            nodes[s].d = i32(snap)
-        else if is_map_type(t) or is_map_entries_type(t):
-            si = int(types[t].st)
-            check_struct_fields(si)
-            kt = int(fields[int(structs[si].fields)].type)
-            vt = int(fields[int(structs[si].fields) + 1].type)
-            collide_local(s)
-            idx = new_local(0, T_INT, pos)
-            snap = new_local(0, t, pos)
-            kl = new_local(n1, telem(kt), pos)
-            locals[kl].flags = i32(int(locals[kl].flags) | LF_BYREF)
-            vl = 0
-            if nv == 2:
-                if is_mut:
-                    check_place(it, true)
-                    vl = new_local(n2, telem(vt), pos)
-                    locals[vl].flags = i32(int(locals[vl].flags) | LF_ALIAS)
-                    f = mk(.field, pos)
-                    nodes[f].a = i32(clone(it))
-                    nodes[f].name = i32(intern("vals"))
-                    ix = mk(.index, pos)
-                    nodes[ix].a = i32(f)
-                    nodes[ix].b = i32(mk_ident_local(idx, pos))
-                    check_expr(ix, 0)
-                    locals[vl].alias = i32(last_checked)
-                else:
-                    vl = new_local(n2, telem(vt), pos)
-                    locals[vl].flags = i32(int(locals[vl].flags) | LF_BYREF)
-                    map_loop_values[vl] = true
-            else if is_mut: fatal(pos, "'for mut' over a map needs key and value variables")
-            nodes[s].aux = 3
-            nodes[s].sym = i32(kl)
-            nodes[s].c = i32(idx)
-            nodes[s].d = i32(snap)
-            nodes[s].aux2 = i32(vl)
-        else:
-            never_cascade(nodes[it].pos, t)
-            fatal(nodes[it].pos, "cannot iterate over a value of type {dt(t)}")
-    check_loop_enter(s)
-    check_block(int(nodes[s].b), 0, false)
-    value_loops.truncate(value_mark)
-    loop_serials.pop()
-    check_loop_leave(s)
-    scope_reset(mark)
+    if (is_map_type(t) or is_map_entries_type(t)) and nodes[s].ival == 1:
+        # `i in 0.. and key in map` counts keys. The native two-binding
+        # map loop otherwise means key/value, so iterate its key snapshot.
+        add_flag(it, NF_CHECKED)
+        t = prune(check_expr(bc_map_keys(it, pos), 0))
+        it = last_checked
+        nodes[s].a = i32(it)
+    t
+for_collide = (s: int):
+    collide_local(s)
+    return
+# `loop @x in xs`: x is xs[i] itself (only the elements change, not the array's length)
+for_element = (s: int, name: int, et: int, idx: int, fixed: bool) -> int:
+    it = int(nodes[s].a)
+    pos = nodes[s].pos
+    cp_inner += 1
+    check_place(it, true)
+    cp_inner -= 1
+    el = new_local(name, et, pos)
+    locals[el].flags = i32(int(locals[el].flags) | LF_ALIAS)
+    ix = mk(.index, pos)
+    # (it is checked; m[k] of a map was made the place in it by check_place)
+    base = copy_place(it)
+    nodes[ix].a = i32(base)
+    nodes[ix].b = i32(mk_ident_local(idx, pos))
+    nodes[ix].type = i32(et)
+    add_flag(ix, NF_CHECKED)
+    if fixed: add_flag(ix, NF_INBOUNDS)
+    locals[el].alias = i32(ix)
+    el
+for_route = (it: int) -> bool: route_text(it) != ""
+for_struct_fields = (si: int):
+    check_struct_fields(si)
+    return
+# `loop k, @v in m`: v is the entry's value in place
+for_map_value = (s: int, name: int, vt: int, idx: int) -> int:
+    it = int(nodes[s].a)
+    pos = nodes[s].pos
+    check_place(it, true)
+    vl = new_local(name, telem(vt), pos)
+    locals[vl].flags = i32(int(locals[vl].flags) | LF_ALIAS)
+    f = mk(.field, pos)
+    nodes[f].a = i32(clone(it))
+    nodes[f].name = i32(intern("vals"))
+    ix = mk(.index, pos)
+    nodes[ix].a = i32(f)
+    nodes[ix].b = i32(mk_ident_local(idx, pos))
+    check_expr(ix, 0)
+    locals[vl].alias = i32(last_checked)
+    vl
+for_map_value_ref = (vl: int): map_loop_values[vl] = true
+for_body = (b: int):
+    check_block(b, 0, false)
+    return
+for_error = (n: int, t0: int, code: int):
+    t = t0
+    pos = nodes[n].pos
+    if code == 1: fatal(pos, "a loop range needs a start")
+    if code == 2: fatal(pos, "text is joined with `+` (or put in a string: \"\{a}\{b}\"); `..` makes a range of numbers")
+    if code == 3:
+        if is_int(t): t = T_FLOAT
+        fatal(pos, "a range counts in whole numbers, not {dt(t)} (for 0.0 to 1.0 in tenths, count to 10 and divide: {jd(pos, "`loop i in [0..10): x = f64(i) / 10.0`", "`loop i in [0..10] \{ let x = float64(i) / 10 }`")})")
+    if code == 4: fatal(pos, "a range loop has one loop variable")
+    if code == 5: fatal(pos, "`{mutable_loop_syntax(pos)}` needs an array (a range's numbers are not stored anywhere)")
+    if code == 6: fatal(pos, "strings are immutable; 'for mut' needs an array")
+    if code == 7: fatal(pos, "'for mut' over a map needs key and value variables")
+    never_cascade(pos, t)
+    fatal(pos, "cannot iterate over a value of type {dt(t)}")
 
 # Arrays a Dewy loop iterates by value (`loop x in xs`), while their bodies are
 # checked: the loop sees the value at entry, so changing the array's length in
 # the body is an error naming the two meanings the program could have wanted.
-struct ValueLoop:
-    context: int
-    route: int      # the checked source: a binding or a field path of one
-    name: int       # the element's name
-
+# (ValueLoop: checker_for_loops.dewy)
 value_loops: ValueLoop[]
+for_host = CheckerForHost(for_rewrite, check_expr, coerce, lit_default, new_local, for_open_range, for_map_view, is_map_entries_type, for_collide, for_element, for_route, for_struct_fields, for_map_value, for_map_value_ref, for_body, scope_reset, for_error)
+for_input = CheckerForInput(&nodes, &lists, &types, &structs, &fields, &files, &locals, &check_scopes, &loop_serials, &loop_serial_next, &value_loops, &cx, &last_checked, &T_INT, &T_U8, &for_host)
+for_binding = checker_for_loops_bind(&for_input)
 
 route_text = (n: int) -> str:
     k = nodes[n].kind
