@@ -790,7 +790,10 @@ dictionary can require a new membership guard. A dictionary built by a comprehen
 that makes one entry keyed by the loop's element on every iteration, `[loop p in people p -> 0]`,
 has every element of that `people` value as a key (with no filter, `break` or `continue`),
 including each name of a `const` table it walks, and keeps them while later stores or
-`insert_if_absent` only add keys. The entries of a dictionary whose value type
+`insert_if_absent` only add keys, also after loops that only change entries. Keyed by one
+field of the element instead, `[loop p in people p.name -> 0]`, it has that field of each
+element of `people` as a key, so `loop p in people` can index `d[p.name]`. The entries of
+a dictionary whose value type
 is refined (`dict<string Slot>`) keep that contract when read, as array elements do.
 So does a loop over an array that ends each iteration with its element a key and
 removes none (no `break`), `loop name in [white black] { if name not in? d d[name] = 0 }`

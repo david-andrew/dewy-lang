@@ -1,0 +1,14 @@
+# A dictionary built from one field of each element, `[loop p in xs p.name -> v]`,
+# holds every element's field: later loops over the same xs index it directly, also
+# after entry changes and added keys.
+Player:type = [name:string nick:string rating:int]
+roster = ():>array<Player> => [Player["ana" "a" 3] Player["bo" "b" 1] Player["cy" "c" 2]]
+main = () => {
+    let players = roster()
+    let wins:dict<string int> = [loop p in players p.name -> 0]
+    loop p in players if p.rating >? 1 wins[p.name] += p.rating
+    wins.insert_if_absent("dee" 0);
+    loop p in players printl"{p.name} {wins[p.name]}"
+    let ratings:dict<int string> = [loop p in players p.rating -> p.nick]
+    loop p in players printl"{p.rating} {ratings[p.rating]}"
+}

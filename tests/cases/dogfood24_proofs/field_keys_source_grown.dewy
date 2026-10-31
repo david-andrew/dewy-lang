@@ -1,0 +1,9 @@
+# An element added after the dictionary was built need not be a key.
+Player:type = [name:string nick:string rating:int]
+roster = ():>array<Player> => [Player["ana" "a" 3] Player["bo" "b" 1] Player["cy" "c" 2]]
+main = () => {
+    let players = roster()
+    let wins:dict<string int> = [loop p in players p.name -> 0]
+    players.push(Player["dee" "d" 0])
+    loop p in players printl(wins[p.name])
+}

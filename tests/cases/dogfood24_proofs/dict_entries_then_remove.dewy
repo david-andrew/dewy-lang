@@ -1,0 +1,9 @@
+# A key removed after the entry changes is gone, even with another added after.
+main = () => {
+    let words = ["ana" "bo" "cy"]
+    let counts:dict<string int> = [loop w in words w -> 0]
+    loop w in words counts[w] += 1
+    counts.remove("bo");
+    counts.insert_if_absent("dee" 0);
+    loop w in words printl(counts[w])
+}

@@ -1,0 +1,8 @@
+# A filtered comprehension leaves some elements' fields out.
+Player:type = [name:string nick:string rating:int]
+roster = ():>array<Player> => [Player["ana" "a" 3] Player["bo" "b" 1] Player["cy" "c" 2]]
+main = () => {
+    let players = roster()
+    let wins:dict<string int> = [loop p in players if p.rating >? 1 p.name -> 0]
+    loop p in players printl(wins[p.name])
+}

@@ -1,0 +1,9 @@
+# A key removed after the dictionary was built is gone.
+Player:type = [name:string nick:string rating:int]
+roster = ():>array<Player> => [Player["ana" "a" 3] Player["bo" "b" 1] Player["cy" "c" 2]]
+main = () => {
+    let players = roster()
+    let wins:dict<string int> = [loop p in players p.name -> 0]
+    wins.remove("bo");
+    loop p in players printl(wins[p.name])
+}

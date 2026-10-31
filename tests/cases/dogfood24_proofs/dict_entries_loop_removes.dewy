@@ -1,0 +1,8 @@
+# A loop that may remove keys does not keep the key positions.
+main = () => {
+    let words = ["ana" "bo" "cy"]
+    let counts:dict<string int> = [loop w in words w -> 0]
+    loop w in words if w.length <? 3 counts.remove(w);
+    counts.insert_if_absent("dee" 0);
+    loop w in words printl(counts[w])
+}

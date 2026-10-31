@@ -301,6 +301,10 @@ const FACT_ELEMENT_BELOW = -28
 # comprehension's dictionary (fact_grown_roots): it holds every key that
 # dictionary held.
 const FACT_MAP_GROWN = -29
+# The keys a comprehension's dictionary takes from one field of this source's
+# elements (fact_map_of): its value's projection on each field name is that
+# dictionary, so a loop element's field is a key of it (fact_loop_elements).
+const FACT_FIELD_KEYS = -30
 # Component c (< 8) of every element of this array of tuples, an integer: its
 # hull (FACT_COMPONENT_FACTS - 2c) and a value it is below (one less), as
 # FACT_ELEMENT_VALUE and FACT_ELEMENT_BELOW for an integer array (`[loop i in
@@ -1497,7 +1501,7 @@ fact_replace = (s: mut FactState, base: int, selector: int, element: bool, value
     loop pi >= 0:
         p = old[pi]
         pi = fact_projection_next_in(old, links, pi)
-        if element and not p.element and (p.selector == FACT_ELEMENT_LENGTH or p.selector == FACT_ELEMENT_VALUE or p.selector == FACT_ELEMENT_COPY or p.selector == FACT_ELEMENT_SOURCE or p.selector == FACT_KEYS_SOURCE or p.selector == FACT_KEYS_POSITIONS or p.selector == FACT_ELEMENT_SAME_LENGTH or p.selector == FACT_ELEMENT_BELOW or fact_component_fact(p.selector)):
+        if element and not p.element and (p.selector == FACT_ELEMENT_LENGTH or p.selector == FACT_ELEMENT_VALUE or p.selector == FACT_ELEMENT_COPY or p.selector == FACT_ELEMENT_SOURCE or p.selector == FACT_KEYS_SOURCE or p.selector == FACT_FIELD_KEYS or p.selector == FACT_KEYS_POSITIONS or p.selector == FACT_ELEMENT_SAME_LENGTH or p.selector == FACT_ELEMENT_BELOW or fact_component_fact(p.selector)):
             if p.selector == FACT_ELEMENT_COPY: fact_fill_remainder(s, base, v, selector, p.value)
             # (a row stored back with the one length every row has, as
             # `grid[y][x] = v` does, keeps that length for all of them)
@@ -3399,10 +3403,13 @@ fact_grown_root = (s: FactState, map: int) -> int:
     if g < 0: return 0
     s.projections[g].value
 
-# After a key-adding store: after holds every key of before's root. O(1).
+# After a key-adding store: after holds every key of before's root, or of
+# before itself when its key positions are known (a comprehension's after
+# entry changes, fact_map_member). O(1).
 fact_map_grew = (s: mut FactState, before: int, after: int):
     if before == 0 or fact_slot(s, before) < 0: return
     root = fact_grown_root(s, before)
+    if root == 0 and fact_projection_find(s, before, FACT_MAP_POSITIONS, false) >= 0: root = before
     if root != 0 and fact_slot(s, root) >= 0 and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(after, FACT_MAP_GROWN, false, root))
 
 fact_host_finite = (s: FactState, v: int) -> bool:
@@ -5620,8 +5627,12 @@ fact_map_member = (s: mut FactState, n: int, map: int, key: int) -> int:
         before = fact_projection_find(s, held, FACT_MAP_POSITIONS, false)
         after = if before >= 0: fact_projection_find(s, map, FACT_MAP_POSITIONS, false) else: -1
         if after >= 0 and s.projections[before].value == s.projections[after].value: return fact_constant(s, 1)
-        # (map grew from that comprehension's dictionary by adding keys)
-        if fact_grown_roots.has(held) and fact_grown_root(s, map) == held: return fact_constant(s, 1)
+        # (map grew by adding keys from that comprehension's dictionary, or
+        # from a value sharing its key positions)
+        root = fact_grown_root(s, map)
+        if root != 0 and root == held: return fact_constant(s, 1)
+        at = if root != 0 and before >= 0: fact_projection_find(s, root, FACT_MAP_POSITIONS, false) else: -1
+        if at >= 0 and s.projections[before].value == s.projections[at].value: return fact_constant(s, 1)
     fact_project(s, map, fact_map_key(s, kid(n, 1), key), true, T_BOOL)
 
 # A dictionary's entries (no traps): the entry of key k in a dictionary's value
@@ -5832,19 +5843,36 @@ fact_map_of = (n: int, s: mut FactState) -> int:
     key_type = fact_type(struct_targ(int(types[map].st), 0))
     kt = representation_type(key_type)
     element = int(nodes[loop_].sym)
-    if element <= 0 or not (fact_scalar(kt) or kt == T_STR) or fact_type(int(locals[element].type)) != key_type: return 0
+    if element <= 0 or not (fact_scalar(kt) or kt == T_STR): return 0
     body = int(nodes[loop_].b)
     flow = fact_push_flow(body, acc)
     if flow.0 != 1 or flow.1 != -2: return 0
     sites: int[]
     if not fact_push_only(body, acc, sites) or sites.len() == 0: return 0
+    # (or every key is one field of the element, `[loop p in people p.name -> v]`)
+    field = -1
     loop site in sites:
         pair = kid(site, 1)
         if nodes[pair].kind != .tuple or nkids(pair) != 2: return 0
         key = kid(pair, 0)
+        name = 0
+        if nodes[key].kind == .field and nodes[key].aux >= 0 and tkind(ntype(int(nodes[key].a))) == .struct_ and fact_type(ntype(key)) == key_type:
+            name = int(nodes[key].name)
+            key = int(nodes[key].a)
         if nodes[key].kind != .ident or nodes[key].aux != i32(int(SK.local)) or int(nodes[key].sym) != element: return 0
+        if field >= 0 and field != name: return 0
+        field = name
+    if field == 0 and fact_type(int(locals[element].type)) != key_type: return 0
     result = fact_fresh(s, ntype(n))
     if fact_name_vals == 0: fact_name_vals = intern("vals")
+    if field > 0:
+        view = fact_project(s, source, FACT_FIELD_KEYS, false, T_INT)
+        if fact_projection_find(s, view, field, false) >= 0: return result
+        fact_add_projection(s, FactProjection(view, field, false, result))
+        # (its key positions, which a later entry change keeps: fact_map_member)
+        fact_project(s, result, FACT_MAP_POSITIONS, false, T_INT)
+        fact_grown_roots[result] = true
+        return result
     if positions != 0:
         fact_add_projection(s, FactProjection(result, FACT_MAP_POSITIONS, false, positions))
         fact_literal_keys(s, int(nodes[loop_].a), result)
@@ -7912,7 +7940,8 @@ fact_loop_elements = (n: int, base: int, s: mut FactState):
     if nodes[n].aux != 1 or l <= 0 or base == 0: return
     place = PlaceIdentity(.local, int(locals[l].owner), l)
     below = fact_projection_find(s, base, FACT_ELEMENT_BELOW, false)
-    if below < 0 and fact_projection_find(s, base, FACT_KEYS_SOURCE, false) < 0:
+    field_keys = fact_projection_find(s, base, FACT_FIELD_KEYS, false)
+    if below < 0 and field_keys < 0 and fact_projection_find(s, base, FACT_KEYS_SOURCE, false) < 0:
         fact_loop_element(n, base, s)
         return
     i = fact_binding(s, place)
@@ -7922,6 +7951,27 @@ fact_loop_elements = (n: int, base: int, s: mut FactState):
     value = if i >= 0 and s.bindings[i].value != before: s.bindings[i].value else: fact_fresh(s, int(locals[l].type))
     if below >= 0: fact_difference(s, value, s.projections[below].value, -1, n, 16)
     fact_bind(s, place, fact_keys_element(s, base, value))
+    # (the element's field the dictionary took its keys from is a key of it)
+    if field_keys >= 0: fact_field_keys(s, s.projections[field_keys].value, value, int(locals[l].type))
+
+# Each field name the view (FACT_FIELD_KEYS) holds: the element's field is a
+# key of that dictionary (FACT_KEY_SOURCE). O(the view's projections).
+fact_field_keys = (s: mut FactState, view: int, value: int, t0: int):
+    t = fact_type(t0)
+    if tkind(t) != .struct_: return
+    si = int(types[t].st)
+    held: FactProjection[]
+    pi = fact_projection_first(s, view)
+    loop pi >= 0:
+        held.push(s.projections[pi])
+        pi = fact_projection_after(s, pi)
+    loop p in held:
+        if p.element or p.selector <= 0: continue
+        loop i in [0..int(structs[si].nfields)):
+            f = fields[int(structs[si].fields) + i]
+            if int(f.name) != p.selector or s.projections.len() >= FACT_CAP: continue
+            key = fact_project(s, value, p.selector, false, int(f.type))
+            fact_add_projection(s, FactProjection(key, FACT_KEY_SOURCE, false, p.value))
 
 fact_loop_element = (n: int, base: int, s: mut FactState):
     l = int(nodes[n].sym)

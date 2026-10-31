@@ -83,7 +83,7 @@ main = () => {
         printl"champion: {name}"
     }
     loop p in players {
-        let r = records.get(p.name) ?? Record[]
+        let r = records[p.name]
         let fate = if r.out_in =? round "won it all" else if r.losses =? 0 "never played" else "out in round {r.out_in}"
         printl"{p.name:<4} {p.rating}  {r.wins}-{r.losses}  {fate}"
     }

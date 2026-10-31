@@ -1,0 +1,10 @@
+# After a loop of entry changes, a comprehension dictionary keeps its key positions;
+# a key added then keeps every key it had.
+main = () => {
+    let words = ["ana" "bo" "cy"]
+    let counts:dict<string int> = [loop w in words w -> 0]
+    loop w in words if w.length >? 2 counts[w] += 1
+    counts.insert_if_absent("dee" 0);
+    counts["eve"] = 5
+    loop w in words printl"{w} {counts[w]}"
+}
