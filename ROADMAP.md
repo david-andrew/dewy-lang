@@ -7,12 +7,12 @@ day; keep it under 150 lines. Accepted designs live in [docs/design](docs/design
 
 ## North star
 
-| Measure | Now (2026-10-30) | Goal |
+| Measure | Now (2026-10-31) | Goal |
 |---|---|---|
 | Acceptance ladder, design surface | 122/122 (saturated; new rungs needed) | all |
 | Tier-4 flagship programs (1–5k lines each) | 7/7 pass | all pass |
-| No traps by default | census 1,430 sites / 429 programs (2,730 / 2,252), down from 1,793 / 3,600 on 10-26 | ordinary code proves without opt-ins |
-| Compile throughput, single thread, default build, every processed line | flagships 153.6k lines/s (min 99_dewy_frontend 113.9k) | 200–250k on every flagship |
+| No traps by default | census 1,327 sites / 429 programs (2,604 / 2,252), down from 1,793 / 3,600 on 10-26 | ordinary code proves without opt-ins |
+| Compile throughput, single thread, default build, every processed line | flagships 155.3k lines/s (min 100_rtos_kernel 124.4k, 99_dewy_frontend 127.2k) | 200–250k on every flagship |
 | Hello-world compile | 8.0 ms (instruction-derived) | ≤20 ms |
 | Kernels vs C -O2 (time, default) | broadcast 0.75×, Jacobi 0.59×, arena 3.2×; mergesort 0.62× OpenMP | ≤1.2× |
 | Quick / full suite | ~100 s loaded (reselect) / ~5 min | ≤30 s / ≤5 min |
@@ -27,7 +27,8 @@ changes. Wall clock only on a quiet pinned machine or a CI runner. Kernels:
 1. **No traps: ordinary code proves** (top capability). #95, #96, #98 and #106
    are implemented. Remaining families: index bounds and integer fit on inputs
    without stated contracts (diagnostics name the contract), loop-carried
-   selector lengths, stepped ranges. Dogfood rounds alternate discovery and fix.
+   selector lengths. Stepped ranges measured zero corpus demand. Dogfood rounds
+   alternate discovery and fix.
 2. **Compile speed** (200–250k lines/s on every flagship). 99_dewy_frontend
    needs ~44% fewer instructions per line. Of the four strategy programs,
    register allocation, isel and dense storage measured ≤1.6% each; the facts
@@ -35,12 +36,15 @@ changes. Wall clock only on a quiet pinned machine or a CI runner. Kernels:
    A strategy decision is open (see the pending questions).
 3. **Self-hosting** ([readiness](docs/design/self_hosting.md)): the front end, the
    checker state, the optimizer, the shared backend analysis, and the wasm, arm64
-   and x64 emitters run in Dewy. Next: close milestone 1 (Dewy owns all subsystem
+   and x64 emitters run in Dewy, with most expression and statement checking.
+   Next: the statement layer (let, assign, blocks), the safety passes, then
+   the expression core; close milestone 1 (Dewy owns all subsystem
    execution), then milestone 3 (a pinned C-reproducible seed that retires the
    frozen twins).
-4. **Runtime speed vs C:** allocation and growth in `arena`, `push` vs C
-   (~2.3× instructions). Fork-join one-worker overhead ≤1.03×; mergesort's
-   gap to OpenMP is per-instruction cost (memory), not instruction count.
+4. **Runtime speed vs C:** `push` and `arena` growth bookkeeping is bounded
+   below 1.5× (closed); the rest of their gap is arithmetic and reference
+   cleanup. Fork-join one-worker overhead ≤1.03×; mergesort's gap to OpenMP
+   is per-instruction cost (memory), not instruction count.
 5. **Decided surface still to build:** the time system (redesign pending).
 6. **Hygiene at quiet points:** the internal Sloppy comment sweep and
    `SLOPPY_*` names.
