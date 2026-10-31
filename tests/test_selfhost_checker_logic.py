@@ -58,7 +58,9 @@ logical = (k: NK, a: int, b: int = 0) -> int:
 main = ():
     prepare()
     xg_scopes.names.push(9)
+    # (literal operands: the host coerces them; settled ones of the type it is not asked)
     a = operand(T_BOOL); b = operand(T_BOOL)
+    nodes[a].flags = 256; nodes[b].flags = 256
     loop k in [NK.and_, NK.or_]:
         start = events.len()
         n = logical(k, a, b)
@@ -74,6 +76,12 @@ main = ():
     start = events.len()
     assert(xg_check(logical(.not_, a), 0, 0).type == T_BOOL)
     assert(events.len() == start + 2)
+    sa = operand(T_BOOL); sb = operand(T_BOOL)
+    start = events.len()
+    assert(xg_check(logical(.and_, sa, sb), 0, 0).type == T_BOOL)
+    assert(events.len() == start + 4 and events[start + 1] == "narrow:{sa}:true" and events[start + 3] == "reset:1")
+    start = events.len()
+    assert(xg_check(logical(.not_, sa), 0, 0).type == T_BOOL and events.len() == start + 1)
     loop k in [NK.and_, NK.or_, NK.not_]:
         ia = operand(T_INT)
         n = logical(k, ia, operand(T_INT))

@@ -3,6 +3,7 @@ from p"node_store.dewy" import Node
 from p"checker_types.dewy" import (TypeInfo TK)
 from p"checker_state.dewy" import (FnCtx CheckerScope)
 from p"type_inference.dewy" import tu_prune
+from p"checker_coerce.dewy" import cq_settled
 from p"checker_expr.dewy" import check_expr
 # Loop statements: `loop cond` and `loop let x = v` (scope, loop serial, guard
 # narrowing, label and body), `break` and `continue` (label resolution and the
@@ -108,7 +109,8 @@ xb_while=(s:XBWord):>void=>$unsafe {
     } else {
         let ct=check_expr(XBWord(xb_nodes[0].ptr[s].a) xb_bool_type[0])
         if xb_kind(ct) =? 'array' or xb_nodes[0].ptr[XBWord(xb_nodes[0].ptr[s].a)].kind =? 'range' {xb_host[0].error(s ct 2)}
-        let cond=xb_host[0].coerce(xb_last[0] xb_bool_type[0])
+        let cond=xb_last[0]
+        if not cq_settled(xb_nodes xb_types cond xb_bool_type[0]) {cond=xb_host[0].coerce(cond xb_bool_type[0])}
         xb_nodes[0][s].a=int32<overflow='wrap'>(cond)
         # The body runs only after its guard succeeds. Assignment still
         # invalidates these aliases, just as it does inside an if arm.

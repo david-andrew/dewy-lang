@@ -4,6 +4,7 @@ use 'checker_types.dewy'
 use 'source_types.dewy'
 use 'checker_state.dewy'
 use 'type_inference.dewy'
+use 'checker_coerce.dewy'
 struct CheckerDeclHost:
     form: (int, int) -> bool
     binding_type: (int) -> int
@@ -203,7 +204,8 @@ vd_decl = (s: int):
                 member = et
                 if literal != 0: member = literal
                 vd_host[0].annotated(s, t, member)
-            vd_nodes[0][s].b = i32(vd_host[0].coerce(int(vd_nodes[0][s].b), t))
+            v = int(vd_nodes[0][s].b)
+            if not cq_settled(vd_nodes, vd_types, v, t): vd_nodes[0][s].b = i32(vd_host[0].coerce(v, t))
         else:
             t = et
             k = vd_kind(t)

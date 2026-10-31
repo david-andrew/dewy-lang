@@ -4,6 +4,7 @@ from p"checker_types.dewy" import (TypeInfo TK)
 from p"source_types.dewy" import SrcFile
 from p"checker_state.dewy" import (FnInst FnCtx)
 from p"type_inference.dewy" import (tu_prune tu_unify tu_zonk)
+from p"checker_coerce.dewy" import cq_settled
 # A function body's result obligations: an inferred result from its value, its end
 # or nothing; a declared result given on every path; `never` functions not finishing;
 # inferred throws finished. Work is O(1) beyond checking the body and the demanded
@@ -65,6 +66,11 @@ xe_ret=():>XEWord=>$unsafe {XEWord(xe_contexts[0][xe_context[0]].ret)}
 # The value a block ends with, and replacing it.
 xe_value=(b:XEWord):>XEWord=>$unsafe {XEWord(xe_nodes[0].ptr[xe_kid(b xe_count(b) - 1)].a)}
 xe_set_value=(b:XEWord e:XEWord):>void=>$unsafe {xe_nodes[0][xe_kid(b xe_count(b) - 1)].a=int32<overflow='wrap'>(e)}
+# The body's value coerced to r (a settled value of type r stays as it is)
+xe_coerce_value=(body:XEWord r:XEWord):>void=>$unsafe {
+    let v=xe_value(body)
+    if not cq_settled(xe_nodes xe_types v r) {xe_set_value(body xe_host[0].coerce(v r))}
+}
 # Does the body's last statement end every path?
 xe_ends=(body:XEWord):>bool=>$unsafe {
     let n=xe_count(body)
@@ -101,7 +107,7 @@ xe_body=(f:XEWord decl:XEWord):>void=>$unsafe {
                 tu_unify(r xe_never_type[0]);
             } else {tu_unify(r xe_void_type[0]);}
         } else if xe_types[0].ptr[r].kind =? 'void_' {xe_nodes[0][body].aux=0}
-        else if xe_nodes[0].ptr[body].aux not=? 0 {xe_set_value(body xe_host[0].coerce(xe_value(body) r))}
+        else if xe_nodes[0].ptr[body].aux not=? 0 {xe_coerce_value(body r)}
         else if bt not=? xe_never_type[0] and not xe_ends(body) {xe_host[0].error(decl 1 r decl)}
         xe_host[0].finish_throws(f body)
         xe_fns[0][f].ret=int32<overflow='wrap'>(tu_zonk(xe_ret()))
@@ -110,7 +116,7 @@ xe_body=(f:XEWord decl:XEWord):>void=>$unsafe {
     } else if r =? xe_never_type[0] and decl not=? 0 and xe_files[0][xe_nodes[0].ptr[decl].pos >> 40].is_dewy and bt not=? xe_never_type[0] and not xe_ends(body) {
         xe_host[0].error(decl 3 0 decl)
     } else if want {
-        if xe_nodes[0].ptr[body].aux not=? 0 {xe_set_value(body xe_host[0].coerce(xe_value(body) r))}
+        if xe_nodes[0].ptr[body].aux not=? 0 {xe_coerce_value(body r)}
         else if bt not=? xe_never_type[0] and not xe_ends(body) {
             if not xe_host[0].void_arm_end(body r) {xe_host[0].error(body 4 r decl)}
         }

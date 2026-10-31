@@ -1,0 +1,13 @@
+# Frozen coercion no-op front extracted from expr.jo's coerce.
+use 'node_store.dewy'
+use 'checker_types.dewy'
+use 'type_inference.dewy'
+cq_settled = (nodes: *(Node[]), types: *(TypeInfo[]), n: int, t: int) -> bool:
+    if t == 0: return true
+    if nodes[0][n].type == 0 or int(nodes[0][n].flags) & 256 != 0: return false
+    k = nodes[0][n].kind
+    if k == .str_lit or k == .float_lit: return false
+    to = tu_prune(t)
+    if tu_prune(int(nodes[0][n].type)) != to: return false
+    tk = types[0][to].kind
+    tk != .refined and tk != .callable

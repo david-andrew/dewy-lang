@@ -4,6 +4,7 @@ from p"checker_types.dewy" import (TypeInfo StructInfo TK)
 from p"source_types.dewy" import SrcFile
 from p"checker_state.dewy" import (Local FnCtx StatementWatch)
 from p"type_inference.dewy" import (tu_prune tu_targ)
+from p"checker_coerce.dewy" import cq_settled
 # `let name = value`, `let name:T`, `let name:T = value`, once its other forms (a
 # spawned task's handle, soa and element aliases, lent and local places, shaped
 # values, patterns, globals) are passed to their host services: the written type
@@ -253,7 +254,8 @@ vd_decl=(s:VWord):>void=>$unsafe {
                 if literal not=? 0 {member=literal}
                 vd_host[0].annotated(s t member)
             }
-            vd_nodes[0][s].b=int32<overflow='wrap'>(vd_host[0].coerce(VWord(vd_nodes[0].ptr[s].b) t))
+            let v=VWord(vd_nodes[0].ptr[s].b)
+            if not cq_settled(vd_nodes vd_types v t) {vd_nodes[0][s].b=int32<overflow='wrap'>(vd_host[0].coerce(v t))}
         } else {
             t=et
             let k=vd_kind(t)

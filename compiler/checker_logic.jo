@@ -4,6 +4,7 @@ use 'checker_types.dewy'
 use 'checker_state.dewy'
 use 'checker_tokens.dewy'
 use 'type_inference.dewy'
+use 'checker_coerce.dewy'
 struct CheckerLogicHost:
     check: (int, int) -> int
     coerce: (int, int) -> int
@@ -59,13 +60,14 @@ xg_check = (n: int, expected: int, ex: int) -> CheckerLogicResult:
         xg_input[0].nodes[0][a].flags = xg_input[0].nodes[0][a].flags | 128
         xg_input[0].host[0].broadcast(n)
         return CheckerLogicResult(xg_input[0].host[0].check(n, expected), true)
-    a = xg_input[0].host[0].coerce(int(xg_input[0].nodes[0][n].a), xg_input[0].bool_type[0])
+    a = int(xg_input[0].nodes[0][n].a)
+    if not cq_settled(xg_input[0].nodes, xg_input[0].types, a, xg_input[0].bool_type[0]): a = xg_input[0].host[0].coerce(a, xg_input[0].bool_type[0])
     xg_input[0].nodes[0][n].a = i32(a)
     if k != .not_:
         mark = xg_input[0].scopes[0].names.len()
         xg_input[0].host[0].narrow(int(xg_input[0].nodes[0][n].a), k == .and_)
         b = int(xg_input[0].nodes[0][n].b)
         xg_input[0].host[0].check(b, xg_input[0].bool_type[0])
-        xg_input[0].host[0].coerce(b, xg_input[0].bool_type[0])
+        if not cq_settled(xg_input[0].nodes, xg_input[0].types, b, xg_input[0].bool_type[0]): xg_input[0].host[0].coerce(b, xg_input[0].bool_type[0])
         xg_input[0].host[0].reset(mark)
     CheckerLogicResult(xg_input[0].bool_type[0], false)

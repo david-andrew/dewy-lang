@@ -4,6 +4,7 @@ use 'checker_types.dewy'
 use 'source_types.dewy'
 use 'checker_state.dewy'
 use 'type_inference.dewy'
+use 'checker_coerce.dewy'
 struct CheckerBodyResultHost:
     entry: (int, int) -> void
     init_body: (int, int) -> void
@@ -55,6 +56,9 @@ xe_kind = (t: int) -> TK: xe_types[0][tu_prune(t)].kind
 xe_ret = () -> int: int(xe_contexts[0][xe_context[0]].ret)
 xe_value = (b: int) -> int: int(xe_nodes[0][xe_kid(b, xe_count(b) - 1)].a)
 xe_set_value = (b: int, e: int): xe_nodes[0][xe_kid(b, xe_count(b) - 1)].a = i32(e)
+xe_coerce_value = (b: int, r: int):
+    v = xe_value(b)
+    if not cq_settled(xe_nodes, xe_types, v, r): xe_set_value(b, xe_host[0].coerce(v, r))
 xe_ends = (body: int) -> bool:
     n = xe_count(body)
     n > 0 and xe_host[0].terminates(xe_kid(body, n - 1))
@@ -83,7 +87,7 @@ xe_body = (f: int, decl: int):
             else if n > 0 and decl != 0 and xe_nodes[0][decl].kind == .fn_ and xe_ends(body) and not xe_host[0].never_skip(decl): tu_unify(r, xe_never_type[0])
             else: tu_unify(r, xe_void_type[0])
         else if xe_types[0][r].kind == .void_: xe_nodes[0][body].aux = 0
-        else if xe_nodes[0][body].aux != 0: xe_set_value(body, xe_host[0].coerce(xe_value(body), r))
+        else if xe_nodes[0][body].aux != 0: xe_coerce_value(body, r)
         else if bt != xe_never_type[0] and not xe_ends(body): xe_host[0].error(decl, 1, r, decl)
         xe_host[0].finish_throws(f, body)
         xe_fns[0][f].ret = i32(int(tu_zonk(xe_ret())))
@@ -92,6 +96,6 @@ xe_body = (f: int, decl: int):
     else if r == xe_never_type[0] and decl != 0 and xe_files[0][xe_nodes[0][decl].pos >> 40].is_dewy and bt != xe_never_type[0] and not xe_ends(body):
         xe_host[0].error(decl, 3, 0, decl)
     else if want:
-        if xe_nodes[0][body].aux != 0: xe_set_value(body, xe_host[0].coerce(xe_value(body), r))
+        if xe_nodes[0][body].aux != 0: xe_coerce_value(body, r)
         else if bt != xe_never_type[0] and not xe_ends(body):
             if not xe_host[0].void_arm_end(body, r): xe_host[0].error(body, 4, r, decl)

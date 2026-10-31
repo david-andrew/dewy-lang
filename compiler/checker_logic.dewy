@@ -3,6 +3,7 @@ from p"node_store.dewy" import Node
 from p"checker_types.dewy" import TypeInfo
 from p"checker_state.dewy" import CheckerScope
 from p"type_inference.dewy" import tu_prune
+from p"checker_coerce.dewy" import cq_settled
 # Logical expressions own operand order, integer rewrites and narrowing lifetime.
 # Work follows only demanded operands and existing scope rollback; arena elements
 # are reacquired after each reentrant semantic service.
@@ -67,14 +68,15 @@ xg_check=(n:XGWord expected:XGWord ex:XGWord):>CheckerLogicResult=>$unsafe {
         xg_input[0].host[0].broadcast(n)
         return [type=xg_input[0].host[0].check(n expected) bypass=true]
     }
-    let a=xg_input[0].host[0].coerce(XGWord(xg_input[0].nodes[0].ptr[n].a) xg_input[0].bool_type[0])
+    let a=XGWord(xg_input[0].nodes[0].ptr[n].a)
+    if not cq_settled(xg_input[0].nodes xg_input[0].types a xg_input[0].bool_type[0]) {a=xg_input[0].host[0].coerce(a xg_input[0].bool_type[0])}
     xg_input[0].nodes[0][n].a=int32<overflow='wrap'>(a)
     if k not=? 'not_' {
         let mark=xg_input[0].scopes[0].names.length
         xg_input[0].host[0].narrow(XGWord(xg_input[0].nodes[0].ptr[n].a) k =? 'and_')
         let b=XGWord(xg_input[0].nodes[0].ptr[n].b)
         xg_input[0].host[0].check(b xg_input[0].bool_type[0]);
-        xg_input[0].host[0].coerce(b xg_input[0].bool_type[0]);
+        if not cq_settled(xg_input[0].nodes xg_input[0].types b xg_input[0].bool_type[0]) {xg_input[0].host[0].coerce(b xg_input[0].bool_type[0]);}
         xg_input[0].host[0].reset(mark)
     }
     [type=xg_input[0].bool_type[0] bypass=false]

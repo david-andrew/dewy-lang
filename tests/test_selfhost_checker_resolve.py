@@ -187,7 +187,7 @@ def compare(compiler, tmp_path, release, driver, status=0, extra_stems=(), doubl
     stems = ('node_store', 'source_types', 'checker_types', 'checker_state', 'checker_tokens',
              'refinement_types', 'refine_predicates', 'refine_queries', 'type_queries',
              'type_intern', 'type_inference', 'type_constructors', 'type_labels',
-             'type_unions', 'checker_alias', 'checker_resolve') + tuple(doubles) + extra_stems
+             'type_unions', 'checker_alias', 'checker_resolve', 'checker_coerce') + tuple(doubles) + extra_stems
     for extension in ('dewy', 'jo'):
         directory = tmp_path / extension
         directory.mkdir()

@@ -1,0 +1,21 @@
+$runtime_checks
+from p"node_store.dewy" import Node
+from p"checker_types.dewy" import TypeInfo
+from p"type_inference.dewy" import tu_prune
+# Coercion's no-op front, answered from node and type reads so the common case needs
+# no host call: the host's coerce keeps every rewrite and diagnostic. Read only;
+# O(the two type-variable chains).
+CQWord:type=int64<overflow='wrap'>
+# Would coerce(n, t) leave n as it is? A settled value already of type t (not a literal,
+# a refinement or a callable: coerce's first case), or no type wanted.
+cq_settled=(nodes:ptr<array<Node>> types:ptr<array<TypeInfo>> n:CQWord t:CQWord):>bool=>$unsafe {
+    if t =? 0 {return true}
+    let node=nodes[0].ptr + n
+    if node[0].type =? 0 or (CQWord(node[0].flags) & 256) not=? 0 {return false}
+    let k=node[0].kind
+    if k =? 'str_lit' or k =? 'float_lit' {return false}
+    let to=tu_prune(t)
+    if tu_prune(CQWord(node[0].type)) not=? to {return false}
+    let tk=types[0].ptr[to].kind
+    tk not=? 'refined' and tk not=? 'callable'
+}

@@ -112,6 +112,18 @@ xl_int_default=(n:XLWord):>XLWord=>$unsafe {
     if xl_files[0][xl_nodes[0].ptr[n].pos >> 40].is_dewy {return xl_math_int[0]}
     xl_int_type[0]
 }
+# Does fixed-width integer type t hold int literal n of a Jo file? (else the host's coerce
+# decides, and reports what does not fit)
+xl_word_fits=(n:XLWord t:XLWord):>bool=>$unsafe {
+    if xl_nodes[0].ptr[n].kind not=? 'int_lit' {return false}
+    let bits=XLWord(xl_types[0].ptr[t].bits)
+    let sign=xl_types[0].ptr[t].sign
+    if (XLWord(xl_nodes[0].ptr[n].flags) & 2097152) not=? 0 {return bits >=? 64}
+    let v=xl_nodes[0].ptr[n].ival
+    if bits >=? 64 {return sign or v >=? 0}
+    if sign {return v >=? -(XLWord(1) << (bits - 1)) and v <? (XLWord(1) << (bits - 1))}
+    v >=? 0 and v <? (XLWord(1) << bits)
+}
 xl_check_int=(n:XLWord expected:XLWord):>XLWord=>$unsafe {
     let ex=xl_expected(expected)
     let exk:TK='void_'
@@ -120,7 +132,12 @@ xl_check_int=(n:XLWord expected:XLWord):>XLWord=>$unsafe {
     xl_nodes[0][n].flags=xl_nodes[0].ptr[n].flags | 256
     let initial=xl_int_default(n)
     xl_nodes[0][n].type=int32<overflow='wrap'>(initial)
-    if ex not=? 0 and (exk =? 'int_' or exk =? 'float_') {
+    if exk =? 'int_' and initial not=? xl_math_int[0] and ex not=? xl_math_int[0] and xl_word_fits(n ex) {
+        # (coerce's fixed-width literal case: retyped, no longer a literal)
+        xl_nodes[0][n].type=int32<overflow='wrap'>(ex)
+        xl_nodes[0][n].flags=xl_nodes[0].ptr[n].flags & ~256
+        t=ex
+    } else if ex not=? 0 and (exk =? 'int_' or exk =? 'float_') {
         xl_host[0].coerce(n ex);
         t=ex
     } else if ex not=? 0 and exk =? 'opt' and xl_numeric(XLWord(xl_types[0].ptr[ex].elem)) {

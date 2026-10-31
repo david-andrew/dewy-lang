@@ -96,6 +96,16 @@ xl_int_default = (n: int) -> int:
     if xl_files[0][int(xl_nodes[0][n].pos) >> 40].is_dewy: return xl_math_int[0]
     xl_int_type[0]
 
+xl_word_fits = (n: int, t: int) -> bool:
+    if xl_nodes[0][n].kind != .int_lit: return false
+    bits = int(xl_types[0][t].bits)
+    sign = xl_types[0][t].sign
+    if int(xl_nodes[0][n].flags) & 2097152 != 0: return bits >= 64
+    v = xl_nodes[0][n].ival
+    if bits >= 64: return sign or v >= 0
+    if sign: return v >= -(1 << (bits - 1)) and v < (1 << (bits - 1))
+    v >= 0 and v < (1 << bits)
+
 xl_check_int = (n: int, expected: int) -> int:
     ex = xl_expected(expected)
     exk = TK.void_
@@ -104,7 +114,11 @@ xl_check_int = (n: int, expected: int) -> int:
     xl_nodes[0][n].flags |= 256
     initial = xl_int_default(n)
     xl_nodes[0][n].type = i32(initial)
-    if ex != 0 and exk == .int_:
+    if exk == .int_ and initial != xl_math_int[0] and ex != xl_math_int[0] and xl_word_fits(n, ex):
+        xl_nodes[0][n].type = i32(ex)
+        xl_nodes[0][n].flags &= ~256
+        t = ex
+    else if ex != 0 and exk == .int_:
         xl_host[0].coerce(n, ex)
         t = ex
     else if ex != 0 and exk == .float_:

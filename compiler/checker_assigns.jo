@@ -4,6 +4,7 @@ use 'checker_types.dewy'
 use 'source_types.dewy'
 use 'checker_state.dewy'
 use 'type_inference.dewy'
+use 'checker_coerce.dewy'
 use 'checker_expr.dewy'
 struct CheckerAssignHost:
     begin: (int, int) -> int
@@ -218,7 +219,7 @@ va_compound = (s: int, lt: int) -> int:
         if int(va_nodes[0][v].flags) & 256 != 0: va_nodes[0][s].b = i32(va_host[0].coerce(v, va_int_type[0]))
     else:
         if lk == .int_ and rk == .float_: va_host[0].update(s, l, rt, 9)
-        va_nodes[0][s].b = i32(va_host[0].coerce(v, l))
+        if not cq_settled(va_nodes, va_types, v, l): va_nodes[0][s].b = i32(va_host[0].coerce(v, l))
     s
 va_check = (s: int) -> int:
     target = int(va_nodes[0][s].a)
