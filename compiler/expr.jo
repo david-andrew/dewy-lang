@@ -9818,9 +9818,6 @@ field_soa_index = (n: int, a0: int, expected: int) -> int:
     nodes[f].name = nodes[n].name
     nodes[n] = Node(kind = .index, pos = nodes[n].pos, a = i32(f), b = nodes[a0].b)
     check_expr(n, expected)
-receiver_host = CheckerReceiverHost(check_expr, field_juxt, field_reflect_name, reflect_member, field_private, field_soa_alias, field_soa_index)
-receiver_input = CheckerReceiverInput(&nodes, &types, &structs, &names, &ide_on, &reflect_active, &callee_at, &soa_aliases, &last_checked, &receiver_host)
-receiver_binding = checker_receivers_bind(&receiver_input)
 member_receiver = (n: int, expected: int) -> int:
     saved_receiver = type_receiver_at
     type_receiver_at = int(nodes[n].a)
@@ -10093,85 +10090,76 @@ dewy_whole_collection = (x: int) -> bool:
     if k == .parallel_region: return true
     k == .call and nkids(x) == 1 and nodes[int(nodes[x].a)].kind == .ident and name_of(int(nodes[int(nodes[x].a)].name)) == "__map_of"
 
-check_index_expr = (n: int, expected: int) -> int:
-    if has_flag(n, NF_JUXT): juxt_member_check(n)
-    values_index_base = int(nodes[n].a)
-    t = 0
-    if dewy_bracket_call(n): return check_expr(n, expected)
-    if nodes[n].sval != 0:
-        pos = nodes[n].pos
-        name = "$index_source{bc_count}"
-        bc_count += 1
-        source = int(nodes[n].a)
-        source_type = prune(check_expr(clone(source), 0))
-        source_kind = types[source_type].kind
-        stable = (source_kind == .array or source_kind == .str_ or source_kind == .fixed) and pool_update_read(last_checked) and dewy_end_arithmetic(int(nodes[n].b), int(nodes[n].sval))
-        if stable and not ide_on:
-            # A stable receiver's length can be read where `end` is written:
-            # `xs[end]` is then exactly `xs[xs.length - 1]`, with no binding.
-            # (The editor keeps the binding so that `end` hovers as a name.)
-            end_names = [int(nodes[n].sval)]
-            end_base = name_of(int(nodes[n].sval))
-            loop axis in [1..max(nkids(n), 1)): end_names.push(intern("{end_base}_{axis}"))
-            nodes[n].sval = 0
-            dewy_end_substitute(int(nodes[n].b), end_names, source, pos)
-            loop x in kids(n):
-                if x != int(nodes[n].b): dewy_end_substitute(x, end_names, source, pos)
-            return check_expr(n, expected)
-        stmts: int[]
-        end_source = clone(source)
-        if not stable:
-            stmts.push(bc_let(name, source, pos))
-            end_source = bc_ident(name, pos)
-            nodes[n].a = i32(bc_ident(name, pos))
-        loop binding in dewy_index_end_bindings(n, end_source, source_type): stmts.push(binding)
+check_index_expr = (n: int, expected: int) -> int: xs_index(n, expected)
+# The receiver prelude of `x[i]` runs in checker_receivers.dewy; these are its services.
+# (`end` in the brackets: the receiver's length, read where it is written or bound once)
+index_end = (n: int, expected: int) -> int:
+    pos = nodes[n].pos
+    name = "$index_source{bc_count}"
+    bc_count += 1
+    source = int(nodes[n].a)
+    source_type = prune(check_expr(clone(source), 0))
+    source_kind = types[source_type].kind
+    stable = (source_kind == .array or source_kind == .str_ or source_kind == .fixed) and pool_update_read(last_checked) and dewy_end_arithmetic(int(nodes[n].b), int(nodes[n].sval))
+    if stable and not ide_on:
+        # A stable receiver's length can be read where `end` is written:
+        # `xs[end]` is then exactly `xs[xs.length - 1]`, with no binding.
+        # (The editor keeps the binding so that `end` hovers as a name.)
+        end_names = [int(nodes[n].sval)]
+        end_base = name_of(int(nodes[n].sval))
+        loop axis in [1..max(nkids(n), 1)): end_names.push(intern("{end_base}_{axis}"))
         nodes[n].sval = 0
-        ix = nodes.len()
-        nodes.push(nodes[n])
-        stmts.push(bc_stmt(ix, pos))
-        nodes[n] = nodes[bc_block(stmts, pos)]
+        dewy_end_substitute(int(nodes[n].b), end_names, source, pos)
+        loop x in kids(n):
+            if x != int(nodes[n].b): dewy_end_substitute(x, end_names, source, pos)
         return check_expr(n, expected)
-    saved_receiver = type_receiver_at
-    type_receiver_at = int(nodes[n].a)
-    if nodes[n].b == 0 and nkids(n) == 0: empty_index_receiver = int(nodes[n].a)
-    bt = prune(check_expr(int(nodes[n].a), 0))
-    type_receiver_at = saved_receiver
-    if is_dewy_set_type(bt) and dewy_at(nodes[n].pos):
-        fatal(nodes[n].pos, "a set has no positions to index (`d.keys` is a set): `[{concat_piece(last_checked, false)}...]` collects its members into an array, and `in?` tests membership")
-    nodes[n].a = i32(last_checked)
+    stmts: int[]
+    end_source = clone(source)
+    if not stable:
+        stmts.push(bc_let(name, source, pos))
+        end_source = bc_ident(name, pos)
+        nodes[n].a = i32(bc_ident(name, pos))
+    loop binding in dewy_index_end_bindings(n, end_source, source_type): stmts.push(binding)
+    nodes[n].sval = 0
+    ix = nodes.len()
+    nodes.push(nodes[n])
+    stmts.push(bc_stmt(ix, pos))
+    nodes[n] = nodes[bc_block(stmts, pos)]
+    check_expr(n, expected)
+index_ranges = (n: int, bt: int):
     dewy_index_ranges(n, bt)
+    return
+index_stepped = (n: int, bt: int, expected: int) -> int:
     bk = types[bt].kind
+    if bk != .array and bk != .fixed and not is_nd(bt): fatal(nodes[n].pos, "stepped slicing requires an array")
+    nodes[n].a = i32(last_checked)
+    call = dewy_array_slice(n)
+    nodes[n] = nodes[call]
+    check_expr(n, expected)
+index_text = (n: int, expected: int) -> int:
     b = int(nodes[n].b)
-    if b != 0 and nodes[b].kind == .range and has_flag(b, NF_STEP) and not is_nd(bt):
-        if bk != .array and bk != .fixed and not is_nd(bt): fatal(nodes[n].pos, "stepped slicing requires an array")
-        nodes[n].a = i32(last_checked)
-        call = dewy_array_slice(n)
-        nodes[n] = nodes[call]
-        return check_expr(n, expected)
-    if bk == .str_ and files[pos_file(nodes[n].pos)].is_dewy:
-        base = last_checked
-        add_flag(base, NF_CHECKED)
-        pos = nodes[n].pos
-        call = 0
-        if b != 0 and nodes[b].kind == .range:
-            lo = int(nodes[b].a)
-            hi = int(nodes[b].b)
-            has_stop = hi != 0
-            if lo == 0: lo = mk(.int_lit, pos)
-            if hi == 0: hi = mk(.int_lit, pos)
-            incl = mk(.bool_lit, pos)
-            nodes[incl].ival = if has_flag(b, NF_INCLUSIVE): 1 else: 0
-            stop = mk(.bool_lit, pos)
-            nodes[stop].ival = if has_stop: 1 else: 0
-            call = bc_call("__dewy_string_slice", [base, lo, hi, incl, stop], pos)
-        else:
-            if b == 0: fatal(pos, "invalid string index")
-            call = bc_call("__dewy_string_index", [base, b], pos)
-        nodes[n] = nodes[call]
-        return check_expr(n, expected)
-    result = xx_index(n, expected, bt)
-    if result.bypass: return result.type
-    ce_finish(n, result.type, expected)
+    base = last_checked
+    add_flag(base, NF_CHECKED)
+    pos = nodes[n].pos
+    call = 0
+    if b != 0 and nodes[b].kind == .range:
+        lo = int(nodes[b].a)
+        hi = int(nodes[b].b)
+        has_stop = hi != 0
+        if lo == 0: lo = mk(.int_lit, pos)
+        if hi == 0: hi = mk(.int_lit, pos)
+        incl = mk(.bool_lit, pos)
+        nodes[incl].ival = if has_flag(b, NF_INCLUSIVE): 1 else: 0
+        stop = mk(.bool_lit, pos)
+        nodes[stop].ival = if has_stop: 1 else: 0
+        call = bc_call("__dewy_string_slice", [base, lo, hi, incl, stop], pos)
+    else:
+        if b == 0: fatal(pos, "invalid string index")
+        call = bc_call("__dewy_string_index", [base, b], pos)
+    nodes[n] = nodes[call]
+    check_expr(n, expected)
+receiver_error = (n: int, bt: int, code: int):
+    fatal(nodes[n].pos, "a set has no positions to index (`d.keys` is a set): `[{concat_piece(last_checked, false)}...]` collects its members into an array, and `in?` tests membership")
 
 # Indexing runs in checker_indexes.dewy; these are its services.
 # (`Point[3 4]` in Dewy: checking a qualified type replaces its field node with a
@@ -10246,6 +10234,9 @@ index_error = (n: int, code: int, bt: int):
 index_host = CheckerIndexHost(check_expr, check_to, index_construct, dewy_position_index, index_type_value, check_soa_index, index_part, index_negative, index_operator, index_int_range, index_select, index_deref, index_error)
 index_input = CheckerIndexInput(&nodes, &lists, &types, &structs, &files, &T_INT, &T_MATH_INT, &T_U8, &T_RANGE, &T_MAT4, &T_VEC4, &T_I32, &T_F32, &index_host)
 index_binding = checker_indexes_bind(&index_input)
+receiver_host = CheckerReceiverHost(check_expr, field_juxt, field_reflect_name, reflect_member, field_private, field_soa_alias, field_soa_index, dewy_bracket_call, index_end, is_dewy_set_type, index_ranges, index_stepped, index_text, receiver_error)
+receiver_input = CheckerReceiverInput(&nodes, &types, &structs, &names, &files, &ide_on, &reflect_active, &callee_at, &soa_aliases, &last_checked, &values_index_base, &type_receiver_at, &empty_index_receiver, &receiver_host)
+receiver_binding = checker_receivers_bind(&receiver_input)
 
 check_expr_other = (n: int, expected: int) -> int:
     if nodes[n].kind == .float_lit or nodes[n].kind == .bool_lit or nodes[n].kind == .none_lit or nodes[n].kind == .null_lit: return xl_check_scalar(n, expected)

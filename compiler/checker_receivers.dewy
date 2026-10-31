@@ -1,14 +1,19 @@
 $runtime_checks
 from p"node_store.dewy" import Node
 from p"checker_types.dewy" import (TypeInfo StructInfo TK)
+from p"source_types.dewy" import SrcFile
 from p"type_inference.dewy" import tu_prune
 from p"checker_literals.dewy" import xl_finish
 from p"checker_members.dewy" import xd_member
+from p"checker_indexes.dewy" import xx_index
 # `x.f` before member selection: juxtaposed products, computed names, reflected
 # members, a library's own `__` fields, soa element aliases and `ps[i].x` over a soa
-# array, then the member's spelling; selection runs in checker_members. A plain
-# member makes no host request beyond its receiver's checking. O(1) plus demanded
-# semantic work; host calls may grow every arena, so records are reread by ID.
+# array, then the member's spelling; selection runs in checker_members. `x[i]`
+# before indexing: Dewy calls written with brackets, `end` inside the brackets, the
+# receiver's checking, sets, stored ranges, stepped slices and text; indexing runs in
+# checker_indexes. A plain member or index makes no host request beyond its
+# receiver's checking. O(1) plus demanded semantic work; host calls may grow every
+# arena, so records are reread by ID.
 XSWord:type=int64<overflow='wrap'>
 CheckerReceiverHost:type=[
     check:<(node:int64 expected:int64):>int64>
@@ -18,39 +23,58 @@ CheckerReceiverHost:type=[
     private:<(node:int64):>int64>
     soa_alias:<(node:int64 receiver:int64 expected:int64):>int64>
     soa_index:<(node:int64 receiver:int64 expected:int64):>int64>
+    bracket_call:<(node:int64):>bool>
+    end_index:<(node:int64 expected:int64):>int64>
+    set_type:<(type_id:int64):>bool>
+    ranges:<(node:int64 type_id:int64):>void>
+    stepped:<(node:int64 type_id:int64 expected:int64):>int64>
+    text_index:<(node:int64 expected:int64):>int64>
+    error:<(node:int64 type_id:int64 code:int64):>void>
 ]
 CheckerReceiverInput:type=[
     nodes:ptr<array<Node>>
     types:ptr<array<TypeInfo>>
     structs:ptr<array<StructInfo>>
     names:ptr<array<string>>
+    files:ptr<array<SrcFile>>
     ide:ptr<bool>
     reflecting:ptr<bool>
     callee:ptr<int64>
     soa_aliases:ptr<int64>
     last:ptr<int64>
+    index_base:ptr<int64>
+    type_receiver:ptr<int64>
+    empty_receiver:ptr<int64>
     host:ptr<CheckerReceiverHost>
 ]
 let xs_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
 let xs_types:ptr<array<TypeInfo>>=$unsafe (uint64(0) as ptr<array<TypeInfo>>)
 let xs_structs:ptr<array<StructInfo>>=$unsafe (uint64(0) as ptr<array<StructInfo>>)
 let xs_names:ptr<array<string>>=$unsafe (uint64(0) as ptr<array<string>>)
+let xs_files:ptr<array<SrcFile>>=$unsafe (uint64(0) as ptr<array<SrcFile>>)
 let xs_ide:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
 let xs_reflecting:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
 let xs_callee:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let xs_soa_aliases:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let xs_last:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xs_index_base:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xs_type_receiver:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xs_empty_receiver:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let xs_host:ptr<CheckerReceiverHost>=$unsafe (uint64(0) as ptr<CheckerReceiverHost>)
 checker_receivers_bind=(input:ptr<CheckerReceiverInput>):>XSWord=>$unsafe {
     xs_nodes=input[0].nodes
     xs_types=input[0].types
     xs_structs=input[0].structs
     xs_names=input[0].names
+    xs_files=input[0].files
     xs_ide=input[0].ide
     xs_reflecting=input[0].reflecting
     xs_callee=input[0].callee
     xs_soa_aliases=input[0].soa_aliases
     xs_last=input[0].last
+    xs_index_base=input[0].index_base
+    xs_type_receiver=input[0].type_receiver
+    xs_empty_receiver=input[0].empty_receiver
     xs_host=input[0].host
     0
 }
@@ -86,6 +110,41 @@ xs_field=(n:XSWord expected:XSWord):>XSWord=>$unsafe {
     else if name =? "length" {spelled=2}
     else if name =? "copy" {spelled=4}
     let result=xd_member(n expected spelled is_callee)
+    if result.bypass {return result.type}
+    xl_finish(n result.type expected)
+}
+xs_count=(n:XSWord):>XSWord=>$unsafe {XSWord(xs_nodes[0].ptr[n].nlist)}
+xs_dewy=(n:XSWord):>bool=>$unsafe {xs_files[0].ptr[xs_nodes[0].ptr[n].pos >> 40].is_dewy}
+xs_dewy_at=(n:XSWord):>bool=>$unsafe {
+    let pos=xs_nodes[0].ptr[n].pos
+    let f=pos >> 40
+    pos >? 0 and f <? xs_files[0].length and xs_files[0].ptr[f].is_dewy
+}
+# A record type by its declared name (Set, NDArray; the host confirms the library's).
+xs_named=(t:XSWord name:string):>bool=>$unsafe {
+    xs_types[0].ptr[t].kind =? 'struct_' and xs_structs[0].ptr[XSWord(xs_types[0].ptr[t].st)].name =? name
+}
+# Flags: NF_JUXT 536870912, NF_STEP 32768.
+xs_index=(n:XSWord expected:XSWord):>XSWord=>$unsafe {
+    if xs_flag(n 536870912) {xs_host[0].juxt(n)}
+    xs_index_base[0]=XSWord(xs_nodes[0].ptr[n].a)
+    # `mean[xs]` in Dewy: a function called with brackets.
+    if xs_nodes[0].ptr[XSWord(xs_nodes[0].ptr[n].a)].kind =? 'ident' and xs_nodes[0].ptr[n].sval =? 0 and xs_count(n) >? 0 and xs_dewy_at(n) and xs_host[0].bracket_call(n) {return xs_host[0].check(n expected)}
+    if xs_nodes[0].ptr[n].sval not=? 0 {return xs_host[0].end_index(n expected)}
+    let saved=xs_type_receiver[0]
+    xs_type_receiver[0]=XSWord(xs_nodes[0].ptr[n].a)
+    if xs_nodes[0].ptr[n].b =? 0 and xs_count(n) =? 0 {xs_empty_receiver[0]=XSWord(xs_nodes[0].ptr[n].a)}
+    let bt=tu_prune(xs_host[0].check(XSWord(xs_nodes[0].ptr[n].a) 0))
+    xs_type_receiver[0]=saved
+    if xs_named(bt "Set") and xs_host[0].set_type(bt) and xs_dewy_at(n) {xs_host[0].error(n bt 1)}
+    xs_nodes[0][n].a=int32<overflow='wrap'>(xs_last[0])
+    let nd=xs_named(bt "NDArray")
+    if xs_dewy(n) and not nd and (xs_count(n) >=? 2 or xs_types[0].ptr[bt].kind =? 'typeval') {xs_host[0].ranges(n bt)}
+    let bk=xs_types[0].ptr[bt].kind
+    let b=XSWord(xs_nodes[0].ptr[n].b)
+    if b not=? 0 and xs_nodes[0].ptr[b].kind =? 'range' and xs_flag(b 32768) and not nd {return xs_host[0].stepped(n bt expected)}
+    if bk =? 'str_' and xs_dewy(n) {return xs_host[0].text_index(n expected)}
+    let result=xx_index(n expected bt)
     if result.bypass {return result.type}
     xl_finish(n result.type expected)
 }

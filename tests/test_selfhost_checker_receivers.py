@@ -1,14 +1,17 @@
-"""Field receiver preludes: products, reflection, private fields, soa aliases and spellings match frozen Jo."""
+"""Field and index receiver preludes: products, reflection, private fields, soa aliases, spellings,
+bracket calls, `end`, sets, stored ranges, stepped slices and text match frozen Jo."""
 import pytest
 
 from tests.support import compiler  # noqa: F401
+from tests.test_selfhost_checker_indexes import DRIVER as INDEXES
 from tests.test_selfhost_checker_literals import DRIVER as LITERALS
 from tests.test_selfhost_checker_members import DRIVER as MEMBERS
 from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER, compare
 
-STEMS = ('checker_literals', 'checker_members', 'checker_receivers')
+STEMS = ('checker_literals', 'checker_members', 'checker_indexes', 'checker_receivers')
 BASE = RESOLVER.split('main = ():')[0]
-DRIVER = MEMBERS + LITERALS.split('main = ():')[0][len(BASE):] + r'''
+DRIVER = (MEMBERS + LITERALS.split('main = ():')[0][len(BASE):]
+          + INDEXES.split('main = ():')[0][len(BASE):].split('DEWY = 1 << 40')[0] + r'''
 rv_ide_on = false
 rv_reflecting = false
 rv_reflect_hit = false
@@ -45,17 +48,55 @@ rv_soa_alias_host = (n: int, a0: int, expected: int) -> int:
 rv_soa_index_host = (n: int, a0: int, expected: int) -> int:
     events.push("soa-index:{n}:{a0}:{expected}")
     T_U8
-rv_services = CheckerReceiverHost(rv_check_host, rv_juxt_host, rv_reflect_name_host, rv_reflect_member_host, rv_private_host, rv_soa_alias_host, rv_soa_index_host)
-rv_inputs = CheckerReceiverInput(&nodes, &types, &structs, &names, &rv_ide_on, &rv_reflecting, &rv_callee_at, &rv_soa_count, &rv_last, &rv_services)
+rv_bracket = false
+rv_set = false
+rv_index_base = 0
+rv_type_receiver = 5
+rv_empty = 0
+rv_bracket_host = (n: int) -> bool:
+    events.push("bracket:{n}")
+    rv_bracket
+rv_end_host = (n: int, expected: int) -> int:
+    events.push("end:{n}:{expected}")
+    T_U16
+rv_set_host = (t: int) -> bool:
+    events.push("set-type:{t}")
+    rv_set
+rv_ranges_host = (n: int, t: int): events.push("ranges:{n}:{t}")
+rv_stepped_host = (n: int, t: int, expected: int) -> int:
+    events.push("stepped:{n}:{t}:{expected}")
+    T_U32
+rv_text_host = (n: int, expected: int) -> int:
+    events.push("text:{n}:{expected}")
+    T_STR
+rv_error_host = (n: int, t: int, code: int):
+    print(events)
+    print("error:{n}:{t}:{code}")
+    exit(19)
+rv_services = CheckerReceiverHost(rv_check_host, rv_juxt_host, rv_reflect_name_host, rv_reflect_member_host, rv_private_host, rv_soa_alias_host, rv_soa_index_host, rv_bracket_host, rv_end_host, rv_set_host, rv_ranges_host, rv_stepped_host, rv_text_host, rv_error_host)
+rv_inputs = CheckerReceiverInput(&nodes, &types, &structs, &names, &files, &rv_ide_on, &rv_reflecting, &rv_callee_at, &rv_soa_count, &rv_last, &rv_index_base, &rv_type_receiver, &rv_empty, &rv_services)
 rv_binding = checker_receivers_bind(&rv_inputs)
 field_run = (n: int, expected: int = 0):
     t = xs_field(n, expected)
     print("{n}:{t}:{nodes[n].a}:{nodes[n].aux}:{nodes[n].type}")
 named = (t: int, text: str, dewy: bool = true) -> int: member(t, intern_text(text), dewy)
+item = (t: int, k: NK = .ident) -> int:
+    n = node(k); nodes[n].type = i32(t); n
+index_run = (n: int, expected: int = 0):
+    t = xs_index(n, expected)
+    print("{n}:{t}:{nodes[n].a}:{nodes[n].aux}:{nodes[n].type}:{rv_index_base}:{rv_type_receiver}:{rv_empty}")
+indexed = (t: int, b: int, dewy: bool = true, extra: int[] = []) -> int:
+    n = node(.index, item(t), 0, 0, extra); nodes[n].b = i32(b)
+    if dewy: nodes[n].pos = DEWY + n
+    n
+named_record = (name: str) -> int:
+    structs.push(StructInfo(name = name, resolved = true))
+    types.push(TypeInfo(kind = .struct_, st = i32(structs.len() - 1)))
+    types.len() - 1
 prepare_receivers = ():
     prepare_members()
     loop names.len() < 50: names.push("n{names.len()}")
-'''
+''')
 
 MAIN = r'''
 main = ():
@@ -110,6 +151,33 @@ main = ():
     field_run(named(rec, "copy"))
     xd_copy = -1
     field_run(named(rec, "copy"))
+    # Indexes: plain, products, Dewy bracket calls, `end`, empty brackets.
+    arr = int(tb_mk_array(T_STR))
+    index_run(indexed(arr, item(T_INT, .int_lit), false))
+    index_run(indexed(arr, item(T_INT, .int_lit)), T_STR)
+    p = indexed(arr, item(T_INT, .int_lit)); nodes[p].flags = i32(536870912); index_run(p)
+    index_run(indexed(rec, 0, true, [item(T_INT, .int_lit)]))
+    rv_bracket = true
+    index_run(indexed(rec, 0, true, [item(T_INT, .int_lit)]))
+    index_run(indexed(rec, 0, false, [item(T_INT, .int_lit)]))
+    rv_bracket = false
+    p = indexed(arr, item(T_INT, .ident)); nodes[p].sval = 7; index_run(p)
+    index_run(indexed(kind_of(.typeval), 0))
+    # Sets the host does not confirm; stored ranges; n-dimensional arrays; steps; text.
+    index_run(indexed(named_record("Set"), item(T_INT, .int_lit)))
+    two = [item(T_INT, .int_lit), item(T_INT, .int_lit)]
+    index_run(indexed(rec, 0, true, two))
+    index_run(indexed(rec, 0, false, two))
+    index_run(indexed(named_record("NDArray"), 0, true, two))
+    index_run(indexed(kind_of(.typeval), item(T_INT, .int_lit)))
+    step = node(.range, item(T_INT, .int_lit)); nodes[step].flags = i32(32768)
+    index_run(indexed(arr, step))
+    step = node(.range, item(T_INT, .int_lit)); nodes[step].flags = i32(32768)
+    xx_part = T_I32
+    index_run(indexed(named_record("NDArray"), step))
+    xx_part = -1
+    index_run(indexed(T_STR, item(T_INT, .int_lit)))
+    index_run(indexed(T_STR, item(T_INT, .int_lit), false))
     print(events)
     print("ok")
 '''
@@ -124,6 +192,7 @@ def test_checker_receivers_twins(compiler, tmp_path, release):  # noqa: F811
 @pytest.mark.parametrize('case,code', [
     ('xd_set = true; field_run(named(T_INT, "add"))', 1),
     ('p = member(T_INT, 0); nodes[p].aux = -2; field_run(p)', 2),
+    ('rv_set = true; index_run(indexed(named_record("Set"), item(T_INT, .int_lit)))', 1),
 ])
 def test_checker_receivers_errors(compiler, tmp_path, case, code):  # noqa: F811
     main = f'''
