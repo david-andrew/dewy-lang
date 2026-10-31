@@ -1,0 +1,269 @@
+$runtime_checks
+from p"checker_types.dewy" import (TK TypeInfo StructInfo Field Variant)
+from p"checker_state.dewy" import FnInst
+from p"type_layout.dewy" import (tl_layout)
+from p"type_constructors.dewy" import (tb_mk_box)
+# Resource-type predicates: which types own a lifecycle, can be copied, keep an
+# inline layout. Pure queries over borrowed type arenas and the hook tables
+# (decls key: declaration * 4 + role, 1 drop, 2 copy, 3 move). No host calls:
+# layout and boxes are Dewy leaves; layout may grow arenas, so IDs are reread.
+# Each costs O(visited component types); depth caps and seen lists stay.
+OWord:type=int64<overflow='wrap'>
+OwnershipTypeInput:type=[
+    types:ptr<array<TypeInfo>>
+    structs:ptr<array<StructInfo>>
+    args:ptr<array<int32>>
+    fields:ptr<array<Field>>
+    variants:ptr<array<Variant>>
+    fns:ptr<array<FnInst>>
+    decls:ptr<dict<int64 int64>>
+    copies:ptr<dict<int64 int64>>
+    moves:ptr<dict<int64 int64>>
+    contained:ptr<dict<int64 bool>>
+    parents:ptr<dict<int64 int64>>
+    math_int:ptr<int64>
+]
+let ow_types:ptr<array<TypeInfo>>=$unsafe (uint64(0) as ptr<array<TypeInfo>>)
+let ow_structs:ptr<array<StructInfo>>=$unsafe (uint64(0) as ptr<array<StructInfo>>)
+let ow_args:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
+let ow_fields:ptr<array<Field>>=$unsafe (uint64(0) as ptr<array<Field>>)
+let ow_variants:ptr<array<Variant>>=$unsafe (uint64(0) as ptr<array<Variant>>)
+let ow_fns:ptr<array<FnInst>>=$unsafe (uint64(0) as ptr<array<FnInst>>)
+let ow_decls:ptr<dict<int64 int64>>=$unsafe (uint64(0) as ptr<dict<int64 int64>>)
+let ow_copies:ptr<dict<int64 int64>>=$unsafe (uint64(0) as ptr<dict<int64 int64>>)
+let ow_moves:ptr<dict<int64 int64>>=$unsafe (uint64(0) as ptr<dict<int64 int64>>)
+let ow_contained:ptr<dict<int64 bool>>=$unsafe (uint64(0) as ptr<dict<int64 bool>>)
+let ow_parents:ptr<dict<int64 int64>>=$unsafe (uint64(0) as ptr<dict<int64 int64>>)
+let ow_math_int:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+ownership_types_bind=(input:ptr<OwnershipTypeInput>):>OWord=>$unsafe {
+    ow_types=input[0].types
+    ow_structs=input[0].structs
+    ow_args=input[0].args
+    ow_fields=input[0].fields
+    ow_variants=input[0].variants
+    ow_fns=input[0].fns
+    ow_decls=input[0].decls
+    ow_copies=input[0].copies
+    ow_moves=input[0].moves
+    ow_contained=input[0].contained
+    ow_parents=input[0].parents
+    ow_math_int=input[0].math_int
+    0
+}
+ow_prune=(t0:OWord):>OWord=>$unsafe {
+    let t=t0
+    loop t not=? 0 and ow_types[0].ptr[t].kind =? 'var' and ow_types[0].ptr[t].ref not=? 0 {t=OWord(ow_types[0].ptr[t].ref)}
+    t
+}
+ow_kind=(t:OWord):>TK=>$unsafe {ow_types[0].ptr[ow_prune(t)].kind}
+ow_elem=(t:OWord):>OWord=>$unsafe {OWord(ow_types[0].ptr[ow_prune(t)].elem)}
+ow_st=(t:OWord):>OWord=>$unsafe {OWord(ow_types[0].ptr[t].st)}
+# A refined type stands for its base.
+ow_representation=(t0:OWord):>OWord=>$unsafe {
+    let t=ow_prune(t0)
+    if ow_types[0].ptr[t].kind =? 'refined' {return ow_prune(OWord(ow_types[0].ptr[t].elem))}
+    t
+}
+ow_is_map=(t0:OWord):>bool=>$unsafe {
+    let t=ow_prune(t0)
+    ow_types[0].ptr[t].kind =? 'struct_' and ow_structs[0].ptr[ow_st(t)].name =? "Map"
+}
+# The type each field's storage holds (a boxed field: its box), after layout.
+ow_field_types=(t:OWord):>array<OWord>=>$unsafe {
+    tl_layout(t)
+    let out:array<OWord>=[]
+    let si=ow_st(t)
+    loop i in [0..OWord(ow_structs[0].ptr[si].nfields)) {
+        let f=OWord(ow_structs[0].ptr[si].fields) + i
+        if ow_fields[0].ptr[f].boxed {out.push(tb_mk_box(OWord(ow_fields[0].ptr[f].type)))} else {out.push(OWord(ow_fields[0].ptr[f].type))}
+    }
+    out
+}
+# A machine word: bool or a fixed-width integer, never math `int` (effects.jo's
+# effect_scalar, kept inline there for its hot callers).
+ow_scalar=(t0:OWord):>bool=>$unsafe {
+    let t=ow_representation(t0)
+    let k=ow_types[0].ptr[t].kind
+    k =? 'bool_' or (k =? 'int_' and t not=? ow_math_int[0])
+}
+# Callable capability: 0 ordinary, 1 owning/copyable, 2 owning/move-only.
+# Adding 2 marks a nonescaping borrowed owner capture.
+ownership_callable_cap=(t0:OWord):>OWord=>$unsafe {
+    let t=ow_prune(t0)
+    if ow_types[0].ptr[t].kind =? 'callable' {return OWord(ow_types[0].ptr[t].bits)}
+    0
+}
+ownership_declared=(decl:OWord):>bool=>$unsafe {
+    ow_decls[0].has(decl * 4 + 1) or ow_decls[0].has(decl * 4 + 2) or ow_decls[0].has(decl * 4 + 3)
+}
+ownership_nominal=(t0:OWord):>bool=>$unsafe {
+    if ow_decls[0].length =? 0 {return false}
+    let t=ow_prune(t0)
+    ow_types[0].ptr[t].kind =? 'struct_' and (ow_structs[0].ptr[ow_st(t)].drop_fn not=? 0 or ow_copies[0].has(t) or ow_moves[0].has(t))
+}
+ownership_type=(t0:OWord):>bool=>$unsafe {
+    if ow_decls[0].length =? 0 {return false}
+    let t=ow_prune(t0)
+    if ownership_callable_cap(t) not=? 0 {return true}
+    let k=ow_types[0].ptr[t].kind
+    (k =? 'struct_' or k =? 'fixed' or k =? 'array' or k =? 'opt' or k =? 'box') and ownership_contains(t)
+}
+ownership_contains=(t0:OWord):>bool=>$unsafe {
+    let t=ow_prune(t0)
+    if ownership_callable_cap(t) not=? 0 {return true}
+    if ownership_nominal(t) {return true}
+    let cached=ow_contained[0].get(t)
+    if cached isnt? none {return cached as bool}
+    ow_contained[0][t] = false
+    let found=false
+    let k=ow_kind(t)
+    if k =? 'array' or k =? 'fixed' or k =? 'opt' or k =? 'box' {found=ownership_contains(ow_elem(t))}
+    else if k =? 'tuple' {
+        loop i in [0..OWord(ow_types[0].ptr[t].nargs)) {
+            if ownership_contains(OWord(ow_args[0].ptr[OWord(ow_types[0].ptr[t].args) + i])) {found=true}
+        }
+    }
+    else if k =? 'struct_' or k =? 'enum_' {
+        tl_layout(t)
+        let si=ow_st(t)
+        if k =? 'struct_' {
+            loop i in [0..OWord(ow_structs[0].ptr[si].nfields)) {
+                if ownership_contains(OWord(ow_fields[0].ptr[OWord(ow_structs[0].ptr[si].fields) + i].type)) {found=true}
+            }
+        } else {
+            loop i in [0..OWord(ow_structs[0].ptr[si].nvariants)) {
+                let v=OWord(ow_structs[0].ptr[si].variants) + i
+                loop j in [0..OWord(ow_variants[0].ptr[v].nfields)) {
+                    if ownership_contains(OWord(ow_fields[0].ptr[OWord(ow_variants[0].ptr[v].fields) + j].type)) {found=true}
+                }
+            }
+        }
+    }
+    # False is only the recursion guard, not a settled property: another
+    # path through the component may discover a resource after this visit.
+    if found {ow_contained[0][t] = true} else {ow_contained[0].remove(t);}
+    found
+}
+ownership_copyable=(t0:OWord seen:array<int64>=[]):>bool=>$unsafe {
+    let t=ow_prune(t0)
+    let cap=ownership_callable_cap(t)
+    if cap not=? 0 {return cap =? 1 or cap =? 3}
+    if seen.contains(int64(t)) {return true}
+    let visited=seen
+    visited.push(int64(t))
+    let k=ow_kind(t)
+    if k =? 'fixed' or k =? 'array' or k =? 'opt' or k =? 'box' {return ownership_copyable(ow_elem(t) visited)}
+    if not ownership_type(t) {return true}
+    let first:OWord=0
+    let hook=ow_copies[0].get(t)
+    if hook isnt? none {
+        let parent=ow_prune(OWord(ow_fns[0].ptr[hook as int64].ret))
+        first=OWord(ow_structs[0].ptr[ow_st(parent)].nfields)
+    } else if ow_structs[0].ptr[ow_st(t)].drop_fn not=? 0 {return false}
+    let fs=ow_field_types(t)
+    loop i in [first..fs.length) {
+        if ownership_type(fs[i]) and not ownership_copyable(fs[i] visited) {return false}
+    }
+    true
+}
+ownership_inline=(t0:OWord depth:OWord=0):>bool=>$unsafe {
+    let t=ow_prune(t0)
+    if ownership_callable_cap(t) not=? 0 {return true}
+    if ow_scalar(t) or ow_kind(t) =? 'float_' {return true}
+    if depth >? 32 {return false}
+    let k=ow_kind(t)
+    if k =? 'fixed' or k =? 'opt' {return ownership_inline(ow_elem(t) depth + 1)}
+    if k not=? 'struct_' {return false}
+    tl_layout(t)
+    let si=ow_st(t)
+    loop i in [0..OWord(ow_structs[0].ptr[si].nfields)) {
+        let f=OWord(ow_structs[0].ptr[si].fields) + i
+        if ow_fields[0].ptr[f].boxed or not ownership_inline(OWord(ow_fields[0].ptr[f].type) depth + 1) {return false}
+    }
+    true
+}
+# Fresh scalar-field results have no allocation/copy adapter. Hook calls are
+# inventoried separately; this does not certify a semantic copy as plain data.
+ownership_scalar=(t:OWord):>bool=>{
+    if not ownership_type(t) {return false}
+    ownership_inline(t)
+}
+# Fact checking can precede hook instantiation. Consult declarations rather
+# than the finalized lowering IDs, keeping ordinary COW values unchanged.
+ownership_fact_type=(t0:OWord depth:OWord=0):>bool=>$unsafe {
+    let t=ow_representation(t0)
+    if ownership_callable_cap(t) not=? 0 {return true}
+    if depth >? 32 {return true}
+    let k=ow_kind(t)
+    if k =? 'fixed' or k =? 'array' or k =? 'opt' or k =? 'box' {return ownership_fact_type(ow_elem(t) depth + 1)}
+    if k not=? 'struct_' {return false}
+    let si=ow_st(t)
+    if ownership_declared(OWord(ow_structs[0].ptr[si].decl)) {return true}
+    let parent=ow_parents[0].get(t) ?? 0
+    if parent not=? 0 and ownership_fact_type(parent depth + 1) {return true}
+    tl_layout(t)
+    loop i in [0..OWord(ow_structs[0].ptr[si].nfields)) {
+        if ownership_fact_type(OWord(ow_fields[0].ptr[OWord(ow_structs[0].ptr[si].fields) + i].type) depth + 1) {return true}
+    }
+    false
+}
+# Containers remain finite layouts, but copying them can allocate. Keep this
+# separate from the no-allocation inline predicate used by effect summaries.
+ownership_layout=(t0:OWord depth:OWord=0 seen:array<int64>=[]):>bool=>$unsafe {
+    let t=ow_prune(t0)
+    if seen.contains(int64(t)) {return true}
+    if depth >? 32 {return false}
+    let visited=seen
+    visited.push(int64(t))
+    let k=ow_kind(t)
+    if k =? 'opt' or k =? 'box' {return ownership_layout(ow_elem(t) depth + 1 visited)}
+    if k =? 'array' {
+        if ownership_type(ow_elem(t)) {return ownership_inline(ow_elem(t))}
+        return ownership_layout(ow_elem(t) depth + 1 visited)
+    }
+    if k =? 'fixed' {return ownership_inline(ow_elem(t) depth + 1)}
+    if ownership_callable_cap(t) not=? 0 {return true}
+    if k =? 'str_' or ow_scalar(t) or k =? 'float_' {return true}
+    if k not=? 'struct_' {return false}
+    let map=ow_is_map(t)
+    loop ft in ow_field_types(t) {
+        let fk=ow_kind(ft)
+        if not map and (fk =? 'array' or fk =? 'str_') {return false}
+        if not ownership_layout(ft depth + 1 visited) {return false}
+    }
+    true
+}
+ownership_decl_copyable=(t0:OWord seen:array<int64>=[]):>bool=>$unsafe {
+    let t=ow_prune(t0)
+    let cap=ownership_callable_cap(t)
+    if cap not=? 0 {return cap =? 1 or cap =? 3}
+    if seen.contains(int64(t)) {return true}
+    let visited=seen
+    visited.push(int64(t))
+    let k=ow_kind(t)
+    if k =? 'array' or k =? 'fixed' or k =? 'box' or k =? 'opt' {return ownership_decl_copyable(ow_elem(t) visited)}
+    if k not=? 'struct_' {return true}
+    let si=ow_st(t)
+    let decl=OWord(ow_structs[0].ptr[si].decl)
+    if ow_decls[0].has(decl * 4 + 2) {return true}
+    let parent=ow_parents[0].get(t) ?? 0
+    let copy_parent=parent
+    loop copy_parent not=? 0 {
+        let pd=OWord(ow_structs[0].ptr[ow_st(copy_parent)].decl)
+        if ow_decls[0].has(pd * 4 + 2) {break}
+        copy_parent=ow_parents[0].get(copy_parent) ?? 0
+    }
+    let first:OWord=0
+    if copy_parent not=? 0 {
+        tl_layout(copy_parent)
+        first=OWord(ow_structs[0].ptr[ow_st(copy_parent)].nfields)
+    } else {
+        if ow_decls[0].has(decl * 4 + 1) {return false}
+        if parent not=? 0 and not ownership_decl_copyable(parent visited) {return false}
+    }
+    let fs=ow_field_types(t)
+    loop i in [first..fs.length) {
+        if not ownership_decl_copyable(fs[i] visited) {return false}
+    }
+    true
+}

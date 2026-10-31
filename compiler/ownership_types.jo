@@ -1,0 +1,214 @@
+# Frozen resource-type predicates extracted from ownership.jo.
+use 'checker_types.dewy'
+use 'checker_state.dewy'
+use 'type_layout.dewy'
+use 'type_constructors.dewy'
+struct OwnershipTypeInput:
+    types: *(TypeInfo[])
+    structs: *(StructInfo[])
+    args: *(i32[])
+    fields: *(Field[])
+    variants: *(Variant[])
+    fns: *(FnInst[])
+    decls: *({int: int})
+    copies: *({int: int})
+    moves: *({int: int})
+    contained: *({int: bool})
+    parents: *({int: int})
+    math_int: *int
+ow_types: *(TypeInfo[])
+ow_structs: *(StructInfo[])
+ow_args: *(i32[])
+ow_fields: *(Field[])
+ow_variants: *(Variant[])
+ow_fns: *(FnInst[])
+ow_decls: *({int: int})
+ow_copies: *({int: int})
+ow_moves: *({int: int})
+ow_contained: *({int: bool})
+ow_parents: *({int: int})
+ow_math_int: *int
+ownership_types_bind = (input: *OwnershipTypeInput) -> int:
+    ow_types = input[0].types
+    ow_structs = input[0].structs
+    ow_args = input[0].args
+    ow_fields = input[0].fields
+    ow_variants = input[0].variants
+    ow_fns = input[0].fns
+    ow_decls = input[0].decls
+    ow_copies = input[0].copies
+    ow_moves = input[0].moves
+    ow_contained = input[0].contained
+    ow_parents = input[0].parents
+    ow_math_int = input[0].math_int
+    0
+ow_prune = (t0: int) -> int:
+    t = t0
+    loop t != 0 and ow_types[0][t].kind == .var and ow_types[0][t].ref != 0: t = int(ow_types[0][t].ref)
+    t
+ow_kind = (t: int) -> TK: ow_types[0][ow_prune(t)].kind
+ow_elem = (t: int) -> int: int(ow_types[0][ow_prune(t)].elem)
+ow_st = (t: int) -> int: int(ow_types[0][t].st)
+ow_representation = (t0: int) -> int:
+    t = ow_prune(t0)
+    if ow_types[0][t].kind == .refined: return ow_prune(int(ow_types[0][t].elem))
+    t
+ow_is_map = (t0: int) -> bool:
+    t = ow_prune(t0)
+    ow_types[0][t].kind == .struct_ and ow_structs[0][ow_st(t)].name == "Map"
+ow_field_types = (t: int) -> int[]:
+    tl_layout(t)
+    out: int[]
+    si = ow_st(t)
+    loop i in [0..int(ow_structs[0][si].nfields)):
+        f = int(ow_structs[0][si].fields) + i
+        if ow_fields[0][f].boxed: out.push(tb_mk_box(int(ow_fields[0][f].type)))
+        else: out.push(int(ow_fields[0][f].type))
+    out
+ow_scalar = (t0: int) -> bool:
+    t = ow_representation(t0)
+    ow_types[0][t].kind == .bool_ or ow_types[0][t].kind == .int_ and t != ow_math_int[0]
+ownership_callable_cap = (t0: int) -> int:
+    t = ow_prune(t0)
+    if ow_types[0][t].kind == .callable: return int(ow_types[0][t].bits)
+    0
+ownership_declared = (decl: int) -> bool:
+    ow_decls[0].has(decl * 4 + 1) or ow_decls[0].has(decl * 4 + 2) or ow_decls[0].has(decl * 4 + 3)
+ownership_nominal = (t0: int) -> bool:
+    if ow_decls[0].len() == 0: return false
+    t = ow_prune(t0)
+    ow_types[0][t].kind == .struct_ and (ow_structs[0][ow_st(t)].drop_fn != 0 or ow_copies[0].has(t) or ow_moves[0].has(t))
+ownership_type = (t0: int) -> bool:
+    if ow_decls[0].len() == 0: return false
+    t = ow_prune(t0)
+    if ownership_callable_cap(t) != 0: return true
+    k = ow_types[0][t].kind
+    (k == .struct_ or k == .fixed or k == .array or k == .opt or k == .box) and ownership_contains(t)
+ownership_contains = (t0: int) -> bool:
+    t = ow_prune(t0)
+    if ownership_callable_cap(t) != 0: return true
+    if ownership_nominal(t): return true
+    if let found = ow_contained[0].get(t): return found
+    ow_contained[0][t] = false
+    found = false
+    k = ow_kind(t)
+    if k == .array or k == .fixed or k == .opt or k == .box: found = ownership_contains(ow_elem(t))
+    else if k == .tuple:
+        loop i in [0..int(ow_types[0][t].nargs)):
+            if ownership_contains(int(ow_args[0][int(ow_types[0][t].args) + i])): found = true
+    else if k == .struct_ or k == .enum_:
+        tl_layout(t)
+        si = ow_st(t)
+        if k == .struct_:
+            loop i in [0..int(ow_structs[0][si].nfields)):
+                if ownership_contains(int(ow_fields[0][int(ow_structs[0][si].fields) + i].type)): found = true
+        else:
+            loop i in [0..int(ow_structs[0][si].nvariants)):
+                v = int(ow_structs[0][si].variants) + i
+                loop j in [0..int(ow_variants[0][v].nfields)):
+                    if ownership_contains(int(ow_fields[0][int(ow_variants[0][v].fields) + j].type)): found = true
+    if found: ow_contained[0][t] = true
+    else: ow_contained[0].remove(t)
+    found
+ownership_copyable = (t0: int, seen: int[] = []) -> bool:
+    t = ow_prune(t0)
+    cap = ownership_callable_cap(t)
+    if cap != 0: return cap == 1 or cap == 3
+    if seen.contains(t): return true
+    visited = seen
+    visited.push(t)
+    k = ow_kind(t)
+    if k == .fixed or k == .array or k == .opt or k == .box: return ownership_copyable(ow_elem(t), visited)
+    if not ownership_type(t): return true
+    first = 0
+    if let hook = ow_copies[0].get(t):
+        parent = ow_prune(int(ow_fns[0][hook].ret))
+        first = int(ow_structs[0][ow_st(parent)].nfields)
+    else if ow_structs[0][ow_st(t)].drop_fn != 0: return false
+    fs = ow_field_types(t)
+    loop i in [first..fs.len()):
+        if ownership_type(fs[i]) and not ownership_copyable(fs[i], visited): return false
+    true
+ownership_inline = (t0: int, depth: int = 0) -> bool:
+    t = ow_prune(t0)
+    if ownership_callable_cap(t) != 0: return true
+    if ow_scalar(t) or ow_kind(t) == .float_: return true
+    if depth > 32: return false
+    k = ow_kind(t)
+    if k == .fixed or k == .opt: return ownership_inline(ow_elem(t), depth + 1)
+    if k != .struct_: return false
+    tl_layout(t)
+    si = ow_st(t)
+    loop i in [0..int(ow_structs[0][si].nfields)):
+        f = int(ow_structs[0][si].fields) + i
+        if ow_fields[0][f].boxed or not ownership_inline(int(ow_fields[0][f].type), depth + 1): return false
+    true
+ownership_scalar = (t: int) -> bool:
+    if not ownership_type(t): return false
+    ownership_inline(t)
+ownership_fact_type = (t0: int, depth: int = 0) -> bool:
+    t = ow_representation(t0)
+    if ownership_callable_cap(t) != 0: return true
+    if depth > 32: return true
+    k = ow_kind(t)
+    if k == .fixed or k == .array or k == .opt or k == .box: return ownership_fact_type(ow_elem(t), depth + 1)
+    if k != .struct_: return false
+    si = ow_st(t)
+    if ownership_declared(int(ow_structs[0][si].decl)): return true
+    parent = ow_parents[0].get(t) ?? 0
+    if parent != 0 and ownership_fact_type(parent, depth + 1): return true
+    tl_layout(t)
+    loop i in [0..int(ow_structs[0][si].nfields)):
+        if ownership_fact_type(int(ow_fields[0][int(ow_structs[0][si].fields) + i].type), depth + 1): return true
+    false
+ownership_layout = (t0: int, depth: int = 0, seen: int[] = []) -> bool:
+    t = ow_prune(t0)
+    if seen.contains(t): return true
+    if depth > 32: return false
+    visited = seen
+    visited.push(t)
+    k = ow_kind(t)
+    if k == .opt or k == .box: return ownership_layout(ow_elem(t), depth + 1, visited)
+    if k == .array:
+        if ownership_type(ow_elem(t)): return ownership_inline(ow_elem(t))
+        return ownership_layout(ow_elem(t), depth + 1, visited)
+    if k == .fixed: return ownership_inline(ow_elem(t), depth + 1)
+    if ownership_callable_cap(t) != 0: return true
+    if k == .str_ or ow_scalar(t) or k == .float_: return true
+    if k != .struct_: return false
+    map = ow_is_map(t)
+    loop ft in ow_field_types(t):
+        fk = ow_kind(ft)
+        if not map and (fk == .array or fk == .str_): return false
+        if not ownership_layout(ft, depth + 1, visited): return false
+    true
+ownership_decl_copyable = (t0: int, seen: int[] = []) -> bool:
+    t = ow_prune(t0)
+    cap = ownership_callable_cap(t)
+    if cap != 0: return cap == 1 or cap == 3
+    if seen.contains(t): return true
+    visited = seen
+    visited.push(t)
+    k = ow_kind(t)
+    if k == .array or k == .fixed or k == .box or k == .opt: return ownership_decl_copyable(ow_elem(t), visited)
+    if k != .struct_: return true
+    si = ow_st(t)
+    decl = int(ow_structs[0][si].decl)
+    if ow_decls[0].has(decl * 4 + 2): return true
+    parent = ow_parents[0].get(t) ?? 0
+    copy_parent = parent
+    loop copy_parent != 0:
+        pd = int(ow_structs[0][ow_st(copy_parent)].decl)
+        if ow_decls[0].has(pd * 4 + 2): break
+        copy_parent = ow_parents[0].get(copy_parent) ?? 0
+    first = 0
+    if copy_parent != 0:
+        tl_layout(copy_parent)
+        first = int(ow_structs[0][ow_st(copy_parent)].nfields)
+    else:
+        if ow_decls[0].has(decl * 4 + 1): return false
+        if parent != 0 and not ownership_decl_copyable(parent, visited): return false
+    fs = ow_field_types(t)
+    loop i in [first..fs.len()):
+        if not ownership_decl_copyable(fs[i], visited): return false
+    true
