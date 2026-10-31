@@ -1094,9 +1094,9 @@ fact_nonempty_check = (n: int, s: mut FactState, values: int[]):
     wit_unknown(n, fact_bound(s, length), "{shown} is nonempty", 0, relation)
 
 # A program's `sum(xs)` of checked 64-bit integers (core/array.jo; an N-D
-# array's sums its flat storage, std/nd.jo) fails only when a running sum
-# leaves the element type, so "the exact sum fits" is the caller's obligation.
-# In any order every prefix lies between the sum of the elements' negative
+# array's sums its flat storage, std/nd.jo) fails only when the exact sum
+# leaves the element type, so "the exact sum fits" is the caller's obligation,
+# proven here over every running sum (stricter). In any order every prefix lies between the sum of the elements' negative
 # lower bounds and the sum of their positive upper bounds: a literal's
 # inventory term by term, else the element hull (a fill's value, a
 # comprehension's pushes, the type's range) times the length's upper bound.

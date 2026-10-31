@@ -1,4 +1,4 @@
-"""Vector sum guards preserve the scalar prefix-overflow contract."""
+"""Vector sum guards preserve the exact-sum contract: only a final sum out of range fails."""
 import platform
 import subprocess
 import pytest
@@ -10,8 +10,10 @@ from tests.support import compiler  # noqa: F401
     ('int64', [1, -2, 3, -4] * 16, '-32'),
     ('int64', [-(2**31), 2**31-1] * 16, '-16'),
     ('uint64', [2**32-1] * 32, str((2**32-1)*32)),
-    ('int64', [2**63-1, 1, -1], None),
-    ('int64', [-2**63, -1, 1], None),
+    ('int64', [2**63-1, 1, -1], str(2**63-1)),
+    ('int64', [-2**63, -1, 1], str(-2**63)),
+    ('int64', [2**63-1, 2, -1], None),
+    ('int64', [-2**63, -2, 1], None),
     ('uint64', [2**64-1, 1], None),
     ('int64', [2**63-1, -(2**63-1)], '0'),
     ('int64', [], '0'),

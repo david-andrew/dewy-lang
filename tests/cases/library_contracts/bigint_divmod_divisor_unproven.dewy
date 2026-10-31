@@ -1,0 +1,6 @@
+# (a guard that admits zero proves nothing)
+split=(a:bigint b:bigint):>bigint=>{
+    if b <? 0 return 0
+    return a.divmod(b).remainder
+}
+main=()=>printl(split(10 3))

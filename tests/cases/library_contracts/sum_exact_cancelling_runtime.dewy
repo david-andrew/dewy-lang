@@ -1,0 +1,11 @@
+# Checked at run time, sum(xs) fails only when the exact sum does not fit:
+# a running sum may leave int64's range while later terms bring it back.
+$runtime_checks
+main=()=>{
+    let high:array<int64>=[9223372036854775807 1 -1]
+    printl(sum(high))
+    let low:array<int64>=[-9223372036854775808 -1 1]
+    printl(sum(low))
+    let both:array<int64>=[9223372036854775807 9223372036854775807 -9223372036854775807 -9223372036854775807 5]
+    printl(sum(both))
+}

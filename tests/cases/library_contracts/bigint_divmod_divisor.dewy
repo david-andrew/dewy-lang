@@ -1,0 +1,12 @@
+# A bigint divmod's divisor must be proven nonzero, as `//`'s: a constant or a guard.
+split=(a:bigint b:bigint):>bigint=>{
+    if b =? 0 return 0
+    return a.divmod(b).quotient
+}
+main=()=>{
+    let value:bigint=-123456789012345678901234567890
+    let parts=value.divmod(9876543210987654321)
+    printl"{parts.quotient} {parts.remainder}"
+    printl(split(value 7))
+    printl(split(value 0))
+}
