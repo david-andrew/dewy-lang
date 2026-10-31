@@ -220,14 +220,189 @@ exact_midpoint = (n: int) -> (int, int):
 
 # Context-free width facts are demanded only by a storage boundary. Cache one
 # signed width and a nonnegative bit per expression; 0 means not computed and
-# -1 means unknown. Each demanded edge is visited once: O(N+E) time/O(N) space.
+# -1 means unknown. Other negative entries are negated constant widths, with
+# their magnitudes in the parallel node index.
+# Each demanded edge is visited once: O(N+E) time/O(N) space, no separate walk.
+# Constants use a signed magnitude with one unsigned word. Overflow of that
+# bounded representation falls back to width bounds, never host-word wrapping.
 exact_type_widths: int[]
-exact_type_width = (n: int) -> int:
-    if n < exact_type_widths.len() and exact_type_widths[n] != 0: return exact_type_widths[n]
-    if n >= exact_type_widths.len(): exact_type_widths.resize(max(n + 1, nodes.len()))
+exact_type_values: u64[]
+
+exact_constant_width = (n: int, magnitude: u64, negative0: bool) -> int:
+    negative = negative0 and magnitude != 0
+    value = magnitude - u64(negative)
+    bits = 1
+    loop shift in [32, 16, 8, 4, 2, 1]:
+        if value >> shift != 0:
+            value = value >> shift
+            bits += shift
+    if value != 0: bits += 1
+    width = bits * 2 + int(not negative)
+    exact_type_values[n] = magnitude
+    exact_type_widths[n] = -width
+    width
+
+# Both child widths have already been demanded. Constant folding therefore
+# does O(1) work at this node; no recursive evaluator or fact state is needed.
+exact_fold_binary = (n: int, ai: int, bi: int) -> int:
+    x = exact_type_values[int(nodes[n].a)]; y = exact_type_values[int(nodes[n].b)]
+    an = ai & 1 == 0; bn = bi & 1 == 0
+    op = nodes[n].op as Tok
+    value = u64(0)
+    negative = false
+    limit = u64(0xFFFFFFFFFFFFFFFF)
+    if op == .plus or op == .minus:
+        if op == .minus: bn = not bn
+        if an == bn:
+            if x > limit - y: return 0
+            value = x + y
+            negative = an
+        else if x >= y:
+            value = x - y
+            negative = an
+        else:
+            value = y - x
+            negative = bn
+    else if op == .star:
+        if y != 0 and x > limit / y: return 0
+        value = x * y
+        negative = an != bn
+    else if op == .slash or op == .percent:
+        if y == 0: return 0
+        quotient = x / y
+        remainder = x % y
+        floor = nodes[n].aux2 == -1
+        if op == .slash:
+            value = quotient
+            negative = an != bn
+            if floor and negative and remainder != 0: value += 1
+        else:
+            value = remainder
+            negative = an
+            if floor and an != bn and remainder != 0:
+                value = y - remainder
+                negative = bn
+    else if op == .amp or op == .pipe or op == .caret:
+        if an: x = 0 - x
+        if bn: y = 0 - y
+        if op == .amp:
+            value = x & y
+            negative = an and bn
+        else if op == .pipe:
+            value = x | y
+            negative = an or bn
+        else:
+            value = x xor y
+            negative = an != bn
+        if negative:
+            value = 0 - value
+            if value == 0: return 0 # -2**64 exceeds the magnitude word
+    else if op == .shl or op == .shr:
+        if bn: return 0
+        negative = an
+        if op == .shl:
+            if x == 0: value = 0
+            else:
+                if y >= 64 or x > limit >> int(y): return 0
+                value = x << int(y)
+        else if y >= 64: value = u64(an)
+        else:
+            value = x >> int(y)
+            if an and x & ((u64(1) << int(y)) - 1) != 0: value += 1
+    else if op == .starstar:
+        if bn: return 0
+        negative = an and y & 1 != 0
+        value = 1
+        loop y != 0:
+            if y & 1 != 0:
+                if x != 0 and value > limit / x: return 0
+                value *= x
+            y = y >> 1
+            if y != 0:
+                if x != 0 and x > limit / x: return 0
+                x *= x
+    else: return 0
+    exact_constant_width(n, value, negative)
+
+exact_constant_fits = (width: int, t: int) -> bool:
+    t == T_MATH_INT or (if types[t].sign: width / 2 <= types[t].bits else: width & 1 != 0 and width / 2 <= types[t].bits + 1)
+
+exact_type_width = (n: int, constant_only: bool = false) -> int:
+    if n < exact_type_widths.len() and exact_type_widths[n] != 0:
+        cached = exact_type_widths[n]
+        if cached < -1: return -cached
+        return if constant_only: -1 else: cached
+    if n >= exact_type_widths.len():
+        exact_type_widths.resize(max(n + 1, nodes.len()))
+        exact_type_values.resize(exact_type_widths.len())
+    k = nodes[n].kind
+    if k == .int_lit:
+        value = nodes[n].ival
+        magnitude = u64(value)
+        result = 131
+        if value >= 0 or not has_flag(n, NF_U64):
+            if value < 0: magnitude = 0 - magnitude
+            high = if value < 0: -(value + 1) else: value
+            bits = 1
+            loop shift in [32, 16, 8, 4, 2, 1]:
+                if high >> shift != 0:
+                    high = high >> shift
+                    bits += shift
+            if high != 0: bits += 1
+            result = bits * 2 + int(value >= 0)
+        exact_type_values[n] = magnitude
+        exact_type_widths[n] = -result
+        return result
+    # A constant binding may refer back to a node already being queried.
+    exact_type_widths[n] = -1
     t = exact_representation(ntype(n))
     result = -1
-    k = nodes[n].kind
+    if k == .ident:
+        global = nodes[n].aux == i32(int(SK.global))
+        if constant_only and global: return -1
+        initial = 0
+        if is_int(t) and int_policy(t) == 0:
+            ref = int(nodes[n].sym)
+            if global:
+                if readonly_global(ref) and not globals[ref].exposed: initial = int(nodes[int(globals[ref].decl)].b)
+            else if nodes[n].aux == i32(int(SK.local)) and int(locals[ref].flags) & (LF_CONST | LF_CAPTURE) == LF_CONST:
+                initial = int(locals[ref].const_init)
+        if initial != 0:
+            width = exact_type_width(initial, true)
+            index = exact_type_widths[initial]
+            if index < -1 and exact_constant_fits(width, t):
+                # A stored global is zero until its initializer runs. Its
+                # width includes zero, but it is not a singleton constant.
+                exact_type_widths[n] = if global: width else: index
+                if not global: exact_type_values[n] = exact_type_values[initial]
+                return width
+        if not constant_only and is_int(t) and t != T_MATH_INT: result = (int(types[t].bits) + int(not types[t].sign)) * 2 + int(not types[t].sign)
+        exact_type_widths[n] = result
+        return result
+    if k == .conv and is_int(t) and int_policy(t) == 0 and (nodes[n].aux == i32(int(CV.int_)) or nodes[n].aux == i32(int(CV.none_))):
+        width = exact_type_width(int(nodes[n].a), constant_only)
+        index = exact_type_widths[int(nodes[n].a)]
+        if width > 0 and exact_constant_fits(width, t):
+            exact_type_widths[n] = index
+            if index < -1: exact_type_values[n] = exact_type_values[int(nodes[n].a)]
+            return width
+    # Unexpanded mathematical constants and stored bitwise operations also
+    # have exact arithmetic semantics. Jo/policy words keep their own rules.
+    if (k == .binary or k == .unary) and (constant_only or not exact_has_node(n)) and is_int(t) and int_policy(t) == 0 and dewy_at(nodes[n].pos):
+        if k == .binary and nodes[n].aux == 0:
+            exact_type_width(int(nodes[n].a), constant_only); exact_type_width(int(nodes[n].b), constant_only)
+            ai = exact_type_widths[int(nodes[n].a)]; bi = exact_type_widths[int(nodes[n].b)]
+            if ai < -1 and bi < -1:
+                folded = exact_fold_binary(n, ai, bi)
+                if folded > 0: return folded
+        else if k == .unary and nodes[n].op == i32(int(Tok.minus)):
+            exact_type_width(int(nodes[n].a), constant_only)
+            index = exact_type_widths[int(nodes[n].a)]
+            if index < -1:
+                return exact_constant_width(n, exact_type_values[int(nodes[n].a)], index & 1 != 0)
+    # Initializers can belong to an owner not prepared yet. Only an actual
+    # constant is usable there; a source storage type is not an exact bound.
+    if constant_only: return -1
     if exact_word_reads.has(n):
         bound = exact_count_bound(int(nodes[n].a))
         magnitude = max((if bound.lo < 0: -(bound.lo + 1) else: bound.lo), (if bound.hi < 0: -(bound.hi + 1) else: bound.hi))
@@ -238,25 +413,20 @@ exact_type_width = (n: int) -> int:
                 bits += shift
         if magnitude != 0: bits += 1
         result = bits * 2 + int(bound.lo >= 0)
-    else if k == .int_lit:
-        value = nodes[n].ival
-        if has_flag(n, NF_U64) and value < 0: result = 131
-        else:
-            magnitude = if value < 0: -(value + 1) else: value
-            bits = 1
-            loop shift in [32, 16, 8, 4, 2, 1]:
-                if magnitude >> shift != 0:
-                    magnitude = magnitude >> shift
-                    bits += shift
-            if magnitude != 0: bits += 1
-            result = bits * 2 + int(value >= 0)
     else if not exact_has_node(n):
         if is_int(t) and t != T_MATH_INT: result = (int(types[t].bits) + int(not types[t].sign)) * 2 + int(not types[t].sign)
     else if k == .unary:
         a = exact_type_width(int(nodes[n].a))
+        index = exact_type_widths[int(nodes[n].a)]
+        if index < -1 and nodes[n].op == i32(int(Tok.minus)):
+            return exact_constant_width(n, exact_type_values[int(nodes[n].a)], index & 1 != 0)
         if a > 0: result = (a / 2 + 1) * 2
     else if k == .binary:
         a = exact_type_width(int(nodes[n].a)); b = exact_type_width(int(nodes[n].b))
+        ai = exact_type_widths[int(nodes[n].a)]; bi = exact_type_widths[int(nodes[n].b)]
+        if ai < -1 and bi < -1:
+            folded = exact_fold_binary(n, ai, bi)
+            if folded > 0: return folded
         op = nodes[n].op as Tok
         if op == .amp:
             if a > 0 and a & 1 != 0: result = a
@@ -334,13 +504,52 @@ exact_store = (n: int, owner: int):
     if n < exact_type_widths.len(): exact_type_widths[n] = 0
     if exact_measure_on: exact_measure_sites[n] = ExactMeasure(owner, t, "runtime-check")
 
+# Only immutable names can supply a context-free initializer. Stored globals
+# remain loads, and their word bound includes the value before initialization.
+exact_named_constant = (n: int) -> bool:
+    if nodes[n].kind != .ident: return false
+    if nodes[n].aux == i32(int(SK.global)):
+        g = int(nodes[n].sym)
+        return readonly_global(g) and not globals[g].exposed
+    nodes[n].aux == i32(int(SK.local)) and int(locals[int(nodes[n].sym)].flags) & LF_CONST != 0
+
+exact_constant_use = (n: int) -> bool:
+    if exact_named_constant(n): return true
+    if nodes[n].kind == .binary and nodes[n].aux == 0:
+        return exact_named_constant(int(nodes[n].a)) or exact_named_constant(int(nodes[n].b))
+    false
+
 # After checking has seen every write, an immutable mathematical local with a
 # word-sized initializer can feed static exact arithmetic without a tagged
 # temporary. The conversion is a representation proof, not a fit obligation.
 exact_prepare_operand = (n: int) -> int:
     word = exact_math_operand(n)
     if word != n or prune(ntype(n)) != T_MATH_INT: return word
-    if nodes[n].kind != .ident or nodes[n].aux != i32(int(SK.local)): return n
+    if nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.int_)):
+        source = int(nodes[n].a)
+        t = exact_representation(ntype(source))
+        # A stored signed policy word has the same value when lifted to int.
+        # Keep its policy operation intact beneath an identity conversion.
+        if is_int(t) and types[t].sign and types[t].bits == 64:
+            word = mk(.conv, nodes[n].pos)
+            nodes[word] = Node(kind = .conv, pos = nodes[n].pos, a = i32(source), aux = i32(int(CV.none_)), type = i32(T_INT), flags = i32(NF_CHECKED))
+            return word
+    if nodes[n].kind != .ident: return n
+    # A local constant may be an inferred `int`. Stored globals retain their
+    # read and include their initial zero in exact_count_bound below.
+    local = nodes[n].aux == i32(int(SK.local))
+    if local and int(locals[int(nodes[n].sym)].flags) & LF_CONST != 0:
+        width = exact_type_width(n)
+        index = exact_type_widths[n]
+        if index < -1 and width / 2 <= 64:
+            value = int(exact_type_values[n])
+            if index & 1 == 0: value = -value
+            word = mk(.int_lit, nodes[n].pos)
+            nodes[word].type = i32(T_INT)
+            nodes[word].ival = value
+            add_flag(word, NF_CHECKED)
+            return word
+    if not local and nodes[n].aux != i32(int(SK.global)): return n
     bound = exact_count_bound(n)
     if bound.wide: return n
     word = mk(.conv, nodes[n].pos)
@@ -351,8 +560,16 @@ exact_prepare_operand = (n: int) -> int:
     word
 
 exact_prepare_math = (n: int) -> bool:
-    if nodes[n].kind != .call and nodes[n].kind != .binary: return false
+    if nodes[n].kind != .call and nodes[n].kind != .binary and nodes[n].kind != .unary: return false
     if nodes[n].aux != 0 or prune(ntype(n)) != T_MATH_INT or not dewy_at(nodes[n].pos): return false
+    if nodes[n].kind == .unary:
+        if nodes[n].op != i32(int(Tok.minus)): return false
+        a = exact_prepare_operand(int(nodes[n].a))
+        if exact_representation(ntype(a)) != T_INT: return false
+        nodes[n].a = i32(a)
+        nodes[n].type = i32(T_INT)
+        wrap_conv(n, .int_, T_MATH_INT)
+        return true
     if nodes[n].kind == .call:
         floor = fact_floor_call(n)
         if floor < 1 or floor > 4: return false
@@ -459,6 +676,8 @@ exact_prepare_node = (n: int, owner: int, store: bool):
         exact_control_values.push(int(nodes[n].a))
         exact_control_parents.push(previous_control)
         exact_control_head = exact_control_values.len()
+    if policy and k == .conv and (nodes[n].aux == i32(int(CV.wrap_int)) or nodes[n].aux == i32(int(CV.saturate_int))) and exact_named_constant(int(nodes[n].a)):
+        nodes[n].a = i32(exact_prepare_operand(int(nodes[n].a)))
     mask = isolation_children(k)
     if mask > 0:
         if mask & 1 != 0: exact_prepare_node(int(nodes[n].a), owner, not (math or operator or cmp or conversion or policy or k == .exprstmt or k == .match_ and exact_match_literals(n)))
@@ -466,14 +685,20 @@ exact_prepare_node = (n: int, owner: int, store: bool):
         if mask & 4 != 0: exact_prepare_node(int(nodes[n].c), owner, not control)
         if mask & 16 != 0:
             loop i in [0..nkids(n)): exact_prepare_node(kid(n, i), owner, not math and k != .block and k != .match_)
-    if (k == .call or k == .binary) and prune(ntype(n)) == T_MATH_INT and exact_prepare_math(n):
+    if (k == .call or k == .binary or k == .unary) and prune(ntype(n)) == T_MATH_INT and exact_prepare_math(n):
         exact_marks[n] &= 251
         exact_prepare_node(n, owner, store)
         return
     if conversion and prune(ntype(int(nodes[n].a))) == T_MATH_INT:
-        exact_demands[owner] = true
         source = int(nodes[n].a)
-        if nodes[source].kind == .conv and nodes[source].aux == i32(int(CV.int_)) and exact_type(ntype(int(nodes[source].a)), nodes[n].pos): nodes[n].a = nodes[source].a
+        if exact_named_constant(source) and not exact_word_reads.has(n):
+            word = exact_prepare_operand(source)
+            if word != source:
+                nodes[n].a = i32(word)
+                exact_mark(n) # narrower destinations still need their own fit proof
+        if nodes[n].a == i32(source):
+            if nodes[source].kind == .conv and nodes[source].aux == i32(int(CV.int_)) and exact_type(ntype(int(nodes[source].a)), nodes[n].pos): nodes[n].a = nodes[source].a
+            else if not exact_word_reads.has(n): exact_demands[owner] = true
     # Arm coercion rewrites the tail after check_block cached its type.
     # Keep both directions synchronized: a word arm widened to int must not
     # be read as an untagged word, and a narrowed arm must expose its fit check.
@@ -766,6 +991,16 @@ exact_count_bound = (n: int) -> FactBound:
     k = nodes[n].kind
     t = exact_representation(ntype(n))
     if k == .int_lit and not (has_flag(n, NF_U64) and nodes[n].ival < 0): out = FactBound(nodes[n].ival, nodes[n].ival)
+    else if k == .ident and nodes[n].aux == i32(int(SK.global)):
+        g = int(nodes[n].sym)
+        if readonly_global(g) and not globals[g].exposed:
+            initial = int(nodes[int(globals[g].decl)].b)
+            width = exact_type_width(initial, true)
+            index = exact_type_widths[initial]
+            if index < -1 and width / 2 <= 64:
+                value = int(exact_type_values[initial])
+                if index & 1 == 0: value = -value
+                out = FactBound(min(0, value), max(0, value))
     else if k == .ident and nodes[n].aux == i32(int(SK.local)):
         l = int(nodes[n].sym)
         flags = int(locals[l].flags)
@@ -1937,6 +2172,7 @@ exact_reset = ():
     exact_stores = {}
     exact_widths = []
     exact_type_widths = []
+    exact_type_values = []
     exact_shifts = {}
     exact_count_nodes = []
     exact_count_index = []

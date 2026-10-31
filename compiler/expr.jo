@@ -324,7 +324,7 @@ wrap_conv = (n: int, cv: CV, to: int):
     nodes.push(nodes[n])
     move_divisor(n, inner)
     nodes[n] = Node(kind = .conv, pos = nodes[inner].pos, a = i32(inner), aux = i32(int(cv)), type = i32(to), flags = i32(NF_CHECKED))
-    if cv == .int_ and to == T_INT and representation_type(ntype(inner)) == T_MATH_INT and dewy_at(nodes[n].pos) and cx >= 0:
+    if (cv == .int_ and to == T_INT or (cv == .wrap_int or cv == .saturate_int) and ntype(inner) == T_MATH_INT and exact_constant_use(inner)) and representation_type(ntype(inner)) == T_MATH_INT and dewy_at(nodes[n].pos) and cx >= 0:
         owner = int(ctxs[cx].inst)
         if owner > 0:
             exact_owners[owner] = true

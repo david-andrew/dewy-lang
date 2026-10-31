@@ -1,0 +1,27 @@
+# quick
+# modes: native native-release web web-release
+Range:type=[lo:int64 = -9223372036854775807 - 1]
+const BASE = 0x100000000
+const WATCH = BASE + 0x20000000
+const TOP = 4611686018427387904 * 2 - 1
+f=():>int64=>Range[].lo
+main=()=>{
+ let x:int64 = 4611686018427387904 * 2 - 1
+ let y:int64 = WATCH + 1
+ let z:int64 = -(4611686018427387904 * 2)
+ printl(f() x y z)
+ let product:int8 = 100 * 100 // 100
+ let negative:int8 = (-127 - 2) // 2
+ let reverse:int8 = (127 + 2) // -2
+ let remainder:int8 = (-127 - 2) % 5
+ let reverse_remainder:int8 = (127 + 2) % -5
+ printl(product negative reverse remainder reverse_remainder)
+ let shifted:int64 = (4611686018427387904 << 1) - 1
+ let power:int64 = 2^63 - 1
+ let mask:int64 = (4611686018427387904 * 2) & 255
+ let bits:int64 = (4611686018427387904 * 2) xor (4611686018427387904 * 2 + 7)
+ printl(shifted power mask bits)
+ let unsigned:uint64 = uint64(9223372036854775808) + uint64(9223372036854775807)
+ let difference:int64 = uint64(9223372036854775808) - uint64(9223372036854775807)
+ printl(unsigned difference)
+}

@@ -848,8 +848,11 @@ including negation, `abs`, floor division, remainder, powers and shifts.
 An unannotated arithmetic local therefore stays `int`: `let total = a+b` does
 not require the sum to fit `int64`, even when both operands are `int64`.
 Only narrowing into a fixed-width binding, field, element, parameter or return
-requires a fit proof. A proven fit costs nothing; otherwise a runtime check
-requires an opt-in. `$runtime_checks=false` and `$no_hidden_costs` reject an
+requires a fit proof. Constant expressions can supply that proof even when an
+intermediate exceeds the destination, such as
+`let x:int64 = 4611686018427387904 * 2 - 1`. A proven fit costs nothing;
+otherwise a runtime check requires an opt-in. `$runtime_checks=false` and
+`$no_hidden_costs` reject an
 unproven narrowing and offer three fixes: widen the destination to `int`, state
 the domain as a refinement (or prove it with a guard), or choose
 `overflow='wrap'|'saturate'`. `$runtime_checks` permits the check except under
