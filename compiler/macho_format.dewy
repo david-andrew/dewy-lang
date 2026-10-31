@@ -8,12 +8,12 @@ from p"leb128.dewy" import (uleb)
 from p"sha.dewy" import (sha256)
 from p"arm64_encode.dewy" import (AC_NE A_SP a_blr a_cmp a_code a_ldr a_movk a_movn a_movz a_ret a_str rd32 w32 wr32)
 let macho_error=""
-const MACHO_BASE=0x100000000
-const MACHO_PAGE=0x4000
-const MACHO_TEXT_OFF=0x4000
-const MACHO_WATCH_AT=MACHO_BASE + 0x20000000 # sloppy watch: all the game's a_code[0] (see below;
-const MACHO_WATCH_SIZE=0x10000000 # below where libSystem's malloc puts its regions)
-const MACHO_WATCH_CODE=MACHO_WATCH_AT + 0x4000 # (after the page with the region's mark)
+const MACHO_BASE:int64=0x100000000
+const MACHO_PAGE:int64=0x4000
+const MACHO_TEXT_OFF:int64=0x4000
+const MACHO_WATCH_AT:int64=MACHO_BASE + 0x20000000 # sloppy watch: all the game's a_code[0] (see below;
+const MACHO_WATCH_SIZE:int64=0x10000000 # below where libSystem's malloc puts its regions)
+const MACHO_WATCH_CODE:int64=MACHO_WATCH_AT + 0x4000 # (after the page with the region's mark)
 macho_page_up=(x:MachWord):>MachWord=>$unsafe {
     (x + MACHO_PAGE - 1) & ((MACHO_PAGE - 1) xor -1)
 }
