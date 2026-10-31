@@ -1,0 +1,202 @@
+$runtime_checks
+from p"node_store.dewy" import Node
+from p"source_types.dewy" import SrcFile
+from p"checker_state.dewy" import (CheckerScope SiblingKnown)
+from p"checker_vardecls.dewy" import vd_decl
+from p"checker_assigns.dewy" import va_assign
+from p"checker_statements.dewy" import (st_const st_drop st_defer st_when)
+from p"checker_exprstmts.dewy" import es_statement
+from p"checker_loops.dewy" import (xb_while xb_jump)
+from p"checker_for_loops.dewy" import fl_for
+from p"checker_returns.dewy" import xt_return
+# A block's statements in its scope, and each statement sent to its checker: a
+# declaration, an assignment (or the declaration it makes, or a dropped value), an
+# expression, a loop, a return or jump, a local constant, `defer` and `when` run in
+# their Dewy leaves; `if`, reflected scopes, shaped dimensions and the value a value
+# block ends with are host services, as are its sinks (where a body's, an arm's or a
+# binding's values go) when it has them. Sibling records followed through the block
+# are asked about only while their tables are live. O(statements) plus their checking;
+# statements may grow every arena, so nodes and lists are reread by ID.
+BWord:type=int64<overflow='wrap'>
+CheckerBlockHost:type=[
+    open:<(node:int64 want_value:bool):>int64>
+    expand:<(node:int64):>void>
+    direct:<(node:int64):>void>
+    final:<(node:int64 index:int64 expected:int64 mode:int64):>int64>
+    sibling:<(node:int64 other:int64 code:int64):>void>
+    finish:<(node:int64 result:int64 mode:int64 count:int64 want_value:bool):>int64>
+    reset:<(mark:int64):>void>
+    special:<(node:int64 code:int64):>void>
+    assign:<(node:int64):>bool>
+    error:<(node:int64 code:int64):>void>
+]
+CheckerBlockInput:type=[
+    nodes:ptr<array<Node>>
+    lists:ptr<array<int32>>
+    files:ptr<array<SrcFile>>
+    scopes:ptr<CheckerScope>
+    context:ptr<int64>
+    sibling_flow:ptr<dict<int64 int64>>
+    sibling_known:ptr<dict<int64 SiblingKnown>>
+    sibling_block:ptr<int64>
+    sibling_index:ptr<int64>
+    flow_local:ptr<int64>
+    body_mode:ptr<int64>
+    arm_next:ptr<int64>
+    bind_next:ptr<int64>
+    discarding:ptr<bool>
+    exact:ptr<bool>
+    void_type:ptr<int64>
+    never_type:ptr<int64>
+    host:ptr<CheckerBlockHost>
+]
+let bk_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let bk_lists:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
+let bk_files:ptr<array<SrcFile>>=$unsafe (uint64(0) as ptr<array<SrcFile>>)
+let bk_scopes:ptr<CheckerScope>=$unsafe (uint64(0) as ptr<CheckerScope>)
+let bk_context:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let bk_sibling_flow:ptr<dict<int64 int64>>=$unsafe (uint64(0) as ptr<dict<int64 int64>>)
+let bk_sibling_known:ptr<dict<int64 SiblingKnown>>=$unsafe (uint64(0) as ptr<dict<int64 SiblingKnown>>)
+let bk_sibling_block:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let bk_sibling_index:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let bk_flow_local:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let bk_body_mode:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let bk_arm_next:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let bk_bind_next:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let bk_discarding:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+let bk_exact:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+let bk_void_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let bk_never_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let bk_host:ptr<CheckerBlockHost>=$unsafe (uint64(0) as ptr<CheckerBlockHost>)
+checker_blocks_bind=(input:ptr<CheckerBlockInput>):>BWord=>$unsafe {
+    bk_nodes=input[0].nodes
+    bk_lists=input[0].lists
+    bk_files=input[0].files
+    bk_scopes=input[0].scopes
+    bk_context=input[0].context
+    bk_sibling_flow=input[0].sibling_flow
+    bk_sibling_known=input[0].sibling_known
+    bk_sibling_block=input[0].sibling_block
+    bk_sibling_index=input[0].sibling_index
+    bk_flow_local=input[0].flow_local
+    bk_body_mode=input[0].body_mode
+    bk_arm_next=input[0].arm_next
+    bk_bind_next=input[0].bind_next
+    bk_discarding=input[0].discarding
+    bk_exact=input[0].exact
+    bk_void_type=input[0].void_type
+    bk_never_type=input[0].never_type
+    bk_host=input[0].host
+    0
+}
+bk_flag=(n:BWord f:BWord):>bool=>$unsafe {BWord(bk_nodes[0].ptr[n].flags) & f not=? 0}
+bk_kid=(n:BWord i:BWord):>BWord=>$unsafe {BWord(bk_lists[0][BWord(bk_nodes[0].ptr[n].list) + i])}
+# `x = value`: `_ = value` drops it, a first `x = value` declares x (Tok.assign 47; a
+# spawn's call aux2 17).
+bk_assign=(s:BWord):>void=>$unsafe {
+    let lhs=BWord(bk_nodes[0].ptr[s].a)
+    let op=bk_nodes[0].ptr[s].op
+    let lk=bk_nodes[0].ptr[lhs].kind
+    if lk =? 'hole' and op =? 47 {st_drop(s); return}
+    if op =? 47 and (lk =? 'ident' or lk =? 'tuple') {
+        if bk_host[0].assign(s) {vd_decl(s); return}
+    } else {
+        let b=BWord(bk_nodes[0].ptr[s].b)
+        if bk_nodes[0].ptr[b].kind =? 'call' and bk_nodes[0].ptr[b].aux2 =? 17 {bk_host[0].error(s 3)}
+    }
+    let r=va_assign(s)
+    if r not=? s {bk_nodes[0][s]=bk_nodes[0].ptr[r]}
+}
+# One statement (NF_CHECKED 128: a quantity constant settled before its module's code
+# ran; a shaped parameter's dimension is aux2 1789).
+bk_stmt=(s:BWord):>void=>$unsafe {
+    let k=bk_nodes[0].ptr[s].kind
+    if bk_exact[0] and k =? 'assign' and bk_nodes[0].ptr[s].op not=? 47 and bk_context[0] >=? 0 {bk_host[0].special(s 1)}
+    if k =? 'vardecl' and bk_nodes[0].ptr[s].aux2 =? 1789 {
+        bk_host[0].special(s 2)
+        k=bk_nodes[0].ptr[s].kind
+    }
+    if k =? 'reflect_scope' {bk_host[0].special(s 3); return}
+    if (k =? 'vardecl' or k =? 'const_') and bk_flag(s 128) {return}
+    if k =? 'vardecl' {vd_decl(s)}
+    else if k =? 'const_' {st_const(s)}
+    else if k =? 'assign' {bk_assign(s)}
+    else if k =? 'exprstmt' {es_statement(s)}
+    else if k =? 'if_' or k =? 'iflet' {bk_host[0].special(s 4)}
+    else if k =? 'while_' {xb_while(s)}
+    else if k =? 'for_' {fl_for(s)}
+    else if k =? 'return_' {xt_return(s)}
+    else if k =? 'break_' or k =? 'continue_' {xb_jump(s)}
+    else if k =? 'defer_' {st_defer(s)}
+    else if k =? 'when_' {st_when(s)}
+    else if k =? 'block' {bk_block(s 0 false);}
+    else if k =? 'fn_' or k =? 'struct_' or k =? 'enum_' or k =? 'import_' {bk_host[0].error(s 1)}
+    else if k not=? 'test_' and k not=? 'build_' {bk_host[0].error(s 2)}
+}
+# A block (NF_LOOP_SETUP 131072, NF_FLOW_RETURNS 1073741824, NF_DISCARD 8; sinks: body
+# 2, bind 6), its value's type when want_value.
+bk_block=(b:BWord expected:BWord want_value:bool):>BWord=>$unsafe {
+    # (a lowered combined loop is a statement wherever it stands: its body's values go where
+    # the loop's own would, to the enclosing collector or body, as a single-header loop's do)
+    let pos=bk_nodes[0].ptr[b].pos
+    if want_value and bk_flag(b 131072) and bk_files[0][pos >> 40].is_dewy {
+        bk_block(b 0 false);
+        let result=if bk_flag(b 1073741824) {bk_never_type[0]} else {bk_void_type[0]}
+        bk_nodes[0][b].type=int32<overflow='wrap'>(result)
+        return result
+    }
+    let mode:BWord=-1
+    let was_discarding=bk_discarding[0]
+    if want_value or bk_body_mode[0] >=? 0 or bk_flag(b 8) {mode=bk_host[0].open(b want_value)}
+    else {
+        bk_arm_next[0]=0
+        bk_bind_next[0]=0
+    }
+    let counted=mode =? 2 or mode =? 6
+    let transparent=bk_nodes[0].ptr[b].aux =? 5 and not want_value
+    let n0=BWord(bk_nodes[0].ptr[b].nlist)
+    let i:BWord=0
+    loop i <? n0 {
+        if bk_nodes[0].ptr[bk_kid(b i)].kind =? 'when_' {
+            bk_host[0].expand(b)
+            break
+        }
+        i=i + 1
+    }
+    let mark=bk_scopes[0].names.length
+    let result=bk_void_type[0]
+    bk_nodes[0][b].aux=0
+    let n=BWord(bk_nodes[0].ptr[b].nlist)
+    let saved_block=bk_sibling_block[0]
+    let saved_index=bk_sibling_index[0]
+    bk_sibling_block[0]=b
+    i=0
+    loop i <? n {
+        let s=bk_kid(b i)
+        bk_sibling_index[0]=i
+        if counted {bk_host[0].direct(s)}
+        let value:BWord=-1
+        if i =? n - 1 and want_value {value=bk_host[0].final(b i expected mode)}
+        if value >=? 0 {result=value}
+        else {
+            if bk_sibling_flow[0].length >? 0 {bk_host[0].sibling(s 0 1)}
+            if bk_sibling_known[0].length >? 0 {bk_host[0].sibling(s b 2)}
+            else {bk_stmt(s)}
+            let l=bk_flow_local[0]
+            if l not=? 0 {
+                bk_host[0].sibling(l bk_nodes[0].ptr[s].pos 3)
+                bk_flow_local[0]=0
+            }
+        }
+        i=i + 1
+    }
+    if bk_sibling_flow[0].length >? 0 {bk_host[0].sibling(b 0 4)}
+    bk_sibling_block[0]=saved_block
+    bk_sibling_index[0]=saved_index
+    if want_value or mode >=? 0 {result=bk_host[0].finish(b result mode n want_value)}
+    if mode >=? 0 {bk_discarding[0]=was_discarding}
+    bk_nodes[0][b].type=int32<overflow='wrap'>(result)
+    if transparent {bk_nodes[0][b].aux=5}
+    else if bk_scopes[0].names.length not=? mark {bk_host[0].reset(mark)}
+    result
+}

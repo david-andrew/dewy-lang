@@ -1,3 +1,4 @@
+use 'checker_blocks.dewy'
 use 'checker_assigns.dewy'
 use 'checker_vardecls.dewy'
 use 'checker_for_loops.dewy'
@@ -2614,14 +2615,11 @@ sink_close = (b: int, result: int) -> int:
     sinks.pop()
     out
 
-check_block = (b: int, expected: int, want_value: bool) -> int:
-    # (a lowered combined loop is a statement wherever it stands: its body's values go where
-    # the loop's own would, to the enclosing collector or body, as a single-header loop's do)
-    if want_value and has_flag(b, NF_LOOP_SETUP) and files[pos_file(nodes[b].pos)].is_dewy:
-        check_block(b, 0, false)
-        result = if has_flag(b, NF_FLOW_RETURNS): T_NEVER else: T_VOID
-        nodes[b].type = i32(result)
-        return result
+check_block = (b: int, expected: int, want_value: bool) -> int: bk_block(b, expected, want_value)
+# Blocks run in checker_blocks.dewy; these are its services.
+# (how a block's values go: a function body's, a collector's, an arm's, a binding's, or
+# dropped; -1 for none)
+block_open = (b: int, want_value: bool) -> int:
     sink_mode = -1
     if sink_body_mode >= 0:
         sink_mode = sink_body_mode
@@ -2634,82 +2632,67 @@ check_block = (b: int, expected: int, want_value: bool) -> int:
         else: sink_mode = SINK_ONE
     sink_arm_next = 0
     sink_bind_next = 0
-    was_discarding = discarding
     if sink_mode >= 0:
         sink_open(b, sink_mode)
         discarding = false
+    sink_mode
+block_expand = (b: int):
+    nl: int[]
+    loop i in [0..nkids(b)): expand_when(nl, kid(b, i))
+    set_list(b, nl)
+block_direct = (s: int): sinks[sinks.len() - 1].direct = s
+# The value statement ending a value block (its result type), or -1 when it is a statement.
+block_final = (b: int, i: int, expected: int, sink_mode: int) -> int:
+    s = kid(b, i)
+    # A trailing spawn is a statement even in a value-producing helper body.
+    if not value_capable(s) or nodes[s].kind == .exprstmt and nodes[int(nodes[s].a)].kind == .call and nodes[int(nodes[s].a)].aux2 == 17: return -1
     collecting = sink_mode == SINK_BODY or sink_mode == SINK_ARM or sink_mode == SINK_BIND
-    transparent = nodes[b].aux == 5 and not want_value
-    has_when = false
-    loop i in [0..nkids(b)):
-        if nodes[kid(b, i)].kind == .when_: has_when = true
-    if has_when:
-        nl: int[]
-        loop i in [0..nkids(b)): expand_when(nl, kid(b, i))
-        set_list(b, nl)
-    mark = scope_mark()
-    result = T_VOID
-    nodes[b].aux = 0
-    n = nkids(b)
-    saved_block = sibling_block
-    saved_index = sibling_index
-    sibling_block = b
     counted = sink_mode == SINK_BODY or sink_mode == SINK_BIND
-    loop i in [0..n):
-        s = kid(b, i)
-        sibling_index = i
+    if nodes[s].kind == .if_ or nodes[s].kind == .iflet:
+        es = mk(.exprstmt, nodes[s].pos)
+        nodes[es].a = i32(s)
+        clear_flag(s, NF_STMT)
+        set_kid(b, i, es)
+        s = es
         if counted: sinks[sinks.len() - 1].direct = s
-        # A trailing spawn is a statement even in a value-producing helper body.
-        if i == n - 1 and want_value and value_capable(s) and not (nodes[s].kind == .exprstmt and nodes[int(nodes[s].a)].kind == .call and nodes[int(nodes[s].a)].aux2 == 17):
-            if nodes[s].kind == .if_ or nodes[s].kind == .iflet:
-                es = mk(.exprstmt, nodes[s].pos)
-                nodes[es].a = i32(s)
-                clear_flag(s, NF_STMT)
-                set_kid(b, i, es)
-                s = es
-                if counted: sinks[sinks.len() - 1].direct = s
-            e = int(nodes[s].a)
-            if nodes[e].kind == .match_: clear_flag(e, NF_STMT)
-            if collecting:
-                saved_final = sink_final
-                sink_final = e
-                saved_site = sink_pack_site
-                sink_pack_site = e
-                result = check_expr(e, expected)
-                sink_final = saved_final
-                nodes[s].a = i32(last_checked)
-                pack = sink_pack_hit != 0 and sink_pack_hit == e
-                sink_pack_hit = 0
-                sink_pack_site = saved_site
-                armed = sinks[sink_root(sinks.len() - 1)].finals.contains(e)
-                if not armed and tkind(result) != .void_ and result != T_NEVER: sink_express(s, result, pack, true)
-            else:
-                result = check_expr(e, expected)
-                nodes[s].a = i32(last_checked)
-            if tkind(result) != .void_: nodes[b].aux = 1
-            if result == T_NEVER: nodes[b].aux = 0
-            add_flag(s, NF_CHECKED)
-            continue
-        if sibling_flow.len() > 0: sibling_flow_loops(s)
-        if sibling_known.len() > 0: sibling_statement(s, b)
-        else: check_stmt(s)
-        if sibling_flow_l != 0:
-            sibling_flow_start(sibling_flow_l, nodes[s].pos)
-            sibling_flow_l = 0
-    if sibling_flow.len() > 0: sibling_flow_end(b)
-    sibling_block = saved_block
-    sibling_index = saved_index
+    e = int(nodes[s].a)
+    if nodes[e].kind == .match_: clear_flag(e, NF_STMT)
+    result = T_VOID
+    if collecting:
+        saved_final = sink_final
+        sink_final = e
+        saved_site = sink_pack_site
+        sink_pack_site = e
+        result = check_expr(e, expected)
+        sink_final = saved_final
+        nodes[s].a = i32(last_checked)
+        pack = sink_pack_hit != 0 and sink_pack_hit == e
+        sink_pack_hit = 0
+        sink_pack_site = saved_site
+        armed = sinks[sink_root(sinks.len() - 1)].finals.contains(e)
+        if not armed and tkind(result) != .void_ and result != T_NEVER: sink_express(s, result, pack, true)
+    else:
+        result = check_expr(e, expected)
+        nodes[s].a = i32(last_checked)
+    if tkind(result) != .void_: nodes[b].aux = 1
+    if result == T_NEVER: nodes[b].aux = 0
+    add_flag(s, NF_CHECKED)
+    result
+# (1 followed variables a statement writes in a loop, 2 a statement while sibling contents
+# are known, 3 a followed variable just declared (n: it, m: its position), 4 the block's end)
+block_sibling = (n: int, m: int, code: int):
+    if code == 1: sibling_flow_loops(n)
+    else if code == 2: sibling_statement(n, m)
+    else if code == 3: sibling_flow_start(n, m)
+    else: sibling_flow_end(n)
+block_finish = (b: int, result0: int, sink_mode: int, n: int, want_value: bool) -> int:
+    result = result0
     if want_value and nodes[b].aux == 0 and n > 0 and stmt_terminates(kid(b, n - 1)): result = T_NEVER
     if want_value and has_flag(b, NF_FLOW_RETURNS): result = T_NEVER
     # (an array built by pushing has a solved inference variable inside its type: the plain type
     # matches overloads exactly)
     if want_value and result != 0 and int(types[result].flags) & TF_HAS_VAR != 0: result = zonk(result)
-    if sink_mode >= 0:
-        result = sink_close(b, result)
-        discarding = was_discarding
-    nodes[b].type = i32(result)
-    if transparent: nodes[b].aux = 5
-    else: scope_reset(mark)
+    if sink_mode >= 0: result = sink_close(b, result)
     result
 
 # the value expression of a value block
@@ -4540,15 +4523,15 @@ shape_returned = (value: int, rt: int) -> int:
     check_expr(bc_call("__shape_value", [value, sizes], pos), rt)
     last_checked
 
-check_stmt = (s: int):
-    k = nodes[s].kind
-    if exact_measure_on and k == .assign and nodes[s].op != i32(int(Tok.assign)) and cx >= 0:
+check_stmt = (s: int): bk_stmt(s)
+# (1 an exact-width measure's owner, 2 a shaped parameter's dimension, 3 a reflected scope,
+# 4 an `if` statement)
+stmt_special = (s: int, code: int):
+    if code == 1:
         owner = int(ctxs[cx].inst)
         if owner > 0: exact_owners[owner] = true
-    if k == .vardecl and nodes[s].aux2 == SHAPE_DIM:
-        shape_dim_decl(s)
-        k = nodes[s].kind
-    if k == .reflect_scope:
+    else if code == 2: shape_dim_decl(s)
+    else if code == 3:
         mark = scope_mark()
         reflect_bind(s)
         body = int(nodes[s].b)
@@ -4559,38 +4542,27 @@ check_stmt = (s: int):
         reflect_active = active
         scope_reset(mark)
         nodes[s] = nodes[body]
-        return
-    # (a quantity constant ensure_global settled, used before its module's own code ran)
-    if (k == .vardecl or k == .const_) and has_flag(s, NF_CHECKED): return
-    if k == .vardecl: check_vardecl(s)
-    else if k == .const_: st_const(s)
-    # (_ = f(): the value made, and dropped on purpose)
-    else if k == .assign and nodes[int(nodes[s].a)].kind == .hole and nodes[s].op == i32(int(Tok.assign)): st_drop(s)
-    else if k == .assign and assign_declares(s, -1):
-        assign_to_decl(s)
-        check_vardecl(s)
-    else if k == .assign:
-        if nodes[int(nodes[s].b)].kind == .call and nodes[int(nodes[s].b)].aux2 == 17: spawn_value_error(nodes[int(nodes[s].b)].pos)
-        check_late_global(s)
-        r = check_assign(s)
-        if r != s:
-            nodes[s] = nodes[r]
-    else if k == .exprstmt: es_statement(s)
-    else if k == .if_ or k == .iflet:
+    else:
         add_flag(s, NF_STMT)
         check_expr(s, 0)
         if last_checked != s: nodes[s] = nodes[last_checked]
         if expectation_ifs.has(s): expectation_refuted(s)
-    else if k == .while_: xb_while(s)
-    else if k == .for_: check_for(s)
-    else if k == .return_: xt_return(s)
-    else if k == .break_ or k == .continue_: xb_jump(s)
-    else if k == .defer_: st_defer(s)
-    else if k == .when_: st_when(s)
-    else if k == .block: check_block(s, 0, false)
-    else if k == .fn_ or k == .struct_ or k == .enum_ or k == .import_: fatal(nodes[s].pos, "declarations are only allowed at the top level")
-    else if k == .test_ or k == .build_: pass
-    else: fatal(nodes[s].pos, "invalid statement")
+# `x = value` (or `a, b = value`) that declares x, made a declaration; otherwise a spawn's
+# handle and a global declared below are looked at
+stmt_assign = (s: int) -> bool:
+    if assign_declares(s, -1):
+        assign_to_decl(s)
+        return true
+    if nodes[int(nodes[s].b)].kind == .call and nodes[int(nodes[s].b)].aux2 == 17: spawn_value_error(nodes[int(nodes[s].b)].pos)
+    check_late_global(s)
+    false
+stmt_error = (s: int, code: int):
+    if code == 1: fatal(nodes[s].pos, "declarations are only allowed at the top level")
+    if code == 2: fatal(nodes[s].pos, "invalid statement")
+    spawn_value_error(nodes[int(nodes[s].b)].pos)
+block_host = CheckerBlockHost(block_open, block_expand, block_direct, block_final, block_sibling, block_finish, scope_reset, stmt_special, stmt_assign, stmt_error)
+block_input = CheckerBlockInput(&nodes, &lists, &files, &check_scopes, &cx, &sibling_flow, &sibling_known, &sibling_block, &sibling_index, &sibling_flow_l, &sink_body_mode, &sink_arm_next, &sink_bind_next, &discarding, &exact_measure_on, &T_VOID, &T_NEVER, &block_host)
+block_binding = checker_blocks_bind(&block_input)
 
 # Loop statements run in checker_loops.dewy; these are its services.
 loop_body = (b: int):

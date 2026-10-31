@@ -1,0 +1,176 @@
+# Frozen block and statement checker extracted from check.jo.
+use 'node_store.dewy'
+use 'source_types.dewy'
+use 'checker_state.dewy'
+use 'checker_vardecls.dewy'
+use 'checker_assigns.dewy'
+use 'checker_statements.dewy'
+use 'checker_exprstmts.dewy'
+use 'checker_loops.dewy'
+use 'checker_for_loops.dewy'
+use 'checker_returns.dewy'
+struct CheckerBlockHost:
+    open: (int, bool) -> int
+    expand: (int) -> void
+    direct: (int) -> void
+    final: (int, int, int, int) -> int
+    sibling: (int, int, int) -> void
+    finish: (int, int, int, int, bool) -> int
+    reset: (int) -> void
+    special: (int, int) -> void
+    assign: (int) -> bool
+    error: (int, int) -> void
+struct CheckerBlockInput:
+    nodes: *(Node[])
+    lists: *(i32[])
+    files: *(SrcFile[])
+    scopes: *CheckerScope
+    context: *int
+    sibling_flow: *({int: int})
+    sibling_known: *({int: SiblingKnown})
+    sibling_block: *int
+    sibling_index: *int
+    flow_local: *int
+    body_mode: *int
+    arm_next: *int
+    bind_next: *int
+    discarding: *bool
+    exact: *bool
+    void_type: *int
+    never_type: *int
+    host: *CheckerBlockHost
+bk_nodes: *(Node[])
+bk_lists: *(i32[])
+bk_files: *(SrcFile[])
+bk_scopes: *CheckerScope
+bk_context: *int
+bk_sibling_flow: *({int: int})
+bk_sibling_known: *({int: SiblingKnown})
+bk_sibling_block: *int
+bk_sibling_index: *int
+bk_flow_local: *int
+bk_body_mode: *int
+bk_arm_next: *int
+bk_bind_next: *int
+bk_discarding: *bool
+bk_exact: *bool
+bk_void_type: *int
+bk_never_type: *int
+bk_host: *CheckerBlockHost
+checker_blocks_bind = (input: *CheckerBlockInput) -> int:
+    bk_nodes = input[0].nodes
+    bk_lists = input[0].lists
+    bk_files = input[0].files
+    bk_scopes = input[0].scopes
+    bk_context = input[0].context
+    bk_sibling_flow = input[0].sibling_flow
+    bk_sibling_known = input[0].sibling_known
+    bk_sibling_block = input[0].sibling_block
+    bk_sibling_index = input[0].sibling_index
+    bk_flow_local = input[0].flow_local
+    bk_body_mode = input[0].body_mode
+    bk_arm_next = input[0].arm_next
+    bk_bind_next = input[0].bind_next
+    bk_discarding = input[0].discarding
+    bk_exact = input[0].exact
+    bk_void_type = input[0].void_type
+    bk_never_type = input[0].never_type
+    bk_host = input[0].host
+    0
+bk_flag = (n: int, f: int) -> bool: int(bk_nodes[0][n].flags) & f != 0
+bk_kid = (n: int, i: int) -> int: int(bk_lists[0][int(bk_nodes[0][n].list) + i])
+bk_assign = (s: int):
+    lhs = int(bk_nodes[0][s].a)
+    op = bk_nodes[0][s].op
+    lk = bk_nodes[0][lhs].kind
+    if lk == .hole and op == 47:
+        st_drop(s)
+        return
+    if op == 47 and (lk == .ident or lk == .tuple):
+        if bk_host[0].assign(s):
+            vd_decl(s)
+            return
+    else:
+        b = int(bk_nodes[0][s].b)
+        if bk_nodes[0][b].kind == .call and bk_nodes[0][b].aux2 == 17: bk_host[0].error(s, 3)
+    r = va_assign(s)
+    if r != s: bk_nodes[0][s] = bk_nodes[0][r]
+bk_stmt = (s: int):
+    k = bk_nodes[0][s].kind
+    if bk_exact[0] and k == .assign and bk_nodes[0][s].op != 47 and bk_context[0] >= 0: bk_host[0].special(s, 1)
+    if k == .vardecl and bk_nodes[0][s].aux2 == 1789:
+        bk_host[0].special(s, 2)
+        k = bk_nodes[0][s].kind
+    if k == .reflect_scope:
+        bk_host[0].special(s, 3)
+        return
+    if (k == .vardecl or k == .const_) and bk_flag(s, 128): return
+    if k == .vardecl: vd_decl(s)
+    else if k == .const_: st_const(s)
+    else if k == .assign: bk_assign(s)
+    else if k == .exprstmt: es_statement(s)
+    else if k == .if_ or k == .iflet: bk_host[0].special(s, 4)
+    else if k == .while_: xb_while(s)
+    else if k == .for_: fl_for(s)
+    else if k == .return_: xt_return(s)
+    else if k == .break_ or k == .continue_: xb_jump(s)
+    else if k == .defer_: st_defer(s)
+    else if k == .when_: st_when(s)
+    else if k == .block: bk_block(s, 0, false)
+    else if k == .fn_ or k == .struct_ or k == .enum_ or k == .import_: bk_host[0].error(s, 1)
+    else if k != .test_ and k != .build_: bk_host[0].error(s, 2)
+bk_block = (b: int, expected: int, want_value: bool) -> int:
+    pos = bk_nodes[0][b].pos
+    if want_value and bk_flag(b, 131072) and bk_files[0][pos >> 40].is_dewy:
+        bk_block(b, 0, false)
+        result = if bk_flag(b, 1073741824): bk_never_type[0] else: bk_void_type[0]
+        bk_nodes[0][b].type = i32(result)
+        return result
+    mode = -1
+    was_discarding = bk_discarding[0]
+    if want_value or bk_body_mode[0] >= 0 or bk_flag(b, 8): mode = bk_host[0].open(b, want_value)
+    else:
+        bk_arm_next[0] = 0
+        bk_bind_next[0] = 0
+    counted = mode == 2 or mode == 6
+    transparent = bk_nodes[0][b].aux == 5 and not want_value
+    n0 = int(bk_nodes[0][b].nlist)
+    i = 0
+    loop i < n0:
+        if bk_nodes[0][bk_kid(b, i)].kind == .when_:
+            bk_host[0].expand(b)
+            break
+        i = i + 1
+    mark = bk_scopes[0].names.len()
+    result = bk_void_type[0]
+    bk_nodes[0][b].aux = 0
+    n = int(bk_nodes[0][b].nlist)
+    saved_block = bk_sibling_block[0]
+    saved_index = bk_sibling_index[0]
+    bk_sibling_block[0] = b
+    i = 0
+    loop i < n:
+        s = bk_kid(b, i)
+        bk_sibling_index[0] = i
+        if counted: bk_host[0].direct(s)
+        value = -1
+        if i == n - 1 and want_value: value = bk_host[0].final(b, i, expected, mode)
+        if value >= 0: result = value
+        else:
+            if bk_sibling_flow[0].len() > 0: bk_host[0].sibling(s, 0, 1)
+            if bk_sibling_known[0].len() > 0: bk_host[0].sibling(s, b, 2)
+            else: bk_stmt(s)
+            l = bk_flow_local[0]
+            if l != 0:
+                bk_host[0].sibling(l, bk_nodes[0][s].pos, 3)
+                bk_flow_local[0] = 0
+        i = i + 1
+    if bk_sibling_flow[0].len() > 0: bk_host[0].sibling(b, 0, 4)
+    bk_sibling_block[0] = saved_block
+    bk_sibling_index[0] = saved_index
+    if want_value or mode >= 0: result = bk_host[0].finish(b, result, mode, n, want_value)
+    if mode >= 0: bk_discarding[0] = was_discarding
+    bk_nodes[0][b].type = i32(result)
+    if transparent: bk_nodes[0][b].aux = 5
+    else if bk_scopes[0].names.len() != mark: bk_host[0].reset(mark)
+    result
