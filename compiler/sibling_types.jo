@@ -15,15 +15,11 @@ use 'expr.jo'
 use 'errors.jo'
 use 'lex.jo'
 use 'node_store.dewy'
+use 'checker_state.dewy'
 
 SIBLING_CAP = 8
 
-struct SiblingKnown:
-    types: int[]
-    owner: int = 0
-    depth: int = 0
-    block: int = 0
-
+# (SiblingKnown: checker_state.dewy)
 sibling_literals: {int: bool} = {}
 sibling_known: {int: SiblingKnown} = {}
 sibling_block = 0

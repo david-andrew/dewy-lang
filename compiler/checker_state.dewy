@@ -123,3 +123,19 @@ RefineBindings:type=[
     base_type:int64=0
 ]
 
+
+# A binding whose sibling records' order is known from its literal and later pushes
+# (sibling_types.jo); the statement layer tests the table's length.
+SiblingKnown:type=[
+    types:array<int64>=[]
+    owner:int64=0
+    depth:int64=0
+    block:int64=0
+]
+
+# An optional filled in place by a statement of a block (expr.jo opt_fill_*).
+OptFill:type=[
+    subject:int32=0
+    block:int32=0
+    alias:int32=0
+]

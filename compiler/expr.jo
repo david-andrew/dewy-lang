@@ -10377,11 +10377,7 @@ check_swizzle = (n: int, bt: int) -> int:
 # The statements `if v is? none` checking their then-branch, whose top level may fill v
 # (opt_fill_subject): v (a variable, global or field path), the branch, and the alias of
 # v's latest fill there.
-struct OptFill:
-    subject: i32
-    block: i32
-    alias: i32
-
+# (OptFill: checker_state.dewy)
 opt_fill_watch: OptFill[]
 
 # A Dewy statement `if v is? none` (or `v =? none`) over an optional v, a variable not
@@ -10471,7 +10467,7 @@ cond_merge = () -> void: narrow_merge(cond_restored.pop())
 cond_promote = (first: int, limit: int) -> void: narrow_promote(first, limit)
 cond_fill_subject = (cond: int, b: int) -> int:
     fill = opt_fill_subject(cond)
-    if fill != 0: opt_fill_watch.push(OptFill(i32(fill), i32(b), 0))
+    if fill != 0: opt_fill_watch.push(OptFill(subject = i32(fill), block = i32(b)))
     fill
 cond_fill_end = (b: int) -> bool:
     nl = int(opt_fill_watch.pop().alias)
