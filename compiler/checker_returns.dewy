@@ -1,0 +1,142 @@
+$runtime_checks
+from p"node_store.dewy" import Node
+from p"checker_types.dewy" import (TypeInfo StructInfo TK)
+from p"source_types.dewy" import SrcFile
+from p"checker_state.dewy" import (FnInst FnCtx)
+from p"type_inference.dewy" import (tu_prune tu_unify)
+# `return` and `return value`: where a return may stand, the value checked at the
+# declared result (its refinement's representation, a shaped result's dimensions,
+# coercion) or unified with an inferred one, and the exceptions an inferred Dewy
+# result throws. O(1) per statement plus the demanded checking of the value; the
+# value, the inferred-throw log and body sinks are host services that may grow
+# every arena, so nodes and contexts are reread by ID.
+XTWord:type=int64<overflow='wrap'>
+CheckerReturnHost:type=[
+    check:<(node:int64 expected:int64):>int64>
+    coerce:<(node:int64 type_id:int64):>int64>
+    place:<(node:int64):>void>
+    sink:<(pos:int64):>void>
+    throws:<(inst:int64):>bool>
+    thrown:<(node:int64 type_id:int64):>bool>
+    note:<(node:int64):>void>
+    literal:<(node:int64):>int64>
+    fits:<(node:int64 source:int64 target:int64):>bool>
+    shaped:<(node:int64 type_id:int64):>int64>
+    void_member:<(type_id:int64):>bool>
+    void_value:<(node:int64 type_id:int64):>void>
+    error:<(node:int64 type_id:int64 code:int64):>void>
+]
+CheckerReturnInput:type=[
+    nodes:ptr<array<Node>>
+    types:ptr<array<TypeInfo>>
+    structs:ptr<array<StructInfo>>
+    files:ptr<array<SrcFile>>
+    fns:ptr<array<FnInst>>
+    contexts:ptr<array<FnCtx>>
+    context:ptr<int64>
+    last:ptr<int64>
+    sink:ptr<int64>
+    void_type:ptr<int64>
+    never_type:ptr<int64>
+    host:ptr<CheckerReturnHost>
+]
+let xt_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let xt_types:ptr<array<TypeInfo>>=$unsafe (uint64(0) as ptr<array<TypeInfo>>)
+let xt_structs:ptr<array<StructInfo>>=$unsafe (uint64(0) as ptr<array<StructInfo>>)
+let xt_files:ptr<array<SrcFile>>=$unsafe (uint64(0) as ptr<array<SrcFile>>)
+let xt_fns:ptr<array<FnInst>>=$unsafe (uint64(0) as ptr<array<FnInst>>)
+let xt_contexts:ptr<array<FnCtx>>=$unsafe (uint64(0) as ptr<array<FnCtx>>)
+let xt_context:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xt_last:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xt_sink:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xt_void_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xt_never_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xt_host:ptr<CheckerReturnHost>=$unsafe (uint64(0) as ptr<CheckerReturnHost>)
+checker_returns_bind=(input:ptr<CheckerReturnInput>):>XTWord=>$unsafe {
+    xt_nodes=input[0].nodes
+    xt_types=input[0].types
+    xt_structs=input[0].structs
+    xt_files=input[0].files
+    xt_fns=input[0].fns
+    xt_contexts=input[0].contexts
+    xt_context=input[0].context
+    xt_last=input[0].last
+    xt_sink=input[0].sink
+    xt_void_type=input[0].void_type
+    xt_never_type=input[0].never_type
+    xt_host=input[0].host
+    0
+}
+xt_kind=(t:XTWord):>TK=>$unsafe {xt_types[0].ptr[tu_prune(t)].kind}
+xt_dewy=(n:XTWord):>bool=>$unsafe {xt_files[0].ptr[xt_nodes[0].ptr[n].pos >> 40].is_dewy}
+xt_union=(t:XTWord):>bool=>$unsafe {
+    xt_types[0].ptr[t].kind =? 'enum_' and xt_structs[0].ptr[XTWord(xt_types[0].ptr[t].st)].union_
+}
+# `return @place` (NF_MUT 1) in Dewy: a place is not a value, save a function's.
+xt_place=(v:XTWord):>void=>$unsafe {
+    let k=xt_nodes[0].ptr[v].kind
+    if XTWord(xt_nodes[0].ptr[v].flags) & 1 not=? 0 and (k =? 'ident' or k =? 'field' or k =? 'index') and xt_dewy(v) {xt_host[0].place(v)}
+}
+# A function whose written result is shaped (`:>array<T length=[m p]>`) checks the
+# value's dimensions as it leaves.
+xt_shaped=(value:XTWord rt:XTWord):>XTWord=>$unsafe {
+    let d=XTWord(xt_fns[0].ptr[XTWord(xt_contexts[0].ptr[xt_context[0]].inst)].decl)
+    if d =? 0 or xt_nodes[0].ptr[d].kind not=? 'fn_' or xt_nodes[0].ptr[d].a =? 0 {return value}
+    let tn=XTWord(xt_nodes[0].ptr[d].a)
+    if xt_nodes[0].ptr[tn].kind not=? 'tarray' or xt_nodes[0].ptr[tn].ival not=? 1 {return value}
+    xt_host[0].shaped(value rt)
+}
+# A refined result is represented by its base.
+xt_representation=(t:XTWord):>XTWord=>$unsafe {
+    if xt_types[0].ptr[t].kind =? 'refined' {return tu_prune(XTWord(xt_types[0].ptr[t].elem))}
+    t
+}
+# Frozen FK_INIT ordinal 4: top-level code.
+xt_return=(s:XTWord):>void=>$unsafe {
+    let c=xt_context[0]
+    let inst=XTWord(xt_contexts[0].ptr[c].inst)
+    if xt_fns[0].ptr[inst].kind =? 4 and xt_contexts[0].ptr[c].parent <? 0 {xt_host[0].error(s 0 1)}
+    let ret=XTWord(xt_contexts[0].ptr[c].ret)
+    let infer=xt_contexts[0].ptr[c].infer_ret
+    if not infer and tu_prune(ret) =? xt_never_type[0] and xt_dewy(s) {xt_host[0].error(s 0 2)}
+    let a=XTWord(xt_nodes[0].ptr[s].a)
+    if a =? 0 {
+        let rt=tu_prune(ret)
+        if infer and xt_host[0].throws(inst) {xt_host[0].note(s)}
+        let k=xt_types[0].ptr[rt].kind
+        if k =? 'var' {tu_unify(rt xt_void_type[0]);}
+        # A bare return in a `:>void | E` function gives its void member.
+        else if xt_union(rt) and xt_host[0].void_member(rt) {xt_host[0].void_value(s rt)}
+        else if k not=? 'void_' {xt_host[0].error(s rt 4)}
+        return
+    }
+    xt_place(a)
+    if xt_sink[0] >=? 0 {xt_host[0].sink(xt_nodes[0].ptr[s].pos)}
+    if infer and xt_kind(ret) =? 'var' {
+        let t=xt_host[0].check(a 0)
+        xt_nodes[0][s].a=int32<overflow='wrap'>(xt_last[0])
+        if not xt_host[0].thrown(s t) {
+            let v=XTWord(xt_nodes[0].ptr[s].a)
+            if XTWord(xt_nodes[0].ptr[v].flags) & 256 not=? 0 {
+                t=xt_host[0].literal(v)
+                xt_nodes[0][s].a=int32<overflow='wrap'>(xt_host[0].coerce(v t))
+            }
+            tu_unify(ret t);
+            if xt_host[0].throws(inst) {xt_host[0].note(s)}
+        }
+        return
+    }
+    let rt=tu_prune(ret)
+    let inferring=infer and xt_host[0].throws(inst)
+    let is_void=xt_types[0].ptr[rt].kind =? 'void_'
+    if is_void and not inferring {xt_host[0].error(s 0 3)}
+    let expected=rt
+    if is_void {expected=0}
+    let t=xt_host[0].check(a expected)
+    xt_nodes[0][s].a=int32<overflow='wrap'>(xt_last[0])
+    if inferring and not xt_host[0].fits(0 t rt) and xt_host[0].thrown(s t) {return}
+    if is_void {xt_host[0].error(s 0 3)}
+    let shaped=xt_shaped(XTWord(xt_nodes[0].ptr[s].a) xt_representation(rt))
+    xt_nodes[0][s].a=int32<overflow='wrap'>(xt_host[0].coerce(shaped rt))
+    if inferring {xt_host[0].note(s)}
+}

@@ -1,3 +1,4 @@
+use 'checker_returns.dewy'
 use 'checker_loops.dewy'
 use 'checker_zonk.dewy'
 use 'checker_body_results.dewy'
@@ -4708,42 +4709,7 @@ check_stmt = (s: int):
         if expectation_ifs.has(s): expectation_refuted(s)
     else if k == .while_: xb_while(s)
     else if k == .for_: check_for(s)
-    else if k == .return_:
-        inst = int(ctxs[cx].inst)
-        if fns[inst].kind == FK_INIT and ctxs[cx].parent < 0: fatal(nodes[s].pos, "'return' outside of a function")
-        ret = int(ctxs[cx].ret)
-        if not ctxs[cx].infer_ret and prune(ret) == T_NEVER and files[pos_file(nodes[s].pos)].is_dewy: fatal(nodes[s].pos, "a function giving `never` does not return")
-        if nodes[s].a != 0:
-            returned_place(int(nodes[s].a))
-            sink_return(nodes[s].pos)
-            if ctxs[cx].infer_ret and tkind(ret) == .var:
-                t = check_expr(int(nodes[s].a), 0)
-                nodes[s].a = i32(last_checked)
-                if not infer_throw(s, t):
-                    if has_flag(int(nodes[s].a), NF_LITERAL):
-                        t = lit_default(int(nodes[s].a))
-                        nodes[s].a = i32(coerce(int(nodes[s].a), t))
-                    unify(ret, t)
-                    if infer_throws.has(int(ctxs[cx].inst)): infer_note_return(s)
-            else:
-                rt = prune(ret)
-                inferring = ctxs[cx].infer_ret and infer_throws.has(int(ctxs[cx].inst))
-                if tkind(rt) == .void_ and not inferring: fatal(nodes[s].pos, "this function does not return a value")
-                t = check_expr(int(nodes[s].a), (if tkind(rt) == .void_: 0 else: rt))
-                nodes[s].a = i32(last_checked)
-                if not (inferring and not can_coerce(0, t, rt) and infer_throw(s, t)):
-                    if tkind(rt) == .void_: fatal(nodes[s].pos, "this function does not return a value")
-                    nodes[s].a = i32(coerce(shape_returned(int(nodes[s].a), representation_type(rt)), rt))
-                    if inferring: infer_note_return(s)
-        else:
-            rt = prune(ret)
-            if ctxs[cx].infer_ret and infer_throws.has(int(ctxs[cx].inst)): infer_note_return(s)
-            if tkind(rt) == .var: unify(rt, T_VOID)
-            else if union_has_void(rt):
-                # (a bare return in a `:>void | E` function gives its void member)
-                check_expr(bc_block([], nodes[s].pos), rt)
-                nodes[s].a = i32(coerce(last_checked, rt))
-            else if tkind(rt) != .void_: fatal(nodes[s].pos, "missing return value (function returns {dt(rt)})")
+    else if k == .return_: xt_return(s)
     else if k == .break_ or k == .continue_: xb_jump(s)
     else if k == .defer_:
         if refine_active and ref_mutable_result(int(ctxs[cx].inst)):
@@ -4785,6 +4751,29 @@ loop_error = (n: int, t: int, code: int):
 loop_host = CheckerLoopHost(check_expr, coerce, narrow_by, narrow_optional_source, new_local, loop_body, scope_reset, loop_error)
 loop_input = CheckerLoopInput(&nodes, &types, &ctxs, &cx, &check_scopes, &loop_serials, &loop_serial_next, &loop_labels, &narrow_jumps, &last_checked, &T_BOOL, &loop_host)
 loop_binding = checker_loops_bind(&loop_input)
+# Return statements run in checker_returns.dewy; these are its services.
+return_place = (v: int):
+    returned_place(v)
+    return
+return_sink = (pos: int):
+    sink_return(pos)
+    return
+return_throws = (inst: int) -> bool: infer_throws.has(inst)
+return_note = (s: int):
+    infer_note_return(s)
+    return
+return_void_value = (s: int, rt: int):
+    check_expr(bc_block([], nodes[s].pos), rt)
+    nodes[s].a = i32(coerce(last_checked, rt))
+return_error = (s: int, t: int, code: int):
+    pos = nodes[s].pos
+    if code == 1: fatal(pos, "'return' outside of a function")
+    if code == 2: fatal(pos, "a function giving `never` does not return")
+    if code == 3: fatal(pos, "this function does not return a value")
+    fatal(pos, "missing return value (function returns {dt(t)})")
+return_host = CheckerReturnHost(check_expr, coerce, return_place, return_sink, return_throws, infer_throw, return_note, lit_default, can_coerce, shape_returned, union_has_void, return_void_value, return_error)
+return_input = CheckerReturnInput(&nodes, &types, &structs, &files, &fns, &ctxs, &cx, &last_checked, &sink_fn, &T_VOID, &T_NEVER, &return_host)
+return_binding = checker_returns_bind(&return_input)
 
 # (a generic instance's body: an error in the library's code is reported at the program's call)
 check_fn_body = (f: int): cb_check_fn_body(f)

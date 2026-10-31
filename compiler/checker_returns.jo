@@ -1,0 +1,116 @@
+# Frozen return statement checker extracted from check.jo.
+use 'node_store.dewy'
+use 'checker_types.dewy'
+use 'source_types.dewy'
+use 'checker_state.dewy'
+use 'type_inference.dewy'
+struct CheckerReturnHost:
+    check: (int, int) -> int
+    coerce: (int, int) -> int
+    place: (int) -> void
+    sink: (int) -> void
+    throws: (int) -> bool
+    thrown: (int, int) -> bool
+    note: (int) -> void
+    literal: (int) -> int
+    fits: (int, int, int) -> bool
+    shaped: (int, int) -> int
+    void_member: (int) -> bool
+    void_value: (int, int) -> void
+    error: (int, int, int) -> void
+struct CheckerReturnInput:
+    nodes: *(Node[])
+    types: *(TypeInfo[])
+    structs: *(StructInfo[])
+    files: *(SrcFile[])
+    fns: *(FnInst[])
+    contexts: *(FnCtx[])
+    context: *int
+    last: *int
+    sink: *int
+    void_type: *int
+    never_type: *int
+    host: *CheckerReturnHost
+xt_nodes: *(Node[])
+xt_types: *(TypeInfo[])
+xt_structs: *(StructInfo[])
+xt_files: *(SrcFile[])
+xt_fns: *(FnInst[])
+xt_contexts: *(FnCtx[])
+xt_context: *int
+xt_last: *int
+xt_sink: *int
+xt_void_type: *int
+xt_never_type: *int
+xt_host: *CheckerReturnHost
+checker_returns_bind = (input: *CheckerReturnInput) -> int:
+    xt_nodes = input[0].nodes
+    xt_types = input[0].types
+    xt_structs = input[0].structs
+    xt_files = input[0].files
+    xt_fns = input[0].fns
+    xt_contexts = input[0].contexts
+    xt_context = input[0].context
+    xt_last = input[0].last
+    xt_sink = input[0].sink
+    xt_void_type = input[0].void_type
+    xt_never_type = input[0].never_type
+    xt_host = input[0].host
+    0
+xt_kind = (t: int) -> TK: xt_types[0][tu_prune(t)].kind
+xt_dewy = (n: int) -> bool: xt_files[0][xt_nodes[0][n].pos >> 40].is_dewy
+xt_union = (t: int) -> bool: xt_types[0][t].kind == .enum_ and xt_structs[0][int(xt_types[0][t].st)].union_
+xt_place = (v: int):
+    k = xt_nodes[0][v].kind
+    if int(xt_nodes[0][v].flags) & 1 != 0 and (k == .ident or k == .field or k == .index) and xt_dewy(v): xt_host[0].place(v)
+xt_shaped = (value: int, rt: int) -> int:
+    d = int(xt_fns[0][int(xt_contexts[0][xt_context[0]].inst)].decl)
+    if d == 0 or xt_nodes[0][d].kind != .fn_ or xt_nodes[0][d].a == 0: return value
+    tn = int(xt_nodes[0][d].a)
+    if xt_nodes[0][tn].kind != .tarray or xt_nodes[0][tn].ival != 1: return value
+    xt_host[0].shaped(value, rt)
+xt_representation = (t: int) -> int:
+    if xt_types[0][t].kind == .refined: return int(tu_prune(int(xt_types[0][t].elem)))
+    t
+xt_return = (s: int):
+    c = xt_context[0]
+    inst = int(xt_contexts[0][c].inst)
+    if xt_fns[0][inst].kind == 4 and xt_contexts[0][c].parent < 0: xt_host[0].error(s, 0, 1)
+    ret = int(xt_contexts[0][c].ret)
+    infer = xt_contexts[0][c].infer_ret
+    if not infer and int(tu_prune(ret)) == xt_never_type[0] and xt_dewy(s): xt_host[0].error(s, 0, 2)
+    a = int(xt_nodes[0][s].a)
+    if a == 0:
+        rt = int(tu_prune(ret))
+        if infer and xt_host[0].throws(inst): xt_host[0].note(s)
+        k = xt_types[0][rt].kind
+        if k == .var: tu_unify(rt, xt_void_type[0])
+        else if xt_union(rt) and xt_host[0].void_member(rt): xt_host[0].void_value(s, rt)
+        else if k != .void_: xt_host[0].error(s, rt, 4)
+        return
+    xt_place(a)
+    if xt_sink[0] >= 0: xt_host[0].sink(xt_nodes[0][s].pos)
+    if infer and xt_kind(ret) == .var:
+        t = xt_host[0].check(a, 0)
+        xt_nodes[0][s].a = i32(xt_last[0])
+        if not xt_host[0].thrown(s, t):
+            v = int(xt_nodes[0][s].a)
+            if int(xt_nodes[0][v].flags) & 256 != 0:
+                t = xt_host[0].literal(v)
+                xt_nodes[0][s].a = i32(xt_host[0].coerce(v, t))
+            tu_unify(ret, t)
+            if xt_host[0].throws(inst): xt_host[0].note(s)
+        return
+    rt = int(tu_prune(ret))
+    inferring = infer and xt_host[0].throws(inst)
+    is_void = xt_types[0][rt].kind == .void_
+    if is_void and not inferring: xt_host[0].error(s, 0, 3)
+    expected = rt
+    if is_void: expected = 0
+    t = xt_host[0].check(a, expected)
+    xt_nodes[0][s].a = i32(xt_last[0])
+    if inferring and not xt_host[0].fits(0, t, rt) and xt_host[0].thrown(s, t): return
+    if is_void: xt_host[0].error(s, 0, 3)
+    shaped = xt_shaped(int(xt_nodes[0][s].a), xt_representation(rt))
+    xt_nodes[0][s].a = i32(xt_host[0].coerce(shaped, rt))
+    if inferring: xt_host[0].note(s)
