@@ -922,7 +922,7 @@ coerce = (n: int, target: int) -> int:
         return n
     if fk == .typeval: fatal(nodes[n].pos, "expected a value of type {dt(to)}, found a type name")
     why = variant_hint(n, to)
-    if fk == .opt and tk != .opt: why = if dewy_at(nodes[n].pos): " (this value may be none; check it with `is?none` before using its value)" else: " (this value may be none; narrow it before using its value)"
+    if fk == .opt and tk != .opt: why = if dewy_at(nodes[n].pos): optional_hint(n, from) else: " (this value may be none; narrow it before using its value)"
     # (shown += c with c from a loop over a string: a character's code)
     if len(why) == 0 and tkind(to) == .str_ and type_eq(prune(from), T_U8): why = " (a string's elements are character codes, numbers: `chr(c)` is the character as text)"
     if fk == .void_: why = void_rec_hint(n)
@@ -12162,6 +12162,24 @@ narrow_local = (l: int, ms: int[], pos: int):
         al = int(locals[l].alias)
         if nodes[al].kind == .conv and nodes[al].aux == i32(int(CV.union_)): root = copy_path(int(nodes[al].a))
     narrow_expr(root, ms, pos, int(locals[l].name))
+
+# Why a Dewy optional does not fit a plain type. A value optional twice
+# (`xs.get(i)` of optional elements) needs a check per level, and a name
+# narrowed once from one still holds an optional.
+optional_hint = (n: int, from: int) -> str:
+    inner = telem(prune(from))
+    if tkind(inner) == .opt: return " (this value is optional twice, {dt(prune(from))}: none for a missing value, or a present value that is none itself; check it with `is? none` once for each)"
+    e = n
+    loop nodes[e].kind == .conv: e = int(nodes[e].a)
+    root = 0
+    if nodes[e].kind == .unwrap: root = int(nodes[e].a)
+    else if nodes[e].kind == .ident and nodes[e].aux == i32(int(SK.local)):
+        l = int(nodes[e].sym)
+        if int(locals[l].flags) & LF_ALIAS != 0 and locals[l].alias != 0 and nodes[int(locals[l].alias)].kind == .unwrap: root = int(nodes[int(locals[l].alias)].a)
+    if root != 0 and tkind(prune(ntype(root))) == .opt and tkind(telem(prune(ntype(root)))) == .opt:
+        name = if nodes[root].kind == .ident: "`{name_of(int(nodes[root].name))}`" else: "it"
+        return " ({name} was optional twice, {dt(prune(ntype(root)))}, and `is? none` ruled out only the outer none: the value present may be none itself; check it again with `is? none`)"
+    " (this value may be none; check it with `is?none` before using its value)"
 
 # the name `name` stands for root (a variable or field path) narrowed to members ms of its union
 narrow_expr = (root: int, ms: int[], pos: int, name: int):

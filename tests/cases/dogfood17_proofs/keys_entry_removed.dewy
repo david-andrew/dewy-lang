@@ -1,0 +1,9 @@
+# A removal in the loop changes the key set: the snapshot's keys need a guard.
+main = () => {
+    let d = ['a' -> 1 'b' -> 2]
+    loop k in d.keys.values {
+        d.remove('a');
+        d[k] += 1
+    }
+    printl"{d}"
+}

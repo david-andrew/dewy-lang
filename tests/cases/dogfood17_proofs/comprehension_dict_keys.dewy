@@ -1,0 +1,21 @@
+# A dictionary built by a comprehension over a collection has its elements
+# as keys, and so does a second one over the same collection.
+const PEOPLE = ['ann' 'bob' 'cy']
+count = (people:array<string> votes:array<string>):>void => {
+    let tally = [loop p in people p -> 0]
+    loop v in votes if v in? tally tally[v] += 1
+    loop p in people printl"{p}: {tally[p]}"
+    let sorted = people.sorted()
+    if sorted.length >? 0 printl"{tally[sorted[0]]}"
+}
+main = () => {
+    let d = [loop p in PEOPLE p -> 0]
+    let size = [loop p in PEOPLE p -> p.length]
+    loop p in PEOPLE d[p] += 1
+    loop p in PEOPLE printl"{p} {d[p]} {size[p]}"
+    let xs = [3 1 2]
+    let sq = [loop x in xs { let y = x * x; x -> y }]
+    let parity = [loop x in xs if x % 2 =? 0 x -> 'even' else x -> 'odd']
+    loop x in xs printl"{x} {sq[x]} {parity[x]}"
+    count(['ann' 'bob'] ['bob' 'zed' 'bob'])
+}

@@ -1,0 +1,8 @@
+# A removal before the loop leaves the snapshot's keys unproven.
+main = () => {
+    let d = ['a' -> 1 'b' -> 2]
+    let ks = d.keys.values
+    d.pop('a' default=0);
+    loop k in ks { d[k] += 1 }
+    printl"{d}"
+}

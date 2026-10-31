@@ -79,10 +79,7 @@ main = () => {
     let total = sum([loop e in expenses e.amount])
     printl""
     printl"total {total} over {expenses.length} expenses; average per person {total / PEOPLE.length}"
-    loop p in PEOPLE {
-        let mine = balance.get(p) ?? 0
-        printl"{p:<5} spent {spent.get(p) ?? 0:>7}  balance {money(mine):>8}"
-    }
+    loop p in PEOPLE printl"{p:<5} spent {spent[p]:>7}  balance {money(balance[p]):>8}"
     let check = sum(balance.values)
     printl"balances sum to {check} cents"
 

@@ -1,0 +1,7 @@
+# A nested loop may insert nothing for an element (an empty inner range).
+main = () => {
+    let xs = [3 1 2]
+    let ys:array<int> = []
+    let d = [loop x in xs loop y in ys x -> y]
+    loop x in xs printl"{d[x]}"
+}

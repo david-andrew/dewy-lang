@@ -725,7 +725,11 @@ retains those bounds for builtin values. Finite element inventories also retain
 scalar relations established for every entry, such as an index being below
 another array's length. A write to a known position in a short `fill` retains
 facts about its untouched entries. Element writes, unknown mutations and copy
-hooks discard evidence they can change. `text.chars()` has `text.length`
+hooks discard evidence they can change. `xs.push(xs.pop())` and `xs.insert(xs.pop() i)` keep
+`xs.length`, in loops too. Rows pushed in a loop into an array that was
+empty before it and is only pushed there all have one length when every push has it
+(`if cells.length not=? header.length continue` then `rows.push(cells)`), a length
+the loop does not change. `text.chars()` has `text.length`
 elements; a comprehension collecting the same number of values for every element,
 `[loop x in xs {1.0 x x^2}]`, has that many times `xs.length`. A method called
 on a dictionary entry (`accounts[name].withdraw(n) or_throw`) changes that entry
@@ -763,9 +767,12 @@ entry (`if m not in? d[p] d[p][m] = 0` before `d[p][m] += 1`), while neither `d`
 nor that entry changes otherwise. These rules also apply to a dictionary lent by
 `@(m.lock())` and to a helper taking it by `@`, while the guard is held; `d.get(k)` and `d.pop(k default=v)` take a missing key as a value.
 Keys with builtin equality and hashing selected or iterated from `d.keys.values`
-or `d.keys.sorted()` remain members of that dictionary snapshot. Copying, slicing, sorting or reversing
-the key array preserves this fact; replacing its elements or changing the
-dictionary can require a new membership guard.
+or `d.keys.sorted()` remain members of that dictionary snapshot, and of `d` while
+only its entries change (`loop k in d.keys.values d[k] += 1`). Copying, slicing, sorting or reversing
+the key array preserves this fact; replacing its elements or otherwise changing the
+dictionary can require a new membership guard. A dictionary built by a comprehension
+that makes one entry keyed by the loop's element on every iteration, `[loop p in people p -> 0]`,
+has every element of that `people` value as a key (with no filter, `break` or `continue`).
 `pool[h]`, `pool[h] = x` and `pool[h].field += x` need `pool.has(h)`, proven by
 `h = pool.add(x)` or a guard (`if pool.has(h)`) with nothing since that may have
 removed `h`: stores, updates and loops that do not remove keep it, and so does

@@ -119,6 +119,8 @@ struct FactSlice:
     # (whether the function assigns a local of fact_carried_type, which only
     # a loop iterating its header bounds: fact_iterates)
     carried: bool = true
+    # (whether it pushes into a local array of rows: fact_pushed_rows)
+    rows: bool = true
     plan: int = 0
     callees: int[]
     versions: int[]
@@ -197,6 +199,13 @@ struct FactPushes:
     recorded: {int: bool}
     rows: int = 0
     matching: bool = false
+    # (the comprehension's accumulator, which alone may match rows)
+    acc: int = 0
+    # (per local: the one length every pushed row has, a value loop entry
+    # held or a length of one, 0 before a push, -1 none: fact_push_same)
+    same: int[]
+    same_base: int[]
+    entry: FactState = FactState(live = false)
 
 fact_push_frames: FactPushes[]
 fact_comprehensions: {int: int} = {}   # a comprehension's loop -> its accumulator
@@ -261,6 +270,11 @@ const FACT_KEYS_SOURCE = -23
 const FACT_KEY_SOURCE = -24
 # An immutable inventory whose elements were permuted, never position identities.
 const FACT_ELEMENT_SOURCE = -25
+# The key positions of the dictionaries a comprehension builds from this
+# source's elements, in order (fact_map_of): the same for each such dictionary.
+const FACT_KEYS_POSITIONS = -26
+# Every element of this array of rows has this one length.
+const FACT_ELEMENT_SAME_LENGTH = -27
 fact_name_vals = 0
 
 # A runtime-child walk, never into nested function bodies. Closed calls
@@ -848,6 +862,10 @@ fact_project = (s: mut FactState, base: int, selector: int, element: bool, t: in
             row = fact_project(s, other, selector, true, telem(fact_type(fact_terms[other].type)))
             length = fact_project(s, row, -1, false, T_INT)
             fact_add_projection(s, FactProjection(v, -1, false, length))
+    # (every element has one length: fact_push_close)
+    if element and (fact_type(t) == T_STR or tkind(fact_type(t)) == .array):
+        same = fact_projection_find(s, base, FACT_ELEMENT_SAME_LENGTH, false)
+        if same >= 0 and s.projections.len() < FACT_CAP and fact_projection_find(s, v, -1, false) < 0: fact_add_projection(s, FactProjection(v, -1, false, s.projections[same].value))
     # Element-length hulls describe each selected value separately: two
     # arbitrary elements have the same bounds, not necessarily equal lengths.
     if element and (fact_type(t) == T_STR or tkind(fact_type(t)) == .array):
@@ -1368,7 +1386,7 @@ fact_replace = (s: mut FactState, base: int, selector: int, element: bool, value
     loop pi >= 0:
         p = old[pi]
         pi = fact_projection_next_in(old, links, pi)
-        if element and not p.element and (p.selector == FACT_ELEMENT_LENGTH or p.selector == FACT_ELEMENT_VALUE or p.selector == FACT_ELEMENT_COPY or p.selector == FACT_ELEMENT_SOURCE or p.selector == FACT_KEYS_SOURCE):
+        if element and not p.element and (p.selector == FACT_ELEMENT_LENGTH or p.selector == FACT_ELEMENT_VALUE or p.selector == FACT_ELEMENT_COPY or p.selector == FACT_ELEMENT_SOURCE or p.selector == FACT_KEYS_SOURCE or p.selector == FACT_KEYS_POSITIONS or p.selector == FACT_ELEMENT_SAME_LENGTH):
             if p.selector == FACT_ELEMENT_COPY: fact_fill_remainder(s, base, v, selector, p.value)
             continue
         if element and not p.element and p.selector == FACT_ROW_SOURCE:
@@ -3759,6 +3777,9 @@ fact_changes = (n: int, s: mut FactState, at: int, reason: FactReason = .loop_):
     if n == 0: return
     if fact_slice_flags(n) & (FACT_MEMBER | FACT_ACTIVE) == FACT_MEMBER: return
     k = nodes[n].kind
+    if (k == .intrinsic or k == .call) and nkids(n) >= 2 and fact_balanced_resize(n) != 0:
+        fact_balanced_changes(n, s, at, reason)
+        return
     if k == .return_ and not fact_return_escapes(int(nodes[n].a)): return
     # (an element or field store havocs only its route within its root: fact_change_route)
     if k == .assign and not fact_bounded_change(n, s, at, reason): fact_change_route(s, int(nodes[n].a), false, at, reason)
@@ -3788,6 +3809,49 @@ fact_changes = (n: int, s: mut FactState, at: int, reason: FactReason = .loop_):
     if mask & 4 != 0: fact_changes(int(nodes[n].c), s, at, reason)
     if mask & 16 != 0:
         loop i in [0..nkids(n)): fact_changes(kid(n, i), s, at, reason)
+
+# `xs.push(xs.pop())` and `xs.insert(xs.pop() i)` of a local array: an element
+# taken from xs goes back into it, so on completion xs has its old length
+# (each failure, an empty xs or a position out of bounds, is its own
+# obligation in the transfer). The receiver, or 0. O(1).
+fact_balanced_resize = (n: int) -> int:
+    k = nodes[n].kind
+    if k == .intrinsic and (nodes[n].aux != i32(int(IN.push)) or nkids(n) != 2): return 0
+    if k == .call and (nodes[n].aux != 0 or nkids(n) != 3): return 0
+    taken = kid(n, 1)
+    loop nodes[taken].kind == .conv: taken = int(nodes[taken].a)
+    if nodes[taken].kind != .intrinsic or nodes[taken].aux != i32(int(IN.pop)) or nkids(taken) != 1: return 0
+    if k == .call and fact_array_call(n) != 5: return 0
+    target = fact_balanced_root(kid(n, 0))
+    if target == 0: return 0
+    from = fact_balanced_root(kid(taken, 0))
+    if from == 0 or nodes[from].sym != nodes[target].sym: return 0
+    if ownership_decls.len() != 0 and ownership_fact_type(ntype(target)): return 0
+    target
+
+# A plain local array named directly (`xs` or `@xs`), or 0.
+fact_balanced_root = (e0: int) -> int:
+    e = e0
+    loop nodes[e].kind == .addr or nodes[e].kind == .conv: e = int(nodes[e].a)
+    if nodes[e].kind != .ident or nodes[e].aux != i32(int(SK.local)) or tkind(fact_type(ntype(e))) != .array: return 0
+    if int(locals[int(nodes[e].sym)].flags) & LF_ALIAS != 0: return 0
+    e
+
+# A loop's havoc of a balanced resize: xs's elements are unknown, its length
+# is the one it had. The position operand havocs as usual.
+fact_balanced_changes = (n: int, s: mut FactState, at: int, reason: FactReason):
+    target = fact_balanced_resize(n)
+    i = fact_binding(s, fact_place(target))
+    length = if i >= 0: fact_project(s, s.bindings[i].value, -1, false, T_INT) else: 0
+    fact_change_route(s, target, true, at, reason)
+    i = fact_binding(s, fact_place(target))
+    if i >= 0 and length != 0:
+        held = fact_projection_find(s, s.bindings[i].value, -1, false)
+        if held >= 0:
+            fact_difference(s, s.projections[held].value, length, 0, n)
+            fact_difference(s, length, s.projections[held].value, 0, n)
+        else if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(s.bindings[i].value, -1, false, length))
+    if nkids(n) == 3: fact_changes(kid(n, 2), s, at, reason)
 
 struct FactPaths:
     yes: FactState
@@ -5379,9 +5443,17 @@ fact_keys_element = (s: mut FactState, base: int, value: int) -> int:
     if source >= 0 and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(value, FACT_KEY_SOURCE, false, s.projections[source].value))
     value
 
+# A key from a snapshot's collection is a member of that snapshot, and of any
+# later value sharing its key positions: only an entry change keeps them
+# (fact_map_position), so the key set is the same. O(1) indexed lookups.
 fact_map_member = (s: mut FactState, n: int, map: int, key: int) -> int:
     source = fact_projection_find(s, key, FACT_KEY_SOURCE, false)
-    if source >= 0 and s.projections[source].value == map: return fact_constant(s, 1)
+    if source >= 0:
+        held = s.projections[source].value
+        if held == map: return fact_constant(s, 1)
+        before = fact_projection_find(s, held, FACT_MAP_POSITIONS, false)
+        after = if before >= 0: fact_projection_find(s, map, FACT_MAP_POSITIONS, false) else: -1
+        if after >= 0 and s.projections[before].value == s.projections[after].value: return fact_constant(s, 1)
     fact_project(s, map, fact_map_key(s, kid(n, 1), key), true, T_BOOL)
 
 # A dictionary's entries (no traps): the entry of key k in a dictionary's value
@@ -5537,6 +5609,59 @@ fact_map_snapshot_call = (n: int) -> bool:
     if d == 0: return false
     if fact_map_snapshot_name == 0: fact_map_snapshot_name = intern("__map_entries")
     int(nodes[d].name) == fact_map_snapshot_name and files[pos_file(nodes[d].pos)].path == lib_dir + "/core/map.jo"
+
+# `[loop x in xs x -> v]` (`__map_of` of a comprehension's pairs): every
+# element of the evaluated source xs becomes a key, when each iteration pushes
+# exactly one pair (no filter, break or continue) and every pair's key is the
+# loop's own immutable element. xs's value then names the result as its key
+# snapshot (FACT_KEYS_SOURCE), as `[d.keys...]` does, so its elements are
+# members of that dictionary value and of any later one keeping its key
+# positions. Demand-only: O(loop body) on an evaluated __map_of call.
+fact_map_of_name = 0
+fact_comprehension_sources: {int: int} = {}   # a comprehension's array loop -> its evaluated source
+fact_map_of = (n: int, s: mut FactState) -> int:
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) != 1: return 0
+    d = int(fns[int(nodes[n].sym)].decl)
+    if fact_map_of_name == 0: fact_map_of_name = intern("__map_of")
+    if d == 0 or int(nodes[d].name) != fact_map_of_name or files[pos_file(nodes[d].pos)].path != lib_dir + "/core/map.jo": return 0
+    block = kid(n, 0)
+    if nodes[block].kind != .block or not has_flag(block, NF_COMPREHENSION) or nkids(block) != 3: return 0
+    loop_ = kid(block, 1)
+    acc = fact_comprehensions.get(loop_) ?? 0
+    source = fact_comprehension_sources.get(loop_) ?? 0
+    if acc <= 0 or source == 0 or nodes[loop_].kind != .for_ or nodes[loop_].aux != 1 or fact_slot(s, source) < 0: return 0
+    if s.projections.len() + 3 >= FACT_CAP: return 0
+    # (another dictionary built from this source in its order has the same
+    # keys at the same positions; a key snapshot of another kind has none)
+    positions = 0
+    if fact_projection_find(s, source, FACT_KEYS_SOURCE, false) >= 0:
+        held = fact_projection_find(s, source, FACT_KEYS_POSITIONS, false)
+        if held < 0: return 0
+        positions = s.projections[held].value
+    map = fact_type(ntype(n))
+    if not is_map_type(map) or ownership_decls.len() != 0 and ownership_fact_type(map): return 0
+    key_type = fact_type(struct_targ(int(types[map].st), 0))
+    kt = representation_type(key_type)
+    element = int(nodes[loop_].sym)
+    if element <= 0 or not (fact_scalar(kt) or kt == T_STR) or fact_type(int(locals[element].type)) != key_type: return 0
+    body = int(nodes[loop_].b)
+    flow = fact_push_flow(body, acc)
+    if flow.0 != 1 or flow.1 != -2: return 0
+    sites: int[]
+    if not fact_push_only(body, acc, sites) or sites.len() == 0: return 0
+    loop site in sites:
+        pair = kid(site, 1)
+        if nodes[pair].kind != .tuple or nkids(pair) != 2: return 0
+        key = kid(pair, 0)
+        if nodes[key].kind != .ident or nodes[key].aux != i32(int(SK.local)) or int(nodes[key].sym) != element: return 0
+    result = fact_fresh(s, ntype(n))
+    if fact_name_vals == 0: fact_name_vals = intern("vals")
+    if positions != 0:
+        fact_add_projection(s, FactProjection(result, FACT_MAP_POSITIONS, false, positions))
+        return result
+    fact_add_projection(s, FactProjection(source, FACT_KEYS_SOURCE, false, result))
+    fact_add_projection(s, FactProjection(source, FACT_KEYS_POSITIONS, false, fact_project(s, result, FACT_MAP_POSITIONS, false, T_INT)))
+    result
 
 fact_map_snapshot = (n: int, s: mut FactState, map: int) -> int:
     if ownership_decls.len() != 0 and ownership_fact_type(ntype(kid(n, 0))):
@@ -6929,9 +7054,11 @@ fact_push_only = (n: int, l: int, sites: mut int[]) -> bool:
 
 fact_push_open = (n: int, s: mut FactState, base: int = 0) -> bool:
     acc = fact_comprehensions.get(n) ?? 0
-    if acc <= 0: return false
-    frame = FactPushes(n)
-    loop l in [acc]:
+    candidates = if fact_slice.rows: fact_pushed_rows(n) else: []
+    if acc > 0 and acc not in candidates: candidates = [acc] + candidates
+    if candidates.len() == 0: return false
+    frame = FactPushes(n, acc = acc)
+    loop l in candidates:
         if int(locals[l].flags) & (LF_CAPTURED | LF_SHARED | LF_ADDR | LF_BYREF | LF_ALIAS | LF_MUTPARAM | LF_EXPOSED) != 0: continue
         t = fact_type(int(locals[l].type))
         if tkind(t) != .array: continue
@@ -6953,7 +7080,7 @@ fact_push_open = (n: int, s: mut FactState, base: int = 0) -> bool:
         if fact_mentions(int(nodes[n].a), l) or not fact_push_only(int(nodes[n].b), l, sites) or sites.len() == 0: continue
         # Only empty, one-push-per-iteration row maps can preserve positions.
         # The forward transfer below must additionally prove every row length.
-        if base != 0 and tkind(e) == .array and nodes[n].aux == 1 and not seen and tkind(fact_type(telem(fact_type(ntype(int(nodes[n].a)))))) == .array:
+        if l == acc and base != 0 and tkind(e) == .array and nodes[n].aux == 1 and not seen and tkind(fact_type(telem(fact_type(ntype(int(nodes[n].a)))))) == .array:
             flow = fact_push_flow(int(nodes[n].b), l)
             if flow.0 == 1 and flow.1 == -2:
                 frame.rows = base
@@ -6963,9 +7090,78 @@ fact_push_open = (n: int, s: mut FactState, base: int = 0) -> bool:
         frame.bounds.push(bound)
         frame.seen.push(seen)
         frame.sites.push(sites)
+        same = -1
+        if tkind(e) == .array:
+            held = fact_projection_find(s, value, FACT_ELEMENT_SAME_LENGTH, false)
+            if held >= 0: same = s.projections[held].value
+            else if not seen: same = 0
+            if same >= 0 and not frame.entry.live: frame.entry = s
+        frame.same.push(same)
+        frame.same_base.push(0)
     if frame.locals.len() == 0: return false
     fact_push_frames.push(frame)
     true
+
+# The pushed length v is a value equal to one loop entry held, or to the
+# length of a value it held (`if cells.length not=? header.length continue`
+# then `rows.push(cells)`): immutable, so the same at every iteration. Kept
+# as (value, 0), or (0, that value) for its length. Its rows only; O(rows of v).
+fact_push_same = (s: mut FactState, v: int, entry: FactState) -> (int, int):
+    found = fact_push_invariant(s, v, entry)
+    if found.0 != 0 or found.1 != 0: return found
+    loop direction in [0..2):
+        ri = fact_difference_head(s, v, direction)
+        loop ri >= 0:
+            row = s.differences[ri]
+            ri = fact_difference_next(s, ri, direction)
+            w = if direction == 0: row.a else: row.b
+            if w == v or fact_compare(s, .eq, v, w) != 1: continue
+            found = fact_push_invariant(s, w, entry)
+            if found.0 != 0 or found.1 != 0: return found
+    (-1, 0)
+
+fact_push_invariant = (s: FactState, w: int, entry: FactState) -> (int, int):
+    if fact_slot(entry, w) >= 0: return (w, 0)
+    pi = fact_projection_origin(s, w)
+    if pi >= 0 and s.projections[pi].selector == -1 and not s.projections[pi].element and fact_slot(entry, s.projections[pi].base) >= 0: return (0, s.projections[pi].base)
+    (0, 0)
+
+# The shared length in s (fact_push_same's pair), or 0.
+fact_push_same_value = (s: mut FactState, same: int, base: int) -> int:
+    if same > 0 and fact_slot(s, same) >= 0: return same
+    if base > 0 and fact_slot(s, base) >= 0: return fact_project(s, base, -1, false, T_INT)
+    0
+
+# An array of rows (arrays).
+fact_row_array = (t0: int) -> bool:
+    t = fact_type(t0)
+    tkind(t) == .array and tkind(fact_type(int(types[t].elem))) == .array
+
+# Locals a loop's body pushes rows into, declared before it: the
+# candidates for a length every pushed row shares. O(body), once per loop.
+fact_pushed_rows_cache: {int: int[]} = {}
+fact_pushed_rows = (n: int) -> int[]:
+    if let known = fact_pushed_rows_cache.get(n): return known
+    out: int[]
+    work = [int(nodes[n].b)]
+    loop work.len() > 0:
+        e = work.pop()
+        if e == 0: continue
+        k = nodes[e].kind
+        if k == .lambda: continue
+        if k == .intrinsic and nodes[e].aux == i32(int(IN.push)) and nkids(e) == 2:
+            l = fact_push_receiver(kid(e, 0))
+            if l > 0 and locals[l].pos < nodes[n].pos and l not in out:
+                if fact_row_array(int(locals[l].type)): out.push(l)
+        mask = isolation_children(k)
+        if mask < 0: continue
+        if mask & 1 != 0: work.push(int(nodes[e].a))
+        if mask & 2 != 0: work.push(int(nodes[e].b))
+        if mask & 4 != 0: work.push(int(nodes[e].c))
+        if mask & 16 != 0:
+            loop i in [0..nkids(e)): work.push(kid(e, i))
+    fact_pushed_rows_cache[n] = out
+    out
 
 fact_push_record = (n: int, s: mut FactState, value: int):
     l = fact_push_receiver(kid(n, 0))
@@ -6974,7 +7170,18 @@ fact_push_record = (n: int, s: mut FactState, value: int):
         loop j in [0..fact_push_frames[f].locals.len()):
             if fact_push_frames[f].locals[j] != l: continue
             v = if fact_push_frames[f].lengths[j]: fact_project(s, value, -1, false, T_INT) else: value
-            if fact_push_frames[f].matching:
+            same = fact_push_frames[f].same[j]
+            base = fact_push_frames[f].same_base[j]
+            if same == 0 and base == 0:
+                found = fact_push_same(s, v, fact_push_frames[f].entry)
+                fact_push_frames[f].same[j] = found.0
+                fact_push_frames[f].same_base[j] = found.1
+            else if same >= 0:
+                held = fact_push_same_value(s, same, base)
+                if held == 0 or fact_compare(s, .eq, v, held) != 1:
+                    fact_push_frames[f].same[j] = -1
+                    fact_push_frames[f].same_base[j] = 0
+            if fact_push_frames[f].matching and l == fact_push_frames[f].acc:
                 loop_ = fact_push_frames[f].at
                 index = fact_binding(s, PlaceIdentity(.local, fact_owner, int(nodes[loop_].c)))
                 if index < 0: fact_push_frames[f].matching = false
@@ -6998,7 +7205,10 @@ fact_push_close = (n: int, s: mut FactState):
         if not all or s.projections.len() >= FACT_CAP: continue
         l = frame.locals[j]
         i = fact_binding(s, PlaceIdentity(.local, int(locals[l].owner), l))
-        if i >= 0 and frame.matching:
+        if i >= 0 and frame.same[j] >= 0 and fact_projection_find(s, s.bindings[i].value, FACT_ELEMENT_SAME_LENGTH, false) < 0:
+            same = fact_push_same_value(s, frame.same[j], frame.same_base[j])
+            if same != 0 and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(s.bindings[i].value, FACT_ELEMENT_SAME_LENGTH, false, same))
+        if i >= 0 and frame.matching and l == frame.acc:
             source = frame.rows
             prior = fact_projection_find(s, source, FACT_ROW_SOURCE, false)
             if prior >= 0: source = s.projections[prior].value
@@ -7184,6 +7394,12 @@ fact_loop_elements = (n: int, base: int, s: mut FactState):
             fact_bind(s, PlaceIdentity(.local, int(locals[l].owner), l), value)
             return
     if sized:
+        same = fact_projection_find(s, base, FACT_ELEMENT_SAME_LENGTH, false)
+        if same >= 0:
+            value = fact_new(s, FactBound(), FactTerm(type = t))
+            if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(value, -1, false, s.projections[same].value))
+            fact_bind(s, PlaceIdentity(.local, int(locals[l].owner), l), value)
+            return
         pi = fact_projection_find(s, base, FACT_ELEMENT_LENGTH, false)
         if pi >= 0:
             value = fact_new(s, FactBound(), FactTerm(type = t))
@@ -7493,6 +7709,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
     exact_demands: int[]
     index_demands: int[]
     carried = false
+    rows = false
     probe_only = false
     members = fact_member_shared and f == fact_member_owner and not summary
     # Preparation visits only exact owners. Gate its node indexes once per
@@ -7536,6 +7753,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
                 c = kid(n, j)
                 l = int(nodes[c].sym)
                 if l > 0 and not has_flag(c, NF_GLOBAL): fact_slice_writer(writers, PlaceIdentity(.local, int(locals[l].owner), l), n)
+        if not rows and k == .intrinsic and nodes[n].aux == i32(int(IN.push)) and nkids(n) == 2 and fact_push_receiver(kid(n, 0)) > 0 and fact_row_array(ntype(kid(n, 0))): rows = true
         if k == .assign:
             target = int(nodes[n].a)
             if nodes[target].kind == .ident and nodes[target].aux == i32(int(SK.local)) and fact_carried_type(int(locals[int(nodes[target].sym)].type), f): carried = true
@@ -7785,12 +8003,12 @@ fact_slice_prepare = (f: int, summary: bool = false):
         flags = fill(0, hi - lo + 1)
         loop n in fact_mark_touched:
             if fact_mark_flags[n] != 0: flags[n - lo] = fact_mark_flags[n]
-        fact_slice = FactSlice(flags, probe_only, lo, carried)
+        fact_slice = FactSlice(flags, probe_only, lo, carried, rows)
     else:
         flags = fact_index_sized(count)
         loop n in fact_mark_touched:
             if fact_mark_flags[n] != 0: fact_index_put(flags, n, fact_mark_flags[n])
-        fact_slice = FactSlice(flags, probe_only, carried = carried)
+        fact_slice = FactSlice(flags, probe_only, carried = carried, rows = rows)
     fact_plan_serial += 1
     fact_slice.plan = fact_plan_serial
     fact_slice.callees = callees
@@ -8123,7 +8341,10 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                 fact_add_projection(s, FactProjection(value, intern("numerator"), false, fact_constant(s, fraction.0)))
                 fact_add_projection(s, FactProjection(value, intern("denominator"), false, fact_constant(s, fraction.1)))
             return value
-    if k == .block and has_flag(n, NF_COMPREHENSION) and nkids(n) > 1 and nodes[kid(n, 0)].kind == .vardecl: fact_comprehensions[kid(n, 1)] = int(nodes[kid(n, 0)].sym)
+    if k == .block and has_flag(n, NF_COMPREHENSION) and nkids(n) > 1 and nodes[kid(n, 0)].kind == .vardecl:
+        fact_comprehensions[kid(n, 1)] = int(nodes[kid(n, 0)].sym)
+        # (this evaluation's source only: fact_map_of)
+        if fact_comprehension_sources.len() > 0: fact_comprehension_sources.remove(kid(n, 1))
     if k == .dotname and tkind(ntype(n)) == .enum_ and simple_enum(ntype(n)):
         si = int(types[prune(ntype(n))].st)
         return fact_constant(s, variants[int(structs[si].variants) + int(nodes[n].aux)].value, n)
@@ -8481,6 +8702,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         indexed = k == .for_ and (nodes[n].aux == 1 or nodes[n].aux == 2) and nodes[n].c != 0 and files[pos_file(nodes[n].pos)].is_dewy
         mapped = k == .for_ and nodes[n].aux == 3 and is_map_entries_type(fact_type(ntype(int(nodes[n].a))))
         if indexed or mapped: base = fact_capture(int(nodes[n].a), s)
+        if indexed and fact_comprehensions.has(n): fact_comprehension_sources[n] = base
         pushes: (int, int)[]
         sums: (int, FactBound)[]
         scaled: (int, int, int)[]
@@ -8755,8 +8977,9 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                     size = fact_new(s, FactBound(max(0, old.lo + delta), min(fact_length_max(), max(0, old.hi + delta))))
                 # (the new length is the old one plus or minus one exactly: a
                 # row where an interval cannot say it (`let i=xs.length`,
-                # `xs.push(v)`, `return i` below the new length), outside loops)
-                if old.lo != old.hi and fact_loops.len() == 0:
+                # `xs.push(v)`, `return i` below the new length), outside
+                # loops, and for a removal in them, which an insertion can undo)
+                if old.lo != old.hi and (fact_loops.len() == 0 or delta < 0):
                     fact_difference(s, size, length, delta, n)
                     fact_difference(s, length, size, -delta, n)
             if plain and id == .push and position != 0 and fact_loops.len() == 0 and tkind(fact_type(ntype(kid(n, 1)))) == .array:
@@ -8885,6 +9108,9 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         fact_sum_operand = sum_operand
         fact_route_call = outer_call
         if fact_map_snapshot_call(n): return fact_map_snapshot(n, s, values[0])
+        if fact_comprehension_sources.len() > 0:
+            made = fact_map_of(n, s)
+            if made != 0: return made
         if fact_parallel_array(n): fact_parallel_record(n, s, values[0])
         if wi_fact_calls.len() > 0 and wi_fact_calls.has(n): wi_fact_check(n, values, s)
         if fact_speculating == 0:
@@ -8921,7 +9147,11 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                     kt = representation_type(struct_targ(int(types[fact_type(ntype(kid(n, 0)))].st), 0))
                     # User equality/hash hooks need their own proof; even a
                     # snapshot key need not compare equal to itself.
-                    if source != 0 and name != "values" and (fact_scalar(kt) or kt == T_STR) and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(fresh, FACT_KEYS_SOURCE, false, source))
+                    if source != 0 and name != "values" and (fact_scalar(kt) or kt == T_STR) and s.projections.len() < FACT_CAP:
+                        fact_add_projection(s, FactProjection(fresh, FACT_KEYS_SOURCE, false, source))
+                        # (its key positions, which a later entry change keeps: fact_map_member)
+                        if fact_name_vals == 0: fact_name_vals = intern("vals")
+                        fact_project(s, source, FACT_MAP_POSITIONS, false, T_INT)
                 else: fact_keys_copy(s, source, fresh)
                 return fresh
         endpoint = fact_endpoint_call(n)
@@ -8982,6 +9212,10 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             fresh = fact_new(s, FactBound(), FactTerm(type = ntype(kid(n, 0))))
             size = fact_new(s, FactBound(min(fact_length_max(), old.lo + 1), fact_length_max()))
             if old.hi < fact_length_max(): fact_set_bound(s, size, FactBound(old.lo + 1, old.hi + 1))
+            # (one longer exactly: `xs.insert(xs.pop() 0)` keeps the length)
+            if old.lo != old.hi:
+                fact_difference(s, size, length, 1, n)
+                fact_difference(s, length, size, -1, n)
             fact_add_projection(s, FactProjection(fresh, -1, false, size))
             fact_store_route(s, route, fresh, n)
             return 0
@@ -9814,7 +10048,9 @@ facts_reset = ():
     fact_returns_cache = {}
     fact_return_escapes_cache = {}
     fact_carried_cache = {}
+    fact_pushed_rows_cache = {}
     fact_comprehensions = {}
+    fact_comprehension_sources = {}
     fact_owner = 0
     fact_summaries = {}
     fact_selector_sources = {}

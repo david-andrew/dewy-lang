@@ -1,0 +1,13 @@
+# Rows held before the loop have their own lengths.
+table = (lines:array<string>):>void => {
+    if lines.length <? 1 return
+    let header = lines[0].split(',')
+    let rows = [['z']]
+    loop line in lines {
+        let cells = line.split(',')
+        if cells.length not=? header.length continue
+        rows.push(cells)
+    }
+    loop r in rows loop c in [0..header.length) print"{r[c]} "
+}
+main = () => table(['a,b' '1,2' '3' '4,5'])

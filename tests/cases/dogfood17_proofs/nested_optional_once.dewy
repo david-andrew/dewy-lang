@@ -1,0 +1,9 @@
+# `get` of an optional element is optional twice: one `is? none` leaves an
+# optional, and the hint says so.
+show = (order:array<string?> i:int):>void => {
+    let b = order.get(i)
+    if b is? none return
+    let s:string = b
+    printl"{s}"
+}
+main = () => { show(['a' none 'c'] 0) show(['a' none 'c'] 1) show(['a' none] 5) }

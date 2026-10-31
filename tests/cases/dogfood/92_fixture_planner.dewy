@@ -19,14 +19,14 @@ fixtures = (clubs:array<string>):>array<Match> => {
     let m = n - 1
     let out:array<Match> = []
     loop r in [0..m) {
-        let order = [seats[0] [loop p in [0..m) seats[1 + (p + m - r) % m]]...]
         # table i seats the i-th club from each end
-        loop i in [0..n//2) and a in order and b in order.reversed {
+        loop i in [0..n//2) and a in seats and b in seats.reversed {
             if a is? none or b is? none continue
             # the fixed club alternates by round, the others by table
             let swap = if i =? 0 r % 2 =? 1 else i % 2 =? 1
             out.push(if swap Match[r+1 b a] else Match[r+1 a b])
         }
+        seats.insert(seats.pop() 1)
     }
     out
 }

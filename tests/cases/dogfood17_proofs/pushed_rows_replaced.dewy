@@ -1,0 +1,14 @@
+# A row written afterwards replaces the shared length.
+table = (lines:array<string>):>void => {
+    if lines.length <? 1 return
+    let header = lines[0].split(',')
+    let rows:array<array<string>> = []
+    loop line in lines[1..] {
+        let cells = line.split(',')
+        if cells.length not=? header.length continue
+        rows.push(cells)
+    }
+    if rows.length >? 0 rows[0] = ['q']
+    loop r in rows loop c in [0..header.length) print"{r[c]} "
+}
+main = () => table(['a,b' '1,2' '3' '4,5'])

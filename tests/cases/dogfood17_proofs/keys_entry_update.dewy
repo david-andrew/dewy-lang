@@ -1,0 +1,11 @@
+# Updating existing entries keeps a dictionary's keys, so a key taken from
+# its key snapshot stays a member through the loop.
+main = () => {
+    let d = ['a' -> 1 'b' -> 2]
+    loop k in d.keys { d[k] += 1 }
+    loop k in d.keys.sorted() { d[k] *= 2 }
+    let ks = [d.keys...]
+    loop k in ks { d[k] -= 1 }
+    loop k in d.keys.values { d[k] += 1; d[k] += 1 }
+    printl"{d}"
+}

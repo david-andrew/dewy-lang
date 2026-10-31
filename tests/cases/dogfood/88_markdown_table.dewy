@@ -92,6 +92,10 @@ main = () => {
         return
     }
     let header = split_row(lines[0])
+    if header.length <? 4 {
+        printl"expected name, moons, radius and type columns"
+        return
+    }
     let markers = split_row(lines[1])
     if not is_rule(markers) or markers.length not=? header.length {
         printl"second line is not an alignment rule"
@@ -110,7 +114,7 @@ main = () => {
 
     # numeric columns are right-aligned even if the rule said otherwise
     loop c in [0..header.length) {
-        if rows.length >? 0 and [loop r in rows is_number(r.get(c) ?? "")].all aligns[c] = 'right'
+        if rows.length >? 0 and [loop r in rows is_number(r[c])].all aligns[c] = 'right'
     }
 
     # sort by moons, most first, then by name
@@ -120,14 +124,14 @@ main = () => {
         if ma not=? mb return ma >? mb
         (a.get(0) ?? "") <? (b.get(0) ?? "")
     })
-    let moons = sum([loop r in rows to_int(r.get(1) ?? "") ?? 0])
-    let radius = sum([loop r in rows to_float(r.get(2) ?? "") ?? 0.0])
+    let moons = sum([loop r in rows to_int(r[1]) ?? 0])
+    let radius = sum([loop r in rows to_float(r[2]) ?? 0.0])
     let totals = ["total" "{moons}" format(radius ".1f") ""]
     render(header aligns [by_moons... totals])
 
     printl""
-    let initials = [loop r in rows (r.get(0) ?? "").get(0) ?? "?"].join
+    let initials = [loop r in rows r[0].get(0) ?? "?"].join
     printl"initials: {initials}"
-    let kinds = set[loop r in rows r.get(3) ?? ""]
+    let kinds = set[loop r in rows r[3]]
     printl"{kinds.length} kinds: {kinds.sorted.join(", ")}"
 }

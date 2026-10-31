@@ -1,0 +1,36 @@
+# Rows pushed under a length guard keep that length, symbolic or not.
+table = (lines:array<string>):>void => {
+    if lines.length <? 1 return
+    let header = lines[0].split(',')
+    let rows:array<array<string>> = []
+    loop line in lines[1..] {
+        let cells = line.split(',')
+        if cells.length not=? header.length continue
+        rows.push(cells)
+    }
+    loop r in rows {
+        loop c in [0..header.length) print"{header[c]}={r[c]} "
+        printl""
+    }
+    loop i in [0..rows.length) loop c in [0..header.length) print"{rows[i][c]}"
+    printl""
+    let kept:array<array<string>> = []
+    loop line in lines {
+        let cells = line.split(',')
+        if cells.length =? header.length kept.push(cells)
+    }
+    loop r in kept if header.length >? 1 printl"{r[1]}"
+}
+main = () => { literal(); table(['a,b' '1,2' '3' '4,5']) }
+literal = () => {
+    let header = ['a' 'b' 'c']
+    let lines = ['1,2,3' '4,5' '6,7,8']
+    let rows:array<array<string>> = []
+    loop line in lines {
+        let cells = line.split(',')
+        if cells.length not=? header.length continue
+        rows.push(cells)
+    }
+    loop r in rows loop c in [0..header.length) print"{r[c]} "
+    printl""
+}

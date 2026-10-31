@@ -1,0 +1,25 @@
+# Taking an element and putting it back keeps the length, in counted and
+# condition loops alike.
+circle = () => {
+    let n = 6
+    let seats = [loop i in [0..n) i]
+    loop r in [0..n-1) {
+        printl"{seats[0]} {seats[n-1]}"
+        seats.insert(seats.pop() 1)
+    }
+}
+rotate = (seats:array<string> rounds:int):>void => {
+    let n = seats.length
+    if n <? 2 return
+    let r = 0
+    loop r <? rounds {
+        printl"{seats[0]} vs {seats[n-1]}"
+        seats.insert(seats.pop() 1)
+        r += 1
+    }
+    loop _ in [0..rounds) {
+        printl"{seats[n-1]}"
+        seats.push(seats.pop())
+    }
+}
+main = () => { circle(); rotate(['a' 'b' 'c' 'd'] 3) }
