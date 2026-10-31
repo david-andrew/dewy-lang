@@ -1,4 +1,5 @@
 use 'checker_range_values.dewy'
+use 'checker_in_range.dewy'
 use 'checker_idents.dewy'
 use 'checker_match.dewy'
 use 'checker_indexes.dewy'
@@ -10721,72 +10722,10 @@ check_range_value = (n: int, expected: int) -> int: xn_check(n, expected)
 range_value_error = (n: int):
     fatal(nodes[n].pos, "a range with no end (a..) can only be looped over")
 
-# Dewy interval membership evaluates the needle and both endpoints exactly once,
-# in written order, before testing either bound. No range array is constructed.
-check_dewy_in_range = (n: int) -> int:
-    pos = nodes[n].pos
-    r = int(nodes[n].b)
-    statements: int[]
-    values: int[]
-    loop value in [int(nodes[n].a), int(nodes[r].a), int(nodes[r].b)]:
-        if value == 0: values.push(0); continue
-        check_to(value, T_INT)
-        values.push(capture_value(value, T_INT, statements))
-    condition = 0
-    if values[1] != 0: condition = bc_bin(.ge, values[0], values[1], pos)
-    if values[2] != 0:
-        op = Tok.lt
-        if has_flag(r, NF_INCLUSIVE): op = .le
-        upper = bc_bin(op, values[0], values[2], pos)
-        if condition == 0: condition = upper
-        else:
-            both = mk(.and_, pos)
-            nodes[both].a = i32(condition)
-            nodes[both].b = i32(upper)
-            condition = both
-    if condition == 0:
-        condition = mk(.bool_lit, pos)
-        nodes[condition].ival = 1
-    check_to(condition, T_BOOL)
-    statements.push(bc_stmt(condition, pos))
-    nodes[n] = Node(kind = .block, pos = pos, type = i32(T_BOOL), aux = 1, flags = i32(NF_CHECKED))
-    set_list(n, statements)
-    T_BOOL
-
-# x in a..b: a <= x and x <= b (no array)
-check_in_range = (n: int, expected: int) -> int:
-    if files[pos_file(nodes[n].pos)].is_dewy: return check_dewy_in_range(n)
-    pos = nodes[n].pos
-    r = int(nodes[n].b)
-    x = int(nodes[n].a)
-    stmts: int[]
-    xk = nodes[x].kind
-    xr = x
-    if xk != .ident and xk != .int_lit:
-        xn = "__rx{bc_count}"
-        bc_count += 1
-        stmts.push(bc_let(xn, x, pos))
-        xr = bc_ident(xn, pos)
-    again = (e: int) -> int:
-        if e == x: return clone(x)
-        bc_ident(name_of(int(nodes[e].name)), pos)
-    lo = 0
-    if nodes[r].a != 0: lo = bc_bin(.ge, xr, int(nodes[r].a), pos)
-    hi = 0
-    if nodes[r].b != 0:
-        op = Tok.lt
-        if has_flag(r, NF_INCLUSIVE): op = .le
-        hi = bc_bin(op, again(xr), int(nodes[r].b), pos)
-    c = lo
-    if lo == 0: c = hi
-    else if hi != 0:
-        c = mk(.and_, pos)
-        nodes[c].a = i32(lo)
-        nodes[c].b = i32(hi)
-    if c == 0: fatal(pos, "invalid range")
-    stmts.push(bc_stmt(c, pos))
-    nodes[n] = nodes[bc_block(stmts, pos)]
-    check_expr(n, expected)
+# `x in a..b` runs in checker_in_range.dewy; these are its services.
+check_in_range = (n: int, expected: int) -> int: xy_check(n, expected)
+in_range_error = (n: int):
+    fatal(nodes[n].pos, "invalid range")
 
 # ---------------- struct-of-arrays ----------------
 # soa P[] is a struct with an array per field of P; these rewrite its array operations into
@@ -10997,6 +10936,9 @@ bc_count = 0
 range_value_host = CheckerRangeValueHost(intern, check_expr, range_value_error)
 range_value_input = CheckerRangeValueInput(&nodes, &lists, &bc_count, &T_INT, &range_value_host)
 range_value_binding = checker_range_values_bind(&range_value_input)
+in_range_host = CheckerInRangeHost(intern, check_expr, check_to, capture_value, in_range_error)
+in_range_input = CheckerInRangeInput(&nodes, &lists, &files, &bc_count, &T_INT, &T_BOOL, &in_range_host)
+in_range_binding = checker_in_range_bind(&in_range_input)
 
 # Brackets also construct records and call user-defined indexing operators. Keep
 # range syntax until the receiver type is known: NDArray uses axis slices, while

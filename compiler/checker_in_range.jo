@@ -1,0 +1,113 @@
+# Frozen `x in a..b` rewrite extracted from expr.jo.
+use 'node_store.dewy'
+use 'source_types.dewy'
+struct CheckerInRangeHost:
+    intern: (str) -> int
+    check: (int, int) -> int
+    check_to: (int, int) -> int
+    capture: (int, int, mut int[]) -> int
+    error: (int) -> void
+struct CheckerInRangeInput:
+    nodes: *(Node[])
+    lists: *(i32[])
+    files: *(SrcFile[])
+    counter: *int
+    int_type: *int
+    bool_type: *int
+    host: *CheckerInRangeHost
+xy_nodes: *(Node[])
+xy_lists: *(i32[])
+xy_files: *(SrcFile[])
+xy_counter: *int
+xy_int_type: *int
+xy_bool_type: *int
+xy_host: *CheckerInRangeHost
+checker_in_range_bind = (input: *CheckerInRangeInput) -> int:
+    xy_nodes = input[0].nodes
+    xy_lists = input[0].lists
+    xy_files = input[0].files
+    xy_counter = input[0].counter
+    xy_int_type = input[0].int_type
+    xy_bool_type = input[0].bool_type
+    xy_host = input[0].host
+    0
+xy_bin = (op: i32, a: int, b: int, pos: int) -> int:
+    n = int(node_mk(mut xy_nodes[0], .binary, pos))
+    xy_nodes[0][n].op = op
+    xy_nodes[0][n].a = i32(a)
+    xy_nodes[0][n].b = i32(b)
+    n
+xy_and = (a: int, b: int, pos: int) -> int:
+    n = int(node_mk(mut xy_nodes[0], .and_, pos))
+    xy_nodes[0][n].a = i32(a)
+    xy_nodes[0][n].b = i32(b)
+    n
+xy_stmt = (e: int, pos: int) -> int:
+    s = int(node_mk(mut xy_nodes[0], .exprstmt, pos))
+    xy_nodes[0][s].a = i32(e)
+    s
+xy_upper_op = (r: int) -> i32:
+    if int(xy_nodes[0][r].flags) & 2 != 0: return i32(72)
+    i32(71)
+xy_dewy = (n: int) -> int:
+    pos = xy_nodes[0][n].pos
+    r = int(xy_nodes[0][n].b)
+    statements: int[]
+    values: int[]
+    parts = [int(xy_nodes[0][n].a), int(xy_nodes[0][r].a), int(xy_nodes[0][r].b)]
+    loop value in parts:
+        if value == 0:
+            values.push(0)
+            continue
+        xy_host[0].check_to(value, xy_int_type[0])
+        values.push(xy_host[0].capture(value, xy_int_type[0], mut statements))
+    condition = 0
+    if values[1] != 0: condition = xy_bin(i32(74), values[0], values[1], pos)
+    if values[2] != 0:
+        upper = xy_bin(xy_upper_op(r), values[0], values[2], pos)
+        if condition == 0: condition = upper
+        else: condition = xy_and(condition, upper, pos)
+    if condition == 0:
+        condition = int(node_mk(mut xy_nodes[0], .bool_lit, pos))
+        xy_nodes[0][condition].ival = 1
+    xy_host[0].check_to(condition, xy_bool_type[0])
+    statements.push(xy_stmt(condition, pos))
+    xy_nodes[0][n] = Node(kind = .block, pos = pos, type = i32(xy_bool_type[0]), aux = 1, flags = i32(128))
+    node_set_list(mut xy_nodes[0], mut xy_lists[0], n, statements)
+    xy_bool_type[0]
+xy_check = (n: int, expected: int) -> int:
+    if xy_files[0][xy_nodes[0][n].pos >> 40].is_dewy: return xy_dewy(n)
+    pos = xy_nodes[0][n].pos
+    r = int(xy_nodes[0][n].b)
+    x = int(xy_nodes[0][n].a)
+    statements: int[]
+    xk = xy_nodes[0][x].kind
+    xr = x
+    if xk != .ident and xk != .int_lit:
+        name = "__rx{xy_counter[0]}"
+        xy_counter[0] = xy_counter[0] + 1
+        d = int(node_mk(mut xy_nodes[0], .vardecl, pos))
+        xy_nodes[0][d].name = i32(xy_host[0].intern(name))
+        xy_nodes[0][d].b = i32(x)
+        statements.push(d)
+        xr = int(node_mk(mut xy_nodes[0], .ident, pos))
+        xy_nodes[0][xr].name = i32(xy_host[0].intern(name))
+    lo = 0
+    if xy_nodes[0][r].a != 0: lo = xy_bin(i32(74), xr, int(xy_nodes[0][r].a), pos)
+    hi = 0
+    if xy_nodes[0][r].b != 0:
+        again = 0
+        if xr == x: again = int(node_clone(mut xy_nodes[0], mut xy_lists[0], x))
+        else:
+            again = int(node_mk(mut xy_nodes[0], .ident, pos))
+            xy_nodes[0][again].name = xy_nodes[0][xr].name
+        hi = xy_bin(xy_upper_op(r), again, int(xy_nodes[0][r].b), pos)
+    c = lo
+    if lo == 0: c = hi
+    else if hi != 0: c = xy_and(lo, hi, pos)
+    if c == 0: xy_host[0].error(n)
+    statements.push(xy_stmt(c, pos))
+    b = int(node_mk(mut xy_nodes[0], .block, pos))
+    node_set_list(mut xy_nodes[0], mut xy_lists[0], b, statements)
+    xy_nodes[0][n] = xy_nodes[0][b]
+    xy_host[0].check(n, expected)

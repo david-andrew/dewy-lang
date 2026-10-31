@@ -1,0 +1,138 @@
+$runtime_checks
+from p"node_store.dewy" import (Node node_mk node_set_list node_clone)
+from p"source_types.dewy" import SrcFile
+# `x in a..b` owns its rewrite into bound tests: in Dewy each of the needle and the
+# endpoints is evaluated once, in written order, before either bound is tested (no
+# range array); elsewhere a non-trivial needle is bound once and both bounds compare
+# with it. Nodes and names are made in the original order, so IDs are unchanged.
+# Work is O(1) nodes plus the demanded checks, which the host may grow arenas for.
+XYWord:type=int64<overflow='wrap'>
+CheckerInRangeHost:type=[
+    intern:<(text:string):>int64>
+    check:<(node:int64 expected:int64):>int64>
+    check_to:<(node:int64 type_id:int64):>int64>
+    capture:<(node:int64 type_id:int64 @statements:array<int64>):>int64>
+    error:<(node:int64):>void>
+]
+CheckerInRangeInput:type=[
+    nodes:ptr<array<Node>>
+    lists:ptr<array<int32>>
+    files:ptr<array<SrcFile>>
+    counter:ptr<int64>
+    int_type:ptr<int64>
+    bool_type:ptr<int64>
+    host:ptr<CheckerInRangeHost>
+]
+let xy_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let xy_lists:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
+let xy_files:ptr<array<SrcFile>>=$unsafe (uint64(0) as ptr<array<SrcFile>>)
+let xy_counter:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xy_int_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xy_bool_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xy_host:ptr<CheckerInRangeHost>=$unsafe (uint64(0) as ptr<CheckerInRangeHost>)
+checker_in_range_bind=(input:ptr<CheckerInRangeInput>):>XYWord=>$unsafe {
+    xy_nodes=input[0].nodes
+    xy_lists=input[0].lists
+    xy_files=input[0].files
+    xy_counter=input[0].counter
+    xy_int_type=input[0].int_type
+    xy_bool_type=input[0].bool_type
+    xy_host=input[0].host
+    0
+}
+# A comparison (frozen Tok ordinals: lt 71, le 72, ge 74).
+xy_bin=(op:int32 a:XYWord b:XYWord pos:int64):>XYWord=>$unsafe {
+    let n=node_mk(@xy_nodes[0] 'binary' pos)
+    xy_nodes[0][n].op=op
+    xy_nodes[0][n].a=int32<overflow='wrap'>(a)
+    xy_nodes[0][n].b=int32<overflow='wrap'>(b)
+    n
+}
+xy_and=(a:XYWord b:XYWord pos:int64):>XYWord=>$unsafe {
+    let n=node_mk(@xy_nodes[0] 'and_' pos)
+    xy_nodes[0][n].a=int32<overflow='wrap'>(a)
+    xy_nodes[0][n].b=int32<overflow='wrap'>(b)
+    n
+}
+xy_stmt=(e:XYWord pos:int64):>XYWord=>$unsafe {
+    let s=node_mk(@xy_nodes[0] 'exprstmt' pos)
+    xy_nodes[0][s].a=int32<overflow='wrap'>(e)
+    s
+}
+xy_upper_op=(r:XYWord):>int32=>$unsafe {
+    if XYWord(xy_nodes[0].ptr[r].flags) & 2 not=? 0 {return 72}
+    71
+}
+# Dewy interval membership: the needle and both endpoints once each, in written order.
+xy_dewy=(n:XYWord):>XYWord=>$unsafe {
+    let pos=xy_nodes[0].ptr[n].pos
+    let r=XYWord(xy_nodes[0].ptr[n].b)
+    let statements:array<int64>=[]
+    let values:array<int64>=[]
+    let parts:array<int64>=[int64(xy_nodes[0].ptr[n].a) int64(xy_nodes[0].ptr[r].a) int64(xy_nodes[0].ptr[r].b)]
+    loop value in parts {
+        if value =? 0 {
+            values.push(0)
+            continue
+        }
+        xy_host[0].check_to(value xy_int_type[0]);
+        values.push(xy_host[0].capture(value xy_int_type[0] @statements))
+    }
+    let condition:XYWord=0
+    if values[1] not=? 0 {condition=xy_bin(74 values[0] values[1] pos)}
+    if values[2] not=? 0 {
+        let upper=xy_bin(xy_upper_op(r) values[0] values[2] pos)
+        if condition =? 0 {condition=upper} else {condition=xy_and(condition upper pos)}
+    }
+    if condition =? 0 {
+        condition=node_mk(@xy_nodes[0] 'bool_lit' pos)
+        xy_nodes[0][condition].ival=1
+    }
+    xy_host[0].check_to(condition xy_bool_type[0]);
+    statements.push(int64(xy_stmt(condition pos)))
+    xy_nodes[0][n]=Node[kind='block' pos=pos type=int32<overflow='wrap'>(xy_bool_type[0]) aux=1 flags=128]
+    node_set_list(@xy_nodes[0] @xy_lists[0] n statements)
+    xy_bool_type[0]
+}
+# x in a..b elsewhere: a <= x and x <= b (no array), x bound once unless a name or literal.
+xy_check=(n:XYWord expected:XYWord):>XYWord=>$unsafe {
+    if xy_files[0][xy_nodes[0].ptr[n].pos >> 40].is_dewy {return xy_dewy(n)}
+    let pos=xy_nodes[0].ptr[n].pos
+    let r=XYWord(xy_nodes[0].ptr[n].b)
+    let x=XYWord(xy_nodes[0].ptr[n].a)
+    let statements:array<int64>=[]
+    let xk=xy_nodes[0].ptr[x].kind
+    let xr=x
+    if xk not=? 'ident' and xk not=? 'int_lit' {
+        let name="__rx{xy_counter[0]}"
+        xy_counter[0]=xy_counter[0] + 1
+        let d=node_mk(@xy_nodes[0] 'vardecl' pos)
+        xy_nodes[0][d].name=int32<overflow='wrap'>(xy_host[0].intern(name))
+        xy_nodes[0][d].b=int32<overflow='wrap'>(x)
+        statements.push(int64(d))
+        xr=node_mk(@xy_nodes[0] 'ident' pos)
+        xy_nodes[0][xr].name=int32<overflow='wrap'>(xy_host[0].intern(name))
+    }
+    let lo:XYWord=0
+    if xy_nodes[0].ptr[r].a not=? 0 {lo=xy_bin(74 xr XYWord(xy_nodes[0].ptr[r].a) pos)}
+    let hi:XYWord=0
+    if xy_nodes[0].ptr[r].b not=? 0 {
+        # The needle again: a copy of a name or literal, else the bound name.
+        let again:XYWord=0
+        if xr =? x {again=node_clone(@xy_nodes[0] @xy_lists[0] x)}
+        else {
+            again=node_mk(@xy_nodes[0] 'ident' pos)
+            xy_nodes[0][again].name=xy_nodes[0].ptr[xr].name
+        }
+        hi=xy_bin(xy_upper_op(r) again XYWord(xy_nodes[0].ptr[r].b) pos)
+    }
+    let c=lo
+    if lo =? 0 {c=hi}
+    else if hi not=? 0 {c=xy_and(lo hi pos)}
+    if c =? 0 {xy_host[0].error(n)}
+    statements.push(int64(xy_stmt(c pos)))
+    let b=node_mk(@xy_nodes[0] 'block' pos)
+    node_set_list(@xy_nodes[0] @xy_lists[0] b statements)
+    xy_nodes[0][n]=xy_nodes[0].ptr[b]
+    xy_host[0].check(n expected)
+}
