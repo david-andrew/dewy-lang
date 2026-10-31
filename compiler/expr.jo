@@ -1242,6 +1242,16 @@ implicit_capture_write = (l: int, pos: int):
     err_notes.push((-1, "help: `($capture {nm}) => ...` gives the closure its own copy, kept between calls; `($capture @{nm}) => ...` changes the enclosing '{nm}'"))
     fatal(pos, "this closure changes '{nm}', which it captures implicitly: capture it explicitly")
 
+# (a write to the binder of `loop item in @items`, a copy of the element: live_binders)
+live_element_write = (l: int, pos: int):
+    if let b = live_binders.get(locals[l].pos):
+        if b.0 != int(locals[l].name): return
+        nm = name_of(b.0)
+        src = if len(b.1) > 0: b.1 else: "items"
+        at = pos
+        if place_write_pos != 0: at = place_write_pos
+        place_fatal(at, "'{nm}' is a copy of the element `loop {nm} in @{src}` reads, so changing it leaves `{src}` as it was: write `loop @{nm} in {src}` to change the element itself")
+
 place_write_pos = 0 # the written name, when a narrowed alias is resolved to its variable
 
 check_place = (n: int, for_mut: bool):
@@ -1276,6 +1286,7 @@ check_place = (n: int, for_mut: bool):
                 else if narrowed_var(r) != 0: r = narrowed_var(r)
                 else: break
             rf = int(locals[r].flags)
+            if live_binders.len() > 0: live_element_write(r, nodes[n].pos)
             if rf & LF_CONST != 0: place_fatal(nodes[n].pos, "cannot modify const '{nm}'; copy it with `let {nm} = {nm}`")
             if rf & (LF_CAPTURE | LF_VALUECAP) == LF_CAPTURE | LF_VALUECAP and implicit_capture(r): implicit_capture_write(r, if place_write_pos != 0: place_write_pos else: nodes[n].pos)
             ag = alias_global(r)

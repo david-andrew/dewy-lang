@@ -1,0 +1,20 @@
+# A loop adding keys to a comprehension's dictionary keeps its keys after the loop.
+R:type = [w:int=0]
+main = () => {
+    let names = ["a" "b" "c"]
+    let d:dict<string R> = [loop n in names n -> R[]]
+    let slots = names
+    loop slots.length >? 1 {
+        let next:array<string> = []
+        loop k in [0, 2..slots.length - 1) {
+            let w = slots[k]
+            d.insert_if_absent(w R[]);
+            d[w].w += 1
+            next.push(w)
+        }
+        slots = next
+    }
+    loop n in names printl(d[n].w)
+    loop round in [0..2) { d["r{round}"] = R[round] }
+    loop n in names printl(d[n].w)
+}

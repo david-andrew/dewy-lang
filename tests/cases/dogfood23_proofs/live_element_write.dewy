@@ -1,0 +1,7 @@
+# A write through the element of `loop x in @xs` changes a copy: an error naming `loop @x in xs`.
+P:type = [x:float64]
+main = () => {
+    let ps = [P[1.0]]
+    loop p in @ps { p.x += 1.0; printl(p.x) }
+    printl(ps)
+}

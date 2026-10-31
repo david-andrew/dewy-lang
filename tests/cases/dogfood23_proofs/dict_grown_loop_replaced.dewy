@@ -1,0 +1,10 @@
+# Near miss: a loop that replaces the dictionary ends the comprehension's keys.
+main = () => {
+    let names = ["a" "b" "c"]
+    let d:dict<string int> = [loop n in names n -> 0]
+    loop k in [0..2) {
+        d.insert_if_absent("x{k}" k);
+        if k =? 1 { d = ["z" -> 1] }
+    }
+    loop n in names printl(d[n])
+}

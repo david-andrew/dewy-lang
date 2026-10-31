@@ -37,9 +37,19 @@ wit_collected = 0
 # program is decided again serially (pcheck.jo pc_after_facts).
 wit_tentative = false
 wit_tentative_failed = false
+wit_failed_owners: {int: bool} = {}
 wit_fail = (p: int, msg: str):
     if wit_tentative:
         wit_tentative_failed = true
+        return
+    if err_held_on and not wit_collect:
+        # (a function's first unproven obligation only: later ones may follow from it)
+        owner = if fact_owner > 0: fact_owner else: fact_retry_owner
+        if owner > 0 and wit_failed_owners.has(owner):
+            err_notes = []
+            return
+        if owner > 0: wit_failed_owners[owner] = true
+        err_hold(p, msg)
         return
     if not wit_collect: fatal(p, msg)
     err_notes = []

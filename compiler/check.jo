@@ -2949,6 +2949,11 @@ dewy_iterator_loop = (s: int, place: int = 0) -> bool:
     check_stmt(s)
     true
 
+# (the binders of `loop item in @items` over arrays, by position: the name and the array's
+# path. Each holds a copy of the element read at the step's start, so a write to it, or through
+# it, would change nothing the array holds: an error, check_place)
+live_binders: {int: (int, str)} = {}
+
 # `loop item in @place` (dw_live_loop): an iterator steps in place
 # (dewy_iterator_loop); an array is iterated live, a position counter checked
 # against its current length each time and the element read at the body's start,
@@ -2965,6 +2970,7 @@ check_live_loop = (s: int):
         return
     if types[t].kind != .array: fatal(nodes[it].pos, "`loop item in @items` iterates a growable array or a bound iterator live, not {dt(t)}; iterate its value with `loop item in items`")
     binder = kid(s, 0)
+    live_binders[nodes[binder].pos] = (int(nodes[binder].name), route_text(last_checked))
     counter = "$dewy_live_{nodes.len()}"
     range = mk(.range, pos)
     nodes[range].a = i32(bc_int(0, pos))

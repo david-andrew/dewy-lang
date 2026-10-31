@@ -1,0 +1,36 @@
+# A countdown stepped on one path keeps its upper bound under an `or` loop condition,
+# or a condition that does not test it.
+f = (a:array<int> j:int64):>int => {
+    let i = a.length
+    let k = j
+    let t = 0
+    loop i >? 0 or j >? 5 {
+        if i >? 0 { t += a[i - 1]; i -= 1 }
+        else { t -= 1 }
+        if t >? 100 break
+    }
+    t + k
+}
+g = (a:array<int>):>int => {
+    let i = a.length
+    let t = 0
+    loop i >? 0 {
+        if t >? 0 { t += a[i - 1]; i -= 1 }
+        else { t += 1 }
+    }
+    t
+}
+rising = (a:array<int>):>int => {
+    let i = 0
+    let t = 0
+    loop t <? 20 {
+        if i <? a.length { t += a[i]; i += 1 }
+        else { t += 1 }
+    }
+    t
+}
+main = () => {
+    printl(f([1 2 3] 4))
+    printl(g([1 2 3]))
+    printl(rising([1 2 3]))
+}

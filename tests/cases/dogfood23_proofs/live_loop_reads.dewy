@@ -1,0 +1,10 @@
+# A live loop that reads its element and grows its array, and `loop @x in xs` that writes, both stay.
+P:type = [x:float64]
+main = () => {
+    let xs = [1 2 3]
+    loop x in @xs { if x <? 3 { xs.push(x + 10) } }
+    let ps = [P[1.0] P[2.0]]
+    loop @p in ps { p.x += 1.0 }
+    loop p in @ps { let q = p; printl(q.x + p.x) }
+    printl(xs)
+}

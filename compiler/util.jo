@@ -164,8 +164,9 @@ pos_in_lib = (p: int) -> bool:
     f = pos_file(p)
     f < files.len() and starts_with(files[f].path, lib_root)
 
-fatal = (p0: int, msg0: str):
-    dc_replay()
+# (an error's place and message, moved to the program's call when it is inside the library, and
+# the trail entries to note: the calls that made the generic code it is in, innermost first)
+err_locate = (p0: int, msg0: str) -> (int, str, int[]):
     p = p0
     msg = msg0
     k = err_trail.len() - 1
@@ -185,6 +186,50 @@ fatal = (p0: int, msg0: str):
         loop n in notes: seen = seen or err_trail_fns[n] == err_trail_fns[k]
         if err_trail[k] > 0 and not pos_in_lib(err_trail[k]) and not seen: notes.push(k)
         k -= 1
+    (p, msg, notes)
+
+# an error as shown: its line, the calls noted and the extra notes (p >= 0)
+err_block = (p: int, msg: str, notes: int[], extra: (int, str)[]) -> str:
+    out = "{pos_str(p)}: error: {msg}{line_text(p)}"
+    loop n in notes: out += "\n{pos_str(err_trail[n])}: note: in {trail_sig(n)}, called here{line_text(err_trail[n])}"
+    loop e in extra:
+        if e.0 > 0: out += "\n{pos_str(e.0)}: {e.1}{line_text(e.0)}"
+        else: out += "\n    {e.1}"
+    out
+
+# (the facts pass decides each function's obligations on its own: while err_held_on, an
+# unproven one is held, not shown, and the pass shows all it held in source order at its end)
+err_held_on = false
+err_held: (int, str)[]
+
+err_hold = (p0: int, msg0: str):
+    dc_replay()
+    p, msg, notes = err_locate(p0, msg0)
+    extra = err_notes
+    err_notes = []
+    err_held.push((p, err_block(p, msg, notes, extra)))
+
+# the held errors, in source order, each once; then the compile stops
+err_flush = ():
+    held = err_held
+    err_held = []
+    err_held_on = false
+    loop i in [1..held.len()):
+        j = i
+        loop j > 0 and held[j - 1].0 > held[j].0:
+            t = held[j]
+            held[j] = held[j - 1]
+            held[j - 1] = t
+            j -= 1
+    loop i in [0..held.len()):
+        if i > 0 and held[i].0 == held[i - 1].0 and held[i].1 == held[i - 1].1: continue
+        if i > 0 or errors_only: eprint("")
+        eprint(held[i].1)
+    stop(1)
+
+fatal = (p0: int, msg0: str):
+    dc_replay()
+    p, msg, notes = err_locate(p0, msg0)
     if quiet_errors: stop(1)
     extra = err_notes
     err_notes = []
@@ -192,38 +237,40 @@ fatal = (p0: int, msg0: str):
         loop n in notes: msg += " (in {trail_sig(n)}, called at {pos_str(err_trail[n])})"
         loop e in extra: msg += "; {e.1}"
         ide_fatal(p, msg)
+    if err_held_on or err_held.len() > 0:
+        # (one with no place shows last)
+        if p >= 0: err_held.push((p, err_block(p, msg, notes, extra)))
+        else: err_held.push((1 << 62, "error: {msg}"))
+        err_flush()
     if p < 0:
         eprint("error: {msg}")
         stop(1)
     if errors_only: eprint("")                    # (between this error and the one before)
-    eprint("{pos_str(p)}: error: {msg}")
-    show_line(p)
-    loop n in notes:
-        eprint("{pos_str(err_trail[n])}: note: in {trail_sig(n)}, called here")
-        show_line(err_trail[n])
-    loop e in extra:
-        if e.0 > 0:
-            eprint("{pos_str(e.0)}: {e.1}")
-            show_line(e.0)
-        else: eprint("    {e.1}")
+    eprint(err_block(p, msg, notes, extra))
     if more_errors: next_error_run()
     stop(1)
 
-# the source line at p, and a caret under p's column
-show_line = (p: int):
+# the source line at p, and a caret under p's column (after a newline), or nothing
+line_text = (p: int) -> str:
     line = source_line(p)
-    if len(line) > 0:
-        l, c = line_col(p)
-        caret = ""
-        loop i in [0..c - 1):
-            if i < len(line) and line[i] == '\t': caret += "\t"
-            else: caret += " "
-        eprint("    {line}\n    {caret}^")
+    if len(line) == 0: return ""
+    l, c = line_col(p)
+    caret = ""
+    loop i in [0..c - 1):
+        if i < len(line) and line[i] == '\t': caret += "\t"
+        else: caret += " "
+    "\n    {line}\n    {caret}^"
+
+show_line = (p: int):
+    t = line_text(p)
+    if len(t) > 0: eprint(t[1..])
 
 # (the same warning at the same place once: a generic function checked for each of its types;
 # the editor's checks start over each time, so not there)
 warned: {str: bool} = {}
 warn = (p: int, msg: str):
+    # (after an error is held, as the compile would have stopped at it)
+    if err_held.len() > 0: return
     # A prechecked library warning belongs after the pending roots. Replay there.
     if pc_prechecking: dc_replay()
     if pc_collect:

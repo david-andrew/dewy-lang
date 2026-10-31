@@ -1,0 +1,6 @@
+# Each function's first unproven obligation is reported in one run, in source order.
+pick = (a:array<int> i:int):>int => a[i]
+next = (a:array<int> i:int):>int => a[i + 1] + a[i + 2]
+fine = (a:array<int>):>int => if a.is_empty 0 else a[0]
+twice = (a:array<int> k:int):>int => a[k * 2]
+main = () => printl(pick([1] 0) + next([1 2 3] 0) + fine([4]) + twice([5] 0))

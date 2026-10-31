@@ -3766,6 +3766,9 @@ or field path in the body) is a compile error with both fixes: iterate `@xs` to
 see the changes, or bind a snapshot first (`let snapshot = xs` then
 `loop x in snapshot`). A live loop binds one name over a growable array named by
 a binding or field path, and cannot be part of a combined header.
+*Provisional:* its name holds a copy of the element, so writing to it, or
+through it (`x.hp -= 5`, `x.push(0)`), is a compile error naming
+`loop @x in xs`, which changes the elements themselves.
 
 Use an explicit place binding to update stored array elements:
 

@@ -1,0 +1,12 @@
+# Near miss: a cursor one path raises is not held below its start.
+f = (a:array<int> j:int64):>int => {
+    let i = a.length
+    let t = 0
+    loop i >? 0 or j >? 5 {
+        if i >? 0 { t += a[i - 1]; i -= 1 }
+        else { i += 2 }
+        if t >? 100 break
+    }
+    t
+}
+main = () => printl(f([1 2 3] 4))

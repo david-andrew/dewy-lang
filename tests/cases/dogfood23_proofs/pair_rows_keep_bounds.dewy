@@ -1,0 +1,10 @@
+# Index pairs a comprehension builds keep `i <? xs.length` for each of their parts.
+main = () => {
+    let xs = [5 6 7]
+    let pairs = [loop i in [0..xs.length) [i i]]
+    if not pairs.is_empty { let [i j] = pairs[0]; printl(xs[i] + xs[j]) }
+    let tri = [loop i in [0..xs.length) loop j in [i + 1..xs.length) [i j]]
+    loop p in tri { let [a b] = p; printl(xs[a] * xs[b]) }
+    loop [a b] in tri { printl(xs[a] - xs[b]) }
+    loop k in [0..tri.length) { printl(xs[tri[k][1]]) }
+}

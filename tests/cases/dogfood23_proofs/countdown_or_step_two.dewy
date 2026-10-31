@@ -1,0 +1,12 @@
+# Near miss: a countdown stepped by two on one path may pass below the guard's offset.
+f = (a:array<int> j:int64):>int => {
+    let i = a.length
+    let t = 0
+    loop i >? 0 or j >? 5 {
+        if i >? 0 { t += a[i - 2]; i -= 2 }
+        else { t -= 1 }
+        if t >? 100 break
+    }
+    t
+}
+main = () => printl(f([1 2 3] 4))

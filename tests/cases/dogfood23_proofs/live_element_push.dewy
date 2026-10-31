@@ -1,0 +1,6 @@
+# A mutating call on the element of a live loop is a write to the copy too.
+main = () => {
+    let rows = [[1] [2]]
+    loop r in @rows { r.push(0) }
+    printl(rows)
+}

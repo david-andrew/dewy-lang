@@ -10636,7 +10636,23 @@ rd_dc_unread=(@reader_ctx:ParserContext at:int64):>void=>$unsafe {
         reader_ctx.stores.host[0].fatal(reader_ctx.status.report_pos reader_ctx.status.report_text);
     }
     rd_dc_foreign_habit(@reader_ctx at);
+    rd_dc_optional_chain(@reader_ctx at);
     reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file reader_ctx.tokens[at].start) "could not parse the statement starting here; check the syntax near the underlined token");
+}
+
+# (`d.get(k)?.wins`: optional chaining, which Dewy does not have, in the line of an unread
+# statement: the value with a default, then its member)
+rd_dc_optional_chain=(@reader_ctx:ParserContext at:int64):>void=>$unsafe {
+    let k:int64=at
+    loop (reader_ctx.tokens[(int64<overflow='wrap'>(k) + 1)].kind not=? 'eof') and (not reader_ctx.tokens[(int64<overflow='wrap'>(k) + 1)].newline) {
+        let dot:DewyLexeme=reader_ctx.tokens[(int64<overflow='wrap'>(k) + 1)]
+        if ((reader_ctx.tokens[k].symbol =? 'question') and (dot.symbol =? 'dot')) and (not dot.space) {
+            let member:DewyLexeme=reader_ctx.tokens[(int64<overflow='wrap'>(k) + 2)]
+            let name:string=if (member.kind =? 'identifier') and (not member.newline) rd_dn_payload(@reader_ctx member) else "field"
+            reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file reader_ctx.tokens[k].start) "Dewy has no optional chaining `?.`: give the optional value a default first, as `(d.get(k) ?? default).{name}`");
+        }
+        k = (int64<overflow='wrap'>(k) + 1)
+    }
 }
 
 # A statement the end of the text cuts off (dc_unread's mistake, before any noted): the bracket it

@@ -133,7 +133,21 @@ rt_dc_unread = (at: int):
     if dc_parser.status.hint_pos != 0: fatal(dc_parser.status.hint_pos, dc_parser.status.hint_text)
     if dc_parser.status.report_pos != 0: fatal(dc_parser.status.report_pos, dc_parser.status.report_text)
     rt_dc_foreign_habit(at)
+    rt_dc_optional_chain(at)
     fatal(mkpos(dc_parser.file, dc_parser.tokens[at].start), "could not parse the statement starting here; check the syntax near the underlined token")
+
+# (`d.get(k)?.wins`: optional chaining, which Dewy does not have, in the line of an unread
+# statement: the value with a default, then its member)
+rt_dc_optional_chain = (at: int):
+    k = at
+    loop dc_parser.tokens[k + 1].kind != .eof and not dc_parser.tokens[k + 1].newline:
+        dot = dc_parser.tokens[k + 1]
+        if dc_parser.tokens[k].symbol == .question and dot.symbol == .dot and not dot.space:
+            member = dc_parser.tokens[k + 2]
+            name = "field"
+            if member.kind == .identifier and not member.newline: name = rt_dn_payload(member)
+            fatal(mkpos(dc_parser.file, dc_parser.tokens[k].start), "Dewy has no optional chaining `?.`: give the optional value a default first, as `(d.get(k) ?? default).{name}`")
+        k += 1
 
 rt_dc_cut_off = (cut: int):
     token = dc_parser.tokens[cut]
