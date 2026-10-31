@@ -3,6 +3,7 @@ use 'node_store.dewy'
 use 'checker_types.dewy'
 use 'checker_state.dewy'
 use 'type_inference.dewy'
+use 'checker_expr.dewy'
 struct LoopLabel:
     context: int
     name: int
@@ -11,7 +12,6 @@ struct NarrowJump:
     context: i32
     depth: i32
 struct CheckerLoopHost:
-    check: (int, int) -> int
     coerce: (int, int) -> int
     narrow: (int, bool) -> void
     optional_source: (int) -> int
@@ -80,7 +80,7 @@ xb_while = (s: int):
     xb_serial_next[0] = xb_serial_next[0] + 1
     xb_serials[0].push(xb_serial_next[0])
     if xb_nodes[0][s].aux == 1:
-        t = int(tu_prune(xb_host[0].check(int(xb_nodes[0][s].a), 0)))
+        t = int(tu_prune(check_expr(int(xb_nodes[0][s].a), 0)))
         xb_nodes[0][s].a = i32(xb_last[0])
         if xb_types[0][t].kind != .opt:
             source = xb_host[0].optional_source(int(xb_nodes[0][s].a))
@@ -90,7 +90,7 @@ xb_while = (s: int):
         l = xb_host[0].binding(int(xb_nodes[0][s].name), int(xb_types[0][t].elem), xb_nodes[0][s].pos)
         xb_nodes[0][s].sym = i32(l)
     else:
-        ct = xb_host[0].check(int(xb_nodes[0][s].a), xb_bool_type[0])
+        ct = check_expr(int(xb_nodes[0][s].a), xb_bool_type[0])
         if xb_kind(ct) == .array or xb_nodes[0][int(xb_nodes[0][s].a)].kind == .range: xb_host[0].error(s, ct, 2)
         cond = xb_host[0].coerce(xb_last[0], xb_bool_type[0])
         xb_nodes[0][s].a = i32(cond)

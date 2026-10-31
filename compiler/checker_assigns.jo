@@ -4,13 +4,13 @@ use 'checker_types.dewy'
 use 'source_types.dewy'
 use 'checker_state.dewy'
 use 'type_inference.dewy'
+use 'checker_expr.dewy'
 struct CheckerAssignHost:
     begin: (int, int) -> int
     prelude: (int) -> int
     tuple: (int, int, int, int, int) -> int
     element: (int) -> int
     index: (int, int, int) -> int
-    check: (int, int) -> int
     place: (int) -> void
     capture: (int, int, bool) -> void
     refine: (int, int, int) -> int
@@ -145,7 +145,7 @@ va_tuple = (s: int) -> int:
     loop i < n:
         tp = int(va_lists[0][int(va_nodes[0][lhs].list) + i])
         if va_nodes[0][tp].kind != .hole:
-            tt = va_host[0].check(tp, 0)
+            tt = check_expr(tp, 0)
             e = va_last[0]
             va_lists[0][int(va_nodes[0][lhs].list) + i] = i32(e)
             va_host[0].tuple(s, e, tt, 0, 5)
@@ -164,7 +164,7 @@ va_tuple = (s: int) -> int:
     s
 va_index = (s: int) -> int:
     lhs = int(va_nodes[0][s].a)
-    bt = tu_prune(va_host[0].check(int(va_nodes[0][lhs].a), 0))
+    bt = tu_prune(check_expr(int(va_nodes[0][lhs].a), 0))
     va_nodes[0][lhs].a = i32(va_last[0])
     bk = va_types[0][bt].kind
     pos = va_nodes[0][lhs].pos
@@ -194,7 +194,7 @@ va_compound = (s: int, lt: int) -> int:
         if pluseq and va_dewy_at(pos): va_host[0].update(s, l, 0, 3)
         return va_host[0].update(s, lt, 0, 5)
     if lk == .ptr and va_nodes[0][s].sval == 0 and not broadcast:
-        va_host[0].check(int(va_nodes[0][s].b), va_int_type[0])
+        check_expr(int(va_nodes[0][s].b), va_int_type[0])
         va_nodes[0][s].b = i32(va_host[0].coerce(va_last[0], va_int_type[0]))
         va_nodes[0][s].aux = 3
         return s
@@ -209,7 +209,7 @@ va_compound = (s: int, lt: int) -> int:
     hint = l
     if lk == .int_ and shift: hint = 0
     if lk == .int_ and va_nodes[0][rb].kind == .str_lit and va_nodes[0][rb].aux == 0: va_host[0].update(s, l, 0, 6)
-    rt = va_host[0].check(rb, hint)
+    rt = check_expr(rb, hint)
     rk = va_types[0][tu_prune(rt)].kind
     v = va_last[0]
     va_nodes[0][s].b = i32(v)
@@ -239,7 +239,7 @@ va_check = (s: int) -> int:
     va_current[0] = s
     saved_root = va_root[0]
     va_root[0] = if va_nodes[0][lhs].kind == .ident: lhs else: va_place_root(lhs)
-    lt = va_host[0].check(lhs, 0)
+    lt = check_expr(lhs, 0)
     va_root[0] = saved_root
     va_current[0] = 0
     va_no_narrow_at[0] = 0

@@ -5,13 +5,13 @@ use 'source_types.dewy'
 use 'checker_state.dewy'
 use 'type_inference.dewy'
 use 'checker_loops.dewy'
+use 'checker_expr.dewy'
 struct ValueLoop:
     context: int
     route: int
     name: int
 struct CheckerForHost:
     rewrite: (int) -> bool
-    check: (int, int) -> int
     coerce: (int, int) -> int
     literal: (int) -> int
     binding: (int, int, int) -> int
@@ -88,18 +88,18 @@ fl_named = (t: int, name: str) -> bool: fl_types[0][t].kind == .struct_ and fl_s
 fl_or_flags = (l: int, f: int): fl_locals[0][l].flags = i32(int(fl_locals[0][l].flags) | f)
 fl_range = (s: int, it: int, nv: int, n1: int, is_mut: bool, pos: int):
     if fl_nodes[0][it].a == 0: fl_host[0].error(it, 0, 1)
-    t = fl_host[0].check(int(fl_nodes[0][it].a), 0)
+    t = check_expr(int(fl_nodes[0][it].a), 0)
     fl_nodes[0][it].a = i32(fl_last[0])
     la = fl_flag(int(fl_nodes[0][it].a), 256)
     lb = true
     if fl_nodes[0][it].b != 0:
-        fl_host[0].check(int(fl_nodes[0][it].b), 0)
+        check_expr(int(fl_nodes[0][it].b), 0)
         fl_nodes[0][it].b = i32(fl_last[0])
         lb = fl_flag(int(fl_nodes[0][it].b), 256)
         if la and not lb: t = int(fl_nodes[0][int(fl_nodes[0][it].b)].type)
     step = fl_flag(it, 32768)
     if step:
-        fl_host[0].check(int(fl_nodes[0][it].c), 0)
+        check_expr(int(fl_nodes[0][it].c), 0)
         fl_nodes[0][it].c = i32(fl_last[0])
         if la and lb and not fl_flag(int(fl_nodes[0][it].c), 256): t = int(fl_nodes[0][int(fl_nodes[0][it].c)].type)
     if la and lb and (not step or fl_flag(int(fl_nodes[0][it].c), 256)): t = fl_host[0].literal(int(fl_nodes[0][it].a))
@@ -178,7 +178,7 @@ fl_for = (s: int):
     pos = fl_nodes[0][s].pos
     if fl_nodes[0][it].kind == .range: fl_range(s, it, nv, n1, is_mut, pos)
     else:
-        t = int(tu_prune(fl_host[0].check(it, 0)))
+        t = int(tu_prune(check_expr(it, 0)))
         it = fl_last[0]
         fl_nodes[0][s].a = i32(it)
         if fl_named(t, "Map") or fl_named(t, "__MapEntries"):

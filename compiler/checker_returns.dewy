@@ -4,6 +4,7 @@ from p"checker_types.dewy" import (TypeInfo StructInfo TK)
 from p"source_types.dewy" import SrcFile
 from p"checker_state.dewy" import (FnInst FnCtx)
 from p"type_inference.dewy" import (tu_prune tu_unify)
+from p"checker_expr.dewy" import check_expr
 # `return` and `return value`: where a return may stand, the value checked at the
 # declared result (its refinement's representation, a shaped result's dimensions,
 # coercion) or unified with an inferred one, and the exceptions an inferred Dewy
@@ -12,7 +13,6 @@ from p"type_inference.dewy" import (tu_prune tu_unify)
 # every arena, so nodes and contexts are reread by ID.
 XTWord:type=int64<overflow='wrap'>
 CheckerReturnHost:type=[
-    check:<(node:int64 expected:int64):>int64>
     coerce:<(node:int64 type_id:int64):>int64>
     place:<(node:int64):>void>
     sink:<(pos:int64):>void>
@@ -113,7 +113,7 @@ xt_return=(s:XTWord):>void=>$unsafe {
     xt_place(a)
     if xt_sink[0] >=? 0 {xt_host[0].sink(xt_nodes[0].ptr[s].pos)}
     if infer and xt_kind(ret) =? 'var' {
-        let t=xt_host[0].check(a 0)
+        let t=check_expr(a 0)
         xt_nodes[0][s].a=int32<overflow='wrap'>(xt_last[0])
         if not xt_host[0].thrown(s t) {
             let v=XTWord(xt_nodes[0].ptr[s].a)
@@ -132,7 +132,7 @@ xt_return=(s:XTWord):>void=>$unsafe {
     if is_void and not inferring {xt_host[0].error(s 0 3)}
     let expected=rt
     if is_void {expected=0}
-    let t=xt_host[0].check(a expected)
+    let t=check_expr(a expected)
     xt_nodes[0][s].a=int32<overflow='wrap'>(xt_last[0])
     if inferring and not xt_host[0].fits(0 t rt) and xt_host[0].thrown(s t) {return}
     if is_void {xt_host[0].error(s 0 3)}

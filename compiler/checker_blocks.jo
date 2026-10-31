@@ -13,6 +13,7 @@ use 'checker_for_loops.dewy'
 use 'checker_returns.dewy'
 use 'checker_conditionals.dewy'
 use 'checker_literals.dewy'
+use 'checker_expr.dewy'
 struct CheckerBlockHost:
     open: (int, int) -> int
     expand: (int) -> void
@@ -24,7 +25,6 @@ struct CheckerBlockHost:
     special: (int, int) -> void
     assign: (int) -> bool
     error: (int, int) -> void
-    check: (int, int) -> int
     terminates: (int) -> bool
 struct CheckerBlockInput:
     nodes: *(Node[])
@@ -162,7 +162,7 @@ bk_final = (b: int, i: int, expected: int, mode: int) -> int:
     if bk_nodes[0][e].kind == .call and bk_nodes[0][e].aux2 == 17: return -1
     if mode == 2 or mode == 3 or mode == 6: return bk_host[0].final(b, i, expected, mode)
     if bk_nodes[0][e].kind == .match_: bk_nodes[0][e].flags = i32(int(bk_nodes[0][e].flags) & -17)
-    result = bk_host[0].check(e, expected)
+    result = check_expr(e, expected)
     bk_nodes[0][s].a = i32(bk_last[0])
     if bk_types[0][tu_prune(result)].kind != .void_: bk_nodes[0][b].aux = 1
     if result == bk_never_type[0]: bk_nodes[0][b].aux = 0

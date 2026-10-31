@@ -5,6 +5,7 @@ from p"source_types.dewy" import SrcFile
 from p"checker_state.dewy" import (Local CheckerScope)
 from p"type_inference.dewy" import tu_prune
 from p"checker_loops.dewy" import (xb_enter xb_leave)
+from p"checker_expr.dewy" import check_expr
 # `loop x in source`, once the source's rewrites (live, reflected, soa, unpacked,
 # nested, cursor, tidied-map, iterator and sequence loops) are done: a range's
 # endpoints checked and joined to one integer type, or an array's, text's, range
@@ -23,7 +24,6 @@ ValueLoop:type=[
 ]
 CheckerForHost:type=[
     rewrite:<(node:int64):>bool>
-    check:<(node:int64 expected:int64):>int64>
     coerce:<(node:int64 type_id:int64):>int64>
     literal:<(node:int64):>int64>
     binding:<(name:int64 type_id:int64 pos:int64):>int64>
@@ -108,19 +108,19 @@ fl_or_flags=(l:FWord f:FWord):>void=>$unsafe {fl_locals[0][l].flags=int32<overfl
 # and joined; literal ones take the other's type, or their default.
 fl_range=(s:FWord it:FWord nv:FWord n1:FWord is_mut:bool pos:FWord):>void=>$unsafe {
     if fl_nodes[0].ptr[it].a =? 0 {fl_host[0].error(it 0 1)}
-    let t=fl_host[0].check(FWord(fl_nodes[0].ptr[it].a) 0)
+    let t=check_expr(FWord(fl_nodes[0].ptr[it].a) 0)
     fl_nodes[0][it].a=int32<overflow='wrap'>(fl_last[0])
     let la=fl_flag(FWord(fl_nodes[0].ptr[it].a) 256)
     let lb=true
     if fl_nodes[0].ptr[it].b not=? 0 {
-        fl_host[0].check(FWord(fl_nodes[0].ptr[it].b) 0);
+        check_expr(FWord(fl_nodes[0].ptr[it].b) 0);
         fl_nodes[0][it].b=int32<overflow='wrap'>(fl_last[0])
         lb=fl_flag(FWord(fl_nodes[0].ptr[it].b) 256)
         if la and not lb {t=FWord(fl_nodes[0].ptr[FWord(fl_nodes[0].ptr[it].b)].type)}
     }
     let step=fl_flag(it 32768)
     if step {
-        fl_host[0].check(FWord(fl_nodes[0].ptr[it].c) 0);
+        check_expr(FWord(fl_nodes[0].ptr[it].c) 0);
         fl_nodes[0][it].c=int32<overflow='wrap'>(fl_last[0])
         if la and lb and not fl_flag(FWord(fl_nodes[0].ptr[it].c) 256) {t=FWord(fl_nodes[0].ptr[FWord(fl_nodes[0].ptr[it].c)].type)}
     }
@@ -210,7 +210,7 @@ fl_for=(s:FWord):>void=>$unsafe {
     let pos=fl_nodes[0].ptr[s].pos
     if fl_nodes[0].ptr[it].kind =? 'range' {fl_range(s it nv n1 is_mut pos)}
     else {
-        let t=tu_prune(fl_host[0].check(it 0))
+        let t=tu_prune(check_expr(it 0))
         it=fl_last[0]
         fl_nodes[0][s].a=int32<overflow='wrap'>(it)
         # A dictionary goes over its entries, or (counted) its keys.

@@ -2,7 +2,8 @@
 import pytest
 
 from tests.support import compiler  # noqa: F401
-from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER, compare
+from tests.selfhost_expr_double import compare_leaf
+from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER
 
 DRIVER = RESOLVER.split('main = ():')[0] + r'''
 fns: FnInst[] = [FnInst()]
@@ -52,7 +53,7 @@ xt_error = (n: int, t: int, code: int):
     print(events)
     print("error:{n}:{t}:{code}")
     exit(19)
-xt_services = CheckerReturnHost(xt_check, xt_coerce, xt_place, xt_sink, xt_throws, xt_thrown, xt_note, xt_literal, xt_fits, xt_shaped, xt_void_member, xt_void_value, xt_error)
+xt_services = CheckerReturnHost(xt_coerce, xt_place, xt_sink, xt_throws, xt_thrown, xt_note, xt_literal, xt_fits, xt_shaped, xt_void_member, xt_void_value, xt_error)
 xt_inputs = CheckerReturnInput(&nodes, &types, &structs, &files, &fns, &ctxs, &cx, &last, &sink_at, &T_VOID, &T_NEVER, &xt_services)
 xt_binding = checker_returns_bind(&xt_inputs)
 DEWY = 1 << 40
@@ -137,7 +138,7 @@ main = ():
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_returns_twins(compiler, tmp_path, release):  # noqa: F811
-    assert compare(compiler, tmp_path, release, DRIVER + MAIN,
+    assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'xt_check',
                    extra_stems=('checker_returns',)).endswith(b'ok\n')
 
 
@@ -156,5 +157,5 @@ main = ():
     {case}
     print("unreachable")
 '''
-    output = compare(compiler, tmp_path, False, DRIVER + main, status=19, extra_stems=('checker_returns',))
+    output = compare_leaf(compiler, tmp_path, False, DRIVER + main, 'xt_check', status=19, extra_stems=('checker_returns',))
     assert output.rstrip().endswith(f':{code}'.encode())

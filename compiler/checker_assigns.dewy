@@ -4,6 +4,7 @@ from p"checker_types.dewy" import (TypeInfo StructInfo TK)
 from p"source_types.dewy" import SrcFile
 from p"checker_state.dewy" import (FnCtx OptFill StatementWatch)
 from p"type_inference.dewy" import (tu_prune tu_targ)
+from p"checker_expr.dewy" import check_expr
 # `target = value` and `target op= value`, once the source's forms (`[end]` updates,
 # appends, soa elements) and custom and captured element targets are passed to their host
 # services (a tuple's elements and an indexed target's forms are told apart here; the
@@ -22,7 +23,6 @@ CheckerAssignHost:type=[
     tuple:<(node:int64 part:int64 tuple_type:int64 type_id:int64 code:int64):>int64>
     element:<(node:int64):>int64>
     index:<(node:int64 type_id:int64 code:int64):>int64>
-    check:<(node:int64 expected:int64):>int64>
     place:<(node:int64):>void>
     capture:<(node:int64 target:int64 dewy:bool):>void>
     refine:<(node:int64 type_id:int64 code:int64):>int64>
@@ -181,7 +181,7 @@ va_tuple=(s:AWord):>AWord=>$unsafe {
     loop i <? n {
         let tp=AWord(va_lists[0].ptr[AWord(va_nodes[0].ptr[lhs].list) + i])
         if va_nodes[0].ptr[tp].kind not=? 'hole' {
-            let tt=AWord(va_host[0].check(tp 0))
+            let tt=AWord(check_expr(tp 0))
             let e=AWord(va_last[0])
             va_lists[0][AWord(va_nodes[0].ptr[lhs].list) + i]=int32<overflow='wrap'>(e)
             va_host[0].tuple(s e tt 0 5);
@@ -209,7 +209,7 @@ va_tuple=(s:AWord):>AWord=>$unsafe {
 # elements picked by a mask or indexes), or 0 (NF_STEP 32768).
 va_index=(s:AWord):>AWord=>$unsafe {
     let lhs=AWord(va_nodes[0].ptr[s].a)
-    let bt=tu_prune(AWord(va_host[0].check(AWord(va_nodes[0].ptr[lhs].a) 0)))
+    let bt=tu_prune(AWord(check_expr(AWord(va_nodes[0].ptr[lhs].a) 0)))
     va_nodes[0][lhs].a=int32<overflow='wrap'>(va_last[0])
     let bk=va_types[0].ptr[bt].kind
     let pos=AWord(va_nodes[0].ptr[lhs].pos)
@@ -252,7 +252,7 @@ va_compound=(s:AWord lt:AWord):>AWord=>$unsafe {
         return va_host[0].update(s lt 0 5)
     }
     if lk =? 'ptr' and node[0].sval =? 0 and not broadcast {
-        va_host[0].check(AWord(node[0].b) va_int_type[0]);
+        check_expr(AWord(node[0].b) va_int_type[0]);
         va_nodes[0][s].b=int32<overflow='wrap'>(va_host[0].coerce(va_last[0] va_int_type[0]))
         va_nodes[0][s].aux=3
         return s
@@ -270,7 +270,7 @@ va_compound=(s:AWord lt:AWord):>AWord=>$unsafe {
     let hint=l
     if lk =? 'int_' and shift {hint=0}
     if lk =? 'int_' and va_nodes[0].ptr[rb].kind =? 'str_lit' and va_nodes[0].ptr[rb].aux =? 0 {va_host[0].update(s l 0 6);}
-    let rt=AWord(va_host[0].check(rb hint))
+    let rt=AWord(check_expr(rb hint))
     let rk=va_types[0].ptr[tu_prune(rt)].kind
     let v=AWord(va_last[0])
     va_nodes[0][s].b=int32<overflow='wrap'>(v)
@@ -310,7 +310,7 @@ va_check=(s:AWord):>AWord=>$unsafe {
     # checks the expressions it makes)
     let saved_root=va_root[0]
     va_root[0]=if va_nodes[0].ptr[lhs].kind =? 'ident' {lhs} else {va_place_root(lhs)}
-    let lt=va_host[0].check(lhs 0)
+    let lt=check_expr(lhs 0)
     va_root[0]=saved_root
     va_current[0]=0
     va_no_narrow_at[0]=0

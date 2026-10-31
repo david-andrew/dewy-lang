@@ -2,6 +2,7 @@ $runtime_checks
 from p"node_store.dewy" import Node
 from p"checker_state.dewy" import (Global FnCtx)
 from p"checker_exprstmts.dewy" import es_statement
+from p"checker_expr.dewy" import check_expr
 # Statements without a checker of their own: a local `const` (checked once, kept as
 # a constant global and bound in scope), `_ = value` (a value dropped on purpose),
 # `when` (the compile-time branch's statements in place) and `defer` (its statement
@@ -10,7 +11,6 @@ from p"checker_exprstmts.dewy" import es_statement
 # every arena, so nodes and globals are reread by ID.
 SWord:type=int64<overflow='wrap'>
 CheckerStatementHost:type=[
-    check:<(node:int64 expected:int64):>int64>
     coerce:<(node:int64 type_id:int64):>int64>
     literal:<(node:int64):>int64>
     resolve:<(node:int64):>int64>
@@ -67,7 +67,7 @@ st_const=(s:SWord):>void=>$unsafe {
     let t:SWord=0
     if st_nodes[0].ptr[s].a not=? 0 {t=st_host[0].resolve(SWord(st_nodes[0].ptr[s].a))}
     let value=st_host[0].clone(SWord(st_nodes[0].ptr[s].b))
-    let et=st_host[0].check(value t)
+    let et=check_expr(value t)
     value=st_last[0]
     if t not=? 0 {st_host[0].coerce(value t);}
     else if SWord(st_nodes[0].ptr[value].flags) & 256 not=? 0 {t=st_host[0].literal(value)}

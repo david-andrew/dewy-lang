@@ -2,7 +2,8 @@
 import pytest
 
 from tests.support import compiler  # noqa: F401
-from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER, compare
+from tests.selfhost_expr_double import compare_leaf
+from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER
 
 DRIVER = RESOLVER.split('main = ():')[0] + r'''
 ctxs: FnCtx[]
@@ -56,7 +57,7 @@ kids = (n: int) -> int[]:
     out: int[]
     loop i in [0..int(nodes[n].nlist)): out.push(int(lists[int(nodes[n].list) + i]))
     out
-xb_services = CheckerLoopHost(xb_check, xb_coerce, xb_narrow, xb_source, xb_binding, xb_body, xb_reset, xb_error)
+xb_services = CheckerLoopHost(xb_coerce, xb_narrow, xb_source, xb_binding, xb_body, xb_reset, xb_error)
 xb_inputs = CheckerLoopInput(&nodes, &types, &ctxs, &cx, &scopes, &serials, &serial_next, &labels, &jumps, &last, &T_BOOL, &xb_services)
 xb_binding_done = checker_loops_bind(&xb_inputs)
 typed = (k: NK, t: int, a: int = 0) -> int:
@@ -121,7 +122,7 @@ main = ():
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_loops_twins(compiler, tmp_path, release):  # noqa: F811
-    assert compare(compiler, tmp_path, release, DRIVER + MAIN,
+    assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'xb_check',
                    extra_stems=('checker_loops',)).endswith(b'ok\n')
 
 
@@ -140,5 +141,5 @@ main = ():
     {case}
     print("unreachable")
 '''
-    output = compare(compiler, tmp_path, False, DRIVER + main, status=19, extra_stems=('checker_loops',))
+    output = compare_leaf(compiler, tmp_path, False, DRIVER + main, 'xb_check', status=19, extra_stems=('checker_loops',))
     assert output.rstrip().endswith(f':{code}'.encode())

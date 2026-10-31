@@ -3,6 +3,7 @@ from p"node_store.dewy" import Node
 from p"checker_types.dewy" import (TypeInfo TK)
 from p"checker_state.dewy" import (FnCtx CheckerScope)
 from p"type_inference.dewy" import tu_prune
+from p"checker_expr.dewy" import check_expr
 # Loop statements: `loop cond` and `loop let x = v` (scope, loop serial, guard
 # narrowing, label and body), `break` and `continue` (label resolution and the
 # narrowing log of the jump), and the active-label stack every loop checker enters
@@ -16,7 +17,6 @@ LoopLabel:type=[context:int64=0 name:int64=0 depth:int64=0]
 # A jump's target loop depth in its context (narrow_returned reads the log).
 NarrowJump:type=[context:int32=0 depth:int32=0]
 CheckerLoopHost:type=[
-    check:<(node:int64 expected:int64):>int64>
     coerce:<(node:int64 type_id:int64):>int64>
     narrow:<(node:int64 holds:bool):>void>
     optional_source:<(node:int64):>int64>
@@ -95,7 +95,7 @@ xb_while=(s:XBWord):>void=>$unsafe {
     xb_serial_next[0]=xb_serial_next[0] + 1
     xb_serials[0].push(xb_serial_next[0])
     if xb_nodes[0].ptr[s].aux =? 1 {
-        let t=tu_prune(xb_host[0].check(XBWord(xb_nodes[0].ptr[s].a) 0))
+        let t=tu_prune(check_expr(XBWord(xb_nodes[0].ptr[s].a) 0))
         xb_nodes[0][s].a=int32<overflow='wrap'>(xb_last[0])
         if xb_types[0].ptr[t].kind not=? 'opt' {
             let source=xb_host[0].optional_source(XBWord(xb_nodes[0].ptr[s].a))
@@ -106,7 +106,7 @@ xb_while=(s:XBWord):>void=>$unsafe {
         let l=xb_host[0].binding(XBWord(xb_nodes[0].ptr[s].name) XBWord(xb_types[0].ptr[t].elem) xb_nodes[0].ptr[s].pos)
         xb_nodes[0][s].sym=int32<overflow='wrap'>(l)
     } else {
-        let ct=xb_host[0].check(XBWord(xb_nodes[0].ptr[s].a) xb_bool_type[0])
+        let ct=check_expr(XBWord(xb_nodes[0].ptr[s].a) xb_bool_type[0])
         if xb_kind(ct) =? 'array' or xb_nodes[0].ptr[XBWord(xb_nodes[0].ptr[s].a)].kind =? 'range' {xb_host[0].error(s ct 2)}
         let cond=xb_host[0].coerce(xb_last[0] xb_bool_type[0])
         xb_nodes[0][s].a=int32<overflow='wrap'>(cond)

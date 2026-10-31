@@ -2,8 +2,8 @@
 use 'node_store.dewy'
 use 'checker_state.dewy'
 use 'checker_exprstmts.dewy'
+use 'checker_expr.dewy'
 struct CheckerStatementHost:
-    check: (int, int) -> int
     coerce: (int, int) -> int
     literal: (int) -> int
     resolve: (int) -> int
@@ -54,7 +54,7 @@ st_const = (s: int):
     t = 0
     if st_nodes[0][s].a != 0: t = st_host[0].resolve(int(st_nodes[0][s].a))
     value = st_host[0].clone(int(st_nodes[0][s].b))
-    et = st_host[0].check(value, t)
+    et = check_expr(value, t)
     value = st_last[0]
     if t != 0: st_host[0].coerce(value, t)
     else if int(st_nodes[0][value].flags) & 256 != 0: t = st_host[0].literal(value)

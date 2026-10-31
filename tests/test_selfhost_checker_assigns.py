@@ -3,7 +3,7 @@ import pytest
 
 from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_loops import DRIVER as LOOPS
-from tests.test_selfhost_checker_resolve import compare
+from tests.selfhost_expr_double import compare_leaf
 
 STEMS = ('checker_loops', 'checker_assigns')
 DRIVER = LOOPS + r'''
@@ -95,7 +95,7 @@ da_wrap = (s: int, r: int, mark: int) -> int:
     events.push("wrap:{s}:{r}:{mark}:{da_before}")
     da_before.truncate(mark)
     node(.block)
-da_services = CheckerAssignHost(da_begin, da_prelude, da_tuple, da_element, da_index, da_check, da_place, da_capture, da_refine, da_value, da_write, da_coerce, da_update, da_flow_host, da_wrap)
+da_services = CheckerAssignHost(da_begin, da_prelude, da_tuple, da_element, da_index, da_place, da_capture, da_refine, da_value, da_write, da_coerce, da_update, da_flow_host, da_wrap)
 da_inputs = CheckerAssignInput(&nodes, &lists, &types, &structs, &files, &ctxs, &cx, &last, &da_refining, &da_narrows, &da_no_narrow, &da_current, &da_root, &da_before, &da_watch, &da_decimal_target, &da_cached, &da_fills, &T_STR, &T_MATH_INT, &T_INT, &T_U64, &da_services)
 da_bound = checker_assigns_bind(&da_inputs)
 DEWY = 1 << 40
@@ -303,7 +303,7 @@ main = ():
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_assigns_twins(compiler, tmp_path, release):  # noqa: F811
-    assert compare(compiler, tmp_path, release, DRIVER + MAIN, extra_stems=STEMS).endswith(b'ok\n')
+    assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'da_check', extra_stems=STEMS).endswith(b'ok\n')
 
 
 # A service's error stops the assignment where Jo's did.
@@ -335,5 +335,5 @@ main = ():
     {case}
     print("unreachable")
 '''
-    output = compare(compiler, tmp_path, False, DRIVER + main, status=19, extra_stems=STEMS)
+    output = compare_leaf(compiler, tmp_path, False, DRIVER + main, 'da_check', status=19, extra_stems=STEMS)
     assert output.rstrip().endswith(f'error:{code}'.encode())

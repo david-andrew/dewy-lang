@@ -13,6 +13,7 @@ from p"checker_for_loops.dewy" import fl_for
 from p"checker_returns.dewy" import xt_return
 from p"checker_conditionals.dewy" import xf_if
 from p"checker_literals.dewy" import xl_finish
+from p"checker_expr.dewy" import check_expr
 # A block's statements in its scope, and each statement sent to its checker: a
 # declaration, an assignment (or the declaration it makes, or a dropped value), an
 # expression, a loop, a return or jump, a local constant, `defer`, `when` and an `if`
@@ -35,7 +36,6 @@ CheckerBlockHost:type=[
     special:<(node:int64 code:int64):>void>
     assign:<(node:int64):>bool>
     error:<(node:int64 code:int64):>void>
-    check:<(node:int64 expected:int64):>int64>
     terminates:<(node:int64):>bool>
 ]
 CheckerBlockInput:type=[
@@ -193,7 +193,7 @@ bk_final=(b:BWord i:BWord expected:BWord mode:BWord):>BWord=>$unsafe {
     if bk_nodes[0].ptr[e].kind =? 'call' and bk_nodes[0].ptr[e].aux2 =? 17 {return -1}
     if mode =? 2 or mode =? 3 or mode =? 6 {return bk_host[0].final(b i expected mode)}
     if bk_nodes[0].ptr[e].kind =? 'match_' {bk_nodes[0][e].flags=int32<overflow='wrap'>(BWord(bk_nodes[0].ptr[e].flags) & -17)}
-    let result=BWord(bk_host[0].check(e expected))
+    let result=BWord(check_expr(e expected))
     bk_nodes[0][s].a=int32<overflow='wrap'>(bk_last[0])
     if bk_types[0].ptr[tu_prune(result)].kind not=? 'void_' {bk_nodes[0][b].aux=1}
     if result =? bk_never_type[0] {bk_nodes[0][b].aux=0}

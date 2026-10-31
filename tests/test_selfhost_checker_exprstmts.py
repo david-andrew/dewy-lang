@@ -2,7 +2,8 @@
 import pytest
 
 from tests.support import compiler  # noqa: F401
-from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER, compare
+from tests.selfhost_expr_double import compare_leaf
+from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER
 
 DRIVER = RESOLVER.split('main = ():')[0] + r'''
 fns: FnInst[] = [FnInst()]
@@ -41,7 +42,7 @@ es_error_host = (n: int):
     print(events)
     print("error:{n}:2")
     exit(19)
-es_services = CheckerExprStmtHost(es_check_host, es_repl_host, es_express_host, es_result_host, es_value_host, es_spawn_host, es_error_host)
+es_services = CheckerExprStmtHost(es_repl_host, es_express_host, es_result_host, es_value_host, es_spawn_host, es_error_host)
 es_inputs = CheckerExprStmtInput(&nodes, &types, &fns, &sinks, &es_repl_on, &es_dropping, &es_site, &es_hit, &es_last_at, &T_NEVER, &es_services)
 es_bound = checker_exprstmts_bind(&es_inputs)
 typed = (k: NK, t: int, a: int = 0) -> int:
@@ -118,7 +119,7 @@ main = ():
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_exprstmts_twins(compiler, tmp_path, release):  # noqa: F811
-    assert compare(compiler, tmp_path, release, DRIVER + MAIN,
+    assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'es_check_host',
                    extra_stems=('checker_exprstmts',)).endswith(b'ok\n')
 
 
@@ -134,5 +135,5 @@ main = ():
     {case}
     print("unreachable")
 '''
-    output = compare(compiler, tmp_path, False, DRIVER + main, status=19, extra_stems=('checker_exprstmts',))
+    output = compare_leaf(compiler, tmp_path, False, DRIVER + main, 'es_check_host', status=19, extra_stems=('checker_exprstmts',))
     assert output.rstrip().endswith(f':{code}'.encode())

@@ -3,6 +3,7 @@ from p"node_store.dewy" import (Node NK)
 from p"checker_types.dewy" import (TypeInfo TK)
 from p"checker_state.dewy" import FnInst
 from p"type_inference.dewy" import tu_prune
+from p"checker_expr.dewy" import check_expr
 # A statement that is an expression: the value made and checked, a function named
 # and not called, a value expressed into the enclosing block's sink (a Dewy block's
 # value, a collection's element) or dropped, and the warnings for one dropped that
@@ -38,7 +39,6 @@ Sink:type=[
     hcount:array<int64>=[] # ... how many of those each statement holds
 ]
 CheckerExprStmtHost:type=[
-    check:<(node:int64 expected:int64):>int64>
     repl:<(node:int64):>void>
     express:<(node:int64 type_id:int64 pack:bool):>void>
     unused_result:<(node:int64 pos:int64):>void>
@@ -135,7 +135,7 @@ es_statement=(s:ESWord):>void=>$unsafe {
     let saved_site=es_pack_site[0]
     es_pack_site[0]=e
     let dropped=es_discarding[0]
-    let t=es_host[0].check(e 0)
+    let t=check_expr(e 0)
     es_pack_site[0]=saved_site
     let pack=es_pack_hit[0] not=? 0 and es_pack_hit[0] =? e
     es_pack_hit[0]=0

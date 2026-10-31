@@ -3,6 +3,7 @@ use 'node_store.dewy'
 use 'checker_types.dewy'
 use 'checker_state.dewy'
 use 'type_inference.dewy'
+use 'checker_expr.dewy'
 struct Sink:
     mode: int
     block: int
@@ -24,7 +25,6 @@ struct Sink:
     hlocals: int[]
     hcount: int[]
 struct CheckerExprStmtHost:
-    check: (int, int) -> int
     repl: (int) -> void
     express: (int, int, bool) -> void
     unused_result: (int, int) -> void
@@ -109,7 +109,7 @@ es_statement = (s: int):
     saved_site = es_pack_site[0]
     es_pack_site[0] = e
     dropped = es_discarding[0]
-    t = es_host[0].check(e, 0)
+    t = check_expr(e, 0)
     es_pack_site[0] = saved_site
     pack = es_pack_hit[0] != 0 and es_pack_hit[0] == e
     es_pack_hit[0] = 0

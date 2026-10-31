@@ -180,17 +180,22 @@ main = ():
 '''
 
 
-def compare(compiler, tmp_path, release, driver, status=0, extra_stems=()):
+def compare(compiler, tmp_path, release, driver, status=0, extra_stems=(), doubles=None):
+    # doubles: {stem: {extension: text}}, modules standing in for compiler ones.
     outputs = []
+    doubles = doubles or {}
     stems = ('node_store', 'source_types', 'checker_types', 'checker_state', 'checker_tokens',
              'refinement_types', 'refine_predicates', 'refine_queries', 'type_queries',
              'type_intern', 'type_inference', 'type_constructors', 'type_labels',
-             'type_unions', 'checker_alias', 'checker_resolve') + extra_stems
+             'type_unions', 'checker_alias', 'checker_resolve') + tuple(doubles) + extra_stems
     for extension in ('dewy', 'jo'):
         directory = tmp_path / extension
         directory.mkdir()
         for stem in stems:
-            text = (ROOT / f'compiler/{stem}.{extension}').read_text()
+            if stem in doubles:
+                text = doubles[stem][extension]
+            else:
+                text = (ROOT / f'compiler/{stem}.{extension}').read_text()
             if extension == 'jo':
                 text = text.replace(".dewy'", ".jo'")
             (directory / f'{stem}.{extension}').write_text(text)

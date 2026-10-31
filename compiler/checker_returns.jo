@@ -4,8 +4,8 @@ use 'checker_types.dewy'
 use 'source_types.dewy'
 use 'checker_state.dewy'
 use 'type_inference.dewy'
+use 'checker_expr.dewy'
 struct CheckerReturnHost:
-    check: (int, int) -> int
     coerce: (int, int) -> int
     place: (int) -> void
     sink: (int) -> void
@@ -91,7 +91,7 @@ xt_return = (s: int):
     xt_place(a)
     if xt_sink[0] >= 0: xt_host[0].sink(xt_nodes[0][s].pos)
     if infer and xt_kind(ret) == .var:
-        t = xt_host[0].check(a, 0)
+        t = check_expr(a, 0)
         xt_nodes[0][s].a = i32(xt_last[0])
         if not xt_host[0].thrown(s, t):
             v = int(xt_nodes[0][s].a)
@@ -107,7 +107,7 @@ xt_return = (s: int):
     if is_void and not inferring: xt_host[0].error(s, 0, 3)
     expected = rt
     if is_void: expected = 0
-    t = xt_host[0].check(a, expected)
+    t = check_expr(a, expected)
     xt_nodes[0][s].a = i32(xt_last[0])
     if inferring and not xt_host[0].fits(0, t, rt) and xt_host[0].thrown(s, t): return
     if is_void: xt_host[0].error(s, 0, 3)

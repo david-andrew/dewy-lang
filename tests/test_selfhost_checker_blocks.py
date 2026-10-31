@@ -7,7 +7,8 @@ from tests.test_selfhost_checker_conditionals import DRIVER as CONDITIONALS
 from tests.test_selfhost_checker_literals import DRIVER as LITERALS
 from tests.test_selfhost_checker_loops import DRIVER as LOOPS
 from tests.test_selfhost_checker_vardecls import DRIVER as DECLS
-from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER, compare
+from tests.selfhost_expr_double import compare_leaf
+from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER
 
 STEMS = ('checker_loops', 'checker_vardecls', 'checker_assigns', 'checker_exprstmts', 'checker_statements',
          'checker_for_loops', 'checker_returns', 'checker_conditionals', 'checker_literals', 'checker_blocks')
@@ -81,7 +82,7 @@ db_error = (s: int, code: int):
     print(events)
     print("error:{s}:{code}")
     exit(19)
-db_services = CheckerBlockHost(db_open, db_expand, db_direct, db_final_host, db_sibling, db_close, db_reset, db_special, db_assign, db_error, db_check, db_terminates)
+db_services = CheckerBlockHost(db_open, db_expand, db_direct, db_final_host, db_sibling, db_close, db_reset, db_special, db_assign, db_error, db_terminates)
 db_inputs = CheckerBlockInput(&nodes, &lists, &files, &types, &last, &scopes, &cx, &da_watch, &dv_block, &dv_index, &dv_flow_local, &db_body_mode, &db_arm, &db_bind, &db_discarding, &db_exact, &T_VOID, &T_NEVER, &db_services)
 db_bound = checker_blocks_bind(&db_inputs)
 DEWY = 1 << 40
@@ -218,7 +219,7 @@ main = ():
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_blocks_twins(compiler, tmp_path, release):  # noqa: F811
-    assert compare(compiler, tmp_path, release, DRIVER + MAIN, extra_stems=STEMS).endswith(b'ok\n')
+    assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'db_check', extra_stems=STEMS).endswith(b'ok\n')
 
 
 @pytest.mark.parametrize('case,code', [
@@ -235,5 +236,5 @@ main = ():
     {case}
     print("unreachable")
 '''
-    output = compare(compiler, tmp_path, False, DRIVER + main, status=19, extra_stems=STEMS)
+    output = compare_leaf(compiler, tmp_path, False, DRIVER + main, 'db_check', status=19, extra_stems=STEMS)
     assert output.rstrip().endswith(f':{code}'.encode())

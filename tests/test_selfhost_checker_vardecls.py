@@ -3,7 +3,7 @@ import pytest
 
 from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_loops import DRIVER as LOOPS
-from tests.test_selfhost_checker_resolve import compare
+from tests.selfhost_expr_double import compare_leaf
 
 STEMS = ('checker_loops', 'checker_vardecls')
 DRIVER = LOOPS + r'''
@@ -250,7 +250,7 @@ main = ():
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_vardecls_twins(compiler, tmp_path, release):  # noqa: F811
-    assert compare(compiler, tmp_path, release, DRIVER + MAIN, extra_stems=STEMS).endswith(b'ok\n')
+    assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'xb_check', extra_stems=STEMS).endswith(b'ok\n')
 
 
 @pytest.mark.parametrize('case,code', [
@@ -269,5 +269,5 @@ main = ():
     {case}
     print("unreachable")
 '''
-    output = compare(compiler, tmp_path, False, DRIVER + main, status=19, extra_stems=STEMS)
+    output = compare_leaf(compiler, tmp_path, False, DRIVER + main, 'xb_check', status=19, extra_stems=STEMS)
     assert output.rstrip().endswith(f':{code}'.encode())

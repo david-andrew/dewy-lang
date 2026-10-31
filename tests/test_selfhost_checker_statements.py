@@ -3,7 +3,7 @@ import pytest
 
 from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_exprstmts import DRIVER as EXPRSTMTS
-from tests.test_selfhost_checker_resolve import compare
+from tests.selfhost_expr_double import compare_leaf
 
 STEMS = ('checker_exprstmts', 'checker_statements')
 DRIVER = EXPRSTMTS + r'''
@@ -48,7 +48,7 @@ st_error_host = (n: int):
     print(events)
     print("error:{n}:1")
     exit(19)
-st_services = CheckerStatementHost(st_check_host, st_coerce_host, st_literal_host, st_resolve_host, st_clone_host, st_bind_host, st_truth_host, st_statement_host, st_block_host, st_mutable_host, st_error_host)
+st_services = CheckerStatementHost(st_coerce_host, st_literal_host, st_resolve_host, st_clone_host, st_bind_host, st_truth_host, st_statement_host, st_block_host, st_mutable_host, st_error_host)
 st_inputs = CheckerStatementInput(&nodes, &lists, &globals, &ctxs, &cx, &es_dropping, &st_refine_on, &es_last_at, &st_services)
 st_bound = checker_statements_bind(&st_inputs)
 show = (s: int):
@@ -96,7 +96,7 @@ main = ():
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_statements_twins(compiler, tmp_path, release):  # noqa: F811
-    assert compare(compiler, tmp_path, release, DRIVER + MAIN, extra_stems=STEMS).endswith(b'ok\n')
+    assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'st_check_host', extra_stems=STEMS).endswith(b'ok\n')
 
 
 def test_checker_statements_errors(compiler, tmp_path):  # noqa: F811
@@ -108,5 +108,5 @@ main = ():
     st_defer(node(.defer_, node(.block)))
     print("unreachable")
 '''
-    output = compare(compiler, tmp_path, False, DRIVER + main, status=19, extra_stems=STEMS)
+    output = compare_leaf(compiler, tmp_path, False, DRIVER + main, 'st_check_host', status=19, extra_stems=STEMS)
     assert output.rstrip().endswith(b':1')

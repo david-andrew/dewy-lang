@@ -3,7 +3,7 @@ import pytest
 
 from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_loops import DRIVER as LOOPS
-from tests.test_selfhost_checker_resolve import compare
+from tests.selfhost_expr_double import compare_leaf
 
 STEMS = ('checker_loops', 'checker_for_loops')
 DRIVER = LOOPS + r'''
@@ -65,7 +65,7 @@ fl_error_host = (n: int, t: int, code: int):
     print(events)
     print("error:{n}:{t}:{code}")
     exit(19)
-fl_services = CheckerForHost(fl_rewrite_host, fl_check_host, fl_coerce_host, fl_literal_host, fl_binding_host, fl_open_host, fl_view_host, fl_entries_host, fl_collide_host, fl_element_host, fl_route_host, fl_fields_host, fl_map_value_host, fl_map_ref_host, fl_body_host, fl_reset_host, fl_error_host)
+fl_services = CheckerForHost(fl_rewrite_host, fl_coerce_host, fl_literal_host, fl_binding_host, fl_open_host, fl_view_host, fl_entries_host, fl_collide_host, fl_element_host, fl_route_host, fl_fields_host, fl_map_value_host, fl_map_ref_host, fl_body_host, fl_reset_host, fl_error_host)
 fl_inputs = CheckerForInput(&nodes, &lists, &types, &structs, &fields, &files, &locals, &scopes, &serials, &serial_next, &value_loops, &cx, &last, &T_INT, &T_U8, &fl_services)
 fl_bound = checker_for_loops_bind(&fl_inputs)
 DEWY = 1 << 40
@@ -151,7 +151,7 @@ main = ():
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_for_loops_twins(compiler, tmp_path, release):  # noqa: F811
-    assert compare(compiler, tmp_path, release, DRIVER + MAIN, extra_stems=STEMS).endswith(b'ok\n')
+    assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'fl_check_host', extra_stems=STEMS).endswith(b'ok\n')
 
 
 @pytest.mark.parametrize('case,code', [
@@ -173,5 +173,5 @@ main = ():
     {case}
     print("unreachable")
 '''
-    output = compare(compiler, tmp_path, False, DRIVER + main, status=19, extra_stems=STEMS)
+    output = compare_leaf(compiler, tmp_path, False, DRIVER + main, 'fl_check_host', status=19, extra_stems=STEMS)
     assert output.rstrip().endswith(f':{code}'.encode())

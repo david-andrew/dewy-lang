@@ -3207,7 +3207,7 @@ for_error = (n: int, t0: int, code: int):
 # the body is an error naming the two meanings the program could have wanted.
 # (ValueLoop: checker_for_loops.dewy)
 value_loops: ValueLoop[]
-for_host = CheckerForHost(for_rewrite, check_expr, coerce, lit_default, new_local, for_open_range, for_map_view, is_map_entries_type, for_collide, for_element, for_route, for_struct_fields, for_map_value, for_map_value_ref, for_body, scope_reset, for_error)
+for_host = CheckerForHost(for_rewrite, coerce, lit_default, new_local, for_open_range, for_map_view, is_map_entries_type, for_collide, for_element, for_route, for_struct_fields, for_map_value, for_map_value_ref, for_body, scope_reset, for_error)
 for_input = CheckerForInput(&nodes, &lists, &types, &structs, &fields, &files, &locals, &check_scopes, &loop_serials, &loop_serial_next, &value_loops, &cx, &last_checked, &T_INT, &T_U8, &for_host)
 for_binding = checker_for_loops_bind(&for_input)
 
@@ -4227,7 +4227,7 @@ assign_wrap = (s: int, r: int, mark: int) -> int:
     before = assign_before[mark..]
     assign_before.truncate(mark)
     bc_block(before + [copy_checked(r)], nodes[s].pos)
-assign_host = CheckerAssignHost(assign_begin, assign_prelude, assign_tuple, assign_element, assign_index, check_expr, assign_place, assign_capture, assign_refine, assign_value, assign_write, coerce, assign_update, assign_flow, assign_wrap)
+assign_host = CheckerAssignHost(assign_begin, assign_prelude, assign_tuple, assign_element, assign_index, assign_place, assign_capture, assign_refine, assign_value, assign_write, coerce, assign_update, assign_flow, assign_wrap)
 assign_input = CheckerAssignInput(&nodes, &lists, &types, &structs, &files, &ctxs, &cx, &last_checked, &refine_active, &path_narrows, &no_narrow_at, &cur_assign, &assign_root, &assign_before, &statement_watch, &decimal_target, &decimal_cached_type, &opt_fill_watch, &T_STR, &T_MATH_INT, &T_INT, &T_U64, &assign_host)
 assign_binding = checker_assigns_bind(&assign_input)
 
@@ -4569,7 +4569,7 @@ stmt_error = (s: int, code: int):
     if code == 1: fatal(nodes[s].pos, "declarations are only allowed at the top level")
     if code == 2: fatal(nodes[s].pos, "invalid statement")
     spawn_value_error(nodes[int(nodes[s].b)].pos)
-block_host = CheckerBlockHost(block_open, block_expand, block_direct, block_final, block_sibling, sink_close, scope_reset, stmt_special, stmt_assign, stmt_error, check_expr, stmt_terminates)
+block_host = CheckerBlockHost(block_open, block_expand, block_direct, block_final, block_sibling, sink_close, scope_reset, stmt_special, stmt_assign, stmt_error, stmt_terminates)
 block_input = CheckerBlockInput(&nodes, &lists, &files, &types, &last_checked, &check_scopes, &cx, &statement_watch, &sibling_block, &sibling_index, &sibling_flow_l, &sink_body_mode, &sink_arm_next, &sink_bind_next, &discarding, &exact_measure_on, &T_VOID, &T_NEVER, &block_host)
 block_binding = checker_blocks_bind(&block_input)
 
@@ -4587,7 +4587,7 @@ loop_error = (n: int, t: int, code: int):
         fatal(pos, "'{w}' outside of a loop")
     if code == 4: fatal(pos, "unknown loop label '${name_of(int(nodes[n].name))}'")
     fatal(pos, "duplicate active loop label '${name_of(int(nodes[n].sval))}'")
-loop_host = CheckerLoopHost(check_expr, coerce, narrow_by, narrow_optional_source, new_local, loop_body, scope_reset, loop_error)
+loop_host = CheckerLoopHost(coerce, narrow_by, narrow_optional_source, new_local, loop_body, scope_reset, loop_error)
 loop_input = CheckerLoopInput(&nodes, &types, &ctxs, &cx, &check_scopes, &loop_serials, &loop_serial_next, &loop_labels, &narrow_jumps, &last_checked, &T_BOOL, &loop_host)
 loop_binding = checker_loops_bind(&loop_input)
 # Local constants, dropped values, `when` and `defer` run in checker_statements.dewy;
@@ -4600,7 +4600,7 @@ statement_block = (b: int):
     check_block(b, 0, false)
     return
 statement_error = (s: int): fatal(nodes[s].pos, "projected mutable postconditions with deferred cleanup are not yet supported")
-statement_host = CheckerStatementHost(check_expr, coerce, lit_default, resolve_type, clone, statement_bind, const_eval_bool, statement_check, statement_block, ref_mutable_result, statement_error)
+statement_host = CheckerStatementHost(coerce, lit_default, resolve_type, clone, statement_bind, const_eval_bool, statement_check, statement_block, ref_mutable_result, statement_error)
 statement_input = CheckerStatementInput(&nodes, &lists, &globals, &ctxs, &cx, &discarding, &refine_active, &last_checked, &statement_host)
 statement_binding = checker_statements_bind(&statement_input)
 # Expression statements run in checker_exprstmts.dewy; these are its services.
@@ -4626,7 +4626,7 @@ exprstmt_unused_value = (code: int, op: int, a: int, pos: int, t: int):
 exprstmt_error = (e: int):
     nm = name_of(int(nodes[e].name))
     fatal(nodes[e].pos, "'{nm}' is a function and is not called here: `{nm}()` calls it")
-exprstmt_host = CheckerExprStmtHost(check_expr, exprstmt_repl, exprstmt_express, unused_result, exprstmt_unused_value, spawn_value_error, exprstmt_error)
+exprstmt_host = CheckerExprStmtHost(exprstmt_repl, exprstmt_express, unused_result, exprstmt_unused_value, spawn_value_error, exprstmt_error)
 exprstmt_input = CheckerExprStmtInput(&nodes, &types, &fns, &sinks, &repl_sig_query, &discarding, &sink_pack_site, &sink_pack_hit, &last_checked, &T_NEVER, &exprstmt_host)
 exprstmt_binding = checker_exprstmts_bind(&exprstmt_input)
 # Return statements run in checker_returns.dewy; these are its services.
@@ -4649,7 +4649,7 @@ return_error = (s: int, t: int, code: int):
     if code == 2: fatal(pos, "a function giving `never` does not return")
     if code == 3: fatal(pos, "this function does not return a value")
     fatal(pos, "missing return value (function returns {dt(t)})")
-return_host = CheckerReturnHost(check_expr, coerce, return_place, return_sink, return_throws, infer_throw, return_note, lit_default, can_coerce, shape_returned, union_has_void, return_void_value, return_error)
+return_host = CheckerReturnHost(coerce, return_place, return_sink, return_throws, infer_throw, return_note, lit_default, can_coerce, shape_returned, union_has_void, return_void_value, return_error)
 return_input = CheckerReturnInput(&nodes, &types, &structs, &files, &fns, &ctxs, &cx, &last_checked, &sink_fn, &T_VOID, &T_NEVER, &return_host)
 return_binding = checker_returns_bind(&return_input)
 
