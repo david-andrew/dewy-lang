@@ -3900,86 +3900,87 @@ assign_begin = (s: int, code: int) -> int:
         return 0
     if code == 2: return decimal_assign_begin(s)
     sibling_syntax_type(int(nodes[s].b))
-# `a, b = value`
-assign_tuple = (s: int) -> int:
+# `a, b = value`'s services (checker_assigns.dewy va_tuple): 1 a compound update refused,
+# 3 the value checked and unpacked (its type; a Dewy target's written type refused first),
+# 4 a value of another shape refused, 5 an element written (its place checked, its text or
+# integer domain written), 6 an element of another type refused (part: the target as
+# written), 7 refinement contracts (a block, or 0), 8 elements converted
+assign_tuple = (s: int, part: int, t: int, tt: int, code: int) -> int:
     lhs = int(nodes[s].a)
-    op = int(nodes[s].op)
-    if op != int(Tok.assign): fatal(nodes[s].pos, "compound assignment to a tuple")
-    if files[pos_file(nodes[s].pos)].is_dewy:
-        loop binding in binding_leaves(kids(lhs)):
-            if nodes[binding].a != 0: fatal(nodes[binding].pos, "type annotations declare bindings; use let or const for typed unpacking")
-    t = prune(values_init(int(nodes[s].b), 0, true))
-    nodes[s].b = i32(last_checked)
-    unpacked = unpack_binding(int(nodes[s].b), t, kids(lhs), nodes[s].pos)
-    t = unpacked.0
-    set_list(lhs, unpacked.1)
-    nodes[s].b = i32(last_checked)
-    if types[t].kind != .tuple or int(types[t].nargs) != nkids(lhs): fatal(nodes[s].pos, "expected a tuple with {nkids(lhs)} elements (or an array), found {dt(t)}")
-    loop i in [0..nkids(lhs)):
-        tp = kid(lhs, i)
-        if nodes[tp].kind == .hole: continue
-        tt = check_expr(tp, 0)
-        set_kid(lhs, i, last_checked)
-        check_place(last_checked, false)
-        if string_domains.len() > 0 and tt == T_STR: string_domain_write(last_checked, 0)
-        if tt == T_MATH_INT and dewy_at(nodes[s].pos): int_domain_write(last_checked, 0, -1)
-        if not can_coerce(0, targ(t, i), tt) and not type_eq(targ(t, i), tt): fatal(nodes[tp].pos, "cannot assign {dt(targ(t, i))} to {dt(tt)}")
-    if refine_active:
+    if code == 1: fatal(nodes[s].pos, "compound assignment to a tuple")
+    if code == 3:
+        if files[pos_file(nodes[s].pos)].is_dewy:
+            loop binding in binding_leaves(kids(lhs)):
+                if nodes[binding].a != 0: fatal(nodes[binding].pos, "type annotations declare bindings; use let or const for typed unpacking")
+        vt = prune(values_init(int(nodes[s].b), 0, true))
+        nodes[s].b = i32(last_checked)
+        unpacked = unpack_binding(int(nodes[s].b), vt, kids(lhs), nodes[s].pos)
+        set_list(lhs, unpacked.1)
+        nodes[s].b = i32(last_checked)
+        return unpacked.0
+    if code == 4: fatal(nodes[s].pos, "expected a tuple with {nkids(lhs)} elements (or an array), found {dt(t)}")
+    if code == 5:
+        check_place(part, false)
+        if string_domains.len() > 0 and t == T_STR: string_domain_write(part, 0)
+        if t == T_MATH_INT and dewy_at(nodes[s].pos): int_domain_write(part, 0, -1)
+        return 0
+    if code == 6:
+        if not can_coerce(0, t, tt) and not type_eq(t, tt): fatal(nodes[part].pos, "cannot assign {dt(t)} to {dt(tt)}")
+        return 0
+    if code == 7:
         contracted = false
         loop target in kids(lhs):
             if nodes[target].kind == .hole: continue
             if ref_storage_contract(refine_storage(target, ntype(target))) or ref_dependent_ancestor(target): contracted = true
-        if contracted:
-            before: int[]
-            source = capture_value(int(nodes[s].b), t, before)
-            loop i in [0..nkids(lhs)):
-                target = kid(lhs, i)
-                if nodes[target].kind == .hole: continue
-                field = mk(.field, nodes[s].pos)
-                nodes[field].a = i32(source)
-                nodes[field].aux = -2
-                nodes[field].ival = i
-                check_expr(field, 0)
-                field = last_checked
-                store = bc_assign(target, field, nodes[s].pos)
-                before.push(check_assign(store))
-            return bc_block(before, nodes[s].pos)
-    nodes[s].aux = 1
-    converted = false
-    loop i in [0..nkids(lhs)):
-        target = kid(lhs, i)
-        if nodes[target].kind != .hole and not type_eq(targ(t, i), ntype(target)): converted = true
-    if converted:
-        # Freeze the tuple once, then convert every element before writing
-        # destinations. Semantic int and fixed widths have different ABIs.
-        elem_tmp_n += 1
-        name = "$unpack_convert{elem_tmp_n}"
-        pos = nodes[s].pos
-        decl = bc_let(name, int(nodes[s].b), pos)
-        add_flag(int(nodes[s].b), NF_CHECKED)
-        check_stmt(decl)
-        values: int[]
-        targets: int[]
+        if not contracted: return 0
+        before: int[]
+        source = capture_value(int(nodes[s].b), t, before)
         loop i in [0..nkids(lhs)):
-            field = mk(.field, pos)
-            nodes[field].a = i32(bc_ident(name, pos))
+            target = kid(lhs, i)
+            if nodes[target].kind == .hole: continue
+            field = mk(.field, nodes[s].pos)
+            nodes[field].a = i32(source)
             nodes[field].aux = -2
             nodes[field].ival = i
             check_expr(field, 0)
             field = last_checked
-            target = kid(lhs, i)
-            tt = if nodes[target].kind == .hole: targ(t, i) else: ntype(target)
-            values.push(coerce(field, tt))
-            targets.push(tt)
-        tuple = mk(.tuple, pos)
-        nodes[tuple].type = i32(mk_tuple(targets))
-        add_flag(tuple, NF_CHECKED)
-        set_list(tuple, values)
-        nodes[s].b = i32(tuple)
-        assignment = nodes.len()
-        nodes.push(nodes[s])
-        return bc_block([decl, assignment], pos)
-    return s
+            store = bc_assign(target, field, nodes[s].pos)
+            before.push(check_assign(store))
+        return bc_block(before, nodes[s].pos)
+    converted = false
+    loop i in [0..nkids(lhs)):
+        target = kid(lhs, i)
+        if nodes[target].kind != .hole and not type_eq(targ(t, i), ntype(target)): converted = true
+    if not converted: return s
+    # Freeze the tuple once, then convert every element before writing
+    # destinations. Semantic int and fixed widths have different ABIs.
+    elem_tmp_n += 1
+    name = "$unpack_convert{elem_tmp_n}"
+    pos = nodes[s].pos
+    decl = bc_let(name, int(nodes[s].b), pos)
+    add_flag(int(nodes[s].b), NF_CHECKED)
+    check_stmt(decl)
+    values: int[]
+    targets: int[]
+    loop i in [0..nkids(lhs)):
+        field = mk(.field, pos)
+        nodes[field].a = i32(bc_ident(name, pos))
+        nodes[field].aux = -2
+        nodes[field].ival = i
+        check_expr(field, 0)
+        field = last_checked
+        target = kid(lhs, i)
+        et = if nodes[target].kind == .hole: targ(t, i) else: ntype(target)
+        values.push(coerce(field, et))
+        targets.push(et)
+    tuple = mk(.tuple, pos)
+    nodes[tuple].type = i32(mk_tuple(targets))
+    add_flag(tuple, NF_CHECKED)
+    set_list(tuple, values)
+    nodes[s].b = i32(tuple)
+    assignment = nodes.len()
+    nodes.push(nodes[s])
+    bc_block([decl, assignment], pos)
 # A field or element target's custom index or captured selectors, or 0.
 assign_element = (s: int) -> int:
     r = elem_field_assign(s)
@@ -3987,26 +3988,28 @@ assign_element = (s: int) -> int:
     # (after a custom index's read/edit/writeback, which captures its own
     # receiver selectors before its getter runs)
     compound_selector_capture(s)
-# An indexed target's slices, selections, soa elements, parts and index calls, or 0.
-assign_index = (s: int) -> int:
+# An indexed target's forms (checker_assigns.dewy va_index, given the receiver's type bt):
+# 1 Dewy ranges made values, 2 a range of an array's elements, 3 a stepped range off an
+# n-dimensional array refused, 4 a record's soa element, part or `[]=` call, 5 an array's
+# elements picked by a mask or indexes; the rewritten statement, or 0
+assign_index = (s: int, bt: int, code: int) -> int:
     lhs = int(nodes[s].a)
     op = int(nodes[s].op)
-    bt = prune(check_expr(int(nodes[lhs].a), 0))
-    nodes[lhs].a = i32(last_checked)
-    dewy_index_ranges(lhs, bt)
-    range = int(nodes[lhs].b)
-    if range != 0 and nodes[range].kind == .range:
-        if types[bt].kind == .array or types[bt].kind == .fixed:
-            if has_flag(s, NF_BROADCAST): return dewy_selection_update(s)
-            if op != int(Tok.assign): fatal(nodes[s].pos, "compound assignment to picked elements (write an explicit loop)")
-            call = dewy_array_slice(lhs, int(nodes[s].b))
-            es = mk(.exprstmt, nodes[s].pos)
-            check_expr(call, 0)
-            nodes[es].a = i32(last_checked)
-            return es
-        if has_flag(range, NF_STEP) and not is_nd(bt): fatal(nodes[s].pos, "stepped slicing requires an array")
-    if is_soa(bt) and nodes[lhs].b != 0: return soa_assign(s)
-    if (types[bt].kind == .array or types[bt].kind == .fixed) and nodes[lhs].b != 0 and nodes[int(nodes[lhs].b)].kind != .int_lit and nodes[int(nodes[lhs].b)].kind != .range:
+    if code == 1:
+        dewy_index_ranges(lhs, bt)
+        return 0
+    if code == 2:
+        if has_flag(s, NF_BROADCAST): return dewy_selection_update(s)
+        if op != int(Tok.assign): fatal(nodes[s].pos, "compound assignment to picked elements (write an explicit loop)")
+        call = dewy_array_slice(lhs, int(nodes[s].b))
+        es = mk(.exprstmt, nodes[s].pos)
+        check_expr(call, 0)
+        nodes[es].a = i32(last_checked)
+        return es
+    if code == 3:
+        if not is_nd(bt): fatal(nodes[s].pos, "stepped slicing requires an array")
+        return 0
+    if code == 5:
         put = index_array_fn(int(nodes[lhs].b), "__put")
         if len(put) > 0:
             # xs[mask] = v, xs[idxs] = vs: sets the elements picked
@@ -4019,6 +4022,8 @@ assign_index = (s: int) -> int:
             check_expr(call, 0)
             nodes[es].a = i32(last_checked)
             return es
+        return 0
+    if is_soa(bt) and nodes[lhs].b != 0: return soa_assign(s)
     if types[bt].kind == .struct_ and is_part_index(lhs, bt):
         # m[.., j] = xs: writes into a part of m
         if has_flag(s, NF_BROADCAST) and is_nd(bt): return dewy_selection_update(s, true)
@@ -4130,11 +4135,15 @@ assign_write = (s: int, rt: int, lt: int, code: int) -> int:
         return 0
     opt_fill(rt, lhs, nodes[s].pos)
     0
-# `x op= value`: refined, quantity, text, pointer, helper and numeric updates
-assign_compound = (s: int, lt: int) -> int:
+# `x op= value`'s services (checker_assigns.dewy va_compound): 1 a refined update, 2 a
+# quantity's (1: done), 3 a Dewy `+=` on an array (or text), 4 an exact-width integer (1),
+# 5 a helper-call update, 6 a one-character text added to an integer, 7 a text's `+=`
+# (refused in Dewy but for an interpolation's append), 8 a shift by a non-integer, 9 a
+# float given to an integer (other: its type)
+assign_update = (s: int, lt: int, other: int, code: int) -> int:
     lhs = int(nodes[s].a)
     op = int(nodes[s].op)
-    if types[prune(lt)].kind == .refined:
+    if code == 1:
         # The checked replacement reads and writes one selected element.
         # Capture selectors before the old-value read, including scalar names
         # which the RHS could change, rather than replaying the target.
@@ -4153,25 +4162,21 @@ assign_compound = (s: int, lt: int) -> int:
         nodes[s].op = i32(int(Tok.assign))
         if before.len() > 0: return bc_block(before + [copy_checked(s)], nodes[s].pos)
         return s
-    l = prune(lt)
-    if types[l].kind == .quantity and quantity_compound(s, l): return s
-    if op == int(Tok.pluseq) and (types[l].kind == .str_ or types[l].kind == .array or types[l].kind == .fixed) and not has_flag(s, NF_BROADCAST) and dewy_at(nodes[s].pos) and not interp_appends.has(s):
+    l = lt
+    if code == 2: return if quantity_compound(s, l): 1 else: 0
+    if code == 3 or code == 7:
+        if code == 7 and (not dewy_at(nodes[s].pos) or interp_appends.has(s)):
+            srt = prune(check_expr(int(nodes[s].b), T_STR))
+            if nodes[lhs].kind == .ident and is_numeric(srt) and not can_coerce(last_checked, srt, T_STR): var_type_error(lhs, l, srt, nodes[s].pos)
+            nodes[s].b = i32(coerce(last_checked, T_STR))
+            nodes[s].aux = 2
+            return s
+        if interp_appends.has(s): return 0
         nm = concat_piece(lhs, false)
         if types[l].kind == .str_: fatal(nodes[s].pos, "`+=` does not add text: `{nm} = \"\{{nm}}...\"` appends in place, and many pieces collect in an array and `join`")
         fatal(nodes[s].pos, "`+=` does not join arrays (on arrays it is reserved for elementwise math): `{nm}.extend(ys)` appends ys and `{nm}.push(y)` one element; `.+=` adds element by element")
-    if types[l].kind == .str_ and op == int(Tok.pluseq) and not has_flag(s, NF_BROADCAST):
-        srt = prune(check_expr(int(nodes[s].b), T_STR))
-        if nodes[lhs].kind == .ident and is_numeric(srt) and not can_coerce(last_checked, srt, T_STR): var_type_error(lhs, l, srt, nodes[s].pos)
-        nodes[s].b = i32(coerce(last_checked, T_STR))
-        nodes[s].aux = 2
-        return s
-    bop = compound_op(op)
-    if types[l].kind == .ptr and nodes[s].sval == 0 and not has_flag(s, NF_BROADCAST):
-        check_expr(int(nodes[s].b), T_INT)
-        nodes[s].b = i32(coerce(last_checked, T_INT))
-        nodes[s].aux = 3
-        return s
-    if l == T_MATH_INT or exact_type(l, nodes[s].pos) or nodes[s].sval != 0 or has_flag(s, NF_BROADCAST) or (not is_numeric(l) and types[l].kind != .bool_) or nodes[lhs].kind == .index or nodes[lhs].kind == .field or nodes[s].aux2 == 1 and types[l].kind == .bool_:
+    if code == 4: return if exact_type(l, nodes[s].pos): 1 else: 0
+    if code == 5:
         # Helper calls, overloads and vectors: x = operation(x, y). Capture
         # indices before reading x, including names the right side may change.
         # Reacquire indexed/field storage after the RHS: it can resize an array.
@@ -4208,25 +4213,16 @@ assign_compound = (s: int, lt: int) -> int:
         blk = mk(.block, pos)
         set_list(blk, pre + [c])
         return blk
-    is_shift = bop == int(Tok.shl) or bop == int(Tok.shr)
-    hint = l
-    if is_int(l) and is_shift: hint = 0
-    # (score += "1": a one-character text is that character's code, 49)
-    rb = int(nodes[s].b)
-    if is_int(l) and nodes[rb].kind == .str_lit and nodes[rb].aux == 0 and len(name_of(int(nodes[rb].sval))) == 1 and not pos_in_lib(nodes[s].pos):
-        ch = name_of(int(nodes[rb].sval))
-        warn(nodes[rb].pos, "\"{ch}\" here is the character code of {ch}, not the number: write {ch} without quotes for the number")
-    rt = check_expr(int(nodes[s].b), hint)
-    nodes[s].b = i32(last_checked)
-    if is_shift:
-        if not is_int(rt): fatal(nodes[int(nodes[s].b)].pos, "shift amount must be an integer")
-        if has_flag(int(nodes[s].b), NF_LITERAL): nodes[s].b = i32(coerce(int(nodes[s].b), T_INT))
-    else:
-        if is_int(l) and is_float(rt):
-            if nodes[lhs].kind == .ident: var_type_error(lhs, l, rt, nodes[s].pos)
-            fatal(nodes[s].pos, "cannot apply {tok_text(op as Tok)} to {dt(l)} and {dt(rt)} (int(...) makes the value an int, or make the field a float)")
-        nodes[s].b = i32(coerce(int(nodes[s].b), l))
-    s
+    if code == 6:
+        rb = int(nodes[s].b)
+        if len(name_of(int(nodes[rb].sval))) == 1 and not pos_in_lib(nodes[s].pos):
+            ch = name_of(int(nodes[rb].sval))
+            warn(nodes[rb].pos, "\"{ch}\" here is the character code of {ch}, not the number: write {ch} without quotes for the number")
+        return 0
+    if code == 8: fatal(nodes[int(nodes[s].b)].pos, "shift amount must be an integer")
+    if nodes[lhs].kind == .ident: var_type_error(lhs, l, other, nodes[s].pos)
+    fatal(nodes[s].pos, "cannot apply {tok_text(op as Tok)} to {dt(l)} and {dt(other)} (int(...) makes the value an int, or make the field a float)")
+    0
 assign_flow = (r: int, literal: int):
     sibling_flow_assign(r, literal)
     return
@@ -4235,8 +4231,8 @@ assign_wrap = (s: int, r: int, mark: int) -> int:
     before = assign_before[mark..]
     assign_before.truncate(mark)
     bc_block(before + [copy_checked(r)], nodes[s].pos)
-assign_host = CheckerAssignHost(assign_begin, assign_prelude, assign_tuple, assign_element, assign_index, check_expr, assign_place, assign_capture, assign_refine, assign_value, assign_write, coerce, assign_compound, assign_flow, assign_wrap)
-assign_input = CheckerAssignInput(&nodes, &types, &structs, &files, &ctxs, &cx, &last_checked, &refine_active, &path_narrows, &no_narrow_at, &cur_assign, &assign_root, &assign_before, &statement_watch, &decimal_target, &decimal_cached_type, &opt_fill_watch, &T_STR, &T_MATH_INT, &assign_host)
+assign_host = CheckerAssignHost(assign_begin, assign_prelude, assign_tuple, assign_element, assign_index, check_expr, assign_place, assign_capture, assign_refine, assign_value, assign_write, coerce, assign_update, assign_flow, assign_wrap)
+assign_input = CheckerAssignInput(&nodes, &lists, &types, &structs, &files, &ctxs, &cx, &last_checked, &refine_active, &path_narrows, &no_narrow_at, &cur_assign, &assign_root, &assign_before, &statement_watch, &decimal_target, &decimal_cached_type, &opt_fill_watch, &T_STR, &T_MATH_INT, &T_INT, &T_U64, &assign_host)
 assign_binding = checker_assigns_bind(&assign_input)
 
 # a function another engine would call, which nothing here does: one warning, saying what is

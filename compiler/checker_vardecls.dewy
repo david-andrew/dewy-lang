@@ -183,7 +183,7 @@ vd_forms=(s:VWord):>bool=>$unsafe {
 # 256. The commonest tests are written out: a call costs more than they do.)
 vd_decl=(s:VWord):>void=>$unsafe {
     if vd_forms(s) {return}
-    let pos=vd_nodes[0].ptr[s].pos
+    let pos=VWord(vd_nodes[0].ptr[s].pos)
     let typed=vd_nodes[0].ptr[s].a not=? 0
     let pf=pos >> 40
     let dewy=pos >? 0 and pf <? vd_files[0].length and vd_files[0].ptr[pf].is_dewy

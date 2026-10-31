@@ -150,7 +150,7 @@ bk_if=(s:BWord):>void=>$unsafe {
 bk_block=(b:BWord expected:BWord want_value:bool):>BWord=>$unsafe {
     # (a lowered combined loop is a statement wherever it stands: its body's values go where
     # the loop's own would, to the enclosing collector or body, as a single-header loop's do)
-    let pos=bk_nodes[0].ptr[b].pos
+    let pos=BWord(bk_nodes[0].ptr[b].pos)
     if want_value and bk_flag(b 131072) and bk_files[0][pos >> 40].is_dewy {
         bk_block(b 0 false);
         let result=if bk_flag(b 1073741824) {bk_never_type[0]} else {bk_void_type[0]}

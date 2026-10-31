@@ -3,13 +3,15 @@ from p"node_store.dewy" import Node
 from p"checker_types.dewy" import (TypeInfo StructInfo TK)
 from p"source_types.dewy" import SrcFile
 from p"checker_state.dewy" import (FnCtx OptFill StatementWatch)
-from p"type_inference.dewy" import tu_prune
+from p"type_inference.dewy" import (tu_prune tu_targ)
 # `target = value` and `target op= value`, once the source's forms (`[end]` updates,
-# appends, soa elements), tuples, custom and captured element targets and indexed
-# targets are passed to their host services: the target checked as a place (written,
+# appends, soa elements) and custom and captured element targets are passed to their host
+# services (a tuple's elements and an indexed target's forms are told apart here; the
+# value's unpacking, contracts, conversions and the indexed forms' rewrites are services): the target checked as a place (written,
 # not read), a field or element target's selectors and copies told, refinements and text and integer domains told, then the value checked and
 # converted to the target's type with the paths and optionals it narrows or fills; a
-# compound update is one host service. Growth, decimal and sibling bindings are asked
+# compound update's text, pointer and numeric forms are checked here (refined, quantity
+# and helper-call updates, warnings and errors are host services). Growth, decimal and sibling bindings are asked
 # about only while their tables are live. O(1) per assignment plus the demanded
 # checking of its parts; services may grow every arena, so nodes and types are
 # reread by ID.
@@ -17,9 +19,9 @@ AWord:type=int64<overflow='wrap'>
 CheckerAssignHost:type=[
     begin:<(node:int64 code:int64):>int64>
     prelude:<(node:int64):>int64>
-    tuple:<(node:int64):>int64>
+    tuple:<(node:int64 part:int64 tuple_type:int64 type_id:int64 code:int64):>int64>
     element:<(node:int64):>int64>
-    index:<(node:int64):>int64>
+    index:<(node:int64 type_id:int64 code:int64):>int64>
     check:<(node:int64 expected:int64):>int64>
     place:<(node:int64):>void>
     capture:<(node:int64 target:int64 dewy:bool):>void>
@@ -27,12 +29,13 @@ CheckerAssignHost:type=[
     value:<(node:int64 type_id:int64 settle:int64):>int64>
     write:<(node:int64 value_type:int64 type_id:int64 code:int64):>int64>
     coerce:<(node:int64 type_id:int64):>int64>
-    compound:<(node:int64 type_id:int64):>int64>
+    update:<(node:int64 type_id:int64 other:int64 code:int64):>int64>
     flow:<(node:int64 literal:int64):>void>
     wrap:<(node:int64 result:int64 mark:int64):>int64>
 ]
 CheckerAssignInput:type=[
     nodes:ptr<array<Node>>
+    lists:ptr<array<int32>>
     types:ptr<array<TypeInfo>>
     structs:ptr<array<StructInfo>>
     files:ptr<array<SrcFile>>
@@ -51,9 +54,12 @@ CheckerAssignInput:type=[
     fills:ptr<array<OptFill>>
     str_type:ptr<int64>
     math_int_type:ptr<int64>
+    int_type:ptr<int64>
+    u64_type:ptr<int64>
     host:ptr<CheckerAssignHost>
 ]
 let va_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let va_lists:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
 let va_types:ptr<array<TypeInfo>>=$unsafe (uint64(0) as ptr<array<TypeInfo>>)
 let va_structs:ptr<array<StructInfo>>=$unsafe (uint64(0) as ptr<array<StructInfo>>)
 let va_files:ptr<array<SrcFile>>=$unsafe (uint64(0) as ptr<array<SrcFile>>)
@@ -72,9 +78,12 @@ let va_decimal_cached:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let va_fills:ptr<array<OptFill>>=$unsafe (uint64(0) as ptr<array<OptFill>>)
 let va_str_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let va_math_int_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let va_int_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let va_u64_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let va_host:ptr<CheckerAssignHost>=$unsafe (uint64(0) as ptr<CheckerAssignHost>)
 checker_assigns_bind=(input:ptr<CheckerAssignInput>):>AWord=>$unsafe {
     va_nodes=input[0].nodes
+    va_lists=input[0].lists
     va_types=input[0].types
     va_structs=input[0].structs
     va_files=input[0].files
@@ -93,6 +102,8 @@ checker_assigns_bind=(input:ptr<CheckerAssignInput>):>AWord=>$unsafe {
     va_fills=input[0].fills
     va_str_type=input[0].str_type
     va_math_int_type=input[0].math_int_type
+    va_int_type=input[0].int_type
+    va_u64_type=input[0].u64_type
     va_host=input[0].host
     0
 }
@@ -154,6 +165,124 @@ va_sourced=(lhs:AWord):>bool=>$unsafe {
     }
     false
 }
+# `a, b = value` (tuple services: 1 a compound update refused, 3 the value checked and
+# unpacked to the targets (its type; a Dewy target's written type refused first), 4 a value
+# of another shape refused, 5 an element written (its place checked, its text or integer
+# domain written), 6 an element of another type refused (part: the target as written,
+# tuple_type: the element's type), 7 refinement contracts (a block, or 0), 8 elements
+# converted (the statement or a block)).
+va_tuple=(s:AWord):>AWord=>$unsafe {
+    if va_nodes[0].ptr[s].op not=? 47 {va_host[0].tuple(s 0 0 0 1);}
+    let t=AWord(va_host[0].tuple(s 0 0 0 3))
+    let lhs=AWord(va_nodes[0].ptr[s].a)
+    let n=AWord(va_nodes[0].ptr[lhs].nlist)
+    if va_types[0].ptr[t].kind not=? 'tuple' or AWord(va_types[0].ptr[t].nargs) not=? n {va_host[0].tuple(s 0 t 0 4);}
+    let i:AWord=0
+    loop i <? n {
+        let tp=AWord(va_lists[0].ptr[AWord(va_nodes[0].ptr[lhs].list) + i])
+        if va_nodes[0].ptr[tp].kind not=? 'hole' {
+            let tt=AWord(va_host[0].check(tp 0))
+            let e=AWord(va_last[0])
+            va_lists[0][AWord(va_nodes[0].ptr[lhs].list) + i]=int32<overflow='wrap'>(e)
+            va_host[0].tuple(s e tt 0 5);
+            let et=tu_targ(t i)
+            if et not=? tt {va_host[0].tuple(s tp et tt 6);}
+        }
+        i=i + 1
+    }
+    if va_refining[0] {
+        let r=AWord(va_host[0].tuple(s 0 t 0 7))
+        if r not=? 0 {return r}
+    }
+    va_nodes[0][s].aux=1
+    i=0
+    loop i <? n {
+        let target=AWord(va_lists[0].ptr[AWord(va_nodes[0].ptr[lhs].list) + i])
+        if va_nodes[0].ptr[target].kind not=? 'hole' and tu_targ(t i) not=? AWord(va_nodes[0].ptr[target].type) {return va_host[0].tuple(s 0 t 0 8)}
+        i=i + 1
+    }
+    s
+}
+# An indexed target's forms (index services, given the receiver's type: 1 Dewy ranges made
+# values, 2 a range of an array's elements (slice or selection), 3 a stepped range off an
+# n-dimensional array refused, 4 a record's soa element, part or `[]=` call, 5 an array's
+# elements picked by a mask or indexes), or 0 (NF_STEP 32768).
+va_index=(s:AWord):>AWord=>$unsafe {
+    let lhs=AWord(va_nodes[0].ptr[s].a)
+    let bt=tu_prune(AWord(va_host[0].check(AWord(va_nodes[0].ptr[lhs].a) 0)))
+    va_nodes[0][lhs].a=int32<overflow='wrap'>(va_last[0])
+    let bk=va_types[0].ptr[bt].kind
+    let pos=AWord(va_nodes[0].ptr[lhs].pos)
+    if va_files[0][pos >> 40].is_dewy and (AWord(va_nodes[0].ptr[lhs].nlist) >=? 2 or bk =? 'typeval') {va_host[0].index(s bt 1);}
+    let range=AWord(va_nodes[0].ptr[lhs].b)
+    if range not=? 0 and va_nodes[0].ptr[range].kind =? 'range' {
+        if bk =? 'array' or bk =? 'fixed' {return va_host[0].index(s bt 2)}
+        if AWord(va_nodes[0].ptr[range].flags) & 32768 not=? 0 {va_host[0].index(s bt 3);}
+    }
+    if bk =? 'struct_' {return va_host[0].index(s bt 4)}
+    if (bk =? 'array' or bk =? 'fixed') and range not=? 0 {
+        let rk=va_nodes[0].ptr[range].kind
+        if rk not=? 'int_lit' and rk not=? 'range' {return va_host[0].index(s bt 5)}
+    }
+    0
+}
+# `x op= value` (Tok.pluseq 48, shleq 56, shreq 57; NF_BROADCAST 16384, NF_LITERAL 256).
+# The host's update services: 1 a refined update, 2 a quantity's (1: done), 3 a Dewy `+=`
+# on text or an array (refused but for an interpolation's append), 4 an exact-width
+# integer (1: yes), 5 a helper-call update, 6 a one-character text added to an integer
+# (warned), 7 a text's `+=` (one service: the commonest update in Jo), 8 a shift by a
+# non-integer, 9 a float given to an integer (refused).
+va_compound=(s:AWord lt:AWord):>AWord=>$unsafe {
+    let l=tu_prune(lt)
+    let lk=va_types[0].ptr[l].kind
+    if lk =? 'refined' {return va_host[0].update(s lt 0 1)}
+    if lk =? 'quantity' and va_host[0].update(s l 0 2) not=? 0 {return s}
+    # (Dewy's integers update through their helpers)
+    if l =? va_math_int_type[0] {return va_host[0].update(s lt 0 5)}
+    # (one view of the statement until a service runs)
+    let node=va_nodes[0].ptr + s
+    let op=AWord(node[0].op)
+    let broadcast=AWord(node[0].flags) & 16384 not=? 0
+    let pos=AWord(node[0].pos)
+    let lhs=AWord(node[0].a)
+    if lk =? 'str_' or lk =? 'array' or lk =? 'fixed' {
+        let pluseq=op =? 48 and not broadcast
+        if lk =? 'str_' and pluseq {return va_host[0].update(s l 0 7)}
+        if pluseq and va_dewy_at(pos) {va_host[0].update(s l 0 3);}
+        return va_host[0].update(s lt 0 5)
+    }
+    if lk =? 'ptr' and node[0].sval =? 0 and not broadcast {
+        va_host[0].check(AWord(node[0].b) va_int_type[0]);
+        va_nodes[0][s].b=int32<overflow='wrap'>(va_host[0].coerce(va_last[0] va_int_type[0]))
+        va_nodes[0][s].aux=3
+        return s
+    }
+    let lhk=va_nodes[0].ptr[lhs].kind
+    let helper=node[0].sval not=? 0 or broadcast or (lk not=? 'int_' and lk not=? 'float_' and lk not=? 'bool_') or lhk =? 'index' or lhk =? 'field' or (node[0].aux2 =? 1 and lk =? 'bool_')
+    let rb=AWord(node[0].b)
+    if not helper and lk =? 'int_' {
+        # (the common implementation words are exact in Dewy only)
+        if l =? va_int_type[0] or l =? va_u64_type[0] {helper=va_dewy_at(pos)}
+        else {helper=va_host[0].update(s l 0 4) not=? 0}
+    }
+    if helper {return va_host[0].update(s lt 0 5)}
+    let shift=op =? 56 or op =? 57
+    let hint=l
+    if lk =? 'int_' and shift {hint=0}
+    if lk =? 'int_' and va_nodes[0].ptr[rb].kind =? 'str_lit' and va_nodes[0].ptr[rb].aux =? 0 {va_host[0].update(s l 0 6);}
+    let rt=AWord(va_host[0].check(rb hint))
+    let rk=va_types[0].ptr[tu_prune(rt)].kind
+    let v=AWord(va_last[0])
+    va_nodes[0][s].b=int32<overflow='wrap'>(v)
+    if shift {
+        if rk not=? 'int_' {va_host[0].update(s l rt 8);}
+        if AWord(va_nodes[0].ptr[v].flags) & 256 not=? 0 {va_nodes[0][s].b=int32<overflow='wrap'>(va_host[0].coerce(v va_int_type[0]))}
+    } else {
+        if lk =? 'int_' and rk =? 'float_' {va_host[0].update(s l rt 9);}
+        va_nodes[0][s].b=int32<overflow='wrap'>(va_host[0].coerce(v l))
+    }
+    s
+}
 # (the commonest cases' tests are written out: a call costs more than they do)
 va_check=(s:AWord):>AWord=>$unsafe {
     let target=AWord(va_nodes[0].ptr[s].a)
@@ -164,13 +293,13 @@ va_check=(s:AWord):>AWord=>$unsafe {
     let lhs=AWord(va_nodes[0].ptr[s].a)
     let op=AWord(va_nodes[0].ptr[s].op)
     let k=va_nodes[0].ptr[lhs].kind
-    if k =? 'tuple' {return va_host[0].tuple(s)}
+    if k =? 'tuple' {return va_tuple(s)}
     if k =? 'field' or (k =? 'index' and (op not=? 47 or va_part(AWord(va_nodes[0].ptr[lhs].a)))) {
         let r=va_host[0].element(s)
         if r not=? 0 {return r}
     }
     if k =? 'index' {
-        let r=va_host[0].index(s)
+        let r=va_index(s)
         if r not=? 0 {return r}
     }
     # (assigning a narrowed field or global assigns the whole of it)
@@ -188,7 +317,7 @@ va_check=(s:AWord):>AWord=>$unsafe {
     lhs=va_last[0]
     va_nodes[0][s].a=int32<overflow='wrap'>(lhs)
     va_host[0].place(lhs)
-    let pos=va_nodes[0].ptr[s].pos
+    let pos=AWord(va_nodes[0].ptr[s].pos)
     # (dictionary selectors captured before the value, in Dewy; the variable written
     # through noted, for copies changed and never read)
     let lk=va_nodes[0].ptr[lhs].kind
@@ -204,7 +333,7 @@ va_check=(s:AWord):>AWord=>$unsafe {
         if pos >? 0 and f <? va_files[0].length and va_files[0].ptr[f].is_dewy {va_host[0].refine(s lt 4);}
     }
     if op =? 47 {return va_store(s lhs lt)}
-    va_host[0].compound(s lt)
+    va_compound(s lt)
 }
 # (growth's reading: in a loop, once a growth or decimal binding is live)
 va_assign=(s:AWord):>AWord=>$unsafe {

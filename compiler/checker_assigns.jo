@@ -7,9 +7,9 @@ use 'type_inference.dewy'
 struct CheckerAssignHost:
     begin: (int, int) -> int
     prelude: (int) -> int
-    tuple: (int) -> int
+    tuple: (int, int, int, int, int) -> int
     element: (int) -> int
-    index: (int) -> int
+    index: (int, int, int) -> int
     check: (int, int) -> int
     place: (int) -> void
     capture: (int, int, bool) -> void
@@ -17,11 +17,12 @@ struct CheckerAssignHost:
     value: (int, int, int) -> int
     write: (int, int, int, int) -> int
     coerce: (int, int) -> int
-    compound: (int, int) -> int
+    update: (int, int, int, int) -> int
     flow: (int, int) -> void
     wrap: (int, int, int) -> int
 struct CheckerAssignInput:
     nodes: *(Node[])
+    lists: *(i32[])
     types: *(TypeInfo[])
     structs: *(StructInfo[])
     files: *(SrcFile[])
@@ -40,8 +41,11 @@ struct CheckerAssignInput:
     fills: *(OptFill[])
     str_type: *int
     math_int_type: *int
+    int_type: *int
+    u64_type: *int
     host: *CheckerAssignHost
 va_nodes: *(Node[])
+va_lists: *(i32[])
 va_types: *(TypeInfo[])
 va_structs: *(StructInfo[])
 va_files: *(SrcFile[])
@@ -60,9 +64,12 @@ va_decimal_cached: *int
 va_fills: *(OptFill[])
 va_str_type: *int
 va_math_int_type: *int
+va_int_type: *int
+va_u64_type: *int
 va_host: *CheckerAssignHost
 checker_assigns_bind = (input: *CheckerAssignInput) -> int:
     va_nodes = input[0].nodes
+    va_lists = input[0].lists
     va_types = input[0].types
     va_structs = input[0].structs
     va_files = input[0].files
@@ -81,6 +88,8 @@ checker_assigns_bind = (input: *CheckerAssignInput) -> int:
     va_fills = input[0].fills
     va_str_type = input[0].str_type
     va_math_int_type = input[0].math_int_type
+    va_int_type = input[0].int_type
+    va_u64_type = input[0].u64_type
     va_host = input[0].host
     0
 va_kind = (t: int) -> TK: va_types[0][tu_prune(t)].kind
@@ -126,6 +135,91 @@ va_sourced = (lhs: int) -> bool:
         if va_nodes[0][p].kind == .index and va_nodes[0][p].sval != 0: return true
         p = int(va_nodes[0][p].a)
     false
+va_tuple = (s: int) -> int:
+    if va_nodes[0][s].op != 47: va_host[0].tuple(s, 0, 0, 0, 1)
+    t = va_host[0].tuple(s, 0, 0, 0, 3)
+    lhs = int(va_nodes[0][s].a)
+    n = int(va_nodes[0][lhs].nlist)
+    if va_types[0][t].kind != .tuple or int(va_types[0][t].nargs) != n: va_host[0].tuple(s, 0, t, 0, 4)
+    i = 0
+    loop i < n:
+        tp = int(va_lists[0][int(va_nodes[0][lhs].list) + i])
+        if va_nodes[0][tp].kind != .hole:
+            tt = va_host[0].check(tp, 0)
+            e = va_last[0]
+            va_lists[0][int(va_nodes[0][lhs].list) + i] = i32(e)
+            va_host[0].tuple(s, e, tt, 0, 5)
+            et = tu_targ(t, i)
+            if et != tt: va_host[0].tuple(s, tp, et, tt, 6)
+        i = i + 1
+    if va_refining[0]:
+        r = va_host[0].tuple(s, 0, t, 0, 7)
+        if r != 0: return r
+    va_nodes[0][s].aux = 1
+    i = 0
+    loop i < n:
+        target = int(va_lists[0][int(va_nodes[0][lhs].list) + i])
+        if va_nodes[0][target].kind != .hole and tu_targ(t, i) != int(va_nodes[0][target].type): return va_host[0].tuple(s, 0, t, 0, 8)
+        i = i + 1
+    s
+va_index = (s: int) -> int:
+    lhs = int(va_nodes[0][s].a)
+    bt = tu_prune(va_host[0].check(int(va_nodes[0][lhs].a), 0))
+    va_nodes[0][lhs].a = i32(va_last[0])
+    bk = va_types[0][bt].kind
+    pos = va_nodes[0][lhs].pos
+    if va_files[0][pos >> 40].is_dewy and (int(va_nodes[0][lhs].nlist) >= 2 or bk == .typeval): va_host[0].index(s, bt, 1)
+    range = int(va_nodes[0][lhs].b)
+    if range != 0 and va_nodes[0][range].kind == .range:
+        if bk == .array or bk == .fixed: return va_host[0].index(s, bt, 2)
+        if int(va_nodes[0][range].flags) & 32768 != 0: va_host[0].index(s, bt, 3)
+    if bk == .struct_: return va_host[0].index(s, bt, 4)
+    if (bk == .array or bk == .fixed) and range != 0:
+        rk = va_nodes[0][range].kind
+        if rk != .int_lit and rk != .range: return va_host[0].index(s, bt, 5)
+    0
+va_compound = (s: int, lt: int) -> int:
+    l = tu_prune(lt)
+    lk = va_types[0][l].kind
+    if lk == .refined: return va_host[0].update(s, lt, 0, 1)
+    if lk == .quantity and va_host[0].update(s, l, 0, 2) != 0: return s
+    if l == va_math_int_type[0]: return va_host[0].update(s, lt, 0, 5)
+    op = int(va_nodes[0][s].op)
+    broadcast = int(va_nodes[0][s].flags) & 16384 != 0
+    pos = va_nodes[0][s].pos
+    lhs = int(va_nodes[0][s].a)
+    if lk == .str_ or lk == .array or lk == .fixed:
+        pluseq = op == 48 and not broadcast
+        if lk == .str_ and pluseq: return va_host[0].update(s, l, 0, 7)
+        if pluseq and va_dewy_at(pos): va_host[0].update(s, l, 0, 3)
+        return va_host[0].update(s, lt, 0, 5)
+    if lk == .ptr and va_nodes[0][s].sval == 0 and not broadcast:
+        va_host[0].check(int(va_nodes[0][s].b), va_int_type[0])
+        va_nodes[0][s].b = i32(va_host[0].coerce(va_last[0], va_int_type[0]))
+        va_nodes[0][s].aux = 3
+        return s
+    lhk = va_nodes[0][lhs].kind
+    helper = va_nodes[0][s].sval != 0 or broadcast or (lk != .int_ and lk != .float_ and lk != .bool_) or lhk == .index or lhk == .field or (va_nodes[0][s].aux2 == 1 and lk == .bool_)
+    rb = int(va_nodes[0][s].b)
+    if not helper and lk == .int_:
+        if l == va_int_type[0] or l == va_u64_type[0]: helper = va_dewy_at(pos)
+        else: helper = va_host[0].update(s, l, 0, 4) != 0
+    if helper: return va_host[0].update(s, lt, 0, 5)
+    shift = op == 56 or op == 57
+    hint = l
+    if lk == .int_ and shift: hint = 0
+    if lk == .int_ and va_nodes[0][rb].kind == .str_lit and va_nodes[0][rb].aux == 0: va_host[0].update(s, l, 0, 6)
+    rt = va_host[0].check(rb, hint)
+    rk = va_types[0][tu_prune(rt)].kind
+    v = va_last[0]
+    va_nodes[0][s].b = i32(v)
+    if shift:
+        if rk != .int_: va_host[0].update(s, l, rt, 8)
+        if int(va_nodes[0][v].flags) & 256 != 0: va_nodes[0][s].b = i32(va_host[0].coerce(v, va_int_type[0]))
+    else:
+        if lk == .int_ and rk == .float_: va_host[0].update(s, l, rt, 9)
+        va_nodes[0][s].b = i32(va_host[0].coerce(v, l))
+    s
 va_check = (s: int) -> int:
     target = int(va_nodes[0][s].a)
     if va_nodes[0][target].kind == .ident or va_sourced(target):
@@ -134,12 +228,12 @@ va_check = (s: int) -> int:
     lhs = int(va_nodes[0][s].a)
     op = int(va_nodes[0][s].op)
     k = va_nodes[0][lhs].kind
-    if k == .tuple: return va_host[0].tuple(s)
+    if k == .tuple: return va_tuple(s)
     if k == .field or (k == .index and (op != 47 or va_part(int(va_nodes[0][lhs].a)))):
         r = va_host[0].element(s)
         if r != 0: return r
     if k == .index:
-        r = va_host[0].index(s)
+        r = va_index(s)
         if r != 0: return r
     if op == 47 and (va_nodes[0][lhs].kind != .ident or va_path_narrows[0] > 0): va_no_narrow_at[0] = lhs
     va_current[0] = s
@@ -164,7 +258,7 @@ va_check = (s: int) -> int:
         f = pos >> 40
         if pos > 0 and f < va_files[0].len() and va_files[0][f].is_dewy: va_host[0].refine(s, lt, 4)
     if op == 47: return va_store(s, lhs, lt)
-    va_host[0].compound(s, lt)
+    va_compound(s, lt)
 va_assign = (s: int) -> int:
     if va_watch[0].growth > 0 or va_decimal_cached[0] != 0:
         c = va_context[0]
