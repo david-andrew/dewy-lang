@@ -1,0 +1,88 @@
+# Frozen minor statement checkers extracted from check.jo.
+use 'node_store.dewy'
+use 'checker_state.dewy'
+use 'checker_exprstmts.dewy'
+struct CheckerStatementHost:
+    check: (int, int) -> int
+    coerce: (int, int) -> int
+    literal: (int) -> int
+    resolve: (int) -> int
+    clone: (int) -> int
+    bind: (int, int) -> void
+    truth: (int) -> bool
+    statement: (int) -> void
+    block: (int) -> void
+    mutable_result: (int) -> bool
+    error: (int) -> void
+struct CheckerStatementInput:
+    nodes: *(Node[])
+    lists: *(i32[])
+    globals: *(Global[])
+    contexts: *(FnCtx[])
+    context: *int
+    discarding: *bool
+    refining: *bool
+    last: *int
+    host: *CheckerStatementHost
+st_nodes: *(Node[])
+st_lists: *(i32[])
+st_globals: *(Global[])
+st_contexts: *(FnCtx[])
+st_context: *int
+st_discarding: *bool
+st_refining: *bool
+st_last: *int
+st_host: *CheckerStatementHost
+checker_statements_bind = (input: *CheckerStatementInput) -> int:
+    st_nodes = input[0].nodes
+    st_lists = input[0].lists
+    st_globals = input[0].globals
+    st_contexts = input[0].contexts
+    st_context = input[0].context
+    st_discarding = input[0].discarding
+    st_refining = input[0].refining
+    st_last = input[0].last
+    st_host = input[0].host
+    0
+st_empty = (s: int):
+    st_nodes[0][s].kind = .block
+    st_nodes[0][s].nlist = 0
+st_const = (s: int):
+    c = st_context[0]
+    m = 0
+    if c >= 0: m = int(st_contexts[0][c].mod)
+    t = 0
+    if st_nodes[0][s].a != 0: t = st_host[0].resolve(int(st_nodes[0][s].a))
+    value = st_host[0].clone(int(st_nodes[0][s].b))
+    et = st_host[0].check(value, t)
+    value = st_last[0]
+    if t != 0: st_host[0].coerce(value, t)
+    else if int(st_nodes[0][value].flags) & 256 != 0: t = st_host[0].literal(value)
+    else: t = et
+    name = st_nodes[0][s].name
+    st_globals[0].push(Global(name = name, type = i32(t), decl = 0, mod = i32(m), is_const = true, state = 2, init = st_nodes[0][s].b))
+    st_host[0].bind(int(name), st_globals[0].len() - 1)
+    st_empty(s)
+st_drop = (s: int):
+    e = st_nodes[0][s].b
+    st_nodes[0][s] = Node(kind = .exprstmt, pos = st_nodes[0][s].pos, a = e)
+    was = st_discarding[0]
+    st_discarding[0] = true
+    es_statement(s)
+    st_discarding[0] = was
+st_when = (s: int):
+    blk = int(st_nodes[0][s].c)
+    if st_host[0].truth(int(st_nodes[0][s].a)): blk = int(st_nodes[0][s].b)
+    if blk == 0:
+        st_empty(s)
+        return
+    loop i in [0..int(st_nodes[0][blk].nlist)): st_host[0].statement(int(st_lists[0][int(st_nodes[0][blk].list) + i]))
+    st_nodes[0][s].kind = .block
+    st_nodes[0][s].list = st_nodes[0][blk].list
+    st_nodes[0][s].nlist = st_nodes[0][blk].nlist
+    st_nodes[0][s].aux = 5
+st_defer = (s: int):
+    if st_refining[0] and st_host[0].mutable_result(int(st_contexts[0][st_context[0]].inst)): st_host[0].error(s)
+    d = int(st_nodes[0][s].a)
+    if st_nodes[0][d].kind == .block: st_host[0].block(d)
+    else: st_host[0].statement(d)

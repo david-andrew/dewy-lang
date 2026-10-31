@@ -1,3 +1,4 @@
+use 'checker_statements.dewy'
 use 'checker_exprstmts.dewy'
 use 'checker_returns.dewy'
 use 'checker_loops.dewy'
@@ -4612,30 +4613,9 @@ check_stmt = (s: int):
     # (a quantity constant ensure_global settled, used before its module's own code ran)
     if (k == .vardecl or k == .const_) and has_flag(s, NF_CHECKED): return
     if k == .vardecl: check_vardecl(s)
-    else if k == .const_:
-        g = Global(name = nodes[s].name, decl = 0, mod = i32(cur_mod()), is_const = true, state = 2)
-        t = 0
-        if nodes[s].a != 0: t = resolve_type(int(nodes[s].a))
-        cl = clone(int(nodes[s].b))
-        et = check_expr(cl, t)
-        cl = last_checked
-        if t != 0: cl = coerce(cl, t)
-        else if has_flag(cl, NF_LITERAL): t = lit_default(cl)
-        else: t = et
-        g.type = i32(t)
-        g.init = nodes[s].b
-        globals.push(g)
-        push_scope_sym(int(nodes[s].name), new_sym(int(nodes[s].name), .const_, globals.len() - 1, 0))
-        nodes[s].kind = .block
-        nodes[s].nlist = 0
-    else if k == .assign and nodes[int(nodes[s].a)].kind == .hole and nodes[s].op == i32(int(Tok.assign)):
-        # (_ = f(): the value made, and dropped on purpose)
-        e = int(nodes[s].b)
-        nodes[s] = Node(kind = .exprstmt, pos = nodes[s].pos, a = i32(e))
-        was_discarding = discarding
-        discarding = true
-        check_stmt(s)
-        discarding = was_discarding
+    else if k == .const_: st_const(s)
+    # (_ = f(): the value made, and dropped on purpose)
+    else if k == .assign and nodes[int(nodes[s].a)].kind == .hole and nodes[s].op == i32(int(Tok.assign)): st_drop(s)
     else if k == .assign and assign_declares(s, -1):
         assign_to_decl(s)
         check_vardecl(s)
@@ -4655,24 +4635,8 @@ check_stmt = (s: int):
     else if k == .for_: check_for(s)
     else if k == .return_: xt_return(s)
     else if k == .break_ or k == .continue_: xb_jump(s)
-    else if k == .defer_:
-        if refine_active and ref_mutable_result(int(ctxs[cx].inst)):
-            fatal(nodes[s].pos, "projected mutable postconditions with deferred cleanup are not yet supported")
-        d = int(nodes[s].a)
-        if nodes[d].kind == .block: check_block(d, 0, false)
-        else: check_stmt(d)
-    else if k == .when_:
-        blk = int(nodes[s].c)
-        if const_eval_bool(int(nodes[s].a)): blk = int(nodes[s].b)
-        if blk == 0:
-            nodes[s].kind = .block
-            nodes[s].nlist = 0
-            return
-        loop i in [0..nkids(blk)): check_stmt(kid(blk, i))
-        nodes[s].kind = .block
-        nodes[s].list = nodes[blk].list
-        nodes[s].nlist = nodes[blk].nlist
-        nodes[s].aux = 5
+    else if k == .defer_: st_defer(s)
+    else if k == .when_: st_when(s)
     else if k == .block: check_block(s, 0, false)
     else if k == .fn_ or k == .struct_ or k == .enum_ or k == .import_: fatal(nodes[s].pos, "declarations are only allowed at the top level")
     else if k == .test_ or k == .build_: pass
@@ -4695,6 +4659,19 @@ loop_error = (n: int, t: int, code: int):
 loop_host = CheckerLoopHost(check_expr, coerce, narrow_by, narrow_optional_source, new_local, loop_body, scope_reset, loop_error)
 loop_input = CheckerLoopInput(&nodes, &types, &ctxs, &cx, &check_scopes, &loop_serials, &loop_serial_next, &loop_labels, &narrow_jumps, &last_checked, &T_BOOL, &loop_host)
 loop_binding = checker_loops_bind(&loop_input)
+# Local constants, dropped values, `when` and `defer` run in checker_statements.dewy;
+# these are its services.
+statement_bind = (name: int, g: int): push_scope_sym(name, new_sym(name, .const_, g, 0))
+statement_check = (s: int):
+    check_stmt(s)
+    return
+statement_block = (b: int):
+    check_block(b, 0, false)
+    return
+statement_error = (s: int): fatal(nodes[s].pos, "projected mutable postconditions with deferred cleanup are not yet supported")
+statement_host = CheckerStatementHost(check_expr, coerce, lit_default, resolve_type, clone, statement_bind, const_eval_bool, statement_check, statement_block, ref_mutable_result, statement_error)
+statement_input = CheckerStatementInput(&nodes, &lists, &globals, &ctxs, &cx, &discarding, &refine_active, &last_checked, &statement_host)
+statement_binding = checker_statements_bind(&statement_input)
 # Expression statements run in checker_exprstmts.dewy; these are its services.
 # (`:type name` at the REPL, for a function: its versions as written, with their notes)
 exprstmt_repl = (e: int):

@@ -1,0 +1,108 @@
+$runtime_checks
+from p"node_store.dewy" import Node
+from p"checker_state.dewy" import (Global FnCtx)
+from p"checker_exprstmts.dewy" import es_statement
+# Statements without a checker of their own: a local `const` (checked once, kept as
+# a constant global and bound in scope), `_ = value` (a value dropped on purpose),
+# `when` (the compile-time branch's statements in place) and `defer` (its statement
+# or block, checked where it is written). O(1) plus the statements and values they
+# hold; those, bindings and compile-time evaluation are host services that may grow
+# every arena, so nodes and globals are reread by ID.
+SWord:type=int64<overflow='wrap'>
+CheckerStatementHost:type=[
+    check:<(node:int64 expected:int64):>int64>
+    coerce:<(node:int64 type_id:int64):>int64>
+    literal:<(node:int64):>int64>
+    resolve:<(node:int64):>int64>
+    clone:<(node:int64):>int64>
+    bind:<(name:int64 global:int64):>void>
+    truth:<(node:int64):>bool>
+    statement:<(node:int64):>void>
+    block:<(node:int64):>void>
+    mutable_result:<(inst:int64):>bool>
+    error:<(node:int64):>void>
+]
+CheckerStatementInput:type=[
+    nodes:ptr<array<Node>>
+    lists:ptr<array<int32>>
+    globals:ptr<array<Global>>
+    contexts:ptr<array<FnCtx>>
+    context:ptr<int64>
+    discarding:ptr<bool>
+    refining:ptr<bool>
+    last:ptr<int64>
+    host:ptr<CheckerStatementHost>
+]
+let st_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let st_lists:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
+let st_globals:ptr<array<Global>>=$unsafe (uint64(0) as ptr<array<Global>>)
+let st_contexts:ptr<array<FnCtx>>=$unsafe (uint64(0) as ptr<array<FnCtx>>)
+let st_context:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let st_discarding:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+let st_refining:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+let st_last:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let st_host:ptr<CheckerStatementHost>=$unsafe (uint64(0) as ptr<CheckerStatementHost>)
+checker_statements_bind=(input:ptr<CheckerStatementInput>):>SWord=>$unsafe {
+    st_nodes=input[0].nodes
+    st_lists=input[0].lists
+    st_globals=input[0].globals
+    st_contexts=input[0].contexts
+    st_context=input[0].context
+    st_discarding=input[0].discarding
+    st_refining=input[0].refining
+    st_last=input[0].last
+    st_host=input[0].host
+    0
+}
+# Becomes an empty block.
+st_empty=(s:SWord):>void=>$unsafe {
+    st_nodes[0][s].kind='block'
+    st_nodes[0][s].nlist=0
+}
+# A local `const name:T = value` (NF_LITERAL 256).
+st_const=(s:SWord):>void=>$unsafe {
+    let c=st_context[0]
+    let m:SWord=0
+    if c >=? 0 {m=SWord(st_contexts[0].ptr[c].mod)}
+    let t:SWord=0
+    if st_nodes[0].ptr[s].a not=? 0 {t=st_host[0].resolve(SWord(st_nodes[0].ptr[s].a))}
+    let value=st_host[0].clone(SWord(st_nodes[0].ptr[s].b))
+    let et=st_host[0].check(value t)
+    value=st_last[0]
+    if t not=? 0 {st_host[0].coerce(value t);}
+    else if SWord(st_nodes[0].ptr[value].flags) & 256 not=? 0 {t=st_host[0].literal(value)}
+    else {t=et}
+    let name=st_nodes[0].ptr[s].name
+    st_globals[0].push(Global[name=name type=int32<overflow='wrap'>(t) decl=0 mod=int32<overflow='wrap'>(m) is_const=true state=2 init=st_nodes[0].ptr[s].b])
+    st_host[0].bind(SWord(name) st_globals[0].length - 1)
+    st_empty(s)
+}
+# `_ = value`: the value made and dropped on purpose (no warning).
+st_drop=(s:SWord):>void=>$unsafe {
+    let e=st_nodes[0].ptr[s].b
+    st_nodes[0][s]=Node[kind='exprstmt' pos=st_nodes[0].ptr[s].pos a=e]
+    let was=st_discarding[0]
+    st_discarding[0]=true
+    es_statement(s)
+    st_discarding[0]=was
+}
+# `when cond {...} else {...}`: the branch the condition picks at compile time, its
+# statements checked and spliced in place (aux 5: a transparent block).
+st_when=(s:SWord):>void=>$unsafe {
+    let blk=SWord(st_nodes[0].ptr[s].c)
+    if st_host[0].truth(SWord(st_nodes[0].ptr[s].a)) {blk=SWord(st_nodes[0].ptr[s].b)}
+    if blk =? 0 {
+        st_empty(s)
+        return
+    }
+    loop i in [0..SWord(st_nodes[0].ptr[blk].nlist)) {st_host[0].statement(SWord(st_lists[0][SWord(st_nodes[0].ptr[blk].list) + i]))}
+    st_nodes[0][s].kind='block'
+    st_nodes[0][s].list=st_nodes[0].ptr[blk].list
+    st_nodes[0][s].nlist=st_nodes[0].ptr[blk].nlist
+    st_nodes[0][s].aux=5
+}
+st_defer=(s:SWord):>void=>$unsafe {
+    if st_refining[0] and st_host[0].mutable_result(SWord(st_contexts[0].ptr[st_context[0]].inst)) {st_host[0].error(s)}
+    let d=SWord(st_nodes[0].ptr[s].a)
+    if st_nodes[0].ptr[d].kind =? 'block' {st_host[0].block(d)} else {st_host[0].statement(d)}
+}
