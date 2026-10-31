@@ -1,3 +1,4 @@
+use 'checker_vardecls.dewy'
 use 'checker_for_loops.dewy'
 use 'checker_statements.dewy'
 use 'checker_exprstmts.dewy'
@@ -4315,15 +4316,21 @@ global_place_decl = (d: int):
     nm = name_of(int(nodes[d].name))
     fatal(nodes[init].pos, "'{nm}' is declared at the top level, so it would be a global, and a global cannot be a place (it would hold a copy): declare the place inside a function or a block (`main = () => \{ let {nm} = @... }`), or copy the value without `@`")
 
-check_vardecl = (s: int):
-    # (a task's result is kept by `let name = spawn ...` written directly in its group's block,
-    # which dewy_nodes.jo dw_task_group renames; elsewhere the binding would hold its private handle)
-    b = int(nodes[s].b)
-    if b > 0 and nodes[b].kind == .call and nodes[b].aux2 == 17 and not starts_with(name_of(int(nodes[s].name)), "$task"): spawn_value_error(nodes[b].pos)
-    if has_flag(s, NF_SOA):
+check_vardecl = (s: int): vd_decl(s)
+# Declarations run in checker_vardecls.dewy; these are its services.
+# (the other forms: 1 a spawn's handle, 2 a soa element, 3 an element alias, 4 a lent place,
+# 5 a local place, 6 a shaped value, 7 a pattern, 8 a global; 9: whether definite
+# assignment follows a `let x:T` without a value)
+decl_form = (s: int, code: int) -> bool:
+    if code == 1:
+        # (a task's result is kept by `let name = spawn ...` written directly in its group's block,
+        # which dewy_nodes.jo dw_task_group renames; elsewhere the binding would hold its private handle)
+        if not starts_with(name_of(int(nodes[s].name)), "$task"): spawn_value_error(nodes[int(nodes[s].b)].pos)
+        return false
+    if code == 2:
         soa_alias(s)
-        return
-    if has_flag(s, NF_ALIASDECL):
+        return true
+    if code == 3:
         # (the element of a `mut x in xs` in a combined loop: a name for xs[k] itself)
         arr0 = 0
         if nodes[int(nodes[s].b)].kind == .index: arr0 = int(nodes[int(nodes[s].b)].a)
@@ -4336,16 +4343,18 @@ check_vardecl = (s: int):
         locals[l].alias = i32(ix)
         nodes[s].kind = .block
         nodes[s].nlist = 0
-        return
-    if place_let_decl(s): return
-    if local_place_decl(s): return
-    shape_checked_value(s)
-    if nodes[s].nlist > 0:
+        return true
+    if code == 4: return place_let_decl(s)
+    if code == 5: return local_place_decl(s)
+    if code == 6:
+        shape_checked_value(s)
+        return false
+    if code == 7:
         if has_flag(s, NF_GLOBAL):
             loop binding in binding_leaves(kids(s)):
                 if nodes[binding].kind != .hole:
                     ensure_global(int(nodes[binding].sym), nodes[s].pos, true)
-                    return
+                    return true
             # With only discards, no global initializer checks the source for us.
         t = check_binding_input(s)
         unpacked = unpack_binding(int(nodes[s].b), t, kids(s), nodes[s].pos)
@@ -4362,86 +4371,69 @@ check_vardecl = (s: int):
             if nodes[s].aux2 == 1: locals[l].flags = i32(int(locals[l].flags) | LF_VALUEPARAM)
             nodes[id].sym = i32(l)
         nodes[s].type = i32(t)
-        return
-    if has_flag(s, NF_GLOBAL):
+        return true
+    if code == 8:
         ensure_global(int(nodes[s].sym), nodes[s].pos, true)
-        return
-    t = 0
-    if nodes[s].a != 0:
-        previous_self = refine_bindings.self
-        refine_bindings.self = int(nodes[s].name)
-        t = resolve_binding_type(int(nodes[s].a))
-        refine_bindings.self = previous_self
-    no_value = nodes[s].b == 0
-    literal_init = false
-    if refine_active and types[prune(t)].kind == .refined and nodes[s].b == 0: nodes[s].b = i32(struct_default(t, nodes[s].pos))
+        return true
     nm = name_of(int(nodes[s].name))
-    # (Dewy's `let x:T` without a value: given one on every path before it is read)
-    unset = no_value and t != 0 and dewy_at(nodes[s].pos) and len(nm) > 0 and nm[0] != '$' and nm[0] != '_' and not has_flag(s, NF_RDONLY)
-    # (x: T, a struct with default field values: it starts with them, as T() would)
-    if nodes[s].b == 0 and t != 0: nodes[s].b = i32(struct_default(t, nodes[s].pos))
-    tk_unit = 0
-    if nodes[s].b != 0:
-        growth_decl_before(s)
-        if t == 0 and dewy_at(nodes[s].pos): tk_unit = tk_literal_unit(int(nodes[s].b))
-        literal = if t != 0 and is_union(t) and dewy_at(nodes[s].pos): sibling_syntax_type(int(nodes[s].b)) else: 0
-        et = values_init(int(nodes[s].b), t)
-        nodes[s].b = i32(last_checked)
-        if t != 0:
-            # (`let s:Circle|Square = Circle[...]`: which member it holds is followed)
-            if literal != 0 or is_union(t) and tkind(et) == .struct_ and dewy_at(nodes[s].pos): sibling_annotated(s, t, if literal != 0: literal else: et)
-            nodes[s].b = i32(coerce(int(nodes[s].b), t))
-        else:
-            t = et
-            if tkind(t) == .tuple and sibling_literals.has(int(nodes[s].b)): t = sibling_binding(s, t)
-            # (`let s = Circle[...]` that the block later gives a Square: their union, followed)
-            else if tkind(t) == .struct_ and dewy_at(nodes[s].pos): t = sibling_scalar(s, t)
-            if has_flag(int(nodes[s].b), NF_LITERAL):
-                t = decimal_binding_type(nodes[s].pos, lit_default(int(nodes[s].b)))
-                literal_init = true
-                nodes[s].b = i32(coerce(int(nodes[s].b), t))
-            if tkind(t) == .none_lit: fatal(nodes[s].pos, "cannot infer the type of '{nm}' from 'none'; add a type: {nm}: T? = none")
-    if effects_active and nodes[s].a == 0 and type_has_fn(t):
-        storage = effect_storage_type(t)
-        if storage != t:
-            wrap_conv(int(nodes[s].b), .none_, storage)
-            t = storage
-    # (a value parameter's binding keeps its integer refinement: `s:-1|1` stays one)
-    if nodes[s].aux2 == 1 and nodes[s].a == 0 and refine_active and nodes[s].b != 0:
-        v = int(nodes[s].b)
-        if nodes[v].kind == .ident and nodes[v].aux == i32(int(SK.local)):
-            pt = int(locals[int(nodes[v].sym)].type)
-            known, _ = int_intervals(pt)
-            if int(locals[int(nodes[v].sym)].flags) & LF_PARAM != 0 and tkind(pt) == .refined and (known or str_set_of(pt) != 0):
-                t = pt
-                nodes[s].b = i32(coerce(v, t))
-    if t == 0: fatal(nodes[s].pos, "variable needs a type or a value")
-    if tk_unit != 0: t = temperature_binding(s, t, tk_unit, false)
-    tk = tkind(t)
-    if tk == .void_:
-        never_cascade(nodes[s].pos, t)
-        fatal(nodes[s].pos, "cannot assign a value with no type (void) to '{nm}'{void_rec_hint(int(nodes[s].b))}")
-    if tk == .null_: fatal(nodes[s].pos, "`null` is for C's pointers; a value that may be missing is `none`, with its type written: {jd(nodes[s].pos, "`{nm}: Enemy? = none`", "`let {nm}:Enemy? = none`")}")
-    if tk == .typeval or tk == .module: fatal(nodes[s].pos, "'{nm}' cannot hold a type or module (a value of a type is made by calling it: `T()`)")
-    l = new_local(int(nodes[s].name), t, nodes[s].pos)
-    if sibling_pending.len() > 0: sibling_establish(l)
-    if sibling_flow_next != 0: sibling_flow_l = l
-    if tk_unit != 0: tk_bindings[l] = s
-    if literal_init: decimal_local(l, nodes[s].pos, t)
-    growth_decl_after(s, l, t)
-    if nodes[s].b != 0 and quat_nodes.has(int(nodes[s].b)): quat_locals[l] = true
-    locals[l].flags = i32(LF_DECL)
-    if t == T_STR and nodes[s].a == 0 and dewy_at(nodes[s].pos): string_domain_declare(l, int(nodes[s].b))
-    else if t == T_MATH_INT and nodes[s].a == 0 and dewy_at(nodes[s].pos): int_domain_declare(l, int(nodes[s].b))
-    if has_flag(s, NF_RDONLY):
-        locals[l].flags = i32(LF_DECL | LF_CONST | LF_QUIET)
-        locals[l].const_init = nodes[s].b
-        if nodes[s].b != 0 and files[pos_file(nodes[s].pos)].is_dewy: const_view_declare(l, int(nodes[s].b))
-    if has_flag(s, NF_LOOPCOUNT): locals[l].flags = i32(LF_DECL | LF_QUIET)
-    if nodes[s].aux2 == 1: locals[l].flags = i32(int(locals[l].flags) | LF_VALUEPARAM)
-    nodes[s].sym = i32(l)
-    if unset: da_record(s)
-    if ide_on and nodes[s].a == 0: ide_hint_local(s, l)
+    len(nm) > 0 and nm[0] != '$' and nm[0] != '_'
+decl_binding_type = (s: int) -> int:
+    previous_self = refine_bindings.self
+    refine_bindings.self = int(nodes[s].name)
+    t = resolve_binding_type(int(nodes[s].a))
+    refine_bindings.self = previous_self
+    t
+decl_values = (e: int, expected: int) -> int: values_init(e, expected)
+decl_annotated = (s: int, t: int, member: int):
+    sibling_annotated(s, t, member)
+    return
+# (1: `let shapes = [Circle[...] Square[...]]`, 2: `let s = Circle[...]`, later given a Square)
+decl_sibling = (s: int, t: int, code: int) -> int: if code == 1: sibling_binding(s, t) else: sibling_scalar(s, t)
+decl_literal = (s: int) -> int:
+    t = decimal_binding_type(nodes[s].pos, lit_default(int(nodes[s].b)))
+    nodes[s].b = i32(coerce(int(nodes[s].b), t))
+    t
+decl_storage = (s: int, t: int) -> int:
+    if not type_has_fn(t): return t
+    storage = effect_storage_type(t)
+    if storage != t: wrap_conv(int(nodes[s].b), .none_, storage)
+    storage
+decl_value_param = (s: int, t: int) -> int:
+    v = int(nodes[s].b)
+    if nodes[v].kind == .ident and nodes[v].aux == i32(int(SK.local)):
+        pt = int(locals[int(nodes[v].sym)].type)
+        known, _ = int_intervals(pt)
+        if int(locals[int(nodes[v].sym)].flags) & LF_PARAM != 0 and tkind(pt) == .refined and (known or str_set_of(pt) != 0):
+            nodes[s].b = i32(coerce(v, pt))
+            return pt
+    t
+decl_temperature = (s: int, t: int, unit: int) -> int: temperature_binding(s, t, unit, false)
+# (1 growth's reading of the value; 3 a sibling literal's known contents, 4 a decimal
+# literal's binding, 5 growth's binding, 6 a text domain, 7 an integer domain, 8 a
+# constant's view, 9 definite assignment, 10 an editor's type hint)
+decl_after = (s: int, l: int, t: int, code: int):
+    if code == 1: growth_decl_before(s)
+    else if code == 3: sibling_establish(l)
+    else if code == 4: decimal_local(l, nodes[s].pos, t)
+    else if code == 5: growth_decl_after(s, l, t)
+    else if code == 6: string_domain_declare(l, int(nodes[s].b))
+    else if code == 7: int_domain_declare(l, int(nodes[s].b))
+    else if code == 8: const_view_declare(l, int(nodes[s].b))
+    else if code == 9: da_record(s)
+    else if code == 10: ide_hint_local(s, l)
+decl_error = (s: int, t: int, code: int):
+    nm = name_of(int(nodes[s].name))
+    pos = nodes[s].pos
+    if code == 1: fatal(pos, "cannot infer the type of '{nm}' from 'none'; add a type: {nm}: T? = none")
+    if code == 2: fatal(pos, "variable needs a type or a value")
+    if code == 3:
+        never_cascade(pos, t)
+        fatal(pos, "cannot assign a value with no type (void) to '{nm}'{void_rec_hint(int(nodes[s].b))}")
+    if code == 4: fatal(pos, "`null` is for C's pointers; a value that may be missing is `none`, with its type written: {jd(pos, "`{nm}: Enemy? = none`", "`let {nm}:Enemy? = none`")}")
+    fatal(pos, "'{nm}' cannot hold a type or module (a value of a type is made by calling it: `T()`)")
+decl_host = CheckerDeclHost(decl_form, decl_binding_type, struct_default, sibling_syntax_type, decl_values, decl_annotated, coerce, decl_sibling, decl_literal, decl_storage, decl_value_param, decl_temperature, new_local, decl_after, decl_error)
+decl_input = CheckerDeclInput(&nodes, &lists, &types, &structs, &files, &locals, &ctxs, &cx, &last_checked, &refine_active, &effects_active, &ide_on, &sibling_literals, &sibling_pending, &sibling_block, &sibling_index, &sibling_flow_next, &sibling_flow_l, &nominal_parent, &quat_nodes, &quat_locals, &tk_bindings, &decimal_adapted, &growth_inferred, &decimal_cached_type, &growth_pending_n, &growth_start_whole, &T_STR, &T_MATH_INT, &decl_host)
+decl_binding = checker_vardecls_bind(&decl_input)
 
 # `return @a`: a place goes only to an `@` parameter or a local place binding;
 # a function gives back a value. (`@f` of a function is its handle, a value.)

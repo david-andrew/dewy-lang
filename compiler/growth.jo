@@ -48,6 +48,7 @@ struct GrowthTemp:
 growth_inferred: {int: bool} = {}       # unannotated locals whose type is rational (true: a whole start)
 growth_temps: {int: GrowthTemp[]} = {}  # locals declared in a loop from carried bindings
 growth_pending_temps: GrowthTemp[]      # (check_vardecl, between its initializer and its local)
+growth_pending_n = 0                    # (... its length, which checker_vardecls reads)
 growth_pending: (int, int)[]            # (position, declaration that may still adapt to float64)
 growth_seen: {int: bool} = {}
 
@@ -225,6 +226,7 @@ growth_start_whole = false
 
 growth_decl_before = (s: int):
     growth_pending_temps = []
+    growth_pending_n = 0
     growth_start_whole = false
     if nodes[s].b == 0 or nodes[s].a != 0: return
     init = int(nodes[s].b)
@@ -238,12 +240,14 @@ growth_decl_before = (s: int):
     loop key in keys:
         g = growth_expr(int(nodes[s].b), key)
         if growth_dep(g): growth_pending_temps.push(GrowthTemp(key, g))
+    growth_pending_n = growth_pending_temps.len()
 
 # ... and once its local l exists, of type t
 growth_decl_after = (s: int, l: int, t: int):
     if growth_pending_temps.len() > 0:
         growth_temps[l] = growth_pending_temps
         growth_pending_temps = []
+        growth_pending_n = 0
     if nodes[s].a == 0 and tkind(t) == .struct_ and bundled_rational_type(t) and dewy_at(nodes[s].pos) and not has_flag(s, NF_RDONLY): growth_inferred[l] = growth_start_whole
 
 # the carried bindings (and temporaries made from them) that expression n reads
