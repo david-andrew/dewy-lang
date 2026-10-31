@@ -54,6 +54,7 @@ def test_case_environment_hides_the_display(monkeypatch):
     assert env['DISPLAY'] == '' and env['WAYLAND_DISPLAY'] == '' and 'WAYLAND_SOCKET' not in env
 
 
+@pytest.mark.skipif(platform.system() != 'Linux', reason='other hosts open windows without display variables')
 def test_core_case_run_hides_the_display(compiler, monkeypatch):
     # A display in the caller's environment is emptied by tools.core itself, and the
     # golden game case sees none (its expected output says so).
