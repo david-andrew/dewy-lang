@@ -1,0 +1,134 @@
+# Frozen identifier-read checker extracted from expr.jo.
+use 'node_store.dewy'
+use 'checker_types.dewy'
+use 'checker_state.dewy'
+use 'type_inference.dewy'
+use 'checker_literals.dewy'
+struct CheckerIdentHost:
+    ide_ref: (int, int) -> void
+    narrowed: (int) -> int
+    capture: (int, bool, int) -> int
+    const_view: (int, int) -> void
+    ensure_global: (int, int) -> void
+    quantity: (int, int, int) -> int
+    early_use: (int, int) -> void
+    decimal_use: (int) -> void
+    path_alias: (int, int) -> int
+    constant: (int, int, int) -> int
+    function: (int, int, bool) -> int
+    type_value: (int, int, int) -> int
+    bare_value: (int, int, bool, bool, int) -> int
+    type_use: (int, int, bool, int) -> int
+    error: (int, int) -> void
+struct CheckerIdentInput:
+    nodes: *(Node[])
+    types: *(TypeInfo[])
+    locals: *(Local[])
+    globals: *(Global[])
+    fns: *(FnInst[])
+    contexts: *(FnCtx[])
+    context: *int
+    callee: *int
+    assign_root: *int
+    ide: *bool
+    global_read: *(bool[])
+    path_narrows: *int
+    no_narrow_at: *int
+    test_mode: *bool
+    host: *CheckerIdentHost
+xj_nodes: *(Node[])
+xj_types: *(TypeInfo[])
+xj_locals: *(Local[])
+xj_globals: *(Global[])
+xj_fns: *(FnInst[])
+xj_contexts: *(FnCtx[])
+xj_context: *int
+xj_callee: *int
+xj_assign_root: *int
+xj_ide: *bool
+xj_global_read: *(bool[])
+xj_path_narrows: *int
+xj_no_narrow_at: *int
+xj_test_mode: *bool
+xj_host: *CheckerIdentHost
+checker_idents_bind = (input: *CheckerIdentInput) -> int:
+    xj_nodes = input[0].nodes
+    xj_types = input[0].types
+    xj_locals = input[0].locals
+    xj_globals = input[0].globals
+    xj_fns = input[0].fns
+    xj_contexts = input[0].contexts
+    xj_context = input[0].context
+    xj_callee = input[0].callee
+    xj_assign_root = input[0].assign_root
+    xj_ide = input[0].ide
+    xj_global_read = input[0].global_read
+    xj_path_narrows = input[0].path_narrows
+    xj_no_narrow_at = input[0].no_narrow_at
+    xj_test_mode = input[0].test_mode
+    xj_host = input[0].host
+    0
+xj_fn_type = (t: int) -> bool:
+    k = xj_types[0][tu_prune(t)].kind
+    k == .fn_ or k == .cfn or k == .polyfn or k == .callable
+xj_read = (l: int): xj_locals[0][l].flags = xj_locals[0][l].flags | i32(32768)
+xj_local = (n: int, l00: int, views: bool) -> int:
+    l0 = l00
+    loop int(xj_locals[0][l0].flags) & 2048 != 0: l0 = xj_host[0].narrowed(l0)
+    c = xj_context[0]
+    inst = int(xj_contexts[0][c].inst)
+    l = l0
+    if int(xj_locals[0][l0].owner) != inst:
+        if xj_host[0].narrowed(l0) != 0: l = xj_host[0].capture(l0, true, xj_nodes[0][n].pos)
+        else if xj_contexts[0][c].parent >= 0: l = xj_host[0].capture(l0, false, xj_nodes[0][n].pos)
+    if n != xj_assign_root[0]:
+        xj_read(l)
+        xj_read(l0)
+        if int(xj_locals[0][l0].flags) & 8 != 0:
+            u = xj_host[0].narrowed(l0)
+            if u != 0: xj_read(u)
+        if views: xj_host[0].const_view(l0, xj_nodes[0][n].pos)
+    xj_nodes[0][n].sym = i32(l)
+    int(xj_locals[0][l].type)
+struct CheckerIdentResult:
+    type: int
+    bypass: bool
+xj_global = (n: int, g: int, expected: int, decimals: bool, bypass: mut bool) -> int:
+    pos = xj_nodes[0][n].pos
+    if xj_globals[0][g].state != 2: xj_host[0].ensure_global(g, pos)
+    c = xj_context[0]
+    if c < 0 or xj_fns[0][int(xj_contexts[0][c].inst)].kind != 4 or int(xj_contexts[0][c].mod) != int(xj_globals[0][g].mod): xj_globals[0][g].fn_accessed = true
+    if xj_globals[0][g].is_const and xj_types[0][int(tu_prune(int(xj_globals[0][g].type)))].kind == .quantity:
+        bypass = true
+        return xj_host[0].quantity(n, g, expected)
+    if n != xj_assign_root[0]:
+        loop xj_global_read[0].len() <= g: xj_global_read[0].push(false)
+        xj_global_read[0][g] = true
+    d = int(xj_globals[0][g].decl)
+    if d != 0 and xj_nodes[0][d].pos > pos and xj_contexts[0][c].parent < 0 and xj_fns[0][int(xj_contexts[0][c].inst)].kind == 4 and not xj_test_mode[0]: xj_host[0].early_use(n, g)
+    xj_nodes[0][n].sym = i32(g)
+    t = int(xj_globals[0][g].type)
+    if decimals: xj_host[0].decimal_use(g)
+    if xj_path_narrows[0] > 0 and n != xj_no_narrow_at[0]: t = xj_host[0].path_alias(n, t)
+    t
+xj_ident = (n: int, expected: int, kind: int, ref: int, s: int, flags: int) -> CheckerIdentResult:
+    is_callee = n == xj_callee[0]
+    if xj_ide[0] and kind != 3: xj_host[0].ide_ref(n, s)
+    xj_nodes[0][n].aux = i32(kind)
+    t = 0
+    if kind == 1: t = xj_local(n, ref, flags & 1 != 0)
+    else if kind == 2:
+        bypass = false
+        t = xj_global(n, ref, expected, flags & 2 != 0, mut bypass)
+        if bypass: return CheckerIdentResult(t, true)
+    else if kind == 6: return CheckerIdentResult(xj_host[0].constant(n, ref, expected), true)
+    else if kind == 3: return CheckerIdentResult(xj_host[0].function(n, expected, is_callee), true)
+    else if kind == 4 or kind == 5 or kind == 10 or kind == 8 or kind == 7: t = xj_host[0].type_value(n, kind, s)
+    else: xj_host[0].error(n, kind)
+    if (kind == 1 or kind == 2) and xj_fn_type(t):
+        bare = xj_host[0].bare_value(n, t, kind == 1, is_callee, expected)
+        if bare >= 0: return CheckerIdentResult(bare, true)
+    if xj_types[0][int(tu_prune(t))].kind == .typeval:
+        used = xj_host[0].type_use(n, t, is_callee, expected)
+        if used >= 0: return CheckerIdentResult(used, true)
+    CheckerIdentResult(int(xl_finish(n, t, expected)), false)

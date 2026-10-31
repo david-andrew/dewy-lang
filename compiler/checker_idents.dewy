@@ -1,0 +1,165 @@
+$runtime_checks
+from p"node_store.dewy" import Node
+from p"checker_types.dewy" import (TypeInfo TK)
+from p"checker_state.dewy" import (Local Global FnInst FnCtx)
+from p"type_inference.dewy" import tu_prune
+from p"checker_literals.dewy" import (xl_expected xl_finish)
+# A name read as a value, once its binding is found: a local (narrowed, captured and
+# marked read), a global (initialized on demand, its first-use order and narrowed
+# paths), a constant, a function, a type or a module; then bare function values and
+# type names standing for their construction. A local read in its own function, the
+# common case, makes no host request. Work is O(1) plus demanded semantic work; host
+# calls may grow every arena, so records are reread by ID.
+XJWord:type=int64<overflow='wrap'>
+CheckerIdentHost:type=[
+    ide_ref:<(node:int64 symbol:int64):>void>
+    narrowed:<(local:int64):>int64>
+    capture:<(local:int64 narrowed:bool pos:int64):>int64>
+    const_view:<(local:int64 pos:int64):>void>
+    ensure_global:<(global:int64 pos:int64):>void>
+    quantity:<(node:int64 global:int64 expected:int64):>int64>
+    early_use:<(node:int64 global:int64):>void>
+    decimal_use:<(global:int64):>void>
+    path_alias:<(node:int64 type_id:int64):>int64>
+    constant:<(node:int64 global:int64 expected:int64):>int64>
+    function:<(node:int64 expected:int64 callee:bool):>int64>
+    type_value:<(node:int64 kind:int64 symbol:int64):>int64>
+    bare_value:<(node:int64 type_id:int64 local:bool callee:bool expected:int64):>int64>
+    type_use:<(node:int64 type_id:int64 callee:bool expected:int64):>int64>
+    error:<(node:int64 kind:int64):>void>
+]
+CheckerIdentInput:type=[
+    nodes:ptr<array<Node>>
+    types:ptr<array<TypeInfo>>
+    locals:ptr<array<Local>>
+    globals:ptr<array<Global>>
+    fns:ptr<array<FnInst>>
+    contexts:ptr<array<FnCtx>>
+    context:ptr<int64>
+    callee:ptr<int64>
+    assign_root:ptr<int64>
+    ide:ptr<bool>
+    global_read:ptr<array<bool>>
+    path_narrows:ptr<int64>
+    no_narrow_at:ptr<int64>
+    test_mode:ptr<bool>
+    host:ptr<CheckerIdentHost>
+]
+let xj_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let xj_types:ptr<array<TypeInfo>>=$unsafe (uint64(0) as ptr<array<TypeInfo>>)
+let xj_locals:ptr<array<Local>>=$unsafe (uint64(0) as ptr<array<Local>>)
+let xj_globals:ptr<array<Global>>=$unsafe (uint64(0) as ptr<array<Global>>)
+let xj_fns:ptr<array<FnInst>>=$unsafe (uint64(0) as ptr<array<FnInst>>)
+let xj_contexts:ptr<array<FnCtx>>=$unsafe (uint64(0) as ptr<array<FnCtx>>)
+let xj_context:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xj_callee:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xj_assign_root:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xj_ide:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+let xj_global_read:ptr<array<bool>>=$unsafe (uint64(0) as ptr<array<bool>>)
+let xj_path_narrows:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xj_no_narrow_at:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xj_test_mode:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+let xj_host:ptr<CheckerIdentHost>=$unsafe (uint64(0) as ptr<CheckerIdentHost>)
+checker_idents_bind=(input:ptr<CheckerIdentInput>):>XJWord=>$unsafe {
+    xj_nodes=input[0].nodes
+    xj_types=input[0].types
+    xj_locals=input[0].locals
+    xj_globals=input[0].globals
+    xj_fns=input[0].fns
+    xj_contexts=input[0].contexts
+    xj_context=input[0].context
+    xj_callee=input[0].callee
+    xj_assign_root=input[0].assign_root
+    xj_ide=input[0].ide
+    xj_global_read=input[0].global_read
+    xj_path_narrows=input[0].path_narrows
+    xj_no_narrow_at=input[0].no_narrow_at
+    xj_test_mode=input[0].test_mode
+    xj_host=input[0].host
+    0
+}
+xj_fn_type=(t:XJWord):>bool=>$unsafe {
+    let k=xj_types[0].ptr[tu_prune(t)].kind
+    k =? 'fn_' or k =? 'cfn' or k =? 'polyfn' or k =? 'callable'
+}
+xj_read=(l:XJWord):>void=>$unsafe {xj_locals[0][l].flags=xj_locals[0].ptr[l].flags | 32768}
+# A local read: the variable itself when assigned another type after narrowing, the
+# enclosing function's when captured, and marked read (LF_UNNARROWED 2048, LF_ALIAS 8,
+# LF_READ 32768).
+xj_local=(n:XJWord l00:XJWord views:bool):>XJWord=>$unsafe {
+    let l0=l00
+    loop XJWord(xj_locals[0].ptr[l0].flags) & 2048 not=? 0 {l0=xj_host[0].narrowed(l0)}
+    let c=xj_context[0]
+    let inst=XJWord(xj_contexts[0].ptr[c].inst)
+    let l=l0
+    if XJWord(xj_locals[0].ptr[l0].owner) not=? inst {
+        if xj_host[0].narrowed(l0) not=? 0 {l=xj_host[0].capture(l0 true xj_nodes[0].ptr[n].pos)}
+        else if xj_contexts[0].ptr[c].parent >=? 0 {l=xj_host[0].capture(l0 false xj_nodes[0].ptr[n].pos)}
+    }
+    if n not=? xj_assign_root[0] {
+        xj_read(l)
+        xj_read(l0)
+        # A narrowed name read: its variable is.
+        if XJWord(xj_locals[0].ptr[l0].flags) & 8 not=? 0 {
+            let u=xj_host[0].narrowed(l0)
+            if u not=? 0 {xj_read(u)}
+        }
+        if views {xj_host[0].const_view(l0 xj_nodes[0].ptr[n].pos)}
+    }
+    xj_nodes[0][n].sym=int32<overflow='wrap'>(l)
+    XJWord(xj_locals[0].ptr[l].type)
+}
+# A bypass returns directly: an owner already published the result.
+CheckerIdentResult:type=[type:int64 bypass:bool]
+# A global read (frozen FK_INIT ordinal 4). Returns -1 for a bypassed quantity constant.
+xj_global=(n:XJWord g:XJWord expected:XJWord decimals:bool @bypass:bool):>XJWord=>$unsafe {
+    let pos=xj_nodes[0].ptr[n].pos
+    if xj_globals[0].ptr[g].state not=? 2 {xj_host[0].ensure_global(g pos)}
+    let c=xj_context[0]
+    if c <? 0 or xj_fns[0].ptr[XJWord(xj_contexts[0].ptr[c].inst)].kind not=? 4 or XJWord(xj_contexts[0].ptr[c].mod) not=? XJWord(xj_globals[0].ptr[g].mod) {xj_globals[0][g].fn_accessed=true}
+    if xj_globals[0].ptr[g].is_const and xj_types[0].ptr[tu_prune(XJWord(xj_globals[0].ptr[g].type))].kind =? 'quantity' {
+        bypass=true
+        return xj_host[0].quantity(n g expected)
+    }
+    if n not=? xj_assign_root[0] {
+        loop xj_global_read[0].length <=? g {xj_global_read[0].push(false)}
+        xj_global_read[0][g]=true
+    }
+    # Top-level code runs in order: above the line that sets it, a global is still zero.
+    let d=XJWord(xj_globals[0].ptr[g].decl)
+    if d not=? 0 and xj_nodes[0].ptr[d].pos >? pos and xj_contexts[0].ptr[c].parent <? 0 and xj_fns[0].ptr[XJWord(xj_contexts[0].ptr[c].inst)].kind =? 4 and not xj_test_mode[0] {
+        xj_host[0].early_use(n g)
+    }
+    xj_nodes[0][n].sym=int32<overflow='wrap'>(g)
+    let t=XJWord(xj_globals[0].ptr[g].type)
+    if decimals {xj_host[0].decimal_use(g)}
+    if xj_path_narrows[0] >? 0 and n not=? xj_no_narrow_at[0] {t=xj_host[0].path_alias(n t)}
+    t
+}
+# Frozen SK ordinals: local 1, global 2, functions 3, struct 4, enum 5, const 6, module 7,
+# type 8, builtin 9, alias 10, reflected 11. `flags`: 1 constant views exist, 2 decimal
+# globals exist (the host's own tables).
+xj_ident=(n:XJWord expected:XJWord kind:XJWord ref:XJWord s:XJWord flags:XJWord):>CheckerIdentResult=>$unsafe {
+    let is_callee=n =? xj_callee[0]
+    if xj_ide[0] and kind not=? 3 {xj_host[0].ide_ref(n s)}
+    xj_nodes[0][n].aux=int32<overflow='wrap'>(kind)
+    let t:XJWord=0
+    if kind =? 1 {t=xj_local(n ref flags & 1 not=? 0)}
+    else if kind =? 2 {
+        let bypass=false
+        t=xj_global(n ref expected flags & 2 not=? 0 @bypass)
+        if bypass {return [type=t bypass=true]}
+    } else if kind =? 6 {return [type=xj_host[0].constant(n ref expected) bypass=true]}
+    else if kind =? 3 {return [type=xj_host[0].function(n expected is_callee) bypass=true]}
+    else if kind =? 4 or kind =? 5 or kind =? 10 or kind =? 8 or kind =? 7 {t=xj_host[0].type_value(n kind s)}
+    else {xj_host[0].error(n kind)}
+    if (kind =? 1 or kind =? 2) and xj_fn_type(t) {
+        let bare=xj_host[0].bare_value(n t kind =? 1 is_callee expected)
+        if bare >=? 0 {return [type=bare bypass=true]}
+    }
+    if xj_types[0].ptr[tu_prune(t)].kind =? 'typeval' {
+        let used=xj_host[0].type_use(n t is_callee expected)
+        if used >=? 0 {return [type=used bypass=true]}
+    }
+    [type=xl_finish(n t expected) bypass=false]
+}

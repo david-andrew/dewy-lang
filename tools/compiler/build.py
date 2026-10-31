@@ -23,7 +23,8 @@ ROOT = HERE.parents[1]
 # Steps 1 and 2 cannot read Dewy, so there every `use 'X.dewy'` in compiler/
 # names X.dewy's frozen implementation-language twin instead. Steps 3 on
 # compile the Dewy modules, so the compiler that ships runs them.
-FROZEN_TWINS = {'checker_zonk.dewy': 'checker_zonk.jo',
+FROZEN_TWINS = {'checker_idents.dewy': 'checker_idents.jo',
+                'checker_zonk.dewy': 'checker_zonk.jo',
                 'checker_body_results.dewy': 'checker_body_results.jo',
                 'checker_range_values.dewy': 'checker_range_values.jo',
                 'checker_match.dewy': 'checker_match.jo',
