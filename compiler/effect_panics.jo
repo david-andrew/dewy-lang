@@ -1,0 +1,148 @@
+# Frozen panics call-graph solver extracted from effects.jo.
+use 'checker_state.dewy'
+struct EffectPanicHost:
+    scan: (int) -> bool
+    component: (int) -> void
+    opted: (int) -> bool
+struct EffectPanicInput:
+    fns: *(FnInst[])
+    index: *(int[])
+    low: *(int[])
+    answer: *(int[])
+    witness: *(int[])
+    via: *(int[])
+    local: *(int[])
+    local_via: *(int[])
+    edge_at: *(int[])
+    edge_end: *(int[])
+    edges: *(int[])
+    stack: *(int[])
+    serial: *int
+    draw_guard: *int
+    draw_required: *(bool[])
+    host: *EffectPanicHost
+ep: *EffectPanicInput
+ep_index: *(int[])
+ep_low: *(int[])
+ep_answer: *(int[])
+ep_witness: *(int[])
+ep_edges: *(int[])
+ep_stack: *(int[])
+effect_panics_bind = (input: *EffectPanicInput) -> int:
+    ep = input
+    ep_index = input[0].index
+    ep_low = input[0].low
+    ep_answer = input[0].answer
+    ep_witness = input[0].witness
+    ep_edges = input[0].edges
+    ep_stack = input[0].stack
+    0
+panic_grow = ():
+    m = ep[0].fns[0].len()
+    if ep_index[0].len() >= m: return
+    if ep[0].draw_guard[0] != 0 and ep[0].draw_required[0].len() < m: ep[0].draw_required[0].resize(m)
+    extra = m - ep_index[0].len()
+    ep_index[0] += fill(0, extra)
+    ep_low[0] += fill(0, extra)
+    ep_answer[0] += fill(0, extra)
+    ep_witness[0] += fill(0, extra)
+    ep[0].via[0] += fill(0, extra)
+    ep[0].local[0] += fill(0, extra)
+    ep[0].local_via[0] += fill(0, extra)
+    ep[0].edge_at[0] += fill(0, extra)
+    ep[0].edge_end[0] += fill(0, extra)
+panic_visit = (f: int):
+    serial = ep[0].serial[0] + 1
+    ep[0].serial[0] = serial
+    ep_index[0][f] = serial
+    ep_low[0][f] = serial
+    ep_stack[0].push(f)
+    library = ep[0].host[0].scan(f)
+    at = ep[0].edge_at[0][f]
+    loop at < ep[0].edge_end[0][f]:
+        if library and ep_witness[0][f] != 0 and ep[0].draw_guard[0] == 0: break
+        g = ep_edges[0][at]
+        n = ep_edges[0][at + 1]
+        if ep_index[0][g] == 0:
+            panic_visit(g)
+            if ep_answer[0][g] == 0 and ep_low[0][g] < ep_low[0][f]: ep_low[0][f] = ep_low[0][g]
+        else if ep_answer[0][g] == 0 and ep_index[0][g] < ep_low[0][f]: ep_low[0][f] = ep_index[0][g]
+        answer = panic_edge_answer(f, g, n)
+        if answer == 2 and ep_witness[0][f] == 0:
+            ep_witness[0][f] = n
+            ep[0].via[0][f] = g
+        else if answer == 3 and ep[0].local[0][f] == 0:
+            ep[0].local[0][f] = n
+            ep[0].local_via[0][f] = g
+        at += 2
+    if ep_low[0][f] != ep_index[0][f]: return
+    top = ep_stack[0].len()
+    start = top - 1
+    loop ep_stack[0][start] != f: start -= 1
+    if ep[0].draw_guard[0] != 0: ep[0].host[0].component(start)
+    if start == top - 1:
+        answer = if ep_witness[0][f] != 0: 2 else if ep[0].local[0][f] != 0: 3 else: 1
+        if answer == 3:
+            ep_witness[0][f] = ep[0].local[0][f]
+            ep[0].via[0][f] = ep[0].local_via[0][f]
+        ep_answer[0][f] = answer
+        ep_stack[0].pop()
+        return
+    any = false
+    loop i in [start..top):
+        g = ep_stack[0][i]
+        if ep_witness[0][g] != 0 or ep[0].local[0][g] != 0: any = true
+    incoming: int[]
+    pending: int[]
+    if any:
+        loop i in [start..top): ep_low[0][ep_stack[0][i]] = -1
+        loop i in [start..top):
+            g = ep_stack[0][i]
+            e = ep[0].edge_at[0][g]
+            loop e < ep[0].edge_end[0][g]:
+                h = ep_edges[0][e]
+                if ep_answer[0][h] == 0 and ep_index[0][h] >= ep_index[0][f]:
+                    head = incoming.len()
+                    incoming.push(g)
+                    incoming.push(ep_edges[0][e + 1])
+                    incoming.push(ep_low[0][h])
+                    ep_low[0][h] = head
+                e += 2
+    loop i in [start..top):
+        g = ep_stack[0][i]
+        answer = if ep_witness[0][g] != 0: 2 else if ep[0].local[0][g] != 0: 3 else: 1
+        if answer == 3:
+            ep_witness[0][g] = ep[0].local[0][g]
+            ep[0].via[0][g] = ep[0].local_via[0][g]
+        ep_answer[0][g] = answer
+        if any and answer != 1: pending.push(g)
+    next = 0
+    loop next < pending.len():
+        g = pending[next]
+        next += 1
+        e = ep_low[0][g]
+        loop e >= 0:
+            h = incoming[e]
+            n = incoming[e + 1]
+            answer = panic_edge_answer(h, g, n)
+            old = ep_answer[0][h]
+            if old == 1 or old == 3 and answer == 2:
+                ep_answer[0][h] = answer
+                ep_witness[0][h] = n
+                ep[0].via[0][h] = g
+                pending.push(h)
+            e = incoming[e + 2]
+    loop ep_stack[0].len() > start: ep_stack[0].pop()
+panic_edge_answer = (f: int, g: int, n: int) -> int:
+    if ep_answer[0][g] < 2: return 1
+    if not panic_reaches(f, g): return 3
+    if ep[0].host[0].opted(n): return 3
+    2
+panic_reaches = (f: int, g: int) -> bool:
+    a = ep_answer[0][g]
+    a == 2 or a == 3 and ep[0].fns[0][g].mod != ep[0].fns[0][f].mod
+effect_panics = (f: int) -> bool:
+    if f <= 0 or f >= ep[0].fns[0].len(): return false
+    panic_grow()
+    if ep_index[0][f] == 0: panic_visit(f)
+    ep_answer[0][f] >= 2

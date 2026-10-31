@@ -1,0 +1,212 @@
+$runtime_checks
+from p"checker_state.dewy" import FnInst
+CWord:type=int64<overflow='wrap'>
+# The `panics` call-graph solver: Tarjan's algorithm over the bodies effects.jo
+# scans, answering 1 cannot panic, 2 may panic, 3 only for other modules. Each
+# function is scanned once (a host walk recording its edges and sources); a
+# recursive component with a panic source propagates over its reverse edges,
+# each answer rising at most twice: O(reached functions + call edges). Host
+# calls: the scan per function (answering whether it is the library's), the draw-context check per
+# component, and the call site's opt-in per edge reaching a panicking callee.
+# The scan grows the edge array, so it is reread by index after every call.
+# Indices and serials are words (CWord): exact arithmetic would cost more than
+# the walk itself.
+EffectPanicHost:type=[
+    scan:<(f:int64):>bool>
+    component:<(start:int64):>void>
+    opted:<(n:int64):>bool>
+]
+EffectPanicInput:type=[
+    fns:ptr<array<FnInst>>
+    index:ptr<array<int64>>
+    low:ptr<array<int64>>
+    answer:ptr<array<int64>>
+    witness:ptr<array<int64>>
+    via:ptr<array<int64>>
+    local:ptr<array<int64>>
+    local_via:ptr<array<int64>>
+    edge_at:ptr<array<int64>>
+    edge_end:ptr<array<int64>>
+    edges:ptr<array<int64>>
+    stack:ptr<array<int64>>
+    serial:ptr<int64>
+    draw_guard:ptr<int64>
+    draw_required:ptr<array<bool>>
+    host:ptr<EffectPanicHost>
+]
+let ep:ptr<EffectPanicInput>=$unsafe (uint64(0) as ptr<EffectPanicInput>)
+let ep_index:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+let ep_low:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+let ep_answer:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+let ep_witness:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+let ep_edges:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+let ep_stack:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+let ep_via:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+let ep_local:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+let ep_local_via:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+let ep_edge_at:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+let ep_edge_end:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+let ep_fns:ptr<array<FnInst>>=$unsafe (uint64(0) as ptr<array<FnInst>>)
+let ep_serial:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let ep_guard:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let ep_host:ptr<EffectPanicHost>=$unsafe (uint64(0) as ptr<EffectPanicHost>)
+effect_panics_bind=(input:ptr<EffectPanicInput>):>CWord=>$unsafe {
+    ep=input
+    ep_index=input[0].index
+    ep_low=input[0].low
+    ep_answer=input[0].answer
+    ep_witness=input[0].witness
+    ep_edges=input[0].edges
+    ep_stack=input[0].stack
+    ep_via=input[0].via
+    ep_local=input[0].local
+    ep_local_via=input[0].local_via
+    ep_edge_at=input[0].edge_at
+    ep_edge_end=input[0].edge_end
+    ep_fns=input[0].fns
+    ep_serial=input[0].serial
+    ep_guard=input[0].draw_guard
+    ep_host=input[0].host
+    0
+}
+panic_grow=():>void=>$unsafe {
+    let m:CWord=CWord(ep_fns[0].length)
+    if CWord(ep_index[0].length) >=? m {return}
+    if ep_guard[0] not=? 0 and CWord(ep[0].draw_required[0].length) <? m {ep[0].draw_required[0].resize(m)}
+    ep_index[0].resize(m)
+    ep_low[0].resize(m)
+    ep_answer[0].resize(m)
+    ep_witness[0].resize(m)
+    ep_via[0].resize(m)
+    ep_local[0].resize(m)
+    ep_local_via[0].resize(m)
+    ep_edge_at[0].resize(m)
+    ep_edge_end[0].resize(m)
+}
+panic_visit=(f:CWord):>void=>$unsafe {
+    let serial:CWord=CWord(ep_serial[0]) + 1
+    ep_serial[0] = serial
+    ep_index[0][f] = serial
+    ep_low[0][f] = serial
+    ep_stack[0].push(f)
+    let library=ep_host[0].scan(f)
+    let at:CWord=CWord(ep_edge_at[0].ptr[f])
+    loop at <? CWord(ep_edge_end[0].ptr[f]) {
+        if library and ep_witness[0].ptr[f] not=? 0 and ep_guard[0] =? 0 {break}
+        let g:CWord=CWord(ep_edges[0].ptr[at])
+        let n:CWord=CWord(ep_edges[0].ptr[at + 1])
+        if ep_index[0].ptr[g] =? 0 {
+            panic_visit(g)
+            if ep_answer[0].ptr[g] =? 0 and ep_low[0].ptr[g] <? ep_low[0].ptr[f] {ep_low[0][f] = ep_low[0].ptr[g]}
+        } else if ep_answer[0].ptr[g] =? 0 and ep_index[0].ptr[g] <? ep_low[0].ptr[f] {ep_low[0][f] = ep_index[0].ptr[g]}
+        let answer:CWord=panic_edge_answer(f g n)
+        if answer =? 2 and ep_witness[0].ptr[f] =? 0 {
+            ep_witness[0][f] = n
+            ep_via[0][f] = g
+        } else if answer =? 3 and ep_local[0].ptr[f] =? 0 {
+            ep_local[0][f] = n
+            ep_local_via[0][f] = g
+        }
+        at += 2
+    }
+    if ep_low[0].ptr[f] not=? ep_index[0].ptr[f] {return}
+    let top:CWord=CWord(ep_stack[0].length)
+    let start:CWord=top - 1
+    loop CWord(ep_stack[0].ptr[start]) not=? f {start -= 1}
+    if ep_guard[0] not=? 0 {ep_host[0].component(start)}
+    # (a lone function without a recursive edge: answered from its own sources)
+    if start =? top - 1 {
+        let answer:CWord=if ep_witness[0].ptr[f] not=? 0 {2} else if ep_local[0].ptr[f] not=? 0 {3} else {1}
+        if answer =? 3 {
+            ep_witness[0][f] = ep_local[0].ptr[f]
+            ep_via[0][f] = ep_local_via[0].ptr[f]
+        }
+        ep_answer[0][f] = answer
+        ep_stack[0].pop();
+        return
+    }
+    let any=false
+    loop i in [start..top) {
+        let g:CWord=CWord(ep_stack[0].ptr[i])
+        if ep_witness[0].ptr[g] not=? 0 or ep_local[0].ptr[g] not=? 0 {any=true}
+    }
+    # Only a recursive component with a panic source needs propagation. An
+    # opted-in edge can make its caller local even when its callee is not, so
+    # members need individual answers, not one answer for the whole component.
+    # Reverse edges are indexed by callee; Tarjan is done with these low links:
+    # reuse them as incoming-list heads.
+    let incoming:array<int64>=[]
+    let pending:array<int64>=[]
+    if any {
+        loop i in [start..top) {ep_low[0][ep_stack[0].ptr[i]] = -1}
+        loop i in [start..top) {
+            let g:CWord=CWord(ep_stack[0].ptr[i])
+            let e:CWord=CWord(ep_edge_at[0].ptr[g])
+            loop e <? CWord(ep_edge_end[0].ptr[g]) {
+                let h:CWord=CWord(ep_edges[0].ptr[e])
+                if ep_answer[0].ptr[h] =? 0 and ep_index[0].ptr[h] >=? ep_index[0].ptr[f] {
+                    let head:CWord=CWord(incoming.length)
+                    incoming.push(g)
+                    incoming.push(ep_edges[0].ptr[e + 1])
+                    incoming.push(ep_low[0].ptr[h])
+                    ep_low[0][h] = head
+                }
+                e += 2
+            }
+        }
+    }
+    loop i in [start..top) {
+        let g:CWord=CWord(ep_stack[0].ptr[i])
+        let answer:CWord=if ep_witness[0].ptr[g] not=? 0 {2} else if ep_local[0].ptr[g] not=? 0 {3} else {1}
+        if answer =? 3 {
+            ep_witness[0][g] = ep_local[0].ptr[g]
+            ep_via[0][g] = ep_local_via[0].ptr[g]
+        }
+        ep_answer[0][g] = answer
+        if any and answer not=? 1 {pending.push(g)}
+    }
+    let next:CWord=0
+    loop next <? CWord(pending.length) {
+        let g:CWord=CWord(pending[next])
+        next += 1
+        let e:CWord=CWord(ep_low[0].ptr[g])
+        loop e >=? 0 {
+            let h:CWord=CWord(incoming[e])
+            let n:CWord=CWord(incoming[e + 1])
+            let answer:CWord=panic_edge_answer(h g n)
+            let old:CWord=CWord(ep_answer[0].ptr[h])
+            if old =? 1 or (old =? 3 and answer =? 2) {
+                ep_answer[0][h] = answer
+                ep_witness[0][h] = n
+                ep_via[0][h] = g
+                pending.push(h)
+            }
+            e=CWord(incoming[e + 2])
+        }
+    }
+    loop CWord(ep_stack[0].length) >? start {ep_stack[0].pop();}
+}
+# The effect exported by f after this call. Accepting a dependency's panics at
+# an opted-in call handles them for this module's own callers; the dependency
+# itself and callers of f in other modules still see panics.
+panic_edge_answer=(f:CWord g:CWord n:CWord):>CWord=>$unsafe {
+    if ep_answer[0].ptr[g] <? 2 {return 1}
+    if not panic_reaches(f g) {return 3}
+    if ep_host[0].opted(n) {return 3}
+    2
+}
+# Whether f's call of g (answered) may panic in f: g may panic for every
+# caller, or only for callers outside its module and f is one.
+panic_reaches=(f:CWord g:CWord):>bool=>$unsafe {
+    let a:CWord=CWord(ep_answer[0].ptr[g])
+    a =? 2 or (a =? 3 and ep_fns[0].ptr[g].mod not=? ep_fns[0].ptr[f].mod)
+}
+# Whether f may panic for some caller (its witness: panic_witness/panic_via).
+# Answers settle once facts have run; a body checked later is walked on its
+# first question.
+effect_panics=(f:CWord):>bool=>$unsafe {
+    if f <=? 0 or f >=? CWord(ep_fns[0].length) {return false}
+    panic_grow()
+    if ep_index[0].ptr[f] =? 0 {panic_visit(f)}
+    ep_answer[0].ptr[f] >=? 2
+}

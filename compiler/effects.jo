@@ -1,6 +1,7 @@
 use 'checker_tokens.dewy'
 use 'checker_types.dewy'
 use 'dewy_reader_types.dewy'
+use 'effect_panics.dewy'
 # Interned callback contracts and demanded place/row inference.
 # Absence of a declaration never means purity.
 # The arena, graph and cost inventory are demanded only by explicit contracts
@@ -2196,21 +2197,6 @@ effect_panic_note = (f: int, n: int, what: str, provisional: bool = false):
     effect_panic_nodes[f] = n
     effect_panic_texts[f] = what
 
-panic_grow = ():
-    m = fns.len()
-    if panic_index.len() >= m: return
-    if draw_context_guard != 0 and draw_required.len() < m: draw_required.resize(m)
-    extra = m - panic_index.len()
-    panic_index += fill(0, extra)
-    panic_low += fill(0, extra)
-    panic_answer += fill(0, extra)
-    panic_witness += fill(0, extra)
-    panic_via += fill(0, extra)
-    panic_local += fill(0, extra)
-    panic_local_via += fill(0, extra)
-    panic_edge_at += fill(0, extra)
-    panic_edge_end += fill(0, extra)
-
 # The exhaustive-match fallback cannot run. A marked range check is decided
 # by facts as an obligation; message text never exempts an exhaustion panic.
 panic_synthesized = (n: int) -> bool:
@@ -2459,111 +2445,20 @@ panic_scan = (f: int):
     else: panic_node(f, int(fns[f].body))
     panic_edge_end[f] = panic_edges.len()
 
-panic_visit = (f: int):
-    panic_serial += 1
-    panic_index[f] = panic_serial
-    panic_low[f] = panic_serial
-    panic_stack.push(f)
+# The solver (Tarjan over scanned bodies) runs in effect_panics.dewy; these
+# are its services: a body's scan, a component's draw check, a call's opt-in.
+panic_host_scan = (f: int) -> bool:
     panic_scan(f)
-    library = fn_in_lib(f)
-    loop i in [0..(panic_edge_end[f] - panic_edge_at[f]) / 2):
-        if library and panic_witness[f] != 0 and draw_context_guard == 0: break
-        e = panic_edge_at[f] + 2 * i
-        g = panic_edges[e]
-        if panic_index[g] == 0:
-            panic_visit(g)
-            if panic_answer[g] == 0: panic_low[f] = min(panic_low[f], panic_low[g])
-        else if panic_answer[g] == 0: panic_low[f] = min(panic_low[f], panic_index[g])
-        answer = panic_edge_answer(f, g, panic_edges[e + 1])
-        if answer == 2 and panic_witness[f] == 0:
-            panic_witness[f] = panic_edges[e + 1]
-            panic_via[f] = g
-        else if answer == 3 and panic_local[f] == 0:
-            panic_local[f] = panic_edges[e + 1]
-            panic_local_via[f] = g
-    if panic_low[f] != panic_index[f]: return
-    start = panic_stack.len() - 1
-    loop panic_stack[start] != f: start -= 1
-    if draw_context_guard != 0: draw_context_component(start)
-    any = false
-    loop i in [start..panic_stack.len()):
-        g = panic_stack[i]
-        if panic_witness[g] != 0 or panic_local[g] != 0: any = true
-    # Only a recursive component with a panic source needs propagation. An
-    # opted-in edge can make its caller local even when its callee is not, so
-    # members need individual answers, not one answer for the whole component.
-    # Reverse edges are indexed by callee; each answer rises at most twice
-    # (none -> local -> unconditional), hence O(component nodes + edges).
-    # Tarjan is done with these low links: reuse them as incoming-list heads.
-    incoming: int[]
-    pending: int[]
-    propagate = any and panic_stack.len() - start > 1
-    if propagate:
-        loop i in [start..panic_stack.len()): panic_low[panic_stack[i]] = -1
-        loop i in [start..panic_stack.len()):
-            g = panic_stack[i]
-            loop j in [0..(panic_edge_end[g] - panic_edge_at[g]) / 2):
-                e = panic_edge_at[g] + 2 * j
-                h = panic_edges[e]
-                if panic_answer[h] == 0 and panic_index[h] >= panic_index[f]:
-                    at = incoming.len()
-                    incoming.push(g)
-                    incoming.push(panic_edges[e + 1])
-                    incoming.push(panic_low[h])
-                    panic_low[h] = at
-    loop i in [start..panic_stack.len()):
-        g = panic_stack[i]
-        answer = if panic_witness[g] != 0: 2 else if panic_local[g] != 0: 3 else: 1
-        if answer == 3:
-            panic_witness[g] = panic_local[g]
-            panic_via[g] = panic_local_via[g]
-        panic_answer[g] = answer
-        if propagate and answer != 1: pending.push(g)
-    at = 0
-    loop at < pending.len():
-        g = pending[at]
-        at += 1
-        e = panic_low[g]
-        loop e >= 0:
-            h = incoming[e]
-            n = incoming[e + 1]
-            answer = panic_edge_answer(h, g, n)
-            old = panic_answer[h]
-            if old == 1 or old == 3 and answer == 2:
-                panic_answer[h] = answer
-                panic_witness[h] = n
-                panic_via[h] = g
-                pending.push(h)
-            e = incoming[e + 2]
-    loop panic_stack.len() > start: panic_stack.pop()
-
-# The effect exported by f after this call. Accepting a dependency's panics at
-# an opted-in call handles them for this module's own callers; the dependency
-# itself and callers of f in other modules still see panics. Diagnostics use
-# panic_reaches directly, so a direct unopted dependency call still fails.
-panic_edge_answer = (f: int, g: int, n: int) -> int:
-    if panic_answer[g] < 2: return 1
-    if not panic_reaches(f, g): return 3
+    fn_in_lib(f)
+panic_host_opted = (n: int) -> bool:
     p = nodes[n].pos
     if p > 0 and not pos_in_lib(p) and dir_assume_local_asserts(p):
         policy = dir_policy(p)
-        if policy == DIR_RUNTIME or policy == DIR_PROTOTYPE: return 3
-    2
-
-# Whether f's call of g (answered) may panic in f: g may panic for every
-# caller, or only for callers outside its module and f is one.
-panic_reaches = (f: int, g: int) -> bool:
-    a = panic_answer[g]
-    a == 2 or a == 3 and fns[g].mod != fns[f].mod
-
-# Whether f may panic for some caller (its witness: panic_witness/panic_via).
-# Answers settle once facts have run; a body checked later is walked on its
-# first question.
-effect_panics = (f: int) -> bool:
-    if f <= 0 or f >= fns.len(): return false
-    panic_grow()
-    if panic_index[f] == 0: panic_visit(f)
-    panic_answer[f] >= 2
+        if policy == DIR_RUNTIME or policy == DIR_PROTOTYPE: return true
+    false
+effect_panic_host = EffectPanicHost(panic_host_scan, draw_context_component, panic_host_opted)
+effect_panic_input = EffectPanicInput(&fns, &panic_index, &panic_low, &panic_answer, &panic_witness, &panic_via, &panic_local, &panic_local_via, &panic_edge_at, &panic_edge_end, &panic_edges, &panic_stack, &panic_serial, &draw_context_guard, &draw_required, &effect_panic_host)
+effect_panic_binding = effect_panics_bind(&effect_panic_input)
 
 # A function's name as a program writes it (`xs.insert` reaches `__dewy_insert`).
 effect_shown_name = (f: int) -> str:
