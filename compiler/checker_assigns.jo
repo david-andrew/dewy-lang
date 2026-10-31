@@ -1,0 +1,196 @@
+# Frozen assignment checker extracted from check.jo.
+use 'node_store.dewy'
+use 'checker_types.dewy'
+use 'source_types.dewy'
+use 'checker_state.dewy'
+use 'type_inference.dewy'
+struct CheckerAssignHost:
+    begin: (int, int) -> int
+    prelude: (int) -> int
+    tuple: (int) -> int
+    element: (int) -> int
+    index: (int) -> int
+    check: (int, int) -> int
+    place: (int) -> void
+    capture: (int, int) -> void
+    refine: (int, int, int) -> int
+    value: (int, int) -> int
+    write: (int, int, int, int) -> int
+    coerce: (int, int) -> int
+    compound: (int, int) -> int
+    flow: (int, int) -> void
+    wrap: (int, int, int) -> int
+struct CheckerAssignInput:
+    nodes: *(Node[])
+    types: *(TypeInfo[])
+    structs: *(StructInfo[])
+    files: *(SrcFile[])
+    contexts: *(FnCtx[])
+    context: *int
+    last: *int
+    refining: *bool
+    path_narrows: *int
+    no_narrow_at: *int
+    current: *int
+    root: *int
+    copy_writes: *({int: int})
+    global_copy_writes: *({int: int})
+    before: *(int[])
+    sibling_flow: *({int: int})
+    decimal_locals: *({int: int})
+    decimal_inits: *({int: int})
+    decimal_target: *int
+    growth_inferred: *({int: bool})
+    decimal_cached: *int
+    text_domains: *({int: int[]})
+    temperature_writes: *({int: bool})
+    fills: *(OptFill[])
+    str_type: *int
+    math_int_type: *int
+    host: *CheckerAssignHost
+va_nodes: *(Node[])
+va_types: *(TypeInfo[])
+va_structs: *(StructInfo[])
+va_files: *(SrcFile[])
+va_contexts: *(FnCtx[])
+va_context: *int
+va_last: *int
+va_refining: *bool
+va_path_narrows: *int
+va_no_narrow_at: *int
+va_current: *int
+va_root: *int
+va_copy_writes: *({int: int})
+va_global_copy_writes: *({int: int})
+va_before: *(int[])
+va_sibling_flow: *({int: int})
+va_decimal_locals: *({int: int})
+va_decimal_inits: *({int: int})
+va_decimal_target: *int
+va_growth_inferred: *({int: bool})
+va_decimal_cached: *int
+va_text_domains: *({int: int[]})
+va_temperature_writes: *({int: bool})
+va_fills: *(OptFill[])
+va_str_type: *int
+va_math_int_type: *int
+va_host: *CheckerAssignHost
+checker_assigns_bind = (input: *CheckerAssignInput) -> int:
+    va_nodes = input[0].nodes
+    va_types = input[0].types
+    va_structs = input[0].structs
+    va_files = input[0].files
+    va_contexts = input[0].contexts
+    va_context = input[0].context
+    va_last = input[0].last
+    va_refining = input[0].refining
+    va_path_narrows = input[0].path_narrows
+    va_no_narrow_at = input[0].no_narrow_at
+    va_current = input[0].current
+    va_root = input[0].root
+    va_copy_writes = input[0].copy_writes
+    va_global_copy_writes = input[0].global_copy_writes
+    va_before = input[0].before
+    va_sibling_flow = input[0].sibling_flow
+    va_decimal_locals = input[0].decimal_locals
+    va_decimal_inits = input[0].decimal_inits
+    va_decimal_target = input[0].decimal_target
+    va_growth_inferred = input[0].growth_inferred
+    va_decimal_cached = input[0].decimal_cached
+    va_text_domains = input[0].text_domains
+    va_temperature_writes = input[0].temperature_writes
+    va_fills = input[0].fills
+    va_str_type = input[0].str_type
+    va_math_int_type = input[0].math_int_type
+    va_host = input[0].host
+    0
+va_kind = (t: int) -> TK: va_types[0][tu_prune(t)].kind
+va_dewy_at = (pos: int) -> bool:
+    f = pos >> 40
+    pos > 0 and f < va_files[0].len() and va_files[0][f].is_dewy
+va_union = (t0: int) -> bool:
+    t = tu_prune(t0)
+    va_types[0][t].kind == .enum_ and va_structs[0][int(va_types[0][t].st)].union_
+va_part = (n: int) -> bool:
+    k = va_nodes[0][n].kind
+    k == .field or k == .index
+va_place_root = (n: int) -> int:
+    r = n
+    loop r != 0 and va_part(r): r = int(va_nodes[0][r].a)
+    if r != 0 and va_nodes[0][r].kind == .ident: return r
+    0
+va_growth_on = () -> bool:
+    c = va_context[0]
+    c >= 0 and va_contexts[0][c].loop_depth > 0 and (va_growth_inferred[0].len() > 0 or va_decimal_cached[0] != 0)
+va_copy_write = (lhs: int, pos: int):
+    r = va_place_root(lhs)
+    if r == 0 or va_nodes[0][r].kind != .ident: return
+    sym = int(va_nodes[0][r].sym)
+    if va_nodes[0][r].aux == 1:
+        if not va_copy_writes[0].has(sym): va_copy_writes[0][sym] = pos
+    else if va_nodes[0][r].aux == 2:
+        if not va_global_copy_writes[0].has(sym): va_global_copy_writes[0][sym] = pos
+va_store = (s: int, lhs: int, lt: int) -> int:
+    rt = va_host[0].value(s, lt)
+    if va_temperature_writes[0].len() > 0: rt = va_host[0].write(s, rt, lt, 1)
+    if va_decimal_target[0] != 0 and va_host[0].write(s, rt, lt, 2) != 0: return s
+    lk = va_nodes[0][lhs].kind
+    aux = va_nodes[0][lhs].aux
+    if rt != lt and lk == .ident and (aux == 1 or aux == 2): va_host[0].write(s, rt, lt, 3)
+    fill = -1
+    if va_fills[0].len() > 0: fill = va_host[0].write(s, rt, lt, 4)
+    v = va_last[0]
+    if va_nodes[0][v].kind != .intrinsic or va_nodes[0][v].aux != 76: va_nodes[0][s].b = i32(va_host[0].coerce(v, lt))
+    if (lk != .ident or aux == 2) and (va_path_narrows[0] > 0 or va_union(lt) or va_kind(lt) == .opt): va_host[0].write(s, rt, lt, 5)
+    else if va_path_narrows[0] > 0 and lk == .ident: va_host[0].write(s, rt, lt, 6)
+    if fill >= 0: va_host[0].write(s, fill, lt, 7)
+    s
+va_check = (s: int) -> int:
+    update = va_host[0].prelude(s)
+    if update != 0: return update
+    lhs = int(va_nodes[0][s].a)
+    op = int(va_nodes[0][s].op)
+    k = va_nodes[0][lhs].kind
+    if k == .tuple: return va_host[0].tuple(s)
+    if k == .field or (k == .index and (op != 47 or va_part(int(va_nodes[0][lhs].a)))):
+        r = va_host[0].element(s)
+        if r != 0: return r
+    if k == .index:
+        r = va_host[0].index(s)
+        if r != 0: return r
+    if op == 47 and (va_nodes[0][lhs].kind != .ident or va_path_narrows[0] > 0): va_no_narrow_at[0] = lhs
+    va_current[0] = s
+    saved_root = va_root[0]
+    va_root[0] = va_place_root(lhs)
+    lt = va_host[0].check(lhs, 0)
+    va_root[0] = saved_root
+    va_current[0] = 0
+    va_no_narrow_at[0] = 0
+    lhs = va_last[0]
+    va_nodes[0][s].a = i32(lhs)
+    va_host[0].place(lhs)
+    pos = va_nodes[0][s].pos
+    if va_part(lhs):
+        if va_dewy_at(pos): va_host[0].capture(lhs, int(va_nodes[0][s].b))
+        va_copy_write(lhs, pos)
+    if va_refining[0]:
+        lt = va_host[0].refine(s, lt, 1)
+        replacement = va_host[0].refine(s, lt, 2)
+        if replacement != 0: return replacement
+    if lt == va_str_type[0] and va_text_domains[0].len() > 0: va_host[0].refine(s, lt, 3)
+    if lt == va_math_int_type[0] and va_dewy_at(pos): va_host[0].refine(s, lt, 4)
+    if op == 47: return va_store(s, lhs, lt)
+    va_host[0].compound(s, lt)
+va_assign = (s: int) -> int:
+    if va_growth_on(): va_host[0].begin(s, 1)
+    saved = va_decimal_target[0]
+    if va_decimal_locals[0].len() > 0 or va_decimal_inits[0].len() > 0: saved = va_host[0].begin(s, 2)
+    else: va_decimal_target[0] = 0
+    literal = 0
+    if va_sibling_flow[0].len() > 0: literal = va_host[0].begin(s, 3)
+    mark = va_before[0].len()
+    r = va_check(s)
+    va_decimal_target[0] = saved
+    if va_sibling_flow[0].len() > 0: va_host[0].flow(r, literal)
+    if va_before[0].len() > mark: return va_host[0].wrap(s, r, mark)
+    r

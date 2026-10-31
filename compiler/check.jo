@@ -1,3 +1,4 @@
+use 'checker_assigns.dewy'
 use 'checker_vardecls.dewy'
 use 'checker_for_loops.dewy'
 use 'checker_statements.dewy'
@@ -3882,18 +3883,12 @@ map_update_capture = (lhs: int, rhs: int, before: mut int[]):
             add_flag(part, NF_RELOOKUP)
         else: nodes[part].b = i32(kept)
 
-check_assign = (s: int) -> int:
-    growth_assign(s)
-    saved = decimal_assign_begin(s)
-    literal = if sibling_flow.len() > 0: sibling_syntax_type(int(nodes[s].b)) else: 0
-    before: int[]
-    r = __check_assign(s, before)
-    decimal_target = saved
-    if sibling_flow.len() > 0: sibling_flow_assign(r, literal)
-    if before.len() > 0: return bc_block(before + [copy_checked(r)], nodes[s].pos)
-    r
-
-__check_assign = (s: int, before: mut int[]) -> int:
+check_assign = (s: int) -> int: va_assign(s)
+# Assignments run in checker_assigns.dewy; these are its services.
+assign_before: int[]    # (selectors captured before the values of the assignments being checked)
+# The source's forms: a `[end]`-indexed target's update (returned), `x = x + ...` appends,
+# narrowing undone by a write, a soa element's write to its array.
+assign_prelude = (s: int) -> int:
     if files[pos_file(nodes[s].pos)].is_dewy:
         end_update = dewy_end_assign(s)
         if end_update != 0: return end_update
@@ -3906,222 +3901,230 @@ __check_assign = (s: int, before: mut int[]) -> int:
         # p = value in `loop mut p in ps`: ps[i] = value
         if int(locals[sl].flags) & LF_SOAMUT == 0: fatal(nodes[s].pos, "cannot modify loop variable '{name_of(int(locals[sl].name))}' (use `{mutable_loop_syntax(nodes[s].pos)}`)")
         nodes[s].a = i32(clone(int(locals[sl].soa)))
+    0
+# (1 growth's reading, 2 the decimal binding written (the one before it returned), 3 the
+# record type a sibling literal's syntax names)
+assign_begin = (s: int, code: int) -> int:
+    if code == 1:
+        growth_assign(s)
+        return 0
+    if code == 2: return decimal_assign_begin(s)
+    sibling_syntax_type(int(nodes[s].b))
+# `a, b = value`
+assign_tuple = (s: int) -> int:
     lhs = int(nodes[s].a)
     op = int(nodes[s].op)
-    if nodes[lhs].kind == .tuple:
-        if op != int(Tok.assign): fatal(nodes[s].pos, "compound assignment to a tuple")
-        if files[pos_file(nodes[s].pos)].is_dewy:
-            loop binding in binding_leaves(kids(lhs)):
-                if nodes[binding].a != 0: fatal(nodes[binding].pos, "type annotations declare bindings; use let or const for typed unpacking")
-        t = prune(values_init(int(nodes[s].b), 0, true))
-        nodes[s].b = i32(last_checked)
-        unpacked = unpack_binding(int(nodes[s].b), t, kids(lhs), nodes[s].pos)
-        t = unpacked.0
-        set_list(lhs, unpacked.1)
-        nodes[s].b = i32(last_checked)
-        if types[t].kind != .tuple or int(types[t].nargs) != nkids(lhs): fatal(nodes[s].pos, "expected a tuple with {nkids(lhs)} elements (or an array), found {dt(t)}")
-        loop i in [0..nkids(lhs)):
-            tp = kid(lhs, i)
-            if nodes[tp].kind == .hole: continue
-            tt = check_expr(tp, 0)
-            set_kid(lhs, i, last_checked)
-            check_place(last_checked, false)
-            if string_domains.len() > 0 and tt == T_STR: string_domain_write(last_checked, 0)
-            if tt == T_MATH_INT and dewy_at(nodes[s].pos): int_domain_write(last_checked, 0, -1)
-            if not can_coerce(0, targ(t, i), tt) and not type_eq(targ(t, i), tt): fatal(nodes[tp].pos, "cannot assign {dt(targ(t, i))} to {dt(tt)}")
-        if refine_active:
-            contracted = false
-            loop target in kids(lhs):
-                if nodes[target].kind == .hole: continue
-                if ref_storage_contract(refine_storage(target, ntype(target))) or ref_dependent_ancestor(target): contracted = true
-            if contracted:
-                before: int[]
-                source = capture_value(int(nodes[s].b), t, before)
-                loop i in [0..nkids(lhs)):
-                    target = kid(lhs, i)
-                    if nodes[target].kind == .hole: continue
-                    field = mk(.field, nodes[s].pos)
-                    nodes[field].a = i32(source)
-                    nodes[field].aux = -2
-                    nodes[field].ival = i
-                    check_expr(field, 0)
-                    field = last_checked
-                    store = bc_assign(target, field, nodes[s].pos)
-                    before.push(check_assign(store))
-                return bc_block(before, nodes[s].pos)
-        nodes[s].aux = 1
-        converted = false
-        loop i in [0..nkids(lhs)):
-            target = kid(lhs, i)
-            if nodes[target].kind != .hole and not type_eq(targ(t, i), ntype(target)): converted = true
-        if converted:
-            # Freeze the tuple once, then convert every element before writing
-            # destinations. Semantic int and fixed widths have different ABIs.
-            elem_tmp_n += 1
-            name = "$unpack_convert{elem_tmp_n}"
-            pos = nodes[s].pos
-            decl = bc_let(name, int(nodes[s].b), pos)
-            add_flag(int(nodes[s].b), NF_CHECKED)
-            check_stmt(decl)
-            values: int[]
-            targets: int[]
+    if op != int(Tok.assign): fatal(nodes[s].pos, "compound assignment to a tuple")
+    if files[pos_file(nodes[s].pos)].is_dewy:
+        loop binding in binding_leaves(kids(lhs)):
+            if nodes[binding].a != 0: fatal(nodes[binding].pos, "type annotations declare bindings; use let or const for typed unpacking")
+    t = prune(values_init(int(nodes[s].b), 0, true))
+    nodes[s].b = i32(last_checked)
+    unpacked = unpack_binding(int(nodes[s].b), t, kids(lhs), nodes[s].pos)
+    t = unpacked.0
+    set_list(lhs, unpacked.1)
+    nodes[s].b = i32(last_checked)
+    if types[t].kind != .tuple or int(types[t].nargs) != nkids(lhs): fatal(nodes[s].pos, "expected a tuple with {nkids(lhs)} elements (or an array), found {dt(t)}")
+    loop i in [0..nkids(lhs)):
+        tp = kid(lhs, i)
+        if nodes[tp].kind == .hole: continue
+        tt = check_expr(tp, 0)
+        set_kid(lhs, i, last_checked)
+        check_place(last_checked, false)
+        if string_domains.len() > 0 and tt == T_STR: string_domain_write(last_checked, 0)
+        if tt == T_MATH_INT and dewy_at(nodes[s].pos): int_domain_write(last_checked, 0, -1)
+        if not can_coerce(0, targ(t, i), tt) and not type_eq(targ(t, i), tt): fatal(nodes[tp].pos, "cannot assign {dt(targ(t, i))} to {dt(tt)}")
+    if refine_active:
+        contracted = false
+        loop target in kids(lhs):
+            if nodes[target].kind == .hole: continue
+            if ref_storage_contract(refine_storage(target, ntype(target))) or ref_dependent_ancestor(target): contracted = true
+        if contracted:
+            before: int[]
+            source = capture_value(int(nodes[s].b), t, before)
             loop i in [0..nkids(lhs)):
-                field = mk(.field, pos)
-                nodes[field].a = i32(bc_ident(name, pos))
+                target = kid(lhs, i)
+                if nodes[target].kind == .hole: continue
+                field = mk(.field, nodes[s].pos)
+                nodes[field].a = i32(source)
                 nodes[field].aux = -2
                 nodes[field].ival = i
                 check_expr(field, 0)
                 field = last_checked
-                target = kid(lhs, i)
-                tt = if nodes[target].kind == .hole: targ(t, i) else: ntype(target)
-                values.push(coerce(field, tt))
-                targets.push(tt)
-            tuple = mk(.tuple, pos)
-            nodes[tuple].type = i32(mk_tuple(targets))
-            add_flag(tuple, NF_CHECKED)
-            set_list(tuple, values)
-            nodes[s].b = i32(tuple)
-            assignment = nodes.len()
-            nodes.push(nodes[s])
-            return bc_block([decl, assignment], pos)
-        return s
-    if nodes[lhs].kind == .field or (nodes[lhs].kind == .index and (op != int(Tok.assign) or nodes[int(nodes[lhs].a)].kind == .index or nodes[int(nodes[lhs].a)].kind == .field)):
-        r = elem_field_assign(s)
-        if r != 0: return r
-        # (after a custom index's read/edit/writeback, which captures its own
-        # receiver selectors before its getter runs)
-        r = compound_selector_capture(s)
-        if r != 0: return r
-    if nodes[lhs].kind == .index:
-        bt = prune(check_expr(int(nodes[lhs].a), 0))
-        nodes[lhs].a = i32(last_checked)
-        dewy_index_ranges(lhs, bt)
-        range = int(nodes[lhs].b)
-        if range != 0 and nodes[range].kind == .range:
-            if types[bt].kind == .array or types[bt].kind == .fixed:
-                if has_flag(s, NF_BROADCAST): return dewy_selection_update(s)
-                if op != int(Tok.assign): fatal(nodes[s].pos, "compound assignment to picked elements (write an explicit loop)")
-                call = dewy_array_slice(lhs, int(nodes[s].b))
-                es = mk(.exprstmt, nodes[s].pos)
-                check_expr(call, 0)
-                nodes[es].a = i32(last_checked)
-                return es
-            if has_flag(range, NF_STEP) and not is_nd(bt): fatal(nodes[s].pos, "stepped slicing requires an array")
-        if is_soa(bt) and nodes[lhs].b != 0: return soa_assign(s)
-        if (types[bt].kind == .array or types[bt].kind == .fixed) and nodes[lhs].b != 0 and nodes[int(nodes[lhs].b)].kind != .int_lit and nodes[int(nodes[lhs].b)].kind != .range:
-            put = index_array_fn(int(nodes[lhs].b), "__put")
-            if len(put) > 0:
-                # xs[mask] = v, xs[idxs] = vs: sets the elements picked
-                if has_flag(s, NF_BROADCAST): return dewy_selection_update(s)
-                if op != int(Tok.assign): fatal(nodes[s].pos, "compound assignment to picked elements (write xs[m] = xs[m] .+ x)")
-                recv = int(nodes[lhs].a)
-                add_flag(recv, NF_MUT)
-                call = dewy_array_selection_call(put, [recv, int(nodes[lhs].b), int(nodes[s].b)], bt, nodes[s].pos)
-                es = mk(.exprstmt, nodes[s].pos)
-                check_expr(call, 0)
-                nodes[es].a = i32(last_checked)
-                return es
-        if types[bt].kind == .struct_ and is_part_index(lhs, bt):
-            # m[.., j] = xs: writes into a part of m
-            if has_flag(s, NF_BROADCAST) and is_nd(bt): return dewy_selection_update(s, true)
-            if op != int(Tok.assign): fatal(nodes[s].pos, "compound assignment to a part of an array (write m[...] = m[...] .+ x)")
-            recv = int(nodes[lhs].a)
-            add_flag(recv, NF_MUT)
-            call = bc_call("__nd_slice_set", [recv, part_spec(lhs), int(nodes[s].b)], nodes[s].pos)
+                store = bc_assign(target, field, nodes[s].pos)
+                before.push(check_assign(store))
+            return bc_block(before, nodes[s].pos)
+    nodes[s].aux = 1
+    converted = false
+    loop i in [0..nkids(lhs)):
+        target = kid(lhs, i)
+        if nodes[target].kind != .hole and not type_eq(targ(t, i), ntype(target)): converted = true
+    if converted:
+        # Freeze the tuple once, then convert every element before writing
+        # destinations. Semantic int and fixed widths have different ABIs.
+        elem_tmp_n += 1
+        name = "$unpack_convert{elem_tmp_n}"
+        pos = nodes[s].pos
+        decl = bc_let(name, int(nodes[s].b), pos)
+        add_flag(int(nodes[s].b), NF_CHECKED)
+        check_stmt(decl)
+        values: int[]
+        targets: int[]
+        loop i in [0..nkids(lhs)):
+            field = mk(.field, pos)
+            nodes[field].a = i32(bc_ident(name, pos))
+            nodes[field].aux = -2
+            nodes[field].ival = i
+            check_expr(field, 0)
+            field = last_checked
+            target = kid(lhs, i)
+            tt = if nodes[target].kind == .hole: targ(t, i) else: ntype(target)
+            values.push(coerce(field, tt))
+            targets.push(tt)
+        tuple = mk(.tuple, pos)
+        nodes[tuple].type = i32(mk_tuple(targets))
+        add_flag(tuple, NF_CHECKED)
+        set_list(tuple, values)
+        nodes[s].b = i32(tuple)
+        assignment = nodes.len()
+        nodes.push(nodes[s])
+        return bc_block([decl, assignment], pos)
+    return s
+# A field or element target's custom index or captured selectors, or 0.
+assign_element = (s: int) -> int:
+    r = elem_field_assign(s)
+    if r != 0: return r
+    # (after a custom index's read/edit/writeback, which captures its own
+    # receiver selectors before its getter runs)
+    compound_selector_capture(s)
+# An indexed target's slices, selections, soa elements, parts and index calls, or 0.
+assign_index = (s: int) -> int:
+    lhs = int(nodes[s].a)
+    op = int(nodes[s].op)
+    bt = prune(check_expr(int(nodes[lhs].a), 0))
+    nodes[lhs].a = i32(last_checked)
+    dewy_index_ranges(lhs, bt)
+    range = int(nodes[lhs].b)
+    if range != 0 and nodes[range].kind == .range:
+        if types[bt].kind == .array or types[bt].kind == .fixed:
+            if has_flag(s, NF_BROADCAST): return dewy_selection_update(s)
+            if op != int(Tok.assign): fatal(nodes[s].pos, "compound assignment to picked elements (write an explicit loop)")
+            call = dewy_array_slice(lhs, int(nodes[s].b))
             es = mk(.exprstmt, nodes[s].pos)
             check_expr(call, 0)
             nodes[es].a = i32(last_checked)
             return es
-        # (m[k] += x for a map changes the value in place: see map_elem_place)
-        if types[bt].kind == .struct_ and not (op != int(Tok.assign) and is_map_type(bt) and nodes[lhs].b != 0):
-            call = mk(.call, nodes[s].pos)
-            callee = mk(.ident, nodes[s].pos)
-            nodes[callee].name = i32(intern("[]="))
-            nodes[call].a = i32(callee)
+        if has_flag(range, NF_STEP) and not is_nd(bt): fatal(nodes[s].pos, "stepped slicing requires an array")
+    if is_soa(bt) and nodes[lhs].b != 0: return soa_assign(s)
+    if (types[bt].kind == .array or types[bt].kind == .fixed) and nodes[lhs].b != 0 and nodes[int(nodes[lhs].b)].kind != .int_lit and nodes[int(nodes[lhs].b)].kind != .range:
+        put = index_array_fn(int(nodes[lhs].b), "__put")
+        if len(put) > 0:
+            # xs[mask] = v, xs[idxs] = vs: sets the elements picked
+            if has_flag(s, NF_BROADCAST): return dewy_selection_update(s)
+            if op != int(Tok.assign): fatal(nodes[s].pos, "compound assignment to picked elements (write xs[m] = xs[m] .+ x)")
             recv = int(nodes[lhs].a)
             add_flag(recv, NF_MUT)
-            val = int(nodes[s].b)
-            # (m[i, j] = v has several indexes)
-            ixs = kids(lhs)
-            if nodes[lhs].b != 0: ixs = [int(nodes[lhs].b)]
-            if op != int(Tok.assign):
-                get = mk(.index, nodes[s].pos)
-                ga = clone(recv)
-                clear_flag(ga, NF_MUT)
-                nodes[ga].type = 0
-                nodes[get].a = i32(ga)
-                if nodes[lhs].b != 0: nodes[get].b = i32(clone(int(nodes[lhs].b)))
-                else:
-                    cl: int[]
-                    loop x in ixs: cl.push(clone(x))
-                    set_list(get, cl)
-                if nodes[s].sval != 0 or has_flag(s, NF_BROADCAST):
-                    gt = check_expr(get, 0)
-                    get = last_checked
-                    add_flag(get, NF_CHECKED)
-                    val = compound_checked(s, get, val, gt)
-                    add_flag(val, NF_CHECKED)
-                else: val = compound_value(s, get, val)
-            set_list(call, [recv] + ixs + [val])
-            # (a resolved call, such as m[1] in m[1][2] = 3, is not checked again)
-            if nodes[recv].kind != .call: clear_flag(recv, NF_CHECKED)
+            call = dewy_array_selection_call(put, [recv, int(nodes[lhs].b), int(nodes[s].b)], bt, nodes[s].pos)
             es = mk(.exprstmt, nodes[s].pos)
             check_expr(call, 0)
             nodes[es].a = i32(last_checked)
             return es
-    # (assigning a narrowed field or global assigns the whole of it)
-    plain = op == int(Tok.assign) and nodes[lhs].kind != .ident or op == int(Tok.assign) and path_narrows > 0
-    if plain: no_narrow_at = lhs
-    cur_assign = s
-    # (the variable at the bottom of v.f = 1 or v[i] += 1 is written, not read)
-    saved_root = assign_root
-    assign_root = place_root(lhs)
-    lt = check_expr(lhs, 0)
-    assign_root = saved_root
-    cur_assign = 0
-    no_narrow_at = 0
-    lhs = last_checked
-    nodes[s].a = i32(lhs)
+    if types[bt].kind == .struct_ and is_part_index(lhs, bt):
+        # m[.., j] = xs: writes into a part of m
+        if has_flag(s, NF_BROADCAST) and is_nd(bt): return dewy_selection_update(s, true)
+        if op != int(Tok.assign): fatal(nodes[s].pos, "compound assignment to a part of an array (write m[...] = m[...] .+ x)")
+        recv = int(nodes[lhs].a)
+        add_flag(recv, NF_MUT)
+        call = bc_call("__nd_slice_set", [recv, part_spec(lhs), int(nodes[s].b)], nodes[s].pos)
+        es = mk(.exprstmt, nodes[s].pos)
+        check_expr(call, 0)
+        nodes[es].a = i32(last_checked)
+        return es
+    # (m[k] += x for a map changes the value in place: see map_elem_place)
+    if types[bt].kind == .struct_ and not (op != int(Tok.assign) and is_map_type(bt) and nodes[lhs].b != 0):
+        call = mk(.call, nodes[s].pos)
+        callee = mk(.ident, nodes[s].pos)
+        nodes[callee].name = i32(intern("[]="))
+        nodes[call].a = i32(callee)
+        recv = int(nodes[lhs].a)
+        add_flag(recv, NF_MUT)
+        val = int(nodes[s].b)
+        # (m[i, j] = v has several indexes)
+        ixs = kids(lhs)
+        if nodes[lhs].b != 0: ixs = [int(nodes[lhs].b)]
+        if op != int(Tok.assign):
+            get = mk(.index, nodes[s].pos)
+            ga = clone(recv)
+            clear_flag(ga, NF_MUT)
+            nodes[ga].type = 0
+            nodes[get].a = i32(ga)
+            if nodes[lhs].b != 0: nodes[get].b = i32(clone(int(nodes[lhs].b)))
+            else:
+                cl: int[]
+                loop x in ixs: cl.push(clone(x))
+                set_list(get, cl)
+            if nodes[s].sval != 0 or has_flag(s, NF_BROADCAST):
+                gt = check_expr(get, 0)
+                get = last_checked
+                add_flag(get, NF_CHECKED)
+                val = compound_checked(s, get, val, gt)
+                add_flag(val, NF_CHECKED)
+            else: val = compound_value(s, get, val)
+        set_list(call, [recv] + ixs + [val])
+        # (a resolved call, such as m[1] in m[1][2] = 3, is not checked again)
+        if nodes[recv].kind != .call: clear_flag(recv, NF_CHECKED)
+        es = mk(.exprstmt, nodes[s].pos)
+        check_expr(call, 0)
+        nodes[es].a = i32(last_checked)
+        return es
+    0
+assign_place = (lhs: int):
     check_place(lhs, false)
-    if dewy_at(nodes[s].pos): map_update_capture(lhs, int(nodes[s].b), before)
-    # (a local written through and never read: see copy_write_warnings)
-    if nodes[lhs].kind == .field or nodes[lhs].kind == .index:
-        r = place_root(lhs)
-        if r != 0 and nodes[r].kind == .ident and nodes[r].aux == i32(int(SK.local)):
-            wl = int(nodes[r].sym)
-            if not copy_writes.has(wl): copy_writes[wl] = nodes[s].pos
-        else if r != 0 and nodes[r].kind == .ident and nodes[r].aux == i32(int(SK.global)):
-            wg = int(nodes[r].sym)
-            if not gcopy_writes.has(wg): gcopy_writes[wg] = nodes[s].pos
-    if refine_active:
-        lt = refine_storage(lhs, lt)
-        replacement = ref_field_store(s, lt)
-        if replacement != 0: return replacement
-    if lt == T_STR and string_domains.len() > 0:
-        string_domain_write(lhs, if op == int(Tok.assign): int(nodes[s].b) else: 0)
-    if lt == T_MATH_INT and dewy_at(nodes[s].pos): int_domain_write(lhs, int(nodes[s].b), if op == int(Tok.assign): 0 else: op)
-    if op == int(Tok.assign):
-        rt = prune(if values_any and is_values(lt): values_init(int(nodes[s].b), lt) else: check_expr(int(nodes[s].b), lt))
-        if tk_difference_writes.len() > 0: rt = temperature_write(int(nodes[s].b), last_checked, rt, lt)
-        if decimal_target != 0 and decimal_float_write(rt, lt): return s
-        if rt != lt and nodes[lhs].kind == .ident and (nodes[lhs].aux == i32(int(SK.local)) or nodes[lhs].aux == i32(int(SK.global))) and not can_coerce(last_checked, rt, lt): var_type_error(lhs, lt, rt, nodes[last_checked].pos)
-        fill = if opt_fill_watch.len() > 0: opt_fill_at(lhs, rt, last_checked) else: -1
-        # (release_call's zero bytes are no value of lt: nothing reads them)
-        if nodes[last_checked].kind != .intrinsic or nodes[last_checked].aux != i32(int(IN.zeroed)): nodes[s].b = i32(coerce(last_checked, lt))
-        if (nodes[lhs].kind != .ident or nodes[lhs].aux == i32(int(SK.global))) and (path_narrows > 0 or is_union(lt) or tkind(lt) == .opt):
-            rooted = path_rooted(lhs)
-            key = ""
-            if rooted or is_union(lt) or tkind(lt) == .opt: key = path_key(lhs)
-            if rooted: path_forget(key, rt)
-            # x.f = 5 where x.f is int | str: x.f is an int from here on
-            if is_union(lt) and union_index(lt, rt) >= 0 and len(key) > 0:
-                path_narrows += 1
-                narrow_expr(copy_path(lhs), [rt], nodes[s].pos, path_name(key))
-            # x.f = Enemy() where x.f is an Enemy?: it holds one from here on
-            else if tkind(lt) == .opt and len(key) > 0 and type_eq(int(types[prune(lt)].elem), rt): narrow_path(lhs, -2, true)
-        else if path_narrows > 0 and nodes[lhs].kind == .ident and path_rooted(lhs): path_forget(path_key(lhs))
-        if fill >= 0: opt_fill(fill, lhs, nodes[s].pos)
-        return s
+    return
+assign_capture = (lhs: int, rhs: int): map_update_capture(lhs, rhs, assign_before)
+# (1 the refined storage written, 2 a refined field's checked store (or 0), 3 a text
+# domain's write, 4 an integer domain's)
+assign_refine = (s: int, lt: int, code: int) -> int:
+    lhs = int(nodes[s].a)
+    op = int(nodes[s].op)
+    if code == 1: return refine_storage(lhs, lt)
+    if code == 2: return ref_field_store(s, lt)
+    if code == 3: string_domain_write(lhs, if op == int(Tok.assign): int(nodes[s].b) else: 0)
+    else: int_domain_write(lhs, int(nodes[s].b), if op == int(Tok.assign): 0 else: op)
+    0
+assign_value = (s: int, lt: int) -> int: prune(if values_any and is_values(lt): values_init(int(nodes[s].b), lt) else: check_expr(int(nodes[s].b), lt))
+# `x = value` checked to rt: (1 a temperature difference, 2 a decimal binding made float64,
+# 3 a variable of another type, 4 an optional being filled, 5 the paths it narrows,
+# 6 the paths it ends, 7 the optional filled (rt: its index))
+assign_write = (s: int, rt: int, lt: int, code: int) -> int:
+    lhs = int(nodes[s].a)
+    if code == 1: return temperature_write(int(nodes[s].b), last_checked, rt, lt)
+    if code == 2: return if decimal_float_write(rt, lt): 1 else: 0
+    if code == 3:
+        if not can_coerce(last_checked, rt, lt): var_type_error(lhs, lt, rt, nodes[last_checked].pos)
+        return 0
+    if code == 4: return opt_fill_at(lhs, rt, last_checked)
+    if code == 5:
+        rooted = path_rooted(lhs)
+        key = ""
+        if rooted or is_union(lt) or tkind(lt) == .opt: key = path_key(lhs)
+        if rooted: path_forget(key, rt)
+        # x.f = 5 where x.f is int | str: x.f is an int from here on
+        if is_union(lt) and union_index(lt, rt) >= 0 and len(key) > 0:
+            path_narrows += 1
+            narrow_expr(copy_path(lhs), [rt], nodes[s].pos, path_name(key))
+        # x.f = Enemy() where x.f is an Enemy?: it holds one from here on
+        else if tkind(lt) == .opt and len(key) > 0 and type_eq(int(types[prune(lt)].elem), rt): narrow_path(lhs, -2, true)
+        return 0
+    if code == 6:
+        if path_rooted(lhs): path_forget(path_key(lhs))
+        return 0
+    opt_fill(rt, lhs, nodes[s].pos)
+    0
+# `x op= value`: refined, quantity, text, pointer, helper and numeric updates
+assign_compound = (s: int, lt: int) -> int:
+    lhs = int(nodes[s].a)
+    op = int(nodes[s].op)
     if types[prune(lt)].kind == .refined:
         # The checked replacement reads and writes one selected element.
         # Capture selectors before the old-value read, including scalar names
@@ -4215,6 +4218,17 @@ __check_assign = (s: int, before: mut int[]) -> int:
             fatal(nodes[s].pos, "cannot apply {tok_text(op as Tok)} to {dt(l)} and {dt(rt)} (int(...) makes the value an int, or make the field a float)")
         nodes[s].b = i32(coerce(int(nodes[s].b), l))
     s
+assign_flow = (r: int, literal: int):
+    sibling_flow_assign(r, literal)
+    return
+# (the selectors captured since mark, then the assignment)
+assign_wrap = (s: int, r: int, mark: int) -> int:
+    before = assign_before[mark..]
+    assign_before.truncate(mark)
+    bc_block(before + [copy_checked(r)], nodes[s].pos)
+assign_host = CheckerAssignHost(assign_begin, assign_prelude, assign_tuple, assign_element, assign_index, check_expr, assign_place, assign_capture, assign_refine, assign_value, assign_write, coerce, assign_compound, assign_flow, assign_wrap)
+assign_input = CheckerAssignInput(&nodes, &types, &structs, &files, &ctxs, &cx, &last_checked, &refine_active, &path_narrows, &no_narrow_at, &cur_assign, &assign_root, &copy_writes, &gcopy_writes, &assign_before, &sibling_flow, &decimal_locals, &decimal_global_inits, &decimal_target, &growth_inferred, &decimal_cached_type, &string_domains, &tk_difference_writes, &opt_fill_watch, &T_STR, &T_MATH_INT, &assign_host)
+assign_binding = checker_assigns_bind(&assign_input)
 
 # a function another engine would call, which nothing here does: one warning, saying what is
 # called instead (not also that it is never called)
