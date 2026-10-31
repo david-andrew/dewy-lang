@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from tools import cases
+from tools import headless
 from tools.compiler import dewy_fuzz_programs as gen
 
 MODES = ('native', 'native-release', 'web', 'web-release')
@@ -408,6 +409,7 @@ def arguments(argv):
 
 
 def main(argv=None, compiler: Path | None = None) -> int:
+    headless.activate()
     options = arguments(argv)
     if options.show:
         program, _ = gen.generate(options.seed, options.features)

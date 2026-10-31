@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from tools import cases
+from tools import headless
 from tools.compiler.dewy_fuzz_programs import format_float
 
 MODES = ('native', 'native-g', 'native-release', 'web', 'web-release')
@@ -1253,6 +1254,7 @@ def arguments(argv):
 
 
 def main(argv=None, compiler: Path | None = None) -> int:
+    headless.activate()
     options = arguments(argv)
     if options.show:
         for s in range(options.seed, options.seed + (options.count or 1)):

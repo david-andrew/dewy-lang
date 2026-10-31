@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 import argparse
-from tools import scratch
+from tools import headless, scratch
 from tools.filelock import lock_exclusive
 import hashlib
 import json
@@ -276,6 +276,10 @@ def test(binary: Path, arguments: list[str], quick: bool) -> int:
     return 1 if failed else status
 
 
+# Their children never open a window; `run`, `watch` and the others keep the caller's display.
+HARNESSES = ('test', 'cases', 'ladder', 'speed', 'bench', 'fuzz')
+
+
 def main(argv: list[str] | None = None) -> int:
     cli = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     cli.add_argument('--bootstrap', action='store_true', help='force an independent build from C')
@@ -284,6 +288,8 @@ def main(argv: list[str] | None = None) -> int:
     cli.add_argument('arguments', nargs=argparse.REMAINDER,
                      help='arguments for pytest, speed, bench or the compiler; test --quick selects the smoke suite')
     args = cli.parse_args(argv)
+    if args.command in HARNESSES:
+        headless.activate()
     if args.command == 'path' and args.arguments:
         cli.error('path takes no additional arguments')
     if args.command == 'test' and any(a in ('-h', '--help') for a in args.arguments):

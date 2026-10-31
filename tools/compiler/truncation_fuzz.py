@@ -18,6 +18,8 @@ import re
 import shutil
 import subprocess
 
+from tools import headless
+
 ROOT = Path(__file__).resolve().parents[2]
 WORK = Path.home() / 'dev' / 'tmp' / 'dewy-truncation-fuzz'
 TIMEOUT = 20
@@ -115,6 +117,7 @@ def fuzz(compiler: Path, sources: list[Path], per_file: int, seed: int, workers:
 
 
 def main(argv=None) -> int:
+    headless.activate()
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--compiler', type=Path)
     parser.add_argument('--work', type=Path, default=WORK)

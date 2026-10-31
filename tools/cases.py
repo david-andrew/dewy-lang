@@ -36,6 +36,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 from tools import scratch as scratch_space
+from tools.headless import headless
 
 ROOT = Path(__file__).resolve().parents[1]
 CASES = ROOT / 'tests' / 'cases'
@@ -527,7 +528,8 @@ def plan(cases: list[Case], node: bool) -> list[tuple[str, str, list[Case]]]:
 
 
 def clean_environment() -> dict:
-    return {key: value for key, value in os.environ.items() if not key.startswith('DEWY_')}
+    """A child's environment: no DEWY_ settings and no display (tools/headless.py)."""
+    return dict(headless({key: value for key, value in os.environ.items() if not key.startswith('DEWY_')}))
 
 
 def run(compiler: Path, cases: list[Case], *, workers: int = 2, update: bool = False,

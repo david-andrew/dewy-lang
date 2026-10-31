@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import argparse
 from tools.filelock import lock_exclusive
+from tools import headless
 import hashlib
 import json
 import os
@@ -838,6 +839,7 @@ def resolve(revision: str) -> str:
 
 
 def main(argv: list[str], current: Path) -> int:
+    headless.activate()
     cli = argparse.ArgumentParser(prog='python3 -m tools.core speed', description=__doc__,
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
     cli.add_argument('--base', default='HEAD~1', help='commit to compare with (default HEAD~1)')

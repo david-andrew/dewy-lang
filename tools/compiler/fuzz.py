@@ -19,6 +19,7 @@ import time
 from html.parser import HTMLParser
 from pathlib import Path
 
+from tools import headless
 from tools.compiler import fuzz_programs
 
 MAX_OUTPUT = 2 * 1024 * 1024
@@ -199,6 +200,7 @@ def check(compiler: Path, output: Path, *, seed: int = 1, count: int = 25,
 
 
 if __name__ == '__main__':
+    headless.activate()
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument('--compiler', type=Path, required=True)
     cli.add_argument('--output', type=Path, required=True, help='new directory; failed cases are retained')

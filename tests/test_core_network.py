@@ -186,7 +186,8 @@ def test_core_netpong_winning_state(compiler, tmp_path, release):
     build(compiler, path, binary, release)
     port = free_port()
     env = environment()
-    env.update(HOST='1', DEWY_NETPONG_PORT=str(port), DEWY_SOFTWARE='1', DEWY_FRAMES='180')
+    env.update(HOST='1', DEWY_NETPONG_PORT=str(port), DEWY_SOFTWARE='1', DEWY_FRAMES='180',
+               DEWY_SCREENSHOT=str(tmp_path / 'host.png'))
     server = subprocess.Popen([binary], env=env, stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE, text=True)
     try:
@@ -278,7 +279,8 @@ def test_core_room_native_peers(room_binaries, tmp_path):
             env = environment()
             env.update(DEWY_MATCH_SERVER=f'ws://127.0.0.1:{port}', DEWY_SOFTWARE='1',
                        DEWY_THREADS='1', DEWY_FRAMES='900', ROLE='join' if room else 'host',
-                       NAME=name, ROOM=room, XDG_DATA_HOME=str(tmp_path / name))
+                       NAME=name, ROOM=room, XDG_DATA_HOME=str(tmp_path / name),
+                       DEWY_SCREENSHOT=str(tmp_path / f'{name}.png'))
             process = subprocess.Popen([room_binaries[1]], env=env, stdout=subprocess.PIPE,
                                        stderr=subprocess.PIPE, text=True)
             processes.append(process)
@@ -385,7 +387,8 @@ update=(dt:float64)=>{
             env = environment()
             env.update(DEWY_MATCH_SERVER=f'ws://127.0.0.1:{port}', DEWY_SOFTWARE='1',
                        DEWY_THREADS='1', DEWY_FRAMES='900', ROLE=role,
-                       ROOM=room, XDG_DATA_HOME=str(tmp_path / role))
+                       ROOM=room, XDG_DATA_HOME=str(tmp_path / role),
+                       DEWY_SCREENSHOT=str(tmp_path / f'{role}.png'))
             process = subprocess.Popen([binary], env=env, stdout=subprocess.PIPE,
                                        stderr=subprocess.PIPE, text=True)
             processes.append(process)

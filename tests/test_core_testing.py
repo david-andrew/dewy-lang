@@ -280,8 +280,7 @@ game_logic = () => {
 }
 $runtime_checks
 ''')
-    env = {**os.environ, 'DISPLAY': '', 'WAYLAND_DISPLAY': ''}
-    result = subprocess.run([compiler, 'test', source], env=env, capture_output=True,
+    result = subprocess.run([compiler, 'test', source], capture_output=True,
                             text=True, timeout=30, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout == '.\n1 passed\n'

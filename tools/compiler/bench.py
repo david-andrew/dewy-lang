@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 from tools.filelock import lock_exclusive
+from tools import headless
 import os
 import shutil
 import statistics
@@ -149,6 +150,7 @@ def instructions(args, names: list[str], compiler: Path) -> int:
 
 
 def main(argv: list[str], compiler: Path) -> int:
+    headless.activate()
     cli = argparse.ArgumentParser(prog='python3 -m tools.core bench', description=__doc__,
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
     cli.add_argument('-k', dest='words', help='kernels whose names contain any of these words')

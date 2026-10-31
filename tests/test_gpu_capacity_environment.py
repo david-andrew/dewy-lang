@@ -49,7 +49,7 @@ def test_draw_calls_run_headless(compiler, tmp_path):
     (tmp_path / 'game.dewy').write_text('\n'.join(line for line in DRAWS.splitlines() if not line.startswith(('    let cube=', '    let ball=', '    let custom=', '    let tex='))))
     screenshot = tmp_path / 'frame.png'
     ran = invoke(compiler, tmp_path, 'run', 'game.dewy', DEWY_SOFTWARE='1', DEWY_FRAMES='2',
-                 DEWY_SCREENSHOT=str(screenshot), DISPLAY='', WAYLAND_DISPLAY='')
+                 DEWY_SCREENSHOT=str(screenshot))
     assert ran.returncode == 0, ran.stdout + ran.stderr
     assert screenshot.read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
 
@@ -75,7 +75,7 @@ def test_input_end_reports_and_exits(compiler, tmp_path):
 @pytest.mark.skipif(sys.platform != 'linux', reason='Vulkan slot allocator is native Linux')
 def test_texture_slots_exhaust_before_driver_call(compiler, tmp_path):
     (tmp_path / 'main.dewy').write_text('main=()=>{\n__vk_slot_next=__VK_MAX_TEXTURES\nprintl(__vk_slot_new())\n}\n')
-    ran = invoke(compiler, tmp_path, 'run', 'main.dewy', DEWY_NO_GPU='1', DISPLAY='', WAYLAND_DISPLAY='')
+    ran = invoke(compiler, tmp_path, 'run', 'main.dewy', DEWY_NO_GPU='1')
     assert ran.returncode == 1, ran.stdout + ran.stderr
     assert ran.stdout == '' and ran.stderr == 'fatal: too many textures (at most 16384)\n', ran.stdout + ran.stderr
 

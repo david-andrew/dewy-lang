@@ -20,6 +20,8 @@ import subprocess
 import tempfile
 from html.parser import HTMLParser
 
+from tools import headless
+
 ROOT = Path(__file__).resolve().parents[2]
 MODES = {'native': [], 'release': ['--release'], 'g': ['-g'],
          'wasm32': ['--target', 'wasm32'], 'aarch64-mac': ['--target', 'aarch64-mac'],
@@ -138,6 +140,7 @@ def compare(compiler: Path, source: Path, mode: str, directory: Path, *,
 
 
 def main(argv: list[str] | None = None) -> int:
+    headless.activate()
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument('--compiler', type=Path)
     cli.add_argument('--modes', nargs='+', choices=MODES, default=['native'])

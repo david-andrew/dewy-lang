@@ -1096,14 +1096,17 @@ else when TARGET == "linux":
             eprint("error: cannot open a window: {what}")
             exit(1)
 
+    # a display named by the environment (empty means none, as unset)
+    __display_named = (name: str) -> bool: len(env(name) ?? "") > 0
+
     __platform_open = ():
         __soft = __soft_kept or (env("DEWY_SOFTWARE") ?? "") == "1"
         # (the software renderer with no display to show it on: frames drawn, no window, as for
         # a benchmark with DEWY_FRAMES and DEWY_STATS)
-        no_display = env("WAYLAND_DISPLAY") == none and env("DISPLAY") == none
+        no_display = not __display_named("WAYLAND_DISPLAY") and not __display_named("DISPLAY")
         headless = __soft and (env("DEWY_SCREENSHOT") != none or no_display)
         # (a screenshot run through Vulkan needs no display: no window, frames are only drawn)
-        if not __soft and __vk_wanted() and env("DEWY_SCREENSHOT") != none and env("WAYLAND_DISPLAY") == none and env("DISPLAY") == none:
+        if not __soft and __vk_wanted() and env("DEWY_SCREENSHOT") != none and no_display:
             why = __vk_open("", () -> int: 0)
             if len(why) == 0:
                 __vk = true
@@ -1113,7 +1116,7 @@ else when TARGET == "linux":
             headless = true
         # Wayland first where it is running (DEWY_PLATFORM=x11 or wayland chooses)
         plat = env("DEWY_PLATFORM") ?? ""
-        if plat != "x11" and (env("WAYLAND_DISPLAY") != none or plat == "wayland") and not headless:
+        if plat != "x11" and (__display_named("WAYLAND_DISPLAY") or plat == "wayland") and not headless:
             why = __wl_open(__win_title, __win_w, __win_h)
             if len(why) == 0:
                 __wayland = true

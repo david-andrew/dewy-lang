@@ -3541,7 +3541,7 @@ main=()=>{
 @pytest.mark.parametrize(('kind', 'count'), [('platformer', 2), ('3d', 1), ('arcade', 2), ('story', 2)])
 def test_core_game_starter_tests(compiler, tmp_path, flags, kind, count):
     template = Path(__file__).resolve().parents[1] / f'lib/new/dewy/{kind}.dewy'
-    env = {**os.environ, 'DISPLAY': '', 'WAYLAND_DISPLAY': '', 'DEWY_THREADS': '2',
+    env = {**os.environ, 'DEWY_THREADS': '2',
            'DEWY_SAVE_DIR': str(tmp_path / 'saves')}
     result = subprocess.run([compiler, 'test', *flags, template], env=env, capture_output=True,
                             text=True, timeout=30, check=False)
@@ -3616,7 +3616,7 @@ save_round = () => {
 $test
 load_round = () => $expect best=?7
 ''')
-    env = {**os.environ, 'DISPLAY': '', 'WAYLAND_DISPLAY': '', 'DEWY_THREADS': '2',
+    env = {**os.environ, 'DEWY_THREADS': '2',
            'DEWY_SAVE_DIR': str(tmp_path / 'saves')}
     for name in ['save_round', 'load_round']:
         result = subprocess.run([compiler, 'test', *flags, source, name], env=env,
@@ -3644,7 +3644,7 @@ load_reading = () => {
     $expect "square" in? SCENES and reading.background=?SCENES["square"]
 }
 ''')
-    env = {**os.environ, 'DISPLAY': '', 'WAYLAND_DISPLAY': '', 'DEWY_THREADS': '2',
+    env = {**os.environ, 'DEWY_THREADS': '2',
            'DEWY_SAVE_DIR': str(tmp_path / 'saves')}
     for name in ['save_reading', 'load_reading']:
         result = subprocess.run([compiler, 'test', *flags, source, name], env=env,

@@ -35,7 +35,7 @@ def test_draw_context_proved_and_runs(compiler, tmp_path, name):
     path.write_text(source)
     screenshot = tmp_path / 'frame.png'
     ran = invoke(compiler, path, 'run', DEWY_SOFTWARE='1', DEWY_FRAMES='2',
-                 DEWY_SCREENSHOT=str(screenshot), DISPLAY='', WAYLAND_DISPLAY='')
+                 DEWY_SCREENSHOT=str(screenshot))
     assert ran.returncode == 0, ran.stdout + ran.stderr
     assert screenshot.read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
 
@@ -57,7 +57,7 @@ def test_draw_context_deferred_check_still_traps(compiler, tmp_path):
     checked = invoke(compiler, path, 'check', '--obligations')
     assert checked.returncode == 0, checked.stdout + checked.stderr
     assert 'drawing runs only inside runtime-invoked draw' in checked.stdout
-    ran = invoke(compiler, path, 'run', DEWY_SOFTWARE='1', DISPLAY='', WAYLAND_DISPLAY='')
+    ran = invoke(compiler, path, 'run', DEWY_SOFTWARE='1')
     assert ran.returncode == 101, ran.stdout + ran.stderr
     assert 'drawing works only inside' in ran.stderr
 

@@ -20,6 +20,6 @@ def test_game_template_without_optins(compiler, tmp_path, name):
     checked = subprocess.run([compiler, 'check', '--obligations', path], capture_output=True, text=True)
     assert checked.returncode == 0, checked.stdout + checked.stderr
     assert not checked.stdout.strip(), checked.stdout
-    env = {**os.environ, 'DEWY_SOFTWARE': '1', 'DEWY_FRAMES': '2', 'DEWY_SCREENSHOT': str(tmp_path / 'frame.png'), 'DISPLAY': '', 'WAYLAND_DISPLAY': ''}
+    env = {**os.environ, 'DEWY_SOFTWARE': '1', 'DEWY_FRAMES': '2', 'DEWY_SCREENSHOT': str(tmp_path / 'frame.png')}
     ran = subprocess.run([compiler, 'run', path], capture_output=True, text=True, env=env, timeout=90)
     assert ran.returncode == 0, ran.stdout + ran.stderr
