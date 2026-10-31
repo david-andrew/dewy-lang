@@ -1,0 +1,91 @@
+$runtime_checks
+from p"node_store.dewy" import Node
+from p"checker_types.dewy" import (TypeInfo StructInfo TK)
+from p"type_inference.dewy" import tu_prune
+from p"checker_literals.dewy" import xl_finish
+from p"checker_members.dewy" import xd_member
+# `x.f` before member selection: juxtaposed products, computed names, reflected
+# members, a library's own `__` fields, soa element aliases and `ps[i].x` over a soa
+# array, then the member's spelling; selection runs in checker_members. A plain
+# member makes no host request beyond its receiver's checking. O(1) plus demanded
+# semantic work; host calls may grow every arena, so records are reread by ID.
+XSWord:type=int64<overflow='wrap'>
+CheckerReceiverHost:type=[
+    check:<(node:int64 expected:int64):>int64>
+    juxt:<(node:int64):>void>
+    reflect_name:<(node:int64):>void>
+    reflect_member:<(node:int64):>bool>
+    private:<(node:int64):>int64>
+    soa_alias:<(node:int64 receiver:int64 expected:int64):>int64>
+    soa_index:<(node:int64 receiver:int64 expected:int64):>int64>
+]
+CheckerReceiverInput:type=[
+    nodes:ptr<array<Node>>
+    types:ptr<array<TypeInfo>>
+    structs:ptr<array<StructInfo>>
+    names:ptr<array<string>>
+    ide:ptr<bool>
+    reflecting:ptr<bool>
+    callee:ptr<int64>
+    soa_aliases:ptr<int64>
+    last:ptr<int64>
+    host:ptr<CheckerReceiverHost>
+]
+let xs_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let xs_types:ptr<array<TypeInfo>>=$unsafe (uint64(0) as ptr<array<TypeInfo>>)
+let xs_structs:ptr<array<StructInfo>>=$unsafe (uint64(0) as ptr<array<StructInfo>>)
+let xs_names:ptr<array<string>>=$unsafe (uint64(0) as ptr<array<string>>)
+let xs_ide:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+let xs_reflecting:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+let xs_callee:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xs_soa_aliases:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xs_last:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xs_host:ptr<CheckerReceiverHost>=$unsafe (uint64(0) as ptr<CheckerReceiverHost>)
+checker_receivers_bind=(input:ptr<CheckerReceiverInput>):>XSWord=>$unsafe {
+    xs_nodes=input[0].nodes
+    xs_types=input[0].types
+    xs_structs=input[0].structs
+    xs_names=input[0].names
+    xs_ide=input[0].ide
+    xs_reflecting=input[0].reflecting
+    xs_callee=input[0].callee
+    xs_soa_aliases=input[0].soa_aliases
+    xs_last=input[0].last
+    xs_host=input[0].host
+    0
+}
+xs_flag=(n:XSWord f:XSWord):>bool=>$unsafe {XSWord(xs_nodes[0].ptr[n].flags) & f not=? 0}
+# A soa array type: a record with an array for each field of its element.
+xs_soa=(t0:XSWord):>bool=>$unsafe {
+    let t=tu_prune(t0)
+    xs_types[0].ptr[t].kind =? 'struct_' and xs_structs[0].ptr[XSWord(xs_types[0].ptr[t].st)].soa_
+}
+# Flags: NF_JUXT 536870912, NF_LOOPCOUNT 33554432.
+xs_field=(n:XSWord expected:XSWord):>XSWord=>$unsafe {
+    if xs_flag(n 536870912) {xs_host[0].juxt(n)}
+    if xs_nodes[0].ptr[n].b not=? 0 {xs_host[0].reflect_name(n)}
+    if xs_reflecting[0] and xs_host[0].reflect_member(n) {return XSWord(xs_nodes[0].ptr[n].type)}
+    let a0=XSWord(xs_nodes[0].ptr[n].a)
+    let is_callee=n =? xs_callee[0]
+    # `c.__peer` in a program: a library's own field, which may change in any version.
+    if xs_names[0].ptr[XSWord(xs_nodes[0].ptr[n].name)].startswith("__") and not xs_ide[0] and not xs_flag(n 33554432) {a0=xs_host[0].private(n)}
+    # A soa element alias `p` (loop p in ps): `p.x` is `ps.x[i]`.
+    if xs_soa_aliases[0] >? 0 and xs_nodes[0].ptr[a0].kind =? 'ident' {
+        let t=xs_host[0].soa_alias(n a0 expected)
+        if t >=? 0 {return t}
+    }
+    # `ps[i].x` on a soa array is `ps.x[i]`.
+    if xs_nodes[0].ptr[a0].kind =? 'index' and xs_nodes[0].ptr[a0].b not=? 0 {
+        let abt=tu_prune(xs_host[0].check(XSWord(xs_nodes[0].ptr[a0].a) 0))
+        xs_nodes[0][a0].a=int32<overflow='wrap'>(xs_last[0])
+        if xs_soa(abt) {return xs_host[0].soa_index(n a0 expected)}
+    }
+    let name=xs_names[0].ptr[XSWord(xs_nodes[0].ptr[n].name)]
+    let spelled:XSWord=0
+    if name =? "add" {spelled=1}
+    else if name =? "length" {spelled=2}
+    else if name =? "copy" {spelled=4}
+    let result=xd_member(n expected spelled is_callee)
+    if result.bypass {return result.type}
+    xl_finish(n result.type expected)
+}

@@ -2788,6 +2788,7 @@ soa_alias = (s: int):
     check_expr(int(nodes[s].b), 0)
     v = last_checked
     l = new_local(int(nodes[s].name), ntype(v), nodes[s].pos)
+    soa_aliases += 1
     f = LF_ALIAS | LF_SOAELEM
     if has_flag(s, NF_MUT): f |= LF_SOAMUT
     locals[l].flags = i32(f)
@@ -2795,6 +2796,9 @@ soa_alias = (s: int):
     locals[l].soa = i32(tmpl)
     nodes[s].kind = .block
     nodes[s].nlist = 0
+
+# (how many soa element aliases were made: none, and no name is one)
+soa_aliases = 0
 
 # the soa element alias local a name stands for here, or 0
 soa_alias_of = (e: int) -> int:

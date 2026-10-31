@@ -1,3 +1,4 @@
+use 'checker_receivers.dewy'
 use 'checker_range_values.dewy'
 use 'checker_numeric.dewy'
 use 'checker_in_range.dewy'
@@ -9784,45 +9785,42 @@ literal_input = CheckerLiteralInput(&nodes, &lists, &types, &files, &refine_acti
 literal_binding = checker_literals_bind(&literal_input)
 
 # Member selection runs in checker_members.dewy; these are its services.
-check_field_expr = (n: int, expected: int) -> int:
-    if has_flag(n, NF_JUXT): juxt_member_check(n)
-    t = 0
-    if nodes[n].b != 0: reflect_name(n)
-    if reflect_active and reflect_member(n): return ntype(n)
+check_field_expr = (n: int, expected: int) -> int: xs_field(n, expected)
+# The receiver prelude of `x.f` runs in checker_receivers.dewy; these are its services.
+field_juxt = (n: int):
+    juxt_member_check(n)
+    return
+field_reflect_name = (n: int):
+    reflect_name(n)
+    return
+# (c.__peer in a program: a library's own field, which may change or go in any version)
+field_private = (n: int) -> int:
     a0 = int(nodes[n].a)
-    is_callee = n == callee_at
-    # (c.__peer in a program: a library's own field, which may change or go in any version)
-    if starts_with(name_of(int(nodes[n].name)), "__") and not pos_in_lib(nodes[n].pos) and not ide_on and not has_flag(n, NF_LOOPCOUNT):
-        lt = prune(check_expr(a0, 0))
-        nodes[n].a = i32(last_checked)
-        a0 = last_checked
-        add_flag(a0, NF_CHECKED)
-        if types[lt].kind == .struct_:
-            sd = int(structs[int(types[lt].st)].decl)
-            if (concurrency_builtin_type(lt, "Atomic") or concurrency_builtin_type(lt, "Task") or concurrency_builtin_type(lt, "TaskGroup") or concurrency_builtin_type(lt, "__Lock") or concurrency_builtin_type(lt, "__Chan")) and dewy_at(nodes[n].pos): fatal(nodes[n].pos, "shared concurrency storage is private; use its checked operations")
-            if sd != 0 and pos_in_lib(nodes[sd].pos): warn(nodes[n].pos, "{name_of(int(nodes[n].name))} is {structs[int(types[lt].st)].name}'s own, inside the library: it may change or go in any version (if something here is missing, it is worth asking for)")
+    if pos_in_lib(nodes[n].pos): return a0
+    lt = prune(check_expr(a0, 0))
+    nodes[n].a = i32(last_checked)
+    a0 = last_checked
+    add_flag(a0, NF_CHECKED)
+    if types[lt].kind == .struct_:
+        sd = int(structs[int(types[lt].st)].decl)
+        if (concurrency_builtin_type(lt, "Atomic") or concurrency_builtin_type(lt, "Task") or concurrency_builtin_type(lt, "TaskGroup") or concurrency_builtin_type(lt, "__Lock") or concurrency_builtin_type(lt, "__Chan")) and dewy_at(nodes[n].pos): fatal(nodes[n].pos, "shared concurrency storage is private; use its checked operations")
+        if sd != 0 and pos_in_lib(nodes[sd].pos): warn(nodes[n].pos, "{name_of(int(nodes[n].name))} is {structs[int(types[lt].st)].name}'s own, inside the library: it may change or go in any version (if something here is missing, it is worth asking for)")
+    a0
+field_soa_alias = (n: int, a0: int, expected: int) -> int:
     sl = soa_alias_of(a0)
-    if sl != 0:
-        nodes[n] = nodes[soa_alias_field(n, sl)]
-        return check_expr(n, expected)
-    if nodes[a0].kind == .index and nodes[a0].b != 0:
-        # ps[i].x on a soa array is ps.x[i]
-        abt = prune(check_expr(int(nodes[a0].a), 0))
-        nodes[a0].a = i32(last_checked)
-        if is_soa(abt):
-            f = mk(.field, nodes[n].pos)
-            nodes[f].a = nodes[a0].a
-            nodes[f].name = nodes[n].name
-            nodes[n] = Node(kind = .index, pos = nodes[n].pos, a = i32(f), b = nodes[a0].b)
-            return check_expr(n, expected)
-    nm = name_of(int(nodes[n].name))
-    spelled = 0
-    if nm == "add": spelled = 1
-    else if nm == "length": spelled = 2
-    else if nm == "copy": spelled = 4
-    result = xd_member(n, expected, spelled, is_callee)
-    if result.bypass: return result.type
-    ce_finish(n, result.type, expected)
+    if sl == 0: return -1
+    nodes[n] = nodes[soa_alias_field(n, sl)]
+    check_expr(n, expected)
+# ps[i].x on a soa array is ps.x[i]
+field_soa_index = (n: int, a0: int, expected: int) -> int:
+    f = mk(.field, nodes[n].pos)
+    nodes[f].a = nodes[a0].a
+    nodes[f].name = nodes[n].name
+    nodes[n] = Node(kind = .index, pos = nodes[n].pos, a = i32(f), b = nodes[a0].b)
+    check_expr(n, expected)
+receiver_host = CheckerReceiverHost(check_expr, field_juxt, field_reflect_name, reflect_member, field_private, field_soa_alias, field_soa_index)
+receiver_input = CheckerReceiverInput(&nodes, &types, &structs, &names, &ide_on, &reflect_active, &callee_at, &soa_aliases, &last_checked, &receiver_host)
+receiver_binding = checker_receivers_bind(&receiver_input)
 member_receiver = (n: int, expected: int) -> int:
     saved_receiver = type_receiver_at
     type_receiver_at = int(nodes[n].a)

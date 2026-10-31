@@ -1,0 +1,73 @@
+# Frozen field receiver prelude extracted from expr.jo.
+use 'node_store.dewy'
+use 'checker_types.dewy'
+use 'type_inference.dewy'
+use 'checker_literals.dewy'
+use 'checker_members.dewy'
+struct CheckerReceiverHost:
+    check: (int, int) -> int
+    juxt: (int) -> void
+    reflect_name: (int) -> void
+    reflect_member: (int) -> bool
+    private: (int) -> int
+    soa_alias: (int, int, int) -> int
+    soa_index: (int, int, int) -> int
+struct CheckerReceiverInput:
+    nodes: *(Node[])
+    types: *(TypeInfo[])
+    structs: *(StructInfo[])
+    names: *(str[])
+    ide: *bool
+    reflecting: *bool
+    callee: *int
+    soa_aliases: *int
+    last: *int
+    host: *CheckerReceiverHost
+xs_nodes: *(Node[])
+xs_types: *(TypeInfo[])
+xs_structs: *(StructInfo[])
+xs_names: *(str[])
+xs_ide: *bool
+xs_reflecting: *bool
+xs_callee: *int
+xs_soa_aliases: *int
+xs_last: *int
+xs_host: *CheckerReceiverHost
+checker_receivers_bind = (input: *CheckerReceiverInput) -> int:
+    xs_nodes = input[0].nodes
+    xs_types = input[0].types
+    xs_structs = input[0].structs
+    xs_names = input[0].names
+    xs_ide = input[0].ide
+    xs_reflecting = input[0].reflecting
+    xs_callee = input[0].callee
+    xs_soa_aliases = input[0].soa_aliases
+    xs_last = input[0].last
+    xs_host = input[0].host
+    0
+xs_flag = (n: int, f: int) -> bool: int(xs_nodes[0][n].flags) & f != 0
+xs_soa = (t0: int) -> bool:
+    t = int(tu_prune(t0))
+    xs_types[0][t].kind == .struct_ and xs_structs[0][int(xs_types[0][t].st)].soa_
+xs_field = (n: int, expected: int) -> int:
+    if xs_flag(n, 536870912): xs_host[0].juxt(n)
+    if xs_nodes[0][n].b != 0: xs_host[0].reflect_name(n)
+    if xs_reflecting[0] and xs_host[0].reflect_member(n): return int(xs_nodes[0][n].type)
+    a0 = int(xs_nodes[0][n].a)
+    is_callee = n == xs_callee[0]
+    if starts_with(xs_names[0][int(xs_nodes[0][n].name)], "__") and not xs_ide[0] and not xs_flag(n, 33554432): a0 = xs_host[0].private(n)
+    if xs_soa_aliases[0] > 0 and xs_nodes[0][a0].kind == .ident:
+        t = xs_host[0].soa_alias(n, a0, expected)
+        if t >= 0: return t
+    if xs_nodes[0][a0].kind == .index and xs_nodes[0][a0].b != 0:
+        abt = int(tu_prune(xs_host[0].check(int(xs_nodes[0][a0].a), 0)))
+        xs_nodes[0][a0].a = i32(xs_last[0])
+        if xs_soa(abt): return xs_host[0].soa_index(n, a0, expected)
+    name = xs_names[0][int(xs_nodes[0][n].name)]
+    spelled = 0
+    if name == "add": spelled = 1
+    else if name == "length": spelled = 2
+    else if name == "copy": spelled = 4
+    result = xd_member(n, expected, spelled, is_callee)
+    if result.bypass: return result.type
+    int(xl_finish(n, result.type, expected))
