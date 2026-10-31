@@ -1,0 +1,11 @@
+# Near miss: the guard leaves the sentinel -1 possible.
+pick = (rows:array<array<int>> c:int64):>int => {
+    let found = -1
+    loop i in [0..rows.length) if rows[i].length >? c {
+        found = i
+        break
+    }
+    if found <? -1 return 0
+    rows[found][c]
+}
+main = () => printl(pick([[1] [2 3]] 1))

@@ -1,0 +1,15 @@
+# A helper returning an array keeps its `@` array's length when its loop
+# breaks on that length: pushing into a local array writes that local alone.
+step = (@m:array<array<int>>):>array<int64> => {
+    let out:array<int64> = []
+    loop c in [0..3) {
+        if c >=? m.length break
+        out.push(c)
+    }
+    out
+}
+main = () => {
+    let m = [[1 2] [3 4]]
+    let p = step(@m)
+    printl"{m[0]} {p}"
+}

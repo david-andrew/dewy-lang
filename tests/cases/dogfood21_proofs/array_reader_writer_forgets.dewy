@@ -1,0 +1,16 @@
+# Near miss: a loop that also shrinks the `@` array still forgets its length.
+shrink = (@m:array<array<int>> c:int64):>int64 => {
+    let found = -1
+    loop i in [0..m.length) {
+        if (m[i].get(c) ?? 0) not=? 0 {
+            found = i
+            break
+        }
+        m.pop();
+    }
+    found
+}
+main = () => {
+    let m:array<array<int>> = [[1 2] [0 3]]
+    printl(shrink(@m 1))
+}

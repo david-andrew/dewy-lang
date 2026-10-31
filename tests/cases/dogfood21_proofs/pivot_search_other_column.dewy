@@ -1,0 +1,12 @@
+# Near miss: the search tested column c's entry, not column d's.
+pivot = (rows:array<array<rational>> c:int64 d:int64):>rational => {
+    if c <? 0 or d <? 0 return 0
+    let found = -1
+    loop i in [0..rows.length) if c <? rows[i].length and d <? rows[i].length and rows[i][c] not=? 0 {
+        found = i
+        break
+    }
+    if found <? 0 return 0
+    1 / rows[found][d]
+}
+main = () => printl(pivot([[1 0] [2 4]] 0 1))

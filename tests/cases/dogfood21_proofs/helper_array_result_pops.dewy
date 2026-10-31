@@ -1,0 +1,15 @@
+# Near miss: the same helper popping its `@` array may leave it empty.
+step = (@m:array<array<int>>):>array<int64> => {
+    let out:array<int64> = []
+    loop c in [0..3) {
+        if c >=? m.length break
+        out.push(c)
+        m.pop();
+    }
+    out
+}
+main = () => {
+    let m = [[1 2] [3 4]]
+    let p = step(@m)
+    printl"{m[0]} {p}"
+}

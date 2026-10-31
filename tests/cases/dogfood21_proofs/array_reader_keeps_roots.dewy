@@ -1,0 +1,26 @@
+# Bundled array readers (`get`, `contains`, `is_empty`) visit their bodies:
+# a `T?` result or an array of records no longer forgets the caller's `@` array.
+first_nonzero = (@m:array<array<int>> c:int64):>int64 => {
+    let found = -1
+    loop i in [0..m.length) if (m[i].get(c) ?? 0) not=? 0 {
+        found = i
+        break
+    }
+    found
+}
+first_rational = (@m:array<array<rational>> c:int64):>int64 => {
+    loop i in [0..m.length) if (m[i].get(c) ?? 0) not=? 0 return i
+    -1
+}
+row_with = (@m:array<array<string>> word:string):>int64 => {
+    loop i in [0..m.length) if not m[i].is_empty and m[i].contains(word) return i
+    -1
+}
+main = () => {
+    let m:array<array<int>> = [[1 2] [0 3]]
+    printl(first_nonzero(@m 1))
+    let q:array<array<rational>> = [[1 0] [1/2 3/2]]
+    printl(first_rational(@q 1))
+    let w = [["a" "b"] ["c"]]
+    printl(row_with(@w "c"))
+}

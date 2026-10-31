@@ -1,0 +1,30 @@
+# A pivot search: `found = i` then `break`, else the sentinel -1. Past
+# `if found <? 0`, found is a break's index, so the element fact holds of
+# m[found], and a swap moves it to m[r].
+pick = (rows:array<array<int>> c:int64 r:int64):>int => {
+    let m = rows
+    if r <? 0 or r >=? m.length or c <? 0 return 0
+    let found = -1
+    loop i in [r..m.length) if m[i].length >? c {
+        found = i
+        break
+    }
+    if found <? 0 return 0
+    let before = m[found][c]
+    m.swap(r found)
+    before + m[r][c]
+}
+first_positive = (xs:array<int64>):>int64 => {
+    let at = -1
+    loop i in [0..xs.length) if xs[i] >? 0 {
+        at = i
+        break
+    }
+    if at <? 0 return 0
+    let x:int64<(>? 0)> = xs[at]
+    x
+}
+main = () => {
+    printl(pick([[1] [2 3] [4 5 6]] 1 0))
+    printl(first_positive([-1 0 7 2]))
+}

@@ -1,0 +1,25 @@
+# What the break exit knew of the found element's parts carries too: the
+# nonzero rational, and the entry of a row at a shared column.
+inverse = (xs:array<rational>):>rational => {
+    let at = -1
+    loop i in [0..xs.length) if xs[i] not=? 0 {
+        at = i
+        break
+    }
+    if at <? 0 return 0
+    1 / xs[at]
+}
+pivot = (rows:array<array<rational>> c:int64):>rational => {
+    if c <? 0 return 0
+    let found = -1
+    loop i in [0..rows.length) if c <? rows[i].length and rows[i][c] not=? 0 {
+        found = i
+        break
+    }
+    if found <? 0 return 0
+    1 / rows[found][c]
+}
+main = () => {
+    printl(inverse([0 1/2 3]))
+    printl(pivot([[1 0] [2 4]] 1))
+}

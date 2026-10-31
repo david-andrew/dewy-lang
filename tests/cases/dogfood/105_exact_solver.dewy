@@ -46,14 +46,13 @@ eliminate = (rows:array<Row>):>Reduced => {
         if r >=? m.length break
         # The first row at or below r with a nonzero entry in column c.
         let found = -1
-        loop i in [r..m.length) if (m[i].get(c) ?? 0) not=? 0 {
+        loop i in [r..m.length) if c <? m[i].length and m[i][c] not=? 0 {
             found = i
             break
         }
         if found <? 0 continue
         m.swap(r found)
-        let p = m[r].get(c) ?? 0
-        if p =? 0 continue
+        let p = m[r][c]
         m[r] = [loop x in m[r] x / p]
         loop i in [0..m.length) {
             if i =? r continue

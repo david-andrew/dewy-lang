@@ -3755,6 +3755,14 @@ fact_pure_conversion = (n: int) -> bool:
     if aux == i32(int(CV.union_)) or aux == i32(int(CV.arr2fixed)): return ownership_decls.len() == 0 or not ownership_fact_type(ntype(n))
     aux == i32(int(CV.int2float)) or aux == i32(int(CV.float2int)) or aux == i32(int(CV.float_)) or aux == i32(int(CV.wrap_int)) or aux == i32(int(CV.saturate_int))
 
+# A builtin resize of an array of shares (effect_value: no lifecycle or copy
+# hook) runs none of the program's code: it writes its receiver's route alone,
+# which fact_change_route has havocked, not every exposed root. O(1).
+fact_hook_free_resize = (n: int) -> bool:
+    id = nodes[n].aux as IN
+    if id != .push and id != .pop and id != .insert and id != .remove and id != .clear and id != .extend and id != .resize and id != .truncate: return false
+    nkids(n) > 0 and tkind(fact_type(ntype(kid(n, 0)))) == .array and effect_value(ntype(kid(n, 0)))
+
 fact_reads_only = (id: IN) -> bool:
     id == .len or id == .arrcap or id == .sizeof or id == .alignof or id == .static_assert or id == .runtime_assert or id == .assert or id == .panic or id == .unreachable or fact_pure_intrinsic(id)
 
@@ -3861,7 +3869,7 @@ fact_changes = (n: int, s: mut FactState, at: int, reason: FactReason = .loop_):
     else if k == .call and nodes[n].aux == 0 and (nodes[n].sym == i32(fact_owner) or nd_mutable_call(n)): fact_path_call_effects(n, s)
     else if k == .call and nodes[n].aux == 0: fact_call_effects(n, s)
     else if k == .call and nodes[n].aux == 2: s = s
-    else if k == .intrinsic and fact_reads_only(nodes[n].aux as IN): s = s
+    else if k == .intrinsic and (fact_reads_only(nodes[n].aux as IN) or fact_hook_free_resize(n)): s = s
     # (a closure's, partial application's or handle's creation writes nothing,
     # unless ownership may move an owner: fact_capture)
     else if k == .call: fact_forget_call(s, n, reason, at)
@@ -7499,6 +7507,8 @@ fact_range = (n: int, s: mut FactState):
     edges = fact_loop_body(n, body)
     fact_range_exhaustion(n, pre, lo, 0, edges)
     s = if iterated: fact_join(after, edges.exits, n) else: after
+    if iterated and fact_speculating == 0 and after.live and edges.exits.live:
+        loop entry in kept: fact_carried_exit(s, entry.0, after, edges.exits)
     if hulls: fact_push_close(n, s)
     fact_growing_lengths(s, growers)
     if pushes.len() > 0 and nodes[iterator].b != 0:
@@ -7519,6 +7529,69 @@ fact_range = (n: int, s: mut FactState):
             return
         # (an unknown count is still never negative: the pushes only grow it)
         fact_counted_lengths(n, s, pushes, fact_new(s, FactBound(0, FACT_MAX)))
+
+# A local the loop sets only to its index (`found = i` before a `break`)
+# that still holds a constant K where the range ran out: past the join,
+# `found >? K` means a break exit, where found was that exit's index. What the
+# exit held of the element at that index (its value or its length) against a
+# value both states share, or a constant, becomes an implication of
+# `found >? K`, which a later guard applies (`if found <? 0 continue`). Sound:
+# the joined state is the disjunction of the two, the antecedent refutes the
+# exhausted one, and values present in both are the same evaluations.
+# Demand: range loops with such a local and a live break exit. O(P + rows of
+# each element), at most 8 implications in a state (fact_either's budget).
+fact_carried_exit = (s: mut FactState, l: int, after: FactState, exits: mut FactState):
+    place = PlaceIdentity(.local, int(locals[l].owner), l)
+    ai = fact_binding(after, place); xi = fact_binding(exits, place); si = fact_binding(s, place)
+    if ai < 0 or xi < 0 or si < 0: return
+    k = fact_bound(after, after.bindings[ai].value)
+    found = exits.bindings[xi].value
+    phi = s.bindings[si].value
+    if k.wide or k.lo != k.hi or phi == found or fact_bound(exits, found).lo <= k.lo: return
+    held = 0
+    loop evidence in s.conditional: held += int(evidence.tag == -2)
+    ante = (Tok.gt, 0, phi, 1, k.lo)
+    loop pi in [0..exits.projections.len()):
+        p = exits.projections[pi]
+        if not p.element or p.selector != found or fact_slot(s, p.base) < 0 or s.projections.len() + 32 >= FACT_CAP: continue
+        element = fact_project(s, p.base, phi, true, fact_terms[p.value].type)
+        # (and its parts: a length, fields, elements at shared positions; at most 16)
+        parts = [(p.value, element)]
+        at = 0
+        loop at < parts.len() and parts.len() < 16:
+            qi = fact_projection_first(exits, parts[at].0)
+            loop qi >= 0 and parts.len() < 16:
+                q = exits.projections[qi]
+                qi = fact_projection_after(exits, qi)
+                if q.element and q.selector != found and fact_slot(s, q.selector) < 0: continue
+                if not q.element and q.selector != -1 and q.selector < 0: continue
+                selector = if q.element and q.selector == found: phi else: q.selector
+                parts.push((q.value, fact_project(s, parts[at].1, selector, q.element, (if not q.element and q.selector == -1: T_INT else: fact_terms[q.value].type))))
+            at += 1
+        loop part in parts:
+            x = part.0
+            b = fact_bound(exits, x)
+            d = fact_bound(s, part.1)
+            consequents: (Tok, int, int, int, int)[]
+            if not b.wide and b.lo > d.lo: consequents.push((Tok.ge, 0, part.1, 1, b.lo))
+            if not b.wide and b.hi < d.hi: consequents.push((Tok.le, 0, part.1, 1, b.hi))
+            if b.nz and not d.nz and b.lo <= 0 and b.hi >= 0: consequents.push((Tok.ne, 0, part.1, 1, 0))
+            loop direction in [0..2):
+                ri = fact_difference_head(exits, x, direction)
+                loop ri >= 0:
+                    row = exits.differences[ri]
+                    ri = fact_difference_next(exits, ri, direction)
+                    if row.limit != 0 and row.limit != -1: continue
+                    w = if direction == 0: row.a else: row.b
+                    if w == found: w = phi
+                    else if fact_slot(s, w) < 0: continue
+                    op = if row.limit == 0: Tok.le else: Tok.lt
+                    if direction == 0: consequents.push((op, 0, w, 0, part.1))
+                    else: consequents.push((op, 0, part.1, 0, w))
+            loop then in consequents:
+                if held >= 8 or s.conditional.len() >= 32: return
+                fact_implication(s, ante, then)
+                held += 1
 
 # Locals that body writes only by `x = l` (l the loop variable), and nothing
 # else: no compound or other stores, no `@x`, no closure. O(body nodes).
@@ -9510,6 +9583,15 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             right = fact_project(s, base, values[2], true, element)
             first = fact_replace(s, base, values[1], true, right, t)
             fresh = fact_replace(s, first, values[2], true, left, t)
+            # (the second store keeps the first only for distinct positions,
+            # but a swap's first position holds the other's old element even
+            # when both are one: then the two elements are one value)
+            kept = false
+            pi = fact_projection_first(s, fresh)
+            loop pi >= 0 and not kept:
+                kept = s.projections[pi].element and s.projections[pi].selector == values[1]
+                pi = fact_projection_after(s, pi)
+            if not kept and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(fresh, values[1], true, right))
             fact_store_route(s, route, fresh, n, true)
             return 0
         if array == 6 and (ownership_decls.len() == 0 or not ownership_fact_type(ntype(kid(n, 0)))):

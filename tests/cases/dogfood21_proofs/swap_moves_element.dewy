@@ -1,0 +1,12 @@
+# `xs.swap(r j)` puts the old xs[j] at r even when r and j may be one position.
+pick = (rows:array<array<int>> c:int64 r:int64 j:int64):>int => {
+    let m = rows
+    if r <? 0 or r >=? m.length or j <? 0 or j >=? m.length or c <? 0 return 0
+    if c >=? m[j].length return 0
+    m.swap(r j)
+    m[r][c]
+}
+main = () => {
+    printl(pick([[1] [2 3] [4 5 6]] 1 0 2))
+    printl(pick([[1] [2 3] [4 5 6]] 2 2 2))
+}
