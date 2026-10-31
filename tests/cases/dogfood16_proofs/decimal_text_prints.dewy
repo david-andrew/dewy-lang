@@ -1,0 +1,11 @@
+# A rational read from decimal text prints as a decimal, as a decimal literal
+# does; a fraction or an integer prints as written.
+main = () => {
+    let price = rational("19.99") ?? 0
+    let fee = rational("2.5E-2") ?? 0
+    let third = rational("1/3") ?? 0
+    let whole = rational("120.00") ?? 0
+    printl"{price} {fee} {third} {whole} {rational("7") ?? 0}"
+    printl"{price + whole} {price * 3} {(price + whole) / 4} {price + third}"
+    printl(price =? 1999/100)
+}

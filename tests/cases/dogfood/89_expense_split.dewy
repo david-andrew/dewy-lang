@@ -1,0 +1,108 @@
+# A weekend trip's shared expenses are read as text, split exactly with
+# rational money, each share rounded to cents without losing a cent, and
+# settled with the fewest transfers from debtors to creditors.
+
+const EXPENSES = "
+# payer  amount  description            shared by (empty: everyone)
+ana     120.00  cabin deposit
+ben      45.60  groceries              ana ben cleo
+cleo     19.99  firewood
+ana      33.33  fuel                   ana dev
+dev      x.50   broken line
+ben      60     dinner                 ben cleo dev
+cleo    -5.00   refund typo
+dev      12.75  breakfast              ana ben cleo dev
+"
+
+Expense:type = [payer:string amount:rational what:string shares:array<string>]
+
+const PEOPLE = ["ana" "ben" "cleo" "dev"]
+
+parse_line = (line:string):>Expense | string => {
+    let words = line.split()
+    if words.length <? 3 return "too few fields"
+    let payer = words[0]
+    if payer not in? PEOPLE return "unknown payer {payer}"
+    let amount = rational(words[1]) ?? -1
+    if amount <=? 0 return "bad amount {words[1]}"
+    # the description runs until the first name of a sharer
+    let what:array<string> = []
+    let shares:array<string> = []
+    loop w in words[2..] {
+        if w in? PEOPLE shares.push(w)
+        else if shares.is_empty what.push(w)
+        else return "word {w} after the sharers"
+    }
+    if shares.is_empty shares = PEOPLE
+    Expense[payer amount what.join(" ") shares]
+}
+
+# Split `amount` into cents over n people: everyone gets the floor, and the
+# leftover cents go one each to the first people in the list.
+split_cents = (amount:rational n:int):>array<int> => {
+    if n <=? 0 return []
+    let cents = round(amount * 100)
+    let [quotient as each remainder as extra] = cents.divmod(n)
+    [loop i in [0..n) each + (if i <? extra 1 else 0)]
+}
+
+money = (cents:int):>string => {
+    let sign = if cents <? 0 "-" else ""
+    let [quotient as whole remainder as part] = abs(cents).divmod(100)
+    "{sign}{whole}.{format(part "02")}"
+}
+
+main = () => {
+    let expenses:array<Expense> = []
+    loop i in 1.. and line in EXPENSES.lines {
+        let text = line.trim
+        if text.is_empty or text.startswith("#") continue
+        match parse_line(text) {
+            e:Expense => expenses.push(e)
+            problem:string => printl"line {i}: {problem}"
+        }
+    }
+
+    let balance:dict<string int> = [loop p in PEOPLE p -> 0]
+    let spent:dict<string rational> = [loop p in PEOPLE p -> 0]
+    loop e in expenses {
+        if e.payer not in? balance or e.payer not in? spent continue
+        let parts = split_cents(e.amount e.shares.length)
+        balance[e.payer] += round(e.amount * 100)
+        spent[e.payer] += e.amount
+        loop who in e.shares and cents in parts {
+            if who in? balance balance[who] -= cents
+        }
+        printl"{e.payer:<5} paid {e.amount:>7} for {e.what} ({e.shares.join("/")})"
+    }
+
+    let total = sum([loop e in expenses e.amount])
+    printl""
+    printl"total {total} over {expenses.length} expenses; average per person {total / PEOPLE.length}"
+    loop p in PEOPLE {
+        let mine = balance.get(p) ?? 0
+        printl"{p:<5} spent {spent.get(p) ?? 0:>7}  balance {money(mine):>8}"
+    }
+    let check = sum(balance.values)
+    printl"balances sum to {check} cents"
+
+    # settle: biggest debtor pays biggest creditor until everyone is even
+    let debtors = [loop [p cents] in balance if cents <? 0 [name=p cents=-cents]]
+    let creditors = [loop [p cents] in balance if cents >? 0 [name=p cents=cents]]
+    let by_size = (a:[name:string cents:int] b:[name:string cents:int]) => a.cents >? b.cents
+    debtors.sort_with(@by_size)
+    creditors.sort_with(@by_size)
+    let d = 0
+    let c = 0
+    let transfers = 0
+    loop d <? debtors.length and c <? creditors.length {
+        let amount = min(debtors[d].cents creditors[c].cents)
+        printl"{debtors[d].name} pays {creditors[c].name} {money(amount)}"
+        transfers += 1
+        debtors[d].cents -= amount
+        creditors[c].cents -= amount
+        if debtors[d].cents =? 0 d += 1
+        if creditors[c].cents =? 0 c += 1
+    }
+    printl"{transfers} transfers settle the trip"
+}

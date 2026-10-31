@@ -1,0 +1,11 @@
+# A counter beside several arrays in one header proves every element read,
+# and the counter indexes each array it steps with.
+row = (cells:array<string> widths:array<int> marks:array<string>) =>
+    [loop i in 0.. and cell in cells and w in widths and m in marks "{i}{m}{cell}{w}{widths[i]}"]
+wide = (as_:array<int> bs:array<int> cs:array<int> ds:array<int> es:array<int>) =>
+    [loop i in 0.. and a in as_ and b in bs and c in cs and d in ds and e in es i+a+b+c+d+e]
+main = () => {
+    printl(row(["a" "b" "c"] [3 4] ["<" ">" "^"]))
+    printl(wide([1 1] [2 2] [3 3] [4 4] [5]))
+    printl([loop k in [0..9) and x in [7 8 9] and y in [1 2] and z in ["p" "q"] "{k}{x}{y}{z}"])
+}

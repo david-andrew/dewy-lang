@@ -1,0 +1,150 @@
+# A tiny filter language over an inventory: queries such as
+# `price >= 10 and name != "lamp"` are tokenized with character classes,
+# parsed by recursive descent into a tree, and evaluated against each item.
+
+Item:type = [name:string price:rational stock:int tags:array<string>]
+
+const ITEMS:array<Item> = [
+    Item["lamp" 19.99 12 ["light" "desk"]]
+    Item["desk" 149 3 ["office"]]
+    Item["chair" 45.50 10 ["office" "seat"]]
+    Item["bulb" 2.25 140 ["light"]]
+    Item["stool" 25 0 ["seat"]]
+]
+
+Token:type = [kind:'word' | 'number' | 'text' | 'op' | 'paren' text:string at:int]
+ParseError:type = type of error & [message:string at:int]
+
+tokenize = (source:string):>array<Token> | ParseError => {
+    let tokens:array<Token> = []
+    let i = 0
+    loop i <? source.length {
+        let c = source[i]
+        if c.is_space { i += 1; continue }
+        let start = i
+        if c.is_alpha or c =? "_" {
+            loop i <? source.length and (source[i].is_alnum or source[i] =? "_") i += 1
+            tokens.push(Token['word' source[start..i) start])
+        } else if c.is_digit {
+            loop i <? source.length and (source[i].is_digit or source[i] =? ".") i += 1
+            tokens.push(Token['number' source[start..i) start])
+        } else if c =? "\"" {
+            i += 1
+            loop i <? source.length and source[i] not=? "\"" i += 1
+            if i >=? source.length return ParseError["unterminated text" start]
+            tokens.push(Token['text' source[start+1..i) start])
+            i += 1
+        } else if c =? "(" or c =? ")" {
+            tokens.push(Token['paren' c start])
+            i += 1
+        } else if c in? "<>=!" {
+            let op = if (source.get(i+1) ?? "") =? "=" "{c}=" else c
+            if op =? "=" or op =? "!" return ParseError["`{c}` must be followed by `=`" start]
+            tokens.push(Token['op' op start])
+            i += op.length
+        } else return ParseError["unexpected `{c}`" start]
+    }
+    tokens
+}
+
+Compare:type = [field:string op:string value:string]
+Not:type = [inner:Query]
+Both:type = [left:Query right:Query]
+Either:type = [left:Query right:Query]
+Has:type = [tag:string]
+Query:type = Compare | Not | Both | Either | Has
+Parser:type = [tokens:array<Token> at:int=0]
+
+peek = (p:Parser):>Token? => p.tokens.get(p.at)
+take = (@p:Parser what:string):>Token | ParseError => {
+    p.at += 1
+    p.tokens.get(p.at-1) ?? ParseError["expected {what}, found the end" -1]
+}
+
+expect_word = (@p:Parser):>string | ParseError => {
+    let t = take(@p "a field") or_throw
+    if t.kind not=? 'word' return ParseError["expected a field, found `{t.text}`" t.at]
+    t.text
+}
+
+# `or` joins `and` chains, which join atoms
+parse_chain = (@p:Parser word:string):>Query | ParseError => {
+    let left = if word =? "or" parse_chain(@p "and") or_throw else parse_atom(@p) or_throw
+    loop (peek(p) ?? Token['op' "" -1]).text =? word {
+        p.at += 1
+        let right = if word =? "or" parse_chain(@p "and") or_throw else parse_atom(@p) or_throw
+        left = if word =? "or" Either[left right] else Both[left right]
+    }
+    left
+}
+
+parse_atom = (@p:Parser):>Query | ParseError => {
+    let t = peek(p) ?? Token['op' "end" -1]
+    if t.text =? "not" {
+        p.at += 1
+        return Not[parse_atom(@p) or_throw]
+    }
+    if t.text =? "(" {
+        p.at += 1
+        let inner = parse_chain(@p "or") or_throw
+        let close = take(@p "`)`") or_throw
+        if close.text not=? ")" return ParseError["expected `)`" close.at]
+        return inner
+    }
+    let field = expect_word(@p) or_throw
+    if field =? "has" return Has[expect_word(@p) or_throw]
+    let op = take(@p "a comparison") or_throw
+    if op.kind not=? 'op' return ParseError["expected a comparison after {field}" op.at]
+    let value = take(@p "a value") or_throw
+    if value.kind =? 'op' or value.kind =? 'paren' return ParseError["expected a value after {op.text}" value.at]
+    Compare[field op.text value.text]
+}
+
+parse = (source:string):>Query | ParseError => {
+    let parser = Parser[tokenize(source) or_throw]
+    let q = parse_chain(@parser "or") or_throw
+    let rest = peek(parser)
+    if rest isnt? none return ParseError["unexpected `{rest.text}`" rest.at]
+    q
+}
+
+matches = (q:Query item:Item):>bool => match q {
+    c:Compare => {
+        if c.field =? "name" return (item.name =? c.value) =? (c.op =? "==")
+        let a:rational = if c.field =? "price" item.price else item.stock
+        let b = rational(c.value) ?? 0
+        match c.op { <"<"> => a <? b <"<="> => a <=? b <">"> => a >? b <">="> => a >=? b <"=="> => a =? b _ => a not=? b }
+    }
+    n:Not => not matches(n.inner item)
+    b:Both => matches(b.left item) and matches(b.right item)
+    e:Either => matches(e.left item) or matches(e.right item)
+    h:Has => h.tag in? item.tags
+}
+
+main = () => {
+    let queries = [
+        "price >= 10 and name != \"lamp\""
+        "has light or stock < 5"
+        "not (has office) and price < 20.5"
+        "stock == 0 or (price > 100 and has office)"
+        "price >= 1O"
+        "name = \"desk\""
+        "(price < 3"
+        "price < 3 ;"
+        "stock >"
+        "has light and price <= 2.25 or name == \"stool\""
+    ]
+    loop q in queries {
+        match parse(q) {
+            e:ParseError => {
+                printl"{q}"
+                let at = if e.at <? 0 q.length else e.at
+                printl"{" " * at}^ {e.message}"
+            }
+            query:Query => {
+                let hits = [loop item in ITEMS if matches(query item) item.name]
+                printl"{q} -> {if hits.is_empty "nothing" else hits.join(", ")}"
+            }
+        }
+    }
+}

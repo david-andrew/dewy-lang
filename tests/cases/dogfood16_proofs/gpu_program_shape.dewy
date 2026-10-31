@@ -1,0 +1,11 @@
+# A GPU program's result has no shape the checker knows: indexing its
+# download needs a guard (the program itself checks its operands at run time).
+main = () => {
+    let v:array<float64> = [1.0 2.0 3.0 4.0]
+    let g = gpu(reshape(v 2 2))
+    let b = {
+        $runtime_checks
+        cpu(g .* 2.0)
+    }
+    printl(b[0 1])
+}

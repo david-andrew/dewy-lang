@@ -76,8 +76,8 @@ _from_float=(value:float64):>Rational=>{
     return Rational[exact.numerator exact.denominator 2]
 }
 
-# `rational(text)` of an integer, fraction, or exact base-ten decimal;
-# `rational(n d)` still takes two decimal integer texts.
+# `rational(text)` of an integer, fraction, or exact base-ten decimal (which
+# prints as a decimal); `rational(n d)` still takes two decimal integer texts.
 # none for text that is not that, or a zero denominator.
 _parse=(text:string):>Rational|none=>{
     let parts=text.split("/")
@@ -105,9 +105,10 @@ _parse=(text:string):>Rational|none=>{
     }
     let n=_parse_big(digits)
     if n is? none return none
+    # (written as a decimal, it prints as one, as a decimal literal does)
     let scale=exp-places
-    if scale >=? 0 return _reduce(_integer(n)*10^scale 1 2)
-    return _reduce(_integer(n) 10^(-scale) 2)
+    if scale >=? 0 return _reduce(_integer(n)*10^scale 1 1)
+    return _reduce(_integer(n) 10^(-scale) 1)
 }
 _parse_parts=(numerator:string denominator:string):>Rational|none=>{
     let n=_parse_big(numerator)

@@ -194,6 +194,7 @@ fact_nd_classify = (n: int) -> int:
         fact_nd_names[intern("__shape_value")] = 104
         fact_nd_names[intern("__nd_1d")] = 105
         fact_nd_names[intern("gpu")] = 108
+        fact_nd_names[intern("cpu")] = 114
         fact_nd_names[intern("dot")] = 109
         fact_nd_names[intern("row")] = 112
         fact_nd_names[intern("col")] = 113
@@ -225,6 +226,8 @@ fact_nd_classify = (n: int) -> int:
     if kind == 13 or kind == 14: return if nkids(n) == (if kind == 13: 5 else: 7) and path == lib_dir + "/std/dewy_ranges.jo": kind else: 0
     # (an N-D upload to the GPU: at most four valid dimensions)
     if kind == 108: return if nkids(n) == 1 and path == lib_dir + "/game/gpuarray.jo" and is_nd(representation_type(ntype(kid(n, 0)))): kind else: 0
+    # (a GPU array's download: an N-D array whose storage matches its shape)
+    if kind == 114: return if nkids(n) == 1 and path == lib_dir + "/game/gpuarray.jo" and is_nd(representation_type(ntype(n))): kind else: 0
     if path != lib_dir + "/std/nd.jo" and path != lib_dir + "/prelude/nd.dewy": return 0
     if kind <= 3: return if is_nd(representation_type(ntype(n))): kind else: 0
     # (two float arrays' dot product: equal lengths)
@@ -437,6 +440,7 @@ fact_nd_capture = (n: int, s: mut FactState, values: int[], kind: int) -> int:
     if kind >= 160: return fact_sequence_select(n, s, values, kind)
     if kind != 111 and not (kind >= 151 and kind <= 153) and not fact_nd_reads_only(n): fact_path_call_effects(n, s)
     if kind >= 150 and kind <= 154: return fact_nd_slice(n, s, values, kind)
+    if kind == 114: return fact_nd_download(n, s, values[0])
     if kind >= 11 and kind <= 14: return fact_nd_remember(n, s, values, ntype(n))
     if kind == 140: return fact_nd_broadcast(n, s, values[0])
     if kind == 10: return fact_nd_count(s, values[0])
@@ -471,6 +475,7 @@ fact_nd_capture = (n: int, s: mut FactState, values: int[], kind: int) -> int:
         fact_set_bound(s, fact_nd_valid(s, result), FactBound(1, 1, true))
         return result
     if kind >= 100 or kind == 6: fact_nd_check(n, s, values, (if kind == 6: 107 else: kind))
+    if kind == 108: return fact_nd_upload(n, s, values[0])
     if kind == 9: return fact_nd_transpose(n, s, values[0])
     if kind == 130 or kind == 131:
         rows = fact_nd_dim(s, values[0], ntype(kid(n, 0)), fact_constant(s, 0))
@@ -589,6 +594,24 @@ fact_nd_broadcast = (n: int, s: mut FactState, input: int) -> int:
     if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, -1, false, fact_constant(s, rank)))
     loop axis in [0..rank):
         if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, fact_constant(s, axis), true, dims[axis]))
+    result
+
+# `cpu(g)` downloads a GPU array: lib/game/gpuarray.jo builds every GpuArray
+# with as many values as its shape counts (an upload proves its input's
+# storage, a GPU program or its CPU fallback makes its result's), and the
+# download pairs those values with that shape, so it has the storage marker.
+# An N-D upload keeps its input's shape as the GPU array's own `shape` field,
+# which the download gives back. O(1) each.
+fact_nd_download = (n: int, s: mut FactState, input: int) -> int:
+    result = fact_fresh(s, ntype(n))
+    shape = if input != 0: fact_projection_find(s, input, intern("shape"), false) else: -1
+    if shape >= 0 and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, intern("shape"), false, s.projections[shape].value))
+    fact_set_bound(s, fact_nd_valid(s, result), FactBound(1, 1, true))
+    result
+
+fact_nd_upload = (n: int, s: mut FactState, input: int) -> int:
+    result = fact_fresh(s, ntype(n))
+    if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, intern("shape"), false, fact_nd_shape(s, input)))
     result
 
 # A transpose reverses axes and copies exactly the input storage count.
@@ -734,7 +757,7 @@ nd_mutable_check = (n: int, s: mut FactState, values: int[]):
 fact_nd_reads_only = (n: int) -> bool:
     k = fact_nd_call(n)
     if k == 160 or k == 163 or k == 166 or k == 169: return true
-    if k >= 4 and k <= 14 or k >= 100 and k <= 105 or k >= 120 and k <= 122 or k == 130 or k == 131 or k == 140 or k == 141 or k == 150 or k == 154 or k == 155: return true
+    if k >= 4 and k <= 14 or k >= 100 and k <= 105 or k == 114 or k >= 120 and k <= 122 or k == 130 or k == 131 or k == 140 or k == 141 or k == 150 or k == 154 or k == 155: return true
     k == 110 and effect_share(nd_elem(representation_type(ntype(kid(n, 0)))))
 
 # Mutable entry contracts are separate from the callable's storage type.

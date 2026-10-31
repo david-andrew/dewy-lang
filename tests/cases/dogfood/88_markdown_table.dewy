@@ -1,0 +1,133 @@
+# A messy pipe-separated table is normalized into an aligned markdown
+# table with column widths, alignment markers, numeric columns
+# right-aligned, rows sorted by a chosen column, and a totals row.
+
+const SOURCE = "
+| Planet | Moons |Radius km| Type |
+|:--|--:|---:|:-:|
+|Mercury|0|2439.7| rocky
+| Venus | 0 | 6051.8 |rocky|
+|Earth|1|6371.0|rocky|
+| Mars|2 |3389.5| rocky |
+|Jupiter|95|69911|gas giant|
+|Saturn |146| 58232 |gas giant|
+| Uranus|28|25362|ice giant|
+|Neptune|16|24622|ice giant|
+|Pluto|5|
+"
+
+Align:type = 'left' | 'right' | 'center'
+
+split_row = (line:string):>array<string> => {
+    let text = line.trim
+    if text.startswith("|") text = text[1..]
+    if text.endswith("|") text = text[..text.length-1)
+    [loop cell in text.split("|") cell.trim]
+}
+
+is_rule = (cells:array<string>):>bool => {
+    if cells.is_empty return false
+    loop cell in cells {
+        loop ch in cell {
+            if ch not=? "-" and ch not=? ":" return false
+        }
+    }
+    true
+}
+
+align_of = (marker:string):>Align => {
+    let left = marker.startswith(":")
+    let right = marker.endswith(":")
+    if left and right return 'center'
+    if right return 'right'
+    'left'
+}
+
+is_number = (cell:string):>bool => {
+    if cell.is_empty return false
+    let dots = 0
+    loop ch in cell {
+        if ch =? "." dots += 1
+        else if not ch.is_digit return false
+    }
+    dots <=? 1
+}
+
+# a computed width makes the spec unprovable, so the format is checked when it runs
+pad = (text:string width:int align:Align):>string => {
+    $runtime_checks
+    match align {
+    <'left'> => format(text "<{width}")
+    <'right'> => format(text ">{width}")
+    <'center'> => format(text "^{width}")
+    }
+}
+
+rule_cell = (width:int align:Align):>string => match align {
+    <'left'> => ":{"-" * (width-1)}"
+    <'right'> => "{"-" * (width-1)}:"
+    <'center'> => ":{"-" * (width-2)}:"
+}
+
+render = (header:array<string> aligns:array<Align> rows:array<array<string>>):>void => {
+    let widths = [loop cell in header max(3 cell.length)]
+    loop row in rows {
+        loop i in 0.. and cell in row {
+            if i <? widths.length and cell.length >? widths[i] widths[i] = cell.length
+        }
+    }
+    let line = (cells:array<string>) => {
+        let parts = [loop cell in cells and w in widths and a in aligns pad(cell w a)]
+        "| {parts.join(" | ")} |"
+    }
+    printl(line(header))
+    printl"|{[loop w in widths and a in aligns rule_cell(w+2 a)].join("|")}|"
+    loop row in rows printl(line(row))
+}
+
+main = () => {
+    let lines = [loop l in SOURCE.lines if not l.trim.is_empty l]
+    if lines.length <? 2 {
+        printl"a table needs a header and a rule"
+        return
+    }
+    let header = split_row(lines[0])
+    let markers = split_row(lines[1])
+    if not is_rule(markers) or markers.length not=? header.length {
+        printl"second line is not an alignment rule"
+        return
+    }
+    let aligns = [loop m in markers align_of(m)]
+    let rows:array<array<string>> = []
+    loop line in lines[2..] {
+        let cells = split_row(line)
+        if cells.length not=? header.length {
+            printl"skipping ragged row: {line}"
+            continue
+        }
+        rows.push(cells)
+    }
+
+    # numeric columns are right-aligned even if the rule said otherwise
+    loop c in [0..header.length) {
+        if rows.length >? 0 and [loop r in rows is_number(r.get(c) ?? "")].all aligns[c] = 'right'
+    }
+
+    # sort by moons, most first, then by name
+    let by_moons = rows.sorted_with((a b) => {
+        let ma = to_int(a.get(1) ?? "") ?? 0
+        let mb = to_int(b.get(1) ?? "") ?? 0
+        if ma not=? mb return ma >? mb
+        (a.get(0) ?? "") <? (b.get(0) ?? "")
+    })
+    let moons = sum([loop r in rows to_int(r.get(1) ?? "") ?? 0])
+    let radius = sum([loop r in rows to_float(r.get(2) ?? "") ?? 0.0])
+    let totals = ["total" "{moons}" format(radius ".1f") ""]
+    render(header aligns [by_moons... totals])
+
+    printl""
+    let initials = [loop r in rows (r.get(0) ?? "").get(0) ?? "?"].join
+    printl"initials: {initials}"
+    let kinds = set[loop r in rows r.get(3) ?? ""]
+    printl"{kinds.length} kinds: {kinds.sorted.join(", ")}"
+}

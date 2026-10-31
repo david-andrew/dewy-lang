@@ -4450,6 +4450,24 @@ rd_dc_flow=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$unsafe
     n
 }
 
+# `{x:<{w}}`: a spec is literal text, so one with an interpolation is none (dn_spec_colon finds
+# no colon) and the value fails to read: say so at the colon, with the call that computes one.
+rd_dn_spec_hint=(@reader_ctx:ParserContext source:string first:int64 stop:int64):>void=>$unsafe {
+    let b=source as array<uint8>
+    let at:int64=-1
+    let k:int64=first
+    loop (k <? stop) and (k <? b.length) {
+        if ((b[k] =? b':') and (at <? 0)) {
+            at = k
+        }
+        else if ((b[k] =? b'\{') and (at >=? 0)) {
+            reader_ctx.stores.host[0].dn_error(at "a format spec after `:` is literal text, so it cannot hold `\{...}`: compute one with `format(value spec)`, as in `\{format(x \"<\{w}\")}`");
+            return
+        }
+        k = (k + 1)
+    }
+}
+
 # A flow's arm bodies: an `else if` or `else match` goes on the same flow (dc_flow's block at the
 # chain's own position).
 rd_dc_flow_arms=(@reader_ctx:ParserContext @reader_nodes:array<Node> flow:int64 @arms:array<int64>):>void=>$unsafe {
@@ -11298,6 +11316,9 @@ rd_dn_string=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:DewyLexe
         reader_ctx.flags.comma_stop = saved_comma
         let spec:string=(if (colon >=? 0) reader_ctx.stores.host[0].bytes_slice(source (int64<overflow='wrap'>(colon) + 1) i) else "")
         if (expression =? 0) {
+            if (colon <? 0) {
+                rd_dn_spec_hint(@reader_ctx source first i);
+            }
             return 0
         }
         let part:int64=node_mk(@reader_nodes 'pair' rd_mkpos(reader_ctx.file first))

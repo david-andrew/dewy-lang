@@ -2126,6 +2126,7 @@ desugar_loopx = (lx: int) -> int:
         block = lx_block([lx_let(intern(entered), lx_bool(false, pos), pos), lowered,
                           lx_if(lx_not(lx_ident(entered, pos), pos), fallback, pos)], pos)
         if returns: add_flag(block, NF_FLOW_RETURNS)
+        add_flag(block, NF_LOOP_SETUP)
         st = mk(.exprstmt, pos)
         nodes[st].a = i32(block)
         return st
@@ -2212,6 +2213,7 @@ desugar_loopx = (lx: int) -> int:
     nodes[loop_].b = i32(lx_block(stmts, pos))
     setup.push(loop_)
     blk = lx_block(setup, pos)
+    add_flag(blk, NF_LOOP_SETUP)
     st = mk(.exprstmt, pos)
     nodes[st].a = i32(blk)
     st

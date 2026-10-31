@@ -899,7 +899,9 @@ what it pushed. A counter stepped down while the condition keeps it above a boun
 the loop leaves alone (`loop stop >? start ... stop -= 1`) stays at least that bound
 afterwards. A dictionary's or set's `length` is a length like an array's, and its
 keys, values or members collected into an array (`[d.keys...]`, `d.values`,
-`[s...]`) have that length.
+`[s...]`) have that length. Spreading after a known number of elements
+(`[x ys...]`, or `extend` on an array of known length) adds that many to the
+source's length.
 Keeping the bits has its own
 spelling: `uint8<overflow='wrap'>(x)` is the integer modulo 2^8 (two's complement for a signed target, and
 the low bits of an `int`), so `uint64<overflow='wrap'>(int64(-1))` is `18446744073709551615`.
@@ -1543,7 +1545,7 @@ literal, a guard (`if d =? 0 return ...`) or a power of a positive base
 (`rational(digits 10^k)`) proves it. From text, `rational(text)` reads an integer or `numerator/denominator`
 and `rational(numerator denominator)` two decimal integers; both return
 `rational|none`, `none` for invalid text, including a zero denominator.
-Decimal points and base-ten exponents are accepted exactly: `rational("19.99")` is `1999/100`, and `rational("2.5E-2")` is `1/40`. Whitespace inside the text is not accepted.
+Decimal points and base-ten exponents are accepted exactly: `rational("19.99")` is `1999/100`, and `rational("2.5E-2")` is `1/40`; written as decimals, they print as decimals (`19.99`, `0.025`), as decimal literals do. Whitespace inside the text is not accepted.
 
 Values keep a positive denominator and coprime `int` parts. Zero is `0/1`.
 A part is a machine word while it fits and grows into a big integer beyond, so
@@ -2593,8 +2595,9 @@ indexing work too. Scalar indexing requires the rank to equal the number of
 indices and `0 <=? index <? matrix.length[axis]` on every axis. Constructors,
 literals, `reshape` and shaped parameters supply these facts; loops over the
 extents and guards on `.length` prove the bounds without a runtime-check opt-in.
-A shaped array replaced in a loop keeps its shape when every replacement has it
-(`plate = step(plate)` with a shaped result).
+A shaped array replaced in a loop, a counted one included, keeps its shape when
+every replacement has it (`plate = step(plate)` with a shaped result,
+`loop _ in [0..k) result = result * p`).
 Element writes keep the shape, including across direct helpers whose analyzed
 returns preserve both the shape and data length. Read-only shape helpers keep
 the caller's evidence too. Replacing an array or its shape invalidates old
@@ -2823,7 +2826,10 @@ independent `NDArray` with the same shape. Floating inputs become `float32`,
 integer inputs become `int32<overflow='wrap'>` (the GPU's modular word format),
 and arrays may have up to four dimensions: an `NDArray`'s upload needs
 `m.length.length <=? 4` and storage matching its shape, proven from its
-constructor or a shaped parameter as other array contracts are.
+constructor or a shaped parameter as other array contracts are. A download
+has storage matching its shape, and an uploaded `NDArray`'s download keeps the
+upload's shape, so `cpu(gpu(m))[i j]` is proven as `m[i j]` is; a GPU program's
+result has a shape known only when it runs.
 
 ```dewy
 $runtime_checks                  # shapes are checked

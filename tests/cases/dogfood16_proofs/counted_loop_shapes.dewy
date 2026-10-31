@@ -1,0 +1,22 @@
+# A shaped array a counted loop replaces keeps its shape when every
+# replacement has it, as a condition loop's does.
+power = (p:array<float64 length=[2 2]> k:int):>array<float64 length=[2 2]> => {
+    let result:array<float64 length=[2 2]> = eye(2)
+    loop _ in [0..k) result = result * p
+    result
+}
+step = (m:array<float64 length=[3 3]>):>array<float64 length=[3 3]> => m .* 0.5
+main = () => {
+    let v:array<float64> = [1.0 1.0 0.0 1.0]
+    let p = power(reshape(v 2 2) 5)
+    printl"{p[0 0]} {p[0 1]} {p[1 1]}"
+    let plate = ones(3 3)
+    loop _ in [0..4) plate = step(plate)
+    printl(plate[2 2])
+    let grid = zeros(2 2)
+    loop i in [0..3) {
+        grid = grid .+ 1.0
+        grid[1 1] += float64(i)
+    }
+    printl(grid[1 1])
+}

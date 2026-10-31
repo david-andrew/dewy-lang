@@ -1,0 +1,13 @@
+# A GPU array keeps an N-D upload's shape, and its download has that shape
+# and storage matching it, so indexing the download is proven.
+corner = (m:array<float64 length=[2 3]>):>float64 => {
+    let back = cpu(gpu(m))
+    back[1 2]
+}
+main = () => {
+    let v:array<float64> = [1.0 2.0 3.0 4.0 5.0 6.0]
+    let h = cpu(gpu(reshape(v 3 2)))
+    printl"{h.length} {h[2 1]} {corner(reshape(v 2 3))}"
+    let flat = cpu(gpu(v))
+    printl(flat.data.length)
+}

@@ -1,0 +1,12 @@
+# `xs.sorted_with(less)` is a sorted copy: it has its input's length, so a
+# nonempty input's copy has a last element.
+by_score = (a:[name:string score:int64] b:[name:string score:int64]) => a.score >? b.score
+main = () => {
+    let rows = [loop name in ["ann" "bo" "cy"] [name=name score=name.length]]
+    let ranked = rows.sorted_with(@by_score)
+    printl"{ranked.first.name} {ranked.last.name} {ranked.length}"
+    let words = ["pear" "fig" "banana"]
+    let short = words.sorted_with((a b) => a.length <? b.length)
+    loop i in [0..words.length) print"{short[i]} "
+    printl""
+}

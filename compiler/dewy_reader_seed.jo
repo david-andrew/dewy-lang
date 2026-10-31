@@ -7507,6 +7507,19 @@ rt_module_empty = (offset: int) -> int:
 # String decoding is shared; the construction target selects syntax nodes for
 # the reference parser or compact nodes for the value parser.
 
+
+# `{x:<{w}}`: a spec is literal text, so one with an interpolation is none (dn_spec_colon finds
+# no colon) and the value fails to read: say so at the colon, with the call that computes one.
+rt_dn_spec_hint = (source: str, first: int, stop: int):
+    at = -1
+    k = first
+    loop k < stop and k < len(source):
+        if source[k] == ':' and at < 0: at = k
+        else if source[k] == '{' and at >= 0:
+            dn_error(at, "a format spec after `:` is literal text, so it cannot hold `\{...}`: compute one with `format(value spec)`, as in `\{format(x \"<\{w}\")}`")
+            return
+        k += 1
+
 rt_dn_text = (text: str, offset: int) -> int:
     n = mk(.str_lit, mkpos(dc_parser.file, offset))
     nodes[n].sval = i32(intern(text))
@@ -7557,7 +7570,9 @@ rt_dn_string = (token: DewyLexeme) -> int:
         dc_parser.reader.dn_angles = saved_angles
         dc_parser.flags.comma_stop = saved_comma
         spec = if colon >= 0: source[colon + 1..i) else: ""
-        if expression == 0: return 0
+        if expression == 0:
+            if colon < 0: rt_dn_spec_hint(source, first, i)
+            return 0
         part = mk(.pair, mkpos(dc_parser.file, first))
         nodes[part].a = i32(expression)
         nodes[part].sval = if colon >= 0: i32(intern(spec)) else: -1

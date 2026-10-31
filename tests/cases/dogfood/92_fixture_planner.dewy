@@ -1,0 +1,89 @@
+# A round-robin fixture planner: the circle method pairs every club with
+# every other once, home and away alternate fairly, matches go to pitches
+# and kick-off slots, and a check reports each club's home count and the
+# longest run of home or away games.
+
+const CLUBS = ["Ashford" "Brockley" "Carnforth" "Dunmore" "Elstow" "Fenwick"]
+const PITCHES = ["North" "South"]
+const SLOTS = ["10:00" "12:30"]
+
+Match:type = [round:int home:string away:string]
+
+# The circle method: seat 0 stays put and the others turn one place a
+# round. An odd count gets a bye, written as none.
+fixtures = (clubs:array<string>):>array<Match> => {
+    let seats:array<string?> = [loop c in clubs c]
+    if seats.length % 2 =? 1 seats.push(none)
+    if seats.length <? 2 return []
+    let n = seats.length
+    let m = n - 1
+    let out:array<Match> = []
+    loop r in [0..m) {
+        let order = [seats[0] [loop p in [0..m) seats[1 + (p + m - r) % m]]...]
+        # table i seats the i-th club from each end
+        loop i in [0..n//2) and a in order and b in order.reversed {
+            if a is? none or b is? none continue
+            # the fixed club alternates by round, the others by table
+            let swap = if i =? 0 r % 2 =? 1 else i % 2 =? 1
+            out.push(if swap Match[r+1 b a] else Match[r+1 a b])
+        }
+    }
+    out
+}
+
+main = () => {
+    let plan = fixtures(CLUBS)
+    let rounds = plan.length // (CLUBS.length // 2)
+    printl"{CLUBS.length} clubs, {plan.length} matches over {rounds} rounds"
+
+    # a pitch and slot for each match of a round, in order
+    let per_round = PITCHES.length * SLOTS.length
+    let current = 0
+    let used = 0
+    loop m in plan {
+        if m.round not=? current {
+            current = m.round
+            used = 0
+            printl"round {current}"
+        }
+        let pitch = PITCHES[used % PITCHES.length]
+        let slot = SLOTS[used // PITCHES.length % SLOTS.length]
+        printl"  {slot} {pitch:<5}  {m.home:>9} v {m.away}"
+        used += 1
+        if used >? per_round printl"  (round {current} has more matches than pitches)"
+    }
+
+    # every pair meets exactly once
+    let met:dict<string int> = []
+    loop m in plan {
+        let key = [m.home m.away].sorted.join("-")
+        met[key] = (met.get(key) ?? 0) + 1
+    }
+    let pairs = CLUBS.length * (CLUBS.length - 1) // 2
+    let twice = [loop [k v] in met if v >? 1 k]
+    printl"{met.length} of {pairs} pairings played, repeats: {if twice.is_empty "none" else twice.join(" ")}"
+
+    # home balance and the longest run of home or away games per club
+    printl""
+    printl"{"club":<10} home away  longest run"
+    let rows = [loop club in CLUBS {
+        let venues = [loop m in plan if m.home =? club or m.away =? club m.home =? club]
+        let home = venues.count(true)
+        let best = 0
+        let run = 0
+        let previous = false
+        loop i in 0.. and at_home in venues {
+            run = if i >? 0 and at_home =? previous run + 1 else 1
+            previous = at_home
+            best = max(best run)
+        }
+        [club=club home=home away=venues.length - home run=best]
+    }]
+    let by_balance = rows.sorted_with((a b) => {
+        if a.run not=? b.run return a.run <? b.run
+        a.club <? b.club
+    })
+    loop r in by_balance printl"{r.club:<10} {r.home:>4} {r.away:>4}  {r.run:>11}"
+    let worst = by_balance.last
+    printl"least balanced: {worst.club} ({worst.run} in a row)"
+}

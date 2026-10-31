@@ -2628,6 +2628,13 @@ sink_close = (b: int, result: int) -> int:
     out
 
 check_block = (b: int, expected: int, want_value: bool) -> int:
+    # (a lowered combined loop is a statement wherever it stands: its body's values go where
+    # the loop's own would, to the enclosing collector or body, as a single-header loop's do)
+    if want_value and has_flag(b, NF_LOOP_SETUP) and files[pos_file(nodes[b].pos)].is_dewy:
+        check_block(b, 0, false)
+        result = if has_flag(b, NF_FLOW_RETURNS): T_NEVER else: T_VOID
+        nodes[b].type = i32(result)
+        return result
     sink_mode = -1
     if sink_body_mode >= 0:
         sink_mode = sink_body_mode
@@ -5746,6 +5753,7 @@ unpack_values = (e: int, t: int, bindings: int[], pos: int, statements: mut int[
             if nodes[binding].kind == .hole: fatal(nodes[binding].pos, "record unpacking names fields; leave unwanted fields out instead of using _")
             if nodes[binding].kind == .tuple and nodes[binding].sval == 0: fatal(nodes[binding].pos, "record unpacking needs field names at this level: unpack a field with `as`, `[field as [a b]] = record`")
             nodes[value].name = if nodes[binding].sval != 0: nodes[binding].sval else: nodes[binding].name
+            unpack_field_hint(t, int(nodes[value].name), nodes[binding].pos)
         if nodes[binding].kind == .tuple:
             inner = prune(check_expr(value, 0))
             unpack_values(last_checked, inner, kids(binding), nodes[binding].pos, statements, values)
@@ -5756,6 +5764,19 @@ unpack_values = (e: int, t: int, bindings: int[], pos: int, statements: mut int[
                 value = coerce(last_checked, target)
                 add_flag(value, NF_CHECKED)
             values.push(value)
+
+# `let (q r) = a.divmod(b)`: a record unpacks by field name, so a name it lacks is an error
+# naming its fields and the `as` rename (Python unpacks a pair by position). O(fields).
+unpack_field_hint = (t: int, name: int, pos: int):
+    if types[t].kind != .struct_ or fn_name_for(t, name): return
+    si = int(types[t].st)
+    names: str[]
+    loop i in [0..int(structs[si].nfields)):
+        f = int(fields[int(structs[si].fields) + i].name)
+        if f == name: return
+        names.push(name_of(f))
+    if names.len() == 0: return
+    fatal(pos, "{dt(t)} has no field '{name_of(name)}': a record unpacks by field name, not by position, as in `[{join(names, " ")}] = ...`; `as` gives a field another name, `[{names[0]} as {name_of(name)}]`")
 
 # `length - k`, checked: an index counted from the end.
 unpack_minus = (length: int, k: int, pos: int) -> int:

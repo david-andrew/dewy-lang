@@ -1,0 +1,15 @@
+# `[x ys...]` (or extending a receiver of known length) is one longer than
+# its source, so an index up to ys.length is in bounds.
+pick = (m:int i:int):>int => {
+    if m <? 1 or i <? 0 or i >? m return -1
+    let tail = [loop p in [0..m) p * 10]
+    let all = [7 tail...]
+    all[i]
+}
+pick2 = (ys:array<int> i:int):>int => {
+    if i <? 0 or i >? ys.length + 1 return -1
+    let all = [1 2]
+    all.extend(ys)
+    all[i]
+}
+main = () => printl"{pick(3 0)} {pick(3 3)} {pick2([5 6] 3)} {pick2([5 6] 0)}"

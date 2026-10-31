@@ -962,16 +962,20 @@ fact_endpoint = (n: int, s: mut FactState, base: int, kind: int) -> int:
 fact_name_sorted = 0
 fact_name_sorted_by = 0
 fact_name_graphemes = 0
+fact_name_sorted_with = 0
 fact_copy_length_call = (n: int) -> bool:
     if nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) < 1: return false
     d = int(fns[int(nodes[n].sym)].decl)
     if d == 0: return false
     if fact_name_sorted == 0:
         fact_name_sorted = intern("sorted"); fact_name_sorted_by = intern("sorted_by"); fact_name_graphemes = intern("graphemes")
+        fact_name_sorted_with = intern("sorted_with")
     name = int(nodes[d].name)
-    if name != fact_name_sorted and name != fact_name_sorted_by and name != fact_name_graphemes: return false
+    if name != fact_name_sorted and name != fact_name_sorted_by and name != fact_name_sorted_with and name != fact_name_graphemes: return false
     if tkind(fact_type(ntype(n))) != .array: return false
     path = files[pos_file(nodes[d].pos)].path
+    # (`sorted_with(less)` permutes a by-value copy: the callback sees elements, never the copy)
+    if name == fact_name_sorted_with: return path == lib_dir + "/core/array.jo" and tkind(fact_type(ntype(kid(n, 0)))) == .array
     if name == fact_name_sorted or name == fact_name_sorted_by:
         return path == lib_dir + "/core/array.jo" and tkind(fact_type(ntype(kid(n, 0)))) == .array or name == fact_name_sorted and path == lib_dir + "/std/dewy_sets.jo" and is_dewy_set_type(fact_type(ntype(kid(n, 0))))
     # Jo strings use byte length: only the Dewy grapheme projection relates.
@@ -5806,14 +5810,24 @@ fact_loop_header = (entry: mut FactState, back: FactState, old: FactState, at: i
     # Lockstep counters: two changing integers that start at constants keep
     # the difference entry gives them when the backedge entails it too (a
     # combined loop's range and hidden indices step together).
+    # Each counter is linked only to the last earlier one related to it, so
+    # every class of counters is a chain (paths give the other pairs) and no
+    # counter's rows crowd out its own guard's within fact_difference's
+    # per-term cap (four counters in all pairs would take six of its eight).
     lockstep: FactDifference[]
     if counters.len() <= 8:
         loop i in counters:
             x = fact_bound(entry, entry.bindings[fact_binding(entry, back.bindings[i].place)].value)
+            link: FactDifference[]
             loop j in counters:
+                if j == i: break
                 y = fact_bound(entry, entry.bindings[fact_binding(entry, back.bindings[j].place)].value)
-                if i == j or y.lo == FACT_MIN or not fact_add_fits(x.lo, -y.lo) or x.lo - y.lo == FACT_MIN: continue
-                if fact_entails(back, back.bindings[i].value, back.bindings[j].value, x.lo - y.lo): lockstep.push(FactDifference(i, j, x.lo - y.lo))
+                if y.lo == FACT_MIN or not fact_add_fits(x.lo, -y.lo) or x.lo - y.lo == FACT_MIN: continue
+                rows: FactDifference[]
+                if fact_entails(back, back.bindings[i].value, back.bindings[j].value, x.lo - y.lo): rows.push(FactDifference(i, j, x.lo - y.lo))
+                if fact_entails(back, back.bindings[j].value, back.bindings[i].value, y.lo - x.lo): rows.push(FactDifference(j, i, y.lo - x.lo))
+                if rows.len() > 0: link = rows
+            loop row in link: lockstep.push(row)
     carried: FactDifference[]
     offsets: int[]
     if changing.len() > 0 and nodes[at].kind == .while_: fact_offset_guarded(int(nodes[at].a), offsets, 0)
@@ -6790,7 +6804,7 @@ fact_carried_assigns = (n: int) -> int[]:
             # (declared before the loop, so not in its body; the loop's own
             # element and hidden position are not carried)
             l = int(nodes[a].sym)
-            if nodes[a].kind == .ident and nodes[a].aux == i32(int(SK.local)) and l != int(nodes[n].sym) and l != int(nodes[n].c) and fact_scalar(int(locals[l].type)) and is_int(int(locals[l].type)) and locals[l].pos < nodes[n].pos: out.push(e)
+            if nodes[a].kind == .ident and nodes[a].aux == i32(int(SK.local)) and l != int(nodes[n].sym) and l != int(nodes[n].c) and (fact_scalar(int(locals[l].type)) and is_int(int(locals[l].type)) or is_nd(fact_type(int(locals[l].type)))) and locals[l].pos < nodes[n].pos: out.push(e)
         mask = isolation_children(k)
         if mask < 0: continue
         if mask & 1 != 0: work.push(int(nodes[e].a))
@@ -6806,7 +6820,8 @@ fact_carried_assigns = (n: int) -> int[]:
 # results to decide (its domain's far endpoint). O(1).
 fact_carried_type = (t0: int, f: int) -> bool:
     t = fact_type(t0)
-    t == T_MATH_INT or exact_demands.has(f) and fact_scalar(t) and is_int(t) and types[t].sign
+    # (an N-D array a counted loop replaces, `m = m * p`: its shape settles as a while loop's does)
+    t == T_MATH_INT or is_nd(t) or exact_demands.has(f) and fact_scalar(t) and is_int(t) and types[t].sign
 
 # Whether a range or array loop needs its header iterated: an active carried
 # assignment that no counted sum already bounds.
@@ -8784,6 +8799,10 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                     fact_difference(s, length, size, -grown.lo, n)
                 # (an empty receiver, as `[s...]`'s: the new length is the operand's)
                 else if added != 0 and old.lo == 0 and old.hi == 0: size = added
+                # (a receiver of known length, as `[x ys...]`'s: the operand's length plus it)
+                else if added != 0 and not old.wide and old.lo == old.hi and old.lo > 0:
+                    fact_difference(s, size, added, old.lo, n)
+                    fact_difference(s, added, size, -old.lo, n)
             fresh = fact_new(s, FactBound(), FactTerm(type = ntype(a)))
             if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(fresh, -1, false, size))
             # Extending an empty value copies exactly the evaluated source.

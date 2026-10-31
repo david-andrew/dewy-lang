@@ -1,0 +1,6 @@
+# A replacement of another shape leaves the loop's shape unknown.
+grow = (m:array<float64 length=[2 2]> q:array<float64 length=[2 3]>):>float64 => {
+    let result = m
+    loop _ in [0..2) result = result * q
+    result[0 0]
+}

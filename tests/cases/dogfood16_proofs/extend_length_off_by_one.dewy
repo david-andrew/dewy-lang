@@ -1,0 +1,7 @@
+# One past the extended length is outside it.
+pick = (m:int i:int):>int => {
+    if m <? 1 or i <? 0 or i >? m + 1 return -1
+    let tail = [loop p in [0..m) p]
+    let all = [7 tail...]
+    all[i]
+}

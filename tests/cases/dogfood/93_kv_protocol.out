@@ -1,0 +1,14 @@
+SET greeting hello there   -> OK
+GET greeting               -> VALUE hello there
+get missing                -> NIL
+INCR visits                -> VALUE 1
+INCR visits                -> VALUE 2
+SET name dewy              -> OK
+INCR name                  -> ERR not a number
+DEL greeting               -> OK
+DEL greeting               -> NIL
+KEYS                       -> KEYS name visits
+FLY away                   -> ERR unknown command FLY
+SET lonely                 -> ERR SET needs a key and a value
+STATS                      -> STATS keys=2 hits=1 misses=1
+13 replies, 3 errors

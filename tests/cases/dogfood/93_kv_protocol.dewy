@@ -1,0 +1,104 @@
+# modes: native native-release
+# A tiny key-value server speaking a line protocol over loopback TCP. The
+# client sends a batch of commands; the server buffers bytes until whole
+# lines arrive, answers each one, and the client reads the replies back.
+
+import net
+
+Store:type = [values:dict<string string> hits:int=0 misses:int=0]
+
+# One command line in, one reply line out.
+handle = (@store:Store line:string):>string => {
+    let words = line.split()
+    if words.is_empty return "ERR empty"
+    let verb = words[0].upper
+    match verb {
+        <"SET"> => {
+            if words.length <? 3 return "ERR SET needs a key and a value"
+            store.values[words[1]] = words[2..].join(" ")
+            "OK"
+        }
+        <"GET"> => {
+            if words.length not=? 2 return "ERR GET needs one key"
+            let found = store.values.get(words[1])
+            if found is? none {
+                store.misses += 1
+                return "NIL"
+            }
+            store.hits += 1
+            "VALUE {found}"
+        }
+        <"DEL"> => {
+            if words.length not=? 2 return "ERR DEL needs one key"
+            if words[1] not in? store.values return "NIL"
+            store.values.pop(words[1]);
+            "OK"
+        }
+        <"INCR"> => {
+            if words.length not=? 2 return "ERR INCR needs one key"
+            let now = to_int(store.values.get(words[1]) ?? "0")
+            if now is? exception return "ERR not a number"
+            store.values[words[1]] = "{now + 1}"
+            "VALUE {now + 1}"
+        }
+        <"KEYS"> => "KEYS {store.values.keys.sorted.join(" ")}"
+        <"STATS"> => "STATS keys={store.values.length} hits={store.hits} misses={store.misses}"
+        _ => "ERR unknown command {verb}"
+    }
+}
+
+# Read until `count` whole lines have arrived (or the stream ends).
+read_lines = (stream:net.TcpStream count:int):>array<string> | net.NetError | Canceled => {
+    let pending = ""
+    let lines:array<string> = []
+    loop lines.length <? count {
+        let chunk = net.tcp_receive(stream)
+        if chunk is? none break
+        let bytes = chunk or_throw
+        pending = "{pending}{(bytes as string | none) ?? "?"}"
+        loop true {
+            let at = pending.find("\n")
+            if at is? Missing or at >=? pending.length break
+            lines.push(pending[..at).trim_end)
+            pending = pending[at+1..]
+        }
+    }
+    lines
+}
+
+main = ():>void | net.NetError | Canceled => {
+    let commands = [
+        "SET greeting hello there"
+        "GET greeting"
+        "get missing"
+        "INCR visits"
+        "INCR visits"
+        "SET name dewy"
+        "INCR name"
+        "DEL greeting"
+        "DEL greeting"
+        "KEYS"
+        "FLY away"
+        "SET lonely"
+        "STATS"
+    ]
+    let server = net.tcp_listen(0) or_throw
+    let client = net.tcp_connect("127.0.0.1" server.port) or_throw
+    let peer = net.tcp_accept(server) or_throw
+
+    net.tcp_send(client "{commands.join("\n")}\n") or_throw
+    let store = Store[[]]
+    let received = read_lines(peer commands.length) or_throw
+    let replies = [loop line in received handle(@store line)]
+    net.tcp_send(peer "{replies.join("\n")}\n") or_throw
+
+    let answers = read_lines(client commands.length) or_throw
+    loop command in commands and answer in answers {
+        printl"{command:<26} -> {answer}"
+    }
+    let errors = answers.count((a) => a.startswith("ERR"))
+    printl"{answers.length} replies, {errors} errors"
+    net.tcp_close(client)
+    net.tcp_close(peer)
+    net.tcp_close(server)
+}

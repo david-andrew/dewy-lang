@@ -1,0 +1,119 @@
+# A three-state weather Markov chain: the transition matrix is estimated
+# from an observed day sequence, the forecast distribution is stepped day
+# by day, the stationary distribution found by power iteration, and a
+# seeded simulation compared with it as a text histogram.
+
+const STATES = ["sun" "cloud" "rain"]
+const OBSERVED = "SSCSSRRCSSSCCRRRCSSSSCRCSSSRRCCSSSCSSRRRSSCS"
+
+state_of = (c:string):>int => match c {
+    <"S"> => 0
+    <"C"> => 1
+    _ => 2
+}
+
+# counts[i j] is how often state j followed state i; each row becomes
+# probabilities (a row never seen stays uniform)
+estimate = (days:string):>array<float64 length=[3 3]> => {
+    let counts = zeros(3 3)
+    let previous = -1
+    loop c in days {
+        let s = state_of(c)
+        if previous >=? 0 counts[previous s] += 1.0
+        previous = s
+    }
+    loop i in [0..3) {
+        let total = sum(row(counts i))
+        loop j in [0..3) {
+            counts[i j] = if total >? 0.0 counts[i j] / total else 1.0 / 3.0
+        }
+    }
+    counts
+}
+
+# one day forward: next[j] = sum over i of now[i] * p[i j]
+step = (p:array<float64 length=[3 3]> now:array<float64>):>array<float64> => {
+    [loop j in [0..3) {
+        let column = col(p j)
+        if column.length =? now.length dot(now column) else 0.0
+    }]
+}
+
+# the k-day transition matrix
+power = (p:array<float64 length=[3 3]> k:int):>array<float64 length=[3 3]> => {
+    let result:array<float64 length=[3 3]> = eye(3)
+    loop _ in [0..k) result = result * p
+    result
+}
+
+bar = (share:float64 width:int64):>string => {
+    if not (0.0 <=? share <=? 1.0) return "?"
+    "#" * int(share * float64(width))
+}
+
+main = () => {
+    let p = estimate(OBSERVED)
+    printl"transition probabilities (row: today, column: tomorrow)"
+    print"{"":>6}"
+    loop name in STATES print"{name:>7}"
+    printl""
+    loop i in [0..3) {
+        print"{STATES[i]:>6}"
+        loop j in [0..3) print"{p[i j]:>7.3f}"
+        printl""
+    }
+
+    # forecast from a sunny day
+    let today:array<float64> = [1.0 0.0 0.0]
+    loop day in [1..5] {
+        today = step(p today)
+        let parts = [loop i in [0..3) "{STATES[i]} {today.get(i) ?? 0.0:.3f}"]
+        printl"day {day}: {parts.join(", ")}"
+    }
+
+    let week = power(p 7)
+    printl"a week after rain: {[loop j in [0..3) "{STATES[j]} {week[2 j]:.3f}"].join(", ")}"
+
+    # stationary distribution: step until nothing moves
+    let pi:array<float64> = [1.0/3.0 1.0/3.0 1.0/3.0]
+    let rounds = 0
+    loop rounds <? 200 {
+        let next = step(p pi)
+        let moved = sum([loop a in pi and b in next abs(a - b)])
+        pi = next
+        rounds += 1
+        if moved <? 1e-12 break
+    }
+    printl"stationary after {rounds} steps: {[loop x in pi format(x ".4f")].join(" ")}"
+
+    # simulate 2000 days and compare the visit shares
+    let gen = rng(16)
+    let visits = [0 0 0]
+    let s = 0
+    loop _ in [0..2000) {
+        let r = gen.next_float()
+        let acc = 0.0
+        let next = 2
+        loop j in [0..3) {
+            acc += p[s j]
+            if r <? acc { next = j; break }
+        }
+        s = next
+        visits[s] += 1
+    }
+    loop i in [0..3) {
+        let share = float64(visits[i]) / 2000.0
+        let expected = pi.get(i) ?? 0.0
+        printl"{STATES[i]:>6} {share:.3f} vs {expected:.3f} {bar(share 40)}"
+    }
+
+    # the same one-step update on the GPU path (CPU fallback when absent)
+    let current = gpu(reshape(pi 1 3))
+    let back = cpu(current)
+    printl"downloaded {back.length}: first {back[0 0]:.4f}"
+    let scaled = {
+        $runtime_checks   # a GPU program's operand shapes are checked when it runs
+        cpu(current .* 100.0)
+    }
+    printl"percent: {[loop x in scaled.data format(x ".1f")].join(" ")}"
+}
