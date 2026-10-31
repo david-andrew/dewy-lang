@@ -1,0 +1,19 @@
+# Writing grid cells in loops keeps every row's length.
+main = () => {
+    let seen = [loop _ in [0..5) [loop _ in [0..8) false]]
+    loop y in [0..5) {
+        loop x in [0..8) { seen[y][x] = (x + y) % 3 =? 0 }
+    }
+    let k = 0
+    loop k <? 2 {
+        seen[2][3] = not seen[2][3]
+        k += 1
+    }
+    let n = 4
+    let m = 6
+    let table = [loop _ in [0..n) [loop _ in [0..m) 0]]
+    loop i in [0..n) { loop j in [0..m) { table[i][j] = i * j } }
+    printl(seen[4][7])
+    printl(seen[2][3])
+    printl(table[3][5])
+}

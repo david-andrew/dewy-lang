@@ -1,0 +1,98 @@
+# Two elevators serve a ten-floor building. Calls arrive at set ticks; each
+# call goes to the car that would reach it soonest. A car keeps moving in
+# its direction while it has stops ahead (the SCAN rule), then turns round.
+
+Direction:type = 'up' | 'down' | 'idle'
+
+Car:type = [
+    name:string
+    floor:int = 0
+    heading:Direction = 'idle'
+    stops:set<int> = set[]
+    riders:int = 0
+    moved:int = 0
+]
+
+Call:type = [tick:int origin:int dest:int]
+
+const FLOORS = 10
+const CALLS = [
+    Call[0 0 7]
+    Call[1 5 2]
+    Call[2 9 0]
+    Call[4 3 8]
+    Call[6 7 1]
+    Call[7 2 2]
+    Call[9 6 9]
+    Call[12 1 4]
+]
+
+# Floors a car would travel to reach `floor`, counting a detour past its
+# furthest stop when it is heading away.
+cost = (car:Car floor:int):>int => {
+    if car.heading =? 'idle' or car.stops.is_empty return (car.floor - floor).abs()
+    let ahead = if car.heading =? 'up' floor >=? car.floor else floor <=? car.floor
+    if ahead return (car.floor - floor).abs()
+    let far = if car.heading =? 'up' max(car.stops.values) else min(car.stops.values)
+    (far - car.floor).abs() + (far - floor).abs()
+}
+
+choose = (cars:array<Car> floor:int):>int? => {
+    if cars.is_empty return none
+    let best = 0
+    loop i in [1..cars.length) {
+        if cost(cars[i] floor) <? cost(cars[best] floor) best = i
+    }
+    best
+}
+
+step = (@car:Car):>void => {
+    if car.floor in? car.stops {
+        car.stops.remove(car.floor);
+        printl"    {car.name} opens at {car.floor}"
+    }
+    if car.stops.is_empty {
+        car.heading = 'idle'
+        return
+    }
+    let above = car.stops.values.any(f => f >? car.floor)
+    let below = car.stops.values.any(f => f <? car.floor)
+    if car.heading =? 'up' and not above car.heading = 'down'
+    else if car.heading =? 'down' and not below car.heading = 'up'
+    else if car.heading =? 'idle' car.heading = if above 'up' else 'down'
+    car.floor += if car.heading =? 'up' 1 else -1
+    car.moved += 1
+}
+
+main = () => {
+    let cars = [Car[name="A"] Car[name="B" floor=FLOORS-1]]
+    let pending = CALLS
+    let waits:array<int> = []
+    let tick = 0
+    loop tick <? 40 {
+        loop c in pending {
+            if c.tick not=? tick continue
+            if c.origin =? c.dest {
+                printl"t={tick}: call {c.origin}->{c.dest} needs no ride"
+                continue
+            }
+            let pick = choose(cars c.origin)
+            if pick is? none continue
+            printl"t={tick}: call {c.origin}->{c.dest} goes to {cars[pick].name} (cost {cost(cars[pick] c.origin)})"
+            cars[pick].stops.push(c.origin)
+            cars[pick].stops.push(c.dest)
+            cars[pick].riders += 1
+            waits.push(cost(cars[pick] c.origin))
+        }
+        loop @car in cars step(@car)
+        let busy = cars.any(c => not c.stops.is_empty)
+        tick += 1
+        if not busy and tick >? CALLS[end].tick break
+    }
+    printl"done at t={tick}"
+    loop car in cars {
+        printl"{car.name}: floor {car.floor}, {car.riders} riders, {car.moved} floors moved"
+    }
+    if waits.is_empty return
+    printl"average estimated wait: {sum(waits) / waits.length:.2f} floors"
+}

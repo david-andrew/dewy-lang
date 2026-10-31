@@ -1,0 +1,110 @@
+# Compress a few short messages two ways: run-length encoding, then a
+# Huffman code built from the character counts. Decoding both back checks
+# the round trip, and the report compares the sizes in bits.
+
+Node:type = [weight:int symbol:string left:Node?=none right:Node?=none]
+
+# "aaabcc" -> [["a" 3] ["b" 1] ["c" 2]]
+run_lengths = (text:string):>array<[string int]> => {
+    let runs:array<[string int]> = []
+    loop ch in text {
+        if runs.length >? 0 and runs[end][0] =? ch {
+            runs[end][1] += 1
+        } else {
+            runs.push([ch 1])
+        }
+    }
+    runs
+}
+
+rle_text = (runs:array<[string int]>):>string =>
+    [loop [ch n] in runs if n =? 1 ch else "{n}{ch}"].join
+
+rle_decode = (runs:array<[string int]>):>string =>
+    [loop [ch n] in runs ch * n].join
+
+# Characters in first-seen order with their counts.
+counts = (text:string):>dict<string int> => {
+    let seen:dict<string int> = []
+    loop ch in text {
+        if ch not in? seen seen[ch] = 0
+        seen[ch] += 1
+    }
+    seen
+}
+
+# Repeatedly merge the two lightest trees. Ties go to the one made first,
+# so the code is the same on every run.
+build_tree = (freq:dict<string int>):>Node? => {
+    let forest = [loop [ch n] in freq Node[n ch]]
+    if forest.is_empty return none
+    loop forest.length >? 1 {
+        forest.sort(key=(n:Node) => n.weight)
+        let a = forest.pop(0)
+        let b = forest.pop(0)
+        forest.push(Node[a.weight+b.weight "{a.symbol}{b.symbol}" a b])
+    }
+    forest[0]
+}
+
+assign = (node:Node prefix:string @codes:dict<string string>):>void => {
+    if node.left is? none and node.right is? none {
+        codes[node.symbol] = if prefix =? "" "0" else prefix
+        return
+    }
+    if node.left is? Node assign(node.left "{prefix}0" @codes)
+    if node.right is? Node assign(node.right "{prefix}1" @codes)
+}
+
+encode = (text:string codes:dict<string string>):>string =>
+    [loop ch in text codes.get(ch) ?? "?"].join
+
+decode = (bits:string tree:Node):>string => {
+    # A one-symbol message has a lone leaf: every bit is that symbol.
+    if tree.left is? none and tree.right is? none return tree.symbol * bits.length
+    let out:array<string> = []
+    let at = tree
+    loop b in bits {
+        let next = if b =? "0" at.left else at.right
+        if next is? none return "<bad code>"
+        at = next
+        if at.left is? none and at.right is? none {
+            out.push(at.symbol)
+            at = tree
+        }
+    }
+    out.join
+}
+
+report = (text:string):>void => {
+    printl"message: {text}"
+    let runs = run_lengths(text)
+    let packed = rle_text(runs)
+    let ok_rle = rle_decode(runs) =? text
+    printl"  rle:     {packed} ({runs.length} runs, round trip {ok_rle})"
+    let tree = build_tree(counts(text))
+    if tree is? none or text.is_empty {
+        printl"  huffman: nothing to encode"
+        return
+    }
+    let codes:dict<string string> = []
+    assign(tree "" @codes)
+    let table = [loop k in codes.keys.sorted() "{k}={codes[k]}"]
+    printl"  codes:   {table.join(" ")}"
+    let bits = encode(text codes)
+    let back = decode(bits tree)
+    let raw = text.length * 8
+    let saved = 100 - bits.length * 100 // raw
+    printl"  huffman: {bits.length} bits vs {raw} raw, {saved}% smaller, round trip {back =? text}"
+}
+
+main = () => {
+    let messages = [
+        "aaaabbbcca"
+        "mississippi river"
+        "zzzzzzzzzz"
+        ""
+        "abracadabra"
+    ]
+    loop m in messages report(m)
+}

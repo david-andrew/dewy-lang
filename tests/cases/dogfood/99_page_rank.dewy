@@ -1,0 +1,82 @@
+# Rank the pages of a tiny wiki by PageRank. Links are read from a text
+# dump, pages are numbered in first-seen order, and power iteration runs
+# until the ranks stop moving. Dangling pages share their rank evenly.
+
+const LINKS = """
+home -> about, blog, docs
+about -> home
+blog -> home, post-1, post-2
+post-1 -> blog, post-2
+post-2 -> blog
+docs -> api, guide, home
+guide -> api
+api ->
+orphan -> home
+"""
+
+const DAMPING = 0.85
+const TOLERANCE = 1e-10
+
+# The page's number, giving it the next one the first time it is named.
+number = (@index:dict<string int> @names:array<string> page:string):>int => {
+    let known = index.get(page)
+    if known isnt? none return known
+    index[page] = names.length
+    names.push(page)
+    names.length - 1
+}
+
+main = () => {
+    # Number every page the first time it is named.
+    let index:dict<string int> = []
+    let names:array<string> = []
+    let edges:array<[int int]> = []
+    loop line in LINKS.trim.lines {
+        let parts = line.split("->")
+        if parts.length not=? 2 continue
+        let source = number(@index @names parts[0].trim)
+        loop t in parts[1].split(",") {
+            if t.trim.is_empty continue
+            edges.push([source number(@index @names t.trim)])
+        }
+    }
+    let n = names.length
+    if n =? 0 return
+
+    # Outgoing links per page, by number.
+    let out:array<array<int>> = [loop _ in names []]
+    loop [from_page to_page] in edges {
+        if not (0 <=? from_page <? out.length) continue
+        if to_page not in? out[from_page] out[from_page].push(to_page)
+    }
+
+    let rank:array<float64> = [loop _ in names 1.0 / n]
+    let rounds = 0
+    loop rounds <? 200 {
+        rounds += 1
+        let dangling = sum([loop p in [0..n) if out[p].is_empty rank[p] else 0.0])
+        let next:array<float64> = [loop _ in names (1.0 - DAMPING) / n + DAMPING * dangling / n]
+        loop p in [0..n) {
+            let links = out[p]
+            if links.is_empty continue
+            let share = DAMPING * rank[p] / links.length
+            loop q in links {
+                if 0 <=? q <? next.length next[q] += share
+            }
+        }
+        let change = sum([loop a in rank and b in next (a - b).abs()])
+        rank = next
+        if change <? TOLERANCE break
+    }
+
+    printl"converged after {rounds} rounds (total rank {sum(rank):.6f})"
+    let order = [loop i in [0..n) i].sorted(key=(i) => -(rank.get(i) ?? 0.0))
+    loop place in 1.. and i in order {
+        # (sorting [0..n) keeps its elements' bounds, not their relation to n)
+        if i >=? n or i >=? rank.length or i >=? out.length continue
+        let width = rank[i] * 100.0
+        let bar = if 0.0 <=? width <=? 100.0 "#" * int(width) else "?"
+        let inbound = sum([loop links in out if i in? links 1 else 0])
+        printl"{place:>2}. {names[i]:<7} {rank[i]:.4f} in={inbound} out={out[i].length} {bar}"
+    }
+}

@@ -1,0 +1,99 @@
+# Carve a maze with a randomized depth-first search (seeded, so every run
+# draws the same maze), draw it in ASCII, then solve it breadth first and
+# draw the shortest route.
+
+const W = 8
+const H = 5
+
+Column:type = int64<x => 0 <=? x and x <? W>
+Row:type = int64<y => 0 <=? y and y <? H>
+Cell:type = [x:Column y:Row]
+
+# Walls are kept per cell: right[y][x] is the wall east of (x, y) and
+# down[y][x] the wall south of it.
+Maze:type = [right:array<array<bool length=W> length=H> down:array<array<bool length=W> length=H>]
+
+carve = (seed:int64):>Maze => {
+    let maze = Maze[
+        [loop _ in [0..H) [loop _ in [0..W) true]]
+        [loop _ in [0..H) [loop _ in [0..W) true]]
+    ]
+    let seen = [loop _ in [0..H) [loop _ in [0..W) false]]
+    let draw = rng(seed)
+    let stack:array<Cell> = [Cell[0 0]]
+    seen[0][0] = true
+    loop not stack.is_empty {
+        let [x y] = stack[end]
+        let options:array<Cell> = []
+        if x >? 0 and not seen[y][x - 1] options.push(Cell[x - 1 y])
+        if x + 1 <? W and not seen[y][x + 1] options.push(Cell[x + 1 y])
+        if y >? 0 and not seen[y - 1][x] options.push(Cell[x y - 1])
+        if y + 1 <? H and not seen[y + 1][x] options.push(Cell[x y + 1])
+        if options.is_empty {
+            stack.pop();
+            continue
+        }
+        let [x as nx y as ny] = options[draw.next_int(0 options.length)]
+        if nx >? x maze.right[y][x] = false
+        if nx <? x maze.right[y][nx] = false
+        if ny >? y maze.down[y][x] = false
+        if ny <? y maze.down[ny][x] = false
+        seen[ny][nx] = true
+        stack.push(Cell[nx ny])
+    }
+    maze
+}
+
+# Breadth-first search from the top-left to the bottom-right cell.
+solve = (maze:Maze):>array<Cell> => {
+    let prev:dict<Cell Cell> = [Cell[0 0] -> Cell[0 0]]
+    let queue:array<Cell> = [Cell[0 0]]
+    let goal = Cell[W - 1 H - 1]
+    loop at in @queue {
+        if at =? goal break
+        let [x y] = at
+        let steps:array<Cell> = []
+        if x + 1 <? W and not maze.right[y][x] steps.push(Cell[x + 1 y])
+        if x >? 0 and not maze.right[y][x - 1] steps.push(Cell[x - 1 y])
+        if y + 1 <? H and not maze.down[y][x] steps.push(Cell[x y + 1])
+        if y >? 0 and not maze.down[y - 1][x] steps.push(Cell[x y - 1])
+        loop s in steps {
+            if prev.insert_if_absent(s at) queue.push(s)
+        }
+    }
+    if goal not in? prev return []
+    let path = [goal]
+    loop path[end] not=? Cell[0 0] {
+        # (every recorded step leads back to the start, but nothing proves it)
+        let back = prev.get(path[end])
+        if back is? none break
+        path.push(back)
+    }
+    path.reversed()
+}
+
+render = (maze:Maze path:array<Cell>):>void => {
+    let on = set(path)
+    printl("+{"---+" * W}")
+    loop y in [0..H) {
+        let row = "|"
+        let floor = "+"
+        loop x in [0..W) {
+            let mark = if Cell[x y] in? on " o " else "   "
+            row = "{row}{mark}{if maze.right[y][x] "|" else " "}"
+            floor = "{floor}{if maze.down[y][x] "---" else "   "}+"
+        }
+        printl(row)
+        printl(floor)
+    }
+}
+
+main = () => {
+    loop seed in [7 2026] {
+        let maze = carve(seed)
+        let path = solve(maze)
+        printl"seed {seed}: route of {path.length} cells"
+        render(maze path)
+        printl""
+    }
+}

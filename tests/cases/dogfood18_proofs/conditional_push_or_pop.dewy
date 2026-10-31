@@ -1,0 +1,6 @@
+# Near miss: a loop that may also pop does not only grow.
+main = () => {
+    let kept = [9]
+    loop v in [1 5 2] { if v >? 2 { kept.push(v) } else { kept.pop(); } }
+    printl(kept[0])
+}

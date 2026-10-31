@@ -1,0 +1,12 @@
+# Sorting a comprehension keeps what every element is: these are positions.
+main = () => {
+    let names = ["cho" "ana" "dev" "ben"]
+    let n = names.length
+    let order = [loop i in [0..n) i].sorted(key=(i) => -i)
+    loop i in order {
+        if i <? names.length printl(names[i])
+    }
+    let picked = [loop i in [0..10) if i % 3 =? 0 i].sorted_with((a b) => a >? b)
+    let digits = "0123456789"
+    printl([loop i in picked digits[i]].join)
+}

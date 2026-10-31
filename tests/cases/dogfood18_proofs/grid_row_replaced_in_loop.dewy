@@ -1,0 +1,10 @@
+# Near miss: storing a shorter row breaks the shared length.
+main = () => {
+    let seen = [loop _ in [0..5) [loop _ in [0..8) false]]
+    let k = 0
+    loop k <? 2 {
+        seen[1] = [true]
+        k += 1
+    }
+    printl(seen[4][7])
+}

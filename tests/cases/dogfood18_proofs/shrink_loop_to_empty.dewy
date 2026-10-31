@@ -1,0 +1,6 @@
+# Near miss: popping while nonempty can leave nothing.
+main = () => {
+    let xs = [3 1 2]
+    loop xs.length >? 0 { xs.pop(); }
+    printl(xs[0])
+}

@@ -1,0 +1,27 @@
+# Merging the two smallest until one is left keeps the array nonempty.
+merge_all = (weights:array<int>):>int => {
+    let forest = weights.copy
+    if forest.is_empty return 0
+    loop forest.length >? 1 {
+        forest.sort()
+        let a = forest.pop(0)
+        let b = forest.pop(0)
+        forest.push(a + b)
+    }
+    forest[0]
+}
+grow = (start:array<int>):>int => {
+    let xs = start.copy
+    if xs.is_empty return 0
+    let i = 0
+    loop i <? 3 {
+        xs.push(i)
+        i += 1
+    }
+    xs[0] + xs.length
+}
+main = () => {
+    printl(merge_all([5 1 4 2]))
+    printl(merge_all([]))
+    printl(grow([7]))
+}

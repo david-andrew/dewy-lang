@@ -1,0 +1,9 @@
+# Near miss: two pops per pass under a one-element guard.
+main = () => {
+    let xs = [3 1 2]
+    loop xs.length >? 0 {
+        xs.pop();
+        xs.pop();
+    }
+    printl(xs.length)
+}

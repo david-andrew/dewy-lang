@@ -1,0 +1,12 @@
+# Pushing only some of the time never shrinks the array.
+keep_large = (seed:array<int> values:array<int>):>int => {
+    let kept = seed.copy
+    if kept.is_empty return -1
+    loop v in values { if v >? 2 kept.push(v) }
+    loop i in [0..3) { if i =? 1 { kept.push(i) } else if i =? 2 break }
+    kept[0]
+}
+main = () => {
+    printl(keep_large([9] [1 5 2 7]))
+    printl(keep_large([] [1]))
+}

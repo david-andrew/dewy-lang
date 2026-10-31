@@ -720,13 +720,18 @@ can be stored in that type. Halving an exact sum or difference of `int64`
 values retains its finite bounds through a local variable, including endpoint
 values and negative floor rounding.
 A sorted copy has its input value's length and retains bounds shared by all
-known input elements, including record fields. Sorting or reversing in place
+known input elements, including record fields, or by every element (a
+comprehension's, `[loop i in [0..n) i].sorted(key=f)` holds numbers in `0..n-1`'s
+interval, though not their relation to `n`). Sorting or reversing in place
 retains those bounds for builtin values. Finite element inventories also retain
 scalar relations established for every entry, such as an index being below
 another array's length. A write to a known position in a short `fill` retains
 facts about its untouched entries. Element writes, unknown mutations and copy
 hooks discard evidence they can change. `xs.push(xs.pop())` and `xs.insert(xs.pop() i)` keep
-`xs.length`, in loops too. Rows pushed in a loop into an array that was
+`xs.length`, in loops too. A loop that resizes an array keeps each bound its
+length had on entry that the body respects: after `if xs.is_empty return`,
+`loop xs.length >? 1 { xs.pop(); }` leaves `xs[0]`, and a loop that only pushes,
+however often (`if keep(v) xs.push(v)`), keeps a nonempty array nonempty. Rows pushed in a loop into an array that was
 empty before it and is only pushed there all have one length when every push has it
 (`if cells.length not=? header.length continue` then `rows.push(cells)`), a length
 the loop does not change. `text.chars()` has `text.length`
@@ -2373,7 +2378,8 @@ program.
 
 `values.insert_if_absent(key value)` adds an entry only when the key is missing
 and returns whether it was added. An existing value and its iteration position
-stay unchanged. This combines the lookup and insertion, useful for graph visits,
+stay unchanged. Either way the key is then in the dictionary, as after a store, so
+`d.insert_if_absent(k 0);` followed by `d[k] += 1` needs no other guard. This combines the lookup and insertion, useful for graph visits,
 deduplication and registering entities:
 
 ```dewy
@@ -4131,7 +4137,8 @@ that end when it has it (once), and the text unchanged otherwise.
 `["a" "" "b"]`) and `text.split()` the words between runs of whitespace (none for
 blank text), `text.lines` gives the lines without their breaks (a final break adds no empty
 line), `text.chars` its graphemes (as `graphemes(text)`), `text.count(part)` the
-nonoverlapping occurrences and `text.is_empty` whether it has none.
+nonoverlapping occurrences and `text.is_empty` whether it has none (when it is
+false, `text.length` is positive).
 `text.is_alpha`, `.is_digit`, `.is_space` and `.is_alnum` are true when the text is nonempty and every Unicode grapheme belongs to that class; combining marks follow their leading character.
 `text.get(i)` gives grapheme `i`, as `text[i]` counts it, or `none` past either
 end (negative included), as `xs.get(i)` does for an array.
@@ -4430,7 +4437,9 @@ a callable field named `contains` is not used by membership.
 
 Random numbers: `random()` gives a float in `[0, 1)`, `random_int(lo hi)` a
 whole number in `[lo..hi)`, and `rng(seed)` a generator of its own whose
-`next_int(lo hi)`, `next_float()` and friends repeat for the same seed. The
+`next_int(lo hi)`, `next_float()` and friends repeat for the same seed. Both
+integer forms give a result in `[lo..hi)`, so `xs[random_int(0 xs.length)]`
+needs no guard. The
 shared generator is seeded once per process from the operating system's random
 source; `seed_random(n)` (or an `Rng`) makes a run repeatable. An empty range has
 no number to give, so `hi >? lo` is an obligation of `random_int` and

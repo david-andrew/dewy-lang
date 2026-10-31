@@ -1,0 +1,8 @@
+# The alias names its value with a binder; the field's own spelling works too.
+Month:type = int64<m => 1 <=? m and m <=? 12>
+Date:type = [year:int month:Month day:int<1 <=? day and day <=? 31>]
+names = ["Jan" "Feb" "Mar" "Apr" "May" "Jun" "Jul" "Aug" "Sep" "Oct" "Nov" "Dec"]
+main = () => {
+    let d = Date[2026 10 31]
+    printl"{d.day} {names[d.month - 1]} {d.year}"
+}

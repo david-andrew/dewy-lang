@@ -1,0 +1,96 @@
+# A chess club's ladder: read game results, update Elo ratings after each
+# game, keep head-to-head scores, and print the standings with each
+# player's best win (by the loser's rating at the time).
+
+const RESULTS = """
+# white black result
+ana  ben  1-0
+cho  dev  1/2
+ben  cho  0-1
+dev  ana  0-1
+ana  cho  1/2
+ben  dev  1-0
+cho  ana  1-0
+dev  ben  1/2
+eli  ana  0-1
+eli  cho  1-0
+ana  eli  1-0
+bad line here
+dev  eli  2-0
+"""
+
+const K = 24.0
+
+Game:type = [white:string black:string score:float64]
+Best:type = [opponent:string rating:float64]
+
+parse = (line:string):>Game? => {
+    let words = line.split()
+    if words.length not=? 3 return none
+    let score = match words[2] {
+        <"1-0"> => 1.0
+        <"0-1"> => 0.0
+        <"1/2"> => 0.5
+        _ => -1.0
+    }
+    if score <? 0.0 return none
+    Game[words[0] words[1] score]
+}
+
+expected = (mine:float64 theirs:float64):>float64 => 1.0 / (1.0 + 10.0 ^ ((theirs - mine) / 400.0))
+
+Player:type = [rating:float64=1500.0 played:int=0 h2h:dict<string float64>=[] best:Best?=none]
+
+# A win over a stronger opponent than the best so far replaces it.
+beat = (@p:Player opponent:string rating:float64):>void => {
+    if p.best is? none or p.best.rating <? rating p.best = Best[opponent rating]
+}
+
+main = () => {
+    let players:dict<string Player> = []
+    let skipped:array<string> = []
+    loop raw in RESULTS.lines {
+        let line = raw.trim
+        if line.is_empty or line.startswith("#") continue
+        let game = parse(line)
+        if game is? none {
+            skipped.push(line)
+            continue
+        }
+        # (a loop over [game.white game.black] does not prove both keys)
+        players.insert_if_absent(game.white Player[]);
+        players.insert_if_absent(game.black Player[]);
+        let rw = players[game.white].rating
+        let rb = players[game.black].rating
+        let ew = expected(rw rb)
+        players[game.white].rating = rw + K * (game.score - ew)
+        players[game.black].rating = rb + K * ((1.0 - game.score) - (1.0 - ew))
+        players[game.white].played += 1
+        players[game.black].played += 1
+        let wh = players[game.white].h2h
+        let bh = players[game.black].h2h
+        players[game.white].h2h[game.black] = (wh.get(game.black) ?? 0.0) + game.score
+        players[game.black].h2h[game.white] = (bh.get(game.white) ?? 0.0) + 1.0 - game.score
+        if game.score =? 1.0 beat(@players[game.white] game.black rb)
+        else if game.score =? 0.0 beat(@players[game.black] game.white rw)
+    }
+
+    let table = [loop [name p] in players [name=name rating=p.rating played=p.played best=p.best]]
+    table.sort(key=(row) => row.rating reverse=true)
+    printl"rank  player  rating  games  best win"
+    loop i in 0.. and row in table {
+        let note = if row.best is? none "-" else "{row.best.opponent} ({row.best.rating:.0f})"
+        printl"{i + 1:>4}  {row.name:<6}  {row.rating:6.1f}  {row.played:>5}  {note}"
+    }
+    printl""
+    let names = players.keys.sorted()
+    printl"      {[loop n in names format(n ">5")].join}"
+    loop a in names {
+        let cells = [loop b in names {
+            if a =? b "    -"
+            else format("{players[a].h2h.get(b) ?? 0.0}" ">5")
+        }]
+        printl"{a:<5} {cells.join}"
+    }
+    if not skipped.is_empty printl"\nskipped: {skipped.join(" | ")}"
+}

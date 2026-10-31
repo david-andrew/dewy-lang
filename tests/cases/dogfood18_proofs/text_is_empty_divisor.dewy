@@ -1,0 +1,13 @@
+# `text.is_empty` false makes the text's length positive.
+percent_smaller = (text:string bits:int64):>int => {
+    if text.is_empty return 0
+    let raw = text.length * 8
+    100 - bits * 100 // raw
+}
+first_char = (text:string):>string => if not text.is_empty text[0] else "-"
+main = () => {
+    printl(percent_smaller("abcd" 15))
+    printl(percent_smaller("" 0))
+    printl(first_char("dewy"))
+    printl(first_char(""))
+}

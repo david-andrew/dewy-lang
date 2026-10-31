@@ -1,0 +1,18 @@
+# Python's setdefault: after `insert_if_absent` the key is there either way.
+main = () => {
+    let ratings:dict<string float64> = []
+    loop [white black] in [["ana" "ben"] ["ben" "cho"]] {
+        ratings.insert_if_absent(white 1500.0);
+        ratings.insert_if_absent(black 1500.0);
+        ratings[white] += 10.0
+        ratings[black] -= 10.0
+    }
+    let queue:array<int> = []
+    let seen:dict<int int> = []
+    loop node in [3 1 3 2] {
+        if seen.insert_if_absent(node 0) queue.push(node)
+        seen[node] += 1
+    }
+    printl(ratings)
+    printl"{queue} {seen}"
+}

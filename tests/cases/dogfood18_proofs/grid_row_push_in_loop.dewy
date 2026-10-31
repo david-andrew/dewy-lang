@@ -1,0 +1,7 @@
+# Near miss: pushing onto rows changes their lengths.
+main = () => {
+    let seen = [loop _ in [0..5) [loop _ in [0..8) false]]
+    loop i in [0..5) { seen[i].push(true) }
+    loop i in [0..5) { seen[i][7] = true }
+    printl(seen)
+}

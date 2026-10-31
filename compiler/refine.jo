@@ -785,6 +785,11 @@ ref_validate_record = (t: int, pos: int):
                         if term.kind != 5: continue
                         j = term.value
                         if j >= count: fatal(pos, "refinement field is outside its record")
+                        # (an alias's free name met the field it types: written on the field,
+                        # its own name is its value, but the alias cannot know that name)
+                        if j == i:
+                            name = name_of(int(fields[int(structs[si].fields) + i].name))
+                            fatal(pos, "the refinement of field '{name}' names '{name}', the field itself, through a type alias: name the value with a binder in the alias (`int64<v => 0 <=? v and v <? 10>`), or write the refinement on the field, where its own name is its value")
                         if not done[j]: ready = false
                         dep = int(fields[int(structs[si].fields) + j].type)
                         bound = ref_projection_type(dep, term.path, pos)

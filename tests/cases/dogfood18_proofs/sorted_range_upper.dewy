@@ -1,0 +1,6 @@
+# Near miss: the elements' relation to n is not kept, only their bounds.
+f = (names:array<string>) => {
+    let order = [loop i in [0..names.length) i].sorted()
+    loop i in order printl(names[i])
+}
+main = () => f(["a"])

@@ -1,0 +1,102 @@
+# Date arithmetic without a library: parse ISO dates, find weekdays, count
+# days between dates, add days, and print a month the way `cal` does.
+
+Month:type = int64<m => 1 <=? m and m <=? 12>
+Date:type = [year:int month:Month day:int]
+
+const MONTH_NAMES = ["January" "February" "March" "April" "May" "June" "July"
+    "August" "September" "October" "November" "December"]
+const WEEKDAYS = ["Mon" "Tue" "Wed" "Thu" "Fri" "Sat" "Sun"]
+const DAYS_IN = [31 28 31 30 31 30 31 31 30 31 30 31]
+
+is_leap = (year:int):>bool => year % 4 =? 0 and (year % 100 not=? 0 or year % 400 =? 0)
+
+month_length = (year:int month:Month):>int => {
+    if month =? 2 and is_leap(year) return 29
+    DAYS_IN[month - 1]
+}
+
+parse_date = (text:string):>Date? => {
+    let parts = text.split("-")
+    if parts.length not=? 3 return none
+    let year = to_int(parts[0]) ?? 0
+    let month = to_int(parts[1]) ?? 0
+    let day = to_int(parts[2]) ?? 0
+    if year <? 1 or month <? 1 or month >? 12 return none
+    if day <? 1 or day >? month_length(year month) return none
+    Date[year month day]
+}
+
+# Days since 0001-01-01 (day 0), proleptic Gregorian.
+ordinal = (d:Date):>int => {
+    let y = d.year - 1
+    let days = y * 365 + y // 4 - y // 100 + y // 400
+    loop m in [1..d.month) days += month_length(d.year m)
+    days + d.day - 1
+}
+
+from_ordinal = (n:int):>Date => {
+    let year = 1
+    let left = n
+    loop true {
+        let size = if is_leap(year) 366 else 365
+        if left <? size break
+        left -= size
+        year += 1
+    }
+    let month = 1
+    loop month <? 12 and left >=? month_length(year month) {
+        left -= month_length(year month)
+        month += 1
+    }
+    Date[year month left + 1]
+}
+
+weekday = (d:Date):>string => WEEKDAYS[ordinal(d) % 7]
+
+show = (d:Date):>string => "{d.year}-{d.month:02}-{d.day:02}"
+
+print_month = (year:int month:Month):>void => {
+    let title = "{MONTH_NAMES[month - 1]} {year}"
+    printl(format(title "^20"))
+    printl"Mo Tu We Th Fr Sa Su"
+    let first = ordinal(Date[year month 1]) % 7
+    let cells:array<string> = [loop _ in [0..first) "  "]
+    loop day in [1..month_length(year month)] {
+        cells.push(format(day ">2"))
+        if cells.length =? 7 {
+            printl(cells.join(" "))
+            cells.clear()
+        }
+    }
+    if not cells.is_empty printl(cells.join(" "))
+}
+
+main = () => {
+    let inputs = ["2026-10-31" "2024-02-29" "2023-02-29" "2000-01-01" "1999-12-31" "2026-13-01" "today"]
+    let dates:array<Date> = []
+    loop text in inputs {
+        let d = parse_date(text)
+        if d is? none {
+            printl"{text}: not a date"
+            continue
+        }
+        printl"{text}: a {weekday(d)}, day {ordinal(d)} of the calendar"
+        dates.push(d)
+    }
+    printl""
+    loop i in [1..dates.length) {
+        let gap = ordinal(dates[i]) - ordinal(dates[i - 1])
+        printl"{show(dates[i - 1])} -> {show(dates[i])}: {gap} days"
+    }
+    printl""
+    let start = Date[2026 10 31]
+    loop offset in [1 30 61 365 -365] {
+        let later = from_ordinal(ordinal(start) + offset)
+        printl"{show(start)} {if offset <? 0 "" else "+"}{offset} days = {show(later)} ({weekday(later)})"
+    }
+    printl""
+    print_month(2026 2)
+    printl""
+    print_month(2024 2)
+}

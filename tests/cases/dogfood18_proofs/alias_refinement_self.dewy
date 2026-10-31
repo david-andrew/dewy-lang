@@ -1,0 +1,4 @@
+# A type alias whose refinement names the field it types says so.
+Month:type = int64<1 <=? month and month <=? 12>
+Date:type = [year:int month:Month day:int]
+main = () => printl(Date[2026 10 31])
