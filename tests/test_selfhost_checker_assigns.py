@@ -58,11 +58,15 @@ da_refine = (s: int, t: int, code: int) -> int:
     events.push("refine:{s}:{t}:{code}")
     if code == 1: return t
     da_outcome(10 + code)
-da_value = (s: int, t: int) -> int:
-    events.push("value:{s}:{t}")
+# (settle 1: converted to t but for zeroed bytes; 2: a variable's other type refused first)
+da_value = (s: int, t: int, settle: int) -> int:
+    events.push("value:{s}:{t}:{settle}")
     last = int(nodes[s].b)
-    if da_value_type != 0: return da_value_type
-    int(nodes[int(nodes[s].b)].type)
+    rt = if da_value_type != 0: da_value_type else: int(nodes[int(nodes[s].b)].type)
+    if settle == 2 and rt != t: da_outcome(23)
+    v = last
+    if settle > 0 and (nodes[v].kind != .intrinsic or nodes[v].aux != 76): nodes[s].b = i32(da_coerce(v, t))
+    rt
 da_write = (s: int, rt: int, lt: int, code: int) -> int:
     events.push("write:{s}:{rt}:{lt}:{code}")
     if code == 1: return rt
@@ -200,6 +204,7 @@ def test_checker_assigns_twins(compiler, tmp_path, release):  # noqa: F811
 @pytest.mark.parametrize('case,code', [
     ('da_fail = 1; run(assign(var(T_INT), typed(.int_lit, T_INT)))', 1),
     ('da_fail = 23; run(assign(var(T_INT), typed(.ident, T_I32)))', 23),
+    ('da_fail = 23; da_watch.temperature_writes = 1; run(assign(var(T_INT), typed(.ident, T_I32)))', 23),
     ('da_fail = 13; da_watch.text_domains = 1; run(assign(var(T_STR), typed(.str_lit, T_STR)))', 13),
     ('da_fail = 14; run(assign(var(T_MATH_INT), typed(.int_lit, T_MATH_INT)))', 14),
     ('da_fail = 25; run(assign(part(.field, var(rec_type()), mk_type(.opt)), typed(.call, T_INT)))', 25),

@@ -75,7 +75,6 @@ checker_blocks_bind = (input: *CheckerBlockInput) -> int:
     bk_host = input[0].host
     0
 bk_flag = (n: int, f: int) -> bool: int(bk_nodes[0][n].flags) & f != 0
-bk_kid = (n: int, i: int) -> int: int(bk_lists[0][int(bk_nodes[0][n].list) + i])
 bk_assign = (s: int):
     lhs = int(bk_nodes[0][s].a)
     op = bk_nodes[0][s].op
@@ -134,7 +133,7 @@ bk_block = (b: int, expected: int, want_value: bool) -> int:
     n0 = int(bk_nodes[0][b].nlist)
     i = 0
     loop i < n0:
-        if bk_nodes[0][bk_kid(b, i)].kind == .when_:
+        if bk_nodes[0][int(bk_lists[0][int(bk_nodes[0][b].list) + i])].kind == .when_:
             bk_host[0].expand(b)
             break
         i = i + 1
@@ -147,7 +146,7 @@ bk_block = (b: int, expected: int, want_value: bool) -> int:
     bk_sibling_block[0] = b
     i = 0
     loop i < n:
-        s = bk_kid(b, i)
+        s = int(bk_lists[0][int(bk_nodes[0][b].list) + i])
         bk_sibling_index[0] = i
         if counted: bk_host[0].direct(s)
         value = -1

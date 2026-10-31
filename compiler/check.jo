@@ -4087,7 +4087,15 @@ assign_refine = (s: int, lt: int, code: int) -> int:
     if code == 3: string_domain_write(lhs, if op == int(Tok.assign): int(nodes[s].b) else: 0)
     else: int_domain_write(lhs, int(nodes[s].b), if op == int(Tok.assign): 0 else: op)
     0
-assign_value = (s: int, lt: int) -> int: prune(if values_any and is_values(lt): values_init(int(nodes[s].b), lt) else: check_expr(int(nodes[s].b), lt))
+# The value checked to lt (settle 1: converted to lt, but for a release's zeroed bytes;
+# 2: a variable's value of another type refused first)
+assign_value = (s: int, lt: int, settle: int) -> int:
+    rt = prune(if values_any and is_values(lt): values_init(int(nodes[s].b), lt) else: check_expr(int(nodes[s].b), lt))
+    if settle == 0: return rt
+    v = last_checked
+    if settle == 2 and rt != lt and not can_coerce(v, rt, lt): var_type_error(int(nodes[s].a), lt, rt, nodes[v].pos)
+    if nodes[v].kind != .intrinsic or nodes[v].aux != i32(int(IN.zeroed)): nodes[s].b = i32(coerce(v, lt))
+    rt
 # `x = value` checked to rt: (1 a temperature difference, 2 a decimal binding made float64,
 # 3 a variable of another type, 4 an optional being filled, 5 the paths it narrows,
 # 6 the paths it ends, 7 the optional filled (rt: its index))

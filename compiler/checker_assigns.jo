@@ -14,7 +14,7 @@ struct CheckerAssignHost:
     place: (int) -> void
     capture: (int, int, bool) -> void
     refine: (int, int, int) -> int
-    value: (int, int) -> int
+    value: (int, int, int) -> int
     write: (int, int, int, int) -> int
     coerce: (int, int) -> int
     compound: (int, int) -> int
@@ -98,20 +98,23 @@ va_place_root = (n: int) -> int:
     loop r != 0 and va_part(r): r = int(va_nodes[0][r].a)
     if r != 0 and va_nodes[0][r].kind == .ident: return r
     0
-va_growth_on = () -> bool:
-    c = va_context[0]
-    c >= 0 and va_contexts[0][c].loop_depth > 0 and (va_watch[0].growth > 0 or va_decimal_cached[0] != 0)
 va_store = (s: int, lhs: int, lt: int) -> int:
-    rt = va_host[0].value(s, lt)
-    if va_watch[0].temperature_writes > 0: rt = va_host[0].write(s, rt, lt, 1)
-    if va_decimal_target[0] != 0 and va_host[0].write(s, rt, lt, 2) != 0: return s
     lk = va_nodes[0][lhs].kind
     aux = va_nodes[0][lhs].aux
-    if rt != lt and lk == .ident and (aux == 1 or aux == 2): va_host[0].write(s, rt, lt, 3)
+    variable = lk == .ident and (aux == 1 or aux == 2)
+    rt = 0
     fill = -1
-    if va_fills[0].len() > 0: fill = va_host[0].write(s, rt, lt, 4)
-    v = va_last[0]
-    if va_nodes[0][v].kind != .intrinsic or va_nodes[0][v].aux != 76: va_nodes[0][s].b = i32(va_host[0].coerce(v, lt))
+    if va_watch[0].temperature_writes == 0 and va_decimal_target[0] == 0 and va_fills[0].len() == 0:
+        settle = if variable: 2 else: 1
+        rt = va_host[0].value(s, lt, settle)
+    else:
+        rt = va_host[0].value(s, lt, 0)
+        if va_watch[0].temperature_writes > 0: rt = va_host[0].write(s, rt, lt, 1)
+        if va_decimal_target[0] != 0 and va_host[0].write(s, rt, lt, 2) != 0: return s
+        if rt != lt and variable: va_host[0].write(s, rt, lt, 3)
+        if va_fills[0].len() > 0: fill = va_host[0].write(s, rt, lt, 4)
+        v = va_last[0]
+        if va_nodes[0][v].kind != .intrinsic or va_nodes[0][v].aux != 76: va_nodes[0][s].b = i32(va_host[0].coerce(v, lt))
     if (lk != .ident or aux == 2) and (va_path_narrows[0] > 0 or va_union(lt) or va_kind(lt) == .opt): va_host[0].write(s, rt, lt, 5)
     else if va_path_narrows[0] > 0 and lk == .ident: va_host[0].write(s, rt, lt, 6)
     if fill >= 0: va_host[0].write(s, fill, lt, 7)
@@ -124,7 +127,8 @@ va_sourced = (lhs: int) -> bool:
         p = int(va_nodes[0][p].a)
     false
 va_check = (s: int) -> int:
-    if va_sourced(int(va_nodes[0][s].a)):
+    target = int(va_nodes[0][s].a)
+    if va_nodes[0][target].kind == .ident or va_sourced(target):
         update = va_host[0].prelude(s)
         if update != 0: return update
     lhs = int(va_nodes[0][s].a)
@@ -140,7 +144,7 @@ va_check = (s: int) -> int:
     if op == 47 and (va_nodes[0][lhs].kind != .ident or va_path_narrows[0] > 0): va_no_narrow_at[0] = lhs
     va_current[0] = s
     saved_root = va_root[0]
-    va_root[0] = va_place_root(lhs)
+    va_root[0] = if va_nodes[0][lhs].kind == .ident: lhs else: va_place_root(lhs)
     lt = va_host[0].check(lhs, 0)
     va_root[0] = saved_root
     va_current[0] = 0
@@ -149,17 +153,22 @@ va_check = (s: int) -> int:
     va_nodes[0][s].a = i32(lhs)
     va_host[0].place(lhs)
     pos = va_nodes[0][s].pos
-    if va_part(lhs): va_host[0].capture(s, lhs, va_dewy_at(pos))
+    lk = va_nodes[0][lhs].kind
+    if lk == .field or lk == .index: va_host[0].capture(s, lhs, va_dewy_at(pos))
     if va_refining[0]:
         lt = va_host[0].refine(s, lt, 1)
         replacement = va_host[0].refine(s, lt, 2)
         if replacement != 0: return replacement
     if lt == va_str_type[0] and va_watch[0].text_domains > 0: va_host[0].refine(s, lt, 3)
-    if lt == va_math_int_type[0] and va_dewy_at(pos): va_host[0].refine(s, lt, 4)
+    if lt == va_math_int_type[0]:
+        f = pos >> 40
+        if pos > 0 and f < va_files[0].len() and va_files[0][f].is_dewy: va_host[0].refine(s, lt, 4)
     if op == 47: return va_store(s, lhs, lt)
     va_host[0].compound(s, lt)
 va_assign = (s: int) -> int:
-    if va_growth_on(): va_host[0].begin(s, 1)
+    if va_watch[0].growth > 0 or va_decimal_cached[0] != 0:
+        c = va_context[0]
+        if c >= 0 and va_contexts[0][c].loop_depth > 0: va_host[0].begin(s, 1)
     saved = va_decimal_target[0]
     if va_watch[0].decimals > 0: saved = va_host[0].begin(s, 2)
     else: va_decimal_target[0] = 0

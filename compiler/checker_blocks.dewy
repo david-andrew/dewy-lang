@@ -87,7 +87,6 @@ checker_blocks_bind=(input:ptr<CheckerBlockInput>):>BWord=>$unsafe {
     0
 }
 bk_flag=(n:BWord f:BWord):>bool=>$unsafe {BWord(bk_nodes[0].ptr[n].flags) & f not=? 0}
-bk_kid=(n:BWord i:BWord):>BWord=>$unsafe {BWord(bk_lists[0][BWord(bk_nodes[0].ptr[n].list) + i])}
 # `x = value`: `_ = value` drops it, a first `x = value` declares x (Tok.assign 47; a
 # spawn's call aux2 17).
 bk_assign=(s:BWord):>void=>$unsafe {
@@ -114,7 +113,7 @@ bk_stmt=(s:BWord):>void=>$unsafe {
         k=bk_nodes[0].ptr[s].kind
     }
     if k =? 'reflect_scope' {bk_host[0].special(s 3); return}
-    if (k =? 'vardecl' or k =? 'const_') and bk_flag(s 128) {return}
+    if (k =? 'vardecl' or k =? 'const_') and BWord(bk_nodes[0].ptr[s].flags) & 128 not=? 0 {return}
     if k =? 'vardecl' {vd_decl(s)}
     else if k =? 'const_' {st_const(s)}
     else if k =? 'assign' {bk_assign(s)}
@@ -130,7 +129,8 @@ bk_stmt=(s:BWord):>void=>$unsafe {
     else if k =? 'fn_' or k =? 'struct_' or k =? 'enum_' or k =? 'import_' {bk_host[0].error(s 1)}
     else if k not=? 'test_' and k not=? 'build_' {bk_host[0].error(s 2)}
 }
-# A block (NF_LOOP_SETUP 131072, NF_FLOW_RETURNS 1073741824, NF_DISCARD 8; sinks: body
+# A block (its statements' tests are written out: a call costs more than they do;
+# NF_LOOP_SETUP 131072, NF_FLOW_RETURNS 1073741824, NF_DISCARD 8; sinks: body
 # 2, bind 6), its value's type when want_value.
 bk_block=(b:BWord expected:BWord want_value:bool):>BWord=>$unsafe {
     # (a lowered combined loop is a statement wherever it stands: its body's values go where
@@ -144,7 +144,7 @@ bk_block=(b:BWord expected:BWord want_value:bool):>BWord=>$unsafe {
     }
     let mode:BWord=-1
     let was_discarding=bk_discarding[0]
-    if want_value or bk_body_mode[0] >=? 0 or bk_flag(b 8) {mode=bk_host[0].open(b want_value)}
+    if want_value or bk_body_mode[0] >=? 0 or BWord(bk_nodes[0].ptr[b].flags) & 8 not=? 0 {mode=bk_host[0].open(b want_value)}
     else {
         bk_arm_next[0]=0
         bk_bind_next[0]=0
@@ -154,7 +154,7 @@ bk_block=(b:BWord expected:BWord want_value:bool):>BWord=>$unsafe {
     let n0=BWord(bk_nodes[0].ptr[b].nlist)
     let i:BWord=0
     loop i <? n0 {
-        if bk_nodes[0].ptr[bk_kid(b i)].kind =? 'when_' {
+        if bk_nodes[0].ptr[BWord(bk_lists[0][BWord(bk_nodes[0].ptr[b].list) + i])].kind =? 'when_' {
             bk_host[0].expand(b)
             break
         }
@@ -169,7 +169,7 @@ bk_block=(b:BWord expected:BWord want_value:bool):>BWord=>$unsafe {
     bk_sibling_block[0]=b
     i=0
     loop i <? n {
-        let s=bk_kid(b i)
+        let s=BWord(bk_lists[0][BWord(bk_nodes[0].ptr[b].list) + i])
         bk_sibling_index[0]=i
         if counted {bk_host[0].direct(s)}
         let value:BWord=-1

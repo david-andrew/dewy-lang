@@ -24,7 +24,7 @@ CheckerAssignHost:type=[
     place:<(node:int64):>void>
     capture:<(node:int64 target:int64 dewy:bool):>void>
     refine:<(node:int64 type_id:int64 code:int64):>int64>
-    value:<(node:int64 type_id:int64):>int64>
+    value:<(node:int64 type_id:int64 settle:int64):>int64>
     write:<(node:int64 value_type:int64 type_id:int64 code:int64):>int64>
     coerce:<(node:int64 type_id:int64):>int64>
     compound:<(node:int64 type_id:int64):>int64>
@@ -116,23 +116,28 @@ va_place_root=(n:AWord):>AWord=>$unsafe {
     if r not=? 0 and va_nodes[0].ptr[r].kind =? 'ident' {return r}
     0
 }
-va_growth_on=():>bool=>$unsafe {
-    let c=va_context[0]
-    c >=? 0 and va_contexts[0].ptr[c].loop_depth >? 0 and (va_watch[0].growth >? 0 or va_decimal_cached[0] not=? 0)
-}
 # `target = value` (Tok.assign 47; a release's zero bytes, IN.zeroed 76, are no value
-# of the target's type: nothing reads them).
+# of the target's type: nothing reads them). With no temperature, decimal or fill
+# writes between, the value is checked and converted to the target's type in one
+# service (settle 2: a variable's value of another type refused first, 1: not).
 va_store=(s:AWord lhs:AWord lt:AWord):>AWord=>$unsafe {
-    let rt=va_host[0].value(s lt)
-    if va_watch[0].temperature_writes >? 0 {rt=va_host[0].write(s rt lt 1)}
-    if va_decimal_target[0] not=? 0 and va_host[0].write(s rt lt 2) not=? 0 {return s}
     let lk=va_nodes[0].ptr[lhs].kind
     let aux=va_nodes[0].ptr[lhs].aux
-    if rt not=? lt and lk =? 'ident' and (aux =? 1 or aux =? 2) {va_host[0].write(s rt lt 3);}
+    let variable=lk =? 'ident' and (aux =? 1 or aux =? 2)
+    let rt:AWord=0
     let fill:AWord=-1
-    if va_fills[0].length >? 0 {fill=va_host[0].write(s rt lt 4)}
-    let v=va_last[0]
-    if va_nodes[0].ptr[v].kind not=? 'intrinsic' or va_nodes[0].ptr[v].aux not=? 76 {va_nodes[0][s].b=int32<overflow='wrap'>(va_host[0].coerce(v lt))}
+    if va_watch[0].temperature_writes =? 0 and va_decimal_target[0] =? 0 and va_fills[0].length =? 0 {
+        let settle:AWord=if variable {2} else {1}
+        rt=va_host[0].value(s lt settle)
+    } else {
+        rt=va_host[0].value(s lt 0)
+        if va_watch[0].temperature_writes >? 0 {rt=va_host[0].write(s rt lt 1)}
+        if va_decimal_target[0] not=? 0 and va_host[0].write(s rt lt 2) not=? 0 {return s}
+        if rt not=? lt and variable {va_host[0].write(s rt lt 3);}
+        if va_fills[0].length >? 0 {fill=va_host[0].write(s rt lt 4)}
+        let v=va_last[0]
+        if va_nodes[0].ptr[v].kind not=? 'intrinsic' or va_nodes[0].ptr[v].aux not=? 76 {va_nodes[0][s].b=int32<overflow='wrap'>(va_host[0].coerce(v lt))}
+    }
     if (lk not=? 'ident' or aux =? 2) and (va_path_narrows[0] >? 0 or va_union(lt) or va_kind(lt) =? 'opt') {va_host[0].write(s rt lt 5);}
     else if va_path_narrows[0] >? 0 and lk =? 'ident' {va_host[0].write(s rt lt 6);}
     if fill >=? 0 {va_host[0].write(s fill lt 7);}
@@ -149,8 +154,10 @@ va_sourced=(lhs:AWord):>bool=>$unsafe {
     }
     false
 }
+# (the commonest cases' tests are written out: a call costs more than they do)
 va_check=(s:AWord):>AWord=>$unsafe {
-    if va_sourced(AWord(va_nodes[0].ptr[s].a)) {
+    let target=AWord(va_nodes[0].ptr[s].a)
+    if va_nodes[0].ptr[target].kind =? 'ident' or va_sourced(target) {
         let update=va_host[0].prelude(s)
         if update not=? 0 {return update}
     }
@@ -169,9 +176,11 @@ va_check=(s:AWord):>AWord=>$unsafe {
     # (assigning a narrowed field or global assigns the whole of it)
     if op =? 47 and (va_nodes[0].ptr[lhs].kind not=? 'ident' or va_path_narrows[0] >? 0) {va_no_narrow_at[0]=lhs}
     va_current[0]=s
-    # (the variable at the bottom of v.f = 1 or v[i] += 1 is written, not read)
+    # (the variable at the bottom of v.f = 1 or v[i] += 1 is written, not read; the
+    # state is given back before the place check, since a dictionary entry's place
+    # checks the expressions it makes)
     let saved_root=va_root[0]
-    va_root[0]=va_place_root(lhs)
+    va_root[0]=if va_nodes[0].ptr[lhs].kind =? 'ident' {lhs} else {va_place_root(lhs)}
     let lt=va_host[0].check(lhs 0)
     va_root[0]=saved_root
     va_current[0]=0
@@ -182,19 +191,27 @@ va_check=(s:AWord):>AWord=>$unsafe {
     let pos=va_nodes[0].ptr[s].pos
     # (dictionary selectors captured before the value, in Dewy; the variable written
     # through noted, for copies changed and never read)
-    if va_part(lhs) {va_host[0].capture(s lhs va_dewy_at(pos))}
+    let lk=va_nodes[0].ptr[lhs].kind
+    if lk =? 'field' or lk =? 'index' {va_host[0].capture(s lhs va_dewy_at(pos))}
     if va_refining[0] {
         lt=va_host[0].refine(s lt 1)
         let replacement=va_host[0].refine(s lt 2)
         if replacement not=? 0 {return replacement}
     }
     if lt =? va_str_type[0] and va_watch[0].text_domains >? 0 {va_host[0].refine(s lt 3);}
-    if lt =? va_math_int_type[0] and va_dewy_at(pos) {va_host[0].refine(s lt 4);}
+    if lt =? va_math_int_type[0] {
+        let f=pos >> 40
+        if pos >? 0 and f <? va_files[0].length and va_files[0].ptr[f].is_dewy {va_host[0].refine(s lt 4);}
+    }
     if op =? 47 {return va_store(s lhs lt)}
     va_host[0].compound(s lt)
 }
+# (growth's reading: in a loop, once a growth or decimal binding is live)
 va_assign=(s:AWord):>AWord=>$unsafe {
-    if va_growth_on() {va_host[0].begin(s 1);}
+    if va_watch[0].growth >? 0 or va_decimal_cached[0] not=? 0 {
+        let c=va_context[0]
+        if c >=? 0 and va_contexts[0].ptr[c].loop_depth >? 0 {va_host[0].begin(s 1);}
+    }
     let saved=va_decimal_target[0]
     if va_watch[0].decimals >? 0 {saved=va_host[0].begin(s 2)}
     else {va_decimal_target[0]=0}

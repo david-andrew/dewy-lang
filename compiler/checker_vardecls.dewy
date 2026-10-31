@@ -137,7 +137,6 @@ vd_union=(t0:VWord):>bool=>$unsafe {
     let t=tu_prune(t0)
     vd_types[0].ptr[t].kind =? 'enum_' and vd_structs[0].ptr[VWord(vd_types[0].ptr[t].st)].union_
 }
-vd_set_flags=(l:VWord f:VWord):>void=>$unsafe {vd_locals[0][l].flags=int32<overflow='wrap'>(f)}
 vd_or_flags=(l:VWord f:VWord):>void=>$unsafe {vd_locals[0][l].flags=int32<overflow='wrap'>(VWord(vd_locals[0].ptr[l].flags) | f)}
 # `n * unit` (or its negation) with a numeric literal n and a named unit, unchecked:
 # the unit's name, or 0. (Frozen Tok ordinals: minus 59, star 60; NF_CHECKED 128.)
@@ -150,19 +149,6 @@ vd_literal_unit=(e:VWord):>VWord=>$unsafe {
     let u=VWord(vd_nodes[0].ptr[e].b)
     if (x not=? 'int_lit' and x not=? 'float_lit') or vd_nodes[0].ptr[u].kind not=? 'ident' {return 0}
     VWord(vd_nodes[0].ptr[u].name)
-}
-# Growth's reading of the value starts here: a whole literal start is noted, and a
-# loop carrying an exact binding (or a reading left over) asks the host.
-vd_growth_on=():>bool=>$unsafe {
-    let c=vd_context[0]
-    c >=? 0 and vd_contexts[0].ptr[c].loop_depth >? 0 and (vd_watch[0].growth >? 0 or vd_decimal_cached[0] not=? 0)
-}
-vd_growth_before=(s:VWord):>void=>$unsafe {
-    let init=VWord(vd_nodes[0].ptr[s].b)
-    let typed=vd_nodes[0].ptr[s].a not=? 0
-    let k=vd_nodes[0].ptr[init].kind
-    if vd_growth_pending[0] not=? 0 or (not typed and (k =? 'float_lit' or (vd_growth_on() and vd_dewy_at(vd_nodes[0].ptr[s].pos)))) {vd_host[0].after(s 0 0 1); return}
-    vd_growth_whole[0]=not typed and k =? 'int_lit'
 }
 # `let s = Circle[...]` mid-block, of a minted family: the rest of the block may
 # give it a sibling (sibling_scalar's own first tests, here).
@@ -178,46 +164,54 @@ vd_scalar_followed=(s:VWord t:VWord):>bool=>$unsafe {
 vd_forms=(s:VWord):>bool=>$unsafe {
     let b=VWord(vd_nodes[0].ptr[s].b)
     if b >? 0 and vd_nodes[0].ptr[b].kind =? 'call' and vd_nodes[0].ptr[b].aux2 =? 17 {vd_host[0].form(s 1);}
-    if vd_flag(s 131072) {return vd_host[0].form(s 2)}
-    if vd_flag(s 8388608) {return vd_host[0].form(s 3)}
+    if VWord(vd_nodes[0].ptr[s].flags) & 131072 not=? 0 {return vd_host[0].form(s 2)}
+    if VWord(vd_nodes[0].ptr[s].flags) & 8388608 not=? 0 {return vd_host[0].form(s 3)}
     if b not=? 0 {
         let c=b
         if vd_nodes[0].ptr[c].kind =? 'propagate' {c=VWord(vd_nodes[0].ptr[c].a)}
         if vd_nodes[0].ptr[c].kind =? 'call' and vd_nodes[0].ptr[c].aux2 =? -11 and vd_host[0].form(s 4) {return true}
-        if vd_nodes[0].ptr[s].a =? 0 and vd_nodes[0].ptr[s].nlist =? 0 and not vd_flag(s 2048) and not vd_flag(s 262144) and vd_flag(b 1) and vd_file_dewy(vd_nodes[0].ptr[s].pos) and vd_host[0].form(s 5) {return true}
+        if vd_nodes[0].ptr[s].a =? 0 and vd_nodes[0].ptr[s].nlist =? 0 and VWord(vd_nodes[0].ptr[s].flags) & 2048 =? 0 and VWord(vd_nodes[0].ptr[s].flags) & 262144 =? 0 and VWord(vd_nodes[0].ptr[b].flags) & 1 not=? 0 and vd_file_dewy(vd_nodes[0].ptr[s].pos) and vd_host[0].form(s 5) {return true}
     }
     let tn=VWord(vd_nodes[0].ptr[s].a)
     if tn not=? 0 and b not=? 0 and vd_nodes[0].ptr[tn].kind =? 'tarray' and vd_nodes[0].ptr[tn].ival =? 1 {vd_host[0].form(s 6);}
     if vd_nodes[0].ptr[s].nlist >? 0 {return vd_host[0].form(s 7)}
-    if vd_flag(s 2048) {return vd_host[0].form(s 8)}
+    if VWord(vd_nodes[0].ptr[s].flags) & 2048 not=? 0 {return vd_host[0].form(s 8)}
     false
 }
 # (LF_DECL 512, LF_QUIET 65536, LF_CONST 131072, LF_VALUEPARAM 524288: a constant's
-# 197120, a loop count's 66048; NF_RDONLY 262144, NF_LOOPCOUNT 33554432)
+# 197120, a loop count's 66048; NF_RDONLY 262144, NF_LOOPCOUNT 33554432, NF_LITERAL
+# 256. The commonest tests are written out: a call costs more than they do.)
 vd_decl=(s:VWord):>void=>$unsafe {
     if vd_forms(s) {return}
     let pos=vd_nodes[0].ptr[s].pos
     let typed=vd_nodes[0].ptr[s].a not=? 0
+    let pf=pos >> 40
+    let dewy=pos >? 0 and pf <? vd_files[0].length and vd_files[0].ptr[pf].is_dewy
     let t:VWord=0
     if typed {t=vd_host[0].binding_type(s)}
     let no_value=vd_nodes[0].ptr[s].b =? 0
     if vd_refining[0] and vd_kind(t) =? 'refined' and vd_nodes[0].ptr[s].b =? 0 {vd_nodes[0][s].b=int32<overflow='wrap'>(vd_host[0].default(t pos))}
     # (Dewy's `let x:T` without a value: given one on every path before it is read)
-    let unset=no_value and t not=? 0 and vd_dewy_at(pos) and not vd_flag(s 262144) and vd_host[0].form(s 9)
+    let unset=no_value and t not=? 0 and dewy and VWord(vd_nodes[0].ptr[s].flags) & 262144 =? 0 and vd_host[0].form(s 9)
     # (x: T, a struct with default field values: it starts with them, as T() would)
     if vd_nodes[0].ptr[s].b =? 0 and t not=? 0 {vd_nodes[0][s].b=int32<overflow='wrap'>(vd_host[0].default(t pos))}
     let literal_init=false
     let unit:VWord=0
     if vd_nodes[0].ptr[s].b not=? 0 {
-        vd_growth_before(s)
-        if t =? 0 and vd_dewy_at(pos) {unit=vd_literal_unit(VWord(vd_nodes[0].ptr[s].b))}
+        # (growth's reading of the value starts here: a whole literal start is noted, and
+        # a loop carrying an exact binding, or a reading left over, asks the host)
+        let ik=vd_nodes[0].ptr[VWord(vd_nodes[0].ptr[s].b)].kind
+        let c=vd_context[0]
+        if vd_growth_pending[0] not=? 0 or (not typed and (ik =? 'float_lit' or ((vd_watch[0].growth >? 0 or vd_decimal_cached[0] not=? 0) and c >=? 0 and vd_contexts[0].ptr[c].loop_depth >? 0 and dewy))) {vd_host[0].after(s 0 0 1);}
+        else {vd_growth_whole[0]=not typed and ik =? 'int_lit'}
+        if t =? 0 and dewy {unit=vd_literal_unit(VWord(vd_nodes[0].ptr[s].b))}
         let literal:VWord=0
-        if t not=? 0 and vd_union(t) and vd_dewy_at(pos) {literal=vd_host[0].syntax_type(VWord(vd_nodes[0].ptr[s].b))}
+        if t not=? 0 and vd_union(t) and dewy {literal=vd_host[0].syntax_type(VWord(vd_nodes[0].ptr[s].b))}
         let et=vd_host[0].values(VWord(vd_nodes[0].ptr[s].b) t)
         vd_nodes[0][s].b=int32<overflow='wrap'>(vd_last[0])
         if t not=? 0 {
             # (`let s:Circle|Square = Circle[...]`: which member it holds is followed)
-            if literal not=? 0 or (vd_union(t) and vd_kind(et) =? 'struct_' and vd_dewy_at(pos)) {
+            if literal not=? 0 or (vd_union(t) and vd_kind(et) =? 'struct_' and dewy) {
                 let member=et
                 if literal not=? 0 {member=literal}
                 vd_host[0].annotated(s t member)
@@ -228,9 +222,9 @@ vd_decl=(s:VWord):>void=>$unsafe {
             let k=vd_kind(t)
             if k =? 'tuple' and vd_sibling_literals[0].has(VWord(vd_nodes[0].ptr[s].b)) {t=vd_host[0].sibling(s t 1)}
             # (`let s = Circle[...]` that the block later gives a Square: their union, followed)
-            else if k =? 'struct_' and vd_dewy_at(pos) and vd_scalar_followed(s t) {t=vd_host[0].sibling(s t 2)}
+            else if k =? 'struct_' and dewy and vd_scalar_followed(s t) {t=vd_host[0].sibling(s t 2)}
             # (NF_LITERAL 256: the literal's default, or float64 for a decimal a float was written to)
-            if vd_flag(VWord(vd_nodes[0].ptr[s].b) 256) {
+            if VWord(vd_nodes[0].ptr[VWord(vd_nodes[0].ptr[s].b)].flags) & 256 not=? 0 {
                 t=vd_host[0].literal(s)
                 literal_init=true
             }
@@ -251,20 +245,20 @@ vd_decl=(s:VWord):>void=>$unsafe {
     if vd_flow_next[0] not=? 0 {vd_flow_local[0]=l}
     if unit not=? 0 {vd_tk_bindings[0][l]=s}
     if literal_init and (vd_kind(t) =? 'struct_' or vd_watch[0].decimal_adapted >? 0) {vd_host[0].after(s l t 4)}
-    if vd_growth_pending[0] not=? 0 or (not typed and vd_kind(t) =? 'struct_' and vd_dewy_at(pos) and not vd_flag(s 262144)) {vd_host[0].after(s l t 5)}
+    if vd_growth_pending[0] not=? 0 or (not typed and vd_kind(t) =? 'struct_' and dewy and VWord(vd_nodes[0].ptr[s].flags) & 262144 =? 0) {vd_host[0].after(s l t 5)}
     let b=VWord(vd_nodes[0].ptr[s].b)
     if b not=? 0 and vd_watch[0].quaternions >? 0 and vd_quat_nodes[0].has(b) {vd_quat_locals[0][l]=true}
-    vd_set_flags(l 512)
-    if not typed and vd_dewy_at(pos) {
+    vd_locals[0][l].flags=int32<overflow='wrap'>(512)
+    if not typed and dewy {
         if t =? vd_str_type[0] {vd_host[0].after(s l t 6)}
         else if t =? vd_math_int_type[0] {vd_host[0].after(s l t 7)}
     }
-    if vd_flag(s 262144) {
-        vd_set_flags(l 197120)
+    if VWord(vd_nodes[0].ptr[s].flags) & 262144 not=? 0 {
+        vd_locals[0][l].flags=int32<overflow='wrap'>(197120)
         vd_locals[0][l].const_init=int32<overflow='wrap'>(b)
         if b not=? 0 and vd_file_dewy(pos) {vd_host[0].after(s l t 8)}
     }
-    if vd_flag(s 33554432) {vd_set_flags(l 66048)}
+    if VWord(vd_nodes[0].ptr[s].flags) & 33554432 not=? 0 {vd_locals[0][l].flags=int32<overflow='wrap'>(66048)}
     if vd_nodes[0].ptr[s].aux2 =? 1 {vd_or_flags(l 524288)}
     vd_nodes[0][s].sym=int32<overflow='wrap'>(l)
     if unset {vd_host[0].after(s l t 9)}
