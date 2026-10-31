@@ -1193,7 +1193,7 @@ gen_place = (e: int, write: bool) -> Place:
         bk = types[bt].kind
         if bk == .ptr:
             ir.raw_mem = true
-            p = gen_expr(a).v
+            p = if nodes[a].kind == .intrinsic and (nodes[a].aux as IN) == .arrdata and nkids(a) == 1: arrdata_elements(a) else: gen_expr(a).v
             i = gen_index(int(nodes[e].b))
             sz = tsize(int(types[bt].elem))
             return Place(true, e_bin(.add, VI, p, e_bin(.mul, VI, i, e_iconst(sz))))
@@ -4343,6 +4343,22 @@ ptr_param_read = (f: int, i: int, n: int) -> bool:
     not pr_written.has(pr_find(-fns[f].params[i]))
 
 gen_intrinsic_arrdata = (e: int, arg_start: int) -> Val:
+    p = arrdata_header(e, arg_start)
+    r = vreg(VI)
+    e_mov(r, e_iconst(0))
+    iff(e_bin(.ne, VI, p, e_iconst(0)))
+    e_mov(r, e_addi(p, 24))
+    endc()
+    return V(r, false)
+
+# `xs.ptr[i]`'s base: the elements' address without data()'s null test. A nil array has
+# no element to reach, so the indexed address is out of bounds either way.
+arrdata_elements = (e: int) -> int:
+    if effects_active or effect_policy.prohibitions != 0: effect_lower_intrinsic(cur_fn, e)
+    e_addi(arrdata_header(e, int(nodes[e].list)), 24)
+
+# the array's header pointer for data() node e (null for a nil array)
+arrdata_header = (e: int, arg_start: int) -> int:
     arg0 = int(lists[arg_start])
     id = nodes[e].aux as IN
     # a raw pointer into a variable's array may be written through: give the variable its own
@@ -4358,12 +4374,7 @@ gen_intrinsic_arrdata = (e: int, arg_start: int) -> Val:
         # could select another element or run the user's code twice.
         p = read_place(pl, at)
     else: p = gen_borrowed(a0).v
-    r = vreg(VI)
-    e_mov(r, e_iconst(0))
-    iff(e_bin(.ne, VI, p, e_iconst(0)))
-    e_mov(r, e_addi(p, 24))
-    endc()
-    return V(r, false)
+    p
 
 gen_intrinsic_syscall = (e: int, arg_start: int, arg_count: int) -> Val:
     arg0 = int(lists[arg_start])
