@@ -1,3 +1,4 @@
+use 'checker_loops.dewy'
 use 'checker_zonk.dewy'
 use 'checker_body_results.dewy'
 use 'checker_bodies.dewy'
@@ -3323,19 +3324,10 @@ const ASSIGN_OPS = 0
 
 # Labels belong to active loops in one function-checking context. They cannot
 # cross a function boundary, including a closure checked inside the loop.
-loop_labels: (int, int, int)[]
+loop_labels: LoopLabel[]
 
-check_loop_enter = (s: int):
-    ctxs[cx].loop_depth += 1
-    label = int(nodes[s].sval)
-    if label == 0: return
-    loop item in loop_labels:
-        if item.0 == cx and item.1 == label: fatal(nodes[s].pos, "duplicate active loop label '${name_of(label)}'")
-    loop_labels.push((cx, label, int(ctxs[cx].loop_depth)))
-
-check_loop_leave = (s: int):
-    if nodes[s].sval != 0: loop_labels.pop()
-    ctxs[cx].loop_depth -= 1
+check_loop_enter = (s: int): xb_enter(s)
+check_loop_leave = (s: int): xb_leave(s)
 
 compound_op = (op: int) -> int:
     k = op as Tok
@@ -3442,10 +3434,6 @@ capture_narrowed = (l: int, pos: int) -> int:
 # Only writes to narrowed aliases need rollback between sibling branches.
 # The log avoids scanning all locals or copying checker state for every branch.
 narrow_changes: int[]
-
-struct NarrowJump:
-    context: i32
-    depth: i32
 
 narrow_jumps: NarrowJump[]
 
@@ -4718,29 +4706,7 @@ check_stmt = (s: int):
         check_expr(s, 0)
         if last_checked != s: nodes[s] = nodes[last_checked]
         if expectation_ifs.has(s): expectation_refuted(s)
-    else if k == .while_:
-        mark = scope_mark()
-        enter_loop()
-        if nodes[s].aux == 1:
-            t = prune(check_expr(int(nodes[s].a), 0))
-            nodes[s].a = i32(last_checked)
-            if types[t].kind != .opt:
-                nodes[s].a = i32(narrow_optional_source(int(nodes[s].a)))
-                t = prune(ntype(int(nodes[s].a)))
-            if types[t].kind != .opt: fatal(nodes[int(nodes[s].a)].pos, "'loop let x = value' needs an optional value, found {dt(t)}")
-            nodes[s].sym = i32(new_local(int(nodes[s].name), int(types[t].elem), nodes[s].pos))
-        else:
-            ct = check_expr(int(nodes[s].a), T_BOOL)
-            if tkind(ct) == .array or nodes[int(nodes[s].a)].kind == .range: fatal(nodes[s].pos, jd(nodes[s].pos, "`loop cond:` repeats while cond is true; to go through a range or an array, name the element: `loop i in [0..n):` (`loop _ in` when it is not used)", "`loop cond \{ }` repeats while cond is true; to go through a range or an array, name the element: `loop i in [0..n) \{ }` (`loop _ in` when it is not used)"))
-            nodes[s].a = i32(coerce(last_checked, T_BOOL))
-            # The body runs only after its guard succeeds. Assignment still
-            # invalidates these aliases, just as it does inside an if arm.
-            narrow_by(int(nodes[s].a), true)
-        check_loop_enter(s)
-        check_block(int(nodes[s].b), 0, false)
-        check_loop_leave(s)
-        loop_serials.pop()
-        scope_reset(mark)
+    else if k == .while_: xb_while(s)
     else if k == .for_: check_for(s)
     else if k == .return_:
         inst = int(ctxs[cx].inst)
@@ -4778,18 +4744,7 @@ check_stmt = (s: int):
                 check_expr(bc_block([], nodes[s].pos), rt)
                 nodes[s].a = i32(coerce(last_checked, rt))
             else if tkind(rt) != .void_: fatal(nodes[s].pos, "missing return value (function returns {dt(rt)})")
-    else if k == .break_ or k == .continue_:
-        if ctxs[cx].loop_depth == 0:
-            w = "continue"
-            if k == .break_: w = "break"
-            fatal(nodes[s].pos, "'{w}' outside of a loop")
-        if nodes[s].name != 0:
-            target = -1
-            loop item in loop_labels:
-                if item.0 == cx and item.1 == int(nodes[s].name): target = item.2
-            if target < 0: fatal(nodes[s].pos, "unknown loop label '${name_of(int(nodes[s].name))}'")
-            nodes[s].ival = int(ctxs[cx].loop_depth) - target
-        narrow_jumps.push(NarrowJump(i32(cx), ctxs[cx].loop_depth - i32(nodes[s].ival)))
+    else if k == .break_ or k == .continue_: xb_jump(s)
     else if k == .defer_:
         if refine_active and ref_mutable_result(int(ctxs[cx].inst)):
             fatal(nodes[s].pos, "projected mutable postconditions with deferred cleanup are not yet supported")
@@ -4812,6 +4767,24 @@ check_stmt = (s: int):
     else if k == .fn_ or k == .struct_ or k == .enum_ or k == .import_: fatal(nodes[s].pos, "declarations are only allowed at the top level")
     else if k == .test_ or k == .build_: pass
     else: fatal(nodes[s].pos, "invalid statement")
+
+# Loop statements run in checker_loops.dewy; these are its services.
+loop_body = (b: int):
+    check_block(b, 0, false)
+    return
+loop_error = (n: int, t: int, code: int):
+    pos = nodes[n].pos
+    if code == 1: fatal(pos, "'loop let x = value' needs an optional value, found {dt(t)}")
+    if code == 2: fatal(pos, jd(pos, "`loop cond:` repeats while cond is true; to go through a range or an array, name the element: `loop i in [0..n):` (`loop _ in` when it is not used)", "`loop cond \{ }` repeats while cond is true; to go through a range or an array, name the element: `loop i in [0..n) \{ }` (`loop _ in` when it is not used)"))
+    if code == 3:
+        w = "continue"
+        if nodes[n].kind == .break_: w = "break"
+        fatal(pos, "'{w}' outside of a loop")
+    if code == 4: fatal(pos, "unknown loop label '${name_of(int(nodes[n].name))}'")
+    fatal(pos, "duplicate active loop label '${name_of(int(nodes[n].sval))}'")
+loop_host = CheckerLoopHost(check_expr, coerce, narrow_by, narrow_optional_source, new_local, loop_body, scope_reset, loop_error)
+loop_input = CheckerLoopInput(&nodes, &types, &ctxs, &cx, &check_scopes, &loop_serials, &loop_serial_next, &loop_labels, &narrow_jumps, &last_checked, &T_BOOL, &loop_host)
+loop_binding = checker_loops_bind(&loop_input)
 
 # (a generic instance's body: an error in the library's code is reported at the program's call)
 check_fn_body = (f: int): cb_check_fn_body(f)

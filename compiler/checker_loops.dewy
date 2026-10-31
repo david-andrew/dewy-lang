@@ -1,0 +1,138 @@
+$runtime_checks
+from p"node_store.dewy" import Node
+from p"checker_types.dewy" import (TypeInfo TK)
+from p"checker_state.dewy" import (FnCtx CheckerScope)
+from p"type_inference.dewy" import tu_prune
+# Loop statements: `loop cond` and `loop let x = v` (scope, loop serial, guard
+# narrowing, label and body), `break` and `continue` (label resolution and the
+# narrowing log of the jump), and the active-label stack every loop checker enters
+# and leaves. O(1) per statement plus O(active labels) for a labeled loop or jump;
+# the test, the binding and the body are host services that may grow every arena,
+# so nodes and contexts are reread by ID.
+XBWord:type=int64<overflow='wrap'>
+# Labels belong to active loops in one function-checking context. They cannot
+# cross a function boundary, including a closure checked inside the loop.
+LoopLabel:type=[context:int64=0 name:int64=0 depth:int64=0]
+# A jump's target loop depth in its context (narrow_returned reads the log).
+NarrowJump:type=[context:int32=0 depth:int32=0]
+CheckerLoopHost:type=[
+    check:<(node:int64 expected:int64):>int64>
+    coerce:<(node:int64 type_id:int64):>int64>
+    narrow:<(node:int64 holds:bool):>void>
+    optional_source:<(node:int64):>int64>
+    binding:<(name:int64 type_id:int64 pos:int64):>int64>
+    body:<(node:int64):>void>
+    reset:<(mark:int64):>void>
+    error:<(node:int64 type_id:int64 code:int64):>void>
+]
+CheckerLoopInput:type=[
+    nodes:ptr<array<Node>>
+    types:ptr<array<TypeInfo>>
+    contexts:ptr<array<FnCtx>>
+    context:ptr<int64>
+    scopes:ptr<CheckerScope>
+    serials:ptr<array<int64>>
+    serial_next:ptr<int64>
+    labels:ptr<array<LoopLabel>>
+    jumps:ptr<array<NarrowJump>>
+    last:ptr<int64>
+    bool_type:ptr<int64>
+    host:ptr<CheckerLoopHost>
+]
+let xb_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let xb_types:ptr<array<TypeInfo>>=$unsafe (uint64(0) as ptr<array<TypeInfo>>)
+let xb_contexts:ptr<array<FnCtx>>=$unsafe (uint64(0) as ptr<array<FnCtx>>)
+let xb_context:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xb_scopes:ptr<CheckerScope>=$unsafe (uint64(0) as ptr<CheckerScope>)
+let xb_serials:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+let xb_serial_next:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xb_labels:ptr<array<LoopLabel>>=$unsafe (uint64(0) as ptr<array<LoopLabel>>)
+let xb_jumps:ptr<array<NarrowJump>>=$unsafe (uint64(0) as ptr<array<NarrowJump>>)
+let xb_last:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xb_bool_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xb_host:ptr<CheckerLoopHost>=$unsafe (uint64(0) as ptr<CheckerLoopHost>)
+checker_loops_bind=(input:ptr<CheckerLoopInput>):>XBWord=>$unsafe {
+    xb_nodes=input[0].nodes
+    xb_types=input[0].types
+    xb_contexts=input[0].contexts
+    xb_context=input[0].context
+    xb_scopes=input[0].scopes
+    xb_serials=input[0].serials
+    xb_serial_next=input[0].serial_next
+    xb_labels=input[0].labels
+    xb_jumps=input[0].jumps
+    xb_last=input[0].last
+    xb_bool_type=input[0].bool_type
+    xb_host=input[0].host
+    0
+}
+xb_kind=(t:XBWord):>TK=>$unsafe {xb_types[0].ptr[tu_prune(t)].kind}
+xb_depth=():>XBWord=>$unsafe {XBWord(xb_contexts[0].ptr[xb_context[0]].loop_depth)}
+# Entering a loop body: one deeper, its label (if any) active and unique.
+xb_enter=(s:XBWord):>void=>$unsafe {
+    let c=xb_context[0]
+    xb_contexts[0][c].loop_depth=int32<overflow='wrap'>(xb_depth() + 1)
+    let label=XBWord(xb_nodes[0].ptr[s].sval)
+    if label =? 0 {return}
+    loop i in [0..xb_labels[0].length) {
+        if xb_labels[0].ptr[i].context =? c and xb_labels[0].ptr[i].name =? label {xb_host[0].error(s 0 5)}
+    }
+    xb_labels[0].push(LoopLabel[context=c name=label depth=xb_depth()])
+}
+xb_leave=(s:XBWord):>void=>$unsafe {
+    if xb_nodes[0].ptr[s].sval not=? 0 {xb_labels[0].pop();}
+    let c=xb_context[0]
+    xb_contexts[0][c].loop_depth=int32<overflow='wrap'>(xb_depth() - 1)
+}
+# A test compared with none (frozen Tok.eq 69, Tok.ne 70; the differential checks them).
+xb_none_test=(c:XBWord):>bool=>$unsafe {
+    let op=xb_nodes[0].ptr[c].op
+    xb_nodes[0].ptr[c].kind =? 'binary' and (op =? 69 or op =? 70) and xb_nodes[0].ptr[XBWord(xb_nodes[0].ptr[c].b)].kind =? 'none_lit'
+}
+# `loop cond` and `loop let x = v` (aux 1).
+xb_while=(s:XBWord):>void=>$unsafe {
+    let mark=xb_scopes[0].names.length
+    xb_serial_next[0]=xb_serial_next[0] + 1
+    xb_serials[0].push(xb_serial_next[0])
+    if xb_nodes[0].ptr[s].aux =? 1 {
+        let t=tu_prune(xb_host[0].check(XBWord(xb_nodes[0].ptr[s].a) 0))
+        xb_nodes[0][s].a=int32<overflow='wrap'>(xb_last[0])
+        if xb_types[0].ptr[t].kind not=? 'opt' {
+            let source=xb_host[0].optional_source(XBWord(xb_nodes[0].ptr[s].a))
+            xb_nodes[0][s].a=int32<overflow='wrap'>(source)
+            t=tu_prune(XBWord(xb_nodes[0].ptr[source].type))
+        }
+        if xb_types[0].ptr[t].kind not=? 'opt' {xb_host[0].error(XBWord(xb_nodes[0].ptr[s].a) t 1)}
+        let l=xb_host[0].binding(XBWord(xb_nodes[0].ptr[s].name) XBWord(xb_types[0].ptr[t].elem) xb_nodes[0].ptr[s].pos)
+        xb_nodes[0][s].sym=int32<overflow='wrap'>(l)
+    } else {
+        let ct=xb_host[0].check(XBWord(xb_nodes[0].ptr[s].a) xb_bool_type[0])
+        if xb_kind(ct) =? 'array' or xb_nodes[0].ptr[XBWord(xb_nodes[0].ptr[s].a)].kind =? 'range' {xb_host[0].error(s ct 2)}
+        let cond=xb_host[0].coerce(xb_last[0] xb_bool_type[0])
+        xb_nodes[0][s].a=int32<overflow='wrap'>(cond)
+        # The body runs only after its guard succeeds. Assignment still
+        # invalidates these aliases, just as it does inside an if arm.
+        let k=xb_nodes[0].ptr[cond].kind
+        if k =? 'istype' or k =? 'not_' or k =? 'and_' or k =? 'or_' or xb_none_test(cond) {xb_host[0].narrow(cond true)}
+    }
+    xb_enter(s)
+    xb_host[0].body(XBWord(xb_nodes[0].ptr[s].b))
+    xb_leave(s)
+    xb_serials[0].pop();
+    if xb_scopes[0].names.length not=? mark {xb_host[0].reset(mark)}
+}
+# `break` and `continue`, optionally to a labeled enclosing loop (ival: loops out).
+xb_jump=(s:XBWord):>void=>$unsafe {
+    let c=xb_context[0]
+    if xb_depth() =? 0 {xb_host[0].error(s 0 3)}
+    let label=XBWord(xb_nodes[0].ptr[s].name)
+    if label not=? 0 {
+        let target:XBWord=0 - 1
+        loop i in [0..xb_labels[0].length) {
+            if xb_labels[0].ptr[i].context =? c and xb_labels[0].ptr[i].name =? label {target=xb_labels[0].ptr[i].depth}
+        }
+        if target <? 0 {xb_host[0].error(s 0 4)}
+        xb_nodes[0][s].ival=xb_depth() - target
+    }
+    xb_jumps[0].push(NarrowJump[context=int32<overflow='wrap'>(c) depth=int32<overflow='wrap'>(xb_depth() - xb_nodes[0].ptr[s].ival)])
+}

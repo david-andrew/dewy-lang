@@ -1,0 +1,114 @@
+# Frozen loop statement checker extracted from check.jo.
+use 'node_store.dewy'
+use 'checker_types.dewy'
+use 'checker_state.dewy'
+use 'type_inference.dewy'
+struct LoopLabel:
+    context: int
+    name: int
+    depth: int
+struct NarrowJump:
+    context: i32
+    depth: i32
+struct CheckerLoopHost:
+    check: (int, int) -> int
+    coerce: (int, int) -> int
+    narrow: (int, bool) -> void
+    optional_source: (int) -> int
+    binding: (int, int, int) -> int
+    body: (int) -> void
+    reset: (int) -> void
+    error: (int, int, int) -> void
+struct CheckerLoopInput:
+    nodes: *(Node[])
+    types: *(TypeInfo[])
+    contexts: *(FnCtx[])
+    context: *int
+    scopes: *CheckerScope
+    serials: *(int[])
+    serial_next: *int
+    labels: *(LoopLabel[])
+    jumps: *(NarrowJump[])
+    last: *int
+    bool_type: *int
+    host: *CheckerLoopHost
+xb_nodes: *(Node[])
+xb_types: *(TypeInfo[])
+xb_contexts: *(FnCtx[])
+xb_context: *int
+xb_scopes: *CheckerScope
+xb_serials: *(int[])
+xb_serial_next: *int
+xb_labels: *(LoopLabel[])
+xb_jumps: *(NarrowJump[])
+xb_last: *int
+xb_bool_type: *int
+xb_host: *CheckerLoopHost
+checker_loops_bind = (input: *CheckerLoopInput) -> int:
+    xb_nodes = input[0].nodes
+    xb_types = input[0].types
+    xb_contexts = input[0].contexts
+    xb_context = input[0].context
+    xb_scopes = input[0].scopes
+    xb_serials = input[0].serials
+    xb_serial_next = input[0].serial_next
+    xb_labels = input[0].labels
+    xb_jumps = input[0].jumps
+    xb_last = input[0].last
+    xb_bool_type = input[0].bool_type
+    xb_host = input[0].host
+    0
+xb_kind = (t: int) -> TK: xb_types[0][tu_prune(t)].kind
+xb_depth = () -> int: int(xb_contexts[0][xb_context[0]].loop_depth)
+xb_enter = (s: int):
+    c = xb_context[0]
+    xb_contexts[0][c].loop_depth = i32(xb_depth() + 1)
+    label = int(xb_nodes[0][s].sval)
+    if label == 0: return
+    loop i in [0..xb_labels[0].len()):
+        if xb_labels[0][i].context == c and xb_labels[0][i].name == label: xb_host[0].error(s, 0, 5)
+    xb_labels[0].push(LoopLabel(c, label, xb_depth()))
+xb_leave = (s: int):
+    if xb_nodes[0][s].sval != 0: xb_labels[0].pop()
+    c = xb_context[0]
+    xb_contexts[0][c].loop_depth = i32(xb_depth() - 1)
+xb_none_test = (c: int) -> bool:
+    op = xb_nodes[0][c].op
+    xb_nodes[0][c].kind == .binary and (op == 69 or op == 70) and xb_nodes[0][int(xb_nodes[0][c].b)].kind == .none_lit
+xb_while = (s: int):
+    mark = xb_scopes[0].names.len()
+    xb_serial_next[0] = xb_serial_next[0] + 1
+    xb_serials[0].push(xb_serial_next[0])
+    if xb_nodes[0][s].aux == 1:
+        t = int(tu_prune(xb_host[0].check(int(xb_nodes[0][s].a), 0)))
+        xb_nodes[0][s].a = i32(xb_last[0])
+        if xb_types[0][t].kind != .opt:
+            source = xb_host[0].optional_source(int(xb_nodes[0][s].a))
+            xb_nodes[0][s].a = i32(source)
+            t = int(tu_prune(int(xb_nodes[0][source].type)))
+        if xb_types[0][t].kind != .opt: xb_host[0].error(int(xb_nodes[0][s].a), t, 1)
+        l = xb_host[0].binding(int(xb_nodes[0][s].name), int(xb_types[0][t].elem), xb_nodes[0][s].pos)
+        xb_nodes[0][s].sym = i32(l)
+    else:
+        ct = xb_host[0].check(int(xb_nodes[0][s].a), xb_bool_type[0])
+        if xb_kind(ct) == .array or xb_nodes[0][int(xb_nodes[0][s].a)].kind == .range: xb_host[0].error(s, ct, 2)
+        cond = xb_host[0].coerce(xb_last[0], xb_bool_type[0])
+        xb_nodes[0][s].a = i32(cond)
+        k = xb_nodes[0][cond].kind
+        if k == .istype or k == .not_ or k == .and_ or k == .or_ or xb_none_test(cond): xb_host[0].narrow(cond, true)
+    xb_enter(s)
+    xb_host[0].body(int(xb_nodes[0][s].b))
+    xb_leave(s)
+    xb_serials[0].pop()
+    if xb_scopes[0].names.len() != mark: xb_host[0].reset(mark)
+xb_jump = (s: int):
+    c = xb_context[0]
+    if xb_depth() == 0: xb_host[0].error(s, 0, 3)
+    label = int(xb_nodes[0][s].name)
+    if label != 0:
+        target = 0 - 1
+        loop i in [0..xb_labels[0].len()):
+            if xb_labels[0][i].context == c and xb_labels[0][i].name == label: target = xb_labels[0][i].depth
+        if target < 0: xb_host[0].error(s, 0, 4)
+        xb_nodes[0][s].ival = xb_depth() - target
+    xb_jumps[0].push(NarrowJump(i32(c), i32(xb_depth() - xb_nodes[0][s].ival)))
