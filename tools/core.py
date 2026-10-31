@@ -265,11 +265,13 @@ def test(binary: Path, arguments: list[str], quick: bool) -> int:
     env.update(DEWY_CORE_COMPILER=str(binary), PYTEST_DISABLE_PLUGIN_AUTOLOAD='1')
     if quick:
         arguments = ['-m', 'core_quick', *arguments]
+    # The nightly tier (repeated coverage, run by the scheduled workflow) is left out unless -m names it.
+    tier = [] if quick or '-m' in arguments else ['-m', 'not nightly']
     # A shared compiler/library error otherwise repeats the same failed
     # build across the gate. A later --maxfail=0 requests every failure.
     command = [str(python), '-m', 'pytest', '-q', '-o', 'addopts=', '--maxfail=1',
                f"--basetemp={tempfile.mkdtemp(prefix='pytest-', dir=scratch.activate())}",
-               *test_runner_options(python, arguments), *TESTS, *arguments]
+               *test_runner_options(python, arguments), *TESTS, *tier, *arguments]
     status = subprocess.call(command, cwd=ROOT, env=env)
     if status == 5 and selected:
         status = 0  # -k matched only golden cases or ladder programs

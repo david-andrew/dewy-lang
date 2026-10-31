@@ -73,7 +73,7 @@ jobs:
               sys.executable, '-m', 'pytest', '-q', '-o', 'addopts=',
               '--junitxml=core-results.xml', '-p', 'xdist.plugin',
               '-p', 'tools.compiler.pytest_parallel', '-n', '2',
-              '--dist=loadgroup', *TESTS,
+              '--dist=loadgroup', '-m', 'not nightly', *TESTS,
           ]))
           PY
       - name: Package the tested development toolchain

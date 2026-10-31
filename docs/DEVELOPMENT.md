@@ -76,6 +76,9 @@ python3 -m tools.core ladder [--update-ratchet]     # acceptance-ladder scoreboa
 - `test` runs the cases first (`--quick`: those marked `# quick`), then, for
   the full gate, the ladder's core versions and its ratchet, then pytest. `-k`
   and `-n` apply to all of them.
+- Tests marked `nightly` (the release-mode run of each `test_selfhost_*` twin
+  differential test, added by `tests/conftest.py`) are skipped by `test` and
+  CI; the scheduled `fuzz-nightly.yml` runs them (`pytest -m nightly`).
 - The [ladder](../tests/ladder/README.md) builds each program's `design.dewy`
   and `core.dewy` natively in release mode and compares stdout with
   `expected.out` from independent Python oracles; programs that must be
