@@ -1,0 +1,26 @@
+# Effect and place identity layouts shared by effects, places, facts and the
+# Dewy effect leaves. Arenas and interning stay with their Jo owners.
+from p"dewy_reader_types.dewy" import EffectKind
+PlaceRoot:type='local' | 'global' | 'formal' | 'capture' | 'resource'
+PlaceProjection:type='root' | 'field' | 'index' | 'selector' | 'unknown'
+# Owner-qualified roots and parent-linked projections are also the interface
+# for future effect regions. Runtime ValueIds never become declaration identity.
+PlaceIdentity:type=[
+    root:PlaceRoot='local'
+    owner:int64=0
+    declaration:int64=0
+    parent:int64=0
+    projection:PlaceProjection='root'
+    selector:int64=0
+]
+EffectAtom:type=[
+    kind:EffectKind='read'
+    place:PlaceIdentity=PlaceIdentity[root='local' owner=0 declaration=0]
+    row:int64=0
+]
+EffectContract:type=[
+    atoms:array<EffectAtom>=[]
+    exclusions:array<EffectAtom>=[]
+    variables:array<int64>=[]
+    open:bool=false
+]

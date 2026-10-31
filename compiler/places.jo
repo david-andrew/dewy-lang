@@ -1,21 +1,10 @@
+use 'effect_types.dewy'
 use 'checker_types.dewy'
 # Shared declaration identity. Evaluation values and epochs belong to facts.
 use 'ast.jo'
 use 'check.jo'
 use 'expr.jo'
 use 'types.jo'
-
-enum PlaceRoot: local, global, formal, capture, resource
-enum PlaceProjection: root, field, index, selector, unknown
-# Owner-qualified roots and parent-linked projections are also the interface
-# for future effect regions. Runtime ValueIds never become declaration identity.
-struct PlaceIdentity:
-    root: PlaceRoot
-    owner: int
-    declaration: int
-    parent: int = 0
-    projection: PlaceProjection = .root
-    selector: int = 0
 
 # A checked Mutex payload is a stable, guard-scoped place. Its raw pointer
 # route is for lowering only; analyses use the alias declaration as its root.

@@ -8,7 +8,7 @@ def test_effect_delta_generations(compiler, tmp_path):
     source = tmp_path / 'effect_deltas.jo'
     source.write_text(''.join(f"use '{ROOT / 'compiler' / name}'\n" for name in
                               ('effects.jo', 'places.jo', 'types.jo', 'ast.jo',
-                               'checker_types.dewy', 'check.jo', 'dewy_reader_types.dewy')) + '''
+                               'checker_types.dewy', 'check.jo', 'dewy_reader_types.dewy', 'effect_types.dewy')) + '''
 init_types()
 fns.resize(4)
 effect_limit = fns.len()

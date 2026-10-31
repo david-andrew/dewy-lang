@@ -1,0 +1,22 @@
+# Frozen effect and place layouts; keep field order, defaults and enum ordinals.
+use 'dewy_reader_types.dewy'
+enum PlaceRoot:
+    local, global, formal, capture, resource
+enum PlaceProjection:
+    root, field, index, selector, unknown
+struct PlaceIdentity:
+    root: PlaceRoot = .local
+    owner: int = 0
+    declaration: int = 0
+    parent: int = 0
+    projection: PlaceProjection = .root
+    selector: int = 0
+struct EffectAtom:
+    kind: EffectKind = .read
+    place: PlaceIdentity = PlaceIdentity(.local, 0, 0)
+    row: int = 0
+struct EffectContract:
+    atoms: EffectAtom[]
+    exclusions: EffectAtom[]
+    variables: int[]
+    open: bool = false

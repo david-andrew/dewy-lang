@@ -8,7 +8,7 @@ def test_fact_plan_dependencies(compiler, tmp_path):
     source = tmp_path / 'fact_plans.jo'
     source.write_text(''.join(f"use '{ROOT / 'compiler' / name}'\n" for name in
                               ('facts.jo', 'effects.jo', 'places.jo', 'types.jo',
-                               'checker_types.dewy', 'refinement_types.dewy', 'check.jo',
+                               'checker_types.dewy', 'refinement_types.dewy', 'check.jo', 'effect_types.dewy',
                                'exact.jo', 'ast.jo', 'floats.jo')) + '''
 init_types()
 fns.resize(4)
