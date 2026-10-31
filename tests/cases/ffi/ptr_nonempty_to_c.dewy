@@ -1,0 +1,16 @@
+# modes: native native-release
+# `xs.ptr` of a non-empty array is its first element: C reads and fills it in place.
+memset=(p:ptr<uint8> value:int32 n:uint64):>ptr<uint8>? => $extern
+strlen=(s:ptr<uint8>):>uint64 => $extern
+
+main=():>void=>$unsafe {
+    let word:array<uint8>=[104 105 33 0]
+    printl(strlen(word.ptr) word.ptr[1])
+    memset(word.ptr + 1 120 2);
+    printl(word strlen(word.ptr))
+    let wide:array<int32>=[1 2 3]
+    memset(wide.ptr as ptr<uint8> 0 4);
+    printl(wide wide.ptr[2])
+}
+
+$runtime_checks

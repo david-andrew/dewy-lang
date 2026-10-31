@@ -4344,6 +4344,14 @@ ptr_param_read = (f: int, i: int, n: int) -> bool:
 
 gen_intrinsic_arrdata = (e: int, arg_start: int) -> Val:
     p = arrdata_header(e, arg_start)
+    # Dewy's `xs.ptr` is a ptr<T>, never null: a nil array's is the static empty string's
+    # elements (a zero byte in read-only data, like Rust's dangling pointer). Jo's data() keeps
+    # null for nil, which Jo code tests.
+    if (nodes[e].aux as IN) == .arrdata and dewy_at(nodes[e].pos):
+        h = vreg(VI)
+        empty = e_daddr(str_data(""))
+        emit(.select, VI, h, e_bin(.ne, VI, p, e_iconst(0)), p, empty, 0)
+        return V(e_addi(h, 24), false)
     r = vreg(VI)
     e_mov(r, e_iconst(0))
     iff(e_bin(.ne, VI, p, e_iconst(0)))

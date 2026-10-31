@@ -3558,6 +3558,7 @@ elements on, and `p as ptr<U>` reinterprets it. A C function's result is the
 claim of its declaration: one declared `ptr<T>` must not return null.
 `xs.ptr` (provisional spelling) is the pointer to an array's elements, for C to
 read or fill; it is valid until the array next changes length or is replaced.
+An empty array's is not null either, though there is nothing to reach through it.
 
 A pointer at the C boundary points to data with C's layout: fixed-width
 numbers, bools, pointers, and records of them. Such a record is a C struct: its

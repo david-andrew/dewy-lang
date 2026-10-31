@@ -1,0 +1,15 @@
+# modes: native native-release
+# A string's bytes' `.ptr` reaches C as a zero-terminated text, an unset
+# (zeroed) string's too: C reads an empty one, not a null pointer.
+strlen=(s:ptr<uint8>):>uint64 => $extern
+
+main=():>void=>$unsafe {
+    let names:array<string>=["dewy"]
+    names.resize(2)
+    let unset=names[1]
+    printl(strlen((unset as array<uint8>).ptr))
+    printl(strlen(("" as array<uint8>).ptr))
+    printl(strlen((names[0] as array<uint8>).ptr))
+}
+
+$runtime_checks
