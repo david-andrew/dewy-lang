@@ -18,25 +18,30 @@ LineTable:type=[
     line:int64
 ]
 
+# Offsets, counts and line numbers are words (they cannot overflow); the newline
+# scan's bit trick wraps by design.
+LineWord:type=int64<overflow='wrap'>
+LineBits:type=uint64<overflow='wrap'>
+
 # where each line of src starts: 0, then the offset after each newline. Newlines are
 # found a word at a time: only a word holding one is scanned by byte; O(bytes / 8 + lines)
 line_starts=(src:string):>array<int64>=>$unsafe {
     let ls:array<int64>=[0]
     # (the pointer of a view, not of a variable: a variable's would be its own copy)
-    let n:int64=(src as array<uint8>).length
+    let n=LineWord((src as array<uint8>).length)
     let sp=(src as array<uint8>).ptr
-    let i:int64=0
+    let i:LineWord=0
     loop i + 8 <=? n {
-        let w=((sp + i) as ptr<uint64>)[0] xor 0x0A0A0A0A0A0A0A0A
+        let w=LineBits(((sp + i) as ptr<uint64>)[0]) xor 0x0A0A0A0A0A0A0A0A
         if (w - 0x0101010101010101) & (w xor 0xFFFFFFFFFFFFFFFF) & 0x8080808080808080 not=? 0 {
             loop j in [i..i + 8) {
-                if sp[j] =? 10 {ls.push(j + 1)}
+                if sp[j] =? 10 {ls.push(int64(j + 1))}
             }
         }
         i+=8
     }
     loop i <? n {
-        if sp[i] =? 10 {ls.push(i + 1)}
+        if sp[i] =? 10 {ls.push(int64(i + 1))}
         i+=1
     }
     ls
@@ -44,7 +49,7 @@ line_starts=(src:string):>array<int64>=>$unsafe {
 
 # the line and column (from 1) of byte off of file f, whose text is src
 line_col_in=(@t:LineTable f:int64 off:int64 src:string):>[int64 int64]=>{
-    if f =? t.file and off >=? t.start and off <? t.stop {return [t.line off - t.start + 1]}
+    if f =? t.file and off >=? t.start and off <? t.stop {return [t.line int64(LineWord(off) - LineWord(t.start) + 1)]}
     $runtime_assert f >=? 0
     let known:array<int64>=if f <? t.starts.length t.starts[f] else []
     let ls=if known.length >? 0 known else line_starts(src)
@@ -52,8 +57,8 @@ line_col_in=(@t:LineTable f:int64 off:int64 src:string):>[int64 int64]=>{
     t.starts[f]=ls
     # (line_starts begins every table with 0)
     $runtime_assert ls.length >? 0
-    let lo:int64=0
-    let hi:int64=ls.length - 1
+    let lo:LineWord=0
+    let hi=LineWord(ls.length) - 1
     loop lo <? hi {
         let mid=(lo + hi + 1) // 2
         $runtime_assert lo <? mid and mid <=? hi
@@ -62,7 +67,7 @@ line_col_in=(@t:LineTable f:int64 off:int64 src:string):>[int64 int64]=>{
     $runtime_assert 0 <=? lo and lo <? ls.length
     t.file=f
     t.start=ls[lo]
-    t.stop=if lo + 1 <? ls.length ls[lo + 1] else 1 << 62
-    t.line=lo + 1
-    [lo + 1 off - ls[lo] + 1]
+    t.stop=if lo + 1 <? LineWord(ls.length) ls[lo + 1] else 1 << 62
+    t.line=int64(lo + 1)
+    [int64(lo + 1) int64(LineWord(off) - LineWord(ls[lo]) + 1)]
 }
