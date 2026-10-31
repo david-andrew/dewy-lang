@@ -20,7 +20,7 @@ FactPolicy:type='RuntimeAllowed' | 'RequireStatic'
 FactReason:type='missing' | 'write' | 'call' | 'join' | 'loop_' | 'unsupported' | 'budget' | 'callee'
 
 FactBound:type=[
-    lo:int64=-9223372036854775807 - 1
+    lo:int64=int64.min
     hi:int64=9223372036854775807
     nz:bool=false
     reason:FactReason='missing'
@@ -42,6 +42,6 @@ FactRequest:type=[
     owner:int64=0
 ]
 
-const FACT_MIN:int64= -9223372036854775807 - 1
+const FACT_MIN:int64=int64.min
 
 const FACT_MAX:int64= 9223372036854775807
