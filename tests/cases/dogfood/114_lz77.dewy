@@ -1,0 +1,85 @@
+# LZ77 compression over text: each step emits either a literal character or a
+# back-reference (distance, length) into a sliding window of what came before.
+# Decoding replays the tokens; references may overlap their own output, as
+# "abababab" encodes as "ab" then one long copy at distance 2.
+
+const WINDOW = 32
+const MIN_MATCH = 3
+const MAX_MATCH = 18
+
+Token:type = [distance:int=0 length:int=0 literal:string=""]
+
+# The longest match for the text at i within the window, as [distance length].
+longest = (chars:array<string> i:int):>[int int] => {
+    let best_distance = 0
+    let best_length = 0
+    let start = max(0 i - WINDOW)
+    loop j in [start..i) {
+        let length = 0
+        loop i + length <? chars.length and length <? MAX_MATCH and chars[j + length] =? chars[i + length] length += 1
+        if length >? best_length {
+            best_length = length
+            best_distance = i - j
+        }
+    }
+    [best_distance best_length]
+}
+
+encode = (text:string):>array<Token> => {
+    let chars = text.chars
+    let tokens:array<Token> = []
+    let i = 0
+    loop i <? chars.length {
+        let [distance length] = longest(chars i)
+        if length >=? MIN_MATCH {
+            tokens.push(Token[distance length])
+            i += length
+        } else {
+            tokens.push(Token[literal=chars[i]])
+            i += 1
+        }
+    }
+    tokens
+}
+
+decode = (tokens:array<Token>):>string | DecodeError => {
+    let out:array<string> = []
+    loop t in tokens {
+        if t.length =? 0 {
+            out.push(t.literal)
+            continue
+        }
+        if not (1 <=? t.distance <=? out.length) return DecodeError["distance {t.distance} beyond {out.length} characters"]
+        # (each copied character is t.distance back from the end, even one just copied)
+        loop _ in [0..t.length) out.push(out[out.length - t.distance])
+    }
+    out.join("")
+}
+
+DecodeError:type = type of error & [message:string]
+
+show = (tokens:array<Token>):>string => [loop t in tokens if t.length =? 0 t.literal else "<{t.distance},{t.length}>"].join("")
+
+# Size in bits: a flag bit, then 8 bits for a literal or 5+4 for a reference.
+bits = (tokens:array<Token>):>int => sum([loop t in tokens if t.length =? 0 9 else 10])
+
+const SAMPLES = [
+    "abababababab"
+    "the rain in spain stays mainly in the plain"
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    "no repeats here"
+    "to be or not to be, that is the question: to be or not to be"
+]
+
+main = () => {
+    loop text in SAMPLES {
+        let tokens = encode(text)
+        let back = decode(tokens)
+        let ok = if back is? string back =? text else false
+        printl"{text.length} chars -> {tokens.length} tokens, {bits(tokens)} bits vs {text.length * 8}, round trip {ok}"
+        printl"  {show(tokens)}"
+    }
+    let broken = [Token[literal="x"] Token[4 2]]
+    let result = decode(broken)
+    if result is? DecodeError printl"broken: {result.message}"
+}

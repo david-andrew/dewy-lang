@@ -1,0 +1,108 @@
+# A package resolver: each package has versions, each version requires other
+# packages within a range (">=1.2.0 <2.0.0", "^1.4.0", "~2.1.0" or "=3.0.1").
+# Resolution picks the newest version of each needed package that satisfies
+# every requirement on it, backtracking when a choice leads to a conflict.
+
+Version:type = [major:int minor:int patch:int]
+
+parse_version = (text:string):>Version? => {
+    let parts = text.split(".")
+    if parts.length not=? 3 return none
+    let nums = [loop p in parts to_int(p) ?? -1]
+    if nums.any((n) => n <? 0) return none
+    Version[nums[0] nums[1] nums[2]]
+}
+
+compare = (a:Version b:Version):>int => {
+    if a.major not=? b.major return a.major - b.major
+    if a.minor not=? b.minor return a.minor - b.minor
+    a.patch - b.patch
+}
+
+show = (v:Version):>string => "{v.major}.{v.minor}.{v.patch}"
+
+# A range is a list of bounds, each an operator and a version, all of which must hold.
+Bound:type = [op:string at:Version]
+
+parse_range = (text:string):>array<Bound> => {
+    let bounds:array<Bound> = []
+    loop word in text.split() {
+        let ops = [">=" "<=" ">" "<" "=" "^" "~"]
+        let op = ops.find((o) => word.startswith(o)) ?? "="
+        let v = parse_version(if word.startswith(op) word[op.length..] else word)
+        if v is? none continue
+        if op =? "^" {
+            bounds.push(Bound[">=" v])
+            bounds.push(Bound["<" Version[v.major + 1 0 0]])
+        } else if op =? "~" {
+            bounds.push(Bound[">=" v])
+            bounds.push(Bound["<" Version[v.major v.minor + 1 0]])
+        } else bounds.push(Bound[op v])
+    }
+    bounds
+}
+
+satisfies = (v:Version bounds:array<Bound>):>bool => bounds.all((b) => {
+    let c = compare(v b.at)
+    if b.op =? ">=" c >=? 0 else if b.op =? "<=" c <=? 0 else if b.op =? ">" c >? 0 else if b.op =? "<" c <? 0 else c =? 0
+})
+
+Release:type = [name:string version:Version needs:array<[string string]>]
+
+const INDEX = """
+app 1.0.0 web ^2.0.0 log >=1.1.0
+web 2.0.0 log ~1.1.0 json ^1.0.0
+web 2.1.0 log ^1.3.0 json ^1.2.0
+web 3.0.0 log ^2.0.0
+log 1.1.4
+log 1.3.0
+log 2.0.0
+json 1.0.2
+json 1.2.0 log <1.2.0
+"""
+
+parse_index = (text:string):>array<Release> => {
+    let out:array<Release> = []
+    loop line in text.lines {
+        let words = line.split()
+        if words.length <? 2 or words.length % 2 not=? 0 continue
+        let v = parse_version(words[1])
+        if v is? none continue
+        let needs:array<[string string]> = [loop k in [2, 4..words.length - 1) [words[k] words[k + 1]]]
+        out.push(Release[words[0] v needs])
+    }
+    out
+}
+
+# Choose versions for every wanted name given the choices so far; none on conflict.
+resolve = (index:array<Release> chosen:dict<string Version> wants:array<[string string]>):>dict<string Version>? => {
+    if wants.is_empty return chosen
+    let [name range] = wants[0]
+    let rest = wants[1..]
+    let bounds = parse_range(range)
+    if name in? chosen return if satisfies(chosen[name] bounds) resolve(index chosen rest) else none
+    let candidates = [loop r in index if r.name =? name and satisfies(r.version bounds) r].sorted(key=(r) => r.version.major * 10000 + r.version.minor * 100 + r.version.patch)
+    loop r in candidates.reversed() {
+        let next = chosen
+        next[name] = r.version
+        let found = resolve(index next [rest... r.needs...])
+        if found isnt? none return found
+    }
+    none
+}
+
+main = () => {
+    let index = parse_index(INDEX)
+    let none_chosen:dict<string Version> = []
+    printl"{index.length} releases"
+    loop request in ["^1.0.0" ">=2.0.0"] {
+        let result = resolve(index none_chosen [["app" request]])
+        if result is? none printl"app {request}: no solution"
+        else {
+            printl"app {request}:"
+            loop name in result.keys.sorted() printl"  {name} {show(result[name])}"
+        }
+    }
+    let conflict = resolve(index none_chosen [["web" ">=3.0.0"] ["log" "<2.0.0"]])
+    printl"web >=3 with log <2: {if conflict is? none "conflict" else "resolved"}"
+}

@@ -1,0 +1,117 @@
+# A log-structured key-value store: writes and deletes append records to the
+# active segment; a full segment is sealed and a new one started. Reads look
+# through the segments newest first. Compaction merges the sealed segments,
+# keeping only each key's latest record and dropping deleted keys entirely.
+
+const SEGMENT_SIZE = 4
+
+Entry:type = [key:string value:string? seq:int]
+
+Store:type = [
+    sealed:array<array<Entry>>
+    active:array<Entry>
+    seq:int = 0
+]
+
+append = (@store:Store key:string value:string?) => {
+    store.seq += 1
+    store.active.push(Entry[key value store.seq])
+    if store.active.length >=? SEGMENT_SIZE {
+        store.sealed.push(store.active)
+        store.active = []
+    }
+}
+
+put = (@store:Store key:string value:string) => append(@store key value)
+delete = (@store:Store key:string) => append(@store key none)
+
+# The newest record for key: the active segment first, then sealed ones newest first.
+latest = (segment:array<Entry> key:string):>Entry? => {
+    let found:Entry? = none
+    loop e in segment if e.key =? key found = e
+    found
+}
+
+lookup = (store:Store key:string):>string? => {
+    let recent = latest(store.active key)
+    if recent isnt? none return recent.value
+    loop k in [0..store.sealed.length) {
+        let e = latest(store.sealed[store.sealed.length - 1 - k] key)
+        if e isnt? none return e.value
+    }
+    none
+}
+
+# Merge every sealed segment into fresh full segments of live latest values.
+# Deletions shadowed in the active segment still need their sealed records gone:
+# a key whose newest record anywhere is a delete is dropped, unless the active
+# segment holds it (that record wins at read time either way).
+compact = (@store:Store):>int => {
+    let newest:dict<string Entry> = []
+    let before = 0
+    loop segment in store.sealed {
+        before += segment.length
+        loop e in segment newest[e.key] = e
+    }
+    let live = [loop e in newest.values if e.value isnt? none e].sorted(key=(e) => e.seq)
+    let merged:array<array<Entry>> = []
+    let current:array<Entry> = []
+    loop e in live {
+        current.push(e)
+        if current.length =? SEGMENT_SIZE {
+            merged.push(current)
+            current = []
+        }
+    }
+    if not current.is_empty merged.push(current)
+    store.sealed = merged
+    before - live.length
+}
+
+show = (store:Store) => {
+    loop i in 0.. and segment in store.sealed {
+        printl"  sealed {i}: {[loop e in segment if e.value is? string "{e.key}={e.value}" else "{e.key}=x"].join(" ")}"
+    }
+    printl"  active: {[loop e in store.active if e.value is? string "{e.key}={e.value}" else "{e.key}=x"].join(" ")}"
+}
+
+const SCRIPT = """
+put color red
+put size 10
+put shape circle
+put color blue
+del size
+put weight 3
+put color green
+put size 12
+del shape
+put name disk
+get color
+get size
+get shape
+get missing
+compact
+get color
+get shape
+put shape square
+get shape
+"""
+
+main = () => {
+    let store = Store[[] []]
+    loop line in SCRIPT.lines {
+        let words = line.split()
+        if words.is_empty continue
+        let op = words[0]
+        if op =? "put" and words.length =? 3 put(@store words[1] words[2])
+        else if op =? "del" and words.length =? 2 delete(@store words[1])
+        else if op =? "get" and words.length =? 2 printl"get {words[1]}: {lookup(store words[1]) ?? "(none)"}"
+        else if op =? "compact" {
+            printl"before compaction:"
+            show(store)
+            let dropped = compact(@store)
+            printl"compaction dropped {dropped} records:"
+            show(store)
+        }
+    }
+}

@@ -1,0 +1,128 @@
+# A chess move checker: read a position from rows of text (uppercase white,
+# lowercase black, '.' empty), then judge a list of moves in coordinate form
+# ("e2e4"): the piece must move by its own rule, paths must be clear, a capture
+# must take an enemy piece, and the mover's king must not be left in check.
+
+const START = """
+r...k..r
+ppp..ppp
+..n.....
+...pp...
+.b.PP.b.
+..N..N..
+PPP..PPP
+R.B.KB.R
+"""
+
+const MOVES = ["e1g1" "f3e5" "f3d2" "c1g5" "f1b5" "b1c3" "a1a5" "d4e5" "h2h4" "e4d5" "e1e2" "c3d5" "c3b5" "g7g5" "a2a4" "z9e4" "e2"]
+
+Square:type = [col:int row:int]
+
+parse_board = (text:string):>array<array<string>> => {
+    let rows:array<array<string>> = []
+    loop line in text.lines if line.length =? 8 rows.push(line.chars)
+    rows
+}
+
+# "e2" is column 4, row 6 (rows count down from the top of the text).
+square_of = (name:string):>Square? => {
+    if name.length not=? 2 return none
+    let col = "abcdefgh".find(name[0..1)) ?? -1
+    let row = "87654321".find(name[1..2)) ?? -1
+    if col <? 0 or row <? 0 return none
+    Square[col row]
+}
+
+piece_at = (board:array<array<string>> s:Square):>string => {
+    if not (0 <=? s.row <? board.length) return "."
+    let row = board[s.row]
+    if 0 <=? s.col <? row.length row[s.col] else "."
+}
+
+is_white = (p:string):>bool => p not=? "." and p =? p.upper
+same_side = (a:string b:string):>bool => a not=? "." and b not=? "." and is_white(a) =? is_white(b)
+
+sign = (n:int):>int => if n >? 0 1 else if n <? 0 -1 else 0
+
+# Every square strictly between a and b is empty (a straight or diagonal line).
+clear_path = (board:array<array<string>> a:Square b:Square):>bool => {
+    let dc = sign(b.col - a.col)
+    let dr = sign(b.row - a.row)
+    let at = Square[a.col + dc a.row + dr]
+    loop at.col not=? b.col or at.row not=? b.row {
+        if piece_at(board at) not=? "." return false
+        at = Square[at.col + dc at.row + dr]
+    }
+    true
+}
+
+# Whether the piece on a could move to b by its own rule, ignoring check.
+reaches = (board:array<array<string>> a:Square b:Square):>bool => {
+    let p = piece_at(board a)
+    let target = piece_at(board b)
+    if p =? "." or same_side(p target) return false
+    let dc = b.col - a.col
+    let dr = b.row - a.row
+    let kind = p.lower
+    if kind =? "n" return abs(dc) * abs(dr) =? 2
+    if kind =? "k" return abs(dc) <=? 1 and abs(dr) <=? 1 and (dc not=? 0 or dr not=? 0)
+    if kind =? "r" return (dc =? 0) not=? (dr =? 0) and clear_path(board a b)
+    if kind =? "b" return dc not=? 0 and abs(dc) =? abs(dr) and clear_path(board a b)
+    if kind =? "q" return (dc =? 0 or dr =? 0 or abs(dc) =? abs(dr)) and (dc not=? 0 or dr not=? 0) and clear_path(board a b)
+    # Pawns: white moves up the text (row decreases), one step, two from home, diagonal captures.
+    let ahead = if is_white(p) -1 else 1
+    let home = if is_white(p) 6 else 1
+    if dc =? 0 and target =? "." {
+        if dr =? ahead return true
+        return dr =? 2 * ahead and a.row =? home and clear_path(board a b)
+    }
+    abs(dc) =? 1 and dr =? ahead and target not=? "."
+}
+
+find_king = (board:array<array<string>> white:bool):>Square? => {
+    let king = if white "K" else "k"
+    loop r in [0..board.length) {
+        loop c in [0..board[r].length) if board[r][c] =? king return Square[c r]
+    }
+    none
+}
+
+in_check = (board:array<array<string>> white:bool):>bool => {
+    let king = find_king(board white)
+    if king is? none return false
+    loop r in [0..board.length) {
+        loop c in [0..board[r].length) {
+            let p = board[r][c]
+            if p not=? "." and is_white(p) not=? white and reaches(board Square[c r] king) return true
+        }
+    }
+    false
+}
+
+moved = (board:array<array<string>> a:Square b:Square):>array<array<string>> => {
+    let next = board
+    let p = piece_at(board a)
+    if 0 <=? b.row <? next.length and 0 <=? b.col <? next[b.row].length next[b.row][b.col] = p
+    if 0 <=? a.row <? next.length and 0 <=? a.col <? next[a.row].length next[a.row][a.col] = "."
+    next
+}
+
+judge = (board:array<array<string>> move:string):>string => {
+    if move.length not=? 4 return "not a move"
+    let start = square_of(move[0..2))
+    let to = square_of(move[2..4))
+    if start is? none or to is? none return "not a move"
+    let p = piece_at(board start)
+    if p =? "." return "no piece there"
+    if not is_white(p) return "not white's piece"
+    if not reaches(board start to) return "illegal for {p}"
+    if in_check(moved(board start to) true) return "leaves the king in check"
+    let target = piece_at(board to)
+    if target not=? "." "{p} takes {target}" else "{p} moves"
+}
+
+main = () => {
+    let board = parse_board(START)
+    loop m in MOVES printl"{m}: {judge(board m)}"
+    printl"white in check: {in_check(board true)}, black in check: {in_check(board false)}"
+}

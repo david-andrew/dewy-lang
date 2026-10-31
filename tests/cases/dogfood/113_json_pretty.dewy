@@ -1,0 +1,130 @@
+# A pretty printer for a JSON-like text: parse it into a tree of nodes (objects,
+# arrays, strings, numbers, literals), then print it indented, with short
+# containers kept on one line, and report its depth and the paths of its leaves.
+
+Node:type = [kind:string text:string="" keys:array<string>=[] items:array<Node>=[]]
+
+Reader:type = [chars:array<string> pos:int<(>=? 0)>=0 problem:string=""]
+
+skip_space = (@r:Reader) => {
+    let space = set" \n\t"
+    loop r.pos <? r.chars.length and r.chars[r.pos] in? space r.pos += 1
+}
+
+peek = (r:Reader):>string => r.chars.get(r.pos) ?? ""
+
+fail = (@r:Reader message:string):>Node => {
+    if r.problem =? "" r.problem = "{message} at {r.pos}"
+    r.pos = r.chars.length
+    Node["error"]
+}
+
+read_string = (@r:Reader):>string => {
+    r.pos += 1
+    let text:array<string> = []
+    loop r.pos <? r.chars.length and r.chars[r.pos] not=? "\"" {
+        text.push(r.chars[r.pos])
+        r.pos += 1
+    }
+    r.pos += 1
+    text.join("")
+}
+
+read_value = (@r:Reader):>Node => {
+    skip_space(@r)
+    let c = peek(r)
+    if c =? "\"" return Node["string" read_string(@r)]
+    if c =? "\{" or c =? "[" {
+        let close = if c =? "\{" "}" else "]"
+        let node = Node[if c =? "\{" "object" else "array"]
+        r.pos += 1
+        skip_space(@r)
+        if peek(r) =? close { r.pos += 1  return node }
+        loop r.pos <? r.chars.length {
+            skip_space(@r)
+            if close =? "}" {
+                if peek(r) not=? "\"" return fail(@r "expected a key")
+                node.keys.push(read_string(@r))
+                skip_space(@r)
+                if peek(r) not=? ":" return fail(@r "expected ':'")
+                r.pos += 1
+            }
+            node.items.push(read_value(@r))
+            skip_space(@r)
+            let next = peek(r)
+            r.pos += 1
+            if next =? close return node
+            if next not=? "," return fail(@r "expected ',' or '{close}'")
+        }
+        return fail(@r "unclosed {node.kind}")
+    }
+    let letters:array<string> = []
+    let word_end = set" \n\t,]}:"
+    loop r.pos <? r.chars.length and not (r.chars[r.pos] in? word_end) {
+        letters.push(r.chars[r.pos])
+        r.pos += 1
+    }
+    let word = letters.join("")
+    if word =? "true" or word =? "false" or word =? "null" return Node["literal" word]
+    if to_float(word) isnt? none return Node["number" word]
+    fail(@r "unexpected '{word}'")
+}
+
+# The node on one line, as a short container prints.
+flat = (n:Node):>string => {
+    if n.kind =? "string" return "\"{n.text}\""
+    if n.kind =? "array" return "[{[loop item in n.items flat(item)].join(", ")}]"
+    if n.kind =? "object" {
+        let parts = [loop k in [0..n.items.length) "\"{n.keys.get(k) ?? "?"}\": {flat(n.items[k])}"]
+        return "\{{parts.join(", ")}}"
+    }
+    n.text
+}
+
+const WIDTH = 40
+
+pretty = (n:Node indent:string):>string => {
+    let one = flat(n)
+    if n.kind not=? "object" and n.kind not=? "array" or indent.length + one.length <=? WIDTH return one
+    let inner = "{indent}  "
+    let lines = [loop k in [0..n.items.length) {
+        let key = if n.kind =? "object" "\"{n.keys.get(k) ?? "?"}\": " else ""
+        "{inner}{key}{pretty(n.items[k] inner)}"
+    }]
+    let [open close] = if n.kind =? "object" ["\{" "}"] else ["[" "]"]
+    "{open}\n{lines.join(",\n")}\n{indent}{close}"
+}
+
+depth = (n:Node):>int => 1 + max([0 [loop item in n.items depth(item)]...])
+
+leaves = (n:Node path:string @out:array<string>) => {
+    if n.items.is_empty {
+        out.push("{path} = {flat(n)}")
+        return
+    }
+    loop k in [0..n.items.length) {
+        let step = if n.kind =? "object" ".{n.keys.get(k) ?? "?"}" else "[{k}]"
+        leaves(n.items[k] "{path}{step}" @out)
+    }
+}
+
+const DOCUMENT = r"""
+{"name": "probe", "version": 3, "active": true,
+ "limits": {"speed": 12.5, "depth": 400, "modes": ["dive", "drift", "surface"]},
+ "log": [{"t": 0, "event": "launch"}, {"t": 42, "event": "dive", "notes": null}],
+ "tags": []}
+"""
+
+main = () => {
+    let r = Reader[DOCUMENT.chars]
+    let root = read_value(@r)
+    if r.problem not=? "" { printl"error: {r.problem}"  return }
+    printl(pretty(root ""))
+    printl"depth {depth(root)}"
+    let paths:array<string> = []
+    leaves(root "$" @paths)
+    loop p in paths printl(p)
+    let bad = Reader["\{\"a\": [1, 2\}".chars]
+    read_value(@bad);
+    printl"bad: {bad.problem}"
+}
