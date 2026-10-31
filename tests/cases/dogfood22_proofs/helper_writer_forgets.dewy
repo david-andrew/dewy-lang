@@ -1,0 +1,8 @@
+# Near miss: a helper that changes the array still makes the caller forget it.
+shrink = (@xs:array<int> word:string):>void => { if word.is_digit xs.pop(); }
+f = (@xs:array<int>):>int => {
+    if xs.is_empty return 0
+    shrink(@xs "1")
+    xs[0]
+}
+main = () => { let xs = [1]; printl(f(@xs)) }

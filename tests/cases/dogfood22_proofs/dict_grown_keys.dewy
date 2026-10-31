@@ -1,0 +1,8 @@
+# Adding keys keeps the keys a comprehension made, on one branch too.
+main = () => {
+    let names = ["a" "b"]
+    let d:dict<string int> = [loop n in names n -> 0]
+    d["z"] = 1
+    if names.length >? 1 { d.insert_if_absent("y" 2); d["y"] += 1 }
+    loop n in names printl(d[n])
+}

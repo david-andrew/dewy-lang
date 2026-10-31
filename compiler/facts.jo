@@ -208,6 +208,7 @@ struct FactPushes:
     # held or a length of one, 0 before a push, -1 none: fact_push_same)
     same: int[]
     same_base: int[]
+    same_offset: int[]
     entry: FactState = FactState(live = false)
     # (per local: a value every pushed integer is below, one evaluated before
     # the loop, 0 before a push, -1 none: fact_push_below)
@@ -293,6 +294,11 @@ const FACT_ELEMENT_SAME_LENGTH = -27
 # Every element of this integer array is below this value (`[loop i in
 # [0..n) i]`'s are below n). Built by recorded pushes; an element write drops it.
 const FACT_ELEMENT_BELOW = -28
+# A dictionary value made by adding keys (stores or `insert_if_absent`) to a
+# comprehension's dictionary (fact_grown_roots): it holds every key that
+# dictionary held.
+const FACT_MAP_GROWN = -29
+fact_grown_roots: {int: bool} = {}
 fact_name_vals = 0
 
 # A runtime-child walk, never into nested function bodies. Closed calls
@@ -3319,6 +3325,27 @@ fact_hull_type = (t: int, sa: FactState, a: int, sb: FactState, b: int) -> int:
     if fact_type(t) != T_MATH_INT or not fact_host_finite(sa, a) or not fact_host_finite(sb, b): return t
     T_INT
 
+# A dictionary one path grew by adding keys (`if c d[k] = x`) from the
+# comprehension dictionary the other kept, or both grew from one: the merge
+# holds every key that dictionary held. O(1) indexed lookups per renamed binding.
+fact_join_grown = (s: mut FactState, a: FactState, va: int, b: FactState, vb: int, merged: int):
+    ra = fact_grown_root(a, va)
+    if ra == 0 or ra != fact_grown_root(b, vb) or fact_slot(s, ra) < 0 or s.projections.len() >= FACT_CAP: return
+    fact_add_projection(s, FactProjection(merged, FACT_MAP_GROWN, false, ra))
+
+# The comprehension dictionary map is or grew from, or 0. O(1).
+fact_grown_root = (s: FactState, map: int) -> int:
+    if fact_grown_roots.has(map): return map
+    g = fact_projection_find(s, map, FACT_MAP_GROWN, false)
+    if g < 0: return 0
+    s.projections[g].value
+
+# After a key-adding store: after holds every key of before's root. O(1).
+fact_map_grew = (s: mut FactState, before: int, after: int):
+    if before == 0 or fact_slot(s, before) < 0: return
+    root = fact_grown_root(s, before)
+    if root != 0 and fact_slot(s, root) >= 0 and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(after, FACT_MAP_GROWN, false, root))
+
 fact_host_finite = (s: FactState, v: int) -> bool:
     if v == 0 or fact_type(fact_terms[v].type) == T_U64: return false
     fact_host_value(s, v) or fact_host_endpoint(s, v, false) and fact_host_endpoint(s, v, true)
@@ -3428,7 +3455,9 @@ fact_join = (a: FactState, b: FactState, at: int) -> FactState:
         pair = fact_pair_key(v, other)
         prior = fact_pair_find(left, right, pairs, v, other)
         if prior >= 0: v = merged[prior]
-        else if v != other: v = fact_new(s, fact_hull(fact_bound(a, v), fact_bound(b, other), at), fact_join_term(a, v, b, other))
+        else if v != other:
+            v = fact_new(s, fact_hull(fact_bound(a, v), fact_bound(b, other), at), fact_join_term(a, v, b, other))
+            fact_join_grown(s, a, binding.value, b, other, v)
         # (the tombstone survives when both paths share it)
         r = if v == binding.value and b.bindings[i].event == binding.event and binding.event != 0: binding else: FactBinding(binding.place, v)
         if r != binding: s.bindings[i] = r
@@ -3445,7 +3474,9 @@ fact_join = (a: FactState, b: FactState, at: int) -> FactState:
         pair = fact_pair_key(v, other)
         prior = fact_pair_find(left, right, pairs, v, other)
         if prior >= 0: v = merged[prior]
-        else if v != other: v = fact_new(s, fact_hull(fact_bound(a, v), fact_bound(b, other), at), fact_join_term(a, v, b, other))
+        else if v != other:
+            v = fact_new(s, fact_hull(fact_bound(a, v), fact_bound(b, other), at), fact_join_term(a, v, b, other))
+            fact_join_grown(s, a, binding.value, b, other, v)
         fact_bind(s, binding.place, v)
         if v == binding.value and b.bindings[j].event == binding.event: fact_rebind(s, binding.place, v, binding.event, binding.prior)
         if prior < 0:
@@ -5526,6 +5557,8 @@ fact_map_member = (s: mut FactState, n: int, map: int, key: int) -> int:
         before = fact_projection_find(s, held, FACT_MAP_POSITIONS, false)
         after = if before >= 0: fact_projection_find(s, map, FACT_MAP_POSITIONS, false) else: -1
         if after >= 0 and s.projections[before].value == s.projections[after].value: return fact_constant(s, 1)
+        # (map grew from that comprehension's dictionary by adding keys)
+        if fact_grown_roots.has(held) and fact_grown_root(s, map) == held: return fact_constant(s, 1)
     fact_project(s, map, fact_map_key(s, kid(n, 1), key), true, T_BOOL)
 
 # A dictionary's entries (no traps): the entry of key k in a dictionary's value
@@ -5615,6 +5648,7 @@ fact_map_store_changes = (n: int, s: mut FactState, at: int, reason: FactReason)
     i = if before != 0: fact_binding(s, fact_place(target)) else: -1
     if i < 0: return
     after = s.bindings[i].value
+    fact_map_grew(s, before, after)
     keys: int[]
     j = fact_projection_first(s, before)
     loop j >= 0:
@@ -5633,6 +5667,7 @@ fact_map_store = (n: int, s: mut FactState, values: int[], before: int) -> int:
     if fact_exposed(written): fact_forget(s, n, .call, false, written)
     after = fact_new(s, FactBound(), FactTerm(type = ntype(target)))
     fact_store_route(s, route, after, n)
+    fact_map_grew(s, before, after)
     keys: int[]
     i = fact_projection_first(s, before)
     loop i >= 0:
@@ -5754,6 +5789,7 @@ fact_map_of = (n: int, s: mut FactState) -> int:
     fact_add_projection(s, FactProjection(source, FACT_KEYS_SOURCE, false, result))
     fact_add_projection(s, FactProjection(source, FACT_KEYS_POSITIONS, false, fact_project(s, result, FACT_MAP_POSITIONS, false, T_INT)))
     fact_literal_keys(s, int(nodes[loop_].a), result)
+    fact_grown_roots[result] = true
     result
 
 # The elements of an array literal `[a "b" r.name]` that every element of the
@@ -6169,17 +6205,26 @@ fact_loop_header = (entry: mut FactState, back: FactState, old: FactState, at: i
         # retains the dual lower bound; constant starts need only intervals.
         # O(changing counters x their entry rows, at most 8), one bounded
         # relaxation per candidate.
+        # A counter stepped on only some paths (`if c i -= 1`) reaches the
+        # backedge as a join: it may move either way, so both directions are
+        # candidates, each still kept only when the backedge entails it.
         loop binding in back.bindings:
             v = binding.value
             if not changing.has(v): continue
             term = fact_terms[v]
-            if term.op != .plus and term.op != .minus or term.a == 0 or term.b == 0: continue
-            step = fact_bound(back, term.b)
-            if step.lo != step.hi or step.lo == 0 or step.lo == FACT_MIN: continue
-            falling = (step.lo < 0) == (term.op == .plus)
+            joined = term.op == .eof and term.a == 0
+            if not joined:
+                if term.op != .plus and term.op != .minus or term.a == 0 or term.b == 0: continue
+                step = fact_bound(back, term.b)
+                if step.lo != step.hi or step.lo == 0 or step.lo == FACT_MIN: continue
+            falling = joined or (fact_bound(back, term.b).lo < 0) == (term.op == .plus)
             e = fact_binding(entry, binding.place)
             if e < 0: continue
             start = entry.bindings[e].value
+            if joined:
+                if binding.place.root != .local or types[fact_type(int(locals[binding.place.declaration].type))].kind != .int_: continue
+                initial = fact_bound(entry, start)
+                if not (initial.lo == initial.hi and not initial.wide) and fact_entails(back, start, v, 0): carried.push(FactDifference(start, v, 0))
             if not falling:
                 initial = fact_bound(entry, start)
                 # Constant starts already have an interval lower bound.
@@ -7311,6 +7356,7 @@ fact_push_open = (n: int, s: mut FactState, base: int = 0) -> bool:
             if same >= 0 and not frame.entry.live: frame.entry = s
         frame.same.push(same)
         frame.same_base.push(0)
+        frame.same_offset.push(0)
         below = -1
         if not sized:
             held = fact_projection_find(s, value, FACT_ELEMENT_BELOW, false)
@@ -7326,19 +7372,32 @@ fact_push_open = (n: int, s: mut FactState, base: int = 0) -> bool:
 # length of a value it held (`if cells.length not=? header.length continue`
 # then `rows.push(cells)`): immutable, so the same at every iteration. Kept
 # as (value, 0), or (0, that value) for its length. Its rows only; O(rows of v).
-fact_push_same = (s: mut FactState, v: int, entry: FactState) -> (int, int):
+# (two steps, each at a small exact offset: a comprehension's length is its
+# count, which is its range's end, one more for an inclusive one,
+# `[loop j in [0..b.length] 0]`). Kept as (value, 0, offset) or (0, that
+# value, offset) for its length plus offset.
+fact_push_same = (s: mut FactState, v: int, entry: FactState, depth: int = 0) -> (int, int, int):
     found = fact_push_invariant(s, v, entry)
-    if found.0 != 0 or found.1 != 0: return found
+    if found.0 != 0 or found.1 != 0: return (found.0, found.1, 0)
     loop direction in [0..2):
         ri = fact_difference_head(s, v, direction)
         loop ri >= 0:
             row = s.differences[ri]
             ri = fact_difference_next(s, ri, direction)
             w = if direction == 0: row.a else: row.b
-            if w == v or fact_compare(s, .eq, v, w) != 1: continue
-            found = fact_push_invariant(s, w, entry)
-            if found.0 != 0 or found.1 != 0: return found
-    (-1, 0)
+            if w == v or row.limit < -16 or row.limit > 16: continue
+            # (v = w + d exactly)
+            d = if direction == 0: -row.limit else: row.limit
+            if d == 0:
+                if fact_compare(s, .eq, v, w) != 1: continue
+            else if not (fact_entails(s, v, w, d) and fact_entails(s, w, v, -d)): continue
+            if depth == 0:
+                deeper = fact_push_same(s, w, entry, 1)
+                if deeper.0 > 0 or deeper.1 > 0: return (deeper.0, deeper.1, deeper.2 + d)
+            else:
+                found = fact_push_invariant(s, w, entry)
+                if found.0 != 0 or found.1 != 0: return (found.0, found.1, d)
+    (-1, 0, 0)
 
 fact_push_invariant = (s: FactState, w: int, entry: FactState) -> (int, int):
     if fact_slot(entry, w) >= 0: return (w, 0)
@@ -7357,11 +7416,18 @@ fact_push_below = (s: FactState, v: int, mark: int) -> int:
         if row.b < mark and row.limit <= -1 and fact_slot(s, row.b) >= 0: return row.b
     -1
 
-# The shared length in s (fact_push_same's pair), or 0.
-fact_push_same_value = (s: mut FactState, same: int, base: int) -> int:
-    if same > 0 and fact_slot(s, same) >= 0: return same
-    if base > 0 and fact_slot(s, base) >= 0: return fact_project(s, base, -1, false, T_INT)
-    0
+# The shared length in s (fact_push_same's triple), or 0.
+fact_push_same_value = (s: mut FactState, same: int, base: int, offset: int = 0) -> int:
+    held = 0
+    if same > 0 and fact_slot(s, same) >= 0: held = same
+    else if base > 0 and fact_slot(s, base) >= 0: held = fact_project(s, base, -1, false, T_INT)
+    if held == 0 or offset == 0: return held
+    b = fact_bound(s, held)
+    if not fact_add_fits(b.lo, offset) or not fact_add_fits(b.hi, offset): return 0
+    shifted = fact_new(s, FactBound(max(0, b.lo + offset), min(b.hi + offset, fact_length_max())), FactTerm(.plus, held, fact_constant(s, offset), 0, T_INT))
+    fact_difference(s, shifted, held, offset, 0)
+    fact_difference(s, held, shifted, -offset, 0)
+    shifted
 
 # An array of rows (arrays).
 fact_row_array = (t0: int) -> bool:
@@ -7403,13 +7469,18 @@ fact_push_record = (n: int, s: mut FactState, value: int):
             v = if fact_push_frames[f].lengths[j]: fact_project(s, value, -1, false, T_INT) else: value
             same = fact_push_frames[f].same[j]
             base = fact_push_frames[f].same_base[j]
+            offset = fact_push_frames[f].same_offset[j]
             if same == 0 and base == 0:
                 found = fact_push_same(s, v, fact_push_frames[f].entry)
                 fact_push_frames[f].same[j] = found.0
                 fact_push_frames[f].same_base[j] = found.1
+                fact_push_frames[f].same_offset[j] = found.2
             else if same >= 0:
                 held = fact_push_same_value(s, same, base)
-                if held == 0 or fact_compare(s, .eq, v, held) != 1:
+                kept = held != 0
+                if kept and offset == 0: kept = fact_compare(s, .eq, v, held) == 1
+                else if kept: kept = fact_entails(s, v, held, offset) and fact_entails(s, held, v, -offset)
+                if not kept:
                     fact_push_frames[f].same[j] = -1
                     fact_push_frames[f].same_base[j] = 0
             if fact_push_frames[f].matching and l == fact_push_frames[f].acc:
@@ -7440,7 +7511,7 @@ fact_push_close = (n: int, s: mut FactState):
         l = frame.locals[j]
         i = fact_binding(s, PlaceIdentity(.local, int(locals[l].owner), l))
         if i >= 0 and frame.same[j] >= 0 and fact_projection_find(s, s.bindings[i].value, FACT_ELEMENT_SAME_LENGTH, false) < 0:
-            same = fact_push_same_value(s, frame.same[j], frame.same_base[j])
+            same = fact_push_same_value(s, frame.same[j], frame.same_base[j], frame.same_offset[j])
             if same != 0 and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(s.bindings[i].value, FACT_ELEMENT_SAME_LENGTH, false, same))
         if i >= 0 and frame.matching and l == frame.acc:
             source = frame.rows
@@ -10467,6 +10538,7 @@ facts_reset = ():
     fact_pushed_rows_cache = {}
     fact_comprehensions = {}
     fact_comprehension_sources = {}
+    fact_grown_roots = {}
     fact_owner = 0
     fact_summaries = {}
     fact_selector_sources = {}

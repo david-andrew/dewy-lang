@@ -1,0 +1,131 @@
+# Seat booking on a small train: parties ask for adjacent seats in one row,
+# the first car and row with room gets them, and a party that does not fit
+# waits. A cancellation frees the seats and seats whoever on the waitlist now
+# fits, in arrival order.
+
+const CARS = 2
+const ROWS = 3
+const LETTERS = "ABCD"
+
+const REQUESTS = """
+book Ames 3
+book Baker 4
+book Cho 2
+book Diaz 4
+book Evans 2
+book Fox 3
+book Gray 4
+book Jung 3
+book Kim 2
+book Ames 1
+cancel Baker
+book Hart 1
+cancel Cho
+cancel Nobody
+book Ito 5
+cancel Diaz
+"""
+
+Seat:type = [car:int64<(>=? 0)> row:int64<(>=? 0)> at:int64<(>=? 0)>]
+
+Train:type = [
+    seats:array<array<array<string>>>
+    bookings:dict<string array<Seat>>=[]
+    waiting:array<[string int]>=[]
+]
+
+new_train = ():>Train => Train[
+    [loop c in [0..CARS) [loop r in [0..ROWS) [loop s in LETTERS ""]]]
+]
+
+# The first position of `n` free seats in a row, or -1.
+find_run = (row:array<string> n:int):>int => {
+    let run = 0
+    loop i in [0..row.length) {
+        if row[i].is_empty run += 1 else run = 0
+        if run =? n return i - n + 1
+    }
+    -1
+}
+
+# Seat a party in the first row with room: the seats taken, or none.
+seat_party = (@train:Train name:string n:int):>array<Seat> => {
+    loop c in [0..train.seats.length) {
+        loop r in [0..train.seats[c].length) {
+            let row = train.seats[c][r]
+            let start = find_run(row n)
+            if start <? 0 continue
+            let taken:array<Seat> = []
+            loop at in [start..start + n) {
+                if at >=? row.length break
+                train.seats[c][r][at] = name
+                taken.push(Seat[c r at])
+            }
+            train.bookings[name] = taken
+            return taken
+        }
+    }
+    []
+}
+
+label = (seat:Seat):>string => "{seat.car + 1}-{seat.row + 1}{LETTERS[$clamp seat.at..seat.at + 1)}"
+
+book = (@train:Train name:string n:int):>void => {
+    if name in? train.bookings {
+        printl"{name}: already booked"
+        return
+    }
+    if n >? LETTERS.length {
+        printl"{name}: no row holds {n}"
+        return
+    }
+    let taken = seat_party(@train name n)
+    if not taken.is_empty {
+        printl"{name}: {[loop s in taken label(s)].join(" ")}"
+    } else {
+        train.waiting.push([name n])
+        printl"{name}: waitlisted ({train.waiting.length} waiting)"
+    }
+}
+
+cancel = (@train:Train name:string):>void => {
+    let held = train.bookings.get(name)
+    if held is? none {
+        printl"{name}: no booking to cancel"
+        return
+    }
+    loop s in held {
+        if s.car <? train.seats.length and s.row <? train.seats[s.car].length and s.at <? train.seats[s.car][s.row].length {
+            train.seats[s.car][s.row][s.at] = ""
+        }
+    }
+    train.bookings.remove(name);
+    printl"{name}: cancelled {held.length} seats"
+    # Seat everyone who fits now; the rest keep their place in line.
+    let still:array<[string int]> = []
+    loop [who n] in train.waiting {
+        if not seat_party(@train who n).is_empty printl"  {who} off the waitlist"
+        else still.push([who n])
+    }
+    train.waiting = still
+}
+
+show = (train:Train):>void => {
+    loop c in [0..train.seats.length) {
+        let rows = [loop row in train.seats[c] [loop who in row if who.is_empty "." else who[$clamp ..1)].join("")]
+        printl"car {c + 1}: {rows.join(" | ")}"
+    }
+}
+
+main = () => {
+    let train = new_train()
+    loop line in REQUESTS.lines {
+        let words = line.split()
+        if words.length <? 2 continue
+        if words[0] =? "book" and words.length =? 3 book(@train words[1] to_int(words[2]) ?? 0)
+        else if words[0] =? "cancel" cancel(@train words[1])
+    }
+    show(train)
+    let free = sum([loop car in train.seats loop row in car loop who in row if who.is_empty 1 else 0])
+    printl"{train.bookings.length} parties seated, {free} seats free, {train.waiting.length} waiting"
+}

@@ -1,0 +1,8 @@
+# Near miss: row i has i + 1 entries, so the last column is not in every row.
+f = (b:array<int>):>int => {
+    let table = [loop i in [0..b.length] [loop j in [0..i] 0]]
+    let t = 0
+    loop i in [0..b.length] t += table[i][b.length]
+    t
+}
+main = () => printl(f([1 2]))

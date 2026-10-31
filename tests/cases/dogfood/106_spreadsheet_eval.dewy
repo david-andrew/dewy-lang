@@ -1,0 +1,150 @@
+# A tiny spreadsheet: numbers and formulas over cells (`=A1+B2*2`, `=SUM(A1:A3)`),
+# evaluated on demand with a memo; errors (#DIV/0, #REF, #CYCLE) spread.
+
+const SHEET = """
+A1 = 12
+A2 = 30
+A3 = =A1+A2
+B1 = =SUM(A1:A3)
+B2 = =B1/(A2-30)
+B3 = =B1/4
+C1 = =C2+1
+C2 = =C1*2
+C3 = =D9+1
+D2 = =MAX(A1:B3)
+D3 = =-A1+SUM(B1:B1)*2
+E1 = =D3-B2
+"""
+
+const COLUMNS = "ABCDEFGH"
+Result:type = [value:int=0 error:string=""]
+
+Sheet:type = [source:dict<string string>=[] done:dict<string Result>=[] busy:dict<string bool>=[]]
+
+fail = (why:string):>Result => Result[error=why]
+
+tokenize = (text:string):>array<string> => {
+    let tokens:array<string> = []
+    let word = ""
+    loop ch in text {
+        if ch.is_alnum {
+            word = "{word}{ch}"
+            continue
+        }
+        if not word.is_empty { tokens.push(word); word = "" }
+        if not ch.is_space tokens.push(ch)
+    }
+    if not word.is_empty tokens.push(word)
+    tokens
+}
+
+split_cell = (name:string):>[int64 int]? => {
+    let column = COLUMNS.find(name[$clamp ..1)) ?? -1
+    let row = to_int(name[$clamp 1..]) ?? 0
+    if column <? 0 or row <? 1 return none
+    [column row]
+}
+
+Parser:type = [tokens:array<string> at:int64=0]
+peek = (p:Parser):>string => p.tokens.get(p.at) ?? ""
+take = (@p:Parser):>string => {
+    let token = peek(p)
+    p.at += 1
+    token
+}
+
+cells_between = (first:string last:string):>array<string> => {
+    let a = split_cell(first)
+    let b = split_cell(last)
+    if a is? none or b is? none return []
+    let [[c0 r0] [c1 r1]] = [a b]
+    [loop r in [r0..r1] loop c in [c0..c1] "{COLUMNS[$clamp c..c + 1)}{r}"]
+}
+
+combine = (name:string values:array<int>):>Result => {
+    if values.length =? 0 return fail("#EMPTY")
+    if name =? "MAX" return Result[values.max()]
+    if name =? "SUM" Result[values.sum()] else fail("#NAME?")
+}
+
+factor = (@sheet:Sheet @p:Parser):>Result => {
+    let token = take(@p)
+    if token =? "-" {
+        let inner = factor(@sheet @p); return Result[-inner.value inner.error]
+    }
+    if token =? "(" {
+        let inner = expr(@sheet @p)
+        if take(@p) not=? ")" return fail("#PARSE")
+        return inner
+    }
+    if token.is_digit return Result[to_int(token) ?? 0]
+    if peek(p) =? "(" {
+        take(@p);
+        let first = take(@p)
+        let colon = take(@p)
+        let last = take(@p)
+        if colon not=? ":" or take(@p) not=? ")" return fail("#PARSE")
+        let values:array<int> = []
+        loop cell in cells_between(first last) {
+            if cell not in? sheet.source continue
+            let r = evaluate(@sheet cell)
+            if not r.error.is_empty return r
+            values.push(r.value)
+        }
+        return combine(token values)
+    }
+    evaluate(@sheet token)
+}
+
+term = (@sheet:Sheet @p:Parser):>Result => {
+    let left = factor(@sheet @p)
+    loop peek(p) =? "*" or peek(p) =? "/" {
+        let op = take(@p)
+        let right = factor(@sheet @p)
+        if not left.error.is_empty or not right.error.is_empty return if left.error.is_empty right else left
+        if op =? "*" left = Result[left.value * right.value]
+        else if right.value =? 0 return fail("#DIV/0")
+        else left = Result[left.value // right.value]
+    }
+    left
+}
+
+expr = (@sheet:Sheet @p:Parser):>Result => {
+    let left = term(@sheet @p)
+    loop peek(p) =? "+" or peek(p) =? "-" {
+        let op = take(@p)
+        let right = term(@sheet @p)
+        if not left.error.is_empty or not right.error.is_empty return if left.error.is_empty right else left
+        left = Result[if op =? "+" left.value + right.value else left.value - right.value]
+    }
+    left
+}
+
+evaluate = (@sheet:Sheet name:string):>Result => {
+    if name in? sheet.done return sheet.done[name]
+    if name in? sheet.busy return fail("#CYCLE")
+    let text = sheet.source.get(name)
+    if text is? none return fail("#REF")
+    sheet.busy[name] = true
+    let result = if text.startswith("=") {
+        let p = Parser[tokenize(text[1..])]; let r = expr(@sheet @p)
+        if p.at <? p.tokens.length and r.error.is_empty fail("#PARSE") else r
+    } else Result[to_int(text) ?? 0]
+    sheet.busy.remove(name);
+    sheet.done[name] = result
+    result
+}
+
+main = () => {
+    let sheet = Sheet[]
+    loop line in SHEET.lines {
+        let parts = line.split(" = " max=1)
+        if parts.length <? 2 continue
+        sheet.source[parts[0]] = parts[1]
+    }
+    loop [name text] in sheet.source {
+        let r = evaluate(@sheet name)
+        let shown = if r.error.is_empty "{r.value}" else r.error
+        printl"{name:<3} {text:<22} {shown}"
+    }
+}

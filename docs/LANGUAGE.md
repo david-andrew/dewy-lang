@@ -682,7 +682,10 @@ not transfer its bounds to the new values. A check on only one branch or in a
 possibly empty loop supplies no fact after the join.
 
 Nested comprehensions that append one equal-length row per input row retain
-that positional length relationship, including through cell writes. Changing
+that positional length relationship, including through cell writes. So does a
+table of rows over one range, Python's `[[0]*(m+1) for _ in range(n+1)]`:
+`[loop i in [0..a.length] [loop j in [0..b.length] 0]]` has rows of
+`b.length + 1` entries. Changing
 a row's length invalidates it. Small constructor helpers retain array-field
 lengths proved across their returns, including lengths derived from arguments;
 these facts can satisfy checked length contracts at a caller. An unconstrained
@@ -782,7 +785,8 @@ the key array preserves this fact; replacing its elements or otherwise changing 
 dictionary can require a new membership guard. A dictionary built by a comprehension
 that makes one entry keyed by the loop's element on every iteration, `[loop p in people p -> 0]`,
 has every element of that `people` value as a key (with no filter, `break` or `continue`),
-including each name of a `const` table it walks. The entries of a dictionary whose value type
+including each name of a `const` table it walks, and keeps them while later stores or
+`insert_if_absent` only add keys. The entries of a dictionary whose value type
 is refined (`dict<string Slot>`) keep that contract when read, as array elements do.
 So does a loop over an array that ends each iteration with its element a key and
 removes none (no `break`), `loop name in [white black] { if name not in? d d[name] = 0 }`
@@ -918,7 +922,8 @@ Array and range loops settle what they carry the way condition loops do (a runni
 loop that only pushes onto it (a comprehension, filtered or not) keeps the range of
 what it pushed. A counter stepped down while the condition keeps it above a bound
 the loop leaves alone (`loop stop >? start ... stop -= 1`) stays at least that bound
-afterwards. A dictionary's or set's `length` is a length like an array's, and its
+afterwards, and one stepped down on some paths only (`if a[i-1] >=? b[j-1] i -= 1 else j -= 1`)
+stays at most the value it started with. A dictionary's or set's `length` is a length like an array's, and its
 keys, values or members collected into an array (`[d.keys...]`, `d.values`,
 `[s...]`) have that length. Spreading after a known number of elements
 (`[x ys...]`, or `extend` on an array of known length) adds that many to the

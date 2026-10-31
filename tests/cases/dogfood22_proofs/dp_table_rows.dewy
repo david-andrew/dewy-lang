@@ -1,0 +1,13 @@
+# A Python-style DP table, (n+1) rows of (m+1) zeros from inclusive ranges:
+# every row has b.length + 1 entries, through the cell writes.
+lcs = (a:array<string> b:array<string>):>int => {
+    let table = [loop i in [0..a.length] [loop j in [0..b.length] 0]]
+    loop i in [1..a.length] {
+        loop j in [1..b.length] {
+            table[i][j] = if a[i - 1] =? b[j - 1] table[i - 1][j - 1] + 1
+                else max(table[i - 1][j] table[i][j - 1])
+        }
+    }
+    table[a.length][b.length]
+}
+main = () => printl(lcs(["a" "b" "c" "d"] ["b" "d" "c"]))

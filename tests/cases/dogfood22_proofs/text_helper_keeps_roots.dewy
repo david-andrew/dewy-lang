@@ -1,0 +1,13 @@
+# A helper that only reads text through the library (is_digit, startswith,
+# length) does not make its callers forget their mutable arrays.
+digits = (word:string):>int64 => if word.is_digit or word.startswith("#") word.length else 0
+
+total = (@rows:array<array<string>>):>int64 => {
+    let t:int64 = 0
+    loop r in [0..rows.length) {
+        let n = digits("42")
+        if rows[r].length >? 0 t += n
+    }
+    t
+}
+main = () => { let rows = [["a"] ["b" "c"]]; printl(total(@rows)) }

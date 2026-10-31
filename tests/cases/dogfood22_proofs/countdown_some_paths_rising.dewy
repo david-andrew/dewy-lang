@@ -1,0 +1,11 @@
+# Near miss: a cursor moved up on some path may pass its start.
+f = (a:array<int>):>int => {
+    let i = a.length
+    let t = 0
+    loop i >? 0 and t <? 10 {
+        t += a[i - 1]
+        if t >? 3 i -= 1 else i += 1
+    }
+    t
+}
+main = () => printl(f([1 2 3]))

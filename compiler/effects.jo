@@ -1607,6 +1607,10 @@ effect_scan_node = (f: int, n: int):
     # (a word to a float, or one float width to another: one instruction; a
     # float to an integer is checked, and a semantic integer's is a call)
     else if k == .conv and (nodes[n].aux == i32(int(CV.int2float)) and effect_scalar(ntype(int(nodes[n].a))) or nodes[n].aux == i32(int(CV.float_))): supported = effect_float(ntype(n))
+    # (a number's bits read as another number of the same width, as the
+    # library's float `abs` and `min` do: one move, never a pointer. A write
+    # footprint only; full summaries keep it opaque)
+    else if k == .cast and effect_footprints_only and not raw_view(n) and (effect_scalar(ntype(n)) or effect_float(ntype(n))) and (effect_scalar(ntype(int(nodes[n].a))) or effect_float(ntype(int(nodes[n].a)))): supported = true
 
     else if k == .conv:
         supported = (effect_scalar(ntype(n)) and effect_word(int(nodes[n].a)) or effect_small(n) >= 0 or is_fn_type(ntype(n)) and effect_bare(int(nodes[n].a))) and (nodes[n].aux == i32(int(CV.none_)) or nodes[n].aux == i32(int(CV.int_)) or nodes[n].aux == i32(int(CV.wrap_int)) or nodes[n].aux == i32(int(CV.saturate_int)) or nodes[n].aux == i32(int(CV.fixed_store)))
@@ -1764,7 +1768,18 @@ effect_array_reader = (f: int) -> bool:
     if d == 0 or not (name_of(int(nodes[d].name)) in ["get", "contains", "index_of", "is_empty", "first", "last"]): return false
     files[pos_file(nodes[d].pos)].path == lib_dir + "/core/array.jo"
 
+# (a reviewed text operation's class is its summary: it writes only its own
+# mutable parameters, so its callers keep their roots. Asked only of a library
+# function its signature would make opaque: a reader, or a text member a
+# program calls; the runtime's and formatting's helpers stay opaque, which
+# keeps their library callers from walking whole call trees)
 effect_signature_opaque = (f: int) -> bool:
+    if not effect_signature_opaque_by_type(f): return false
+    if not fn_in_lib(f): return true
+    c = effect_library_class(f)
+    c == .unclassified or c != .reads and not effect_class_text.has(f)
+
+effect_signature_opaque_by_type = (f: int) -> bool:
     if effect_map_remove(f): return false
     d = int(fns[f].decl)
     if fns[f].state != 2 or fns[f].body == 0 or fns[f].kind == FK_INIT or (d != 0 and has_flag(d, NF_EXTERN)):

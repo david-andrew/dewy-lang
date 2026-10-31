@@ -1,0 +1,8 @@
+# Near miss: a removal after the growth ends the comprehension's keys.
+main = () => {
+    let names = ["a" "b"]
+    let d:dict<string int> = [loop n in names n -> 0]
+    d["z"] = 1
+    d.remove("a");
+    loop n in names printl(d[n])
+}

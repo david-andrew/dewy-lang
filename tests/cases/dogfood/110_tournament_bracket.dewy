@@ -1,0 +1,94 @@
+# A single-elimination bracket: seed the entrants by rating (1 plays the
+# lowest seed, byes go to the top seeds), play each round from a fixed list of
+# results, and report each round, the champion and every player's record.
+
+const ENTRANTS = """
+Ana 1820
+Bo 1610
+Cyd 1755
+Dee 1490
+Eli 1902
+Fay 1688
+Gus 1540
+"""
+
+# Upsets by name; every other match goes to the higher rating.
+const UPSETS = ["Fay" "Dee"]
+
+Player:type = [name:string rating:int]
+Record:type = [wins:int=0 losses:int=0 out_in:int=0]
+
+parse = (text:string):>array<Player> => {
+    let players:array<Player> = []
+    loop line in text.lines {
+        let parts = line.split()
+        if parts.length not=? 2 continue
+        players.push(Player[parts[0] to_int(parts[1]) ?? 0])
+    }
+    players
+}
+
+# Seed order for a bracket of `size` slots: [1 4 2 3] for four, so the top two
+# seeds can only meet in the final.
+seed_order = (size:int):>array<int> => {
+    let order:array<int> = [1]
+    loop order.length <? size {
+        let total = order.length * 2 + 1
+        order = [loop s in order {s total - s}]
+    }
+    order
+}
+
+winner_of = (a:Player b:Player):>Player => {
+    if a.name in? UPSETS return a
+    if b.name in? UPSETS return b
+    if a.rating >=? b.rating a else b
+}
+
+main = () => {
+    let players = parse(ENTRANTS).sorted(key=(p) => -p.rating)
+    let records:dict<string Record> = [loop p in players p.name -> Record[]]
+    let size = 1
+    loop size <? players.length size *= 2
+    # A slot holds a player, or none for a bye.
+    let slots:array<Player?> = [loop s in seed_order(size) players.get(s - 1)]
+    let round = 1
+    loop slots.length >? 1 {
+        let next:array<Player?> = []
+        let games:array<string> = []
+        loop k in [0, 2..slots.length - 1) {
+            let a = slots[k]
+            let b = slots[k + 1]
+            if a is? none { next.push(b); continue }
+            if b is? none { next.push(a); continue }
+            let w = winner_of(a b)
+            let l = if w.name =? a.name b else a
+            records.insert_if_absent(w.name Record[]);
+            records.insert_if_absent(l.name Record[]);
+            records[w.name].wins += 1
+            records[l.name].losses += 1
+            records[l.name].out_in = round
+            games.push("{w.name} beat {l.name}")
+            next.push(w)
+        }
+        printl"round {round}: {games.join(", ")}"
+        slots = next
+        round += 1
+    }
+    let champion = if slots.is_empty none else slots[0]
+    if champion isnt? none {
+        let name = champion.name
+        records.insert_if_absent(name Record[]);
+        records[name].out_in = round
+        printl"champion: {name}"
+    }
+    loop p in players {
+        let r = records.get(p.name) ?? Record[]
+        let fate = if r.out_in =? round "won it all" else if r.losses =? 0 "never played" else "out in round {r.out_in}"
+        printl"{p.name:<4} {p.rating}  {r.wins}-{r.losses}  {fate}"
+    }
+    if not players.is_empty {
+        let unlucky = players.max_by(key=(p) => p.rating - 100 * (records.get(p.name) ?? Record[]).wins)
+        printl"best rating per win: {unlucky.name}"
+    }
+}

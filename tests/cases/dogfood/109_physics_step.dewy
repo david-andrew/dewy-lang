@@ -1,0 +1,87 @@
+# A 2D physics step for balls in a box: move, bounce off the walls, find
+# candidate pairs with a sort-and-sweep along x, then resolve overlapping
+# pairs that are still approaching with an equal-mass elastic impulse.
+
+const WIDTH = 12.0
+const HEIGHT = 8.0
+const DT = 0.5
+
+Ball:type = [name:string x:float64 y:float64 vx:float64 vy:float64 r:float64]
+
+const START = [
+    Ball["a" 1.0 1.0 2.0 0.0 0.5]
+    Ball["b" 5.0 1.2 -1.0 0.0 0.5]
+    Ball["c" 9.0 6.0 0.0 -1.5 1.0]
+    Ball["d" 9.2 2.0 0.5 1.0 0.75]
+    Ball["e" 3.0 6.5 1.0 0.5 0.5]
+]
+
+# Move every ball and reflect it off any wall it crossed.
+advance = (@balls:array<Ball>):>void => {
+    loop @b in balls {
+        b.x += b.vx * DT
+        b.y += b.vy * DT
+        if b.x <? b.r { b.x = b.r; b.vx = -b.vx }
+        if b.x >? WIDTH - b.r { b.x = WIDTH - b.r; b.vx = -b.vx }
+        if b.y <? b.r { b.y = b.r; b.vy = -b.vy }
+        if b.y >? HEIGHT - b.r { b.y = HEIGHT - b.r; b.vy = -b.vy }
+    }
+}
+
+# Pairs whose x extents overlap, lower index first.
+sweep = (balls:array<Ball>):>array<[int64 int64]> => {
+    let order = [loop i in [0..balls.length) i].sorted(key=(i) => balls[i].x - balls[i].r)
+    let pairs:array<[int64 int64]> = []
+    loop k in [0..order.length) {
+        let a = order[k]
+        loop m in [k + 1..order.length) {
+            let b = order[m]
+            if balls[b].x - balls[b].r >? balls[a].x + balls[a].r break
+            pairs.push(if a <? b [a b] else [b a])
+        }
+    }
+    pairs.sorted()
+}
+
+gap2 = (p:Ball q:Ball):>float64 => (q.x - p.x)^2 + (q.y - p.y)^2
+
+# Resolve the pairs that touch and approach; the names of each hit.
+collide = (@balls:array<Ball>):>array<string> => {
+    let hits:array<string> = []
+    loop [i j] in sweep(balls) {
+        if not (0 <=? i <? balls.length and 0 <=? j <? balls.length) continue
+        let p = balls[i]
+        let q = balls[j]
+        let d2 = gap2(p q)
+        if d2 >=? (p.r + q.r)^2 or d2 =? 0.0 continue
+        let dx = q.x - p.x
+        let dy = q.y - p.y
+        let closing = ((q.vx - p.vx) * dx + (q.vy - p.vy) * dy) / d2
+        if closing >=? 0.0 continue
+        balls[i].vx += closing * dx
+        balls[i].vy += closing * dy
+        balls[j].vx -= closing * dx
+        balls[j].vy -= closing * dy
+        hits.push("{p.name}-{q.name}")
+    }
+    hits
+}
+
+energy = (balls:array<Ball>):>float64 => sum([loop b in balls (b.vx^2 + b.vy^2) / 2.0])
+
+main = () => {
+    let balls = START
+    printl"energy {energy(balls):.3f}"
+    loop tick in [1..8] {
+        advance(@balls)
+        let hits = collide(@balls)
+        if not hits.is_empty printl"t={tick * DT:.1f} hit {hits.join(" ")}"
+    }
+    loop b in balls printl"{b.name} at ({b.x:.2f}, {b.y:.2f}) moving ({b.vx:.2f}, {b.vy:.2f})"
+    printl"energy {energy(balls):.3f}"
+    let pairs:array<[Ball Ball]> = [loop p in balls loop q in balls if p.name <? q.name [p q]]
+    if not pairs.is_empty {
+        let [p q] = pairs.min_by(key=([p q]) => gap2(p q))
+        printl"closest: {p.name} and {q.name}"
+    }
+}

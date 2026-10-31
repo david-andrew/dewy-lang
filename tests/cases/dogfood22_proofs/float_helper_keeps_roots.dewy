@@ -1,0 +1,10 @@
+# Float abs, min and powers read their operands' bits: callers keep their
+# mutable arrays across them.
+P:type = [x:float64 v:float64]
+step = (@ps:array<P>):>float64 => {
+    if ps.is_empty return 0.0
+    let worst = abs(ps[0].v) + min(ps[0].x 1.0) + ps[0].x^2
+    ps[0].x += worst
+    ps[0].x
+}
+main = () => { let ps = [P[1.0 -2.0]]; printl(step(@ps)) }

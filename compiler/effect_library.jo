@@ -14,7 +14,8 @@
 #   allocates           interpolating text, a flag, a number or an `int`,
 #                       trim, trim_start, trim_end, split, lines, join,
 #                       replace, upper, lower, remove_prefix, remove_suffix,
-#                       find, rfind, to_int (big results), `+ - *` on `int`
+#                       find, rfind, to_int (big results), `+ - *` on `int`,
+#                       is_alpha, is_digit, is_space, is_alnum
 #   allocates, panics   indexing and slicing, byte_slice (each the caller's
 #                       obligation where a direct call states it: its facts
 #                       discharge it), find(part start), and a format
@@ -35,9 +36,13 @@ use 'expr.jo'
 enum EffectClass: unclassified, reads, allocates, allocates_panics
 
 effect_class_cache: {int: EffectClass} = {}
+# (the text members a program calls, `text.split(",")`: core/str.jo,
+# std/graphemes.jo and std/dewy.jo)
+effect_class_text: {int: bool} = {}
 
 effect_library_reset = ():
     effect_class_cache = {}
+    effect_class_text = {}
 
 effect_library_class = (g: int) -> EffectClass:
     if let known = effect_class_cache.get(g): return known
@@ -70,6 +75,7 @@ effect_library_classify = (g: int) -> EffectClass:
     path = files[pos_file(nodes[d].pos)].path
     if not starts_with(path, lib_root): return .unclassified
     file = path[len(lib_root)..]
+    if file == "/core/str.jo" or file == "/std/graphemes.jo" or file == "/std/dewy.jo": effect_class_text[g] = true
     name = name_of(int(nodes[d].name))
     # Exact builtin declarations: these return shape/data snapshots or their
     # lengths, without element hooks or shape assertions.
@@ -103,6 +109,9 @@ effect_library_classify = (g: int) -> EffectClass:
         return .unclassified
     if file == "/std/dewy.jo":
         if name == "is_empty" and fns[g].params.len() == 1 and prune(int(locals[fns[g].params[0]].type)) == T_STR: return .reads
+        # (a character class collects the text's graphemes and reads the
+        # embedded Unicode table)
+        if name in ["is_alpha", "is_digit", "is_space", "is_alnum"] and fns[g].params.len() == 1 and prune(int(locals[fns[g].params[0]].type)) == T_STR: return .allocates
         if name == "remove_prefix" or name == "remove_suffix": return .allocates
         if name == "__dewy_byte_slice": return .allocates_panics
     .unclassified
