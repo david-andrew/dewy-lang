@@ -1,4 +1,5 @@
 use 'effect_types.dewy'
+use 'effect_lattice.dewy'
 use 'checker_types.dewy'
 # Shared declaration identity. Evaluation values and epochs belong to facts.
 use 'ast.jo'
@@ -77,19 +78,7 @@ place_path = (p0: PlaceIdentity) -> int[]:
         p = place_parents[p.parent]
     out
 
-place_base = (p0: PlaceIdentity) -> PlaceIdentity:
-    p = p0
-    loop p.parent != 0: p = place_parents[p.parent]
-    p
-
 place_append = (base: PlaceIdentity, route: PlaceIdentity) -> PlaceIdentity:
     if route.parent == 0: return base
     place_project(place_append(base, place_parents[route.parent]), route.selector)
 
-place_covers = (parent: PlaceIdentity, child0: PlaceIdentity) -> bool:
-    child = child0
-    loop true:
-        if parent == child: return true
-        if child.parent == 0: return false
-        child = place_parents[child.parent]
-    false

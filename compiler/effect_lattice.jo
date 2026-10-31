@@ -1,0 +1,94 @@
+# Frozen effect-row lattice extracted from effects.jo and places.jo.
+use 'effect_types.dewy'
+struct EffectLatticeInput:
+    contracts: *(EffectContract[])
+    parents: *(PlaceIdentity[])
+el_contracts: *(EffectContract[])
+el_parents: *(PlaceIdentity[])
+effect_lattice_bind = (input: *EffectLatticeInput) -> int:
+    el_contracts = input[0].contracts
+    el_parents = input[0].parents
+    0
+place_base = (p0: PlaceIdentity) -> PlaceIdentity:
+    p = p0
+    loop p.parent != 0: p = el_parents[0][p.parent]
+    p
+place_covers = (parent: PlaceIdentity, child0: PlaceIdentity) -> bool:
+    child = child0
+    loop true:
+        if parent == child: return true
+        if child.parent == 0: return false
+        child = el_parents[0][child.parent]
+    false
+effect_intern = (atoms0: EffectAtom[], exclusions0: EffectAtom[] = [], variables0: int[] = [], open: bool = false) -> int:
+    atoms: EffectAtom[]
+    exclusions: EffectAtom[]
+    variables: int[]
+    loop a in atoms0:
+        if not atoms.contains(a): atoms.push(a)
+    loop a in exclusions0:
+        if not exclusions.contains(a): exclusions.push(a)
+    loop v in variables0:
+        if not variables.contains(v): variables.push(v)
+    count = el_contracts[0].len()
+    i = 1
+    loop i < count:
+        old = el_contracts[0][i]
+        if old.open == open and old.atoms.len() == atoms.len() and old.exclusions.len() == exclusions.len() and old.variables.len() == variables.len():
+            same = true
+            loop a in atoms:
+                if not old.atoms.contains(a): same = false
+            loop a in exclusions:
+                if not old.exclusions.contains(a): same = false
+            loop v in variables:
+                if not old.variables.contains(v): same = false
+            if same: return i
+        i += 1
+    el_contracts[0].push(EffectContract(atoms, exclusions, variables, open))
+    count
+effect_overlap = (a: EffectAtom, b: EffectAtom) -> bool:
+    if a.kind == .opaque or b.kind == .opaque: return true
+    if a.kind == .block and b.kind == .io or a.kind == .io and b.kind == .block: return true
+    if a.kind == .alloc and b.kind == .detach or a.kind == .detach and b.kind == .alloc: return true
+    if a.kind != b.kind: return false
+    a.place.declaration == 0 or b.place.declaration == 0 or place_covers(a.place, b.place) or place_covers(b.place, a.place)
+effect_excluded = (row: EffectContract, atom: EffectAtom) -> bool:
+    loop exclusion in row.exclusions:
+        if effect_overlap(exclusion, atom): return true
+    false
+effect_allows = (contract: int, atom: EffectAtom) -> bool:
+    if atom.kind == .remainder: return effect_rows_fit(atom.row, contract)
+    row = el_contracts[0][contract]
+    loop exclusion in row.exclusions:
+        if atom.kind == .opaque and exclusion.kind == .block: continue
+        if exclusion.kind == .panic and (atom.kind == .opaque or atom.kind == .panic): continue
+        if effect_overlap(exclusion, atom): return false
+    if row.open: return true
+    loop permission in row.atoms:
+        if permission.kind == atom.kind and (permission.place.declaration == 0 or place_covers(permission.place, atom.place)): return true
+        if permission.kind == .alloc and atom.kind == .detach: return true
+    false
+effect_rows_fit = (source: int, dest: int) -> bool:
+    if dest == 0: return true
+    if source == 0: return false
+    sr = el_contracts[0][source]
+    dr = el_contracts[0][dest]
+    if sr.open and not dr.open: return false
+    loop ex in dr.exclusions:
+        if sr.open and not sr.exclusions.contains(ex): return false
+    block = EffectAtom(.block)
+    loop atom in sr.atoms:
+        if atom.kind == .opaque and dr.exclusions.contains(block) and not sr.exclusions.contains(block): return false
+        if not effect_allows(dest, atom): return false
+    loop v in sr.variables:
+        if not dr.variables.contains(v): return false
+    true
+effect_top = () -> int: effect_intern([EffectAtom(.opaque)])
+effect_join = (left: int, right: int) -> int:
+    a = el_contracts[0][left]
+    b = el_contracts[0][right]
+    exclusions: EffectAtom[]
+    loop e in a.exclusions + b.exclusions:
+        bound = effect_intern([], [e], [], true)
+        if effect_rows_fit(left, bound) and effect_rows_fit(right, bound): exclusions.push(e)
+    effect_intern(a.atoms + b.atoms, exclusions, a.variables + b.variables, a.open or b.open)

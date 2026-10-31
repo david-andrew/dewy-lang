@@ -1,4 +1,5 @@
 use 'effect_types.dewy'
+use 'effect_lattice.dewy'
 use 'checker_tokens.dewy'
 use 'checker_types.dewy'
 use 'dewy_reader_types.dewy'
@@ -117,6 +118,10 @@ effect_policy = EffectPolicy()
 effects_active = false
 effect_syntax: EffectSyntax[][] = [[]]
 effect_contracts: EffectContract[] = [EffectContract()]
+# Row interning, overlap, permission, fitting and join run in effect_lattice.dewy
+# over this arena and places.jo's projection parents.
+effect_lattice_input = EffectLatticeInput(&effect_contracts, &place_parents)
+effect_lattice_binding = effect_lattice_bind(&effect_lattice_input)
 effect_summaries: EffectSummary[]
 # Bodies another process checks (a partitioned check's other roots): opaque here.
 effect_unavailable: {int: bool} = {}
@@ -195,30 +200,6 @@ effects_reset = ():
     effect_ix_nodes = 0
     effect_ix_locals = 0
     places_reset()
-
-effect_intern = (atoms0: EffectAtom[], exclusions0: EffectAtom[] = [], variables0: int[] = [], open: bool = false) -> int:
-    atoms: EffectAtom[]
-    exclusions: EffectAtom[]
-    variables: int[]
-    loop a in atoms0:
-        if not atoms.contains(a): atoms.push(a)
-    loop a in exclusions0:
-        if not exclusions.contains(a): exclusions.push(a)
-    loop v in variables0:
-        if not variables.contains(v): variables.push(v)
-    loop i in [1..effect_contracts.len()):
-        old = effect_contracts[i]
-        if old.open != open or old.atoms.len() != atoms.len() or old.exclusions.len() != exclusions.len() or old.variables.len() != variables.len(): continue
-        same = true
-        loop a in atoms:
-            if not old.atoms.contains(a): same = false
-        loop a in exclusions:
-            if not old.exclusions.contains(a): same = false
-        loop v in variables:
-            if not old.variables.contains(v): same = false
-        if same: return i
-    effect_contracts.push(EffectContract(atoms, exclusions, variables, open))
-    effect_contracts.len() - 1
 
 # Rows occupy kind-checked specialization slots, never runtime values.
 effect_type = (contract: int) -> int:
@@ -385,50 +366,6 @@ callable_contract = (t0: int) -> int:
     if types[t].kind == .callable: return int(types[t].st)
     0
 
-effect_overlap = (a: EffectAtom, b: EffectAtom) -> bool:
-    if a.kind == .opaque or b.kind == .opaque: return true
-    # (I/O may wait on its device: `no blocks` excludes it)
-    if a.kind == .block and b.kind == .io or a.kind == .io and b.kind == .block: return true
-    # (a storage detach allocates: `allocates` covers it, `no allocates` excludes it)
-    if a.kind == .alloc and b.kind == .detach or a.kind == .detach and b.kind == .alloc: return true
-    if a.kind != b.kind: return false
-    a.place.declaration == 0 or b.place.declaration == 0 or place_covers(a.place, b.place) or place_covers(b.place, a.place)
-
-effect_excluded = (row: EffectContract, atom: EffectAtom) -> bool:
-    loop exclusion in row.exclusions:
-        if effect_overlap(exclusion, atom): return true
-    false
-
-effect_allows = (contract: int, atom: EffectAtom) -> bool:
-    if atom.kind == .remainder: return effect_rows_fit(atom.row, contract)
-    row = effect_contracts[contract]
-    loop exclusion in row.exclusions:
-        # Waiting is classified separately from residual implementation costs,
-        # and so is panicking (effect_panics, after facts: dir_panics_finalize).
-        if atom.kind == .opaque and exclusion.kind == .block: continue
-        if exclusion.kind == .panic and (atom.kind == .opaque or atom.kind == .panic): continue
-        if effect_overlap(exclusion, atom): return false
-    if row.open: return true
-    loop permission in row.atoms:
-        if permission.kind == atom.kind and (permission.place.declaration == 0 or place_covers(permission.place, atom.place)): return true
-        if permission.kind == .alloc and atom.kind == .detach: return true
-    false
-
-effect_rows_fit = (source: int, dest: int) -> bool:
-    if dest == 0: return true
-    if source == 0: return false
-    sr = effect_contracts[source]
-    dr = effect_contracts[dest]
-    if sr.open and not dr.open: return false
-    loop ex in dr.exclusions:
-        if sr.open and not sr.exclusions.contains(ex): return false
-    loop atom in sr.atoms:
-        if atom.kind == .opaque and dr.exclusions.contains(EffectAtom(.block)) and not sr.exclusions.contains(EffectAtom(.block)): return false
-        if not effect_allows(dest, atom): return false
-    loop v in sr.variables:
-        if not dr.variables.contains(v): return false
-    true
-
 effect_contract_fits = (from: int, to: int) -> bool:
     effect_rows_fit(callable_contract(from), callable_contract(to))
 
@@ -459,19 +396,6 @@ effect_match = (source: int, dest: int, binds: mut int[]) -> bool:
             binds[slot] = effect_type(effect_join(int(types[binds[slot]].st), int(types[t].st)))
             return true
     match_type(v, t, binds, 1) >= 0
-
-# Compatibility is speculative during checking, then rechecked against every
-# reaching source at the helper fixed point. No declaration is rewritten.
-effect_top = () -> int: effect_intern([EffectAtom(.opaque)])
-
-effect_join = (left: int, right: int) -> int:
-    a = effect_contracts[left]
-    b = effect_contracts[right]
-    exclusions: EffectAtom[]
-    loop e in a.exclusions + b.exclusions:
-        bound = effect_intern([], [e], [], true)
-        if effect_rows_fit(left, bound) and effect_rows_fit(right, bound): exclusions.push(e)
-    effect_intern(a.atoms + b.atoms, exclusions, a.variables + b.variables, a.open or b.open)
 
 effect_prepare_node = (n: int, seen: mut int[], depth: int):
     if n == 0 or depth > 32: return

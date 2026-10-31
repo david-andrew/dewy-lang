@@ -1,0 +1,119 @@
+$runtime_checks
+from p"effect_types.dewy" import (PlaceIdentity EffectAtom EffectContract)
+# The effect-row lattice: interning, atom overlap, permission, row fitting and
+# join over the contract arena, and the place order (a projection is covered by
+# its parents) over the interned projection parents; both arenas are borrowed,
+# with no host calls. Interning scans the arena, O(rows * atoms^2) (rows are
+# few, a row has at most 32 atoms); every other query is O(atoms * exclusions)
+# with a projection walk of at most 8 parents per comparison.
+CWord:type=int64<overflow='wrap'>
+EffectLatticeInput:type=[
+    contracts:ptr<array<EffectContract>>
+    parents:ptr<array<PlaceIdentity>>
+]
+let el_contracts:ptr<array<EffectContract>>=$unsafe (uint64(0) as ptr<array<EffectContract>>)
+let el_parents:ptr<array<PlaceIdentity>>=$unsafe (uint64(0) as ptr<array<PlaceIdentity>>)
+effect_lattice_bind=(input:ptr<EffectLatticeInput>):>CWord=>$unsafe {
+    el_contracts=input[0].contracts
+    el_parents=input[0].parents
+    0
+}
+place_base=(p0:PlaceIdentity):>PlaceIdentity=>$unsafe {
+    let p=p0
+    loop p.parent not=? 0 {p=el_parents[0].ptr[p.parent]}
+    p
+}
+place_covers=(parent:PlaceIdentity child0:PlaceIdentity):>bool=>$unsafe {
+    let child=child0
+    loop true {
+        if parent =? child {return true}
+        if child.parent =? 0 {return false}
+        child=el_parents[0].ptr[child.parent]
+    }
+    false
+}
+effect_intern=(atoms0:array<EffectAtom> exclusions0:array<EffectAtom>=[] variables0:array<int64>=[] open:bool=false):>CWord=>$unsafe {
+    let atoms:array<EffectAtom>=[]
+    let exclusions:array<EffectAtom>=[]
+    let variables:array<int64>=[]
+    loop a in atoms0 {if not atoms.contains(a) {atoms.push(a)}}
+    loop a in exclusions0 {if not exclusions.contains(a) {exclusions.push(a)}}
+    loop v in variables0 {if not variables.contains(v) {variables.push(v)}}
+    let count:CWord=CWord(el_contracts[0].length)
+    let i:CWord=1
+    loop i <? count {
+        let old=el_contracts[0].ptr[i]
+        if old.open =? open and old.atoms.length =? atoms.length and old.exclusions.length =? exclusions.length and old.variables.length =? variables.length {
+            let same=true
+            loop a in atoms {if not old.atoms.contains(a) {same=false}}
+            loop a in exclusions {if not old.exclusions.contains(a) {same=false}}
+            loop v in variables {if not old.variables.contains(v) {same=false}}
+            if same {return i}
+        }
+        i += 1
+    }
+    el_contracts[0].push(EffectContract[atoms=atoms exclusions=exclusions variables=variables open=open])
+    count
+}
+effect_overlap=(a:EffectAtom b:EffectAtom):>bool=>$unsafe {
+    if a.kind =? 'opaque' or b.kind =? 'opaque' {return true}
+    # (I/O may wait on its device: `no blocks` excludes it)
+    if (a.kind =? 'block' and b.kind =? 'io') or (a.kind =? 'io' and b.kind =? 'block') {return true}
+    # (a storage detach allocates: `allocates` covers it, `no allocates` excludes it)
+    if (a.kind =? 'alloc' and b.kind =? 'detach') or (a.kind =? 'detach' and b.kind =? 'alloc') {return true}
+    if a.kind not=? b.kind {return false}
+    a.place.declaration =? 0 or b.place.declaration =? 0 or place_covers(a.place b.place) or place_covers(b.place a.place)
+}
+effect_excluded=(row:EffectContract atom:EffectAtom):>bool=>$unsafe {
+    loop exclusion in row.exclusions {if effect_overlap(exclusion atom) {return true}}
+    false
+}
+effect_allows=(contract:CWord atom:EffectAtom):>bool=>$unsafe {
+    if atom.kind =? 'remainder' {return effect_rows_fit(CWord(atom.row) contract)}
+    let row=el_contracts[0].ptr[contract]
+    loop exclusion in row.exclusions {
+        # Waiting is classified separately from residual implementation costs,
+        # and so is panicking (effect_panics, after facts: dir_panics_finalize).
+        if atom.kind =? 'opaque' and exclusion.kind =? 'block' {continue}
+        if exclusion.kind =? 'panic' and (atom.kind =? 'opaque' or atom.kind =? 'panic') {continue}
+        if effect_overlap(exclusion atom) {return false}
+    }
+    if row.open {return true}
+    loop permission in row.atoms {
+        if permission.kind =? atom.kind and (permission.place.declaration =? 0 or place_covers(permission.place atom.place)) {return true}
+        if permission.kind =? 'alloc' and atom.kind =? 'detach' {return true}
+    }
+    false
+}
+effect_rows_fit=(source:CWord dest:CWord):>bool=>$unsafe {
+    if dest =? 0 {return true}
+    if source =? 0 {return false}
+    let sr=el_contracts[0].ptr[source]
+    let dr=el_contracts[0].ptr[dest]
+    if sr.open and not dr.open {return false}
+    loop ex in dr.exclusions {
+        if sr.open and not sr.exclusions.contains(ex) {return false}
+    }
+    let block=EffectAtom[kind='block']
+    loop atom in sr.atoms {
+        if atom.kind =? 'opaque' and dr.exclusions.contains(block) and not sr.exclusions.contains(block) {return false}
+        if not effect_allows(dest atom) {return false}
+    }
+    loop v in sr.variables {
+        if not dr.variables.contains(v) {return false}
+    }
+    true
+}
+# Compatibility is speculative during checking, then rechecked against every
+# reaching source at the helper fixed point. No declaration is rewritten.
+effect_top=():>CWord=>effect_intern([EffectAtom[kind='opaque']] [] [] false)
+effect_join=(left:CWord right:CWord):>CWord=>$unsafe {
+    let a=el_contracts[0].ptr[left]
+    let b=el_contracts[0].ptr[right]
+    let exclusions:array<EffectAtom>=[]
+    loop e in [a.exclusions... b.exclusions...] {
+        let bound=effect_intern([] [e] [] true)
+        if effect_rows_fit(left bound) and effect_rows_fit(right bound) {exclusions.push(e)}
+    }
+    effect_intern([a.atoms... b.atoms...] exclusions [a.variables... b.variables...] a.open or b.open)
+}
