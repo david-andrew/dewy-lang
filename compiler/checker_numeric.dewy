@@ -1,0 +1,236 @@
+$runtime_checks
+from p"node_store.dewy" import Node
+from p"checker_types.dewy" import (TypeInfo TK)
+from p"source_types.dewy" import SrcFile
+from p"type_inference.dewy" import tu_prune
+# Binary arithmetic and comparison of two plain numbers: integer division in Dewy,
+# literal folding (with the implementation word's wrapping, truncation and shift
+# rules, and the semantic integer's overflow escape), exact-width comparisons, the
+# joined type, bitwise operands and the exact semantic result. Work is O(1) plus
+# the demanded join, exactness and coercions, which are host services.
+XWWord:type=int64<overflow='wrap'>
+XWUnsigned:type=uint64<overflow='wrap'>
+CheckerNumericHost:type=[
+    coerce:<(node:int64 type_id:int64):>int64>
+    exact_potential:<(node:int64):>bool>
+    num_join:<(first:int64 second:int64):>int64>
+    join:<(first:int64 second:int64 pos:int64):>int64>
+    exact:<(node:int64):>int64>
+    library:<(pos:int64):>bool>
+    nan:<(value:float64):>float64>
+    warn_division:<(node:int64 x:int64 y:int64):>void>
+    warn_percent:<(node:int64 left:int64):>void>
+    error:<(node:int64 code:int64):>void>
+]
+CheckerNumericInput:type=[
+    nodes:ptr<array<Node>>
+    types:ptr<array<TypeInfo>>
+    files:ptr<array<SrcFile>>
+    int_type:ptr<int64>
+    math_int:ptr<int64>
+    u64_type:ptr<int64>
+    float_type:ptr<int64>
+    bool_type:ptr<int64>
+    never_type:ptr<int64>
+    host:ptr<CheckerNumericHost>
+]
+let xw_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let xw_types:ptr<array<TypeInfo>>=$unsafe (uint64(0) as ptr<array<TypeInfo>>)
+let xw_files:ptr<array<SrcFile>>=$unsafe (uint64(0) as ptr<array<SrcFile>>)
+let xw_int_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xw_math_int:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xw_u64_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xw_float_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xw_bool_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xw_never_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xw_host:ptr<CheckerNumericHost>=$unsafe (uint64(0) as ptr<CheckerNumericHost>)
+checker_numeric_bind=(input:ptr<CheckerNumericInput>):>XWWord=>$unsafe {
+    xw_nodes=input[0].nodes
+    xw_types=input[0].types
+    xw_files=input[0].files
+    xw_int_type=input[0].int_type
+    xw_math_int=input[0].math_int
+    xw_u64_type=input[0].u64_type
+    xw_float_type=input[0].float_type
+    xw_bool_type=input[0].bool_type
+    xw_never_type=input[0].never_type
+    xw_host=input[0].host
+    0
+}
+xw_in_dewy=(n:XWWord):>bool=>$unsafe {xw_files[0][xw_nodes[0].ptr[n].pos >> 40].is_dewy}
+xw_dewy=(n:XWWord):>bool=>$unsafe {
+    let pos=xw_nodes[0].ptr[n].pos
+    let f=pos >> 40
+    pos >? 0 and f <? xw_files[0].length and xw_files[0].ptr[f].is_dewy
+}
+xw_flag=(n:XWWord f:XWWord):>bool=>$unsafe {XWWord(xw_nodes[0].ptr[n].flags) & f not=? 0}
+xw_int=(t:XWWord):>bool=>$unsafe {xw_types[0].ptr[tu_prune(t)].kind =? 'int_'}
+xw_type=(n:XWWord):>XWWord=>$unsafe {XWWord(xw_nodes[0].ptr[n].type)}
+xw_representation=(t0:XWWord):>XWWord=>$unsafe {
+    let t=tu_prune(t0)
+    if xw_types[0].ptr[t].kind =? 'refined' {return tu_prune(XWWord(xw_types[0].ptr[t].elem))}
+    t
+}
+# The implementation word's arithmetic: wrapping, division and remainder truncating
+# toward zero, shift counts taken modulo the word.
+xw_trunc_div=(a:XWWord b:XWWord):>XWWord=>{
+    let q:XWWord=a // b
+    if (a <? 0) not=? (b <? 0) and a % b not=? 0 {q=q + 1}
+    q
+}
+# Would the semantic integer's operation leave the word (0 add, 1 subtract, 2 multiply,
+# 3 divide, 4 shift left)?
+xw_overflow=(operation:XWWord x:XWWord y:XWWord):>bool=>{
+    if operation =? 0 {
+        let r=x + y
+        return ((x xor r) & (y xor r)) <? 0
+    }
+    if operation =? 1 {
+        let r=x - y
+        return ((x xor y) & (x xor r)) <? 0
+    }
+    if operation =? 2 {
+        let one:XWUnsigned=1
+        let ax:XWUnsigned=if x <? 0 {XWUnsigned(uint64(XWWord(0) - (x + 1))) + one} else {XWUnsigned(uint64(x))}
+        let ay:XWUnsigned=if y <? 0 {XWUnsigned(uint64(XWWord(0) - (y + 1))) + one} else {XWUnsigned(uint64(y))}
+        let limit:XWUnsigned=if (x <? 0) not=? (y <? 0) {XWUnsigned(9223372036854775807) + one} else {XWUnsigned(9223372036854775807)}
+        return ay not=? 0 and ax >? limit // ay
+    }
+    if operation =? 3 {return y =? 0 or (x =? XWWord(-9223372036854775807) - 1 and y =? -1)}
+    if y <? 0 {return true}
+    if y >=? 64 {return x not=? 0}
+    ((x << y) >> y) not=? x
+}
+# An untyped integer literal's own type: the semantic integer in Dewy.
+xw_int_default=(n:XWWord):>XWWord=>$unsafe {
+    if xw_in_dewy(n) {return xw_math_int[0]}
+    xw_int_type[0]
+}
+# Only these kinds can hold exact arithmetic (exact_potential): any other operand,
+# a name, literal, field, index or call, cannot, and needs no request.
+xw_exact_potential=(n:XWWord):>bool=>$unsafe {
+    if n <=? 0 {return false}
+    let k=xw_nodes[0].ptr[n].kind
+    if k not=? 'intrinsic' and k not=? 'unary' and k not=? 'binary' and k not=? 'conv' and k not=? 'if_' and k not=? 'iflet' and k not=? 'coalesce' and k not=? 'match_' and k not=? 'block' and k not=? 'exprstmt' {return false}
+    xw_host[0].exact_potential(n)
+}
+# Two values of one number type, neither a literal, join as that type (join_types'
+# first case); anything else asks the host.
+xw_join=(a:XWWord b:XWWord pos:int64):>XWWord=>$unsafe {
+    let ta=tu_prune(xw_type(a))
+    let tb=tu_prune(xw_type(b))
+    if ta =? tb and ta not=? xw_never_type[0] and not xw_flag(a 256) and not xw_flag(b 256) {
+        let k=xw_types[0].ptr[ta].kind
+        if (k =? 'int_' or k =? 'float_') and xw_nodes[0].ptr[a].kind not=? 'str_lit' and xw_nodes[0].ptr[b].kind not=? 'str_lit' {return ta}
+    }
+    xw_host[0].join(a b pos)
+}
+# Frozen Tok ordinals: plus 58, minus 59, star 60, slash 61, percent 62, amp 63,
+# pipe 64, caret 65, shl 67, shr 68.
+xw_fold_int=(n:XWWord op:int32 a:XWWord b:XWWord):>XWWord=>$unsafe {
+    let x=XWWord(xw_nodes[0].ptr[a].ival)
+    let y=XWWord(xw_nodes[0].ptr[b].ival)
+    let mathematical=xw_in_dewy(n)
+    let operation:XWWord=-1
+    if op =? 58 {operation=0} else if op =? 59 {operation=1} else if op =? 60 {operation=2} else if op =? 61 {operation=3} else if op =? 67 {operation=4}
+    if mathematical and operation >=? 0 and xw_overflow(operation x y) {
+        xw_host[0].coerce(a xw_math_int[0]);
+        xw_host[0].coerce(b xw_math_int[0]);
+        xw_nodes[0][n].type=int32<overflow='wrap'>(xw_math_int[0])
+        return xw_math_int[0]
+    }
+    if mathematical and (op =? 67 or op =? 68) and y <? 0 {xw_host[0].error(n 2)}
+    let v:XWWord=0
+    let ok=true
+    if op =? 58 {v=x + y}
+    else if op =? 59 {v=x - y}
+    else if op =? 60 {v=x * y}
+    else if op =? 61 {
+        if y =? 0 {ok=false}
+        else {
+            v=xw_trunc_div(x y)
+            # 3 / 4 is 0: in languages with one kind of number it is 0.75.
+            if v =? 0 and x not=? 0 {xw_host[0].warn_division(n x y)}
+        }
+    } else if op =? 62 {
+        if y =? 0 {ok=false} else {v=x - xw_trunc_div(x y) * y}
+    } else if op =? 63 {v=x & y}
+    else if op =? 64 {v=x | y}
+    else if op =? 65 {v=x xor y}
+    else if (op =? 67 or op =? 68) and xw_dewy(n) and (y >=? 64 or y <? 0) {
+        # A count past the width reaches the continuation bits.
+        if op =? 68 and x <? 0 {v=-1} else {v=0}
+    } else if op =? 67 {v=x << (y & 63)}
+    else if op =? 68 {v=x >> (y & 63)}
+    else {ok=false}
+    if not ok {return -1}
+    let big=v <? 0 and (xw_flag(a 2097152) or xw_flag(b 2097152) or (op =? 67 and x >=? 0))
+    xw_nodes[0][n]=Node[kind='int_lit' pos=xw_nodes[0].ptr[n].pos ival=int64(v) flags=384 type=int32<overflow='wrap'>(xw_int_type[0])]
+    if big {xw_nodes[0][n].flags=xw_nodes[0].ptr[n].flags | 2097152}
+    xw_nodes[0][n].type=int32<overflow='wrap'>(xw_int_default(n))
+    XWWord(xw_nodes[0].ptr[n].type)
+}
+xw_fold_float=(n:XWWord op:int32 a:XWWord b:XWWord):>XWWord=>$unsafe {
+    let x=xw_nodes[0].ptr[a].fval
+    if xw_nodes[0].ptr[a].kind =? 'int_lit' {x=float64(xw_nodes[0].ptr[a].ival)}
+    let y=xw_nodes[0].ptr[b].fval
+    if xw_nodes[0].ptr[b].kind =? 'int_lit' {y=float64(xw_nodes[0].ptr[b].ival)}
+    let v=0.0
+    if op =? 58 {v=x + y}
+    else if op =? 59 {v=x - y}
+    else if op =? 60 {v=x * y}
+    else {v=x / y}
+    # A NaN as the target's processor makes it, whatever the compiler runs on.
+    if v not=? v {v=xw_host[0].nan(v)}
+    xw_nodes[0][n]=Node[kind='float_lit' pos=xw_nodes[0].ptr[n].pos fval=v flags=384 type=int32<overflow='wrap'>(xw_float_type[0])]
+    xw_float_type[0]
+}
+xw_numeric=(n:XWWord op:int32 a:XWWord b:XWWord ta:XWWord tb:XWWord is_cmp:bool):>XWWord=>$unsafe {
+    let dewy_file=xw_in_dewy(n)
+    if op =? 61 and xw_int(ta) and xw_int(tb) and dewy_file {xw_host[0].error(n 1)}
+    # High unsigned Dewy literals go through typed lowering: the untyped fold uses
+    # signed division and shifts and would lose their unsigned meaning.
+    let wide_unsigned=(xw_flag(a 2097152) or xw_flag(b 2097152)) and dewy_file
+    if xw_flag(a 256) and xw_flag(b 256) and not is_cmp and not wide_unsigned {
+        let ak=xw_nodes[0].ptr[a].kind
+        let bk=xw_nodes[0].ptr[b].kind
+        if ak =? 'int_lit' and bk =? 'int_lit' {
+            let folded=xw_fold_int(n op a b)
+            if folded >=? 0 {return folded}
+        } else if (op =? 58 or op =? 59 or op =? 60 or op =? 61) and (ak =? 'int_lit' or ak =? 'float_lit') and (bk =? 'int_lit' or bk =? 'float_lit') {
+            return xw_fold_float(n op a b)
+        }
+    }
+    if is_cmp and xw_int(ta) and xw_int(tb) and (ta not=? xw_math_int[0] or xw_flag(a 256)) and (tb not=? xw_math_int[0] or xw_flag(b 256)) and (xw_exact_potential(a) or xw_exact_potential(b)) {
+        let operands:array<int64>=[int64(a) int64(b)]
+        loop operand in operands {
+            if xw_flag(operand 256) and xw_nodes[0].ptr[operand].kind =? 'int_lit' {
+                let other=if operand =? a {b} else {a}
+                let ot=xw_type(other)
+                let unsigned=xw_int(ot) and not xw_types[0].ptr[xw_representation(ot)].sign and xw_nodes[0].ptr[operand].ival >=? 0
+                let t=if unsigned or xw_flag(operand 2097152) {xw_u64_type[0]} else {xw_int_type[0]}
+                xw_nodes[0][operand].type=int32<overflow='wrap'>(t)
+                xw_nodes[0][operand].flags=xw_nodes[0].ptr[operand].flags & ~256
+            }
+        }
+        xw_nodes[0][n].type=int32<overflow='wrap'>(xw_bool_type[0])
+        return xw_bool_type[0]
+    }
+    if is_cmp and not xw_flag(a 256) and not xw_flag(b 256) and xw_dewy(n) {
+        # i:uint64 <? s.length: compared in the left operand's width, the right one's cast.
+        let wa=tu_prune(xw_type(a))
+        let wb=tu_prune(xw_type(b))
+        if xw_types[0].ptr[wa].kind =? 'int_' and xw_types[0].ptr[wb].kind =? 'int_' and wa not=? xw_math_int[0] and wb not=? xw_math_int[0] and xw_host[0].num_join(wa wb) =? 0 {xw_host[0].coerce(b wa);}
+    }
+    let j=xw_join(a b xw_nodes[0].ptr[n].pos)
+    if (op =? 63 or op =? 64 or op =? 65) and not xw_int(j) {xw_host[0].error(n 3)}
+    # got / total * 100 with whole numbers: the division drops the fraction first.
+    if op =? 60 and xw_int(j) and xw_nodes[0].ptr[a].kind =? 'binary' and xw_nodes[0].ptr[a].op =? 61 and xw_nodes[0].ptr[b].kind =? 'int_lit' and xw_nodes[0].ptr[b].ival =? 100 and not xw_host[0].library(xw_nodes[0].ptr[n].pos) {
+        xw_host[0].warn_percent(n a)
+    }
+    if is_cmp {xw_nodes[0][n].type=int32<overflow='wrap'>(xw_bool_type[0])}
+    else {xw_nodes[0][n].type=int32<overflow='wrap'>(j)}
+    # Semantic int64 arithmetic gives the exact semantic integer in Dewy.
+    if not is_cmp and xw_dewy(n) and xw_type(n) =? xw_int_type[0] {return xw_host[0].exact(n)}
+    xw_type(n)
+}

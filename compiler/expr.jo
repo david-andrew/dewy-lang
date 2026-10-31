@@ -1,4 +1,5 @@
 use 'checker_range_values.dewy'
+use 'checker_numeric.dewy'
 use 'checker_in_range.dewy'
 use 'checker_idents.dewy'
 use 'checker_match.dewy'
@@ -8013,98 +8014,31 @@ check_binary = (n: int, expected: int) -> int:
         fatal(nodes[n].pos, "operator {tok_text(op)} is not defined for {dt(ta)} and {dt(tb)}{why}")
     binary_numeric(n, op, a, b, ta, tb, is_cmp)
 
-# (check_binary's end for numbers: division, literal folding, the joined type)
-binary_numeric = (n: int, op: Tok, a: int, b: int, ta: int, tb: int, is_cmp: bool) -> int:
-    if op == .slash and is_int(ta) and is_int(tb) and files[pos_file(nodes[n].pos)].is_dewy:
-        fatal(nodes[n].pos, "Dewy does not yet support integer /; use // or convert to float64")
-    # High unsigned Dewy literals go through typed lowering. The untyped fold
-    # below uses signed division/shifts and would lose their unsigned meaning.
-    wide_unsigned = (has_flag(a, NF_U64) or has_flag(b, NF_U64)) and files[pos_file(nodes[n].pos)].is_dewy
-    if is_lit(a) and is_lit(b) and not is_cmp and not wide_unsigned:
-        # fold literal arithmetic, keeping the result an untyped literal
-        if nodes[a].kind == .int_lit and nodes[b].kind == .int_lit:
-            x = nodes[a].ival
-            y = nodes[b].ival
-            mathematical = lit_default(n) == T_MATH_INT
-            operation = if op == .plus: 0 else if op == .minus: 1 else if op == .star: 2 else if op == .slash: 3 else if op == .shl: 4 else: -1
-            if mathematical and operation >= 0 and math_word_overflow(operation, x, y):
-                coerce(a, T_MATH_INT)
-                coerce(b, T_MATH_INT)
-                nodes[n].type = i32(T_MATH_INT)
-                return T_MATH_INT
-            if mathematical and (op == .shl or op == .shr) and y < 0: fatal(nodes[n].pos, "shift count must be nonnegative")
-            v = 0
-            ok = true
-            if op == .plus: v = x + y
-            else if op == .minus: v = x - y
-            else if op == .star: v = x * y
-            else if op == .slash:
-                if y == 0: ok = false
-                else:
-                    v = x / y
-                    # (3 / 4 is 0: in languages with one kind of number it is 0.75)
-                    if v == 0 and x != 0: warn(nodes[n].pos, "{x} / {y} is 0: whole numbers divide to a whole number ({x}.0 / {y} is {f64(x) / f64(y)})")
-            else if op == .percent:
-                if y == 0: ok = false
-                else: v = x % y
-            else if op == .amp: v = x & y
-            else if op == .pipe: v = x | y
-            else if op == .caret: v = (x xor y)
-            else if (op == .shl or op == .shr) and dewy_at(nodes[n].pos) and (y >= 64 or y < 0):
-                # (a count past the width reaches the continuation bits)
-                v = if op == .shr and x < 0: -1 else: 0
-            else if op == .shl: v = x << y
-            else if op == .shr: v = x >> y
-            else: ok = false
-            if ok:
-                big = v < 0 and (has_flag(a, NF_U64) or has_flag(b, NF_U64) or (op == .shl and x >= 0))
-                nodes[n] = Node(kind = .int_lit, pos = nodes[n].pos, ival = v, flags = i32(NF_LITERAL | NF_CHECKED), type = i32(T_INT))
-                if big: add_flag(n, NF_U64)
-                nodes[n].type = i32(lit_default(n))
-                return ntype(n)
-        else if (op == .plus or op == .minus or op == .star or op == .slash) and (nodes[a].kind == .int_lit or nodes[a].kind == .float_lit) and (nodes[b].kind == .int_lit or nodes[b].kind == .float_lit):
-            x = nodes[a].fval
-            if nodes[a].kind == .int_lit: x = f64(nodes[a].ival)
-            y = nodes[b].fval
-            if nodes[b].kind == .int_lit: y = f64(nodes[b].ival)
-            v = 0.0
-            if op == .plus: v = x + y
-            else if op == .minus: v = x - y
-            else if op == .star: v = x * y
-            else: v = x / y
-            if v != v:
-                # (a NaN as the target's processor makes it, whatever the compiler runs on:
-                # x86-64's has the sign bit set, arm64's and wasm's do not; negating flips it)
-                neg = int(f64_bits(v)) < 0
-                if neg == (target_arm64 or target_wasm): v = -v
-            nodes[n] = Node(kind = .float_lit, pos = nodes[n].pos, fval = v, flags = i32(NF_LITERAL | NF_CHECKED), type = i32(T_FLOAT))
-            return T_FLOAT
-    if is_cmp and is_int(ta) and is_int(tb) and (ta != T_MATH_INT or is_lit(a)) and (tb != T_MATH_INT or is_lit(b)) and (exact_potential(a) or exact_potential(b)):
-        loop operand in [a, b]:
-            if is_lit(operand) and nodes[operand].kind == .int_lit:
-                other = if operand == a: b else: a
-                unsigned = is_int(ntype(other)) and not types[representation_type(ntype(other))].sign and nodes[operand].ival >= 0
-                nodes[operand].type = i32(if unsigned or has_flag(operand, NF_U64): T_U64 else: T_INT)
-                clear_flag(operand, NF_LITERAL)
-        nodes[n].type = i32(T_BOOL)
-        return T_BOOL
-    if is_cmp and not is_lit(a) and not is_lit(b) and dewy_at(nodes[n].pos):
-        # (i:uint64 <? s.length: compared in the left operand's width, the right one's proven cast)
-        wa = prune(ntype(a))
-        wb = prune(ntype(b))
-        if tkind(wa) == .int_ and tkind(wb) == .int_ and wa != T_MATH_INT and wb != T_MATH_INT and num_join(wa, wb) == 0: coerce(b, wa)
-    j = join_types(a, b, nodes[n].pos)
-    if (op == .amp or op == .pipe or op == .caret) and not is_int(j): fatal(nodes[n].pos, "bitwise operators need integers")
-    # (got / total * 100 with whole numbers: 3 / 4 is 0, so the percent is 0)
-    if op == .star and is_int(j) and nodes[a].kind == .binary and nodes[a].op == i32(int(Tok.slash)) and nodes[b].kind == .int_lit and nodes[b].ival == 100 and not pos_in_lib(nodes[n].pos):
-        an = "a"
-        if nodes[int(nodes[a].a)].kind == .ident: an = name_of(int(nodes[int(nodes[a].a)].name))
-        warn(nodes[n].pos, "this divides whole numbers before multiplying, dropping the fraction (3 / 4 * 100 is 0): `{an} * 100 / ...` multiplies first, `f64({an}) / ...` keeps the fraction")
-    if is_cmp: nodes[n].type = i32(T_BOOL)
-    else: nodes[n].type = i32(j)
-    if not is_cmp: return exact_int_result(n)
-    ntype(n)
-
+# (check_binary's end for numbers: division, literal folding, the joined type; it runs in
+# checker_numeric.dewy, these are its services)
+binary_numeric = (n: int, op: Tok, a: int, b: int, ta: int, tb: int, is_cmp: bool) -> int: xw_numeric(n, i32(int(op)), a, b, ta, tb, is_cmp)
+numeric_exact = (n: int) -> int: exact_int_result(n)
+# (a NaN as the target's processor makes it, whatever the compiler runs on: x86-64's has
+# the sign bit set, arm64's and wasm's do not; negating flips it)
+numeric_nan = (v: f64) -> f64:
+    neg = int(f64_bits(v)) < 0
+    if neg == (target_arm64 or target_wasm): return -v
+    v
+# (3 / 4 is 0: in languages with one kind of number it is 0.75)
+numeric_warn_division = (n: int, x: int, y: int):
+    warn(nodes[n].pos, "{x} / {y} is 0: whole numbers divide to a whole number ({x}.0 / {y} is {f64(x) / f64(y)})")
+# (got / total * 100 with whole numbers: 3 / 4 is 0, so the percent is 0)
+numeric_warn_percent = (n: int, a: int):
+    an = "a"
+    if nodes[int(nodes[a].a)].kind == .ident: an = name_of(int(nodes[int(nodes[a].a)].name))
+    warn(nodes[n].pos, "this divides whole numbers before multiplying, dropping the fraction (3 / 4 * 100 is 0): `{an} * 100 / ...` multiplies first, `f64({an}) / ...` keeps the fraction")
+numeric_error = (n: int, code: int):
+    if code == 1: fatal(nodes[n].pos, "Dewy does not yet support integer /; use // or convert to float64")
+    if code == 2: fatal(nodes[n].pos, "shift count must be nonnegative")
+    fatal(nodes[n].pos, "bitwise operators need integers")
+numeric_host = CheckerNumericHost(coerce, exact_potential, num_join, join_types, numeric_exact, pos_in_lib, numeric_nan, numeric_warn_division, numeric_warn_percent, numeric_error)
+numeric_input = CheckerNumericInput(&nodes, &types, &files, &T_INT, &T_MATH_INT, &T_U64, &T_FLOAT, &T_BOOL, &T_NEVER, &numeric_host)
+numeric_binding = checker_numeric_bind(&numeric_input)
 
 # (q1 * q2 for quaternions, which are vec4s: * multiplies their parts one by one, which is no
 # rotation; values from quat_* functions, and variables made from them, are known to be ones)

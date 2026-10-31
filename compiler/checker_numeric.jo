@@ -1,0 +1,190 @@
+# Frozen numeric binary checker extracted from expr.jo.
+use 'node_store.dewy'
+use 'checker_types.dewy'
+use 'source_types.dewy'
+use 'type_inference.dewy'
+struct CheckerNumericHost:
+    coerce: (int, int) -> int
+    exact_potential: (int) -> bool
+    num_join: (int, int) -> int
+    join: (int, int, int) -> int
+    exact: (int) -> int
+    library: (int) -> bool
+    nan: (f64) -> f64
+    warn_division: (int, int, int) -> void
+    warn_percent: (int, int) -> void
+    error: (int, int) -> void
+struct CheckerNumericInput:
+    nodes: *(Node[])
+    types: *(TypeInfo[])
+    files: *(SrcFile[])
+    int_type: *int
+    math_int: *int
+    u64_type: *int
+    float_type: *int
+    bool_type: *int
+    never_type: *int
+    host: *CheckerNumericHost
+xw_nodes: *(Node[])
+xw_types: *(TypeInfo[])
+xw_files: *(SrcFile[])
+xw_int_type: *int
+xw_math_int: *int
+xw_u64_type: *int
+xw_float_type: *int
+xw_bool_type: *int
+xw_never_type: *int
+xw_host: *CheckerNumericHost
+checker_numeric_bind = (input: *CheckerNumericInput) -> int:
+    xw_nodes = input[0].nodes
+    xw_types = input[0].types
+    xw_files = input[0].files
+    xw_int_type = input[0].int_type
+    xw_math_int = input[0].math_int
+    xw_u64_type = input[0].u64_type
+    xw_float_type = input[0].float_type
+    xw_bool_type = input[0].bool_type
+    xw_never_type = input[0].never_type
+    xw_host = input[0].host
+    0
+xw_in_dewy = (n: int) -> bool: xw_files[0][xw_nodes[0][n].pos >> 40].is_dewy
+xw_dewy = (n: int) -> bool:
+    pos = xw_nodes[0][n].pos
+    f = pos >> 40
+    pos > 0 and f < xw_files[0].len() and xw_files[0][f].is_dewy
+xw_flag = (n: int, f: int) -> bool: int(xw_nodes[0][n].flags) & f != 0
+xw_int = (t: int) -> bool: xw_types[0][tu_prune(t)].kind == .int_
+xw_type = (n: int) -> int: int(xw_nodes[0][n].type)
+xw_representation = (t0: int) -> int:
+    t = int(tu_prune(t0))
+    if xw_types[0][t].kind == .refined: return int(tu_prune(int(xw_types[0][t].elem)))
+    t
+xw_trunc_div = (a: int, b: int) -> int: a / b
+xw_overflow = (operation: int, x: int, y: int) -> bool:
+    if operation == 0:
+        r = x + y
+        return ((x xor r) & (y xor r)) < 0
+    if operation == 1:
+        r = x - y
+        return ((x xor y) & (x xor r)) < 0
+    if operation == 2:
+        ax = u64(x)
+        if x < 0: ax = u64(-(x + 1)) + 1
+        ay = u64(y)
+        if y < 0: ay = u64(-(y + 1)) + 1
+        limit = u64(9223372036854775807)
+        if (x < 0) != (y < 0): limit = u64(9223372036854775807) + 1
+        return ay != 0 and ax > limit / ay
+    if operation == 3: return y == 0 or (x == -9223372036854775807 - 1 and y == -1)
+    if y < 0: return true
+    if y >= 64: return x != 0
+    ((x << y) >> y) != x
+xw_int_default = (n: int) -> int:
+    if xw_in_dewy(n): return xw_math_int[0]
+    xw_int_type[0]
+xw_exact_potential = (n: int) -> bool:
+    if n <= 0: return false
+    k = xw_nodes[0][n].kind
+    if k != .intrinsic and k != .unary and k != .binary and k != .conv and k != .if_ and k != .iflet and k != .coalesce and k != .match_ and k != .block and k != .exprstmt: return false
+    xw_host[0].exact_potential(n)
+xw_join = (a: int, b: int, pos: int) -> int:
+    ta = int(tu_prune(xw_type(a)))
+    tb = int(tu_prune(xw_type(b)))
+    if ta == tb and ta != xw_never_type[0] and not xw_flag(a, 256) and not xw_flag(b, 256):
+        k = xw_types[0][ta].kind
+        if (k == .int_ or k == .float_) and xw_nodes[0][a].kind != .str_lit and xw_nodes[0][b].kind != .str_lit: return ta
+    xw_host[0].join(a, b, pos)
+xw_fold_int = (n: int, op: i32, a: int, b: int) -> int:
+    x = xw_nodes[0][a].ival
+    y = xw_nodes[0][b].ival
+    mathematical = xw_in_dewy(n)
+    operation = -1
+    if op == 58: operation = 0
+    else if op == 59: operation = 1
+    else if op == 60: operation = 2
+    else if op == 61: operation = 3
+    else if op == 67: operation = 4
+    if mathematical and operation >= 0 and xw_overflow(operation, x, y):
+        xw_host[0].coerce(a, xw_math_int[0])
+        xw_host[0].coerce(b, xw_math_int[0])
+        xw_nodes[0][n].type = i32(xw_math_int[0])
+        return xw_math_int[0]
+    if mathematical and (op == 67 or op == 68) and y < 0: xw_host[0].error(n, 2)
+    v = 0
+    ok = true
+    if op == 58: v = x + y
+    else if op == 59: v = x - y
+    else if op == 60: v = x * y
+    else if op == 61:
+        if y == 0: ok = false
+        else:
+            v = xw_trunc_div(x, y)
+            if v == 0 and x != 0: xw_host[0].warn_division(n, x, y)
+    else if op == 62:
+        if y == 0: ok = false
+        else: v = x - xw_trunc_div(x, y) * y
+    else if op == 63: v = x & y
+    else if op == 64: v = x | y
+    else if op == 65: v = (x xor y)
+    else if (op == 67 or op == 68) and xw_dewy(n) and (y >= 64 or y < 0):
+        if op == 68 and x < 0: v = -1
+        else: v = 0
+    else if op == 67: v = x << (y & 63)
+    else if op == 68: v = x >> (y & 63)
+    else: ok = false
+    if not ok: return -1
+    big = v < 0 and (xw_flag(a, 2097152) or xw_flag(b, 2097152) or (op == 67 and x >= 0))
+    xw_nodes[0][n] = Node(kind = .int_lit, pos = xw_nodes[0][n].pos, ival = v, flags = i32(384), type = i32(xw_int_type[0]))
+    if big: xw_nodes[0][n].flags = i32(int(xw_nodes[0][n].flags) | 2097152)
+    xw_nodes[0][n].type = i32(xw_int_default(n))
+    int(xw_nodes[0][n].type)
+xw_fold_float = (n: int, op: i32, a: int, b: int) -> int:
+    x = xw_nodes[0][a].fval
+    if xw_nodes[0][a].kind == .int_lit: x = f64(xw_nodes[0][a].ival)
+    y = xw_nodes[0][b].fval
+    if xw_nodes[0][b].kind == .int_lit: y = f64(xw_nodes[0][b].ival)
+    v = 0.0
+    if op == 58: v = x + y
+    else if op == 59: v = x - y
+    else if op == 60: v = x * y
+    else: v = x / y
+    if v != v: v = xw_host[0].nan(v)
+    xw_nodes[0][n] = Node(kind = .float_lit, pos = xw_nodes[0][n].pos, fval = v, flags = i32(384), type = i32(xw_float_type[0]))
+    xw_float_type[0]
+xw_numeric = (n: int, op: i32, a: int, b: int, ta: int, tb: int, is_cmp: bool) -> int:
+    dewy_file = xw_in_dewy(n)
+    if op == 61 and xw_int(ta) and xw_int(tb) and dewy_file: xw_host[0].error(n, 1)
+    wide_unsigned = (xw_flag(a, 2097152) or xw_flag(b, 2097152)) and dewy_file
+    if xw_flag(a, 256) and xw_flag(b, 256) and not is_cmp and not wide_unsigned:
+        ak = xw_nodes[0][a].kind
+        bk = xw_nodes[0][b].kind
+        if ak == .int_lit and bk == .int_lit:
+            folded = xw_fold_int(n, op, a, b)
+            if folded >= 0: return folded
+        else if (op == 58 or op == 59 or op == 60 or op == 61) and (ak == .int_lit or ak == .float_lit) and (bk == .int_lit or bk == .float_lit):
+            return xw_fold_float(n, op, a, b)
+    if is_cmp and xw_int(ta) and xw_int(tb) and (ta != xw_math_int[0] or xw_flag(a, 256)) and (tb != xw_math_int[0] or xw_flag(b, 256)) and (xw_exact_potential(a) or xw_exact_potential(b)):
+        loop operand in [a, b]:
+            if xw_flag(operand, 256) and xw_nodes[0][operand].kind == .int_lit:
+                other = a
+                if operand == a: other = b
+                ot = xw_type(other)
+                unsigned = xw_int(ot) and not xw_types[0][xw_representation(ot)].sign and xw_nodes[0][operand].ival >= 0
+                t = xw_int_type[0]
+                if unsigned or xw_flag(operand, 2097152): t = xw_u64_type[0]
+                xw_nodes[0][operand].type = i32(t)
+                xw_nodes[0][operand].flags = i32(int(xw_nodes[0][operand].flags) & ~256)
+        xw_nodes[0][n].type = i32(xw_bool_type[0])
+        return xw_bool_type[0]
+    if is_cmp and not xw_flag(a, 256) and not xw_flag(b, 256) and xw_dewy(n):
+        wa = int(tu_prune(xw_type(a)))
+        wb = int(tu_prune(xw_type(b)))
+        if xw_types[0][wa].kind == .int_ and xw_types[0][wb].kind == .int_ and wa != xw_math_int[0] and wb != xw_math_int[0] and xw_host[0].num_join(wa, wb) == 0: xw_host[0].coerce(b, wa)
+    j = xw_join(a, b, xw_nodes[0][n].pos)
+    if (op == 63 or op == 64 or op == 65) and not xw_int(j): xw_host[0].error(n, 3)
+    if op == 60 and xw_int(j) and xw_nodes[0][a].kind == .binary and xw_nodes[0][a].op == 61 and xw_nodes[0][b].kind == .int_lit and xw_nodes[0][b].ival == 100 and not xw_host[0].library(xw_nodes[0][n].pos):
+        xw_host[0].warn_percent(n, a)
+    if is_cmp: xw_nodes[0][n].type = i32(xw_bool_type[0])
+    else: xw_nodes[0][n].type = i32(j)
+    if not is_cmp and xw_dewy(n) and xw_type(n) == xw_int_type[0]: return xw_host[0].exact(n)
+    xw_type(n)
