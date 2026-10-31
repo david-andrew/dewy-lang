@@ -66,7 +66,8 @@ def test_library_root_error_order(compiler, tmp_path, forced):
         assert run.returncode == 1
         results.append((run.returncode, run.stdout, run.stderr))
     assert all(result == results[0] for result in results)
-    assert results[0][2].index(b"unknown name 'missing_name'") < results[0][2].index(b'in this call to path_length')
+    # (the errors each run finds are shown together in source order: line 1's call first)
+    assert results[0][2].index(b'in this call to path_length') < results[0][2].index(b"unknown name 'missing_name'")
 
 
 @pytest.mark.parametrize('mode', ['partitioned', 'fused', 'emission'])

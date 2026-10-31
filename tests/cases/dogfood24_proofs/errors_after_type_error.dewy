@@ -1,0 +1,7 @@
+# After a type error, the next run also decides the proofs: each other function's first
+# unproven obligation is reported in the same compile, in source order.
+label = (x:int):>int => x + "a"
+pick = (a:array<int> i:int):>int => a[i]
+fine = (a:array<int>):>int => if a.is_empty 0 else a[0]
+third = (a:array<int>):>int => a[3]
+main = () => printl(label(1) + pick([1 2] 0) + fine([4]) + third([1]))

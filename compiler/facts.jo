@@ -10584,6 +10584,8 @@ facts_finalize = ():
         if effect_unavailable.has(f) or fact_decided.has(f): continue
         fact_decided[f] = true
         if f <= 0 or f >= isolation_limit or fns[f].state != 2: fatal(-1, "cannot prove assertion: unsettled checked body")
+        # (a body left out after an error, in the run for the next errors: not checked)
+        if errors_only and wit_skipped.has(f): continue
         icb = ic_fn(IC_FACTS, f)
         if let run = fact_probe_runs.get(f):
             if fact_probe_reusable(f, run):

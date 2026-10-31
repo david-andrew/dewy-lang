@@ -37,6 +37,7 @@ use 'types.jo'
 use 'check.jo'
 use 'spelling.dewy'
 use 'facts.jo'
+use 'witness.jo'
 use 'exact.jo'
 use 'prelude.jo'
 use 'expr.jo'
@@ -369,17 +370,18 @@ compile = (path: str, out0: str) -> str:
     check_program(path)
     if exit_codes_only:
         dc_flush_warnings()
-        if errors_only: exit(error_exit)
+        if errors_only: stop(error_exit)
         print_exit_codes()
         exit(0)
     dc_flush_warnings()
-    # (a run for the errors after the first: no more to find, and nothing is built)
-    if errors_only: exit(error_exit)
-    if target_wasm and not program_named: web_save_name_check()
-    # (functions left unchecked after errors in them cannot be lowered)
-    if lower_only and ide_skip.len() > 0: return ""
-    if lower_only: det_check_program()
-    if repl_image: repl_set_main()
+    # (a run for the errors after the first: the proofs are decided too, then nothing is built)
+    if not errors_only:
+        if target_wasm and not program_named: web_save_name_check()
+        # (functions left unchecked after errors in them cannot be lowered)
+        if lower_only and ide_skip.len() > 0: return ""
+        if lower_only: det_check_program()
+        if repl_image: repl_set_main()
+    else: wit_skip_close()
     ic_switch(IC_OWNERSHIP, IC_SHARED)
     isolation_reset()
     loans_finalize()
@@ -391,6 +393,7 @@ compile = (path: str, out0: str) -> str:
     pc_before_facts()
     facts_finalize()
     pc_after_facts()
+    if errors_only: stop(error_exit)
     directives_after_facts()
     floats_after_facts()
     ic_switch(IC_EFFECTS, IC_SHARED)
@@ -680,7 +683,12 @@ main = ():
         eprint("dewy-core: '{a[1]}' is not yet available for Dewy; see docs/DEVELOPMENT.md")
         exit(2)
     # (the next errors after one in a function: next_error_run, ide.jo)
-    if a.len() > 3 and a[1] == "--skip-fns":
+    if a.len() > 4 and a[1] == "--skip-fns":
+        # (and the errors the runs before found: position, then the error as shown)
+        if len(a[3]) > 0:
+            loop e in split(a[3], "\x1e"):
+                c = find(e, "\x1f")
+                if c > 0: err_prior.push((to_int(e[..c)) ?? 0, e[c + 1..]))
         loop s in split(a[2], ","):
             c = find(s, ":")
             # (w and a warning's place and length: shown by the run before)
@@ -690,7 +698,7 @@ main = ():
                 ide_skip[mkpos(to_int(s[..c)) ?? 0, to_int(s[c + 1..]) ?? 0)] = true
         errors_only = true
         rest = [a[0]]
-        loop i in [3..a.len()): rest.push(a[i])
+        loop i in [4..a.len()): rest.push(a[i])
         a = rest
     if a.len() > 2 and a[1] == "--eager-bodies":
         dc_eager = true
@@ -799,13 +807,13 @@ main = ():
             init_types()
             check_program(path)
             dc_flush_warnings()
-            if errors_only: exit(error_exit)
+            if errors_only: stop(error_exit)
             return
         # (and lowered without making code: some errors are found there, as a `loop mut` that
         # resizes its array, a data race, a shader's)
         lower_only = true
         compile(path, "")
-        if errors_only: exit(error_exit)
+        if errors_only: stop(error_exit)
         if dir_obligations: dir_print_obligations()
         return
     first = 1

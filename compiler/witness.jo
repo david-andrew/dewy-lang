@@ -19,6 +19,8 @@ use 'refine.jo'
 use 'nd_contracts.jo'
 use 'proofs.jo'
 use 'directives.jo'
+use 'ide.jo'
+use 'isolation.jo'
 
 struct WitSide:
     value: int = 0
@@ -38,6 +40,74 @@ wit_collected = 0
 wit_tentative = false
 wit_tentative_failed = false
 wit_failed_owners: {int: bool} = {}
+
+# (a run after checker errors, whose bodies are left out, before ownership and facts are
+# decided: the functions that use one, directly or through others, or that a closure shares
+# facts with. Their facts may be missing only because of the earlier error, so their
+# unproven obligations are not shown. One walk over the checked bodies, O(their nodes),
+# then O(edges) to close the set.)
+wit_skip_users: {int: bool} = {}
+wit_skipped: {int: bool} = {}       # (the functions whose bodies are left out)
+# (each use as an edge: used, then its user)
+wit_skip_uses = (n: int, f: int, edges: mut int[]):
+    if n == 0: return
+    k = nodes[n].kind
+    g = 0
+    if k == .call and nodes[n].aux == 0 or k == .fnref and nodes[n].aux == 0: g = int(nodes[n].sym)
+    else if k == .partial: g = int(nodes[n].d)
+    else if k == .lambda:
+        g = int(nodes[n].sym)
+        # (the closure starts from its creator's facts)
+        if g > 0 and g < fns.len():
+            edges.push(f)
+            edges.push(g)
+    if g > 0 and g < fns.len():
+        edges.push(g)
+        edges.push(f)
+    mask = isolation_children(k)
+    if mask <= 0: return
+    if mask & 1 != 0: wit_skip_uses(int(nodes[n].a), f, edges)
+    if mask & 2 != 0: wit_skip_uses(int(nodes[n].b), f, edges)
+    if mask & 4 != 0: wit_skip_uses(int(nodes[n].c), f, edges)
+    if mask & 16 != 0:
+        loop child in kids(n): wit_skip_uses(child, f, edges)
+
+wit_skip_close = ():
+    wit_skip_users = {}
+    wit_skipped = {}
+    if not errors_only or ide_skip.len() == 0: return
+    edges: int[]
+    work: int[]
+    loop f in [1..fns.len()):
+        d = int(fns[f].decl)
+        if d != 0 and ide_skip.has(nodes[d].pos):
+            wit_skipped[f] = true
+            work.push(f)
+        else if fns[f].body != 0 and fns[f].state == 2: wit_skip_uses(int(fns[f].body), f, edges)
+    # (an unchecked body is opaque to the passes after checking, as a foreign function's)
+    loop f, _ in wit_skipped: fns[f].body = 0
+    # (each function's users, contiguous: start[g] up to start[g + 1])
+    start = fill(0, fns.len() + 1)
+    i = 0
+    loop i < edges.len():
+        start[edges[i] + 1] += 1
+        i += 2
+    loop g in [1..fns.len() + 1): start[g] += start[g - 1]
+    at = start
+    users = fill(0, edges.len() / 2)
+    i = 0
+    loop i < edges.len():
+        users[at[edges[i]]] = edges[i + 1]
+        at[edges[i]] += 1
+        i += 2
+    loop work.len() > 0:
+        g = work.pop()
+        loop j in [start[g]..start[g + 1]):
+            f = users[j]
+            if wit_skip_users.has(f): continue
+            wit_skip_users[f] = true
+            work.push(f)
+
 wit_fail = (p: int, msg: str):
     if wit_tentative:
         wit_tentative_failed = true
@@ -45,7 +115,7 @@ wit_fail = (p: int, msg: str):
     if err_held_on and not wit_collect:
         # (a function's first unproven obligation only: later ones may follow from it)
         owner = if fact_owner > 0: fact_owner else: fact_retry_owner
-        if owner > 0 and wit_failed_owners.has(owner):
+        if owner > 0 and (wit_failed_owners.has(owner) or wit_skip_users.has(owner)):
             err_notes = []
             return
         if owner > 0: wit_failed_owners[owner] = true

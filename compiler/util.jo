@@ -97,6 +97,7 @@ call_args_text = (p: int) -> str:
 
 # the end of compiling: the process ends (in the interactive prompt, back to it: repl.jo)
 stop = (code: int):
+    if err_prior.len() > 0 or err_more_note: err_prior_show()
     status = code
     if status == 1: status = error_exit
     when not BOOTSTRAP:
@@ -111,6 +112,8 @@ quiet_errors = false        # (an error only stops: sloppy fmt in the language s
 more_errors = false
 errors_only = false
 err_skips: str[]
+err_prior: (int, str)[]        # (the errors the runs before found, and this run's: shown at its end)
+err_more_note = false          # (the last run allowed found another error)
 shown_warnings: str[]          # (the warnings shown, passed on to the next run: w<place>.<length>)
 
 # p < 0: no source position
@@ -209,11 +212,16 @@ err_hold = (p0: int, msg0: str):
     err_notes = []
     err_held.push((p, err_block(p, msg, notes, extra)))
 
-# the held errors, in source order, each once; then the compile stops
+# the held errors, with the runs' before, in source order, each once; then the compile stops
 err_flush = ():
-    held = err_held
+    err_prior = err_prior + err_held
     err_held = []
     err_held_on = false
+    stop(1)
+
+err_prior_show = ():
+    held = err_prior
+    err_prior = []
     loop i in [1..held.len()):
         j = i
         loop j > 0 and held[j - 1].0 > held[j].0:
@@ -223,9 +231,11 @@ err_flush = ():
             j -= 1
     loop i in [0..held.len()):
         if i > 0 and held[i].0 == held[i - 1].0 and held[i].1 == held[i - 1].1: continue
-        if i > 0 or errors_only: eprint("")
+        if i > 0: eprint("")
         eprint(held[i].1)
-    stop(1)
+    if err_more_note:
+        err_more_note = false
+        eprint("(there may be more errors: these first)")
 
 fatal = (p0: int, msg0: str):
     dc_replay()
@@ -243,11 +253,11 @@ fatal = (p0: int, msg0: str):
         else: err_held.push((1 << 62, "error: {msg}"))
         err_flush()
     if p < 0:
-        eprint("error: {msg}")
+        err_prior.push((1 << 62, "error: {msg}"))
         stop(1)
-    if errors_only: eprint("")                    # (between this error and the one before)
-    eprint(err_block(p, msg, notes, extra))
-    if more_errors: next_error_run()
+    block = err_block(p, msg, notes, extra)
+    if more_errors: next_error_run(p, block)
+    err_prior.push((p, block))
     stop(1)
 
 # the source line at p, and a caret under p's column (after a newline), or nothing

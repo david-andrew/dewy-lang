@@ -1,0 +1,6 @@
+# Checker errors found in later runs and unproven obligations show together in source order.
+alpha = (a:array<int> i:int):>int => a[i]
+beta = (x:int):>int => x + "b"
+gamma = (a:array<int>):>int => a[2]
+delta = (x:int):>int => x * true
+main = () => printl(delta(1) + beta(2) + alpha([1] 0) + gamma([1]))

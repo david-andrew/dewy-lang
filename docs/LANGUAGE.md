@@ -126,7 +126,11 @@ remains `python3 -m tools.core test`.
 
 `watch` reruns a terminal program after edits and retries failed builds when a
 missing imported file or embedded asset appears. `check` reports errors without
-emitting an executable. `build --time` reports compiler phase timings.
+emitting an executable. `check`, `build`, `run` and `test` report the first error in each
+function, up to five functions with type errors plus every other function's first
+unproven obligation, in source order. A function that calls one with a type error has
+its obligations left unreported, as they may fail only because of that error.
+`build --time` reports compiler phase timings.
 Development builds are the default. Ordinary builds expand tiny functions that
 call no other functions, then apply one local optimization pass per function.
 Read-only walks through recursive records avoid per-node copies in development

@@ -1,0 +1,15 @@
+# A closure that calls a function left out after its error is not reported either.
+reset = (@xs:array<int>) => {
+    loop @x in xs x = 0
+    let bad:int = "x"
+}
+apply = (f:<(n:int):>int> v:int):>int => f(v)
+main = () => {
+    let k = apply(n => {
+        let zs:array<int> = [1 2 3]
+        reset(@zs)
+        zs[2] + n
+    } 3)
+    printl(k + other([1 2]))
+}
+other = (a:array<int>):>int => a[2]

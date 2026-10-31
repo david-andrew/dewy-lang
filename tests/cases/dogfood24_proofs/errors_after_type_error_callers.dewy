@@ -1,0 +1,16 @@
+# A function whose body was left out after its error is opaque to the proofs: a caller
+# that could prove its index only from that body's facts is not reported, an unrelated
+# function still is.
+make = (n:int):>array<int> => {
+    let xs:array<int> = []
+    loop i in [0..n) xs.push(i)
+    let bad:int = "x"
+    xs
+}
+last = ():>int => {
+    let xs = make(4)
+    xs[3]
+}
+indirect = ():>int => last() + 1
+other = (a:array<int> i:int):>int => a[i]
+main = () => printl(indirect() + other([1 2] 0))
