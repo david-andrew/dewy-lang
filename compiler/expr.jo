@@ -1,3 +1,4 @@
+use 'checker_expr.dewy'
 use 'checker_receivers.dewy'
 use 'checker_range_values.dewy'
 use 'checker_numeric.dewy'
@@ -9391,48 +9392,13 @@ mk_ident_local = (l: int, pos: int) -> int:
     add_flag(n, NF_CHECKED)
     n
 
-# ---------------- main expression checker ----------------
-check_expr = (n: int, expected: int) -> int:
-    last_checked = n
-    if nodes[n].type != 0 and has_flag(n, NF_CHECKED): return ntype(n)
-    # (the commonest kinds in frames of their own; the rest below)
-    k = nodes[n].kind
-    if k == .ident:
-        it = if tk_reads_on: temperature_read(n, expected) else: check_ident_expr(n, expected)
-        # (a binding holding several values, read where they are not taken; a bare call, `pair`
-        # as `pair()`, is a call now, and its check took them)
-        if values_any and is_values(it) and nodes[n].kind == .ident and n != assign_root and name_of(int(nodes[n].name))[0] != '$': sink_values_use(n, it)
-        return it
-    if k == .int_lit: return check_int_expr(n, expected)
-    if k == .binary: return ce_finish(n, check_binary(n, expected), expected)
-    if k == .call: return check_call_expr(n, expected)
-    if k == .field: return check_field_expr(n, expected)
-    if k == .if_: return ce_finish(n, xf_if(n, ce_expected(expected)), expected)
-    if k == .index:
-        it = check_index_expr(n, expected)
-        if sibling_known.len() > 0: it = sibling_index_narrow(n, it)
-        return it
-    if k == .str_lit: return check_str_expr(n, expected)
-    check_expr_other(n, expected)
-
+# ---------------- main expression checker: checker_expr.dewy ----------------
 # (the expected type as checking reads it: a refinement's representation)
 ce_expected = (expected: int) -> int:
     if expected == 0: return 0
     xl_expected(expected)
 ce_finish = (n: int, t: int, expected: int) -> int: xl_finish(n, t, expected)
 check_int_expr = (n: int, expected: int) -> int: xl_check_int(n, expected)
-
-check_ident_expr = (n: int, expected: int) -> int:
-    nm = int(nodes[n].name)
-    if ide_sentinel != 0 and nm == ide_sentinel: ide_complete_names()
-    s = lookup(nm)
-    if s == 0: ident_unknown(n, expected, nm)
-    # (constant views and decimal globals: tables only this side keeps)
-    flags = 0
-    if const_views.len() > 0: flags = 1
-    if decimal_globals.len() > 0: flags = flags | 2
-    result = xj_ident(n, expected, int(syms[s].kind), int(syms[s].ref), s, flags)
-    result.type
 
 # A name read as a value runs in checker_idents.dewy once looked up; these are its services.
 ident_unknown = (n: int, expected: int, nm: int):
@@ -10268,85 +10234,68 @@ receiver_host = CheckerReceiverHost(check_expr, field_juxt, field_reflect_name, 
 receiver_input = CheckerReceiverInput(&nodes, &types, &structs, &names, &files, &ide_on, &reflect_active, &callee_at, &soa_aliases, &last_checked, &values_index_base, &type_receiver_at, &empty_index_receiver, &receiver_host)
 receiver_binding = checker_receivers_bind(&receiver_input)
 
-check_expr_other = (n: int, expected: int) -> int:
-    if nodes[n].kind == .float_lit or nodes[n].kind == .bool_lit or nodes[n].kind == .none_lit or nodes[n].kind == .null_lit: return xl_check_scalar(n, expected)
-    t = 0
-    ex = prune(expected)
-    if refine_active: ex = representation_type(ex)
-    if expected == 0: ex = 0
+# checker_expr.dewy's services: literal preparation (grouped values, spreads, the
+# optional's element, a literal union's member, total dictionaries) and the kinds that
+# stay here.
+expr_literal = (n: int, expected: int, ex0: int) -> int:
+    ex = ex0
     exk = TK.void_
     if ex != 0: exk = types[ex].kind
-    if nodes[n].kind == .array:
+    k = nodes[n].kind
+    if k == .array:
         # (`[(1 2) 3]`: a group's values are elements, as written)
         if values_grouped(n): set_list(n, values_flatten(kids(n)))
         dewy_classify_spread(n)
+    if k == .array and exk == .opt and (tkind(int(types[ex].elem)) == .array or tkind(int(types[ex].elem)) == .fixed or tkind(int(types[ex].elem)) == .tuple and files[pos_file(nodes[n].pos)].is_dewy):
+        ex = prune(int(types[ex].elem))
+        exk = types[ex].kind
+    if (k == .array or k == .map_lit or k == .record_lit or k == .tuple and nodes[n].aux != i32(TUPLE_VALUES)) and ex != 0 and files[pos_file(nodes[n].pos)].is_dewy:
+        member = literal_union_member(n, ex)
+        if member != 0: ex = member
+    if k == .map_lit and refine_active and expected != 0 and is_total_dict(expected): total_literal_check(n, expected)
+    ex
+expr_other = (n: int, expected: int) -> int:
     k = nodes[n].kind
     if k == .intrinsic and nodes[n].aux == i32(int(IN.zeroed)) and expected != 0:
         # (release_call's zero bytes: of the type the place stores)
         nodes[n].type = i32(expected)
         add_flag(n, NF_CHECKED)
         return expected
-    if k == .array and exk == .opt and (tkind(int(types[ex].elem)) == .array or tkind(int(types[ex].elem)) == .fixed or tkind(int(types[ex].elem)) == .tuple and files[pos_file(nodes[n].pos)].is_dewy):
-        ex = prune(int(types[ex].elem))
-        exk = types[ex].kind
-    if (k == .array or k == .map_lit or k == .record_lit or k == .tuple and nodes[n].aux != i32(TUPLE_VALUES)) and ex != 0 and files[pos_file(nodes[n].pos)].is_dewy:
-        member = literal_union_member(n, ex)
-        if member != 0:
-            ex = member
-            exk = types[ex].kind
-    if k == .map_lit and refine_active and expected != 0 and is_total_dict(expected): total_literal_check(n, expected)
     if k == .propagate: return check_propagate(n, expected)
     if k == .unit_lit:
         return quantity_constant(n, nodes[n].ival, int(nodes[n].aux), int(nodes[n].aux2), expected)
-    if k == .dotname: t = xv_check(n, ex)
-    else if k == .typeapply:
-        result = xa_check(n, expected, ex)
-        if result.bypass: return result.type
-        t = result.type
-    else if k == .unary:
-        result = xu_check(n, expected, ex)
-        if result.bypass: return result.type
-        t = result.type
-    else if k == .and_ or k == .or_ or k == .not_:
-        result = xg_check(n, expected, ex)
-        if result.bypass: return result.type
-        t = result.type
-    else if k == .istype: t = xi_check(n)
-    else if k == .coalesce or k == .unwrap:
-        result = xo_check(n, expected, ex)
-        if result.bypass: return result.type
-        t = result.type
-    else if k == .lambda: t = check_lambda(n, expected)
-    else if k == .record_loop:
+    if k == .record_loop:
         reflect_record(n)
         return check_expr(n, expected)
-    else if k == .new_axis: return dewy_new_axis(n, expected)
-    else if k == .array or k == .record_lit:
-        result = xr_check(n, expected, ex)
-        if result.bypass: return result.type
-        t = result.type
-    else if k == .map_lit or k == .tuple:
-        result = xk_check(n, expected, ex)
-        if result.bypass: return result.type
-        t = result.type
-    else if k == .iflet: t = xf_iflet(n, ex)
+    if k == .new_axis: return dewy_new_axis(n, expected)
+    if k == .range: return check_range_value(n, expected)
+    if k == .matrix: return check_matrix(n, expected)
+    ex = ce_expected(expected)
+    t = 0
+    if k == .lambda: t = check_lambda(n, expected)
     else if k == .match_: t = check_match(n, expected)
-    else if k == .cast:
-        result = xc_check(n, expected)
-        if result.bypass: return result.type
-        t = result.type
-    else if k == .range: return check_range_value(n, expected)
-    else if k == .addr or k == .conv or k == .fnref or k == .parallel_region or k == .hole or k == .namedarg: t = xp_check(n, expected)
     else if k == .block:
-        if has_flag(n, NF_COMPREHENSION) and ex != 0 and exk == .array:
+        if has_flag(n, NF_COMPREHENSION) and ex != 0 and types[ex].kind == .array:
             nodes[kid(n, 0)].a = i32(type_node_of(ex, nodes[n].pos))
         # (into a fixed-size array: its elements have the fixed array's element type)
-        else if has_flag(n, NF_COMPREHENSION) and ex != 0 and exk == .fixed and nodes[kid(n, 0)].kind == .vardecl and nodes[kid(n, 0)].a == 0:
+        else if has_flag(n, NF_COMPREHENSION) and ex != 0 and types[ex].kind == .fixed and nodes[kid(n, 0)].kind == .vardecl and nodes[kid(n, 0)].a == 0:
             nodes[kid(n, 0)].a = i32(type_node_of(mk_array(int(types[representation_type(ex)].elem)), nodes[n].pos))
         t = check_block(n, expected, true)
-    else if k == .matrix: return check_matrix(n, expected)
     else: fatal(nodes[n].pos, "invalid expression")
     ce_finish(n, t, expected)
+expr_complete = ():
+    ide_complete_names()
+    return
+expr_module = (m: int, name: int) -> int: module_lookup(m, name)
+expr_values_use = (n: int, t: int):
+    # (a binding holding several values, read where they are not taken; a bare call, `pair`
+    # as `pair()`, is a call now, and its check took them)
+    if is_values(t) and nodes[n].kind == .ident and n != assign_root and name_of(int(nodes[n].name))[0] != '$': sink_values_use(n, t)
+    return
+expr_sibling = (n: int, t: int) -> int: sibling_index_narrow(n, t)
+expr_host = CheckerExprHost(expr_complete, ident_unknown, expr_module, temperature_read, expr_values_use, check_binary, check_call_expr, expr_sibling, expr_literal, expr_other)
+expr_input = CheckerExprInput(&nodes, &syms, &check_scopes, &ctxs, &cx, &ml_at, &ml_mod, &ml_sym, &ml_name_tick, &ml_struct, &ide_sentinel, &tk_reads_on, &values_any, &statement_watch, &last_checked, &expr_host)
+expr_binding = checker_expr_bind(&expr_input)
 
 # The `__as__` conversion from a record type ft to tt (its declared result), or 0.
 as_conversion = (ft: int, tt: int) -> int:

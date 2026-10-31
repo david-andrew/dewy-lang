@@ -16,6 +16,7 @@ LAYOUTS = {
     'DeclInfo': 'insts:8 sig:40',
     'FnInstanceKey': 'decl:8 args:8',
     'FnCtx': 'inst:4 parent:4 ret:4 infer_ret:1 loop_depth:4 mod:4 floor:4',
+    'Sym': 'name:4 kind:4 ref:4 decl:4 next:4 surface:4',
     'CheckerScope': 'names:8 syms:8 prev:8 top:8',
     'RefineBindings': 'fields:8 formals:8 self:8 base_type:8',
 }

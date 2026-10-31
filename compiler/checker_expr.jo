@@ -1,0 +1,170 @@
+# Frozen expression dispatcher extracted from expr.jo.
+use 'node_store.dewy'
+use 'checker_state.dewy'
+use 'checker_literals.dewy'
+use 'checker_idents.dewy'
+use 'checker_conditionals.dewy'
+use 'checker_receivers.dewy'
+use 'checker_variants.dewy'
+use 'checker_type_apply.dewy'
+use 'checker_unary.dewy'
+use 'checker_logic.dewy'
+use 'checker_type_tests.dewy'
+use 'checker_optional.dewy'
+use 'checker_aggregates.dewy'
+use 'checker_collections.dewy'
+use 'checker_cast.dewy'
+use 'checker_places.dewy'
+struct CheckerExprHost:
+    complete: () -> void
+    unknown: (int, int, int) -> void
+    module: (int, int) -> int
+    temperature: (int, int) -> int
+    values_use: (int, int) -> void
+    binary: (int, int) -> int
+    call: (int, int) -> int
+    sibling: (int, int) -> int
+    literal: (int, int, int) -> int
+    other: (int, int) -> int
+struct CheckerExprInput:
+    nodes: *(Node[])
+    syms: *(Sym[])
+    scopes: *CheckerScope
+    contexts: *(FnCtx[])
+    context: *int
+    ml_at: *(int[])
+    ml_mod: *(int[])
+    ml_sym: *(int[])
+    ml_tick: *(int[])
+    ml_struct: *int
+    sentinel: *int
+    temperature: *bool
+    values: *bool
+    watch: *StatementWatch
+    last: *int
+    host: *CheckerExprHost
+xe_nodes: *(Node[])
+xe_syms: *(Sym[])
+xe_scopes: *CheckerScope
+xe_contexts: *(FnCtx[])
+xe_context: *int
+xe_ml_at: *(int[])
+xe_ml_mod: *(int[])
+xe_ml_sym: *(int[])
+xe_ml_tick: *(int[])
+xe_ml_struct: *int
+xe_sentinel: *int
+xe_temperature: *bool
+xe_values: *bool
+xe_watch: *StatementWatch
+xe_last: *int
+xe_host: *CheckerExprHost
+checker_expr_bind = (input: *CheckerExprInput) -> int:
+    xe_nodes = input[0].nodes
+    xe_syms = input[0].syms
+    xe_scopes = input[0].scopes
+    xe_contexts = input[0].contexts
+    xe_context = input[0].context
+    xe_ml_at = input[0].ml_at
+    xe_ml_mod = input[0].ml_mod
+    xe_ml_sym = input[0].ml_sym
+    xe_ml_tick = input[0].ml_tick
+    xe_ml_struct = input[0].ml_struct
+    xe_sentinel = input[0].sentinel
+    xe_temperature = input[0].temperature
+    xe_values = input[0].values
+    xe_watch = input[0].watch
+    xe_last = input[0].last
+    xe_host = input[0].host
+    0
+xe_module = (name: int) -> int:
+    c = xe_context[0]
+    m = -1
+    if c >= 0: m = int(xe_contexts[0][c].mod)
+    if name < xe_ml_at[0].len():
+        stamp = xe_ml_struct[0]
+        if name < xe_ml_tick[0].len() and xe_ml_tick[0][name] > xe_ml_struct[0]: stamp = xe_ml_tick[0][name]
+        if xe_ml_at[0][name] == stamp and xe_ml_mod[0][name] == m: return xe_ml_sym[0][name]
+    xe_host[0].module(m, name)
+xe_kind = (k: SK) -> int: int(k)
+xe_complete = (): xe_host[0].complete()
+xe_unknown = (n: int, expected: int, name: int): xe_host[0].unknown(n, expected, name)
+xe_read = (n: int, t: int) -> int:
+    it = t
+    if xe_temperature[0]: it = xe_host[0].temperature(n, it)
+    if xe_values[0]: xe_host[0].values_use(n, it)
+    it
+xe_ident = (n: int, expected: int) -> int:
+    nm = int(xe_nodes[0][n].name)
+    if xe_sentinel[0] != 0 and nm == xe_sentinel[0]: xe_complete()
+    c = xe_context[0]
+    floor = 0
+    if c >= 0: floor = int(xe_contexts[0][c].floor)
+    i = -1
+    if nm < xe_scopes[0].top.len(): i = xe_scopes[0].top[nm]
+    s = 0
+    if i >= floor: s = xe_scopes[0].syms[i]
+    else: s = xe_module(nm)
+    if s == 0: xe_unknown(n, expected, nm)
+    flags = 0
+    if xe_watch[0].const_views > 0: flags = 1
+    if xe_watch[0].decimal_globals > 0: flags = flags | 2
+    t = xj_ident(n, expected, xe_kind(xe_syms[0][s].kind), int(xe_syms[0][s].ref), s, flags).type
+    if xe_temperature[0] or xe_values[0]: return xe_read(n, t)
+    t
+xe_other = (n: int, expected: int) -> int:
+    k = xe_nodes[0][n].kind
+    if k == .float_lit or k == .bool_lit or k == .none_lit or k == .null_lit: return xl_check_scalar(n, expected)
+    ex = xl_expected(expected)
+    if k == .array or (ex != 0 and (k == .map_lit or k == .record_lit or k == .tuple)): ex = xe_host[0].literal(n, expected, ex)
+    t = 0
+    if k == .dotname: t = xv_check(n, ex)
+    else if k == .typeapply:
+        r = xa_check(n, expected, ex)
+        if r.bypass: return r.type
+        t = r.type
+    else if k == .unary:
+        r = xu_check(n, expected, ex)
+        if r.bypass: return r.type
+        t = r.type
+    else if k == .and_ or k == .or_ or k == .not_:
+        r = xg_check(n, expected, ex)
+        if r.bypass: return r.type
+        t = r.type
+    else if k == .istype: t = xi_check(n)
+    else if k == .coalesce or k == .unwrap:
+        r = xo_check(n, expected, ex)
+        if r.bypass: return r.type
+        t = r.type
+    else if k == .array or k == .record_lit:
+        r = xr_check(n, expected, ex)
+        if r.bypass: return r.type
+        t = r.type
+    else if k == .map_lit or k == .tuple:
+        r = xk_check(n, expected, ex)
+        if r.bypass: return r.type
+        t = r.type
+    else if k == .iflet: t = xf_iflet(n, ex)
+    else if k == .cast:
+        r = xc_check(n, expected)
+        if r.bypass: return r.type
+        t = r.type
+    else if k == .addr or k == .conv or k == .fnref or k == .parallel_region or k == .hole or k == .namedarg: t = xp_check(n, expected)
+    else: return xe_host[0].other(n, expected)
+    xl_finish(n, t, expected)
+check_expr = (n: int, expected: int) -> int:
+    xe_last[0] = n
+    if xe_nodes[0][n].type != 0 and int(xe_nodes[0][n].flags) & 128 != 0: return int(xe_nodes[0][n].type)
+    k = xe_nodes[0][n].kind
+    if k == .ident: return xe_ident(n, expected)
+    if k == .int_lit: return xl_check_int(n, expected)
+    if k == .binary: return xl_finish(n, xe_host[0].binary(n, expected), expected)
+    if k == .call: return xe_host[0].call(n, expected)
+    if k == .field: return xs_field(n, expected)
+    if k == .if_: return xl_finish(n, xf_if(n, xl_expected(expected)), expected)
+    if k == .index:
+        it = xs_index(n, expected)
+        if xe_watch[0].sibling_known != 0: return xe_host[0].sibling(n, it)
+        return it
+    if k == .str_lit: return xl_check_str(n, expected)
+    xe_other(n, expected)

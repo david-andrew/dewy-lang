@@ -477,9 +477,8 @@ temperature_difference_at = (n: int) -> int:
     last_checked = n
     ntype(n)
 
-# A conflicting binding's difference use: its name, read as a difference in place.
-temperature_read = (n: int, expected: int) -> int:
-    t = check_ident_expr(n, expected)
+# A conflicting binding's difference use: its name, checked as t, read as a difference in place.
+temperature_read = (n: int, t: int) -> int:
     if not tk_difference_reads.has(n) or not quantity_point(t): return t
     temperature_difference_at(n)
 

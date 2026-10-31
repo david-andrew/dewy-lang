@@ -1,3 +1,4 @@
+use 'checker_expr.dewy'
 use 'effect_lattice.dewy'
 use 'checker_blocks.dewy'
 use 'checker_assigns.dewy'
@@ -81,16 +82,6 @@ use 'ffi.jo'
 use 'floats.jo'
 use 'node_store.dewy'
 use 'ownership_types.dewy'
-
-enum SK: none_, local, global, fns, struct_, enum_, const_, module, type_, builtin, alias_, reflected
-
-struct Sym:
-    name: i32
-    kind: SK
-    ref: i32
-    decl: i32
-    next: i32
-    surface: i32 = 0   # a library function seen only from Dewy (1) or only from Sloppy (2): dewy_surface
 
 struct Module:
     name: i32
@@ -1780,6 +1771,7 @@ const_view_declare = (l: int, init: int):
     loop (nodes[e].kind == .field or nodes[e].kind == .index) and nodes[e].a != 0: e = int(nodes[e].a)
     if nodes[e].kind != .ident or nodes[e].aux != i32(int(SK.local)): return
     const_views.push(ConstView(l, place_owner(int(nodes[e].sym)), loop_serials.len(), []))
+    statement_watch.const_views = const_views.len()
 
 const_view_write = (r: int, pos: int):
     loop i in [0..const_views.len()):

@@ -99,6 +99,18 @@ FnInstanceKey:type=[
     args:array<int64>=[]
 ]
 
+# A name's binding: its kind and the arena entry it refers to (check.jo `syms`).
+SK:type='none_' | 'local' | 'global' | 'fns' | 'struct_' | 'enum_' | 'const_' | 'module' | 'type_' | 'builtin' | 'alias_' | 'reflected'
+
+Sym:type=[
+    name:int32=0
+    kind:SK='none_'
+    ref:int32=0
+    decl:int32=0
+    next:int32=0
+    surface:int32=0 # a library function seen only from Dewy (1) or only from Sloppy (2): dewy_surface
+]
+
 FnCtx:type=[
     inst:int32=0
     parent:int32=0
@@ -145,6 +157,8 @@ StatementWatch:type=[
     text_domains:int64=0
     temperature_writes:int64=0
     expectations:int64=0 # `$expect` tests
+    const_views:int64=0
+    decimal_globals:int64=0
 ]
 
 # An optional filled in place by a statement of a block (expr.jo opt_fill_*).

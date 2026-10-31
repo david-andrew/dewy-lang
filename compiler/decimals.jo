@@ -302,7 +302,9 @@ decimal_local = (l: int, pos: int, t: int):
     else if decimal_adapted.len() > 0 and decimal_adapted.has(pos): decimal_adapted_locals[l] = pos
 
 decimal_global = (g: int, pos: int, t: int):
-    if bundled_rational_type(t) and dewy_at(pos) and decimal_global_inits.has(g): decimal_globals[g] = pos
+    if bundled_rational_type(t) and dewy_at(pos) and decimal_global_inits.has(g):
+        decimal_globals[g] = pos
+        statement_watch.decimal_globals = decimal_globals.len()
 
 # a use of a decimal global while it is exact: who would check again if it became float
 decimal_use = (g: int):

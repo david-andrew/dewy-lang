@@ -1,0 +1,211 @@
+$runtime_checks
+from p"node_store.dewy" import Node
+from p"checker_state.dewy" import (FnCtx CheckerScope Sym SK StatementWatch)
+from p"checker_literals.dewy" import (xl_expected xl_finish xl_check_int xl_check_str xl_check_scalar)
+from p"checker_idents.dewy" import xj_ident
+from p"checker_conditionals.dewy" import (xf_if xf_iflet)
+from p"checker_receivers.dewy" import (xs_field xs_index)
+from p"checker_variants.dewy" import xv_check
+from p"checker_type_apply.dewy" import xa_check
+from p"checker_unary.dewy" import xu_check
+from p"checker_logic.dewy" import xg_check
+from p"checker_type_tests.dewy" import xi_check
+from p"checker_optional.dewy" import xo_check
+from p"checker_aggregates.dewy" import xr_check
+from p"checker_collections.dewy" import xk_check
+from p"checker_cast.dewy" import xc_check
+from p"checker_places.dewy" import xp_check
+# The expression dispatcher: an already checked node, then each kind sent to its
+# leaf. A name is looked up here (the scope stack, then the module lookup cache);
+# only a cache miss asks the host. Binary operators, calls, a few rare kinds and
+# literal preparation (grouped values, spreads, union members) are host services.
+# Jo callers call `check_expr` directly; leaves below this one in the import order
+# reach it through their host records. O(1) per node plus its kind's checking; host
+# calls may grow every arena, so nodes are reread by ID.
+XEWord:type=int64<overflow='wrap'>
+CheckerExprHost:type=[
+    complete:<():>void>
+    unknown:<(node:int64 expected:int64 name:int64):>void>
+    module:<(module:int64 name:int64):>int64>
+    temperature:<(node:int64 type_id:int64):>int64>
+    values_use:<(node:int64 type_id:int64):>void>
+    binary:<(node:int64 expected:int64):>int64>
+    call:<(node:int64 expected:int64):>int64>
+    sibling:<(node:int64 type_id:int64):>int64>
+    literal:<(node:int64 expected:int64 ex:int64):>int64>
+    other:<(node:int64 expected:int64):>int64>
+]
+CheckerExprInput:type=[
+    nodes:ptr<array<Node>>
+    syms:ptr<array<Sym>>
+    scopes:ptr<CheckerScope>
+    contexts:ptr<array<FnCtx>>
+    context:ptr<int64>
+    ml_at:ptr<array<int64>>
+    ml_mod:ptr<array<int64>>
+    ml_sym:ptr<array<int64>>
+    ml_tick:ptr<array<int64>>
+    ml_struct:ptr<int64>
+    sentinel:ptr<int64>
+    temperature:ptr<bool>
+    values:ptr<bool>
+    watch:ptr<StatementWatch>
+    last:ptr<int64>
+    host:ptr<CheckerExprHost>
+]
+let xe_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let xe_syms:ptr<array<Sym>>=$unsafe (uint64(0) as ptr<array<Sym>>)
+let xe_scopes:ptr<CheckerScope>=$unsafe (uint64(0) as ptr<CheckerScope>)
+let xe_contexts:ptr<array<FnCtx>>=$unsafe (uint64(0) as ptr<array<FnCtx>>)
+let xe_context:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xe_ml_at:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+let xe_ml_mod:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+let xe_ml_sym:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+let xe_ml_tick:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+let xe_ml_struct:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xe_sentinel:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xe_temperature:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+let xe_values:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
+let xe_watch:ptr<StatementWatch>=$unsafe (uint64(0) as ptr<StatementWatch>)
+let xe_last:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xe_host:ptr<CheckerExprHost>=$unsafe (uint64(0) as ptr<CheckerExprHost>)
+checker_expr_bind=(input:ptr<CheckerExprInput>):>XEWord=>$unsafe {
+    xe_nodes=input[0].nodes
+    xe_syms=input[0].syms
+    xe_scopes=input[0].scopes
+    xe_contexts=input[0].contexts
+    xe_context=input[0].context
+    xe_ml_at=input[0].ml_at
+    xe_ml_mod=input[0].ml_mod
+    xe_ml_sym=input[0].ml_sym
+    xe_ml_tick=input[0].ml_tick
+    xe_ml_struct=input[0].ml_struct
+    xe_sentinel=input[0].sentinel
+    xe_temperature=input[0].temperature
+    xe_values=input[0].values
+    xe_watch=input[0].watch
+    xe_last=input[0].last
+    xe_host=input[0].host
+    0
+}
+# A name bound in the module (not a scope above the function's floor): the lookup
+# cache's entry while its stamp for the name holds, else the host's lookup.
+xe_module=(name:XEWord):>XEWord=>$unsafe {
+    let c=xe_context[0]
+    let m:XEWord=if c >=? 0 {XEWord(xe_contexts[0].ptr[c].mod)} else {-1}
+    if name <? xe_ml_at[0].length {
+        let stamp=if name <? xe_ml_tick[0].length and xe_ml_tick[0].ptr[name] >? xe_ml_struct[0] {xe_ml_tick[0].ptr[name]} else {xe_ml_struct[0]}
+        if xe_ml_at[0].ptr[name] =? stamp and xe_ml_mod[0].ptr[name] =? m {return xe_ml_sym[0].ptr[name]}
+    }
+    xe_host[0].module(m name)
+}
+# Frozen SK ordinals past `local`, the ABI checker_idents.dewy reads.
+xe_kind=(k:SK):>XEWord=>{
+    if k =? 'global' {return 2}
+    if k =? 'fns' {return 3}
+    if k =? 'struct_' {return 4}
+    if k =? 'enum_' {return 5}
+    if k =? 'const_' {return 6}
+    if k =? 'module' {return 7}
+    if k =? 'type_' {return 8}
+    if k =? 'builtin' {return 9}
+    if k =? 'alias_' {return 10}
+    if k =? 'reflected' {return 11}
+    0
+}
+# Cold host requests kept out of the name path's frame.
+xe_complete=():>void=>$unsafe {xe_host[0].complete()}
+xe_unknown=(n:XEWord expected:XEWord name:XEWord):>void=>$unsafe {xe_host[0].unknown(n expected name)}
+# A name read after its leaf: a temperature difference, then several values.
+xe_read=(n:XEWord t:XEWord):>XEWord=>$unsafe {
+    let it=t
+    if xe_temperature[0] {it=xe_host[0].temperature(n it)}
+    if xe_values[0] {xe_host[0].values_use(n it)}
+    it
+}
+# A name read as a value: its scope binding above the current function's floor, else
+# the module's; the identifier leaf reads the binding.
+xe_ident=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
+    let nm=XEWord(xe_nodes[0].ptr[n].name)
+    if xe_sentinel[0] not=? 0 and nm =? xe_sentinel[0] {xe_complete()}
+    let c=xe_context[0]
+    let floor:XEWord=if c >=? 0 {XEWord(xe_contexts[0].ptr[c].floor)} else {0}
+    let s:XEWord=0
+    let i:XEWord=if nm <? xe_scopes[0].top.length {xe_scopes[0].top.ptr[nm]} else {-1}
+    if i >=? floor {s=xe_scopes[0].syms.ptr[i]} else {s=xe_module(nm)}
+    if s =? 0 {xe_unknown(n expected nm)}
+    let flags:XEWord=if xe_watch[0].const_views >? 0 {1} else {0}
+    if xe_watch[0].decimal_globals >? 0 {flags=flags | 2}
+    let sym=xe_syms[0].ptr + s
+    let sk=sym[0].kind
+    let kind:XEWord=if sk =? 'local' {1} else {xe_kind(sk)}
+    let t=xj_ident(n expected kind XEWord(sym[0].ref) s flags).type
+    if xe_temperature[0] or xe_values[0] {return xe_read(n t)}
+    t
+}
+# Kinds below the commonest: literals, operators, conversions and aggregates in their
+# leaves; lambdas, blocks, matches, ranges and the other rare kinds on the host.
+xe_other=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
+    let k=xe_nodes[0].ptr[n].kind
+    if k =? 'float_lit' or k =? 'bool_lit' or k =? 'none_lit' or k =? 'null_lit' {return xl_check_scalar(n expected)}
+    let ex=xl_expected(expected)
+    if k =? 'array' or (ex not=? 0 and (k =? 'map_lit' or k =? 'record_lit' or k =? 'tuple')) {ex=xe_host[0].literal(n expected ex)}
+    let t:XEWord=0
+    if k =? 'dotname' {t=xv_check(n ex)}
+    else if k =? 'typeapply' {
+        let r=xa_check(n expected ex)
+        if r.bypass {return r.type}
+        t=r.type
+    } else if k =? 'unary' {
+        let r=xu_check(n expected ex)
+        if r.bypass {return r.type}
+        t=r.type
+    } else if k =? 'and_' or k =? 'or_' or k =? 'not_' {
+        let r=xg_check(n expected ex)
+        if r.bypass {return r.type}
+        t=r.type
+    } else if k =? 'istype' {t=xi_check(n)}
+    else if k =? 'coalesce' or k =? 'unwrap' {
+        let r=xo_check(n expected ex)
+        if r.bypass {return r.type}
+        t=r.type
+    } else if k =? 'array' or k =? 'record_lit' {
+        let r=xr_check(n expected ex)
+        if r.bypass {return r.type}
+        t=r.type
+    } else if k =? 'map_lit' or k =? 'tuple' {
+        let r=xk_check(n expected ex)
+        if r.bypass {return r.type}
+        t=r.type
+    } else if k =? 'iflet' {t=xf_iflet(n ex)}
+    else if k =? 'cast' {
+        let r=xc_check(n expected)
+        if r.bypass {return r.type}
+        t=r.type
+    } else if k =? 'addr' or k =? 'conv' or k =? 'fnref' or k =? 'parallel_region' or k =? 'hole' or k =? 'namedarg' {t=xp_check(n expected)}
+    else {return xe_host[0].other(n expected)}
+    xl_finish(n t expected)
+}
+# Host records and Jo callers take machine words: the ABI of `(int, int) -> int`.
+check_expr=(n0:int64 expected0:int64):>int64=>$unsafe {
+    let n=XEWord(n0)
+    let expected=XEWord(expected0)
+    xe_last[0]=n
+    let node=xe_nodes[0].ptr + n
+    # NF_CHECKED 128: a node checked before keeps its type.
+    if node[0].type not=? 0 and XEWord(node[0].flags) & 128 not=? 0 {return XEWord(node[0].type)}
+    let k=node[0].kind
+    if k =? 'ident' {return xe_ident(n expected)}
+    if k =? 'int_lit' {return xl_check_int(n expected)}
+    if k =? 'binary' {return xl_finish(n xe_host[0].binary(n expected) expected)}
+    if k =? 'call' {return xe_host[0].call(n expected)}
+    if k =? 'field' {return xs_field(n expected)}
+    if k =? 'if_' {return xl_finish(n xf_if(n xl_expected(expected)) expected)}
+    if k =? 'index' {
+        let it=xs_index(n expected)
+        if xe_watch[0].sibling_known not=? 0 {return xe_host[0].sibling(n it)}
+        return it
+    }
+    if k =? 'str_lit' {return xl_check_str(n expected)}
+    xe_other(n expected)
+}

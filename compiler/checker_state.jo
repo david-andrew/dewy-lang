@@ -92,6 +92,17 @@ struct FnInstanceKey:
     decl: int
     args: int[]
 
+enum SK:
+    none_, local, global, fns, struct_, enum_, const_, module, type_, builtin, alias_, reflected
+
+struct Sym:
+    name: i32
+    kind: SK
+    ref: i32
+    decl: i32
+    next: i32
+    surface: i32
+
 struct FnCtx:
     inst: i32
     parent: i32
@@ -129,6 +140,8 @@ struct StatementWatch:
     text_domains: int
     temperature_writes: int
     expectations: int
+    const_views: int
+    decimal_globals: int
 
 struct OptFill:
     subject: i32
