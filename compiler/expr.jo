@@ -1,5 +1,6 @@
 use 'checker_exact.dewy'
 use 'checker_expr.dewy'
+use 'checker_intrinsics.dewy'
 use 'checker_receivers.dewy'
 use 'checker_range_values.dewy'
 use 'checker_numeric.dewy'
@@ -4388,7 +4389,7 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
                     if not decl_in_prelude(d) and args_fit(d, args.len()) and takes_seq(d): own.push(d)
             if own.len() > 0: return resolve_fn_call(n, name, own, args, expected)
             if ide_on: ide_builtin_ref(n, name)
-            return check_intrinsic(n, intrinsics[ii].id, args, expected)
+            return check_intrinsic(n, int(intrinsics[ii].id), args, expected)
         if types[t0].kind == .fixed:
             if intrinsics[ii].id == .arrdata: fatal(nodes[n].pos, "data() is for a growable array T[]; a fixed-size one is stored in place: `&x` is where its first element is (what C wants)")
             if intrinsics[ii].id != .len:
@@ -4397,7 +4398,7 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
                 fatal(nodes[n].pos, jd(nodes[n].pos, "{name_of(name)}() needs a growable array T[]; {dt(t0)} has a fixed size", "`.{name_of(member)}` needs a growable array (`array<T>`); {dt(t0)} has a fixed length"))
             # Calls and indexed receivers still evaluate, even though the
             # resulting length is statically known.
-            if nodes[a0].kind != .ident: return check_intrinsic(n, .len, args, expected)
+            if nodes[a0].kind != .ident: return check_intrinsic(n, int(IN.len), args, expected)
             # (the size is part of the type)
             nodes[n] = Node(kind = .int_lit, pos = nodes[n].pos, ival = fixed_len(t0), type = i32(T_INT), flags = i32(NF_CHECKED))
             return T_INT
@@ -4457,7 +4458,7 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
                 collect_fns(name, decls)
                 if decls.len() == 0:
                     if ide_on: ide_builtin_ref(n, name)
-                    return check_intrinsic(n, int(syms[s].ref) as IN, args, expected)
+                    return check_intrinsic(n, int(syms[s].ref), args, expected)
     surface_hidden.clear()
     if ufcs:
         if mod_scope >= 0: collect_module(mod_scope, name, decls)
@@ -4496,7 +4497,7 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
     if decls.len() == 0:
         if ii >= 0 and not intrinsics[ii].arr:
             if ide_on: ide_builtin_ref(n, name)
-            return check_intrinsic(n, intrinsics[ii].id, args, expected)
+            return check_intrinsic(n, int(intrinsics[ii].id), args, expected)
         if ii >= 0 and intrinsics[ii].arr and args.len() > 0: fatal(nodes[n].pos, "'{name_of(name)}' expects an array or string, found {dt(ntype(args[0]))}")
         if ufcs:
             t0 = prune(ntype(args[0]))
@@ -6403,17 +6404,19 @@ is_value_collection_type = (t: int) -> bool:
     d = int(structs[st].decl)
     d != 0 and files[pos_file(nodes[d].pos)].path == lib_dir + "/core/map.jo"
 
-check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
+# The intrinsics checker_intrinsics.dewy leaves to the host: every one but len, cap, push,
+# pop and clear.
+intrinsic_rest = (n: int, iid: int, args0: int[], expected: int) -> int:
+    let id = iid as IN
     if id == .range_max:
-        t = representation_type(check_expr(args[0], 0))
+        t = representation_type(check_expr(args0[0], 0))
         bits = int(types[t].bits)
         value = if bits == 64: -1 else: (1 << bits) - 1
         if types[t].sign: value = int(u64(value) >> 1)
         nodes[n] = Node(kind = .int_lit, pos = nodes[n].pos, type = i32(t), ival = value, flags = i32(NF_CHECKED))
         if not types[t].sign and value < 0: add_flag(n, NF_U64)
         return t
-    let args = args
-    let id = id
+    let args = args0
     # `__permutable_data(xs)`: data() for code that only moves elements between slots (the
     # library's swap and reorderings), so an element's refinement holds without a proof per
     # element: refined storage is not refused
@@ -6550,32 +6553,6 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         if types[t].kind != .array: fatal(nodes[n].pos, "`loop item in @items` iterates a growable array or a bound iterator live, not {dt(t)}; iterate its value with `loop item in items`")
         nodes[n].aux = i32(int(IN.len))
         r = T_INT
-    else if id == .len or id == .arrcap:
-        nargs_check(n, nargs, 1, 1, "len")
-        t = arg_type(args, 0, 0)
-        if is_soa(t): return check_soa_method(n, args[0], ci(17, "len"), [], expected)
-        if id == .len and types[t].kind == .str_ and files[pos_file(nodes[n].pos)].is_dewy:
-            add_flag(args[0], NF_CHECKED)
-            nodes[n] = nodes[bc_call("__dewy_string_length", args, nodes[n].pos)]
-            return check_expr(n, expected)
-        if types[t].kind != .array and types[t].kind != .str_ and not (id == .len and types[t].kind == .fixed): fatal(nodes[n].pos, "len() expects an array or string, found {dt(t)}")
-        r = T_INT
-    else if id == .push:
-        # (xs.push(1, 2, 3): JavaScript's push of several)
-        if nargs > 2: fatal(nodes[n].pos, "push adds one value: for several, {jd(nodes[n].pos, "`xs.extend([1, 2, 3])`", "`xs.extend([1 2 3])`")}")
-        nargs_check(n, nargs, 2, 2, "push")
-        t = arg_type(args, 0, 0)
-        if types[t].kind != .array: fatal(nodes[n].pos, "push() needs an array, found {dt(t)}")
-        if value_loops.len() > 0: value_loop_resize(args[0], "push", nodes[n].pos)
-        check_place(args[0], false)
-        arg_type(args, 1, int(types[t].elem))
-    else if id == .pop:
-        nargs_check(n, nargs, 1, 1, "pop")
-        t = arg_type(args, 0, 0)
-        if types[t].kind != .array: fatal(nodes[n].pos, "pop() needs an array")
-        if value_loops.len() > 0: value_loop_resize(args[0], "pop", nodes[n].pos)
-        check_place(args[0], false)
-        r = int(types[t].elem)
     else if id == .insert:
         nargs_check(n, nargs, 3, 3, "insert")
         t = arg_type(args, 0, 0)
@@ -6595,14 +6572,6 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         arg_type(args, 1, T_INT)
         coerce_hint = ""
         r = int(types[t].elem)
-    else if id == .clear:
-        nargs_check(n, nargs, 1, 1, "clear")
-        t = arg_type(args, 0, 0)
-        if types[t].kind != .array:
-            if types[t].kind == .str_ or is_int(t): fatal(nodes[n].pos, "clear() of the screen takes a color: `clear(rgb(1, 0, 0))`, or from hex digits `clear(hex(\"#ff0000\"))`")
-            fatal(nodes[n].pos, "clear() needs an array")
-        if value_loops.len() > 0: value_loop_resize(args[0], "clear", nodes[n].pos)
-        check_place(args[0], false)
     else if id == .extend:
         nargs_check(n, nargs, 2, 2, "extend")
         t = arg_type(args, 0, 0)
@@ -6920,7 +6889,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
             plain = nodes.len()
             nodes.push(nodes[n])
             fmt_plain[plain] = true
-            pt = check_intrinsic(plain, .fmt_struct, args, 0)
+            pt = check_intrinsic(plain, int(IN.fmt_struct), args, 0)
             if nodes[plain].type == 0: nodes[plain].type = i32(pt)
             add_flag(plain, NF_CHECKED)
             inner = mk(.call, pos)
@@ -7125,7 +7094,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         if is_union(t):
             nodes[n].aux = i32(int(IN.fmt_struct))
             nodes[n].aux2 = 1
-            return check_intrinsic(n, .fmt_struct, args, expected)
+            return check_intrinsic(n, int(IN.fmt_struct), args, expected)
         # (a Dewy object with its own text, `__as__` to string, as a rational in a matrix: that text)
         if tkind(t) == .struct_ and as_conversion(prune(t), T_STR) != 0:
             nodes[n] = nodes[bc_call("__dewy_fmt_elem", args, nodes[n].pos)]
@@ -7171,7 +7140,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
             nodes[n].aux = i32(int(IN.fmt_struct))
             nodes[n].aux2 = i32(FMT_DEWY)
             if elem: nodes[n].aux2 = i32(FMT_DEWY | 1)
-            return check_intrinsic(n, .fmt_struct, args, expected)
+            return check_intrinsic(n, int(IN.fmt_struct), args, expected)
         # (inside a structure, a container as it is on its own: a call, which copies a
         # fixed-size array into the T[] the library's overload takes)
         writer = "__fmt"
@@ -10181,6 +10150,26 @@ index_binding = checker_indexes_bind(&index_input)
 receiver_host = CheckerReceiverHost(check_expr, field_juxt, field_reflect_name, reflect_member, field_private, field_soa_alias, field_soa_index, dewy_bracket_call, index_end, is_dewy_set_type, index_ranges, index_stepped, index_text, receiver_error)
 receiver_input = CheckerReceiverInput(&nodes, &types, &structs, &names, &files, &ide_on, &reflect_active, &callee_at, &soa_aliases, &last_checked, &values_index_base, &type_receiver_at, &empty_index_receiver, &receiver_host)
 receiver_binding = checker_receivers_bind(&receiver_input)
+# checker_intrinsics.dewy's services: diagnostics, and the lengths that are calls
+# (an soa value's, Dewy text's grapheme count).
+intrinsic_error = (n: int, code: int, t: int):
+    if code == 1: fatal(nodes[n].pos, "len() expects an array or string, found {dt(t)}")
+    # (xs.push(1, 2, 3): JavaScript's push of several)
+    if code == 2: fatal(nodes[n].pos, "push adds one value: for several, {jd(nodes[n].pos, "`xs.extend([1, 2, 3])`", "`xs.extend([1 2 3])`")}")
+    if code == 3: fatal(nodes[n].pos, "push() needs an array, found {dt(t)}")
+    if code == 4: fatal(nodes[n].pos, "pop() needs an array")
+    if code == 5:
+        if types[t].kind == .str_ or is_int(t): fatal(nodes[n].pos, "clear() of the screen takes a color: `clear(rgb(1, 0, 0))`, or from hex digits `clear(hex(\"#ff0000\"))`")
+        fatal(nodes[n].pos, "clear() needs an array")
+    fatal(nodes[n].pos, "named arguments are not supported here")
+intrinsic_length = (n: int, a: int, t: int, expected: int) -> int:
+    if is_soa(t): return check_soa_method(n, a, ci(17, "len"), [], expected)
+    add_flag(a, NF_CHECKED)
+    nodes[n] = nodes[bc_call("__dewy_string_length", [a], nodes[n].pos)]
+    check_expr(n, expected)
+intrinsic_host = CheckerIntrinsicHost(intrinsic_rest, nargs_check, intrinsic_error, coerce, intrinsic_length, value_loop_resize, check_place, ref_length_mutation)
+intrinsic_input = CheckerIntrinsicInput(&nodes, &lists, &types, &structs, &files, &value_loops, &refine_active, &T_VOID, &T_INT, &intrinsic_host)
+intrinsic_binding = checker_intrinsics_bind(&intrinsic_input)
 
 # checker_expr.dewy's services: literal preparation (grouped values, spreads, the
 # optional's element, a literal union's member, total dictionaries) and the kinds that

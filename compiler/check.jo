@@ -4,6 +4,7 @@ use 'checker_blocks.dewy'
 use 'checker_assigns.dewy'
 use 'checker_vardecls.dewy'
 use 'checker_for_loops.dewy'
+use 'checker_intrinsics.dewy'
 use 'checker_statements.dewy'
 use 'checker_exprstmts.dewy'
 use 'checker_returns.dewy'
@@ -5485,7 +5486,7 @@ unpack_count_error = (e: int, t: int, count: int, rest: bool, pos: int):
 # (the length of captured array src, a fresh read)
 unpack_length = (src: int, pos: int) -> int:
     length = mk(.call, pos)
-    check_intrinsic(length, .len, [mk_ident_local(int(nodes[src].sym), pos)], 0)
+    check_intrinsic(length, int(IN.len), [mk_ident_local(int(nodes[src].sym), pos)], 0)
     add_flag(length, NF_CHECKED)
     length
 
@@ -5537,7 +5538,7 @@ unpack_values = (e: int, t: int, bindings: int[], pos: int, statements: mut int[
         statements.push(unpack_length_check(mk_ident_local(int(nodes[source].sym), pos), count, r < 0, pos, "unpacking requires {exactly} {count} {elements}"))
     if is_map:
         length = mk(.call, pos)
-        check_intrinsic(length, .len, [bc_map_keys(source, pos)], 0)
+        check_intrinsic(length, int(IN.len), [bc_map_keys(source, pos)], 0)
         add_flag(length, NF_CHECKED)
         wanted = mk(.int_lit, pos)
         nodes[wanted].ival = count
@@ -5547,7 +5548,7 @@ unpack_values = (e: int, t: int, bindings: int[], pos: int, statements: mut int[
         nodes[equal].b = i32(wanted)
         message = synth_str("unpacking requires {exactly} {count} {elements}", pos)
         guard = mk(.call, pos)
-        check_intrinsic(guard, .assert, [equal, message], 0)
+        check_intrinsic(guard, int(IN.assert), [equal, message], 0)
         statement = mk(.exprstmt, pos)
         nodes[statement].a = i32(guard)
         statements.push(statement)
@@ -5570,7 +5571,7 @@ unpack_values = (e: int, t: int, bindings: int[], pos: int, statements: mut int[
             index = 0
             if back > 0:
                 keys = mk(.call, pos)
-                check_intrinsic(keys, .len, [bc_map_keys(source, pos)], 0)
+                check_intrinsic(keys, int(IN.len), [bc_map_keys(source, pos)], 0)
                 add_flag(keys, NF_CHECKED)
                 index = unpack_minus(keys, back, nodes[binding].pos)
             else:
@@ -7023,7 +7024,7 @@ values_group = (n: int, ex: int) -> int:
 # one, as any obligation (no_traps.md).
 unpack_length_check = (src: int, k: int, exact: bool, pos: int, message: str) -> int:
     length = mk(.call, pos)
-    check_intrinsic(length, .len, [src], 0)
+    check_intrinsic(length, int(IN.len), [src], 0)
     add_flag(length, NF_CHECKED)
     count = mk(.int_lit, pos)
     nodes[count].ival = k
@@ -7033,7 +7034,7 @@ unpack_length_check = (src: int, k: int, exact: bool, pos: int, message: str) ->
     nodes[cmp].b = i32(count)
     guard = mk(.call, pos)
     nodes[guard].aux2 = i32(UNPACK_OBLIGATION)
-    check_intrinsic(guard, .assert, [cmp, synth_str(message, pos)], 0)
+    check_intrinsic(guard, int(IN.assert), [cmp, synth_str(message, pos)], 0)
     # (a runtime check until the facts prove it, as an index's: a body decided in another
     # process keeps it)
     fact_requests.push(FactRequest(guard, if cx >= 0: int(ctxs[cx].inst) else: 0))
