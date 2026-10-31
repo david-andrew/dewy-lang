@@ -1,0 +1,16 @@
+# Python's `sorted(range(n), key=lambda i: -rank[i])`: a key callback is
+# called with the receiver's elements, so it knows what they are.
+Score:type = [name:string points:int]
+f = (rank:array<float64> names:array<string>) => {
+    let n = rank.length
+    let order = [loop i in [0..n) i].sorted(key=(i) => -rank[i])
+    printl(order)
+    if names.length =? n and n >? 0 {
+        let first = [loop i in [0..n) i].min_by((i) => names[i])
+        printl(first)
+    }
+    let picks = [3 1 2]
+    let weights = [0.5 0.1 0.9 0.3 0.2]
+    printl(picks.sorted(key=(p) => weights[p]))
+}
+main = () => f([0.5 0.25 0.75] ["cho" "ana" "ben"])

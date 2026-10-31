@@ -1,0 +1,11 @@
+# An argmax helper returning a plain int: its result is not tied to xs.length
+# (an empty xs has no index), and the error points at the optional idiom.
+argmax = (xs:array<int>) :> int => {
+    let best = 0
+    loop i in [1..xs.length) { if xs[i] >? xs[best] best = i }
+    best
+}
+main = () => {
+    let xs = [3 9 2]
+    printl(xs[argmax(xs)])
+}

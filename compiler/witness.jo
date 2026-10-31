@@ -758,9 +758,34 @@ wit_index = (n: int, s: mut FactState, index: int, length: int, lo: int, hi: int
         wit_cause(fact_bound(s, length), n)
     wit_context(0)
     wit_help(relation)
+    if hi != 1: wit_position_help(n, (if index_node >= 0: index_node else: int(nodes[n].b)), a)
     which = if lo != 1 and hi != 1: "lower and upper bounds" else if lo != 1: "lower bound" else: "upper bound"
     if dir_defer(n, "cannot prove {read} is in bounds: missing {which}", true): return
     wit_fail(nodes[n].pos, "cannot prove {read} is in bounds: missing {which}")
+
+# (`xs[argmax(xs)]`, argmax returning a plain `int`: what its body proves
+# holds for every input, an empty xs among them, where no index is below the
+# length. The documented repair returns an optional position. O(arguments))
+wit_position_help = (n: int, index0: int, base0: int):
+    e = index0
+    loop e > 0 and (nodes[e].kind == .narrow or nodes[e].kind == .conv): e = int(nodes[e].a)
+    if e <= 0 or nodes[e].kind != .call or nodes[e].aux != 0 or nodes[e].sym <= 0 or not dewy_at(nodes[n].pos): return
+    f = int(nodes[e].sym)
+    d = int(fns[f].decl)
+    ret = prune(int(fns[f].ret))
+    if d == 0 or pos_in_lib(nodes[d].pos) or not is_int(ret) or tkind(ret) == .opt: return
+    base = base0
+    loop base > 0 and (nodes[base].kind == .addr or nodes[base].kind == .narrow or nodes[base].kind == .conv): base = int(nodes[base].a)
+    if base <= 0 or nodes[base].kind != .ident or nodes[base].aux != i32(int(SK.local)): return
+    param = ""
+    loop i in [0..nkids(e)):
+        c = kid(e, i)
+        loop nodes[c].kind == .addr or nodes[c].kind == .narrow or nodes[c].kind == .conv: c = int(nodes[c].a)
+        if nodes[c].kind == .ident and nodes[c].aux == i32(int(SK.local)) and nodes[c].sym == nodes[base].sym and i < fns[f].params.len(): param = name_of(int(locals[fns[f].params[i]].name))
+    if param == "": return
+    name = name_of(int(nodes[d].name))
+    array = wit_text(base)
+    err_notes.push((-1, "help: or have `{name}` return an optional position, `:>int?` with `if {param}.is_empty return none` first: a plain `int` result is not tied to `{array}.length` (an empty `{array}` has no index), while after `if p isnt? none` an optional one indexes `{array}` without a guard"))
 
 # `d[k]`, `d[k] += 1` or `d.pop(k)` where k may be missing (facts.jo fact_map_check).
 wit_key = (n: int):

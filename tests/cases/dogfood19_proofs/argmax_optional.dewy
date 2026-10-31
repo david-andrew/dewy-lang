@@ -1,0 +1,12 @@
+# The idiom the hint names: an optional position indexes its argument.
+argmax = (xs:array<int>) :> int? => {
+    if xs.is_empty return none
+    let best = 0
+    loop i in [1..xs.length) { if xs[i] >? xs[best] best = i }
+    best
+}
+main = () => {
+    let xs = [3 9 2]
+    let p = argmax(xs)
+    if p isnt? none printl(xs[p])
+}

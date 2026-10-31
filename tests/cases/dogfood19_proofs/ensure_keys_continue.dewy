@@ -1,0 +1,12 @@
+# Near miss: a continue skips the insertion for one element.
+main = () => {
+    let a = "ana"
+    let b = "ben"
+    let d:dict<string int> = []
+    loop name in [a b] {
+        if name =? "ben" continue
+        d[name] = 0
+    }
+    d[b] += 1
+    printl(d)
+}

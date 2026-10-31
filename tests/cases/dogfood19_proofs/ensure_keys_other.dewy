@@ -1,0 +1,9 @@
+# Near miss: only the iterated elements become keys.
+main = () => {
+    let a = "ana"
+    let b = "ben"
+    let d:dict<string int> = []
+    loop name in [a] { if name not in? d d[name] = 0 }
+    d[b] += 1
+    printl(d)
+}

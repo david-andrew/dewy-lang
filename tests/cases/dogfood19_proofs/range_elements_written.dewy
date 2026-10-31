@@ -1,0 +1,7 @@
+# Near miss: an element write drops what every element was.
+f = (names:array<string>) => {
+    let order = [loop i in [0..names.length) i]
+    if order.length >? 0 order[0] = names.length
+    loop i in order printl(names[i])
+}
+main = () => f(["a"])

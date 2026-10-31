@@ -1,0 +1,17 @@
+# A guard `i <? n` holds even when many lengths equal n: a convergence loop
+# that replaces an array and ends in break (dogfood 99's rank).
+main = () => {
+    let names:array<string> = []
+    loop w in "c a b".split(" ") names.push(w)
+    let n = names.length
+    let out = [loop _ in names 1]
+    let rank:array<float64> = [loop _ in names 1.0]
+    let rounds = 0
+    loop rounds <? 10 {
+        rounds += 1
+        let next:array<float64> = [loop _ in names 0.5]
+        rank = next
+        if rounds >? 3 break
+    }
+    loop i in [2 0] { if i <? n printl(rank[i] + float64(out[i])) }
+}

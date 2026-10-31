@@ -207,6 +207,10 @@ struct FactPushes:
     same: int[]
     same_base: int[]
     entry: FactState = FactState(live = false)
+    # (per local: a value every pushed integer is below, one evaluated before
+    # the loop, 0 before a push, -1 none: fact_push_below)
+    below: int[]
+    mark: int = 0
 
 fact_push_frames: FactPushes[]
 fact_comprehensions: {int: int} = {}   # a comprehension's loop -> its accumulator
@@ -237,6 +241,14 @@ struct FactForkEntry:
     length: bool[]
     bounds: FactBound[]
     rows: FactDifference[]
+    # (the creator's values of the captures, for fact_key_record)
+    values: int[]
+# A key callback's parameter (fact_key_record): the hull of the receiver's
+# elements, and rows to its fork entry's captures (a: -1 for the parameter).
+struct FactKeyParam:
+    bound: FactBound
+    rows: FactDifference[]
+fact_key_params: {int: FactKeyParam} = {}
 fact_fork_nodes: {int: bool} = {}
 fact_decided: {int: bool} = {}
 fact_policy_default = false    # RequireStatic is the no-traps default, not a harness's
@@ -276,6 +288,9 @@ const FACT_ELEMENT_SOURCE = -25
 const FACT_KEYS_POSITIONS = -26
 # Every element of this array of rows has this one length.
 const FACT_ELEMENT_SAME_LENGTH = -27
+# Every element of this integer array is below this value (`[loop i in
+# [0..n) i]`'s are below n). Built by recorded pushes; an element write drops it.
+const FACT_ELEMENT_BELOW = -28
 fact_name_vals = 0
 
 # A runtime-child walk, never into nested function bodies. Closed calls
@@ -856,6 +871,8 @@ fact_project = (s: mut FactState, base: int, selector: int, element: bool, t: in
         if hull >= 0:
             b = fact_bound(s, v); h = fact_bound(s, s.projections[hull].value)
             fact_set_bound(s, v, FactBound(max(b.lo, h.lo), min(b.hi, h.hi), b.nz or h.nz))
+        below = fact_projection_find(s, base, FACT_ELEMENT_BELOW, false)
+        if below >= 0: fact_difference(s, v, s.projections[below].value, -1, 0, 16)
     if element and tkind(fact_type(t)) == .array:
         source = fact_projection_find(s, base, FACT_ROW_SOURCE, false)
         if source >= 0 and s.projections.len() + 2 < FACT_CAP:
@@ -1389,7 +1406,7 @@ fact_replace = (s: mut FactState, base: int, selector: int, element: bool, value
     loop pi >= 0:
         p = old[pi]
         pi = fact_projection_next_in(old, links, pi)
-        if element and not p.element and (p.selector == FACT_ELEMENT_LENGTH or p.selector == FACT_ELEMENT_VALUE or p.selector == FACT_ELEMENT_COPY or p.selector == FACT_ELEMENT_SOURCE or p.selector == FACT_KEYS_SOURCE or p.selector == FACT_KEYS_POSITIONS or p.selector == FACT_ELEMENT_SAME_LENGTH):
+        if element and not p.element and (p.selector == FACT_ELEMENT_LENGTH or p.selector == FACT_ELEMENT_VALUE or p.selector == FACT_ELEMENT_COPY or p.selector == FACT_ELEMENT_SOURCE or p.selector == FACT_KEYS_SOURCE or p.selector == FACT_KEYS_POSITIONS or p.selector == FACT_ELEMENT_SAME_LENGTH or p.selector == FACT_ELEMENT_BELOW):
             if p.selector == FACT_ELEMENT_COPY: fact_fill_remainder(s, base, v, selector, p.value)
             # (a row stored back with the one length every row has, as
             # `grid[y][x] = v` does, keeps that length for all of them)
@@ -3145,7 +3162,8 @@ fact_assume = (s: mut FactState, v: int, truth: bool):
         # `MAX <? n` holds for n above int64. Past a real one the edge is dead.
         x_open = x.lo == FACT_MIN and fact_open_endpoint(s, a, false)
         y_open = y.hi == FACT_MAX and fact_open_endpoint(s, b, true)
-        fact_difference(s, a, b, -d, t.origin)
+        # (a guard's own relation, written by the program: the wider cap)
+        fact_difference(s, a, b, -d, t.origin, 16)
         if d == 1 and (y.hi == FACT_MIN and not x_open or x.lo == FACT_MAX and not y_open): s.live = false
         else:
             below = if y.hi == FACT_MIN: FACT_MIN else: y.hi - d
@@ -5691,7 +5709,90 @@ fact_map_of = (n: int, s: mut FactState) -> int:
         return result
     fact_add_projection(s, FactProjection(source, FACT_KEYS_SOURCE, false, result))
     fact_add_projection(s, FactProjection(source, FACT_KEYS_POSITIONS, false, fact_project(s, result, FACT_MAP_POSITIONS, false, T_INT)))
+    fact_literal_keys(s, int(nodes[loop_].a), result)
     result
+
+# The elements of an array literal `[a "b" r.name]` that every element of the
+# evaluated literal keys in map: each spelled element with a stable key
+# identity (fact_map_key) is a member, as `d[a]` names it. O(elements).
+fact_literal_keys = (s: mut FactState, e0: int, map: int):
+    e = e0
+    loop nodes[e].kind == .conv: e = int(nodes[e].a)
+    if nodes[e].kind != .array or nodes[e].aux != 0 or nodes[e].b != 0: return
+    loop i in [0..nkids(e)):
+        c = kid(e, i)
+        if has_flag(c, NF_SPREAD) or s.projections.len() >= FACT_CAP: continue
+        key = fact_map_key(s, c, 0)
+        if key != 0: fact_assume(s, fact_project(s, map, key, true, T_BOOL), true)
+
+# `loop x in xs { if x not in? d d[x] = v }` (or `d[x] = v`, or
+# `d.insert_if_absent(x v)`): after the loop every element of the evaluated
+# xs is a key of d. Each completed iteration ends with x a member of d (the
+# body's own backedge proves it, continue edges included), no break leaves
+# early, and the body only adds keys to d: the loop havoc (fact_changes) of
+# the body keeps a key d held. So xs's value names d's exit value as its key
+# snapshot (FACT_KEYS_SOURCE), and a literal's stable elements are members.
+# Candidates are found once per loop, O(body); each costs one membership
+# lookup and one havoc walk of the body on a copy of the exit state.
+fact_ensured_keys_cache: {int: (int, int)[]} = {}
+fact_ensured_keys = (n: int) -> (int, int)[]:
+    if let known = fact_ensured_keys_cache.get(n): return known
+    out: (int, int)[]
+    element = int(nodes[n].sym)
+    work = [int(nodes[n].b)]
+    loop element > 0 and work.len() > 0:
+        e = work.pop()
+        if e == 0: continue
+        k = nodes[e].kind
+        if k == .lambda: continue
+        if k == .call and nodes[e].aux == 0 and nkids(e) == 3 and (fact_map_store_call(e) or fact_map_insert_call(e)):
+            d = kid(e, 0)
+            loop nodes[d].kind == .addr or nodes[d].kind == .conv: d = int(nodes[d].a)
+            key = kid(e, 1)
+            loop nodes[key].kind == .conv or nodes[key].kind == .narrow: key = int(nodes[key].a)
+            if nodes[d].kind == .ident and nodes[d].aux == i32(int(SK.local)) and not has_flag(d, NF_GLOBAL) and nodes[key].kind == .ident and nodes[key].aux == i32(int(SK.local)) and int(nodes[key].sym) == element:
+                l = int(nodes[d].sym)
+                fresh = true
+                loop c in out:
+                    if c.0 == l: fresh = false
+                if l > 0 and fresh and locals[l].pos < nodes[n].pos and int(locals[l].flags) & (LF_CAPTURED | LF_SHARED | LF_BYREF | LF_ALIAS | LF_MUTPARAM | LF_EXPOSED) == 0: out.push((l, key))
+        mask = isolation_children(k)
+        if mask < 0: continue
+        if mask & 1 != 0: work.push(int(nodes[e].a))
+        if mask & 2 != 0: work.push(int(nodes[e].b))
+        if mask & 4 != 0: work.push(int(nodes[e].c))
+        if mask & 16 != 0:
+            loop i in [0..nkids(e)): work.push(kid(e, i))
+    fact_ensured_keys_cache[n] = out
+    out
+
+fact_ensured_close = (n: int, base: int, back: mut FactState, s: mut FactState):
+    loop c in fact_ensured_keys(n):
+        place = PlaceIdentity(.local, int(locals[c.0].owner), c.0)
+        bi = fact_binding(back, place)
+        if bi < 0 or fact_stable_key(c.1) <= 0: continue
+        key = fact_map_key(back, c.1, 0)
+        if fact_truth(back, fact_project(back, back.bindings[bi].value, key, true, T_BOOL)) != 1: continue
+        if not fact_keys_monotone(n, s, place): continue
+        si = fact_binding(s, place)
+        if si < 0 or s.projections.len() + 2 >= FACT_CAP: continue
+        map = s.bindings[si].value
+        if fact_name_vals == 0: fact_name_vals = intern("vals")
+        fact_project(s, map, FACT_MAP_POSITIONS, false, T_INT)
+        if fact_projection_find(s, base, FACT_KEYS_SOURCE, false) < 0: fact_add_projection(s, FactProjection(base, FACT_KEYS_SOURCE, false, map))
+        fact_literal_keys(s, int(nodes[n].a), map)
+
+# The loop's havoc of its body keeps every key d held: a marker key no
+# program names survives it. O(body) on a copy of s.
+fact_keys_monotone = (n: int, s: FactState, place: PlaceIdentity) -> bool:
+    probe = s
+    i = fact_binding(probe, place)
+    if i < 0: return false
+    marker = fact_constant(probe, 5 << 42)
+    fact_assume(probe, fact_project(probe, probe.bindings[i].value, marker, true, T_BOOL), true)
+    fact_changes(int(nodes[n].b), probe, n)
+    i = fact_binding(probe, place)
+    i >= 0 and fact_truth(probe, fact_project(probe, probe.bindings[i].value, marker, true, T_BOOL)) == 1
 
 fact_map_snapshot = (n: int, s: mut FactState, map: int) -> int:
     if ownership_decls.len() != 0 and ownership_fact_type(ntype(kid(n, 0))):
@@ -7160,7 +7261,14 @@ fact_push_open = (n: int, s: mut FactState, base: int = 0) -> bool:
             if same >= 0 and not frame.entry.live: frame.entry = s
         frame.same.push(same)
         frame.same_base.push(0)
+        below = -1
+        if not sized:
+            held = fact_projection_find(s, value, FACT_ELEMENT_BELOW, false)
+            if held >= 0: below = s.projections[held].value
+            else if not seen: below = 0
+        frame.below.push(below)
     if frame.locals.len() == 0: return false
+    frame.mark = fact_terms.len()
     fact_push_frames.push(frame)
     true
 
@@ -7187,6 +7295,17 @@ fact_push_invariant = (s: FactState, w: int, entry: FactState) -> (int, int):
     pi = fact_projection_origin(s, w)
     if pi >= 0 and s.projections[pi].selector == -1 and not s.projections[pi].element and fact_slot(entry, s.projections[pi].base) >= 0: return (0, s.projections[pi].base)
     (0, 0)
+
+# A value v is below that the loop's entry evaluated (its id precedes the
+# frame's mark, so it is one value at every iteration): `i <? hi` of the
+# range `[lo..hi)`. v's rows only, O(rows of v); -1 none.
+fact_push_below = (s: FactState, v: int, mark: int) -> int:
+    ri = fact_difference_head(s, v, 1)
+    loop ri >= 0:
+        row = s.differences[ri]
+        ri = fact_difference_next(s, ri, 1)
+        if row.b < mark and row.limit <= -1 and fact_slot(s, row.b) >= 0: return row.b
+    -1
 
 # The shared length in s (fact_push_same's pair), or 0.
 fact_push_same_value = (s: mut FactState, same: int, base: int) -> int:
@@ -7251,6 +7370,9 @@ fact_push_record = (n: int, s: mut FactState, value: int):
                     row = fact_project(s, fact_push_frames[f].rows, s.bindings[index].value, true, int(locals[int(nodes[loop_].sym)].type))
                     length = fact_project(s, row, -1, false, T_INT)
                     if fact_compare(s, .eq, v, length) != 1: fact_push_frames[f].matching = false
+            below = fact_push_frames[f].below[j]
+            if below == 0: fact_push_frames[f].below[j] = fact_push_below(s, v, fact_push_frames[f].mark)
+            else if below > 0 and fact_compare(s, .lt, v, below) != 1: fact_push_frames[f].below[j] = -1
             b = fact_bound(s, v)
             fact_push_frames[f].bounds[j] = if fact_push_frames[f].seen[j]: fact_hull(fact_push_frames[f].bounds[j], b, n) else: b
             fact_push_frames[f].seen[j] = true
@@ -7275,6 +7397,9 @@ fact_push_close = (n: int, s: mut FactState):
             prior = fact_projection_find(s, source, FACT_ROW_SOURCE, false)
             if prior >= 0: source = s.projections[prior].value
             fact_add_projection(s, FactProjection(s.bindings[i].value, FACT_ROW_SOURCE, false, source))
+        below = frame.below[j]
+        if i >= 0 and below > 0 and fact_slot(s, below) >= 0 and fact_projection_find(s, s.bindings[i].value, FACT_ELEMENT_BELOW, false) < 0 and s.projections.len() < FACT_CAP:
+            fact_add_projection(s, FactProjection(s.bindings[i].value, FACT_ELEMENT_BELOW, false, below))
         if b.wide: continue
         selector = if frame.lengths[j]: FACT_ELEMENT_LENGTH else: FACT_ELEMENT_VALUE
         if i < 0 or fact_projection_find(s, s.bindings[i].value, selector, false) >= 0: continue
@@ -7437,14 +7562,27 @@ fact_loop_index = (n: int, base: int, s: mut FactState):
 # A readonly iteration over a complete finite element inventory takes its
 # interval hull, never one selected element's facts. Demand-only, O(P), capped
 # by the ordinary projection budget. Mutations rebuild aggregate identities.
+# An element of a key snapshot (FACT_KEYS_SOURCE) is a key besides, and one
+# of an array whose elements are below a value is below it: inside the body
+# the source is not empty, so the bound value is one of its elements.
 fact_loop_elements = (n: int, base: int, s: mut FactState):
     l = int(nodes[n].sym)
     if nodes[n].aux != 1 or l <= 0 or base == 0: return
-    source = fact_projection_find(s, base, FACT_KEYS_SOURCE, false)
-    if source >= 0:
-        value = fact_keys_element(s, base, fact_fresh(s, int(locals[l].type)))
-        fact_bind(s, PlaceIdentity(.local, int(locals[l].owner), l), value)
+    place = PlaceIdentity(.local, int(locals[l].owner), l)
+    below = fact_projection_find(s, base, FACT_ELEMENT_BELOW, false)
+    if below < 0 and fact_projection_find(s, base, FACT_KEYS_SOURCE, false) < 0:
+        fact_loop_element(n, base, s)
         return
+    i = fact_binding(s, place)
+    before = if i >= 0: s.bindings[i].value else: 0
+    fact_loop_element(n, base, s)
+    i = fact_binding(s, place)
+    value = if i >= 0 and s.bindings[i].value != before: s.bindings[i].value else: fact_fresh(s, int(locals[l].type))
+    if below >= 0: fact_difference(s, value, s.projections[below].value, -1, n, 16)
+    fact_bind(s, place, fact_keys_element(s, base, value))
+
+fact_loop_element = (n: int, base: int, s: mut FactState):
+    l = int(nodes[n].sym)
     uniform = fact_projection_find(s, base, FACT_ELEMENT_COPY, false)
     if uniform >= 0:
         fact_bind(s, PlaceIdentity(.local, int(locals[l].owner), l), s.projections[uniform].value)
@@ -7491,7 +7629,7 @@ fact_permuted_elements = (s: mut FactState, before: int, after: int):
     if ownership_decls.len() != 0 and ownership_fact_type(telem(t)): return
     # (what holds of every element, as a comprehension's value hull, holds of
     # every element of the permutation: `[loop i in [0..n) i].sorted(key=f)`)
-    loop selector in [FACT_ELEMENT_VALUE, FACT_ELEMENT_LENGTH, FACT_ELEMENT_SAME_LENGTH]:
+    loop selector in [FACT_ELEMENT_VALUE, FACT_ELEMENT_LENGTH, FACT_ELEMENT_SAME_LENGTH, FACT_ELEMENT_BELOW]:
         held = fact_projection_find(s, before, selector, false)
         if held >= 0 and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(after, selector, false, s.projections[held].value))
     uniform = fact_projection_find(s, before, FACT_ELEMENT_COPY, false)
@@ -7860,6 +7998,12 @@ fact_slice_prepare = (f: int, summary: bool = false):
                 if fact_parallel_array(n):
                     values.push(n)
                     values.push(kid(n, 0))
+            if not summary and (fact_probe_on or fact_policy == .RequireStatic) and fact_key_callback(n) > 0:
+                arg = fact_key_callback(n)
+                fact_fork_nodes[arg] = true
+                forks.push(arg)
+                values.push(n)
+                values.push(kid(n, 0))
             if result_active or proof_active or fact_divisors.has(n) or fact_rational_constructor(n) or fact_rational_promotion(n) or fact_rational_divmod(n): values.push(n)
             else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and fact_string_call(n) >= 2: values.push(n)
             else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and fact_rational_zero_test(n) >= 0:
@@ -8118,6 +8262,7 @@ fact_fork_record = (lam: int, s: mut FactState):
         entry.length.push(array)
         values.push(v)
     loop v in values: entry.bounds.push(fact_bound(s, v))
+    entry.values = values
     loop i in [0..values.len()):
         loop j in [0..values.len()):
             if i == j: continue
@@ -8152,6 +8297,56 @@ fact_parallel_record = (n: int, s: mut FactState, base: int):
     if let previous = fact_parallel_bounds.get(f): bound = fact_hull(previous, bound, n)
     fact_parallel_bounds[f] = bound
 
+# `xs.sorted(key=(i) => -rank[i])`: the library's key callbacks (sorted,
+# sort, min_by, max_by, group_by and their _by spellings) are called with
+# elements of the evaluated receiver only. An inline integer callback owned
+# by the call starts from those elements' hull and their bound below a value
+# (FACT_ELEMENT_BELOW), related to its snapshot captures (fact_fork_record).
+# The literal lambda argument, or 0. O(1).
+fact_key_names: int[]
+fact_key_callback = (n: int) -> int:
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) < 2: return 0
+    d = int(fns[int(nodes[n].sym)].decl)
+    if d == 0 or not pos_in_lib(nodes[d].pos): return 0
+    if fact_key_names.len() == 0: fact_key_names = [intern("sorted"), intern("sorted_by"), intern("sort"), intern("sort_by"), intern("min_by"), intern("max_by"), intern("group_by")]
+    if int(nodes[d].name) not in fact_key_names: return 0
+    callback = kid(n, 1)
+    if nodes[callback].kind != .lambda or has_flag(callback, NF_GENERIC) or nodes[callback].sym <= 0: return 0
+    f = int(nodes[callback].sym)
+    if fns[f].params.len() != 1 or tkind(fact_type(ntype(kid(n, 0)))) != .array: return 0
+    t = fact_type(int(locals[fns[f].params[0]].type))
+    if not fact_scalar(t) or not is_int(t) or t == T_U64 or t != fact_type(telem(fact_type(ntype(kid(n, 0))))): return 0
+    callback
+
+# Each record describes this call's receiver; another evaluation of the call
+# hulls its bound and keeps only rows both give. O(captures).
+fact_key_record = (n: int, s: mut FactState, base: int):
+    if fact_speculating != 0 or fact_summary_owner != 0 or base == 0: return
+    lam = fact_key_callback(n)
+    f = int(nodes[lam].sym)
+    entry = fact_fork_entries.get(lam) ?? FactForkEntry()
+    t = fact_type(int(locals[fns[f].params[0]].type))
+    bound = fact_element_hull(s, base, t)
+    parts = fact_inventory(s, base)
+    if parts.len() > 0:
+        bound = fact_bound(s, parts[0])
+        loop i in [1..parts.len()): bound = fact_hull(bound, fact_bound(s, parts[i]), n)
+    rows: FactDifference[]
+    below = fact_projection_find(s, base, FACT_ELEMENT_BELOW, false)
+    if below >= 0:
+        top = s.projections[below].value
+        loop j in [0..entry.values.len()):
+            d = if entry.values[j] == top: 0 else: fact_shortest(s, top, entry.values[j])
+            if d != FACT_MAX and d > FACT_MIN + 1: rows.push(FactDifference(-1, j, d - 1))
+    if let previous = fact_key_params.get(f):
+        bound = fact_hull(previous.bound, bound, n)
+        kept: FactDifference[]
+        loop r in rows:
+            loop q in previous.rows:
+                if q.b == r.b: kept.push(FactDifference(-1, r.b, max(q.limit, r.limit)))
+        rows = kept
+    fact_key_params[f] = FactKeyParam(bound, rows)
+
 fact_fork_seed = (f: int, s: mut FactState):
     if fns[f].kind != FK_LAMBDA: return
     if let bound = fact_parallel_bounds.get(f):
@@ -8172,6 +8367,12 @@ fact_fork_seed = (f: int, s: mut FactState):
             fact_bind(s, p, array)
         else: fact_bind(s, p, v)
     loop r in entry.rows: fact_difference(s, values[r.a], values[r.b], r.limit)
+    if let key = fact_key_params.get(f):
+        l = fns[f].params[0]
+        value = fact_new(s, key.bound, FactTerm(type = int(locals[l].type)))
+        fact_bind(s, PlaceIdentity(.local, f, l), value)
+        loop r in key.rows:
+            if r.b >= 0 and r.b < values.len(): fact_difference(s, value, values[r.b], r.limit, 0, 16)
 
 # Both value-demanded and contract-only calls check actuals after their
 # effects, in the same source evaluation order and with the same entry.
@@ -8277,6 +8478,11 @@ fact_obligation_node = (n: int) -> bool:
                 if nodes[arg].kind == .lambda:
                     fact_panic_collect = false
                     if fact_obliged(int(nodes[arg].b)): return true
+        # (and so do a key callback's: fact_key_callback)
+        key = fact_key_callback(n)
+        if key > 0:
+            fact_panic_collect = false
+            if fact_obliged(int(nodes[key].b)): return true
         return false
     if k == .intrinsic:
         id = nodes[n].aux as IN
@@ -8648,7 +8854,12 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         fact_saving = fact_saved_boolean(int(nodes[n].b))
         r = if nodes[n].b != 0: fact_capture(int(nodes[n].b), s) else: fact_constant(s, 0, n)
         fact_saving = saving
-        if has_flag(n, NF_MAP_KEY): r = fact_map_key(s, int(nodes[n].b), r)
+        # (the key's identity, still a member of any snapshot it came from)
+        if has_flag(n, NF_MAP_KEY):
+            key = fact_map_key(s, int(nodes[n].b), r)
+            source = if key != r: fact_projection_find(s, r, FACT_KEY_SOURCE, false) else: -1
+            if source >= 0 and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(key, FACT_KEY_SOURCE, false, s.projections[source].value))
+            r = key
         if ownership_decls.len() != 0: r = fact_owner_value(int(nodes[n].b), r, s)
         l = int(nodes[n].sym)
         if nkids(n) > 0 and not has_flag(n, NF_GLOBAL):
@@ -8809,6 +9020,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         edges = fact_loop_body(n, body)
         # (an iterated header holds at every head, not inside the body: a break joins it)
         s = if iterated: fact_join(after, edges.exits, n) else: after
+        if indexed and nodes[n].aux == 1 and base != 0 and edges.back.live and not edges.exits.live: fact_ensured_close(n, base, edges.back, s)
         if hulls: fact_push_close(n, s)
         fact_growing_lengths(s, growers)
         if pushes.len() > 0 or scaled.len() > 0:
@@ -9186,6 +9398,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             made = fact_map_of(n, s)
             if made != 0: return made
         if fact_parallel_array(n): fact_parallel_record(n, s, values[0])
+        else if fact_fork_entries.len() > 0 and fact_key_callback(n) > 0: fact_key_record(n, s, values[0])
         if wi_fact_calls.len() > 0 and wi_fact_calls.has(n): wi_fact_check(n, values, s)
         if fact_speculating == 0:
             floor_probe = fact_probe_on and nkids(n) == 2 and (fact_floor_call(n) == 1 or fact_floor_call(n) == 2)
@@ -10113,6 +10326,7 @@ facts_reset = ():
     fact_fork_nodes = {}
     fact_fork_entries = {}
     fact_parallel_bounds = {}
+    fact_key_params = {}
     fact_decided = {}
     fact_deferred = {}
     fact_deferred_checks = {}

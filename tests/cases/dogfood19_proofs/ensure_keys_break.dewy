@@ -1,0 +1,12 @@
+# Near miss: a break can leave before the later names are added.
+main = () => {
+    let a = "ana"
+    let b = "ben"
+    let d:dict<string int> = []
+    loop name in [a b] {
+        if name not in? d d[name] = 0
+        if d.length >? 0 break
+    }
+    d[b] += 1
+    printl(d)
+}

@@ -1,0 +1,33 @@
+# Python's `for name in (white, black): ratings.setdefault(name, 1500)`:
+# after a loop that adds each missing element, every element is a key.
+Game:type = [white:string black:string]
+main = () => {
+    let games = [Game["ana" "ben"] Game["ben" "cho"]]
+    let ratings:dict<string int> = []
+    loop game in games {
+        loop name in [game.white game.black] { if name not in? ratings ratings[name] = 1500 }
+        ratings[game.white] += 16
+        ratings[game.black] -= 16
+    }
+    printl(ratings)
+    let a = "x"
+    let b = "y"
+    let seen:dict<string int> = []
+    loop name in [a b "z"] seen.insert_if_absent(name 0);
+    seen[a] += 1
+    seen["z"] += 3
+    printl(seen)
+    let codes = [a b]
+    let counts:dict<string int> = []
+    loop c in codes counts[c] = 0
+    loop c in codes counts[c] += c.length
+    printl(counts)
+    let zeros = [loop p in [a b] p -> 0]
+    printl(zeros[b])
+    let picks = [0 2]
+    let xs = [10 20 30]
+    let sums:dict<int int> = []
+    loop i in picks { if i not in? sums sums[i] = 0 }
+    loop i in picks sums[i] += xs[i]
+    printl(sums)
+}

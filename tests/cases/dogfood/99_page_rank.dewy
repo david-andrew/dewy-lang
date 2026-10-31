@@ -70,10 +70,8 @@ main = () => {
     }
 
     printl"converged after {rounds} rounds (total rank {sum(rank):.6f})"
-    let order = [loop i in [0..n) i].sorted(key=(i) => -(rank.get(i) ?? 0.0))
+    let order = [loop i in [0..n) i].sorted(key=(i) => -rank[i])
     loop place in 1.. and i in order {
-        # (sorting [0..n) keeps its elements' bounds, not their relation to n)
-        if i >=? n or i >=? rank.length or i >=? out.length continue
         let width = rank[i] * 100.0
         let bar = if 0.0 <=? width <=? 100.0 "#" * int(width) else "?"
         let inbound = sum([loop links in out if i in? links 1 else 0])

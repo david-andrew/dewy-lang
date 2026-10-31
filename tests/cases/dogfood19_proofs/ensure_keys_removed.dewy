@@ -1,0 +1,12 @@
+# Near miss: a later iteration removes a key an earlier one added.
+main = () => {
+    let a = "ana"
+    let b = "ben"
+    let d:dict<string int> = []
+    loop name in [a b] {
+        d[name] = 0
+        if name =? "ben" d.remove(a);
+    }
+    d[a] += 1
+    printl(d)
+}

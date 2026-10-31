@@ -57,9 +57,7 @@ main = () => {
             skipped.push(line)
             continue
         }
-        # (a loop over [game.white game.black] does not prove both keys)
-        players.insert_if_absent(game.white Player[]);
-        players.insert_if_absent(game.black Player[]);
+        loop name in [game.white game.black] { if name not in? players players[name] = Player[] }
         let rw = players[game.white].rating
         let rb = players[game.black].rating
         let ew = expected(rw rb)

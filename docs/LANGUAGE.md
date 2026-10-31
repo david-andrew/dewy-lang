@@ -722,7 +722,10 @@ values and negative floor rounding.
 A sorted copy has its input value's length and retains bounds shared by all
 known input elements, including record fields, or by every element (a
 comprehension's, `[loop i in [0..n) i].sorted(key=f)` holds numbers in `0..n-1`'s
-interval, though not their relation to `n`). Sorting or reversing in place
+interval, each below `n`). A key callback written in the call
+(`sorted`, `sort`, `min_by`, `max_by`, `group_by`) is given only the receiver's
+elements, so `[loop i in [0..n) i].sorted(key=(i) => -rank[i])` needs no guard
+when `rank.length` is `n`. Sorting or reversing in place
 retains those bounds for builtin values. Finite element inventories also retain
 scalar relations established for every entry, such as an index being below
 another array's length. A write to a known position in a short `fill` retains
@@ -778,6 +781,9 @@ the key array preserves this fact; replacing its elements or otherwise changing 
 dictionary can require a new membership guard. A dictionary built by a comprehension
 that makes one entry keyed by the loop's element on every iteration, `[loop p in people p -> 0]`,
 has every element of that `people` value as a key (with no filter, `break` or `continue`).
+So does a loop over an array that ends each iteration with its element a key and
+removes none (no `break`), `loop name in [white black] { if name not in? d d[name] = 0 }`
+(Python's `setdefault` over a few names): after it, `d[white]` needs no guard.
 `pool[h]`, `pool[h] = x` and `pool[h].field += x` need `pool.has(h)`, proven by
 `h = pool.add(x)` or a guard (`if pool.has(h)`) with nothing since that may have
 removed `h`: stores, updates and loops that do not remove keep it, and so does

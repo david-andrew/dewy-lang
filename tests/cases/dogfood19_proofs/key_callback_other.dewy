@@ -1,0 +1,6 @@
+# Near miss: positions of one array say nothing of another's length.
+f = (rank:array<float64> other:array<float64>) => {
+    let order = [loop i in [0..rank.length) i].sorted(key=(i) => -other[i])
+    printl(order)
+}
+main = () => f([0.5 0.25] [1.0])
