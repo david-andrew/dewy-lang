@@ -151,7 +151,7 @@ main = ():
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_idents_twins(compiler, tmp_path, release):  # noqa: F811
     assert compare(compiler, tmp_path, release, DRIVER + MAIN,
-                   extra_stems=('checker_literals', 'checker_idents')).endswith(b'ok\n')
+                   extra_stems=('checker_exact', 'checker_literals', 'checker_idents')).endswith(b'ok\n')
 
 
 @pytest.mark.parametrize('kind', [0, 9, 11])
@@ -163,5 +163,5 @@ main = ():
     print("unreachable")
 '''
     output = compare(compiler, tmp_path, False, DRIVER + main, status=19,
-                     extra_stems=('checker_literals', 'checker_idents'))
+                     extra_stems=('checker_exact', 'checker_literals', 'checker_idents'))
     assert output.rstrip().endswith(f':{kind}'.encode())

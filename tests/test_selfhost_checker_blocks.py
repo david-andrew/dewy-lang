@@ -11,7 +11,7 @@ from tests.selfhost_expr_double import compare_leaf
 from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER
 
 STEMS = ('checker_loops', 'checker_vardecls', 'checker_assigns', 'checker_exprstmts', 'checker_statements',
-         'checker_for_loops', 'checker_returns', 'checker_conditionals', 'checker_literals', 'checker_blocks')
+         'checker_for_loops', 'checker_returns', 'checker_conditionals', 'checker_exact', 'checker_literals', 'checker_blocks')
 
 
 def hosts(driver):

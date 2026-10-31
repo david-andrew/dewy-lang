@@ -1,3 +1,4 @@
+use 'checker_exact.dewy'
 use 'checker_expr.dewy'
 use 'checker_receivers.dewy'
 use 'checker_range_values.dewy'
@@ -7588,132 +7589,68 @@ method_str_set_key = (n: int, recv: int, rt: int, fname: int, args: mut int[], e
     last_checked = n
     rt_call
 
-check_binary = (n: int, expected: int) -> int:
-    op = nodes[n].op as Tok
-    if op == .dotop: return check_dotted(n, expected)
-    if op == .star and has_flag(n, NF_JUXT): juxt_group_product(n)
-    if op == .kw_xor:
-        # logical on bools (a != b), bitwise on integers
-        ta = prune(check_expr(int(nodes[n].a), 0))
-        nodes[n].a = i32(last_checked)
-        add_flag(int(nodes[n].a), NF_CHECKED)
-        if ta == T_BOOL: nodes[n].op = i32(int(Tok.ne))
-        else: nodes[n].op = i32(int(Tok.caret))
-        return check_expr(n, expected)
-    # 'a' == c: the literal is a character code when the other side is an integer
-    if nodes[int(nodes[n].a)].kind == .str_lit and charlike(int(nodes[n].a)) and not charlike(int(nodes[n].b)) and op != .plus and op != .star:
-        tb = prune(check_expr(int(nodes[n].b), 0))
-        nodes[n].b = i32(last_checked)
-        add_flag(int(nodes[n].b), NF_CHECKED)
-        if is_int(tb): charlike_to_int(int(nodes[n].a))
-    if op == .kw_in and nodes[int(nodes[n].b)].kind == .range and not has_flag(int(nodes[n].b), NF_STEP):
-        return check_in_range(n, expected)
-    if op == .kw_in:
+# check_binary runs in checker_expr.dewy (xe_binary); these are its services.
+binary_juxt = (n: int): juxt_group_product(n)
+binary_char_code = (n: int): charlike_to_int(n)
+# `needle in container`, other than a range: the container's contains function.
+binary_membership = (n: int, expected: int) -> int:
+    needle = int(nodes[n].a)
+    container = int(nodes[n].b)
+    dewy = files[pos_file(nodes[n].pos)].is_dewy
+    if dewy and str_sets.len() > 1 and nodes[needle].kind != .str_lit:
+        members = membership_str_set(n)
+        if members != 0: return members
         needle = int(nodes[n].a)
         container = int(nodes[n].b)
-        dewy = files[pos_file(nodes[n].pos)].is_dewy
-        if dewy and str_sets.len() > 1 and nodes[needle].kind != .str_lit:
-            members = membership_str_set(n)
-            if members != 0: return members
-            needle = int(nodes[n].a)
-            container = int(nodes[n].b)
-        call = mk(.call, nodes[n].pos)
-        callee = mk(.field, nodes[n].pos)
-        nodes[callee].a = nodes[n].b
-        nodes[callee].name = i32(intern("contains"))
-        nodes[call].a = i32(callee)
-        set_list(call, [int(nodes[n].a)])
-        nodes[n] = nodes[call]
-        t = check_expr(n, 0)
-        if dewy:
-            # Method syntax puts the receiver first. Membership reads the
-            # needle first, preserving snapshots and side effects in that order.
-            if nodes[n].kind == .call and nodes[n].aux == 0:
-                save_call_order(n, [needle, container], kids(n))
-            else if nodes[n].kind == .block and nkids(n) >= 3 and nodes[kid(n, 0)].kind == .vardecl and nodes[kid(n, 1)].kind == .vardecl and nodes[kid(n, 0)].b == i32(container) and nodes[kid(n, 1)].b == i32(needle):
-                # Dependent defaults already captured the two explicit values.
-                statements = kids(n)
-                first = statements[0]
-                statements[0] = statements[1]
-                statements[1] = first
-                set_list(n, statements)
-            else: fatal(nodes[n].pos, "membership needs a contains function, not a callable field")
-            if t != T_BOOL: fatal(nodes[n].pos, "membership's contains function must return bool")
-        return t
+    call = mk(.call, nodes[n].pos)
+    callee = mk(.field, nodes[n].pos)
+    nodes[callee].a = nodes[n].b
+    nodes[callee].name = i32(intern("contains"))
+    nodes[call].a = i32(callee)
+    set_list(call, [int(nodes[n].a)])
+    nodes[n] = nodes[call]
+    t = check_expr(n, 0)
+    if dewy:
+        # Method syntax puts the receiver first. Membership reads the
+        # needle first, preserving snapshots and side effects in that order.
+        if nodes[n].kind == .call and nodes[n].aux == 0:
+            save_call_order(n, [needle, container], kids(n))
+        else if nodes[n].kind == .block and nkids(n) >= 3 and nodes[kid(n, 0)].kind == .vardecl and nodes[kid(n, 1)].kind == .vardecl and nodes[kid(n, 0)].b == i32(container) and nodes[kid(n, 1)].b == i32(needle):
+            # Dependent defaults already captured the two explicit values.
+            statements = kids(n)
+            first = statements[0]
+            statements[0] = statements[1]
+            statements[1] = first
+            set_list(n, statements)
+        else: fatal(nodes[n].pos, "membership needs a contains function, not a callable field")
+        if t != T_BOOL: fatal(nodes[n].pos, "membership's contains function must return bool")
+    return t
+binary_quantity_hint = (t: int) -> int: if is_float(quantity_base(t)): quantity_base(t) else: 0
+binary_decimal = (e: int): decimal_compared(e)
+binary_context = (e: int, t: int, op: int) -> bool: binary_literal_context(e, t, op as Tok)
+# (`m[0 [..]] =? [1 2]`: a 1-D selection against a literal of its elements; `m * [1.0 0.0]`:
+# a matrix times a column vector written out, in the matrix's elements)
+binary_nd_hint = (n: int, ta: int, h: int) -> int:
+    op = nodes[n].op as Tok
+    bk = nodes[int(nodes[n].b)].kind
+    if (op == .eq or op == .ne) and is_nd(ta) and bk == .array: return mk_array(nd_elem(ta))
+    if op == .star and is_nd(ta) and bk == .array and dewy_at(nodes[n].pos) and is_numeric(nd_elem(ta)): return mk_array(nd_elem(ta))
+    h
+binary_secret = (n: int, a: int, b: int) -> int: secret_binary(n, nodes[n].op as Tok, a, b)
+# Every operand pair but two plain numbers, both checked (flags: 1 and 2 a quantity
+# literal written left and right, 4 and 8 a character added left and right).
+binary_rest = (n: int, expected: int, a0: int, b0: int, ta0: int, tb0: int, hint: int, flags: int) -> int:
+    a = a0
+    b = b0
+    ta = ta0
+    tb = tb0
+    op = nodes[n].op as Tok
     is_cmp = op == .eq or op == .ne or op == .lt or op == .le or op == .gt or op == .ge
     is_shift = op == .shl or op == .shr
-    hint = 0
-    if not is_cmp and expected != 0 and (is_numeric(expected) or is_vec(expected)): hint = expected
-    if not is_cmp and is_quantity(expected) and is_float(quantity_base(expected)): hint = quantity_base(expected)
-    a = int(nodes[n].a)
-    b = int(nodes[n].b)
-    # (an exact comparison reading a decimal binding a later write made float64)
-    if (op == .eq or op == .ne) and decimal_adapted.len() > 0:
-        decimal_compared(a)
-        decimal_compared(b)
-    # (20°C in start + 20°C is a difference: offset temperatures tell literals from values)
-    # (and a unit written by name in a product: c*°C makes a point, where a point is not scaled)
-    q_lit_a = false
-    q_lit_b = false
-    if op == .plus or op == .minus:
-        q_lit_a = quantity_literal_syntax(a)
-        q_lit_b = quantity_literal_syntax(b) or (b == quantity_update_right and b != 0)
-    else if op == .star:
-        q_lit_a = quantity_name_syntax(a)
-        q_lit_b = quantity_name_syntax(b)
-    # ("-" * 40 is forty dashes, as in Python: a character's code multiplied means nothing)
-    if op == .star:
-        if charlike(a) and not charlike(b): clear_flag(a, NF_CHARLIKE)
-        if charlike(b) and not charlike(a): clear_flag(b, NF_CHARLIKE)
-    a_char = op == .plus and charlike(a)
-    b_char = op == .plus and charlike(b)
-    # ('a' + i: a character's code and a number, as i + 'a' is; the number decides)
-    if a_char and not b_char and hint == 0 and has_flag(a, NF_SQUOTE):
-        tb0 = prune(check_expr(b, 0))
-        add_flag(b, NF_CHECKED)
-        if is_int(tb0): hint = tb0
-    literal_op = (op == .eq or op == .ne or op == .amp or op == .pipe or op == .caret or op == .minus) and files[pos_file(nodes[n].pos)].is_dewy
-    a_literal = literal_op and (nodes[a].kind == .array or nodes[a].kind == .record_lit or nodes[a].kind == .map_lit or dewy_set_literal(a))
-    b_literal = literal_op and (nodes[b].kind == .array or nodes[b].kind == .record_lit or nodes[b].kind == .map_lit or dewy_set_literal(b))
-    if a_literal and not b_literal:
-        # Type-checking the typed operand first supplies context without moving
-        # either operand in the runtime expression or checking it twice.
-        bt = prune(check_expr(b, 0))
-        add_flag(b, NF_CHECKED)
-        if binary_literal_context(a, bt, op): hint = if tkind(bt) == .opt: telem(bt) else: bt
-    ta = prune(check_expr(a, hint))
-    tb = 0
-    bk = nodes[b].kind
-    if bk == .none_lit or bk == .null_lit or bk == .dotname: tb = prune(check_expr(b, ta))
-    else:
-        h = 0
-        if not is_lit(a) and not is_shift and is_numeric(ta):
-            h = ta
-            if is_cmp and exact_potential(a) and (nodes[b].kind == .int_lit or nodes[b].kind == .unary): h = if has_flag(b, NF_U64): T_U64 else: T_INT
-        if not a_literal and b_literal and binary_literal_context(b, ta, op): h = if tkind(ta) == .opt: telem(ta) else: ta
-        # (`m[0 [..]] =? [1 2]`: a 1-D selection against a literal of its elements)
-        if (op == .eq or op == .ne) and is_nd(ta) and bk == .array: h = mk_array(nd_elem(ta))
-        # (`m * [1.0 0.0]`: a matrix times a column vector written out, in the matrix's elements)
-        if op == .star and is_nd(ta) and bk == .array and dewy_at(nodes[n].pos) and is_numeric(nd_elem(ta)): h = mk_array(nd_elem(ta))
-        tb = prune(check_expr(b, h))
-    if types[ta].kind == .secret or types[tb].kind == .secret: return secret_binary(n, op, a, b)
-    # Fuse static-width exact intermediates before choosing scalar arithmetic.
-    # Stored int locals are not peeled and continue through mathematical math.
-    if (ntype(a) == T_MATH_INT or ntype(b) == T_MATH_INT) and dewy_at(nodes[n].pos):
-        wa = exact_math_operand(a); wb = exact_math_operand(b)
-        if is_int(ntype(wa)) and is_int(ntype(wb)) and ntype(wa) != T_MATH_INT and ntype(wb) != T_MATH_INT and int_policy(ntype(wa)) == 0 and int_policy(ntype(wb)) == 0:
-            a = wa; b = wb
-            nodes[n].a = i32(a); nodes[n].b = i32(b)
-            ta = prune(ntype(a)); tb = prune(ntype(b))
-    # (two plain numbers, neither a written fraction nor a character: none of the cases below
-    # applies to them, so straight to the arithmetic)
-    if not is_shift and ta != T_MATH_INT and tb != T_MATH_INT:
-        fka = types[ta].kind
-        fkb = types[tb].kind
-        if (fka == .int_ or fka == .float_) and (fkb == .int_ or fkb == .float_) and not (op == .eq and fka == .float_):
-            ak = nodes[a].kind
-            bk2 = nodes[b].kind
-            if ak != .float_lit and bk2 != .float_lit and ak != .str_lit and bk2 != .str_lit: return binary_numeric(n, op, a, b, ta, tb, is_cmp)
+    q_lit_a = flags & 1 != 0
+    q_lit_b = flags & 2 != 0
+    a_char = flags & 4 != 0
+    b_char = flags & 8 != 0
     if (op == .eq or op == .ne) and types[ta].kind == .fixed and types[tb].kind == .fixed and fixed_len(ta) != fixed_len(tb) and type_eq(int(types[ta].elem), int(types[tb].elem)):
         # (arrays of different exact lengths are unequal, compared as arrays)
         ta = mk_array(int(types[ta].elem))
@@ -10304,8 +10241,8 @@ expr_values_use = (n: int, t: int):
     if is_values(t) and nodes[n].kind == .ident and n != assign_root and name_of(int(nodes[n].name))[0] != '$': sink_values_use(n, t)
     return
 expr_sibling = (n: int, t: int) -> int: sibling_index_narrow(n, t)
-expr_host = CheckerExprHost(expr_complete, ident_unknown, expr_module, temperature_read, expr_values_use, check_binary, check_call_expr, expr_sibling, expr_literal, expr_other)
-expr_input = CheckerExprInput(&nodes, &syms, &check_scopes, &ctxs, &cx, &ml_at, &ml_mod, &ml_sym, &ml_name_tick, &ml_struct, &ide_sentinel, &tk_reads_on, &values_any, &statement_watch, &last_checked, &expr_host)
+expr_host = CheckerExprHost(expr_complete, ident_unknown, expr_module, temperature_read, expr_values_use, check_dotted, binary_juxt, binary_char_code, binary_membership, binary_quantity_hint, binary_decimal, dewy_set_literal, binary_context, binary_nd_hint, binary_secret, binary_rest, check_call_expr, expr_sibling, expr_literal, expr_other)
+expr_input = CheckerExprInput(&nodes, &types, &files, &syms, &check_scopes, &ctxs, &cx, &ml_at, &ml_mod, &ml_sym, &ml_name_tick, &ml_struct, &ide_sentinel, &tk_reads_on, &values_any, &statement_watch, &last_checked, &T_BOOL, &T_INT, &T_U64, &T_MATH_INT, &quantity_update_right, &expr_host)
 expr_binding = checker_expr_bind(&expr_input)
 
 # The `__as__` conversion from a record type ft to tt (its declared result), or 0.

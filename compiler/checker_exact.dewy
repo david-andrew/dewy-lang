@@ -1,0 +1,142 @@
+$runtime_checks
+from p"node_store.dewy" import Node
+from p"checker_types.dewy" import TypeInfo
+from p"source_types.dewy" import SrcFile
+from p"type_inference.dewy" import tu_prune
+# Exact arithmetic queries the checker asks while it checks: whether an expression can
+# hold exact (static-width) arithmetic, and an `int` operand's machine-word computation
+# behind its representation boundary, and whether a checked node is one exact.jo notes.
+# Node and type reads only, except the copy of an integer literal retyped as a word;
+# O(1) per node, exact_potential O(its value arms).
+EXWord:type=int64<overflow='wrap'>
+CheckerExactInput:type=[
+    nodes:ptr<array<Node>>
+    lists:ptr<array<int32>>
+    types:ptr<array<TypeInfo>>
+    files:ptr<array<SrcFile>>
+    int_type:ptr<int64>
+    u64_type:ptr<int64>
+    math_int:ptr<int64>
+]
+let ex_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let ex_lists:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
+let ex_types:ptr<array<TypeInfo>>=$unsafe (uint64(0) as ptr<array<TypeInfo>>)
+let ex_files:ptr<array<SrcFile>>=$unsafe (uint64(0) as ptr<array<SrcFile>>)
+let ex_int_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let ex_u64_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let ex_math_int:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+checker_exact_bind=(input:ptr<CheckerExactInput>):>EXWord=>$unsafe {
+    ex_nodes=input[0].nodes
+    ex_lists=input[0].lists
+    ex_types=input[0].types
+    ex_files=input[0].files
+    ex_int_type=input[0].int_type
+    ex_u64_type=input[0].u64_type
+    ex_math_int=input[0].math_int
+    0
+}
+ex_type_of=(n:EXWord):>EXWord=>$unsafe {EXWord(ex_nodes[0].ptr[n].type)}
+ex_dewy=(pos:int64):>bool=>$unsafe {
+    let f=pos >> 40
+    pos >? 0 and f <? ex_files[0].length and ex_files[0].ptr[f].is_dewy
+}
+# A type as arithmetic sees it: refinements and secrets peeled (exact.jo exact_representation).
+ex_representation=(t0:EXWord):>EXWord=>$unsafe {
+    let t=tu_prune(t0)
+    if ex_types[0].ptr[t].kind =? 'refined' {t=tu_prune(EXWord(ex_types[0].ptr[t].elem))}
+    loop ex_types[0].ptr[t].kind =? 'secret' {
+        t=tu_prune(EXWord(ex_types[0].ptr[t].elem))
+        if ex_types[0].ptr[t].kind =? 'refined' {t=tu_prune(EXWord(ex_types[0].ptr[t].elem))}
+    }
+    t
+}
+# A fixed-width integer without wrappers or an overflow policy (exact.jo exact_type).
+ex_type=(t0:EXWord pos:int64):>bool=>$unsafe {
+    if t0 =? ex_int_type[0] or t0 =? ex_u64_type[0] {return ex_dewy(pos)}
+    if t0 =? ex_math_int[0] {return false}
+    let t=ex_representation(t0)
+    if ex_types[0].ptr[t].kind not=? 'int_' or t =? ex_math_int[0] or ex_types[0].ptr[t].st not=? 0 {return false}
+    ex_dewy(pos) or ex_types[0].ptr[t].bits <? 64
+}
+# Frozen Tok ordinals: plus 58, minus 59, star 60, slash 61, amp 63, pipe 64, caret 65,
+# shl 67, starstar 79; IN.fixed_abs 89.
+ex_operation=(n:EXWord):>bool=>$unsafe {
+    let node=ex_nodes[0].ptr + n
+    let k=node[0].kind
+    let op=node[0].op
+    if k =? 'intrinsic' {return node[0].aux =? 89}
+    if k =? 'unary' {
+        if op not=? 59 {return false}
+    } else if k =? 'binary' and node[0].aux =? 0 {
+        if op not=? 58 and op not=? 59 and op not=? 60 and op not=? 79 and op not=? 61 and op not=? 67 {return false}
+    } else {return false}
+    let t=EXWord(node[0].type)
+    if t =? 0 or not ex_type(t node[0].pos) {return false}
+    k not=? 'binary' or op not=? 61 or ex_types[0].ptr[ex_representation(t)].sign
+}
+ex_kid=(n:EXWord i:EXWord):>EXWord=>$unsafe {EXWord(ex_lists[0][EXWord(ex_nodes[0].ptr[n].list) + i])}
+# Before the boundary walk, identify conversions whose source is still an arithmetic
+# value: its declared storage type is not an intermediate bound.
+exact_potential=(n0:int64):>bool=>$unsafe {
+    let n=EXWord(n0)
+    if n <=? 0 {return false}
+    if ex_operation(n) {return true}
+    let node=ex_nodes[0].ptr + n
+    let k=node[0].kind
+    if k =? 'binary' and (node[0].op =? 63 or node[0].op =? 64 or node[0].op =? 65) {return exact_potential(int64(node[0].a)) or exact_potential(int64(ex_nodes[0].ptr[n].b))}
+    # CV.none_ 0, CV.int_ 1
+    if k =? 'conv' and (node[0].aux =? 1 or node[0].aux =? 0) {return exact_potential(int64(node[0].a))}
+    if k =? 'if_' or k =? 'iflet' {return exact_potential(int64(node[0].b)) or exact_potential(int64(ex_nodes[0].ptr[n].c))}
+    if k =? 'coalesce' {return exact_potential(int64(node[0].b))}
+    if k =? 'match_' {
+        loop i in [0..EXWord(node[0].nlist)) {
+            if exact_potential(int64(ex_nodes[0].ptr[ex_kid(n i)].b)) {return true}
+        }
+    }
+    if k =? 'block' and node[0].aux not=? 0 {return exact_potential(int64(ex_nodes[0].ptr[ex_kid(n EXWord(node[0].nlist) - 1)].a))}
+    if k =? 'exprstmt' {return exact_potential(int64(node[0].a))}
+    false
+}
+# Semantic int64 arithmetic returns int. A bounded expression can retain its
+# static-width computation behind the representation boundary until a consumer
+# needs a tagged value. Peeling this boundary never narrows the value.
+exact_math_operand=(n0:int64):>int64=>$unsafe {
+    let n=EXWord(n0)
+    if ex_type_of(n) not=? ex_math_int[0] {return n}
+    let value=n
+    # A checked reveal/wrap pair changes visibility, never representation.
+    loop ex_nodes[0].ptr[value].kind =? 'conv' and ex_nodes[0].ptr[value].aux =? 0 {
+        let child=EXWord(ex_nodes[0].ptr[value].a)
+        if ex_representation(ex_type_of(child)) not=? ex_math_int[0] {break}
+        value=child
+    }
+    let node=ex_nodes[0].ptr + value
+    # NF_U64 2097152
+    if node[0].kind =? 'int_lit' and (EXWord(node[0].flags) & 2097152 =? 0 or node[0].ival >=? 0) {
+        let word=ex_nodes[0].length
+        let copy=ex_nodes[0].ptr[value]
+        ex_nodes[0].push(copy)
+        ex_nodes[0][word].type=int32<overflow='wrap'>(ex_int_type[0])
+        return word
+    }
+    if node[0].kind =? 'conv' and node[0].aux =? 1 {
+        let a=EXWord(node[0].a)
+        if ex_type_of(a) =? ex_int_type[0] and ex_dewy(node[0].pos) {return a}
+    }
+    n
+}
+# Whether exact.jo's exact_note keeps a checked operator, conversion or intrinsic (its
+# test without the measuring mode): only these are sent to it.
+exact_candidate=(n0:int64):>bool=>$unsafe {
+    let n=EXWord(n0)
+    let node=ex_nodes[0].ptr + n
+    let k=node[0].kind
+    if k =? 'binary' {
+        let op=node[0].op
+        return ex_operation(n) or ((op =? 63 or op =? 64 or op =? 65) and exact_potential(n0))
+    }
+    if k =? 'unary' or k =? 'intrinsic' {return ex_operation(n)}
+    # CV.int2float 2
+    if k =? 'conv' and node[0].aux =? 2 {return exact_potential(int64(node[0].a))}
+    false
+}

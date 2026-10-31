@@ -51,6 +51,8 @@ literal_float_error = (n: int): print("float-error"); exit(22)
 literal_host = CheckerLiteralHost(literal_coerce, literal_effect, literal_note, literal_charlike, literal_check, literal_finalize, literal_format, literal_warning, literal_float_error)
 literal_input = CheckerLiteralInput(&nodes, &lists, &types, &files, &refine, &literal_effects, &literal_exact, &literal_last, &T_STR, &T_FLOAT, &T_BOOL, &T_NULL, &T_INT, &T_MATH_INT, &literal_host)
 literal_binding = checker_literals_bind(&literal_input)
+literal_exact_input = CheckerExactInput(&nodes, &lists, &types, &files, &T_INT, &T_U64, &T_MATH_INT)
+literal_exact_binding = checker_exact_bind(&literal_exact_input)
 main = ():
     prepare()
     assert(xl_expected(0) == 0)
@@ -103,7 +105,11 @@ main = ():
     n = node(.ident)
     count = events.len(); assert(xl_finish(n, T_INT, 0) == T_INT and events.len() == count)
     literal_effects = false
+    # (int-to-float of an exact operation is noted; of anything else, not asked about)
     n = node(.conv); nodes[n].aux = 2
+    count = events.len(); xl_finish(n, T_INT, 0); assert(events.len() == count and literal_last == n)
+    src = node(.binary); nodes[src].type = i32(T_I32); nodes[src].op = 58
+    n = node(.conv, src); nodes[n].aux = 2
     count = events.len(); xl_finish(n, T_INT, 0); assert(events.len() == count + 1 and literal_last == n)
     n = node(.conv)
     publication_snapshot = nodes
@@ -121,4 +127,4 @@ main = ():
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_literals_twins(compiler, tmp_path, release):  # noqa: F811
     assert compare(compiler, tmp_path, release, DRIVER,
-                   extra_stems=('checker_literals',)).endswith(b'ok\n')
+                   extra_stems=('checker_exact', 'checker_literals')).endswith(b'ok\n')

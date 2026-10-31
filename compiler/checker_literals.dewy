@@ -4,6 +4,7 @@ from p"checker_types.dewy" import (TypeInfo TK)
 from p"source_types.dewy" import SrcFile
 from p"type_inference.dewy" import tu_prune
 from p"type_constructors.dewy" import (tb_mk_var tb_mk_opt)
+from p"checker_exact.dewy" import exact_candidate
 # Literal expression checking and common type publication. Scalar paths are O(1)
 # plus inference links; interpolation visits only its parts and demanded checks.
 # The host retains coercion/effects, exactness and source diagnostic obligations;
@@ -102,7 +103,7 @@ xl_finish=(n:XLWord t0:XLWord expected:XLWord):>XLWord=>$unsafe {
     # No host call until the predicate finishes: one borrowed element view.
     let node=xl_nodes[0].ptr + n
     let k=node[0].kind
-    if xl_exact_measure[0] or k =? 'binary' or k =? 'unary' or k =? 'intrinsic' or (k =? 'conv' and node[0].aux =? 2) {xl_host[0].exact(n)}
+    if xl_exact_measure[0] or ((k =? 'binary' or k =? 'unary' or k =? 'intrinsic' or (k =? 'conv' and node[0].aux =? 2)) and exact_candidate(n)) {xl_host[0].exact(n)}
     xl_last[0]=n
     t
 }

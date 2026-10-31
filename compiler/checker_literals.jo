@@ -4,6 +4,7 @@ use 'checker_types.dewy'
 use 'source_types.dewy'
 use 'type_inference.dewy'
 use 'type_constructors.dewy'
+use 'checker_exact.dewy'
 struct CheckerLiteralHost:
     coerce: (int, int) -> int
     effect: (int, int) -> int
@@ -86,7 +87,7 @@ xl_finish = (n: int, t0: int, expected: int) -> int:
     # (without an expected type, callable inference returns the type as published)
     if xl_effects[0] and expected != 0: t = xl_host[0].effect(n, expected); xl_nodes[0][n].type = i32(t)
     xl_nodes[0][n].flags |= 128
-    if xl_exact_measure[0] or xl_nodes[0][n].kind == .binary or xl_nodes[0][n].kind == .unary or xl_nodes[0][n].kind == .intrinsic or xl_nodes[0][n].kind == .conv and xl_nodes[0][n].aux == 2: xl_host[0].exact(n)
+    if xl_exact_measure[0] or ((xl_nodes[0][n].kind == .binary or xl_nodes[0][n].kind == .unary or xl_nodes[0][n].kind == .intrinsic or xl_nodes[0][n].kind == .conv and xl_nodes[0][n].aux == 2) and exact_candidate(n)): xl_host[0].exact(n)
     xl_last[0] = n
     t
 

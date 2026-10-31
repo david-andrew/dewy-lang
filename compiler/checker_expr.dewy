@@ -1,5 +1,8 @@
 $runtime_checks
 from p"node_store.dewy" import Node
+from p"checker_types.dewy" import (TypeInfo TK)
+from p"source_types.dewy" import SrcFile
+from p"type_inference.dewy" import tu_prune
 from p"checker_state.dewy" import (FnCtx CheckerScope Sym SK StatementWatch)
 from p"checker_literals.dewy" import (xl_expected xl_finish xl_check_int xl_check_str xl_check_scalar)
 from p"checker_idents.dewy" import xj_ident
@@ -15,10 +18,15 @@ from p"checker_aggregates.dewy" import xr_check
 from p"checker_collections.dewy" import xk_check
 from p"checker_cast.dewy" import xc_check
 from p"checker_places.dewy" import xp_check
+from p"checker_in_range.dewy" import xy_check
+from p"checker_numeric.dewy" import xw_numeric
+from p"checker_exact.dewy" import (exact_potential exact_math_operand)
 # The expression dispatcher: an already checked node, then each kind sent to its
 # leaf. A name is looked up here (the scope stack, then the module lookup cache);
-# only a cache miss asks the host. Binary operators, calls, a few rare kinds and
-# literal preparation (grouped values, spreads, union members) are host services.
+# only a cache miss asks the host. A binary operator's operands are checked here and
+# two plain numbers go to the numeric leaf; rare operators and every other operand
+# type are host services, as are calls, a few rare kinds and literal preparation
+# (grouped values, spreads, union members).
 # Jo callers call `check_expr` directly; leaves below this one in the import order
 # reach it through their host records. O(1) per node plus its kind's checking; host
 # calls may grow every arena, so nodes are reread by ID.
@@ -29,7 +37,17 @@ CheckerExprHost:type=[
     module:<(module:int64 name:int64):>int64>
     temperature:<(node:int64 type_id:int64):>int64>
     values_use:<(node:int64 type_id:int64):>void>
-    binary:<(node:int64 expected:int64):>int64>
+    dotted:<(node:int64 expected:int64):>int64>
+    juxt:<(node:int64):>void>
+    char_code:<(node:int64):>void>
+    membership:<(node:int64 expected:int64):>int64>
+    quantity_hint:<(type_id:int64):>int64>
+    decimal:<(node:int64):>void>
+    set_literal:<(node:int64):>bool>
+    literal_context:<(node:int64 type_id:int64 op:int64):>bool>
+    nd_hint:<(node:int64 type_id:int64 hint:int64):>int64>
+    secret:<(node:int64 a:int64 b:int64):>int64>
+    binary_rest:<(node:int64 expected:int64 a:int64 b:int64 ta:int64 tb:int64 hint:int64 flags:int64):>int64>
     call:<(node:int64 expected:int64):>int64>
     sibling:<(node:int64 type_id:int64):>int64>
     literal:<(node:int64 expected:int64 ex:int64):>int64>
@@ -37,6 +55,8 @@ CheckerExprHost:type=[
 ]
 CheckerExprInput:type=[
     nodes:ptr<array<Node>>
+    types:ptr<array<TypeInfo>>
+    files:ptr<array<SrcFile>>
     syms:ptr<array<Sym>>
     scopes:ptr<CheckerScope>
     contexts:ptr<array<FnCtx>>
@@ -51,9 +71,16 @@ CheckerExprInput:type=[
     values:ptr<bool>
     watch:ptr<StatementWatch>
     last:ptr<int64>
+    bool_type:ptr<int64>
+    int_type:ptr<int64>
+    u64_type:ptr<int64>
+    math_int:ptr<int64>
+    quantity_right:ptr<int64>
     host:ptr<CheckerExprHost>
 ]
 let xe_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let xe_types:ptr<array<TypeInfo>>=$unsafe (uint64(0) as ptr<array<TypeInfo>>)
+let xe_files:ptr<array<SrcFile>>=$unsafe (uint64(0) as ptr<array<SrcFile>>)
 let xe_syms:ptr<array<Sym>>=$unsafe (uint64(0) as ptr<array<Sym>>)
 let xe_scopes:ptr<CheckerScope>=$unsafe (uint64(0) as ptr<CheckerScope>)
 let xe_contexts:ptr<array<FnCtx>>=$unsafe (uint64(0) as ptr<array<FnCtx>>)
@@ -68,9 +95,16 @@ let xe_temperature:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
 let xe_values:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
 let xe_watch:ptr<StatementWatch>=$unsafe (uint64(0) as ptr<StatementWatch>)
 let xe_last:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xe_bool_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xe_int_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xe_u64_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xe_math_int:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xe_quantity_right:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let xe_host:ptr<CheckerExprHost>=$unsafe (uint64(0) as ptr<CheckerExprHost>)
 checker_expr_bind=(input:ptr<CheckerExprInput>):>XEWord=>$unsafe {
     xe_nodes=input[0].nodes
+    xe_types=input[0].types
+    xe_files=input[0].files
     xe_syms=input[0].syms
     xe_scopes=input[0].scopes
     xe_contexts=input[0].contexts
@@ -85,6 +119,11 @@ checker_expr_bind=(input:ptr<CheckerExprInput>):>XEWord=>$unsafe {
     xe_values=input[0].values
     xe_watch=input[0].watch
     xe_last=input[0].last
+    xe_bool_type=input[0].bool_type
+    xe_int_type=input[0].int_type
+    xe_u64_type=input[0].u64_type
+    xe_math_int=input[0].math_int
+    xe_quantity_right=input[0].quantity_right
     xe_host=input[0].host
     0
 }
@@ -186,6 +225,181 @@ xe_other=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
     else {return xe_host[0].other(n expected)}
     xl_finish(n t expected)
 }
+# Binary operators (frozen Tok ordinals: kw_in 12, plus 58, minus 59, star 60, amp 63,
+# pipe 64, caret 65, shl 67, shr 68, eq 69, ne 70, lt 71 ... ge 74, kw_xor 82, dotop 85).
+xe_kind_of=(t:XEWord):>TK=>$unsafe {xe_types[0].ptr[tu_prune(t)].kind}
+xe_flag=(n:XEWord f:XEWord):>bool=>$unsafe {XEWord(xe_nodes[0].ptr[n].flags) & f not=? 0}
+xe_add_flag=(n:XEWord f:XEWord):>void=>$unsafe {xe_nodes[0][n].flags=int32<overflow='wrap'>(XEWord(xe_nodes[0].ptr[n].flags) | f)}
+xe_dewy_at=(pos:int64):>bool=>$unsafe {
+    let f=pos >> 40
+    pos >? 0 and f <? xe_files[0].length and xe_files[0].ptr[f].is_dewy
+}
+# A one-character string literal (NF_CHARLIKE 512).
+xe_charlike=(n:XEWord):>bool=>$unsafe {xe_nodes[0].ptr[n].kind =? 'str_lit' and xe_flag(n 512)}
+# How a quantity operand was written, before it is checked (units.jo): `2 * m`, `-2 * m`.
+xe_quantity_literal=(e:XEWord):>bool=>$unsafe {
+    if e =? 0 or xe_flag(e 128) {return false}
+    let node=xe_nodes[0].ptr + e
+    if node[0].kind =? 'unary' {return xe_quantity_literal(XEWord(node[0].a))}
+    if node[0].kind =? 'binary' and node[0].op =? 60 {
+        let x=xe_nodes[0].ptr[XEWord(node[0].a)].kind
+        return (x =? 'int_lit' or x =? 'float_lit') and xe_nodes[0].ptr[XEWord(node[0].b)].kind =? 'ident'
+    }
+    false
+}
+xe_quantity_name=(e:XEWord):>bool=>$unsafe {
+    if e =? 0 or xe_flag(e 128) {return false}
+    let k=xe_nodes[0].ptr[e].kind
+    k =? 'ident' or (k =? 'field' and xe_nodes[0].ptr[XEWord(xe_nodes[0].ptr[e].a)].kind =? 'ident')
+}
+# A collection literal operand of `=? not=? & | ^ -` in Dewy, which takes the other side's type.
+xe_literal_operand=(e:XEWord):>bool=>$unsafe {
+    let node=xe_nodes[0].ptr + e
+    let k=node[0].kind
+    if k =? 'array' or k =? 'record_lit' or k =? 'map_lit' {return true}
+    # (a set literal is the call `__dewy_set(...)`, not yet checked)
+    k =? 'call' and node[0].type =? 0 and node[0].nlist =? 1 and xe_nodes[0].ptr[XEWord(node[0].a)].kind =? 'ident' and xe_host[0].set_literal(e)
+}
+# `a xor b`: not=? on bools, ^ on integers.
+xe_xor=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
+    let ta=tu_prune(check_expr(xe_nodes[0].ptr[n].a 0))
+    xe_nodes[0][n].a=int32<overflow='wrap'>(xe_last[0])
+    xe_add_flag(XEWord(xe_nodes[0].ptr[n].a) 128)
+    xe_nodes[0][n].op=if ta =? xe_bool_type[0] {70} else {65}
+    check_expr(n expected)
+}
+# 'a' =? c: the literal is a character code when the other side is an integer.
+xe_char=(n:XEWord):>void=>$unsafe {
+    if not xe_charlike(XEWord(xe_nodes[0].ptr[n].a)) or xe_charlike(XEWord(xe_nodes[0].ptr[n].b)) {return}
+    let tb=check_expr(xe_nodes[0].ptr[n].b 0)
+    xe_nodes[0][n].b=int32<overflow='wrap'>(xe_last[0])
+    xe_add_flag(XEWord(xe_nodes[0].ptr[n].b) 128)
+    if xe_kind_of(tb) =? 'int_' {xe_host[0].char_code(XEWord(xe_nodes[0].ptr[n].a))}
+}
+# `x in a..b` in its leaf, other memberships on the host.
+xe_in=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
+    let b=XEWord(xe_nodes[0].ptr[n].b)
+    if xe_nodes[0].ptr[b].kind =? 'range' and not xe_flag(b 32768) {return xy_check(n expected)}
+    xe_host[0].membership(n expected)
+}
+# Cold requests out of the operator's frame.
+xe_decimals=(a:XEWord b:XEWord):>void=>$unsafe {
+    xe_host[0].decimal(a)
+    xe_host[0].decimal(b)
+}
+xe_literal_hint=(e:XEWord t:XEWord op:XEWord hint:XEWord):>XEWord=>$unsafe {
+    if not xe_host[0].literal_context(e t op) {return hint}
+    let p=tu_prune(t)
+    if xe_types[0].ptr[p].kind =? 'opt' {return XEWord(xe_types[0].ptr[p].elem)}
+    p
+}
+xe_first=(b:XEWord):>XEWord=>$unsafe {
+    let t=tu_prune(check_expr(b 0))
+    xe_add_flag(b 128)
+    t
+}
+# Both operands checked here: the hint from the expected type (or a literal's other side),
+# then the second operand in the first's type. Two plain numbers go to the numeric leaf;
+# a secret, a quantity, text, an optional, a struct and every other pair to the host.
+xe_binary=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
+    let op=XEWord(xe_nodes[0].ptr[n].op)
+    if op =? 85 {return xe_host[0].dotted(n expected)}
+    if op =? 60 and xe_flag(n 536870912) {xe_host[0].juxt(n)}
+    if op =? 82 {return xe_xor(n expected)}
+    if op not=? 58 and op not=? 60 and xe_nodes[0].ptr[XEWord(xe_nodes[0].ptr[n].a)].kind =? 'str_lit' {xe_char(n)}
+    if op =? 12 {return xe_in(n expected)}
+    let is_cmp=op >=? 69 and op <=? 74
+    let is_shift=op =? 67 or op =? 68
+    let hint:XEWord=0
+    if not is_cmp and expected not=? 0 {
+        let ek=xe_kind_of(expected)
+        if ek =? 'int_' or ek =? 'float_' or ek =? 'vec' {hint=expected}
+        else if ek =? 'quantity' {hint=xe_host[0].quantity_hint(expected)}
+    }
+    let a=XEWord(xe_nodes[0].ptr[n].a)
+    let b=XEWord(xe_nodes[0].ptr[n].b)
+    if (op =? 69 or op =? 70) and xe_watch[0].decimal_adapted >? 0 {xe_decimals(a b)}
+    let flags:XEWord=0
+    if op =? 58 or op =? 59 {
+        if xe_quantity_literal(a) {flags=1}
+        if xe_quantity_literal(b) or (b =? xe_quantity_right[0] and b not=? 0) {flags=flags | 2}
+    } else if op =? 60 {
+        if xe_quantity_name(a) {flags=1}
+        if xe_quantity_name(b) {flags=flags | 2}
+        # ("-" * 40 is forty dashes: a character's code multiplied means nothing)
+        let ca=xe_charlike(a)
+        let cb=xe_charlike(b)
+        if ca and not cb {xe_nodes[0][a].flags=xe_nodes[0].ptr[a].flags & ~512}
+        if cb and not ca {xe_nodes[0][b].flags=xe_nodes[0].ptr[b].flags & ~512}
+    }
+    if op =? 58 {
+        let ca=xe_charlike(a)
+        let cb=xe_charlike(b)
+        if ca {flags=flags | 4}
+        if cb {flags=flags | 8}
+        # ('a' + i: a character's code and a number, as i + 'a' is; the number decides)
+        if ca and not cb and hint =? 0 and xe_flag(a 8) {
+            let tb0=xe_first(b)
+            if xe_types[0].ptr[tb0].kind =? 'int_' {hint=tb0}
+        }
+    }
+    let literal_op=(op =? 69 or op =? 70 or op =? 63 or op =? 64 or op =? 65 or op =? 59) and xe_files[0][xe_nodes[0].ptr[n].pos >> 40].is_dewy
+    let a_literal=literal_op and xe_literal_operand(a)
+    let b_literal=literal_op and xe_literal_operand(b)
+    # Type-checking the typed operand first supplies context without moving either
+    # operand in the runtime expression or checking it twice.
+    if a_literal and not b_literal {hint=xe_literal_hint(a xe_first(b) op hint)}
+    let ta=tu_prune(check_expr(a hint))
+    let tb:XEWord=0
+    let bk=xe_nodes[0].ptr[b].kind
+    if bk =? 'none_lit' or bk =? 'null_lit' or bk =? 'dotname' {tb=tu_prune(check_expr(b ta))}
+    else {
+        let h:XEWord=0
+        let tk=xe_types[0].ptr[ta].kind
+        if not xe_flag(a 256) and not is_shift and (tk =? 'int_' or tk =? 'float_') {
+            h=ta
+            # (exact_potential is pure: the cheaper test first)
+            if is_cmp and (bk =? 'int_lit' or bk =? 'unary') and exact_potential(a) {h=if xe_flag(b 2097152) {xe_u64_type[0]} else {xe_int_type[0]}}
+        }
+        if not a_literal and b_literal {h=xe_literal_hint(b ta op h)}
+        # (an n-dimensional array against, or times, an array written out)
+        if bk =? 'array' and tk =? 'struct_' and (op =? 69 or op =? 70 or op =? 60) {h=xe_host[0].nd_hint(n ta h)}
+        tb=tu_prune(check_expr(b h))
+    }
+    if xe_types[0].ptr[ta].kind =? 'secret' or xe_types[0].ptr[tb].kind =? 'secret' {return xe_host[0].secret(n a b)}
+    # Static-width exact intermediates fused before scalar arithmetic is chosen.
+    let mi=xe_math_int[0]
+    if (XEWord(xe_nodes[0].ptr[a].type) =? mi or XEWord(xe_nodes[0].ptr[b].type) =? mi) and xe_dewy_at(xe_nodes[0].ptr[n].pos) {
+        let wa=XEWord(exact_math_operand(a))
+        let wb=XEWord(exact_math_operand(b))
+        let ua=XEWord(xe_nodes[0].ptr[wa].type)
+        let ub=XEWord(xe_nodes[0].ptr[wb].type)
+        if ua not=? mi and ub not=? mi and xe_word(ua) and xe_word(ub) {
+            a=wa
+            b=wb
+            xe_nodes[0][n].a=int32<overflow='wrap'>(a)
+            xe_nodes[0][n].b=int32<overflow='wrap'>(b)
+            ta=tu_prune(ua)
+            tb=tu_prune(ub)
+        }
+    }
+    # Two plain numbers, neither a written fraction nor a character: the arithmetic.
+    if not is_shift and ta not=? mi and tb not=? mi {
+        let fka=xe_types[0].ptr[ta].kind
+        let fkb=xe_types[0].ptr[tb].kind
+        if (fka =? 'int_' or fka =? 'float_') and (fkb =? 'int_' or fkb =? 'float_') and not (op =? 69 and fka =? 'float_') {
+            let ak=xe_nodes[0].ptr[a].kind
+            let bk2=xe_nodes[0].ptr[b].kind
+            if ak not=? 'float_lit' and bk2 not=? 'float_lit' and ak not=? 'str_lit' and bk2 not=? 'str_lit' {return xw_numeric(n int32<overflow='wrap'>(op) a b ta tb is_cmp)}
+        }
+    }
+    xe_host[0].binary_rest(n expected a b ta tb hint flags)
+}
+# An integer type without an overflow policy (types.jo is_int, int_policy).
+xe_word=(t0:XEWord):>bool=>$unsafe {
+    let t=tu_prune(t0)
+    xe_types[0].ptr[t].kind =? 'int_' and (t =? xe_math_int[0] or xe_types[0].ptr[t].st =? 0)
+}
 # Host records and Jo callers take machine words: the ABI of `(int, int) -> int`.
 check_expr=(n0:int64 expected0:int64):>int64=>$unsafe {
     let n=XEWord(n0)
@@ -197,7 +411,7 @@ check_expr=(n0:int64 expected0:int64):>int64=>$unsafe {
     let k=node[0].kind
     if k =? 'ident' {return xe_ident(n expected)}
     if k =? 'int_lit' {return xl_check_int(n expected)}
-    if k =? 'binary' {return xl_finish(n xe_host[0].binary(n expected) expected)}
+    if k =? 'binary' {return xl_finish(n xe_binary(n expected) expected)}
     if k =? 'call' {return xe_host[0].call(n expected)}
     if k =? 'field' {return xs_field(n expected)}
     if k =? 'if_' {return xl_finish(n xf_if(n xl_expected(expected)) expected)}

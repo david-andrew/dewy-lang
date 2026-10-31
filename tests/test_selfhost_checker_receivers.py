@@ -8,7 +8,7 @@ from tests.test_selfhost_checker_literals import DRIVER as LITERALS
 from tests.test_selfhost_checker_members import DRIVER as MEMBERS
 from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER, compare
 
-STEMS = ('checker_literals', 'checker_members', 'checker_indexes', 'checker_receivers')
+STEMS = ('checker_exact', 'checker_literals', 'checker_members', 'checker_indexes', 'checker_receivers')
 BASE = RESOLVER.split('main = ():')[0]
 DRIVER = (MEMBERS + LITERALS.split('main = ():')[0][len(BASE):]
           + INDEXES.split('main = ():')[0][len(BASE):].split('DEWY = 1 << 40')[0] + r'''

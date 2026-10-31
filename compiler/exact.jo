@@ -1,4 +1,5 @@
 use 'checker_state.dewy'
+use 'checker_exact.dewy'
 use 'exact_reset_loop.jo'
 use 'ir_types.dewy'
 use 'checker_tokens.dewy'
@@ -27,6 +28,10 @@ use 'util.jo'
 use 'facts.jo'
 use 'lower.jo'
 use 'node_store.dewy'
+
+# exact_potential and exact_math_operand run in checker_exact.dewy.
+exact_query_input = CheckerExactInput(&nodes, &lists, &types, &files, &T_INT, &T_U64, &T_MATH_INT)
+exact_query_binding = checker_exact_bind(&exact_query_input)
 
 # Secret wrapping changes visibility, never an integer's arithmetic domain.
 exact_representation = (t0: int) -> int:
@@ -109,28 +114,6 @@ exact_type = (t0: int, pos: int) -> bool:
     # Jo's implementation word remains a machine word. Narrow Jo integers
     # and every Dewy fixed-width integer have storage-only widths.
     dewy_at(pos) or types[t].bits < 64
-
-# Semantic int64 arithmetic returns int. A bounded expression can retain its
-# static-width computation behind the representation boundary until a consumer
-# needs a tagged value. Peeling this boundary never narrows the value.
-exact_math_operand = (n: int) -> int:
-    if ntype(n) != T_MATH_INT: return n
-    value = n
-    # A checked reveal/wrap pair changes visibility, never representation.
-    # The caller must already see int before looking through these wrappers.
-    loop nodes[value].kind == .conv and nodes[value].aux == i32(int(CV.none_)):
-        child = int(nodes[value].a)
-        if exact_representation(ntype(child)) != T_MATH_INT: break
-        value = child
-    if nodes[value].kind == .int_lit and (not has_flag(value, NF_U64) or nodes[value].ival >= 0):
-        word = nodes.len()
-        nodes.push(nodes[value])
-        nodes[word].type = i32(T_INT)
-        return word
-    if nodes[value].kind == .conv and nodes[value].aux == i32(int(CV.int_)):
-        a = int(nodes[value].a)
-        if ntype(a) == T_INT and exact_type(ntype(a), nodes[value].pos): return a
-    n
 
 # Distribute a demanded scalar conversion into selected value arms. This
 # preserves evaluation order and puts the fit check on the executed arm only.
@@ -2022,24 +2005,6 @@ exact_unsigned_fact = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int
         fact_difference(s, b, v, -int(xl))
     v
 
-
-# Before the boundary walk, identify conversions whose source is still an
-# arithmetic value. Its declared storage type is not an intermediate bound.
-exact_potential = (n: int) -> bool:
-    if n <= 0: return false
-    if exact_operation(n): return true
-    k = nodes[n].kind
-    if k == .binary and (nodes[n].op == i32(int(Tok.amp)) or nodes[n].op == i32(int(Tok.pipe)) or nodes[n].op == i32(int(Tok.caret))):
-        return exact_potential(int(nodes[n].a)) or exact_potential(int(nodes[n].b))
-    if k == .conv and (nodes[n].aux == i32(int(CV.int_)) or nodes[n].aux == i32(int(CV.none_))): return exact_potential(int(nodes[n].a))
-    if k == .if_ or k == .iflet: return exact_potential(int(nodes[n].b)) or exact_potential(int(nodes[n].c))
-    if k == .coalesce: return exact_potential(int(nodes[n].b))
-    if k == .match_:
-        loop arm in kids(n):
-            if exact_potential(int(nodes[arm].b)): return true
-    if k == .block and nodes[n].aux != 0: return exact_potential(block_value(n))
-    if k == .exprstmt: return exact_potential(int(nodes[n].a))
-    false
 
 # A deliberate conversion to mathematical int is an allocation boundary;
 # evaluating the fixed-width source above it never allocated a bigint.
