@@ -21,6 +21,7 @@ CASE = 'game/headless_window'
 
 def test_pytest_children_see_no_display(compiler, tmp_path):
     assert os.environ.get('DISPLAY') == '' and os.environ.get('WAYLAND_DISPLAY') == ''
+    assert os.environ.get('DEWY_NO_AUDIO') == '1'
     assert 'WAYLAND_SOCKET' not in os.environ
     source = tmp_path / 'game.dewy'
     source.write_text(GAME)
