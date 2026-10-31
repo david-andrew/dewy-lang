@@ -1037,7 +1037,8 @@ fact_length_through = (e: int, s: mut FactState, depth: int) -> int:
     if held.len() == 0: return 0
     fact_project(s, held[held.len() - 1], -1, false, T_INT)
 
-# Reviewed nonempty requirements: an array's `min(xs)` and `max(xs)`, a set's
+# Reviewed nonempty requirements: an array's `min(xs)` and `max(xs)` (an N-D
+# array's: of its flat storage, `m.data.length >? 0`), a set's
 # `s.pop()` (any member) and a heap's `h.pop()`, `h.peek()` and
 # `h.peek_priority()` need an element, so `xs.length >? 0` is the call's
 # obligation, as an index's bound is (each library body states it as its one
@@ -1061,6 +1062,8 @@ fact_nonempty_call = (n: int) -> bool:
     path = files[pos_file(nodes[d].pos)].path
     if name == fact_name_least or name == fact_name_most:
         rk = tkind(fact_type(ntype(kid(n, 0))))
+        # (an N-D array's reduces its flat storage: `m.data.length >? 0`)
+        if path == lib_dir + "/std/nd.jo": return is_nd(representation_type(ntype(kid(n, 0))))
         return path == lib_dir + "/core/array.jo" and (rk == .array or rk == .fixed)
     if path == lib_dir + "/std/heap.jo": return true
     name == fact_name_take and path == lib_dir + "/std/dewy_sets.jo" and is_dewy_set_type(representation_type(ntype(kid(n, 0))))
@@ -1068,7 +1071,8 @@ fact_nonempty_call = (n: int) -> bool:
 fact_nonempty_check = (n: int, s: mut FactState, values: int[]):
     if fact_speculating != 0 or not (fact_policy == .RequireStatic or fact_query): return
     t = fact_type(ntype(kid(n, 0)))
-    length = if tkind(t) == .fixed: fact_constant(s, fixed_len(t)) else: fact_project(s, fact_map_receiver(s, n, values[0]), -1, false, T_INT)
+    nd = is_nd(representation_type(t))
+    length = if tkind(t) == .fixed: fact_constant(s, fixed_len(t)) else if nd: fact_nd_data_length(s, fact_map_receiver(s, n, values[0])) else: fact_project(s, fact_map_receiver(s, n, values[0]), -1, false, T_INT)
     # (the constant first: the state is taken before later arguments run)
     one = fact_constant(s, 1)
     c = fact_compare(s, .ge, length, one)
@@ -1077,8 +1081,9 @@ fact_nonempty_check = (n: int, s: mut FactState, values: int[]):
         return
     if c == 1: return
     receiver = wit_text(kid(n, 0))
+    if nd and receiver != "": receiver = "{receiver}.data"
     rk = tkind(t)
-    what = if rk == .array or rk == .fixed: "array" else if is_dewy_set_type(representation_type(ntype(kid(n, 0)))): "set" else: "heap"
+    what = if rk == .array or rk == .fixed or nd: "array" else if is_dewy_set_type(representation_type(ntype(kid(n, 0)))): "set" else: "heap"
     shown = if receiver != "": "`{receiver}`" else: "the {what}"
     relation = if receiver != "": "{receiver}.length >? 0" else: ""
     if c == 0:
@@ -1087,6 +1092,100 @@ fact_nonempty_check = (n: int, s: mut FactState, values: int[]):
         wit_fail(nodes[n].pos, "{shown} is empty")
         return
     wit_unknown(n, fact_bound(s, length), "{shown} is nonempty", 0, relation)
+
+# A program's `sum(xs)` of checked 64-bit integers (core/array.jo; an N-D
+# array's sums its flat storage, std/nd.jo) fails only when a running sum
+# leaves the element type, so "the exact sum fits" is the caller's obligation.
+# In any order every prefix lies between the sum of the elements' negative
+# lower bounds and the sum of their positive upper bounds: a literal's
+# inventory term by term, else the element hull (a fill's value, a
+# comprehension's pushes, the type's range) times the length's upper bound.
+# Demand: these calls only; O(1), or O(elements <= 64) for an inventory.
+fact_name_sum = 0
+fact_exact_sum_call = (n: int) -> bool:
+    if nkids(n) != 1 or nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0: return false
+    d = int(fns[int(nodes[n].sym)].decl)
+    if d == 0 or pos_in_lib(nodes[n].pos): return false
+    if fact_name_sum == 0: fact_name_sum = intern("sum")
+    if int(nodes[d].name) != fact_name_sum: return false
+    fact_exact_sum_element(fact_type(ntype(kid(n, 0))), files[pos_file(nodes[d].pos)].path) != 0
+
+# (the checked 64-bit element type of a summed array, or 0)
+fact_exact_sum_element = (t: int, path: str) -> int:
+    e = 0
+    if is_nd(representation_type(t)):
+        if path == lib_dir + "/std/nd.jo": e = nd_elem(representation_type(t))
+    else if path == lib_dir + "/core/array.jo" and (tkind(t) == .array or tkind(t) == .fixed): e = telem(t)
+    if e == 0: return 0
+    e = fact_type(e)
+    if not is_int(e) or e == T_MATH_INT or types[e].bits != 64 or int_policy(e) != 0: return 0
+    e
+
+fact_exact_sum_check = (n: int, s: mut FactState, values: int[]):
+    if fact_speculating != 0 or not (fact_policy == .RequireStatic or fact_query): return
+    t = fact_type(ntype(kid(n, 0)))
+    d = int(fns[int(nodes[n].sym)].decl)
+    e = fact_exact_sum_element(t, files[pos_file(nodes[d].pos)].path)
+    base = fact_map_receiver(s, n, values[0])
+    nd = is_nd(representation_type(t))
+    if nd: base = fact_project(s, base, intern("data"), false, mk_array(nd_elem(representation_type(t))))
+    length = if tkind(t) == .fixed: fact_constant(s, fixed_len(t)) else: fact_project(s, base, -1, false, T_INT)
+    hull = fact_element_hull(s, base, e)
+    proven = fact_exact_sum_fits(s, base, fact_bound(s, length), hull, e)
+    if fact_probe_on:
+        fact_probe_record(n, proven)
+        return
+    if proven: return
+    receiver = wit_text(kid(n, 0))
+    shown = if receiver != "": "`{receiver}`" else: "the array"
+    wit_unknown(n, hull, "the exact sum of {shown} fits `{dt(e)}`", 0, "", "bounds on its elements and length that keep every running sum in range")
+
+# What every element of base (of type e) lies in: a fill's value, else the
+# comprehension hull within e's range. O(1) indexed lookups.
+fact_element_hull = (s: mut FactState, base: int, e: int) -> FactBound:
+    copy = fact_projection_find(s, base, FACT_ELEMENT_COPY, false)
+    if copy >= 0: return fact_bound(s, s.projections[copy].value)
+    b = fact_domain(e)
+    if fact_hull_owner == fact_owner:
+        i = fact_projection_find(s, base, FACT_ELEMENT_VALUE, false)
+        if i >= 0:
+            h = fact_bound(s, s.projections[i].value)
+            if not h.wide: b = FactBound(max(b.lo, h.lo), min(b.hi, h.hi), h.nz, h.reason, h.witness)
+    b
+
+# Whether every running sum of base's elements fits e (int64 or uint64):
+# the positive upper bounds' total within e's maximum and the negative lower
+# bounds' within its minimum, as unsigned magnitudes. O(parts).
+fact_exact_sum_fits = (s: mut FactState, base: int, count: FactBound, hull: FactBound, e: int) -> bool:
+    unsigned = e == T_U64
+    top = if unsigned: u64(18446744073709551615) else: u64(FACT_MAX)
+    bottom = if unsigned: u64(0) else: top + u64(1)
+    up = u64(0); down = u64(0)
+    parts = fact_inventory(s, base)
+    if parts.len() > 0:
+        loop p in parts:
+            m = fact_exact_sum_magnitudes(fact_bound(s, p), unsigned)
+            if m.0 > top - up or m.1 > bottom - down: return false
+            up += m.0; down += m.1
+        return true
+    if count.wide: return false
+    if count.hi <= 0: return true
+    m = fact_exact_sum_magnitudes(hull, unsigned)
+    length = u64(count.hi)
+    (m.0 == u64(0) or length <= top / m.0) and (m.1 == u64(0) or length <= bottom / m.1)
+
+# (a bound's positive upper end and negative lower end as magnitudes; a wide
+# one is the type's whole range)
+fact_exact_sum_magnitudes = (b: FactBound, unsigned: bool) -> (u64, u64):
+    up = u64(0); down = u64(0)
+    if unsigned:
+        up = if b.wide: u64(18446744073709551615) else: u64(b.hi xor FACT_MIN)
+        return (up, down)
+    hi = if b.wide: FACT_MAX else: b.hi
+    lo = if b.wide: FACT_MIN else: b.lo
+    if hi > 0: up = u64(hi)
+    if lo < 0: down = u64(-(lo + 1)) + u64(1)
+    (up, down)
 
 # The bundled delimiter split always appends its final part when the
 # separator is nonempty. Empty separators and whitespace splitting differ.
@@ -4431,6 +4530,17 @@ fact_rational_constructor = (n: int, count: int = 2) -> bool:
     t = fact_quantity_number(ntype(kid(n, count - 1)))
     is_int(t) or t == T_MATH_INT
 
+# A program's exact `a.divmod(b)` (lib/rational.dewy): its one failure is a
+# zero divisor, the caller's obligation as `a // b`'s (fact_divisor reads b's
+# numerator). Library calls keep the callee's panic (effects.jo). O(1).
+fact_name_divmod = 0
+fact_rational_divmod = (n: int) -> bool:
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) != 2: return false
+    d = int(fns[int(nodes[n].sym)].decl)
+    if d == 0: return false
+    if fact_name_divmod == 0: fact_name_divmod = intern("divmod")
+    int(nodes[d].name) == fact_name_divmod and not pos_in_lib(nodes[n].pos) and files[pos_file(nodes[d].pos)].path == lib_dir + "/rational.dewy"
+
 # (a quantity's number type, as lowering erases the unit; any other type's representation)
 fact_quantity_number = (t0: int) -> int:
     t = prune(t0)
@@ -7447,7 +7557,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
                 if fact_parallel_array(n):
                     values.push(n)
                     values.push(kid(n, 0))
-            if result_active or proof_active or fact_divisors.has(n) or fact_rational_constructor(n) or fact_rational_promotion(n): values.push(n)
+            if result_active or proof_active or fact_divisors.has(n) or fact_rational_constructor(n) or fact_rational_promotion(n) or fact_rational_divmod(n): values.push(n)
             else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and fact_string_call(n) >= 2: values.push(n)
             else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and fact_rational_zero_test(n) >= 0:
                 values.push(n)
@@ -7461,7 +7571,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
                 values.push(n)
                 values.push(kid(n, first))
                 values.push(kid(n, first + 1))
-            else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and (nd_mutable_call(n) or fact_array_call(n) != 0 or fact_map_call(n) != 0 or fact_nonempty_call(n) or fact_pool_call(n) != 0):
+            else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and (nd_mutable_call(n) or fact_array_call(n) != 0 or fact_map_call(n) != 0 or fact_nonempty_call(n) or fact_exact_sum_call(n) or fact_pool_call(n) != 0):
                 active.push(n)
                 values.push(n)
                 loop j in [0..nkids(n)): values.push(kid(n, j))
@@ -7622,7 +7732,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
         # (a length-preserving call's length is its receiver's: `let ks = d.keys` then `ks.values`
         # needs ks's definition)
         else if k == .call and (fact_copy_length_call(n) or fact_endpoint_call(n) != 0 or fact_same_length_call(n)): values.push(kid(n, 0))
-        else if k == .call and nodes[n].aux == 0 and not result_active and not proof_active and not fact_divisors.has(n) and not fact_rational_constructor(n) and not fact_rational_promotion(n) and fact_floor_call(n) == 0 and fact_string_call(n) == 0 and not fact_extremum_call(n) and not fact_empty_array_call(n) and not fact_entry_count_call(n) and not fact_split_call(n) and not fact_words_call(n) and not fact_lines_call(n) and not fact_search_call(n) and not fact_affix_call(n) and not fact_parallel_array(n) and not ref_refined_result(int(fns[int(nodes[n].sym)].ret)):
+        else if k == .call and nodes[n].aux == 0 and not result_active and not proof_active and not fact_divisors.has(n) and not fact_rational_constructor(n) and not fact_rational_promotion(n) and not fact_rational_divmod(n) and fact_floor_call(n) == 0 and fact_string_call(n) == 0 and not fact_extremum_call(n) and not fact_empty_array_call(n) and not fact_entry_count_call(n) and not fact_split_call(n) and not fact_words_call(n) and not fact_lines_call(n) and not fact_search_call(n) and not fact_affix_call(n) and not fact_parallel_array(n) and not ref_refined_result(int(fns[int(nodes[n].sym)].ret)):
             # Ordinary summaries start from unknown formals: their return
             # facts do not depend on the actual values. Argument obligations
             # and effects remain separate roots of this slice.
@@ -7851,10 +7961,10 @@ fact_obligation_node = (n: int) -> bool:
         if exact_has_store(n) and not exact_decided(n) or nodes[n].aux == i32(int(CV.refinement)) or nodes[n].aux == i32(int(CV.arr2fixed)): return true
         return nodes[n].aux == i32(int(CV.int_)) and prune(ntype(int(nodes[n].a))) == T_MATH_INT and prune(ntype(n)) != T_MATH_INT
     if k == .call:
-        if wi_fact_calls.has(n) or fact_divisors.has(n) or fact_range_call(n) or nd_mutable_call(n) or fact_rational_constructor(n) and not fact_literal_nonzero(kid(n, 1)): return true
+        if wi_fact_calls.has(n) or fact_divisors.has(n) or fact_range_call(n) or nd_mutable_call(n) or fact_rational_constructor(n) and not fact_literal_nonzero(kid(n, 1)) or fact_rational_divmod(n): return true
         if (fact_floor_call(n) != 0 and not fact_literal_nonzero(kid(n, 1))) or fact_string_call(n) >= 2 or fact_array_call(n) != 0 or fact_power_call(n): return true
         map = fact_map_call(n)
-        if map >= 2 and map <= 4 or fact_nonempty_call(n): return true
+        if map >= 2 and map <= 4 or fact_nonempty_call(n) or fact_exact_sum_call(n): return true
         pool = fact_pool_call(n)
         if pool >= 2 and pool <= 4: return true
         # A fork closure's obligations start from its creator's facts.
@@ -8762,7 +8872,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             floor_probe = fact_probe_on and nkids(n) == 2 and (fact_floor_call(n) == 1 or fact_floor_call(n) == 2)
             # (a divisor's call keeps its two operands: a wrapper takes the
             # obligation along, expr.jo move_divisor)
-            obligation = if values.len() == 2: fact_divisors.get(n) ?? (if fact_rational_constructor(n): 1 else: 0) else: 0
+            obligation = if values.len() == 2: fact_divisors.get(n) ?? (if fact_rational_constructor(n) or fact_rational_divmod(n): 1 else: 0) else: 0
             if obligation != 0:
                 proven = fact_divisor(s, n, values[0], values[1], obligation == 2)
                 if floor_probe: fact_probe_record(n, proven)
@@ -8810,6 +8920,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         array = fact_array_call(n)
         if array != 0: fact_array_call_check(n, s, values, array)
         if fact_nonempty_call(n): fact_nonempty_check(n, s, values)
+        else if fact_exact_sum_call(n): fact_exact_sum_check(n, s, values)
         if array == 4 and (ownership_decls.len() == 0 or not ownership_fact_type(ntype(kid(n, 0)))):
             route = fact_receiver_route(n, s)
             held = fact_route_values(s, route)

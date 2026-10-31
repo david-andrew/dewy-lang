@@ -1,0 +1,12 @@
+# A rational divmod's divisor must be nonzero, as `/`'s: a constant or a guard.
+split=(a:rational b:rational):>int=>{
+    if b =? 0 return 0
+    return a.divmod(b).quotient
+}
+main=()=>{
+    let parts=((-7)/3).divmod(2/5)
+    printl"{parts.quotient} {parts.remainder}"
+    printl((5/3).divmod(2).remainder)
+    printl(split(7/2 1/3))
+    printl(split(7/2 0))
+}

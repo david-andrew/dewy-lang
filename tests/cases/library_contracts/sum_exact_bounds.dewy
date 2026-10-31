@@ -1,0 +1,17 @@
+# sum(xs) of int64 or uint64 needs its exact sum to fit: element bounds
+# times the length, or a literal's elements one by one, prove it.
+main=()=>{
+    let xs:array<int64>=[1 2 3]
+    printl(sum(xs))
+    printl(sum([loop i in [1..4] i]))
+    let high:array<int64>=[9223372036854775806 1]
+    printl(sum(high))
+    let low:array<int64>=[-9223372036854775807 -1]
+    printl(sum(low))
+    printl(sum<uint64>([18446744073709551614 1]))
+    let bytes:array<uint8>=[200 100 7]
+    printl(sum([loop b in bytes int64(b)]))
+    # (unknown length, elements 0 or 1: at most the longest array's length)
+    printl(sum([loop b in bytes if b >? 50 1]))
+    printl(sum(fill(5 1000)))
+}

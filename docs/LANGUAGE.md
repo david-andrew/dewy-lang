@@ -745,8 +745,14 @@ makes its checks and explicit panics panic for every caller.
 `& no panics` forbids it outright, whatever the scope, local asserts included. A library function's
 precondition is the caller's obligation where the library states it: `xs.first`
 and `xs.last`, along with `xs.min_by(key)` and `xs.max_by(key)`, take an array
-with `length >? 0`, as do `min(xs)` and `max(xs)` of an array, a set's `s.pop()`
-and a heap's `h.pop()`, `h.peek()` and `h.peek_priority()`. The key functions retain their own effects. `xs.swap(i j)` and
+with `length >? 0`, as do `min(xs)` and `max(xs)` of an array (of an N-D array `m`,
+`m.data.length >? 0`), a set's `s.pop()`
+and a heap's `h.pop()`, `h.peek()` and `h.peek_priority()`. The key functions retain their own effects.
+`sum(xs)` of `int64` or `uint64` elements needs its exact sum to fit, every running
+sum included: proven from the elements' bounds times the length's (a literal's
+elements one by one, a comprehension's values, a fill), so `sum([loop i in [1..4] i])`
+cannot panic while `sum(xs)` of an unbounded `array<int64>` parameter needs `$runtime_checks`.
+A rational `a.divmod(b)` needs `b not=? 0`, as `a // b` does. `xs.swap(i j)` and
 `xs.insert(value i)` need their positions in bounds, and `text.find(part start)`
 needs `0 <=? start <=? text.length`, so a guarded call cannot panic. `d[k]`, `d[k] += 1` and `d.pop(k)` need the key present, proven by a
 guard (`if k in? d`) or an earlier store into `d[k]` with no other change of

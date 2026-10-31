@@ -1,0 +1,6 @@
+# (a push or an element write after the bound was known drops it)
+main=()=>{
+    let xs:array<int64>=[loop i in [1..4] i]
+    xs.push(9223372036854775807)
+    printl(sum(xs))
+}
