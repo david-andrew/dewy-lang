@@ -1,0 +1,9 @@
+# `xs[u] += 1` with an `int` selector: the guard on the index proves the
+# update, as it does a read.
+bump = (xs:array<int> ids:array<int>):>array<int> => {
+    loop u in ids {
+        if 0 <=? u <? xs.length xs[u] += 1
+    }
+    xs
+}
+main = () => printl(bump([0 0 0] [2 0 2 7 -1]))

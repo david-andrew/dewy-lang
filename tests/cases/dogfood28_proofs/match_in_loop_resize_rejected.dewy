@@ -1,0 +1,14 @@
+# An arm that shrinks the array still changes its length for the next trip.
+total = (xs:array<int>):>int => {
+    let best:int? = none
+    let sum = 0
+    loop i in [0..xs.length) {
+        match best {
+            b:int => { xs.clear() }
+            _ => { best = i }
+        }
+        sum += xs[i]
+    }
+    sum
+}
+main = () => printl(total([1 2 3]))

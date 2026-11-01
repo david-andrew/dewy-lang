@@ -1,0 +1,11 @@
+# The same shape, but the call takes the whole array and may shrink it.
+F:type = [hp:int]
+cull = (@fs:array<F>) => { if fs.length >? 0 fs.pop(); }
+main = () => {
+    let fs = [F[1] F[2] F[3]]
+    let order = [loop i in [0..fs.length) i].sorted(key=(i) => -fs[i].hp)
+    loop i in order {
+        cull(@fs)
+        printl(fs[i].hp)
+    }
+}

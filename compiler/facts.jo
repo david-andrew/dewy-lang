@@ -2438,6 +2438,10 @@ fact_exposed = (p: PlaceIdentity) -> bool:
     # (and so is any Dewy local's that nothing captures, aliases or exposes:
     # `@xs` lends it to that call alone, which fact_forget_mutable_args havocs)
     if flags & FACT_LENT == LF_ADDR and fact_dewy_local(p.declaration): return false
+    # (also when closures capture it only by snapshot: a value capture owns its
+    # copy and reaches no storage of the local; a place capture of an owner
+    # also sets LF_ADDR, so owner types stay exposed, as check.jo capture_in)
+    if flags & FACT_LENT == LF_ADDR | LF_CAPTURED and fact_dewy_local(p.declaration) and not (ownership_decls.len() != 0 and ownership_fact_type(int(locals[p.declaration].type))): return false
     # Only the closed, checked partition ABI supplies this guarantee. Ordinary
     # callers and speculative summaries retain conservative alias invalidation.
     if fact_probe_disjoint != 0 and fact_owner == fact_probe_disjoint and int(locals[p.declaration].owner) == fact_probe_disjoint and tkind(int(locals[p.declaration].type)) == .array and int(locals[p.declaration].flags) & LF_MUTPARAM != 0: return false
@@ -4003,13 +4007,22 @@ fact_changes = (n: int, s: mut FactState, at: int, reason: FactReason = .loop_):
     # unless ownership may move an owner: fact_capture)
     else if k == .call: fact_forget_call(s, n, reason, at)
     else if k == .intrinsic or k == .lambda and ownership_decls.len() != 0 or k == .partial and fact_partial_opaque(n) or k == .fnref and fact_handle_opaque(n): fact_forget(s, at, reason)
-    mask = isolation_children(k)
+    mask = fact_change_children(n)
     if mask < 0: fact_forget(s, at, reason, true); return
     if mask & 1 != 0: fact_changes(int(nodes[n].a), s, at, reason)
     if mask & 2 != 0: fact_changes(int(nodes[n].b), s, at, reason)
     if mask & 4 != 0: fact_changes(int(nodes[n].c), s, at, reason)
     if mask & 16 != 0:
         loop i in [0..nkids(n)): fact_changes(kid(n, i), s, at, reason)
+
+# Runtime children for loop havoc. A match arm's type pattern binds a fresh
+# arm-local and evaluates only its type (a refinement is pure); shape and
+# sequence patterns are their field and element patterns. O(1).
+fact_change_children = (n: int) -> int:
+    k = nodes[n].kind
+    if k == .ptype: return 0
+    if k == .pshape or k == .pseq: return 16
+    isolation_children(k)
 
 # `xs.push(xs.pop())` and `xs.insert(xs.pop() i)` of a local array: an element
 # taken from xs goes back into it, so on completion xs has its old length
@@ -9438,7 +9451,13 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                 if source == int(nodes[n].b): fact_selector_sources[int(nodes[n].sym)] = source
         saving = fact_saving
         fact_saving = fact_saved_boolean(int(nodes[n].b))
+        # (an update's captured array selector, `xs[u] += 1` for an `int` u:
+        # the bounds check at its uses is the narrowing's, as for a read)
+        outer = fact_covered
+        init = int(nodes[n].b)
+        if index_update_arrays.len() > 0 and index_update_arrays.has(int(nodes[n].name)) and init != 0 and nodes[init].kind == .conv and nodes[init].aux == i32(int(CV.int_)): fact_covered = init
         r = if nodes[n].b != 0: fact_capture(int(nodes[n].b), s) else: fact_constant(s, 0, n)
+        fact_covered = outer
         fact_saving = saving
         # (the key's identity, still a member of any snapshot it came from)
         if has_flag(n, NF_MAP_KEY):

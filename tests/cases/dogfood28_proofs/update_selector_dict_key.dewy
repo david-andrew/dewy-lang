@@ -1,0 +1,8 @@
+# A dictionary key is no index: an `int` key of an `int64` dictionary still
+# has to fit.
+main = () => {
+    let d:dict<int64 int> = [1 -> 0]
+    let k:int = 10^30
+    d[k] += 1
+    printl(d)
+}

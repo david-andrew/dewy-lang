@@ -809,7 +809,9 @@ wit_index = (n: int, s: mut FactState, index: int, length: int, lo: int, hi: int
     read = "index"
     # (`pair[i]` of a `[int64 string]` reads a fixed array of its positions)
     positions = nodes[a].kind == .ident and starts_with(name_of(int(nodes[a].name)), "$position_values")
-    if wit_hidden_read(n) and not positions: read = if base != "": "the loop's read of `{base}`" else: "the loop's element read"
+    # (an update's captured selector, `xs[u] += 1`, is the source's own index)
+    update = index_update_sources.len() > 0 and nodes[int(nodes[n].b)].kind == .ident and index_update_sources.has(int(nodes[int(nodes[n].b)].name))
+    if wit_hidden_read(n) and not positions and not update: read = if base != "": "the loop's read of `{base}`" else: "the loop's element read"
     i = wit_side(index, if index_node >= 0: index_node else: int(nodes[n].b))
     zero = WitSide(fact_constant(s, 0), 0, "0", false, true)
     size = WitSide(length, a, (if base != "": "{base}.length" else: ""), true)

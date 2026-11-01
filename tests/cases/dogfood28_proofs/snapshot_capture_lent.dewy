@@ -1,0 +1,16 @@
+# A key function captures `fs` by snapshot: it cannot reach `fs` itself, so a
+# call changing one element (`hurt(@fs[i])`) keeps what is known of its length.
+F:type = [hp:int moves:array<int>]
+hurt = (@f:F) => { f.hp -= 1 }
+main = () => {
+    let fs = [F[1 [0]] F[2 [0 1]] F[3 []]]
+    let order = [loop i in [0..fs.length) i].sorted(key=(i) => -fs[i].hp)
+    let round = 0
+    loop round <? 2 {
+        loop i in order {
+            hurt(@fs[i])
+            printl"{round} {i} {fs[i].hp}"
+        }
+        round += 1
+    }
+}

@@ -10645,7 +10645,23 @@ rd_dc_unread=(@reader_ctx:ParserContext at:int64):>void=>$unsafe {
     rd_dc_foreign_habit(@reader_ctx at);
     rd_dc_optional_chain(@reader_ctx at);
     rd_dc_as_precedence(@reader_ctx at);
+    rd_dc_place_type(@reader_ctx at);
     reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file reader_ctx.tokens[at].start) "could not parse the statement starting here; check the syntax near the underlined token");
+}
+
+# (`(g:@Graph)`: the `@` of a mutable parameter written on its type, in the line of an unread
+# statement: it goes before the name)
+rd_dc_place_type=(@reader_ctx:ParserContext at:int64):>void=>$unsafe {
+    let k:int64=at
+    loop (reader_ctx.tokens[(int64<overflow='wrap'>(k) + 2)].kind not=? 'eof') and (not reader_ctx.tokens[(int64<overflow='wrap'>(k) + 1)].newline) and (not reader_ctx.tokens[(int64<overflow='wrap'>(k) + 2)].newline) {
+        let after:DewyLexeme=reader_ctx.tokens[(int64<overflow='wrap'>(k) + 3)]
+        if ((((reader_ctx.tokens[k].kind =? 'identifier') and (reader_ctx.tokens[(int64<overflow='wrap'>(k) + 1)].symbol =? 'colon')) and (reader_ctx.tokens[(int64<overflow='wrap'>(k) + 2)].symbol =? 'at')) and (after.kind =? 'identifier')) and (not after.newline) {
+            let name:string=rd_dn_payload(@reader_ctx reader_ctx.tokens[k])
+            let type_name:string=rd_dn_payload(@reader_ctx after)
+            reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file reader_ctx.tokens[(int64<overflow='wrap'>(k) + 2)].start) "a mutable parameter takes `@` before its name, not on its type: write `@{name}:{type_name}`, and pass it as `@place` at the call");
+        }
+        k = (int64<overflow='wrap'>(k) + 1)
+    }
 }
 
 # (`data[i] as int << 16`: `as` binds looser than arithmetic, so the operator continues the

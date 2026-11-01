@@ -3438,6 +3438,7 @@ index_update_path = (n: int) -> int[]:
 # Capture an index even when it is a variable: the update's right side may
 # change that variable before the selected value is written back.
 index_update_sources: {int: int} = {}   # a captured index's name -> the expression it holds (for messages)
+index_update_arrays: {int: bool} = {}   # captured names used only to index arrays (facts.jo)
 index_update_capture = (ix: int, stmts: mut int[]) -> int:
     pos = nodes[ix].pos
     elem_tmp_n += 1
@@ -4177,6 +4178,8 @@ assign_update = (s: int, lt: int, other: int, code: int) -> int:
                     nodes[d].name = i32(nm)
                     nodes[d].b = i32(ib)
                     index_update_sources[nm] = ib
+                    rk = types[representation_type(ntype(int(nodes[x].a)))].kind
+                    if rk == .array or rk == .fixed: index_update_arrays[nm] = true
                     add_flag(ib, NF_CHECKED)
                     check_stmt(d)
                     pre.insert(0, d)

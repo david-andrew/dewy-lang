@@ -1,0 +1,7 @@
+# Unguarded, the missing obligation is the index's bounds (which also make
+# the `int` fit), not a conversion to int64.
+bump = (xs:array<int> ids:array<int>):>array<int> => {
+    loop u in ids xs[u] += 1
+    xs
+}
+main = () => printl(bump([0 0 0] [2 0]))

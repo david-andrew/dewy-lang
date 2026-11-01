@@ -1,0 +1,19 @@
+# A `match` with type patterns inside a loop writes only what its arms
+# write, so the loop's `i <? fs.length` survives it.
+F:type = [hp:int name:string]
+weakest = (fs:array<F>):>int => {
+    let best:int? = none
+    let seen = 0
+    loop i in [0..fs.length) {
+        if fs[i].hp <? 0 continue
+        match best {
+            b:int => { seen += b }
+            _ => { best = i }
+        }
+        seen += fs[i].hp
+    }
+    seen
+}
+main = () => {
+    printl(weakest([F[3 "a"] F[1 "b"] F[-2 "c"] F[5 "d"]]))
+}

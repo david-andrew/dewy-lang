@@ -136,7 +136,20 @@ rt_dc_unread = (at: int):
     rt_dc_foreign_habit(at)
     rt_dc_optional_chain(at)
     rt_dc_as_precedence(at)
+    rt_dc_place_type(at)
     fatal(mkpos(dc_parser.file, dc_parser.tokens[at].start), "could not parse the statement starting here; check the syntax near the underlined token")
+
+# (`(g:@Graph)`: the `@` of a mutable parameter written on its type, in the line of an unread
+# statement: it goes before the name)
+rt_dc_place_type = (at: int):
+    k = at
+    loop dc_parser.tokens[k + 2].kind != .eof and not dc_parser.tokens[k + 1].newline and not dc_parser.tokens[k + 2].newline:
+        after = dc_parser.tokens[k + 3]
+        if dc_parser.tokens[k].kind == .identifier and dc_parser.tokens[k + 1].symbol == .colon and dc_parser.tokens[k + 2].symbol == .at and after.kind == .identifier and not after.newline:
+            name = rt_dn_payload(dc_parser.tokens[k])
+            type_name = rt_dn_payload(after)
+            fatal(mkpos(dc_parser.file, dc_parser.tokens[k + 2].start), "a mutable parameter takes `@` before its name, not on its type: write `@{name}:{type_name}`, and pass it as `@place` at the call")
+        k += 1
 
 # (`data[i] as int << 16`: `as` binds looser than arithmetic, so the operator continues the
 # type, in the line of an unread statement: parenthesize the conversion)
