@@ -1,0 +1,109 @@
+# Line breaking two ways: greedy first-fit and a minimum-raggedness dynamic
+# program (a line costs the square of its trailing space; the last line is
+# free). Both layouts are printed fully justified, the extra spaces going to
+# the leftmost gaps, with each layout's total cost.
+
+const TEXT = "Dewy reads like a scripting language but compiles to tight machine code. Every index, division and narrowing is proven safe when it compiles, handled as a value, or checked because the author asked. Short words pack well; extraordinarily long words do not."
+
+const WIDTH = 30
+
+words_of = (text:string):>array<string> => [loop w in text.split(" ") if w.length >? 0 w]
+
+# Greedy: put each word on the current line while it fits.
+greedy = (words:array<string> width:int):>array<array<string>> => {
+    let lines:array<array<string>> = []
+    let line:array<string> = []
+    let used = 0
+    loop w in words {
+        if line.length >? 0 and used + 1 + w.length >? width {
+            lines.push(line)
+            line = []
+            used = 0
+        }
+        used += if line.length =? 0 w.length else 1 + w.length
+        line.push(w)
+    }
+    if line.length >? 0 lines.push(line)
+    lines
+}
+
+# Minimum raggedness: best[i] is the least cost of setting words i.. and
+# cut[i] the index just past the first line of that best setting.
+balanced = (words:array<string> width:int):>array<array<string>> => {
+    let n = words.length
+    let best = [loop _ in [0..n] 0]
+    let cut = [loop _ in [0..n] n]
+    loop k in [0..n) {
+        let i = n - 1 - k
+        best[i] = -1
+        let used = -1
+        loop j in [i..n) {
+            used += 1 + words[j].length
+            if used >? width and j >? i break
+            let slack = width - used
+            let cost = (if j =? n - 1 0 else slack * slack) + best[j + 1]
+            if best[i] <? 0 or cost <? best[i] {
+                best[i] = cost
+                cut[i] = j + 1
+            }
+        }
+    }
+    let lines:array<array<string>> = []
+    let i = 0
+    loop i <? n {
+        let j = max(cut[i] i + 1)
+        lines.push(words[$clamp i..j))
+        i = j
+    }
+    lines
+}
+
+letters = (line:array<string>):>int => {
+    let total = 0
+    loop w in line total += w.length
+    total
+}
+
+line_width = (line:array<string>):>int => letters(line) + line.length - 1
+
+cost = (lines:array<array<string>> width:int):>int => {
+    let total = 0
+    loop k in [0..lines.length - 1) {
+        let slack = width - line_width(lines[k])
+        total += slack * slack
+    }
+    total
+}
+
+# Spread the spare spaces over the gaps, leftmost gaps first.
+justify = (line:array<string> width:int last:bool):>string => {
+    if last or line.length <? 2 return line.join(" ")
+    let gaps = line.length - 1
+    let spare = width - letters(line)
+    let parts:array<string> = []
+    loop k in [0..gaps) {
+        let pad = spare // gaps + (if k <? spare % gaps 1 else 0)
+        parts.push("{line[k]}{" " * pad}")
+    }
+    parts.push(line[end])
+    parts.join("")
+}
+
+show = (title:string lines:array<array<string>> width:int) => {
+    printl"{title} (cost {cost(lines width)})"
+    printl"+{"-" * width}+"
+    loop k in [0..lines.length) {
+        let text = justify(lines[k] width k =? lines.length - 1)
+        printl"|{text}{" " * (width - text.length)}|"
+    }
+    printl"+{"-" * width}+"
+}
+
+main = () => {
+    let words = words_of(TEXT)
+    printl"{words.length} words, width {WIDTH}"
+    show("greedy" greedy(words WIDTH) WIDTH)
+    show("balanced" balanced(words WIDTH) WIDTH)
+    let narrow = 12
+    show("balanced, narrow" balanced(words_of("a tiny column of short words wraps often") narrow) narrow)
+}

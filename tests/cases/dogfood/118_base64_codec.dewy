@@ -1,0 +1,85 @@
+# Base64 by hand: encode text bytes three at a time into four symbols with
+# '=' padding, decode them back with validation (bad symbol, bad length,
+# misplaced padding), and show the round trip for a few samples.
+
+const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+DecodeError:type = type of error & [message:string]
+
+encode = (text:string):>string => {
+    let data = text as array<uint8>
+    let symbols = ALPHABET.chars
+    let out:array<string> = []
+    let n = data.length
+    let whole = n - n % 3
+    loop i in [0, 3..n - 2) {
+        let v = ((data[i] as int) << 16) | ((data[i + 1] as int) << 8) | (data[i + 2] as int)
+        loop shift in [18 12 6 0] out.push(symbols[(v >> shift) & 63])
+    }
+    let rest = n - whole
+    if rest =? 1 {
+        let v = (data[n - 1] as int) << 16
+        out.push(symbols[(v >> 18) & 63])
+        out.push(symbols[(v >> 12) & 63])
+        out.push("==")
+    } else if rest =? 2 {
+        let v = ((data[n - 2] as int) << 16) | ((data[n - 1] as int) << 8)
+        out.push(symbols[(v >> 18) & 63])
+        out.push(symbols[(v >> 12) & 63])
+        out.push(symbols[(v >> 6) & 63])
+        out.push("=")
+    }
+    out.join("")
+}
+
+# Each symbol's six-bit value, or none for a character outside the alphabet.
+value_of = (c:string):>int? => {
+    let symbols = ALPHABET.chars
+    loop k in [0..symbols.length) if symbols[k] =? c return k
+    none
+}
+
+decode = (code:string):>string | DecodeError => {
+    let chars = code.chars
+    if chars.length % 4 not=? 0 return DecodeError["length {chars.length} is not a multiple of 4"]
+    let bytes:array<uint8> = []
+    loop g in [0..chars.length // 4) {
+        let quad = chars[4 * g..4 * g + 4)
+        let pad = 0
+        let v = 0
+        loop k in [0..4) {
+            let c = quad[k]
+            if c =? "=" {
+                if 4 * g + 4 <? chars.length or k <? 2 return DecodeError["padding inside the text at {4 * g + k}"]
+                pad += 1
+                v = v << 6
+                continue
+            }
+            if pad >? 0 return DecodeError["symbol after padding at {4 * g + k}"]
+            let x = value_of(c)
+            if x is? none return DecodeError["bad symbol '{c}' at {4 * g + k}"]
+            v = (v << 6) | x
+        }
+        bytes.push(((v >> 16) & 255) as uint8)
+        if pad <? 2 bytes.push(((v >> 8) & 255) as uint8)
+        if pad <? 1 bytes.push((v & 255) as uint8)
+    }
+    let text = bytes as string | none
+    if text is? none return DecodeError["the bytes are not UTF-8 text"]
+    text
+}
+
+const SAMPLES = ["" "f" "fo" "foo" "foob" "fooba" "foobar" "Dewy proves its indices." "naïve café"]
+
+main = () => {
+    loop s in SAMPLES {
+        let code = encode(s)
+        let back = decode(code)
+        let ok = if back is? string back =? s else false
+        printl"{"\"{s}\"":<28} -> {code:<36} round trip {ok}"
+    }
+    loop bad in ["Zm9v!A==" "Zm9vY" "Zg==Zm9v" "Zm=v"] {
+        let result = decode(bad)
+        if result is? DecodeError printl"{bad:<10} error: {result.message}" else printl"{bad:<10} decoded \"{result}\""
+    }
+}

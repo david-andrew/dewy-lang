@@ -1,0 +1,108 @@
+# Studio booking: requests are [start, end) hour intervals with a fee. Merge
+# the requested time into busy blocks, find the free gaps in the day, then
+# choose the most profitable set of non-overlapping requests (weighted
+# interval scheduling: sort by end, binary search the last compatible job).
+
+Job:type = [name:string start:int finish:int fee:int]
+
+const OPEN = 8
+const CLOSE = 22
+
+const REQUESTS = """
+podcast 9 11 120
+band 10 12 300
+voiceover 11 12 90
+choir 13 16 260
+mixing 15 17 150
+lesson 16 18 80
+dj 18 22 400
+quartet 17 20 220
+demo 20 21 70
+"""
+
+parse = (text:string):>array<Job> => {
+    let jobs:array<Job> = []
+    loop line in text.split("\n") {
+        let parts = [loop p in line.split(" ") if p.length >? 0 p]
+        if parts.length not=? 4 continue
+        let [name start finish fee] = parts
+        jobs.push(Job[name to_int(start) ?? 0 to_int(finish) ?? 0 to_int(fee) ?? 0])
+    }
+    jobs
+}
+
+# Busy blocks: sort by start and fuse overlapping or touching intervals.
+merge = (jobs:array<Job>):>array<[int int]> => {
+    let blocks:array<[int int]> = []
+    loop j in jobs.sorted(key=(j) => j.start) {
+        if blocks.length >? 0 and j.start <=? blocks[end][1] {
+            blocks[end][1] = max(blocks[end][1] j.finish)
+        } else {
+            blocks.push([j.start j.finish])
+        }
+    }
+    blocks
+}
+
+gaps = (blocks:array<[int int]>):>array<[int int]> => {
+    let out:array<[int int]> = []
+    let at = OPEN
+    loop [start finish] in blocks {
+        if start >? at out.push([at start])
+        at = max(at finish)
+    }
+    if at <? CLOSE out.push([at CLOSE])
+    out
+}
+
+# The number of jobs (in end order) that finish by time t.
+finished_by = (ends:array<int> t:int):>int => {
+    let lo = 0
+    let hi = ends.length
+    loop lo <? hi {
+        let mid = (lo + hi) // 2
+        if ends[mid] <=? t lo = mid + 1 else hi = mid
+    }
+    lo
+}
+
+# best[k] is the largest fee from the first k jobs in end order.
+schedule = (jobs:array<Job>):>[int array<Job>] => {
+    let order = jobs.sorted(key=(j) => j.finish)
+    let ends = [loop j in order j.finish]
+    let n = order.length
+    let best = [loop _ in [0..n] 0]
+    loop k in [0..n) {
+        let job = order[k]
+        # (finished_by gives at most ends.length = n, but its result carries no bound)
+        let take = job.fee + (best.get(finished_by(ends job.start)) ?? 0)
+        best[k + 1] = max(best[k] take)
+    }
+    # walk back from the end to recover the chosen jobs
+    let chosen:array<Job> = []
+    let k = n
+    loop 0 <? k <=? n {
+        let job = order[k - 1]
+        let p = finished_by(ends job.start)
+        if job.fee + (best.get(p) ?? 0) >=? best[k - 1] {
+            chosen.push(job)
+            k = p
+        } else {
+            k -= 1
+        }
+    }
+    [best[n] chosen.reversed()]
+}
+
+hours = (block:[int int]):>string => "{block[0]}-{block[1]}"
+
+main = () => {
+    let jobs = parse(REQUESTS)
+    printl"{jobs.length} requests"
+    let blocks = merge(jobs)
+    printl"busy: {[loop b in blocks hours(b)].join(", ")}"
+    printl"free: {[loop g in gaps(blocks) hours(g)].join(", ")}"
+    let [total chosen] = schedule(jobs)
+    printl"best takings {total} from {chosen.length} jobs:"
+    loop j in chosen printl"  {j.name:<10} {j.start:>2}-{j.finish:<2} {j.fee:>4}"
+}
