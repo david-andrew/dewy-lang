@@ -1,20 +1,16 @@
 """Intrinsic calls (len, cap, push, pop, clear, syscall, mem_copy, mem_set, panic, bytes here;
-the rest the host's) match frozen Jo."""
+the rest the host's) match frozen Jo. check_intrinsic lives in the expression dispatcher's
+leaf, so its arguments are checked by the real dispatcher (unchecked names are locals)."""
 import pytest
 
 from tests.support import compiler  # noqa: F401
-from tests.selfhost_expr_double import compare_leaf
-from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER
+from tests.test_selfhost_checker_expr import DRIVER as EXPR, STEMS
+from tests.test_selfhost_checker_resolve import compare
 
-STEMS = ('checker_loops', 'checker_for_loops', 'checker_intrinsics')
-
-DRIVER = RESOLVER.split('main = ():')[0] + r'''
+DRIVER = EXPR + r'''
 drv_loops: ValueLoop[]
 drv_refine = false
 drv_grow = false
-xn_check_stub = (n: int, expected: int) -> int:
-    events.push("check:{n}:{expected}")
-    int(nodes[n].type)
 xn_rest = (n: int, id: int, args: int[], expected: int) -> int:
     events.push("rest:{n}:{id}:{args}:{expected}")
     T_STR
@@ -46,7 +42,18 @@ xn_mutation = (n: int, r: int) -> int:
 drv_host = CheckerIntrinsicHost(xn_rest, xn_nargs, xn_error, xn_coerce_stub, xn_length, xn_resize, xn_place, xn_mutation)
 drv_input = CheckerIntrinsicInput(&nodes, &lists, &types, &structs, &files, &drv_loops, &drv_refine, &T_VOID, &T_INT, &T_STR, &T_U8, &T_RAWPTR, &T_NEVER, &drv_host)
 xn_binding = checker_intrinsics_bind(&drv_input)
+drv_name = 100
 typed = (k: NK, t: int, flags: int = 0) -> int:
+    if k == .ident and flags & 128 == 0:
+        # (an unchecked name: a local of type t, bound in scope)
+        drv_name += 1
+        loop xe_scope.syms.len() <= drv_name: xe_scope.syms.push(0)
+        xe_scope.syms[drv_name] = sym_of(.local, local_of(t, 1))
+        loop xe_scope.top.len() <= drv_name: xe_scope.top.push(-1)
+        xe_scope.top[drv_name] = drv_name
+        named = node(.ident)
+        nodes[named].name = i32(drv_name); nodes[named].flags = i32(flags)
+        return named
     n = node(k)
     nodes[n].type = i32(t); nodes[n].flags = i32(flags)
     n
@@ -60,7 +67,7 @@ run = (id: int, args: int[], expected: int = 0):
 
 MAIN = r'''
 main = ():
-    prepare()
+    prepare_expr()
     arr = int(tb_mk_array(T_INT))
     # len and cap: the argument checked once, then int
     run(1, [typed(.ident, arr)])
@@ -115,7 +122,7 @@ main = ():
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_intrinsics_twins(compiler, tmp_path, release):  # noqa: F811
-    out = compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'xn_check_stub', extra_stems=STEMS)
+    out = compare(compiler, tmp_path, release, DRIVER + MAIN, extra_stems=STEMS)
     assert out.endswith(b'ok\n') and b'length:' in out and b'rest:' in out and b'mutation:' in out
 
 
@@ -144,12 +151,12 @@ def test_checker_intrinsics_twins(compiler, tmp_path, release):  # noqa: F811
 def test_checker_intrinsics_errors(compiler, tmp_path, case, expect):  # noqa: F811
     main = f'''
 main = ():
-    prepare()
+    prepare_expr()
     arr = int(tb_mk_array(T_INT))
     c = nodes.len()
     {case}
     print("unreachable")
 '''
-    output = compare_leaf(compiler, tmp_path, False, DRIVER + main, 'xn_check_stub', status=19, extra_stems=STEMS)
+    output = compare(compiler, tmp_path, False, DRIVER + main, status=19, extra_stems=STEMS)
     last = output.rstrip().split(b'\n')[-1]
     assert last.endswith(expect.split('}')[-1].encode()) and b'unreachable' not in output

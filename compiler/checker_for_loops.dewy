@@ -2,7 +2,7 @@ $runtime_checks
 from p"node_store.dewy" import Node
 from p"checker_types.dewy" import (TypeInfo StructInfo Field TK)
 from p"source_types.dewy" import SrcFile
-from p"checker_state.dewy" import (Local CheckerScope)
+from p"checker_state.dewy" import (Local CheckerScope ValueLoop)
 from p"type_inference.dewy" import tu_prune
 from p"checker_loops.dewy" import (xb_enter xb_leave)
 from p"checker_expr.dewy" import check_expr
@@ -14,14 +14,6 @@ from p"checker_expr.dewy" import check_expr
 # rewrites, bindings, places and the body are host services that may grow every
 # arena, so nodes, types and locals are reread by ID.
 FWord:type=int64<overflow='wrap'>
-# Arrays a Dewy loop iterates by value (`loop x in xs`), while their bodies are
-# checked: the loop sees the value at entry, so changing the array's length in the
-# body is an error naming the two meanings the program could have wanted.
-ValueLoop:type=[
-    context:int64=0
-    route:int64=0 # the checked source: a binding or a field path of one
-    name:int64=0 # the element's name
-]
 CheckerForHost:type=[
     rewrite:<(node:int64):>bool>
     coerce:<(node:int64 type_id:int64):>int64>

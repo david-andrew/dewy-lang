@@ -167,3 +167,12 @@ OptFill:type=[
     block:int32=0
     alias:int32=0
 ]
+
+# Arrays a Dewy loop iterates by value (`loop x in xs`), while their bodies are
+# checked: the loop sees the value at entry, so changing the array's length in the
+# body is an error naming the two meanings the program could have wanted.
+ValueLoop:type=[
+    context:int64=0
+    route:int64=0 # the checked source: a binding or a field path of one
+    name:int64=0 # the element's name
+]

@@ -5,7 +5,6 @@ use 'checker_blocks.dewy'
 use 'checker_assigns.dewy'
 use 'checker_vardecls.dewy'
 use 'checker_for_loops.dewy'
-use 'checker_intrinsics.dewy'
 use 'checker_statements.dewy'
 use 'checker_exprstmts.dewy'
 use 'checker_returns.dewy'
@@ -3244,7 +3243,7 @@ for_error = (n: int, t0: int, code: int):
 # Arrays a Dewy loop iterates by value (`loop x in xs`), while their bodies are
 # checked: the loop sees the value at entry, so changing the array's length in
 # the body is an error naming the two meanings the program could have wanted.
-# (ValueLoop: checker_for_loops.dewy)
+# (ValueLoop: checker_state.dewy)
 value_loops: ValueLoop[]
 for_host = CheckerForHost(for_rewrite, coerce, lit_default, new_local, for_open_range, for_map_view, is_map_entries_type, for_collide, for_element, for_route, for_struct_fields, for_map_value, for_map_value_ref, for_body, scope_reset, for_error)
 for_input = CheckerForInput(&nodes, &lists, &types, &structs, &fields, &files, &locals, &check_scopes, &loop_serials, &loop_serial_next, &value_loops, &cx, &last_checked, &T_INT, &T_U8, &for_host)

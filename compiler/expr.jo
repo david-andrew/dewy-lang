@@ -1,7 +1,6 @@
 use 'checker_signature.dewy'
 use 'checker_exact.dewy'
 use 'checker_expr.dewy'
-use 'checker_intrinsics.dewy'
 use 'checker_call_queries.dewy'
 use 'checker_receivers.dewy'
 use 'checker_range_values.dewy'
@@ -6303,7 +6302,7 @@ is_value_collection_type = (t: int) -> bool:
     d = int(structs[st].decl)
     d != 0 and files[pos_file(nodes[d].pos)].path == lib_dir + "/core/map.jo"
 
-# The intrinsics checker_intrinsics.dewy leaves to the host: every one but len, cap, push,
+# The intrinsics checker_expr.dewy's check_intrinsic leaves to the host: every one but len, cap, push,
 # pop, clear, syscall, mem_copy, mem_set, panic and bytes.
 intrinsic_rest = (n: int, iid: int, args0: int[], expected: int) -> int:
     let id = iid as IN
@@ -10062,7 +10061,7 @@ index_binding = checker_indexes_bind(&index_input)
 receiver_host = CheckerReceiverHost(check_expr, field_juxt, field_reflect_name, reflect_member, field_private, field_soa_alias, field_soa_index, dewy_bracket_call, index_end, is_dewy_set_type, index_ranges, index_stepped, index_text, receiver_error)
 receiver_input = CheckerReceiverInput(&nodes, &types, &structs, &names, &files, &ide_on, &reflect_active, &callee_at, &soa_aliases, &last_checked, &values_index_base, &type_receiver_at, &empty_index_receiver, &receiver_host)
 receiver_binding = checker_receivers_bind(&receiver_input)
-# checker_intrinsics.dewy's services: diagnostics, and the lengths that are calls
+# check_intrinsic's services (checker_expr.dewy): diagnostics, and the lengths that are calls
 # (an soa value's, Dewy text's grapheme count).
 intrinsic_error = (n: int, code: int, t: int):
     if code == 1: fatal(nodes[n].pos, "len() expects an array or string, found {dt(t)}")
