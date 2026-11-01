@@ -1,0 +1,27 @@
+# A guard on an inline index expression proves the same expression used as
+# the index, a sum of two unbounded `int`s or a row-major grid position.
+pair = (xs:array<int> r:int c:int) => {
+    if 0 <=? r + c <? xs.length printl(xs[r + c])
+}
+
+grid = (xs:array<int> w:int r:int c:int) => {
+    if 0 <=? r * w + c <? xs.length printl(xs[r * w + c])
+}
+
+Grid:type = [columns:int<(>? 0)> cells:array<string>]
+
+render = (g:Grid) => {
+    let rows = (g.cells.length + g.columns - 1) // g.columns
+    loop r in [0..rows) {
+        let line:array<string> = []
+        loop c in [0..g.columns) if r * g.columns + c <? g.cells.length line.push(g.cells[r * g.columns + c])
+        printl(line.join(" "))
+    }
+}
+
+main = () => {
+    pair([1 2 3] 1 1)
+    pair([1 2 3] 5 1)
+    grid([1 2 3 4 5 6] 3 1 2)
+    render(Grid[2 ["a" "b" "c" "d" "e"]])
+}

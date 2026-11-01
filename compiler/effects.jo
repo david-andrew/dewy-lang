@@ -1037,6 +1037,8 @@ effect_place_inventory = (n: int, depth: int = 0) -> bool:
         t = prune(ntype(int(nodes[n].a)))
         # A swizzle accesses inline lanes of its vector, with no hooks or box.
         if nodes[n].aux == -4 and is_vec(t): return effect_place_inventory(int(nodes[n].a), depth + 1)
+        # (a tuple's element, `a[0]`, is inline storage of the tuple)
+        if nodes[n].aux == -2 and tkind(representation_type(t)) == .tuple: return effect_place_inventory(int(nodes[n].a), depth + 1)
         if types[t].kind != .struct_ or nodes[n].aux < 0: return false
         layout(t)
         fi = int(structs[int(types[t].st)].fields) + int(nodes[n].aux)
@@ -1081,6 +1083,16 @@ effect_temporary_field = (n0: int) -> bool:
         n = int(nodes[n].a)
     true
 
+# A refinement whose atoms name only the value itself, literals and type
+# limits: no formal or lexical dependency to read. O(atoms).
+effect_self_contract = (t0: int) -> bool:
+    t = zonk(t0)
+    if types[t].kind != .refined: return false
+    loop atom in ref_predicates[int(types[t].st)]:
+        loop term in [atom.a, atom.b]:
+            if term.kind != 0 and term.kind != 1 and term.kind != 4: return false
+    true
+
 # The value a narrowing alias reads: an optional's payload, a union's member,
 # or the union's remaining members re-tagged in place; n itself otherwise.
 effect_narrowed = (n: int) -> int:
@@ -1114,6 +1126,8 @@ effect_route = (n: int, depth: int = 0) -> PlaceIdentity:
     if k == .addr or effect_fixed_index(n): return effect_route(int(nodes[n].a), depth + 1)
     # A write of any lane conservatively writes the whole vector place.
     if k == .field and nodes[n].aux == -4 and is_vec(ntype(int(nodes[n].a))): return effect_route(int(nodes[n].a), depth + 1)
+    # (and a tuple element's, the whole tuple's)
+    if k == .field and nodes[n].aux == -2 and tkind(representation_type(ntype(int(nodes[n].a)))) == .tuple: return effect_route(int(nodes[n].a), depth + 1)
     if k == .field and tkind(ntype(int(nodes[n].a))) == .struct_: return place_project(effect_route(int(nodes[n].a), depth + 1), int(nodes[n].name))
     if k == .ident and nodes[n].aux == i32(int(SK.local)) and int(locals[int(nodes[n].sym)].flags) & LF_ALIAS != 0:
         # (a binding narrowed by `is?` reads the optional's or union's own storage)
@@ -1209,6 +1223,19 @@ effect_range_loop = (n: int) -> bool:
             bound = max(bound, m + 1)
         else if not effect_scalar(ntype(c)) and not effect_count_literal(c): return false
     if small: effect_counters[l] = bound
+    true
+
+# A counted loop over an `int` range whose bounds are not proven small, `loop
+# c in [a[0]..b[0]]`: the same private counter, whose steps and comparisons
+# may make a big integer (an allocation). O(1).
+effect_big_range_loop = (n: int) -> bool:
+    it = int(nodes[n].a)
+    if nodes[it].kind != .range or nodes[n].sym <= 0: return false
+    l = int(nodes[n].sym)
+    if prune(int(locals[l].type)) != T_MATH_INT: return false
+    if int(locals[l].flags) & (LF_ASSIGNED | LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF | LF_ADDR | LF_EXPOSED) != 0: return false
+    loop c in [int(nodes[it].a), int(nodes[it].b), int(nodes[it].c)]:
+        if c != 0 and prune(ntype(c)) != T_MATH_INT and not effect_scalar(ntype(c)): return false
     true
 
 # A fixed array literal is built in place: its elements, or zeros.
@@ -1482,12 +1509,13 @@ effect_scan_node = (f: int, n: int):
         # (a string index or slice: in bounds by the caller's facts, or a possible failure)
         if fact_string_call(n) >= 2: effect_failure(f, n)
         return
-    # A plain array element replacement writes its containing array route,
-    # not sibling record fields. COW may allocate/detach; indexing may fail.
-    # Hooks and unsupported selectors keep the ordinary opaque fallback.
+    # A plain array element replacement writes its containing array route (a
+    # field's or a variable's), not sibling record fields. COW may
+    # allocate/detach; indexing may fail. Hooks and unsupported selectors keep
+    # the ordinary opaque fallback.
     if k == .assign and nodes[n].op == i32(int(Tok.assign)):
         target = int(nodes[n].a)
-        if nodes[target].kind == .index and nodes[int(nodes[target].a)].kind == .field and effect_index_read(target) and tkind(representation_type(ntype(int(nodes[target].a)))) == .array:
+        if nodes[target].kind == .index and (nodes[int(nodes[target].a)].kind == .field or nodes[int(nodes[target].a)].kind == .ident) and effect_index_read(target) and tkind(representation_type(ntype(int(nodes[target].a)))) == .array:
             effect_target_parts(f, int(nodes[target].a))
             effect_access(f, int(nodes[target].a), true)
             effect_scan_node(f, int(nodes[target].b))
@@ -1533,8 +1561,11 @@ effect_scan_node = (f: int, n: int):
     if k == .ident or k == .field:
         effect_access(f, n, false)
         return
-    if k == .for_ and effect_range_loop(n):
+    small_range = k == .for_ and effect_range_loop(n)
+    big_range = k == .for_ and not small_range and effect_big_range_loop(n)
+    if small_range or big_range:
         loop c in [int(nodes[int(nodes[n].a)].a), int(nodes[int(nodes[n].a)].b), int(nodes[int(nodes[n].a)].c), int(nodes[n].b)]: effect_scan_node(f, c)
+        if big_range: effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
         # (a zero step fails unless the owner's facts show it is not: facts.jo fact_step_check)
         if fact_open_range(n) or fact_stepped_loop(n) and not panic_literal_step(int(nodes[n].a)): effect_failure(f, n)
         loop g in hidden: effect_summaries[f].edges.push(EffectEdge(g, n, []))
@@ -1626,6 +1657,26 @@ effect_scan_node = (f: int, n: int):
             supported = true
             effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
             if fact_shift_obliged(n) and not effect_count_literal(int(nodes[n].b)): effect_failure(f, n)
+    # (a match on a share copies it into a private hidden local and tests that
+    # copy's tag or compares it with literals: reads only. A valued match with
+    # no wildcard arm may find no arm, which fails. Bindings and arm bodies
+    # answer for their own operations)
+    else if k == .match_:
+        subject = int(nodes[n].sym)
+        supported = effect_share(ntype(int(nodes[n].a))) and (subject <= 0 or int(locals[subject].flags) & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF) == 0)
+        wild = false
+        loop j in [0..nkids(n)):
+            arm = kid(n, j)
+            loop q in [0..nkids(arm)):
+                if nodes[kid(arm, q)].kind == .pwild: wild = true
+        if supported and not wild and not has_flag(n, NF_STMT) and vc(ntype(n)) != VC_VOID and ntype(n) != T_NEVER: effect_failure(f, n)
+    # (an optional's payload, `x!` or a match binding's: an inline read that
+    # fails when the value is none)
+    else if k == .unwrap:
+        supported = effect_share(ntype(int(nodes[n].a))) and effect_share(ntype(n))
+        if supported: effect_failure(f, n)
+    else if k == .arm: supported = nodes[n].a == 0 and nodes[n].c == 0
+    else if k == .pwild or k == .ptype or k == .plit or k == .prange: supported = true
     else if k == .dotname or k == .none_lit: supported = effect_share(ntype(n))
     # (an optional's or union's tag test, payload and fallback are inline reads)
     else if k == .istype or k == .narrow or k == .coalesce: supported = effect_share(ntype(int(nodes[n].a))) and (k == .istype or effect_share(ntype(n)))
@@ -1640,6 +1691,13 @@ effect_scan_node = (f: int, n: int):
     else if k == .conv and nodes[n].aux == i32(int(CV.refinement)):
         # A proven refinement check is erased; an unproven one may fail.
         supported = effect_plain(ntype(n)) or effect_footprints_only and nd_shape_predicates.has(int(types[zonk(int(nodes[n].aux2))].st)) and effect_value(ntype(n))
+        # (a self-contained contract on a value, `denominator:int<(>? 0)>`:
+        # its check compares the value, or its length or fields, with
+        # constants; it reads only that value and writes nothing, though an
+        # `int` comparison may make a big constant: an allocation)
+        if not supported and effect_value(ntype(n)) and effect_self_contract(int(nodes[n].aux2)):
+            supported = true
+            if not type_eq(ntype(int(nodes[n].a)), int(nodes[n].aux2)): effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
         if supported and not type_eq(ntype(int(nodes[n].a)), int(nodes[n].aux2)): effect_failure(f, n)
     # (wrapping a value as an optional, or one union as a wider one, fills the
     # flag or tag and the payload in place)

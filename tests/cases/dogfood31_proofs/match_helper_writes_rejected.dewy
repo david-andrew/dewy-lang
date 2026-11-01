@@ -1,0 +1,23 @@
+# A helper whose match arm clears the `@` record: the match itself reads
+# only its subject, but the arm's write still reaches the caller.
+Cell:type = [value:rational?]
+Sheet:type = [cells:dict<string Cell>]
+
+note = (@sheet:Sheet v:rational?):>string => match v {
+    x:rational => "{x.numerator}"
+    _ => { sheet.cells = []; "#ERR" }
+}
+
+recalc = (@sheet:Sheet name:string) => {
+    let cell = sheet.cells.get(name)
+    if cell is? none return
+    let shown = note(@sheet none)
+    sheet.cells[name].value = none
+    printl(shown)
+}
+
+main = () => {
+    let sheet = Sheet[[]]
+    sheet.cells["A"] = Cell[none]
+    recalc(@sheet "A")
+}

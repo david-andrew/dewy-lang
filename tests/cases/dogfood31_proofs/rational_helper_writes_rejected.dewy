@@ -1,0 +1,24 @@
+# The same rational helper, but it also empties the `@` record's table: the
+# key the caller looked up is gone, so the field write cannot be proven.
+Cell:type = [value:rational?]
+Sheet:type = [cells:dict<string Cell>]
+
+evaluate = (@sheet:Sheet n:int):>rational => {
+    let total:rational = 0
+    total += rational(n 3)
+    sheet.cells = []
+    total
+}
+
+recalc = (@sheet:Sheet name:string) => {
+    let cell = sheet.cells.get(name)
+    if cell is? none return
+    let v = evaluate(@sheet 2)
+    sheet.cells[name].value = v
+}
+
+main = () => {
+    let sheet = Sheet[[]]
+    sheet.cells["A"] = Cell[none]
+    recalc(@sheet "A")
+}

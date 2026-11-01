@@ -38,6 +38,7 @@ use 'exact.jo'
 use 'concurrency.jo'
 use 'parallel_lower.jo'
 use 'partition.jo'
+use 'witness.jo'
 use 'string_domains.jo'
 use 'temperature_kinds.jo'
 use 'juxtapose.jo'
@@ -2257,8 +2258,12 @@ default_uses_names = (n: int, names: int[], hidden: int[] = []) -> bool:
         if default_uses_names(child, names, hidden): return true
     false
 
+# A captured value's unnamed local -> the expression it holds (for messages).
+capture_sources: {int: int} = {}
+
 capture_value = (a: int, pt: int, statements: mut int[]) -> int:
     local = new_local(0, pt, nodes[a].pos)
+    capture_sources[local] = a
     locals[local].flags = i32(LF_DECL | LF_QUIET | LF_READ)
     binding = mk(.vardecl, nodes[a].pos)
     nodes[binding].a = i32(type_node_of(pt, nodes[a].pos))
@@ -7354,8 +7359,22 @@ concat_piece = (n: int, text: bool, second: bool = false) -> str:
         if nkids(n) == 0 and nodes[c].kind == .field and nodes[int(nodes[c].a)].kind == .ident: nm = name_of(int(nodes[int(nodes[c].a)].name)) + "." + name_of(int(nodes[c].name))
         else if nkids(n) == 1 and nodes[c].kind == .ident and nodes[kid(n, 0)].kind == .ident: nm = name_of(int(nodes[kid(n, 0)].name)) + "." + shown_fn_name(name_of(int(nodes[c].name)))
         else if nkids(n) == 1 and c == 0 and nodes[n].sym > 0 and int(nodes[n].sym) < fns.len() and fns[int(nodes[n].sym)].decl != 0 and nodes[kid(n, 0)].kind == .ident: nm = name_of(int(nodes[kid(n, 0)].name)) + "." + shown_fn_name(name_of(int(nodes[int(fns[int(nodes[n].sym)].decl)].name)))
+    # (any other operand as written, `wrap(x "b")` or `line[2..]`, when it prints)
+    if len(nm) == 0 and text: nm = wit_text(n)
+    if len(nm) == 0 and text and fact_string_call(n) == 3: nm = concat_slice_text(n)
     if len(nm) == 0 or nm[0] == '$' or nm[0] == '_': nm = if text and second: "y" else if text: "x" else if second: "ys" else: "xs"
     if text: "\{{nm}}" else: nm
+
+# A text slice as written, `line[2..]`, `s[a..b)`; "" when a part does not print.
+concat_slice_text = (n: int) -> str:
+    base = wit_text(kid(n, 0))
+    start = wit_text(kid(n, 1))
+    inclusive = nodes[kid(n, 3)].kind == .bool_lit and nodes[kid(n, 3)].ival != 0
+    stop = nodes[kid(n, 4)].kind != .bool_lit or nodes[kid(n, 4)].ival != 0
+    end = if stop: wit_text(kid(n, 2)) else: ""
+    if base == "" or start == "" or stop and end == "": return ""
+    if not stop: return "{base}[{start}..]"
+    if inclusive: "{base}[{start}..{end}]" else: "{base}[{start}..{end})"
 
 no_concat_error = (n: int, a: int, b: int, text: bool):
     if text:
@@ -9276,10 +9295,36 @@ ident_unknown = (n: int, expected: int, nm: int):
     if len(name_of(nm)) > 1:
         vh = bare_variant_hint(nm)
         if len(vh) > 0: fatal(nodes[n].pos, "unknown name '{name_of(nm)}'{vh}")
+    # (`"""if x < 3 { y }"""`: braces meant as text in a Dewy string, when the
+    # name is no misspelling)
+    if dewy_at(nodes[n].pos) and sug == "" and interpolation_last != 0 and written_interpolation(interpolation_last) and node_within(interpolation_last, n): fatal(nodes[n].pos, "unknown name '{name_of(nm)}': braces in a string interpolate, so this puts in the value of {name_of(nm)}; for braces in the text, write `\\\{` and `\\}`, or make it a raw string, `r\"...\"` or `r\"\"\"...\"\"\"`")
     # ("I have {i}plans": a tag as Ren'Py's, in braces that put a value in the text)
-    if braced_alone(nodes[n].pos, len(name_of(nm))): fatal(nodes[n].pos, "unknown name '{name_of(nm)}': `\{{name_of(nm)}}` in a string puts in the value of {name_of(nm)}; for the braces in the text (a tag), write `\{\{{name_of(nm)}}}}}`, or make it a raw string, r\"...\"")
+    if braced_alone(nodes[n].pos, len(name_of(nm))):
+        escaped = jd(nodes[n].pos, "\{\{{name_of(nm)}}}}}", "\\\{{name_of(nm)}\\}")
+        fatal(nodes[n].pos, "unknown name '{name_of(nm)}': `\{{name_of(nm)}}` in a string puts in the value of {name_of(nm)}; for the braces in the text (a tag), write `{escaped}`, or make it a raw string, r\"...\"{sug}")
     if name_of(nm) == "Cancelled": fatal(nodes[n].pos, "unknown name `Cancelled`; use `Canceled` (US spelling)")
     fatal(nodes[n].pos, "unknown name '{name_of(nm)}'{private_hint(nm)}{sug}")
+# An interpolation as written in a string, after its `{` (not `printl(x)`'s
+# own): the source before its expression is a brace. O(spaces).
+written_interpolation = (e: int) -> bool:
+    f = pos_file(nodes[e].pos)
+    if f < 0 or f >= files.len(): return false
+    src = files[f].src
+    o = pos_off(nodes[e].pos) - 1
+    loop o >= 0 and (src[o] == ' ' or src[o] == '\t' or src[o] == '\n'): o -= 1
+    o >= 0 and src[o] == '{{'
+
+# Node n is e or inside it. Error paths only; O(nodes of e), depth 64.
+node_within = (e: int, n: int, depth: int = 0) -> bool:
+    if e <= 0 or depth > 64: return false
+    if e == n: return true
+    mask = isolation_children(nodes[e].kind)
+    if mask < 0: return false
+    if mask & 1 != 0 and node_within(int(nodes[e].a), n, depth + 1) or mask & 2 != 0 and node_within(int(nodes[e].b), n, depth + 1) or mask & 4 != 0 and node_within(int(nodes[e].c), n, depth + 1): return true
+    if mask & 16 != 0:
+        loop i in [0..nkids(e)):
+            if node_within(kid(e, i), n, depth + 1): return true
+    false
 ident_ide_ref = (n: int, s: int):
     ide_sym_ref(n, s)
     return
@@ -9615,7 +9660,11 @@ optional_host = CheckerOptionalHost(check_expr, coerce, narrow_optional_source, 
 optional_input = CheckerOptionalInput(&nodes, &types, &files, &T_MATH_INT, &optional_host)
 optional_binding = checker_optional_bind(&optional_input)
 
+# The interpolation checked last, for an unknown name inside one: ident_unknown.
+interpolation_last = 0
+
 literal_interpolation_warning = (e: int):
+    interpolation_last = e
     # ("[0-9]{4}" for a regular expression: {4} puts the number 4 in the text)
     if (nodes[e].kind == .int_lit or (nodes[e].kind == .tuple and nkids(e) > 0 and nodes[kid(e, 0)].kind == .int_lit)) and not pos_in_lib(nodes[e].pos) and not files[pos_file(nodes[e].pos)].is_dewy and brace_before(nodes[e].pos):
         warn(nodes[e].pos, "`\{...}` with a number in it puts that number in the text: for the characters themselves (a regular expression's repeat), write `\{\{4}}}}`, or a raw string `r\"[0-9]\{4}\"`")

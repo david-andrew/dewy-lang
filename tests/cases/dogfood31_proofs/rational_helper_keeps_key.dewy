@@ -1,0 +1,48 @@
+# A helper doing rational arithmetic (a refined `rational` start, an `int`
+# range over a parsed pair, interpolation, a match on the result and a scratch
+# array) writes nothing of its caller's, so `name in? cells` survives the call.
+Cell:type = [source:string value:rational?]
+Sheet:type = [cells:dict<string Cell> order:array<string>]
+
+span = (text:string):>[int int]? => {
+    let parts = text.split(":")
+    if parts.length not=? 2 return none
+    if parts[0].length =? 0 return none
+    [parts[0].length parts[1].length]
+}
+
+evaluate = (source:string):>rational? => {
+    let total:rational = 0
+    let pair = span(source)
+    if pair is? none return none
+    let scratch:array<int> = [0 0]
+    loop k in [pair[0]..pair[1]] {
+        scratch[0] = k
+        total += rational(scratch[0] 2)
+    }
+    total
+}
+
+show = (v:rational?):>string => match v {
+    x:rational => if x.denominator =? 1 "{x.numerator}" else "{x:.2f}"
+    _ => "#ERR"
+}
+
+recalc = (@sheet:Sheet) => {
+    loop name in sheet.order {
+        let cell = sheet.cells.get(name)
+        if cell is? none continue
+        let v = evaluate(cell.source)
+        let shown = show(v)
+        sheet.cells[name].value = v
+        printl"{name} = {shown}"
+    }
+}
+
+main = () => {
+    let sheet = Sheet[[] ["A" "B" "C"]]
+    sheet.cells["A"] = Cell["a:bbb" none]
+    sheet.cells["B"] = Cell["bb:bb" none]
+    sheet.cells["C"] = Cell[":x" none]
+    recalc(@sheet)
+}

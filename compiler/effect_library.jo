@@ -84,8 +84,15 @@ effect_library_classify = (g: int) -> EffectClass:
         if is_nd(t) and effect_share(nd_elem(t)): return .reads
     if file == "/core/fmt.jo" or file == "/math_int.jo":
         if name in ["__fmt", "__dewy_fmt", "__fmt_elem", "__dewy_fmt_elem", "__fmt_u64", "__fmt_hex", "__fmt_float", "__fmt_fixed"]:
-            return if effect_library_formatter(g): .allocates else: .unclassified
-        if name == "__fmt_spec": return if effect_library_formatter(g): .allocates_panics else: .unclassified
+            # (an interpolation's writer, `"{name}{row}"`: it appends a leaf to
+            # its own buffer, so a helper that formats keeps its caller's roots)
+            if not effect_library_formatter(g): return .unclassified
+            effect_class_text[g] = true
+            return .allocates
+        if name == "__fmt_spec":
+            if not effect_library_formatter(g): return .unclassified
+            effect_class_text[g] = true
+            return .allocates_panics
         if name == "format" and fns[g].params.len() == 2 and effect_library_leaf(int(locals[fns[g].params[0]].type)): return .allocates_panics
         return .unclassified
     if file == "/core/rt.jo":
@@ -122,6 +129,17 @@ effect_library_classify = (g: int) -> EffectClass:
         k = representation_type(int(locals[fns[g].params[1]].type))
         if is_map_type(m) and (effect_scalar(k) or k == T_STR) and effect_share(struct_targ(int(types[m].st), 1)):
             return if name == "[]": .allocates_panics else: .reads
+    # (the exact numbers' Dewy library: value code over word arrays that calls
+    # only arithmetic, text and math builtins and `panic`, with no global
+    # state. Reviewed, it allocates, may fail and writes only its own `@`
+    # parameters, so rational arithmetic in a helper keeps its caller's roots)
+    if file == "/bigint.dewy" or file == "/rational.dewy":
+        loop l in fns[g].params:
+            t = representation_type(int(locals[l].type))
+            if is_fn_type(t) or int(locals[l].flags) & LF_MUTPARAM == 0 and not effect_value(t): return .unclassified
+        if not effect_value(int(fns[g].ret)) and int(fns[g].ret) != T_VOID: return .unclassified
+        effect_class_text[g] = true
+        return .allocates_panics
     # (`set"..."`: a fresh set of the text's graphemes, as a character class
     # collects them; it writes only its own result)
     if file == "/std/dewy_sets.jo" and name == "set" and fns[g].params.len() == 1 and prune(int(locals[fns[g].params[0]].type)) == T_STR:

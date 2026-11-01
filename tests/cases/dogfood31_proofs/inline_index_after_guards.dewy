@@ -1,0 +1,13 @@
+# A sum or product named before its operands' guards, then written again after
+# them, takes the bounds those guards give.
+f = (xs:array<int> r:int c:int) => {
+    let s = r + c
+    printl"{s}"
+    if r >=? 0 and c >=? 0 and r + c <? xs.length printl(xs[r + c])
+}
+g = (xs:array<int> r:int w:int c:int) => {
+    let p = r * w
+    printl"{p}"
+    if r >=? 0 and w >=? 0 and c >=? 0 and r * w + c <? xs.length printl(xs[r * w + c])
+}
+main = () => { f([1 2 3] 1 1) g([1 2 3] 1 1 1) }

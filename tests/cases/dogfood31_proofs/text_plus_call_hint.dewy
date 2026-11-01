@@ -1,0 +1,8 @@
+# `+` on text with a call on the right: the hint shows the call.
+wrap = (s:string tag:string):>string => "<{tag}>{s}</{tag}>"
+join = (parts:array<string>):>string => {
+    let out = ""
+    loop p in parts out = out + wrap(p "b")
+    out
+}
+main = () => { printl"{join(["a" "b"])}" }

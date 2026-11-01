@@ -200,6 +200,12 @@ wit_text = (e0: int, depth: int = 0) -> str:
         if let source = union_field_sources.get(e):
             base = wit_text(source.0, depth + 1)
             if base != "": return "{base}.{name_of(source.1)}"
+    # (a value an update captured, `d[name].value = v`: shown as written)
+    if k == .ident and nodes[e].name == 0 and nodes[e].aux == i32(int(SK.local)) and nodes[e].sym > 0:
+        if let source = capture_sources.get(int(nodes[e].sym)):
+            # (a lowering's own temporary, `__lt0`, stays unshown)
+            shown = wit_text(source, depth + 1)
+            return if starts_with(shown, "__") or starts_with(shown, "#"): "" else: shown
     if k == .ident and nodes[e].name != 0:
         name = name_of(int(nodes[e].name))
         # (`d[v * n // 256] += 1` holds its index in a temporary: it is shown as written)
@@ -626,12 +632,13 @@ wit_relation = (s: FactState, cex: FactState, op: Tok, a: WitSide, b: WitSide, r
     which
 
 # Unknown obligations: a reason, the retained cause, context and a repair.
-wit_unknown = (n: int, b: FactBound, what: str, contract: int = 0, relation: str = "", missing: str = "", runtime: bool = true):
+wit_unknown = (n: int, b: FactBound, what: str, contract: int = 0, relation: str = "", missing: str = "", runtime: bool = true, divisor: int = 0):
     wit_cause(b, n)
     wit_context(contract)
     wit_help(relation, runtime, contract)
     wit_counter_help(n, b)
     wit_int_parameter_help(n)
+    wit_field_divisor_help(divisor)
     # (a loop's or an unsupported operation's part is a note at its span: the
     # headline names the bound the relation lacks)
     why = if missing != "" and (b.reason == .missing or b.reason == .loop_ or b.reason == .unsupported): "missing {missing}" else: wit_reason(b)
@@ -639,6 +646,18 @@ wit_unknown = (n: int, b: FactBound, what: str, contract: int = 0, relation: str
     if missing == "" and b.reason == .missing and relation != "": why = "nothing establishes `{relation}` here"
     if dir_defer(n, "cannot prove {what}: {why}", runtime and what != "assertion"): return
     wit_fail(nodes[n].pos, "cannot prove {what}: {why}")
+
+# (`i // g.columns` with `columns:int`: a refined field holds its contract at
+# every read, the "stronger checked contract" spelled out. O(1))
+wit_field_divisor_help = (operand: int):
+    e = operand
+    loop e > 0 and (nodes[e].kind == .narrow or nodes[e].kind == .conv): e = int(nodes[e].a)
+    if e <= 0 or nodes[e].kind != .field or nodes[e].aux < 0 or not dewy_at(nodes[e].pos): return
+    record = representation_type(ntype(int(nodes[e].a)))
+    if tkind(record) != .struct_ or not is_int(prune(ntype(e))) and prune(ntype(e)) != T_MATH_INT: return
+    d = int(structs[int(types[record].st)].decl)
+    if d == 0 or pos_in_lib(nodes[d].pos): return
+    err_notes.push((-1, "help: or give the field a contract where `{dt(record)}` declares it, `{name_of(int(nodes[e].name))}:{dt(prune(ntype(e)))}<(>? 0)>`: every write to it is checked, so each read is a nonzero divisor"))
 
 # (`let n = 0`, `n += 1` in a loop, then `n` given as an int64: the counter-progress
 # assumption covers 64-bit counters, not an `int` converted afterwards. O(1))
@@ -1027,7 +1046,7 @@ wit_divisor = (n: int, s: FactState, divisor: int, zero: int, operand: int, refu
         if dir_defer(n, "divisor refuted: zero", true): return
         wit_fail(nodes[n].pos, "divisor refuted: zero")
         return
-    wit_unknown(n, fact_bound(s, divisor), "divisor is nonzero", 0, wit_relation_text(.ne, side, nil), missing)
+    wit_unknown(n, fact_bound(s, divisor), "divisor is nonzero", 0, wit_relation_text(.ne, side, nil), missing, divisor = operand)
 
 wit_ref_text = (term: RefTerm, self: str) -> str:
     text = ""

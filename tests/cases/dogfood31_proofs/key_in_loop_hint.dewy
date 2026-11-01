@@ -1,0 +1,15 @@
+# In a loop, the key error names the guard it needs, as straight-line code does.
+Cell:type = [value:int?]
+Sheet:type = [cells:dict<string Cell> order:array<string>]
+
+clear = (@sheet:Sheet) => {
+    loop name in sheet.order if name.length >? 0 {
+        sheet.cells[name].value = none
+    }
+}
+
+main = () => {
+    let sheet = Sheet[[] ["A"]]
+    sheet.cells["A"] = Cell[1]
+    clear(@sheet)
+}

@@ -4650,7 +4650,14 @@ fact_arithmetic = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
     if op == .plus and a != 0 and b != 0 and x.lo != x.hi and y.lo != y.hi:
         loop i in [0..s.ids.len()):
             t = fact_terms[s.ids[i]]
-            if t.op == .plus and t.type == ntype(n) and (t.a == a and t.b == b or t.a == b and t.b == a): return s.ids[i]
+            if t.op == .plus and t.type == ntype(n) and (t.a == a and t.b == b or t.a == b and t.b == a):
+                # (an open end is infinite: only a real end of both tightens)
+                lo_real = fact_add_fits(x.lo, y.lo) and not (x.lo == FACT_MIN and fact_open_endpoint(s, a, false)) and not (y.lo == FACT_MIN and fact_open_endpoint(s, b, false))
+                hi_real = fact_add_fits(x.hi, y.hi) and not (x.hi == FACT_MAX and fact_open_endpoint(s, a, true)) and not (y.hi == FACT_MAX and fact_open_endpoint(s, b, true))
+                lo_sum = if lo_real: x.lo + y.lo else: 0
+                hi_sum = if hi_real: x.hi + y.hi else: 0
+                fact_reuse_tighten(s, s.ids[i], lo_sum, hi_sum, lo_real, hi_real)
+                return s.ids[i]
         sums = fact_sum_rows(s, a, b)
     if op == .minus:
         if y.lo == FACT_MIN:
@@ -4690,7 +4697,9 @@ fact_arithmetic = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
         if exact_has_node(n) or n == fact_sum_operand and fact_type(ntype(n)) == T_MATH_INT and fact_host_finite(s, a) and fact_host_finite(s, b) or n < exact_marks.len() and exact_marks[n] & 32 != 0: return fact_new(s, FactBound(lo, hi, lo > 0 or hi < 0, wide = true), FactTerm(op, a, b, n, ntype(n)))
         # (an `int` end beyond the host word is open, not unknown: a counter
         # at most int64's MAX plus one keeps its lower bound)
-        if fact_type(ntype(n)) != T_MATH_INT or not low and not high: return fact_unmodeled(s, n, .unsupported)
+        # (both ends open, `r + c` of two unbounded `int`s: still the named
+        # sum, so a guard on `r + c` bounds the same `r + c` again)
+        if fact_type(ntype(n)) != T_MATH_INT: return fact_unmodeled(s, n, .unsupported)
         if not low: lo = FACT_MIN; lo_open = true
         if not high: hi = FACT_MAX; hi_open = true
     if not exact_has_node(n) and (not sa_fits(lo, ntype(n)) or not sa_fits(hi, ntype(n))): return fact_unmodeled(s, n, .unsupported)
@@ -4818,7 +4827,28 @@ fact_open_product = (s: mut FactState, n: int, a: int, b: int, x: FactBound, y: 
     if below: lo = FACT_MIN
     if above: hi = FACT_MAX
     if lo > hi: return fact_unmodeled(s, n, .unsupported)
+    # (the same product again, `r*w` in a guard and in the index it guards:
+    # one value. O(values))
+    if a != 0 and b != 0:
+        loop i in [0..s.ids.len()):
+            t = fact_terms[s.ids[i]]
+            if t.op == .star and t.type == ntype(n) and (t.a == a and t.b == b or t.a == b and t.b == a):
+                fact_reuse_tighten(s, s.ids[i], lo, hi, not below, not above)
+                return s.ids[i]
     fact_new(s, fact_open_bound(lo, hi, below, above), FactTerm(.star, a, b, n, ntype(n)))
+
+# A named sum or product evaluated again keeps the bounds its guards gave it,
+# and takes any real end its operands now have: both hold for the one value.
+fact_reuse_tighten = (s: mut FactState, v: int, lo: int, hi: int, lo_real: bool, hi_real: bool):
+    b = fact_bound(s, v)
+    if b.wide: return
+    nlo = if lo_real and lo > b.lo: lo else: b.lo
+    nhi = if hi_real and hi < b.hi: hi else: b.hi
+    if nlo == b.lo and nhi == b.hi: return
+    b.lo = nlo
+    b.hi = nhi
+    b.nz = b.nz or nlo > 0 or nhi < 0
+    fact_set_bound(s, v, b)
 
 # An interval with an open end; collapsed onto that end, it is only "at least
 # MAX" (or "at most MIN"): wide, as fact_set_bound keeps such a value.

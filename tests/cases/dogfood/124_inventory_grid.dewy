@@ -113,13 +113,11 @@ cell = (s:Stack?):>string => match s {
 }
 
 render = (inv:Inventory) => {
-    let line:array<string> = []
-    loop i in [0..inv.slots.length) {
-        line.push(cell(inv.slots[i]))
-        if line.length =? inv.columns or i =? inv.slots.length - 1 {
-            printl"| {line.join(" | ")} |"
-            line = []
-        }
+    let rows = (inv.slots.length + inv.columns - 1) // inv.columns
+    loop r in [0..rows) {
+        let line:array<string> = []
+        loop c in [0..inv.columns) if r * inv.columns + c <? inv.slots.length line.push(cell(inv.slots[r * inv.columns + c]))
+        printl"| {line.join(" | ")} |"
     }
     match inv.held {
         h:Stack => printl"holding {h.count} {h.item}"
