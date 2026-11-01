@@ -1,0 +1,80 @@
+$runtime_checks
+from p"node_store.dewy" import Node
+from p"source_types.dewy" import SrcFile
+# Read-only questions the call checker asks of a call's names and arguments: which
+# intrinsic a name is, and whether an argument takes its type from the parameter it
+# meets (so it is checked after the overload is picked). Jo callers call both
+# directly; the call group will. O(1); an array literal O(its elements).
+# Frozen ordinals: Tok.minus 59; NF_CHECKED 128, NF_FNREF_ARG 4096, NF_COMPREHENSION
+# 67108864.
+CGWord:type=int64<overflow='wrap'>
+CheckerCallQueryInput:type=[
+    nodes:ptr<array<Node>>
+    lists:ptr<array<int32>>
+    files:ptr<array<SrcFile>>
+    intrinsic_names:ptr<array<int64>>
+    set_name:ptr<int64>
+]
+let cg_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
+let cg_lists:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
+let cg_files:ptr<array<SrcFile>>=$unsafe (uint64(0) as ptr<array<SrcFile>>)
+let cg_intrinsic_names:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+let cg_set_name:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+checker_call_queries_bind=(input:ptr<CheckerCallQueryInput>):>CGWord=>$unsafe {
+    cg_nodes=input[0].nodes
+    cg_lists=input[0].lists
+    cg_files=input[0].files
+    cg_intrinsic_names=input[0].intrinsic_names
+    cg_set_name=input[0].set_name
+    0
+}
+# The intrinsic (its index in the table) an interned name names, or -1.
+intrinsic_of=(name:CGWord):>CGWord=>$unsafe {
+    if name >=? 0 and name <? cg_intrinsic_names[0].length {return cg_intrinsic_names[0].ptr[name] - 1}
+    -1
+}
+# A literal too wide for a word (a call the reader marked), possibly negated.
+cg_oversized=(a:CGWord):>bool=>$unsafe {
+    let node=cg_nodes[0].ptr + a
+    if node[0].kind =? 'unary' and node[0].op =? 59 {return cg_oversized(CGWord(node[0].a))}
+    node[0].kind =? 'call' and node[0].aux2 =? -1
+}
+cg_dewy=(pos:int64):>bool=>$unsafe {cg_files[0][pos >> 40].is_dewy}
+# Does argument a take its type from its parameter: an unchecked Dewy literal (array,
+# map, set, record, conditional, comprehension), a lambda, `none`, a hole, `.v`, a
+# function named as a value, an oversized literal?
+ctx_dependent=(a:CGWord):>bool=>$unsafe {
+    let node=cg_nodes[0].ptr + a
+    let k=node[0].kind
+    let flags=CGWord(node[0].flags)
+    if k =? 'unary' {return node[0].op =? 59 and cg_oversized(CGWord(node[0].a))}
+    if k =? 'call' {
+        if node[0].aux2 =? -1 {return true}
+        if node[0].type =? 0 {
+            let callee=cg_nodes[0].ptr + CGWord(node[0].a)
+            let ck=callee[0].kind
+            if node[0].nlist =? 1 and ck =? 'ident' and CGWord(callee[0].name) =? cg_set_name[0] {return true}
+            if ck =? 'dotname' {return true}
+        }
+        return false
+    }
+    if k =? 'ident' or k =? 'field' or k =? 'typeapply' {return (flags & 4096) not=? 0}
+    if k =? 'dotname' {return node[0].type =? 0}
+    if k =? 'lambda' or k =? 'none_lit' or k =? 'hole' or k =? 'record_lit' {return true}
+    if k =? 'if_' or k =? 'match_' {return (flags & 128) =? 0 and cg_dewy(node[0].pos)}
+    if k =? 'block' {return (flags & 67108864) not=? 0 and (flags & 128) =? 0}
+    if k =? 'array' {
+        let count=CGWord(node[0].nlist)
+        if count =? 0 {return node[0].b =? 0}
+        if node[0].type =? 0 and (flags & 128) =? 0 and cg_dewy(node[0].pos) {return true}
+        let base=CGWord(node[0].list)
+        let i:CGWord=0
+        loop i <? count {
+            if ctx_dependent(CGWord(cg_lists[0].ptr[base + i])) {return true}
+            i=i + 1
+        }
+        return false
+    }
+    if k =? 'map_lit' {return node[0].nlist =? 0 or (node[0].type =? 0 and (flags & 128) =? 0 and cg_dewy(node[0].pos))}
+    false
+}

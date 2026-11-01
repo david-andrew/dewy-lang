@@ -21,6 +21,7 @@ from p"checker_places.dewy" import xp_check
 from p"checker_in_range.dewy" import xy_check
 from p"checker_numeric.dewy" import xw_numeric
 from p"checker_exact.dewy" import (exact_potential exact_math_operand)
+from p"checker_coerce.dewy" import cq_settled
 # The expression dispatcher: an already checked node, then each kind sent to its
 # leaf. A name is looked up here (the scope stack, then the module lookup cache);
 # only a cache miss asks the host. A binary operator's operands are checked here and
@@ -52,6 +53,7 @@ CheckerExprHost:type=[
     sibling:<(node:int64 type_id:int64):>int64>
     literal:<(node:int64 expected:int64 ex:int64):>int64>
     other:<(node:int64 expected:int64):>int64>
+    arg:<(node:int64 type_id:int64 mutable:bool):>void>
 ]
 CheckerExprInput:type=[
     nodes:ptr<array<Node>>
@@ -138,6 +140,36 @@ xe_module=(name:XEWord):>XEWord=>$unsafe {
     }
     xe_host[0].module(m name)
 }
+# A name from the current context: its scope binding above the function's floor, else
+# the module's. Jo callers call it directly.
+lookup=(name:XEWord):>XEWord=>$unsafe {
+    let c=xe_context[0]
+    let floor:XEWord=if c >=? 0 {XEWord(xe_contexts[0].ptr[c].floor)} else {0}
+    if name <? xe_scopes[0].top.length {
+        let i=xe_scopes[0].top.ptr[name]
+        if i >=? floor {return xe_scopes[0].syms.ptr[i]}
+    }
+    xe_module(name)
+}
+# A call argument a for a parameter of type pt: checked with pt wanted, then coerced
+# to it. Arguments of mutable parameters, values written with `@` (NF_MUT, 1) and
+# coercions that change something are the host's (it skips the steps done here).
+finish_arg=(a:XEWord pt:XEWord is_mut:bool):>void=>$unsafe {
+    if is_mut {
+        xe_arg(a pt true)
+        return
+    }
+    if xe_nodes[0].ptr[a].kind =? 'hole' {
+        xe_nodes[0][a].type=int32<overflow='wrap'>(pt)
+        return
+    }
+    if (XEWord(xe_nodes[0].ptr[a].flags) & 128) =? 0 or xe_nodes[0].ptr[a].type =? 0 {
+        check_expr(a pt);
+        xe_nodes[0][a].flags=xe_nodes[0].ptr[a].flags | 128
+    }
+    if (XEWord(xe_nodes[0].ptr[a].flags) & 1) not=? 0 or not cq_settled(xe_nodes xe_types a pt) {xe_arg(a pt false)}
+}
+xe_arg=(a:XEWord pt:XEWord is_mut:bool):>void=>$unsafe {xe_host[0].arg(a pt is_mut)}
 # Frozen SK ordinals past `local`, the ABI checker_idents.dewy reads.
 xe_kind=(k:SK):>XEWord=>{
     if k =? 'global' {return 2}

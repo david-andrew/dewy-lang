@@ -21,6 +21,7 @@ use 'checker_places.dewy'
 use 'checker_in_range.dewy'
 use 'checker_numeric.dewy'
 use 'checker_exact.dewy'
+use 'checker_coerce.dewy'
 struct CheckerExprHost:
     complete: () -> void
     unknown: (int, int, int) -> void
@@ -42,6 +43,7 @@ struct CheckerExprHost:
     sibling: (int, int) -> int
     literal: (int, int, int) -> int
     other: (int, int) -> int
+    arg: (int, int, bool) -> void
 struct CheckerExprInput:
     nodes: *(Node[])
     types: *(TypeInfo[])
@@ -123,6 +125,26 @@ xe_module = (name: int) -> int:
         if name < xe_ml_tick[0].len() and xe_ml_tick[0][name] > xe_ml_struct[0]: stamp = xe_ml_tick[0][name]
         if xe_ml_at[0][name] == stamp and xe_ml_mod[0][name] == m: return xe_ml_sym[0][name]
     xe_host[0].module(m, name)
+lookup = (name: int) -> int:
+    c = xe_context[0]
+    floor = 0
+    if c >= 0: floor = int(xe_contexts[0][c].floor)
+    if name < xe_scopes[0].top.len():
+        i = xe_scopes[0].top[name]
+        if i >= floor: return xe_scopes[0].syms[i]
+    xe_module(name)
+finish_arg = (a: int, pt: int, is_mut: bool):
+    if is_mut:
+        xe_arg(a, pt, true)
+        return
+    if xe_nodes[0][a].kind == .hole:
+        xe_nodes[0][a].type = i32(pt)
+        return
+    if int(xe_nodes[0][a].flags) & 128 == 0 or xe_nodes[0][a].type == 0:
+        check_expr(a, pt)
+        xe_nodes[0][a].flags |= 128
+    if int(xe_nodes[0][a].flags) & 1 != 0 or not cq_settled(xe_nodes, xe_types, a, pt): xe_arg(a, pt, false)
+xe_arg = (a: int, pt: int, is_mut: bool): xe_host[0].arg(a, pt, is_mut)
 xe_kind = (k: SK) -> int: int(k)
 xe_complete = (): xe_host[0].complete()
 xe_unknown = (n: int, expected: int, name: int): xe_host[0].unknown(n, expected, name)

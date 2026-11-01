@@ -1,6 +1,7 @@
 use 'checker_exact.dewy'
 use 'checker_expr.dewy'
 use 'checker_intrinsics.dewy'
+use 'checker_call_queries.dewy'
 use 'checker_receivers.dewy'
 use 'checker_range_values.dewy'
 use 'checker_numeric.dewy'
@@ -141,6 +142,7 @@ const AUX2_PLACE = -11         # a call `@(m.lock())` taking the place a method 
 callee_at = 0                  # the callee a call is resolving: a Dewy function name there is not called by itself
 embedded_files: str[]          # actual compile-time inputs, including those used inside functions
 intrinsic_names: int[]         # interned name -> intrinsic index + 1; 0 means no intrinsic
+dewy_set_name = -1             # the interned `__dewy_set`
 
 register_intrinsics = ():
     intrinsic_names = []
@@ -148,11 +150,8 @@ register_intrinsics = ():
         nm = intern(it.name)
         loop intrinsic_names.len() <= nm: intrinsic_names.push(0)
         intrinsic_names[nm] = i + 1
+        if it.id == .dewy_set: dewy_set_name = nm
         universe[nm] = new_sym(nm, .builtin, int(it.id), 0)
-
-intrinsic_of = (name: int) -> int:
-    if name >= 0 and name < intrinsic_names.len(): return intrinsic_names[name] - 1
-    -1
 
 is_lit = (n: int) -> bool: has_flag(n, NF_LITERAL)
 lit_default = (n: int) -> int:
@@ -1482,37 +1481,6 @@ oversized_literal = (a: int) -> bool:
     if nodes[a].kind == .unary and nodes[a].op == i32(int(Tok.minus)): return oversized_literal(int(nodes[a].a))
     nodes[a].kind == .call and nodes[a].aux2 == -1
 
-ctx_dependent = (a: int) -> bool:
-    # (one read of the node; oversized_literal and dewy_set_literal, as they would answer)
-    nd = nodes[a]
-    k = nd.kind
-    if k == .unary and nd.op == i32(int(Tok.minus)) and oversized_literal(int(nd.a)): return true
-    if k == .call:
-        if nd.aux2 == -1: return true
-        if nd.type == 0:
-            callee = nodes[int(nd.a)].kind
-            if nd.nlist == 1 and callee == .ident and name_of(int(nodes[int(nd.a)].name)) == "__dewy_set": return true
-            if callee == .dotname: return true     # .v(args)
-        return false
-    if k == .ident or k == .field or k == .typeapply: return int(nd.flags) & NF_FNREF_ARG != 0
-    if k == .dotname: return nd.type == 0        # (E.v is a dotname already typed)
-    if k == .lambda or k == .none_lit or k == .hole: return true
-    if k == .record_lit: return true
-    if (k == .if_ or k == .match_) and int(nd.flags) & NF_CHECKED == 0 and files[pos_file(nd.pos)].is_dewy: return true
-    if k == .block and int(nd.flags) & NF_COMPREHENSION != 0: return int(nd.flags) & NF_CHECKED == 0
-    if k == .array:
-        if nd.nlist == 0: return nd.b == 0
-        # Dewy array literals take their element type from the selected call.
-        # Check their children first, but do not freeze the array at int[] just
-        # because its numeric literals have not received a parameter type yet.
-        if nd.type == 0 and int(nd.flags) & NF_CHECKED == 0 and files[pos_file(nd.pos)].is_dewy: return true
-        # ([.key(.space), .button(.a)]: its elements take their type from the parameter's)
-        loop i in [0..int(nd.nlist)):
-            if ctx_dependent(int(lists[int(nd.list) + i])): return true
-        return false
-    if k == .map_lit: return nd.nlist == 0 or (nd.type == 0 and int(nd.flags) & NF_CHECKED == 0 and files[pos_file(nd.pos)].is_dewy)
-    false
-
 # `to_int(text max_digits=n)` with a literal n from 1 to 18 (lib/math_runtime.jo, __mi_parse_word).
 to_int_word_limit = (a0: int) -> bool:
     if nodes[a0].kind == .namedarg and name_of(int(nodes[a0].name)) != "max_digits": return false
@@ -2172,7 +2140,9 @@ check_mutable_arguments = (args: int[], mask: int, pos: int):
             if not partition_disjoint(args[j], args[i]) and mutable_overlap(args[j], args[i]):
                 fatal(nodes[args[i]].pos, "mutable arguments {j + 1} and {i + 1} overlap; pass disjoint places")
 
-finish_arg = (a: int, pt: int, is_mut: bool):
+# checker_expr.dewy's finish_arg leaves the host mutable arguments, values written with
+# `@` and coercions that change something; the steps already done are skipped here.
+arg_finish_rest = (a: int, pt: int, is_mut: bool):
     if is_mut and refine_active:
         ref_mutable_authority(a)
         storage = refine_storage(a, ntype(a))
@@ -10170,6 +10140,8 @@ intrinsic_length = (n: int, a: int, t: int, expected: int) -> int:
 intrinsic_host = CheckerIntrinsicHost(intrinsic_rest, nargs_check, intrinsic_error, coerce, intrinsic_length, value_loop_resize, check_place, ref_length_mutation)
 intrinsic_input = CheckerIntrinsicInput(&nodes, &lists, &types, &structs, &files, &value_loops, &refine_active, &T_VOID, &T_INT, &intrinsic_host)
 intrinsic_binding = checker_intrinsics_bind(&intrinsic_input)
+call_query_input = CheckerCallQueryInput(&nodes, &lists, &files, &intrinsic_names, &dewy_set_name)
+call_query_binding = checker_call_queries_bind(&call_query_input)
 
 # checker_expr.dewy's services: literal preparation (grouped values, spreads, the
 # optional's element, a literal union's member, total dictionaries) and the kinds that
@@ -10230,7 +10202,7 @@ expr_values_use = (n: int, t: int):
     if is_values(t) and nodes[n].kind == .ident and n != assign_root and name_of(int(nodes[n].name))[0] != '$': sink_values_use(n, t)
     return
 expr_sibling = (n: int, t: int) -> int: sibling_index_narrow(n, t)
-expr_host = CheckerExprHost(expr_complete, ident_unknown, expr_module, temperature_read, expr_values_use, check_dotted, binary_juxt, binary_char_code, binary_membership, binary_quantity_hint, binary_decimal, dewy_set_literal, binary_context, binary_nd_hint, binary_secret, binary_rest, check_call_expr, expr_sibling, expr_literal, expr_other)
+expr_host = CheckerExprHost(expr_complete, ident_unknown, expr_module, temperature_read, expr_values_use, check_dotted, binary_juxt, binary_char_code, binary_membership, binary_quantity_hint, binary_decimal, dewy_set_literal, binary_context, binary_nd_hint, binary_secret, binary_rest, check_call_expr, expr_sibling, expr_literal, expr_other, arg_finish_rest)
 expr_input = CheckerExprInput(&nodes, &types, &files, &syms, &check_scopes, &ctxs, &cx, &ml_at, &ml_mod, &ml_sym, &ml_name_tick, &ml_struct, &ide_sentinel, &tk_reads_on, &values_any, &statement_watch, &last_checked, &T_BOOL, &T_INT, &T_U64, &T_MATH_INT, &quantity_update_right, &expr_host)
 expr_binding = checker_expr_bind(&expr_input)
 

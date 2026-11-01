@@ -107,7 +107,8 @@ xe_literal_host = (n: int, expected: int, ex: int) -> int:
 xe_other_host = (n: int, expected: int) -> int:
     events.push("other:{n}:{int(nodes[n].kind)}:{expected}")
     T_BOOL
-xe_services = CheckerExprHost(xe_complete_host, xe_unknown_host, xe_module_host, xe_temperature_host, xe_values_host, xe_dotted_host, xe_juxt_host, xe_char_host, xe_member_host, xe_quantity_hint_host, xe_decimal_host, xe_set_host, xe_context_host, xe_nd_host, xe_secret_host, xe_rest_host, xe_call_host, xe_sibling_host, xe_literal_host, xe_other_host)
+xe_arg_host = (a: int, pt: int, is_mut: bool): events.push("arg:{a}:{pt}:{is_mut}:{nodes[a].type}")
+xe_services = CheckerExprHost(xe_complete_host, xe_unknown_host, xe_module_host, xe_temperature_host, xe_values_host, xe_dotted_host, xe_juxt_host, xe_char_host, xe_member_host, xe_quantity_hint_host, xe_decimal_host, xe_set_host, xe_context_host, xe_nd_host, xe_secret_host, xe_rest_host, xe_call_host, xe_sibling_host, xe_literal_host, xe_other_host, xe_arg_host)
 xe_inputs = CheckerExprInput(&nodes, &types, &files, &syms, &xe_scope, &ctxs, &cx, &xe_at, &xe_mods, &xe_found, &xe_ticks, &xe_struct, &xe_sentinel_name, &xe_temperature_on, &xe_values_on, &xe_watch_counts, &xe_checked, &T_BOOL, &T_INT, &T_U64, &T_MATH_INT, &xe_right_at, &xe_services)
 xe_binding = checker_expr_bind(&xe_inputs)
 sym_of = (kind: SK, ref: int) -> int:
@@ -205,6 +206,13 @@ done = (t: int, k: NK = .ident, flags: int = 0, dewy: bool = true) -> int:
     n = node(k); nodes[n].type = i32(t); nodes[n].flags = i32(128 | flags)
     if dewy: nodes[n].pos = (1 << 40) + n
     n
+# Call arguments: holes take the parameter's type, settled values stay, the rest is the host's.
+arguments = ():
+    loop a in [node(.hole), done(T_INT), done(T_U8), done(T_INT, .ident, 1), node(.int_lit), node(.bool_lit)]:
+        finish_arg(a, T_INT, false)
+        print("arg:{a}:{nodes[a].type}:{int(nodes[a].flags)}")
+    finish_arg(done(T_INT), T_INT, true)
+    finish_arg(done(T_INT), 0, false)
 binop = (op: Tok, a: int, b: int, dewy: bool = true) -> int:
     n = node(.binary, a); nodes[n].b = i32(b); nodes[n].op = i32(int(op))
     if dewy: nodes[n].pos = (1 << 40) + n
@@ -236,6 +244,7 @@ main = ():
     # Names: the scope above the function's floor, else the module cache, else the host.
     scoped(sym_of(.local, own), 4)
     show(name_node())
+    print("lookup:{lookup(2)}:{lookup(3)}")
     ctxs[cx].floor = 5
     g = sym_of(.local, own)
     cached(int(ctxs[cx].mod), g, 1)
@@ -247,16 +256,19 @@ main = ():
     show(name_node())
     xe_mods[2] = 5
     show(name_node())
+    print("lookup:{lookup(2)}")
     xe_mods[2] = int(ctxs[cx].mod)
     xe_ticks = [0, 0, 0]
     xe_struct = 7
     show(name_node())
+    print("lookup:{lookup(2)}")
     # Outside every function: no floor, the module -1; a module name, which reads no context.
     cx = -1
     xe_mods[2] = -1
     xe_found[2] = sym_of(.module, 0)
     xe_scope.top[2] = -1
     show(name_node())
+    print("lookup:{lookup(2)}")
     cx = 1
     ctxs[cx].floor = 0
     # Every symbol kind reaches the identifier leaf with its frozen ordinal.
@@ -281,6 +293,7 @@ main = ():
     xe_temperature_on = false
     xe_values_on = false
     binaries()
+    arguments()
     print(events)
     print("ok")
 '''

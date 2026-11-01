@@ -1,3 +1,4 @@
+use 'checker_call_queries.dewy'
 use 'checker_expr.dewy'
 use 'effect_lattice.dewy'
 use 'checker_blocks.dewy'
@@ -596,18 +597,6 @@ jo_type_spelling = (nm: int, s: int, pos: int):
         if src[off + i] != w[i]: return
     dewy = dewy_type_word(w)
     fatal(pos, "`{w}` is not a Dewy type name: write `{dewy}`")
-
-# look up a name from the current context
-lookup = (name: int) -> int:
-    floor = 0
-    m = -1
-    if cx >= 0:
-        floor = int(ctxs[cx].floor)
-        m = int(ctxs[cx].mod)
-    if name < check_scopes.top.len():
-        i = check_scopes.top[name]
-        if i >= floor: return check_scopes.syms[i]
-    module_lookup(m, name)
 
 # ---------------- "did you mean" ----------------
 # the closest of the candidate names (" (did you mean 'x'?)"), or ""; ties go to the longest
@@ -1488,7 +1477,8 @@ result_candidate = (leaf: int, need_literal: bool) -> CheckerResultCandidate:
     if t != 0 and tkind(t) != .var and tkind(t) != .void_ and t != T_NEVER: return CheckerResultCandidate(prune(t), false)
     CheckerResultCandidate()
 
-result_host = CheckerResultHost(lookup, result_pending, result_candidate)
+result_lookup = (name: int) -> int: lookup(name)
+result_host = CheckerResultHost(result_lookup, result_pending, result_candidate)
 result_binding = checker_results_bind(&nodes, &lists, &files, &result_host)
 
 value_leaves = (n: int, out: mut int[]): cr_value_leaves(n, out)

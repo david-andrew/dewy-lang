@@ -1,0 +1,55 @@
+# Frozen call-checker queries extracted from expr.jo's intrinsic_of and ctx_dependent.
+use 'node_store.dewy'
+use 'source_types.dewy'
+struct CheckerCallQueryInput:
+    nodes: *(Node[])
+    lists: *(i32[])
+    files: *(SrcFile[])
+    intrinsic_names: *(int[])
+    set_name: *(int)
+cg_nodes: *(Node[])
+cg_lists: *(i32[])
+cg_files: *(SrcFile[])
+cg_intrinsic_names: *(int[])
+cg_set_name: *(int)
+checker_call_queries_bind = (input: *CheckerCallQueryInput) -> int:
+    cg_nodes = input[0].nodes
+    cg_lists = input[0].lists
+    cg_files = input[0].files
+    cg_intrinsic_names = input[0].intrinsic_names
+    cg_set_name = input[0].set_name
+    0
+intrinsic_of = (name: int) -> int:
+    if name >= 0 and name < cg_intrinsic_names[0].len(): return cg_intrinsic_names[0][name] - 1
+    -1
+cg_oversized = (a: int) -> bool:
+    if cg_nodes[0][a].kind == .unary and cg_nodes[0][a].op == 59: return cg_oversized(int(cg_nodes[0][a].a))
+    cg_nodes[0][a].kind == .call and cg_nodes[0][a].aux2 == -1
+cg_dewy = (pos: int) -> bool: cg_files[0][pos >> 40].is_dewy
+ctx_dependent = (a: int) -> bool:
+    k = cg_nodes[0][a].kind
+    flags = int(cg_nodes[0][a].flags)
+    if k == .unary: return cg_nodes[0][a].op == 59 and cg_oversized(int(cg_nodes[0][a].a))
+    if k == .call:
+        if cg_nodes[0][a].aux2 == -1: return true
+        if cg_nodes[0][a].type == 0:
+            callee = int(cg_nodes[0][a].a)
+            ck = cg_nodes[0][callee].kind
+            if cg_nodes[0][a].nlist == 1 and ck == .ident and int(cg_nodes[0][callee].name) == cg_set_name[0]: return true
+            if ck == .dotname: return true
+        return false
+    if k == .ident or k == .field or k == .typeapply: return flags & 4096 != 0
+    if k == .dotname: return cg_nodes[0][a].type == 0
+    if k == .lambda or k == .none_lit or k == .hole or k == .record_lit: return true
+    if k == .if_ or k == .match_: return flags & 128 == 0 and cg_dewy(cg_nodes[0][a].pos)
+    if k == .block: return flags & 67108864 != 0 and flags & 128 == 0
+    if k == .array:
+        count = int(cg_nodes[0][a].nlist)
+        if count == 0: return cg_nodes[0][a].b == 0
+        if cg_nodes[0][a].type == 0 and flags & 128 == 0 and cg_dewy(cg_nodes[0][a].pos): return true
+        base = int(cg_nodes[0][a].list)
+        loop i in [0..count):
+            if ctx_dependent(int(cg_lists[0][base + i])): return true
+        return false
+    if k == .map_lit: return cg_nodes[0][a].nlist == 0 or (cg_nodes[0][a].type == 0 and flags & 128 == 0 and cg_dewy(cg_nodes[0][a].pos))
+    false
