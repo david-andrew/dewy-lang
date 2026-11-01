@@ -19,3 +19,20 @@ cq_settled=(nodes:ptr<array<Node>> types:ptr<array<TypeInfo>> n:CQWord t:CQWord)
     let tk=types[0].ptr[to].kind
     tk not=? 'refined' and tk not=? 'callable'
 }
+# Can a value (node n; 0 for a type alone) of type from0 go where to0 is wanted? The same
+# type once pruned is answered here; every conversion is the host's (expr.jo can_coerce).
+# For Dewy callers; Jo calls can_coerce itself.
+CheckerCoerceHost:type=[
+    rest:<(node:int64 source:int64 target:int64):>bool>
+]
+let cq_coerce_host:ptr<CheckerCoerceHost>=$unsafe (uint64(0) as ptr<CheckerCoerceHost>)
+checker_coerce_bind=(host:ptr<CheckerCoerceHost>):>CQWord=>$unsafe {
+    cq_coerce_host=host
+    0
+}
+cq_can_coerce=(n:CQWord from0:CQWord to0:CQWord):>bool=>$unsafe {
+    let source=tu_prune(from0)
+    let target=tu_prune(to0)
+    if source =? target {return true}
+    cq_coerce_host[0].rest(n source target)
+}

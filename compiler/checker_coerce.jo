@@ -11,3 +11,14 @@ cq_settled = (nodes: *(Node[]), types: *(TypeInfo[]), n: int, t: int) -> bool:
     if tu_prune(int(nodes[0][n].type)) != to: return false
     tk = types[0][to].kind
     tk != .refined and tk != .callable
+struct CheckerCoerceHost:
+    rest: (int, int, int) -> bool
+cq_coerce_host: *(CheckerCoerceHost)
+checker_coerce_bind = (host: *CheckerCoerceHost) -> int:
+    cq_coerce_host = host
+    0
+cq_can_coerce = (n: int, from0: int, to0: int) -> bool:
+    from = tu_prune(from0)
+    to = tu_prune(to0)
+    if from == to: return true
+    cq_coerce_host[0].rest(n, from, to)

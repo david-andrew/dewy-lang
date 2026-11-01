@@ -1,4 +1,5 @@
-"""Coercion's no-op front (cq_settled) and the literal leaf's word fast path match frozen Jo."""
+"""Coercion's no-op front (cq_settled), can_coerce's same-type head (cq_can_coerce) and the
+literal leaf's word fast path match frozen Jo."""
 import pytest
 
 from tests.support import compiler  # noqa: F401
@@ -14,6 +15,11 @@ typed = (k: NK, t: int, flags: int = 0) -> int:
     nodes[n].type = i32(t); nodes[n].flags = i32(flags)
     n
 settled = (n: int, t: int): print("settled:{n}:{t}:{cq_settled(&nodes, &types, n, t)}")
+cq_rest = (n: int, from: int, to: int) -> bool:
+    events.push("can_coerce:{n}:{from}:{to}")
+    to == T_INT
+cq_rest_host = CheckerCoerceHost(cq_rest)
+cq_rest_binding = checker_coerce_bind(&cq_rest_host)
 # An int literal of a Jo file checked where t is wanted: its type, flags and the host's calls.
 word = (value: int, t: int, u64: bool = false):
     n = node(.int_lit, 0, value)
@@ -51,6 +57,11 @@ main = ():
     types.push(TypeInfo(kind = .callable))
     callable = types.len() - 1
     settled(typed(.ident, callable), callable)
+    # can_coerce: equal once pruned here, else the host's
+    count = events.len()
+    loop pair in [(T_INT, T_INT), (v, T_INT), (T_INT, v), (free, free), (T_I8, T_INT), (T_I8, T_BOOL), (free, T_INT)]:
+        print("can_coerce:{pair.0}:{pair.1}:{cq_can_coerce(x, pair.0, pair.1)}")
+    print("can_coerce hosts:{events.len() - count}")
     # Word literals: in range, retyped here; out of range, the host's to report.
     word(127, T_I8); word(128, T_I8); word(-128, T_I8); word(-129, T_I8)
     word(255, T_U8); word(256, T_U8); word(-1, T_U8); word(0, T_U8)
