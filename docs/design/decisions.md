@@ -269,3 +269,34 @@ section linked. ROADMAP.md lists them in one line each.
   `main` provably assigns it before any read; forbid-only rows check the body
   while callers see the inferred effects; distinct `@` parameters are disjoint
   for the solver; regex `find` returns `Match | Missing`.
+- Answers, batch 1 (2026-11-01):
+  - Import cycles (#140): allowed, under the rule "as if everything were one
+    big file": a program that would work as one file must not break when split
+    into modules. This covers declarations and module-level code alike.
+    Initialization is ordered by dependency, as in one file; the only error is
+    one a single file would also have (a genuine value cycle, or a use before
+    initialization), and it names the chain. Aim for maximum ergonomics.
+  - Compile-speed target (#126c): every flagship reaches at least 200k
+    lines/s (option a); the reading in ROADMAP.md stands.
+  - Concurrency stage 4, the parts that stand (#105):
+    - D3a: a failed send returns `void | Unsent<T>`, with `.value` (the exact
+      payload offered) and `.reason` (`Full`, `Closed`, `Busy` or
+      `Canceled`). `Channel.send` returns this too.
+    - D3b: `spsc<T N>` with a consuming `.split` (no parentheses: zero-argument
+      calls drop them everywhere) and the channel verbs `try_send`, `send`,
+      `try_receive`, `receive`, `close`.
+    - D3c: `mpmc<T>(capacity)`; a non-waiting attempt that collides with
+      another task returns `Busy`.
+  - Callbacks passed into parallel code (#114): inferred. A function that
+    passes a callback parameter into parallel code gets "this argument must be
+    parallel-safe" in its signature, checked at call sites like effects. No
+    required tag. An optional `$parallel_safe` only enforces the contract on
+    exported APIs, and is rejected on a function that takes no callback.
+  - On hold for one cohesive parallel/concurrent surface proposal: `select`
+    (#105 D3d), `[concurrent x in xs …]` (#118), and any new loop- or
+    capture-shaped concurrency construct. Don't build them.
+  - No legacy: Dewy has no users yet, so a design change keeps no
+    compatibility shims, deprecation paths or old-form-to-new-form
+    diagnostics; change it and update the tests and docs. "Use X instead"
+    errors for spellings that never shipped are removed. Fix-its that teach
+    Dewy over Python or C habits stay.
