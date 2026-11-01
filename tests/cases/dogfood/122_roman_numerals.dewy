@@ -1,0 +1,94 @@
+# Roman numerals both ways. Encoding walks a table of values; decoding
+# scans the letters left to right (subtractive pairs look one ahead) and
+# then validates by re-encoding, so "IIII", "VX" and "MCMC" are rejected
+# with a reason. A ledger of mixed entries is totalled at the end.
+
+Letter:type = 'I' | 'V' | 'X' | 'L' | 'C' | 'D' | 'M'
+
+const VALUE:totaldict<Letter int> = ['I' -> 1 'V' -> 5 'X' -> 10 'L' -> 50 'C' -> 100 'D' -> 500 'M' -> 1000]
+
+const TABLE:array<[int string]> = [
+    [1000 "M"] [900 "CM"] [500 "D"] [400 "CD"] [100 "C"] [90 "XC"]
+    [50 "L"] [40 "XL"] [10 "X"] [9 "IX"] [5 "V"] [4 "IV"] [1 "I"]
+]
+
+BadNumeral:type = [text:string reason:string]
+
+letter_of = (c:string):>Letter? => {
+    loop l in members(Letter) if c =? l return l
+    none
+}
+
+to_roman = (n:int):>string => {
+    let parts:array<string> = []
+    let left = n
+    loop [value glyphs] in TABLE {
+        loop left >=? value {
+            parts.push(glyphs)
+            left -= value
+        }
+    }
+    parts.join("")
+}
+
+from_roman = (text:string):>int | BadNumeral => {
+    let word = text.trim().upper()
+    if word.length =? 0 return BadNumeral[text "empty"]
+    let values:array<int> = []
+    loop c in word.chars {
+        let l = letter_of(c)
+        if l is? none return BadNumeral[text "`{c}` is not a Roman letter"]
+        values.push(VALUE[l])
+    }
+    let total = 0
+    loop i in [0..values.length) {
+        let v = values[i]
+        if i + 1 <? values.length and v <? values[i + 1] total -= v else total += v
+    }
+    if total <=? 0 or total >=? 4000 return BadNumeral[text "out of range ({total})"]
+    let canonical = to_roman(total)
+    if canonical not=? word return BadNumeral[text "not canonical; {total} is {canonical}"]
+    total
+}
+
+# A ledger entry is a Roman numeral or a decimal number.
+read_entry = (text:string):>int | BadNumeral => {
+    let n = to_int(text.trim())
+    if n is? int {
+        if 0 <? n <? 4000 return n
+        return BadNumeral[text "{n} has no Roman form"]
+    }
+    from_roman(text)
+}
+
+main = () => {
+    printl"encode:"
+    loop n in [1 4 9 14 40 90 400 1994 2024 3999] printl"  {n:>4} -> {to_roman(n)}"
+
+    printl"decode:"
+    let samples = ["XLII" "mmxxiv" "MCMXCIV" "IIII" "VX" "IC" "MCMC" "ABC" "" "MMMM"]
+    loop s in samples {
+        match from_roman(s) {
+            n:int => printl"  {s:<8} = {n}"
+            bad:BadNumeral => printl"  {s:<8} rejected: {bad.reason}"
+        }
+    }
+
+    printl"ledger:"
+    const LEDGER = "XII, 30, iv, MDCLXVI, 0, XIIX, 250, CCL"
+    let total = 0
+    let rejected = 0
+    loop item in LEDGER.split(",") {
+        match read_entry(item) {
+            n:int => {
+                total += n
+                printl"  + {to_roman(n):>9} ({n})"
+            }
+            bad:BadNumeral => {
+                rejected += 1
+                printl"  ! `{bad.text.trim()}`: {bad.reason}"
+            }
+        }
+    }
+    printl"total {total} = {to_roman(total)}, {rejected} rejected"
+}

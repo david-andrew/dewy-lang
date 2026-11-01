@@ -1,0 +1,129 @@
+# Build planner: read "target: dependency dependency" rules, number the
+# targets, then peel topological layers (Kahn's algorithm: every target whose
+# dependencies are all built joins the next layer). Targets left over sit on
+# or behind a cycle; a depth-first walk with colours names one cycle.
+
+Graph:type = [
+    names:array<string>
+    index:dict<string int>
+    needs:array<array<int>>      # needs[t]: what t depends on
+    users:array<array<int>>      # users[d]: what depends on d
+]
+
+const RULES = """
+app: ui net log
+ui: widgets theme
+widgets: log
+theme:
+net: tls log
+tls: crypto
+crypto:
+log:
+docs: app
+tests: app fixtures
+fixtures: tests
+"""
+
+# The target's number, adding it the first time it is seen.
+intern = (@g:Graph name:string):>int => {
+    if name in? g.index return g.index[name]
+    let id = g.names.length
+    g.names.push(name)
+    g.index[name] = id
+    g.needs.push([])
+    g.users.push([])
+    id
+}
+
+parse = (text:string):>Graph => {
+    let g = Graph[[] [] [] []]
+    loop line in text.lines {
+        let halves = line.split(":")
+        if halves.length not=? 2 continue
+        let [head tail] = halves
+        let target = intern(@g head.trim())
+        loop dep in tail.split() {
+            let d = intern(@g dep)
+            if 0 <=? target <? g.needs.length g.needs[target].push(d)
+            if 0 <=? d <? g.users.length g.users[d].push(target)
+        }
+    }
+    g
+}
+
+layers = (g:Graph):>array<array<int>> => {
+    let waiting = [loop deps in g.needs deps.length]
+    let ready:array<int> = [loop t in [0..waiting.length) if waiting[t] =? 0 t]
+    let out:array<array<int>> = []
+    loop ready.length >? 0 {
+        out.push(ready)
+        let next:array<int> = []
+        loop t in ready {
+            loop u in (g.users.get(t) ?? []) {
+                if not (0 <=? u <? waiting.length) continue
+                waiting[u] -= 1
+                if waiting[u] =? 0 next.push(u)
+            }
+        }
+        ready = next.sorted(key=(t) => g.names.get(t) ?? "")
+    }
+    out
+}
+
+# One cycle through the unbuilt targets, as names, or none.
+find_cycle = (g:Graph):>array<string>? => {
+    # 0 unvisited, 1 on the current path, 2 finished
+    let colour = [loop _ in g.names 0]
+    let path:array<int> = []
+    let next_edge = [loop _ in g.names 0]
+    loop start in [0..g.names.length) {
+        if colour[start] not=? 0 continue
+        path.push(start)
+        colour[start] = 1
+        loop path.length >? 0 {
+            let t = path[end]
+            if not (0 <=? t <? colour.length) {
+                path.pop();
+                continue
+            }
+            let deps = g.needs.get(t) ?? []
+            let k = next_edge[t]
+            if not (0 <=? k <? deps.length) {
+                colour[t] = 2
+                path.pop();
+                continue
+            }
+            next_edge[t] = k + 1
+            let d = deps[k]
+            if not (0 <=? d <? colour.length) continue
+            if colour[d] =? 1 {
+                let first = path.index_of(d) ?? 0
+                return [loop p in path[first..] g.names.get(p) ?? "?"]
+            }
+            if colour[d] =? 0 {
+                colour[d] = 1
+                path.push(d)
+            }
+        }
+    }
+    none
+}
+
+main = () => {
+    let g = parse(RULES)
+    printl"{g.names.length} targets"
+    let built = 0
+    let plan = layers(g)
+    loop i in 0.. and layer in plan {
+        let names = [loop t in layer g.names.get(t) ?? "?"].sorted()
+        printl"layer {i}: {names.join(" ")}"
+        built += layer.length
+    }
+    if built <? g.names.length {
+        printl"{g.names.length - built} targets cannot be built"
+        match find_cycle(g) {
+            cycle:array<string> => printl"cycle: {cycle.join(" -> ")} -> {cycle.get(0) ?? "?"}"
+            _ => printl"no cycle found"
+        }
+    }
+}

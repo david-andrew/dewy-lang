@@ -1,0 +1,125 @@
+# Turn-based arena: two teams of fighters trade blows until one team falls.
+# A seeded linear congruential RNG makes every run identical. Each fighter
+# holds an array of moves with cooldowns; status effects tick each round.
+
+Status:type = 'fine' | 'poisoned' | 'stunned'
+
+Move:type = [name:string power:int cooldown:int]
+
+# A move in a fighter's hand and the turns left before it can be used again.
+Slot:type = [move:Move wait:int]
+
+Fighter:type = [
+    name:string
+    team:int
+    hp:int
+    max_hp:int
+    speed:int
+    slots:array<Slot>
+    status:Status
+    status_turns:int
+]
+
+Rng:type = [state:uint32<overflow='wrap'>]
+
+# Numerical Recipes LCG; the high bits are the better ones.
+next = (@rng:Rng bound:int):>int => {
+    rng.state = rng.state * 1664525 + 1013904223
+    let high = int(rng.state >> 16)
+    if bound <=? 0 return 0
+    high % bound
+}
+
+fighter = (name:string team:int hp:int speed:int moves:array<Move>):>Fighter =>
+    Fighter[name team hp hp speed [loop m in moves Slot[m 0]] 'fine' 0]
+
+alive = (f:Fighter):>bool => f.hp >? 0
+
+# The first living enemy with the least health, or -1.
+target_of = (fs:array<Fighter> team:int):>int => {
+    let best = -1
+    loop i in [0..fs.length) {
+        if fs[i].team =? team or not alive(fs[i]) continue
+        if best <? 0 or fs[i].hp <? fs[best].hp best = i
+    }
+    best
+}
+
+# The strongest special move whose cooldown has run out, else the basic
+# move in slot 0, which never cools down.
+pick_move = (f:Fighter):>int? => {
+    if f.slots.length =? 0 return none
+    let pick = 0
+    loop k in [1..f.slots.length) {
+        let slot = f.slots[k]
+        if slot.wait >? 0 continue
+        if pick =? 0 or slot.move.power >? f.slots[pick].move.power pick = k
+    }
+    pick
+}
+
+tick_status = (@f:Fighter) => {
+    if f.status =? 'poisoned' {
+        f.hp = max(f.hp - 3 0)
+        printl"  {f.name} takes 3 poison damage ({f.hp} left)"
+    }
+    if f.status_turns >? 0 f.status_turns -= 1
+    if f.status_turns =? 0 f.status = 'fine'
+}
+
+team_alive = (fs:array<Fighter> team:int):>bool => {
+    loop f in fs if f.team =? team and alive(f) return true
+    false
+}
+
+main = () => {
+    let slash = Move["slash" 6 0]
+    let fire = Move["fireball" 14 3]
+    let venom = Move["venom" 5 4]
+    let bash = Move["shield bash" 4 3]
+    let fs = [
+        fighter("Aria" 0 40 7 [slash fire])
+        fighter("Brom" 0 55 4 [slash bash])
+        fighter("Cask" 1 45 6 [slash venom])
+        fighter("Dree" 1 38 8 [slash fire bash])
+    ]
+    let rng = Rng[2024]
+    let order = [loop i in [0..fs.length) i].sorted(key=(i) => -fs[i].speed)
+    let round = 1
+    loop round <=? 20 and team_alive(fs 0) and team_alive(fs 1) {
+        printl"round {round}"
+        loop i in order {
+            if not alive(fs[i]) continue
+            let stunned = fs[i].status =? 'stunned'
+            tick_status(@fs[i])
+            if not alive(fs[i]) { printl"  {fs[i].name} succumbs"; continue }
+            if stunned { printl"  {fs[i].name} is stunned"; continue }
+            let t = target_of(fs fs[i].team)
+            if t <? 0 break
+            let k = pick_move(fs[i])
+            if k is? none continue
+            loop c in [0..fs[i].slots.length) if fs[i].slots[c].wait >? 0 fs[i].slots[c].wait -= 1
+            let move = (fs[i].slots.get(k) ?? Slot[slash 0]).move
+            if 0 <=? k <? fs[i].slots.length fs[i].slots[k].wait = move.cooldown
+            let roll = next(@rng 20)
+            if roll <? 2 {
+                printl"  {fs[i].name}'s {move.name} misses {fs[t].name}"
+                continue
+            }
+            let damage = move.power + roll // 4 + (if roll =? 19 move.power else 0)
+            fs[t].hp = max(fs[t].hp - damage 0)
+            printl"  {fs[i].name} uses {move.name} on {fs[t].name}: {damage} ({fs[t].hp} left)"
+            if move.name =? "venom" and fs[t].hp >? 0 {
+                fs[t].status = 'poisoned'
+                fs[t].status_turns = 3
+            } else if move.name =? "shield bash" and fs[t].hp >? 0 and roll >=? 10 {
+                fs[t].status = 'stunned'
+                fs[t].status_turns = 1
+            }
+        }
+        round += 1
+    }
+    let winner = if team_alive(fs 0) and not team_alive(fs 1) "team 0" else if team_alive(fs 1) and not team_alive(fs 0) "team 1" else "nobody"
+    printl"winner: {winner} after {round - 1} rounds"
+    loop f in fs printl"  {f.name:<5} {f.hp:>3}/{f.max_hp:<3} {f.status}"
+}

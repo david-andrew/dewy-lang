@@ -1,0 +1,32 @@
+encode:
+     1 -> I
+     4 -> IV
+     9 -> IX
+    14 -> XIV
+    40 -> XL
+    90 -> XC
+   400 -> CD
+  1994 -> MCMXCIV
+  2024 -> MMXXIV
+  3999 -> MMMCMXCIX
+decode:
+  XLII     = 42
+  mmxxiv   = 2024
+  MCMXCIV  = 1994
+  IIII     rejected: not canonical; 4 is IV
+  VX       rejected: not canonical; 5 is V
+  IC       rejected: not canonical; 99 is XCIX
+  MCMC     rejected: not canonical; 2000 is MM
+  ABC      rejected: `A` is not a Roman letter
+           rejected: empty
+  MMMM     rejected: out of range (4000)
+ledger:
+  +       XII (12)
+  +       XXX (30)
+  +        IV (4)
+  +   MDCLXVI (1666)
+  ! `0`: 0 has no Roman form
+  ! `XIIX`: not canonical; 20 is XX
+  +       CCL (250)
+  +       CCL (250)
+total 2212 = MMCCXII, 2 rejected

@@ -1,0 +1,94 @@
+# Delivery-time report: read a CSV of courier deliveries, skip bad rows with a
+# reason, then print a per-region summary (count, mean, worst) and a text
+# histogram of minutes in fixed-width buckets, with an overflow bucket.
+
+const CSV = """
+region,courier,minutes,rating
+north,ana,12.5,5
+north,bo,31,4
+south,cy,8.25,5
+east,dee,44,2
+south,ana,19.75,4
+north,cy,abc,3
+west,bo,27.5,
+east,ana,16,5
+south,dee,61.5,1
+north,ana,22,4
+east,cy,9.5,5
+west,dee,38.25,3
+south,bo,-4,5
+north,dee,14.75,5
+"""
+
+const WIDTH = 10
+const BUCKETS = 6
+
+Row:type = [region:string courier:string minutes:rational rating:int]
+
+Stats:type = [count:int total:rational worst:rational]
+
+# A row, or the reason it is rejected.
+parse_row = (line:string):>Row | string => {
+    let cells = [loop c in line.split(",") c.trim()]
+    if cells.length not=? 4 return "expected 4 cells, got {cells.length}"
+    let [region courier minutes rating] = cells
+    let m = rational(minutes)
+    if m is? none return "minutes `{minutes}` is not a number"
+    if m <? 0 return "negative minutes {m}"
+    let r = to_int(rating)
+    if r isnt? int return "rating `{rating}` is not a whole number"
+    if not (1 <=? r <=? 5) return "rating {r} outside 1..5"
+    Row[region courier m r]
+}
+
+bucket_of = (minutes:rational):>int => {
+    let b = (minutes / WIDTH).floor()
+    min(max(b 0) BUCKETS - 1)
+}
+
+label = (b:int):>string => {
+    if b =? BUCKETS - 1 return "{b * WIDTH}+"
+    "{b * WIDTH}-{(b + 1) * WIDTH}"
+}
+
+bar = (n:int scale:int):>string => "#" * (n * scale)
+
+main = () => {
+    let rows:array<Row> = []
+    let lines = [loop l in CSV.split("\n") if l.trim().length >? 0 l]
+    loop i in [1..lines.length) {
+        let got = parse_row(lines[i])
+        match got {
+            r:Row => rows.push(r)
+            why:string => printl"line {i + 1}: skipped, {why}"
+        }
+    }
+    printl"{rows.length} good rows"
+
+    let by_region:dict<string Stats> = []
+    loop r in rows {
+        if r.region not in? by_region by_region[r.region] = Stats[0 0 0]
+        by_region[r.region].count += 1
+        by_region[r.region].total += r.minutes
+        by_region[r.region].worst = max(by_region[r.region].worst r.minutes)
+    }
+    let names = by_region.keys.sorted()
+    printl""
+    printl"region  count   mean   worst"
+    loop name in names {
+        let s = by_region[name]
+        if s.count =? 0 continue
+        let mean = s.total / s.count
+        printl"{name:<7} {s.count:>5} {mean:>6.2f} {s.worst:>7.2f}"
+    }
+
+    let counts = [loop _ in [0..BUCKETS) 0]
+    loop r in rows counts[bucket_of(r.minutes)] += 1
+    printl""
+    printl"minutes histogram"
+    loop b in [0..BUCKETS) printl"{label(b):>6} | {bar(counts[b] 2)} {counts[b]}"
+
+    let five_star = [loop r in rows if r.rating =? 5 r.courier]
+    printl""
+    printl"five-star deliveries: {five_star.join(", ")}"
+}
