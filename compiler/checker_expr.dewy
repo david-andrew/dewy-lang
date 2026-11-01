@@ -184,19 +184,85 @@ CheckerCallInput:type=[
     members_name:ptr<int64>
     set_name:ptr<int64>
     host:ptr<CheckerCallHost>
+    names:ptr<array<string>>
+    values_hit:ptr<array<bool>>
+    spread_call:ptr<array<bool>>
 ]
 let xe_lists:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
 let xe_locals:ptr<array<Local>>=$unsafe (uint64(0) as ptr<array<Local>>)
 let xe_members_name:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let xe_set_name:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let xe_call_host:ptr<CheckerCallHost>=$unsafe (uint64(0) as ptr<CheckerCallHost>)
+let xe_names:ptr<array<string>>=$unsafe (uint64(0) as ptr<array<string>>)
+let xe_values_hit:ptr<array<bool>>=$unsafe (uint64(0) as ptr<array<bool>>)
+let xe_spread_call:ptr<array<bool>>=$unsafe (uint64(0) as ptr<array<bool>>)
 checker_call_bind=(input:ptr<CheckerCallInput>):>XEWord=>$unsafe {
     xe_lists=input[0].lists
     xe_locals=input[0].locals
     xe_members_name=input[0].members_name
     xe_set_name=input[0].set_name
     xe_call_host=input[0].host
+    xe_names=input[0].names
+    xe_values_hit=input[0].values_hit
+    xe_spread_call=input[0].spread_call
     0
+}
+xe_marked=(marks:ptr<array<bool>> a:XEWord):>bool=>$unsafe {a <? marks[0].length and marks[0].ptr[a]}
+# An unchecked name argument that cannot give several values (check.jo values_candidate's
+# false answers): written `@x` (NF_MUT 1), unbound, bound to neither a variable nor a
+# function, or a local of a type that holds one value and is not callable. Globals and
+# functions are the host's.
+xe_one_value=(a:XEWord):>bool=>$unsafe {
+    if (XEWord(xe_nodes[0].ptr[a].flags) & 1) not=? 0 {return true}
+    let s=lookup(XEWord(xe_nodes[0].ptr[a].name))
+    if s =? 0 {return true}
+    let sk=xe_syms[0].ptr[s].kind
+    if sk =? 'local' {
+        let held=XEWord(xe_locals[0].ptr[XEWord(xe_syms[0].ptr[s].ref)].type)
+        if held =? 0 {return true}
+        let k=xe_kind_of(held)
+        return k =? 'bool_' or k =? 'int_' or k =? 'float_' or k =? 'str_' or k =? 'array' or k =? 'enum_' or k =? 'fixed' or k =? 'range' or k =? 'vec' or k =? 'quantity' or k =? 'ptr'
+    }
+    sk not=? 'global' and sk not=? 'fns'
+}
+# check.jo values_call's common answer without the host: true when it would expand
+# nothing and check nothing first (an operator's own `__f`/`$f`, or arguments that are
+# checked or wait for their parameter, none spreading, packed or naming several values;
+# `members(U)` arguments are the host's). O(arguments).
+values_settled=(n:XEWord):>bool=>$unsafe {
+    let callee=XEWord(xe_nodes[0].ptr[n].a)
+    if xe_nodes[0].ptr[callee].kind =? 'ident' {
+        let text=xe_names[0].ptr[XEWord(xe_nodes[0].ptr[callee].name)]
+        if text.startswith("__") or (text.startswith("$") and text not=? "$") {return true}
+    }
+    let count=XEWord(xe_nodes[0].ptr[n].nlist)
+    let base=XEWord(xe_nodes[0].ptr[n].list)
+    let i:XEWord=0
+    loop i <? count {
+        let original=XEWord(xe_lists[0].ptr[base + i])
+        i=i + 1
+        let named=xe_nodes[0].ptr[original].kind =? 'namedarg'
+        let a=original
+        if named {a=XEWord(xe_nodes[0].ptr[original].a)}
+        let k=xe_nodes[0].ptr[a].kind
+        let flags=XEWord(xe_nodes[0].ptr[a].flags)
+        if k =? 'call' {
+            let m=xe_members_name[0]
+            if m =? 0 or XEWord(xe_nodes[0].ptr[XEWord(xe_nodes[0].ptr[a].a)].name) =? m {return false}
+        }
+        if not named {
+            if k =? 'tuple' and xe_nodes[0].ptr[a].aux =? 7 {return false}
+            if (flags & 1024) not=? 0 or xe_marked(xe_values_hit a) {return false}
+        }
+        if (flags & 128) =? 0 {
+            if k =? 'ident' {
+                if not named and not xe_one_value(a) {return false}
+            } else if k =? 'call' {
+                if not ctx_dependent(a) and not xe_marked(xe_spread_call a) {return false}
+            }
+        }
+    }
+    true
 }
 # Before an overload is picked, each argument's literal shape is settled: set, record,
 # map and Dewy array literals by their members; a function named as a value (a module

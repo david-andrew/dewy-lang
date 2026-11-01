@@ -1,5 +1,6 @@
 """check_args_untyped: argument literal shapes, function-value marks and the checks of
-settled arguments before an overload is picked match frozen Jo."""
+settled arguments before an overload is picked match frozen Jo; so do values_settled's
+answers (a call with nothing to expand)."""
 import pytest
 
 from tests.support import compiler  # noqa: F401
@@ -25,7 +26,8 @@ cz_spread_host = (n: int):
     events.push("spread:{n}")
     nodes[n].kind = .record_lit
 cz_host = CheckerCallHost(cz_members_host, cz_spread_host)
-cz_input = CheckerCallInput(&lists, &locals, &cz_members, &cq_set, &cz_host)
+cz_marks: bool[]
+cz_input = CheckerCallInput(&lists, &locals, &cz_members, &cq_set, &cz_host, &names, &cz_marks, &cz_marks)
 cz_binding = checker_call_bind(&cz_input)
 # An unchecked node of kind k with children, in a Dewy file.
 raw = (k: NK, children: int[] = [], a: int = 0) -> int:
@@ -93,6 +95,20 @@ main = ():
     typed_arr = raw(.array, [named(2)]); nodes[typed_arr].type = i32(T_INT); nodes[typed_arr].flags = 128
     check_args_untyped([record, map, empty_map, arr, spread, typed_arr])
     show_all("literals", [record, rec_item, map, key, value, empty_map, arr, arr_item, spread, spread_item, typed_arr])
+    # values_settled: an operator's own function; checked, waiting and one-value arguments;
+    # spreads, packs, marked hits, callable or unknown names and unchecked calls go to the host
+    xe_module_result = 0
+    g = intern_text("g")
+    checked = raw(.int_lit); nodes[checked].flags = 128
+    hit = raw(.int_lit); nodes[hit].flags = 128
+    loop cz_marks.len() <= hit: cz_marks.push(false)
+    cz_marks[hit] = true
+    spread_arg = named(2); nodes[spread_arg].flags = 1024
+    values_tuple = raw(.tuple); nodes[values_tuple].aux = 7
+    fn_arg = raw(.namedarg, [], named(4))
+    settled_args = [[checked], [named(2)], [named(4)], [named(3)], [named(20)], [spread_arg], [values_tuple], [hit], [raw(.lambda)], [fn_arg], [raw(.call, [], named(g))], [raw(.call, [], named(5))], [checked, named(2), raw(.hole)], []]
+    loop args in settled_args: print("settled:{args.len()}:{values_settled(raw(.call, args, named(g)))}")
+    loop text in ["__op", "$", "$f", "_f"]: print("settled:{text}:{values_settled(raw(.call, [named(4)], named(intern_text(text))))}")
     print(events)
     print("ok")
 '''

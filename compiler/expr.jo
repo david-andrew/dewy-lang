@@ -9437,8 +9437,9 @@ check_call_expr = (n: int, expected: int) -> int:
         return dewy_partial(n, expected)
     # (arguments giving several values, or a spread container: substitution invariance)
     if nkids(n) > 0 and nodes[n].aux2 == 0 and dewy_at(nodes[n].pos) and not (has_flag(n, NF_JUXT) and (nodes[int(nodes[n].a)].kind == .ident or nodes[int(nodes[n].a)].kind == .field) and juxt_head_numeric(n)):
-        vt = values_call(n, expected)
-        if vt >= 0: return ce_finish(n, vt, expected)
+        if not values_settled(n):
+            vt = values_call(n, expected)
+            if vt >= 0: return ce_finish(n, vt, expected)
     t = check_call(n, expected)
     # (a call the check replaced, `int64(x)` of an int64 now x itself: its sym is not a function)
     if nodes[n].kind != .call: return ce_finish(n, t, expected)
@@ -10164,7 +10165,7 @@ expr_values_use = (n: int, t: int):
 expr_sibling = (n: int, t: int) -> int: sibling_index_narrow(n, t)
 expr_host = CheckerExprHost(expr_complete, ident_unknown, expr_module, temperature_read, expr_values_use, check_dotted, binary_juxt, binary_char_code, binary_membership, binary_quantity_hint, binary_decimal, dewy_set_literal, binary_context, binary_nd_hint, binary_secret, binary_rest, check_call_expr, expr_sibling, expr_literal, expr_other, arg_finish_rest)
 call_host = CheckerCallHost(members_argument, dewy_classify_spread)
-call_input = CheckerCallInput(&lists, &locals, &id_members, &dewy_set_name, &call_host)
+call_input = CheckerCallInput(&lists, &locals, &id_members, &dewy_set_name, &call_host, &names, &values_hits, &spread_calls)
 call_binding = checker_call_bind(&call_input)
 expr_input = CheckerExprInput(&nodes, &types, &files, &syms, &check_scopes, &ctxs, &cx, &ml_at, &ml_mod, &ml_sym, &ml_name_tick, &ml_struct, &ide_sentinel, &tk_reads_on, &values_any, &statement_watch, &last_checked, &T_BOOL, &T_INT, &T_U64, &T_MATH_INT, &quantity_update_right, &expr_host)
 expr_binding = checker_expr_bind(&expr_input)
@@ -10401,7 +10402,7 @@ aggregate_spread = (n: int, ex: int, expected: int) -> int:
                 set_list(collected, [c])
                 add_flag(collected, NF_SPREAD)
                 c = collected
-            else: sink_spread_calls[c] = true
+            else: node_mark(spread_calls, c)
         if has_flag(c, NF_SPREAD):
             clear_flag(c, NF_SPREAD)
             nodes[callee].name = i32(intern("extend"))

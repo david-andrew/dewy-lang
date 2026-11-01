@@ -2128,7 +2128,11 @@ or_throw_returns: {int: bool} = {}   # positions of the returns `or_throw` write
 sink_want_n = 0          # (a written `:>(T T)` body about to open: its count and type)
 sink_want_elem = 0
 sink_lambda_pack = 0     # (a lambda checked as a function type giving several values: their type)
-sink_spread_calls: {int: bool}   # (calls spread into an array, `[f()...]`: they may give several values)
+spread_calls: bool[]   # (by node: calls spread into an array, `[f()...]`: they may give several values)
+node_marked = (marks: bool[], n: int) -> bool: n < marks.len() and marks[n]
+node_mark = (marks: mut bool[], n: int):
+    if marks.len() <= n: marks.resize(n * 2 + 64)
+    marks[n] = true
 sink_splice: {int: int[]}        # (a held value's statement: the statements it becomes, sink_hold)
 sink_no_tuple = false            # (a body about to open whose values are always pushed onto an array)
 sink_bind_next = 0               # (the block a binding is about to check as its value: a BIND ...)
@@ -2192,7 +2196,7 @@ sink_pack_call = (n: int):
     if sink_pack_site == n:
         sink_pack_hit = n
         return
-    if sink_spread_calls.has(n): return
+    if node_marked(spread_calls, n): return
     # (through a function value whose type says it gives several values, `<():>(int64 int64)>`)
     if nodes[n].aux == 1:
         callee = int(nodes[n].a)
@@ -6506,7 +6510,7 @@ values_hint_pos: int[]      # (inlay hints: where an argument giving several val
 values_hint_first: int[]    # (... the first position its values fill ...)
 values_hint_label: str[]    # (... and the parameters they fill, once the call is resolved)
 values_hint_mark = 0        # (the first of the hints the arguments being expanded made)
-values_hits: {int: bool}    # (call arguments checked early that gave several values)
+values_hits: bool[]    # (by node: call arguments checked early that gave several values)
 
 values_expand = (items0: int[], pre: mut int[], call: int) -> int[]:
     items = values_flatten(items0)
@@ -6543,7 +6547,7 @@ values_expand = (items0: int[], pre: mut int[], call: int) -> int[]:
             info[i].count = k
             continue
         hit = false
-        if values_hits.has(c): hit = true
+        if node_marked(values_hits, c): hit = true
         else:
             if not values_candidate(c): continue
             saved = sink_pack_site
@@ -6669,7 +6673,7 @@ values_candidate = (c: int) -> bool:
     k = nodes[c].kind
     if has_flag(c, NF_CHECKED): return false
     # (`[pair()... 3]` builds with `extend(pair())`: the values spread as an array)
-    if k == .call: return not ctx_dependent(c) and not sink_spread_calls.has(c)
+    if k == .call: return not ctx_dependent(c) and not node_marked(spread_calls, c)
     if k != .ident or has_flag(c, NF_MUT): return false
     s = lookup(int(nodes[c].name))
     if s == 0: return false
@@ -6920,7 +6924,7 @@ values_call = (n: int, expected: int) -> int:
         if nodes[a].kind == .call and members_named(a): members_argument(a)
         k = nodes[a].kind
         if named: record = 0
-        if not named and (k == .tuple and nodes[a].aux == i32(TUPLE_VALUES) or has_flag(a, NF_SPREAD) or values_hits.has(a)):
+        if not named and (k == .tuple and nodes[a].aux == i32(TUPLE_VALUES) or has_flag(a, NF_SPREAD) or node_marked(values_hits, a)):
             some = true
             break
         if has_flag(a, NF_CHECKED): continue
@@ -6928,7 +6932,7 @@ values_call = (n: int, expected: int) -> int:
             if values_candidate(a):
                 some = true
                 break
-        else if k == .call and not ctx_dependent(a) and not sink_spread_calls.has(a):
+        else if k == .call and not ctx_dependent(a) and not node_marked(spread_calls, a):
             # (a record's positional field: its type is what the value is checked against, as
             # a function's parameter is once its overload is chosen)
             field = 0
@@ -6959,7 +6963,7 @@ values_call = (n: int, expected: int) -> int:
                 if named: nodes[original].a = i32(v)
                 else: set_kid(n, i, v)
             if hit:
-                values_hits[v] = true
+                node_mark(values_hits, v)
                 some = true
                 break
     if not some: return -1
