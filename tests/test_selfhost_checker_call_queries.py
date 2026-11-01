@@ -1,4 +1,5 @@
-"""The call checker's queries (intrinsic_of, ctx_dependent) match frozen Jo and expr.jo's answers."""
+"""The call checker's queries (intrinsic_of, ctx_dependent, argument order, mutable overlap)
+match frozen Jo and expr.jo's answers."""
 import pytest
 
 from tests.support import compiler  # noqa: F401
@@ -7,7 +8,10 @@ from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER, compare
 DRIVER = RESOLVER.split('main = ():')[0] + r'''
 intrinsic_names: int[] = [0, 3, 0, 1]
 set_name = 2
-query_input = CheckerCallQueryInput(&nodes, &lists, &files, &intrinsic_names, &set_name)
+order_host = (n: int, given: int[], final: int[]): print("order:{n}:{given}:{final}")
+overlap_host = (args: int[], mask: int, pos: int): print("overlap:{args}:{mask}:{pos}")
+query_host = CheckerCallQueryHost(order_host, overlap_host)
+query_input = CheckerCallQueryInput(&nodes, &lists, &files, &intrinsic_names, &set_name, &query_host)
 query_binding = checker_call_queries_bind(&query_input)
 mk = (kind: NK, flags: int = 0, t: int = 0, children: int[] = []) -> int:
     n = node(kind, 0, 0, 0, children)
@@ -79,10 +83,21 @@ main = ():
         nested = mk(.array, 128, 0, [small, mk(.array, 128, 0, [small, neg])])
         ask("array_nested:{dewy}", nested)
         ask("array_typed:{dewy}", mk(.array, 0, T_INT, [small, small]))
+    # (argument order: only a Dewy call written out of parameter order reaches the host)
+    p = mk(.ident); q = mk(.ident)
+    named_q = mk(.namedarg); nodes[named_q].a = i32(q)
+    loop dewy in [false, true]:
+        files[0].is_dewy = dewy
+        c = mk(.call)
+        loop given in [[p, q], [p, named_q], [p], [], [q, p], [named_q, p], [p, q, small]]:
+            print("call:{dewy}:{given}")
+            save_call_order(c, given, [p, q])
+    # (two or more mutable parameters are compared on the host)
+    loop mask in [0, 1, 2, 4, 3, 5, 7]: check_mutable_arguments([p, q, small], mask, 9)
     print("ok")
 '''
 
-# expr.jo's answers before the move, for the cases above.
+# expr.jo's answers before the move, for the cases above (host calls as the driver prints them).
 EXPECTED = '''intrinsic:-1:-1
 intrinsic:0:-1
 intrinsic:1:2
@@ -142,6 +157,26 @@ array_checked:true:false
 array_lambda:true:true
 array_nested:true:true
 array_typed:true:false
+call:false:[60, 61]
+call:false:[60, 62]
+call:false:[60]
+call:false:[]
+call:false:[61, 60]
+call:false:[62, 60]
+call:false:[60, 61, 6]
+call:true:[60, 61]
+call:true:[60, 62]
+call:true:[60]
+call:true:[]
+call:true:[61, 60]
+order:64:[61, 60]:[60, 61]
+call:true:[62, 60]
+order:64:[62, 60]:[60, 61]
+call:true:[60, 61, 6]
+order:64:[60, 61, 6]:[60, 61]
+overlap:[60, 61, 6]:3:9
+overlap:[60, 61, 6]:5:9
+overlap:[60, 61, 6]:7:9
 ok
 '''
 

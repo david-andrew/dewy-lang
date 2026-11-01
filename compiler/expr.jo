@@ -1574,7 +1574,9 @@ map_args_text = (d: int, args: int[]) -> str:
 # Keep parameter slots canonical for types/ABI, but evaluate explicitly supplied
 # Dewy arguments in source order, then omitted defaults in parameter order.
 # c holds a list of integer-literal slot numbers only when reordering is needed.
-save_call_order = (n: int, given: int[], final: int[]):
+# checker_call_queries.dewy's save_call_order leaves the host the calls whose arguments
+# are not written in parameter order.
+call_order_rest = (n: int, given: int[], final: int[]):
     if not files[pos_file(nodes[n].pos)].is_dewy: return
     # Most calls already have their written arguments in parameter order.
     # Omitted trailing defaults follow them without any ordering metadata.
@@ -2131,7 +2133,8 @@ mutable_borrowed_overlap = (a: int, b: int) -> bool:
     if not bx and not by: return false
     x == 0 or y == 0 or locals[x].owner != locals[y].owner
 
-check_mutable_arguments = (args: int[], mask: int, pos: int):
+# checker_call_queries.dewy's check_mutable_arguments leaves the host two or more.
+mutable_arguments_rest = (args: int[], mask: int, pos: int):
     if mask == 0 or mask & (mask - 1) == 0 or not dewy_at(pos): return
     loop i in [0..args.len()):
         if mask & (1 << i) == 0 or nodes[args[i]].kind == .hole: continue
@@ -10111,7 +10114,8 @@ intrinsic_length = (n: int, a: int, t: int, expected: int) -> int:
 intrinsic_host = CheckerIntrinsicHost(intrinsic_rest, nargs_check, intrinsic_error, coerce, intrinsic_length, value_loop_resize, check_place, ref_length_mutation)
 intrinsic_input = CheckerIntrinsicInput(&nodes, &lists, &types, &structs, &files, &value_loops, &refine_active, &T_VOID, &T_INT, &T_STR, &T_U8, &T_RAWPTR, &T_NEVER, &intrinsic_host)
 intrinsic_binding = checker_intrinsics_bind(&intrinsic_input)
-call_query_input = CheckerCallQueryInput(&nodes, &lists, &files, &intrinsic_names, &dewy_set_name)
+call_query_host = CheckerCallQueryHost(call_order_rest, mutable_arguments_rest)
+call_query_input = CheckerCallQueryInput(&nodes, &lists, &files, &intrinsic_names, &dewy_set_name, &call_query_host)
 call_query_binding = checker_call_queries_bind(&call_query_input)
 
 # checker_expr.dewy's services: literal preparation (grouped values, spreads, the
