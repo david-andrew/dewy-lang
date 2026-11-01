@@ -22,6 +22,7 @@ use 'checker_in_range.dewy'
 use 'checker_numeric.dewy'
 use 'checker_exact.dewy'
 use 'checker_coerce.dewy'
+use 'checker_call_queries.dewy'
 struct CheckerExprHost:
     complete: () -> void
     unknown: (int, int, int) -> void
@@ -145,6 +146,92 @@ finish_arg = (a: int, pt: int, is_mut: bool):
         xe_nodes[0][a].flags |= 128
     if int(xe_nodes[0][a].flags) & 1 != 0 or not cq_settled(xe_nodes, xe_types, a, pt): xe_arg(a, pt, false)
 xe_arg = (a: int, pt: int, is_mut: bool): xe_host[0].arg(a, pt, is_mut)
+struct CheckerCallHost:
+    members: (int) -> void
+    spread: (int) -> void
+struct CheckerCallInput:
+    lists: *(i32[])
+    locals: *(Local[])
+    members_name: *int
+    set_name: *int
+    host: *CheckerCallHost
+xe_lists: *(i32[])
+xe_locals: *(Local[])
+xe_members_name: *int
+xe_set_name: *int
+xe_call_host: *CheckerCallHost
+checker_call_bind = (input: *CheckerCallInput) -> int:
+    xe_lists = input[0].lists
+    xe_locals = input[0].locals
+    xe_members_name = input[0].members_name
+    xe_set_name = input[0].set_name
+    xe_call_host = input[0].host
+    0
+check_args_untyped = (args: int[]):
+    loop a in args: xe_untyped(a)
+xe_untyped_kids = (n: int):
+    base = int(xe_nodes[0][n].list)
+    count = int(xe_nodes[0][n].nlist)
+    loop i in [0..count): xe_untyped(int(xe_lists[0][base + i]))
+xe_untyped_pairs = (n: int):
+    base = int(xe_nodes[0][n].list)
+    count = int(xe_nodes[0][n].nlist)
+    loop i in [0..count):
+        pair = int(xe_lists[0][base + i])
+        xe_untyped(int(xe_nodes[0][pair].a))
+        xe_untyped(int(xe_nodes[0][pair].b))
+xe_set_call = (a: int) -> bool:
+    if xe_nodes[0][a].type != 0 or xe_nodes[0][a].nlist != 1: return false
+    callee = int(xe_nodes[0][a].a)
+    xe_nodes[0][callee].kind == .ident and int(xe_nodes[0][callee].name) == xe_set_name[0]
+xe_spread = (a: int):
+    if xe_nodes[0][a].b != 0 or xe_nodes[0][a].nlist == 0: return
+    first = int(xe_lists[0][int(xe_nodes[0][a].list)])
+    if int(xe_nodes[0][first].flags) & 1024 == 0: return
+    xe_call_host[0].spread(a)
+xe_fn_kind = (t: int) -> bool:
+    k = xe_kind_of(t)
+    k == .fn_ or k == .cfn or k == .polyfn or k == .callable
+xe_untyped = (a0: int):
+    a = a0
+    if xe_nodes[0][a].kind == .namedarg: a = int(xe_nodes[0][a].a)
+    if xe_nodes[0][a].kind == .call:
+        m = xe_members_name[0]
+        if m == 0 or int(xe_nodes[0][int(xe_nodes[0][a].a)].name) == m: xe_call_host[0].members(a)
+        if xe_nodes[0][a].kind == .call and xe_set_call(a):
+            xe_untyped_kids(a)
+            return
+    if xe_nodes[0][a].kind == .array: xe_spread(a)
+    k = xe_nodes[0][a].kind
+    if k == .record_lit:
+        xe_untyped_kids(a)
+        return
+    if k == .map_lit and ctx_dependent(a):
+        xe_untyped_pairs(a)
+        return
+    if k == .array and xe_files[0][int(xe_nodes[0][a].pos) >> 40].is_dewy and ctx_dependent(a):
+        xe_untyped_kids(a)
+        return
+    base = a
+    if k == .typeapply: base = int(xe_nodes[0][a].a)
+    if not xe_flag(a, 128):
+        bk = xe_nodes[0][base].kind
+        if bk == .ident: xe_fnref(a, base)
+        if bk == .field and xe_nodes[0][int(xe_nodes[0][base].a)].kind == .ident: xe_module_fn(a, base)
+    if ctx_dependent(a) or xe_flag(a, 128): return
+    check_expr(a, 0)
+    xe_add_flag(a, 128)
+xe_fnref = (a: int, base: int):
+    s = lookup(int(xe_nodes[0][base].name))
+    if s == 0: return
+    sk = xe_syms[0][s].kind
+    if sk == .fns: xe_add_flag(a, 4096)
+    if sk == .local and a == base and not xe_flag(a, 1) and xe_files[0][int(xe_nodes[0][a].pos) >> 40].is_dewy and xe_fn_kind(int(xe_locals[0][int(xe_syms[0][s].ref)].type)): xe_add_flag(a, 4096)
+xe_module_fn = (a: int, base: int):
+    ms = lookup(int(xe_nodes[0][int(xe_nodes[0][base].a)].name))
+    if ms == 0 or xe_syms[0][ms].kind != .module: return
+    fs = xe_host[0].module(int(xe_syms[0][ms].ref), int(xe_nodes[0][base].name))
+    if fs != 0 and xe_syms[0][fs].kind == .fns: xe_add_flag(a, 4096)
 xe_kind = (k: SK) -> int: int(k)
 xe_complete = (): xe_host[0].complete()
 xe_unknown = (n: int, expected: int, name: int): xe_host[0].unknown(n, expected, name)

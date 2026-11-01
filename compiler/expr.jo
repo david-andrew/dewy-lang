@@ -2041,41 +2041,8 @@ comprehension_self_typed = (n: int) -> bool:
             if not comprehension_self_typed(c): return false
     true
 
-check_args_untyped = (args: int[]):
-    loop a0 in args:
-        a = unnamed(a0)
-        # (members(U) is the array literal of U's members, taking its type from the call as one does)
-        if nodes[a].kind == .call and members_named(a): members_argument(a)
-        if dewy_set_literal(a):
-            check_args_untyped(kids(a))
-            continue
-        if nodes[a].kind == .array: dewy_classify_spread(a)
-        if nodes[a].kind == .record_lit:
-            check_args_untyped(kids(a))
-            continue
-        if nodes[a].kind == .map_lit and ctx_dependent(a):
-            loop pair in kids(a): check_args_untyped([int(nodes[pair].a), int(nodes[pair].b)])
-            continue
-        if nodes[a].kind == .array and files[pos_file(nodes[a].pos)].is_dewy and ctx_dependent(a):
-            check_args_untyped(kids(a))
-            continue
-        base = a
-        if nodes[a].kind == .typeapply: base = int(nodes[a].a)
-        if nodes[base].kind == .ident and not has_flag(a, NF_CHECKED):
-            s = lookup(int(nodes[base].name))
-            if s != 0 and syms[s].kind == .fns: add_flag(a, NF_FNREF_ARG)
-            # A Dewy function-valued local named alone: its parameter's type
-            # says whether that is a call or a mistaken `@`.
-            if s != 0 and syms[s].kind == .local and a == base and not has_flag(a, NF_MUT) and is_fn_type(int(locals[int(syms[s].ref)].type)) and files[pos_file(nodes[a].pos)].is_dewy: add_flag(a, NF_FNREF_ARG)
-        # (cm.step: a module's function, checked with the parameter's type as a plain one is)
-        if nodes[base].kind == .field and not has_flag(a, NF_CHECKED) and nodes[int(nodes[base].a)].kind == .ident:
-            ms = lookup(int(nodes[int(nodes[base].a)].name))
-            if ms != 0 and syms[ms].kind == .module:
-                fs = module_lookup(int(syms[ms].ref), int(nodes[base].name))
-                if fs != 0 and syms[fs].kind == .fns: add_flag(a, NF_FNREF_ARG)
-        if ctx_dependent(a) or has_flag(a, NF_CHECKED): continue
-        check_expr(a, 0)
-        add_flag(a, NF_CHECKED)
+# check_args_untyped (each argument's literal shape and function-value marks before an
+# overload is picked) is checker_expr.dewy's; members(U) and spread records are host services.
 
 # A place route starts at its owning binding. Narrowing aliases and shared
 # captures still designate that same storage; private captures are independent.
@@ -10178,6 +10145,9 @@ expr_values_use = (n: int, t: int):
     return
 expr_sibling = (n: int, t: int) -> int: sibling_index_narrow(n, t)
 expr_host = CheckerExprHost(expr_complete, ident_unknown, expr_module, temperature_read, expr_values_use, check_dotted, binary_juxt, binary_char_code, binary_membership, binary_quantity_hint, binary_decimal, dewy_set_literal, binary_context, binary_nd_hint, binary_secret, binary_rest, check_call_expr, expr_sibling, expr_literal, expr_other, arg_finish_rest)
+call_host = CheckerCallHost(members_argument, dewy_classify_spread)
+call_input = CheckerCallInput(&lists, &locals, &id_members, &dewy_set_name, &call_host)
+call_binding = checker_call_bind(&call_input)
 expr_input = CheckerExprInput(&nodes, &types, &files, &syms, &check_scopes, &ctxs, &cx, &ml_at, &ml_mod, &ml_sym, &ml_name_tick, &ml_struct, &ide_sentinel, &tk_reads_on, &values_any, &statement_watch, &last_checked, &T_BOOL, &T_INT, &T_U64, &T_MATH_INT, &quantity_update_right, &expr_host)
 expr_binding = checker_expr_bind(&expr_input)
 

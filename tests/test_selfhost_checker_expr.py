@@ -9,7 +9,7 @@ STEMS = ('checker_exact', 'checker_literals', 'checker_idents', 'checker_conditi
          'checker_indexes', 'checker_receivers', 'checker_variants', 'checker_type_apply',
          'checker_unary', 'checker_logic', 'checker_type_tests', 'checker_optional',
          'checker_aggregates', 'checker_collections', 'checker_cast', 'checker_places',
-         'checker_in_range', 'checker_numeric', 'checker_expr')
+         'checker_in_range', 'checker_numeric', 'checker_call_queries', 'checker_expr')
 
 DRIVER = IDENTS + r'''
 syms: Sym[] = [Sym()]

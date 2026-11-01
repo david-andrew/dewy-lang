@@ -3,7 +3,7 @@ from p"node_store.dewy" import Node
 from p"checker_types.dewy" import (TypeInfo TK)
 from p"source_types.dewy" import SrcFile
 from p"type_inference.dewy" import tu_prune
-from p"checker_state.dewy" import (FnCtx CheckerScope Sym SK StatementWatch)
+from p"checker_state.dewy" import (FnCtx CheckerScope Sym SK StatementWatch Local)
 from p"checker_literals.dewy" import (xl_expected xl_finish xl_check_int xl_check_str xl_check_scalar)
 from p"checker_idents.dewy" import xj_ident
 from p"checker_conditionals.dewy" import (xf_if xf_iflet)
@@ -22,6 +22,7 @@ from p"checker_in_range.dewy" import xy_check
 from p"checker_numeric.dewy" import xw_numeric
 from p"checker_exact.dewy" import (exact_potential exact_math_operand)
 from p"checker_coerce.dewy" import cq_settled
+from p"checker_call_queries.dewy" import ctx_dependent
 # The expression dispatcher: an already checked node, then each kind sent to its
 # leaf. A name is looked up here (the scope stack, then the module lookup cache);
 # only a cache miss asks the host. A binary operator's operands are checked here and
@@ -170,6 +171,136 @@ finish_arg=(a:XEWord pt:XEWord is_mut:bool):>void=>$unsafe {
     if (XEWord(xe_nodes[0].ptr[a].flags) & 1) not=? 0 or not cq_settled(xe_nodes xe_types a pt) {xe_arg(a pt false)}
 }
 xe_arg=(a:XEWord pt:XEWord is_mut:bool):>void=>$unsafe {xe_host[0].arg(a pt is_mut)}
+# The call group's inputs beyond the dispatcher's: node lists, locals, the interned
+# `members` (0 until reflection first asks) and `__dewy_set`; rare argument preparation
+# (a `members(U)` argument, an array spreading a record) is the host's.
+CheckerCallHost:type=[
+    members:<(node:int64):>void>
+    spread:<(node:int64):>void>
+]
+CheckerCallInput:type=[
+    lists:ptr<array<int32>>
+    locals:ptr<array<Local>>
+    members_name:ptr<int64>
+    set_name:ptr<int64>
+    host:ptr<CheckerCallHost>
+]
+let xe_lists:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
+let xe_locals:ptr<array<Local>>=$unsafe (uint64(0) as ptr<array<Local>>)
+let xe_members_name:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xe_set_name:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xe_call_host:ptr<CheckerCallHost>=$unsafe (uint64(0) as ptr<CheckerCallHost>)
+checker_call_bind=(input:ptr<CheckerCallInput>):>XEWord=>$unsafe {
+    xe_lists=input[0].lists
+    xe_locals=input[0].locals
+    xe_members_name=input[0].members_name
+    xe_set_name=input[0].set_name
+    xe_call_host=input[0].host
+    0
+}
+# Before an overload is picked, each argument's literal shape is settled: set, record,
+# map and Dewy array literals by their members; a function named as a value (a module
+# function, or a Dewy function-typed local not written with `@`) is marked
+# NF_FNREF_ARG (4096) so it is passed, not called. O(arguments and literal members);
+# host calls may grow every arena, so nodes are reread by ID.
+check_args_untyped=(args:array<int64>):>void=>$unsafe {
+    let i:XEWord=0
+    loop i <? args.length {
+        xe_untyped(args[i])
+        i=i + 1
+    }
+}
+xe_untyped_kids=(n:XEWord):>void=>$unsafe {
+    let base=XEWord(xe_nodes[0].ptr[n].list)
+    let count=XEWord(xe_nodes[0].ptr[n].nlist)
+    let i:XEWord=0
+    loop i <? count {
+        xe_untyped(XEWord(xe_lists[0].ptr[base + i]))
+        i=i + 1
+    }
+}
+xe_untyped_pairs=(n:XEWord):>void=>$unsafe {
+    let base=XEWord(xe_nodes[0].ptr[n].list)
+    let count=XEWord(xe_nodes[0].ptr[n].nlist)
+    let i:XEWord=0
+    loop i <? count {
+        let pair=XEWord(xe_lists[0].ptr[base + i])
+        xe_untyped(XEWord(xe_nodes[0].ptr[pair].a))
+        xe_untyped(XEWord(xe_nodes[0].ptr[pair].b))
+        i=i + 1
+    }
+}
+# `__dewy_set(...)`, a set literal not yet checked.
+xe_set_call=(a:XEWord):>bool=>$unsafe {
+    let node=xe_nodes[0].ptr + a
+    if node[0].type not=? 0 or node[0].nlist not=? 1 {return false}
+    let callee=xe_nodes[0].ptr + XEWord(node[0].a)
+    callee[0].kind =? 'ident' and XEWord(callee[0].name) =? xe_set_name[0]
+}
+# An array whose first member spreads (NF_SPREAD 1024) in Dewy may be a record literal.
+xe_spread=(a:XEWord):>void=>$unsafe {
+    let node=xe_nodes[0].ptr + a
+    if node[0].b not=? 0 or node[0].nlist =? 0 {return}
+    if (XEWord(xe_nodes[0].ptr[XEWord(xe_lists[0].ptr[XEWord(node[0].list)])].flags) & 1024) =? 0 {return}
+    xe_call_host[0].spread(a)
+}
+xe_members=(a:XEWord):>void=>$unsafe {xe_call_host[0].members(a)}
+xe_fn_kind=(t:XEWord):>bool=>$unsafe {
+    let k=xe_kind_of(t)
+    k =? 'fn_' or k =? 'cfn' or k =? 'polyfn' or k =? 'callable'
+}
+xe_untyped=(a0:XEWord):>void=>$unsafe {
+    let a=a0
+    if xe_nodes[0].ptr[a].kind =? 'namedarg' {a=XEWord(xe_nodes[0].ptr[a].a)}
+    if xe_nodes[0].ptr[a].kind =? 'call' {
+        let m=xe_members_name[0]
+        if m =? 0 or XEWord(xe_nodes[0].ptr[XEWord(xe_nodes[0].ptr[a].a)].name) =? m {xe_members(a)}
+        if xe_nodes[0].ptr[a].kind =? 'call' and xe_set_call(a) {
+            xe_untyped_kids(a)
+            return
+        }
+    }
+    if xe_nodes[0].ptr[a].kind =? 'array' {xe_spread(a)}
+    let k=xe_nodes[0].ptr[a].kind
+    if k =? 'record_lit' {
+        xe_untyped_kids(a)
+        return
+    }
+    if k =? 'map_lit' and ctx_dependent(a) {
+        xe_untyped_pairs(a)
+        return
+    }
+    if k =? 'array' and xe_files[0][xe_nodes[0].ptr[a].pos >> 40].is_dewy and ctx_dependent(a) {
+        xe_untyped_kids(a)
+        return
+    }
+    let base=a
+    if k =? 'typeapply' {base=XEWord(xe_nodes[0].ptr[a].a)}
+    if not xe_flag(a 128) {
+        let bk=xe_nodes[0].ptr[base].kind
+        if bk =? 'ident' {xe_fnref(a base)}
+        else if bk =? 'field' and xe_nodes[0].ptr[XEWord(xe_nodes[0].ptr[base].a)].kind =? 'ident' {xe_module_fn(a base)}
+    }
+    if ctx_dependent(a) or xe_flag(a 128) {return}
+    check_expr(a 0);
+    xe_add_flag(a 128)
+}
+# A function named alone; or a Dewy function-typed local named alone, not with `@`
+# (NF_MUT 1): its parameter's type says whether that is a call or a mistaken `@`.
+xe_fnref=(a:XEWord base:XEWord):>void=>$unsafe {
+    let s=lookup(XEWord(xe_nodes[0].ptr[base].name))
+    if s =? 0 {return}
+    let sk=xe_syms[0].ptr[s].kind
+    if sk =? 'fns' {xe_add_flag(a 4096)}
+    else if sk =? 'local' and a =? base and not xe_flag(a 1) and xe_files[0][xe_nodes[0].ptr[a].pos >> 40].is_dewy and xe_fn_kind(XEWord(xe_locals[0].ptr[XEWord(xe_syms[0].ptr[s].ref)].type)) {xe_add_flag(a 4096)}
+}
+# `cm.step`: a module's function, checked with the parameter's type as a plain one is.
+xe_module_fn=(a:XEWord base:XEWord):>void=>$unsafe {
+    let ms=lookup(XEWord(xe_nodes[0].ptr[XEWord(xe_nodes[0].ptr[base].a)].name))
+    if ms =? 0 or xe_syms[0].ptr[ms].kind not=? 'module' {return}
+    let fs=xe_host[0].module(XEWord(xe_syms[0].ptr[ms].ref) XEWord(xe_nodes[0].ptr[base].name))
+    if fs not=? 0 and xe_syms[0].ptr[fs].kind =? 'fns' {xe_add_flag(a 4096)}
+}
 # Frozen SK ordinals past `local`, the ABI checker_idents.dewy reads.
 xe_kind=(k:SK):>XEWord=>{
     if k =? 'global' {return 2}
