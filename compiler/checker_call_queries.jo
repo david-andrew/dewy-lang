@@ -152,3 +152,138 @@ habit_call_check = (n: int, name: int, args: int[]):
     if name == h[6]: maybe = na == 5
     if name == h[7]: maybe = na == 2
     if maybe: cg_host[0].habit(n, name, args)
+struct CheckerCollectHost:
+    demand: (int) -> void
+    use_home: (int, int) -> int
+    prelude_module: (int) -> int
+    prelude_reach: (int, int) -> void
+    rational: (int, int, *(int[])) -> void
+    cin_grow: (int) -> void
+struct CheckerCollectInput:
+    contexts: *(FnCtx[])
+    context: *(int)
+    mod_bits: *(int[])
+    mod_uses: *(int[][])
+    homes_built: *(bool)
+    prelude_used: *(bool[])
+    home_first: *(int[])
+    home_mod: *(int[])
+    home_next: *(int[])
+    demanded: *(bool[])
+    dp_scanned: *(bool)
+    dp_by_name: *(int[])
+    dp_mods: *(int[])
+    rational_found: *(int)
+    rational_probed: *(int)
+    rational_reach: *(int[])
+    exact_named: *(bool[])
+    cin_mark: *(i32[])
+    surface_hidden: *(int[])
+    host: *(CheckerCollectHost)
+cl_in: *(CheckerCollectInput)
+cl_pass = 0
+checker_collect_bind = (input: *CheckerCollectInput) -> int:
+    cl_in = input
+    0
+cl_cur_mod = () -> int:
+    c = cl_in[0].context[0]
+    if c >= 0: return int(cl_in[0].contexts[0][c].mod)
+    0
+cl_demand = (name: int):
+    if name < cl_in[0].demanded[0].len() and cl_in[0].demanded[0][name]: return
+    cl_in[0].host[0].demand(name)
+cl_marked = (d: int) -> bool: d < cl_in[0].cin_mark[0].len() and int(cl_in[0].cin_mark[0][d]) == cl_pass
+cl_mark = (d: int):
+    if d >= cl_in[0].cin_mark[0].len(): cl_in[0].host[0].cin_grow(d)
+    cl_in[0].cin_mark[0][d] = i32(cl_pass)
+collect_in = (m: int, name: int, hide: int, out: *(int[])):
+    s = name_family(m, name, hide)
+    if s == 0: return
+    cm = cl_cur_mod()
+    dewy = cm >= 0 and cl_in[0].mod_bits[0][cm] & 2 != 0
+    cl_pass += 1
+    count = out[0].len()
+    loop i in [0..count): cl_mark(out[0][i])
+    o = s
+    loop o != 0:
+        d = int(cg_syms[0][o].decl)
+        surface = int(cg_syms[0][o].surface)
+        hidden = false
+        if surface == 1: hidden = not dewy
+        if surface != 0 and surface != 1: hidden = dewy
+        if hidden: cl_in[0].surface_hidden[0].push(d)
+        else if not cl_marked(d):
+            out[0].push(d)
+            cl_mark(d)
+        o = int(cg_syms[0][o].next)
+cl_use_home = (m: int, name: int) -> int:
+    if not cl_in[0].homes_built[0]: return cl_in[0].host[0].use_home(m, name)
+    if m < cl_in[0].prelude_used[0].len() and cl_in[0].prelude_used[0][m]: return -2
+    if name >= cl_in[0].home_first[0].len(): return -1
+    h = cl_in[0].home_first[0][name]
+    if h == 0: return -1
+    h = h - 1
+    if cl_in[0].home_next[0][h] != 0: return -2
+    hm = cl_in[0].home_mod[0][h]
+    loop i in [0..cl_in[0].mod_uses[0][m].len()):
+        if cl_in[0].mod_uses[0][m][i] == hm: return hm
+    -1
+cl_bound_in = (m: int, name: int) -> bool:
+    if name >= cl_in[0].home_first[0].len(): return false
+    h = cl_in[0].home_first[0][name]
+    loop h != 0:
+        if cl_in[0].home_mod[0][h - 1] == m: return true
+        h = cl_in[0].home_next[0][h - 1]
+    false
+collect_module = (m: int, name: int, out: *(int[])):
+    if m < 0: return
+    cl_demand(name)
+    if cl_in[0].mod_bits[0][m] & 1 != 0:
+        collect_in(-1, name, 0, out)
+        return
+    collect_in(m, name, 0, out)
+    nu = cl_in[0].mod_uses[0][m].len()
+    if nu == 0: return
+    h = cl_use_home(m, name)
+    if h >= 0:
+        collect_in(h, name, 1, out)
+        return
+    if h != -2: return
+    loop i in [0..nu):
+        u = cl_in[0].mod_uses[0][m][i]
+        if cl_in[0].mod_bits[0][u] & 1 != 0: collect_in(-1, name, 2, out)
+        else if cl_bound_in(u, name): collect_in(u, name, 1, out)
+cl_prelude_module = (name: int) -> int:
+    if cl_in[0].dp_scanned[0] and name < cl_in[0].dp_by_name[0].len():
+        f = cl_in[0].dp_by_name[0][name]
+        if f == 1: return -1
+        if f >= 2:
+            dm = cl_in[0].dp_mods[0][f - 2]
+            if dm >= 0: return dm
+    cl_in[0].host[0].prelude_module(name)
+cl_prelude_reach = (m: int, dm: int):
+    if cl_in[0].rational_found[0] < 0 and cl_in[0].mod_bits[0].len() == cl_in[0].rational_probed[0]: return
+    if m < cl_in[0].rational_reach[0].len() and cl_in[0].rational_reach[0][m] == 1: return
+    cl_in[0].host[0].prelude_reach(m, dm)
+collect_fns = (name: int, out: *(int[])):
+    cl_demand(name)
+    m = cl_cur_mod()
+    collect_module(m, name, out)
+    user = false
+    dewy = false
+    if m >= 0:
+        bits = cl_in[0].mod_bits[0][m]
+        user = bits & 1 == 0
+        dewy = user and bits & 2 != 0
+    if dewy and not starts_with(cg_names[0][name], "_"):
+        dm = cl_prelude_module(name)
+        if dm >= 0 and name_family(dm, name, 0) != 0:
+            if dm != m:
+                collect_in(dm, name, 0, out)
+                cl_prelude_reach(m, dm)
+            return
+    hide = 0
+    if user: hide = 2
+    collect_in(-1, name, hide, out)
+    if dewy:
+        if cl_in[0].exact_named[0].len() == 0 or (name < cl_in[0].exact_named[0].len() and cl_in[0].exact_named[0][name]): cl_in[0].host[0].rational(m, name, out)

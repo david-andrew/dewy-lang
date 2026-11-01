@@ -333,10 +333,23 @@ bound_in = (m: int, name: int) -> bool:
         h = home_next[h - 1]
     false
 
+# By module, for checker_call_queries.dewy's collect_fns: 1 a prelude module, 2 a Dewy file
+# (mod_bits), and its uses (mod_uses, as modules[m].uses)
+mod_bits: int[]
+mod_uses: int[][]
+module_added = (m: int):
+    bits = 0
+    if modules[m].is_prelude: bits = 1
+    if files[int(modules[m].file)].is_dewy: bits |= 2
+    mod_bits.push(bits)
+    none_yet: int[]
+    mod_uses.push(none_yet)
+
 # (by module, whether a prelude module is among its uses: then each use is asked in turn)
 prelude_used: bool[]
 use_added = (m: int, u: int):
     modules[m].uses.push(u)
+    mod_uses[m].push(u)
     if modules[u].is_prelude:
         if prelude_used.len() <= m: prelude_used.resize(m * 2 + 16)
         prelude_used[m] = true
@@ -853,6 +866,7 @@ load_module = (path: str, is_prelude: bool, from: int) -> int:
     m = Module(name = i32(intern(path_stem(path))), file = i32(fi), dir = d, is_prelude = is_prelude)
     modules.push(m)
     mi = modules.len() - 1
+    module_added(mi)
     module_by_path[key] = mi
     p_lazy = is_prelude and not ide_on
     if pl_on: pl_files.push(fi)
@@ -4637,7 +4651,7 @@ exprstmt_repl = (e: int):
     sy = lookup(int(nodes[e].name))
     if sy != 0 and syms[sy].kind == .fns:
         ds: int[]
-        collect_fns(int(nodes[e].name), ds)
+        collect_fns(int(nodes[e].name), &ds)
         loop d in ds:
             if len(repl_sig) > 0: repl_sig += "\n"
             repl_sig += ide_fn_header(d)
@@ -5756,7 +5770,7 @@ record_value_member = (t: int, hashing: bool) -> int:
         protocol_names = [intern("hash")]
         ts = [t]
     decls: int[]
-    loop name in protocol_names: collect_module(m, name, decls)
+    loop name in protocol_names: collect_module(m, name, &decls)
     own: int[]
     loop d in decls:
         if int(nodes[d].mod) == m and fn_sig(d).mutmask == 0: own.push(d)
@@ -6878,13 +6892,13 @@ values_argument_hints = (n: int, expected: int) -> int[]:
                 # unless call_by_name selects a user-defined sequence overload.
                 if k == .array and args.len() == 1 and (name_of(name) == "push" or name_of(name) == "extend"):
                     own: int[]
-                    collect_module(cur_mod(), name, own)
+                    collect_module(cur_mod(), name, &own)
                     loop d in own:
                         if not decl_in_prelude(d) and args_fit(d, 2) and takes_seq(d): decls.push(d)
                     if decls.len() == 0: return [if name_of(name) == "push": telem(rt) else: rt]
                     return fns_argument_hints(decls, [recv] + args, recv)[1..]
-                collect_fns(name, decls)
-                loop m in method_modules(rt): collect_module(m, name, decls)
+                collect_fns(name, &decls)
+                loop m in method_modules(rt): collect_module(m, name, &decls)
                 receiver = recv
     if receiver != 0: args = [receiver] + args
     hints: int[]

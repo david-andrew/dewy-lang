@@ -606,7 +606,7 @@ intersection_within = (from: int, to: int) -> bool:
 # a function of the program's own (not the prelude's) by this name
 program_fn_named = (name: int) -> bool:
     own: int[]
-    collect_fns(name, own)
+    collect_fns(name, &own)
     loop d in own:
         if not decl_in_prelude(d): return true
     false
@@ -3671,35 +3671,10 @@ enum_from_int = (n: int, et: int, a: int) -> int:
     nodes[n] = Node(kind = .conv, pos = pos, a = i32(last_checked), aux = i32(int(CV.int_)), type = i32(et), flags = i32(NF_CHECKED))
     et
 
-# (collect_in's marks, by declaration: the pass that found it in `out` already)
+# (collect_in's marks, by declaration: the pass that found it in `out` already;
+# checker_call_queries.dewy keeps the passes, and asks here for room)
 cin_mark: i32[]
-cin_pass = 0
-cin_marked = (d: int) -> bool: d < cin_mark.len() and int(cin_mark[d]) == cin_pass
-cin_set = (d: int):
-    if d >= cin_mark.len(): cin_mark.resize(max(d + 1, nodes.len()) + 1024)
-    cin_mark[d] = i32(cin_pass)
-
-# (m: a module's own table, -1 the prelude's; checker_call_queries.dewy's name_family reads
-# them indexed)
-collect_in = (m: int, name: int, out: mut int[]):
-    hide = 0
-    if hide_private:
-        hide = 1
-        if hide_lib_only: hide = 2
-    s = name_family(m, name, hide)
-    if s == 0: return
-    dewy = caller_dewy()
-    # (each declaration once: what `out` holds, and what this family adds)
-    cin_pass += 1
-    loop d in out: cin_set(d)
-    o = s
-    loop o != 0:
-        d = int(syms[o].decl)
-        if not surface_sees(o, dewy): surface_hidden.push(d)
-        else if not cin_marked(d):
-            out.push(d)
-            cin_set(d)
-        o = int(syms[o].next)
+cin_grow = (d: int): cin_mark.resize(max(d + 1, nodes.len()) + 1024)
 
 # Library operations Dewy spells differently from the Sloppy library underneath. For these
 # names, the definitions in lib/std/files.jo are Dewy's (`read_bytes` gives a value or a file
@@ -3818,51 +3793,12 @@ decl_takes = (decls: int[], ts: int[]) -> bool:
         if ok: return true
     false
 
-# (while set, collect_in leaves out private names: those of used modules, or with
-# hide_lib_only those of the library)
-hide_private = false
-hide_lib_only = false
-
-collect_module = (m: int, name: int, out: mut int[]):
-    if m < 0: return
-    demand_name(name)
-    if modules[m].is_prelude: collect_in(-1, name, out)
-    else:
-        collect_in(m, name, out)
-        hide_private = true
-        h = use_home(m, name)
-        if h == -2:
-            loop u in modules[m].uses:
-                hide_lib_only = modules[u].is_prelude
-                if modules[u].is_prelude: collect_in(-1, name, out)
-                else if bound_in(u, name): collect_in(u, name, out)
-        else:
-            if modules[m].uses.len() > 0: hide_lib_only = false
-            if h >= 0: collect_in(h, name, out)
-        hide_private = false
-
-collect_fns = (name: int, out: mut int[]):
-    demand_name(name)
-    m = cur_mod()
-    collect_module(m, name, out)
-    # (in a Dewy module, the Dewy prelude's family of the name replaces the Sloppy prelude's)
-    if m >= 0 and not modules[m].is_prelude and files[int(modules[m].file)].is_dewy and not is_private(name):
-        dm = dewy_prelude_module(name)
-        if dm >= 0 and name_family(dm, name, 0) != 0:
-            if dm != m:
-                collect_in(dm, name, out)
-                prelude_reach(m, dm)
-            return
-    hide_private = m >= 0 and not modules[m].is_prelude
-    hide_lib_only = true
-    collect_in(-1, name, out)
-    hide_private = false
-    # (the builtin `rational`'s exact abs, min, max and sign join the prelude's families in a
-    # module whose imports reach its library: a probe per family collected, the cache's once a
-    # name is stamped. Never another module's: a batch's float case keeps its float members)
-    if m >= 0 and not modules[m].is_prelude and files[int(modules[m].file)].is_dewy and exact_family_name(name):
-        rm = rational_module()
-        if rm >= 0 and rm != m and reaches_rational(m, rm): collect_in(rm, name, out)
+# (checker_call_queries.dewy's collect_fns in a Dewy module: the bundled rational's exact
+# members of an exact family name, when the module's imports reach it)
+collect_rational = (m: int, name: int, out: *(int[])):
+    if not exact_family_name(name): return
+    rm = rational_module()
+    if rm >= 0 and rm != m and reaches_rational(m, rm): collect_in(rm, name, 0, out)
 
 # (by name: abs, min, max or sign; built on first use)
 exact_named: bool[]
@@ -3941,7 +3877,7 @@ exact_members_for = (decls: int[], name: int, args: int[]) -> int[]:
             if s != 0 and syms[s].kind == .local: t = prune(int(locals[int(syms[s].ref)].type))
         if t != 0 and (bundled_rational_type(t) or bundled_word_rational_type(t)):
             out = decls
-            collect_in(rm, name, out)
+            collect_in(rm, name, 0, &out)
             return out
     decls
 
@@ -3987,8 +3923,8 @@ collect_named = (name: int, mod: int, out: mut int[]):
     if ml_stamp(name) == gen: families[key] = Family(gen, out, surface_hidden[hidden_mark..])
 
 collect_named_now = (name: int, mod: int, out: mut int[]):
-    if mod >= 0: collect_module(mod, name, out)
-    else: collect_fns(name, out)
+    if mod >= 0: collect_module(mod, name, &out)
+    else: collect_fns(name, &out)
     m = if mod >= 0: mod else: cur_mod()
     if m < 0 or modules[m].is_prelude or not files[int(modules[m].file)].is_dewy: return
     s = modules[m].names.get(name) ?? 0
@@ -4166,7 +4102,7 @@ dewy_arithmetic_call = (n: int, name: int, args: int[], expected: int) -> int:
             nodes[b].type = i32(T_INT) # generated shift count, not the divisor
     if nodes[n].a != 0: nodes[int(nodes[n].a)].name = i32(helper)
     declarations: int[]
-    collect_fns(helper, declarations)
+    collect_fns(helper, &declarations)
     result = resolve_fn_call(n, helper, declarations, checked, expected)
     # Internal scalar policy: retain the builtin operation's captured actuals.
     # Custom operators and the proven positive power-of-two path are separate.
@@ -4349,7 +4285,7 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
             cm = cur_mod()
             if (not ufcs or mod_scope < 0) and cm >= 0 and not modules[cm].is_prelude:
                 all_d: int[]
-                collect_module(cm, name, all_d)
+                collect_module(cm, name, &all_d)
                 loop d in all_d:
                     if not decl_in_prelude(d) and args_fit(d, args.len()) and takes_seq(d): own.push(d)
             if own.len() > 0: return resolve_fn_call(n, name, own, args, expected)
@@ -4409,7 +4345,7 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
                 at = prune(check_expr(args[0], 0))
                 add_flag(args[0], NF_CHECKED)
                 fd: int[]
-                collect_fns(name, fd)
+                collect_fns(name, &fd)
                 takes = false
                 loop d in fd:
                     sig = fn_sig(d)
@@ -4420,14 +4356,14 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
             else if sk == .fns and args.len() == 2 and name == release_name and (prelude.get(name) ?? 0) == s and pos_in_lib(nodes[n].pos): return release_call(n, args, expected)
             else if sk == .const_ or sk == .module: fatal(nodes[n].pos, "'{name_of(name)}' is not a function")
             else if sk == .builtin and not hidden_assert:
-                collect_fns(name, decls)
+                collect_fns(name, &decls)
                 if decls.len() == 0:
                     if ide_on: ide_builtin_ref(n, name)
                     return check_intrinsic(n, int(syms[s].ref), args, expected)
     surface_hidden.clear()
     if ufcs:
-        if mod_scope >= 0: collect_module(mod_scope, name, decls)
-        else: collect_fns(name, decls)
+        if mod_scope >= 0: collect_module(mod_scope, name, &decls)
+        else: collect_fns(name, &decls)
     else: collect_named(name, mod_scope, decls)
     if name == ci(7, "to_int") and mod_scope < 0 and files[pos_file(nodes[n].pos)].is_dewy:
         own = false
@@ -4441,7 +4377,7 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
             if args.len() == 2 and to_int_word_limit(args[1]): parser = intern("__mi_parse_word")
             demand_name(parser)
             decls = []
-            collect_fns(parser, decls)
+            collect_fns(parser, &decls)
             return resolve_fn_call(n, parser, decls, args, expected)
     # Index operators belong to the receiver's module, just like methods. A
     # selected import of a container type must also make its operators usable.
@@ -4451,13 +4387,13 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
             check_expr(args[0], 0)
             add_flag(args[0], NF_CHECKED)
         tms = method_modules(ntype(args[0]))
-        loop tm in tms: collect_module(tm, name, decls)
+        loop tm in tms: collect_module(tm, name, &decls)
         tm = if tms.len() > 0: tms[0] else: -1
         if indexed:
             protocol = intern(if name == ci(11, "[]"): "__index__" else: "__setindex__")
-            if mod_scope >= 0: collect_module(mod_scope, protocol, decls)
-            else: collect_fns(protocol, decls)
-            if tm >= 0: collect_module(tm, protocol, decls)
+            if mod_scope >= 0: collect_module(mod_scope, protocol, &decls)
+            else: collect_fns(protocol, &decls)
+            if tm >= 0: collect_module(tm, protocol, &decls)
     if surface_hidden.len() > 0: dewy_surface_check(n, name, decls, args)
     if decls.len() == 0:
         if ii >= 0 and not intrinsics[ii].arr:
@@ -4754,7 +4690,7 @@ program_str_fn = (t0: int, pos: int) -> int:
     d0 = int(structs[int(types[t].st)].decl)
     if d0 == 0 or modules[int(nodes[d0].mod)].is_prelude: return 0
     fd: int[]
-    collect_module(int(nodes[d0].mod), intern("str"), fd)
+    collect_module(int(nodes[d0].mod), intern("str"), &fd)
     loop d in fd:
         if decl_in_prelude(d) or nkids(d) != 1: continue
         sig = fn_sig(d)
@@ -4770,7 +4706,7 @@ habit_rest = (n: int, name: int, args: int[]):
     nm = name_of(name)
     # (the program's own function of the name: its call)
     own: int[]
-    collect_fns(name, own)
+    collect_fns(name, &own)
     loop d in own:
         if not decl_in_prelude(d): return
     na = args.len()
@@ -5778,8 +5714,8 @@ synthetic_copy = (t: int, name: int, pos: int) -> bool:
     if copy_member(t, name): return false
     # Uniform-call methods are user declarations too.
     decls: int[]
-    collect_fns(name, decls)
-    loop m in method_modules(t): collect_module(m, name, decls)
+    collect_fns(name, &decls)
+    loop m in method_modules(t): collect_module(m, name, &decls)
     loop d in decls:
         if nkids(d) == 0: continue
         sig = fn_sig(d)
@@ -5801,7 +5737,7 @@ receiver_literal_hint = (recv: int, name: int, nargs: int, expected: int, pos: i
     wk = tkind(want)
     if wk != .array and not is_map_type(want) and not is_dewy_set_type(want): return 0
     decls: int[]
-    collect_fns(name, decls)
+    collect_fns(name, &decls)
     if decls.len() == 0: return if name_of(name) == "copy": want else: 0
     some = false
     loop d in decls:
@@ -6115,7 +6051,7 @@ check_call = (n: int, expected: int) -> int:
                 if j >= 0: return dewy_static_call(n, tt, j, args, expected)
             why = ""
             fd: int[]
-            collect_fns(fname, fd)
+            collect_fns(fname, &fd)
             if fd.len() > 0:
                 why = " (functions are not kept in types: call it as `{name_of(fname)}(x)` or `x.{name_of(fname)}()`)"
                 # (Date.now(): a function of nothing is called by itself)
@@ -6213,11 +6149,11 @@ resolve_by_types = (name: int, ts: int[], pos: int, required: bool, choice_only:
     gen = ml_stamp(name)
     hidden_mark = surface_hidden.len()
     decls: int[]
-    collect_fns(name, decls)
-    collect_in(-1, name, decls)
+    collect_fns(name, &decls)
+    collect_in(-1, name, 0, &decls)
     if ts.len() > 0:
         tm = module_of_type(ts[ts.len() - 1])
-        if tm >= 0: collect_module(tm, name, decls)
+        if tm >= 0: collect_module(tm, name, &decls)
     if not choose_from_types(name, decls, ts, pos, required): return 0
     decl = by_types_decl
     binds = by_types_binds
@@ -6894,7 +6830,7 @@ intrinsic_rest = (n: int, iid: int, args0: int[], expected: int) -> int:
             if i == 0 and nodes[args[1]].kind == .fnref:
                 ff = int(nodes[args[1]].sym)
                 vd: int[]
-                collect_fns(int(nodes[a].name), vd)
+                collect_fns(int(nodes[a].name), &vd)
                 if vd.len() == 1 and fn_sig(vd[0]).generic and nkids(vd[0]) == 2 and fns[ff].ptypes.len() == 2:
                     want = mk_fn([fn_sig(vd[0]).params[0], fns[ff].ptypes[1]], fns[ff].ptypes[0], 0)
             check_expr(a, want)
@@ -6960,7 +6896,7 @@ intrinsic_rest = (n: int, iid: int, args0: int[], expected: int) -> int:
         # (of the functions with that name, the one shaped like a compute function)
         want = 0
         decls: int[]
-        collect_fns(int(nodes[a].name), decls)
+        collect_fns(int(nodes[a].name), &decls)
         loop d in decls:
             sig = fn_sig(d)
             if not sig.generic and sig.params.len() == 2 and (prune(sig.params[0]) == T_INT or prune(sig.params[0]) == T_IVEC2 or prune(sig.params[0]) == T_IVEC3) and tkind(sig.params[1]) == .struct_ and tkind(int(sig.ret)) == .void_:
@@ -7219,20 +7155,20 @@ dewy_operator_name = (op: str, unary: bool) -> str:
 op_overload = (n: int, opname: str) -> int:
     decls: int[]
     nm = intern(opname)
-    collect_fns(nm, decls)
+    collect_fns(nm, &decls)
     tm = module_of_type(ntype(int(nodes[n].a)))
-    if tm >= 0: collect_module(tm, nm, decls)
+    if tm >= 0: collect_module(tm, nm, &decls)
     if nodes[n].b != 0:
         tm2 = module_of_type(ntype(int(nodes[n].b)))
-        if tm2 >= 0: collect_module(tm2, nm, decls)
+        if tm2 >= 0: collect_module(tm2, nm, &decls)
     protocol = dewy_operator_name(opname, nodes[n].b == 0)
     if protocol != "":
         pn = intern(protocol)
-        collect_fns(pn, decls)
-        if tm >= 0: collect_module(tm, pn, decls)
+        collect_fns(pn, &decls)
+        if tm >= 0: collect_module(tm, pn, &decls)
         if nodes[n].b != 0:
             pm = module_of_type(ntype(int(nodes[n].b)))
-            if pm >= 0: collect_module(pm, pn, decls)
+            if pm >= 0: collect_module(pm, pn, &decls)
     if decls.len() == 0: return 0
     a = int(nodes[n].a)
     b = int(nodes[n].b)
@@ -8834,7 +8770,7 @@ fn_value = (n: int, expected: int, explicit_types: int[] = [], mod: int = -1, cl
             parser = intern("__mi_parse")
             demand_name(parser)
             decls = []
-            collect_fns(parser, decls)
+            collect_fns(parser, &decls)
     if proof_active:
         loop d in decls:
             if proof_decls.has(d): fatal(nodes[n].pos, "a proof cannot be used as a value")
@@ -9077,8 +9013,8 @@ dewy_partial = (n: int, expected: int) -> int:
     if s != 0 and syms[s].kind == .fns:
         decls: int[]
         if receiver:
-            if mod >= 0: collect_module(mod, int(nodes[callee].name), decls)
-            else: collect_fns(int(nodes[callee].name), decls)
+            if mod >= 0: collect_module(mod, int(nodes[callee].name), &decls)
+            else: collect_fns(int(nodes[callee].name), &decls)
         else: collect_named(int(nodes[callee].name), mod, decls)
         # The one ordinary function of that name these arguments fit; the
         # program's own come before the prelude's.
@@ -10152,6 +10088,9 @@ intrinsic_binding = checker_intrinsics_bind(&intrinsic_input)
 call_query_host = CheckerCallQueryHost(call_order_rest, mutable_arguments_rest, float_key_rest, habit_rest)
 call_query_input = CheckerCallQueryInput(&nodes, &lists, &files, &intrinsic_names, &dewy_set_name, &fns, &float_key_names, &call_query_host, &syms, &names, &prelude_syms, &name_first, &name_mod, &name_sym, &name_next, &habit_names)
 call_query_binding = checker_call_queries_bind(&call_query_input)
+collect_host = CheckerCollectHost(demand_name, use_home, dewy_prelude_module, prelude_reach, collect_rational, cin_grow)
+collect_input = CheckerCollectInput(&ctxs, &cx, &mod_bits, &mod_uses, &homes_built, &prelude_used, &home_first, &home_mod, &home_next, &demanded, &dp_scanned, &dp_by_name, &dp_mods, &rational_module_found, &rational_module_probed, &rational_reach, &exact_named, &cin_mark, &surface_hidden, &collect_host)
+collect_binding = checker_collect_bind(&collect_input)
 
 # checker_expr.dewy's services: literal preparation (grouped values, spreads, the
 # optional's element, a literal union's member, total dictionaries) and the kinds that
@@ -10223,9 +10162,9 @@ expr_binding = checker_expr_bind(&expr_input)
 as_conversion = (ft: int, tt: int) -> int:
     name = intern("__as__")
     decls: int[]
-    collect_fns(name, decls)
+    collect_fns(name, &decls)
     tm = module_of_type(ft)
-    if tm >= 0: collect_module(tm, name, decls)
+    if tm >= 0: collect_module(tm, name, &decls)
     # (the type's own conversion; then, for a minted child, its nearest
     # ancestor's, whose methods take the family they are written for)
     owner = prune(ft)
@@ -11683,7 +11622,7 @@ map_presence_fn = (call: int) -> int:
     path = lib_dir + "/core/map.jo"
     if files[pos_file(nodes[d].pos)].path != path: return 0
     decls: int[]
-    collect_module(int(nodes[d].mod), intern("has"), decls)
+    collect_module(int(nodes[d].mod), intern("has"), &decls)
     loop candidate in decls:
         if files[pos_file(nodes[candidate].pos)].path == path:
             return get_fn_inst(candidate, fns[f].targs, nodes[call].pos)

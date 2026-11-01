@@ -1,7 +1,7 @@
 $runtime_checks
 from p"node_store.dewy" import Node
 from p"source_types.dewy" import SrcFile
-from p"checker_state.dewy" import (FnInst Sym)
+from p"checker_state.dewy" import (FnInst Sym FnCtx)
 # Questions the call checker asks of a call's names and arguments: which intrinsic a
 # name is, whether an argument takes its type from the parameter it meets (so it is
 # checked after the overload is picked), and the common cases of two per-call checks
@@ -218,4 +218,191 @@ habit_call_check=(n:CGWord name:CGWord args:array<int64>):>void=>$unsafe {
     if name =? h[6] {maybe=na =? 5}
     if name =? h[7] {maybe=na =? 2}
     if maybe {cg_host[0].habit(n name args)}
+}
+# A call's function family by name, gathered in `out` (each declaration once): the
+# current module's (collect_fns) or a given module's (collect_module) own table, its
+# uses', the Dewy prelude's for a Dewy module, the shared prelude's, and the bundled
+# rational's exact members. Declarations the caller's language does not see go to
+# surface_hidden. The tables are check.jo's and prelude.jo's, indexed (mod_bits: 1 a
+# prelude module, 2 a Dewy file); the host loads what a name demands first, builds the
+# use homes once, loads a Dewy prelude module, and answers the rational reach.
+# O(declarations collected + modules binding the name + uses).
+CheckerCollectHost:type=[
+    demand:<(name:int64):>void>
+    use_home:<(m:int64 name:int64):>int64>
+    prelude_module:<(name:int64):>int64>
+    prelude_reach:<(m:int64 dm:int64):>void>
+    rational:<(m:int64 name:int64 out:ptr<array<int64>>):>void>
+    cin_grow:<(d:int64):>void>
+]
+CheckerCollectInput:type=[
+    contexts:ptr<array<FnCtx>>
+    context:ptr<int64>
+    mod_bits:ptr<array<int64>>
+    mod_uses:ptr<array<array<int64>>>
+    homes_built:ptr<bool>
+    prelude_used:ptr<array<bool>>
+    home_first:ptr<array<int64>>
+    home_mod:ptr<array<int64>>
+    home_next:ptr<array<int64>>
+    demanded:ptr<array<bool>>
+    dp_scanned:ptr<bool>
+    dp_by_name:ptr<array<int64>>
+    dp_mods:ptr<array<int64>>
+    rational_found:ptr<int64>
+    rational_probed:ptr<int64>
+    rational_reach:ptr<array<int64>>
+    exact_named:ptr<array<bool>>
+    cin_mark:ptr<array<int32>>
+    surface_hidden:ptr<array<int64>>
+    host:ptr<CheckerCollectHost>
+]
+let cl_in:ptr<CheckerCollectInput>=$unsafe (uint64(0) as ptr<CheckerCollectInput>)
+let cl_pass:CGWord=0
+checker_collect_bind=(input:ptr<CheckerCollectInput>):>CGWord=>$unsafe {
+    cl_in=input
+    0
+}
+cl_cur_mod=():>CGWord=>$unsafe {
+    let c=cl_in[0].context[0]
+    if c >=? 0 {return CGWord(cl_in[0].contexts[0].ptr[c].mod)}
+    0
+}
+cl_demand=(name:CGWord):>void=>$unsafe {
+    if name <? cl_in[0].demanded[0].length and cl_in[0].demanded[0].ptr[name] {return}
+    cl_in[0].host[0].demand(name)
+}
+cl_marked=(d:CGWord):>bool=>$unsafe {d <? cl_in[0].cin_mark[0].length and CGWord(cl_in[0].cin_mark[0].ptr[d]) =? cl_pass}
+cl_mark=(d:CGWord):>void=>$unsafe {
+    if d >=? cl_in[0].cin_mark[0].length {cl_in[0].host[0].cin_grow(d)}
+    cl_in[0].cin_mark[0].ptr[d]=int32<overflow='wrap'>(cl_pass)
+}
+# Module m's family of name (m < 0: the prelude's; hide as name_family's), the
+# declarations not in `out` yet.
+collect_in=(m:CGWord name:CGWord hide:CGWord out:ptr<array<int64>>):>void=>$unsafe {
+    let s=name_family(m name hide)
+    if s =? 0 {return}
+    let cm=cl_cur_mod()
+    let dewy=cm >=? 0 and (cl_in[0].mod_bits[0].ptr[cm] & 2) not=? 0
+    cl_pass=cl_pass + 1
+    let i:CGWord=0
+    let count=out[0].length
+    loop i <? count {
+        cl_mark(out[0].ptr[i])
+        i=i + 1
+    }
+    let o=s
+    loop o not=? 0 {
+        let sym=cg_syms[0].ptr + o
+        let d=CGWord(sym[0].decl)
+        let surface=CGWord(sym[0].surface)
+        let hidden=false
+        if surface =? 1 {hidden=not dewy}
+        if surface not=? 0 and surface not=? 1 {hidden=dewy}
+        if hidden {cl_in[0].surface_hidden[0].push(d)}
+        else if not cl_marked(d) {
+            out[0].push(d)
+            cl_mark(d)
+        }
+        o=CGWord(sym[0].next)
+    }
+}
+# (the one use of m whose table can bind name, -1 none, -2 each use asked in order)
+cl_use_home=(m:CGWord name:CGWord):>CGWord=>$unsafe {
+    if not cl_in[0].homes_built[0] {return cl_in[0].host[0].use_home(m name)}
+    if m <? cl_in[0].prelude_used[0].length and cl_in[0].prelude_used[0].ptr[m] {return -2}
+    if name >=? cl_in[0].home_first[0].length {return -1}
+    let h=cl_in[0].home_first[0].ptr[name]
+    if h =? 0 {return -1}
+    h=h - 1
+    if cl_in[0].home_next[0].ptr[h] not=? 0 {return -2}
+    let hm=cl_in[0].home_mod[0].ptr[h]
+    let uses=cl_in[0].mod_uses[0].ptr + m
+    let i:CGWord=0
+    loop i <? uses[0].length {
+        if uses[0].ptr[i] =? hm {return hm}
+        i=i + 1
+    }
+    -1
+}
+cl_bound_in=(m:CGWord name:CGWord):>bool=>$unsafe {
+    if name >=? cl_in[0].home_first[0].length {return false}
+    let h=cl_in[0].home_first[0].ptr[name]
+    loop h not=? 0 {
+        if cl_in[0].home_mod[0].ptr[h - 1] =? m {return true}
+        h=cl_in[0].home_next[0].ptr[h - 1]
+    }
+    false
+}
+collect_module=(m:CGWord name:CGWord out:ptr<array<int64>>):>void=>$unsafe {
+    if m <? 0 {return}
+    cl_demand(name)
+    if (cl_in[0].mod_bits[0].ptr[m] & 1) not=? 0 {
+        collect_in(-1 name 0 out)
+        return
+    }
+    collect_in(m name 0 out)
+    let nu=cl_in[0].mod_uses[0].ptr[m].length
+    if nu =? 0 {return}
+    let h=cl_use_home(m name)
+    if h >=? 0 {
+        collect_in(h name 1 out)
+        return
+    }
+    if h not=? -2 {return}
+    let i:CGWord=0
+    loop i <? nu {
+        let u=cl_in[0].mod_uses[0].ptr[m].ptr[i]
+        if (cl_in[0].mod_bits[0].ptr[u] & 1) not=? 0 {collect_in(-1 name 2 out)}
+        else if cl_bound_in(u name) {collect_in(u name 1 out)}
+        i=i + 1
+    }
+}
+# (the Dewy prelude module declaring name, -1 none: the host's until it is loaded)
+cl_prelude_module=(name:CGWord):>CGWord=>$unsafe {
+    if cl_in[0].dp_scanned[0] and name <? cl_in[0].dp_by_name[0].length {
+        let f=cl_in[0].dp_by_name[0].ptr[name]
+        if f =? 1 {return -1}
+        if f >=? 2 {
+            let dm=cl_in[0].dp_mods[0].ptr[f - 2]
+            if dm >=? 0 {return dm}
+        }
+    }
+    cl_in[0].host[0].prelude_module(name)
+}
+# (m calls a function of the Dewy prelude's module dm: nothing to record while the bundled
+# rational is not loaded, or once m reaches it)
+cl_prelude_reach=(m:CGWord dm:CGWord):>void=>$unsafe {
+    if cl_in[0].rational_found[0] <? 0 and cl_in[0].mod_bits[0].length =? cl_in[0].rational_probed[0] {return}
+    if m <? cl_in[0].rational_reach[0].length and cl_in[0].rational_reach[0].ptr[m] =? 1 {return}
+    cl_in[0].host[0].prelude_reach(m dm)
+}
+collect_fns=(name:CGWord out:ptr<array<int64>>):>void=>$unsafe {
+    cl_demand(name)
+    let m=cl_cur_mod()
+    collect_module(m name out)
+    let user=false
+    let dewy=false
+    if m >=? 0 {
+        let bits=cl_in[0].mod_bits[0].ptr[m]
+        user=(bits & 1) =? 0
+        dewy=user and (bits & 2) not=? 0
+    }
+    if dewy and not cg_names[0].ptr[name].startswith("_") {
+        let dm=cl_prelude_module(name)
+        if dm >=? 0 and name_family(dm name 0) not=? 0 {
+            if dm not=? m {
+                collect_in(dm name 0 out)
+                cl_prelude_reach(m dm)
+            }
+            return
+        }
+    }
+    let hide:CGWord=0
+    if user {hide=2}
+    collect_in(-1 name hide out)
+    if dewy {
+        let ex=cl_in[0].exact_named
+        if ex[0].length =? 0 or (name <? ex[0].length and ex[0].ptr[name]) {cl_in[0].host[0].rational(m name out)}
+    }
 }

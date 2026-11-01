@@ -112,6 +112,7 @@ repl_start = () -> str:
     # (inputs `use` files relative to the current directory)
     modules[repl_mainm].dir = cwd()
     files[int(modules[repl_mainm].file)].is_dewy = true
+    mod_bits[repl_mainm] |= 2
     loop f in init_fns: repl_modules_inited[int(fns[f].mod)] = true
     loop i in [0..lfuncs.len()):
         a = 0
