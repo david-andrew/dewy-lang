@@ -1,0 +1,14 @@
+# Printing writes only the library's output state: a guard on an `@`
+# record parameter survives `printl`.
+Inv:type = [slots:array<int>]
+put = (@inv:Inv h:int v:int) => {
+    if 0 <=? h <? inv.slots.length {
+        printl"put {v} in slot {h}"
+        inv.slots[h] = v
+    }
+}
+main = () => {
+    let inv = Inv[[0 0]]
+    put(@inv 1 7)
+    printl(inv.slots)
+}

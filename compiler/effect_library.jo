@@ -114,6 +114,14 @@ effect_library_classify = (g: int) -> EffectClass:
         if name in ["is_alpha", "is_digit", "is_space", "is_alnum"] and fns[g].params.len() == 1 and prune(int(locals[fns[g].params[0]].type)) == T_STR: return .allocates
         if name == "remove_prefix" or name == "remove_suffix": return .allocates
         if name == "__dewy_byte_slice": return .allocates_panics
+    # (a dictionary lookup by a word or text key hashes and compares the key
+    # with builtin operations and reads the table; `[]` panics on a missing
+    # key. As facts' fact_map_reads_only: a const table read in a helper)
+    if file == "/core/map.jo" and name in ["get", "contains", "has", "[]"] and fns[g].params.len() == 2:
+        m = representation_type(int(locals[fns[g].params[0]].type))
+        k = representation_type(int(locals[fns[g].params[1]].type))
+        if is_map_type(m) and (effect_scalar(k) or k == T_STR) and effect_share(struct_targ(int(types[m].st), 1)):
+            return if name == "[]": .allocates_panics else: .reads
     # (`set"..."`: a fresh set of the text's graphemes, as a character class
     # collects them; it writes only its own result)
     if file == "/std/dewy_sets.jo" and name == "set" and fns[g].params.len() == 1 and prune(int(locals[fns[g].params[0]].type)) == T_STR:

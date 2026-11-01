@@ -1,0 +1,17 @@
+# A helper that reads a table and also shrinks the `@` record forgets its length.
+Inv:type = [slots:array<int>]
+const CAPS:dict<string int> = ["gem" -> 16]
+cap_and_drop = (@inv:Inv name:string):>int => {
+    inv.slots = []
+    CAPS.get(name) ?? 1
+}
+put = (@inv:Inv h:int) => {
+    if 0 <=? h <? inv.slots.length {
+        let c = cap_and_drop(@inv "gem")
+        inv.slots[h] = c
+    }
+}
+main = () => {
+    let inv = Inv[[0 0]]
+    put(@inv 1)
+}

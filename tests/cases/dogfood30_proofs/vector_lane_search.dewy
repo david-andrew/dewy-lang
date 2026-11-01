@@ -1,0 +1,11 @@
+# A search helper that reads a vector's lanes (`p.x`) still bounds its
+# present result by the array it searched, at the caller.
+first_right_of = (xs:array<float32> p:vec2):>int? => {
+    loop i in [0..xs.length) if xs[i] >? p.x and p.y >=? 0.0 return i
+    none
+}
+main = () => {
+    let xs:array<float32> = [1.0 4.0 9.0]
+    let k = first_right_of(xs vec2(3 1))
+    if k isnt? none printl(xs[k])
+}

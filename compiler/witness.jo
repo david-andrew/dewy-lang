@@ -971,10 +971,11 @@ wit_held_name = (s: FactState, v: int) -> str:
 # omitted bound is 0 or the length and an inclusive end counts one more.
 wit_slice = (n: int, s: mut FactState, lo: int, hi: int, length: int, checks: int[]):
     r = int(nodes[n].b)
-    wit_slice_at(n, s, lo, hi, length, checks, int(nodes[n].a), int(nodes[r].a), int(nodes[r].b), has_flag(r, NF_INCLUSIVE))
+    wit_slice_at(n, s, lo, hi, length, checks, int(nodes[n].a), int(nodes[r].a), int(nodes[r].b), has_flag(r, NF_INCLUSIVE), true)
 
-# (the slice's receiver and bound expressions, 0 for an omitted bound)
-wit_slice_at = (n: int, s: mut FactState, lo: int, hi: int, length: int, checks: int[], receiver: int, lo_node: int, hi_node: int, inclusive: bool):
+# (the slice's receiver and bound expressions, 0 for an omitted bound; a read
+# may also be truncated to its receiver: `clamp` offers `xs[$clamp a..b)`)
+wit_slice_at = (n: int, s: mut FactState, lo: int, hi: int, length: int, checks: int[], receiver: int, lo_node: int, hi_node: int, inclusive: bool, clamp: bool = false):
     base = wit_text(receiver)
     start = if lo_node != 0: wit_side(lo, lo_node) else: WitSide(lo, 0, "0", false, true)
     stop = if hi_node != 0: wit_side(hi, hi_node) else: WitSide(hi, 0, (if base != "": "{base}.length" else: ""), true)
@@ -999,12 +1000,22 @@ wit_slice_at = (n: int, s: mut FactState, lo: int, hi: int, length: int, checks:
     wit_context(0)
     relation = join(relations, "` and `")
     wit_help(relation)
+    if clamp and (not inclusive or hi_node == 0): wit_clamp_help(base, lo_node, hi_node)
     if refuted:
         if dir_defer(n, "slice is not in bounds", true): return
         wit_fail(nodes[n].pos, "slice is not in bounds")
         return
     if dir_defer(n, "cannot prove slice is in bounds: missing {join(missing, " and ")}", true): return
     wit_fail(nodes[n].pos, "cannot prove slice is in bounds: missing {join(missing, " and ")}")
+
+# A Python programmer's slice clamps to the receiver; Dewy spells that
+# `xs[$clamp a..b)`. Offered only when every written part prints. O(1).
+wit_clamp_help = (base: str, lo_node: int, hi_node: int):
+    start = if lo_node != 0: wit_text(lo_node) else: ""
+    stop = if hi_node != 0: wit_text(hi_node) else: ""
+    if base == "" or lo_node != 0 and start == "" or hi_node != 0 and stop == "": return
+    range = if hi_node != 0: "{start}..{stop})" else: "{start}..]"
+    err_notes.push((-1, "help: or truncate it to `{base}` as Python's slices do: `{base}[$clamp {range}`"))
 
 wit_divisor = (n: int, s: FactState, divisor: int, zero: int, operand: int, refuted: bool):
     side = wit_side(divisor, operand)

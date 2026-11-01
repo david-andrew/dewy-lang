@@ -1,0 +1,32 @@
+# A slot search that builds each slot's rectangle (`rect(inv i).x`, an
+# `int` scaled to a float) bounds its result by `inv.slots`, and a printing,
+# dictionary-reading helper keeps the `@inv` caller's facts.
+Inv:type = [columns:int<(>? 0)> slots:array<int>]
+Box:type = [x:float64 w:float64]
+const CAPS:dict<string int> = ["arrow" -> 64 "gem" -> 16]
+rect = (inv:Inv i:int):>Box => Box[(i % inv.columns) * 40.0 38.0]
+slot_at = (inv:Inv x:float64):>int? => {
+    loop i in [0..inv.slots.length) {
+        let r = rect(inv i)
+        if r.x <=? x <? r.x + r.w return i
+    }
+    none
+}
+first_wide = (inv:Inv):>int? => {
+    loop i in [0..inv.slots.length) if rect(inv i).w >? 30.0 return i
+    none
+}
+cap_of = (name:string):>int => CAPS.get(name) ?? 1
+click = (@inv:Inv x:float64) => {
+    let hit = slot_at(inv x)
+    if hit is? none return
+    printl"slot {hit}"
+    inv.slots[hit] = cap_of("gem")
+    let w = first_wide(inv)
+    if w isnt? none inv.slots[w] += 1
+}
+main = () => {
+    let inv = Inv[2 [0 0 0]]
+    click(@inv 45.0)
+    printl(inv.slots)
+}

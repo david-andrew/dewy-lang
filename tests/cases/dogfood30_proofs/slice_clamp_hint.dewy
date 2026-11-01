@@ -1,0 +1,11 @@
+# A Python slice clamps; the diagnostic offers Dewy's spelling of that.
+heading = (line:string):>string => {
+    let level = 0
+    loop c in line {
+        if c not=? "#" break
+        level += 1
+    }
+    if level >? 6 return ""
+    line[level + 1..]
+}
+main = () => printl(heading("## Notes"))

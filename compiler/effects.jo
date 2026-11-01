@@ -1053,6 +1053,34 @@ effect_place_inventory = (n: int, depth: int = 0) -> bool:
         return effect_place_inventory(effect_narrowed(int(locals[l].alias)), depth + 1)
     flags & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF | LF_EXPOSED) == 0
 
+# `mk(i).x`, `rect(i).w`: a field of a direct call's result reads the
+# temporary only, never a place. Every level is an inline value (no hook,
+# box or owner), so the read adds nothing to the call's own effects. O(depth).
+effect_field_root = (n0: int) -> int:
+    n = n0
+    loop depth in [0..32):
+        if nodes[n].kind != .field: return n
+        n = int(nodes[n].a)
+    0
+
+effect_temporary_field = (n0: int) -> bool:
+    root = effect_field_root(n0)
+    if root == 0 or nodes[root].kind != .call or nodes[root].aux != 0: return false
+    n = n0
+    loop n != root:
+        t = representation_type(ntype(int(nodes[n].a)))
+        if not effect_value(ntype(n)) or not effect_value(t): return false
+        if nodes[n].aux == -4:
+            if not is_vec(t): return false
+        else if nodes[n].aux == -2:
+            if tkind(t) != .tuple: return false
+        else:
+            if tkind(t) != .struct_ or nodes[n].aux < 0: return false
+            layout(t)
+            if fields[int(structs[int(types[t].st)].fields) + int(nodes[n].aux)].boxed: return false
+        n = int(nodes[n].a)
+    true
+
 # The value a narrowing alias reads: an optional's payload, a union's member,
 # or the union's remaining members re-tagged in place; n itself otherwise.
 effect_narrowed = (n: int) -> int:
@@ -1499,6 +1527,9 @@ effect_scan_node = (f: int, n: int):
         loop qi in [0..nkids(fb)):
             st = kid(fb, qi)
             if nodes[st].kind == .vardecl and not has_flag(st, NF_GLOBAL) and nodes[st].sym == i32(l) and effect_readonly_binding(st): return
+    if k == .field and effect_temporary_field(n):
+        effect_scan_node(f, effect_field_root(n))
+        return
     if k == .ident or k == .field:
         effect_access(f, n, false)
         return
@@ -1638,6 +1669,14 @@ effect_scan_node = (f: int, n: int):
     # (a word to a float, or one float width to another: one instruction; a
     # float to an integer is checked, and a semantic integer's is a call)
     else if k == .conv and (nodes[n].aux == i32(int(CV.int2float)) and effect_scalar(ntype(int(nodes[n].a))) or nodes[n].aux == i32(int(CV.float_))): supported = effect_float(ntype(n))
+    # (an `int` to a float, `i * 40.0`: a word conversion, or a read of its big
+    # payload that writes nothing (lib/math_runtime.jo __mi_float); that read
+    # keeps a possible allocation and failure)
+    else if k == .conv and nodes[n].aux == i32(int(CV.int2float)) and prune(ntype(int(nodes[n].a))) == T_MATH_INT and effect_float(ntype(n)):
+        supported = true
+        if effect_small(int(nodes[n].a)) < 0:
+            effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
+            effect_failure(f, n)
     # (a number's bits read as another number of the same width, as the
     # library's float `abs` and `min` do: one move, never a pointer. A write
     # footprint only; full summaries keep it opaque)

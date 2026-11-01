@@ -1,0 +1,16 @@
+# What a printed call writes still counts: `take` shrinks the record.
+Inv:type = [slots:array<int>]
+take = (@inv:Inv):>int => {
+    inv.slots = []
+    0
+}
+put = (@inv:Inv h:int v:int) => {
+    if 0 <=? h <? inv.slots.length {
+        printl"took {take(@inv)}"
+        inv.slots[h] = v
+    }
+}
+main = () => {
+    let inv = Inv[[0 0]]
+    put(@inv 1 7)
+}

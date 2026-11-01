@@ -11711,8 +11711,20 @@ istype_refined = (n: int, orig: int, tt: int) -> int:
         c = mk(.bool_lit, pos)
         nodes[c].ival = 1
     is_rewritten(n, orig, c)
+# The member a test most likely meant: a search's `Missing` for `is? none`,
+# `int64` for `is? int`. "" when no member stands out. O(members).
+istype_member_hint = (at: int, tt: int) -> str:
+    absent = 0
+    number = 0
+    loop m in union_members(at):
+        if m != T_NONE and exception_member(m) and absent == 0: absent = m
+        if is_int(representation_type(m)) and number == 0: number = m
+    if tt == T_NONE and absent != 0: return ": it holds {dt(absent)} when there is no value, so test `is? {dt(absent)}`, or give a fallback with `??`"
+    if is_int(representation_type(tt)) and number != 0: return ": its number is {a_type(number)}, so test `is? {dt(number)}`"
+    ""
+
 istype_error = (n: int, at: int, tt: int, code: int) -> void:
-    if code == 1: fatal(nodes[int(nodes[n].b)].pos, "{dt(tt)} is not one of the types of {dt(at)}")
+    if code == 1: fatal(nodes[int(nodes[n].b)].pos, "{dt(tt)} is not one of the types of {dt(at)}{istype_member_hint(at, tt)}")
     if code == 2: fatal(nodes[int(nodes[n].b)].pos, "a {dt(at)} is either a {dt(int(types[at].elem))} or none, never a {dt(tt)}")
     fatal(nodes[n].pos, "{jd(nodes[n].pos, "`is`", "`is?`")} tests which type a union (A | B) or optional value holds; this is always {a_type(at)}")
 istype_host = CheckerTypeTestHost(check_expr, finalize_literal, istype_original, family_annotation, istype_family, istype_members, istype_set, istype_member_value, istype_refined, refine_implies, map_presence_fn, istype_error)

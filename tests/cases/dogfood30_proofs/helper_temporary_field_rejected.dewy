@@ -1,0 +1,15 @@
+# A field of a call's result still counts the call's own writes: `shrink`
+# pops the global array the guard described.
+Box:type = [x:int y:int]
+stack = [1 2 3]
+shrink = (i:int):>Box => {
+    stack.clear()
+    Box[i 0]
+}
+main = () => {
+    let h = 2
+    if 0 <=? h <? stack.length {
+        let x = shrink(h).x
+        printl(stack[h] + x)
+    }
+}
