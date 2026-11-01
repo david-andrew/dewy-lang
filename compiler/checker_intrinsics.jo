@@ -3,6 +3,7 @@ use 'node_store.dewy'
 use 'checker_types.dewy'
 use 'source_types.dewy'
 use 'type_inference.dewy'
+use 'type_constructors.dewy'
 use 'checker_coerce.dewy'
 use 'checker_for_loops.dewy'
 use 'checker_expr.dewy'
@@ -25,6 +26,10 @@ struct CheckerIntrinsicInput:
     refine: *(bool)
     void_type: *(int)
     int_type: *(int)
+    str_type: *(int)
+    u8_type: *(int)
+    rawptr_type: *(int)
+    never_type: *(int)
     host: *(CheckerIntrinsicHost)
 xn_nodes: *(Node[])
 xn_lists: *(i32[])
@@ -35,6 +40,10 @@ xn_value_loops: *(ValueLoop[])
 xn_refine: *(bool)
 xn_void_type: *(int)
 xn_int_type: *(int)
+xn_str_type: *(int)
+xn_u8_type: *(int)
+xn_rawptr_type: *(int)
+xn_never_type: *(int)
 xn_host: *(CheckerIntrinsicHost)
 checker_intrinsics_bind = (input: *CheckerIntrinsicInput) -> int:
     xn_nodes = input[0].nodes
@@ -46,6 +55,10 @@ checker_intrinsics_bind = (input: *CheckerIntrinsicInput) -> int:
     xn_refine = input[0].refine
     xn_void_type = input[0].void_type
     xn_int_type = input[0].int_type
+    xn_str_type = input[0].str_type
+    xn_u8_type = input[0].u8_type
+    xn_rawptr_type = input[0].rawptr_type
+    xn_never_type = input[0].never_type
     xn_host = input[0].host
     0
 xn_kind = (t: int) -> TK: xn_types[0][t].kind
@@ -60,8 +73,19 @@ xn_arg = (args: int[], i: int, expected: int) -> int:
 xn_resized = (n: int, a: int, operation: str):
     if xn_value_loops[0].len() > 0: xn_host[0].resize(a, operation, xn_nodes[0][n].pos)
     xn_host[0].place(a, false)
+xn_syscall_arg = (args: int[], i: int):
+    t = xn_arg(args, i, 0)
+    a = args[i]
+    if int(xn_nodes[0][a].flags) & 256 != 0:
+        xn_host[0].coerce(a, xn_int_type[0])
+        return
+    k = xn_kind(t)
+    if k == .null_: xn_nodes[0][a].type = i32(xn_rawptr_type[0])
+    else if k == .int_:
+        if t != xn_int_type[0]: xn_host[0].coerce(a, xn_int_type[0])
+    else if k != .ptr and k != .bool_: xn_host[0].error(a, 9, 0)
 check_intrinsic = (n: int, id: int, args: int[], expected: int) -> int:
-    if id != 1 and id != 2 and id != 3 and id != 6 and id != 27: return xn_host[0].rest(n, id, args, expected)
+    if id != 1 and id != 2 and id != 3 and id != 6 and id != 27 and id != 9 and id != 10 and id != 11 and id != 14 and id != 19: return xn_host[0].rest(n, id, args, expected)
     xn_nodes[0][n].kind = .intrinsic
     xn_nodes[0][n].aux = i32(id)
     node_set_list(mut xn_nodes[0], mut xn_lists[0], n, args)
@@ -89,11 +113,32 @@ check_intrinsic = (n: int, id: int, args: int[], expected: int) -> int:
         if xn_kind(t) != .array: xn_host[0].error(n, 4, t)
         xn_resized(n, args[0], "pop")
         r = int(xn_types[0][t].elem)
-    else:
+    else if id == 6:
         if nargs != 1: xn_host[0].nargs(n, nargs, 1, 1, "clear")
         t = xn_arg(args, 0, 0)
         if xn_kind(t) != .array: xn_host[0].error(n, 5, t)
         xn_resized(n, args[0], "clear")
+    else if id == 9:
+        if nargs < 1 or nargs > 7: xn_host[0].error(n, 8, 0)
+        loop i in [0..nargs): xn_syscall_arg(args, i)
+        r = xn_int_type[0]
+    else if id == 10 or id == 11:
+        if nargs != 3:
+            if id == 10: xn_host[0].nargs(n, nargs, 3, 3, "mem_copy")
+            else: xn_host[0].nargs(n, nargs, 3, 3, "mem_set")
+        if xn_kind(xn_arg(args, 0, 0)) != .ptr: xn_host[0].error(args[0], 7, 0)
+        if id == 10:
+            if xn_kind(xn_arg(args, 1, 0)) != .ptr: xn_host[0].error(args[1], 7, 0)
+        else: xn_arg(args, 1, xn_int_type[0])
+        xn_arg(args, 2, xn_int_type[0])
+    else if id == 14:
+        if nargs > 1: xn_host[0].nargs(n, nargs, 0, 1, "panic")
+        if nargs > 0: xn_arg(args, 0, xn_str_type[0])
+        r = xn_never_type[0]
+    else:
+        if nargs != 1: xn_host[0].nargs(n, nargs, 1, 1, "bytes")
+        xn_arg(args, 0, xn_str_type[0])
+        r = int(tb_mk_array(xn_u8_type[0]))
     xn_nodes[0][n].type = i32(r)
     if xn_refine[0]: return xn_host[0].length_mutation(n, r)
     r

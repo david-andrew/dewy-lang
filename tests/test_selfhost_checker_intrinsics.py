@@ -1,4 +1,5 @@
-"""Intrinsic calls (len, cap, push, pop, clear here; the rest the host's) match frozen Jo."""
+"""Intrinsic calls (len, cap, push, pop, clear, syscall, mem_copy, mem_set, panic, bytes here;
+the rest the host's) match frozen Jo."""
 import pytest
 
 from tests.support import compiler  # noqa: F401
@@ -43,7 +44,7 @@ xn_mutation = (n: int, r: int) -> int:
     events.push("mutation:{n}:{r}")
     r
 drv_host = CheckerIntrinsicHost(xn_rest, xn_nargs, xn_error, xn_coerce_stub, xn_length, xn_resize, xn_place, xn_mutation)
-drv_input = CheckerIntrinsicInput(&nodes, &lists, &types, &structs, &files, &drv_loops, &drv_refine, &T_VOID, &T_INT, &drv_host)
+drv_input = CheckerIntrinsicInput(&nodes, &lists, &types, &structs, &files, &drv_loops, &drv_refine, &T_VOID, &T_INT, &T_STR, &T_U8, &T_RAWPTR, &T_NEVER, &drv_host)
 xn_binding = checker_intrinsics_bind(&drv_input)
 typed = (k: NK, t: int, flags: int = 0) -> int:
     n = node(k)
@@ -89,9 +90,22 @@ main = ():
     run(3, [typed(.ident, arr, 128)])
     run(1, [typed(.ident, arr, 128)])
     drv_refine = false
+    # syscall: literals and other int widths coerced to int, null a raw pointer
+    ptr = int(tb_mk_ptr(T_INT))
+    nil_arg = typed(.ident, T_NULL, 128)
+    run(9, [typed(.int_lit, T_INT, 128 | 256), typed(.ident, ptr, 128), nil_arg, typed(.ident, T_I8, 128), typed(.ident, T_INT, 128), typed(.ident, T_BOOL, 128)])
+    assert(nodes[nil_arg].type == i32(T_RAWPTR))
+    # mem_copy, mem_set: pointers, then ints
+    run(10, [typed(.ident, ptr, 128), typed(.ident, ptr), typed(.ident, T_I8, 128)])
+    run(11, [typed(.ident, ptr), typed(.int_lit, T_INT, 128 | 256), typed(.ident, T_INT, 128)])
+    # panic with and without a message; bytes of text
+    run(14, [])
+    run(14, [typed(.ident, T_STR, 128)])
+    run(14, [typed(.ident, T_I8, 128)])
+    run(19, [typed(.ident, T_STR)])
     # every other intrinsic is the host's, untouched
     x = typed(.ident, arr)
-    run(14, [x, 5], T_INT)
+    run(13, [x, 5], T_INT)
     assert(nodes[x].flags == 0)
     print(events)
     print("ok")
@@ -113,6 +127,15 @@ def test_checker_intrinsics_twins(compiler, tmp_path, release):  # noqa: F811
     ('run(3, [typed(.ident, T_INT, 128)])', ':4'),
     ('run(6, [typed(.ident, T_STR, 128)])', ':5'),
     ('run(1, [typed(.namedarg, arr, 128)])', ':6'),
+    ('run(9, [])', ':8'),
+    ('run(9, [1, 2, 3, 4, 5, 6, 7, 8])', ':8'),
+    ('run(9, [typed(.ident, T_STR, 128)])', ':9'),
+    ('run(10, [typed(.ident, T_INT, 128), 1, 2])', ':7'),
+    ('run(10, [typed(.ident, int(tb_mk_ptr(T_INT)), 128), typed(.ident, T_INT, 128), 2])', ':7'),
+    ('run(10, [1, 2])', 'nargs:mem_copy:2:3:3'),
+    ('run(11, [1])', 'nargs:mem_set:1:3:3'),
+    ('run(14, [1, 2])', 'nargs:panic:2:0:1'),
+    ('run(19, [])', 'nargs:bytes:0:1:1'),
     ('run(1, [])', 'nargs:len:0:1:1'),
     ('run(2, [typed(.ident, arr, 128)])', 'nargs:push:1:2:2'),
     ('run(3, [typed(.ident, arr, 128), 1])', 'nargs:pop:2:1:1'),

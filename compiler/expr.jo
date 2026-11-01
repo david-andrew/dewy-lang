@@ -6375,7 +6375,7 @@ is_value_collection_type = (t: int) -> bool:
     d != 0 and files[pos_file(nodes[d].pos)].path == lib_dir + "/core/map.jo"
 
 # The intrinsics checker_intrinsics.dewy leaves to the host: every one but len, cap, push,
-# pop and clear.
+# pop, clear, syscall, mem_copy, mem_set, panic and bytes.
 intrinsic_rest = (n: int, iid: int, args0: int[], expected: int) -> int:
     let id = iid as IN
     if id == .range_max:
@@ -6594,30 +6594,6 @@ intrinsic_rest = (n: int, iid: int, args0: int[], expected: int) -> int:
         else: fatal(nodes[n].pos, "data() needs an array or string")
         if not permute and refine_active and ref_storage_contract(t): fatal(nodes[n].pos, "mutable refinement access through raw data is not supported")
         note_storage_access(args[0])
-    else if id == .syscall:
-        if nargs < 1 or nargs > 7: fatal(nodes[n].pos, "syscall takes 1 to 7 arguments")
-        loop i in [0..nargs):
-            t = arg_type(args, i, 0)
-            a = args[i]
-            if is_lit(a): coerce(a, T_INT)
-            else if types[t].kind == .ptr or types[t].kind == .null_:
-                if types[t].kind == .null_: nodes[a].type = i32(T_RAWPTR)
-            else if types[t].kind == .int_:
-                if t != T_INT: coerce(a, T_INT)
-            else if types[t].kind == .bool_: pass
-            else: fatal(nodes[a].pos, "syscall arguments must be integers or pointers")
-        r = T_INT
-    else if id == .memcpy or id == .memset:
-        nm = "mem_set"
-        if id == .memcpy: nm = "mem_copy"
-        nargs_check(n, nargs, 3, 3, nm)
-        t0 = arg_type(args, 0, 0)
-        if types[t0].kind != .ptr: fatal(nodes[args[0]].pos, "expected a pointer")
-        if id == .memcpy:
-            t1 = arg_type(args, 1, 0)
-            if types[t1].kind != .ptr: fatal(nodes[args[1]].pos, "expected a pointer")
-        else: arg_type(args, 1, T_INT)
-        arg_type(args, 2, T_INT)
     else if id == .integer_mode:
         # Private library dispatch: signedness and overflow policy, erased now.
         nargs_check(n, nargs, 1, 1, "__integer_mode")
@@ -6633,10 +6609,6 @@ intrinsic_rest = (n: int, iid: int, args0: int[], expected: int) -> int:
         if id == .alignof: v = talign(t)
         nodes[n] = Node(kind = .int_lit, pos = nodes[n].pos, ival = v, type = i32(T_INT), flags = i32(NF_LITERAL | NF_CHECKED))
         return T_INT
-    else if id == .panic:
-        nargs_check(n, nargs, 0, 1, "panic")
-        if nargs > 0: arg_type(args, 0, T_STR)
-        r = T_NEVER
     else if id == .unreachable: r = T_NEVER
     else if id == .assert or id == .runtime_assert:
         if nodes[n].aux2 == i32(RANGE_EXHAUSTION):
@@ -6757,10 +6729,6 @@ intrinsic_rest = (n: int, iid: int, args0: int[], expected: int) -> int:
         nodes[n].sym = i32(runtime_fn("__str_from_bytes"))
         nodes[n].type = i32(T_STR)
         return T_STR
-    else if id == .to_bytes:
-        nargs_check(n, nargs, 1, 1, "bytes")
-        arg_type(args, 0, T_STR)
-        r = mk_array(T_U8)
     else if id == .argv: r = T_RAWPTR
     else if id == .offset_unit:
         nargs_check(n, nargs, 3, 3, "__offset_unit")
@@ -10131,6 +10099,9 @@ intrinsic_error = (n: int, code: int, t: int):
     if code == 5:
         if types[t].kind == .str_ or is_int(t): fatal(nodes[n].pos, "clear() of the screen takes a color: `clear(rgb(1, 0, 0))`, or from hex digits `clear(hex(\"#ff0000\"))`")
         fatal(nodes[n].pos, "clear() needs an array")
+    if code == 7: fatal(nodes[n].pos, "expected a pointer")
+    if code == 8: fatal(nodes[n].pos, "syscall takes 1 to 7 arguments")
+    if code == 9: fatal(nodes[n].pos, "syscall arguments must be integers or pointers")
     fatal(nodes[n].pos, "named arguments are not supported here")
 intrinsic_length = (n: int, a: int, t: int, expected: int) -> int:
     if is_soa(t): return check_soa_method(n, a, ci(17, "len"), [], expected)
@@ -10138,7 +10109,7 @@ intrinsic_length = (n: int, a: int, t: int, expected: int) -> int:
     nodes[n] = nodes[bc_call("__dewy_string_length", [a], nodes[n].pos)]
     check_expr(n, expected)
 intrinsic_host = CheckerIntrinsicHost(intrinsic_rest, nargs_check, intrinsic_error, coerce, intrinsic_length, value_loop_resize, check_place, ref_length_mutation)
-intrinsic_input = CheckerIntrinsicInput(&nodes, &lists, &types, &structs, &files, &value_loops, &refine_active, &T_VOID, &T_INT, &intrinsic_host)
+intrinsic_input = CheckerIntrinsicInput(&nodes, &lists, &types, &structs, &files, &value_loops, &refine_active, &T_VOID, &T_INT, &T_STR, &T_U8, &T_RAWPTR, &T_NEVER, &intrinsic_host)
 intrinsic_binding = checker_intrinsics_bind(&intrinsic_input)
 call_query_input = CheckerCallQueryInput(&nodes, &lists, &files, &intrinsic_names, &dewy_set_name)
 call_query_binding = checker_call_queries_bind(&call_query_input)

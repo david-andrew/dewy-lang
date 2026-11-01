@@ -3,16 +3,18 @@ from p"node_store.dewy" import (Node node_set_list)
 from p"checker_types.dewy" import (TypeInfo StructInfo TK)
 from p"source_types.dewy" import SrcFile
 from p"type_inference.dewy" import tu_prune
+from p"type_constructors.dewy" import tb_mk_array
 from p"checker_coerce.dewy" import cq_settled
 from p"checker_for_loops.dewy" import ValueLoop
 from p"checker_expr.dewy" import check_expr
 # Intrinsic calls: the node made an intrinsic, its arguments checked, its type. The
-# common array intrinsics (len, cap, push, pop, clear) are checked here; every other
+# common array intrinsics (len, cap, push, pop, clear), syscall, mem_copy, mem_set,
+# panic and bytes are checked here; every other
 # intrinsic, the soa and Dewy-text lengths, places, value-loop resizes, refinement
 # length updates and diagnostics are host services. O(arguments) plus their checking;
 # host calls may grow every arena, so nodes and types are reread by ID.
 # Jo callers call `check_intrinsic` directly (frozen IN ordinals: len 1, push 2, pop 3,
-# clear 6, arrcap 27).
+# clear 6, syscall 9, memcpy 10, memset 11, panic 14, to_bytes 19, arrcap 27).
 XNWord:type=int64<overflow='wrap'>
 CheckerIntrinsicHost:type=[
     rest:<(node:int64 id:int64 args:array<int64> expected:int64):>int64>
@@ -34,6 +36,10 @@ CheckerIntrinsicInput:type=[
     refine:ptr<bool>
     void_type:ptr<int64>
     int_type:ptr<int64>
+    str_type:ptr<int64>
+    u8_type:ptr<int64>
+    rawptr_type:ptr<int64>
+    never_type:ptr<int64>
     host:ptr<CheckerIntrinsicHost>
 ]
 let xn_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
@@ -45,6 +51,10 @@ let xn_value_loops:ptr<array<ValueLoop>>=$unsafe (uint64(0) as ptr<array<ValueLo
 let xn_refine:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
 let xn_void_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let xn_int_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xn_str_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xn_u8_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xn_rawptr_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let xn_never_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let xn_host:ptr<CheckerIntrinsicHost>=$unsafe (uint64(0) as ptr<CheckerIntrinsicHost>)
 checker_intrinsics_bind=(input:ptr<CheckerIntrinsicInput>):>XNWord=>$unsafe {
     xn_nodes=input[0].nodes
@@ -56,6 +66,10 @@ checker_intrinsics_bind=(input:ptr<CheckerIntrinsicInput>):>XNWord=>$unsafe {
     xn_refine=input[0].refine
     xn_void_type=input[0].void_type
     xn_int_type=input[0].int_type
+    xn_str_type=input[0].str_type
+    xn_u8_type=input[0].u8_type
+    xn_rawptr_type=input[0].rawptr_type
+    xn_never_type=input[0].never_type
     xn_host=input[0].host
     0
 }
@@ -76,8 +90,23 @@ xn_resized=(n:XNWord a:XNWord operation:string):>void=>$unsafe {
     if xn_value_loops[0].length >? 0 {xn_host[0].resize(a operation xn_nodes[0].ptr[n].pos)}
     xn_host[0].place(a false)
 }
+# A syscall argument: an integer (a literal or other width coerced to int), a pointer
+# (null as a raw pointer) or a bool.
+xn_syscall_arg=(args:array<int64> i:XNWord):>void=>$unsafe {
+    let t=xn_arg(args i 0)
+    let a=args[i]
+    if (XNWord(xn_nodes[0].ptr[a].flags) & 256) not=? 0 {
+        xn_host[0].coerce(a xn_int_type[0]);
+        return
+    }
+    let k=xn_kind(t)
+    if k =? 'null_' {xn_nodes[0][a].type=int32<overflow='wrap'>(xn_rawptr_type[0])}
+    else if k =? 'int_' {
+        if t not=? xn_int_type[0] {xn_host[0].coerce(a xn_int_type[0]);}
+    } else if k not=? 'ptr' and k not=? 'bool_' {xn_host[0].error(a 9 0)}
+}
 check_intrinsic=(n:XNWord id:XNWord args:array<int64> expected:XNWord):>XNWord=>$unsafe {
-    if id not=? 1 and id not=? 2 and id not=? 3 and id not=? 6 and id not=? 27 {return xn_host[0].rest(n id args expected)}
+    if id not=? 1 and id not=? 2 and id not=? 3 and id not=? 6 and id not=? 27 and id not=? 9 and id not=? 10 and id not=? 11 and id not=? 14 and id not=? 19 {return xn_host[0].rest(n id args expected)}
     xn_nodes[0][n].kind='intrinsic'
     xn_nodes[0][n].aux=int32<overflow='wrap'>(id)
     node_set_list(@xn_nodes[0] @xn_lists[0] n args)
@@ -106,11 +135,36 @@ check_intrinsic=(n:XNWord id:XNWord args:array<int64> expected:XNWord):>XNWord=>
         if xn_kind(t) not=? 'array' {xn_host[0].error(n 4 t)}
         xn_resized(n args[0] "pop")
         r=XNWord(xn_types[0].ptr[t].elem)
-    } else {
+    } else if id =? 6 {
         if nargs not=? 1 {xn_host[0].nargs(n nargs 1 1 "clear")}
         let t=xn_arg(args 0 0)
         if xn_kind(t) not=? 'array' {xn_host[0].error(n 5 t)}
         xn_resized(n args[0] "clear")
+    } else if id =? 9 {
+        if nargs <? 1 or nargs >? 7 {xn_host[0].error(n 8 0)}
+        let i:XNWord=0
+        loop i <? nargs {
+            xn_syscall_arg(args i)
+            i=i + 1
+        }
+        r=xn_int_type[0]
+    } else if id =? 10 or id =? 11 {
+        if nargs not=? 3 {
+            if id =? 10 {xn_host[0].nargs(n nargs 3 3 "mem_copy")} else {xn_host[0].nargs(n nargs 3 3 "mem_set")}
+        }
+        if xn_kind(xn_arg(args 0 0)) not=? 'ptr' {xn_host[0].error(args[0] 7 0)}
+        if id =? 10 {
+            if xn_kind(xn_arg(args 1 0)) not=? 'ptr' {xn_host[0].error(args[1] 7 0)}
+        } else {xn_arg(args 1 xn_int_type[0]);}
+        xn_arg(args 2 xn_int_type[0]);
+    } else if id =? 14 {
+        if nargs >? 1 {xn_host[0].nargs(n nargs 0 1 "panic")}
+        if nargs >? 0 {xn_arg(args 0 xn_str_type[0]);}
+        r=xn_never_type[0]
+    } else {
+        if nargs not=? 1 {xn_host[0].nargs(n nargs 1 1 "bytes")}
+        xn_arg(args 0 xn_str_type[0]);
+        r=tb_mk_array(xn_u8_type[0])
     }
     xn_nodes[0][n].type=int32<overflow='wrap'>(r)
     if xn_refine[0] {return xn_host[0].length_mutation(n r)}
