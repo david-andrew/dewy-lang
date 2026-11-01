@@ -1,0 +1,125 @@
+# A small Markdown to HTML converter: ATX headings, paragraphs, unordered
+# and ordered lists, block quotes, fenced code, and inline emphasis
+# (**strong**, *em*, `code`). HTML special characters are escaped.
+
+const DOC = r"""
+# Release notes
+
+Version *0.3* adds **faster** builds & a `--watch` flag.
+
+## Changes
+- parser: handles `a < b` in guards
+- checker: **no** more *spurious* warnings
+- runtime: 2x faster maps
+
+## Upgrade steps
+1. back up `config.toml`
+2. run the *migrate* tool
+3. restart
+
+> Note: the old flag still works,
+> but prints a warning.
+
+```
+dewy build --watch app.dewy
+if x < 3 { y }
+```
+
+### Thanks
+Thanks to everyone who *tested* the betas.
+"""
+
+escape = (text:string):>string => text.replace("&" "&amp;").replace("<" "&lt;").replace(">" "&gt;")
+
+# Inline markup: `code` spans are copied verbatim (escaped); ** and * toggle
+# <strong> and <em>. An unclosed marker is left as text.
+inline = (text:string):>string => {
+    let parts = text.split("`")
+    let out = ""
+    loop i in 0.. and part in parts {
+        if i % 2 =? 1 and i <? parts.length - 1 {
+            out = "{out}<code>{escape(part)}</code>"
+            continue
+        }
+        let piece = if i % 2 =? 1 "`{part}" else part
+        out = "{out}{emphasis(escape(piece))}"
+    }
+    out
+}
+
+emphasis = (text:string):>string => {
+    let strong = text.split("**")
+    let out = ""
+    loop i in 0.. and part in strong {
+        let inner = part.split("*")
+        let em = ""
+        loop j in 0.. and bit in inner {
+            em = "{em}{if j % 2 =? 1 and j <? inner.length - 1 "<em>{bit}</em>" else if j % 2 =? 1 "*{bit}" else bit}"
+        }
+        out = "{out}{if i % 2 =? 1 and i <? strong.length - 1 "<strong>{em}</strong>" else if i % 2 =? 1 "**{em}" else em}"
+    }
+    out
+}
+
+heading_level = (line:string):>int => {
+    let level = 0
+    loop c in line {
+        if c not=? "#" break
+        level += 1
+    }
+    if 1 <=? level <=? 6 and line.startswith("{"#" * level} ") level else 0
+}
+
+# "12. text" gives the text after the number and dot, or none.
+ordered_item = (line:string):>string? => {
+    let dot = line.find(". ")
+    if dot is? Missing or dot =? 0 return none
+    let number = line[..dot)
+    if to_int(number) is? int line[$clamp dot + 2..] else none
+}
+
+convert = (doc:string):>array<string> => {
+    let html:array<string> = []
+    let list = ""           # the open list's tag, or ""
+    let paragraph:array<string> = []
+    let quote:array<string> = []
+    let in_code = false
+    loop raw in doc.lines {
+        let line = raw.trim_end()
+        if line.startswith("```") {
+            if in_code html.push("</code></pre>") else html.push("<pre><code>")
+            in_code = not in_code
+            continue
+        }
+        if in_code { html.push(escape(raw)); continue }
+        let item = if line.startswith("- ") line[2..] else none
+        let numbered = ordered_item(line)
+        let want = if item isnt? none "ul" else if numbered isnt? none "ol" else ""
+        if list not=? "" and want not=? list { html.push("</{list}>"); list = "" }
+        if paragraph.length >? 0 and (line =? "" or want not=? "" or heading_level(line) >? 0 or line.startswith(">")) {
+            html.push("<p>{inline(paragraph.join(" "))}</p>")
+            paragraph = []
+        }
+        if quote.length >? 0 and not line.startswith(">") {
+            html.push("<blockquote>{inline(quote.join(" "))}</blockquote>")
+            quote = []
+        }
+        if want not=? "" {
+            if list =? "" { html.push("<{want}>"); list = want }
+            html.push("  <li>{inline(item ?? numbered ?? "")}</li>")
+            continue
+        }
+        let level = heading_level(line)
+        if level >? 0 html.push("<h{level}>{inline(line[$clamp level + 1..])}</h{level}>")
+        else if line.startswith(">") quote.push(line[1..].trim())
+        else if line not=? "" paragraph.push(line)
+    }
+    if list not=? "" html.push("</{list}>")
+    if paragraph.length >? 0 html.push("<p>{inline(paragraph.join(" "))}</p>")
+    if quote.length >? 0 html.push("<blockquote>{inline(quote.join(" "))}</blockquote>")
+    html
+}
+
+main = () => {
+    loop line in convert(DOC) printl(line)
+}

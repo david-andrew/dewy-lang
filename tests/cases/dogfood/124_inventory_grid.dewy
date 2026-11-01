@@ -1,0 +1,149 @@
+# Inventory screen model: a 4x3 grid of slots drawn as text. Clicks arrive
+# as screen positions; each slot's rectangle answers whether it was hit.
+# The cursor can hold one stack: clicking picks up, places, merges or swaps.
+
+Item:type = [name:string max_stack:int]
+
+Stack:type = [item:string count:int]
+
+Inventory:type = [
+    columns:int<(>? 0)>
+    slots:array<Stack?>
+    held:Stack?
+]
+
+const SLOT_SIZE = 40.0
+const ORIGIN = vec2(20 30)
+
+const ITEMS:dict<string int> = [
+    "arrow" -> 64
+    "potion" -> 5
+    "sword" -> 1
+    "gem" -> 16
+]
+
+max_of = (name:string):>int => ITEMS.get(name) ?? 1
+
+slot_rect = (inv:Inventory i:int):>Rect => {
+    let col = i % inv.columns
+    let row = i // inv.columns
+    Rect[ORIGIN.x + col * SLOT_SIZE  ORIGIN.y + row * SLOT_SIZE  SLOT_SIZE - 2.0  SLOT_SIZE - 2.0]
+}
+
+slot_at = (inv:Inventory p:vec2):>int? => {
+    loop i in [0..inv.slots.length) if contains(slot_rect(inv i) p) return i
+    none
+}
+
+# Put `count` of an item into the inventory: top up matching stacks first,
+# then fill empty slots. Gives back what did not fit.
+add = (@inv:Inventory name:string count:int):>int => {
+    let left = count
+    let cap = max_of(name)
+    loop @slot in inv.slots {
+        if left =? 0 break
+        match slot {
+            s:Stack => if s.item =? name and s.count <? cap {
+                let moved = min(cap - s.count left)
+                slot = Stack[name s.count + moved]
+                left -= moved
+            }
+            _ => {}
+        }
+    }
+    loop @slot in inv.slots {
+        if left =? 0 break
+        if slot is? none {
+            let moved = min(cap left)
+            slot = Stack[name moved]
+            left -= moved
+        }
+    }
+    left
+}
+
+click = (@inv:Inventory p:vec2) => {
+    let hit = slot_at(inv p)
+    if hit is? none { printl"click ({p.x} {p.y}): outside"; return }
+    let here = inv.slots[hit]
+    match inv.held {
+        h:Stack => match here {
+            s:Stack => if s.item =? h.item {
+                let room = max_of(s.item) - s.count
+                let moved = min(room h.count)
+                inv.slots[hit] = Stack[s.item s.count + moved]
+                inv.held = if h.count - moved >? 0 Stack[h.item h.count - moved] else none
+                printl"click slot {hit}: merge {moved} {s.item}"
+            } else {
+                inv.slots[hit] = h
+                inv.held = s
+                printl"click slot {hit}: swap {h.item} for {s.item}"
+            }
+            _ => {
+                inv.slots[hit] = h
+                inv.held = none
+                printl"click slot {hit}: place {h.count} {h.item}"
+            }
+        }
+        _ => {
+            inv.held = here
+            inv.slots[hit] = none
+            printl"click slot {hit}: pick up"
+        }
+    }
+}
+
+# Right click: take half of a stack (rounded up) onto the cursor.
+split = (@inv:Inventory i:int) => {
+    if inv.held isnt? none or not (0 <=? i <? inv.slots.length) return
+    match inv.slots[i] {
+        s:Stack => if s.count >? 1 {
+            let take = (s.count + 1) // 2
+            inv.held = Stack[s.item take]
+            inv.slots[i] = Stack[s.item s.count - take]
+            printl"split slot {i}: hold {take} {s.item}"
+        }
+        _ => {}
+    }
+}
+
+cell = (s:Stack?):>string => match s {
+    x:Stack => "{x.item[$clamp ..3)}x{x.count:<2}"
+    _ => "  ..  "
+}
+
+render = (inv:Inventory) => {
+    let line:array<string> = []
+    loop i in [0..inv.slots.length) {
+        line.push(cell(inv.slots[i]))
+        if line.length =? inv.columns or i =? inv.slots.length - 1 {
+            printl"| {line.join(" | ")} |"
+            line = []
+        }
+    }
+    match inv.held {
+        h:Stack => printl"holding {h.count} {h.item}"
+        _ => printl"holding nothing"
+    }
+}
+
+main = () => {
+    let inv = Inventory[4 [loop _ in [0..12) none] none]
+    printl"left over: {add(@inv "arrow" 100)}"
+    printl"left over: {add(@inv "potion" 7)}"
+    printl"left over: {add(@inv "sword" 2)}"
+    printl"left over: {add(@inv "gem" 20)}"
+    render(inv)
+    click(@inv vec2(25 35))       # pick up the 64 arrows in slot 0
+    click(@inv vec2(25 115))      # put them in the first empty slot
+    split(@inv 1)                 # take half of the other arrow stack
+    click(@inv vec2(30 120))      # the 64 are full: nothing merges
+    click(@inv vec2(65 40))       # so put them back where they came from
+    click(@inv vec2(150 75))      # pick up the small gem stack
+    click(@inv vec2(140 35))      # swap it for the two potions
+    click(@inv vec2(500 500))     # outside the grid
+    click(@inv vec2(100 40))      # five potions is a full stack too
+    click(@inv vec2(22 32))       # the potions go in the empty first slot
+    printl"left over: {add(@inv "gem" 30)}"
+    render(inv)
+}

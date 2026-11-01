@@ -1,0 +1,137 @@
+# A tiny spreadsheet: cells hold numbers or formulas such as `=A1+B1*2` or
+# `=SUM(A1:A3)`. Formulas name their inputs; editing a cell recomputes
+# exactly the cells that depend on it, in dependency order. A cycle marks
+# its cells as errors instead of looping.
+
+Cell:type = [
+    source:string
+    refs:array<string>      # the cells this one reads
+    value:rational?          # none: an error
+]
+
+Sheet:type = [cells:dict<string Cell> order:array<string>]
+
+# "B12" -> column 1, row 12; none for anything else.
+parse_name = (name:string):>[int int]? => {
+    if name.length <? 2 return none
+    let letter = name[0]
+    let column = "ABCDEFGH".find(letter)
+    if column is? Missing return none
+    let row = to_int(name[1..])
+    if row is? int and row >=? 1 return [int(column) row]
+    none
+}
+
+name_of = (column:int row:int):>string => "{"ABCDEFGH"[$clamp column..column + 1)}{row}"
+
+# Every cell a formula reads: single names and the rectangles of A1:B3 ranges.
+refs_of = (formula:string):>array<string> => {
+    let out:array<string> = []
+    let words = formula.replace("SUM(" " ").replace(")" " ").replace("+" " ").replace("*" " ").replace("-" " ").split()
+    loop word in words {
+        let ends = word.split(":")
+        if ends.length =? 2 {
+            let a = parse_name(ends[0])
+            let b = parse_name(ends[1])
+            if a is? none or b is? none continue
+            loop c in [a[0]..b[0]] loop r in [a[1]..b[1]] out.push(name_of(c r))
+        } else if parse_name(word) isnt? none out.push(word)
+    }
+    out
+}
+
+# Evaluate `term (+|-) term ...` where a term is `factor * factor ...` and
+# a factor is a number, a cell, or SUM(range). Values come from `known`.
+evaluate = (formula:string known:dict<string rational>):>rational? => {
+    let total:rational = 0
+    loop chunk in formula.replace("-" "+-").split("+") {
+        if chunk.trim() =? "" continue
+        let product:rational = 1
+        loop factor in chunk.split("*") {
+            let f = factor.trim()
+            let negative = f.startswith("-")
+            if negative f = f[1..]
+            let v:rational? = none
+            if f.startswith("SUM(") {
+                let sum:rational = 0
+                loop name in refs_of(f) sum += known.get(name) ?? 0
+                v = sum
+            } else if parse_name(f) isnt? none v = known.get(f)
+            else {
+                let n = to_int(f)
+                if n is? int v = rational(n)
+            }
+            if v is? none return none
+            product *= if negative -v else v
+        }
+        total += product
+    }
+    total
+}
+
+set = (@sheet:Sheet name:string source:string) => {
+    let refs = if source.startswith("=") refs_of(source[1..]) else []
+    if name not in? sheet.cells sheet.order.push(name)
+    sheet.cells[name] = Cell[source refs none]
+}
+
+# Recompute everything reachable from `changed`, dependencies first. A cell
+# whose inputs never settle sits on a cycle.
+recalc = (@sheet:Sheet changed:array<string>) => {
+    let dirty:dict<string bool> = []
+    let queue = changed
+    loop name in @queue {
+        if name in? dirty continue
+        dirty[name] = true
+        loop [other cell] in sheet.cells if name in? cell.refs queue.push(other)
+    }
+    let known:dict<string rational> = []
+    loop [name cell] in sheet.cells if name not in? dirty and cell.value is? rational known[name] = cell.value
+    let done:dict<string bool> = []
+    let progress = true
+    loop progress {
+        progress = false
+        loop [name cell] in sheet.cells {
+            if name not in? dirty or name in? done continue
+            let waiting = [loop r in cell.refs if r in? dirty and r not in? done r]
+            if waiting.length >? 0 continue
+            let value = if cell.source.startswith("=") evaluate(cell.source[1..] known) else evaluate(cell.source known)
+            sheet.cells[name] = Cell[cell.source cell.refs value]
+            if value is? rational known[name] = value
+            done[name] = true
+            printl"  {name} = {show(value)}"
+            progress = true
+        }
+    }
+    loop name in sheet.order if name in? dirty and name not in? done and name in? sheet.cells {
+        sheet.cells[name].value = none
+        printl"  {name} = #CYCLE"
+    }
+}
+
+show = (v:rational?):>string => match v {
+    x:rational => if x.denominator =? 1 "{x.numerator}" else "{x:.2f}"
+    _ => "#ERR"
+}
+
+main = () => {
+    let sheet = Sheet[[] []]
+    set(@sheet "A1" "10")
+    set(@sheet "A2" "32")
+    set(@sheet "A3" "=A1*3")
+    set(@sheet "B1" "=SUM(A1:A3)")
+    set(@sheet "B2" "=B1-A2*2+B3")
+    set(@sheet "B3" "7")
+    set(@sheet "C1" "=B2*B2")
+    printl"load"
+    recalc(@sheet sheet.order)
+    printl"A1 := 4"
+    set(@sheet "A1" "4")
+    recalc(@sheet ["A1"])
+    printl"B3 := =C1"
+    set(@sheet "B3" "=C1")
+    recalc(@sheet ["B3"])
+    printl"B3 := 1"
+    set(@sheet "B3" "1")
+    recalc(@sheet ["B3"])
+}

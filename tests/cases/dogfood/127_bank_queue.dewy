@@ -1,0 +1,93 @@
+# Bank lobby simulation in fixed time steps. Customers arrive at the door
+# (a seeded generator decides when), walk to the back of one shared line,
+# then to the first free teller window, and leave after their service time.
+# Positions are vec2 and walking uses the game library's move_toward.
+
+Phase:type = 'walking' | 'queued' | 'served' | 'gone'
+
+Customer:type = [
+    id:int
+    pos:vec2
+    target:vec2
+    phase:Phase
+    service:int        # ticks the teller needs
+    arrived:int
+    window:int         # the teller serving them, or -1
+]
+
+Rng:type = [state:uint32<overflow='wrap'>]
+
+roll = (@rng:Rng sides:int):>int => {
+    rng.state = rng.state * 1103515245 + 12345
+    if sides <=? 0 return 0
+    int(rng.state >> 16) % sides
+}
+
+const DOOR = vec2(0 0)
+const SPEED = 2.0            # units per tick
+const WINDOWS = [vec2(10 20) vec2(20 20) vec2(30 20)]
+
+# The spot for place k in line: a column running back from the windows.
+spot = (k:int):>vec2 => vec2(20 14 - 2 * k)
+
+move_toward = (here:vec2 to:vec2 step:float32):>vec2 => {
+    let gap = to - here
+    let d = gap.norm
+    if d <=? step return to
+    here + gap * (step / d)
+}
+
+main = () => {
+    let rng = Rng[7]
+    let people:array<Customer> = []
+    let line:array<int> = []                  # customer ids, front first
+    let busy = [loop _ in WINDOWS -1]         # who each window serves
+    let waits:array<int> = []
+    loop tick in [0..60) {
+        if tick <? 40 and roll(@rng 3) =? 0 {
+            let id = people.length
+            people.push(Customer[id DOOR spot(line.length) 'walking' 3 + roll(@rng 6) tick -1])
+            line.push(id)
+            printl"t={tick:>2} #{id} arrives"
+        }
+        # a free window calls the front of the line, if they are standing in it
+        loop w in [0..busy.length) {
+            if busy[w] >=? 0 or line.length =? 0 continue
+            let front = line[0]
+            if not (0 <=? front <? people.length) or people[front].phase not=? 'queued' continue
+            line.pop(0);
+            busy[w] = front
+            people[front].phase = 'walking'
+            people[front].window = w
+            people[front].target = WINDOWS[w]
+            waits.push(tick - people[front].arrived)
+            printl"t={tick:>2} window {w} calls #{front}"
+            loop k in [0..line.length) {
+                let id = line[k]
+                if 0 <=? id <? people.length people[id].target = spot(k)
+            }
+        }
+        loop @c in people {
+            if c.phase =? 'gone' continue
+            c.pos = move_toward(c.pos c.target SPEED)
+            let there = (c.pos - c.target).norm <? 0.01
+            if c.phase =? 'walking' and there {
+                c.phase = if c.window <? 0 'queued' else 'served'
+            } else if c.phase =? 'served' {
+                c.service -= 1
+                if c.service <=? 0 {
+                    c.phase = 'gone'
+                    printl"t={tick:>2} #{c.id} leaves window {c.window}"
+                }
+            }
+        }
+        loop w in [0..busy.length) {
+            let id = busy[w]
+            if 0 <=? id <? people.length and people[id].phase =? 'gone' busy[w] = -1
+        }
+    }
+    let served = waits.length
+    let total = [loop w in waits w].sum()
+    printl"{people.length} arrived, {served} called, {line.length} still in line"
+    if served >? 0 printl"average wait {total / served:.2f} ticks, longest {waits.max()}"
+}
