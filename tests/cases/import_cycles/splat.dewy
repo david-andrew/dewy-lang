@@ -1,0 +1,9 @@
+# quick
+# Two modules that splat-import each other use each other's names unqualified.
+import p"../../fixtures/import_cycles/splat_peer.dewy"
+ping=(n:int):>int => {
+    if n <=? 0 { return 0 }
+    1 + pong(n - 1)
+}
+let start=4
+main=()=>printl"{ping(start)} {peer_value}"

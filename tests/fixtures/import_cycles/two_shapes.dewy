@@ -1,0 +1,8 @@
+import p"../../cases/import_cycles/two_modules.dewy" as top
+Point:type=[x:int y:int]
+corner=(b:top.Box):>Point => Point[b.w b.h]
+box_area=(p:Point):>int => top.area(top.Box[p.x p.y])
+count=(n:int):>int => {
+    if n <=? 0 { return 0 }
+    1 + top.count_down(n - 1)
+}

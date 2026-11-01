@@ -1,0 +1,16 @@
+# quick
+# two_modules.dewy as one file.
+Box:type=[w:int h:int]
+area=(b:Box):>int => b.w * b.h
+count_down=(n:int):>int => count(n)
+Point:type=[x:int y:int]
+corner=(b:Box):>Point => Point[b.w b.h]
+box_area=(p:Point):>int => area(Box[p.x p.y])
+count=(n:int):>int => {
+    if n <=? 0 { return 0 }
+    1 + count_down(n - 1)
+}
+main=()=>{
+    let p=corner(Box[3 4])
+    printl"{p.x} {p.y} {box_area(p)} {count_down(5)}"
+}

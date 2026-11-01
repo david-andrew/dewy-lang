@@ -1,0 +1,11 @@
+# quick
+# three_modules.dewy as one file: the same values in the order it runs them.
+Gear:type=[teeth:int]
+let base=2
+let scaled=base * 10
+gear=(n:int):>Gear => Gear[n]
+let ratio=scaled + 1
+let total=ratio + scaled
+let small=gear(3)
+spin=(g:Gear):>int => g.teeth * ratio
+main=()=>printl"{base} {ratio} {total} {spin(small)}"

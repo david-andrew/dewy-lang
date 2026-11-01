@@ -1,0 +1,11 @@
+# quick
+# Two modules that import each other call each other's functions and use each
+# other's types, in both directions.
+import p"../../fixtures/import_cycles/two_shapes.dewy" as shapes
+Box:type=[w:int h:int]
+area=(b:Box):>int => b.w * b.h
+count_down=(n:int):>int => shapes.count(n)
+main=()=>{
+    let p=shapes.corner(Box[3 4])
+    printl"{p.x} {p.y} {shapes.box_area(p)} {count_down(5)}"
+}

@@ -38,6 +38,7 @@ use 'spelling.dewy'
 use 'habits.dewy'
 use 'units.jo'
 use 'definite.jo'
+use 'import_cycles.jo'
 use 'decimals.jo'
 use 'growth.jo'
 use 'safe_paths.jo'
@@ -436,7 +437,6 @@ lib_private = (name: int) -> bool:
 from_imports: int[]
 
 bind_from_imports = (start: int = 0):
-    check_import_cycles()
     loop di in [start..from_imports.len()):
         d = from_imports[di]
         m = int(nodes[d].mod)
@@ -876,31 +876,6 @@ load_module = (path: str, is_prelude: bool, from: int) -> int:
     p_lazy = false
     modules[mi].decls = decls
     mi
-
-# Search from each Dewy module for a path back to itself. Traversing Sloppy
-# modules catches mixed cycles, while visited nodes terminate Sloppy-only cycles.
-# Compiler self-builds contain no Dewy modules and need no graph walks.
-check_import_path = (root: int, m: int, seen: mut bool[], path: mut int[]) -> void:
-    seen[m] = true
-    path.push(m)
-    loop edge in modules[m].imports:
-        next = edge.0
-        if next == root:
-            names: str[]
-            loop part in path: names.push(files[int(modules[part].file)].path)
-            names.push(files[int(modules[root].file)].path)
-            cycle = join(names, " -> ")
-            fatal(edge.1, "Dewy module import cycle: {cycle}")
-        if not seen[next]: check_import_path(root, next, seen, path)
-    path.pop()
-    return
-
-check_import_cycles = ():
-    loop m in [0..modules.len()):
-        if not files[int(modules[m].file)].is_dewy: continue
-        seen = fill(false, modules.len())
-        path: int[]
-        check_import_path(m, m, seen, path)
 
 late_module_imports = false
 
@@ -1901,8 +1876,10 @@ ensure_global = (g: int, use_pos: int, in_flow: bool = false):
     if globals[g].state == 2: return
     if globals[g].state == 1:
         gn = name_of(int(globals[g].name))
+        global_cycle_across_modules(g, use_pos)
         fatal(use_pos, "'{gn}' is used in its own first value, before it has one: give it one first ({jd(use_pos, "`{gn} = 0`", "`let {gn} = 0`")} on a line above), then change it")
     globals[g].state = 1
+    ensuring_globals.push(g)
     saved = cx
     m = int(globals[g].mod)
     entered = enter_module_context(m)
@@ -1985,6 +1962,7 @@ ensure_global = (g: int, use_pos: int, in_flow: bool = false):
             nodes[d].kind = .const_
         add_flag(d, NF_CHECKED)
     globals[g].state = 2
+    ensuring_globals.pop()
     ctxs[cx].floor = saved_floor
     leave_module_context(m, entered)
     cx = saved
@@ -6124,9 +6102,7 @@ check_program = (main_path: str):
     # Imported initializers must see the original arguments and headless mode too.
     test_start = 0
     if test_mode: test_start = runtime_fn("__test_run_begin")
-    dfs_state = fill(false, modules.len())
-    order: int[]
-    order_modules(mainm, order)
+    order = init_module_order(mainm)
     init_fns = [prelude_init]
     if test_start != 0: init_fns.push(test_start)
     loop m in order:
@@ -6243,13 +6219,12 @@ check_program = (main_path: str):
         if open_globals.len() > 0: settle_open_globals()
     ut_run()
     if late_module_imports:
-        dfs_state = fill(false, modules.len())
-        order.clear()
-        order_modules(mainm, order)
+        order = init_module_order(mainm)
         init_fns = [prelude_init]
         if test_start != 0: init_fns.push(test_start)
         loop m in order:
             if not modules[m].is_prelude: init_fns.push(int(modules[m].init_fn))
+    merge_cycle_inits()
     if dg_globals.len() > 0 and not test_mode:
         later: int[]
         if update_fn > 0: later.push(update_fn)

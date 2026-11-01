@@ -4665,9 +4665,15 @@ Use `import p"@lib/physics.jo" as physics` to select a bundled library explicitl
 even when a neighboring file has the same name. `@lib/` resolves inside the
 active toolchain's library directory and also works with selected imports.
 
-Import cycles containing a Dewy (`.dewy`) module are rejected, with the import
-path through the cycle in the diagnostic. This includes cycles that pass through
-Sloppy implementation libraries; cycles made entirely of Sloppy modules remain allowed.
+Modules may import each other in cycles, Dewy and Sloppy (`.jo`) modules alike:
+a program runs as if its modules were one file. Each module sees the others'
+functions, types and values whichever imports first. Each module's top-level code
+runs in its own order; within a cycle, a line that reads another module's value
+(directly, or through a function it calls) runs after that value is given, and
+otherwise imported modules go first, each running as far as it can.
+The only errors are the ones one file would have: values that need each other's
+first values, or a module's own order putting a line before a value it needs.
+Both name the chain of values and lines.
 
 `--target` and `$target` use the design's target names. A name has only the
 fields it needs: the processor, then the system.

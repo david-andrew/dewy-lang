@@ -1,0 +1,8 @@
+# quick
+# Three modules in a ring: each calls the next one's functions and builds its
+# values from the others' values, initialized in the order they need.
+import p"../../fixtures/import_cycles/ring_b.dewy" as b
+Gear:type=[teeth:int]
+let base=2
+spin=(g:Gear):>int => g.teeth * b.ratio
+main=()=>printl"{base} {b.ratio} {b.total} {spin(b.small)}"

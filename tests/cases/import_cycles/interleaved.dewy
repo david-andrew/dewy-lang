@@ -1,0 +1,7 @@
+# quick
+# Top-level code of two modules in a cycle runs as one file would: each
+# module's lines in order, a line that reads the other's value after it.
+import p"../../fixtures/import_cycles/interleaved_peer.dewy" as peer
+printl"top starts"
+let y=peer.x + 1
+printl"y = {y}"

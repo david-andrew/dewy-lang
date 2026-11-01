@@ -1,0 +1,6 @@
+# quick
+# The peer's own order puts `z` (which needs `y`) above `x`, and `y` needs `x`:
+# no order of the two files' lines gives `y` first.
+import p"../../fixtures/import_cycles/use_before_init_peer.dewy" as peer
+let y=peer.x + 1
+printl(y)
