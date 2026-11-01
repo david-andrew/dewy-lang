@@ -3672,10 +3672,15 @@ cin_set = (d: int):
     if d >= cin_mark.len(): cin_mark.resize(max(d + 1, nodes.len()) + 1024)
     cin_mark[d] = i32(cin_pass)
 
-collect_in = (table: {int: int}, name: int, out: mut int[]):
-    s = table.get(name) ?? 0
-    if s != 0 and hide_private and is_private(name) and (not hide_lib_only or name_of(name)[1] != '_'): return
-    if s == 0 or syms[s].kind != .fns: return
+# (m: a module's own table, -1 the prelude's; checker_call_queries.dewy's name_family reads
+# them indexed)
+collect_in = (m: int, name: int, out: mut int[]):
+    hide = 0
+    if hide_private:
+        hide = 1
+        if hide_lib_only: hide = 2
+    s = name_family(m, name, hide)
+    if s == 0: return
     dewy = caller_dewy()
     # (each declaration once: what `out` holds, and what this family adds)
     cin_pass += 1
@@ -3814,19 +3819,19 @@ hide_lib_only = false
 collect_module = (m: int, name: int, out: mut int[]):
     if m < 0: return
     demand_name(name)
-    if modules[m].is_prelude: collect_in(prelude, name, out)
+    if modules[m].is_prelude: collect_in(-1, name, out)
     else:
-        collect_in(modules[m].names, name, out)
+        collect_in(m, name, out)
         hide_private = true
         h = use_home(m, name)
         if h == -2:
             loop u in modules[m].uses:
                 hide_lib_only = modules[u].is_prelude
-                if modules[u].is_prelude: collect_in(prelude, name, out)
-                else if bound_in(u, name): collect_in(modules[u].names, name, out)
+                if modules[u].is_prelude: collect_in(-1, name, out)
+                else if bound_in(u, name): collect_in(u, name, out)
         else:
             if modules[m].uses.len() > 0: hide_lib_only = false
-            if h >= 0: collect_in(modules[h].names, name, out)
+            if h >= 0: collect_in(h, name, out)
         hide_private = false
 
 collect_fns = (name: int, out: mut int[]):
@@ -3836,21 +3841,21 @@ collect_fns = (name: int, out: mut int[]):
     # (in a Dewy module, the Dewy prelude's family of the name replaces the Sloppy prelude's)
     if m >= 0 and not modules[m].is_prelude and files[int(modules[m].file)].is_dewy and not is_private(name):
         dm = dewy_prelude_module(name)
-        if dm >= 0 and syms[modules[dm].names.get(name) ?? 0].kind == .fns:
+        if dm >= 0 and name_family(dm, name, 0) != 0:
             if dm != m:
-                collect_in(modules[dm].names, name, out)
+                collect_in(dm, name, out)
                 prelude_reach(m, dm)
             return
     hide_private = m >= 0 and not modules[m].is_prelude
     hide_lib_only = true
-    collect_in(prelude, name, out)
+    collect_in(-1, name, out)
     hide_private = false
     # (the builtin `rational`'s exact abs, min, max and sign join the prelude's families in a
     # module whose imports reach its library: a probe per family collected, the cache's once a
     # name is stamped. Never another module's: a batch's float case keeps its float members)
     if m >= 0 and not modules[m].is_prelude and files[int(modules[m].file)].is_dewy and exact_family_name(name):
         rm = rational_module()
-        if rm >= 0 and rm != m and reaches_rational(m, rm): collect_in(modules[rm].names, name, out)
+        if rm >= 0 and rm != m and reaches_rational(m, rm): collect_in(rm, name, out)
 
 # (by name: abs, min, max or sign; built on first use)
 exact_named: bool[]
@@ -3929,7 +3934,7 @@ exact_members_for = (decls: int[], name: int, args: int[]) -> int[]:
             if s != 0 and syms[s].kind == .local: t = prune(int(locals[int(syms[s].ref)].type))
         if t != 0 and (bundled_rational_type(t) or bundled_word_rational_type(t)):
             out = decls
-            collect_in(modules[rm].names, name, out)
+            collect_in(rm, name, out)
             return out
     decls
 
@@ -6204,7 +6209,7 @@ resolve_by_types = (name: int, ts: int[], pos: int, required: bool, choice_only:
     hidden_mark = surface_hidden.len()
     decls: int[]
     collect_fns(name, decls)
-    collect_in(prelude, name, decls)
+    collect_in(-1, name, decls)
     if ts.len() > 0:
         tm = module_of_type(ts[ts.len() - 1])
         if tm >= 0: collect_module(tm, name, decls)
@@ -10095,7 +10100,7 @@ intrinsic_host = CheckerIntrinsicHost(intrinsic_rest, nargs_check, intrinsic_err
 intrinsic_input = CheckerIntrinsicInput(&nodes, &lists, &types, &structs, &files, &value_loops, &refine_active, &T_VOID, &T_INT, &T_STR, &T_U8, &T_RAWPTR, &T_NEVER, &intrinsic_host)
 intrinsic_binding = checker_intrinsics_bind(&intrinsic_input)
 call_query_host = CheckerCallQueryHost(call_order_rest, mutable_arguments_rest, float_key_rest)
-call_query_input = CheckerCallQueryInput(&nodes, &lists, &files, &intrinsic_names, &dewy_set_name, &fns, &float_key_names, &call_query_host)
+call_query_input = CheckerCallQueryInput(&nodes, &lists, &files, &intrinsic_names, &dewy_set_name, &fns, &float_key_names, &call_query_host, &syms, &names, &prelude_syms, &name_first, &name_mod, &name_sym, &name_next)
 call_query_binding = checker_call_queries_bind(&call_query_input)
 
 # checker_expr.dewy's services: literal preparation (grouped values, spreads, the

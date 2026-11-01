@@ -311,9 +311,13 @@ dp_scan = ():
     ic_restore(icb)
 
 # The Dewy prelude module declaring name (loaded on first use), or -1
+# (dp_names' answer by interned name, + 2: 0 not asked yet, 1 none)
+dp_by_name: int[]
 dewy_prelude_module = (name: int) -> int:
     if not dp_scanned: dp_scan()
-    f = dp_names.get(name_of(name)) ?? -1
+    if dp_by_name.len() <= name: dp_by_name.resize(name * 2 + 64)
+    if dp_by_name[name] == 0: dp_by_name[name] = (dp_names.get(name_of(name)) ?? -1) + 2
+    f = dp_by_name[name] - 2
     if f < 0: return -1
     m = dp_mods[f]
     if m < 0:

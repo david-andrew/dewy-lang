@@ -13,7 +13,8 @@ cq_overlap_host = (args: int[], mask: int, pos: int): events.push("overlap:{mask
 cq_float_host = (n: int): events.push("float:{n}")
 cq_float_names: int[] = [0, 0, 0, 0]
 cq_host = CheckerCallQueryHost(cq_order_host, cq_overlap_host, cq_float_host)
-cq_input = CheckerCallQueryInput(&nodes, &lists, &files, &cq_names, &cq_set, &fns, &cq_float_names, &cq_host)
+cq_family: int[]
+cq_input = CheckerCallQueryInput(&nodes, &lists, &files, &cq_names, &cq_set, &fns, &cq_float_names, &cq_host, &syms, &names, &cq_family, &cq_family, &cq_family, &cq_family, &cq_family)
 cq_binding = checker_call_queries_bind(&cq_input)
 cz_members = 0
 cz_members_host = (n: int):

@@ -15,6 +15,13 @@ struct CheckerCallQueryInput:
     fns: *(FnInst[])
     float_key_names: *(int[])
     host: *(CheckerCallQueryHost)
+    syms: *(Sym[])
+    names: *(str[])
+    prelude_syms: *(int[])
+    name_first: *(int[])
+    name_mod: *(int[])
+    name_sym: *(int[])
+    name_next: *(int[])
 cg_nodes: *(Node[])
 cg_lists: *(i32[])
 cg_files: *(SrcFile[])
@@ -23,6 +30,13 @@ cg_set_name: *(int)
 cg_fns: *(FnInst[])
 cg_float_key_names: *(int[])
 cg_host: *(CheckerCallQueryHost)
+cg_syms: *(Sym[])
+cg_names: *(str[])
+cg_prelude_syms: *(int[])
+cg_name_first: *(int[])
+cg_name_mod: *(int[])
+cg_name_sym: *(int[])
+cg_name_next: *(int[])
 checker_call_queries_bind = (input: *CheckerCallQueryInput) -> int:
     cg_nodes = input[0].nodes
     cg_lists = input[0].lists
@@ -32,6 +46,13 @@ checker_call_queries_bind = (input: *CheckerCallQueryInput) -> int:
     cg_fns = input[0].fns
     cg_float_key_names = input[0].float_key_names
     cg_host = input[0].host
+    cg_syms = input[0].syms
+    cg_names = input[0].names
+    cg_prelude_syms = input[0].prelude_syms
+    cg_name_first = input[0].name_first
+    cg_name_mod = input[0].name_mod
+    cg_name_sym = input[0].name_sym
+    cg_name_next = input[0].name_next
     0
 intrinsic_of = (name: int) -> int:
     if name >= 0 and name < cg_intrinsic_names[0].len(): return cg_intrinsic_names[0][name] - 1
@@ -98,3 +119,21 @@ map_float_key = (n: int):
         p = int(cg_nodes[0][int(cg_lists[0][int(cg_nodes[0][d].list) + 1])].name)
         if p != cg_float_key_names[0][2] and p != cg_float_key_names[0][3]: return
     cg_host[0].float_key(n)
+name_family = (m: int, name: int, hide: int) -> int:
+    s = 0
+    if m < 0:
+        if name < cg_prelude_syms[0].len(): s = cg_prelude_syms[0][name]
+    else:
+        if name < cg_name_first[0].len():
+            e = cg_name_first[0][name]
+            loop e != 0:
+                if cg_name_mod[0][e - 1] == m:
+                    s = cg_name_sym[0][e - 1]
+                    e = 0
+                else: e = cg_name_next[0][e - 1]
+    if s == 0: return 0
+    if hide != 0:
+        text = cg_names[0][name]
+        if starts_with(text, "_") and not (hide == 2 and starts_with(text, "__")): return 0
+    if cg_syms[0][s].kind != .fns: return 0
+    s

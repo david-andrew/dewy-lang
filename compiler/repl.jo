@@ -250,7 +250,7 @@ repl_compile = (text: str, n: int) -> ReplOut:
             nm = int(nodes[d].name)
             if modules[m].names.get(nm) != none:
                 ml_bump_name(nm)
-                modules[m].names.remove(nm)
+                name_unbind(m, nm)
     n0 = modules[m].inits.len()
     modules[m].decls.extend(decls)
     register_decls(m, decls)

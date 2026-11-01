@@ -1,5 +1,5 @@
-"""The call checker's queries (intrinsic_of, ctx_dependent, argument order, mutable overlap)
-match frozen Jo and expr.jo's answers."""
+"""The call checker's queries (intrinsic_of, ctx_dependent, argument order, mutable overlap,
+name families) match frozen Jo and expr.jo's answers."""
 import pytest
 
 from tests.support import compiler  # noqa: F401
@@ -14,7 +14,15 @@ float_host = (n: int): print("float_key")
 query_fns: FnInst[] = [FnInst()]
 float_names: int[] = [20, 21, 22, 23]
 query_host = CheckerCallQueryHost(order_host, overlap_host, float_host)
-query_input = CheckerCallQueryInput(&nodes, &lists, &files, &intrinsic_names, &set_name, &query_fns, &float_names, &query_host)
+# (name families: syms 1-3 functions, 4 a global; the prelude binds names 1 and `_p`, module
+# 0 binds name 2 and module 1 names 2 and `__q`; module 2 binds name 2 to a global)
+query_syms: Sym[] = [Sym(), Sym(kind = .fns), Sym(kind = .fns), Sym(kind = .fns), Sym(kind = .global)]
+prelude_syms: int[] = [0, 1, 0]
+name_first: int[] = [0, 0, 4]
+name_mod: int[] = [0, 1, 1, 2]
+name_sym: int[] = [2, 3, 1, 4]
+name_next: int[] = [0, 1, 0, 2]
+query_input = CheckerCallQueryInput(&nodes, &lists, &files, &intrinsic_names, &set_name, &query_fns, &float_names, &query_host, &query_syms, &names, &prelude_syms, &name_first, &name_mod, &name_sym, &name_next)
 query_binding = checker_call_queries_bind(&query_input)
 mk = (kind: NK, flags: int = 0, t: int = 0, children: int[] = []) -> int:
     n = node(kind, 0, 0, 0, children)
@@ -111,6 +119,17 @@ main = ():
         loop i in [0..shape[1]): args.push(small)
         site = mk(.call, 0, 0, args); nodes[site].sym = i32(query_fns.len() - 1)
         map_float_key(site)
+    pn = intern_text("_p")
+    qn = intern_text("__q")
+    prelude_syms.resize(qn + 1); prelude_syms[pn] = 2
+    name_first.resize(qn + 1); name_first[qn] = 3
+    loop m in [-1, 0, 1, 2, 3]:
+        loop name in [0, 1, 2, pn, qn, qn + 99]:
+            label = "{name}"
+            if name == pn: label = "_p"
+            if name == qn: label = "__q"
+            if name > qn: label = "far"
+            print("family:{m}:{label}:{name_family(m, name, 0)}:{name_family(m, name, 1)}:{name_family(m, name, 2)}")
     print("ok")
 '''
 
@@ -208,6 +227,36 @@ float_key
 shape:[5, 2, 2, 7]
 shape:[5, 2, 1, 22]
 shape:[5, 1, 2, 22]
+family:-1:0:0:0:0
+family:-1:1:1:1:1
+family:-1:2:0:0:0
+family:-1:_p:2:0:0
+family:-1:__q:0:0:0
+family:-1:far:0:0:0
+family:0:0:0:0:0
+family:0:1:0:0:0
+family:0:2:2:2:2
+family:0:_p:0:0:0
+family:0:__q:0:0:0
+family:0:far:0:0:0
+family:1:0:0:0:0
+family:1:1:0:0:0
+family:1:2:3:3:3
+family:1:_p:0:0:0
+family:1:__q:1:0:1
+family:1:far:0:0:0
+family:2:0:0:0:0
+family:2:1:0:0:0
+family:2:2:0:0:0
+family:2:_p:0:0:0
+family:2:__q:0:0:0
+family:2:far:0:0:0
+family:3:0:0:0:0
+family:3:1:0:0:0
+family:3:2:0:0:0
+family:3:_p:0:0:0
+family:3:__q:0:0:0
+family:3:far:0:0:0
 ok
 '''
 

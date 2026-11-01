@@ -1,7 +1,7 @@
 $runtime_checks
 from p"node_store.dewy" import Node
 from p"source_types.dewy" import SrcFile
-from p"checker_state.dewy" import FnInst
+from p"checker_state.dewy" import (FnInst Sym)
 # Questions the call checker asks of a call's names and arguments: which intrinsic a
 # name is, whether an argument takes its type from the parameter it meets (so it is
 # checked after the overload is picked), and the common cases of two per-call checks
@@ -26,6 +26,13 @@ CheckerCallQueryInput:type=[
     fns:ptr<array<FnInst>>
     float_key_names:ptr<array<int64>>
     host:ptr<CheckerCallQueryHost>
+    syms:ptr<array<Sym>>
+    names:ptr<array<string>>
+    prelude_syms:ptr<array<int64>>
+    name_first:ptr<array<int64>>
+    name_mod:ptr<array<int64>>
+    name_sym:ptr<array<int64>>
+    name_next:ptr<array<int64>>
 ]
 let cg_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
 let cg_lists:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
@@ -35,6 +42,13 @@ let cg_set_name:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let cg_fns:ptr<array<FnInst>>=$unsafe (uint64(0) as ptr<array<FnInst>>)
 let cg_float_key_names:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
 let cg_host:ptr<CheckerCallQueryHost>=$unsafe (uint64(0) as ptr<CheckerCallQueryHost>)
+let cg_syms:ptr<array<Sym>>=$unsafe (uint64(0) as ptr<array<Sym>>)
+let cg_names:ptr<array<string>>=$unsafe (uint64(0) as ptr<array<string>>)
+let cg_prelude_syms:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+let cg_name_first:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+let cg_name_mod:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+let cg_name_sym:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+let cg_name_next:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
 checker_call_queries_bind=(input:ptr<CheckerCallQueryInput>):>CGWord=>$unsafe {
     cg_nodes=input[0].nodes
     cg_lists=input[0].lists
@@ -44,6 +58,13 @@ checker_call_queries_bind=(input:ptr<CheckerCallQueryInput>):>CGWord=>$unsafe {
     cg_fns=input[0].fns
     cg_float_key_names=input[0].float_key_names
     cg_host=input[0].host
+    cg_syms=input[0].syms
+    cg_names=input[0].names
+    cg_prelude_syms=input[0].prelude_syms
+    cg_name_first=input[0].name_first
+    cg_name_mod=input[0].name_mod
+    cg_name_sym=input[0].name_sym
+    cg_name_next=input[0].name_next
     0
 }
 # The intrinsic (its index in the table) an interned name names, or -1.
@@ -147,4 +168,34 @@ map_float_key=(n:CGWord):>void=>$unsafe {
         if p not=? names[2] and p not=? names[3] {return}
     }
     cg_host[0].float_key(n)
+}
+# The function family a module's own table binds an interned name to (m < 0: the
+# prelude's), read from the indexed tables check.jo keeps beside its maps: the family's
+# first binding, or 0 when there is none, the name binds something else, or it is a
+# private name hidden (hide 1: `_x` hidden; hide 2: only a used module's, the library's
+# `__x` kept). O(modules binding the name).
+name_family=(m:CGWord name:CGWord hide:CGWord):>CGWord=>$unsafe {
+    let s:CGWord=0
+    if m <? 0 {
+        if name <? cg_prelude_syms[0].length {s=cg_prelude_syms[0].ptr[name]}
+    } else {
+        if name <? cg_name_first[0].length {
+            let e=cg_name_first[0].ptr[name]
+            loop e not=? 0 {
+                if cg_name_mod[0].ptr[e - 1] =? m {
+                    s=cg_name_sym[0].ptr[e - 1]
+                    e=0
+                } else {
+                    e=cg_name_next[0].ptr[e - 1]
+                }
+            }
+        }
+    }
+    if s =? 0 {return 0}
+    if hide not=? 0 {
+        let text=cg_names[0].ptr[name]
+        if text.startswith("_") and not (hide =? 2 and text.startswith("__")) {return 0}
+    }
+    if cg_syms[0].ptr[s].kind not=? 'fns' {return 0}
+    s
 }

@@ -209,7 +209,7 @@ scope_add_module = (m: int, name: int, kind: SK, r: int, decl: int) -> int:
                     prev = e
                     e = int(syms[e].next)
                 syms[s].next = i32(e)
-                if prev == 0: prelude[name] = s
+                if prev == 0: prelude_bind(name, s)
                 else: syms[prev].next = i32(s)
                 return prelude[name]
             e = ex
@@ -221,7 +221,7 @@ scope_add_module = (m: int, name: int, kind: SK, r: int, decl: int) -> int:
             fatal(nodes[decl].pos, "'{name_of(name)}' is already defined at {pos_str(nodes[int(syms[ex].decl)].pos)}")
     s = new_sym(name, kind, r, decl)
     if kind == .fns and decl != 0 and modules[m].is_prelude: syms[s].surface = i32(dewy_surface(name, decl))
-    if modules[m].is_prelude: prelude[name] = s
+    if modules[m].is_prelude: prelude_bind(name, s)
     else:
         bind_module_name(m, name, s)
         if kind == .const_:
@@ -279,6 +279,40 @@ home_next: int[]
 bind_module_name = (m: int, name: int, s: int):
     modules[m].names[name] = s
     if homes_built: home_add(m, name)
+    name_bind(m, name, s)
+
+# The same bindings indexed for checker_call_queries.dewy's name_family: the prelude's by name
+# (0: none), and each module's through a list by name from name_first[name] (an entry + 1; 0
+# ends it) of (module, binding). Kept by prelude_bind and name_bind, the tables' only writers
+# (the REPL's redefinition clears an entry's binding, name_unbind).
+prelude_syms: int[]
+name_first: int[]
+name_mod: int[]
+name_sym: int[]
+name_next: int[]
+prelude_bind = (name: int, s: int):
+    prelude[name] = s
+    if prelude_syms.len() <= name: prelude_syms.resize(name * 2 + 64)
+    prelude_syms[name] = s
+name_bind = (m: int, name: int, s: int):
+    if name_first.len() <= name: name_first.resize(name * 2 + 64)
+    e = name_first[name]
+    loop e != 0:
+        if name_mod[e - 1] == m:
+            name_sym[e - 1] = s
+            return
+        e = name_next[e - 1]
+    name_mod.push(m)
+    name_sym.push(s)
+    name_next.push(name_first[name])
+    name_first[name] = name_mod.len()
+name_unbind = (m: int, name: int):
+    modules[m].names.remove(name)
+    if name < name_first.len():
+        e = name_first[name]
+        loop e != 0:
+            if name_mod[e - 1] == m: name_sym[e - 1] = 0
+            e = name_next[e - 1]
 home_add = (m: int, name: int):
     if home_first.len() <= name: home_first.resize(name * 2 + 64)
     h = home_first[name]
