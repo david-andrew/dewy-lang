@@ -1,0 +1,9 @@
+# A comprehension of int64 positions pushed where array<int> rows are wanted
+# says to give the array its type where it is made.
+layers = (xs:array<int>):>array<array<int>> => {
+    let ready = [loop t in [0..xs.length) if xs[t] =? 0 t]
+    let out:array<array<int>> = []
+    out.push(ready)
+    out
+}
+main = () => printl(layers([0 1 0]).length)

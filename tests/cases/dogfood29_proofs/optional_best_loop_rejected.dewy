@@ -1,0 +1,8 @@
+# One past the position: the payload is at most the length, not below it.
+pick = (fs:array<int>):>int => {
+    let best:int? = none
+    loop i in [0..fs.length) best = i + 1
+    if best is? int return fs[best]
+    -1
+}
+main = () => printl(pick([3 1 2]))

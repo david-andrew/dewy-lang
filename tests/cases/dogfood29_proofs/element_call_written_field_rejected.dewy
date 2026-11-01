@@ -1,0 +1,10 @@
+# The field the callee writes is forgotten: it may have shrunk.
+F:type = [hp:int moves:array<int>]
+drop = (@f:F) => { f.moves = [] }
+main = () => {
+    let fs = [F[5 [1 2]] F[6 [3]]]
+    let i = 0
+    if fs[i].moves.length =? 0 return
+    drop(@fs[i])
+    printl"{fs[i].moves[0]}"
+}

@@ -984,6 +984,13 @@ rd_dc_atom_mistake=(@reader_ctx:ParserContext token:DewyLexeme):>int64=>$unsafe 
             return reader_ctx.stores.host[0].dn_error(reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) - 2)].start "`{word}` is a keyword, so it cannot name a variable, parameter or field: choose another name")
         }
     }
+    # (`[:]`, another language's empty dictionary; `xs[:]` stays a slice)
+    if ((((symbol =? 'colon') and (reader_ctx.at >=? 2)) and (reader_ctx.at <? reader_ctx.tokens.length)) and (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) - 2)].symbol =? 'lbrack')) and (reader_ctx.tokens[reader_ctx.at].symbol =? 'rbrack') {
+        let indexed:bool=((reader_ctx.at >=? 3) and (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) - 3)].stop =? reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) - 2)].start))
+        if (not indexed) {
+            return reader_ctx.stores.host[0].dn_error(token.start "expected an expression, found ':' (an empty dictionary is `[]` with a dictionary type: `let d:dict<string int> = []`)")
+        }
+    }
     if (after_colon and ((symbol =? 'colon') or (symbol =? 'rbrack'))) {
         return reader_ctx.stores.host[0].dn_error(token.start "expected an expression, found '{text}' (a slice is a range in the brackets: `xs[1..]`, `xs[..n)`, `xs[a..b)`; `xs.reversed()` reverses; `:` gives a type)")
     }

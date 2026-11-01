@@ -1,0 +1,22 @@
+# An optional set on one path and `none` on the other keeps the set
+# payload's bounds once `is? int` narrows it.
+first = (fs:array<int>):>int => {
+    let best:int? = none
+    if fs.length >? 0 best = 0
+    if best is? int return fs[best]
+    -1
+}
+last = (fs:array<int>):>int => {
+    let best:int? = none
+    if fs.length >? 1 best = fs.length - 1
+    match best {
+        b:int => fs[b]
+        _ => -1
+    }
+}
+main = () => {
+    printl(first([3 1 2]))
+    printl(first([]))
+    printl(last([3 1 2]))
+    printl(last([5]))
+}

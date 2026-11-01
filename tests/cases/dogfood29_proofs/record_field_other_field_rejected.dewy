@@ -1,0 +1,12 @@
+# A position in one field says nothing about another field's length.
+F:type = [moves:array<int> slots:array<int>]
+best = (f:F):>int? => {
+    if f.moves.length =? 0 return none
+    f.moves.length - 1
+}
+main = () => {
+    let f = F[[3 9 4] [1]]
+    let k = best(f)
+    if k is? none return
+    printl"{f.slots[k]}"
+}

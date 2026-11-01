@@ -1,0 +1,24 @@
+# A helper returning the best index so far as an optional bounds its
+# present result by the array it searched, at the caller.
+F:type = [hp:int team:int]
+target_of = (fs:array<F> team:int):>int? => {
+    let best:int? = none
+    loop i in [0..fs.length) {
+        if fs[i].team =? team or fs[i].hp <=? 0 continue
+        if best is? none or fs[i].hp <? fs[best].hp best = i
+    }
+    best
+}
+first_dead = (fs:array<F>):>int? => {
+    let found:int? = none
+    loop i in [0..fs.length) if found is? none and fs[i].hp <=? 0 found = i
+    found
+}
+main = () => {
+    let fs = [F[5 0] F[3 1] F[2 1] F[0 1]]
+    let t = target_of(fs 0)
+    if t is? none return
+    printl(fs[t].hp)
+    let d = first_dead(fs)
+    if d is? int printl(fs[d].team)
+}

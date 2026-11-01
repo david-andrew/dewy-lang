@@ -834,6 +834,7 @@ fact_collect = (s: mut FactState, boundary: int, result: int):
     work += refine_entry
     loop loan in fact_loans: work.push(loan.capacity)
     work += fact_summary_entry
+    loop entry in fact_summary_fields: work.push(entry.2)
     depth = fill(0, work.len())
     kept = 0
     i = 0
@@ -2007,6 +2008,8 @@ struct FactSummary:
     host: bool = false       # every scalar return has finite host endpoints
     post: int = -1           # scalar result < this mutable array's EXIT length
     lengths: int[]           # mutable array parameters: 0 unknown, 1 same, 2 grows
+    upper_field: int = 0     # upper (post) names that record parameter's array field
+    post_field: int = 0
 
 fact_summaries: {int: FactSummary} = {}
 fact_summary_owner = 0
@@ -2020,6 +2023,9 @@ fact_summary_used = false
 fact_retry_owner = 0
 fact_summary_acc = FactSummary()
 fact_summary_entry: int[]    # each array parameter's entry length value (0: none)
+# (record parameter, array field, entry length value): a result bounded by a
+# record's array, `best(f)` a position in `f.moves`. At most 8, int results only.
+fact_summary_fields: (int, int, int)[]
 # N-D state is separate: ordinary scalar/length summaries do not carry or copy it.
 # Only demanded mutable N-D parameters populate this cache (one mask per callee).
 fact_shape_summaries: {int: int} = {}
@@ -2045,6 +2051,11 @@ fact_summary_record = (s: mut FactState, r0: int):
         if r != 0:
             tag = fact_bound(s, fact_project(s, r, -3, false, T_INT))
             if tag.lo == 0 and tag.hi == 0 and not tag.wide: return
+            # (this describes a present payload: what holds where the tag is 1,
+            # its implications too; the state ends with this return)
+            if s.conditional.len() > 0 and not (tag.lo == 1 and tag.hi == 1):
+                fact_tag(s, r, 1, true)
+                if not s.live: return
             r = fact_project(s, r, -4, false, payload)
         t = payload
     if fact_summary_field != 0:
@@ -2066,6 +2077,8 @@ fact_summary_record = (s: mut FactState, r0: int):
     host = r != 0 and fact_type(t) == T_MATH_INT and (not fact_summary_acc.seen or fact_summary_acc.host) and fact_host_finite(s, r)
     upper = -1
     upper_delta = 0
+    upper_field = 0
+    post_field = 0
     if r != 0 and fact_scalar(t) and is_int(t) and t != T_U64:
         # One source-selected array endpoint per result; at most two bounded
         # queries per array parameter/return, no pair enumeration. Once a
@@ -2082,6 +2095,18 @@ fact_summary_record = (s: mut FactState, r0: int):
             if holds:
                 upper = i; upper_delta = limit
                 break
+        # (or a record parameter's array field, when no array parameter holds it)
+        if upper < 0:
+            loop entry in fact_summary_fields:
+                if fact_summary_acc.seen and (fact_summary_acc.upper != entry.0 or fact_summary_acc.upper_field != entry.1): continue
+                limit = if not fact_summary_acc.seen or fact_summary_acc.upper_delta == -1: -1 else: 0
+                holds = fact_entails(s, r, entry.2, limit)
+                if not holds and limit != 0:
+                    limit = 0
+                    holds = fact_entails(s, r, entry.2, limit)
+                if holds:
+                    upper = entry.0; upper_field = entry.1; upper_delta = limit
+                    break
     post = -1
     # Place results refer to the final observable array, not its entry value.
     # Pending return cleanup has not run: publish no place relation then.
@@ -2098,6 +2123,19 @@ fact_summary_record = (s: mut FactState, r0: int):
             if not fact_entails(s, r, length_value, -1): continue
             post = i
             break
+        # (a mutable record parameter's array field at exit, `intern(@g name)`)
+        if post < 0:
+            loop entry in fact_summary_fields:
+                l = fns[fact_summary_owner].params[entry.0]
+                if int(locals[l].flags) & LF_MUTPARAM == 0: continue
+                if fact_summary_acc.seen and (fact_summary_acc.post != entry.0 or fact_summary_acc.post_field != entry.1): continue
+                b = fact_binding(s, PlaceIdentity(.local, int(locals[l].owner), l))
+                if b < 0: continue
+                pt = fact_type(int(locals[l].type))
+                field = fact_project(s, s.bindings[b].value, entry.1, false, fact_call_field_type(pt, entry.1))
+                if field == 0 or not fact_entails(s, r, fact_project(s, field, -1, false, T_INT), -1): continue
+                post = entry.0; post_field = entry.1
+                break
     if fact_summary_acc.seen:
         length = fact_hull(fact_summary_acc.length, length, 0)
         value = fact_hull(fact_summary_acc.value, value, 0)
@@ -2118,7 +2156,7 @@ fact_summary_record = (s: mut FactState, r0: int):
         useful = useful or mode != 0
     if not useful: lengths = []
     if fact_summary_shapes.len() > 0: fact_summary_record_shapes(s)
-    fact_summary_acc = FactSummary(length, value, true, same, delta, upper, upper_delta, host, post, lengths)
+    fact_summary_acc = FactSummary(length, value, true, same, delta, upper, upper_delta, host, post, lengths, upper_field, post_field)
     # A hull only widens. Once it says nothing the result's own domain does
     # not, and no argument-length relation survives (once lost, it stays
     # lost), the rest of the run cannot bound anything a caller asks: stop it
@@ -2269,6 +2307,7 @@ fact_summary = (f: int, places: bool = false, field: int = 0) -> FactSummary:
     saved_acc = fact_summary_acc
     saved_slice = fact_slice
     saved_lengths = fact_summary_entry
+    saved_fields = fact_summary_fields
     saved_shapes = fact_summary_shapes
     saved_shape_mask = fact_summary_shape_mask
     fact_summary_shapes = []
@@ -2314,6 +2353,28 @@ fact_summary = (f: int, places: bool = false, field: int = 0) -> FactSummary:
             if places and int(locals[l].flags) & LF_MUTPARAM != 0 and fact_summary_entry.len() <= 62 and tkind(pt) == .struct_ and is_nd(pt):
                 value = fact_read(state, mk_ident_local(l, locals[l].pos))
                 fact_summary_shapes.push((fact_summary_entry.len() - 1, fact_nd_shape(state, value), fact_nd_data_length(state, value)))
+    fact_summary_fields = []
+    if fact_scalar(t) and is_int(t) and t != T_U64 and field == 0:
+        loop i in [0..fns[f].params.len()):
+            l = fns[f].params[i]
+            pt = fact_type(int(locals[l].type))
+            if not fact_record_arrays(pt): continue
+            si = int(types[pt].st)
+            value = 0
+            loop k in [0..int(structs[si].nfields)):
+                if fact_summary_fields.len() >= 8: break
+                name = int(fields[int(structs[si].fields) + k].name)
+                ft = fact_call_field_type(pt, name)
+                if ft == 0 or tkind(fact_type(ft)) != .array: continue
+                if value == 0:
+                    place = PlaceIdentity(.local, int(locals[l].owner), l)
+                    b = fact_binding(state, place)
+                    if b >= 0: value = state.bindings[b].value
+                    else:
+                        value = fact_new(state, FactBound(), FactTerm(type = pt))
+                        fact_bind(state, place, value)
+                length = fact_project(state, fact_project(state, value, name, false, ft), -1, false, T_INT)
+                if length != 0: fact_summary_fields.push((i, name, length))
     fact_slice_prepare(f, true)
     if places:
         loop i in [0..fact_summary_entry.len()):
@@ -2357,6 +2418,7 @@ fact_summary = (f: int, places: bool = false, field: int = 0) -> FactSummary:
     fact_summary_acc = saved_acc
     fact_slice = saved_slice
     fact_summary_entry = saved_lengths
+    fact_summary_fields = saved_fields
     fact_summary_shapes = saved_shapes
     fact_summary_shape_mask = saved_shape_mask
     fact_summary_assumed = saved_assumed
@@ -2379,16 +2441,44 @@ fact_summary_payload_publish = (f: int, result: int, entry: int[], payload: int,
     atoms: RefAtom[]
     if summary.value.lo != FACT_MIN and not summary.value.wide: atoms.push(RefAtom(.ge, RefTerm(), RefTerm(1, summary.value.lo)))
     if summary.value.hi != FACT_MAX and not summary.value.wide: atoms.push(RefAtom(.le, RefTerm(), RefTerm(1, summary.value.hi)))
+    values = entry
     if summary.upper >= 0 and summary.upper < entry.len():
         # (materialized now, so the argument's length stays related after the call)
-        fact_project(s, entry[summary.upper], -1, false, T_INT)
-        atoms.push(RefAtom(.le, RefTerm(), RefTerm(2, summary.upper, path = [-1], offset = summary.upper_delta)))
+        length = fact_summary_length(s, entry[summary.upper], summary.upper_field, f, summary.upper)
+        if summary.upper_field == 0: atoms.push(RefAtom(.le, RefTerm(), RefTerm(2, summary.upper, path = [-1], offset = summary.upper_delta)))
+        else if length != 0:
+            # (a record field's length: named as one more value, not a path)
+            values = entry + [length]
+            atoms.push(RefAtom(.le, RefTerm(), RefTerm(2, entry.len(), offset = summary.upper_delta)))
     if atoms.len() == 0: return
     selector = fact_project(s, result, -3, false, T_INT)
     b = fact_bound(s, selector)
     fact_set_bound(s, selector, FactBound(max(0, b.lo), min(1, b.hi)))
     value = fact_project(s, result, -4, false, payload)
-    s.conditional.push(ResultEvidence(selector, 1, ref_intern(atoms), entry, fns[f].ptypes, value, payload))
+    s.conditional.push(ResultEvidence(selector, 1, ref_intern(atoms), values, fns[f].ptypes, value, payload))
+
+# Whether a plain record type has an array field (a summary may bound a
+# scalar result by its length). Cached per type; O(fields) once.
+fact_record_array_types: {int: bool} = {}
+fact_record_arrays = (t: int) -> bool:
+    if tkind(t) != .struct_ or is_nd(t) or is_map_type(t) or fact_pool_type(t): return false
+    if let known = fact_record_array_types.get(t): return known
+    si = int(types[t].st)
+    found = false
+    loop k in [0..int(structs[si].nfields)):
+        ft = fact_call_field_type(t, int(fields[int(structs[si].fields) + k].name))
+        if ft != 0 and tkind(fact_type(ft)) == .array: found = true; break
+    fact_record_array_types[t] = found
+    found
+
+# The length a summary relates its result to: argument value's own, or its
+# record field's (field != 0, parameter i of f). O(1).
+fact_summary_length = (s: mut FactState, value: int, field: int, f: int, i: int) -> int:
+    if value == 0: return 0
+    if field == 0: return fact_project(s, value, -1, false, T_INT)
+    pt = fact_type(int(locals[fns[f].params[i]].type))
+    inner = fact_project(s, value, field, false, fact_call_field_type(pt, field))
+    if inner == 0: 0 else: fact_project(s, inner, -1, false, T_INT)
 
 # A postcondition's current mutable actual. Place routes contain only named
 # fields; a missing/unsupported route supplies no evidence. O(route depth).
@@ -2502,12 +2592,18 @@ fact_written_root = (e0: int) -> PlaceIdentity:
 # what the route cannot change (fact_change_route: an array's length, a
 # dictionary's keys and positions). False when the place is not one, for the
 # caller's own rule. O(route depth + the root's projections).
-fact_routed_write = (s: mut FactState, e0: int, at: int, reason: FactReason) -> bool:
+fact_routed_write = (s: mut FactState, e0: int, at: int, reason: FactReason, paths: int[][] = []) -> bool:
+    e = fact_routed_place(e0)
+    if e == 0: return false
+    fact_change_route(s, e, false, at, reason, paths)
+    true
+
+# The element place a mutable argument names (`@xs[i]`, `@d[k]`), or 0.
+fact_routed_place = (e0: int) -> int:
     e = e0
     loop nodes[e].kind == .addr or nodes[e].kind == .conv: e = int(nodes[e].a)
-    if place_base(place_route(e)).declaration != 0 or fact_written_root(e).declaration == 0: return false
-    fact_change_route(s, e, false, at, reason)
-    true
+    if place_base(place_route(e)).declaration != 0 or fact_written_root(e).declaration == 0: return 0
+    e
 
 # An opaque call's effects: every exposed root, and each local lent to it.
 fact_forget_call = (s: mut FactState, n: int, reason: FactReason, at: int = 0):
@@ -2661,6 +2757,19 @@ fact_call_effects = (n: int, s: mut FactState):
         if event.atom.kind == .opaque or event.atom.kind == .escape:
             fact_forget_call(s, n, .call)
             return
+    # (an element place argument, `hurt(@fs[i])`, changes only what the
+    # callee writes in it: its written paths, on every tracked element)
+    routed: {int: int[][]} = {}
+    loop event in events:
+        if event.atom.kind != .write: continue
+        p = place_base(event.atom.place)
+        i = p.declaration - 1
+        if p.root != .formal or i < 0 or i >= nkids(n) or fact_routed_place(kid(n, i)) == 0: continue
+        paths = routed.get(i) ?? []
+        paths.push(place_path(event.atom.place))
+        routed[i] = paths
+    loop i in [0..nkids(n)):
+        if let paths = routed.get(i): fact_routed_write(s, kid(n, i), n, .call, paths)
     groups: FactCallWrites[]
     by_root: int[]
     loop event in events:
@@ -2671,7 +2780,7 @@ fact_call_effects = (n: int, s: mut FactState):
         if p.root == .formal:
             i = p.declaration - 1
             if i < 0 or i >= nkids(n): fact_forget_call(s, n, .call); return
-            if fact_routed_write(s, kid(n, i), n, .call): continue
+            if routed.has(i): continue
             actual = place_route(kid(n, i))
             p = place_base(actual)
             if actual.parent != 0: path = place_path(actual) + path
@@ -3580,6 +3689,7 @@ fact_join = (a: FactState, b: FactState, at: int) -> FactState:
         if prior < 0:
             fact_pair_add(left, right, pairs, pair)
             left.push(binding.value); right.push(other); merged.push(v)
+    binding_pairs = merged.len()
     # Match projections of merged aggregate values, including current lengths.
     # (each side's non-element projections chained by base value, in order:
     # the same matches as scanning both lists for every merged value)
@@ -3622,6 +3732,8 @@ fact_join = (a: FactState, b: FactState, at: int) -> FactState:
                 fact_pair_add(left, right, pairs, pair)
                 left.push(p.value); right.push(q.value); merged.push(v)
         cursor += 1
+    loop i in [0..binding_pairs):
+        if left[i] != right[i]: fact_join_payload(s, a, left[i], b, right[i], merged[i], left, right, merged, FactBound(), false)
     if a.differences.len() == 0 and b.differences.len() == 0: return s
     # (renamings: the last pair naming a value wins)
     left_merge: int[]; right_merge: int[]
@@ -3704,6 +3816,148 @@ fact_join_pair_rows = (s: mut FactState, from: FactState, peer: FactState, v: in
             if direction == 0 and fact_distance(peer, po, w, row.limit): fact_difference(s, o, m, row.limit, row.at)
             if direction == 1 and fact_distance(peer, w, po, row.limit): fact_difference(s, m, o, row.limit, row.at)
 
+# An optional's tag known to be `none` (0) in s. O(1).
+fact_known_none = (s: FactState, v: int) -> bool:
+    ti = fact_projection_find(s, v, -3, false)
+    if ti < 0: return false
+    b = fact_bound(s, s.projections[ti].value)
+    not b.wide and b.lo == 0 and b.hi == 0
+
+fact_known_some = (s: FactState, v: int) -> bool:
+    ti = fact_projection_find(s, v, -3, false)
+    if ti < 0: return false
+    b = fact_bound(s, s.projections[ti].value)
+    not b.wide and b.lo == 1 and b.hi == 1
+
+# A merged optional integer whose tag is not 1 on every path (`let best:int?
+# = none`, then `if c best = i`): its payload exists only where the merged
+# tag is 1. A fact about it that every path holding a payload proves (as a
+# row, an interval, or its own tag implication) becomes an implication from
+# the merged tag, applied when `is? int`, `??` or a pattern narrows it. Never
+# a row: a row through a payload one path lacks would relate that path's
+# other values. x in a and y in b merge into m; for a join, left/right/merged
+# rename (fact_rename), for a loop header they are empty and only values
+# present in s qualify. Demand: optional integer bindings that differ.
+# O(B + rows and implications of the payloads), at most 32 candidates, each
+# one bounded distance query per path, and 4 implications.
+fact_join_payload = (s: mut FactState, a: FactState, x: int, b: FactState, y: int, m: int, left: int[], right: int[], merged: int[], bound: FactBound, header: bool):
+    if not s.live or s.conditional.len() + 4 > 32: return
+    t = fact_type(fact_terms[m].type)
+    pt = fact_summary_payload(t)
+    if pt == 0 or fact_known_some(a, x) and fact_known_some(b, y): return
+    na = not a.live or fact_known_none(a, x)
+    nb = not b.live or fact_known_none(b, y)
+    if na and nb: return
+    pa = if na: 0 else: fact_projection_value(a, x, -4)
+    pb = if nb: 0 else: fact_projection_value(b, y, -4)
+    if not na and pa == 0 or not nb and pb == 0: return
+    held = 0
+    loop evidence in s.conditional: held += int(evidence.tag == -2)
+    if held >= 12: return
+    tag = fact_projection_value(s, m, -3)
+    if tag == 0:
+        tag = fact_new(s, FactBound(0, 1), FactTerm(type = T_INT))
+        fact_add_projection(s, FactProjection(m, -3, false, tag))
+    v = fact_projection_value(s, m, -4)
+    if v == 0:
+        if na or nb:
+            # (one path's payload; a loop header widens it as any changing scalar)
+            p = if na: pb else: pa
+            from = if na: b else: a
+            v = if header: fact_new(s, bound, FactTerm(type = pt)) else if fact_slot(s, p) >= 0: p else: fact_new(s, fact_bound(from, p), FactTerm(type = pt))
+        else:
+            both = if header: bound else: fact_hull(fact_bound(a, pa), fact_bound(b, pb), 0)
+            v = fact_new(s, both, FactTerm(type = pt))
+        fact_add_projection(s, FactProjection(m, -4, false, v))
+    ta = fact_projection_value(a, x, -3)
+    tb = fact_projection_value(b, y, -3)
+    # Candidates (op, operand) from the paths that hold a payload, in their frames.
+    ops: Tok[]
+    operands: int[]
+    sides: int[]
+    loop side in [0..2):
+        if side == 0 and na or side == 1 and nb: continue
+        st = if side == 0: a else: b
+        p = if side == 0: pa else: pb
+        tg = if side == 0: ta else: tb
+        loop direction in [0..2):
+            ri = fact_difference_head(st, p, direction)
+            loop ri >= 0 and ops.len() < 32:
+                row = st.differences[ri]
+                ri = fact_difference_next(st, ri, direction)
+                if row.limit > 0: continue
+                strict = row.limit < 0
+                if direction == 1:
+                    op = if strict: Tok.lt else: Tok.le
+                    ops.push(op); operands.push(row.b)
+                else:
+                    op = if strict: Tok.gt else: Tok.ge
+                    ops.push(op); operands.push(row.a)
+                sides.push(side)
+        loop evidence in st.conditional:
+            if evidence.tag != -2 or ops.len() >= 32: continue
+            r = fact_implications[evidence.base - 1]
+            if r.k == 2 and r.op0 == .eq and r.a0 == tg and r.b0 == 1 and r.a1 == p: ops.push(r.op1); operands.push(r.b1); sides.push(side)
+        # (the lengths of the bound arrays and their fields: an index's limits;
+        # the first 64 bindings, parameters and early locals)
+        scanned = 0
+        loop binding in st.bindings:
+            scanned += 1
+            if ops.len() >= 32 or scanned > 64: break
+            pi = fact_projection_first(st, binding.value)
+            depth = 0
+            loop pi >= 0 and depth < 8 and ops.len() < 32:
+                q = st.projections[pi]
+                pi = fact_projection_after(st, pi)
+                depth += 1
+                if q.element: continue
+                length = if q.selector == -1: q.value else: fact_projection_value(st, q.value, -1)
+                if length != 0: ops.push(Tok.lt); operands.push(length); sides.push(side)
+    done_ops: Tok[]
+    done: int[]
+    loop i in [0..ops.len()):
+        if done.len() >= 4 or held + done.len() >= 12: break
+        side = sides[i]
+        st = if side == 0: a else: b
+        o = operands[i]
+        target = if side == 0: fact_rename(o, left, merged, [], s) else: fact_rename(o, right, merged, [], s)
+        if target == 0 or target == v: continue
+        duplicate = false
+        loop j in [0..done.len()):
+            if done_ops[j] == ops[i] and done[j] == target: duplicate = true; break
+        if duplicate: continue
+        mine_tag = if side == 0: ta else: tb
+        mine_payload = if side == 0: pa else: pb
+        if not fact_payload_holds(st, mine_tag, mine_payload, ops[i], o): continue
+        # (the other path: none, or it proves the same of its own payload)
+        peer_none = if side == 0: nb else: na
+        if not peer_none:
+            peer = if side == 0: b else: a
+            peer_tag = if side == 0: tb else: ta
+            peer_payload = if side == 0: pb else: pa
+            po = if side == 0: fact_rename(o, left, right, [], b) else: fact_rename(o, right, left, [], a)
+            if po == 0 or not fact_payload_holds(peer, peer_tag, peer_payload, ops[i], po): continue
+        fact_implication(s, (Tok.eq, 0, tag, 1, 1), (ops[i], 0, v, 0, target))
+        done_ops.push(ops[i]); done.push(target)
+
+# The non-element projection value of base at selector in s, or 0. O(1).
+fact_projection_value = (s: FactState, base: int, selector: int) -> int:
+    pi = fact_projection_find(s, base, selector, false)
+    if pi >= 0: s.projections[pi].value else: 0
+
+# Whether payload p (tag t) relates to o by op in s, wherever the payload
+# exists: a row or the intervals, or s's own implication from its tag.
+# One bounded distance query plus O(implications).
+fact_payload_holds = (s: FactState, t: int, p: int, op: Tok, o: int) -> bool:
+    if op == .lt and fact_entails(s, p, o, -1) or op == .le and fact_entails(s, p, o, 0): return true
+    if op == .gt and fact_entails(s, o, p, -1) or op == .ge and fact_entails(s, o, p, 0): return true
+    if t == 0: return false
+    loop evidence in s.conditional:
+        if evidence.tag != -2: continue
+        r = fact_implications[evidence.base - 1]
+        if r.k == 2 and r.op0 == .eq and r.a0 == t and r.b0 == 1 and r.op1 == op and r.a1 == p and r.b1 == o: return true
+    false
+
 # v renamed through the last i with from[i] == v (an index once there are many).
 fact_rename = (v: int, from: int[], to: int[], index: int[], shared: FactState) -> int:
     if index.len() != 0:
@@ -3744,11 +3998,11 @@ fact_field_node = (e: int) -> bool:
 # keeps what the route cannot change: sibling fields and containing lengths.
 # Indexed writes havoc every candidate element's affected descendants. The
 # written value itself (or, with `resize`, the route's own value) is unknown.
-fact_change_route = (s: mut FactState, target: int, resize: bool, at: int, reason: FactReason):
+fact_change_route = (s: mut FactState, target: int, resize: bool, at: int, reason: FactReason, paths: int[][] = []):
     if fact_name_vals == 0: fact_name_vals = intern("vals")
     if target != 0 and nodes[target].kind == .hole: return
     if target != 0 and nodes[target].kind == .tuple:
-        loop j in [0..nkids(target)): fact_change_route(s, kid(target, j), resize, at, reason)
+        loop j in [0..nkids(target)): fact_change_route(s, kid(target, j), resize, at, reason, paths)
         return
     chain: int[]
     e = target
@@ -3773,14 +4027,16 @@ fact_change_route = (s: mut FactState, target: int, resize: bool, at: int, reaso
     fresh = fact_new(s, fact_domain(ntype(e), reason, at), FactTerm(type = ntype(e)))
     fact_holds_contract(s, refine_storage(e, ntype(e)), fresh)
     fact_bind(s, p, fresh)
-    fact_change_shape(s, old, fresh, chain, chain.len() - 1, resize, at, reason)
+    fact_change_shape(s, old, fresh, chain, chain.len() - 1, resize, at, reason, paths)
 
 # Havoc a route without evaluating its selectors. An indexed write can hit
 # ANY tracked element; recursively havoc each one's affected descendants.
 # This preserves inner lengths only when the write cannot resize them, even
 # if the selector changes in the loop. Demanded projections only, indexed by
 # base; O(tracked projections x route depth), capped by FACT_CAP and depth 32.
-fact_change_shape = (s: mut FactState, old0: int, fresh0: int, chain: int[], j0: int, resize: bool, at: int, reason: FactReason):
+# A call's write through the route (paths: the callee's written paths in the
+# place, fact_call_write) keeps the rest of each value it may reach.
+fact_change_shape = (s: mut FactState, old0: int, fresh0: int, chain: int[], j0: int, resize: bool, at: int, reason: FactReason, paths: int[][] = []):
     old = old0
     fresh = fresh0
     j = j0
@@ -3802,7 +4058,7 @@ fact_change_shape = (s: mut FactState, old0: int, fresh0: int, chain: int[], j0:
                 loop selector in [FACT_ELEMENT_SAME_LENGTH, FACT_ELEMENT_LENGTH]:
                     held = fact_projection_find(s, old, selector, false)
                     if held >= 0 and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(fresh, selector, false, s.projections[held].value))
-            if j > 0:
+            if j > 0 or paths.len() > 0:
                 parts: FactProjection[]
                 pi = fact_projection_first(s, old)
                 loop pi >= 0:
@@ -3812,10 +4068,15 @@ fact_change_shape = (s: mut FactState, old0: int, fresh0: int, chain: int[], j0:
                 loop p in parts:
                     if s.projections.len() >= FACT_CAP: break
                     child_type = refine_storage(c, ntype(c))
+                    # (the written element may be any tracked one: each keeps
+                    # what the callee leaves, its unwritten fields)
+                    if j == 0:
+                        fact_add_projection(s, FactProjection(fresh, p.selector, true, fact_call_write(s, p.value, child_type, paths, 0, at)))
+                        continue
                     child = fact_new(s, fact_domain(child_type, reason, at), FactTerm(type = child_type))
                     if child == 0: return
                     fact_add_projection(s, FactProjection(fresh, p.selector, true, child))
-                    fact_change_shape(s, p.value, child, chain, j - 1, resize, at, reason)
+                    fact_change_shape(s, p.value, child, chain, j - 1, resize, at, reason, paths)
             return
         payload = fact_payload_node(c)
         selector = if payload: -4 else if nodes[c].aux == -2: int(nodes[c].ival) else: int(nodes[c].name)
@@ -3842,7 +4103,7 @@ fact_change_shape = (s: mut FactState, old0: int, fresh0: int, chain: int[], j0:
         t = refine_storage(c, ntype(c))
         if child == 0: child = fact_project(s, old, selector, false, t)
         if child == 0: return
-        next = fact_new(s, fact_domain(t, reason, at), FactTerm(type = t))
+        next = if j == 0 and paths.len() > 0: fact_call_write(s, child, t, paths, 0, at) else: fact_new(s, fact_domain(t, reason, at), FactTerm(type = t))
         if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(fresh, selector, false, next))
         old = child
         fresh = next
@@ -6570,6 +6831,7 @@ fact_loop_header = (entry: mut FactState, back: FactState, old: FactState, at: i
         if predecessor.live and peer < 0: continue
         other = if peer >= 0: predecessor.bindings[peer].value else: binding.value
         fact_loop_shape(s, source, predecessor, binding.value, other, s.bindings[h].value, shape_steps, 0)
+        if fact_summary_payload(fact_type(fact_terms[s.bindings[h].value].type)) != 0: fact_loop_payload(s, source, binding.value, predecessor, other, s.bindings[h].value, old, binding.place, widen)
         # (a dictionary the body grows by adding keys holds the comprehension's keys at every head)
         if fact_grown_roots.len() > 0: fact_join_grown(s, source, binding.value, predecessor, other, s.bindings[h].value)
     loop row in carried:
@@ -6850,6 +7112,66 @@ fact_same_shape = (a: FactState, b: FactState, x: int, y: int, steps: mut int, d
         qi = fact_projection_after(b, qi)
     count == 0 and fact_incident(a, x) < 0 and fact_incident(b, y) < 0
 
+# A changing optional integer at a loop header: its payload's interval (the
+# paths' hull, widened as a changing scalar's) and implications from its tag
+# (fact_join_payload) relating it to values entry and the backedge share.
+# Stability compares those implications. O(fact_join_payload).
+fact_loop_payload = (s: mut FactState, a: FactState, x: int, b: FactState, y: int, into: int, old: FactState, place: PlaceIdentity, widen: bool):
+    pt = fact_summary_payload(fact_type(fact_terms[into].type))
+    bound = FactBound()
+    seen = false
+    loop side in [0..2):
+        st = if side == 0: a else: b
+        v = if side == 0: x else: y
+        if not st.live or fact_known_none(st, v): continue
+        p = fact_projection_value(st, v, -4)
+        if p == 0: return
+        bound = if seen: fact_hull(bound, fact_bound(st, p), 0) else: fact_bound(st, p)
+        seen = true
+    if not seen: return
+    previous = fact_binding(old, place)
+    before = if previous >= 0: fact_projection_value(old, old.bindings[previous].value, -4) else: 0
+    if widen and before != 0:
+        last = fact_bound(old, before)
+        domain = fact_domain(pt)
+        bound.lo = if bound.lo < last.lo: domain.lo else: last.lo
+        bound.hi = if bound.hi <= last.hi: last.hi else: domain.hi
+        bound.nz = bound.nz and last.nz
+    fact_join_payload(s, a, x, b, y, into, [], [], [], bound, true)
+
+# Implication operand slot (kind bit set: a constant) renamed by map.
+fact_stable_operand = (v: int, constant: int, map: {int: int}) -> int: if constant != 0: v else: map.get(v) ?? v
+
+# Implications only one header holds (a changing optional's, fact_loop_payload)
+# match the other's through the renamed tags and payloads. O(B + I^2), I <= 12.
+fact_loop_stable_implications = (a: FactState, b: FactState) -> bool:
+    if a.conditional == b.conditional: return true
+    mine: ResultEvidence[]
+    theirs: ResultEvidence[]
+    loop evidence in a.conditional:
+        if evidence.tag == -2 and not (evidence in b.conditional): mine.push(evidence)
+    loop evidence in b.conditional:
+        if evidence.tag == -2 and not (evidence in a.conditional): theirs.push(evidence)
+    if mine.len() != theirs.len(): return false
+    if mine.len() == 0: return true
+    map: {int: int} = {}
+    loop binding in a.bindings:
+        i = fact_binding(b, binding.place)
+        if i < 0 or fact_summary_payload(fact_type(fact_terms[binding.value].type)) == 0: continue
+        loop selector in [-3, -4]:
+            x = fact_projection_value(a, binding.value, selector)
+            y = fact_projection_value(b, b.bindings[i].value, selector)
+            if x != 0 and y != 0: map[x] = y
+    loop evidence in mine:
+        r = fact_implications[evidence.base - 1]
+        found = false
+        loop other in theirs:
+            q = fact_implications[other.base - 1]
+            if q.k != r.k or q.op0 != r.op0 or q.op1 != r.op1: continue
+            if q.a0 == fact_stable_operand(r.a0, r.k & 1, map) and q.b0 == fact_stable_operand(r.b0, r.k & 2, map) and q.a1 == fact_stable_operand(r.a1, r.k & 4, map) and q.b1 == fact_stable_operand(r.b1, r.k & 8, map): found = true; break
+        if not found: return false
+    true
+
 fact_loop_stable = (a: FactState, b: FactState) -> bool:
     shape_steps = FACT_CAP
     loop binding in a.bindings:
@@ -6875,7 +7197,7 @@ fact_loop_stable = (a: FactState, b: FactState) -> bool:
         y = renamed.get(row.b) ?? row.b
         i = fact_row_find(b, x, y)
         if i < 0 or b.differences[i].limit != row.limit: return false
-    true
+    fact_loop_stable_implications(a, b)
 
 # Iterator transfers publish their pre-killed exit state and optional counted
 # lengths, not the body's backedge. In a return-summary run the body is only
@@ -7918,11 +8240,16 @@ fact_range = (n: int, s: mut FactState):
     # holds its entry value or some earlier i: at most hi-1 whenever its
     # entry value is (a sentinel -1, a first index 0).
     kept: (int, FactBound, bool, bool)[]
+    # (an optional set only to it, `let best:int? = none`: a present payload is some i)
+    found: int[]
     if nodes[iterator].b != 0 and not has_flag(iterator, NF_INCLUSIVE) and int(nodes[n].sym) != 0:
         loop l in fact_index_carried(int(nodes[n].b), int(nodes[n].sym)):
             i = fact_binding(s, PlaceIdentity(.local, int(locals[l].owner), l))
             if i < 0: continue
             e = s.bindings[i].value
+            if fact_summary_payload(fact_type(int(locals[l].type))) != 0:
+                if fact_known_none(s, e): found.push(l)
+                continue
             kept.push((l, fact_bound(s, e), fact_entails(s, e, hi, -1), fact_entails(s, e, lo, 0)))
     pre = s
     hulls = fact_push_open(n, s)
@@ -7942,6 +8269,7 @@ fact_range = (n: int, s: mut FactState):
         if y.hi != FACT_MIN: b.hi = min(b.hi, max(entry.1.hi, y.hi - 1))
         fact_set_bound(s, v, b)
         if entry.2: fact_difference(s, v, hi, -1, n)
+    loop l in found: fact_found_payload(s, l, lo, hi)
     if s.live and int(nodes[n].sym) != 0: fact_range_invariants(n, pre, s, lo, hi)
     after = s
     body = fact_range_body(n, s, lo, hi)
@@ -8043,6 +8371,31 @@ fact_carried_exit = (s: mut FactState, l: int, after: FactState, exits: mut Fact
                 fact_implication(s, ante, then)
                 held += 1
 
+# An optional local that entered a range loop as `none` and that the body
+# sets only to the loop's value: where present, its payload is some i in
+# [lo, hi). The interval holds on the payload itself (vacuous where absent);
+# the relation to hi is an implication from its tag (fact_join_payload's
+# reason). O(1) plus at most two implications.
+fact_found_payload = (s: mut FactState, l: int, lo: int, hi: int):
+    i = fact_binding(s, PlaceIdentity(.local, int(locals[l].owner), l))
+    if i < 0 or not s.live or s.conditional.len() + 2 > 32: return
+    v = s.bindings[i].value
+    pt = fact_summary_payload(fact_type(int(locals[l].type)))
+    if fact_known_none(s, v) or s.projections.len() + 2 >= FACT_CAP: return
+    held = 0
+    loop evidence in s.conditional: held += int(evidence.tag == -2)
+    if held + 2 > 12: return
+    tag = fact_project(s, v, -3, false, T_INT)
+    t = fact_bound(s, tag)
+    fact_set_bound(s, tag, FactBound(max(0, t.lo), min(1, t.hi)))
+    p = fact_project(s, v, -4, false, pt)
+    x = fact_bound(s, lo); y = fact_bound(s, hi); b = fact_bound(s, p)
+    if not x.wide: b.lo = max(b.lo, x.lo)
+    if not y.wide and y.hi != FACT_MIN: b.hi = min(b.hi, y.hi - 1)
+    fact_set_bound(s, p, b)
+    fact_implication(s, (Tok.eq, 0, tag, 1, 1), (Tok.lt, 0, p, 0, hi))
+    fact_implication(s, (Tok.eq, 0, tag, 1, 1), (Tok.ge, 0, p, 0, lo))
+
 # Locals that body writes only by `x = l` (l the loop variable), and nothing
 # else: no compound or other stores, no `@x`, no closure. O(body nodes).
 fact_index_carried = (body: int, l: int) -> int[]:
@@ -8061,8 +8414,8 @@ fact_index_carried = (body: int, l: int) -> int[]:
         if k == .assign and nodes[int(nodes[e].a)].kind == .ident and nodes[int(nodes[e].a)].aux == i32(int(SK.local)):
             target = int(nodes[int(nodes[e].a)].sym)
             value = int(nodes[e].b)
-            # (a value-preserving integer conversion, `best=i` into an `int`)
-            loop nodes[value].kind == .conv and nodes[value].aux == i32(int(CV.int_)): value = int(nodes[value].a)
+            # (a value-preserving integer conversion, `best=i` into an `int`, or an `int?`)
+            loop nodes[value].kind == .conv and (nodes[value].aux == i32(int(CV.int_)) or nodes[value].aux == i32(int(CV.opt))): value = int(nodes[value].a)
             if nodes[e].op == i32(int(Tok.assign)) and nodes[value].kind == .ident and nodes[value].aux == i32(int(SK.local)): stores.push((target, int(nodes[value].sym)))
             else: bad[target] = true
         if k == .addr and nodes[int(nodes[e].a)].kind == .ident: bad[int(nodes[int(nodes[e].a)].sym)] = true
@@ -8079,7 +8432,7 @@ fact_index_carried = (body: int, l: int) -> int[]:
         if not copies.has(store.1) or copies.has(store.0): bad[store.0] = true
     out: int[]
     loop store in stores:
-        if not bad.has(store.0) and not fact_exposed(PlaceIdentity(.local, int(locals[store.0].owner), store.0)) and fact_scalar(int(locals[store.0].type)) and store.0 not in out: out.push(store.0)
+        if not bad.has(store.0) and not fact_exposed(PlaceIdentity(.local, int(locals[store.0].owner), store.0)) and (fact_scalar(int(locals[store.0].type)) or fact_summary_payload(fact_type(int(locals[store.0].type))) != 0) and store.0 not in out: out.push(store.0)
     out
 
 # A stepped range `[first,second..end)`: the step's sign, when known, bounds
@@ -8793,6 +9146,8 @@ fact_slice_prepare = (f: int, summary: bool = false):
                     arg = kid(n, j)
                     at = fact_type(ntype(arg))
                     if tkind(at) == .array or tkind(at) == .fixed or array_result and fact_scalar(at) and is_int(at) and at != T_U64: values.push(arg)
+                    # (a record's array field bounds a scalar result too: fact_summary_fields)
+                    else if not array_result and fact_record_arrays(at): values.push(arg)
         else if k == .intrinsic and nodes[n].aux == i32(int(IN.remove)):
             values.push(kid(n, 0))
             values.push(kid(n, 1))
@@ -9364,7 +9719,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             fact_map_literal(n, s, value, keys, raw, payloads)
             return value
     # (a summary's `none` too: an optional result's present arm excludes it)
-    if (result_active or fact_summary_owner != 0) and k == .none_lit:
+    if k == .none_lit and (result_active or fact_summary_owner != 0 or fact_summary_payload(fact_type(ntype(n))) != 0):
         value = fact_new(s, FactBound(), FactTerm(type = ntype(n)))
         fact_add_projection(s, FactProjection(value, -3, false, fact_constant(s, 0)))
         return value
@@ -10299,12 +10654,12 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                     fact_set_bound(s, result, FactBound(max(b.lo, summary.value.lo), min(b.hi, summary.value.hi), b.nz or summary.value.nz))
                     if summary.host and result != 0: fact_terms[result].type = T_INT
                     if summary.upper >= 0 and summary.upper < entry.len():
-                        other = fact_project(s, entry[summary.upper], -1, false, T_INT)
+                        other = fact_summary_length(s, entry[summary.upper], summary.upper_field, f, summary.upper)
                         fact_difference(s, result, other, summary.upper_delta, n)
                     if summary.post >= 0:
                         after = fact_summary_actual(n, summary.post, s)
                         if after != 0:
-                            length = fact_project(s, after, -1, false, T_INT)
+                            length = fact_summary_length(s, after, summary.post_field, f, summary.post)
                             fact_difference(s, result, length, -1, n)
         else if nodes[n].aux == 1:
             ft = prune(ntype(int(nodes[n].a)))

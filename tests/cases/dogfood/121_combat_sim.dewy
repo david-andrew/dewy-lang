@@ -35,12 +35,12 @@ fighter = (name:string team:int hp:int speed:int moves:array<Move>):>Fighter =>
 
 alive = (f:Fighter):>bool => f.hp >? 0
 
-# The first living enemy with the least health, or -1.
-target_of = (fs:array<Fighter> team:int):>int => {
-    let best = -1
+# The first living enemy with the least health, if any.
+target_of = (fs:array<Fighter> team:int):>int? => {
+    let best:int? = none
     loop i in [0..fs.length) {
         if fs[i].team =? team or not alive(fs[i]) continue
-        if best <? 0 or fs[i].hp <? fs[best].hp best = i
+        if best is? none or fs[i].hp <? fs[best].hp best = i
     }
     best
 }
@@ -95,12 +95,12 @@ main = () => {
             if not alive(fs[i]) { printl"  {fs[i].name} succumbs"; continue }
             if stunned { printl"  {fs[i].name} is stunned"; continue }
             let t = target_of(fs fs[i].team)
-            if t <? 0 break
+            if t is? none break
             let k = pick_move(fs[i])
             if k is? none continue
             loop c in [0..fs[i].slots.length) if fs[i].slots[c].wait >? 0 fs[i].slots[c].wait -= 1
-            let move = (fs[i].slots.get(k) ?? Slot[slash 0]).move
-            if 0 <=? k <? fs[i].slots.length fs[i].slots[k].wait = move.cooldown
+            let move = fs[i].slots[k].move
+            fs[i].slots[k].wait = move.cooldown
             let roll = next(@rng 20)
             if roll <? 2 {
                 printl"  {fs[i].name}'s {move.name} misses {fs[t].name}"

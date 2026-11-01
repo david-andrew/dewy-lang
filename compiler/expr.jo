@@ -958,6 +958,16 @@ coerce = (n: int, target: int) -> int:
             if exception_member(prune(m)): failures.push(dt(m))
             else if can_coerce(0, m, to): rest += 1
         if failures.len() > 0 and rest > 0: why = " (it may be {join(failures, " | ")}, carried along from where the value was made: handle that there, with `if x is? exception ...`, `or_throw` or `?? fallback`)"
+    # (`out.push(ready)`, ready an `array<int64>` comprehension where an
+    # `array<int>` is wanted: arrays never convert element by element)
+    if dewy and len(why) == 0 and fk == .array and tk == .array:
+        fe = telem(prune(from))
+        te = telem(prune(to))
+        loop tkind(fe) == .array and tkind(te) == .array:
+            fe = telem(prune(fe)); te = telem(prune(te))
+        if not type_eq(prune(fe), prune(te)) and can_coerce(0, fe, te):
+            named = if nodes[n].kind == .ident: name_of(int(nodes[n].name)) else: "xs"
+            why = " (an array's elements are not converted one by one: give it its type where it is made, `let {named}:{dt(to)} = ...`, so its elements are {dt(te)} from the start)"
     # (`[1 2 ; 3 4]` where one row is wanted: a row break makes the literal 2-D)
     if dewy and tk == .array and is_nd(from) and pos_off(nodes[n].pos) < len(files[pos_file(nodes[n].pos)].src) and files[pos_file(nodes[n].pos)].src[pos_off(nodes[n].pos)] == '[': why = " (this literal has rows, so it is 2-D: for one row, leave out the row breaks, and end a line with `\\` to continue the row on the next line)"
     fatal(nodes[n].pos, "type mismatch: expected {dt_named(to)}, found {dt_named(from)}{why}{coerce_hint}")

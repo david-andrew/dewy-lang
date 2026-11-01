@@ -1,0 +1,12 @@
+# Any element may be the written one: a fact about another element's
+# written field is forgotten too.
+F:type = [hp:int moves:array<int>]
+clear = (@f:F) => { f.moves.clear() }
+main = () => {
+    let fs = [F[5 [1 2]] F[6 [3]]]
+    let i = 1
+    let j = 0
+    if fs[j].moves.length =? 0 return
+    clear(@fs[i])
+    printl"{fs[j].moves[0]}"
+}

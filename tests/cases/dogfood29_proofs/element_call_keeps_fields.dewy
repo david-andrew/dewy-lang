@@ -1,0 +1,17 @@
+# A call through an element place changes only the fields the callee
+# writes; the element's other fields keep their facts.
+F:type = [hp:int moves:array<int>]
+hurt = (@f:F) => { f.hp -= 1 }
+G:type = [inner:F tag:int]
+poke = (@g:G) => { g.tag += 1 }
+main = () => {
+    let fs = [F[5 [1 2]] F[6 [3]]]
+    let i = 1
+    if fs[0].moves.length =? 0 or fs[i].moves.length =? 0 return
+    hurt(@fs[i])
+    printl"{fs[i].moves[0]} {fs[0].moves[0]} {fs[i].hp}"
+    let gs = [G[F[1 [7 8]] 0]]
+    if gs[0].inner.moves.length <? 2 return
+    poke(@gs[0])
+    printl"{gs[0].inner.moves[1]} {gs[0].tag}"
+}

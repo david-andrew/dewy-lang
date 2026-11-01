@@ -1,0 +1,11 @@
+# A count, not a position: the helper's present result may equal the length.
+past = (xs:array<int>):>int? => {
+    let stop:int? = none
+    loop i in [0..xs.length) stop = i + 1
+    stop
+}
+main = () => {
+    let xs = [1 2 3]
+    let e = past(xs)
+    if e is? int printl(xs[e])
+}

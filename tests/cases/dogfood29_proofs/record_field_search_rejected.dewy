@@ -1,0 +1,12 @@
+# The result may equal the field's length: not an index into it.
+F:type = [hp:int moves:array<int>]
+count = (f:F):>int => {
+    let n = 0
+    loop k in [0..f.moves.length) n = k + 1
+    n
+}
+main = () => {
+    let f = F[1 [3 9 4]]
+    let k = count(f)
+    printl"{f.moves[k]}"
+}

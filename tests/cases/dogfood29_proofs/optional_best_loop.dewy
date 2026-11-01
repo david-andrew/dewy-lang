@@ -1,0 +1,49 @@
+# "Best index so far": an optional set inside a loop keeps its payload's
+# bounds at the loop head, conditionally or not.
+smallest = (fs:array<int>):>int => {
+    let best:int? = none
+    loop i in [0..fs.length) {
+        if best is? int {
+            if fs[i] <? fs[best] best = i
+        } else {
+            best = i
+        }
+    }
+    best ?? -1
+}
+largest = (fs:array<int>):>int => {
+    let best:int? = none
+    loop i in [0..fs.length) {
+        if best is? none or fs[i] >? fs[best] best = i
+    }
+    if best is? int return fs[best]
+    -1
+}
+last_positive = (fs:array<int>):>int => {
+    let found:int? = none
+    loop i in [0..fs.length) if fs[i] >? 0 found = i
+    if found is? int return fs[found]
+    0
+}
+F:type = [hp:int]
+weakest = (fs:array<F>):>int => {
+    let best:int? = none
+    let i = 0
+    loop i <? fs.length {
+        if fs[i].hp >? 0 {
+            match best {
+                b:int => { if fs[i].hp <? fs[b].hp best = i }
+                _ => { best = i }
+            }
+        }
+        i += 1
+    }
+    if best is? int return fs[best].hp
+    -1
+}
+main = () => {
+    printl(smallest([3 1 2]))
+    printl(largest([3 1 7 2]))
+    printl(last_positive([3 -1 4 -2]))
+    printl(weakest([F[3] F[0] F[2]]))
+}

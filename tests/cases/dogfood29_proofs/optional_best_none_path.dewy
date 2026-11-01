@@ -1,0 +1,9 @@
+# A payload fact never reaches the `none` path: the length guard held only
+# where the optional was set.
+size = (fs:array<int>):>int => {
+    let best:int? = none
+    if fs.length >? 0 best = 0
+    if best is? none return fs[0]
+    -1
+}
+main = () => printl(size([3]))

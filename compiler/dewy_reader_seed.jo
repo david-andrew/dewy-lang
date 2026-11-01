@@ -621,6 +621,8 @@ rt_dc_atom_mistake = (token: DewyLexeme) -> int:
         word = dn_token_text(dc_parser.tokens[dc_parser.at - 2].symbol)
         named = symbol == .assign or dc_parser.tokens[dc_parser.at - 2].stop == token.start and not (word in ["else", "loop", "if", "match"])
         if named and len(word) > 0 and word[0] >= 'a' and word[0] <= 'z': return dn_error(dc_parser.tokens[dc_parser.at - 2].start, "`{word}` is a keyword, so it cannot name a variable, parameter or field: choose another name")
+    # (`[:]`, another language's empty dictionary; `xs[:]` stays a slice)
+    if symbol == .colon and dc_parser.at >= 2 and dc_parser.at < dc_parser.tokens.len() and dc_parser.tokens[dc_parser.at - 2].symbol == .lbrack and dc_parser.tokens[dc_parser.at].symbol == .rbrack and not (dc_parser.at >= 3 and dc_parser.tokens[dc_parser.at - 3].stop == dc_parser.tokens[dc_parser.at - 2].start): return dn_error(token.start, "expected an expression, found ':' (an empty dictionary is `[]` with a dictionary type: `let d:dict<string int> = []`)")
     if after_colon and (symbol == .colon or symbol == .rbrack): return dn_error(token.start, "expected an expression, found '{text}' (a slice is a range in the brackets: `xs[1..]`, `xs[..n)`, `xs[a..b)`; `xs.reversed()` reverses; `:` gives a type)")
     # (`x := 1`: a binding written as another language declares one)
     if symbol == .assign and dc_parser.at >= 3 and dc_parser.tokens[dc_parser.at - 2].symbol == .colon and dc_parser.tokens[dc_parser.at - 2].stop == token.start and dc_parser.tokens[dc_parser.at - 3].kind == .identifier:
