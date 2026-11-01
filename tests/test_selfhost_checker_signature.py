@@ -33,7 +33,7 @@ sig_finish = (d: int, sig: mut FnSig, shaped: bool, mask: int):
         sig_declarations = declarations
         loop i in [0..128): nodes.push(Node()); declarations.push(DeclInfo())
         saved = binders.formals
-        nested = cs_fn_sig(nested_decl)
+        nested = fn_sig(nested_decl)
         assert(binders.formals == saved and binders.self == 0 and nested.ret == i32(T_VOID))
         sig.contract = 456
         sig.params.push(T_BOOL)
@@ -52,7 +52,7 @@ main = ():
     decl = node(.fn_, it, 0, 0, [pa, pb], [it])
     saved_nodes = nodes
     saved_declarations = declarations
-    result = cs_fn_sig(decl)
+    result = fn_sig(decl)
     assert(result.done and result.generic and result.ntp == 2 and result.nexplicit == 1)
     assert(result.mutmask == 1 and result.ret == i32(T_STR) and result.contract == 456)
     assert(result.params.len() == 3 and sig_snapshot.params.len() == 2 and sig_snapshot.contract == 0)
@@ -61,18 +61,18 @@ main = ():
     assert(not sig_declarations[di].sig.done and declarations[di].sig.done)
     assert(binders.formals == [88] and binders.self == 77 and sig_depth == 0)
     count = events.len()
-    assert(cs_fn_sig(decl) == result and events.len() == count)
+    assert(fn_sig(decl) == result and events.len() == count)
     result.params.push(T_FLOAT)
-    assert(cs_fn_sig(decl).params.len() == 3, "returned signatures preserve cache snapshots")
+    assert(fn_sig(decl).params.len() == 3, "returned signatures preserve cache snapshots")
     refine = false
     plain = node(.fn_, 0, 0, 0, [node(.param, it)])
-    result = cs_fn_sig(plain)
+    result = fn_sig(plain)
     assert(not result.generic and result.ntp == 0 and result.ret == 0 and result.params == [T_INT])
     assert(binders.formals == [88] and binders.self == 77)
     widep = node(.param, it); nodes[widep].flags = 1
     wideps: int[]
     loop i in [0..40): wideps.push(widep)
-    wide = cs_fn_sig(node(.fn_, 0, 0, 0, wideps))
+    wide = fn_sig(node(.fn_, 0, 0, 0, wideps))
     assert(wide.mutmask == -1)
     r = node(.trefined)
     assert(cs_written_refinement(r) and cs_written_refinement(shaped))

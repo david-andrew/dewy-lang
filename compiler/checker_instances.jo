@@ -36,7 +36,7 @@ ci_get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
     # (the host's preflight acts only on extern or attributed declarations)
     if int(ci_input[0].nodes[0][decl].flags) & 4 != 0 or ci_input[0].nodes[0][decl].c != 0: ci_input[0].host[0].preflight(decl, use_pos)
     di = cs_decl_info(decl)
-    sig = cs_fn_sig(decl)
+    sig = fn_sig(decl)
     concrete = targs.len() > 0
     loop t in targs:
         if tu_has_var(t): concrete = false

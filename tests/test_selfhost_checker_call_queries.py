@@ -10,8 +10,11 @@ intrinsic_names: int[] = [0, 3, 0, 1]
 set_name = 2
 order_host = (n: int, given: int[], final: int[]): print("order:{n}:{given}:{final}")
 overlap_host = (args: int[], mask: int, pos: int): print("overlap:{args}:{mask}:{pos}")
-query_host = CheckerCallQueryHost(order_host, overlap_host)
-query_input = CheckerCallQueryInput(&nodes, &lists, &files, &intrinsic_names, &set_name, &query_host)
+float_host = (n: int): print("float_key")
+query_fns: FnInst[] = [FnInst()]
+float_names: int[] = [20, 21, 22, 23]
+query_host = CheckerCallQueryHost(order_host, overlap_host, float_host)
+query_input = CheckerCallQueryInput(&nodes, &lists, &files, &intrinsic_names, &set_name, &query_fns, &float_names, &query_host)
 query_binding = checker_call_queries_bind(&query_input)
 mk = (kind: NK, flags: int = 0, t: int = 0, children: int[] = []) -> int:
     n = node(kind, 0, 0, 0, children)
@@ -94,6 +97,20 @@ main = ():
             save_call_order(c, given, [p, q])
     # (two or more mutable parameters are compared on the host)
     loop mask in [0, 1, 2, 4, 3, 5, 7]: check_mutable_arguments([p, q, small], mask, 9)
+    # (float keys: names of the declaration (one argument) or of its parameter 1 (two or more))
+    loop shape in [[0, 1, 0, 0], [0, 1, 1, 9], [20, 1, 1, 9], [21, 1, 2, 9], [5, 1, 1, 9], [5, 2, 2, 22], [5, 3, 3, 23], [5, 2, 2, 7], [5, 2, 1, 22], [5, 1, 2, 22]]:
+        print("shape:{shape}")
+        params: int[]
+        loop i in [0..shape[2]):
+            param = mk(.param); nodes[param].name = i32(if i == 1: shape[3] else: 9)
+            params.push(param)
+        decl = if shape[2] == 0 and shape[0] == 0: 0 else: mk(.fn_, 0, 0, params)
+        if decl != 0: nodes[decl].name = i32(shape[0])
+        query_fns.push(FnInst(decl = i32(decl)))
+        args: int[]
+        loop i in [0..shape[1]): args.push(small)
+        site = mk(.call, 0, 0, args); nodes[site].sym = i32(query_fns.len() - 1)
+        map_float_key(site)
     print("ok")
 '''
 
@@ -177,6 +194,20 @@ order:64:[60, 61, 6]:[60, 61]
 overlap:[60, 61, 6]:3:9
 overlap:[60, 61, 6]:5:9
 overlap:[60, 61, 6]:7:9
+shape:[0, 1, 0, 0]
+shape:[0, 1, 1, 9]
+shape:[20, 1, 1, 9]
+float_key
+shape:[21, 1, 2, 9]
+float_key
+shape:[5, 1, 1, 9]
+shape:[5, 2, 2, 22]
+float_key
+shape:[5, 3, 3, 23]
+float_key
+shape:[5, 2, 2, 7]
+shape:[5, 2, 1, 22]
+shape:[5, 1, 2, 22]
 ok
 '''
 

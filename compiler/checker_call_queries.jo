@@ -1,21 +1,27 @@
 # Frozen call-checker queries extracted from expr.jo's intrinsic_of and ctx_dependent.
 use 'node_store.dewy'
 use 'source_types.dewy'
+use 'checker_state.dewy'
 struct CheckerCallQueryHost:
     order: (int, int[], int[]) -> void
     overlap: (int[], int, int) -> void
+    float_key: (int) -> void
 struct CheckerCallQueryInput:
     nodes: *(Node[])
     lists: *(i32[])
     files: *(SrcFile[])
     intrinsic_names: *(int[])
     set_name: *(int)
+    fns: *(FnInst[])
+    float_key_names: *(int[])
     host: *(CheckerCallQueryHost)
 cg_nodes: *(Node[])
 cg_lists: *(i32[])
 cg_files: *(SrcFile[])
 cg_intrinsic_names: *(int[])
 cg_set_name: *(int)
+cg_fns: *(FnInst[])
+cg_float_key_names: *(int[])
 cg_host: *(CheckerCallQueryHost)
 checker_call_queries_bind = (input: *CheckerCallQueryInput) -> int:
     cg_nodes = input[0].nodes
@@ -23,6 +29,8 @@ checker_call_queries_bind = (input: *CheckerCallQueryInput) -> int:
     cg_files = input[0].files
     cg_intrinsic_names = input[0].intrinsic_names
     cg_set_name = input[0].set_name
+    cg_fns = input[0].fns
+    cg_float_key_names = input[0].float_key_names
     cg_host = input[0].host
     0
 intrinsic_of = (name: int) -> int:
@@ -76,3 +84,17 @@ save_call_order = (n: int, given: int[], final: int[]):
 check_mutable_arguments = (args: int[], mask: int, pos: int):
     if mask == 0 or mask & (mask - 1) == 0: return
     cg_host[0].overlap(args, mask, pos)
+map_float_key = (n: int):
+    d = int(cg_fns[0][int(cg_nodes[0][n].sym)].decl)
+    if d == 0: return
+    nd = int(cg_nodes[0][d].nlist)
+    if nd < 1: return
+    nn = int(cg_nodes[0][n].nlist)
+    if nn == 1:
+        nm = int(cg_nodes[0][d].name)
+        if nm != cg_float_key_names[0][0] and nm != cg_float_key_names[0][1]: return
+    else:
+        if nd < 2 or nn < 2: return
+        p = int(cg_nodes[0][int(cg_lists[0][int(cg_nodes[0][d].list) + 1])].name)
+        if p != cg_float_key_names[0][2] and p != cg_float_key_names[0][3]: return
+    cg_host[0].float_key(n)

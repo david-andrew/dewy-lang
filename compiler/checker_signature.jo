@@ -43,7 +43,7 @@ cs_written_refinement = (n: int) -> bool:
         if cs_written_refinement(cs_kid(n, i)): return true
     false
 
-cs_fn_sig = (decl: int) -> FnSig:
+fn_sig = (decl: int) -> FnSig:
     di = cs_decl_info(decl)
     if cs_input[0].declarations[0][di].sig.done: return cs_input[0].declarations[0][di].sig
     cs_input[0].host[0].resume(decl)

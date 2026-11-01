@@ -1,3 +1,4 @@
+use 'checker_signature.dewy'
 use 'checker_exact.dewy'
 use 'checker_expr.dewy'
 use 'checker_intrinsics.dewy'
@@ -143,6 +144,7 @@ callee_at = 0                  # the callee a call is resolving: a Dewy function
 embedded_files: str[]          # actual compile-time inputs, including those used inside functions
 intrinsic_names: int[]         # interned name -> intrinsic index + 1; 0 means no intrinsic
 dewy_set_name = -1             # the interned `__dewy_set`
+float_key_names: int[]         # interned `__dewy_make_set`, `set`, `k`, `value` (map_float_key)
 
 register_intrinsics = ():
     intrinsic_names = []
@@ -152,6 +154,7 @@ register_intrinsics = ():
         intrinsic_names[nm] = i + 1
         if it.id == .dewy_set: dewy_set_name = nm
         universe[nm] = new_sym(nm, .builtin, int(it.id), 0)
+    float_key_names = [intern("__dewy_make_set"), intern("set"), intern("k"), intern("value")]
 
 is_lit = (n: int) -> bool: has_flag(n, NF_LITERAL)
 lit_default = (n: int) -> int:
@@ -10081,8 +10084,8 @@ intrinsic_length = (n: int, a: int, t: int, expected: int) -> int:
 intrinsic_host = CheckerIntrinsicHost(intrinsic_rest, nargs_check, intrinsic_error, coerce, intrinsic_length, value_loop_resize, check_place, ref_length_mutation)
 intrinsic_input = CheckerIntrinsicInput(&nodes, &lists, &types, &structs, &files, &value_loops, &refine_active, &T_VOID, &T_INT, &T_STR, &T_U8, &T_RAWPTR, &T_NEVER, &intrinsic_host)
 intrinsic_binding = checker_intrinsics_bind(&intrinsic_input)
-call_query_host = CheckerCallQueryHost(call_order_rest, mutable_arguments_rest)
-call_query_input = CheckerCallQueryInput(&nodes, &lists, &files, &intrinsic_names, &dewy_set_name, &call_query_host)
+call_query_host = CheckerCallQueryHost(call_order_rest, mutable_arguments_rest, float_key_rest)
+call_query_input = CheckerCallQueryInput(&nodes, &lists, &files, &intrinsic_names, &dewy_set_name, &fns, &float_key_names, &call_query_host)
 call_query_binding = checker_call_queries_bind(&call_query_input)
 
 # checker_expr.dewy's services: literal preparation (grouped values, spreads, the

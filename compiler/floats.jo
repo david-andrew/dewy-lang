@@ -118,7 +118,9 @@ key_holds_float = (t0: int, depth: int = 0) -> bool:
     key_float_types[t] = holds
     holds
 
-map_float_key = (n: int):
+# checker_call_queries.dewy's map_float_key leaves the host the library set and map calls
+# whose names could owe a key proof.
+float_key_rest = (n: int):
     d = int(fns[int(nodes[n].sym)].decl)
     if d == 0 or not pos_in_lib(nodes[d].pos) or nkids(d) < 1: return
     mt = prune(ntype(kid(n, 0)))

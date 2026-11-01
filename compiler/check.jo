@@ -1372,11 +1372,7 @@ refine_resume = (m: int):
 # result, say)
 written_refinement = (n: int) -> bool: cs_written_refinement(n)
 
-fn_sig = (decl: int) -> FnSig:
-    # Preserve the frequently requested cached signature without a service entry.
-    di = int(nodes[decl].sym)
-    if di != 0 and decl_infos[di].sig.done: return decl_infos[di].sig
-    cs_fn_sig(decl)
+# fn_sig (a declaration's signature, cached in its DeclInfo) is checker_signature.dewy's.
 signature_resume = (decl: int):
     if refine_deferred.len() > 0 and not refine_active and refine_deferred.has(int(nodes[decl].mod)) and written_refinement(decl): refine_resume(int(nodes[decl].mod))
 signature_enter = (decl: int) -> CheckerSignatureScope:

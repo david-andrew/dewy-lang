@@ -1,10 +1,12 @@
 $runtime_checks
 from p"node_store.dewy" import Node
 from p"source_types.dewy" import SrcFile
+from p"checker_state.dewy" import FnInst
 # Questions the call checker asks of a call's names and arguments: which intrinsic a
 # name is, whether an argument takes its type from the parameter it meets (so it is
 # checked after the overload is picked), and the common cases of two per-call checks
-# (argument order, overlapping mutable arguments), whose rare cases are host services.
+# (argument order, overlapping mutable arguments, float keys of library sets and maps),
+# whose rare cases are host services.
 # Jo callers call them directly; the call group will. O(1); an array literal or a
 # call's arguments O(their count).
 # Frozen ordinals: Tok.minus 59; NF_CHECKED 128, NF_FNREF_ARG 4096, NF_COMPREHENSION
@@ -13,6 +15,7 @@ CGWord:type=int64<overflow='wrap'>
 CheckerCallQueryHost:type=[
     order:<(node:int64 given:array<int64> final:array<int64>):>void>
     overlap:<(args:array<int64> mask:int64 pos:int64):>void>
+    float_key:<(node:int64):>void>
 ]
 CheckerCallQueryInput:type=[
     nodes:ptr<array<Node>>
@@ -20,6 +23,8 @@ CheckerCallQueryInput:type=[
     files:ptr<array<SrcFile>>
     intrinsic_names:ptr<array<int64>>
     set_name:ptr<int64>
+    fns:ptr<array<FnInst>>
+    float_key_names:ptr<array<int64>>
     host:ptr<CheckerCallQueryHost>
 ]
 let cg_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
@@ -27,6 +32,8 @@ let cg_lists:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
 let cg_files:ptr<array<SrcFile>>=$unsafe (uint64(0) as ptr<array<SrcFile>>)
 let cg_intrinsic_names:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
 let cg_set_name:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
+let cg_fns:ptr<array<FnInst>>=$unsafe (uint64(0) as ptr<array<FnInst>>)
+let cg_float_key_names:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
 let cg_host:ptr<CheckerCallQueryHost>=$unsafe (uint64(0) as ptr<CheckerCallQueryHost>)
 checker_call_queries_bind=(input:ptr<CheckerCallQueryInput>):>CGWord=>$unsafe {
     cg_nodes=input[0].nodes
@@ -34,6 +41,8 @@ checker_call_queries_bind=(input:ptr<CheckerCallQueryInput>):>CGWord=>$unsafe {
     cg_files=input[0].files
     cg_intrinsic_names=input[0].intrinsic_names
     cg_set_name=input[0].set_name
+    cg_fns=input[0].fns
+    cg_float_key_names=input[0].float_key_names
     cg_host=input[0].host
     0
 }
@@ -116,4 +125,26 @@ save_call_order=(n:CGWord given:array<int64> final:array<int64>):>void=>$unsafe 
 check_mutable_arguments=(args:array<int64> mask:CGWord pos:CGWord):>void=>$unsafe {
     if mask =? 0 or (mask & (mask - 1)) =? 0 {return}
     cg_host[0].overlap(args mask pos)
+}
+# A call of a library set or map whose key type holds floats owes a key proof (floats.jo).
+# Without a host call: a declaration with no parameters; one argument to a function not
+# named `__dewy_make_set` or `set`; parameter 1 not named `k` or `value` (the interned
+# names, in that order). The host tests the library and the key type.
+map_float_key=(n:CGWord):>void=>$unsafe {
+    let d=CGWord(cg_fns[0].ptr[CGWord(cg_nodes[0].ptr[n].sym)].decl)
+    if d =? 0 {return}
+    let decl=cg_nodes[0].ptr + d
+    let nd=CGWord(decl[0].nlist)
+    if nd <? 1 {return}
+    let nn=CGWord(cg_nodes[0].ptr[n].nlist)
+    let names=cg_float_key_names[0].ptr
+    if nn =? 1 {
+        let nm=CGWord(decl[0].name)
+        if nm not=? names[0] and nm not=? names[1] {return}
+    } else {
+        if nd <? 2 or nn <? 2 {return}
+        let p=CGWord(cg_nodes[0].ptr[CGWord(cg_lists[0].ptr[CGWord(decl[0].list) + 1])].name)
+        if p not=? names[2] and p not=? names[3] {return}
+    }
+    cg_host[0].float_key(n)
 }

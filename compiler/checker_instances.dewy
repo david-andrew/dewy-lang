@@ -1,7 +1,7 @@
 $runtime_checks
 from p"node_store.dewy" import Node
 from p"checker_state.dewy" import (FnInst FnSig FnCtx DeclInfo FnInstanceKey)
-from p"checker_signature.dewy" import (cs_decl_info cs_fn_sig)
+from p"checker_signature.dewy" import (cs_decl_info fn_sig)
 from p"type_inference.dewy" import (tu_has_var tu_prune tu_zonk tu_equal)
 from p"type_substitute.dewy" import ts_subst
 from p"checker_results.dewy" import (cr_syntactic_void cr_may_express cr_has_propagate)
@@ -46,7 +46,7 @@ ci_get_fn_inst=(decl:CIWord targs:array<int64> use_pos:CIWord):>CIWord=>$unsafe 
     let di=CIWord(ci_input[0].nodes[0].ptr[decl].sym)
     if di =? 0 {di=cs_decl_info(decl)}
     let sig=ci_input[0].declarations[0].ptr[di].sig
-    if not sig.done {sig=cs_fn_sig(decl)}
+    if not sig.done {sig=fn_sig(decl)}
     let concrete=targs.length >? 0
     loop t in targs {if tu_has_var(t) {concrete=false}}
     if concrete {
