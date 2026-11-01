@@ -1,0 +1,6 @@
+# `as` binds looser than `<<`: the shift reads as part of the type.
+main = () => {
+    let data = [1 2 3] as array<uint8>
+    let v = data[0] as int << 16
+    printl(v)
+}

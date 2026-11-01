@@ -4461,7 +4461,7 @@ rd_dn_spec_hint=(@reader_ctx:ParserContext source:string first:int64 stop:int64)
             at = k
         }
         else if ((b[k] =? b'\{') and (at >=? 0)) {
-            reader_ctx.stores.host[0].dn_error(at "a format spec after `:` is literal text, so it cannot hold `\{...}`: compute one with `format(value spec)`, as in `\{format(x \"<\{w}\")}`");
+            reader_ctx.stores.host[0].dn_error(at "a format spec after `:` is literal text, so it cannot hold `\{...}`: pad the text instead, as in `\{x.pad_end(w)}` for `<` or `\{x.pad_start(w)}` for `>` (a number: `\"\{n}\".pad_end(w)`)");
             return
         }
         k = (k + 1)
@@ -10644,8 +10644,26 @@ rd_dc_unread=(@reader_ctx:ParserContext at:int64):>void=>$unsafe {
     }
     rd_dc_foreign_habit(@reader_ctx at);
     rd_dc_optional_chain(@reader_ctx at);
+    rd_dc_as_precedence(@reader_ctx at);
     reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file reader_ctx.tokens[at].start) "could not parse the statement starting here; check the syntax near the underlined token");
 }
+
+# (`data[i] as int << 16`: `as` binds looser than arithmetic, so the operator continues the
+# type, in the line of an unread statement: parenthesize the conversion)
+rd_dc_as_precedence=(@reader_ctx:ParserContext at:int64):>void=>$unsafe {
+    let k:int64=at
+    loop (reader_ctx.tokens[(int64<overflow='wrap'>(k) + 1)].kind not=? 'eof') and (not reader_ctx.tokens[(int64<overflow='wrap'>(k) + 1)].newline) {
+        let after:DewyLexeme=reader_ctx.tokens[(int64<overflow='wrap'>(k) + 2)]
+        if (((reader_ctx.tokens[k].symbol =? 'kw_as') and (reader_ctx.tokens[(int64<overflow='wrap'>(k) + 1)].kind =? 'identifier')) and ((after.kind not=? 'eof') and (not after.newline))) and rd_dc_arithmetic(after.symbol) {
+            let name:string=rd_dn_payload(@reader_ctx reader_ctx.tokens[(int64<overflow='wrap'>(k) + 1)])
+            let op:string=dn_token_text(after.symbol)
+            reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file reader_ctx.tokens[k].start) "`as` binds looser than `{op}`, so `{name} {op} ...` is read as the type: parenthesize the conversion, as in `(x as {name}) {op} ...`");
+        }
+        k = (int64<overflow='wrap'>(k) + 1)
+    }
+}
+
+rd_dc_arithmetic=(t:DewyToken):>bool=>(t =? 'plus') or (t =? 'minus') or (t =? 'star') or (t =? 'slash') or (t =? 'percent') or (t =? 'floor') or (t =? 'shl') or (t =? 'shr') or (t =? 'amp') or (t =? 'caret')
 
 # (`d.get(k)?.wins`: optional chaining, which Dewy does not have, in the line of an unread
 # statement: the value with a default, then its member)

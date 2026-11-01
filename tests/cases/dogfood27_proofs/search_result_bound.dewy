@@ -1,0 +1,38 @@
+# A binary search keeps `lo <=? hi` across `loop lo <? hi`, so it returns at
+# most ends.length: its result indexes a table of length ends.length + 1, in
+# the caller and in its own body.
+finished_by = (ends:array<int> t:int):>int => {
+    let lo = 0
+    let hi = ends.length
+    loop lo <? hi {
+        let mid = (lo + hi) // 2
+        if ends[mid] <=? t lo = mid + 1 else hi = mid
+    }
+    lo
+}
+table_at = (ends:array<int> t:int):>int => {
+    let best = [loop k in [0..ends.length] k * 10]
+    let lo = 0
+    let hi = ends.length
+    loop lo <? hi {
+        let mid = lo + (hi - lo) // 2
+        if ends[mid] <? t lo = mid + 1 else hi = mid
+    }
+    best[lo]
+}
+main = () => {
+    let ends = [1 3 5 7]
+    let best = [loop k in [0..ends.length] k]
+    printl(best[finished_by(ends 4)])
+    printl(best[finished_by(ends 9)])
+    printl(table_at(ends 6))
+    # a walk back through search results stays within the table
+    let k = ends.length
+    let steps = 0
+    loop k >? 0 {
+        let p = finished_by(ends ends[k - 1] - 1)
+        steps += best[p]
+        k = if p <? k p else k - 1
+    }
+    printl(steps)
+}

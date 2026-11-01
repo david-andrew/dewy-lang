@@ -89,12 +89,12 @@ justify = (line:array<string> width:int last:bool):>string => {
     parts.join("")
 }
 
-show = (title:string lines:array<array<string>> width:int) => {
+show = (title:string lines:array<array<string>> width:int64) => {
     printl"{title} (cost {cost(lines width)})"
     printl"+{"-" * width}+"
     loop k in [0..lines.length) {
         let text = justify(lines[k] width k =? lines.length - 1)
-        printl"|{text}{" " * (width - text.length)}|"
+        printl"|{text.pad_end(width)}|"
     }
     printl"+{"-" * width}+"
 }

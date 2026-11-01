@@ -147,6 +147,7 @@ effect_ix_next: int[][] = [[], [], []]
 # effect_plain answers by representation type, for top-level queries.
 effect_plain_cache: {int: bool} = {}
 effect_share_cache: {int: bool} = {}
+effect_value_cache: {int: bool} = {}
 effect_serial = 0
 effect_limit = 0
 # Element accesses charged a possible failure in the current graph (owner,
@@ -194,6 +195,7 @@ effects_reset = ():
     effect_for_marks = {}
     effect_plain_cache = {}
     effect_share_cache = {}
+    effect_value_cache = {}
     effect_library_reset()
     effect_ix_nodes = 0
     effect_ix_locals = 0
@@ -432,6 +434,7 @@ effect_graph_reset = (reuse_bodies: bool = false):
         effect_for_marks = {}
         effect_plain_cache = {}
         effect_share_cache = {}
+        effect_value_cache = {}
     effect_stack = []
     effect_serial = 0
 
@@ -813,12 +816,38 @@ effect_share_type = (t: int, depth: int) -> bool:
 # A value whose copy is a share: a share, or a dynamic array of shares (copy on
 # write: a copy shares the storage; a later write's detach is that write's own
 # cost, as the growth intrinsics and element stores classify it).
-effect_value = (t0: int) -> bool:
+effect_value = (t0: int, depth: int = 0) -> bool:
     t = representation_type(t0)
     if tkind(t) == .array: return effect_share(telem(t))
     # The builtin tensor copies its two COW arrays; no element hook runs.
     if is_nd(t): return effect_share(nd_elem(t))
-    effect_share(t)
+    if effect_share(t): return true
+    effect_value_record(t, depth)
+
+# An inline record, tuple or optional of such values (`[items:array<int>
+# up:bool]`): its copy copies each field, so it shares each array's storage
+# exactly as passing the array would. No lifecycle hook, box or nominal owner.
+# Cached per type; O(fields) once.
+effect_value_record = (t: int, depth: int) -> bool:
+    k = tkind(t)
+    if depth > 8 or k != .struct_ and k != .tuple and k != .opt: return false
+    if let known = effect_value_cache.get(t): return known
+    effect_value_cache[t] = false
+    answer = false
+    if k == .opt: answer = effect_value(int(types[t].elem), depth + 1)
+    else if k == .tuple:
+        answer = true
+        loop i in [0..int(types[t].nargs)):
+            if not effect_value(targ(t, i), depth + 1): answer = false
+    else if not ownership_type(t):
+        layout(t)
+        si = int(types[t].st)
+        answer = structs[si].drop_fn == 0
+        loop i in [0..int(structs[si].nfields)):
+            fi = int(structs[si].fields) + i
+            if fields[fi].boxed or not effect_value(int(fields[fi].type), depth + 1): answer = false
+    effect_value_cache[t] = answer
+    answer
 
 # A reviewed library operation's class (effect_library.jo) as its summary: its
 # residual costs, and a write of each mutable parameter.
@@ -2055,6 +2084,7 @@ effects_demand = (f: int, footprints: bool = false) -> bool:
         effect_for_marks = {}
         effect_plain_cache = {}
         effect_share_cache = {}
+        effect_value_cache = {}
     if f <= 0 or f >= effect_limit: return false
     if effect_summaries[f].index == 0:
         icb = ic_phase(IC_EFFECTS)

@@ -7,14 +7,14 @@ const READINGS = [41 17 63 8 25 99 54 31 70 12 88 46 5 77 60]
 # A binary heap of ints ordered by `before`: the root is the first in order.
 Heap:type = [items:array<int> max_first:bool]
 
-before = (max_first:bool a:int b:int):>bool => if max_first a >? b else a <? b
+before = (h:Heap a:int b:int):>bool => if h.max_first a >? b else a <? b
 
 push = (@h:Heap x:int) => {
     h.items.push(x)
     let i = h.items.length - 1
     loop 0 <? i <? h.items.length {
         let parent = (i - 1) // 2
-        if not before(h.max_first h.items[i] h.items[parent]) break
+        if not before(h h.items[i] h.items[parent]) break
         h.items.swap(i parent)
         i = parent
     }
@@ -30,8 +30,8 @@ pop = (@h:Heap):>int? => {
         let n = h.items.length
         loop 2 * i + 1 <? n {
             let child = 2 * i + 1
-            if child + 1 <? n and before(h.max_first h.items[child + 1] h.items[child]) child += 1
-            if not before(h.max_first h.items[child] h.items[i]) break
+            if child + 1 <? n and before(h h.items[child + 1] h.items[child]) child += 1
+            if not before(h h.items[child] h.items[i]) break
             h.items.swap(i child)
             i = child
         }

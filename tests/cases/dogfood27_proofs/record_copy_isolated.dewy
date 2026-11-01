@@ -1,0 +1,19 @@
+# A callee's copy of the record detaches before it writes: the caller's
+# items and length are unchanged, so its guard still holds after the call.
+H:type = [items:array<int> up:bool]
+poke = (h:H):>int => {
+    let g = h
+    if g.items.length >? 0 g.items[0] = 99
+    g.items.push(5)
+    g.items.length
+}
+f = (@h:H i:int) => {
+    if not (0 <=? i <? h.items.length) return
+    let k = poke(h)
+    h.items[i] = k
+}
+main = () => {
+    let h = H[[1 2 3] true]
+    f(@h 2)
+    printl(h.items)
+}

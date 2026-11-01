@@ -135,7 +135,22 @@ rt_dc_unread = (at: int):
     if dc_parser.status.report_pos != 0: fatal(dc_parser.status.report_pos, dc_parser.status.report_text)
     rt_dc_foreign_habit(at)
     rt_dc_optional_chain(at)
+    rt_dc_as_precedence(at)
     fatal(mkpos(dc_parser.file, dc_parser.tokens[at].start), "could not parse the statement starting here; check the syntax near the underlined token")
+
+# (`data[i] as int << 16`: `as` binds looser than arithmetic, so the operator continues the
+# type, in the line of an unread statement: parenthesize the conversion)
+rt_dc_as_precedence = (at: int):
+    k = at
+    loop dc_parser.tokens[k + 1].kind != .eof and not dc_parser.tokens[k + 1].newline:
+        after = dc_parser.tokens[k + 2]
+        if dc_parser.tokens[k].symbol == .kw_as and dc_parser.tokens[k + 1].kind == .identifier and after.kind != .eof and not after.newline and rt_dc_arithmetic(after.symbol):
+            name = rt_dn_payload(dc_parser.tokens[k + 1])
+            op = dn_token_text(after.symbol)
+            fatal(mkpos(dc_parser.file, dc_parser.tokens[k].start), "`as` binds looser than `{op}`, so `{name} {op} ...` is read as the type: parenthesize the conversion, as in `(x as {name}) {op} ...`")
+        k += 1
+
+rt_dc_arithmetic = (t: DewyToken) -> bool: t == .plus or t == .minus or t == .star or t == .slash or t == .percent or t == .floor or t == .shl or t == .shr or t == .amp or t == .caret
 
 # (`d.get(k)?.wins`: optional chaining, which Dewy does not have, in the line of an unread
 # statement: the value with a default, then its member)
@@ -7535,7 +7550,7 @@ rt_dn_spec_hint = (source: str, first: int, stop: int):
     loop k < stop and k < len(source):
         if source[k] == ':' and at < 0: at = k
         else if source[k] == '{' and at >= 0:
-            dn_error(at, "a format spec after `:` is literal text, so it cannot hold `\{...}`: compute one with `format(value spec)`, as in `\{format(x \"<\{w}\")}`")
+            dn_error(at, "a format spec after `:` is literal text, so it cannot hold `\{...}`: pad the text instead, as in `\{x.pad_end(w)}` for `<` or `\{x.pad_start(w)}` for `>` (a number: `\"\{n}\".pad_end(w)`)")
             return
         k += 1
 

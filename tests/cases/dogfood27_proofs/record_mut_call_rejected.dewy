@@ -1,0 +1,13 @@
+# A callee that takes the record mutably may shrink its array: the guard is gone.
+H:type = [items:array<int> up:bool]
+drain = (@h:H) => { h.items.clear() }
+mark = (@h:H i:int) => {
+    if not (0 <=? i <? h.items.length) return
+    drain(@h)
+    h.items[i] = 1
+}
+main = () => {
+    let h = H[[1 2 3] true]
+    mark(@h 1)
+    printl(h.items)
+}

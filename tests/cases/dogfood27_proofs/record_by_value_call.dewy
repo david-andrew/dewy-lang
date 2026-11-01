@@ -1,0 +1,30 @@
+# Passing an `@` record by value cannot write the caller's fields: facts about
+# `h.items.length` survive the call, whichever value of the record is passed.
+H:type = [items:array<int> up:bool]
+Wrap:type = [inner:H tag:int]
+less = (h:H a:int b:int):>bool => if h.up a <? b else a >? b
+size = (h:H):>int => h.items.length
+depth = (w:Wrap):>int => w.inner.items.length + w.tag
+mark = (@h:H i:int) => {
+    if not (0 <=? i <? h.items.length) return
+    if less(h h.items[i] 0) return
+    h.items[i] = size(H[[1] true])
+}
+copy_then_call = (@h:H i:int) => {
+    if not (0 <=? i <? h.items.length) return
+    let g = h
+    h.items[i] = size(g)
+}
+nested = (@w:Wrap i:int) => {
+    if not (0 <=? i <? w.inner.items.length) return
+    w.inner.items[i] = depth(w)
+}
+main = () => {
+    let h = H[[1 2 3] true]
+    mark(@h 1)
+    copy_then_call(@h 2)
+    printl(h.items)
+    let w = Wrap[H[[5 6] false] 10]
+    nested(@w 0)
+    printl(w.inner.items)
+}

@@ -1,0 +1,4 @@
+# Shared strings can repeat, so the int64 sum of their lengths is unproven:
+# the error points at an exact `int` total.
+total = (line:array<string>):>int => sum([loop w in line w.length])
+main = () => printl(total(["ab" "cde"]))

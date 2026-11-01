@@ -1,0 +1,12 @@
+# Stepping lo two past mid can leave it one past hi: no `lo <=? hi` invariant.
+overshoot = (ends:array<int> t:int):>int => {
+    let best = [loop k in [0..ends.length] k]
+    let lo = 0
+    let hi = ends.length
+    loop lo <? hi {
+        let mid = (lo + hi) // 2
+        if ends[mid] <=? t lo = mid + 2 else hi = mid
+    }
+    best[lo]
+}
+main = () => printl(overshoot([1 3 5 7] 9))

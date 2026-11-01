@@ -1,0 +1,7 @@
+# The suggested exact total of string lengths.
+total = (line:array<string>):>int => {
+    let total = 0
+    loop w in line total += w.length
+    total
+}
+main = () => printl(total(["ab" "cde"]))

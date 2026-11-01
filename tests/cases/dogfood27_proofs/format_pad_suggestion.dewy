@@ -1,0 +1,6 @@
+# The fix-it's padding compiles in the default mode, for text and for numbers.
+row = (name:string fee:int width:int64):>string => "[{name.pad_end(width)}|{"{fee}".pad_start(width)}]"
+main = () => {
+    printl(row("band" 300 6))
+    printl(row("voiceover" 90 4))
+}

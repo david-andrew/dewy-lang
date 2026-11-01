@@ -1,0 +1,14 @@
+# The search may return ends.length itself: that does not index ends.
+finished_by = (ends:array<int> t:int):>int => {
+    let lo = 0
+    let hi = ends.length
+    loop lo <? hi {
+        let mid = (lo + hi) // 2
+        if ends[mid] <=? t lo = mid + 1 else hi = mid
+    }
+    lo
+}
+main = () => {
+    let ends = [1 3 5 7]
+    printl(ends[finished_by(ends 9)])
+}

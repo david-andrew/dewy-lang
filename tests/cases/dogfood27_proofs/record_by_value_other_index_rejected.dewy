@@ -1,0 +1,12 @@
+# The by-value call keeps the guard's facts, but `i + 1` was never guarded.
+H:type = [items:array<int> up:bool]
+size = (h:H):>int => h.items.length
+mark = (@h:H i:int) => {
+    if not (0 <=? i <? h.items.length) return
+    h.items[i + 1] = size(h)
+}
+main = () => {
+    let h = H[[1 2 3] true]
+    mark(@h 1)
+    printl(h.items)
+}

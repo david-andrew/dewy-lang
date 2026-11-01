@@ -74,17 +74,16 @@ schedule = (jobs:array<Job>):>[int array<Job>] => {
     let best = [loop _ in [0..n] 0]
     loop k in [0..n) {
         let job = order[k]
-        # (finished_by gives at most ends.length = n, but its result carries no bound)
-        let take = job.fee + (best.get(finished_by(ends job.start)) ?? 0)
+        let take = job.fee + best[finished_by(ends job.start)]
         best[k + 1] = max(best[k] take)
     }
     # walk back from the end to recover the chosen jobs
     let chosen:array<Job> = []
     let k = n
-    loop 0 <? k <=? n {
+    loop k >? 0 {
         let job = order[k - 1]
         let p = finished_by(ends job.start)
-        if job.fee + (best.get(p) ?? 0) >=? best[k - 1] {
+        if job.fee + best[p] >=? best[k - 1] {
             chosen.push(job)
             k = p
         } else {

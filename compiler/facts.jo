@@ -1275,6 +1275,8 @@ fact_exact_sum_check = (n: int, s: mut FactState, values: int[]):
     if proven: return
     receiver = wit_text(kid(n, 0))
     shown = if receiver != "": "`{receiver}`" else: "the array"
+    # (an `int` total is exact: adding into one needs no bound. O(1))
+    if dewy_at(nodes[n].pos): err_notes.push((-1, "help: add into an `int` instead, which never overflows: `let total = 0` then `loop x in xs total += x`"))
     wit_unknown(n, hull, "the exact sum of {shown} fits `{dt(e)}`", 0, "", "bounds on its elements and length that keep every running sum in range")
 
 # What every element of base (of type e) lies in: a fill's value, else the
@@ -4424,6 +4426,11 @@ fact_arithmetic = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
         # for a given sign; sums keep their intervals, which bound them)
         if y.hi <= 0: fact_difference(s, value, a, y.hi, n)
         if y.lo >= 0 and y.lo != FACT_MAX: fact_difference(s, a, value, -y.lo, n)
+    else if op == .plus and x.lo != x.hi:
+        # (a nonnegative addend: value - a is b >= y.lo, so `lo + (hi-lo)//2`
+        # stays at least lo. O(1), only for an operand that already has rows)
+        if y.lo >= 0 and y.lo != FACT_MAX and fact_incident(s, a) >= 0: fact_difference(s, a, value, -y.lo, n)
+        if x.lo >= 0 and x.lo != FACT_MAX and fact_incident(s, b) >= 0: fact_difference(s, b, value, -x.lo, n)
     if op == .plus and x.lo == x.hi and x.lo != FACT_MIN:
         fact_difference(s, value, b, x.lo, 0, 16)
         fact_difference(s, b, value, -x.lo, 0, 16)
@@ -6401,6 +6408,11 @@ fact_loop_header = (entry: mut FactState, back: FactState, old: FactState, at: i
                 if fact_entails(back, back.bindings[j].value, back.bindings[i].value, y.lo - x.lo): rows.push(FactDifference(j, i, y.lo - x.lo))
                 if rows.len() > 0: link = rows
             loop row in link: lockstep.push(row)
+    # Two changing scalars the condition compares (`loop lo <? hi`, each
+    # side moved by the body) keep that comparison's closed form `lo <= hi`
+    # when entry and the backedge both entail it: an inductive row stability
+    # re-validates. Fixed limit, so widening cannot chase it. O(condition).
+    if changing.len() > 1 and nodes[at].kind == .while_: fact_guard_pairs(int(nodes[at].a), entry, back, changing, lockstep, 0)
     carried: FactDifference[]
     offsets: int[]
     if changing.len() > 0 and nodes[at].kind == .while_: fact_offset_guarded(int(nodes[at].a), offsets, 0)
@@ -6656,6 +6668,32 @@ fact_guarded_rows = (e: int, back: FactState, changing: {int: bool}, carried: mu
         # (and from below: `loop stop >? start ... stop -= 1` keeps stop at least start)
         below = fact_shortest(back, other, v)
         if below != FACT_MAX: carried.push(FactDifference(other, v, below, e))
+
+# A comparison of two changing locals (through `and`/`or`) as a lockstep row
+# over back's binding indexes: `a <? b` offers `a - b <= 0`, `a <=? b` offers
+# `a - b <= 1`, kept only when entry and backedge entail it. Depth <= 16.
+fact_guard_pairs = (e: int, entry: FactState, back: FactState, changing: {int: bool}, out: mut FactDifference[], depth: int):
+    if e == 0 or depth > 16: return
+    k = nodes[e].kind
+    if k == .and_ or k == .or_:
+        fact_guard_pairs(int(nodes[e].a), entry, back, changing, out, depth + 1)
+        fact_guard_pairs(int(nodes[e].b), entry, back, changing, out, depth + 1)
+        return
+    if k != .binary or nodes[e].aux != 0: return
+    op = nodes[e].op as Tok
+    if op != .lt and op != .le and op != .gt and op != .ge: return
+    a = int(nodes[e].a); b = int(nodes[e].b)
+    if op == .gt or op == .ge:
+        a = int(nodes[e].b); b = int(nodes[e].a)
+    loop nodes[a].kind == .conv: a = int(nodes[a].a)
+    loop nodes[b].kind == .conv: b = int(nodes[b].a)
+    if nodes[a].kind != .ident or nodes[b].kind != .ident: return
+    i = fact_binding(back, fact_place(a)); j = fact_binding(back, fact_place(b))
+    x = fact_binding(entry, fact_place(a)); y = fact_binding(entry, fact_place(b))
+    if i < 0 or j < 0 or x < 0 or y < 0 or i == j: return
+    if not changing.has(back.bindings[i].value) or not changing.has(back.bindings[j].value): return
+    limit = if op == .lt or op == .gt: 0 else: 1
+    if fact_entails(entry, entry.bindings[x].value, entry.bindings[y].value, limit) and fact_entails(back, back.bindings[i].value, back.bindings[j].value, limit): out.push(FactDifference(i, j, limit, e))
 
 # Common projection skeleton of changing loop aggregates. Leaves keep their
 # immutable identity only when both entry and backedge have that identity.
