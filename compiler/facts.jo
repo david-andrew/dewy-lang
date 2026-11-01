@@ -4340,19 +4340,23 @@ fact_arithmetic = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
         # operands need the same four endpoint products as fixed exact ints.
         if not exact_has_node(n) and prune(ntype(n)) != T_MATH_INT and x.lo != x.hi and y.lo != y.hi: return fact_unmodeled(s, n, .unsupported)
         if xlo_open or xhi_open or ylo_open or yhi_open: return fact_open_product(s, n, a, b, x, y, xlo_open, xhi_open, ylo_open, yhi_open)
-        if math_word_overflow(2, x.lo, y.lo) or math_word_overflow(2, x.lo, y.hi) or math_word_overflow(2, x.hi, y.lo) or math_word_overflow(2, x.hi, y.hi): return fact_unmodeled(s, n, .unsupported)
+        if math_word_overflow(2, x.lo, y.lo) or math_word_overflow(2, x.lo, y.hi) or math_word_overflow(2, x.hi, y.lo) or math_word_overflow(2, x.hi, y.hi):
+            # (an exact `int` scaled by a constant keeps the end that fits and
+            # opens the other: `2*i` of a widened i >= 0 is still at least 0)
+            if prune(ntype(n)) != T_MATH_INT or exact_has_node(n): return fact_unmodeled(s, n, .unsupported)
+            again = fact_scaled_again(s, a, b, x, y)
+            if again != 0: return again
+            return fact_scaled_open(s, n, a, b, x, y)
         lo = min(min(x.lo * y.lo, x.lo * y.hi), min(x.hi * y.lo, x.hi * y.hi))
         hi = max(max(x.lo * y.lo, x.lo * y.hi), max(x.hi * y.lo, x.hi * y.hi))
         if not exact_has_node(n) and (not sa_fits(lo, ntype(n)) or not sa_fits(hi, ntype(n))): return fact_unmodeled(s, n, .unsupported)
         # (a symbolic value scaled by a constant again, `xs.length*3`: the same
         # product, as a comprehension's length is; O(values) only for this shape)
-        if x.lo != x.hi and y.lo == y.hi and a != 0:
-            loop i in [0..s.ids.len()):
-                t = fact_terms[s.ids[i]]
-                if t.op == .star and t.a == a and t.b != 0 and fact_slot(s, t.b) >= 0:
-                    c = fact_bound(s, t.b)
-                    if c.lo == c.hi and c.lo == y.lo: return s.ids[i]
-        return fact_new(s, FactBound(lo, hi, lo > 0 or hi < 0), FactTerm(op, a, b, n, fact_word_type(s, n, a, b, lo, hi)))
+        again = fact_scaled_again(s, a, b, x, y)
+        if again != 0: return again
+        value = fact_new(s, FactBound(lo, hi, lo > 0 or hi < 0), FactTerm(op, a, b, n, fact_word_type(s, n, a, b, lo, hi)))
+        fact_scaled_quotient(s, n, value, a, b, x, y)
+        return value
     # (two symbolic operands: the same sum again, or rows through terms
     # already evaluated, which can also bound it)
     sums: FactDifference[]
@@ -4424,6 +4428,68 @@ fact_arithmetic = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
         fact_difference(s, value, b, x.lo, 0, 16)
         fact_difference(s, b, value, -x.lo, 0, 16)
     value
+
+# A symbolic value scaled by a constant again (`xs.length*3`, `2*i`, in either
+# order): the same product, as a comprehension's length is, so a guard on one
+# evaluation (`loop 2*i+1 <? n`) bounds the next. O(values), this shape only.
+fact_scaled_again = (s: FactState, a: int, b: int, x: FactBound, y: FactBound) -> int:
+    if (x.lo == x.hi) == (y.lo == y.hi): return 0
+    v = if x.lo != x.hi: a else: b
+    c = if x.lo != x.hi: y.lo else: x.lo
+    if v == 0: return 0
+    loop i in [0..s.ids.len()):
+        t = fact_terms[s.ids[i]]
+        if t.op != .star or t.a != v and t.b != v: continue
+        other = if t.a == v: t.b else: t.a
+        if other == 0 or other == v or fact_slot(s, other) < 0: continue
+        k = fact_bound(s, other)
+        if k.lo == k.hi and k.lo == c and not k.wide: return s.ids[i]
+    0
+
+# An exact `int` product by a constant whose interval leaves the host word at
+# one end: the end that fits stays, the other is open. O(1).
+fact_scaled_open = (s: mut FactState, n: int, a: int, b: int, x: FactBound, y: FactBound) -> int:
+    if (x.lo == x.hi) == (y.lo == y.hi) or x.wide or y.wide: return fact_unmodeled(s, n, .unsupported)
+    v = if x.lo != x.hi: x else: y
+    c = if x.lo != x.hi: y.lo else: x.lo
+    if c == 0 or c == FACT_MIN: return fact_unmodeled(s, n, .unsupported)
+    low_end = if c > 0: v.lo else: v.hi
+    high_end = if c > 0: v.hi else: v.lo
+    low_fits = not math_word_overflow(2, low_end, c)
+    high_fits = not math_word_overflow(2, high_end, c)
+    if low_fits == high_fits: return fact_unmodeled(s, n, .unsupported)
+    lo = if low_fits: low_end * c else: FACT_MIN
+    hi = if high_fits: high_end * c else: FACT_MAX
+    value = fact_new(s, fact_open_bound(lo, hi, not low_fits, not high_fits), FactTerm(.star, a, b, n, ntype(n)))
+    fact_scaled_quotient(s, n, value, a, b, x, y)
+    value
+
+# A constant product's rows. `c*g` where g lies below a floor quotient
+# `d // c` by the same positive constant (`loop g in [0..d // c)`): c*q <= d,
+# so g <= q + L gives c*g <= d + c*L, and `chars[4*g..4*g+4)` stays within
+# `chars.length`. O(rows from g, at most 8); demanded only by a constant product.
+fact_scaled_quotient = (s: mut FactState, n: int, value: int, a: int, b: int, x: FactBound, y: FactBound):
+    if (x.lo == x.hi) == (y.lo == y.hi): return
+    g = if x.lo != x.hi: a else: b
+    c = if x.lo != x.hi: y.lo else: x.lo
+    if g == 0 or c < 1: return
+    # (a factor of at least one moves a signed value away from zero: `2*i`
+    # of i >= 0 is at least i, so `2*i+1 <? n` bounds i too)
+    if c > 1:
+        sign = if x.lo != x.hi: x else: y
+        if sign.lo >= 0: fact_difference(s, g, value, 0, n)
+        else if sign.hi <= 0: fact_difference(s, value, g, 0, n)
+    ri = fact_difference_head(s, g, 1)
+    seen = 0
+    found: FactDifference[]
+    loop ri >= 0 and seen < 8:
+        row = s.differences[ri]
+        ri = fact_difference_next(s, ri, 1)
+        seen += 1
+        if row.a != g or row.limit == FACT_MIN or math_word_overflow(2, row.limit, c): continue
+        if fact_quotient_divisor(s, row.b) != c: continue
+        found.push(FactDifference(value, fact_terms[row.b].a, row.limit * c, n))
+    loop row in found: fact_difference(s, row.a, row.b, row.limit, row.at)
 
 # An `int` sum or product of two values with real ends has real ends too: at
 # a MIN/MAX endpoint it is an int64 value, as fact_hull_type types a hull.
@@ -4534,7 +4600,9 @@ fact_sum_quotient = (s: mut FactState, n: int, a: int, d: int) -> int:
     if not low.0 or not high.0: return 0
     # Endpoint arithmetic above certified real host endpoints, including MIN/MAX.
     t = if fact_type(ntype(n)) == T_MATH_INT: T_INT else: ntype(n)
-    fact_new(s, FactBound(low.1, high.1, low.1 > 0 or high.1 < 0), FactTerm(type = t))
+    v = fact_new(s, FactBound(low.1, high.1, low.1 > 0 or high.1 < 0), FactTerm(type = t))
+    if d == 2 and not subtract: fact_midpoint(s, n, v, a)
+    v
 
 # Integer `//` and `%` by a nonzero divisor (kind 1, 2), or by a power of two
 # as a shift count or mask (3, 4). Dewy's remainder has the divisor's sign, so
@@ -4605,7 +4673,47 @@ fact_floor = (s: mut FactState, n: int, kind: int, a: int, b: int, floor: bool) 
     if x.lo >= 0:
         distance = if kind == 1: x.lo / y.lo - x.lo else if kind == 3: (x.lo >> y.lo) - x.lo else if smaller: -1 else: 0
         fact_difference(s, v, a, distance, n)
+    if (kind == 1 and y.lo == 2 or kind == 3 and y.lo == 1) and y.lo == y.hi and (floor or x.lo >= 0): fact_midpoint(s, n, v, a)
     v
+
+# The constant positive divisor of a floor quotient value (`d // c`, Dewy's
+# `__floor_div` or its power-of-two shift, or a nonnegative dividend's
+# truncating `/`), else 0: c*q <= d. O(1).
+fact_quotient_divisor = (s: FactState, q: int) -> int:
+    t = fact_terms[q]
+    if t.op != .eof or t.a == 0 or t.b == 0 or t.origin <= 0 or t.origin >= nodes.len(): return 0
+    if fact_slot(s, t.a) < 0 or fact_slot(s, t.b) < 0: return 0
+    k = fact_bound(s, t.b)
+    if k.lo != k.hi or k.wide: return 0
+    o = t.origin
+    kind = 0
+    if nodes[o].kind == .binary and nodes[o].op == i32(int(Tok.slash)):
+        # (truncating division rounds a negative dividend up)
+        if not files[pos_file(nodes[o].pos)].is_dewy and fact_bound(s, t.a).lo < 0: return 0
+        kind = 1
+    else if nodes[o].kind == .call: kind = fact_floor_call(o)
+    if kind == 1: return if k.lo >= 1: k.lo else: 0
+    if kind == 3: return if k.lo >= 0 and k.lo <= 62: 1 << k.lo else: 0
+    0
+
+# A floor midpoint `(lo + hi) // 2` of two related values lies between them:
+# with lo - hi <= L (L <= 0), lo + floor(-L/2) <= mid <= hi + floor(L/2), so
+# `lo <? hi` gives `lo <=? mid <? hi` (a binary search's probe). O(1) row lookups.
+fact_midpoint = (s: mut FactState, n: int, v: int, sum: int):
+    t = fact_terms[sum]
+    if t.op != .plus or t.a == 0 or t.b == 0 or t.a == t.b: return
+    loop side in [0..2):
+        p = if side == 0: t.a else: t.b
+        q = if side == 0: t.b else: t.a
+        r = fact_row_find(s, p, q)
+        if r < 0: continue
+        limit = s.differences[r].limit
+        if limit > 0 or limit == FACT_MIN: continue
+        # (floor(L/2) for L <= 0, and -floor(-L/2) = ceil(L/2))
+        down = if limit % 2 == 0: limit / 2 else: (limit - 1) / 2
+        up = limit / 2
+        fact_difference(s, v, q, down, n)
+        fact_difference(s, p, v, up, n)
 
 # uint64's forms on its order-preserving encoding (value xor MIN, so rows and
 # comparisons between two uint64 values read as unsigned): every result is at

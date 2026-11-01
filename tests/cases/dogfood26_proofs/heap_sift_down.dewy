@@ -1,0 +1,28 @@
+# A heap's sift-down guards its children with `2*i + 1 <? n`: the cursor
+# keeps `i >=? 0` across the loop and stays below its child.
+sift = (@xs:array<int>) => {
+    let n = xs.length
+    let i = 0
+    loop 2 * i + 1 <? n {
+        let child = 2 * i + 1
+        if child + 1 <? n and xs[child + 1] <? xs[child] child += 1
+        if xs[i] <=? xs[child] break
+        xs.swap(i child)
+        i = child
+    }
+}
+left_spine = (xs:array<int>):>int => {
+    let i = 0
+    let t = 0
+    loop 2 * i + 1 <? xs.length {
+        t += xs[2 * i + 1]
+        i = 2 * i + 1
+    }
+    t
+}
+main = () => {
+    let a = [9 1 2 3 4 5]
+    sift(@a)
+    printl(a)
+    printl(left_spine([1 2 3 4 5 6 7 8]))
+}

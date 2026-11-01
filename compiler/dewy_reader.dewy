@@ -9271,12 +9271,19 @@ rd_dc_statement_ends=(@reader_ctx:ParserContext):>bool=>$unsafe {
     ((((after.space or after.newline) or (after.symbol =? 'rbrace')) or (after.symbol =? 'rparen')) or (after.symbol =? 'rbrack'))
 }
 
+# (`loop k in [18, 12, 6, 0]` has no `..`: a comma-separated array, the comma mistake)
 rd_dc_stepped_arity=(@reader_ctx:ParserContext @reader_nodes:array<Node> pos:int64):>void=>$unsafe {
-    rd_dc_unsupported(@reader_ctx pos "a stepped range without exactly two starting values");
     loop rd_dn_accept(@reader_ctx 'comma') {
         if (rd_dc_expr(@reader_ctx @reader_nodes 106) =? 0) {
+            rd_dc_unsupported(@reader_ctx pos "a stepped range without exactly two starting values");
             return
         }
+    }
+    if (rd_dn_peek(@reader_ctx) =? 'range') {
+        rd_dc_unsupported(@reader_ctx pos "a stepped range without exactly two starting values");
+    }
+    else {
+        rd_dc_report(@reader_ctx pos rd_dc_comma_text());
     }
 }
 

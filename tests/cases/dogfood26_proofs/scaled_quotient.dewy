@@ -1,0 +1,14 @@
+# A counter below `d // c` scaled by the same c stays within d:
+# `chars[4*g..4*g + 4)` for g in [0..chars.length // 4), pairs and triples.
+quads = (chars:array<string>):>array<string> => [loop g in [0..chars.length // 4) chars[4 * g..4 * g + 4).join("")]
+pairs = (words:array<string>):>array<string> => [loop k in [0..words.length // 2) "{words[2 * k]}={words[2 * k + 1]}"]
+triples = (xs:array<int>):>int => {
+    let t = 0
+    loop k in [0..xs.length // 3) t += xs[3 * k] + xs[k * 3 + 2]
+    t
+}
+main = () => {
+    printl(quads("abcdefghij".chars))
+    printl(pairs(["a" "1" "b" "2" "c"]))
+    printl(triples([1 2 3 4 5 6 7]))
+}

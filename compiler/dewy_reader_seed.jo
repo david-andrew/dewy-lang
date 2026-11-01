@@ -3929,10 +3929,14 @@ rt_dc_range = (bracketed: bool, value: bool = false, open: bool = false) -> int:
         return bc_call("__dewy_iter", [dw_range_value(n)], pos)
     n
 
+# (`loop k in [18, 12, 6, 0]` has no `..`: a comma-separated array, the comma mistake)
 rt_dc_stepped_arity = (pos: int):
-    rt_dc_unsupported(pos, "a stepped range without exactly two starting values")
     loop rt_dn_accept(.comma):
-        if rt_dc_expr(106) == 0: return
+        if rt_dc_expr(106) == 0:
+            rt_dc_unsupported(pos, "a stepped range without exactly two starting values")
+            return
+    if rt_dn_peek() == .range: rt_dc_unsupported(pos, "a stepped range without exactly two starting values")
+    else: rt_dc_comma_mistake(pos)
 
 rt_dc_range_fail = () -> int:
     dc_parser.at = -1

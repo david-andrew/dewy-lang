@@ -1,0 +1,7 @@
+# `3*k + 3` passes the last whole triple: still refused.
+f = (xs:array<int>):>int => {
+    let t = 0
+    loop k in [0..xs.length // 3) t += xs[3 * k + 3]
+    t
+}
+main = () => printl(f([1 2 3 4 5 6]))

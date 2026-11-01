@@ -1,0 +1,11 @@
+# `2*i + 1 <? n` does not cover the second child `2*i + 2`.
+f = (xs:array<int>):>int => {
+    let i = 0
+    let t = 0
+    loop 2 * i + 1 <? xs.length {
+        t += xs[2 * i + 2]
+        i = 2 * i + 1
+    }
+    t
+}
+main = () => printl(f([1 2 3 4]))

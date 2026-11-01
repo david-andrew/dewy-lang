@@ -1,0 +1,7 @@
+# A counter below `d // 2` scaled by 3 can pass d: still refused.
+f = (xs:array<int>):>int => {
+    let t = 0
+    loop k in [0..xs.length // 2) t += xs[3 * k]
+    t
+}
+main = () => printl(f([1 2 3 4 5 6]))

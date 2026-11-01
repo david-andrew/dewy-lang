@@ -1,0 +1,6 @@
+# `lo <=? hi` allows lo = hi = xs.length, where the midpoint is past the end.
+probe = (xs:array<int> lo:int hi:int):>int => {
+    if not (0 <=? lo <=? hi <=? xs.length) return -1
+    xs[(lo + hi) // 2]
+}
+main = () => printl(probe([1 3 5 7] 2 2))
