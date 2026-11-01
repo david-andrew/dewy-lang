@@ -7,13 +7,13 @@ day; keep it under 150 lines. Accepted designs live in [docs/design](docs/design
 
 ## North star
 
-| Measure | Now (2026-10-31) | Goal |
+| Measure | Now (2026-11-01) | Goal |
 |---|---|---|
 | Acceptance ladder, design surface | 122/122 (saturated; new rungs needed) | all |
 | Tier-4 flagship programs (1–5k lines each) | 7/7 pass | all pass |
-| No traps by default | census 1,327 sites / 429 programs (2,604 / 2,252), down from 1,793 / 3,600 on 10-26 | ordinary code proves without opt-ins |
-| Compile throughput, single thread, default build, every processed line | flagships 155.3k lines/s (min 100_rtos_kernel 124.4k, 99_dewy_frontend 127.2k) | 200–250k on every flagship |
-| Hello-world compile | 8.0 ms (instruction-derived) | ≤20 ms |
+| No traps by default | census 2,580 sites in 1,008 of 2,252 programs (10-31: 2,604), down from 3,600 on 10-26 | ordinary code proves without opt-ins |
+| Compile throughput, single thread, default build, every processed line | flagships 160.2k lines/s (min 100_rtos_kernel 127.2k, 99_dewy_frontend 130.8k) | 200–250k on every flagship |
+| Hello-world compile | 7.5 ms (instruction-derived) | ≤20 ms |
 | Kernels vs C -O2 (time, default) | broadcast 0.75×, Jacobi 0.59×, arena 3.2×; mergesort 0.62× OpenMP | ≤1.2× |
 | Quick / full suite | ~100 s loaded (reselect) / ~5 min | ≤30 s / ≤5 min |
 
@@ -36,9 +36,11 @@ changes. Wall clock only on a quiet pinned machine or a CI runner. Kernels:
    A strategy decision is open (see the pending questions).
 3. **Self-hosting** ([readiness](docs/design/self_hosting.md)): the front end, the
    checker state, the optimizer, the shared backend analysis, and the wasm, arm64
-   and x64 emitters run in Dewy, with most expression and statement checking.
-   Next: the statement layer (let, assign, blocks), the safety passes, then
-   the expression core; close milestone 1 (Dewy owns all subsystem
+   and x64 emitters run in Dewy, with the statement layer, the expression
+   dispatcher, binary and coercion checking, and the ownership and loans
+   passes. Next: the call group (blocked on module collection, intrinsics and
+   import cycles, question #140), then check.jo's value machinery, lowering
+   and facts/effects; close milestone 1 (Dewy owns all subsystem
    execution), then milestone 3 (a pinned C-reproducible seed that retires the
    frozen twins).
 4. **Runtime speed vs C:** `push` and `arena` growth bookkeeping is bounded
