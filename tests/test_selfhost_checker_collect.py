@@ -1,6 +1,7 @@
-"""collect_fns, collect_module and collect_in (a call's function family by name: the
-module's own table, its uses', the Dewy prelude's, the prelude's, the rational's exact
-members) match frozen Jo, host services and surface hiding included."""
+"""collect_fns, collect_module, collect_in and collect_named (a call's function family by
+name: the module's own table, its uses', the Dewy prelude's, the prelude's, the rational's
+exact members; a Dewy module's own binding shadowing them, kept while the name's stamp
+stands) match frozen Jo, host services and surface hiding included."""
 import pytest
 
 from tests.support import compiler  # noqa: F401
@@ -44,8 +45,18 @@ cl_rational_host = (m: int, name: int, out: *(int[])):
     print("rational:{m}:{name}")
     out[0].push(99)
 cl_grow = (d: int): cl_marks.resize(d + 4)
-cl_host = CheckerCollectHost(cl_demand, cl_use_home_host, cl_dp_host, cl_reach_host, cl_rational_host, cl_grow)
-cl_input = CheckerCollectInput(&cl_ctxs, &cl_cx, &cl_bits, &cl_uses, &cl_built, &cl_prelude_used, &cl_home_first, &cl_home_mod, &cl_home_next, &cl_demanded, &cl_scanned, &cl_dp_by_name, &cl_dp_mods, &cl_found, &cl_probed, &cl_reach, &cl_exact, &cl_marks, &cl_hidden, &cl_host)
+cl_named_first: int[]
+cl_named_grow = (name: int):
+    print("named_grow:{name}")
+    cl_named_first.resize(name + 2)
+cl_ide = false
+cl_ticks: int[]
+cl_struct = 1
+cl_named: NamedFamily[]
+cl_named_decls: int[]
+cl_named_hidden: int[]
+cl_host = CheckerCollectHost(cl_demand, cl_use_home_host, cl_dp_host, cl_reach_host, cl_rational_host, cl_grow, cl_named_grow)
+cl_input = CheckerCollectInput(&cl_ctxs, &cl_cx, &cl_bits, &cl_uses, &cl_built, &cl_prelude_used, &cl_home_first, &cl_home_mod, &cl_home_next, &cl_demanded, &cl_scanned, &cl_dp_by_name, &cl_dp_mods, &cl_found, &cl_probed, &cl_reach, &cl_exact, &cl_marks, &cl_hidden, &cl_host, &cl_ide, &cl_ticks, &cl_struct, &cl_named_first, &cl_named, &cl_named_decls, &cl_named_hidden)
 cl_binding = checker_collect_bind(&cl_input)
 show = (label: str, out: int[]):
     print("{label}:{out}:{cl_hidden}")
@@ -89,6 +100,30 @@ main = ():
             collect_in(1, qn, hide, &out)
             collect_in(-1, pn, hide, &out)
             show("in:{round}:{hide}", out)
+    # collect_named: a Dewy module's own non-method declarations shadow the rest (methods,
+    # first parameter `$self...`, stay); kept by name, module and current module per stamp
+    self_name = intern_text("$self")
+    param = node(.param); nodes[param].name = i32(self_name)
+    loop nodes.len() < 120: nodes.push(Node())
+    method = node(.fn_, 0, 0, 0, [param])
+    query_syms.push(Sym(kind = .fns, decl = i32(method)))
+    query_syms[2].next = 7
+    loop round in [0, 1, 2]:
+        if round == 1: cl_struct = 2
+        if round == 2:
+            cl_ticks = [0, 0, 5]
+            cl_ide = true
+        loop c in [0, 1, 3]:
+            cl_cx = c
+            loop name in [1, 2, qn]:
+                loop mod in [-1, 0, 1]:
+                    loop again in [0, 1]:
+                        out: int[]
+                        if again == 1 and mod == 1: out.push(method)
+                        if again == 1 and mod == 0: out.push(16)
+                        collect_named(name, mod, &out)
+                        show("named:{round}:{c}:{name}:{mod}:{again}", out)
+    print("families:{cl_named.len()}:{cl_named_decls.len()}:{cl_named_hidden.len()}")
     print("ok")
 '''
 

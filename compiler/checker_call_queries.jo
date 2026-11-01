@@ -159,6 +159,16 @@ struct CheckerCollectHost:
     prelude_reach: (int, int) -> void
     rational: (int, int, *(int[])) -> void
     cin_grow: (int) -> void
+    named_grow: (int) -> void
+struct NamedFamily:
+    next: int
+    mod: int
+    cur: int
+    gen: int
+    decls: int
+    ndecls: int
+    hidden: int
+    nhidden: int
 struct CheckerCollectInput:
     contexts: *(FnCtx[])
     context: *(int)
@@ -180,6 +190,13 @@ struct CheckerCollectInput:
     cin_mark: *(i32[])
     surface_hidden: *(int[])
     host: *(CheckerCollectHost)
+    ide: *(bool)
+    ml_name_tick: *(int[])
+    ml_struct: *(int)
+    named_first: *(int[])
+    named: *(NamedFamily[])
+    named_decls: *(int[])
+    named_hidden: *(int[])
 cl_in: *(CheckerCollectInput)
 cl_pass = 0
 checker_collect_bind = (input: *CheckerCollectInput) -> int:
@@ -287,3 +304,80 @@ collect_fns = (name: int, out: *(int[])):
     collect_in(-1, name, hide, out)
     if dewy:
         if cl_in[0].exact_named[0].len() == 0 or (name < cl_in[0].exact_named[0].len() and cl_in[0].exact_named[0][name]): cl_in[0].host[0].rational(m, name, out)
+cl_stamp = (name: int) -> int:
+    base = cl_in[0].ml_struct[0]
+    if name < cl_in[0].ml_name_tick[0].len() and cl_in[0].ml_name_tick[0][name] > base: return cl_in[0].ml_name_tick[0][name]
+    base
+cl_method = (d: int) -> bool:
+    if cg_nodes[0][d].nlist < 1: return false
+    p = int(cg_lists[0][int(cg_nodes[0][d].list)])
+    starts_with(cg_names[0][int(cg_nodes[0][p].name)], "$self")
+cl_named_now = (name: int, mod: int, out: *(int[])):
+    if mod >= 0: collect_module(mod, name, out)
+    else: collect_fns(name, out)
+    m = mod
+    if mod < 0: m = cl_cur_mod()
+    if m < 0: return
+    bits = cl_in[0].mod_bits[0][m]
+    if bits & 1 != 0 or bits & 2 == 0: return
+    s = name_family(m, name, 0)
+    if s == 0: return
+    owned = false
+    o = s
+    loop o != 0:
+        d = int(cg_syms[0][o].decl)
+        if d != 0 and not cl_method(d): owned = true
+        o = int(cg_syms[0][o].next)
+    if not owned: return
+    kept = 0
+    count = out[0].len()
+    loop i in [0..count):
+        d = out[0][i]
+        keep = cl_method(d)
+        e = s
+        loop not keep and e != 0:
+            ed = int(cg_syms[0][e].decl)
+            if ed == d and ed != 0 and not cl_method(ed): keep = true
+            e = int(cg_syms[0][e].next)
+        if keep:
+            out[0][kept] = d
+            kept += 1
+    loop out[0].len() > kept: out[0].pop()
+collect_named = (name: int, mod: int, out: *(int[])):
+    if out[0].len() > 0 or cl_in[0].ide[0]:
+        cl_named_now(name, mod, out)
+        return
+    cur = cl_cur_mod()
+    gen = cl_stamp(name)
+    found = -1
+    if name < cl_in[0].named_first[0].len():
+        e = cl_in[0].named_first[0][name]
+        loop e != 0:
+            f = cl_in[0].named[0][e - 1]
+            if f.mod == mod and f.cur == cur:
+                if f.gen == gen:
+                    loop i in [f.decls..f.decls + f.ndecls): out[0].push(cl_in[0].named_decls[0][i])
+                    loop i in [f.hidden..f.hidden + f.nhidden): cl_in[0].surface_hidden[0].push(cl_in[0].named_hidden[0][i])
+                    return
+                found = e - 1
+                e = 0
+            else: e = f.next
+    mark = cl_in[0].surface_hidden[0].len()
+    cl_named_now(name, mod, out)
+    if cl_stamp(name) != gen: return
+    start = cl_in[0].named_decls[0].len()
+    loop i in [0..out[0].len()): cl_in[0].named_decls[0].push(out[0][i])
+    hstart = cl_in[0].named_hidden[0].len()
+    loop i in [mark..cl_in[0].surface_hidden[0].len()): cl_in[0].named_hidden[0].push(cl_in[0].surface_hidden[0][i])
+    nd = out[0].len()
+    nh = cl_in[0].named_hidden[0].len() - hstart
+    if found >= 0:
+        cl_in[0].named[0][found].gen = gen
+        cl_in[0].named[0][found].decls = start
+        cl_in[0].named[0][found].ndecls = nd
+        cl_in[0].named[0][found].hidden = hstart
+        cl_in[0].named[0][found].nhidden = nh
+        return
+    if name >= cl_in[0].named_first[0].len(): cl_in[0].host[0].named_grow(name)
+    cl_in[0].named[0].push(NamedFamily(cl_in[0].named_first[0][name], mod, cur, gen, start, nd, hstart, nh))
+    cl_in[0].named_first[0][name] = cl_in[0].named[0].len()

@@ -6708,7 +6708,7 @@ values_candidate = (c: int) -> bool:
     else:
         # (`add(fn)`, fn giving several values: the bare name calls it)
         ds: int[]
-        collect_named(int(nodes[c].name), -1, ds)
+        collect_named(int(nodes[c].name), -1, &ds)
         if ds.len() != 1: return false
         d = ds[0]
         if has_flag(d, NF_GENERIC) or nkids(d) > 0 and nodes[kid(d, 0)].b == 0: return false
@@ -6742,7 +6742,7 @@ values_arity = (n: int) -> int:
     s = lookup(int(nodes[callee].name))
     if s == 0 or syms[s].kind != .fns: return -1
     ds: int[]
-    collect_named(int(nodes[callee].name), -1, ds)
+    collect_named(int(nodes[callee].name), -1, &ds)
     if ds.len() != 1: return -1
     d = ds[0]
     kinds = dewy_param_kinds.get(d) ?? []
@@ -6843,7 +6843,7 @@ values_argument_hints = (n: int, expected: int) -> int[]:
     ft = 0
     if nodes[callee].kind == .ident:
         s = lookup(int(nodes[callee].name))
-        if s != 0 and syms[s].kind == .fns: collect_named(int(nodes[callee].name), -1, decls)
+        if s != 0 and syms[s].kind == .fns: collect_named(int(nodes[callee].name), -1, &decls)
     else if nodes[callee].kind == .field and nodes[callee].b == 0:
         recv = int(nodes[callee].a)
         name = int(nodes[callee].name)
@@ -6855,7 +6855,7 @@ values_argument_hints = (n: int, expected: int) -> int[]:
         nodes[callee].a = i32(recv)
         add_flag(recv, NF_CHECKED)
         k = types[rt].kind
-        if k == .module: collect_named(name, int(types[rt].mod), decls)
+        if k == .module: collect_named(name, int(types[rt].mod), &decls)
         else if k == .typeval:
             tt = prune(telem(rt))
             if types[tt].kind == .struct_:
@@ -6956,7 +6956,7 @@ values_call = (n: int, expected: int) -> int:
                 if fn_decls_read == 0:
                     fn_decls_read = 1
                     s = lookup(int(nodes[callee].name))
-                    if s != 0 and syms[s].kind == .fns: collect_named(int(nodes[callee].name), -1, fn_decls)
+                    if s != 0 and syms[s].kind == .fns: collect_named(int(nodes[callee].name), -1, &fn_decls)
                 field = fns_param_hint(fn_decls, i, nkids(n))
             else:
                 if not hints_read:

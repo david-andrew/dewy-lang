@@ -234,6 +234,20 @@ CheckerCollectHost:type=[
     prelude_reach:<(m:int64 dm:int64):>void>
     rational:<(m:int64 name:int64 out:ptr<array<int64>>):>void>
     cin_grow:<(d:int64):>void>
+    named_grow:<(name:int64):>void>
+]
+# A collect_named family kept while its name's stamp stands: by name through next (an entry
+# + 1; 0 ends it), for the module asked from (-1 the current one's) and the module checked in,
+# its declarations and the spellings it hid (spans of named_decls and named_hidden).
+NamedFamily:type=[
+    next:int64=0
+    mod:int64=0
+    cur:int64=0
+    gen:int64=0
+    decls:int64=0
+    ndecls:int64=0
+    hidden:int64=0
+    nhidden:int64=0
 ]
 CheckerCollectInput:type=[
     contexts:ptr<array<FnCtx>>
@@ -256,6 +270,13 @@ CheckerCollectInput:type=[
     cin_mark:ptr<array<int32>>
     surface_hidden:ptr<array<int64>>
     host:ptr<CheckerCollectHost>
+    ide:ptr<bool>
+    ml_name_tick:ptr<array<int64>>
+    ml_struct:ptr<int64>
+    named_first:ptr<array<int64>>
+    named:ptr<array<NamedFamily>>
+    named_decls:ptr<array<int64>>
+    named_hidden:ptr<array<int64>>
 ]
 let cl_in:ptr<CheckerCollectInput>=$unsafe (uint64(0) as ptr<CheckerCollectInput>)
 let cl_pass:CGWord=0
@@ -405,4 +426,131 @@ collect_fns=(name:CGWord out:ptr<array<int64>>):>void=>$unsafe {
         let ex=cl_in[0].exact_named
         if ex[0].length =? 0 or (name <? ex[0].length and ex[0].ptr[name]) {cl_in[0].host[0].rational(m name out)}
     }
+}
+# (the tick as of which name's module-level answers stand: check.jo's ml_stamp)
+cl_stamp=(name:CGWord):>CGWord=>$unsafe {
+    let ticks=cl_in[0].ml_name_tick
+    let base=cl_in[0].ml_struct[0]
+    if name <? ticks[0].length and ticks[0].ptr[name] >? base {return ticks[0].ptr[name]}
+    base
+}
+# (a Dewy method: its first parameter is `$self...`)
+cl_method=(d:CGWord):>bool=>$unsafe {
+    let decl=cg_nodes[0].ptr + d
+    if decl[0].nlist <? 1 {return false}
+    let p=CGWord(cg_lists[0].ptr[CGWord(decl[0].list)])
+    cg_names[0].ptr[CGWord(cg_nodes[0].ptr[p].name)].startswith("$self")
+}
+# A bare name in a Dewy module names one binding: the module's own declarations of it
+# shadow the families it would otherwise see, as a whole (methods, reached through their
+# object, stay).
+cl_named_now=(name:CGWord mod:CGWord out:ptr<array<int64>>):>void=>$unsafe {
+    if mod >=? 0 {collect_module(mod name out)} else {collect_fns(name out)}
+    let m=if mod >=? 0 {mod} else {cl_cur_mod()}
+    if m <? 0 {return}
+    let bits=cl_in[0].mod_bits[0].ptr[m]
+    if (bits & 1) not=? 0 or (bits & 2) =? 0 {return}
+    let s=name_family(m name 0)
+    if s =? 0 {return}
+    let owned=false
+    let o=s
+    loop o not=? 0 {
+        let d=CGWord(cg_syms[0].ptr[o].decl)
+        if d not=? 0 and not cl_method(d) {owned=true}
+        o=CGWord(cg_syms[0].ptr[o].next)
+    }
+    if not owned {return}
+    let kept:CGWord=0
+    let i:CGWord=0
+    let count=out[0].length
+    loop i <? count {
+        let d=out[0].ptr[i]
+        let keep=cl_method(d)
+        let e=s
+        loop not keep and e not=? 0 {
+            let ed=CGWord(cg_syms[0].ptr[e].decl)
+            if ed =? d and ed not=? 0 and not cl_method(ed) {keep=true}
+            e=CGWord(cg_syms[0].ptr[e].next)
+        }
+        if keep {
+            out[0].ptr[kept]=d
+            kept=kept + 1
+        }
+        i=i + 1
+    }
+    loop out[0].length >? kept {out[0].pop();}
+}
+# collect_fns (mod < 0) or collect_module(mod), with the Dewy module's own binding
+# shadowing, into an empty `out`: kept by name, module and current module while the
+# name's stamp stands. O(entries for the name) a hit, plus the declarations copied.
+collect_named=(name:CGWord mod:CGWord out:ptr<array<int64>>):>void=>$unsafe {
+    if out[0].length >? 0 or cl_in[0].ide[0] {
+        cl_named_now(name mod out)
+        return
+    }
+    let cur=cl_cur_mod()
+    let gen=cl_stamp(name)
+    let fams=cl_in[0].named
+    let found:CGWord=-1
+    if name <? cl_in[0].named_first[0].length {
+        let e=cl_in[0].named_first[0].ptr[name]
+        loop e not=? 0 {
+            let f=fams[0].ptr + (e - 1)
+            if f[0].mod =? mod and f[0].cur =? cur {
+                if f[0].gen =? gen {
+                    let decls=cl_in[0].named_decls
+                    let i=f[0].decls
+                    let stop=i + f[0].ndecls
+                    loop i <? stop {
+                        out[0].push(decls[0].ptr[i])
+                        i=i + 1
+                    }
+                    let hidden=cl_in[0].named_hidden
+                    i=f[0].hidden
+                    stop=i + f[0].nhidden
+                    loop i <? stop {
+                        cl_in[0].surface_hidden[0].push(hidden[0].ptr[i])
+                        i=i + 1
+                    }
+                    return
+                }
+                found=e - 1
+                e=0
+            } else {
+                e=f[0].next
+            }
+        }
+    }
+    let mark=cl_in[0].surface_hidden[0].length
+    cl_named_now(name mod out)
+    if cl_stamp(name) not=? gen {return}
+    let decls=cl_in[0].named_decls
+    let start=decls[0].length
+    let i:CGWord=0
+    loop i <? out[0].length {
+        decls[0].push(out[0].ptr[i])
+        i=i + 1
+    }
+    let hidden=cl_in[0].named_hidden
+    let hstart=hidden[0].length
+    let surface=cl_in[0].surface_hidden
+    i=mark
+    loop i <? surface[0].length {
+        hidden[0].push(surface[0].ptr[i])
+        i=i + 1
+    }
+    let nd=out[0].length
+    let nh=hidden[0].length - hstart
+    if found >=? 0 {
+        let f=fams[0].ptr + found
+        f[0].gen=gen
+        f[0].decls=start
+        f[0].ndecls=nd
+        f[0].hidden=hstart
+        f[0].nhidden=nh
+        return
+    }
+    if name >=? cl_in[0].named_first[0].length {cl_in[0].host[0].named_grow(name)}
+    fams[0].push(NamedFamily[cl_in[0].named_first[0].ptr[name] mod cur gen start nd hstart nh])
+    cl_in[0].named_first[0].ptr[name]=fams[0].length
 }
