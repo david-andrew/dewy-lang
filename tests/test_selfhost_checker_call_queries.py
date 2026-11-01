@@ -1,5 +1,5 @@
 """The call checker's queries (intrinsic_of, ctx_dependent, argument order, mutable overlap,
-name families) match frozen Jo and expr.jo's answers."""
+name families, habit names) match frozen Jo and expr.jo's answers."""
 import pytest
 
 from tests.support import compiler  # noqa: F401
@@ -11,9 +11,11 @@ set_name = 2
 order_host = (n: int, given: int[], final: int[]): print("order:{n}:{given}:{final}")
 overlap_host = (args: int[], mask: int, pos: int): print("overlap:{args}:{mask}:{pos}")
 float_host = (n: int): print("float_key")
+habit_host = (n: int, name: int, args: int[]): print("habit:{name}:{args.len()}")
+habit_names: int[] = [30, 31, 32, 33, 34, 35, 36, 37, 38]
 query_fns: FnInst[] = [FnInst()]
 float_names: int[] = [20, 21, 22, 23]
-query_host = CheckerCallQueryHost(order_host, overlap_host, float_host)
+query_host = CheckerCallQueryHost(order_host, overlap_host, float_host, habit_host)
 # (name families: syms 1-3 functions, 4 a global; the prelude binds names 1 and `_p`, module
 # 0 binds name 2 and module 1 names 2 and `__q`; module 2 binds name 2 to a global)
 query_syms: Sym[] = [Sym(), Sym(kind = .fns), Sym(kind = .fns), Sym(kind = .fns), Sym(kind = .global)]
@@ -22,7 +24,7 @@ name_first: int[] = [0, 0, 4]
 name_mod: int[] = [0, 1, 1, 2]
 name_sym: int[] = [2, 3, 1, 4]
 name_next: int[] = [0, 1, 0, 2]
-query_input = CheckerCallQueryInput(&nodes, &lists, &files, &intrinsic_names, &set_name, &query_fns, &float_names, &query_host, &query_syms, &names, &prelude_syms, &name_first, &name_mod, &name_sym, &name_next)
+query_input = CheckerCallQueryInput(&nodes, &lists, &files, &intrinsic_names, &set_name, &query_fns, &float_names, &query_host, &query_syms, &names, &prelude_syms, &name_first, &name_mod, &name_sym, &name_next, &habit_names)
 query_binding = checker_call_queries_bind(&query_input)
 mk = (kind: NK, flags: int = 0, t: int = 0, children: int[] = []) -> int:
     n = node(kind, 0, 0, 0, children)
@@ -130,6 +132,12 @@ main = ():
             if name == qn: label = "__q"
             if name > qn: label = "far"
             print("family:{m}:{label}:{name_family(m, name, 0)}:{name_family(m, name, 1)}:{name_family(m, name, 2)}")
+    # (habits: by name, only the argument counts that may be one reach the host)
+    loop name in [29, 30, 31, 32, 33, 34, 35, 36, 37, 38]:
+        loop na in [0, 1, 2, 3, 4, 5]:
+            args: int[]
+            loop i in [0..na): args.push(i)
+            habit_call_check(7, name, args)
     print("ok")
 '''
 
@@ -257,6 +265,20 @@ family:3:2:0:0:0
 family:3:_p:0:0:0
 family:3:__q:0:0:0
 family:3:far:0:0:0
+habit:30:4
+habit:30:5
+habit:31:3
+habit:31:4
+habit:31:5
+habit:32:1
+habit:33:3
+habit:33:4
+habit:33:5
+habit:34:0
+habit:35:0
+habit:36:5
+habit:37:2
+habit:38:1
 ok
 '''
 

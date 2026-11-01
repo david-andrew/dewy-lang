@@ -16,6 +16,7 @@ CheckerCallQueryHost:type=[
     order:<(node:int64 given:array<int64> final:array<int64>):>void>
     overlap:<(args:array<int64> mask:int64 pos:int64):>void>
     float_key:<(node:int64):>void>
+    habit:<(node:int64 name:int64 args:array<int64>):>void>
 ]
 CheckerCallQueryInput:type=[
     nodes:ptr<array<Node>>
@@ -33,6 +34,7 @@ CheckerCallQueryInput:type=[
     name_mod:ptr<array<int64>>
     name_sym:ptr<array<int64>>
     name_next:ptr<array<int64>>
+    habit_names:ptr<array<int64>>
 ]
 let cg_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
 let cg_lists:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
@@ -49,6 +51,7 @@ let cg_name_first:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
 let cg_name_mod:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
 let cg_name_sym:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
 let cg_name_next:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
+let cg_habit_names:ptr<array<int64>>=$unsafe (uint64(0) as ptr<array<int64>>)
 checker_call_queries_bind=(input:ptr<CheckerCallQueryInput>):>CGWord=>$unsafe {
     cg_nodes=input[0].nodes
     cg_lists=input[0].lists
@@ -65,6 +68,7 @@ checker_call_queries_bind=(input:ptr<CheckerCallQueryInput>):>CGWord=>$unsafe {
     cg_name_mod=input[0].name_mod
     cg_name_sym=input[0].name_sym
     cg_name_next=input[0].name_next
+    cg_habit_names=input[0].habit_names
     0
 }
 # The intrinsic (its index in the table) an interned name names, or -1.
@@ -198,4 +202,20 @@ name_family=(m:CGWord name:CGWord hide:CGWord):>CGWord=>$unsafe {
     }
     if cg_syms[0].ptr[s].kind not=? 'fns' {return 0}
     s
+}
+# A call written as another language's habit (`push()` for push_transform, `line` with
+# four numbers...) is told Dewy's spelling by the host (expr.jo habit_rest). Without a
+# host call: a name that is none of them (interned line, text, clear, fill, push, pop,
+# map, atan, random, in that order), or an argument count the habit cannot have.
+habit_call_check=(n:CGWord name:CGWord args:array<int64>):>void=>$unsafe {
+    let h=cg_habit_names[0].ptr
+    let na=args.length
+    let maybe=false
+    if name =? h[0] {maybe=na >=? 4}
+    if name =? h[1] or name =? h[3] {maybe=na >=? 3}
+    if name =? h[2] or name =? h[8] {maybe=na =? 1}
+    if name =? h[4] or name =? h[5] {maybe=na =? 0}
+    if name =? h[6] {maybe=na =? 5}
+    if name =? h[7] {maybe=na =? 2}
+    if maybe {cg_host[0].habit(n name args)}
 }

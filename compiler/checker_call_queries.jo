@@ -6,6 +6,7 @@ struct CheckerCallQueryHost:
     order: (int, int[], int[]) -> void
     overlap: (int[], int, int) -> void
     float_key: (int) -> void
+    habit: (int, int, int[]) -> void
 struct CheckerCallQueryInput:
     nodes: *(Node[])
     lists: *(i32[])
@@ -22,6 +23,7 @@ struct CheckerCallQueryInput:
     name_mod: *(int[])
     name_sym: *(int[])
     name_next: *(int[])
+    habit_names: *(int[])
 cg_nodes: *(Node[])
 cg_lists: *(i32[])
 cg_files: *(SrcFile[])
@@ -37,6 +39,7 @@ cg_name_first: *(int[])
 cg_name_mod: *(int[])
 cg_name_sym: *(int[])
 cg_name_next: *(int[])
+cg_habit_names: *(int[])
 checker_call_queries_bind = (input: *CheckerCallQueryInput) -> int:
     cg_nodes = input[0].nodes
     cg_lists = input[0].lists
@@ -53,6 +56,7 @@ checker_call_queries_bind = (input: *CheckerCallQueryInput) -> int:
     cg_name_mod = input[0].name_mod
     cg_name_sym = input[0].name_sym
     cg_name_next = input[0].name_next
+    cg_habit_names = input[0].habit_names
     0
 intrinsic_of = (name: int) -> int:
     if name >= 0 and name < cg_intrinsic_names[0].len(): return cg_intrinsic_names[0][name] - 1
@@ -137,3 +141,14 @@ name_family = (m: int, name: int, hide: int) -> int:
         if starts_with(text, "_") and not (hide == 2 and starts_with(text, "__")): return 0
     if cg_syms[0][s].kind != .fns: return 0
     s
+habit_call_check = (n: int, name: int, args: int[]):
+    h = cg_habit_names[0]
+    na = args.len()
+    maybe = false
+    if name == h[0]: maybe = na >= 4
+    if name == h[1] or name == h[3]: maybe = na >= 3
+    if name == h[2] or name == h[8]: maybe = na == 1
+    if name == h[4] or name == h[5]: maybe = na == 0
+    if name == h[6]: maybe = na == 5
+    if name == h[7]: maybe = na == 2
+    if maybe: cg_host[0].habit(n, name, args)

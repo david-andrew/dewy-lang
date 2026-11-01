@@ -145,6 +145,7 @@ embedded_files: str[]          # actual compile-time inputs, including those use
 intrinsic_names: int[]         # interned name -> intrinsic index + 1; 0 means no intrinsic
 dewy_set_name = -1             # the interned `__dewy_set`
 float_key_names: int[]         # interned `__dewy_make_set`, `set`, `k`, `value` (map_float_key)
+habit_names: int[]             # interned line, text, clear, fill, push, pop, map, atan, random (habit_call_check)
 
 register_intrinsics = ():
     intrinsic_names = []
@@ -155,6 +156,7 @@ register_intrinsics = ():
         if it.id == .dewy_set: dewy_set_name = nm
         universe[nm] = new_sym(nm, .builtin, int(it.id), 0)
     float_key_names = [intern("__dewy_make_set"), intern("set"), intern("k"), intern("value")]
+    habit_names = [intern("line"), intern("text"), intern("clear"), intern("fill"), intern("push"), intern("pop"), intern("map"), intern("atan"), intern("random")]
 
 is_lit = (n: int) -> bool: has_flag(n, NF_LITERAL)
 lit_default = (n: int) -> int:
@@ -4757,11 +4759,9 @@ program_str_fn = (t0: int, pos: int) -> int:
 
 # a library function called as another language's of the same name is (p5's line(x1, y1, x2,
 # y2), fill(r, g, b) and push(); atan(y, x)): what it is here, before its overloads are tried
-habit_call_names: {int: bool} = {}
-habit_call_check = (n: int, name: int, args: int[]):
-    if habit_call_names.len() == 0:
-        loop w in ["line", "text", "clear", "fill", "push", "pop", "map", "atan", "random"]: habit_call_names[intern(w)] = true
-    if not habit_call_names.has(name): return
+# checker_call_queries.dewy's habit_call_check leaves the host the names and argument
+# counts a habit may have.
+habit_rest = (n: int, name: int, args: int[]):
     nm = name_of(name)
     # (the program's own function of the name: its call)
     own: int[]
@@ -10100,8 +10100,8 @@ intrinsic_length = (n: int, a: int, t: int, expected: int) -> int:
 intrinsic_host = CheckerIntrinsicHost(intrinsic_rest, nargs_check, intrinsic_error, coerce, intrinsic_length, value_loop_resize, check_place, ref_length_mutation)
 intrinsic_input = CheckerIntrinsicInput(&nodes, &lists, &types, &structs, &files, &value_loops, &refine_active, &T_VOID, &T_INT, &T_STR, &T_U8, &T_RAWPTR, &T_NEVER, &intrinsic_host)
 intrinsic_binding = checker_intrinsics_bind(&intrinsic_input)
-call_query_host = CheckerCallQueryHost(call_order_rest, mutable_arguments_rest, float_key_rest)
-call_query_input = CheckerCallQueryInput(&nodes, &lists, &files, &intrinsic_names, &dewy_set_name, &fns, &float_key_names, &call_query_host, &syms, &names, &prelude_syms, &name_first, &name_mod, &name_sym, &name_next)
+call_query_host = CheckerCallQueryHost(call_order_rest, mutable_arguments_rest, float_key_rest, habit_rest)
+call_query_input = CheckerCallQueryInput(&nodes, &lists, &files, &intrinsic_names, &dewy_set_name, &fns, &float_key_names, &call_query_host, &syms, &names, &prelude_syms, &name_first, &name_mod, &name_sym, &name_next, &habit_names)
 call_query_binding = checker_call_queries_bind(&call_query_input)
 
 # checker_expr.dewy's services: literal preparation (grouped values, spreads, the
