@@ -466,21 +466,14 @@ dw_parallel_exits = (n: int, depth: int = 0):
 dw_warn_if_pending: int[]
 
 # `$parallel_safe` before a module function: its callers are held to giving a parallel-safe
-# function for each callback parameter (compiler/concurrency.jo, parsafe_tags_check). A function
-# with no callback parameter is rejected: the tag would check nothing.
+# function for each callback parameter (compiler/concurrency.jo, parsafe_tags_check, which also
+# rejects a function with no callback parameter once its types are known).
 PARSAFE_PLACE = "`$parallel_safe` marks a module-level function that runs its callbacks on many threads at once: put it before one, on its line or the line above"
 dw_parsafe_pos = 0
 
 dw_parsafe_attach = (made: int[], pos: int):
     if made.len() != 1 or nodes[made[0]].kind != .fn_ or has_flag(made[0], NF_EXTERN): fatal(pos, PARSAFE_PLACE)
-    n = made[0]
-    callback = false
-    loop p in kids(n):
-        t = int(nodes[p].a)
-        if t != 0 and nodes[t].kind == .topt: t = int(nodes[t].a)
-        if t != 0 and nodes[t].kind == .tfn: callback = true
-    if not callback: fatal(pos, "`$parallel_safe` holds callers to giving a parallel-safe function for each callback parameter, but '{name_of(int(nodes[n].name))}' takes no function, so the tag would check nothing: remove it")
-    parsafe_tags[n] = pos
+    parsafe_tags[made[0]] = pos
 
 # The declarations a module statement the direct grammar read makes (dewy_direct.jo's dn_statement):
 # positive IDs are declarations; negative IDs select module-only checker nodes.

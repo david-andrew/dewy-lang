@@ -717,10 +717,11 @@ a function that takes no callback. Ordinary code never writes anything.
   on, and the parallel use ("apply runs 'f' on many threads at once here,
   through `parallel`").
 - **`$parallel_safe`** is a marker like `$export`: first in a module-level
-  function declaration, on its line or the line before. It is rejected at
-  once when no parameter has a function type. After inference, each checked
-  instance must carry the requirement on every callback parameter; otherwise
-  the tag is an error saying the body no longer passes it into parallel code.
+  function declaration, on its line or the line before. After inference, each
+  checked instance is examined: with no parameter of function type (aliases
+  resolved) the tag is rejected, as it would check nothing; otherwise every
+  callback parameter must carry the requirement, or the tag is an error saying
+  the body no longer passes it into parallel code.
 - **Gaps** (conservative errors, not unsoundness): a parallel body that hands
   a callback parameter to a helper that calls it, and a callback parameter
   given to `spawn`, are still rejected as calls the compiler cannot see.
