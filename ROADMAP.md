@@ -7,7 +7,7 @@ day; keep it under 150 lines. Accepted designs live in [docs/design](docs/design
 
 ## North star
 
-| Measure | Now (2026-11-01) | Goal |
+| Measure | Now (2026-11-02) | Goal |
 |---|---|---|
 | Acceptance ladder, design surface | 122/122 (saturated; new rungs needed) | all |
 | Tier-4 flagship programs (1–5k lines each) | 7/7 pass | all pass |
@@ -15,7 +15,7 @@ day; keep it under 150 lines. Accepted designs live in [docs/design](docs/design
 | Compile throughput, single thread, default build, every processed line | flagships 160.2k lines/s (min 100_rtos_kernel 127.2k, 99_dewy_frontend 130.8k) | 200–250k on every flagship |
 | Hello-world compile | 7.5 ms (instruction-derived) | ≤20 ms |
 | Kernels vs C -O2 (time, default) | broadcast 0.75×, Jacobi 0.59×, arena 3.2×; mergesort 0.62× OpenMP | ≤1.2× |
-| Quick / full suite | ~100 s loaded (reselect) / ~5 min | ≤30 s / ≤5 min |
+| Quick / full suite | 34 s quiet / 4:56 median loaded (nightly tier) | ≤30 s / ≤5 min |
 
 Ladder: `python3 -m tools.core ladder` (`tests/ladder/ladder.json`). Compile:
 `speed` (single-thread instructions; the gate) and `speed --cycles` for layout
@@ -38,8 +38,9 @@ changes. Wall clock only on a quiet pinned machine or a CI runner. Kernels:
    checker state, the optimizer, the shared backend analysis, and the wasm, arm64
    and x64 emitters run in Dewy, with the statement layer, the expression
    dispatcher, binary and coercion checking, and the ownership and loans
-   passes. Next: the call group (blocked on module collection, intrinsics and
-   import cycles, question #140), then check.jo's value machinery, lowering
+   passes, module collection and intrinsics. Import cycles are now allowed
+   (#140), so next: give the call group's ~15 small helpers Dewy homes and move
+   the group, then check.jo's value machinery, lowering
    and facts/effects; close milestone 1 (Dewy owns all subsystem
    execution), then milestone 3 (a pinned C-reproducible seed that retires the
    frozen twins).
@@ -59,10 +60,16 @@ changes. Wall clock only on a quiet pinned machine or a CI runner. Kernels:
 - No traps by default; `$runtime_checks` is the production opt-in; `$prototype`
   is for development. Boolean metatags accept `$tag`, `=true`, `=false`.
 - The strict lane is `$no_hidden_costs` (library bundle); `$realtime` is reserved.
-- Compile target: 250k lines/s single-threaded, default build (200k minimum).
+- Compile target: 250k lines/s single-threaded, default build; every flagship
+  at least 200k (#126c, 11-01).
   Fresh compiles only, no library image; hello-world ~50 ms guardrail.
 - Concurrency: the adopted direction; `parallel`; `concurrent {…}`/`spawn`;
   `& no blocks`; `Canceled`; `Atomic<T>` with optional orders (provisional).
+  Stage 4 (11-01): `Unsent<T>` sends, `spsc<T N>`, `mpmc<T>(n)`, inferred
+  parallel-safe callbacks; `select` and `[concurrent …]` on hold for one
+  cohesive proposal.
+- Import cycles behave as one big file (11-01). No legacy: design changes
+  keep no shims or old-form diagnostics.
 - GPU: placement follows data; mixing devices is a compile error.
 - Follow the reference: no `+` concatenation; initialize before reading;
   `d.keys` is a set; value-preserving conversions; declared rows are contracts.
