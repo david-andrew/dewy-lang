@@ -1,6 +1,7 @@
-# Decisions waiting on David (2026-11-01)
+# Decisions waiting on David
 
-- **Answering:** reply per item, e.g. "D1 yes, D2 a, D5 b". Anything you skip stays pending. "Take the recs for the rest" is a valid answer.
+- **Only open items.** Once you answer one, it moves to [decisions.md](decisions.md), with what was considered and why, and is removed from here.
+- **Answering:** reply per item, e.g. "D6 a, D9 yes, C3 a". Anything you skip stays pending. "Take the recs for the rest" is a valid answer.
 - **Order:** priority order. P1 items block work that is happening now.
 - **Example conventions:**
   - Arguments are space-separated, `=?` is equality, and zero-argument calls drop their parentheses.
@@ -11,111 +12,7 @@
 
 ## P1: blocking current work
 
-### D1. Allow import cycles between modules that only declare things (#140)
-> **Answered 11-01:** yes, generally (declarations and module code); "as if one big file".
-- **Today:** any import cycle that contains a Dewy module is a compile error.
-- **Why it matters:** the self-hosted compiler's checker and lowering are mutually recursive. Split across files, every call back across the split goes through a function-value thunk (about 20 extra instructions per call). That costs compile speed and blocks the next self-hosting milestone.
-- **Proposal:** allow a cycle when every module in it holds only declarations (functions, types, constants). Still reject cycles where module-level code runs at load time.
-
-```dewy
-# check.dewy                          # allowed: declarations only
-import p"lower.dewy"
-check_expr = (e:Expr) => if e.is_lambda lower.lower_body(e.body) else e.kind
-
-# lower.dewy
-import p"check.dewy"
-lower_body = (b:Block) => check.check_expr(b.first)
-```
-
-```dewy
-# a.dewy                              # still rejected: load-time values depend on each other
-import p"b.dewy"
-let table = b.build_table             # runs when a.dewy loads
-
-# b.dewy
-import p"a.dewy"
-let seed = a.table.length             # needs a.table during b's load
-```
-
-- **Prior art:** Go bans all cycles. Python allows them but exposes half-initialized modules. This proposal allows exactly the safe case.
-- **Rec:** yes. It's reversible until programs rely on it.
-
-### D2. Compile-speed goal: every flagship, or the panel as a whole? (#126c)
-> **Answered 11-01:** (a), every flagship.
-- **Your goal:** 200–250k lines/s, single thread, default build, counting every compiled line including library code.
-- **Flagships:** 7 representative programs the gate measures, including a KV store, the self-hosted compiler frontend (`99_dewy_frontend`), an RTOS kernel (`100_rtos_kernel`) and ML training.
-- **Now:**
-  - whole panel: **160.2k lines/s**;
-  - slowest two: `100_rtos_kernel` **127.2k** and `99_dewy_frontend` **130.8k**.
-- **Options:**
-  - **a)** Every flagship must reach ≥200k. This is how ROADMAP reads it today. The slowest program needs about 36% fewer instructions per line.
-  - **b)** The panel aggregate must reach ≥200k (about 20% fewer from here). The worst flagship is tracked but doesn't gate.
-- **Rec:** (a). It's the honest reading of the goal, and the slowest programs (the compiler itself and a systems program) are exactly the workloads that matter.
-- Either way the work continues: representation cuts now, plus scoping a bigger checker/IR redesign. Only the definition of "done" changes.
-
-### D3. Concurrency stage 4, part 1 (#105)
-> **Answered 11-01:** D3a, D3b (`.split` without parens) and D3c yes. D3d (`select`) is replaced by D4 → C5.
-- **Context:** Dewy already has `channel<T>(capacity)`, `Mutex`, `spawn`, `concurrent { … }` task scopes and `[parallel x in xs …]`. Stage 4 adds faster special-purpose queues and `select`.
-- **Deferred, no decision now:** a broadcast ring (`Sequencer`), `SeqLock` and `Snapshot`/`Version`. They're designed, but nothing needs them yet.
-
-Shared declarations for the examples:
-
-```dewy
-Message:type = [id:int64 body:string]
-save = (m:Message) => printl"unsent: {m.id}"
-let message = Message[1 "hello"]
-```
-
-- **D3a. A failed send gives the value back.**
-  - A failed send returns `void | Unsent<T>`.
-  - `.value` is the exact payload you offered.
-  - `.reason` is one of `Full`, `Closed`, `Busy` or `Canceled`.
-  - **Also changes `Channel.send`,** which today returns `void | Closed | Canceled`. Old `??<Closed>` handlers become compile errors that point to the new form.
-
-```dewy
-match tx.try_send(message) {
-    failed:Unsent<Message> => save(failed.value)   # nothing is lost
-    _ => {}
-}
-```
-
-- **D3b. Single-producer/single-consumer queue.**
-  - `split` consumes the queue, and each end has exactly one owner.
-  - Its verbs match channels: `try_send`, `send`, `try_receive`, `receive`, `close`.
-
-```dewy
-let [tx rx] = spsc<Message 64>().split()   # 64 = fixed capacity
-tx.send(message) or_throw
-let m = rx.receive() or_throw
-```
-
-- **D3c. Shared bounded queue (many senders and receivers).** A non-waiting attempt that collides with another task mid-operation returns the existing `Busy`, rather than a misleading `Empty`.
-
-```dewy
-let jobs = mpmc<Message>(64)
-jobs.try_send(message) ??<Busy> save(message)
-```
-
-- **D3d. `select`.**
-  - It waits on several channel operations, and exactly one wins.
-  - `_` is the "nothing ready" fallback.
-  - Cancellation runs no arm.
-
-```dewy
-let inbox = channel<Message>(16)
-let text = select {
-    item = inbox.receive() => (item or_throw).body
-    _ => "nothing ready"
-}
-```
-
-- **New names:**
-  - outcomes: `Full`, `Empty`, `Unsent<P>` (with `.reason` and `.value`);
-  - queues: `spsc`, `mpmc`, `split`, `SpscSender`, `SpscReceiver`;
-  - syntax: the `select { … }` grammar.
-- **Rec:** yes to D3a–d.
-
-### D4. One unified `parallel` surface (replaces old D3d `select` and D4 `[concurrent …]`)
+### D4. One unified `parallel` surface
 - **What this is:** the cohesive redesign you asked for. It was drafted by Opus, checked for soundness by Sol, and revised after a Grok review. Full proposal with more examples: `docs/design/proposals/concurrency/unified/proposal-v2.md` (about 3,000 words).
 - **The model in 5 bullets:**
   - **One keyword.** `parallel` means "these items start together, and the construct ends when they all end". It has three shapes:
@@ -308,24 +205,6 @@ apply_all = (xs:array<int> f:(x:int):>int) => [parallel x in xs f(x)]
 ```
 - **Recommendation:** yes. Waiting no longer disqualifies a callback; its cost shows in hover, and `& no blocks` locks it out.
 - **Spellings:** none.
-
-### D5. Passing a callback into `parallel` (#114)
-> **Answered 11-01:** (a), infer; `$parallel_safe` is optional and only enforces.
-- **The problem:** to compile `apply`, the compiler must know that `f` is safe to run on several threads (no shared mutable writes and so on). Today Dewy can't express this at all; Sloppy used an `@parallel` attribute.
-
-```dewy
-apply = (xs:array<int> f) => [parallel x in xs f(x)]
-square = (x:int) => x*x
-let ys = apply([1 2 3] @square)   # fine; a callback writing a shared global would be rejected here
-```
-
-- **Options:**
-  - **a)** Infer it. The compiler records "argument `f` must be parallel-safe" in `apply`'s signature and checks every call site, as it already does for effects. An optional tag pins the contract on exported APIs, so editing the body can't quietly loosen it.
-  - **b)** Require a tag on `apply` before it may pass `f` into `parallel`.
-- **Tag spelling either way:** `$parallel_safe`, rather than `$thread_safe` or `$parallel`. It goes first in a declaration, on the same line or the line before: `$parallel_safe let apply = (xs f) => [parallel x in xs f(x)]`.
-- **Rec:** (a), with the tag optional, and rejected on functions that take no callback (it would be a silent no-op).
-  - Sol leaned (b) as a first step.
-  - Opus notes that `$parallel_safe apply` reads as "apply is safe", when it actually means "callbacks passed to apply get checked".
 
 ### D6–D9: time design core
 - **Context:** the time system is a draft (`docs/design/proposals/time/time-design-v5.md`) and its implementation is on hold until these decisions are made.
@@ -611,7 +490,7 @@ let apply_then_report = (xs:array<int> f:<(int):>int> report:<(array<int>):>void
 - **Reversible:** yes, a one-loop change.
 
 ### D23. `spsc` details built provisionally (#146)
-- **Today (built 11-02):** `spsc<T N>` works as decided in D3b. Six smaller calls were made along the way and are all reversible.
+- **Today (built 11-02):** `spsc<T N>` works as decided on 2026-11-01 (see decisions.md). Six smaller calls were made along the way and are all reversible.
 
 ```dewy
 Message:type = [id:int64 body:string]
