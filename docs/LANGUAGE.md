@@ -1753,6 +1753,9 @@ parent portion, composing the child's added fields; a declared child
 role overrides that role. Generic records instantiate their declared hooks for
 each concrete type; structural generic records compose their fields' hooks.
 Generic functions cannot implicitly duplicate a move-only type argument.
+A method marked with the compiler-only `$__consume__` takes its receiver: the
+call moves the owner in (at its proven last use, like any owning argument), and
+the method owns and drops it. Other methods borrow their receiver.
 Global owners and foreign entry points with owners remain unsupported.
 Ordinary records and collections keep their existing value and copy-on-write behavior.
 

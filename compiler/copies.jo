@@ -47,6 +47,10 @@ copies_reset = ():
     copy_borrowed = {}
     if copies_on: copies_parameters()
     ownership_parameters()
+    # (a `$__consume__` method's receiver: an owning parameter, as Dewy's own are)
+    if ownership_consumers.len() != 0:
+        loop f in [1..fns.len()):
+            if fns[f].params.len() > 0 and ownership_consumers.has(int(fns[f].decl)) and ownership_type(int(fns[f].ptypes[0])): copy_inputs[fns[f].params[0]] = true
     ownership_validate()
     if ownership_decls.len() != 0: copies_on = true
 

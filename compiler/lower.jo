@@ -8096,7 +8096,7 @@ lower_inst = (lf: int, f: int):
         if t == T_MATH_INT and fl & LF_ASSIGNED != 0: math_has_mutable = true
         if fl & (LF_CAPTURE | LF_ALIAS) != 0: continue
         if fl & LF_PARAM != 0:
-            if copy_inputs.has(l) and not files[pos_file(nodes[int(fns[f].decl)].pos)].is_dewy:
+            if copy_inputs.has(l) and (not files[pos_file(nodes[int(fns[f].decl)].pos)].is_dewy or ownership_consumers.len() != 0 and ownership_consumers.has(int(fns[f].decl))):
                 s = new_temp(t)
                 store_val(t, e_slot(s), 0, int(locals[l].vreg))
                 locals[l].offset = i32(s)
@@ -8149,6 +8149,8 @@ lower_inst_body = (f: int, body: int) -> void:
     if ownership_decls.len() != 0 and fns[f].decl != 0 and not files[pos_file(nodes[int(fns[f].decl)].pos)].is_dewy:
         loop p in fns[f].params:
             if copy_inputs.has(p): scope_add_local(p)
+    # (a `$__consume__` method owns its receiver, which no binding of Dewy's takes)
+    else if ownership_consumers.len() != 0 and fns[f].params.len() > 0 and ownership_consumers.has(int(fns[f].decl)) and copy_inputs.has(fns[f].params[0]): scope_add_local(fns[f].params[0])
     if fns[f].kind == FK_INIT:
         gen_block_stmts(body)
     else:

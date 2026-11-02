@@ -1,0 +1,23 @@
+# A method marked `$__consume__` takes its receiver: the call moves it in, the method
+# owns (and drops) it, and the caller cannot use it afterwards. Other methods borrow.
+End:type = [
+    id:int64
+    $__drop__
+    release = ():>void => printl"drop end"
+]
+Whole:type = [
+    id:int64
+    $__drop__
+    release = ():>void => printl"drop whole"
+    get = ():>int64 => id
+    $__consume__
+    split = ():>[End End] => [End[id] End[id]]
+]
+main = () => {
+    let w = Whole[1]
+    printl"{w.get} {w.get}"
+    let [a b] = w.split
+    printl"{a.id} {b.id}"
+    let [c _] = Whole[2].split
+    printl"{c.id}"
+}

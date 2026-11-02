@@ -23,6 +23,8 @@ ownership_contained: {int: bool}
 # cannot run user code. Other lifecycle hooks retain opaque cleanup effects.
 ownership_fact_cleanup = false
 ownership_hooks: {int: int}
+# methods declared `$__consume__`: a call moves the receiver into them
+ownership_consumers: {int: bool}
 ownership_copies: {int: int}
 ownership_moves: {int: int}
 ownership_nominals: {int: bool}
@@ -41,6 +43,9 @@ ownership_check_input = OwnershipCheckInput(&nodes, &lists, &types, &structs, &f
 ownership_check_binding = ownership_checks_bind(&ownership_check_input)
 
 ownership_declare = (decl: int, hook: int, role: int):
+    if role == 4:
+        ownership_consumers[hook] = true
+        return
     if nkids(hook) != 1: fatal(nodes[hook].pos, "lifecycle hooks have no explicit parameters")
     if nkids2(hook) != nkids2(decl): fatal(nodes[hook].pos, "lifecycle hooks cannot declare additional type parameters")
     key = decl * 4 + role
@@ -279,6 +284,7 @@ ownership_literal_print = (n: int) -> bool:
 ownership_reset = ():
     ownership_decls.clear()
     ownership_hooks.clear()
+    ownership_consumers.clear()
     ownership_copies.clear()
     ownership_moves.clear()
     ownership_nominals.clear()

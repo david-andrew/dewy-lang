@@ -75,7 +75,7 @@ STATEMENTS = {'lbrace', 'kw_let', 'kw_const', 'kw_return', 'kw_break', 'kw_conti
               'kw_parallel', 'kw_match'}
 FORMS = {'assert': 1, 'runtime_assert': 1, 'expect': 1, 'unsafe_assume': 1, 'fail': 2, 'breakpoint': 3, 'lend': 4,
          'allocator': 5, 'unsafe': 6, 'warn_if': 7}
-DESIGNED = {'abstract', 'field', 'lend', 'no_prelude', 'proof', 'unsafe_assume', '__copy__', '__drop__', '__move__'}
+DESIGNED = {'abstract', 'field', 'lend', 'no_prelude', 'proof', 'unsafe_assume', '__copy__', '__drop__', '__move__', '__consume__'}
 METATAGS = sorted(FORMS) + sorted(DESIGNED) + ['extern', 'export', 'test', 'target', 'build', 'capture', 'Assert', '']
 NUMBERS = {'integer', 'source_integer', 'source_real'}
 HABIT_TEXTS = ['*', '!', '&', '|', '=', '>', '<', '>=', '<=', '+', '-', '%', 'x']

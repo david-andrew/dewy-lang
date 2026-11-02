@@ -6299,6 +6299,10 @@ rd_dc_lifecycle_tag=(@reader_ctx:ParserContext token:DewyLexeme):>int64=>$unsafe
     if (name =? "__move__") {
         return 3
     }
+    # (`$__consume__`: a method that takes its receiver, which the call moves)
+    if (name =? "__consume__") {
+        return 4
+    }
     0
 }
 

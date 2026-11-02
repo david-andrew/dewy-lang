@@ -1,0 +1,12 @@
+# A consumed receiver is gone: reading it after the call is refused.
+Whole:type = [
+    id:int64
+    $__drop__
+    release = ():>void => {}
+    $__consume__
+    take = ():>int64 => id
+]
+main = () => {
+    let w = Whole[1]
+    printl"{w.take} {w.id}"
+}
