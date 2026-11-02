@@ -830,8 +830,11 @@ coerce = (n: int, target: int) -> int:
         wrap_conv(n, .fixed2arr, to)
         return n
     if fk == .callable or tk == .callable:
-        if ownership_callable_cap(from) > ownership_callable_cap(to): fatal(nodes[n].pos, "callable conversion would erase capture ownership")
-        if not callable_fits(from, to): fatal(nodes[n].pos, "cannot prove callable effect contract")
+        # (a spawn body is called once and released by its task, which so owns its captures)
+        spawned = nodes[n].kind == .lambda and nodes[n].aux2 == 17
+        if ownership_callable_cap(from) > ownership_callable_cap(to) and not spawned: fatal(nodes[n].pos, "callable conversion would erase capture ownership")
+        fits = if spawned: mk_callable_contract(callable_base(from), callable_contract(from)) else: from
+        if not callable_fits(fits, to): fatal(nodes[n].pos, "cannot prove callable effect contract")
         wrap_conv(n, .none_, to)
         return n
     if fk == .fn_ and tk == .fn_ and callable_fits(from, to):

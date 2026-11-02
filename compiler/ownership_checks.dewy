@@ -209,7 +209,7 @@ ownership_validate_node=(n:CWord f:CWord):>void=>$unsafe {
             oc_fail(n "owner replacement requires a whole local or growable array element")
         }
     }
-    if k =? 'defer_' and f in? oc[0].functions[0] and ownership_defer_conflict(f) {
+    if k =? 'defer_' and oc_nodes[0].ptr[n].aux2 not=? 17 and f in? oc[0].functions[0] and ownership_defer_conflict(f) {
         oc_fail(n "an owner with defer requires a unified defer unwind plan; transfer is not proven safe")
     }
     if k =? 'conv' and CWord(oc_nodes[0].ptr[n].aux) =? oc[0].cv_copy and ownership_type(t) and not ownership_copyable(t) {

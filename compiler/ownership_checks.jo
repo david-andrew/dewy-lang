@@ -150,7 +150,7 @@ ownership_validate_node = (n: int, f: int):
             if int(oc_locals[0][l].flags) & (LF_MUTPARAM | LF_ALIAS | LF_BYREF | LF_CAPTURE) != 0: oc_fail(n, "cannot replace a borrowed owner")
         else if oc_nodes[0][target].kind != .index or ow_kind(oc_ntype(int(oc_nodes[0][target].a))) != .array:
             oc_fail(n, "owner replacement requires a whole local or growable array element")
-    if k == .defer_ and oc[0].functions[0].has(f) and ownership_defer_conflict(f):
+    if k == .defer_ and oc_nodes[0][n].aux2 != 17 and oc[0].functions[0].has(f) and ownership_defer_conflict(f):
         oc_fail(n, "an owner with defer requires a unified defer unwind plan; transfer is not proven safe")
     if k == .conv and int(oc_nodes[0][n].aux) == oc[0].cv_copy and ownership_type(t) and not ownership_copyable(t):
         oc_fail(n, "cannot copy a move-only owner: no $__copy__ hook")

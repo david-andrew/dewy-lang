@@ -1,0 +1,14 @@
+# modes: native native-release
+# A value moved into a spawned task cannot be used by its spawner.
+End:type = [
+    id:int64
+    $__drop__
+    release = ():>void => {}
+]
+main = () => {
+    let e = End[3]
+    concurrent {
+        spawn { printl"in task {e.id}" }
+    }
+    printl"after {e.id}"
+}

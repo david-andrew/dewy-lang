@@ -2489,7 +2489,7 @@ gen_lambda = (e: int, stack: bool = false) -> Val:
     # Stack environments are never retained beyond the activation. Callback
     # parameters may temporarily retain an immutable one while invoking it.
     resource = ownership_callable_cap(int(fns[f].fntype)) != 0
-    if resource and not ownership_copyable(int(fns[f].fntype)):
+    if resource and not ownership_copyable(int(fns[f].fntype)) and not spawn_body(f):
         hdr_store(header, 16, e_iconst(0))
     else: hdr_store(header, 16, e_faddr(lf_helper(.envcopy, 0, f)))
     if hoist:
@@ -8905,13 +8905,22 @@ helper_envdrop = (f: int, heap: bool = true):
     if heap: e_call1(rt("__free"), env, -1)
     e_ret(-1)
 
+# A spawn body (dewy_nodes.jo's dw_task_spawn, aux2 17) runs once, in its task: the
+# task runtime's copies of it share one environment, whose captures, owners among them,
+# are dropped once, with the last copy.
+spawn_body = (f: int) -> bool:
+    d = int(fns[f].decl)
+    # (the conversion to the task's callable type wraps the literal in place)
+    loop d != 0 and nodes[d].kind == .conv: d = int(nodes[d].a)
+    d != 0 and nodes[d].kind == .lambda and nodes[d].aux2 == 17
+
 helper_envcopy = (f: int):
     ps = helper_params(1)
     ir.ret = VI
     src = ps[0]
     d = int(fns[f].decl)
     if fns[f].kind == FK_PARTIAL: d = int(fns[f].partial)
-    if d == 0 or not files[pos_file(nodes[d].pos)].is_dewy:
+    if d == 0 or not files[pos_file(nodes[d].pos)].is_dewy or fns[f].kind != FK_PARTIAL and spawn_body(f):
         retain(src, T_STR)
         return e_ret(src)
     if fns[f].kind != FK_PARTIAL:

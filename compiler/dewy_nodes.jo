@@ -552,6 +552,8 @@ dw_task_spawn = (g: int, value: int, pos: int) -> int:
     body = bc_block([bc_stmt(value, pos)], pos)
     fn_ = mk(.lambda, pos)
     add_flag(fn_, NF_LANG_BODY)
+    # (a spawn body runs once, in its task, which owns what it captures: aux2 17)
+    nodes[fn_].aux2 = 17
     nodes[fn_].b = i32(body)
     call = bc_call("__task_spawn", [g, fn_], pos)
     nodes[call].aux2 = 17
@@ -564,6 +566,8 @@ dw_task_group = (pos: int, name: str, serial: int, body: int, transparent: bool)
     outcome = "$joined{serial}"
     statements = [bc_let(name, bc_call("__task_new_group", [], pos), pos), bc_let(previous, bc_call("__task_enter", [bc_ident(name, pos)], pos), pos)]
     cleanup = mk(.defer_, pos)
+    # (aux2 17: it only joins the group's tasks, which own what they captured, and touches no owner)
+    nodes[cleanup].aux2 = 17
     nodes[cleanup].a = i32(bc_stmt(bc_call("__task_cleanup", [bc_ident(name, pos), bc_ident(previous, pos)], pos), pos))
     statements.push(cleanup)
     results: int[]
