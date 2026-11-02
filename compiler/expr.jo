@@ -9249,6 +9249,13 @@ ident_bare_value = (n: int, t: int, local: bool, is_callee: bool, expected: int)
 ident_type_use = (n: int, t: int, is_callee: bool, expected: int) -> int:
     nm = int(nodes[n].name)
     tt = telem(t)
+    # (`<T N>` given `64`: a type parameter bound to one integer reads as that constant;
+    # instance bodies are copies, so the name becomes the literal in place)
+    if nodes[n].aux == 8 and not is_callee and in_generic_instance() and tkind(tt) == .refined:
+        known, values = int_intervals(tt)
+        if known and values.len() == 2 and values[0] == values[1]:
+            nodes[n] = Node(kind = .int_lit, pos = nodes[n].pos, ival = values[0])
+            return check_expr(n, expected)
     if nominal_parent.has(tt) and tt != error_type:
         si = int(types[tt].st)
         check_struct_fields(si)

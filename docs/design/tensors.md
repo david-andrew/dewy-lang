@@ -19,6 +19,18 @@ checks them:
 matmul = (a:array<float64 length=[m n]> b:array<float64 length=[n p]>):>array<float64 length=[m p]>
 ```
 
+### Value type parameters (2026-11-01, built)
+
+A type parameter can carry an integer: `spsc<Message 64>` (decision #105 D3b). No
+new declaration form: `Ring:type = <T N>[...]` and `f = <N>(...)` take any type
+argument, and an integer argument is the singleton literal type the checker
+already has (`64` as in `<'a' | 1>`), so it is part of type identity for free
+(`Ring<int64 64>` is not `Ring<int64 32>`). In an instance body, a parameter bound
+to exactly one integer reads as that constant; instance bodies are copies, so the
+name becomes the literal (`compiler/expr.jo`, `ident_type_use`). Bound to a type,
+it stays a type. Not yet: named constants as arguments (`spsc<Message CAP>`), and
+such a parameter inside a type (`array<T length=N>`).
+
 There is no `.shape` member. `.length` is the single source of truth: an int for
 a 1-D array, a sequence for an N-d one.
 

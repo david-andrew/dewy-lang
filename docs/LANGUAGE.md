@@ -1861,6 +1861,21 @@ and an integer alias exposes `.min` and `.max`. The editor completes these
 bounds and shows their integer type on hover; `end` inside brackets hovers as
 `int64`.
 
+A type argument can also be an integer, a value carried in the type. Inside the
+body its parameter reads as that compile-time constant, and the value is part of
+the type: `Ring<string 4>` and `Ring<string 64>` are different types.
+
+```dewy
+Ring:type = <T N>[
+    first:T
+    capacity = ():>int64 => N
+]
+let r = Ring<string 64>["a"]
+printl(r.capacity)   # 64
+```
+
+Only integer literals can be such arguments so far (not named constants).
+
 Generic functions can also be specialized as values: `let convert = @identity<int64>`
 stores a callable, including functions imported from Dewy or core modules.
 Passing `@identity<int64>` directly as a callback works too. If several overloads

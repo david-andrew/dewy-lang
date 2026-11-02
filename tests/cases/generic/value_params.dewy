@@ -1,0 +1,17 @@
+# A type parameter given an integer is a type-level value: the body reads it as a
+# compile-time constant, and each value is its own instance.
+Ring:type = <T N>[
+    first:T
+    capacity = ():>int64 => N
+    doubled = ():>int64 => N * 2
+]
+scaled = <N>(x:int32):>int64 => N * int64(x)
+main = () => {
+    let small = Ring<string 4>["a"]
+    let large = Ring<string 64>["b"]
+    printl"{small.first} {small.capacity} {small.doubled}"
+    printl"{large.first} {large.capacity} {large.doubled}"
+    printl"{scaled<3>(5)} {scaled<(-2)>(5)}"
+    let caps = [4 64].map(c => c + Ring<bool 8>[true].capacity)
+    printl"{caps}"
+}
