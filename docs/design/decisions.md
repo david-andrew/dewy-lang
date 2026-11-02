@@ -269,34 +269,47 @@ section linked. ROADMAP.md lists them in one line each.
   `main` provably assigns it before any read; forbid-only rows check the body
   while callers see the inferred effects; distinct `@` parameters are disjoint
   for the solver; regex `find` returns `Match | Missing`.
-- Answers, batch 1 (2026-11-01):
+- David's decisions of 2026-11-01 (batch 1; questions D1–D5 in
+  [open_decisions.md](open_decisions.md)):
   - Import cycles (#140): allowed, under the rule "as if everything were one
     big file": a program that would work as one file must not break when split
-    into modules. This covers declarations and module-level code alike.
-    Initialization is ordered by dependency, as in one file; the only error is
-    one a single file would also have (a genuine value cycle, or a use before
-    initialization), and it names the chain. Aim for maximum ergonomics.
+    into modules, for declarations and module-level code alike. Initialization
+    is ordered by dependency, as in one file; the only error is one a single
+    file would also have (a genuine value cycle, or a use before
+    initialization), and it names the chain. Considered: keep rejecting cycles
+    that contain a `.dewy` module; allow cycles of declarations only. Reasons:
+    maximum ergonomics, and splitting a file must never change its meaning.
+    Design: [modules.md](modules.md).
   - Compile-speed target (#126c): every flagship reaches at least 200k
-    lines/s (option a); the reading in ROADMAP.md stands.
-  - Concurrency stage 4, the parts that stand (#105):
+    lines/s. Considered: the panel aggregate reaching 200k with the worst
+    flagship only tracked. Reasons: it is the honest reading of the goal, and
+    the slowest flagships (the compiler itself, a systems program) are the
+    workloads that matter.
+  - Failed sends and new queues (#105 D3a–c), from
+    [proposals/concurrency/stage4/](proposals/concurrency/stage4/):
     - D3a: a failed send returns `void | Unsent<T>`, with `.value` (the exact
       payload offered) and `.reason` (`Full`, `Closed`, `Busy` or
-      `Canceled`). `Channel.send` returns this too.
+      `Canceled`); `Channel.send` returns this too. Considered: keeping
+      `void | Closed | Canceled`. Reason: a failed send must never lose the
+      value.
     - D3b: `spsc<T N>` with a consuming `.split` (no parentheses: zero-argument
-      calls drop them everywhere) and the channel verbs `try_send`, `send`,
-      `try_receive`, `receive`, `close`.
+      calls drop them everywhere) and the channel verbs.
     - D3c: `mpmc<T>(capacity)`; a non-waiting attempt that collides with
-      another task returns `Busy`.
+      another task returns `Busy`, rather than a misleading `Empty`.
   - Callbacks passed into parallel code (#114): inferred. A function that
     passes a callback parameter into parallel code gets "this argument must be
-    parallel-safe" in its signature, checked at call sites like effects. No
-    required tag. An optional `$parallel_safe` only enforces the contract on
-    exported APIs, and is rejected on a function that takes no callback.
-  - On hold for one cohesive parallel/concurrent surface proposal: `select`
-    (#105 D3d), `[concurrent x in xs …]` (#118), and any new loop- or
-    capture-shaped concurrency construct. Don't build them.
+    parallel-safe" in its signature, checked at call sites like effects. An
+    optional `$parallel_safe` only enforces the contract on exported APIs and
+    is rejected on a function that takes no callback. Considered: requiring a
+    tag before a function may pass a callback into `parallel`. Reason: no
+    colored-function-style requirements on ordinary code.
+  - On hold for one cohesive parallel/concurrent surface proposal
+    ([proposals/concurrency/unified/](proposals/concurrency/unified/)):
+    `select` (#105 D3d), `[concurrent x in xs …]` (#118), and any new loop- or
+    capture-shaped concurrency construct. Reason: these should be designed
+    together, not one construct at a time.
   - No legacy: Dewy has no users yet, so a design change keeps no
     compatibility shims, deprecation paths or old-form-to-new-form
     diagnostics; change it and update the tests and docs. "Use X instead"
     errors for spellings that never shipped are removed. Fix-its that teach
-    Dewy over Python or C habits stay.
+    Dewy over Python or C habits stay. Reason: there is nothing to migrate.
