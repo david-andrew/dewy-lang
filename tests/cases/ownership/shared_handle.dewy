@@ -1,0 +1,27 @@
+# A move-only record can hold a handle to shared storage (a growable array, a
+# string, a record holding one): the handle's buffer is shared, not copied, and
+# released once the last holder is dropped.
+$runtime_checks
+let dropped:int64 = 0
+Shared:type = <T>[items:array<T>]
+End:type = <T>[
+    shared:Shared<T>
+    name:string
+    $__drop__
+    release = ():>void => { dropped += 1 }
+]
+total = (e:End<int64>):>int64 => {
+    let sum:int64 = 0
+    loop x in e.shared.items { sum = sum + x }
+    sum
+}
+main = () => {
+    let grand:int64 = 0
+    loop i in [0..50000) {
+        let e = End<int64>[Shared<int64>[[1 2 3]] "e"]
+        grand = grand + total(e)
+    }
+    printl"{grand} dropped {dropped}"
+    let kept = End<string>[Shared<string>[["a" "b"]] "kept"]
+    printl"{kept.name} {kept.shared.items}"
+}

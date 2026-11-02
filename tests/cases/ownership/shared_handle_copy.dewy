@@ -1,0 +1,11 @@
+# Holding a shared handle does not make a move-only record copyable.
+End:type = [
+    shared:array<int64>
+    $__drop__
+    release = ():>void => {}
+]
+main = () => {
+    let a = End[[1 2 3]]
+    let b = a
+    printl"{a.shared} {b.shared}"
+}

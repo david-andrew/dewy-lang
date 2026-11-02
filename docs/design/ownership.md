@@ -402,3 +402,13 @@ a pointer to each rule. The wording is David's.
 - Place-returning methods may be annotated `:>@T`, written with a space after
   the arrow in idiomatic style (`lock = () :> @T => …`); unannotated, the
   place result is inferred from the body.
+
+### Owners holding shared handles (2026-11-01, built)
+
+An owning record (one with lifecycle hooks, or fields that have them) may hold
+growable arrays, strings and records holding them, not only inline data. These
+are reference-counted handles: a move transfers the handle, a structural copy
+retains it, and dropping the owner releases it after the hook runs, so the last
+holder frees the buffer. Move-only still means one owner of the record; the
+buffer behind it may be shared on purpose, as the two ends of an `spsc` share
+their ring. Elements of resource arrays stay inline (`ownership_layout`).

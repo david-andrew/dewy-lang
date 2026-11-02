@@ -1706,6 +1706,12 @@ including panic and early exits. A later read of the moved field or the whole
 record prevents a move-only transfer. Fields beneath an outer lifecycle hook
 cannot transfer independently, because the hook may read them.
 
+An owning record can also hold growable arrays, strings and records holding
+them. These fields are shared handles: a move transfers them, and the buffer is
+released when its last holder is dropped, after the hook runs. This is how a
+move-only record shares storage with another, as an `spsc` queue's two ends share
+their ring.
+
 Optional owner fields use their presence tag: `none` drops nothing, and a
 present value transfers or copies through its payload's lifecycle. Recursive
 records use owning boxes with exactly-once cleanup. Copyable recursive records

@@ -176,10 +176,7 @@ ownership_layout = (t0: int, depth: int = 0, seen: int[] = []) -> bool:
     if ownership_callable_cap(t) != 0: return true
     if k == .str_ or ow_scalar(t) or k == .float_: return true
     if k != .struct_: return false
-    map = ow_is_map(t)
     loop ft in ow_field_types(t):
-        fk = ow_kind(ft)
-        if not map and (fk == .array or fk == .str_): return false
         if not ownership_layout(ft, depth + 1, visited): return false
     true
 ownership_decl_copyable = (t0: int, seen: int[] = []) -> bool:
