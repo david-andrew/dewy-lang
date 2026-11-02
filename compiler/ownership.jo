@@ -166,11 +166,17 @@ owner_record = (slot: int) -> int:
     owner_records[slot] = record
     record
 
+# A record without hooks of its own, or a tuple, holding owners: each resource leaf
+# is its own cleanup authority.
+owner_structural = (t: int) -> bool:
+    k = tkind(t)
+    ownership_type(t) and (k == .tuple or k == .struct_ and not ownership_nominal(t) and not is_map_type(t))
+
 # Structural records have independent cleanup authorities for their resource
 # leaves. This preserves reverse field order and permits path-dependent moves
 # without treating zero bytes as an initialization marker.
 owner_register_part = (slot: int, t: int, offset: int, path: str):
-    if ownership_type(t) and tkind(t) == .struct_ and not ownership_nominal(t) and not is_map_type(t):
+    if owner_structural(t):
         fs = field_list(t)
         loop i in [0..fs.len()):
             field = fs[i]
@@ -187,7 +193,7 @@ owner_register_part = (slot: int, t: int, offset: int, path: str):
     e_call(rt("__owner_link"), [e_slot(record), e_addi(e_slot(slot), offset), e_faddr(lf_helper(.drop, t, 0))], -1)
 
 owner_register = (slot: int, t: int):
-    if ownership_type(t) and tkind(t) == .struct_ and not ownership_nominal(t) and not is_map_type(t):
+    if owner_structural(t):
         owner_register_part(slot, t, 0, "")
         return
     record = owner_record(slot)

@@ -239,8 +239,12 @@ ERRORS = [
     globals.push(Global(type=i32(kind(.opt, res)), decl=i32(d)))
 ''', 'global owners require'),
     ('container', '''
-    function(mk(.block), [local(kind(.tuple, 0))])
-    types[types.len() - 1].nargs = 1; types[types.len() - 1].args = i32(args.len()); args.push(i32(res))
+    u = nominal("U", 0, [])
+    types[u].kind = .enum_
+    si = int(types[u].st)
+    structs[si].variants = i32(variants.len()); structs[si].nvariants = 1
+    variants.push(Variant(fields=i32(fields.len()), nfields=1)); fields.push(Field(type=i32(res)))
+    function(mk(.block), [local(u)])
 ''', 'aggregate ownership support'),
     ('shared', '''
     function(mk(.block), [local(res, 1024)])

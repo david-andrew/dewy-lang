@@ -1,0 +1,31 @@
+# A tuple of move-only values unpacks into separately owned bindings: each is
+# dropped once, by its own binding; a discarded position is dropped at once.
+$runtime_checks
+let dropped:int64 = 0
+End:type = [
+    id:int64
+    shared:array<int64>
+    $__drop__
+    release = ():>void => { dropped += 1 }
+]
+pair = (n:int64):>[End End] => {
+    let s:array<int64> = [n n]
+    [End[n s] End[n + 1 s]]
+}
+consume = (e:End):>int64 => e.id
+round = (n:int64):>int64 => {
+    let [a b] = pair(n)
+    consume(a) + b.id
+}
+whole = ():>int64 => {
+    let w = pair(5)
+    w[0].id + w[1].id
+}
+main = () => {
+    let total = 0
+    loop i in [0..1000) { total += round(i) }
+    printl"{total} dropped {dropped}"
+    printl"{whole()} dropped {dropped}"
+    let [x _] = pair(7)
+    printl"{x.id} dropped {dropped}"
+}

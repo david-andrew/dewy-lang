@@ -1,0 +1,15 @@
+# exit: 101
+# A panic after unpacking drops each binding once.
+$runtime_checks
+End:type = [
+    id:int64
+    $__drop__
+    release = ():>void => printl"drop"
+]
+pair = (n:int64):>[End End] => [End[n] End[n + 1]]
+main = () => {
+    let xs:array<int64> = [1 2]
+    let [a b] = pair(1)
+    let i = a.id + b.id + 5
+    printl"{xs[i]}"
+}

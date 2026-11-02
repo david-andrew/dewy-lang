@@ -1,0 +1,13 @@
+# An unpacked owner is moved like any other: a read after the move is refused.
+End:type = [
+    id:int64
+    $__drop__
+    release = ():>void => {}
+]
+pair = ():>[End End] => [End[1] End[2]]
+consume = (e:End):>int64 => e.id
+main = () => {
+    let [a b] = pair()
+    let n = consume(a)
+    printl"{n} {a.id} {b.id}"
+}

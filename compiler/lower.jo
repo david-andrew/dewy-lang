@@ -5496,6 +5496,7 @@ gen_value_tuple = (e: int) -> Val:
         el = targ(t, i)
         val = gen_owned(kid(e, i))
         store_val(el, e_slot(s), tuple_off(t, i), val.v)
+        if ownership_type(el) and val.slot >= 0: owner_forget_slot(val.slot)
     if tracked: building.pop()
     return Val(e_slot(s), true, s)
 
@@ -6253,11 +6254,16 @@ gen_vardecl = (s: int):
     if nodes[s].nlist > 0:
         tt = prune(ntype(int(nodes[s].b)))
         val = gen_owned(int(nodes[s].b))
+        # (a tuple of owners: each element leaves the temporary's cleanup for its binding's)
+        parts = ownership_type(tt) and val.slot >= 0
         loop i in [0..int(types[tt].nargs)):
             el = targ(tt, i)
             id = kid(s, i)
             ea = e_addi(val.v, tuple_off(tt, i))
-            if nodes[id].kind == .hole: drop_at(ea, el)
+            if parts: owner_forget_field(val.slot, "{i}/")
+            if nodes[id].kind == .hole:
+                if parts and ownership_type(el): e_call1(lf_helper(.drop, el, 0), ea, -1)
+                else: drop_at(ea, el)
             else if has_flag(id, NF_GLOBAL):
                 g = int(nodes[id].sym)
                 store_val(el, e_gaddr(global_addr_off(g)), 0, load_val(el, ea, 0))

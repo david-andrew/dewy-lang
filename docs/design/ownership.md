@@ -412,3 +412,8 @@ retains it, and dropping the owner releases it after the hook runs, so the last
 holder frees the buffer. Move-only still means one owner of the record; the
 buffer behind it may be shared on purpose, as the two ends of an `spsc` share
 their ring. Elements of resource arrays stay inline (`ownership_layout`).
+
+Tuples holding owners are structural owners, like a record without hooks of its
+own: each resource leaf is its own cleanup authority (`owner_structural`), a
+tuple literal adopts its elements, and unpacking moves each element's authority
+to its binding (`gen_vardecl`). Enums holding owners still are not owners.

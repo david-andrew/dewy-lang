@@ -1712,6 +1712,11 @@ released when its last holder is dropped, after the hook runs. This is how a
 move-only record shares storage with another, as an `spsc` queue's two ends share
 their ring.
 
+A `[T U]` tuple holding owners is an owner the same way a record without hooks
+of its own is: it can be returned, and `let [a b] = pair()` unpacks it into
+separately owned bindings, each dropped once by its own binding (a `_` position
+is dropped at once).
+
 Optional owner fields use their presence tag: `none` drops nothing, and a
 present value transfers or copies through its payload's lifecycle. Recursive
 records use owning boxes with exactly-once cleanup. Copyable recursive records

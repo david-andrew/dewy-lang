@@ -57,8 +57,11 @@ ow_is_map = (t0: int) -> bool:
     t = ow_prune(t0)
     ow_types[0][t].kind == .struct_ and ow_structs[0][ow_st(t)].name == "Map"
 ow_field_types = (t: int) -> int[]:
-    tl_layout(t)
     out: int[]
+    if ow_kind(t) == .tuple:
+        loop i in [0..int(ow_types[0][ow_prune(t)].nargs)): out.push(int(ow_args[0][int(ow_types[0][ow_prune(t)].args) + i]))
+        return out
+    tl_layout(t)
     si = ow_st(t)
     loop i in [0..int(ow_structs[0][si].nfields)):
         f = int(ow_structs[0][si].fields) + i
@@ -83,7 +86,7 @@ ownership_type = (t0: int) -> bool:
     t = ow_prune(t0)
     if ownership_callable_cap(t) != 0: return true
     k = ow_types[0][t].kind
-    (k == .struct_ or k == .fixed or k == .array or k == .opt or k == .box) and ownership_contains(t)
+    (k == .struct_ or k == .tuple or k == .fixed or k == .array or k == .opt or k == .box) and ownership_contains(t)
 ownership_contains = (t0: int) -> bool:
     t = ow_prune(t0)
     if ownership_callable_cap(t) != 0: return true
@@ -121,10 +124,11 @@ ownership_copyable = (t0: int, seen: int[] = []) -> bool:
     if k == .fixed or k == .array or k == .opt or k == .box: return ownership_copyable(ow_elem(t), visited)
     if not ownership_type(t): return true
     first = 0
-    if let hook = ow_copies[0].get(t):
-        parent = ow_prune(int(ow_fns[0][hook].ret))
-        first = int(ow_structs[0][ow_st(parent)].nfields)
-    else if ow_structs[0][ow_st(t)].drop_fn != 0: return false
+    if k != .tuple:
+        if let hook = ow_copies[0].get(t):
+            parent = ow_prune(int(ow_fns[0][hook].ret))
+            first = int(ow_structs[0][ow_st(parent)].nfields)
+        else if ow_structs[0][ow_st(t)].drop_fn != 0: return false
     fs = ow_field_types(t)
     loop i in [first..fs.len()):
         if ownership_type(fs[i]) and not ownership_copyable(fs[i], visited): return false
@@ -136,6 +140,10 @@ ownership_inline = (t0: int, depth: int = 0) -> bool:
     if depth > 32: return false
     k = ow_kind(t)
     if k == .fixed or k == .opt: return ownership_inline(ow_elem(t), depth + 1)
+    if k == .tuple:
+        loop ft in ow_field_types(t):
+            if not ownership_inline(ft, depth + 1): return false
+        return true
     if k != .struct_: return false
     tl_layout(t)
     si = ow_st(t)
@@ -152,6 +160,10 @@ ownership_fact_type = (t0: int, depth: int = 0) -> bool:
     if depth > 32: return true
     k = ow_kind(t)
     if k == .fixed or k == .array or k == .opt or k == .box: return ownership_fact_type(ow_elem(t), depth + 1)
+    if k == .tuple:
+        loop ft in ow_field_types(t):
+            if ownership_fact_type(ft, depth + 1): return true
+        return false
     if k != .struct_: return false
     si = ow_st(t)
     if ownership_declared(int(ow_structs[0][si].decl)): return true
@@ -175,7 +187,7 @@ ownership_layout = (t0: int, depth: int = 0, seen: int[] = []) -> bool:
     if k == .fixed: return ownership_inline(ow_elem(t), depth + 1)
     if ownership_callable_cap(t) != 0: return true
     if k == .str_ or ow_scalar(t) or k == .float_: return true
-    if k != .struct_: return false
+    if k != .struct_ and k != .tuple: return false
     loop ft in ow_field_types(t):
         if not ownership_layout(ft, depth + 1, visited): return false
     true
@@ -188,6 +200,10 @@ ownership_decl_copyable = (t0: int, seen: int[] = []) -> bool:
     visited.push(t)
     k = ow_kind(t)
     if k == .array or k == .fixed or k == .box or k == .opt: return ownership_decl_copyable(ow_elem(t), visited)
+    if k == .tuple:
+        loop ft in ow_field_types(t):
+            if not ownership_decl_copyable(ft, visited): return false
+        return true
     if k != .struct_: return true
     si = ow_st(t)
     decl = int(ow_structs[0][si].decl)
