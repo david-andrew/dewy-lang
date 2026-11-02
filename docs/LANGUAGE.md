@@ -2929,6 +2929,25 @@ independent value semantics. Collection preserves source order, so a subsequent
 `sum` uses the same reduction order as the sequential collection. Scheduling
 does not reassociate reductions.
 
+A function may run its own callback parameter in parallel code. Nothing is
+written: its signature records that the argument must be parallel-safe, and each
+call checks the function it is given as the parallel body itself would be
+checked (no shared writes, `Send`/`Sync`, nonblocking). A wrapper that passes
+its callback parameter on inherits the requirement. An unsafe argument is
+reported where it goes wrong, with notes naming the call, any wrappers and the
+parallel use. Such a function is called directly, not used as a value.
+
+```dewy
+apply = (f:<(x:int):>int> xs:array<int>):>array<int> => [parallel x in xs f(x)]
+square = (x:int):>int => x*x
+printl(apply(@square [1 2 3]))   # [1 4 9]; a callback changing a global is an error here
+```
+
+`$parallel_safe`, first in a function declaration (on its line or the line
+before), pins this contract on an exported API: each callback parameter must
+still reach parallel code, so an edit to the body cannot quietly loosen what
+callers are held to. On a function that takes no callback it is an error.
+
 Native programs use a persistent worker pool. `DEWY_THREADS = 2` limits it to
 two threads including the caller; `DEWY_THREADS = 1` runs on the caller. Nested
 operations share the same pool, and a caller waiting at a join helps run ready

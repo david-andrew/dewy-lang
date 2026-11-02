@@ -672,6 +672,59 @@ a pointer to each rule. The wording is David's.
 - On hold: `select`, `[concurrent x in xs …]` and any new loop- or capture-shaped
   concurrency construct.
 
+### Callbacks passed into parallel code (2026-11-01)
+
+David's decision (#114): inferred, with no required tag. A function that passes
+a callback parameter into parallel code gets "this argument must be
+parallel-safe" in its signature, checked at call sites like effects. An optional
+`$parallel_safe` only enforces the contract on exported APIs, and is rejected on
+a function that takes no callback. Ordinary code never writes anything.
+
+- **Parallel-safe** is exactly what a `parallel` body already must be: no
+  writes to globals or captured variables, also through called functions
+  (`race_arg`), `Send`/`Sync` captures and result, and nonblocking (the
+  two-lane rule; `concurrency_callback`). No new check.
+- **Roots.** A program's call of a parallel boundary (`[parallel ...]`,
+  `parallel ... {}`, `parallel_map` and the other `@parallel` library
+  entry points) whose function argument is a callback parameter of the
+  enclosing function, directly (`parallel_map(xs @f)`) or captured by the body
+  it runs (`[parallel x in xs f(x)]`). A parameter is its function's own
+  binding, still unassigned; a capture follows its chain to it. Anything else
+  is checked where it is, as before.
+- **Representation** (internal): a side table from (function instance,
+  parameter index) to the site that made the requirement: the parallel call,
+  or the call passing the parameter on, with that callee's parameter. No field
+  on ordinary functions; a program with no root builds nothing.
+- **Propagation.** After checking (`concurrency_finalize`), one walk indexes
+  the program's direct calls by callee and its function values; a worklist
+  visits each required (instance, parameter) once. At each call the argument
+  is either a parameter of the caller (the caller inherits the requirement,
+  recording this call) or a lambda, function reference or partial
+  application, checked as the parallel body would be. Anything else (a
+  variable holding a function) is an error: the compiler can only check a
+  function it can see. Generic functions require per instance, as their
+  calls resolve to instances. Cost: O(nodes) once, only when a root exists.
+- **Inside the function**, a call through a required parameter (or its
+  capture) is not reported by the body's own race and blocking checks: every
+  call of the function checks what it gives. Capture checks skip it only in
+  the parallel lane; `spawn` keeps its own rule.
+- **Function values.** A function with a requirement is called directly; using
+  it as a value or partially applying it is an error, since that call could not
+  be checked (the same rule as the library's `@parallel` entry points).
+- **The error** is reported where the argument goes wrong (the write, the
+  capture, the wait), with notes: the call giving it ("this is given to
+  apply's parameter 'f', which must be parallel-safe"), each wrapper passing it
+  on, and the parallel use ("apply runs 'f' on many threads at once here,
+  through `parallel`").
+- **`$parallel_safe`** is a marker like `$export`: first in a module-level
+  function declaration, on its line or the line before. It is rejected at
+  once when no parameter has a function type. After inference, each checked
+  instance must carry the requirement on every callback parameter; otherwise
+  the tag is an error saying the body no longer passes it into parallel code.
+- **Gaps** (conservative errors, not unsoundness): a parallel body that hands
+  a callback parameter to a helper that calls it, and a callback parameter
+  given to `spawn`, are still rejected as calls the compiler cannot see.
+
 ### Multi-lock spelling (2026-10-23)
 
 - Multi-lock spelling (decided 2026-10-23):
