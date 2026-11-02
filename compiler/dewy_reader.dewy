@@ -7495,16 +7495,6 @@ rd_dc_parameter_word=(@reader_ctx:ParserContext parameter:DewyLexeme):>bool=>$un
     true
 }
 
-# `((x:int64):>int64)` at its `(`: dw_type's mistake, noted; the function type read on.
-rd_dc_paren_function_type=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:DewyLexeme):>int64=>$unsafe {
-    reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
-    let n:int64=rd_dc_function_type(@reader_ctx @reader_nodes false)
-    if ((n =? 0) or (not rd_dn_accept(@reader_ctx 'rparen'))) {
-        return 0
-    }
-    rd_dc_report(@reader_ctx rd_mkpos(reader_ctx.file token.start) "function types use angle brackets: replace the outer (...) with <...>, as in `<(x:int64):>int64>`");
-    n
-}
 
 rd_dc_partial=(@reader_ctx:ParserContext @reader_nodes:array<Node> opening:DewyLexeme name_id:int32=0):>int64=>$unsafe {
     let pos:int64=rd_mkpos(reader_ctx.file opening.start)
@@ -10441,12 +10431,6 @@ rd_dc_type_primary=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=
     else if (((token.symbol =? 'lparen') and (reader_ctx.reader.dc_type_args >? 0)) and (reader_ctx.tokens[(int64<overflow='wrap'>(rd_dc_closing(@reader_ctx reader_ctx.at)) + 1)].symbol =? 'returns')) {
         # `array<():>int64>`: a type argument may be a function type without its own angle brackets
         n = rd_dc_function_type(@reader_ctx @reader_nodes false)
-    }
-    else if ((((token.symbol =? 'lparen') and (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 1)].symbol =? 'lparen')) and (reader_ctx.tokens[(int64<overflow='wrap'>(rd_dc_closing(@reader_ctx (int64<overflow='wrap'>(reader_ctx.at) + 1))) + 1)].symbol =? 'returns')) and reader_ctx.flags.report_now) {
-        n = rd_dc_paren_function_type(@reader_ctx @reader_nodes token)
-        if (n =? 0) {
-            return 0
-        }
     }
     else if (token.symbol =? 'lparen') {
         # (dw_type of its one element; a joined closer cannot end a type in it)

@@ -2682,13 +2682,6 @@ rt_dc_type_power = (n: int, pos: int) -> int:
 
 # Type arguments being read (dc_type_named): a joined closer may end one, dn_closer_joined.
 
-rt_dc_paren_function_type = (token: DewyLexeme) -> int:
-    dc_parser.at += 1
-    n = rt_dc_function_type(false)
-    if n == 0 or not rt_dn_accept(.rparen): return 0
-    rt_dc_report(mkpos(dc_parser.file, token.start), "function types use angle brackets: replace the outer (...) with <...>, as in `<(x:int64):>int64>`")
-    n
-
 rt_dc_closes = () -> bool: rt_dn_peek() == .rangle or dc_parser.reader.dn_edits_on and rt_dn_closer_joined()
 
 rt_dc_effect_atom_at = (at: int) -> bool:
@@ -2725,9 +2718,6 @@ rt_dc_type_primary = () -> int:
     else if token.symbol == .lparen and dc_parser.reader.dc_type_args > 0 and dc_parser.tokens[rt_dc_closing(dc_parser.at) + 1].symbol == .returns:
         # `array<():>int64>`: a type argument may be a function type without its own angle brackets
         n = rt_dc_function_type(false)
-    else if token.symbol == .lparen and dc_parser.tokens[dc_parser.at + 1].symbol == .lparen and dc_parser.tokens[rt_dc_closing(dc_parser.at + 1) + 1].symbol == .returns and dc_parser.flags.report_now:
-        n = rt_dc_paren_function_type(token)
-        if n == 0: return 0
     else if token.symbol == .lparen:
         # (dw_type of its one element; a joined closer cannot end a type in it)
         dc_parser.at += 1

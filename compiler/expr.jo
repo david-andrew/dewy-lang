@@ -3678,35 +3678,16 @@ cin_grow = (d: int): cin_mark.resize(max(d + 1, nodes.len()) + 1024)
 
 # Library operations Dewy spells differently from the Sloppy library underneath. For these
 # names, the definitions in lib/std/files.jo are Dewy's (`read_bytes` gives a value or a file
-# error) and the others stay the Sloppy library's; a Dewy program calling a Sloppy spelling is told
-# Dewy's. (One spelling per operation: the Sloppy names are not Dewy's.)
+# error) and the others stay the Sloppy library's, which a Dewy program does not see. (One
+# spelling per operation: the Sloppy names are not Dewy's, and nothing points from them to
+# Dewy's; only the Python builtins `zip` and `enumerate` are told the Dewy way.)
 dewy_surface_hints: {int: str}
 dewy_surface_table = () -> {int: str}:
     if dewy_surface_hints.len() == 0:
-        loop entry in [
-            ("read_file", "`read_text(path)` (or `p\"file\".read_text`) gives the text or a file error"),
-            ("write_file", "`write_text(path text)` (or `p\"file\".write_text(text)`) gives the byte count or a file error"),
-            ("read_bytes", "`read_bytes(path)` (or `p\"file\".read_bytes`) gives the bytes or a file error"),
-            ("write_bytes", "`write_bytes(path bytes)` (or `p\"file\".write_bytes(bytes)`) gives the byte count or a file error"),
-            ("append_file", "`append_file(path text)` adds to the end of the file and gives the byte count or a file error"),
-            ("is_dir", "`is_directory(path)` (or `p\"dir\".is_dir`)"),
-            ("mkdir", "`make_directory(path)` (or `p\"dir\".mkdir`) gives `true` or a file error"),
-            ("delete_file", "`remove_file(path)` (or `p\"file\".unlink`) gives `true` or a file error"),
-            ("delete_dir", "`remove_directory(path)` (or `p\"dir\".rmdir`) gives `true` or a file error"),
-            ("list_dir", "`list_directory(path)` (or `p\"dir\".list`) gives the entries or a file error"),
-            ("run_program", "`run(program args)` gives the exit status or SpawnError, and `capture(program args)` the output too; a program is a path (`run(\"/usr/bin/env\" [name ...])` searches PATH)"),
-            ("run_shell", "`run(\"/bin/sh\" [\"-c\" command])` (or `capture` for its output)"),
-            ("file_name", "`p(path).name`"),
-            ("dir_name", "`p(path).parent`"),
-            ("extension", "`p(path).suffix`"),
-            ("without_extension", "`p(path).with_suffix(\"\")`"),
-            ("join_path", "`p\"\{a}/\{b}\"`: a path interpolates as its text"),
-            ("sort_by", "`xs.sort(key=f)` sorts by a key (`reverse=true` for largest first)"),
-            ("sorted_by", "`xs.sorted(key=f)` gives a copy sorted by a key (`reverse=true` for largest first)"),
-            ("eprint", "`printl(x file=stderr)` writes to standard error, and `console.error(x)` in red on a terminal"),
-            ("zip", "loop over both at once, `loop x in xs and y in ys \{...}`, or pair them in a comprehension, `[loop x in xs and y in ys [x y]]`"),
-            ("enumerate", "count alongside, `loop i in 0.. and x in xs \{...}`")]:
-            dewy_surface_hints[intern(entry.0)] = entry.1
+        loop word in ["read_file", "write_file", "read_bytes", "write_bytes", "append_file", "is_dir", "mkdir", "delete_file", "delete_dir", "list_dir", "run_program", "run_shell", "file_name", "dir_name", "extension", "without_extension", "join_path", "sort_by", "sorted_by", "eprint"]:
+            dewy_surface_hints[intern(word)] = ""
+        dewy_surface_hints[intern("zip")] = "loop over both at once, `loop x in xs and y in ys \{...}`, or pair them in a comprehension, `[loop x in xs and y in ys [x y]]`"
+        dewy_surface_hints[intern("enumerate")] = "count alongside, `loop i in 0.. and x in xs \{...}`"
     dewy_surface_hints
 
 # (for a library declaration of the name: 1 when only Dewy sees it, 2 when only Sloppy does, 0 both;
@@ -3756,42 +3737,11 @@ caller_dewy = () -> bool:
 # (declarations collect_in left out for the caller's language, since the last call_by_name)
 surface_hidden: int[]
 
-# A Dewy call that only a Sloppy spelling would take: Dewy's spelling instead.
-dewy_surface_check = (n: int, name: int, decls: int[], args: int[]):
+# A Dewy call of a Python builtin the Sloppy library has (zip, enumerate): the Dewy way.
+dewy_surface_check = (n: int, name: int):
     if surface_hidden.len() == 0 or not caller_dewy(): return
     hint = dewy_surface_table().get(name) ?? ""
-    if hint == "": return
-    if dewy_renamed(name): fatal(nodes[n].pos, "'{name_of(name)}' is not Dewy's: {hint}")
-    # (checking an argument may check other calls, which collect their own)
-    hidden: int[]
-    loop d in surface_hidden: hidden.push(d)
-    # (only the first argument, the path, when a Dewy spelling may take these arguments: the
-    # others stay unchecked for its parameters to guide them)
-    count = args.len()
-    loop d in decls:
-        if nkids(d) >= args.len() and count > 1: count = 1
-    ts: int[]
-    loop a in args[..count):
-        if nodes[a].kind == .namedarg: return
-        if not has_flag(a, NF_CHECKED):
-            check_expr(a, 0)
-            add_flag(a, NF_CHECKED)
-        ts.push(ntype(a))
-    if decl_takes(decls, ts) or not decl_takes(hidden, ts): return
-    fatal(nodes[n].pos, "'{name_of(name)}' is not Dewy's: {hint}")
-
-decl_takes = (decls: int[], ts: int[]) -> bool:
-    loop d in decls:
-        sig = fn_sig(d)
-        if nkids(d) < ts.len(): continue
-        binds = fill(0, int(sig.ntp))
-        ok = true
-        loop i in [0..ts.len()):
-            if match_type(sig.params[i], ts[i], binds, 0) < 0:
-                ok = false
-                break
-        if ok: return true
-    false
+    if hint != "": fatal(nodes[n].pos, "'{name_of(name)}' is not Dewy's: {hint}")
 
 # (checker_call_queries.dewy's collect_fns in a Dewy module: the bundled rational's exact
 # members of an exact family name, when the module's imports reach it)
@@ -4349,7 +4299,7 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
             if mod_scope >= 0: collect_module(mod_scope, protocol, &decls)
             else: collect_fns(protocol, &decls)
             if tm >= 0: collect_module(tm, protocol, &decls)
-    if surface_hidden.len() > 0: dewy_surface_check(n, name, decls, args)
+    if surface_hidden.len() > 0: dewy_surface_check(n, name)
     if decls.len() == 0:
         if ii >= 0 and not intrinsics[ii].arr:
             if ide_on: ide_builtin_ref(n, name)
