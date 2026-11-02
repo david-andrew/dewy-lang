@@ -421,7 +421,7 @@ monitored `Deadlock` scopes and STM. (`$no_deadlocks` certificates: see below.)
 ### Channels and channel waits (2026-10-24)
 
 Built: bounded channels and their waits in the default analysis. Not built:
-`select` and split send/receive ends. (`$no_deadlocks` certificates: see below.)
+`select` and split send/receive ends (`spsc`, stage 4 below). (`$no_deadlocks` certificates: see below.)
 
 - **Channel type.** `Channel<T>`, made by `channel<T>(capacity)`, with
   `capacity >? 0` an obligation (no unbounded channel). It lives in
@@ -429,12 +429,12 @@ Built: bounded channels and their waits in the default analysis. Not built:
   `lib/std/thread.jo`: one allocation holding a word lock, a futex sequence word
   and `capacity` slots. Copied handles retain it. It is `Send`/`Sync` when `T` is
   `Send`; zero-filling cannot make one.
-  - `send(value)` gives `void | Closed | Canceled`, `receive()` gives
-    `T | Closed | Canceled`, and `close()` gives `void`. Provisional spellings:
+  - `send(value)` gives `void | Unsent<T>` (stage 4, below), `receive` gives
+    `T | Closed | Canceled`, and `close` gives `void`. Provisional spellings:
     `channel`, `send`, `receive`, `close` and `Closed` (an `exception`, like
     `Canceled`).
   - Close semantics follow the adopted direction (no send-on-closed trap): a send
-    after a close gives `Closed`; a receive drains what is buffered, then gives
+    after a close fails with `Closed`; a receive drains what is buffered, then gives
     `Closed`; a close wakes every waiter; closing twice does nothing.
   - Both waits are `blocks` (a `parallel` body cannot use them) and cancellation
     points, level-triggered: in a canceled scope they give `Canceled` even when
@@ -477,6 +477,45 @@ Built: bounded channels and their waits in the default analysis. Not built:
     behavior (`producer_consumer`, `cancel_blocked`, `close`).
 - **False rejections.** None in the corpus (no existing program uses channels);
   pipelines, worker pools and request/reply loops are quiet.
+
+### Stage 4 queues: `Unsent`, `try_` verbs and `mpmc` (2026-11-01)
+
+Decided by David (#105 D3a–c; see "Decided rules"). Built: D3a and D3c. Not built:
+D3b (`spsc`), whose blockers are below. On hold: `select` (D3d).
+
+- **A failed send gives its value back.** Every send returns `void | Unsent<T>`:
+  `.value` is the exact payload offered, `.reason` is `Full`, `Closed`, `Busy` or
+  `Canceled`. `Unsent<T>` is a generic `exception`; `Full`, `Empty` and `Closed` are
+  `exception`s and `Busy` an `error`, all in `lib/prelude/outcomes.jo`, loaded with
+  the lock, channel and queue preludes (a Jo prelude file, for the generic type), so
+  programs without them keep their exception families.
+  - `or_throw` forwards an `Unsent` like any exception. Exception families are
+    closed unions, made before checking, so they hold no generic instance: a task
+    failing with an `Unsent` fails its group with the `.reason`, and keeps the
+    `Unsent` as its own result. `x is? exception` holds for one.
+- **Non-waiting verbs.** `try_send(value)` fails with `Full` when there is no room;
+  `try_receive` gives `T | Empty | Closed | Busy | Canceled`. Both are cancellation
+  points (level-triggered) that never wait. `Busy` means another task was
+  mid-operation: a channel's lock was held, or an `mpmc` slot was claimed but not
+  yet filled or emptied. It is never reported as `Full` or `Empty`.
+- **`mpmc<T>(capacity)`**, an `Mpmc<T>` (`lib/prelude/mpmc.dewy`, its runtime in
+  `mpmc.jo`, both loaded only when a program names it): Vyukov's bounded queue, lock-free, with a
+  sequence word per slot and a close bit in the send position, so no send claims
+  a slot after a close and receives drain what was claimed before it. Waiters sleep
+  on a futex sequence word, as a channel's do. The handle is shared by copying and
+  is `Send` when `T` is; its waits are `blocks`, and the channel-wait analysis and
+  `$no_deadlocks` treat them as a channel's (a raw `mpmc` wait is uncertified).
+- **Not yet.** `try_send` and `try_receive` are not modeled by the channel-wait
+  analysis (they never wait, but they change what a later send finds).
+  `spsc<T N>` needs: value type parameters (`N`); move-only ends that hold a shared
+  allocation (resource records must be inline today); and destructuring a pair of
+  move-only values (`let [tx rx] = q.split`). The lock-free ring itself is
+  straightforward on the existing atomics.
+- **Acceptance** (`tests/cases/queues/`, `tests/test_queue_busy.py`): values given
+  back on full, closed and canceled sends; forwarding and group reporting; `mpmc`
+  order, laps, close and draining; four producers and three consumers delivering
+  each value once; `Busy` seen under contention (bounded retries); an `mpmc`
+  cycle rejected and an `mpmc` wait refused in a `parallel` body.
 
 ### `$no_deadlocks` certificates (stage 2, 2026-10-24)
 
@@ -619,6 +658,19 @@ a pointer to each rule. The wording is David's.
   approval). Later it can drive constant-time checks in crypto code.
 - `secret<T>` reveal: `s.reveal`. Sealed secrets (reveal requiring a key or
   capability) may come later.
+
+### Stage 4 queues (2026-11-01)
+
+- A failed send returns `void | Unsent<T>`, with `.value` (the exact payload
+  offered) and `.reason` (`Full`, `Closed`, `Busy` or `Canceled`). `Channel.send`
+  returns this too.
+- `spsc<T N>` with a consuming `.split` (no parentheses: zero-argument calls drop
+  them everywhere) and the channel verbs `try_send`, `send`, `try_receive`,
+  `receive`, `close`; each end has exactly one owner.
+- `mpmc<T>(capacity)`; a non-waiting attempt that collides with another task
+  returns `Busy`.
+- On hold: `select`, `[concurrent x in xs …]` and any new loop- or capture-shaped
+  concurrency construct.
 
 ### Multi-lock spelling (2026-10-23)
 

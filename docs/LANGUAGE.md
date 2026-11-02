@@ -3081,9 +3081,9 @@ A `Channel<T>` carries values between tasks, in the order they were sent.
 handle, like a `Mutex`, and its payload must be `Send`:
 
 ```dewy
-produce = (out:Channel<int64> n:int64):>void | Closed | Canceled => {
+produce = (out:Channel<int64> n:int64):>void | Unsent<int64> => {
     loop i in [0..n) { out.send(i) or_throw }   # waits while out is full
-    out.close()
+    out.close
 }
 main = () => {
     let numbers = channel<int64>(16)
@@ -3091,7 +3091,7 @@ main = () => {
     concurrent {
         spawn produce(numbers 1000)
         loop true {
-            let n = numbers.receive()   # waits while numbers is empty
+            let n = numbers.receive   # waits while numbers is empty
             if n is? Closed break
             total += n or_throw
         }
@@ -3100,14 +3100,65 @@ main = () => {
 }
 ```
 
-`c.send(value)` gives `void | Closed | Canceled` and waits while the channel is full;
-`c.receive()` gives `T | Closed | Canceled` and waits while it is empty. Both are
-blocking operations (`blocks`, so a `parallel` body cannot use them) and cancellation
-points: canceled while waiting, or in a canceled scope, they give `Canceled`.
-`c.close()` closes the channel; closing again does nothing. After a close, a send
-gives `Closed` (never a trap) and a receive takes what is still buffered, then gives
-`Closed`; tasks waiting on the channel wake with `Closed`. `Closed` is an
-`exception`, like `Canceled`.
+`c.send(value)` waits while the channel is full; `c.receive` gives `T | Closed |
+Canceled` and waits while it is empty. Both are blocking operations (`blocks`, so a
+`parallel` body cannot use them) and cancellation points: canceled while waiting, or
+in a canceled scope, they fail with `Canceled`. `c.close` closes the channel; closing
+again does nothing. After a close, a send fails with `Closed` (never a trap) and a
+receive takes what is still buffered, then gives `Closed`; tasks waiting on the
+channel wake.
+
+A send that fails gives its value back: it returns `void | Unsent<T>`, where `.value`
+is the exact payload offered and `.reason` is `Full`, `Closed`, `Busy` or `Canceled`.
+`or_throw` forwards an `Unsent` like any exception; a task that fails with one fails
+its group with the reason (`Closed`, say), and keeps the `Unsent` as its own result.
+
+```dewy
+Message:type = [id:int64 body:string]
+save = (m:Message) => printl"unsent: {m.id}"
+main = () => {
+    let outbox = channel<Message>(16)
+    match outbox.try_send(Message[1 "hello"]) {
+        failed:Unsent<Message> => save(failed.value)   # nothing is lost
+        _ => {}
+    }
+}
+```
+
+`c.try_send(value)` and `c.try_receive` never wait and are cancellation points.
+`try_send` fails with `Full` when there is no room; `try_receive` gives `T | Empty |
+Closed | Busy | Canceled`. Both give `Busy` when another task is mid-operation on
+the channel, rather than a misleading `Full` or `Empty`. `Unsent`, `Full`, `Empty`
+and `Closed` are `exception`s, like `Canceled`; `Busy` is an `error`.
+
+`mpmc<T>(capacity)` makes an `Mpmc<T>`, a bounded queue for many senders and
+receivers with the same verbs and outcomes. It is lock-free: a send or receive
+claims a slot and fills or empties it, and a non-waiting attempt that finds another
+task claiming or filling the slot it wants gives `Busy`. Its handle is shared by
+copying, like a channel's, and its waits are checked like a channel's.
+
+```dewy
+fill = (jobs:Mpmc<int64> n:int64):>void | Unsent<int64> => {
+    loop i in [0..n) { jobs.send(i) or_throw }
+}
+main = () => {
+    let jobs = mpmc<int64>(64)
+    concurrent {
+        spawn {
+            concurrent {
+                spawn fill(jobs 100)
+                spawn fill(jobs 100)
+            }
+            jobs.close
+        }
+        loop true {
+            let job = jobs.receive
+            if job is? Closed break
+            printl"{job or_throw}"
+        }
+    }
+}
+```
 
 The compiler reads every task's channel waits, in order, with the loops around them
 (their counts when literal) and the locks it holds, and rejects waits it can show
