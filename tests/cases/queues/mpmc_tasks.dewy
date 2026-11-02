@@ -1,0 +1,38 @@
+# modes: native native-release
+# Many senders and receivers on one small mpmc queue. Every value arrives exactly once:
+# four producers send 2000 values each through 8 slots, three consumers sum them, and the
+# close after the producers' join lets the consumers drain and stop.
+produce = (q:Mpmc<int64> first:int64 count:int64):>void | Unsent<int64> => {
+    loop i in [first..first + count) { q.send(i) or_throw }
+}
+consume = (q:Mpmc<int64> total:Atomic<int64> seen:Atomic<int64>):>void => {
+    loop true {
+        let n = q.receive
+        if n is? Closed break
+        if n is? Canceled break
+        total.add(n);
+        seen.add(1);
+    }
+}
+main = () => {
+    let q = mpmc<int64>(8)
+    let total = atomic(0)
+    let seen = atomic(0)
+    concurrent {
+        spawn consume(q total seen)
+        spawn consume(q total seen)
+        spawn consume(q total seen)
+        spawn {
+            concurrent {
+                spawn produce(q 0 2000)
+                spawn produce(q 2000 2000)
+                spawn produce(q 4000 2000)
+                spawn produce(q 6000 2000)
+            }
+            q.close
+        }
+    }
+    printl"received {seen.load()} values, sum {total.load()}"
+}
+
+$runtime_checks

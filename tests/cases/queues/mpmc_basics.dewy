@@ -1,0 +1,25 @@
+# modes: native native-release
+# mpmc<T>(capacity): a bounded queue with the channel verbs, in order, its slots reused
+# lap after lap. Full and Empty when nothing collides; after a close, sends give their
+# value back and receives drain what is left, then give Closed.
+main = () => {
+    let q = mpmc<string>(3)
+    loop lap in [0..3) {
+        q.send("a{lap}") or_throw
+        q.try_send("b{lap}") or_throw
+        q.send("c{lap}") or_throw
+        match q.try_send("d{lap}") {
+            u:Unsent<string> => printl"{u.value} full: {u.reason is? Full}"
+            _ => printl"sent past capacity"
+        }
+        printl"{q.receive or_throw} {q.try_receive or_throw} {q.receive or_throw} empty: {q.try_receive is? Empty}"
+    }
+    q.send("last") or_throw
+    q.close
+    q.close
+    match q.send("late") {
+        u:Unsent<string> => printl"{u.value} closed: {u.reason is? Closed}"
+        _ => printl"sent after close"
+    }
+    printl"drained {q.try_receive or_throw}, then closed: {q.try_receive is? Closed} {q.receive is? Closed}"
+}

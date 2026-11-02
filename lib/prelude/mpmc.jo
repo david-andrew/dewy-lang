@@ -1,0 +1,147 @@
+# Dewy's prelude: the runtime of `mpmc<T>(capacity)` (lib/prelude/channels.dewy), loaded only by
+# programs that name it.
+# (words read and added to at once; the web runs one thread, so plainly)
+__q_load = (p: *int) -> int:
+    when TARGET == "wasm": return p[0]
+    else: return __atomic_add(p, 0)
+
+__q_add = (p: *int, v: int) -> int:
+    when TARGET == "wasm":
+        old = p[0]
+        p[0] = old + v
+        return old
+    else: return __atomic_add(p, v)
+
+# A queue changed: its waiters woken (they sleep on seq, like a channel's).
+__q_changed = (seq: *int, waiting: *int):
+    __q_add(seq, 1)
+    when TARGET == "linux":
+        if __q_load(waiting) != 0: syscall(202, seq, 129, 0x7FFFFFFF)
+
+# Sleeps until seq moves on from s, or 1 ms passes; the first few rounds only yield.
+__q_park = (seq: *int, s: int, waiting: *int, spins: int):
+    when TARGET == "linux":
+        if spins < 16: return
+        __q_add(waiting, 1)
+        timeout = (0, 1000000)
+        syscall(202, seq, 128, s, &timeout)
+        __q_add(waiting, -1)
+    else: __task_pause()
+
+# The shared state of Dewy's `mpmc<T>(capacity)` (lib/prelude/queues.dewy): Vyukov's
+# bounded queue. Each slot has a sequence word: pos when it is free for the send claiming
+# position pos, pos + 1 once that send has written it. A send claims a position by moving
+# `enq` on, a receive by moving `deq` on; the close bit in `enq` stops every later claim.
+# A non-waiting attempt that loses a claim, or finds a slot another task is still writing
+# or emptying, is busy rather than full or empty.
+const __MPMC_CLOSED = 4611686018427387904
+
+struct __MpmcState[T]:
+    enq: int
+    deq: int
+    seq: int
+    waiting: int
+    cap: int
+    seqs: int[]
+    slots: T[]
+
+struct __Mpmc[T]:
+    __cell: __MpmcState[T][]
+    __p: *__MpmcState[T]
+
+__mpmc_new[T] = (capacity: int) -> __Mpmc[T]:
+    n = max(capacity, 1)
+    slots: T[]
+    slots.resize(n)
+    seqs: int[]
+    seqs.resize(n)
+    loop i in [0..n): seqs[i] = i
+    cell: __MpmcState[T][] = [__MpmcState[T](0, 0, 0, 0, n, seqs, slots)]
+    p = data(cell)
+    __Mpmc[T](cell, p)
+
+__mpmc_seq[T] = (p: *__MpmcState[T], i: int) -> *int: ((data(p.seqs) as int) + i * 8) as *int
+
+# 0: sent; 1 closed; 2 canceled; 3 full; 4 busy. Never waits.
+__mpmc_try_send[T] = (q: __Mpmc[T], v: T) -> int:
+    p = q.__p
+    if __task_canceled(): return 2
+    pos = __q_load(&p.enq)
+    if pos & __MPMC_CLOSED != 0: return 1
+    i = pos % p.cap
+    sq = __mpmc_seq(p, i)
+    d = __q_load(sq) - pos
+    if d < 0:
+        # (the slot still holds the value sent a lap ago: full, unless a receive has claimed it)
+        if __q_load(&p.deq) > pos - p.cap: return 4
+        return 3
+    if d > 0: return 4
+    if __q_cas(&p.enq, pos, pos + 1) != pos:
+        if __q_load(&p.enq) & __MPMC_CLOSED != 0: return 1
+        return 4
+    p.slots[i] = v
+    __q_add(sq, 1)
+    __q_changed(&p.seq, &p.waiting)
+    0
+
+# The value at a claimed position; its slot freed for the send a lap later.
+__mpmc_take_at[T] = (p: *__MpmcState[T], pos: int) -> T:
+    i = pos % p.cap
+    v = p.slots[i]
+    empty: T
+    p.slots[i] = empty
+    __q_add(__mpmc_seq(p, i), p.cap - 1)
+    __q_changed(&p.seq, &p.waiting)
+    v
+
+# The position claimed (>= 0, for __mpmc_take), or -1 closed and drained, -2 canceled,
+# -3 empty, -4 busy. Never waits.
+__mpmc_try_claim[T] = (q: __Mpmc[T]) -> int:
+    p = q.__p
+    if __task_canceled(): return -2
+    pos = __q_load(&p.deq)
+    i = pos % p.cap
+    d = __q_load(__mpmc_seq(p, i)) - (pos + 1)
+    if d < 0:
+        # (not written yet: empty, unless a send has claimed it and is still writing)
+        e = __q_load(&p.enq)
+        if e & (__MPMC_CLOSED - 1) != pos: return -4
+        if e & __MPMC_CLOSED != 0: return -1
+        return -3
+    if d > 0: return -4
+    if __q_cas(&p.deq, pos, pos + 1) != pos: return -4
+    pos
+
+__mpmc_take[T] = (q: __Mpmc[T], pos: int) -> T: __mpmc_take_at(q.__p, pos)
+
+# 0: sent; 1 closed; 2 canceled. Waits while the queue is full or busy.
+__mpmc_send_wait[T] = (q: __Mpmc[T], v: T) -> int:
+    p = q.__p
+    spins = 0
+    loop:
+        s = __q_load(&p.seq)
+        code = __mpmc_try_send(q, v)
+        if code < 3: return code
+        if code == 3: __q_park(&p.seq, s, &p.waiting, spins)
+        else if spins > 64: __task_pause()
+        spins += 1
+
+# The position claimed, or -1 closed and drained, -2 canceled. Waits while the queue is
+# empty or busy.
+__mpmc_receive_wait[T] = (q: __Mpmc[T]) -> int:
+    p = q.__p
+    spins = 0
+    loop:
+        s = __q_load(&p.seq)
+        pos = __mpmc_try_claim(q)
+        if pos > -3: return pos
+        if pos == -3: __q_park(&p.seq, s, &p.waiting, spins)
+        else if spins > 64: __task_pause()
+        spins += 1
+
+__mpmc_close[T] = (q: __Mpmc[T]) -> void:
+    p = q.__p
+    loop:
+        e = __q_load(&p.enq)
+        if e & __MPMC_CLOSED != 0 or __q_cas(&p.enq, e, e | __MPMC_CLOSED) == e: break
+    __q_changed(&p.seq, &p.waiting)

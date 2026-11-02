@@ -46,6 +46,7 @@ deadlock_parallel = false        # the program runs `parallel` work (a cycle is 
 deadlock_atomics = false         # the program uses an atomic (concurrency_atomic_call)
 dc_fns: {int: bool}              # functions calling a channel operation (dl_scan_calls)
 dc_mod = -1                      # the channels prelude's module, once loaded
+dc_qmod = -1                     # the mpmc prelude's (lib/prelude/mpmc.dewy), once loaded
 pc_mod = -2                      # the protocols prelude's module (-1 none; -2 not looked up)
 
 const DL_PASSES = 8
@@ -144,7 +145,7 @@ dl_scan_calls = (f: int, n: int):
                     dl_givens[g] = list
     if k == .vardecl and nodes[n].sym > 0 and nkids(n) == 0 and not has_flag(n, NF_GLOBAL): dl_inits[int(nodes[n].sym)] = n
     # (the certified protocols' own channel waits are the library's, not the program's)
-    if dc_mod >= 0 and k == .call and nodes[n].aux == 0 and nodes[n].sym > 0 and int(fns[f].mod) != dc_mod and int(fns[f].mod) != dc_protocols() and dc_chan_call(n) > 0: dc_fns[f] = true
+    if dc_on() and k == .call and nodes[n].aux == 0 and nodes[n].sym > 0 and not dc_is(int(fns[f].mod)) and int(fns[f].mod) != dc_protocols() and dc_chan_call(n) > 0: dc_fns[f] = true
     if k != .lambda and k != .fnref:
         loop g in value_helper_calls(n):
             list = dl_callers.get(g) ?? []
@@ -221,7 +222,7 @@ dl_makes_handle = (n: int) -> bool:
     if d == 0: return false
     nm = name_of(int(nodes[d].name))
     path = files[pos_file(nodes[d].pos)].path
-    nm == "mutex" and path == dl_lib() or nm == "channel" and ends_with(path, "/prelude/channels.dewy") or nm == "atomic" and path == lib_dir + "/std/thread.jo"
+    nm == "mutex" and path == dl_lib() or (nm == "channel" and ends_with(path, "/prelude/channels.dewy") or nm == "mpmc" and ends_with(path, "/prelude/mpmc.dewy")) or nm == "atomic" and path == lib_dir + "/std/thread.jo"
 
 # Whether `$no_deadlocks` can place a lock in the checked order: one named by a local or a parameter
 # (a handle made by `mutex(...)` where it is declared, or a copy of one), or a global made so.
@@ -684,11 +685,14 @@ deadlock_finalize = ():
         dl_report = false
     # (channels: only once their prelude is loaded; the scan finds the functions calling them)
     dc_mod = dc_module()
-    if dc_mod >= 0 and not dc_called(): dc_mod = -1
+    dc_qmod = dc_module("/prelude/mpmc.dewy")
+    if dc_on() and not dc_called():
+        dc_mod = -1
+        dc_qmod = -1
     # (`$no_deadlocks` asks for a certificate of every wait: joins, foreign calls and protocols too)
     certify = dir_deadlocks_any
     pc_mod = pc_module()
-    if deadlock_fns.len() == 0 and dc_mod < 0 and not certify: return
+    if deadlock_fns.len() == 0 and not dc_on() and not certify: return
     # (the call graph, the owners of locals and the parameters' indexes: one scan)
     loop f in [1..fns.len()):
         if fns[f].state != 2 or fns[f].body == 0: continue
@@ -823,10 +827,14 @@ dc_edges: DcEdge[]
 dc_edge_at: {str: int}
 
 # The channels prelude's module, if a program loaded it (by its path among the prelude's files)
-dc_module = () -> int:
+dc_module = (path: str = "/prelude/channels.dewy") -> int:
     loop i in [0..dp_paths.len()):
-        if ends_with(dp_paths[i], "/prelude/channels.dewy"): return dp_mods[i]
+        if ends_with(dp_paths[i], path): return dp_mods[i]
     -1
+
+# (channel operations: the channels prelude's, and mpmc's)
+dc_is = (m: int) -> bool: m >= 0 and (m == dc_mod or m == dc_qmod)
+dc_on = () -> bool: dc_mod >= 0 or dc_qmod >= 0
 
 # The certified protocols' module (lib/prelude/protocols.dewy), if a program loaded it
 pc_module = () -> int:
@@ -842,16 +850,16 @@ dc_protocols = () -> int:
 # uses otherwise, as a module of its own called `channel`): O(functions)
 dc_called = () -> bool:
     loop f in [1..fns.len()):
-        if int(fns[f].mod) != dc_mod or fns[f].state != 2 or fns[f].decl == 0: continue
+        if not dc_is(int(fns[f].mod)) or fns[f].state != 2 or fns[f].decl == 0: continue
         nm = name_of(int(nodes[int(fns[f].decl)].name))
         if nm == "send" or nm == "receive" or nm == "close": return true
     false
 
 # The channel operation a call is: 1 send, 2 receive, 3 close, 0 none
 dc_chan_call = (n: int) -> int:
-    if dc_mod < 0 or nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0: return 0
+    if not dc_on() or nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0: return 0
     g = int(nodes[n].sym)
-    if int(fns[g].mod) != dc_mod or nkids(n) == 0: return 0
+    if not dc_is(int(fns[g].mod)) or nkids(n) == 0: return 0
     d = int(fns[g].decl)
     if d == 0: return 0
     nm = name_of(int(nodes[d].name))
@@ -1115,7 +1123,7 @@ dc_capacity = (l: DlLoc) -> int:
     loop init != 0 and nodes[init].kind == .conv: init = int(nodes[init].a)
     if init == 0 or nodes[init].kind != .call or nodes[init].aux != 0 or nodes[init].sym <= 0: return -1
     g = int(nodes[init].sym)
-    if int(fns[g].mod) != dc_mod or name_of(int(nodes[int(fns[g].decl)].name)) != "channel" or nkids(init) != 1: return -1
+    if not dc_is(int(fns[g].mod)) or name_of(int(nodes[int(fns[g].decl)].name)) not in ["channel", "mpmc"] or nkids(init) != 1: return -1
     c = dc_const(kid(init, 0))
     if c == none: return -1
     c!
@@ -1707,6 +1715,7 @@ nd_protocol = (n: int, gname: str, held: DlHeld[]):
 
 nd_check = ():
     if dc_mod < 0: dc_mod = dc_module()
+    if dc_qmod < 0: dc_qmod = dc_module("/prelude/mpmc.dewy")
     # (the functions of the files that opt in; what they reach is summarized as they call it)
     files_in: {int: bool} = {}
     loop sc in dir_scopes:

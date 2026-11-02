@@ -5908,11 +5908,15 @@ check_program = (main_path: str):
     # program names it: a probe per name, all asked before any loads, nothing otherwise)
     locks = ts_dewy and prelude_named(["mutex", "Mutex", "lock_all", "DuplicateLock"])
     channels = ts_dewy and prelude_named(["channel", "Channel"])
+    queue = ts_dewy and prelude_named(["mpmc", "Mpmc"])
     protocols = ts_dewy and prelude_named(["serve", "Service", "pipeline"], true)
     # (the outcomes also load for any source naming one, its own type of that name included: a
     # module that does not declare it may still reach the prelude's)
-    if locks or channels or protocols or ts_dewy and names_known(["Unsent", "Full", "Empty", "Closed", "Busy"]): dewy_prelude_module(intern("Unsent"))
+    if locks or channels or queue or protocols or ts_dewy and names_known(["Unsent", "Full", "Empty", "Closed", "Busy"]): dewy_prelude_module(intern("Unsent"))
     if locks: dewy_prelude_module(intern("mutex"))
+    if queue:
+        dewy_prelude_file("mpmc.jo")
+        dewy_prelude_module(intern("mpmc"))
     # (the certified protocols are built on channels: theirs load first)
     if channels or protocols: dewy_prelude_module(intern("channel"))
     if protocols: concurrency_protocol_module = dewy_prelude_module(intern("serve"))

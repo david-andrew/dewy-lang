@@ -1,0 +1,45 @@
+# Dewy's prelude: the mpmc queue. `mpmc<T>(capacity)` makes a bounded `Mpmc<T>` for many
+# senders and receivers, which copy the handle, with the channel verbs and outcomes;
+# lock-free (Vyukov's, lib/prelude/mpmc.jo). Where a channel's non-waiting attempt finds
+# its lock held, an mpmc one finds another task mid-claim on the slot it wants; both give
+# `Busy`, never a misleading `Full` or `Empty`:
+#
+#     let jobs = mpmc<int64>(64)
+#     match jobs.try_send(7) {
+#         u:Unsent<int64> => if u.reason is? Busy ...   # u.value is the 7 offered
+#         _ => {}
+#     }
+#
+# (compiler/deadlock.jo checks its waits as channel waits; the outcomes are
+# lib/prelude/outcomes.jo)
+
+# (the ring lives in the shared allocation, reached through the handle's pointer)
+$unsafe
+Mpmc:type = <T>[
+    __h:__Mpmc<T>
+    try_send = (value:T):>void | Unsent<T> => {
+        let code = __mpmc_try_send(__h value)
+        if code not=? 0 return __unsent(value code)
+    }
+    send = (value:T):>void | Unsent<T> => {
+        let code = __mpmc_send_wait(__h value)
+        if code not=? 0 return __unsent(value code)
+    }
+    try_receive = ():>T | Empty | Closed | Busy | Canceled => {
+        let pos = __mpmc_try_claim(__h)
+        if pos =? -1 return Closed
+        if pos =? -2 return Canceled
+        if pos =? -3 return Empty
+        if pos =? -4 return Busy
+        __mpmc_take(__h pos)
+    }
+    receive = ():>T | Closed | Canceled => {
+        let pos = __mpmc_receive_wait(__h)
+        if pos =? -1 return Closed
+        if pos =? -2 return Canceled
+        __mpmc_take(__h pos)
+    }
+    close = ():>void => __mpmc_close(__h)
+]
+
+mpmc = <T>(capacity:int64<(>? 0)>):>Mpmc<T> => Mpmc<T>[__mpmc_new<T>(capacity)]

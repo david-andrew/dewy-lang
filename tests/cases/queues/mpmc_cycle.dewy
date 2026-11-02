@@ -1,0 +1,16 @@
+# modes: native
+# mpmc waits are channel waits to the deadlock analysis: each task sends ten values into a
+# queue that holds four before it receives from the other's.
+ping = (out:Mpmc<int64> back:Mpmc<int64>):>void | Unsent<int64> | Closed | Canceled => {
+    loop i in [0..10) { out.send(i) or_throw }
+    loop i in [0..10) { back.receive or_throw; }
+}
+main = () => {
+    let a = mpmc<int64>(4)
+    let b = mpmc<int64>(4)
+    concurrent {
+        spawn ping(a b)
+        spawn ping(b a)
+    }
+    printl"done"
+}

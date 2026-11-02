@@ -1,0 +1,5 @@
+# An mpmc wait is the waiting lane's, like a channel's: a parallel body cannot use it.
+main = () => {
+    let q = mpmc<int64>(4)
+    parallel i in [0..8) { q.send(i); }
+}
