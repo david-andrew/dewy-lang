@@ -1,0 +1,8 @@
+# An end moved into a function cannot be used again.
+take = (tx:SpscSender<int64>):>void => tx.close
+main = () => {
+    let [tx rx] = spsc<int64 4>().split
+    take(tx)
+    tx.try_send(1);
+    printl"{rx.try_receive}"
+}

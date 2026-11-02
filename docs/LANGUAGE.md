@@ -3212,6 +3212,33 @@ main = () => {
 }
 ```
 
+`spsc<T N>()` makes a queue for exactly one sender and one receiver, its capacity
+`N` a positive integer in the type. `.split` consumes the queue and gives the two
+ends, an `SpscSender<T>` and an `SpscReceiver<T>`, with the same verbs and
+outcomes (`try_receive` never gives `Busy`: nothing else can be mid-operation).
+Each end has exactly one owner: it moves rather than copies, so two tasks can never
+hold the same end, and using the queue after `.split` or an end after moving it is a
+compile error. The ring is lock-free and released when both ends are gone.
+Dropping an end closes the queue; an end captured by a spawned task is dropped
+when its group joins, so a producer task closes its sender itself.
+
+```dewy
+main = () => {
+    let [tx rx] = spsc<int64 64>().split
+    concurrent {
+        spawn {
+            loop i in [0..100) { if tx.send(i) is? Unsent<int64> break }
+            tx.close
+        }
+        loop true {
+            let n = rx.receive
+            if n is? Closed break
+            printl"{n or_throw}"
+        }
+    }
+}
+```
+
 The compiler reads every task's channel waits, in order, with the loops around them
 (their counts when literal) and the locks it holds, and rejects waits it can show
 never end: tasks that each send more values than a channel holds before receiving

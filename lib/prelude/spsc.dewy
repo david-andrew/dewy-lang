@@ -1,0 +1,62 @@
+# Dewy's prelude: the spsc queue. `spsc<T N>()` makes a fixed-capacity queue for one sender
+# and one receiver, N its capacity (a type-level value); `.split` consumes it and gives the
+# two ends, each with exactly one owner, so no end can be copied into a data race:
+#
+#     let [tx rx] = spsc<int64 64>().split
+#     tx.send(7) or_throw          # void | Unsent<int64>, as a channel's
+#     let n = rx.receive or_throw  # 7
+#
+# The ends share a lock-free ring (lib/prelude/spsc.jo), released when both are gone.
+# Dropping an end closes the queue: the receiver drains what was sent, then gets Closed;
+# a sender to a dropped receiver gets its value back as Unsent, Closed.
+
+# (the ring lives in the shared allocation, reached through the handle's pointer)
+$unsafe
+Spsc:type = <T N>[
+    __h:__Spsc<T>
+    $__drop__
+    __release = ():>void => {}
+    $__consume__
+    split = ():>[SpscSender<T> SpscReceiver<T>] => [SpscSender<T>[__h] SpscReceiver<T>[__h]]
+]
+
+$unsafe
+SpscSender:type = <T>[
+    __h:__Spsc<T>
+    $__drop__
+    __release = ():>void => __spsc_close(__h)
+    try_send = (value:T):>void | Unsent<T> => {
+        let code = __spsc_try_send(__h value)
+        if code not=? 0 return __unsent(value code)
+    }
+    send = (value:T):>void | Unsent<T> => {
+        let code = __spsc_send_wait(__h value)
+        if code not=? 0 return __unsent(value code)
+    }
+    close = ():>void => __spsc_close(__h)
+]
+
+$unsafe
+SpscReceiver:type = <T>[
+    __h:__Spsc<T>
+    $__drop__
+    __release = ():>void => __spsc_close(__h)
+    try_receive = ():>T | Empty | Closed | Canceled => {
+        let code = __spsc_try_receive(__h)
+        if code =? 1 return Closed
+        if code =? 2 return Canceled
+        if code =? 3 return Empty
+        __spsc_take(__h)
+    }
+    receive = ():>T | Closed | Canceled => {
+        let code = __spsc_receive_wait(__h)
+        if code =? 1 return Closed
+        if code =? 2 return Canceled
+        __spsc_take(__h)
+    }
+    close = ():>void => __spsc_close(__h)
+]
+
+# (N, the capacity, proven positive where the queue is made)
+__spsc_capacity = (capacity:int64<(>? 0)>):>int64 => capacity
+spsc = <T N>():>Spsc<T N> => Spsc<T N>[__spsc_new<T>(__spsc_capacity(N))]

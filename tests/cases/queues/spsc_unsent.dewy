@@ -1,0 +1,32 @@
+# modes: native native-release
+$runtime_checks
+# A failed spsc send gives its value back: Full when the ring has no room, Closed once
+# either end closed the queue (or was dropped), Canceled in a canceled task.
+Message:type = [id:int64 body:string]
+report = (r:void | Unsent<Message>):>void => {
+    match r {
+        u:Unsent<Message> => {
+            let why = if u.reason is? Full "full" else if u.reason is? Closed "closed" else if u.reason is? Canceled "canceled" else "busy"
+            printl"unsent {u.value.id} '{u.value.body}': {why}"
+        }
+        _ => printl"sent"
+    }
+}
+# (takes the receiver, which is dropped as this returns)
+last_look = (rx:SpscReceiver<Message>):>bool => rx.try_receive is? Empty
+main = () => {
+    let [tx rx] = spsc<Message 1>().split
+    report(tx.try_send(Message[1 "one"]))
+    report(tx.try_send(Message[2 "two"]))
+    concurrent g {
+        cancel(g)
+        report(tx.send(Message[3 "three"]))
+    }
+    printl"received {(rx.receive or_throw).id}"
+    rx.close
+    report(tx.send(Message[4 "four"]))
+    report(tx.try_send(Message[5 "five"]))
+    let [tx2 rx2] = spsc<Message 4>().split
+    printl"empty before the drop: {last_look(rx2)}"
+    report(tx2.send(Message[6 "six"]))
+}

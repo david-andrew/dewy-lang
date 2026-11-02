@@ -1,0 +1,8 @@
+# An end has exactly one owner: copying it, which would give two senders, is refused.
+main = () => {
+    let [tx rx] = spsc<int64 4>().split
+    let other = tx
+    tx.try_send(1);
+    other.try_send(2);
+    printl"{rx.try_receive}"
+}

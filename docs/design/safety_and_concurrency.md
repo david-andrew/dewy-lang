@@ -480,8 +480,8 @@ Built: bounded channels and their waits in the default analysis. Not built:
 
 ### Stage 4 queues: `Unsent`, `try_` verbs and `mpmc` (2026-11-01)
 
-Decided by David (#105 D3a–c; see "Decided rules"). Built: D3a and D3c. Not built:
-D3b (`spsc`), whose blockers are below. On hold: `select` (D3d).
+Decided by David (#105 D3a–c; see "Decided rules"). Built: D3a, D3b and D3c. On
+hold: `select` (D3d).
 
 - **A failed send gives its value back.** Every send returns `void | Unsent<T>`:
   `.value` is the exact payload offered, `.reason` is `Full`, `Closed`, `Busy` or
@@ -505,12 +505,18 @@ D3b (`spsc`), whose blockers are below. On hold: `select` (D3d).
   on a futex sequence word, as a channel's do. The handle is shared by copying and
   is `Send` when `T` is; its waits are `blocks`, and the channel-wait analysis and
   `$no_deadlocks` treat them as a channel's (a raw `mpmc` wait is uncertified).
+- **`spsc<T N>()`** (`lib/prelude/spsc.dewy`, its runtime in `spsc.jo`, which
+  shares `mpmc.jo`'s atomics and waits; both loaded only when a program names it):
+  a lock-free ring for one sender and one receiver, `N` a value type parameter
+  (tensors.md). `.split` is a `$__consume__` method giving
+  `[SpscSender<T> SpscReceiver<T>]`. Each end is move-only (a drop hook that closes
+  the queue) and holds the ring as a shared handle (ownership.md), so an end is never
+  copied; a spawned task owns the ends it captures. `__Spsc` is private storage,
+  Send and Sync like a channel's ring, and its waits are `blocks`.
 - **Not yet.** `try_send` and `try_receive` are not modeled by the channel-wait
-  analysis (they never wait, but they change what a later send finds).
-  `spsc<T N>` needs: value type parameters (`N`); move-only ends that hold a shared
-  allocation (resource records must be inline today); and destructuring a pair of
-  move-only values (`let [tx rx] = q.split`). The lock-free ring itself is
-  straightforward on the existing atomics.
+  analysis (they never wait, but they change what a later send finds). `spsc` waits
+  are not modeled by the channel-wait analysis or `$no_deadlocks` at all. A task's
+  captured end is dropped at the group's join, not when the task ends.
 - **Acceptance** (`tests/cases/queues/`, `tests/test_queue_busy.py`): values given
   back on full, closed and canceled sends; forwarding and group reporting; `mpmc`
   order, laps, close and draining; four producers and three consumers delivering

@@ -1,0 +1,87 @@
+# Dewy's prelude: the runtime of `spsc<T N>()` (lib/prelude/spsc.dewy), loaded only by
+# programs that name it, after mpmc.jo, whose atomics and futex waits (__q_*) it shares.
+# A ring with one writer and one reader, lock-free. `tail` (the next to write) is the
+# sender's and `head` (the next to read) the receiver's; each reads the other's with an
+# atomic load and publishes its own with an atomic add after the slot is written or
+# emptied. Both only grow.
+struct __SpscState[T]:
+    head: int
+    tail: int
+    closed: int
+    seq: int
+    waiting: int
+    cap: int
+    slots: T[]
+
+struct __Spsc[T]:
+    __cell: __SpscState[T][]
+    __p: *__SpscState[T]
+
+__spsc_new[T] = (capacity: int) -> __Spsc[T]:
+    slots: T[]
+    slots.resize(max(capacity, 1))
+    cell: __SpscState[T][] = [__SpscState[T](0, 0, 0, 0, 0, max(capacity, 1), slots)]
+    p = data(cell)
+    __Spsc[T](cell, p)
+
+# 0: sent; 1 closed; 2 canceled; 3 full. Never waits.
+__spsc_try_send[T] = (q: __Spsc[T], v: T) -> int:
+    p = q.__p
+    if __task_canceled(): return 2
+    if __q_load(&p.closed) != 0: return 1
+    t = p.tail
+    if t - __q_load(&p.head) >= p.cap: return 3
+    p.slots[t % p.cap] = v
+    __q_add(&p.tail, 1)
+    __q_changed(&p.seq, &p.waiting)
+    0
+
+# 0: a value at the head (for __spsc_take); 1 closed and drained; 2 canceled; 3 empty.
+__spsc_try_receive[T] = (q: __Spsc[T]) -> int:
+    p = q.__p
+    if __task_canceled(): return 2
+    h = p.head
+    if __q_load(&p.tail) != h: return 0
+    # (closed, then the tail read again: a value sent before the close is still taken)
+    if __q_load(&p.closed) == 0: return 3
+    if __q_load(&p.tail) != h: return 0
+    1
+
+__spsc_take[T] = (q: __Spsc[T]) -> T:
+    p = q.__p
+    i = p.head % p.cap
+    v = p.slots[i]
+    empty: T
+    p.slots[i] = empty
+    __q_add(&p.head, 1)
+    __q_changed(&p.seq, &p.waiting)
+    v
+
+# 0: sent; 1 closed; 2 canceled. Waits while the ring is full.
+__spsc_send_wait[T] = (q: __Spsc[T], v: T) -> int:
+    p = q.__p
+    spins = 0
+    loop:
+        s = __q_load(&p.seq)
+        code = __spsc_try_send(q, v)
+        if code != 3: return code
+        __q_park(&p.seq, s, &p.waiting, spins)
+        spins += 1
+
+# 0: a value at the head (for __spsc_take); 1 closed and drained; 2 canceled. Waits while
+# the ring is empty.
+__spsc_receive_wait[T] = (q: __Spsc[T]) -> int:
+    p = q.__p
+    spins = 0
+    loop:
+        s = __q_load(&p.seq)
+        code = __spsc_try_receive(q)
+        if code != 3: return code
+        __q_park(&p.seq, s, &p.waiting, spins)
+        spins += 1
+
+__spsc_close[T] = (q: __Spsc[T]) -> void:
+    p = q.__p
+    __q_cas(&p.closed, 0, 1)
+    __q_changed(&p.seq, &p.waiting)
+

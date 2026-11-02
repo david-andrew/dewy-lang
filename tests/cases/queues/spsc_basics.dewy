@@ -1,0 +1,18 @@
+# modes: native native-release
+# spsc<T N>(): a fixed-capacity queue whose `.split` gives one sender and one receiver.
+# Values arrive in order, lap after lap around the ring of N slots; a full ring refuses a
+# non-waiting send and an empty one a non-waiting receive. After a close, the receiver
+# drains what was sent, then gets Closed.
+main = () => {
+    let [tx rx] = spsc<string 3>().split
+    loop lap in [0..4) {
+        tx.send("a{lap}") or_throw
+        tx.try_send("b{lap}") or_throw
+        tx.send("c{lap}") or_throw
+        printl"full: {tx.try_send("d{lap}") is? Unsent<string>}"
+        printl"{rx.receive or_throw} {rx.try_receive or_throw} {rx.receive or_throw} empty: {rx.try_receive is? Empty}"
+    }
+    tx.send("last") or_throw
+    tx.close
+    printl"{rx.receive or_throw}, then closed: {rx.receive is? Closed} {rx.try_receive is? Closed}"
+}

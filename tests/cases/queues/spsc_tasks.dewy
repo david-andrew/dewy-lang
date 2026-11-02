@@ -1,0 +1,27 @@
+# modes: native native-release
+$runtime_checks
+# One producer task and one consumer task on an 8-slot spsc ring: every value arrives once
+# and in order. Each task owns the end it captured.
+main = () => {
+    let [tx rx] = spsc<int64 8>().split
+    let sum = atomic(0)
+    let ordered = atomic(1)
+    concurrent {
+        spawn {
+            let expected:int64 = 0
+            loop true {
+                let n = rx.receive
+                if n is? Closed break
+                if n is? Canceled break
+                if n not=? expected ordered.store(0)
+                expected = expected + 1
+                sum.add(n);
+            }
+        }
+        spawn {
+            loop i in [0..20000) { if tx.send(i) is? Unsent<int64> break }
+            tx.close
+        }
+    }
+    printl"sum {sum.load()}, in order: {ordered.load() =? 1}"
+}

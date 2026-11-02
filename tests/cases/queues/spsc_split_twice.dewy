@@ -1,0 +1,9 @@
+# `.split` consumes the queue: using it afterwards (a second pair of ends) is refused.
+main = () => {
+    let q = spsc<int64 4>()
+    let [tx rx] = q.split
+    let [tx2 rx2] = q.split
+    tx.try_send(1);
+    tx2.try_send(2);
+    printl"{rx.try_receive} {rx2.try_receive}"
+}

@@ -1,0 +1,6 @@
+# The capacity is a positive integer, checked where the queue is made.
+main = () => {
+    let [tx rx] = spsc<int64 0>().split
+    tx.try_send(1);
+    printl"{rx.try_receive}"
+}

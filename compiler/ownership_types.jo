@@ -186,7 +186,8 @@ ownership_layout = (t0: int, depth: int = 0, seen: int[] = []) -> bool:
         return ownership_layout(ow_elem(t), depth + 1, visited)
     if k == .fixed: return ownership_inline(ow_elem(t), depth + 1)
     if ownership_callable_cap(t) != 0: return true
-    if k == .str_ or ow_scalar(t) or k == .float_: return true
+    # (a raw pointer is a plain word: a handle's view of storage it shares, owning nothing)
+    if k == .str_ or ow_scalar(t) or k == .float_ or k == .ptr: return true
     if k != .struct_ and k != .tuple: return false
     loop ft in ow_field_types(t):
         if not ownership_layout(ft, depth + 1, visited): return false
