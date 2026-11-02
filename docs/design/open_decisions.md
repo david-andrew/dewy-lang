@@ -591,6 +591,46 @@ parent.push(parent.length)                          # still valid: arrays only g
 - **Today:** two lines, `let e = f(x)` then `if e isnt? none { … }`, and `e` is already narrowed inside the `if`.
 - **Rec:** no; the current form is enough.
 
+### D22. `$parallel_safe` on a function with several callbacks (#145)
+- **Today (built 11-02):** the tag requires *every* callback parameter to reach parallel code.
+- **Question:** should one parallel callback be enough, so a function can also take a sequential callback and still carry the tag?
+
+```dewy
+$parallel_safe
+let apply_then_report = (xs:array<int> f:<(int):>int> report:<(array<int>):>void>) => {
+    let ys = [parallel x in xs f(x)]   # f must be parallel-safe
+    report(ys)                         # report runs once, sequentially
+}
+```
+
+- **Options:**
+  - **a) Every callback (built).** The tag above is an error, because `report` never reaches parallel code.
+  - **b) At least one.** The tag above is accepted; only `f` is pinned.
+- **Rec:** (a). It keeps the tag's meaning simple: every callback the function takes is checked for parallel use.
+- **Spellings:** none new.
+- **Reversible:** yes, a one-loop change.
+
+### D23. `spsc` details built provisionally (#146)
+- **Today (built 11-02):** `spsc<T N>` works as decided in D3b. Six smaller calls were made along the way and are all reversible.
+
+```dewy
+Message:type = [id:int64 body:string]
+let [tx rx] = spsc<Message 64>().split
+tx.send(Message[1 "hi"]) or_throw
+let m = rx.receive or_throw
+printl"{m.body}"
+```
+
+- **The calls, each with the rec "keep":**
+  1. A value type parameter is a plain `<T N>`: a parameter given an integer becomes a value. No `<T N:int64>` annotation (it could be added later).
+  2. Dropping an end closes the queue: the receiver drains what was sent, then sees `Closed`.
+  3. The end types leave out the capacity: `SpscSender<T>` and `SpscReceiver<T>`, so functions taking an end don't name `N`.
+  4. `.split` is built on a compiler-only tag `$__consume__` (like `$__drop__`) that makes a method take ownership of its receiver. Users don't write it.
+  5. A spawned task now owns the move-only values it captures, so an end can be moved into a task.
+  6. `spsc`'s `try_receive` returns `T | Empty | Closed | Canceled`, with no `Busy`, since a single consumer can't collide.
+- **Spellings:** `$__consume__` (compiler-only).
+- **Reversible:** yes, each one.
+
 ---
 
 ## P4: open-ended
