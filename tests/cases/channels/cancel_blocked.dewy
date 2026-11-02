@@ -1,13 +1,14 @@
 # modes: native native-release
 # A receive waiting on an empty channel and a send waiting on a full one are cancellation
-# points; when a sibling fails, the group cancels them and each gives Canceled.
+# points; when a sibling fails, the group cancels them: the receive gives Canceled, and the
+# send gives its value back, as Unsent with the reason Canceled.
 Failed:type = type of error
 waiter = (c:Channel<int64> waiting:Atomic<int64>):>int64 | Closed | Canceled => {
     waiting.store(1)
     let v = c.receive() or_throw
     v
 }
-filler = (c:Channel<int64> filled:Atomic<int64>):>int64 | Closed | Canceled => {
+filler = (c:Channel<int64> filled:Atomic<int64>):>int64 | Unsent<int64> => {
     let sent:int64 = 0
     loop true {
         c.send(sent) or_throw
@@ -34,7 +35,10 @@ main = () => {
         spawn quitter(waiting filled)
     }
     printl"receive canceled: {a is? Canceled}"
-    printl"send canceled: {b is? Canceled}"
+    match b {
+        u:Unsent<int64> => printl"send canceled: {u.reason is? Canceled}, value given back: {u.value}"
+        _ => printl"send not canceled"
+    }
     # (the full channel kept what was sent before the send waited)
     printl"kept: {full.receive()} {full.receive()}"
     # Level-triggered: in a canceled group, every later wait gives Canceled, even one that

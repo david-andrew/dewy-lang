@@ -21,7 +21,7 @@ record = (@s:Summary e:Event @by_service:dict<string int>):>void => {
     by_service[e.service] = (by_service.get(e.service) ?? 0) + 1
 }
 
-produce = (out:Channel<Event> batch:array<Event>):>void | Closed | Canceled => {
+produce = (out:Channel<Event> batch:array<Event>):>void | Unsent<Event> => {
     loop e in batch out.send(e) or_throw
     out.close()
 }

@@ -911,15 +911,15 @@ dc_trip_count = (n: int) -> int:
     count
 
 # Whether a task's result may be a failure (an exception other than Canceled, which only follows
-# a cancellation, and Closed, which only follows a close: those are drainers and fillers): the
-# group's first failure cancels the rest, so a wait in it may end
+# a cancellation, and Closed or a send's Unsent, which follow a close or one: those are drainers
+# and fillers): the group's first failure cancels the rest, so a wait in it may end
 dc_may_fail = (t: int) -> bool:
     loop m in value_members(t):
         if not exception_member(m) or m == T_NONE: continue
         if tkind(m) == .struct_:
             d = int(structs[int(types[m].st)].decl)
             nm = if d != 0: name_of(int(nodes[d].name)) else: ""
-            if nm == "Canceled" or nm == "Closed" and not dc_closes: continue
+            if nm == "Canceled" or (nm == "Closed" or nm == "Unsent") and not dc_closes: continue
         return true
     false
 

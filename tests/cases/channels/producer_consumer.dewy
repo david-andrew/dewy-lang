@@ -2,10 +2,10 @@
 # Producers and a consumer share bounded channels by copying their handles. Three producers
 # fill one small channel, a stage turns numbers into text through a second, and the consumer
 # drains it until it is closed. Sends wait while a channel is full (backpressure).
-produce = (out:Channel<int64> first:int64 count:int64):>void | Closed | Canceled => {
+produce = (out:Channel<int64> first:int64 count:int64):>void | Unsent<int64> => {
     loop i in [first..first + count) { out.send(i) or_throw }
 }
-render = (input:Channel<int64> out:Channel<string>):>void | Closed | Canceled => {
+render = (input:Channel<int64> out:Channel<string>):>void | Unsent<string> | Canceled => {
     loop true {
         let n = input.receive()
         if n is? Closed break

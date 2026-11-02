@@ -31,7 +31,7 @@ parse_hit = (line:string):>Hit? => {
     Hit[f[1] status ms]
 }
 
-produce = (out:Channel<string> text:string):>void | Closed | Canceled => {
+produce = (out:Channel<string> text:string):>void | Unsent<string> => {
     loop line in text.lines {
         if not line.trim.is_empty out.send(line) or_throw
     }

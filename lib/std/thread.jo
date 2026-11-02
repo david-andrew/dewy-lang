@@ -371,3 +371,37 @@ __chan_close[T] = (c: __Chan[T]) -> void:
     __chan_lock(&p.lock)
     p.closed = 1
     __chan_changed(&p.seq, &p.lock, &p.waiting)
+
+# 0: room for one more (the lock held, for __chan_put); 1: closed; 2: canceled; 3: full;
+# 4: busy (another task holds the lock). Never waits.
+__chan_try_send[T] = (c: __Chan[T]) -> int:
+    p = c.__p
+    if __task_canceled(): return 2
+    if __q_cas(&p.lock, 0, 1) != 0: return 4
+    if p.closed != 0:
+        __chan_unlock(&p.lock)
+        return 1
+    if p.count < p.cap: return 0
+    __chan_unlock(&p.lock)
+    3
+
+# 0: a value to take (the lock held, for __chan_take); 1: closed and drained; 2: canceled;
+# 3: empty; 4: busy. Never waits.
+__chan_try_receive[T] = (c: __Chan[T]) -> int:
+    p = c.__p
+    if __task_canceled(): return 2
+    if __q_cas(&p.lock, 0, 1) != 0: return 4
+    if p.count > 0: return 0
+    closed = p.closed
+    __chan_unlock(&p.lock)
+    if closed != 0: return 1
+    3
+
+# (the non-waiting channel operations above)
+# (a word compared and set at once; the web runs one thread, so plainly)
+__q_cas = (p: *int, expected: int, v: int) -> int:
+    when TARGET == "wasm":
+        old = p[0]
+        if old == expected: p[0] = v
+        return old
+    else: return __atomic_cas(p, expected, v)

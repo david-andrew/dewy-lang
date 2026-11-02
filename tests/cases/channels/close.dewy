@@ -1,7 +1,8 @@
 # modes: native native-release
-# Closing. A send after close gives Closed (never a trap), a receive takes what is still
-# buffered and then gives Closed, closing twice is harmless, and closing wakes the tasks
-# waiting on the channel, so receivers on an empty one and senders on a full one get Closed.
+# Closing. A send after close gives its value back with the reason Closed (never a trap), a
+# receive takes what is still buffered and then gives Closed, closing twice is harmless, and
+# closing wakes the tasks waiting on the channel, so receivers on an empty one get Closed and
+# senders on a full one their value back.
 drain = (c:Channel<int64>):>int64 => {
     let got:int64 = 0
     loop true {
@@ -26,7 +27,10 @@ main = () => {
     c.send("b") or_throw
     c.close()
     c.close()
-    printl"send after close: {c.send("c") is? Closed}"
+    match c.send("c") {
+        u:Unsent<string> => printl"send after close: {u.reason is? Closed}, gave back {u.value}"
+        _ => printl"sent after close"
+    }
     printl"buffered: {c.receive()} {c.receive()}"
     printl"then: {c.receive() is? Closed}"
     let empty = channel<int64>(1)

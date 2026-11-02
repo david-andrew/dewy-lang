@@ -9,7 +9,10 @@ Service:type = <Q R>[
     __requests:Channel<__Request<Q R>>
     request = (value:Q):>R | Closed | Canceled => {
         let reply = channel<R>(1)
-        __requests.send(__Request<Q R>[value reply]) or_throw
+        match __requests.send(__Request<Q R>[value reply]) {
+            u:Unsent<__Request<Q R>> => return (if u.reason is? Canceled Canceled else Closed)
+            _ => {}
+        }
         reply.receive()
     }
 ]
@@ -23,7 +26,11 @@ __serve_loop = <Q R>(requests:Channel<__Request<Q R>> handler:<(q:Q):>R>):>void 
         if r is? Closed break
         if r is? Canceled break
         # (canceled: the reply is not sent, so its caller gets Closed)
-        if r.reply.send(handler(r.value)) is? Canceled {
+        let canceled = match r.reply.send(handler(r.value)) {
+            u:Unsent<R> => u.reason is? Canceled
+            _ => false
+        }
+        if canceled {
             r.reply.close()
             break
         }

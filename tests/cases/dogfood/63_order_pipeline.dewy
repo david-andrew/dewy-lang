@@ -40,7 +40,7 @@ lookup_price = (item:string):>int? | Canceled => {
     PRICES.get(item)
 }
 
-read_orders = (text:string out:Channel<Order> rejects:Channel<string>):>void | Closed | Canceled => {
+read_orders = (text:string out:Channel<Order> rejects:Channel<string>):>void | Unsent<Order> | Unsent<string> => {
     loop line in text.lines {
         if line.trim.is_empty continue
         match parse_order(line) {
@@ -52,7 +52,7 @@ read_orders = (text:string out:Channel<Order> rejects:Channel<string>):>void | C
     rejects.close()
 }
 
-price_orders = (input:Channel<Order> out:Channel<Priced>):>void | Closed | Canceled => {
+price_orders = (input:Channel<Order> out:Channel<Priced>):>void | Unsent<Priced> | Canceled => {
     loop true {
         let next = input.receive()
         if next is? Closed break

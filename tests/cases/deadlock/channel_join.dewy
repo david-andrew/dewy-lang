@@ -1,7 +1,7 @@
 # modes: native
 # Draining a channel only after joining the task that fills it: the task waits for room once
 # the channel is full, and the join waits for the task.
-produce = (c:Channel<int64>):>void | Closed | Canceled => {
+produce = (c:Channel<int64>):>void | Unsent<int64> => {
     loop i in [0..100) { c.send(i) or_throw }
 }
 main = () => {

@@ -1,7 +1,7 @@
 # modes: native native-release
 # The same two tasks, taking turns (a send, then a receive) never hold more than a channel
 # holds, and run.
-ping = (out:Channel<int64> back:Channel<int64>):>int64 | Closed | Canceled => {
+ping = (out:Channel<int64> back:Channel<int64>):>int64 | Unsent<int64> | Closed | Canceled => {
     let total:int64 = 0
     loop i in [0..1000) {
         out.send(i) or_throw

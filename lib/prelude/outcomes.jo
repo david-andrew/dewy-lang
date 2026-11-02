@@ -1,0 +1,32 @@
+# Dewy's prelude: the outcomes of lock, channel and queue operations (lib/prelude/locks.dewy,
+# lib/prelude/channels.dewy), loaded with them; Jo, for the generic exception `Unsent`.
+# A non-waiting attempt finds the queue full or empty; it is closed; another task is
+# mid-operation on it; or the task was canceled.
+@nominal(exception)
+struct Full:
+    pass
+@nominal(exception)
+struct Empty:
+    pass
+@nominal(exception)
+struct Closed:
+    pass
+@nominal(error)
+struct Busy:
+    pass
+
+# A send that failed: the exact value offered, and why.
+@nominal(exception)
+struct Unsent[T]:
+    value: T
+    reason: Full | Closed | Busy | Canceled
+
+# Why a send gave its value back, by code: 1 closed, 2 canceled, 3 full, 4 busy.
+__send_failure = (code: int) -> Full | Closed | Busy | Canceled:
+    if code == 1: return Closed()
+    if code == 2: return Canceled
+    if code == 3: return Full()
+    Busy()
+
+# A send's value given back, with why (by code)
+__unsent[T] = (value: T, code: int) -> Unsent[T]: Unsent[T](value, __send_failure(code))

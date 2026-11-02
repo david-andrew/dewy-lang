@@ -1,0 +1,25 @@
+# modes: native native-release
+# `or_throw` forwards an Unsent like any exception, and a task that fails with one reports
+# its reason to its group. The value stays with the task's own result.
+produce = (out:Channel<int64> n:int64):>void | Unsent<int64> => {
+    loop i in [0..n) { out.send(i) or_throw }
+}
+main = () => {
+    let c = channel<int64>(4)
+    c.close
+    let r = produce(c 3)
+    printl"forwarded: {r is? Unsent<int64>} {r is? exception}"
+    let d = channel<int64>(1)
+    d.close
+    concurrent {
+        let t = spawn produce(d 2)
+    }
+    match t {
+        u:Unsent<int64> => printl"task gave back {u.value}"
+        _ => printl"task finished"
+    }
+    let outcome = concurrent {
+        spawn produce(d 2)
+    }
+    printl"group failed with Closed: {outcome is? Closed}"
+}

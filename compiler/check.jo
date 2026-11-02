@@ -5903,15 +5903,19 @@ check_program = (main_path: str):
     dewy_resolve_inherited()
     if dewy_methods.len() > 0: dc_force_all()
     dewy_infer_methods()
-    # (the locks and channels preludes declare nominal errors, `Busy`, `DuplicateLock` and
-    # `Closed`, so each loads before they close when a Dewy program names it: a probe per name,
-    # nothing otherwise)
-    if ts_dewy and prelude_named(["mutex", "Mutex", "lock_all", "Busy", "DuplicateLock"]): dewy_prelude_module(intern("mutex"))
-    if ts_dewy and prelude_named(["channel", "Channel", "Closed"]): dewy_prelude_module(intern("channel"))
+    # (the locks prelude and the outcomes of locks, channels and queues declare nominal errors,
+    # `DuplicateLock`, `Busy`, `Closed`, `Unsent`..., so each loads before they close when a Dewy
+    # program names it: a probe per name, all asked before any loads, nothing otherwise)
+    locks = ts_dewy and prelude_named(["mutex", "Mutex", "lock_all", "DuplicateLock"])
+    channels = ts_dewy and prelude_named(["channel", "Channel"])
+    protocols = ts_dewy and prelude_named(["serve", "Service", "pipeline"], true)
+    # (the outcomes also load for any source naming one, its own type of that name included: a
+    # module that does not declare it may still reach the prelude's)
+    if locks or channels or protocols or ts_dewy and names_known(["Unsent", "Full", "Empty", "Closed", "Busy"]): dewy_prelude_module(intern("Unsent"))
+    if locks: dewy_prelude_module(intern("mutex"))
     # (the certified protocols are built on channels: theirs load first)
-    if ts_dewy and prelude_named(["serve", "Service", "pipeline"], true):
-        dewy_prelude_module(intern("channel"))
-        concurrency_protocol_module = dewy_prelude_module(intern("serve"))
+    if channels or protocols: dewy_prelude_module(intern("channel"))
+    if protocols: concurrency_protocol_module = dewy_prelude_module(intern("serve"))
     prepare_nominals()
     check_build_block()
     # (native programs report crashes as they do panics: lib/std/backtrace.jo)
@@ -6295,6 +6299,11 @@ check_program = (main_path: str):
 # channels': a name some source has, and that no module of the program declares itself, as a
 # program's own `Mutex` type): a probe per name, then a lookup per module only for a name some
 # source has.
+names_known = (probes: str[]) -> bool:
+    loop nm in probes:
+        if name_known(nm): return true
+    false
+
 prelude_named = (probes: str[], families: bool = false) -> bool:
     loop nm in probes:
         if not name_known(nm): continue

@@ -296,7 +296,7 @@ dp_scan = ():
     names_.sort()
     icb = ic_switch(IC_LOAD, IC_LIB)
     loop n in names_:
-        if not ends_with(n, ".dewy"): continue
+        if not ends_with(n, ".dewy") and not ends_with(n, ".jo"): continue
         path = "{dir}/{n}"
         src = read_source(path)
         if src == none: continue
@@ -320,12 +320,25 @@ dewy_prelude_module = (name: int) -> int:
     if dp_by_name[name] == 0: dp_by_name[name] = (dp_names.get(name_of(name)) ?? -1) + 2
     f = dp_by_name[name] - 2
     if f < 0: return -1
+    dp_load(f)
+
+# The Dewy prelude module of the file named file (lib/prelude/mpmc.jo), loaded now, or -1
+dewy_prelude_file = (file: str) -> int:
+    if not dp_scanned: dp_scan()
+    loop f in [0..dp_paths.len()):
+        if ends_with(dp_paths[f], "/" + file): return dp_load(f)
+    -1
+
+# The module of the prelude's file f, loaded on first use
+dp_load = (f: int) -> int:
     m = dp_mods[f]
     if m < 0:
         first_module = modules.len()
         first_import = from_imports.len()
         active = refine_active
         m = load_module(dp_paths[f], false, 0)
+        # (a Jo file here joins the library's own prelude, as lib/std's do: lib/prelude/outcomes.jo)
+        if ends_with(dp_paths[f], ".jo"): modules[m].is_prelude = true
         dp_mods[f] = m
         dp_loaded.push(m)
         mi = first_module

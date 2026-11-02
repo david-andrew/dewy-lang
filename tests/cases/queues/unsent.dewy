@@ -1,0 +1,34 @@
+# modes: native native-release
+# A send that fails gives its value back: Unsent<T> holds the exact payload offered and why.
+# A full channel refuses a non-waiting send (Full), a closed one any send (Closed), and a
+# canceled task's send gives Canceled, even when the channel has room.
+Message:type = [id:int64 body:string]
+report = (r:void | Unsent<Message>):>void => {
+    match r {
+        u:Unsent<Message> => {
+            let why = if u.reason is? Full "full" else if u.reason is? Closed "closed" else if u.reason is? Canceled "canceled" else "busy"
+            printl"unsent {u.value.id} '{u.value.body}': {why}"
+        }
+        _ => printl"sent"
+    }
+}
+main = () => {
+    let c = channel<Message>(2)
+    report(c.try_send(Message[1 "one"]))
+    report(c.send(Message[2 "two"]))
+    report(c.try_send(Message[3 "three"]))
+    printl"received {(c.try_receive or_throw).id} {(c.receive or_throw).id}"
+    printl"then empty: {c.try_receive is? Empty}"
+    let saved:array<Message> = []
+    concurrent g {
+        cancel(g)
+        let r = c.send(Message[4 "four"])
+        if r is? Unsent<Message> saved.push(r.value)
+        report(r)
+    }
+    loop m in saved { printl"saved: {m.body}" }
+    c.close
+    report(c.send(Message[5 "five"]))
+    report(c.try_send(Message[6 "six"]))
+    printl"closed: {c.try_receive is? Closed} {c.receive is? Closed}"
+}
