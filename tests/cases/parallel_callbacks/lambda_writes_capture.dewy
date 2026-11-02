@@ -1,0 +1,10 @@
+# A lambda argument that changes what it captured is a data race once apply runs it in parallel.
+apply = (f:<(x:int):>int> xs:array<int>):>array<int> => [parallel x in xs f(x)]
+main = () => {
+    let count = 0
+    printl(apply(($capture @count x:int):>int => {
+        count = count + 1
+        x
+    } [1 2 3]))
+    printl(count)
+}

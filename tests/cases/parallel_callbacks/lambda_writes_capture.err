@@ -1,0 +1,3 @@
+apply (through its parameter 'f') runs this function on many threads at once, so it must not change 'count', a variable it captured (a data race): return values instead
+note: this is given to apply's parameter 'f', which must be parallel-safe
+note: apply runs 'f' on many threads at once here, through `parallel`

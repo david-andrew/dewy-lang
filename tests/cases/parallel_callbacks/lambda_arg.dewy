@@ -1,0 +1,6 @@
+# A lambda argument is checked as the parallel call's own body would be: reading a capture is fine.
+apply = (f:<(x:int):>int> xs:array<int>):>array<int> => [parallel x in xs f(x)]
+main = () => {
+    let k = 10
+    printl(apply((x:int):>int => x + k [1 2 3]))
+}

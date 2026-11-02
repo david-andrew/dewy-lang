@@ -6606,7 +6606,7 @@ rd_dc_loop_value=(@reader_ctx:ParserContext @reader_nodes:array<Node> pos:int64)
 # dw_top_declarations). 0 for any other form.
 rd_dc_marker=(@reader_ctx:ParserContext token:DewyLexeme):>int64=>$unsafe {
     let name:string=rd_dn_payload(@reader_ctx token)
-    if (not (((((name =? "test") or (name =? "proof")) or (name =? "export")) or (name =? "shadowable")) or (name =? "explicit_allocation_failure"))) {
+    if (not ((((((name =? "test") or (name =? "proof")) or (name =? "export")) or (name =? "shadowable")) or (name =? "explicit_allocation_failure")) or (name =? "parallel_safe"))) {
         return 0
     }
     let next:DewyLexeme=reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 1)]

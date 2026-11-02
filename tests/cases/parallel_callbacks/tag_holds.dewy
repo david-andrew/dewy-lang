@@ -1,0 +1,9 @@
+# `$parallel_safe` states the inferred requirement on an exported function; it holds here.
+$parallel_safe
+apply = (f:<(x:int):>int> xs:array<int>):>array<int> => [parallel x in xs f(x)]
+$parallel_safe count_up = (f:<(x:int):>int> n:int):>array<int> => [parallel i in [0..n) f(i)]
+square = (x:int):>int => x*x
+main = () => {
+    printl(count_up(@square 4))
+    printl(apply(@square [1 2 3]))
+}

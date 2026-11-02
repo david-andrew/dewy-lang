@@ -1,0 +1,10 @@
+# Two wrapper levels up, an unsafe callback is reported with the whole chain.
+let seen:array<int> = []
+apply = (f:<(x:int):>int> xs:array<int>):>array<int> => [parallel x in xs f(x)]
+mid = (g:<(x:int):>int> xs:array<int>):>array<int> => apply(@g xs)
+outer = (h:<(x:int):>int> xs:array<int>):>array<int> => mid(@h xs)
+note = (x:int):>int => {
+    seen.push(x)
+    x
+}
+main = () => printl(outer(@note [1 2 3]))

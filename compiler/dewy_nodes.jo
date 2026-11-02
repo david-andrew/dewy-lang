@@ -121,6 +121,7 @@ metatag_fail_text = (name: str) -> str:
     if name == "supported_targets" or name == "explicit_allocation_failure": return "`${name}` is a module directive; put it at file scope"
     if dir_builtin(name): return "`${name}` is a setting: write it on a line of its own in a module, function body or block"
     if name == "test": return "`$test` goes alone on the line just before a module-level function declaration"
+    if name == "parallel_safe": return PARSAFE_PLACE
     if name == "shadowable": return "`$shadowable` marks a module-level const: `$shadowable const name = ...` at the top of the file"
     if name == "expect" or name == "fail": return "`${name}` is a statement in a function: a test, or a helper a test calls"
     if dw_designed_directive(name): return "`${name}` is part of the design but not implemented yet"
@@ -464,6 +465,23 @@ dw_parallel_exits = (n: int, depth: int = 0):
 # (compiler/warn_if.jo), kept as the declaration's `warn_if` attribute (condition, message).
 dw_warn_if_pending: int[]
 
+# `$parallel_safe` before a module function: its callers are held to giving a parallel-safe
+# function for each callback parameter (compiler/concurrency.jo, parsafe_tags_check). A function
+# with no callback parameter is rejected: the tag would check nothing.
+PARSAFE_PLACE = "`$parallel_safe` marks a module-level function that runs its callbacks on many threads at once: put it before one, on its line or the line above"
+dw_parsafe_pos = 0
+
+dw_parsafe_attach = (made: int[], pos: int):
+    if made.len() != 1 or nodes[made[0]].kind != .fn_ or has_flag(made[0], NF_EXTERN): fatal(pos, PARSAFE_PLACE)
+    n = made[0]
+    callback = false
+    loop p in kids(n):
+        t = int(nodes[p].a)
+        if t != 0 and nodes[t].kind == .topt: t = int(nodes[t].a)
+        if t != 0 and nodes[t].kind == .tfn: callback = true
+    if not callback: fatal(pos, "`$parallel_safe` holds callers to giving a parallel-safe function for each callback parameter, but '{name_of(int(nodes[n].name))}' takes no function, so the tag would check nothing: remove it")
+    parsafe_tags[n] = pos
+
 # The declarations a module statement the direct grammar read makes (dewy_direct.jo's dn_statement):
 # positive IDs are declarations; negative IDs select module-only checker nodes.
 # Keep the statement head separately: a declaration's own position may name its binding.
@@ -479,6 +497,9 @@ dw_top_declarations = (id: int, pos: int) -> int[]:
                 proof_active = true
                 refine_active = true
             else if text == "export": dw_export_at(pos, "")
+            else if text == "parallel_safe":
+                if dw_parsafe_pos != 0: fatal(pos, "a second `$parallel_safe`: one marks the function just after it")
+                dw_parsafe_pos = pos
             else if text == "explicit_allocation_failure": oom_module(pos_file(pos), pos)
         else if form == 2: dw_export_at(pos, name_of(int(nodes[int(result.a)].sval)))
         else if form == 3:
@@ -488,11 +509,14 @@ dw_top_declarations = (id: int, pos: int) -> int[]:
         else if form == 4: dw_warn_if_pending.push(int(result.a))
         return []
     exported = dw_export_pos != 0
+    parsafe = dw_parsafe_pos
+    dw_parsafe_pos = 0
     pending = proof_pending
     soft = dw_warn_if_pending
     dw_warn_if_pending = []
     made = dw_top_declarations_inner(id)
     if exported: dw_export_attach(made)
+    if parsafe != 0: dw_parsafe_attach(made, parsafe)
     if soft.len() > 0:
         if made.len() != 1 or nodes[made[0]].kind != .fn_: fatal(nodes[soft[0]].pos, "`$warn_if` goes on the line before the function declaration whose callers it warns")
         dw_ffi_attach(made[0], soft)

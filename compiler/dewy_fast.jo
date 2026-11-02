@@ -286,6 +286,7 @@ df_finish_statement = (made: int[], shadowable: bool) -> int[]:
 df_finish_checks = (offset: int):
     if proof_pending: dn_error(offset, "$proof requires a following function declaration")
     if dir_bundles.len() > 0: dir_bundles_resolve()
+    if dw_parsafe_pos != 0: fatal(dw_parsafe_pos, PARSAFE_PLACE)
     if dw_export_pos != 0: fatal(dw_export_pos, "`$export` marks a module-level function: put it before one, on its line or the line above")
 
 dc_file_host = ParserFileHost(df_note_lazy, dw_top_declarations, df_finish_statement, dw_test_attach, df_finish_checks, dw_finish_declarations)

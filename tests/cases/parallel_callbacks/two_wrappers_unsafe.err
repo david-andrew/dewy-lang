@@ -1,0 +1,5 @@
+outer (through its parameter 'h') runs this function on many threads at once, so it must not change the global 'seen' (a data race): return values instead
+/two_wrappers_unsafe.dewy:10:28: note: this is given to outer's parameter 'h', which must be parallel-safe$/
+/two_wrappers_unsafe.dewy:5:57: note: outer passes 'h' on to mid's parameter 'g' here$/
+/two_wrappers_unsafe.dewy:4:55: note: mid passes 'g' on to apply's parameter 'f' here$/
+/two_wrappers_unsafe.dewy:3:58: note: apply runs 'f' on many threads at once here, through `parallel`$/
