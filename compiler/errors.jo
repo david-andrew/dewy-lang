@@ -52,7 +52,7 @@ value_members = (t: int) -> int[]:
 
 nominal_family = (t: int) -> int:
     if not nominal_ready or (t != exception_type and t != error_type and not nominal_parent.has(t)): return t
-    if ownership_nominals.has(t): return t
+    if ownership_nominals.has(t) or nominal_generic_instance(t): return t
     if let found = nominal_families.get(t): return found
     members: int[]
     loop child in nominal_types:
@@ -73,6 +73,8 @@ nominal_family_part = (t: int, u: int) -> int:
     held: int[]
     loop m in union_members(t):
         if union_index(u, m) >= 0: held.push(m)
+    loop m in union_members(u):
+        if family_holds_generic(t, m): held.push(m)
     if held.len() == 0: return 0
     mk_union(held)
 
@@ -136,14 +138,50 @@ mint_of_any = (d: int) -> bool:
     nodes[p].kind == .tname and name_of(int(nodes[p].name)) == "any" and nkids(p) == 0 and files[pos_file(nodes[d].pos)].is_dewy
 
 prepare_nominals = ():
+    generic: int[]
     loop m in modules:
         loop d in m.decls:
             if nodes[d].kind != .struct_: continue
             if not nominal_declaration(d): continue
-            if nkids2(d) != 0: fatal(nodes[d].pos, "generic nominal types are not yet implemented")
-            nominal_types.push(get_struct_inst(d, []))
+            if nkids2(d) != 0: generic.push(d)
+            else: nominal_types.push(get_struct_inst(d, []))
     loop t in nominal_types: nominal_resolve(t)
+    loop d in generic: nominal_generic[d] = nominal_generic_parent(d)
     nominal_ready = true
+
+# Generic nominal types (`Unsent[T]`, lib/prelude/outcomes.jo), by declaration: their parent, a
+# builtin family or a nongeneric nominal type. Each instance descends from it once made
+# (nominal_instance), so it forwards and matches as the family's; but a family's union is
+# closed before checking, so it holds no instance: a task failing with one reports its
+# `reason` to its group (concurrency_report).
+nominal_generic: {int: int}
+
+nominal_generic_parent = (d: int) -> int:
+    saved = cx
+    ctxs.push(FnCtx(i32(new_inst(FK_INIT, int(nodes[d].mod), "nominal")), -1, i32(T_VOID), false, 0, nodes[d].mod, i32(check_scopes.names.len())))
+    cx = ctxs.len() - 1
+    parent = resolve_type(int(nodes[d].a))
+    ctxs.pop()
+    cx = saved
+    if not nominal_types.contains(parent): fatal(nodes[d].pos, "a generic nominal type needs exception, error, or a nongeneric nominal parent")
+    parent
+
+nominal_instance = (decl: int, t: int):
+    if nominal_parent.has(t): return
+    parent = nominal_generic.get(decl) ?? 0
+    if parent == 0: return
+    nominal_parent[t] = parent
+
+# Whether family (a family's union, written as a pattern) holds m, a generic instance
+# descending from its parent: the union itself never lists one
+family_holds_generic = (family: int, m: int) -> bool:
+    if not nominal_generic_instance(m): return false
+    loop parent, found in nominal_families:
+        if found == family and nominal_descends(m, parent): return true
+    false
+
+nominal_generic_instance = (t: int) -> bool:
+    nominal_generic.len() > 0 and tkind(t) == .struct_ and nominal_generic.has(int(structs[int(types[t].st)].decl))
 
 # Dewy functions without a declared result: the exception kinds (not none) their
 # returns and or_throw give, by instance, and the returns to give the joined result

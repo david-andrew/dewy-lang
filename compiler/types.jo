@@ -408,4 +408,8 @@ const MAX_TYPE_NESTING = 48
 # Concrete argument lists have canonical instances. Inference-bearing requests
 # still match structurally; zonking them must produce a concrete instance rather
 # than returning an earlier record whose TF_HAS_VAR flag can never clear.
-get_struct_inst = (decl: int, args: int[]) -> int: tc_struct_inst(decl, args)
+get_struct_inst = (decl: int, args: int[]) -> int:
+    t = tc_struct_inst(decl, args)
+    # (a generic nominal type's instance joins its family: errors.jo)
+    if args.len() > 0 and nominal_generic.len() > 0: nominal_instance(decl, t)
+    t

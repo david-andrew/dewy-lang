@@ -11599,7 +11599,7 @@ istype_family = (n: int, orig: int, at: int, tt: int) -> int:
     wanted = value_members(tt)
     actual = value_members(at)
     loop member in actual:
-        if wanted.contains(member): selected.push(member)
+        if wanted.contains(member) or family_holds_generic(tt, member): selected.push(member)
     subj = is_subject(n, orig)
     condition = 0
     if selected.len() == 0 or selected.len() == actual.len():

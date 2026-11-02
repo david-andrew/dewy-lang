@@ -327,6 +327,8 @@ concurrency_report = (n: int, args: int[]) -> int:
     loop member in members:
         if not exception_member(member): continue
         actual = if member == T_NONE: mk(.none_lit, pos) else: bc_ident(vn, pos)
+        # (the family holds no generic instance: `Unsent<T>` reports its reason, errors.jo)
+        if member != T_NONE and nominal_generic_instance(member): actual = bc_field(actual, "reason", pos)
         call = bc_stmt(bc_call("__task_fail", [bc_ident(gn, pos), actual], pos), pos)
         if members.len() == 1: statements.push(call)
         else:
