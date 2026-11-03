@@ -24,7 +24,7 @@ body_lookup = (f: int) -> int:
         if contexts[i].inst == f: return i
     -1
 body_error = (f: int, pos: int): print("recursive:{pos}"); exit(21)
-body_restore = (f: int): events.push("restore:{f}")
+bt_restore = (f: int): events.push("restore:{f}")
 body_measure = (phase: int, f: int) -> int:
     assert(phase == 1)
     events.push("measure:{f}")
@@ -34,7 +34,7 @@ body_decimal = (f: int) -> bool: functions[f].kind == 77
 body_decimal_check = (f: int):
     events.push("decimal:{f}")
     cb_check_body_now(f)
-body_force = (d: int, f: int):
+bt_force = (d: int, f: int):
     assert(functions[f].state == 1)
     events.push("force:{f}:{context}")
 body_type_params = (d: int, ts: int[]):
@@ -44,12 +44,12 @@ body_local = (nm: int, t: int, pos: int) -> int:
     body_locals.push(Local(name = i32(nm), type = i32(t), owner = contexts[context].inst))
     scopes.names.push(nm)
     body_locals.len() - 1
-body_skip = (d: int) -> bool: nodes[d].aux == 99
+bt_skip = (d: int) -> bool: nodes[d].aux == 99
 body_reset = (mark: int): scopes.names.resize(mark)
-body_infer = (f: int, d: int):
+bt_infer = (f: int, d: int):
     assert(contexts[context].infer_ret and types[int(contexts[context].ret)].kind == .var)
     events.push("infer:{f}")
-body_expression = (f: int, d: int):
+bt_expression = (f: int, d: int):
     assert(functions[f].state == 1 and contexts[context].inst == f)
     if functions[f].targs.len() == 0: assert(trail.len() == 0)
     else: assert(trail_fns[trail_fns.len() - 1] == f)
@@ -73,12 +73,11 @@ body_expression = (f: int, d: int):
         cb_ensure_ret(f, 70)
         assert(functions[f].ret == i32(T_INT))
     else: functions[f].ret = contexts[context].ret
-body_finalize = (f: int, vars0: int, binds0: int, exposed0: int, da_mark: int):
+bt_finalize = (f: int, vars0: int, binds0: int, exposed0: int, da_mark: int):
     assert(functions[f].state == 1 and contexts[context].inst == f)
     assert(vars0 <= var_counter and binds0 <= binds and exposed0 <= exposures and da_mark == 0)
     events.push("finalize:{f}")
-body_host = CheckerBodyHost(instance_pack, instance_dewy, body_lookup, body_error, body_restore, body_measure, body_unmeasure, body_decimal, body_decimal_check, body_force, body_type_params, body_local, body_skip, body_reset, body_infer, body_expression, body_finalize)
-body_input = CheckerBodyInput(&nodes, &lists, &types, &functions, &contexts, &body_locals, &names, &trail, &trail_names, &trail_fns, &scopes, &definite_decls, &context, &var_counter, &binds, &exposures, &T_VOID, &T_NEVER, &skipped_never, &body_host)
+body_input = CheckerBodyInput(&nodes, &lists, &types, &functions, &contexts, &body_locals, &names, &trail, &trail_names, &trail_fns, &scopes, &definite_decls, &context, &var_counter, &binds, &exposures, &T_VOID, &T_NEVER, &skipped_never)
 body_binding = checker_bodies_bind(&body_input)
 body_fn = (generic: bool, ret: int) -> int:
     d = instance_decl(false, ret)
@@ -119,13 +118,40 @@ main = ():
     print("ok")
 '''
 
+# The Jo services the body leaf calls (check.jo, icount.jo, decimals.jo), routed to the driver.
+JO_DOUBLES = {
+    'check.jo': '''use 'driver.jo'
+load_body = (decl: int, f: int): instance_pack(decl, f)
+dewy_at = (pos: int) -> bool: instance_dewy(pos)
+body_context = (f: int) -> int: body_lookup(f)
+body_recursive_error = (f: int, use_pos: int): body_error(f, use_pos)
+body_restore = (f: int): bt_restore(f)
+body_force = (decl: int, f: int): bt_force(decl, f)
+push_type_params = (decl: int, targs: int[]): body_type_params(decl, targs)
+new_local = (name: int, t: int, pos: int) -> int: body_local(name, t, pos)
+body_skip = (decl: int) -> bool: bt_skip(decl)
+scope_reset = (mark: int): body_reset(mark)
+body_infer = (f: int, decl: int): bt_infer(f, decl)
+body_expression = (f: int, decl: int): bt_expression(f, decl)
+body_finalize = (f: int, vars0: int, binds0: int, exposed0: int, da_mark: int): bt_finalize(f, vars0, binds0, exposed0, da_mark)
+''',
+    'icount.jo': '''use 'driver.jo'
+ic_fn = (phase: int, f: int) -> int: body_measure(phase, f)
+ic_restore = (bucket: int): body_unmeasure(bucket)
+''',
+    'decimals.jo': '''use 'driver.jo'
+decimal_wants = (f: int) -> bool: body_decimal(f)
+decimal_check_body = (f: int): body_decimal_check(f)
+''',
+}
+
 
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_bodies_twins(compiler, tmp_path, release):  # noqa: F811
     assert compare(compiler, tmp_path, release, DRIVER,
                    extra_stems=('checker_signature', 'type_substitute', 'checker_results',
-                                'checker_instances', 'checker_bodies')).endswith(b'ok\n')
+                                'checker_instances', 'checker_bodies'), jo_doubles=JO_DOUBLES).endswith(b'ok\n')
 
 
 def test_checker_bodies_recursive_error(compiler, tmp_path):  # noqa: F811
@@ -136,4 +162,4 @@ def test_checker_bodies_recursive_error(compiler, tmp_path):  # noqa: F811
     print(events)''')
     compare(compiler, tmp_path, False, driver, status=21,
             extra_stems=('checker_signature', 'type_substitute', 'checker_results',
-                         'checker_instances', 'checker_bodies'))
+                         'checker_instances', 'checker_bodies'), jo_doubles=JO_DOUBLES)
