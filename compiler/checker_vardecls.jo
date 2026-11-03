@@ -5,23 +5,9 @@ use 'source_types.dewy'
 use 'checker_state.dewy'
 use 'type_inference.dewy'
 use 'checker_coerce.dewy'
-struct CheckerDeclHost:
-    form: (int, int) -> bool
-    binding_type: (int) -> int
-    default: (int, int) -> int
-    syntax_type: (int) -> int
-    values: (int, int) -> int
-    annotated: (int, int, int) -> void
-    coerce: (int, int) -> int
-    sibling: (int, int, int) -> int
-    literal: (int) -> int
-    storage: (int, int) -> int
-    value_param: (int, int) -> int
-    temperature: (int, int, int) -> int
-    binding: (int, int, int) -> int
-    pattern: (int, int, int) -> int
-    after: (int, int, int, int) -> void
-    error: (int, int, int) -> void
+use 'check.jo'
+use 'expr.jo'
+use 'sibling_types.jo'
 struct CheckerDeclInput:
     nodes: *(Node[])
     lists: *(i32[])
@@ -51,7 +37,6 @@ struct CheckerDeclInput:
     growth_whole: *bool
     str_type: *int
     math_int_type: *int
-    host: *CheckerDeclHost
 vd_nodes: *(Node[])
 vd_lists: *(i32[])
 vd_types: *(TypeInfo[])
@@ -80,7 +65,6 @@ vd_growth_pending: *int
 vd_growth_whole: *bool
 vd_str_type: *int
 vd_math_int_type: *int
-vd_host: *CheckerDeclHost
 checker_vardecls_bind = (input: *CheckerDeclInput) -> int:
     vd_nodes = input[0].nodes
     vd_lists = input[0].lists
@@ -110,7 +94,6 @@ checker_vardecls_bind = (input: *CheckerDeclInput) -> int:
     vd_growth_whole = input[0].growth_whole
     vd_str_type = input[0].str_type
     vd_math_int_type = input[0].math_int_type
-    vd_host = input[0].host
     0
 vd_kind = (t: int) -> TK: vd_types[0][tu_prune(t)].kind
 vd_flag = (n: int, f: int) -> bool: int(vd_nodes[0][n].flags) & f != 0
@@ -138,23 +121,23 @@ vd_scalar_followed = (s: int, t: int) -> bool:
     if b == 0 or i >= int(vd_nodes[0][b].nlist) or vd_kid(b, i) != s: return false
     vd_parents[0].get(tu_prune(t), 0) != 0 and i + 1 < int(vd_nodes[0][b].nlist)
 vd_element_alias = (s: int) -> bool:
-    ix = vd_host[0].pattern(s, 0, 4)
-    l = vd_host[0].binding(int(vd_nodes[0][s].name), int(vd_nodes[0][ix].type), vd_nodes[0][s].pos)
+    ix = decl_pattern(s, 0, 4)
+    l = new_local(int(vd_nodes[0][s].name), int(vd_nodes[0][ix].type), vd_nodes[0][s].pos)
     vd_locals[0][l].flags = i32(16392)
     vd_locals[0][l].alias = i32(ix)
     vd_nodes[0][s].kind = .block
     vd_nodes[0][s].nlist = 0
     true
 vd_pattern = (s: int) -> bool:
-    if int(vd_nodes[0][s].flags) & 2048 != 0 and vd_host[0].pattern(s, 0, 1) != 0: return true
-    t = vd_host[0].pattern(s, 0, 2)
+    if int(vd_nodes[0][s].flags) & 2048 != 0 and decl_pattern(s, 0, 1) != 0: return true
+    t = decl_pattern(s, 0, 2)
     n = int(vd_nodes[0][s].nlist)
-    if vd_types[0][t].kind != .tuple or int(vd_types[0][t].nargs) != n: vd_host[0].pattern(s, t, 3)
+    if vd_types[0][t].kind != .tuple or int(vd_types[0][t].nargs) != n: decl_pattern(s, t, 3)
     i = 0
     loop i < n:
         id = vd_kid(s, i)
         if vd_nodes[0][id].kind != .hole:
-            l = vd_host[0].binding(int(vd_nodes[0][id].name), tu_targ(t, i), vd_nodes[0][id].pos)
+            l = new_local(int(vd_nodes[0][id].name), tu_targ(t, i), vd_nodes[0][id].pos)
             f = if int(vd_nodes[0][s].flags) & 262144 != 0: 197120 else: 66048
             if vd_nodes[0][s].aux2 == 1: f = f | 524288
             vd_locals[0][l].flags = i32(f)
@@ -164,83 +147,83 @@ vd_pattern = (s: int) -> bool:
     true
 vd_forms = (s: int) -> bool:
     b = int(vd_nodes[0][s].b)
-    if b > 0 and vd_nodes[0][b].kind == .call and vd_nodes[0][b].aux2 == 17: vd_host[0].form(s, 1)
-    if vd_flag(s, 131072): return vd_host[0].form(s, 2)
+    if b > 0 and vd_nodes[0][b].kind == .call and vd_nodes[0][b].aux2 == 17: decl_form(s, 1)
+    if vd_flag(s, 131072): return decl_form(s, 2)
     if vd_flag(s, 8388608): return vd_element_alias(s)
     if b != 0:
         c = b
         if vd_nodes[0][c].kind == .propagate: c = int(vd_nodes[0][c].a)
-        if vd_nodes[0][c].kind == .call and vd_nodes[0][c].aux2 == -11 and vd_host[0].form(s, 4): return true
-        if vd_nodes[0][s].a == 0 and vd_nodes[0][s].nlist == 0 and not vd_flag(s, 2048) and not vd_flag(s, 262144) and vd_flag(b, 1) and vd_file_dewy(vd_nodes[0][s].pos) and vd_host[0].form(s, 5): return true
+        if vd_nodes[0][c].kind == .call and vd_nodes[0][c].aux2 == -11 and decl_form(s, 4): return true
+        if vd_nodes[0][s].a == 0 and vd_nodes[0][s].nlist == 0 and not vd_flag(s, 2048) and not vd_flag(s, 262144) and vd_flag(b, 1) and vd_file_dewy(vd_nodes[0][s].pos) and decl_form(s, 5): return true
     tn = int(vd_nodes[0][s].a)
-    if tn != 0 and b != 0 and vd_nodes[0][tn].kind == .tarray and vd_nodes[0][tn].ival == 1: vd_host[0].form(s, 6)
+    if tn != 0 and b != 0 and vd_nodes[0][tn].kind == .tarray and vd_nodes[0][tn].ival == 1: decl_form(s, 6)
     if vd_nodes[0][s].nlist > 0: return vd_pattern(s)
-    if vd_flag(s, 2048): return vd_host[0].form(s, 8)
+    if vd_flag(s, 2048): return decl_form(s, 8)
     false
 vd_decl = (s: int):
     if vd_forms(s): return
     pos = vd_nodes[0][s].pos
     typed = vd_nodes[0][s].a != 0
     t = 0
-    if typed: t = vd_host[0].binding_type(s)
+    if typed: t = decl_binding_type(s)
     no_value = vd_nodes[0][s].b == 0
-    if vd_refining[0] and vd_kind(t) == .refined and vd_nodes[0][s].b == 0: vd_nodes[0][s].b = i32(vd_host[0].default(t, pos))
-    unset = no_value and t != 0 and vd_dewy_at(pos) and not vd_flag(s, 262144) and vd_host[0].form(s, 9)
-    if vd_nodes[0][s].b == 0 and t != 0: vd_nodes[0][s].b = i32(vd_host[0].default(t, pos))
+    if vd_refining[0] and vd_kind(t) == .refined and vd_nodes[0][s].b == 0: vd_nodes[0][s].b = i32(struct_default(t, pos))
+    unset = no_value and t != 0 and vd_dewy_at(pos) and not vd_flag(s, 262144) and decl_form(s, 9)
+    if vd_nodes[0][s].b == 0 and t != 0: vd_nodes[0][s].b = i32(struct_default(t, pos))
     literal_init = false
     unit = 0
     if vd_nodes[0][s].b != 0:
         ik = vd_nodes[0][int(vd_nodes[0][s].b)].kind
         c = vd_context[0]
-        if vd_growth_pending[0] != 0 or (not typed and (ik == .float_lit or ((vd_watch[0].growth > 0 or vd_decimal_cached[0] != 0) and c >= 0 and vd_contexts[0][c].loop_depth > 0 and vd_dewy_at(pos)))): vd_host[0].after(s, 0, 0, 1)
+        if vd_growth_pending[0] != 0 or (not typed and (ik == .float_lit or ((vd_watch[0].growth > 0 or vd_decimal_cached[0] != 0) and c >= 0 and vd_contexts[0][c].loop_depth > 0 and vd_dewy_at(pos)))): decl_after(s, 0, 0, 1)
         else: vd_growth_whole[0] = not typed and ik == .int_lit
         if t == 0 and vd_dewy_at(pos): unit = vd_literal_unit(int(vd_nodes[0][s].b))
         literal = 0
-        if t != 0 and vd_union(t) and vd_dewy_at(pos): literal = vd_host[0].syntax_type(int(vd_nodes[0][s].b))
-        et = vd_host[0].values(int(vd_nodes[0][s].b), t)
+        if t != 0 and vd_union(t) and vd_dewy_at(pos): literal = sibling_syntax_type(int(vd_nodes[0][s].b))
+        et = decl_values(int(vd_nodes[0][s].b), t)
         vd_nodes[0][s].b = i32(vd_last[0])
         if t != 0:
             if literal != 0 or (vd_union(t) and vd_kind(et) == .struct_ and vd_dewy_at(pos)):
                 member = et
                 if literal != 0: member = literal
-                vd_host[0].annotated(s, t, member)
+                decl_annotated(s, t, member)
             v = int(vd_nodes[0][s].b)
-            if not cq_settled(vd_nodes, vd_types, v, t): vd_nodes[0][s].b = i32(vd_host[0].coerce(v, t))
+            if not cq_settled(vd_nodes, vd_types, v, t): vd_nodes[0][s].b = i32(coerce(v, t))
         else:
             t = et
             k = vd_kind(t)
-            if k == .tuple and vd_sibling_literals[0].has(int(vd_nodes[0][s].b)): t = vd_host[0].sibling(s, t, 1)
-            else if k == .struct_ and vd_dewy_at(pos) and vd_scalar_followed(s, t): t = vd_host[0].sibling(s, t, 2)
+            if k == .tuple and vd_sibling_literals[0].has(int(vd_nodes[0][s].b)): t = decl_sibling(s, t, 1)
+            else if k == .struct_ and vd_dewy_at(pos) and vd_scalar_followed(s, t): t = decl_sibling(s, t, 2)
             if vd_flag(int(vd_nodes[0][s].b), 256):
-                t = vd_host[0].literal(s)
+                t = decl_literal(s)
                 literal_init = true
-            if vd_kind(t) == .none_lit: vd_host[0].error(s, t, 1)
-    if vd_effects[0] and not typed: t = vd_host[0].storage(s, t)
-    if vd_nodes[0][s].aux2 == 1 and not typed and vd_refining[0] and vd_nodes[0][s].b != 0: t = vd_host[0].value_param(s, t)
-    if t == 0: vd_host[0].error(s, 0, 2)
-    if unit != 0: t = vd_host[0].temperature(s, t, unit)
+            if vd_kind(t) == .none_lit: decl_error(s, t, 1)
+    if vd_effects[0] and not typed: t = decl_storage(s, t)
+    if vd_nodes[0][s].aux2 == 1 and not typed and vd_refining[0] and vd_nodes[0][s].b != 0: t = decl_value_param(s, t)
+    if t == 0: decl_error(s, 0, 2)
+    if unit != 0: t = decl_temperature(s, t, unit)
     tk = vd_kind(t)
-    if tk == .void_: vd_host[0].error(s, t, 3)
-    if tk == .null_: vd_host[0].error(s, t, 4)
-    if tk == .typeval or tk == .module: vd_host[0].error(s, t, 5)
-    l = vd_host[0].binding(int(vd_nodes[0][s].name), t, pos)
-    if vd_sibling_pending[0].len() > 0: vd_host[0].after(s, l, t, 3)
+    if tk == .void_: decl_error(s, t, 3)
+    if tk == .null_: decl_error(s, t, 4)
+    if tk == .typeval or tk == .module: decl_error(s, t, 5)
+    l = new_local(int(vd_nodes[0][s].name), t, pos)
+    if vd_sibling_pending[0].len() > 0: decl_after(s, l, t, 3)
     if vd_flow_next[0] != 0: vd_flow_local[0] = l
     if unit != 0: vd_tk_bindings[0][l] = s
-    if literal_init and (vd_kind(t) == .struct_ or vd_watch[0].decimal_adapted > 0): vd_host[0].after(s, l, t, 4)
-    if vd_growth_pending[0] != 0 or (not typed and vd_kind(t) == .struct_ and vd_dewy_at(pos) and not vd_flag(s, 262144)): vd_host[0].after(s, l, t, 5)
+    if literal_init and (vd_kind(t) == .struct_ or vd_watch[0].decimal_adapted > 0): decl_after(s, l, t, 4)
+    if vd_growth_pending[0] != 0 or (not typed and vd_kind(t) == .struct_ and vd_dewy_at(pos) and not vd_flag(s, 262144)): decl_after(s, l, t, 5)
     b = int(vd_nodes[0][s].b)
     if b != 0 and vd_watch[0].quaternions > 0 and vd_quat_nodes[0].has(b): vd_quat_locals[0][l] = true
     vd_locals[0][l].flags = i32(512)
     if not typed and vd_dewy_at(pos):
-        if t == vd_str_type[0]: vd_host[0].after(s, l, t, 6)
-        else if t == vd_math_int_type[0]: vd_host[0].after(s, l, t, 7)
+        if t == vd_str_type[0]: decl_after(s, l, t, 6)
+        else if t == vd_math_int_type[0]: decl_after(s, l, t, 7)
     if vd_flag(s, 262144):
         vd_locals[0][l].flags = i32(197120)
         vd_locals[0][l].const_init = i32(b)
-        if b != 0 and vd_file_dewy(pos): vd_host[0].after(s, l, t, 8)
+        if b != 0 and vd_file_dewy(pos): decl_after(s, l, t, 8)
     if vd_flag(s, 33554432): vd_locals[0][l].flags = i32(66048)
     if vd_nodes[0][s].aux2 == 1: vd_or_flags(l, 524288)
     vd_nodes[0][s].sym = i32(l)
-    if unset: vd_host[0].after(s, l, t, 9)
-    if vd_ide[0] and not typed: vd_host[0].after(s, l, t, 10)
+    if unset: decl_after(s, l, t, 9)
+    if vd_ide[0] and not typed: decl_after(s, l, t, 10)

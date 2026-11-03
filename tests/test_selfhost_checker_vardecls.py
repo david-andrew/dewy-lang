@@ -3,7 +3,7 @@ import pytest
 
 from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_loops import DRIVER as LOOPS
-from tests.selfhost_expr_double import compare_leaf
+from tests.selfhost_expr_double import compare_leaf, jo_doubles
 
 STEMS = ('checker_loops', 'checker_vardecls')
 DRIVER = LOOPS + r'''
@@ -93,8 +93,7 @@ dv_error = (s: int, t: int, code: int):
     print(events)
     print("error:{s}:{t}:{code}")
     exit(19)
-dv_services = CheckerDeclHost(dv_form, dv_binding_type, dv_default, dv_syntax_type, dv_values, dv_annotated, dv_coerce, dv_sibling, dv_literal, dv_storage, dv_value_param, dv_temperature, dv_binding, dv_pattern, dv_after, dv_error)
-dv_inputs = CheckerDeclInput(&nodes, &lists, &types, &structs, &files, &locals, &ctxs, &cx, &last, &dv_refining, &dv_effects, &dv_ide, &dv_literals, &dv_pending, &dv_block, &dv_index, &dv_flow_next, &dv_flow_local, &dv_parents, &dv_quat_nodes, &dv_quat_locals, &dv_tk, &dv_watch, &dv_cached, &dv_growth_pending, &dv_whole, &T_STR, &T_MATH_INT, &dv_services)
+dv_inputs = CheckerDeclInput(&nodes, &lists, &types, &structs, &files, &locals, &ctxs, &cx, &last, &dv_refining, &dv_effects, &dv_ide, &dv_literals, &dv_pending, &dv_block, &dv_index, &dv_flow_next, &dv_flow_local, &dv_parents, &dv_quat_nodes, &dv_quat_locals, &dv_tk, &dv_watch, &dv_cached, &dv_growth_pending, &dv_whole, &T_STR, &T_MATH_INT)
 dv_bound = checker_vardecls_bind(&dv_inputs)
 DEWY = 1 << 40
 # let name[:tn] = value (flags on the declaration)
@@ -246,11 +245,37 @@ main = ():
     print("ok")
 '''
 
+# The Jo services checker_vardecls calls, routed to the driver.
+DECL_JO = {
+    'check.jo': {
+        'decl_form': 'decl_form = (s: int, code: int) -> bool: dv_form(s, code)',
+        'decl_binding_type': 'decl_binding_type = (s: int) -> int: dv_binding_type(s)',
+        'decl_values': 'decl_values = (e: int, expected: int) -> int: dv_values(e, expected)',
+        'decl_annotated': 'decl_annotated = (s: int, t: int, member: int): dv_annotated(s, t, member)',
+        'decl_sibling': 'decl_sibling = (s: int, t: int, code: int) -> int: dv_sibling(s, t, code)',
+        'decl_literal': 'decl_literal = (s: int) -> int: dv_literal(s)',
+        'decl_storage': 'decl_storage = (s: int, t: int) -> int: dv_storage(s, t)',
+        'decl_value_param': 'decl_value_param = (s: int, t: int) -> int: dv_value_param(s, t)',
+        'decl_temperature': 'decl_temperature = (s: int, t: int, unit: int) -> int: dv_temperature(s, t, unit)',
+        'new_local': 'new_local = (name: int, t: int, pos: int) -> int: dv_binding(name, t, pos)',
+        'decl_pattern': 'decl_pattern = (s: int, t: int, code: int) -> int: dv_pattern(s, t, code)',
+        'decl_after': 'decl_after = (s: int, l: int, t: int, code: int): dv_after(s, l, t, code)',
+        'decl_error': 'decl_error = (s: int, t: int, code: int): dv_error(s, t, code)',
+    },
+    'expr.jo': {
+        'struct_default': 'struct_default = (t0: int, pos: int) -> int: dv_default(t0, pos)',
+        'coerce': 'coerce = (n: int, target: int) -> int: dv_coerce(n, target)',
+    },
+    'sibling_types.jo': {
+        'sibling_syntax_type': 'sibling_syntax_type = (v: int) -> int: dv_syntax_type(v)',
+    },
+}
+
 
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_vardecls_twins(compiler, tmp_path, release):  # noqa: F811
-    assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'xb_check', extra_stems=STEMS).endswith(b'ok\n')
+    assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'xb_check', extra_stems=STEMS, jo_doubles=jo_doubles(DECL_JO)).endswith(b'ok\n')
 
 
 @pytest.mark.parametrize('case,code', [
@@ -269,5 +294,5 @@ main = ():
     {case}
     print("unreachable")
 '''
-    output = compare_leaf(compiler, tmp_path, False, DRIVER + main, 'xb_check', status=19, extra_stems=STEMS)
+    output = compare_leaf(compiler, tmp_path, False, DRIVER + main, 'xb_check', status=19, extra_stems=STEMS, jo_doubles=jo_doubles(DECL_JO))
     assert output.rstrip().endswith(f':{code}'.encode())

@@ -6,13 +6,13 @@ from tests.test_selfhost_checker_assigns import ASSIGN_JO, DRIVER as ASSIGNS
 from tests.test_selfhost_checker_conditionals import DRIVER as CONDITIONALS
 from tests.test_selfhost_checker_literals import DRIVER as LITERALS
 from tests.test_selfhost_checker_loops import DRIVER as LOOPS
-from tests.test_selfhost_checker_vardecls import DRIVER as DECLS
+from tests.test_selfhost_checker_vardecls import DECL_JO, DRIVER as DECLS
 from tests.selfhost_expr_double import compare_leaf, jo_doubles
 from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER
 
 STEMS = ('checker_loops', 'checker_vardecls', 'checker_assigns', 'checker_exprstmts', 'checker_statements',
          'checker_for_loops', 'checker_returns', 'checker_conditionals', 'checker_exact', 'checker_literals', 'checker_blocks')
-JO_DOUBLES = jo_doubles(ASSIGN_JO)
+JO_DOUBLES = jo_doubles(ASSIGN_JO, DECL_JO)
 
 
 def hosts(driver):
