@@ -110,42 +110,130 @@ init_module_order = (mainm: int) -> int[]:
     full
 
 # ---------------- merging a cycle's top-level code ----------------
-# What a statement reads of the other members' values: (global, position) pairs,
-# directly or through the functions it calls or makes (a superset of the reads).
-cyc_reads = (n: int, own: int, members: {int: bool}, at: int, seen: mut {int: bool}, out: mut int[]):
+# What a statement reads of the other members' values: (global, first use)
+# pairs, directly or through the functions it calls or makes (a superset of the
+# reads). Each function's transitive reads are found once per group and shared
+# by its call graph component (Tarjan, as for modules), so the cost is one walk
+# of the reachable code plus a union per call, not a walk per statement. A read
+# through a call is placed at the statement's call, so the sets need no positions.
+cr_member: bool[]    # per module: a member of the group being merged
+cr_index: int[]      # per function: its visit number, -1 when not yet visited
+cr_low: int[]
+cr_on: bool[]
+cr_stack: int[]
+cr_next = 0
+cr_comp: int[]       # per function: its component, an index into cr_sets
+cr_events: int[][]   # per visit, until its component is done: the body's reads (g) and calls (-f), in order
+cr_sets: int[][]     # per component: the members' globals its functions read, transitively, first read first
+cr_mark: int[]       # per global: the last cr_stamp that added it to a set
+cr_stamp = 0
+cr_taken: int[]      # per global: the last statement (cr_stmt) that took it
+cr_stmt = 0
+
+cyc_reads_start = (group: int[]):
+    cr_member = fill(false, modules.len())
+    loop m in group: cr_member[m] = true
+    cr_index = fill(-1, fns.len())
+    cr_low = fill(0, fns.len())
+    cr_on = fill(false, fns.len())
+    cr_comp = fill(-1, fns.len())
+    cr_stack = []
+    cr_events = []
+    cr_sets = []
+    cr_next = 0
+    cr_mark = fill(0, globals.len())
+    cr_stamp = 0
+    cr_taken = fill(0, globals.len())
+    cr_stmt = 0
+
+# A statement's reads, as (global, position) pairs, each global once at its first use.
+cyc_reads = (s: int, own: int, out: mut int[]):
+    cr_stmt += 1
+    cyc_walk(s, 0, own, out)
+
+cyc_take = (g: int, own: int, pos: int, out: mut int[]):
+    if int(globals[g].mod) == own or cr_taken[g] == cr_stmt: return
+    cr_taken[g] = cr_stmt
+    out.push(g)
+    out.push(pos)
+
+# In function f's body (f > 0), ev gets its reads and calls; in a statement of
+# member own (f == 0), out gets the statement's reads.
+cyc_walk = (n: int, f: int, own: int, ev: mut int[]):
     if n <= 0: return
     k = nodes[n].kind
     if k == .ident:
         if nodes[n].aux == i32(int(SK.global)):
             g = int(nodes[n].sym)
-            gm = int(globals[g].mod)
-            if gm != own and members.has(gm):
-                out.push(g)
-                read_at = at
-                if read_at == 0: read_at = nodes[n].pos
-                out.push(read_at)
+            if cr_member[int(globals[g].mod)]:
+                if f > 0: ev.push(g)
+                else: cyc_take(g, own, nodes[n].pos, ev)
         return
-    via = if at != 0: at else: nodes[n].pos
-    if (k == .call and nodes[n].aux == 0) or k == .fnref or (k == .lambda and not has_flag(n, NF_GENERIC)): cyc_reads_fn(int(nodes[n].sym), own, members, via, seen, out)
-    if k == .partial: cyc_reads_fn(int(nodes[n].d), own, members, via, seen, out)
+    h = 0
+    if (k == .call and nodes[n].aux == 0) or k == .fnref or (k == .lambda and not has_flag(n, NF_GENERIC)): h = int(nodes[n].sym)
+    if k == .partial: h = int(nodes[n].d)
+    if h > 0 and h < fns.len():
+        if cr_index[h] < 0:
+            cyc_visit(h)
+            if f > 0 and cr_low[h] < cr_low[f]: cr_low[f] = cr_low[h]
+        else if f > 0 and cr_on[h] and cr_index[h] < cr_low[f]: cr_low[f] = cr_index[h]
+        if f > 0: ev.push(-h)
+        else:
+            loop g in cr_sets[cr_comp[h]]: cyc_take(g, own, nodes[n].pos, ev)
     mask = isolation_children(k)
     if mask < 0:
-        cyc_reads(int(nodes[n].a), own, members, at, seen, out)
-        cyc_reads(int(nodes[n].b), own, members, at, seen, out)
-        loop c in kids(n): cyc_reads(c, own, members, at, seen, out)
+        cyc_walk(int(nodes[n].a), f, own, ev)
+        cyc_walk(int(nodes[n].b), f, own, ev)
+        loop c in kids(n): cyc_walk(c, f, own, ev)
         return
-    if mask & 1 != 0: cyc_reads(int(nodes[n].a), own, members, at, seen, out)
-    if mask & 2 != 0: cyc_reads(int(nodes[n].b), own, members, at, seen, out)
-    if mask & 4 != 0: cyc_reads(int(nodes[n].c), own, members, at, seen, out)
+    if mask & 1 != 0: cyc_walk(int(nodes[n].a), f, own, ev)
+    if mask & 2 != 0: cyc_walk(int(nodes[n].b), f, own, ev)
+    if mask & 4 != 0: cyc_walk(int(nodes[n].c), f, own, ev)
     if mask & 16 != 0:
-        loop c in kids(n): cyc_reads(c, own, members, at, seen, out)
+        loop c in kids(n): cyc_walk(c, f, own, ev)
     if mask & 32 != 0:
-        loop c in kids2(n): cyc_reads(c, own, members, at, seen, out)
+        loop c in kids2(n): cyc_walk(c, f, own, ev)
 
-cyc_reads_fn = (f: int, own: int, members: {int: bool}, at: int, seen: mut {int: bool}, out: mut int[]):
-    if f <= 0 or f >= fns.len() or seen.has(f): return
-    seen[f] = true
-    cyc_reads(int(fns[f].body), own, members, at, seen, out)
+# Walk f's body; when f closes a component, its set is the members' events in
+# visit order, each call out of the component adding that component's set.
+cyc_visit = (f: int):
+    v = cr_next
+    cr_index[f] = v
+    cr_low[f] = v
+    cr_next += 1
+    cr_stack.push(f)
+    cr_on[f] = true
+    cr_events.push([])
+    ev: int[]
+    cyc_walk(int(fns[f].body), f, 0, ev)
+    cr_events[v] = ev
+    if cr_low[f] != v: return
+    c = cr_sets.len()
+    comp: int[]
+    loop true:
+        w = cr_stack.pop()
+        cr_on[w] = false
+        cr_comp[w] = c
+        comp.push(w)
+        if w == f: break
+    cr_stamp += 1
+    acc: int[]
+    i = comp.len()
+    loop i > 0:
+        i -= 1
+        x = cr_index[comp[i]]
+        loop e in cr_events[x]:
+            if e >= 0:
+                cyc_add(e, acc)
+            else if cr_comp[-e] != c:
+                loop g in cr_sets[cr_comp[-e]]: cyc_add(g, acc)
+        cr_events[x] = []
+    cr_sets.push(acc)
+
+cyc_add = (g: int, acc: mut int[]):
+    if cr_mark[g] == cr_stamp: return
+    cr_mark[g] = cr_stamp
+    acc.push(g)
 
 cyc_where = (p: int) -> str:
     f = pos_file(p)
@@ -169,8 +257,7 @@ merge_cycle_inits = ():
 # declarations it reads; among the ready ones the earliest member goes first.
 merge_cycle_group = (group: int[]):
     n = group.len()
-    members: {int: bool}
-    loop m in group: members[m] = true
+    cyc_reads_start(group)
     flat: int[]
     start: int[]
     loop m in group:
@@ -186,8 +273,7 @@ merge_cycle_group = (group: int[]):
     loop mi in [0..n):
         loop si in [0..start[mi + 1] - start[mi]):
             reads: int[]
-            seen: {int: bool}
-            cyc_reads(flat[start[mi] + si], group[mi], members, 0, seen, reads)
+            cyc_reads(flat[start[mi] + si], group[mi], reads)
             need: int[]
             i = 0
             loop i < reads.len():

@@ -1,0 +1,17 @@
+# quick
+# Many statements in a cycle reach the other module's values through shared
+# functions, a chain of calls into a recursive pair that spans both modules.
+# Each statement still runs after every value it reaches, however many share
+# the functions.
+import p"../../fixtures/import_cycles/big_cycle_peer.dewy" as peer
+printl"top starts"
+let scale=3
+printl"scale = {scale}"
+weigh=(n:int):>int => n * scale + peer.parity(n)
+even=(n:int):>int => if n =? 0 bias else peer.odd(n - 1)
+let t0=peer.base + 1
+printl"t0 = {t0}"
+let bias=100
+printl"bias = {bias}"
+let t1=peer.p20 + 1
+printl"t1 = {t1}"
