@@ -4,7 +4,7 @@ These folders record, for each design decision, what was considered and why one 
 
 1. **Open questions** for David are in [../open_decisions.md](../open_decisions.md).
    - It is self-contained, with examples, and sorted by priority.
-   - Answers are marked inline until the next cleanup.
+   - It lists only open items: an answered item is removed in the same commit that records the decision.
 2. **Proposals and reviews** behind each question live here, one folder per topic.
    - They hold the options considered, the arguments for and against each, the prior art, and the reasoning.
    - Old rounds are kept, never rewritten; a new round gets a new file. That way the history shows how the design moved.
