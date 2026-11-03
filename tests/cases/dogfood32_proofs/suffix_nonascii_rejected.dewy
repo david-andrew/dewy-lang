@@ -1,0 +1,7 @@
+# A suffix outside ASCII may merge with what comes before it, so it promises
+# only one character: the slice before a two-character suffix is unproven.
+stem = (word:string):>string => {
+    if not word.endswith("ée") return ""
+    word[..word.length - 2)
+}
+main = () => printl(stem("idée"))

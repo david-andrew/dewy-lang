@@ -1,0 +1,4 @@
+# A function named like a string method hides that method, so `s.upper`
+# inside `upper` calls the function itself and never ends.
+upper = (s:string):>string => s.upper
+main = () => printl(upper("abc"))

@@ -2372,6 +2372,36 @@ written_int_param = (d: int, i: int) -> bool:
     if s == 0 or syms[s].kind != .type_ or module_lookup(int(nodes[d].mod), int(nodes[tn].name)) != s: return false
     tkind(int(syms[s].ref)) == .int_
 
+# `upper = (s:string):>string => s.upper`: a Dewy function whose whole body calls
+# itself again with its own parameters or literals never ends. O(1) per call.
+self_call_is_body = (n: int, decl: int, args: int[]) -> bool:
+    ci = int(ctxs[cx].inst)
+    if ci <= 0 or int(fns[ci].decl) != decl or nodes[decl].kind != .fn_: return false
+    b = int(nodes[decl].b)
+    loop b != 0 and b != n and nodes[b].kind != .call:
+        k = nodes[b].kind
+        if k == .return_ or k == .exprstmt: b = int(nodes[b].a)
+        else if k == .block and nkids(b) > 0:
+            # (after the copies of the parameters a Dewy body starts with)
+            last = nkids(b) - 1
+            loop i in [0..last):
+                c = kid(b, i)
+                if nodes[c].kind != .vardecl or nodes[c].b == 0 or nodes[int(nodes[c].b)].kind != .ident: return false
+            b = kid(b, last)
+        else: return false
+    if b != n: return false
+    loop a in args:
+        k = nodes[unnamed(a)].kind
+        if k != .ident and k != .int_lit and k != .bool_lit and not (k == .str_lit and nkids(unnamed(a)) == 0): return false
+    true
+
+self_call_error = (n: int, name: int, ufcs: bool, args: int[]):
+    nm = name_of(name)
+    hint = ""
+    if ufcs and args.len() > 0 and nodes[unnamed(args[0])].kind == .ident:
+        hint = ": `{name_of(int(nodes[unnamed(args[0])].name))}.{nm}` names this function, which hides any method `{nm}` it was meant to reach; rename the function"
+    fatal(nodes[n].pos, "'{nm}' calls itself as its whole body, so it repeats without end{hint}")
+
 resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, closure: int = 0, ufcs: bool = false) -> int:
     if rational_module_found >= 0 and exact_family_name(name):
         family = exact_members_for(decls, name, args)
@@ -2702,6 +2732,7 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
         ci = int(ctxs[cx].inst)
         if ci > 0 and int(fns[ci].decl) == decl:
             fatal(nodes[n].pos, "{name_of(name)} calls itself here, which repeats without end: the game calls {name_of(name)} by itself, each frame")
+    if cx >= 0 and caller_dewy() and self_call_is_body(n, decl, args): self_call_error(n, name, ufcs, args)
     if nodes[n].aux2 == i32(AUX2_PLACE) or nodes[n].aux2 == i32(AUX2_PLACE_TAKEN) or place_methods.has(decl): place_call_seen(n, decl)
     np = nkids(decl)
     if (name == id_rgb or name == id_rgba) and np >= 3 and decl_in_prelude(decl): rgb_check(n, cd.args)

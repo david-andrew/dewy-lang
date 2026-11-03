@@ -3309,7 +3309,7 @@ fact_assume = (s: mut FactState, v: int, truth: bool):
         # Byte-prefix/suffix success on a nonempty pattern implies at least
         # one grapheme, even when combining marks merge at the boundary.
         if truth and t.origin != 0 and fact_affix_call(t.origin) and fact_bound(s, t.b).lo > 0:
-            fact_assume(s, fact_new(s, fact_domain(T_BOOL), FactTerm(.ge, t.a, fact_constant(s, 1))), true)
+            fact_assume(s, fact_new(s, fact_domain(T_BOOL), FactTerm(.ge, t.a, fact_constant(s, fact_affix_floor(kid(t.origin, 1))))), true)
         # A byte prefix has no more graphemes than its text: a boundary is
         # decided by the scalars before it and the one after, so the prefix's
         # inner boundaries are the text's, and its end is at most the text's.
@@ -5592,6 +5592,18 @@ fact_affix_call = (n: int) -> bool:
     name = int(nodes[d].name)
     if name != fact_name_starts_with and name != fact_name_ends_with: return false
     pos_in_lib(nodes[d].pos) and fact_type(ntype(kid(n, 0))) == T_STR and fact_type(ntype(kid(n, 1))) == T_STR
+
+# Graphemes a text matching a nonempty affix pattern has at least. An ASCII
+# literal without CR breaks between every pair of its bytes whatever surrounds
+# it, so each of its bytes starts a grapheme of the text; any other pattern
+# guarantees one.
+fact_affix_floor = (p: int) -> int:
+    if p <= 0 or nodes[p].kind != .str_lit or nodes[p].aux != 0 or nkids(p) != 0 or nodes[p].sval < 0: return 1
+    text = name_of(int(nodes[p].sval))
+    if len(text) == 0: return 1
+    loop c in text:
+        if c >= 128 or c == 13: return 1
+    len(text)
 
 fact_name_string_length = 0
 fact_name_string_index = 0

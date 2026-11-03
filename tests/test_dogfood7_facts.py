@@ -190,7 +190,7 @@ REJECTED = {
     'parallel_mutated_hull': 'f=(n:int8):>int8=>n\nmain=()=>{let xs=[loop i in [1..3] i] xs.push(1000) printl([parallel n in xs f(n)])}',
     'lock_missing_key': 'main=()=>{let m=mutex(dict<string int64>[]) let d=@(m.lock()) printl(d["x"])}',
     'lock_clear': 'main=()=>{let m=mutex(dict<string int64>[]) let d=@(m.lock()) d["x"]=1 d.clear() printl(d["x"])}',
-    'lock_helper_clear': 'clear=(@d:dict<string int64>):>void=>d.clear()\nmain=()=>{let m=mutex(dict<string int64>[]) let d=@(m.lock()) d["x"]=1 clear(@d) printl(d["x"])}',
+    'lock_helper_clear': 'wipe=(@d:dict<string int64>):>void=>d.clear()\nmain=()=>{let m=mutex(dict<string int64>[]) let d=@(m.lock()) d["x"]=1 wipe(@d) printl(d["x"])}',
     'lock_reacquired': 'main=()=>{let m=mutex(dict<string int64>[]) let d=@(m.lock()) d["x"]=1 let e=@(m.lock()) printl(e["x"])}',
     'lock_array_clear': 'main=()=>{let initial:array<int64>=[1] let m=mutex(initial) let xs=@(m.lock()) if xs.length >? 0 {xs.clear() printl(xs[0])}}',
     'lock_scalar_direct_write': 'main=()=>{let initial:int64=2 let m=mutex(initial) let x=@(m.lock()) if x =? 0 {return} x=0 printl(10/x)}',

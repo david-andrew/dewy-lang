@@ -1,0 +1,14 @@
+# A text that ends with (or starts with) an ASCII literal has at least that
+# many characters, so the slice in front of the suffix is in bounds.
+number_before = (word:string):>int => {
+    if not word.endswith("ms") return -1
+    to_int(word[..word.length - 2)) ?? -1
+}
+key_after = (line:string):>string => {
+    if not line.startswith("key=") return ""
+    line[4..)
+}
+main = () => {
+    printl"{number_before("340ms")} {number_before("ms")} {number_before("12s")}"
+    printl"'{key_after("key=abc")}' '{key_after("key=")}' '{key_after("k")}'"
+}

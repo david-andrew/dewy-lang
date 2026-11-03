@@ -1,0 +1,5 @@
+# Recursion behind a branch, or with changed arguments, is ordinary.
+count = (n:int):>int => if n <=? 0 0 else 1 + count(n - 1)
+depth = (s:string):>int => if s.length <=? 1 1 else 1 + s[1..).depth
+depth_of = (s:string):>int => depth(s)
+main = () => printl"{count(3)} {depth_of("abcd")}"
