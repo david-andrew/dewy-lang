@@ -6,6 +6,8 @@ from p"checker_state.dewy" import (FnCtx OptFill StatementWatch)
 from p"type_inference.dewy" import (tu_prune tu_targ)
 from p"checker_coerce.dewy" import cq_settled
 from p"checker_expr.dewy" import check_expr
+from p"check.jo" import (assign_begin assign_prelude assign_tuple assign_element assign_index assign_place assign_capture assign_refine assign_value assign_write assign_update assign_flow assign_wrap)
+from p"expr.jo" import coerce
 # `target = value` and `target op= value`, once the source's forms (`[end]` updates,
 # appends, soa elements) and custom and captured element targets are passed to their host
 # services (a tuple's elements and an indexed target's forms are told apart here; the
@@ -18,22 +20,6 @@ from p"checker_expr.dewy" import check_expr
 # checking of its parts; services may grow every arena, so nodes and types are
 # reread by ID.
 AWord:type=int64<overflow='wrap'>
-CheckerAssignHost:type=[
-    begin:<(node:int64 code:int64):>int64>
-    prelude:<(node:int64):>int64>
-    tuple:<(node:int64 part:int64 tuple_type:int64 type_id:int64 code:int64):>int64>
-    element:<(node:int64):>int64>
-    index:<(node:int64 type_id:int64 code:int64):>int64>
-    place:<(node:int64):>void>
-    capture:<(node:int64 target:int64 dewy:bool):>void>
-    refine:<(node:int64 type_id:int64 code:int64):>int64>
-    value:<(node:int64 type_id:int64 settle:int64):>int64>
-    write:<(node:int64 value_type:int64 type_id:int64 code:int64):>int64>
-    coerce:<(node:int64 type_id:int64):>int64>
-    update:<(node:int64 type_id:int64 other:int64 code:int64):>int64>
-    flow:<(node:int64 literal:int64):>void>
-    wrap:<(node:int64 result:int64 mark:int64):>int64>
-]
 CheckerAssignInput:type=[
     nodes:ptr<array<Node>>
     lists:ptr<array<int32>>
@@ -57,7 +43,6 @@ CheckerAssignInput:type=[
     math_int_type:ptr<int64>
     int_type:ptr<int64>
     u64_type:ptr<int64>
-    host:ptr<CheckerAssignHost>
 ]
 let va_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
 let va_lists:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
@@ -81,7 +66,6 @@ let va_str_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let va_math_int_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let va_int_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let va_u64_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
-let va_host:ptr<CheckerAssignHost>=$unsafe (uint64(0) as ptr<CheckerAssignHost>)
 checker_assigns_bind=(input:ptr<CheckerAssignInput>):>AWord=>$unsafe {
     va_nodes=input[0].nodes
     va_lists=input[0].lists
@@ -105,7 +89,6 @@ checker_assigns_bind=(input:ptr<CheckerAssignInput>):>AWord=>$unsafe {
     va_math_int_type=input[0].math_int_type
     va_int_type=input[0].int_type
     va_u64_type=input[0].u64_type
-    va_host=input[0].host
     0
 }
 va_kind=(t:AWord):>TK=>$unsafe {va_types[0].ptr[tu_prune(t)].kind}
@@ -140,19 +123,19 @@ va_store=(s:AWord lhs:AWord lt:AWord):>AWord=>$unsafe {
     let fill:AWord=-1
     if va_watch[0].temperature_writes =? 0 and va_decimal_target[0] =? 0 and va_fills[0].length =? 0 {
         let settle:AWord=if variable {2} else {1}
-        rt=va_host[0].value(s lt settle)
+        rt=assign_value(s lt settle)
     } else {
-        rt=va_host[0].value(s lt 0)
-        if va_watch[0].temperature_writes >? 0 {rt=va_host[0].write(s rt lt 1)}
-        if va_decimal_target[0] not=? 0 and va_host[0].write(s rt lt 2) not=? 0 {return s}
-        if rt not=? lt and variable {va_host[0].write(s rt lt 3);}
-        if va_fills[0].length >? 0 {fill=va_host[0].write(s rt lt 4)}
+        rt=assign_value(s lt 0)
+        if va_watch[0].temperature_writes >? 0 {rt=assign_write(s rt lt 1)}
+        if va_decimal_target[0] not=? 0 and assign_write(s rt lt 2) not=? 0 {return s}
+        if rt not=? lt and variable {assign_write(s rt lt 3);}
+        if va_fills[0].length >? 0 {fill=assign_write(s rt lt 4)}
         let v=va_last[0]
-        if va_nodes[0].ptr[v].kind not=? 'intrinsic' or va_nodes[0].ptr[v].aux not=? 76 {va_nodes[0][s].b=int32<overflow='wrap'>(va_host[0].coerce(v lt))}
+        if va_nodes[0].ptr[v].kind not=? 'intrinsic' or va_nodes[0].ptr[v].aux not=? 76 {va_nodes[0][s].b=int32<overflow='wrap'>(coerce(v lt))}
     }
-    if (lk not=? 'ident' or aux =? 2) and (va_path_narrows[0] >? 0 or va_union(lt) or va_kind(lt) =? 'opt') {va_host[0].write(s rt lt 5);}
-    else if va_path_narrows[0] >? 0 and lk =? 'ident' {va_host[0].write(s rt lt 6);}
-    if fill >=? 0 {va_host[0].write(s fill lt 7);}
+    if (lk not=? 'ident' or aux =? 2) and (va_path_narrows[0] >? 0 or va_union(lt) or va_kind(lt) =? 'opt') {assign_write(s rt lt 5);}
+    else if va_path_narrows[0] >? 0 and lk =? 'ident' {assign_write(s rt lt 6);}
+    if fill >=? 0 {assign_write(s fill lt 7);}
     s
 }
 # Whether the source's forms may apply: a variable written (appends, narrowing, soa
@@ -173,11 +156,11 @@ va_sourced=(lhs:AWord):>bool=>$unsafe {
 # tuple_type: the element's type), 7 refinement contracts (a block, or 0), 8 elements
 # converted (the statement or a block)).
 va_tuple=(s:AWord):>AWord=>$unsafe {
-    if va_nodes[0].ptr[s].op not=? 47 {va_host[0].tuple(s 0 0 0 1);}
-    let t=AWord(va_host[0].tuple(s 0 0 0 3))
+    if va_nodes[0].ptr[s].op not=? 47 {assign_tuple(s 0 0 0 1);}
+    let t=AWord(assign_tuple(s 0 0 0 3))
     let lhs=AWord(va_nodes[0].ptr[s].a)
     let n=AWord(va_nodes[0].ptr[lhs].nlist)
-    if va_types[0].ptr[t].kind not=? 'tuple' or AWord(va_types[0].ptr[t].nargs) not=? n {va_host[0].tuple(s 0 t 0 4);}
+    if va_types[0].ptr[t].kind not=? 'tuple' or AWord(va_types[0].ptr[t].nargs) not=? n {assign_tuple(s 0 t 0 4);}
     let i:AWord=0
     loop i <? n {
         let tp=AWord(va_lists[0].ptr[AWord(va_nodes[0].ptr[lhs].list) + i])
@@ -185,21 +168,21 @@ va_tuple=(s:AWord):>AWord=>$unsafe {
             let tt=AWord(check_expr(tp 0))
             let e=AWord(va_last[0])
             va_lists[0][AWord(va_nodes[0].ptr[lhs].list) + i]=int32<overflow='wrap'>(e)
-            va_host[0].tuple(s e tt 0 5);
+            assign_tuple(s e tt 0 5);
             let et=tu_targ(t i)
-            if et not=? tt {va_host[0].tuple(s tp et tt 6);}
+            if et not=? tt {assign_tuple(s tp et tt 6);}
         }
         i=i + 1
     }
     if va_refining[0] {
-        let r=AWord(va_host[0].tuple(s 0 t 0 7))
+        let r=AWord(assign_tuple(s 0 t 0 7))
         if r not=? 0 {return r}
     }
     va_nodes[0][s].aux=1
     i=0
     loop i <? n {
         let target=AWord(va_lists[0].ptr[AWord(va_nodes[0].ptr[lhs].list) + i])
-        if va_nodes[0].ptr[target].kind not=? 'hole' and tu_targ(t i) not=? AWord(va_nodes[0].ptr[target].type) {return va_host[0].tuple(s 0 t 0 8)}
+        if va_nodes[0].ptr[target].kind not=? 'hole' and tu_targ(t i) not=? AWord(va_nodes[0].ptr[target].type) {return assign_tuple(s 0 t 0 8)}
         i=i + 1
     }
     s
@@ -214,16 +197,16 @@ va_index=(s:AWord):>AWord=>$unsafe {
     va_nodes[0][lhs].a=int32<overflow='wrap'>(va_last[0])
     let bk=va_types[0].ptr[bt].kind
     let pos=AWord(va_nodes[0].ptr[lhs].pos)
-    if va_files[0][pos >> 40].is_dewy and (AWord(va_nodes[0].ptr[lhs].nlist) >=? 2 or bk =? 'typeval') {va_host[0].index(s bt 1);}
+    if va_files[0][pos >> 40].is_dewy and (AWord(va_nodes[0].ptr[lhs].nlist) >=? 2 or bk =? 'typeval') {assign_index(s bt 1);}
     let range=AWord(va_nodes[0].ptr[lhs].b)
     if range not=? 0 and va_nodes[0].ptr[range].kind =? 'range' {
-        if bk =? 'array' or bk =? 'fixed' {return va_host[0].index(s bt 2)}
-        if AWord(va_nodes[0].ptr[range].flags) & 32768 not=? 0 {va_host[0].index(s bt 3);}
+        if bk =? 'array' or bk =? 'fixed' {return assign_index(s bt 2)}
+        if AWord(va_nodes[0].ptr[range].flags) & 32768 not=? 0 {assign_index(s bt 3);}
     }
-    if bk =? 'struct_' {return va_host[0].index(s bt 4)}
+    if bk =? 'struct_' {return assign_index(s bt 4)}
     if (bk =? 'array' or bk =? 'fixed') and range not=? 0 {
         let rk=va_nodes[0].ptr[range].kind
-        if rk not=? 'int_lit' and rk not=? 'range' {return va_host[0].index(s bt 5)}
+        if rk not=? 'int_lit' and rk not=? 'range' {return assign_index(s bt 5)}
     }
     0
 }
@@ -236,10 +219,10 @@ va_index=(s:AWord):>AWord=>$unsafe {
 va_compound=(s:AWord lt:AWord):>AWord=>$unsafe {
     let l=tu_prune(lt)
     let lk=va_types[0].ptr[l].kind
-    if lk =? 'refined' {return va_host[0].update(s lt 0 1)}
-    if lk =? 'quantity' and va_host[0].update(s l 0 2) not=? 0 {return s}
+    if lk =? 'refined' {return assign_update(s lt 0 1)}
+    if lk =? 'quantity' and assign_update(s l 0 2) not=? 0 {return s}
     # (Dewy's integers update through their helpers)
-    if l =? va_math_int_type[0] {return va_host[0].update(s lt 0 5)}
+    if l =? va_math_int_type[0] {return assign_update(s lt 0 5)}
     # (one view of the statement until a service runs)
     let node=va_nodes[0].ptr + s
     let op=AWord(node[0].op)
@@ -248,13 +231,13 @@ va_compound=(s:AWord lt:AWord):>AWord=>$unsafe {
     let lhs=AWord(node[0].a)
     if lk =? 'str_' or lk =? 'array' or lk =? 'fixed' {
         let pluseq=op =? 48 and not broadcast
-        if lk =? 'str_' and pluseq {return va_host[0].update(s l 0 7)}
-        if pluseq and va_dewy_at(pos) {va_host[0].update(s l 0 3);}
-        return va_host[0].update(s lt 0 5)
+        if lk =? 'str_' and pluseq {return assign_update(s l 0 7)}
+        if pluseq and va_dewy_at(pos) {assign_update(s l 0 3);}
+        return assign_update(s lt 0 5)
     }
     if lk =? 'ptr' and node[0].sval =? 0 and not broadcast {
         check_expr(AWord(node[0].b) va_int_type[0]);
-        va_nodes[0][s].b=int32<overflow='wrap'>(va_host[0].coerce(va_last[0] va_int_type[0]))
+        va_nodes[0][s].b=int32<overflow='wrap'>(coerce(va_last[0] va_int_type[0]))
         va_nodes[0][s].aux=3
         return s
     }
@@ -264,23 +247,23 @@ va_compound=(s:AWord lt:AWord):>AWord=>$unsafe {
     if not helper and lk =? 'int_' {
         # (the common implementation words are exact in Dewy only)
         if l =? va_int_type[0] or l =? va_u64_type[0] {helper=va_dewy_at(pos)}
-        else {helper=va_host[0].update(s l 0 4) not=? 0}
+        else {helper=assign_update(s l 0 4) not=? 0}
     }
-    if helper {return va_host[0].update(s lt 0 5)}
+    if helper {return assign_update(s lt 0 5)}
     let shift=op =? 56 or op =? 57
     let hint=l
     if lk =? 'int_' and shift {hint=0}
-    if lk =? 'int_' and va_nodes[0].ptr[rb].kind =? 'str_lit' and va_nodes[0].ptr[rb].aux =? 0 {va_host[0].update(s l 0 6);}
+    if lk =? 'int_' and va_nodes[0].ptr[rb].kind =? 'str_lit' and va_nodes[0].ptr[rb].aux =? 0 {assign_update(s l 0 6);}
     let rt=AWord(check_expr(rb hint))
     let rk=va_types[0].ptr[tu_prune(rt)].kind
     let v=AWord(va_last[0])
     va_nodes[0][s].b=int32<overflow='wrap'>(v)
     if shift {
-        if rk not=? 'int_' {va_host[0].update(s l rt 8);}
-        if AWord(va_nodes[0].ptr[v].flags) & 256 not=? 0 {va_nodes[0][s].b=int32<overflow='wrap'>(va_host[0].coerce(v va_int_type[0]))}
+        if rk not=? 'int_' {assign_update(s l rt 8);}
+        if AWord(va_nodes[0].ptr[v].flags) & 256 not=? 0 {va_nodes[0][s].b=int32<overflow='wrap'>(coerce(v va_int_type[0]))}
     } else {
-        if lk =? 'int_' and rk =? 'float_' {va_host[0].update(s l rt 9);}
-        if not cq_settled(va_nodes va_types v l) {va_nodes[0][s].b=int32<overflow='wrap'>(va_host[0].coerce(v l))}
+        if lk =? 'int_' and rk =? 'float_' {assign_update(s l rt 9);}
+        if not cq_settled(va_nodes va_types v l) {va_nodes[0][s].b=int32<overflow='wrap'>(coerce(v l))}
     }
     s
 }
@@ -288,7 +271,7 @@ va_compound=(s:AWord lt:AWord):>AWord=>$unsafe {
 va_check=(s:AWord):>AWord=>$unsafe {
     let target=AWord(va_nodes[0].ptr[s].a)
     if va_nodes[0].ptr[target].kind =? 'ident' or va_sourced(target) {
-        let update=va_host[0].prelude(s)
+        let update=assign_prelude(s)
         if update not=? 0 {return update}
     }
     let lhs=AWord(va_nodes[0].ptr[s].a)
@@ -296,7 +279,7 @@ va_check=(s:AWord):>AWord=>$unsafe {
     let k=va_nodes[0].ptr[lhs].kind
     if k =? 'tuple' {return va_tuple(s)}
     if k =? 'field' or (k =? 'index' and (op not=? 47 or va_part(AWord(va_nodes[0].ptr[lhs].a)))) {
-        let r=va_host[0].element(s)
+        let r=assign_element(s)
         if r not=? 0 {return r}
     }
     if k =? 'index' {
@@ -317,21 +300,21 @@ va_check=(s:AWord):>AWord=>$unsafe {
     va_no_narrow_at[0]=0
     lhs=va_last[0]
     va_nodes[0][s].a=int32<overflow='wrap'>(lhs)
-    va_host[0].place(lhs)
+    assign_place(lhs)
     let pos=AWord(va_nodes[0].ptr[s].pos)
     # (dictionary selectors captured before the value, in Dewy; the variable written
     # through noted, for copies changed and never read)
     let lk=va_nodes[0].ptr[lhs].kind
-    if lk =? 'field' or lk =? 'index' {va_host[0].capture(s lhs va_dewy_at(pos))}
+    if lk =? 'field' or lk =? 'index' {assign_capture(s lhs va_dewy_at(pos))}
     if va_refining[0] {
-        lt=va_host[0].refine(s lt 1)
-        let replacement=va_host[0].refine(s lt 2)
+        lt=assign_refine(s lt 1)
+        let replacement=assign_refine(s lt 2)
         if replacement not=? 0 {return replacement}
     }
-    if lt =? va_str_type[0] and va_watch[0].text_domains >? 0 {va_host[0].refine(s lt 3);}
+    if lt =? va_str_type[0] and va_watch[0].text_domains >? 0 {assign_refine(s lt 3);}
     if lt =? va_math_int_type[0] {
         let f=pos >> 40
-        if pos >? 0 and f <? va_files[0].length and va_files[0].ptr[f].is_dewy {va_host[0].refine(s lt 4);}
+        if pos >? 0 and f <? va_files[0].length and va_files[0].ptr[f].is_dewy {assign_refine(s lt 4);}
     }
     if op =? 47 {return va_store(s lhs lt)}
     va_compound(s lt)
@@ -340,17 +323,17 @@ va_check=(s:AWord):>AWord=>$unsafe {
 va_assign=(s:AWord):>AWord=>$unsafe {
     if va_watch[0].growth >? 0 or va_decimal_cached[0] not=? 0 {
         let c=va_context[0]
-        if c >=? 0 and va_contexts[0].ptr[c].loop_depth >? 0 {va_host[0].begin(s 1);}
+        if c >=? 0 and va_contexts[0].ptr[c].loop_depth >? 0 {assign_begin(s 1);}
     }
     let saved=va_decimal_target[0]
-    if va_watch[0].decimals >? 0 {saved=va_host[0].begin(s 2)}
+    if va_watch[0].decimals >? 0 {saved=assign_begin(s 2)}
     else {va_decimal_target[0]=0}
     let literal:AWord=0
-    if va_watch[0].sibling_flow >? 0 {literal=va_host[0].begin(s 3)}
+    if va_watch[0].sibling_flow >? 0 {literal=assign_begin(s 3)}
     let mark=va_before[0].length
     let r=va_check(s)
     va_decimal_target[0]=saved
-    if va_watch[0].sibling_flow >? 0 {va_host[0].flow(r literal)}
-    if va_before[0].length >? mark {return va_host[0].wrap(s r mark)}
+    if va_watch[0].sibling_flow >? 0 {assign_flow(r literal)}
+    if va_before[0].length >? mark {return assign_wrap(s r mark)}
     r
 }

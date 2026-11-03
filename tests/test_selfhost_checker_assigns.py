@@ -3,7 +3,7 @@ import pytest
 
 from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_loops import DRIVER as LOOPS
-from tests.selfhost_expr_double import compare_leaf
+from tests.selfhost_expr_double import compare_leaf, jo_doubles
 
 STEMS = ('checker_loops', 'checker_assigns')
 DRIVER = LOOPS + r'''
@@ -95,8 +95,7 @@ da_wrap = (s: int, r: int, mark: int) -> int:
     events.push("wrap:{s}:{r}:{mark}:{da_before}")
     da_before.truncate(mark)
     node(.block)
-da_services = CheckerAssignHost(da_begin, da_prelude, da_tuple, da_element, da_index, da_place, da_capture, da_refine, da_value, da_write, da_coerce, da_update, da_flow_host, da_wrap)
-da_inputs = CheckerAssignInput(&nodes, &lists, &types, &structs, &files, &ctxs, &cx, &last, &da_refining, &da_narrows, &da_no_narrow, &da_current, &da_root, &da_before, &da_watch, &da_decimal_target, &da_cached, &da_fills, &T_STR, &T_MATH_INT, &T_INT, &T_U64, &da_services)
+da_inputs = CheckerAssignInput(&nodes, &lists, &types, &structs, &files, &ctxs, &cx, &last, &da_refining, &da_narrows, &da_no_narrow, &da_current, &da_root, &da_before, &da_watch, &da_decimal_target, &da_cached, &da_fills, &T_STR, &T_MATH_INT, &T_INT, &T_U64)
 da_bound = checker_assigns_bind(&da_inputs)
 DEWY = 1 << 40
 # target op= value (Tok.assign 47, pluseq 48)
@@ -299,11 +298,33 @@ main = ():
     print("ok")
 '''
 
+# The Jo services checker_assigns calls, routed to the driver.
+ASSIGN_JO = {
+    'check.jo': {
+        'assign_begin': 'assign_begin = (s: int, code: int) -> int: da_begin(s, code)',
+        'assign_prelude': 'assign_prelude = (s: int) -> int: da_prelude(s)',
+        'assign_tuple': 'assign_tuple = (s: int, part: int, t: int, tt: int, code: int) -> int: da_tuple(s, part, t, tt, code)',
+        'assign_element': 'assign_element = (s: int) -> int: da_element(s)',
+        'assign_index': 'assign_index = (s: int, bt: int, code: int) -> int: da_index(s, bt, code)',
+        'assign_place': 'assign_place = (lhs: int): da_place(lhs)',
+        'assign_capture': 'assign_capture = (s: int, lhs: int, dewy: bool): da_capture(s, lhs, dewy)',
+        'assign_refine': 'assign_refine = (s: int, lt: int, code: int) -> int: da_refine(s, lt, code)',
+        'assign_value': 'assign_value = (s: int, lt: int, settle: int) -> int: da_value(s, lt, settle)',
+        'assign_write': 'assign_write = (s: int, rt: int, lt: int, code: int) -> int: da_write(s, rt, lt, code)',
+        'assign_update': 'assign_update = (s: int, lt: int, other: int, code: int) -> int: da_update(s, lt, other, code)',
+        'assign_flow': 'assign_flow = (r: int, literal: int): da_flow_host(r, literal)',
+        'assign_wrap': 'assign_wrap = (s: int, r: int, mark: int) -> int: da_wrap(s, r, mark)',
+    },
+    'expr.jo': {
+        'coerce': 'coerce = (n: int, target: int) -> int: da_coerce(n, target)',
+    },
+}
+
 
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_assigns_twins(compiler, tmp_path, release):  # noqa: F811
-    assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'da_check', extra_stems=STEMS).endswith(b'ok\n')
+    assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'da_check', extra_stems=STEMS, jo_doubles=jo_doubles(ASSIGN_JO)).endswith(b'ok\n')
 
 
 # A service's error stops the assignment where Jo's did.
@@ -335,5 +356,5 @@ main = ():
     {case}
     print("unreachable")
 '''
-    output = compare_leaf(compiler, tmp_path, False, DRIVER + main, 'da_check', status=19, extra_stems=STEMS)
+    output = compare_leaf(compiler, tmp_path, False, DRIVER + main, 'da_check', status=19, extra_stems=STEMS, jo_doubles=jo_doubles(ASSIGN_JO))
     assert output.rstrip().endswith(f'error:{code}'.encode())

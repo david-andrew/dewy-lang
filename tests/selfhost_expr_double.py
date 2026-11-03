@@ -30,11 +30,22 @@ check_expr = (n: int, expected: int) -> int: dbl_host[0].check(n, expected)
 DOUBLES = {'checker_expr': {'dewy': DEWY, 'jo': JO}}
 
 
-def compare_leaf(compiler, tmp_path, release, driver, stub=None, status=0, extra_stems=()):
+def compare_leaf(compiler, tmp_path, release, driver, stub=None, status=0, extra_stems=(), jo_doubles=None):
     """compare() with checker_expr replaced by the double, bound to the driver's `stub`."""
     if stub is not None:
         head, sep, tail = driver.partition('\nmain = ():')
         assert sep, 'driver has no main'
         driver = (head + f'\ndbl_services = CheckExprDouble({stub})\n'
                   'dbl_bound = check_expr_double(&dbl_services)' + sep + tail)
-    return compare(compiler, tmp_path, release, driver, status, extra_stems, DOUBLES)
+    return compare(compiler, tmp_path, release, driver, status, extra_stems, DOUBLES, jo_doubles)
+
+
+def jo_doubles(*tables):
+    """Jo-module doubles {file: text} from {file: {name: definition}} tables; the first definition wins."""
+    merged = {}
+    for table in tables:
+        for name, functions in table.items():
+            for function, line in functions.items():
+                merged.setdefault(name, {}).setdefault(function, line)
+    return {name: "use 'driver.jo'\n" + ''.join(line + '\n' for line in functions.values())
+            for name, functions in merged.items()}

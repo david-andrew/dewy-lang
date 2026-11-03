@@ -2,16 +2,17 @@
 import pytest
 
 from tests.support import compiler  # noqa: F401
-from tests.test_selfhost_checker_assigns import DRIVER as ASSIGNS
+from tests.test_selfhost_checker_assigns import ASSIGN_JO, DRIVER as ASSIGNS
 from tests.test_selfhost_checker_conditionals import DRIVER as CONDITIONALS
 from tests.test_selfhost_checker_literals import DRIVER as LITERALS
 from tests.test_selfhost_checker_loops import DRIVER as LOOPS
 from tests.test_selfhost_checker_vardecls import DRIVER as DECLS
-from tests.selfhost_expr_double import compare_leaf
+from tests.selfhost_expr_double import compare_leaf, jo_doubles
 from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER
 
 STEMS = ('checker_loops', 'checker_vardecls', 'checker_assigns', 'checker_exprstmts', 'checker_statements',
          'checker_for_loops', 'checker_returns', 'checker_conditionals', 'checker_exact', 'checker_literals', 'checker_blocks')
+JO_DOUBLES = jo_doubles(ASSIGN_JO)
 
 
 def hosts(driver):
@@ -219,7 +220,7 @@ main = ():
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_blocks_twins(compiler, tmp_path, release):  # noqa: F811
-    assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'db_check', extra_stems=STEMS).endswith(b'ok\n')
+    assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'db_check', extra_stems=STEMS, jo_doubles=JO_DOUBLES).endswith(b'ok\n')
 
 
 @pytest.mark.parametrize('case,code', [
@@ -236,5 +237,5 @@ main = ():
     {case}
     print("unreachable")
 '''
-    output = compare_leaf(compiler, tmp_path, False, DRIVER + main, 'db_check', status=19, extra_stems=STEMS)
+    output = compare_leaf(compiler, tmp_path, False, DRIVER + main, 'db_check', status=19, extra_stems=STEMS, jo_doubles=JO_DOUBLES)
     assert output.rstrip().endswith(f':{code}'.encode())
