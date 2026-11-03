@@ -122,6 +122,16 @@ zc_special = -1
 zc_index = -1
 zc_module = -1
 zc_lib = true
+# call_by_name's Jo services answer what these say (-1: go on).
+zn_early = -1
+zn_hidden = false
+zn_array = -1
+zn_sym = -1
+zn_collect = -1
+zn_builtin = false
+zn_decls = true
+zn_fatal = false
+zn_module_sym = 0
 zc_members = 0
 zc_set = 9
 zc_marks: bool[]
@@ -130,6 +140,18 @@ zc_spread_host = (n: int): events.push("spread:{n}")
 zc_host = CheckerCallHost(zc_members_host, zc_spread_host)
 zc_input = CheckerCallInput(&lists, &locals, &zc_members, &zc_set, &zc_host, &names, &zc_marks, &zc_marks, &fns)
 zc_binding = checker_call_bind(&zc_input)
+# The call queries (intrinsic names, families) call_by_name reads.
+cq_names: int[] = [0]
+cq_set = 9
+cq_order_host = (n: int, given: int[], final: int[]): events.push("order:{n}")
+cq_overlap_host = (args: int[], mask: int, pos: int): events.push("overlap:{mask}")
+cq_float_host = (n: int): events.push("float:{n}")
+cq_float_names: int[] = [0, 0, 0, 0]
+cq_habit_host = (n: int, name: int, args: int[]): events.push("habit:{n}")
+cq_host = CheckerCallQueryHost(cq_order_host, cq_overlap_host, cq_float_host, cq_habit_host)
+cq_family: int[]
+cq_input = CheckerCallQueryInput(&nodes, &lists, &files, &cq_names, &cq_set, &fns, &cq_float_names, &cq_host, &syms, &names, &cq_family, &cq_family, &cq_family, &cq_family, &cq_family, &cq_family)
+cq_binding = checker_call_queries_bind(&cq_input)
 xe_inputs = CheckerExprInput(&nodes, &types, &files, &syms, &xe_scope, &ctxs, &cx, &xe_at, &xe_mods, &xe_found, &xe_ticks, &xe_struct, &xe_sentinel_name, &xe_temperature_on, &xe_values_on, &xe_watch_counts, &xe_checked, &T_BOOL, &T_INT, &T_U64, &T_MATH_INT, &xe_right_at)
 xe_binding = checker_expr_bind(&xe_inputs)
 sym_of = (kind: SK, ref: int) -> int:
@@ -348,8 +370,29 @@ call_value = (n: int, expected: int) -> int:
     events.push("value-call:{n}")
     xe_call_host(n, expected)
 path_literal_module = (n: int, callee: int, args: int[]) -> int: zc_module
-call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, ufcs: bool) -> int:
-    if mod_scope >= 0 or args.len() != 1: events.push("by-name:{name}:{mod_scope}:{args}")
+call_name_early = (n: int, name: int, mod_scope: int, args: int[], expected: int, ufcs: bool) -> int:
+    if mod_scope >= 0 or args.len() != 1: events.push("by-name:{name}:{mod_scope}:{args}:{ufcs}")
+    zn_early
+call_name_intrinsic = (n: int, ii: int) -> int: if zn_hidden: -2 else: ii
+take_name = 21
+relocate_name = 22
+release_name = 21
+call_name_array = (n: int, name: int, mod_scope: int, args: int[], expected: int, ufcs: bool, ii: int) -> int:
+    events.push("array:{name}:{ii}")
+    zn_array
+call_name_sym = (n: int, name: int, mod_scope: int, s: int, args: int[], expected: int, hidden_assert: bool, decls: mut int[]) -> int:
+    events.push("sym:{name}:{s}:{hidden_assert}")
+    if zn_builtin: decls.push(name)
+    zn_sym
+call_name_collect = (n: int, name: int, mod_scope: int, args: int[], expected: int, ufcs: bool, decls: mut int[]) -> int:
+    if zn_decls: decls.push(name)
+    zn_collect
+call_name_unknown = (n: int, name: int, mod_scope: int, args: int[], expected: int, ufcs: bool, ii: int, hidden_assert: bool) -> int:
+    events.push("unknown-call:{name}:{ii}:{hidden_assert}")
+    if zn_fatal: print("unknown-call:{name}"); exit(19)
+    xe_call_host(n, expected)
+resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, closure: int = 0, ufcs: bool = false) -> int:
+    if decls.len() != 1: events.push("pick:{name}:{decls}:{closure}:{ufcs}")
     xe_call_host(n, expected)
 call_int_literal = (n: int, ex: int) -> int:
     events.push("int-literal:{n}:{ex}")
@@ -375,6 +418,9 @@ values_call = (n: int, expected: int) -> int:
     events.push("values:{n}:{expected}")
     zc_values
 sink_pack_call = (n: int): events.push("pack:{n}")
+module_lookup = (m: int, name: int) -> int:
+    events.push("module-lookup:{m}:{name}")
+    zn_module_sym
 """,
               'concurrency.jo': """use 'driver.jo'
 concurrency_tasks: int[]

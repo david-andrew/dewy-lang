@@ -7,17 +7,6 @@ from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_expr import DRIVER as EXPR, JO_DOUBLES, STEMS
 
 DRIVER = EXPR + r'''
-cq_names: int[] = [0]
-cq_set = 9
-cq_order_host = (n: int, given: int[], final: int[]): events.push("order:{n}")
-cq_overlap_host = (args: int[], mask: int, pos: int): events.push("overlap:{mask}")
-cq_float_host = (n: int): events.push("float:{n}")
-cq_float_names: int[] = [0, 0, 0, 0]
-cq_habit_host = (n: int, name: int, args: int[]): events.push("habit:{n}")
-cq_host = CheckerCallQueryHost(cq_order_host, cq_overlap_host, cq_float_host, cq_habit_host)
-cq_family: int[]
-cq_input = CheckerCallQueryInput(&nodes, &lists, &files, &cq_names, &cq_set, &fns, &cq_float_names, &cq_host, &syms, &names, &cq_family, &cq_family, &cq_family, &cq_family, &cq_family, &cq_family)
-cq_binding = checker_call_queries_bind(&cq_input)
 cz_members = 0
 cz_members_host = (n: int):
     events.push("members:{n}")

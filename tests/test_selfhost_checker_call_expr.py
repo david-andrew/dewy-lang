@@ -108,6 +108,49 @@ main = ():
     zc_index = int(T_BOOL)
     show(headed(.index))
     zc_index = -1
+    # call_by_name: the library's rewrites, intrinsics (a hidden assert among them), the
+    # name's symbol, its families, then the pick or, with none, the unknown-call service.
+    zn_early = int(T_BOOL)
+    show(call(4, [done(T_INT)]))
+    show(call(4, [done(T_INT), done(T_INT)]))
+    zn_early = -1
+    # (name 4 is intrinsic 5 here)
+    cq_names = [0, 0, 0, 0, 6]
+    show(call(4, [done(T_INT)]))
+    zn_array = int(T_BOOL)
+    show(call(4, [done(T_INT)]))
+    show(call(4, []))
+    zn_array = -1
+    zn_hidden = true
+    zn_decls = false
+    show(call(4, [done(T_INT)]))
+    zn_hidden = false
+    show(call(4, [done(T_INT)]))
+    cq_names = [0]
+    zn_builtin = true
+    show(call(4, [done(T_INT)]))
+    zn_builtin = false
+    zn_decls = true
+    zc_module = 6
+    show(call(4, [done(T_INT)]))
+    zn_module_sym = sym_of(.struct_, 0)
+    show(call(4, [done(T_INT), done(T_INT)]))
+    zn_sym = int(T_BOOL)
+    show(call(4, [done(T_INT)]))
+    zn_sym = -1
+    zn_module_sym = sym_of(.fns, 0)
+    show(call(4, [done(T_INT)]))
+    show(call(4, [done(T_INT), done(T_INT)]))
+    show(call(21, [done(T_INT), done(T_INT)]))
+    show(call(22, [done(T_INT), done(T_INT), done(T_INT)]))
+    zn_module_sym = 0
+    zc_module = -1
+    zn_collect = int(T_U64)
+    show(call(4, [done(T_INT)]))
+    zn_collect = -1
+    # (a method call: no symbol, families by receiver)
+    print("ufcs:{call_by_name(call(4, [done(T_INT)]), 4, -1, [done(T_INT)], 0, true)}")
+    print("ufcs:{call_by_name(call(4, [done(T_INT)]), 4, 6, [done(T_INT), done(T_INT)], 0, true)}")
     print(events)
     print("ok")
 '''
@@ -133,3 +176,20 @@ main = ():
 '''
     output = compare(compiler, tmp_path, False, DRIVER + main, status=19, extra_stems=STEMS, jo_doubles=JO_DOUBLES)
     assert output.startswith(b'literal-error:') and b'unreachable' not in output
+
+
+@pytest.mark.parametrize('ufcs', ['false', 'true'])
+def test_checker_call_expr_unknown_name(compiler, tmp_path, ufcs):  # noqa: F811
+    # A name with no function: the unknown-call service's diagnostic, after the symbol's turn.
+    from tests.test_selfhost_checker_resolve import compare
+    main = f'''
+main = ():
+    prepare_expr()
+    zn_decls = false
+    zn_fatal = true
+    n = call(4, [done(T_INT)])
+    call_by_name(n, 4, -1, [done(T_INT)], 0, {ufcs})
+    print("unreachable")
+'''
+    output = compare(compiler, tmp_path, False, DRIVER + main, status=19, extra_stems=STEMS, jo_doubles=JO_DOUBLES)
+    assert b'unknown-call:4' in output and b'unreachable' not in output

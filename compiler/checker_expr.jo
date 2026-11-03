@@ -526,6 +526,26 @@ check_call = (n: int, expected: int) -> int:
         indexed = call_index(n, expected)
         if indexed >= 0: return indexed
     call_value(n, expected)
+call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, ufcs: bool) -> int:
+    early = call_name_early(n, name, mod_scope, args, expected, ufcs)
+    if early >= 0: return early
+    ii0 = if intrinsic_of(name) < 0: -1 else: call_name_intrinsic(n, intrinsic_of(name))
+    hidden = ii0 == -2
+    ii = if hidden: -1 else: ii0
+    if ii >= 0 and args.len() > 0:
+        arr = call_name_array(n, name, mod_scope, args, expected, ufcs, ii)
+        if arr >= 0: return arr
+    decls: int[]
+    if not ufcs:
+        s = if mod_scope >= 0: module_lookup(mod_scope, name) else: lookup(name)
+        if s != 0 and (xe_syms[0][s].kind != .fns or xe_fns_special(name, args.len())):
+            named = call_name_sym(n, name, mod_scope, s, args, expected, hidden, mut decls)
+            if named >= 0: return named
+    collected = call_name_collect(n, name, mod_scope, args, expected, ufcs, mut decls)
+    if collected >= 0: return collected
+    if decls.len() == 0: return call_name_unknown(n, name, mod_scope, args, expected, ufcs, ii, hidden)
+    resolve_fn_call(n, name, decls, args, expected, 0, ufcs)
+xe_fns_special = (name: int, count: int) -> bool: count == 1 or (count == 2 and (name == take_name or name == release_name)) or (count == 3 and name == relocate_name)
 xe_kid = (n: int, i: int) -> int: int(xe_lists[0][int(xe_nodes[0][n].list) + i])
 xe_set_kid = (n: int, i: int, v: int): xe_lists[0][int(xe_nodes[0][n].list) + i] = i32(v)
 xe_called = (n: int) -> int: if xe_nodes[0][n].aux == 0 and xe_nodes[0][n].sym > 0: int(xe_nodes[0][n].sym) else: 0

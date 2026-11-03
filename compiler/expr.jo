@@ -4123,7 +4123,10 @@ path_literal_module = (n: int, callee: int, args: int[]) -> int:
     if s == 0 or syms[s].decl == 0: return -1
     int(nodes[int(syms[s].decl)].mod)
 
-call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, ufcs: bool) -> int:
+# call_by_name's services (checker_expr.dewy runs it). Each answers a type, or -1 to go on.
+# The core library's rewrites by name: completion, searches, saturating get, Dewy arithmetic,
+# quantities and abs.
+call_name_early = (n: int, name: int, mod_scope: int, args: int[], expected: int, ufcs: bool) -> int:
     if ide_sentinel != 0 and name == ide_sentinel:
         if ufcs and args.len() > 0:
             check_expr(args[0], 0)
@@ -4176,99 +4179,106 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
             nodes[n] = Node(kind = .intrinsic, pos = nodes[n].pos, aux = i32(int(IN.fixed_abs)), type = i32(t), flags = i32(NF_CHECKED))
             set_list(n, [a])
             return exact_int_result(n)
-    ii = intrinsic_of(name)
-    # (`assert(cond)` is the implementation language's; Dewy's assertions are directives)
-    hidden_assert = ii >= 0 and intrinsics[ii].id == .assert and dewy_at(nodes[n].pos) and nodes[n].aux2 != i32(RANGE_EXHAUSTION)
-    if hidden_assert: ii = -1
-    if ii >= 0 and intrinsics[ii].arr and args.len() > 0:
-        a0 = args[0]
-        if not has_flag(a0, NF_CHECKED):
-            check_expr(a0, 0)
-            add_flag(a0, NF_CHECKED)
-        t0 = prune(ntype(a0))
-        # Raw element access cannot resize an array; retain element contracts below.
-        if intrinsics[ii].id == .arrdata and tkind(representation_type(t0)) == .array: t0 = representation_type(t0)
-        if types[t0].kind == .array or types[t0].kind == .str_:
-            # (the program's own insert(t: mut T[], k) and the like, taking that many arguments: its)
-            own: int[]
-            cm = cur_mod()
-            if (not ufcs or mod_scope < 0) and cm >= 0 and not modules[cm].is_prelude:
-                all_d: int[]
-                collect_module(cm, name, &all_d)
-                loop d in all_d:
-                    if not decl_in_prelude(d) and args_fit(d, args.len()) and takes_seq(d): own.push(d)
-            if own.len() > 0: return resolve_fn_call(n, name, own, args, expected)
+    -1
+# Intrinsic ii, or -2 for the implementation language's `assert` written in Dewy (Dewy's
+# assertions are directives). O(1).
+call_name_intrinsic = (n: int, ii: int) -> int:
+    if ii >= 0 and intrinsics[ii].id == .assert and dewy_at(nodes[n].pos) and nodes[n].aux2 != i32(RANGE_EXHAUSTION): return -2
+    ii
+# An array intrinsic ii (len, push, ...) of an array, text or fixed-size receiver.
+call_name_array = (n: int, name: int, mod_scope: int, args: int[], expected: int, ufcs: bool, ii: int) -> int:
+    if not intrinsics[ii].arr: return -1
+    a0 = args[0]
+    if not has_flag(a0, NF_CHECKED):
+        check_expr(a0, 0)
+        add_flag(a0, NF_CHECKED)
+    t0 = prune(ntype(a0))
+    # Raw element access cannot resize an array; retain element contracts below.
+    if intrinsics[ii].id == .arrdata and tkind(representation_type(t0)) == .array: t0 = representation_type(t0)
+    if types[t0].kind == .array or types[t0].kind == .str_:
+        # (the program's own insert(t: mut T[], k) and the like, taking that many arguments: its)
+        own: int[]
+        cm = cur_mod()
+        if (not ufcs or mod_scope < 0) and cm >= 0 and not modules[cm].is_prelude:
+            all_d: int[]
+            collect_module(cm, name, &all_d)
+            loop d in all_d:
+                if not decl_in_prelude(d) and args_fit(d, args.len()) and takes_seq(d): own.push(d)
+        if own.len() > 0: return resolve_fn_call(n, name, own, args, expected)
+        if ide_on: ide_builtin_ref(n, name)
+        return check_intrinsic(n, int(intrinsics[ii].id), args, expected)
+    if types[t0].kind == .fixed:
+        if intrinsics[ii].id == .arrdata: fatal(nodes[n].pos, "data() is for a growable array T[]; a fixed-size one is stored in place: `&x` is where its first element is (what C wants)")
+        if intrinsics[ii].id != .len:
+            member = name
+            if ide_dewy_alt(name) != 0: member = ide_dewy_alt(name)
+            fatal(nodes[n].pos, jd(nodes[n].pos, "{name_of(name)}() needs a growable array T[]; {dt(t0)} has a fixed size", "`.{name_of(member)}` needs a growable array (`array<T>`); {dt(t0)} has a fixed length"))
+        # Calls and indexed receivers still evaluate, even though the
+        # resulting length is statically known.
+        if nodes[a0].kind != .ident: return check_intrinsic(n, int(IN.len), args, expected)
+        # (the size is part of the type)
+        nodes[n] = Node(kind = .int_lit, pos = nodes[n].pos, ival = fixed_len(t0), type = i32(T_INT), flags = i32(NF_CHECKED))
+        return T_INT
+    -1
+# The name's symbol s when it is not a function family: a variable holding a function, a
+# constructor, a conversion, the library's take/relocate/release; a builtin's functions
+# are collected into decls. -1 to go on to the families.
+call_name_sym = (n: int, name: int, mod_scope: int, s: int, args: int[], expected: int, hidden_assert: bool, decls: mut int[]) -> int:
+    sk = syms[s].kind
+    if ide_on and (sk == .struct_ or sk == .type_ or sk == .enum_) and nodes[n].a != 0: ide_sym_ref(int(nodes[n].a), s)
+    if sk == .local or sk == .global:
+        vt = 0
+        if sk == .local: vt = int(locals[int(syms[s].ref)].type)
+        else:
+            ensure_global(int(syms[s].ref), nodes[n].pos)
+            vt = int(globals[int(syms[s].ref)].type)
+        if tkind(vt) == .fn_ or tkind(vt) == .cfn or tkind(vt) == .polyfn or tkind(vt) == .callable:
+            callee = mk(.ident, nodes[n].pos)
+            nodes[callee].name = i32(name)
+            callee_at = callee
+            if mod_scope >= 0:
+                check_expr_in_module(callee, mod_scope)
+            else: check_expr(callee, 0)
+            return value_call(n, callee, args, expected)
+    else if sk == .struct_: return struct_ctor(n, 0, int(syms[s].ref), args, expected)
+    else if sk == .enum_:
+        ed = int(syms[s].ref)
+        if nkids2(ed) == 0 and args.len() == 1 and nodes[args[0]].kind != .namedarg:
+            et = get_struct_inst(ed, [])
+            if simple_enum(et): return enum_from_int(n, et, args[0])
+        fatal(nodes[n].pos, "use {name_of(name)}.variant(...) to construct an enum")
+    # (Phase(2) in Sloppy, Phase a Dewy union of string literals: its member at that
+    # position, as for a Sloppy enum, so Sloppy code takes a Dewy enumeration as its own)
+    else if sk == .alias_ and not dewy_at(nodes[n].pos) and nkids2(int(syms[s].ref)) == 0 and args.len() == 1 and nodes[args[0]].kind != .namedarg and str_set_of(resolve_alias(int(syms[s].ref), [], nodes[n].pos)) != 0:
+        return enum_from_int(n, prune(resolve_alias(int(syms[s].ref), [], nodes[n].pos)), args[0])
+    else if sk == .type_:
+        jo_type_spelling(name, s, nodes[n].pos)
+        return conversion(n, int(syms[s].ref), args)
+    else if sk == .fns and args.len() == 1 and nodes[args[0]].kind != .namedarg and universe.get(name) != none:
+        # (str(5) beside the program's str = (b: Big) -> str: the type's conversion, when
+        # no function of the name takes the value)
+        at = prune(check_expr(args[0], 0))
+        add_flag(args[0], NF_CHECKED)
+        fd: int[]
+        collect_fns(name, &fd)
+        takes = false
+        loop d in fd:
+            sig = fn_sig(d)
+            if sig.params.len() >= 1 and (sig.generic or can_coerce(args[0], at, sig.params[0])): takes = true
+        if not takes: return conversion(n, int(syms[universe[name]].ref), args)
+    else if sk == .fns and args.len() == 2 and name == take_name and (prelude.get(name) ?? 0) == s and pos_in_lib(nodes[n].pos): return take_call(n, args)
+    else if sk == .fns and args.len() == 3 and name == relocate_name and (prelude.get(name) ?? 0) == s and pos_in_lib(nodes[n].pos): return relocate_call(n, args)
+    else if sk == .fns and args.len() == 2 and name == release_name and (prelude.get(name) ?? 0) == s and pos_in_lib(nodes[n].pos): return release_call(n, args, expected)
+    else if sk == .const_ or sk == .module: fatal(nodes[n].pos, "'{name_of(name)}' is not a function")
+    else if sk == .builtin and not hidden_assert:
+        collect_fns(name, &decls)
+        if decls.len() == 0:
             if ide_on: ide_builtin_ref(n, name)
-            return check_intrinsic(n, int(intrinsics[ii].id), args, expected)
-        if types[t0].kind == .fixed:
-            if intrinsics[ii].id == .arrdata: fatal(nodes[n].pos, "data() is for a growable array T[]; a fixed-size one is stored in place: `&x` is where its first element is (what C wants)")
-            if intrinsics[ii].id != .len:
-                member = name
-                if ide_dewy_alt(name) != 0: member = ide_dewy_alt(name)
-                fatal(nodes[n].pos, jd(nodes[n].pos, "{name_of(name)}() needs a growable array T[]; {dt(t0)} has a fixed size", "`.{name_of(member)}` needs a growable array (`array<T>`); {dt(t0)} has a fixed length"))
-            # Calls and indexed receivers still evaluate, even though the
-            # resulting length is statically known.
-            if nodes[a0].kind != .ident: return check_intrinsic(n, int(IN.len), args, expected)
-            # (the size is part of the type)
-            nodes[n] = Node(kind = .int_lit, pos = nodes[n].pos, ival = fixed_len(t0), type = i32(T_INT), flags = i32(NF_CHECKED))
-            return T_INT
-    decls: int[]
-    if not ufcs:
-        s = 0
-        if mod_scope >= 0: s = module_lookup(mod_scope, name)
-        else: s = lookup(name)
-        if s != 0:
-            sk = syms[s].kind
-            if ide_on and (sk == .struct_ or sk == .type_ or sk == .enum_) and nodes[n].a != 0: ide_sym_ref(int(nodes[n].a), s)
-            if sk == .local or sk == .global:
-                vt = 0
-                if sk == .local: vt = int(locals[int(syms[s].ref)].type)
-                else:
-                    ensure_global(int(syms[s].ref), nodes[n].pos)
-                    vt = int(globals[int(syms[s].ref)].type)
-                if tkind(vt) == .fn_ or tkind(vt) == .cfn or tkind(vt) == .polyfn or tkind(vt) == .callable:
-                    callee = mk(.ident, nodes[n].pos)
-                    nodes[callee].name = i32(name)
-                    callee_at = callee
-                    if mod_scope >= 0:
-                        check_expr_in_module(callee, mod_scope)
-                    else: check_expr(callee, 0)
-                    return value_call(n, callee, args, expected)
-            else if sk == .struct_: return struct_ctor(n, 0, int(syms[s].ref), args, expected)
-            else if sk == .enum_:
-                ed = int(syms[s].ref)
-                if nkids2(ed) == 0 and args.len() == 1 and nodes[args[0]].kind != .namedarg:
-                    et = get_struct_inst(ed, [])
-                    if simple_enum(et): return enum_from_int(n, et, args[0])
-                fatal(nodes[n].pos, "use {name_of(name)}.variant(...) to construct an enum")
-            # (Phase(2) in Sloppy, Phase a Dewy union of string literals: its member at that
-            # position, as for a Sloppy enum, so Sloppy code takes a Dewy enumeration as its own)
-            else if sk == .alias_ and not dewy_at(nodes[n].pos) and nkids2(int(syms[s].ref)) == 0 and args.len() == 1 and nodes[args[0]].kind != .namedarg and str_set_of(resolve_alias(int(syms[s].ref), [], nodes[n].pos)) != 0:
-                return enum_from_int(n, prune(resolve_alias(int(syms[s].ref), [], nodes[n].pos)), args[0])
-            else if sk == .type_:
-                jo_type_spelling(name, s, nodes[n].pos)
-                return conversion(n, int(syms[s].ref), args)
-            else if sk == .fns and args.len() == 1 and nodes[args[0]].kind != .namedarg and universe.get(name) != none:
-                # (str(5) beside the program's str = (b: Big) -> str: the type's conversion, when
-                # no function of the name takes the value)
-                at = prune(check_expr(args[0], 0))
-                add_flag(args[0], NF_CHECKED)
-                fd: int[]
-                collect_fns(name, &fd)
-                takes = false
-                loop d in fd:
-                    sig = fn_sig(d)
-                    if sig.params.len() >= 1 and (sig.generic or can_coerce(args[0], at, sig.params[0])): takes = true
-                if not takes: return conversion(n, int(syms[universe[name]].ref), args)
-            else if sk == .fns and args.len() == 2 and name == take_name and (prelude.get(name) ?? 0) == s and pos_in_lib(nodes[n].pos): return take_call(n, args)
-            else if sk == .fns and args.len() == 3 and name == relocate_name and (prelude.get(name) ?? 0) == s and pos_in_lib(nodes[n].pos): return relocate_call(n, args)
-            else if sk == .fns and args.len() == 2 and name == release_name and (prelude.get(name) ?? 0) == s and pos_in_lib(nodes[n].pos): return release_call(n, args, expected)
-            else if sk == .const_ or sk == .module: fatal(nodes[n].pos, "'{name_of(name)}' is not a function")
-            else if sk == .builtin and not hidden_assert:
-                collect_fns(name, &decls)
-                if decls.len() == 0:
-                    if ide_on: ide_builtin_ref(n, name)
-                    return check_intrinsic(n, int(syms[s].ref), args, expected)
+            return check_intrinsic(n, int(syms[s].ref), args, expected)
+    -1
+# The families a name calls: a method's receiver modules, index operators' protocols, and
+# Dewy's to_int parsers; hidden Dewy names are reported. -1 to go on and pick from decls.
+call_name_collect = (n: int, name: int, mod_scope: int, args: int[], expected: int, ufcs: bool, decls: mut int[]) -> int:
     surface_hidden.clear()
     if ufcs:
         if mod_scope >= 0: collect_module(mod_scope, name, &decls)
@@ -4304,98 +4314,100 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
             else: collect_fns(protocol, &decls)
             if tm >= 0: collect_module(tm, protocol, &decls)
     if surface_hidden.len() > 0: dewy_surface_check(n, name)
-    if decls.len() == 0:
-        if ii >= 0 and not intrinsics[ii].arr:
-            if ide_on: ide_builtin_ref(n, name)
-            return check_intrinsic(n, int(intrinsics[ii].id), args, expected)
-        if ii >= 0 and intrinsics[ii].arr and args.len() > 0: fatal(nodes[n].pos, "'{name_of(name)}' expects an array or string, found {dt(ntype(args[0]))}")
-        if ufcs:
-            t0 = prune(ntype(args[0]))
-            # (step.1() for a tuple whose element 1 is a function: that element, called)
-            nm0 = name_of(name)
-            if types[t0].kind == .tuple and len(nm0) > 0 and is_digit(nm0[0]):
-                if let k = to_int(nm0):
-                    if k < int(types[t0].nargs) and tkind(targ(t0, k)) == .fn_:
-                        el = mk(.field, nodes[n].pos)
-                        nodes[el].a = i32(args[0])
-                        nodes[el].aux = -2
-                        nodes[el].ival = k
-                        check_expr(el, 0)
-                        add_flag(el, NF_CHECKED)
-                        return value_call(n, el, args[1..])
-            cands = fn_names_for(t0)
-            if types[t0].kind == .struct_:
-                si = int(types[t0].st)
-                loop i in [0..int(structs[si].nfields)): cands.push(int(fields[int(structs[si].fields) + i].name))
-            if is_map_type(t0) and len(map_habit_name(name_of(name))) > 0: fatal(nodes[n].pos, "no field or function '{name_of(name)}' for type {dt(t0)} (use {map_habit_name(name_of(name))})")
-            # (m.groups(): a field, called as a method)
-            if types[t0].kind == .struct_:
-                si = int(types[t0].st)
-                loop i in [0..int(structs[si].nfields)):
-                    if int(fields[int(structs[si].fields) + i].name) == name: fatal(nodes[n].pos, "'{name_of(name)}' is a field, not a function: `x.{name_of(name)}`, without ()")
-            never_cascade(nodes[n].pos, t0)
-            tsh = dt(ntype(args[0]))
-            # (xs = [] with nothing in it yet: its type is not known, and its name for it means nothing)
-            if has_var(prune(ntype(args[0]))):
-                tsh = "this value (its type is not known yet)"
-                if types[t0].kind == .array: tsh = "an array"
-                fatal(nodes[n].pos, "no field or function '{name_of(name)}' for {tsh}{suggestion(name_of(name), surface_names(cands, nodes[n].pos), t0)}")
-            fatal(nodes[n].pos, "no field or function '{name_of(name)}' for type {tsh}{suggestion(name_of(name), surface_names(cands, nodes[n].pos), t0)}")
-        # a variable of the same name hides the function or type (m.x(...): m's x)
-        qualified = mod_scope >= 0 and not ufcs
-        hs = if qualified: module_lookup(mod_scope, name) else: lookup(name)
-        if hs != 0 and syms[hs].kind == .local:
-            if starts_with(name_of(name), "$index_end"): fatal(nodes[n].pos, "end is the last index inside brackets; it cannot be called")
-            fatal(nodes[n].pos, "'{name_of(name)}' is a variable of type {dt(int(locals[int(syms[hs].ref)].type))} here (it hides the function or type of that name){juxt_string_call_hint(n)}; rename the variable")
-        if hs != 0 and syms[hs].kind == .global:
-            g = int(syms[hs].ref)
-            ensure_global(g, nodes[n].pos)
-            fatal(nodes[n].pos, "'{name_of(name)}' is a variable of type {dt(int(globals[g].type))}, not a function{juxt_string_call_hint(n)}")
-        # (m.Reading(n): the alias as its module has it)
-        ts = hs
-        # (Msg(Move(3)), Msg a union: its members are Msgs as they are)
-        if ts != 0 and syms[ts].kind == .alias_ and nkids2(int(syms[ts].ref)) == 0:
-            at = resolve_alias(int(syms[ts].ref), [], nodes[n].pos)
-            if is_int(at): return conversion(n, at, args)
-            # (Reading(n), Reading a refined alias: the conversion `n as Reading`, its
-            # refinement an obligation; Color('red'), Color a union of string literals:
-            # likewise `'red' as Color`)
-            if (tkind(at) == .refined or str_set_of(at) != 0) and dewy_at(nodes[n].pos) and args.len() == 1 and nodes[args[0]].kind != .namedarg:
-                target = mk(.tname, nodes[n].pos)
-                nodes[target].name = i32(name)
-                if qualified and lookup(name) != ts:
-                    nodes[target].aux = -7
-                    nodes[target].ival = nominal_family(at)
-                nodes[n] = Node(kind = .cast, pos = nodes[n].pos, a = i32(args[0]), b = i32(target))
-                return check_expr(n, expected)
-            if is_union(at):
-                ms: str[]
-                loop m in union_members(at): ms.push(dt(m))
-                un = name_of(name)
-                fatal(nodes[n].pos, "'{un}' is a union ({join(ms, " | ")}): a {ms[0]} is a {un} as it is, with nothing around it: {jd(nodes[n].pos, "`m: {un} = {ms[0]}(...)`", "`let m:{un} = {ms[0]}[...]`")}")
-        if hidden_assert: fatal(nodes[n].pos, "unknown function 'assert' (assertions are directives: `$assert condition` must be proven while compiling, `$runtime_assert condition` checks while running, and `$expect condition` states what a `$test` checks)")
-        all = visible_names()
-        loop it in intrinsics:
-            if it.id != .assert or not dewy_at(nodes[n].pos): all.push(intern(it.name))
-        # (physics3d.world(): the names of that module, World among them)
-        if mod_scope >= 0 and not ufcs and not modules[mod_scope].is_prelude:
-            all = []
-            loop k, v in modules[mod_scope].names: all.push(k)
-        # (import net, then tcp_connect(...): the module's, written with its name; not a
-        # name this file sees, nor one of the module it is written with)
-        if ts == 0:
-            loop mi in [0..modules.len()):
-                if modules[mi].is_prelude or mi == mod_scope or mi == cur_mod() or modules[mi].names.get(name) == none: continue
-                mn = name_of(int(modules[mi].name))
-                ms = lookup(intern(mn))
-                if ms != 0 and syms[ms].kind == .module and int(syms[ms].ref) == mi: fatal(nodes[n].pos, "unknown function '{name_of(name)}' (it is {mn}'s: `{mn}.{name_of(name)}(...)`)")
-            uh = unused_file_hint(name)
-            if len(uh) > 0: fatal(nodes[n].pos, "unknown function '{name_of(name)}'{uh}")
-        # (Python's f-strings: f"hello {name}")
-        if name_of(name) == "f" and not ufcs and args.len() == 1 and nodes[args[0]].kind == .str_lit and dewy_at(nodes[n].pos):
-            fatal(nodes[n].pos, "unknown function 'f' (drop the f: every string interpolates, as in `\"hello \{name}\"`)")
-        fatal(nodes[n].pos, "unknown function '{name_of(name)}'{private_hint(name)}{suggestion(name_of(name), surface_names(all, nodes[n].pos))}")
-    resolve_fn_call(n, name, decls, args, expected, 0, ufcs)
+    -1
+# No function of the name: an intrinsic, else the diagnostics. Never returns otherwise.
+call_name_unknown = (n: int, name: int, mod_scope: int, args: int[], expected: int, ufcs: bool, ii: int, hidden_assert: bool) -> int:
+    if ii >= 0 and not intrinsics[ii].arr:
+        if ide_on: ide_builtin_ref(n, name)
+        return check_intrinsic(n, int(intrinsics[ii].id), args, expected)
+    if ii >= 0 and intrinsics[ii].arr and args.len() > 0: fatal(nodes[n].pos, "'{name_of(name)}' expects an array or string, found {dt(ntype(args[0]))}")
+    if ufcs:
+        t0 = prune(ntype(args[0]))
+        # (step.1() for a tuple whose element 1 is a function: that element, called)
+        nm0 = name_of(name)
+        if types[t0].kind == .tuple and len(nm0) > 0 and is_digit(nm0[0]):
+            if let k = to_int(nm0):
+                if k < int(types[t0].nargs) and tkind(targ(t0, k)) == .fn_:
+                    el = mk(.field, nodes[n].pos)
+                    nodes[el].a = i32(args[0])
+                    nodes[el].aux = -2
+                    nodes[el].ival = k
+                    check_expr(el, 0)
+                    add_flag(el, NF_CHECKED)
+                    return value_call(n, el, args[1..])
+        cands = fn_names_for(t0)
+        if types[t0].kind == .struct_:
+            si = int(types[t0].st)
+            loop i in [0..int(structs[si].nfields)): cands.push(int(fields[int(structs[si].fields) + i].name))
+        if is_map_type(t0) and len(map_habit_name(name_of(name))) > 0: fatal(nodes[n].pos, "no field or function '{name_of(name)}' for type {dt(t0)} (use {map_habit_name(name_of(name))})")
+        # (m.groups(): a field, called as a method)
+        if types[t0].kind == .struct_:
+            si = int(types[t0].st)
+            loop i in [0..int(structs[si].nfields)):
+                if int(fields[int(structs[si].fields) + i].name) == name: fatal(nodes[n].pos, "'{name_of(name)}' is a field, not a function: `x.{name_of(name)}`, without ()")
+        never_cascade(nodes[n].pos, t0)
+        tsh = dt(ntype(args[0]))
+        # (xs = [] with nothing in it yet: its type is not known, and its name for it means nothing)
+        if has_var(prune(ntype(args[0]))):
+            tsh = "this value (its type is not known yet)"
+            if types[t0].kind == .array: tsh = "an array"
+            fatal(nodes[n].pos, "no field or function '{name_of(name)}' for {tsh}{suggestion(name_of(name), surface_names(cands, nodes[n].pos), t0)}")
+        fatal(nodes[n].pos, "no field or function '{name_of(name)}' for type {tsh}{suggestion(name_of(name), surface_names(cands, nodes[n].pos), t0)}")
+    # a variable of the same name hides the function or type (m.x(...): m's x)
+    qualified = mod_scope >= 0 and not ufcs
+    hs = if qualified: module_lookup(mod_scope, name) else: lookup(name)
+    if hs != 0 and syms[hs].kind == .local:
+        if starts_with(name_of(name), "$index_end"): fatal(nodes[n].pos, "end is the last index inside brackets; it cannot be called")
+        fatal(nodes[n].pos, "'{name_of(name)}' is a variable of type {dt(int(locals[int(syms[hs].ref)].type))} here (it hides the function or type of that name){juxt_string_call_hint(n)}; rename the variable")
+    if hs != 0 and syms[hs].kind == .global:
+        g = int(syms[hs].ref)
+        ensure_global(g, nodes[n].pos)
+        fatal(nodes[n].pos, "'{name_of(name)}' is a variable of type {dt(int(globals[g].type))}, not a function{juxt_string_call_hint(n)}")
+    # (m.Reading(n): the alias as its module has it)
+    ts = hs
+    # (Msg(Move(3)), Msg a union: its members are Msgs as they are)
+    if ts != 0 and syms[ts].kind == .alias_ and nkids2(int(syms[ts].ref)) == 0:
+        at = resolve_alias(int(syms[ts].ref), [], nodes[n].pos)
+        if is_int(at): return conversion(n, at, args)
+        # (Reading(n), Reading a refined alias: the conversion `n as Reading`, its
+        # refinement an obligation; Color('red'), Color a union of string literals:
+        # likewise `'red' as Color`)
+        if (tkind(at) == .refined or str_set_of(at) != 0) and dewy_at(nodes[n].pos) and args.len() == 1 and nodes[args[0]].kind != .namedarg:
+            target = mk(.tname, nodes[n].pos)
+            nodes[target].name = i32(name)
+            if qualified and lookup(name) != ts:
+                nodes[target].aux = -7
+                nodes[target].ival = nominal_family(at)
+            nodes[n] = Node(kind = .cast, pos = nodes[n].pos, a = i32(args[0]), b = i32(target))
+            return check_expr(n, expected)
+        if is_union(at):
+            ms: str[]
+            loop m in union_members(at): ms.push(dt(m))
+            un = name_of(name)
+            fatal(nodes[n].pos, "'{un}' is a union ({join(ms, " | ")}): a {ms[0]} is a {un} as it is, with nothing around it: {jd(nodes[n].pos, "`m: {un} = {ms[0]}(...)`", "`let m:{un} = {ms[0]}[...]`")}")
+    if hidden_assert: fatal(nodes[n].pos, "unknown function 'assert' (assertions are directives: `$assert condition` must be proven while compiling, `$runtime_assert condition` checks while running, and `$expect condition` states what a `$test` checks)")
+    all = visible_names()
+    loop it in intrinsics:
+        if it.id != .assert or not dewy_at(nodes[n].pos): all.push(intern(it.name))
+    # (physics3d.world(): the names of that module, World among them)
+    if mod_scope >= 0 and not ufcs and not modules[mod_scope].is_prelude:
+        all = []
+        loop k, v in modules[mod_scope].names: all.push(k)
+    # (import net, then tcp_connect(...): the module's, written with its name; not a
+    # name this file sees, nor one of the module it is written with)
+    if ts == 0:
+        loop mi in [0..modules.len()):
+            if modules[mi].is_prelude or mi == mod_scope or mi == cur_mod() or modules[mi].names.get(name) == none: continue
+            mn = name_of(int(modules[mi].name))
+            ms = lookup(intern(mn))
+            if ms != 0 and syms[ms].kind == .module and int(syms[ms].ref) == mi: fatal(nodes[n].pos, "unknown function '{name_of(name)}' (it is {mn}'s: `{mn}.{name_of(name)}(...)`)")
+        uh = unused_file_hint(name)
+        if len(uh) > 0: fatal(nodes[n].pos, "unknown function '{name_of(name)}'{uh}")
+    # (Python's f-strings: f"hello {name}")
+    if name_of(name) == "f" and not ufcs and args.len() == 1 and nodes[args[0]].kind == .str_lit and dewy_at(nodes[n].pos):
+        fatal(nodes[n].pos, "unknown function 'f' (drop the f: every string interpolates, as in `\"hello \{name}\"`)")
+    fatal(nodes[n].pos, "unknown function '{name_of(name)}'{private_hint(name)}{suggestion(name_of(name), surface_names(all, nodes[n].pos))}")
+    -1
 
 id_rgb = intern("rgb")
 id_rgba = intern("rgba")

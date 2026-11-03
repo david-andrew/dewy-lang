@@ -23,10 +23,10 @@ from p"checker_in_range.dewy" import xy_check
 from p"checker_numeric.dewy" import xw_numeric
 from p"checker_exact.dewy" import (exact_potential exact_math_operand)
 from p"checker_coerce.dewy" import cq_settled
-from p"checker_call_queries.dewy" import (ctx_dependent map_float_key habit_call_check)
-from p"expr.jo" import (expr_complete ident_unknown expr_module expr_values_use check_dotted binary_juxt binary_char_code binary_membership binary_quantity_hint binary_decimal dewy_set_literal binary_context binary_nd_hint binary_secret binary_rest expr_sibling call_int_literal call_map_rows is_nd is_unchecked_at dewy_partial dewy_data_after_give call_head call_typeapply call_ident_special call_dotname call_member call_index call_value path_literal_module call_by_name expr_literal expr_other arg_finish_rest)
+from p"checker_call_queries.dewy" import (ctx_dependent map_float_key habit_call_check intrinsic_of)
+from p"expr.jo" import (expr_complete ident_unknown expr_module expr_values_use check_dotted binary_juxt binary_char_code binary_membership binary_quantity_hint binary_decimal dewy_set_literal binary_context binary_nd_hint binary_secret binary_rest expr_sibling call_int_literal call_map_rows is_nd is_unchecked_at dewy_partial dewy_data_after_give call_head call_typeapply call_ident_special call_dotname call_member call_index call_value path_literal_module call_name_early call_name_intrinsic call_name_array call_name_sym call_name_collect call_name_unknown resolve_fn_call take_name relocate_name release_name expr_literal expr_other arg_finish_rest)
 from p"temperature_kinds.jo" import temperature_read
-from p"check.jo" import (values_call sink_pack_call)
+from p"check.jo" import (values_call sink_pack_call module_lookup)
 from p"concurrency.jo" import (concurrency_tasks concurrency_runtime_needed concurrency_calls concurrency_atomic_call)
 from p"juxtapose.jo" import (juxt_head_numeric juxt_factor)
 from p"parallel_lower.jo" import parallel_prepare
@@ -705,6 +705,38 @@ check_call=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
     }
     call_value(n expected)
 }
+# A call by name, from module mod_scope when it is one (else as the file sees the name), or
+# a method's when ufcs: the core library's rewrites, array intrinsics, the name's symbol
+# when it is not a function family (variables, constructors, conversions, builtins), then
+# its families and the overload picked from them; no function of the name is an intrinsic
+# or a diagnostic. The steps are services; O(1) here plus theirs.
+call_by_name=(n:XEWord name:XEWord mod_scope:XEWord args:array<int64> expected:XEWord ufcs:bool):>XEWord=>$unsafe {
+    let early=call_name_early(n name mod_scope args expected ufcs)
+    if early >=? 0 {return early}
+    let ii0=if intrinsic_of(name) <? 0 {-1} else {call_name_intrinsic(n intrinsic_of(name))}
+    let hidden=ii0 =? -2
+    let ii:XEWord=if hidden {-1} else {ii0}
+    if ii >=? 0 and args.length >? 0 {
+        let arr=call_name_array(n name mod_scope args expected ufcs ii)
+        if arr >=? 0 {return arr}
+    }
+    let decls:array<int64>=[]
+    if not ufcs {
+        let s=if mod_scope >=? 0 {module_lookup(mod_scope name)} else {lookup(name)}
+        # (a function family's symbol matters only for a type's conversion of one argument
+        # and the library's take, release and relocate)
+        if s not=? 0 and (xe_syms[0].ptr[s].kind not=? 'fns' or xe_fns_special(name args.length)) {
+            let named=call_name_sym(n name mod_scope s args expected hidden @decls)
+            if named >=? 0 {return named}
+        }
+    }
+    let collected=call_name_collect(n name mod_scope args expected ufcs @decls)
+    if collected >=? 0 {return collected}
+    if decls.length =? 0 {return call_name_unknown(n name mod_scope args expected ufcs ii hidden)}
+    resolve_fn_call(n name decls args expected 0 ufcs)
+}
+# Could a function family's symbol answer a call of count arguments (call_name_sym's kinds)?
+xe_fns_special=(name:XEWord count:XEWord):>bool=>$unsafe {count =? 1 or (count =? 2 and (name =? take_name or name =? release_name)) or (count =? 3 and name =? relocate_name)}
 xe_kid=(n:XEWord i:XEWord):>XEWord=>$unsafe {XEWord(xe_lists[0].ptr[XEWord(xe_nodes[0].ptr[n].list) + i])}
 xe_set_kid=(n:XEWord i:XEWord v:XEWord):>void=>$unsafe {xe_lists[0][XEWord(xe_nodes[0].ptr[n].list) + i]=int32<overflow='wrap'>(v)}
 # The function a call resolved to by name (aux 0), else 0.
