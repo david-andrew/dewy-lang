@@ -4,7 +4,7 @@ leaf, so its arguments are checked by the real dispatcher (unchecked names are l
 import pytest
 
 from tests.support import compiler  # noqa: F401
-from tests.test_selfhost_checker_expr import DRIVER as EXPR, STEMS
+from tests.test_selfhost_checker_expr import DRIVER as EXPR, JO_DOUBLES, STEMS
 from tests.test_selfhost_checker_resolve import compare
 
 DRIVER = EXPR + r'''
@@ -122,7 +122,7 @@ main = ():
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_intrinsics_twins(compiler, tmp_path, release):  # noqa: F811
-    out = compare(compiler, tmp_path, release, DRIVER + MAIN, extra_stems=STEMS)
+    out = compare(compiler, tmp_path, release, DRIVER + MAIN, extra_stems=STEMS, jo_doubles=JO_DOUBLES)
     assert out.endswith(b'ok\n') and b'length:' in out and b'rest:' in out and b'mutation:' in out
 
 
@@ -157,6 +157,6 @@ main = ():
     {case}
     print("unreachable")
 '''
-    output = compare(compiler, tmp_path, False, DRIVER + main, status=19, extra_stems=STEMS)
+    output = compare(compiler, tmp_path, False, DRIVER + main, status=19, extra_stems=STEMS, jo_doubles=JO_DOUBLES)
     last = output.rstrip().split(b'\n')[-1]
     assert last.endswith(expect.split('}')[-1].encode()) and b'unreachable' not in output

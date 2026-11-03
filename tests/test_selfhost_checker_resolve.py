@@ -180,8 +180,9 @@ main = ():
 '''
 
 
-def compare(compiler, tmp_path, release, driver, status=0, extra_stems=(), doubles=None):
-    # doubles: {stem: {extension: text}}, modules standing in for compiler ones.
+def compare(compiler, tmp_path, release, driver, status=0, extra_stems=(), doubles=None, jo_doubles=None):
+    # doubles: {stem: {extension: text}}, modules standing in for compiler ones; jo_doubles:
+    # {file: text}, Jo modules a Dewy module imports by file name, in both builds.
     outputs = []
     doubles = doubles or {}
     stems = ('node_store', 'source_types', 'checker_types', 'checker_state', 'checker_tokens',
@@ -199,6 +200,8 @@ def compare(compiler, tmp_path, release, driver, status=0, extra_stems=(), doubl
             if extension == 'jo':
                 text = text.replace(".dewy'", ".jo'")
             (directory / f'{stem}.{extension}').write_text(text)
+        for name, text in (jo_doubles or {}).items():
+            (directory / name).write_text(text)
         source, binary = directory / 'driver.jo', directory / 'driver'
         source.write_text(''.join(f"use '{s}.{extension}'\n" for s in stems) + driver)
         built = subprocess.run([compiler, 'build', source, '-o', binary,

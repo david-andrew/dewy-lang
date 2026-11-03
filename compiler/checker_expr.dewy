@@ -24,6 +24,8 @@ from p"checker_numeric.dewy" import xw_numeric
 from p"checker_exact.dewy" import (exact_potential exact_math_operand)
 from p"checker_coerce.dewy" import cq_settled
 from p"checker_call_queries.dewy" import ctx_dependent
+from p"expr.jo" import (expr_complete ident_unknown expr_module expr_values_use check_dotted binary_juxt binary_char_code binary_membership binary_quantity_hint binary_decimal dewy_set_literal binary_context binary_nd_hint binary_secret binary_rest check_call_expr expr_sibling expr_literal expr_other arg_finish_rest)
+from p"temperature_kinds.jo" import temperature_read
 # The expression dispatcher: an already checked node, then each kind sent to its
 # leaf. A name is looked up here (the scope stack, then the module lookup cache);
 # only a cache miss asks the host. A binary operator's operands are checked here and
@@ -34,29 +36,6 @@ from p"checker_call_queries.dewy" import ctx_dependent
 # reach it through their host records. O(1) per node plus its kind's checking; host
 # calls may grow every arena, so nodes are reread by ID.
 XEWord:type=int64<overflow='wrap'>
-CheckerExprHost:type=[
-    complete:<():>void>
-    unknown:<(node:int64 expected:int64 name:int64):>void>
-    module:<(module:int64 name:int64):>int64>
-    temperature:<(node:int64 type_id:int64):>int64>
-    values_use:<(node:int64 type_id:int64):>void>
-    dotted:<(node:int64 expected:int64):>int64>
-    juxt:<(node:int64):>void>
-    char_code:<(node:int64):>void>
-    membership:<(node:int64 expected:int64):>int64>
-    quantity_hint:<(type_id:int64):>int64>
-    decimal:<(node:int64):>void>
-    set_literal:<(node:int64):>bool>
-    literal_context:<(node:int64 type_id:int64 op:int64):>bool>
-    nd_hint:<(node:int64 type_id:int64 hint:int64):>int64>
-    secret:<(node:int64 a:int64 b:int64):>int64>
-    binary_rest:<(node:int64 expected:int64 a:int64 b:int64 ta:int64 tb:int64 hint:int64 flags:int64):>int64>
-    call:<(node:int64 expected:int64):>int64>
-    sibling:<(node:int64 type_id:int64):>int64>
-    literal:<(node:int64 expected:int64 ex:int64):>int64>
-    other:<(node:int64 expected:int64):>int64>
-    arg:<(node:int64 type_id:int64 mutable:bool):>void>
-]
 CheckerExprInput:type=[
     nodes:ptr<array<Node>>
     types:ptr<array<TypeInfo>>
@@ -80,7 +59,6 @@ CheckerExprInput:type=[
     u64_type:ptr<int64>
     math_int:ptr<int64>
     quantity_right:ptr<int64>
-    host:ptr<CheckerExprHost>
 ]
 let xe_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
 let xe_types:ptr<array<TypeInfo>>=$unsafe (uint64(0) as ptr<array<TypeInfo>>)
@@ -104,7 +82,6 @@ let xe_int_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let xe_u64_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let xe_math_int:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let xe_quantity_right:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
-let xe_host:ptr<CheckerExprHost>=$unsafe (uint64(0) as ptr<CheckerExprHost>)
 checker_expr_bind=(input:ptr<CheckerExprInput>):>XEWord=>$unsafe {
     xe_nodes=input[0].nodes
     xe_types=input[0].types
@@ -128,7 +105,6 @@ checker_expr_bind=(input:ptr<CheckerExprInput>):>XEWord=>$unsafe {
     xe_u64_type=input[0].u64_type
     xe_math_int=input[0].math_int
     xe_quantity_right=input[0].quantity_right
-    xe_host=input[0].host
     0
 }
 # A name bound in the module (not a scope above the function's floor): the lookup
@@ -140,7 +116,7 @@ xe_module=(name:XEWord):>XEWord=>$unsafe {
         let stamp=if name <? xe_ml_tick[0].length and xe_ml_tick[0].ptr[name] >? xe_ml_struct[0] {xe_ml_tick[0].ptr[name]} else {xe_ml_struct[0]}
         if xe_ml_at[0].ptr[name] =? stamp and xe_ml_mod[0].ptr[name] =? m {return xe_ml_sym[0].ptr[name]}
     }
-    xe_host[0].module(m name)
+    expr_module(m name)
 }
 # A name from the current context: its scope binding above the function's floor, else
 # the module's. Jo callers call it directly.
@@ -171,7 +147,7 @@ finish_arg=(a:XEWord pt:XEWord is_mut:bool):>void=>$unsafe {
     }
     if (XEWord(xe_nodes[0].ptr[a].flags) & 1) not=? 0 or not cq_settled(xe_nodes xe_types a pt) {xe_arg(a pt false)}
 }
-xe_arg=(a:XEWord pt:XEWord is_mut:bool):>void=>$unsafe {xe_host[0].arg(a pt is_mut)}
+xe_arg=(a:XEWord pt:XEWord is_mut:bool):>void=>$unsafe {arg_finish_rest(a pt is_mut)}
 # The call group's inputs beyond the dispatcher's: node lists, locals, the interned
 # `members` (0 until reflection first asks) and `__dewy_set`; rare argument preparation
 # (a `members(U)` argument, an array spreading a record) is the host's.
@@ -365,7 +341,7 @@ xe_fnref=(a:XEWord base:XEWord):>void=>$unsafe {
 xe_module_fn=(a:XEWord base:XEWord):>void=>$unsafe {
     let ms=lookup(XEWord(xe_nodes[0].ptr[XEWord(xe_nodes[0].ptr[base].a)].name))
     if ms =? 0 or xe_syms[0].ptr[ms].kind not=? 'module' {return}
-    let fs=xe_host[0].module(XEWord(xe_syms[0].ptr[ms].ref) XEWord(xe_nodes[0].ptr[base].name))
+    let fs=expr_module(XEWord(xe_syms[0].ptr[ms].ref) XEWord(xe_nodes[0].ptr[base].name))
     if fs not=? 0 and xe_syms[0].ptr[fs].kind =? 'fns' {xe_add_flag(a 4096)}
 }
 # Frozen SK ordinals past `local`, the ABI checker_idents.dewy reads.
@@ -383,13 +359,13 @@ xe_kind=(k:SK):>XEWord=>{
     0
 }
 # Cold host requests kept out of the name path's frame.
-xe_complete=():>void=>$unsafe {xe_host[0].complete()}
-xe_unknown=(n:XEWord expected:XEWord name:XEWord):>void=>$unsafe {xe_host[0].unknown(n expected name)}
+xe_complete=():>void=>$unsafe {expr_complete()}
+xe_unknown=(n:XEWord expected:XEWord name:XEWord):>void=>$unsafe {ident_unknown(n expected name)}
 # A name read after its leaf: a temperature difference, then several values.
 xe_read=(n:XEWord t:XEWord):>XEWord=>$unsafe {
     let it=t
-    if xe_temperature[0] {it=xe_host[0].temperature(n it)}
-    if xe_values[0] {xe_host[0].values_use(n it)}
+    if xe_temperature[0] {it=temperature_read(n it)}
+    if xe_values[0] {expr_values_use(n it)}
     it
 }
 # A name read as a value: its scope binding above the current function's floor, else
@@ -418,7 +394,7 @@ xe_other=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
     let k=xe_nodes[0].ptr[n].kind
     if k =? 'float_lit' or k =? 'bool_lit' or k =? 'none_lit' or k =? 'null_lit' {return xl_check_scalar(n expected)}
     let ex=xl_expected(expected)
-    if k =? 'array' or (ex not=? 0 and (k =? 'map_lit' or k =? 'record_lit' or k =? 'tuple')) {ex=xe_host[0].literal(n expected ex)}
+    if k =? 'array' or (ex not=? 0 and (k =? 'map_lit' or k =? 'record_lit' or k =? 'tuple')) {ex=expr_literal(n expected ex)}
     let t:XEWord=0
     if k =? 'dotname' {t=xv_check(n ex)}
     else if k =? 'typeapply' {
@@ -452,7 +428,7 @@ xe_other=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
         if r.bypass {return r.type}
         t=r.type
     } else if k =? 'addr' or k =? 'conv' or k =? 'fnref' or k =? 'parallel_region' or k =? 'hole' or k =? 'namedarg' {t=xp_check(n expected)}
-    else {return xe_host[0].other(n expected)}
+    else {return expr_other(n expected)}
     xl_finish(n t expected)
 }
 # Binary operators (frozen Tok ordinals: kw_in 12, plus 58, minus 59, star 60, amp 63,
@@ -488,7 +464,7 @@ xe_literal_operand=(e:XEWord):>bool=>$unsafe {
     let k=node[0].kind
     if k =? 'array' or k =? 'record_lit' or k =? 'map_lit' {return true}
     # (a set literal is the call `__dewy_set(...)`, not yet checked)
-    k =? 'call' and node[0].type =? 0 and node[0].nlist =? 1 and xe_nodes[0].ptr[XEWord(node[0].a)].kind =? 'ident' and xe_host[0].set_literal(e)
+    k =? 'call' and node[0].type =? 0 and node[0].nlist =? 1 and xe_nodes[0].ptr[XEWord(node[0].a)].kind =? 'ident' and dewy_set_literal(e)
 }
 # `a xor b`: not=? on bools, ^ on integers.
 xe_xor=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
@@ -504,21 +480,21 @@ xe_char=(n:XEWord):>void=>$unsafe {
     let tb=check_expr(xe_nodes[0].ptr[n].b 0)
     xe_nodes[0][n].b=int32<overflow='wrap'>(xe_last[0])
     xe_add_flag(XEWord(xe_nodes[0].ptr[n].b) 128)
-    if xe_kind_of(tb) =? 'int_' {xe_host[0].char_code(XEWord(xe_nodes[0].ptr[n].a))}
+    if xe_kind_of(tb) =? 'int_' {binary_char_code(XEWord(xe_nodes[0].ptr[n].a))}
 }
 # `x in a..b` in its leaf, other memberships on the host.
 xe_in=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
     let b=XEWord(xe_nodes[0].ptr[n].b)
     if xe_nodes[0].ptr[b].kind =? 'range' and not xe_flag(b 32768) {return xy_check(n expected)}
-    xe_host[0].membership(n expected)
+    binary_membership(n expected)
 }
 # Cold requests out of the operator's frame.
 xe_decimals=(a:XEWord b:XEWord):>void=>$unsafe {
-    xe_host[0].decimal(a)
-    xe_host[0].decimal(b)
+    binary_decimal(a)
+    binary_decimal(b)
 }
 xe_literal_hint=(e:XEWord t:XEWord op:XEWord hint:XEWord):>XEWord=>$unsafe {
-    if not xe_host[0].literal_context(e t op) {return hint}
+    if not binary_context(e t op) {return hint}
     let p=tu_prune(t)
     if xe_types[0].ptr[p].kind =? 'opt' {return XEWord(xe_types[0].ptr[p].elem)}
     p
@@ -533,8 +509,8 @@ xe_first=(b:XEWord):>XEWord=>$unsafe {
 # a secret, a quantity, text, an optional, a struct and every other pair to the host.
 xe_binary=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
     let op=XEWord(xe_nodes[0].ptr[n].op)
-    if op =? 85 {return xe_host[0].dotted(n expected)}
-    if op =? 60 and xe_flag(n 536870912) {xe_host[0].juxt(n)}
+    if op =? 85 {return check_dotted(n expected)}
+    if op =? 60 and xe_flag(n 536870912) {binary_juxt(n)}
     if op =? 82 {return xe_xor(n expected)}
     if op not=? 58 and op not=? 60 and xe_nodes[0].ptr[XEWord(xe_nodes[0].ptr[n].a)].kind =? 'str_lit' {xe_char(n)}
     if op =? 12 {return xe_in(n expected)}
@@ -544,7 +520,7 @@ xe_binary=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
     if not is_cmp and expected not=? 0 {
         let ek=xe_kind_of(expected)
         if ek =? 'int_' or ek =? 'float_' or ek =? 'vec' {hint=expected}
-        else if ek =? 'quantity' {hint=xe_host[0].quantity_hint(expected)}
+        else if ek =? 'quantity' {hint=binary_quantity_hint(expected)}
     }
     let a=XEWord(xe_nodes[0].ptr[n].a)
     let b=XEWord(xe_nodes[0].ptr[n].b)
@@ -593,10 +569,10 @@ xe_binary=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
         }
         if not a_literal and b_literal {h=xe_literal_hint(b ta op h)}
         # (an n-dimensional array against, or times, an array written out)
-        if bk =? 'array' and tk =? 'struct_' and (op =? 69 or op =? 70 or op =? 60) {h=xe_host[0].nd_hint(n ta h)}
+        if bk =? 'array' and tk =? 'struct_' and (op =? 69 or op =? 70 or op =? 60) {h=binary_nd_hint(n ta h)}
         tb=tu_prune(check_expr(b h))
     }
-    if xe_types[0].ptr[ta].kind =? 'secret' or xe_types[0].ptr[tb].kind =? 'secret' {return xe_host[0].secret(n a b)}
+    if xe_types[0].ptr[ta].kind =? 'secret' or xe_types[0].ptr[tb].kind =? 'secret' {return binary_secret(n a b)}
     # Static-width exact intermediates fused before scalar arithmetic is chosen.
     let mi=xe_math_int[0]
     if (XEWord(xe_nodes[0].ptr[a].type) =? mi or XEWord(xe_nodes[0].ptr[b].type) =? mi) and xe_dewy_at(xe_nodes[0].ptr[n].pos) {
@@ -623,7 +599,7 @@ xe_binary=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
             if ak not=? 'float_lit' and bk2 not=? 'float_lit' and ak not=? 'str_lit' and bk2 not=? 'str_lit' {return xw_numeric(n int32<overflow='wrap'>(op) a b ta tb is_cmp)}
         }
     }
-    xe_host[0].binary_rest(n expected a b ta tb hint flags)
+    binary_rest(n expected a b ta tb hint flags)
 }
 # An integer type without an overflow policy (types.jo is_int, int_policy).
 xe_word=(t0:XEWord):>bool=>$unsafe {
@@ -642,12 +618,12 @@ check_expr=(n0:int64 expected0:int64):>int64=>$unsafe {
     if k =? 'ident' {return xe_ident(n expected)}
     if k =? 'int_lit' {return xl_check_int(n expected)}
     if k =? 'binary' {return xl_finish(n xe_binary(n expected) expected)}
-    if k =? 'call' {return xe_host[0].call(n expected)}
+    if k =? 'call' {return check_call_expr(n expected)}
     if k =? 'field' {return xs_field(n expected)}
     if k =? 'if_' {return xl_finish(n xf_if(n xl_expected(expected)) expected)}
     if k =? 'index' {
         let it=xs_index(n expected)
-        if xe_watch[0].sibling_known not=? 0 {return xe_host[0].sibling(n it)}
+        if xe_watch[0].sibling_known not=? 0 {return expr_sibling(n it)}
         return it
     }
     if k =? 'str_lit' {return xl_check_str(n expected)}

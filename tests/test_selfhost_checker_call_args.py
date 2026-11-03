@@ -4,7 +4,7 @@ answers (a call with nothing to expand)."""
 import pytest
 
 from tests.support import compiler  # noqa: F401
-from tests.test_selfhost_checker_expr import DRIVER as EXPR, STEMS
+from tests.test_selfhost_checker_expr import DRIVER as EXPR, JO_DOUBLES, STEMS
 
 DRIVER = EXPR + r'''
 cq_names: int[] = [0]
@@ -119,4 +119,4 @@ main = ():
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_call_args_twins(compiler, tmp_path, release):  # noqa: F811
     from tests.test_selfhost_checker_resolve import compare
-    assert compare(compiler, tmp_path, release, DRIVER + MAIN, extra_stems=STEMS).endswith(b'ok\n')
+    assert compare(compiler, tmp_path, release, DRIVER + MAIN, extra_stems=STEMS, jo_doubles=JO_DOUBLES).endswith(b'ok\n')

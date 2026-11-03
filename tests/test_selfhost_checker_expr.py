@@ -108,8 +108,7 @@ xe_other_host = (n: int, expected: int) -> int:
     events.push("other:{n}:{int(nodes[n].kind)}:{expected}")
     T_BOOL
 xe_arg_host = (a: int, pt: int, is_mut: bool): events.push("arg:{a}:{pt}:{is_mut}:{nodes[a].type}")
-xe_services = CheckerExprHost(xe_complete_host, xe_unknown_host, xe_module_host, xe_temperature_host, xe_values_host, xe_dotted_host, xe_juxt_host, xe_char_host, xe_member_host, xe_quantity_hint_host, xe_decimal_host, xe_set_host, xe_context_host, xe_nd_host, xe_secret_host, xe_rest_host, xe_call_host, xe_sibling_host, xe_literal_host, xe_other_host, xe_arg_host)
-xe_inputs = CheckerExprInput(&nodes, &types, &files, &syms, &xe_scope, &ctxs, &cx, &xe_at, &xe_mods, &xe_found, &xe_ticks, &xe_struct, &xe_sentinel_name, &xe_temperature_on, &xe_values_on, &xe_watch_counts, &xe_checked, &T_BOOL, &T_INT, &T_U64, &T_MATH_INT, &xe_right_at, &xe_services)
+xe_inputs = CheckerExprInput(&nodes, &types, &files, &syms, &xe_scope, &ctxs, &cx, &xe_at, &xe_mods, &xe_found, &xe_ticks, &xe_struct, &xe_sentinel_name, &xe_temperature_on, &xe_values_on, &xe_watch_counts, &xe_checked, &T_BOOL, &T_INT, &T_U64, &T_MATH_INT, &xe_right_at)
 xe_binding = checker_expr_bind(&xe_inputs)
 sym_of = (kind: SK, ref: int) -> int:
     syms.push(Sym(name = 2, kind = kind, ref = i32(ref)))
@@ -299,10 +298,37 @@ main = ():
 '''
 
 
+
+# The Jo services the dispatcher calls (expr.jo, temperature_kinds.jo), routed to the driver.
+EXPR_JO = r'''use 'driver.jo'
+expr_complete = (): xe_complete_host()
+ident_unknown = (n: int, expected: int, nm: int): xe_unknown_host(n, expected, nm)
+expr_module = (m: int, name: int) -> int: xe_module_host(m, name)
+expr_values_use = (n: int, t: int): xe_values_host(n, t)
+check_dotted = (n: int, expected: int) -> int: xe_dotted_host(n, expected)
+binary_juxt = (n: int): xe_juxt_host(n)
+binary_char_code = (n: int): xe_char_host(n)
+binary_membership = (n: int, expected: int) -> int: xe_member_host(n, expected)
+binary_quantity_hint = (t: int) -> int: xe_quantity_hint_host(t)
+binary_decimal = (e: int): xe_decimal_host(e)
+dewy_set_literal = (a: int) -> bool: xe_set_host(a)
+binary_context = (e: int, t: int, op: int) -> bool: xe_context_host(e, t, op)
+binary_nd_hint = (n: int, ta: int, h: int) -> int: xe_nd_host(n, ta, h)
+binary_secret = (n: int, a: int, b: int) -> int: xe_secret_host(n, a, b)
+binary_rest = (n: int, expected: int, a: int, b: int, ta: int, tb: int, hint: int, flags: int) -> int: xe_rest_host(n, expected, a, b, ta, tb, hint, flags)
+check_call_expr = (n: int, expected: int) -> int: xe_call_host(n, expected)
+expr_sibling = (n: int, t: int) -> int: xe_sibling_host(n, t)
+expr_literal = (n: int, expected: int, ex: int) -> int: xe_literal_host(n, expected, ex)
+expr_other = (n: int, expected: int) -> int: xe_other_host(n, expected)
+arg_finish_rest = (a: int, pt: int, is_mut: bool): xe_arg_host(a, pt, is_mut)
+'''
+JO_DOUBLES = {'expr.jo': EXPR_JO,
+              'temperature_kinds.jo': "use 'driver.jo'\ntemperature_read = (n: int, t: int) -> int: xe_temperature_host(n, t)\n"}
+
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_expr_twins(compiler, tmp_path, release):  # noqa: F811
-    assert compare(compiler, tmp_path, release, DRIVER + MAIN, extra_stems=STEMS).endswith(b'ok\n')
+    assert compare(compiler, tmp_path, release, DRIVER + MAIN, extra_stems=STEMS, jo_doubles=JO_DOUBLES).endswith(b'ok\n')
 
 
 @pytest.mark.parametrize('setup', ['xe_module_result = 0', 'ctxs[cx].floor = 9'])
@@ -316,5 +342,5 @@ main = ():
     show(name_node())
     print("unreachable")
 '''
-    output = compare(compiler, tmp_path, False, DRIVER + main, status=19, extra_stems=STEMS)
+    output = compare(compiler, tmp_path, False, DRIVER + main, status=19, extra_stems=STEMS, jo_doubles=JO_DOUBLES)
     assert b'unknown:' in output and b'module:' in output

@@ -24,28 +24,8 @@ use 'checker_numeric.dewy'
 use 'checker_exact.dewy'
 use 'checker_coerce.dewy'
 use 'checker_call_queries.dewy'
-struct CheckerExprHost:
-    complete: () -> void
-    unknown: (int, int, int) -> void
-    module: (int, int) -> int
-    temperature: (int, int) -> int
-    values_use: (int, int) -> void
-    dotted: (int, int) -> int
-    juxt: (int) -> void
-    char_code: (int) -> void
-    membership: (int, int) -> int
-    quantity_hint: (int) -> int
-    decimal: (int) -> void
-    set_literal: (int) -> bool
-    literal_context: (int, int, int) -> bool
-    nd_hint: (int, int, int) -> int
-    secret: (int, int, int) -> int
-    binary_rest: (int, int, int, int, int, int, int, int) -> int
-    call: (int, int) -> int
-    sibling: (int, int) -> int
-    literal: (int, int, int) -> int
-    other: (int, int) -> int
-    arg: (int, int, bool) -> void
+use 'expr.jo'
+use 'temperature_kinds.jo'
 struct CheckerExprInput:
     nodes: *(Node[])
     types: *(TypeInfo[])
@@ -69,7 +49,6 @@ struct CheckerExprInput:
     u64_type: *int
     math_int: *int
     quantity_right: *int
-    host: *CheckerExprHost
 xe_nodes: *(Node[])
 xe_types: *(TypeInfo[])
 xe_files: *(SrcFile[])
@@ -92,7 +71,6 @@ xe_int_type: *int
 xe_u64_type: *int
 xe_math_int: *int
 xe_quantity_right: *int
-xe_host: *CheckerExprHost
 checker_expr_bind = (input: *CheckerExprInput) -> int:
     xe_nodes = input[0].nodes
     xe_types = input[0].types
@@ -116,7 +94,6 @@ checker_expr_bind = (input: *CheckerExprInput) -> int:
     xe_u64_type = input[0].u64_type
     xe_math_int = input[0].math_int
     xe_quantity_right = input[0].quantity_right
-    xe_host = input[0].host
     0
 xe_module = (name: int) -> int:
     c = xe_context[0]
@@ -126,7 +103,7 @@ xe_module = (name: int) -> int:
         stamp = xe_ml_struct[0]
         if name < xe_ml_tick[0].len() and xe_ml_tick[0][name] > xe_ml_struct[0]: stamp = xe_ml_tick[0][name]
         if xe_ml_at[0][name] == stamp and xe_ml_mod[0][name] == m: return xe_ml_sym[0][name]
-    xe_host[0].module(m, name)
+    expr_module(m, name)
 lookup = (name: int) -> int:
     c = xe_context[0]
     floor = 0
@@ -146,7 +123,7 @@ finish_arg = (a: int, pt: int, is_mut: bool):
         check_expr(a, pt)
         xe_nodes[0][a].flags |= 128
     if int(xe_nodes[0][a].flags) & 1 != 0 or not cq_settled(xe_nodes, xe_types, a, pt): xe_arg(a, pt, false)
-xe_arg = (a: int, pt: int, is_mut: bool): xe_host[0].arg(a, pt, is_mut)
+xe_arg = (a: int, pt: int, is_mut: bool): arg_finish_rest(a, pt, is_mut)
 struct CheckerCallHost:
     members: (int) -> void
     spread: (int) -> void
@@ -278,15 +255,15 @@ xe_fnref = (a: int, base: int):
 xe_module_fn = (a: int, base: int):
     ms = lookup(int(xe_nodes[0][int(xe_nodes[0][base].a)].name))
     if ms == 0 or xe_syms[0][ms].kind != .module: return
-    fs = xe_host[0].module(int(xe_syms[0][ms].ref), int(xe_nodes[0][base].name))
+    fs = expr_module(int(xe_syms[0][ms].ref), int(xe_nodes[0][base].name))
     if fs != 0 and xe_syms[0][fs].kind == .fns: xe_add_flag(a, 4096)
 xe_kind = (k: SK) -> int: int(k)
-xe_complete = (): xe_host[0].complete()
-xe_unknown = (n: int, expected: int, name: int): xe_host[0].unknown(n, expected, name)
+xe_complete = (): expr_complete()
+xe_unknown = (n: int, expected: int, name: int): ident_unknown(n, expected, name)
 xe_read = (n: int, t: int) -> int:
     it = t
-    if xe_temperature[0]: it = xe_host[0].temperature(n, it)
-    if xe_values[0]: xe_host[0].values_use(n, it)
+    if xe_temperature[0]: it = temperature_read(n, it)
+    if xe_values[0]: expr_values_use(n, it)
     it
 xe_ident = (n: int, expected: int) -> int:
     nm = int(xe_nodes[0][n].name)
@@ -310,7 +287,7 @@ xe_other = (n: int, expected: int) -> int:
     k = xe_nodes[0][n].kind
     if k == .float_lit or k == .bool_lit or k == .none_lit or k == .null_lit: return xl_check_scalar(n, expected)
     ex = xl_expected(expected)
-    if k == .array or (ex != 0 and (k == .map_lit or k == .record_lit or k == .tuple)): ex = xe_host[0].literal(n, expected, ex)
+    if k == .array or (ex != 0 and (k == .map_lit or k == .record_lit or k == .tuple)): ex = expr_literal(n, expected, ex)
     t = 0
     if k == .dotname: t = xv_check(n, ex)
     else if k == .typeapply:
@@ -344,7 +321,7 @@ xe_other = (n: int, expected: int) -> int:
         if r.bypass: return r.type
         t = r.type
     else if k == .addr or k == .conv or k == .fnref or k == .parallel_region or k == .hole or k == .namedarg: t = xp_check(n, expected)
-    else: return xe_host[0].other(n, expected)
+    else: return expr_other(n, expected)
     xl_finish(n, t, expected)
 xe_kind_of = (t: int) -> TK: xe_types[0][int(tu_prune(t))].kind
 xe_flag = (n: int, f: int) -> bool: int(xe_nodes[0][n].flags) & f != 0
@@ -367,7 +344,7 @@ xe_quantity_name = (e: int) -> bool:
 xe_literal_operand = (e: int) -> bool:
     k = xe_nodes[0][e].kind
     if k == .array or k == .record_lit or k == .map_lit: return true
-    k == .call and xe_nodes[0][e].type == 0 and xe_nodes[0][e].nlist == 1 and xe_nodes[0][int(xe_nodes[0][e].a)].kind == .ident and xe_host[0].set_literal(e)
+    k == .call and xe_nodes[0][e].type == 0 and xe_nodes[0][e].nlist == 1 and xe_nodes[0][int(xe_nodes[0][e].a)].kind == .ident and dewy_set_literal(e)
 xe_xor = (n: int, expected: int) -> int:
     ta = int(tu_prune(check_expr(int(xe_nodes[0][n].a), 0)))
     xe_nodes[0][n].a = i32(xe_last[0])
@@ -380,16 +357,16 @@ xe_char = (n: int):
     tb = check_expr(int(xe_nodes[0][n].b), 0)
     xe_nodes[0][n].b = i32(xe_last[0])
     xe_add_flag(int(xe_nodes[0][n].b), 128)
-    if xe_kind_of(tb) == .int_: xe_host[0].char_code(int(xe_nodes[0][n].a))
+    if xe_kind_of(tb) == .int_: binary_char_code(int(xe_nodes[0][n].a))
 xe_in = (n: int, expected: int) -> int:
     b = int(xe_nodes[0][n].b)
     if xe_nodes[0][b].kind == .range and not xe_flag(b, 32768): return int(xy_check(n, expected))
-    xe_host[0].membership(n, expected)
+    binary_membership(n, expected)
 xe_decimals = (a: int, b: int):
-    xe_host[0].decimal(a)
-    xe_host[0].decimal(b)
+    binary_decimal(a)
+    binary_decimal(b)
 xe_literal_hint = (e: int, t: int, op: int, hint: int) -> int:
-    if not xe_host[0].literal_context(e, t, op): return hint
+    if not binary_context(e, t, op): return hint
     p = int(tu_prune(t))
     if xe_types[0][p].kind == .opt: return int(xe_types[0][p].elem)
     p
@@ -399,8 +376,8 @@ xe_first = (b: int) -> int:
     t
 xe_binary = (n: int, expected: int) -> int:
     op = int(xe_nodes[0][n].op)
-    if op == 85: return xe_host[0].dotted(n, expected)
-    if op == 60 and xe_flag(n, 536870912): xe_host[0].juxt(n)
+    if op == 85: return check_dotted(n, expected)
+    if op == 60 and xe_flag(n, 536870912): binary_juxt(n)
     if op == 82: return xe_xor(n, expected)
     if op != 58 and op != 60 and xe_nodes[0][int(xe_nodes[0][n].a)].kind == .str_lit: xe_char(n)
     if op == 12: return xe_in(n, expected)
@@ -410,7 +387,7 @@ xe_binary = (n: int, expected: int) -> int:
     if not is_cmp and expected != 0:
         ek = xe_kind_of(expected)
         if ek == .int_ or ek == .float_ or ek == .vec: hint = expected
-        else if ek == .quantity: hint = xe_host[0].quantity_hint(expected)
+        else if ek == .quantity: hint = binary_quantity_hint(expected)
     a = int(xe_nodes[0][n].a)
     b = int(xe_nodes[0][n].b)
     if (op == 69 or op == 70) and xe_watch[0].decimal_adapted > 0: xe_decimals(a, b)
@@ -450,9 +427,9 @@ xe_binary = (n: int, expected: int) -> int:
                 h = xe_int_type[0]
                 if xe_flag(b, 2097152): h = xe_u64_type[0]
         if not a_literal and b_literal: h = xe_literal_hint(b, ta, op, h)
-        if bk == .array and tk == .struct_ and (op == 69 or op == 70 or op == 60): h = xe_host[0].nd_hint(n, ta, h)
+        if bk == .array and tk == .struct_ and (op == 69 or op == 70 or op == 60): h = binary_nd_hint(n, ta, h)
         tb = int(tu_prune(check_expr(b, h)))
-    if xe_types[0][ta].kind == .secret or xe_types[0][tb].kind == .secret: return xe_host[0].secret(n, a, b)
+    if xe_types[0][ta].kind == .secret or xe_types[0][tb].kind == .secret: return binary_secret(n, a, b)
     mi = xe_math_int[0]
     if (int(xe_nodes[0][a].type) == mi or int(xe_nodes[0][b].type) == mi) and xe_dewy_at(xe_nodes[0][n].pos):
         wa = exact_math_operand(a)
@@ -473,7 +450,7 @@ xe_binary = (n: int, expected: int) -> int:
             ak = xe_nodes[0][a].kind
             bk2 = xe_nodes[0][b].kind
             if ak != .float_lit and bk2 != .float_lit and ak != .str_lit and bk2 != .str_lit: return int(xw_numeric(n, i32(op), a, b, ta, tb, is_cmp))
-    xe_host[0].binary_rest(n, expected, a, b, ta, tb, hint, flags)
+    binary_rest(n, expected, a, b, ta, tb, hint, flags)
 xe_word = (t0: int) -> bool:
     t = int(tu_prune(t0))
     xe_types[0][t].kind == .int_ and (t == xe_math_int[0] or xe_types[0][t].st == 0)
@@ -484,12 +461,12 @@ check_expr = (n: int, expected: int) -> int:
     if k == .ident: return xe_ident(n, expected)
     if k == .int_lit: return xl_check_int(n, expected)
     if k == .binary: return xl_finish(n, xe_binary(n, expected), expected)
-    if k == .call: return xe_host[0].call(n, expected)
+    if k == .call: return check_call_expr(n, expected)
     if k == .field: return xs_field(n, expected)
     if k == .if_: return xl_finish(n, xf_if(n, xl_expected(expected)), expected)
     if k == .index:
         it = xs_index(n, expected)
-        if xe_watch[0].sibling_known != 0: return xe_host[0].sibling(n, it)
+        if xe_watch[0].sibling_known != 0: return expr_sibling(n, it)
         return it
     if k == .str_lit: return xl_check_str(n, expected)
     xe_other(n, expected)
