@@ -510,6 +510,23 @@ printl"{m.body}"
 - **Spellings:** `$__consume__` (compiler-only).
 - **Reversible:** yes, each one.
 
+### D24. A program function that hides a library method of the same name
+- **Today:** a program-level function silently takes over the same-named method of its first parameter's type, everywhere in the module, not only inside itself. A function that calls itself this way is now a compile error (it never returns), but the wider hiding is silent.
+
+```dewy
+upper = (s:string):>string => "<{s}>"
+shout = (s:string):>string => s.upper      # calls the program's upper above, not string's method
+main = () => printl(shout("hi"))          # prints <hi>, not HI
+```
+
+- **Options:**
+  - **a)** Warn when a program function's name and first parameter type hide a library method, naming both. Which one wins doesn't change.
+  - **b)** Change lookup so `x.name` prefers the type's own method over a program function.
+  - **c)** Leave it silent.
+- **Rec:** (a). It keeps established semantics and catches the surprise.
+- **Spellings:** none new.
+- **Reversible:** (a) yes; (b) would change established semantics.
+
 ---
 
 ## P4: open-ended
