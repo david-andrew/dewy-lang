@@ -19,6 +19,13 @@ the same sources) and uses its commit's library, so the counts cover compiler
 and library changes alike. Inputs are this checkout's; a base that cannot
 compile one falls back to its own copy and says so.
 
+Both compilers build the same compiler source in the self-build row, so a cost
+that the new source adds to its own compile (such as an import cycle that sends
+the compiler down a slow path) is paid on both sides and never shows. The
+"self-build source cost" row holds the candidate compiler fixed and builds the
+base's compiler source, then this checkout's. The compiler grows a little with
+most changes, so it fails only above SOURCE_LIMIT percent (or --limit if larger).
+
 A line `speed: accept <reason>` in a commit message between the base and HEAD
 waives the base comparison. A --checkpoint comparison is never waived: move the
 checkpoint tag after reviewing accepted costs.
@@ -77,6 +84,7 @@ KEEP_BASES = 16        # cached base compilers kept (most recently used)
 IPS = 6.3e9            # compiler instructions per second on the reference machine (compile_throughput.md)
 CORPUS_WORKERS = (1, 4)
 CORPUS_JOBS = 2        # programs compiled at once; critical-path counts do not depend on load
+SOURCE_LIMIT = 5.0     # percent: the candidate compiling the base's compiler source, then this checkout's
 ACCEPT = re.compile(r'^speed: accept\s+(\S.*)$', re.MULTILINE)
 
 
@@ -352,6 +360,25 @@ def measure(counter: Counter, toolchain: Toolchain, source: str, flags: list[str
             raise RuntimeError(f'{toolchain.label} cannot build {source}:\n{str(error)[-2000:]}')
         notes.append(f'{toolchain.label} cannot build this checkout\'s {source}; measured its own copy')
         return twice(toolchain.inputs / source)
+
+
+def source_row(counter: Counter, candidate: Toolchain, base: Toolchain, counts: dict[str, int], notes: list[str],
+               limit: float, failures: list) -> None:
+    """The candidate compiler builds the base's compiler source, then this checkout's (the self-build row's
+    count): what the source change alone costs to compile."""
+    name = 'self-build source cost'
+    try:
+        old = measure(counter, candidate, str(base.inputs / 'compiler/main.jo'), [], notes)
+    except RuntimeError:
+        notes.append('the candidate cannot build the base\'s compiler source; no source cost row')
+        return
+    new = counts['self-build']
+    change = round(delta(old, new), 2) + 0.0
+    over = change > limit
+    if over:
+        failures.append(('base', f'{name} (candidate compiler, base -> this source)', change))
+    print(f'  {name:26} {old / 1e9:8.4f} -> {new / 1e9:8.4f}  {change:+6.2f}%' + (' <-' if over else '')
+          + f'  (candidate compiler: base -> this source; limit {limit:g}%)', flush=True)
 
 
 HELLO = 'printl"hello"\n'
@@ -927,6 +954,7 @@ def main(argv: list[str], current: Path) -> int:
                 prefix = '' if role == 'base' else f'   {revision}'
                 line += f'{prefix} {old / 1e9:8.4f} -> {new / 1e9:8.4f}  {change:+6.2f}%' + (' <-' if over else '   ')
             print(line.rstrip(), flush=True)
+        source_row(counter, candidate, references['base'][2], counts, notes, max(args.limit, SOURCE_LIMIT), failures)
         for note in dict.fromkeys(notes):
             print(f'  ({note})')
         hello_failures = yardstick(candidate, counts)
