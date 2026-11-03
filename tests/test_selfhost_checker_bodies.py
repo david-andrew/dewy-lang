@@ -3,7 +3,7 @@ import pytest
 
 from tests.support import compiler  # noqa: F401
 from tests.selfhost_expr_double import jo_doubles
-from tests.test_selfhost_checker_instances import DRIVER as INSTANCES
+from tests.test_selfhost_checker_instances import DRIVER as INSTANCES, INSTANCE_JO
 from tests.test_selfhost_checker_signature import SIGNATURE_JO
 from tests.test_selfhost_checker_resolve import compare
 
@@ -146,7 +146,7 @@ BODY_JO = {
         'decimal_check_body': 'decimal_check_body = (f: int): body_decimal_check(f)',
     },
 }
-JO_DOUBLES = jo_doubles(BODY_JO, SIGNATURE_JO)
+JO_DOUBLES = jo_doubles(BODY_JO, INSTANCE_JO, SIGNATURE_JO)
 
 
 @pytest.mark.core_quick

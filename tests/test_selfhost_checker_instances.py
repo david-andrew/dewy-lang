@@ -22,14 +22,14 @@ instance_snapshot: FnInst[]
 instance_decl_snapshot: DeclInfo[]
 instance_cache_snapshot: {FnInstanceKey: int}
 instance_poly = (d: int, ts: int[], pos: int) -> int: 1234
-instance_preflight = (d: int, pos: int): events.push("preflight:{d}:{pos}")
-instance_create = (d: int, pos: int) -> int:
+it_preflight = (d: int, pos: int): events.push("preflight:{d}:{pos}")
+it_create = (d: int, pos: int) -> int:
     functions.push(FnInst(decl = i32(d), use_pos = pos))
     events.push("create:{d}")
     functions.len() - 1
 instance_bad = (d: int, t: int, pos: int): print("bad:{pos}"); exit(19)
 instance_depth = (d: int, pos: int): print("depth:{pos}"); exit(20)
-instance_load = (d: int, f: int, generic: bool):
+it_load = (d: int, f: int, generic: bool):
     events.push("load:{d}:{f}:{generic}")
     if instance_grow:
         instance_grow = false
@@ -40,11 +40,11 @@ instance_load = (d: int, f: int, generic: bool):
         ci_get_fn_inst(instance_nested, [], 100)
 instance_pack = (f: int, n: int): events.push("pack:{f}:{n}")
 instance_dewy = (pos: int) -> bool: true
-instance_validate = (f: int, sig: FnSig, pos: int): events.push("validate:{f}:{sig.generic}")
+it_validate = (f: int, sig: FnSig, pos: int): events.push("validate:{f}:{sig.generic}")
 instance_clone = (n: int) -> int:
     nodes.push(nodes[n])
     nodes.len() - 1
-instance_attributes = (d: int, f: int, ts: int[], pos: int):
+it_attributes = (d: int, f: int, ts: int[], pos: int):
     assert(not declarations[cs_decl_info(d)].insts.contains(f))
     assert(instance_index.get(FnInstanceKey(d, ts)) == none)
     events.push("attributes:{f}")
@@ -53,8 +53,7 @@ instance_ensure = (f: int, pos: int):
     assert(declarations[cs_decl_info(d)].insts.contains(f))
     if functions[f].targs.len() > 0: assert(instance_index[FnInstanceKey(d, functions[f].targs)] == f)
     events.push("ensure:{f}:{pos}")
-instance_host = CheckerInstanceHost(instance_poly, instance_preflight, instance_create, instance_bad, instance_depth, instance_load, instance_pack, instance_dewy, instance_validate, instance_clone, instance_attributes, instance_ensure)
-instance_input = CheckerInstanceInput(&nodes, &functions, &declarations, &instance_index, &contexts, &context, &T_VOID, &instance_host)
+instance_input = CheckerInstanceInput(&nodes, &functions, &declarations, &instance_index, &contexts, &context, &T_VOID)
 instance_binding = checker_instances_bind(&instance_input)
 instance_decl = (generic: bool, ret: int) -> int:
     p = node(.param)
@@ -98,7 +97,30 @@ main = ():
     print(events)
     print("ok")
 '''
-JO_DOUBLES = jo_doubles(SIGNATURE_JO)
+
+# The Jo services checker_instances calls, routed to the driver.
+INSTANCE_JO = {
+    'poly_closure.jo': {
+        'poly_inst': 'poly_inst = (decl: int, targs: int[], use_pos: int) -> int: instance_poly(decl, targs, use_pos)',
+    },
+    'check.jo': {
+        'checker_state.dewy': "use 'checker_state.dewy'",
+        'instance_preflight': 'instance_preflight = (decl: int, use_pos: int): it_preflight(decl, use_pos)',
+        'instance_create': 'instance_create = (decl: int, use_pos: int) -> int: it_create(decl, use_pos)',
+        'instance_bad_arg': 'instance_bad_arg = (decl: int, z: int, use_pos: int): instance_bad(decl, z, use_pos)',
+        'instance_depth_error': 'instance_depth_error = (decl: int, use_pos: int): instance_depth(decl, use_pos)',
+        'instance_load': 'instance_load = (decl: int, f: int, generic: bool): it_load(decl, f, generic)',
+        'pack_written': 'pack_written = (f: int, tn: int): instance_pack(f, tn)',
+        'dewy_at': 'dewy_at = (pos: int) -> bool: instance_dewy(pos)',
+        'instance_validate': 'instance_validate = (f: int, sig: FnSig, use_pos: int): it_validate(f, sig, use_pos)',
+        'instance_attributes': 'instance_attributes = (decl: int, f: int, zt: int[], use_pos: int): it_attributes(decl, f, zt, use_pos)',
+        'ensure_ret': 'ensure_ret = (f: int, use_pos: int): instance_ensure(f, use_pos)',
+    },
+    'ast.jo': {
+        'clone': 'clone = (n: int) -> int: instance_clone(n)',
+    },
+}
+JO_DOUBLES = jo_doubles(INSTANCE_JO, SIGNATURE_JO)
 
 
 @pytest.mark.core_quick
