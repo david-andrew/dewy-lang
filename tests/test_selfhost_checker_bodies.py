@@ -2,7 +2,9 @@
 import pytest
 
 from tests.support import compiler  # noqa: F401
+from tests.selfhost_expr_double import jo_doubles
 from tests.test_selfhost_checker_instances import DRIVER as INSTANCES
+from tests.test_selfhost_checker_signature import SIGNATURE_JO
 from tests.test_selfhost_checker_resolve import compare
 
 DRIVER = INSTANCES.split('main = ():')[0] + r'''
@@ -119,31 +121,32 @@ main = ():
 '''
 
 # The Jo services the body leaf calls (check.jo, icount.jo, decimals.jo), routed to the driver.
-JO_DOUBLES = {
-    'check.jo': '''use 'driver.jo'
-load_body = (decl: int, f: int): instance_pack(decl, f)
-dewy_at = (pos: int) -> bool: instance_dewy(pos)
-body_context = (f: int) -> int: body_lookup(f)
-body_recursive_error = (f: int, use_pos: int): body_error(f, use_pos)
-body_restore = (f: int): bt_restore(f)
-body_force = (decl: int, f: int): bt_force(decl, f)
-push_type_params = (decl: int, targs: int[]): body_type_params(decl, targs)
-new_local = (name: int, t: int, pos: int) -> int: body_local(name, t, pos)
-body_skip = (decl: int) -> bool: bt_skip(decl)
-scope_reset = (mark: int): body_reset(mark)
-body_infer = (f: int, decl: int): bt_infer(f, decl)
-body_expression = (f: int, decl: int): bt_expression(f, decl)
-body_finalize = (f: int, vars0: int, binds0: int, exposed0: int, da_mark: int): bt_finalize(f, vars0, binds0, exposed0, da_mark)
-''',
-    'icount.jo': '''use 'driver.jo'
-ic_fn = (phase: int, f: int) -> int: body_measure(phase, f)
-ic_restore = (bucket: int): body_unmeasure(bucket)
-''',
-    'decimals.jo': '''use 'driver.jo'
-decimal_wants = (f: int) -> bool: body_decimal(f)
-decimal_check_body = (f: int): body_decimal_check(f)
-''',
+BODY_JO = {
+    'check.jo': {
+        'load_body': 'load_body = (decl: int, f: int): instance_pack(decl, f)',
+        'dewy_at': 'dewy_at = (pos: int) -> bool: instance_dewy(pos)',
+        'body_context': 'body_context = (f: int) -> int: body_lookup(f)',
+        'body_recursive_error': 'body_recursive_error = (f: int, use_pos: int): body_error(f, use_pos)',
+        'body_restore': 'body_restore = (f: int): bt_restore(f)',
+        'body_force': 'body_force = (decl: int, f: int): bt_force(decl, f)',
+        'push_type_params': 'push_type_params = (decl: int, targs: int[]): body_type_params(decl, targs)',
+        'new_local': 'new_local = (name: int, t: int, pos: int) -> int: body_local(name, t, pos)',
+        'body_skip': 'body_skip = (decl: int) -> bool: bt_skip(decl)',
+        'scope_reset': 'scope_reset = (mark: int): body_reset(mark)',
+        'body_infer': 'body_infer = (f: int, decl: int): bt_infer(f, decl)',
+        'body_expression': 'body_expression = (f: int, decl: int): bt_expression(f, decl)',
+        'body_finalize': 'body_finalize = (f: int, vars0: int, binds0: int, exposed0: int, da_mark: int): bt_finalize(f, vars0, binds0, exposed0, da_mark)',
+    },
+    'icount.jo': {
+        'ic_fn': 'ic_fn = (phase: int, f: int) -> int: body_measure(phase, f)',
+        'ic_restore': 'ic_restore = (bucket: int): body_unmeasure(bucket)',
+    },
+    'decimals.jo': {
+        'decimal_wants': 'decimal_wants = (f: int) -> bool: body_decimal(f)',
+        'decimal_check_body': 'decimal_check_body = (f: int): body_decimal_check(f)',
+    },
 }
+JO_DOUBLES = jo_doubles(BODY_JO, SIGNATURE_JO)
 
 
 @pytest.mark.core_quick

@@ -3,17 +3,12 @@ from p"node_store.dewy" import Node
 from p"checker_state.dewy" import (FnSig DeclInfo RefineBindings)
 from p"checker_resolve.dewy" import (ct_resolve_type ct_resolve_result)
 from p"type_constructors.dewy" import tb_mk_param
+from p"check.jo" import (signature_resume signature_enter signature_leave signature_finish)
 # Demand-only signature construction: O(parameters + visited type syntax), plus
 # the existing semantic obligations. Cache IDs survive nested arena growth.
 # The host borrows the local signature for validation; no per-field callbacks.
 CSWord:type=int64<overflow='wrap'>
 CheckerSignatureScope:type=[context:int64=0 mark:int64=0]
-CheckerSignatureHost:type=[
-    resume:<(decl:int64):>void>
-    enter:<(decl:int64):>CheckerSignatureScope>
-    leave:<(scope:CheckerSignatureScope):>void>
-    finish:<(decl:int64 @sig:FnSig shaped:bool mask:int64):>void>
-]
 CheckerSignatureInput:type=[
     nodes:ptr<array<Node>>
     lists:ptr<array<int32>>
@@ -21,7 +16,6 @@ CheckerSignatureInput:type=[
     binders:ptr<RefineBindings>
     refine:ptr<bool>
     void_type:ptr<int64>
-    host:ptr<CheckerSignatureHost>
 ]
 let cs_input:ptr<CheckerSignatureInput>=$unsafe (uint64(0) as ptr<CheckerSignatureInput>)
 checker_signature_bind=(input:ptr<CheckerSignatureInput>):>CSWord=>{cs_input=input;0}
@@ -55,10 +49,10 @@ cs_written_refinement=(n:CSWord):>bool=>$unsafe {
 fn_sig=(decl:CSWord):>FnSig=>$unsafe {
     let di=cs_decl_info(decl)
     if cs_input[0].declarations[0].ptr[di].sig.done {return cs_input[0].declarations[0].ptr[di].sig}
-    cs_input[0].host[0].resume(decl)
+    signature_resume(decl)
     let sig=FnSig[done=true]
     sig.nexplicit = cs_input[0].nodes[0].ptr[decl].nlist2
-    let scope=cs_input[0].host[0].enter(decl)
+    let scope=signature_enter(decl)
     let ntp=CSWord(cs_input[0].nodes[0].ptr[decl].nlist2)
     let old_formals=cs_input[0].binders[0].formals
     let old_self=cs_input[0].binders[0].self
@@ -85,8 +79,8 @@ fn_sig=(decl:CSWord):>FnSig=>$unsafe {
     cs_input[0].binders[0].self = 0
     if cs_input[0].nodes[0].ptr[decl].a not=? 0 {sig.ret = int32<overflow='wrap'>(ct_resolve_result(CSWord(cs_input[0].nodes[0].ptr[decl].a)))}
     else if cs_has_flag(decl 4194304) {sig.ret = int32<overflow='wrap'>(cs_input[0].void_type[0])}
-    cs_input[0].host[0].finish(decl @sig shaped mm)
-    cs_input[0].host[0].leave(scope)
+    signature_finish(decl @sig shaped mm)
+    signature_leave(scope)
     cs_input[0].binders[0].formals = old_formals
     cs_input[0].binders[0].self = old_self
     cs_input[0].declarations[0][di].sig = sig

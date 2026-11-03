@@ -47,5 +47,6 @@ def jo_doubles(*tables):
         for name, functions in table.items():
             for function, line in functions.items():
                 merged.setdefault(name, {}).setdefault(function, line)
-    return {name: "use 'driver.jo'\n" + ''.join(line + '\n' for line in functions.values())
+    # (a `use` entry, keyed by its module, brings a type a double's signature names)
+    return {name: "use 'driver.jo'\n" + ''.join(line + '\n' for line in sorted(functions.values(), key=lambda line: not line.startswith('use ')))
             for name, functions in merged.items()}

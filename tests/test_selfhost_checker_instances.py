@@ -2,7 +2,8 @@
 import pytest
 
 from tests.support import compiler  # noqa: F401
-from tests.test_selfhost_checker_signature import DRIVER as SIGNATURE
+from tests.selfhost_expr_double import jo_doubles
+from tests.test_selfhost_checker_signature import DRIVER as SIGNATURE, SIGNATURE_JO
 from tests.test_selfhost_checker_resolve import compare
 
 DRIVER = SIGNATURE.split('main = ():')[0] + r'''
@@ -97,6 +98,7 @@ main = ():
     print(events)
     print("ok")
 '''
+JO_DOUBLES = jo_doubles(SIGNATURE_JO)
 
 
 @pytest.mark.core_quick
@@ -104,7 +106,7 @@ main = ():
 def test_checker_instances_twins(compiler, tmp_path, release):  # noqa: F811
     assert compare(compiler, tmp_path, release, DRIVER,
                    extra_stems=('checker_signature', 'type_substitute',
-                                'checker_results', 'checker_instances')).endswith(b'ok\n')
+                                'checker_results', 'checker_instances'), jo_doubles=JO_DOUBLES).endswith(b'ok\n')
 
 
 @pytest.mark.parametrize('statement,status', [
@@ -114,4 +116,4 @@ def test_checker_instances_twins(compiler, tmp_path, release):  # noqa: F811
 def test_checker_instances_reject_unbounded_requests(compiler, tmp_path, statement, status):  # noqa: F811
     compare(compiler, tmp_path, False, DRIVER.replace('    print(events)', '    ' + statement + '\n    print(events)'),
             status=status, extra_stems=('checker_signature', 'type_substitute',
-                                       'checker_results', 'checker_instances'))
+                                       'checker_results', 'checker_instances'), jo_doubles=JO_DOUBLES)

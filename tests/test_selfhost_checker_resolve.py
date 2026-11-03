@@ -201,7 +201,7 @@ def compare(compiler, tmp_path, release, driver, status=0, extra_stems=(), doubl
                 text = text.replace(".dewy'", ".jo'")
             (directory / f'{stem}.{extension}').write_text(text)
         for name, text in (jo_doubles or {}).items():
-            (directory / name).write_text(text)
+            (directory / name).write_text(text.replace(".dewy'", ".jo'") if extension == 'jo' else text)
         source, binary = directory / 'driver.jo', directory / 'driver'
         source.write_text(''.join(f"use '{s}.{extension}'\n" for s in stems) + driver)
         built = subprocess.run([compiler, 'build', source, '-o', binary,

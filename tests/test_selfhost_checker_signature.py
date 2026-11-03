@@ -2,6 +2,7 @@
 import pytest
 
 from tests.support import compiler  # noqa: F401
+from tests.selfhost_expr_double import jo_doubles
 from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER, compare
 
 DRIVER = RESOLVER.split('main = ():')[0] + r'''
@@ -38,8 +39,7 @@ sig_finish = (d: int, sig: mut FnSig, shaped: bool, mask: int):
         sig.contract = 456
         sig.params.push(T_BOOL)
     if shaped: sig.ret = i32(T_STR)
-sig_host = CheckerSignatureHost(sig_resume, sig_enter, sig_leave, sig_finish)
-sig_input = CheckerSignatureInput(&nodes, &lists, &declarations, &binders, &refine, &T_VOID, &sig_host)
+sig_input = CheckerSignatureInput(&nodes, &lists, &declarations, &binders, &refine, &T_VOID)
 sig_binding = checker_signature_bind(&sig_input)
 main = ():
     prepare()
@@ -88,9 +88,21 @@ main = ():
     print("ok")
 '''
 
+# The Jo services checker_signature calls, routed to the driver.
+SIGNATURE_JO = {
+    'check.jo': {
+        'checker_signature.dewy': "use 'checker_signature.dewy'",
+        'checker_state.dewy': "use 'checker_state.dewy'",
+        'signature_resume': 'signature_resume = (decl: int): sig_resume(decl)',
+        'signature_enter': 'signature_enter = (decl: int) -> CheckerSignatureScope: sig_enter(decl)',
+        'signature_leave': 'signature_leave = (scope: CheckerSignatureScope): sig_leave(scope)',
+        'signature_finish': 'signature_finish = (decl: int, sig: mut FnSig, shaped: bool, mask: int): sig_finish(decl, sig, shaped, mask)',
+    },
+}
+
 
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_signature_twins(compiler, tmp_path, release):  # noqa: F811
     assert compare(compiler, tmp_path, release, DRIVER,
-                   extra_stems=('checker_signature',)).endswith(b'ok\n')
+                   extra_stems=('checker_signature',), jo_doubles=jo_doubles(SIGNATURE_JO)).endswith(b'ok\n')

@@ -2,14 +2,10 @@ use 'node_store.dewy'
 use 'checker_state.dewy'
 use 'checker_resolve.dewy'
 use 'type_constructors.dewy'
+use 'check.jo'
 struct CheckerSignatureScope:
     context: int
     mark: int
-struct CheckerSignatureHost:
-    resume: (int) -> void
-    enter: (int) -> CheckerSignatureScope
-    leave: (CheckerSignatureScope) -> void
-    finish: (int, mut FnSig, bool, int) -> void
 struct CheckerSignatureInput:
     nodes: *(Node[])
     lists: *(i32[])
@@ -17,7 +13,6 @@ struct CheckerSignatureInput:
     binders: *RefineBindings
     refine: *bool
     void_type: *int
-    host: *CheckerSignatureHost
 cs_input: *CheckerSignatureInput
 checker_signature_bind = (input: *CheckerSignatureInput) -> int:
     cs_input = input
@@ -46,10 +41,10 @@ cs_written_refinement = (n: int) -> bool:
 fn_sig = (decl: int) -> FnSig:
     di = cs_decl_info(decl)
     if cs_input[0].declarations[0][di].sig.done: return cs_input[0].declarations[0][di].sig
-    cs_input[0].host[0].resume(decl)
+    signature_resume(decl)
     sig = FnSig(done = true)
     sig.nexplicit = cs_input[0].nodes[0][decl].nlist2
-    scope = cs_input[0].host[0].enter(decl)
+    scope = signature_enter(decl)
     ntp = int(cs_input[0].nodes[0][decl].nlist2)
     old_formals = cs_input[0].binders[0].formals
     old_self = cs_input[0].binders[0].self
@@ -74,8 +69,8 @@ fn_sig = (decl: int) -> FnSig:
     cs_input[0].binders[0].self = 0
     if cs_input[0].nodes[0][decl].a != 0: sig.ret = i32(ct_resolve_result(int(cs_input[0].nodes[0][decl].a)))
     else if cs_has_flag(decl, 4194304): sig.ret = i32(cs_input[0].void_type[0])
-    cs_input[0].host[0].finish(decl, sig, shaped, mm)
-    cs_input[0].host[0].leave(scope)
+    signature_finish(decl, sig, shaped, mm)
+    signature_leave(scope)
     cs_input[0].binders[0].formals = old_formals
     cs_input[0].binders[0].self = old_self
     cs_input[0].declarations[0][di].sig = sig
