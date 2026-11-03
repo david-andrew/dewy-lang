@@ -95,8 +95,10 @@ xe_num_services = CheckerNumericHost(xe_num_coerce, xe_num_potential, xe_num_num
 xe_num_inputs = CheckerNumericInput(&nodes, &types, &files, &T_INT, &T_MATH_INT, &T_U64, &T_FLOAT, &T_BOOL, &T_NEVER, &xe_num_services)
 xe_num_binding = checker_numeric_bind(&xe_num_inputs)
 xe_right_at = 0
+zc_rekind = false
 xe_call_host = (n: int, expected: int) -> int:
     events.push("call:{n}:{expected}")
+    if zc_rekind: nodes[n].kind = .int_lit
     T_STR
 xe_sibling_host = (n: int, t: int) -> int:
     events.push("sibling:{n}:{t}")
@@ -108,6 +110,21 @@ xe_other_host = (n: int, expected: int) -> int:
     events.push("other:{n}:{int(nodes[n].kind)}:{expected}")
     T_BOOL
 xe_arg_host = (a: int, pt: int, is_mut: bool): events.push("arg:{a}:{pt}:{is_mut}:{nodes[a].type}")
+# check_call_expr's Jo services answer what a call differential sets here.
+zc_literal = -1
+zc_unchecked = false
+zc_numeric = false
+zc_values = -1
+zc_nd = false
+zc_base = 0
+zc_members = 0
+zc_set = 9
+zc_marks: bool[]
+zc_members_host = (n: int): events.push("members:{n}")
+zc_spread_host = (n: int): events.push("spread:{n}")
+zc_host = CheckerCallHost(zc_members_host, zc_spread_host)
+zc_input = CheckerCallInput(&lists, &locals, &zc_members, &zc_set, &zc_host, &names, &zc_marks, &zc_marks, &fns)
+zc_binding = checker_call_bind(&zc_input)
 xe_inputs = CheckerExprInput(&nodes, &types, &files, &syms, &xe_scope, &ctxs, &cx, &xe_at, &xe_mods, &xe_found, &xe_ticks, &xe_struct, &xe_sentinel_name, &xe_temperature_on, &xe_values_on, &xe_watch_counts, &xe_checked, &T_BOOL, &T_INT, &T_U64, &T_MATH_INT, &xe_right_at)
 xe_binding = checker_expr_bind(&xe_inputs)
 sym_of = (kind: SK, ref: int) -> int:
@@ -316,14 +333,46 @@ binary_context = (e: int, t: int, op: int) -> bool: xe_context_host(e, t, op)
 binary_nd_hint = (n: int, ta: int, h: int) -> int: xe_nd_host(n, ta, h)
 binary_secret = (n: int, a: int, b: int) -> int: xe_secret_host(n, a, b)
 binary_rest = (n: int, expected: int, a: int, b: int, ta: int, tb: int, hint: int, flags: int) -> int: xe_rest_host(n, expected, a, b, ta, tb, hint, flags)
-check_call_expr = (n: int, expected: int) -> int: xe_call_host(n, expected)
+check_call = (n: int, expected: int) -> int: xe_call_host(n, expected)
+call_int_literal = (n: int, ex: int) -> int:
+    events.push("int-literal:{n}:{ex}")
+    if zc_literal == -2: print("literal-error:{n}"); exit(19)
+    if zc_literal >= 0: nodes[n].aux2 = 0
+    zc_literal
+call_map_rows = (n: int, ex: int): events.push("map-rows:{n}:{ex}")
+is_nd = (t: int) -> bool: zc_nd
+is_unchecked_at = (n: int) -> bool: zc_unchecked
+dewy_partial = (n: int, expected: int) -> int:
+    events.push("partial:{n}:{expected}")
+    T_INT
+dewy_data_after_give = (n: int): events.push("give:{n}")
 expr_sibling = (n: int, t: int) -> int: xe_sibling_host(n, t)
 expr_literal = (n: int, expected: int, ex: int) -> int: xe_literal_host(n, expected, ex)
 expr_other = (n: int, expected: int) -> int: xe_other_host(n, expected)
 arg_finish_rest = (a: int, pt: int, is_mut: bool): xe_arg_host(a, pt, is_mut)
 '''
 JO_DOUBLES = {'expr.jo': EXPR_JO,
-              'temperature_kinds.jo': "use 'driver.jo'\ntemperature_read = (n: int, t: int) -> int: xe_temperature_host(n, t)\n"}
+              'temperature_kinds.jo': "use 'driver.jo'\ntemperature_read = (n: int, t: int) -> int: xe_temperature_host(n, t)\n",
+              'check.jo': """use 'driver.jo'
+values_call = (n: int, expected: int) -> int:
+    events.push("values:{n}:{expected}")
+    zc_values
+sink_pack_call = (n: int): events.push("pack:{n}")
+""",
+              'concurrency.jo': """use 'driver.jo'
+concurrency_tasks: int[]
+concurrency_runtime_needed = false
+concurrency_calls: int[]
+concurrency_atomic_call = (n: int): events.push("atomic:{n}")
+""",
+              'juxtapose.jo': """use 'driver.jo'
+juxt_head_numeric = (r: int) -> bool: zc_numeric
+juxt_factor = (c: int) -> int:
+    events.push("factor:{c}")
+    c
+""",
+              'parallel_lower.jo': "use 'driver.jo'\nparallel_prepare = (n: int): events.push(\"parallel:{n}\")\n",
+              'effects.jo': "use 'driver.jo'\ncallable_base = (t0: int) -> int: if zc_base != 0: zc_base else: t0\n"}
 
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])

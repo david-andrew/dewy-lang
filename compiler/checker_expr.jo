@@ -26,6 +26,11 @@ use 'checker_coerce.dewy'
 use 'checker_call_queries.dewy'
 use 'expr.jo'
 use 'temperature_kinds.jo'
+use 'check.jo'
+use 'concurrency.jo'
+use 'juxtapose.jo'
+use 'parallel_lower.jo'
+use 'effects.jo'
 struct CheckerExprInput:
     nodes: *(Node[])
     types: *(TypeInfo[])
@@ -136,6 +141,7 @@ struct CheckerCallInput:
     names: *(str[])
     values_hit: *(bool[])
     spread_call: *(bool[])
+    functions: *(FnInst[])
 xe_lists: *(i32[])
 xe_locals: *(Local[])
 xe_members_name: *int
@@ -144,6 +150,7 @@ xe_call_host: *CheckerCallHost
 xe_names: *(str[])
 xe_values_hit: *(bool[])
 xe_spread_call: *(bool[])
+xe_functions: *(FnInst[])
 checker_call_bind = (input: *CheckerCallInput) -> int:
     xe_lists = input[0].lists
     xe_locals = input[0].locals
@@ -153,6 +160,7 @@ checker_call_bind = (input: *CheckerCallInput) -> int:
     xe_names = input[0].names
     xe_values_hit = input[0].values_hit
     xe_spread_call = input[0].spread_call
+    xe_functions = input[0].functions
     0
 xe_marked = (marks: *(bool[]), a: int) -> bool: a < marks[0].len() and marks[0][a]
 xe_one_value = (a: int) -> bool:
@@ -454,6 +462,58 @@ xe_binary = (n: int, expected: int) -> int:
 xe_word = (t0: int) -> bool:
     t = int(tu_prune(t0))
     xe_types[0][t].kind == .int_ and (t == xe_math_int[0] or xe_types[0][t].st == 0)
+check_call_expr = (n: int, expected: int) -> int:
+    ex = 0
+    if expected != 0: ex = xl_expected(expected)
+    if xe_nodes[0][n].aux2 == -1:
+        r = call_int_literal(n, ex)
+        if r >= 0: return r
+    if xe_flag(n, 16384): return check_dotted(n, expected)
+    callee = int(xe_nodes[0][n].a)
+    if ex != 0 and xe_nodes[0][callee].kind == .ident:
+        count = int(xe_nodes[0][n].nlist)
+        if count == 2 and (xe_types[0][ex].kind == .array or is_nd(ex)) and xe_names[0][int(xe_nodes[0][callee].name)] == "__shape_value":
+            check_expr(xe_kid(n, 0), ex)
+            xe_set_kid(n, 0, xe_last[0])
+        if count == 1 and xe_names[0][int(xe_nodes[0][callee].name)] == "__map_of": call_map_rows(n, ex)
+    if is_unchecked_at(n):
+        xs = xe_kid(n, 0)
+        i = xe_kid(n, 1)
+        xe_nodes[0][n].kind = .index
+        xe_nodes[0][n].a = i32(xs)
+        xe_nodes[0][n].b = i32(i)
+        xe_add_flag(n, 524288)
+        return check_expr(n, expected)
+    if xe_nodes[0][n].aux2 == -10:
+        if xe_flag(n, 536870912) and juxt_head_numeric(n): juxt_factor(n)
+        return dewy_partial(n, expected)
+    if xe_nodes[0][n].nlist > 0 and xe_nodes[0][n].aux2 == 0 and xe_dewy_at(xe_nodes[0][n].pos) and not xe_numeric_head(n):
+        if not values_settled(n):
+            vt = values_call(n, expected)
+            if vt >= 0: return xl_finish(n, vt, expected)
+    t = check_call(n, expected)
+    if xe_nodes[0][n].kind != .call: return xl_finish(n, t, expected)
+    if xe_nodes[0][n].aux == 2 and xe_nodes[0][n].nlist > 1 and not xe_dewy_at(xe_nodes[0][n].pos): dewy_data_after_give(n)
+    if xe_called(n) > 0:
+        if xe_functions[0][xe_called(n)].atomic_api: concurrency_atomic_call(n)
+        if xe_functions[0][xe_called(n)].task_api:
+            concurrency_tasks.push(n)
+            concurrency_runtime_needed = true
+    if xe_nodes[0][n].nlist == 2 and xe_called(n) > 0 and xe_functions[0][xe_called(n)].parallel_api:
+        concurrency_calls.push(n)
+        parallel_prepare(n)
+    if xe_called(n) > 0 and xe_nodes[0][n].nlist >= 1 and xe_dewy_at(xe_nodes[0][n].pos): map_float_key(n)
+    if xe_called(n) > 0 and xe_functions[0][xe_called(n)].pack != 0: sink_pack_call(n)
+    else if xe_nodes[0][n].aux == 1 and xe_fn_pack(callable_base(int(tu_prune(int(xe_nodes[0][int(xe_nodes[0][n].a)].type))))): sink_pack_call(n)
+    xl_finish(n, t, expected)
+xe_kid = (n: int, i: int) -> int: int(xe_lists[0][int(xe_nodes[0][n].list) + i])
+xe_set_kid = (n: int, i: int, v: int): xe_lists[0][int(xe_nodes[0][n].list) + i] = i32(v)
+xe_called = (n: int) -> int: if xe_nodes[0][n].aux == 0 and xe_nodes[0][n].sym > 0: int(xe_nodes[0][n].sym) else: 0
+xe_numeric_head = (n: int) -> bool:
+    if not xe_flag(n, 536870912): return false
+    k = xe_nodes[0][int(xe_nodes[0][n].a)].kind
+    (k == .ident or k == .field) and juxt_head_numeric(n)
+xe_fn_pack = (t: int) -> bool: xe_types[0][t].kind == .fn_ and xe_types[0][t].sign
 check_expr = (n: int, expected: int) -> int:
     xe_last[0] = n
     if xe_nodes[0][n].type != 0 and int(xe_nodes[0][n].flags) & 128 != 0: return int(xe_nodes[0][n].type)

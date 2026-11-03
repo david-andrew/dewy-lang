@@ -28,7 +28,7 @@ cz_spread_host = (n: int):
     nodes[n].kind = .record_lit
 cz_host = CheckerCallHost(cz_members_host, cz_spread_host)
 cz_marks: bool[]
-cz_input = CheckerCallInput(&lists, &locals, &cz_members, &cq_set, &cz_host, &names, &cz_marks, &cz_marks)
+cz_input = CheckerCallInput(&lists, &locals, &cz_members, &cq_set, &cz_host, &names, &cz_marks, &cz_marks, &fns)
 cz_binding = checker_call_bind(&cz_input)
 # An unchecked node of kind k with children, in a Dewy file.
 raw = (k: NK, children: int[] = [], a: int = 0) -> int:
@@ -47,6 +47,8 @@ show_all = (label: str, ns: int[]):
 MAIN = r'''
 main = ():
     prepare_expr()
+    # (call names checked through check_call_expr are spelled)
+    loop names.len() < 32: names.push("f{names.len()}")
     files.push(SrcFile(is_dewy = false))
     fn_t = int(tb_mk_fn([T_INT], T_INT, 0, 0, 0, false))
     bind(2, sym_of(.local, local_of(T_INT, 1)))

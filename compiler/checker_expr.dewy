@@ -4,7 +4,7 @@ from p"checker_types.dewy" import (TypeInfo StructInfo TK)
 from p"source_types.dewy" import SrcFile
 from p"type_inference.dewy" import tu_prune
 from p"type_constructors.dewy" import tb_mk_array
-from p"checker_state.dewy" import (FnCtx CheckerScope Sym SK StatementWatch Local ValueLoop)
+from p"checker_state.dewy" import (FnInst FnCtx CheckerScope Sym SK StatementWatch Local ValueLoop)
 from p"checker_literals.dewy" import (xl_expected xl_finish xl_check_int xl_check_str xl_check_scalar)
 from p"checker_idents.dewy" import xj_ident
 from p"checker_conditionals.dewy" import (xf_if xf_iflet)
@@ -23,9 +23,14 @@ from p"checker_in_range.dewy" import xy_check
 from p"checker_numeric.dewy" import xw_numeric
 from p"checker_exact.dewy" import (exact_potential exact_math_operand)
 from p"checker_coerce.dewy" import cq_settled
-from p"checker_call_queries.dewy" import ctx_dependent
-from p"expr.jo" import (expr_complete ident_unknown expr_module expr_values_use check_dotted binary_juxt binary_char_code binary_membership binary_quantity_hint binary_decimal dewy_set_literal binary_context binary_nd_hint binary_secret binary_rest check_call_expr expr_sibling expr_literal expr_other arg_finish_rest)
+from p"checker_call_queries.dewy" import (ctx_dependent map_float_key)
+from p"expr.jo" import (expr_complete ident_unknown expr_module expr_values_use check_dotted binary_juxt binary_char_code binary_membership binary_quantity_hint binary_decimal dewy_set_literal binary_context binary_nd_hint binary_secret binary_rest expr_sibling call_int_literal call_map_rows is_nd is_unchecked_at dewy_partial dewy_data_after_give check_call expr_literal expr_other arg_finish_rest)
 from p"temperature_kinds.jo" import temperature_read
+from p"check.jo" import (values_call sink_pack_call)
+from p"concurrency.jo" import (concurrency_tasks concurrency_runtime_needed concurrency_calls concurrency_atomic_call)
+from p"juxtapose.jo" import (juxt_head_numeric juxt_factor)
+from p"parallel_lower.jo" import parallel_prepare
+from p"effects.jo" import callable_base
 # The expression dispatcher: an already checked node, then each kind sent to its
 # leaf. A name is looked up here (the scope stack, then the module lookup cache);
 # only a cache miss asks the host. A binary operator's operands are checked here and
@@ -164,6 +169,7 @@ CheckerCallInput:type=[
     names:ptr<array<string>>
     values_hit:ptr<array<bool>>
     spread_call:ptr<array<bool>>
+    functions:ptr<array<FnInst>>
 ]
 let xe_lists:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
 let xe_locals:ptr<array<Local>>=$unsafe (uint64(0) as ptr<array<Local>>)
@@ -173,6 +179,7 @@ let xe_call_host:ptr<CheckerCallHost>=$unsafe (uint64(0) as ptr<CheckerCallHost>
 let xe_names:ptr<array<string>>=$unsafe (uint64(0) as ptr<array<string>>)
 let xe_values_hit:ptr<array<bool>>=$unsafe (uint64(0) as ptr<array<bool>>)
 let xe_spread_call:ptr<array<bool>>=$unsafe (uint64(0) as ptr<array<bool>>)
+let xe_functions:ptr<array<FnInst>>=$unsafe (uint64(0) as ptr<array<FnInst>>)
 checker_call_bind=(input:ptr<CheckerCallInput>):>XEWord=>$unsafe {
     xe_lists=input[0].lists
     xe_locals=input[0].locals
@@ -182,6 +189,7 @@ checker_call_bind=(input:ptr<CheckerCallInput>):>XEWord=>$unsafe {
     xe_names=input[0].names
     xe_values_hit=input[0].values_hit
     xe_spread_call=input[0].spread_call
+    xe_functions=input[0].functions
     0
 }
 xe_marked=(marks:ptr<array<bool>> a:XEWord):>bool=>$unsafe {a <? marks[0].length and marks[0].ptr[a]}
@@ -606,6 +614,80 @@ xe_word=(t0:XEWord):>bool=>$unsafe {
     let t=tu_prune(t0)
     xe_types[0].ptr[t].kind =? 'int_' and (t =? xe_math_int[0] or xe_types[0].ptr[t].st =? 0)
 }
+# A call: a big integer literal's call form, an elementwise call, the destination hints
+# of generated shape and map rows, the core library's unchecked `__at`, `@` partial
+# evaluation and values to expand go first; check_call then picks and checks it, and the
+# picked function's atomic, task, parallel, float-key and pack obligations are recorded.
+# O(1) here plus the services; services may grow every arena, so nodes are reread by ID.
+check_call_expr=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
+    let ex:XEWord=if expected =? 0 {0} else {xl_expected(expected)}
+    if xe_nodes[0].ptr[n].aux2 =? -1 {
+        let r=call_int_literal(n ex)
+        if r >=? 0 {return r}
+    }
+    # NF_BROADCAST 16384
+    if xe_flag(n 16384) {return check_dotted(n expected)}
+    let callee=XEWord(xe_nodes[0].ptr[n].a)
+    if ex not=? 0 and xe_nodes[0].ptr[callee].kind =? 'ident' {
+        let count=XEWord(xe_nodes[0].ptr[n].nlist)
+        if count =? 2 and (xe_types[0].ptr[ex].kind =? 'array' or is_nd(ex)) and xe_names[0].ptr[XEWord(xe_nodes[0].ptr[callee].name)] =? "__shape_value" {
+            check_expr(xe_kid(n 0) ex);
+            xe_set_kid(n 0 xe_last[0])
+        }
+        if count =? 1 and xe_names[0].ptr[XEWord(xe_nodes[0].ptr[callee].name)] =? "__map_of" {call_map_rows(n ex)}
+    }
+    if is_unchecked_at(n) {
+        let xs=xe_kid(n 0)
+        let i=xe_kid(n 1)
+        xe_nodes[0][n].kind='index'
+        xe_nodes[0][n].a=int32<overflow='wrap'>(xs)
+        xe_nodes[0][n].b=int32<overflow='wrap'>(i)
+        # NF_INBOUNDS 524288
+        xe_add_flag(n 524288)
+        return check_expr(n expected)
+    }
+    # AUX2_PARTIAL -10; NF_JUXT 536870912
+    if xe_nodes[0].ptr[n].aux2 =? -10 {
+        if xe_flag(n 536870912) and juxt_head_numeric(n) {juxt_factor(n);}
+        return dewy_partial(n expected)
+    }
+    if xe_nodes[0].ptr[n].nlist >? 0 and xe_nodes[0].ptr[n].aux2 =? 0 and xe_dewy_at(xe_nodes[0].ptr[n].pos) and not xe_numeric_head(n) {
+        if not values_settled(n) {
+            let vt=values_call(n expected)
+            if vt >=? 0 {return xl_finish(n vt expected)}
+        }
+    }
+    let t=check_call(n expected)
+    # (a call the check replaced, `int64(x)` of an int64 now x itself: its sym is not a function)
+    if xe_nodes[0].ptr[n].kind not=? 'call' {return xl_finish(n t expected)}
+    if xe_nodes[0].ptr[n].aux =? 2 and xe_nodes[0].ptr[n].nlist >? 1 and not xe_dewy_at(xe_nodes[0].ptr[n].pos) {dewy_data_after_give(n)}
+    if xe_called(n) >? 0 {
+        if xe_functions[0].ptr[xe_called(n)].atomic_api {concurrency_atomic_call(n)}
+        if xe_functions[0].ptr[xe_called(n)].task_api {
+            concurrency_tasks.push(n)
+            concurrency_runtime_needed=true
+        }
+    }
+    if xe_nodes[0].ptr[n].nlist =? 2 and xe_called(n) >? 0 and xe_functions[0].ptr[xe_called(n)].parallel_api {
+        concurrency_calls.push(n)
+        parallel_prepare(n)
+    }
+    if xe_called(n) >? 0 and xe_nodes[0].ptr[n].nlist >=? 1 and xe_dewy_at(xe_nodes[0].ptr[n].pos) {map_float_key(n)}
+    if xe_called(n) >? 0 and xe_functions[0].ptr[xe_called(n)].pack not=? 0 {sink_pack_call(n)} else if xe_nodes[0].ptr[n].aux =? 1 and xe_fn_pack(callable_base(tu_prune(XEWord(xe_nodes[0].ptr[XEWord(xe_nodes[0].ptr[n].a)].type)))) {sink_pack_call(n)}
+    xl_finish(n t expected)
+}
+xe_kid=(n:XEWord i:XEWord):>XEWord=>$unsafe {XEWord(xe_lists[0].ptr[XEWord(xe_nodes[0].ptr[n].list) + i])}
+xe_set_kid=(n:XEWord i:XEWord v:XEWord):>void=>$unsafe {xe_lists[0][XEWord(xe_nodes[0].ptr[n].list) + i]=int32<overflow='wrap'>(v)}
+# The function a call resolved to by name (aux 0), else 0.
+xe_called=(n:XEWord):>XEWord=>$unsafe {if xe_nodes[0].ptr[n].aux =? 0 and xe_nodes[0].ptr[n].sym >? 0 {XEWord(xe_nodes[0].ptr[n].sym)} else {0}}
+# A juxtaposed product headed by a number (`2 x`, `3 f.x`): not a call to expand.
+xe_numeric_head=(n:XEWord):>bool=>$unsafe {
+    if not xe_flag(n 536870912) {return false}
+    let k=xe_nodes[0].ptr[XEWord(xe_nodes[0].ptr[n].a)].kind
+    (k =? 'ident' or k =? 'field') and juxt_head_numeric(n)
+}
+# A function type that expresses several values (types.jo fn_type_pack).
+xe_fn_pack=(t:XEWord):>bool=>$unsafe {xe_types[0].ptr[t].kind =? 'fn_' and xe_types[0].ptr[t].sign}
 # Host records and Jo callers take machine words: the ABI of `(int, int) -> int`.
 check_expr=(n0:int64 expected0:int64):>int64=>$unsafe {
     let n=XEWord(n0)

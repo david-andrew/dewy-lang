@@ -1,0 +1,108 @@
+"""check_call_expr in the expression dispatcher's leaf: the paths before the pick and the
+picked function's obligations after it."""
+import pytest
+
+from tests.support import compiler  # noqa: F401
+from tests.test_selfhost_checker_call_args import DRIVER as CALL_ARGS
+from tests.test_selfhost_checker_expr import JO_DOUBLES, STEMS
+
+DRIVER = CALL_ARGS + r'''
+use 'concurrency.jo'
+# An unchecked call of callee named name with args, in a Dewy file unless jo.
+call = (name: int, args: int[], jo: bool = false) -> int:
+    callee = done(T_INT); nodes[callee].name = i32(name)
+    n = node(.call, callee, 0, 0, args)
+    nodes[n].flags = 0
+    nodes[n].pos = (if jo: 2 else: 1) << 40
+    nodes[n].pos += n
+    n
+fn_with = (atomic: bool, task: bool, parallel: bool, pack: int) -> int:
+    fns.push(FnInst(atomic_api = atomic, task_api = task, parallel_api = parallel, pack = pack))
+    fns.len() - 1
+picked = (n: int, f: int, aux: int = 0) -> int:
+    nodes[n].sym = i32(f); nodes[n].aux = i32(aux); n
+'''
+
+MAIN = r'''
+main = ():
+    prepare_expr()
+    loop names.len() < 32: names.push("f{names.len()}")
+    names[20] = "__shape_value"; names[21] = "__map_of"
+    files.push(SrcFile(is_dewy = false))
+    # The picked function's obligations: atomic and task entry points, parallel pairs, packs.
+    show(picked(call(3, [done(T_INT)]), fn_with(true, true, false, 0)))
+    print("tasks:{concurrency_tasks}:{concurrency_runtime_needed}")
+    show(picked(call(3, [done(T_INT), done(T_INT)]), fn_with(false, false, true, 0)))
+    show(picked(call(3, [done(T_INT)]), fn_with(false, false, true, 1)))
+    print("parallel:{concurrency_calls}")
+    pack_t = int(tb_mk_fn([T_INT], T_INT, 0, 0, 0, true))
+    value_call = picked(call(3, [done(T_INT)]), 0, 1)
+    nodes[int(nodes[value_call].a)].type = i32(pack_t)
+    show(value_call)
+    zc_base = int(tb_mk_fn([T_INT], T_INT, 0))
+    show(value_call)
+    zc_base = 0
+    # (a Jo file's give form; a call the pick replaced keeps none of these)
+    show(picked(call(3, [done(T_INT), done(T_INT)], true), fn_with(true, false, false, 0), 2))
+    zc_rekind = true
+    show(picked(call(3, [done(T_INT)]), fn_with(true, true, false, 1)))
+    zc_rekind = false
+    # Before the pick: elementwise calls, big integer literals, partial evaluation.
+    broadcast = call(3, [done(T_INT)]); nodes[broadcast].flags = 16384
+    show(broadcast, T_INT)
+    big = call(3, [done(T_INT)]); nodes[big].aux2 = -1
+    zc_literal = int(T_MATH_INT)
+    show(big)
+    big = call(3, [done(T_INT)]); nodes[big].aux2 = -1
+    zc_literal = -1
+    show(big, T_INT)
+    partial = call(3, [done(T_INT)]); nodes[partial].aux2 = -10
+    show(partial, T_INT)
+    nodes[partial].flags = 536870912; zc_numeric = true
+    show(partial, T_INT)
+    zc_numeric = false
+    # Values to expand: an argument that spreads asks values_call first.
+    spread = done(T_INT); nodes[spread].flags = i32(128 | 1024)
+    zc_values = int(T_BOOL)
+    show(call(3, [spread]))
+    zc_values = -1
+    show(call(3, [spread]))
+    numeric = call(3, [spread]); nodes[numeric].flags = 536870912; zc_numeric = true
+    show(numeric)
+    zc_numeric = false
+    # Destination hints: a generated shape check's value, a map's rows.
+    arr = int(tb_mk_array(T_INT))
+    shape = call(20, [done(arr), done(T_INT)])
+    show(shape, arr)
+    print("shape-kid:{lists[int(nodes[shape].list)]}")
+    show(call(20, [done(arr), done(T_INT)]), T_INT)
+    zc_nd = true
+    show(call(20, [done(arr), done(T_INT)]), T_INT)
+    zc_nd = false
+    show(call(21, [done(T_INT)]), T_INT)
+    show(call(21, [done(T_INT)]))
+    print(events)
+    print("ok")
+'''
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
+def test_checker_call_expr_twins(compiler, tmp_path, release):  # noqa: F811
+    from tests.test_selfhost_checker_resolve import compare
+    assert compare(compiler, tmp_path, release, DRIVER + MAIN, extra_stems=STEMS, jo_doubles=JO_DOUBLES).endswith(b'ok\n')
+
+
+def test_checker_call_expr_literal_first(compiler, tmp_path):  # noqa: F811
+    # A big integer literal's call form is answered before anything else about the call.
+    from tests.test_selfhost_checker_resolve import compare
+    main = r'''
+main = ():
+    prepare_expr()
+    big = call(3, [done(T_INT)]); nodes[big].aux2 = -1; nodes[big].flags = 16384
+    zc_literal = -2
+    check_expr(big, T_INT)
+    print("unreachable")
+'''
+    output = compare(compiler, tmp_path, False, DRIVER + main, status=19, extra_stems=STEMS, jo_doubles=JO_DOUBLES)
+    assert output.startswith(b'literal-error:') and b'unreachable' not in output

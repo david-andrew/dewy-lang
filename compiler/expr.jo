@@ -9281,75 +9281,34 @@ ident_error = (n: int, kind: int):
     if sk == .reflected: fatal(nodes[n].pos, "field descriptors cannot escape into runtime storage; use .name or .type")
     fatal(nodes[n].pos, "invalid use of '{name_of(nm)}'")
 
-check_call_expr = (n: int, expected: int) -> int:
-    ex = ce_expected(expected)
-    exk = TK.void_
-    if ex != 0: exk = types[ex].kind
-    t = 0
-    if nodes[n].aux2 == -1:
-        literal_target = ex
-        if exk == .opt: literal_target = prune(int(types[ex].elem))
-        if literal_target == 0 or literal_target == T_MATH_INT:
-            nodes[n].aux2 = 0
-            check_expr(n, 0)
-            coerce(n, T_MATH_INT)
-            last_checked = n
-            return T_MATH_INT
-        if literal_target == 0 or not bundled_bigint_type(literal_target):
-            if literal_target != 0 and is_int(literal_target) and literal_target != T_MATH_INT:
-                fatal(nodes[n].pos, "integer literal does not fit in {dt(literal_target)}")
-            fatal(nodes[n].pos, "integer literal does not fit in int's interim int64 representation; use an explicit BigInt annotation")
+# check_call_expr (checker_expr.dewy) services. A call node holding an integer literal too
+# large for int64 (aux2 -1): the literal itself (a math int) when nothing narrower is
+# wanted, else -1 to check the call that makes the wanted BigInt.
+call_int_literal = (n: int, ex: int) -> int:
+    literal_target = ex
+    if ex != 0 and types[ex].kind == .opt: literal_target = prune(int(types[ex].elem))
+    if literal_target == 0 or literal_target == T_MATH_INT:
         nodes[n].aux2 = 0
-    if has_flag(n, NF_BROADCAST): return check_dotted(n, expected)
-    # The generated shape check preserves the value's destination type. Pass
-    # that hint through before generic argument inference fixes its elements.
-    if ex != 0 and (exk == .array or is_nd(ex)) and nkids(n) == 2:
-        callee = int(nodes[n].a)
-        if nodes[callee].kind == .ident and name_of(int(nodes[callee].name)) == "__shape_value":
-            check_expr(kid(n, 0), ex)
-            set_kid(n, 0, last_checked)
-    # (`let d:dict<string House> = [loop ... k -> v]`: its pairs are made as the
-    # dictionary's key and value types, so a refined value takes its conversion)
-    if ex != 0 and is_map_type(ex) and nkids(n) == 1 and dewy_at(nodes[n].pos):
-        callee = int(nodes[n].a)
-        block = kid(n, 0)
-        if nodes[callee].kind == .ident and name_of(int(nodes[callee].name)) == "__map_of" and nodes[block].kind == .block and has_flag(block, NF_COMPREHENSION) and nkids(block) > 0 and nodes[kid(block, 0)].kind == .vardecl and nodes[kid(block, 0)].a == 0:
-            si = int(types[ex].st)
-            pair = mk_tuple([struct_targ(si, 0), struct_targ(si, 1)])
-            check_expr(block, mk_array(pair))
-            set_kid(n, 0, last_checked)
-    if is_unchecked_at(n):
-        # __at(xs, i) in the core library: xs[i] where the library knows i is in bounds
-        args = kids(n)
-        nodes[n].kind = .index
-        nodes[n].a = i32(args[0])
-        nodes[n].b = i32(args[1])
-        add_flag(n, NF_INBOUNDS)
-        return check_expr(n, expected)
-    if nodes[n].aux2 == i32(AUX2_PARTIAL):
-        if has_flag(n, NF_JUXT) and juxt_head_numeric(n): juxt_factor(n)
-        return dewy_partial(n, expected)
-    # (arguments giving several values, or a spread container: substitution invariance)
-    if nkids(n) > 0 and nodes[n].aux2 == 0 and dewy_at(nodes[n].pos) and not (has_flag(n, NF_JUXT) and (nodes[int(nodes[n].a)].kind == .ident or nodes[int(nodes[n].a)].kind == .field) and juxt_head_numeric(n)):
-        if not values_settled(n):
-            vt = values_call(n, expected)
-            if vt >= 0: return ce_finish(n, vt, expected)
-    t = check_call(n, expected)
-    # (a call the check replaced, `int64(x)` of an int64 now x itself: its sym is not a function)
-    if nodes[n].kind != .call: return ce_finish(n, t, expected)
-    if nodes[n].aux == 2 and nkids(n) > 1 and not dewy_at(nodes[n].pos): dewy_data_after_give(n)
-    if nodes[n].aux == 0 and nodes[n].sym > 0:
-        if fns[int(nodes[n].sym)].atomic_api: concurrency_atomic_call(n)
-        if fns[int(nodes[n].sym)].task_api:
-            concurrency_tasks.push(n)
-            concurrency_runtime_needed = true
-    if nkids(n) == 2 and nodes[n].aux == 0 and nodes[n].sym > 0 and fns[int(nodes[n].sym)].parallel_api:
-        concurrency_calls.push(n)
-        parallel_prepare(n)
-    if nodes[n].aux == 0 and nodes[n].sym > 0 and nkids(n) >= 1 and dewy_at(nodes[n].pos): map_float_key(n)
-    if nodes[n].aux == 0 and nodes[n].sym > 0 and fns[int(nodes[n].sym)].pack != 0: sink_pack_call(n)
-    else if nodes[n].aux == 1 and fn_type_pack(callable_base(prune(ntype(int(nodes[n].a))))): sink_pack_call(n)
-    ce_finish(n, t, expected)
+        check_expr(n, 0)
+        coerce(n, T_MATH_INT)
+        last_checked = n
+        return T_MATH_INT
+    if not bundled_bigint_type(literal_target):
+        if is_int(literal_target) and literal_target != T_MATH_INT:
+            fatal(nodes[n].pos, "integer literal does not fit in {dt(literal_target)}")
+        fatal(nodes[n].pos, "integer literal does not fit in int's interim int64 representation; use an explicit BigInt annotation")
+    nodes[n].aux2 = 0
+    -1
+# (`let d:dict<string House> = [loop ... k -> v]`: its pairs are made as the
+# dictionary's key and value types, so a refined value takes its conversion)
+call_map_rows = (n: int, ex: int):
+    if not is_map_type(ex) or not dewy_at(nodes[n].pos): return
+    block = kid(n, 0)
+    if nodes[block].kind == .block and has_flag(block, NF_COMPREHENSION) and nkids(block) > 0 and nodes[kid(block, 0)].kind == .vardecl and nodes[kid(block, 0)].a == 0:
+        si = int(types[ex].st)
+        pair = mk_tuple([struct_targ(si, 0), struct_targ(si, 1)])
+        check_expr(block, mk_array(pair))
+        set_kid(n, 0, last_checked)
 
 check_str_expr = (n: int, expected: int) -> int: xl_check_str(n, expected)
 
