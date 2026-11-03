@@ -1,5 +1,5 @@
 $runtime_checks
-from p"node_store.dewy" import (Node node_set_list)
+from p"node_store.dewy" import (Node node_set_list node_kids)
 from p"checker_types.dewy" import (TypeInfo StructInfo TK)
 from p"source_types.dewy" import SrcFile
 from p"type_inference.dewy" import tu_prune
@@ -23,14 +23,15 @@ from p"checker_in_range.dewy" import xy_check
 from p"checker_numeric.dewy" import xw_numeric
 from p"checker_exact.dewy" import (exact_potential exact_math_operand)
 from p"checker_coerce.dewy" import cq_settled
-from p"checker_call_queries.dewy" import (ctx_dependent map_float_key)
-from p"expr.jo" import (expr_complete ident_unknown expr_module expr_values_use check_dotted binary_juxt binary_char_code binary_membership binary_quantity_hint binary_decimal dewy_set_literal binary_context binary_nd_hint binary_secret binary_rest expr_sibling call_int_literal call_map_rows is_nd is_unchecked_at dewy_partial dewy_data_after_give check_call expr_literal expr_other arg_finish_rest)
+from p"checker_call_queries.dewy" import (ctx_dependent map_float_key habit_call_check)
+from p"expr.jo" import (expr_complete ident_unknown expr_module expr_values_use check_dotted binary_juxt binary_char_code binary_membership binary_quantity_hint binary_decimal dewy_set_literal binary_context binary_nd_hint binary_secret binary_rest expr_sibling call_int_literal call_map_rows is_nd is_unchecked_at dewy_partial dewy_data_after_give call_head call_typeapply call_ident_special call_dotname call_member call_index call_value path_literal_module call_by_name expr_literal expr_other arg_finish_rest)
 from p"temperature_kinds.jo" import temperature_read
 from p"check.jo" import (values_call sink_pack_call)
 from p"concurrency.jo" import (concurrency_tasks concurrency_runtime_needed concurrency_calls concurrency_atomic_call)
 from p"juxtapose.jo" import (juxt_head_numeric juxt_factor)
 from p"parallel_lower.jo" import parallel_prepare
 from p"effects.jo" import callable_base
+from p"util.jo" import pos_in_lib
 # The expression dispatcher: an already checked node, then each kind sent to its
 # leaf. A name is looked up here (the scope stack, then the module lookup cache);
 # only a cache miss asks the host. A binary operator's operands are checked here and
@@ -675,6 +676,34 @@ check_call_expr=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
     if xe_called(n) >? 0 and xe_nodes[0].ptr[n].nlist >=? 1 and xe_dewy_at(xe_nodes[0].ptr[n].pos) {map_float_key(n)}
     if xe_called(n) >? 0 and xe_functions[0].ptr[xe_called(n)].pack not=? 0 {sink_pack_call(n)} else if xe_nodes[0].ptr[n].aux =? 1 and xe_fn_pack(callable_base(tu_prune(XEWord(xe_nodes[0].ptr[XEWord(xe_nodes[0].ptr[n].a)].type)))) {sink_pack_call(n)}
     xl_finish(n t expected)
+}
+# A call by its callee's kind: the head checks every call gets, then a type application,
+# a name (its juxtaposed and len forms, the habit checks outside the library, the
+# function picked by name, from a `p"..."` module when it names one), an enum variant,
+# a member, a type or generic index, else the callee as a value. The named path runs
+# here; the rest are services. O(arguments) plus the services.
+check_call=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
+    let head=call_head(n expected)
+    if head >=? 0 {return head}
+    let callee=XEWord(xe_nodes[0].ptr[n].a)
+    let ck=xe_nodes[0].ptr[callee].kind
+    if ck =? 'typeapply' {return call_typeapply(n expected)}
+    if ck =? 'ident' {
+        let special=call_ident_special(n expected)
+        if special >=? 0 {return special}
+        let name=XEWord(xe_nodes[0].ptr[callee].name)
+        let args=node_kids(@xe_nodes[0] @xe_lists[0] n)
+        if not pos_in_lib(xe_nodes[0].ptr[n].pos) {habit_call_check(n name args)}
+        # (path_literal_module answers a module or -1)
+        return call_by_name(n name path_literal_module(n callee args) args expected false)
+    }
+    if ck =? 'dotname' {return call_dotname(n expected)}
+    if ck =? 'field' {return call_member(n expected)}
+    if ck =? 'index' {
+        let indexed=call_index(n expected)
+        if indexed >=? 0 {return indexed}
+    }
+    call_value(n expected)
 }
 xe_kid=(n:XEWord i:XEWord):>XEWord=>$unsafe {XEWord(xe_lists[0].ptr[XEWord(xe_nodes[0].ptr[n].list) + i])}
 xe_set_kid=(n:XEWord i:XEWord v:XEWord):>void=>$unsafe {xe_lists[0][XEWord(xe_nodes[0].ptr[n].list) + i]=int32<overflow='wrap'>(v)}

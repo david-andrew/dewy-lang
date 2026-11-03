@@ -31,6 +31,7 @@ use 'concurrency.jo'
 use 'juxtapose.jo'
 use 'parallel_lower.jo'
 use 'effects.jo'
+use 'util.jo'
 struct CheckerExprInput:
     nodes: *(Node[])
     types: *(TypeInfo[])
@@ -506,6 +507,25 @@ check_call_expr = (n: int, expected: int) -> int:
     if xe_called(n) > 0 and xe_functions[0][xe_called(n)].pack != 0: sink_pack_call(n)
     else if xe_nodes[0][n].aux == 1 and xe_fn_pack(callable_base(int(tu_prune(int(xe_nodes[0][int(xe_nodes[0][n].a)].type))))): sink_pack_call(n)
     xl_finish(n, t, expected)
+check_call = (n: int, expected: int) -> int:
+    head = call_head(n, expected)
+    if head >= 0: return head
+    callee = int(xe_nodes[0][n].a)
+    ck = xe_nodes[0][callee].kind
+    if ck == .typeapply: return call_typeapply(n, expected)
+    if ck == .ident:
+        special = call_ident_special(n, expected)
+        if special >= 0: return special
+        name = int(xe_nodes[0][callee].name)
+        args = node_kids(mut xe_nodes[0], mut xe_lists[0], n)
+        if not pos_in_lib(xe_nodes[0][n].pos): habit_call_check(n, name, args)
+        return call_by_name(n, name, path_literal_module(n, callee, args), args, expected, false)
+    if ck == .dotname: return call_dotname(n, expected)
+    if ck == .field: return call_member(n, expected)
+    if ck == .index:
+        indexed = call_index(n, expected)
+        if indexed >= 0: return indexed
+    call_value(n, expected)
 xe_kid = (n: int, i: int) -> int: int(xe_lists[0][int(xe_nodes[0][n].list) + i])
 xe_set_kid = (n: int, i: int, v: int): xe_lists[0][int(xe_nodes[0][n].list) + i] = i32(v)
 xe_called = (n: int) -> int: if xe_nodes[0][n].aux == 0 and xe_nodes[0][n].sym > 0: int(xe_nodes[0][n].sym) else: 0

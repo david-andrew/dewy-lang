@@ -117,6 +117,11 @@ zc_numeric = false
 zc_values = -1
 zc_nd = false
 zc_base = 0
+zc_head = -1
+zc_special = -1
+zc_index = -1
+zc_module = -1
+zc_lib = true
 zc_members = 0
 zc_set = 9
 zc_marks: bool[]
@@ -333,7 +338,19 @@ binary_context = (e: int, t: int, op: int) -> bool: xe_context_host(e, t, op)
 binary_nd_hint = (n: int, ta: int, h: int) -> int: xe_nd_host(n, ta, h)
 binary_secret = (n: int, a: int, b: int) -> int: xe_secret_host(n, a, b)
 binary_rest = (n: int, expected: int, a: int, b: int, ta: int, tb: int, hint: int, flags: int) -> int: xe_rest_host(n, expected, a, b, ta, tb, hint, flags)
-check_call = (n: int, expected: int) -> int: xe_call_host(n, expected)
+call_head = (n: int, expected: int) -> int: zc_head
+call_typeapply = (n: int, expected: int) -> int: xe_call_host(n, expected)
+call_ident_special = (n: int, expected: int) -> int: zc_special
+call_dotname = (n: int, expected: int) -> int: xe_call_host(n, expected)
+call_member = (n: int, expected: int) -> int: xe_call_host(n, expected)
+call_index = (n: int, expected: int) -> int: zc_index
+call_value = (n: int, expected: int) -> int:
+    events.push("value-call:{n}")
+    xe_call_host(n, expected)
+path_literal_module = (n: int, callee: int, args: int[]) -> int: zc_module
+call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, ufcs: bool) -> int:
+    if mod_scope >= 0 or args.len() != 1: events.push("by-name:{name}:{mod_scope}:{args}")
+    xe_call_host(n, expected)
 call_int_literal = (n: int, ex: int) -> int:
     events.push("int-literal:{n}:{ex}")
     if zc_literal == -2: print("literal-error:{n}"); exit(19)
@@ -372,6 +389,7 @@ juxt_factor = (c: int) -> int:
     c
 """,
               'parallel_lower.jo': "use 'driver.jo'\nparallel_prepare = (n: int): events.push(\"parallel:{n}\")\n",
+              'util.jo': "use 'driver.jo'\npos_in_lib = (pos: int) -> bool: zc_lib\n",
               'effects.jo': "use 'driver.jo'\ncallable_base = (t0: int) -> int: if zc_base != 0: zc_base else: t0\n"}
 
 @pytest.mark.core_quick

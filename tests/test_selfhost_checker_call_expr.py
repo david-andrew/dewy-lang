@@ -8,6 +8,9 @@ from tests.test_selfhost_checker_expr import JO_DOUBLES, STEMS
 
 DRIVER = CALL_ARGS + r'''
 use 'concurrency.jo'
+zh_habits: int[] = [3, 0, 0, 0, 0, 0, 0, 0, 0]
+zh_input = CheckerCallQueryInput(&nodes, &lists, &files, &cq_names, &cq_set, &fns, &cq_float_names, &cq_host, &syms, &names, &cq_family, &cq_family, &cq_family, &cq_family, &cq_family, &zh_habits)
+zh_binding = checker_call_queries_bind(&zh_input)
 # An unchecked call of callee named name with args, in a Dewy file unless jo.
 call = (name: int, args: int[], jo: bool = false) -> int:
     callee = done(T_INT); nodes[callee].name = i32(name)
@@ -19,6 +22,11 @@ call = (name: int, args: int[], jo: bool = false) -> int:
 fn_with = (atomic: bool, task: bool, parallel: bool, pack: int) -> int:
     fns.push(FnInst(atomic_api = atomic, task_api = task, parallel_api = parallel, pack = pack))
     fns.len() - 1
+# An unchecked call whose callee is a node of kind k.
+headed = (k: NK) -> int:
+    n = call(3, [done(T_INT)])
+    nodes[int(nodes[n].a)].kind = k
+    n
 picked = (n: int, f: int, aux: int = 0) -> int:
     nodes[n].sym = i32(f); nodes[n].aux = i32(aux); n
 '''
@@ -81,6 +89,25 @@ main = ():
     zc_nd = false
     show(call(21, [done(T_INT)]), T_INT)
     show(call(21, [done(T_INT)]))
+    # check_call: the head checks, then the callee's kind; a name is picked here.
+    zc_head = int(T_BOOL)
+    show(call(3, [done(T_INT)]))
+    zc_head = -1
+    zc_special = int(T_BOOL)
+    show(call(3, [done(T_INT)]))
+    zc_special = -1
+    zc_module = 6
+    show(call(3, [done(T_INT)]))
+    zc_module = -1
+    # (outside the library a habit-named call is asked about: name 3 is the first habit's)
+    zc_lib = false
+    show(call(3, [done(T_INT), done(T_INT)]))
+    show(call(3, [done(T_INT), done(T_INT), done(T_INT), done(T_INT)]))
+    zc_lib = true
+    loop k in [NK.typeapply, NK.dotname, NK.field, NK.index, NK.call]: show(headed(k))
+    zc_index = int(T_BOOL)
+    show(headed(.index))
+    zc_index = -1
     print(events)
     print("ok")
 '''
