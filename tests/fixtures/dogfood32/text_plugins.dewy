@@ -1,0 +1,12 @@
+# Text filters. They register themselves at start-up.
+import p"../../cases/dogfood/129_plugin_registry.dewy" as host
+
+caps = (s:string):>string => s.upper
+exclaim = (s:string):>string => "{s}!"
+# A filter built from others, looked up through the host at call time.
+shout = (s:string):>string => host.pipe("upper|exclaim|exclaim" s)
+
+host.register(host.Plugin["upper" "text" @caps])
+host.register(host.Plugin["exclaim" "text" @exclaim])
+host.register(host.Plugin["shout" "text" @shout])
+let seen_at_start = host.registry.length

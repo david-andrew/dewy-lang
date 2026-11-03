@@ -1,0 +1,19 @@
+# Counting filters. "double" runs a text filter twice through the host.
+import p"../../cases/dogfood/129_plugin_registry.dewy" as host
+import p"text_plugins.dewy" as text
+
+words = (s:string):>string => {
+    let n = [loop w in s.split(" ") if w.length >? 0 w].length
+    "{s} ({n} words)"
+}
+vowels = (s:string):>string => {
+    let n = 0
+    loop c in s.lower { if c in? "aeiou" n += 1 }
+    "{s} ({n} vowels)"
+}
+double = (s:string):>string => text.exclaim(text.exclaim(s))
+
+host.register(host.Plugin["words" "count" @words])
+host.register(host.Plugin["vowels" "count" @vowels])
+host.register(host.Plugin["double" "count" @double])
+let seen_at_start = host.registry.length

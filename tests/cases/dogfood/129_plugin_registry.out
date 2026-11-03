@@ -1,0 +1,17 @@
+host: 6 plugins before main
+text module saw 3, count module saw 6
+  text.upper
+  text.exclaim
+  text.shout
+  count.words
+  count.vowels
+  count.double
+upper|exclaim  plugins load in order  -> PLUGINS LOAD IN ORDER!
+shout          import cycles          -> IMPORT CYCLES!!
+words|double   one big file           -> one big file (3 words)!!
+vowels         Dewy modules           -> Dewy modules (4 vowels)
+missing|upper  unknown names pass     -> UNKNOWN NAMES PASS
+last 3 results:
+  words|double -> one big file (3 words)!!
+  vowels -> Dewy modules (4 vowels)
+  missing|upper -> UNKNOWN NAMES PASS

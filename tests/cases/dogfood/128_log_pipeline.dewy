@@ -1,0 +1,120 @@
+# modes: native native-release
+# A three-stage log pipeline. A reader task pushes raw lines through a small
+# spsc ring (so it waits whenever the parser falls behind), the parser turns
+# them into entries for an mpmc work queue, and two workers tally them.
+# Afterwards an alert outbox with room for two shows what a failed try_send
+# gives back.
+
+Level:type = 'info' | 'warn' | 'error'
+Entry:type = [ms:int level:Level source:string text:string]
+Tally:type = [entries:int errors:int warns:int slow:int bytes:int]
+
+const RAW = [
+    "1000 INFO  api    GET /users 12ms"
+    "1004 WARN  db     pool at 80%"
+    "1010 INFO  api    GET /orders 340ms"
+    "1011 ERROR db     timeout after 5000ms"
+    "1015 INFO  cache  hit ratio 0.93"
+    "1020 ERROR api    upstream 502"
+    "1022 INFO  api    POST /orders 95ms"
+    "1030 WARN  cache  eviction storm"
+    "1031 INFO  api    GET /health 1ms"
+    "1040 ERROR auth   token expired"
+    "1041 INFO  api    GET /users 410ms"
+    "1050 INFO  db     vacuum done"
+]
+
+level_of = (word:string):>Level => {
+    if word =? "ERROR" return 'error'
+    if word =? "WARN" return 'warn'
+    'info'
+}
+
+# "1010 INFO  api    GET /orders 340ms" -> [1010 'info' "api" "GET /orders 340ms"]
+parse = (line:string):>Entry => {
+    let words = [loop w in line.split(" ") if w.length >? 0 w]
+    if words.length <? 3 return Entry[0 'info' "?" line]
+    let ms = to_int(words[0]) ?? 0
+    let text = " ".join(words[3..])
+    Entry[ms level_of(words[1]) words[2] text]
+}
+
+# A message is slow when it ends in a duration of 300ms or more.
+is_slow = (text:string):>bool => {
+    let words = text.split(" ")
+    let last = words[words.length - 1]
+    if not last.endswith("ms") return false
+    let n = to_int(last[..last.length - 2)) ?? 0
+    n >=? 300
+}
+
+work = (jobs:Mpmc<Entry>):>Tally => {
+    let t = Tally[0 0 0 0 0]
+    loop true {
+        let e = jobs.receive
+        if e is? Closed break
+        if e is? Canceled break
+        t.entries += 1
+        t.bytes += e.text.length
+        if e.level =? 'error' t.errors += 1
+        if e.level =? 'warn' t.warns += 1
+        if is_slow(e.text) t.slow += 1
+    }
+    t
+}
+
+main = () => {
+    let [tx rx] = spsc<string 2>().split
+    let jobs = mpmc<Entry>(4)
+    concurrent {
+        spawn {
+            loop line in RAW { if tx.send(line) is? Unsent<string> break }
+            tx.close
+        }
+        spawn {
+            loop true {
+                let line = rx.receive
+                if line is? Closed break
+                if line is? Canceled break
+                if jobs.send(parse(line)) is? Unsent<Entry> break
+            }
+            jobs.close
+        }
+        let a = spawn work(jobs)
+        let b = spawn work(jobs)
+    }
+    let ta = a or_throw
+    let tb = b or_throw
+    let total = Tally[
+        ta.entries + tb.entries
+        ta.errors + tb.errors
+        ta.warns + tb.warns
+        ta.slow + tb.slow
+        ta.bytes + tb.bytes
+    ]
+    printl"entries {total.entries}: {total.errors} errors, {total.warns} warnings, {total.slow} slow"
+    printl"message bytes {total.bytes}"
+
+    # Alerts go to an outbox with room for two; the rest come back as Unsent.
+    let outbox = channel<Entry>(2)
+    let deferred:array<Entry> = []
+    loop line in RAW {
+        let e = parse(line)
+        if e.level not=? 'error' continue
+        match outbox.try_send(e) {
+            u:Unsent<Entry> => {
+                let why = if u.reason is? Full "full" else "closed"
+                printl"deferred {u.value.source} at {u.value.ms}: {why}"
+                deferred.push(u.value)
+            }
+            _ => printl"queued {e.source} at {e.ms}"
+        }
+    }
+    loop true {
+        let got = outbox.try_receive
+        if got is? Empty break
+        if got is? Entry printl"page on-call: {got.source}: {got.text}"
+        else break
+    }
+    printl"{deferred.length} alert(s) wait for the next round"
+}

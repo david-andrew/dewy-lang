@@ -1,0 +1,70 @@
+# Parallel map-reduce word count. Each document is tokenized in parallel by a
+# caller-supplied callback, the per-document counts are merged in input order,
+# and the top words are reported. Batches of documents are move-only records
+# that share their text buffer and count themselves out when released.
+
+let released:int64 = 0
+
+Batch:type = type of [
+    id:int64
+    docs:array<string>
+    $__drop__
+    release = ():>void => { released += 1 }
+]
+
+# Lowercase words, punctuation stripped.
+tokens = (line:string):>array<string> => {
+    let out:array<string> = []
+    loop raw in line.lower.split(" ") {
+        let w = raw.trim(".,;:!?\"'()")
+        if w.length >? 0 out.push(w)
+    }
+    out
+}
+
+# Only words of four letters or more.
+long_tokens = (line:string):>array<string> => [loop w in tokens(line) if w.length >=? 4 w]
+
+$parallel_safe
+map_reduce = (docs:array<string> split:<(line:string):>array<string>>):>dict<string int> => {
+    let parts = [parallel d in docs split(d)]
+    let counts:dict<string int> = []
+    loop words in parts {
+        loop w in words {
+            counts.insert_if_absent(w 0);
+            counts[w] += 1
+        }
+    }
+    counts
+}
+
+top = (counts:dict<string int> k:int):>array<string> => {
+    let words = counts.keys.values.sorted
+    let ranked = words.sorted(key=(w:string) => -(counts.get(w) ?? 0))
+    ranked[$clamp 0..k)
+}
+
+# Takes the batch: it is released when this returns.
+summarize = (b:Batch split:<(line:string):>array<string>>):>void => {
+    let counts = map_reduce(b.docs @split)
+    let total = 0
+    loop c in counts.values total += c
+    printl"batch {b.id}: {b.docs.length} docs, {total} words, {counts.length} distinct"
+    loop w in top(counts 4) printl"    {w:<10} {counts.get(w) ?? 0}"
+}
+
+main = () => {
+    let shelf = [
+        "The quick brown fox jumps over the lazy dog."
+        "A lazy afternoon: the dog sleeps, the fox waits."
+        "Quick thinking saves the day; quick hands save the fox."
+        "Over and over, the brown dog dreams of the quick fox!"
+    ]
+    let first = Batch[1 shelf]
+    let second = Batch[2 shelf[2..)]
+    summarize(first @tokens)
+    printl"released after one: {released}"
+    summarize(second @long_tokens)
+    printl"released after two: {released}"
+    printl"shelf still holds {shelf.length} docs"
+}

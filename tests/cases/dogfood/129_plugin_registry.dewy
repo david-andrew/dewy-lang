@@ -1,0 +1,66 @@
+# A text-filter plugin registry split over three modules that import each
+# other. The host owns the registry; each plugin module registers its filters
+# in its own top-level code, and some filters call back into the host to run
+# other plugins by name. Start-up order comes from what each line reads.
+import p"../../fixtures/dogfood32/text_plugins.dewy" as text
+import p"../../fixtures/dogfood32/count_plugins.dewy" as count
+
+Plugin:type = [name:string module:string run:<(s:string):>string>]
+
+# The last N results, oldest first; N is part of the type.
+Recent:type = <T N>[
+    items:array<T>
+    room = ():>int64 => N
+]
+
+let registry:array<Plugin> = []
+let log:Recent<string 3> = [[]]
+
+register = (p:Plugin):>void => { registry.push(p) }
+
+find = (name:string):>int => {
+    loop i in [0..registry.length) {
+        if registry[i].name =? name return i
+    }
+    -1
+}
+
+# Run one plugin by name; an unknown name leaves the text alone.
+run = (name:string s:string):>string => {
+    let i = find(name)
+    if i <? 0 or i >=? registry.length return s
+    registry[i].run(s)
+}
+
+# Run a pipeline written as "a|b|c".
+pipe = (spec:string s:string):>string => {
+    let out = s
+    loop name in spec.split("|") { out = run(name out) }
+    out
+}
+
+remember = (@r:Recent<string 3> line:string):>void => {
+    r.items.push(line)
+    if r.items.length >? r.room r.items.pop(0);
+}
+
+printl"host: {registry.length} plugins before main"
+printl"text module saw {text.seen_at_start}, count module saw {count.seen_at_start}"
+
+main = () => {
+    loop p in registry { printl"  {p.module}.{p.name}" }
+    let jobs = [
+        ["upper|exclaim" "plugins load in order"]
+        ["shout" "import cycles"]
+        ["words|double" "one big file"]
+        ["vowels" "Dewy modules"]
+        ["missing|upper" "unknown names pass"]
+    ]
+    loop job in jobs {
+        let result = pipe(job[0] job[1])
+        printl"{job[0]:<14} {job[1]:<22} -> {result}"
+        remember(@log "{job[0]} -> {result}")
+    }
+    printl"last {log.room} results:"
+    loop line in log.items { printl"  {line}" }
+}
