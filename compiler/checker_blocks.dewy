@@ -14,6 +14,7 @@ from p"checker_returns.dewy" import xt_return
 from p"checker_conditionals.dewy" import xf_if
 from p"checker_literals.dewy" import xl_finish
 from p"checker_expr.dewy" import check_expr
+from p"check.jo" import (block_open block_expand block_direct block_final block_sibling sink_close scope_reset stmt_special stmt_assign stmt_error stmt_terminates)
 # A block's statements in its scope, and each statement sent to its checker: a
 # declaration, an assignment (or the declaration it makes, or a dropped value), an
 # expression, a loop, a return or jump, a local constant, `defer`, `when` and an `if`
@@ -25,19 +26,6 @@ from p"checker_expr.dewy" import check_expr
 # are asked about only while their tables are live. O(statements) plus their checking;
 # statements may grow every arena, so nodes and lists are reread by ID.
 BWord:type=int64<overflow='wrap'>
-CheckerBlockHost:type=[
-    open:<(node:int64 mode:int64):>int64>
-    expand:<(node:int64):>void>
-    direct:<(node:int64):>void>
-    final:<(node:int64 index:int64 expected:int64 mode:int64):>int64>
-    sibling:<(node:int64 other:int64 code:int64):>void>
-    close:<(node:int64 result:int64):>int64>
-    reset:<(mark:int64):>void>
-    special:<(node:int64 code:int64):>void>
-    assign:<(node:int64):>bool>
-    error:<(node:int64 code:int64):>void>
-    terminates:<(node:int64):>bool>
-]
 CheckerBlockInput:type=[
     nodes:ptr<array<Node>>
     lists:ptr<array<int32>>
@@ -57,7 +45,6 @@ CheckerBlockInput:type=[
     exact:ptr<bool>
     void_type:ptr<int64>
     never_type:ptr<int64>
-    host:ptr<CheckerBlockHost>
 ]
 let bk_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
 let bk_lists:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
@@ -77,7 +64,6 @@ let bk_discarding:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
 let bk_exact:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
 let bk_void_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let bk_never_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
-let bk_host:ptr<CheckerBlockHost>=$unsafe (uint64(0) as ptr<CheckerBlockHost>)
 checker_blocks_bind=(input:ptr<CheckerBlockInput>):>BWord=>$unsafe {
     bk_nodes=input[0].nodes
     bk_lists=input[0].lists
@@ -97,7 +83,6 @@ checker_blocks_bind=(input:ptr<CheckerBlockInput>):>BWord=>$unsafe {
     bk_exact=input[0].exact
     bk_void_type=input[0].void_type
     bk_never_type=input[0].never_type
-    bk_host=input[0].host
     0
 }
 bk_flag=(n:BWord f:BWord):>bool=>$unsafe {BWord(bk_nodes[0].ptr[n].flags) & f not=? 0}
@@ -109,10 +94,10 @@ bk_assign=(s:BWord):>void=>$unsafe {
     let lk=bk_nodes[0].ptr[lhs].kind
     if lk =? 'hole' and op =? 47 {st_drop(s); return}
     if op =? 47 and (lk =? 'ident' or lk =? 'tuple') {
-        if bk_host[0].assign(s) {vd_decl(s); return}
+        if stmt_assign(s) {vd_decl(s); return}
     } else {
         let b=BWord(bk_nodes[0].ptr[s].b)
-        if bk_nodes[0].ptr[b].kind =? 'call' and bk_nodes[0].ptr[b].aux2 =? 17 {bk_host[0].error(s 3)}
+        if bk_nodes[0].ptr[b].kind =? 'call' and bk_nodes[0].ptr[b].aux2 =? 17 {stmt_error(s 3)}
     }
     let r=va_assign(s)
     if r not=? s {bk_nodes[0][s]=bk_nodes[0].ptr[r]}
@@ -121,19 +106,19 @@ bk_assign=(s:BWord):>void=>$unsafe {
 # ran; a shaped parameter's dimension is aux2 1789).
 bk_stmt=(s:BWord):>void=>$unsafe {
     let k=bk_nodes[0].ptr[s].kind
-    if bk_exact[0] and k =? 'assign' and bk_nodes[0].ptr[s].op not=? 47 and bk_context[0] >=? 0 {bk_host[0].special(s 1)}
+    if bk_exact[0] and k =? 'assign' and bk_nodes[0].ptr[s].op not=? 47 and bk_context[0] >=? 0 {stmt_special(s 1)}
     if k =? 'vardecl' and bk_nodes[0].ptr[s].aux2 =? 1789 {
-        bk_host[0].special(s 2)
+        stmt_special(s 2)
         k=bk_nodes[0].ptr[s].kind
     }
-    if k =? 'reflect_scope' {bk_host[0].special(s 3); return}
+    if k =? 'reflect_scope' {stmt_special(s 3); return}
     if (k =? 'vardecl' or k =? 'const_') and BWord(bk_nodes[0].ptr[s].flags) & 128 not=? 0 {return}
     if k =? 'vardecl' {vd_decl(s)}
     else if k =? 'const_' {st_const(s)}
     else if k =? 'assign' {bk_assign(s)}
     else if k =? 'exprstmt' {es_statement(s)}
     else if k =? 'if_' {bk_if(s)}
-    else if k =? 'iflet' {bk_host[0].special(s 4)}
+    else if k =? 'iflet' {stmt_special(s 4)}
     else if k =? 'while_' {xb_while(s)}
     else if k =? 'for_' {fl_for(s)}
     else if k =? 'return_' {xt_return(s)}
@@ -141,20 +126,20 @@ bk_stmt=(s:BWord):>void=>$unsafe {
     else if k =? 'defer_' {st_defer(s)}
     else if k =? 'when_' {st_when(s)}
     else if k =? 'block' {bk_block(s 0 false);}
-    else if k =? 'fn_' or k =? 'struct_' or k =? 'enum_' or k =? 'import_' {bk_host[0].error(s 1)}
-    else if k not=? 'test_' and k not=? 'build_' {bk_host[0].error(s 2)}
+    else if k =? 'fn_' or k =? 'struct_' or k =? 'enum_' or k =? 'import_' {stmt_error(s 1)}
+    else if k not=? 'test_' and k not=? 'build_' {stmt_error(s 2)}
 }
 # An `if` statement (NF_STMT 16); one checked before (NF_CHECKED 128 with its type) goes
 # to the host whole. (A frame of its own: the dispatcher's stays as small as it was.)
 bk_if=(s:BWord):>void=>$unsafe {
     let f=BWord(bk_nodes[0].ptr[s].flags)
     if f & 128 not=? 0 and bk_nodes[0].ptr[s].type not=? 0 {
-        bk_host[0].special(s 4)
+        stmt_special(s 4)
         return
     }
     bk_nodes[0][s].flags=int32<overflow='wrap'>(f | 16)
     xl_finish(s xf_if(s 0) 0);
-    if bk_watch[0].expectations >? 0 {bk_host[0].special(s 5)}
+    if bk_watch[0].expectations >? 0 {stmt_special(s 5)}
 }
 # How a block's values go (sink modes: 1 one value, 2 a function body's, 3 an arm's,
 # 4 a collector's, 6 a binding's; -1 none): a body's mode set by its function, else a Dewy
@@ -166,7 +151,7 @@ bk_open=(b:BWord want_value:bool):>BWord=>$unsafe {
         mode=bk_body_mode[0]
         bk_body_mode[0]=-1
     } else if bk_flag(b 8) {
-        return bk_host[0].open(b if want_value {-2} else {-1})
+        return block_open(b if want_value {-2} else {-1})
     } else if want_value and bk_files[0][BWord(bk_nodes[0].ptr[b].pos) >> 40].is_dewy {
         if bk_flag(b 67108864) {mode=4}
         else if bk_arm_next[0] =? b {mode=3}
@@ -176,7 +161,7 @@ bk_open=(b:BWord want_value:bool):>BWord=>$unsafe {
     bk_arm_next[0]=0
     bk_bind_next[0]=0
     if mode >=? 0 {
-        bk_host[0].open(b mode);
+        block_open(b mode);
         bk_discarding[0]=false
     }
     mode
@@ -187,11 +172,11 @@ bk_open=(b:BWord want_value:bool):>BWord=>$unsafe {
 bk_final=(b:BWord i:BWord expected:BWord mode:BWord):>BWord=>$unsafe {
     let s=BWord(bk_lists[0].ptr[BWord(bk_nodes[0].ptr[b].list) + i])
     let k=bk_nodes[0].ptr[s].kind
-    if k =? 'if_' or k =? 'iflet' {return bk_host[0].final(b i expected mode)}
+    if k =? 'if_' or k =? 'iflet' {return block_final(b i expected mode)}
     if k not=? 'exprstmt' {return -1}
     let e=BWord(bk_nodes[0].ptr[s].a)
     if bk_nodes[0].ptr[e].kind =? 'call' and bk_nodes[0].ptr[e].aux2 =? 17 {return -1}
-    if mode =? 2 or mode =? 3 or mode =? 6 {return bk_host[0].final(b i expected mode)}
+    if mode =? 2 or mode =? 3 or mode =? 6 {return block_final(b i expected mode)}
     if bk_nodes[0].ptr[e].kind =? 'match_' {bk_nodes[0][e].flags=int32<overflow='wrap'>(BWord(bk_nodes[0].ptr[e].flags) & -17)}
     let result=BWord(check_expr(e expected))
     bk_nodes[0][s].a=int32<overflow='wrap'>(bk_last[0])
@@ -205,11 +190,11 @@ bk_final=(b:BWord i:BWord expected:BWord mode:BWord):>BWord=>$unsafe {
 bk_finish=(b:BWord result0:BWord mode:BWord n:BWord want_value:bool):>BWord=>$unsafe {
     let result=result0
     if want_value {
-        if bk_nodes[0].ptr[b].aux =? 0 and n >? 0 and bk_host[0].terminates(BWord(bk_lists[0].ptr[BWord(bk_nodes[0].ptr[b].list) + n - 1])) {result=bk_never_type[0]}
+        if bk_nodes[0].ptr[b].aux =? 0 and n >? 0 and stmt_terminates(BWord(bk_lists[0].ptr[BWord(bk_nodes[0].ptr[b].list) + n - 1])) {result=bk_never_type[0]}
         if bk_flag(b 1073741824) {result=bk_never_type[0]}
         if result not=? 0 and BWord(bk_types[0].ptr[result].flags) & 1 not=? 0 {result=tu_zonk(result)}
     }
-    if mode >=? 0 {result=BWord(bk_host[0].close(b result))}
+    if mode >=? 0 {result=BWord(sink_close(b result))}
     result
 }
 # A block (its statements' tests are written out: a call costs more than they do;
@@ -238,7 +223,7 @@ bk_block=(b:BWord expected:BWord want_value:bool):>BWord=>$unsafe {
     let i:BWord=0
     loop i <? n0 {
         if bk_nodes[0].ptr[BWord(bk_lists[0][BWord(bk_nodes[0].ptr[b].list) + i])].kind =? 'when_' {
-            bk_host[0].expand(b)
+            block_expand(b)
             break
         }
         i=i + 1
@@ -254,29 +239,29 @@ bk_block=(b:BWord expected:BWord want_value:bool):>BWord=>$unsafe {
     loop i <? n {
         let s=BWord(bk_lists[0][BWord(bk_nodes[0].ptr[b].list) + i])
         bk_sibling_index[0]=i
-        if counted {bk_host[0].direct(s)}
+        if counted {block_direct(s)}
         let value:BWord=-1
         if i =? n - 1 and want_value {value=bk_final(b i expected mode)}
         if value >=? 0 {result=value}
         else {
-            if bk_watch[0].sibling_flow >? 0 {bk_host[0].sibling(s 0 1)}
-            if bk_watch[0].sibling_known >? 0 {bk_host[0].sibling(s b 2)}
+            if bk_watch[0].sibling_flow >? 0 {block_sibling(s 0 1)}
+            if bk_watch[0].sibling_known >? 0 {block_sibling(s b 2)}
             else {bk_stmt(s)}
             let l=bk_flow_local[0]
             if l not=? 0 {
-                bk_host[0].sibling(l bk_nodes[0].ptr[s].pos 3)
+                block_sibling(l bk_nodes[0].ptr[s].pos 3)
                 bk_flow_local[0]=0
             }
         }
         i=i + 1
     }
-    if bk_watch[0].sibling_flow >? 0 {bk_host[0].sibling(b 0 4)}
+    if bk_watch[0].sibling_flow >? 0 {block_sibling(b 0 4)}
     bk_sibling_block[0]=saved_block
     bk_sibling_index[0]=saved_index
     if want_value or mode >=? 0 {result=bk_finish(b result mode n want_value)}
     if mode >=? 0 {bk_discarding[0]=was_discarding}
     bk_nodes[0][b].type=int32<overflow='wrap'>(result)
     if transparent {bk_nodes[0][b].aux=5}
-    else if bk_scopes[0].names.length not=? mark {bk_host[0].reset(mark)}
+    else if bk_scopes[0].names.length not=? mark {scope_reset(mark)}
     result
 }

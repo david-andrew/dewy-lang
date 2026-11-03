@@ -12,7 +12,6 @@ from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER
 
 STEMS = ('checker_loops', 'checker_vardecls', 'checker_assigns', 'checker_exprstmts', 'checker_statements',
          'checker_for_loops', 'checker_returns', 'checker_conditionals', 'checker_exact', 'checker_literals', 'checker_blocks')
-JO_DOUBLES = jo_doubles(ASSIGN_JO, DECL_JO)
 
 
 def hosts(driver):
@@ -83,8 +82,7 @@ db_error = (s: int, code: int):
     print(events)
     print("error:{s}:{code}")
     exit(19)
-db_services = CheckerBlockHost(db_open, db_expand, db_direct, db_final_host, db_sibling, db_close, db_reset, db_special, db_assign, db_error, db_terminates)
-db_inputs = CheckerBlockInput(&nodes, &lists, &files, &types, &last, &scopes, &cx, &da_watch, &dv_block, &dv_index, &dv_flow_local, &db_body_mode, &db_arm, &db_bind, &db_discarding, &db_exact, &T_VOID, &T_NEVER, &db_services)
+db_inputs = CheckerBlockInput(&nodes, &lists, &files, &types, &last, &scopes, &cx, &da_watch, &dv_block, &dv_index, &dv_flow_local, &db_body_mode, &db_arm, &db_bind, &db_discarding, &db_exact, &T_VOID, &T_NEVER)
 db_bound = checker_blocks_bind(&db_inputs)
 DEWY = 1 << 40
 dewy_node = (k: NK, a: int = 0) -> int:
@@ -215,6 +213,24 @@ main = ():
     run(block_of([dewy_node(.exprstmt, typed(.call, solved))]), 0, true)
     print("ok")
 '''
+
+# The Jo services checker_blocks calls, routed to the driver.
+BLOCK_JO = {
+    'check.jo': {
+        'block_open': 'block_open = (b: int, mode: int) -> int: db_open(b, mode)',
+        'block_expand': 'block_expand = (b: int): db_expand(b)',
+        'block_direct': 'block_direct = (s: int): db_direct(s)',
+        'block_final': 'block_final = (b: int, i: int, expected: int, sink_mode: int) -> int: db_final_host(b, i, expected, sink_mode)',
+        'block_sibling': 'block_sibling = (n: int, m: int, code: int): db_sibling(n, m, code)',
+        'sink_close': 'sink_close = (b: int, result: int) -> int: db_close(b, result)',
+        'scope_reset': 'scope_reset = (mark: int): db_reset(mark)',
+        'stmt_special': 'stmt_special = (s: int, code: int): db_special(s, code)',
+        'stmt_assign': 'stmt_assign = (s: int) -> bool: db_assign(s)',
+        'stmt_error': 'stmt_error = (s: int, code: int): db_error(s, code)',
+        'stmt_terminates': 'stmt_terminates = (s: int) -> bool: db_terminates(s)',
+    },
+}
+JO_DOUBLES = jo_doubles(BLOCK_JO, ASSIGN_JO, DECL_JO)
 
 
 @pytest.mark.core_quick
