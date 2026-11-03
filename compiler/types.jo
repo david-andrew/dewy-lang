@@ -1,3 +1,4 @@
+use 'host_binds.jo'
 use 'type_refinement.dewy'
 use 'type_match.dewy'
 use 'type_substitute.dewy'
@@ -42,23 +43,16 @@ const TF_BOXED = 16    # inline storage contains recursive managed boxes
 types: TypeInfo[] = [TypeInfo()]
 type_args: i32[]
 type_ht: i32[]
-type_intern_binding = type_intern_bind(&types, &type_args, &type_ht)
 structs: StructInfo[]
 fields: Field[]
 variants: Variant[]
 ptr_size = 8     # 4 for wasm32
-layout_host = TypeLayoutHost(check_struct_fields, mk_box, quantity_base, math_optional, layout_endless_error, layout_cycle_error, layout_cache_padded)
-layout_input = TypeLayoutInput(&types, &structs, &type_args, &fields, &variants, &ptr_size, &layout_host)
-layout_binding = type_layout_bind(&layout_input)
 
 # built-in types (indices fixed at startup)
 T_VOID = 0
 T_BOOL = 0
 T_INT = 0
 T_MATH_INT = 0    # semantic integer, independent of its selected storage representation
-property_host = TypePropertyHost(is_lib_texture, check_struct_fields)
-property_input = TypePropertyInput(&types, &structs, &type_args, &fields, &variants, &refine_active, &T_MATH_INT, &property_host)
-property_binding = type_property_bind(&property_input)
 T_I8 = 0
 T_I16 = 0
 T_I32 = 0
@@ -75,9 +69,6 @@ T_NONE = 0
 T_NEVER = 0
 union_type_name = (t: int) -> str: type_str(t)
 union_postfix_name = (t: int) -> str: type_str_postfix(t)
-union_host = TypeUnionHost(mk_opt, str_set_of, str_set_type, union_postfix_name, union_type_name, intern)
-union_input = TypeUnionInput(&types, &structs, &type_args, &fields, &variants, &str_sets, &T_NEVER, &T_NONE, &union_host)
-union_binding = type_union_bind(&union_input)
 T_RAWPTR = 0
 T_VEC2 = 0
 T_VEC3 = 0
@@ -143,8 +134,6 @@ secret_repr = (t0: int) -> int: tb_secret_repr(t0)
 # Callable labels are compile-time metadata, interned as a newline-separated
 # name tuple in st (unused by fn_ layout). Positional implementation-language
 # callables retain zero, without any label allocation or ABI change.
-label_input = TypeLabelInput(&names, &nodes, &lists, &files, intern)
-label_binding = type_label_bind(&label_input)
 fn_label_key = (names: int[]) -> int: tn_label_key(names)
 fn_label_names = (key: int, count: int) -> int[]: tn_label_names(key, count)
 decl_fn_labels = (decl: int) -> int: tn_decl_labels(decl)
@@ -171,19 +160,9 @@ is_values = (t0: int) -> bool:
     t = prune(t0)
     types[t].kind == .tuple and types[t].sign
 var_counter = 0
-constructor_host = TypeConstructorHost(mk_type)
-constructor_input = TypeConstructorInput(&types, &ptr_size, &var_counter, &secrets_seen, &values_any, &T_VOID, &T_BOOL, &T_INT, &T_MATH_INT, &T_I8, &T_I16, &T_I32, &T_U8, &T_U16, &T_U32, &T_U64, &T_FLOAT, &T_F32, &T_STR, &T_NULL, &T_RANGE, &T_NONE, &T_NEVER, &T_RAWPTR, &T_VEC2, &T_VEC3, &T_VEC4, &T_MAT4, &T_IVEC2, &T_IVEC3, &T_IVEC4, &constructor_host)
-constructor_binding = type_constructor_bind(&constructor_input)
 # (each binding of a type variable: a body checked with neither a new variable nor a binding
 # has no type a zonk would change)
 type_binds = 0
-inference_host = TypeInferenceHost(mk_callable_contract, effect_subst, effect_type, mk_refined, ref_subst, mk_quantity, get_struct_inst, mk_type, mk_union)
-inference_input = TypeInferenceInput(&types, &structs, &type_args, &type_binds, &inference_host)
-inference_binding = type_inference_bind(&inference_input)
-substitution_binding = type_substitute_bind(&inference_input)
-type_refinement_binding = type_refinement_bind(&inference_input, &ref_predicates, &refine_active, &T_U64, &type_refinement_host)
-type_match_host = TypeMatchHost(can_coerce, caller_dewy, effect_match)
-type_match_binding = type_match_bind(&inference_input, &refine_active, &T_NEVER, &T_MATH_INT, &type_match_host)
 
 mk_var = () -> int: tb_mk_var()
 
@@ -332,9 +311,6 @@ dt_named_inner = (p: int) -> bool:
 # (the names of the type parameters of the declaration whose types are being shown: a
 # parameter that has none shows as T, U, ... by its place)
 ts_params: int[]
-format_host = TypeFormatHost(int_intervals, small_span, dimension_str, name_of, str_set_text, check_struct_fields, bundled_rational_type, bundled_word_rational_type, is_dewy_set_type)
-format_input = TypeFormatInput(&types, &structs, &type_args, &fields, &ts_params, &nominal_parent, &T_MATH_INT, &T_INT, &T_MAT4, &format_host)
-format_binding = type_format_bind(&format_input)
 
 type_str = (t: int, dewy: bool = false) -> str: tf_string(t, dewy)
 type_str_in = (t: int, dewy: bool) -> str: tf_string_in(t, dewy)
@@ -386,9 +362,6 @@ factory_declaration = (decl: int) -> TypeDeclInfo:
     TypeDeclInfo(name_of(int(nodes[decl].name)), has_flag(decl, NF_RECORD), nodes[decl].kind == .enum_)
 factory_nesting_error = (decl: int):
     fatal(nodes[decl].pos, "the generic type '{name_of(int(nodes[decl].name))}' expands without end: its type arguments nest more than {MAX_TYPE_NESTING} deep (does a field use it with a bigger type argument than its own?)")
-factory_host = TypeFactoryHost(check_struct_fields, mk_array, factory_declaration, factory_nesting_error)
-factory_input = TypeFactoryInput(&types, &structs, &type_args, &fields, &soa_decl, &factory_host)
-factory_binding = type_factory_bind(&factory_input)
 
 is_soa = (t0: int) -> bool:
     t = prune(t0)

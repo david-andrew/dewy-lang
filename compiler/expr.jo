@@ -1,3 +1,4 @@
+use 'host_binds.jo'
 use 'checker_coerce.dewy'
 use 'checker_signature.dewy'
 use 'checker_exact.dewy'
@@ -7764,9 +7765,6 @@ numeric_error = (n: int, code: int):
     if code == 1: fatal(nodes[n].pos, "Dewy does not yet support integer /; use // or convert to float64")
     if code == 2: fatal(nodes[n].pos, "shift count must be nonnegative")
     fatal(nodes[n].pos, "bitwise operators need integers")
-numeric_host = CheckerNumericHost(coerce, exact_potential, num_join, join_types, numeric_exact, pos_in_lib, numeric_nan, numeric_warn_division, numeric_warn_percent, numeric_error)
-numeric_input = CheckerNumericInput(&nodes, &types, &files, &T_INT, &T_MATH_INT, &T_U64, &T_FLOAT, &T_BOOL, &T_NEVER, &numeric_host)
-numeric_binding = checker_numeric_bind(&numeric_input)
 
 # (q1 * q2 for quaternions, which are vec4s: * multiplies their parts one by one, which is no
 # rotation; values from quat_* functions, and variables made from them, are known to be ones)
@@ -9361,9 +9359,6 @@ logic_broadcast = (n: int):
     c = bc_call("__not", [int(nodes[n].a)], nodes[n].pos)
     add_flag(c, NF_BROADCAST)
     nodes[n] = nodes[c]
-logic_host = CheckerLogicHost(check_expr, coerce, simple_enum, op_overload, narrow_by, scope_reset, logic_mask, logic_broadcast)
-logic_input = CheckerLogicInput(&nodes, &types, &check_scopes, &last_checked, &T_BOOL, &logic_host)
-logic_binding = checker_logic_bind(&logic_input)
 unary_quantity = (n: int, expected: int, literal: bool) -> int:
     quantity_unary_literal = literal
     quantity_unary(n, expected)
@@ -9374,9 +9369,6 @@ unary_error = (n: int, at: int, code: int):
     if code == 2: fatal(nodes[n].pos, "unary '+' needs a number")
     never_cascade(nodes[n].pos, at)
     fatal(nodes[n].pos, "cannot negate {dt(at)}")
-unary_host = CheckerUnaryHost(check_expr, check_dotted, bundled_bigint_type, simple_enum, secret_unary, unary_quantity, unary_overload, coerce, unary_exact, unary_error)
-unary_input = CheckerUnaryInput(&nodes, &types, &files, &last_checked, &T_INT, &T_MATH_INT, &unary_host)
-unary_binding = checker_unary_bind(&unary_input)
 cast_unit = (n: int) -> int:
     if not quantity_unit_syntax(int(nodes[n].b)): return -1
     quantity_as_unit(n)
@@ -9446,9 +9438,6 @@ cast_error = (n: int, a: int, ft: int, tt: int, code: int):
         if type_eq(inner, tt) or (is_union(inner) and union_index(inner, tt) >= 0):
             why = " (an optional is not cast: inside `if x is? {dt(tt)} \{ }` (or after `x is? {dt(tt)} and`), x is one; `match x` takes each member, `x ?? fallback` gives a default)"
     fatal(pos, "cannot cast {dt(ft)} to {dt(tt)}{why}")
-cast_host = CheckerCastHost(check_expr, cast_unit, finalize_literal, quantity_transmute, cast_size, cast_refine, secret_cast, can_coerce, coerce, cast_type_text, cast_set_coerce, cast_bundled, cast_conversion, cast_helper, cast_record, cast_text, pos_in_lib, cast_storage, cast_error)
-cast_input = CheckerCastInput(&nodes, &types, &structs, &files, &last_checked, &T_STR, &T_U8, &T_MATH_INT, &cast_host)
-cast_binding = checker_cast_bind(&cast_input)
 collection_float_key = (t: int) -> bool: key_holds_float(t)
 collection_float_obligation = (key: int) -> void: float_key_obligation(key)
 # ({x: 1, y: 2}: JavaScript's object, with names the program does not have)
@@ -9467,9 +9456,6 @@ collection_error = (n: int, code: int, vt: int, bt: int) -> void:
     if code == 1: fatal(nodes[n].pos, "cannot infer the type of an empty map; add a type annotation: {jd(nodes[n].pos, "`m: \{K: V} = \{}`", "`let m:dict<K V> = []`")}")
     # ({"name": "Drone", "cost": 10.0}: JavaScript's object, values of several types)
     fatal(nodes[n].pos, "a map's values are all of one type, and the first is {a_type(vt)}, this {a_type(bt)}: for a record with named fields of their own types, declare {jd(nodes[n].pos, "`struct Name:`", "`Name:type = [field:T ...]`")} with them")
-collection_host = CheckerCollectionHost(check_expr, coerce, finalize_literal, values_group, collection_float_key, collection_float_obligation, collection_key_name, collection_map_decl, collection_instance, collection_setter, can_coerce, collection_error)
-collection_input = CheckerCollectionInput(&nodes, &lists, &types, &structs, &type_args, &files, &T_VOID, &collection_host)
-collection_binding = checker_collections_bind(&collection_input)
 place_contract = (a: int, at: int) -> bool: ref_storage_contract(refine_storage(a, at))
 place_storage = (a: int) -> void: note_storage_access(a)
 place_error = (n: int, code: int) -> void:
@@ -9478,9 +9464,6 @@ place_error = (n: int, code: int) -> void:
     if code == 3: fatal(nodes[n].pos, "cannot take the address of a captured variable")
     if code == 4: fatal(nodes[n].pos, "'_' can only be used as a function argument (partial application)")
     fatal(nodes[n].pos, "named arguments are only allowed in calls")
-place_host = CheckerPlaceHost(check_expr, place_contract, place_storage, place_error)
-place_input = CheckerPlaceInput(&nodes, &locals, &refine_active, &last_checked, &place_host)
-place_binding = checker_places_bind(&place_input)
 variant_fields = (si: int) -> void: check_struct_fields(si)
 variant_complete = (ex: int) -> void: ide_complete_variants(ex)
 variant_reference = (n: int, et: int, vi: int) -> void: ide_variant_ref(nodes[n].pos, int(nodes[n].name), et, vi)
@@ -9495,9 +9478,6 @@ variant_error = (n: int, et: int, code: int) -> void:
         fatal(nodes[n].pos, "cannot infer the enum type for '.{name_of(nm)}'")
     if code == 2: fatal(nodes[n].pos, "{dt(et)} has no variant '{name_of(nm)}'{variant_hint_for(et, name_of(nm))}")
     fatal(nodes[n].pos, "variant '{name_of(nm)}' needs arguments")
-variant_host = CheckerVariantHost(variant_fields, variant_complete, variant_reference, variant_error)
-variant_input = CheckerVariantInput(&nodes, &types, &structs, &type_args, &variants, &ide_sentinel, &ide_on, &variant_host)
-variant_binding = checker_variants_bind(&variant_input)
 
 optional_error = (n: int, at: int, unwrap: bool):
     if unwrap: fatal(nodes[n].pos, "'!' needs an optional value, found {dt(at)}")
@@ -9507,9 +9487,6 @@ optional_error = (n: int, at: int, unwrap: bool):
     if lf >= 0 and lf < files.len() and pos_off(lp) < len(files[lf].src) and files[lf].src[pos_off(lp)] == '[':
         fatal(nodes[n].pos, "'??' needs an optional on the left, found {dt(at)} (indexing gives the element itself; m.get(k) gives an optional, m.get(k, default) a value)")
     fatal(nodes[n].pos, "'??' needs an optional on the left, found {dt(at)}")
-optional_host = CheckerOptionalHost(check_expr, coerce, narrow_optional_source, coalesce_exceptions, coalesce_failures, exact_potential, is_union, optional_error)
-optional_input = CheckerOptionalInput(&nodes, &types, &files, &T_MATH_INT, &optional_host)
-optional_binding = checker_optional_bind(&optional_input)
 
 # The interpolation checked last, for an unknown name inside one: ident_unknown.
 interpolation_last = 0
@@ -9520,9 +9497,6 @@ literal_interpolation_warning = (e: int):
     if (nodes[e].kind == .int_lit or (nodes[e].kind == .tuple and nkids(e) > 0 and nodes[kid(e, 0)].kind == .int_lit)) and not pos_in_lib(nodes[e].pos) and not files[pos_file(nodes[e].pos)].is_dewy and brace_before(nodes[e].pos):
         warn(nodes[e].pos, "`\{...}` with a number in it puts that number in the text: for the characters themselves (a regular expression's repeat), write `\{\{4}}}}`, or a raw string `r\"[0-9]\{4}\"`")
 literal_float_error = (n: int): fatal(nodes[n].pos, "real literal exceeds float64")
-literal_host = CheckerLiteralHost(coerce, effect_infer_callable, exact_note, charlike_to_int, check_expr, finalize_literal, fmt_part, literal_interpolation_warning, literal_float_error)
-literal_input = CheckerLiteralInput(&nodes, &lists, &types, &files, &refine_active, &effects_active, &exact_measure_on, &last_checked, &T_STR, &T_FLOAT, &T_BOOL, &T_NULL, &T_INT, &T_MATH_INT, &literal_host)
-literal_binding = checker_literals_bind(&literal_input)
 
 # Member selection runs in checker_members.dewy; these are its services.
 check_field_expr = (n: int, expected: int) -> int: xs_field(n, expected)
@@ -9971,12 +9945,6 @@ index_error = (n: int, code: int, bt: int):
             if m != T_NONE and exception_member(m): fatal(nodes[n].pos, "cannot index a value of type {dt(bt)}: it may be {dt(m)} (a member read through it forwards {dt(m)} too). Check the value first, `if x isnt? {dt(m)} \{ ... }`, which narrows x inside")
     never_cascade(nodes[n].pos, bt)
     fatal(nodes[n].pos, "cannot index a value of type {dt(bt)}")
-index_host = CheckerIndexHost(check_expr, check_to, index_construct, dewy_position_index, index_type_value, check_soa_index, index_part, index_negative, index_operator, index_int_range, index_select, index_deref, index_error)
-index_input = CheckerIndexInput(&nodes, &lists, &types, &structs, &files, &T_INT, &T_MATH_INT, &T_U8, &T_RANGE, &T_MAT4, &T_VEC4, &T_I32, &T_F32, &index_host)
-index_binding = checker_indexes_bind(&index_input)
-receiver_host = CheckerReceiverHost(check_expr, field_juxt, field_reflect_name, reflect_member, field_private, field_soa_alias, field_soa_index, dewy_bracket_call, index_end, is_dewy_set_type, index_ranges, index_stepped, index_text, receiver_error)
-receiver_input = CheckerReceiverInput(&nodes, &types, &structs, &names, &files, &ide_on, &reflect_active, &callee_at, &soa_aliases, &last_checked, &values_index_base, &type_receiver_at, &empty_index_receiver, &receiver_host)
-receiver_binding = checker_receivers_bind(&receiver_input)
 # check_intrinsic's services (checker_expr.dewy): diagnostics, and the lengths that are calls
 # (an soa value's, Dewy text's grapheme count).
 intrinsic_error = (n: int, code: int, t: int):
@@ -9997,17 +9965,6 @@ intrinsic_length = (n: int, a: int, t: int, expected: int) -> int:
     add_flag(a, NF_CHECKED)
     nodes[n] = nodes[bc_call("__dewy_string_length", [a], nodes[n].pos)]
     check_expr(n, expected)
-intrinsic_host = CheckerIntrinsicHost(intrinsic_rest, nargs_check, intrinsic_error, coerce, intrinsic_length, value_loop_resize, check_place, ref_length_mutation)
-intrinsic_input = CheckerIntrinsicInput(&nodes, &lists, &types, &structs, &files, &value_loops, &refine_active, &T_VOID, &T_INT, &T_STR, &T_U8, &T_RAWPTR, &T_NEVER, &intrinsic_host)
-intrinsic_binding = checker_intrinsics_bind(&intrinsic_input)
-call_query_host = CheckerCallQueryHost(call_order_rest, mutable_arguments_rest, float_key_rest, habit_rest)
-call_query_input = CheckerCallQueryInput(&nodes, &lists, &files, &intrinsic_names, &dewy_set_name, &fns, &float_key_names, &call_query_host, &syms, &names, &prelude_syms, &name_first, &name_mod, &name_sym, &name_next, &habit_names)
-call_query_binding = checker_call_queries_bind(&call_query_input)
-coerce_host = CheckerCoerceHost(can_coerce)
-coerce_binding = checker_coerce_bind(&coerce_host)
-collect_host = CheckerCollectHost(demand_name, use_home, dewy_prelude_module, prelude_reach, collect_rational, cin_grow, named_grow)
-collect_input = CheckerCollectInput(&ctxs, &cx, &mod_bits, &mod_uses, &homes_built, &prelude_used, &home_first, &home_mod, &home_next, &demanded, &dp_scanned, &dp_by_name, &dp_mods, &rational_module_found, &rational_module_probed, &rational_reach, &exact_named, &cin_mark, &surface_hidden, &collect_host, &ide_on, &ml_name_tick, &ml_struct, &named_first, &named_families, &named_decls, &named_hidden)
-collect_binding = checker_collect_bind(&collect_input)
 
 # checker_expr.dewy's services: literal preparation (grouped values, spreads, the
 # optional's element, a literal union's member, total dictionaries) and the kinds that
@@ -10068,12 +10025,6 @@ expr_values_use = (n: int, t: int):
     if is_values(t) and nodes[n].kind == .ident and n != assign_root and name_of(int(nodes[n].name))[0] != '$': sink_values_use(n, t)
     return
 expr_sibling = (n: int, t: int) -> int: sibling_index_narrow(n, t)
-expr_host = CheckerExprHost(expr_complete, ident_unknown, expr_module, temperature_read, expr_values_use, check_dotted, binary_juxt, binary_char_code, binary_membership, binary_quantity_hint, binary_decimal, dewy_set_literal, binary_context, binary_nd_hint, binary_secret, binary_rest, check_call_expr, expr_sibling, expr_literal, expr_other, arg_finish_rest)
-call_host = CheckerCallHost(members_argument, dewy_classify_spread)
-call_input = CheckerCallInput(&lists, &locals, &id_members, &dewy_set_name, &call_host, &names, &values_hits, &spread_calls)
-call_binding = checker_call_bind(&call_input)
-expr_input = CheckerExprInput(&nodes, &types, &files, &syms, &check_scopes, &ctxs, &cx, &ml_at, &ml_mod, &ml_sym, &ml_name_tick, &ml_struct, &ide_sentinel, &tk_reads_on, &values_any, &statement_watch, &last_checked, &T_BOOL, &T_INT, &T_U64, &T_MATH_INT, &quantity_update_right, &expr_host)
-expr_binding = checker_expr_bind(&expr_input)
 
 # The `__as__` conversion from a record type ft to tt (its declared result), or 0.
 as_conversion = (ft: int, tt: int) -> int:
@@ -10247,9 +10198,6 @@ cond_error = (n: int, t: int, code: int) -> void:
     if code == 2: fatal(nodes[n].pos, "an if expression needs an else branch")
     if code == 3: fatal(nodes[n].pos, "both branches of an if expression need a value")
     fatal(nodes[int(nodes[n].a)].pos, "'if let x = value' needs an optional value, found {dt(t)}")
-cond_host = CheckerConditionalHost(check_expr, check_to, coerce, finalize_literal, cond_block, cond_returned, stmt_terminates, cond_narrow, cond_reset, cond_restore, cond_merge, cond_promote, cond_fill_subject, cond_fill_end, opt_filled, union_has_void, cond_then_literal, cond_sink, cond_union, is_map_type, cond_join, narrow_optional_source, new_local, cond_error)
-cond_input = CheckerConditionalInput(&nodes, &lists, &types, &structs, &files, &locals, &check_scopes, &narrow_changes, &sink_final, &T_VOID, &T_BOOL, &T_NONE, &T_NEVER, &cond_host)
-cond_binding = checker_conditionals_bind(&cond_input)
 # `f<T>` runs in checker_type_apply.dewy; these are its services.
 apply_lookup = (name: int, mod: int, kind: mut int) -> int:
     s = 0
@@ -10267,9 +10215,6 @@ apply_error = (n: int, name: int, code: int):
     if code == 2: bare_fn_error(n, "{name_of(name)}<...>", false)
     if code == 3: fatal(nodes[n].pos, "'{name_of(name)}<...>' needs arguments: call it, or write `@{name_of(name)}<...>` for the function itself")
     fatal(nodes[n].pos, "type arguments require a generic callable")
-apply_host = CheckerTypeApplyHost(check_expr, apply_lookup, dewy_bare_fn, bare_fns_call, bare_call, effect_generic_argument, apply_fn_value, apply_reference, apply_error)
-apply_input = CheckerTypeApplyInput(&nodes, &lists, &types, &callee_at, &ide_on, &apply_host)
-apply_binding = checker_type_apply_bind(&apply_input)
 # Array and record literals run in checker_aggregates.dewy; these are its services.
 # (thorns = Rect[]: an empty array of Rects is declared with a colon)
 aggregate_type_error = (n: int):
@@ -10365,12 +10310,6 @@ aggregate_error = (n: int, code: int, t: int):
     if code == 2: fatal(nodes[n].pos, "{dt(t)} has {int(types[t].nargs)} positions, and this array gives {nkids(n)} values")
     if code == 3: fatal(nodes[n].pos, "only arrays can be spread into an array (found {dt(t)})")
     fatal(nodes[n].pos, "record literal needs a record type, found {dt(t)}")
-aggregate_host = CheckerAggregateHost(check_expr, check_to, coerce, finalize_literal, decimal_type, aggregate_spread, aggregate_record_spread, aggregate_reflect, dewy_record_type, is_map_type, dewy_positional_record, aggregate_construct, aggregate_fixed, values_elements, sibling_parent, sibling_literal, aggregate_coerce, aggregate_error)
-aggregate_input = CheckerAggregateInput(&nodes, &lists, &types, &files, &last_checked, &sink_pack_site, &sink_pack_hit, &T_INT, &T_MATH_INT, &T_FLOAT, &T_STR, &T_U64, &aggregate_host)
-aggregate_binding = checker_aggregates_bind(&aggregate_input)
-lambda_host = CheckerLambdaHost(check_poly_lambda, callable_base, lambda_instance, lambda_shaped, lambda_entry, lambda_body, lambda_zonk_tree, decl_fn_labels, lambda_contract, effect_infer_callable, lambda_verify, ownership_lambda_type, lambda_error)
-lambda_input = CheckerLambdaInput(&nodes, &lists, &types, &type_args, &fns, &locals, &refine_bindings, &refine_active, &effects_active, &sink_lambda_pack, &lambda_host)
-lambda_binding = checker_lambdas_bind(&lambda_input)
 
 # the expression a nonempty block ends in
 block_tail = (b: int) -> int:
@@ -10609,12 +10548,6 @@ check_matrix = (n: int, expected: int) -> int:
 # that are not themselves dotted operations are evaluated once, and the operation applies to their
 # elements, broadcast like numpy (a dimension of length 1, or a missing leading one, stretches).
 bc_count = 0
-range_value_host = CheckerRangeValueHost(intern, check_expr, range_value_error)
-range_value_input = CheckerRangeValueInput(&nodes, &lists, &bc_count, &T_INT, &range_value_host)
-range_value_binding = checker_range_values_bind(&range_value_input)
-in_range_host = CheckerInRangeHost(intern, check_expr, check_to, capture_value, in_range_error)
-in_range_input = CheckerInRangeInput(&nodes, &lists, &files, &bc_count, &T_INT, &T_BOOL, &in_range_host)
-in_range_binding = checker_in_range_bind(&in_range_input)
 
 # Brackets also construct records and call user-defined indexing operators. Keep
 # range syntax until the receiver type is known: NDArray uses axis slices, while
@@ -11632,9 +11565,6 @@ istype_error = (n: int, at: int, tt: int, code: int) -> void:
     if code == 1: fatal(nodes[int(nodes[n].b)].pos, "{dt(tt)} is not one of the types of {dt(at)}{istype_member_hint(at, tt)}")
     if code == 2: fatal(nodes[int(nodes[n].b)].pos, "a {dt(at)} is either a {dt(int(types[at].elem))} or none, never a {dt(tt)}")
     fatal(nodes[n].pos, "{jd(nodes[n].pos, "`is`", "`is?`")} tests which type a union (A | B) or optional value holds; this is always {a_type(at)}")
-istype_host = CheckerTypeTestHost(check_expr, finalize_literal, istype_original, family_annotation, istype_family, istype_members, istype_set, istype_member_value, istype_refined, refine_implies, map_presence_fn, istype_error)
-istype_input = CheckerTypeTestInput(&nodes, &types, &structs, &refine_active, &last_checked, &T_STR, &T_BOOL, &istype_host)
-istype_binding = checker_type_tests_bind(&istype_input)
 
 # (`c < x + k` keeps k on the value's side (refine.jo ref_offset_right): as `c - k < x`, which
 # cannot overflow where x + k would)
@@ -11969,15 +11899,6 @@ narrow_expr = (root: int, ms: int[], pos: int, name: int):
 path_narrows = 0                # (none yet: field accesses need not look)
 no_narrow_at = 0                # (the target of an assignment: the field or global itself, not what it narrows to; a narrowed
                                 # path it is a part of, as x in x.hp = 7, is still narrowed)
-member_host = CheckerMemberHost(member_receiver, secret_member, coerce, is_dewy_set_type, is_map_type, member_copy, member_forward, ide_complete_members, member_len_check, member_call, member_module, member_type, member_vector, member_deref, member_fields, member_field_ref, dewy_method_field, member_method_value, member_fn_value, member_narrow_path, member_missing, member_error)
-member_input = CheckerMemberInput(&nodes, &types, &structs, &fields, &type_args, &files, &ide_sentinel, &ide_on, &id_dewy_len, &id_dewy_ptr, &path_narrows, &no_narrow_at, &T_STR, &member_host)
-member_binding = checker_members_bind(&member_input)
-ident_host = CheckerIdentHost(ident_ide_ref, narrowed_var, ident_capture, ident_const_view, ident_ensure_global, ident_quantity, ident_early_use, ident_decimal_use, ident_path_alias, ident_constant, ident_function, ident_type_value, ident_bare_value, ident_type_use, ident_error)
-ident_input = CheckerIdentInput(&nodes, &types, &locals, &globals, &fns, &ctxs, &cx, &callee_at, &assign_root, &ide_on, &global_read, &path_narrows, &no_narrow_at, &test_mode, &ident_host)
-ident_binding = checker_idents_bind(&ident_input)
-match_host = CheckerMatchHost(check_expr, finalize_literal, coerce, check_to, new_local, check_struct_fields, match_intervals, path_key, match_refined, match_string_patterns, mk_ident_local, bare_arm_warning, catch_all_value, nominal_family_part, union_within, union_target, union_literal_seen, match_wrap_union, union_part, match_none_name, match_narrow_local, match_opt_wild, match_opt_wild_path, match_narrow_path, match_block, match_returned, match_reset, narrow_restore, match_merge, match_sink, match_void_hint, join_types, string_domain_match, int_domain_match, match_member_arms, match_enum_missing, match_string_missing, match_optional_missing, match_error)
-match_input = CheckerMatchInput(&nodes, &lists, &types, &structs, &fields, &variants, &type_args, &files, &locals, &names, &str_sets, &check_scopes, &narrow_changes, &path_narrows, &sink_final, &T_VOID, &T_BOOL, &T_STR, &T_MATH_INT, &T_NONE, &T_NEVER, &match_host)
-match_binding = checker_match_bind(&match_input)
 
 path_key = (n: int) -> str:
     k = nodes[n].kind

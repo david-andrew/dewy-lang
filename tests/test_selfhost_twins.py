@@ -1,6 +1,6 @@
 """The compiler's Dewy modules and their frozen twins (tools/compiler/build.py): every
-Dewy module has a twin, is a leaf of the compiler's import cycle, and its twin
-defines nothing the Dewy module does not."""
+Dewy module has a twin, imports the library, Dewy modules or compiler Jo modules
+(never a twin), and its twin defines nothing the Dewy module does not."""
 import re
 from pathlib import Path
 
@@ -25,13 +25,15 @@ def test_every_dewy_module_has_its_twin():
         assert not [p.name for p in COMPILER.glob('*.jo') if f"use '{twin}'\n" in p.read_text()], twin
 
 
-def test_dewy_modules_are_leaves():
+def test_dewy_module_imports():
     stems = {p.stem for p in COMPILER.glob('*.jo')} | {p.stem for p in COMPILER.glob('*.dewy')}
+    twins = set(FROZEN_TWINS.values())
     for module in FROZEN_TWINS:
         text = (COMPILER / module).read_text()
-        # (or another Dewy module of the compiler, itself a leaf, by its file name)
+        # (by file name: the library, a Dewy module, or a compiler Jo module in the import cycle)
         for path in re.findall(r'^\s*(?:from|import)\s+p"([^"]+)"', text, re.M):
-            assert path.startswith('@lib/') or path in FROZEN_TWINS, f'{module} imports {path}: only the library'
+            ok = path.startswith('@lib/') or path in FROZEN_TWINS or (path.endswith('.jo') and path not in twins and (COMPILER / path).is_file())
+            assert ok, f'{module} imports {path}'
         for name in re.findall(r'^\s*(?:from|import)\s+([A-Za-z_]\w*)', text, re.M):
             assert name not in stems, f'{module} imports the compiler module {name}'
 

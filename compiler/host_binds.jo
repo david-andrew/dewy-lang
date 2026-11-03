@@ -1,0 +1,320 @@
+# Host records and leaf bindings, made once every module's values exist: a Dewy leaf
+# that imports Jo joins the compiler's import cycle, whose top-level code then runs
+# as one file (docs/design/modules.md), and a record of functions reads what they read.
+use 'type_refinement.dewy'
+use 'type_match.dewy'
+use 'type_substitute.dewy'
+use 'type_queries.dewy'
+use 'type_inference.dewy'
+use 'type_unions.dewy'
+use 'type_layout.dewy'
+use 'type_format.dewy'
+use 'type_factory.dewy'
+use 'type_properties.dewy'
+use 'type_constructors.dewy'
+use 'type_labels.dewy'
+use 'checker_types.dewy'
+use 'type_intern.dewy'
+use 'concurrency.jo'
+use 'util.jo'
+use 'ast.jo'
+use 'check.jo'
+use 'expr.jo'
+use 'units.jo'
+use 'errors.jo'
+use 'refine.jo'
+use 'effects.jo'
+use 'node_store.dewy'
+use 'types.jo'
+use 'checker_call_queries.dewy'
+use 'checker_expr.dewy'
+use 'effect_lattice.dewy'
+use 'checker_blocks.dewy'
+use 'checker_assigns.dewy'
+use 'checker_vardecls.dewy'
+use 'checker_for_loops.dewy'
+use 'checker_statements.dewy'
+use 'checker_exprstmts.dewy'
+use 'checker_returns.dewy'
+use 'checker_loops.dewy'
+use 'checker_zonk.dewy'
+use 'checker_body_results.dewy'
+use 'checker_bodies.dewy'
+use 'checker_instances.dewy'
+use 'checker_signature.dewy'
+use 'checker_resolve.dewy'
+use 'checker_alias.dewy'
+use 'checker_fields.dewy'
+use 'checker_results.dewy'
+use 'constant_eval.dewy'
+use 'constant_host.dewy'
+use 'source_types.dewy'
+use 'evaluator_state.dewy'
+use 'checker_state.dewy'
+use 'checker_tokens.dewy'
+use 'refinement_types.dewy'
+use 'member_replay.jo'
+use 'exact.jo'
+use 'partition.jo'
+use 'lazy_bodies.jo'
+use 'frontend.jo'
+use 'pcheck.jo'
+use 'spelling.dewy'
+use 'habits.dewy'
+use 'definite.jo'
+use 'import_cycles.jo'
+use 'decimals.jo'
+use 'growth.jo'
+use 'safe_paths.jo'
+use 'warn_if.jo'
+use 'check_constant.jo'
+use 'place_methods.jo'
+use 'deadlock.jo'
+use 'settings.jo'
+use 'targets.dewy'
+use 'icount.jo'
+use 'watch.jo'
+use 'module_paths.dewy'
+use 'pkg.jo'
+use 'lex.jo'
+use 'parse.jo'
+use 'ide.jo'
+use 'poly_closure.jo'
+use 'prelude.jo'
+use 'comptime.jo'
+use 'facts.jo'
+use 'nd_contracts.jo'
+use 'proofs.jo'
+use 'arena.jo'
+use 'ownership.jo'
+use 'reflection.jo'
+use 'string_domains.jo'
+use 'juxtapose.jo'
+use 'sibling_types.jo'
+use 'temperature_kinds.jo'
+use 'dewy_methods.jo'
+use 'secrets.jo'
+use 'directives.jo'
+use 'ffi.jo'
+use 'floats.jo'
+use 'ownership_types.dewy'
+use 'checker_coerce.dewy'
+use 'checker_exact.dewy'
+use 'checker_receivers.dewy'
+use 'checker_range_values.dewy'
+use 'checker_numeric.dewy'
+use 'checker_in_range.dewy'
+use 'checker_idents.dewy'
+use 'checker_match.dewy'
+use 'checker_indexes.dewy'
+use 'checker_members.dewy'
+use 'checker_lambdas.dewy'
+use 'checker_aggregates.dewy'
+use 'checker_type_apply.dewy'
+use 'checker_conditionals.dewy'
+use 'checker_type_tests.dewy'
+use 'checker_variants.dewy'
+use 'checker_places.dewy'
+use 'checker_collections.dewy'
+use 'checker_cast.dewy'
+use 'checker_unary.dewy'
+use 'checker_logic.dewy'
+use 'checker_optional.dewy'
+use 'checker_literals.dewy'
+use 'refine_intervals.dewy'
+use 'intervals.dewy'
+use 'refine_predicates.dewy'
+use 'parallel_lower.jo'
+use 'witness.jo'
+use 'isolation.jo'
+use 'ownership_checks.dewy'
+use 'ir_types.dewy'
+use 'refine_resolve.dewy'
+use 'refine_resolve_host.dewy'
+use 'refine_projection.dewy'
+use 'refine_storage.dewy'
+use 'checker_services.dewy'
+use 'refine_strings.dewy'
+use 'refine_keys.dewy'
+use 'refine_queries.dewy'
+use 'lower.jo'
+use 'ir.jo'
+use 'math_lower.jo'
+use 'effect_types.dewy'
+use 'effect_loans.dewy'
+use 'dewy_reader_types.dewy'
+use 'effect_panics.dewy'
+use 'places.jo'
+use 'copies.jo'
+use 'effect_library.jo'
+use 'draw_context.jo'
+type_intern_binding = type_intern_bind(&types, &type_args, &type_ht)
+layout_host = TypeLayoutHost(check_struct_fields, mk_box, quantity_base, math_optional, layout_endless_error, layout_cycle_error, layout_cache_padded)
+layout_input = TypeLayoutInput(&types, &structs, &type_args, &fields, &variants, &ptr_size, &layout_host)
+layout_binding = type_layout_bind(&layout_input)
+property_host = TypePropertyHost(is_lib_texture, check_struct_fields)
+property_input = TypePropertyInput(&types, &structs, &type_args, &fields, &variants, &refine_active, &T_MATH_INT, &property_host)
+property_binding = type_property_bind(&property_input)
+union_host = TypeUnionHost(mk_opt, str_set_of, str_set_type, union_postfix_name, union_type_name, intern)
+union_input = TypeUnionInput(&types, &structs, &type_args, &fields, &variants, &str_sets, &T_NEVER, &T_NONE, &union_host)
+union_binding = type_union_bind(&union_input)
+label_input = TypeLabelInput(&names, &nodes, &lists, &files, intern)
+label_binding = type_label_bind(&label_input)
+constructor_host = TypeConstructorHost(mk_type)
+constructor_input = TypeConstructorInput(&types, &ptr_size, &var_counter, &secrets_seen, &values_any, &T_VOID, &T_BOOL, &T_INT, &T_MATH_INT, &T_I8, &T_I16, &T_I32, &T_U8, &T_U16, &T_U32, &T_U64, &T_FLOAT, &T_F32, &T_STR, &T_NULL, &T_RANGE, &T_NONE, &T_NEVER, &T_RAWPTR, &T_VEC2, &T_VEC3, &T_VEC4, &T_MAT4, &T_IVEC2, &T_IVEC3, &T_IVEC4, &constructor_host)
+constructor_binding = type_constructor_bind(&constructor_input)
+inference_host = TypeInferenceHost(mk_callable_contract, effect_subst, effect_type, mk_refined, ref_subst, mk_quantity, get_struct_inst, mk_type, mk_union)
+inference_input = TypeInferenceInput(&types, &structs, &type_args, &type_binds, &inference_host)
+inference_binding = type_inference_bind(&inference_input)
+substitution_binding = type_substitute_bind(&inference_input)
+type_refinement_host = TypeRefinementHost(ref_span_copy, fact_domain, int_fits, fatal)
+type_refinement_binding = type_refinement_bind(&inference_input, &ref_predicates, &refine_active, &T_U64, &type_refinement_host)
+type_match_host = TypeMatchHost(can_coerce, caller_dewy, effect_match)
+type_match_binding = type_match_bind(&inference_input, &refine_active, &T_NEVER, &T_MATH_INT, &type_match_host)
+format_host = TypeFormatHost(int_intervals, small_span, dimension_str, name_of, str_set_text, check_struct_fields, bundled_rational_type, bundled_word_rational_type, is_dewy_set_type)
+format_input = TypeFormatInput(&types, &structs, &type_args, &fields, &ts_params, &nominal_parent, &T_MATH_INT, &T_INT, &T_MAT4, &format_host)
+format_binding = type_format_bind(&format_input)
+factory_host = TypeFactoryHost(check_struct_fields, mk_array, factory_declaration, factory_nesting_error)
+factory_input = TypeFactoryInput(&types, &structs, &type_args, &fields, &soa_decl, &factory_host)
+factory_binding = type_factory_bind(&factory_input)
+alias_host = CheckerAliasHost(alias_resume, alias_error, alias_atomic_order, alias_enter, alias_leave, resolve_type, name_of, policy_int, alias_note)
+alias_binding = checker_alias_bind(&nodes, &lists, &alias_host)
+field_host = CheckerFieldHost(field_enter, field_leave, resolve_type, field_default, field_exit_name, field_exit_type, is_map_type, ref_validate_record, field_error, field_intersection_error)
+field_binding = checker_fields_bind(&nodes, &lists, &types, &structs, &fields, &variants, &struct_components, &intersection_parts, &nominal_parent, &refine_bindings, &refine_active, &field_host)
+signature_host = CheckerSignatureHost(signature_resume, signature_enter, signature_leave, signature_finish)
+signature_input = CheckerSignatureInput(&nodes, &lists, &decl_infos, &refine_bindings, &refine_active, &T_VOID, &signature_host)
+signature_binding = checker_signature_bind(&signature_input)
+result_host = CheckerResultHost(result_lookup, result_pending, result_candidate)
+result_binding = checker_results_bind(&nodes, &lists, &files, &result_host)
+instance_host = CheckerInstanceHost(poly_inst, instance_preflight, instance_create, instance_bad_arg, instance_depth_error, instance_load, pack_written, dewy_at, instance_validate, clone, instance_attributes, ensure_ret)
+instance_input = CheckerInstanceInput(&nodes, &fns, &decl_infos, &fn_instances, &ctxs, &cx, &T_VOID, &instance_host)
+instance_binding = checker_instances_bind(&instance_input)
+for_host = CheckerForHost(for_rewrite, coerce, lit_default, new_local, for_open_range, for_map_view, is_map_entries_type, for_collide, for_element, for_route, for_struct_fields, for_map_value, for_map_value_ref, for_body, scope_reset, for_error)
+for_input = CheckerForInput(&nodes, &lists, &types, &structs, &fields, &files, &locals, &check_scopes, &loop_serials, &loop_serial_next, &value_loops, &cx, &last_checked, &T_INT, &T_U8, &for_host)
+for_binding = checker_for_loops_bind(&for_input)
+assign_host = CheckerAssignHost(assign_begin, assign_prelude, assign_tuple, assign_element, assign_index, assign_place, assign_capture, assign_refine, assign_value, assign_write, coerce, assign_update, assign_flow, assign_wrap)
+assign_input = CheckerAssignInput(&nodes, &lists, &types, &structs, &files, &ctxs, &cx, &last_checked, &refine_active, &path_narrows, &no_narrow_at, &cur_assign, &assign_root, &assign_before, &statement_watch, &decimal_target, &decimal_cached_type, &opt_fill_watch, &T_STR, &T_MATH_INT, &T_INT, &T_U64, &assign_host)
+assign_binding = checker_assigns_bind(&assign_input)
+decl_host = CheckerDeclHost(decl_form, decl_binding_type, struct_default, sibling_syntax_type, decl_values, decl_annotated, coerce, decl_sibling, decl_literal, decl_storage, decl_value_param, decl_temperature, new_local, decl_pattern, decl_after, decl_error)
+decl_input = CheckerDeclInput(&nodes, &lists, &types, &structs, &files, &locals, &ctxs, &cx, &last_checked, &refine_active, &effects_active, &ide_on, &sibling_literals, &sibling_pending, &sibling_block, &sibling_index, &sibling_flow_next, &sibling_flow_l, &nominal_parent, &quat_nodes, &quat_locals, &tk_bindings, &statement_watch, &decimal_cached_type, &growth_pending_n, &growth_start_whole, &T_STR, &T_MATH_INT, &decl_host)
+decl_binding = checker_vardecls_bind(&decl_input)
+block_host = CheckerBlockHost(block_open, block_expand, block_direct, block_final, block_sibling, sink_close, scope_reset, stmt_special, stmt_assign, stmt_error, stmt_terminates)
+block_input = CheckerBlockInput(&nodes, &lists, &files, &types, &last_checked, &check_scopes, &cx, &statement_watch, &sibling_block, &sibling_index, &sibling_flow_l, &sink_body_mode, &sink_arm_next, &sink_bind_next, &discarding, &exact_measure_on, &T_VOID, &T_NEVER, &block_host)
+block_binding = checker_blocks_bind(&block_input)
+loop_host = CheckerLoopHost(coerce, narrow_by, narrow_optional_source, new_local, loop_body, scope_reset, loop_error)
+loop_input = CheckerLoopInput(&nodes, &types, &ctxs, &cx, &check_scopes, &loop_serials, &loop_serial_next, &loop_labels, &narrow_jumps, &last_checked, &T_BOOL, &loop_host)
+loop_binding = checker_loops_bind(&loop_input)
+statement_host = CheckerStatementHost(coerce, lit_default, resolve_type, clone, statement_bind, const_eval_bool, statement_check, statement_block, ref_mutable_result, statement_error)
+statement_input = CheckerStatementInput(&nodes, &lists, &globals, &ctxs, &cx, &discarding, &refine_active, &last_checked, &statement_host)
+statement_binding = checker_statements_bind(&statement_input)
+exprstmt_host = CheckerExprStmtHost(exprstmt_repl, exprstmt_express, unused_result, exprstmt_unused_value, spawn_value_error, exprstmt_error)
+exprstmt_input = CheckerExprStmtInput(&nodes, &types, &fns, &sinks, &repl_sig_query, &discarding, &sink_pack_site, &sink_pack_hit, &last_checked, &T_NEVER, &exprstmt_host)
+exprstmt_binding = checker_exprstmts_bind(&exprstmt_input)
+return_host = CheckerReturnHost(coerce, return_place, return_sink, return_throws, infer_throw, return_note, lit_default, can_coerce, shape_returned, union_has_void, return_void_value, return_error)
+return_input = CheckerReturnInput(&nodes, &types, &structs, &files, &fns, &ctxs, &cx, &last_checked, &sink_fn, &T_VOID, &T_NEVER, &return_host)
+return_binding = checker_returns_bind(&return_input)
+body_result_host = CheckerBodyResultHost(body_result_entry, body_result_init, body_result_check, stmt_terminates, lit_default, coerce, never_skip_result, body_result_throws, body_result_hint, void_arm_end, body_result_error)
+body_result_input = CheckerBodyResultInput(&nodes, &lists, &types, &files, &fns, &ctxs, &cx, &T_VOID, &T_NEVER, &body_result_host)
+body_result_binding = checker_body_results_bind(&body_result_input)
+body_host = CheckerBodyHost(load_body, dewy_at, body_context, body_recursive_error, body_restore, ic_fn, ic_restore, decimal_wants, decimal_check_body, body_force, push_type_params, new_local, body_skip, scope_reset, body_infer, body_expression, body_finalize)
+body_input = CheckerBodyInput(&nodes, &lists, &types, &fns, &ctxs, &locals, &names, &err_trail, &err_trail_names, &err_trail_fns, &check_scopes, &da_decls, &cx, &var_counter, &type_binds, &type_exposures, &T_VOID, &T_NEVER, &ide_skipped_never, &body_host)
+body_binding = checker_bodies_bind(&body_input)
+zonk_host = CheckerZonkHost(zonk_prelude, zonk_local_error, zonk_copy_warnings, zonk_definite)
+zonk_input = CheckerZonkInput(&nodes, &lists, &types, &locals, &globals, &fns, &zonk_write_sites, &zonk_collect_writes, &zonk_indexes, &zonk_user_globals, &var_counter, &type_binds, &type_exposures, &da_decls, &T_MATH_INT, &zonk_host)
+zonk_binding = checker_zonk_bind(&zonk_input)
+constant_host = ConstantHost(constant_checked, constant_binding, fatal)
+resolve_host = CheckerResolveHost(resolve_type_name, policy_int, resolve_refinement, resolve_quantity_type, resolve_type_ide, effect_argument, nominal_family, fixed_size_arg, fixed_size, mk_fixed_checked, get_struct_inst, decimal_type, word_rational_type, resolve_type_error, dewy_record_schema, ref_validate_record, nd_of, resolve_type_soa, resolve_type_map_decl, total_dict_type, ref_validate_signature, pack_result_count, resolve_type_contract, resolve_type_pack_error)
+resolve_input = CheckerResolveInput(&nodes, &lists, &types, &names, &refine_bindings, &refine_active, &values_type_ok, &pack_result_ok, &T_VOID, &T_INT, &resolve_host)
+resolve_binding = checker_resolve_bind(&resolve_input)
+numeric_host = CheckerNumericHost(coerce, exact_potential, num_join, join_types, numeric_exact, pos_in_lib, numeric_nan, numeric_warn_division, numeric_warn_percent, numeric_error)
+numeric_input = CheckerNumericInput(&nodes, &types, &files, &T_INT, &T_MATH_INT, &T_U64, &T_FLOAT, &T_BOOL, &T_NEVER, &numeric_host)
+numeric_binding = checker_numeric_bind(&numeric_input)
+logic_host = CheckerLogicHost(check_expr, coerce, simple_enum, op_overload, narrow_by, scope_reset, logic_mask, logic_broadcast)
+logic_input = CheckerLogicInput(&nodes, &types, &check_scopes, &last_checked, &T_BOOL, &logic_host)
+logic_binding = checker_logic_bind(&logic_input)
+unary_host = CheckerUnaryHost(check_expr, check_dotted, bundled_bigint_type, simple_enum, secret_unary, unary_quantity, unary_overload, coerce, unary_exact, unary_error)
+unary_input = CheckerUnaryInput(&nodes, &types, &files, &last_checked, &T_INT, &T_MATH_INT, &unary_host)
+unary_binding = checker_unary_bind(&unary_input)
+cast_host = CheckerCastHost(check_expr, cast_unit, finalize_literal, quantity_transmute, cast_size, cast_refine, secret_cast, can_coerce, coerce, cast_type_text, cast_set_coerce, cast_bundled, cast_conversion, cast_helper, cast_record, cast_text, pos_in_lib, cast_storage, cast_error)
+cast_input = CheckerCastInput(&nodes, &types, &structs, &files, &last_checked, &T_STR, &T_U8, &T_MATH_INT, &cast_host)
+cast_binding = checker_cast_bind(&cast_input)
+collection_host = CheckerCollectionHost(check_expr, coerce, finalize_literal, values_group, collection_float_key, collection_float_obligation, collection_key_name, collection_map_decl, collection_instance, collection_setter, can_coerce, collection_error)
+collection_input = CheckerCollectionInput(&nodes, &lists, &types, &structs, &type_args, &files, &T_VOID, &collection_host)
+collection_binding = checker_collections_bind(&collection_input)
+place_host = CheckerPlaceHost(check_expr, place_contract, place_storage, place_error)
+place_input = CheckerPlaceInput(&nodes, &locals, &refine_active, &last_checked, &place_host)
+place_binding = checker_places_bind(&place_input)
+variant_host = CheckerVariantHost(variant_fields, variant_complete, variant_reference, variant_error)
+variant_input = CheckerVariantInput(&nodes, &types, &structs, &type_args, &variants, &ide_sentinel, &ide_on, &variant_host)
+variant_binding = checker_variants_bind(&variant_input)
+optional_host = CheckerOptionalHost(check_expr, coerce, narrow_optional_source, coalesce_exceptions, coalesce_failures, exact_potential, is_union, optional_error)
+optional_input = CheckerOptionalInput(&nodes, &types, &files, &T_MATH_INT, &optional_host)
+optional_binding = checker_optional_bind(&optional_input)
+literal_host = CheckerLiteralHost(coerce, effect_infer_callable, exact_note, charlike_to_int, check_expr, finalize_literal, fmt_part, literal_interpolation_warning, literal_float_error)
+literal_input = CheckerLiteralInput(&nodes, &lists, &types, &files, &refine_active, &effects_active, &exact_measure_on, &last_checked, &T_STR, &T_FLOAT, &T_BOOL, &T_NULL, &T_INT, &T_MATH_INT, &literal_host)
+literal_binding = checker_literals_bind(&literal_input)
+index_host = CheckerIndexHost(check_expr, check_to, index_construct, dewy_position_index, index_type_value, check_soa_index, index_part, index_negative, index_operator, index_int_range, index_select, index_deref, index_error)
+index_input = CheckerIndexInput(&nodes, &lists, &types, &structs, &files, &T_INT, &T_MATH_INT, &T_U8, &T_RANGE, &T_MAT4, &T_VEC4, &T_I32, &T_F32, &index_host)
+index_binding = checker_indexes_bind(&index_input)
+receiver_host = CheckerReceiverHost(check_expr, field_juxt, field_reflect_name, reflect_member, field_private, field_soa_alias, field_soa_index, dewy_bracket_call, index_end, is_dewy_set_type, index_ranges, index_stepped, index_text, receiver_error)
+receiver_input = CheckerReceiverInput(&nodes, &types, &structs, &names, &files, &ide_on, &reflect_active, &callee_at, &soa_aliases, &last_checked, &values_index_base, &type_receiver_at, &empty_index_receiver, &receiver_host)
+receiver_binding = checker_receivers_bind(&receiver_input)
+intrinsic_host = CheckerIntrinsicHost(intrinsic_rest, nargs_check, intrinsic_error, coerce, intrinsic_length, value_loop_resize, check_place, ref_length_mutation)
+intrinsic_input = CheckerIntrinsicInput(&nodes, &lists, &types, &structs, &files, &value_loops, &refine_active, &T_VOID, &T_INT, &T_STR, &T_U8, &T_RAWPTR, &T_NEVER, &intrinsic_host)
+intrinsic_binding = checker_intrinsics_bind(&intrinsic_input)
+call_query_host = CheckerCallQueryHost(call_order_rest, mutable_arguments_rest, float_key_rest, habit_rest)
+call_query_input = CheckerCallQueryInput(&nodes, &lists, &files, &intrinsic_names, &dewy_set_name, &fns, &float_key_names, &call_query_host, &syms, &names, &prelude_syms, &name_first, &name_mod, &name_sym, &name_next, &habit_names)
+call_query_binding = checker_call_queries_bind(&call_query_input)
+coerce_host = CheckerCoerceHost(can_coerce)
+coerce_binding = checker_coerce_bind(&coerce_host)
+collect_host = CheckerCollectHost(demand_name, use_home, dewy_prelude_module, prelude_reach, collect_rational, cin_grow, named_grow)
+collect_input = CheckerCollectInput(&ctxs, &cx, &mod_bits, &mod_uses, &homes_built, &prelude_used, &home_first, &home_mod, &home_next, &demanded, &dp_scanned, &dp_by_name, &dp_mods, &rational_module_found, &rational_module_probed, &rational_reach, &exact_named, &cin_mark, &surface_hidden, &collect_host, &ide_on, &ml_name_tick, &ml_struct, &named_first, &named_families, &named_decls, &named_hidden)
+collect_binding = checker_collect_bind(&collect_input)
+expr_host = CheckerExprHost(expr_complete, ident_unknown, expr_module, temperature_read, expr_values_use, check_dotted, binary_juxt, binary_char_code, binary_membership, binary_quantity_hint, binary_decimal, dewy_set_literal, binary_context, binary_nd_hint, binary_secret, binary_rest, check_call_expr, expr_sibling, expr_literal, expr_other, arg_finish_rest)
+call_host = CheckerCallHost(members_argument, dewy_classify_spread)
+call_input = CheckerCallInput(&lists, &locals, &id_members, &dewy_set_name, &call_host, &names, &values_hits, &spread_calls)
+call_binding = checker_call_bind(&call_input)
+expr_input = CheckerExprInput(&nodes, &types, &files, &syms, &check_scopes, &ctxs, &cx, &ml_at, &ml_mod, &ml_sym, &ml_name_tick, &ml_struct, &ide_sentinel, &tk_reads_on, &values_any, &statement_watch, &last_checked, &T_BOOL, &T_INT, &T_U64, &T_MATH_INT, &quantity_update_right, &expr_host)
+expr_binding = checker_expr_bind(&expr_input)
+cond_host = CheckerConditionalHost(check_expr, check_to, coerce, finalize_literal, cond_block, cond_returned, stmt_terminates, cond_narrow, cond_reset, cond_restore, cond_merge, cond_promote, cond_fill_subject, cond_fill_end, opt_filled, union_has_void, cond_then_literal, cond_sink, cond_union, is_map_type, cond_join, narrow_optional_source, new_local, cond_error)
+cond_input = CheckerConditionalInput(&nodes, &lists, &types, &structs, &files, &locals, &check_scopes, &narrow_changes, &sink_final, &T_VOID, &T_BOOL, &T_NONE, &T_NEVER, &cond_host)
+cond_binding = checker_conditionals_bind(&cond_input)
+apply_host = CheckerTypeApplyHost(check_expr, apply_lookup, dewy_bare_fn, bare_fns_call, bare_call, effect_generic_argument, apply_fn_value, apply_reference, apply_error)
+apply_input = CheckerTypeApplyInput(&nodes, &lists, &types, &callee_at, &ide_on, &apply_host)
+apply_binding = checker_type_apply_bind(&apply_input)
+aggregate_host = CheckerAggregateHost(check_expr, check_to, coerce, finalize_literal, decimal_type, aggregate_spread, aggregate_record_spread, aggregate_reflect, dewy_record_type, is_map_type, dewy_positional_record, aggregate_construct, aggregate_fixed, values_elements, sibling_parent, sibling_literal, aggregate_coerce, aggregate_error)
+aggregate_input = CheckerAggregateInput(&nodes, &lists, &types, &files, &last_checked, &sink_pack_site, &sink_pack_hit, &T_INT, &T_MATH_INT, &T_FLOAT, &T_STR, &T_U64, &aggregate_host)
+aggregate_binding = checker_aggregates_bind(&aggregate_input)
+lambda_host = CheckerLambdaHost(check_poly_lambda, callable_base, lambda_instance, lambda_shaped, lambda_entry, lambda_body, lambda_zonk_tree, decl_fn_labels, lambda_contract, effect_infer_callable, lambda_verify, ownership_lambda_type, lambda_error)
+lambda_input = CheckerLambdaInput(&nodes, &lists, &types, &type_args, &fns, &locals, &refine_bindings, &refine_active, &effects_active, &sink_lambda_pack, &lambda_host)
+lambda_binding = checker_lambdas_bind(&lambda_input)
+range_value_host = CheckerRangeValueHost(intern, check_expr, range_value_error)
+range_value_input = CheckerRangeValueInput(&nodes, &lists, &bc_count, &T_INT, &range_value_host)
+range_value_binding = checker_range_values_bind(&range_value_input)
+in_range_host = CheckerInRangeHost(intern, check_expr, check_to, capture_value, in_range_error)
+in_range_input = CheckerInRangeInput(&nodes, &lists, &files, &bc_count, &T_INT, &T_BOOL, &in_range_host)
+in_range_binding = checker_in_range_bind(&in_range_input)
+istype_host = CheckerTypeTestHost(check_expr, finalize_literal, istype_original, family_annotation, istype_family, istype_members, istype_set, istype_member_value, istype_refined, refine_implies, map_presence_fn, istype_error)
+istype_input = CheckerTypeTestInput(&nodes, &types, &structs, &refine_active, &last_checked, &T_STR, &T_BOOL, &istype_host)
+istype_binding = checker_type_tests_bind(&istype_input)
+member_host = CheckerMemberHost(member_receiver, secret_member, coerce, is_dewy_set_type, is_map_type, member_copy, member_forward, ide_complete_members, member_len_check, member_call, member_module, member_type, member_vector, member_deref, member_fields, member_field_ref, dewy_method_field, member_method_value, member_fn_value, member_narrow_path, member_missing, member_error)
+member_input = CheckerMemberInput(&nodes, &types, &structs, &fields, &type_args, &files, &ide_sentinel, &ide_on, &id_dewy_len, &id_dewy_ptr, &path_narrows, &no_narrow_at, &T_STR, &member_host)
+member_binding = checker_members_bind(&member_input)
+ident_host = CheckerIdentHost(ident_ide_ref, narrowed_var, ident_capture, ident_const_view, ident_ensure_global, ident_quantity, ident_early_use, ident_decimal_use, ident_path_alias, ident_constant, ident_function, ident_type_value, ident_bare_value, ident_type_use, ident_error)
+ident_input = CheckerIdentInput(&nodes, &types, &locals, &globals, &fns, &ctxs, &cx, &callee_at, &assign_root, &ide_on, &global_read, &path_narrows, &no_narrow_at, &test_mode, &ident_host)
+ident_binding = checker_idents_bind(&ident_input)
+match_host = CheckerMatchHost(check_expr, finalize_literal, coerce, check_to, new_local, check_struct_fields, match_intervals, path_key, match_refined, match_string_patterns, mk_ident_local, bare_arm_warning, catch_all_value, nominal_family_part, union_within, union_target, union_literal_seen, match_wrap_union, union_part, match_none_name, match_narrow_local, match_opt_wild, match_opt_wild_path, match_narrow_path, match_block, match_returned, match_reset, narrow_restore, match_merge, match_sink, match_void_hint, join_types, string_domain_match, int_domain_match, match_member_arms, match_enum_missing, match_string_missing, match_optional_missing, match_error)
+match_input = CheckerMatchInput(&nodes, &lists, &types, &structs, &fields, &variants, &type_args, &files, &locals, &names, &str_sets, &check_scopes, &narrow_changes, &path_narrows, &sink_final, &T_VOID, &T_BOOL, &T_STR, &T_MATH_INT, &T_NONE, &T_NEVER, &match_host)
+match_binding = checker_match_bind(&match_input)
+ref_intern_host = CheckerInternHost(intern)
+ref_resolve_host = RefResolveHost(ref_resolve_value, ref_resolve_limit, fatal)
+ref_fields_host = CheckerFieldsHost(check_struct_fields)
+ref_projection_host = CheckerProjectionHost(ref_projection_string_length)
+effect_lattice_input = EffectLatticeInput(&effect_contracts, &place_parents)
+effect_lattice_binding = effect_lattice_bind(&effect_lattice_input)
+effect_panic_host = EffectPanicHost(panic_host_scan, draw_context_component, panic_host_opted)
+effect_panic_input = EffectPanicInput(&fns, &panic_index, &panic_low, &panic_answer, &panic_witness, &panic_via, &panic_local, &panic_local_via, &panic_edge_at, &panic_edge_end, &panic_edges, &panic_stack, &panic_serial, &draw_context_guard, &draw_required, &effect_panic_host)
+effect_panic_binding = effect_panics_bind(&effect_panic_input)
+effect_loan_host = EffectLoanHost(loan_host_error, loan_host_route, loan_host_append, loan_host_demand, loan_host_events)
+effect_loan_input = EffectLoanInput(&nodes, &lists, &locals, &fns, &loan_owners, int(IN.lend), int(IN.loan_address), int(IN.loan_length), int(IN.loan_load), int(IN.loan_store), int(IN.len), int(IN.runtime_assert), int(IN.static_assert), int(IN.assert), &effect_loan_host)
+effect_loan_binding = effect_loans_bind(&effect_loan_input)

@@ -1,3 +1,4 @@
+use 'host_binds.jo'
 use 'checker_expr.dewy'
 use 'type_refinement.dewy'
 use 'type_substitute.dewy'
@@ -62,8 +63,6 @@ representation_deep = (t0: int) -> int: tr_deep(t0)
 # compare that word, and the text is made only where the value meets a string.
 str_sets: str[][] = [[]]
 str_set_types: int[] = [0]
-ref_intern_host = CheckerInternHost(intern)
-type_refinement_host = TypeRefinementHost(ref_span_copy, fact_domain, int_fits, fatal)
 substitution_refinements = TypeSubstituteRefinements(&ref_predicates, ref_span_copy)
 substitution_refinement_binding = type_substitute_refinements(&substitution_refinements)
 
@@ -231,7 +230,6 @@ ref_resolve_limit = (n: int) -> RefResolveLimit:
         return RefResolveLimit(true, RefTerm(1, if member == "max": bound.hi else: bound.lo))
     RefResolveLimit()
 
-ref_resolve_host = RefResolveHost(ref_resolve_value, ref_resolve_limit, fatal)
 
 ref_atoms = (n: int, binder: int, out: mut RefAtom[], depth: int = 0):
     ref_resolve_atoms(nodes, types, names, refine_bindings, ref_resolve_host, n, binder, out, depth)
@@ -726,7 +724,6 @@ ref_resolve_limit = (term: RefTerm) -> RefTerm: tr_limit(term)
 ref_subst = (predicate: int, args: int[], zonking: bool = false) -> int: ts_ref_subst(predicate, args, zonking)
 
 # One shared, noncapturing service; resolution owns its reentrant context.
-ref_fields_host = CheckerFieldsHost(check_struct_fields)
 ref_storage_contract = (t0: int) -> bool:
     ref_types_storage(types, structs, fields, type_args, ref_fields_host, t0)
 
@@ -740,7 +737,6 @@ ref_projection_string_length = (pos: int) -> bool:
     if not files[pos_file(pos)].is_dewy: return false
     runtime_fn("__dewy_string_length")
     true
-ref_projection_host = CheckerProjectionHost(ref_projection_string_length)
 
 # Resolve a projection against its concrete binder before publishing a contract.
 ref_projection_type = (root: int, path: int[], pos: int) -> int:

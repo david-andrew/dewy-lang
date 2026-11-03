@@ -25,8 +25,13 @@ from the Dewy modules; generation 3's self-build must be byte-identical.
 Restore bootstrap stubs (frontend, formatter, parser context) with the correct
 twins before building generation 2. The reader's twin uses `dewy_reader_seed.jo`.
 
-Every compiler `.dewy` has a frozen twin, imports only the library or other Dewy
-leaves, and is explicitly imported by its Jo callers. Change API/layouts in both
+Every compiler `.dewy` has a frozen twin and is explicitly imported by its Jo
+callers. It imports the library, other Dewy leaves, or compiler Jo modules: an
+import cycle (decision #140) makes a call into Jo a plain call, where a host record
+costs an indirect one. Such a leaf joins the compiler's cycle, whose top-level code
+then runs as one file; a record of functions reads what those functions read, so
+the cycle's host records and bindings live in `host_binds.jo`, after every value.
+Its differential driver supplies doubles of the Jo modules it imports. Change API/layouts in both
 twins; never evolve a second parser. `tests/test_selfhost_twins.py` enforces the
 inventory, import direction, names and enum ordinals. Differential drivers cover
 both build modes; bootstrap, fixed point and `same_output` guard whole-compiler

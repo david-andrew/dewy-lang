@@ -1,3 +1,4 @@
+use 'host_binds.jo'
 use 'checker_expr.dewy'
 use 'checker_state.dewy'
 use 'effect_types.dewy'
@@ -118,8 +119,6 @@ effect_syntax: EffectSyntax[][] = [[]]
 effect_contracts: EffectContract[] = [EffectContract()]
 # Row interning, overlap, permission, fitting and join run in effect_lattice.dewy
 # over this arena and places.jo's projection parents.
-effect_lattice_input = EffectLatticeInput(&effect_contracts, &place_parents)
-effect_lattice_binding = effect_lattice_bind(&effect_lattice_input)
 effect_summaries: EffectSummary[]
 # Bodies another process checks (a partitioned check's other roots): opaque here.
 effect_unavailable: {int: bool} = {}
@@ -2535,9 +2534,6 @@ panic_host_opted = (n: int) -> bool:
         policy = dir_policy(p)
         if policy == DIR_RUNTIME or policy == DIR_PROTOTYPE: return true
     false
-effect_panic_host = EffectPanicHost(panic_host_scan, draw_context_component, panic_host_opted)
-effect_panic_input = EffectPanicInput(&fns, &panic_index, &panic_low, &panic_answer, &panic_witness, &panic_via, &panic_local, &panic_local_via, &panic_edge_at, &panic_edge_end, &panic_edges, &panic_stack, &panic_serial, &draw_context_guard, &draw_required, &effect_panic_host)
-effect_panic_binding = effect_panics_bind(&effect_panic_input)
 
 # A function's name as a program writes it (`xs.insert` reaches `__dewy_insert`).
 effect_shown_name = (f: int) -> str:
@@ -2588,9 +2584,6 @@ loan_host_append = (n: int, p: PlaceIdentity) -> PlaceIdentity: place_append(pla
 loan_host_route = (n: int) -> PlaceIdentity: place_route(n)
 loan_host_demand = (f: int) -> bool: effects_demand(f)
 loan_host_events = (f: int) -> EffectEvent[]: effect_summaries[f].events
-effect_loan_host = EffectLoanHost(loan_host_error, loan_host_route, loan_host_append, loan_host_demand, loan_host_events)
-effect_loan_input = EffectLoanInput(&nodes, &lists, &locals, &fns, &loan_owners, int(IN.lend), int(IN.loan_address), int(IN.loan_length), int(IN.loan_load), int(IN.loan_store), int(IN.len), int(IN.runtime_assert), int(IN.static_assert), int(IN.assert), &effect_loan_host)
-effect_loan_binding = effect_loans_bind(&effect_loan_input)
 
 # Owning boundaries must publish every optional hook edge before verification.
 # Last-use elision never grants permission to omit a hook's possible effects.
