@@ -2010,6 +2010,7 @@ struct FactSummary:
     lengths: int[]           # mutable array parameters: 0 unknown, 1 same, 2 grows
     upper_field: int = 0     # upper (post) names that record parameter's array field
     post_field: int = 0
+    global_post: int = 0    # scalar result < this module array's EXIT length
 
 fact_summaries: {int: FactSummary} = {}
 fact_summary_owner = 0
@@ -2136,6 +2137,28 @@ fact_summary_record = (s: mut FactState, r0: int):
                 if field == 0 or not fact_entails(s, r, fact_project(s, field, -1, false, T_INT), -1): continue
                 post = entry.0; post_field = entry.1
                 break
+    # Reuse globals already demanded by this scalar summary, never scan
+    # module declarations or a second body. At most eight bounded queries
+    # on its first return; later returns check the same indexed binding.
+    # Cleanup may still replace/shrink a global after evaluating the result.
+    global_post = 0
+    if r != 0 and payload == 0 and fact_summary_field == 0 and fact_scalar(t) and is_int(t) and t != T_U64 and upper < 0 and post < 0 and fact_pending_defers == 0 and not ownership_fact_cleanup:
+        if fact_summary_acc.seen:
+            g = fact_summary_acc.global_post
+            if g > 0:
+                b = fact_binding(s, PlaceIdentity(.global, 0, g))
+                if b >= 0 and fact_entails(s, r, fact_project(s, s.bindings[b].value, -1, false, T_INT), -1): global_post = g
+        else:
+            tried = 0
+            bindings = s.bindings
+            loop binding in bindings:
+                g = binding.place.declaration
+                if binding.place.root != .global or g <= 0 or tkind(fact_type(int(globals[g].type))) != .array: continue
+                if tried >= 8: break
+                tried += 1
+                if fact_entails(s, r, fact_project(s, binding.value, -1, false, T_INT), -1):
+                    global_post = g
+                    break
     if fact_summary_acc.seen:
         length = fact_hull(fact_summary_acc.length, length, 0)
         value = fact_hull(fact_summary_acc.value, value, 0)
@@ -2156,12 +2179,12 @@ fact_summary_record = (s: mut FactState, r0: int):
         useful = useful or mode != 0
     if not useful: lengths = []
     if fact_summary_shapes.len() > 0: fact_summary_record_shapes(s)
-    fact_summary_acc = FactSummary(length, value, true, same, delta, upper, upper_delta, host, post, lengths, upper_field, post_field)
+    fact_summary_acc = FactSummary(length, value, true, same, delta, upper, upper_delta, host, post, lengths, upper_field, post_field, global_post)
     # A hull only widens. Once it says nothing the result's own domain does
     # not, and no argument-length relation survives (once lost, it stays
     # lost), the rest of the run cannot bound anything a caller asks: stop it
     # (an unbounded summary counts the same as none).
-    if same < 0 and upper < 0 and post < 0 and fact_summary_shape_mask == 0 and fact_summary_vacuous(fact_summary_acc, t):
+    if same < 0 and upper < 0 and post < 0 and global_post == 0 and fact_summary_shape_mask == 0 and fact_summary_vacuous(fact_summary_acc, t):
         fact_loop_steps = FACT_STEPS + 1
         fact_loop_exhausted = true
 
@@ -10720,6 +10743,18 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                     if summary.upper >= 0 and summary.upper < entry.len():
                         other = fact_summary_length(s, entry[summary.upper], summary.upper_field, f, summary.upper)
                         fact_difference(s, result, other, summary.upper_delta, n)
+                    if summary.global_post > 0:
+                        # Effects have run. Relate to this exit snapshot only;
+                        # subsequent writes invalidate it by ordinary routing.
+                        g = summary.global_post
+                        place = PlaceIdentity(.global, 0, g)
+                        binding_index = fact_binding(s, place)
+                        after = 0
+                        if binding_index >= 0: after = s.bindings[binding_index].value
+                        else:
+                            after = fact_new(s, FactBound(), FactTerm(type = int(globals[g].type)))
+                            fact_bind(s, place, after)
+                        fact_difference(s, result, fact_project(s, after, -1, false, T_INT), -1, n)
                     if summary.post >= 0:
                         after = fact_summary_actual(n, summary.post, s)
                         if after != 0:

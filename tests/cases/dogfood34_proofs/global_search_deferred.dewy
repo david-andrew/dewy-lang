@@ -1,0 +1,12 @@
+const empty:array<string> = []
+let reg:array<string> = []
+Sweep:type = type of [id:int64
+    $__drop__
+    release = ():>void => { reg = empty }
+]
+find = (name:string):>int => {
+    let cleanup = Sweep[1]
+    loop i in [0..reg.length) { if reg[i] =? name return i }
+    -1
+}
+main = () => { reg.push("a"); let i=find("a"); if i >=? 0 printl(reg[i]) }

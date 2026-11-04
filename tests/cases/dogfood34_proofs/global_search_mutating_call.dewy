@@ -1,0 +1,12 @@
+let reg:array<string> = []
+find = (name:string):>int => {
+    loop i in [0..reg.length) { if reg[i] =? name return i }
+    -1
+}
+clear = ():>void => { reg.clear }
+main = () => {
+    reg.push("a")
+    let i = find("a")
+    clear()
+    if i >=? 0 printl(reg[i])
+}

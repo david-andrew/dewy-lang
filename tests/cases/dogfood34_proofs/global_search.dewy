@@ -1,0 +1,12 @@
+let reg:array<string> = []
+find = (name:string):>int => {
+    loop i in [0..reg.length) { if reg[i] =? name return i }
+    -1
+}
+main = () => {
+    reg.push("a"); reg.push("b")
+    let i = find("b")
+    if i >=? 0 printl(reg[i])
+    let absent = find("missing")
+    if absent >=? 0 printl(reg[absent]) else printl("missing")
+}
