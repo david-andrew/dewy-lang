@@ -1,0 +1,106 @@
+$runtime_checks
+from p"effects.jo" import (callable_base)
+from p"checker_call_queries.dewy" import (check_mutable_arguments save_call_order)
+from p"expr.jo" import (AUX2_PARTIAL value_call_error default_arg finish_partial has_hole map_args ntype)
+from p"ast.jo" import (dewy_param_kinds kid nkids nodes set_list)
+from p"util.jo" import (fatal intern)
+from p"checker_expr.dewy" import (finish_arg)
+from p"types.jo" import (fn_label_names prune targ types)
+from p"check.jo" import (fns)
+from p"ide.jo" import (never_cascade)
+from p"poly_closure.jo" import (poly_families)
+from p"refine.jo" import (representation_type)
+from p"checker_call_resolve.dewy" import (resolve_fn_call)
+# O(arguments), preserving call order and retaining indices across arena growth.
+HVWord:type=int64<overflow='wrap'>
+value_call=(n:int64 callee:int64 args:array<int64> expected:int64=0):>int64=>$unsafe {
+    let ft:HVWord=prune(ntype(callee))
+    if types.ptr[ft].kind =? 'polyfn' {
+        let d=poly_families.ptr[HVWord(types.ptr[ft].st)].decl
+        return resolve_fn_call(n intern("lambda") [d] args expected callee)
+    }
+    ft=callable_base(ft)
+    if types.ptr[ft].kind not=? 'fn_' and types.ptr[ft].kind not=? 'cfn' {
+        never_cascade(nodes.ptr[n].pos ft)
+        value_call_error(n ft args 0)
+    }
+    let na:HVWord=HVWord(types.ptr[ft].nargs)
+    let keeps=if types.ptr[ft].kind =? 'fn_' {HVWord(types.ptr[ft].bits)} else {0}
+    if args.length not=? na and (keeps =? 0 or args.length >? na) {value_call_error(n ft args 1)}
+    let named=false
+    loop a in args {
+        if nodes.ptr[a].kind =? 'namedarg' {named=true}
+    }
+    let final=args
+    if keeps not=? 0 and (named or args.length <? na) {
+        return value_call_defaults(n callee ft keeps args)
+    }
+    if named {
+        if types.ptr[ft].kind =? 'cfn' or types.ptr[ft].st =? 0 {value_call_error(n ft args 2)}
+        let labels=fn_label_names(HVWord(types.ptr[ft].st) na)
+        let hasdef:array<bool>=[]
+        hasdef.resize(na)
+        let message=map_args(labels hasdef args @final)
+        if message not=? "" {fatal(nodes.ptr[n].pos message)}
+    }
+    loop i in [0..final.length) and a in final {
+        finish_arg(a targ(ft i) HVWord(types.ptr[ft].mutmask) & (HVWord(1) << i) not=? 0)
+    }
+    check_mutable_arguments(final HVWord(types.ptr[ft].mutmask) nodes.ptr[n].pos)
+    set_list(n final)
+    if named {save_call_order(n args final)}
+    nodes.ptr[n].a = int32(callee)
+    nodes.ptr[n].sym = 0
+    nodes.ptr[n].aux = 1
+    if types.ptr[ft].kind =? 'cfn' {nodes.ptr[n].aux = 4}
+    if has_hole(args) or nodes.ptr[n].aux2 =? int32(AUX2_PARTIAL) {
+        nodes.ptr[n].aux2 = 0
+        if types.ptr[ft].kind =? 'cfn' {value_call_error(n ft args 3)}
+        let pts:array<int64>=[]
+        loop i in [0..na) {pts.push(targ(ft i))}
+        return finish_partial(n pts HVWord(types.ptr[ft].mutmask) HVWord(types.ptr[ft].elem))
+    }
+    let result=representation_type(HVWord(types.ptr[ft].elem))
+    nodes.ptr[n].type = int32(result)
+    representation_type(HVWord(types.ptr[ft].elem))
+}
+# A call through a handle that keeps its function's defaults (see mk_fn):
+# arguments bind as in a direct call of that function, and each omitted
+# parameter takes its default, evaluated for this call.
+value_call_defaults=(n:int64 callee:int64 ft:int64 f:int64 args:array<int64>):>int64=>$unsafe {
+    let decl:HVWord=HVWord(fns.ptr[f].decl)
+    let np:HVWord=nkids(decl)
+    let pnames:array<int64>=[]
+    let hasdef:array<bool>=[]
+    loop i in [0..np) {
+        pnames.push(HVWord(nodes.ptr[kid(decl i)].name))
+        hasdef.push(nodes.ptr[kid(decl i)].b not=? 0)
+    }
+    let mapped:array<int64>=[]
+    let message=map_args(pnames hasdef args @mapped dewy_param_kinds.get(decl) ?? [])
+    if message not=? "" {fatal(nodes.ptr[n].pos message)}
+    let final:array<int64>=[]
+    loop i in [0..np) {
+        let a=mapped.ptr[i]
+        if a =? 0 {
+            a=default_arg(decl i targ(ft i) final false fns.ptr[f].targs)
+        }
+        else {finish_arg(a targ(ft i) HVWord(types.ptr[ft].mutmask) & (HVWord(1) << i) not=? 0)}
+        final.push(a)
+    }
+    check_mutable_arguments(final HVWord(types.ptr[ft].mutmask) nodes.ptr[n].pos)
+    set_list(n final)
+    save_call_order(n args final)
+    nodes.ptr[n].a = int32(callee)
+    nodes.ptr[n].sym = 0
+    nodes.ptr[n].aux = 1
+    if has_hole(args) or nodes.ptr[n].aux2 =? int32(AUX2_PARTIAL) {
+        nodes.ptr[n].aux2 = 0
+        let pts:array<int64>=[]
+        loop i in [0..np) {pts.push(targ(ft i))}
+        return finish_partial(n pts HVWord(types.ptr[ft].mutmask) HVWord(types.ptr[ft].elem))
+    }
+    let result=representation_type(HVWord(types.ptr[ft].elem))
+    nodes.ptr[n].type = int32(result)
+    representation_type(HVWord(types.ptr[ft].elem))
+}

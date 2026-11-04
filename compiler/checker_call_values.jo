@@ -1,0 +1,91 @@
+# Frozen callable-value checking from expr.jo.
+use 'effects.jo'
+use 'checker_call_queries.dewy'
+use 'expr.jo'
+use 'ast.jo'
+use 'util.jo'
+use 'checker_expr.dewy'
+use 'types.jo'
+use 'check.jo'
+use 'ide.jo'
+use 'poly_closure.jo'
+use 'refine.jo'
+use 'checker_call_resolve.dewy'
+
+value_call = (n: int, callee: int, args: int[], expected: int = 0) -> int:
+    ft = prune(ntype(callee))
+    if types[ft].kind == .polyfn:
+        d = poly_families[int(types[ft].st)].decl
+        return resolve_fn_call(n, intern("lambda"), [d], args, expected, callee)
+    ft = callable_base(ft)
+    if types[ft].kind != .fn_ and types[ft].kind != .cfn:
+        never_cascade(nodes[n].pos, ft)
+        value_call_error(n, ft, args, 0)
+    na = int(types[ft].nargs)
+    keeps = if types[ft].kind == .fn_: int(types[ft].bits) else: 0
+    if args.len() != na and (keeps == 0 or args.len() > na): value_call_error(n, ft, args, 1)
+    named = false
+    loop a in args:
+        if nodes[a].kind == .namedarg: named = true
+    final = args
+    if keeps != 0 and (named or args.len() < na):
+        return value_call_defaults(n, callee, ft, keeps, args)
+    if named:
+        if types[ft].kind == .cfn or types[ft].st == 0: value_call_error(n, ft, args, 2)
+        labels = fn_label_names(int(types[ft].st), na)
+        message = map_args(labels, fill(false, na), args, final)
+        if message != "": fatal(nodes[n].pos, message)
+    loop i in 0.. and a in final:
+        finish_arg(a, targ(ft, i), int(types[ft].mutmask) & (1 << i) != 0)
+    check_mutable_arguments(final, int(types[ft].mutmask), nodes[n].pos)
+    set_list(n, final)
+    if named: save_call_order(n, args, final)
+    nodes[n].a = i32(callee)
+    nodes[n].sym = 0
+    nodes[n].aux = 1
+    if types[ft].kind == .cfn: nodes[n].aux = 4
+    if has_hole(args) or nodes[n].aux2 == i32(AUX2_PARTIAL):
+        nodes[n].aux2 = 0
+        if types[ft].kind == .cfn: value_call_error(n, ft, args, 3)
+        pts: int[]
+        loop i in [0..na): pts.push(targ(ft, i))
+        return finish_partial(n, pts, int(types[ft].mutmask), int(types[ft].elem))
+    result = representation_type(int(types[ft].elem))
+    nodes[n].type = i32(result)
+    representation_type(int(types[ft].elem))
+
+# A call through a handle that keeps its function's defaults (see mk_fn):
+# arguments bind as in a direct call of that function, and each omitted
+# parameter takes its default, evaluated for this call.
+value_call_defaults = (n: int, callee: int, ft: int, f: int, args: int[]) -> int:
+    decl = int(fns[f].decl)
+    np = nkids(decl)
+    pnames: int[]
+    hasdef: bool[]
+    loop i in [0..np):
+        pnames.push(int(nodes[kid(decl, i)].name))
+        hasdef.push(nodes[kid(decl, i)].b != 0)
+    mapped: int[]
+    message = map_args(pnames, hasdef, args, mapped, dewy_param_kinds.get(decl) ?? [])
+    if message != "": fatal(nodes[n].pos, message)
+    final: int[]
+    loop i in [0..np):
+        a = mapped[i]
+        if a == 0:
+            a = default_arg(decl, i, targ(ft, i), final, false, fns[f].targs)
+        else: finish_arg(a, targ(ft, i), int(types[ft].mutmask) & (1 << i) != 0)
+        final.push(a)
+    check_mutable_arguments(final, int(types[ft].mutmask), nodes[n].pos)
+    set_list(n, final)
+    save_call_order(n, args, final)
+    nodes[n].a = i32(callee)
+    nodes[n].sym = 0
+    nodes[n].aux = 1
+    if has_hole(args) or nodes[n].aux2 == i32(AUX2_PARTIAL):
+        nodes[n].aux2 = 0
+        pts: int[]
+        loop i in [0..np): pts.push(targ(ft, i))
+        return finish_partial(n, pts, int(types[ft].mutmask), int(types[ft].elem))
+    result = representation_type(int(types[ft].elem))
+    nodes[n].type = i32(result)
+    representation_type(int(types[ft].elem))

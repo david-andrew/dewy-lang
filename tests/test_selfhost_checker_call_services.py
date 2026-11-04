@@ -338,3 +338,8 @@ def test_checker_call_services_errors(compiler, tmp_path, setup, message):  # no
     output = compare(compiler, tmp_path, False, DRIVER + main, status=35,
                      extra_stems=('checker_call_cost', 'checker_call_services'), doubles=DOUBLES, jo_doubles=JO)
     assert message in output
+
+# Callable-value execution has its own differential; retain this driver's service.
+JO['expr.jo'] = JO['expr.jo'].replace('value_call = ', 'value_call_double = ')
+JO['checker_call_values.dewy'] = 'from p"expr.jo" import value_call_double\nvalue_call=(n:int64 callee:int64 args:array<int64> expected:int64=0):>int64=>value_call_double(n callee args expected)\n'
+JO['checker_call_values.jo'] = "use 'expr.jo'\nvalue_call = (n: int, callee: int, args: int[], expected: int = 0) -> int: value_call_double(n, callee, args, expected)\n"
