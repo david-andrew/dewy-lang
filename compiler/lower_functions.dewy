@@ -28,7 +28,7 @@ from p"lower_views.dewy" import (find_views param_view_decl)
 from p"lower_group.dewy" import (gen_block_stmts gen_return gen_stmt scope_pop)
 from p"lower_helpers.dewy" import (lower_helper)
 from p"math_lower.jo" import (math_decl_depth math_loop_parent math_loop_sites math_static_regs math_static_widths math_word_limits math_word_regs math_word_updates math_write_loop math_writes)
-from p"ownership.jo" import (owner_begin owner_end ownership_consumers ownership_decls)
+from p"ownership.jo" import (owner_begin owner_end owner_enter_captures ownership_consumers ownership_decls)
 from p"ownership_types.dewy" import (ownership_type)
 from p"parallel_lower.jo" import (parallel_owned parallel_scalars parallel_serial)
 from p"partition.jo" import (partition_begin)
@@ -261,6 +261,7 @@ lower_inst=(lf:LFnWord f:LFnWord):>void=>$unsafe {
 lower_inst_body=(f:LFnWord body:LFnWord):>void=>$unsafe {
     let guarded=lower_length_guards.length
     scope_push();
+    owner_enter_captures(f);
     if ownership_decls.length not=? 0 and fns.ptr[f].decl not=? 0 and not files.ptr[pos_file(nodes.ptr[LFnWord(fns.ptr[f].decl)].pos)].is_dewy {
         loop p in fns.ptr[f].params {
             if copy_inputs.has(p) {scope_add_local(p);}

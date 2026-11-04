@@ -1,0 +1,5 @@
+# exit: 101
+# modes: native native-release
+$runtime_checks
+End:type=[id:int64 $__drop__ release=():>void=>printl("drop")]
+main=()=>{concurrent {spawn {let e=End[42] printl(e.id) panic("local child")}}}

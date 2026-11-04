@@ -675,7 +675,9 @@ helper_envdrop = (f: int, heap: bool = true):
             if is_managed(t):
                 if resource: iff(e_bin(.gtu, VI, e_load(VI, env, 24, 8), e_iconst(index)))
                 movable = spawn_owned_capture(f, inn)
-                if movable: iff(e_load(VI, env, int(locals[inn].env_off) - 8, 8))
+                if movable:
+                    iff(e_load(VI, env, int(locals[inn].env_off) - 8, 8))
+                    e_store(env, int(locals[inn].env_off) - 8, e_iconst(0), 8)
                 drop_embedded(e_addi(env, int(locals[inn].env_off)), t)
                 if movable: endc()
                 if resource: endc()
@@ -742,6 +744,7 @@ lower_helper = (lf: int):
         partial: helper_partial(h.inst)
         envdrop: helper_envdrop(h.inst)
         stackenvdrop: helper_envdrop(h.inst, false)
+        capture_drop: helper_capture_drop(t)
         envcopy: helper_envcopy(h.inst)
 
         boxrel: helper_boxrel(t)

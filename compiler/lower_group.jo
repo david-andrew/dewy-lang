@@ -93,6 +93,7 @@ emit_scope_exit = (i: int):
             release(int(locals[l].vreg), t)
             e_mov(int(locals[l].vreg), e_iconst(0))
         k -= 1
+    if i == 0: owner_leave_captures()
 
 scope_pop = ():
     emit_scope_exit(scope_locals.len() - 1)

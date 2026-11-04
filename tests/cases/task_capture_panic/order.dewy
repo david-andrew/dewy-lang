@@ -1,0 +1,21 @@
+# modes: native native-release
+# exit: 101
+$runtime_checks
+End:type=[id:int64
+    $__drop__ release=():>void=>{
+        if id =? 1 {printl("first")}
+        else if id =? 2 {printl("second")}
+        else {printl("local")}
+    }
+]
+main=()=>{
+    let first=End[1]
+    let second=End[2]
+    concurrent {spawn {
+        printl(first.id)
+        printl(second.id)
+        let local=End[3]
+        printl(local.id)
+        panic("capture order")
+    }}
+}

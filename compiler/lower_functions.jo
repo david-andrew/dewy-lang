@@ -230,6 +230,7 @@ lower_inst = (lf: int, f: int):
 lower_inst_body = (f: int, body: int) -> void:
     guarded = lower_length_guards.len()
     scope_push()
+    owner_enter_captures(f)
     if ownership_decls.len() != 0 and fns[f].decl != 0 and not files[pos_file(nodes[int(fns[f].decl)].pos)].is_dewy:
         loop p in fns[f].params:
             if copy_inputs.has(p): scope_add_local(p)

@@ -1,0 +1,6 @@
+# modes: native native-release
+# exit: 101
+$runtime_checks
+End:type=[id:int64 $__drop__ release=():>void=>printl("drop")]
+consume=(e:End):>void=>{printl(e.id) panic("after move")}
+main=()=>{let e=End[42] concurrent {spawn consume(e)}}

@@ -1,3 +1,4 @@
+use 'lower_closures.dewy'
 use 'lower_storage.dewy'
 use 'lower_helpers.dewy'
 use 'checker_state.dewy'
@@ -157,12 +158,14 @@ owner_adoptions: {int: bool}
 owner_values: {int: int}
 owner_parts: {int: (str, int)[]} # root slot -> (field path, record)
 owner_init = -1
+owner_capture_records: int[]
 
 owner_begin = ():
     owner_records.clear()
     owner_parts.clear()
     owner_adoptions.clear()
     owner_values.clear()
+    owner_capture_records.clear()
     owner_init = -1
     if ownership_decls.len() != 0: owner_init = emit(.nop, 0, 0, 0, 0, 0, 0)
 
@@ -211,6 +214,34 @@ owner_register = (slot: int, t: int):
         return
     record = owner_record(slot)
     e_call(rt("__owner_link"), [e_slot(record), e_slot(slot), e_faddr(lf_helper(.drop, t, 0))], -1)
+
+# Only run-once bodies with owned captures demand these panic records. Each
+# capture is indexed by its existing environment live bit: O(captures), with
+# no program-wide walk. Register before locals, so locals unwind first.
+owner_enter_captures = (f: int):
+    if not spawn_body(f): return
+    loop cap in fns[f].caps:
+        l = int(cap.inner)
+        if not spawn_owned_capture(f, l): continue
+        record = owner_record(new_slot(1, 1))
+        owner_capture_records.push(record)
+        e_call(rt("__owner_link"), [e_slot(record), e_addi(env_v, int(locals[l].env_off) - 8), e_faddr(lf_helper(.capture_drop, store_type(l), 0))], -1)
+
+# Normal completion leaves the environment's ownership with the task runner.
+# A panic consumes the same live bit used by onward moves and environment drop.
+owner_leave_captures = ():
+    loop record in owner_capture_records: e_call(rt("__owner_unlink"), [e_slot(record)], -1)
+
+helper_capture_drop = (t: int):
+    ps = helper_params(1)
+    live = ps[0]
+    iff(e_load(VI, live, 0, 8))
+    e_store(live, 0, e_iconst(0), 8)
+    e_call0(rt("__task_shield_enter"), -1)
+    drop_embedded(e_addi(live, 8), t)
+    e_call0(rt("__task_shield_leave"), -1)
+    endc()
+    e_ret(-1)
 
 owner_forget_field = (slot: int, path: str):
     if let parts = owner_parts.get(slot):

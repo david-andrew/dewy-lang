@@ -17,7 +17,7 @@ from p"arena.jo" import (helper_promote)
 from p"expr.jo" import (is_fn_type ntype)
 from p"ast.jo" import (kid nkids nodes)
 from p"math_lower.jo" import (math_compare math_main math_tag)
-from p"ownership.jo" import (owner_begin owner_element_drop owner_end owner_forget_slot owner_hook_into owner_register owner_stride owner_value ownership_copies ownership_moves)
+from p"ownership.jo" import (helper_capture_drop owner_begin owner_element_drop owner_end owner_forget_slot owner_hook_into owner_register owner_stride owner_value ownership_copies ownership_moves)
 from p"ownership_types.dewy" import (ownership_callable_cap ownership_copyable ownership_inline ownership_type)
 from p"parallel_lower.jo" import (parallel_job_helper)
 from p"units.jo" import (quantity_base)
@@ -755,7 +755,10 @@ helper_envdrop=(f:LHWord heap:bool=true):>void=>$unsafe {
             if is_managed(t) {
                 if resource {iff(e_bin('gtu' VI e_load(VI env 24 8) e_iconst(index)));}
                 let movable=spawn_owned_capture(f inn)
-                if movable {iff(e_load(VI env LHWord(locals.ptr[inn].env_off) - 8 8));}
+                if movable {
+                    iff(e_load(VI env LHWord(locals.ptr[inn].env_off) - 8 8));
+                    e_store(env LHWord(locals.ptr[inn].env_off) - 8 e_iconst(0) 8);
+                }
                 drop_embedded(e_addi(env LHWord(locals.ptr[inn].env_off)) t);
                 if movable {endc();}
                 if resource {endc();}
@@ -840,6 +843,7 @@ lower_helper=(lf:LHWord):>void=>$unsafe {
         <10> => {helper_partial(h.inst);}
         <9> => {helper_envdrop(h.inst);}
         <12> => {helper_envdrop(h.inst false);}
+        <23> => {helper_capture_drop(t);}
         <11> => {helper_envcopy(h.inst);}
         <13> => {helper_boxrel(t);}
         <14> => {helper_boxdrop(t);}
