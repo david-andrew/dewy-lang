@@ -1,0 +1,7 @@
+# quick
+import p"./cycle_value_peer.dewy" as peer
+Op:type=<():>int>
+f=():>int => b + 1
+let saved:Op=peer.keep(@f)
+let b=41
+printl(saved())

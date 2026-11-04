@@ -1,0 +1,13 @@
+# modes: native native-release web web-release
+$runtime_checks
+Word:type=int64<overflow='wrap'>
+Small:type=int8<overflow='saturate'>
+const BASE=10
+wrapped=(x:Word):>Word=>x+WATCH
+saturated=():>Small=>Small(WATCH)
+printl(wrapped(1) saturated())
+const WATCH=BASE+200
+printl(wrapped(1) saturated())
+printl(wrapped(int64.max))
+const BIG=BASE+9223372036854775807
+printl(Word(BIG))

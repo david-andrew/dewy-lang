@@ -6191,7 +6191,7 @@ check_program = (main_path: str):
         if test_start != 0: init_fns.push(test_start)
         loop m in order:
             if not modules[m].is_prelude: init_fns.push(int(modules[m].init_fn))
-    merge_cycle_inits()
+    merge_cycle_inits(order)
     if dg_globals.len() > 0 and not test_mode:
         later: int[]
         if update_fn > 0: later.push(update_fn)

@@ -8,7 +8,6 @@ from tests.test_selfhost_opt_rewrite import build_run
 
 DRIVER = r'''
 ir: IrFn
-checked_flags = true
 const VI = 0
 const M_INDEX = 128
 cache_values = fill(0, 256)
@@ -57,6 +56,7 @@ def test_opt_borrowed_views(compiler, tmp_path, release):  # noqa: F811
     decode += '\n'.join(function(original, name) for name in (
         'o_pure_classify', 'cse_arity_classify', 'o_defines_classify',
         'kills_memory_classify', 'o_retargetable_classify', 'o_resize'))
-    driver = '\nir_operand_layout = ir_operand_layouts()\n' + decode + DRIVER
+    # Initialize classifier inputs before building the extracted decode table.
+    driver = '\nchecked_flags = true\nir_operand_layout = ir_operand_layouts()\n' + decode + DRIVER
     outputs = [build_run(compiler, tmp_path, ext, driver, release) for ext in ('dewy', 'jo')]
     assert outputs == ['ok\n', 'ok\n']
