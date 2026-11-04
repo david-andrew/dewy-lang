@@ -5376,7 +5376,11 @@ intrinsic_rest = (n: int, iid: int, args0: int[], expected: int) -> int:
         check_place(args[0], false)
         arg_type(args, 1, T_INT)
         if id == .resize or id == .setlen: concurrency_require_zero(n, int(types[t].elem))
-        if refine_active and (id == .resize or id == .setlen) and ref_storage_contract(int(types[t].elem)):
+        # Generated dotted output is private reserved storage, filled once
+        # by checked element stores before it becomes a value. Its temporary
+        # zeroed slots are never exposed as inhabitants of the element type.
+        private_output = id == .setlen and has_flag(n, NF_PRIVATE_SETLEN)
+        if refine_active and (id == .resize or id == .setlen) and not private_output and ref_storage_contract(int(types[t].elem)):
             fatal(nodes[n].pos, "refined elements cannot be created by unchecked zero initialization")
     else if id == .task_data:
         nargs_check(n, nargs, 1, 1, "__task_data")

@@ -9701,8 +9701,27 @@ fact_literal = (s: mut FactState, n: int) -> int:
     if has_flag(n, NF_U64) and x < 0: return fact_new(s, FactBound(1, FACT_MAX, true), FactTerm(origin = n, type = T_MATH_INT))
     fact_constant(s, x, n)
 
+# A final body walk can prove a branch unreachable (including a generated
+# broadcast alternative). Its refinement checks need no evidence-free retry.
+# Do not publish this during speculation, summaries or probes, and never walk
+# into a nested function. Indexed visits cost O(nodes in demanded dead paths).
+fact_dead_refinements: {int: bool}
+fact_refinements_unreachable = (root: int):
+    if fact_speculating != 0 or fact_summary_owner != 0 or fact_probe_on or fact_query or wit_tentative or not refine_owners.has(fact_owner): return
+    work = [root]
+    loop work.len() > 0:
+        n = work.pop()
+        if n == 0 or fact_dead_refinements.has(n): continue
+        fact_dead_refinements[n] = true
+        if nodes[n].kind == .lambda: continue
+        if nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.refinement)): fact_validated[n] = true
+        fact_slice_push_children(work, n)
+
 fact_capture_value = (n: int, s: mut FactState) -> int:
-    if n == 0 or not s.live: return 0
+    if n == 0: return 0
+    if not s.live:
+        if refine_owners.len() > 0: fact_refinements_unreachable(n)
+        return 0
     if fact_speculating > 0:
         if fact_constructor_budget >= 0:
             if fact_constructor_budget == 0:
@@ -11530,6 +11549,7 @@ facts_reset = ():
     fact_fixed_requests = []
     fact_divisors = {}
     fact_validated = {}
+    fact_dead_refinements = {}
     fact_query = false
     fact_policy = FactPolicy.RuntimeAllowed
     if len(fact_internal_policy) > 0:
