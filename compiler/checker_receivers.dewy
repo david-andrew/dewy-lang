@@ -6,6 +6,9 @@ from p"type_inference.dewy" import tu_prune
 from p"checker_literals.dewy" import xl_finish
 from p"checker_members.dewy" import xd_member
 from p"checker_indexes.dewy" import xx_index
+from p"checker_expr.dewy" import check_expr
+from p"expr.jo" import (field_juxt field_reflect_name field_private field_soa_alias field_soa_index dewy_bracket_call index_end is_dewy_set_type index_ranges index_stepped index_text receiver_error)
+from p"reflection.jo" import reflect_member
 # `x.f` before member selection: juxtaposed products, computed names, reflected
 # members, a library's own `__` fields, soa element aliases and `ps[i].x` over a soa
 # array, then the member's spelling; selection runs in checker_members. `x[i]`
@@ -15,22 +18,6 @@ from p"checker_indexes.dewy" import xx_index
 # receiver's checking. O(1) plus demanded semantic work; host calls may grow every
 # arena, so records are reread by ID.
 XSWord:type=int64<overflow='wrap'>
-CheckerReceiverHost:type=[
-    check:<(node:int64 expected:int64):>int64>
-    juxt:<(node:int64):>void>
-    reflect_name:<(node:int64):>void>
-    reflect_member:<(node:int64):>bool>
-    private:<(node:int64):>int64>
-    soa_alias:<(node:int64 receiver:int64 expected:int64):>int64>
-    soa_index:<(node:int64 receiver:int64 expected:int64):>int64>
-    bracket_call:<(node:int64):>bool>
-    end_index:<(node:int64 expected:int64):>int64>
-    set_type:<(type_id:int64):>bool>
-    ranges:<(node:int64 type_id:int64):>void>
-    stepped:<(node:int64 type_id:int64 expected:int64):>int64>
-    text_index:<(node:int64 expected:int64):>int64>
-    error:<(node:int64 type_id:int64 code:int64):>void>
-]
 CheckerReceiverInput:type=[
     nodes:ptr<array<Node>>
     types:ptr<array<TypeInfo>>
@@ -45,7 +32,6 @@ CheckerReceiverInput:type=[
     index_base:ptr<int64>
     type_receiver:ptr<int64>
     empty_receiver:ptr<int64>
-    host:ptr<CheckerReceiverHost>
 ]
 let xs_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
 let xs_types:ptr<array<TypeInfo>>=$unsafe (uint64(0) as ptr<array<TypeInfo>>)
@@ -60,7 +46,6 @@ let xs_last:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let xs_index_base:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let xs_type_receiver:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let xs_empty_receiver:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
-let xs_host:ptr<CheckerReceiverHost>=$unsafe (uint64(0) as ptr<CheckerReceiverHost>)
 checker_receivers_bind=(input:ptr<CheckerReceiverInput>):>XSWord=>$unsafe {
     xs_nodes=input[0].nodes
     xs_types=input[0].types
@@ -75,7 +60,6 @@ checker_receivers_bind=(input:ptr<CheckerReceiverInput>):>XSWord=>$unsafe {
     xs_index_base=input[0].index_base
     xs_type_receiver=input[0].type_receiver
     xs_empty_receiver=input[0].empty_receiver
-    xs_host=input[0].host
     0
 }
 xs_flag=(n:XSWord f:XSWord):>bool=>$unsafe {XSWord(xs_nodes[0].ptr[n].flags) & f not=? 0}
@@ -86,23 +70,23 @@ xs_soa=(t0:XSWord):>bool=>$unsafe {
 }
 # Flags: NF_JUXT 536870912, NF_LOOPCOUNT 33554432.
 xs_field=(n:XSWord expected:XSWord):>XSWord=>$unsafe {
-    if xs_flag(n 536870912) {xs_host[0].juxt(n)}
-    if xs_nodes[0].ptr[n].b not=? 0 {xs_host[0].reflect_name(n)}
-    if xs_reflecting[0] and xs_host[0].reflect_member(n) {return XSWord(xs_nodes[0].ptr[n].type)}
+    if xs_flag(n 536870912) {field_juxt(n)}
+    if xs_nodes[0].ptr[n].b not=? 0 {field_reflect_name(n)}
+    if xs_reflecting[0] and reflect_member(n) {return XSWord(xs_nodes[0].ptr[n].type)}
     let a0=XSWord(xs_nodes[0].ptr[n].a)
     let is_callee=n =? xs_callee[0]
     # `c.__peer` in a program: a library's own field, which may change in any version.
-    if xs_names[0].ptr[XSWord(xs_nodes[0].ptr[n].name)].startswith("__") and not xs_ide[0] and not xs_flag(n 33554432) {a0=xs_host[0].private(n)}
+    if xs_names[0].ptr[XSWord(xs_nodes[0].ptr[n].name)].startswith("__") and not xs_ide[0] and not xs_flag(n 33554432) {a0=field_private(n)}
     # A soa element alias `p` (loop p in ps): `p.x` is `ps.x[i]`.
     if xs_soa_aliases[0] >? 0 and xs_nodes[0].ptr[a0].kind =? 'ident' {
-        let t=xs_host[0].soa_alias(n a0 expected)
+        let t=field_soa_alias(n a0 expected)
         if t >=? 0 {return t}
     }
     # `ps[i].x` on a soa array is `ps.x[i]`.
     if xs_nodes[0].ptr[a0].kind =? 'index' and xs_nodes[0].ptr[a0].b not=? 0 {
-        let abt=tu_prune(xs_host[0].check(XSWord(xs_nodes[0].ptr[a0].a) 0))
+        let abt=tu_prune(check_expr(XSWord(xs_nodes[0].ptr[a0].a) 0))
         xs_nodes[0][a0].a=int32<overflow='wrap'>(xs_last[0])
-        if xs_soa(abt) {return xs_host[0].soa_index(n a0 expected)}
+        if xs_soa(abt) {return field_soa_index(n a0 expected)}
     }
     let name=xs_names[0].ptr[XSWord(xs_nodes[0].ptr[n].name)]
     let spelled:XSWord=0
@@ -126,24 +110,24 @@ xs_named=(t:XSWord name:string):>bool=>$unsafe {
 }
 # Flags: NF_JUXT 536870912, NF_STEP 32768.
 xs_index=(n:XSWord expected:XSWord):>XSWord=>$unsafe {
-    if xs_flag(n 536870912) {xs_host[0].juxt(n)}
+    if xs_flag(n 536870912) {field_juxt(n)}
     xs_index_base[0]=XSWord(xs_nodes[0].ptr[n].a)
     # `mean[xs]` in Dewy: a function called with brackets.
-    if xs_nodes[0].ptr[XSWord(xs_nodes[0].ptr[n].a)].kind =? 'ident' and xs_nodes[0].ptr[n].sval =? 0 and xs_count(n) >? 0 and xs_dewy_at(n) and xs_host[0].bracket_call(n) {return xs_host[0].check(n expected)}
-    if xs_nodes[0].ptr[n].sval not=? 0 {return xs_host[0].end_index(n expected)}
+    if xs_nodes[0].ptr[XSWord(xs_nodes[0].ptr[n].a)].kind =? 'ident' and xs_nodes[0].ptr[n].sval =? 0 and xs_count(n) >? 0 and xs_dewy_at(n) and dewy_bracket_call(n) {return check_expr(n expected)}
+    if xs_nodes[0].ptr[n].sval not=? 0 {return index_end(n expected)}
     let saved=xs_type_receiver[0]
     xs_type_receiver[0]=XSWord(xs_nodes[0].ptr[n].a)
     if xs_nodes[0].ptr[n].b =? 0 and xs_count(n) =? 0 {xs_empty_receiver[0]=XSWord(xs_nodes[0].ptr[n].a)}
-    let bt=tu_prune(xs_host[0].check(XSWord(xs_nodes[0].ptr[n].a) 0))
+    let bt=tu_prune(check_expr(XSWord(xs_nodes[0].ptr[n].a) 0))
     xs_type_receiver[0]=saved
-    if xs_named(bt "Set") and xs_host[0].set_type(bt) and xs_dewy_at(n) {xs_host[0].error(n bt 1)}
+    if xs_named(bt "Set") and is_dewy_set_type(bt) and xs_dewy_at(n) {receiver_error(n bt 1)}
     xs_nodes[0][n].a=int32<overflow='wrap'>(xs_last[0])
     let nd=xs_named(bt "NDArray")
-    if xs_dewy(n) and not nd and (xs_count(n) >=? 2 or xs_types[0].ptr[bt].kind =? 'typeval') {xs_host[0].ranges(n bt)}
+    if xs_dewy(n) and not nd and (xs_count(n) >=? 2 or xs_types[0].ptr[bt].kind =? 'typeval') {index_ranges(n bt)}
     let bk=xs_types[0].ptr[bt].kind
     let b=XSWord(xs_nodes[0].ptr[n].b)
-    if b not=? 0 and xs_nodes[0].ptr[b].kind =? 'range' and xs_flag(b 32768) and not nd {return xs_host[0].stepped(n bt expected)}
-    if bk =? 'str_' and xs_dewy(n) {return xs_host[0].text_index(n expected)}
+    if b not=? 0 and xs_nodes[0].ptr[b].kind =? 'range' and xs_flag(b 32768) and not nd {return index_stepped(n bt expected)}
+    if bk =? 'str_' and xs_dewy(n) {return index_text(n expected)}
     let result=xx_index(n expected bt)
     if result.bypass {return result.type}
     xl_finish(n result.type expected)

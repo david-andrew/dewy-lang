@@ -261,3 +261,16 @@ isolate_sinks(JO_DOUBLES)
 
 from tests.selfhost_expr_double import isolate_hooks
 isolate_hooks(JO_DOUBLES)
+
+from tests.test_selfhost_checker_returns import RETURN_JO
+for _module, _definitions in RETURN_JO.items():
+    _missing = {}
+    for _name, _definition in _definitions.items():
+        if (_name + ' = ') in JO_DOUBLES.get(_module, ''):
+            continue
+        _head, _body = _definition.rsplit(': ', 1)
+        _result = ''
+        if ' -> bool' in _head: _result = '; false'
+        elif ' -> int' in _head: _result = '; 0'
+        _missing[_name] = _head + ': assert(false)' + _result
+    JO_DOUBLES[_module] = JO_DOUBLES.get(_module, '') + jo_doubles({_module: _missing}).get(_module, '')

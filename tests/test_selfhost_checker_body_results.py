@@ -1,5 +1,6 @@
 """Body result obligations: inferred results, declared results on every path, never and init."""
 import pytest
+from tests.selfhost_expr_double import jo_doubles
 
 from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER, compare
@@ -41,8 +42,7 @@ xe_error_host = (n: int, code: int, t: int, d: int):
     print(events)
     print("error:{n}:{t}:{d}:{code}")
     exit(19)
-xe_services = CheckerBodyResultHost(xe_entry_host, xe_init_host, xe_check_host, xe_terminates_host, xe_default_host, xe_coerce_host, xe_never_skip_host, xe_throws_host, xe_hint_host, xe_void_end_host, xe_error_host)
-xe_inputs = CheckerBodyResultInput(&nodes, &lists, &types, &files, &fns, &ctxs, &cx, &T_VOID, &T_NEVER, &xe_services)
+xe_inputs = CheckerBodyResultInput(&nodes, &lists, &types, &files, &fns, &ctxs, &cx, &T_VOID, &T_NEVER)
 xe_binding = checker_body_results_bind(&xe_inputs)
 DEWY = 1 << 40
 # A body whose last statement holds a value of type t (ends: never finishes).
@@ -103,11 +103,31 @@ main = ():
 '''
 
 
+
+# The Jo services checker_body_results calls, routed to the driver.
+BODY_RESULT_JO = {
+    'check.jo': {
+        'body_result_entry': 'body_result_entry = (decl: int, body: int): xe_entry_host(decl, body)',
+        'body_result_init': 'body_result_init = (f: int, body: int): xe_init_host(f, body)',
+        'body_result_check': 'body_result_check = (f: int, decl: int, body: int, infer: bool, want: bool, expected: int) -> int: xe_check_host(f, decl, body, infer, want, expected)',
+        'stmt_terminates': 'stmt_terminates = (s: int) -> bool: xe_terminates_host(s)',
+        'never_skip_result': 'never_skip_result = (decl: int) -> bool: xe_never_skip_host(decl)',
+        'body_result_throws': 'body_result_throws = (f: int, body: int): xe_throws_host(f, body)',
+        'body_result_hint': 'body_result_hint = (f: int, decl: int): xe_hint_host(f, decl)',
+        'void_arm_end': 'void_arm_end = (body: int, r: int) -> bool: xe_void_end_host(body, r)',
+        'body_result_error': 'body_result_error = (n: int, code: int, r: int, decl: int): xe_error_host(n, code, r, decl)',
+    },
+    'expr.jo': {
+        'lit_default': 'lit_default = (n: int) -> int: xe_default_host(n)',
+        'coerce': 'coerce = (n: int, target: int) -> int: xe_coerce_host(n, target)',
+    },
+}
+
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_body_results_twins(compiler, tmp_path, release):  # noqa: F811
     assert compare(compiler, tmp_path, release, DRIVER + MAIN,
-                   extra_stems=('checker_body_results',)).endswith(b'ok\n')
+                   jo_doubles=jo_doubles(BODY_RESULT_JO), extra_stems=('checker_body_results',)).endswith(b'ok\n')
 
 
 @pytest.mark.parametrize('case,code', [
@@ -124,5 +144,5 @@ main = ():
     print("unreachable")
 '''
     output = compare(compiler, tmp_path, False, DRIVER + main, status=19,
-                     extra_stems=('checker_body_results',))
+                     jo_doubles=jo_doubles(BODY_RESULT_JO), extra_stems=('checker_body_results',))
     assert output.rstrip().endswith(f':{code}'.encode())

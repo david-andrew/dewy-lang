@@ -98,8 +98,7 @@ xe_num_error = (n: int, code: int):
     print(events)
     print("numeric-error:{n}:{code}")
     exit(19)
-xe_num_services = CheckerNumericHost(xe_num_coerce, xe_num_potential, xe_num_numjoin, xe_num_join, xe_num_exact, xe_num_library, xe_num_nan, xe_num_division, xe_num_percent, xe_num_error)
-xe_num_inputs = CheckerNumericInput(&nodes, &types, &files, &T_INT, &T_MATH_INT, &T_U64, &T_FLOAT, &T_BOOL, &T_NEVER, &xe_num_services)
+xe_num_inputs = CheckerNumericInput(&nodes, &types, &files, &T_INT, &T_MATH_INT, &T_U64, &T_FLOAT, &T_BOOL, &T_NEVER)
 xe_num_binding = checker_numeric_bind(&xe_num_inputs)
 xe_right_at = 0
 zc_rekind = false
@@ -454,6 +453,23 @@ expr_literal = (n: int, expected: int, ex: int) -> int: xe_literal_host(n, expec
 expr_other = (n: int, expected: int) -> int: xe_other_host(n, expected)
 call_finish_double = (a: int, pt: int, is_mut: bool): xe_arg_host(a, pt, is_mut)
 '''
+# The Jo services checker_numeric calls, routed to the driver.
+EXPR_NUMERIC_JO = {
+    'expr.jo': {
+        'coerce': 'coerce = (n: int, target: int) -> int: xe_num_coerce(n, target)',
+        'num_join': 'num_join = (a0: int, b0: int) -> int: xe_num_numjoin(a0, b0)',
+        'join_types': 'join_types = (a: int, b: int, pos: int) -> int: xe_num_join(a, b, pos)',
+        'numeric_exact': 'numeric_exact = (n: int) -> int: xe_num_exact(n)',
+        'numeric_nan': 'numeric_nan = (v: f64) -> f64: xe_num_nan(v)',
+        'numeric_warn_division': 'numeric_warn_division = (n: int, x: int, y: int): xe_num_division(n, x, y)',
+        'numeric_warn_percent': 'numeric_warn_percent = (n: int, a: int): xe_num_percent(n, a)',
+        'numeric_error': 'numeric_error = (n: int, code: int): xe_num_error(n, code)',
+    },
+    'util.jo': {
+        'pos_in_lib': 'pos_in_lib = (p: int) -> bool: xe_num_library(p)',
+    },
+}
+
 JO_DOUBLES = {'expr.jo': EXPR_JO,
               'types.jo': "use 'expr.jo'\nis_soa = (t: int) -> bool: zm_soa\n",
               'ast.jo': "id_dewy_len = 30\n",
@@ -487,18 +503,25 @@ juxt_factor = (c: int) -> int:
               'util.jo': "use 'driver.jo'\npos_in_lib = (pos: int) -> bool: zc_lib\n",
               'effects.jo': "use 'driver.jo'\ncallable_base = (t0: int) -> int: if zc_base != 0: zc_base else: t0\n"}
 
+for _module, _definitions in EXPR_NUMERIC_JO.items():
+    _existing = JO_DOUBLES.get(_module, '')
+    _missing = {_name: _definition for _name, _definition in _definitions.items()
+                if not any(_line.startswith(_name + ' = ') for _line in _existing.splitlines())}
+    JO_DOUBLES[_module] = _existing + jo_doubles({_module: _missing}).get(_module, '')
+
 import re
 from tests.test_selfhost_checker_logic import LOGIC_JO
 from tests.test_selfhost_checker_members import MEMBER_JO
 from tests.test_selfhost_checker_indexes import INDEX_JO
-for _table in (LITERAL_JO, CONDITIONAL_JO, LOGIC_JO, MEMBER_JO, INDEX_JO):
+from tests.test_selfhost_checker_receivers import RECEIVER_JO
+for _table in (LITERAL_JO, CONDITIONAL_JO, LOGIC_JO, MEMBER_JO, INDEX_JO, RECEIVER_JO):
     for _module, _functions in _table.items():
         _existing = JO_DOUBLES.get(_module, '')
         _missing = {_name: _definition for _name, _definition in _functions.items()
                     if not any(_line.startswith(f'{_name} = ') for _line in _existing.splitlines())}
         # These three leaves are not exercised by this dispatcher differential.
         # Keep their unused direct services explicit, and fail if a route reaches one.
-        if _table in (LOGIC_JO, MEMBER_JO, INDEX_JO):
+        if _table in (LOGIC_JO, MEMBER_JO, INDEX_JO, RECEIVER_JO):
             for _name, _definition in _missing.items():
                 if _definition.startswith('use '):
                     continue
@@ -506,7 +529,7 @@ for _table in (LITERAL_JO, CONDITIONAL_JO, LOGIC_JO, MEMBER_JO, INDEX_JO):
                 _return = re.search(r' -> (\w+)$', _head)
                 _value = '' if not _return else '; ' + ('false' if _return[1] == 'bool' else '0')
                 _missing[_name] = _head + ': assert(false)' + _value
-        JO_DOUBLES[_module] = _existing + jo_doubles({_module: _missing})[_module]
+        JO_DOUBLES[_module] = _existing + jo_doubles({_module: _missing}).get(_module, '')
 
 # The expression differential isolates the resolver at its new module boundary.
 JO_DOUBLES['checker_call_resolve.jo'] = "use 'driver.jo'\n" + 'resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, closure: int = 0, ufcs: bool = false) -> int:\n    if decls.len() != 1: events.push("pick:{name}:{decls}:{closure}:{ufcs}")\n    xe_call_host(n, expected)\n'
@@ -522,6 +545,8 @@ JO_DOUBLES['checker_call_convert.jo'] = "use 'expr.jo'\narg_finish_rest = (a: in
 
 from tests.selfhost_call_service_double import isolate_call_services
 isolate_call_services(JO_DOUBLES)
+
+
 
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])

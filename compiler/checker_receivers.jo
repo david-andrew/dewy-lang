@@ -6,21 +6,9 @@ use 'type_inference.dewy'
 use 'checker_literals.dewy'
 use 'checker_members.dewy'
 use 'checker_indexes.dewy'
-struct CheckerReceiverHost:
-    check: (int, int) -> int
-    juxt: (int) -> void
-    reflect_name: (int) -> void
-    reflect_member: (int) -> bool
-    private: (int) -> int
-    soa_alias: (int, int, int) -> int
-    soa_index: (int, int, int) -> int
-    bracket_call: (int) -> bool
-    end_index: (int, int) -> int
-    set_type: (int) -> bool
-    ranges: (int, int) -> void
-    stepped: (int, int, int) -> int
-    text_index: (int, int) -> int
-    error: (int, int, int) -> void
+use 'checker_expr.dewy'
+use 'expr.jo'
+use 'reflection.jo'
 struct CheckerReceiverInput:
     nodes: *(Node[])
     types: *(TypeInfo[])
@@ -35,7 +23,6 @@ struct CheckerReceiverInput:
     index_base: *int
     type_receiver: *int
     empty_receiver: *int
-    host: *CheckerReceiverHost
 xs_nodes: *(Node[])
 xs_types: *(TypeInfo[])
 xs_structs: *(StructInfo[])
@@ -49,7 +36,6 @@ xs_last: *int
 xs_index_base: *int
 xs_type_receiver: *int
 xs_empty_receiver: *int
-xs_host: *CheckerReceiverHost
 checker_receivers_bind = (input: *CheckerReceiverInput) -> int:
     xs_nodes = input[0].nodes
     xs_types = input[0].types
@@ -64,26 +50,25 @@ checker_receivers_bind = (input: *CheckerReceiverInput) -> int:
     xs_index_base = input[0].index_base
     xs_type_receiver = input[0].type_receiver
     xs_empty_receiver = input[0].empty_receiver
-    xs_host = input[0].host
     0
 xs_flag = (n: int, f: int) -> bool: int(xs_nodes[0][n].flags) & f != 0
 xs_soa = (t0: int) -> bool:
     t = int(tu_prune(t0))
     xs_types[0][t].kind == .struct_ and xs_structs[0][int(xs_types[0][t].st)].soa_
 xs_field = (n: int, expected: int) -> int:
-    if xs_flag(n, 536870912): xs_host[0].juxt(n)
-    if xs_nodes[0][n].b != 0: xs_host[0].reflect_name(n)
-    if xs_reflecting[0] and xs_host[0].reflect_member(n): return int(xs_nodes[0][n].type)
+    if xs_flag(n, 536870912): field_juxt(n)
+    if xs_nodes[0][n].b != 0: field_reflect_name(n)
+    if xs_reflecting[0] and reflect_member(n): return int(xs_nodes[0][n].type)
     a0 = int(xs_nodes[0][n].a)
     is_callee = n == xs_callee[0]
-    if starts_with(xs_names[0][int(xs_nodes[0][n].name)], "__") and not xs_ide[0] and not xs_flag(n, 33554432): a0 = xs_host[0].private(n)
+    if starts_with(xs_names[0][int(xs_nodes[0][n].name)], "__") and not xs_ide[0] and not xs_flag(n, 33554432): a0 = field_private(n)
     if xs_soa_aliases[0] > 0 and xs_nodes[0][a0].kind == .ident:
-        t = xs_host[0].soa_alias(n, a0, expected)
+        t = field_soa_alias(n, a0, expected)
         if t >= 0: return t
     if xs_nodes[0][a0].kind == .index and xs_nodes[0][a0].b != 0:
-        abt = int(tu_prune(xs_host[0].check(int(xs_nodes[0][a0].a), 0)))
+        abt = int(tu_prune(check_expr(int(xs_nodes[0][a0].a), 0)))
         xs_nodes[0][a0].a = i32(xs_last[0])
-        if xs_soa(abt): return xs_host[0].soa_index(n, a0, expected)
+        if xs_soa(abt): return field_soa_index(n, a0, expected)
     name = xs_names[0][int(xs_nodes[0][n].name)]
     spelled = 0
     if name == "add": spelled = 1
@@ -100,23 +85,23 @@ xs_dewy_at = (n: int) -> bool:
     pos > 0 and f < xs_files[0].len() and xs_files[0][f].is_dewy
 xs_named = (t: int, name: str) -> bool: xs_types[0][t].kind == .struct_ and xs_structs[0][int(xs_types[0][t].st)].name == name
 xs_index = (n: int, expected: int) -> int:
-    if xs_flag(n, 536870912): xs_host[0].juxt(n)
+    if xs_flag(n, 536870912): field_juxt(n)
     xs_index_base[0] = int(xs_nodes[0][n].a)
-    if xs_nodes[0][int(xs_nodes[0][n].a)].kind == .ident and xs_nodes[0][n].sval == 0 and xs_count(n) > 0 and xs_dewy_at(n) and xs_host[0].bracket_call(n): return xs_host[0].check(n, expected)
-    if xs_nodes[0][n].sval != 0: return xs_host[0].end_index(n, expected)
+    if xs_nodes[0][int(xs_nodes[0][n].a)].kind == .ident and xs_nodes[0][n].sval == 0 and xs_count(n) > 0 and xs_dewy_at(n) and dewy_bracket_call(n): return check_expr(n, expected)
+    if xs_nodes[0][n].sval != 0: return index_end(n, expected)
     saved = xs_type_receiver[0]
     xs_type_receiver[0] = int(xs_nodes[0][n].a)
     if xs_nodes[0][n].b == 0 and xs_count(n) == 0: xs_empty_receiver[0] = int(xs_nodes[0][n].a)
-    bt = int(tu_prune(xs_host[0].check(int(xs_nodes[0][n].a), 0)))
+    bt = int(tu_prune(check_expr(int(xs_nodes[0][n].a), 0)))
     xs_type_receiver[0] = saved
-    if xs_named(bt, "Set") and xs_host[0].set_type(bt) and xs_dewy_at(n): xs_host[0].error(n, bt, 1)
+    if xs_named(bt, "Set") and is_dewy_set_type(bt) and xs_dewy_at(n): receiver_error(n, bt, 1)
     xs_nodes[0][n].a = i32(xs_last[0])
     nd = xs_named(bt, "NDArray")
-    if xs_dewy(n) and not nd and (xs_count(n) >= 2 or xs_types[0][bt].kind == .typeval): xs_host[0].ranges(n, bt)
+    if xs_dewy(n) and not nd and (xs_count(n) >= 2 or xs_types[0][bt].kind == .typeval): index_ranges(n, bt)
     bk = xs_types[0][bt].kind
     b = int(xs_nodes[0][n].b)
-    if b != 0 and xs_nodes[0][b].kind == .range and xs_flag(b, 32768) and not nd: return xs_host[0].stepped(n, bt, expected)
-    if bk == .str_ and xs_dewy(n): return xs_host[0].text_index(n, expected)
+    if b != 0 and xs_nodes[0][b].kind == .range and xs_flag(b, 32768) and not nd: return index_stepped(n, bt, expected)
+    if bk == .str_ and xs_dewy(n): return index_text(n, expected)
     result = xx_index(n, expected, bt)
     if result.bypass: return result.type
     int(xl_finish(n, result.type, expected))

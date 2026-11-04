@@ -1,5 +1,6 @@
 """Numeric binaries: literal folding (wrapping, truncation, shifts), exact comparisons, joins."""
 import pytest
+from tests.selfhost_expr_double import jo_doubles
 
 from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER, compare
@@ -33,8 +34,7 @@ xw_error_host = (n: int, code: int):
     print(events)
     print("error:{n}:{code}")
     exit(19)
-xw_services = CheckerNumericHost(xw_coerce_host, xw_potential_host, xw_num_join_host, xw_join_host, xw_exact_host, xw_library_host, xw_nan_host, xw_division_host, xw_percent_host, xw_error_host)
-xw_inputs = CheckerNumericInput(&nodes, &types, &files, &T_INT, &T_MATH_INT, &T_U64, &T_FLOAT, &T_BOOL, &T_NEVER, &xw_services)
+xw_inputs = CheckerNumericInput(&nodes, &types, &files, &T_INT, &T_MATH_INT, &T_U64, &T_FLOAT, &T_BOOL, &T_NEVER)
 xw_binding = checker_numeric_bind(&xw_inputs)
 DEWY = 1 << 40
 int_lit = (v: int, dewy: bool = false, flags: int = 256) -> int:
@@ -103,11 +103,34 @@ main = ():
 '''
 
 
+
+# The Jo services checker_numeric calls, routed to the driver.
+NUMERIC_JO = {
+    'expr.jo': {
+        'coerce': 'coerce = (n: int, target: int) -> int: xw_coerce_host(n, target)',
+        'num_join': 'num_join = (a0: int, b0: int) -> int: xw_num_join_host(a0, b0)',
+        'join_types': 'join_types = (a: int, b: int, pos: int) -> int: xw_join_host(a, b, pos)',
+        'numeric_exact': 'numeric_exact = (n: int) -> int: xw_exact_host(n)',
+        'numeric_nan': 'numeric_nan = (v: f64) -> f64: xw_nan_host(v)',
+        'numeric_warn_division': 'numeric_warn_division = (n: int, x: int, y: int): xw_division_host(n, x, y)',
+        'numeric_warn_percent': 'numeric_warn_percent = (n: int, a: int): xw_percent_host(n, a)',
+        'numeric_error': 'numeric_error = (n: int, code: int): xw_error_host(n, code)',
+    },
+    'util.jo': {
+        'pos_in_lib': 'pos_in_lib = (p: int) -> bool: xw_library_host(p)',
+    },
+}
+
+JO_DOUBLES = jo_doubles(NUMERIC_JO)
+JO_DOUBLES['expr.jo'] += 'numeric_potential_double = (n: int) -> bool: xw_potential_host(n)\n'
+JO_DOUBLES['checker_exact.dewy'] = 'from p"expr.jo" import numeric_potential_double\nexact_potential=(n:int64):>bool=>numeric_potential_double(n)\n'
+JO_DOUBLES['checker_exact.jo'] = "use 'expr.jo'\nexact_potential = (n: int) -> bool: numeric_potential_double(n)\n"
+
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_numeric_twins(compiler, tmp_path, release):  # noqa: F811
     assert compare(compiler, tmp_path, release, DRIVER + MAIN,
-                   extra_stems=('checker_numeric',)).endswith(b'ok\n')
+                   jo_doubles=JO_DOUBLES, extra_stems=('checker_numeric',)).endswith(b'ok\n')
 
 
 @pytest.mark.parametrize('case,code', [
@@ -122,5 +145,5 @@ main = ():
     {case}
     print("unreachable")
 '''
-    output = compare(compiler, tmp_path, False, DRIVER + main, status=19, extra_stems=('checker_numeric',))
+    output = compare(compiler, tmp_path, False, DRIVER + main, status=19, jo_doubles=JO_DOUBLES, extra_stems=('checker_numeric',))
     assert output.rstrip().endswith(f':{code}'.encode())

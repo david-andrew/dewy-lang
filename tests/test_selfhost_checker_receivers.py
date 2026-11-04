@@ -62,7 +62,7 @@ rv_end_host = (n: int, expected: int) -> int:
     T_U16
 rv_set_host = (t: int) -> bool:
     events.push("set-type:{t}")
-    rv_set
+    rv_set or xd_set
 rv_ranges_host = (n: int, t: int): events.push("ranges:{n}:{t}")
 rv_stepped_host = (n: int, t: int, expected: int) -> int:
     events.push("stepped:{n}:{t}:{expected}")
@@ -74,8 +74,7 @@ rv_error_host = (n: int, t: int, code: int):
     print(events)
     print("error:{n}:{t}:{code}")
     exit(19)
-rv_services = CheckerReceiverHost(rv_check_host, rv_juxt_host, rv_reflect_name_host, rv_reflect_member_host, rv_private_host, rv_soa_alias_host, rv_soa_index_host, rv_bracket_host, rv_end_host, rv_set_host, rv_ranges_host, rv_stepped_host, rv_text_host, rv_error_host)
-rv_inputs = CheckerReceiverInput(&nodes, &types, &structs, &names, &files, &rv_ide_on, &rv_reflecting, &rv_callee_at, &rv_soa_count, &rv_last, &rv_index_base, &rv_type_receiver, &rv_empty, &rv_services)
+rv_inputs = CheckerReceiverInput(&nodes, &types, &structs, &names, &files, &rv_ide_on, &rv_reflecting, &rv_callee_at, &rv_soa_count, &rv_last, &rv_index_base, &rv_type_receiver, &rv_empty)
 rv_binding = checker_receivers_bind(&rv_inputs)
 field_run = (n: int, expected: int = 0):
     t = xs_field(n, expected)
@@ -184,10 +183,32 @@ main = ():
 '''
 
 
+
+# The Jo services checker_receivers calls, routed to the driver.
+RECEIVER_JO = {
+    'expr.jo': {
+        'field_juxt': 'field_juxt = (n: int): rv_juxt_host(n)',
+        'field_reflect_name': 'field_reflect_name = (n: int): rv_reflect_name_host(n)',
+        'field_private': 'field_private = (n: int) -> int: rv_private_host(n)',
+        'field_soa_alias': 'field_soa_alias = (n: int, a0: int, expected: int) -> int: rv_soa_alias_host(n, a0, expected)',
+        'field_soa_index': 'field_soa_index = (n: int, a0: int, expected: int) -> int: rv_soa_index_host(n, a0, expected)',
+        'dewy_bracket_call': 'dewy_bracket_call = (n: int) -> bool: rv_bracket_host(n)',
+        'index_end': 'index_end = (n: int, expected: int) -> int: rv_end_host(n, expected)',
+        'is_dewy_set_type': 'is_dewy_set_type = (t: int) -> bool: rv_set_host(t)',
+        'index_ranges': 'index_ranges = (n: int, bt: int): rv_ranges_host(n, bt)',
+        'index_stepped': 'index_stepped = (n: int, bt: int, expected: int) -> int: rv_stepped_host(n, bt, expected)',
+        'index_text': 'index_text = (n: int, expected: int) -> int: rv_text_host(n, expected)',
+        'receiver_error': 'receiver_error = (n: int, bt: int, code: int): rv_error_host(n, bt, code)',
+    },
+    'reflection.jo': {
+        'reflect_member': 'reflect_member = (n: int) -> bool: rv_reflect_member_host(n)',
+    },
+}
+
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_receivers_twins(compiler, tmp_path, release):  # noqa: F811
-    assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'xx_check_host', jo_doubles=jo_doubles(INDEX_JO, MEMBER_JO, LITERAL_JO), extra_stems=STEMS).endswith(b'ok\n')
+    assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'rv_check_host', jo_doubles=jo_doubles(RECEIVER_JO, INDEX_JO, MEMBER_JO, LITERAL_JO), extra_stems=STEMS).endswith(b'ok\n')
 
 
 @pytest.mark.parametrize('case,code', [
@@ -202,5 +223,5 @@ main = ():
     {case}
     print("unreachable")
 '''
-    output = compare_leaf(compiler, tmp_path, False, DRIVER + main, 'xx_check_host', jo_doubles=jo_doubles(INDEX_JO, MEMBER_JO, LITERAL_JO), status=19, extra_stems=STEMS)
+    output = compare_leaf(compiler, tmp_path, False, DRIVER + main, 'rv_check_host', jo_doubles=jo_doubles(RECEIVER_JO, INDEX_JO, MEMBER_JO, LITERAL_JO), status=19, extra_stems=STEMS)
     assert output.rstrip().endswith(f':{code}'.encode())

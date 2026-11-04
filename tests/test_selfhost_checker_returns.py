@@ -1,5 +1,6 @@
 """Return statements: declared, inferred and thrown results match frozen Jo."""
 import pytest
+from tests.selfhost_expr_double import jo_doubles
 
 from tests.support import compiler  # noqa: F401
 from tests.selfhost_expr_double import compare_leaf
@@ -53,8 +54,7 @@ xt_error = (n: int, t: int, code: int):
     print(events)
     print("error:{n}:{t}:{code}")
     exit(19)
-xt_services = CheckerReturnHost(xt_coerce, xt_place, xt_sink, xt_throws, xt_thrown, xt_note, xt_literal, xt_fits, xt_shaped, xt_void_member, xt_void_value, xt_error)
-xt_inputs = CheckerReturnInput(&nodes, &types, &structs, &files, &fns, &ctxs, &cx, &last, &sink_at, &T_VOID, &T_NEVER, &xt_services)
+xt_inputs = CheckerReturnInput(&nodes, &types, &structs, &files, &fns, &ctxs, &cx, &last, &sink_at, &T_VOID, &T_NEVER)
 xt_binding = checker_returns_bind(&xt_inputs)
 DEWY = 1 << 40
 # A function context: its instance kind, declared (or inferred) result.
@@ -135,11 +135,34 @@ main = ():
 '''
 
 
+
+# The Jo services checker_returns calls, routed to the driver.
+RETURN_JO = {
+    'expr.jo': {
+        'coerce': 'coerce = (n: int, target: int) -> int: xt_coerce(n, target)',
+        'lit_default': 'lit_default = (n: int) -> int: xt_literal(n)',
+        'can_coerce': 'can_coerce = (n: int, from0: int, to0: int) -> bool: xt_fits(n, from0, to0)',
+    },
+    'check.jo': {
+        'return_place': 'return_place = (v: int): xt_place(v)',
+        'return_sink': 'return_sink = (pos: int): xt_sink(pos)',
+        'return_throws': 'return_throws = (inst: int) -> bool: xt_throws(inst)',
+        'return_note': 'return_note = (s: int): xt_note(s)',
+        'shape_returned': 'shape_returned = (value: int, rt: int) -> int: xt_shaped(value, rt)',
+        'union_has_void': 'union_has_void = (t: int) -> bool: xt_void_member(t)',
+        'return_void_value': 'return_void_value = (s: int, rt: int): xt_void_value(s, rt)',
+        'return_error': 'return_error = (s: int, t: int, code: int): xt_error(s, t, code)',
+    },
+    'errors.jo': {
+        'infer_throw': 'infer_throw = (s: int, t0: int) -> bool: xt_thrown(s, t0)',
+    },
+}
+
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_returns_twins(compiler, tmp_path, release):  # noqa: F811
     assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'xt_check',
-                   extra_stems=('checker_returns',)).endswith(b'ok\n')
+                   jo_doubles=jo_doubles(RETURN_JO), extra_stems=('checker_returns',)).endswith(b'ok\n')
 
 
 @pytest.mark.parametrize('case,code', [
@@ -157,5 +180,5 @@ main = ():
     {case}
     print("unreachable")
 '''
-    output = compare_leaf(compiler, tmp_path, False, DRIVER + main, 'xt_check', status=19, extra_stems=('checker_returns',))
+    output = compare_leaf(compiler, tmp_path, False, DRIVER + main, 'xt_check', status=19, jo_doubles=jo_doubles(RETURN_JO), extra_stems=('checker_returns',))
     assert output.rstrip().endswith(f':{code}'.encode())
