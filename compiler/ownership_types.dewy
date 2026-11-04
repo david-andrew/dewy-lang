@@ -248,6 +248,21 @@ ownership_layout=(t0:OWord depth:OWord=0 seen:array<int64>=[]):>bool=>$unsafe {
     # (a raw pointer is a plain word: a handle's view of storage it shares, owning nothing)
     let scalar=ow_kind(ow_representation(t))
     if k =? 'str_' or scalar =? 'int_' or scalar =? 'bool_' or k =? 'float_' or k =? 'ptr' {return true}
+    if k =? 'enum_' {
+        # Ordinary tagged payloads use the existing active-variant retain/drop
+        # path. Enums containing lifecycle owners remain unsupported.
+        if ownership_contains(t) {return false}
+        tl_layout(t)
+        let si=ow_st(t)
+        loop i in [0..OWord(ow_structs[0].ptr[si].nvariants)) {
+            let v=OWord(ow_structs[0].ptr[si].variants) + i
+            loop j in [0..OWord(ow_variants[0].ptr[v].nfields)) {
+                let ft=OWord(ow_fields[0].ptr[OWord(ow_variants[0].ptr[v].fields) + j].type)
+                if not ownership_layout(ft depth + 1 visited) {return false}
+            }
+        }
+        return true
+    }
     if k not=? 'struct_' and k not=? 'tuple' {return false}
     loop ft in ow_field_types(t) {
         if not ownership_layout(ft depth + 1 visited) {return false}

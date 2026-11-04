@@ -1,0 +1,2 @@
+# modes: native native-release
+main=()=>{let tx=mpmc<int|string>(2) let rx=tx concurrent {spawn {tx.send("abc"); tx.close} let v:int|string=rx.receive or_throw match v {n:int=>printl(n) s:string=>printl(s)}}}

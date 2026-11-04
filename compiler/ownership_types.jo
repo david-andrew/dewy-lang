@@ -193,6 +193,17 @@ ownership_layout = (t0: int, depth: int = 0, seen: int[] = []) -> bool:
     # (a raw pointer is a plain word: a handle's view of storage it shares, owning nothing)
     scalar = ow_kind(ow_representation(t))
     if k == .str_ or scalar == .int_ or scalar == .bool_ or k == .float_ or k == .ptr: return true
+    if k == .enum_:
+        # Active-variant managed cleanup exists; owner-bearing enums do not.
+        if ownership_contains(t): return false
+        tl_layout(t)
+        si = ow_st(t)
+        loop i in [0..int(ow_structs[0][si].nvariants)):
+            v = int(ow_structs[0][si].variants) + i
+            loop j in [0..int(ow_variants[0][v].nfields)):
+                ft = int(ow_fields[0][int(ow_variants[0][v].fields) + j].type)
+                if not ownership_layout(ft, depth + 1, visited): return false
+        return true
     if k != .struct_ and k != .tuple: return false
     loop ft in ow_field_types(t):
         if not ownership_layout(ft, depth + 1, visited): return false
