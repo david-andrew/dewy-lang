@@ -2745,6 +2745,10 @@ fact_call_effects = (n: int, s: mut FactState):
     # (a callee opaque by its signature forgets the same exposed roots its
     # summary would: its call tree is not visited for it)
     if nodes[n].aux == 0 and f > 0 and f < fns.len() and not (fns[f].body != 0 and fns[f].state != 2) and effect_signature_opaque(f):
+        # A reviewed library class writes only its mutable actuals. With
+        # none, allocator/bookkeeping opacity cannot change caller places.
+        # Reuse the cached contract, O(1); do not walk a runtime call tree.
+        if checked_call_mutmask(n) == 0 and effect_library_class(f) != .unclassified: return
         effects_demand(0, true)
         fact_forget_call(s, n, .call)
         return

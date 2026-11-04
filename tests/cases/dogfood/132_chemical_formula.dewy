@@ -10,11 +10,9 @@ is_lower = (s:string):>bool => s.length =? 1 and s in? "abcdefghijklmnopqrstuvwx
 number = (chars:array<string> @pos:int64<(>=? 0)>):>int => {
     let n = 0
     let any = false
-    loop 0 <=? pos <? chars.length and is_digit(chars[pos]) {
-        let at = pos
-        let digit = chars[at]
-        pos = at + 1
-        n = n * 10 + (to_int(digit) ?? 0)
+    loop pos <? chars.length and is_digit(chars[pos]) {
+        n = n * 10 + (to_int(chars[pos]) ?? 0)
+        pos += 1
         any = true
     }
     if any n else 1
@@ -30,7 +28,7 @@ parse_group = (chars:array<string> start:int64 nested:bool):>Parsed? => {
     let atoms:dict<string int> = []
     if start <? 0 return none
     let pos:int64<(>=? 0)> = start
-    loop 0 <=? pos <? chars.length {
+    loop pos <? chars.length {
         let ch = chars[pos]
         if ch =? ")" {
             if not nested or atoms.length =? 0 return none
@@ -45,7 +43,7 @@ parse_group = (chars:array<string> start:int64 nested:bool):>Parsed? => {
         } else if is_upper(ch) {
             let atom = ch
             pos += 1
-            loop 0 <=? pos <? chars.length and is_lower(chars[pos]) {
+            loop pos <? chars.length and is_lower(chars[pos]) {
                 atom = "{atom}{chars[pos]}"
                 pos += 1
             }

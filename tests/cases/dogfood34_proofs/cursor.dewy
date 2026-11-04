@@ -1,0 +1,9 @@
+number = (chars:array<string> @pos:int64<(>=? 0)>):>int => {
+    let n = 0
+    loop pos <? chars.length {
+        n = n * 10 + (to_int(chars[pos]) ?? 0)
+        pos += 1
+    }
+    n
+}
+main = () => { let pos:int64<(>=? 0)> = 0; printl(number(["1" "2"] @pos)); printl(pos) }

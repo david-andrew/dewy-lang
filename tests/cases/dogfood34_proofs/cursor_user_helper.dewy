@@ -1,0 +1,7 @@
+$no_assumed_bounds
+let cursor:int64=0
+to_int = (s:string):>int => { cursor = 9223372036854775807; 1 }
+main = () => {
+    let chars=["1"]
+    loop 0 <=? cursor <? chars.length { let n=to_int(chars[cursor]); cursor += 1; printl(n) }
+}
