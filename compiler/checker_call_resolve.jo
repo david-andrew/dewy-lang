@@ -1,0 +1,281 @@
+# Frozen call resolution: selection, generic bindings, defaults and finishing.
+use 'ast.jo'
+use 'expr.jo'
+use 'member_replay.jo'
+use 'checker_call_cost.dewy'
+use 'checker_call_queries.dewy'
+use 'checker_expr.dewy'
+use 'check.jo'
+use 'units.jo'
+use 'effects.jo'
+use 'poly_closure.jo'
+use 'util.jo'
+use 'ide.jo'
+use 'refine.jo'
+use 'dewy_methods.jo'
+use 'proofs.jo'
+use 'warn_if.jo'
+use 'directives.jo'
+use 'check_constant.jo'
+use 'types.jo'
+use 'checker_signature.dewy'
+
+resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, closure: int = 0, ufcs: bool = false) -> int:
+    if rational_module_found >= 0 and exact_family_name(name):
+        family = exact_members_for(decls, name, args)
+        if family.len() > decls.len(): return resolve_fn_call(n, name, family, args, expected, closure, ufcs)
+    if member_record >= 0: member_candidates(decls)
+    # (this call's own type arguments: a call among its arguments has none, from_text[S](f(x)))
+    targs_here = call_targs
+    call_targs = []
+    check_args_untyped(args)
+    positional = true
+    loop arg in args:
+        if arg == 0 or nodes[arg].kind == .namedarg:
+            positional = false
+            break
+    cands: Cand[]             # (those that fit, when more than one does)
+    first = Cand()
+    nfit = 0
+    failure = CallFailure()
+    recv_fits = false         # (some candidate takes the object of x.f(...), whatever else fails)
+    best = -1
+    # (an argument that is a number of a known type, the first such, rules out before anything is
+    # made for them the overloads whose parameter there is a number type it cannot become: abs(x)
+    # with x: f64 looks at abs(f64) alone, max(0.0, x) at the float ones)
+    a0t = 0
+    a0i = 0
+    if decls.len() > 1:
+        loop i in 0.. and a in args:
+            if nodes[a].kind == .namedarg: break
+            if nodes[a].type == 0 or is_lit(a) or ctx_dependent(a): continue
+            k = tkind(ntype(a))
+            if k == .int_ or k == .float_ or k == .vec:
+                a0t = prune(ntype(a))
+                a0i = i
+            break
+    loop d in decls:
+        di = decl_info(d)
+        if not decl_infos[di].sig.done:
+            # (its signature left unresolved where its written type rules it out: `mod` of floats
+            # beside `mod` of integers)
+            if a0t != 0 and tkind(a0t) == .float_ and written_int_param(d, a0i): continue
+            fn_sig(d)
+        if a0t != 0 and not decl_infos[di].sig.generic and decl_infos[di].sig.params.len() > a0i:
+            p0 = prune(decl_infos[di].sig.params[a0i])
+            pk0 = tkind(p0)
+            # (failure.last_err is for a name with one function only; sin(v) with v: vec3 looks at
+            # sin(vec3) alone)
+            if p0 != a0t and (pk0 == .vec or pk0 == .int_ or pk0 == .float_) and not can_coerce(0, a0t, p0): continue
+            # (a float never becomes a fraction implicitly: abs(x) with x: f64 passes over the
+            # exact members its family has once a rational is in use)
+            if pk0 == .struct_ and tkind(a0t) == .float_ and (bundled_rational_type(p0) or bundled_word_rational_type(p0)): continue
+        cd = Cand(decl = d, sig = decl_infos[di].sig)
+        np = nkids(d)
+        kinds = dewy_param_kinds.get(d) ?? []
+        if positional and args.len() == np and kinds.len() == 0:
+            cd.args = args
+        else:
+            if not call_map_candidate(d, args, cd, kinds, ufcs, recv_fits, failure): continue
+        if cd.sig.ntp > 0: cd.binds = fill(0, int(cd.sig.ntp))
+        if targs_here.len() > 0:
+            if nkids2(d) != targs_here.len():
+                call_type_arity(name, d, targs_here, failure)
+                recv_fits = true
+                continue
+            loop i in 0.. and t in targs_here: cd.binds[i] = t
+        failed = call_candidate_cost(cd, recv_fits)
+        if failed != 0:
+            call_reject_candidate(cd, failed, failure)
+            continue
+        # (the first that fits is kept apart: most calls have no other)
+        if nfit == 0: first = cd
+        else:
+            if nfit == 1: cands.push(first)
+            cands.push(cd)
+        nfit += 1
+    # (`sum([loop i in [0..5) i])`: a comprehension fits `f64[]` by converting
+    # each element, and `T[]` as it is; when both fit, type it on its own first)
+    if nfit > 1 and comprehension_settle(args):
+        call_targs = targs_here
+        return resolve_fn_call(n, name, decls, args, expected, closure, ufcs)
+    if nfit == 0 and failure.rejected.len() > 0: call_rejection_text(failure)
+    # pick the cheapest candidate; prefer non-generic ones, then the program's own definitions
+    # over the standard library's; report real ties (the library's are settled by how many
+    # arguments have exactly a parameter's type, then which comes first: min(x, 5) with x: i32
+    # takes min(i32, i32), and min(a, b) with a: i8 and b: u8 still takes min(int, int))
+    if nfit == 1: best = 0
+    else:
+        loop ci in 0.. and cd in cands:
+            if best < 0 or cd.cost < cands[best].cost: best = ci
+            else if cd.cost == cands[best].cost:
+                bc = cands[best]
+                if bc.sig.generic and not cd.sig.generic: best = ci
+                else if bc.sig.generic == cd.sig.generic and decl_in_prelude(bc.decl) and not decl_in_prelude(cd.decl): best = ci
+                else if bc.sig.generic == cd.sig.generic and decl_in_prelude(bc.decl) and decl_in_prelude(cd.decl) and exact_args(cd) > exact_args(bc): best = ci
+    if nfit > 1 and not decl_in_prelude(cands[best].decl): call_tie_error(n, name, args, cands, best)
+    if best < 0: return call_no_candidate(n, name, decls, args, expected, ufcs, recv_fits, failure)
+    cd = if nfit == 1: first else: cands[best]
+    decl = cd.decl
+    np = nkids(decl)
+    call_decl_checks(n, name, decl, args, cd, np, ufcs)
+    # (a hole is an argument whose type comes from the parameter's: none in a plain call)
+    partial = (not cd.plain and has_hole(args)) or nodes[n].aux2 == i32(AUX2_PARTIAL)
+    if partial and expected != 0 and tkind(expected) == .fn_:
+        # (a partial evaluation's expected type is the function it makes: the open parameters
+        # in order, then the result)
+        rb = cd.binds
+        ok = true
+        j = 0
+        loop i in [0..np):
+            a = cd.args[i]
+            if a == 0 or nodes[a].kind != .hole: continue
+            if j >= int(types[prune(expected)].nargs) or match_type(cd.sig.params[i], targ(prune(expected), j), rb, 0) < 0: ok = false
+            j += 1
+        if ok and cd.sig.ret != 0 and match_type(int(cd.sig.ret), int(types[prune(expected)].elem), rb, 0) < 0: ok = false
+        if ok: cd.binds = rb
+    if not cd.plain and not partial and expected != 0 and cd.sig.ret != 0 and cd.sig.ntp > 0: expected_binds(cd, expected, targs_here)
+    if not cd.plain:
+        loop i in [0..np):
+            a = cd.args[i]
+            if a == 0 or not is_lit(a): continue
+            p = prune(cd.sig.params[i])
+            if types[p].kind == .param and cd.binds[int(types[p].id)] == 0: cd.binds[int(types[p].id)] = lit_default(a)
+        loop i in [0..np):
+            a = cd.args[i]
+            if a == 0 or not ctx_dependent(a) or nodes[a].kind == .hole: continue
+            pt = subst_partial(cd.sig.params[i], cd.binds)
+            if has_var(pt) and expected != 0 and cd.sig.ret != 0:
+                # (a lambda whose parameter types are still open: what the result must be may
+                # settle them, as in `x: int = make((v): v + 1)`)
+                rb = cd.binds
+                if match_type(int(cd.sig.ret), expected, rb, 0) >= 0:
+                    cd.binds = rb
+                    pt = subst_partial(cd.sig.params[i], cd.binds)
+            # Shared E is a join over callbacks, not a bound frozen by the first
+            # argument. Keep its rigid binder in the checking hint until matching.
+            row = callable_contract(cd.sig.params[i])
+            if row != 0 and effect_contracts[row].variables.len() != 0: pt = mk_callable_contract(callable_base(pt), row)
+            check_expr(a, pt)
+            add_flag(a, NF_CHECKED)
+            matched = match_type(cd.sig.params[i], ntype(a), cd.binds, 0)
+            if matched < 0 and callable_contract(cd.sig.params[i]) != 0: call_resolve_error(1, a, name, decl, 0, partial)
+    if not partial and expected != 0 and cd.sig.ret != 0:
+        rb = cd.binds
+        if match_type(int(cd.sig.ret), expected, rb, 0) >= 0: cd.binds = rb
+    loop i in [0..targs_here.len()):
+        if not type_eq(cd.binds[i], targs_here[i]): call_resolve_error(2, n, name, decl, 0, partial)
+    # (show = false, an untyped parameter, left out: its type is its default's)
+    if cd.missing:
+        loop i in [0..np):
+            if cd.args[i] != 0: continue
+            p = prune(cd.sig.params[i])
+            if types[p].kind != .param or cd.binds[int(types[p].id)] != 0: continue
+            dv = int(nodes[kid(decl, i)].b)
+            if dv == 0: continue
+            dk = nodes[dv].kind
+            if is_lit(dv): cd.binds[int(types[p].id)] = lit_default(dv)
+            else if dk == .bool_lit: cd.binds[int(types[p].id)] = T_BOOL
+            else if dk == .str_lit: cd.binds[int(types[p].id)] = T_STR
+            else if dk == .ident and files[pos_file(nodes[n].pos)].is_dewy:
+                loop j in [0..i):
+                    if nodes[dv].name != nodes[kid(decl, j)].name: continue
+                    earlier = subst_partial(cd.sig.params[j], cd.binds)
+                    if not has_var(earlier): cd.binds[int(types[p].id)] = earlier
+            # Nonliteral defaults (including large integer literals lowered to
+            # constructors) have their ordinary expression type. Resolve names in
+            # the declaration's module, just as when emitting the actual default.
+            if cd.binds[int(types[p].id)] == 0 and files[pos_file(nodes[n].pos)].is_dewy and (closure != 0 or not default_uses_params(dv, decl, i)):
+                ready = true
+                loop j in [0..nkids2(decl)):
+                    if cd.binds[j] == 0 or has_var(cd.binds[j]): ready = false
+                if ready:
+                    inferred = if closure != 0: poly_default_type(decl, i, cd.binds) else: default_arg(decl, i, 0, targs = cd.binds)
+                    cd.binds[int(types[p].id)] = ntype(inferred)
+    loop i in [0..int(cd.sig.ntp)):
+        b = cd.binds[i]
+        if b == 0:
+            # T | Err given just an Err: T is nothing (the union is just Err)
+            loop pt in cd.sig.params:
+                if param_in_union(pt, i): cd.binds[i] = T_NEVER
+            b = cd.binds[i]
+        if b == 0 or tkind(b) == .var: call_resolve_error(5, n, name, decl, i, partial)
+    if closure != 0:
+        variant = poly_default_variant(decl, cd.args)
+        if variant != decl:
+            decl = variant
+            cd.sig = fn_sig(decl)
+            supplied: int[]
+            loop arg in cd.args:
+                if arg != 0: supplied.push(arg)
+            cd.args = supplied
+            np = supplied.len()
+    f = get_fn_inst(decl, cd.binds, nodes[n].pos)
+    if ide_on: call_ide_ref(n, name, args, decl, f)
+    capture_defaults = false
+    dewy_call = files[pos_file(nodes[n].pos)].is_dewy
+    if not partial and dewy_call and cd.missing:
+        loop i in [0..np):
+            if cd.args[i] == 0 and default_uses_params(int(nodes[kid(decl, i)].b), decl, i): capture_defaults = true
+    if capture_defaults and cd.sig.mutmask != 0: call_resolve_error(3, n, name, decl, 0, partial)
+    refined_array = RefArrayCall()
+    if refine_active and not partial and not capture_defaults and cd.sig.mutmask == 1 and fns[f].ret == T_VOID: refined_array = ref_array_call_prepare(decl, cd.args, fns[f].ptypes, args)
+    captured: int[]
+    statements: int[]
+    if capture_defaults:
+        captured = fill(0, np)
+        # Explicit values first, in written order; defaults follow in parameter
+        # order. These ordinary locals provide both snapshots and ownership.
+        loop source in args:
+            a = unnamed(source)
+            loop i in [0..np):
+                if cd.args[i] != a: continue
+                finish_arg(a, representation_type(fns[f].ptypes[i]), false)
+                captured[i] = capture_value(a, representation_type(fns[f].ptypes[i]), statements)
+                break
+    fin: int[]
+    loop i in [0..np):
+        a = cd.args[i]
+        is_mut = if i < 31: int(cd.sig.mutmask) & (1 << i) != 0 else: has_flag(kid(decl, i), NF_MUT)
+        if a == 0:
+            earlier = if dewy_call and not capture_defaults: [] else: fin
+            pt = fns[f].ptypes[i]
+            if capture_defaults: pt = representation_type(pt)
+            a = default_arg(decl, i, pt, earlier, capture_defaults, fns[f].targs)
+            if capture_defaults:
+                a = capture_value(a, representation_type(fns[f].ptypes[i]), statements)
+                finish_arg(a, fns[f].ptypes[i], false)
+            fin.push(a)
+            continue
+        if capture_defaults:
+            finish_arg(captured[i], fns[f].ptypes[i], false)
+            fin.push(captured[i])
+            continue
+        if i == 0 and is_mut and dewy_is_method(decl) and place_method == 0:
+            place_method = if nodes[decl].kind == .fn_: int(nodes[decl].name) else: dewy_literal_method_name
+            finish_arg(a, fns[f].ptypes[i], is_mut)
+            place_method = 0
+        else: finish_arg(a, fns[f].ptypes[i], is_mut)
+        fin.push(a)
+    check_mutable_arguments(fin, int(cd.sig.mutmask), nodes[n].pos)
+    set_list(n, fin)
+    nodes[n].sym = i32(f)
+    nodes[n].aux = 0
+    nodes[n].kind = .call
+    nodes[n].a = 0
+    if closure != 0:
+        nodes[n].a = i32(poly_fnref(closure, f))
+        nodes[n].sym = 0
+        nodes[n].aux = 1
+    if proof_active or wi_any or dir_floats_any: call_note_contracts(n, f, decl, partial, closure)
+    if partial:
+        nodes[n].aux2 = 0
+        return finish_partial(n, fns[f].ptypes, int(cd.sig.mutmask), int(fns[f].ret))
+    if not capture_defaults: save_call_order(n, args, fin)
+    nodes[n].type = i32(representation_type(int(fns[f].ret)))
+    if refined_array.candidate != 0: return ref_array_call_finish(n, refined_array)
+    if cc_any and nodes[decl].c != 0 and closure == 0 and not capture_defaults:
+        narrowed = cc_call(n, f, decl)
+        if narrowed != 0: return narrowed
+    if capture_defaults: call_capture_block(n, f, statements)
+    representation_type(int(fns[f].ret))

@@ -437,9 +437,6 @@ call_name_unknown = (n: int, name: int, mod_scope: int, args: int[], expected: i
     events.push("unknown-call:{name}:{ii}:{hidden_assert}")
     if zn_fatal: print("unknown-call:{name}"); exit(19)
     xe_call_host(n, expected)
-resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, closure: int = 0, ufcs: bool = false) -> int:
-    if decls.len() != 1: events.push("pick:{name}:{decls}:{closure}:{ufcs}")
-    xe_call_host(n, expected)
 call_int_literal = (n: int, ex: int) -> int:
     events.push("int-literal:{n}:{ex}")
     if zc_literal == -2: print("literal-error:{n}"); exit(19)
@@ -496,6 +493,13 @@ for _table in (LITERAL_JO, CONDITIONAL_JO):
         _missing = {_name: _definition for _name, _definition in _functions.items()
                     if not any(_line.startswith(f'{_name} = ') for _line in _existing.splitlines())}
         JO_DOUBLES[_module] = _existing + jo_doubles({_module: _missing})[_module]
+
+# The expression differential isolates the resolver at its new module boundary.
+JO_DOUBLES['checker_call_resolve.jo'] = "use 'driver.jo'\n" + 'resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, closure: int = 0, ufcs: bool = false) -> int:\n    if decls.len() != 1: events.push("pick:{name}:{decls}:{closure}:{ufcs}")\n    xe_call_host(n, expected)\n'
+JO_DOUBLES['checker_call_resolve.dewy'] = r'''from p"expr.jo" import call_resolver_double
+resolve_fn_call=(n:int64 name:int64 decls:array<int64> args:array<int64> expected:int64 closure:int64=0 ufcs:bool=false):>int64=>call_resolver_double(n name decls args expected closure ufcs)
+'''
+JO_DOUBLES['expr.jo'] += 'call_resolver_double = (n: int, name: int, decls: int[], args: int[], expected: int, closure: int = 0, ufcs: bool = false) -> int:\n    if decls.len() != 1: events.push("pick:{name}:{decls}:{closure}:{ufcs}")\n    xe_call_host(n, expected)\n'
 
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])

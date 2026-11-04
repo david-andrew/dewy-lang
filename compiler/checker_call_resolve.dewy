@@ -1,0 +1,315 @@
+$runtime_checks
+from p"ast.jo" import (nodes dewy_param_kinds nkids nkids2 kid has_flag add_flag set_list NF_MUT NF_CHECKED)
+from p"expr.jo" import (rational_module_found exact_family_name exact_members_for call_targs written_int_param can_coerce CallFailure call_map_candidate call_type_arity call_reject_candidate call_rejection_text exact_args call_tie_error call_no_candidate call_decl_checks AUX2_PARTIAL has_hole expected_binds lit_default match_type subst_partial ntype is_lit param_in_union default_arg default_uses_params capture_value finish_partial place_method dewy_literal_method_name call_resolve_error call_ide_ref call_note_contracts call_capture_block decl_in_prelude comprehension_settle unnamed)
+from p"member_replay.jo" import (member_record member_candidates)
+from p"checker_call_cost.dewy" import (Cand call_candidate_cost)
+from p"checker_call_queries.dewy" import (ctx_dependent check_mutable_arguments save_call_order)
+from p"checker_expr.dewy" import (check_expr finish_arg check_args_untyped)
+from p"check.jo" import (decl_info decl_infos get_fn_inst fns)
+from p"units.jo" import (bundled_rational_type bundled_word_rational_type)
+from p"effects.jo" import (effect_contracts callable_base mk_callable_contract callable_contract)
+from p"poly_closure.jo" import (poly_default_type poly_default_variant poly_fnref)
+from p"util.jo" import (pos_file files)
+from p"ide.jo" import (ide_on)
+from p"refine.jo" import (RefArrayCall refine_active ref_array_call_prepare ref_array_call_finish representation_type)
+from p"dewy_methods.jo" import (dewy_is_method)
+from p"proofs.jo" import (proof_active)
+from p"warn_if.jo" import (wi_any)
+from p"directives.jo" import (dir_floats_any)
+from p"check_constant.jo" import (cc_any cc_call)
+from p"types.jo" import (types tkind prune has_var type_eq targ T_BOOL T_STR T_NEVER T_VOID)
+from p"checker_signature.dewy" import (fn_sig)
+# O(candidates * arguments), with candidate-local binding arrays.
+# Services may re-enter checking or grow arenas; retain indices, never elements.
+CRWord:type=int64<overflow='wrap'>
+resolve_fn_call=(n:CRWord name:CRWord decls:array<int64> args:array<int64> expected:CRWord closure:CRWord=0 ufcs:bool=false):>CRWord=>$unsafe {
+    if rational_module_found >=? 0 and exact_family_name(name) {
+        let family=exact_members_for(decls name args)
+        if family.length >? decls.length {return resolve_fn_call(n name family args expected closure ufcs)}
+    }
+    if member_record >=? 0 {member_candidates(decls)}
+    let targs_here=call_targs
+    call_targs=[]
+    check_args_untyped(args)
+    let positional=true
+    loop arg in args {
+        if arg =? 0 or nodes.ptr[arg].kind =? 'namedarg' {
+            positional=false
+            break
+        }
+    }
+    let cands:array<Cand>=[]
+    let first=Cand[]
+    let nfit:CRWord=0
+    let failure=CallFailure[]
+    let recv_fits=false
+    let best:CRWord=-1
+    # A settled numeric argument can rule out overloads before signature work.
+    let a0t:CRWord=0
+    let a0i:CRWord=0
+    if decls.length >? 1 {
+        loop i in [0..args.length) and a in args {
+            if nodes.ptr[a].kind =? 'namedarg' {break}
+            if nodes.ptr[a].type =? 0 or is_lit(a) or ctx_dependent(a) {continue}
+            let k=tkind(ntype(a))
+            if k =? 'int_' or k =? 'float_' or k =? 'vec' {
+                a0t=prune(ntype(a))
+                a0i=i
+            }
+            break
+        }
+    }
+    loop d in decls {
+        let di:CRWord=decl_info(d)
+        if not decl_infos.ptr[di].sig.done {
+            if a0t not=? 0 and tkind(a0t) =? 'float_' and written_int_param(d a0i) {continue}
+            fn_sig(d);
+        }
+        if a0t not=? 0 and not decl_infos.ptr[di].sig.generic and decl_infos.ptr[di].sig.params.length >? a0i {
+            let p0:CRWord=prune(decl_infos.ptr[di].sig.params.ptr[a0i])
+            let pk0=tkind(p0)
+            if p0 not=? a0t and (pk0 =? 'vec' or pk0 =? 'int_' or pk0 =? 'float_') and not can_coerce(0 a0t p0) {continue}
+            if pk0 =? 'struct_' and tkind(a0t) =? 'float_' and (bundled_rational_type(p0) or bundled_word_rational_type(p0)) {continue}
+        }
+        let cd=Cand[decl = d sig = decl_infos.ptr[di].sig]
+        let np:CRWord=nkids(d)
+        let kinds=dewy_param_kinds.get(d) ?? []
+        if positional and args.length =? np and kinds.length =? 0 {
+            cd.args = args
+        }
+        else {
+            if not call_map_candidate(d args @cd kinds ufcs @recv_fits @failure) {continue}
+        }
+        if cd.sig.ntp >? 0 {cd.binds = fill(0 CRWord(cd.sig.ntp))}
+        if targs_here.length >? 0 {
+            if nkids2(d) not=? targs_here.length {
+                call_type_arity(name d targs_here @failure)
+                recv_fits=true
+                continue
+            }
+            loop i in [0..targs_here.length) and t in targs_here {cd.binds.ptr[i] = t}
+        }
+        let failed=call_candidate_cost(@cd @recv_fits)
+        if failed not=? 0 {
+            call_reject_candidate(cd failed @failure)
+            continue
+        }
+        if nfit =? 0 {first=cd}
+        else {
+            if nfit =? 1 {cands.push(first)}
+            cands.push(cd)
+        }
+        nfit += 1
+    }
+    # Settle comprehensions before comparing multiple surviving candidates.
+    if nfit >? 1 and comprehension_settle(args) {
+        call_targs=targs_here
+        return resolve_fn_call(n name decls args expected closure ufcs)
+    }
+    if nfit =? 0 and failure.rejected.length >? 0 {call_rejection_text(@failure)}
+    if nfit =? 1 {best=0}
+    else {
+        loop ci in [0..cands.length) and cd in cands {
+            if best <? 0 or cd.cost <? cands.ptr[best].cost {best=ci}
+            else if cd.cost =? cands.ptr[best].cost {
+                let bc=cands.ptr[best]
+                if bc.sig.generic and not cd.sig.generic {best=ci}
+                else if bc.sig.generic =? cd.sig.generic and decl_in_prelude(bc.decl) and not decl_in_prelude(cd.decl) {best=ci}
+                else if bc.sig.generic =? cd.sig.generic and decl_in_prelude(bc.decl) and decl_in_prelude(cd.decl) and exact_args(cd) >? exact_args(bc) {best=ci}
+            }
+        }
+    }
+    if nfit >? 1 and not decl_in_prelude(cands.ptr[best].decl) {call_tie_error(n name args cands best)}
+    if best <? 0 {return call_no_candidate(n name decls args expected ufcs recv_fits @failure)}
+    let cd=if nfit =? 1 {first} else {cands.ptr[best]}
+    let decl=cd.decl
+    let np:CRWord=nkids(decl)
+    call_decl_checks(n name decl args cd np ufcs)
+    # Bind holes, context-dependent arguments and expected result types.
+    let partial=(not cd.plain and has_hole(args)) or nodes.ptr[n].aux2 =? int32(AUX2_PARTIAL)
+    if partial and expected not=? 0 and tkind(expected) =? 'fn_' {
+        let rb=cd.binds
+        let ok=true
+        let j:CRWord=0
+        loop i in [0..np) {
+            let a=cd.args.ptr[i]
+            if a =? 0 or nodes.ptr[a].kind not=? 'hole' {continue}
+            if j >=? CRWord(types.ptr[prune(expected)].nargs) or match_type(cd.sig.params.ptr[i] targ(prune(expected) j) @rb 0) <? 0 {ok=false}
+            j += 1
+        }
+        if ok and cd.sig.ret not=? 0 and match_type(CRWord(cd.sig.ret) CRWord(types.ptr[prune(expected)].elem) @rb 0) <? 0 {ok=false}
+        if ok {cd.binds = rb}
+    }
+    if not cd.plain and not partial and expected not=? 0 and cd.sig.ret not=? 0 and cd.sig.ntp >? 0 {expected_binds(@cd expected targs_here)}
+    if not cd.plain {
+        loop i in [0..np) {
+            let a=cd.args.ptr[i]
+            if a =? 0 or not is_lit(a) {continue}
+            let p:CRWord=prune(cd.sig.params.ptr[i])
+            if types.ptr[p].kind =? 'param' and cd.binds.ptr[CRWord(types.ptr[p].id)] =? 0 {cd.binds.ptr[CRWord(types.ptr[p].id)] = lit_default(a)}
+        }
+        loop i in [0..np) {
+            let a=cd.args.ptr[i]
+            if a =? 0 or not ctx_dependent(a) or nodes.ptr[a].kind =? 'hole' {continue}
+            let pt:CRWord=subst_partial(cd.sig.params.ptr[i] @cd.binds)
+            if has_var(pt) and expected not=? 0 and cd.sig.ret not=? 0 {
+                let rb=cd.binds
+                if match_type(CRWord(cd.sig.ret) expected @rb 0) >=? 0 {
+                    cd.binds = rb
+                    pt=subst_partial(cd.sig.params.ptr[i] @cd.binds)
+                }
+            }
+            let row=callable_contract(cd.sig.params.ptr[i])
+            if row not=? 0 and effect_contracts.ptr[row].variables.length not=? 0 {pt=mk_callable_contract(callable_base(pt) row)}
+            check_expr(a pt);
+            add_flag(a NF_CHECKED)
+            let matched:CRWord=match_type(cd.sig.params.ptr[i] ntype(a) @cd.binds 0)
+            if matched <? 0 and callable_contract(cd.sig.params.ptr[i]) not=? 0 {call_resolve_error(1 a name decl 0 partial)}
+        }
+    }
+    if not partial and expected not=? 0 and cd.sig.ret not=? 0 {
+        let rb=cd.binds
+        if match_type(CRWord(cd.sig.ret) expected @rb 0) >=? 0 {cd.binds = rb}
+    }
+    loop i in [0..targs_here.length) {
+        if not type_eq(cd.binds.ptr[i] targs_here.ptr[i]) {call_resolve_error(2 n name decl 0 partial)}
+    }
+    # A missing generic parameter can get its type from its default expression.
+    if cd.missing {
+        loop i in [0..np) {
+            if cd.args.ptr[i] not=? 0 {continue}
+            let p:CRWord=prune(cd.sig.params.ptr[i])
+            if types.ptr[p].kind not=? 'param' or cd.binds.ptr[CRWord(types.ptr[p].id)] not=? 0 {continue}
+            let dv:CRWord=CRWord(nodes.ptr[kid(decl i)].b)
+            if dv =? 0 {continue}
+            let dk=nodes.ptr[dv].kind
+            if is_lit(dv) {cd.binds.ptr[CRWord(types.ptr[p].id)] = lit_default(dv)}
+            else if dk =? 'bool_lit' {cd.binds.ptr[CRWord(types.ptr[p].id)] = T_BOOL}
+            else if dk =? 'str_lit' {cd.binds.ptr[CRWord(types.ptr[p].id)] = T_STR}
+            else if dk =? 'ident' and files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy {
+                loop j in [0..i) {
+                    if nodes.ptr[dv].name not=? nodes.ptr[kid(decl j)].name {continue}
+                    let earlier:CRWord=subst_partial(cd.sig.params.ptr[j] @cd.binds)
+                    if not has_var(earlier) {cd.binds.ptr[CRWord(types.ptr[p].id)] = earlier}
+                }
+            }
+            if cd.binds.ptr[CRWord(types.ptr[p].id)] =? 0 and files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy and (closure not=? 0 or not default_uses_params(dv decl i)) {
+                let ready=true
+                loop j in [0..nkids2(decl)) {
+                    if cd.binds.ptr[j] =? 0 or has_var(cd.binds.ptr[j]) {ready=false}
+                }
+                if ready {
+                    let inferred=if closure not=? 0 {poly_default_type(decl i cd.binds)} else {default_arg(decl i 0 targs = cd.binds)}
+                    cd.binds.ptr[CRWord(types.ptr[p].id)] = ntype(inferred)
+                }
+            }
+        }
+    }
+    loop i in [0..CRWord(cd.sig.ntp)) {
+        let b=cd.binds.ptr[i]
+        if b =? 0 {
+            loop pt in cd.sig.params {
+                if param_in_union(pt i) {cd.binds.ptr[i] = T_NEVER}
+            }
+            b=cd.binds.ptr[i]
+        }
+        if b =? 0 or tkind(b) =? 'var' {call_resolve_error(5 n name decl i partial)}
+    }
+    if closure not=? 0 {
+        let variant=poly_default_variant(decl cd.args)
+        if variant not=? decl {
+            decl=variant
+            cd.sig = fn_sig(decl)
+            let supplied:array<int64>=[]
+            loop arg in cd.args {
+                if arg not=? 0 {supplied.push(arg)}
+            }
+            cd.args = supplied
+            np=supplied.length
+        }
+    }
+    let f:CRWord=get_fn_inst(decl cd.binds nodes.ptr[n].pos)
+    if ide_on {call_ide_ref(n name args decl f)}
+    # Defaults referring to earlier parameters capture values in written order.
+    let capture_defaults=false
+    let dewy_call=files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy
+    if not partial and dewy_call and cd.missing {
+        loop i in [0..np) {
+            if cd.args.ptr[i] =? 0 and default_uses_params(CRWord(nodes.ptr[kid(decl i)].b) decl i) {capture_defaults=true}
+        }
+    }
+    if capture_defaults and cd.sig.mutmask not=? 0 {call_resolve_error(3 n name decl 0 partial)}
+    let refined_array=RefArrayCall[]
+    if refine_active and not partial and not capture_defaults and cd.sig.mutmask =? 1 and fns.ptr[f].ret =? T_VOID {refined_array=ref_array_call_prepare(decl @cd.args fns.ptr[f].ptypes args)}
+    let captured:array<int64>=[]
+    let statements:array<int64>=[]
+    if capture_defaults {
+        captured=fill(0 np)
+        loop source in args {
+            let a=unnamed(source)
+            loop i in [0..np) {
+                if cd.args.ptr[i] not=? a {continue}
+                finish_arg(a representation_type(fns.ptr[f].ptypes.ptr[i]) false)
+                captured.ptr[i] = capture_value(a representation_type(fns.ptr[f].ptypes.ptr[i]) @statements)
+                break
+            }
+        }
+    }
+    # Finish each parameter in order, restoring the mutable method context.
+    let fin:array<int64>=[]
+    loop i in [0..np) {
+        let a=cd.args.ptr[i]
+        let is_mut=if i <? 31 {CRWord(cd.sig.mutmask) & (1 << i) not=? 0} else {has_flag(kid(decl i) NF_MUT)}
+        if a =? 0 {
+            let earlier=if dewy_call and not capture_defaults {[]} else {fin}
+            let pt=fns.ptr[f].ptypes.ptr[i]
+            if capture_defaults {pt=representation_type(pt)}
+            a=default_arg(decl i pt earlier capture_defaults fns.ptr[f].targs)
+            if capture_defaults {
+                a=capture_value(a representation_type(fns.ptr[f].ptypes.ptr[i]) @statements)
+                finish_arg(a fns.ptr[f].ptypes.ptr[i] false)
+            }
+            fin.push(a)
+            continue
+        }
+        if capture_defaults {
+            finish_arg(captured.ptr[i] fns.ptr[f].ptypes.ptr[i] false)
+            fin.push(captured.ptr[i])
+            continue
+        }
+        if i =? 0 and is_mut and dewy_is_method(decl) and place_method =? 0 {
+            place_method=if nodes.ptr[decl].kind =? 'fn_' {CRWord(nodes.ptr[decl].name)} else {dewy_literal_method_name}
+            finish_arg(a fns.ptr[f].ptypes.ptr[i] is_mut)
+            place_method=0
+        }
+        else {finish_arg(a fns.ptr[f].ptypes.ptr[i] is_mut)}
+        fin.push(a)
+    }
+    check_mutable_arguments(fin CRWord(cd.sig.mutmask) nodes.ptr[n].pos)
+    set_list(n fin)
+    nodes.ptr[n].sym = int32(f)
+    nodes.ptr[n].aux = 0
+    nodes.ptr[n].kind = 'call'
+    nodes.ptr[n].a = 0
+    if closure not=? 0 {
+        let reference=poly_fnref(closure f)
+        nodes.ptr[n].a = int32(reference)
+        nodes.ptr[n].sym = 0
+        nodes.ptr[n].aux = 1
+    }
+    if proof_active or wi_any or dir_floats_any {call_note_contracts(n f decl partial closure)}
+    if partial {
+        nodes.ptr[n].aux2 = 0
+        return finish_partial(n fns.ptr[f].ptypes CRWord(cd.sig.mutmask) CRWord(fns.ptr[f].ret))
+    }
+    if not capture_defaults {save_call_order(n args fin)}
+    let result_type=representation_type(CRWord(fns.ptr[f].ret))
+    nodes.ptr[n].type = int32(result_type)
+    if refined_array.candidate not=? 0 {return ref_array_call_finish(n refined_array)}
+    if cc_any and nodes.ptr[decl].c not=? 0 and closure =? 0 and not capture_defaults {
+        let narrowed=cc_call(n f decl)
+        if narrowed not=? 0 {return narrowed}
+    }
+    if capture_defaults {call_capture_block(n f @statements)}
+    representation_type(CRWord(fns.ptr[f].ret))
+}

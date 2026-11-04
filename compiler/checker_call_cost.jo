@@ -28,17 +28,17 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
     arg_cost_rest(a, pat, binds)
 
 # Zero means success; +/- (index + 1) identifies a value/mutable rejection.
-call_candidate_cost = (cd: *Cand, recv_fits: *bool) -> int:
-    np = cd[0].args.len()
+call_candidate_cost = (cd: mut Cand, recv_fits: mut bool) -> int:
+    np = cd.args.len()
     later = 0
-    loop a in cd[0].args:
+    loop a in cd.args:
         if a == 0: continue
         if ctx_dependent(a): later |= 2
         else if is_lit(a): later |= 1
-    cd[0].plain = later == 0
+    cd.plain = later == 0
     arg_cls: int[]
     if later != 0:
-        loop a in cd[0].args:
+        loop a in cd.args:
             cls = 0
             if a != 0:
                 if ctx_dependent(a): cls = 2
@@ -48,20 +48,20 @@ call_candidate_cost = (cd: *Cand, recv_fits: *bool) -> int:
     loop phase in [0..3):
         if phase > 0 and later & phase == 0: continue
         loop i in [0..np):
-            a = cd[0].args[i]
+            a = cd.args[i]
             if a == 0: continue
             cls = if later == 0: 0 else: arg_cls[i]
             if cls != phase: continue
-            pt = cd[0].sig.params[i]
-            if int(cd[0].sig.mutmask) & (1 << i) != 0 and cls != 2:
-                r = call_mutable_cost(a, pt, cd[0].binds, recv_fits, i == 0)
+            pt = cd.sig.params[i]
+            if int(cd.sig.mutmask) & (1 << i) != 0 and cls != 2:
+                r = call_mutable_cost(a, pt, cd.binds, recv_fits, i == 0)
                 if r < 0: return -(i + 1)
                 cost += r
                 continue
-            r = arg_cost(a, pt, cd[0].binds)
-            if i == 0 and r >= 0: recv_fits[0] = true
+            r = arg_cost(a, pt, cd.binds)
+            if i == 0 and r >= 0: recv_fits = true
             if r < 0: return i + 1
             cost += r
-    cd[0].ok = true
-    cd[0].cost = cost
+    cd.ok = true
+    cd.cost = cost
     0

@@ -22,9 +22,9 @@ cost_rest = (a: int, p: int, bs: mut int[]) -> int:
         rb: int[]
         assert(arg_cost(1, T_INT, rb) == 0)
     int(nodes[a].ival)
-cost_mutable = (a: int, p: int, bs: mut int[], recv: *bool, receiver: bool) -> int:
+cost_mutable = (a: int, p: int, bs: mut int[], recv: mut bool, receiver: bool) -> int:
     events.push("mutable:{a}:{p}:{receiver}")
-    if receiver and nodes[a].aux2 != -1: recv[0] = true
+    if receiver and nodes[a].aux2 != -1: recv = true
     if bs.len() > 0: bs[0] += 10
     int(nodes[a].ival)
 cost_node = (kind: NK, t: int, score: int = 4, literal: bool = false, context: bool = false) -> int:
@@ -36,7 +36,7 @@ cost_node = (kind: NK, t: int, score: int = 4, literal: bool = false, context: b
 score = (ns: int[], ps: int[], mask: int = 0):
     cd = Cand(args=ns, sig=FnSig(params=ps, mutmask=i32(mask)), binds=[0])
     recv = false
-    failure = call_candidate_cost(&cd, &recv)
+    failure = call_candidate_cost(cd, recv)
     print("score:{failure}:{cd.cost}:{cd.ok}:{cd.plain}:{recv}:{cd.binds}")
     print(events)
     events = []
@@ -97,7 +97,7 @@ JO = jo_doubles({name: {} for name in ('ast.jo', 'types.jo', 'units.jo')}, {
         'ntype': 'ntype = (n: int) -> int: int(nodes[n].type)',
         'cc_context': 'cc_context = (a: int) -> bool: cost_context(a)',
         'arg_cost_rest': 'arg_cost_rest = (a: int, p: int, bs: mut int[]) -> int: cost_rest(a, p, bs)',
-        'call_mutable_cost': 'call_mutable_cost = (a: int, p: int, bs: mut int[], recv: *bool, receiver: bool) -> int: cost_mutable(a, p, bs, recv, receiver)',
+        'call_mutable_cost': 'call_mutable_cost = (a: int, p: int, bs: mut int[], recv: mut bool, receiver: bool) -> int: cost_mutable(a, p, bs, recv, receiver)',
     },
 })
 # Empty Jo stand-ins still re-export the driver's arenas.

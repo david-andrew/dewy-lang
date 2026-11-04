@@ -33,18 +33,18 @@ arg_cost=(a:CCWord pat:CCWord @binds:array<int64>):>CCWord=>$unsafe {
 }
 # Zero means success; +/- (index + 1) identifies a value/mutable rejection.
 # The caller builds diagnostics only for rejected candidates, in its cold frame.
-call_candidate_cost=(cd:ptr<Cand> recv_fits:ptr<bool>):>CCWord=>$unsafe {
-    let np=CCWord(cd[0].args.length)
+call_candidate_cost=(@cd:Cand @recv_fits:bool):>CCWord=>$unsafe {
+    let np=CCWord(cd.args.length)
     let later:CCWord=0
-    loop a in cd[0].args {
+    loop a in cd.args {
         if a =? 0 {continue}
         if ctx_dependent(a) {later|=2}
         else if (CCWord(nodes.ptr[a].flags) & 256) not=? 0 {later|=1}
     }
-    cd[0].plain=later =? 0
+    cd.plain=later =? 0
     let arg_cls:array<int64>=[]
     if later not=? 0 {
-        loop a in cd[0].args {
+        loop a in cd.args {
             let cls:CCWord=0
             if a not=? 0 {
                 if ctx_dependent(a) {cls=2}
@@ -59,24 +59,24 @@ call_candidate_cost=(cd:ptr<Cand> recv_fits:ptr<bool>):>CCWord=>$unsafe {
         if phase >? 0 and (later & phase) =? 0 {continue}
         loop i0 in [0..np) {
             let i=CCWord(i0)
-            let a=CCWord(cd[0].args.ptr[i])
+            let a=CCWord(cd.args.ptr[i])
             if a =? 0 {continue}
             let cls:CCWord=if later =? 0 {0} else {arg_cls.ptr[i]}
             if cls not=? phase {continue}
-            let pt=CCWord(cd[0].sig.params.ptr[i])
-            if (CCWord(cd[0].sig.mutmask) & (1 << i)) not=? 0 and cls not=? 2 {
-                let r=call_mutable_cost(a pt @cd[0].binds recv_fits i =? 0)
+            let pt=CCWord(cd.sig.params.ptr[i])
+            if (CCWord(cd.sig.mutmask) & (1 << i)) not=? 0 and cls not=? 2 {
+                let r=call_mutable_cost(a pt @cd.binds @recv_fits i =? 0)
                 if r <? 0 {return -(i + 1)}
                 cost+=r
                 continue
             }
-            let r=arg_cost(a pt @cd[0].binds)
-            if i =? 0 and r >=? 0 {recv_fits[0]=true}
+            let r=arg_cost(a pt @cd.binds)
+            if i =? 0 and r >=? 0 {recv_fits=true}
             if r <? 0 {return i + 1}
             cost+=r
         }
     }
-    cd[0].ok=true
-    cd[0].cost=cost
+    cd.ok=true
+    cd.cost=cost
     0
 }
