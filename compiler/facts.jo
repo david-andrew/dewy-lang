@@ -9212,6 +9212,16 @@ fact_slice_prepare = (f: int, summary: bool = false):
                 active.push(parents.nodes[edge])
                 edge = parents.next[edge]
             k = nodes[n].kind
+            # A demanded plain alias store still evaluates an indexed route.
+            # Its declaration has no runtime initializer left in the body;
+            # demand the alias so its selectors and container definitions feed
+            # the bounds/membership obligation in fact_store_route. O(1) here,
+            # with the existing node-indexed worklist visiting each route once.
+            if k == .assign:
+                target = int(nodes[n].a)
+                if nodes[target].kind == .ident and nodes[target].aux == i32(int(SK.local)):
+                    l = int(nodes[target].sym)
+                    if int(locals[l].flags) & LF_ALIAS != 0: values.push(target)
             if k == .if_ or k == .while_ or k == .for_ or k == .iflet or k == .match_ or k == .and_ or k == .or_ or k == .coalesce:
                 values.push(int(nodes[n].a))
                 if k == .match_:
