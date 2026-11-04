@@ -1,0 +1,28 @@
+# modes: native native-release
+First:type = [
+    id:int64
+    $__drop__
+    release = ():>void => printl"first capture"
+]
+Second:type = [
+    id:int64
+    $__drop__
+    release = ():>void => printl"second capture"
+]
+Local:type = [
+    id:int64
+    $__drop__
+    release = ():>void => printl"local"
+]
+main = () => {
+    let parent = Local[0]
+    let first = First[1]
+    let second = Second[2]
+    concurrent {
+        spawn {
+            let local = Local[3]
+            printl"body {first.id} {second.id} {local.id}"
+        }
+    }
+    printl"joined {parent.id}"
+}

@@ -838,6 +838,7 @@ dc_edge_at: {str: int}
 dc_attempts: {str: bool}          # occupancy may change without a blocking event
 dc_unknown_attempt = false       # an unresolved alias may affect any queue's occupancy
 dc_exclusive: {str: bool}         # one producer, one drainer; no attempt can race an earlier drain
+dc_ends: {str: bool}              # SPSC ends can also close through ownership cleanup
 
 # The channels prelude's module, if a program loaded it (by its path among the prelude's files)
 dc_module = (path: str = "/prelude/channels.dewy") -> int:
@@ -1071,6 +1072,7 @@ dc_call = (n: int):
     if op > 0:
         loop i in [1..nkids(n)): dc_walk(kid(n, i))
         loc = dc_loc(kid(n, 0))
+        if fns[int(nodes[n].sym)].mod == dc_smod: dc_ends[dl_key(loc)] = true
         if loc.root == 0 or not loc.exact or len(loc.route) > 0 or loc.root != 2 and loc.root != 1: dc_precise = false
         if op == 3: dc_closes = true
         if op == 6 or op == 7:
@@ -1332,7 +1334,11 @@ dc_edges_build = ():
             w, text, sure = dc_wait_node(a, i, i, true)
             if len(w) == 0: continue
             what = if e.kind == 1: "nothing receives from it or closes it" else: "nothing sends into it or closes it"
-            if sure == 2 and dc_precise and dc_complete: fatal(e.site, "{dc_actors[a].name} {text}, and {what}: it waits forever")
+            # An end passed on to a task/helper may close there without an
+            # explicit queue verb. Absence of a verb is not absence of a closer.
+            implicit = dc_ends.has(key)
+            if sure == 2 and dc_precise and dc_complete and not implicit: fatal(e.site, "{dc_actors[a].name} {text}, and {what}: it waits forever")
+            if implicit: what = "no explicit peer operation was found (an owned end may close on drop)"
             if dl_report_warn(e.site): dl_undecided(e.site, "{dc_actors[a].name} {text}, and {what}: it may wait forever")
     # (stage 1's lock order: one lock taken while holding another)
     loop e in dl_global_edges:

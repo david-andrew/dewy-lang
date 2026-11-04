@@ -97,6 +97,12 @@ __task_worker = (slot: int) -> void:
     c.rng = rng(__rng_seed + slot * 1000003)
     __task_states[slot * __TS_WORDS + __TS_FILE_CODE] = 0
     p.run()
+    # The callback owns the task's captures. Release them on this worker,
+    # before publishing completion, so a dropped queue end wakes its peer.
+    # Cancellation can skip the body; the callback still owns those captures.
+    __task_shield_enter()
+    p.run = __task_noop
+    __task_shield_leave()
     c.scope = TaskGroup()
     g = p.group.__p
     __task_lock(&g.lock)

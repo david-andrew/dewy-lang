@@ -1,0 +1,15 @@
+# modes: native native-release
+main = () => {
+    let [tx rx] = spsc<int64 2>().split
+    let total:int64 = 0
+    concurrent {
+        spawn { tx.send(10); tx.send(20); }
+        loop true {
+            let n = rx.receive
+            if n is? Closed break
+            if n is? Canceled break
+            total += n
+        }
+        printl"closed before join: {total}"
+    }
+}

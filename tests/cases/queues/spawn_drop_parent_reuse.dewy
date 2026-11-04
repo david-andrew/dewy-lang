@@ -1,0 +1,8 @@
+# modes: native
+# Finishing a task does not return ownership of its captured end to the parent.
+main = () => {
+    let [tx rx] = spsc<int64 2>().split
+    concurrent { spawn { tx.try_send(1); } }
+    tx.try_send(2);
+    rx.try_receive;
+}

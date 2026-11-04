@@ -3226,8 +3226,12 @@ body runs once and can pass a captured end to a function that takes ownership,
 at its proven last use. A later read, a loop backedge or a defer that still needs
 that end prevents the move. A closure that can run repeatedly cannot move its
 owned captures out this way.
-Dropping an end closes the queue; an end captured by a spawned task is dropped
-when its group joins, so a producer task closes its sender itself.
+Dropping an end closes the queue. A spawned task releases its captures when it
+finishes, before the group joins; a producer can simply return and its receiver
+will drain the remaining values, then see `Closed`. Captures moved onward are
+dropped by their new owner. Task cleanup runs shielded from cancellation,
+including when cancellation skips the task body. Local defers and local owners
+still clean up before the captures, which drop in reverse capture order.
 
 ```dewy
 main = () => {
@@ -3235,7 +3239,7 @@ main = () => {
     concurrent {
         spawn {
             loop i in [0..100) { if tx.send(i) is? Unsent<int64> break }
-            tx.close
+            # Returning drops tx and closes the queue.
         }
         loop true {
             let n = rx.receive

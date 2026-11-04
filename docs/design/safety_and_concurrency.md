@@ -519,8 +519,11 @@ hold: `select` (D3d).
   drains can remove a guaranteed overflow, and sends can fill available slots.
   A failed attempt cannot certify progress. Unresolved outcomes retain a warning
   even when the prefix dependency graph cannot represent their later waits.
-- **Not yet.** A task's captured end is dropped at the group's join, not when the
-  task ends.
+- **Task-owned ends.** A worker releases its callback before publishing completion,
+  so captures close at task completion, not at group join. Cleanup is shielded
+  even when cancellation skips the body; an end moved onward belongs to its new
+  owner. The wait analysis does not mistake absence of explicit peer verbs for
+  absence of an implicit closer; such unresolved waits retain a warning.
 - **Acceptance** (`tests/cases/queues/`, `tests/test_queue_busy.py`): values given
   back on full, closed and canceled sends; forwarding and group reporting; `mpmc`
   order, laps, close and draining; four producers and three consumers delivering
@@ -681,6 +684,10 @@ a pointer to each rule. The wording is David's.
   an owned capture into another function. Repeatable closures cannot consume
   their captures; shared and borrowed captures remain borrowed. A conditional
   transfer suppresses cleanup only on the path that actually transferred it.
+- Task captures are released when the task finishes, before its completion is
+  published to the group. Defers still precede local drops; remaining captures
+  follow, in reverse capture order. Cancellation shields this cleanup, including
+  tasks whose body was skipped. Parents retain their ordinary local drop order.
 - `mpmc<T>(capacity)`; a non-waiting attempt that collides with another task
   returns `Busy`.
 - Channel, `mpmc` and `spsc` waits participate in deadlock diagnostics and need

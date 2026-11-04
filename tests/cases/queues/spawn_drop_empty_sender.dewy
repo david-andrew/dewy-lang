@@ -1,0 +1,8 @@
+# modes: native native-release
+main = () => {
+    let [tx rx] = spsc<int64 1>().split
+    concurrent {
+        spawn { let end_ = tx; }
+        printl"closed before join: {rx.receive is? Closed}"
+    }
+}

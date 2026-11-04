@@ -1,0 +1,14 @@
+# modes: native native-release
+main = () => {
+    let [tx rx] = spsc<int64 2>().split
+    concurrent g {
+        spawn { tx.try_send(7); }
+        cancel(g)
+    }
+    loop true {
+        let n = rx.try_receive
+        if n is? int64 continue
+        printl"closed: {n is? Closed}"
+        break
+    }
+}

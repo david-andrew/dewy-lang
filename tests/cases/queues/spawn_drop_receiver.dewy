@@ -1,0 +1,16 @@
+# modes: native native-release
+main = () => {
+    let [tx rx] = spsc<int64 1>().split
+    let closed:bool = false
+    concurrent {
+        spawn { rx.try_receive; }
+        loop true {
+            let r = tx.send(7)
+            if r is? Unsent<int64> {
+                closed = r.reason is? Closed
+                break
+            }
+        }
+        printl"closed before join: {closed}"
+    }
+}
