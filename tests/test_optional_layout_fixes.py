@@ -231,3 +231,26 @@ def test_optional_heap_literal(compiler, tmp_path, name, mode):
 def test_optional_heap_literal_word_reject(compiler, tmp_path, type_name, mode):
     source = f'$runtime_checks\nmain=()=>{{let x:{type_name}?=18446744073709551616 printl(x)}}'
     check_program(compiler, tmp_path, source, None, mode)
+
+
+AGGREGATE_VALID = {
+    'context_refined_array': ("""main=()=>{let xs:array<int8 length >? 0>?=[1] printl(xs)}""", '[1]\n'),
+    'context_refined_array_control': ("""main=()=>{let xs:array<int8>?=[1] printl(xs)}""", '[1]\n'),
+    'control_refined_array_plain': ("""main=()=>{let xs:array<int8 length >? 0>=[1] printl(xs)}""", '[1]\n'),
+    'optional_fixed_context': ('main=()=>{let xs:array<int8 length=1>?=[1] printl(xs)}', '[1]\n'),
+    'optional_tuple_context': ('main=()=>{let xs:[int8 uint64]?=[1 18446744073709551615] printl(xs)}', '[1 18446744073709551615]\n'),
+    'refined_element_context': ('main=()=>{let xs:array<int8<(>=? 0)> length >? 0>?=[1] printl(xs)}', '[1]\n'),
+}
+
+
+@pytest.mark.parametrize('mode', MODES)
+@pytest.mark.parametrize('name', AGGREGATE_VALID)
+def test_optional_aggregate_context(compiler, tmp_path, name, mode):
+    check_program(compiler, tmp_path, *AGGREGATE_VALID[name], mode)
+
+
+@pytest.mark.parametrize('mode', MODES)
+@pytest.mark.parametrize('value', ['[]', '[-1]'])
+def test_optional_aggregate_contract(compiler, tmp_path, value, mode):
+    source = f'main=()=>{{let xs:array<int8<(>=? 0)> length >? 0>?={value} printl(xs)}}'
+    check_program(compiler, tmp_path, source, None, mode)

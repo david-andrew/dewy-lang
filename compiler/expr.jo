@@ -8911,9 +8911,12 @@ expr_literal = (n: int, expected: int, ex0: int) -> int:
         # (`[(1 2) 3]`: a group's values are elements, as written)
         if values_grouped(n): set_list(n, values_flatten(kids(n)))
         dewy_classify_spread(n)
-    if k == .array and exk == .opt and (tkind(int(types[ex].elem)) == .array or tkind(int(types[ex].elem)) == .fixed or tkind(int(types[ex].elem)) == .tuple and files[pos_file(nodes[n].pos)].is_dewy):
-        ex = prune(int(types[ex].elem))
-        exk = types[ex].kind
+    if k == .array and exk == .opt:
+        # A payload's length contract must not hide the literal's element
+        # context. The original expected type still checks that contract.
+        inner = representation_type(int(types[ex].elem))
+        ik = types[inner].kind
+        if ik == .array or ik == .fixed or ik == .tuple and files[pos_file(nodes[n].pos)].is_dewy: ex = inner
     if (k == .array or k == .map_lit or k == .record_lit or k == .tuple and nodes[n].aux != i32(TUPLE_VALUES)) and ex != 0 and files[pos_file(nodes[n].pos)].is_dewy:
         member = literal_union_member(n, ex)
         if member != 0: ex = member
