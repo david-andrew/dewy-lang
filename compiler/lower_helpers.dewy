@@ -1,0 +1,972 @@
+$runtime_checks
+from p"lower.jo" import (BOX_HDR V VC_AGG VC_FLT VC_INT Val arr_len begin_fn blk box_val br_to brif_to copy_at ctl drop_at e_faddr e_gaddr endc env_guard env_guarded env_layout field_store_type fn_writes global_addr_off hdr_load hdr_store hk_key iff inst_mutmask is_shared lf_helper lf_of_inst lfuncs load_val lop new_temp opt_has opt_value own partial_layout release ret_vt retain retain_elems rt spawn_body spawn_owned_capture store_type store_val tuple_off vec_comps value_member_cache vc vt_of)
+from p"check.jo" import (FK_PARTIAL LF_ASSIGNED LF_EXPOSED LF_VALUECAP fns locals prelude syms value_equal_fns value_hash_fns)
+from p"ir.jo" import (M_FLOAT VI VS e_addi e_bin e_call e_call0 e_call1 e_call2 e_calli e_copy e_fconst e_iconst e_load e_mov e_ret e_slot e_store e_zero emit ir mulh_ok vreg)
+from p"types.jo" import (T_MATH_INT T_STR fields fixed_len is_managed layout math_optional prune ptr_size structs targ telem tkind tsize type_has_fn types variants)
+from p"checker_state.dewy" import (SK)
+from p"lower.jo" import (HK)
+from p"checked_eval.dewy" import (cx_token_values)
+from p"util.jo" import (files ice intern pos_file)
+from p"arena.jo" import (helper_promote)
+from p"expr.jo" import (is_fn_type ntype)
+from p"ast.jo" import (kid nkids nodes)
+from p"math_lower.jo" import (math_compare math_main math_tag)
+from p"ownership.jo" import (owner_begin owner_element_drop owner_end owner_forget_slot owner_hook_into owner_register owner_stride owner_value ownership_copies ownership_moves)
+from p"ownership_types.dewy" import (ownership_callable_cap ownership_copyable ownership_inline ownership_type)
+from p"parallel_lower.jo" import (parallel_job_helper)
+from p"units.jo" import (quantity_base)
+# Generated aggregate helpers; shared state has one owner in lower.jo.
+LHWord:type=int64<overflow='wrap'>
+helper_params=(n:LHWord):>array<int64>=>$unsafe {
+    let ps:array<int64>=[]
+    loop i in [0..n) {ps.push(vreg(VI));}
+    ir.nparams = n;
+    return ps
+}
+field_list=(t0:LHWord):>array<[int64 int64]>=>$unsafe {
+    # (type, offset) of each member of a struct/tuple
+    let t=quantity_base(t0)
+    layout(t);
+    let out:array<[int64 int64]>=[]
+    if types.ptr[t].kind =? 'struct_' {
+        let si:LHWord=LHWord(types.ptr[t].st)
+        loop i in [0..LHWord(structs.ptr[si].nfields)) {
+            let f:LHWord=LHWord(structs.ptr[si].fields) + i
+            out.push([field_store_type(f) LHWord(fields.ptr[f].offset)]);
+        }
+    }
+    else if types.ptr[t].kind =? 'tuple' {
+        loop i in [0..LHWord(types.ptr[t].nargs)) {out.push([targ(t i) tuple_off(t i)]);}
+    }
+    return out
+}
+helper_drop=(t:LHWord copy:bool):>void=>$unsafe {
+    let ps=helper_params(1)
+    let a=ps.ptr[0]
+    let k=types.ptr[t].kind
+    if ownership_type(t) {
+        if copy {
+            if not ownership_copyable(t) {ice("copy helper requested for move-only owner");}
+            let hook = ownership_copies.get(t)
+            if hook not=? none {
+                let result=e_slot(new_temp(t))
+                owner_hook_into(hook a t result);
+                e_copy(a result tsize(t));
+                e_ret(-1);
+                return
+            }
+            if k =? 'struct_' and not ownership_inline(t) {
+                helper_owner_record_copy(a t);
+                return
+            }
+        }
+        else if k =? 'struct_' {
+            let hook:LHWord=LHWord(structs.ptr[LHWord(types.ptr[t].st)].drop_fn)
+            if hook not=? 0 {e_call1(lf_of_inst(hook) a -1);}
+        }
+    }
+    if k =? 'array' or k =? 'box' {
+        if copy {copy_at(a t);}
+        else {release(e_load(VI a 0 ptr_size) t);}
+    }
+    else if k =? 'fn_' or k =? 'polyfn' or k =? 'callable' {
+        let env=e_load(VI a ptr_size ptr_size)
+        if copy {
+            iff(e_bin('ne' VI env e_iconst(0)));
+            let cf=e_load(VI env 16 ptr_size)
+            e_store(a ptr_size e_calli(cf [env] VI false) ptr_size);
+            endc();
+        }
+        else {
+            iff(e_call1(rt("__rc_dec_test") env VI));
+            let df=e_load(VI env 8 ptr_size)
+            e_calli(df [env] -1 false);
+            endc();
+        }
+    }
+    else if k =? 'opt' {
+        let inner:LHWord=LHWord(types.ptr[t].elem)
+        iff(e_bin('ne' VI opt_has(a inner) e_iconst(0)));
+        if copy {copy_at(a inner);}
+        else {drop_embedded(a inner);}
+        endc();
+    }
+    else if k =? 'enum_' {
+        let si:LHWord=LHWord(types.ptr[t].st)
+        layout(t);
+        let tag=e_load(VI a 0 4)
+        loop v in [0..LHWord(structs.ptr[si].nvariants)) {
+            let vi:LHWord=LHWord(structs.ptr[si].variants) + v
+            let any=false
+            loop i in [0..LHWord(variants.ptr[vi].nfields)) {
+                if is_managed(field_store_type(LHWord(variants.ptr[vi].fields) + i)) {any=true}
+            }
+            if not any {continue}
+            iff(e_bin('eq' VI tag e_iconst(v)));
+            loop i in [0..LHWord(variants.ptr[vi].nfields)) {
+                let f:LHWord=LHWord(variants.ptr[vi].fields) + i
+                let ft=field_store_type(f)
+                if copy {copy_at(e_addi(a LHWord(fields.ptr[f].offset)) ft);}
+                else {drop_at(e_addi(a LHWord(fields.ptr[f].offset)) ft);}
+            }
+            endc();
+        }
+    }
+    else if k =? 'fixed' {
+        let et:LHWord=LHWord(types.ptr[t].elem)
+        if is_managed(et) {
+            let i=fixed_loop_begin(t)
+            let index=if copy {i} else {e_bin('sub' VI e_iconst(fixed_len(t) - 1) i)}
+            let ea=fixed_elem_addr(a index et)
+            if copy {copy_at(ea et);}
+            else {drop_embedded(ea et);}
+            fixed_loop_end(i);
+        }
+    }
+    else {
+        let fs=field_list(t)
+        loop i in [0..fs.length) {
+            let fo=fs.ptr[if copy {i} else {fs.length - 1 - i}]
+            if not is_managed(fo[0]) {continue}
+            if copy {copy_at(e_addi(a fo[1]) fo[0]);}
+            else {drop_embedded(e_addi(a fo[1]) fo[0]);}
+        }
+    }
+    e_ret(-1);
+}
+fixed_loop_begin=(t:LHWord):>LHWord=>$unsafe {
+    let i=vreg(VI)
+    e_mov(i e_iconst(0));
+    blk();
+    lop();
+    brif_to(e_bin('ges' VI i e_iconst(fixed_len(t))) ctl - 1);
+    return i
+}
+fixed_loop_end=(i:LHWord):>void=>$unsafe {
+    e_mov(i e_addi(i 1));
+    br_to(ctl);
+    endc();
+    endc();
+}
+fixed_elem_addr=(a:LHWord i:LHWord et:LHWord):>LHWord=>$unsafe {
+    return e_bin('add' VI a e_bin('mul' VI i e_iconst(tsize(et))))
+}
+helper_arrrel=(t:LHWord):>void=>$unsafe {
+    let ps=helper_params(1)
+    let p=ps.ptr[0]
+    let et:LHWord=LHWord(types.ptr[t].elem)
+    iff(e_call1(rt("__rc_dec_test") p VI));
+    let n=hdr_load(p 8)
+    # Mathematical integers use a word tag: an all-inline array has no
+    # element owners. Scan tags with an associative OR before the cold drops;
+    # the ordinary vectorizer can process this census without per-slot calls.
+    if quantity_base(et) =? T_MATH_INT {
+        let tags=vreg(VI); e_mov(tags e_iconst(0));
+        let j=vreg(VI); e_mov(j e_iconst(0));
+        blk();
+        brif_to(e_bin('ges' VI j n) ctl);
+        lop();
+        let word=e_load(VI e_bin('add' VI p e_bin('shl' VI j e_iconst(3))) 24 8)
+        e_mov(tags e_bin('or_' VI tags word));
+        e_mov(j e_addi(j 1));
+        brif_to(e_bin('lts' VI j n) ctl);
+        endc(); endc();
+        iff(math_tag(tags));
+    }
+    let i=vreg(VI)
+    e_mov(i e_iconst(0));
+    blk();
+    lop();
+    brif_to(e_bin('ges' VI i n) ctl - 1);
+    owner_element_drop(e_bin('add' VI e_addi(p 24) e_bin('mul' VI (if ownership_type(et) {e_bin('sub' VI e_addi(n -1) i)} else {i}) e_iconst(owner_stride(et)))) et);
+    e_mov(i e_addi(i 1));
+    br_to(ctl);
+    endc();
+    endc();
+    if quantity_base(et) =? T_MATH_INT {endc();}
+    e_call1(rt("__free_obj") p -1);
+    endc();
+    e_ret(-1);
+}
+helper_arruniq=(t:LHWord):>void=>$unsafe {
+    # takes the array pointer, returns a uniquely owned array pointer
+    let ps=helper_params(1)
+    ir.ret = VI;
+    let p=ps.ptr[0]
+    let et:LHWord=LHWord(types.ptr[t].elem)
+    let r=vreg(VI)
+    e_mov(r p);
+    iff(e_bin('ne' VI p e_iconst(0)));
+    iff(e_bin('ne' VI hdr_load(p 0) e_iconst(1)));
+    e_mov(r e_call2(rt("__arr_clone") p e_iconst(owner_stride(et)) VI));
+    if is_managed(et) and ownership_copyable(et) {retain_elems(r et);}
+    endc();
+    endc();
+    e_ret(r);
+}
+helper_value_members=(t:LHWord hashing:bool=false):>array<int64>=>$unsafe {
+    if value_equal_fns.length =? 0 and value_hash_fns.length =? 0 {return []}
+    let key=t * 2 + LHWord(int64(hashing))
+    let cached = value_member_cache.get(key)
+    if cached not=? none {return cached}
+    let result:array<int64>=[]
+    let pending=[t]
+    let seen:dict<int64 bool>=dict<int64 bool>()
+    loop pending.length >? 0 {
+        let current=prune(pending.pop())
+        if seen.has(current) {continue}
+        seen[current] = true;
+        let f=value_equal_fns.get(current) ?? 0
+        if hashing {f=value_hash_fns.get(current) ?? 0}
+        if f not=? 0 {
+            result.push(f);
+            continue
+        }
+        let k=types.ptr[current].kind
+        if k =? 'array' or k =? 'fixed' or k =? 'opt' or k =? 'box' {pending.push(LHWord(types.ptr[current].elem));}
+        else if k =? 'struct_' or k =? 'tuple' {
+            loop field in field_list(current) {pending.push(field[0]);}
+        }
+        else if k =? 'enum_' {
+            layout(current);
+            let si:LHWord=LHWord(types.ptr[current].st)
+            loop i in [0..LHWord(structs.ptr[si].nvariants)) {
+                let vi:LHWord=LHWord(structs.ptr[si].variants) + i
+                loop j in [0..LHWord(variants.ptr[vi].nfields)) {
+                    pending.push(LHWord(fields.ptr[LHWord(variants.ptr[vi].fields) + j].type));
+                }
+            }
+        }
+    }
+    value_member_cache[key] = result;
+    return result
+}
+helper_callback_snapshot=(t:LHWord hashing:bool=false):>bool=>$unsafe {
+    loop f in helper_value_members(t hashing) {
+        let writes=fn_writes(f)
+        if writes.all or writes.globals.length >? 0 {return true}
+    }
+    return false
+}
+value_helper_calls=(n:LHWord):>array<int64>=>$unsafe {
+    if value_equal_fns.length =? 0 and value_hash_fns.length =? 0 {return []}
+    let t:LHWord=0
+    let hashing=false
+    if nodes.ptr[n].kind =? 'intrinsic' and nodes.ptr[n].aux =? int32(24) and nkids(n) >? 0 {
+        t=ntype(kid(n 0))
+        hashing=true
+    }
+    else if nodes.ptr[n].kind =? 'binary' and nodes.ptr[n].aux =? 1 {
+        let op=cx_token_values.ptr[LHWord(nodes.ptr[n].op)]
+        if op =? 'eq' or op =? 'ne' {t=ntype(LHWord(nodes.ptr[n].a))}
+    }
+    if t =? 0 {return []}
+    return helper_value_members(t hashing)
+}
+helper_value_snapshot=(t:LHWord source:LHWord):>LHWord=>$unsafe {
+    let result=e_slot(new_temp(t))
+    e_copy(result source tsize(t));
+    copy_at(result t);
+    return result
+}
+helper_boxrel=(t:LHWord):>void=>$unsafe {
+    let ps=helper_params(1)
+    let p=ps.ptr[0]
+    let drop=lf_helper(HK.boxdrop t 0)
+    iff(e_call1(rt("__rc_dec_test") p VI));
+    iff(e_bin('eq' VI e_call2(rt("__box_defer") p e_faddr(drop) VI) e_iconst(0)));
+    e_call1(drop p -1);
+    blk();
+    lop();
+    let q=e_call0(rt("__box_next") VI)
+    brif_to(e_bin('eq' VI q e_iconst(0)) ctl - 1);
+    e_calli(e_load(VI q ptr_size ptr_size) [e_load(VI q 0 ptr_size)] -1 false);
+    br_to(ctl);
+    endc();
+    endc();
+    endc();
+    endc();
+    e_ret(-1);
+}
+helper_boxdrop=(t:LHWord):>void=>$unsafe {
+    let ps=helper_params(1)
+    let p=ps.ptr[0]
+    drop_embedded(e_addi(p BOX_HDR) LHWord(types.ptr[t].elem));
+    e_call2(rt("__box_free") p e_iconst(tsize(LHWord(types.ptr[t].elem))) -1);
+    e_ret(-1);
+}
+helper_boxuniq=(t:LHWord):>void=>$unsafe {
+    let ps=helper_params(1)
+    ir.ret = VI;
+    let p=ps.ptr[0]
+    let et:LHWord=LHWord(types.ptr[t].elem)
+    # Resource snapshots copy eagerly, so mutable access never detaches a
+    # shared resource box or invents a copy of a move-only payload.
+    if ownership_type(t) {e_ret(p); return}
+    let r=vreg(VI)
+    e_mov(r p);
+    iff(e_bin('ne' VI p e_iconst(0)));
+    iff(e_bin('ne' VI hdr_load(p 0) e_iconst(1)));
+    e_mov(r e_call2(rt("__box_clone") p e_iconst(tsize(et)) VI));
+    copy_at(e_addi(r BOX_HDR) et);
+    endc();
+    endc();
+    e_ret(r);
+}
+helper_eq=(t:LHWord):>void=>$unsafe {
+    let ps=helper_params(2)
+    if t =? T_MATH_INT {
+        ir.ret = VI;
+        e_ret(math_compare('eq' e_load(VI ps.ptr[0] 0 8) e_load(VI ps.ptr[1] 0 8)));
+        return
+    }
+    ir.ret = VI;
+    let a=ps.ptr[0]
+    let b=ps.ptr[1]
+    let snapshot=helper_callback_snapshot(t)
+    if snapshot {
+        a=helper_value_snapshot(t a)
+        b=helper_value_snapshot(t b)
+    }
+    let f=value_equal_fns.get(t) ?? 0
+    if f not=? 0 {
+        let result=e_call2(lf_of_inst(f) a b VI)
+        if snapshot {
+            drop_at(a t);
+            drop_at(b t);
+        }
+        e_ret(result);
+        return
+    }
+    let r=vreg(VI)
+    e_mov(r e_iconst(0));
+    blk();
+    let fail=ctl
+    let k=types.ptr[t].kind
+    if k =? 'struct_' or k =? 'tuple' {
+        loop fo in field_list(t) {eq_member(fo[0] e_addi(a fo[1]) e_addi(b fo[1]) fail);}
+    }
+    else if k =? 'fixed' {
+        let et:LHWord=LHWord(types.ptr[t].elem)
+        let i=fixed_loop_begin(t)
+        eq_member(et fixed_elem_addr(a i et) fixed_elem_addr(b i et) fail);
+        fixed_loop_end(i);
+    }
+    else if k =? 'opt' {
+        let inner:LHWord=LHWord(types.ptr[t].elem)
+        let ha=opt_has(a inner)
+        let hb=opt_has(b inner)
+        brif_to(e_bin('ne' VI ha hb) fail);
+        iff(ha);
+        if math_optional(t) {
+            brif_to(e_bin('eq' VI math_compare('eq' opt_value(a inner) opt_value(b inner)) e_iconst(0)) fail);
+        }
+        else {eq_member(inner a b fail);}
+        endc();
+    }
+    else if k =? 'enum_' {
+        let si:LHWord=LHWord(types.ptr[t].st)
+        layout(t);
+        let ta=e_load(VI a 0 4)
+        brif_to(e_bin('ne' VI ta e_load(VI b 0 4)) fail);
+        loop v in [0..LHWord(structs.ptr[si].nvariants)) {
+            let vi:LHWord=LHWord(structs.ptr[si].variants) + v
+            if variants.ptr[vi].nfields =? 0 {continue}
+            iff(e_bin('eq' VI ta e_iconst(v)));
+            loop i in [0..LHWord(variants.ptr[vi].nfields)) {
+                f=LHWord(variants.ptr[vi].fields) + i
+                eq_member(field_store_type(f) e_addi(a LHWord(fields.ptr[f].offset)) e_addi(b LHWord(fields.ptr[f].offset)) fail);
+            }
+            endc();
+        }
+    }
+    else if k =? 'array' {
+        let et:LHWord=LHWord(types.ptr[t].elem)
+        let pa=e_load(VI a 0 ptr_size)
+        let pb=e_load(VI b 0 ptr_size)
+        let na=arr_len(pa)
+        brif_to(e_bin('ne' VI na arr_len(pb)) fail);
+        let ek=types.ptr[prune(et)].kind
+        let bits_equal=(ek =? 'int_' and et not=? T_MATH_INT) or ek =? 'bool_'
+        if bits_equal {
+            # A single scalar needs neither a word loop nor a tail loop.
+            iff(e_bin('eq' VI na e_iconst(1)));
+            eq_member(et e_addi(pa 24) e_addi(pb 24) fail);
+            e_mov(r e_iconst(1));
+            br_to(fail);
+            endc();
+            # Only reflexive scalar equality: floats may contain NaN, and a
+            # record protocol may have effects even when storage is shared.
+            iff(e_bin('eq' VI pa pb));
+            e_mov(r e_iconst(1));
+            br_to(fail);
+            endc();
+        }
+        if bits_equal and owner_stride(et) <? 8 {
+            # Emit the word loop here so the equality helper stays a leaf and
+            # release builds can inline it. Finish with whole element loads.
+            let bytes=e_bin('mul' VI na e_iconst(owner_stride(et)))
+            let i=vreg(VI)
+            e_mov(i e_iconst(0));
+            blk();
+            lop();
+            brif_to(e_bin('gts' VI e_addi(i 8) bytes) ctl - 1);
+            let aa=e_bin('add' VI e_addi(pa 24) i)
+            let bb=e_bin('add' VI e_addi(pb 24) i)
+            brif_to(e_bin('ne' VI e_load(VI aa 0 8) e_load(VI bb 0 8)) fail);
+            e_mov(i e_addi(i 8));
+            br_to(ctl);
+            endc();
+            endc();
+            blk();
+            lop();
+            brif_to(e_bin('ges' VI i bytes) ctl - 1);
+            eq_member(et e_bin('add' VI e_addi(pa 24) i) e_bin('add' VI e_addi(pb 24) i) fail);
+            e_mov(i e_addi(i owner_stride(et)));
+            br_to(ctl);
+            endc();
+            endc();
+        }
+        else {
+            let i=vreg(VI)
+            e_mov(i e_iconst(0));
+            blk();
+            lop();
+            brif_to(e_bin('ges' VI i na) ctl - 1);
+            let off=e_bin('mul' VI i e_iconst(owner_stride(et)))
+            eq_member(et e_bin('add' VI e_addi(pa 24) off) e_bin('add' VI e_addi(pb 24) off) fail);
+            e_mov(i e_addi(i 1));
+            br_to(ctl);
+            endc();
+            endc();
+        }
+    }
+    else if k =? 'vec' {
+        loop i in [0..vec_comps(t)) {
+            if types.ptr[t].sign {
+                brif_to(e_bin('ne' VI e_load(VI a 4 * i 4) e_load(VI b 4 * i 4)) fail);
+            }
+            else {
+                brif_to(e_bin('fne' VS e_load(VS a 4 * i 4 | M_FLOAT) e_load(VS b 4 * i 4 | M_FLOAT)) fail);
+            }
+        }
+    }
+    else {eq_member(t a b fail);}
+    e_mov(r e_iconst(1));
+    endc();
+    if snapshot {
+        drop_at(a t);
+        drop_at(b t);
+    }
+    e_ret(r);
+}
+eq_member=(t0:LHWord a:LHWord b:LHWord fail:LHWord):>void=>$unsafe {
+    let t=quantity_base(t0)
+    let k=types.ptr[t].kind
+    if k =? 'box' {
+        # (the same box, or both empty: equal without looking inside)
+        let pa=e_load(VI a 0 ptr_size)
+        let pb=e_load(VI b 0 ptr_size)
+        blk();
+        let same=ctl
+        brif_to(e_bin('eq' VI pa pb) same);
+        let et=prune(LHWord(types.ptr[t].elem))
+        let va=box_val(pa et)
+        let vb=box_val(pb et)
+        if types.ptr[et].kind =? 'opt' {
+            # (an optional's flags here, its value by the value's helper: one call deep for each
+            # node of a list, not two)
+            let inner:LHWord=LHWord(types.ptr[et].elem)
+            let ha=opt_has(va inner)
+            brif_to(e_bin('ne' VI ha opt_has(vb inner)) fail);
+            brif_to(e_bin('eq' VI ha e_iconst(0)) same);
+            et=prune(inner)
+        }
+        let r=e_call2(lf_helper(HK.eq et 0) va vb VI)
+        brif_to(e_bin('eq' VI r e_iconst(0)) fail);
+        endc();
+        return
+    }
+    if k =? 'str_' {
+        let r=e_call2(rt("__str_eq") e_load(VI a 0 ptr_size) e_load(VI b 0 ptr_size) VI)
+        brif_to(e_bin('eq' VI r e_iconst(0)) fail);
+        return
+    }
+    let c=vc(t)
+    if math_optional(t) {
+        brif_to(e_bin('eq' VI e_call2(lf_helper(HK.eq t 0) a b VI) e_iconst(0)) fail);
+        return
+    }
+    if t =? T_MATH_INT {
+        brif_to(e_bin('eq' VI math_compare('eq' load_val(t a 0) load_val(t b 0)) e_iconst(0)) fail);
+        return
+    }
+    if c =? VC_INT and k not=? 'array' {
+        brif_to(e_bin('ne' VI load_val(t a 0) load_val(t b 0)) fail);
+        return
+    }
+    if c =? VC_FLT {
+        brif_to(e_bin('fne' vt_of(t) load_val(t a 0) load_val(t b 0)) fail);
+        return
+    }
+    if k =? 'fn_' or k =? 'polyfn' or k =? 'callable' {
+        brif_to(e_bin('ne' VI e_load(VI a 0 ptr_size) e_load(VI b 0 ptr_size)) fail);
+        return
+    }
+    let r=e_call2(lf_helper(HK.eq t 0) a b VI)
+    brif_to(e_bin('eq' VI r e_iconst(0)) fail);
+}
+helper_hash=(t:LHWord keyed:bool=false):>void=>$unsafe {
+    let ps=helper_params(1)
+    if t =? T_MATH_INT {
+        ir.ret = VI;
+        e_ret(e_call1(rt(if keyed {"__mi_khash"} else {"__mi_hash"}) e_load(VI ps.ptr[0] 0 8) VI));
+        return
+    }
+    ir.ret = VI;
+    let a=ps.ptr[0]
+    let snapshot=helper_callback_snapshot(t true)
+    if snapshot {a=helper_value_snapshot(t a)}
+    let f=value_hash_fns.get(t) ?? 0
+    if f not=? 0 {
+        let result=e_call1(lf_of_inst(f) a VI)
+        if keyed {result=e_call1(rt("__hk_word") result VI)}
+        if snapshot {drop_at(a t);}
+        e_ret(result);
+        return
+    }
+    let h=vreg(VI)
+    hk_key=0
+    if keyed {
+        # (no check that it is drawn: before a dictionary's first entry is added, __map_add
+        # draws it and hashes that key again; an empty dictionary reads no slots);
+        let s=prelude.get(intern("__hash_key")) ?? 0
+        if s =? 0 or syms.ptr[s].kind not=? SK.global {ice("missing runtime global __hash_key");}
+        hk_key=e_load(VI e_gaddr(global_addr_off(LHWord(syms.ptr[s].ref))) 0 8)
+        e_mov(h e_iconst(0));
+    }
+    else {e_mov(h e_iconst(LHWord(0xcbf29ce484222325)));}
+    # (what helper_eq compares, and nothing else: equal values hash alike)
+    let k=types.ptr[t].kind
+    if k =? 'struct_' or k =? 'tuple' {
+        loop fo in field_list(t) {hash_member(h fo[0] e_addi(a fo[1]));}
+    }
+    else if k =? 'fixed' {
+        let et:LHWord=LHWord(types.ptr[t].elem)
+        let i=fixed_loop_begin(t)
+        hash_member(h et fixed_elem_addr(a i et));
+        fixed_loop_end(i);
+    }
+    else if k =? 'opt' {
+        let inner:LHWord=LHWord(types.ptr[t].elem)
+        let has=opt_has(a inner)
+        hash_mix(h has);
+        iff(has);
+        if math_optional(t) {hash_mix(h e_call1(rt(if hk_key not=? 0 {"__mi_khash"} else {"__mi_hash"}) opt_value(a inner) VI));}
+        else {hash_member(h inner a);}
+        endc();
+    }
+    else if k =? 'enum_' {
+        let si:LHWord=LHWord(types.ptr[t].st)
+        layout(t);
+        let tag=e_load(VI a 0 4)
+        hash_mix(h tag);
+        loop v in [0..LHWord(structs.ptr[si].nvariants)) {
+            let vi:LHWord=LHWord(structs.ptr[si].variants) + v
+            if variants.ptr[vi].nfields =? 0 {continue}
+            iff(e_bin('eq' VI tag e_iconst(v)));
+            loop i in [0..LHWord(variants.ptr[vi].nfields)) {
+                f=LHWord(variants.ptr[vi].fields) + i
+                hash_member(h field_store_type(f) e_addi(a LHWord(fields.ptr[f].offset)));
+            }
+            endc();
+        }
+    }
+    else if k =? 'array' {
+        let et:LHWord=LHWord(types.ptr[t].elem)
+        let p=e_load(VI a 0 ptr_size)
+        let n=arr_len(p)
+        hash_mix(h n);
+        let i=vreg(VI)
+        e_mov(i e_iconst(0));
+        blk();
+        lop();
+        brif_to(e_bin('ges' VI i n) ctl - 1);
+        hash_member(h et e_bin('add' VI e_addi(p 24) e_bin('mul' VI i e_iconst(owner_stride(et)))));
+        e_mov(i e_addi(i 1));
+        br_to(ctl);
+        endc();
+        endc();
+    }
+    else if k =? 'vec' {
+        loop i in [0..vec_comps(t)) {
+            if types.ptr[t].sign {hash_mix(h e_load(VI a 4 * i 4));}
+            else {hash_mix(h hash_float(e_load(VS a 4 * i 4 | M_FLOAT) VS));}
+        }
+    }
+    else {hash_member(h t a);}
+    if snapshot {drop_at(a t);}
+    hk_key=0
+    e_ret(h);
+}
+hash_mix=(h:LHWord x:LHWord):>void=>$unsafe {
+    if hk_key not=? 0 {
+        # (__hk_mix(key, h xor x): the folded 128-bit product of h ^ x ^ key and key ^ C)
+        let a=e_bin('xor' VI e_bin('xor' VI h x) hk_key)
+        let b=e_bin('xor' VI hk_key e_iconst(LHWord(0xE7037ED1A0B428DB)))
+        if mulh_ok {e_mov(h e_bin('xor' VI e_bin('mul' VI a b) e_bin('mulhu' VI a b)));}
+        else {e_mov(h e_call2(rt("__hk_mix") hk_key e_bin('xor' VI h x) VI));}
+        return
+    }
+    let m=e_bin('mul' VI e_bin('xor' VI h x) e_iconst(0x100000001b3))
+    e_mov(h e_bin('xor' VI m e_bin('shru' VI m e_iconst(29))));
+}
+hash_float=(v:LHWord ty:LHWord):>LHWord=>$unsafe {
+    let d=vreg(VI)
+    emit('f2bits' ty d e_bin('fadd' ty v e_fconst(0.0 ty)) 0 0 0);
+    return d
+}
+hash_member=(h:LHWord t0:LHWord a:LHWord):>void=>$unsafe {
+    let t=quantity_base(t0)
+    let k=types.ptr[t].kind
+    let c=vc(t)
+    let x:LHWord=0
+    let hp:LHWord=LHWord(int64(hk_key not=? 0))
+    if k =? 'str_' {x=e_call1(rt(if hp not=? 0 {"__str_khash"} else {"__str_hash"}) e_load(VI a 0 ptr_size) VI)}
+    else if k =? 'box' {
+        let et=prune(LHWord(types.ptr[t].elem))
+        let va=box_val(e_load(VI a 0 ptr_size) et)
+        if types.ptr[et].kind =? 'opt' {
+            # (as helper_hash does for an optional, but one call deep for each node of a list)
+            let inner:LHWord=LHWord(types.ptr[et].elem)
+            let has=opt_has(va inner)
+            hash_mix(h has);
+            iff(has);
+            hash_mix(h e_call1(lf_helper(HK.hash prune(inner) hp) va VI));
+            endc();
+            return
+        }
+        x=e_call1(lf_helper(HK.hash et hp) va VI)
+    }
+    else if math_optional(t) {x=e_call1(lf_helper(HK.hash t hp) a VI)}
+    else if t =? T_MATH_INT {x=e_call1(rt(if hp not=? 0 {"__mi_khash"} else {"__mi_hash"}) load_val(t a 0) VI)}
+    else if c =? VC_INT and k not=? 'array' {x=load_val(t a 0)}
+    else if c =? VC_FLT {x=hash_float(load_val(t a 0) vt_of(t))}
+    else if k =? 'fn_' or k =? 'polyfn' or k =? 'callable' {x=e_load(VI a 0 ptr_size)}
+    else if (c =? VC_AGG or k =? 'array') and helper_hash_differs(t) {x=e_call1(lf_helper(HK.hash t hp) a VI)}
+    else {return}
+    hash_mix(h x);
+}
+helper_hash_differs=(t:LHWord):>bool=>$unsafe {
+    if t =? T_MATH_INT {return true}
+    let k=types.ptr[t].kind
+    return k =? 'struct_' or k =? 'tuple' or k =? 'fixed' or k =? 'opt' or k =? 'enum_' or k =? 'array' or k =? 'vec'
+}
+helper_thunk=(f:LHWord):>void=>$unsafe {
+    # (sret?, env, args...) -> f(sret?, args...)
+    let ret:LHWord=LHWord(fns.ptr[f].ret)
+    let sret=vc(ret) =? VC_AGG
+    let n=fns.ptr[f].ptypes.length
+    let argv:array<int64>=[]
+    if sret {argv.push(vreg(VI));}
+    vreg(VI);
+    let mm=inst_mutmask(f)
+    loop i in [0..n) {
+        let t=fns.ptr[f].ptypes.ptr[i]
+        if mm & (1 << i) not=? 0 or vc(t) =? VC_AGG {argv.push(vreg(VI));}
+        else {argv.push(vreg(vt_of(t)));}
+    }
+    ir.nparams = ir.vtypes.length;
+    ir.ret = ret_vt(ret);
+    let r=e_call(lf_of_inst(f) argv ret_vt(ret))
+    if sret {e_ret(argv.ptr[0]);}
+    else {e_ret(r);}
+}
+helper_partial=(th:LHWord):>void=>$unsafe {
+    let e:LHWord=LHWord(fns.ptr[th].partial)
+    let target:LHWord=LHWord(nodes.ptr[e].sym)
+    let offs=partial_layout(e)
+    let ret:LHWord=LHWord(fns.ptr[th].ret)
+    let sret=vc(ret) =? VC_AGG
+    let sv:LHWord=-1
+    if sret {sv=vreg(VI)}
+    let env=vreg(VI)
+    let hole_vs:array<int64>=[]
+    let hmm:LHWord=LHWord(types.ptr[prune(ntype(e))].mutmask)
+    loop i in [0..fns.ptr[th].ptypes.length) and t in fns.ptr[th].ptypes {
+        if hmm & (1 << i) not=? 0 or vc(t) =? VC_AGG {hole_vs.push(vreg(VI));}
+        else {hole_vs.push(vreg(vt_of(t)));}
+    }
+    ir.nparams = ir.vtypes.length;
+    ir.ret = ret_vt(ret);
+    let argv:array<int64>=[]
+    if sret {argv.push(sv);}
+    if nodes.ptr[e].aux =? 1 {argv.push(e_load(VI env 24 + ptr_size ptr_size));}
+    let hk:LHWord=0
+    loop i in [0..nkids(e)) {
+        let a=kid(e i)
+        if nodes.ptr[a].kind =? 'hole' {
+            argv.push(hole_vs.ptr[hk]);
+            hk += 1;
+        }
+        else {
+            let t=ntype(a)
+            if vc(t) =? VC_AGG {argv.push(e_addi(env offs.ptr[i]));}
+            else {argv.push(load_val(t env offs.ptr[i]));}
+        }
+    }
+    let r:LHWord=0
+    if target not=? 0 {r=e_call(lf_of_inst(target) argv ret_vt(ret))}
+    else {
+        let fp=e_load(VI env 24 ptr_size)
+        r=e_calli(fp argv ret_vt(ret) false)
+    }
+    if sret {e_ret(sv);}
+    else {e_ret(r);}
+}
+helper_envdrop=(f:LHWord heap:bool=true):>void=>$unsafe {
+    let ps=helper_params(1)
+    let env=ps.ptr[0]
+    if fns.ptr[f].kind =? FK_PARTIAL {
+        let e:LHWord=LHWord(fns.ptr[f].partial)
+        let offs=partial_layout(e)
+        if nodes.ptr[e].aux =? 1 {drop_at(e_addi(env 24) ntype(LHWord(nodes.ptr[e].a)));}
+        loop i in [0..nkids(e)) {
+            if offs.ptr[i] <? 0 {continue}
+            drop_at(e_addi(env offs.ptr[i]) ntype(kid(e i)));
+        }
+    }
+    else {
+        env_layout(f);
+        let resource=ownership_callable_cap(LHWord(fns.ptr[f].fntype)) not=? 0
+        loop i in [0..fns.ptr[f].caps.length) {
+            let index=fns.ptr[f].caps.length - 1 - i
+            let inn:LHWord=LHWord(fns.ptr[f].caps.ptr[index].inner)
+            let t=store_type(inn)
+            if is_managed(t) {
+                if resource {iff(e_bin('gtu' VI e_load(VI env 24 8) e_iconst(index)));}
+                let movable=spawn_owned_capture(f inn)
+                if movable {iff(e_load(VI env LHWord(locals.ptr[inn].env_off) - 8 8));}
+                drop_embedded(e_addi(env LHWord(locals.ptr[inn].env_off)) t);
+                if movable {endc();}
+                if resource {endc();}
+            }
+        }
+    }
+    if heap {e_call1(rt("__free") env -1);}
+    e_ret(-1);
+}
+helper_envcopy=(f:LHWord):>void=>$unsafe {
+    let ps=helper_params(1)
+    ir.ret = VI;
+    let src=ps.ptr[0]
+    let d:LHWord=LHWord(fns.ptr[f].decl)
+    if fns.ptr[f].kind =? FK_PARTIAL {d=LHWord(fns.ptr[f].partial)}
+    if d =? 0 or not files.ptr[pos_file(nodes.ptr[d].pos)].is_dewy or fns.ptr[f].kind not=? FK_PARTIAL and spawn_body(f) {
+        retain(src T_STR);
+        e_ret(src);
+        return
+    }
+    if fns.ptr[f].kind not=? FK_PARTIAL {
+        env_layout(f);
+        let mutable=false
+        loop cap in fns.ptr[f].caps {
+            let inn:LHWord=LHWord(cap.inner)
+            let flags:LHWord=LHWord(locals.ptr[inn].flags)
+            if flags & LF_VALUECAP not=? 0 and (flags & (LF_ASSIGNED | LF_EXPOSED) not=? 0 or is_shared(inn) or type_has_fn(LHWord(locals.ptr[inn].type)) or ownership_type(LHWord(locals.ptr[inn].type))) {mutable=true}
+        }
+        if not mutable {
+            retain(src T_STR);
+            e_ret(src);
+            return
+        }
+    }
+    if ownership_callable_cap(LHWord(fns.ptr[f].fntype)) not=? 0 {
+        helper_owner_envcopy(f src);
+        return
+    }
+    let env=e_call1(rt("__alloc") e_iconst(LHWord(fns.ptr[f].env_size)) VI)
+    e_copy(env src LHWord(fns.ptr[f].env_size));
+    hdr_store(env 0 e_iconst(1));
+    if fns.ptr[f].kind =? FK_PARTIAL {
+        let offs=partial_layout(d)
+        if nodes.ptr[d].aux =? 1 {copy_at(e_addi(env 24) ntype(LHWord(nodes.ptr[d].a)));}
+        loop i in [0..nkids(d)) {
+            if offs.ptr[i] >=? 0 {copy_at(e_addi(env offs.ptr[i]) ntype(kid(d i)));}
+        }
+    }
+    else {
+        loop cap in fns.ptr[f].caps {
+            let inn:LHWord=LHWord(cap.inner)
+            let t=store_type(inn)
+            let addr=e_addi(env LHWord(locals.ptr[inn].env_off))
+            if is_shared(inn) {
+                let cell=e_load(VI addr 0 ptr_size)
+                retain(cell t);
+                if LHWord(locals.ptr[inn].flags) & LF_VALUECAP not=? 0 {
+                    e_store(addr 0 e_call1(lf_helper(HK.arruniq t 0) cell VI) ptr_size);
+                }
+            }
+            else {copy_at(addr t);}
+        }
+    }
+    e_ret(env);
+}
+lower_helper=(lf:LHWord):>void=>$unsafe {
+    let h=lfuncs.ptr[lf]
+    begin_fn(h.name lf);
+    let t=quantity_base(h.htype)
+    # Preserve the imported HK ordinals in dispatch patterns.
+    match int64(h.hkind) {
+        <0> => {helper_drop(t false);}
+        <1> => {helper_drop(t true);}
+        <2> => {helper_move(t);}
+        <3> => {helper_arrrel(t);}
+        <4> => {helper_arruniq(t);}
+        <5> => {helper_owner_arrcopy(t);}
+        <6> => {helper_eq(t);}
+        <7> => {helper_hash(t h.inst not=? 0);}
+        <8> => {helper_thunk(h.inst);}
+        <10> => {helper_partial(h.inst);}
+        <9> => {helper_envdrop(h.inst);}
+        <12> => {helper_envdrop(h.inst false);}
+        <11> => {helper_envcopy(h.inst);}
+        <13> => {helper_boxrel(t);}
+        <14> => {helper_boxdrop(t);}
+        <15> => {helper_boxuniq(t);}
+        <16> => {math_main(h.inst);}
+        <17> => {helper_owner_boxcopy(t);}
+        <18 | 20 | 22> => {ice("borrowed region helper must lower as an instance");}
+        <19> => {parallel_job_helper(h.inst h.htype & 1 not=? 0 h.htype & 2 not=? 0);}
+        <21> => {helper_promote(t);}
+        _ => {}
+    }
+}
+drop_embedded=(addr:LHWord t:LHWord):>void=>$unsafe {
+    if not is_managed(t) {return}
+    if vc(t) =? VC_INT {
+        release(e_load(VI addr 0 ptr_size) t);
+        return
+    }
+    let b=quantity_base(t)
+    env_guard(addr b);
+    e_call1(lf_helper(HK.drop t 0) addr -1);
+    if env_guarded(b) {endc();}
+}
+helper_move=(t:LHWord):>void=>$unsafe {
+    let ps=helper_params(2)
+    let dest=ps.ptr[0]
+    let source=ps.ptr[1]
+    if tkind(t) =? 'array' or tkind(t) =? 'box' or is_fn_type(t) {
+        e_copy(dest source tsize(t));
+    }
+    else if tkind(t) =? 'opt' {
+        let inner=telem(t)
+        e_zero(dest tsize(t));
+        iff(opt_has(source inner));
+        e_call2(lf_helper(HK.move inner 0) dest source -1);
+        e_store(dest tsize(inner) e_iconst(1) 1);
+        endc();
+    }
+    else if tkind(t) =? 'fixed' {
+        let et=telem(t)
+        let i=fixed_loop_begin(t)
+        let dst=fixed_elem_addr(dest i et)
+        let src=fixed_elem_addr(source i et)
+        if ownership_type(et) {e_call2(lf_helper(HK.move et 0) dst src -1);}
+        else {e_copy(dst src tsize(et));}
+        fixed_loop_end(i);
+    }
+    else {
+    let hook=ownership_moves.get(t)
+    if hook not=? none {
+        owner_hook_into(hook source t dest);
+        # A custom move consumes the outer owner. Its borrowed receiver's
+        # fields still own their values unless transferred separately.
+        let parent=prune(LHWord(fns.ptr[hook].ret))
+        let fs=field_list(parent)
+        loop i in [0..fs.length) {
+            let field=fs.ptr[fs.length - 1 - i]
+            drop_embedded(e_addi(source field[1]) field[0]);
+        }
+    }
+    else {
+        loop field in field_list(t) {
+            let dst=e_addi(dest field[1])
+            let src=e_addi(source field[1])
+            if ownership_type(field[0]) {e_call2(lf_helper(HK.move field[0] 0) dst src -1);}
+            else {e_copy(dst src tsize(field[0]));}
+        }
+    }
+    }
+    e_ret(-1);
+}
+helper_owner_arrcopy=(t:LHWord):>void=>$unsafe {
+    let ps=helper_params(1)
+    ir.ret = VI;
+    let et=telem(t)
+    let r=vreg(VI)
+    e_mov(r e_iconst(0));
+    iff(e_bin('ne' VI ps.ptr[0] e_iconst(0)));
+    e_mov(r e_call2(rt("__arr_copy") ps.ptr[0] e_iconst(owner_stride(et)) VI));
+    retain_elems(r et);
+    endc();
+    e_ret(r);
+}
+helper_owner_record_copy=(source:LHWord t:LHWord):>void=>$unsafe {
+    owner_begin();
+    let dest=e_slot(new_temp(t))
+    let held:array<int64>=[]
+    loop field in field_list(t) {
+        let child=own(V(load_val(field[0] source field[1]) false) field[0])
+        store_val(field[0] dest field[1] child.v);
+        if is_managed(field[0]) {
+            if not ownership_type(field[0]) {child=owner_value(child field[0])}
+            held.push(child.slot);
+        }
+    }
+    e_copy(source dest tsize(t));
+    loop slot in held {owner_forget_slot(slot);}
+    owner_end();
+    e_ret(-1);
+}
+helper_owner_boxcopy=(t:LHWord):>void=>$unsafe {
+    owner_begin();
+    let ps=helper_params(1)
+    ir.ret = VI;
+    let et=telem(t)
+    let result=vreg(VI)
+    e_mov(result e_iconst(0));
+    iff(e_bin('ne' VI ps.ptr[0] e_iconst(0)));
+    let child=own(V(load_val(et e_addi(ps.ptr[0] BOX_HDR) 0) false) et)
+    e_mov(result e_call1(rt("__box_new") e_iconst(tsize(et)) VI));
+    store_val(et e_addi(result BOX_HDR) 0 child.v);
+    owner_forget_slot(child.slot);
+    endc();
+    owner_end();
+    e_ret(result);
+}
+helper_owner_envcopy=(f:LHWord src:LHWord):>void=>$unsafe {
+    owner_begin();
+    let t:LHWord=LHWord(fns.ptr[f].fntype)
+    let env=e_call1(rt("__alloc") e_iconst(LHWord(fns.ptr[f].env_size)) VI)
+    e_copy(env src 24);
+    hdr_store(env 0 e_iconst(1));
+    hdr_store(env 24 e_iconst(0));
+    let slot=new_temp(t)
+    e_zero(e_slot(slot) tsize(t));
+    e_store(e_slot(slot) ptr_size env ptr_size);
+    owner_register(slot t);
+    loop i in [0..fns.ptr[f].caps.length) {
+        let inn:LHWord=LHWord(fns.ptr[f].caps.ptr[i].inner)
+        let ct=store_type(inn)
+        let off:LHWord=LHWord(locals.ptr[inn].env_off)
+        let value=own(Val[load_val(ct src off) false -1] ct)
+        store_val(ct env off value.v);
+        if ownership_type(ct) {owner_forget_slot(value.slot);}
+        hdr_store(env 24 e_iconst(i + 1));
+    }
+    owner_forget_slot(slot);
+    owner_end();
+    e_ret(env);
+}

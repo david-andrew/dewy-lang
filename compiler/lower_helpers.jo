@@ -1,0 +1,858 @@
+# Frozen recursive lowering from lower.jo.
+use 'checker_state.dewy'
+use 'lower.jo'
+use 'check.jo'
+use 'ir.jo'
+use 'types.jo'
+use 'checker_tokens.dewy'
+use 'util.jo'
+use 'arena.jo'
+use 'expr.jo'
+use 'ast.jo'
+use 'math_lower.jo'
+use 'ownership.jo'
+use 'ownership_types.dewy'
+use 'parallel_lower.jo'
+use 'units.jo'
+
+helper_params = (n: int) -> int[]:
+    ps: int[]
+    loop i in [0..n): ps.push(vreg(VI))
+    ir.nparams = n
+    ps
+
+field_list = (t0: int) -> (int, int)[]:
+    # (type, offset) of each member of a struct/tuple
+    t = quantity_base(t0)
+    layout(t)
+    out: (int, int)[]
+    if types[t].kind == .struct_:
+        si = int(types[t].st)
+        loop i in [0..int(structs[si].nfields)):
+            f = int(structs[si].fields) + i
+            out.push((field_store_type(f), int(fields[f].offset)))
+    else if types[t].kind == .tuple:
+        loop i in [0..int(types[t].nargs)): out.push((targ(t, i), tuple_off(t, i)))
+    out
+
+helper_drop = (t: int, copy: bool):
+    ps = helper_params(1)
+    a = ps[0]
+    k = types[t].kind
+    if ownership_type(t):
+        if copy:
+            if not ownership_copyable(t): ice("copy helper requested for move-only owner")
+            if let hook = ownership_copies.get(t):
+                result = e_slot(new_temp(t))
+                owner_hook_into(hook, a, t, result)
+                e_copy(a, result, tsize(t))
+                return e_ret(-1)
+            if k == .struct_ and not ownership_inline(t):
+                return helper_owner_record_copy(a, t)
+        else if k == .struct_:
+            hook = int(structs[int(types[t].st)].drop_fn)
+            if hook != 0: e_call1(lf_of_inst(hook), a, -1)
+    if k == .array or k == .box:
+        if copy: copy_at(a, t)
+        else: release(e_load(VI, a, 0, ptr_size), t)
+    else if k == .fn_ or k == .polyfn or k == .callable:
+        env = e_load(VI, a, ptr_size, ptr_size)
+        if copy:
+            iff(e_bin(.ne, VI, env, e_iconst(0)))
+            cf = e_load(VI, env, 16, ptr_size)
+            e_store(a, ptr_size, e_calli(cf, [env], VI, false), ptr_size)
+            endc()
+        else:
+            iff(e_call1(rt("__rc_dec_test"), env, VI))
+            df = e_load(VI, env, 8, ptr_size)
+            e_calli(df, [env], -1, false)
+            endc()
+    else if k == .opt:
+        inner = int(types[t].elem)
+        iff(e_bin(.ne, VI, opt_has(a, inner), e_iconst(0)))
+        if copy: copy_at(a, inner)
+        else: drop_embedded(a, inner)
+        endc()
+    else if k == .enum_:
+        si = int(types[t].st)
+        layout(t)
+        tag = e_load(VI, a, 0, 4)
+        loop v in [0..int(structs[si].nvariants)):
+            vi = int(structs[si].variants) + v
+            any = false
+            loop i in [0..int(variants[vi].nfields)):
+                if is_managed(field_store_type(int(variants[vi].fields) + i)): any = true
+            if not any: continue
+            iff(e_bin(.eq, VI, tag, e_iconst(v)))
+            loop i in [0..int(variants[vi].nfields)):
+                f = int(variants[vi].fields) + i
+                ft = field_store_type(f)
+                if copy: copy_at(e_addi(a, int(fields[f].offset)), ft)
+                else: drop_at(e_addi(a, int(fields[f].offset)), ft)
+            endc()
+    else if k == .fixed:
+        et = int(types[t].elem)
+        if is_managed(et):
+            i = fixed_loop_begin(t)
+            index = if copy: i else: e_bin(.sub, VI, e_iconst(fixed_len(t) - 1), i)
+            ea = fixed_elem_addr(a, index, et)
+            if copy: copy_at(ea, et)
+            else: drop_embedded(ea, et)
+            fixed_loop_end(i)
+    else:
+        fs = field_list(t)
+        loop i in [0..fs.len()):
+            fo = fs[if copy: i else: fs.len() - 1 - i]
+            if not is_managed(fo.0): continue
+            if copy: copy_at(e_addi(a, fo.1), fo.0)
+            else: drop_embedded(e_addi(a, fo.1), fo.0)
+    e_ret(-1)
+
+fixed_loop_begin = (t: int) -> int:
+    i = vreg(VI)
+    e_mov(i, e_iconst(0))
+    blk()
+    lop()
+    brif_to(e_bin(.ges, VI, i, e_iconst(fixed_len(t))), ctl - 1)
+    i
+
+fixed_loop_end = (i: int):
+    e_mov(i, e_addi(i, 1))
+    br_to(ctl)
+    endc()
+    endc()
+
+fixed_elem_addr = (a: int, i: int, et: int) -> int: e_bin(.add, VI, a, e_bin(.mul, VI, i, e_iconst(tsize(et))))
+
+helper_arrrel = (t: int):
+    ps = helper_params(1)
+    p = ps[0]
+    et = int(types[t].elem)
+    iff(e_call1(rt("__rc_dec_test"), p, VI))
+    n = hdr_load(p, 8)
+    # Mathematical integers use a word tag: an all-inline array has no
+    # element owners. Scan tags with an associative OR before the cold drops;
+    # the ordinary vectorizer can process this census without per-slot calls.
+    if quantity_base(et) == T_MATH_INT:
+        tags = vreg(VI); e_mov(tags, e_iconst(0))
+        j = vreg(VI); e_mov(j, e_iconst(0))
+        blk()
+        brif_to(e_bin(.ges, VI, j, n), ctl)
+        lop()
+        word = e_load(VI, e_bin(.add, VI, p, e_bin(.shl, VI, j, e_iconst(3))), 24, 8)
+        e_mov(tags, e_bin(.or_, VI, tags, word))
+        e_mov(j, e_addi(j, 1))
+        brif_to(e_bin(.lts, VI, j, n), ctl)
+        endc(); endc()
+        iff(math_tag(tags))
+    i = vreg(VI)
+    e_mov(i, e_iconst(0))
+    blk()
+    lop()
+    brif_to(e_bin(.ges, VI, i, n), ctl - 1)
+    base = e_addi(p, 24)
+    index = if ownership_type(et): e_bin(.sub, VI, e_addi(n, -1), i) else: i
+    owner_element_drop(e_bin(.add, VI, base, e_bin(.mul, VI, index, e_iconst(owner_stride(et)))), et)
+    e_mov(i, e_addi(i, 1))
+    br_to(ctl)
+    endc()
+    endc()
+    if quantity_base(et) == T_MATH_INT: endc()
+    e_call1(rt("__free_obj"), p, -1)
+    endc()
+    e_ret(-1)
+
+helper_arruniq = (t: int):
+    # takes the array pointer, returns a uniquely owned array pointer
+    ps = helper_params(1)
+    ir.ret = VI
+    p = ps[0]
+    et = int(types[t].elem)
+    r = vreg(VI)
+    e_mov(r, p)
+    iff(e_bin(.ne, VI, p, e_iconst(0)))
+    iff(e_bin(.ne, VI, hdr_load(p, 0), e_iconst(1)))
+    e_mov(r, e_call2(rt("__arr_clone"), p, e_iconst(owner_stride(et)), VI))
+    if is_managed(et) and ownership_copyable(et): retain_elems(r, et)
+    endc()
+    endc()
+    e_ret(r)
+
+helper_value_members = (t: int, hashing: bool = false) -> int[]:
+    if value_equal_fns.len() == 0 and value_hash_fns.len() == 0: return []
+    key = t * 2 + int(hashing)
+    if let cached = value_member_cache.get(key): return cached
+    result: int[]
+    pending = [t]
+    seen: {int: bool} = {}
+    loop pending.len() > 0:
+        current = prune(pending.pop())
+        if seen.has(current): continue
+        seen[current] = true
+        f = value_equal_fns.get(current) ?? 0
+        if hashing: f = value_hash_fns.get(current) ?? 0
+        if f != 0:
+            result.push(f)
+            continue
+        k = types[current].kind
+        if k == .array or k == .fixed or k == .opt or k == .box: pending.push(int(types[current].elem))
+        else if k == .struct_ or k == .tuple:
+            loop field in field_list(current): pending.push(field.0)
+        else if k == .enum_:
+            layout(current)
+            si = int(types[current].st)
+            loop i in [0..int(structs[si].nvariants)):
+                vi = int(structs[si].variants) + i
+                loop j in [0..int(variants[vi].nfields)):
+                    pending.push(int(fields[int(variants[vi].fields) + j].type))
+    value_member_cache[key] = result
+    result
+
+helper_callback_snapshot = (t: int, hashing: bool = false) -> bool:
+    loop f in helper_value_members(t, hashing):
+        writes = fn_writes(f)
+        if writes.all or writes.globals.len() > 0: return true
+    false
+
+value_helper_calls = (n: int) -> int[]:
+    if value_equal_fns.len() == 0 and value_hash_fns.len() == 0: return []
+    t = 0
+    hashing = false
+    if nodes[n].kind == .intrinsic and nodes[n].aux == i32(int(IN.hash)) and nkids(n) > 0:
+        t = ntype(kid(n, 0))
+        hashing = true
+    else if nodes[n].kind == .binary and nodes[n].aux == 1:
+        op = nodes[n].op as Tok
+        if op == .eq or op == .ne: t = ntype(int(nodes[n].a))
+    if t == 0: return []
+    helper_value_members(t, hashing)
+
+helper_value_snapshot = (t: int, source: int) -> int:
+    result = e_slot(new_temp(t))
+    e_copy(result, source, tsize(t))
+    copy_at(result, t)
+    result
+
+helper_boxrel = (t: int):
+    ps = helper_params(1)
+    p = ps[0]
+    drop = lf_helper(.boxdrop, t, 0)
+    iff(e_call1(rt("__rc_dec_test"), p, VI))
+    iff(e_bin(.eq, VI, e_call2(rt("__box_defer"), p, e_faddr(drop), VI), e_iconst(0)))
+    e_call1(drop, p, -1)
+    blk()
+    lop()
+    q = e_call0(rt("__box_next"), VI)
+    brif_to(e_bin(.eq, VI, q, e_iconst(0)), ctl - 1)
+    e_calli(e_load(VI, q, ptr_size, ptr_size), [e_load(VI, q, 0, ptr_size)], -1, false)
+    br_to(ctl)
+    endc()
+    endc()
+    endc()
+    endc()
+    e_ret(-1)
+
+helper_boxdrop = (t: int):
+    ps = helper_params(1)
+    p = ps[0]
+    drop_embedded(e_addi(p, BOX_HDR), int(types[t].elem))
+    e_call2(rt("__box_free"), p, e_iconst(tsize(int(types[t].elem))), -1)
+    e_ret(-1)
+
+helper_boxuniq = (t: int):
+    ps = helper_params(1)
+    ir.ret = VI
+    p = ps[0]
+    et = int(types[t].elem)
+    # Resource snapshots copy eagerly, so mutable access never detaches a
+    # shared resource box or invents a copy of a move-only payload.
+    if ownership_type(t): return e_ret(p)
+    r = vreg(VI)
+    e_mov(r, p)
+    iff(e_bin(.ne, VI, p, e_iconst(0)))
+    iff(e_bin(.ne, VI, hdr_load(p, 0), e_iconst(1)))
+    e_mov(r, e_call2(rt("__box_clone"), p, e_iconst(tsize(et)), VI))
+    copy_at(e_addi(r, BOX_HDR), et)
+    endc()
+    endc()
+    e_ret(r)
+
+helper_eq = (t: int):
+    ps = helper_params(2)
+    if t == T_MATH_INT:
+        ir.ret = VI
+        e_ret(math_compare(.eq, e_load(VI, ps[0], 0, 8), e_load(VI, ps[1], 0, 8)))
+        return
+    ir.ret = VI
+    a = ps[0]
+    b = ps[1]
+    snapshot = helper_callback_snapshot(t)
+    if snapshot:
+        a = helper_value_snapshot(t, a)
+        b = helper_value_snapshot(t, b)
+    f = value_equal_fns.get(t) ?? 0
+    if f != 0:
+        result = e_call2(lf_of_inst(f), a, b, VI)
+        if snapshot:
+            drop_at(a, t)
+            drop_at(b, t)
+        e_ret(result)
+        return
+    r = vreg(VI)
+    e_mov(r, e_iconst(0))
+    blk()
+    fail = ctl
+    k = types[t].kind
+    if k == .struct_ or k == .tuple:
+        loop fo in field_list(t): eq_member(fo.0, e_addi(a, fo.1), e_addi(b, fo.1), fail)
+    else if k == .fixed:
+        et = int(types[t].elem)
+        i = fixed_loop_begin(t)
+        eq_member(et, fixed_elem_addr(a, i, et), fixed_elem_addr(b, i, et), fail)
+        fixed_loop_end(i)
+    else if k == .opt:
+        inner = int(types[t].elem)
+        ha = opt_has(a, inner)
+        hb = opt_has(b, inner)
+        brif_to(e_bin(.ne, VI, ha, hb), fail)
+        iff(ha)
+        if math_optional(t):
+            brif_to(e_bin(.eq, VI, math_compare(.eq, opt_value(a, inner), opt_value(b, inner)), e_iconst(0)), fail)
+        else: eq_member(inner, a, b, fail)
+        endc()
+    else if k == .enum_:
+        si = int(types[t].st)
+        layout(t)
+        ta = e_load(VI, a, 0, 4)
+        brif_to(e_bin(.ne, VI, ta, e_load(VI, b, 0, 4)), fail)
+        loop v in [0..int(structs[si].nvariants)):
+            vi = int(structs[si].variants) + v
+            if variants[vi].nfields == 0: continue
+            iff(e_bin(.eq, VI, ta, e_iconst(v)))
+            loop i in [0..int(variants[vi].nfields)):
+                f = int(variants[vi].fields) + i
+                eq_member(field_store_type(f), e_addi(a, int(fields[f].offset)), e_addi(b, int(fields[f].offset)), fail)
+            endc()
+    else if k == .array:
+        et = int(types[t].elem)
+        pa = e_load(VI, a, 0, ptr_size)
+        pb = e_load(VI, b, 0, ptr_size)
+        na = arr_len(pa)
+        brif_to(e_bin(.ne, VI, na, arr_len(pb)), fail)
+        ek = types[prune(et)].kind
+        bits_equal = (ek == .int_ and et != T_MATH_INT) or ek == .bool_
+        if bits_equal:
+            # A single scalar needs neither a word loop nor a tail loop.
+            iff(e_bin(.eq, VI, na, e_iconst(1)))
+            eq_member(et, e_addi(pa, 24), e_addi(pb, 24), fail)
+            e_mov(r, e_iconst(1))
+            br_to(fail)
+            endc()
+            # Only reflexive scalar equality: floats may contain NaN, and a
+            # record protocol may have effects even when storage is shared.
+            iff(e_bin(.eq, VI, pa, pb))
+            e_mov(r, e_iconst(1))
+            br_to(fail)
+            endc()
+        if bits_equal and owner_stride(et) < 8:
+            # Emit the word loop here so the equality helper stays a leaf and
+            # release builds can inline it. Finish with whole element loads.
+            bytes = e_bin(.mul, VI, na, e_iconst(owner_stride(et)))
+            i = vreg(VI)
+            e_mov(i, e_iconst(0))
+            blk()
+            lop()
+            brif_to(e_bin(.gts, VI, e_addi(i, 8), bytes), ctl - 1)
+            aa = e_bin(.add, VI, e_addi(pa, 24), i)
+            bb = e_bin(.add, VI, e_addi(pb, 24), i)
+            brif_to(e_bin(.ne, VI, e_load(VI, aa, 0, 8), e_load(VI, bb, 0, 8)), fail)
+            e_mov(i, e_addi(i, 8))
+            br_to(ctl)
+            endc()
+            endc()
+            blk()
+            lop()
+            brif_to(e_bin(.ges, VI, i, bytes), ctl - 1)
+            eq_member(et, e_bin(.add, VI, e_addi(pa, 24), i), e_bin(.add, VI, e_addi(pb, 24), i), fail)
+            e_mov(i, e_addi(i, owner_stride(et)))
+            br_to(ctl)
+            endc()
+            endc()
+        else:
+            i = vreg(VI)
+            e_mov(i, e_iconst(0))
+            blk()
+            lop()
+            brif_to(e_bin(.ges, VI, i, na), ctl - 1)
+            off = e_bin(.mul, VI, i, e_iconst(owner_stride(et)))
+            eq_member(et, e_bin(.add, VI, e_addi(pa, 24), off), e_bin(.add, VI, e_addi(pb, 24), off), fail)
+            e_mov(i, e_addi(i, 1))
+            br_to(ctl)
+            endc()
+            endc()
+    else if k == .vec:
+        loop i in [0..vec_comps(t)):
+            if types[t].sign:
+                brif_to(e_bin(.ne, VI, e_load(VI, a, 4 * i, 4), e_load(VI, b, 4 * i, 4)), fail)
+            else:
+                brif_to(e_bin(.fne, VS, e_load(VS, a, 4 * i, 4 | M_FLOAT), e_load(VS, b, 4 * i, 4 | M_FLOAT)), fail)
+    else: eq_member(t, a, b, fail)
+    e_mov(r, e_iconst(1))
+    endc()
+    if snapshot:
+        drop_at(a, t)
+        drop_at(b, t)
+    e_ret(r)
+
+eq_member = (t0: int, a: int, b: int, fail: int):
+    t = quantity_base(t0)
+    k = types[t].kind
+    if k == .box:
+        # (the same box, or both empty: equal without looking inside)
+        pa = e_load(VI, a, 0, ptr_size)
+        pb = e_load(VI, b, 0, ptr_size)
+        blk()
+        same = ctl
+        brif_to(e_bin(.eq, VI, pa, pb), same)
+        et = prune(int(types[t].elem))
+        va = box_val(pa, et)
+        vb = box_val(pb, et)
+        if types[et].kind == .opt:
+            # (an optional's flags here, its value by the value's helper: one call deep for each
+            # node of a list, not two)
+            inner = int(types[et].elem)
+            ha = opt_has(va, inner)
+            brif_to(e_bin(.ne, VI, ha, opt_has(vb, inner)), fail)
+            brif_to(e_bin(.eq, VI, ha, e_iconst(0)), same)
+            et = prune(inner)
+        r = e_call2(lf_helper(.eq, et, 0), va, vb, VI)
+        brif_to(e_bin(.eq, VI, r, e_iconst(0)), fail)
+        endc()
+        return
+    if k == .str_:
+        r = e_call2(rt("__str_eq"), e_load(VI, a, 0, ptr_size), e_load(VI, b, 0, ptr_size), VI)
+        brif_to(e_bin(.eq, VI, r, e_iconst(0)), fail)
+        return
+    c = vc(t)
+    if math_optional(t):
+        brif_to(e_bin(.eq, VI, e_call2(lf_helper(.eq, t, 0), a, b, VI), e_iconst(0)), fail)
+        return
+    if t == T_MATH_INT:
+        brif_to(e_bin(.eq, VI, math_compare(.eq, load_val(t, a, 0), load_val(t, b, 0)), e_iconst(0)), fail)
+        return
+    if c == VC_INT and k != .array:
+        brif_to(e_bin(.ne, VI, load_val(t, a, 0), load_val(t, b, 0)), fail)
+        return
+    if c == VC_FLT:
+        brif_to(e_bin(.fne, vt_of(t), load_val(t, a, 0), load_val(t, b, 0)), fail)
+        return
+    if k == .fn_ or k == .polyfn or k == .callable:
+        brif_to(e_bin(.ne, VI, e_load(VI, a, 0, ptr_size), e_load(VI, b, 0, ptr_size)), fail)
+        return
+    r = e_call2(lf_helper(.eq, t, 0), a, b, VI)
+    brif_to(e_bin(.eq, VI, r, e_iconst(0)), fail)
+
+helper_hash = (t: int, keyed: bool = false):
+    ps = helper_params(1)
+    if t == T_MATH_INT:
+        ir.ret = VI
+        hash_name = if keyed: "__mi_khash" else: "__mi_hash"
+        e_ret(e_call1(rt(hash_name), e_load(VI, ps[0], 0, 8), VI))
+        return
+    ir.ret = VI
+    a = ps[0]
+    snapshot = helper_callback_snapshot(t, true)
+    if snapshot: a = helper_value_snapshot(t, a)
+    f = value_hash_fns.get(t) ?? 0
+    if f != 0:
+        result = e_call1(lf_of_inst(f), a, VI)
+        if keyed: result = e_call1(rt("__hk_word"), result, VI)
+        if snapshot: drop_at(a, t)
+        e_ret(result)
+        return
+    h = vreg(VI)
+    hk_key = 0
+    if keyed:
+        # (no check that it is drawn: before a dictionary's first entry is added, __map_add
+        # draws it and hashes that key again; an empty dictionary reads no slots)
+        s = prelude.get(intern("__hash_key")) ?? 0
+        if s == 0 or syms[s].kind != .global: ice("missing runtime global __hash_key")
+        hk_key = e_load(VI, e_gaddr(global_addr_off(int(syms[s].ref))), 0, 8)
+        e_mov(h, e_iconst(0))
+    else: e_mov(h, e_iconst(0xcbf29ce484222325))
+    # (what helper_eq compares, and nothing else: equal values hash alike)
+    k = types[t].kind
+    if k == .struct_ or k == .tuple:
+        loop fo in field_list(t): hash_member(h, fo.0, e_addi(a, fo.1))
+    else if k == .fixed:
+        et = int(types[t].elem)
+        i = fixed_loop_begin(t)
+        hash_member(h, et, fixed_elem_addr(a, i, et))
+        fixed_loop_end(i)
+    else if k == .opt:
+        inner = int(types[t].elem)
+        has = opt_has(a, inner)
+        hash_mix(h, has)
+        iff(has)
+        if math_optional(t):
+            hash_name = if hk_key != 0: "__mi_khash" else: "__mi_hash"
+            hash_mix(h, e_call1(rt(hash_name), opt_value(a, inner), VI))
+        else: hash_member(h, inner, a)
+        endc()
+    else if k == .enum_:
+        si = int(types[t].st)
+        layout(t)
+        tag = e_load(VI, a, 0, 4)
+        hash_mix(h, tag)
+        loop v in [0..int(structs[si].nvariants)):
+            vi = int(structs[si].variants) + v
+            if variants[vi].nfields == 0: continue
+            iff(e_bin(.eq, VI, tag, e_iconst(v)))
+            loop i in [0..int(variants[vi].nfields)):
+                f = int(variants[vi].fields) + i
+                hash_member(h, field_store_type(f), e_addi(a, int(fields[f].offset)))
+            endc()
+    else if k == .array:
+        et = int(types[t].elem)
+        p = e_load(VI, a, 0, ptr_size)
+        n = arr_len(p)
+        hash_mix(h, n)
+        i = vreg(VI)
+        e_mov(i, e_iconst(0))
+        blk()
+        lop()
+        brif_to(e_bin(.ges, VI, i, n), ctl - 1)
+        hash_member(h, et, e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, i, e_iconst(owner_stride(et)))))
+        e_mov(i, e_addi(i, 1))
+        br_to(ctl)
+        endc()
+        endc()
+    else if k == .vec:
+        loop i in [0..vec_comps(t)):
+            if types[t].sign: hash_mix(h, e_load(VI, a, 4 * i, 4))
+            else: hash_mix(h, hash_float(e_load(VS, a, 4 * i, 4 | M_FLOAT), VS))
+    else: hash_member(h, t, a)
+    if snapshot: drop_at(a, t)
+    hk_key = 0
+    e_ret(h)
+
+hash_mix = (h: int, x: int):
+    if hk_key != 0:
+        # (__hk_mix(key, h xor x): the folded 128-bit product of h ^ x ^ key and key ^ C)
+        a = e_bin(.xor, VI, e_bin(.xor, VI, h, x), hk_key)
+        b = e_bin(.xor, VI, hk_key, e_iconst(0xE7037ED1A0B428DB))
+        if mulh_ok: e_mov(h, e_bin(.xor, VI, e_bin(.mul, VI, a, b), e_bin(.mulhu, VI, a, b)))
+        else: e_mov(h, e_call2(rt("__hk_mix"), hk_key, e_bin(.xor, VI, h, x), VI))
+        return
+    m = e_bin(.mul, VI, e_bin(.xor, VI, h, x), e_iconst(0x100000001b3))
+    e_mov(h, e_bin(.xor, VI, m, e_bin(.shru, VI, m, e_iconst(29))))
+
+hash_float = (v: int, ty: int) -> int:
+    d = vreg(VI)
+    emit(.f2bits, ty, d, e_bin(.fadd, ty, v, e_fconst(0.0, ty)), 0, 0, 0)
+    d
+
+hash_member = (h: int, t0: int, a: int):
+    t = quantity_base(t0)
+    k = types[t].kind
+    c = vc(t)
+    x = 0
+    hp = int(hk_key != 0)
+    if k == .str_:
+        hash_name = if hp != 0: "__str_khash" else: "__str_hash"
+        x = e_call1(rt(hash_name), e_load(VI, a, 0, ptr_size), VI)
+    else if k == .box:
+        et = prune(int(types[t].elem))
+        va = box_val(e_load(VI, a, 0, ptr_size), et)
+        if types[et].kind == .opt:
+            # (as helper_hash does for an optional, but one call deep for each node of a list)
+            inner = int(types[et].elem)
+            has = opt_has(va, inner)
+            hash_mix(h, has)
+            iff(has)
+            hash_mix(h, e_call1(lf_helper(.hash, prune(inner), hp), va, VI))
+            endc()
+            return
+        x = e_call1(lf_helper(.hash, et, hp), va, VI)
+    else if math_optional(t): x = e_call1(lf_helper(.hash, t, hp), a, VI)
+    else if t == T_MATH_INT:
+        hash_name = if hp != 0: "__mi_khash" else: "__mi_hash"
+        x = e_call1(rt(hash_name), load_val(t, a, 0), VI)
+    else if c == VC_INT and k != .array: x = load_val(t, a, 0)
+    else if c == VC_FLT: x = hash_float(load_val(t, a, 0), vt_of(t))
+    else if k == .fn_ or k == .polyfn or k == .callable: x = e_load(VI, a, 0, ptr_size)
+    else if (c == VC_AGG or k == .array) and helper_hash_differs(t): x = e_call1(lf_helper(.hash, t, hp), a, VI)
+    else: return
+    hash_mix(h, x)
+
+helper_hash_differs = (t: int) -> bool:
+    if t == T_MATH_INT: return true
+    k = types[t].kind
+    k == .struct_ or k == .tuple or k == .fixed or k == .opt or k == .enum_ or k == .array or k == .vec
+
+helper_thunk = (f: int):
+    # (sret?, env, args...) -> f(sret?, args...)
+    ret = int(fns[f].ret)
+    sret = vc(ret) == VC_AGG
+    n = fns[f].ptypes.len()
+    argv: int[]
+    if sret: argv.push(vreg(VI))
+    vreg(VI) # env (ignored)
+    mm = inst_mutmask(f)
+    loop i in [0..n):
+        t = fns[f].ptypes[i]
+        if mm & (1 << i) != 0 or vc(t) == VC_AGG: argv.push(vreg(VI))
+        else: argv.push(vreg(vt_of(t)))
+    ir.nparams = ir.vtypes.len()
+    ir.ret = ret_vt(ret)
+    r = e_call(lf_of_inst(f), argv, ret_vt(ret))
+    if sret: e_ret(argv[0])
+    else: e_ret(r)
+
+helper_partial = (th: int):
+    e = int(fns[th].partial)
+    target = int(nodes[e].sym)
+    offs = partial_layout(e)
+    ret = int(fns[th].ret)
+    sret = vc(ret) == VC_AGG
+    sv = -1
+    if sret: sv = vreg(VI)
+    env = vreg(VI)
+    hole_vs: int[]
+    hmm = int(types[prune(ntype(e))].mutmask)
+    loop i in 0.. and t in fns[th].ptypes:
+        if hmm & (1 << i) != 0 or vc(t) == VC_AGG: hole_vs.push(vreg(VI))
+        else: hole_vs.push(vreg(vt_of(t)))
+    ir.nparams = ir.vtypes.len()
+    ir.ret = ret_vt(ret)
+    argv: int[]
+    if sret: argv.push(sv)
+    if nodes[e].aux == 1: argv.push(e_load(VI, env, 24 + ptr_size, ptr_size))
+    hk = 0
+    loop i in [0..nkids(e)):
+        a = kid(e, i)
+        if nodes[a].kind == .hole:
+            argv.push(hole_vs[hk])
+            hk += 1
+        else:
+            t = ntype(a)
+            if vc(t) == VC_AGG: argv.push(e_addi(env, offs[i]))
+            else: argv.push(load_val(t, env, offs[i]))
+    r = 0
+    if target != 0: r = e_call(lf_of_inst(target), argv, ret_vt(ret))
+    else:
+        fp = e_load(VI, env, 24, ptr_size)
+        r = e_calli(fp, argv, ret_vt(ret), false)
+    if sret: e_ret(sv)
+    else: e_ret(r)
+
+helper_envdrop = (f: int, heap: bool = true):
+    ps = helper_params(1)
+    env = ps[0]
+    if fns[f].kind == FK_PARTIAL:
+        e = int(fns[f].partial)
+        offs = partial_layout(e)
+        if nodes[e].aux == 1: drop_at(e_addi(env, 24), ntype(int(nodes[e].a)))
+        loop i in [0..nkids(e)):
+            if offs[i] < 0: continue
+            drop_at(e_addi(env, offs[i]), ntype(kid(e, i)))
+    else:
+        env_layout(f)
+        resource = ownership_callable_cap(int(fns[f].fntype)) != 0
+        loop i in [0..fns[f].caps.len()):
+            index = fns[f].caps.len() - 1 - i
+            inn = int(fns[f].caps[index].inner)
+            t = store_type(inn)
+            if is_managed(t):
+                if resource: iff(e_bin(.gtu, VI, e_load(VI, env, 24, 8), e_iconst(index)))
+                movable = spawn_owned_capture(f, inn)
+                if movable: iff(e_load(VI, env, int(locals[inn].env_off) - 8, 8))
+                drop_embedded(e_addi(env, int(locals[inn].env_off)), t)
+                if movable: endc()
+                if resource: endc()
+    if heap: e_call1(rt("__free"), env, -1)
+    e_ret(-1)
+
+helper_envcopy = (f: int):
+    ps = helper_params(1)
+    ir.ret = VI
+    src = ps[0]
+    d = int(fns[f].decl)
+    if fns[f].kind == FK_PARTIAL: d = int(fns[f].partial)
+    if d == 0 or not files[pos_file(nodes[d].pos)].is_dewy or fns[f].kind != FK_PARTIAL and spawn_body(f):
+        retain(src, T_STR)
+        return e_ret(src)
+    if fns[f].kind != FK_PARTIAL:
+        env_layout(f)
+        mutable = false
+        loop cap in fns[f].caps:
+            inn = int(cap.inner)
+            flags = int(locals[inn].flags)
+            if flags & LF_VALUECAP != 0 and (flags & (LF_ASSIGNED | LF_EXPOSED) != 0 or is_shared(inn) or type_has_fn(int(locals[inn].type)) or ownership_type(int(locals[inn].type))): mutable = true
+        if not mutable:
+            retain(src, T_STR)
+            return e_ret(src)
+    if ownership_callable_cap(int(fns[f].fntype)) != 0:
+        return helper_owner_envcopy(f, src)
+    env = e_call1(rt("__alloc"), e_iconst(int(fns[f].env_size)), VI)
+    e_copy(env, src, int(fns[f].env_size))
+    hdr_store(env, 0, e_iconst(1))
+    if fns[f].kind == FK_PARTIAL:
+        offs = partial_layout(d)
+        if nodes[d].aux == 1: copy_at(e_addi(env, 24), ntype(int(nodes[d].a)))
+        loop i in [0..nkids(d)):
+            if offs[i] >= 0: copy_at(e_addi(env, offs[i]), ntype(kid(d, i)))
+    else:
+        loop cap in fns[f].caps:
+            inn = int(cap.inner)
+            t = store_type(inn)
+            addr = e_addi(env, int(locals[inn].env_off))
+            if is_shared(inn):
+                cell = e_load(VI, addr, 0, ptr_size)
+                retain(cell, t)
+                if int(locals[inn].flags) & LF_VALUECAP != 0:
+                    e_store(addr, 0, e_call1(lf_helper(.arruniq, t, 0), cell, VI), ptr_size)
+            else: copy_at(addr, t)
+    e_ret(env)
+
+lower_helper = (lf: int):
+    h = lfuncs[lf]
+    begin_fn(h.name, lf)
+    t = quantity_base(h.htype)
+    match h.hkind:
+        drop: helper_drop(t, false)
+        copy: helper_drop(t, true)
+        move: helper_move(t)
+        arrrel: helper_arrrel(t)
+        arruniq: helper_arruniq(t)
+        arrcopy: helper_owner_arrcopy(t)
+        eq: helper_eq(t)
+        hash: helper_hash(t, h.inst != 0)
+        thunk: helper_thunk(h.inst)
+        partial: helper_partial(h.inst)
+        envdrop: helper_envdrop(h.inst)
+        stackenvdrop: helper_envdrop(h.inst, false)
+        envcopy: helper_envcopy(h.inst)
+
+        boxrel: helper_boxrel(t)
+        boxdrop: helper_boxdrop(t)
+        boxuniq: helper_boxuniq(t)
+        math_main: math_main(h.inst)
+        owner_boxcopy: helper_owner_boxcopy(t)
+        parallel_serial, partition, reset_words: ice("borrowed region helper must lower as an instance")
+        parallel_job: parallel_job_helper(h.inst, h.htype & 1 != 0, h.htype & 2 != 0)
+        promote: helper_promote(t)
+
+drop_embedded = (addr: int, t: int):
+    if not is_managed(t): return
+    if vc(t) == VC_INT:
+        release(e_load(VI, addr, 0, ptr_size), t)
+        return
+    b = quantity_base(t)
+    env_guard(addr, b)
+    e_call1(lf_helper(.drop, t, 0), addr, -1)
+    if env_guarded(b): endc()
+
+helper_move = (t: int):
+    ps = helper_params(2)
+    dest = ps[0]
+    source = ps[1]
+    if tkind(t) == .array or tkind(t) == .box or is_fn_type(t):
+        e_copy(dest, source, tsize(t))
+    else if tkind(t) == .opt:
+        inner = telem(t)
+        e_zero(dest, tsize(t))
+        iff(opt_has(source, inner))
+        e_call2(lf_helper(.move, inner, 0), dest, source, -1)
+        e_store(dest, tsize(inner), e_iconst(1), 1)
+        endc()
+    else if tkind(t) == .fixed:
+        et = telem(t)
+        i = fixed_loop_begin(t)
+        dst = fixed_elem_addr(dest, i, et)
+        src = fixed_elem_addr(source, i, et)
+        if ownership_type(et): e_call2(lf_helper(.move, et, 0), dst, src, -1)
+        else: e_copy(dst, src, tsize(et))
+        fixed_loop_end(i)
+    else if let hook = ownership_moves.get(t):
+        owner_hook_into(hook, source, t, dest)
+        # A custom move consumes the outer owner. Its borrowed receiver's
+        # fields still own their values unless transferred separately.
+        parent = prune(int(fns[hook].ret))
+        fs = field_list(parent)
+        loop i in [0..fs.len()):
+            field = fs[fs.len() - 1 - i]
+            drop_embedded(e_addi(source, field.1), field.0)
+    else:
+        loop field in field_list(t):
+            dst = e_addi(dest, field.1)
+            src = e_addi(source, field.1)
+            if ownership_type(field.0): e_call2(lf_helper(.move, field.0, 0), dst, src, -1)
+            else: e_copy(dst, src, tsize(field.0))
+    e_ret(-1)
+
+helper_owner_arrcopy = (t: int):
+    ps = helper_params(1)
+    ir.ret = VI
+    et = telem(t)
+    r = vreg(VI)
+    e_mov(r, e_iconst(0))
+    iff(e_bin(.ne, VI, ps[0], e_iconst(0)))
+    e_mov(r, e_call2(rt("__arr_copy"), ps[0], e_iconst(owner_stride(et)), VI))
+    retain_elems(r, et)
+    endc()
+    e_ret(r)
+
+helper_owner_record_copy = (source: int, t: int):
+    owner_begin()
+    dest = e_slot(new_temp(t))
+    held: int[]
+    loop field in field_list(t):
+        child = own(V(load_val(field.0, source, field.1), false), field.0)
+        store_val(field.0, dest, field.1, child.v)
+        if is_managed(field.0):
+            if not ownership_type(field.0): child = owner_value(child, field.0)
+            held.push(child.slot)
+    e_copy(source, dest, tsize(t))
+    loop slot in held: owner_forget_slot(slot)
+    owner_end()
+    e_ret(-1)
+
+helper_owner_boxcopy = (t: int):
+    owner_begin()
+    ps = helper_params(1)
+    ir.ret = VI
+    et = telem(t)
+    result = vreg(VI)
+    e_mov(result, e_iconst(0))
+    iff(e_bin(.ne, VI, ps[0], e_iconst(0)))
+    child = own(V(load_val(et, e_addi(ps[0], BOX_HDR), 0), false), et)
+    e_mov(result, e_call1(rt("__box_new"), e_iconst(tsize(et)), VI))
+    store_val(et, e_addi(result, BOX_HDR), 0, child.v)
+    owner_forget_slot(child.slot)
+    endc()
+    owner_end()
+    e_ret(result)
+
+helper_owner_envcopy = (f: int, src: int):
+    owner_begin()
+    t = int(fns[f].fntype)
+    env = e_call1(rt("__alloc"), e_iconst(int(fns[f].env_size)), VI)
+    e_copy(env, src, 24)
+    hdr_store(env, 0, e_iconst(1))
+    hdr_store(env, 24, e_iconst(0))
+    slot = new_temp(t)
+    e_zero(e_slot(slot), tsize(t))
+    e_store(e_slot(slot), ptr_size, env, ptr_size)
+    owner_register(slot, t)
+    loop i in [0..fns[f].caps.len()):
+        inn = int(fns[f].caps[i].inner)
+        ct = store_type(inn)
+        off = int(locals[inn].env_off)
+        value = own(Val(load_val(ct, src, off), false, -1), ct)
+        store_val(ct, env, off, value.v)
+        if ownership_type(ct): owner_forget_slot(value.slot)
+        hdr_store(env, 24, e_iconst(i + 1))
+    owner_forget_slot(slot)
+    owner_end()
+    e_ret(env)

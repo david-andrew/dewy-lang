@@ -219,8 +219,9 @@ static void register_decls(Module *m, NodeList *decls, NodeList *init_stmts) {
   }
 }
 
-static NodeList module_inits[256];
-static FnCtx *module_ctx[256];
+enum { MAX_MODULES = 512 };
+static NodeList module_inits[MAX_MODULES];
+static FnCtx *module_ctx[MAX_MODULES];
 
 static Module *load_module(const char *path, bool is_prelude, Pos from) {
   char *rp = realpath(path, NULL);
@@ -243,7 +244,7 @@ static Module *load_module(const char *path, bool is_prelude, Pos from) {
   m->name = intern(base, strlen(base) - 3);
   m->scope = is_prelude ? prelude_scope : scope_new(prelude_scope, 0, NULL);
   vpush(modules, m);
-  if (modules.len >= 256) fatal(from, "too many modules");
+  if (modules.len >= MAX_MODULES) fatal(from, "too many modules");
   parse_file(m->file, &m->decls);
   if (!is_prelude && modules.len > 0 && !prog.build) { /* main detection happens in check_program */ }
   return m;
@@ -1262,7 +1263,7 @@ static void load_prelude(void) {
 }
 
 typedef VEC(Module *) ModVec;
-static int dfs_state[256];
+static int dfs_state[MAX_MODULES];
 static void order_modules(Module *m, ModVec *out) {
   if (dfs_state[m->order]) return;
   dfs_state[m->order] = 1;
