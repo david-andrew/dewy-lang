@@ -1,3 +1,5 @@
+use 'checker_program.dewy'
+use 'checker_hooks.dewy'
 use 'checker_sinks.dewy'
 use 'checker_value_calls.dewy'
 use 'checker_values.dewy'
@@ -2271,12 +2273,6 @@ block_final = (b: int, i: int, expected: int, sink_mode: int) -> int:
     result
 # (1 followed variables a statement writes in a loop, 2 a statement while sibling contents
 # are known, 3 a followed variable just declared (n: it, m: its position), 4 the block's end)
-block_sibling = (n: int, m: int, code: int):
-    if code == 1: sibling_flow_loops(n)
-    else if code == 2: sibling_statement(n, m)
-    else if code == 3: sibling_flow_start(n, m)
-    else: sibling_flow_end(n)
-
 # the value expression of a value block
 block_value = (b: int) -> int: int(nodes[kid(b, nkids(b) - 1)].a)
 
@@ -3473,12 +3469,6 @@ assign_prelude = (s: int) -> int:
     0
 # (1 growth's reading, 2 the decimal binding written (the one before it returned), 3 the
 # record type a sibling literal's syntax names)
-assign_begin = (s: int, code: int) -> int:
-    if code == 1:
-        growth_assign(s)
-        return 0
-    if code == 2: return decimal_assign_begin(s)
-    sibling_syntax_type(int(nodes[s].b))
 # `a, b = value`'s services (checker_assigns.dewy va_tuple): 1 a compound update refused,
 # 3 the value checked and unpacked (its type; a Dewy target's written type refused first),
 # 4 a value of another shape refused, 5 an element written (its place checked, its text or
@@ -3970,15 +3960,7 @@ decl_binding_type = (s: int) -> int:
     refine_bindings.self = previous_self
     t
 decl_values = (e: int, expected: int) -> int: values_init(e, expected)
-decl_annotated = (s: int, t: int, member: int):
-    sibling_annotated(s, t, member)
-    return
 # (1: `let shapes = [Circle[...] Square[...]]`, 2: `let s = Circle[...]`, later given a Square)
-decl_sibling = (s: int, t: int, code: int) -> int: if code == 1: sibling_binding(s, t) else: sibling_scalar(s, t)
-decl_literal = (s: int) -> int:
-    t = decimal_binding_type(nodes[s].pos, lit_default(int(nodes[s].b)))
-    nodes[s].b = i32(coerce(int(nodes[s].b), t))
-    t
 decl_storage = (s: int, t: int) -> int:
     if not type_has_fn(t): return t
     storage = effect_storage_type(t)
@@ -3997,16 +3979,6 @@ decl_temperature = (s: int, t: int, unit: int) -> int: temperature_binding(s, t,
 # (1 growth's reading of the value; 3 a sibling literal's known contents, 4 a decimal
 # literal's binding, 5 growth's binding, 6 a text domain, 7 an integer domain, 8 a
 # constant's view, 9 definite assignment, 10 an editor's type hint)
-decl_after = (s: int, l: int, t: int, code: int):
-    if code == 1: growth_decl_before(s)
-    else if code == 3: sibling_establish(l)
-    else if code == 4: decimal_local(l, nodes[s].pos, t)
-    else if code == 5: growth_decl_after(s, l, t)
-    else if code == 6: string_domain_declare(l, int(nodes[s].b))
-    else if code == 7: int_domain_declare(l, int(nodes[s].b))
-    else if code == 8: const_view_declare(l, int(nodes[s].b))
-    else if code == 9: da_record(s)
-    else if code == 10: ide_hint_local(s, l)
 decl_error = (s: int, t: int, code: int):
     nm = name_of(int(nodes[s].name))
     pos = nodes[s].pos
@@ -5346,496 +5318,8 @@ prepare_value_helpers = () -> bool:
         if demand & 2 != 0: check_value_members(t, true, seen)
     fns.len() > before
 
-check_pending_functions = (start: int) -> int:
-    k = start
-    loop k < fns.len() or prepare_value_helpers():
-        pc_try(k)
-        if fns[k].state == 0 and (fns[k].kind == FK_NORMAL or fns[k].kind == FK_INIT) and k != 0:
-            if fns[k].kind == FK_INIT:
-                icb = ic_mod(IC_CHECK, int(fns[k].mod))
-                if decimal_wants(k): decimal_check_body(k)
-                else: check_init_now(k)
-                ic_restore(icb)
-            else: check_fn_body(k)
-        k += 1
-    k
-
 # a module's top-level code. It may be checked in the middle of another body (a runtime
 # function demanded there checks what is pending, runtime_fn): that body's context comes back.
-check_init_now = (k: int):
-    m = int(fns[k].mod)
-    saved = cx
-    entered = enter_module_context(m)
-    cx = module_ctx[m]
-    saved_floor = ctxs[cx].floor
-    fns[k].state = 1
-    mark = scope_mark()
-    ctxs[cx].floor = i32(check_scopes.names.len())
-    body = int(fns[k].body)
-    loop j in [0..nkids(body)): check_stmt(kid(body, j))
-    scope_reset(mark)
-    zonk_tree(body)
-    loop l in fns[k].locals: locals[l].type = i32(zonk(int(locals[l].type)))
-    copy_write_warnings(k)
-    fns[k].ret = i32(T_VOID)
-    fns[k].state = 2
-    ctxs[cx].floor = saved_floor
-    leave_module_context(m, entered)
-    cx = saved
-
-check_program = (main_path: str):
-    member_reset()
-    console_type_id = -1
-    ut_reset()
-    wi_reset()
-    cc_reset()
-    ownership_reset()
-    facts_reset()
-    refine_reset()
-    proof_reset()
-    effects_reset()
-    arena_reset()
-    directives_reset()
-    float_keys_reset()
-    floats_notes_reset()
-    if len(program_name) > 0: program_named = true
-    if len(program_name) == 0:
-        program_name = main_path
-        s = rfind(program_name, "/")
-        if s >= 0: program_name = program_name[s + 1..]
-        program_name = strip_ext(program_name)
-    add_universe()
-    ic_switch(IC_LOAD, IC_LIB)
-    load_prelude()
-    ic_switch(IC_LOAD, IC_ROOT)
-    mainm = load_module(main_path, false, -1)
-    ic_switch(IC_CHECK, IC_SHARED)
-    ts_dewy = files[int(modules[mainm].file)].is_dewy
-    # (a setting main.jo's scan_settings read that the parser did not find as a statement: inside
-    # a string or comment, say)
-    if ts_dewy and build_target_at >= 0 and not build_target_seen: fatal(mkpos(int(modules[mainm].file), build_target_at), "this line reads as `$target = ...` but is not a statement at the top level")
-    if ts_dewy and file_mode_at >= 0 and not file_mode_seen: fatal(mkpos(int(modules[mainm].file), file_mode_at), "this line reads as `$build.mode = ...` but is not a statement at the top level")
-    # The editor checks library documents with an empty main. Named libraries
-    # are outside the prelude, so load the opened document explicitly as well.
-    if ide_on and starts_with(ide_doc, path_norm(lib_dir) + "/") and find_module(ide_doc) < 0:
-        load_module(ide_doc, false, -1)
-    if stop_after == "lex" or stop_after == "parse": exit(0)
-    modules[mainm].is_main = true
-    i = 0
-    loop i < modules.len():
-        icb = ic_mod(IC_CHECK, i)
-        register_module(i)
-        ic_restore(icb)
-        i += 1
-    # (dictionaries hash keys with the keyed value hash: lib/core/map.jo)
-    runtime_switch_on("__KEYED_HASH")
-    runtime_switch_on("__MUL_HI")
-    runtime_switch_on("__SECRETS")
-    if runtime_switches.len() > 0: runtime_switch()
-    bind_from_imports()
-    dewy_resolve_inherited()
-    if dewy_methods.len() > 0: dc_force_all()
-    dewy_infer_methods()
-    # (the locks prelude and the outcomes of locks, channels and queues declare nominal errors,
-    # `DuplicateLock`, `Busy`, `Closed`, `Unsent`..., so each loads before they close when a Dewy
-    # program names it: a probe per name, all asked before any loads, nothing otherwise)
-    locks = ts_dewy and prelude_named(["mutex", "Mutex", "lock_all", "DuplicateLock"])
-    channels = ts_dewy and prelude_named(["channel", "Channel"])
-    queue = ts_dewy and prelude_named(["mpmc", "Mpmc"])
-    ring = ts_dewy and prelude_named(["spsc", "Spsc", "SpscSender", "SpscReceiver"])
-    protocols = ts_dewy and prelude_named(["serve", "Service", "pipeline"], true)
-    # (the outcomes also load for any source naming one, its own type of that name included: a
-    # module that does not declare it may still reach the prelude's)
-    if locks or channels or queue or ring or protocols or ts_dewy and names_known(["Unsent", "Full", "Empty", "Closed", "Busy"]): dewy_prelude_module(intern("Unsent"))
-    if locks: dewy_prelude_module(intern("mutex"))
-    if queue or ring: dewy_prelude_file("mpmc.jo")
-    if queue: dewy_prelude_module(intern("mpmc"))
-    # (the spsc ring's runtime shares mpmc.jo's atomics and waits)
-    if ring:
-        dewy_prelude_file("spsc.jo")
-        dewy_prelude_module(intern("spsc"))
-    # (the certified protocols are built on channels: theirs load first)
-    if channels or protocols: dewy_prelude_module(intern("channel"))
-    if protocols: concurrency_protocol_module = dewy_prelude_module(intern("serve"))
-    prepare_nominals()
-    check_build_block()
-    # (native programs report crashes as they do panics: lib/std/backtrace.jo)
-    if not target_wasm and prelude.get(intern("__crash_install")) != none: modules[mainm].inits.insert(0, synth_call("__crash_install", [], 0))
-    # programs with update()/draw() run the game loop after main()
-    has_upd = game_fn(mainm, "update") != none
-    has_drw = game_fn(mainm, "draw") != none
-    # (two updates, as a Scratch project's scripts, one per sprite: only the first would run)
-    loop gname in ["update", "draw", "main"]:
-        first = 0
-        loop d in modules[mainm].decls:
-            if nodes[d].kind != .fn_ or name_of(int(nodes[d].name)) != gname or dewy_is_method(d): continue
-            if first == 0: first = d
-            else:
-                what = "runs every frame"
-                if gname == "draw": what = "draws every frame"
-                else if gname == "main": what = "runs once, after the top of the file"
-                fl, fc = line_col(nodes[first].pos)
-                fatal(nodes[d].pos, "a second {gname} (the first is on line {fl}): a program has one {gname}, which {what}; put the lines of both in it, or make each a function of its own that {gname} calls")
-    # (a top-level `loop:` in a game, as Scratch's forever: the frames start after the top level ends)
-    if has_upd or has_drw:
-        loop d in modules[mainm].decls:
-            if nodes[d].kind == .while_ and nodes[int(nodes[d].a)].kind == .bool_lit and nodes[int(nodes[d].a)].ival != 0 and not has_break(int(nodes[d].b)):
-                upd = "update"
-                if not has_upd: upd = "draw"
-                warn(nodes[d].pos, "this loop never ends, so the game never starts: {upd} runs after the lines at the top of the file are done. What repeats each frame goes in {upd}, which is the game's forever loop")
-    # (the game ignores what update and draw give back: their last line is a statement, as
-    # `world.step(dt)` or a mistaken `pos == pos + v`, which then gets its warning)
-    loop gn in ["update", "draw"]:
-        if let gs = game_fn(mainm, gn):
-            gd = int(syms[gs].decl)
-            if syms[gs].kind == .fns and gd != 0 and nodes[gd].kind == .fn_ and nodes[gd].a == 0: add_flag(gd, NF_VOID)
-    # (Godot's callbacks, which nothing here calls)
-    if not has_upd and not has_drw:
-        loop gn in ["_process", "_physics_process", "_ready", "_draw", "_input", "Awake", "FixedUpdate", "LateUpdate", "OnGUI"]:
-            if let gs = modules[mainm].names.get(intern(gn)):
-                if syms[gs].decl != 0: callback_warn(gs, "nothing calls {gn}: a game is {jd(nodes[int(syms[gs].decl)].pos, "`update = (dt: f64): ...`", "`update = (dt:float64):>void => \{...}`")}, called each frame, and {jd(nodes[int(syms[gs].decl)].pos, "`draw = (): ...`", "`draw = ():>void => \{...}`")} after it; what runs once goes at the top level")
-    # (Draw = ():, updte = (dt: f64): a near miss of the name the game calls, and nothing runs)
-    loop want in ["draw", "update"]:
-        if game_fn(mainm, want) != none: continue
-        lim = 1
-        if want == "update": lim = 2
-        loop nm, gs in modules[mainm].names:
-            if syms[gs].kind != .fns or syms[gs].decl == 0: continue
-            s = name_of(nm)
-            # (a game's: no main, and the parameters the game would give it)
-            gd = int(syms[gs].decl)
-            np = 0
-            if want == "update": np = 1
-            if modules[mainm].names.get(intern("main")) != none or nodes[gd].kind != .fn_ or nkids(gd) != np: continue
-            if abs(len(s) - len(want)) <= 1 and edit_distance(s, want, lim) <= lim:
-                callback_warn(gs, "nothing calls {s}: the game calls `{want}` each frame (did you mean `{want}`?)")
-    # (a quit hook under another name: on_close, Unity's OnApplicationQuit)
-    if modules[mainm].names.get(intern("on_quit")) == none:
-        loop gn in ["on_close", "onClose", "onQuit", "on_exit", "onExit", "OnApplicationQuit", "on_quit_game", "at_exit", "atexit", "_exit_tree", "beforeunload"]:
-            if let gs = modules[mainm].names.get(intern(gn)):
-                if syms[gs].kind == .fns and syms[gs].decl != 0: callback_warn(gs, "nothing calls {gn}: when the game closes, it calls `on_quit = (): ...` (did you mean `on_quit`?)")
-    # (Unity's collision callbacks: contacts are read, each frame)
-    loop gn in ["OnCollisionEnter", "OnCollisionStay", "OnCollisionExit", "OnTriggerEnter", "OnTriggerStay", "OnTriggerExit"]:
-        if let gs = modules[mainm].names.get(intern(gn)):
-            if syms[gs].kind == .fns and syms[gs].decl != 0: callback_warn(gs, "nothing calls {gn}: read `w.contacts(b)` in update, each frame (`if c.new:` for a touch that just began; sensors' are there too)")
-    # (LÖVE's input callbacks: input is asked for, each frame)
-    loop gn in ["keypressed", "keyreleased", "mousepressed", "mousereleased", "textinput", "wheelmoved"]:
-        if let gs = modules[mainm].names.get(intern(gn)):
-            if syms[gs].kind == .fns and syms[gs].decl != 0: callback_warn(gs, "nothing calls {gn}: in update, ask each frame (`key_pressed(.space)`, `mouse_pressed(.left)`, `text_input()`, `mouse_wheel()`)")
-    if test_mode and test_decls.len() == 0 and not check_all and not ide_on:
-        # (pytest's test_ functions, or no tests at all: "0 tests passed" would say all is well)
-        pyt = ""
-        loop nm, gs in modules[mainm].names:
-            if starts_with(name_of(nm), "test_") and syms[gs].kind == .fns and len(pyt) == 0: pyt = name_of(nm)
-        if ends_with(main_path, ".dewy"):
-            if len(pyt) > 0: fatal(nodes[int(syms[modules[mainm].names[intern(pyt)]].decl)].pos, "'{pyt}' is a function, not a test: put `$test` on the line before it")
-            fatal(-1, "no tests in {main_path}: a test is a function marked `$test` on the line before it (`$test` then `let adds = () => $expect add(1 2) =? 3`)")
-        if len(pyt) > 0: fatal(nodes[int(syms[modules[mainm].names[intern(pyt)]].decl)].pos, "'{pyt}' is a function, not a test: a test is written `test \"{pyt[5..]}\":` with its lines below it (`assert(...)` in them)")
-        fatal(-1, "no tests in {main_path}: a test is written `test \"adds\":` with its lines below it, as `assert(add(1, 2) == 3)`")
-    if test_mode:
-        # top-level code runs first (it may set up globals), then each test in order
-        if not check_all: skip_main = true
-        count = 0
-        computed: int[]
-        loop d in test_decls:
-            pos = nodes[d].pos
-            nm = name_of(int(nodes[d].sval))
-            if nodes[d].aux == 1:
-                # (Dewy's `$test` function: called once, or once per case as name[i])
-                if nodes[d].a != 0:
-                    # (a computed array of cases: each element, by its index at run time)
-                    cases = int(nodes[d].a)
-                    index = "$test_case{d}"
-                    arg = bc_call("__test_case", [cases, bc_ident(index, pos)], pos)
-                    name = bc_call("__test_case_name", [synth_str(nm, pos), bc_ident(index, pos)], pos)
-                    modules[mainm].inits.push(bc_loop(index, bc_call("__test_count", [clone(cases)], pos), [test_entry(name, [synth_call(nm, [arg], pos)], pos)], pos))
-                    computed.push(clone(cases))
-                    continue
-                if nkids(d) == 0:
-                    modules[mainm].inits.push(test_entry(synth_str(nm, pos), [synth_call(nm, [], pos)], pos))
-                    count += 1
-                    continue
-                loop k in 0.. and case in kids(d):
-                    modules[mainm].inits.push(test_entry(synth_str("{nm}[{k}]", nodes[case].pos), [synth_call(nm, kids(case), nodes[case].pos)], nodes[case].pos))
-                    count += 1
-                continue
-            if not files[pos_file(pos)].is_dewy and len(nm) >= 2 and nm[0] == '"': nm = nm[1..len(nm) - 1)
-            body = int(nodes[d].b)
-            modules[mainm].inits.push(test_entry(synth_str(nm, pos), kids(body), pos))
-            count += 1
-        cnt = mk(.int_lit, 0)
-        nodes[cnt].ival = count
-        total = cnt
-        loop cases in computed: total = bc_bin(.plus, total, bc_call("__test_count", [cases], 0), 0)
-        modules[mainm].inits.push(synth_call("__test_done", [total], 0))
-    # (sloppy check: the tests, and the game loop's update and draw too)
-    if (not test_mode or check_all) and (has_upd or has_drw):
-        user_main = false
-        loop st0 in modules[mainm].inits:
-            if calls_named(st0, "main"): user_main = true
-        if user_main: skip_main = true
-        else if let s = modules[mainm].names.get(intern("main")):
-            mc = mk(.call, 0)
-            mid = mk(.ident, 0)
-            nodes[mid].name = i32(intern("main"))
-            nodes[mc].a = i32(mid)
-            st = mk(.exprstmt, 0)
-            nodes[st].a = i32(mc)
-            modules[mainm].inits.push(st)
-            skip_main = true
-        # (before the program's own code: it is a game, so a texture made at the top opens the
-        # window; a script's opens none)
-        isg = mk(.assign, 0)
-        nodes[isg].op = i32(int(Tok.assign))
-        isgl = mk(.ident, 0)
-        nodes[isgl].name = i32(intern("__is_game"))
-        nodes[isg].a = i32(isgl)
-        isgv = mk(.bool_lit, 0)
-        nodes[isgv].ival = 1
-        nodes[isg].b = i32(isgv)
-        modules[mainm].inits.insert(0, isg)
-        gc = mk(.call, 0)
-        gid = mk(.ident, 0)
-        nodes[gid].name = i32(intern("__game_run"))
-        nodes[gc].a = i32(gid)
-        # (at the program's update and draw: a mismatch is reported there)
-        ua = mk(.ident, 0)
-        if has_upd:
-            nodes[ua].name = i32(intern("update"))
-            nodes[ua].pos = nodes[int(syms[game_fn(mainm, "update")!].decl)].pos
-            add_flag(ua, NF_MUT)   # the function itself (Dewy's `@update`)
-        else: nodes[ua].name = i32(intern("__no_update"))
-        da = mk(.ident, 0)
-        if has_drw:
-            nodes[da].name = i32(intern("draw"))
-            nodes[da].pos = nodes[int(syms[game_fn(mainm, "draw")!].decl)].pos
-            add_flag(da, NF_MUT)
-        else: nodes[da].name = i32(intern("__no_draw"))
-        set_list(gc, [ua, da])
-        # (quit = (): the game's own, in place of the library's that closes the window)
-        if let qq = modules[mainm].names.get(intern("quit")):
-            qd2 = int(syms[qq].decl)
-            if syms[qq].kind == .fns and qd2 != 0 and nodes[qd2].kind == .fn_ and nkids(qd2) == 0: warn(nodes[qd2].pos, "this quit takes the place of the library's quit(), which closes the window: for what runs as the game ends (to save), write `on_quit = ():`")
-        # (on_quit = (): what the game does as it ends: its window closed; quit() closes it)
-        if let qs = modules[mainm].names.get(intern("on_quit")):
-            qd = int(syms[qs].decl)
-            if syms[qs].kind == .fns and qd != 0 and nodes[qd].kind == .fn_ and nkids(qd) == 0:
-                # (what its last line gives, on_quit = (): save_value(...)'s bool, is dropped)
-                add_flag(qd, NF_VOID)
-                qc = mk(.call, 0)
-                qf = mk(.ident, 0)
-                nodes[qf].name = i32(intern("__set_quit"))
-                nodes[qc].a = i32(qf)
-                qa = mk(.ident, nodes[qd].pos)
-                nodes[qa].name = i32(intern("on_quit"))
-                add_flag(qa, NF_MUT)
-                set_list(qc, [qa])
-                qst = mk(.exprstmt, 0)
-                nodes[qst].a = i32(qc)
-                modules[mainm].inits.push(qst)
-        st2 = mk(.exprstmt, 0)
-        nodes[st2].a = i32(gc)
-        modules[mainm].inits.push(st2)
-    prelude_init = new_inst(FK_INIT, 0, "init_prelude")
-    fns[prelude_init].body = i32(mk(.block, 0))
-    fns[prelude_init].ret = i32(T_VOID)
-    fns[prelude_init].state = 2
-    module_ctx = []
-    module_frames = []
-    setup_module_contexts(prelude_init)
-    # Set up testing after runtime globals, before any user module initializer.
-    # Imported initializers must see the original arguments and headless mode too.
-    test_start = 0
-    if test_mode: test_start = runtime_fn("__test_run_begin")
-    order = init_module_order(mainm)
-    init_fns = [prelude_init]
-    if test_start != 0: init_fns.push(test_start)
-    loop m in order:
-        if not modules[m].is_prelude: init_fns.push(int(modules[m].init_fn))
-    cx = -1
-    check_pushers_first()
-    decimal_writers_first()
-    # (a struct or enum of the program's whose values hold one another without end, a: A, is an
-    # error used or not)
-    loop m in order:
-        if modules[m].is_prelude: continue
-        loop nm, s in modules[m].names:
-            sk = syms[s].kind
-            if (sk == .struct_ or sk == .enum_) and syms[s].decl != 0 and nkids2(int(syms[s].decl)) == 0 and (nodes[int(syms[s].decl)].kind == .struct_ or nodes[int(syms[s].decl)].kind == .enum_):
-                layout(get_struct_inst(int(syms[s].decl), []))
-    if let s = modules[mainm].names.get(intern("main")):
-        # (main() at the end of the file, as in Python: it runs once, there)
-        calls_main = false
-        loop st in modules[mainm].inits:
-            if calls_named(st, "main"):
-                # (Dewy runs a program's main by itself, exactly once)
-                if files[int(modules[mainm].file)].is_dewy and syms[s].kind == .fns and nodes[st].pos > 0 and not pos_in_lib(nodes[st].pos): fatal(nodes[st].pos, "main runs by itself, once, after the file's top-level statements: remove this call (a file without main runs top to bottom as a script)")
-                calls_main = true
-        if syms[s].kind == .fns and not skip_main and not calls_main:
-            main_fn = get_fn_inst(int(syms[s].decl), [], 0)
-            rt = prune(int(fns[main_fn].ret))
-            if files[int(modules[mainm].file)].is_dewy: dewy_main_result(int(syms[s].decl), rt)
-            else if rt != T_VOID and rt != T_NEVER and not is_int(rt):
-                fatal(nodes[int(syms[s].decl)].pos, "main must return void or an integer exit code, found {dt(rt)}")
-    if let s = game_fn(mainm, "update"):
-        if syms[s].kind == .fns:
-            # (update = (dt): ..., its parameter untyped: the seconds the game loop gives it)
-            ud = int(syms[s].decl)
-            if fn_sig(ud).generic and int(fn_sig(ud).ntp) == 1 and nkids(ud) == 1: update_fn = get_fn_inst(ud, [T_FLOAT], 0)
-            else: update_fn = get_fn_inst(ud, [], 0)
-    if let s = game_fn(mainm, "draw"):
-        if syms[s].kind == .fns: draw_fn = get_fn_inst(int(syms[s].decl), [], 0)
-    loop d in export_decls:
-        if not modules[int(nodes[d].mod)].is_prelude: export_fns.push(get_fn_inst(d, [], nodes[d].pos))
-    # the program's own functions are all checked, called or not (errors should not hide in
-    # unused code); only what is reachable is compiled
-    if ide_on: ide_force = ide_find_file(ide_doc)
-    loop m in modules:
-        if m.is_prelude and int(m.file) != ide_force: continue
-        loop d in m.decls:
-            if nodes[d].kind == .fn_ and not has_flag(d, NF_EXTERN) and not fn_sig(d).generic: get_fn_inst(d, [], nodes[d].pos)
-    loop nm in runtime_names: runtime_fn(nm)
-    runtime_memeq = runtime_fn("__mem_eq")
-    runtime_streq = runtime_fn("__str_eq")
-    # (__mac_syscall lives in macos.jo's `when TARGET == "macos"`: elsewhere asking parses it for nothing)
-    loop nm in optional_runtime:
-        if nm != "__mac_syscall" or target_macos: runtime_demand(nm)
-    if float_int_demanded: runtime_demand("__float_int_fail")
-    # (@cabi functions set __c_threads: lib/core/rt.jo)
-    if let ct = prelude.get(intern("__c_threads")):
-        if syms[ct].kind == .global: ensure_global(int(syms[ct].ref), 0)
-    # (vectorized code reads __cpu_avx2: its initializer must be checked with the rest)
-    if want_cpu_flag:
-        if let cs = prelude.get(intern("__cpu_avx2")):
-            if syms[cs].kind == .global: ensure_global(int(syms[cs].ref), 0)
-    # (a web page's loops count down to the watchdog, which stops one that never ends)
-    if want_loop_watch:
-        if let ls = prelude.get(intern("__loop_budget")):
-            if syms[ls].kind == .global:
-                ensure_global(int(syms[ls].ref), 0)
-                runtime_fn("__loop_watchdog")
-    # check everything reachable; library exports join once their module is in use
-    k = 0
-    exp_added: bool[] = fill(false, export_decls.len())
-    loop true:
-        k = check_pending_functions(k)
-        if runtime_ffi_demand(): continue
-        used: {int: bool} = {}
-        loop fi in [1..fns.len()):
-            if fns[fi].state == 2 and fns[fi].decl != 0: used[int(nodes[int(fns[fi].decl)].mod)] = true
-        more = false
-        exp_added.resize(export_decls.len())
-        loop ei in 0.. and d in export_decls:
-            if exp_added[ei] or not modules[int(nodes[d].mod)].is_prelude: continue
-            if used.get(int(nodes[d].mod)) != none:
-                exp_added[ei] = true
-                export_fns.push(get_fn_inst(d, [], nodes[d].pos))
-                more = true
-        if not more: break
-    pc_finish()
-    string_domains_finish()
-    string_domains_materialize()
-    int_domains_finish()
-    if poly_families.len() > 1: poly_finish_warnings()
-    if open_globals.len() > 0: settle_open_globals()
-    # (make_world written and never called: nothing runs it. A file of definitions alone, with
-    # no main, update or draw and no statement at its top that does something, is a module that
-    # others use: checked by itself, nothing in it is called)
-    runs = false
-    loop i0 in modules[mainm].inits:
-        ik = nodes[i0].kind
-        # (statements the file has, not ones made for it: they have no place in it)
-        if nodes[i0].pos <= 0 or pos_in_lib(nodes[i0].pos): continue
-        if ik != .vardecl and ik != .assign and ik != .const_: runs = true
-    loop nm0 in ["main", "update", "draw"]:
-        if game_fn(mainm, nm0) != none: runs = true
-    # (a const nothing uses is checked too: `const X = no_such(3)` is an error, used or not)
-    loop mi in [0..modules.len()):
-        if modules[mi].is_prelude: continue
-        loop cn, cs in modules[mi].names:
-            if syms[cs].kind == .const_ and syms[cs].decl != 0:
-                cg = int(syms[cs].ref)
-                if globals[cg].decl != 0: ensure_global(cg, nodes[int(syms[cs].decl)].pos)
-    # An otherwise unused constant can discover another exact-arithmetic
-    # module. Finish its queued bodies before lowering any initialization.
-    if k < fns.len():
-        k = check_pending_functions(k)
-        if runtime_ffi_demand(): k = check_pending_functions(k)
-        if open_globals.len() > 0: settle_open_globals()
-    ut_run()
-    if late_module_imports:
-        order = init_module_order(mainm)
-        init_fns = [prelude_init]
-        if test_start != 0: init_fns.push(test_start)
-        loop m in order:
-            if not modules[m].is_prelude: init_fns.push(int(modules[m].init_fn))
-    merge_cycle_inits(order)
-    if dg_globals.len() > 0 and not test_mode:
-        later: int[]
-        if update_fn > 0: later.push(update_fn)
-        if draw_fn > 0: later.push(draw_fn)
-        loop f in export_fns: later.push(f)
-        dg_check_program(init_fns, main_fn, later)
-    loop ci, at in draw_to_at:
-        if not back_to_screen.has(ci): warn(at, "after draw_to, drawing goes into that picture to the end of the frame, and the screen shows nothing: `draw_to_screen()` comes back to the screen (then `draw_target(rt)` shows the picture)")
-    # (nothing runs at all: one word for the whole file, as a module or a program not finished)
-    if not ide_on and not test_mode and not runs and not check_all and not ends_with(main_path, "<input>"):
-        loop d in modules[mainm].decls:
-            if nodes[d].kind != .fn_ or fn_used.has(d) or has_flag(d, NF_EXTERN) or nodes[d].c != 0: continue
-            fnm = name_of(int(nodes[d].name))
-            warn(nodes[d].pos, "nothing in this file runs: it only makes functions, and making {fnm} does not run it. Lines at the top of the file run when the program starts (`{fnm}()` there calls it); a game's {jd(nodes[d].pos, "`update = (dt: f64):` runs every frame, where `if key_pressed(.space): ...` checks a key. (A file that other files `use` is fine like this.)", "`update = (dt:float64):>void => \{...}` runs every frame, where `if key_pressed(Key.space) ...` checks a key. (A file that other files import is fine like this.)")}")
-            break
-    if not ide_on and (not test_mode or check_all) and runs:
-        # (a `$test` function: `dewy-core test` runs it)
-        tested: {int: bool} = {}
-        loop d in modules[mainm].decls:
-            if nodes[d].kind == .test_ and nodes[d].aux == 1: tested[int(nodes[d].name)] = true
-        loop d in modules[mainm].decls:
-            if nodes[d].kind != .fn_ or fn_used.has(d) or has_flag(d, NF_EXTERN) or nodes[d].c != 0 or tested.has(int(nodes[d].name)): continue
-            dn = name_of(int(nodes[d].name))
-            if dn == "main" or dn == "update" or dn == "draw" or starts_with(dn, "_") or starts_with(dn, "(") or starts_with(dn, "op_"): continue
-            # (a method is a member of its type, there for whoever uses the type: only a private
-            # type's, `_Name`, is held to this rule)
-            if dewy_is_method(d) and not starts_with(method_type_name(d), "_"): continue
-            # (its name written anywhere else in the file: an overload used under it, or a use in
-            # code for another target, as in `when TARGET == "windows":`)
-            if word_count(files[pos_file(nodes[d].pos)].src, dn) > 1: continue
-            how = "`{dn}()`"
-            if nkids(d) > 0: how = "`{dn}(...)`"
-            if dewy_is_method(d) and nkids(d) > 1: how = "`value.{dn}(...)`"
-            else if dewy_is_method(d): how = "`value.{dn}`"
-            warn(nodes[d].pos, "'{dn}' is never called: nothing runs it (call it, as {how} where it should run)")
-    # (globals of the program whose fields or elements are changed and that are never read)
-    loop g, wp in gcopy_writes:
-        if g < global_read.len() and global_read[g]: continue
-        if modules[int(globals[g].mod)].is_prelude or pos_in_lib(wp): continue
-        nm = name_of(int(globals[g].name))
-        warn_unused_copy(wp, nm)
-    # prelude init: referenced prelude globals in declaration order
-    pl: int[]
-    loop g in global_ids:
-        if modules[int(globals[g].mod)].is_prelude and globals[g].state == 2: pl.push(int(globals[g].decl))
-    order_prelude_globals(pl)
-    set_list(int(fns[prelude_init].body), pl)
-    zonk_tree(int(fns[prelude_init].body))
-    # Close declared promises after every checked helper has been discovered,
-    # including check-only callers and unreachable checked declarations.
-    pc_finish()
-    string_domains_finish()
-    string_domains_materialize()
-    int_domains_finish()
-    if not errors_only:
-        icb = ic_switch(IC_FACTS, IC_SHARED)
-        exact_prepare()
-        ic_switch(IC_OWNERSHIP, IC_SHARED)
-        ownership_finalize()
-        ic_switch(IC_EFFECTS, IC_SHARED)
-        concurrency_finalize()
-        concurrency_claims_finalize()
-        deadlock_finalize()
-        effects_finalize()
-        ic_restore(icb)
-
 # Whether a Dewy program names a prelude file that declares nominal errors (the locks' or the
 # channels': a name some source has, and that no module of the program declares itself, as a
 # program's own `Mutex` type): a probe per name, then a lookup per module only for a name some
@@ -6171,3 +5655,230 @@ sink_error1 = (v: int): fatal(nodes[v].pos, "this gives a value, and here the bl
 sink_error2 = (v: int): fatal(nodes[v].pos, "this expresses a value before the function's end, and the function also gives one back with `return`; a function expressing several values cannot `return` one yet: attach `;` to discard this value, as in `f();`")
 sink_error3 = (v: int): fatal(nodes[v].pos, "this value is in a loop or a branch, or comes from a call that may give any number, so the block does not give a fixed number of values, and a binding holds a fixed number: collect them into an array, `[ ... ]`, or attach `;` to discard it, as in `f();`")
 sink_acc_name = () -> int: intern("$pack{nodes.len()}")
+
+program_name_default = (main_path: str):
+    if len(program_name) > 0: program_named = true
+    if len(program_name) == 0:
+        program_name = main_path
+        s = rfind(program_name, "/")
+        if s >= 0: program_name = program_name[s + 1..]
+        program_name = strip_ext(program_name)
+program_setting_errors = (mainm: int):
+    # (a setting main.jo's scan_settings read that the parser did not find as a statement: inside
+    # a string or comment, say)
+    if ts_dewy and build_target_at >= 0 and not build_target_seen: fatal(mkpos(int(modules[mainm].file), build_target_at), "this line reads as `$target = ...` but is not a statement at the top level")
+    if ts_dewy and file_mode_at >= 0 and not file_mode_seen: fatal(mkpos(int(modules[mainm].file), file_mode_at), "this line reads as `$build.mode = ...` but is not a statement at the top level")
+program_callback_checks = (mainm: int, has_upd: bool, has_drw: bool):
+    # (two updates, as a Scratch project's scripts, one per sprite: only the first would run)
+    loop gname in ["update", "draw", "main"]:
+        first = 0
+        loop d in modules[mainm].decls:
+            if nodes[d].kind != .fn_ or name_of(int(nodes[d].name)) != gname or dewy_is_method(d): continue
+            if first == 0: first = d
+            else:
+                what = "runs every frame"
+                if gname == "draw": what = "draws every frame"
+                else if gname == "main": what = "runs once, after the top of the file"
+                fl, fc = line_col(nodes[first].pos)
+                fatal(nodes[d].pos, "a second {gname} (the first is on line {fl}): a program has one {gname}, which {what}; put the lines of both in it, or make each a function of its own that {gname} calls")
+    # (a top-level `loop:` in a game, as Scratch's forever: the frames start after the top level ends)
+    if has_upd or has_drw:
+        loop d in modules[mainm].decls:
+            if nodes[d].kind == .while_ and nodes[int(nodes[d].a)].kind == .bool_lit and nodes[int(nodes[d].a)].ival != 0 and not has_break(int(nodes[d].b)):
+                upd = "update"
+                if not has_upd: upd = "draw"
+                warn(nodes[d].pos, "this loop never ends, so the game never starts: {upd} runs after the lines at the top of the file are done. What repeats each frame goes in {upd}, which is the game's forever loop")
+    # (the game ignores what update and draw give back: their last line is a statement, as
+    # `world.step(dt)` or a mistaken `pos == pos + v`, which then gets its warning)
+    loop gn in ["update", "draw"]:
+        if let gs = game_fn(mainm, gn):
+            gd = int(syms[gs].decl)
+            if syms[gs].kind == .fns and gd != 0 and nodes[gd].kind == .fn_ and nodes[gd].a == 0: add_flag(gd, NF_VOID)
+    # (Godot's callbacks, which nothing here calls)
+    if not has_upd and not has_drw:
+        loop gn in ["_process", "_physics_process", "_ready", "_draw", "_input", "Awake", "FixedUpdate", "LateUpdate", "OnGUI"]:
+            if let gs = modules[mainm].names.get(intern(gn)):
+                if syms[gs].decl != 0: callback_warn(gs, "nothing calls {gn}: a game is {jd(nodes[int(syms[gs].decl)].pos, "`update = (dt: f64): ...`", "`update = (dt:float64):>void => \{...}`")}, called each frame, and {jd(nodes[int(syms[gs].decl)].pos, "`draw = (): ...`", "`draw = ():>void => \{...}`")} after it; what runs once goes at the top level")
+    # (Draw = ():, updte = (dt: f64): a near miss of the name the game calls, and nothing runs)
+    loop want in ["draw", "update"]:
+        if game_fn(mainm, want) != none: continue
+        lim = 1
+        if want == "update": lim = 2
+        loop nm, gs in modules[mainm].names:
+            if syms[gs].kind != .fns or syms[gs].decl == 0: continue
+            s = name_of(nm)
+            # (a game's: no main, and the parameters the game would give it)
+            gd = int(syms[gs].decl)
+            np = 0
+            if want == "update": np = 1
+            if modules[mainm].names.get(intern("main")) != none or nodes[gd].kind != .fn_ or nkids(gd) != np: continue
+            if abs(len(s) - len(want)) <= 1 and edit_distance(s, want, lim) <= lim:
+                callback_warn(gs, "nothing calls {s}: the game calls `{want}` each frame (did you mean `{want}`?)")
+    # (a quit hook under another name: on_close, Unity's OnApplicationQuit)
+    if modules[mainm].names.get(intern("on_quit")) == none:
+        loop gn in ["on_close", "onClose", "onQuit", "on_exit", "onExit", "OnApplicationQuit", "on_quit_game", "at_exit", "atexit", "_exit_tree", "beforeunload"]:
+            if let gs = modules[mainm].names.get(intern(gn)):
+                if syms[gs].kind == .fns and syms[gs].decl != 0: callback_warn(gs, "nothing calls {gn}: when the game closes, it calls `on_quit = (): ...` (did you mean `on_quit`?)")
+    # (Unity's collision callbacks: contacts are read, each frame)
+    loop gn in ["OnCollisionEnter", "OnCollisionStay", "OnCollisionExit", "OnTriggerEnter", "OnTriggerStay", "OnTriggerExit"]:
+        if let gs = modules[mainm].names.get(intern(gn)):
+            if syms[gs].kind == .fns and syms[gs].decl != 0: callback_warn(gs, "nothing calls {gn}: read `w.contacts(b)` in update, each frame (`if c.new:` for a touch that just began; sensors' are there too)")
+    # (LÖVE's input callbacks: input is asked for, each frame)
+    loop gn in ["keypressed", "keyreleased", "mousepressed", "mousereleased", "textinput", "wheelmoved"]:
+        if let gs = modules[mainm].names.get(intern(gn)):
+            if syms[gs].kind == .fns and syms[gs].decl != 0: callback_warn(gs, "nothing calls {gn}: in update, ask each frame (`key_pressed(.space)`, `mouse_pressed(.left)`, `text_input()`, `mouse_wheel()`)")
+program_tests = (mainm: int, main_path: str):
+    if test_mode and test_decls.len() == 0 and not check_all and not ide_on:
+        # (pytest's test_ functions, or no tests at all: "0 tests passed" would say all is well)
+        pyt = ""
+        loop nm, gs in modules[mainm].names:
+            if starts_with(name_of(nm), "test_") and syms[gs].kind == .fns and len(pyt) == 0: pyt = name_of(nm)
+        if ends_with(main_path, ".dewy"):
+            if len(pyt) > 0: fatal(nodes[int(syms[modules[mainm].names[intern(pyt)]].decl)].pos, "'{pyt}' is a function, not a test: put `$test` on the line before it")
+            fatal(-1, "no tests in {main_path}: a test is a function marked `$test` on the line before it (`$test` then `let adds = () => $expect add(1 2) =? 3`)")
+        if len(pyt) > 0: fatal(nodes[int(syms[modules[mainm].names[intern(pyt)]].decl)].pos, "'{pyt}' is a function, not a test: a test is written `test \"{pyt[5..]}\":` with its lines below it (`assert(...)` in them)")
+        fatal(-1, "no tests in {main_path}: a test is written `test \"adds\":` with its lines below it, as `assert(add(1, 2) == 3)`")
+    if test_mode:
+        # top-level code runs first (it may set up globals), then each test in order
+        if not check_all: skip_main = true
+        count = 0
+        computed: int[]
+        loop d in test_decls:
+            pos = nodes[d].pos
+            nm = name_of(int(nodes[d].sval))
+            if nodes[d].aux == 1:
+                # (Dewy's `$test` function: called once, or once per case as name[i])
+                if nodes[d].a != 0:
+                    # (a computed array of cases: each element, by its index at run time)
+                    cases = int(nodes[d].a)
+                    index = "$test_case{d}"
+                    arg = bc_call("__test_case", [cases, bc_ident(index, pos)], pos)
+                    name = bc_call("__test_case_name", [synth_str(nm, pos), bc_ident(index, pos)], pos)
+                    modules[mainm].inits.push(bc_loop(index, bc_call("__test_count", [clone(cases)], pos), [test_entry(name, [synth_call(nm, [arg], pos)], pos)], pos))
+                    computed.push(clone(cases))
+                    continue
+                if nkids(d) == 0:
+                    modules[mainm].inits.push(test_entry(synth_str(nm, pos), [synth_call(nm, [], pos)], pos))
+                    count += 1
+                    continue
+                loop k in 0.. and case in kids(d):
+                    modules[mainm].inits.push(test_entry(synth_str("{nm}[{k}]", nodes[case].pos), [synth_call(nm, kids(case), nodes[case].pos)], nodes[case].pos))
+                    count += 1
+                continue
+            if not files[pos_file(pos)].is_dewy and len(nm) >= 2 and nm[0] == '"': nm = nm[1..len(nm) - 1)
+            body = int(nodes[d].b)
+            modules[mainm].inits.push(test_entry(synth_str(nm, pos), kids(body), pos))
+            count += 1
+        cnt = mk(.int_lit, 0)
+        nodes[cnt].ival = count
+        total = cnt
+        loop cases in computed: total = bc_bin(.plus, total, bc_call("__test_count", [cases], 0), 0)
+        modules[mainm].inits.push(synth_call("__test_done", [total], 0))
+program_game = (mainm: int, has_upd: bool, has_drw: bool):
+    user_main = false
+    loop st0 in modules[mainm].inits:
+        if calls_named(st0, "main"): user_main = true
+    if user_main: skip_main = true
+    else if let s = modules[mainm].names.get(intern("main")):
+        mc = mk(.call, 0)
+        mid = mk(.ident, 0)
+        nodes[mid].name = i32(intern("main"))
+        nodes[mc].a = i32(mid)
+        st = mk(.exprstmt, 0)
+        nodes[st].a = i32(mc)
+        modules[mainm].inits.push(st)
+        skip_main = true
+    # (before the program's own code: it is a game, so a texture made at the top opens the
+    # window; a script's opens none)
+    isg = mk(.assign, 0)
+    nodes[isg].op = i32(int(Tok.assign))
+    isgl = mk(.ident, 0)
+    nodes[isgl].name = i32(intern("__is_game"))
+    nodes[isg].a = i32(isgl)
+    isgv = mk(.bool_lit, 0)
+    nodes[isgv].ival = 1
+    nodes[isg].b = i32(isgv)
+    modules[mainm].inits.insert(0, isg)
+    gc = mk(.call, 0)
+    gid = mk(.ident, 0)
+    nodes[gid].name = i32(intern("__game_run"))
+    nodes[gc].a = i32(gid)
+    # (at the program's update and draw: a mismatch is reported there)
+    ua = mk(.ident, 0)
+    if has_upd:
+        nodes[ua].name = i32(intern("update"))
+        nodes[ua].pos = nodes[int(syms[game_fn(mainm, "update")!].decl)].pos
+        add_flag(ua, NF_MUT)   # the function itself (Dewy's `@update`)
+    else: nodes[ua].name = i32(intern("__no_update"))
+    da = mk(.ident, 0)
+    if has_drw:
+        nodes[da].name = i32(intern("draw"))
+        nodes[da].pos = nodes[int(syms[game_fn(mainm, "draw")!].decl)].pos
+        add_flag(da, NF_MUT)
+    else: nodes[da].name = i32(intern("__no_draw"))
+    set_list(gc, [ua, da])
+    # (quit = (): the game's own, in place of the library's that closes the window)
+    if let qq = modules[mainm].names.get(intern("quit")):
+        qd2 = int(syms[qq].decl)
+        if syms[qq].kind == .fns and qd2 != 0 and nodes[qd2].kind == .fn_ and nkids(qd2) == 0: warn(nodes[qd2].pos, "this quit takes the place of the library's quit(), which closes the window: for what runs as the game ends (to save), write `on_quit = ():`")
+    # (on_quit = (): what the game does as it ends: its window closed; quit() closes it)
+    if let qs = modules[mainm].names.get(intern("on_quit")):
+        qd = int(syms[qs].decl)
+        if syms[qs].kind == .fns and qd != 0 and nodes[qd].kind == .fn_ and nkids(qd) == 0:
+            # (what its last line gives, on_quit = (): save_value(...)'s bool, is dropped)
+            add_flag(qd, NF_VOID)
+            qc = mk(.call, 0)
+            qf = mk(.ident, 0)
+            nodes[qf].name = i32(intern("__set_quit"))
+            nodes[qc].a = i32(qf)
+            qa = mk(.ident, nodes[qd].pos)
+            nodes[qa].name = i32(intern("on_quit"))
+            add_flag(qa, NF_MUT)
+            set_list(qc, [qa])
+            qst = mk(.exprstmt, 0)
+            nodes[qst].a = i32(qc)
+            modules[mainm].inits.push(qst)
+    st2 = mk(.exprstmt, 0)
+    nodes[st2].a = i32(gc)
+    modules[mainm].inits.push(st2)
+program_unused_warnings = (mainm: int, main_path: str, runs: bool):
+    loop ci, at in draw_to_at:
+        if not back_to_screen.has(ci): warn(at, "after draw_to, drawing goes into that picture to the end of the frame, and the screen shows nothing: `draw_to_screen()` comes back to the screen (then `draw_target(rt)` shows the picture)")
+    # (nothing runs at all: one word for the whole file, as a module or a program not finished)
+    if not ide_on and not test_mode and not runs and not check_all and not ends_with(main_path, "<input>"):
+        loop d in modules[mainm].decls:
+            if nodes[d].kind != .fn_ or fn_used.has(d) or has_flag(d, NF_EXTERN) or nodes[d].c != 0: continue
+            fnm = name_of(int(nodes[d].name))
+            warn(nodes[d].pos, "nothing in this file runs: it only makes functions, and making {fnm} does not run it. Lines at the top of the file run when the program starts (`{fnm}()` there calls it); a game's {jd(nodes[d].pos, "`update = (dt: f64):` runs every frame, where `if key_pressed(.space): ...` checks a key. (A file that other files `use` is fine like this.)", "`update = (dt:float64):>void => \{...}` runs every frame, where `if key_pressed(Key.space) ...` checks a key. (A file that other files import is fine like this.)")}")
+            break
+    if not ide_on and (not test_mode or check_all) and runs:
+        # (a `$test` function: `dewy-core test` runs it)
+        tested: {int: bool} = {}
+        loop d in modules[mainm].decls:
+            if nodes[d].kind == .test_ and nodes[d].aux == 1: tested[int(nodes[d].name)] = true
+        loop d in modules[mainm].decls:
+            if nodes[d].kind != .fn_ or fn_used.has(d) or has_flag(d, NF_EXTERN) or nodes[d].c != 0 or tested.has(int(nodes[d].name)): continue
+            dn = name_of(int(nodes[d].name))
+            if dn == "main" or dn == "update" or dn == "draw" or starts_with(dn, "_") or starts_with(dn, "(") or starts_with(dn, "op_"): continue
+            # (a method is a member of its type, there for whoever uses the type: only a private
+            # type's, `_Name`, is held to this rule)
+            if dewy_is_method(d) and not starts_with(method_type_name(d), "_"): continue
+            # (its name written anywhere else in the file: an overload used under it, or a use in
+            # code for another target, as in `when TARGET == "windows":`)
+            if word_count(files[pos_file(nodes[d].pos)].src, dn) > 1: continue
+            how = "`{dn}()`"
+            if nkids(d) > 0: how = "`{dn}(...)`"
+            if dewy_is_method(d) and nkids(d) > 1: how = "`value.{dn}(...)`"
+            else if dewy_is_method(d): how = "`value.{dn}`"
+            warn(nodes[d].pos, "'{dn}' is never called: nothing runs it (call it, as {how} where it should run)")
+    # (globals of the program whose fields or elements are changed and that are never read)
+    loop g, wp in gcopy_writes:
+        if g < global_read.len() and global_read[g]: continue
+        if modules[int(globals[g].mod)].is_prelude or pos_in_lib(wp): continue
+        nm = name_of(int(globals[g].name))
+        warn_unused_copy(wp, nm)
+program_main_error0 = (st: int, s: int): fatal(nodes[st].pos, "main runs by itself, once, after the file's top-level statements: remove this call (a file without main runs top to bottom as a script)")
+program_main_error1 = (s: int, rt: int): fatal(nodes[int(syms[s].decl)].pos, "main must return void or an integer exit code, found {dt(rt)}")
+
+# Ownership calls this entry through check.jo; execution is in the Dewy leaf.
+check_pending_functions = (start: int) -> int: run_pending_functions(start)

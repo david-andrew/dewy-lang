@@ -54,13 +54,16 @@ def jo_doubles(*tables):
 
 def isolate_sinks(modules):
     """Keep callers' sink stubs when the implementation lives in its own leaf."""
-    import re
-    signatures = {
+    _isolate_services(modules, "checker_sinks", {
         'sink_pack_call': ('n:int64', 'n', 'void'),
         'sink_values_use': ('n:int64 t:int64', 'n t', 'void'),
         'sink_close': ('b:int64 result:int64', 'b result', 'int64'),
         'pack_written': ('f:int64 tn:int64', 'f tn', 'void'),
-    }
+    })
+
+
+def _isolate_services(modules, stem, signatures):
+    import re
     text = modules.get('check.jo', '')
     dewy, jo = [], ["use 'check.jo'\n"]
     for name, (params, args, result) in signatures.items():
@@ -75,5 +78,17 @@ def isolate_sinks(modules):
         jo.append(f'{name} = {match[1]}: {service}({args.replace(" ", ", ")})\n')
     if dewy:
         modules['check.jo'] = text
-        modules['checker_sinks.dewy'] = ''.join(dewy)
-        modules['checker_sinks.jo'] = ''.join(jo)
+        modules[stem + '.dewy'] = '$runtime_checks\n' + ''.join(dewy)
+        modules[stem + '.jo'] = ''.join(jo)
+
+
+def isolate_hooks(modules):
+    """Keep each caller's hook behavior separate from the hook leaf differential."""
+    _isolate_services(modules, 'checker_hooks', {
+        'block_sibling': ('n:int64 m:int64 code:int64', 'n m code', 'void'),
+        'assign_begin': ('s:int64 code:int64', 's code', 'int64'),
+        'decl_annotated': ('s:int64 t:int64 member:int64', 's t member', 'void'),
+        'decl_sibling': ('s:int64 t:int64 code:int64', 's t code', 'int64'),
+        'decl_literal': ('s:int64', 's', 'int64'),
+        'decl_after': ('s:int64 l:int64 t:int64 code:int64', 's l t code', 'void'),
+    })

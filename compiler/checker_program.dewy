@@ -1,0 +1,303 @@
+from p"checker_hooks.dewy" import (run_pending_functions)
+$runtime_checks
+from p"check.jo" import (FK_INIT add_universe bind_from_imports calls_named check_all check_build_block check_pushers_first cx dewy_main_result draw_fn ensure_global export_decls export_fns find_module float_int_demanded fns game_fn get_fn_inst global_ids globals init_fns late_module_imports lib_dir load_module load_prelude main_fn module_ctx module_frames modules names_known new_inst open_globals optional_runtime prelude prelude_named program_callback_checks program_game program_main_error0 program_main_error1 program_name_default program_setting_errors program_tests program_unused_warnings register_module runtime_demand runtime_ffi_demand runtime_fn runtime_memeq runtime_names runtime_streq settle_open_globals setup_module_contexts skip_main syms synth_call target_macos target_wasm test_mode update_fn want_cpu_flag want_loop_watch zonk_tree)
+from p"icount.jo" import (IC_CHECK IC_EFFECTS IC_FACTS IC_LIB IC_LOAD IC_OWNERSHIP IC_ROOT IC_SHARED ic_mod ic_restore ic_switch)
+from p"ast.jo" import (NF_EXTERN has_flag mk nkids nkids2 nodes set_list)
+from p"types.jo" import (T_FLOAT T_NEVER T_VOID get_struct_inst is_int layout prune ts_dewy)
+from p"arena.jo" import (arena_reset runtime_switch runtime_switch_on runtime_switches)
+from p"check_constant.jo" import (cc_reset)
+from p"concurrency.jo" import (concurrency_claims_finalize concurrency_finalize concurrency_protocol_module)
+from p"expr.jo" import (console_type_id)
+from p"lazy_bodies.jo" import (dc_force_all)
+from p"deadlock.jo" import (deadlock_finalize)
+from p"decimals.jo" import (decimal_writers_first)
+from p"dewy_methods.jo" import (dewy_infer_methods dewy_methods dewy_resolve_inherited)
+from p"prelude.jo" import (dewy_prelude_file dewy_prelude_module order_prelude_globals)
+from p"definite.jo" import (dg_check_program dg_globals)
+from p"directives.jo" import (directives_reset)
+from p"effects.jo" import (effects_finalize effects_reset)
+from p"util.jo" import (errors_only files intern pos_in_lib)
+from p"exact.jo" import (exact_prepare)
+from p"facts.jo" import (facts_reset)
+from p"floats.jo" import (float_keys_reset floats_notes_reset)
+from p"checker_signature.dewy" import (fn_sig)
+from p"ide.jo" import (ide_doc ide_find_file ide_force ide_on)
+from p"import_cycles.jo" import (init_module_order merge_cycle_inits)
+from p"string_domains.jo" import (int_domains_finish string_domains_finish string_domains_materialize)
+from p"member_replay.jo" import (member_reset)
+from p"ownership.jo" import (ownership_finalize ownership_reset)
+from p"module_paths.dewy" import (path_norm)
+from p"pcheck.jo" import (pc_finish)
+from p"poly_closure.jo" import (poly_families poly_finish_warnings)
+from p"errors.jo" import (prepare_nominals)
+from p"proofs.jo" import (proof_reset)
+from p"refine.jo" import (refine_reset)
+from p"parse.jo" import (stop_after)
+from p"safe_paths.jo" import (ut_reset ut_run)
+from p"warn_if.jo" import (wi_reset)
+# Program-level checking owns phase order; services may grow all compiler arenas.
+PGWord:type=int64<overflow='wrap'>
+check_program=(main_path:string):>void=>$unsafe {
+    member_reset()
+    console_type_id=-1
+    ut_reset()
+    wi_reset()
+    cc_reset()
+    ownership_reset()
+    facts_reset()
+    refine_reset()
+    proof_reset()
+    effects_reset()
+    arena_reset()
+    directives_reset()
+    float_keys_reset()
+    floats_notes_reset()
+    program_name_default(main_path)
+    add_universe()
+    ic_switch(IC_LOAD IC_LIB);
+    load_prelude()
+    ic_switch(IC_LOAD IC_ROOT);
+    let mainm=load_module(main_path false -1)
+    ic_switch(IC_CHECK IC_SHARED);
+    ts_dewy=files.ptr[PGWord(modules.ptr[mainm].file)].is_dewy
+    program_setting_errors(mainm)
+    if ide_on and starts_with(ide_doc "{path_norm(lib_dir)}/") and find_module(ide_doc) <? 0 {
+        load_module(ide_doc false -1);
+    }
+    if stop_after =? "lex" or stop_after =? "parse" {exit(0)}
+    modules.ptr[mainm].is_main = true
+    let i:PGWord=0
+    loop i <? modules.length {
+        let icb=ic_mod(IC_CHECK i)
+        register_module(i)
+        ic_restore(icb)
+        i += 1
+    }
+    runtime_switch_on("__KEYED_HASH")
+    runtime_switch_on("__MUL_HI")
+    runtime_switch_on("__SECRETS")
+    if runtime_switches.length >? 0 {runtime_switch()}
+    bind_from_imports()
+    dewy_resolve_inherited()
+    if dewy_methods.length >? 0 {dc_force_all()}
+    dewy_infer_methods()
+    let locks=ts_dewy and prelude_named(["mutex" "Mutex" "lock_all" "DuplicateLock"])
+    let channels=ts_dewy and prelude_named(["channel" "Channel"])
+    let queue=ts_dewy and prelude_named(["mpmc" "Mpmc"])
+    let ring=ts_dewy and prelude_named(["spsc" "Spsc" "SpscSender" "SpscReceiver"])
+    let protocols=ts_dewy and prelude_named(["serve" "Service" "pipeline"] true)
+    if locks or channels or queue or ring or protocols or ts_dewy and names_known(["Unsent" "Full" "Empty" "Closed" "Busy"]) {dewy_prelude_module(intern("Unsent"));}
+    if locks {dewy_prelude_module(intern("mutex"));}
+    if queue or ring {dewy_prelude_file("mpmc.jo");}
+    if queue {dewy_prelude_module(intern("mpmc"));}
+    if ring {
+        dewy_prelude_file("spsc.jo");
+        dewy_prelude_module(intern("spsc"));
+    }
+    if channels or protocols {dewy_prelude_module(intern("channel"));}
+    if protocols {concurrency_protocol_module=dewy_prelude_module(intern("serve"))}
+    prepare_nominals()
+    check_build_block()
+    if not target_wasm and prelude.get(intern("__crash_install")) not=? none {
+        let install=synth_call("__crash_install" [] 0)
+        modules.ptr[mainm].inits.insert(install 0)
+    }
+    let has_upd=game_fn(mainm "update") not=? none
+    let has_drw=game_fn(mainm "draw") not=? none
+    program_callback_checks(mainm has_upd has_drw)
+    program_tests(mainm main_path)
+    if (not test_mode or check_all) and (has_upd or has_drw) {
+        program_game(mainm has_upd has_drw)
+    }
+    let prelude_init=new_inst(FK_INIT 0 "init_prelude")
+    let prelude_body=mk('block' 0)
+    fns.ptr[prelude_init].body = int32(prelude_body)
+    fns.ptr[prelude_init].ret = int32(T_VOID)
+    fns.ptr[prelude_init].state = 2
+    module_ctx=[]
+    module_frames=[]
+    setup_module_contexts(prelude_init)
+    let test_start:PGWord=0
+    if test_mode {test_start=runtime_fn("__test_run_begin")}
+    let order=init_module_order(mainm)
+    init_fns=[prelude_init]
+    if test_start not=? 0 {init_fns.push(test_start)}
+    loop m in order {
+        if not modules.ptr[m].is_prelude {init_fns.push(PGWord(modules.ptr[m].init_fn))}
+    }
+    cx=-1
+    check_pushers_first()
+    decimal_writers_first()
+    loop m in order {
+        if modules.ptr[m].is_prelude {continue}
+        loop [nm s] in modules.ptr[m].names {
+            let sk=syms.ptr[s].kind
+            if (sk =? 'struct_' or sk =? 'enum_') and syms.ptr[s].decl not=? 0 and nkids2(PGWord(syms.ptr[s].decl)) =? 0 and (nodes.ptr[PGWord(syms.ptr[s].decl)].kind =? 'struct_' or nodes.ptr[PGWord(syms.ptr[s].decl)].kind =? 'enum_') {
+                layout(get_struct_inst(PGWord(syms.ptr[s].decl) []))
+            }
+        }
+    }
+    let program_option1=modules.ptr[mainm].names.get(intern("main"))
+    if program_option1 not=? none {
+        let s=program_option1
+        let calls_main=false
+        loop st in modules.ptr[mainm].inits {
+            if calls_named(st "main") {
+                if files.ptr[PGWord(modules.ptr[mainm].file)].is_dewy and syms.ptr[s].kind =? 'fns' and nodes.ptr[st].pos >? 0 and not pos_in_lib(nodes.ptr[st].pos) {program_main_error0(st s)}
+                calls_main=true
+            }
+        }
+        if syms.ptr[s].kind =? 'fns' and not skip_main and not calls_main {
+            main_fn=get_fn_inst(PGWord(syms.ptr[s].decl) [] 0)
+            let rt:PGWord=prune(PGWord(fns.ptr[main_fn].ret))
+            if files.ptr[PGWord(modules.ptr[mainm].file)].is_dewy {dewy_main_result(PGWord(syms.ptr[s].decl) rt)}
+            else if rt not=? T_VOID and rt not=? T_NEVER and not is_int(rt) {
+                program_main_error1(s rt)
+            }
+        }
+    }
+    let program_option2=game_fn(mainm "update")
+    if program_option2 not=? none {
+        let s=program_option2
+        if syms.ptr[s].kind =? 'fns' {
+            let ud:PGWord=PGWord(syms.ptr[s].decl)
+            if fn_sig(ud).generic and PGWord(fn_sig(ud).ntp) =? 1 and nkids(ud) =? 1 {update_fn=get_fn_inst(ud [T_FLOAT] 0)}
+            else {update_fn=get_fn_inst(ud [] 0)}
+        }
+    }
+    let program_option3=game_fn(mainm "draw")
+    if program_option3 not=? none {
+        let s=program_option3
+        if syms.ptr[s].kind =? 'fns' {draw_fn=get_fn_inst(PGWord(syms.ptr[s].decl) [] 0)}
+    }
+    loop d in export_decls {
+        if not modules.ptr[PGWord(nodes.ptr[d].mod)].is_prelude {export_fns.push(get_fn_inst(d [] nodes.ptr[d].pos))}
+    }
+    if ide_on {ide_force=ide_find_file(ide_doc)}
+    loop m in modules {
+        if m.is_prelude and PGWord(m.file) not=? ide_force {continue}
+        loop d in m.decls {
+            if nodes.ptr[d].kind =? 'fn_' and not has_flag(d NF_EXTERN) and not fn_sig(d).generic {get_fn_inst(d [] nodes.ptr[d].pos);}
+        }
+    }
+    loop nm in runtime_names {runtime_fn(nm);}
+    runtime_memeq=runtime_fn("__mem_eq")
+    runtime_streq=runtime_fn("__str_eq")
+    loop nm in optional_runtime {
+        if nm not=? "__mac_syscall" or target_macos {runtime_demand(nm)}
+    }
+    if float_int_demanded {runtime_demand("__float_int_fail")}
+    let program_option4=prelude.get(intern("__c_threads"))
+    if program_option4 not=? none {
+        let ct=program_option4
+        if syms.ptr[ct].kind =? 'global' {ensure_global(PGWord(syms.ptr[ct].ref) 0)}
+    }
+    if want_cpu_flag {
+        let program_option5=prelude.get(intern("__cpu_avx2"))
+        if program_option5 not=? none {
+            let cs=program_option5
+            if syms.ptr[cs].kind =? 'global' {ensure_global(PGWord(syms.ptr[cs].ref) 0)}
+        }
+    }
+    if want_loop_watch {
+        let program_option6=prelude.get(intern("__loop_budget"))
+        if program_option6 not=? none {
+            let ls=program_option6
+            if syms.ptr[ls].kind =? 'global' {
+                ensure_global(PGWord(syms.ptr[ls].ref) 0)
+                runtime_fn("__loop_watchdog");
+            }
+        }
+    }
+    let k:PGWord=0
+    let exp_added:array<bool>=fill(false export_decls.length)
+    loop true {
+        k=run_pending_functions(k)
+        if runtime_ffi_demand() {continue}
+        let used:dict<int64 bool>=dict<int64 bool>()
+        loop fi in [1..fns.length) {
+            if fns.ptr[fi].state =? 2 and fns.ptr[fi].decl not=? 0 {used[PGWord(nodes.ptr[PGWord(fns.ptr[fi].decl)].mod)] = true}
+        }
+        let more=false
+        exp_added.resize(export_decls.length)
+        loop ei in [0..export_decls.length) and d in export_decls {
+            if exp_added.ptr[ei] or not modules.ptr[PGWord(nodes.ptr[d].mod)].is_prelude {continue}
+            if used.get(PGWord(nodes.ptr[d].mod)) not=? none {
+                exp_added.ptr[ei] = true
+                export_fns.push(get_fn_inst(d [] nodes.ptr[d].pos))
+                more=true
+            }
+        }
+        if not more {break}
+    }
+    pc_finish()
+    string_domains_finish()
+    string_domains_materialize()
+    int_domains_finish()
+    if poly_families.length >? 1 {poly_finish_warnings()}
+    if open_globals.length >? 0 {settle_open_globals()}
+    let runs=false
+    loop i0 in modules.ptr[mainm].inits {
+        let ik=nodes.ptr[i0].kind
+        if nodes.ptr[i0].pos <=? 0 or pos_in_lib(nodes.ptr[i0].pos) {continue}
+        if ik not=? 'vardecl' and ik not=? 'assign' and ik not=? 'const_' {runs=true}
+    }
+    loop nm0 in ["main" "update" "draw"] {
+        if game_fn(mainm nm0) not=? none {runs=true}
+    }
+    loop mi in [0..modules.length) {
+        if modules.ptr[mi].is_prelude {continue}
+        loop [cn cs] in modules.ptr[mi].names {
+            if syms.ptr[cs].kind =? 'const_' and syms.ptr[cs].decl not=? 0 {
+                let cg:PGWord=PGWord(syms.ptr[cs].ref)
+                if globals.ptr[cg].decl not=? 0 {ensure_global(cg nodes.ptr[PGWord(syms.ptr[cs].decl)].pos)}
+            }
+        }
+    }
+    if k <? fns.length {
+        k=run_pending_functions(k)
+        if runtime_ffi_demand() {k=run_pending_functions(k)}
+        if open_globals.length >? 0 {settle_open_globals()}
+    }
+    ut_run()
+    if late_module_imports {
+        order=init_module_order(mainm)
+        init_fns=[prelude_init]
+        if test_start not=? 0 {init_fns.push(test_start)}
+        loop m in order {
+            if not modules.ptr[m].is_prelude {init_fns.push(PGWord(modules.ptr[m].init_fn))}
+        }
+    }
+    merge_cycle_inits(order)
+    if dg_globals.length >? 0 and not test_mode {
+        let later:array<int64>=[]
+        if update_fn >? 0 {later.push(update_fn)}
+        if draw_fn >? 0 {later.push(draw_fn)}
+        loop f in export_fns {later.push(f)}
+        dg_check_program(init_fns main_fn later)
+    }
+    program_unused_warnings(mainm main_path runs)
+    let pl:array<int64>=[]
+    loop g in global_ids {
+        if modules.ptr[PGWord(globals.ptr[g].mod)].is_prelude and globals.ptr[g].state =? 2 {pl.push(PGWord(globals.ptr[g].decl))}
+    }
+    order_prelude_globals(@pl)
+    set_list(PGWord(fns.ptr[prelude_init].body) pl)
+    zonk_tree(PGWord(fns.ptr[prelude_init].body))
+    pc_finish()
+    string_domains_finish()
+    string_domains_materialize()
+    int_domains_finish()
+    if not errors_only {
+        let icb=ic_switch(IC_FACTS IC_SHARED)
+        exact_prepare()
+        ic_switch(IC_OWNERSHIP IC_SHARED);
+        ownership_finalize()
+        ic_switch(IC_EFFECTS IC_SHARED);
+        concurrency_finalize()
+        concurrency_claims_finalize()
+        deadlock_finalize()
+        effects_finalize()
+        ic_restore(icb)
+    }
+}

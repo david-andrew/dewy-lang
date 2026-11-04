@@ -272,10 +272,14 @@ DECL_JO = {
 }
 
 
+from tests.selfhost_expr_double import isolate_hooks
+JO_DOUBLES = jo_doubles(DECL_JO)
+isolate_hooks(JO_DOUBLES)
+
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_vardecls_twins(compiler, tmp_path, release):  # noqa: F811
-    assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'xb_check', extra_stems=STEMS, jo_doubles=jo_doubles(DECL_JO)).endswith(b'ok\n')
+    assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'xb_check', extra_stems=STEMS, jo_doubles=JO_DOUBLES).endswith(b'ok\n')
 
 
 @pytest.mark.parametrize('case,code', [
@@ -294,5 +298,5 @@ main = ():
     {case}
     print("unreachable")
 '''
-    output = compare_leaf(compiler, tmp_path, False, DRIVER + main, 'xb_check', status=19, extra_stems=STEMS, jo_doubles=jo_doubles(DECL_JO))
+    output = compare_leaf(compiler, tmp_path, False, DRIVER + main, 'xb_check', status=19, extra_stems=STEMS, jo_doubles=JO_DOUBLES)
     assert output.rstrip().endswith(f':{code}'.encode())

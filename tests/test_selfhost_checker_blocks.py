@@ -258,3 +258,6 @@ main = ():
 
 from tests.selfhost_expr_double import isolate_sinks
 isolate_sinks(JO_DOUBLES)
+
+from tests.selfhost_expr_double import isolate_hooks
+isolate_hooks(JO_DOUBLES)

@@ -321,10 +321,14 @@ ASSIGN_JO = {
 }
 
 
+from tests.selfhost_expr_double import isolate_hooks
+JO_DOUBLES = jo_doubles(ASSIGN_JO)
+isolate_hooks(JO_DOUBLES)
+
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_assigns_twins(compiler, tmp_path, release):  # noqa: F811
-    assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'da_check', extra_stems=STEMS, jo_doubles=jo_doubles(ASSIGN_JO)).endswith(b'ok\n')
+    assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'da_check', extra_stems=STEMS, jo_doubles=JO_DOUBLES).endswith(b'ok\n')
 
 
 # A service's error stops the assignment where Jo's did.
@@ -356,5 +360,5 @@ main = ():
     {case}
     print("unreachable")
 '''
-    output = compare_leaf(compiler, tmp_path, False, DRIVER + main, 'da_check', status=19, extra_stems=STEMS, jo_doubles=jo_doubles(ASSIGN_JO))
+    output = compare_leaf(compiler, tmp_path, False, DRIVER + main, 'da_check', status=19, extra_stems=STEMS, jo_doubles=JO_DOUBLES)
     assert output.rstrip().endswith(f'error:{code}'.encode())
