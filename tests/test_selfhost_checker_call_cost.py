@@ -96,8 +96,8 @@ JO = jo_doubles({name: {} for name in ('ast.jo', 'types.jo', 'units.jo')}, {
         'is_lit': 'is_lit = (n: int) -> bool: int(nodes[n].flags) & 256 != 0',
         'ntype': 'ntype = (n: int) -> int: int(nodes[n].type)',
         'cc_context': 'cc_context = (a: int) -> bool: cost_context(a)',
-        'arg_cost_rest': 'arg_cost_rest = (a: int, p: int, bs: mut int[]) -> int: cost_rest(a, p, bs)',
-        'call_mutable_cost': 'call_mutable_cost = (a: int, p: int, bs: mut int[], recv: mut bool, receiver: bool) -> int: cost_mutable(a, p, bs, recv, receiver)',
+        'call_conversion_double': 'call_conversion_double = (a: int, p: int, bs: mut int[]) -> int: cost_rest(a, p, bs)',
+        'call_mutable_double': 'call_mutable_double = (a: int, p: int, bs: mut int[], recv: mut bool, receiver: bool) -> int: cost_mutable(a, p, bs, recv, receiver)',
     },
 })
 # Empty Jo stand-ins still re-export the driver's arenas.
@@ -105,6 +105,17 @@ JO['ast.jo'] = "use 'node_store.dewy'\nnodes: Node[] = [Node()]\n"
 JO['types.jo'] = "use 'checker_types.dewy'\ntypes: TypeInfo[] = [TypeInfo()]\nhas_var = (t: int) -> bool: int(types[t].flags) & 1 != 0\n"
 DRIVER = ("use 'ast.jo'\nuse 'types.jo'\n" + DRIVER.replace('nodes: Node[] = [Node()]', '')
           .replace('types: TypeInfo[] = [TypeInfo()]', ''))
+
+# A module boundary double isolates the scoring/resolver leaf from conversion.
+JO['checker_call_convert.dewy'] = r'''from p"expr.jo" import call_conversion_double
+arg_cost_rest=(a:int64 p:int64 @bs:array<int64>):>int64=>call_conversion_double(a p @bs)
+'''
+JO['checker_call_convert.jo'] = "use 'expr.jo'\narg_cost_rest = (a: int, p: int, bs: mut int[]) -> int: call_conversion_double(a, p, bs)\n"
+
+JO['checker_call_convert.dewy'] += r'''from p"expr.jo" import call_mutable_double
+call_mutable_cost=(a:int64 p:int64 @bs:array<int64> @recv:bool receiver:bool):>int64=>call_mutable_double(a p @bs @recv receiver)
+'''
+JO['checker_call_convert.jo'] += "call_mutable_cost = (a: int, p: int, bs: mut int[], recv: mut bool, receiver: bool) -> int: call_mutable_double(a, p, bs, recv, receiver)\n"
 
 
 @pytest.mark.core_quick

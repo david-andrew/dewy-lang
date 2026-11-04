@@ -1,0 +1,433 @@
+$runtime_checks
+from p"types.jo" import (T_FLOAT T_INT T_MATH_INT T_U64 fields has_var is_float is_int is_union mk_array prune struct_targ structs targ tkind type_eq types)
+from p"ast.jo" import (NF_CHECKED NF_U64 NF_COMPREHENSION NF_GENERIC NF_SPREAD add_flag clone has_flag kid kids nkids nodes)
+from p"checker_call_cost.dewy" import (arg_cost)
+from p"expr.jo" import (array_has_spread branch_numeric bundled_bigint_type call_refined_literal_cost call_string_cost can_coerce charlike decimal_literal_tree dewy_bigint_literal_target dewy_positional_fits dewy_record_spread_entries dewy_record_target dewy_set_literal find_variant fixed_literal_ok fn_value_adapts is_dewy_set_type is_fn_type is_lit is_map_type is_nd lit_default lit_fits match_type nd_elem ntype oversized_literal subst_partial union_target variant_enum word_rational_source)
+from p"check.jo" import (binding_leaves check_struct_fields globals locals resolve_type subst syms)
+from p"units.jo" import (bundled_rational_type bundled_word_rational_type quantity_constant_fits quantity_int_promotes)
+from p"effects.jo" import (callable_base callable_contract effect_infer_callable effects_active)
+from p"checker_expr.dewy" import (check_expr lookup)
+from p"checker_call_queries.dewy" import (ctx_dependent)
+from p"util.jo" import (files pos_file)
+from p"poly_closure.jo" import (poly_matches)
+from p"refine.jo" import (refine_active representation_type str_sets)
+from p"sibling_types.jo" import (sibling_array_source)
+# Score only demanded argument syntax; branch scopes remain deferred.
+CVWord:type=int64<overflow='wrap'>
+branch_arg_cost=(a:CVWord pat:CVWord @binds:array<int64> hidden:array<int64>=[]):>CVWord=>$unsafe {
+    let k=nodes.ptr[a].kind
+    if k =? 'block' {
+        if nkids(a) =? 0 {return 0}
+        let local_hidden=hidden
+        loop statement in kids(a) {
+            if nodes.ptr[statement].kind =? 'vardecl' {
+                local_hidden.push(CVWord(nodes.ptr[statement].name))
+                loop binding in binding_leaves(kids(statement)) {local_hidden.push(CVWord(nodes.ptr[binding].name))}
+            }
+        }
+        let last=kid(a nkids(a) - 1)
+        if nodes.ptr[last].kind =? 'exprstmt' {return branch_arg_cost(CVWord(nodes.ptr[last].a) pat @binds local_hidden)}
+        if nodes.ptr[last].kind =? 'if_' {return branch_arg_cost(last pat @binds local_hidden)}
+        return 0
+    }
+    if k =? 'if_' or k =? 'match_' {
+        let bodies:array<int64>=[]
+        let local_hidden=hidden
+        if k =? 'if_' {
+            bodies.push(CVWord(nodes.ptr[a].b))
+            if nodes.ptr[a].c not=? 0 {bodies.push(CVWord(nodes.ptr[a].c))}
+        }
+        else {
+            loop arm in kids(a) {
+                bodies.push(CVWord(nodes.ptr[arm].b))
+                loop pattern in kids(arm) {
+                    if nodes.ptr[pattern].name not=? 0 {local_hidden.push(CVWord(nodes.ptr[pattern].name))}
+                }
+            }
+        }
+        let cost:CVWord=0
+        loop body in bodies {
+            let r=branch_arg_cost(body pat @binds local_hidden)
+            if r <? 0 {return -1}
+            cost=max(cost r)
+        }
+        return cost
+    }
+    if k =? 'int_lit' or k =? 'float_lit' or k =? 'str_lit' or k =? 'bool_lit' or k =? 'none_lit' {
+        let probe=clone(a)
+        check_expr(probe 0);
+        return arg_cost(probe pat @binds)
+    }
+    if k =? 'unary' and (nodes.ptr[CVWord(nodes.ptr[a].a)].kind =? 'int_lit' or nodes.ptr[CVWord(nodes.ptr[a].a)].kind =? 'float_lit') {
+        let probe=clone(a)
+        check_expr(probe 0);
+        return arg_cost(probe pat @binds)
+    }
+    if (k =? 'binary' or k =? 'unary') and branch_numeric(a hidden) {
+        let left=branch_arg_cost(CVWord(nodes.ptr[a].a) pat @binds hidden)
+        if left <? 0 or k =? 'unary' {return left}
+        let right=branch_arg_cost(CVWord(nodes.ptr[a].b) pat @binds hidden)
+        if right <? 0 {return -1}
+        return max(left right)
+    }
+    if k =? 'ident' and not (CVWord(nodes.ptr[a].name) in? hidden) {
+        let sym=lookup(CVWord(nodes.ptr[a].name))
+        let t:CVWord=0
+        if sym not=? 0 and syms.ptr[sym].kind =? 'local' {t=CVWord(locals.ptr[CVWord(syms.ptr[sym].ref)].type)}
+        else if sym not=? 0 and syms.ptr[sym].kind =? 'global' {t=CVWord(globals.ptr[CVWord(syms.ptr[sym].ref)].type)}
+        if t not=? 0 and not has_var(t) and not is_union(t) and tkind(t) not=? 'opt' and not is_fn_type(t) {
+            let probe=clone(a)
+            nodes.ptr[probe].type = int32(t)
+            add_flag(probe NF_CHECKED)
+            return arg_cost(probe pat @binds)
+        }
+    }
+    if types.ptr[prune(pat)].kind =? 'param' {return 3}
+    0
+}
+arg_cost_rest=(a:CVWord pat:CVWord @binds:array<int64>):>CVWord=>$unsafe {
+    if effects_active and nodes.ptr[a].type not=? 0 and callable_contract(pat) not=? 0 {
+        let inferred=effect_infer_callable(a pat)
+        nodes.ptr[a].type=int32(inferred)
+    }
+    let p=representation_type(pat)
+    let pk=types.ptr[p].kind
+    let target=p
+    if pk =? 'param' and binds.ptr[CVWord(types.ptr[p].id)] not=? 0 {target=prune(binds.ptr[CVWord(types.ptr[p].id)])}
+    if pk =? 'secret' and not has_var(p) and (nodes.ptr[a].type =? 0 or is_lit(a) or ctx_dependent(a)) {
+        let r=arg_cost(a CVWord(types.ptr[p].elem) @binds)
+        if r <? 0 {return -1}
+        return r + 1
+    }
+    if nodes.ptr[a].kind not=? 'int_lit' and bundled_rational_type(target) and decimal_literal_tree(a) {return 0}
+    if is_float(target) and nodes.ptr[a].type not=? 0 and bundled_rational_type(ntype(a)) {return 10}
+    if bundled_rational_type(target) and (nodes.ptr[a].kind =? 'int_lit' or (nodes.ptr[a].type not=? 0 and is_int(ntype(a)))) {return 10}
+    if nodes.ptr[a].type not=? 0 and bundled_word_rational_type(ntype(a)) and (bundled_rational_type(target) or is_float(target)) {return 10}
+    if bundled_word_rational_type(target) and nodes.ptr[a].type not=? 0 and word_rational_source(a ntype(a)) {return 5}
+    if not is_lit(a) and nodes.ptr[a].type not=? 0 and ntype(a) =? T_MATH_INT and bundled_bigint_type(target) {return 1}
+    if ctx_dependent(a) {
+        if oversized_literal(a) {
+            target=prune(subst_partial(p @binds))
+            if types.ptr[target].kind =? 'opt' {target=prune(CVWord(types.ptr[target].elem))}
+            if bundled_bigint_type(target) {return 0}
+            if target =? T_MATH_INT {return 1}
+            return -1
+        }
+        let k=nodes.ptr[a].kind
+        if k =? 'if_' or k =? 'match_' {return branch_arg_cost(a pat @binds)}
+        if dewy_set_literal(a) {
+            target=p
+            if pk =? 'param' and binds.ptr[CVWord(types.ptr[p].id)] not=? 0 {target=prune(binds.ptr[CVWord(types.ptr[p].id)])}
+            let cost:CVWord=0
+            if types.ptr[target].kind =? 'opt' {
+                target=prune(CVWord(types.ptr[target].elem))
+                cost=2
+            }
+            if is_dewy_set_type(target) {
+                let r=arg_cost(kid(a 0) mk_array(struct_targ(CVWord(types.ptr[target].st) 0)) @binds)
+                if r <? 0 {return -1}
+                return cost + r
+            }
+            if pk =? 'param' {return 3}
+            return -1
+        }
+        if k =? 'hole' {return 0}
+        if k =? 'ident' or k =? 'field' or k =? 'typeapply' {
+            if pk =? 'fn_' or pk =? 'callable' {return 0}
+            if pk =? 'cfn' {return 0}
+            if pk =? 'param' {return 3}
+            return -1
+        }
+        if k =? 'lambda' {
+            if pk =? 'param' {
+                if nkids(a) >? 0 and nodes.ptr[kid(a 0)].a not=? 0 {return 3}
+                return -1
+            }
+            if pk =? 'callable' {p=callable_base(p); pk=types.ptr[p].kind}
+            if pk not=? 'fn_' or CVWord(types.ptr[p].nargs) not=? nkids(a) {return -1}
+            if has_flag(a NF_GENERIC) {return 0}
+            loop i in [0..nkids(a)) {
+                let pn=kid(a i)
+                if nodes.ptr[pn].a =? 0 {continue}
+                let at:CVWord=prune(resolve_type(CVWord(nodes.ptr[pn].a)))
+                let pt:CVWord=prune(targ(p i))
+                if not has_var(at) and not has_var(pt) and not type_eq(at pt) {return -1}
+            }
+            return 0
+        }
+        if k =? 'dotname' or k =? 'call' {
+            let name:CVWord=CVWord(nodes.ptr[a].name)
+            if k =? 'call' {name=CVWord(nodes.ptr[CVWord(nodes.ptr[a].a)].name)}
+            let e=p
+            if has_var(p) {e=prune(subst(p binds))}
+            if types.ptr[e].kind =? 'opt' {e=prune(CVWord(types.ptr[e].elem))}
+            e=variant_enum(e name)
+            if types.ptr[e].kind not=? 'enum_' {return -1}
+            if find_variant(CVWord(types.ptr[e].st) name) >=? 0 {return 0}
+            return -1
+        }
+        if k =? 'none_lit' {
+            if pk =? 'opt' {return 0}
+            if pk =? 'param' {return 3}
+            return -1
+        }
+        if k =? 'array' and nkids(a) >? 0 and files.ptr[pos_file(nodes.ptr[a].pos)].is_dewy {
+            target=p
+            if pk =? 'param' and binds.ptr[CVWord(types.ptr[p].id)] not=? 0 {target=prune(binds.ptr[CVWord(types.ptr[p].id)])}
+            let cost:CVWord=0
+            if types.ptr[target].kind =? 'opt' {
+                target=prune(CVWord(types.ptr[target].elem))
+                cost=2
+            }
+            let tk=types.ptr[target].kind
+            if tk =? 'tuple' {
+                if nkids(a) not=? CVWord(types.ptr[target].nargs) or array_has_spread(a) {return -1}
+                loop i in [0..nkids(a)) {
+                    let r=arg_cost(kid(a i) targ(target i) @binds)
+                    if r <? 0 {return -1}
+                    cost += r
+                }
+                return cost
+            }
+            if tk =? 'array' or (tk =? 'fixed' and (fixed_literal_ok(a target) or array_has_spread(a))) {
+                let et:CVWord=CVWord(types.ptr[target].elem)
+                if types.ptr[prune(et)].kind =? 'param' and binds.ptr[CVWord(types.ptr[prune(et)].id)] =? 0 {
+                    loop element in kids(a) {
+                        if ctx_dependent(element) or is_lit(element) {continue}
+                        let inferred:CVWord=prune(ntype(element))
+                        if has_flag(element NF_SPREAD) {
+                            if is_dewy_set_type(inferred) {inferred=struct_targ(CVWord(types.ptr[inferred].st) 0)}
+                            else if types.ptr[inferred].kind =? 'array' or types.ptr[inferred].kind =? 'fixed' {inferred=CVWord(types.ptr[inferred].elem)}
+                            else {continue}
+                        }
+                        if match_type(et inferred @binds 1) <? 0 {return -1}
+                        break
+                    }
+                }
+                let element_cost:CVWord=0
+                loop element in kids(a) {
+                    let ep=et
+                    if has_flag(element NF_SPREAD) {ep=mk_array(et)}
+                    if types.ptr[prune(ep)].kind =? 'param' {
+                        let bound=binds.ptr[CVWord(types.ptr[prune(ep)].id)]
+                        if bound not=? 0 and not has_var(prune(bound)) {ep=bound}
+                    }
+                    let r:CVWord=0
+                    if has_flag(element NF_SPREAD) and dewy_set_literal(element) {
+                        r=arg_cost(kid(element 0) ep @binds)
+                    }
+                    else if has_flag(element NF_SPREAD) and is_dewy_set_type(ntype(element)) {
+                        r=match_type(et struct_targ(CVWord(types.ptr[prune(ntype(element))].st) 0) @binds 0)
+                    }
+                    else if types.ptr[prune(ep)].kind =? 'param' and binds.ptr[CVWord(types.ptr[prune(ep)].id)] =? 0 and not ctx_dependent(element) {
+                        if is_lit(element) {r=if lit_default(element) =? T_MATH_INT {2} else {1}}
+                        else {
+                            r=match_type(ep ntype(element) @binds 1)
+                            if r >=? 0 {r += 1}
+                        }
+                    }
+                    else {r=arg_cost(element ep @binds)}
+                    if r <? 0 {return -1}
+                    element_cost=max(element_cost r)
+                }
+                return cost + element_cost
+            }
+            if tk =? 'struct_' and not has_var(target) and not is_map_type(target) and dewy_positional_fits(a target) {
+                let si:CVWord=CVWord(types.ptr[target].st)
+                check_struct_fields(si)
+                if nkids(a) >? CVWord(structs.ptr[si].nfields) {return -1}
+                let element_cost:CVWord=0
+                loop i in [0..kids(a).length) and element in kids(a) {
+                    let r=arg_cost(element CVWord(fields.ptr[CVWord(structs.ptr[si].fields) + i].type) @binds)
+                    if r <? 0 {return -1}
+                    element_cost=max(element_cost r)
+                }
+                return cost + element_cost
+            }
+            if pk =? 'param' and has_var(target) {return 3}
+            return -1
+        }
+        if k =? 'array' or (k =? 'block' and has_flag(a NF_COMPREHENSION)) {
+            if pk =? 'array' {return 0}
+            if nkids(a) =? 0 and not has_flag(a NF_CHECKED) and dewy_record_target(p) not=? 0 and files.ptr[pos_file(nodes.ptr[a].pos)].is_dewy {return 0}
+            if pk =? 'param' {return 3}
+            return -1
+        }
+        if k =? 'record_lit' {
+            target=p
+            if pk =? 'opt' {target=prune(CVWord(types.ptr[p].elem))}
+            if types.ptr[target].kind =? 'struct_' and not is_map_type(target) {
+                let si:CVWord=CVWord(types.ptr[target].st)
+                check_struct_fields(si)
+                let cost:CVWord=0
+                let members=kids(a)
+                if array_has_spread(a) {
+                    let unused:array<int64>=[]
+                    members=dewy_record_spread_entries(a 0 @unused false)
+                }
+                loop field in members {
+                    let fi:CVWord=-1
+                    loop i in [0..CVWord(structs.ptr[si].nfields)) {
+                        let at:CVWord=CVWord(structs.ptr[si].fields) + i
+                        if fields.ptr[at].name =? nodes.ptr[field].name {fi=at; break}
+                    }
+                    if fi <? 0 {return -1}
+                    let r=arg_cost(CVWord(nodes.ptr[field].a) CVWord(fields.ptr[fi].type) @binds)
+                    if r <? 0 {return -1}
+                    cost += r
+                }
+                return cost
+            }
+            if pk =? 'param' {return 3}
+            return -1
+        }
+        if k =? 'map_lit' {
+            target=prune(subst_partial(p @binds))
+            if types.ptr[target].kind =? 'opt' {target=prune(CVWord(types.ptr[target].elem))}
+            if is_map_type(target) {
+                let si:CVWord=CVWord(types.ptr[target].st)
+                let cost:CVWord=0
+                loop pair in kids(a) {
+                    let key=arg_cost(CVWord(nodes.ptr[pair].a) struct_targ(si 0) @binds)
+                    let value=arg_cost(CVWord(nodes.ptr[pair].b) struct_targ(si 1) @binds)
+                    if key <? 0 or value <? 0 {return -1}
+                    cost=max(cost key + value)
+                }
+                return cost
+            }
+            if pk =? 'param' {return 3}
+            return -1
+        }
+        return -1
+    }
+    if charlike(a) and pk =? 'int_' {return 1}
+    if pk =? 'enum_' and not has_var(p) and is_union(p) and not is_union(ntype(a)) {
+        if union_target(a ntype(a) p) >=? 0 {return 1}
+        return -1
+    }
+    let sp=if pk =? 'param' and binds.ptr[CVWord(types.ptr[p].id)] not=? 0 {prune(binds.ptr[CVWord(types.ptr[p].id)])} else {p}
+    if str_sets.length >? 1 and (types.ptr[sp].kind =? 'str_' or types.ptr[sp].kind =? 'opt' or types.ptr[sp].kind =? 'enum_') {
+        let cost=call_string_cost(a p sp @binds)
+        if cost not=? -2 {return cost}
+    }
+    if is_lit(a) and types.ptr[prune(pat)].kind =? 'refined' and refine_active {
+        let cost=call_refined_literal_cost(a pat)
+        if cost not=? -2 {return cost}
+    }
+    if is_lit(a) {
+        if pk =? 'param' {
+            let b=binds.ptr[CVWord(types.ptr[p].id)]
+            if b =? 0 {return 3}
+            if can_coerce(a ntype(a) b) {return 0}
+            return -1
+        }
+        if is_union(p) and has_var(p) {return match_type(pat lit_default(a) @binds 0)}
+        if pk =? 'int_' {
+            if nodes.ptr[a].kind =? 'int_lit' {
+                if not lit_fits(a p) {return -1}
+                if p =? lit_default(a) {return 0}
+                if p =? T_U64 and has_flag(a NF_U64) {return 1}
+                if lit_default(a) =? T_MATH_INT and p not=? T_INT {return 2}
+                return 1
+            }
+            return -1
+        }
+        if dewy_bigint_literal_target(a p) {return 3}
+        if pk =? 'float_' {
+            if p =? T_FLOAT {
+                if nodes.ptr[a].kind =? 'int_lit' {return if lit_default(a) =? T_MATH_INT {3} else {2}}
+                return if decimal_literal_tree(a) {1} else {0}
+            }
+            if nodes.ptr[a].kind =? 'int_lit' {return if lit_default(a) =? T_MATH_INT {4} else {3}}
+            return if decimal_literal_tree(a) {2} else {1}
+        }
+        if pk =? 'opt' and not has_var(p) and can_coerce(a ntype(a) p) {return 2}
+        if pk =? 'vec' {return -1}
+        return -1
+    }
+    let fp=p
+    if pk =? 'param' and binds.ptr[CVWord(types.ptr[p].id)] not=? 0 {fp=prune(binds.ptr[CVWord(types.ptr[p].id)])}
+    if types.ptr[fp].kind =? 'quantity' and quantity_constant_fits(a fp) {
+        if type_eq(ntype(a) fp) {return 0}
+        return 2
+    }
+    if types.ptr[fp].kind =? 'quantity' and nodes.ptr[a].type not=? 0 and quantity_int_promotes(ntype(a) fp) {return 10}
+    if types.ptr[fp].kind =? 'fixed' and nodes.ptr[a].kind =? 'array' and tkind(ntype(a)) =? 'array' and fixed_literal_ok(a fp) {
+        let et:CVWord=CVWord(types.ptr[fp].elem)
+        if has_var(prune(et)) {
+            let r:CVWord=match_type(et CVWord(types.ptr[prune(ntype(a))].elem) @binds 1)
+            if r <? 0 {return -1}
+            return r + 1
+        }
+        loop i in [0..nkids(a)) {
+            if not can_coerce(kid(a i) ntype(kid(a i)) et) {return -1}
+        }
+        return 1
+    }
+    if types.ptr[fp].kind =? 'fixed' and nodes.ptr[a].kind not=? 'array' and tkind(ntype(a)) =? 'array' {
+        let r:CVWord=match_type(CVWord(types.ptr[fp].elem) CVWord(types.ptr[prune(ntype(a))].elem) @binds 1)
+        if r >=? 0 {return r + 1}
+        return -1
+    }
+    if tkind(ntype(a)) =? 'polyfn' and types.ptr[fp].kind =? 'fn_' and poly_matches(prune(ntype(a)) fp) {return 0}
+    let r:CVWord=match_type(pat ntype(a) @binds 0)
+    if r <? 0 and types.ptr[fp].kind =? 'array' and tkind(ntype(a)) =? 'tuple' and not has_var(fp) and sibling_array_source(a prune(ntype(a)) CVWord(types.ptr[fp].elem)) {return 2}
+    if r <? 0 and types.ptr[fp].kind =? 'fn_' and tkind(ntype(a)) =? 'fn_' and not has_var(fp) and fn_value_adapts(a prune(ntype(a)) fp) {return 2}
+    if r <? 0 and types.ptr[fp].kind =? 'array' and is_nd(ntype(a)) {
+        r=match_type(pat mk_array(nd_elem(ntype(a))) @binds 0)
+        if r >=? 0 {return r + 2}
+    }
+    r
+}
+from p"expr.jo" import (call_argument_error written_at check_place coerce)
+from p"refine.jo" import (ref_mutable_authority refine_storage ref_storage_contract is_total_dict refine_arg_target)
+from p"partition.jo" import (partition_slice partition_active)
+from p"expr.jo" import (path_narrows path_rooted path_forget path_key)
+from p"types.jo" import unify
+from p"ast.jo" import NF_MUT
+# Mutability matches representation only after ordinary generic matching succeeds.
+call_mutable_cost=(a:CVWord pt:CVWord @binds:array<int64> @recv_fits:bool receiver:bool):>CVWord=>$unsafe {
+    let r=match_type(pt ntype(a) @binds 0)
+    if r <? 0 {return -1}
+    if receiver {recv_fits=true}
+    let shape=subst(pt binds)
+    let actual=ntype(a)
+    if refine_active {actual=representation_type(actual); shape=representation_type(shape)}
+    if not has_var(prune(shape)) and not has_var(prune(actual)) and not type_eq(shape actual) {return -1}
+    r
+}
+# Finish only arguments that still need checking, a conversion or mutable access.
+arg_finish_rest=(a:CVWord pt:CVWord is_mut:bool):>void=>$unsafe {
+    if is_mut and refine_active {
+        ref_mutable_authority(a)
+        let storage=refine_storage(a ntype(a))
+        if not type_eq(storage pt) and (ref_storage_contract(storage) or ref_storage_contract(pt)) {
+            let total=is_total_dict(storage) and type_eq(CVWord(types.ptr[prune(storage)].elem) pt)
+            if not total {call_argument_error(1 a pt)}
+        }
+    }
+    if is_mut and not has_flag(a NF_MUT) and files.ptr[pos_file(nodes.ptr[a].pos)].is_dewy {call_argument_error(2 a pt)}
+    if nodes.ptr[a].kind =? 'hole' {
+        nodes.ptr[a].type=int32(pt)
+        return
+    }
+    if not has_flag(a NF_CHECKED) or nodes.ptr[a].type =? 0 {
+        check_expr(a pt);
+        add_flag(a NF_CHECKED)
+    }
+    if not is_mut and has_flag(a NF_MUT) and not is_fn_type(ntype(a)) and files.ptr[pos_file(nodes.ptr[a].pos)].is_dewy and written_at(a) {call_argument_error(3 a pt)}
+    if is_mut {
+        if partition_slice(a) {partition_active=true}
+        check_place(a true)
+        if path_narrows >? 0 and path_rooted(a) {path_forget(path_key(a))}
+        let actual=if refine_active {refine_storage(a ntype(a))} else {ntype(a)}
+        if refine_active and is_total_dict(actual) {actual=CVWord(types.ptr[prune(actual)].elem)}
+        if not type_eq(actual pt) and not unify(actual pt) {call_argument_error(4 a pt)}
+        add_flag(a NF_MUT)
+        return
+    }
+    let saved=refine_arg_target
+    refine_arg_target=prune(pt)
+    coerce(a pt);
+    refine_arg_target=saved
+}

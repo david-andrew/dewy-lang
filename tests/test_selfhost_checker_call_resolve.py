@@ -128,11 +128,11 @@ call_resolve_error = (kind: int, n: int, name: int, d: int, i: int, partial: boo
 call_ide_ref = (n: int, name: int, xs: int[], d: int, f: int): events.push("ide")
 call_note_contracts = (n: int, f: int, d: int, partial: bool, closure: int): events.push("contracts:{partial}:{closure}")
 call_capture_block = (n: int, f: int, ss: mut int[]): events.push("capture-block:{ss}")
-arg_cost_rest = (a: int, p: int, bs: mut int[]) -> int:
+call_conversion_double = (a: int, p: int, bs: mut int[]) -> int:
     if nodes[a].ival == -1: return -1
     if tkind(p) == .param and nodes[a].type != 0: bs[int(types[p].id)] = int(nodes[a].type)
     1
-call_mutable_cost = (a: int, p: int, bs: mut int[], recv: mut bool, receiver: bool) -> int:
+call_mutable_double = (a: int, p: int, bs: mut int[], recv: mut bool, receiver: bool) -> int:
     if receiver: recv = true
     0
 ''',
@@ -294,6 +294,17 @@ MAIN = r'''main = ():
     cr_run([d], [x])
     print("ok")
 '''
+
+# A module boundary double isolates the scoring/resolver leaf from conversion.
+JO['checker_call_convert.dewy'] = r'''from p"expr.jo" import call_conversion_double
+arg_cost_rest=(a:int64 p:int64 @bs:array<int64>):>int64=>call_conversion_double(a p @bs)
+'''
+JO['checker_call_convert.jo'] = "use 'expr.jo'\narg_cost_rest = (a: int, p: int, bs: mut int[]) -> int: call_conversion_double(a, p, bs)\n"
+
+JO['checker_call_convert.dewy'] += r'''from p"expr.jo" import call_mutable_double
+call_mutable_cost=(a:int64 p:int64 @bs:array<int64> @recv:bool receiver:bool):>int64=>call_mutable_double(a p @bs @recv receiver)
+'''
+JO['checker_call_convert.jo'] += "call_mutable_cost = (a: int, p: int, bs: mut int[], recv: mut bool, receiver: bool) -> int: call_mutable_double(a, p, bs, recv, receiver)\n"
 
 
 @pytest.mark.core_quick

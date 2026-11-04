@@ -452,7 +452,7 @@ dewy_data_after_give = (n: int): events.push("give:{n}")
 expr_sibling = (n: int, t: int) -> int: xe_sibling_host(n, t)
 expr_literal = (n: int, expected: int, ex: int) -> int: xe_literal_host(n, expected, ex)
 expr_other = (n: int, expected: int) -> int: xe_other_host(n, expected)
-arg_finish_rest = (a: int, pt: int, is_mut: bool): xe_arg_host(a, pt, is_mut)
+call_finish_double = (a: int, pt: int, is_mut: bool): xe_arg_host(a, pt, is_mut)
 '''
 JO_DOUBLES = {'expr.jo': EXPR_JO,
               'types.jo': "use 'expr.jo'\nis_soa = (t: int) -> bool: zm_soa\n",
@@ -500,6 +500,11 @@ JO_DOUBLES['checker_call_resolve.dewy'] = r'''from p"expr.jo" import call_resolv
 resolve_fn_call=(n:int64 name:int64 decls:array<int64> args:array<int64> expected:int64 closure:int64=0 ufcs:bool=false):>int64=>call_resolver_double(n name decls args expected closure ufcs)
 '''
 JO_DOUBLES['expr.jo'] += 'call_resolver_double = (n: int, name: int, decls: int[], args: int[], expected: int, closure: int = 0, ufcs: bool = false) -> int:\n    if decls.len() != 1: events.push("pick:{name}:{decls}:{closure}:{ufcs}")\n    xe_call_host(n, expected)\n'
+
+JO_DOUBLES['checker_call_convert.dewy'] = r'''from p"expr.jo" import call_finish_double
+arg_finish_rest=(a:int64 pt:int64 mutable:bool):>void=>call_finish_double(a pt mutable)
+'''
+JO_DOUBLES['checker_call_convert.jo'] = "use 'expr.jo'\narg_finish_rest = (a: int, pt: int, mutable: bool): call_finish_double(a, pt, mutable)\n"
 
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])

@@ -1,0 +1,390 @@
+# Frozen argument conversion and branch scoring from expr.jo.
+use 'types.jo'
+use 'ast.jo'
+use 'checker_call_cost.dewy'
+use 'expr.jo'
+use 'check.jo'
+use 'units.jo'
+use 'effects.jo'
+use 'checker_expr.dewy'
+use 'checker_call_queries.dewy'
+use 'util.jo'
+use 'poly_closure.jo'
+use 'refine.jo'
+use 'sibling_types.jo'
+
+branch_arg_cost = (a: int, pat: int, binds: mut int[], hidden: int[] = []) -> int:
+    k = nodes[a].kind
+    if k == .block:
+        if nkids(a) == 0: return 0
+        local_hidden = hidden
+        loop statement in kids(a):
+            if nodes[statement].kind == .vardecl:
+                local_hidden.push(int(nodes[statement].name))
+                loop binding in binding_leaves(kids(statement)): local_hidden.push(int(nodes[binding].name))
+        last = kid(a, nkids(a) - 1)
+        if nodes[last].kind == .exprstmt: return branch_arg_cost(int(nodes[last].a), pat, binds, local_hidden)
+        if nodes[last].kind == .if_: return branch_arg_cost(last, pat, binds, local_hidden)
+        return 0
+    if k == .if_ or k == .match_:
+        bodies: int[]
+        local_hidden = hidden
+        if k == .if_:
+            bodies.push(int(nodes[a].b))
+            if nodes[a].c != 0: bodies.push(int(nodes[a].c))
+        else:
+            loop arm in kids(a):
+                bodies.push(int(nodes[arm].b))
+                loop pattern in kids(arm):
+                    if nodes[pattern].name != 0: local_hidden.push(int(nodes[pattern].name))
+        cost = 0
+        loop body in bodies:
+            r = branch_arg_cost(body, pat, binds, local_hidden)
+            if r < 0: return -1
+            cost = max(cost, r)
+        return cost
+    if k == .int_lit or k == .float_lit or k == .str_lit or k == .bool_lit or k == .none_lit:
+        probe = clone(a)
+        check_expr(probe, 0)
+        return arg_cost(probe, pat, binds)
+    if k == .unary and (nodes[int(nodes[a].a)].kind == .int_lit or nodes[int(nodes[a].a)].kind == .float_lit):
+        # The sign is part of a literal's range, e.g. -128 fits int8 but 128 does not.
+        probe = clone(a)
+        check_expr(probe, 0)
+        return arg_cost(probe, pat, binds)
+    if (k == .binary or k == .unary) and branch_numeric(a, hidden):
+        left = branch_arg_cost(int(nodes[a].a), pat, binds, hidden)
+        if left < 0 or k == .unary: return left
+        right = branch_arg_cost(int(nodes[a].b), pat, binds, hidden)
+        if right < 0: return -1
+        return max(left, right)
+    if k == .ident and not (int(nodes[a].name) in hidden):
+        sym = lookup(int(nodes[a].name))
+        t = 0
+        if sym != 0 and syms[sym].kind == .local: t = int(locals[int(syms[sym].ref)].type)
+        else if sym != 0 and syms[sym].kind == .global: t = int(globals[int(syms[sym].ref)].type)
+        # Type-test branches may narrow optionals/unions; let their own scope
+        # establish that view. Ordinary typed values already constrain overloads.
+        if t != 0 and not has_var(t) and not is_union(t) and tkind(t) != .opt and not is_fn_type(t):
+            probe = clone(a)
+            nodes[probe].type = i32(t)
+            add_flag(probe, NF_CHECKED)
+            return arg_cost(probe, pat, binds)
+    if types[prune(pat)].kind == .param: return 3
+    0
+
+arg_cost_rest = (a: int, pat: int, binds: mut int[]) -> int:
+    if effects_active and nodes[a].type != 0 and callable_contract(pat) != 0: nodes[a].type = i32(effect_infer_callable(a, pat))
+    p = representation_type(pat)
+    pk = types[p].kind
+    target = p
+    if pk == .param and binds[int(types[p].id)] != 0: target = prune(binds[int(types[p].id)])
+    # (a literal or a value its context types, where a secret<T> is wanted: as for a T, a little
+    # dearer; only for a written secret type, as a generic secret[T] takes secrets alone)
+    if pk == .secret and not has_var(p) and (nodes[a].type == 0 or is_lit(a) or ctx_dependent(a)):
+        r = arg_cost(a, int(types[p].elem), binds)
+        if r < 0: return -1
+        return r + 1
+    if nodes[a].kind != .int_lit and bundled_rational_type(target) and decimal_literal_tree(a): return 0
+    if is_float(target) and nodes[a].type != 0 and bundled_rational_type(ntype(a)): return 10
+    if bundled_rational_type(target) and (nodes[a].kind == .int_lit or (nodes[a].type != 0 and is_int(ntype(a)))): return 10
+    if nodes[a].type != 0 and bundled_word_rational_type(ntype(a)) and (bundled_rational_type(target) or is_float(target)): return 10
+    # (a constant beside a word fraction takes its form, as a literal beside a word integer does)
+    if bundled_word_rational_type(target) and nodes[a].type != 0 and word_rational_source(a, ntype(a)): return 5
+    if not is_lit(a) and nodes[a].type != 0 and ntype(a) == T_MATH_INT and bundled_bigint_type(target): return 1
+    if ctx_dependent(a):
+        if oversized_literal(a):
+            target = prune(subst_partial(p, binds))
+            if types[target].kind == .opt: target = prune(int(types[target].elem))
+            if bundled_bigint_type(target): return 0
+            if target == T_MATH_INT: return 1
+            return -1
+        k = nodes[a].kind
+        if k == .if_ or k == .match_: return branch_arg_cost(a, pat, binds)
+        if dewy_set_literal(a):
+            target = p
+            if pk == .param and binds[int(types[p].id)] != 0: target = prune(binds[int(types[p].id)])
+            cost = 0
+            if types[target].kind == .opt:
+                target = prune(int(types[target].elem))
+                cost = 2
+            if is_dewy_set_type(target):
+                r = arg_cost(kid(a, 0), mk_array(struct_targ(int(types[target].st), 0)), binds)
+                if r < 0: return -1
+                return cost + r
+            if pk == .param: return 3
+            return -1
+        if k == .hole: return 0
+        if k == .ident or k == .field or k == .typeapply:
+            if pk == .fn_ or pk == .callable: return 0
+            if pk == .cfn: return 0             # (a @cabi function for C: checked when given)
+            if pk == .param: return 3        # a function passed to a generic parameter
+            return -1
+        if k == .lambda:
+            if pk == .param:
+                if nkids(a) > 0 and nodes[kid(a, 0)].a != 0: return 3
+                return -1
+            if pk == .callable: p = callable_base(p); pk = types[p].kind
+            if pk != .fn_ or int(types[p].nargs) != nkids(a): return -1
+            if has_flag(a, NF_GENERIC): return 0
+            # (a parameter the lambda gives a type must have that type)
+            loop i in [0..nkids(a)):
+                pn = kid(a, i)
+                if nodes[pn].a == 0: continue
+                at = prune(resolve_type(int(nodes[pn].a)))
+                pt = prune(targ(p, i))
+                if not has_var(at) and not has_var(pt) and not type_eq(at, pt): return -1
+            return 0
+        if k == .dotname or k == .call:
+            name = int(nodes[a].name)
+            if k == .call: name = int(nodes[int(nodes[a].a)].name)
+            # (m[k] = .wood for a map of an enum: the parameter's type as the arguments before
+            # bound it)
+            e = p
+            if has_var(p): e = prune(subst(p, binds))
+            if types[e].kind == .opt: e = prune(int(types[e].elem))
+            e = variant_enum(e, name)
+            if types[e].kind != .enum_: return -1
+            if find_variant(int(types[e].st), name) >= 0: return 0
+            return -1
+        if k == .none_lit:
+            if pk == .opt: return 0
+            if pk == .param: return 3
+            return -1
+        if k == .array and nkids(a) > 0 and files[pos_file(nodes[a].pos)].is_dewy:
+            target = p
+            if pk == .param and binds[int(types[p].id)] != 0: target = prune(binds[int(types[p].id)])
+            cost = 0
+            if types[target].kind == .opt:
+                target = prune(int(types[target].elem))
+                cost = 2
+            tk = types[target].kind
+            # (`[1 "a"]` for a `[int64 string]`: each value fits its position)
+            if tk == .tuple:
+                if nkids(a) != int(types[target].nargs) or array_has_spread(a): return -1
+                loop i in [0..nkids(a)):
+                    r = arg_cost(kid(a, i), targ(target, i), binds)
+                    if r < 0: return -1
+                    cost += r
+                return cost
+            if tk == .array or (tk == .fixed and (fixed_literal_ok(a, target) or array_has_spread(a))):
+                et = int(types[target].elem)
+                # Settle a generic element from the first typed value before
+                # scoring literals, including literals written before it.
+                if types[prune(et)].kind == .param and binds[int(types[prune(et)].id)] == 0:
+                    loop element in kids(a):
+                        if ctx_dependent(element) or is_lit(element): continue
+                        inferred = prune(ntype(element))
+                        if has_flag(element, NF_SPREAD):
+                            if is_dewy_set_type(inferred): inferred = struct_targ(int(types[inferred].st), 0)
+                            else if types[inferred].kind == .array or types[inferred].kind == .fixed: inferred = int(types[inferred].elem)
+                            else: continue
+                        if match_type(et, inferred, binds, 1) < 0: return -1
+                        break
+                element_cost = 0
+                loop element in kids(a):
+                    ep = et
+                    if has_flag(element, NF_SPREAD): ep = mk_array(et)
+                    if types[prune(ep)].kind == .param:
+                        bound = binds[int(types[prune(ep)].id)]
+                        # Once another element determines T, charge its actual
+                        # conversion cost rather than a generic-parameter cost.
+                        if bound != 0 and not has_var(prune(bound)): ep = bound
+                    r = 0
+                    if has_flag(element, NF_SPREAD) and dewy_set_literal(element):
+                        r = arg_cost(kid(element, 0), ep, binds)
+                    else if has_flag(element, NF_SPREAD) and is_dewy_set_type(ntype(element)):
+                        r = match_type(et, struct_targ(int(types[prune(ntype(element))].st), 0), binds, 0)
+                    else if types[prune(ep)].kind == .param and binds[int(types[prune(ep)].id)] == 0 and not ctx_dependent(element):
+                        # Inferring an array element is cheaper than changing
+                        # an integer to float. Literals wait for the whole array;
+                        # a typed element can supply T, in either source order.
+                        if is_lit(element): r = if lit_default(element) == T_MATH_INT: 2 else: 1
+                        else:
+                            r = match_type(ep, ntype(element), binds, 1)
+                            if r >= 0: r += 1
+                    else: r = arg_cost(element, ep, binds)
+                    if r < 0: return -1
+                    # One array is one argument. Adding more elements must not
+                    # make a typed-array overload lose to a catch-all T.
+                    element_cost = max(element_cost, r)
+                return cost + element_cost
+            # (a positional object literal, Point(3 4) written [3 4]: its items against the
+            # fields in order)
+            if tk == .struct_ and not has_var(target) and not is_map_type(target) and dewy_positional_fits(a, target):
+                si = int(types[target].st)
+                check_struct_fields(si)
+                if nkids(a) > int(structs[si].nfields): return -1
+                element_cost = 0
+                loop i in 0.. and element in kids(a):
+                    r = arg_cost(element, int(fields[int(structs[si].fields) + i].type), binds)
+                    if r < 0: return -1
+                    element_cost = max(element_cost, r)
+                return cost + element_cost
+            # A bound scalar parameter cannot accept an array literal. Do not
+            # let its generic fallback compete with the matching T[] overload.
+            if pk == .param and has_var(target): return 3
+            return -1
+        if k == .array or (k == .block and has_flag(a, NF_COMPREHENSION)):
+            if pk == .array: return 0
+            # A checked method receiver is already an array, though its empty
+            # element type can still be inferred from the other arguments.
+            if nkids(a) == 0 and not has_flag(a, NF_CHECKED) and dewy_record_target(p) != 0 and files[pos_file(nodes[a].pos)].is_dewy: return 0
+            if pk == .param: return 3
+            return -1
+        if k == .record_lit:
+            target = p
+            if pk == .opt: target = prune(int(types[p].elem))
+            if types[target].kind == .struct_ and not is_map_type(target):
+                si = int(types[target].st)
+                check_struct_fields(si)
+                cost = 0
+                members = kids(a)
+                if array_has_spread(a):
+                    unused: int[]
+                    members = dewy_record_spread_entries(a, 0, unused, false)
+                loop field in members:
+                    fi = -1
+                    loop i in [0..int(structs[si].nfields)):
+                        at = int(structs[si].fields) + i
+                        if fields[at].name == nodes[field].name: fi = at; break
+                    if fi < 0: return -1
+                    r = arg_cost(int(nodes[field].a), int(fields[fi].type), binds)
+                    if r < 0: return -1
+                    cost += r
+                return cost
+            if pk == .param: return 3
+            return -1
+        if k == .map_lit:
+            target = prune(subst_partial(p, binds))
+            if types[target].kind == .opt: target = prune(int(types[target].elem))
+            if is_map_type(target):
+                si = int(types[target].st)
+                cost = 0
+                loop pair in kids(a):
+                    key = arg_cost(int(nodes[pair].a), struct_targ(si, 0), binds)
+                    value = arg_cost(int(nodes[pair].b), struct_targ(si, 1), binds)
+                    if key < 0 or value < 0: return -1
+                    cost = max(cost, key + value)
+                return cost
+            if pk == .param: return 3
+            return -1
+        return -1
+    if charlike(a) and pk == .int_: return 1
+    if pk == .enum_ and not has_var(p) and is_union(p) and not is_union(ntype(a)):
+        # a member value passed for a union parameter
+        if union_target(a, ntype(a), p) >= 0: return 1
+        return -1
+    sp = if pk == .param and binds[int(types[p].id)] != 0: prune(binds[int(types[p].id)]) else: p
+    if str_sets.len() > 1 and (types[sp].kind == .str_ or types[sp].kind == .opt or types[sp].kind == .enum_):
+        cost = call_string_cost(a, p, sp, binds)
+        if cost != -2: return cost
+    if is_lit(a) and types[prune(pat)].kind == .refined and refine_active:
+        cost = call_refined_literal_cost(a, pat)
+        if cost != -2: return cost
+    if is_lit(a):
+        # Prefer the literal's default integer width/sign, but only among types
+        # that can represent it; Dewy literals prefer mathematical int.
+        if pk == .param:
+            b = binds[int(types[p].id)]
+            if b == 0: return 3
+            if can_coerce(a, ntype(a), b): return 0
+            return -1
+        if is_union(p) and has_var(p): return match_type(pat, lit_default(a), binds, 0)
+        if pk == .int_:
+            if nodes[a].kind == .int_lit:
+                if not lit_fits(a, p): return -1
+                if p == lit_default(a): return 0
+                if p == T_U64 and has_flag(a, NF_U64): return 1
+                if lit_default(a) == T_MATH_INT and p != T_INT: return 2
+                return 1
+            return -1
+        if dewy_bigint_literal_target(a, p): return 3
+        if pk == .float_:
+            # (a decimal literal is exact: a float parameter fits it after an exact one,
+            # `round(2.5)` takes the fraction's overload)
+            if p == T_FLOAT:
+                if nodes[a].kind == .int_lit: return if lit_default(a) == T_MATH_INT: 3 else: 2
+                return if decimal_literal_tree(a): 1 else: 0
+            if nodes[a].kind == .int_lit: return if lit_default(a) == T_MATH_INT: 4 else: 3
+            return if decimal_literal_tree(a): 2 else: 1
+        if pk == .opt and not has_var(p) and can_coerce(a, ntype(a), p): return 2
+        if pk == .vec: return -1
+        return -1
+    fp = p
+    if pk == .param and binds[int(types[p].id)] != 0: fp = prune(binds[int(types[p].id)])
+    if types[fp].kind == .quantity and quantity_constant_fits(a, fp):
+        if type_eq(ntype(a), fp): return 0
+        return 2
+    # (an int quantity for a rational one of its dimension, as an int for a rational)
+    if types[fp].kind == .quantity and nodes[a].type != 0 and quantity_int_promotes(ntype(a), fp): return 10
+    if types[fp].kind == .fixed and nodes[a].kind == .array and tkind(ntype(a)) == .array and fixed_literal_ok(a, fp):
+        # an array literal for a fixed-size array parameter
+        et = int(types[fp].elem)
+        if has_var(prune(et)):
+            r = match_type(et, int(types[prune(ntype(a))].elem), binds, 1)
+            if r < 0: return -1
+            return r + 1
+        loop i in [0..nkids(a)):
+            if not can_coerce(kid(a, i), ntype(kid(a, i)), et): return -1
+        return 1
+    if types[fp].kind == .fixed and nodes[a].kind != .array and tkind(ntype(a)) == .array:
+        r = match_type(int(types[fp].elem), int(types[prune(ntype(a))].elem), binds, 1)
+        if r >= 0: return r + 1
+        return -1
+    if tkind(ntype(a)) == .polyfn and types[fp].kind == .fn_ and poly_matches(prune(ntype(a)), fp): return 0
+    r = match_type(pat, ntype(a), binds, 0)
+    # (sibling records in their positions, `[Circle Square]`, for an `array<Shape>`)
+    if r < 0 and types[fp].kind == .array and tkind(ntype(a)) == .tuple and not has_var(fp) and sibling_array_source(a, prune(ntype(a)), int(types[fp].elem)): return 2
+    # (a function value through a wrapper: wider result, narrower parameters)
+    if r < 0 and types[fp].kind == .fn_ and tkind(ntype(a)) == .fn_ and not has_var(fp) and fn_value_adapts(a, prune(ntype(a)), fp): return 2
+    if r < 0 and types[fp].kind == .array and is_nd(ntype(a)):
+        # a 1-D T[,] (a row, a column) for a T[] parameter
+        r = match_type(pat, mk_array(nd_elem(ntype(a))), binds, 0)
+        if r >= 0: return r + 2
+    r
+
+
+use 'partition.jo'
+arg_finish_rest = (a: int, pt: int, is_mut: bool):
+    if is_mut and refine_active:
+        ref_mutable_authority(a)
+        storage = refine_storage(a, ntype(a))
+        if not type_eq(storage, pt) and (ref_storage_contract(storage) or ref_storage_contract(pt)):
+            # (a totaldict's mutations keep every key: pop and clear are refused where they are called)
+            total = is_total_dict(storage) and type_eq(int(types[prune(storage)].elem), pt)
+            if not total: call_argument_error(1, a, pt)
+    if is_mut and not has_flag(a, NF_MUT) and files[pos_file(nodes[a].pos)].is_dewy:
+        call_argument_error(2, a, pt)
+    if nodes[a].kind == .hole:
+        nodes[a].type = i32(pt)
+        return
+    if not has_flag(a, NF_CHECKED) or nodes[a].type == 0:
+        check_expr(a, pt)
+        add_flag(a, NF_CHECKED)
+    # (a written `@x` for a by-value parameter; `@f` of a function is its handle)
+    if not is_mut and has_flag(a, NF_MUT) and not is_fn_type(ntype(a)) and files[pos_file(nodes[a].pos)].is_dewy and written_at(a):
+        call_argument_error(3, a, pt)
+    if is_mut:
+        if partition_slice(a): partition_active = true
+        check_place(a, true)
+        if path_narrows > 0 and path_rooted(a): path_forget(path_key(a))
+        actual = if refine_active: refine_storage(a, ntype(a)) else: ntype(a)
+        if refine_active and is_total_dict(actual): actual = int(types[prune(actual)].elem)
+        if not type_eq(actual, pt) and not unify(actual, pt): call_argument_error(4, a, pt)
+        add_flag(a, NF_MUT)
+        return
+    saved = refine_arg_target
+    refine_arg_target = prune(pt)
+    coerce(a, pt)
+    refine_arg_target = saved
+
+call_mutable_cost = (a: int, pt: int, binds: mut int[], recv_fits: mut bool, receiver: bool) -> int:
+    r = match_type(pt, ntype(a), binds, 0)
+    if r < 0: return -1
+    if receiver: recv_fits = true
+    shape = subst(pt, binds)
+    actual = ntype(a)
+    if refine_active: actual = representation_type(actual); shape = representation_type(shape)
+    if not has_var(prune(shape)) and not has_var(prune(actual)) and not type_eq(shape, actual): return -1
+    r
