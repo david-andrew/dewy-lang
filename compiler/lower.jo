@@ -84,18 +84,6 @@ helper_lf: {str: int} = {}
 # Open addressing: expected O(1) lookup, amortized O(1) insertion.
 helper_slots: i32[]
 
-helper_key_hash = (hk: HK, t: int, p: int) -> int:
-    (int(hk) * 73856093) xor (t * 19349663) xor (p * 83492791)
-
-helper_slot = (hk: HK, t: int, p: int) -> int:
-    mask = helper_slots.len() - 1
-    i = helper_key_hash(hk, t, p) & mask
-    loop helper_slots[i] != 0:
-        h = &lfuncs[int(helper_slots[i]) - 1]
-        if h.hkind == hk and h.htype == t and h.inst == p: return i
-        i = (i + 1) & mask
-    i
-
 helper_count = 0
 
 # data segments
@@ -114,158 +102,16 @@ entry_points: int[]
 # relocations inside rodata/data that hold function addresses or data addresses are not needed:
 # all addresses are computed by code.
 
-lf_of_inst = (f: int) -> int:
-    if parallel_serial and not modules[int(fns[f].mod)].is_prelude and fns[f].kind != FK_PARTIAL and fns[f].body != 0:
-        return lf_helper(.parallel_serial, 0, f)
-    if let x = inst_lf.get(f):
-        if fused_on and x >= fz_lf0: fz_note(0, x, f, 0, 0)
-        return x
-    lfuncs.push(LFunc(LK_INST, f, .drop, 0, fns[f].sym))
-    x = lfuncs.len() - 1
-    inst_lf[f] = x
-    if fused_on: fz_note(0, x, f, 0, 0)
-    x
-
-lf_helper = (hk: HK, t0: int, p: int) -> int:
-    # (a secret's helpers are its value's: secrets.jo)
-    t = if secrets_seen: secret_repr(t0) else: t0
-    if helper_slots.len() == 0: helper_slots = fill(0, 64)
-    slot = helper_slot(hk, t, p)
-    if helper_slots[slot] != 0:
-        x = int(helper_slots[slot]) - 1
-        if fused_on and x >= fz_lf0: fz_note(1, x, int(hk), t, p)
-        return x
-    lfuncs.push(LFunc(LK_HELPER, p, hk, t, "__h_{hk}_{lfuncs.len()}"))
-    x = lfuncs.len() - 1
-    helper_slots[slot] = i32(x + 1)
-    helper_lf["{int(hk)}:{t}:{p}"] = x
-    helper_count += 1
-    if helper_count * 2 > helper_slots.len():
-        old = helper_slots
-        helper_slots = fill(0, helper_slots.len() * 2)
-        loop entry in old:
-            if entry == 0: continue
-            h = &lfuncs[int(entry) - 1]
-            helper_slots[helper_slot(h.hkind, h.htype, h.inst)] = entry
-    if fused_on: fz_note(1, x, int(hk), t, p)
-    x
-
-rt = (name: str) -> int: lf_of_inst(runtime_fn(name))
-
 # object header words (refcount, length, capacity, closure drop function): a memory class of
 # their own, so stores to elements do not invalidate what the optimizer knows about them
 # value of a runtime global (by name, from the prelude)
-rt_global = (name: str) -> int:
-    s = prelude.get(intern(name)) ?? 0
-    if s == 0 or syms[s].kind != .global: ice("missing runtime global {name}")
-    e_load(VI, e_gaddr(global_addr_off(int(syms[s].ref))), 0, 1)
-
 # call to a function that never returns (panics): registers need not survive it
 # Fixed-arity calls append evaluated operands directly to the shared IR span.
-e_call_nr0 = (f: int, rtype: int) -> int:
-    start = ir.args.len()
-    emit(.call, rtype, -1, start, 0, 1, f)
-    -1
-
-e_call_nr1 = (f: int, a0: int, rtype: int) -> int:
-    start = ir.args.len()
-    ir.args.push(i32(a0))
-    emit(.call, rtype, -1, start, 1, 1, f)
-    -1
-
-e_call_nr2 = (f: int, a0: int, a1: int, rtype: int) -> int:
-    start = ir.args.len()
-    ir.args.push(i32(a0))
-    ir.args.push(i32(a1))
-    emit(.call, rtype, -1, start, 2, 1, f)
-    -1
-
-e_call_nr3 = (f: int, a0: int, a1: int, a2: int, rtype: int) -> int:
-    start = ir.args.len()
-    ir.args.push(i32(a0))
-    ir.args.push(i32(a1))
-    ir.args.push(i32(a2))
-    emit(.call, rtype, -1, start, 3, 1, f)
-    -1
-
-e_call_nr4 = (f: int, a0: int, a1: int, a2: int, a3: int, rtype: int) -> int:
-    start = ir.args.len()
-    ir.args.push(i32(a0))
-    ir.args.push(i32(a1))
-    ir.args.push(i32(a2))
-    ir.args.push(i32(a3))
-    emit(.call, rtype, -1, start, 4, 1, f)
-    -1
-
-e_call_nr = (f: int, args: int[], rtype: int) -> int:
-    start = ir.args.len()
-    loop a in args: ir.args.push(i32(a))
-    emit(.call, rtype, -1, i32(start), i32(args.len()), 1, f)
-    -1
-
-str_data = (s: str) -> int:
-    if let o = str_off.get(s):
-        if fused_on and o >= fz_r0: fz_note_text(2, o, s)
-        return o
-    loop rodata.len() % 8 != 0: rodata.push(0)
-    o = rodata.len()
-    ro_starts.push(o)
-    push_i64(rodata, -1)
-    push_i64(rodata, len(s))
-    push_i64(rodata, len(s) + 1)
-    n = rodata.len()
-    rodata.resize(n + len(s))
-    if len(s) > 0: mem_copy(data(rodata) + n, data(s), len(s))
-    rodata.push(0)
-    str_off[s] = o
-    if fused_on: fz_note_text(2, o, s)
-    o
-
 # A string set's texts as one read-only block: each member's offset from the
 # block's start, then the members as static strings (str_data's layout). The
 # block refers only within itself, so it moves as a whole. (fused.jo's layout:
 # a block per use, the same bytes however the functions are shared out)
 set_text_tables: {int: int} = {}
-set_text_table = (id: int) -> int:
-    if not fz_layout:
-        if let o = set_text_tables.get(id): return o
-    loop rodata.len() % 8 != 0: rodata.push(0)
-    o = rodata.len()
-    ro_starts.push(o)
-    texts = str_sets[id]
-    at = 8 * texts.len()
-    loop text in texts:
-        push_i64(rodata, at)
-        at += (24 + len(text) + 1 + 7) / 8 * 8
-    loop text in texts:
-        push_i64(rodata, -1)
-        push_i64(rodata, len(text))
-        push_i64(rodata, len(text) + 1)
-        n = rodata.len()
-        rodata.resize(n + len(text))
-        if len(text) > 0: mem_copy(data(rodata) + n, data(text), len(text))
-        rodata.push(0)
-        loop rodata.len() % 8 != 0: rodata.push(0)
-    if fused_on: fz_note_raw(o, 8)
-    set_text_tables[id] = o
-    o
-
-global_addr_off = (g: int) -> int:
-    if let o = global_off.get(g):
-        if fused_on and o >= fz_d0: fz_note(3, o, g, 0, 0)
-        return o
-    t = int(globals[g].type)
-    al = talign(t)
-    if al < 8: al = 8
-    data_size = align_up(data_size, al)
-    o = data_size
-    sz = tsize(t)
-    if sz < 8: sz = 8
-    data_size += sz
-    global_off[g] = o
-    if fused_on: fz_note(3, o, g, 0, 0)
-    o
-
 # ---------------- type helpers ----------------
 # Representation plans belong to one lowering invocation. Only demanded types
 # acquire entries; epochs avoid a types-by-functions clearing pass. Lazy helper
@@ -400,79 +246,15 @@ pinned_type = 0
 # one-element array. The variable (and each capture) holds the cell, and every access goes to its
 # element, without copy-on-write, so all holders see the same value.
 # the type of what the variable's storage holds: the value, or the cell
-bounds_check = (arr: int, idx: int, pos: int):
-    # arr: array object pointer (may be null), idx: index
-    loc = loc_data(pos)
-    if not opt_release:
-        n = 0
-        if target_wasm or target_arm64: n = arr_len(arr)
-        else:
-            # Select a real zero-length header for nil, without a hot branch.
-            # Keep the comparison next to select so native lowering reuses flags.
-            selected = vreg(VI)
-            empty = e_daddr(str_data(""))
-            condition = e_bin(.ne, VI, arr, e_iconst(0))
-            emit(.select, VI, selected, condition, arr, empty, 0)
-            n = hdr_load(selected, 8)
-        iff(e_bin(.geu, VI, idx, n))
-        e_call_nr3(rt("__panic_bounds"), idx, n, e_daddr(loc), -1)
-        endc()
-        return
-    iff(e_bin(.eq, VI, arr, e_iconst(0)))
-    e_call_nr3(rt("__panic_bounds"), idx, e_iconst(0), e_daddr(loc), -1)
-    endc()
-    n = hdr_load(arr, 8)
-    iff(e_bin(.geu, VI, idx, n))
-    e_call_nr3(rt("__panic_bounds"), idx, n, e_daddr(loc), -1)
-    endc()
-
 # the part of a bounds check that later checks build on: the array exists (release builds
 # then know this for the rest of the scope)
-null_check = (arr: int, idx: int, pos: int):
-    iff(e_bin(.eq, VI, arr, e_iconst(0)))
-    e_call_nr3(rt("__panic_bounds"), idx, e_iconst(0), e_daddr(loc_data(pos)), -1)
-    endc()
-
 # rodata offset of the "file:line" string for a position (consecutive checks share a line)
 loc_last_file = -1
 loc_last_line = -1
 loc_last_off = 0
 
-loc_data = (pos: int) -> int:
-    f = pos_file(pos)
-    l, c = line_col(pos)
-    if f == loc_last_file and l == loc_last_line and not fused_on: return loc_last_off
-    loc_last_file = f
-    loc_last_line = l
-    loc_last_off = str_data(loc_str(pos))
-    loc_last_off
-
 # A library position names no line of the program: the backtrace shows the
 # program's call instead (`a // 0` fails in the caller, not in the library).
-loc_str = (pos: int) -> str:
-    if pos_in_lib(pos): return ""
-    f = pos_file(pos)
-    path = files[f].path
-    s = rfind(path, "/")
-    if s >= 0: path = path[s + 1..]
-    l, c = line_col(pos)
-    "{path}:{l}"
-
-e_daddr = (off: int) -> int:
-    d = vreg(VI)
-    emit(.daddr, VI, d, 0, 0, 0, off)
-    d
-
-e_gaddr = (off: int) -> int:
-    d = vreg(VI)
-    emit(.gaddr, VI, d, 0, 0, 0, off)
-    d
-
-e_faddr = (lf: int) -> int:
-    d = vreg(VI)
-    emit(.faddr, VI, d, 0, 0, 0, lf)
-    d
-
 # length of an array/string object pointer (0 for null)
 # indexes computed beforehand (a `mut` element passed as a copy finds its place again after the
 # call with the same index)
@@ -480,41 +262,7 @@ frozen: {int: int}
 # A fixed array covering an unsigned index's entire domain needs no check.
 # Follow only value-preserving integer widenings. Stripping arbitrary casts
 # would miss negative values introduced by signed narrowing (u16 -> i8 -> int).
-fixed_index_domain = (index: int, length: int) -> bool:
-    n = index
-    loop true:
-        t = prune(ntype(n))
-        if types[t].kind != .int_: return false
-        bits = int(types[t].bits)
-        if not types[t].sign and bits < 32: return (1 << bits) <= length
-        if nodes[n].kind != .conv or nodes[n].aux != i32(int(CV.int_)): return false
-        inner = int(nodes[n].a)
-        source = prune(ntype(inner))
-        if types[source].kind != .int_: return false
-        from_bits = int(types[source].bits)
-        if bits < from_bits: return false
-        if types[t].sign != types[source].sign and not (types[t].sign and bits > from_bits): return false
-        n = inner
-    false
-
-tuple_off = (t: int, idx: int) -> int:
-    off = 0
-    loop i in [0..idx + 1):
-        el = targ(t, i)
-        off = align_up(off, talign(el))
-        if i < idx: off += tsize(el)
-    off
-
 # ---------------- calls ----------------
-call_eval_order = (n: int) -> int[]:
-    order: int[]
-    metadata = int(nodes[n].c)
-    if metadata != 0:
-        loop e in kids(metadata): order.push(nodes[e].ival)
-    else:
-        loop i in [0..nkids(n)): order.push(i)
-    order
-
 # A scalar expression can name a local's mutable register. Keep the value
 # already read before evaluating a later operand/argument that can assign it.
 # A snapshot taken only to keep an argument stable while the callee runs. The
@@ -578,16 +326,6 @@ pw_depth = 0
 # prefix of the longer, as far as the compiler can tell (xs[i] and xs[j] may be the same)?
 # the variable (ident node) whose array or map, or box, holds the element place n is in, or 0
 # does expression n name the variable of ident node r?
-inst_mutmask = (f: int) -> int:
-    d = int(fns[f].decl)
-    if d == 0 or nodes[d].kind != .fn_: return 0
-    di = int(nodes[d].sym)
-    if di > 0 and decl_infos[di].sig.done: return int(decl_infos[di].sig.mutmask)
-    mm = 0
-    loop i in [0..fns[f].ptypes.len()):
-        if has_flag(kid(d, i), NF_MUT): mm |= 1 << i
-    mm
-
 # A checked method receiver may still carry syntactic NF_MUT permission even
 # when overload resolution selected a read-only parameter. Effects follow the
 # resolved signature, just as argument lowering does; keep syntax flags intact.
@@ -773,23 +511,6 @@ texture_offsets = (t0: int, base: int, out: mut int[]):
 # Checked exact stores are conversion nodes and must be captured. O(nodes of n x nodes of rhs)
 # ---------------- vectors ----------------
 # f32 x as an i32: toward zero, saturating, NaN to 0
-data_writable = (e: int) -> bool:
-    k = nodes[e].kind
-    if k == .field or k == .index or k == .unwrap or k == .narrow:
-        # A field/element of owned storage needs the same detachment as a named
-        # array. Slices are temporary values, not writable storage paths.
-        if k == .index and nodes[e].aux == 1: return false
-        return data_writable(int(nodes[e].a))
-    if k != .ident: return false
-    if nodes[e].aux == i32(int(SK.global)): return true
-    if nodes[e].aux != i32(int(SK.local)): return false
-    l = int(nodes[e].sym)
-    f = int(locals[l].flags)
-    if f & LF_ALIAS != 0: return locals[l].alias != 0 and data_writable(int(locals[l].alias))
-    if f & LF_BYREF != 0: return false
-    if f & LF_CAPTURE != 0: return f & LF_VALUECAP != 0 or is_shared(l)
-    f & LF_PARAM == 0 or f & LF_MUTPARAM != 0
-
 # ---------------- intrinsics ----------------
 struct LoanCapacity:
     place: PlaceIdentity
@@ -908,41 +629,11 @@ flat_slots = (t0: int, base: int, mask: mut u8[]):
     loop b in [base / 4..(base + tsize(t) + 3) / 4):
         if b < mask.len(): mask[b] = 'i'
 
-lit = (ba: int, s: str): e_call2(rt("__buf_append_str"), ba, e_daddr(str_data(s)), -1)
-fmt_field = (ba: int, f: int, t: int, addr: int): e_call2(lf_of_inst(f), ba, load_val(t, addr, 0), -1)
-
 # Typed JSON writing uses the field writers selected by the checker. It emits
 # directly into the caller's buffer, without a text round trip or a Json tree.
-json_key = (ba: int, name: str, indent: int, level: int, index: int):
-    e_call(rt("__json_key"), [ba, e_daddr(str_data(name)), indent, level, e_iconst(index)], -1)
-
-json_field = (ba: int, f: int, t: int, addr: int, indent: int, level: int):
-    e_call4(lf_of_inst(f), ba, load_val(t, addr, 0), indent, level, -1)
-
 # ---------------- conversions ----------------
 # a string set's word w as the word of the same member in set type `to` (members are
 # unordered: one set's word for a member is not another's); a member `to` lacks panics
-set_word_moved = (w: int, from: int, to: int, pos: int) -> int:
-    fs = str_set_of(from)
-    ts = str_set_of(to)
-    d = vreg(VI)
-    e_mov(d, w)
-    lacks = false
-    loop k in 0.. and value in str_sets[fs]:
-        j = str_sets[ts].index_of(value)
-        if j < 0: lacks = true
-        else if j != k:
-            iff(e_bin(.eq, VI, w, e_iconst(k)))
-            e_mov(d, e_iconst(j))
-            endc()
-    if lacks:
-        loop k in 0.. and value in str_sets[fs]:
-            if not str_sets[ts].contains(value):
-                iff(e_bin(.eq, VI, w, e_iconst(k)))
-                e_call_nr1(rt("__panic_narrow"), e_daddr(loc_data(pos)), -1)
-                endc()
-    d
-
 # ---------------- expressions ----------------
 # (after code that never comes back: a value of n's type when it is taken as one, "a" + panic(...))
 # any value of type t, where one is wanted after code that never comes back (it is never used)
@@ -1119,6 +810,7 @@ use 'scanloops.jo'
 use 'exact_reset_loop.jo'
 use 'lower_ffi.dewy'
 use 'lower_functions.dewy'
+use 'lower_primitives.dewy'
 
 # ---------------- functions ----------------
 find_ids: int[]

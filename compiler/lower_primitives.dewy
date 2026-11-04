@@ -1,0 +1,359 @@
+from p"checker_state.dewy" import (SK)
+$runtime_checks
+from p"check.jo" import (FK_PARTIAL LF_ALIAS LF_BYREF LF_CAPTURE LF_MUTPARAM LF_PARAM LF_VALUECAP decl_infos fns globals locals modules prelude runtime_fn syms target_arm64 target_wasm)
+from p"lower.jo" import (HK LFunc LK_HELPER LK_INST data_size global_off helper_count helper_lf helper_slots inst_lf lfuncs loc_last_file loc_last_line loc_last_off opt_release ro_starts rodata set_text_tables str_off)
+from p"ast.jo" import (NF_MUT has_flag kid kids nkids nodes)
+from p"ir.jo" import (VI e_bin e_call e_call2 e_call4 e_iconst e_load e_mov emit ir vreg)
+from p"types.jo" import (align_up prune secret_repr secrets_seen talign targ tsize types)
+from p"lower_storage.dewy" import (arr_len endc hdr_load iff is_shared load_val)
+from p"util.jo" import (files ice intern line_col pos_file pos_in_lib)
+from p"fused.jo" import (fused_on fz_d0 fz_layout fz_lf0 fz_note fz_note_raw fz_note_text fz_r0)
+from p"expr.jo" import (ntype)
+from p"parallel_lower.jo" import (parallel_serial)
+from p"lower_scalars.dewy" import (push_i64)
+from p"refine.jo" import (str_set_of str_sets)
+# Direct recursive lowering; shared state has one owner in lower.jo.
+LPWord:type=int64<overflow='wrap'>
+helper_key_hash=(hk:HK t:LPWord p:LPWord):>int64=>$unsafe {
+    return (LPWord(int64(hk)) * 73856093) xor (t * 19349663) xor (p * 83492791)
+}
+helper_slot=(hk:HK t:LPWord p:LPWord):>int64=>$unsafe {
+    let mask:LPWord=LPWord(helper_slots.length) - 1
+    let i:LPWord=LPWord(helper_key_hash(hk t p)) & mask
+    loop helper_slots.ptr[i] not=? 0 {
+        let h=lfuncs.ptr + (LPWord(helper_slots.ptr[i]) - 1)
+        if h[0].hkind =? hk and h[0].htype =? t and h[0].inst =? p {return i}
+        i=(i + 1) & mask
+    }
+    return i
+}
+lf_of_inst=(f:LPWord):>int64=>$unsafe {
+    if parallel_serial and not modules.ptr[LPWord(fns.ptr[f].mod)].is_prelude and fns.ptr[f].kind not=? FK_PARTIAL and fns.ptr[f].body not=? 0 {
+        return lf_helper(HK.parallel_serial 0 f)
+    }
+    let x=inst_lf.get(f)
+    if x not=? none {
+        if fused_on and x >=? fz_lf0 {fz_note(0 x f 0 0);}
+        return x
+    }
+    lfuncs.push(LFunc[LK_INST f HK.drop 0 fns.ptr[f].sym]);
+    let x=lfuncs.length - 1
+    inst_lf[f] = x;
+    if fused_on {fz_note(0 x f 0 0);}
+    return x
+}
+lf_helper=(hk:HK t0:LPWord p:LPWord):>int64=>$unsafe {
+    # (a secret's helpers are its value's: secrets.jo)
+    let t=if secrets_seen {secret_repr(t0)} else {t0}
+    if helper_slots.length =? 0 {helper_slots=fill(int32(0) 64)}
+    let slot=helper_slot(hk t p)
+    if helper_slots.ptr[slot] not=? 0 {
+        let x:LPWord=LPWord(helper_slots.ptr[slot]) - 1
+        if fused_on and x >=? fz_lf0 {fz_note(1 x LPWord(int64(hk)) t p);}
+        return x
+    }
+    lfuncs.push(LFunc[LK_HELPER p hk t "__h_{hk}_{lfuncs.length}"]);
+    let x=lfuncs.length - 1
+    helper_slots.ptr[slot] = int32<overflow='wrap'>(x + 1);
+    helper_lf["{LPWord(int64(hk))}:{t}:{p}"] = x;
+    helper_count += 1;
+    if helper_count * 2 >? helper_slots.length {
+        let old=helper_slots
+        helper_slots=fill(int32(0) helper_slots.length * 2)
+        loop entry in old {
+            if entry =? 0 {continue}
+            let h=lfuncs.ptr + (LPWord(entry) - 1)
+            helper_slots.ptr[helper_slot(h[0].hkind h[0].htype h[0].inst)] = entry;
+        }
+    }
+    if fused_on {fz_note(1 x LPWord(int64(hk)) t p);}
+    return x
+}
+rt=(name:string):>int64=>$unsafe {
+    return lf_of_inst(runtime_fn(name))
+}
+rt_global=(name:string):>int64=>$unsafe {
+    let s=prelude.get(intern(name)) ?? 0
+    if s =? 0 or syms.ptr[s].kind not=? SK.global {ice("missing runtime global {name}");}
+    return e_load(VI e_gaddr(global_addr_off(LPWord(syms.ptr[s].ref))) 0 1)
+}
+e_call_nr0=(f:LPWord rtype:LPWord):>int64=>$unsafe {
+    let start=ir.args.length
+    emit('call' rtype -1 start 0 1 f);
+    return -1
+}
+e_call_nr1=(f:LPWord a0:LPWord rtype:LPWord):>int64=>$unsafe {
+    let start=ir.args.length
+    ir.args.push(int32<overflow='wrap'>(a0));
+    emit('call' rtype -1 start 1 1 f);
+    return -1
+}
+e_call_nr2=(f:LPWord a0:LPWord a1:LPWord rtype:LPWord):>int64=>$unsafe {
+    let start=ir.args.length
+    ir.args.push(int32<overflow='wrap'>(a0));
+    ir.args.push(int32<overflow='wrap'>(a1));
+    emit('call' rtype -1 start 2 1 f);
+    return -1
+}
+e_call_nr3=(f:LPWord a0:LPWord a1:LPWord a2:LPWord rtype:LPWord):>int64=>$unsafe {
+    let start=ir.args.length
+    ir.args.push(int32<overflow='wrap'>(a0));
+    ir.args.push(int32<overflow='wrap'>(a1));
+    ir.args.push(int32<overflow='wrap'>(a2));
+    emit('call' rtype -1 start 3 1 f);
+    return -1
+}
+e_call_nr4=(f:LPWord a0:LPWord a1:LPWord a2:LPWord a3:LPWord rtype:LPWord):>int64=>$unsafe {
+    let start=ir.args.length
+    ir.args.push(int32<overflow='wrap'>(a0));
+    ir.args.push(int32<overflow='wrap'>(a1));
+    ir.args.push(int32<overflow='wrap'>(a2));
+    ir.args.push(int32<overflow='wrap'>(a3));
+    emit('call' rtype -1 start 4 1 f);
+    return -1
+}
+e_call_nr=(f:LPWord args:array<int64> rtype:LPWord):>int64=>$unsafe {
+    let start=ir.args.length
+    loop a in args {ir.args.push(int32<overflow='wrap'>(a));}
+    emit('call' rtype -1 int32<overflow='wrap'>(start) int32<overflow='wrap'>(args.length) 1 f);
+    return -1
+}
+str_data=(s:string):>int64=>$unsafe {
+    let o=str_off.get(s)
+    if o not=? none {
+        if fused_on and o >=? fz_r0 {fz_note_text(2 o s);}
+        return o
+    }
+    loop rodata.length % 8 not=? 0 {rodata.push(0);}
+    let o=rodata.length
+    ro_starts.push(o);
+    push_i64(@rodata -1);
+    push_i64(@rodata (s as array<uint8>).length);
+    push_i64(@rodata (s as array<uint8>).length + 1);
+    let n=rodata.length
+    rodata.resize(n + (s as array<uint8>).length);
+    if (s as array<uint8>).length >? 0 {mem_copy((rodata).ptr + n (s as array<uint8>).ptr (s as array<uint8>).length);}
+    rodata.push(0);
+    str_off[s] = o;
+    if fused_on {fz_note_text(2 o s);}
+    return o
+}
+set_text_table=(id:LPWord):>int64=>$unsafe {
+    if not fz_layout {
+        let o=set_text_tables.get(id)
+    if o not=? none {return o}
+    }
+    loop rodata.length % 8 not=? 0 {rodata.push(0);}
+    let o=rodata.length
+    ro_starts.push(o);
+    let texts=str_sets.ptr[id]
+    let at:LPWord=8 * LPWord(texts.length)
+    loop text in texts {
+        push_i64(@rodata at);
+        at += (24 + (text as array<uint8>).length + 1 + 7) // 8 * 8;
+    }
+    loop text in texts {
+        push_i64(@rodata -1);
+        push_i64(@rodata (text as array<uint8>).length);
+        push_i64(@rodata (text as array<uint8>).length + 1);
+        let n=rodata.length
+        rodata.resize(n + (text as array<uint8>).length);
+        if (text as array<uint8>).length >? 0 {mem_copy((rodata).ptr + n (text as array<uint8>).ptr (text as array<uint8>).length);}
+        rodata.push(0);
+        loop rodata.length % 8 not=? 0 {rodata.push(0);}
+    }
+    if fused_on {fz_note_raw(o 8);}
+    set_text_tables[id] = o;
+    return o
+}
+global_addr_off=(g:LPWord):>int64=>$unsafe {
+    let o=global_off.get(g)
+    if o not=? none {
+        if fused_on and o >=? fz_d0 {fz_note(3 o g 0 0);}
+        return o
+    }
+    let t:LPWord=LPWord(globals.ptr[g].type)
+    let al=talign(t)
+    if al <? 8 {al=8}
+    data_size=align_up(data_size al)
+    let o=data_size
+    let sz=tsize(t)
+    if sz <? 8 {sz=8}
+    data_size += sz;
+    global_off[g] = o;
+    if fused_on {fz_note(3 o g 0 0);}
+    return o
+}
+bounds_check=(arr:LPWord idx:LPWord pos:LPWord):>void=>$unsafe {
+    # arr: array object pointer (may be null), idx: index
+    let loc=loc_data(pos)
+    if not opt_release {
+        let n:LPWord=0
+        if target_wasm or target_arm64 {n=arr_len(arr)}
+        else {
+            # Select a real zero-length header for nil, without a hot branch.
+            # Keep the comparison next to select so native lowering reuses flags.
+            let selected=vreg(VI)
+            let empty=e_daddr(str_data(""))
+            let condition=e_bin('ne' VI arr e_iconst(0))
+            emit('select' VI selected condition arr empty 0);
+            n=hdr_load(selected 8)
+        }
+        iff(e_bin('geu' VI idx n));
+        e_call_nr3(rt("__panic_bounds") idx n e_daddr(loc) -1);
+        endc();
+        return
+    }
+    iff(e_bin('eq' VI arr e_iconst(0)));
+    e_call_nr3(rt("__panic_bounds") idx e_iconst(0) e_daddr(loc) -1);
+    endc();
+    let n=hdr_load(arr 8)
+    iff(e_bin('geu' VI idx n));
+    e_call_nr3(rt("__panic_bounds") idx n e_daddr(loc) -1);
+    endc();
+}
+null_check=(arr:LPWord idx:LPWord pos:LPWord):>void=>$unsafe {
+    iff(e_bin('eq' VI arr e_iconst(0)));
+    e_call_nr3(rt("__panic_bounds") idx e_iconst(0) e_daddr(loc_data(pos)) -1);
+    endc();
+}
+loc_data=(pos:LPWord):>int64=>$unsafe {
+    let f=pos_file(pos)
+    let [l c]=line_col(pos)
+    if f =? loc_last_file and l =? loc_last_line and not fused_on {return loc_last_off}
+    loc_last_file=f
+    loc_last_line=l
+    loc_last_off=str_data(loc_str(pos))
+    return loc_last_off
+}
+loc_str=(pos:LPWord):>string=>$unsafe {
+    if pos_in_lib(pos) {return ""}
+    let f=pos_file(pos)
+    let path=files.ptr[f].path
+    let bytes=path as array<uint8>
+    let s:LPWord=LPWord(bytes.length) - 1
+    loop s >=? 0 and bytes.ptr[s] not=? b'/' {s -= 1;}
+    if s >=? 0 {path=path.byte_slice(s + 1 bytes.length)}
+    let [l c]=line_col(pos)
+    return "{path}:{l}"
+}
+e_daddr=(off:LPWord):>int64=>$unsafe {
+    let d=vreg(VI)
+    emit('daddr' VI d 0 0 0 off);
+    return d
+}
+e_gaddr=(off:LPWord):>int64=>$unsafe {
+    let d=vreg(VI)
+    emit('gaddr' VI d 0 0 0 off);
+    return d
+}
+e_faddr=(lf:LPWord):>int64=>$unsafe {
+    let d=vreg(VI)
+    emit('faddr' VI d 0 0 0 lf);
+    return d
+}
+fixed_index_domain=(index:LPWord length:LPWord):>bool=>$unsafe {
+    let n=index
+    loop true {
+        let t=prune(ntype(n))
+        if types.ptr[t].kind not=? 'int_' {return false}
+        let bits:LPWord=LPWord(types.ptr[t].bits)
+        if not types.ptr[t].sign and bits <? 32 {return (1 << bits) <=? length}
+        if nodes.ptr[n].kind not=? 'conv' or nodes.ptr[n].aux not=? int32<overflow='wrap'>(1) {return false}
+        let inner:LPWord=LPWord(nodes.ptr[n].a)
+        let source=prune(ntype(inner))
+        if types.ptr[source].kind not=? 'int_' {return false}
+        let from_bits:LPWord=LPWord(types.ptr[source].bits)
+        if bits <? from_bits {return false}
+        if types.ptr[t].sign not=? types.ptr[source].sign and not (types.ptr[t].sign and bits >? from_bits) {return false}
+        n=inner
+    }
+    return false
+}
+tuple_off=(t:LPWord idx:LPWord):>int64=>$unsafe {
+    let off:LPWord=0
+    loop i in [0..idx + 1) {
+        let el=targ(t i)
+        off=align_up(off talign(el))
+        if i <? idx {off += tsize(el);}
+    }
+    return off
+}
+call_eval_order=(n:int64):>array<int64>=>$unsafe {
+    let order:array<int64>=[]
+    let metadata:LPWord=LPWord(nodes.ptr[n].c)
+    if metadata not=? 0 {
+        loop e in kids(metadata) {order.push(nodes.ptr[e].ival);}
+    }
+    else {
+        loop i in [0..nkids(n)) {order.push(i);}
+    }
+    return order
+}
+inst_mutmask=(f:LPWord):>int64=>$unsafe {
+    let d:LPWord=LPWord(fns.ptr[f].decl)
+    if d =? 0 or nodes.ptr[d].kind not=? 'fn_' {return 0}
+    let di:LPWord=LPWord(nodes.ptr[d].sym)
+    if di >? 0 and decl_infos.ptr[di].sig.done {return LPWord(decl_infos.ptr[di].sig.mutmask)}
+    let mm:LPWord=0
+    loop i in [0..fns.ptr[f].ptypes.length) {
+        if has_flag(kid(d i) NF_MUT) {mm |= 1 << i;}
+    }
+    return mm
+}
+data_writable=(e:LPWord):>bool=>$unsafe {
+    let k=nodes.ptr[e].kind
+    if k =? 'field' or k =? 'index' or k =? 'unwrap' or k =? 'narrow' {
+        # A field/element of owned storage needs the same detachment as a named
+        # array. Slices are temporary values, not writable storage paths.
+        if k =? 'index' and nodes.ptr[e].aux =? 1 {return false}
+        return data_writable(LPWord(nodes.ptr[e].a))
+    }
+    if k not=? 'ident' {return false}
+    if nodes.ptr[e].aux =? int32<overflow='wrap'>(2) {return true}
+    if nodes.ptr[e].aux not=? int32<overflow='wrap'>(1) {return false}
+    let l:LPWord=LPWord(nodes.ptr[e].sym)
+    let f:LPWord=LPWord(locals.ptr[l].flags)
+    if f & LF_ALIAS not=? 0 {return locals.ptr[l].alias not=? 0 and data_writable(LPWord(locals.ptr[l].alias))}
+    if f & LF_BYREF not=? 0 {return false}
+    if f & LF_CAPTURE not=? 0 {return f & LF_VALUECAP not=? 0 or is_shared(l)}
+    return f & LF_PARAM =? 0 or f & LF_MUTPARAM not=? 0
+}
+lit=(ba:LPWord s:string):>void=>$unsafe {
+    e_call2(rt("__buf_append_str") ba e_daddr(str_data(s)) -1);
+}
+fmt_field=(ba:LPWord f:LPWord t:LPWord addr:LPWord):>void=>$unsafe {
+    e_call2(lf_of_inst(f) ba load_val(t addr 0) -1);
+}
+json_key=(ba:LPWord name:string indent:LPWord level:LPWord index:LPWord):>void=>$unsafe {
+    e_call(rt("__json_key") [ba e_daddr(str_data(name)) indent level e_iconst(index)] -1);
+}
+json_field=(ba:LPWord f:LPWord t:LPWord addr:LPWord indent:LPWord level:LPWord):>void=>$unsafe {
+    e_call4(lf_of_inst(f) ba load_val(t addr 0) indent level -1);
+}
+set_word_moved=(w:LPWord from_:LPWord to:LPWord pos:LPWord):>int64=>$unsafe {
+    let fs=str_set_of(from_)
+    let ts=str_set_of(to)
+    let d=vreg(VI)
+    e_mov(d w);
+    let lacks=false
+    loop k in [0..str_sets.ptr[fs].length) and value in str_sets.ptr[fs] {
+        let j:LPWord=LPWord(str_sets.ptr[ts].index_of(value) ?? -1)
+        if j <? 0 {lacks=true}
+        else if j not=? k {
+            iff(e_bin('eq' VI w e_iconst(k)));
+            e_mov(d e_iconst(j));
+            endc();
+        }
+    }
+    if lacks {
+        loop k in [0..str_sets.ptr[fs].length) and value in str_sets.ptr[fs] {
+            if not str_sets.ptr[ts].contains(value) {
+                iff(e_bin('eq' VI w e_iconst(k)));
+                e_call_nr1(rt("__panic_narrow") e_daddr(loc_data(pos)) -1);
+                endc();
+            }
+        }
+    }
+    return d
+}

@@ -42,6 +42,7 @@ def test_lower_helpers_invalid_dispatch(compiler, tmp_path, monkeypatch):
         modules['util.jo'], count=1)
     assert count == 1
     driver = ("use 'main.jo'\nuse 'lower.jo'\nuse 'types.jo'\n"
+              "use 'lower_primitives.dewy'\n"
               'main = ():\n    lower_test_cli()\n'
               '    lower_helper(lf_helper(HK.parallel_serial, T_INT, 0))\n'
               '    print("unreachable")\n')
