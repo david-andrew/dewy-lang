@@ -1,0 +1,82 @@
+$runtime_checks
+from p"checker_state.dewy" import FnSig
+from p"ast.jo" import nodes
+from p"types.jo" import types
+from p"type_inference.dewy" import tu_prune
+from p"checker_call_queries.dewy" import ctx_dependent
+from p"units.jo" import bundled_word_rational_type
+from p"expr.jo" import (arg_cost_rest call_mutable_cost)
+# Candidate scoring is O(arguments), in typed/literal/context-dependent order.
+# State is local to the candidate; services may re-enter checking and grow arenas.
+CCWord:type=int64<overflow='wrap'>
+Cand:type=[
+    decl:int64=0
+    sig:FnSig=FnSig[]
+    args:array<int64>=[]
+    binds:array<int64>=[]
+    cost:int64=0
+    ok:bool=false
+    plain:bool=false
+    missing:bool=false
+]
+# A settled argument of exactly its parameter's type needs no conversion. Literal,
+# optional, refinement, callable and word-fraction cases retain the full service.
+arg_cost=(a:CCWord pat:CCWord @binds:array<int64>):>CCWord=>$unsafe {
+    if nodes.ptr[a].type not=? 0 and (CCWord(nodes.ptr[a].flags) & 256) =? 0 and nodes.ptr[a].kind not=? 'str_lit' and nodes.ptr[a].kind not=? 'float_lit' {
+        let t=tu_prune(pat)
+        if tu_prune(CCWord(nodes.ptr[a].type)) =? t and (CCWord(types.ptr[t].flags) & 1) =? 0 {
+            let tk=types.ptr[t].kind
+            if tk not=? 'opt' and tk not=? 'refined' and tk not=? 'callable' and tk not=? 'polyfn' and not (tk =? 'struct_' and bundled_word_rational_type(t)) and not ctx_dependent(a) {return 0}
+        }
+    }
+    arg_cost_rest(a pat @binds)
+}
+# Zero means success; +/- (index + 1) identifies a value/mutable rejection.
+# The caller builds diagnostics only for rejected candidates, in its cold frame.
+call_candidate_cost=(cd:ptr<Cand> recv_fits:ptr<bool>):>CCWord=>$unsafe {
+    let np=CCWord(cd[0].args.length)
+    let later:CCWord=0
+    loop a in cd[0].args {
+        if a =? 0 {continue}
+        if ctx_dependent(a) {later|=2}
+        else if (CCWord(nodes.ptr[a].flags) & 256) not=? 0 {later|=1}
+    }
+    cd[0].plain=later =? 0
+    let arg_cls:array<int64>=[]
+    if later not=? 0 {
+        loop a in cd[0].args {
+            let cls:CCWord=0
+            if a not=? 0 {
+                if ctx_dependent(a) {cls=2}
+                else if (CCWord(nodes.ptr[a].flags) & 256) not=? 0 {cls=1}
+            }
+            arg_cls.push(cls)
+        }
+    }
+    let cost:CCWord=0
+    loop phase0 in [0..3) {
+        let phase=CCWord(phase0)
+        if phase >? 0 and (later & phase) =? 0 {continue}
+        loop i0 in [0..np) {
+            let i=CCWord(i0)
+            let a=CCWord(cd[0].args.ptr[i])
+            if a =? 0 {continue}
+            let cls:CCWord=if later =? 0 {0} else {arg_cls.ptr[i]}
+            if cls not=? phase {continue}
+            let pt=CCWord(cd[0].sig.params.ptr[i])
+            if (CCWord(cd[0].sig.mutmask) & (1 << i)) not=? 0 and cls not=? 2 {
+                let r=call_mutable_cost(a pt @cd[0].binds recv_fits i =? 0)
+                if r <? 0 {return -(i + 1)}
+                cost+=r
+                continue
+            }
+            let r=arg_cost(a pt @cd[0].binds)
+            if i =? 0 and r >=? 0 {recv_fits[0]=true}
+            if r <? 0 {return i + 1}
+            cost+=r
+        }
+    }
+    cd[0].ok=true
+    cd[0].cost=cost
+    0
+}

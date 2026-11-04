@@ -1,0 +1,67 @@
+# Frozen argument costs and candidate scoring from expr.jo.
+use 'checker_state.dewy'
+use 'ast.jo'
+use 'types.jo'
+use 'type_inference.dewy'
+use 'checker_call_queries.dewy'
+use 'units.jo'
+use 'expr.jo'
+struct Cand:
+    decl: int
+    sig: FnSig
+    args: int[]
+    binds: int[]
+    cost: int
+    ok: bool
+    plain: bool       # (no argument a literal or one whose type comes from the parameter's)
+    missing: bool     # (some parameter left to its default)
+
+arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
+    # (a value whose settled type is the parameter's, half of all arguments: the cases below
+    # that could cost it anything are of literals, of values whose type comes from where they
+    # go, of optionals (string sets), refinements, callables and word fractions)
+    if nodes[a].type != 0 and not is_lit(a) and nodes[a].kind != .str_lit and nodes[a].kind != .float_lit:
+        t = tu_prune(pat)
+        if tu_prune(ntype(a)) == t and not has_var(t):
+            tk = types[t].kind
+            if tk != .opt and tk != .refined and tk != .callable and tk != .polyfn and not (tk == .struct_ and bundled_word_rational_type(t)) and not ctx_dependent(a): return 0
+    arg_cost_rest(a, pat, binds)
+
+# Zero means success; +/- (index + 1) identifies a value/mutable rejection.
+call_candidate_cost = (cd: *Cand, recv_fits: *bool) -> int:
+    np = cd[0].args.len()
+    later = 0
+    loop a in cd[0].args:
+        if a == 0: continue
+        if ctx_dependent(a): later |= 2
+        else if is_lit(a): later |= 1
+    cd[0].plain = later == 0
+    arg_cls: int[]
+    if later != 0:
+        loop a in cd[0].args:
+            cls = 0
+            if a != 0:
+                if ctx_dependent(a): cls = 2
+                else if is_lit(a): cls = 1
+            arg_cls.push(cls)
+    cost = 0
+    loop phase in [0..3):
+        if phase > 0 and later & phase == 0: continue
+        loop i in [0..np):
+            a = cd[0].args[i]
+            if a == 0: continue
+            cls = if later == 0: 0 else: arg_cls[i]
+            if cls != phase: continue
+            pt = cd[0].sig.params[i]
+            if int(cd[0].sig.mutmask) & (1 << i) != 0 and cls != 2:
+                r = call_mutable_cost(a, pt, cd[0].binds, recv_fits, i == 0)
+                if r < 0: return -(i + 1)
+                cost += r
+                continue
+            r = arg_cost(a, pt, cd[0].binds)
+            if i == 0 and r >= 0: recv_fits[0] = true
+            if r < 0: return i + 1
+            cost += r
+    cd[0].ok = true
+    cd[0].cost = cost
+    0

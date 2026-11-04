@@ -1,3 +1,4 @@
+use 'checker_call_cost.dewy'
 use 'host_binds.jo'
 use 'checker_coerce.dewy'
 use 'checker_signature.dewy'
@@ -1460,16 +1461,6 @@ expr_as_type = (e: int) -> int:
     0
 
 # ---------------- calls ----------------
-struct Cand:
-    decl: int
-    sig: FnSig
-    args: int[]
-    binds: int[]
-    cost: int
-    ok: bool
-    plain: bool       # (no argument a literal or one whose type comes from the parameter's)
-    missing: bool     # (some parameter left to its default)
-
 # a candidate turned down at an argument, its message made only if no candidate fits: of
 # argument fi (from 0), a, whose parameter's type there is ptx (d negative: a mutable
 # parameter's, needing an exact match)
@@ -1724,15 +1715,7 @@ branch_arg_cost = (a: int, pat: int, binds: mut int[], hidden: int[] = []) -> in
     if types[prune(pat)].kind == .param: return 3
     0
 
-arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
-    # (a value whose settled type is the parameter's, half of all arguments: the cases below
-    # that could cost it anything are of literals, of values whose type comes from where they
-    # go, of optionals (string sets), refinements, callables and word fractions)
-    if nodes[a].type != 0 and not is_lit(a) and nodes[a].kind != .str_lit and nodes[a].kind != .float_lit:
-        t = prune(pat)
-        if prune(ntype(a)) == t and not has_var(t):
-            tk = types[t].kind
-            if tk != .opt and tk != .refined and tk != .callable and tk != .polyfn and not (tk == .struct_ and bundled_word_rational_type(t)) and not ctx_dependent(a): return 0
+arg_cost_rest = (a: int, pat: int, binds: mut int[]) -> int:
     if effects_active and nodes[a].type != 0 and callable_contract(pat) != 0: nodes[a].type = i32(effect_infer_callable(a, pat))
     p = representation_type(pat)
     pk = types[p].kind
@@ -2419,7 +2402,6 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
     cands: Cand[]             # (those that fit, when more than one does)
     first = Cand()
     nfit = 0
-    arg_cls: int[]
     last_err = ""
     last_err_pos = 0          # (where the argument it is about is: the error points there)
     last_err_arg = 0          # (which argument, from 1)
@@ -2492,81 +2474,31 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
                 recv_fits = true
                 continue
             loop i in 0.. and t in targs_here: cd.binds[i] = t
-        cost = 0
-        ok = true
-        # (each argument's class, read once for this candidate: trying the others leaves it as it is;
-        # kept only when some argument is not of the first)
-        later = 0             # (the phases after the first that have arguments, as bits)
-        loop i in [0..np):
-            a = cd.args[i]
-            if a != 0:
-                if ctx_dependent(a): later |= 2
-                else if is_lit(a): later |= 1
-        cd.plain = later == 0
-        if later != 0:
-            arg_cls.truncate(0)
-            loop i in [0..np):
-                a = cd.args[i]
-                cls = 0
-                if a != 0:
-                    if ctx_dependent(a): cls = 2
-                    else if is_lit(a): cls = 1
-                arg_cls.push(cls)
-        loop phase in [0..3):
-            if not ok: break
-            if phase > 0 and later & phase == 0: continue
-            loop i in [0..np):
-                a = cd.args[i]
-                if a == 0: continue
-                cls = if later == 0: 0 else: arg_cls[i]
-                if cls != phase: continue
-                pt = cd.sig.params[i]
-                if int(cd.sig.mutmask) & (1 << i) != 0 and cls != 2:
-                    r = match_type(pt, ntype(a), cd.binds, 0)
-                    ok2 = r >= 0
-                    if i == 0 and ok2: recv_fits = true
-                    if ok2:
-                        ptx = subst(pt, cd.binds)
-                        actual = ntype(a)
-                        shape = ptx
-                        if refine_active: actual = representation_type(actual); shape = representation_type(shape)
-                        if not has_var(prune(shape)) and not has_var(prune(actual)) and not type_eq(shape, actual): ok2 = false
-                    if not ok2:
-                        ok = false
-                        if i + 1 < last_err_arg: break
-                        if last_err_arg < i + 1: rejected.clear()
-                        last_err_arg = i + 1
-                        rejected.push(Rejection(-cd.decl, i, 0, subst(pt, cd.binds), cd))
+        failed = call_candidate_cost(&cd, &recv_fits)
+        if failed != 0:
+            i = abs(failed) - 1
+            if i + 1 < last_err_arg: continue
+            if failed < 0:
+                if last_err_arg < i + 1: rejected.clear()
+                last_err_arg = i + 1
+                rejected.push(Rejection(-cd.decl, i, 0, subst(cd.sig.params[i], cd.binds), cd))
+                continue
+            # Of the candidates, blame the one that got furthest; among its literals,
+            # a failure before this argument is the first mistake.
+            fi = i
+            if not cd.sig.generic:
+                loop j in [0..i):
+                    aj = cd.args[j]
+                    if aj == 0 or not is_lit(aj) or ctx_dependent(aj): continue
+                    if arg_cost(aj, cd.sig.params[j], cd.binds) < 0:
+                        fi = j
                         break
-                    cost += r
-                    continue
-                r = arg_cost(a, pt, cd.binds)
-                if i == 0 and r >= 0: recv_fits = true
-                if r < 0:
-                    ok = false
-                    # (of the overloads, the one that got furthest is the one meant: m[k] = v
-                    # with the wrong v is about the map's, not a GPU buffer's)
-                    if i + 1 < last_err_arg: break
-                    # (literals are tried after the rest: a literal written before this argument
-                    # that does not fit either is the first mistake, as 100 in circle(100, 100, 20, RED))
-                    fi = i
-                    if not cd.sig.generic:
-                        loop j in [0..i):
-                            aj = cd.args[j]
-                            if aj == 0 or not is_lit(aj) or ctx_dependent(aj): continue
-                            if arg_cost(aj, cd.sig.params[j], cd.binds) < 0:
-                                fi = j
-                                break
-                    a = cd.args[fi]
-                    if last_err_arg < i + 1: rejected.clear()
-                    last_err_arg = i + 1
-                    rejected.push(Rejection(d, fi, a, subst(cd.sig.params[fi], cd.binds), cd))
-                    last_err_pos = nodes[a].pos
-                    break
-                cost += r
-        if not ok: continue
-        cd.ok = true
-        cd.cost = cost
+            a = cd.args[fi]
+            if last_err_arg < i + 1: rejected.clear()
+            last_err_arg = i + 1
+            rejected.push(Rejection(d, fi, a, subst(cd.sig.params[fi], cd.binds), cd))
+            last_err_pos = nodes[a].pos
+            continue
         # (the first that fits is kept apart: most calls have no other)
         if nfit == 0: first = cd
         else:
@@ -12109,3 +12041,15 @@ take_call = (n: int, args: int[]) -> int:
 game_name_hint = (pos: int, nm: str) -> str:
     if not dewy_at(pos): return ""
     "; a program with a top-level `{nm}` is a game, so a function of your own that is no game callback needs another name, as `{nm}_board`"
+
+# Mutable arguments require an exact representation after binding. Keep refinement
+# and substitution work off the ordinary candidate-scoring frame.
+call_mutable_cost = (a: int, pt: int, binds: mut int[], recv_fits: *bool, receiver: bool) -> int:
+    r = match_type(pt, ntype(a), binds, 0)
+    if r < 0: return -1
+    if receiver: recv_fits[0] = true
+    shape = subst(pt, binds)
+    actual = ntype(a)
+    if refine_active: actual = representation_type(actual); shape = representation_type(shape)
+    if not has_var(prune(shape)) and not has_var(prune(actual)) and not type_eq(shape, actual): return -1
+    r
