@@ -1,0 +1,88 @@
+# Deferred acceptance for mentors and apprentices, with incomplete preference
+# lists. Both sides may prefer remaining unmatched to a name absent from a list.
+# The final audit looks for a pair that would both prefer one another.
+Profile:type = [name:string choices:array<string>]
+
+rank = (choices:array<string> name:string):>int => {
+    loop i in [0..choices.length) {
+        if choices[i] =? name return i
+    }
+    choices.length
+}
+
+preferences = (people:array<Profile> name:string):>array<string> => {
+    loop p in people { if p.name =? name return p.choices }
+    []
+}
+
+match_people = (applicants:array<Profile> mentors:array<Profile>):>dict<string string> => {
+    let held:dict<string string> = []
+    let next:dict<string int<(>=? 0)>> = []
+    let free = [loop a in applicants a.name]
+    let proposals = 0
+    loop free.length >? 0 {
+        let name = free.pop(0)
+        let choices = preferences(applicants name)
+        let i = next.get(name) ?? 0
+        if i >=? choices.length continue
+        let mentor = choices[i]
+        next[name] = i + 1
+        proposals += 1
+        let wants = preferences(mentors mentor)
+        if name not in? wants { free.push(name); continue }
+        let old = held.get(mentor)
+        if old is? none {
+            held[mentor] = name
+        } else if rank(wants name) <? rank(wants old) {
+            held[mentor] = name
+            free.push(old)
+        } else free.push(name)
+    }
+    printl"{proposals} proposals"
+    held
+}
+
+partner = (held:dict<string string> applicant:string):>string => {
+    loop [mentor name] in held { if name =? applicant return mentor }
+    "unmatched"
+}
+
+blocking_pairs = (applicants:array<Profile> mentors:array<Profile> held:dict<string string>):>array<string> => {
+    let bad:array<string> = []
+    loop a in applicants {
+        let current = partner(held a.name)
+        loop preferred in a.choices {
+            if preferred =? current break
+            let wants = preferences(mentors preferred)
+            if a.name not in? wants continue
+            let occupant = held.get(preferred) ?? "unmatched"
+            if rank(wants a.name) <? rank(wants occupant) {
+                bad.push("{a.name}/{preferred}")
+            }
+        }
+    }
+    bad
+}
+
+main = () => {
+    let applicants = [
+        Profile["Ada" ["Oak" "Pine" "Elm"]]
+        Profile["Ben" ["Oak" "Elm" "Pine"]]
+        Profile["Cy" ["Pine" "Oak"]]
+        Profile["Dee" ["Elm"]]
+        Profile["Eli" ["Oak"]]
+    ]
+    let mentors = [
+        Profile["Oak" ["Ben" "Ada" "Cy"]]
+        Profile["Pine" ["Ada" "Cy" "Ben"]]
+        Profile["Elm" ["Dee" "Ben" "Ada"]]
+    ]
+    let held = match_people(applicants mentors)
+    loop a in applicants { printl"{a.name}: {partner(held a.name)}" }
+    printl"blocking pairs: {blocking_pairs(applicants mentors held).length}"
+    # A deliberately bad matching must fail the stability audit.
+    let bad = ["Oak" -> "Ada" "Pine" -> "Cy" "Elm" -> "Ben"]
+    printl"bad matching: {blocking_pairs(applicants mentors bad).join(", ")}"
+    let nobody:array<Profile> = []
+    printl"empty matching: {match_people(nobody mentors).length}"
+}

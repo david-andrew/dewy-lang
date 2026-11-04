@@ -1,0 +1,94 @@
+# Scan all six DNA reading frames for complete open reading frames. Whitespace
+# and letter case are normalized; unknown bases are rejected. Coordinates are
+# zero-based, half-open, on the strand printed beside each result.
+Gene:type = [strand:string frame:int64 start:int64 stop:int64 protein:string]
+
+const CODE = [
+    "TTT"->"F" "TTC"->"F" "TTA"->"L" "TTG"->"L"
+    "TCT"->"S" "TCC"->"S" "TCA"->"S" "TCG"->"S"
+    "TAT"->"Y" "TAC"->"Y" "TAA"->"*" "TAG"->"*"
+    "TGT"->"C" "TGC"->"C" "TGA"->"*" "TGG"->"W"
+    "CTT"->"L" "CTC"->"L" "CTA"->"L" "CTG"->"L"
+    "CCT"->"P" "CCC"->"P" "CCA"->"P" "CCG"->"P"
+    "CAT"->"H" "CAC"->"H" "CAA"->"Q" "CAG"->"Q"
+    "CGT"->"R" "CGC"->"R" "CGA"->"R" "CGG"->"R"
+    "ATT"->"I" "ATC"->"I" "ATA"->"I" "ATG"->"M"
+    "ACT"->"T" "ACC"->"T" "ACA"->"T" "ACG"->"T"
+    "AAT"->"N" "AAC"->"N" "AAA"->"K" "AAG"->"K"
+    "AGT"->"S" "AGC"->"S" "AGA"->"R" "AGG"->"R"
+    "GTT"->"V" "GTC"->"V" "GTA"->"V" "GTG"->"V"
+    "GCT"->"A" "GCC"->"A" "GCA"->"A" "GCG"->"A"
+    "GAT"->"D" "GAC"->"D" "GAA"->"E" "GAG"->"E"
+    "GGT"->"G" "GGC"->"G" "GGA"->"G" "GGG"->"G"
+]
+
+normalize_dna = (raw:string):>string? => {
+    let bases:array<string> = []
+    loop ch in raw.upper {
+        if ch in? " \n\t\r" continue
+        if ch not in? "ACGT" return none
+        bases.push(ch)
+    }
+    bases.join
+}
+
+reverse_complement = (dna:string):>string => {
+    let complement = ["A"->"T" "T"->"A" "C"->"G" "G"->"C"]
+    let bases = [loop ch in dna complement.get(ch) ?? "?"]
+    bases.reversed.join
+}
+
+scan_frame = (dna:string strand:string frame:int64):>array<Gene> => {
+    let genes:array<Gene> = []
+    if frame <? 0 or frame >? 2 return genes
+    let pos:int64 = frame
+    let start:int64 = -1
+    let protein:array<string> = []
+    loop pos + 3 <=? dna.length {
+        let codon = dna[pos..pos + 3)
+        let amino = CODE.get(codon) ?? "?"
+        if start <? 0 {
+            if codon =? "ATG" { start = pos; protein = ["M"] }
+        } else if amino =? "*" {
+            genes.push(Gene[strand frame start pos + 3 protein.join])
+            start = -1
+            protein = []
+        } else protein.push(amino)
+        pos += 3
+    }
+    genes
+}
+
+scan = (dna:string):>array<Gene> => {
+    let genes:array<Gene> = []
+    let reverse = reverse_complement(dna)
+    loop frame in [0..3) {
+        genes.extend(scan_frame(dna "+" frame))
+        genes.extend(scan_frame(reverse "-" frame))
+    }
+    genes
+}
+
+report = (label:string raw:string):>void => {
+    let dna = normalize_dna(raw)
+    if dna is? none { printl"{label}: invalid bases"; return }
+    let gc = [loop base in dna if base in? "GC" base].length
+    let genes = scan(dna)
+    printl"{label}: {dna.length} bases, GC={gc}, {genes.length} complete ORFs"
+    loop gene in genes {
+        printl"  {gene.strand}{gene.frame} [{gene.start}..{gene.stop}) {gene.protein}"
+    }
+    printl"  reverse twice: {reverse_complement(reverse_complement(dna)) =? dna}"
+}
+
+main = () => {
+    report("fragment" "CCCATGGCCATTGTAATGTAA")
+    report("two genes" "ATGAAATAGATGCCCTGA")
+    report("reverse gene" "TTAAAACAT")
+    report("offset one" "CATGTTTTAA")
+    report("offset two" "CCATGTTTTAA")
+    report("normalized" "atg aaa\n tag")
+    report("incomplete" "ATGAAA")
+    report("unknown" "ATGNNTAA")
+    report("empty" "")
+}

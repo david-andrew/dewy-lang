@@ -1,0 +1,97 @@
+# Count atoms in chemical formulae, including nested parenthesized groups.
+# Integer masses keep the examples exact; this is bookkeeping, not chemistry
+# software with an isotope table. Invalid formulae return none.
+Parsed:type = [atoms:dict<string int> pos:int64<(>=? 0)>]
+
+is_digit = (s:string):>bool => s.length =? 1 and s in? "0123456789"
+is_upper = (s:string):>bool => s.length =? 1 and s in? "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+is_lower = (s:string):>bool => s.length =? 1 and s in? "abcdefghijklmnopqrstuvwxyz"
+
+number = (chars:array<string> @pos:int64<(>=? 0)>):>int => {
+    let n = 0
+    let any = false
+    loop 0 <=? pos <? chars.length and is_digit(chars[pos]) {
+        let at = pos
+        let digit = chars[at]
+        pos = at + 1
+        n = n * 10 + (to_int(digit) ?? 0)
+        any = true
+    }
+    if any n else 1
+}
+
+merge_atoms = (@target:dict<string int> source:dict<string int> factor:int):>void => {
+    loop [atom count] in source {
+        target[atom] = (target.get(atom) ?? 0) + count * factor
+    }
+}
+
+parse_group = (chars:array<string> start:int64 nested:bool):>Parsed? => {
+    let atoms:dict<string int> = []
+    if start <? 0 return none
+    let pos:int64<(>=? 0)> = start
+    loop 0 <=? pos <? chars.length {
+        let ch = chars[pos]
+        if ch =? ")" {
+            if not nested or atoms.length =? 0 return none
+            return Parsed[atoms pos + 1]
+        }
+        let part:dict<string int> = []
+        if ch =? "(" {
+            let group = parse_group(chars pos + 1 true)
+            if group is? none return none
+            part = group.atoms
+            pos = group.pos
+        } else if is_upper(ch) {
+            let atom = ch
+            pos += 1
+            loop 0 <=? pos <? chars.length and is_lower(chars[pos]) {
+                atom = "{atom}{chars[pos]}"
+                pos += 1
+            }
+            part[atom] = 1
+        } else return none
+        let multiplier = number(chars @pos)
+        if multiplier =? 0 return none
+        merge_atoms(@atoms part multiplier)
+    }
+    if nested or atoms.length =? 0 return none
+    Parsed[atoms pos]
+}
+
+formula = (text:string):>dict<string int>? => {
+    let result = parse_group([loop ch in text ch] 0 false)
+    if result is? none return none
+    result.atoms
+}
+
+report = (text:string masses:dict<string int>):>void => {
+    let atoms = formula(text)
+    if atoms is? none { printl"{text}: invalid"; return }
+    let terms = [loop [atom count] in atoms [name=atom count=count]].sorted(key=(x) => x.name)
+    let parts = [loop t in terms "{t.name}:{t.count}"]
+    let mass = 0
+    let known = true
+    loop [atom count] in atoms {
+        if atom not in? masses { known = false; continue }
+        mass += masses[atom] * count
+    }
+    printl"{text}: {parts.join(" ")} mass={if known "{mass}" else "unknown"}"
+}
+
+main = () => {
+    let masses = ["H" -> 1 "C" -> 12 "O" -> 16 "N" -> 14 "S" -> 32
+                  "Ca" -> 40 "Al" -> 27 "K" -> 39]
+    loop text in ["H2O" "Ca(OH)2" "Al2(SO4)3" "K4(ON(SO3)2)2" "C12H22O11"
+                  "Xx2" "H0" "(OH" "H)" "()" "2H" ""] {
+        report(text masses)
+    }
+    let water = formula("H2O")
+    let peroxide = formula("H2O2")
+    if water isnt? none and peroxide isnt? none {
+        let batch = water
+        merge_atoms(@batch peroxide 2)
+        printl"mixture: H={batch.get("H") ?? 0} O={batch.get("O") ?? 0}"
+        printl"water unchanged: O={water.get("O") ?? 0}"
+    }
+}

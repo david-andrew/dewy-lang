@@ -1,0 +1,85 @@
+# Instant-runoff voting with weighted ballots, exhausted votes and explicit
+# deterministic tie breaking: eliminate the alphabetically last tied name.
+# Each round counts only a ballot's highest-ranked remaining candidate.
+Ballot:type = [count:int ranking:array<string>]
+Round:type = [totals:dict<string int> active:int exhausted:int]
+
+first_active = (ranking:array<string> remaining:array<string>):>string? => {
+    loop candidate in ranking {
+        if candidate in? remaining return candidate
+    }
+    none
+}
+
+tally = (ballots:array<Ballot> remaining:array<string>):>Round => {
+    let totals = [loop name in remaining name -> 0]
+    let active = 0
+    let exhausted = 0
+    loop ballot in ballots {
+        if ballot.count <=? 0 continue
+        let choice = first_active(ballot.ranking remaining)
+        if choice is? none {
+            exhausted += ballot.count
+        } else {
+            totals[choice] = (totals.get(choice) ?? 0) + ballot.count
+            active += ballot.count
+        }
+    }
+    Round[totals active exhausted]
+}
+
+elect = (ballots:array<Ballot> candidates:array<string>):>string => {
+    let remaining = candidates.sorted
+    let round = 1
+    loop remaining.length >? 0 {
+        let r = tally(ballots remaining)
+        let rows = [loop [name votes] in r.totals [name=name votes=votes]]
+        let summary = [loop row in rows "{row.name}={row.votes}"].join(" ")
+        printl"round {round}: {summary}; exhausted={r.exhausted}"
+        if r.active =? 0 return "no winner"
+        loop row in rows {
+            if row.votes * 2 >? r.active return row.name
+        }
+        # Stable sorting retains alphabetical order for equal vote counts.
+        rows.sort(key=(row) => row.votes)
+        if rows.length =? 0 return "no winner"
+        let least = rows[0].votes
+        let loser = rows[0].name
+        loop row in rows {
+            if row.votes =? least loser = row.name
+        }
+        printl"eliminate {loser}"
+        remaining = [loop name in remaining if name not=? loser name]
+        round += 1
+    }
+    "no winner"
+}
+
+valid = (ballot:Ballot candidates:array<string>):>bool => {
+    if ballot.count <=? 0 return false
+    let seen:array<string> = []
+    loop name in ballot.ranking {
+        if name not in? candidates or name in? seen return false
+        seen.push(name)
+    }
+    true
+}
+
+main = () => {
+    let candidates = ["Birch" "Cedar" "Maple" "Willow"]
+    let incoming = [
+        Ballot[4 ["Birch" "Cedar"]]
+        Ballot[3 ["Cedar" "Maple"]]
+        Ballot[2 ["Maple" "Cedar"]]
+        Ballot[1 ["Willow"]]
+        Ballot[1 ["Maple" "Birch"]]
+        Ballot[9 ["Birch" "Birch"]]
+        Ballot[2 ["Pine"]]
+        Ballot[0 ["Cedar"]]
+    ]
+    let ballots = [loop b in incoming if valid(b candidates) b]
+    printl"accepted {ballots.length}, rejected {incoming.length - ballots.length}"
+    printl"winner: {elect(ballots candidates)}"
+    printl"tie winner: {elect([Ballot[1 ["A" "B"]] Ballot[1 ["B" "A"]]] ["A" "B"])}"
+    printl"empty: {elect([] ["A"])}"
+}
