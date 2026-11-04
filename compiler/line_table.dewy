@@ -18,31 +18,22 @@ LineTable:type=[
     line:int64
 ]
 
-# Offsets, counts and line numbers are words (they cannot overflow); the newline
-# scan's bit trick wraps by design.
+# Offsets, counts and line numbers are words (they cannot overflow).
 LineWord:type=int64<overflow='wrap'>
-LineBits:type=uint64<overflow='wrap'>
 
 # where each line of src starts: 0, then the offset after each newline. Newlines are
-# found a word at a time: only a word holding one is scanned by byte; O(bytes / 8 + lines)
+# found by the bounded library search, shared with the lexer; O(bytes + lines).
 line_starts=(src:string):>array<int64>=>$unsafe {
     let ls:array<int64>=[0]
     # (the pointer of a view, not of a variable: a variable's would be its own copy)
     let n=LineWord((src as array<uint8>).length)
     let sp=(src as array<uint8>).ptr
     let i:LineWord=0
-    loop i + 8 <=? n {
-        let w=LineBits(((sp + i) as ptr<uint64>)[0]) xor 0x0A0A0A0A0A0A0A0A
-        if (w - 0x0101010101010101) & (w xor 0xFFFFFFFFFFFFFFFF) & 0x8080808080808080 not=? 0 {
-            loop j in [i..i + 8) {
-                if sp[j] =? 10 {ls.push(int64(j + 1))}
-            }
-        }
-        i+=8
-    }
     loop i <? n {
-        if sp[i] =? 10 {ls.push(int64(i + 1))}
+        i=__find_newline(sp i n)
+        if i >=? n {break}
         i+=1
+        ls.push(int64(i))
     }
     ls
 }
