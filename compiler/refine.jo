@@ -1003,7 +1003,7 @@ ref_array_call_prepare = (decl: int, args: mut int[], ptypes: int[], written: in
     out = RefArrayCall()
     if args.len() == 0 or not pos_in_lib(nodes[decl].pos): return out
     name = name_of(int(nodes[decl].name))
-    if name != "__dewy_insert" and name != "reverse" and name != "sort" and name != "sort_by" and name != "sort_with": return out
+    if name != "__dewy_insert" and name != "swap" and name != "reverse" and name != "sort" and name != "sort_by" and name != "sort_with": return out
     place = args[0]
     t = prune(refine_storage(place, ntype(place)))
     if tkind(representation_type(t)) != .array or (types[t].kind != .refined and not ref_dependent_ancestor(place)): return out
