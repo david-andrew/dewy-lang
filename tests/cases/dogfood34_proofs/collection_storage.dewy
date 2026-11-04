@@ -1,0 +1,12 @@
+Pos:type = int<(>=? 0)>
+values = (xs:array<Pos?> d:dict<string Pos>):>void => {
+    loop x in xs printl(x ?? 0)
+    printl(d.get("a") ?? 0)
+    printl(d.get("missing") ?? 0)
+}
+main = () => {
+    values([2 none 7] ["a" -> 11])
+    let huge = 1267650600228229401496703205376
+    if huge <? 0 return
+    values([huge none huge] ["a" -> huge])
+}

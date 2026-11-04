@@ -1,0 +1,9 @@
+small = (v:int8<(>=? -10)>?):>int => v ?? 0
+unsigned = (v:uint64<(>=? 0)>?):>int => v ?? 0
+wide = (v:int8<(>=? -10)>? fallback:int8<(>=? -10)>):>int64 => v ?? fallback
+float = (v:float32?):>float64 => v ?? 0.0
+main = () => {
+    printl"{small(-7)} {small(none)} {unsigned(18446744073709551615)}"
+    printl"{wide(-7 10)} {wide(none 10)}"
+    printl"{float(2.5)} {float(none)}"
+}

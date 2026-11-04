@@ -1,0 +1,22 @@
+refined = (v:int<(>=? -10)>?):>int => {
+    let n = v ?? 3
+    let xs:array<int> = [n n+1]
+    let result = (xs[0] * 7 + xs[1]) - n * 8
+    result
+}
+plain = (v:int?):>int => {
+    let n = v ?? 3
+    let xs:array<int> = [n n+1]
+    let result = (xs[0] * 7 + xs[1]) - n * 8
+    result
+}
+main = () => {
+    loop x in [-10 -1 0 1 2 999] {
+        if x <? -10 continue
+        printl"{refined(x)} {plain(x)}"
+    }
+    printl"{refined(none)} {plain(none)}"
+    let huge = 1267650600228229401496703205376
+    if huge <? 0 return
+    printl"{refined(huge)} {plain(huge)}"
+}

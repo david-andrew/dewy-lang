@@ -1,0 +1,20 @@
+Pos:type = int<(>=? 0)>
+Box:type = [value:Pos]
+main = () => {
+    let v:Pos = 2
+    v += 3
+    v *= 7
+    printl(v)
+    let b = Box[2]
+    b.value += 3
+    printl(b.value)
+    let pair:[Pos Pos] = [2 3]
+    pair[0] += 5
+    printl(pair[0])
+    let xs:array<Pos> = [2]
+    xs[0] += 7
+    printl(xs[0])
+    let d:dict<string Pos> = ["a" -> 2]
+    d["a"] += 9
+    printl(d["a"])
+}

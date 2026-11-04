@@ -1,0 +1,11 @@
+Pos:type = int<(>=? 0)>
+pass_on = (v:Pos?):>Pos? => v
+select = (v:Pos? fallback:Pos=3):>Pos => v ?? fallback
+narrow = (v:Pos?):>int => { if v is? none return -1; v }
+main = () => {
+    printl"{select(2)} {select(none)} {narrow(2)} {narrow(none)}"
+    let huge = 1267650600228229401496703205376
+    if huge <? 0 return
+    printl(select(pass_on(huge)))
+    printl(narrow(pass_on(huge)))
+}

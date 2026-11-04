@@ -1,0 +1,13 @@
+Pos:type = int<(>=? 0)>
+select = (v:Pos|string):>int => match v {
+    n:Pos => n
+    s:string => s.length
+}
+narrow = (v:Pos|string):>int => { if v is? Pos return v; -1 }
+main = () => {
+    printl"{select(2)} {select("abc")} {narrow(2)} {narrow("abc")}"
+    let huge = 1267650600228229401496703205376
+    if huge <? 0 return
+    printl(select(huge))
+    printl(narrow(huge))
+}

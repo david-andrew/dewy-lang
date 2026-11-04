@@ -706,10 +706,18 @@ proven below the array's post-call length. Every return must establish the
 relation. Replacing or shrinking the array, an unknown callback, and pending
 return cleanup still invalidate facts they could falsify. Module `const` values,
 including their lengths and guarded elements, retain facts across calls.
+A scalar search result can also retain its strict upper bound against a
+module array's exit length when every return proves it; later replacement or
+shrinking and pending cleanup do not inherit that relation. Reviewed library
+operations such as `to_int` that write no caller storage preserve a mutable
+cursor's bounds across the call.
 For a dictionary with non-optional values and builtin keys, a successful
 `d.get(k)` supplies membership in that evaluated dictionary. A later change
 to the dictionary or key does not inherit that evidence. Common fields of an
 immutable tagged value retain key identity through a compound dictionary update.
+An inline `sorted(key=...)` callback over a dictionary's keys retains membership
+in a captured, read-only snapshot of that same dictionary. A different or
+changed dictionary, an added nonkey, and mutable captures supply no such fact.
 Immutable literal tables supply key membership and element-field bounds;
 `text.lines` is nonempty when `text` is nonempty. Read-only array-loop elements
 keep guarded field facts across unrelated calls. A successful integer narrowing
@@ -1178,6 +1186,11 @@ contract through an alias is rejected. Captured lexical dependencies remain
 unsupported. Parameter-dependent contracts nested inside element types, and
 projected mutable postconditions with deferred cleanup, are conservatively
 rejected. There is no public strict-lane spelling.
+
+Oversized integer literals retain their known sign even when their magnitude
+is outside the fixed-width fact domain; this does not prove that they fit a
+machine integer. A text fallback `value ?? "?"` retains a minimum length known
+on both arms, including a length refinement on the optional payload.
 
 Static evidence can follow transitive integer comparisons, constant-offset
 addition, subtraction and literal scaling when their intermediates fit, and facts supported by

@@ -1,0 +1,19 @@
+Pos:type = int<(>=? 0)>
+equal = (a:Pos b:Pos):>void => {
+    printl(a =? b)
+    let x:Pos? = a
+    let y:Pos? = b
+    printl(x =? y)
+    let xs:array<Pos> = [a a]
+    let ys:array<Pos> = [b b]
+    printl(xs =? ys)
+    let d:dict<Pos string> = [a -> "ok"]
+    printl(d.get(b) ?? "missing")
+}
+main = () => {
+    equal(2 2)
+    let a = 1267650600228229401496703205376
+    let b = 1267650600228229401496703205375 + 1
+    if a <? 0 or b <? 0 return
+    equal(a b)
+}

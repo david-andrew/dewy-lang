@@ -1,0 +1,8 @@
+small = (v:int<x => x >=? 0 and x <=? 100>):>void => {
+    printl(int64(v))
+    printl(float64(v))
+    let w:int64<x => x >=? 0 and x <=? 100> = int64(v)
+    printl(int(w))
+    printl(float64(w))
+}
+main = () => { small(2); small(99) }

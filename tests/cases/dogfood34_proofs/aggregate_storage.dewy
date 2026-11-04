@@ -1,0 +1,12 @@
+Pos:type = int<(>=? 0)>
+Box:type = [value:Pos other:Pos?]
+fields = (b:Box pair:[Pos Pos?]):>void => {
+    printl"{b.value} {b.other ?? 0} {pair[0]} {pair[1] ?? 0}"
+}
+main = () => {
+    fields(Box[2 3] [4 5])
+    fields(Box[0 none] [0 none])
+    let huge = 1267650600228229401496703205376
+    if huge <? 0 return
+    fields(Box[huge huge] [huge huge])
+}

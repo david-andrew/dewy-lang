@@ -1,0 +1,13 @@
+Pos:type = int<(>=? 0)>
+select = (v:Pos):>string => match v {
+    <2> => "two"
+    <1267650600228229401496703205376> => "huge"
+    _ => "other"
+}
+main = () => {
+    printl(select(2))
+    printl(select(3))
+    let huge = 1267650600228229401496703205376
+    if huge <? 0 return
+    printl(select(huge))
+}
