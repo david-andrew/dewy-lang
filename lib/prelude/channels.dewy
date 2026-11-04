@@ -25,12 +25,12 @@ Channel:type = <T>[
     __h:__Chan<T>
     send = (value:T):>void | Unsent<T> => {
         let code = __chan_send_wait(__h)
-        if code not=? 0 return __unsent(value code)
+        if code not=? 0 return __unsent<T>(value code)
         __chan_put(__h value)
     }
     try_send = (value:T):>void | Unsent<T> => {
         let code = __chan_try_send(__h)
-        if code not=? 0 return __unsent(value code)
+        if code not=? 0 return __unsent<T>(value code)
         __chan_put(__h value)
     }
     receive = ():>T | Closed | Canceled => {

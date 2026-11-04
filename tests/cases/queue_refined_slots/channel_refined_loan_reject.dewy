@@ -1,0 +1,2 @@
+bad=(@x:int):>void=>{x=-1}
+main=()=>{let tx=channel<int<(>=? 0)>>(2) let rx=tx tx.send(2) or_throw let received=rx.receive if received is? Closed or received is? Canceled {printl("bad") return} let x:int<(>=? 0)>=received bad(@x) printl(x)}

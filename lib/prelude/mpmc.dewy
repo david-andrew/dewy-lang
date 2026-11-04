@@ -19,11 +19,11 @@ Mpmc:type = <T>[
     __h:__Mpmc<T>
     try_send = (value:T):>void | Unsent<T> => {
         let code = __mpmc_try_send(__h value)
-        if code not=? 0 return __unsent(value code)
+        if code not=? 0 return __unsent<T>(value code)
     }
     send = (value:T):>void | Unsent<T> => {
         let code = __mpmc_send_wait(__h value)
-        if code not=? 0 return __unsent(value code)
+        if code not=? 0 return __unsent<T>(value code)
     }
     try_receive = ():>T | Empty | Closed | Busy | Canceled => {
         let pos = __mpmc_try_claim(__h)

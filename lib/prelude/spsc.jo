@@ -11,17 +11,17 @@ struct __SpscState[T]:
     seq: int
     waiting: int
     cap: int
-    slots: T[]
+    slots: T?[]
 
 struct __Spsc[T]:
     __cell: __SpscState[T][]
     __p: *__SpscState[T]
 
 __spsc_new[T] = (capacity: int) -> __Spsc[T]:
-    slots: T[]
-    slots.resize(max(capacity, 1))
+    # Vacant slots contain none, never a fabricated zero-valued payload.
+    slots: T?[] = fill(none, max(capacity, 1))
     cell: __SpscState[T][] = [__SpscState[T](0, 0, 0, 0, 0, max(capacity, 1), slots)]
-    p = data(cell)
+    p = __task_data(cell)
     __Spsc[T](cell, p)
 
 # 0: sent; 1 closed; 2 canceled; 3 full. Never waits.
@@ -50,9 +50,8 @@ __spsc_try_receive[T] = (q: __Spsc[T]) -> int:
 __spsc_take[T] = (q: __Spsc[T]) -> T:
     p = q.__p
     i = p.head % p.cap
-    v = p.slots[i]
-    empty: T
-    p.slots[i] = empty
+    v = p.slots[i]!
+    p.slots[i] = none
     __q_add(&p.head, 1)
     __q_changed(&p.seq, &p.waiting)
     v

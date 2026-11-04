@@ -48,7 +48,7 @@ struct __MpmcState[T]:
     waiting: int
     cap: int
     seqs: int[]
-    slots: T[]
+    slots: T?[]
 
 struct __Mpmc[T]:
     __cell: __MpmcState[T][]
@@ -56,13 +56,13 @@ struct __Mpmc[T]:
 
 __mpmc_new[T] = (capacity: int) -> __Mpmc[T]:
     n = max(capacity, 1)
-    slots: T[]
-    slots.resize(n)
+    # Vacant slots contain none, never a fabricated zero-valued payload.
+    slots: T?[] = fill(none, n)
     seqs: int[]
     seqs.resize(n)
     loop i in [0..n): seqs[i] = 2 * i
     cell: __MpmcState[T][] = [__MpmcState[T](0, 0, 0, 0, n, seqs, slots)]
-    p = data(cell)
+    p = __task_data(cell)
     __Mpmc[T](cell, p)
 
 __mpmc_seq[T] = (p: *__MpmcState[T], i: int) -> *int: ((data(p.seqs) as int) + i * 8) as *int
@@ -92,9 +92,8 @@ __mpmc_try_send[T] = (q: __Mpmc[T], v: T) -> int:
 # The value at a claimed position; its slot freed for the send a lap later.
 __mpmc_take_at[T] = (p: *__MpmcState[T], pos: int) -> T:
     i = pos % p.cap
-    v = p.slots[i]
-    empty: T
-    p.slots[i] = empty
+    v = p.slots[i]!
+    p.slots[i] = none
     __q_add(__mpmc_seq(p, i), 2 * p.cap - 1)
     __q_changed(&p.seq, &p.waiting)
     v

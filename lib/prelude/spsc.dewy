@@ -27,11 +27,11 @@ SpscSender:type = <T>[
     __release = ():>void => __spsc_close(__h)
     try_send = (value:T):>void | Unsent<T> => {
         let code = __spsc_try_send(__h value)
-        if code not=? 0 return __unsent(value code)
+        if code not=? 0 return __unsent<T>(value code)
     }
     send = (value:T):>void | Unsent<T> => {
         let code = __spsc_send_wait(__h value)
-        if code not=? 0 return __unsent(value code)
+        if code not=? 0 return __unsent<T>(value code)
     }
     close = ():>void => __spsc_close(__h)
 ]

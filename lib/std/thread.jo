@@ -261,17 +261,17 @@ struct __ChanState[T]:
     head: int
     count: int
     cap: int
-    slots: T[]
+    slots: T?[]
 
 struct __Chan[T]:
     __cell: __ChanState[T][]
     __p: *__ChanState[T]
 
 __chan_new[T] = (capacity: int) -> __Chan[T]:
-    slots: T[]
-    slots.resize(max(capacity, 1))
+    # Vacant slots contain none, never a fabricated zero-valued payload.
+    slots: T?[] = fill(none, max(capacity, 1))
     cell: __ChanState[T][] = [__ChanState[T](0, 0, 0, 0, 0, 0, max(capacity, 1), slots)]
-    p = data(cell)
+    p = __task_data(cell)
     __Chan[T](cell, p)
 
 # (the web runs one thread: no other holder, no one to wake)
@@ -358,9 +358,8 @@ __chan_drain_wait[T] = (c: __Chan[T]) -> int:
 __chan_take[T] = (c: __Chan[T]) -> T:
     p = c.__p
     h = p.head
-    v = p.slots[h]
-    empty: T
-    p.slots[h] = empty
+    v = p.slots[h]!
+    p.slots[h] = none
     p.head = if h + 1 == p.cap: 0 else: h + 1
     p.count -= 1
     __chan_changed(&p.seq, &p.lock, &p.waiting)
