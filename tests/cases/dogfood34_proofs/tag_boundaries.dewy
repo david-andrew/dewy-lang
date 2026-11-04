@@ -1,0 +1,13 @@
+choose = (v:int<(>=? 0)>? fallback:int<(>=? 0)>?):>int? => v ?? fallback
+step = (@v:int<(>=? 0)>):>void => { v += 1 }
+main = () => {
+    let a:int<(>=? 0)> = 4611686018427387903
+    step(@a)
+    printl(a)
+    let b = choose(a none)
+    printl(b ?? 0)
+    let c:int<(>=? 0)> = 9223372036854775807
+    step(@c)
+    printl(c)
+    printl(choose(none c) ?? 0)
+}

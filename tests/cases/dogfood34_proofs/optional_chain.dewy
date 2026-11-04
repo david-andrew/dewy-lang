@@ -1,0 +1,9 @@
+Pos:type = int<(>=? 0)>
+choose = (a:Pos? b:Pos?):>Pos? => a ?? b
+main = () => {
+    printl"{choose(2 3) ?? 0} {choose(none 3) ?? 0} {choose(none none) ?? 0}"
+    let huge = 1267650600228229401496703205376
+    if huge <? 0 return
+    printl(choose(huge none) ?? 0)
+    printl(choose(none huge) ?? 0)
+}

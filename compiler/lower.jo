@@ -5448,7 +5448,9 @@ gen_value_coalesce = (e: int) -> Val:
     has = opt_has(pa, inner)
     iff(has)
     if nodes[e].aux == 1:
-        vv = own_at(a, V(pa, false), ot)
+        # A packed optional integer is a scalar, not the address of its slot.
+        # load_val also leaves ordinary aggregate optionals as addresses.
+        vv = own_at(a, V(load_val(ot, pa, 0), false), ot)
         store_val(ot, e_slot(rs), 0, vv.v)
     else if t == T_MATH_INT and representation_type(inner) != T_MATH_INT:
         # Refined mathematical integers are already tagged. Only an actual
