@@ -1,3 +1,4 @@
+use 'refine.jo'
 use 'checker_expr.dewy'
 use 'checker_tokens.dewy'
 # Place-returning methods (docs/design/decisions.md: round 6, batch 13 and the small batch).
@@ -152,7 +153,10 @@ place_written_check = (info: PlaceMethod, decl: int, g: int, l: int, pos: int):
     if c != 0 and nodes[c].kind == .call and nodes[c].sym > 0 and int(nodes[c].sym) < fns.len() and int(fns[int(nodes[c].sym)].decl) == decl: push_type_params(decl, fns[int(nodes[c].sym)].targs)
     t = resolve_type(info.written)
     scope_reset(mark)
-    if not type_eq(prune(t), prune(int(locals[l].type))): fatal(pos, "the place is written as @{dt(t)}, and its member is {dt(int(locals[l].type))}")
+    # The lent place's read type may erase its qualifier. Its written
+    # return annotation promises the field's declared storage authority.
+    storage = refine_storage(mk_ident_local(l, pos), int(locals[l].type))
+    if not type_eq(prune(t), prune(storage)): fatal(pos, "the place is written as @{dt(t)}, and its member is {dt(storage)}")
 
 # `let a = @(recv.m(args))`, as a statement of sibling_block. false when s is something else.
 place_let_decl = (s: int) -> bool:
