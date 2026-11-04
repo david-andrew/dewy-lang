@@ -278,6 +278,7 @@ copy_live = (n: int, live: mut {int: bool}):
         l = int(nodes[n].sym)
         skip = LF_PARAM | LF_MUTPARAM | LF_ALIAS | LF_BYREF | LF_CAPTURE | LF_CAPTURED | LF_EXPOSED
         if copy_inputs.has(l): skip &= ~LF_PARAM
+        if spawn_owned_capture(int(locals[l].owner), l): skip &= ~LF_CAPTURE
         if ownership_type(int(locals[l].type)) and not is_shared(l) and int(locals[l].flags) & LF_ADDR == 0: skip &= ~LF_CAPTURED
         if not copy_local_live(l, live) and not copy_blocked.has(l) and int(locals[l].flags) & skip == 0:
             copy_moves[n] = true
@@ -414,7 +415,10 @@ copy_take = (e: int, value: Val, t: int) -> Val:
 
 copy_forget = (e: int, t: int):
     if nodes[e].kind == .ident:
-        owner_forget_slot(int(locals[int(nodes[e].sym)].offset))
+        l = int(nodes[e].sym)
+        if spawn_owned_capture(cur_fn, l):
+            e_store(env_v, int(locals[l].env_off) - 8, e_iconst(0), 8)
+        else: owner_forget_slot(int(locals[l].offset))
     else:
         key = copy_field(e)
         if key >= 0: ice("missing owner field path")

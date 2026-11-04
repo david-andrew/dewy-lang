@@ -2300,6 +2300,9 @@ env_layout = (f: int):
         al = talign(t)
         if al < 8: al = 8
         off = align_up(off, al)
+        # A run-once task may transfer a capture on one branch only. Keep its
+        # live bit beside the payload; the construction prefix still guards it.
+        if spawn_owned_capture(f, inn): off = align_up(off + 8, al)
         locals[inn].env_off = i32(off)
         off += tsize(t)
     fns[f].env_size = i32(align_up(off, 8))
@@ -2537,6 +2540,7 @@ gen_lambda = (e: int, stack: bool = false) -> Val:
             store_val(store_type(inn), env, int(locals[inn].env_off), cell)
         else: store_val(t, env, int(locals[inn].env_off), val.v)
         if resource:
+            if spawn_owned_capture(f, inn): e_store(env, int(locals[inn].env_off) - 8, e_iconst(1), 8)
             if ownership_type(t): owner_forget_slot(val.slot)
             hdr_store(env, 24, e_iconst(index + 1))
         index += 1
@@ -8901,7 +8905,10 @@ helper_envdrop = (f: int, heap: bool = true):
             t = store_type(inn)
             if is_managed(t):
                 if resource: iff(e_bin(.gtu, VI, e_load(VI, env, 24, 8), e_iconst(index)))
+                movable = spawn_owned_capture(f, inn)
+                if movable: iff(e_load(VI, env, int(locals[inn].env_off) - 8, 8))
                 drop_embedded(e_addi(env, int(locals[inn].env_off)), t)
+                if movable: endc()
                 if resource: endc()
     if heap: e_call1(rt("__free"), env, -1)
     e_ret(-1)
@@ -8914,6 +8921,12 @@ spawn_body = (f: int) -> bool:
     # (the conversion to the task's callable type wraps the literal in place)
     loop d != 0 and nodes[d].kind == .conv: d = int(nodes[d].a)
     d != 0 and nodes[d].kind == .lambda and nodes[d].aux2 == 17
+
+# Only owned, unshared resource captures can move out of a run-once body.
+# Nested shared captures and borrowed places keep their existing restrictions.
+spawn_owned_capture = (f: int, l: int) -> bool:
+    flags = int(locals[l].flags)
+    flags & LF_CAPTURE != 0 and flags & (LF_OWNERBORROW | LF_PARTBORROW) == 0 and not is_shared(l) and ownership_type(int(locals[l].type)) and spawn_body(f)
 
 helper_envcopy = (f: int):
     ps = helper_params(1)

@@ -677,6 +677,10 @@ a pointer to each rule. The wording is David's.
 - `spsc<T N>` with a consuming `.split` (no parentheses: zero-argument calls drop
   them everywhere) and the channel verbs `try_send`, `send`, `try_receive`,
   `receive`, `close`; each end has exactly one owner.
+- A spawn body runs once and owns its captures: a proven last use may transfer
+  an owned capture into another function. Repeatable closures cannot consume
+  their captures; shared and borrowed captures remain borrowed. A conditional
+  transfer suppresses cleanup only on the path that actually transferred it.
 - `mpmc<T>(capacity)`; a non-waiting attempt that collides with another task
   returns `Busy`.
 - Channel, `mpmc` and `spsc` waits participate in deadlock diagnostics and need

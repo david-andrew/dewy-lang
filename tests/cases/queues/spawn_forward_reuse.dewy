@@ -1,0 +1,12 @@
+# modes: native
+consume = (tx:SpscSender<int64>):>void => tx.close
+main = () => {
+    let [tx rx] = spsc<int64 2>().split
+    concurrent {
+        spawn {
+            consume(tx)
+            tx.try_send(1);
+        }
+    }
+    rx.try_receive;
+}

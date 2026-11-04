@@ -1,0 +1,15 @@
+# modes: native native-release
+produce = (tx:SpscSender<int64>):>void => { tx.send(41); }
+consume = (rx:SpscReceiver<int64>):>int64 => {
+    let n = rx.receive
+    if n is? int64 return n
+    0
+}
+main = () => {
+    let [tx rx] = spsc<int64 2>().split
+    concurrent {
+        spawn produce(tx)
+        let got = spawn consume(rx)
+    }
+    printl"{got}"
+}

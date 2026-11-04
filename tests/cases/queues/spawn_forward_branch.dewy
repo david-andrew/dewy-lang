@@ -1,0 +1,13 @@
+# modes: native native-release
+produce = (tx:SpscSender<int64> value:int64):>void => { tx.send(value); }
+run = (choice:int64):>void => {
+    let [tx rx] = spsc<int64 2>().split
+    concurrent {
+        spawn {
+            if choice =? 0 produce(tx 10) else { tx.send(20); }
+        }
+        let n = rx.receive
+        if n is? int64 printl"{n}"
+    }
+}
+main = () => { run(0); run(1) }

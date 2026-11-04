@@ -3221,7 +3221,11 @@ ends, an `SpscSender<T>` and an `SpscReceiver<T>`, with the same verbs and
 outcomes (`try_receive` never gives `Busy`: nothing else can be mid-operation).
 Each end has exactly one owner: it moves rather than copies, so two tasks can never
 hold the same end, and using the queue after `.split` or an end after moving it is a
-compile error. The ring is lock-free and released when both ends are gone.
+compile error. The ring is lock-free and released when both ends are gone. A spawn
+body runs once and can pass a captured end to a function that takes ownership,
+at its proven last use. A later read, a loop backedge or a defer that still needs
+that end prevents the move. A closure that can run repeatedly cannot move its
+owned captures out this way.
 Dropping an end closes the queue; an end captured by a spawned task is dropped
 when its group joins, so a producer task closes its sender itself.
 
