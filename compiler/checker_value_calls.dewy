@@ -1,0 +1,485 @@
+$runtime_checks
+from p"ast.jo" import (NF_CHECKED NF_INBOUNDS NF_SPREAD TUPLE_VALUES add_flag clear_flag dewy_param_kinds has_flag kid kids mk nkids nkids2 nodes set_kid set_list)
+from p"types.jo" import (T_STR fields fixed_len has_var is_values mk_values prune structs targ telem tkind type_eq types)
+from p"check.jo" import (ValuesItem check_struct_fields cur_mod method_modules node_mark node_marked sink_pack_hit sink_pack_site sink_values_use spread_calls subst syms values_call_labels values_collect_fns values_collect_module values_count_label values_dynamic values_expand_error0 values_expand_error1 values_expand_error2 values_expand_error3 values_expand_error4 values_group_error0 values_hint_first values_hint_mark values_hint_pos values_hits values_internal_callee values_length_check values_shift_warning)
+from p"expr.jo" import (args_fit bc_block bc_stmt call_collect_named capture_value coerce decl_in_prelude dewy_member_name finalize_literal is_map_type last_checked map_args match_type mk_ident_local ntype program_fn_named receiver_literal_hint takes_seq type_receiver_at unnamed)
+from p"effects.jo" import (callable_base effect_generic_argument)
+from p"checker_expr.dewy" import (check_expr lookup)
+from p"checker_call_queries.dewy" import (ctx_dependent)
+from p"dewy_methods.jo" import (dewy_is_method dewy_methods dewy_type_method)
+from p"checker_signature.dewy" import (fn_sig)
+from p"ide.jo" import (ide_on)
+from p"reflection.jo" import (members_argument members_named)
+from p"util.jo" import (name_of)
+from p"poly_closure.jo" import (poly_families)
+from p"refine.jo" import (representation_type str_set_of)
+from p"checker_values.dewy" import (values_arity values_candidate values_count values_flatten values_parts values_record values_simple)
+# Demand-driven call expansion; retain arena indices across checker services.
+VCWord:type=int64<overflow='wrap'>
+values_expand=(items0:array<int64> @pre:array<int64> call:int64):>array<int64>=>$unsafe {
+    let items=values_flatten(items0)
+    let n=items.length
+    let info:array<ValuesItem>=[]
+    let any=false
+    loop i in [0..n) {
+        let c=items.ptr[i]
+        info.push(ValuesItem[count = 1])
+        if nodes.ptr[c].kind =? 'namedarg' {continue}
+        if has_flag(c NF_SPREAD) {
+            clear_flag(c NF_SPREAD)
+            let saved=sink_pack_site
+            sink_pack_site=c
+            let t:VCWord=prune(check_expr(c 0))
+            sink_pack_site=saved
+            let hit=sink_pack_hit not=? 0 and sink_pack_hit =? c
+            sink_pack_hit=0
+            items.ptr[i] = last_checked
+            add_flag(items.ptr[i] NF_CHECKED)
+            any=true
+            info.ptr[i].spread = true
+            let k:VCWord=0
+            if hit or is_values(t) {
+                k=values_count(items.ptr[i])
+                info.ptr[i].spread = false
+                info.ptr[i].hidden = true
+                if k =? 0 {values_dynamic(items.ptr[i])}
+            }
+            else if types.ptr[t].kind =? 'fixed' {k=fixed_len(t)}
+            else if types.ptr[t].kind =? 'tuple' {k=VCWord(types.ptr[t].nargs)}
+            else if types.ptr[t].kind =? 'array' {k=-1}
+            else if types.ptr[t].kind =? 'struct_' and not is_map_type(t) {values_expand_error0(c)}
+            else {values_expand_error1(c t)}
+            info.ptr[i].count = k
+            continue
+        }
+        let hit=false
+        if node_marked(values_hits c) {hit=true}
+        else {
+            if not values_candidate(c) {continue}
+            let saved=sink_pack_site
+            sink_pack_site=c
+            check_expr(c 0);
+            sink_pack_site=saved
+            hit=sink_pack_hit not=? 0 and sink_pack_hit =? c
+            sink_pack_hit=0
+            items.ptr[i] = last_checked
+            add_flag(items.ptr[i] NF_CHECKED)
+        }
+        if not hit {continue}
+        let k=values_count(items.ptr[i])
+        if k =? 0 {values_dynamic(items.ptr[i])}
+        info.ptr[i].count = k
+        info.ptr[i].hidden = true
+        any=true
+    }
+    values_hint_mark=values_hint_pos.length
+    if not any {return items}
+    let dyn:VCWord=-1
+    let fixed:VCWord=0
+    loop i in [0..n) {
+        if nodes.ptr[items.ptr[i]].kind =? 'namedarg' {continue}
+        if info.ptr[i].count <? 0 {
+            if dyn >=? 0 {values_expand_error2(items i)}
+            dyn=i
+        }
+        else {fixed += info.ptr[i].count}
+    }
+    if dyn >=? 0 {
+        let arity=if call not=? 0 {values_arity(call)} else {-1}
+        if arity <? 0 {values_expand_error3(items dyn)}
+        if arity <? fixed {values_expand_error4(items dyn arity)}
+        info.ptr[dyn].count = arity - fixed
+    }
+    loop i in [0..n) {
+        if not info.ptr[i].hidden or info.ptr[i].count <? 2 or nodes.ptr[items.ptr[i]].kind =? 'namedarg' {continue}
+        loop j in [i + 1..n) {
+            if nodes.ptr[items.ptr[j]].kind not=? 'namedarg' {
+                values_shift_warning(items.ptr[i] info.ptr[i].count)
+                break
+            }
+        }
+    }
+    let last:VCWord=-1
+    loop i in [0..n) {
+        if info.ptr[i].count not=? 1 or info.ptr[i].spread {last=i}
+    }
+    let out:array<int64>=[]
+    values_hint_mark=values_hint_pos.length
+    loop i in [0..n) {
+        let c=items.ptr[i]
+        if nodes.ptr[c].kind =? 'namedarg' {
+            out.push(c)
+            continue
+        }
+        if info.ptr[i].count =? 1 and not info.ptr[i].spread {
+            if i <? last and not values_simple(c) {
+                if not has_flag(c NF_CHECKED) {
+                    check_expr(c 0);
+                    c=last_checked
+                    finalize_literal(c);
+                }
+                add_flag(c NF_CHECKED)
+                out.push(capture_value(c ntype(c) @pre))
+            }
+            else {out.push(c)}
+            continue
+        }
+        let start=out.length
+        if not info.ptr[i].spread {
+            loop part in values_parts(c @pre) {out.push(part)}
+        }
+        else {values_spread_parts(c info.ptr[i].count @pre @out)}
+        if ide_on and call not=? 0 and info.ptr[i].count >? 0 {
+            values_hint_pos.push(nodes.ptr[c].pos)
+            values_hint_first.push(start)
+            values_count_label(info.ptr[i].count)
+        }
+    }
+    out
+}
+values_spread_parts=(c:int64 k:int64 @pre:array<int64> @out:array<int64>):>void=>$unsafe {
+    let pos=nodes.ptr[c].pos
+    let t:VCWord=prune(ntype(c))
+    let src:VCWord=0
+    if nodes.ptr[c].kind =? 'ident' and nodes.ptr[c].aux =? 1 {src=VCWord(nodes.ptr[c].sym)}
+    else {
+        let held=capture_value(c t @pre)
+        src=VCWord(nodes.ptr[held].sym)
+    }
+    if types.ptr[t].kind =? 'array' {pre.push(values_length_check(src k pos))}
+    loop i in [0..k) {
+        let r:VCWord=0
+        if types.ptr[t].kind =? 'tuple' {
+            r=mk('field' pos)
+            let local=mk_ident_local(src pos)
+            nodes.ptr[r].a = int32(local)
+            nodes.ptr[r].aux = -2
+            nodes.ptr[r].ival = i
+        }
+        else {
+            r=mk('index' pos)
+            let local=mk_ident_local(src pos)
+            nodes.ptr[r].a = int32(local)
+            let index=mk('int_lit' pos)
+            nodes.ptr[index].ival = i
+            nodes.ptr[r].b = int32(index)
+            add_flag(r NF_INBOUNDS)
+        }
+        check_expr(r 0);
+        out.push(last_checked)
+    }
+}
+fns_param_hint=(decls:array<int64> i:int64 nargs:int64):>int64=>$unsafe {
+    let hint:VCWord=0
+    loop d in decls {
+        let np:VCWord=nkids(d)
+        if np <? nargs {continue}
+        if (dewy_param_kinds.get(d) ?? []).length >? 0 {return 0}
+        let takes=true
+        loop j in [nargs..np) {
+            if nodes.ptr[kid(d j)].b =? 0 {takes=false}
+        }
+        if not takes {continue}
+        let sig=fn_sig(d)
+        if VCWord(sig.mutmask) & (1 << i) not=? 0 {return 0}
+        let pt:VCWord=prune(sig.params.ptr[i])
+        if pt =? 0 or has_var(pt) or hint not=? 0 and not type_eq(hint pt) {return 0}
+        hint=pt
+    }
+    hint
+}
+fns_argument_hints=(decls:array<int64> args:array<int64> receiver:int64=0 explicit:array<int64>=[]):>array<int64>=>$unsafe {
+    let hints:array<int64>=fill(0 args.length)
+    let indices:dict<int64 int64>=dict<int64 int64>()
+    let positional=true
+    loop i in [0..args.length) and a in args {
+        if nodes.ptr[a].kind =? 'namedarg' {positional=false}
+        indices[unnamed(a)] = i
+    }
+    loop d in decls {
+        let np:VCWord=nkids(d)
+        if np <? args.length {continue}
+        let kinds=dewy_param_kinds.get(d) ?? []
+        let mapped=args
+        if not positional or kinds.length >? 0 {
+            let names:array<int64>=[]
+            let defaults:array<bool>=[]
+            loop p in kids(d) {
+                names.push(VCWord(nodes.ptr[p].name))
+                defaults.push(nodes.ptr[p].b not=? 0)
+            }
+            if map_args(names defaults args @mapped kinds false) not=? "" {continue}
+        }
+        else {
+            let takes=true
+            loop j in [args.length..np) {
+                if nodes.ptr[kid(d j)].b =? 0 {takes=false}
+            }
+            if not takes {continue}
+        }
+        let sig=fn_sig(d)
+        let binds:array<int64>=fill(0 VCWord(sig.ntp))
+        if explicit.length >? 0 {
+            if explicit.length not=? nkids2(d) {continue}
+            loop i in [0..explicit.length) and t in explicit {binds.ptr[i] = t}
+        }
+        if receiver not=? 0 {
+            if np =? 0 or match_type(sig.params.ptr[0] ntype(receiver) @binds 0) <? 0 {continue}
+        }
+        loop j in [0..mapped.length) {
+            let a=mapped.ptr[j]
+            if a =? 0 {continue}
+            let i=if positional and kinds.length =? 0 {j} else {indices.get(a) ?? (-1)}
+            if i <? 0 or hints.ptr[i] <? 0 {continue}
+            let pt:VCWord=prune(subst(sig.params.ptr[j] binds))
+            if VCWord(sig.mutmask) & (1 << j) not=? 0 or pt =? 0 or has_var(pt) or hints.ptr[i] not=? 0 and not type_eq(hints.ptr[i] pt) {hints.ptr[i] = -1}
+            else {hints.ptr[i] = pt}
+        }
+    }
+    loop i in [0..hints.length) {
+        if hints.ptr[i] <? 0 {hints.ptr[i] = 0}
+    }
+    hints
+}
+values_argument_hints=(n:int64 expected:int64):>array<int64>=>$unsafe {
+    let callee:VCWord=VCWord(nodes.ptr[n].a)
+    let args=kids(n)
+    let explicit:array<int64>=[]
+    if nodes.ptr[callee].kind =? 'typeapply' {
+        loop t in kids(callee) {explicit.push(effect_generic_argument(t))}
+        callee=VCWord(nodes.ptr[callee].a)
+    }
+    let decls:array<int64>=[]
+    let receiver:VCWord=0
+    let ft:VCWord=0
+    if nodes.ptr[callee].kind =? 'ident' {
+        let s=lookup(VCWord(nodes.ptr[callee].name))
+        if s not=? 0 and syms.ptr[s].kind =? 'fns' {call_collect_named(VCWord(nodes.ptr[callee].name) -1 @decls)}
+    }
+    else if nodes.ptr[callee].kind =? 'field' and nodes.ptr[callee].b =? 0 {
+        let recv:VCWord=VCWord(nodes.ptr[callee].a)
+        let name:VCWord=VCWord(nodes.ptr[callee].name)
+        let saved=type_receiver_at
+        type_receiver_at=recv
+        let rt:VCWord=prune(check_expr(recv receiver_literal_hint(recv name args.length expected nodes.ptr[n].pos)))
+        type_receiver_at=saved
+        recv=last_checked
+        nodes.ptr[callee].a = int32(recv)
+        add_flag(recv NF_CHECKED)
+        let k=types.ptr[rt].kind
+        if k =? 'module' {call_collect_named(name VCWord(types.ptr[rt].mod) @decls)}
+        else if k =? 'typeval' {
+            let tt:VCWord=prune(telem(rt))
+            if types.ptr[tt].kind =? 'struct_' {
+                let si:VCWord=VCWord(types.ptr[tt].st)
+                let j=dewy_type_method(VCWord(structs.ptr[si].decl) name)
+                if j >=? 0 and not dewy_methods.ptr[j].reads {
+                    check_struct_fields(si)
+                    decls.push(dewy_methods.ptr[j].decl)
+                    receiver=mk('call' nodes.ptr[n].pos)
+                    nodes.ptr[receiver].type = int32(tt)
+                }
+            }
+        }
+        else {
+            let st=if k =? 'ptr' {prune(telem(rt))} else {rt}
+            if types.ptr[st].kind =? 'struct_' {
+                let si:VCWord=VCWord(types.ptr[st].st)
+                check_struct_fields(si)
+                loop i in [0..VCWord(structs.ptr[si].nfields)) {
+                    let f:VCWord=VCWord(structs.ptr[si].fields) + i
+                    if fields.ptr[f].name =? int32(name) {
+                        let t:VCWord=prune(VCWord(fields.ptr[f].type))
+                        let fk=tkind(t)
+                        if fk =? 'fn_' or fk =? 'cfn' or fk =? 'polyfn' or fk =? 'callable' {ft=t}
+                    }
+                }
+            }
+            if ft not=? 0 {
+                if tkind(ft) =? 'polyfn' {
+                    let d=poly_families.ptr[VCWord(types.ptr[ft].st)].decl
+                    decls.push(d)
+                    if dewy_is_method(d) {receiver=recv}
+                }
+                else {ft=callable_base(ft)}
+            }
+            else if k not=? 'typeval' {
+                if str_set_of(rt) not=? 0 and not program_fn_named(name) {rt=T_STR}
+                name=dewy_member_name(callee rt name args)
+                if k =? 'array' and args.length =? 1 and (name_of(name) =? "push" or name_of(name) =? "extend") {
+                    let own:array<int64>=[]
+                    values_collect_module(cur_mod() name @own)
+                    loop d in own {
+                        if not decl_in_prelude(d) and args_fit(d 2) and takes_seq(d) {decls.push(d)}
+                    }
+                    if decls.length =? 0 {
+                        let hint=if name_of(name) =? "push" {telem(rt)} else {rt}
+                        return [hint]
+                    }
+                    return fns_argument_hints(decls [recv args...] recv)[1..]
+                }
+                values_collect_fns(name @decls)
+                loop m in method_modules(rt) {values_collect_module(m name @decls)}
+                receiver=recv
+            }
+        }
+    }
+    if receiver not=? 0 {args=[receiver args...]}
+    let hints:array<int64>=[]
+    if decls.length >? 0 {hints=fns_argument_hints(decls args receiver explicit)}
+    else if ft not=? 0 and (tkind(ft) =? 'fn_' or tkind(ft) =? 'cfn') {
+        loop i in [0..args.length) {
+            if nodes.ptr[args.ptr[i]].kind =? 'namedarg' or i >=? VCWord(types.ptr[ft].nargs) {return []}
+            let hint=if VCWord(types.ptr[ft].mutmask) & (1 << i) =? 0 {targ(ft i)} else {0}
+            hints.push(hint)
+        }
+    }
+    if receiver not=? 0 and hints.length >? 0 {return hints[1..]}
+    hints
+}
+values_call=(n:int64 expected:int64):>int64=>$unsafe {
+    let callee:VCWord=VCWord(nodes.ptr[n].a)
+    if values_internal_callee(callee) {return -1}
+    let some=false
+    let record=values_record(callee)
+    let positional=true
+    let fn_decls_read:VCWord=0
+    let fn_decls:array<int64>=[]
+    let hints_read=false
+    let arg_hints:array<int64>=[]
+    loop j in [0..nkids(n)) {
+        if nodes.ptr[kid(n j)].kind =? 'namedarg' {positional=false}
+    }
+    loop i in [0..nkids(n)) {
+        let original=kid(n i)
+        let named=nodes.ptr[original].kind =? 'namedarg'
+        let a=unnamed(original)
+        if nodes.ptr[a].kind =? 'call' and members_named(a) {members_argument(a)}
+        let k=nodes.ptr[a].kind
+        if named {record=0}
+        if not named and (k =? 'tuple' and nodes.ptr[a].aux =? int32(TUPLE_VALUES) or has_flag(a NF_SPREAD) or node_marked(values_hits a)) {
+            some=true
+            break
+        }
+        if has_flag(a NF_CHECKED) {continue}
+        if k =? 'ident' and not named {
+            if values_candidate(a) {
+                some=true
+                break
+            }
+        }
+        else if k =? 'call' and not ctx_dependent(a) and not node_marked(spread_calls a) {
+            let field:VCWord=0
+            if record not=? 0 and i <? VCWord(structs.ptr[record].nfields) {field=representation_type(VCWord(fields.ptr[VCWord(structs.ptr[record].fields) + i].type))}
+            else if record =? 0 and positional and nodes.ptr[callee].kind =? 'ident' {
+                if fn_decls_read =? 0 {
+                    fn_decls_read=1
+                    let s=lookup(VCWord(nodes.ptr[callee].name))
+                    if s not=? 0 and syms.ptr[s].kind =? 'fns' {call_collect_named(VCWord(nodes.ptr[callee].name) -1 @fn_decls)}
+                }
+                field=fns_param_hint(fn_decls i nkids(n))
+            }
+            else {
+                if not hints_read {
+                    hints_read=true
+                    arg_hints=values_argument_hints(n expected)
+                }
+                if i <? arg_hints.length {field=arg_hints.ptr[i]}
+            }
+            if named and field =? 0 {continue}
+            let saved=sink_pack_site
+            sink_pack_site=if named {0} else {a}
+            check_expr(a field);
+            sink_pack_site=saved
+            let hit=sink_pack_hit not=? 0 and sink_pack_hit =? a
+            sink_pack_hit=0
+            let v=last_checked
+            add_flag(v NF_CHECKED)
+            if v not=? a {
+                if named {nodes.ptr[original].a = int32(v)}
+                else {set_kid(n i v)}
+            }
+            if hit {
+                node_mark(@values_hits v)
+                some=true
+                break
+            }
+        }
+    }
+    if not some {return -1}
+    let pre:array<int64>=[]
+    values_hint_mark=values_hint_pos.length
+    let args=values_expand(kids(n) @pre n)
+    let hints=values_hint_mark
+    let expanded=args.length not=? nkids(n) or pre.length >? 0
+    if not expanded {
+        loop i in [0..args.length) {
+            if args.ptr[i] not=? kid(n i) {expanded=true}
+        }
+    }
+    if values_hint_pos.length >? hints {expanded=true}
+    if not expanded {return -1}
+    let pos=nodes.ptr[n].pos
+    let call=nodes.length
+    nodes.push(nodes.ptr[n])
+    set_list(call args)
+    let site=sink_pack_site =? n
+    if site {sink_pack_site=call}
+    let t=check_expr(call expected)
+    let v=last_checked
+    if site {
+        sink_pack_site=n
+        if sink_pack_hit =? call {sink_pack_hit=n}
+    }
+    if ide_on and values_hint_pos.length >? hints {values_call_labels(v hints)}
+    pre.push(bc_stmt(v pos))
+    add_flag(pre.ptr[pre.length - 1] NF_CHECKED)
+    let b=bc_block(pre pos)
+    nodes.ptr[b].type = int32(t)
+    if tkind(t) not=? 'void_' {nodes.ptr[b].aux = 1}
+    add_flag(b NF_CHECKED)
+    nodes.ptr[n] = nodes.ptr[b]
+    last_checked=n
+    t
+}
+values_group=(n:int64 ex:int64):>int64=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    let pre:array<int64>=[]
+    let items=values_expand(kids(n) @pre 0)
+    let el:array<int64>=[]
+    let exact=ex not=? 0 and is_values(ex) and VCWord(types.ptr[prune(ex)].nargs) =? items.length
+    loop i in [0..items.length) {
+        let c=items.ptr[i]
+        if nodes.ptr[c].kind =? 'namedarg' {values_group_error0(c)}
+        if not has_flag(c NF_CHECKED) {
+            let e=if exact {targ(prune(ex) i)} else {0}
+            check_expr(c e);
+            c=last_checked
+            if e not=? 0 {c=coerce(c e)}
+            else {finalize_literal(c);}
+        }
+        items.ptr[i] = c
+        el.push(ntype(c))
+    }
+    let t=mk_values(el)
+    let group=n
+    if pre.length >? 0 {
+        group=nodes.length
+        nodes.push(nodes.ptr[n])
+    }
+    set_list(group items)
+    nodes.ptr[group].type = int32(t)
+    add_flag(group NF_CHECKED)
+    if pre.length >? 0 {
+        pre.push(bc_stmt(group pos))
+        add_flag(pre.ptr[pre.length - 1] NF_CHECKED)
+        let b=bc_block(pre pos)
+        nodes.ptr[b].type = int32(t)
+        nodes.ptr[b].aux = 1
+        add_flag(b NF_CHECKED)
+        nodes.ptr[n] = nodes.ptr[b]
+    }
+    last_checked=n
+    sink_values_use(n t)
+    t
+}

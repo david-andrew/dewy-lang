@@ -542,3 +542,8 @@ main = ():
 '''
     output = compare(compiler, tmp_path, False, DRIVER + main, status=19, extra_stems=STEMS, jo_doubles=JO_DOUBLES)
     assert b'unknown:' in output and b'module:' in output
+
+# Value expansion has its own leaf differential; dispatcher tests keep the same stub.
+JO_DOUBLES['checker_value_calls.dewy'] = 'from p"check.jo" import value_call_double\nvalues_call=(n:int64 expected:int64):>int64=>value_call_double(n expected)\n'
+JO_DOUBLES['checker_value_calls.jo'] = "use 'check.jo'\nvalues_call = (n: int, expected: int) -> int: value_call_double(n, expected)\n"
+JO_DOUBLES['check.jo'] = JO_DOUBLES['check.jo'].replace('values_call = ', 'value_call_double = ')

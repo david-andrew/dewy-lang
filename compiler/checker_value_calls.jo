@@ -1,0 +1,427 @@
+use 'checker_state.dewy'
+# Frozen value-call machinery from check.jo.
+use 'ast.jo'
+use 'types.jo'
+use 'check.jo'
+use 'expr.jo'
+use 'effects.jo'
+use 'checker_expr.dewy'
+use 'checker_call_queries.dewy'
+use 'dewy_methods.jo'
+use 'checker_signature.dewy'
+use 'ide.jo'
+use 'reflection.jo'
+use 'util.jo'
+use 'poly_closure.jo'
+use 'refine.jo'
+use 'checker_values.dewy'
+
+values_expand = (items0: int[], pre: mut int[], call: int) -> int[]:
+    items = values_flatten(items0)
+    n = items.len()
+    info: ValuesItem[]
+    any = false
+    loop i in [0..n):
+        c = items[i]
+        info.push(ValuesItem(count = 1))
+        if nodes[c].kind == .namedarg: continue
+        if has_flag(c, NF_SPREAD):
+            clear_flag(c, NF_SPREAD)
+            saved = sink_pack_site
+            sink_pack_site = c
+            t = prune(check_expr(c, 0))
+            sink_pack_site = saved
+            hit = sink_pack_hit != 0 and sink_pack_hit == c
+            sink_pack_hit = 0
+            items[i] = last_checked
+            add_flag(items[i], NF_CHECKED)
+            any = true
+            info[i].spread = true
+            k = 0
+            if hit or is_values(t):
+                k = values_count(items[i])
+                info[i].spread = false
+                info[i].hidden = true
+                if k == 0: values_dynamic(items[i])
+            else if types[t].kind == .fixed: k = fixed_len(t)
+            else if types[t].kind == .tuple: k = int(types[t].nargs)
+            else if types[t].kind == .array: k = -1
+            else if types[t].kind == .struct_ and not is_map_type(t): values_expand_error0(c)
+            else: values_expand_error1(c, t)
+            info[i].count = k
+            continue
+        hit = false
+        if node_marked(values_hits, c): hit = true
+        else:
+            if not values_candidate(c): continue
+            saved = sink_pack_site
+            sink_pack_site = c
+            check_expr(c, 0)
+            sink_pack_site = saved
+            hit = sink_pack_hit != 0 and sink_pack_hit == c
+            sink_pack_hit = 0
+            items[i] = last_checked
+            add_flag(items[i], NF_CHECKED)
+        if not hit: continue
+        k = values_count(items[i])
+        if k == 0: values_dynamic(items[i])
+        info[i].count = k
+        info[i].hidden = true
+        any = true
+    values_hint_mark = values_hint_pos.len()
+    if not any: return items
+    # (an array of unknown length fills the positional parameters left)
+    dyn = -1
+    fixed = 0
+    loop i in [0..n):
+        if nodes[items[i]].kind == .namedarg: continue
+        if info[i].count < 0:
+            if dyn >= 0: values_expand_error2(items, i)
+            dyn = i
+        else: fixed += info[i].count
+    if dyn >= 0:
+        arity = if call != 0: values_arity(call) else: -1
+        if arity < 0: values_expand_error3(items, dyn)
+        if arity < fixed: values_expand_error4(items, dyn, arity)
+        info[dyn].count = arity - fixed
+    # (a value whose count is not written here, followed by positional arguments: they shift)
+    loop i in [0..n):
+        if not info[i].hidden or info[i].count < 2 or nodes[items[i]].kind == .namedarg: continue
+        loop j in [i + 1..n):
+            if nodes[items[j]].kind != .namedarg:
+                values_shift_warning(items[i], info[i].count)
+                break
+    # (the last item held first: what comes before it and may have an effect runs before it)
+    last = -1
+    loop i in [0..n):
+        if info[i].count != 1 or info[i].spread: last = i
+    out: int[]
+    values_hint_mark = values_hint_pos.len()
+    loop i in [0..n):
+        c = items[i]
+        if nodes[c].kind == .namedarg:
+            out.push(c)
+            continue
+        if info[i].count == 1 and not info[i].spread:
+            if i < last and not values_simple(c):
+                if not has_flag(c, NF_CHECKED):
+                    check_expr(c, 0)
+                    c = last_checked
+                    finalize_literal(c)
+                add_flag(c, NF_CHECKED)
+                out.push(capture_value(c, ntype(c), pre))
+            else: out.push(c)
+            continue
+        start = out.len()
+        if not info[i].spread:
+            loop part in values_parts(c, pre): out.push(part)
+        else: values_spread_parts(c, info[i].count, pre, out)
+        if ide_on and call != 0 and info[i].count > 0:
+            values_hint_pos.push(nodes[c].pos)
+            values_hint_first.push(start)
+            values_count_label(info[i].count)
+    out
+
+values_spread_parts = (c: int, k: int, pre: mut int[], out: mut int[]):
+    pos = nodes[c].pos
+    t = prune(ntype(c))
+    src = 0
+    if nodes[c].kind == .ident and nodes[c].aux == i32(int(SK.local)): src = int(nodes[c].sym)
+    else:
+        held = capture_value(c, t, pre)
+        src = int(nodes[held].sym)
+    if types[t].kind == .array: pre.push(values_length_check(src, k, pos))
+    loop i in [0..k):
+        r = 0
+        if types[t].kind == .tuple:
+            r = mk(.field, pos)
+            local = mk_ident_local(src, pos)
+            nodes[r].a = i32(local)
+            nodes[r].aux = -2
+            nodes[r].ival = i
+        else:
+            r = mk(.index, pos)
+            local = mk_ident_local(src, pos)
+            nodes[r].a = i32(local)
+            index = mk(.int_lit, pos)
+            nodes[index].ival = i
+            nodes[r].b = i32(index)
+            add_flag(r, NF_INBOUNDS)
+        check_expr(r, 0)
+        out.push(last_checked)
+
+fns_param_hint = (decls: int[], i: int, nargs: int) -> int:
+    hint = 0
+    loop d in decls:
+        np = nkids(d)
+        if np < nargs: continue
+        if (dewy_param_kinds.get(d) ?? []).len() > 0: return 0
+        takes = true
+        loop j in [nargs..np):
+            if nodes[kid(d, j)].b == 0: takes = false
+        if not takes: continue
+        sig = fn_sig(d)
+        if int(sig.mutmask) & (1 << i) != 0: return 0
+        pt = prune(sig.params[i])
+        if pt == 0 or has_var(pt) or hint != 0 and not type_eq(hint, pt): return 0
+        hint = pt
+    hint
+
+fns_argument_hints = (decls: int[], args: int[], receiver: int = 0, explicit: int[] = []) -> int[]:
+    hints = fill(0, args.len())
+    indices: {int: int} = {}
+    positional = true
+    loop i in 0.. and a in args:
+        if nodes[a].kind == .namedarg: positional = false
+        indices[unnamed(a)] = i
+    loop d in decls:
+        np = nkids(d)
+        if np < args.len(): continue
+        kinds = dewy_param_kinds.get(d) ?? []
+        mapped = args
+        if not positional or kinds.len() > 0:
+            names: int[]
+            defaults: bool[]
+            loop p in kids(d):
+                names.push(int(nodes[p].name))
+                defaults.push(nodes[p].b != 0)
+            if map_args(names, defaults, args, mapped, kinds, false) != "": continue
+        else:
+            takes = true
+            loop j in [args.len()..np):
+                if nodes[kid(d, j)].b == 0: takes = false
+            if not takes: continue
+        sig = fn_sig(d)
+        binds = fill(0, int(sig.ntp))
+        if explicit.len() > 0:
+            if explicit.len() != nkids2(d): continue
+            loop i in 0.. and t in explicit: binds[i] = t
+        if receiver != 0:
+            if np == 0 or match_type(sig.params[0], ntype(receiver), binds, 0) < 0: continue
+        loop j in [0..mapped.len()):
+            a = mapped[j]
+            if a == 0: continue
+            i = if positional and kinds.len() == 0: j else: indices.get(a) ?? -1
+            if i < 0 or hints[i] < 0: continue
+            pt = prune(subst(sig.params[j], binds))
+            if int(sig.mutmask) & (1 << j) != 0 or pt == 0 or has_var(pt) or hints[i] != 0 and not type_eq(hints[i], pt): hints[i] = -1
+            else: hints[i] = pt
+    loop i in [0..hints.len()):
+        if hints[i] < 0: hints[i] = 0
+    hints
+
+values_argument_hints = (n: int, expected: int) -> int[]:
+    callee = int(nodes[n].a)
+    args = kids(n)
+    explicit: int[]
+    if nodes[callee].kind == .typeapply:
+        loop t in kids(callee): explicit.push(effect_generic_argument(t))
+        callee = int(nodes[callee].a)
+    decls: int[]
+    receiver = 0
+    ft = 0
+    if nodes[callee].kind == .ident:
+        s = lookup(int(nodes[callee].name))
+        if s != 0 and syms[s].kind == .fns: call_collect_named(int(nodes[callee].name), -1, decls)
+    else if nodes[callee].kind == .field and nodes[callee].b == 0:
+        recv = int(nodes[callee].a)
+        name = int(nodes[callee].name)
+        saved = type_receiver_at
+        type_receiver_at = recv
+        rt = prune(check_expr(recv, receiver_literal_hint(recv, name, args.len(), expected, nodes[n].pos)))
+        type_receiver_at = saved
+        recv = last_checked
+        nodes[callee].a = i32(recv)
+        add_flag(recv, NF_CHECKED)
+        k = types[rt].kind
+        if k == .module: call_collect_named(name, int(types[rt].mod), decls)
+        else if k == .typeval:
+            tt = prune(telem(rt))
+            if types[tt].kind == .struct_:
+                si = int(types[tt].st)
+                j = dewy_type_method(int(structs[si].decl), name)
+                if j >= 0 and not dewy_methods[j].reads:
+                    check_struct_fields(si)
+                    decls.push(dewy_methods[j].decl)
+                    # The static call supplies an unused object of this type.
+                    receiver = mk(.call, nodes[n].pos)
+                    nodes[receiver].type = i32(tt)
+        else:
+            st = if k == .ptr: prune(telem(rt)) else: rt
+            if types[st].kind == .struct_:
+                si = int(types[st].st)
+                check_struct_fields(si)
+                loop i in [0..int(structs[si].nfields)):
+                    f = int(structs[si].fields) + i
+                    if fields[f].name == i32(name):
+                        t = prune(int(fields[f].type))
+                        fk = tkind(t)
+                        if fk == .fn_ or fk == .cfn or fk == .polyfn or fk == .callable: ft = t
+            if ft != 0:
+                if tkind(ft) == .polyfn:
+                    d = poly_families[int(types[ft].st)].decl
+                    decls.push(d)
+                    if dewy_is_method(d): receiver = recv
+                else: ft = callable_base(ft)
+            else if k != .typeval:
+                if str_set_of(rt) != 0 and not program_fn_named(name): rt = T_STR
+                name = dewy_member_name(callee, rt, name, args)
+                # Array intrinsics give the same context as check_intrinsic,
+                # unless call_by_name selects a user-defined sequence overload.
+                if k == .array and args.len() == 1 and (name_of(name) == "push" or name_of(name) == "extend"):
+                    own: int[]
+                    values_collect_module(cur_mod(), name, own)
+                    loop d in own:
+                        if not decl_in_prelude(d) and args_fit(d, 2) and takes_seq(d): decls.push(d)
+                    if decls.len() == 0:
+                        hint = if name_of(name) == "push": telem(rt) else: rt
+                        return [hint]
+                    return fns_argument_hints(decls, [recv] + args, recv)[1..]
+                values_collect_fns(name, decls)
+                loop m in method_modules(rt): values_collect_module(m, name, decls)
+                receiver = recv
+    if receiver != 0: args = [receiver] + args
+    hints: int[]
+    if decls.len() > 0: hints = fns_argument_hints(decls, args, receiver, explicit)
+    else if ft != 0 and (tkind(ft) == .fn_ or tkind(ft) == .cfn):
+        # A function field already has its complete signature. Its named calls
+        # and defaults remain the responsibility of value_call.
+        loop i in [0..args.len()):
+            if nodes[args[i]].kind == .namedarg or i >= int(types[ft].nargs): return []
+            hint = if int(types[ft].mutmask) & (1 << i) == 0: targ(ft, i) else: 0
+            hints.push(hint)
+    if receiver != 0 and hints.len() > 0: return hints[1..]
+    hints
+
+values_call = (n: int, expected: int) -> int:
+    callee = int(nodes[n].a)
+    if values_internal_callee(callee): return -1
+    # (the common case, nothing to expand, decided without allocating: a call argument is
+    # checked here as an untyped argument would be anyway, its own pack noted)
+    some = false
+    record = values_record(callee)
+    positional = true
+    fn_decls_read = 0
+    fn_decls: int[]
+    hints_read = false
+    arg_hints: int[]
+    loop j in [0..nkids(n)):
+        if nodes[kid(n, j)].kind == .namedarg: positional = false
+    loop i in [0..nkids(n)):
+        original = kid(n, i)
+        named = nodes[original].kind == .namedarg
+        a = unnamed(original)
+        if nodes[a].kind == .call and members_named(a): members_argument(a)
+        k = nodes[a].kind
+        if named: record = 0
+        if not named and (k == .tuple and nodes[a].aux == i32(TUPLE_VALUES) or has_flag(a, NF_SPREAD) or node_marked(values_hits, a)):
+            some = true
+            break
+        if has_flag(a, NF_CHECKED): continue
+        if k == .ident and not named:
+            if values_candidate(a):
+                some = true
+                break
+        else if k == .call and not ctx_dependent(a) and not node_marked(spread_calls, a):
+            # (a record's positional field: its type is what the value is checked against, as
+            # a function's parameter is once its overload is chosen)
+            field = 0
+            if record != 0 and i < int(structs[record].nfields): field = representation_type(int(fields[int(structs[record].fields) + i].type))
+            # (a function's parameter, when every function of the name these arguments could
+            # reach has the same written type there: `f(set(['load']))` with f taking a set<Op>)
+            else if record == 0 and positional and nodes[callee].kind == .ident:
+                if fn_decls_read == 0:
+                    fn_decls_read = 1
+                    s = lookup(int(nodes[callee].name))
+                    if s != 0 and syms[s].kind == .fns: call_collect_named(int(nodes[callee].name), -1, fn_decls)
+                field = fns_param_hint(fn_decls, i, nkids(n))
+            else:
+                if not hints_read:
+                    hints_read = true
+                    arg_hints = values_argument_hints(n, expected)
+                if i < arg_hints.len(): field = arg_hints[i]
+            if named and field == 0: continue
+            saved = sink_pack_site
+            sink_pack_site = if named: 0 else: a
+            check_expr(a, field)
+            sink_pack_site = saved
+            hit = sink_pack_hit != 0 and sink_pack_hit == a
+            sink_pack_hit = 0
+            v = last_checked
+            add_flag(v, NF_CHECKED)
+            if v != a:
+                if named: nodes[original].a = i32(v)
+                else: set_kid(n, i, v)
+            if hit:
+                node_mark(values_hits, v)
+                some = true
+                break
+    if not some: return -1
+    pre: int[]
+    values_hint_mark = values_hint_pos.len()
+    args = values_expand(kids(n), pre, n)
+    hints = values_hint_mark
+    expanded = args.len() != nkids(n) or pre.len() > 0
+    if not expanded:
+        loop i in [0..args.len()):
+            if args[i] != kid(n, i): expanded = true
+    if values_hint_pos.len() > hints: expanded = true
+    if not expanded: return -1
+    pos = nodes[n].pos
+    call = nodes.len()
+    nodes.push(nodes[n])
+    set_list(call, args)
+    site = sink_pack_site == n
+    if site: sink_pack_site = call
+    t = check_expr(call, expected)
+    v = last_checked
+    if site:
+        sink_pack_site = n
+        if sink_pack_hit == call: sink_pack_hit = n
+    if ide_on and values_hint_pos.len() > hints: values_call_labels(v, hints)
+    pre.push(bc_stmt(v, pos))
+    add_flag(pre[pre.len() - 1], NF_CHECKED)
+    b = bc_block(pre, pos)
+    nodes[b].type = i32(t)
+    if tkind(t) != .void_: nodes[b].aux = 1
+    add_flag(b, NF_CHECKED)
+    nodes[n] = nodes[b]
+    last_checked = n
+    t
+
+values_group = (n: int, ex: int) -> int:
+    pos = nodes[n].pos
+    pre: int[]
+    items = values_expand(kids(n), pre, 0)
+    el: int[]
+    exact = ex != 0 and is_values(ex) and int(types[prune(ex)].nargs) == items.len()
+    loop i in [0..items.len()):
+        c = items[i]
+        if nodes[c].kind == .namedarg: values_group_error0(c)
+        if not has_flag(c, NF_CHECKED):
+            e = if exact: targ(prune(ex), i) else: 0
+            check_expr(c, e)
+            c = last_checked
+            if e != 0: c = coerce(c, e)
+            else: finalize_literal(c)
+        items[i] = c
+        el.push(ntype(c))
+    t = mk_values(el)
+    group = n
+    if pre.len() > 0:
+        group = nodes.len()
+        nodes.push(nodes[n])
+    set_list(group, items)
+    nodes[group].type = i32(t)
+    add_flag(group, NF_CHECKED)
+    if pre.len() > 0:
+        pre.push(bc_stmt(group, pos))
+        add_flag(pre[pre.len() - 1], NF_CHECKED)
+        b = bc_block(pre, pos)
+        nodes[b].type = i32(t)
+        nodes[b].aux = 1
+        add_flag(b, NF_CHECKED)
+        nodes[n] = nodes[b]
+    last_checked = n
+    sink_values_use(n, t)
+    t
