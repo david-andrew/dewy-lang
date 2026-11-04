@@ -1,0 +1,5 @@
+# modes: native native-release
+A:type=[n:int $__drop__ release=():>void=>printl("A")]
+B:type=[n:int $__drop__ release=():>void=>printl("B")]
+L:type=[n:int $__drop__ release=():>void=>printl("L")]
+main=()=>{let a=A[1] let b=B[2] concurrent {spawn {let l=L[3] printl(a.n+b.n+l.n)}} printl("joined")}

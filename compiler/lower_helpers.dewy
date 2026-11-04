@@ -733,6 +733,9 @@ helper_partial=(th:LHWord):>void=>$unsafe {
 helper_envdrop=(f:LHWord heap:bool=true):>void=>$unsafe {
     let ps=helper_params(1)
     let env=ps.ptr[0]
+    # Caller-side release of a skipped task still performs shielded cleanup.
+    let task=spawn_body(f)
+    if task {e_call0(rt("__task_shield_enter") -1);}
     if fns.ptr[f].kind =? FK_PARTIAL {
         let e:LHWord=LHWord(fns.ptr[f].partial)
         let offs=partial_layout(e)
@@ -759,6 +762,7 @@ helper_envdrop=(f:LHWord heap:bool=true):>void=>$unsafe {
             }
         }
     }
+    if task {e_call0(rt("__task_shield_leave") -1);}
     if heap {e_call1(rt("__free") env -1);}
     e_ret(-1);
 }

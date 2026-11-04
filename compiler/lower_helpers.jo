@@ -655,6 +655,9 @@ helper_partial = (th: int):
 helper_envdrop = (f: int, heap: bool = true):
     ps = helper_params(1)
     env = ps[0]
+    # Caller-side release of a skipped task still performs shielded cleanup.
+    task = spawn_body(f)
+    if task: e_call0(rt("__task_shield_enter"), -1)
     if fns[f].kind == FK_PARTIAL:
         e = int(fns[f].partial)
         offs = partial_layout(e)
@@ -676,6 +679,7 @@ helper_envdrop = (f: int, heap: bool = true):
                 drop_embedded(e_addi(env, int(locals[inn].env_off)), t)
                 if movable: endc()
                 if resource: endc()
+    if task: e_call0(rt("__task_shield_leave"), -1)
     if heap: e_call1(rt("__free"), env, -1)
     e_ret(-1)
 
