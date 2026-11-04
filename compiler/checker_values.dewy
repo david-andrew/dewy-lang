@@ -1,0 +1,249 @@
+$runtime_checks
+from p"ast.jo" import (NF_CHECKED NF_COMPREHENSION NF_GENERIC NF_INBOUNDS NF_MUT NF_SPREAD NF_WRITTEN_VOID NF_INDEX_CAPTURED TUPLE_VALUES add_flag clone dewy_param_kinds has_flag kid kids mk nkids nkids2 nodes set_list)
+from p"expr.jo" import (bc_block bc_stmt call_collect_named capture_value last_checked mk_ident_local ntype unnamed)
+from p"effects.jo" import (callable_base)
+from p"checker_expr.dewy" import (check_expr lookup)
+from p"check.jo" import (check_fn_body check_struct_fields dewy_at ensure_global fns get_fn_inst globals locals node_marked pack_result_count sink_bind_expect sink_bind_next sink_pack_hit sink_pack_site spread_calls syms values_init_error)
+from p"checker_call_queries.dewy" import (ctx_dependent)
+from p"types.jo" import (fn_type_pack get_struct_inst is_values mk_values prune types)
+# Visit only requested values; retain indices across reentrant checker services.
+VAWord:type=int64<overflow='wrap'>
+# How many values a several-valued expression v gives, or 0 when not known statically.
+values_count=(v:int64):>int64=>$unsafe {
+    let t:VAWord=ntype(v)
+    if is_values(t) {return VAWord(types.ptr[prune(t)].nargs)}
+    if nodes.ptr[v].kind =? 'call' and nodes.ptr[v].sym >? 0 and nodes.ptr[v].aux =? 0 {return fns.ptr[VAWord(nodes.ptr[v].sym)].pack_k}
+    0
+}
+# The values of v, several values of a `(T T)` type or a call giving k of them, as one
+# checked expression each. A value that is not a local's name or a group is held first, in pre.
+values_parts=(v:int64 @pre:array<int64>):>array<int64>=>$unsafe {
+    let pos=nodes.ptr[v].pos
+    let out:array<int64>=[]
+    let t:VAWord=prune(ntype(v))
+    if nodes.ptr[v].kind =? 'tuple' and is_values(t) {
+        loop c in kids(v) {out.push(c)}
+        return out
+    }
+    let src:VAWord=0
+    # Frozen SK.local ordinal; the differential compares against SK.local.
+    if nodes.ptr[v].kind =? 'ident' and nodes.ptr[v].aux =? 1 {src=VAWord(nodes.ptr[v].sym)}
+    else {
+        add_flag(v NF_CHECKED)
+        let captured=capture_value(v t @pre)
+        src=VAWord(nodes.ptr[captured].sym)
+    }
+    let k=if is_values(t) {VAWord(types.ptr[t].nargs)} else {values_count(v)}
+    loop i in [0..k) {
+        let r:VAWord=0
+        if is_values(t) {
+            r=mk('field' pos)
+            let local=mk_ident_local(src pos)
+            nodes.ptr[r].a = int32(local)
+            nodes.ptr[r].aux = -2
+            nodes.ptr[r].ival = i
+        }
+        else {
+            r=mk('index' pos)
+            let local=mk_ident_local(src pos)
+            nodes.ptr[r].a = int32(local)
+            let index=mk('int_lit' pos)
+            nodes.ptr[index].ival = i
+            nodes.ptr[r].b = int32(index)
+            add_flag(r NF_INBOUNDS)
+        }
+        check_expr(r 0);
+        out.push(last_checked)
+    }
+    out
+}
+# A binding's value `x = e` (or `let x = e`): one value, or several, which the binding holds
+# as one `(T T)`. A call giving a static number of values is held through its array.
+values_init=(e:int64 expected:int64 unpacking:bool=false):>int64=>$unsafe {
+    if not dewy_at(nodes.ptr[e].pos) {return check_expr(e expected)}
+    let saved=sink_pack_site
+    sink_pack_site=e
+    if nodes.ptr[e].kind =? 'block' and not has_flag(e NF_COMPREHENSION) and not has_flag(e NF_CHECKED) {
+        sink_bind_next=e
+        sink_bind_expect=if is_values(expected) {prune(expected)} else {0}
+    }
+    let hint=if is_values(expected) and nodes.ptr[e].kind =? 'block' {0} else {expected}
+    let t=check_expr(e hint)
+    sink_bind_next=0
+    sink_bind_expect=0
+    let v=last_checked
+    if is_values(expected) and is_values(t) and types.ptr[prune(t)].nargs not=? types.ptr[prune(expected)].nargs {values_init_error(1 v expected t)}
+    sink_pack_site=saved
+    let hit=sink_pack_hit not=? 0 and sink_pack_hit =? e
+    sink_pack_hit=0
+    last_checked=v
+    if not hit or is_values(t) {return t}
+    let k=values_count(v)
+    if k =? 0 and unpacking {return t}
+    if k =? 0 {values_init_error(2 v expected t)}
+    let pre:array<int64>=[]
+    let parts=values_parts(v @pre)
+    let group=mk('tuple' nodes.ptr[v].pos)
+    set_list(group parts)
+    let ts:array<int64>=[]
+    loop p in parts {ts.push(ntype(p))}
+    let vt=mk_values(ts)
+    nodes.ptr[group].type = int32(vt)
+    add_flag(group NF_CHECKED)
+    let r=mk('exprstmt' nodes.ptr[v].pos)
+    nodes.ptr[r].a = int32(group)
+    add_flag(r NF_CHECKED)
+    pre.push(r)
+    let b=bc_block(pre nodes.ptr[v].pos)
+    nodes.ptr[b].aux = 1
+    nodes.ptr[b].type = int32(vt)
+    add_flag(b NF_CHECKED)
+    last_checked=b
+    vt
+}
+# Nested groups and spread array literals, spliced as written: `add((1 2))`, `add([1 2]...)`.
+values_flatten=(items:array<int64>):>array<int64>=>$unsafe {
+    let out:array<int64>=[]
+    loop c in items {
+        let k=nodes.ptr[c].kind
+        if k =? 'tuple' and nodes.ptr[c].aux =? int32(TUPLE_VALUES) and not has_flag(c NF_CHECKED) {
+            loop x in values_flatten(kids(c)) {out.push(x)}
+            continue
+        }
+        if k =? 'array' and has_flag(c NF_SPREAD) and not has_flag(c NF_CHECKED) and nodes.ptr[c].b =? 0 and nkids(c) >? 0 {
+            let plain=true
+            loop x in kids(c) {
+                if has_flag(x NF_SPREAD) or nodes.ptr[x].kind =? 'namedarg' {plain=false}
+            }
+            if plain {
+                loop x in values_flatten(kids(c)) {out.push(x)}
+                continue
+            }
+        }
+        out.push(c)
+    }
+    out
+}
+# An item that may give several values: a name holding them (or a function giving them,
+# called by its bare name), or a call.
+values_candidate=(c:int64):>bool=>$unsafe {
+    let k=nodes.ptr[c].kind
+    if has_flag(c NF_CHECKED) {return false}
+    if k =? 'call' {return not ctx_dependent(c) and not node_marked(spread_calls c)}
+    if k not=? 'ident' or has_flag(c NF_MUT) {return false}
+    let s=lookup(VAWord(nodes.ptr[c].name))
+    if s =? 0 {return false}
+    let sk=syms.ptr[s].kind
+    let held:VAWord=0
+    if sk =? 'local' {held=VAWord(locals.ptr[VAWord(syms.ptr[s].ref)].type)}
+    if sk =? 'global' {
+        let g:VAWord=VAWord(syms.ptr[s].ref)
+        if globals.ptr[g].type =? 0 {ensure_global(g nodes.ptr[c].pos)}
+        held=VAWord(globals.ptr[g].type)
+    }
+    if sk =? 'local' or sk =? 'global' {
+        if held =? 0 {return false}
+        if is_values(held) {return true}
+        let ft=callable_base(prune(held))
+        if not fn_type_pack(ft) or types.ptr[ft].nargs not=? 0 or not is_values(VAWord(types.ptr[ft].elem)) {return false}
+    }
+    else if sk not=? 'fns' {return false}
+    else {
+        let ds:array<int64>=[]
+        call_collect_named(VAWord(nodes.ptr[c].name) -1 @ds)
+        if ds.length not=? 1 {return false}
+        let d=ds[0]
+        if has_flag(d NF_GENERIC) or nkids(d) >? 0 and nodes.ptr[kid(d 0)].b =? 0 {return false}
+        if pack_result_count(VAWord(nodes.ptr[d].a)) =? 0 {
+            if nodes.ptr[d].a not=? 0 or has_flag(d NF_WRITTEN_VOID) {return false}
+            let f:VAWord=get_fn_inst(d [] nodes.ptr[c].pos)
+            check_fn_body(f)
+            if fns.ptr[f].pack =? 0 {return false}
+        }
+    }
+    let call=mk('call' nodes.ptr[c].pos)
+    let source=clone(c)
+    nodes.ptr[call].a = int32(source)
+    nodes.ptr[c] = nodes.ptr[call]
+    set_list(c [])
+    true
+}
+# (an item read twice or out of its place without changing what runs)
+values_simple=(c:int64):>bool=>$unsafe {
+    let k=nodes.ptr[c].kind
+    if k =? 'int_lit' or k =? 'float_lit' or k =? 'bool_lit' or k =? 'none_lit' or k =? 'ident' or k =? 'lambda' or k =? 'hole' {return true}
+    if k =? 'str_lit' {return nodes.ptr[c].aux =? 0}
+    if k =? 'field' {return values_simple(VAWord(nodes.ptr[c].a))}
+    if k =? 'array' or k =? 'record_lit' {
+        loop x in kids(c) {
+            if not values_simple(unnamed(x)) {return false}
+        }
+        return true
+    }
+    false
+}
+# The positional parameters of the one function call n names, or -1.
+values_arity=(n:int64):>int64=>$unsafe {
+    let callee:VAWord=VAWord(nodes.ptr[n].a)
+    if nodes.ptr[callee].kind not=? 'ident' {return -1}
+    let s=lookup(VAWord(nodes.ptr[callee].name))
+    if s =? 0 or syms.ptr[s].kind not=? 'fns' {return -1}
+    let ds:array<int64>=[]
+    call_collect_named(VAWord(nodes.ptr[callee].name) -1 @ds)
+    if ds.length not=? 1 {return -1}
+    let d=ds[0]
+    let kinds=dewy_param_kinds.get(d) ?? []
+    let count:VAWord=0
+    loop i in [0..nkids(d)) {
+        if i <? kinds.length and kinds[i] =? 1 {continue}
+        count += 1
+    }
+    count
+}
+# the record (struct index) a call's callee constructs when its fields' types are known before
+# its arguments are (not generic), or 0
+values_record=(callee:int64):>int64=>$unsafe {
+    if nodes.ptr[callee].kind not=? 'ident' {return 0}
+    let s=lookup(VAWord(nodes.ptr[callee].name))
+    if s =? 0 or syms.ptr[s].kind not=? 'struct_' or nkids2(VAWord(syms.ptr[s].ref)) not=? 0 {return 0}
+    let record=prune(get_struct_inst(VAWord(syms.ptr[s].ref) []))
+    let si:VAWord=VAWord(types.ptr[record].st)
+    check_struct_fields(si)
+    si
+}
+# (an array literal with a group of values among its elements, not checked yet)
+values_grouped=(n:int64):>bool=>$unsafe {
+    if nodes.ptr[n].type not=? 0 {return false}
+    loop j in [0..nkids(n)) {
+        let c=kid(n j)
+        if nodes.ptr[c].kind =? 'tuple' and nodes.ptr[c].aux =? int32(TUPLE_VALUES) and not has_flag(c NF_CHECKED) {return true}
+    }
+    false
+}
+# Array literal n whose element i (checked as v) holds several values: its parts are elements.
+values_elements=(n:int64 i:int64 v:int64 expected:int64):>int64=>$unsafe {
+    let pre:array<int64>=[]
+    let parts=values_parts(v @pre)
+    let xs:array<int64>=[]
+    loop j in [0..nkids(n)) {
+        if j =? i {
+            loop p in parts {xs.push(p)}
+        }
+        else {xs.push(kid(n j))}
+    }
+    set_list(n xs)
+    if pre.length =? 0 {return check_expr(n expected)}
+    let pos=nodes.ptr[n].pos
+    let arr=nodes.length
+    nodes.push(nodes.ptr[n])
+    let t=check_expr(arr expected)
+    pre.push(bc_stmt(last_checked pos))
+    add_flag(pre.ptr[pre.length - 1] NF_CHECKED)
+    let b=bc_block(pre pos)
+    nodes.ptr[b].type = int32(t)
+    nodes.ptr[b].aux = 1
+    add_flag(b NF_CHECKED)
+    nodes.ptr[n] = nodes.ptr[b]
+    last_checked=n
+    t
+}

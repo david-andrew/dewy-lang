@@ -1,0 +1,228 @@
+use 'checker_state.dewy'
+# Frozen value queries and expansion from check.jo.
+use 'ast.jo'
+use 'expr.jo'
+use 'effects.jo'
+use 'checker_expr.dewy'
+use 'check.jo'
+use 'checker_call_queries.dewy'
+use 'types.jo'
+
+# How many values a several-valued expression v gives, or 0 when not known statically.
+values_count = (v: int) -> int:
+    t = ntype(v)
+    if is_values(t): return int(types[prune(t)].nargs)
+    if nodes[v].kind == .call and nodes[v].sym > 0 and nodes[v].aux == 0: return fns[int(nodes[v].sym)].pack_k
+    0
+
+# The values of v, several values of a `(T T)` type or a call giving k of them, as one
+# checked expression each. A value that is not a local's name or a group is held first, in pre.
+values_parts = (v: int, pre: mut int[]) -> int[]:
+    pos = nodes[v].pos
+    out: int[]
+    t = prune(ntype(v))
+    if nodes[v].kind == .tuple and is_values(t):
+        loop c in kids(v): out.push(c)
+        return out
+    src = 0
+    if nodes[v].kind == .ident and nodes[v].aux == i32(int(SK.local)): src = int(nodes[v].sym)
+    else:
+        add_flag(v, NF_CHECKED)
+        src = int(nodes[capture_value(v, t, pre)].sym)
+    k = if is_values(t): int(types[t].nargs) else: values_count(v)
+    loop i in [0..k):
+        r = 0
+        if is_values(t):
+            r = mk(.field, pos)
+            nodes[r].a = i32(mk_ident_local(src, pos))
+            nodes[r].aux = -2
+            nodes[r].ival = i
+        else:
+            r = mk(.index, pos)
+            nodes[r].a = i32(mk_ident_local(src, pos))
+            index = mk(.int_lit, pos)
+            nodes[index].ival = i
+            nodes[r].b = i32(index)
+            # (the function gives exactly k values: its body was counted)
+            add_flag(r, NF_INBOUNDS)
+        check_expr(r, 0)
+        out.push(last_checked)
+    out
+
+# A binding's value `x = e` (or `let x = e`): one value, or several, which the binding holds
+# as one `(T T)`. A call giving a static number of values is held through its array.
+values_init = (e: int, expected: int, unpacking: bool = false) -> int:
+    if not dewy_at(nodes[e].pos): return check_expr(e, expected)
+    saved = sink_pack_site
+    sink_pack_site = e
+    # (`x = { 1 2 }`: the block's values, as a group's; one value as before)
+    if nodes[e].kind == .block and not has_flag(e, NF_COMPREHENSION) and not has_flag(e, NF_CHECKED):
+        sink_bind_next = e
+        sink_bind_expect = if is_values(expected): prune(expected) else: 0
+    hint = if is_values(expected) and nodes[e].kind == .block: 0 else: expected
+    t = check_expr(e, hint)
+    sink_bind_next = 0
+    sink_bind_expect = 0
+    v = last_checked
+    if is_values(expected) and is_values(t) and types[prune(t)].nargs != types[prune(expected)].nargs: values_init_error(1, v, expected, t)
+    sink_pack_site = saved
+    hit = sink_pack_hit != 0 and sink_pack_hit == e
+    sink_pack_hit = 0
+    last_checked = v
+    if not hit or is_values(t): return t
+    k = values_count(v)
+    # (unpacked, a number known only when it runs is an array's: its length an obligation)
+    if k == 0 and unpacking: return t
+    if k == 0: values_init_error(2, v, expected, t)
+    pre: int[]
+    parts = values_parts(v, pre)
+    group = mk(.tuple, nodes[v].pos)
+    set_list(group, parts)
+    ts: int[]
+    loop p in parts: ts.push(ntype(p))
+    vt = mk_values(ts)
+    nodes[group].type = i32(vt)
+    add_flag(group, NF_CHECKED)
+    r = mk(.exprstmt, nodes[v].pos)
+    nodes[r].a = i32(group)
+    add_flag(r, NF_CHECKED)
+    pre.push(r)
+    b = bc_block(pre, nodes[v].pos)
+    nodes[b].aux = 1
+    nodes[b].type = i32(vt)
+    add_flag(b, NF_CHECKED)
+    last_checked = b
+    vt
+
+# Nested groups and spread array literals, spliced as written: `add((1 2))`, `add([1 2]...)`.
+values_flatten = (items: int[]) -> int[]:
+    out: int[]
+    loop c in items:
+        k = nodes[c].kind
+        if k == .tuple and nodes[c].aux == i32(TUPLE_VALUES) and not has_flag(c, NF_CHECKED):
+            loop x in values_flatten(kids(c)): out.push(x)
+            continue
+        if k == .array and has_flag(c, NF_SPREAD) and not has_flag(c, NF_CHECKED) and nodes[c].b == 0 and nkids(c) > 0:
+            plain = true
+            loop x in kids(c):
+                if has_flag(x, NF_SPREAD) or nodes[x].kind == .namedarg: plain = false
+            if plain:
+                loop x in values_flatten(kids(c)): out.push(x)
+                continue
+        out.push(c)
+    out
+
+# An item that may give several values: a name holding them (or a function giving them,
+# called by its bare name), or a call.
+values_candidate = (c: int) -> bool:
+    k = nodes[c].kind
+    if has_flag(c, NF_CHECKED): return false
+    # (`[pair()... 3]` builds with `extend(pair())`: the values spread as an array)
+    if k == .call: return not ctx_dependent(c) and not node_marked(spread_calls, c)
+    if k != .ident or has_flag(c, NF_MUT): return false
+    s = lookup(int(nodes[c].name))
+    if s == 0: return false
+    sk = syms[s].kind
+    held = 0
+    if sk == .local: held = int(locals[int(syms[s].ref)].type)
+    if sk == .global:
+        g = int(syms[s].ref)
+        if globals[g].type == 0: ensure_global(g, nodes[c].pos)
+        held = int(globals[g].type)
+    if sk == .local or sk == .global:
+        if held == 0: return false
+        if is_values(held): return true
+        # (`f = @pair; add(f)`: a function value giving a fixed number of values, by its type,
+        # called by its bare name as the function's own name is)
+        ft = callable_base(prune(held))
+        if not fn_type_pack(ft) or types[ft].nargs != 0 or not is_values(int(types[ft].elem)): return false
+    else if sk != .fns: return false
+    else:
+        # (`add(fn)`, fn giving several values: the bare name calls it)
+        ds: int[]
+        call_collect_named(int(nodes[c].name), -1, ds)
+        if ds.len() != 1: return false
+        d = ds[0]
+        if has_flag(d, NF_GENERIC) or nkids(d) > 0 and nodes[kid(d, 0)].b == 0: return false
+        if pack_result_count(int(nodes[d].a)) == 0:
+            if nodes[d].a != 0 or has_flag(d, NF_WRITTEN_VOID): return false
+            f = get_fn_inst(d, [], nodes[c].pos)
+            check_fn_body(f)
+            if fns[f].pack == 0: return false
+    call = mk(.call, nodes[c].pos)
+    nodes[call].a = i32(clone(c))
+    nodes[c] = nodes[call]
+    set_list(c, [])
+    true
+
+# (an item read twice or out of its place without changing what runs)
+values_simple = (c: int) -> bool:
+    k = nodes[c].kind
+    if k == .int_lit or k == .float_lit or k == .bool_lit or k == .none_lit or k == .ident or k == .lambda or k == .hole: return true
+    if k == .str_lit: return nodes[c].aux == 0
+    if k == .field: return values_simple(int(nodes[c].a))
+    if k == .array or k == .record_lit:
+        loop x in kids(c):
+            if not values_simple(unnamed(x)): return false
+        return true
+    false
+
+# The positional parameters of the one function call n names, or -1.
+values_arity = (n: int) -> int:
+    callee = int(nodes[n].a)
+    if nodes[callee].kind != .ident: return -1
+    s = lookup(int(nodes[callee].name))
+    if s == 0 or syms[s].kind != .fns: return -1
+    ds: int[]
+    call_collect_named(int(nodes[callee].name), -1, ds)
+    if ds.len() != 1: return -1
+    d = ds[0]
+    kinds = dewy_param_kinds.get(d) ?? []
+    count = 0
+    loop i in [0..nkids(d)):
+        if i < kinds.len() and kinds[i] == 1: continue
+        count += 1
+    count
+
+# the record (struct index) a call's callee constructs when its fields' types are known before
+# its arguments are (not generic), or 0
+values_record = (callee: int) -> int:
+    if nodes[callee].kind != .ident: return 0
+    s = lookup(int(nodes[callee].name))
+    if s == 0 or syms[s].kind != .struct_ or nkids2(int(syms[s].ref)) != 0: return 0
+    si = int(types[prune(get_struct_inst(int(syms[s].ref), []))].st)
+    check_struct_fields(si)
+    si
+
+# (an array literal with a group of values among its elements, not checked yet)
+values_grouped = (n: int) -> bool:
+    if nodes[n].type != 0: return false
+    loop j in [0..nkids(n)):
+        c = kid(n, j)
+        if nodes[c].kind == .tuple and nodes[c].aux == i32(TUPLE_VALUES) and not has_flag(c, NF_CHECKED): return true
+    false
+
+# Array literal n whose element i (checked as v) holds several values: its parts are elements.
+values_elements = (n: int, i: int, v: int, expected: int) -> int:
+    pre: int[]
+    parts = values_parts(v, pre)
+    xs: int[]
+    loop j in [0..nkids(n)):
+        if j == i:
+            loop p in parts: xs.push(p)
+        else: xs.push(kid(n, j))
+    set_list(n, xs)
+    if pre.len() == 0: return check_expr(n, expected)
+    pos = nodes[n].pos
+    arr = nodes.len()
+    nodes.push(nodes[n])
+    t = check_expr(arr, expected)
+    pre.push(bc_stmt(last_checked, pos))
+    add_flag(pre[pre.len() - 1], NF_CHECKED)
+    b = bc_block(pre, pos)
+    nodes[b].type = i32(t)
+    nodes[b].aux = 1
+    add_flag(b, NF_CHECKED)
+    nodes[n] = nodes[b]
+    last_checked = n
+    t
