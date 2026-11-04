@@ -1,0 +1,146 @@
+$runtime_checks
+from p"check.jo" import (FK_LAMBDA LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_CONST LF_EXPOSED LF_MUTPARAM LF_OWNERBORROW LF_PARAM LF_PARTBORROW LF_SHARED LF_VALUECAP fns locals)
+from p"ir.jo" import (VI e_call1 e_load)
+from p"types.jo" import (align_up is_managed ptr_size talign tkind tsize type_has_fn)
+from p"lower_storage.dewy" import (check_cell_type endc iff is_shared store_type)
+from p"lower_closure_borrow.dewy" import (closure_borrow_param stack_closure_params)
+from p"lower.jo" import (HK cur_fn lf_helper stack_closure_fn stack_closure_locals stack_closure_passed stack_closure_targets)
+from p"expr.jo" import (is_fn_type ntype)
+from p"ast.jo" import (kid kid2 nkids nkids2 nodes)
+from p"math_lower.jo" import (math_prepare_capture)
+from p"ownership_types.dewy" import (ownership_callable_cap ownership_type)
+from p"poly_closure.jo" import (poly_env_layout)
+# Direct recursive lowering; shared state has one owner in lower.jo.
+LClWord:type=int64<overflow='wrap'>
+env_layout=(f:LClWord):>void=>$unsafe {
+    if fns.ptr[f].env_size not=? 0 {return}
+    if fns.ptr[f].kind =? FK_LAMBDA and fns.ptr[f].target not=? 0 {
+        poly_env_layout(LClWord(fns.ptr[f].target));
+        return
+    }
+    let off:LClWord=if ownership_callable_cap(LClWord(fns.ptr[f].fntype)) not=? 0 {32} else {24}
+    loop cap in fns.ptr[f].caps {
+        let inn:LClWord=LClWord(cap.inner)
+        math_prepare_capture(inn);
+        if is_shared(inn) {check_cell_type(inn);}
+        let t=store_type(inn)
+        let al=talign(t)
+        if al <? 8 {al=8}
+        off=align_up(off al)
+        # A run-once task may transfer a capture on one branch only. Keep its
+        # live bit beside the payload; the construction prefix still guards it.
+        if spawn_owned_capture(f inn) {off=align_up(off + 8 al)}
+        locals.ptr[inn].env_off = int32<overflow='wrap'>(off);
+        off += tsize(t);
+    }
+    fns.ptr[f].env_size = int32<overflow='wrap'>(align_up(off 8));
+}
+closure_size=():>int64=>$unsafe {
+    return 2 * ptr_size
+}
+closure_env_shareable=(f:LClWord):>bool=>$unsafe {
+    if ownership_callable_cap(LClWord(fns.ptr[f].fntype)) not=? 0 {return false}
+    loop cap in fns.ptr[f].caps {
+        let inn:LClWord=LClWord(cap.inner)
+        let flags:LClWord=LClWord(locals.ptr[inn].flags)
+        if flags & LF_VALUECAP not=? 0 and (flags & (LF_ASSIGNED | LF_EXPOSED) not=? 0 or is_shared(inn) or type_has_fn(LClWord(locals.ptr[inn].type)) or ownership_type(LClWord(locals.ptr[inn].type))) {return false}
+    }
+    return true
+}
+stack_closure_target=(l:LClWord):>int64=>$unsafe {
+    if stack_closure_fn not=? cur_fn {return -1}
+    return stack_closure_targets.get(l) ?? (-1)
+}
+closure_managed_captures=(f:LClWord):>bool=>$unsafe {
+    loop cap in fns.ptr[f].caps {
+        if is_managed(store_type(LClWord(cap.inner))) {return true}
+    }
+    return false
+}
+closure_scalar_environment=(f:LClWord):>bool=>$unsafe {
+    return ownership_callable_cap(LClWord(fns.ptr[f].fntype)) =? 0 and not closure_managed_captures(f)
+}
+drop_stack_closure=(addr:LClWord f:LClWord):>void=>$unsafe {
+    if not closure_managed_captures(f) {return}
+    let env=e_load(VI addr ptr_size ptr_size)
+    iff(env);
+    e_call1(lf_helper(HK.stackenvdrop 0 f) env -1);
+    endc();
+}
+stack_closure_uses=(n:LClWord called:bool=false):>void=>$unsafe {
+    if n =? 0 {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' or k =? 'fn_' {return}
+    if k =? 'fnref' and nodes.ptr[n].aux =? 2 {
+        stack_closure_uses(LClWord(nodes.ptr[n].a) called);
+        return
+    }
+    if k =? 'ident' {
+        if not called and nodes.ptr[n].aux =? int32<overflow='wrap'>(1) {
+            let l:LClWord=LClWord(nodes.ptr[n].sym)
+            if stack_closure_locals.has(l) {stack_closure_locals[l] = false;}
+        }
+        return
+    }
+    let a:LClWord=LClWord(nodes.ptr[n].a)
+    let direct=k =? 'call' and nodes.ptr[n].aux =? 1 and a not=? 0 and (nodes.ptr[a].kind =? 'ident' or nodes.ptr[a].kind =? 'fnref' and nodes.ptr[a].aux =? 2)
+    stack_closure_uses(a direct);
+    stack_closure_uses(LClWord(nodes.ptr[n].b));
+    if k not=? 'for_' {
+        stack_closure_uses(LClWord(nodes.ptr[n].c));
+        if k not=? 'partial' {stack_closure_uses(LClWord(nodes.ptr[n].d));}
+    }
+    loop i in [0..nkids(n)) {
+        let arg=kid(n i)
+        let safe=k =? 'call' and nodes.ptr[n].aux =? 0 and nodes.ptr[arg].kind =? 'ident' and nodes.ptr[arg].aux =? int32<overflow='wrap'>(1) and stack_closure_locals.has(LClWord(nodes.ptr[arg].sym)) and closure_borrow_param(LClWord(nodes.ptr[n].sym) i)
+        if safe {stack_closure_passed[LClWord(nodes.ptr[arg].sym)] = true;}
+        stack_closure_uses(arg safe);
+    }
+    loop i in [0..nkids2(n)) {stack_closure_uses(kid2(n i));}
+}
+stack_closure_local=(l:LClWord):>bool=>$unsafe {
+    if stack_closure_fn not=? cur_fn {
+        stack_closure_fn=cur_fn
+        stack_closure_locals.clear();
+        stack_closure_targets.clear();
+        stack_closure_passed.clear();
+        stack_closure_params.clear();
+        let skip=LF_CONST | LF_PARAM | LF_MUTPARAM | LF_ASSIGNED | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_BYREF | LF_ALIAS | LF_SHARED
+        loop candidate in fns.ptr[cur_fn].locals {
+            if LClWord(locals.ptr[candidate].flags) & skip not=? 0 {continue}
+            if is_fn_type(LClWord(locals.ptr[candidate].type)) or tkind(LClWord(locals.ptr[candidate].type)) =? 'polyfn' {stack_closure_locals[candidate] = true;}
+        }
+        if stack_closure_locals.length >? 0 {stack_closure_uses(LClWord(fns.ptr[cur_fn].body));}
+    }
+    return stack_closure_locals.get(l) ?? false
+}
+partial_layout=(e:LClWord):>array<int64>=>$unsafe {
+    let offs:array<int64>=[]
+    let off:LClWord=24
+    if nodes.ptr[e].aux =? 1 {off += closure_size();}
+    loop i in [0..nkids(e)) {
+        let a=kid(e i)
+        if nodes.ptr[a].kind =? 'hole' {
+            offs.push(-1);
+            continue
+        }
+        let t=ntype(a)
+        let al=talign(t)
+        if al <? 8 {al=8}
+        off=align_up(off al)
+        offs.push(off);
+        off += tsize(t);
+    }
+    offs.push(align_up(off 8));
+    return offs
+}
+spawn_body=(f:LClWord):>bool=>$unsafe {
+    let d:LClWord=LClWord(fns.ptr[f].decl)
+    # (the conversion to the task's callable type wraps the literal in place)
+    loop d not=? 0 and nodes.ptr[d].kind =? 'conv' {d=LClWord(nodes.ptr[d].a)}
+    return d not=? 0 and nodes.ptr[d].kind =? 'lambda' and nodes.ptr[d].aux2 =? 17
+}
+spawn_owned_capture=(f:LClWord l:LClWord):>bool=>$unsafe {
+    let flags:LClWord=LClWord(locals.ptr[l].flags)
+    return flags & LF_CAPTURE not=? 0 and flags & (LF_OWNERBORROW | LF_PARTBORROW) =? 0 and not is_shared(l) and ownership_type(LClWord(locals.ptr[l].type)) and spawn_body(f)
+}

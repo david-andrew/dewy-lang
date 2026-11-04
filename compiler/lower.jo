@@ -1,3 +1,4 @@
+use 'lower_closures.dewy'
 use 'lower_scalars.dewy'
 use 'lower_views.dewy'
 use 'lower_storage.dewy'
@@ -703,29 +704,6 @@ race_scan = (n: int, f: int, who: str, captures: bool):
 # rollback does not put them back) -- also not in the functions it calls. Warnings: random()
 # after seed() from the game, say, is the same everywhere.
 # ---------------- closures ----------------
-env_layout = (f: int):
-    if fns[f].env_size != 0: return
-    if fns[f].kind == FK_LAMBDA and fns[f].target != 0:
-        poly_env_layout(int(fns[f].target))
-        return
-    off = if ownership_callable_cap(int(fns[f].fntype)) != 0: 32 else: 24
-    loop cap in fns[f].caps:
-        inn = int(cap.inner)
-        math_prepare_capture(inn)
-        if is_shared(inn): check_cell_type(inn)
-        t = store_type(inn)
-        al = talign(t)
-        if al < 8: al = 8
-        off = align_up(off, al)
-        # A run-once task may transfer a capture on one branch only. Keep its
-        # live bit beside the payload; the construction prefix still guards it.
-        if spawn_owned_capture(f, inn): off = align_up(off + 8, al)
-        locals[inn].env_off = i32(off)
-        off += tsize(t)
-    fns[f].env_size = i32(align_up(off, 8))
-
-closure_size = () -> int: 2 * ptr_size
-
 # A direct local closure may keep its environment in this activation when every
 # reference is a direct invocation, or an immutable environment is passed to
 # an invocation-only parameter. Copies, returns, captures, rebinding and
@@ -738,93 +716,8 @@ stack_closure_passed: {int: bool} = {}
 
 # Match envcopy's retain-only case. A mutable or owner environment must still
 # use the heap: its copy helper may allocate and copy the environment header.
-closure_env_shareable = (f: int) -> bool:
-    if ownership_callable_cap(int(fns[f].fntype)) != 0: return false
-    loop cap in fns[f].caps:
-        inn = int(cap.inner)
-        flags = int(locals[inn].flags)
-        if flags & LF_VALUECAP != 0 and (flags & (LF_ASSIGNED | LF_EXPOSED) != 0 or is_shared(inn) or type_has_fn(int(locals[inn].type)) or ownership_type(int(locals[inn].type))): return false
-    true
-
-stack_closure_target = (l: int) -> int:
-    if stack_closure_fn != cur_fn: return -1
-    stack_closure_targets.get(l) ?? -1
-
 # Invocation pins have ended before scope cleanup. No value can retain this
 # environment, so only its managed captures need destruction, with no RC dispatch.
-closure_managed_captures = (f: int) -> bool:
-    loop cap in fns[f].caps:
-        if is_managed(store_type(int(cap.inner))): return true
-    false
-
-closure_scalar_environment = (f: int) -> bool:
-    ownership_callable_cap(int(fns[f].fntype)) == 0 and not closure_managed_captures(f)
-
-drop_stack_closure = (addr: int, f: int):
-    if not closure_managed_captures(f): return
-    env = e_load(VI, addr, ptr_size, ptr_size)
-    iff(env)
-    e_call1(lf_helper(.stackenvdrop, 0, f), env, -1)
-    endc()
-
-stack_closure_uses = (n: int, called: bool = false):
-    if n == 0: return
-    k = nodes[n].kind
-    if k == .lambda or k == .fn_: return
-    if k == .fnref and nodes[n].aux == 2:
-        stack_closure_uses(int(nodes[n].a), called)
-        return
-    if k == .ident:
-        if not called and nodes[n].aux == i32(int(SK.local)):
-            l = int(nodes[n].sym)
-            if stack_closure_locals.has(l): stack_closure_locals[l] = false
-        return
-    a = int(nodes[n].a)
-    direct = k == .call and nodes[n].aux == 1 and a != 0 and (nodes[a].kind == .ident or nodes[a].kind == .fnref and nodes[a].aux == 2)
-    stack_closure_uses(a, direct)
-    stack_closure_uses(int(nodes[n].b))
-    if k != .for_:
-        stack_closure_uses(int(nodes[n].c))
-        if k != .partial: stack_closure_uses(int(nodes[n].d))
-    loop i in [0..nkids(n)):
-        arg = kid(n, i)
-        safe = k == .call and nodes[n].aux == 0 and nodes[arg].kind == .ident and nodes[arg].aux == i32(int(SK.local)) and stack_closure_locals.has(int(nodes[arg].sym)) and closure_borrow_param(int(nodes[n].sym), i)
-        if safe: stack_closure_passed[int(nodes[arg].sym)] = true
-        stack_closure_uses(arg, safe)
-    loop i in [0..nkids2(n)): stack_closure_uses(kid2(n, i))
-
-stack_closure_local = (l: int) -> bool:
-    if stack_closure_fn != cur_fn:
-        stack_closure_fn = cur_fn
-        stack_closure_locals.clear()
-        stack_closure_targets.clear()
-        stack_closure_passed.clear()
-        stack_closure_params.clear()
-        skip = LF_CONST | LF_PARAM | LF_MUTPARAM | LF_ASSIGNED | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_BYREF | LF_ALIAS | LF_SHARED
-        loop candidate in fns[cur_fn].locals:
-            if int(locals[candidate].flags) & skip != 0: continue
-            if is_fn_type(int(locals[candidate].type)) or tkind(int(locals[candidate].type)) == .polyfn: stack_closure_locals[candidate] = true
-        if stack_closure_locals.len() > 0: stack_closure_uses(int(fns[cur_fn].body))
-    stack_closure_locals.get(l) ?? false
-
-partial_layout = (e: int) -> int[]:
-    offs: int[]
-    off = 24
-    if nodes[e].aux == 1: off += closure_size()
-    loop i in [0..nkids(e)):
-        a = kid(e, i)
-        if nodes[a].kind == .hole:
-            offs.push(-1)
-            continue
-        t = ntype(a)
-        al = talign(t)
-        if al < 8: al = 8
-        off = align_up(off, al)
-        offs.push(off)
-        off += tsize(t)
-    offs.push(align_up(off, 8))
-    offs
-
 # ---------------- string interpolation ----------------
 # ---------------- value blocks ----------------
 # ---------------- match ----------------
@@ -1544,18 +1437,8 @@ hk_key = 0          # (the key's register in the keyed helper being lowered, els
 # A spawn body (dewy_nodes.jo's dw_task_spawn, aux2 17) runs once, in its task: the
 # task runtime's copies of it share one environment, whose captures, owners among them,
 # are dropped once, with the last copy.
-spawn_body = (f: int) -> bool:
-    d = int(fns[f].decl)
-    # (the conversion to the task's callable type wraps the literal in place)
-    loop d != 0 and nodes[d].kind == .conv: d = int(nodes[d].a)
-    d != 0 and nodes[d].kind == .lambda and nodes[d].aux2 == 17
-
 # Only owned, unshared resource captures can move out of a run-once body.
 # Nested shared captures and borrowed places keep their existing restrictions.
-spawn_owned_capture = (f: int, l: int) -> bool:
-    flags = int(locals[l].flags)
-    flags & LF_CAPTURE != 0 and flags & (LF_OWNERBORROW | LF_PARTBORROW) == 0 and not is_shared(l) and ownership_type(int(locals[l].type)) and spawn_body(f)
-
 # native FFI: a thunk that resolves the C function on first use and calls it
 # macOS: the C functions dyld puts in their slots when the program starts: (slot's offset in the
 # data, library, symbol) -- compiler/macho.jo writes them as binds
