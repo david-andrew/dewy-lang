@@ -1,0 +1,18 @@
+# A refined int still has mathematical-int storage, including heap integers.
+nonnegative = (v:int<(>=? 0)>?):>int => v ?? 0
+signed = (v:int<(>=? -10)>?):>int => v ?? 0
+word = (v:int64<(>=? -10)>?):>int => v ?? 0
+unsigned = (v:uint64<(>=? 0)>?):>int => v ?? 0
+main = () => {
+    printl"{nonnegative(0)} {nonnegative(2)} {nonnegative(none)}"
+    let large = 1267650600228229401496703205376
+    if large <? 0 return
+    printl(nonnegative(large))
+    printl"{signed(-7)} {signed(none)}"
+    printl"{word(-7)} {word(none)}"
+    printl"{unsigned(18446744073709551615)} {unsigned(none)}"
+    let d:dict<string int<(>=? 0)>> = ["huge" -> large]
+    printl(d.get("huge") ?? 0)
+    printl(d.get("absent") ?? 0)
+    printl(d["huge"])
+}

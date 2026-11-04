@@ -3808,6 +3808,8 @@ let port = to_int(env("PORT") ?? "47200") ?? 47200
 
 The left operand must be optional; use `mapping.get(key) ?? fallback` for an
 optional dictionary lookup. Direct indexing returns the stored element itself.
+The present arm keeps its payload's numeric refinements: if dictionary values
+are `int<(>=? 0)>`, `mapping.get(key) ?? 0` is proven nonnegative too.
 
 Loop bindings can unpack structured values, including nested groups:
 

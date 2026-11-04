@@ -1,0 +1,10 @@
+# modes: native native-release
+bad = (text:string):>string => text[..text.length - 2)
+work = (jobs:Mpmc<string>):>string => { jobs.close; bad("x") }
+main = () => {
+    let jobs = mpmc<string>(4)
+    concurrent { let a = spawn work(jobs) }
+    let box = channel<string>(2)
+    box.try_send("x");
+    printl(a or_throw)
+}

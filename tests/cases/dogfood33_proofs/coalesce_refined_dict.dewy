@@ -1,0 +1,6 @@
+f = (d:dict<string int<(>=? 0)>>):>int => {
+    let n = d.get("a") ?? 0
+    $assert n >=? 0
+    n
+}
+main = () => printl(f(["a" -> 2]))

@@ -133,7 +133,12 @@ ownership_finalize = ():
         loop event in effect_summaries[f].events:
             k = event.atom.kind
             if k == .opaque or k == .panic or k == .alloc or k == .spawn or k == .remainder or k == .detach or k == .escape:
-                fatal(nodes[int(fns[f].decl)].pos, "{name} hook requires a proven no-failure summary: {effect_witness(f, event)}")
+                what = if k == .alloc: "allocation may fail" else if k == .panic: "operation may fail" else if k == .detach: "storage detach may allocate" else if k == .spawn: "task creation may fail" else if k == .escape: "storage escapes" else: "operation has no proven no-failure summary"
+                at = if event.via != 0: event.via else: event.witness
+                if at > 0: err_notes.push((nodes[at].pos, "note: {what} here"))
+                if event.witness > 0 and event.witness != at and not pos_in_lib(nodes[event.witness].pos):
+                    err_notes.push((nodes[event.witness].pos, "note: originating operation is here"))
+                fatal(nodes[int(fns[f].decl)].pos, "{name} hook requires a proven no-failure summary: {effect_witness(f, event)} ({what})")
             if role == 2 and k == .write and place_base(event.atom.place).root == .formal:
                 fatal(nodes[int(fns[f].decl)].pos, "a copy hook requires a readonly receiver")
 

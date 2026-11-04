@@ -8477,6 +8477,13 @@ variant_error = (n: int, et: int, code: int) -> void:
 optional_error = (n: int, at: int, unwrap: bool):
     if unwrap: fatal(nodes[n].pos, "'!' needs an optional value, found {dt(at)}")
     lhs = int(nodes[n].a)
+    # Index operators have already become checked calls; their source position
+    # need not point at '[' (Dewy's mapping[key] points at the receiver).
+    if nodes[lhs].kind == .call and nodes[lhs].aux == 0 and nodes[lhs].sym > 0 and nkids(lhs) == 2:
+        f = int(nodes[lhs].sym)
+        d = int(fns[f].decl)
+        if d > 0 and name_of(int(nodes[d].name)) == "[]" and is_map_type(ntype(kid(lhs, 0))):
+            fatal(nodes[n].pos, "'??' needs an optional on the left, found {dt(at)}; dictionary indexing gives the value itself; use `mapping.get(key) ?? fallback`")
     lp = int(nodes[lhs].pos)
     lf = pos_file(lp)
     if lf >= 0 and lf < files.len() and pos_off(lp) < len(files[lf].src) and files[lf].src[pos_off(lp)] == '[':

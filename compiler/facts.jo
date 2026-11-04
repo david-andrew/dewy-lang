@@ -10727,7 +10727,12 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         fact_tag(s, value, 1, false)
         y = 0
         if k == .coalesce:
-            y = if nodes[n].aux == 1: value else: fact_project(yes, value, -4, false, ntype(n))
+            # The present arm retains the optional's payload contract even if
+            # the fallback widens the expression's result type. O(1), demanded
+            # only while transferring this coalesce; no extra body walk.
+            optional = fact_type(ntype(int(nodes[n].a)))
+            payload = if tkind(optional) == .opt: telem(optional) else: ntype(n)
+            y = if nodes[n].aux == 1: value else: fact_project(yes, value, -4, false, payload)
         else:
             l = int(nodes[n].sym)
             if l != 0: fact_bind(yes, PlaceIdentity(.local, int(locals[l].owner), l), fact_project(yes, value, -4, false, int(locals[l].type)))

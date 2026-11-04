@@ -430,6 +430,23 @@ copy_movable = (e: int) -> bool:
     if nodes[n].kind != .ident or not copy_moves.has(n) or copy_blocked.has(int(nodes[n].sym)): return false
     n == e or vc(ntype(n)) == VC_AGG
 
+# Diagnostic-only walk after a failed transfer, O(nodes in the current body).
+# It neither changes liveness nor claims that an unreachable use is executed.
+copy_later_use = (n: int, l: int, after: int) -> int:
+    if n == 0: return 0
+    if nodes[n].kind == .ident and nodes[n].aux == i32(int(SK.local)) and nodes[n].sym == i32(l) and nodes[n].pos > after: return nodes[n].pos
+    if nodes[n].kind == .lambda:
+        f = int(nodes[n].sym)
+        if has_flag(n, NF_GENERIC): f = poly_families[int(nodes[n].aux)].envfn
+        loop cap in fns[f].caps:
+            if int(cap.outer) == l and nodes[n].pos > after: return nodes[n].pos
+        return 0
+    found = 0
+    loop c in copy_children(n):
+        at = copy_later_use(c, l, after)
+        if at > 0 and (found == 0 or at < found): found = at
+    found
+
 copy_own = (e: int, value: Val, t: int) -> Val:
     if ownership_type(t):
         if value.owned: return value
@@ -437,6 +454,9 @@ copy_own = (e: int, value: Val, t: int) -> Val:
         if owner_adoptions.has(e): fatal(nodes[e].pos, "a hook result requires fresh construction or a proven last-use local")
         if ownership_copyable(t): return own(value, t)
         if copy_proof_budget == 0: fatal(nodes[e].pos, "move proof budget exhausted; cannot copy a move-only owner")
+        if nodes[e].kind == .ident and nodes[e].aux == i32(int(SK.local)):
+            at = copy_later_use(int(fns[cur_fn].body), int(nodes[e].sym), nodes[e].pos)
+            if at > 0: err_notes.push((at, "note: later use of '{name_of(int(nodes[e].name))}' prevents this transfer"))
         fatal(nodes[e].pos, "cannot copy a move-only owner: transfer requires a proven last use (later read, loop, alias or defer keeps it live)")
     if value.owned or not copy_strict(e) or not costly_copy(t): return own(value, t)
     # A literal may be placed in read-only data, then promoted on its first
