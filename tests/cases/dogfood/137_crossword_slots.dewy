@@ -1,0 +1,86 @@
+# Extract numbered across/down slots from a text crossword template.
+# '#' is a block, '.' an unknown letter, and A-Z a fixed letter.
+Slot:type = [number:int direction:string row:int column:int pattern:string]
+
+read_grid = (source:string):>array<string>? => {
+    let rows = source.upper.lines
+    if rows.length =? 0 { printl"invalid grid: empty"; return none }
+    let width = rows[0].length
+    if width =? 0 { printl"invalid grid: empty row"; return none }
+    loop row in rows {
+        if row.length not =? width { printl"invalid grid: ragged"; return none }
+        loop ch in row {
+            if ch not in? "#.ABCDEFGHIJKLMNOPQRSTUVWXYZ" {
+                printl"invalid grid: unexpected {ch}"
+                return none
+            }
+        }
+    }
+    rows
+}
+
+cell = (rows:array<string> y:int x:int):>string => {
+    if y <? 0 or y >=? rows.length return "#"
+    let row = rows[y]
+    if x <? 0 or x >=? row.length return "#"
+    row[x]
+}
+
+collect_slots = (rows:array<string>):>array<Slot> => {
+    let slots:array<Slot> = []
+    let number = 0
+    loop y in [0..rows.length) {
+        let row = rows[y]
+        loop x in [0..row.length) {
+            if row[x] =? "#" continue
+            let across = cell(rows y x-1) =? "#" and cell(rows y x+1) not =? "#"
+            let down = cell(rows y-1 x) =? "#" and cell(rows y+1 x) not =? "#"
+            if not across and not down continue
+            number += 1
+            if across {
+                let stop:int64 = x
+                loop stop <? row.length and row[stop] not =? "#" { stop += 1 }
+                slots.push(Slot[number "A" y x row[x..stop)])
+            }
+            if down {
+                let letters:array<string> = []
+                let stop:int64 = y
+                loop cell(rows stop x) not =? "#" {
+                    letters.push(cell(rows stop x))
+                    stop += 1
+                }
+                slots.push(Slot[number "D" y x letters.join])
+            }
+        }
+    }
+    slots
+}
+
+fits = (pattern:string word:string):>bool => {
+    if pattern.length not =? word.length return false
+    loop i in [0..pattern.length) {
+        if pattern[i] not =? "." and pattern[i] not =? word[i] return false
+    }
+    true
+}
+
+report = (source:string words:array<string>):>void => {
+    let rows = read_grid(source)
+    if rows is? none return
+    let slots = collect_slots(rows)
+    printl"grid: {rows.length} rows, {slots.length} slots"
+    loop slot in slots {
+        let choices = [loop word in words if fits(slot.pattern word) word]
+        printl"{slot.number}{slot.direction} ({slot.row},{slot.column}) {slot.pattern}: {choices.join(",")}"
+    }
+}
+
+main = () => {
+    let words = ["CAT" "CAR" "CAN" "DOG" "DIG" "ANT" "ART" "RAT" "TAR" "TEN"]
+    report("C..#\n.#..\n...#\n#..#" words)
+    report("CAT\n###\nDOG" words)
+    report("#" words)
+    report("" words)
+    report("..\n..." words)
+    report(".?" words)
+}

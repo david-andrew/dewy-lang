@@ -1,0 +1,80 @@
+# Decode a monochrome scanline format: header 'width height', followed by
+# 'ink count' runs. Runs may cross rows; reject overrun and underrun.
+Bitmap:type = [width:int<0 <? width <=? 40> height:int<0 <? height <=? 20> pixels:array<string>]
+
+decode = (source:string):>Bitmap? => {
+    let lines = source.lines
+    if lines.length =? 0 { printl"bad bitmap: missing header"; return none }
+    let header = lines[0].split
+    if header.length not =? 2 { printl"bad bitmap: expected width height"; return none }
+    let width = to_int(header[0]) ?? 0
+    let height = to_int(header[1]) ?? 0
+    if width <=? 0 or width >? 40 or height <=? 0 or height >? 20 {
+        printl"bad bitmap: dimensions must be 1..40 by 1..20"
+        return none
+    }
+    let pixels:array<string> = []
+    let capacity = width * height
+    loop line in lines[1..] {
+        if line.trim.is_empty continue
+        let fields = line.split
+        if fields.length not =? 2 { printl"bad bitmap: expected ink count"; return none }
+        let ink = fields[0]
+        let count = to_int(fields[1]) ?? 0
+        if ink not in? ["#" "."] { printl"bad bitmap: unknown ink {ink}"; return none }
+        if count <=? 0 { printl"bad bitmap: count must be positive"; return none }
+        if pixels.length + count >? capacity { printl"bad bitmap: too many pixels"; return none }
+        loop i in [0..count) { pixels.push(ink) }
+    }
+    if pixels.length not =? capacity { printl"bad bitmap: too few pixels"; return none }
+    Bitmap[width height pixels]
+}
+
+encode = (pixels:array<string>):>array<string> => {
+    let runs:array<string> = []
+    let previous = ""
+    let count = 0
+    loop ink in pixels {
+        if ink =? previous { count += 1 }
+        else {
+            if count >? 0 runs.push("{previous} {count}")
+            previous = ink
+            count = 1
+        }
+    }
+    if count >? 0 runs.push("{previous} {count}")
+    runs
+}
+
+report = (source:string):>void => {
+    let bitmap = decode(source)
+    if bitmap is? none return
+    printl"bitmap {bitmap.width}x{bitmap.height}"
+    loop y in [0..bitmap.height) {
+        let start = y * bitmap.width
+        let stop = start + bitmap.width
+        if stop >? bitmap.pixels.length { printl"bad bitmap: incomplete row"; return }
+        let row = bitmap.pixels[start..stop)
+        printl(row.join)
+    }
+    let dark = [loop ink in bitmap.pixels if ink =? "#" ink].length
+    printl"dark: {dark}/{bitmap.pixels.length}"
+    let runs = encode(bitmap.pixels)
+    printl"canonical runs: {runs.join("; ")}"
+    let again = decode("{bitmap.width} {bitmap.height}\n{runs.join("\n")}")
+    if again isnt? none printl"round trip: {again.pixels =? bitmap.pixels}"
+}
+
+main = () => {
+    report("5 3\n. 1\n# 3\n. 2\n# 1\n. 1\n# 1\n. 2\n# 3\n. 1")
+    report("3 2\n# 3\n# 3")
+    report("1 1\n. 1")
+    report("")
+    report("0 2")
+    report("3 nope")
+    report("2 2\n# 5")
+    report("2 2\n# 3")
+    report("2 2\n# -1")
+    report("2 2\nx 4")
+    report("2 2\n#")
+}

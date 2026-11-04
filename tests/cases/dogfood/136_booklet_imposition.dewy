@@ -1,0 +1,78 @@
+# Turn a print-shop job ticket into folded booklet sheet order.
+# A signature holds a multiple of four pages; '_' denotes a blank page.
+Job:type = [title:string pages:int<0 <? pages <=? 1000> signature:int<4 <=? signature <=? 32> binding:string]
+
+parse_job = (ticket:string):>Job? => {
+    let fields = ticket.split
+    if fields.length not =? 4 {
+        printl"bad ticket: expected title pages signature binding"
+        return none
+    }
+    let [title page_text signature_text binding] = fields
+    let pages = to_int(page_text) ?? -1
+    let signature = to_int(signature_text) ?? -1
+    if pages <=? 0 or pages >? 1000 {
+        printl"{title}: pages must be 1..1000"
+        return none
+    }
+    if signature <? 4 or signature >? 32 or signature % 4 not =? 0 {
+        printl"{title}: signature must be 4..32 in multiples of four"
+        return none
+    }
+    if binding not in? ["left" "right"] {
+        printl"{title}: binding must be left or right"
+        return none
+    }
+    Job[title pages signature binding]
+}
+
+page_label = (page:int count:int):>string => if page >? count "_" else "{page}"
+
+impose = (job:Job):>array<[int int int int]> => {
+    let sheets:array<[int int int int]> = []
+    let signatures = (job.pages + job.signature - 1) // job.signature
+    loop section in [0..signatures) {
+        let first = section * job.signature + 1
+        let last = first + job.signature - 1
+        loop sheet in [0..job.signature // 4) {
+            let a = last - 2 * sheet
+            let b = first + 2 * sheet
+            let c = b + 1
+            let d = a - 1
+            if job.binding =? "right" sheets.push([b a d c])
+            else sheets.push([a b c d])
+        }
+    }
+    sheets
+}
+
+print_ticket = (ticket:string):>void => {
+    let job = parse_job(ticket)
+    if job is? none return
+    let sheets = impose(job)
+    printl"{job.title}: {sheets.length} sheets, {sheets.length*4-job.pages} blanks"
+    let seen:set<int> = set[]
+    loop i in [0..sheets.length) {
+        let [a b c d] = sheets[i]
+        printl"  sheet {i+1}: front {page_label(a job.pages)} {page_label(b job.pages)}; back {page_label(c job.pages)} {page_label(d job.pages)}"
+        loop page in [a b c d] {
+            if page <=? job.pages seen.push(page)
+        }
+    }
+    printl"  audit: {seen.length} distinct pages of {job.pages}"
+}
+
+main = () => {
+    loop ticket in [
+        "zine 10 8 left"
+        "manga 7 8 right"
+        "flyer 1 4 left"
+        "empty 0 8 left"
+        "huge 1001 8 left"
+        "bad text 8 left"
+        "fold 12 6 left"
+        "zero 12 0 left"
+        "side 12 8 top"
+        "missing 12"
+    ] { print_ticket(ticket) }
+}

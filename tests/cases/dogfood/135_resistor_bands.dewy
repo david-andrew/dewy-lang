@@ -1,0 +1,76 @@
+# Decode four-band resistor labels from a technician's parts list.
+# Keep the tolerance interval exact; reject malformed labels independently.
+Reading:type = [name:string ohms:int tolerance:int]
+
+const DIGITS:dict<string int> = [
+    "black"->0 "brown"->1 "red"->2 "orange"->3 "yellow"->4
+    "green"->5 "blue"->6 "violet"->7 "gray"->8 "white"->9
+]
+const TOLERANCE:dict<string int> = ["brown"->1 "red"->2 "gold"->5 "silver"->10]
+
+parse_label = (line:string):>Reading? => {
+    let words = line.lower.split
+    if words.length not =? 5 {
+        printl"invalid label: expected name and four bands"
+        return none
+    }
+    let [name first second multiplier tolerance] = words
+    if first not in? DIGITS or second not in? DIGITS or multiplier not in? DIGITS {
+        printl"{name}: unknown digit band"
+        return none
+    }
+    if first =? "black" {
+        printl"{name}: first band cannot be black"
+        return none
+    }
+    if tolerance not in? TOLERANCE {
+        printl"{name}: unknown tolerance band"
+        return none
+    }
+    let value = (10 * DIGITS[first] + DIGITS[second]) * 10^DIGITS[multiplier]
+    Reading[name value TOLERANCE[tolerance]]
+}
+
+read_parts = (source:string):>array<Reading> => {
+    let parts:array<Reading> = []
+    let names:set<string> = set[]
+    loop raw in source.lines {
+        let line = raw.trim
+        if line.is_empty or line.startswith("#") continue
+        let part = parse_label(line)
+        if part is? none continue
+        if part.name in? names {
+            printl"{part.name}: duplicate label"
+            continue
+        }
+        names.push(part.name)
+        parts.push(part)
+    }
+    parts
+}
+
+report = (parts:array<Reading> target:int):>void => {
+    printl"accepted: {parts.length}"
+    let nominal_total = 0
+    loop part in parts.sorted(key=(p) => p.ohms) {
+        let low = part.ohms * (100 - part.tolerance) / 100
+        let high = part.ohms * (100 + part.tolerance) / 100
+        printl"{part.name}: {part.ohms} ohm +/-{part.tolerance}% [{low}, {high}]"
+        nominal_total += part.ohms
+    }
+    printl"series total: {nominal_total} ohm"
+    let best:Reading? = none
+    let distance = 0
+    loop part in parts {
+        let delta = abs(part.ohms - target)
+        if best is? none or delta <? distance { best = part; distance = delta }
+    }
+    if best isnt? none printl"nearest to {target}: {best.name} (off by {distance})"
+    else printl"no parts available"
+}
+
+main = () => {
+    let source = "# drawer A\nR1 brown black red gold\nR2 yellow violet orange silver\nR3 red red brown brown\nR4 orange orange black red\nR1 brown black brown gold\nBAD teal black red gold\nZERO black red brown gold\nSHORT brown red\nTOL brown black red blue\n"
+    report(read_parts(source) 250)
+    report(read_parts("# empty drawer\n\n") 100)
+}
