@@ -207,3 +207,27 @@ main=()=>{
 @pytest.mark.parametrize('name', COALESCE_VALID)
 def test_optional_coalesce(compiler, tmp_path, name, mode):
     check_program(compiler, tmp_path, *COALESCE_VALID[name], mode)
+
+
+HEAP_VALID = {
+    'finding_refined_heap_literal': ("""$runtime_checks
+main=()=>{let x:int<(>=? 0)>?=18446744073709551616 printl(x ?? 0)}""", '18446744073709551616\n'),
+    'refined_heap_literals': ("""$runtime_checks
+main=()=>{ let x:int<(>=? 0)>?=1267650600228229401496703205376 printl(x ?? 0) }""", '1267650600228229401496703205376\n'),
+    'control_heap_literal_plain': ("""main=()=>{let x:int?=18446744073709551616 printl(x ?? 0)}""", '18446744073709551616\n'),
+    'control_heap_literal_refined': ("""$runtime_checks
+main=()=>{let x:int<(>=? 0)>=18446744073709551616 printl(x)}""", '18446744073709551616\n'),
+}
+
+
+@pytest.mark.parametrize('mode', MODES)
+@pytest.mark.parametrize('name', HEAP_VALID)
+def test_optional_heap_literal(compiler, tmp_path, name, mode):
+    check_program(compiler, tmp_path, *HEAP_VALID[name], mode)
+
+
+@pytest.mark.parametrize('mode', MODES)
+@pytest.mark.parametrize('type_name', ['int8<(>=? 0)>', 'uint64<(>=? 0)>'])
+def test_optional_heap_literal_word_reject(compiler, tmp_path, type_name, mode):
+    source = f'$runtime_checks\nmain=()=>{{let x:{type_name}?=18446744073709551616 printl(x)}}'
+    check_program(compiler, tmp_path, source, None, mode)

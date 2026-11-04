@@ -8248,7 +8248,7 @@ ident_error = (n: int, kind: int):
 # wanted, else -1 to check the call that makes the wanted BigInt.
 call_int_literal = (n: int, ex: int) -> int:
     literal_target = ex
-    if ex != 0 and types[ex].kind == .opt: literal_target = prune(int(types[ex].elem))
+    if ex != 0 and types[ex].kind == .opt: literal_target = representation_type(int(types[ex].elem))
     if literal_target == 0 or literal_target == T_MATH_INT:
         # The parser's oversized literal constructor has a literal sign.
         # Keep that provenance on its packing conversion: the fact domain
