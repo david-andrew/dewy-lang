@@ -1,0 +1,94 @@
+# Frozen recursive lowering from lower.jo.
+use 'lower.jo'
+use 'ir.jo'
+use 'types.jo'
+use 'lower_storage.dewy'
+use 'util.jo'
+use 'check.jo'
+use 'ast.jo'
+use 'pe_format.dewy'
+
+mac_bound_lib = (lib: str) -> str:
+    if starts_with(lib, "/"): return lib
+    if lib == "libc.so.6" or lib == "libm.so.6" or lib == "libdl.so.2" or lib == "libpthread.so.0": return "/usr/lib/libSystem.B.dylib"
+    ""
+
+
+c_nullable = (t0: int) -> bool:
+    t = prune(t0)
+    types[t].kind == .opt and tkind(int(types[t].elem)) == .ptr
+
+
+lower_extern_thunk = (lf: int, f: int):
+    begin_fn(fns[f].sym, lf)
+    lib = fns[f].clib
+    nm = name_of(int(nodes[int(fns[f].decl)].name))
+    if len(fns[f].csym) > 0: nm = fns[f].csym
+    ret = int(fns[f].ret)
+    # (Dewy's ptr<T>?: an optional held as a value, null to C when it is none)
+    sret = if c_nullable(ret): vreg(VI) else: -1
+    ps: int[]
+    loop t in fns[f].ptypes:
+        if vc(t) == VC_AGG and not c_nullable(t): fatal(nodes[int(fns[f].decl)].pos, "C functions can only take scalar or pointer arguments")
+        if tkind(t) == .array: fatal(nodes[int(fns[f].decl)].pos, "a C function cannot take an array: declare the parameter as a pointer (*f32) and pass data(xs)")
+        ps.push(vreg(vt_of(t)))
+    ir.nparams = ir.vtypes.len()
+    # (a str goes to C as its bytes, ending in a zero byte: a char *)
+    cps: int[]
+    loop i in 0.. and t in fns[f].ptypes:
+        if c_nullable(t):
+            p = vreg(VI)
+            e_mov(p, e_iconst(0))
+            iff(opt_has(ps[i], int(types[prune(t)].elem)))
+            e_mov(p, e_load(VI, ps[i], 0, 8))
+            endc()
+            cps.push(p)
+        else if tkind(t) == .str_: cps.push(e_call1(rt("__c_str"), ps[i], VI))
+        else if fns[f].cvariadic > 0 and i >= int(fns[f].cvariadic) - 1 and vt_of(t) == VS:
+            # C promotes variadic floats to double. Fixed f32 parameters keep
+            # their declared type; narrow integers already use extended registers.
+            d = vreg(VF)
+            emit(.f2f, VF, d, ps[i], 0, 0, 0)
+            cps.push(d)
+        else: cps.push(ps[i])
+    if vc(ret) == VC_AGG and sret < 0: fatal(nodes[int(fns[f].decl)].pos, "C functions can only return scalars or pointers")
+    ir.ret = ret_vt(ret)
+    data_size = align_up(data_size, 8)
+    slot = data_size
+    data_size += 8
+    ffi_slot[slot] = ffi_offs.len()
+    ffi_offs.push(slot)
+    ffi_keys.push("ffi|{lib}|{nm}")
+    fp = vreg(VI)
+    imp = -1
+    if target_windows and lower(lib) == "kernel32.dll": imp = pe_imports.index_of(nm)
+    if imp >= 0:
+        # (one of the functions the program imports: from the import table, compiler/pe.jo)
+        emit(.intr, VI, fp, 0, 0, i32(imp), 10)
+    else if target_macos and len(mac_bound_lib(lib)) > 0 and (not late_binding or nm == "dlopen" or nm == "dlsym" or nm == "dlerror"):
+        # (dyld has put it in the slot, or null where its library is missing)
+        mac_imports.push((slot, mac_bound_lib(lib), nm))
+        e_mov(fp, e_load(VI, e_gaddr(slot), 0, 8))
+        iff(e_bin(.eq, VI, fp, e_iconst(0)))
+        e_call2(rt("__ffi_missing"), e_daddr(str_data(lib)), e_daddr(str_data(nm)), -1)
+        endc()
+    else:
+        rlib = lib
+        if target_macos and len(mac_bound_lib(lib)) > 0: rlib = mac_bound_lib(lib)
+        e_mov(fp, e_load(VI, e_gaddr(slot), 0, 8))
+        iff(e_bin(.eq, VI, fp, e_iconst(0)))
+        e_mov(fp, e_call2(rt("__ffi_resolve"), e_daddr(str_data(rlib)), e_daddr(str_data(nm)), VI))
+        e_store(e_gaddr(slot), 0, fp, 8)
+        endc()
+    result_type = if sret >= 0: VI else: ret_vt(ret)
+    r = e_calli(fp, cps, result_type, true)
+    # (C's variadic arguments: on Apple's arm64 they go on the stack)
+    if fns[f].cvariadic > 0: ir.code[ir.code.len() - 1].imm = int(fns[f].cvariadic)
+    if sret >= 0:
+        e_zero(sret, tsize(ret))
+        e_store(sret, 0, r, 8)
+        e_store(sret, 8, e_bin(.ne, VI, r, e_iconst(0)), 1)
+        e_ret(sret)
+        return
+    if vc(ret) == VC_INT: r = norm(r, ret)
+    e_ret(r)
