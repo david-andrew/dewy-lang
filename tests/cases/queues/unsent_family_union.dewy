@@ -1,0 +1,19 @@
+# modes: native native-release
+show = (r:int64 | Unsent<int64> | Unsent<string>):>void => {
+    match r {
+        e:exception => {
+            if e is? Unsent<int64> printl"returned {e.value}"
+            else if e is? Unsent<string> printl"returned {e.value}"
+        }
+        n:int64 => printl"value {n}"
+    }
+}
+main = () => {
+    let a = channel<int64>(1)
+    let b = channel<string>(1)
+    a.close
+    b.close
+    match a.try_send(7) { u:Unsent<int64> => show(u) _ => {} }
+    match b.try_send("word") { u:Unsent<string> => show(u) _ => {} }
+    show(9)
+}

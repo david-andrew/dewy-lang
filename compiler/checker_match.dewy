@@ -216,7 +216,7 @@ xh_pattern=(@ms:MatchState @arm_state:ArmState arm:XHWord p:XHWord st:XHWord hid
     if pk =? 'ptype' {
         let pt=tu_prune(ct_resolve_type(XHWord(xh_nodes[0].ptr[p].a)))
         # `e:error`: the error kinds the value may hold.
-        if dewy and xh_union(pt) and not tu_equal(pt st) {
+        if dewy and (xh_union(pt) or xh_types[0].ptr[pt].kind =? 'opt') and not tu_equal(pt st) {
             let whole=if xh_types[0].ptr[st].kind =? 'opt' {tu_prune(xh_elem(st))} else {st}
             let held=xh_host[0].family_part(pt whole)
             if held not=? 0 {pt=tu_prune(held)}

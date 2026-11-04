@@ -492,7 +492,9 @@ hold: `select` (D3d).
   - `or_throw` forwards an `Unsent` like any exception. Exception families are
     closed unions, made before checking, so they hold no generic instance: a task
     failing with an `Unsent` fails its group with the `.reason`, and keeps the
-    `Unsent` as its own result. `x is? exception` holds for one.
+    `Unsent` as its own result. `x is? exception` holds for one. A family pattern
+    intersects that family with the matched value's known alternatives, including
+    concrete generic exceptions; it does not enlarge the family's storage union.
 - **Non-waiting verbs.** `try_send(value)` fails with `Full` when there is no room;
   `try_receive` gives `T | Empty | Closed | Busy | Canceled`. Both are cancellation
   points (level-triggered) that never wait. `Busy` means another task was
@@ -677,6 +679,10 @@ a pointer to each rule. The wording is David's.
 - A failed send returns `void | Unsent<T>`, with `.value` (the exact payload
   offered) and `.reason` (`Full`, `Closed`, `Busy` or `Canceled`). `Channel.send`
   returns this too.
+- Exception-family patterns cover the known generic exception alternatives of
+  the matched value, retaining their concrete payloads. This applies to a single
+  `Unsent<T>` as well as a union; unrelated alternatives remain uncovered. Family
+  storage remains closed, so signatures carrying an `Unsent<T>` name it explicitly.
 - `spsc<T N>` with a consuming `.split` (no parentheses: zero-argument calls drop
   them everywhere) and the channel verbs `try_send`, `send`, `try_receive`,
   `receive`, `close`; each end has exactly one owner.

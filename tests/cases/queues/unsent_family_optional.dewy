@@ -1,0 +1,13 @@
+# modes: native native-release
+show = (r:Unsent<int64>?):>void => {
+    match r {
+        <none> => printl"none"
+        e:exception => printl"returned {e.value}"
+    }
+}
+main = () => {
+    let q = channel<int64>(1)
+    q.close
+    match q.try_send(8) { u:Unsent<int64> => show(u) _ => {} }
+    show(none)
+}

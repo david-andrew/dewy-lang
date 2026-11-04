@@ -65,16 +65,15 @@ nominal_family = (t: int) -> int:
 # A family written as a pattern (`e:error`) against union u: the family's members u holds,
 # as one type (0 when t is no family's, or u holds none of it). O(members).
 nominal_family_part = (t: int, u: int) -> int:
-    if not is_union(t) or not is_union(u): return 0
+    if not is_union(t) and tkind(t) != .opt: return 0
     family = false
     loop _, found in nominal_families:
         if found == t: family = true
     if not family: return 0
     held: int[]
-    loop m in union_members(t):
-        if union_index(u, m) >= 0: held.push(m)
-    loop m in union_members(u):
-        if family_holds_generic(t, m): held.push(m)
+    wanted = value_members(t)
+    loop m in value_members(u):
+        if wanted.contains(m) or family_holds_generic(t, m): held.push(m)
     if held.len() == 0: return 0
     mk_union(held)
 

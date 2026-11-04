@@ -3186,6 +3186,13 @@ Closed | Busy | Canceled`. Both give `Busy` when another task is mid-operation o
 the channel, rather than a misleading `Full` or `Empty`. `Unsent`, `Full`, `Empty`
 and `Closed` are `exception`s, like `Canceled`; `Busy` is an `error`.
 
+A `match` pattern such as `e:exception` covers the `Unsent<T>` alternatives of
+its matched value, including a value already narrowed to one `Unsent<T>`. The
+binding keeps those concrete types and their payloads; ordinary success values
+still need their own arm. Name `Unsent<T>` explicitly in stored results and
+function signatures: matching a family does not erase its generic payload type
+into the fixed `exception` storage type.
+
 `mpmc<T>(capacity)` makes an `Mpmc<T>`, a bounded queue for many senders and
 receivers with the same verbs and outcomes. It is lock-free: a send or receive
 claims a slot and fills or empties it, and a non-waiting attempt that finds another

@@ -186,7 +186,7 @@ xh_pattern = (ms: mut MatchState, arm_state: mut ArmState, arm: int, p: int, st:
             value = xh_host[0].catch_all(hidden, st, seen_before, finite_before, ms.opt_members, pos)
     if pk == .ptype:
         pt = int(tu_prune(ct_resolve_type(int(xh_nodes[0][p].a))))
-        if dewy and xh_union(pt) and not tu_equal(pt, st):
+        if dewy and (xh_union(pt) or xh_types[0][pt].kind == .opt) and not tu_equal(pt, st):
             whole = st
             if xh_types[0][st].kind == .opt: whole = int(tu_prune(xh_elem(st)))
             held = xh_host[0].family_part(pt, whole)
