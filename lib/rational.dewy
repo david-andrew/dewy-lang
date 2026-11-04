@@ -184,10 +184,10 @@ _narrow=(value:Rational):>RationalWord|Overflow=>{
     let d:int64=value.denominator
     return RationalWord[n d value._shown]
 }
-# `rational<int64>(value)` and `rational<int64>(numerator denominator)`: the
-# explicit narrowing, Overflow when a normalized part leaves int64.
+# `rational<int64>` narrows normalized parts, returning Overflow if they do not
+# fit. Two-part construction proves a nonzero denominator before normalization.
 _word_rational = ((value:Rational):>RationalWord|Overflow=>_narrow(value))
-    & ((numerator:int denominator:int):>RationalWord|Overflow=>_narrow(_make(numerator denominator 2)))
+    & ((numerator:int denominator:int<(not=? 0)>):>RationalWord|Overflow=>_narrow(_reduce(numerator denominator 2)))
 # Powers stop at the first factor that leaves the parts: coprime factors never
 # shrink again, so the result could not fit either.
 _word_pow=(base:RationalWord exponent:int64):>RationalWord|Overflow=>{

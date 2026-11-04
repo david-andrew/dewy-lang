@@ -1672,6 +1672,8 @@ constant fraction initializes it (`let third:rational<int64> = 1/3`), and it
 widens to `rational` or a float wherever one is expected. A runtime `rational`
 narrows explicitly: `rational<int64>(q)`, or `rational<int64>(numerator
 denominator)` like `rational(...)`, returns `rational<int64> | Overflow`.
+The two-part constructor requires a proven nonzero denominator; `Overflow`
+reports parts that do not fit, not division by zero.
 
 ```dewy
 main = ():>void => {

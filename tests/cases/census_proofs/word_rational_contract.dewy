@@ -1,0 +1,12 @@
+# quick
+make=(n:int d:int):>rational<int64>|Overflow|none=>{
+    if d =? 0 return none
+    return rational<int64>(n d)
+}
+main=():>void=>{
+    printl(make(6 (-8)))
+    printl(make(0 3))
+    printl(make(1 0))
+    printl(make(18446744073709551616 18446744073709551616))
+    printl(make(18446744073709551616 1) is? Overflow)
+}
