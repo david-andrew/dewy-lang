@@ -48,20 +48,25 @@ callback_value = (n0: int, known: {int: int}) -> int:
     if not closure_env_shareable(f) or callback_size(int(fns[f].body), 32) < 0: return -1
     f
 
-callback_bindings = (n: int, known: mut {int: int}):
+# Collect direct calls in the old scan's preorder while finding bindings. Calls
+# consume the completed bindings, never the partially discovered table. This
+# replaces a second body walk with O(call sites + arguments) work and keeps only
+# node IDs, so nested specialization cannot invalidate a borrowed arena view.
+callback_bindings = (n: int, known: mut {int: int}, calls: mut int[]):
     if n == 0 or nodes[n].kind == .lambda: return
+    if nodes[n].kind == .call and nodes[n].aux == 0: calls.push(n)
     if nodes[n].kind == .vardecl and nkids(n) == 0 and not has_flag(n, NF_GLOBAL):
         l = int(nodes[n].sym)
         if l >= 0 and int(locals[l].flags) & (LF_ASSIGNED | LF_ADDR | LF_EXPOSED | LF_CAPTURED | LF_SHARED | LF_ALIAS | LF_BYREF | LF_MUTPARAM) == 0:
             v = callback_value(int(nodes[n].b), known)
             if v >= 0: known[l] = v
-    callback_bindings(int(nodes[n].a), known)
-    callback_bindings(int(nodes[n].b), known)
+    callback_bindings(int(nodes[n].a), known, calls)
+    callback_bindings(int(nodes[n].b), known, calls)
     if nodes[n].kind != .for_:
-        callback_bindings(int(nodes[n].c), known)
-        if nodes[n].kind != .partial: callback_bindings(int(nodes[n].d), known)
-    loop i in [0..nkids(n)): callback_bindings(kid(n, i), known)
-    loop i in [0..nkids2(n)): callback_bindings(kid2(n, i), known)
+        callback_bindings(int(nodes[n].c), known, calls)
+        if nodes[n].kind != .partial: callback_bindings(int(nodes[n].d), known, calls)
+    loop i in [0..nkids(n)): callback_bindings(kid(n, i), known, calls)
+    loop i in [0..nkids2(n)): callback_bindings(kid2(n, i), known, calls)
 
 callback_request = (f: int, targets: int[], depth: int) -> int:
     if depth >= 4 or callback_versions.len() >= 128: return -1
@@ -78,36 +83,26 @@ callback_request = (f: int, targets: int[], depth: int) -> int:
     known: {int: int}
     loop i in 0.. and t in targets:
         if t >= 0: known[fns[f].params[i]] = t
-    callback_bindings(int(fns[f].body), known)
+    calls: int[]
+    callback_bindings(int(fns[f].body), known, calls)
     loop l, t in known: callback_targets[callback_key(lf, l)] = t
-    callback_scan(int(fns[f].body), lf, known, depth + 1)
+    loop n in calls: callback_scan(n, lf, known, depth + 1)
     lf
 
 callback_scan = (n: int, caller: int, known: {int: int}, depth: int):
-    if n == 0 or nodes[n].kind == .lambda: return
-    k = nodes[n].kind
-    if k == .call and nodes[n].aux == 0:
-        f = int(nodes[n].sym)
-        if f > 0 and fns[f].params.len() == nkids(n):
-            targets = fill(-1, nkids(n))
-            any = false
-            loop i in [0..nkids(n)):
-                t = callback_value(kid(n, i), known)
-                if t >= 0 and closure_borrow_param(f, i):
-                    targets[i] = t
-                    any = true
-            if any:
-                lf = callback_request(f, targets, depth)
-                if lf >= 0:
-                    caller_lf = if caller < 0: lf_of_inst(-caller - 1) else: caller
-                    callback_calls[callback_key(caller_lf, n)] = lf
-    callback_scan(int(nodes[n].a), caller, known, depth)
-    callback_scan(int(nodes[n].b), caller, known, depth)
-    if k != .for_:
-        callback_scan(int(nodes[n].c), caller, known, depth)
-        if k != .partial: callback_scan(int(nodes[n].d), caller, known, depth)
-    loop i in [0..nkids(n)): callback_scan(kid(n, i), caller, known, depth)
-    loop i in [0..nkids2(n)): callback_scan(kid2(n, i), caller, known, depth)
+    f = int(nodes[n].sym)
+    if f <= 0 or fns[f].params.len() != nkids(n): return
+    targets: int[]
+    loop i in [0..nkids(n)):
+        t = callback_value(kid(n, i), known)
+        if t >= 0 and closure_borrow_param(f, i):
+            if targets.len() == 0: targets = fill(-1, nkids(n))
+            targets[i] = t
+    if targets.len() == 0: return
+    lf = callback_request(f, targets, depth)
+    if lf >= 0:
+        caller_lf = if caller < 0: lf_of_inst(-caller - 1) else: caller
+        callback_calls[callback_key(caller_lf, n)] = lf
 
 callback_prepare = ():
     callback_calls.clear()
@@ -125,14 +120,15 @@ callback_prepare = ():
         d = int(fns[f].decl)
         if d == 0 or not files[pos_file(nodes[d].pos)].is_dewy: continue
         known: {int: int}
-        callback_bindings(int(fns[f].body), known)
+        calls: int[]
+        callback_bindings(int(fns[f].body), known, calls)
         # Ordinary callers need the same immutable bindings as versions: their
         # invocation-only arguments can borrow the already saved environment.
         # Publish before any fused worker forks, never during lowering.
         if known.len() > 0:
             lf = lf_of_inst(f)
             loop l, t in known: callback_targets[callback_key(lf, l)] = t
-        callback_scan(int(fns[f].body), -f - 1, known, 0)
+        loop n in calls: callback_scan(n, -f - 1, known, 0)
     stack_closure_params.clear()
 
 # A known immutable callback's environment needs no independent state copy.
