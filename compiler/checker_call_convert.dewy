@@ -385,13 +385,23 @@ from p"partition.jo" import (partition_slice partition_active)
 from p"expr.jo" import (path_narrows path_rooted path_forget path_key)
 from p"types.jo" import unify
 from p"ast.jo" import NF_MUT
-# Mutability matches representation only after ordinary generic matching succeeds.
+# Mutable inference binds the declared storage contract, including an outer
+# refinement. Read-value erasure remains correct for by-value inference.
 call_mutable_cost=(a:CVWord pt:CVWord @binds:array<int64> @recv_fits:bool receiver:bool):>CVWord=>$unsafe {
-    let r=match_type(pt ntype(a) @binds 0)
+    let actual=ntype(a)
+    let depth:CVWord=0
+    let unbound=false
+    if refine_active {
+        actual=refine_storage(a actual)
+        depth=1
+        let p=prune(pt)
+        unbound=types.ptr[p].kind =? 'param' and binds.ptr[CVWord(types.ptr[p].id)] =? 0
+    }
+    let r=match_type(pt actual @binds depth)
+    if unbound and r >=? 0 {r += 3}
     if r <? 0 {return -1}
     if receiver {recv_fits=true}
     let shape=subst(pt binds)
-    let actual=ntype(a)
     if refine_active {actual=representation_type(actual); shape=representation_type(shape)}
     if not has_var(prune(shape)) and not has_var(prune(actual)) and not type_eq(shape actual) {return -1}
     r

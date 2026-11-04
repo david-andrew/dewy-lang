@@ -115,6 +115,8 @@ JO['checker_call_convert.jo'] = "use 'expr.jo'\narg_cost_rest = (a: int, p: int,
 JO['checker_call_convert.dewy'] += r'''from p"expr.jo" import call_mutable_double
 call_mutable_cost=(a:int64 p:int64 @bs:array<int64> @recv:bool receiver:bool):>int64=>call_mutable_double(a p @bs @recv receiver)
 '''
+JO.setdefault('refine.jo', '')
+JO['refine.jo'] += 'refine_active = false\n'
 JO['checker_call_convert.jo'] += "call_mutable_cost = (a: int, p: int, bs: mut int[], recv: mut bool, receiver: bool) -> int: call_mutable_double(a, p, bs, recv, receiver)\n"
 
 

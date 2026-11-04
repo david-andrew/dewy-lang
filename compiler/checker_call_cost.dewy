@@ -5,6 +5,7 @@ from p"types.jo" import types
 from p"type_inference.dewy" import tu_prune
 from p"checker_call_queries.dewy" import ctx_dependent
 from p"units.jo" import bundled_word_rational_type
+from p"refine.jo" import refine_active
 from p"checker_call_convert.dewy" import (arg_cost_rest call_mutable_cost)
 # Candidate scoring is O(arguments), in typed/literal/context-dependent order.
 # State is local to the candidate; services may re-enter checking and grow arenas.
@@ -53,12 +54,24 @@ call_candidate_cost=(@cd:Cand @recv_fits:bool):>CCWord=>$unsafe {
             arg_cls.push(cls)
         }
     }
+    # A place fixes T's storage authority before by-value arguments constrain
+    # T. Only refined generic mutable candidates need an ordering vector;
+    # construction and scoring remain O(arguments).
+    let order:array<int64>=[]
+    if refine_active and cd.binds.length >? 0 and cd.sig.mutmask not=? 0 {
+        loop mutable_pass in [0..2) {
+            loop i in [0..np) {
+                let mutable_arg=(CCWord(cd.sig.mutmask) & (1 << i)) not=? 0
+                if mutable_arg =? (mutable_pass =? 0) {order.push(i)}
+            }
+        }
+    }
     let cost:CCWord=0
     loop phase0 in [0..3) {
         let phase=CCWord(phase0)
         if phase >? 0 and (later & phase) =? 0 {continue}
         loop i0 in [0..np) {
-            let i=CCWord(i0)
+            let i=if order.length >? 0 {CCWord(order.ptr[i0])} else {CCWord(i0)}
             let a=CCWord(cd.args.ptr[i])
             if a =? 0 {continue}
             let cls:CCWord=if later =? 0 {0} else {arg_cls.ptr[i]}
