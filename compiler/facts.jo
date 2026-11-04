@@ -245,6 +245,7 @@ fact_constructor_calls: {int: bool} = {}
 struct FactForkEntry:
     inner: int[]
     length: bool[]
+    maps: bool[]
     bounds: FactBound[]
     rows: FactDifference[]
     # (the creator's values of the captures, for fact_key_record)
@@ -254,6 +255,7 @@ struct FactForkEntry:
 struct FactKeyParam:
     bound: FactBound
     rows: FactDifference[]
+    maps: int[]             # capture locals sharing the receiver's key snapshot
 fact_key_params: {int: FactKeyParam} = {}
 fact_fork_nodes: {int: bool} = {}
 fact_decided: {int: bool} = {}
@@ -9283,7 +9285,8 @@ fact_fork_record = (lam: int, s: mut FactState):
         t = fact_type(int(locals[o].type))
         snapshot = flags & LF_VALUECAP != 0
         array = tkind(t) == .array and (snapshot or flags & LF_PARTBORROW != 0)
-        if not array and not (snapshot and fact_scalar(t) and is_int(t) and t != T_U64): continue
+        map = snapshot and flags & (LF_ASSIGNED | LF_ADDR | LF_SHARED | LF_EXPOSED) == 0 and is_map_type(t) and not (ownership_decls.len() != 0 and ownership_fact_type(t))
+        if not array and not map and not (snapshot and fact_scalar(t) and is_int(t) and t != T_U64): continue
         p = PlaceIdentity(.local, int(locals[o].owner), o)
         i = fact_binding(s, p)
         v = 0
@@ -9295,12 +9298,13 @@ fact_fork_record = (lam: int, s: mut FactState):
         if array: v = fact_project(s, v, -1, false, T_INT)
         entry.inner.push(inner)
         entry.length.push(array)
+        entry.maps.push(map)
         values.push(v)
     loop v in values: entry.bounds.push(fact_bound(s, v))
     entry.values = values
     loop i in [0..values.len()):
         loop j in [0..values.len()):
-            if i == j: continue
+            if i == j or entry.maps[i] or entry.maps[j]: continue
             d = fact_shortest(s, values[i], values[j])
             if d != FACT_MAX: entry.rows.push(FactDifference(i, j, d))
     fact_fork_entries[lam] = entry
@@ -9350,7 +9354,8 @@ fact_key_callback = (n: int) -> int:
     f = int(nodes[callback].sym)
     if fns[f].params.len() != 1 or tkind(fact_type(ntype(kid(n, 0)))) != .array: return 0
     t = fact_type(int(locals[fns[f].params[0]].type))
-    if not fact_scalar(t) or not is_int(t) or t == T_U64 or t != fact_type(telem(fact_type(ntype(kid(n, 0))))): return 0
+    if (not fact_scalar(t) or not is_int(t) or t == T_U64) and t != T_STR: return 0
+    if t != fact_type(telem(fact_type(ntype(kid(n, 0))))): return 0
     callback
 
 # Each record describes this call's receiver; another evaluation of the call
@@ -9373,14 +9378,27 @@ fact_key_record = (n: int, s: mut FactState, base: int):
         loop j in [0..entry.values.len()):
             d = if entry.values[j] == top: 0 else: fact_shortest(s, top, entry.values[j])
             if d != FACT_MAX and d > FACT_MIN + 1: rows.push(FactDifference(-1, j, d - 1))
+    # Membership crosses the closure boundary only for the identical
+    # immutable dictionary snapshot, never a shared/mutable capture or name.
+    # O(captures^2), capped at 16, using indexed key-source projections.
+    maps: int[]
+    source = fact_projection_find(s, base, FACT_KEYS_SOURCE, false)
+    if source >= 0:
+        held = s.projections[source].value
+        loop j in [0..entry.values.len()):
+            if entry.maps[j] and entry.values[j] == held: maps.push(entry.inner[j])
     if let previous = fact_key_params.get(f):
         bound = fact_hull(previous.bound, bound, n)
+        common: int[]
+        loop j in maps:
+            if previous.maps.contains(j): common.push(j)
+        maps = common
         kept: FactDifference[]
         loop r in rows:
             loop q in previous.rows:
                 if q.b == r.b: kept.push(FactDifference(-1, r.b, max(q.limit, r.limit)))
         rows = kept
-    fact_key_params[f] = FactKeyParam(bound, rows)
+    fact_key_params[f] = FactKeyParam(bound, rows, maps)
 
 fact_fork_seed = (f: int, s: mut FactState):
     if fns[f].kind != FK_LAMBDA: return
@@ -9393,7 +9411,8 @@ fact_fork_seed = (f: int, s: mut FactState):
     loop i in [0..entry.inner.len()):
         inner = entry.inner[i]
         p = PlaceIdentity(.local, f, inner)
-        v = fact_new(s, entry.bounds[i], FactTerm(type = T_INT))
+        capture_type = if entry.maps[i]: int(locals[inner].type) else: T_INT
+        v = fact_new(s, entry.bounds[i], FactTerm(type = capture_type))
         values.push(v)
         if entry.length[i]:
             t = int(locals[inner].type)
@@ -9408,6 +9427,10 @@ fact_fork_seed = (f: int, s: mut FactState):
         fact_bind(s, PlaceIdentity(.local, f, l), value)
         loop r in key.rows:
             if r.b >= 0 and r.b < values.len(): fact_difference(s, value, values[r.b], r.limit, 0, 16)
+        loop capture in key.maps:
+            j = entry.inner.index_of(capture)
+            if j >= 0 and j < values.len() and s.projections.len() < FACT_CAP:
+                fact_add_projection(s, FactProjection(value, FACT_KEY_SOURCE, false, values[j]))
 
 # Both value-demanded and contract-only calls check actuals after their
 # effects, in the same source evaluation order and with the same entry.

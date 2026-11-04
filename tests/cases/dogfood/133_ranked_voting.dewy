@@ -33,20 +33,21 @@ elect = (ballots:array<Ballot> candidates:array<string>):>string => {
     let round = 1
     loop remaining.length >? 0 {
         let r = tally(ballots remaining)
-        let rows = [loop [name votes] in r.totals [name=name votes=votes]]
-        let summary = [loop row in rows "{row.name}={row.votes}"].join(" ")
+        let totals = r.totals
+        let names = totals.keys.values.sorted
+        let summary = [loop name in names "{name}={totals[name]}"].join(" ")
         printl"round {round}: {summary}; exhausted={r.exhausted}"
         if r.active =? 0 return "no winner"
-        loop row in rows {
-            if row.votes * 2 >? r.active return row.name
+        loop name in names {
+            if totals[name] * 2 >? r.active return name
         }
         # Stable sorting retains alphabetical order for equal vote counts.
-        rows.sort(key=(row) => row.votes)
-        if rows.length =? 0 return "no winner"
-        let least = rows[0].votes
-        let loser = rows[0].name
-        loop row in rows {
-            if row.votes =? least loser = row.name
+        let ordered = names.sorted(key=(name:string) => totals[name])
+        if ordered.length =? 0 return "no winner"
+        let least = totals[ordered[0]]
+        let loser = ordered[0]
+        loop name in ordered {
+            if totals[name] =? least loser = name
         }
         printl"eliminate {loser}"
         remaining = [loop name in remaining if name not=? loser name]
