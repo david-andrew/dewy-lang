@@ -4985,6 +4985,16 @@ unpack_binding = (e: int, t: int, bindings: int[], pos: int) -> (int, int[]):
     tuple = mk(.tuple, pos)
     set_list(tuple, values)
     result_type = check_expr(tuple, 0)
+    # Reads erase refinements, but each written pattern annotation governs
+    # the new storage. Preserve the already checked leaf contracts in the
+    # unpacked tuple descriptor (locals and globals share this boundary).
+    # O(leaves), on the existing unpacking path only.
+    storage: int[]
+    loop i in [0..leaves.len()):
+        leaf = leaves[i]
+        storage.push(if nodes[leaf].a != 0: int(nodes[leaf].type) else: targ(result_type, i))
+    result_type = mk_tuple(storage)
+    nodes[tuple].type = i32(result_type)
     result = mk(.exprstmt, pos)
     nodes[result].a = i32(last_checked)
     statements.push(result)
@@ -5080,7 +5090,8 @@ unpack_values = (e: int, t: int, bindings: int[], pos: int, statements: mut int[
             if drop: continue
             value = unpack_rest(source, t, r, after, total, nodes[binding].pos)
             if nodes[binding].a != 0:
-                target = resolve_type(int(nodes[binding].a))
+                target = decl_binding_type(binding)
+                nodes[binding].type = i32(target)
                 value = coerce(value, target)
                 add_flag(value, NF_CHECKED)
             values.push(value)
@@ -5123,7 +5134,8 @@ unpack_values = (e: int, t: int, bindings: int[], pos: int, statements: mut int[
             unpack_values(last_checked, inner, kids(binding), nodes[binding].pos, statements, values)
         else:
             if nodes[binding].a != 0:
-                target = resolve_type(int(nodes[binding].a))
+                target = decl_binding_type(binding)
+                nodes[binding].type = i32(target)
                 check_expr(value, target)
                 value = coerce(last_checked, target)
                 add_flag(value, NF_CHECKED)
