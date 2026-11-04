@@ -1,0 +1,29 @@
+# Rank stops, inspect the return route, and find the first departure after a time.
+smallest = (xs:array<int>):>int => {
+    let best:int? = none
+    loop i in [0..xs.length) {
+        if best is? none or xs[i] <? xs[best] best = i
+    }
+    if best is? int return xs[best]
+    0
+}
+search = (xs:array<int> t:int):>int => {
+    let lo = 0
+    let hi = xs.length
+    loop lo <? hi {
+        let mid = lo + (hi - lo) // 2
+        if xs[mid] <=? t lo = mid + 1 else hi = mid
+    }
+    lo
+}
+main = () => {
+    let stops = [3 7 12 18 25]
+    let fares:dict<int int> = []
+    loop i in [0..stops.length) {
+        let stop = stops[stops.length - 1 - i]
+        fares[stop] = stop * 2
+        printl"return {stop}, fare {fares[stop]}"
+    }
+    let counts = [loop i in [0..stops.length] i]
+    printl"cheapest {smallest(stops)}, departed {counts[search(stops 12)]}"
+}

@@ -1,0 +1,23 @@
+# A full outbox returns the message for durable retry, including its body.
+Message:type = [id:int body:string]
+main = () => {
+    let wire = channel<Message>(1)
+    let retry:array<Message> = []
+    wire.try_send(Message[1 "invoice"]) or_throw
+    match wire.try_send(Message[2 "receipt"]) {
+        u:Unsent<Message> => { if u.reason is? Full retry.push(u.value) }
+        _ => {}
+    }
+    printl"delivered {(wire.try_receive or_throw).body}"
+    printl"empty {wire.try_receive is? Empty}"
+    loop m in retry {
+        wire.try_send(m) or_throw
+        printl"retried {(wire.try_receive or_throw).body}"
+    }
+    wire.close
+    match wire.try_send(Message[3 "refund"]) {
+        u:Unsent<Message> => printl"saved {u.value.body}, closed {u.reason is? Closed}"
+        _ => {}
+    }
+    printl"drained {wire.try_receive is? Closed}"
+}

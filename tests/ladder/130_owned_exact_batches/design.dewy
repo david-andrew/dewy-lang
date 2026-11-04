@@ -1,0 +1,20 @@
+# A move-only batch retains its buffer until the consuming report finishes.
+let released:int64 = 0
+Batch:type = <T N>[
+    items:array<T>
+    capacity = ():>int => N
+    $__drop__
+    release = ():>void => { released += 1 }
+]
+report = (b:Batch<int 8>):>void => {
+    let total = 0
+    loop x in b.items total += x
+    printl"batch capacity {b.capacity}, total {total}"
+}
+main = () => {
+    loop day in [1..4) {
+        let batch = Batch<int 8>[[day day*2 day*3]]
+        report(batch)
+    }
+    printl"released {released}"
+}

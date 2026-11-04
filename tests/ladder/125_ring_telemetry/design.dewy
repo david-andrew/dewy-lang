@@ -1,0 +1,27 @@
+# Native task workload: the ladder runs native release.
+
+# Transfer a sequence of telemetry frames through an 8-slot spsc ring, wrapping repeatedly
+# and in order. Each task owns the end it captured.
+main = () => {
+    let [tx rx] = spsc<int64 8>().split
+    let sum = atomic<int64<overflow='wrap'>>(0)
+    let ordered = atomic(1)
+    concurrent {
+        spawn {
+            let expected:int64 = 0
+            loop true {
+                let n = rx.receive
+                if n is? Closed break
+                if n is? Canceled break
+                if n not=? expected ordered.store(0)
+                expected = expected + 1
+                sum.add(n);
+            }
+        }
+        spawn {
+            loop i in [0..100) { if tx.send(i) is? Unsent<int64> break }
+            tx.close
+        }
+    }
+    printl"sum {sum.load()}, in order: {ordered.load() =? 1}"
+}

@@ -1,0 +1,9 @@
+# Route classification and fares live in mutually dependent modules.
+import p"fares.dewy" as fares
+let base = 10
+let fare = fares.surcharge + base
+is_local = (hops:int):>bool => if hops <=? 0 true else fares.is_express(hops - 1)
+main = () => {
+    loop hops in [0..6) printl"route {hops}: local {is_local(hops)}, fare {fare}"
+    printl"return fare {fares.return_fare}"
+}

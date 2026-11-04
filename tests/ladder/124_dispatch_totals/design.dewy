@@ -1,0 +1,36 @@
+# Native task workload: the ladder runs native release.
+# Dispatch four numbered invoice batches to three accounting workers:
+# four producers send 100 values each through 8 slots, three consumers sum them, and the
+# close after the producers' join lets the consumers drain and stop.
+produce = (q:Mpmc<int64> first:int count:int):>void | Unsent<int64> => {
+    loop i in [first..first + count) { if i >=? 0 and i <? 1000 q.send(int64(i)) or_throw }
+}
+consume = (q:Mpmc<int64> total:Atomic<int64<overflow='wrap'>> seen:Atomic<int64<overflow='wrap'>>):>void => {
+    loop true {
+        let n = q.receive
+        if n is? Closed break
+        if n is? Canceled break
+        total.add(n);
+        seen.add(1);
+    }
+}
+main = () => {
+    let q = mpmc<int64>(8)
+    let total = atomic<int64<overflow='wrap'>>(0)
+    let seen = atomic<int64<overflow='wrap'>>(0)
+    concurrent {
+        spawn consume(q total seen)
+        spawn consume(q total seen)
+        spawn consume(q total seen)
+        spawn {
+            concurrent {
+                spawn produce(q 0 100)
+                spawn produce(q 100 100)
+                spawn produce(q 200 100)
+                spawn produce(q 300 100)
+            }
+            q.close
+        }
+    }
+    printl"received {seen.load()} values, sum {total.load()}"
+}

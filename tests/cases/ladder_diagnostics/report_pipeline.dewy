@@ -1,0 +1,5 @@
+# Report independent mistakes across every stage of an invoice pipeline.
+parse_invoice = (text:string):>int => missing_parser(text)
+price_invoice = (quantity:int):>int => quantity * missing_price
+format_invoice = (total:int):>string => missing_formatter(total)
+main = () => printl(format_invoice(price_invoice(parse_invoice("12"))))
