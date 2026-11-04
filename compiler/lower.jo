@@ -1,3 +1,4 @@
+use 'lower_uniqueness.dewy'
 use 'lower_closure_borrow.dewy'
 use 'lower_ptr_reads.dewy'
 use 'checker_state.dewy'
@@ -7394,70 +7395,7 @@ fixed_path_of = (a: int) -> int:
 # A loop that writes elements of a local array but never lets the array escape (it is only
 # indexed, measured or changed in place) keeps the array uniquely owned, so one copy-on-write
 # check before the loop replaces the check at every element write (release builds).
-uq_written: int[]
-uq_escaped: int[]
-uq_lambda = false
-uq_calls = false            # the loop calls code that might copy a mut parameter's variable
 uniq_locals: int[]          # locals known to be unique while lowering the current loop
-
-uq_scan = (n: int, ctx: int):
-    # ctx: 0 = the value escapes (copied, passed, captured), 1 = indexed read, 2 = indexed write
-    if n == 0: return
-    k = nodes[n].kind
-    # An unclassified operation may also affect its local actuals. Merely
-    # marking ambient calls would still allow caching a private local array.
-    mask = isolation_children(k)
-    if mask < 0 or k == .intrinsic and not isolation_intrinsic(nodes[n].aux as IN):
-        uq_lambda = true
-        return
-    if k == .lambda:
-        uq_lambda = true
-        return
-    if not ambient_sharing_stable(n): uq_calls = true
-    if k == .ident and nodes[n].aux == i32(int(SK.local)) and int(locals[int(nodes[n].sym)].flags) & LF_ELEMALIAS != 0:
-        # (as fp_scan: its array is written where the body does not show; left as it is)
-        b = int(nodes[int(locals[int(nodes[n].sym)].alias)].a)
-        if nodes[b].kind == .ident and nodes[b].aux == i32(int(SK.local)): uq_escaped.push(int(nodes[b].sym))
-        return
-    if k == .ident:
-        if nodes[n].aux == i32(int(SK.local)):
-            if ctx == 2: uq_written.push(int(nodes[n].sym))
-            else if ctx == 0: uq_escaped.push(int(nodes[n].sym))
-        return
-    if k == .index:
-        uq_scan(int(nodes[n].a), if nodes[n].aux == 1: 0 else: 1)
-        uq_scan(int(nodes[n].b), 0)
-        return
-    if k == .field:
-        uq_scan(int(nodes[n].a), 1)
-        return
-    if k == .assign:
-        uq_target(int(nodes[n].a))
-        uq_scan(int(nodes[n].b), 0)
-        return
-    if k == .intrinsic:
-        id = nodes[n].aux as IN
-        if nkids(n) > 0 and (id == .len or id == .arrcap or id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .reserve or id == .resize or id == .truncate or id == .extend):
-            uq_scan(kid(n, 0), 1)
-            loop i in [1..nkids(n)): uq_scan(kid(n, i), 0)
-            return
-    if mask & 1 != 0: uq_scan(int(nodes[n].a), 0)
-    if mask & 2 != 0: uq_scan(int(nodes[n].b), 0)
-    if mask & 4 != 0: uq_scan(int(nodes[n].c), 0)
-    if mask & 16 != 0:
-        loop i in [0..nkids(n)): uq_scan(kid(n, i), 0)
-    if mask & 32 != 0:
-        loop i in [0..nkids2(n)): uq_scan(kid2(n, i), 0)
-
-# assignment target: elements of an indexed array (possibly a field of one) are writes
-uq_target = (t: int):
-    if not ambient_sharing_stable(t): uq_calls = true
-    k = nodes[t].kind
-    if k == .index:
-        uq_scan(int(nodes[t].a), 2)
-        uq_scan(int(nodes[t].b), 0)
-    else if k == .field: uq_target(int(nodes[t].a))
-    else: uq_scan(t, 0)
 
 # hoist the uniqueness checks of a loop's arrays in front of it; returns how many were added
 uq_begin = (s: int) -> int:
