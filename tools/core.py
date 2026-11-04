@@ -28,9 +28,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CACHE = ROOT / '__dewycache__' / 'compact-core'
-# Every tests/test_*.py runs; adding a test file needs no registration here.
+# Every tests/**/test_*.py runs; subsystem-local checks need no registration here.
 # The largest files go first so parallel workers finish together.
-TESTS = tuple(sorted((str(p.relative_to(ROOT)) for p in (ROOT / 'tests').glob('test_*.py')),
+TESTS = tuple(sorted((str(p.relative_to(ROOT)) for p in (ROOT / 'tests').rglob('test_*.py')),
                      key=lambda name: -(ROOT / name).stat().st_size))
 
 

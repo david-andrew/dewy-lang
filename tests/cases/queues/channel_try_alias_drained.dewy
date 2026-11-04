@@ -1,0 +1,10 @@
+# modes: native native-release
+alias = (q:Channel<int64>):>Channel<int64> => q
+main = () => {
+    let q = channel<int64>(1)
+    let same = alias(q)
+    q.send(10) or_throw
+    printl"{same.try_receive or_throw}"
+    q.send(20) or_throw
+    printl"{q.receive or_throw}"
+}

@@ -1,0 +1,11 @@
+# modes: native native-release
+# A successful drain makes room; an empty attempt never waits.
+main = () => {
+    let c = channel<int64>(1)
+    c.try_send(10) or_throw
+    printl"{c.try_receive or_throw}"
+    c.send(20) or_throw
+    printl"{c.receive or_throw}"
+    printl"empty: {c.try_receive is? Empty}"
+    c.close
+}

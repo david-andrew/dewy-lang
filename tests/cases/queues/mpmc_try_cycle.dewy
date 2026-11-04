@@ -1,0 +1,14 @@
+# modes: native
+ping = (out:Mpmc<int64> back:Mpmc<int64>) => {
+    out.try_send(1);
+    out.send(2) or_throw
+    back.receive or_throw;
+}
+main = () => {
+    let a = mpmc<int64>(1)
+    let b = mpmc<int64>(1)
+    concurrent {
+        spawn ping(a b)
+        spawn ping(b a)
+    }
+}

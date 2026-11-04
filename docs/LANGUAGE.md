@@ -3242,7 +3242,7 @@ main = () => {
 }
 ```
 
-The compiler reads every task's channel waits, in order, with the loops around them
+The compiler reads every task's channel, `mpmc` and `spsc` waits, in order, with the loops around them
 (their counts when literal) and the locks it holds, and rejects waits it can show
 never end: tasks that each send more values than a channel holds before receiving
 from the channel the other fills, a lock held across a channel wait that the other
@@ -3250,7 +3250,11 @@ side takes the lock to reach, a task's sends filling a channel that is drained o
 after the task is joined, one task filling a channel past its capacity before
 draining it itself, and a receive from a channel nothing sends into or closes. Where
 the counts or capacities are not literal, or a group's failure may cancel the wait,
-it warns instead.
+it warns instead. The two ends of an `spsc` name the same queue, including when
+passed through calls or captured by tasks. Non-waiting attempts affect the
+occupancy used to check later waits; they never count as waits themselves. An
+attempt that may fail is not evidence that another task can proceed. Where its
+outcome prevents a proof, the compiler reports the queue wait as unresolved.
 
 ### Deadlock certificates
 
@@ -3273,7 +3277,7 @@ certificate is one of:
   that the call waits only on the outside world. A foreign function declared with
   a row excluding `blocks` (`& no_effects`) is trusted not to wait.
 
-A raw channel's `send` and `receive`, a loop polling an atomic another task sets,
+A raw channel's, `mpmc`'s or `spsc`'s `send` and `receive`, a loop polling an atomic another task sets,
 a call of a function value the compiler cannot follow, and a wait in a lifecycle
 hook have no certificate. A lock is held only across other locks: holding one
 across a join, a request or a call that waits is an error. A call into code outside

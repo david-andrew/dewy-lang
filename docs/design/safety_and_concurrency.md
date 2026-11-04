@@ -513,10 +513,14 @@ hold: `select` (D3d).
   the queue) and holds the ring as a shared handle (ownership.md), so an end is never
   copied; a spawned task owns the ends it captures. `__Spsc` is private storage,
   Send and Sync like a channel's ring, and its waits are `blocks`.
-- **Not yet.** `try_send` and `try_receive` are not modeled by the channel-wait
-  analysis (they never wait, but they change what a later send finds). `spsc` waits
-  are not modeled by the channel-wait analysis or `$no_deadlocks` at all. A task's
-  captured end is dropped at the group's join, not when the task ends.
+- **Queue wait analysis.** Both `spsc` ends resolve to the same ring; its type-level
+  capacity bounds sends. Its raw waits need certificates like channel and `mpmc`
+  waits. Non-waiting attempts change occupancy without adding waits: successful
+  drains can remove a guaranteed overflow, and sends can fill available slots.
+  A failed attempt cannot certify progress. Unresolved outcomes retain a warning
+  even when the prefix dependency graph cannot represent their later waits.
+- **Not yet.** A task's captured end is dropped at the group's join, not when the
+  task ends.
 - **Acceptance** (`tests/cases/queues/`, `tests/test_queue_busy.py`): values given
   back on full, closed and canceled sends; forwarding and group reporting; `mpmc`
   order, laps, close and draining; four producers and three consumers delivering
@@ -675,6 +679,10 @@ a pointer to each rule. The wording is David's.
   `receive`, `close`; each end has exactly one owner.
 - `mpmc<T>(capacity)`; a non-waiting attempt that collides with another task
   returns `Busy`.
+- Channel, `mpmc` and `spsc` waits participate in deadlock diagnostics and need
+  certificates under `$no_deadlocks`. Non-waiting attempts never wait themselves
+  but must be accounted for in later queue occupancy; an attempt's possible failure
+  cannot be used to prove progress.
 - On hold: `select`, `[concurrent x in xs …]` and any new loop- or capture-shaped
   concurrency construct.
 

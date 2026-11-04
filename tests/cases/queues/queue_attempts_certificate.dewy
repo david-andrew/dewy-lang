@@ -1,0 +1,11 @@
+# modes: native native-release
+$no_deadlocks
+main = () => {
+    let c = channel<int64>(1)
+    let q = mpmc<int64>(1)
+    let [tx rx] = spsc<int64 1>().split
+    c.try_send(10) or_throw
+    q.try_send(20) or_throw
+    tx.try_send(30) or_throw
+    printl"{c.try_receive or_throw} {q.try_receive or_throw} {rx.try_receive or_throw}"
+}

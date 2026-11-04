@@ -1,0 +1,17 @@
+# modes: native
+main = () => {
+    let [at ar] = spsc<int64 1>().split
+    let [bt br] = spsc<int64 1>().split
+    concurrent {
+        spawn {
+            at.try_send(1);
+            at.send(2);
+            br.receive;
+        }
+        spawn {
+            bt.try_send(1);
+            bt.send(2);
+            ar.receive;
+        }
+    }
+}

@@ -1,0 +1,22 @@
+# modes: native native-release
+main = () => {
+    let [at ar] = spsc<int64 2>().split
+    let [bt br] = spsc<int64 2>().split
+    concurrent {
+        let a = spawn {
+            at.send(10);
+            at.send(20);
+            let x = match br.receive { n:int64 => n _ => 0 }
+            let y = match br.receive { n:int64 => n _ => 0 }
+            x + y
+        }
+        let b = spawn {
+            bt.send(30);
+            bt.send(40);
+            let x = match ar.receive { n:int64 => n _ => 0 }
+            let y = match ar.receive { n:int64 => n _ => 0 }
+            x + y
+        }
+    }
+    printl"{a} {b}"
+}
