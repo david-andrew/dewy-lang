@@ -174,10 +174,14 @@ arg_cost_rest=(a:CVWord pat:CVWord @binds:array<int64>):>CVWord=>$unsafe {
         if k =? 'array' and nkids(a) >? 0 and files.ptr[pos_file(nodes.ptr[a].pos)].is_dewy {
             target=p
             if pk =? 'param' and binds.ptr[CVWord(types.ptr[p].id)] not=? 0 {target=prune(binds.ptr[CVWord(types.ptr[p].id)])}
+            # Substitution can expose a refinement hidden behind T. Select
+            # literal shape from its representation; finishing still checks T.
+            if refine_active {target=representation_type(target)}
             let cost:CVWord=0
             if types.ptr[target].kind =? 'opt' {
                 target=prune(CVWord(types.ptr[target].elem))
                 cost=2
+                if refine_active {target=representation_type(target)}
             }
             let tk=types.ptr[target].kind
             if tk =? 'tuple' {
