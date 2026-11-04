@@ -487,11 +487,25 @@ juxt_factor = (c: int) -> int:
               'util.jo': "use 'driver.jo'\npos_in_lib = (pos: int) -> bool: zc_lib\n",
               'effects.jo': "use 'driver.jo'\ncallable_base = (t0: int) -> int: if zc_base != 0: zc_base else: t0\n"}
 
-for _table in (LITERAL_JO, CONDITIONAL_JO):
+import re
+from tests.test_selfhost_checker_logic import LOGIC_JO
+from tests.test_selfhost_checker_members import MEMBER_JO
+from tests.test_selfhost_checker_indexes import INDEX_JO
+for _table in (LITERAL_JO, CONDITIONAL_JO, LOGIC_JO, MEMBER_JO, INDEX_JO):
     for _module, _functions in _table.items():
         _existing = JO_DOUBLES.get(_module, '')
         _missing = {_name: _definition for _name, _definition in _functions.items()
                     if not any(_line.startswith(f'{_name} = ') for _line in _existing.splitlines())}
+        # These three leaves are not exercised by this dispatcher differential.
+        # Keep their unused direct services explicit, and fail if a route reaches one.
+        if _table in (LOGIC_JO, MEMBER_JO, INDEX_JO):
+            for _name, _definition in _missing.items():
+                if _definition.startswith('use '):
+                    continue
+                _head, _body = _definition.rsplit(': ', 1)
+                _return = re.search(r' -> (\w+)$', _head)
+                _value = '' if not _return else '; ' + ('false' if _return[1] == 'bool' else '0')
+                _missing[_name] = _head + ': assert(false)' + _value
         JO_DOUBLES[_module] = _existing + jo_doubles({_module: _missing})[_module]
 
 # The expression differential isolates the resolver at its new module boundary.

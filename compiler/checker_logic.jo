@@ -5,22 +5,16 @@ use 'checker_state.dewy'
 use 'checker_tokens.dewy'
 use 'type_inference.dewy'
 use 'checker_coerce.dewy'
-struct CheckerLogicHost:
-    check: (int, int) -> int
-    coerce: (int, int) -> int
-    simple_enum: (int) -> bool
-    overload: (int, str) -> int
-    narrow: (int, bool) -> void
-    reset: (int) -> void
-    mask: (int) -> bool
-    broadcast: (int) -> void
+use 'checker_expr.dewy'
+use 'expr.jo'
+use 'types.jo'
+use 'check.jo'
 struct CheckerLogicInput:
     nodes: *(Node[])
     types: *(TypeInfo[])
     scopes: *CheckerScope
     last: *int
     bool_type: *int
-    host: *CheckerLogicHost
 xg_input: *CheckerLogicInput
 checker_logic_bind = (input: *CheckerLogicInput) -> int:
     xg_input = input
@@ -32,16 +26,16 @@ xg_check = (n: int, expected: int, ex: int) -> CheckerLogicResult:
     k = xg_input[0].nodes[0][n].kind
     h = 0
     if ex != 0 and xg_input[0].types[0][tu_prune(ex)].kind == .int_: h = ex
-    ta = int(tu_prune(xg_input[0].host[0].check(int(xg_input[0].nodes[0][n].a), h)))
+    ta = int(tu_prune(check_expr(int(xg_input[0].nodes[0][n].a), h)))
     xg_input[0].nodes[0][n].a = i32(xg_input[0].last[0])
     tk = xg_input[0].types[0][tu_prune(ta)].kind
-    if tk == .struct_ or tk == .tuple or (tk == .enum_ and not xg_input[0].host[0].simple_enum(ta)):
+    if tk == .struct_ or tk == .tuple or (tk == .enum_ and not simple_enum(ta)):
         op = "~"
         if k != .not_:
-            xg_input[0].host[0].check(int(xg_input[0].nodes[0][n].b), 0)
+            check_expr(int(xg_input[0].nodes[0][n].b), 0)
             xg_input[0].nodes[0][n].b = i32(xg_input[0].last[0])
             op = if k == .and_: "&" else: "|"
-        r = xg_input[0].host[0].overload(n, op)
+        r = op_overload(n, op)
         if r != 0:
             xg_input[0].last[0] = n
             return CheckerLogicResult(r, true)
@@ -54,20 +48,20 @@ xg_check = (n: int, expected: int, ex: int) -> CheckerLogicResult:
         else:
             xg_input[0].nodes[0][n].kind = .binary
             xg_input[0].nodes[0][n].op = i32(int(if k == .and_: Tok.amp else: Tok.pipe))
-        return CheckerLogicResult(xg_input[0].host[0].check(n, expected), true)
-    if k == .not_ and xg_input[0].host[0].mask(ta):
+        return CheckerLogicResult(check_expr(n, expected), true)
+    if k == .not_ and logic_mask(ta):
         a = int(xg_input[0].nodes[0][n].a)
         xg_input[0].nodes[0][a].flags = xg_input[0].nodes[0][a].flags | 128
-        xg_input[0].host[0].broadcast(n)
-        return CheckerLogicResult(xg_input[0].host[0].check(n, expected), true)
+        logic_broadcast(n)
+        return CheckerLogicResult(check_expr(n, expected), true)
     a = int(xg_input[0].nodes[0][n].a)
-    if not cq_settled(xg_input[0].nodes, xg_input[0].types, a, xg_input[0].bool_type[0]): a = xg_input[0].host[0].coerce(a, xg_input[0].bool_type[0])
+    if not cq_settled(xg_input[0].nodes, xg_input[0].types, a, xg_input[0].bool_type[0]): a = coerce(a, xg_input[0].bool_type[0])
     xg_input[0].nodes[0][n].a = i32(a)
     if k != .not_:
         mark = xg_input[0].scopes[0].names.len()
-        xg_input[0].host[0].narrow(int(xg_input[0].nodes[0][n].a), k == .and_)
+        narrow_by(int(xg_input[0].nodes[0][n].a), k == .and_)
         b = int(xg_input[0].nodes[0][n].b)
-        xg_input[0].host[0].check(b, xg_input[0].bool_type[0])
-        if not cq_settled(xg_input[0].nodes, xg_input[0].types, b, xg_input[0].bool_type[0]): xg_input[0].host[0].coerce(b, xg_input[0].bool_type[0])
-        xg_input[0].host[0].reset(mark)
+        check_expr(b, xg_input[0].bool_type[0])
+        if not cq_settled(xg_input[0].nodes, xg_input[0].types, b, xg_input[0].bool_type[0]): coerce(b, xg_input[0].bool_type[0])
+        scope_reset(mark)
     CheckerLogicResult(xg_input[0].bool_type[0], false)

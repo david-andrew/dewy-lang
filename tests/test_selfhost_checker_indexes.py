@@ -1,5 +1,6 @@
 """Indexing: constructors, positions, soa, parts, slices, picks and element types match frozen Jo."""
 import pytest
+from tests.selfhost_expr_double import compare_leaf, jo_doubles
 
 from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER, compare
@@ -47,8 +48,7 @@ xx_error_host = (n: int, code: int, t: int):
     print(events)
     print("error:{n}:{t}:{code}")
     exit(19)
-xx_services = CheckerIndexHost(xx_check_host, xx_check_to_host, xx_construct_host, xx_position_host, xx_type_value_host, xx_soa_host, xx_part_host, xx_negative_host, xx_operator_host, xx_range_host, xx_select_host, xx_deref_host, xx_error_host)
-xx_inputs = CheckerIndexInput(&nodes, &lists, &types, &structs, &files, &T_INT, &T_MATH_INT, &T_U8, &T_RANGE, &T_MAT4, &T_VEC4, &T_I32, &T_F32, &xx_services)
+xx_inputs = CheckerIndexInput(&nodes, &lists, &types, &structs, &files, &T_INT, &T_MATH_INT, &T_U8, &T_RANGE, &T_MAT4, &T_VEC4, &T_I32, &T_F32)
 xx_binding = checker_indexes_bind(&xx_inputs)
 DEWY = 1 << 40
 item = (t: int, k: NK = .ident) -> int:
@@ -121,11 +121,30 @@ main = ():
 '''
 
 
+
+# The Jo services checker_indexes calls, routed to the driver.
+INDEX_JO = {
+    'expr.jo': {
+        'check_to': 'check_to = (n: int, target: int) -> int: xx_check_to_host(n, target)',
+        'index_construct': 'index_construct = (n: int, bt: int, expected: int) -> int: xx_construct_host(n, bt, expected)',
+        'dewy_position_index': 'dewy_position_index = (n: int, bt: int, expected: int) -> int: xx_position_host(n, bt, expected)',
+        'index_type_value': 'index_type_value = (n: int) -> int: xx_type_value_host(n)',
+        'check_soa_index': 'check_soa_index = (n: int, expected: int) -> int: xx_soa_host(n, expected)',
+        'index_part': 'index_part = (n: int, bt: int, expected: int) -> int: xx_part_host(n, bt, expected)',
+        'index_negative': 'index_negative = (b: int): xx_negative_host(b)',
+        'index_operator': 'index_operator = (n: int, b: int, expected: int) -> int: xx_operator_host(n, b, expected)',
+        'index_int_range': 'index_int_range = (t: int) -> bool: xx_range_host(t)',
+        'index_select': 'index_select = (n: int, b: int, bt: int, kind: int, expected: int) -> int: xx_select_host(n, b, bt, kind, expected)',
+        'index_deref': 'index_deref = (pos: int, bt: int): xx_deref_host(pos, bt)',
+        'index_error': 'index_error = (n: int, code: int, bt: int): xx_error_host(n, code, bt)',
+    },
+}
+
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_indexes_twins(compiler, tmp_path, release):  # noqa: F811
-    assert compare(compiler, tmp_path, release, DRIVER + MAIN,
-                   extra_stems=('checker_indexes',)).endswith(b'ok\n')
+    assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN,
+                   stub='xx_check_host', jo_doubles=jo_doubles(INDEX_JO), extra_stems=('checker_indexes',)).endswith(b'ok\n')
 
 
 @pytest.mark.parametrize('case,code', [
@@ -143,6 +162,6 @@ main = ():
     {case}
     print("unreachable")
 '''
-    output = compare(compiler, tmp_path, False, DRIVER + main, status=19,
-                     extra_stems=('checker_indexes',))
+    output = compare_leaf(compiler, tmp_path, False, DRIVER + main, status=19,
+                     stub='xx_check_host', jo_doubles=jo_doubles(INDEX_JO), extra_stems=('checker_indexes',))
     assert output.rstrip().endswith(f':{code}'.encode())

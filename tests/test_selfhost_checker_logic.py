@@ -1,5 +1,6 @@
 """Logical operands, overload rewrites and narrowing scopes match frozen Jo."""
 import pytest
+from tests.selfhost_expr_double import compare_leaf, jo_doubles
 from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER, compare
 
@@ -30,6 +31,7 @@ xg_check_host = (n: int, expected: int) -> int:
     if nodes[n].kind == .call: return T_STR
     int(nodes[xg_last].type)
 xg_coerce_host = (n: int, t: int) -> int:
+    if nodes[n].sval == 999: print("coerce-error"); exit(19)
     events.push("coerce:{n}:{t}:{xg_scopes.names.len()}")
     nodes[n].type = i32(t)
     n
@@ -48,8 +50,7 @@ xg_mask_host = (t: int) -> bool: xg_mask
 xg_broadcast_host = (n: int):
     assert(int(nodes[int(nodes[n].a)].flags) & 128 != 0)
     nodes[n].kind = .call
-xg_services = CheckerLogicHost(xg_check_host, xg_coerce_host, xg_simple_host, xg_overload_host, xg_narrow_host, xg_reset_host, xg_mask_host, xg_broadcast_host)
-xg_inputs = CheckerLogicInput(&nodes, &types, &xg_scopes, &xg_last, &T_BOOL, &xg_services)
+xg_inputs = CheckerLogicInput(&nodes, &types, &xg_scopes, &xg_last, &T_BOOL)
 xg_binding = checker_logic_bind(&xg_inputs)
 operand = (t: int) -> int:
     n = node(.ident); nodes[n].type = i32(t); n
@@ -132,8 +133,40 @@ main = ():
     print("ok")
 '''
 
+
+# The Jo services checker_logic calls, routed to the driver.
+LOGIC_JO = {
+    'expr.jo': {
+        'coerce': 'coerce = (n: int, target: int) -> int: xg_coerce_host(n, target)',
+        'op_overload': 'op_overload = (n: int, opname: str) -> int: xg_overload_host(n, opname)',
+        'narrow_by': 'narrow_by = (c: int, holds: bool): xg_narrow_host(c, holds)',
+        'logic_mask': 'logic_mask = (ta: int) -> bool: xg_mask_host(ta)',
+        'logic_broadcast': 'logic_broadcast = (n: int): xg_broadcast_host(n)',
+    },
+    'types.jo': {
+        'simple_enum': 'simple_enum = (t: int) -> bool: xg_simple_host(t)',
+    },
+    'check.jo': {
+        'scope_reset': 'scope_reset = (mark: int): xg_reset_host(mark)',
+    },
+}
+
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_logic_twins(compiler, tmp_path, release):  # noqa: F811
-    assert compare(compiler, tmp_path, release, DRIVER,
-                   extra_stems=('checker_logic',)).endswith(b'ok\n')
+    assert compare_leaf(compiler, tmp_path, release, DRIVER,
+                   stub='xg_check_host', jo_doubles=jo_doubles(LOGIC_JO), extra_stems=('checker_logic',)).endswith(b'ok\n')
+
+
+def test_checker_logic_error(compiler, tmp_path):
+    driver = DRIVER.split('main = ():')[0] + r'''
+main = ():
+    prepare()
+    a = operand(T_STR)
+    nodes[a].sval = 999
+    xg_check(logical(.not_, a), 0, 0)
+    print("unreachable")
+'''
+    assert compare_leaf(compiler, tmp_path, False, driver, stub='xg_check_host',
+                        status=19, jo_doubles=jo_doubles(LOGIC_JO),
+                        extra_stems=('checker_logic',)).endswith(b'coerce-error\n')

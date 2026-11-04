@@ -3,10 +3,10 @@ bracket calls, `end`, sets, stored ranges, stepped slices and text match frozen 
 import pytest
 
 from tests.support import compiler  # noqa: F401
-from tests.test_selfhost_checker_indexes import DRIVER as INDEXES
+from tests.test_selfhost_checker_indexes import DRIVER as INDEXES, INDEX_JO
 from tests.test_selfhost_checker_literals import DRIVER as LITERALS, LITERAL_JO
 from tests.selfhost_expr_double import compare_leaf, jo_doubles
-from tests.test_selfhost_checker_members import DRIVER as MEMBERS
+from tests.test_selfhost_checker_members import DRIVER as MEMBERS, MEMBER_JO
 from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER
 
 STEMS = ('checker_exact', 'checker_literals', 'checker_members', 'checker_indexes', 'checker_receivers')
@@ -187,7 +187,7 @@ main = ():
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_receivers_twins(compiler, tmp_path, release):  # noqa: F811
-    assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'literal_check', jo_doubles=jo_doubles(LITERAL_JO), extra_stems=STEMS).endswith(b'ok\n')
+    assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'xx_check_host', jo_doubles=jo_doubles(INDEX_JO, MEMBER_JO, LITERAL_JO), extra_stems=STEMS).endswith(b'ok\n')
 
 
 @pytest.mark.parametrize('case,code', [
@@ -202,5 +202,5 @@ main = ():
     {case}
     print("unreachable")
 '''
-    output = compare_leaf(compiler, tmp_path, False, DRIVER + main, 'literal_check', jo_doubles=jo_doubles(LITERAL_JO), status=19, extra_stems=STEMS)
+    output = compare_leaf(compiler, tmp_path, False, DRIVER + main, 'xx_check_host', jo_doubles=jo_doubles(INDEX_JO, MEMBER_JO, LITERAL_JO), status=19, extra_stems=STEMS)
     assert output.rstrip().endswith(f':{code}'.encode())

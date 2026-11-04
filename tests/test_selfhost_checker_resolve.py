@@ -1,4 +1,5 @@
 """Recursive type syntax, binder restoration and service order match frozen Jo."""
+import re
 import subprocess
 
 import pytest
@@ -61,7 +62,7 @@ effect_arg = (n: int) -> int:
     T_BOOL
 nominal = (t: int) -> int: t
 fixed_arg = (n: int) -> bool: nodes[n].sval == 99
-fixed_size = (n: int) -> int: 3
+resolve_fixed_size_double = (n: int) -> int: 3
 fixed = (t: int, count: int, pos: int) -> int: int(tb_mk_fixed(t, count))
 instance = (d: int, ts: int[]) -> int:
     events.push("instance:{d}:{ts}")
@@ -94,8 +95,7 @@ contract = (n: int, base: int, ps: int[], labels: int[], mask: int) -> int:
 pack_error = (n: int, i: int, t: int, first: int):
     print("pack:{n}:{i}:{t}:{first}")
     exit(17)
-resolve_host = CheckerResolveHost(lookup_type, policy_type, refinement, quantity, ide, effect_arg, nominal, fixed_arg, fixed_size, fixed, instance, decimal, word_rational, error, record, validate_record, nd, soa, map_decl, total_dict, signature, pack_count, contract, pack_error)
-resolve_input = CheckerResolveInput(&nodes, &lists, &types, &names, &binders, &refine, &values_ok, &pack_ok, &T_VOID, &T_INT, &resolve_host)
+resolve_input = CheckerResolveInput(&nodes, &lists, &types, &names, &binders, &refine, &values_ok, &pack_ok, &T_VOID, &T_INT)
 resolve_binding = checker_resolve_bind(&resolve_input)
 alias_resume = (d: int): events.push("resume:{d}")
 alias_error = (k: int, n: int, p: int, c: int): error(k, n, c)
@@ -183,6 +183,18 @@ main = ():
 def compare(compiler, tmp_path, release, driver, status=0, extra_stems=(), doubles=None, jo_doubles=None):
     # doubles: {stem: {extension: text}}, modules standing in for compiler ones; jo_doubles:
     # {file: text}, Jo modules a Dewy module imports by file name, in both builds.
+    # Supply the resolver's direct services to every derived leaf driver.
+    jo_doubles = dict(jo_doubles or {})
+    for module, functions in RESOLVE_JO.items():
+        text = jo_doubles.get(module, "use 'driver.jo'\nuse 'checker_resolve.dewy'\n")
+        for name, definition in functions.items():
+            if not re.search(r'(?m)^' + re.escape(name) + r'\s*=', text):
+                text += definition + '\n'
+        if "use 'checker_resolve.dewy'" not in text:
+            text = "use 'checker_resolve.dewy'\n" + text
+        if "use 'driver.jo'" not in text:
+            text = "use 'driver.jo'\n" + text
+        jo_doubles[module] = text
     outputs = []
     doubles = doubles or {}
     stems = ('node_store', 'source_types', 'checker_types', 'checker_state', 'checker_tokens',
@@ -213,6 +225,49 @@ def compare(compiler, tmp_path, release, driver, status=0, extra_stems=(), doubl
     assert outputs[0] == outputs[1]
     return outputs[0]
 
+
+
+# The Jo services checker_resolve calls, routed to the driver.
+RESOLVE_JO = {
+    'check.jo': {
+        'resolve_type_name': 'resolve_type_name = (tn: int) -> CheckerTypeName: lookup_type(tn)',
+        'resolve_type_ide': 'resolve_type_ide = (tn: int): ide(tn)',
+        'fixed_size_arg': 'fixed_size_arg = (tn: int) -> bool: fixed_arg(tn)',
+        'fixed_size': 'fixed_size = (n: int) -> int: resolve_fixed_size_double(n)',
+        'mk_fixed_checked': 'mk_fixed_checked = (e: int, n: int, pos: int) -> int: fixed(e, n, pos)',
+        'resolve_type_error': 'resolve_type_error = (kind: int, tn: int, count: int): error(kind, tn, count)',
+        'nd_of': 'nd_of = (t: int, pos: int) -> int: nd(t, pos)',
+        'resolve_type_soa': 'resolve_type_soa = (et: int, pos: int) -> int: soa(et, pos)',
+        'resolve_type_map_decl': 'resolve_type_map_decl = (tn: int) -> int: map_decl(tn)',
+        'pack_result_count': 'pack_result_count = (tn: int) -> int: pack_count(tn)',
+        'resolve_type_contract': 'resolve_type_contract = (tn: int, base: int, ps: int[], names: int[], mm: int) -> int: contract(tn, base, ps, names, mm)',
+        'resolve_type_pack_error': 'resolve_type_pack_error = (tn: int, i: int, t: int, first: int): pack_error(tn, i, t, first)',
+    },
+    'types.jo': {
+        'policy_int': 'policy_int = (base: int, policy: int, pos: int) -> int: policy_type(base, policy, pos)',
+        'get_struct_inst': 'get_struct_inst = (decl: int, args: int[]) -> int: instance(decl, args)',
+    },
+    'refine.jo': {
+        'resolve_refinement': 'resolve_refinement = (n: int) -> int: refinement(n)',
+        'ref_validate_record': 'ref_validate_record = (t: int, pos: int): validate_record(t, pos)',
+        'total_dict_type': 'total_dict_type = (map: int, pos: int) -> int: total_dict(map, pos)',
+        'ref_validate_signature': 'ref_validate_signature = (params: int[], ret: int, mask: int, pos: int): signature(params, ret, mask, pos)',
+    },
+    'units.jo': {
+        'resolve_quantity_type': 'resolve_quantity_type = (n: int) -> int: quantity(n)',
+    },
+    'effects.jo': {
+        'effect_argument': 'effect_argument = (tn: int) -> int: effect_arg(tn)',
+    },
+    'errors.jo': {
+        'nominal_family': 'nominal_family = (t: int) -> int: nominal(t)',
+    },
+    'expr.jo': {
+        'decimal_type': 'decimal_type = (pos: int) -> int: decimal(pos)',
+        'word_rational_type': 'word_rational_type = (pos: int) -> int: word_rational(pos)',
+        'dewy_record_schema': 'dewy_record_schema = (n: int, args: int[]) -> int: record(n, args)',
+    },
+}
 
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])

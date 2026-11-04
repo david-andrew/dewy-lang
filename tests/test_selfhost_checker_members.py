@@ -1,5 +1,6 @@
 """Member selection: receivers, spellings, modules, tuples, vectors and record fields match frozen Jo."""
 import pytest
+from tests.selfhost_expr_double import compare_leaf, jo_doubles
 
 from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER, compare
@@ -84,8 +85,7 @@ xd_error_host = (n: int, code: int, t: int):
     print(events)
     print("error:{n}:{t}:{code}")
     exit(19)
-xd_services = CheckerMemberHost(xd_receiver_host, xd_secret_host, xd_coerce_host, xd_set_host, xd_map_host, xd_copy_host, xd_forward_host, xd_complete_host, xd_len_host, xd_call_host, xd_module_host, xd_type_host, xd_vector_host, xd_deref_host, xd_fields_host, xd_field_ref_host, xd_method_host, xd_method_value_host, xd_fn_host, xd_narrow_host, xd_missing_host, xd_error_host)
-xd_inputs = CheckerMemberInput(&nodes, &types, &structs, &fields, &args, &files, &xd_sentinel_name, &xd_ide_on, &xd_len_id, &xd_ptr_id, &xd_narrows, &xd_no_narrow, &T_STR, &xd_services)
+xd_inputs = CheckerMemberInput(&nodes, &types, &structs, &fields, &args, &files, &xd_sentinel_name, &xd_ide_on, &xd_len_id, &xd_ptr_id, &xd_narrows, &xd_no_narrow, &T_STR)
 xd_binding = checker_members_bind(&xd_inputs)
 DEWY = 1 << 40
 member = (t: int, name: int, dewy: bool = true) -> int:
@@ -179,11 +179,44 @@ main = ():
 '''
 
 
+
+# The Jo services checker_members calls, routed to the driver.
+MEMBER_JO = {
+    'expr.jo': {
+        'member_receiver': 'member_receiver = (n: int, expected: int) -> int: xd_receiver_host(n, expected)',
+        'coerce': 'coerce = (n: int, target: int) -> int: xd_coerce_host(n, target)',
+        'is_dewy_set_type': 'is_dewy_set_type = (t: int) -> bool: xd_set_host(t)',
+        'is_map_type': 'is_map_type = (t: int) -> bool: xd_map_host(t)',
+        'member_copy': 'member_copy = (n: int, bt: int) -> int: xd_copy_host(n, bt)',
+        'member_forward': 'member_forward = (n: int, bt: int, expected: int) -> int: xd_forward_host(n, bt, expected)',
+        'member_len_check': 'member_len_check = (n: int, bt: int): xd_len_host(n, bt)',
+        'member_call': 'member_call = (n: int, data: bool, expected: int) -> int: xd_call_host(n, data, expected)',
+        'member_module': 'member_module = (n: int, bt: int, expected: int, is_callee: bool) -> int: xd_module_host(n, bt, expected, is_callee)',
+        'member_type': 'member_type = (n: int, bt: int, expected: int, is_callee: bool, bypass: mut bool) -> int: xd_type_host(n, bt, expected, is_callee, bypass)',
+        'member_vector': 'member_vector = (n: int, bt: int, expected: int, bypass: mut bool) -> int: xd_vector_host(n, bt, expected, bypass)',
+        'member_deref': 'member_deref = (pos: int, bt: int): xd_deref_host(pos, bt)',
+        'member_fields': 'member_fields = (si: int): xd_fields_host(si)',
+        'member_field_ref': 'member_field_ref = (n: int, si: int, fi: int, t: int): xd_field_ref_host(n, si, fi, t)',
+        'dewy_method_field': 'dewy_method_field = (t0: int) -> int: xd_method_host(t0)',
+        'member_method_value': 'member_method_value = (n: int, method: int, is_callee: bool, expected: int) -> int: xd_method_value_host(n, method, is_callee, expected)',
+        'member_fn_value': 'member_fn_value = (n: int, t: int, is_callee: bool, expected: int) -> int: xd_fn_host(n, t, is_callee, expected)',
+        'member_narrow_path': 'member_narrow_path = (n: int, t: int) -> int: xd_narrow_host(n, t)',
+        'member_missing': 'member_missing = (n: int, bt: int, expected: int, bypass: mut bool) -> int: xd_missing_host(n, bt, expected, bypass)',
+        'member_error': 'member_error = (n: int, code: int, bt: int): xd_error_host(n, code, bt)',
+    },
+    'secrets.jo': {
+        'secret_member': 'secret_member = (n: int, bt: int) -> int: xd_secret_host(n, bt)',
+    },
+    'ide.jo': {
+        'ide_complete_members': 'ide_complete_members = (t0: int): xd_complete_host(t0)',
+    },
+}
+
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_members_twins(compiler, tmp_path, release):  # noqa: F811
     assert compare(compiler, tmp_path, release, DRIVER + MAIN,
-                   extra_stems=('checker_members',)).endswith(b'ok\n')
+                   jo_doubles=jo_doubles(MEMBER_JO), extra_stems=('checker_members',)).endswith(b'ok\n')
 
 
 @pytest.mark.parametrize('case,code', [
@@ -200,5 +233,5 @@ main = ():
     print("unreachable")
 '''
     output = compare(compiler, tmp_path, False, DRIVER + main, status=19,
-                     extra_stems=('checker_members',))
+                     jo_doubles=jo_doubles(MEMBER_JO), extra_stems=('checker_members',))
     assert output.rstrip().endswith(f':{code}'.encode())
