@@ -1,24 +1,20 @@
 $runtime_checks
 from p"checker_types.dewy" import (TypeInfo StructInfo)
 from p"type_inference.dewy" import (TypeInferenceInput tu_prune tu_has_var tu_equal tu_unify tu_is_union tu_union_members tu_targ tu_struct_targ)
+from p"expr.jo" import (can_coerce caller_dewy)
+from p"effects.jo" import effect_match
 # Generic matching retains the existing overload costs and partial bindings.
 # Callbacks may reenter checking; only stable IDs survive those calls.
 MWord:type=int64<overflow='wrap'>
-TypeMatchHost:type=[
-    can_coerce:<(n:int64 source:int64 dest:int64):>bool>
-    caller_dewy:<():>bool>
-    effect_match:<(source:int64 dest:int64 @binds:array<int64>):>bool>
-]
 let tm_types:ptr<array<TypeInfo>>=$unsafe (uint64(0) as ptr<array<TypeInfo>>)
 let tm_structs:ptr<array<StructInfo>>=$unsafe (uint64(0) as ptr<array<StructInfo>>)
 let tm_inference:ptr<TypeInferenceInput>=$unsafe (uint64(0) as ptr<TypeInferenceInput>)
 let tm_active:ptr<bool>=$unsafe (uint64(0) as ptr<bool>)
 let tm_never:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let tm_math:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
-let tm_host:ptr<TypeMatchHost>=$unsafe (uint64(0) as ptr<TypeMatchHost>)
-type_match_bind=(input:ptr<TypeInferenceInput> active:ptr<bool> never:ptr<int64> math:ptr<int64> host:ptr<TypeMatchHost>):>MWord=>$unsafe {
+type_match_bind=(input:ptr<TypeInferenceInput> active:ptr<bool> never:ptr<int64> math:ptr<int64>):>MWord=>$unsafe {
     tm_inference=input; tm_types=input[0].types; tm_structs=input[0].structs
-    tm_active=active; tm_never=never; tm_math=math; tm_host=host; 0
+    tm_active=active; tm_never=never; tm_math=math; 0
 }
 tm_quantity_base=(t:MWord):>MWord=>$unsafe {MWord(tm_types[0].ptr[tu_prune(t)].elem)}
 tm_match=(pat0:MWord a0:MWord @binds:array<int64> depth:MWord):>MWord=>$unsafe {
@@ -28,7 +24,7 @@ tm_match=(pat0:MWord a0:MWord @binds:array<int64> depth:MWord):>MWord=>$unsafe {
     loop pat not=? 0 and types[pat].kind =? 'var' and types[pat].ref not=? 0 {pat=MWord(types[pat].ref)}
     loop a not=? 0 and types[a].kind =? 'var' and types[a].ref not=? 0 {a=MWord(types[a].ref)}
     if tm_types[0].ptr[pat].kind =? 'callable' {
-        if not tm_host[0].effect_match(tm_contract(a)  tm_contract(pat)  @binds) {return - 1}
+        if not effect_match(tm_contract(a)  tm_contract(pat)  @binds) {return - 1}
         return tm_match(tm_callable_base(pat)  tm_callable_base(a)  @binds  depth)
     }
     if tm_types[0].ptr[a].kind =? 'callable' and tm_types[0].ptr[pat].kind not=? 'param' {a=tm_callable_base(a)}
@@ -51,7 +47,7 @@ tm_match=(pat0:MWord a0:MWord @binds:array<int64> depth:MWord):>MWord=>$unsafe {
         }
         if tu_equal(binds[id]  a) {return 0}
         if tu_has_var(tu_prune(binds[id])) and tu_unify(binds[id]  a) {return 0}
-        if tm_host[0].can_coerce(0  a  binds[id]) {return 1}
+        if can_coerce(0  a  binds[id]) {return 1}
         return - 1
     }
     if (tm_types[0].ptr[pat].flags & 1) =? 0 {
@@ -62,7 +58,7 @@ tm_match=(pat0:MWord a0:MWord @binds:array<int64> depth:MWord):>MWord=>$unsafe {
             if ak =? 'opt' and pk =? 'opt' {return 0}
         }
         if ak =? 'none_lit' and pk =? 'opt' {return 0}
-        if tm_host[0].can_coerce(0  a  pat) {
+        if can_coerce(0  a  pat) {
             if pat =? tm_math[0] and ak =? 'int_' {return 2}
             if a =? tm_math[0] and pk =? 'int_' and not tm_int_widens(a  pat) {return 2}
             if ak =? 'float_' and pk =? 'float_' {
@@ -73,7 +69,7 @@ tm_match=(pat0:MWord a0:MWord @binds:array<int64> depth:MWord):>MWord=>$unsafe {
             return 1
 # (a narrowing is a proven conversion: the last resort among overloads)
         }
-        if ak =? 'int_' and pk =? 'int_' and tm_host[0].caller_dewy() {return 20}
+        if ak =? 'int_' and pk =? 'int_' and caller_dewy() {return 20}
         return - 1
     }
     if ak =? 'var' {return 0}

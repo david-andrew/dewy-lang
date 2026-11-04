@@ -1,31 +1,27 @@
 use 'checker_types.dewy'
 use 'type_inference.dewy'
-struct TypeMatchHost:
-    can_coerce: (int, int, int) -> bool
-    caller_dewy: () -> bool
-    effect_match: (int, int, mut int[]) -> bool
+use 'expr.jo'
+use 'effects.jo'
 tm_types: *(TypeInfo[])
 tm_structs: *(StructInfo[])
 tm_inference: *TypeInferenceInput
 tm_active: *bool
 tm_never: *int
 tm_math: *int
-tm_host: *TypeMatchHost
-type_match_bind = (input: *TypeInferenceInput, active: *bool, never: *int, math: *int, host: *TypeMatchHost) -> int:
+type_match_bind = (input: *TypeInferenceInput, active: *bool, never: *int, math: *int) -> int:
     tm_inference = input
     tm_types = input[0].types
     tm_structs = input[0].structs
     tm_active = active
     tm_never = never
     tm_math = math
-    tm_host = host
     0
 tm_quantity_base = (t: int) -> int: int(tm_types[0][tu_prune(t)].elem)
 tm_match = (pat0: int, a0: int, binds: mut int[], depth: int) -> int:
     pat = tu_prune(pat0)
     a = tu_prune(a0)
     if tm_types[0][pat].kind == .callable:
-        if not tm_host[0].effect_match(tm_contract(a), tm_contract(pat), binds): return -1
+        if not effect_match(tm_contract(a), tm_contract(pat), binds): return -1
         return tm_match(tm_callable_base(pat), tm_callable_base(a), binds, depth)
     if tm_types[0][a].kind == .callable and tm_types[0][pat].kind != .param: a = tm_callable_base(a)
     # (inside a container a type parameter takes the elements' refinement too: array<Pos> is
@@ -45,7 +41,7 @@ tm_match = (pat0: int, a0: int, binds: mut int[], depth: int) -> int:
             return 0
         if tu_equal(binds[id], a): return 0
         if tu_has_var(tu_prune(binds[id])) and tu_unify(binds[id], a): return 0
-        if tm_host[0].can_coerce(0, a, binds[id]): return 1
+        if can_coerce(0, a, binds[id]): return 1
         return -1
     if not tu_has_var(pat):
         if tu_equal(pat, a): return 0
@@ -54,7 +50,7 @@ tm_match = (pat0: int, a0: int, binds: mut int[], depth: int) -> int:
             if ak == pk and ak == .array and tm_match(int(tm_types[0][pat].elem), int(tm_types[0][a].elem), binds, depth + 1) >= 0: return 0
             if ak == .opt and pk == .opt: return 0
         if ak == .none_lit and pk == .opt: return 0
-        if tm_host[0].can_coerce(0, a, pat):
+        if can_coerce(0, a, pat):
             if pat == tm_math[0] and ak == .int_: return 2
             if a == tm_math[0] and pk == .int_ and not tm_int_widens(a, pat): return 2
             if ak == .float_ and pk == .float_:
@@ -63,7 +59,7 @@ tm_match = (pat0: int, a0: int, binds: mut int[], depth: int) -> int:
             if (ak == .int_ and pk == .float_) or pk == .opt: return 2
             return 1
         # (a narrowing is a proven conversion: the last resort among overloads)
-        if ak == .int_ and pk == .int_ and tm_host[0].caller_dewy(): return 20
+        if ak == .int_ and pk == .int_ and caller_dewy(): return 20
         return -1
     if ak == .var: return 0
     if tu_is_union(pat): return tm_union(pat, a, binds, depth)

@@ -2,6 +2,8 @@
 import subprocess
 
 import pytest
+from tests.selfhost_expr_double import jo_doubles
+from tests.test_selfhost_type_properties import LAYOUT_JO
 
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.test_selfhost_type_properties import DRIVER as PROPERTIES
@@ -113,6 +115,8 @@ def test_ownership_types_twins(compiler, tmp_path, release):  # noqa: F811
             if extension == 'jo':
                 text = text.replace(".dewy'", ".jo'")
             (directory / f'{stem}.{extension}').write_text(text)
+        for module, code in jo_doubles(LAYOUT_JO).items():
+            (directory / module).write_text(code)
         source, binary = directory / 'driver.jo', directory / 'driver'
         source.write_text(''.join(f"use '{s}.{extension}'\n" for s in STEMS) + DRIVER)
         built = subprocess.run([compiler, 'build', source, '-o', binary, *(['--release'] if release else [])],

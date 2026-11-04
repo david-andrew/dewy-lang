@@ -1,6 +1,7 @@
 """Generic matching preserves costs, mutable bindings and recursive union capture."""
 import subprocess
 import pytest
+from tests.selfhost_expr_double import jo_doubles
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.test_selfhost_type_constructors import DRIVER as CONSTRUCTOR_DRIVER
 
@@ -25,8 +26,7 @@ match_effect = (source: int, dest: int, values: mut int[]) -> bool:
     values[1] = T_STR
     loop i in [0..160]: types.push(TypeInfo()); args.push(0)
     true
-match_host = TypeMatchHost(coercible, is_dewy, match_effect)
-match_binding = type_match_bind(&inference_input, &active, &T_NEVER, &T_MATH_INT, &match_host)
+match_binding = type_match_bind(&inference_input, &active, &T_NEVER, &T_MATH_INT)
 union_of = (values: int[]) -> int:
     if values.len() == 0: return T_NEVER
     if values.len() == 1: return values[0]
@@ -116,6 +116,18 @@ main = ():
         print(values); print(events)
     print("ok")
 '''
+
+# The Jo services type_match calls, routed to the driver.
+MATCH_JO = {
+    'expr.jo': {
+        'can_coerce': 'can_coerce = (n: int, from0: int, to0: int) -> bool: coercible(n, from0, to0)',
+        'caller_dewy': 'caller_dewy = () -> bool: is_dewy()',
+    },
+    'effects.jo': {
+        'effect_match': 'effect_match = (source: int, dest: int, binds: mut int[]) -> bool: match_effect(source, dest, binds)',
+    },
+}
+
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_type_match_twins(compiler, tmp_path, release):  # noqa: F811
     outputs = []
@@ -128,6 +140,8 @@ def test_type_match_twins(compiler, tmp_path, release):  # noqa: F811
             if extension == 'jo':
                 text = text.replace(".dewy'", ".jo'")
             (directory / f'{stem}.{extension}').write_text(text)
+        for module, code in jo_doubles(MATCH_JO).items():
+            (directory / module).write_text(code)
         source, binary = directory / 'driver.jo', directory / 'driver'
         source.write_text(''.join(f"use '{s}.{extension}'\n" for s in stems) + DRIVER)
         built = subprocess.run([compiler, 'build', source, '-o', binary,

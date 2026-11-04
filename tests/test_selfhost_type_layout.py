@@ -2,6 +2,7 @@
 import subprocess
 
 import pytest
+from tests.selfhost_expr_double import jo_doubles
 
 from tests.support import ROOT, compiler  # noqa: F401
 
@@ -42,8 +43,7 @@ math_opt = (t: int) -> bool: types[t].kind == .opt and base(int(types[t].elem)) 
 endless = (si: int, f: int, vi: int): events.push("endless:{si}:{f}:{vi}")
 cycle = (si: int): events.push("cycle:{si}")
 padded = (t: int) -> bool: structs[int(types[t].st)].decl == 77
-host = TypeLayoutHost(resolve, box, base, math_opt, endless, cycle, padded)
-input = TypeLayoutInput(&types, &structs, &args, &fields, &variants, &pointer_size, &host)
+input = TypeLayoutInput(&types, &structs, &args, &fields, &variants, &pointer_size)
 reset = ():
     types = [TypeInfo(), TypeInfo(kind=.int_, bits=64, sign=true, size=8, align=8, flags=2), TypeInfo(kind=.bool_, size=1, align=1, flags=2), TypeInfo(kind=.str_, size=i32(pointer_size), align=i32(pointer_size), flags=6), TypeInfo(kind=.array, elem=1), TypeInfo(kind=.ptr, elem=1), TypeInfo(kind=.fn_, elem=1), TypeInfo(kind=.opt, elem=1), TypeInfo(kind=.fixed, elem=1, bits=3), TypeInfo(kind=.tuple, args=0, nargs=3), TypeInfo(kind=.struct_, st=1), TypeInfo(kind=.opt, elem=10), TypeInfo(kind=.struct_, st=2), TypeInfo(kind=.enum_, st=3), TypeInfo(kind=.enum_, st=4), TypeInfo(kind=.enum_, st=5), TypeInfo(kind=.struct_, st=6), TypeInfo(kind=.quantity, elem=1), TypeInfo(kind=.refined, elem=1), TypeInfo(kind=.callable, elem=6), TypeInfo(kind=.secret, elem=3), TypeInfo(kind=.box, elem=1), TypeInfo(kind=.opt, elem=23), TypeInfo(kind=.int_, size=8, align=8, flags=2, rep=.tagged_int), TypeInfo(kind=.fixed, elem=12, bits=0), TypeInfo(kind=.struct_, st=7)]
     structs = [StructInfo(), StructInfo(type=10, fields=0, nfields=1, name="Good"), StructInfo(type=12, fields=1, nfields=1, name="Bad"), StructInfo(type=13, variants=0, nvariants=2, name="Enum"), StructInfo(type=14, variants=2, nvariants=2), StructInfo(type=15, variants=4, nvariants=2, union_=true), StructInfo(type=16, fields=3, nfields=1, decl=77), StructInfo(type=25, fields=4, nfields=1, soa_=true)]
@@ -82,6 +82,24 @@ main = ():
     print("ok")
 '''
 
+
+# The Jo services type_layout calls, routed to the driver.
+LAYOUT_JO = {
+    'check.jo': {
+        'check_struct_fields': 'check_struct_fields = (si: int): resolve(si)',
+    },
+    'types.jo': {
+        'mk_box': 'mk_box = (e: int) -> int: box(e)',
+        'math_optional': 'math_optional = (t: int) -> bool: math_opt(t)',
+        'layout_endless_error': 'layout_endless_error = (si: int, f: int, vi: int): endless(si, f, vi)',
+        'layout_cycle_error': 'layout_cycle_error = (si: int): cycle(si)',
+        'layout_cache_padded': 'layout_cache_padded = (t: int) -> bool: padded(t)',
+    },
+    'units.jo': {
+        'quantity_base': 'quantity_base = (t0: int) -> int: base(t0)',
+    },
+}
+
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_type_layout_twins(compiler, tmp_path, release):  # noqa: F811
     outputs = []
@@ -93,6 +111,8 @@ def test_type_layout_twins(compiler, tmp_path, release):  # noqa: F811
             if extension == 'jo':
                 text = text.replace(".dewy'", ".jo'")
             (directory / f'{stem}.{extension}').write_text(text)
+        for module, code in jo_doubles(LAYOUT_JO).items():
+            (directory / module).write_text(code)
         source, binary = directory / 'driver.jo', directory / 'driver'
         source.write_text(f"use 'checker_types.{extension}'\nuse 'type_layout.{extension}'\n" + DRIVER)
         built = subprocess.run([compiler, 'build', source, '-o', binary,

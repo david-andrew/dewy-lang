@@ -2,6 +2,7 @@
 import subprocess
 
 import pytest
+from tests.selfhost_expr_double import jo_doubles
 
 from tests.support import ROOT, compiler  # noqa: F401
 
@@ -177,8 +178,7 @@ property_optional = (t: int) -> bool: tp_math_optional(t)
 endless = (si: int, f: int, vi: int): property_events.push("endless:{si}:{f}:{vi}")
 cycle = (si: int): property_events.push("cycle:{si}")
 padded = (t: int) -> bool: false
-layout_host = TypeLayoutHost(property_resolve, layout_box, property_base, property_optional, endless, cycle, padded)
-layout_input = TypeLayoutInput(&types, &structs, &args, &fields, &variants, &ptr_size, &layout_host)
+layout_input = TypeLayoutInput(&types, &structs, &args, &fields, &variants, &ptr_size)
 property_host = TypePropertyHost(texture, property_resolve)
 property_input = TypePropertyInput(&types, &structs, &args, &fields, &variants, &refine_active, &math_id, &property_host)
 main = ():
@@ -249,6 +249,24 @@ main = ():
 
 '''
 
+
+# The Jo services type_layout calls, routed to the driver.
+LAYOUT_JO = {
+    'check.jo': {
+        'check_struct_fields': 'check_struct_fields = (si: int): property_resolve(si)',
+    },
+    'types.jo': {
+        'mk_box': 'mk_box = (e: int) -> int: layout_box(e)',
+        'math_optional': 'math_optional = (t: int) -> bool: property_optional(t)',
+        'layout_endless_error': 'layout_endless_error = (si: int, f: int, vi: int): endless(si, f, vi)',
+        'layout_cycle_error': 'layout_cycle_error = (si: int): cycle(si)',
+        'layout_cache_padded': 'layout_cache_padded = (t: int) -> bool: padded(t)',
+    },
+    'units.jo': {
+        'quantity_base': 'quantity_base = (t0: int) -> int: property_base(t0)',
+    },
+}
+
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_type_property_twins(compiler, tmp_path, release):  # noqa: F811
     outputs = []
@@ -261,6 +279,8 @@ def test_type_property_twins(compiler, tmp_path, release):  # noqa: F811
             if extension == 'jo':
                 text = text.replace(".dewy'", ".jo'")
             (directory / f'{stem}.{extension}').write_text(text)
+        for module, code in jo_doubles(LAYOUT_JO).items():
+            (directory / module).write_text(code)
         source, binary = directory / 'driver.jo', directory / 'driver'
         source.write_text(''.join(f"use '{s}.{extension}'\n" for s in stems) + DRIVER)
         built = subprocess.run([compiler, 'build', source, '-o', binary,

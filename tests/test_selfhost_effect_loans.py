@@ -2,6 +2,8 @@
 import subprocess
 
 import pytest
+from tests.selfhost_expr_double import jo_doubles
+from tests.test_selfhost_type_properties import LAYOUT_JO
 
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.test_selfhost_ownership_checks import STEMS as CHECK_STEMS
@@ -124,6 +126,16 @@ def run(compiler, tmp_path, release, driver, status=0):
             if extension == 'jo':
                 text = text.replace(".dewy'", ".jo'")
             (directory / f'{stem}.{extension}').write_text(text)
+        # Layout is imported transitively but is not bound or exercised here.
+        unused = {}
+        for module, functions in LAYOUT_JO.items():
+            unused[module] = {}
+            for name, definition in functions.items():
+                signature = definition.rsplit(': ', 1)[0]
+                result = ' false' if ' -> bool' in signature else ' 0' if ' -> int' in signature else ' return'
+                unused[module][name] = signature + ': assert(false);' + result
+        for module, code in jo_doubles(unused).items():
+            (directory / module).write_text(code)
         source, binary = directory / 'driver.jo', directory / 'driver'
         source.write_text(''.join(f"use '{s}.{extension}'\n" for s in STEMS) + driver)
         built = subprocess.run([compiler, 'build', source, '-o', binary, *(['--release'] if release else [])],
