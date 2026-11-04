@@ -1,3 +1,4 @@
+use 'lower_storage.dewy'
 use 'lower_analysis.dewy'
 use 'lower_helpers.dewy'
 use 'lower_group.dewy'
@@ -150,9 +151,6 @@ rt = (name: str) -> int: lf_of_inst(runtime_fn(name))
 
 # object header words (refcount, length, capacity, closure drop function): a memory class of
 # their own, so stores to elements do not invalidate what the optimizer knows about them
-hdr_load = (p: int, off: int) -> int: e_load(VI, p, off, 8 | M_HDR)
-hdr_store = (p: int, off: int, v: int): e_store(p, off, v, 8 | M_HDR)
-
 # value of a runtime global (by name, from the prelude)
 rt_global = (name: str) -> int:
     s = prelude.get(intern(name)) ?? 0
@@ -282,81 +280,6 @@ lower_types: LowerTypePlan[]
 lower_epoch = 0
 lower_planning = false
 
-lower_type_plan = (t0: int) -> *LowerTypePlan:
-    if t0 >= lower_types.len(): lower_types.resize(max(t0 + 1, lower_types.len() * 2))
-    plan = &lower_types[t0]
-    if plan.epoch == lower_epoch: return plan
-    t = quantity_base(t0)
-    k = types[t].kind
-    c = VC_INT
-    v = VI
-    if k == .void_ or k == .typeval or k == .module: c = VC_VOID
-    else if k == .float_:
-        c = VC_FLT
-        v = if int(types[t].bits) == 32: VS else: VF
-    else if is_aggregate(t): c = VC_AGG
-    plan.value_class = c
-    plan.vtype = v
-    plan.epoch = lower_epoch
-    plan
-
-vc = (t0: int) -> int:
-    if lower_planning: return lower_type_plan(t0).value_class
-    t = quantity_base(t0)
-    k = types[t].kind
-    if k == .void_ or k == .typeval or k == .module: return VC_VOID
-    if k == .float_: return VC_FLT
-    if is_aggregate(t): return VC_AGG
-    VC_INT
-
-vt_of = (t0: int) -> int:
-    if lower_planning: return lower_type_plan(t0).vtype
-    t = quantity_base(t0)
-    if types[t].kind == .float_:
-        if int(types[t].bits) == 32: return VS
-        return VF
-    VI
-
-mem_mode = (t0: int) -> int:
-    t = quantity_base(t0)
-    k = types[t].kind
-    s = tsize(t)
-    if k == .float_: return s | M_FLOAT
-    if k == .int_ and types[t].sign: return s | M_SIGNED
-    s
-
-load_val = (t: int, addr: int, off: int) -> int:
-    if vc(t) == VC_AGG: return e_addi(addr, off)
-    if vc(t) == VC_VOID: return -1
-    e_load(vt_of(t), addr, off, mem_mode(t))
-
-store_val = (t: int, addr: int, off: int, v: int):
-    c = vc(t)
-    if c == VC_AGG: e_copy(e_addi(addr, off), v, tsize(t))
-    else if c != VC_VOID: e_store(addr, off, v, mem_mode(t))
-
-norm = (v: int, t0: int) -> int:
-    t = quantity_base(t0)
-    k = types[t].kind
-    if k == .bool_: return e_un(.zext8, VI, v)
-    if k != .int_: return v
-    s = tsize(t)
-    sg = types[t].sign
-    if s == 1:
-        if sg: return e_un(.sext8, VI, v)
-        return e_un(.zext8, VI, v)
-    if s == 2:
-        if sg: return e_un(.sext16, VI, v)
-        return e_un(.zext16, VI, v)
-    if s == 4:
-        if sg: return e_un(.sext32, VI, v)
-        return e_un(.zext32, VI, v)
-    v
-
-zero_val = (t: int) -> int:
-    if vt_of(t) == VI: return e_iconst(0)
-    e_fconst(0.0, vt_of(t))
-
 # ---------------- function state ----------------
 struct Val:
     v: int
@@ -420,8 +343,6 @@ lower_zeros: LowerZero[]
 lower_mark_serial = 0
 lower_has_nops = false
 
-V = (v: int, owned: bool) -> Val: Val(v, owned, -1)
-
 # ---------------- reference counting ----------------
 # release builds (`opt = release`) inline the fast paths of refcounting, uniqueness and bounds
 # checks; debug builds keep them out of line so the IR (and compile time) stays small.
@@ -429,370 +350,25 @@ opt_release = false
 
 # (where __mt_active is among the globals, for the code generator's CALL_RC_INC and CALL_RC_DEC)
 mt_active_off = -1
-note_mt_active = ():
-    # (a fused worker notes each function's use: fused.jo)
-    if mt_active_off >= 0 and not fused_on: return
-    s = prelude.get(intern("__mt_active")) ?? 0
-    if s == 0 or syms[s].kind != .global: ice("missing runtime global __mt_active")
-    mt_active_off = global_addr_off(int(syms[s].ref))
-
 # v was just computed as a read-only datum's address (e_daddr, a fresh vreg defined once): an
 # immortal object, as every object in read-only data is (str_data, const_array). A bounded look
 # back over the last few instructions; constant time.
-static_datum = (v: int) -> bool:
-    i = ir.code.len() - 1
-    floor = i - 4
-    loop i >= 0 and i >= floor:
-        if int(ir.code[i].dst) == v and ir.code[i].op == .daddr: return true
-        i -= 1
-    false
-
 # rc <= 0 marks immortal objects
-retain = (v: int, t0: int):
-    if static_datum(v): return
-    t = quantity_base(t0)
-    if math_optional(t):
-        retain(e_bin(.xor, VI, v, e_iconst(1)), T_MATH_INT)
-        return
-    if t == T_MATH_INT:
-        iff(math_tag(v))
-        was = ir_cold
-        ir_cold = true
-        retain(e_addi(v, -1), math_payload_type())
-        ir_cold = was
-        endc()
-        return
-    if not opt_release:
-        # (one call in the IR, which the code generator does inline when it can: CALL_RC_INC)
-        e_call1(rt("__rc_inc"), v, -1)
-        ir.code[ir.code.len() - 1].c = CALL_RC_INC
-        note_mt_active()
-        return
-    # during a parallel job refcounts must be updated atomically (out of line)
-    blk()
-    done = ctl
-    iff(rt_global("__mt_active"))
-    was = ir_cold
-    ir_cold = true
-    e_call1(rt("__rc_inc"), v, -1)
-    ir_cold = was
-    br_to(done)
-    endc()
-    iff(e_bin(.ne, VI, v, e_iconst(0)))
-    rc = hdr_load(v, 0)
-    iff(e_bin(.gts, VI, rc, e_iconst(0)))
-    hdr_store(v, 0, e_addi(rc, 1))
-    endc()
-    endc()
-    endc()
-
-release = (v: int, t0: int):
-    t = quantity_base(t0)
-    if math_optional(t):
-        release(e_bin(.xor, VI, v, e_iconst(1)), T_MATH_INT)
-        return
-    if t == T_MATH_INT:
-        iff(math_tag(v))
-        was = ir_cold
-        ir_cold = true
-        release_call(e_addi(v, -1), math_payload_type())
-        ir_cold = was
-        endc()
-        return
-    if not opt_release:
-        release_call(v, t)
-        ir.code[ir.code.len() - 1].c = CALL_RC_DEC
-        note_mt_active()
-        return
-    blk()
-    done = ctl
-    iff(rt_global("__mt_active"))
-    was = ir_cold
-    ir_cold = true
-    release_call(v, t)
-    ir_cold = was
-    br_to(done)
-    endc()
-    iff(e_bin(.ne, VI, v, e_iconst(0)))
-    rc = hdr_load(v, 0)
-    iff(e_bin(.gts, VI, rc, e_iconst(1)))
-    hdr_store(v, 0, e_addi(rc, -1))
-    els()
-    # last reference: the out-of-line path frees (and releases elements)
-    iff(e_bin(.eq, VI, rc, e_iconst(1)))
-    release_call(v, t)
-    endc()
-    endc()
-    endc()
-    endc()
-
 # (the call dropping a reference to v, freeing it with the last: an array's elements and a box's
 # value are released by a helper for the type)
-release_call = (v: int, t: int):
-    if types[t].kind == .array and is_managed(int(types[t].elem)): e_call1(lf_helper(.arrrel, t, 0), v, -1)
-    else if types[t].kind == .box: e_call1(lf_helper(.boxrel, t, 0), v, -1)
-    else: e_call1(rt("__rc_dec"), v, -1)
-
-drop_at = (addr: int, t0: int):
-    if ownership_type(t0):
-        owner_drop(addr)
-        return
-    t = quantity_base(t0)
-    if not is_managed(t): return
-    if ownership_type(t):
-        owner_drop(addr)
-        return
-    if vc(t) == VC_INT:
-        release(e_load(VI, addr, 0, ptr_size), t)
-        return
-    env_guard(addr, t)
-    e_call1(lf_helper(.drop, t, 0), addr, -1)
-    if env_guarded(t): endc()
-
-copy_at = (addr: int, t0: int):
-    t = quantity_base(t0)
-    if not is_managed(t): return
-    if vc(t) == VC_INT:
-        e_store(addr, 0, copy_ref(e_load(VI, addr, 0, ptr_size), t), ptr_size)
-        return
-    env_guard(addr, t)
-    e_call1(lf_helper(.copy, t, 0), addr, -1)
-    if env_guarded(t): endc()
-
 # A function value's one managed part is its environment, and its drop and copy helpers
 # (helper_drop) do nothing to a value without one (a plain function's: env 0). Test that inline
 # and call the helper only for an environment. (Owner-capturing callables keep their hooks.)
-env_guarded = (t: int) -> bool:
-    k = types[t].kind
-    (k == .fn_ or k == .polyfn or k == .callable) and not ownership_type(t)
-
-env_guard = (addr: int, t: int):
-    if env_guarded(t): iff(e_bin(.ne, VI, e_load(VI, addr, ptr_size, ptr_size), e_iconst(0)))
-
 # Arrays containing callable values must copy their environments too. Ordinary
 # data arrays retain the normal COW path. This eager path is deliberately small:
 # it also works when a callback is invoked by a borrowed implementation-library API.
-copy_ref = (v: int, t: int) -> int:
-    if ownership_type(t):
-        if tkind(t) == .array: return e_call1(lf_helper(.arrcopy, t, 0), v, VI)
-        if tkind(t) == .box: return e_call1(lf_helper(.owner_boxcopy, t, 0), v, VI)
-    retain(v, t)
-    k = types[prune(t)].kind
-    if (k == .array or k == .box) and type_has_fn(t):
-        return e_call1(lf_helper((if k == .array: HK.arruniq else: HK.boxuniq), t, 0), v, VI)
-    v
-
 # ---------------- temps ----------------
-new_temp = (t: int) -> int: new_slot(tsize(t), talign(t))
-
-reg_temp_slot = (s: int, t: int, stack_target: int = -1):
-    if stack_target >= 0 and closure_scalar_environment(stack_target): return
-    if not is_managed(t) or tl_items.len() == 0: return
-    tl_values.push(TempItem(true, s, t, cond_depth > tl_cond[tl_cond.len() - 1], stack_target))
-
-reg_temp_vreg = (v: int, t: int):
-    if not is_managed(t) or tl_items.len() == 0: return
-    # An empty literal is an immutable null constant. It owns no allocation,
-    # and conditional cleanup must not try to clear its constant register.
-    if is_kv(v) and kv_of(v) == 0: return
-    tl_values.push(TempItem(false, v, t, cond_depth > tl_cond[tl_cond.len() - 1]))
-
-borrow = (val: Val, t: int):
-    if not val.owned or not is_managed(t): return
-    if vc(t) == VC_AGG or ownership_type(t):
-        if val.slot < 0: ice("owned aggregate without slot")
-        reg_temp_slot(val.slot, t)
-    else:
-        # copy into a fresh vreg so later reassignment of the original can't confuse release
-        # (the value may sit in a local's own vreg, which statement cleanup must not touch)
-        c = vreg(VI)
-        e_mov(c, val.v)
-        reg_temp_vreg(c, t)
-
-own = (val: Val, t: int) -> Val:
-    if val.owned: return val
-    if ownership_type(t):
-        if not ownership_copyable(t): fatal(ir_pos, "cannot copy a move-only owner")
-        if vc(t) == VC_INT: return owner_value(V(copy_ref(val.v, t), true), t)
-        if let hook = ownership_copies.get(prune(t)): return owner_hook_result(hook, val.v, t)
-        if let copier = owner_map_copies.get(prune(t)):
-            slot = new_temp(t)
-            addr = e_slot(slot)
-            e_call2(lf_of_inst(copier), addr, val.v, -1)
-            owner_register(slot, t)
-            return Val(addr, true, slot)
-        if is_map_type(t):
-            slot = new_temp(t)
-            addr = e_slot(slot)
-            e_zero(addr, tsize(t))
-            owner_register(slot, t)
-            loop field in field_list(t):
-                child = own(Val(load_val(field.0, val.v, field.1), false, -1), field.0)
-                store_val(field.0, addr, field.1, child.v)
-                if ownership_type(field.0): owner_forget_slot(child.slot)
-            return Val(addr, true, slot)
-        slot = new_temp(t)
-        addr = e_slot(slot)
-        e_copy(addr, val.v, tsize(t))
-        copy_at(addr, t)
-        owner_register(slot, t)
-        return Val(addr, true, slot)
-    if vc(t) == VC_AGG:
-        s = new_temp(t)
-        a = e_slot(s)
-        e_copy(a, val.v, tsize(t))
-        if is_managed(t): copy_at(a, t)
-        return Val(a, true, s)
-    if is_managed(t): return Val(copy_ref(val.v, t), true, -1)
-    Val(val.v, true, -1)
-
-stmt_begin = ():
-    positive_epoch += 1
-    tl_items.push(tl_values.len())
-    lower_mark_serial += 1
-    tl_nop.push((ir.code.len() << 32) | lower_mark_serial)
-    tl_cond.push(cond_depth)
-
-stmt_end = ():
-    start = tl_items.pop()
-    end = tl_values.len()
-    nop = tl_nop.pop()
-    tl_cond.pop()
-    # Append the demanded zero inventory directly into the IR argument arena.
-    args_start = ir.args.len()
-    loop i in [start..end):
-        it = tl_values[i]
-        if it.cond: ir.args.push(i32(it.ref * 2 + int(not it.is_slot)))
-    count = ir.args.len() - args_start
-    if count > 0:
-        lower_zeros.push(LowerZero(nop, args_start, count))
-    i = end - 1
-    loop i >= start:
-        it = tl_values[i]
-        if it.is_slot:
-            a = e_slot(it.ref)
-            if it.stack_target >= 0: drop_stack_closure(a, it.stack_target)
-            else: drop_at(a, it.t)
-            if it.cond: e_zero(a, tsize(it.t))
-        else:
-            release(it.ref, it.t)
-            if it.cond: e_mov(it.ref, e_iconst(0))
-        i -= 1
-    tl_values.truncate(start)
-
 # Keep ordinary construction unchanged: a placeholder becomes a zero only
 # when return/break/continue can bypass writes to some managed fields.
-build_slot = (s: int, t: int, needs_zero: bool = false) -> bool:
-    if not is_managed(t): return false
-    at = -1
-    if needs_zero:
-        lower_has_nops = true
-        at = emit(.nop, 0, 0, e_slot(s), 0, 0, 0)
-    building.push(BuildItem(true, s, t, at))
-    true
-
-drop_held = (items: int, built: int):
-    k = building.len() - 1
-    loop k >= built:
-        it = building[k]
-        if it.init >= 0:
-            ins = ir.code[it.init]
-            if it.is_slot:
-                ins.op = .zero
-                ins.imm = tsize(it.t)
-            else: ins.imm = rt("__arr_repeat")
-            ir.code[it.init] = ins
-        if it.is_slot: drop_at(e_slot(it.ref), it.t)
-        else: release(it.ref, it.t)
-        k -= 1
-    if items < tl_items.len():
-        start = tl_items[items]
-        k = tl_values.len() - 1
-        loop k >= start:
-            it = tl_values[k]
-            if it.is_slot:
-                if it.stack_target >= 0: drop_stack_closure(e_slot(it.ref), it.stack_target)
-                else: drop_at(e_slot(it.ref), it.t)
-            else: release(it.ref, it.t)
-            k -= 1
-
-enter_cond = (): cond_depth += 1
-leave_cond = (): cond_depth -= 1
-
 # ---------------- structured control ----------------
-blk = ():
-    e_block()
-    ctl += 1
-lop = ():
-    e_loop()
-    ctl += 1
-    if lop_watch:
-        # (a web page: each pass counts down, and every million the watchdog asks how long the
-        # page has been running without a break: a loop that never ends is stopped, its output
-        # shown, rather than the page hanging)
-        g = e_gaddr(global_addr_off(int(syms[prelude.get(intern("__loop_budget")) ?? 0].ref)))
-        v = e_bin(.sub, VI, e_load(VI, g, 0, 8), e_iconst(1))
-        e_store(g, 0, v, 8)
-        iff(e_bin(.lts, VI, v, e_iconst(0)))
-        e_call0(rt("__loop_watchdog"), -1)
-        endc()
-iff = (c: int):
-    e_if(c)
-    ctl += 1
-els = (): e_else()
-endc = ():
-    e_end()
-    ctl -= 1
 # branch to the construct opened at nesting level `level` (1-based count of open constructs)
-br_to = (level: int): e_br(ctl - level)
-brif_to = (c: int, level: int): e_brif(c, ctl - level)
-
 # ---------------- scopes ----------------
-scope_push = ():
-    scope_locals.push([])
-    scope_defers.push([])
-
-scope_add_local = (l: int):
-    if scope_locals.len() == 0: return
-    f = int(locals[l].flags)
-    if not is_managed(store_type(l)) or f & (LF_CAPTURE | LF_ALIAS | LF_BYREF) != 0: return
-    if f & LF_PARAM != 0 and not copy_inputs.has(l): return
-    if ownership_type(store_type(l)): owner_register(int(locals[l].offset), store_type(l))
-    scope_locals[scope_locals.len() - 1].push(l)
-
-opt_has = (addr: int, inner: int) -> int:
-    if quantity_base(inner) == T_MATH_INT: return e_bin(.ne, VI, e_load(VI, addr, 0, 8), e_iconst(0))
-    e_load(VI, addr, tsize(inner), 1)
-
-opt_value = (addr: int, inner: int) -> int:
-    if quantity_base(inner) == T_MATH_INT: return e_bin(.xor, VI, e_load(VI, addr, 0, 8), e_iconst(1))
-    load_val(inner, addr, 0)
-
 # ---------------- places ----------------
-read_place = (p: Place, t: int) -> int:
-    if p.math_opt: return e_bin(.xor, VI, (if p.mem: e_load(VI, p.v, 0, 8) else: p.v), e_iconst(1))
-    if not p.mem: return p.v
-    load_val(t, p.v, 0)
-
-write_place = (p: Place, t: int, v: int):
-    if p.math_opt:
-        encoded = e_bin(.xor, VI, v, e_iconst(1))
-        if p.mem: e_store(p.v, 0, encoded, 8)
-        else: e_mov(p.v, encoded)
-        return
-    if not p.mem:
-        e_mov(p.v, v)
-        return
-    store_val(t, p.v, 0, v)
-
-place_addr = (p: Place, t: int) -> int:
-    if p.mem and not p.math_opt: return p.v
-    # a value in a register: spill to a temporary slot
-    s = new_temp(t)
-    a = e_slot(s)
-    store_val(t, a, 0, read_place(p, t))
-    a
-
 # ---------------- boxes ----------------
 # A boxed field (types.jo, decide_boxes) holds a pointer to [rc][value], null until it is given a
 # value: an empty box reads as its type's default (box_dflt_off). Copies of what holds it share
@@ -801,110 +377,17 @@ place_addr = (p: Place, t: int) -> int:
 const BOX_HDR = 8
 
 # the type a field's memory holds: its value, or the box keeping it
-field_store_type = (f: int) -> int:
-    if fields[f].boxed: return mk_box(int(fields[f].type))
-    int(fields[f].type)
-
 # the boxed field (an index into fields) that field node e reads, or -1
-boxed_field_of = (e: int) -> int:
-    if nodes[e].kind != .field: return -1
-    aux = int(nodes[e].aux)
-    bt = prune(ntype(int(nodes[e].a)))
-    if types[bt].kind == .ptr: bt = prune(int(types[bt].elem))
-    f = -1
-    if aux == -3:
-        layout(bt)
-        f = int(variants[int(structs[int(types[bt].st)].variants) + int(nodes[e].aux2)].fields) + int(nodes[e].ival)
-    else if aux >= 0 and types[bt].kind == .struct_:
-        layout(bt)
-        f = int(structs[int(types[bt].st)].fields) + aux
-    if f >= 0 and fields[f].boxed: return f
-    -1
-
 box_dflt_data: {int: int} = {}
 
 # (the rodata offset of) the value an empty box of type t reads as
-box_dflt_off = (t0: int) -> int:
-    t = prune(t0)
-    if let o = box_dflt_data.get(t):
-        if fused_on and o >= fz_r0: fz_note(4, o, t, 0, 0)
-        return o
-    loop rodata.len() % 8 != 0: rodata.push(0)
-    o = rodata.len()
-    ro_starts.push(o)
-    rodata.resize(o + max(tsize(t), 8))
-    v = box_default(t)
-    if v > 0:
-        loop i in [0..4): rodata[o + i] = u8((v >> (8 * i)) & 255)
-    box_dflt_data[t] = o
-    if fused_on: fz_note(4, o, t, 0, 0)
-    o
-
 # the address of the value in box p (of a value of type t), or of the default when p is empty
-box_val = (p: int, t: int) -> int:
-    r = vreg(VI)
-    e_mov(r, e_daddr(box_dflt_off(t)))
-    iff(e_bin(.ne, VI, p, e_iconst(0)))
-    e_mov(r, e_addi(p, BOX_HDR))
-    endc()
-    r
-
 # the box at slot made the writer's own (a new one holding the default when it is empty, a copy
 # when it is shared), for a write through it: the address of its value
-box_unique = (slot: int, t: int) -> int:
-    sz = tsize(t)
-    iff(e_bin(.eq, VI, e_load(VI, slot, 0, ptr_size), e_iconst(0)))
-    was = ir_cold
-    ir_cold = true
-    np = e_call1(rt("__box_new"), e_iconst(sz), VI)
-    e_copy(e_addi(np, BOX_HDR), e_daddr(box_dflt_off(t)), sz)
-    e_store(slot, 0, np, ptr_size)
-    ir_cold = was
-    endc()
-    p = e_load(VI, slot, 0, ptr_size)
-    bt = mk_box(t)
-    if not opt_release:
-        # (one call, which the code generator skips for a box with one reference: CALL_IF_SHARED)
-        q = e_call1(lf_helper(.boxuniq, bt, 0), p, VI)
-        ir.code[ir.code.len() - 1].c = CALL_IF_SHARED
-        e_store(slot, 0, q, ptr_size)
-        return e_addi(q, BOX_HDR)
-    r = vreg(VI)
-    e_mov(r, p)
-    iff(e_bin(.ne, VI, hdr_load(p, 0), e_iconst(1)))
-    was2 = ir_cold
-    ir_cold = true
-    e_mov(r, e_call1(lf_helper(.boxuniq, bt, 0), p, VI))
-    e_store(slot, 0, r, ptr_size)
-    ir_cold = was2
-    endc()
-    e_addi(r, BOX_HDR)
-
 # the owned value v of type t put in the box at slot (empty, or its box already released): a new
 # box, or none for none (an empty box reads as none)
-box_put = (slot: int, t0: int, v: int):
-    t = prune(t0)
-    sz = tsize(t)
-    is_opt = types[t].kind == .opt
-    if is_opt:
-        e_store(slot, 0, e_iconst(0), ptr_size)
-        iff(e_load(VI, v, tsize(int(types[t].elem)), 1))
-    p = e_call1(rt("__box_new"), e_iconst(sz), VI)
-    e_copy(e_addi(p, BOX_HDR), v, sz)
-    e_store(slot, 0, p, ptr_size)
-    if is_opt: endc()
-
 # owned value v stored in field f of the value at addr (whose memory there is zero, or released)
-store_field = (f: int, addr: int, v: int):
-    if fields[f].boxed: box_put(e_addi(addr, int(fields[f].offset)), int(fields[f].type), v)
-    else: store_val(int(fields[f].type), addr, int(fields[f].offset), v)
-
 # the address of field f's value in the value at addr, for reading
-field_val_addr = (f: int, addr: int) -> int:
-    a = e_addi(addr, int(fields[f].offset))
-    if not fields[f].boxed: return a
-    box_val(e_load(VI, a, 0, ptr_size), int(fields[f].type))
-
 # (gen_place of a boxed field gives the field's own memory, the box pointer, when this is set:
 # assign_to, giving it a new box)
 box_slot = false
@@ -912,52 +395,11 @@ box_slot = false
 pinned_box = -1
 pinned_type = 0
 
-field_place = (f: int, addr: int, write: bool, slot: bool) -> Place:
-    a = e_addi(addr, int(fields[f].offset))
-    if not fields[f].boxed or slot: return Place(true, a)
-    if write:
-        v = box_unique(a, int(fields[f].type))
-        pinned_box = e_load(VI, a, 0, ptr_size)
-        pinned_type = mk_box(int(fields[f].type))
-        return Place(true, v)
-    Place(true, box_val(e_load(VI, a, 0, ptr_size), int(fields[f].type)))
-
 # ---------------- shared variables ----------------
 # A variable that closures share by reference (LF_SHARED, see check.jo) lives in a cell: a
 # one-element array. The variable (and each capture) holds the cell, and every access goes to its
 # element, without copy-on-write, so all holders see the same value.
-share_root = (l: int) -> int:
-    r = l
-    loop int(locals[r].flags) & LF_CAPTURE != 0 and int(locals[r].flags) & LF_VALUECAP == 0: r = int(locals[r].outer)
-    r
-
-is_shared = (l: int) -> bool: int(locals[share_root(l)].flags) & LF_SHARED != 0
-
 # the type of what the variable's storage holds: the value, or the cell
-store_type = (l: int) -> int:
-    t = int(locals[l].type)
-    if int(locals[l].flags) & (LF_OWNERBORROW | LF_PARTBORROW) != 0: return mk_ptr(t)
-    if is_shared(l): return mk_array(t)
-    if math_word_captures.has(l): return T_INT
-    t
-
-cell_place = (l: int) -> Place:
-    if int(locals[l].flags) & LF_CAPTURE != 0: return Place(true, e_addi(env_v, int(locals[l].env_off)))
-    if locals[l].offset >= 0: return Place(true, e_slot(int(locals[l].offset)))
-    Place(false, int(locals[l].vreg))
-
-check_cell_type = (l: int):
-    # (a cell holding a closure that holds the cell would never be freed: values that can hold
-    # functions are not shared like this)
-    if type_has_fn(int(locals[l].type)):
-        nm = name_of(int(locals[l].name))
-        fatal(int(locals[l].pos), "'{nm}' is changed after a closure captured it, and it can hold functions ({dt(int(locals[l].type))}): a closure kept in it would keep it alive forever. Make it a global, or pass it to the closure as {jd(int(locals[l].pos), "a `mut`", "an `@`")} parameter")
-new_cell = (l: int):
-    check_cell_type(l)
-    sz = tsize(int(locals[l].type))
-    if sz < 1: sz = 1
-    write_place(cell_place(l), store_type(l), e_call2(rt("__arr_repeat"), e_iconst(1), e_iconst(sz), VI))
-
 bounds_check = (arr: int, idx: int, pos: int):
     # arr: array object pointer (may be null), idx: index
     loc = loc_data(pos)
@@ -1032,36 +474,6 @@ e_faddr = (lf: int) -> int:
     d
 
 # length of an array/string object pointer (0 for null)
-arr_len = (p: int) -> int:
-    r = vreg(VI)
-    emit(.iconst, VI, r, 0, 0, 0, 0)
-    iff(e_bin(.ne, VI, p, e_iconst(0)))
-    e_mov(r, hdr_load(p, 8))
-    endc()
-    r
-
-arr_unique = (slot_addr_or_place: Place, at: int):
-    # ensure the array in the place is uniquely owned
-    # (fast path inline: a non-null array with refcount 1 is already unique. Debug builds keep
-    # the IR one call, which the code generator skips in those cases (CALL_IF_SHARED): out of
-    # line, every element write cost a call, half of nbody's time)
-    p = read_place(slot_addr_or_place, at)
-    if not opt_release:
-        np0 = e_call1(lf_helper(.arruniq, at, 0), p, VI)
-        ir.code[ir.code.len() - 1].c = CALL_IF_SHARED
-        write_place(slot_addr_or_place, at, np0)
-        return
-    iff(e_bin(.ne, VI, p, e_iconst(0)))
-    iff(e_bin(.ne, VI, hdr_load(p, 0), e_iconst(1)))
-    was = ir_cold
-    ir_cold = true
-    np = e_call1(lf_helper(.arruniq, at, 0), p, VI)
-    ir_cold = was
-    write_place(slot_addr_or_place, at, np)
-    endc()
-    endc()
-    emit(.assume, 0, 0, read_place(slot_addr_or_place, at), 0, 0, A_RC1)
-
 # indexes computed beforehand (a `mut` element passed as a copy finds its place again after the
 # call with the same index)
 frozen: {int: int}
@@ -1105,37 +517,12 @@ call_eval_order = (n: int) -> int[]:
 
 # A scalar expression can name a local's mutable register. Keep the value
 # already read before evaluating a later operand/argument that can assign it.
-freeze_scalar = (v: int, t: int) -> int:
-    if v < 0 or is_kv(v): return v
-    saved = vreg(vt_of(t))
-    e_mov(saved, v)
-    saved
-
 # A snapshot taken only to keep an argument stable while the callee runs. The
 # result is owned, so nothing refers to the snapshot once the call returns;
 # release it there rather than at the end of the statement. A snapshot kept
 # alive across a later mutating call in the same statement (`add(@p
 # Node[text(p t)])`) would make that call detach and copy p's buffers.
 arg_snapshots: TempItem[]
-
-release_arg_snapshots = (mark: int):
-    loop arg_snapshots.len() > mark:
-        it = arg_snapshots.pop()
-        k = tl_values.len() - 1
-        found = false
-        loop k >= 0 and not found:
-            x = tl_values[k]
-            if x.is_slot == it.is_slot and x.ref == it.ref:
-                tl_values.remove(k)
-                # An early release can belong to an enclosing statement.
-                # Preserve the offsets of every still-active nested statement.
-                loop j in [0..tl_items.len()):
-                    if tl_items[j] > k: tl_items[j] -= 1
-                found = true
-            k -= 1
-        if not found: continue
-        if it.is_slot: drop_at(e_slot(it.ref), it.t)
-        else: release(it.ref, it.t)
 
 # (a is part of the same variable as one of the call's `mut` arguments; for the
 # copy policy (callee 0 or more), unless their field paths part, or a checked
@@ -1191,19 +578,6 @@ pw_depth = 0
 # prefix of the longer, as far as the compiler can tell (xs[i] and xs[j] may be the same)?
 # the variable (ident node) whose array or map, or box, holds the element place n is in, or 0
 # does expression n name the variable of ident node r?
-ret_vt = (t: int) -> int:
-    c = vc(t)
-    if c == VC_VOID: return -1
-    if c == VC_AGG: return -1
-    vt_of(t)
-
-finish_call = (ret: int, rv: int, rslot: int) -> Val:
-    c = vc(ret)
-    if c == VC_AGG: return Val(e_slot(rslot), true, rslot)
-    if c == VC_VOID: return V(-1, false)
-    if c == VC_INT: return V(norm(rv, ret), true)
-    V(rv, true)
-
 inst_mutmask = (f: int) -> int:
     d = int(fns[f].decl)
     if d == 0 or nodes[d].kind != .fn_: return 0
@@ -1480,13 +854,6 @@ partial_layout = (e: int) -> int[]:
 
 # ---------------- string interpolation ----------------
 # ---------------- value blocks ----------------
-result_from_slot = (rs: int, t: int) -> Val:
-    a = e_slot(rs)
-    if vc(t) == VC_AGG: return Val(a, true, rs)
-    value = load_val(t, a, 0)
-    if ownership_type(t): return Val(value, true, rs)
-    V(value, true)
-
 # ---------------- match ----------------
 # constant value of an integer literal pattern
 pat_int = (a0: int) -> (bool, int):
@@ -1806,23 +1173,6 @@ texture_offsets = (t0: int, base: int, out: mut int[]):
 # does index n read the same before and after rhs runs, with nothing of its own to run or trap:
 # literals and plain locals rhs does not write, under arithmetic with no storage check?
 # Checked exact stores are conversion nodes and must be captured. O(nodes of n x nodes of rhs)
-retain_elems = (arr: int, et: int):
-    # retain every element of a freshly copied array
-    n = arr_len(arr)
-    i = vreg(VI)
-    e_mov(i, e_iconst(0))
-    blk()
-    lop()
-    brif_to(e_bin(.ges, VI, i, n), ctl - 1)
-    ea = e_bin(.add, VI, e_addi(arr, 24), e_bin(.mul, VI, i, e_iconst(owner_stride(et))))
-    if ownership_type(et): iff(e_load(VI, ea, tsize(et), 1))
-    copy_at(ea, et)
-    if ownership_type(et): endc()
-    e_mov(i, e_addi(i, 1))
-    br_to(ctl)
-    endc()
-    endc()
-
 # ---------------- vectors ----------------
 vec_comps = (t: int) -> int:
     if prune(t) == T_MAT4: return 16
@@ -3208,32 +2558,6 @@ lower_extern_thunk = (lf: int, f: int):
 # temporary owner until the enclosing object is complete.
 # Publish only successfully initialized elements. The array owns the prefix
 # during failures in later constructors; each pending element owns itself.
-owner_array_from_fixed = (source: int, et: int, count: int, t: int, dynamic: bool = false) -> Val:
-    s = new_temp(t)
-    sa = e_slot(s)
-    e_zero(sa, tsize(t))
-    owner_register(s, t)
-    n = if dynamic: count else: e_iconst(count)
-    e_call3(rt("__arr_reserve"), sa, e_iconst(owner_stride(et)), n, -1)
-    i = vreg(VI)
-    e_mov(i, e_iconst(0))
-    blk()
-    lop()
-    brif_to(e_bin(.ges, VI, i, n), ctl - 1)
-    ea = e_bin(.add, VI, source, e_bin(.mul, VI, i, e_iconst(tsize(et))))
-    value = own(Val(load_val(et, ea, 0), false, -1), et)
-    dst = e_call2(rt("__arr_push_slot"), sa, e_iconst(owner_stride(et)), VI)
-    store_val(et, dst, 0, value.v)
-    owner_element_live(dst, et)
-    owner_forget_slot(value.slot)
-    e_mov(i, e_addi(i, 1))
-    br_to(ctl)
-    endc()
-    endc()
-    result = e_load(VI, sa, 0, ptr_size)
-    owner_values[result] = s
-    Val(result, true, s)
-
 # Eager resource snapshots never retain the source. Allocation may fail before
 # any new element exists; inline element copy hooks have no-failure summaries.
 # Unlike inline hooks, recursive copies can allocate. Hold each completed

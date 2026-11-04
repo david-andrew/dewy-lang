@@ -5,7 +5,7 @@ import re
 from tests.support import ROOT
 
 
-def modules_for(source, output, leaf="lower_group"):
+def modules_for(source, output, leaf="lower_group", flags=()):
     # Keep the real service graph: this group owns the recursive dispatcher, so
     # stubbing each outward edge would hide the execution we need to compare.
     # Switch only the requested leaf. Other twins are import shims to the live services;
@@ -43,7 +43,7 @@ def modules_for(source, output, leaf="lower_group"):
     modules['main.jo'] = ''.join(f'use "{name}"\n' for name, _ in rebind
                                  if name != 'main.jo') + modules['main.jo']
     command = ', '.join(json.dumps(str(s)) for s in
-                        ('leaf-test', 'build', source, '-o', output))
+                        ('leaf-test', 'build', source, '-o', output, *flags))
     modules['main.jo'] = modules['main.jo'].replace('main = ():',
         'lower_test_cli = ():\n' + ''.join('    ' + function + '()\n'
                                            for _, function in rebind), 1)

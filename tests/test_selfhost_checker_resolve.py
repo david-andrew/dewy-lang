@@ -213,7 +213,13 @@ def compare(compiler, tmp_path, release, driver, status=0, extra_stems=(), doubl
                 text = text.replace(".dewy'", ".jo'")
             (directory / f'{stem}.{extension}').write_text(text)
         for name, text in (jo_doubles or {}).items():
-            (directory / name).write_text(text.replace(".dewy'", ".jo'") if extension == 'jo' else text)
+            if extension == 'jo':
+                text = text.replace(".dewy'", ".jo'")
+                # Real Dewy services may also import the leaf under comparison.
+                # Switch those edges too, so the graph has one implementation.
+                for stem in extra_stems:
+                    text = text.replace(f'p"{stem}.dewy"', f'p"{stem}.jo"')
+            (directory / name).write_text(text)
         source, binary = directory / 'driver.jo', directory / 'driver'
         source.write_text(''.join(f"use '{s}.{extension}'\n" for s in stems) + driver)
         built = subprocess.run([compiler, 'build', source, '-o', binary,

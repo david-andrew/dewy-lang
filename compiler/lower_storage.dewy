@@ -1,0 +1,775 @@
+$runtime_checks
+from p"ir.jo" import (A_RC1 M_FLOAT M_HDR M_SIGNED VF VI VS e_addi e_bin e_block e_br e_brif e_call0 e_call1 e_call2 e_call3 e_copy e_else e_end e_fconst e_iconst e_if e_load e_loop e_mov e_slot e_store e_un e_zero emit ir ir_cold ir_pos is_kv kv_of new_slot vreg)
+from p"lower.jo" import (BOX_HDR BuildItem HK LowerTypePlan LowerZero Place TempItem VC_AGG VC_FLT VC_INT VC_VOID Val arg_snapshots box_dflt_data building closure_scalar_environment cond_depth ctl drop_stack_closure e_daddr e_gaddr env_v global_addr_off lf_helper lf_of_inst lop_watch lower_epoch lower_has_nops lower_mark_serial lower_planning lower_types lower_zeros mt_active_off opt_release pinned_box pinned_type ro_starts rodata rt rt_global scope_defers scope_locals tl_cond tl_items tl_nop tl_values)
+from p"ir.jo" import (CALL_IF_SHARED CALL_RC_DEC CALL_RC_INC)
+from p"checker_state.dewy" import (SK)
+from p"check.jo" import (jd)
+from p"types.jo" import (dt)
+from p"check.jo" import (LF_ALIAS LF_BYREF LF_CAPTURE LF_OWNERBORROW LF_PARAM LF_PARTBORROW LF_SHARED LF_VALUECAP locals prelude syms)
+from p"types.jo" import (T_INT T_MATH_INT box_default fields is_aggregate is_managed layout math_optional mk_array mk_box mk_ptr prune ptr_size structs talign tkind tsize type_has_fn types variants)
+from p"copies.jo" import (copy_inputs)
+from p"util.jo" import (fatal ice intern name_of)
+from p"lower_helpers.dewy" import (field_list)
+from p"fused.jo" import (fused_on fz_note fz_r0)
+from p"expr.jo" import (is_map_type ntype)
+from p"math_lower.jo" import (math_payload_type math_tag math_word_captures)
+from p"ast.jo" import (nodes)
+from p"ownership.jo" import (owner_drop owner_element_live owner_forget_slot owner_hook_result owner_map_copies owner_register owner_stride owner_value owner_values ownership_copies)
+from p"ownership_types.dewy" import (ownership_copyable ownership_type)
+from p"facts.jo" import (positive_epoch)
+from p"units.jo" import (quantity_base)
+# Value storage, lifetime and structured control; state stays in lower.jo.
+LSWord:type=int64<overflow='wrap'>
+hdr_load=(p:LSWord off:LSWord):>int64=>$unsafe {
+    return e_load(VI p off 8 | M_HDR)
+}
+hdr_store=(p:LSWord off:LSWord v:LSWord):>void=>$unsafe {
+    e_store(p off v 8 | M_HDR);
+}
+lower_type_plan=(t0:LSWord):>ptr<LowerTypePlan>=>$unsafe {
+    if t0 >=? lower_types.length {lower_types.resize(max(t0 + 1 lower_types.length * 2));}
+    let plan=lower_types.ptr + t0
+    if plan[0].epoch =? lower_epoch {return plan}
+    let t=quantity_base(t0)
+    let k=types.ptr[t].kind
+    let c=VC_INT
+    let v=VI
+    if k =? 'void_' or k =? 'typeval' or k =? 'module' {c=VC_VOID}
+    else if k =? 'float_' {
+        c=VC_FLT
+        v=if LSWord(types.ptr[t].bits) =? 32 {VS} else {VF}
+    }
+    else if is_aggregate(t) {c=VC_AGG}
+    plan[0].value_class = c;
+    plan[0].vtype = v;
+    plan[0].epoch = lower_epoch;
+    return plan
+}
+vc=(t0:LSWord):>int64=>$unsafe {
+    if lower_planning {return lower_type_plan(t0)[0].value_class}
+    let t=quantity_base(t0)
+    let k=types.ptr[t].kind
+    if k =? 'void_' or k =? 'typeval' or k =? 'module' {return VC_VOID}
+    if k =? 'float_' {return VC_FLT}
+    if is_aggregate(t) {return VC_AGG}
+    return VC_INT
+}
+vt_of=(t0:LSWord):>int64=>$unsafe {
+    if lower_planning {return lower_type_plan(t0)[0].vtype}
+    let t=quantity_base(t0)
+    if types.ptr[t].kind =? 'float_' {
+        if LSWord(types.ptr[t].bits) =? 32 {return VS}
+        return VF
+    }
+    return VI
+}
+mem_mode=(t0:LSWord):>int64=>$unsafe {
+    let t=quantity_base(t0)
+    let k=types.ptr[t].kind
+    let s=tsize(t)
+    if k =? 'float_' {return s | M_FLOAT}
+    if k =? 'int_' and types.ptr[t].sign {return s | M_SIGNED}
+    return s
+}
+load_val=(t:LSWord addr:LSWord off:LSWord):>int64=>$unsafe {
+    if vc(t) =? VC_AGG {return e_addi(addr off)}
+    if vc(t) =? VC_VOID {return -1}
+    return e_load(vt_of(t) addr off mem_mode(t))
+}
+store_val=(t:LSWord addr:LSWord off:LSWord v:LSWord):>void=>$unsafe {
+    let c=vc(t)
+    if c =? VC_AGG {e_copy(e_addi(addr off) v tsize(t));}
+    else if c not=? VC_VOID {e_store(addr off v mem_mode(t));}
+}
+norm=(v:LSWord t0:LSWord):>int64=>$unsafe {
+    let t=quantity_base(t0)
+    let k=types.ptr[t].kind
+    if k =? 'bool_' {return e_un('zext8' VI v)}
+    if k not=? 'int_' {return v}
+    let s=tsize(t)
+    let sg=types.ptr[t].sign
+    if s =? 1 {
+        if sg {return e_un('sext8' VI v)}
+        return e_un('zext8' VI v)
+    }
+    if s =? 2 {
+        if sg {return e_un('sext16' VI v)}
+        return e_un('zext16' VI v)
+    }
+    if s =? 4 {
+        if sg {return e_un('sext32' VI v)}
+        return e_un('zext32' VI v)
+    }
+    return v
+}
+zero_val=(t:LSWord):>int64=>$unsafe {
+    if vt_of(t) =? VI {return e_iconst(0)}
+    return e_fconst(0.0 vt_of(t))
+}
+V=(v:LSWord owned:bool):>Val=>$unsafe {
+    return Val[v owned -1]
+}
+note_mt_active=():>void=>$unsafe {
+    # (a fused worker notes each function's use: fused.jo)
+    if mt_active_off >=? 0 and not fused_on {return}
+    let s=prelude.get(intern("__mt_active")) ?? 0
+    if s =? 0 or syms.ptr[s].kind not=? SK.global {ice("missing runtime global __mt_active");}
+    mt_active_off=global_addr_off(LSWord(syms.ptr[s].ref))
+}
+static_datum=(v:LSWord):>bool=>$unsafe {
+    let i=ir.code.length - 1
+    let floor=i - 4
+    loop i >=? 0 and i >=? floor {
+        if LSWord(ir.code.ptr[i].dst) =? v and ir.code.ptr[i].op =? 'daddr' {return true}
+        i -= 1;
+    }
+    return false
+}
+retain=(v:LSWord t0:LSWord):>void=>$unsafe {
+    if static_datum(v) {return}
+    let t=quantity_base(t0)
+    if math_optional(t) {
+        retain(e_bin('xor' VI v e_iconst(1)) T_MATH_INT);
+        return
+    }
+    if t =? T_MATH_INT {
+        iff(math_tag(v));
+        let was=ir_cold
+        ir_cold=true
+        retain(e_addi(v -1) math_payload_type());
+        ir_cold=was
+        endc();
+        return
+    }
+    if not opt_release {
+        # (one call in the IR, which the code generator does inline when it can: CALL_RC_INC)
+        e_call1(rt("__rc_inc") v -1);
+        ir.code.ptr[ir.code.length - 1].c = CALL_RC_INC;
+        note_mt_active();
+        return
+    # during a parallel job refcounts must be updated atomically (out of line)
+    }
+    blk();
+    let done=ctl
+    iff(rt_global("__mt_active"));
+    let was=ir_cold
+    ir_cold=true
+    e_call1(rt("__rc_inc") v -1);
+    ir_cold=was
+    br_to(done);
+    endc();
+    iff(e_bin('ne' VI v e_iconst(0)));
+    let rc=hdr_load(v 0)
+    iff(e_bin('gts' VI rc e_iconst(0)));
+    hdr_store(v 0 e_addi(rc 1));
+    endc();
+    endc();
+    endc();
+}
+release=(v:LSWord t0:LSWord):>void=>$unsafe {
+    let t=quantity_base(t0)
+    if math_optional(t) {
+        release(e_bin('xor' VI v e_iconst(1)) T_MATH_INT);
+        return
+    }
+    if t =? T_MATH_INT {
+        iff(math_tag(v));
+        let was=ir_cold
+        ir_cold=true
+        release_call(e_addi(v -1) math_payload_type());
+        ir_cold=was
+        endc();
+        return
+    }
+    if not opt_release {
+        release_call(v t);
+        ir.code.ptr[ir.code.length - 1].c = CALL_RC_DEC;
+        note_mt_active();
+        return
+    }
+    blk();
+    let done=ctl
+    iff(rt_global("__mt_active"));
+    let was=ir_cold
+    ir_cold=true
+    release_call(v t);
+    ir_cold=was
+    br_to(done);
+    endc();
+    iff(e_bin('ne' VI v e_iconst(0)));
+    let rc=hdr_load(v 0)
+    iff(e_bin('gts' VI rc e_iconst(1)));
+    hdr_store(v 0 e_addi(rc -1));
+    els();
+    # last reference: the out-of-line path frees (and releases elements)
+    iff(e_bin('eq' VI rc e_iconst(1)));
+    release_call(v t);
+    endc();
+    endc();
+    endc();
+    endc();
+}
+release_call=(v:LSWord t:LSWord):>void=>$unsafe {
+    if types.ptr[t].kind =? 'array' and is_managed(LSWord(types.ptr[t].elem)) {e_call1(lf_helper(HK.arrrel t 0) v -1);}
+    else if types.ptr[t].kind =? 'box' {e_call1(lf_helper(HK.boxrel t 0) v -1);}
+    else {e_call1(rt("__rc_dec") v -1);}
+}
+drop_at=(addr:LSWord t0:LSWord):>void=>$unsafe {
+    if ownership_type(t0) {
+        owner_drop(addr);
+        return
+    }
+    let t=quantity_base(t0)
+    if not is_managed(t) {return}
+    if ownership_type(t) {
+        owner_drop(addr);
+        return
+    }
+    if vc(t) =? VC_INT {
+        release(e_load(VI addr 0 ptr_size) t);
+        return
+    }
+    env_guard(addr t);
+    e_call1(lf_helper(HK.drop t 0) addr -1);
+    if env_guarded(t) {endc();}
+}
+copy_at=(addr:LSWord t0:LSWord):>void=>$unsafe {
+    let t=quantity_base(t0)
+    if not is_managed(t) {return}
+    if vc(t) =? VC_INT {
+        e_store(addr 0 copy_ref(e_load(VI addr 0 ptr_size) t) ptr_size);
+        return
+    }
+    env_guard(addr t);
+    e_call1(lf_helper(HK.copy t 0) addr -1);
+    if env_guarded(t) {endc();}
+}
+env_guarded=(t:LSWord):>bool=>$unsafe {
+    let k=types.ptr[t].kind
+    return (k =? 'fn_' or k =? 'polyfn' or k =? 'callable') and not ownership_type(t)
+}
+env_guard=(addr:LSWord t:LSWord):>void=>$unsafe {
+    if env_guarded(t) {iff(e_bin('ne' VI e_load(VI addr ptr_size ptr_size) e_iconst(0)));}
+}
+copy_ref=(v:LSWord t:LSWord):>int64=>$unsafe {
+    if ownership_type(t) {
+        if tkind(t) =? 'array' {return e_call1(lf_helper(HK.arrcopy t 0) v VI)}
+        if tkind(t) =? 'box' {return e_call1(lf_helper(HK.owner_boxcopy t 0) v VI)}
+    }
+    retain(v t);
+    let k=types.ptr[prune(t)].kind
+    if (k =? 'array' or k =? 'box') and type_has_fn(t) {
+        return e_call1(lf_helper((if k =? 'array' {HK.arruniq} else {HK.boxuniq}) t 0) v VI)
+    }
+    return v
+}
+new_temp=(t:LSWord):>int64=>$unsafe {
+    return new_slot(tsize(t) talign(t))
+}
+reg_temp_slot=(s:LSWord t:LSWord stack_target:LSWord=-1):>void=>$unsafe {
+    if stack_target >=? 0 and closure_scalar_environment(stack_target) {return}
+    if not is_managed(t) or tl_items.length =? 0 {return}
+    tl_values.push(TempItem[true s t cond_depth >? tl_cond.ptr[tl_cond.length - 1] stack_target]);
+}
+reg_temp_vreg=(v:LSWord t:LSWord):>void=>$unsafe {
+    if not is_managed(t) or tl_items.length =? 0 {return}
+    # An empty literal is an immutable null constant. It owns no allocation,
+    # and conditional cleanup must not try to clear its constant register.
+    if is_kv(v) and kv_of(v) =? 0 {return}
+    tl_values.push(TempItem[false v t cond_depth >? tl_cond.ptr[tl_cond.length - 1]]);
+}
+borrow=(val:Val t:LSWord):>void=>$unsafe {
+    if not val.owned or not is_managed(t) {return}
+    if vc(t) =? VC_AGG or ownership_type(t) {
+        if val.slot <? 0 {ice("owned aggregate without slot");}
+        reg_temp_slot(val.slot t);
+    }
+    else {
+        # copy into a fresh vreg so later reassignment of the original can't confuse release
+        # (the value may sit in a local's own vreg, which statement cleanup must not touch)
+        let c=vreg(VI)
+        e_mov(c val.v);
+        reg_temp_vreg(c t);
+    }
+}
+own=(val:Val t:LSWord):>Val=>$unsafe {
+    if val.owned {return val}
+    if ownership_type(t) {
+        if not ownership_copyable(t) {fatal(ir_pos "cannot copy a move-only owner");}
+        if vc(t) =? VC_INT {return owner_value(V(copy_ref(val.v t) true) t)}
+        let hook=ownership_copies.get(prune(t))
+        if hook not=? none {return owner_hook_result(hook val.v t)}
+        let copier=owner_map_copies.get(prune(t))
+        if copier not=? none {
+            let slot=new_temp(t)
+            let addr=e_slot(slot)
+            e_call2(lf_of_inst(copier) addr val.v -1);
+            owner_register(slot t);
+            return Val[addr true slot]
+        }
+        if is_map_type(t) {
+            let slot=new_temp(t)
+            let addr=e_slot(slot)
+            e_zero(addr tsize(t));
+            owner_register(slot t);
+            loop field in field_list(t) {
+                let child=own(Val[load_val(field[0] val.v field[1]) false -1] field[0])
+                store_val(field[0] addr field[1] child.v);
+                if ownership_type(field[0]) {owner_forget_slot(child.slot);}
+            }
+            return Val[addr true slot]
+        }
+        let slot=new_temp(t)
+        let addr=e_slot(slot)
+        e_copy(addr val.v tsize(t));
+        copy_at(addr t);
+        owner_register(slot t);
+        return Val[addr true slot]
+    }
+    if vc(t) =? VC_AGG {
+        let s=new_temp(t)
+        let a=e_slot(s)
+        e_copy(a val.v tsize(t));
+        if is_managed(t) {copy_at(a t);}
+        return Val[a true s]
+    }
+    if is_managed(t) {return Val[copy_ref(val.v t) true -1]}
+    return Val[val.v true -1]
+}
+stmt_begin=():>void=>$unsafe {
+    positive_epoch += 1;
+    tl_items.push(tl_values.length);
+    lower_mark_serial += 1;
+    tl_nop.push((ir.code.length << 32) | lower_mark_serial);
+    tl_cond.push(cond_depth);
+}
+stmt_end=():>void=>$unsafe {
+    let start=tl_items.pop()
+    let end_=tl_values.length
+    let nop=tl_nop.pop()
+    tl_cond.pop();
+    # Append the demanded zero inventory directly into the IR argument arena.
+    let args_start=ir.args.length
+    loop i in [start..end_) {
+        let it=tl_values.ptr[i]
+        if it.cond {ir.args.push(int32<overflow='wrap'>(it.ref * 2 + LSWord(int64(not it.is_slot))));}
+    }
+    let count=ir.args.length - args_start
+    if count >? 0 {
+        lower_zeros.push(LowerZero[nop args_start count]);
+    }
+    let i=end_ - 1
+    loop i >=? start {
+        let it=tl_values.ptr[i]
+        if it.is_slot {
+            let a=e_slot(it.ref)
+            if it.stack_target >=? 0 {drop_stack_closure(a it.stack_target);}
+            else {drop_at(a it.t);}
+            if it.cond {e_zero(a tsize(it.t));}
+        }
+        else {
+            release(it.ref it.t);
+            if it.cond {e_mov(it.ref e_iconst(0));}
+        }
+        i -= 1;
+    }
+    tl_values.truncate(start);
+}
+build_slot=(s:LSWord t:LSWord needs_zero:bool=false):>bool=>$unsafe {
+    if not is_managed(t) {return false}
+    let at:LSWord=-1
+    if needs_zero {
+        lower_has_nops=true
+        at=emit('nop' 0 0 e_slot(s) 0 0 0)
+    }
+    building.push(BuildItem[true s t at]);
+    return true
+}
+drop_held=(items:LSWord built:LSWord):>void=>$unsafe {
+    let k=building.length - 1
+    loop k >=? built {
+        let it=building.ptr[k]
+        if it.init >=? 0 {
+            let ins=ir.code.ptr[it.init]
+            if it.is_slot {
+                ins.op = 'zero';
+                ins.imm = tsize(it.t);
+            }
+            else {ins.imm = rt("__arr_repeat");}
+            ir.code.ptr[it.init] = ins;
+        }
+        if it.is_slot {drop_at(e_slot(it.ref) it.t);}
+        else {release(it.ref it.t);}
+        k -= 1;
+    }
+    if items <? tl_items.length {
+        let start=tl_items.ptr[items]
+        k=tl_values.length - 1
+        loop k >=? start {
+            let it=tl_values.ptr[k]
+            if it.is_slot {
+                if it.stack_target >=? 0 {drop_stack_closure(e_slot(it.ref) it.stack_target);}
+                else {drop_at(e_slot(it.ref) it.t);}
+            }
+            else {release(it.ref it.t);}
+            k -= 1;
+        }
+    }
+}
+enter_cond=():>void=>$unsafe {
+    cond_depth += 1;
+}
+leave_cond=():>void=>$unsafe {
+    cond_depth -= 1;
+}
+blk=():>void=>$unsafe {
+    e_block();
+    ctl += 1;
+}
+lop=():>void=>$unsafe {
+    e_loop();
+    ctl += 1;
+    if lop_watch {
+        # (a web page: each pass counts down, and every million the watchdog asks how long the
+        # page has been running without a break: a loop that never ends is stopped, its output
+        # shown, rather than the page hanging)
+        let g=e_gaddr(global_addr_off(LSWord(syms.ptr[prelude.get(intern("__loop_budget")) ?? 0].ref)))
+        let v=e_bin('sub' VI e_load(VI g 0 8) e_iconst(1))
+        e_store(g 0 v 8);
+        iff(e_bin('lts' VI v e_iconst(0)));
+        e_call0(rt("__loop_watchdog") -1);
+        endc();
+    }
+}
+iff=(c:LSWord):>void=>$unsafe {
+    e_if(c);
+    ctl += 1;
+}
+els=():>void=>$unsafe {
+    e_else();
+}
+endc=():>void=>$unsafe {
+    e_end();
+    ctl -= 1;
+}
+br_to=(level:LSWord):>void=>$unsafe {
+    e_br(ctl - level);
+}
+brif_to=(c:LSWord level:LSWord):>void=>$unsafe {
+    e_brif(c ctl - level);
+}
+scope_push=():>void=>$unsafe {
+    scope_locals.push([]);
+    scope_defers.push([]);
+}
+scope_add_local=(l:LSWord):>void=>$unsafe {
+    if scope_locals.length =? 0 {return}
+    let f:LSWord=LSWord(locals.ptr[l].flags)
+    if not is_managed(store_type(l)) or f & (LF_CAPTURE | LF_ALIAS | LF_BYREF) not=? 0 {return}
+    if f & LF_PARAM not=? 0 and not copy_inputs.has(l) {return}
+    if ownership_type(store_type(l)) {owner_register(LSWord(locals.ptr[l].offset) store_type(l));}
+    scope_locals.ptr[scope_locals.length - 1].push(l);
+}
+opt_has=(addr:LSWord inner:LSWord):>int64=>$unsafe {
+    if quantity_base(inner) =? T_MATH_INT {return e_bin('ne' VI e_load(VI addr 0 8) e_iconst(0))}
+    return e_load(VI addr tsize(inner) 1)
+}
+opt_value=(addr:LSWord inner:LSWord):>int64=>$unsafe {
+    if quantity_base(inner) =? T_MATH_INT {return e_bin('xor' VI e_load(VI addr 0 8) e_iconst(1))}
+    return load_val(inner addr 0)
+}
+read_place=(p:Place t:LSWord):>int64=>$unsafe {
+    if p.math_opt {return e_bin('xor' VI (if p.mem {e_load(VI p.v 0 8)} else {p.v}) e_iconst(1))}
+    if not p.mem {return p.v}
+    return load_val(t p.v 0)
+}
+write_place=(p:Place t:LSWord v:LSWord):>void=>$unsafe {
+    if p.math_opt {
+        let encoded=e_bin('xor' VI v e_iconst(1))
+        if p.mem {e_store(p.v 0 encoded 8);}
+        else {e_mov(p.v encoded);}
+        return
+    }
+    if not p.mem {
+        e_mov(p.v v);
+        return
+    }
+    store_val(t p.v 0 v);
+}
+place_addr=(p:Place t:LSWord):>int64=>$unsafe {
+    if p.mem and not p.math_opt {return p.v}
+    # a value in a register: spill to a temporary slot
+    let s=new_temp(t)
+    let a=e_slot(s)
+    store_val(t a 0 read_place(p t));
+    return a
+}
+field_store_type=(f:int64):>int64=>$unsafe {
+    if fields.ptr[f].boxed {return mk_box(LSWord(fields.ptr[f].type))}
+    return LSWord(fields.ptr[f].type)
+}
+boxed_field_of=(e:LSWord):>int64=>$unsafe {
+    if nodes.ptr[e].kind not=? 'field' {return -1}
+    let aux:LSWord=LSWord(nodes.ptr[e].aux)
+    let bt=prune(ntype(LSWord(nodes.ptr[e].a)))
+    if types.ptr[bt].kind =? 'ptr' {bt=prune(LSWord(types.ptr[bt].elem))}
+    let f:LSWord=-1
+    if aux =? -3 {
+        layout(bt);
+        f=LSWord(variants.ptr[LSWord(structs.ptr[LSWord(types.ptr[bt].st)].variants) + LSWord(nodes.ptr[e].aux2)].fields) + LSWord(nodes.ptr[e].ival)
+    }
+    else if aux >=? 0 and types.ptr[bt].kind =? 'struct_' {
+        layout(bt);
+        f=LSWord(structs.ptr[LSWord(types.ptr[bt].st)].fields) + aux
+    }
+    if f >=? 0 and fields.ptr[f].boxed {return f}
+    return -1
+}
+box_dflt_off=(t0:LSWord):>int64=>$unsafe {
+    let t=prune(t0)
+    let cached=box_dflt_data.get(t)
+    if cached not=? none {
+        let o=cached
+        if fused_on and o >=? fz_r0 {fz_note(4 o t 0 0);}
+        return o
+    }
+    loop rodata.length % 8 not=? 0 {rodata.push(0);}
+    let o=rodata.length
+    ro_starts.push(o);
+    rodata.resize(o + max(tsize(t) 8));
+    let v=box_default(t)
+    if v >? 0 {
+        loop i in [0..4) {rodata.ptr[o + i] = uint8<overflow='wrap'>((v >> (8 * i)) & 255);}
+    }
+    box_dflt_data[t] = o;
+    if fused_on {fz_note(4 o t 0 0);}
+    return o
+}
+box_val=(p:LSWord t:LSWord):>int64=>$unsafe {
+    let r=vreg(VI)
+    e_mov(r e_daddr(box_dflt_off(t)));
+    iff(e_bin('ne' VI p e_iconst(0)));
+    e_mov(r e_addi(p BOX_HDR));
+    endc();
+    return r
+}
+box_unique=(slot:LSWord t:LSWord):>int64=>$unsafe {
+    let sz=tsize(t)
+    iff(e_bin('eq' VI e_load(VI slot 0 ptr_size) e_iconst(0)));
+    let was=ir_cold
+    ir_cold=true
+    let np=e_call1(rt("__box_new") e_iconst(sz) VI)
+    e_copy(e_addi(np BOX_HDR) e_daddr(box_dflt_off(t)) sz);
+    e_store(slot 0 np ptr_size);
+    ir_cold=was
+    endc();
+    let p=e_load(VI slot 0 ptr_size)
+    let bt=mk_box(t)
+    if not opt_release {
+        # (one call, which the code generator skips for a box with one reference: CALL_IF_SHARED)
+        let q=e_call1(lf_helper(HK.boxuniq bt 0) p VI)
+        ir.code.ptr[ir.code.length - 1].c = CALL_IF_SHARED;
+        e_store(slot 0 q ptr_size);
+        return e_addi(q BOX_HDR)
+    }
+    let r=vreg(VI)
+    e_mov(r p);
+    iff(e_bin('ne' VI hdr_load(p 0) e_iconst(1)));
+    let was2=ir_cold
+    ir_cold=true
+    e_mov(r e_call1(lf_helper(HK.boxuniq bt 0) p VI));
+    e_store(slot 0 r ptr_size);
+    ir_cold=was2
+    endc();
+    return e_addi(r BOX_HDR)
+}
+box_put=(slot:LSWord t0:LSWord v:LSWord):>void=>$unsafe {
+    let t=prune(t0)
+    let sz=tsize(t)
+    let is_opt=types.ptr[t].kind =? 'opt'
+    if is_opt {
+        e_store(slot 0 e_iconst(0) ptr_size);
+        iff(e_load(VI v tsize(LSWord(types.ptr[t].elem)) 1));
+    }
+    let p=e_call1(rt("__box_new") e_iconst(sz) VI)
+    e_copy(e_addi(p BOX_HDR) v sz);
+    e_store(slot 0 p ptr_size);
+    if is_opt {endc();}
+}
+store_field=(f:LSWord addr:LSWord v:LSWord):>void=>$unsafe {
+    if fields.ptr[f].boxed {box_put(e_addi(addr LSWord(fields.ptr[f].offset)) LSWord(fields.ptr[f].type) v);}
+    else {store_val(LSWord(fields.ptr[f].type) addr LSWord(fields.ptr[f].offset) v);}
+}
+field_val_addr=(f:LSWord addr:LSWord):>int64=>$unsafe {
+    let a=e_addi(addr LSWord(fields.ptr[f].offset))
+    if not fields.ptr[f].boxed {return a}
+    return box_val(e_load(VI a 0 ptr_size) LSWord(fields.ptr[f].type))
+}
+field_place=(f:LSWord addr:LSWord write:bool slot:bool):>Place=>$unsafe {
+    let a=e_addi(addr LSWord(fields.ptr[f].offset))
+    if not fields.ptr[f].boxed or slot {return Place[true a]}
+    if write {
+        let v=box_unique(a LSWord(fields.ptr[f].type))
+        pinned_box=e_load(VI a 0 ptr_size)
+        pinned_type=mk_box(LSWord(fields.ptr[f].type))
+        return Place[true v]
+    }
+    return Place[true box_val(e_load(VI a 0 ptr_size) LSWord(fields.ptr[f].type))]
+}
+share_root=(l:LSWord):>int64=>$unsafe {
+    let r=l
+    loop LSWord(locals.ptr[r].flags) & LF_CAPTURE not=? 0 and LSWord(locals.ptr[r].flags) & LF_VALUECAP =? 0 {r=LSWord(locals.ptr[r].outer)}
+    return r
+}
+is_shared=(l:LSWord):>bool=>$unsafe {
+    return LSWord(locals.ptr[share_root(l)].flags) & LF_SHARED not=? 0
+}
+store_type=(l:int64):>int64=>$unsafe {
+    let t:LSWord=LSWord(locals.ptr[l].type)
+    if LSWord(locals.ptr[l].flags) & (LF_OWNERBORROW | LF_PARTBORROW) not=? 0 {return mk_ptr(t)}
+    if is_shared(l) {return mk_array(t)}
+    if math_word_captures.has(l) {return T_INT}
+    return t
+}
+cell_place=(l:LSWord):>Place=>$unsafe {
+    if LSWord(locals.ptr[l].flags) & LF_CAPTURE not=? 0 {return Place[true e_addi(env_v LSWord(locals.ptr[l].env_off))]}
+    if locals.ptr[l].offset >=? 0 {return Place[true e_slot(LSWord(locals.ptr[l].offset))]}
+    return Place[false LSWord(locals.ptr[l].vreg)]
+}
+check_cell_type=(l:LSWord):>void=>$unsafe {
+    # (a cell holding a closure that holds the cell would never be freed: values that can hold
+    # functions are not shared like this)
+    if type_has_fn(LSWord(locals.ptr[l].type)) {
+        let nm=name_of(LSWord(locals.ptr[l].name))
+        fatal(LSWord(locals.ptr[l].pos) "'{nm}' is changed after a closure captured it, and it can hold functions ({dt(LSWord(locals.ptr[l].type))}): a closure kept in it would keep it alive forever. Make it a global, or pass it to the closure as {jd(LSWord(locals.ptr[l].pos) "a `mut`" "an `@`")} parameter");
+    }
+}
+new_cell=(l:LSWord):>void=>$unsafe {
+    check_cell_type(l);
+    let sz=tsize(LSWord(locals.ptr[l].type))
+    if sz <? 1 {sz=1}
+    write_place(cell_place(l) store_type(l) e_call2(rt("__arr_repeat") e_iconst(1) e_iconst(sz) VI));
+}
+arr_len=(p:LSWord):>int64=>$unsafe {
+    let r=vreg(VI)
+    emit('iconst' VI r 0 0 0 0);
+    iff(e_bin('ne' VI p e_iconst(0)));
+    e_mov(r hdr_load(p 8));
+    endc();
+    return r
+}
+arr_unique=(slot_addr_or_place:Place at:LSWord):>void=>$unsafe {
+    # ensure the array in the place is uniquely owned
+    # (fast path inline: a non-null array with refcount 1 is already unique. Debug builds keep
+    # the IR one call, which the code generator skips in those cases (CALL_IF_SHARED): out of
+    # line, every element write cost a call, half of nbody's time)
+    let p=read_place(slot_addr_or_place at)
+    if not opt_release {
+        let np0=e_call1(lf_helper(HK.arruniq at 0) p VI)
+        ir.code.ptr[ir.code.length - 1].c = CALL_IF_SHARED;
+        write_place(slot_addr_or_place at np0);
+        return
+    }
+    iff(e_bin('ne' VI p e_iconst(0)));
+    iff(e_bin('ne' VI hdr_load(p 0) e_iconst(1)));
+    let was=ir_cold
+    ir_cold=true
+    let np=e_call1(lf_helper(HK.arruniq at 0) p VI)
+    ir_cold=was
+    write_place(slot_addr_or_place at np);
+    endc();
+    endc();
+    emit('assume' 0 0 read_place(slot_addr_or_place at) 0 0 A_RC1);
+}
+freeze_scalar=(v:LSWord t:LSWord):>int64=>$unsafe {
+    if v <? 0 or is_kv(v) {return v}
+    let saved=vreg(vt_of(t))
+    e_mov(saved v);
+    return saved
+}
+release_arg_snapshots=(mark:LSWord):>void=>$unsafe {
+    loop arg_snapshots.length >? mark {
+        let it=arg_snapshots.pop()
+        let k=tl_values.length - 1
+        let found=false
+        loop k >=? 0 and not found {
+            let x=tl_values.ptr[k]
+            if x.is_slot =? it.is_slot and x.ref =? it.ref {
+                tl_values.pop(k);
+                # An early release can belong to an enclosing statement.
+                # Preserve the offsets of every still-active nested statement.
+                loop j in [0..tl_items.length) {
+                    if tl_items.ptr[j] >? k {tl_items.ptr[j] -= 1;}
+                }
+                found=true
+            }
+            k -= 1;
+        }
+        if not found {continue}
+        if it.is_slot {drop_at(e_slot(it.ref) it.t);}
+        else {release(it.ref it.t);}
+    }
+}
+ret_vt=(t:LSWord):>int64=>$unsafe {
+    let c=vc(t)
+    if c =? VC_VOID {return -1}
+    if c =? VC_AGG {return -1}
+    return vt_of(t)
+}
+finish_call=(ret:LSWord rv:LSWord rslot:LSWord):>Val=>$unsafe {
+    let c=vc(ret)
+    if c =? VC_AGG {return Val[e_slot(rslot) true rslot]}
+    if c =? VC_VOID {return V(-1 false)}
+    if c =? VC_INT {return V(norm(rv ret) true)}
+    return V(rv true)
+}
+result_from_slot=(rs:LSWord t:LSWord):>Val=>$unsafe {
+    let a=e_slot(rs)
+    if vc(t) =? VC_AGG {return Val[a true rs]}
+    let value=load_val(t a 0)
+    if ownership_type(t) {return Val[value true rs]}
+    return V(value true)
+}
+retain_elems=(arr:LSWord et:LSWord):>void=>$unsafe {
+    # retain every element of a freshly copied array
+    let n=arr_len(arr)
+    let i=vreg(VI)
+    e_mov(i e_iconst(0));
+    blk();
+    lop();
+    brif_to(e_bin('ges' VI i n) ctl - 1);
+    let ea=e_bin('add' VI e_addi(arr 24) e_bin('mul' VI i e_iconst(owner_stride(et))))
+    if ownership_type(et) {iff(e_load(VI ea tsize(et) 1));}
+    copy_at(ea et);
+    if ownership_type(et) {endc();}
+    e_mov(i e_addi(i 1));
+    br_to(ctl);
+    endc();
+    endc();
+}
+owner_array_from_fixed=(source:LSWord et:LSWord count:LSWord t:LSWord dynamic:bool=false):>Val=>$unsafe {
+    let s=new_temp(t)
+    let sa=e_slot(s)
+    e_zero(sa tsize(t));
+    owner_register(s t);
+    let n=if dynamic {count} else {e_iconst(count)}
+    e_call3(rt("__arr_reserve") sa e_iconst(owner_stride(et)) n -1);
+    let i=vreg(VI)
+    e_mov(i e_iconst(0));
+    blk();
+    lop();
+    brif_to(e_bin('ges' VI i n) ctl - 1);
+    let ea=e_bin('add' VI source e_bin('mul' VI i e_iconst(tsize(et))))
+    let value=own(Val[load_val(et ea 0) false -1] et)
+    let dst=e_call2(rt("__arr_push_slot") sa e_iconst(owner_stride(et)) VI)
+    store_val(et dst 0 value.v);
+    owner_element_live(dst et);
+    owner_forget_slot(value.slot);
+    e_mov(i e_addi(i 1));
+    br_to(ctl);
+    endc();
+    endc();
+    let result=e_load(VI sa 0 ptr_size)
+    owner_values[result] = s;
+    return Val[result true s]
+}
