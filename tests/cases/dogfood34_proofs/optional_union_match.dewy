@@ -1,0 +1,19 @@
+Pos:type = int<(>=? 0)>
+Text:type = string<(length >=? 1)>
+select = (v:Pos|Text|none):>string => match v {
+    <none> => "none"
+    <2> => "two"
+    <9223372036854775807> => "heap"
+    <"abc"> => "text"
+    _ => "other"
+}
+main = () => {
+    printl(select(none))
+    printl(select(2))
+    printl(select(9223372036854775807))
+    let text = ["a" "b" "c"].join
+    if text.length <? 1 return
+    printl(select(text))
+    printl(select(3))
+    printl(select("def"))
+}
