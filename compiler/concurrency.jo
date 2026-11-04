@@ -248,6 +248,17 @@ concurrency_callback = (a: int, waiting: bool = false):
         called: {int: bool}
         if concurrency_blocks(f, called, true): fatal(nodes[a].pos, "parallel body may block; use `concurrent` for waiting work (the two-lane rule)")
 
+# A queue's payload is a factory precondition, even without a task in this
+# program. Instances are interned: only new bundled factory specializations
+# demand the indexed structural Send walk, O(reachable payload types + fields).
+concurrency_queue_instance = (decl: int, payload: int, pos: int):
+    name = name_of(int(nodes[decl].name))
+    if name != "channel" and name != "mpmc" and name != "spsc": return
+    file = if name == "channel": "channels" else: name
+    if files[pos_file(nodes[decl].pos)].path != lib_dir + "/prelude/" + file + ".dewy": return
+    seen: {int: bool}
+    if not concurrency_transfer(payload, seen): fatal(pos, "{name} payload must satisfy Send{concurrency_why()}; use a payload whose fields can cross tasks")
+
 concurrency_atomic_call = (n: int):
     if nodes[n].aux != 0 or nodes[n].sym <= 0: return
     deadlock_atomics = true

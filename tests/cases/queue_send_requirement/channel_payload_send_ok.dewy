@@ -1,0 +1,2 @@
+R:type=[n:int]
+main=()=>{let tx=channel<R>(2) let rx=tx tx.send(R[42]) or_throw printl((rx.receive or_throw).n)}

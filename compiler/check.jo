@@ -1567,6 +1567,7 @@ instance_validate = (f: int, sig: FnSig, use_pos: int):
     if refine_active and sig.generic: ref_validate_signature(fns[f].ptypes, int(fns[f].ret), int(sig.mutmask), use_pos)
     if sig.generic and pl_on: pl_inst_decls.push(int(fns[f].decl))
 instance_attributes = (decl: int, f: int, zt: int[], use_pos: int):
+    if zt.len() > 0: concurrency_queue_instance(decl, zt[0], use_pos)
     # attributes
     if nodes[decl].c != 0:
         ab = int(nodes[decl].c)
