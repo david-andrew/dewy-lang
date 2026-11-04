@@ -32,6 +32,8 @@ use 'juxtapose.jo'
 use 'parallel_lower.jo'
 use 'effects.jo'
 use 'util.jo'
+use 'types.jo'
+use 'ast.jo'
 struct CheckerExprInput:
     nodes: *(Node[])
     types: *(TypeInfo[])
@@ -526,6 +528,41 @@ check_call = (n: int, expected: int) -> int:
         indexed = call_index(n, expected)
         if indexed >= 0: return indexed
     call_value(n, expected)
+# Receiver checking and member dispatch; diagnostics and unusual receiver forms
+# remain services. Re-read the checked receiver because checking may replace it.
+call_member = (n: int, expected: int) -> int:
+    callee = int(xe_nodes[0][n].a)
+    args = node_kids(mut xe_nodes[0], mut xe_lists[0], n)
+    if xe_flag(callee, 536870912): juxt_member_check(callee)
+    if xe_flag(n, 536870912) and juxt_head_numeric(n):
+        juxt_product(n)
+        return check_expr(n, expected)
+    recv = int(xe_nodes[0][callee].a)
+    saved_receiver = type_receiver_at
+    type_receiver_at = recv
+    rt = tu_prune(check_expr(recv, receiver_literal_hint(recv, int(xe_nodes[0][callee].name), args.len(), expected, xe_nodes[0][n].pos)))
+    type_receiver_at = saved_receiver
+    recv = xe_last[0]
+    xe_nodes[0][callee].a = i32(recv)
+    fname = int(xe_nodes[0][callee].name)
+    prepared = call_member_prepare(n, callee, recv, mut rt, args, expected)
+    if prepared >= 0: return prepared
+    rk = xe_types[0][rt].kind
+    if rk == .module: return call_by_name(n, fname, int(xe_types[0][rt].mod), args, expected, false)
+    if rk == .typeval: return call_member_type(n, callee, rt, fname, args, expected)
+    if is_soa(rt): return check_soa_method(n, recv, fname, args, expected)
+    if fname == id_dewy_len: dewy_len_check(callee, true, rt, recv)
+    if rk == .struct_ or rk == .ptr:
+        field = call_member_callable(n, callee, recv, rt, fname, args, expected)
+        if field >= 0: return field
+    tail = call_member_tail(n, callee, recv, rt, mut fname, mut args, expected)
+    if tail >= 0: return tail
+    xe_add_flag(recv, 128)
+    nl = [recv]
+    loop a in args: nl.push(a)
+    node_set_list(mut xe_nodes[0], mut xe_lists[0], n, nl)
+    call_by_name(n, fname, -1, nl, expected, true)
+
 call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, ufcs: bool) -> int:
     early = call_name_early(n, name, mod_scope, args, expected, ufcs)
     if early >= 0: return early

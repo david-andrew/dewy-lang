@@ -345,6 +345,8 @@ main = ():
 
 # The Jo services the dispatcher calls (expr.jo, temperature_kinds.jo), routed to the driver.
 EXPR_JO = r'''use 'driver.jo'
+use 'node_store.dewy'
+use 'checker_types.dewy'
 expr_complete = (): xe_complete_host()
 ident_unknown = (n: int, expected: int, nm: int): xe_unknown_host(n, expected, nm)
 expr_module = (m: int, name: int) -> int: xe_module_host(m, name)
@@ -364,11 +366,48 @@ call_head = (n: int, expected: int) -> int: zc_head
 call_typeapply = (n: int, expected: int) -> int: xe_call_host(n, expected)
 call_ident_special = (n: int, expected: int) -> int: zc_special
 call_dotname = (n: int, expected: int) -> int: xe_call_host(n, expected)
-call_member = (n: int, expected: int) -> int: xe_call_host(n, expected)
 call_index = (n: int, expected: int) -> int: zc_index
 call_value = (n: int, expected: int) -> int:
     events.push("value-call:{n}")
     xe_call_host(n, expected)
+type_receiver_at = 0
+zm_hint = 0
+zm_receiver_type = 0
+zm_prepared = -1
+zm_field = -1
+zm_tail = -1
+zm_name = 0
+zm_extra = 0
+zm_soa = false
+zm_grow = false
+zm_error = false
+receiver_literal_hint = (recv: int, name: int, count: int, expected: int, pos: int) -> int:
+    events.push("receiver:{recv}:{name}:{count}:{expected}:{type_receiver_at}")
+    zm_hint
+call_member_prepare = (n: int, callee: int, recv: int, rt: mut int, args: int[], expected: int) -> int:
+    events.push("member-prepare:{recv}:{rt}:{type_receiver_at}")
+    if zm_receiver_type != 0: rt = zm_receiver_type
+    if zm_grow:
+        zm_grow = false
+        loop i in [0..256): nodes.push(Node()); types.push(TypeInfo())
+    zm_prepared
+call_member_type = (n: int, callee: int, rt: int, fname: int, args: int[], expected: int) -> int:
+    events.push("member-type:{rt}:{fname}:{args}:{expected}")
+    if zm_error: print(events); exit(19)
+    T_BOOL
+call_member_callable = (n: int, callee: int, recv: int, rt: int, fname: int, args: int[], expected: int) -> int:
+    events.push("member-field:{recv}:{rt}:{fname}")
+    zm_field
+call_member_tail = (n: int, callee: int, recv: int, rt: int, fname: mut int, args: mut int[], expected: int) -> int:
+    events.push("member-tail:{recv}:{rt}:{fname}:{args}")
+    if zm_error: print(events); exit(19)
+    if zm_name != 0: fname = zm_name
+    if zm_extra != 0: args.push(zm_extra)
+    zm_tail
+check_soa_method = (n: int, recv: int, fname: int, args: int[], expected: int) -> int:
+    events.push("member-soa:{recv}:{fname}:{args}")
+    T_FLOAT
+dewy_len_check = (callee: int, member: bool, rt: int, recv: int): events.push("member-len:{rt}:{recv}")
 path_literal_module = (n: int, callee: int, args: int[]) -> int: zc_module
 call_name_early = (n: int, name: int, mod_scope: int, args: int[], expected: int, ufcs: bool) -> int:
     if mod_scope >= 0 or args.len() != 1: events.push("by-name:{name}:{mod_scope}:{args}:{ufcs}")
@@ -412,6 +451,8 @@ expr_other = (n: int, expected: int) -> int: xe_other_host(n, expected)
 arg_finish_rest = (a: int, pt: int, is_mut: bool): xe_arg_host(a, pt, is_mut)
 '''
 JO_DOUBLES = {'expr.jo': EXPR_JO,
+              'types.jo': "use 'expr.jo'\nis_soa = (t: int) -> bool: zm_soa\n",
+              'ast.jo': "id_dewy_len = 30\n",
               'temperature_kinds.jo': "use 'driver.jo'\ntemperature_read = (n: int, t: int) -> int: xe_temperature_host(n, t)\n",
               'check.jo': """use 'driver.jo'
 values_call = (n: int, expected: int) -> int:
@@ -430,6 +471,10 @@ concurrency_atomic_call = (n: int): events.push("atomic:{n}")
 """,
               'juxtapose.jo': """use 'driver.jo'
 juxt_head_numeric = (r: int) -> bool: zc_numeric
+juxt_member_check = (c: int): events.push("member-juxt:{c}")
+juxt_product = (n: int):
+    events.push("member-product:{n}")
+    nodes[n].kind = .int_lit; nodes[n].type = i32(T_INT); nodes[n].flags = 128
 juxt_factor = (c: int) -> int:
     events.push("factor:{c}")
     c

@@ -24,14 +24,16 @@ from p"checker_numeric.dewy" import xw_numeric
 from p"checker_exact.dewy" import (exact_potential exact_math_operand)
 from p"checker_coerce.dewy" import cq_settled
 from p"checker_call_queries.dewy" import (ctx_dependent map_float_key habit_call_check intrinsic_of)
-from p"expr.jo" import (expr_complete ident_unknown expr_module expr_values_use check_dotted binary_juxt binary_char_code binary_membership binary_quantity_hint binary_decimal dewy_set_literal binary_context binary_nd_hint binary_secret binary_rest expr_sibling call_int_literal call_map_rows is_nd is_unchecked_at dewy_partial dewy_data_after_give call_head call_typeapply call_ident_special call_dotname call_member call_index call_value path_literal_module call_name_early call_name_intrinsic call_name_array call_name_sym call_name_collect call_name_unknown resolve_fn_call take_name relocate_name release_name expr_literal expr_other arg_finish_rest)
+from p"expr.jo" import (expr_complete ident_unknown expr_module expr_values_use check_dotted binary_juxt binary_char_code binary_membership binary_quantity_hint binary_decimal dewy_set_literal binary_context binary_nd_hint binary_secret binary_rest expr_sibling call_int_literal call_map_rows is_nd is_unchecked_at dewy_partial dewy_data_after_give call_head call_typeapply call_ident_special call_dotname call_index call_value path_literal_module call_name_early call_name_intrinsic call_name_array call_name_sym call_name_collect call_name_unknown resolve_fn_call take_name relocate_name release_name expr_literal expr_other arg_finish_rest type_receiver_at receiver_literal_hint call_member_prepare call_member_type call_member_callable call_member_tail check_soa_method dewy_len_check)
 from p"temperature_kinds.jo" import temperature_read
 from p"check.jo" import (values_call sink_pack_call module_lookup)
 from p"concurrency.jo" import (concurrency_tasks concurrency_runtime_needed concurrency_calls concurrency_atomic_call)
-from p"juxtapose.jo" import (juxt_head_numeric juxt_factor)
+from p"juxtapose.jo" import (juxt_head_numeric juxt_factor juxt_member_check juxt_product)
 from p"parallel_lower.jo" import parallel_prepare
 from p"effects.jo" import callable_base
 from p"util.jo" import pos_in_lib
+from p"types.jo" import is_soa
+from p"ast.jo" import id_dewy_len
 # The expression dispatcher: an already checked node, then each kind sent to its
 # leaf. A name is looked up here (the scope stack, then the module lookup cache);
 # only a cache miss asks the host. A binary operator's operands are checked here and
@@ -705,6 +707,45 @@ check_call=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
     }
     call_value(n expected)
 }
+# Receiver checking and member dispatch; O(arguments) plus the services. Save the
+# type-receiver context across recursion, then use the receiver checking produced.
+# Cold services retain diagnostics, type values, callable fields and name rewrites.
+call_member=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
+    let callee=XEWord(xe_nodes[0].ptr[n].a)
+    let args=node_kids(@xe_nodes[0] @xe_lists[0] n)
+    if xe_flag(callee 536870912) {juxt_member_check(callee)}
+    if xe_flag(n 536870912) and juxt_head_numeric(n) {
+        juxt_product(n)
+        return check_expr(n expected)
+    }
+    let recv=XEWord(xe_nodes[0].ptr[callee].a)
+    let saved_receiver=type_receiver_at
+    type_receiver_at=recv
+    let rt:int64=tu_prune(check_expr(recv receiver_literal_hint(recv XEWord(xe_nodes[0].ptr[callee].name) args.length expected xe_nodes[0].ptr[n].pos)))
+    type_receiver_at=saved_receiver
+    recv=xe_last[0]
+    xe_nodes[0][callee].a=int32<overflow='wrap'>(recv)
+    let fname:int64=XEWord(xe_nodes[0].ptr[callee].name)
+    let prepared=call_member_prepare(n callee recv @rt args expected)
+    if prepared >=? 0 {return prepared}
+    let rk=xe_types[0].ptr[rt].kind
+    if rk =? 'module' {return call_by_name(n fname XEWord(xe_types[0].ptr[rt].mod) args expected false)}
+    if rk =? 'typeval' {return call_member_type(n callee rt fname args expected)}
+    if is_soa(rt) {return check_soa_method(n recv fname args expected)}
+    if fname =? id_dewy_len {dewy_len_check(callee true rt recv)}
+    if rk =? 'struct_' or rk =? 'ptr' {
+        let field=call_member_callable(n callee recv rt fname args expected)
+        if field >=? 0 {return field}
+    }
+    let tail=call_member_tail(n callee recv rt @fname @args expected)
+    if tail >=? 0 {return tail}
+    xe_add_flag(recv 128)
+    let nl:array<int64>=[recv]
+    loop a in args {nl.push(a)}
+    node_set_list(@xe_nodes[0] @xe_lists[0] n nl)
+    call_by_name(n fname -1 nl expected true)
+}
+
 # A call by name, from module mod_scope when it is one (else as the file sees the name), or
 # a method's when ufcs: the core library's rewrites, array intrinsics, the name's symbol
 # when it is not a function family (variables, constructors, conversions, builtins), then

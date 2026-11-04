@@ -104,7 +104,7 @@ main = ():
     show(call(3, [done(T_INT), done(T_INT)]))
     show(call(3, [done(T_INT), done(T_INT), done(T_INT), done(T_INT)]))
     zc_lib = true
-    loop k in [NK.typeapply, NK.dotname, NK.field, NK.index, NK.call]: show(headed(k))
+    loop k in [NK.typeapply, NK.dotname, NK.index, NK.call]: show(headed(k))
     zc_index = int(T_BOOL)
     show(headed(.index))
     zc_index = -1

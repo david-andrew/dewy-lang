@@ -5907,20 +5907,8 @@ call_dotname = (n: int, expected: int) -> int:
     return variant_ctor(n, et, vi, args)
 # `x.f(...)`: a module function, a type's variant or method, a function field, or
 # uniform call syntax.
-call_member = (n: int, expected: int) -> int:
-    callee = int(nodes[n].a)
-    args = kids(n)
-    if has_flag(callee, NF_JUXT): juxt_member_check(callee)
-    if has_flag(n, NF_JUXT) and juxt_head_numeric(n):
-        juxt_product(n)
-        return check_expr(n, expected)
-    recv = int(nodes[callee].a)
-    saved_receiver = type_receiver_at
-    type_receiver_at = recv
-    rt = prune(check_expr(recv, receiver_literal_hint(recv, int(nodes[callee].name), args.len(), expected, nodes[n].pos)))
-    type_receiver_at = saved_receiver
-    recv = last_checked
-    nodes[callee].a = i32(recv)
+call_member_prepare = (n: int, callee: int, recv: int, receiver_type: mut int, args: int[], expected: int) -> int:
+    rt = receiver_type
     fname = int(nodes[callee].name)
     if refine_active and (name_of(fname) == "pop" or name_of(fname) == "clear") and is_total_dict(refine_storage(recv, 0)):
         fatal(nodes[n].pos, "a totaldict keeps an entry for every key: it has no {name_of(fname)}")
@@ -5928,37 +5916,40 @@ call_member = (n: int, expected: int) -> int:
         # (a string set's methods are its text's)
         coerce(recv, T_STR)
         rt = T_STR
+        receiver_type = rt
     if synthetic_copy(rt, fname, nodes[n].pos):
         nargs_check(n, args.len(), 0, 0, ".copy")
         return check_copy(n, recv, rt)
     if ide_sentinel != 0 and fname == ide_sentinel: ide_complete_members(rt)
     rk = types[rt].kind
     if rk == .struct_ and dewy_at(nodes[n].pos) and rt == console_type(): return dewy_console_call(n, name_of(fname), args, expected)
-    if rk == .module: return call_by_name(n, fname, int(types[rt].mod), args, expected, false)
-    if rk == .typeval:
-        tt = prune(int(types[rt].elem))
-        if tt != 0 and types[tt].kind == .enum_:
-            vi = find_variant(int(types[tt].st), fname)
-            if vi < 0: fatal(nodes[callee].pos, "{dt(tt)} has no variant '{name_of(fname)}'{variant_hint_for(tt, name_of(fname))}")
-            if ide_on: ide_variant_ref(nodes[callee].pos, fname, tt, vi)
-            return variant_ctor(n, tt, vi, args)
-        if tt != 0 and types[tt].kind == .struct_:
-            j = dewy_type_method(int(structs[int(types[tt].st)].decl), fname)
-            if j >= 0: return dewy_static_call(n, tt, j, args, expected)
-        why = ""
-        fd: int[]
-        collect_fns(fname, &fd)
-        if fd.len() > 0:
-            why = " (functions are not kept in types: call it as `{name_of(fname)}(x)` or `x.{name_of(fname)}()`)"
-            # (Date.now(): a function of nothing is called by itself)
-            loop d in fd:
-                if nkids(d) == 0: why = " (functions are not kept in types: call it by itself, `{name_of(fname)}()`)"
-            if name_of(fname) == "now" and dt(tt) == "Date": why = " (`unix_time()` is the seconds since 1970, a moment to save and compare; `now()` gives today's Date; `time()` the seconds the program has run, for timing)"
-        fatal(nodes[callee].pos, "type {dt(tt)} has no member '{name_of(fname)}'{why}")
-    if is_soa(rt): return check_soa_method(n, recv, fname, args, expected)
-    if fname == id_dewy_len: dewy_len_check(callee, true, rt, recv)
+    -1
+
+call_member_type = (n: int, callee: int, rt: int, fname: int, args: int[], expected: int) -> int:
+    tt = prune(int(types[rt].elem))
+    if tt != 0 and types[tt].kind == .enum_:
+        vi = find_variant(int(types[tt].st), fname)
+        if vi < 0: fatal(nodes[callee].pos, "{dt(tt)} has no variant '{name_of(fname)}'{variant_hint_for(tt, name_of(fname))}")
+        if ide_on: ide_variant_ref(nodes[callee].pos, fname, tt, vi)
+        return variant_ctor(n, tt, vi, args)
+    if tt != 0 and types[tt].kind == .struct_:
+        j = dewy_type_method(int(structs[int(types[tt].st)].decl), fname)
+        if j >= 0: return dewy_static_call(n, tt, j, args, expected)
+    why = ""
+    fd: int[]
+    collect_fns(fname, &fd)
+    if fd.len() > 0:
+        why = " (functions are not kept in types: call it as `{name_of(fname)}(x)` or `x.{name_of(fname)}()`)"
+        # (Date.now(): a function of nothing is called by itself)
+        loop d in fd:
+            if nkids(d) == 0: why = " (functions are not kept in types: call it by itself, `{name_of(fname)}()`)"
+        if name_of(fname) == "now" and dt(tt) == "Date": why = " (`unix_time()` is the seconds since 1970, a moment to save and compare; `now()` gives today's Date; `time()` the seconds the program has run, for timing)"
+    fatal(nodes[callee].pos, "type {dt(tt)} has no member '{name_of(fname)}'{why}")
+    0 # unreachable; the C seed requires an explicit result after fatal
+
+call_member_callable = (n: int, callee: int, recv: int, rt: int, fname: int, args: int[], expected: int) -> int:
     st = rt
-    if rk == .ptr: st = prune(int(types[rt].elem))
+    if types[rt].kind == .ptr: st = prune(int(types[rt].elem))
     if types[st].kind == .struct_:
         si = int(types[st].st)
         check_struct_fields(si)
@@ -5971,19 +5962,18 @@ call_member = (n: int, expected: int) -> int:
                 callee_at = callee
                 check_expr(callee, 0)
                 return value_call(n, callee, args, expected)
+    -1
+
+call_member_tail = (n: int, callee: int, recv: int, rt: int, member_name: mut int, args: mut int[], expected: int) -> int:
+    fname = member_name
     if (name_of(fname) == "wrap" or name_of(fname) == "bitcast") and args.len() == 1 and (is_numeric(rt) or rt == T_MATH_INT) and dewy_at(nodes[n].pos):
         fatal(nodes[n].pos, "numbers have no `.{name_of(fname)}` member: `uint8<overflow='wrap'>(x)` keeps the low bits of an integer, and `x transmute float64` reads its bits as another type of the same width")
     if files[pos_file(nodes[n].pos)].is_dewy:
         if str_sets.len() > 1:
             keyed = method_str_set_key(n, recv, rt, fname, args, expected)
             if keyed != 0: return keyed
-        fname = dewy_member_name(callee, rt, fname, args)
-    # uniform call syntax
-    add_flag(recv, NF_CHECKED)
-    nl = [recv]
-    loop a in args: nl.push(a)
-    set_list(n, nl)
-    return call_by_name(n, fname, -1, nl, expected, true)
+        member_name = dewy_member_name(callee, rt, fname, args)
+    -1
 # `T[...](...)` and `f[T](...)`; -1 goes on to the value call.
 call_index = (n: int, expected: int) -> int:
     callee = int(nodes[n].a)
