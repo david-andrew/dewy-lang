@@ -1,0 +1,10 @@
+Node:type=[value:int64 next:Node?=none]
+main=()=>{
+ let rows=[Node[20 Node[22]]]
+ loop @row in rows {
+  if row.next is? none {return 1}
+  row.next.value=100
+ }
+ printl((rows[0].next ?? Node[0]).value)
+ return 0
+}

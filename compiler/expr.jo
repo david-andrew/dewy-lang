@@ -9087,6 +9087,7 @@ opt_unwrap_alias = (l: int, pos: int) -> int:
     nl = new_local(int(locals[l].name), t, pos)
     locals[nl].flags = i32(LF_ALIAS)
     locals[nl].alias = i32(e)
+    narrow_store_register(nl)
     nl
 
 # A Dewy `is?` test ending an else-less if (checked or not).
@@ -10652,6 +10653,7 @@ narrow_opt_rest_by = (c: int):
     nl = new_local(int(locals[l].name), mk_opt(inner), pos)
     locals[nl].flags = i32(LF_ALIAS)
     locals[nl].alias = i32(opt_rest_expr(l, keep, pos))
+    narrow_store_register(nl)
 
 # match x over an (A | B | C)?: the `_` arm after `c:C` (and `<none>`) knows x is an (A | B)? (an
 # A | B). O(members).
@@ -10678,6 +10680,7 @@ opt_wild_narrow = (l0: int, st: int, matched: int[], none_matched: bool, pos: in
     nl = new_local(int(locals[l].name), t, pos)
     locals[nl].flags = i32(LF_ALIAS)
     locals[nl].alias = i32(rest)
+    narrow_store_register(nl)
 
 # Optional-union narrowing aliases: `if x != none: some(payload as the kept members) else none`,
 # an expression of x (narrowed_var finds x in its condition)
@@ -10827,6 +10830,7 @@ narrow_expr = (root: int, ms: int[], pos: int, name: int):
     nl = new_local(name, t, pos)
     locals[nl].flags = i32(LF_ALIAS)
     locals[nl].alias = i32(e)
+    narrow_store_register(nl)
 
 # ---- narrowing field paths (x.f, x.f.g, a global g) ----
 # a narrowed path is a scope entry named by its key ("#L<local>.<field>...", "#G<global>..."),
@@ -10836,10 +10840,27 @@ path_narrows = 0                # (none yet: field accesses need not look)
 no_narrow_at = 0                # (the target of an assignment: the field or global itself, not what it narrows to; a narrowed
                                 # path it is a part of, as x in x.hp = 7, is still narrowed)
 
+# Declaration aliases preserve path identity. Narrowing aliases retain their
+# own roots so forgetting a parent can also retire paths below its payload.
+# O(alias/path depth), with no allocation for an unrelated local.
+path_decl_alias = (l: int) -> int:
+    if int(locals[l].flags) & LF_ALIAS == 0: return 0
+    a = int(locals[l].alias)
+    if a == 0: return 0
+    # Path keys represent declaration roots and fields, not array selectors.
+    # Keep an element alias's own stable root for narrowing inside its value.
+    root = a
+    loop nodes[root].kind == .field and nodes[root].a != 0: root = int(nodes[root].a)
+    if nodes[root].kind == .ident: return a
+    0
+
 path_key = (n: int) -> str:
     k = nodes[n].kind
     if k == .ident:
-        if nodes[n].aux == i32(int(SK.local)): return "#L{nodes[n].sym}"
+        if nodes[n].aux == i32(int(SK.local)):
+            a = path_decl_alias(int(nodes[n].sym))
+            if a != 0: return path_key(a)
+            return "#L{nodes[n].sym}"
         if nodes[n].aux == i32(int(SK.global)): return "#G{nodes[n].sym}"
         return ""
     if k == .field and nodes[n].aux >= 0 and nodes[n].a != 0:
@@ -10876,7 +10897,10 @@ path_rooted = (n0: int) -> bool:
     loop nodes[n].kind == .field and nodes[n].a != 0: n = int(nodes[n].a)
     if nodes[n].kind != .ident: return false
     id = int(nodes[n].sym)
-    if nodes[n].aux == i32(int(SK.local)): return id < path_rooted_l.len() and path_rooted_l[id]
+    if nodes[n].aux == i32(int(SK.local)):
+        a = path_decl_alias(id)
+        if a != 0: return path_rooted(a)
+        return id < path_rooted_l.len() and path_rooted_l[id]
     if nodes[n].aux == i32(int(SK.global)): return id < path_rooted_g.len() and path_rooted_g[id]
     false
 

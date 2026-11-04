@@ -2925,6 +2925,7 @@ capture_narrowed = (l: int, pos: int) -> int:
     locals[nl].name = locals[l].name
     locals[nl].flags = i32(LF_ALIAS)
     locals[nl].alias = i32(e)
+    narrow_store_register(nl)
     nl
 
 # Only writes to narrowed aliases need rollback between sibling branches.
@@ -2965,7 +2966,37 @@ narrow_returned = (mark: int, jumps: int, body: int):
         locals[l].flags = i32(int(locals[l].flags) & ~LF_UNNARROWED)
     narrow_changes.truncate(mark)
 
-# x = v where x is narrowed (by `is`) and v is not of the narrowed type: x is the whole variable again
+# Index narrowing aliases by their underlying local declaration. Writes visit
+# only that root's aliases: O(alias depth + dependent narrowings), with O(1)
+# expected indexed links and one entry per narrowing. No scan of all locals.
+narrow_store_heads: {int: int}
+narrow_store_next: {int: int}
+
+narrow_store_root = (l0: int) -> int:
+    l = l0
+    loop int(locals[l].flags) & LF_ALIAS != 0 and locals[l].alias != 0:
+        u = narrowed_var(l)
+        if u != 0: l = u
+        else:
+            a = int(locals[l].alias)
+            if nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)): return 0
+            l = int(nodes[a].sym)
+    l
+
+narrow_store_register = (l: int):
+    if narrowed_var(l) == 0: return
+    root = narrow_store_root(l)
+    if root == 0: return
+    narrow_store_next[l] = narrow_store_heads.get(root) ?? 0
+    narrow_store_heads[root] = l
+
+narrow_store_keeps = (l: int, rhs: int, rt: int) -> bool:
+    al = int(locals[l].alias)
+    in_place = nodes[al].kind != .conv and nodes[al].kind != .if_
+    in_place and not is_union(rt) and types[rt].kind != .opt and can_coerce(rhs, rt, int(locals[l].type))
+
+# A whole-variable replacement invalidates tag evidence through every name
+# for that storage. Payload writes of the same member retain their tag.
 unnarrow_assign = (s: int):
     lhs = int(nodes[s].a)
     if nodes[lhs].kind != .ident: return
@@ -2973,15 +3004,22 @@ unnarrow_assign = (s: int):
     if sy == 0 or syms[sy].kind != .local: return
     l = int(syms[sy].ref)
     u = narrowed_var(l)
-    if u == 0: return
+    head = 0
+    if narrow_store_heads.len() > 0: head = narrow_store_heads.get(narrow_store_root(l)) ?? 0
+    if u == 0 and head == 0: return
     rt = prune(check_expr(int(nodes[s].b), 0))
-    nodes[s].b = i32(last_checked)
-    add_flag(int(nodes[s].b), NF_CHECKED)
-    # (a member assigned to a variable narrowed to that member is stored in place; a variable
-    # narrowed to several members is always assigned as a whole)
-    al = int(locals[l].alias)
-    in_place = nodes[al].kind != .conv and nodes[al].kind != .if_
-    if in_place and not is_union(rt) and types[rt].kind != .opt and can_coerce(int(nodes[s].b), rt, int(locals[l].type)): return
+    rhs = last_checked
+    nodes[s].b = i32(rhs)
+    add_flag(rhs, NF_CHECKED)
+    loop head != 0:
+        alias = head
+        head = narrow_store_next.get(alias) ?? 0
+        if int(locals[alias].owner) != int(ctxs[cx].inst): continue
+        if int(locals[alias].flags) & LF_UNNARROWED != 0: continue
+        if not narrow_store_keeps(alias, rhs, rt): narrow_invalidate(alias)
+        # Replacing the parent also retires narrowed paths inside its payload.
+        if path_narrows > 0 and alias < path_rooted_l.len() and path_rooted_l[alias]: path_forget("#L{alias}")
+    if u == 0 or narrow_store_keeps(l, rhs, rt): return
     narrow_invalidate(l)
     nm = int(nodes[lhs].name)
     push_scope_sym(nm, new_sym(nm, .local, u, 0))
