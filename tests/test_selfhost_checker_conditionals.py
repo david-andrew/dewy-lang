@@ -2,7 +2,8 @@
 import pytest
 
 from tests.support import compiler  # noqa: F401
-from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER, compare
+from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER
+from tests.selfhost_expr_double import compare_leaf, jo_doubles
 
 DRIVER = RESOLVER.split('main = ():')[0] + r'''
 locals: Local[] = [Local()]
@@ -100,8 +101,7 @@ xf_error_host = (n: int, t: int, code: int):
     print(events)
     print("error:{n}:{t}:{code}")
     exit(19)
-xf_services = CheckerConditionalHost(xf_check_host, xf_check_to_host, xf_coerce_host, xf_finalize_host, xf_block_host, xf_returned_host, xf_terminates_host, xf_narrow_host, xf_reset_host, xf_restore_host, xf_merge_host, xf_promote_host, xf_fill_subject_host, xf_fill_end_host, xf_filled_host, xf_void_member_host, xf_then_literal_host, xf_sink_host, xf_union_host, xf_map_host, xf_join_host, xf_source_host, xf_binding_host, xf_error_host)
-xf_inputs = CheckerConditionalInput(&nodes, &lists, &types, &structs, &files, &locals, &xf_scope, &xf_log, &xf_sink_at, &T_VOID, &T_BOOL, &T_NONE, &T_NEVER, &xf_services)
+xf_inputs = CheckerConditionalInput(&nodes, &lists, &types, &structs, &files, &locals, &xf_scope, &xf_log, &xf_sink_at, &T_VOID, &T_BOOL, &T_NONE, &T_NEVER)
 xf_binding = checker_conditionals_bind(&xf_inputs)
 DEWY = 1 << 40
 operand = (t: int, k: NK = .ident) -> int:
@@ -208,11 +208,43 @@ main = ():
     print("ok")
 '''
 
+# The Jo services checker_conditionals calls, routed to the driver.
+CONDITIONAL_JO = {
+    'expr.jo': {
+        'check_to': 'check_to = (n: int, target: int) -> int: xf_check_to_host(n, target)',
+        'coerce': 'coerce = (n: int, target: int) -> int: xf_coerce_host(n, target)',
+        'finalize_literal': 'finalize_literal = (n: int) -> int: xf_finalize_host(n)',
+        'cond_block': 'cond_block = (b: int, expected: int, value: bool, jumps: mut int) -> int: xf_block_host(b, expected, value, jumps)',
+        'cond_returned': 'cond_returned = (changes: int, jumps: int, body: int) -> void: xf_returned_host(changes, jumps, body)',
+        'cond_narrow': 'cond_narrow = (cond: int, holds: bool) -> void: xf_narrow_host(cond, holds)',
+        'cond_reset': 'cond_reset = (mark: int) -> void: xf_reset_host(mark)',
+        'cond_restore': 'cond_restore = (changes: int) -> void: xf_restore_host(changes)',
+        'cond_merge': 'cond_merge = () -> void: xf_merge_host()',
+        'cond_promote': 'cond_promote = (first: int, limit: int) -> void: xf_promote_host(first, limit)',
+        'cond_fill_subject': 'cond_fill_subject = (cond: int, b: int) -> int: xf_fill_subject_host(cond, b)',
+        'cond_fill_end': 'cond_fill_end = (b: int) -> bool: xf_fill_end_host(b)',
+        'opt_filled': 'opt_filled = (sub: int) -> bool: xf_filled_host(sub)',
+        'cond_then_literal': 'cond_then_literal = (b: int) -> int: xf_then_literal_host(b)',
+        'cond_sink': 'cond_sink = (n: int, b: int) -> void: xf_sink_host(n, b)',
+        'cond_union': 'cond_union = (a: int, b: int) -> int: xf_union_host(a, b)',
+        'is_map_type': 'is_map_type = (t: int) -> bool: xf_map_host(t)',
+        'cond_join': 'cond_join = (va: int, vb: int, ex: int, pos: int) -> int: xf_join_host(va, vb, ex, pos)',
+        'narrow_optional_source': 'narrow_optional_source = (a: int) -> int: xf_source_host(a)',
+        'cond_error': 'cond_error = (n: int, t: int, code: int) -> void: xf_error_host(n, t, code)',
+    },
+    'check.jo': {
+        'stmt_terminates': 'stmt_terminates = (s: int) -> bool: xf_terminates_host(s)',
+        'union_has_void': 'union_has_void = (t: int) -> bool: xf_void_member_host(t)',
+        'new_local': 'new_local = (name: int, t: int, pos: int) -> int: xf_binding_host(name, t, pos)',
+    },
+}
+
+
 
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_conditionals_twins(compiler, tmp_path, release):  # noqa: F811
-    assert compare(compiler, tmp_path, release, DRIVER + MAIN,
+    assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'xf_check_host', jo_doubles=jo_doubles(CONDITIONAL_JO),
                    extra_stems=('checker_conditionals',)).endswith(b'ok\n')
 
 
@@ -230,6 +262,6 @@ main = ():
     {case}
     print("unreachable")
 '''
-    output = compare(compiler, tmp_path, False, DRIVER + main, status=19,
+    output = compare_leaf(compiler, tmp_path, False, DRIVER + main, 'xf_check_host', jo_doubles=jo_doubles(CONDITIONAL_JO), status=19,
                      extra_stems=('checker_conditionals',))
     assert output.rstrip().endswith(f':{code}'.encode())

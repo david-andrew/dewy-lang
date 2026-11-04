@@ -3,7 +3,8 @@ import pytest
 
 from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_idents import DRIVER as IDENTS
-from tests.test_selfhost_checker_resolve import compare
+from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER, compare
+from tests.test_selfhost_checker_conditionals import DRIVER as CONDITIONALS, CONDITIONAL_JO
 from tests.test_selfhost_checker_literals import LITERAL_JO
 from tests.selfhost_expr_double import jo_doubles
 
@@ -13,7 +14,11 @@ STEMS = ('checker_exact', 'checker_literals', 'checker_idents', 'checker_conditi
          'checker_aggregates', 'checker_collections', 'checker_cast', 'checker_places',
          'checker_in_range', 'checker_numeric', 'checker_call_queries', 'checker_expr')
 
-DRIVER = IDENTS + r'''
+# Bind the conditional leaf too: its direct services share the expression driver's
+# arenas, while keeping the conditional differential's own scope and narrowing log.
+CONDITIONAL_SERVICES = CONDITIONALS[len(RESOLVER.split('main = ():')[0]):CONDITIONALS.index('DEWY = 1 << 40')]
+CONDITIONAL_SERVICES = CONDITIONAL_SERVICES.replace('locals: Local[] = [Local()]\n', '')
+DRIVER = IDENTS + CONDITIONAL_SERVICES + r'''
 syms: Sym[] = [Sym()]
 xe_scope = CheckerScope()
 xe_at: int[]
@@ -485,8 +490,12 @@ juxt_factor = (c: int) -> int:
               'util.jo': "use 'driver.jo'\npos_in_lib = (pos: int) -> bool: zc_lib\n",
               'effects.jo': "use 'driver.jo'\ncallable_base = (t0: int) -> int: if zc_base != 0: zc_base else: t0\n"}
 
-for _module, _text in jo_doubles(LITERAL_JO).items():
-    JO_DOUBLES[_module] = JO_DOUBLES.get(_module, '') + _text
+for _table in (LITERAL_JO, CONDITIONAL_JO):
+    for _module, _functions in _table.items():
+        _existing = JO_DOUBLES.get(_module, '')
+        _missing = {_name: _definition for _name, _definition in _functions.items()
+                    if not any(_line.startswith(f'{_name} = ') for _line in _existing.splitlines())}
+        JO_DOUBLES[_module] = _existing + jo_doubles({_module: _missing})[_module]
 
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])

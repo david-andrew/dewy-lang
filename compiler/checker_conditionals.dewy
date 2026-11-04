@@ -4,37 +4,14 @@ from p"checker_types.dewy" import (TypeInfo StructInfo TK)
 from p"source_types.dewy" import SrcFile
 from p"checker_state.dewy" import (Local CheckerScope)
 from p"type_inference.dewy" import (tu_prune tu_equal)
+from p"checker_expr.dewy" import check_expr
+from p"expr.jo" import (check_to coerce finalize_literal cond_block cond_returned cond_narrow cond_reset cond_restore cond_merge cond_promote cond_fill_subject cond_fill_end opt_filled cond_then_literal cond_sink cond_union is_map_type cond_join narrow_optional_source cond_error)
+from p"check.jo" import (stmt_terminates union_has_void new_local)
 # `if` and `if let` own branch order, narrowing lifetimes, chain-ending tests, fills of
 # optionals and the joined result. Work is O(branches) plus the demanded checking of
 # the test and bodies. Branch bodies, narrowing logs and joins are host services that
 # may grow every arena: nodes, locals and logs are reread by ID and length.
 XFWord:type=int64<overflow='wrap'>
-CheckerConditionalHost:type=[
-    check:<(node:int64 expected:int64):>int64>
-    check_to:<(node:int64 type_id:int64):>int64>
-    coerce:<(node:int64 type_id:int64):>int64>
-    finalize:<(node:int64):>int64>
-    block:<(node:int64 expected:int64 value:bool @jumps:int64):>int64>
-    returned:<(changes:int64 jumps:int64 body:int64):>void>
-    terminates:<(node:int64):>bool>
-    narrow:<(node:int64 holds:bool):>void>
-    reset:<(mark:int64):>void>
-    restore:<(changes:int64):>void>
-    merge:<():>void>
-    promote:<(first:int64 limit:int64):>void>
-    fill_subject:<(node:int64 body:int64):>int64>
-    fill_end:<(body:int64):>bool>
-    filled:<(subject:int64):>bool>
-    void_member:<(type_id:int64):>bool>
-    then_literal:<(body:int64):>int64>
-    sink:<(node:int64 body:int64):>void>
-    union:<(first:int64 second:int64):>int64>
-    map_type:<(type_id:int64):>bool>
-    join:<(first:int64 second:int64 expected:int64 pos:int64):>int64>
-    optional_source:<(node:int64):>int64>
-    binding:<(name:int64 type_id:int64 pos:int64):>int64>
-    error:<(node:int64 type_id:int64 code:int64):>void>
-]
 CheckerConditionalInput:type=[
     nodes:ptr<array<Node>>
     lists:ptr<array<int32>>
@@ -49,7 +26,6 @@ CheckerConditionalInput:type=[
     bool_type:ptr<int64>
     none_type:ptr<int64>
     never_type:ptr<int64>
-    host:ptr<CheckerConditionalHost>
 ]
 let xf_nodes:ptr<array<Node>>=$unsafe (uint64(0) as ptr<array<Node>>)
 let xf_lists:ptr<array<int32>>=$unsafe (uint64(0) as ptr<array<int32>>)
@@ -64,7 +40,6 @@ let xf_void_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let xf_bool_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let xf_none_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
 let xf_never_type:ptr<int64>=$unsafe (uint64(0) as ptr<int64>)
-let xf_host:ptr<CheckerConditionalHost>=$unsafe (uint64(0) as ptr<CheckerConditionalHost>)
 checker_conditionals_bind=(input:ptr<CheckerConditionalInput>):>XFWord=>$unsafe {
     xf_nodes=input[0].nodes
     xf_lists=input[0].lists
@@ -79,7 +54,6 @@ checker_conditionals_bind=(input:ptr<CheckerConditionalInput>):>XFWord=>$unsafe 
     xf_bool_type=input[0].bool_type
     xf_none_type=input[0].none_type
     xf_never_type=input[0].never_type
-    xf_host=input[0].host
     0
 }
 xf_kind=(t:XFWord):>TK=>$unsafe {xf_types[0].ptr[tu_prune(t)].kind}
@@ -123,10 +97,10 @@ xf_ends=(s:XFWord):>bool=>$unsafe {
         let e=XFWord(xf_nodes[0].ptr[s].a)
         if XFWord(xf_nodes[0].ptr[e].type) =? xf_never_type[0] {return true}
         let ek=xf_nodes[0].ptr[e].kind
-        if ek =? 'call' or ek =? 'match_' or ek =? 'if_' {return xf_host[0].terminates(s)}
+        if ek =? 'call' or ek =? 'match_' or ek =? 'if_' {return stmt_terminates(s)}
         return false
     }
-    if k =? 'while_' {return xf_host[0].terminates(s)}
+    if k =? 'while_' {return stmt_terminates(s)}
     false
 }
 # A test compared with none (frozen Tok.eq 69, Tok.ne 70; the differential checks them).
@@ -137,23 +111,23 @@ xf_none_test=(c:XFWord):>bool=>$unsafe {
 # Only type tests, tests against none and their logical combinations narrow.
 xf_narrow=(c:XFWord holds:bool):>void=>$unsafe {
     let k=xf_nodes[0].ptr[c].kind
-    if k =? 'istype' or k =? 'not_' or k =? 'and_' or k =? 'or_' or xf_none_test(c) {xf_host[0].narrow(c holds)}
+    if k =? 'istype' or k =? 'not_' or k =? 'and_' or k =? 'or_' or xf_none_test(c) {cond_narrow(c holds)}
 }
 # Scope rollback has work only when the branch bound names.
 xf_reset=(mark:XFWord):>void=>$unsafe {
-    if xf_mark() not=? mark {xf_host[0].reset(mark)}
+    if xf_mark() not=? mark {cond_reset(mark)}
 }
 # One body's checking; a returning body releases the narrowing writes it logged.
 xf_branch=(b:XFWord expected:XFWord value:bool changes:XFWord):>XFWord=>$unsafe {
     let jumps:int64=0
-    let t=xf_host[0].block(b expected value @jumps)
-    if xf_change_count() not=? changes {xf_host[0].returned(changes jumps b)}
+    let t=cond_block(b expected value @jumps)
+    if xf_change_count() not=? changes {cond_returned(changes jumps b)}
     t
 }
 # The value of one branch whose sibling never finishes.
 xf_settle=(b:XFWord ex:XFWord):>XFWord=>$unsafe {
     let v=xf_value(b)
-    if ex not=? 0 {xf_host[0].coerce(v ex);} else {xf_host[0].finalize(v);}
+    if ex not=? 0 {coerce(v ex);} else {finalize_literal(v);}
     XFWord(xf_nodes[0].ptr[v].type)
 }
 # Two branch types: never, void statements, an expected type or their join.
@@ -173,27 +147,27 @@ xf_statement=(cond:XFWord b:XFWord c:XFWord):>XFWord=>$unsafe {
     # `if v is? none { v = x }`: v holds a value at the end of the branch.
     let jumps:int64=0
     let fill:XFWord=0
-    if (xf_nodes[0].ptr[cond].kind =? 'istype' and xf_nodes[0].ptr[cond].aux =? -1) or (xf_none_test(cond) and xf_nodes[0].ptr[cond].op =? 69) {fill=xf_host[0].fill_subject(cond b)}
-    xf_host[0].block(b 0 false @jumps);
+    if (xf_nodes[0].ptr[cond].kind =? 'istype' and xf_nodes[0].ptr[cond].aux =? -1) or (xf_none_test(cond) and xf_nodes[0].ptr[cond].op =? 69) {fill=cond_fill_subject(cond b)}
+    cond_block(b 0 false @jumps);
     let filled=false
-    if fill not=? 0 {filled=xf_host[0].fill_end(b)}
-    if xf_change_count() not=? changes {xf_host[0].returned(changes jumps b)}
+    if fill not=? 0 {filled=cond_fill_end(b)}
+    if xf_change_count() not=? changes {cond_returned(changes jumps b)}
     xf_reset(mark)
     let before_c:XFWord=0
     let after_c:XFWord=0
     if c not=? 0 {
         let restored=xf_change_count() not=? changes
-        if restored {xf_host[0].restore(changes)}
+        if restored {cond_restore(changes)}
         before_c=xf_local_count()
         xf_narrow(cond false)
         after_c=xf_local_count()
         jumps=0
-        xf_host[0].block(c 0 false @jumps);
+        cond_block(c 0 false @jumps);
         # And in the else branch, v keeps the value it was tested to hold.
-        if filled and not xf_ends(c) {filled=xf_host[0].filled(fill)}
-        if xf_change_count() not=? changes {xf_host[0].returned(changes jumps c)}
+        if filled and not xf_ends(c) {filled=opt_filled(fill)}
+        if xf_change_count() not=? changes {cond_returned(changes jumps c)}
         xf_reset(mark)
-        if restored {xf_host[0].merge()}
+        if restored {cond_merge()}
     }
     # Reuse the surviving arm's still-valid facts; retesting the old condition
     # would resurrect facts invalidated by that arm's writes. Termination is a
@@ -201,8 +175,8 @@ xf_statement=(cond:XFWord b:XFWord c:XFWord):>XFWord=>$unsafe {
     let ends_b=xf_ends(b)
     let ends_c=c not=? 0 and xf_ends(c)
     if ends_b and (c =? 0 or not ends_c) {
-        if c =? 0 {xf_narrow(cond false)} else {xf_host[0].promote(before_c after_c)}
-    } else if c not=? 0 and ends_c and not ends_b {xf_host[0].promote(before_b after_b)}
+        if c =? 0 {xf_narrow(cond false)} else {cond_promote(before_c after_c)}
+    } else if c not=? 0 and ends_c and not ends_b {cond_promote(before_b after_b)}
     # Every path on holds a value: v stands for it from here, as after an early exit.
     if filled {xf_narrow(cond false)}
     xf_void_type[0]
@@ -212,7 +186,7 @@ xf_if=(n:XFWord ex:XFWord):>XFWord=>$unsafe {
     # Checking may rewrite the test (`x is? error` over a library union): ask
     # whether it ends a chain as written.
     let chain=xf_chain_end(XFWord(xf_nodes[0].ptr[n].a))
-    xf_host[0].check_to(XFWord(xf_nodes[0].ptr[n].a) xf_bool_type[0]);
+    check_to(XFWord(xf_nodes[0].ptr[n].a) xf_bool_type[0]);
     let cond=XFWord(xf_nodes[0].ptr[n].a)
     let b=XFWord(xf_nodes[0].ptr[n].b)
     let c=XFWord(xf_nodes[0].ptr[n].c)
@@ -221,18 +195,18 @@ xf_if=(n:XFWord ex:XFWord):>XFWord=>$unsafe {
     if not is_stmt and c =? 0 and (chain or xf_chain_end(cond)) {
         if xf_chain_end(cond) and xf_nodes[0].ptr[cond].aux =? -3 and xf_nodes[0].ptr[XFWord(xf_nodes[0].ptr[cond].a)].kind =? 'ident' {
             let jumps:int64=0
-            let t=xf_host[0].block(b ex true @jumps)
+            let t=cond_block(b ex true @jumps)
             if xf_nodes[0].ptr[b].aux not=? 0 {t=xf_settle(b ex)}
             xf_nodes[0][n]=xf_nodes[0].ptr[b]
             return t
         }
         # A result that may be void (`:>void|Oops`) lets the test fall through.
-        if ex not=? 0 and xf_kind(ex) not=? 'void_' and xf_kind(ex) not=? 'var' and not (xf_union(ex) and xf_host[0].void_member(ex)) {xf_host[0].error(n ex 1)}
+        if ex not=? 0 and xf_kind(ex) not=? 'void_' and xf_kind(ex) not=? 'var' and not (xf_union(ex) and union_has_void(ex)) {cond_error(n ex 1)}
         is_stmt=true
         xf_nodes[0][n].flags=xf_nodes[0].ptr[n].flags | 16
     }
     if is_stmt {return xf_statement(cond b c)}
-    if c =? 0 {xf_host[0].error(n 0 2)}
+    if c =? 0 {cond_error(n 0 2)}
     let mark=xf_mark()
     xf_narrow(cond true)
     let changes=xf_change_count()
@@ -241,12 +215,12 @@ xf_if=(n:XFWord ex:XFWord):>XFWord=>$unsafe {
     # `if flag [42] else xs`: a then-branch literal of literals is checked again at
     # the other branch's type (kept unchecked here).
     let then_literal:XFWord=0
-    if branch_expected =? 0 and xf_nodes[0].ptr[n].aux2 not=? -8 and xf_container_tail(b) and not xf_container_tail(c) {then_literal=xf_host[0].then_literal(b)}
-    if n =? xf_sink[0] {xf_host[0].sink(n b)}
+    if branch_expected =? 0 and xf_nodes[0].ptr[n].aux2 not=? -8 and xf_container_tail(b) and not xf_container_tail(c) {then_literal=cond_then_literal(b)}
+    if n =? xf_sink[0] {cond_sink(n b)}
     let t1=xf_branch(b branch_expected true changes)
     xf_reset(mark)
     let restored=xf_change_count() not=? changes
-    if restored {xf_host[0].restore(changes)}
+    if restored {cond_restore(changes)}
     xf_narrow(cond false)
     let else_expected=branch_expected
     # `if flag xs else []`: a container literal takes the other branch's type.
@@ -254,46 +228,46 @@ xf_if=(n:XFWord ex:XFWord):>XFWord=>$unsafe {
         let tk=xf_kind(t1)
         if tk =? 'array' or tk =? 'fixed' or tk =? 'struct_' or (tk =? 'enum_' and xf_union(t1)) {else_expected=t1}
     }
-    if n =? xf_sink[0] {xf_host[0].sink(n c)}
+    if n =? xf_sink[0] {cond_sink(n c)}
     let t2=xf_branch(c else_expected true changes)
     xf_reset(mark)
-    if restored {xf_host[0].merge()}
+    if restored {cond_merge()}
     let settled=xf_join(n ex b c t1 t2)
     if settled >=? 0 {return settled}
     if t1 =? xf_never_type[0] {return xf_settle(c ex)}
     if t2 =? xf_never_type[0] {return xf_settle(b ex)}
-    if xf_nodes[0].ptr[b].aux =? 0 or xf_nodes[0].ptr[c].aux =? 0 {xf_host[0].error(n 0 3)}
+    if xf_nodes[0].ptr[b].aux =? 0 or xf_nodes[0].ptr[c].aux =? 0 {cond_error(n 0 3)}
     let va=xf_value(b)
     let vb=xf_value(c)
     if xf_nodes[0].ptr[n].aux2 =? -8 {
-        let ta=xf_host[0].finalize(va)
-        let tb=xf_host[0].finalize(vb)
+        let ta=finalize_literal(va)
+        let tb=finalize_literal(vb)
         if xf_nodes[0].ptr[va].kind =? 'none_lit' {ta=xf_none_type[0]}
         if xf_nodes[0].ptr[vb].kind =? 'none_lit' {tb=xf_none_type[0]}
-        let result=xf_host[0].union(ta tb)
-        xf_host[0].coerce(va result);
-        xf_host[0].coerce(vb result);
+        let result=cond_union(ta tb)
+        coerce(va result);
+        coerce(vb result);
         return result
     }
-    if ex =? 0 and then_literal not=? 0 and XFWord(xf_types[0].ptr[t2].flags) & 1 =? 0 and not tu_equal(t1 t2) and (xf_kind(t2) =? 'array' or xf_kind(t2) =? 'fixed' or xf_host[0].map_type(t2)) {
+    if ex =? 0 and then_literal not=? 0 and XFWord(xf_types[0].ptr[t2].flags) & 1 =? 0 and not tu_equal(t1 t2) and (xf_kind(t2) =? 'array' or xf_kind(t2) =? 'fixed' or is_map_type(t2)) {
         xf_nodes[0][va]=xf_nodes[0].ptr[then_literal]
-        xf_host[0].check(va t2);
+        check_expr(va t2);
         xf_nodes[0][b].type=int32<overflow='wrap'>(t2)
     }
     # Both values take an expected type; otherwise their join.
-    xf_host[0].join(va vb ex xf_nodes[0].ptr[n].pos)
+    cond_join(va vb ex xf_nodes[0].ptr[n].pos)
 }
 xf_iflet=(n:XFWord ex:XFWord):>XFWord=>$unsafe {
     let is_stmt=XFWord(xf_nodes[0].ptr[n].flags) & 16 not=? 0
-    let ot=tu_prune(xf_host[0].check(XFWord(xf_nodes[0].ptr[n].a) 0))
+    let ot=tu_prune(check_expr(XFWord(xf_nodes[0].ptr[n].a) 0))
     if xf_types[0].ptr[ot].kind not=? 'opt' {
-        let source=xf_host[0].optional_source(XFWord(xf_nodes[0].ptr[n].a))
+        let source=narrow_optional_source(XFWord(xf_nodes[0].ptr[n].a))
         xf_nodes[0][n].a=int32<overflow='wrap'>(source)
         ot=tu_prune(XFWord(xf_nodes[0].ptr[XFWord(xf_nodes[0].ptr[n].a)].type))
     }
-    if xf_types[0].ptr[ot].kind not=? 'opt' {xf_host[0].error(n ot 4)}
+    if xf_types[0].ptr[ot].kind not=? 'opt' {cond_error(n ot 4)}
     let mark=xf_mark()
-    let l=xf_host[0].binding(XFWord(xf_nodes[0].ptr[n].name) XFWord(xf_types[0].ptr[ot].elem) xf_nodes[0].ptr[n].pos)
+    let l=new_local(XFWord(xf_nodes[0].ptr[n].name) XFWord(xf_types[0].ptr[ot].elem) xf_nodes[0].ptr[n].pos)
     xf_nodes[0][n].sym=int32<overflow='wrap'>(l)
     let b=XFWord(xf_nodes[0].ptr[n].b)
     let c=XFWord(xf_nodes[0].ptr[n].c)
@@ -305,22 +279,22 @@ xf_iflet=(n:XFWord ex:XFWord):>XFWord=>$unsafe {
     let t2=xf_void_type[0]
     if c not=? 0 {
         let restored=xf_change_count() not=? changes
-        if restored {xf_host[0].restore(changes)}
+        if restored {cond_restore(changes)}
         let e2=ex
         if e2 =? 0 {e2=t1}
         if is_stmt {e2=0}
         t2=xf_branch(c e2 not is_stmt changes)
-        if restored {xf_host[0].merge()}
+        if restored {cond_merge()}
     }
     if is_stmt {return xf_void_type[0]}
-    if c =? 0 {xf_host[0].error(n 0 2)}
+    if c =? 0 {cond_error(n 0 2)}
     # Branches that are statements, as at the end of a function: no value, as `if`.
     let settled=xf_join(n ex b c t1 t2)
     if settled >=? 0 {return settled}
     if t1 =? xf_never_type[0] {return t2}
     if t2 =? xf_never_type[0] {return t1}
-    if xf_nodes[0].ptr[b].aux =? 0 or xf_nodes[0].ptr[c].aux =? 0 {xf_host[0].error(n 0 3)}
+    if xf_nodes[0].ptr[b].aux =? 0 or xf_nodes[0].ptr[c].aux =? 0 {cond_error(n 0 3)}
     let va=xf_value(b)
     let vb=xf_value(c)
-    xf_host[0].join(va vb ex xf_nodes[0].ptr[n].pos)
+    cond_join(va vb ex xf_nodes[0].ptr[n].pos)
 }
