@@ -1,0 +1,118 @@
+$runtime_checks
+from p"ast.jo" import (nodes nkids nkids2 kid kid2 kids kids2 has_flag NF_MUT)
+from p"check.jo" import (fns modules)
+from p"expr.jo" import (ntype IN)
+from p"types.jo" import (tkind prune type_str)
+from p"lower.jo" import (in_lib checked_call_mutmask place_var)
+from p"util.jo" import (name_of warn)
+# Node.aux retains its existing symbol-kind encoding (local 1, global 2).
+DTWord:type=int64<overflow='wrap'>
+let det_done:dict<int64 bool>=dict<int64 bool>()
+let DET_CALLS:array<string>=["random" "random_int" "random_normal" "random_direction" "random_point" "random_in_circle" "random_color" "rand" "randn" "shuffle"
+    "time" "elapsed" "frame_time" "fps" "frame_number" "unix_time" "now"
+    "mouse_pos" "mouse_down" "mouse_pressed" "mouse_delta" "key_down" "key_pressed" "action_down" "action_pressed" "action_axis"
+    "action_value" "input_axis" "touches" "gamepad_down" "gamepad_pressed" "gamepad_axis"]
+# Check-only compilation visits checked calls without scheduling their lowering.
+det_check_program=():>void=>$unsafe {
+    let enabled=false
+    loop f in fns {if f.deterministic {enabled=true; break}}
+    if not enabled {return}
+    loop f in fns {
+        if f.body not=? 0 and f.state =? 2 and not in_lib(nodes.ptr[DTWord(f.body)].pos) {det_calls(DTWord(f.body))}
+    }
+}
+det_calls=(n:DTWord):>void=>$unsafe {
+    if n =? 0 or nodes.ptr[n].kind =? 'lambda' {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'call' and nodes.ptr[n].aux =? 0 and nodes.ptr[n].sym >? 0 {
+        let f:DTWord=DTWord(nodes.ptr[n].sym)
+        if fns.ptr[f].deterministic {det_check(f kids(n) nodes.ptr[n].pos)}
+    }
+    det_calls(DTWord(nodes.ptr[n].a))
+    det_calls(DTWord(nodes.ptr[n].b))
+    if k not=? 'for_' {
+        det_calls(DTWord(nodes.ptr[n].c))
+        if k not=? 'partial' {det_calls(DTWord(nodes.ptr[n].d))}
+    }
+    loop child in kids(n) {det_calls(child)}
+    loop child in kids2(n) {det_calls(child)}
+}
+det_check=(callee:DTWord args:array<int64> pos:DTWord):>void=>$unsafe {
+    if in_lib(pos) {return}
+    let d:DTWord=DTWord(fns.ptr[callee].decl)
+    let whose="{name_of(DTWord(modules.ptr[DTWord(nodes.ptr[d].mod)].name))}.{name_of(DTWord(nodes.ptr[d].name))}'s tick"
+    loop a in args {if tkind(ntype(a)) =? 'fn_' {det_arg(a whose)}}
+}
+det_arg=(a:DTWord whose:string):>void=>$unsafe {
+    let k=nodes.ptr[a].kind
+    if k =? 'conv' {det_arg(DTWord(nodes.ptr[a].a) whose)}
+    else if k =? 'lambda' {det_scan(DTWord(fns.ptr[DTWord(nodes.ptr[a].sym)].body) "this function is {whose}")}
+    else if k =? 'fnref' {det_named(DTWord(nodes.ptr[a].sym) "{name_of(DTWord(nodes.ptr[DTWord(fns.ptr[DTWord(nodes.ptr[a].sym)].decl)].name))} is {whose}")}
+    else if k =? 'partial' {
+        if nodes.ptr[a].aux =? 1 {det_arg(DTWord(nodes.ptr[a].a) whose)}
+        else {det_named(DTWord(nodes.ptr[a].sym) "{name_of(DTWord(nodes.ptr[DTWord(fns.ptr[DTWord(nodes.ptr[a].sym)].decl)].name))} is {whose}")}
+    }
+}
+det_named=(f:DTWord who:string):>void=>$unsafe {
+    if det_done.contains(f) or fns.ptr[f].body =? 0 or fns.ptr[f].decl =? 0 {return}
+    det_done[f]=true
+    if in_lib(nodes.ptr[DTWord(fns.ptr[f].decl)].pos) {return}
+    det_scan(DTWord(fns.ptr[f].body) who)
+}
+det_scan=(n:DTWord who:string):>void=>$unsafe {
+    if n =? 0 {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' {return}
+    if k =? 'assign' {det_target(DTWord(nodes.ptr[n].a) who nodes.ptr[n].pos)}
+    else if k =? 'intrinsic' and nkids(n) >? 0 {
+        let id=nodes.ptr[n].aux as IN
+        if id =? IN.push or id =? IN.pop or id =? IN.insert or id =? IN.remove or id =? IN.clear or id =? IN.reserve or id =? IN.resize or id =? IN.truncate or id =? IN.extend {det_target(kid(n 0) who nodes.ptr[n].pos)}
+    }
+    else if k =? 'call' {
+        let mm:DTWord=checked_call_mutmask(n)
+        loop i in [0..nkids(n)) {if mm & (1 << i) not=? 0 {det_target(kid(n i) who nodes.ptr[kid(n i)].pos)}}
+        let g:DTWord=DTWord(nodes.ptr[n].sym)
+        if nodes.ptr[n].aux =? 0 and g >? 0 and fns.ptr[g].decl not=? 0 {
+            let d:DTWord=DTWord(fns.ptr[g].decl)
+            let nm=name_of(DTWord(nodes.ptr[d].name))
+            if in_lib(nodes.ptr[d].pos) {
+                # Explicit RNGs and unix_time(Date) do not observe ambient state.
+                let clock_conversion=nm =? "unix_time" and fns.ptr[g].ptypes.length >? 0
+                if DET_CALLS.contains(nm) and not det_has_rng(g) and not clock_conversion {
+                    let what="reads the clock"
+                    if starts_with(nm "rand") or nm =? "shuffle" {what="takes random numbers"}
+                    else if nm =? "frame_number" or nm =? "fps" {what="reads the frame count"}
+                    else if nm not=? "time" and nm not=? "elapsed" and nm not=? "frame_time" and nm not=? "unix_time" and nm not=? "now" {what="reads the input"}
+                    warn(nodes.ptr[n].pos "{who}, and here it {what} ({nm}()), which can differ between machines and cause a desync; {det_hint(nm)}")
+                }
+            }
+            else {det_named(g who)}
+        }
+    }
+    else if k =? 'for_' and has_flag(n NF_MUT) {det_target(DTWord(nodes.ptr[n].a) who nodes.ptr[n].pos)}
+    det_scan(DTWord(nodes.ptr[n].a) who)
+    det_scan(DTWord(nodes.ptr[n].b) who)
+    if k not=? 'for_' {
+        det_scan(DTWord(nodes.ptr[n].c) who)
+        if k not=? 'partial' {det_scan(DTWord(nodes.ptr[n].d) who)}
+    }
+    loop i in [0..nkids(n)) {det_scan(kid(n i) who)}
+    loop i in [0..nkids2(n)) {det_scan(kid2(n i) who)}
+}
+det_hint=(nm:string):>string=>{
+    if starts_with(nm "rand") or nm =? "shuffle" {return "make them from the game (`hash(g.tick * 7 + i)`), or from an Rng kept in it"}
+    if nm =? "time" or nm =? "elapsed" or nm =? "frame_time" or nm =? "unix_time" or nm =? "now" or nm =? "frame_number" or nm =? "fps" {return "count ticks in the game and use a fixed timestep"}
+    "read it in update, and give it to the tick as the player's input"
+}
+det_has_rng=(g:DTWord):>bool=>$unsafe {
+    loop t in fns.ptr[g].ptypes {
+        let tt=prune(t)
+        if tkind(tt) =? 'struct_' and type_str(tt) =? "Rng" {return true}
+    }
+    false
+}
+det_target=(t:DTWord who:string pos:DTWord):>void=>$unsafe {
+    let n=place_var(t)
+    if n =? 0 or nodes.ptr[n].aux not=? 2 {return}
+    warn(pos "{who}, and here it changes the global '{name_of(DTWord(nodes.ptr[n].name))}', which a rollback does not put back (ticks are played again from an earlier game): keep it in the game")
+}
