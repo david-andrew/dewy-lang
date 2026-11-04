@@ -1,0 +1,5 @@
+main=()=>{let tx=mpmc<string>(1) let rx=tx printl(rx.try_receive is? Empty) tx.try_send("first") or_throw
+ match tx.try_send("second") {u:Unsent<string>=>{printl(u.value) printl(u.reason is? Full)} _=>printl("bad")}
+ printl(rx.try_receive or_throw) printl(rx.try_receive is? Empty) tx.close tx.close
+ match tx.send("late") {u:Unsent<string>=>{printl(u.value) printl(u.reason is? Closed)} _=>printl("bad")}
+ printl(rx.receive is? Closed)}

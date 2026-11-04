@@ -1,0 +1,32 @@
+# modes: native native-release
+produce=(q:Mpmc<int> first:int):>void | Unsent<int>=>{
+    loop i in [first..first+200) {q.send(i) or_throw}
+}
+consume=(q:Mpmc<int> bag:Mutex<array<int>>):>void | Canceled=>{
+    loop true {
+        let value=q.receive
+        if value is? Closed break
+        let n=value or_throw
+        let values=@(bag.lock())
+        values.push(n)
+    }
+}
+check=(capacity:int<(>? 0)>):>void=>{
+    let q=mpmc<int>(capacity)
+    let bag=mutex<array<int>>([])
+    concurrent {
+        spawn consume(q bag)
+        spawn consume(q bag)
+        spawn consume(q bag)
+        concurrent {
+            spawn produce(q 0)
+            spawn produce(q 200)
+            spawn produce(q 400)
+        }
+        q.close
+    }
+    let values=@(bag.lock())
+    printl(values.sorted() =? [loop i in [0..600) i])
+}
+main=()=>{check(1) check(2) check(3)}
+$runtime_checks

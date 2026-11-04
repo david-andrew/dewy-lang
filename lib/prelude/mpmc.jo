@@ -29,9 +29,14 @@ __q_park = (seq: *int, s: int, waiting: *int, spins: int):
     else: __task_pause()
 
 # The shared state of Dewy's `mpmc<T>(capacity)` (lib/prelude/queues.dewy): Vyukov's
-# bounded queue. Each slot has a sequence word: pos when it is free for the send claiming
-# position pos, pos + 1 once that send has written it. A send claims a position by moving
+# bounded queue. Each slot has a sequence word: 2*pos when it is free for the send claiming
+# position pos, 2*pos + 1 once that send has written it. A send claims a position by moving
 # `enq` on, a receive by moving `deq` on; the close bit in `enq` stops every later claim.
+# Invariant: free and occupied generations never coincide, including capacity one.
+# Publishing 2*pos+1 releases the payload write; observing it acquires that write.
+# Publishing 2*(pos+cap) releases the read/clear before the next writer acquires it.
+# __q_load/add/cas provide acquire/release ordering (locked RMW on x86,
+# ldaxr/stlxr on ARM); enq/deq CAS grants each position to exactly one task.
 # A non-waiting attempt that loses a claim, or finds a slot another task is still writing
 # or emptying, is busy rather than full or empty.
 const __MPMC_CLOSED = 4611686018427387904
@@ -55,7 +60,7 @@ __mpmc_new[T] = (capacity: int) -> __Mpmc[T]:
     slots.resize(n)
     seqs: int[]
     seqs.resize(n)
-    loop i in [0..n): seqs[i] = i
+    loop i in [0..n): seqs[i] = 2 * i
     cell: __MpmcState[T][] = [__MpmcState[T](0, 0, 0, 0, n, seqs, slots)]
     p = data(cell)
     __Mpmc[T](cell, p)
@@ -70,7 +75,7 @@ __mpmc_try_send[T] = (q: __Mpmc[T], v: T) -> int:
     if pos & __MPMC_CLOSED != 0: return 1
     i = pos % p.cap
     sq = __mpmc_seq(p, i)
-    d = __q_load(sq) - pos
+    d = __q_load(sq) - 2 * pos
     if d < 0:
         # (the slot still holds the value sent a lap ago: full, unless a receive has claimed it)
         if __q_load(&p.deq) > pos - p.cap: return 4
@@ -90,7 +95,7 @@ __mpmc_take_at[T] = (p: *__MpmcState[T], pos: int) -> T:
     v = p.slots[i]
     empty: T
     p.slots[i] = empty
-    __q_add(__mpmc_seq(p, i), p.cap - 1)
+    __q_add(__mpmc_seq(p, i), 2 * p.cap - 1)
     __q_changed(&p.seq, &p.waiting)
     v
 
@@ -101,7 +106,7 @@ __mpmc_try_claim[T] = (q: __Mpmc[T]) -> int:
     if __task_canceled(): return -2
     pos = __q_load(&p.deq)
     i = pos % p.cap
-    d = __q_load(__mpmc_seq(p, i)) - (pos + 1)
+    d = __q_load(__mpmc_seq(p, i)) - (2 * pos + 1)
     if d < 0:
         # (not written yet: empty, unless a send has claimed it and is still writing)
         e = __q_load(&p.enq)

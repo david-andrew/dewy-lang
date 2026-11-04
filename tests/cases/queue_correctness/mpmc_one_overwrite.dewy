@@ -1,0 +1,1 @@
+main=()=>{let q=mpmc<int>(1) q.try_send(1) or_throw match q.try_send(2) {u:Unsent<int>=>{printl(u.value) printl(u.reason is? Full)} _=>printl("accepted extra value")}}

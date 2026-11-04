@@ -1,0 +1,4 @@
+# modes: native native-release
+producer=(q:Mpmc<int>):>void | Unsent<int>=>{loop i in [0..100) {q.send(i) or_throw}}
+consumer=(q:Mpmc<int> bag:Mutex<array<int>>):>void | Canceled=>{loop true {let n=q.receive if n is? Closed break let value=n or_throw let a=@(bag.lock()) a.push(value)}}
+main=()=>{let q=mpmc<int>(2) let bag=mutex<array<int>>([]) concurrent {spawn consumer(q bag) concurrent {spawn producer(q) loop i in [100..200) {q.send(i) or_throw}} q.close} let a=@(bag.lock()) printl(a.length) printl(sum(a)) printl(a.sorted() =? [loop i in [0..200) i])}
