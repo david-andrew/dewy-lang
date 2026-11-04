@@ -490,19 +490,6 @@ stack_closure_passed: {int: bool} = {}
 # signed / and % of 64-bit integers wrap like other arithmetic: the smallest integer / -1 is
 # itself and % -1 is 0 (the machine's division would trap on the quotient)
 # the offsets of the Textures in a value of type t (at offset base), into out
-texture_offsets = (t0: int, base: int, out: mut int[]):
-    t = prune(t0)
-    k = types[t].kind
-    if k == .fixed:
-        et = int(types[t].elem)
-        loop i in [0..fixed_len(t)): texture_offsets(et, base + i * tsize(et), out)
-    else if k == .struct_ and not is_union(t):
-        si = int(types[t].st)
-        if is_lib_texture(si):
-            out.push(base)
-            return
-        loop fo in field_list(t): texture_offsets(fo.0, base + fo.1, out)
-
 # does expression n call a function (directly, or formatting a part of a string)?
 # can evaluating n change what an assignment's destination indices read: a call, an assignment
 # or a statement inside it, or an operation that resizes or formats through user code?
@@ -522,113 +509,6 @@ loan_capacities: LoanCapacity[]
 # `xs.ptr[i]`'s base: the elements' address without data()'s null test. A nil array has
 # no element to reach, so the indexed address is out of bounds either way.
 # the array's header pointer for data() node e (null for a nil array)
-gen_intrinsic_zeroed = (e: int, arg_start: int) -> Val:
-    t = ntype(e)
-    if vc(t) != VC_AGG: return V(zero_val(t), true)
-    z = e_slot(new_temp(t))
-    e_zero(z, tsize(t))
-    return V(z, true)
-
-gen_intrinsic_unreachable = (e: int, arg_start: int) -> Val:
-    e_call_nr1(rt("__panic"), e_daddr(str_data("unreachable code reached")), -1)
-    return never_after(e)
-
-gen_intrinsic_embed = (e: int, arg_start: int) -> Val:
-    s = name_of(int(nodes[e].sval))
-    return V(e_daddr(str_data(s)), false)
-
-gen_intrinsic_argv = (e: int, arg_start: int) -> Val:
-    d = vreg(VI)
-    emit(.intr, VI, d, 0, 0, 0, 1)
-    return V(d, false)
-
-gen_intrinsic_gpu_kernel = (e: int, arg_start: int) -> Val:
-    arg0 = int(lists[arg_start])
-    arg1 = int(lists[arg_start + 1])
-    # (the GLSL program, then, past a 0 byte, the SPIR-V one for Vulkan: not on the web)
-    kf = int(nodes[arg0].sym)
-    kd = name_of(int(nodes[arg1].sval))
-    ks = glsl_kernel(kf, kd)
-    # (on macOS, Metal's in place of SPIR-V)
-    if target_macos: ks = ks + str_from_bytes([u8(0)]) + msl_kernel(kf, kd)
-    else if not target_wasm: ks = ks + str_from_bytes([u8(0)]) + spirv_kernel(kf, kd)
-    return V(e_daddr(str_data(ks)), false)
-
-gen_intrinsic_compute_spirv = (e: int, arg_start: int) -> Val:
-    arg0 = int(lists[arg_start])
-    cs = ""
-    if target_macos: cs = msl_compute(int(nodes[arg0].sym))
-    else if not target_wasm: cs = spirv_compute(int(nodes[arg0].sym))
-    return V(e_daddr(str_data(cs)), false)
-
-gen_intrinsic_compute_textures = (e: int, arg_start: int) -> Val:
-    arg0 = int(lists[arg_start])
-    # where the parameters hold Textures (their GL names, given slots when dispatched): "8,40"
-    offs: int[]
-    texture_offsets(fns[int(nodes[arg0].sym)].ptypes[1], 0, offs)
-    ts = ""
-    loop i in 0.. and o in offs:
-        if i > 0: ts += ","
-        ts += "{o}"
-    return V(e_daddr(str_data(ts)), false)
-
-gen_intrinsic_shader = (e: int, arg_start: int) -> Val:
-    arg0 = int(lists[arg_start])
-    arg1 = int(lists[arg_start + 1])
-    vsf = int(nodes[arg0].sym)
-    fsf = int(nodes[arg1].sym)
-    vs, fs, lay = glsl_build(vsf, fsf)
-    if watch_build: glsl_of[e] = vs + fs + lay
-    t = ntype(e)
-    si = int(types[prune(t)].st)
-    layout(t)
-    s = new_temp(t)
-    d = e_slot(s)
-    e_zero(d, tsize(t))
-    srcs = [vs, fs, lay]
-    loop i in [0..3): e_store(d, int(fields[int(structs[si].fields) + i].offset), e_daddr(str_data(srcs[i])), ptr_size)
-    # for the software renderer: the shader functions themselves (callable through C function
-    # pointers: the result pointer comes first, then the arguments' addresses) and the size of
-    # the vertex function's output (the values interpolated across triangles)
-    if int(structs[si].nfields) >= 7:
-        fo = int(structs[si].fields)
-        e_store(d, int(fields[fo + 3].offset), e_faddr(lf_of_inst(vsf)), ptr_size)
-        e_store(d, int(fields[fo + 4].offset), e_faddr(lf_of_inst(fsf)), ptr_size)
-        e_store(d, int(fields[fo + 5].offset), e_iconst(tsize(int(fns[vsf].ret))), 8)
-        e_store(d, int(fields[fo + 6].offset), e_iconst(fns[vsf].ptypes.len()), 8)
-        if int(structs[si].nfields) >= 8:
-            # per 4-byte slot of the output: 'i' if it holds integer (or f64) data, which is
-            # passed on unchanged ("flat") instead of interpolated
-            rt = int(fns[vsf].ret)
-            mask = fill(u8('f'), max(tsize(rt) / 4, 1))
-            flat_slots(rt, 0, mask)
-            e_store(d, int(fields[fo + 7].offset), e_daddr(str_data(str_from_bytes(mask))), ptr_size)
-        if int(structs[si].nfields) >= 10:
-            vk = ("", "")
-            if target_macos: vk = msl_build(vsf, fsf)
-            else if not target_wasm: vk = spirv_build(vsf, fsf)
-            e_store(d, int(fields[fo + 8].offset), e_daddr(str_data(vk.0)), ptr_size)
-            e_store(d, int(fields[fo + 9].offset), e_daddr(str_data(vk.1)), ptr_size)
-    return Val(d, true, s)
-
-flat_slots = (t0: int, base: int, mask: mut u8[]):
-    t = prune(t0)
-    k = types[t].kind
-    if k == .quantity:
-        flat_slots(int(types[t].elem), base, mask)
-        return
-    if k == .float_ and int(types[t].bits) == 32: return
-    if k == .vec and not types[t].sign: return
-    if k == .struct_:
-        si = int(types[t].st)
-        layout(t)
-        loop i in [0..int(structs[si].nfields)):
-            f = fields[int(structs[si].fields) + i]
-            flat_slots(int(f.type), base + int(f.offset), mask)
-        return
-    loop b in [base / 4..(base + tsize(t) + 3) / 4):
-        if b < mask.len(): mask[b] = 'i'
-
 # Typed JSON writing uses the field writers selected by the checker. It emits
 # directly into the caller's buffer, without a text round trip or a Json tree.
 # ---------------- conversions ----------------
@@ -811,6 +691,7 @@ use 'exact_reset_loop.jo'
 use 'lower_ffi.dewy'
 use 'lower_functions.dewy'
 use 'lower_primitives.dewy'
+use 'lower_intrinsics.dewy'
 
 # ---------------- functions ----------------
 find_ids: int[]

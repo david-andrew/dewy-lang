@@ -1,0 +1,148 @@
+from p"lower_primitives.dewy" import (e_call_nr1 e_daddr e_faddr lf_of_inst rt str_data)
+$runtime_checks
+from p"lower_storage.dewy" import (V new_temp vc zero_val)
+from p"lower.jo" import (VC_AGG Val glsl_of)
+from p"ir.jo" import (VI e_iconst e_slot e_store e_zero emit vreg)
+from p"lower_helpers.dewy" import (field_list)
+from p"types.jo" import (fields fixed_len is_lib_texture is_union layout prune ptr_size structs tsize types)
+from p"check.jo" import (fns target_macos target_wasm watch_build)
+from p"glsl.jo" import (glsl_build glsl_kernel)
+from p"ast.jo" import (lists nodes)
+from p"msl.jo" import (msl_build msl_compute msl_kernel)
+from p"util.jo" import (name_of)
+from p"lower_scalars.dewy" import (never_after)
+from p"expr.jo" import (ntype)
+from p"spirv.jo" import (spirv_build spirv_compute spirv_kernel)
+# Direct recursive lowering; shared state has one owner in lower.jo.
+LIWord:type=int64<overflow='wrap'>
+texture_offsets=(t0:LIWord base:LIWord @out:array<int64>):>void=>$unsafe {
+    let t=prune(t0)
+    let k=types.ptr[t].kind
+    if k =? 'fixed' {
+        let et:LIWord=LIWord(types.ptr[t].elem)
+        loop i in [0..fixed_len(t)) {texture_offsets(et base + i * tsize(et) @out);}
+    }
+    else if k =? 'struct_' and not is_union(t) {
+        let si:LIWord=LIWord(types.ptr[t].st)
+        if is_lib_texture(si) {
+            out.push(base);
+            return
+        }
+        loop fo in field_list(t) {texture_offsets(fo[0] base + fo[1] @out);}
+    }
+}
+gen_intrinsic_zeroed=(e:LIWord arg_start:LIWord):>Val=>$unsafe {
+    let t=ntype(e)
+    if vc(t) not=? VC_AGG {return V(zero_val(t) true)}
+    let z=e_slot(new_temp(t))
+    e_zero(z tsize(t));
+    return V(z true)
+}
+gen_intrinsic_unreachable=(e:LIWord arg_start:LIWord):>Val=>$unsafe {
+    e_call_nr1(rt("__panic") e_daddr(str_data("unreachable code reached")) -1);
+    return never_after(e)
+}
+gen_intrinsic_embed=(e:LIWord arg_start:LIWord):>Val=>$unsafe {
+    let s=name_of(LIWord(nodes.ptr[e].sval))
+    return V(e_daddr(str_data(s)) false)
+}
+gen_intrinsic_argv=(e:LIWord arg_start:LIWord):>Val=>$unsafe {
+    let d=vreg(VI)
+    emit('intr' VI d 0 0 0 1);
+    return V(d false)
+}
+gen_intrinsic_gpu_kernel=(e:LIWord arg_start:LIWord):>Val=>$unsafe {
+    let arg0:LIWord=LIWord(lists.ptr[arg_start])
+    let arg1:LIWord=LIWord(lists.ptr[arg_start + 1])
+    # (the GLSL program, then, past a 0 byte, the SPIR-V one for Vulkan: not on the web)
+    let kf:LIWord=LIWord(nodes.ptr[arg0].sym)
+    let kd=name_of(LIWord(nodes.ptr[arg1].sval))
+    let ks=glsl_kernel(kf kd)
+    # (on macOS, Metal's in place of SPIR-V)
+    if target_macos {ks="{ks}\0{msl_kernel(kf kd)}"}
+    else if not target_wasm {ks="{ks}\0{spirv_kernel(kf kd)}"}
+    return V(e_daddr(str_data(ks)) false)
+}
+gen_intrinsic_compute_spirv=(e:LIWord arg_start:LIWord):>Val=>$unsafe {
+    let arg0:LIWord=LIWord(lists.ptr[arg_start])
+    let cs=""
+    if target_macos {cs=msl_compute(LIWord(nodes.ptr[arg0].sym))}
+    else if not target_wasm {cs=spirv_compute(LIWord(nodes.ptr[arg0].sym))}
+    return V(e_daddr(str_data(cs)) false)
+}
+gen_intrinsic_compute_textures=(e:LIWord arg_start:LIWord):>Val=>$unsafe {
+    let arg0:LIWord=LIWord(lists.ptr[arg_start])
+    # where the parameters hold Textures (their GL names, given slots when dispatched): "8,40"
+    let offs:array<int64>=[]
+    texture_offsets(fns.ptr[LIWord(nodes.ptr[arg0].sym)].ptypes.ptr[1] 0 @offs);
+    let ts=""
+    loop i in [0..offs.length) and o in offs {
+        if i >? 0 {ts="{ts},";}
+        ts="{ts}{o}";
+    }
+    return V(e_daddr(str_data(ts)) false)
+}
+gen_intrinsic_shader=(e:LIWord arg_start:LIWord):>Val=>$unsafe {
+    let arg0:LIWord=LIWord(lists.ptr[arg_start])
+    let arg1:LIWord=LIWord(lists.ptr[arg_start + 1])
+    let vsf:LIWord=LIWord(nodes.ptr[arg0].sym)
+    let fsf:LIWord=LIWord(nodes.ptr[arg1].sym)
+    let [vs fs lay]=glsl_build(vsf fsf)
+    if watch_build {glsl_of[e] = "{vs}{fs}{lay}";}
+    let t=ntype(e)
+    let si:LIWord=LIWord(types.ptr[prune(t)].st)
+    layout(t);
+    let s=new_temp(t)
+    let d=e_slot(s)
+    e_zero(d tsize(t));
+    let srcs=[vs fs lay]
+    loop i in [0..3) {e_store(d LIWord(fields.ptr[LIWord(structs.ptr[si].fields) + i].offset) e_daddr(str_data(srcs[i])) ptr_size);}
+    # for the software renderer: the shader functions themselves (callable through C function
+    # pointers: the result pointer comes first, then the arguments' addresses) and the size of
+    # the vertex function's output (the values interpolated across triangles)
+    if LIWord(structs.ptr[si].nfields) >=? 7 {
+        let fo:LIWord=LIWord(structs.ptr[si].fields)
+        e_store(d LIWord(fields.ptr[fo + 3].offset) e_faddr(lf_of_inst(vsf)) ptr_size);
+        e_store(d LIWord(fields.ptr[fo + 4].offset) e_faddr(lf_of_inst(fsf)) ptr_size);
+        e_store(d LIWord(fields.ptr[fo + 5].offset) e_iconst(tsize(LIWord(fns.ptr[vsf].ret))) 8);
+        e_store(d LIWord(fields.ptr[fo + 6].offset) e_iconst(fns.ptr[vsf].ptypes.length) 8);
+        if LIWord(structs.ptr[si].nfields) >=? 8 {
+            # per 4-byte slot of the output: 'i' if it holds integer (or f64) data, which is
+            # passed on unchanged ("flat") instead of interpolated
+            let rt:LIWord=LIWord(fns.ptr[vsf].ret)
+            let mask=fill(b'f' max(tsize(rt) // 4 1))
+            flat_slots(rt 0 @mask);
+            e_store(d LIWord(fields.ptr[fo + 7].offset) e_daddr(str_data((mask as string ?? ""))) ptr_size);
+        }
+        if LIWord(structs.ptr[si].nfields) >=? 10 {
+            let vk:[string string]=["" ""]
+            if target_macos {vk=msl_build(vsf fsf)}
+            else if not target_wasm {vk=spirv_build(vsf fsf)}
+            e_store(d LIWord(fields.ptr[fo + 8].offset) e_daddr(str_data(vk[0])) ptr_size);
+            e_store(d LIWord(fields.ptr[fo + 9].offset) e_daddr(str_data(vk[1])) ptr_size);
+        }
+    }
+    return Val[d true s]
+}
+flat_slots=(t0:LIWord base:LIWord @mask:array<uint8>):>void=>$unsafe {
+    let t=prune(t0)
+    let k=types.ptr[t].kind
+    if k =? 'quantity' {
+        flat_slots(LIWord(types.ptr[t].elem) base @mask);
+        return
+    }
+    if k =? 'float_' and LIWord(types.ptr[t].bits) =? 32 {return}
+    if k =? 'vec' and not types.ptr[t].sign {return}
+    if k =? 'struct_' {
+        let si:LIWord=LIWord(types.ptr[t].st)
+        layout(t);
+        loop i in [0..LIWord(structs.ptr[si].nfields)) {
+            let f=fields.ptr[LIWord(structs.ptr[si].fields) + i]
+            flat_slots(LIWord(f.type) base + LIWord(f.offset) @mask);
+        }
+        return
+    }
+    loop b in [base // 4..(base + tsize(t) + 3) // 4) {
+        if b <? mask.length {mask[b] = b'i';}
+    }
+}
