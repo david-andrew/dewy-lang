@@ -9,7 +9,9 @@ from tests.support import ROOT, compiler
 def test_nested_zero_inventory_order(compiler, tmp_path):
     source = tmp_path / 'zero_inventory.jo'
     source.write_text(''.join(f"use '{ROOT / 'compiler' / (name + '.jo')}'\n"
-                              for name in ('lower', 'ir', 'types')) + '''
+                              for name in ('lower', 'ir', 'types'))
+                      + ''.join(f"use '{ROOT / 'compiler' / (name + '.dewy')}'\n"
+                                for name in ('lower_storage', 'lower_functions')) + '''
 init_types()
 loop round in [0..3):
     begin_fn("zeros", 0)
