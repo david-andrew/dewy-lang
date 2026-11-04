@@ -275,6 +275,12 @@ refine_storage = (n: int, fallback: int) -> int:
             if int(locals[l].flags) & LF_ALIAS != 0 and locals[l].alias != 0: return refine_storage(int(locals[l].alias), fallback)
         if nodes[n].aux == i32(int(SK.local)): return int(locals[int(nodes[n].sym)].type)
         if nodes[n].aux == i32(int(SK.global)): return int(globals[int(nodes[n].sym)].type)
+    if nodes[n].kind == .unwrap:
+        # Narrowed aliases read the payload representation, but writes still
+        # owe the payload contract declared on the containing optional place.
+        a = int(nodes[n].a)
+        t = representation_type(refine_storage(a, ntype(a)))
+        if types[t].kind == .opt: return int(types[t].elem)
     fallback
 
 # A string stored as a string set: a member literal is its word, another
