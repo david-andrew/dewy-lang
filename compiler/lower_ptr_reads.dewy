@@ -1,3 +1,4 @@
+from p"lower_analysis.dewy" import (raw_view checked_call_mutmask)
 # ---- pointers only read through ----
 # `xs.ptr` (data(xs)) detaches xs's elements from any other value sharing them only when
 # the pointer may be written through: read through, it needs no copy of its own. One walk
@@ -13,7 +14,7 @@ from p"ast.jo" import (nodes nkids nkids2 kid kid2 has_flag NF_MUT NF_AT NF_GLOB
 from p"check.jo" import (locals fns LF_CAPTURED LF_CAPTURE LF_SHARED LF_ADDR LF_BYREF LF_ALIAS LF_MUTPARAM)
 from p"expr.jo" import (ntype IN)
 from p"types.jo" import (tkind)
-from p"lower.jo" import (cur_fn raw_view checked_call_mutmask)
+from p"lower.jo" import (cur_fn)
 # Node.aux stores the existing SK.local ordinal (1), not a Dewy string value.
 PRWord:type=int64<overflow='wrap'>
 let pr_parent:dict<int64 int64>=dict<int64 int64>()

@@ -1,0 +1,802 @@
+$runtime_checks
+from p"lower.jo" import (FnWrites LF_ELEMENTVIEW boxed_field_of fr_direct fr_total fw_direct fw_named fw_total held_views inst_mutmask is_shared lpath_ids lpath_parents mwr_direct opt_release pw_box pw_depth pw_heap)
+from p"expr.jo" import (IN is_map_type ntype)
+from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_ELEMALIAS LF_EXPOSED LF_MUTPARAM LF_OWNERBORROW LF_SHARED LF_SOAELEM LF_VALUECAP fns globals lib_dir locals)
+from p"ast.jo" import (NF_EXTERN NF_MUT has_flag kid kid2 kid_c kid_d nkids nodes)
+from p"types.jo" import (T_MATH_INT int_policy is_int is_managed math_optional prune tkind types)
+from p"checked_eval.dewy" import (cx_token_values)
+from p"copies.jo" import (copies_on copy_strict)
+from p"effects.jo" import (effect_summaries effects_demand_late)
+from p"util.jo" import (fatal files name_of pos_file)
+from p"check.jo" import (jd)
+from p"ast.jo" import (nkids2)
+from p"ownership_types.dewy" import (ownership_type)
+from p"effect_lattice.dewy" import (place_base)
+from p"places.jo" import (place_path)
+from p"lower_helpers.dewy" import (value_helper_calls)
+# Mutation and alias queries; shared state has one owner in lower.jo.
+LAWord:type=int64<overflow='wrap'>
+shares_mut_root=(a:LAWord args:array<int64> mutmask:LAWord callee:LAWord=-2):>bool=>$unsafe {
+    let ra=place_var(a)
+    if ra =? 0 {return false}
+    loop j in [0..args.length) and b in args {
+        if mutmask & (1 << j) =? 0 {continue}
+        let rb=place_var(b)
+        if rb =? 0 or not same_var(ra rb) {continue}
+        if callee >? -2 and (disjoint_fields(a b) or mut_arg_spares(a b j callee)) {continue}
+        return true
+    }
+    return false
+}
+mut_arg_spares=(a:LAWord b:LAWord j:LAWord callee:LAWord):>bool=>$unsafe {
+    if callee <=? 0 or j >=? fns.ptr[callee].params.length {return false}
+    let sa=place_steps(a)
+    let sb=place_steps(b)
+    if sa.length <=? sb.length {return false}
+    loop i in [0..sb.length) {
+        if nodes.ptr[sa.ptr[i]].kind not=? 'field' or nodes.ptr[sb.ptr[i]].kind not=? 'field' or nodes.ptr[sa.ptr[i]].aux not=? nodes.ptr[sb.ptr[i]].aux {return false}
+    }
+    let rest:array<int64>=[]
+    loop i in [sb.length..sa.length) {
+        let x=sa.ptr[i]
+        if nodes.ptr[x].kind not=? 'field' or nodes.ptr[x].aux <? 0 or tkind(ntype(LAWord(nodes.ptr[x].a))) not=? 'struct_' or boxed_field_of(x) >=? 0 {return false}
+        rest.push(LAWord(nodes.ptr[x].name));
+    }
+    if not effects_demand_late(callee) {return false}
+    loop event in effect_summaries.ptr[callee].events {
+        let k=event.atom.kind
+        if k =? 'opaque' or k =? 'remainder' or k =? 'escape' {return false}
+        if k not=? 'write' {continue}
+        let base=place_base(event.atom.place)
+        if base.root =? 'capture' or base.root =? 'local' and base.declaration =? 0 {return false}
+        if base.root not=? 'formal' or base.declaration - 1 not=? j {continue}
+        let path=place_path(event.atom.place)
+        let n=min(path.length rest.length)
+        let same=true
+        loop i in [0..n) {
+            if path.ptr[i] not=? rest.ptr[i] {same=false}
+        }
+        if same {return false}
+    }
+    return true
+}
+disjoint_fields=(a:LAWord b:LAWord):>bool=>$unsafe {
+    let sa=place_steps(a)
+    let sb=place_steps(b)
+    loop i in [0..min(sa.length sb.length)) {
+        let x=sa.ptr[i]
+        let y=sb.ptr[i]
+        if nodes.ptr[x].kind not=? 'field' or nodes.ptr[y].kind not=? 'field' or nodes.ptr[x].aux <? 0 or nodes.ptr[y].aux <? 0 {return false}
+        if tkind(ntype(LAWord(nodes.ptr[x].a))) not=? 'struct_' or boxed_field_of(x) >=? 0 or boxed_field_of(y) >=? 0 {return false}
+        if nodes.ptr[x].aux not=? nodes.ptr[y].aux {return true}
+    }
+    return false
+}
+copy_through=(a:LAWord callee:LAWord):>bool=>$unsafe {
+    let alias=a
+    loop nodes.ptr[alias].kind =? 'ident' and nodes.ptr[alias].aux =? int32(1) and LAWord(locals.ptr[LAWord(nodes.ptr[alias].sym)].flags) & LF_ALIAS not=? 0 {
+        alias=LAWord(locals.ptr[LAWord(nodes.ptr[alias].sym)].alias)
+    }
+    if nodes.ptr[alias].kind =? 'unwrap' and math_optional(prune(ntype(LAWord(nodes.ptr[alias].a)))) {return true}
+    let r=place_var(a)
+    if r =? 0 or not pw_heap {return false}
+    if nodes.ptr[r].aux not=? int32(2) {
+        if nodes.ptr[r].aux not=? int32(1) or LAWord(locals.ptr[LAWord(nodes.ptr[r].sym)].flags) & LF_MUTPARAM =? 0 {return false}
+    }
+    return callee <=? 0 or fn_writes(callee).all
+}
+borrow_may_change=(a:LAWord args:array<int64> i:LAWord callee:LAWord):>bool=>$unsafe {
+    let n=place_var(a)
+    if n =? 0 {return false}
+    let heap_place=pw_heap
+    if nodes.ptr[n].aux =? int32(2) {
+        # (a global only top-level code changes cannot change during a call, only in the
+        # arguments after this one)
+        if not globals.ptr[LAWord(nodes.ptr[n].sym)].fn_written {
+            mwr_direct=true
+            let w=false
+            loop j in [i + 1..args.length) {
+                if may_write_root(args.ptr[j] n) {w=true}
+            }
+            mwr_direct=false
+            return w
+        }
+        if not opt_release or callee <=? 0 {return true}
+        let w=fn_writes(callee)
+        if w.all or w.globals.contains(LAWord(nodes.ptr[n].sym)) {return true}
+        loop j in [i + 1..args.length) {
+            if may_write_root(args.ptr[j] n) {return true}
+        }
+        return false
+    }
+    if nodes.ptr[n].aux not=? int32(1) {return false}
+    if held_views.contains(LAWord(nodes.ptr[n].sym)) {return false}
+    let flags:LAWord=LAWord(locals.ptr[LAWord(nodes.ptr[n].sym)].flags)
+    # view_decl proved that the array root cannot change through the last use,
+    # including this call and its remaining arguments. The view needs no retain.
+    if flags & LF_ELEMENTVIEW not=? 0 {return false}
+    # An immutable value capture is kept alive by the active closure. Passing
+    # it to a reader needs no per-invocation retain, including across workers.
+    let immutable_capture=flags & (LF_CAPTURE | LF_VALUECAP) =? (LF_CAPTURE | LF_VALUECAP) and flags & (LF_ASSIGNED | LF_CAPTURED | LF_ADDR | LF_EXPOSED | LF_OWNERBORROW | LF_SHARED) =? 0 and not is_shared(LAWord(nodes.ptr[n].sym))
+    if flags & (LF_SHARED | LF_BYREF | LF_ALIAS) not=? 0 or flags & LF_CAPTURE not=? 0 and not immutable_capture {return true}
+    # Even an ordinary local can be changed by evaluating a later argument.
+    # Disjoint fields keep borrowing. A dynamic element also borrows its
+    # container's storage: a sibling write may detach it, and later code may
+    # release the old backing storage's last other owner. Treat that ownership
+    # place as overlapping, even when the logical elements are disjoint.
+    loop j in [i + 1..args.length) {
+        if may_write_root(args.ptr[j] n (if heap_place {0} else {a})) {return true}
+    }
+    if flags & LF_MUTPARAM =? 0 {return false}
+    # A mutable parameter may alias a caller's global. A read-only direct call
+    # cannot replace it when it writes no globals and invokes no unknown code.
+    # Keep the snapshot if a later argument can write the parameter itself.
+    let resource=ownership_type(ntype(n))
+    # Owners cannot be global, captured, or exported. A readonly argument
+    # cannot be reached by the callee except through another actual; those
+    # aliases and later argument writes are checked above/by shares_mut_root.
+    if resource {return false}
+    # (the source copy policy cannot depend on the build: it consults writes always)
+    if not opt_release and not (copies_on and copy_strict(a)) or callee <=? 0 {return true}
+    let w=fn_writes(callee)
+    if w.all or w.globals.length >? 0 {return true}
+    loop j in [i + 1..args.length) {
+        if may_write_root(args.ptr[j] n) {return true}
+    }
+    return false
+}
+mut_may_reach=(a:LAWord args:array<int64> mutmask:LAWord):>bool=>$unsafe {
+    let ra=place_var(a)
+    if ra =? 0 or shares_mut_root(a args mutmask) {return true}
+    if nodes.ptr[ra].aux =? int32(1) {
+        if mut_plain_root(ra) {return false}
+    }
+    else if nodes.ptr[ra].aux not=? int32(2) {return true}
+    loop j in [0..args.length) and b in args {
+        if mutmask & (1 << j) =? 0 {continue}
+        let rb=place_var(b)
+        if rb =? 0 {return true}
+        if nodes.ptr[rb].aux =? int32(2) and nodes.ptr[ra].aux =? int32(2) {continue}
+        if nodes.ptr[rb].aux not=? int32(1) or not mut_plain_root(rb) {return true}
+    }
+    return false
+}
+mut_plain_root=(r:LAWord):>bool=>$unsafe {
+    let l:LAWord=LAWord(nodes.ptr[r].sym)
+    let fl:LAWord=LAWord(locals.ptr[l].flags)
+    return fl & (LF_MUTPARAM | LF_SHARED | LF_BYREF | LF_ALIAS | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_ELEMALIAS | LF_SOAELEM | LF_ELEMENTVIEW | LF_OWNERBORROW) =? 0 and not is_shared(l) and not held_views.contains(l)
+}
+mut_alias_check=(args:array<int64> mutmask:LAWord callee:LAWord):>void=>$unsafe {
+    loop i in [0..args.length) and a in args {
+        if mutmask & (1 << i) =? 0 {continue}
+        let r=elem_root(a)
+        if r =? 0 {continue}
+        # (a place only in a box, not an array: the box is kept while the call runs, call_args)
+        let in_arr=pw_heap
+        let hint=""
+        if in_arr {hint=" (pass the index instead)"}
+        let sa=place_steps(a)
+        let nm=name_of(LAWord(nodes.ptr[r].name))
+        loop j in [0..args.length) and b in args {
+            if j =? i {continue}
+            let bmut=mutmask & (1 << j) not=? 0
+            let w=place_var(b)
+            # (another place that holds this one or is inside it: xs and xs[0], xs[0] and
+            # xs[0][0]; other elements and fields are fine, as in swap(xs[i], xs[j]), and so is
+            # reading numbers out of the array)
+            let nested=false
+            if w not=? 0 and same_var(w r) and (bmut or is_managed(ntype(b))) {
+                let sb=place_steps(b)
+                nested=steps_overlap(sa sb) and not (bmut and sa.length =? sb.length)
+            }
+            if nested or may_write_root(b r) {
+                fatal(nodes.ptr[b].pos "{place_text(a)} is passed as {jd(nodes.ptr[b].pos "a `mut` argument" "an `@` argument")}, so this argument cannot also hold or change '{nm}'{hint}");
+            }
+        }
+        let glob=nodes.ptr[r].aux =? int32(2)
+        let lf:LAWord=0
+        if not glob {lf=LAWord(locals.ptr[LAWord(nodes.ptr[r].sym)].flags)}
+        let mutparam=lf & LF_MUTPARAM not=? 0
+        # (a variable a closure changes: the callee may be that closure, or call it)
+        if lf & LF_SHARED not=? 0 and (callee <=? 0 or fn_writes(callee).all) {
+            fatal(nodes.ptr[a].pos "'{nm}' is changed by a closure, which this call may run, so {place_text(a)} cannot be passed as {jd(nodes.ptr[a].pos "a `mut` argument" "an `@` argument")}{hint}");
+        }
+        if glob or mutparam {
+            let who="the function called"
+            if callee >? 0 {who="'{name_of(LAWord(nodes.ptr[LAWord(fns.ptr[callee].decl)].name))}'"}
+            # (what the callee changes, as far as it names it; a call of a function value it
+            # makes is not counted, or nearly every call into a library would be refused)
+            let fw=FnWrites[false [] [] []]
+            if callee >? 0 {fw=fn_writes_named(callee)}
+            if glob and fw.globals.contains(LAWord(nodes.ptr[r].sym)) {
+                fatal(nodes.ptr[a].pos "{who} may change the global '{nm}' (or call something that does), so {place_text(a)} cannot be passed to it as {jd(nodes.ptr[a].pos "a `mut` argument" "an `@` argument")}{hint}");
+            }
+            if mutparam and in_arr and param_may_alias(fw.globals nodes.ptr[a].pos) {
+                fatal(nodes.ptr[a].pos "{who} changes globals, and '{nm}' ({jd(nodes.ptr[a].pos "a `mut` parameter" "an `@` parameter")}) may be one of them, so {place_text(a)} cannot be passed to it as {jd(nodes.ptr[a].pos "a `mut` argument" "an `@` argument")}{hint}");
+            }
+        }
+    }
+}
+param_may_alias=(written:array<int64> pos:LAWord):>bool=>$unsafe {
+    if not files.ptr[pos_file(pos)].is_dewy {return written.length >? 0}
+    loop g in written {
+        let d:LAWord=LAWord(globals.ptr[g].decl)
+        if d =? 0 or files.ptr[pos_file(nodes.ptr[d].pos)].is_dewy or not starts_with(name_of(LAWord(globals.ptr[g].name)) "__") {return true}
+    }
+    return false
+}
+place_text=(n:LAWord):>string=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if k =? 'ident' {
+        let nm=name_of(LAWord(nodes.ptr[n].name))
+        # (a narrowed field or global: the place it stands for)
+        if starts_with(nm "#") and nodes.ptr[n].aux =? int32(1) and locals.ptr[LAWord(nodes.ptr[n].sym)].alias not=? 0 {return place_text(LAWord(locals.ptr[LAWord(nodes.ptr[n].sym)].alias))}
+        return nm
+    }
+    if k =? 'narrow' or k =? 'conv' {return place_text(LAWord(nodes.ptr[n].a))}
+    if k =? 'field' {return "{place_text(LAWord(nodes.ptr[n].a))}.{name_of(LAWord(nodes.ptr[n].name))}"}
+    if k =? 'unwrap' {return "{place_text(LAWord(nodes.ptr[n].a))}!"}
+    if k =? 'index' {
+        let b:LAWord=LAWord(nodes.ptr[n].b)
+        let i="..."
+        if nodes.ptr[b].kind =? 'ident' {i=name_of(LAWord(nodes.ptr[b].name))}
+        else if nodes.ptr[b].kind =? 'int_lit' {i="{nodes.ptr[b].ival}"}
+        # (a dictionary entry is stored in its values array: written as the dictionary's)
+        let a:LAWord=LAWord(nodes.ptr[n].a)
+        if nodes.ptr[a].kind =? 'field' and is_map_type(ntype(LAWord(nodes.ptr[a].a))) {return "{place_text(LAWord(nodes.ptr[a].a))}[{i}]"}
+        return "{place_text(a)}[{i}]"
+    }
+    return "..."
+}
+place_var=(n0:LAWord):>LAWord=>$unsafe {
+    let n=n0
+    pw_heap=false
+    pw_box=false
+    pw_depth=0
+    loop true {
+        let k=nodes.ptr[n].kind
+        if k =? 'field' or k =? 'index' {
+            let bk=tkind(ntype(LAWord(nodes.ptr[n].a)))
+            if bk =? 'ptr' {return 0}
+            if k =? 'index' and bk not=? 'fixed' and bk not=? 'vec' {pw_heap=true}
+            if k =? 'field' and boxed_field_of(n) >=? 0 {pw_box=true}
+            pw_depth += 1;
+            n=LAWord(nodes.ptr[n].a)
+        }
+        else if k =? 'unwrap' or k =? 'narrow' or (k =? 'fnref' and nodes.ptr[n].aux =? 2) or (k =? 'conv' and nodes.ptr[n].aux =? int32(9)) {n=LAWord(nodes.ptr[n].a)}
+        else if k =? 'ident' and nodes.ptr[n].aux =? int32(1) and LAWord(locals.ptr[LAWord(nodes.ptr[n].sym)].flags) & LF_ALIAS not=? 0 and locals.ptr[LAWord(nodes.ptr[n].sym)].alias not=? 0 {
+            n=LAWord(locals.ptr[LAWord(nodes.ptr[n].sym)].alias)
+        }
+        else {break}
+    }
+    if nodes.ptr[n].kind =? 'ident' {return n}
+    return 0
+}
+place_steps=(n0:LAWord):>array<int64>=>$unsafe {
+    let out:array<int64>=[]
+    let n=n0
+    loop true {
+        let k=nodes.ptr[n].kind
+        if k =? 'field' or k =? 'index' {
+            out.insert(n 0);
+            n=LAWord(nodes.ptr[n].a)
+        }
+        else if k =? 'unwrap' or k =? 'narrow' or (k =? 'conv' and nodes.ptr[n].aux =? int32(9)) {n=LAWord(nodes.ptr[n].a)}
+        else if k =? 'ident' and nodes.ptr[n].aux =? int32(1) and LAWord(locals.ptr[LAWord(nodes.ptr[n].sym)].flags) & LF_ALIAS not=? 0 and locals.ptr[LAWord(nodes.ptr[n].sym)].alias not=? 0 {
+            n=LAWord(locals.ptr[LAWord(nodes.ptr[n].sym)].alias)
+        }
+        else {break}
+    }
+    return out
+}
+steps_overlap=(a:array<int64> b:array<int64>):>bool=>$unsafe {
+    loop k in [0..min(a.length b.length)) {
+        let x=a.ptr[k]
+        let y=b.ptr[k]
+        if nodes.ptr[x].kind not=? nodes.ptr[y].kind {return false}
+        if nodes.ptr[x].kind =? 'field' and nodes.ptr[x].aux not=? nodes.ptr[y].aux {return false}
+        if nodes.ptr[x].kind =? 'index' {
+            let bx:LAWord=LAWord(nodes.ptr[x].b)
+            let by:LAWord=LAWord(nodes.ptr[y].b)
+            if nodes.ptr[bx].kind =? 'int_lit' and nodes.ptr[by].kind =? 'int_lit' and nodes.ptr[bx].ival not=? nodes.ptr[by].ival {return false}
+        }
+    }
+    return true
+}
+elem_root=(n:LAWord):>LAWord=>$unsafe {
+    let r=place_var(n)
+    if pw_heap or pw_box {return r}
+    return 0
+}
+mentions_var=(n:LAWord r:LAWord):>bool=>$unsafe {
+    if n <=? 0 {return false}
+    if nodes.ptr[n].kind =? 'ident' and same_var(n r) {return true}
+    if nodes.ptr[n].kind =? 'lambda' {return false}
+    let child_a:LAWord=LAWord(nodes.ptr[n].a)
+    let child_b:LAWord=LAWord(nodes.ptr[n].b)
+    # (kid_c and kid_d, with the kind in hand)
+    let child_c=if nodes.ptr[n].kind =? 'for_' {0} else {LAWord(nodes.ptr[n].c)}
+    let child_d=if nodes.ptr[n].kind =? 'for_' or nodes.ptr[n].kind =? 'partial' {0} else {LAWord(nodes.ptr[n].d)}
+    if mentions_var(child_a r) {return true}
+    if mentions_var(child_b r) {return true}
+    if mentions_var(child_c r) {return true}
+    if mentions_var(child_d r) {return true}
+    loop i in [0..nkids(n)) {
+        if mentions_var(kid(n i) r) {return true}
+    }
+    loop i in [0..nkids2(n)) {
+        if mentions_var(kid2(n i) r) {return true}
+    }
+    return false
+}
+checked_call_mutmask=(n:LAWord):>LAWord=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if k =? 'pair' and nodes.ptr[n].sym >? 0 {return inst_mutmask(LAWord(nodes.ptr[n].sym))}
+    if k not=? 'call' {return 0}
+    let aux:LAWord=LAWord(nodes.ptr[n].aux)
+    if aux =? 0 and nodes.ptr[n].sym >? 0 {return inst_mutmask(LAWord(nodes.ptr[n].sym))}
+    if aux =? 1 or aux =? 4 {
+        let ft=prune(ntype(LAWord(nodes.ptr[n].a)))
+        return LAWord(types.ptr[ft].mutmask)
+    }
+    return 0
+}
+has_call=(n:LAWord):>bool=>$unsafe {
+    if n <=? 0 {return false}
+    let k=nodes.ptr[n].kind
+    if k =? 'call' or (k =? 'pair' and nodes.ptr[n].sym >? 0) {return true}
+    if k =? 'lambda' {return false}
+    let child_a:LAWord=LAWord(nodes.ptr[n].a)
+    let child_b:LAWord=LAWord(nodes.ptr[n].b)
+    # (kid_c and kid_d, with the kind in hand)
+    let child_c=if nodes.ptr[n].kind =? 'for_' {0} else {LAWord(nodes.ptr[n].c)}
+    let child_d=if nodes.ptr[n].kind =? 'for_' or nodes.ptr[n].kind =? 'partial' {0} else {LAWord(nodes.ptr[n].d)}
+    if has_call(child_a) {return true}
+    if has_call(child_b) {return true}
+    if has_call(child_c) {return true}
+    if has_call(child_d) {return true}
+    loop i in [0..nkids(n)) {
+        if has_call(kid(n i)) {return true}
+    }
+    loop i in [0..nkids2(n)) {
+        if has_call(kid2(n i)) {return true}
+    }
+    return false
+}
+assign_rhs_effects=(n:LAWord):>bool=>$unsafe {
+    if n <=? 0 {return false}
+    let k=nodes.ptr[n].kind
+    if k =? 'call' or (k =? 'pair' and nodes.ptr[n].sym >? 0) or k =? 'assign' or k =? 'block' or k =? 'for_' or k =? 'while_' {return true}
+    if k =? 'lambda' {return false}
+    if k =? 'intrinsic' {
+        let id=nodes.ptr[n].aux as IN
+        if id =? IN.fmt_struct or id =? IN.json_fields or id =? IN.push or id =? IN.pop or id =? IN.insert or id =? IN.remove or id =? IN.clear or id =? IN.reserve or id =? IN.resize or id =? IN.truncate or id =? IN.extend {return true}
+    }
+    if assign_rhs_effects(LAWord(nodes.ptr[n].a)) or assign_rhs_effects(LAWord(nodes.ptr[n].b)) {return true}
+    if assign_rhs_effects(kid_c(n)) or assign_rhs_effects(kid_d(n)) {return true}
+    loop i in [0..nkids(n)) {
+        if assign_rhs_effects(kid(n i)) {return true}
+    }
+    loop i in [0..nkids2(n)) {
+        if assign_rhs_effects(kid2(n i)) {return true}
+    }
+    return false
+}
+index_stable=(n:LAWord rhs:LAWord):>bool=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if k =? 'int_lit' {return true}
+    if k =? 'ident' {return nodes.ptr[n].aux =? int32(1) and mut_plain_root(n) and not may_write_root(rhs n)}
+    if k not=? 'binary' or not is_int(ntype(n)) or prune(ntype(n)) =? T_MATH_INT or int_policy(ntype(n)) not=? 0 {return false}
+    let op=cx_token_values.ptr[LAWord(nodes.ptr[n].op)]
+    if op not=? 'plus' and op not=? 'minus' and op not=? 'star' and op not=? 'amp' and op not=? 'pipe' and op not=? 'caret' and op not=? 'kw_xor' {return false}
+    return index_stable(LAWord(nodes.ptr[n].a) rhs) and index_stable(LAWord(nodes.ptr[n].b) rhs)
+}
+unchanged_by=(e:LAWord n:LAWord):>bool=>$unsafe {
+    if lpath_key(e) =? 0 {return false}
+    let rn=lpath_root(e)
+    if nodes.ptr[rn].aux not=? int32(2) {
+        let r:LAWord=LAWord(nodes.ptr[rn].sym)
+        if LAWord(locals.ptr[r].flags) & (LF_ALIAS | LF_CAPTURE | LF_BYREF) not=? 0 or is_shared(r) {return false}
+    }
+    return not may_write_root(n rn)
+}
+mentions_local=(n:LAWord l:LAWord):>bool=>$unsafe {
+    if n <=? 0 {return false}
+    let k=nodes.ptr[n].kind
+    if k =? 'ident' {return nodes.ptr[n].aux =? int32(1) and LAWord(nodes.ptr[n].sym) =? l}
+    let child_a:LAWord=LAWord(nodes.ptr[n].a)
+    let child_b:LAWord=LAWord(nodes.ptr[n].b)
+    # (kid_c and kid_d, with the kind in hand)
+    let child_c=if nodes.ptr[n].kind =? 'for_' {0} else {LAWord(nodes.ptr[n].c)}
+    let child_d=if nodes.ptr[n].kind =? 'for_' or nodes.ptr[n].kind =? 'partial' {0} else {LAWord(nodes.ptr[n].d)}
+    if mentions_local(child_a l) {return true}
+    if mentions_local(child_b l) {return true}
+    if mentions_local(child_c l) {return true}
+    if mentions_local(child_d l) {return true}
+    loop i in [0..nkids(n)) {
+        if mentions_local(kid(n i) l) {return true}
+    }
+    loop i in [0..nkids2(n)) {
+        if mentions_local(kid2(n i) l) {return true}
+    }
+    return false
+}
+write_root=(n0:LAWord):>LAWord=>$unsafe {
+    let n=n0
+    loop nodes.ptr[n].kind =? 'field' or nodes.ptr[n].kind =? 'index' or nodes.ptr[n].kind =? 'unwrap' {n=LAWord(nodes.ptr[n].a)}
+    if nodes.ptr[n].kind =? 'ident' {return n}
+    return 0
+}
+same_var=(a:LAWord b:LAWord):>bool=>$unsafe {
+    return nodes.ptr[a].aux =? nodes.ptr[b].aux and nodes.ptr[a].sym =? nodes.ptr[b].sym
+}
+raw_view=(n:LAWord):>bool=>$unsafe {
+    let a:LAWord=LAWord(nodes.ptr[n].a)
+    if a =? 0 or nodes.ptr[n].type =? 0 or nodes.ptr[a].type =? 0 {return false}
+    let tk=tkind(ntype(n))
+    let fk=tkind(ntype(a))
+    return (tk =? 'ptr' or tk =? 'int_') and (fk =? 'array' or fk =? 'str_')
+}
+write_overlaps=(target:LAWord root:LAWord place:LAWord):>bool=>$unsafe {
+    let w=place_var(target)
+    return w not=? 0 and same_var(w root) and (place =? 0 or steps_overlap(place_steps(target) place_steps(place)))
+}
+may_write_root=(n:LAWord rn:LAWord place:LAWord=0):>bool=>$unsafe {
+    if n <=? 0 {return false}
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' {return false}
+    let glob=nodes.ptr[rn].aux =? int32(2)
+    let mutparam=not glob and LAWord(locals.ptr[LAWord(nodes.ptr[rn].sym)].flags) & LF_MUTPARAM not=? 0
+    if not mwr_direct and (glob or mutparam) {
+        loop f in value_helper_calls(n) {
+            let w=fn_writes(f)
+            if w.all or (glob and w.globals.contains(LAWord(nodes.ptr[rn].sym))) or (mutparam and w.globals.length >? 0) {return true}
+        }
+    }
+    if k =? 'assign' {
+        if write_overlaps(LAWord(nodes.ptr[n].a) rn place) {return true}
+    }
+    if k =? 'intrinsic' and nkids(n) >? 0 {
+        let id=nodes.ptr[n].aux as IN
+        if (id =? IN.fmt_struct or id =? IN.json_fields) and (glob or mutparam) {return true}
+        if id =? IN.push or id =? IN.pop or id =? IN.insert or id =? IN.remove or id =? IN.clear or id =? IN.reserve or id =? IN.resize or id =? IN.truncate or id =? IN.extend or id =? IN.arrdata {
+            if write_overlaps(kid(n 0) rn place) {return true}
+        }
+    }
+    if k =? 'addr' or (k =? 'cast' or k =? 'conv') and raw_view(n) {
+        if write_overlaps(LAWord(nodes.ptr[n].a) rn place) {return true}
+    }
+    if k =? 'for_' and has_flag(n NF_MUT) {
+        if write_overlaps(LAWord(nodes.ptr[n].a) rn place) {return true}
+    }
+    if k =? 'call' or (k =? 'pair' and nodes.ptr[n].sym >? 0) {
+        let mm=checked_call_mutmask(n)
+        loop i in [0..nkids(n)) {
+            if mm & (1 << i) not=? 0 {
+                if write_overlaps(kid(n i) rn place) {return true}
+            }
+        }
+        let aux=if k =? 'pair' {0} else {LAWord(nodes.ptr[n].aux)}
+        if mwr_direct {}
+        else if aux =? 1 or aux =? 4 {
+            if glob or mutparam {return true}
+        }
+        else if aux =? 0 and (glob or mutparam) {
+            # (what the function and everything it calls may write; a mut parameter may be the
+            # caller's global)
+            let w=fn_writes(LAWord(nodes.ptr[n].sym))
+            if w.all or (glob and w.globals.contains(LAWord(nodes.ptr[rn].sym))) or (mutparam and w.globals.length >? 0) {return true}
+        }
+    }
+    let child_a:LAWord=LAWord(nodes.ptr[n].a)
+    let child_b:LAWord=LAWord(nodes.ptr[n].b)
+    # (kid_c and kid_d, with the kind in hand)
+    let child_c=if nodes.ptr[n].kind =? 'for_' {0} else {LAWord(nodes.ptr[n].c)}
+    let child_d=if nodes.ptr[n].kind =? 'for_' or nodes.ptr[n].kind =? 'partial' {0} else {LAWord(nodes.ptr[n].d)}
+    if may_write_root(child_a rn place) {return true}
+    if may_write_root(child_b rn place) {return true}
+    if may_write_root(child_c rn place) {return true}
+    if may_write_root(child_d rn place) {return true}
+    loop i in [0..nkids(n)) {
+        if may_write_root(kid(n i) rn place) {return true}
+    }
+    loop i in [0..nkids2(n)) {
+        if may_write_root(kid2(n i) rn place) {return true}
+    }
+    return false
+}
+calls_leave=(n:LAWord rn:LAWord written:bool):>bool=>$unsafe {
+    if n <=? 0 {return true}
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' {return true}
+    loop f in value_helper_calls(n) {
+        let w=fn_writes(f)
+        if w.all {return false}
+        if nodes.ptr[rn].aux =? int32(2) {
+            let g:LAWord=LAWord(nodes.ptr[rn].sym)
+            if w.globals.contains(g) or (written and w.mentions.contains(g)) {return false}
+        }
+        else if w.globals.length >? 0 or (written and w.mentions.length >? 0) {return false}
+    }
+    if k =? 'intrinsic' and (nodes.ptr[n].aux =? int32(28) or nodes.ptr[n].aux =? int32(63)) {return false}
+    if k =? 'call' or (k =? 'pair' and nodes.ptr[n].sym >? 0) {
+        let aux=if k =? 'pair' {0} else {LAWord(nodes.ptr[n].aux)}
+        if aux =? 1 or aux =? 4 {return false}
+        if aux =? 0 {
+            let w=fn_writes(LAWord(nodes.ptr[n].sym))
+            if w.all {return false}
+            if nodes.ptr[rn].aux =? int32(2) {
+                let g:LAWord=LAWord(nodes.ptr[rn].sym)
+                if w.globals.contains(g) or (written and w.mentions.contains(g)) {return false}
+            }
+            else {
+                # (a mut parameter may be any of the caller's globals)
+                if w.globals.length >? 0 or (written and w.mentions.length >? 0) {return false}
+            }
+        }
+    }
+    let child_a:LAWord=LAWord(nodes.ptr[n].a)
+    let child_b:LAWord=LAWord(nodes.ptr[n].b)
+    # (kid_c and kid_d, with the kind in hand)
+    let child_c=if nodes.ptr[n].kind =? 'for_' {0} else {LAWord(nodes.ptr[n].c)}
+    let child_d=if nodes.ptr[n].kind =? 'for_' or nodes.ptr[n].kind =? 'partial' {0} else {LAWord(nodes.ptr[n].d)}
+    if not calls_leave(child_a rn written) {return false}
+    if not calls_leave(child_b rn written) {return false}
+    if not calls_leave(child_c rn written) {return false}
+    if not calls_leave(child_d rn written) {return false}
+    loop i in [0..nkids(n)) {
+        if not calls_leave(kid(n i) rn written) {return false}
+    }
+    loop i in [0..nkids2(n)) {
+        if not calls_leave(kid2(n i) rn written) {return false}
+    }
+    return true
+}
+fn_writes_named=(f:LAWord):>FnWrites=>$unsafe {
+    let cached_w=fw_named.get(f)
+    if cached_w not=? none {return cached_w}
+    let total=FnWrites[false [] [] []]
+    let seen:dict<int64 bool>=dict<int64 bool>()
+    let todo=[f]
+    loop todo.length >? 0 {
+        let g=todo.pop()
+        if seen.get(g false) {continue}
+        seen[g] = true;
+        let d=fn_writes_direct(g)
+        loop x in d.globals {
+            if not total.globals.contains(x) {total.globals.push(x);}
+        }
+        loop c in d.calls {todo.push(c);}
+    }
+    fw_named[f] = total;
+    return total
+}
+fn_writes=(f:LAWord):>FnWrites=>$unsafe {
+    let cached_w=fw_total.get(f)
+    if cached_w not=? none {return cached_w}
+    let total=FnWrites[false [] [] []]
+    let seen:dict<int64 bool>=dict<int64 bool>()
+    let todo=[f]
+    loop todo.length >? 0 {
+        let g=todo.pop()
+        if seen.get(g false) {continue}
+        seen[g] = true;
+        let d=fn_writes_direct(g)
+        if d.all {total.all = true;}
+        loop x in d.globals {
+            if not total.globals.contains(x) {total.globals.push(x);}
+        }
+        loop x in d.mentions {
+            if not total.mentions.contains(x) {total.mentions.push(x);}
+        }
+        loop c in d.calls {todo.push(c);}
+        if total.all {break}
+    }
+    fw_total[f] = total;
+    return total
+}
+fn_writes_direct=(f:LAWord):>FnWrites=>$unsafe {
+    let cached_w=fw_direct.get(f)
+    if cached_w not=? none {return cached_w}
+    let w=FnWrites[false [] [] []]
+    if f >? 0 and f <? fns.length and fns.ptr[f].body not=? 0 {fw_scan(LAWord(fns.ptr[f].body) @w);}
+    # A foreign function may call back into the program; its body is opaque. The core runtime's
+    # own host imports and system functions (lib/core: write, clock, files) never do.
+    if f >? 0 and f <? fns.length and fns.ptr[f].decl not=? 0 and has_flag(LAWord(fns.ptr[f].decl) NF_EXTERN) and not starts_with(files.ptr[pos_file(nodes.ptr[LAWord(fns.ptr[f].decl)].pos)].path "{lib_dir}/core/") {w.all = true;}
+    fw_direct[f] = w;
+    return w
+}
+fw_global=(n:LAWord @w:FnWrites):>void=>$unsafe {
+    let r=write_root(n)
+    if r not=? 0 and nodes.ptr[r].aux =? int32(2) and not w.globals.contains(LAWord(nodes.ptr[r].sym)) {w.globals.push(LAWord(nodes.ptr[r].sym));}
+}
+fw_scan=(n:LAWord @w:FnWrites):>void=>$unsafe {
+    if n <=? 0 {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' {return}
+    loop f in value_helper_calls(n) {
+        if not w.calls.contains(f) {w.calls.push(f);}
+    }
+    if k =? 'ident' and nodes.ptr[n].aux =? int32(2) and not w.mentions.contains(LAWord(nodes.ptr[n].sym)) {w.mentions.push(LAWord(nodes.ptr[n].sym));}
+    if k =? 'assign' {fw_global(LAWord(nodes.ptr[n].a) @w);}
+    if k =? 'intrinsic' and nkids(n) >? 0 {
+        let id=nodes.ptr[n].aux as IN
+        # Field formatting invokes type-specific formatters selected by the
+        # checker. Treat it conservatively, including nested user formatters.
+        if id =? IN.fmt_struct or id =? IN.json_fields {w.all = true;}
+        if id =? IN.push or id =? IN.pop or id =? IN.insert or id =? IN.remove or id =? IN.clear or id =? IN.reserve or id =? IN.resize or id =? IN.truncate or id =? IN.extend {fw_global(kid(n 0) @w);}
+    }
+    if k =? 'for_' and has_flag(n NF_MUT) {fw_global(LAWord(nodes.ptr[n].a) @w);}
+    if k =? 'call' or (k =? 'pair' and nodes.ptr[n].sym >? 0) {
+        let mm=checked_call_mutmask(n)
+        loop i in [0..nkids(n)) {
+            if mm & (1 << i) not=? 0 {fw_global(kid(n i) @w);}
+        }
+        let aux=if k =? 'pair' {0} else {LAWord(nodes.ptr[n].aux)}
+        if aux =? 1 or aux =? 4 {w.all = true;}
+        else if aux =? 0 and not w.calls.contains(LAWord(nodes.ptr[n].sym)) {w.calls.push(LAWord(nodes.ptr[n].sym));}
+    }
+    fw_scan(LAWord(nodes.ptr[n].a) @w);
+    fw_scan(LAWord(nodes.ptr[n].b) @w);
+    fw_scan(kid_c(n) @w);
+    fw_scan(kid_d(n) @w);
+    loop i in [0..nkids(n)) {fw_scan(kid(n i) @w);}
+    loop i in [0..nkids2(n)) {fw_scan(kid2(n i) @w);}
+}
+fn_resizes=(f:LAWord):>array<int64>=>$unsafe {
+    let cached_r=fr_total.get(f)
+    if cached_r not=? none {return cached_r}
+    let total:array<int64>=[]
+    let seen:dict<int64 bool>=dict<int64 bool>()
+    let todo=[f]
+    loop todo.length >? 0 {
+        let g=todo.pop()
+        if seen.get(g false) {continue}
+        seen[g] = true;
+        loop x in fn_resizes_direct(g) {
+            if not total.contains(x) {total.push(x);}
+        }
+        loop c in fn_writes_direct(g).calls {todo.push(c);}
+    }
+    fr_total[f] = total;
+    return total
+}
+fn_resizes_direct=(f:LAWord):>array<int64>=>$unsafe {
+    let cached_r=fr_direct.get(f)
+    if cached_r not=? none {return cached_r}
+    let out:array<int64>=[]
+    if f >? 0 and f <? fns.length and fns.ptr[f].body not=? 0 {fr_scan(LAWord(fns.ptr[f].body) @out);}
+    fr_direct[f] = out;
+    return out
+}
+fr_root=(n:LAWord @out:array<int64>):>void=>$unsafe {
+    let r=write_root(n)
+    if r not=? 0 and nodes.ptr[r].aux =? int32(2) and not out.contains(LAWord(nodes.ptr[r].sym)) {out.push(LAWord(nodes.ptr[r].sym));}
+}
+fr_scan=(n:LAWord @out:array<int64>):>void=>$unsafe {
+    if n <=? 0 {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' {return}
+    if k =? 'assign' {
+        # (a whole value replaced, not an element's field: g.enemies = [], g = Game())
+        let t:LAWord=LAWord(nodes.ptr[n].a)
+        let whole=true
+        let u=t
+        loop nodes.ptr[u].kind =? 'field' {
+            u=LAWord(nodes.ptr[u].a)
+        }
+        if nodes.ptr[u].kind not=? 'ident' {whole=false}
+        if whole {fr_root(t @out);}
+    }
+    if k =? 'intrinsic' and nkids(n) >? 0 {
+        let id=nodes.ptr[n].aux as IN
+        if id =? IN.push or id =? IN.pop or id =? IN.insert or id =? IN.remove or id =? IN.clear or id =? IN.resize or id =? IN.truncate or id =? IN.extend {fr_root(kid(n 0) @out);}
+    }
+    if k =? 'call' {
+        let mm=checked_call_mutmask(n)
+        loop i in [0..nkids(n)) {
+            if mm & (1 << i) not=? 0 {fr_root(kid(n i) @out);}
+        }
+    }
+    fr_scan(LAWord(nodes.ptr[n].a) @out);
+    fr_scan(LAWord(nodes.ptr[n].b) @out);
+    fr_scan(kid_c(n) @out);
+    fr_scan(kid_d(n) @out);
+    loop i in [0..nkids(n)) {fr_scan(kid(n i) @out);}
+    loop i in [0..nkids2(n)) {fr_scan(kid2(n i) @out);}
+}
+lm_resizing_call=(n:LAWord g:LAWord):>LAWord=>$unsafe {
+    if n <=? 0 {return 0}
+    loop called in value_helper_calls(n) {
+        if fn_resizes(called).contains(g) {return n}
+    }
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' {return 0}
+    if k =? 'call' and LAWord(nodes.ptr[n].aux) =? 0 and nodes.ptr[n].sym >? 0 and fn_resizes(LAWord(nodes.ptr[n].sym)).contains(g) {return n}
+    let r=lm_resizing_call(LAWord(nodes.ptr[n].a) g)
+    if r =? 0 {r=lm_resizing_call(LAWord(nodes.ptr[n].b) g)}
+    if r =? 0 {r=lm_resizing_call(kid_c(n) g)}
+    if r =? 0 {r=lm_resizing_call(kid_d(n) g)}
+    loop i in [0..nkids(n)) {
+        if r =? 0 {r=lm_resizing_call(kid(n i) g)}
+    }
+    loop i in [0..nkids2(n)) {
+        if r =? 0 {r=lm_resizing_call(kid2(n i) g)}
+    }
+    return r
+}
+lpath_intern=(parent:LAWord part:LAWord):>LAWord=>$unsafe {
+    let edge=(parent << 32) | part
+    let cached_id=lpath_ids.get(edge)
+    if cached_id not=? none {return cached_id}
+    let id=lpath_parents.length
+    lpath_parents.push(parent);
+    lpath_ids[edge] = id;
+    return id
+}
+lpath_key=(n:LAWord):>LAWord=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if k =? 'ident' {
+        if nodes.ptr[n].aux =? int32(1) {return lpath_intern(0 LAWord(nodes.ptr[n].sym) * 2)}
+        if nodes.ptr[n].aux =? int32(2) {return lpath_intern(0 LAWord(nodes.ptr[n].sym) * 2 + 1)}
+    }
+    if k =? 'field' and nodes.ptr[n].aux >=? 0 {
+        let a:LAWord=LAWord(nodes.ptr[n].a)
+        if tkind(ntype(a)) not=? 'struct_' or boxed_field_of(n) >=? 0 {return 0}
+        let parent=lpath_key(a)
+        if parent =? 0 {return 0}
+        return lpath_intern(parent LAWord(nodes.ptr[n].aux))
+    }
+    return 0
+}
+lpath_root=(n0:LAWord):>LAWord=>$unsafe {
+    let n=n0
+    loop nodes.ptr[n].kind =? 'field' {n=LAWord(nodes.ptr[n].a)}
+    return n
+}
+path_within=(p:LAWord k:LAWord):>bool=>$unsafe {
+    let path=p
+    loop path not=? 0 {
+        if path =? k {return true}
+        path=lpath_parents.ptr[path]
+    }
+    return false
+}
+lm_change_at=(n:LAWord key:LAWord):>LAWord=>$unsafe {
+    if n =? 0 {return 0}
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' {return 0}
+    if k =? 'assign' {
+        let tk=lpath_key(LAWord(nodes.ptr[n].a))
+        if tk not=? 0 and path_within(key tk) {return nodes.ptr[n].pos}
+    }
+    if k =? 'intrinsic' and nkids(n) >? 0 {
+        let id=nodes.ptr[n].aux as IN
+        if id =? IN.push or id =? IN.pop or id =? IN.insert or id =? IN.remove or id =? IN.clear or id =? IN.resize or id =? IN.truncate or id =? IN.extend {
+            let tk=lpath_key(kid(n 0))
+            if tk not=? 0 and path_within(key tk) {return nodes.ptr[n].pos}
+        }
+    }
+    if k =? 'call' {
+        let mm=checked_call_mutmask(n)
+        loop i in [0..nkids(n)) {
+            if mm & (1 << i) not=? 0 {
+                let tk=lpath_key(kid(n i))
+                if tk not=? 0 and path_within(key tk) {return nodes.ptr[kid(n i)].pos}
+            }
+        }
+    }
+    let r=lm_change_at(LAWord(nodes.ptr[n].a) key)
+    if r =? 0 {r=lm_change_at(LAWord(nodes.ptr[n].b) key)}
+    if r =? 0 and k not=? 'for_' {
+        r=lm_change_at(LAWord(nodes.ptr[n].c) key)
+        if r =? 0 and k not=? 'partial' {r=lm_change_at(LAWord(nodes.ptr[n].d) key)}
+    }
+    loop i in [0..nkids(n)) {
+        if r =? 0 {r=lm_change_at(kid(n i) key)}
+    }
+    loop i in [0..nkids2(n)) {
+        if r =? 0 {r=lm_change_at(kid2(n i) key)}
+    }
+    return r
+}

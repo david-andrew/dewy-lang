@@ -27,6 +27,12 @@ JO['check.jo'] = "use 'checker_state.dewy'\n" + JO['check.jo']
 JO['types.jo'] = "use 'checker_types.dewy'\n" + JO['types.jo']
 JO['expr.jo'] = "use 'ast.jo'\n" + JO['expr.jo']
 JO['lower.jo'] = "use 'ast.jo'\n" + JO['lower.jo']
+# The moved analysis services still use this driver's controlled stand-ins.
+JO['lower_analysis.dewy'] = r'''from p"lower.jo" import (raw_view as stub_raw_view checked_call_mutmask as stub_mask)
+raw_view=(n:int64):>bool=>stub_raw_view(n)
+checked_call_mutmask=(n:int64):>int64=>stub_mask(n)
+'''
+JO['lower_analysis.jo'] = "use 'lower.jo'\n"
 
 DRIVER = BASE.split('main = ():')[0] + r'''
 locals: Local[] = [Local()]

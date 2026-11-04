@@ -26,6 +26,9 @@ kids2 = (n: int) -> int[]:
 '''
 JO['check.jo'] += 'struct DTModule:\n    name: i32\nmodules: DTModule[] = [DTModule()]\n'
 JO['lower.jo'] += 'in_lib = (p: int) -> bool: p >= 100000\nplace_var = (n: int) -> int:\n    if nodes[n].kind == .ident: return n\n    0\n'
+JO['lower_analysis.dewy'] += r'''from p"lower.jo" import (place_var as stub_place_var)
+place_var=(n:int64):>int64=>stub_place_var(n)
+'''
 JO['types.jo'] += 'prune = (t: int) -> int: t\ntype_str = (t: int) -> str: if types[t].bits == 42: "Rng" else: "Other"\n'
 DRIVER = BASE.split('lp_reset =')[0] + r'''
 use 'util.jo'
