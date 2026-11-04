@@ -198,7 +198,7 @@ int_domain_declare = (binding: int, value: int):
     site = -1
     if binding >= 0: site = int_site()
     leaf = domain_leaf(value)
-    if leaf != 0 and nodes[leaf].kind == .int_lit and not oversized_literal(leaf):
+    if leaf != 0 and nodes[leaf].kind == .int_lit and not (has_flag(leaf, NF_U64) and nodes[leaf].ival < 0):
         int_record(binding, INT_DECL, site, 0)
         int_record(binding, INT_POINT, nodes[leaf].ival, 0)
         return

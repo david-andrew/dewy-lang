@@ -4,6 +4,8 @@ ld_leaf = (store: mut Node[], lists: mut i32[], n0: int) -> int:
     n = n0
     loop n != 0:
         k = store[n].kind
+        # CV.float2int, wrap_int and saturate_int change the literal value.
+        if k == .conv and (store[n].aux == 3 or store[n].aux == 19 or store[n].aux == 20): break
         if k == .conv or k == .exprstmt: n = int(store[n].a)
         else if k == .block and store[n].nlist == 1 and int(store[n].flags) & 67108864 == 0: n = int(lists[store[n].list])
         else: break
@@ -18,11 +20,13 @@ ld_literals = (store: mut Node[], lists: mut i32[], n0: int, text: bool, minus: 
         return true
     if not text:
         if k == .int_lit:
+            # NF_U64: signed storage bits are not a signed literal value.
+            if int(store[n].flags) & 2097152 != 0 and store[n].ival < 0: return false
             out.push(store[n].ival)
             return true
         if k == .unary and store[n].op == minus:
             v = ld_leaf(store, lists, int(store[n].a))
-            if store[v].kind == .int_lit and store[v].ival > (-9223372036854775807 - 1):
+            if store[v].kind == .int_lit and store[v].ival > (-9223372036854775807 - 1) and not (int(store[v].flags) & 2097152 != 0 and store[v].ival < 0):
                 out.push(-store[v].ival)
                 return true
     if k == .if_ and store[n].c != 0 and depth < 8:

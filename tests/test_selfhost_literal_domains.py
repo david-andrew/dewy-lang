@@ -25,6 +25,8 @@ def corpus():
         if not n:
             return 0
         nd = nodes[n]
+        if nd['kind'] == 3 and nd['aux'] in (3, 19, 20):
+            return n
         if nd['kind'] in (3, 4):
             return leaf(nd['a'])
         if nd['kind'] == 5 and len(nd['kids']) == 1 and not nd['flags'] & 67108864:
@@ -41,11 +43,13 @@ def corpus():
             return True
         if not text:
             if nd['kind'] == 1:
+                if nd['flags'] & 2097152 and nd['value'] < 0:
+                    return False
                 out.append(nd['value'])
                 return True
             if nd['kind'] == 6 and nd['op'] == 77:
                 operand = nodes[leaf(nd['a'])]
-                if operand['kind'] == 1 and operand['value'] != MIN:
+                if operand['kind'] == 1 and operand['value'] != MIN and not (operand['flags'] & 2097152 and operand['value'] < 0):
                     out.append(-operand['value'])
                     return True
         if nd['kind'] == 7 and nd['c'] and depth < 8:

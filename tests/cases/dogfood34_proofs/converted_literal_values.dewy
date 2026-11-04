@@ -1,0 +1,10 @@
+main = () => {
+    let wrapped = int(uint8<overflow='wrap'>(256))
+    let saturated = int(uint8<overflow='saturate'>(300))
+    let rounded = int(float64(9007199254740993))
+    let unsigned = int(uint64<overflow='wrap'>(-1))
+    printl(wrapped)
+    printl(saturated)
+    printl(rounded)
+    printl(unsigned)
+}
