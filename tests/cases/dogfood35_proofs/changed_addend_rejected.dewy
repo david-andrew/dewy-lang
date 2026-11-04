@@ -1,0 +1,8 @@
+window = (xs:array<int> row:int<0 <=? row <=? 20> width:int<1 <=? width <=? 40>):>array<int> => {
+    let start = row * width
+    let stop = start + width
+    start = stop + 1
+    if stop >? xs.length return []
+    xs[start..stop)
+}
+main = () => printl(window([0 1 2 3] 0 2))

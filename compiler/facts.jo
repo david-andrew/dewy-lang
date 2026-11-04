@@ -3138,6 +3138,35 @@ fact_affine = (s: FactState, v: int, budget: mut int) -> FactAffine:
     FactAffine((if a.root != 0: a.root else: b.root), a.scale + b.scale, a.offset + b.offset)
 
 fact_affine_compare = (s: FactState, op: Tok, av: int, bv: int) -> int:
+    # A sum relative to one of its captured operands needs only the other
+    # operand's sign, even if that operand has no difference rows. Query
+    # existing indexed terms only: O(1), no new rows or body walk. Retained
+    # non-wide arithmetic terms denote exact values, never a possible wrap.
+    loop side in [0..2):
+        sum = fact_terms[if side == 0: av else: bv]
+        base = if side == 0: bv else: av
+        if base == 0 or sum.op != .plus or sum.a != base and sum.b != base: continue
+        other = if sum.a == base: sum.b else: sum.a
+        if other == 0: continue
+        bound = fact_bound(s, other)
+        if bound.wide: continue
+        if op == .eq:
+            if bound.lo == 0 and bound.hi == 0: return 1
+            if bound.nz or bound.lo > 0 or bound.hi < 0: return 0
+        else if op == .lt:
+            if side == 0:
+                if bound.hi < 0: return 1
+                if bound.lo >= 0: return 0
+            else:
+                if bound.lo > 0: return 1
+                if bound.hi <= 0: return 0
+        else if op == .le:
+            if side == 0:
+                if bound.hi <= 0: return 1
+                if bound.lo > 0: return 0
+            else:
+                if bound.lo >= 0: return 1
+                if bound.hi < 0: return 0
     budget = 32
     a = fact_affine(s, av, budget)
     b = fact_affine(s, bv, budget)

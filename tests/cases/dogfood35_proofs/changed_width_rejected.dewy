@@ -1,0 +1,7 @@
+check = (x:int<0 <=? x <=? 20> width:int<width >=? -10 and width <=? 10>):>void => {
+    let base = x*x
+    let stop = base + width
+    width = 1
+    $assert base <=? stop
+}
+main = () => check(3 -1)

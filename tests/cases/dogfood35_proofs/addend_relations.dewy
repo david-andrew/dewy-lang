@@ -1,0 +1,12 @@
+check = (x:int<x >=? -100 and x <=? 100> positive:int<1 <=? positive <=? 10> nonnegative:int<0 <=? nonnegative <=? 10> negative:int<negative >=? -10 and negative <=? -1>):>void => {
+    let base = x*x
+    $assert base <? base + positive
+    $assert base + positive >? base
+    $assert base <=? nonnegative + base
+    $assert nonnegative + base >=? base
+    $assert base + negative <? base
+    $assert base >? negative + base
+    $assert base + positive not =? base
+    $assert base + negative not =? base
+}
+main = () => { check(3 2 0 -2); check(-4 1 5 -1); printl"addition relations proved" }

@@ -4698,6 +4698,11 @@ An unproven obligation's error names the missing relation (`i <? xs.length`,
   nonempty guard on `a` also proves `b[0]`. The same applies to parameters
   sharing a shape binder (`a:array<int length=[n]> b:array<int length=[n]>`)
   after `n >? 0`. Replacing or resizing an array needs a fresh relation.
+- For bounded exact integer arithmetic, a sum retains its order relative to
+  either captured operand: after
+  `stop = start + width`, a nonnegative `width` proves `start <=? stop`,
+  and a positive one proves `start <? stop`.
+  The slice still needs `0 <=? start` and `stop <=? xs.length`.
 - A small Boolean helper can carry the same guard back to its caller:
   `valid = (i:int xs:array<int>):>bool => 0 <=? i <? xs.length`, then
   `if valid(i xs) xs[i] else 0`. This also works when its result is saved and

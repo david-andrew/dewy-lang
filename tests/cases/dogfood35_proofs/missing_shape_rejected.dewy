@@ -1,0 +1,7 @@
+Bitmap:type = [width:int<1 <=? width <=? 40> height:int<1 <=? height <=? 20> pixels:array<int>]
+row = (bitmap:Bitmap y:int<0 <=? y <=? 19>):>array<int> => {
+    let start = y * bitmap.width
+    let stop = start + bitmap.width
+    bitmap.pixels[start..stop)
+}
+main = () => printl(row(Bitmap[3 2 [0 1]] 1))

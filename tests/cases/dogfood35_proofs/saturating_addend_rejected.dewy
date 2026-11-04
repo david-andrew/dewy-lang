@@ -1,0 +1,6 @@
+check = (x:uint8<overflow='saturate'> width:uint8<overflow='saturate'>):>void => {
+    if width =? 0 return
+    let stop:uint8<overflow='saturate'> = x + width
+    $assert x <? stop
+}
+main = () => check(255 1)
