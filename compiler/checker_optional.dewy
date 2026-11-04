@@ -4,6 +4,7 @@ from p"checker_types.dewy" import TypeInfo
 from p"source_types.dewy" import SrcFile
 from p"type_inference.dewy" import tu_prune
 from p"type_constructors.dewy" import tb_mk_opt
+from p"checker_coerce.dewy" import cq_can_coerce
 # Optional expressions own recursive operand checking and result selection.
 # Work is O(inference links + demanded semantic work); no additional traversal.
 # Host calls may reenter and grow every arena: retain IDs, never element views.
@@ -68,7 +69,9 @@ xo_check=(n:XOWord expected:XOWord ex:XOWord):>CheckerOptionalResult=>$unsafe {
     if ex not=? 0 {h2=ex}
     let btt=tu_prune(xo_host[0].check(XOWord(xo_nodes[0].ptr[n].b) h2))
     let t=inner
-    if xo_types[0].ptr[btt].kind =? 'opt' {
+    # Prefer the payload when the fallback fits it, including an inner none.
+    # A fallback needing the outer optional keeps that result's extra layer.
+    if xo_types[0].ptr[btt].kind =? 'opt' and (xo_types[0].ptr[tu_prune(inner)].kind not=? 'opt' or not cq_can_coerce(XOWord(xo_nodes[0].ptr[n].b) btt inner)) {
         xo_host[0].coerce(XOWord(xo_nodes[0].ptr[n].b) at);
         t=at
         xo_nodes[0][n].aux=1

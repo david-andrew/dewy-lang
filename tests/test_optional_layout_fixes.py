@@ -145,3 +145,65 @@ def test_optional_narrowed_reject(compiler, tmp_path, name, mode):
 @pytest.mark.parametrize('name', NARROW_VALID)
 def test_optional_narrowed_valid(compiler, tmp_path, name, mode):
     check_program(compiler, tmp_path, *NARROW_VALID[name], mode)
+
+
+COALESCE_VALID = {
+    'convertible_optional_payload': ('''main=()=>{
+ let xs:array<int64?>=[none]
+ let fallback:int8?=7
+ printl((xs.get(0) ?? fallback) ?? 9)
+}''', '9\n'),
+    'nested_optional_fallback_control': ('''wrap=(v:int?):>(int?)?=>v
+f=(x:(int?)? y:(int?)?):>(int?)?=>x ?? y
+main=()=>{
+ printl(f(wrap(none) none) is? none)
+ printl((f(wrap(none) none) ?? 7) is? none)
+ printl(f(none none) is? none)
+ printl((f(none wrap(7)) ?? 0) ?? -1)
+}''', 'false\ntrue\ntrue\n7\n'),
+    'finding_nested_coalesce': ("""main=()=>{
+ let xs:array<int?>=[none]
+ let fallback:int?=7
+ printl((xs.get(0) ?? fallback) ?? 9)
+}""", '9\n'),
+    'finding_nested_coalesce_dict': ("""main=()=>{
+ let d:dict<string int?>=["x"->none]
+ let fallback:int?=7
+ printl((d.get("x") ?? fallback) ?? 9)
+}""", '9\n'),
+    'finding_nested_coalesce_direct': ("""wrap=(x:int?):>(int?)?=>x
+main=()=>{
+ let x=wrap(none)
+ let fallback:int?=7
+ printl((x ?? fallback) ?? 9)
+}""", '9\n'),
+    'finding_nested_coalesce_type': ("""f=(x:(int?)? y:int?):>int?=>x ?? y
+main=()=>{printl(f(none 7))}""", '7\n'),
+    'control_nested_coalesce_scalar': ("""main=()=>{
+ let xs:array<int?>=[none]
+ printl((xs.get(0) ?? 7) ?? 9)
+}""", '9\n'),
+    'optional_fallback_control': ('''f=(x:int? y:int?):>int?=>x ?? y
+main=()=>{
+ printl(f(none 7))
+ printl(f(2 7))
+ printl(f(none none))
+}''', '7\n2\nnone\n'),
+    'nested_lazy_fallback': ('''let calls=0
+fallback=():>int?=>{calls+=1 return 7}
+wrap=(x:int?):>(int?)?=>x
+main=()=>{
+ let empty:int?=none
+ printl((wrap(empty) ?? fallback()) ?? 9)
+ printl(calls)
+ let absent:(int?)?=none
+ printl((absent ?? fallback()) ?? 9)
+ printl(calls)
+}''', '9\n0\n7\n1\n'),
+}
+
+
+@pytest.mark.parametrize('mode', MODES)
+@pytest.mark.parametrize('name', COALESCE_VALID)
+def test_optional_coalesce(compiler, tmp_path, name, mode):
+    check_program(compiler, tmp_path, *COALESCE_VALID[name], mode)
