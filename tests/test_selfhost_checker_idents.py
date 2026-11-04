@@ -64,8 +64,7 @@ xj_error_host = (n: int, kind: int):
     print(events)
     print("error:{n}:{kind}")
     exit(19)
-xj_services = CheckerIdentHost(xj_ide_host, xj_narrowed_host, xj_capture_host, xj_view_host, xj_ensure_host, xj_quantity_host, xj_early_host, xj_decimal_host, xj_path_host, xj_constant_host, xj_function_host, xj_type_value_host, xj_bare_host, xj_type_use_host, xj_error_host)
-xj_inputs = CheckerIdentInput(&nodes, &types, &locals, &globals, &fns, &ctxs, &cx, &xj_callee_at, &xj_assign_at, &xj_ide_on, &xj_reads, &xj_paths, &xj_no_narrow, &xj_tests, &xj_services)
+xj_inputs = CheckerIdentInput(&nodes, &types, &locals, &globals, &fns, &ctxs, &cx, &xj_callee_at, &xj_assign_at, &xj_ide_on, &xj_reads, &xj_paths, &xj_no_narrow, &xj_tests)
 xj_binding = checker_idents_bind(&xj_inputs)
 local_of = (t: int, owner: int, flags: int = 0) -> int:
     locals.push(Local(type = i32(t), owner = i32(owner), flags = i32(flags)))
@@ -147,10 +146,34 @@ main = ():
 '''
 
 
+
+# The Jo services checker_idents calls, routed to the driver.
+IDENT_JO = {
+    'expr.jo': {
+        'ident_ide_ref': 'ident_ide_ref = (n: int, s: int): xj_ide_host(n, s)',
+        'ident_capture': 'ident_capture = (l0: int, narrowed: bool, pos: int) -> int: xj_capture_host(l0, narrowed, pos)',
+        'ident_const_view': 'ident_const_view = (l0: int, pos: int): xj_view_host(l0, pos)',
+        'ident_ensure_global': 'ident_ensure_global = (g: int, pos: int): xj_ensure_host(g, pos)',
+        'ident_quantity': 'ident_quantity = (n: int, g: int, expected: int) -> int: xj_quantity_host(n, g, expected)',
+        'ident_early_use': 'ident_early_use = (n: int, g: int): xj_early_host(n, g)',
+        'ident_decimal_use': 'ident_decimal_use = (g: int): xj_decimal_host(g)',
+        'ident_path_alias': 'ident_path_alias = (n: int, t: int) -> int: xj_path_host(n, t)',
+        'ident_constant': 'ident_constant = (n: int, g: int, expected: int) -> int: xj_constant_host(n, g, expected)',
+        'ident_function': 'ident_function = (n: int, expected: int, is_callee: bool) -> int: xj_function_host(n, expected, is_callee)',
+        'ident_type_value': 'ident_type_value = (n: int, kind: int, s: int) -> int: xj_type_value_host(n, kind, s)',
+        'ident_bare_value': 'ident_bare_value = (n: int, t: int, local: bool, is_callee: bool, expected: int) -> int: xj_bare_host(n, t, local, is_callee, expected)',
+        'ident_type_use': 'ident_type_use = (n: int, t: int, is_callee: bool, expected: int) -> int: xj_type_use_host(n, t, is_callee, expected)',
+        'ident_error': 'ident_error = (n: int, kind: int): xj_error_host(n, kind)',
+    },
+    'check.jo': {
+        'narrowed_var': 'narrowed_var = (l: int) -> int: xj_narrowed_host(l)',
+    },
+}
+
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_idents_twins(compiler, tmp_path, release):  # noqa: F811
-    assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'literal_check', jo_doubles=jo_doubles(LITERAL_JO),
+    assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'literal_check', jo_doubles=jo_doubles(IDENT_JO, LITERAL_JO),
                    extra_stems=('checker_exact', 'checker_literals', 'checker_idents')).endswith(b'ok\n')
 
 
@@ -162,6 +185,6 @@ main = ():
     run({kind}, 0)
     print("unreachable")
 '''
-    output = compare_leaf(compiler, tmp_path, False, DRIVER + main, 'literal_check', jo_doubles=jo_doubles(LITERAL_JO), status=19,
+    output = compare_leaf(compiler, tmp_path, False, DRIVER + main, 'literal_check', jo_doubles=jo_doubles(IDENT_JO, LITERAL_JO), status=19,
                      extra_stems=('checker_exact', 'checker_literals', 'checker_idents'))
     assert output.rstrip().endswith(f':{kind}'.encode())

@@ -263,7 +263,15 @@ from tests.selfhost_expr_double import isolate_hooks
 isolate_hooks(JO_DOUBLES)
 
 from tests.test_selfhost_checker_returns import RETURN_JO
-for _module, _definitions in RETURN_JO.items():
+from tests.test_selfhost_checker_for_loops import FOR_JO
+def jo_tables(*tables):
+    result = {}
+    for table in tables:
+        for module, definitions in table.items():
+            for name, definition in definitions.items():
+                result.setdefault(module, {}).setdefault(name, definition)
+    return result
+for _module, _definitions in jo_tables(RETURN_JO, FOR_JO).items():
     _missing = {}
     for _name, _definition in _definitions.items():
         if (_name + ' = ') in JO_DOUBLES.get(_module, ''):

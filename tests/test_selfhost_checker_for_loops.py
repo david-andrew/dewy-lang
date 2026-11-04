@@ -1,5 +1,6 @@
 """For loops: ranges, elements, places, dictionaries and value loops match frozen Jo."""
 import pytest
+from tests.selfhost_expr_double import jo_doubles
 
 from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_loops import DRIVER as LOOPS
@@ -65,8 +66,7 @@ fl_error_host = (n: int, t: int, code: int):
     print(events)
     print("error:{n}:{t}:{code}")
     exit(19)
-fl_services = CheckerForHost(fl_rewrite_host, fl_coerce_host, fl_literal_host, fl_binding_host, fl_open_host, fl_view_host, fl_entries_host, fl_collide_host, fl_element_host, fl_route_host, fl_fields_host, fl_map_value_host, fl_map_ref_host, fl_body_host, fl_reset_host, fl_error_host)
-fl_inputs = CheckerForInput(&nodes, &lists, &types, &structs, &fields, &files, &locals, &scopes, &serials, &serial_next, &value_loops, &cx, &last, &T_INT, &T_U8, &fl_services)
+fl_inputs = CheckerForInput(&nodes, &lists, &types, &structs, &fields, &files, &locals, &scopes, &serials, &serial_next, &value_loops, &cx, &last, &T_INT, &T_U8)
 fl_bound = checker_for_loops_bind(&fl_inputs)
 DEWY = 1 << 40
 named_var = (name: int) -> int:
@@ -148,10 +148,35 @@ main = ():
 '''
 
 
+
+# The Jo services checker_for_loops calls, routed to the driver.
+FOR_JO = {
+    'check.jo': {
+        'for_rewrite': 'for_rewrite = (s: int) -> bool: fl_rewrite_host(s)',
+        'new_local': 'new_local = (name: int, t: int, pos: int) -> int: fl_binding_host(name, t, pos)',
+        'for_open_range': 'for_open_range = (s: int): fl_open_host(s)',
+        'for_map_view': 'for_map_view = (s: int, t0: int) -> int: fl_view_host(s, t0)',
+        'for_collide': 'for_collide = (s: int): fl_collide_host(s)',
+        'for_element': 'for_element = (s: int, name: int, et: int, idx: int, fixed: bool) -> int: fl_element_host(s, name, et, idx, fixed)',
+        'for_route': 'for_route = (it: int) -> bool: fl_route_host(it)',
+        'for_struct_fields': 'for_struct_fields = (si: int): fl_fields_host(si)',
+        'for_map_value': 'for_map_value = (s: int, name: int, vt: int, idx: int) -> int: fl_map_value_host(s, name, vt, idx)',
+        'for_map_value_ref': 'for_map_value_ref = (vl: int): fl_map_ref_host(vl)',
+        'for_body': 'for_body = (b: int): fl_body_host(b)',
+        'scope_reset': 'scope_reset = (mark: int): fl_reset_host(mark)',
+        'for_error': 'for_error = (n: int, t0: int, code: int): fl_error_host(n, t0, code)',
+    },
+    'expr.jo': {
+        'coerce': 'coerce = (n: int, target: int) -> int: fl_coerce_host(n, target)',
+        'lit_default': 'lit_default = (n: int) -> int: fl_literal_host(n)',
+        'is_map_entries_type': 'is_map_entries_type = (t: int) -> bool: fl_entries_host(t)',
+    },
+}
+
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_for_loops_twins(compiler, tmp_path, release):  # noqa: F811
-    assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'fl_check_host', extra_stems=STEMS).endswith(b'ok\n')
+    assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'fl_check_host', jo_doubles=jo_doubles(FOR_JO), extra_stems=STEMS).endswith(b'ok\n')
 
 
 @pytest.mark.parametrize('case,code', [
@@ -173,5 +198,5 @@ main = ():
     {case}
     print("unreachable")
 '''
-    output = compare_leaf(compiler, tmp_path, False, DRIVER + main, 'fl_check_host', status=19, extra_stems=STEMS)
+    output = compare_leaf(compiler, tmp_path, False, DRIVER + main, 'fl_check_host', status=19, jo_doubles=jo_doubles(FOR_JO), extra_stems=STEMS)
     assert output.rstrip().endswith(f':{code}'.encode())

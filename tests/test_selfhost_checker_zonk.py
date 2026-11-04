@@ -1,5 +1,6 @@
 """Body finalization: zonked types, index/global summaries and write sites match frozen Jo."""
 import pytest
+from tests.selfhost_expr_double import jo_doubles
 
 from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER, compare
@@ -25,8 +26,7 @@ xz_local_error_host = (l: int):
     exit(19)
 xz_copy_host = (f: int): events.push("copy:{f}")
 xz_definite_host = (b: int, mark: int): events.push("definite:{b}:{mark}")
-xz_services = CheckerZonkHost(xz_prelude_host, xz_local_error_host, xz_copy_host, xz_definite_host)
-xz_inputs = CheckerZonkInput(&nodes, &lists, &types, &locals, &globals, &fns, &xz_write_sites, &xz_collect_on, &xz_index_count, &xz_global_count, &xz_vars, &xz_binds, &xz_exposures, &xz_decls, &T_MATH_INT, &xz_services)
+xz_inputs = CheckerZonkInput(&nodes, &lists, &types, &locals, &globals, &fns, &xz_write_sites, &xz_collect_on, &xz_index_count, &xz_global_count, &xz_vars, &xz_binds, &xz_exposures, &xz_decls, &T_MATH_INT)
 xz_binding = checker_zonk_bind(&xz_inputs)
 typed = (k: NK, t: int, a: int = 0, kids: int[] = []) -> int:
     n = node(k, a, 0, 0, kids); nodes[n].type = i32(t); n
@@ -95,11 +95,22 @@ main = ():
 '''
 
 
+
+# The Jo services checker_zonk calls, routed to the driver.
+ZONK_JO = {
+    'check.jo': {
+        'zonk_prelude': 'zonk_prelude = (m: int) -> bool: xz_prelude_host(m)',
+        'zonk_local_error': 'zonk_local_error = (l: int): xz_local_error_host(l)',
+        'zonk_copy_warnings': 'zonk_copy_warnings = (f: int): xz_copy_host(f)',
+        'zonk_definite': 'zonk_definite = (body: int, mark: int): xz_definite_host(body, mark)',
+    },
+}
+
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_zonk_twins(compiler, tmp_path, release):  # noqa: F811
     assert compare(compiler, tmp_path, release, DRIVER + MAIN,
-                   extra_stems=('checker_zonk',)).endswith(b'ok\n')
+                   jo_doubles=jo_doubles(ZONK_JO), extra_stems=('checker_zonk',)).endswith(b'ok\n')
 
 
 def test_checker_zonk_unresolved_local(compiler, tmp_path):  # noqa: F811
@@ -111,5 +122,5 @@ main = ():
     xz_finalize(fns.len() - 1, 0, 0, 0, 0)
     print("unreachable")
 '''
-    output = compare(compiler, tmp_path, False, DRIVER + main, status=19, extra_stems=('checker_zonk',))
+    output = compare(compiler, tmp_path, False, DRIVER + main, status=19, jo_doubles=jo_doubles(ZONK_JO), extra_stems=('checker_zonk',))
     assert output.rstrip().endswith(b':1')

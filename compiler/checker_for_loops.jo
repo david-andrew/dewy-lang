@@ -6,23 +6,8 @@ use 'checker_state.dewy'
 use 'type_inference.dewy'
 use 'checker_loops.dewy'
 use 'checker_expr.dewy'
-struct CheckerForHost:
-    rewrite: (int) -> bool
-    coerce: (int, int) -> int
-    literal: (int) -> int
-    binding: (int, int, int) -> int
-    open_range: (int) -> void
-    map_view: (int, int) -> int
-    entries: (int) -> bool
-    collide: (int) -> void
-    element: (int, int, int, int, bool) -> int
-    route: (int) -> bool
-    struct_fields: (int) -> void
-    map_value: (int, int, int, int) -> int
-    map_value_ref: (int) -> void
-    body: (int) -> void
-    reset: (int) -> void
-    error: (int, int, int) -> void
+use 'check.jo'
+use 'expr.jo'
 struct CheckerForInput:
     nodes: *(Node[])
     lists: *(i32[])
@@ -39,7 +24,6 @@ struct CheckerForInput:
     last: *int
     int_type: *int
     u8_type: *int
-    host: *CheckerForHost
 fl_nodes: *(Node[])
 fl_lists: *(i32[])
 fl_types: *(TypeInfo[])
@@ -55,7 +39,6 @@ fl_context: *int
 fl_last: *int
 fl_int_type: *int
 fl_u8_type: *int
-fl_host: *CheckerForHost
 checker_for_loops_bind = (input: *CheckerForInput) -> int:
     fl_nodes = input[0].nodes
     fl_lists = input[0].lists
@@ -72,7 +55,6 @@ checker_for_loops_bind = (input: *CheckerForInput) -> int:
     fl_last = input[0].last
     fl_int_type = input[0].int_type
     fl_u8_type = input[0].u8_type
-    fl_host = input[0].host
     0
 fl_kind = (t: int) -> TK: fl_types[0][tu_prune(t)].kind
 fl_flag = (n: int, f: int) -> bool: int(fl_nodes[0][n].flags) & f != 0
@@ -83,7 +65,7 @@ fl_dewy_at = (pos: int) -> bool:
 fl_named = (t: int, name: str) -> bool: fl_types[0][t].kind == .struct_ and fl_structs[0][int(fl_types[0][t].st)].name == name
 fl_or_flags = (l: int, f: int): fl_locals[0][l].flags = i32(int(fl_locals[0][l].flags) | f)
 fl_range = (s: int, it: int, nv: int, n1: int, is_mut: bool, pos: int):
-    if fl_nodes[0][it].a == 0: fl_host[0].error(it, 0, 1)
+    if fl_nodes[0][it].a == 0: for_error(it, 0, 1)
     t = check_expr(int(fl_nodes[0][it].a), 0)
     fl_nodes[0][it].a = i32(fl_last[0])
     la = fl_flag(int(fl_nodes[0][it].a), 256)
@@ -98,69 +80,69 @@ fl_range = (s: int, it: int, nv: int, n1: int, is_mut: bool, pos: int):
         check_expr(int(fl_nodes[0][it].c), 0)
         fl_nodes[0][it].c = i32(fl_last[0])
         if la and lb and not fl_flag(int(fl_nodes[0][it].c), 256): t = int(fl_nodes[0][int(fl_nodes[0][it].c)].type)
-    if la and lb and (not step or fl_flag(int(fl_nodes[0][it].c), 256)): t = fl_host[0].literal(int(fl_nodes[0][it].a))
-    if fl_kind(t) == .str_: fl_host[0].error(it, 0, 2)
-    if fl_kind(t) != .int_ or fl_nodes[0][int(fl_nodes[0][it].a)].kind == .float_lit or fl_nodes[0][int(fl_nodes[0][it].b)].kind == .float_lit: fl_host[0].error(it, t, 3)
-    fl_nodes[0][it].a = i32(fl_host[0].coerce(int(fl_nodes[0][it].a), t))
-    if fl_nodes[0][it].b != 0: fl_nodes[0][it].b = i32(fl_host[0].coerce(int(fl_nodes[0][it].b), t))
-    if step: fl_nodes[0][it].c = i32(fl_host[0].coerce(int(fl_nodes[0][it].c), t))
-    if nv != 1: fl_host[0].error(s, 0, 4)
-    if is_mut: fl_host[0].error(s, 0, 5)
-    l = fl_host[0].binding(n1, t, pos)
+    if la and lb and (not step or fl_flag(int(fl_nodes[0][it].c), 256)): t = lit_default(int(fl_nodes[0][it].a))
+    if fl_kind(t) == .str_: for_error(it, 0, 2)
+    if fl_kind(t) != .int_ or fl_nodes[0][int(fl_nodes[0][it].a)].kind == .float_lit or fl_nodes[0][int(fl_nodes[0][it].b)].kind == .float_lit: for_error(it, t, 3)
+    fl_nodes[0][it].a = i32(coerce(int(fl_nodes[0][it].a), t))
+    if fl_nodes[0][it].b != 0: fl_nodes[0][it].b = i32(coerce(int(fl_nodes[0][it].b), t))
+    if step: fl_nodes[0][it].c = i32(coerce(int(fl_nodes[0][it].c), t))
+    if nv != 1: for_error(s, 0, 4)
+    if is_mut: for_error(s, 0, 5)
+    l = new_local(n1, t, pos)
     fl_nodes[0][s].sym = i32(l)
     fl_nodes[0][s].aux = 0
-    if fl_nodes[0][it].b == 0 and fl_dewy_at(pos): fl_host[0].open_range(s)
+    if fl_nodes[0][it].b == 0 and fl_dewy_at(pos): for_open_range(s)
 fl_elements = (s: int, it: int, t: int, k: TK, nv: int, n1: int, n2: int, is_mut: bool, pos: int):
     et = fl_u8_type[0]
     if k == .array or k == .fixed: et = int(fl_types[0][t].elem)
     index_name = 0
     if nv == 2: index_name = n1
-    fl_host[0].collide(s)
-    index = fl_host[0].binding(index_name, fl_int_type[0], pos)
-    snapshot = fl_host[0].binding(0, t, pos)
+    for_collide(s)
+    index = new_local(index_name, fl_int_type[0], pos)
+    snapshot = new_local(0, t, pos)
     name = n1
     if nv == 2: name = n2
     el = 0
     if is_mut:
-        if k == .str_: fl_host[0].error(s, 0, 6)
-        el = fl_host[0].element(s, name, et, index, k == .fixed)
+        if k == .str_: for_error(s, 0, 6)
+        el = for_element(s, name, et, index, k == .fixed)
         fl_nodes[0][s].aux = 2
     else:
-        el = fl_host[0].binding(name, et, pos)
+        el = new_local(name, et, pos)
         fl_or_flags(el, 32)
         dewy = fl_dewy_at(pos)
         if k == .array and dewy: fl_or_flags(el, 33554432)
         fl_nodes[0][s].aux = 1
-        if k == .array and dewy and fl_host[0].route(it): fl_value_loops[0].push(ValueLoop(fl_context[0], it, name))
+        if k == .array and dewy and for_route(it): fl_value_loops[0].push(ValueLoop(fl_context[0], it, name))
     fl_nodes[0][s].sym = i32(el)
     fl_nodes[0][s].c = i32(index)
     fl_nodes[0][s].d = i32(snapshot)
 fl_entries = (s: int, it: int, t: int, nv: int, n1: int, n2: int, is_mut: bool, pos: int):
     si = int(fl_types[0][t].st)
-    fl_host[0].struct_fields(si)
+    for_struct_fields(si)
     first = int(fl_structs[0][si].fields)
     kt = int(fl_fields[0][first].type)
     vt = int(fl_fields[0][first + 1].type)
-    fl_host[0].collide(s)
-    index = fl_host[0].binding(0, fl_int_type[0], pos)
-    snapshot = fl_host[0].binding(0, t, pos)
-    kl = fl_host[0].binding(n1, int(fl_types[0][int(tu_prune(kt))].elem), pos)
+    for_collide(s)
+    index = new_local(0, fl_int_type[0], pos)
+    snapshot = new_local(0, t, pos)
+    kl = new_local(n1, int(fl_types[0][int(tu_prune(kt))].elem), pos)
     fl_or_flags(kl, 32)
     vl = 0
     if nv == 2:
-        if is_mut: vl = fl_host[0].map_value(s, n2, vt, index)
+        if is_mut: vl = for_map_value(s, n2, vt, index)
         else:
-            vl = fl_host[0].binding(n2, int(fl_types[0][int(tu_prune(vt))].elem), pos)
+            vl = new_local(n2, int(fl_types[0][int(tu_prune(vt))].elem), pos)
             fl_or_flags(vl, 32)
-            fl_host[0].map_value_ref(vl)
-    else if is_mut: fl_host[0].error(s, 0, 7)
+            for_map_value_ref(vl)
+    else if is_mut: for_error(s, 0, 7)
     fl_nodes[0][s].aux = 3
     fl_nodes[0][s].sym = i32(kl)
     fl_nodes[0][s].c = i32(index)
     fl_nodes[0][s].d = i32(snapshot)
     fl_nodes[0][s].aux2 = i32(vl)
 fl_for = (s: int):
-    if fl_host[0].rewrite(s): return
+    if for_rewrite(s): return
     mark = fl_scopes[0].names.len()
     value_mark = fl_value_loops[0].len()
     fl_serial_next[0] = fl_serial_next[0] + 1
@@ -178,19 +160,19 @@ fl_for = (s: int):
         it = fl_last[0]
         fl_nodes[0][s].a = i32(it)
         if fl_named(t, "Map") or fl_named(t, "__MapEntries"):
-            t = fl_host[0].map_view(s, t)
+            t = for_map_view(s, t)
             it = int(fl_nodes[0][s].a)
         k = fl_types[0][t].kind
         if k == .range:
-            l = fl_host[0].binding(n1, fl_int_type[0], pos)
+            l = new_local(n1, fl_int_type[0], pos)
             fl_nodes[0][s].sym = i32(l)
             fl_nodes[0][s].aux = 4
         else if k == .array or k == .str_ or k == .fixed: fl_elements(s, it, t, k, nv, n1, n2, is_mut, pos)
-        else if fl_named(t, "Map") or (fl_named(t, "__MapEntries") and fl_host[0].entries(t)): fl_entries(s, it, t, nv, n1, n2, is_mut, pos)
-        else: fl_host[0].error(it, t, 8)
+        else if fl_named(t, "Map") or (fl_named(t, "__MapEntries") and is_map_entries_type(t)): fl_entries(s, it, t, nv, n1, n2, is_mut, pos)
+        else: for_error(it, t, 8)
     xb_enter(s)
-    fl_host[0].body(int(fl_nodes[0][s].b))
+    for_body(int(fl_nodes[0][s].b))
     loop fl_value_loops[0].len() > value_mark: fl_value_loops[0].pop()
     fl_serials[0].pop()
     xb_leave(s)
-    if fl_scopes[0].names.len() != mark: fl_host[0].reset(mark)
+    if fl_scopes[0].names.len() != mark: scope_reset(mark)

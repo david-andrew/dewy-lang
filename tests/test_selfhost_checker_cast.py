@@ -1,5 +1,6 @@
 """Casts: transmutes, literal targets, identity, conversions and the cast table match frozen Jo."""
 import pytest
+from tests.selfhost_expr_double import compare_leaf, jo_doubles
 
 from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER, compare
@@ -78,8 +79,7 @@ xc_error_host = (n: int, a: int, ft: int, tt: int, code: int):
     print(events)
     print("error:{n}:{a}:{ft}:{tt}:{code}")
     exit(19)
-xc_services = CheckerCastHost(xc_check_host, xc_unit_host, xc_finalize_host, xc_reinterpret_host, xc_size_host, xc_refine_host, xc_secret_host, xc_can_coerce_host, xc_coerce_host, xc_type_text_host, xc_set_coerce_host, xc_bundled_host, xc_conversion_host, xc_helper_host, xc_record_host, xc_text_host, xc_library_host, xc_storage_host, xc_error_host)
-xc_inputs = CheckerCastInput(&nodes, &types, &structs, &files, &xc_seen, &T_STR, &T_U8, &T_MATH_INT, &xc_services)
+xc_inputs = CheckerCastInput(&nodes, &types, &structs, &files, &xc_seen, &T_STR, &T_U8, &T_MATH_INT)
 xc_binding = checker_cast_bind(&xc_inputs)
 DEWY = 1 << 40
 operand = (t: int, k: NK = .ident) -> int:
@@ -189,11 +189,42 @@ main = ():
 '''
 
 
+
+# The Jo services checker_cast calls, routed to the driver.
+CAST_JO = {
+    'expr.jo': {
+        'cast_unit': 'cast_unit = (n: int) -> int: xc_unit_host(n)',
+        'finalize_literal': 'finalize_literal = (n: int) -> int: xc_finalize_host(n)',
+        'cast_size': 'cast_size = (t: int) -> int: xc_size_host(t)',
+        'cast_refine': 'cast_refine = (n: int, t: int): xc_refine_host(n, t)',
+        'can_coerce': 'can_coerce = (n: int, from0: int, to0: int) -> bool: xc_can_coerce_host(n, from0, to0)',
+        'coerce': 'coerce = (n: int, target: int) -> int: xc_coerce_host(n, target)',
+        'cast_type_text': 'cast_type_text = (n: int, ft: int) -> int: xc_type_text_host(n, ft)',
+        'cast_set_coerce': 'cast_set_coerce = (n: int, t: int): xc_set_coerce_host(n, t)',
+        'cast_bundled': 'cast_bundled = (t: int, bigint: bool) -> bool: xc_bundled_host(t, bigint)',
+        'cast_conversion': 'cast_conversion = (n: int, t: int, a: int) -> int: xc_conversion_host(n, t, a)',
+        'cast_helper': 'cast_helper = (n: int, a: int, decode: bool, expected: int) -> int: xc_helper_host(n, a, decode, expected)',
+        'cast_record': 'cast_record = (n: int, a: int, ft: int, tt: int) -> int: xc_record_host(n, a, ft, tt)',
+        'cast_text': 'cast_text = (n: int, a: int, expected: int) -> int: xc_text_host(n, a, expected)',
+        'cast_storage': 'cast_storage = (a: int) -> void: xc_storage_host(a)',
+        'cast_error': 'cast_error = (n: int, a: int, ft: int, tt: int, code: int): xc_error_host(n, a, ft, tt, code)',
+    },
+    'units.jo': {
+        'quantity_transmute': 'quantity_transmute = (n: int, a: int, from: int, to: int) -> int: xc_reinterpret_host(n, a, from, to)',
+    },
+    'secrets.jo': {
+        'secret_cast': 'secret_cast = (n: int, a: int, tt: int) -> int: xc_secret_host(n, a, tt)',
+    },
+    'util.jo': {
+        'pos_in_lib': 'pos_in_lib = (p: int) -> bool: xc_library_host(p)',
+    },
+}
+
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_cast_twins(compiler, tmp_path, release):  # noqa: F811
-    assert compare(compiler, tmp_path, release, DRIVER + MAIN,
-                   extra_stems=('checker_cast',)).endswith(b'ok\n')
+    assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN,
+                   stub='xc_check_host', jo_doubles=jo_doubles(CAST_JO), extra_stems=('checker_cast',)).endswith(b'ok\n')
 
 
 @pytest.mark.parametrize('case,code', [
@@ -217,5 +248,5 @@ main = ():
     xc_check({case}, 0)
     print("unreachable")
 '''
-    assert compare(compiler, tmp_path, False, DRIVER + main, status=19,
-                   extra_stems=('checker_cast',)).rstrip().endswith(f':{code}'.encode())
+    assert compare_leaf(compiler, tmp_path, False, DRIVER + main, status=19,
+                   stub='xc_check_host', jo_doubles=jo_doubles(CAST_JO), extra_stems=('checker_cast',)).rstrip().endswith(f':{code}'.encode())

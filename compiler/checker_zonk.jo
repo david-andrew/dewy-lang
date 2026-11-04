@@ -3,11 +3,7 @@ use 'node_store.dewy'
 use 'checker_types.dewy'
 use 'checker_state.dewy'
 use 'type_inference.dewy'
-struct CheckerZonkHost:
-    prelude: (int) -> bool
-    local_error: (int) -> void
-    copy_warnings: (int) -> void
-    definite: (int, int) -> void
+use 'check.jo'
 struct CheckerZonkInput:
     nodes: *(Node[])
     lists: *(i32[])
@@ -24,7 +20,6 @@ struct CheckerZonkInput:
     type_exposures: *int
     da_decls: *(int[])
     math_int: *int
-    host: *CheckerZonkHost
 xz_nodes: *(Node[])
 xz_lists: *(i32[])
 xz_types: *(TypeInfo[])
@@ -40,7 +35,6 @@ xz_type_binds: *int
 xz_type_exposures: *int
 xz_da_decls: *(int[])
 xz_math_int: *int
-xz_host: *CheckerZonkHost
 xz_stack: int[]
 xz_summary_stack: int[]
 checker_zonk_bind = (input: *CheckerZonkInput) -> int:
@@ -59,10 +53,9 @@ checker_zonk_bind = (input: *CheckerZonkInput) -> int:
     xz_type_exposures = input[0].type_exposures
     xz_da_decls = input[0].da_decls
     xz_math_int = input[0].math_int
-    xz_host = input[0].host
     0
 xz_user_global = (aux: i32, sym: i32) -> bool:
-    if aux == 2: return not xz_host[0].prelude(int(xz_globals[0][int(sym)].mod))
+    if aux == 2: return not zonk_prelude(int(xz_globals[0][int(sym)].mod))
     aux == 1 and int(xz_locals[0][int(sym)].flags) & 8 != 0
 xz_summary = (root: int):
     if root == 0: return
@@ -197,6 +190,6 @@ xz_finalize = (f: int, vars0: int, binds0: int, exposed0: int, da_mark: int):
         l = xz_fns[0][f].locals[i]
         zonked = int(tu_zonk(int(xz_locals[0][l].type)))
         xz_locals[0][l].type = i32(zonked)
-        if int(xz_types[0][int(tu_prune(zonked))].flags) & 1 != 0: xz_host[0].local_error(l)
-    xz_host[0].copy_warnings(f)
-    if xz_da_decls[0].len() > da_mark: xz_host[0].definite(body, da_mark)
+        if int(xz_types[0][int(tu_prune(zonked))].flags) & 1 != 0: zonk_local_error(l)
+    zonk_copy_warnings(f)
+    if xz_da_decls[0].len() > da_mark: zonk_definite(body, da_mark)

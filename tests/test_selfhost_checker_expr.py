@@ -2,7 +2,7 @@
 import pytest
 
 from tests.support import compiler  # noqa: F401
-from tests.test_selfhost_checker_idents import DRIVER as IDENTS
+from tests.test_selfhost_checker_idents import DRIVER as IDENTS, IDENT_JO
 from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER, compare
 from tests.test_selfhost_checker_conditionals import DRIVER as CONDITIONALS, CONDITIONAL_JO
 from tests.test_selfhost_checker_literals import LITERAL_JO
@@ -514,14 +514,15 @@ from tests.test_selfhost_checker_logic import LOGIC_JO
 from tests.test_selfhost_checker_members import MEMBER_JO
 from tests.test_selfhost_checker_indexes import INDEX_JO
 from tests.test_selfhost_checker_receivers import RECEIVER_JO
-for _table in (LITERAL_JO, CONDITIONAL_JO, LOGIC_JO, MEMBER_JO, INDEX_JO, RECEIVER_JO):
+from tests.test_selfhost_checker_cast import CAST_JO
+for _table in (IDENT_JO, LITERAL_JO, CONDITIONAL_JO, LOGIC_JO, MEMBER_JO, INDEX_JO, RECEIVER_JO, CAST_JO):
     for _module, _functions in _table.items():
         _existing = JO_DOUBLES.get(_module, '')
         _missing = {_name: _definition for _name, _definition in _functions.items()
                     if not any(_line.startswith(f'{_name} = ') for _line in _existing.splitlines())}
         # These three leaves are not exercised by this dispatcher differential.
         # Keep their unused direct services explicit, and fail if a route reaches one.
-        if _table in (LOGIC_JO, MEMBER_JO, INDEX_JO, RECEIVER_JO):
+        if _table in (LOGIC_JO, MEMBER_JO, INDEX_JO, RECEIVER_JO, CAST_JO):
             for _name, _definition in _missing.items():
                 if _definition.startswith('use '):
                     continue
