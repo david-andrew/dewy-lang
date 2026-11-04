@@ -1,0 +1,6 @@
+Item:type=[value:int64]
+let current:array<Item>=[Item[20]]
+__eq__=(a:Item b:Item):>bool=>{current.clear() return a.value =? b.value}
+main=():>void=>{
+    if current =? [Item[20]] printl(current[0].value)
+}

@@ -3335,6 +3335,17 @@ fact_assume = (s: mut FactState, v: int, truth: bool):
         fact_assume(s, t.a, not truth)
         return
     if not fact_comparison(t.op):
+        # This Boolean remembers the evaluated operands' lengths, not their
+        # mutable source places. Reassigning either operand cannot reuse it.
+        if t.origin != 0 and fact_length_comparison(t.origin):
+            equal = truth == (nodes[t.origin].op == i32(int(Tok.eq)))
+            if equal:
+                fact_assume(s, fact_new(s, fact_domain(T_BOOL), FactTerm(.eq, t.a, t.b)), true)
+            else:
+                x = fact_bound(s, t.a); y = fact_bound(s, t.b)
+                if x.lo == 0 and x.hi == 0 or y.lo == 0 and y.hi == 0:
+                    fact_assume(s, fact_new(s, fact_domain(T_BOOL), FactTerm(.ne, t.a, t.b)), true)
+            return
         # Byte-prefix/suffix success on a nonempty pattern implies at least
         # one grapheme, even when combining marks merge at the boundary.
         if truth and t.origin != 0 and fact_affix_call(t.origin) and fact_bound(s, t.b).lo > 0:
@@ -4163,6 +4174,16 @@ fact_pure_binary = (n: int) -> bool:
     if aux != 1 or (nodes[n].op != i32(int(Tok.eq)) and nodes[n].op != i32(int(Tok.ne))): return false
     t = ntype(int(nodes[n].a))
     helper_value_members(t).len() == 0 and (ownership_decls.len() == 0 or not ownership_fact_type(t))
+
+# Builtin collection equality implies equal lengths, but unequal contents
+# need not have different lengths. Only hook-free structural arrays and text
+# qualify. Two indexed projections; existing purity and bounded relation work.
+fact_length_comparison = (n: int) -> bool:
+    if n == 0 or nodes[n].kind != .binary or (nodes[n].op != i32(int(Tok.eq)) and nodes[n].op != i32(int(Tok.ne))): return false
+    if not fact_pure_binary(n): return false
+    a = fact_type(ntype(int(nodes[n].a)))
+    b = fact_type(ntype(int(nodes[n].b)))
+    (a == T_STR and b == T_STR) or ((tkind(a) == .array or tkind(a) == .fixed) and (tkind(b) == .array or tkind(b) == .fixed))
 
 # Is a conversion from one type to the other only a unit attached or dropped?
 fact_unit_erased = (from0: int, to0: int) -> bool:
@@ -10138,6 +10159,12 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         if nodes[n].aux == 0 and (op == .amp or op == .pipe or op == .caret or op == .shr or op == .shl) and fact_scalar(ntype(n)) and is_int(ntype(n)):
             exact_shift_fact(n, b, s)
             return fact_bitwise(s, n, op, a, b)
+        if fact_length_comparison(n):
+            at = fact_type(ntype(int(nodes[n].a)))
+            bt = fact_type(ntype(int(nodes[n].b)))
+            al = if tkind(at) == .fixed: fact_constant(s, fixed_len(at)) else: fact_project(s, a, -1, false, T_INT)
+            bl = if tkind(bt) == .fixed: fact_constant(s, fixed_len(bt)) else: fact_project(s, b, -1, false, T_INT)
+            return fact_new(s, fact_domain(T_BOOL), FactTerm(a = al, b = bl, origin = n, type = T_BOOL))
         if nodes[n].aux != 0 and not fact_pure_binary(n): fact_forget(s, n, .call)
         return fact_unmodeled(s, n, .unsupported)
     if fact_enum_cast(n):

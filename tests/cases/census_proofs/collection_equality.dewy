@@ -1,0 +1,25 @@
+# quick
+# Equal contents imply equal lengths; different contents need not.
+read = (xs:array<int64>):>int => {
+    if xs =? [20 22] return xs[0]+xs[1]
+    return 0
+}
+last_nonempty = (xs:array<int64>):>int64 => {
+    if xs =? [] return 0
+    return xs[end]
+}
+paired = (xs:array<int64> ys:array<int64>):>int64 => {
+    if xs not=? ys return 0
+    if ys.length <? 2 return 0
+    return xs[1]
+}
+text = (s:string):>string => {
+    if s =? "cafe" return s[3]
+    if s not=? "" return s[0]
+    return "empty"
+}
+main=():>void=>{
+    printl"{read([20 22])} {last_nonempty([])} {last_nonempty([7])}"
+    printl"{paired([1 9] [1 9])} {paired([1] [2])}"
+    printl"{text("cafe")} {text("hello")} {text("")}"
+}
