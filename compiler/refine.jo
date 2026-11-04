@@ -282,6 +282,17 @@ refine_storage = (n: int, fallback: int) -> int:
         a = int(nodes[n].a)
         t = representation_type(refine_storage(a, ntype(a)))
         if types[t].kind == .opt: return int(types[t].elem)
+    if nodes[n].kind == .narrow:
+        # The tag selects a declared union member even after the payload's
+        # read type has erased its outer refinement. Resolve through optional
+        # and local aliases first, just as for an unwrapped optional payload.
+        a = int(nodes[n].a)
+        t = representation_type(refine_storage(a, ntype(a)))
+        if is_union(t): return struct_targ(int(types[t].st), int(nodes[n].aux))
+    if nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.union_)):
+        # A narrowed subset retains its declared member types; the conversion
+        # is a view of the same union storage, not an unrefined replacement.
+        return ntype(n)
     fallback
 
 # A string stored as a string set: a member literal is its word, another
