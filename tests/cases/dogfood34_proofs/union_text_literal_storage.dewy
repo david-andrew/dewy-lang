@@ -1,0 +1,14 @@
+Text:type = string<(length >=? 1)>
+select = (v:Text|int):>string => match v {
+    <"abc"> => "match"
+    s:Text => "other"
+    n:int => "integer"
+}
+main = () => {
+    let pieces:array<string> = ["a" "b" "c"]
+    let text = pieces.join("")
+    if text.length =? 0 return
+    printl(select(text))
+    printl(select("xyz"))
+    printl(select(2))
+}

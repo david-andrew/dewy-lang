@@ -2679,8 +2679,9 @@ result_from_slot = (rs: int, t: int) -> Val:
 
 # ---------------- match ----------------
 gen_match_test = (p: int, st0: int, hidden_addr: int) -> int:
-    # returns a vreg that is nonzero when the pattern matches
-    st = prune(st0)
+    # A union payload may retain its refinement. Select equality from its
+    # storage type: heap integers and text compare values, never addresses.
+    st = representation_type(st0)
     k = nodes[p].kind
     if k == .pwild: return e_iconst(1)
     if k == .ptype:

@@ -1,0 +1,13 @@
+Neg:type = int<(<=? 0)>
+select = (v:Neg|string):>string => match v {
+    <-2> => "minus two"
+    <-9223372036854775807> => "huge negative"
+    n:Neg => "other"
+    s:string => s
+}
+main = () => {
+    printl(select(-2))
+    printl(select(-3))
+    printl(select(-9223372036854775807))
+    printl(select("text"))
+}

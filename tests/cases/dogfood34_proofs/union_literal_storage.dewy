@@ -1,0 +1,13 @@
+Pos:type = int<(>=? 0)>
+select = (v:Pos|string):>string => match v {
+    <2> => "two"
+    <9223372036854775807> => "huge"
+    n:Pos => "other"
+    s:string => s
+}
+main = () => {
+    printl(select(2))
+    printl(select(3))
+    printl(select(9223372036854775807))
+    printl(select("text"))
+}
