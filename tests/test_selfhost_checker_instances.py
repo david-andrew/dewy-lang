@@ -139,3 +139,6 @@ def test_checker_instances_reject_unbounded_requests(compiler, tmp_path, stateme
     compare(compiler, tmp_path, False, DRIVER.replace('    print(events)', '    ' + statement + '\n    print(events)'),
             status=status, extra_stems=('checker_signature', 'type_substitute',
                                        'checker_results', 'checker_instances'), jo_doubles=JO_DOUBLES)
+
+from tests.selfhost_expr_double import isolate_sinks
+isolate_sinks(JO_DOUBLES)

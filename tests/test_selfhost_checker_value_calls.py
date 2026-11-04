@@ -95,3 +95,6 @@ def test_checker_value_calls_errors(compiler, tmp_path, case, message):
     output = compare(compiler, tmp_path, False, DRIVER + 'main = ():\n    prepare()\n    ' + case + '\n    print("unreachable")\n',
                      status=43, extra_stems=STEMS, doubles=DOUBLES, jo_doubles=JO)
     assert message.encode() in output
+
+from tests.selfhost_expr_double import isolate_sinks
+isolate_sinks(JO)

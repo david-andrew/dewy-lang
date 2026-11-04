@@ -1,0 +1,321 @@
+# Frozen value-call machinery from check.jo.
+use 'check.jo'
+use 'ast.jo'
+use 'checker_exprstmts.dewy'
+use 'types.jo'
+use 'expr.jo'
+use 'checker_expr.dewy'
+use 'util.jo'
+use 'checker_values.dewy'
+
+sink_root = (i: int) -> int:
+    if sinks[i].mode == SINK_ARM: int(sinks[i].root) else: i
+
+sink_body_kind = (body: int, infer: bool, want: bool, ret: int, written: bool) -> int:
+    if not files[pos_file(nodes[body].pos)].is_dewy: return SINK_NONE
+    if not want: return if written: SINK_VOID else: SINK_NONE
+    if infer: return SINK_BODY
+    if union_has_void(prune(ret)): return if written: SINK_VOID else: SINK_NONE
+    SINK_ONE
+
+sink_written = (d: int) -> bool:
+    d != 0 and (has_flag(d, NF_WRITTEN_VOID) or nodes[d].a != 0)
+
+pack_written = (f: int, tn: int):
+    n = pack_result_count(tn)
+    if n == 0: return
+    fns[f].pack = nodes[tn].pos
+    fns[f].pack_n = n
+    fns[f].pack_k = n
+
+sink_return = (pos: int):
+    if sink_fn >= 0 and sinks[sink_fn].mode == SINK_BODY and sinks[sink_fn].returns == 0: sinks[sink_fn].returns = pos
+
+sink_pack_call = (n: int):
+    f = int(nodes[n].sym)
+    if sink_pack_site == n:
+        sink_pack_hit = n
+        return
+    if node_marked(spread_calls, n): return
+    sink_pack_error(n, f)
+
+sink_values_use = (n: int, t: int):
+    if sink_pack_site == n:
+        sink_pack_hit = n
+        return
+    sink_values_error(n, t)
+
+sink_make_acc = (i: int, elem: int, pos: int):
+    acc_name = sink_acc_name()
+    d = mk(.vardecl, pos)
+    nodes[d].name = i32(acc_name)
+    tn = type_node_of(mk_array(elem), pos)
+    nodes[d].a = i32(tn)
+    arr = mk(.array, pos)
+    nodes[d].b = i32(arr)
+    check_stmt(d)
+    l = int(nodes[d].sym)
+    locals[l].dloops = i32(sinks[i].loops)
+    locals[l].flags = locals[l].flags | i32(LF_QUIET)
+    sinks[i].acc = l
+    sinks[i].decl = d
+
+sink_push = (i: int, s: int, pack: bool):
+    v = int(nodes[s].a)
+    pos = nodes[v].pos
+    if sinks[i].tuple and sinks[i].vague == 0:
+        sink_hold(i, s, pack)
+        return
+    if pack and is_values(ntype(v)):
+        sink_push_values(i, s)
+        return
+    if sinks[i].acc == 0:
+        elem = ntype(v)
+        if pack: elem = int(types[prune(elem)].elem)
+        else if is_lit(v): elem = lit_default(v)
+        if sinks[i].elem != 0: elem = sinks[i].elem
+        else if sinks[i].hlocals.len() > 0: elem = int(locals[sinks[i].hlocals[0]].type)
+        sink_make_acc(i, elem, pos)
+    else if sinks[i].mode != SINK_COLLECTOR:
+        elem = int(types[prune(int(locals[int(sinks[i].acc)].type))].elem)
+        vt = ntype(v)
+        if pack: vt = int(types[prune(vt)].elem)
+        if not is_lit(v) and not can_coerce(v, vt, elem):
+            sink_main_value(i, pos)
+            sink_error0(pos, vt, elem)
+    receiver = mk_ident_local(int(sinks[i].acc), pos)
+    add_flag(receiver, NF_MUT)
+    callee = mk(.field, pos)
+    nodes[callee].a = i32(receiver)
+    method = if pack: "extend" else: "push"
+    nodes[callee].name = i32(intern(method))
+    call = mk(.call, pos)
+    nodes[call].a = i32(callee)
+    set_list(call, [v])
+    check_expr(call, 0)
+    nodes[s].a = i32(last_checked)
+
+sink_hold = (i: int, s: int, pack: bool):
+    v = int(nodes[s].a)
+    pre: int[]
+    parts = if pack or is_values(ntype(v)): values_parts(v, pre) else: [v]
+    loop p0 in parts:
+        p = p0
+        t = ntype(p)
+        if sinks[i].mode == SINK_BODY:
+            elem = int(sinks[i].elem)
+            if elem == 0 and sinks[i].hlocals.len() > 0: elem = int(locals[sinks[i].hlocals[0]].type)
+            if elem == 0: elem = if is_lit(p): lit_default(p) else: t
+            else if not is_lit(p) and not can_coerce(p, t, elem):
+                sink_main_value(i, nodes[p].pos)
+                sink_hold_error(p, t, elem, parts)
+            p = coerce(p, elem)
+            t = elem
+        else:
+            # (`let p:(int64 int64) = { 1 2 }`: each value takes its place's type)
+            want = int(sinks[i].elem)
+            at = sinks[i].hlocals.len()
+            if want != 0 and at < int(types[want].nargs):
+                p = coerce(p, targ(want, at))
+                t = targ(want, at)
+            else:
+                finalize_literal(p)
+                t = ntype(p)
+        held = capture_value(p, t, pre)
+        sinks[i].hlocals.push(int(nodes[held].sym))
+    sink_splice[s] = pre
+    sinks[i].held.push(s)
+    sinks[i].hcount.push(parts.len())
+
+sink_push_values = (i: int, s: int):
+    v = int(nodes[s].a)
+    pos = nodes[v].pos
+    pre: int[]
+    parts = values_parts(v, pre)
+    out: int[]
+    loop d in pre: out.push(d)
+    loop part in parts:
+        st = mk(.exprstmt, pos)
+        nodes[st].a = i32(part)
+        sink_push(i, st, false)
+        out.push(st)
+    b = bc_block(out, pos)
+    add_flag(b, NF_CHECKED)
+    nodes[b].type = i32(T_VOID)
+    nodes[s].a = i32(b)
+
+sink_flush = (i: int):
+    start = int(sinks[i].pending)
+    loop k in [start..sink_pending.len()):
+        sink_push(i, sink_pending[k], false)
+    sink_pending.truncate(start)
+    sink_pfinal.truncate(start)
+
+sink_express = (s: int, t: int, pack: bool, final: bool):
+    i = sinks.len() - 1
+    mode = sinks[i].mode
+    v = int(nodes[s].a)
+    if mode == SINK_VOID: sink_void_error(s, t)
+    if mode == SINK_ONE:
+        sink_error1(v)
+    if mode == SINK_COLLECTOR:
+        if sinks[i].acc == 0: sinks[i].acc = int(nodes[kid(int(sinks[i].block), 0)].sym)
+        sink_push(i, s, pack)
+        return
+    r = sink_root(i)
+    if sinks[r].mode == SINK_BODY or sinks[r].mode == SINK_BIND: sink_count(r, s, pack)
+    if not final and sinks[r].first == 0 and sinks[r].mode == SINK_BODY:
+        sinks[r].first = nodes[v].pos
+        # (a body that also gives a value with `return`: said here, before the values meet)
+        if sinks[r].returns == 0 and has_value_return(int(sinks[r].block)): sink_error2(v)
+    if sinks[r].acc != 0 or sinks[r].held.len() > 0 or pack or loop_serials.len() > sinks[r].loops:
+        if sinks[r].first == 0: sinks[r].first = nodes[v].pos
+        sink_flush(r)
+        sink_push(r, s, pack)
+        return
+    sink_pending.push(s)
+    sink_pfinal.push(final)
+
+sink_count = (r: int, s: int, pack: bool):
+    v = int(nodes[s].a)
+    n = 1
+    if pack:
+        n = values_count(v)
+    if n == 0 or s != sinks[r].direct or sinks.len() - 1 != r or loop_serials.len() > sinks[r].loops:
+        if sinks[r].mode == SINK_BIND: sink_error3(v)
+        if sinks[r].vague == 0: sinks[r].vague = nodes[v].pos
+        return
+    sinks[r].count += n
+
+sink_arm = (e: int, b: int):
+    if sinks.len() == 0: return
+    r = sink_root(sinks.len() - 1)
+    if sinks[r].mode != SINK_BODY: return
+    if not sinks[r].finals.contains(e): sinks[r].finals.push(e)
+    sink_arm_next = b
+
+sink_pack_body = (f: int) -> int:
+    sink_body_mode = SINK_BODY
+    sink_want_n = fns[f].pack_n
+    sink_want_elem = targ(prune(int(ctxs[cx].ret)), 0)
+    0
+
+sink_open = (b: int, mode: int):
+    sinks.push(Sink(mode = mode, block = b, root = -1, acc = 0, loops = loop_serials.len(), pending = sink_pending.len()))
+    i = sinks.len() - 1
+    sinks[i].tuple = mode == SINK_BIND or mode == SINK_BODY and not sink_no_tuple
+    if mode == SINK_BODY: sink_no_tuple = false
+    if mode == SINK_BODY and (sink_want_n > 0 or sink_want_elem != 0):
+        sinks[i].want = sink_want_n
+        sinks[i].elem = sink_want_elem
+        sink_want_n = 0
+        sink_want_elem = 0
+    if mode == SINK_BIND:
+        sinks[i].elem = sink_bind_expect
+        sink_bind_expect = 0
+    if mode == SINK_ARM:
+        p = sinks.len() - 2
+        sinks[i].root = i32(sink_root(p))
+
+sink_flow_stmt = (e: int):
+    add_flag(e, NF_STMT)
+    nodes[e].type = i32(T_VOID)
+    arms: int[]
+    if nodes[e].kind == .if_:
+        arms.push(int(nodes[e].b))
+        if nodes[e].c != 0: arms.push(int(nodes[e].c))
+    else:
+        loop arm in kids(e): arms.push(int(nodes[arm].b))
+    loop arm in arms:
+        nodes[arm].aux = 0
+        nodes[arm].type = i32(T_VOID)
+        sink_unwrap_last(arm)
+
+sink_unwrap_last = (b: int):
+    n = nkids(b)
+    if n == 0: return
+    last = kid(b, n - 1)
+    if nodes[last].kind != .exprstmt: return
+    inner = int(nodes[last].a)
+    if nodes[inner].kind == .if_ and has_flag(inner, NF_STMT): set_kid(b, n - 1, inner)
+
+sink_close = (b: int, result: int) -> int:
+    i = sinks.len() - 1
+    mode = sinks[i].mode
+    out = result
+    if mode == SINK_BODY and sinks[i].want > 0:
+        sink_close_count_error(i, b)
+    if mode == SINK_BODY or mode == SINK_BIND:
+        start = int(sinks[i].pending)
+        single = sinks[i].acc == 0 and sinks[i].held.len() == 0
+        loop k in [start..sink_pending.len()):
+            if not sink_pfinal[k]: single = false
+        if not single:
+            first = int(sinks[i].first)
+            if first == 0: first = nodes[b].pos
+            if mode == SINK_BODY:
+                sink_close_body_error(i, first)
+            sink_flush(i)
+            k = sinks[i].finals.len() - 1
+            loop k >= 0:
+                sink_flow_stmt(sinks[i].finals[k])
+                k -= 1
+            sink_unwrap_last(b)
+            pos = nodes[b].pos
+            tuple = sinks[i].tuple and sinks[i].vague == 0
+            # (values held before one whose number is not static: pushed after all, in order)
+            pushes: {int: int[]}
+            if not tuple:
+                h = 0
+                loop j in [0..sinks[i].held.len()):
+                    st = sinks[i].held[j]
+                    more: int[]
+                    loop part in sink_splice[st]: more.push(part)
+                    loop q in [0..sinks[i].hcount[j]):
+                        e = mk(.exprstmt, pos)
+                        local = mk_ident_local(sinks[i].hlocals[h], pos)
+                        nodes[e].a = i32(local)
+                        sink_push(i, e, false)
+                        add_flag(e, NF_CHECKED)
+                        more.push(e)
+                        h += 1
+                    pushes[st] = more
+            xs: int[]
+            if not tuple: xs.push(int(sinks[i].decl))
+            loop k in kids(b):
+                if pushes.has(k):
+                    loop x in pushes[k]: xs.push(x)
+                else if sink_splice.has(k) and sinks[i].held.contains(k):
+                    loop x in sink_splice[k]: xs.push(x)
+                else: xs.push(k)
+            value = 0
+            if tuple:
+                value = mk(.tuple, pos)
+                nodes[value].aux = i32(TUPLE_VALUES)
+                vs: int[]
+                ts: int[]
+                loop l in sinks[i].hlocals:
+                    vs.push(mk_ident_local(l, pos))
+                    ts.push(int(locals[l].type))
+                set_list(value, vs)
+                out = mk_values(ts)
+                nodes[value].type = i32(out)
+                add_flag(value, NF_CHECKED)
+            else:
+                value = mk_ident_local(int(sinks[i].acc), pos)
+                out = int(locals[int(sinks[i].acc)].type)
+            r = mk(.exprstmt, pos)
+            nodes[r].a = i32(value)
+            add_flag(r, NF_CHECKED)
+            xs.push(r)
+            set_list(b, xs)
+            nodes[b].aux = 1
+            if mode == SINK_BODY:
+                fns[int(ctxs[cx].inst)].pack = first
+                # (a count every path gives, each value a statement of the body's own block)
+                if sinks[i].want == 0: fns[int(ctxs[cx].inst)].pack_k = if sinks[i].vague == 0: int(sinks[i].count) else: 0
+        loop st in sinks[i].held: sink_splice.remove(st)
+        sink_pending.truncate(start)
+        sink_pfinal.truncate(start)
+    sinks.pop()
+    out

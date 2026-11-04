@@ -50,3 +50,30 @@ def jo_doubles(*tables):
     # (a `use` entry, keyed by its module, brings a type a double's signature names)
     return {name: "use 'driver.jo'\n" + ''.join(line + '\n' for line in sorted(functions.values(), key=lambda line: not line.startswith('use ')))
             for name, functions in merged.items()}
+
+
+def isolate_sinks(modules):
+    """Keep callers' sink stubs when the implementation lives in its own leaf."""
+    import re
+    signatures = {
+        'sink_pack_call': ('n:int64', 'n', 'void'),
+        'sink_values_use': ('n:int64 t:int64', 'n t', 'void'),
+        'sink_close': ('b:int64 result:int64', 'b result', 'int64'),
+        'pack_written': ('f:int64 tn:int64', 'f tn', 'void'),
+    }
+    text = modules.get('check.jo', '')
+    dewy, jo = [], ["use 'check.jo'\n"]
+    for name, (params, args, result) in signatures.items():
+        pattern = r'(?m)^' + name + r' = (\([^\n]*?\)(?: -> [^:\n]+)?):'
+        match = re.search(pattern, text)
+        if match is None:
+            continue
+        service = name + '_double'
+        text = re.sub(r'(?m)^' + name + r' = ', service + ' = ', text)
+        dewy.append(f'from p"check.jo" import {service}\n'
+                    f'{name}=({params}):>{result}=>{service}({args})\n')
+        jo.append(f'{name} = {match[1]}: {service}({args.replace(" ", ", ")})\n')
+    if dewy:
+        modules['check.jo'] = text
+        modules['checker_sinks.dewy'] = ''.join(dewy)
+        modules['checker_sinks.jo'] = ''.join(jo)

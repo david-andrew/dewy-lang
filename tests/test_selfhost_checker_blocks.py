@@ -255,3 +255,6 @@ main = ():
 '''
     output = compare_leaf(compiler, tmp_path, False, DRIVER + main, 'db_check', status=19, extra_stems=STEMS, jo_doubles=JO_DOUBLES)
     assert output.rstrip().endswith(f':{code}'.encode())
+
+from tests.selfhost_expr_double import isolate_sinks
+isolate_sinks(JO_DOUBLES)

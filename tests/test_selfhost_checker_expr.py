@@ -547,3 +547,6 @@ main = ():
 JO_DOUBLES['checker_value_calls.dewy'] = 'from p"check.jo" import value_call_double\nvalues_call=(n:int64 expected:int64):>int64=>value_call_double(n expected)\n'
 JO_DOUBLES['checker_value_calls.jo'] = "use 'check.jo'\nvalues_call = (n: int, expected: int) -> int: value_call_double(n, expected)\n"
 JO_DOUBLES['check.jo'] = JO_DOUBLES['check.jo'].replace('values_call = ', 'value_call_double = ')
+
+from tests.selfhost_expr_double import isolate_sinks
+isolate_sinks(JO_DOUBLES)

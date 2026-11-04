@@ -1,0 +1,362 @@
+$runtime_checks
+from p"check.jo" import (LF_QUIET SINK_ARM SINK_BIND SINK_BODY SINK_COLLECTOR SINK_NONE SINK_ONE SINK_VOID check_stmt ctxs cx fns has_value_return locals loop_serials node_marked pack_result_count sink_acc_name sink_arm_next sink_bind_expect sink_body_mode sink_close_body_error sink_close_count_error sink_error0 sink_error1 sink_error2 sink_error3 sink_fn sink_hold_error sink_main_value sink_no_tuple sink_pack_error sink_pack_hit sink_pack_site sink_pending sink_pfinal sink_splice sink_values_error sink_void_error sink_want_elem sink_want_n sinks spread_calls union_has_void)
+from p"ast.jo" import (NF_INDEX_CAPTURED NF_CHECKED NF_MUT NF_STMT NF_WRITTEN_VOID TUPLE_VALUES add_flag has_flag kid kids mk nkids nodes set_kid set_list)
+from p"checker_exprstmts.dewy" import (Sink)
+from p"types.jo" import (T_VOID is_values mk_array mk_values prune targ types)
+from p"expr.jo" import (bc_block can_coerce capture_value coerce finalize_literal is_lit last_checked lit_default mk_ident_local ntype type_node_of)
+from p"checker_expr.dewy" import (check_expr)
+from p"util.jo" import (files intern pos_file)
+from p"checker_values.dewy" import (values_count values_parts)
+# General sink execution; reread arena elements after allocating services.
+SNWord:type=int64<overflow='wrap'>
+sink_root=(i:int64):>int64=>$unsafe {
+    if sinks.ptr[i].mode =? SINK_ARM {SNWord(sinks.ptr[i].root)} else {i}
+}
+sink_body_kind=(body:int64 infer:bool want:bool ret:int64 written:bool):>int64=>$unsafe {
+    if not files.ptr[pos_file(nodes.ptr[body].pos)].is_dewy {return SINK_NONE}
+    if not want {return if written {SINK_VOID} else {SINK_NONE}}
+    if infer {return SINK_BODY}
+    if union_has_void(prune(ret)) {return if written {SINK_VOID} else {SINK_NONE}}
+    SINK_ONE
+}
+sink_written=(d:int64):>bool=>$unsafe {
+    d not=? 0 and (has_flag(d NF_WRITTEN_VOID) or nodes.ptr[d].a not=? 0)
+}
+pack_written=(f:int64 tn:int64):>void=>$unsafe {
+    let n=pack_result_count(tn)
+    if n =? 0 {return}
+    fns.ptr[f].pack = nodes.ptr[tn].pos
+    fns.ptr[f].pack_n = n
+    fns.ptr[f].pack_k = n
+}
+sink_return=(pos:int64):>void=>$unsafe {
+    if sink_fn >=? 0 and sinks.ptr[sink_fn].mode =? SINK_BODY and sinks.ptr[sink_fn].returns =? 0 {sinks.ptr[sink_fn].returns = pos}
+}
+sink_pack_call=(n:int64):>void=>$unsafe {
+    let f:SNWord=SNWord(nodes.ptr[n].sym)
+    if sink_pack_site =? n {
+        sink_pack_hit=n
+        return
+    }
+    if node_marked(spread_calls n) {return}
+    sink_pack_error(n f)
+}
+sink_values_use=(n:int64 t:int64):>void=>$unsafe {
+    if sink_pack_site =? n {
+        sink_pack_hit=n
+        return
+    }
+    sink_values_error(n t)
+}
+sink_make_acc=(i:int64 elem:int64 pos:int64):>void=>$unsafe {
+    let acc_name=sink_acc_name()
+    let d=mk('vardecl' pos)
+    nodes.ptr[d].name = int32(acc_name)
+    let tn=type_node_of(mk_array(elem) pos)
+    nodes.ptr[d].a = int32(tn)
+    let arr=mk('array' pos)
+    nodes.ptr[d].b = int32(arr)
+    check_stmt(d)
+    let l:SNWord=SNWord(nodes.ptr[d].sym)
+    locals.ptr[l].dloops = int32(sinks.ptr[i].loops)
+    locals.ptr[l].flags = locals.ptr[l].flags | int32(LF_QUIET)
+    sinks.ptr[i].acc = l
+    sinks.ptr[i].decl = d
+}
+sink_push=(i:int64 s:int64 pack:bool):>void=>$unsafe {
+    let v:SNWord=SNWord(nodes.ptr[s].a)
+    let pos=nodes.ptr[v].pos
+    if sinks.ptr[i].tuple and sinks.ptr[i].vague =? 0 {
+        sink_hold(i s pack)
+        return
+    }
+    if pack and is_values(ntype(v)) {
+        sink_push_values(i s)
+        return
+    }
+    if sinks.ptr[i].acc =? 0 {
+        let elem:SNWord=ntype(v)
+        if pack {elem=SNWord(types.ptr[prune(elem)].elem)}
+        else if is_lit(v) {elem=lit_default(v)}
+        if sinks.ptr[i].elem not=? 0 {elem=sinks.ptr[i].elem}
+        else if sinks.ptr[i].hlocals.length >? 0 {elem=SNWord(locals.ptr[sinks.ptr[i].hlocals.ptr[0]].type)}
+        sink_make_acc(i elem pos)
+    }
+    else if sinks.ptr[i].mode not=? SINK_COLLECTOR {
+        let elem:SNWord=SNWord(types.ptr[prune(SNWord(locals.ptr[SNWord(sinks.ptr[i].acc)].type))].elem)
+        let vt:SNWord=ntype(v)
+        if pack {vt=SNWord(types.ptr[prune(vt)].elem)}
+        if not is_lit(v) and not can_coerce(v vt elem) {
+            sink_main_value(i pos)
+            sink_error0(pos vt elem)
+        }
+    }
+    let receiver=mk_ident_local(SNWord(sinks.ptr[i].acc) pos)
+    add_flag(receiver NF_MUT)
+    let callee=mk('field' pos)
+    nodes.ptr[callee].a = int32(receiver)
+    let method=if pack {"extend"} else {"push"}
+    nodes.ptr[callee].name = int32(intern(method))
+    let call=mk('call' pos)
+    nodes.ptr[call].a = int32(callee)
+    set_list(call [v])
+    check_expr(call 0);
+    nodes.ptr[s].a = int32(last_checked)
+}
+sink_hold=(i:int64 s:int64 pack:bool):>void=>$unsafe {
+    let v:SNWord=SNWord(nodes.ptr[s].a)
+    let pre:array<int64>=[]
+    let parts=if pack or is_values(ntype(v)) {values_parts(v @pre)} else {[v]}
+    loop p0 in parts {
+        let p=p0
+        let t:SNWord=ntype(p)
+        if sinks.ptr[i].mode =? SINK_BODY {
+            let elem:SNWord=SNWord(sinks.ptr[i].elem)
+            if elem =? 0 and sinks.ptr[i].hlocals.length >? 0 {elem=SNWord(locals.ptr[sinks.ptr[i].hlocals.ptr[0]].type)}
+            if elem =? 0 {elem=if is_lit(p) {lit_default(p)} else {t}}
+            else if not is_lit(p) and not can_coerce(p t elem) {
+                sink_main_value(i nodes.ptr[p].pos)
+                sink_hold_error(p t elem parts)
+            }
+            p=coerce(p elem)
+            t=elem
+        }
+        else {
+            let want:SNWord=SNWord(sinks.ptr[i].elem)
+            let at=sinks.ptr[i].hlocals.length
+            if want not=? 0 and at <? SNWord(types.ptr[want].nargs) {
+                p=coerce(p targ(want at))
+                t=targ(want at)
+            }
+            else {
+                finalize_literal(p);
+                t=ntype(p)
+            }
+        }
+        let held=capture_value(p t @pre)
+        sinks.ptr[i].hlocals.push(SNWord(nodes.ptr[held].sym))
+    }
+    sink_splice[s] = pre
+    sinks.ptr[i].held.push(s)
+    sinks.ptr[i].hcount.push(parts.length)
+}
+sink_push_values=(i:int64 s:int64):>void=>$unsafe {
+    let v:SNWord=SNWord(nodes.ptr[s].a)
+    let pos=nodes.ptr[v].pos
+    let pre:array<int64>=[]
+    let parts=values_parts(v @pre)
+    let out:array<int64>=[]
+    loop d in pre {out.push(d)}
+    loop part in parts {
+        let st=mk('exprstmt' pos)
+        nodes.ptr[st].a = int32(part)
+        sink_push(i st false)
+        out.push(st)
+    }
+    let b=bc_block(out pos)
+    add_flag(b NF_CHECKED)
+    nodes.ptr[b].type = int32(T_VOID)
+    nodes.ptr[s].a = int32(b)
+}
+sink_flush=(i:int64):>void=>$unsafe {
+    let start:SNWord=SNWord(sinks.ptr[i].pending)
+    loop k in [start..sink_pending.length) {
+        sink_push(i sink_pending.ptr[k] false)
+    }
+    sink_pending.truncate(start)
+    sink_pfinal.truncate(start)
+}
+sink_express=(s:int64 t:int64 pack:bool final:bool):>void=>$unsafe {
+    let i=sinks.length - 1
+    let mode=sinks.ptr[i].mode
+    let v:SNWord=SNWord(nodes.ptr[s].a)
+    if mode =? SINK_VOID {sink_void_error(s t)}
+    if mode =? SINK_ONE {
+        sink_error1(v)
+    }
+    if mode =? SINK_COLLECTOR {
+        if sinks.ptr[i].acc =? 0 {sinks.ptr[i].acc = SNWord(nodes.ptr[kid(SNWord(sinks.ptr[i].block) 0)].sym)}
+        sink_push(i s pack)
+        return
+    }
+    let r=sink_root(i)
+    if sinks.ptr[r].mode =? SINK_BODY or sinks.ptr[r].mode =? SINK_BIND {sink_count(r s pack)}
+    if not final and sinks.ptr[r].first =? 0 and sinks.ptr[r].mode =? SINK_BODY {
+        sinks.ptr[r].first = nodes.ptr[v].pos
+        if sinks.ptr[r].returns =? 0 and has_value_return(SNWord(sinks.ptr[r].block)) {sink_error2(v)}
+    }
+    if sinks.ptr[r].acc not=? 0 or sinks.ptr[r].held.length >? 0 or pack or loop_serials.length >? sinks.ptr[r].loops {
+        if sinks.ptr[r].first =? 0 {sinks.ptr[r].first = nodes.ptr[v].pos}
+        sink_flush(r)
+        sink_push(r s pack)
+        return
+    }
+    sink_pending.push(s)
+    sink_pfinal.push(final)
+}
+sink_count=(r:int64 s:int64 pack:bool):>void=>$unsafe {
+    let v:SNWord=SNWord(nodes.ptr[s].a)
+    let n:SNWord=1
+    if pack {
+        n=values_count(v)
+    }
+    if n =? 0 or s not=? sinks.ptr[r].direct or sinks.length - 1 not=? r or loop_serials.length >? sinks.ptr[r].loops {
+        if sinks.ptr[r].mode =? SINK_BIND {sink_error3(v)}
+        if sinks.ptr[r].vague =? 0 {sinks.ptr[r].vague = nodes.ptr[v].pos}
+        return
+    }
+    sinks.ptr[r].count += n
+}
+sink_arm=(e:int64 b:int64):>void=>$unsafe {
+    if sinks.length =? 0 {return}
+    let r=sink_root(sinks.length - 1)
+    if sinks.ptr[r].mode not=? SINK_BODY {return}
+    if not sinks.ptr[r].finals.contains(e) {sinks.ptr[r].finals.push(e)}
+    sink_arm_next=b
+}
+sink_pack_body=(f:int64):>int64=>$unsafe {
+    sink_body_mode=SINK_BODY
+    sink_want_n=fns.ptr[f].pack_n
+    sink_want_elem=targ(prune(SNWord(ctxs.ptr[cx].ret)) 0)
+    0
+}
+sink_open=(b:int64 mode:int64):>void=>$unsafe {
+    sinks.push(Sink[mode = mode block = b root = -1 acc = 0 loops = loop_serials.length pending = sink_pending.length])
+    let i=sinks.length - 1
+    sinks.ptr[i].tuple = mode =? SINK_BIND or mode =? SINK_BODY and not sink_no_tuple
+    if mode =? SINK_BODY {sink_no_tuple=false}
+    if mode =? SINK_BODY and (sink_want_n >? 0 or sink_want_elem not=? 0) {
+        sinks.ptr[i].want = sink_want_n
+        sinks.ptr[i].elem = sink_want_elem
+        sink_want_n=0
+        sink_want_elem=0
+    }
+    if mode =? SINK_BIND {
+        sinks.ptr[i].elem = sink_bind_expect
+        sink_bind_expect=0
+    }
+    if mode =? SINK_ARM {
+        let p=sinks.length - 2
+        sinks.ptr[i].root = int32(sink_root(p))
+    }
+}
+sink_flow_stmt=(e:int64):>void=>$unsafe {
+    add_flag(e NF_STMT)
+    nodes.ptr[e].type = int32(T_VOID)
+    let arms:array<int64>=[]
+    if nodes.ptr[e].kind =? 'if_' {
+        arms.push(SNWord(nodes.ptr[e].b))
+        if nodes.ptr[e].c not=? 0 {arms.push(SNWord(nodes.ptr[e].c))}
+    }
+    else {
+        loop arm in kids(e) {arms.push(SNWord(nodes.ptr[arm].b))}
+    }
+    loop arm in arms {
+        nodes.ptr[arm].aux = 0
+        nodes.ptr[arm].type = int32(T_VOID)
+        sink_unwrap_last(arm)
+    }
+}
+sink_unwrap_last=(b:int64):>void=>$unsafe {
+    let n:SNWord=nkids(b)
+    if n =? 0 {return}
+    let last=kid(b n - 1)
+    if nodes.ptr[last].kind not=? 'exprstmt' {return}
+    let inner:SNWord=SNWord(nodes.ptr[last].a)
+    if nodes.ptr[inner].kind =? 'if_' and has_flag(inner NF_STMT) {set_kid(b n - 1 inner)}
+}
+sink_close=(b:int64 result:int64):>int64=>$unsafe {
+    let i=sinks.length - 1
+    let mode=sinks.ptr[i].mode
+    let out=result
+    if mode =? SINK_BODY and sinks.ptr[i].want >? 0 {
+        sink_close_count_error(i b)
+    }
+    if mode =? SINK_BODY or mode =? SINK_BIND {
+        let start:SNWord=SNWord(sinks.ptr[i].pending)
+        let single=sinks.ptr[i].acc =? 0 and sinks.ptr[i].held.length =? 0
+        loop k in [start..sink_pending.length) {
+            if not sink_pfinal.ptr[k] {single=false}
+        }
+        if not single {
+            let first:SNWord=SNWord(sinks.ptr[i].first)
+            if first =? 0 {first=nodes.ptr[b].pos}
+            if mode =? SINK_BODY {
+                sink_close_body_error(i first)
+            }
+            sink_flush(i)
+            let k=sinks.ptr[i].finals.length - 1
+            loop k >=? 0 {
+                sink_flow_stmt(sinks.ptr[i].finals.ptr[k])
+                k -= 1
+            }
+            sink_unwrap_last(b)
+            let pos=nodes.ptr[b].pos
+            let tuple=sinks.ptr[i].tuple and sinks.ptr[i].vague =? 0
+            let pushes:dict<int64 array<int64>>=dict<int64 array<int64>>()
+            if not tuple {
+                let h:SNWord=0
+                loop j in [0..sinks.ptr[i].held.length) {
+                    let st=sinks.ptr[i].held.ptr[j]
+                    let more:array<int64>=[]
+                    loop part in sink_splice[st] {more.push(part)}
+                    loop q in [0..sinks.ptr[i].hcount.ptr[j]) {
+                        let e=mk('exprstmt' pos)
+                        let local=mk_ident_local(sinks.ptr[i].hlocals.ptr[h] pos)
+                        nodes.ptr[e].a = int32(local)
+                        sink_push(i e false)
+                        add_flag(e NF_CHECKED)
+                        more.push(e)
+                        h += 1
+                    }
+                    pushes[st] = more
+                }
+            }
+            let xs:array<int64>=[]
+            if not tuple {xs.push(SNWord(sinks.ptr[i].decl))}
+            loop k in kids(b) {
+                if pushes.has(k) {
+                    loop x in pushes[k] {xs.push(x)}
+                }
+                else if sink_splice.has(k) and sinks.ptr[i].held.contains(k) {
+                    loop x in sink_splice[k] {xs.push(x)}
+                }
+                else {xs.push(k)}
+            }
+            let value:SNWord=0
+            if tuple {
+                value=mk('tuple' pos)
+                nodes.ptr[value].aux = int32(TUPLE_VALUES)
+                let vs:array<int64>=[]
+                let ts:array<int64>=[]
+                loop l in sinks.ptr[i].hlocals {
+                    vs.push(mk_ident_local(l pos))
+                    ts.push(SNWord(locals.ptr[l].type))
+                }
+                set_list(value vs)
+                out=mk_values(ts)
+                nodes.ptr[value].type = int32(out)
+                add_flag(value NF_CHECKED)
+            }
+            else {
+                value=mk_ident_local(SNWord(sinks.ptr[i].acc) pos)
+                out=SNWord(locals.ptr[SNWord(sinks.ptr[i].acc)].type)
+            }
+            let r=mk('exprstmt' pos)
+            nodes.ptr[r].a = int32(value)
+            add_flag(r NF_CHECKED)
+            xs.push(r)
+            set_list(b xs)
+            nodes.ptr[b].aux = 1
+            if mode =? SINK_BODY {
+                fns.ptr[SNWord(ctxs.ptr[cx].inst)].pack = first
+                if sinks.ptr[i].want =? 0 {fns.ptr[SNWord(ctxs.ptr[cx].inst)].pack_k = if sinks.ptr[i].vague =? 0 {SNWord(sinks.ptr[i].count)} else {0}}
+            }
+        }
+        loop st in sinks.ptr[i].held {sink_splice.remove(st);}
+        sink_pending.truncate(start)
+        sink_pfinal.truncate(start)
+    }
+    sinks.pop();
+    out
+}

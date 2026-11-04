@@ -166,3 +166,6 @@ def test_checker_bodies_recursive_error(compiler, tmp_path):  # noqa: F811
     compare(compiler, tmp_path, False, driver, status=21,
             extra_stems=('checker_signature', 'type_substitute', 'checker_results',
                          'checker_instances', 'checker_bodies'), jo_doubles=JO_DOUBLES)
+
+from tests.selfhost_expr_double import isolate_sinks
+isolate_sinks(JO_DOUBLES)
