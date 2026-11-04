@@ -2,7 +2,8 @@
 import pytest
 
 from tests.support import compiler  # noqa: F401
-from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER, compare
+from tests.test_selfhost_checker_resolve import DRIVER as RESOLVER
+from tests.selfhost_expr_double import compare_leaf, jo_doubles
 
 DRIVER = RESOLVER.split('main = ():')[0] + r'''
 literal_effects = false
@@ -47,9 +48,8 @@ literal_format = (n: int, pos: int):
     events.push("format:{n}:{pos}")
     loop i in [0..128): nodes.push(Node()); lists.push(0)
 literal_warning = (n: int): events.push("warning:{n}")
-literal_float_error = (n: int): print("float-error"); exit(22)
-literal_host = CheckerLiteralHost(literal_coerce, literal_effect, literal_note, literal_charlike, literal_check, literal_finalize, literal_format, literal_warning, literal_float_error)
-literal_input = CheckerLiteralInput(&nodes, &lists, &types, &files, &refine, &literal_effects, &literal_exact, &literal_last, &T_STR, &T_FLOAT, &T_BOOL, &T_NULL, &T_INT, &T_MATH_INT, &literal_host)
+literal_float_host = (n: int): print("float-error"); exit(22)
+literal_input = CheckerLiteralInput(&nodes, &lists, &types, &files, &refine, &literal_effects, &literal_exact, &literal_last, &T_STR, &T_FLOAT, &T_BOOL, &T_NULL, &T_INT, &T_MATH_INT)
 literal_binding = checker_literals_bind(&literal_input)
 literal_exact_input = CheckerExactInput(&nodes, &lists, &types, &files, &T_INT, &T_U64, &T_MATH_INT)
 literal_exact_binding = checker_exact_bind(&literal_exact_input)
@@ -122,9 +122,40 @@ main = ():
     print("ok")
 '''
 
+# The Jo services checker_literals calls, routed to the driver.
+LITERAL_JO = {
+    'expr.jo': {
+        'coerce': 'coerce = (n: int, target: int) -> int: literal_coerce(n, target)',
+        'charlike_to_int': 'charlike_to_int = (n: int): literal_charlike(n)',
+        'finalize_literal': 'finalize_literal = (n: int) -> int: literal_finalize(n)',
+        'fmt_part': 'fmt_part = (part: int, pos: int): literal_format(part, pos)',
+        'literal_interpolation_warning': 'literal_interpolation_warning = (e: int): literal_warning(e)',
+        'literal_float_error': 'literal_float_error = (n: int): literal_float_host(n)',
+    },
+    'effects.jo': {
+        'effect_infer_callable': 'effect_infer_callable = (n: int, expected: int) -> int: literal_effect(n, expected)',
+    },
+    'exact.jo': {
+        'exact_note': 'exact_note = (n: int): literal_note(n)',
+    },
+}
+
+
 
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_literals_twins(compiler, tmp_path, release):  # noqa: F811
-    assert compare(compiler, tmp_path, release, DRIVER,
+    assert compare_leaf(compiler, tmp_path, release, DRIVER, 'literal_check', jo_doubles=jo_doubles(LITERAL_JO),
                    extra_stems=('checker_exact', 'checker_literals')).endswith(b'ok\n')
+
+
+def test_checker_literals_float_error(compiler, tmp_path):  # noqa: F811
+    driver = DRIVER.split('main = ():')[0] + r'''main = ():
+    prepare()
+    n = node(.float_lit)
+    nodes[n].sval = 1
+    nodes[n].fval = f64_from_bits(0x7ff0000000000000)
+    xl_check_scalar(n, T_FLOAT)
+'''
+    compare_leaf(compiler, tmp_path, False, driver, 'literal_check', status=22,
+                 extra_stems=('checker_exact', 'checker_literals'), jo_doubles=jo_doubles(LITERAL_JO))

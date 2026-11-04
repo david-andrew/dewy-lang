@@ -3,8 +3,8 @@ literal leaf's word fast path match frozen Jo."""
 import pytest
 
 from tests.support import compiler  # noqa: F401
-from tests.test_selfhost_checker_literals import DRIVER as LITERALS
-from tests.test_selfhost_checker_resolve import compare
+from tests.test_selfhost_checker_literals import DRIVER as LITERALS, LITERAL_JO
+from tests.selfhost_expr_double import compare_leaf, jo_doubles
 
 # (a Dewy file's literal reaches the host as the semantic integer)
 HEAD = LITERALS.split('main = ():')[0].replace(
@@ -82,7 +82,7 @@ main = ():
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_coerce_twins(compiler, tmp_path, release):  # noqa: F811
-    out = compare(compiler, tmp_path, release, DRIVER, extra_stems=('checker_exact', 'checker_literals'))
+    out = compare_leaf(compiler, tmp_path, release, DRIVER, 'literal_check', jo_doubles=jo_doubles(LITERAL_JO), extra_stems=('checker_exact', 'checker_literals'))
     assert out.endswith(b'ok\n')
     for line in (b'settled:', b'word:127:', b'word:128:'):
         assert line in out
@@ -104,5 +104,5 @@ main = ():
     word({value}, {target}, {'true' if u64 else 'false'})
     print("fit")
 '''
-    out = compare(compiler, tmp_path, False, driver, 17, extra_stems=('checker_exact', 'checker_literals'))
+    out = compare_leaf(compiler, tmp_path, False, driver, 'literal_check', status=17, jo_doubles=jo_doubles(LITERAL_JO), extra_stems=('checker_exact', 'checker_literals'))
     assert out.startswith(b'misfit:')

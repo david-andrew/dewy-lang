@@ -4,7 +4,7 @@ import pytest
 from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_assigns import ASSIGN_JO, DRIVER as ASSIGNS
 from tests.test_selfhost_checker_conditionals import DRIVER as CONDITIONALS
-from tests.test_selfhost_checker_literals import DRIVER as LITERALS
+from tests.test_selfhost_checker_literals import DRIVER as LITERALS, LITERAL_JO
 from tests.test_selfhost_checker_loops import DRIVER as LOOPS
 from tests.test_selfhost_checker_vardecls import DECL_JO, DRIVER as DECLS
 from tests.selfhost_expr_double import compare_leaf, jo_doubles
@@ -230,7 +230,7 @@ BLOCK_JO = {
         'stmt_terminates': 'stmt_terminates = (s: int) -> bool: db_terminates(s)',
     },
 }
-JO_DOUBLES = jo_doubles(BLOCK_JO, ASSIGN_JO, DECL_JO)
+JO_DOUBLES = jo_doubles(BLOCK_JO, ASSIGN_JO, DECL_JO, LITERAL_JO)
 
 
 @pytest.mark.core_quick

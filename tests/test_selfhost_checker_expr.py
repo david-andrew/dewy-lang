@@ -4,6 +4,8 @@ import pytest
 from tests.support import compiler  # noqa: F401
 from tests.test_selfhost_checker_idents import DRIVER as IDENTS
 from tests.test_selfhost_checker_resolve import compare
+from tests.test_selfhost_checker_literals import LITERAL_JO
+from tests.selfhost_expr_double import jo_doubles
 
 STEMS = ('checker_exact', 'checker_literals', 'checker_idents', 'checker_conditionals', 'checker_members',
          'checker_indexes', 'checker_receivers', 'checker_variants', 'checker_type_apply',
@@ -482,6 +484,9 @@ juxt_factor = (c: int) -> int:
               'parallel_lower.jo': "use 'driver.jo'\nparallel_prepare = (n: int): events.push(\"parallel:{n}\")\n",
               'util.jo': "use 'driver.jo'\npos_in_lib = (pos: int) -> bool: zc_lib\n",
               'effects.jo': "use 'driver.jo'\ncallable_base = (t0: int) -> int: if zc_base != 0: zc_base else: t0\n"}
+
+for _module, _text in jo_doubles(LITERAL_JO).items():
+    JO_DOUBLES[_module] = JO_DOUBLES.get(_module, '') + _text
 
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])

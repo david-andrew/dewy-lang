@@ -2,8 +2,8 @@
 import pytest
 
 from tests.support import compiler  # noqa: F401
-from tests.test_selfhost_checker_literals import DRIVER as LITERALS
-from tests.test_selfhost_checker_resolve import compare
+from tests.test_selfhost_checker_literals import DRIVER as LITERALS, LITERAL_JO
+from tests.selfhost_expr_double import compare_leaf, jo_doubles
 
 DRIVER = LITERALS.split('main = ():')[0] + r'''
 locals: Local[] = [Local()]
@@ -150,7 +150,7 @@ main = ():
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_idents_twins(compiler, tmp_path, release):  # noqa: F811
-    assert compare(compiler, tmp_path, release, DRIVER + MAIN,
+    assert compare_leaf(compiler, tmp_path, release, DRIVER + MAIN, 'literal_check', jo_doubles=jo_doubles(LITERAL_JO),
                    extra_stems=('checker_exact', 'checker_literals', 'checker_idents')).endswith(b'ok\n')
 
 
@@ -162,6 +162,6 @@ main = ():
     run({kind}, 0)
     print("unreachable")
 '''
-    output = compare(compiler, tmp_path, False, DRIVER + main, status=19,
+    output = compare_leaf(compiler, tmp_path, False, DRIVER + main, 'literal_check', jo_doubles=jo_doubles(LITERAL_JO), status=19,
                      extra_stems=('checker_exact', 'checker_literals', 'checker_idents'))
     assert output.rstrip().endswith(f':{kind}'.encode())
