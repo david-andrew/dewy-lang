@@ -1,0 +1,453 @@
+$runtime_checks
+from p"expr.jo" import (IN args_fit bc_field bc_ident breakpoint_call call_collect_fns call_collect_module call_collect_named call_dispatch_error call_fixed_array_error call_numeric_member call_search_name call_targs call_totaldict_member call_type_member_error callee_at can_coerce check_copy check_expr_in_module check_soa_method ci coerce console_type conversion decl_in_prelude dewy_arithmetic_call dewy_byte_read dewy_console_call dewy_len_check dewy_member_name dewy_method_call dewy_method_field dewy_quantity_name dewy_static_call dewy_surface_check enum_from_int expr_as_type find_variant id_breakpoint id_len intrinsics is_lit last_checked method_str_set_key nargs_check ntype program_fn_named release_call release_name relocate_call relocate_name struct_ctor surface_hidden synthetic_copy take_call take_name takes_seq to_int_word_limit value_call variant_ctor variant_enum)
+from p"ast.jo" import (NF_EXCL_FIRST NF_SQUOTE NF_CHECKED NF_JUXT NF_PRIVATE_COORD RANGE_EXHAUSTION add_flag has_flag id_chars id_find id_index_of id_rfind kid kids mk nkids nkids2 nodes set_kid set_list)
+from p"node_store.dewy" import (Node)
+from p"types.jo" import (T_INT T_MATH_INT T_STR fields fixed_len get_struct_inst int_policy is_int is_numeric is_soa policy_int prune simple_enum structs tkind types)
+from p"units.jo" import (bundled_word_rational_type dewy_quantity_call)
+from p"checker_expr.dewy" import (call_by_name check_expr check_intrinsic finish_arg lookup)
+from p"check.jo" import (check_struct_fields cur_mod demand_name dewy_at ensure_global globals jo_type_spelling locals method_modules module_lookup modules prelude resolve_alias resolve_type runtime_fn syms universe)
+from p"dewy_methods.jo" import (dewy_type_method)
+from p"effects.jo" import (effect_generic_argument)
+from p"exact.jo" import (exact_int_result exact_type)
+from p"util.jo" import (files intern name_of pos_file pos_in_lib)
+from p"checker_signature.dewy" import (fn_sig)
+from p"reflection.jo" import (id_members members_array reflect_active reflect_fields reflect_member reflect_members reflect_name)
+from p"ide.jo" import (ide_builtin_ref ide_complete_members ide_complete_names ide_complete_variants ide_field_ref ide_on ide_sentinel ide_sym_ref ide_variant_ref)
+from p"refine.jo" import (is_total_dict refine_active refine_storage representation_type str_set_of str_sets)
+from p"juxtapose.jo" import (juxt_chain_numeric juxt_head_numeric juxt_power juxt_product juxt_text juxt_value_head)
+from p"checker_call_resolve.dewy" import (resolve_fn_call)
+from p"string_domains.jo" import (string_domain_members)
+# Call dispatch uses interned names and indices; services may grow the arenas.
+CDWord:type=int64<overflow='wrap'>
+call_head=(n:CDWord expected:CDWord):>CDWord=>$unsafe {
+    if reflect_fields(n) {call_dispatch_error(1 n 0 0 0 0 0 0 0)}
+    let callee:CDWord=CDWord(nodes.ptr[n].a)
+    if nodes.ptr[callee].name =? int32(id_members) and nodes.ptr[callee].kind =? 'ident' and lookup(id_members) =? 0 {
+        if string_domain_members(n) {return ntype(n)}
+        if reflect_members(n) {return members_array(n expected)}
+    }
+    if id_breakpoint =? 0 {id_breakpoint=intern("$breakpoint")}
+    if nodes.ptr[callee].kind =? 'ident' and CDWord(nodes.ptr[callee].name) =? id_breakpoint and nkids(n) =? 0 {
+        breakpoint_call(n);
+        return check_expr(n expected)
+    }
+    if nodes.ptr[callee].kind =? 'field' {
+        if nodes.ptr[callee].b not=? 0 {reflect_name(callee)}
+        if reflect_active {reflect_member(callee);}
+    }
+    let ck=nodes.ptr[callee].kind
+    if has_flag(n NF_PRIVATE_COORD) and ck =? 'ident' and name_of(CDWord(nodes.ptr[callee].name)) =? "__bcast_index" {
+        loop arg in kids(n) {finish_arg(arg T_INT false)}
+        nodes.ptr[n].aux = 0
+        let function=runtime_fn("__bcast_index")
+        nodes.ptr[n].sym = int32(function)
+        nodes.ptr[n].type = int32(T_INT)
+        return T_INT
+    }
+    -1
+}
+call_typeapply=(n:CDWord expected:CDWord):>CDWord=>$unsafe {
+    let callee:CDWord=CDWord(nodes.ptr[n].a)
+    let args=kids(n)
+    let base:CDWord=CDWord(nodes.ptr[callee].a)
+    let name:CDWord=CDWord(nodes.ptr[base].name)
+    if nodes.ptr[base].kind =? 'ident' and name_of(name) =? "rational" and (lookup(name) =? 0 or syms.ptr[lookup(name)].kind =? 'fns') and dewy_at(nodes.ptr[n].pos) {
+        if bundled_word_rational_type(resolve_type(CDWord(nodes.ptr[callee].c))) {
+            let pos=nodes.ptr[n].pos
+            let field=bc_field(bc_ident("$dewy_rational" pos) "_word_rational" pos)
+            nodes.ptr[n].a = int32(field)
+            return check_expr(n expected)
+        }
+    }
+    if nodes.ptr[base].kind =? 'field' and nkids(callee) =? 1 and args.length =? 1 and dewy_at(nodes.ptr[n].pos) and name =? ci(42 "read") {
+        let r=dewy_byte_read(n callee base args expected)
+        if r not=? 0 {return r}
+    }
+    let s:CDWord=0
+    let mod:CDWord=-1
+    if nodes.ptr[base].kind =? 'ident' {s=lookup(name)}
+    else if nodes.ptr[base].kind =? 'field' {
+        let mt:CDWord=prune(check_expr(CDWord(nodes.ptr[base].a) 0))
+        if types.ptr[mt].kind =? 'module' {
+            mod=CDWord(types.ptr[mt].mod)
+            s=module_lookup(mod name)
+        }
+    }
+    if s not=? 0 and syms.ptr[s].kind =? 'fns' {
+        let targs:array<int64>=[]
+        loop arg in kids(callee) {targs.push(effect_generic_argument(arg))}
+        let saved=call_targs
+        call_targs=targs
+        nodes.ptr[n].a = int32(base)
+        let r=call_by_name(n name mod args expected false)
+        call_targs=saved
+        return r
+    }
+    if (s not=? 0 and (syms.ptr[s].kind =? 'local' or syms.ptr[s].kind =? 'global')) or (nodes.ptr[base].kind not=? 'ident' and mod <? 0) {
+        callee_at=base
+        check_expr(base 0);
+        if tkind(ntype(base)) =? 'polyfn' {
+            let explicit:array<int64>=[]
+            loop arg in kids(callee) {explicit.push(effect_generic_argument(arg))}
+            let saved=call_targs
+            call_targs=explicit
+            let r=value_call(n base args expected)
+            call_targs=saved
+            return r
+        }
+    }
+    let t:CDWord=prune(resolve_type(CDWord(nodes.ptr[callee].c)))
+    if is_int(t) {return conversion(n t args)}
+    if types.ptr[t].kind not=? 'struct_' {call_dispatch_error(2 n 0 callee 0 0 0 0 0)}
+    return struct_ctor(n t CDWord(structs.ptr[CDWord(types.ptr[t].st)].decl) args expected)
+}
+call_ident_special=(n:CDWord expected:CDWord):>CDWord=>$unsafe {
+    let callee:CDWord=CDWord(nodes.ptr[n].a)
+    if has_flag(n NF_JUXT) and juxt_head_numeric(n) {
+        juxt_product(n)
+        return check_expr(n expected)
+    }
+    if has_flag(n NF_JUXT) and CDWord(nodes.ptr[callee].name) =? ci(5 "__dewy_power") and nkids(n) =? 2 and nodes.ptr[kid(n 0)].kind =? 'call' and juxt_chain_numeric(kid(n 0)) {
+        juxt_power(n)
+        return check_expr(n expected)
+    }
+    if id_len =? 0 {id_len=intern("len")}
+    if nkids(n) =? 1 and CDWord(nodes.ptr[callee].name) =? id_len {
+        let at:CDWord=prune(check_expr(kid(n 0) 0))
+        let a0=last_checked
+        set_kid(n 0 a0)
+        if lookup(id_len) =? 0 or syms.ptr[lookup(id_len)].kind =? 'builtin' or decl_in_prelude(CDWord(syms.ptr[lookup(id_len)].decl)) {dewy_len_check(callee false at a0)}
+        if is_soa(at) {return check_soa_method(n a0 CDWord(nodes.ptr[callee].name) [] expected)}
+    }
+    -1
+}
+call_dotname=(n:CDWord expected:CDWord):>CDWord=>$unsafe {
+    let callee:CDWord=CDWord(nodes.ptr[n].a)
+    let args=kids(n)
+    if ide_sentinel not=? 0 and CDWord(nodes.ptr[callee].name) =? ide_sentinel {ide_complete_variants(expected)}
+    let et:CDWord=prune(expected)
+    if expected not=? 0 and types.ptr[et].kind =? 'opt' {et=prune(CDWord(types.ptr[et].elem))}
+    if expected not=? 0 {et=variant_enum(et CDWord(nodes.ptr[callee].name))}
+    if expected =? 0 or types.ptr[et].kind not=? 'enum_' {call_dispatch_error(3 n 0 callee 0 0 0 0 0)}
+    let vi=find_variant(CDWord(types.ptr[et].st) CDWord(nodes.ptr[callee].name))
+    if vi <? 0 {call_dispatch_error(4 n 0 callee 0 0 0 et 0)}
+    if ide_on {ide_variant_ref(nodes.ptr[callee].pos CDWord(nodes.ptr[callee].name) et vi)}
+    return variant_ctor(n et vi args)
+}
+call_member_prepare=(n:CDWord callee:CDWord recv:CDWord @receiver_type:int64 args:array<int64> expected:CDWord):>CDWord=>$unsafe {
+    let rt=receiver_type
+    let fname:CDWord=CDWord(nodes.ptr[callee].name)
+    if refine_active and call_totaldict_member(fname) and is_total_dict(refine_storage(recv 0)) {
+        call_dispatch_error(5 n 0 0 0 0 fname 0 0)
+    }
+    if str_sets.length >? 1 and str_set_of(rt) not=? 0 and not program_fn_named(fname) {
+        coerce(recv T_STR);
+        rt=T_STR
+        receiver_type=rt
+    }
+    if synthetic_copy(rt fname nodes.ptr[n].pos) {
+        nargs_check(n args.length 0 0 ".copy")
+        return check_copy(n recv rt)
+    }
+    if ide_sentinel not=? 0 and fname =? ide_sentinel {ide_complete_members(rt)}
+    let rk=types.ptr[rt].kind
+    if rk =? 'struct_' and dewy_at(nodes.ptr[n].pos) and rt =? console_type() {return dewy_console_call(n name_of(fname) args expected)}
+    -1
+}
+call_member_type=(n:CDWord callee:CDWord rt:CDWord fname:CDWord args:array<int64> expected:CDWord):>CDWord=>$unsafe {
+    let tt:CDWord=prune(CDWord(types.ptr[rt].elem))
+    if tt not=? 0 and types.ptr[tt].kind =? 'enum_' {
+        let vi=find_variant(CDWord(types.ptr[tt].st) fname)
+        if vi <? 0 {call_dispatch_error(6 n 0 callee 0 0 fname 0 tt)}
+        if ide_on {ide_variant_ref(nodes.ptr[callee].pos fname tt vi)}
+        return variant_ctor(n tt vi args)
+    }
+    if tt not=? 0 and types.ptr[tt].kind =? 'struct_' {
+        let j=dewy_type_method(CDWord(structs.ptr[CDWord(types.ptr[tt].st)].decl) fname)
+        if j >=? 0 {return dewy_static_call(n tt j args expected)}
+    }
+    call_type_member_error(callee tt fname)
+}
+call_member_callable=(n:CDWord callee:CDWord recv:CDWord rt:CDWord fname:CDWord args:array<int64> expected:CDWord):>CDWord=>$unsafe {
+    let st=rt
+    if types.ptr[rt].kind =? 'ptr' {st=prune(CDWord(types.ptr[rt].elem))}
+    if types.ptr[st].kind =? 'struct_' {
+        let si:CDWord=CDWord(types.ptr[st].st)
+        check_struct_fields(si)
+        loop i in [0..CDWord(structs.ptr[si].nfields)) {
+            let fi:CDWord=CDWord(structs.ptr[si].fields) + i
+            if CDWord(fields.ptr[fi].name) =? fname and (tkind(CDWord(fields.ptr[fi].type)) =? 'fn_' or tkind(CDWord(fields.ptr[fi].type)) =? 'cfn' or tkind(CDWord(fields.ptr[fi].type)) =? 'polyfn' or tkind(CDWord(fields.ptr[fi].type)) =? 'callable') {
+                if ide_on {ide_field_ref(nodes.ptr[callee].pos fname CDWord(structs.ptr[si].decl) i CDWord(fields.ptr[fi].type))}
+                let method=dewy_method_field(CDWord(fields.ptr[fi].type))
+                if method not=? 0 {return dewy_method_call(n callee method args expected)}
+                callee_at=callee
+                check_expr(callee 0);
+                return value_call(n callee args expected)
+            }
+        }
+    }
+    -1
+}
+call_member_tail=(n:CDWord callee:CDWord recv:CDWord rt:CDWord @member_name:int64 @args:array<int64> expected:CDWord):>CDWord=>$unsafe {
+    let fname=member_name
+    if call_numeric_member(fname) and args.length =? 1 and (is_numeric(rt) or rt =? T_MATH_INT) and dewy_at(nodes.ptr[n].pos) {
+        call_dispatch_error(7 n 0 0 0 0 fname 0 0)
+    }
+    if files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy {
+        if str_sets.length >? 1 {
+            let keyed=method_str_set_key(n recv rt fname @args expected)
+            if keyed not=? 0 {return keyed}
+        }
+        member_name=dewy_member_name(callee rt fname args)
+    }
+    -1
+}
+call_index=(n:CDWord expected:CDWord):>CDWord=>$unsafe {
+    let callee:CDWord=CDWord(nodes.ptr[n].a)
+    let args=kids(n)
+    if nodes.ptr[callee].kind =? 'index' and nodes.ptr[CDWord(nodes.ptr[callee].a)].kind =? 'ident' {
+        let s=lookup(CDWord(nodes.ptr[CDWord(nodes.ptr[callee].a)].name))
+        if s not=? 0 and syms.ptr[s].kind =? 'struct_' {
+            let t=expr_as_type(callee)
+            return struct_ctor(n t CDWord(syms.ptr[s].ref) args expected)
+        }
+        if s not=? 0 and syms.ptr[s].kind =? 'fns' {
+            let targs:array<int64>=[]
+            if nodes.ptr[callee].b not=? 0 {targs.push(expr_as_type(CDWord(nodes.ptr[callee].b)))}
+            else {
+                loop i in [0..nkids(callee)) {targs.push(expr_as_type(kid(callee i)))}
+            }
+            let saved=call_targs
+            call_targs=targs
+            let r=call_by_name(n CDWord(nodes.ptr[CDWord(nodes.ptr[callee].a)].name) -1 args expected false)
+            call_targs=saved
+            return r
+        }
+    }
+    -1
+}
+call_value=(n:CDWord expected:CDWord):>CDWord=>$unsafe {
+    let callee:CDWord=CDWord(nodes.ptr[n].a)
+    let args=kids(n)
+    let head_kind=nodes.ptr[callee].kind
+    if head_kind =? 'call' and juxt_chain_numeric(callee) {
+        juxt_product(n)
+        return check_expr(n expected)
+    }
+    let head_text=if head_kind =? 'call' or head_kind =? 'index' {juxt_text(callee)} else {""}
+    callee_at=callee
+    check_expr(callee 0);
+    if juxt_value_head(n head_kind head_text ntype(last_checked)) {
+        nodes.ptr[n].a = int32(last_checked)
+        juxt_product(n)
+        return check_expr(n expected)
+    }
+    value_call(n callee args expected)
+}
+call_name_early=(n:CDWord name:CDWord mod_scope:CDWord args:array<int64> expected:CDWord ufcs:bool):>CDWord=>$unsafe {
+    if ide_sentinel not=? 0 and name =? ide_sentinel {
+        if ufcs and args.length >? 0 {
+            check_expr(args.ptr[0] 0);
+            ide_complete_members(ntype(args.ptr[0]))
+        }
+        ide_complete_names()
+    }
+    if not ufcs and mod_scope <? 0 and args.length >=? 1 and (name =? id_find or name =? id_rfind or name =? id_index_of or name =? id_chars) and (args.length >=? 2 or name =? id_chars) and files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy and nodes.ptr[args.ptr[0]].kind not=? 'namedarg' {
+        let s=lookup(name)
+        if s not=? 0 and syms.ptr[s].kind =? 'fns' and decl_in_prelude(CDWord(syms.ptr[s].decl)) {
+            let a0=args.ptr[0]
+            if not has_flag(a0 NF_CHECKED) {
+                check_expr(a0 0);
+                add_flag(a0 NF_CHECKED)
+            }
+            let k0=tkind(prune(ntype(a0)))
+            if k0 =? 'str_' and name =? id_chars {return call_by_name(n ci(1 "graphemes") mod_scope args expected false)}
+            if k0 =? 'str_' and name not=? id_index_of and name not=? id_chars {return call_by_name(n call_search_name(name) mod_scope args expected false)}
+            if k0 =? 'array' and name =? id_index_of and args.length =? 2 {return call_by_name(n ci(2 "__dewy_index_of") mod_scope args expected false)}
+        }
+    }
+    if name =? ci(47 "get") and mod_scope <? 0 and args.length =? 2 and nodes.ptr[args.ptr[0]].kind not=? 'namedarg' and nodes.ptr[args.ptr[1]].kind not=? 'namedarg' and dewy_at(nodes.ptr[n].pos) {
+        let a0=args.ptr[0]
+        if not has_flag(a0 NF_CHECKED) {
+            check_expr(a0 0);
+            add_flag(a0 NF_CHECKED)
+        }
+        if tkind(prune(ntype(a0))) =? 'array' or tkind(prune(ntype(a0))) =? 'str_' {
+            let a1=args.ptr[1]
+            if not has_flag(a1 NF_CHECKED) {
+                check_expr(a1 0);
+                add_flag(a1 NF_CHECKED)
+            }
+            if prune(ntype(a1)) =? T_MATH_INT and not is_lit(a1) {coerce(a1 policy_int(T_INT 2 nodes.ptr[n].pos));}
+        }
+    }
+    if not ufcs and mod_scope <? 0 and args.length =? 2 and (name =? ci(3 "__floor_div") or name =? ci(4 "__floor_mod") or name =? ci(5 "__dewy_power") or name =? ci(6 "__dewy_divide")) and (files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy or pos_in_lib(nodes.ptr[n].pos)) {
+        if nodes.ptr[args.ptr[0]].kind not=? 'namedarg' and nodes.ptr[args.ptr[1]].kind not=? 'namedarg' {
+            return dewy_arithmetic_call(n name args expected)
+        }
+    }
+    if not ufcs and mod_scope <? 0 and args.length =? 1 and dewy_quantity_name(name) and nodes.ptr[args.ptr[0]].kind not=? 'namedarg' and files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy {
+        let s=lookup(name)
+        if s not=? 0 and syms.ptr[s].kind =? 'fns' and decl_in_prelude(CDWord(syms.ptr[s].decl)) {
+            let a0=args.ptr[0]
+            check_expr(a0 0);
+            add_flag(a0 NF_CHECKED)
+            let r=dewy_quantity_call(n name a0 expected)
+            if r not=? 0 {return r}
+        }
+    }
+    if name =? ci(28 "abs") and mod_scope <? 0 and args.length =? 1 and dewy_at(nodes.ptr[n].pos) and not program_fn_named(name) {
+        let a=args.ptr[0]
+        if not has_flag(a NF_CHECKED) {
+            check_expr(a 0);
+            add_flag(a NF_CHECKED)
+        }
+        if int_policy(ntype(a)) not=? 0 {return call_by_name(n intern("__dewy_policy_abs") -1 args expected false)}
+        if exact_type(ntype(a) nodes.ptr[n].pos) {
+            let t:CDWord=ntype(a)
+            nodes.ptr[n] = Node[kind = 'intrinsic' pos = nodes.ptr[n].pos aux = int32(int64(IN.fixed_abs)) type = int32(t) flags = int32(NF_CHECKED)]
+            set_list(n [a])
+            return exact_int_result(n)
+        }
+    }
+    -1
+}
+call_name_intrinsic=(n:CDWord ii:CDWord):>CDWord=>$unsafe {
+    if ii >=? 0 and intrinsics.ptr[ii].id =? IN.assert and dewy_at(nodes.ptr[n].pos) and nodes.ptr[n].aux2 not=? int32(RANGE_EXHAUSTION) {return -2}
+    ii
+}
+call_name_array=(n:CDWord name:CDWord mod_scope:CDWord args:array<int64> expected:CDWord ufcs:bool ii:CDWord):>CDWord=>$unsafe {
+    if not intrinsics.ptr[ii].arr {return -1}
+    let a0=args.ptr[0]
+    if not has_flag(a0 NF_CHECKED) {
+        check_expr(a0 0);
+        add_flag(a0 NF_CHECKED)
+    }
+    let t0:CDWord=prune(ntype(a0))
+    if intrinsics.ptr[ii].id =? IN.arrdata and tkind(representation_type(t0)) =? 'array' {t0=representation_type(t0)}
+    if types.ptr[t0].kind =? 'array' or types.ptr[t0].kind =? 'str_' {
+        let own:array<int64>=[]
+        let cm=cur_mod()
+        if (not ufcs or mod_scope <? 0) and cm >=? 0 and not modules.ptr[cm].is_prelude {
+            let all_d:array<int64>=[]
+            call_collect_module(cm name @all_d)
+            loop d in all_d {
+                if not decl_in_prelude(d) and args_fit(d args.length) and takes_seq(d) {own.push(d)}
+            }
+        }
+        if own.length >? 0 {return resolve_fn_call(n name own args expected)}
+        if ide_on {ide_builtin_ref(n name)}
+        return check_intrinsic(n int64(intrinsics.ptr[ii].id) args expected)
+    }
+    if types.ptr[t0].kind =? 'fixed' {
+        if intrinsics.ptr[ii].id not=? IN.len {call_fixed_array_error(n name t0 ii)}
+        if nodes.ptr[a0].kind not=? 'ident' {return check_intrinsic(n int64(IN.len) args expected)}
+        nodes.ptr[n] = Node[kind = 'int_lit' pos = nodes.ptr[n].pos ival = fixed_len(t0) type = int32(T_INT) flags = int32(NF_CHECKED)]
+        return T_INT
+    }
+    -1
+}
+call_name_sym=(n:CDWord name:CDWord mod_scope:CDWord s:CDWord args:array<int64> expected:CDWord hidden_assert:bool @decls:array<int64>):>CDWord=>$unsafe {
+    let sk=syms.ptr[s].kind
+    if ide_on and (sk =? 'struct_' or sk =? 'type_' or sk =? 'enum_') and nodes.ptr[n].a not=? 0 {ide_sym_ref(CDWord(nodes.ptr[n].a) s)}
+    if sk =? 'local' or sk =? 'global' {
+        let vt:CDWord=0
+        if sk =? 'local' {vt=CDWord(locals.ptr[CDWord(syms.ptr[s].ref)].type)}
+        else {
+            ensure_global(CDWord(syms.ptr[s].ref) nodes.ptr[n].pos)
+            vt=CDWord(globals.ptr[CDWord(syms.ptr[s].ref)].type)
+        }
+        if tkind(vt) =? 'fn_' or tkind(vt) =? 'cfn' or tkind(vt) =? 'polyfn' or tkind(vt) =? 'callable' {
+            let callee=mk('ident' nodes.ptr[n].pos)
+            nodes.ptr[callee].name = int32(name)
+            callee_at=callee
+            if mod_scope >=? 0 {
+                check_expr_in_module(callee mod_scope);
+            }
+            else {check_expr(callee 0);}
+            return value_call(n callee args expected)
+        }
+    }
+    else if sk =? 'struct_' {return struct_ctor(n 0 CDWord(syms.ptr[s].ref) args expected)}
+    else if sk =? 'enum_' {
+        let ed:CDWord=CDWord(syms.ptr[s].ref)
+        if nkids2(ed) =? 0 and args.length =? 1 and nodes.ptr[args.ptr[0]].kind not=? 'namedarg' {
+            let et=get_struct_inst(ed [])
+            if simple_enum(et) {return enum_from_int(n et args.ptr[0])}
+        }
+        call_dispatch_error(8 n name 0 0 0 0 0 0)
+    }
+    else if sk =? 'alias_' and not dewy_at(nodes.ptr[n].pos) and nkids2(CDWord(syms.ptr[s].ref)) =? 0 and args.length =? 1 and nodes.ptr[args.ptr[0]].kind not=? 'namedarg' and str_set_of(resolve_alias(CDWord(syms.ptr[s].ref) [] nodes.ptr[n].pos)) not=? 0 {
+        return enum_from_int(n prune(resolve_alias(CDWord(syms.ptr[s].ref) [] nodes.ptr[n].pos)) args.ptr[0])
+    }
+    else if sk =? 'type_' {
+        jo_type_spelling(name s nodes.ptr[n].pos)
+        return conversion(n CDWord(syms.ptr[s].ref) args)
+    }
+    else if sk =? 'fns' and args.length =? 1 and nodes.ptr[args.ptr[0]].kind not=? 'namedarg' and universe.get(name) not=? none {
+        let at:CDWord=prune(check_expr(args.ptr[0] 0))
+        add_flag(args.ptr[0] NF_CHECKED)
+        let fd:array<int64>=[]
+        call_collect_fns(name @fd)
+        let takes=false
+        loop d in fd {
+            let sig=fn_sig(d)
+            if sig.params.length >=? 1 and (sig.generic or can_coerce(args.ptr[0] at sig.params.ptr[0])) {takes=true}
+        }
+        if not takes {return conversion(n CDWord(syms.ptr[universe[name]].ref) args)}
+    }
+    else if sk =? 'fns' and args.length =? 2 and name =? take_name and (prelude.get(name) ?? 0) =? s and pos_in_lib(nodes.ptr[n].pos) {return take_call(n args)}
+    else if sk =? 'fns' and args.length =? 3 and name =? relocate_name and (prelude.get(name) ?? 0) =? s and pos_in_lib(nodes.ptr[n].pos) {return relocate_call(n args)}
+    else if sk =? 'fns' and args.length =? 2 and name =? release_name and (prelude.get(name) ?? 0) =? s and pos_in_lib(nodes.ptr[n].pos) {return release_call(n args expected)}
+    else if sk =? 'const_' or sk =? 'module' {call_dispatch_error(9 n name 0 0 0 0 0 0)}
+    else if sk =? 'builtin' and not hidden_assert {
+        call_collect_fns(name @decls)
+        if decls.length =? 0 {
+            if ide_on {ide_builtin_ref(n name)}
+            return check_intrinsic(n CDWord(syms.ptr[s].ref) args expected)
+        }
+    }
+    -1
+}
+call_name_collect=(n:CDWord name:CDWord mod_scope:CDWord args:array<int64> expected:CDWord ufcs:bool @decls:array<int64>):>CDWord=>$unsafe {
+    surface_hidden.clear()
+    if ufcs {
+        if mod_scope >=? 0 {call_collect_module(mod_scope name @decls)}
+        else {call_collect_fns(name @decls)}
+    }
+    else {call_collect_named(name mod_scope @decls)}
+    if name =? ci(7 "to_int") and mod_scope <? 0 and files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy {
+        let own=false
+        loop d in decls {
+            if not decl_in_prelude(d) {own=true}
+        }
+        if not own {
+            let parser=ci(8 "__mi_parse")
+            if args.length >? 1 {parser=intern("__mi_parse_limited")}
+            if args.length =? 2 and to_int_word_limit(args.ptr[1]) {parser=intern("__mi_parse_word")}
+            demand_name(parser)
+            decls=[]
+            call_collect_fns(parser @decls)
+            return resolve_fn_call(n parser decls args expected)
+        }
+    }
+    let indexed=name =? ci(9 "[]") or name =? ci(10 "[]=")
+    if (ufcs or indexed) and args.length >? 0 {
+        if indexed and not has_flag(args.ptr[0] NF_CHECKED) {
+            check_expr(args.ptr[0] 0);
+            add_flag(args.ptr[0] NF_CHECKED)
+        }
+        let tms=method_modules(ntype(args.ptr[0]))
+        loop tm in tms {call_collect_module(tm name @decls)}
+        let tm=if tms.length >? 0 {tms[0]} else {-1}
+        if indexed {
+            let protocol_text=if name =? ci(11 "[]") {"__index__"} else {"__setindex__"}
+            let protocol=intern(protocol_text)
+            if mod_scope >=? 0 {call_collect_module(mod_scope protocol @decls)}
+            else {call_collect_fns(protocol @decls)}
+            if tm >=? 0 {call_collect_module(tm protocol @decls)}
+        }
+    }
+    if surface_hidden.length >? 0 {dewy_surface_check(n name)}
+    -1
+}

@@ -1,3 +1,4 @@
+use 'checker_call_services.dewy'
 use 'checker_call_convert.dewy'
 use 'checker_call_resolve.dewy'
 use 'checker_call_cost.dewy'
@@ -3518,195 +3519,14 @@ path_literal_module = (n: int, callee: int, args: int[]) -> int:
 # call_by_name's services (checker_expr.dewy runs it). Each answers a type, or -1 to go on.
 # The core library's rewrites by name: completion, searches, saturating get, Dewy arithmetic,
 # quantities and abs.
-call_name_early = (n: int, name: int, mod_scope: int, args: int[], expected: int, ufcs: bool) -> int:
-    if ide_sentinel != 0 and name == ide_sentinel:
-        if ufcs and args.len() > 0:
-            check_expr(args[0], 0)
-            ide_complete_members(ntype(args[0]))
-        ide_complete_names()
-    # (`find(text part)` and `index_of(xs x)` written as calls: Dewy's searches, giving Missing)
-    if not ufcs and mod_scope < 0 and args.len() >= 1 and (name == id_find or name == id_rfind or name == id_index_of or name == id_chars) and (args.len() >= 2 or name == id_chars) and files[pos_file(nodes[n].pos)].is_dewy and nodes[args[0]].kind != .namedarg:
-        s = lookup(name)
-        if s != 0 and syms[s].kind == .fns and decl_in_prelude(int(syms[s].decl)):
-            a0 = args[0]
-            if not has_flag(a0, NF_CHECKED):
-                check_expr(a0, 0)
-                add_flag(a0, NF_CHECKED)
-            k0 = tkind(prune(ntype(a0)))
-            if k0 == .str_ and name == id_chars: return call_by_name(n, ci(1, "graphemes"), mod_scope, args, expected, false)
-            if k0 == .str_ and name != id_index_of and name != id_chars: return call_by_name(n, intern("__dewy_{name_of(name)}"), mod_scope, args, expected, false)
-            if k0 == .array and name == id_index_of and args.len() == 2: return call_by_name(n, ci(2, "__dewy_index_of"), mod_scope, args, expected, false)
-    # (`xs.get(i)` of an `int` index: one past the word range is past an end too, so the index
-    # saturates into a word rather than narrowing with a proof, as a text repeat count does)
-    if name == ci(47, "get") and mod_scope < 0 and args.len() == 2 and nodes[args[0]].kind != .namedarg and nodes[args[1]].kind != .namedarg and dewy_at(nodes[n].pos):
-        a0 = args[0]
-        if not has_flag(a0, NF_CHECKED):
-            check_expr(a0, 0)
-            add_flag(a0, NF_CHECKED)
-        if tkind(prune(ntype(a0))) == .array or tkind(prune(ntype(a0))) == .str_:
-            a1 = args[1]
-            if not has_flag(a1, NF_CHECKED):
-                check_expr(a1, 0)
-                add_flag(a1, NF_CHECKED)
-            if prune(ntype(a1)) == T_MATH_INT and not is_lit(a1): coerce(a1, policy_int(T_INT, 2, nodes[n].pos))
-    if not ufcs and mod_scope < 0 and args.len() == 2 and (name == ci(3, "__floor_div") or name == ci(4, "__floor_mod") or name == ci(5, "__dewy_power") or name == ci(6, "__dewy_divide")) and (files[pos_file(nodes[n].pos)].is_dewy or pos_in_lib(nodes[n].pos)):
-        if nodes[args[0]].kind != .namedarg and nodes[args[1]].kind != .namedarg:
-            return dewy_arithmetic_call(n, name, args, expected)
-    if not ufcs and mod_scope < 0 and args.len() == 1 and dewy_quantity_name(name) and nodes[args[0]].kind != .namedarg and files[pos_file(nodes[n].pos)].is_dewy:
-        s = lookup(name)
-        if s != 0 and syms[s].kind == .fns and decl_in_prelude(int(syms[s].decl)):
-            a0 = args[0]
-            check_expr(a0, 0)
-            add_flag(a0, NF_CHECKED)
-            r = dewy_quantity_call(n, name, a0, expected)
-            if r != 0: return r
-    if name == ci(28, "abs") and mod_scope < 0 and args.len() == 1 and dewy_at(nodes[n].pos) and not program_fn_named(name):
-        a = args[0]
-        if not has_flag(a, NF_CHECKED):
-            check_expr(a, 0)
-            add_flag(a, NF_CHECKED)
-        if int_policy(ntype(a)) != 0: return call_by_name(n, intern("__dewy_policy_abs"), -1, args, expected, false)
-        if exact_type(ntype(a), nodes[n].pos):
-            t = ntype(a)
-            nodes[n] = Node(kind = .intrinsic, pos = nodes[n].pos, aux = i32(int(IN.fixed_abs)), type = i32(t), flags = i32(NF_CHECKED))
-            set_list(n, [a])
-            return exact_int_result(n)
-    -1
 # Intrinsic ii, or -2 for the implementation language's `assert` written in Dewy (Dewy's
 # assertions are directives). O(1).
-call_name_intrinsic = (n: int, ii: int) -> int:
-    if ii >= 0 and intrinsics[ii].id == .assert and dewy_at(nodes[n].pos) and nodes[n].aux2 != i32(RANGE_EXHAUSTION): return -2
-    ii
 # An array intrinsic ii (len, push, ...) of an array, text or fixed-size receiver.
-call_name_array = (n: int, name: int, mod_scope: int, args: int[], expected: int, ufcs: bool, ii: int) -> int:
-    if not intrinsics[ii].arr: return -1
-    a0 = args[0]
-    if not has_flag(a0, NF_CHECKED):
-        check_expr(a0, 0)
-        add_flag(a0, NF_CHECKED)
-    t0 = prune(ntype(a0))
-    # Raw element access cannot resize an array; retain element contracts below.
-    if intrinsics[ii].id == .arrdata and tkind(representation_type(t0)) == .array: t0 = representation_type(t0)
-    if types[t0].kind == .array or types[t0].kind == .str_:
-        # (the program's own insert(t: mut T[], k) and the like, taking that many arguments: its)
-        own: int[]
-        cm = cur_mod()
-        if (not ufcs or mod_scope < 0) and cm >= 0 and not modules[cm].is_prelude:
-            all_d: int[]
-            collect_module(cm, name, &all_d)
-            loop d in all_d:
-                if not decl_in_prelude(d) and args_fit(d, args.len()) and takes_seq(d): own.push(d)
-        if own.len() > 0: return resolve_fn_call(n, name, own, args, expected)
-        if ide_on: ide_builtin_ref(n, name)
-        return check_intrinsic(n, int(intrinsics[ii].id), args, expected)
-    if types[t0].kind == .fixed:
-        if intrinsics[ii].id == .arrdata: fatal(nodes[n].pos, "data() is for a growable array T[]; a fixed-size one is stored in place: `&x` is where its first element is (what C wants)")
-        if intrinsics[ii].id != .len:
-            member = name
-            if ide_dewy_alt(name) != 0: member = ide_dewy_alt(name)
-            fatal(nodes[n].pos, jd(nodes[n].pos, "{name_of(name)}() needs a growable array T[]; {dt(t0)} has a fixed size", "`.{name_of(member)}` needs a growable array (`array<T>`); {dt(t0)} has a fixed length"))
-        # Calls and indexed receivers still evaluate, even though the
-        # resulting length is statically known.
-        if nodes[a0].kind != .ident: return check_intrinsic(n, int(IN.len), args, expected)
-        # (the size is part of the type)
-        nodes[n] = Node(kind = .int_lit, pos = nodes[n].pos, ival = fixed_len(t0), type = i32(T_INT), flags = i32(NF_CHECKED))
-        return T_INT
-    -1
 # The name's symbol s when it is not a function family: a variable holding a function, a
 # constructor, a conversion, the library's take/relocate/release; a builtin's functions
 # are collected into decls. -1 to go on to the families.
-call_name_sym = (n: int, name: int, mod_scope: int, s: int, args: int[], expected: int, hidden_assert: bool, decls: mut int[]) -> int:
-    sk = syms[s].kind
-    if ide_on and (sk == .struct_ or sk == .type_ or sk == .enum_) and nodes[n].a != 0: ide_sym_ref(int(nodes[n].a), s)
-    if sk == .local or sk == .global:
-        vt = 0
-        if sk == .local: vt = int(locals[int(syms[s].ref)].type)
-        else:
-            ensure_global(int(syms[s].ref), nodes[n].pos)
-            vt = int(globals[int(syms[s].ref)].type)
-        if tkind(vt) == .fn_ or tkind(vt) == .cfn or tkind(vt) == .polyfn or tkind(vt) == .callable:
-            callee = mk(.ident, nodes[n].pos)
-            nodes[callee].name = i32(name)
-            callee_at = callee
-            if mod_scope >= 0:
-                check_expr_in_module(callee, mod_scope)
-            else: check_expr(callee, 0)
-            return value_call(n, callee, args, expected)
-    else if sk == .struct_: return struct_ctor(n, 0, int(syms[s].ref), args, expected)
-    else if sk == .enum_:
-        ed = int(syms[s].ref)
-        if nkids2(ed) == 0 and args.len() == 1 and nodes[args[0]].kind != .namedarg:
-            et = get_struct_inst(ed, [])
-            if simple_enum(et): return enum_from_int(n, et, args[0])
-        fatal(nodes[n].pos, "use {name_of(name)}.variant(...) to construct an enum")
-    # (Phase(2) in Sloppy, Phase a Dewy union of string literals: its member at that
-    # position, as for a Sloppy enum, so Sloppy code takes a Dewy enumeration as its own)
-    else if sk == .alias_ and not dewy_at(nodes[n].pos) and nkids2(int(syms[s].ref)) == 0 and args.len() == 1 and nodes[args[0]].kind != .namedarg and str_set_of(resolve_alias(int(syms[s].ref), [], nodes[n].pos)) != 0:
-        return enum_from_int(n, prune(resolve_alias(int(syms[s].ref), [], nodes[n].pos)), args[0])
-    else if sk == .type_:
-        jo_type_spelling(name, s, nodes[n].pos)
-        return conversion(n, int(syms[s].ref), args)
-    else if sk == .fns and args.len() == 1 and nodes[args[0]].kind != .namedarg and universe.get(name) != none:
-        # (str(5) beside the program's str = (b: Big) -> str: the type's conversion, when
-        # no function of the name takes the value)
-        at = prune(check_expr(args[0], 0))
-        add_flag(args[0], NF_CHECKED)
-        fd: int[]
-        collect_fns(name, &fd)
-        takes = false
-        loop d in fd:
-            sig = fn_sig(d)
-            if sig.params.len() >= 1 and (sig.generic or can_coerce(args[0], at, sig.params[0])): takes = true
-        if not takes: return conversion(n, int(syms[universe[name]].ref), args)
-    else if sk == .fns and args.len() == 2 and name == take_name and (prelude.get(name) ?? 0) == s and pos_in_lib(nodes[n].pos): return take_call(n, args)
-    else if sk == .fns and args.len() == 3 and name == relocate_name and (prelude.get(name) ?? 0) == s and pos_in_lib(nodes[n].pos): return relocate_call(n, args)
-    else if sk == .fns and args.len() == 2 and name == release_name and (prelude.get(name) ?? 0) == s and pos_in_lib(nodes[n].pos): return release_call(n, args, expected)
-    else if sk == .const_ or sk == .module: fatal(nodes[n].pos, "'{name_of(name)}' is not a function")
-    else if sk == .builtin and not hidden_assert:
-        collect_fns(name, &decls)
-        if decls.len() == 0:
-            if ide_on: ide_builtin_ref(n, name)
-            return check_intrinsic(n, int(syms[s].ref), args, expected)
-    -1
 # The families a name calls: a method's receiver modules, index operators' protocols, and
 # Dewy's to_int parsers; hidden Dewy names are reported. -1 to go on and pick from decls.
-call_name_collect = (n: int, name: int, mod_scope: int, args: int[], expected: int, ufcs: bool, decls: mut int[]) -> int:
-    surface_hidden.clear()
-    if ufcs:
-        if mod_scope >= 0: collect_module(mod_scope, name, &decls)
-        else: collect_fns(name, &decls)
-    else: collect_named(name, mod_scope, &decls)
-    if name == ci(7, "to_int") and mod_scope < 0 and files[pos_file(nodes[n].pos)].is_dewy:
-        own = false
-        loop d in decls:
-            if not decl_in_prelude(d): own = true
-        if not own:
-            parser = ci(8, "__mi_parse")
-            # (to_int(text max_digits=n): the limit as given; plain to_int keeps its one parameter)
-            if args.len() > 1: parser = intern("__mi_parse_limited")
-            # (a literal limit of at most 18 digits: the result is always a word)
-            if args.len() == 2 and to_int_word_limit(args[1]): parser = intern("__mi_parse_word")
-            demand_name(parser)
-            decls = []
-            collect_fns(parser, &decls)
-            return resolve_fn_call(n, parser, decls, args, expected)
-    # Index operators belong to the receiver's module, just like methods. A
-    # selected import of a container type must also make its operators usable.
-    indexed = name == ci(9, "[]") or name == ci(10, "[]=")
-    if (ufcs or indexed) and args.len() > 0:
-        if indexed and not has_flag(args[0], NF_CHECKED):
-            check_expr(args[0], 0)
-            add_flag(args[0], NF_CHECKED)
-        tms = method_modules(ntype(args[0]))
-        loop tm in tms: collect_module(tm, name, &decls)
-        tm = if tms.len() > 0: tms[0] else: -1
-        if indexed:
-            protocol = intern(if name == ci(11, "[]"): "__index__" else: "__setindex__")
-            if mod_scope >= 0: collect_module(mod_scope, protocol, &decls)
-            else: collect_fns(protocol, &decls)
-            if tm >= 0: collect_module(tm, protocol, &decls)
-    if surface_hidden.len() > 0: dewy_surface_check(n, name)
-    -1
 # No function of the name: an intrinsic, else the diagnostics. Never returns otherwise.
 call_name_unknown = (n: int, name: int, mod_scope: int, args: int[], expected: int, ufcs: bool, ii: int, hidden_assert: bool) -> int:
     if ii >= 0 and not intrinsics[ii].arr:
@@ -5232,216 +5052,16 @@ spawn_value_error = (pos: int):
 # check_call (checker_expr.dewy) services, by the callee's kind. Every call head first:
 # fields(T) misused, members(U), $breakpoint, a member's reflection, the generated
 # coordinate helper; -1 goes on.
-call_head = (n: int, expected: int) -> int:
-    if reflect_fields(n): fatal(nodes[n].pos, "fields(T) is a compile-time sequence; iterate over it with `loop field in fields(T)`")
-    callee = int(nodes[n].a)
-    if nodes[callee].name == i32(id_members) and nodes[callee].kind == .ident and lookup(id_members) == 0:
-        if string_domain_members(n): return ntype(n)
-        if reflect_members(n): return members_array(n, expected)
-    if id_breakpoint == 0: id_breakpoint = intern("$breakpoint")
-    if nodes[callee].kind == .ident and int(nodes[callee].name) == id_breakpoint and nkids(n) == 0:
-        breakpoint_call(n)
-        return check_expr(n, expected)
-    if nodes[callee].kind == .field:
-        if nodes[callee].b != 0: reflect_name(callee)
-        if reflect_active: reflect_member(callee)
-    ck = nodes[callee].kind
-    # Generated coordinates rely on the bundled helper's word arithmetic.
-    # A user function with the same spelling must never replace that helper.
-    if has_flag(n, NF_PRIVATE_COORD) and ck == .ident and name_of(int(nodes[callee].name)) == "__bcast_index":
-        loop arg in kids(n): finish_arg(arg, T_INT, false)
-        nodes[n].aux = 0
-        nodes[n].sym = i32(runtime_fn("__bcast_index"))
-        nodes[n].type = i32(T_INT)
-        return T_INT
-    -1
 # `f[T](...)`, `rational<int64>(x)`, `T<...>(...)`: a type application called.
-call_typeapply = (n: int, expected: int) -> int:
-    callee = int(nodes[n].a)
-    args = kids(n)
-    base = int(nodes[callee].a)
-    name = int(nodes[base].name)
-    # `rational<int64>(value)`: the explicit narrowing, with Overflow in its result (the
-    # builtin type's conversion, unless a type shadows its name)
-    if nodes[base].kind == .ident and name_of(name) == "rational" and (lookup(name) == 0 or syms[lookup(name)].kind == .fns) and dewy_at(nodes[n].pos):
-        if bundled_word_rational_type(resolve_type(int(nodes[callee].c))):
-            pos = nodes[n].pos
-            nodes[n].a = i32(bc_field(bc_ident("$dewy_rational", pos), "_word_rational", pos))
-            return check_expr(n, expected)
-    if nodes[base].kind == .field and nkids(callee) == 1 and args.len() == 1 and dewy_at(nodes[n].pos) and name == ci(42, "read"):
-        r = dewy_byte_read(n, callee, base, args, expected)
-        if r != 0: return r
-    s = 0
-    mod = -1
-    if nodes[base].kind == .ident: s = lookup(name)
-    else if nodes[base].kind == .field:
-        mt = prune(check_expr(int(nodes[base].a), 0))
-        if types[mt].kind == .module:
-            mod = int(types[mt].mod)
-            s = module_lookup(mod, name)
-    if s != 0 and syms[s].kind == .fns:
-        targs: int[]
-        loop arg in kids(callee): targs.push(effect_generic_argument(arg))
-        saved = call_targs
-        call_targs = targs
-        nodes[n].a = i32(base)
-        r = call_by_name(n, name, mod, args, expected, false)
-        call_targs = saved
-        return r
-    if (s != 0 and (syms[s].kind == .local or syms[s].kind == .global)) or (nodes[base].kind != .ident and mod < 0):
-        callee_at = base
-        check_expr(base, 0)
-        if tkind(ntype(base)) == .polyfn:
-            explicit: int[]
-            loop arg in kids(callee): explicit.push(effect_generic_argument(arg))
-            saved = call_targs
-            call_targs = explicit
-            r = value_call(n, base, args, expected)
-            call_targs = saved
-            return r
-    t = prune(resolve_type(int(nodes[callee].c)))
-    if is_int(t): return conversion(n, t, args)
-    if types[t].kind != .struct_: fatal(nodes[callee].pos, "this type does not have a record constructor")
-    return struct_ctor(n, t, int(structs[int(types[t].st)].decl), args, expected)
 # A named call's juxtaposed products and len of a soa array; -1 goes on to the name.
-call_ident_special = (n: int, expected: int) -> int:
-    callee = int(nodes[n].a)
-    if has_flag(n, NF_JUXT) and juxt_head_numeric(n):
-        juxt_product(n)
-        return check_expr(n, expected)
-    if has_flag(n, NF_JUXT) and int(nodes[callee].name) == ci(5, "__dewy_power") and nkids(n) == 2 and nodes[kid(n, 0)].kind == .call and juxt_chain_numeric(kid(n, 0)):
-        juxt_power(n)
-        return check_expr(n, expected)
-    if id_len == 0: id_len = intern("len")
-    if nkids(n) == 1 and int(nodes[callee].name) == id_len:
-        # len(ps) for a soa array
-        at = prune(check_expr(kid(n, 0), 0))
-        a0 = last_checked
-        set_kid(n, 0, a0)
-        if lookup(id_len) == 0 or syms[lookup(id_len)].kind == .builtin or decl_in_prelude(int(syms[lookup(id_len)].decl)): dewy_len_check(callee, false, at, a0)
-        if is_soa(at): return check_soa_method(n, a0, int(nodes[callee].name), [], expected)
-    -1
 # `.variant(...)`: an enum variant made.
-call_dotname = (n: int, expected: int) -> int:
-    callee = int(nodes[n].a)
-    args = kids(n)
-    if ide_sentinel != 0 and int(nodes[callee].name) == ide_sentinel: ide_complete_variants(expected)
-    et = prune(expected)
-    if expected != 0 and types[et].kind == .opt: et = prune(int(types[et].elem))
-    if expected != 0: et = variant_enum(et, int(nodes[callee].name))
-    if expected == 0 or types[et].kind != .enum_: fatal(nodes[callee].pos, "cannot infer the enum type for '.{name_of(int(nodes[callee].name))}'")
-    vi = find_variant(int(types[et].st), int(nodes[callee].name))
-    if vi < 0: fatal(nodes[callee].pos, "{dt(et)} has no variant '{name_of(int(nodes[callee].name))}'{variant_hint_for(et, name_of(int(nodes[callee].name)))}")
-    if ide_on: ide_variant_ref(nodes[callee].pos, int(nodes[callee].name), et, vi)
-    return variant_ctor(n, et, vi, args)
 # `x.f(...)`: a module function, a type's variant or method, a function field, or
 # uniform call syntax.
-call_member_prepare = (n: int, callee: int, recv: int, receiver_type: mut int, args: int[], expected: int) -> int:
-    rt = receiver_type
-    fname = int(nodes[callee].name)
-    if refine_active and (name_of(fname) == "pop" or name_of(fname) == "clear") and is_total_dict(refine_storage(recv, 0)):
-        fatal(nodes[n].pos, "a totaldict keeps an entry for every key: it has no {name_of(fname)}")
-    if str_sets.len() > 1 and str_set_of(rt) != 0 and not program_fn_named(fname):
-        # (a string set's methods are its text's)
-        coerce(recv, T_STR)
-        rt = T_STR
-        receiver_type = rt
-    if synthetic_copy(rt, fname, nodes[n].pos):
-        nargs_check(n, args.len(), 0, 0, ".copy")
-        return check_copy(n, recv, rt)
-    if ide_sentinel != 0 and fname == ide_sentinel: ide_complete_members(rt)
-    rk = types[rt].kind
-    if rk == .struct_ and dewy_at(nodes[n].pos) and rt == console_type(): return dewy_console_call(n, name_of(fname), args, expected)
-    -1
 
-call_member_type = (n: int, callee: int, rt: int, fname: int, args: int[], expected: int) -> int:
-    tt = prune(int(types[rt].elem))
-    if tt != 0 and types[tt].kind == .enum_:
-        vi = find_variant(int(types[tt].st), fname)
-        if vi < 0: fatal(nodes[callee].pos, "{dt(tt)} has no variant '{name_of(fname)}'{variant_hint_for(tt, name_of(fname))}")
-        if ide_on: ide_variant_ref(nodes[callee].pos, fname, tt, vi)
-        return variant_ctor(n, tt, vi, args)
-    if tt != 0 and types[tt].kind == .struct_:
-        j = dewy_type_method(int(structs[int(types[tt].st)].decl), fname)
-        if j >= 0: return dewy_static_call(n, tt, j, args, expected)
-    why = ""
-    fd: int[]
-    collect_fns(fname, &fd)
-    if fd.len() > 0:
-        why = " (functions are not kept in types: call it as `{name_of(fname)}(x)` or `x.{name_of(fname)}()`)"
-        # (Date.now(): a function of nothing is called by itself)
-        loop d in fd:
-            if nkids(d) == 0: why = " (functions are not kept in types: call it by itself, `{name_of(fname)}()`)"
-        if name_of(fname) == "now" and dt(tt) == "Date": why = " (`unix_time()` is the seconds since 1970, a moment to save and compare; `now()` gives today's Date; `time()` the seconds the program has run, for timing)"
-    fatal(nodes[callee].pos, "type {dt(tt)} has no member '{name_of(fname)}'{why}")
-    0 # unreachable; the C seed requires an explicit result after fatal
 
-call_member_callable = (n: int, callee: int, recv: int, rt: int, fname: int, args: int[], expected: int) -> int:
-    st = rt
-    if types[rt].kind == .ptr: st = prune(int(types[rt].elem))
-    if types[st].kind == .struct_:
-        si = int(types[st].st)
-        check_struct_fields(si)
-        loop i in [0..int(structs[si].nfields)):
-            fi = int(structs[si].fields) + i
-            if int(fields[fi].name) == fname and (tkind(int(fields[fi].type)) == .fn_ or tkind(int(fields[fi].type)) == .cfn or tkind(int(fields[fi].type)) == .polyfn or tkind(int(fields[fi].type)) == .callable):
-                if ide_on: ide_field_ref(nodes[callee].pos, fname, int(structs[si].decl), i, int(fields[fi].type))
-                method = dewy_method_field(int(fields[fi].type))
-                if method != 0: return dewy_method_call(n, callee, method, args, expected)
-                callee_at = callee
-                check_expr(callee, 0)
-                return value_call(n, callee, args, expected)
-    -1
 
-call_member_tail = (n: int, callee: int, recv: int, rt: int, member_name: mut int, args: mut int[], expected: int) -> int:
-    fname = member_name
-    if (name_of(fname) == "wrap" or name_of(fname) == "bitcast") and args.len() == 1 and (is_numeric(rt) or rt == T_MATH_INT) and dewy_at(nodes[n].pos):
-        fatal(nodes[n].pos, "numbers have no `.{name_of(fname)}` member: `uint8<overflow='wrap'>(x)` keeps the low bits of an integer, and `x transmute float64` reads its bits as another type of the same width")
-    if files[pos_file(nodes[n].pos)].is_dewy:
-        if str_sets.len() > 1:
-            keyed = method_str_set_key(n, recv, rt, fname, args, expected)
-            if keyed != 0: return keyed
-        member_name = dewy_member_name(callee, rt, fname, args)
-    -1
 # `T[...](...)` and `f[T](...)`; -1 goes on to the value call.
-call_index = (n: int, expected: int) -> int:
-    callee = int(nodes[n].a)
-    args = kids(n)
-    if nodes[callee].kind == .index and nodes[int(nodes[callee].a)].kind == .ident:
-        s = lookup(int(nodes[int(nodes[callee].a)].name))
-        if s != 0 and syms[s].kind == .struct_:
-            t = expr_as_type(callee)
-            return struct_ctor(n, t, int(syms[s].ref), args, expected)
-        if s != 0 and syms[s].kind == .fns:
-            # f[T](args): a generic function with its type arguments given
-            targs: int[]
-            if nodes[callee].b != 0: targs.push(expr_as_type(int(nodes[callee].b)))
-            else:
-                loop i in [0..nkids(callee)): targs.push(expr_as_type(kid(callee, i)))
-            saved = call_targs
-            call_targs = targs
-            r = call_by_name(n, int(nodes[int(nodes[callee].a)].name), -1, args, expected, false)
-            call_targs = saved
-            return r
-    -1
 # A callee that is a value: a juxtaposed product, or the value called.
-call_value = (n: int, expected: int) -> int:
-    callee = int(nodes[n].a)
-    args = kids(n)
-    head_kind = nodes[callee].kind
-    if head_kind == .call and juxt_chain_numeric(callee):
-        juxt_product(n)
-        return check_expr(n, expected)
-    # (spelled before checking rewrites it, for the diagnostic of a call or index result)
-    head_text = if head_kind == .call or head_kind == .index: juxt_text(callee) else: ""
-    callee_at = callee
-    check_expr(callee, 0)
-    if juxt_value_head(n, head_kind, head_text, ntype(last_checked)):
-        nodes[n].a = i32(last_checked)
-        juxt_product(n)
-        return check_expr(n, expected)
-    value_call(n, callee, args, expected)
-
 # resolve_by_types' choices (a formatting function for each value type a string puts in, say):
 # by name, module and settled argument types, kept while the name's stamp stands (ml_stamp).
 # A hit makes the same instance request and leaves the same hidden spellings as the search.
@@ -11466,3 +11086,46 @@ call_argument_error = (kind: int, a: int, pt: int):
     if kind == 2: fatal(nodes[a].pos, "a mutable argument needs `@` at the call site")
     if kind == 3: fatal(nodes[a].pos, "`@` passes a place, but this parameter takes a value: drop the `@`")
     if kind == 4: fatal(nodes[a].pos, "{jd(nodes[a].pos, "`mut`", "an `@`")} argument must have type {dt(pt)} exactly, found {dt(ntype(a))}")
+
+call_type_member_error = (callee: int, tt: int, fname: int) -> int:
+    why = ""
+    fd: int[]
+    collect_fns(fname, &fd)
+    if fd.len() > 0:
+        why = " (functions are not kept in types: call it as `{name_of(fname)}(x)` or `x.{name_of(fname)}()`)"
+        # (Date.now(): a function of nothing is called by itself)
+        loop d in fd:
+            if nkids(d) == 0: why = " (functions are not kept in types: call it by itself, `{name_of(fname)}()`)"
+        if name_of(fname) == "now" and dt(tt) == "Date": why = " (`unix_time()` is the seconds since 1970, a moment to save and compare; `now()` gives today's Date; `time()` the seconds the program has run, for timing)"
+    fatal(nodes[callee].pos, "type {dt(tt)} has no member '{name_of(fname)}'{why}")
+    0 # unreachable; the C seed requires an explicit result after fatal
+
+call_fixed_array_error = (n: int, name: int, t0: int, ii: int):
+    if intrinsics[ii].id == .arrdata: fatal(nodes[n].pos, "data() is for a growable array T[]; a fixed-size one is stored in place: `&x` is where its first element is (what C wants)")
+    if intrinsics[ii].id != .len:
+        member = name
+        if ide_dewy_alt(name) != 0: member = ide_dewy_alt(name)
+        fatal(nodes[n].pos, jd(nodes[n].pos, "{name_of(name)}() needs a growable array T[]; {dt(t0)} has a fixed size", "`.{name_of(member)}` needs a growable array (`array<T>`); {dt(t0)} has a fixed length"))
+
+call_dispatch_error = (kind: int, n: int, name: int, callee: int, expected: int, rt: int, fname: int, et: int, tt: int):
+    if kind == 1: fatal(nodes[n].pos, "fields(T) is a compile-time sequence; iterate over it with `loop field in fields(T)`")
+    if kind == 2: fatal(nodes[callee].pos, "this type does not have a record constructor")
+    if kind == 3: fatal(nodes[callee].pos, "cannot infer the enum type for '.{name_of(int(nodes[callee].name))}'")
+    if kind == 4: fatal(nodes[callee].pos, "{dt(et)} has no variant '{name_of(int(nodes[callee].name))}'{variant_hint_for(et, name_of(int(nodes[callee].name)))}")
+    if kind == 5: fatal(nodes[n].pos, "a totaldict keeps an entry for every key: it has no {name_of(fname)}")
+    if kind == 6: fatal(nodes[callee].pos, "{dt(tt)} has no variant '{name_of(fname)}'{variant_hint_for(tt, name_of(fname))}")
+    if kind == 7: fatal(nodes[n].pos, "numbers have no `.{name_of(fname)}` member: `uint8<overflow='wrap'>(x)` keeps the low bits of an integer, and `x transmute float64` reads its bits as another type of the same width")
+    if kind == 8: fatal(nodes[n].pos, "use {name_of(name)}.variant(...) to construct an enum")
+    if kind == 9: fatal(nodes[n].pos, "'{name_of(name)}' is not a function")
+
+call_search_name = (name: int) -> int: intern("__dewy_{name_of(name)}")
+
+call_totaldict_member = (name: int) -> bool: name_of(name) == "pop" or name_of(name) == "clear"
+
+call_numeric_member = (name: int) -> bool: name_of(name) == "wrap" or name_of(name) == "bitcast"
+
+call_collect_module = (mod: int, name: int, out: mut int[]): collect_module(mod, name, &out)
+
+call_collect_named = (name: int, mod: int, out: mut int[]): collect_named(name, mod, &out)
+
+call_collect_fns = (name: int, out: mut int[]): collect_fns(name, &out)

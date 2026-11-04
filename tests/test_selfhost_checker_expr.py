@@ -506,6 +506,9 @@ arg_finish_rest=(a:int64 pt:int64 mutable:bool):>void=>call_finish_double(a pt m
 '''
 JO_DOUBLES['checker_call_convert.jo'] = "use 'expr.jo'\narg_finish_rest = (a: int, pt: int, mutable: bool): call_finish_double(a, pt, mutable)\n"
 
+from tests.selfhost_call_service_double import isolate_call_services
+isolate_call_services(JO_DOUBLES)
+
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_checker_expr_twins(compiler, tmp_path, release):  # noqa: F811
