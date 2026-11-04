@@ -1,0 +1,564 @@
+$runtime_checks
+from p"check.jo" import (LF_ALIAS LF_MUTPARAM fns lib_dir locals)
+from p"ir.jo" import (M_SIGNED VI VS e_addi e_bin e_call2 e_fconst e_iconst e_load e_mov e_slot e_store e_un e_zero emit mulh_ok vreg)
+from p"ast.jo" import (NF_U64 has_flag kid nkids nodes)
+from p"ir_types.dewy" import (Op)
+from p"types.jo" import (T_INT T_MAT4 T_MATH_INT T_NEVER T_U64 is_int is_managed layout prune structs tkind tsize types variants)
+from p"checker_tokens.dewy" import (Tok)
+from p"checked_eval.dewy" import (cx_token_values)
+from p"lower_storage.dewy" import (V els endc iff load_val new_temp store_val vc vt_of)
+from p"lower_views.dewy" import (plain_read)
+from p"lower.jo" import (HK VC_AGG VC_FLT VC_VOID Val e_call_nr0 e_daddr lf_helper ro_starts rodata rt)
+from p"exact.jo" import (exact_has_node)
+from p"util.jo" import (files intern pos_file)
+from p"fused.jo" import (fused_on fz_note_raw)
+from p"expr.jo" import (integer_constant ntype)
+from p"math_lower.jo" import (math_call math_word)
+from p"member_lowering.jo" import (member_lower_active member_lower_word)
+from p"member_replay.jo" import (member_templates)
+from p"units.jo" import (quantity_base)
+from p"refine.jo" import (ref_storage_contract refine_active)
+from p"lower_analysis.dewy" import (same_var)
+from p"facts.jo" import (word_integer_value)
+# Scalar arithmetic, constants and range lowering; state stays in lower.jo.
+LCWord:type=int64<overflow='wrap'>
+LCUWord:type=uint64<overflow='wrap'>
+push_i64=(@b:array<uint8> v:LCWord):>void=>$unsafe {
+    loop i in [0..8) {b.push(uint8<overflow='wrap'>((v >> (8 * i)) & 255));}
+}
+positive_modulus=(n:LCWord):>int64=>$unsafe {
+    if nodes.ptr[n].kind =? 'binary' and nodes.ptr[n].aux =? 0 and nodes.ptr[n].op =? int32<overflow='wrap'>(62) and nodes.ptr[n].aux2 =? -1 {
+        let [known divisor]=integer_constant(LCWord(nodes.ptr[n].b))
+        return if known and divisor >? 0 {divisor} else {0}
+    }
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nkids(n) not=? 2 {return 0}
+    let f:LCWord=LCWord(nodes.ptr[n].sym)
+    if prune(LCWord(fns.ptr[f].ret)) not=? T_INT and prune(LCWord(fns.ptr[f].ret)) not=? T_MATH_INT {return 0}
+    let d:LCWord=LCWord(fns.ptr[f].decl)
+    if d =? 0 {return 0}
+    let masked=nodes.ptr[d].name =? intern("__floor_mod_pow2")
+    if nodes.ptr[d].name not=? intern("__floor_mod") and not masked {return 0}
+    if files.ptr[pos_file(nodes.ptr[d].pos)].path not=? "{lib_dir}/std/date.jo" and files.ptr[pos_file(nodes.ptr[d].pos)].path not=? "{lib_dir}/math_int.jo" {return 0}
+    let b=kid(n 1)
+    if nodes.ptr[b].kind not=? 'int_lit' or has_flag(b NF_U64) or nodes.ptr[b].ival <=? 0 {return 0}
+    if masked {
+        if nodes.ptr[b].ival =? 9223372036854775807 {return 0}
+        return nodes.ptr[b].ival + 1
+    }
+    return nodes.ptr[b].ival
+}
+byte_offset_plain=(n:LCWord):>bool=>$unsafe {
+    if plain_read(n) {return true}
+    let k=nodes.ptr[n].kind
+    if k =? 'binary' and nodes.ptr[n].aux =? 0 and is_int(ntype(n)) {return byte_offset_plain(LCWord(nodes.ptr[n].a)) and byte_offset_plain(LCWord(nodes.ptr[n].b))}
+    if k =? 'conv' and nodes.ptr[n].aux =? int32<overflow='wrap'>(1) {return byte_offset_plain(LCWord(nodes.ptr[n].a))}
+    return false
+}
+pat_int=(a0:LCWord):>[bool int64]=>$unsafe {
+    let a=a0
+    if nodes.ptr[a].kind =? 'conv' {a=LCWord(nodes.ptr[a].a)}
+    if nodes.ptr[a].kind =? 'int_lit' {return [true nodes.ptr[a].ival]}
+    return [false 0]
+}
+match_arm_constant=(arm:LCWord):>[bool int64]=>$unsafe {
+    let body:LCWord=LCWord(nodes.ptr[arm].b)
+    if nodes.ptr[body].aux =? 0 or nkids(body) not=? 1 {return [false 0]}
+    let statement=kid(body 0)
+    if nodes.ptr[statement].kind not=? 'exprstmt' {return [false 0]}
+    let value:LCWord=LCWord(nodes.ptr[statement].a)
+    let kind=nodes.ptr[value].kind
+    if kind =? 'int_lit' or kind =? 'bool_lit' {return [true nodes.ptr[value].ival]}
+    if kind =? 'dotname' {
+        let t=prune(ntype(value))
+        let si:LCWord=LCWord(types.ptr[t].st)
+        if structs.ptr[si].simple_enum {return [true variants.ptr[LCWord(structs.ptr[si].variants) + LCWord(nodes.ptr[value].aux)].value]}
+    }
+    return [false 0]
+}
+gen_match_lookup=(m:LCWord st:LCWord rs:LCWord rtp:LCWord vals:array<int64> arms:array<int64> wild:LCWord lo:LCWord span:LCWord):>bool=>$unsafe {
+    if exact_has_node(m) or wild <? 0 {return false}
+    # Arbitrary-precision int results aren't plain words.
+    if quantity_base(prune(rtp)) =? T_MATH_INT {return false}
+    let result_kind=types.ptr[prune(rtp)].kind
+    if result_kind not=? 'int_' and result_kind not=? 'bool_' and result_kind not=? 'enum_' {return false}
+    if result_kind =? 'enum_' and not structs.ptr[LCWord(types.ptr[prune(rtp)].st)].simple_enum {return false}
+    let results:array<int64>=[]
+    let low:LCWord=0
+    let high:LCWord=0
+    loop i in [0..nkids(m)) {
+        let [ok value]=match_arm_constant(kid(m i))
+        if not ok {return false}
+        results.push(value);
+        if value <? low {low=value}
+        if value >? high {high=value}
+    }
+    let width:LCWord=8
+    let signed=low <? 0
+    if low >=? 0 {
+        if high <=? 255 {width=1}
+        else if high <=? 65535 {width=2}
+        else if high <=? 4294967295 {width=4}
+    }
+    else {
+        if low >=? -128 and high <=? 127 {width=1}
+        else if low >=? -32768 and high <=? 32767 {width=2}
+        else if low >=? -2147483648 and high <=? 2147483647 {width=4}
+    }
+    let fallback=results.ptr[wild]
+    let table:array<int64>=fill(fallback span)
+    # Earlier arms win, including an earlier wildcard.
+    let j=vals.length - 1
+    loop j >=? 0 {
+        if arms.ptr[j] <? wild {table.ptr[vals.ptr[j] - lo] = results.ptr[arms.ptr[j]];}
+        j -= 1;
+    }
+    loop rodata.length % width not=? 0 {rodata.push(0);}
+    let offset=rodata.length
+    ro_starts.push(offset);
+    loop value in table {
+        loop byte in [0..width) {rodata.push(uint8<overflow='wrap'>((value >> (8 * byte)) & 255));}
+    }
+    if fused_on {fz_note_raw(offset width);}
+    let ha=e_slot(LCWord(locals.ptr[LCWord(nodes.ptr[m].sym)].offset))
+    let x=if types.ptr[st].kind =? 'enum_' {e_load(VI ha 0 4)} else {load_val(st ha 0)}
+    let index=e_bin('sub' VI x e_iconst(lo))
+    let result=vreg(VI)
+    e_mov(result e_iconst(fallback));
+    iff(e_bin('ltu' VI index e_iconst(span)));
+    let address=e_bin('add' VI e_daddr(offset) e_bin('mul' VI index e_iconst(width)))
+    e_mov(result e_load(VI address 0 width | (if signed {M_SIGNED} else {0})));
+    endc();
+    store_val(rtp e_slot(rs) 0 result);
+    return true
+}
+gen_eq=(t:LCWord a:LCWord b:LCWord):>int64=>$unsafe {
+    return e_call2(lf_helper(HK.eq prune(t) 0) a b VI)
+}
+int_op=(op:Tok sg:bool):>Op=>$unsafe {
+    match op {
+        <'plus'> => {return 'add'}
+        <'minus'> => {return 'sub'}
+        <'star'> => {return 'mul'}
+        <'slash'> => {
+            if sg {return 'divs'}
+            return 'divu'
+        }
+        <'percent'> => {
+            if sg {return 'rems'}
+            return 'remu'
+        }
+        <'amp'> => {return 'and_'}
+        <'pipe'> => {return 'or_'}
+        <'caret'> => {return 'xor'}
+        <'shl'> => {return 'shl'}
+        <'shr'> => {
+            if sg {return 'shrs'}
+            return 'shru'
+        }
+        <'eq'> => {return 'eq'}
+        <'ne'> => {return 'ne'}
+        <'lt'> => {
+            if sg {return 'lts'}
+            return 'ltu'
+        }
+        <'le'> => {
+            if sg {return 'les'}
+            return 'leu'
+        }
+        <'gt'> => {
+            if sg {return 'gts'}
+            return 'gtu'
+        }
+        <'ge'> => {
+            if sg {return 'ges'}
+            return 'geu'
+        }
+        _ => {return 'nop'}
+    }
+}
+float_op=(op:Tok):>Op=>$unsafe {
+    match op {
+        <'plus'> => {return 'fadd'}
+        <'minus'> => {return 'fsub'}
+        <'star'> => {return 'fmul'}
+        <'slash'> => {return 'fdiv'}
+        <'eq'> => {return 'feq'}
+        <'ne'> => {return 'fne'}
+        <'lt'> => {return 'flt'}
+        <'le'> => {return 'fle'}
+        <'gt'> => {return 'fgt'}
+        <'ge'> => {return 'fge'}
+        _ => {return 'nop'}
+    }
+}
+is_slice=(x:LCWord):>bool=>$unsafe {
+    return nodes.ptr[x].kind =? 'index' and nodes.ptr[x].aux =? 1
+}
+math_int_guard=(bad:LCWord):>void=>$unsafe {
+    iff(bad);
+    e_call_nr0(rt("__int_overflow") -1);
+    endc();
+}
+byte_eq_type=(t:LCWord):>bool=>$unsafe {
+    if tkind(t) not=? 'array' {return false}
+    let et=prune(LCWord(types.ptr[t].elem))
+    return (types.ptr[et].kind =? 'int_' and et not=? T_MATH_INT) or types.ptr[et].kind =? 'bool_'
+}
+text_source=(n:LCWord):>int64=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if (k =? 'conv' or k =? 'cast') and tkind(ntype(n)) =? 'array' and tkind(ntype(LCWord(nodes.ptr[n].a))) =? 'str_' {return LCWord(nodes.ptr[n].a)}
+    return n
+}
+fixed_mul_high=(a:LCWord b:LCWord):>int64=>$unsafe {
+    if mulh_ok {return e_bin('mulhu' VI a b)}
+    let mask=e_iconst(4294967295)
+    let shift=e_iconst(32)
+    let al=e_bin('and_' VI a mask); let ah=e_bin('shru' VI a shift)
+    let bl=e_bin('and_' VI b mask); let bh=e_bin('shru' VI b shift)
+    let low=e_bin('mul' VI al bl)
+    let cross=e_bin('add' VI e_bin('mul' VI ah bl) e_bin('shru' VI low shift))
+    let next=e_bin('add' VI e_bin('mul' VI al bh) e_bin('and_' VI cross mask))
+    return e_bin('add' VI e_bin('mul' VI ah bh) e_bin('add' VI e_bin('shru' VI cross shift) e_bin('shru' VI next shift)))
+}
+saturate_binary=(op:Tok t:LCWord a:LCWord b:LCWord):>int64=>$unsafe {
+    let signed=types.ptr[t].sign
+    let bits:LCWord=LCWord(types.ptr[t].bits)
+    let hi:LCWord=if bits =? 64 {-1} else {(1 << bits) - 1}
+    let lo:LCWord=0
+    if signed {
+        hi=LCWord(LCUWord(hi) >> 1)
+        lo=-hi - 1
+    }
+    let value=e_bin(int_op(op signed) VI a b)
+    let bad=e_iconst(0)
+    let negative=e_iconst(0)
+    if signed {
+        if op =? 'plus' {
+            bad=e_bin('lts' VI e_bin('and_' VI e_bin('xor' VI a value) e_bin('xor' VI b value)) e_iconst(0))
+            negative=e_bin('lts' VI a e_iconst(0))
+        }
+        else if op =? 'minus' {
+            bad=e_bin('lts' VI e_bin('and_' VI e_bin('xor' VI a b) e_bin('xor' VI a value)) e_iconst(0))
+            negative=e_bin('lts' VI a e_iconst(0))
+        }
+        else {
+            let high=if mulh_ok {e_bin('mulhs' VI a b)} else {fixed_mul_high(a b)}
+            if not mulh_ok {
+                high=e_bin('sub' VI high e_bin('and_' VI e_bin('shrs' VI a e_iconst(63)) b))
+                high=e_bin('sub' VI high e_bin('and_' VI e_bin('shrs' VI b e_iconst(63)) a))
+            }
+            bad=e_bin('ne' VI high e_bin('shrs' VI value e_iconst(63)))
+            negative=e_bin('lts' VI e_bin('xor' VI a b) e_iconst(0))
+        }
+    }
+    else {
+        if op =? 'plus' {bad=e_bin('ltu' VI value a)}
+        else if op =? 'minus' {
+            bad=e_bin('ltu' VI a b)
+            negative=e_iconst(1)
+        }
+        else {
+            let high=fixed_mul_high(a b)
+            bad=e_bin('ne' VI high e_iconst(0))
+        }
+    }
+    let out=vreg(VI)
+    e_mov(out value);
+    iff(bad);
+    iff(negative);
+    e_mov(out e_iconst(lo));
+    els();
+    e_mov(out e_iconst(hi));
+    endc();
+    els();
+    if signed {
+        iff(e_bin('lts' VI value e_iconst(lo)));
+        e_mov(out e_iconst(lo));
+        endc();
+    }
+    iff(e_bin((if signed {Op.gts} else {Op.gtu}) VI value e_iconst(hi)));
+    e_mov(out e_iconst(hi));
+    endc();
+    endc();
+    return out
+}
+saturate_shift=(t:LCWord a:LCWord count:LCWord):>int64=>$unsafe {
+    let signed=types.ptr[t].sign
+    let bits:LCWord=LCWord(types.ptr[t].bits)
+    let hi:LCWord=if bits =? 64 {-1} else {(1 << bits) - 1}
+    let lo:LCWord=0
+    if signed {
+        hi=LCWord(LCUWord(hi) >> 1)
+        lo=-hi - 1
+    }
+    let out=vreg(VI)
+    let endpoint=vreg(VI)
+    e_mov(endpoint e_iconst(hi));
+    if signed {
+        iff(e_bin('lts' VI a e_iconst(0)));
+        e_mov(endpoint e_iconst(lo));
+        endc();
+    }
+    e_mov(out e_iconst(0));
+    iff(e_bin('ne' VI a e_iconst(0)));
+    iff(e_bin('geu' VI count e_iconst(64)));
+    e_mov(out endpoint);
+    els();
+    let shifted=e_bin('shl' VI a count)
+    let restored=e_bin((if signed {Op.shrs} else {Op.shru}) VI shifted count)
+    iff(e_bin('ne' VI a restored));
+    e_mov(out endpoint);
+    els();
+    e_mov(out saturate_binary('plus' t shifted e_iconst(0)));
+    endc();
+    endc();
+    endc();
+    return out
+}
+wide_shift=(op:Tok sg:bool va:LCWord vb:LCWord count:LCWord):>int64=>$unsafe {
+    let k=shift_count_bound(count)
+    if k >=? 64 {
+        if op =? 'shr' and sg {return e_bin('shrs' VI va e_iconst(63))}
+        return e_iconst(0)
+    }
+    if k >=? 0 {return e_bin(int_op(op sg) VI va vb)}
+    # ((count >> 6) - 1) >> 63: all ones exactly when count < 64, unsigned
+    let within=e_bin('shrs' VI e_addi(e_bin('shru' VI vb e_iconst(6)) -1) e_iconst(63))
+    if op =? 'shr' and sg {
+        let beyond=e_bin('and_' VI e_un('not_' VI within) e_iconst(63))
+        return e_bin('shrs' VI va e_bin('or_' VI vb beyond))
+    }
+    return e_bin('and_' VI e_bin(int_op(op sg) VI va vb) within)
+}
+shift_count_bound=(n:LCWord):>int64=>$unsafe {
+    loop nodes.ptr[n].kind =? 'conv' {n=LCWord(nodes.ptr[n].a)}
+    let k=nodes.ptr[n].kind
+    if k =? 'int_lit' {return if nodes.ptr[n].ival <? 0 {64} else {min(nodes.ptr[n].ival 64)}}
+    if k =? 'binary' and (cx_token_values.ptr[LCWord(nodes.ptr[n].op)]) =? 'amp' {
+        let a=shift_count_bound(LCWord(nodes.ptr[n].a))
+        let b=shift_count_bound(LCWord(nodes.ptr[n].b))
+        if nodes.ptr[LCWord(nodes.ptr[n].b)].kind =? 'int_lit' and b >=? 0 and b <? 64 {return b}
+        if nodes.ptr[LCWord(nodes.ptr[n].a)].kind =? 'int_lit' and a >=? 0 and a <? 64 {return a}
+    }
+    return -1
+}
+sdiv_wrap=(op:Tok va:LCWord vb:LCWord t:LCWord):>int64=>$unsafe {
+    if tsize(t) <? 8 {return e_bin(int_op(op true) VI va vb)}
+    let d=vreg(VI)
+    iff(e_bin('eq' VI vb e_iconst(-1)));
+    if op =? 'slash' {e_mov(d e_un('neg' VI va));}
+    else {e_mov(d e_iconst(0));}
+    els();
+    e_mov(d e_bin(int_op(op true) VI va vb));
+    endc();
+    return d
+}
+vec_comps=(t:LCWord):>int64=>$unsafe {
+    if prune(t) =? T_MAT4 {return 16}
+    return LCWord(types.ptr[prune(t)].bits)
+}
+f2i_i32=(x:LCWord):>int64=>$unsafe {
+    let d=vreg(VI)
+    emit('f2i' VS d x 0 0 0);
+    iff(e_bin('lts' VI d e_iconst(-2147483647 - 1)));
+    e_mov(d e_iconst(-2147483647 - 1));
+    endc();
+    iff(e_bin('gts' VI d e_iconst(2147483647)));
+    e_mov(d e_iconst(2147483647));
+    endc();
+    return d
+}
+never_after=(n:LCWord):>Val=>$unsafe {
+    let t=prune(ntype(n))
+    if t =? T_NEVER or vc(t) =? VC_VOID {return V(-1 false)}
+    return never_value(t)
+}
+never_value=(t:LCWord):>Val=>$unsafe {
+    if vc(t) =? VC_AGG {
+        let s=new_temp(t)
+        let d=e_slot(s)
+        e_zero(d tsize(t));
+        return Val[d true s]
+    }
+    if vc(t) =? VC_FLT {return V(e_fconst(0.0 vt_of(t)) false)}
+    return V(e_iconst(0) false)
+}
+gen_value_int_lit=(e:LCWord):>Val=>$unsafe {
+    let t=prune(ntype(e))
+    if quantity_base(t) =? T_MATH_INT {
+        if has_flag(e NF_U64) and nodes.ptr[e].ival <? 0 {return math_call("__mi_unsigned" [e_iconst(nodes.ptr[e].ival)])}
+        return math_word(e_iconst(nodes.ptr[e].ival))
+    }
+    if vc(t) =? VC_FLT {return V(e_fconst(float64(nodes.ptr[e].ival) vt_of(t)) false)}
+    return V(e_iconst(nodes.ptr[e].ival) false)
+}
+gen_value_float_lit=(e:LCWord):>Val=>$unsafe {
+    let t=prune(ntype(e))
+    return V(e_fconst(nodes.ptr[e].fval vt_of(t)) false)
+}
+gen_value_none_lit=(e:LCWord):>Val=>$unsafe {
+    let t=prune(ntype(e))
+    if vc(t) not=? VC_AGG {return V(e_iconst(0) false)}
+    let s=new_temp(t)
+    let d=e_slot(s)
+    e_zero(d tsize(t));
+    return Val[d true s]
+}
+gen_value_dotname=(e:LCWord):>Val=>$unsafe {
+    let t=prune(ntype(e))
+    let si:LCWord=LCWord(types.ptr[t].st)
+    layout(t);
+    if structs.ptr[si].simple_enum {
+        let value=variants.ptr[LCWord(structs.ptr[si].variants) + LCWord(nodes.ptr[e].aux)].value
+        if member_lower_active >=? 0 and member_templates.ptr[member_lower_active].positions.has(nodes.ptr[e].pos) {return V(member_lower_word(e value) false)}
+        return V(e_iconst(value) false)
+    }
+    let s=new_temp(t)
+    let d=e_slot(s)
+    e_zero(d tsize(t));
+    e_store(d 0 e_iconst(LCWord(nodes.ptr[e].aux)) 4);
+    return Val[d true s]
+}
+is_plain_ctor=(e:LCWord):>bool=>$unsafe {
+    if refine_active and ref_storage_contract(ntype(e)) {return false}
+    if nodes.ptr[e].kind not=? 'call' or nodes.ptr[e].aux not=? 2 {return false}
+    let t=prune(ntype(e))
+    if types.ptr[t].kind not=? 'struct_' {return false}
+    loop i in [0..nkids(e)) {
+        let a=kid(e i)
+        if a not=? 0 and not is_plain_expr(a) {return false}
+        # (a value that could hold the array being pushed to is read before it grows: xs.push(S(xs)))
+        if a not=? 0 and is_managed(ntype(a)) and types.ptr[prune(ntype(a))].kind not=? 'str_' {return false}
+    }
+    return true
+}
+is_plain_expr=(e:LCWord):>bool=>$unsafe {
+    let k=nodes.ptr[e].kind
+    if k =? 'int_lit' or k =? 'float_lit' or k =? 'bool_lit' or k =? 'str_lit' or k =? 'null_lit' or k =? 'dotname' {return nodes.ptr[e].nlist =? 0}
+    if k =? 'ident' {return nodes.ptr[e].aux =? int32<overflow='wrap'>(1) or nodes.ptr[e].aux =? int32<overflow='wrap'>(2) or nodes.ptr[e].aux =? int32<overflow='wrap'>(6)}
+    if k =? 'conv' or k =? 'unary' or k =? 'not_' {return is_plain_expr(LCWord(nodes.ptr[e].a))}
+    # arithmetic and reads cannot touch the array being pushed to (only calls could)
+    if k =? 'binary' or k =? 'and_' or k =? 'or_' {return nodes.ptr[e].aux =? 0 and is_plain_expr(LCWord(nodes.ptr[e].a)) and is_plain_expr(LCWord(nodes.ptr[e].b))}
+    if k =? 'field' {return nodes.ptr[e].aux >=? 0 and is_plain_expr(LCWord(nodes.ptr[e].a)) and types.ptr[prune(ntype(LCWord(nodes.ptr[e].a)))].kind =? 'struct_'}
+    return false
+}
+all_const=(e:LCWord et:LCWord):>bool=>$unsafe {
+    let k=types.ptr[quantity_base(et)].kind
+    if k not=? 'int_' and k not=? 'float_' and k not=? 'bool_' {return false}
+    loop i in [0..nkids(e)) {
+        let item=kid(e i)
+        if quantity_base(et) =? T_MATH_INT and (has_flag(item NF_U64) or nodes.ptr[item].ival <? -4611686018427387904 or nodes.ptr[item].ival >? 4611686018427387903) {return false}
+        let ck=nodes.ptr[item].kind
+        if ck not=? 'int_lit' and ck not=? 'float_lit' and ck not=? 'bool_lit' {return false}
+    }
+    return true
+}
+const_array=(e:LCWord et:LCWord):>int64=>$unsafe {
+    loop rodata.length % 8 not=? 0 {rodata.push(0);}
+    let o=rodata.length
+    ro_starts.push(o);
+    let n=nkids(e)
+    let sz=tsize(et)
+    push_i64(@rodata -1);
+    push_i64(@rodata n);
+    push_i64(@rodata n);
+    loop i in [0..n) {
+        let c=kid(e i)
+        let bits:LCWord=0
+        if nodes.ptr[c].kind =? 'float_lit' {
+            if sz =? 4 {bits=LCWord(f32_bits(float32(nodes.ptr[c].fval)))}
+            else {bits=LCWord(f64_bits(nodes.ptr[c].fval))}
+        }
+        else {
+            bits=nodes.ptr[c].ival
+            if quantity_base(et) =? T_MATH_INT {bits=bits << 1}
+        }
+        loop b in [0..sz) {rodata.push(if b >=? 8 {uint8<overflow='wrap'>(0)} else {uint8<overflow='wrap'>((bits >> (8 * b)) & 255)});}
+    }
+    if fused_on {fz_note_raw(o 8);}
+    return o
+}
+same_range_local=(a:LCWord b:LCWord):>bool=>$unsafe {
+    if nodes.ptr[a].kind not=? 'ident' or nodes.ptr[b].kind not=? 'ident' {return false}
+    if nodes.ptr[a].aux not=? int32<overflow='wrap'>(1) or not same_var(a b) {return false}
+    return LCWord(locals.ptr[LCWord(nodes.ptr[a].sym)].flags) & (LF_ALIAS | LF_MUTPARAM) =? 0
+}
+same_range_read=(a:LCWord b:LCWord):>bool=>$unsafe {
+    if same_range_local(a b) {return true}
+    if nodes.ptr[a].kind not=? 'index' or nodes.ptr[b].kind not=? 'index' or nodes.ptr[a].aux not=? 0 or nodes.ptr[b].aux not=? 0 {return false}
+    let x:LCWord=LCWord(nodes.ptr[a].a)
+    let y:LCWord=LCWord(nodes.ptr[b].a)
+    if not same_range_local(x y) {return false}
+    let kind=tkind(ntype(x))
+    if kind not=? 'array' and kind not=? 'fixed' {return false}
+    let i:LCWord=LCWord(nodes.ptr[a].b)
+    let j:LCWord=LCWord(nodes.ptr[b].b)
+    if i =? 0 or j =? 0 {return false}
+    if same_range_local(i j) {return true}
+    return nodes.ptr[i].kind =? 'int_lit' and nodes.ptr[j].kind =? 'int_lit' and nodes.ptr[i].ival =? nodes.ptr[j].ival
+}
+range_cmp=(e:LCWord):>[int64 Tok int64]=>$unsafe {
+    if nodes.ptr[e].kind not=? 'binary' or nodes.ptr[e].aux not=? 0 {return [0 'eq' 0]}
+    let op=cx_token_values.ptr[LCWord(nodes.ptr[e].op)]
+    if op not=? 'lt' and op not=? 'le' and op not=? 'gt' and op not=? 'ge' {return [0 'eq' 0]}
+    let a=word_integer_value(LCWord(nodes.ptr[e].a))
+    let b=word_integer_value(LCWord(nodes.ptr[e].b))
+    if nodes.ptr[a].kind =? 'int_lit' {
+        let tmp=a
+        a=b
+        b=tmp
+        if op =? 'lt' {op='gt'}
+        else if op =? 'le' {op='ge'}
+        else if op =? 'gt' {op='lt'}
+        else {op='le'}
+    }
+    if nodes.ptr[b].kind not=? 'int_lit' or has_flag(b NF_U64) and nodes.ptr[b].ival <? 0 {return [0 'eq' 0]}
+    let at=prune(ntype(a))
+    let bt=prune(ntype(b))
+    if not is_int(at) or not is_int(bt) or at =? T_U64 or bt =? T_U64 {return [0 'eq' 0]}
+    if not same_range_read(a a) {return [0 'eq' 0]}
+    return [a op nodes.ptr[b].ival]
+}
+range_tail=(e:LCWord):>int64=>$unsafe {
+    let k=nodes.ptr[e].kind
+    if k not=? 'and_' and k not=? 'or_' {return e}
+    let left:LCWord=LCWord(nodes.ptr[e].a)
+    let right:LCWord=LCWord(nodes.ptr[e].b)
+    if nodes.ptr[left].kind not=? k or nodes.ptr[right].kind not=? 'binary' {return e}
+    let a=range_cmp(LCWord(nodes.ptr[left].b))
+    if a[0] =? 0 {return e}
+    let b=range_cmp(right)
+    if b[0] =? 0 or not same_range_read(a[0] b[0]) {return e}
+    let pair=nodes.length
+    nodes.push(nodes.ptr[e]);
+    nodes.ptr[pair].a = nodes.ptr[left].b;
+    let head=nodes.length
+    nodes.push(nodes.ptr[e]);
+    nodes.ptr[head].a = nodes.ptr[left].a;
+    nodes.ptr[head].b = int32<overflow='wrap'>(pair);
+    return head
+}
+negate_cmp=(op:Op):>Op=>$unsafe {
+    match op {
+        <'eq'> => {return 'ne'}
+        <'ne'> => {return 'eq'}
+        <'lts'> => {return 'ges'}
+        <'les'> => {return 'gts'}
+        <'gts'> => {return 'les'}
+        <'ges'> => {return 'lts'}
+        <'ltu'> => {return 'geu'}
+        <'leu'> => {return 'gtu'}
+        <'gtu'> => {return 'leu'}
+        <'geu'> => {return 'ltu'}
+        _ => {return 'nop'}
+    }
+}
+stepped_done=(up:LCWord ctr:LCWord endv:LCWord inclusive:bool signed:bool):>int64=>$unsafe {
+    let above=if signed {Op.ges} else {Op.geu}
+    let below=if signed {Op.les} else {Op.leu}
+    if inclusive {
+        above=if signed {Op.gts} else {Op.gtu}
+        below=if signed {Op.lts} else {Op.ltu}
+    }
+    return e_bin('or_' VI e_bin('and_' VI up e_bin(above VI ctr endv)) e_bin('and_' VI e_bin('xor' VI up e_iconst(1)) e_bin(below VI ctr endv)))
+}

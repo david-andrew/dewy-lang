@@ -1,0 +1,523 @@
+use 'lower_views.dewy'
+use 'checker_state.dewy'
+# Frozen recursive lowering from lower.jo.
+use 'check.jo'
+use 'ir.jo'
+use 'ast.jo'
+use 'ir_types.dewy'
+use 'types.jo'
+use 'checker_tokens.dewy'
+use 'lower_storage.dewy'
+use 'lower.jo'
+use 'exact.jo'
+use 'util.jo'
+use 'fused.jo'
+use 'expr.jo'
+use 'math_lower.jo'
+use 'member_lowering.jo'
+use 'member_replay.jo'
+use 'units.jo'
+use 'refine.jo'
+use 'lower_analysis.dewy'
+use 'facts.jo'
+
+push_i64 = (b: mut u8[], v: int):
+    loop i in [0..8): b.push(u8((v >> (8 * i)) & 255))
+
+positive_modulus = (n: int) -> int:
+    if nodes[n].kind == .binary and nodes[n].aux == 0 and nodes[n].op == i32(int(Tok.percent)) and nodes[n].aux2 == -1:
+        known, divisor = integer_constant(int(nodes[n].b))
+        return if known and divisor > 0: divisor else: 0
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nkids(n) != 2: return 0
+    f = int(nodes[n].sym)
+    if prune(int(fns[f].ret)) != T_INT and prune(int(fns[f].ret)) != T_MATH_INT: return 0
+    d = int(fns[f].decl)
+    if d == 0: return 0
+    masked = nodes[d].name == intern("__floor_mod_pow2")
+    if nodes[d].name != intern("__floor_mod") and not masked: return 0
+    if files[pos_file(nodes[d].pos)].path != lib_dir + "/std/date.jo" and files[pos_file(nodes[d].pos)].path != lib_dir + "/math_int.jo": return 0
+    b = kid(n, 1)
+    if nodes[b].kind != .int_lit or has_flag(b, NF_U64) or nodes[b].ival <= 0: return 0
+    if masked:
+        if nodes[b].ival == 9223372036854775807: return 0
+        return nodes[b].ival + 1
+    nodes[b].ival
+
+byte_offset_plain = (n: int) -> bool:
+    if plain_read(n): return true
+    k = nodes[n].kind
+    if k == .binary and nodes[n].aux == 0 and is_int(ntype(n)): return byte_offset_plain(int(nodes[n].a)) and byte_offset_plain(int(nodes[n].b))
+    if k == .conv and nodes[n].aux == i32(int(CV.int_)): return byte_offset_plain(int(nodes[n].a))
+    false
+
+pat_int = (a0: int) -> (bool, int):
+    a = a0
+    if nodes[a].kind == .conv: a = int(nodes[a].a)
+    if nodes[a].kind == .int_lit: return (true, nodes[a].ival)
+    (false, 0)
+
+match_arm_constant = (arm: int) -> (bool, int):
+    body = int(nodes[arm].b)
+    if nodes[body].aux == 0 or nkids(body) != 1: return (false, 0)
+    statement = kid(body, 0)
+    if nodes[statement].kind != .exprstmt: return (false, 0)
+    value = int(nodes[statement].a)
+    kind = nodes[value].kind
+    if kind == .int_lit or kind == .bool_lit: return (true, nodes[value].ival)
+    if kind == .dotname:
+        t = prune(ntype(value))
+        si = int(types[t].st)
+        if structs[si].simple_enum: return (true, variants[int(structs[si].variants) + int(nodes[value].aux)].value)
+    (false, 0)
+
+gen_match_lookup = (m: int, st: int, rs: int, rtp: int, vals: int[], arms: int[], wild: int, lo: int, span: int) -> bool:
+    if exact_has_node(m) or wild < 0: return false
+    # Arbitrary-precision int results aren't plain words.
+    if quantity_base(prune(rtp)) == T_MATH_INT: return false
+    result_kind = types[prune(rtp)].kind
+    if result_kind != .int_ and result_kind != .bool_ and result_kind != .enum_: return false
+    if result_kind == .enum_ and not structs[int(types[prune(rtp)].st)].simple_enum: return false
+    results: int[]
+    low = 0
+    high = 0
+    loop i in [0..nkids(m)):
+        ok, value = match_arm_constant(kid(m, i))
+        if not ok: return false
+        results.push(value)
+        if value < low: low = value
+        if value > high: high = value
+    width = 8
+    signed = low < 0
+    if low >= 0:
+        if high <= 255: width = 1
+        else if high <= 65535: width = 2
+        else if high <= 4294967295: width = 4
+    else:
+        if low >= -128 and high <= 127: width = 1
+        else if low >= -32768 and high <= 32767: width = 2
+        else if low >= -2147483648 and high <= 2147483647: width = 4
+    fallback = results[wild]
+    table = fill(fallback, span)
+    # Earlier arms win, including an earlier wildcard.
+    j = vals.len() - 1
+    loop j >= 0:
+        if arms[j] < wild: table[vals[j] - lo] = results[arms[j]]
+        j -= 1
+    loop rodata.len() % width != 0: rodata.push(0)
+    offset = rodata.len()
+    ro_starts.push(offset)
+    loop value in table:
+        loop byte in [0..width): rodata.push(u8((value >> (8 * byte)) & 255))
+    if fused_on: fz_note_raw(offset, width)
+    ha = e_slot(int(locals[int(nodes[m].sym)].offset))
+    x = if types[st].kind == .enum_: e_load(VI, ha, 0, 4) else: load_val(st, ha, 0)
+    index = e_bin(.sub, VI, x, e_iconst(lo))
+    result = vreg(VI)
+    e_mov(result, e_iconst(fallback))
+    iff(e_bin(.ltu, VI, index, e_iconst(span)))
+    address = e_bin(.add, VI, e_daddr(offset), e_bin(.mul, VI, index, e_iconst(width)))
+    mode = width
+    if signed: mode = mode | M_SIGNED
+    e_mov(result, e_load(VI, address, 0, mode))
+    endc()
+    store_val(rtp, e_slot(rs), 0, result)
+    true
+
+gen_eq = (t: int, a: int, b: int) -> int: e_call2(lf_helper(.eq, prune(t), 0), a, b, VI)
+
+int_op = (op: Tok, sg: bool) -> Op:
+    match op:
+        plus: .add
+        minus: .sub
+        star: .mul
+        slash:
+            if sg: return .divs
+            .divu
+        percent:
+            if sg: return .rems
+            .remu
+        amp: .and_
+        pipe: .or_
+        caret: .xor
+        shl: .shl
+        shr:
+            if sg: return .shrs
+            .shru
+        eq: .eq
+        ne: .ne
+        lt:
+            if sg: return .lts
+            .ltu
+        le:
+            if sg: return .les
+            .leu
+        gt:
+            if sg: return .gts
+            .gtu
+        ge:
+            if sg: return .ges
+            .geu
+        _: .nop
+
+float_op = (op: Tok) -> Op:
+    match op:
+        plus: .fadd
+        minus: .fsub
+        star: .fmul
+        slash: .fdiv
+        eq: .feq
+        ne: .fne
+        lt: .flt
+        le: .fle
+        gt: .fgt
+        ge: .fge
+        _: .nop
+
+is_slice = (x: int) -> bool: nodes[x].kind == .index and nodes[x].aux == 1
+
+math_int_guard = (bad: int):
+    iff(bad)
+    e_call_nr0(rt("__int_overflow"), -1)
+    endc()
+
+byte_eq_type = (t: int) -> bool:
+    if tkind(t) != .array: return false
+    et = prune(int(types[t].elem))
+    (types[et].kind == .int_ and et != T_MATH_INT) or types[et].kind == .bool_
+
+text_source = (n: int) -> int:
+    k = nodes[n].kind
+    if (k == .conv or k == .cast) and tkind(ntype(n)) == .array and tkind(ntype(int(nodes[n].a))) == .str_: return int(nodes[n].a)
+    n
+
+fixed_mul_high = (a: int, b: int) -> int:
+    if mulh_ok: return e_bin(.mulhu, VI, a, b)
+    mask = e_iconst(4294967295)
+    shift = e_iconst(32)
+    al = e_bin(.and_, VI, a, mask); ah = e_bin(.shru, VI, a, shift)
+    bl = e_bin(.and_, VI, b, mask); bh = e_bin(.shru, VI, b, shift)
+    low = e_bin(.mul, VI, al, bl)
+    cross = e_bin(.add, VI, e_bin(.mul, VI, ah, bl), e_bin(.shru, VI, low, shift))
+    next = e_bin(.add, VI, e_bin(.mul, VI, al, bh), e_bin(.and_, VI, cross, mask))
+    e_bin(.add, VI, e_bin(.mul, VI, ah, bh), e_bin(.add, VI, e_bin(.shru, VI, cross, shift), e_bin(.shru, VI, next, shift)))
+
+saturate_binary = (op: Tok, t: int, a: int, b: int) -> int:
+    signed = types[t].sign
+    bits = int(types[t].bits)
+    hi = if bits == 64: -1 else: (1 << bits) - 1
+    lo = 0
+    if signed:
+        hi = int(u64(hi) >> 1)
+        lo = -hi - 1
+    value = e_bin(int_op(op, signed), VI, a, b)
+    bad = e_iconst(0)
+    negative = e_iconst(0)
+    if signed:
+        if op == .plus:
+            bad = e_bin(.lts, VI, e_bin(.and_, VI, e_bin(.xor, VI, a, value), e_bin(.xor, VI, b, value)), e_iconst(0))
+            negative = e_bin(.lts, VI, a, e_iconst(0))
+        else if op == .minus:
+            bad = e_bin(.lts, VI, e_bin(.and_, VI, e_bin(.xor, VI, a, b), e_bin(.xor, VI, a, value)), e_iconst(0))
+            negative = e_bin(.lts, VI, a, e_iconst(0))
+        else:
+            high = if mulh_ok: e_bin(.mulhs, VI, a, b) else: fixed_mul_high(a, b)
+            if not mulh_ok:
+                high = e_bin(.sub, VI, high, e_bin(.and_, VI, e_bin(.shrs, VI, a, e_iconst(63)), b))
+                high = e_bin(.sub, VI, high, e_bin(.and_, VI, e_bin(.shrs, VI, b, e_iconst(63)), a))
+            bad = e_bin(.ne, VI, high, e_bin(.shrs, VI, value, e_iconst(63)))
+            negative = e_bin(.lts, VI, e_bin(.xor, VI, a, b), e_iconst(0))
+    else:
+        if op == .plus: bad = e_bin(.ltu, VI, value, a)
+        else if op == .minus:
+            bad = e_bin(.ltu, VI, a, b)
+            negative = e_iconst(1)
+        else:
+            high = fixed_mul_high(a, b)
+            bad = e_bin(.ne, VI, high, e_iconst(0))
+    out = vreg(VI)
+    e_mov(out, value)
+    iff(bad)
+    iff(negative)
+    e_mov(out, e_iconst(lo))
+    els()
+    e_mov(out, e_iconst(hi))
+    endc()
+    els()
+    if signed:
+        iff(e_bin(.lts, VI, value, e_iconst(lo)))
+        e_mov(out, e_iconst(lo))
+        endc()
+    comparison = if signed: Op.gts else: Op.gtu
+    iff(e_bin(comparison, VI, value, e_iconst(hi)))
+    e_mov(out, e_iconst(hi))
+    endc()
+    endc()
+    out
+
+saturate_shift = (t: int, a: int, count: int) -> int:
+    signed = types[t].sign
+    bits = int(types[t].bits)
+    hi = if bits == 64: -1 else: (1 << bits) - 1
+    lo = 0
+    if signed:
+        hi = int(u64(hi) >> 1)
+        lo = -hi - 1
+    out = vreg(VI)
+    endpoint = vreg(VI)
+    e_mov(endpoint, e_iconst(hi))
+    if signed:
+        iff(e_bin(.lts, VI, a, e_iconst(0)))
+        e_mov(endpoint, e_iconst(lo))
+        endc()
+    e_mov(out, e_iconst(0))
+    iff(e_bin(.ne, VI, a, e_iconst(0)))
+    iff(e_bin(.geu, VI, count, e_iconst(64)))
+    e_mov(out, endpoint)
+    els()
+    shifted = e_bin(.shl, VI, a, count)
+    shift_op = if signed: Op.shrs else: Op.shru
+    restored = e_bin(shift_op, VI, shifted, count)
+    iff(e_bin(.ne, VI, a, restored))
+    e_mov(out, endpoint)
+    els()
+    e_mov(out, saturate_binary(.plus, t, shifted, e_iconst(0)))
+    endc()
+    endc()
+    endc()
+    out
+
+wide_shift = (op: Tok, sg: bool, va: int, vb: int, count: int) -> int:
+    k = shift_count_bound(count)
+    if k >= 64:
+        if op == .shr and sg: return e_bin(.shrs, VI, va, e_iconst(63))
+        return e_iconst(0)
+    if k >= 0: return e_bin(int_op(op, sg), VI, va, vb)
+    # ((count >> 6) - 1) >> 63: all ones exactly when count < 64, unsigned
+    within = e_bin(.shrs, VI, e_addi(e_bin(.shru, VI, vb, e_iconst(6)), -1), e_iconst(63))
+    if op == .shr and sg:
+        beyond = e_bin(.and_, VI, e_un(.not_, VI, within), e_iconst(63))
+        return e_bin(.shrs, VI, va, e_bin(.or_, VI, vb, beyond))
+    e_bin(.and_, VI, e_bin(int_op(op, sg), VI, va, vb), within)
+
+shift_count_bound = (n: int) -> int:
+    let n = n
+    loop nodes[n].kind == .conv: n = int(nodes[n].a)
+    k = nodes[n].kind
+    if k == .int_lit: return if nodes[n].ival < 0: 64 else: min(nodes[n].ival, 64)
+    if k == .binary and (nodes[n].op as Tok) == .amp:
+        a = shift_count_bound(int(nodes[n].a))
+        b = shift_count_bound(int(nodes[n].b))
+        if nodes[int(nodes[n].b)].kind == .int_lit and b >= 0 and b < 64: return b
+        if nodes[int(nodes[n].a)].kind == .int_lit and a >= 0 and a < 64: return a
+    -1
+
+sdiv_wrap = (op: Tok, va: int, vb: int, t: int) -> int:
+    if tsize(t) < 8: return e_bin(int_op(op, true), VI, va, vb)
+    d = vreg(VI)
+    iff(e_bin(.eq, VI, vb, e_iconst(-1)))
+    if op == .slash: e_mov(d, e_un(.neg, VI, va))
+    else: e_mov(d, e_iconst(0))
+    els()
+    e_mov(d, e_bin(int_op(op, true), VI, va, vb))
+    endc()
+    d
+
+vec_comps = (t: int) -> int:
+    if prune(t) == T_MAT4: return 16
+    int(types[prune(t)].bits)
+
+f2i_i32 = (x: int) -> int:
+    d = vreg(VI)
+    emit(.f2i, VS, d, x, 0, 0, 0)
+    iff(e_bin(.lts, VI, d, e_iconst(-2147483647 - 1)))
+    e_mov(d, e_iconst(-2147483647 - 1))
+    endc()
+    iff(e_bin(.gts, VI, d, e_iconst(2147483647)))
+    e_mov(d, e_iconst(2147483647))
+    endc()
+    d
+
+never_after = (n: int) -> Val:
+    t = prune(ntype(n))
+    if t == T_NEVER or vc(t) == VC_VOID: return V(-1, false)
+    never_value(t)
+
+never_value = (t: int) -> Val:
+    if vc(t) == VC_AGG:
+        s = new_temp(t)
+        d = e_slot(s)
+        e_zero(d, tsize(t))
+        return Val(d, true, s)
+    if vc(t) == VC_FLT: return V(e_fconst(0.0, vt_of(t)), false)
+    V(e_iconst(0), false)
+
+gen_value_int_lit = (e: int) -> Val:
+    t = prune(ntype(e))
+    if quantity_base(t) == T_MATH_INT:
+        if has_flag(e, NF_U64) and nodes[e].ival < 0: return math_call("__mi_unsigned", [e_iconst(nodes[e].ival)])
+        return math_word(e_iconst(nodes[e].ival))
+    if vc(t) == VC_FLT: return V(e_fconst(f64(nodes[e].ival), vt_of(t)), false)
+    return V(e_iconst(nodes[e].ival), false)
+
+gen_value_float_lit = (e: int) -> Val:
+    t = prune(ntype(e))
+    return V(e_fconst(nodes[e].fval, vt_of(t)), false)
+
+gen_value_none_lit = (e: int) -> Val:
+    t = prune(ntype(e))
+    if vc(t) != VC_AGG: return V(e_iconst(0), false)
+    s = new_temp(t)
+    d = e_slot(s)
+    e_zero(d, tsize(t))
+    return Val(d, true, s)
+
+gen_value_dotname = (e: int) -> Val:
+    t = prune(ntype(e))
+    si = int(types[t].st)
+    layout(t)
+    if structs[si].simple_enum:
+        value = variants[int(structs[si].variants) + int(nodes[e].aux)].value
+        if member_lower_active >= 0 and member_templates[member_lower_active].positions.has(nodes[e].pos): return V(member_lower_word(e, value), false)
+        return V(e_iconst(value), false)
+    s = new_temp(t)
+    d = e_slot(s)
+    e_zero(d, tsize(t))
+    e_store(d, 0, e_iconst(int(nodes[e].aux)), 4)
+    return Val(d, true, s)
+
+is_plain_ctor = (e: int) -> bool:
+    if refine_active and ref_storage_contract(ntype(e)): return false
+    if nodes[e].kind != .call or nodes[e].aux != 2: return false
+    t = prune(ntype(e))
+    if types[t].kind != .struct_: return false
+    loop i in [0..nkids(e)):
+        a = kid(e, i)
+        if a != 0 and not is_plain_expr(a): return false
+        # (a value that could hold the array being pushed to is read before it grows: xs.push(S(xs)))
+        if a != 0 and is_managed(ntype(a)) and types[prune(ntype(a))].kind != .str_: return false
+    true
+
+is_plain_expr = (e: int) -> bool:
+    k = nodes[e].kind
+    if k == .int_lit or k == .float_lit or k == .bool_lit or k == .str_lit or k == .null_lit or k == .dotname: return nodes[e].nlist == 0
+    if k == .ident: return nodes[e].aux == i32(int(SK.local)) or nodes[e].aux == i32(int(SK.global)) or nodes[e].aux == i32(int(SK.const_))
+    if k == .conv or k == .unary or k == .not_: return is_plain_expr(int(nodes[e].a))
+    # arithmetic and reads cannot touch the array being pushed to (only calls could)
+    if k == .binary or k == .and_ or k == .or_: return nodes[e].aux == 0 and is_plain_expr(int(nodes[e].a)) and is_plain_expr(int(nodes[e].b))
+    if k == .field: return nodes[e].aux >= 0 and is_plain_expr(int(nodes[e].a)) and types[prune(ntype(int(nodes[e].a)))].kind == .struct_
+    false
+
+all_const = (e: int, et: int) -> bool:
+    k = types[quantity_base(et)].kind
+    if k != .int_ and k != .float_ and k != .bool_: return false
+    loop i in [0..nkids(e)):
+        item = kid(e, i)
+        if quantity_base(et) == T_MATH_INT and (has_flag(item, NF_U64) or nodes[item].ival < -4611686018427387904 or nodes[item].ival > 4611686018427387903): return false
+        ck = nodes[item].kind
+        if ck != .int_lit and ck != .float_lit and ck != .bool_lit: return false
+    true
+
+const_array = (e: int, et: int) -> int:
+    loop rodata.len() % 8 != 0: rodata.push(0)
+    o = rodata.len()
+    ro_starts.push(o)
+    n = nkids(e)
+    sz = tsize(et)
+    push_i64(rodata, -1)
+    push_i64(rodata, n)
+    push_i64(rodata, n)
+    loop i in [0..n):
+        c = kid(e, i)
+        bits = 0
+        if nodes[c].kind == .float_lit:
+            if sz == 4: bits = int(f32_bits(f32(nodes[c].fval)))
+            else: bits = int(f64_bits(nodes[c].fval))
+        else:
+            bits = nodes[c].ival
+            if quantity_base(et) == T_MATH_INT: bits = bits << 1
+        loop b in [0..sz):
+            byte = u8(0)
+            if b < 8: byte = u8((bits >> (8 * b)) & 255)
+            rodata.push(byte)
+    if fused_on: fz_note_raw(o, 8)
+    o
+
+same_range_local = (a: int, b: int) -> bool:
+    if nodes[a].kind != .ident or nodes[b].kind != .ident: return false
+    if nodes[a].aux != i32(int(SK.local)) or not same_var(a, b): return false
+    int(locals[int(nodes[a].sym)].flags) & (LF_ALIAS | LF_MUTPARAM) == 0
+
+same_range_read = (a: int, b: int) -> bool:
+    if same_range_local(a, b): return true
+    if nodes[a].kind != .index or nodes[b].kind != .index or nodes[a].aux != 0 or nodes[b].aux != 0: return false
+    x = int(nodes[a].a)
+    y = int(nodes[b].a)
+    if not same_range_local(x, y): return false
+    kind = tkind(ntype(x))
+    if kind != .array and kind != .fixed: return false
+    i = int(nodes[a].b)
+    j = int(nodes[b].b)
+    if i == 0 or j == 0: return false
+    if same_range_local(i, j): return true
+    nodes[i].kind == .int_lit and nodes[j].kind == .int_lit and nodes[i].ival == nodes[j].ival
+
+range_cmp = (e: int) -> (int, Tok, int):
+    if nodes[e].kind != .binary or nodes[e].aux != 0: return (0, .eq, 0)
+    op = nodes[e].op as Tok
+    if op != .lt and op != .le and op != .gt and op != .ge: return (0, .eq, 0)
+    a = word_integer_value(int(nodes[e].a))
+    b = word_integer_value(int(nodes[e].b))
+    if nodes[a].kind == .int_lit:
+        tmp = a
+        a = b
+        b = tmp
+        op = if op == .lt: .gt else if op == .le: .ge else if op == .gt: .lt else: .le
+    if nodes[b].kind != .int_lit or has_flag(b, NF_U64) and nodes[b].ival < 0: return (0, .eq, 0)
+    at = prune(ntype(a))
+    bt = prune(ntype(b))
+    if not is_int(at) or not is_int(bt) or at == T_U64 or bt == T_U64: return (0, .eq, 0)
+    if not same_range_read(a, a): return (0, .eq, 0)
+    (a, op, nodes[b].ival)
+
+range_tail = (e: int) -> int:
+    k = nodes[e].kind
+    if k != .and_ and k != .or_: return e
+    left = int(nodes[e].a)
+    right = int(nodes[e].b)
+    if nodes[left].kind != k or nodes[right].kind != .binary: return e
+    a = range_cmp(int(nodes[left].b))
+    if a.0 == 0: return e
+    b = range_cmp(right)
+    if b.0 == 0 or not same_range_read(a.0, b.0): return e
+    pair = nodes.len()
+    nodes.push(nodes[e])
+    nodes[pair].a = nodes[left].b
+    head = nodes.len()
+    nodes.push(nodes[e])
+    nodes[head].a = nodes[left].a
+    nodes[head].b = i32(pair)
+    head
+
+negate_cmp = (op: Op) -> Op:
+    match op:
+        eq: .ne
+        ne: .eq
+        lts: .ges
+        les: .gts
+        gts: .les
+        ges: .lts
+        ltu: .geu
+        leu: .gtu
+        gtu: .leu
+        geu: .ltu
+        _: .nop
+
+stepped_done = (up: int, ctr: int, endv: int, inclusive: bool, signed: bool) -> int:
+    above = if signed: Op.ges else: Op.geu
+    below = if signed: Op.les else: Op.leu
+    if inclusive:
+        above = if signed: Op.gts else: Op.gtu
+        below = if signed: Op.lts else: Op.ltu
+    e_bin(.or_, VI,
+        e_bin(.and_, VI, up, e_bin(above, VI, ctr, endv)),
+        e_bin(.and_, VI, e_bin(.xor, VI, up, e_iconst(1)), e_bin(below, VI, ctr, endv)))
