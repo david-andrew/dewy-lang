@@ -1,0 +1,172 @@
+# ---- pointers only read through ----
+# `xs.ptr` (data(xs)) detaches xs's elements from any other value sharing them only when
+# the pointer may be written through: read through, it needs no copy of its own. One walk
+# over a function's body follows each pointer where it goes: indexed and read, offset,
+# converted to another pointer type, compared, or kept in a local (whose uses then count).
+# Anything else (a write through it, a call, a return, a store elsewhere, a capture) is
+# taken as a write. A call to a function that only reads its pointer parameter is a read.
+# The walk also tells which locals are exposed only by such reads, so a Dewy parameter's
+# binding can stay a view of the parameter. O(body) per function, once.
+# (one union-find for all functions: its keys, nodes and locals, are each one function's)
+$runtime_checks
+from p"ast.jo" import (nodes nkids nkids2 kid kid2 has_flag NF_MUT NF_AT NF_GLOBAL NF_EXTERN)
+from p"check.jo" import (locals fns LF_CAPTURED LF_CAPTURE LF_SHARED LF_ADDR LF_BYREF LF_ALIAS LF_MUTPARAM)
+from p"expr.jo" import (ntype IN)
+from p"types.jo" import (tkind)
+from p"lower.jo" import (cur_fn raw_view checked_call_mutmask)
+# Node.aux stores the existing SK.local ordinal (1), not a Dewy string value.
+PRWord:type=int64<overflow='wrap'>
+let pr_parent:dict<int64 int64>=dict<int64 int64>()
+let pr_written:dict<int64 bool>=dict<int64 bool>()
+let pr_exposed:dict<int64 bool>=dict<int64 bool>()
+let pr_done:dict<int64 int64>=dict<int64 int64>()
+let pr_busy:dict<int64 bool>=dict<int64 bool>()
+let pr_sites:array<int64>=[]
+pr_find=(k:PRWord):>PRWord=>$unsafe {
+    if not pr_parent.has(k) {
+        pr_parent[k] = k
+        if k <? 0 and PRWord(locals.ptr[-k].flags) & (LF_CAPTURED | LF_CAPTURE | LF_SHARED | LF_ADDR | LF_BYREF | LF_ALIAS | LF_MUTPARAM) not=? 0 {pr_written[k] = true}
+        return k
+    }
+    let x=k
+    loop pr_parent[x] not=? x {x=pr_parent[x]}
+    x
+}
+pr_union=(a:PRWord b:PRWord):>PRWord=>$unsafe {
+    if a =? 0 {return b}
+    if b =? 0 {return a}
+    let ra=pr_find(a)
+    let rb=pr_find(b)
+    if ra =? rb {return ra}
+    pr_parent[ra] = rb
+    if pr_written.has(ra) {pr_written[rb] = true}
+    rb
+}
+pr_write=(k:PRWord):>void=>$unsafe {
+    if k not=? 0 {pr_written[pr_find(k)] = true}
+}
+pr_origin=(e:PRWord):>PRWord=>$unsafe {
+    let k=nodes.ptr[e].kind
+    if k =? 'ident' and nodes.ptr[e].aux =? 1 {return pr_find(-PRWord(nodes.ptr[e].sym))}
+    if k =? 'intrinsic' and (nodes.ptr[e].aux as IN) =? IN.arrdata {return pr_find(e)}
+    if k =? 'binary' and nodes.ptr[e].aux =? 4 {return pr_origin(PRWord(nodes.ptr[e].a))}
+    if (k =? 'conv' or k =? 'cast') and tkind(ntype(PRWord(nodes.ptr[e].a))) =? 'ptr' {return pr_origin(PRWord(nodes.ptr[e].a))}
+    if k =? 'if_' {return pr_union(pr_origin(PRWord(nodes.ptr[e].b)) pr_origin(PRWord(nodes.ptr[e].c)))}
+    0
+}
+pr_root=(n0:PRWord):>PRWord=>$unsafe {
+    let n=n0
+    loop nodes.ptr[n].kind =? 'field' or nodes.ptr[n].kind =? 'index' or nodes.ptr[n].kind =? 'unwrap' or nodes.ptr[n].kind =? 'narrow' {n=PRWord(nodes.ptr[n].a)}
+    if nodes.ptr[n].kind not=? 'ident' or nodes.ptr[n].aux not=? 1 {return 0}
+    PRWord(nodes.ptr[n].sym)
+}
+pr_expose=(n:PRWord):>void=>$unsafe {
+    let l=pr_root(n)
+    loop l not=? 0 {
+        pr_exposed[l] = true
+        if PRWord(locals.ptr[l].flags) & LF_ALIAS =? 0 or locals.ptr[l].alias =? 0 {return}
+        l=pr_root(PRWord(locals.ptr[l].alias))
+    }
+}
+pr_target=(n0:PRWord):>void=>$unsafe {
+    let n=n0
+    loop nodes.ptr[n].kind =? 'field' or nodes.ptr[n].kind =? 'index' or nodes.ptr[n].kind =? 'unwrap' or nodes.ptr[n].kind =? 'narrow' {
+        if nodes.ptr[n].kind =? 'index' and tkind(ntype(PRWord(nodes.ptr[n].a))) =? 'ptr' {pr_write(pr_origin(PRWord(nodes.ptr[n].a)))}
+        n=PRWord(nodes.ptr[n].a)
+    }
+}
+pr_is_ptr=(c:PRWord):>bool=>$unsafe {
+    c >? 0 and nodes.ptr[c].type not=? 0 and tkind(ntype(c)) =? 'ptr'
+}
+pr_use=(n:PRWord c:PRWord call_index:PRWord):>void=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if k =? 'index' and PRWord(nodes.ptr[n].a) =? c and not has_flag(n NF_MUT) and not has_flag(n NF_AT) {return}
+    if k =? 'binary' {
+        if nodes.ptr[n].aux =? 4 or nodes.ptr[n].type not=? 0 and tkind(ntype(n)) =? 'bool_' {return}
+    }
+    if (k =? 'conv' or k =? 'cast') and pr_is_ptr(n) {return}
+    if k =? 'if_' and PRWord(nodes.ptr[n].a) not=? c and pr_is_ptr(n) {return}
+    if k =? 'vardecl' and nkids(n) =? 0 and not has_flag(n NF_GLOBAL) {
+        pr_union(-PRWord(nodes.ptr[n].sym) pr_origin(c));
+        return
+    }
+    if k =? 'assign' and nodes.ptr[n].aux =? 0 and PRWord(nodes.ptr[n].b) =? c {
+        let t:PRWord=PRWord(nodes.ptr[n].a)
+        if nodes.ptr[t].kind =? 'ident' and nodes.ptr[t].aux =? 1 {
+            pr_union(-PRWord(nodes.ptr[t].sym) pr_origin(c));
+            return
+        }
+    }
+    if k =? 'call' and call_index >=? 0 and nodes.ptr[n].aux =? 0 and checked_call_mutmask(n) & (1 << call_index) =? 0 and not has_flag(c NF_MUT) and not has_flag(c NF_AT) and ptr_param_read(PRWord(nodes.ptr[n].sym) call_index nkids(n)) {return}
+    pr_write(pr_origin(c))
+}
+pr_walk=(n:PRWord):>void=>$unsafe {
+    if n <=? 0 {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' or k =? 'fn_' {return}
+    if k =? 'intrinsic' and (nodes.ptr[n].aux as IN) =? IN.arrdata and nkids(n) =? 1 {
+        pr_find(n);
+        pr_sites.push(n)
+    }
+    else if k =? 'addr' or ((k =? 'cast' or k =? 'conv') and raw_view(n)) {pr_expose(PRWord(nodes.ptr[n].a))}
+    if k =? 'assign' or k =? 'addr' {
+        let t:PRWord=PRWord(nodes.ptr[n].a)
+        if nodes.ptr[t].kind =? 'tuple' {
+            loop i in [0..nkids(t)) {pr_target(kid(t i))}
+        }
+        else {pr_target(t)}
+    }
+    else if k =? 'call' {
+        let mm=checked_call_mutmask(n)
+        loop i in [0..nkids(n)) {
+            if mm & (1 << i) not=? 0 or has_flag(kid(n i) NF_MUT) or has_flag(kid(n i) NF_AT) {pr_target(kid(n i))}
+        }
+    }
+    else if k =? 'intrinsic' and nkids(n) >? 0 {pr_target(kid(n 0))}
+    pr_child(n PRWord(nodes.ptr[n].a) -1)
+    pr_child(n PRWord(nodes.ptr[n].b) -1)
+    if k not=? 'for_' {
+        pr_child(n PRWord(nodes.ptr[n].c) -1)
+        if k not=? 'partial' {pr_child(n PRWord(nodes.ptr[n].d) -1)}
+    }
+    let m:PRWord=nkids(n)
+    if m >? 0 {
+        let positional=k =? 'call'
+        if positional {
+            loop i in [0..m) {
+                if nodes.ptr[kid(n i)].kind =? 'namedarg' {positional=false}
+            }
+        }
+        loop i in [0..m) {pr_child(n kid(n i) if positional {i} else {-1})}
+    }
+    loop i in [0..nkids2(n)) {pr_child(n kid2(n i) -1)}
+}
+pr_child=(n:PRWord c:PRWord i:PRWord):>void=>$unsafe {
+    if c <=? 0 {return}
+    if nodes.ptr[c].type not=? 0 and tkind(ntype(c)) =? 'ptr' {pr_use(n c i)}
+    pr_walk(c)
+}
+ptr_reads=(f:PRWord):>void=>$unsafe {
+    let body=if f >? 0 and f <? fns.length {PRWord(fns.ptr[f].body)} else {0}
+    if (pr_done.get(f) ?? (-1)) =? body {return}
+    pr_done[f] = body
+    let saved=pr_sites
+    pr_sites=[]
+    pr_busy[f] = true
+    pr_walk(body)
+    pr_busy.remove(f);
+    loop site in pr_sites {
+        if pr_written.has(pr_find(site)) {pr_expose(kid(site 0))}
+    }
+    pr_sites=saved
+}
+ptr_read_only=(e:PRWord):>bool=>$unsafe {
+    ptr_reads(cur_fn)
+    pr_parent.has(e) and not pr_written.has(pr_find(e))
+}
+ptr_param_read=(f:PRWord i:PRWord n:PRWord):>bool=>$unsafe {
+    if f <=? 0 or f >=? fns.length or fns.ptr[f].body =? 0 or fns.ptr[f].decl =? 0 or has_flag(PRWord(fns.ptr[f].decl) NF_EXTERN) or fns.ptr[f].cabi {return false}
+    if i >=? fns.ptr[f].params.length or n not=? fns.ptr[f].params.length or pr_busy.has(f) {return false}
+    ptr_reads(f)
+    not pr_written.has(pr_find(-fns.ptr[f].params.ptr[i]))
+}

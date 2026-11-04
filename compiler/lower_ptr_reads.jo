@@ -1,0 +1,166 @@
+# ---- pointers only read through ----
+# `xs.ptr` (data(xs)) detaches xs's elements from any other value sharing them only when
+# the pointer may be written through: read through, it needs no copy of its own. One walk
+# over a function's body follows each pointer where it goes: indexed and read, offset,
+# converted to another pointer type, compared, or kept in a local (whose uses then count).
+# Anything else (a write through it, a call, a return, a store elsewhere, a capture) is
+# taken as a write. A call to a function that only reads its pointer parameter is a read.
+# The walk also tells which locals are exposed only by such reads, so a Dewy parameter's
+# binding can stay a view of the parameter. O(body) per function, once.
+# (one union-find for all functions: its keys, nodes and locals, are each one function's)
+# Frozen pointer-read analysis from lower.jo.
+use 'checker_state.dewy'
+use 'ast.jo'
+use 'check.jo'
+use 'expr.jo'
+use 'types.jo'
+use 'lower.jo'
+
+pr_parent: {int: int}          # data() node n as n, local l as -l -> its class's next key
+pr_written: {int: bool}        # class root -> a pointer of the class may be written
+pr_exposed: {int: bool}        # locals exposed other than by a data() only read through
+pr_done: {int: int}            # function -> the body walked
+pr_busy: {int: bool}
+pr_sites: int[]                # the data() nodes of the function being walked
+
+pr_find = (k: int) -> int:
+    if not pr_parent.has(k):
+        pr_parent[k] = k
+        # (a local another place reaches, or a closure, may do anything with its pointer)
+        if k < 0 and int(locals[-k].flags) & (LF_CAPTURED | LF_CAPTURE | LF_SHARED | LF_ADDR | LF_BYREF | LF_ALIAS | LF_MUTPARAM) != 0: pr_written[k] = true
+        return k
+    x = k
+    loop pr_parent[x] != x: x = pr_parent[x]
+    x
+
+pr_union = (a: int, b: int) -> int:
+    if a == 0: return b
+    if b == 0: return a
+    ra = pr_find(a)
+    rb = pr_find(b)
+    if ra == rb: return ra
+    pr_parent[ra] = rb
+    if pr_written.has(ra): pr_written[rb] = true
+    rb
+
+pr_write = (k: int):
+    if k != 0: pr_written[pr_find(k)] = true
+
+# the class of the pointer e's value comes from (0: none followed)
+pr_origin = (e: int) -> int:
+    k = nodes[e].kind
+    if k == .ident and nodes[e].aux == i32(int(SK.local)): return pr_find(-int(nodes[e].sym))
+    if k == .intrinsic and (nodes[e].aux as IN) == .arrdata: return pr_find(e)
+    if k == .binary and nodes[e].aux == 4: return pr_origin(int(nodes[e].a))
+    if (k == .conv or k == .cast) and tkind(ntype(int(nodes[e].a))) == .ptr: return pr_origin(int(nodes[e].a))
+    if k == .if_: return pr_union(pr_origin(int(nodes[e].b)), pr_origin(int(nodes[e].c)))
+    0
+
+# the local whose storage place n is in (as note_storage_access finds it), or 0
+pr_root = (n0: int) -> int:
+    n = n0
+    loop nodes[n].kind == .field or nodes[n].kind == .index or nodes[n].kind == .unwrap or nodes[n].kind == .narrow: n = int(nodes[n].a)
+    if nodes[n].kind != .ident or nodes[n].aux != i32(int(SK.local)): return 0
+    int(nodes[n].sym)
+
+pr_expose = (n: int):
+    l = pr_root(n)
+    loop l != 0:
+        pr_exposed[l] = true
+        if int(locals[l].flags) & LF_ALIAS == 0 or locals[l].alias == 0: return
+        l = pr_root(int(locals[l].alias))
+
+# a place written: pointers indexed on its way are written through
+pr_target = (n0: int):
+    n = n0
+    loop nodes[n].kind == .field or nodes[n].kind == .index or nodes[n].kind == .unwrap or nodes[n].kind == .narrow:
+        if nodes[n].kind == .index and tkind(ntype(int(nodes[n].a))) == .ptr: pr_write(pr_origin(int(nodes[n].a)))
+        n = int(nodes[n].a)
+
+pr_is_ptr = (c: int) -> bool: c > 0 and nodes[c].type != 0 and tkind(ntype(c)) == .ptr
+
+# child c of n, a pointer: what n does with it
+pr_use = (n: int, c: int, call_index: int):
+    k = nodes[n].kind
+    if k == .index and int(nodes[n].a) == c and not has_flag(n, NF_MUT) and not has_flag(n, NF_AT): return
+    if k == .binary:
+        # (offsetting gives the same pointer on; comparing only reads it)
+        if nodes[n].aux == 4 or nodes[n].type != 0 and tkind(ntype(n)) == .bool_: return
+    if (k == .conv or k == .cast) and pr_is_ptr(n): return
+    if k == .if_ and int(nodes[n].a) != c and pr_is_ptr(n): return
+    if k == .vardecl and nkids(n) == 0 and not has_flag(n, NF_GLOBAL):
+        pr_union(-int(nodes[n].sym), pr_origin(c))
+        return
+    if k == .assign and nodes[n].aux == 0 and int(nodes[n].b) == c:
+        t = int(nodes[n].a)
+        if nodes[t].kind == .ident and nodes[t].aux == i32(int(SK.local)):
+            pr_union(-int(nodes[t].sym), pr_origin(c))
+            return
+    if k == .call and call_index >= 0 and nodes[n].aux == 0 and checked_call_mutmask(n) & (1 << call_index) == 0 and not has_flag(c, NF_MUT) and not has_flag(c, NF_AT) and ptr_param_read(int(nodes[n].sym), call_index, nkids(n)): return
+    pr_write(pr_origin(c))
+
+pr_walk = (n: int):
+    if n <= 0: return
+    k = nodes[n].kind
+    if k == .lambda or k == .fn_: return
+    if k == .intrinsic and (nodes[n].aux as IN) == .arrdata and nkids(n) == 1:
+        pr_find(n)
+        pr_sites.push(n)
+    else if k == .addr or ((k == .cast or k == .conv) and raw_view(n)): pr_expose(int(nodes[n].a))
+    if k == .assign or k == .addr:
+        t = int(nodes[n].a)
+        if nodes[t].kind == .tuple:
+            loop i in [0..nkids(t)): pr_target(kid(t, i))
+        else: pr_target(t)
+    else if k == .call:
+        mm = checked_call_mutmask(n)
+        loop i in [0..nkids(n)):
+            if mm & (1 << i) != 0 or has_flag(kid(n, i), NF_MUT) or has_flag(kid(n, i), NF_AT): pr_target(kid(n, i))
+    else if k == .intrinsic and nkids(n) > 0: pr_target(kid(n, 0))
+    pr_child(n, int(nodes[n].a), -1)
+    pr_child(n, int(nodes[n].b), -1)
+    if k != .for_:
+        pr_child(n, int(nodes[n].c), -1)
+        if k != .partial: pr_child(n, int(nodes[n].d), -1)
+    m = nkids(n)
+    if m > 0:
+        positional = k == .call
+        if positional:
+            loop i in [0..m):
+                if nodes[kid(n, i)].kind == .namedarg: positional = false
+        loop i in [0..m):
+            ci = if positional: i else: -1
+            pr_child(n, kid(n, i), ci)
+    loop i in [0..nkids2(n)): pr_child(n, kid2(n, i), -1)
+
+pr_child = (n: int, c: int, i: int):
+    if c <= 0: return
+    if nodes[c].type != 0 and tkind(ntype(c)) == .ptr: pr_use(n, c, i)
+    pr_walk(c)
+
+# walk function f's body, once
+ptr_reads = (f: int):
+    body = if f > 0 and f < fns.len(): int(fns[f].body) else: 0
+    if (pr_done.get(f) ?? -1) == body: return
+    pr_done[f] = body
+    saved = pr_sites
+    pr_sites = []
+    pr_busy[f] = true
+    pr_walk(body)
+    pr_busy.remove(f)
+    loop site in pr_sites:
+        if pr_written.has(pr_find(site)): pr_expose(kid(site, 0))
+    pr_sites = saved
+
+# is the pointer from data() node e only read through?
+ptr_read_only = (e: int) -> bool:
+    ptr_reads(cur_fn)
+    pr_parent.has(e) and not pr_written.has(pr_find(e))
+
+# does function f only read through its pointer parameter i (of a call with n arguments)?
+ptr_param_read = (f: int, i: int, n: int) -> bool:
+    if f <= 0 or f >= fns.len() or fns[f].body == 0 or fns[f].decl == 0 or has_flag(int(fns[f].decl), NF_EXTERN) or fns[f].cabi: return false
+    if i >= fns[f].params.len() or n != fns[f].params.len() or pr_busy.has(f): return false
+    ptr_reads(f)
+    # (a Dewy parameter is read through its binding, which the walk joined to it)
+    not pr_written.has(pr_find(-fns[f].params[i]))
