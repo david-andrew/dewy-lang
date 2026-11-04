@@ -815,10 +815,20 @@ ref_validate_record = (t: int, pos: int):
     loop yes in done:
         if not yes: fatal(pos, "cyclic dependent field refinements")
 
+# Follow declaration aliases on demand, retaining the checked field/index route.
+# O(alias depth); declarations only refer to previously established places.
+ref_place_alias = (n: int) -> int:
+    value = n
+    loop nodes[value].kind == .ident and nodes[value].aux == i32(int(SK.local)):
+        l = int(nodes[value].sym)
+        if int(locals[l].flags) & LF_ALIAS == 0 or locals[l].alias == 0: break
+        value = int(locals[l].alias)
+    value
+
 # Dependent field updates construct a private candidate. Every sibling reads
 # the same captured parent; only a validated complete value replaces storage.
 ref_field_store = (statement: int, target: int) -> int:
-    lhs = int(nodes[statement].a)
+    lhs = ref_place_alias(int(nodes[statement].a))
     if nodes[lhs].kind != .field: return 0
     parent = int(nodes[lhs].a)
     t = representation_type(ntype(parent))
@@ -879,14 +889,7 @@ copy_checked = (n: int) -> int:
     copy
 
 ref_mutable_authority = (n: int):
-    value = n
-    if nodes[value].kind == .ident and nodes[value].aux == i32(int(SK.local)):
-        l = int(nodes[value].sym)
-        if int(locals[l].flags) & LF_ALIAS != 0: value = int(locals[l].alias)
-    loop nodes[value].kind == .field or nodes[value].kind == .index:
-        parent = int(nodes[value].a)
-        if ref_dependent_record(representation_type(ntype(parent))): fatal(nodes[n].pos, "mutable refinement access needs the full record invariant authority")
-        value = parent
+    if ref_dependent_ancestor(n): fatal(nodes[n].pos, "mutable refinement access needs the full record invariant authority; pass the whole record with `@`")
 
 # Length-changing operations execute on a private candidate. Later argument
 # effects run before that candidate is published, so callbacks cannot observe
@@ -967,10 +970,11 @@ ref_convert_record = (n: int, target: int) -> int:
     n
 
 ref_dependent_ancestor = (n: int) -> bool:
-    value = n
+    value = ref_place_alias(n)
     loop nodes[value].kind == .field or nodes[value].kind == .index:
         value = int(nodes[value].a)
         if ref_dependent_record(representation_type(ntype(value))): return true
+        value = ref_place_alias(value)
     false
 
 ref_mutable_result = (f: int) -> bool:
