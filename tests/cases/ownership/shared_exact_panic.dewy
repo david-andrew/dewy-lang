@@ -1,0 +1,19 @@
+# exit: 101
+$runtime_checks
+Owner:type = [xs:array<int> id:int64
+    $__drop__
+    release = ():>void => { if id =? 0 printl"drop 0"
+        else if id =? 1 printl"drop 1"
+        else printl"drop 2" }
+]
+fail = ():>int64 => { panic("exact owner panic") }
+inner = (n:int):>void => {
+    let x = Owner[[n n+1] 1]
+    let moved = x
+    let y = Owner[[n+2] 2]
+    let incomplete = Owner[[n+3] fail()]
+}
+main = () => {
+    let outer = Owner[[18446744073709551617] 0]
+    inner(18446744073709551618)
+}

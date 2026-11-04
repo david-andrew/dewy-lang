@@ -68,7 +68,7 @@ ownership_finalize_hook = (f: int):
     si = int(types[t].st)
     loop i in [0..int(structs[si].nfields)):
         ft = field_store_type(int(structs[si].fields) + i)
-        if not ownership_layout(ft): fatal(nodes[hook].pos, "resource fields currently require an inline record layout")
+        if not ownership_layout(ft): fatal(nodes[hook].pos, "unsupported resource field layout; elements with lifecycle hooks in arrays must be inline")
     if role != 1 and prune(int(fns[f].ret)) != t: fatal(nodes[hook].pos, "copy and move hooks must return the same nominal type")
     if role == 1: structs[si].drop_fn = i32(f)
     else if role == 2: ownership_copies[t] = f
@@ -311,7 +311,7 @@ ownership_inherit = (child: int):
     si = int(types[child].st)
     loop field in field_list(child):
         if not ownership_layout(field.0):
-            fatal(nodes[int(structs[si].decl)].pos, "resource fields currently require an inline record layout")
+            fatal(nodes[int(structs[si].decl)].pos, "unsupported resource field layout; elements with lifecycle hooks in arrays must be inline")
     if structs[si].drop_fn == 0: structs[si].drop_fn = structs[int(types[parent].st)].drop_fn
     if not ownership_copies.has(child):
         if let hook = ownership_copies.get(parent): ownership_copies[child] = hook

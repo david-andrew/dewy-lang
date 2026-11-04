@@ -1,0 +1,28 @@
+# Dynamic big integers must be released with the final array reference.
+# 50k constructions also support the bounded-RSS cleanup check.
+$runtime_checks
+let drops:int64 = 0
+Owner:type = <T>[value:T
+    $__drop__
+    release = ():>void => { drops += 1 }
+]
+Item:type = [value:int]
+consume = (x:Owner<array<int>>):>int => x.value[0]
+main = () => {
+    let total:int = 0
+    loop i in [0..50000) {
+        let n:int = 18446744073709551616 + i
+        let shared = [n n+1]
+        {
+            let x = Owner<array<int>>[shared]
+            let moved = x
+            total += consume(moved) - 18446744073709551616
+        }
+        $runtime_assert(shared[1] =? n+1)
+        let nested = Owner<array<array<int>>>[[[n] [n+1]]]
+        let record = Owner<array<Item>>[[Item[n] Item[n+1]]]
+        let fractions = Owner<array<rational>>[[rational(n n+1)]]
+        let scalar = Owner<int>[n+2]
+    }
+    printl"{total} drops {drops}"
+}

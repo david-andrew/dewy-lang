@@ -186,8 +186,13 @@ ownership_layout = (t0: int, depth: int = 0, seen: int[] = []) -> bool:
         return ownership_layout(ow_elem(t), depth + 1, visited)
     if k == .fixed: return ownership_inline(ow_elem(t), depth + 1)
     if ownership_callable_cap(t) != 0: return true
+    # Layout support includes managed scalar handles: tagged integers retain
+    # and release their payload through ordinary field/array cleanup. This is
+    # separate from ownership_inline, which must stay allocation-free.
+    # Normalize refinements only for scalar leaves, not aggregate ownership.
     # (a raw pointer is a plain word: a handle's view of storage it shares, owning nothing)
-    if k == .str_ or ow_scalar(t) or k == .float_ or k == .ptr: return true
+    scalar = ow_kind(ow_representation(t))
+    if k == .str_ or scalar == .int_ or scalar == .bool_ or k == .float_ or k == .ptr: return true
     if k != .struct_ and k != .tuple: return false
     loop ft in ow_field_types(t):
         if not ownership_layout(ft, depth + 1, visited): return false

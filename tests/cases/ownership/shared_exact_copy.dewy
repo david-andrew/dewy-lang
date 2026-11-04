@@ -1,0 +1,24 @@
+# Structural owner copies retain the ordinary managed fields independently.
+$runtime_checks
+let drops:int64 = 0
+let copies:int64 = 0
+Leaf:type = [id:int64
+    $__drop__
+    release = ():>void => { drops += 1 }
+    $__copy__
+    duplicate = ():>Leaf => { copies += 1; return Leaf[id] }
+]
+Envelope:type = [leaf:Leaf xs:array<int> value:int fraction:rational]
+exercise = (n:int):>void => {
+    let first = Envelope[Leaf[1] [n n+1] n+2 rational(n 3)]
+    {
+        let second = first.copy()
+        printl(second.xs)
+        printl(second.value)
+        printl(second.fraction.numerator)
+    }
+    printl(first.xs)
+    printl(first.value)
+    printl(first.fraction.numerator)
+}
+main = () => { exercise(18446744073709551617); printl"copies {copies} drops {drops}" }

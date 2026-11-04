@@ -1710,7 +1710,10 @@ An owning record can also hold growable arrays, strings and records holding
 them. These fields are shared handles: a move transfers them, and the buffer is
 released when its last holder is dropped, after the hook runs. This is how a
 move-only record shares storage with another, as an `spsc` queue's two ends share
-their ring.
+their ring. Arbitrary-precision `int` fields use the same retain/release
+cleanup, including inside records, growable arrays and nested arrays. The last
+array holder releases managed elements, including `int` and `rational` payloads.
+Elements with lifecycle hooks in resource arrays must still be inline.
 
 A `[T U]` tuple holding owners is an owner the same way a record without hooks
 of its own is: it can be returned, and `let [a b] = pair()` unpacks it into

@@ -1,0 +1,6 @@
+Owner:type = [xs:array<int>
+    $__drop__
+    release = ():>void => {}
+]
+consume = (x:Owner):>void => { printl(x.xs) }
+main = () => { let a = Owner[[18446744073709551617]]; let b = a; printl(a.xs); consume(b) }

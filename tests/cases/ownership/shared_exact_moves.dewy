@@ -1,0 +1,30 @@
+$runtime_checks
+let drops:int64 = 0
+Owner:type = <T>[value:T
+    $__drop__
+    release = ():>void => { drops += 1 }
+]
+Item:type = [value:int]
+make = (n:int):>Owner<array<int>> => Owner<array<int>>[[n n+1]]
+forward = (x:Owner<array<int>>):>Owner<array<int>> => x
+consume = (x:Owner<array<int>>):>void => { printl(x.value) }
+exercise = (n:int):>void => {
+    let a = make(n)
+    let b = a
+    consume(forward(b))
+    let ints = [n n+1]
+    { let x = Owner<array<int>>[ints]; printl(x.value) }
+    printl(ints)
+    let nested:array<array<int>> = [[n] [n+1]]
+    { let x = Owner<array<array<int>>>[nested]; printl(x.value) }
+    printl(nested)
+    let items = [Item[n] Item[n+1]]
+    { let x = Owner<array<Item>>[items]; printl(x.value[0].value) }
+    printl(items[1].value)
+    let fractions:array<rational> = [rational(n 3) rational(n+1 3)]
+    { let x = Owner<array<rational>>[fractions]; printl(x.value[0].numerator) }
+    printl(fractions[1].numerator)
+    { let x = Owner<int>[n]; let y = x; printl(y.value) }
+    { let x = Owner<rational>[rational(n 3)]; printl(x.value.numerator) }
+}
+main = () => { exercise(18446744073709551616 + 1); printl"drops {drops}" }
