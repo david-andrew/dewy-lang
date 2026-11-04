@@ -1,0 +1,480 @@
+$runtime_checks
+from p"lower.jo" import (BOX_HDR LF_ELEMENTVIEW LF_HELDVIEW VC_AGG VC_INT all_const comprehension_push_index cur_fn fixed_paths held_views hv_bad hv_cand hv_given hv_lambda opt_release scope_locals uniq_globals uniq_locals)
+from p"expr.jo" import (IN ntype)
+from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_EXPOSED LF_MUTPARAM LF_PARAM LF_SHARED alias_global fns global_ids globals init_fns locals modules)
+from p"ast.jo" import (nkids2 NF_ALIASDECL NF_COMPREHENSION NF_GLOBAL NF_INBOUNDS NF_INCLUSIVE NF_MUT NF_STEP add_flag clear_flag has_flag kid kid2 kids mk nkids nodes set_list)
+from p"types.jo" import (TF_BOXED)
+from p"types.jo" import (T_INT T_MATH_INT is_int is_managed prune telem tkind type_eq type_has_fn types)
+from p"checked_eval.dewy" import (cx_token_values)
+from p"ir.jo" import (VI dbg_on e_addi e_iconst emit vreg)
+from p"callback_specialize.jo" import (callback_local)
+from p"lower_analysis.dewy" import (checked_call_mutmask lpath_key lpath_root path_within place_var raw_view)
+from p"copies.jo" import (copies_on copy_bindings copy_inputs copy_strict)
+from p"facts.jo" import (fact_storage_loop fixed_array_len stable_loop_index word_integer_value)
+from p"util.jo" import (files pos_file)
+from p"lower_storage.dewy" import (is_shared opt_has vc)
+from p"ownership_types.dewy" import (ownership_type)
+from p"lower_ptr_reads.dewy" import (pr_exposed ptr_reads)
+# View, uniqueness and collection-bound queries; state stays in lower.jo.
+LVWord:type=int64<overflow='wrap'>
+param_view_decl=(s:LVWord l:LVWord):>bool=>$unsafe {
+    if (dbg_on and (not copies_on or not copy_strict(s))) or nodes.ptr[s].aux2 not=? 1 {return false}
+    if copies_on and copy_bindings.has(l) {return false}
+    let fl:LVWord=LVWord(locals.ptr[l].flags)
+    if fl & (LF_ASSIGNED | LF_ADDR | LF_CAPTURE | LF_CAPTURED | LF_BYREF | LF_ALIAS | LF_PARAM) not=? 0 or is_shared(l) {return false}
+    # (exposed only by pointers read through, it can read the parameter's storage)
+    if fl & LF_EXPOSED not=? 0 {
+        ptr_reads(cur_fn);
+        if pr_exposed.has(l) {return false}
+    # Most local initializers are not the parameter binding introduced by the
+    # frontend. Reject their shape before asking about layouts or closure types.
+    }
+    let iv:LVWord=LVWord(nodes.ptr[s].b)
+    if iv =? 0 or nodes.ptr[iv].kind not=? 'ident' or nodes.ptr[iv].aux not=? int32<overflow='wrap'>(1) {return false}
+    let source:LVWord=LVWord(nodes.ptr[iv].sym)
+    let flags:LVWord=LVWord(locals.ptr[source].flags)
+    if flags & LF_PARAM =? 0 or flags & (LF_MUTPARAM | LF_ADDR | LF_CAPTURE | LF_CAPTURED) not=? 0 {return false}
+    if locals.ptr[source].owner not=? int32<overflow='wrap'>(cur_fn) or locals.ptr[source].name not=? locals.ptr[l].name {return false}
+    let t=prune(LVWord(locals.ptr[l].type))
+    if not is_managed(t) and vc(t) not=? VC_AGG {return false}
+    if (type_has_fn(t) and callback_local(l) <? 0) or not type_eq(ntype(iv) t) {return false}
+    # Treat this binding as another read-only view of the parameter. It owns
+    # no reference and must not be dropped as a separately initialized local.
+    locals.ptr[l].vreg = locals.ptr[source].vreg;
+    locals.ptr[l].offset = locals.ptr[source].offset;
+    locals.ptr[l].flags = int32<overflow='wrap'>(fl | LF_PARAM);
+    return true
+}
+plain_read=(n:LVWord):>bool=>$unsafe {
+    if n <=? 0 {return false}
+    let k=nodes.ptr[n].kind
+    if k =? 'int_lit' or k =? 'str_lit' {return true}
+    if k =? 'ident' {
+        if nodes.ptr[n].aux =? int32<overflow='wrap'>(2) {return true}
+        if nodes.ptr[n].aux =? int32<overflow='wrap'>(1) {return LVWord(locals.ptr[LVWord(nodes.ptr[n].sym)].flags) & LF_ALIAS =? 0}
+        return false
+    # An implicit integer index narrowing reads its value without user code.
+    }
+    if k =? 'conv' and nodes.ptr[n].aux =? int32<overflow='wrap'>(1) and prune(ntype(n)) =? T_INT and is_int(ntype(LVWord(nodes.ptr[n].a))) {
+        return plain_read(LVWord(nodes.ptr[n].a))
+    }
+    if k =? 'field' {
+        let a:LVWord=LVWord(nodes.ptr[n].a)
+        return nodes.ptr[n].aux >=? 0 and tkind(ntype(a)) =? 'struct_' and plain_read(a)
+    }
+    if k =? 'index' {
+        let a:LVWord=LVWord(nodes.ptr[n].a)
+        let kind=tkind(ntype(a))
+        return (kind =? 'array' or kind =? 'fixed') and plain_read(a) and plain_read(LVWord(nodes.ptr[n].b))
+    }
+    return false
+}
+held_opt_reg=(e:LVWord):>int64=>$unsafe {
+    if held_views.length =? 0 or nodes.ptr[e].kind not=? 'ident' or nodes.ptr[e].aux not=? int32<overflow='wrap'>(1) {return -1}
+    let l:LVWord=LVWord(nodes.ptr[e].sym)
+    if LVWord(locals.ptr[l].flags) & LF_HELDVIEW =? 0 or tkind(LVWord(locals.ptr[l].type)) not=? 'opt' {return -1}
+    return LVWord(locals.ptr[l].vreg)
+}
+held_encode_addr=(addr:LVWord t:LVWord):>int64=>$unsafe {
+    if tkind(t) not=? 'opt' {return addr}
+    let value=e_addi(addr 0 - BOX_HDR)
+    let has=opt_has(addr telem(t))
+    let result=vreg(VI)
+    emit('select' VI result has value e_iconst(0) 0);
+    return result
+}
+find_views=(f:LVWord):>void=>$unsafe {
+    held_views=dict<int64 bool>()
+    loop l in fns.ptr[f].locals {
+        if LVWord(locals.ptr[l].flags) & (LF_HELDVIEW | LF_ELEMENTVIEW) not=? 0 {locals.ptr[l].flags &= int32<overflow='wrap'>(~(LF_HELDVIEW | LF_ELEMENTVIEW | LF_BYREF));}
+    }
+    hv_bad=dict<int64 bool>()
+    # (what C gives a function it calls is C's, which may change it meanwhile)
+    if dbg_on or fns.ptr[f].body =? 0 or fns.ptr[f].cabi or (copies_on and copy_strict(LVWord(fns.ptr[f].body))) {return}
+    let rooted=false
+    loop l in fns.ptr[f].params {
+        # Recursive walks need this even in the fast development mode. Other
+        # managed aggregates retain release-only analysis; their layout flag
+        # lets default builds skip scanning unrelated function bodies.
+        if opt_release or LVWord(types.ptr[prune(LVWord(locals.ptr[l].type))].flags) & TF_BOXED not=? 0 {
+            if hv_root(l) {rooted=true}
+        }
+    }
+    if not rooted {return}
+    hv_given=[]
+    hv_cand=dict<int64 bool>()
+    hv_bad=dict<int64 bool>()
+    hv_lambda=false
+    hv_scan(LVWord(fns.ptr[f].body));
+    if hv_lambda or hv_given.length =? 0 {return}
+    # (assumed views until a value given cannot be one: what is left gives each other only parts)
+    let changed=true
+    loop changed {
+        changed=false
+        loop g in hv_given {
+            if not hv_bad.contains(g[0]) and not hv_part(g[1]) {
+                hv_bad[g[0]] = true;
+                changed=true
+            }
+        }
+    }
+    loop l in hv_cand.keys() {
+        if hv_bad.contains(l) {continue}
+        held_views[l] = true;
+        locals.ptr[l].flags = int32<overflow='wrap'>(LVWord(locals.ptr[l].flags) | LF_BYREF | LF_HELDVIEW);
+    }
+}
+hv_root=(l:LVWord):>bool=>$unsafe {
+    if copy_inputs.has(l) {return false}
+    let fl:LVWord=LVWord(locals.ptr[l].flags)
+    return fl & (LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ASSIGNED | LF_ADDR | LF_EXPOSED | LF_SHARED) =? 0 and vc(LVWord(locals.ptr[l].type)) =? VC_AGG and is_managed(LVWord(locals.ptr[l].type)) and not type_has_fn(LVWord(locals.ptr[l].type))
+}
+hv_give=(l:LVWord v:LVWord):>void=>$unsafe {
+    if ownership_type(LVWord(locals.ptr[l].type)) {
+        hv_bad[l] = true;
+        return
+    }
+    let fl:LVWord=LVWord(locals.ptr[l].flags)
+    # (a match's own variable is LF_ADDR: the match reads it in memory)
+    let ok=v not=? 0 and fl & (LF_CAPTURE | LF_CAPTURED | LF_BYREF | LF_ALIAS | LF_PARAM | LF_EXPOSED) =? 0 and (fl & LF_ADDR =? 0 or locals.ptr[l].name =? 0)
+    if not ok or is_shared(l) or not is_managed(LVWord(locals.ptr[l].type)) or type_has_fn(LVWord(locals.ptr[l].type)) {
+        hv_bad[l] = true;
+        return
+    }
+    hv_given.push([l v]);
+    hv_cand[l] = true;
+}
+hv_spoil=(p:LVWord):>void=>$unsafe {
+    let r=place_var(p)
+    if r not=? 0 and nodes.ptr[r].aux =? int32<overflow='wrap'>(1) {hv_bad[LVWord(nodes.ptr[r].sym)] = true;}
+}
+hv_scan=(n:LVWord):>void=>$unsafe {
+    if n <=? 0 {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' {
+        hv_lambda=true
+        return
+    }
+    if k =? 'vardecl' {
+        if nodes.ptr[n].nlist >? 0 {
+            loop i in [0..nkids(n)) {hv_spoil(kid(n i));}
+        }
+        else if not has_flag(n NF_GLOBAL) {
+            let l:LVWord=LVWord(nodes.ptr[n].sym)
+            # param_view_decl already proved this synthetic Dewy binding is
+            # the borrowed parameter itself. It is a root, not a candidate
+            # local whose LF_PARAM flag would disqualify every walk from it.
+            if nodes.ptr[n].aux2 not=? 1 or LVWord(locals.ptr[l].flags) & LF_PARAM =? 0 {hv_give(l LVWord(nodes.ptr[n].b));}
+        }
+    }
+    else if k =? 'iflet' or k =? 'match_' or (k =? 'while_' and nodes.ptr[n].aux =? 1) {hv_give(LVWord(nodes.ptr[n].sym) LVWord(nodes.ptr[n].a));}
+    else if k =? 'assign' {
+        let a:LVWord=LVWord(nodes.ptr[n].a)
+        if nodes.ptr[n].aux =? 1 {
+            loop i in [0..nkids(a)) {hv_spoil(kid(a i));}
+        }
+        else if nodes.ptr[n].aux =? 0 and nodes.ptr[n].op =? int32<overflow='wrap'>(47) and nodes.ptr[a].kind =? 'ident' and nodes.ptr[a].aux =? int32<overflow='wrap'>(1) and LVWord(locals.ptr[LVWord(nodes.ptr[a].sym)].flags) & LF_ALIAS =? 0 {hv_give(LVWord(nodes.ptr[a].sym) LVWord(nodes.ptr[n].b));}
+        else {hv_spoil(a);}
+    }
+    else if k =? 'intrinsic' and nkids(n) >? 0 {
+        let id=nodes.ptr[n].aux as IN
+        if id =? IN.push or id =? IN.pop or id =? IN.insert or id =? IN.remove or id =? IN.clear or id =? IN.reserve or id =? IN.resize or id =? IN.truncate or id =? IN.setlen or id =? IN.extend or id =? IN.arrdata {hv_spoil(kid(n 0));}
+    }
+    else if k =? 'addr' or (k =? 'cast' or k =? 'conv') and raw_view(n) {hv_spoil(LVWord(nodes.ptr[n].a));}
+    else if k =? 'for_' and has_flag(n NF_MUT) {hv_spoil(LVWord(nodes.ptr[n].a));}
+    let fs=[LVWord(nodes.ptr[n].a) LVWord(nodes.ptr[n].b)]
+    if k not=? 'for_' {fs=[LVWord(nodes.ptr[n].a) LVWord(nodes.ptr[n].b) LVWord(nodes.ptr[n].c) if k =? 'partial' {0} else {LVWord(nodes.ptr[n].d)}]}
+    loop c in fs {hv_scan(c);}
+    loop i in [0..nkids(n)) {
+        let c=kid(n i)
+        if has_flag(c NF_MUT) {hv_spoil(c);}
+        hv_scan(c);
+    }
+    loop i in [0..nkids2(n)) {hv_scan(kid2(n i));}
+}
+hv_part=(p:LVWord):>bool=>$unsafe {
+    let k=nodes.ptr[p].kind
+    if k =? 'ident' {
+        if nodes.ptr[p].aux not=? int32<overflow='wrap'>(1) {return false}
+        let l:LVWord=LVWord(nodes.ptr[p].sym)
+        let fl:LVWord=LVWord(locals.ptr[l].flags)
+        if fl & LF_ALIAS not=? 0 {return locals.ptr[l].alias not=? 0 and hv_part(LVWord(locals.ptr[l].alias))}
+        if fl & LF_PARAM not=? 0 {return not hv_bad.contains(l) and hv_root(l)}
+        return hv_cand.contains(l) and not hv_bad.contains(l)
+    }
+    if k =? 'field' {
+        let a:LVWord=LVWord(nodes.ptr[p].a)
+        let tk=tkind(ntype(a))
+        return (nodes.ptr[p].aux =? -3 or nodes.ptr[p].aux >=? 0 and (tk =? 'struct_' or tk =? 'tuple')) and hv_part(a)
+    }
+    if k =? 'unwrap' or k =? 'narrow' {return hv_part(LVWord(nodes.ptr[p].a))}
+    return false
+}
+bounded_array_length=(array:LVWord loop_:LVWord):>bool=>$unsafe {
+    if not plain_read(array) {return false}
+    let key=lpath_key(array)
+    if key =? 0 {return false}
+    let summary=fact_storage_loop(loop_)
+    if summary.opaque {return false}
+    loop killed in summary.kill {
+        if path_within(key killed) {return false}
+    }
+    let root=lpath_root(array)
+    if nodes.ptr[root].aux =? int32<overflow='wrap'>(2) {return not summary.calls}
+    let l:LVWord=LVWord(nodes.ptr[root].sym)
+    let flags:LVWord=LVWord(locals.ptr[l].flags)
+    if flags & (LF_ALIAS | LF_CAPTURE | LF_BYREF) not=? 0 or is_shared(l) {return false}
+    return flags & LF_MUTPARAM =? 0 or not summary.calls
+}
+bounded_open_for=(s:LVWord):>int64=>$unsafe {
+    if nodes.ptr[s].aux not=? 0 {return 0}
+    let it:LVWord=LVWord(nodes.ptr[s].a)
+    if nodes.ptr[it].kind not=? 'range' or nodes.ptr[it].b not=? 0 or has_flag(it NF_STEP) {return 0}
+    let l:LVWord=LVWord(nodes.ptr[s].sym)
+    if not stable_loop_index(l) or (prune(LVWord(locals.ptr[l].type)) not=? T_INT and prune(LVWord(locals.ptr[l].type)) not=? T_MATH_INT) {return 0}
+    let body:LVWord=LVWord(nodes.ptr[s].b)
+    if nkids(body) =? 0 {return 0}
+    let guard=kid(body 0)
+    if nodes.ptr[guard].kind not=? 'if_' or nodes.ptr[guard].c not=? 0 {return 0}
+    let condition:LVWord=LVWord(nodes.ptr[guard].a)
+    if nodes.ptr[condition].kind not=? 'not_' {return 0}
+    condition=LVWord(nodes.ptr[condition].a)
+    if nodes.ptr[condition].kind not=? 'binary' or nodes.ptr[condition].aux not=? 0 or nodes.ptr[condition].op not=? int32<overflow='wrap'>(71) {return 0}
+    let index=word_integer_value(LVWord(nodes.ptr[condition].a))
+    if nodes.ptr[index].kind not=? 'ident' or nodes.ptr[index].aux not=? int32<overflow='wrap'>(1) or LVWord(nodes.ptr[index].sym) not=? l {return 0}
+    let stop=word_integer_value(LVWord(nodes.ptr[condition].b))
+    if prune(ntype(stop)) not=? T_INT and prune(ntype(stop)) not=? T_MATH_INT {return 0}
+    let stable=nodes.ptr[stop].kind =? 'int_lit' or fixed_array_len(stop) >=? 0
+    if nodes.ptr[stop].kind =? 'ident' and nodes.ptr[stop].aux =? int32<overflow='wrap'>(1) {
+        let end_local:LVWord=LVWord(nodes.ptr[stop].sym)
+        stable=stable_loop_index(end_local) and LVWord(locals.ptr[end_local].flags) & LF_MUTPARAM =? 0
+    }
+    if not stable and nodes.ptr[stop].kind =? 'intrinsic' and nodes.ptr[stop].aux =? int32<overflow='wrap'>(1) and nkids(stop) =? 1 {
+        let array=kid(stop 0)
+        stable=bounded_array_length(array s)
+    }
+    if not stable {return 0}
+    let exit:LVWord=LVWord(nodes.ptr[guard].b)
+    if nodes.ptr[exit].kind =? 'block' and nkids(exit) =? 1 {exit=kid(exit 0)}
+    if nodes.ptr[exit].kind not=? 'break_' or nodes.ptr[exit].ival not=? 0 or nodes.ptr[exit].name not=? 0 {return 0}
+    # Make a lowering-only view; retain the checked source tree for tooling.
+    let range=mk('range' nodes.ptr[it].pos)
+    nodes.ptr[range] = nodes.ptr[it];
+    nodes.ptr[range].b = int32<overflow='wrap'>(stop);
+    clear_flag(range NF_INCLUSIVE);
+    let statements:array<int64>=[]
+    loop i in [1..nkids(body)) {statements.push(kid(body i));}
+    let block=mk('block' nodes.ptr[body].pos)
+    nodes.ptr[block] = nodes.ptr[body];
+    set_list(block statements);
+    let result=mk('for_' nodes.ptr[s].pos)
+    nodes.ptr[result] = nodes.ptr[s];
+    nodes.ptr[result].a = int32<overflow='wrap'>(range);
+    nodes.ptr[result].b = int32<overflow='wrap'>(block);
+    return result
+}
+comprehension_value=(n:LVWord):>bool=>$unsafe {
+    if n =? 0 {return true}
+    let k=nodes.ptr[n].kind
+    if k =? 'block' or k =? 'lambda' or k =? 'if_' or k =? 'iflet' or k =? 'match_' or k =? 'for_' or k =? 'while_' or k =? 'return_' or k =? 'break_' or k =? 'continue_' {return false}
+    if not comprehension_value(LVWord(nodes.ptr[n].a)) or not comprehension_value(LVWord(nodes.ptr[n].b)) or not comprehension_value(LVWord(nodes.ptr[n].c)) {return false}
+    loop child in kids(n) {
+        if not comprehension_value(child) {return false}
+    }
+    return true
+}
+reserve_comprehension=(b:LVWord):>void=>$unsafe {
+    if not has_flag(b NF_COMPREHENSION) or nkids(b) not=? 3 or not files.ptr[pos_file(nodes.ptr[b].pos)].is_dewy {return}
+    let decl=kid(b 0)
+    let loop_=kid(b 1)
+    if nodes.ptr[decl].kind not=? 'vardecl' or nodes.ptr[loop_].kind not=? 'for_' {return}
+    let init:LVWord=LVWord(nodes.ptr[decl].b)
+    if nodes.ptr[init].kind not=? 'array' or nkids(init) not=? 0 {return}
+    let it:LVWord=LVWord(nodes.ptr[loop_].a)
+    let idx:LVWord=LVWord(nodes.ptr[loop_].sym)
+    if nodes.ptr[loop_].aux =? 0 {
+        if nodes.ptr[it].kind not=? 'range' or nodes.ptr[it].b =? 0 or has_flag(it NF_STEP) or has_flag(it NF_INCLUSIVE) {return}
+        let start:LVWord=LVWord(nodes.ptr[it].a)
+        if nodes.ptr[start].kind not=? 'int_lit' or nodes.ptr[start].ival not=? 0 or prune(ntype(LVWord(nodes.ptr[it].b))) not=? T_INT {return}
+    }
+    else if nodes.ptr[loop_].aux =? 1 {
+        let k=tkind(ntype(it))
+        if k not=? 'array' and k not=? 'fixed' {return}
+        idx=LVWord(nodes.ptr[loop_].c)
+        # Unlike range loops, an array loop advances this actual index. It
+        # must stay unchanged even when the result uses incremental append.
+        if not stable_loop_index(idx) {return}
+    }
+    else {return}
+    let body:LVWord=LVWord(nodes.ptr[loop_].b)
+    let nb=nkids(body)
+    if nb =? 0 or nodes.ptr[kid(body nb - 1)].kind not=? 'exprstmt' {return}
+    # Combined index/value loops introduce local index bindings. Ordinary
+    # straight-line local declarations have the same one-result guarantee.
+    loop i in [0..nb - 1) {
+        let item=kid(body i)
+        if nodes.ptr[item].kind not=? 'vardecl' or not comprehension_value(LVWord(nodes.ptr[item].b)) {return}
+    }
+    let push:LVWord=LVWord(nodes.ptr[kid(body nb - 1)].a)
+    if nodes.ptr[push].kind not=? 'intrinsic' or nodes.ptr[push].aux not=? int32<overflow='wrap'>(2) or nkids(push) not=? 2 {return}
+    let recv=kid(push 0)
+    if nodes.ptr[recv].kind not=? 'ident' or nodes.ptr[recv].sym not=? nodes.ptr[decl].sym or not comprehension_value(kid(push 1)) {return}
+    # aux2 is unused by range/array loops; d already owns the array snapshot.
+    nodes.ptr[loop_].aux2 = nodes.ptr[decl].sym;
+    add_flag(loop_ NF_COMPREHENSION);
+    add_flag(push NF_INBOUNDS);
+    # Plain elements need no partial-initialization cleanup. With an unchanged
+    # index, set the result length once and write directly to that index.
+    let at=prune(LVWord(locals.ptr[LVWord(nodes.ptr[decl].sym)].type))
+    if not is_managed(LVWord(types.ptr[at].elem)) and stable_loop_index(idx) {
+        add_flag(loop_ NF_INBOUNDS);
+        add_flag(push NF_COMPREHENSION);
+        comprehension_push_index[push] = idx;
+    }
+}
+fp_end=(n:LVWord):>void=>$unsafe {
+    loop _ in [0..n) {fixed_paths.pop();}
+}
+fixed_path_of=(a:LVWord):>int64=>$unsafe {
+    if fixed_paths.length =? 0 {return -1}
+    let key=lpath_key(a)
+    if key =? 0 {return -1}
+    let i=fixed_paths.length - 1
+    loop i >=? 0 {
+        if fixed_paths.ptr[i].key =? key {return i}
+        i -= 1;
+    }
+    return -1
+}
+declared_in_scope=(l:LVWord):>bool=>$unsafe {
+    # Borrowed element locals have no destructor entry in scope_locals. Their
+    # marker is installed only when their declaration has been lowered.
+    if LVWord(locals.ptr[l].flags) & LF_ELEMENTVIEW not=? 0 {return true}
+    loop sl in scope_locals {
+        if sl.contains(l) {return true}
+    }
+    return false
+}
+uq_end=(n:LVWord):>void=>$unsafe {
+    loop _ in [0..n) {uniq_locals.pop();}
+}
+ug_fresh=(n:LVWord t:LVWord):>bool=>$unsafe {
+    if n =? 0 {return true}
+    if nodes.ptr[n].kind not=? 'array' {return false}
+    return nodes.ptr[n].b not=? 0 or nkids(n) =? 0 or not all_const(n LVWord(types.ptr[prune(t)].elem))
+}
+ug_scan=(n:LVWord ctx:LVWord):>void=>$unsafe {
+    # 0: value can escape, 1: only its storage is inspected/changed,
+    # -1: an address or mutable argument can expose the containing storage.
+    if n =? 0 {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' {return}
+    if k =? 'ident' {
+        if nodes.ptr[n].aux =? int32<overflow='wrap'>(2) {
+            let g:LVWord=LVWord(nodes.ptr[n].sym)
+            if ctx not=? 1 and g <? uniq_globals.length {uniq_globals.ptr[g] = false;}
+        }
+        else if nodes.ptr[n].aux =? int32<overflow='wrap'>(1) {
+            let g=alias_global(LVWord(nodes.ptr[n].sym))
+            if g >=? 0 and g <? uniq_globals.length {uniq_globals.ptr[g] = false;}
+        }
+        return
+    }
+    if k =? 'index' {
+        ug_scan(LVWord(nodes.ptr[n].a) (if ctx =? -1 {-1} else {if nodes.ptr[n].aux =? 1 {0} else {1}}));
+        ug_scan(LVWord(nodes.ptr[n].b) 0);
+        return
+    }
+    if k =? 'addr' {
+        ug_scan(LVWord(nodes.ptr[n].a) -1);
+        return
+    }
+    if k =? 'assign' {
+        let a:LVWord=LVWord(nodes.ptr[n].a)
+        let b:LVWord=LVWord(nodes.ptr[n].b)
+        if nodes.ptr[a].kind =? 'ident' and nodes.ptr[a].aux =? int32<overflow='wrap'>(2) and tkind(ntype(a)) =? 'array' and ug_fresh(b ntype(a)) {
+            ug_scan(a 1);
+        }
+        else {ug_scan(a 0);}
+        ug_scan(b 0);
+        return
+    }
+    if k =? 'vardecl' and has_flag(n NF_ALIASDECL) {
+        ug_scan(LVWord(nodes.ptr[n].b) -1);
+        return
+    }
+    if k =? 'intrinsic' {
+        let id=nodes.ptr[n].aux as IN
+        if nkids(n) >? 0 and (id =? IN.len or id =? IN.arrcap or id =? IN.push or id =? IN.pop or id =? IN.insert or id =? IN.remove or id =? IN.clear or id =? IN.reserve or id =? IN.resize or id =? IN.truncate or id =? IN.extend) {
+            ug_scan(kid(n 0) if ctx =? -1 {-1} else {1});
+            loop i in [1..nkids(n)) {ug_scan(kid(n i) 0);}
+            return
+        }
+    }
+    ug_scan(LVWord(nodes.ptr[n].a) if ctx =? -1 {-1} else {0});
+    ug_scan(LVWord(nodes.ptr[n].b) if ctx =? -1 {-1} else {0});
+    if k not=? 'for_' {
+        ug_scan(LVWord(nodes.ptr[n].c) if ctx =? -1 {-1} else {0});
+        if k not=? 'partial' {ug_scan(LVWord(nodes.ptr[n].d) if ctx =? -1 {-1} else {0});}
+    }
+    let mm=if k =? 'call' or k =? 'pair' {checked_call_mutmask(n)} else {0}
+    loop i in [0..nkids(n)) {
+        let arg=kid(n i)
+        ug_scan(arg if ctx =? -1 or mm & (1 << i) not=? 0 {-1} else {0});
+    }
+    loop i in [0..nkids2(n)) {ug_scan(kid2(n i) 0);}
+}
+find_unique_globals=(closed:bool):>void=>$unsafe {
+    uniq_globals.clear();
+    # Future interactive code can introduce copies. Late runtime helpers may
+    # reference prelude globals, so those are excluded from this closed world.
+    if not closed {return}
+    uniq_globals.resize(globals.length);
+    let any=false
+    loop g in global_ids {
+        if globals.ptr[g].state not=? 2 or globals.ptr[g].is_const or modules.ptr[LVWord(globals.ptr[g].mod)].is_prelude {continue}
+        let t=prune(LVWord(globals.ptr[g].type))
+        let d:LVWord=LVWord(globals.ptr[g].decl)
+        if types.ptr[t].kind not=? 'array' or nkids(d) not=? 0 {continue}
+        if ug_fresh(LVWord(nodes.ptr[d].b) t) {
+            uniq_globals.ptr[g] = true;
+            any=true
+        }
+    }
+    if not any {return}
+    # Initializers commonly expose every candidate (for example by passing a
+    # global array to a function). Disprove those before walking other bodies.
+    loop fi in init_fns {ug_scan(LVWord(fns.ptr[fi].body) 0);}
+    any=false
+    loop g in global_ids {
+        if uniq_globals.ptr[g] {any=true}
+    }
+    if not any {return}
+    loop f in fns {
+        if f.state =? 2 and not f.no_user_globals {ug_scan(LVWord(f.body) 0);}
+    }
+}
+is_uniq_array=(e:LVWord):>bool=>$unsafe {
+    if nodes.ptr[e].kind not=? 'ident' {return false}
+    let r:LVWord=LVWord(nodes.ptr[e].sym)
+    if nodes.ptr[e].aux =? int32<overflow='wrap'>(1) {return uniq_locals.contains(r)}
+    return nodes.ptr[e].aux =? int32<overflow='wrap'>(2) and r <? uniq_globals.length and uniq_globals.ptr[r]
+}
+simple_cond=(e:LVWord):>bool=>$unsafe {
+    let k=nodes.ptr[e].kind
+    if k =? 'bool_lit' {return true}
+    if k =? 'ident' {return nodes.ptr[e].aux =? int32<overflow='wrap'>(1)}
+    if k =? 'not_' {return simple_cond(LVWord(nodes.ptr[e].a))}
+    if k =? 'and_' or k =? 'or_' {return simple_cond(LVWord(nodes.ptr[e].a)) and simple_cond(LVWord(nodes.ptr[e].b))}
+    if k =? 'binary' and nodes.ptr[e].aux =? 0 {
+        let op=cx_token_values.ptr[LVWord(nodes.ptr[e].op)]
+        if not (op =? 'eq' or op =? 'ne' or op =? 'lt' or op =? 'le' or op =? 'gt' or op =? 'ge') {return false}
+        loop x in [LVWord(nodes.ptr[e].a) LVWord(nodes.ptr[e].b)] {
+            let xk=nodes.ptr[x].kind
+            if not (xk =? 'int_lit' or xk =? 'bool_lit' or (xk =? 'ident' and nodes.ptr[x].aux =? int32<overflow='wrap'>(1))) {return false}
+            if vc(ntype(x)) not=? VC_INT {return false}
+        }
+        return true
+    }
+    return false
+}

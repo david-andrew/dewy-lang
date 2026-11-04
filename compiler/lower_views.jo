@@ -1,0 +1,432 @@
+# Frozen recursive lowering from lower.jo.
+use 'lower.jo'
+use 'expr.jo'
+use 'check.jo'
+use 'ast.jo'
+use 'checker_state.dewy'
+use 'types.jo'
+use 'checker_tokens.dewy'
+use 'ir.jo'
+use 'callback_specialize.jo'
+use 'lower_analysis.dewy'
+use 'copies.jo'
+use 'facts.jo'
+use 'util.jo'
+use 'lower_storage.dewy'
+use 'ownership_types.dewy'
+use 'lower_ptr_reads.dewy'
+
+param_view_decl = (s: int, l: int) -> bool:
+    if (dbg_on and (not copies_on or not copy_strict(s))) or nodes[s].aux2 != 1: return false
+    if copies_on and copy_bindings.has(l): return false
+    fl = int(locals[l].flags)
+    if fl & (LF_ASSIGNED | LF_ADDR | LF_CAPTURE | LF_CAPTURED | LF_BYREF | LF_ALIAS | LF_PARAM) != 0 or is_shared(l): return false
+    # (exposed only by pointers read through, it can read the parameter's storage)
+    if fl & LF_EXPOSED != 0:
+        ptr_reads(cur_fn)
+        if pr_exposed.has(l): return false
+    # Most local initializers are not the parameter binding introduced by the
+    # frontend. Reject their shape before asking about layouts or closure types.
+    iv = int(nodes[s].b)
+    if iv == 0 or nodes[iv].kind != .ident or nodes[iv].aux != i32(int(SK.local)): return false
+    source = int(nodes[iv].sym)
+    flags = int(locals[source].flags)
+    if flags & LF_PARAM == 0 or flags & (LF_MUTPARAM | LF_ADDR | LF_CAPTURE | LF_CAPTURED) != 0: return false
+    if locals[source].owner != i32(cur_fn) or locals[source].name != locals[l].name: return false
+    t = prune(int(locals[l].type))
+    if not is_managed(t) and vc(t) != VC_AGG: return false
+    if (type_has_fn(t) and callback_local(l) < 0) or not type_eq(ntype(iv), t): return false
+    # Treat this binding as another read-only view of the parameter. It owns
+    # no reference and must not be dropped as a separately initialized local.
+    locals[l].vreg = locals[source].vreg
+    locals[l].offset = locals[source].offset
+    locals[l].flags = i32(fl | LF_PARAM)
+    true
+
+plain_read = (n: int) -> bool:
+    if n <= 0: return false
+    k = nodes[n].kind
+    if k == .int_lit or k == .str_lit: return true
+    if k == .ident:
+        if nodes[n].aux == i32(int(SK.global)): return true
+        if nodes[n].aux == i32(int(SK.local)): return int(locals[int(nodes[n].sym)].flags) & LF_ALIAS == 0
+        return false
+    # An implicit integer index narrowing reads its value without user code.
+    if k == .conv and nodes[n].aux == i32(int(CV.int_)) and prune(ntype(n)) == T_INT and is_int(ntype(int(nodes[n].a))):
+        return plain_read(int(nodes[n].a))
+    if k == .field:
+        a = int(nodes[n].a)
+        return nodes[n].aux >= 0 and tkind(ntype(a)) == .struct_ and plain_read(a)
+    if k == .index:
+        a = int(nodes[n].a)
+        kind = tkind(ntype(a))
+        return (kind == .array or kind == .fixed) and plain_read(a) and plain_read(int(nodes[n].b))
+    false
+
+held_opt_reg = (e: int) -> int:
+    if held_views.len() == 0 or nodes[e].kind != .ident or nodes[e].aux != i32(int(SK.local)): return -1
+    l = int(nodes[e].sym)
+    if int(locals[l].flags) & LF_HELDVIEW == 0 or tkind(int(locals[l].type)) != .opt: return -1
+    int(locals[l].vreg)
+
+held_encode_addr = (addr: int, t: int) -> int:
+    if tkind(t) != .opt: return addr
+    value = e_addi(addr, 0 - BOX_HDR)
+    has = opt_has(addr, telem(t))
+    result = vreg(VI)
+    emit(.select, VI, result, has, value, e_iconst(0), 0)
+    result
+
+find_views = (f: int):
+    held_views = {}
+    loop l in fns[f].locals:
+        if int(locals[l].flags) & (LF_HELDVIEW | LF_ELEMENTVIEW) != 0: locals[l].flags &= i32(~(LF_HELDVIEW | LF_ELEMENTVIEW | LF_BYREF))
+    hv_bad = {}
+    # (what C gives a function it calls is C's, which may change it meanwhile)
+    if dbg_on or fns[f].body == 0 or fns[f].cabi or (copies_on and copy_strict(int(fns[f].body))): return
+    rooted = false
+    loop l in fns[f].params:
+        # Recursive walks need this even in the fast development mode. Other
+        # managed aggregates retain release-only analysis; their layout flag
+        # lets default builds skip scanning unrelated function bodies.
+        if opt_release or int(types[prune(int(locals[l].type))].flags) & TF_BOXED != 0:
+            if hv_root(l): rooted = true
+    if not rooted: return
+    hv_given = []
+    hv_cand = {}
+    hv_bad = {}
+    hv_lambda = false
+    hv_scan(int(fns[f].body))
+    if hv_lambda or hv_given.len() == 0: return
+    # (assumed views until a value given cannot be one: what is left gives each other only parts)
+    changed = true
+    loop changed:
+        changed = false
+        loop g in hv_given:
+            if not hv_bad.contains(g.0) and not hv_part(g.1):
+                hv_bad[g.0] = true
+                changed = true
+    loop l in hv_cand.keys():
+        if hv_bad.contains(l): continue
+        held_views[l] = true
+        locals[l].flags = i32(int(locals[l].flags) | LF_BYREF | LF_HELDVIEW)
+
+hv_root = (l: int) -> bool:
+    if copy_inputs.has(l): return false
+    fl = int(locals[l].flags)
+    fl & (LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ASSIGNED | LF_ADDR | LF_EXPOSED | LF_SHARED) == 0 and vc(int(locals[l].type)) == VC_AGG and is_managed(int(locals[l].type)) and not type_has_fn(int(locals[l].type))
+
+hv_give = (l: int, v: int):
+    if ownership_type(int(locals[l].type)):
+        hv_bad[l] = true
+        return
+    fl = int(locals[l].flags)
+    # (a match's own variable is LF_ADDR: the match reads it in memory)
+    ok = v != 0 and fl & (LF_CAPTURE | LF_CAPTURED | LF_BYREF | LF_ALIAS | LF_PARAM | LF_EXPOSED) == 0 and (fl & LF_ADDR == 0 or locals[l].name == 0)
+    if not ok or is_shared(l) or not is_managed(int(locals[l].type)) or type_has_fn(int(locals[l].type)):
+        hv_bad[l] = true
+        return
+    hv_given.push((l, v))
+    hv_cand[l] = true
+
+hv_spoil = (p: int):
+    r = place_var(p)
+    if r != 0 and nodes[r].aux == i32(int(SK.local)): hv_bad[int(nodes[r].sym)] = true
+
+hv_scan = (n: int):
+    if n <= 0: return
+    k = nodes[n].kind
+    if k == .lambda:
+        hv_lambda = true
+        return
+    if k == .vardecl:
+        if nodes[n].nlist > 0:
+            loop i in [0..nkids(n)): hv_spoil(kid(n, i))
+        else if not has_flag(n, NF_GLOBAL):
+            l = int(nodes[n].sym)
+            # param_view_decl already proved this synthetic Dewy binding is
+            # the borrowed parameter itself. It is a root, not a candidate
+            # local whose LF_PARAM flag would disqualify every walk from it.
+            if nodes[n].aux2 != 1 or int(locals[l].flags) & LF_PARAM == 0: hv_give(l, int(nodes[n].b))
+    else if k == .iflet or k == .match_ or (k == .while_ and nodes[n].aux == 1): hv_give(int(nodes[n].sym), int(nodes[n].a))
+    else if k == .assign:
+        a = int(nodes[n].a)
+        if nodes[n].aux == 1:
+            loop i in [0..nkids(a)): hv_spoil(kid(a, i))
+        else if nodes[n].aux == 0 and nodes[n].op == i32(int(Tok.assign)) and nodes[a].kind == .ident and nodes[a].aux == i32(int(SK.local)) and int(locals[int(nodes[a].sym)].flags) & LF_ALIAS == 0: hv_give(int(nodes[a].sym), int(nodes[n].b))
+        else: hv_spoil(a)
+    else if k == .intrinsic and nkids(n) > 0:
+        id = nodes[n].aux as IN
+        if id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .reserve or id == .resize or id == .truncate or id == .setlen or id == .extend or id == .arrdata: hv_spoil(kid(n, 0))
+    else if k == .addr or (k == .cast or k == .conv) and raw_view(n): hv_spoil(int(nodes[n].a))
+    else if k == .for_ and has_flag(n, NF_MUT): hv_spoil(int(nodes[n].a))
+    fs = [int(nodes[n].a), int(nodes[n].b)]
+    if k != .for_: fs = [int(nodes[n].a), int(nodes[n].b), int(nodes[n].c), if k == .partial: 0 else: int(nodes[n].d)]
+    loop c in fs: hv_scan(c)
+    loop i in [0..nkids(n)):
+        c = kid(n, i)
+        if has_flag(c, NF_MUT): hv_spoil(c)
+        hv_scan(c)
+    loop i in [0..nkids2(n)): hv_scan(kid2(n, i))
+
+hv_part = (p: int) -> bool:
+    k = nodes[p].kind
+    if k == .ident:
+        if nodes[p].aux != i32(int(SK.local)): return false
+        l = int(nodes[p].sym)
+        fl = int(locals[l].flags)
+        if fl & LF_ALIAS != 0: return locals[l].alias != 0 and hv_part(int(locals[l].alias))
+        if fl & LF_PARAM != 0: return not hv_bad.contains(l) and hv_root(l)
+        return hv_cand.contains(l) and not hv_bad.contains(l)
+    if k == .field:
+        a = int(nodes[p].a)
+        tk = tkind(ntype(a))
+        return (nodes[p].aux == -3 or nodes[p].aux >= 0 and (tk == .struct_ or tk == .tuple)) and hv_part(a)
+    if k == .unwrap or k == .narrow: return hv_part(int(nodes[p].a))
+    false
+
+bounded_array_length = (array: int, loop_: int) -> bool:
+    if not plain_read(array): return false
+    key = lpath_key(array)
+    if key == 0: return false
+    summary = fact_storage_loop(loop_)
+    if summary.opaque: return false
+    loop killed in summary.kill:
+        if path_within(key, killed): return false
+    root = lpath_root(array)
+    if nodes[root].aux == i32(int(SK.global)): return not summary.calls
+    l = int(nodes[root].sym)
+    flags = int(locals[l].flags)
+    if flags & (LF_ALIAS | LF_CAPTURE | LF_BYREF) != 0 or is_shared(l): return false
+    flags & LF_MUTPARAM == 0 or not summary.calls
+
+bounded_open_for = (s: int) -> int:
+    if nodes[s].aux != 0: return 0
+    it = int(nodes[s].a)
+    if nodes[it].kind != .range or nodes[it].b != 0 or has_flag(it, NF_STEP): return 0
+    l = int(nodes[s].sym)
+    if not stable_loop_index(l) or (prune(int(locals[l].type)) != T_INT and prune(int(locals[l].type)) != T_MATH_INT): return 0
+    body = int(nodes[s].b)
+    if nkids(body) == 0: return 0
+    guard = kid(body, 0)
+    if nodes[guard].kind != .if_ or nodes[guard].c != 0: return 0
+    condition = int(nodes[guard].a)
+    if nodes[condition].kind != .not_: return 0
+    condition = int(nodes[condition].a)
+    if nodes[condition].kind != .binary or nodes[condition].aux != 0 or nodes[condition].op != i32(int(Tok.lt)): return 0
+    index = word_integer_value(int(nodes[condition].a))
+    if nodes[index].kind != .ident or nodes[index].aux != i32(int(SK.local)) or int(nodes[index].sym) != l: return 0
+    stop = word_integer_value(int(nodes[condition].b))
+    if prune(ntype(stop)) != T_INT and prune(ntype(stop)) != T_MATH_INT: return 0
+    stable = nodes[stop].kind == .int_lit or fixed_array_len(stop) >= 0
+    if nodes[stop].kind == .ident and nodes[stop].aux == i32(int(SK.local)):
+        end_local = int(nodes[stop].sym)
+        stable = stable_loop_index(end_local) and int(locals[end_local].flags) & LF_MUTPARAM == 0
+    if not stable and nodes[stop].kind == .intrinsic and nodes[stop].aux == i32(int(IN.len)) and nkids(stop) == 1:
+        array = kid(stop, 0)
+        stable = bounded_array_length(array, s)
+    if not stable: return 0
+    exit = int(nodes[guard].b)
+    if nodes[exit].kind == .block and nkids(exit) == 1: exit = kid(exit, 0)
+    if nodes[exit].kind != .break_ or nodes[exit].ival != 0 or nodes[exit].name != 0: return 0
+    # Make a lowering-only view; retain the checked source tree for tooling.
+    range = mk(.range, nodes[it].pos)
+    nodes[range] = nodes[it]
+    nodes[range].b = i32(stop)
+    clear_flag(range, NF_INCLUSIVE)
+    statements: int[]
+    loop i in [1..nkids(body)): statements.push(kid(body, i))
+    block = mk(.block, nodes[body].pos)
+    nodes[block] = nodes[body]
+    set_list(block, statements)
+    result = mk(.for_, nodes[s].pos)
+    nodes[result] = nodes[s]
+    nodes[result].a = i32(range)
+    nodes[result].b = i32(block)
+    result
+
+comprehension_value = (n: int) -> bool:
+    if n == 0: return true
+    k = nodes[n].kind
+    if k == .block or k == .lambda or k == .if_ or k == .iflet or k == .match_ or k == .for_ or k == .while_ or k == .return_ or k == .break_ or k == .continue_: return false
+    if not comprehension_value(int(nodes[n].a)) or not comprehension_value(int(nodes[n].b)) or not comprehension_value(int(nodes[n].c)): return false
+    loop child in kids(n):
+        if not comprehension_value(child): return false
+    true
+
+reserve_comprehension = (b: int):
+    if not has_flag(b, NF_COMPREHENSION) or nkids(b) != 3 or not files[pos_file(nodes[b].pos)].is_dewy: return
+    decl = kid(b, 0)
+    loop_ = kid(b, 1)
+    if nodes[decl].kind != .vardecl or nodes[loop_].kind != .for_: return
+    init = int(nodes[decl].b)
+    if nodes[init].kind != .array or nkids(init) != 0: return
+    it = int(nodes[loop_].a)
+    idx = int(nodes[loop_].sym)
+    if nodes[loop_].aux == 0:
+        if nodes[it].kind != .range or nodes[it].b == 0 or has_flag(it, NF_STEP) or has_flag(it, NF_INCLUSIVE): return
+        start = int(nodes[it].a)
+        if nodes[start].kind != .int_lit or nodes[start].ival != 0 or prune(ntype(int(nodes[it].b))) != T_INT: return
+    else if nodes[loop_].aux == 1:
+        k = tkind(ntype(it))
+        if k != .array and k != .fixed: return
+        idx = int(nodes[loop_].c)
+        # Unlike range loops, an array loop advances this actual index. It
+        # must stay unchanged even when the result uses incremental append.
+        if not stable_loop_index(idx): return
+    else: return
+    body = int(nodes[loop_].b)
+    nb = nkids(body)
+    if nb == 0 or nodes[kid(body, nb - 1)].kind != .exprstmt: return
+    # Combined index/value loops introduce local index bindings. Ordinary
+    # straight-line local declarations have the same one-result guarantee.
+    loop i in [0..nb - 1):
+        item = kid(body, i)
+        if nodes[item].kind != .vardecl or not comprehension_value(int(nodes[item].b)): return
+    push = int(nodes[kid(body, nb - 1)].a)
+    if nodes[push].kind != .intrinsic or nodes[push].aux != i32(int(IN.push)) or nkids(push) != 2: return
+    recv = kid(push, 0)
+    if nodes[recv].kind != .ident or nodes[recv].sym != nodes[decl].sym or not comprehension_value(kid(push, 1)): return
+    # aux2 is unused by range/array loops; d already owns the array snapshot.
+    nodes[loop_].aux2 = nodes[decl].sym
+    add_flag(loop_, NF_COMPREHENSION)
+    add_flag(push, NF_INBOUNDS)
+    # Plain elements need no partial-initialization cleanup. With an unchanged
+    # index, set the result length once and write directly to that index.
+    at = prune(int(locals[int(nodes[decl].sym)].type))
+    if not is_managed(int(types[at].elem)) and stable_loop_index(idx):
+        add_flag(loop_, NF_INBOUNDS)
+        add_flag(push, NF_COMPREHENSION)
+        comprehension_push_index[push] = idx
+
+fp_end = (n: int):
+    loop _ in [0..n): fixed_paths.pop()
+
+fixed_path_of = (a: int) -> int:
+    if fixed_paths.len() == 0: return -1
+    key = lpath_key(a)
+    if key == 0: return -1
+    i = fixed_paths.len() - 1
+    loop i >= 0:
+        if fixed_paths[i].key == key: return i
+        i -= 1
+    -1
+
+declared_in_scope = (l: int) -> bool:
+    # Borrowed element locals have no destructor entry in scope_locals. Their
+    # marker is installed only when their declaration has been lowered.
+    if int(locals[l].flags) & LF_ELEMENTVIEW != 0: return true
+    loop sl in scope_locals:
+        if sl.contains(l): return true
+    false
+
+uq_end = (n: int):
+    loop _ in [0..n): uniq_locals.pop()
+
+ug_fresh = (n: int, t: int) -> bool:
+    if n == 0: return true   # a typed, uninitialized array starts empty
+    if nodes[n].kind != .array: return false
+    nodes[n].b != 0 or nkids(n) == 0 or not all_const(n, int(types[prune(t)].elem))
+
+ug_scan = (n: int, ctx: int):
+    # 0: value can escape, 1: only its storage is inspected/changed,
+    # -1: an address or mutable argument can expose the containing storage.
+    if n == 0: return
+    k = nodes[n].kind
+    if k == .lambda: return  # checked bodies are scanned through fns
+    if k == .ident:
+        if nodes[n].aux == i32(int(SK.global)):
+            g = int(nodes[n].sym)
+            if ctx != 1 and g < uniq_globals.len(): uniq_globals[g] = false
+        else if nodes[n].aux == i32(int(SK.local)):
+            g = alias_global(int(nodes[n].sym))
+            if g >= 0 and g < uniq_globals.len(): uniq_globals[g] = false
+        return
+    if k == .index:
+        base = int(nodes[n].a)
+        context = if ctx == -1: -1 else: if nodes[n].aux == 1: 0 else: 1
+        ug_scan(base, context)
+        ug_scan(int(nodes[n].b), 0)
+        return
+    if k == .addr:
+        ug_scan(int(nodes[n].a), -1)
+        return
+    if k == .assign:
+        a = int(nodes[n].a)
+        b = int(nodes[n].b)
+        if nodes[a].kind == .ident and nodes[a].aux == i32(int(SK.global)) and tkind(ntype(a)) == .array and ug_fresh(b, ntype(a)):
+            ug_scan(a, 1)
+        else: ug_scan(a, 0)
+        ug_scan(b, 0)
+        return
+    if k == .vardecl and has_flag(n, NF_ALIASDECL):
+        ug_scan(int(nodes[n].b), -1)
+        return
+    if k == .intrinsic:
+        id = nodes[n].aux as IN
+        if nkids(n) > 0 and (id == .len or id == .arrcap or id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .reserve or id == .resize or id == .truncate or id == .extend):
+            arg = kid(n, 0)
+            context = if ctx == -1: -1 else: 1
+            ug_scan(arg, context)
+            loop i in [1..nkids(n)): ug_scan(kid(n, i), 0)
+            return
+    context = if ctx == -1: -1 else: 0
+    ug_scan(int(nodes[n].a), context)
+    ug_scan(int(nodes[n].b), context)
+    if k != .for_:
+        ug_scan(int(nodes[n].c), context)
+        if k != .partial: ug_scan(int(nodes[n].d), context)
+    mm = if k == .call or k == .pair: checked_call_mutmask(n) else: 0
+    loop i in [0..nkids(n)):
+        arg = kid(n, i)
+        arg_context = if ctx == -1 or mm & (1 << i) != 0: -1 else: 0
+        ug_scan(arg, arg_context)
+    loop i in [0..nkids2(n)): ug_scan(kid2(n, i), 0)
+
+find_unique_globals = (closed: bool):
+    uniq_globals.clear()
+    # Future interactive code can introduce copies. Late runtime helpers may
+    # reference prelude globals, so those are excluded from this closed world.
+    if not closed: return
+    uniq_globals.resize(globals.len())
+    any = false
+    loop g in global_ids:
+        if globals[g].state != 2 or globals[g].is_const or modules[int(globals[g].mod)].is_prelude: continue
+        t = prune(int(globals[g].type))
+        d = int(globals[g].decl)
+        if types[t].kind != .array or nkids(d) != 0: continue
+        if ug_fresh(int(nodes[d].b), t):
+            uniq_globals[g] = true
+            any = true
+    if not any: return
+    # Initializers commonly expose every candidate (for example by passing a
+    # global array to a function). Disprove those before walking other bodies.
+    loop fi in init_fns: ug_scan(int(fns[fi].body), 0)
+    any = false
+    loop g in global_ids:
+        if uniq_globals[g]: any = true
+    if not any: return
+    loop f in fns:
+        if f.state == 2 and not f.no_user_globals: ug_scan(int(f.body), 0)
+
+is_uniq_array = (e: int) -> bool:
+    if nodes[e].kind != .ident: return false
+    r = int(nodes[e].sym)
+    if nodes[e].aux == i32(int(SK.local)): return uniq_locals.contains(r)
+    nodes[e].aux == i32(int(SK.global)) and r < uniq_globals.len() and uniq_globals[r]
+
+simple_cond = (e: int) -> bool:
+    k = nodes[e].kind
+    if k == .bool_lit: return true
+    if k == .ident: return nodes[e].aux == i32(int(SK.local))
+    if k == .not_: return simple_cond(int(nodes[e].a))
+    if k == .and_ or k == .or_: return simple_cond(int(nodes[e].a)) and simple_cond(int(nodes[e].b))
+    if k == .binary and nodes[e].aux == 0:
+        op = nodes[e].op as Tok
+        if not (op == .eq or op == .ne or op == .lt or op == .le or op == .gt or op == .ge): return false
+        loop x in [int(nodes[e].a), int(nodes[e].b)]:
+            xk = nodes[x].kind
+            if not (xk == .int_lit or xk == .bool_lit or (xk == .ident and nodes[x].aux == i32(int(SK.local)))): return false
+            if vc(ntype(x)) != VC_INT: return false
+        return true
+    false
