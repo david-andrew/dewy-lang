@@ -151,6 +151,13 @@ dl_scan_calls = (f: int, n: int):
             if nodes[c].kind != .hole and nodes[c].sym > 0: dl_inits[int(nodes[c].sym)] = n
     # (the certified protocols' own channel waits are the library's, not the program's)
     if dc_on() and k == .call and nodes[n].aux == 0 and nodes[n].sym > 0 and not dc_is(int(fns[f].mod)) and int(fns[f].mod) != dc_protocols() and dc_chan_call(n) > 0: dc_fns[f] = true
+    # Spawning a failing sibling or canceling a group can end a queue wait,
+    # including through a helper that performs no queue operation itself.
+    if dc_on() and k == .call and nodes[n].aux == 0 and nodes[n].sym > 0:
+        g = int(nodes[n].sym)
+        if int(fns[g].mod) == concurrency_task_module and not pos_in_lib(nodes[n].pos):
+            d = int(fns[g].decl)
+            if d != 0 and name_of(int(nodes[d].name)) in ["__task_spawn", "cancel"]: dc_fns[f] = true
     if k != .lambda and k != .fnref:
         loop g in value_helper_calls(n):
             list = dl_callers.get(g) ?? []
@@ -825,6 +832,7 @@ dc_precise = true                # every channel named by the declaration that m
 dc_count = 0
 dc_closes = false                # some task closes a channel
 dc_cancels = false               # some task cancels a group by hand
+dc_cancelable_groups: {str: bool}
 # (the walk of one task)
 dc_ev: DcEvent[]
 dc_ffns: int[]                   # the functions entered, outermost first
@@ -1093,7 +1101,7 @@ dc_call = (n: int):
     gname = if d != 0: name_of(int(nodes[d].name)) else: ""
     if gname == "__task_spawn" and nkids(n) == 2:
         h = dl_fn_arg(kid(n, 1))
-        if h > 0 and dl_relevant.has(h) and fns[h].body != 0:
+        if h > 0 and fns[h].body != 0:
             if dc_pending.len() >= DC_ACTORS:
                 dc_complete = false
                 return
@@ -1151,7 +1159,9 @@ dc_collect = ():
         dc_held = []
         dc_branch = 0
         dc_multi = s.multi
-        dc_walk(int(fns[s.h].body))
+        # Even a task with no waits can cancel its siblings by failing. Keep
+        # its result summary, but demand a body walk only for relevant effects.
+        if dl_relevant.has(s.h): dc_walk(int(fns[s.h].body))
         dc_actors.push(DcActor(dc_ev, "the task spawned at {dl_line(s.site)}", s.multi, s.group, int(fns[s.h].ret)))
 
 # ---------------- what waits for what ----------------
@@ -1272,6 +1282,11 @@ dc_hold = (a: int, node: str, i: int, through: bool, how: str, ends: bool = fals
         dc_add_edge(node, w, sure == 2 and not ends, "{dc_actors[a].name} {text}{how}", evs[j].site)
 
 dc_edges_build = ():
+    # Demand one indexed cancellation summary per collected group. O(actors
+    # plus result members), then O(1) per join or no-peer wait.
+    dc_cancelable_groups.clear()
+    loop actor in dc_actors:
+        if actor.ret != 0 and dc_may_fail(actor.ret): dc_cancelable_groups[actor.group] = true
     # (each channel's drainers and fillers, by spawn site)
     drainers: {str: int[]} = {}
     fillers: {str: int[]} = {}
@@ -1338,8 +1353,10 @@ dc_edges_build = ():
             # An end passed on to a task/helper may close there without an
             # explicit queue verb. Absence of a verb is not absence of a closer.
             implicit = dc_ends.has(key)
-            if sure == 2 and dc_precise and dc_complete and not implicit: fatal(e.site, "{dc_actors[a].name} {text}, and {what}: it waits forever")
+            canceled = dc_cancelable(dc_actors[a].group)
+            if sure == 2 and dc_precise and dc_complete and not implicit and not canceled: fatal(e.site, "{dc_actors[a].name} {text}, and {what}: it waits forever")
             if implicit: what = "no explicit peer operation was found (an owned end may close on drop)"
+            if canceled: what += " (group cancellation may end the wait)"
             if dl_report_warn(e.site): dl_undecided(e.site, "{dc_actors[a].name} {text}, and {what}: it may wait forever")
     # (stage 1's lock order: one lock taken while holding another)
     loop e in dl_global_edges:
@@ -1348,10 +1365,7 @@ dc_edges_build = ():
 # Whether a group may be canceled while its join waits (a task's failure, or a cancel by hand):
 # then its waits may end, and a cycle through the join is undecided
 dc_cancelable = (group: str) -> bool:
-    if dc_cancels: return true
-    loop actor in dc_actors:
-        if actor.group == group and actor.ret != 0 and dc_may_fail(actor.ret): return true
-    false
+    dc_cancels or dc_cancelable_groups.has(group)
 
 # " at line N" of a group's join
 dc_join_line = (group: str) -> str:

@@ -1,0 +1,4 @@
+# modes: native native-release
+Fail:type=type of error
+fail=(g:TaskGroup):>void=>{spawn(g) Fail}
+main=()=>{let q=channel<int>(1) concurrent g {let r=spawn q.receive fail(g)} printl(r is? Canceled)}

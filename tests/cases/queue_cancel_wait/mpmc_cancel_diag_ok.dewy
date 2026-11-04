@@ -1,0 +1,2 @@
+# modes: native native-release
+main=()=>{let q=mpmc<int>(1) concurrent g {let r=spawn q.receive cancel(g)} printl(r is? Canceled)}

@@ -1,0 +1,3 @@
+# modes: native native-release
+Fail:type=type of error
+main=()=>{let q=mpmc<int>(1) concurrent {let r=spawn q.receive spawn Fail} printl(r is? Canceled)}

@@ -1,0 +1,3 @@
+# modes: native native-release
+wait=(ready:Channel<int> q:Channel<int>):>int|Closed|Canceled|Unsent<int>=>{ready.send(1) or_throw q.receive}
+main=()=>{let ready=channel<int>(1) let q=channel<int>(1) concurrent g {let w=spawn wait(ready q) ready.receive or_throw; cancel(g)} printl(w is? Canceled)}

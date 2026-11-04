@@ -1,0 +1,3 @@
+# modes: native native-release
+stop=(g:TaskGroup):>void=>{cancel(g)}
+main=()=>{let q=channel<int>(1) concurrent g {let r=spawn q.receive stop(g)} printl(r is? Canceled)}
