@@ -1,0 +1,1 @@
+main=()=>{let tx=mpmc<(int?)?>(2) let rx=tx let xs:array<int?>=[none] tx.send(xs.get(0)); let received=rx.receive if received is? Closed or received is? Canceled {printl("bad") return} let v:(int?)?=received if v isnt? none {printl(v is? none)} else {printl("bad")}}

@@ -1,0 +1,2 @@
+# modes: native native-release
+main=()=>{let tx=mpmc<(int?)?>(2) let rx=tx concurrent {spawn {tx.send(none); tx.close} let received=rx.receive if received is? Closed or received is? Canceled {printl("bad") return} let v:(int?)?=received printl(v is? none)}}

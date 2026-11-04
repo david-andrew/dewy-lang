@@ -1,0 +1,8 @@
+outcome=<T>(value:T?):>T?|string|none=>value
+main=()=>{
+    let xs:array<int?>=[none]
+    let received=outcome<int?>(xs.get(0))
+    if received is? string {printl(false) return}
+    let same:(int?)?=received
+    if same isnt? none {printl(same is? none)} else {printl(false)}
+}

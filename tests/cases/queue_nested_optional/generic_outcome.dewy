@@ -1,0 +1,8 @@
+outcome=<T>(value:T?):>T?|string=>value
+main=()=>{
+    let xs:array<int?>=[none]
+    let received=outcome<int?>(xs.get(0))
+    if received is? string {printl("bad") return}
+    let value:(int?)?=received
+    if value isnt? none {printl(value is? none)} else {printl("bad")}
+}

@@ -33,6 +33,8 @@ type_union_bind=(input:ptr<TypeUnionInput>):>UWord=>{uu_inputs=input; uu_instanc
 uu_mk_union=(ms0:array<int64>):>UWord=>$unsafe {
     let ms:array<int64>=[]
     let has_none=false
+    let flattened_none=false
+    let payload_none=false
     let work=ms0
     let i:UWord=0
     loop i <? work.length {
@@ -41,8 +43,12 @@ uu_mk_union=(ms0:array<int64>):>UWord=>$unsafe {
         let k=uu_inputs[0].types[0].ptr[m].kind
         if m =? uu_inputs[0].never[0] {continue} # (a value that never exists adds nothing)
         if k =? 'none_lit' {has_none=true}
-        else if k =? 'opt' {
+        # A nested optional is a payload with two independent presence bits.
+        # Keep it as one union alternative; flattening it would erase states.
+        # Defer unresolved payloads too: substitution may make them optional.
+        else if k =? 'opt' and not tu_has_var(UWord(uu_inputs[0].types[0].ptr[m].elem)) and uu_inputs[0].types[0].ptr[tu_prune(UWord(uu_inputs[0].types[0].ptr[m].elem))].kind not=? 'opt' {
             has_none=true
+            flattened_none=true
             work.push(UWord(uu_inputs[0].types[0].ptr[m].elem))
         }
         else if k =? 'enum_' and uu_inputs[0].structs[0].ptr[UWord(uu_inputs[0].types[0].ptr[m].st)].union_ {
@@ -55,6 +61,7 @@ uu_mk_union=(ms0:array<int64>):>UWord=>$unsafe {
             loop i in [UWord(0)..count) {work.push(UWord(members[first + i]))}
         }
         else {
+            if k =? 'opt' {payload_none=true}
             let dup=false
             loop x in ms {
                 if tu_equal(x  m) {dup=true}
@@ -98,7 +105,9 @@ uu_mk_union=(ms0:array<int64>):>UWord=>$unsafe {
     let r=uu_inputs[0].none_[0]
     if ms.length =? 1 {r=ms[0]}
     else if ms.length >? 1 {r=uu_union_inst(ms)}
-    if has_none and ms.length >? 0 {r=uu_inputs[0].host[0].mk_opt(r)}
+    # Explicit none is already in a preserved optional. Only a flattened
+    # optional needs the common wrapper restored for its value coercions.
+    if has_none and (not payload_none or flattened_none) and ms.length >? 0 {r=uu_inputs[0].host[0].mk_opt(r)}
     r
 }
 uu_union_inst=(ms:array<int64>):>UWord=>$unsafe {

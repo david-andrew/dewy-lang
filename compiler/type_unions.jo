@@ -31,6 +31,8 @@ type_union_bind = (input: *TypeUnionInput) -> int:
 uu_mk_union = (ms0: int[]) -> int:
     ms: int[]
     has_none = false
+    flattened_none = false
+    payload_none = false
     work = ms0
     i = 0
     loop i < work.len():
@@ -39,12 +41,16 @@ uu_mk_union = (ms0: int[]) -> int:
         k = uu_inputs[0].types[0][m].kind
         if m == uu_inputs[0].never[0]: continue           # (a value that never exists adds nothing)
         if k == .none_lit: has_none = true
-        else if k == .opt:
+        # Keep nested optional payloads intact: each layer has its own state.
+        # Defer unresolved payloads too: substitution may make them optional.
+        else if k == .opt and not tu_has_var(int(uu_inputs[0].types[0][m].elem)) and uu_inputs[0].types[0][tu_prune(int(uu_inputs[0].types[0][m].elem))].kind != .opt:
             has_none = true
+            flattened_none = true
             work.push(int(uu_inputs[0].types[0][m].elem))
         else if tu_is_union(m):
             loop x in tu_union_members(m): work.push(x)
         else:
+            if k == .opt: payload_none = true
             dup = false
             loop x in ms:
                 if tu_equal(x, m): dup = true
@@ -77,7 +83,9 @@ uu_mk_union = (ms0: int[]) -> int:
     r = uu_inputs[0].none_[0]
     if ms.len() == 1: r = ms[0]
     else if ms.len() > 1: r = uu_union_inst(ms)
-    if has_none and ms.len() > 0: r = uu_inputs[0].host[0].mk_opt(r)
+    # Explicit none is already in a preserved optional. Only a flattened
+    # optional needs the common wrapper restored for its value coercions.
+    if has_none and (not payload_none or flattened_none) and ms.len() > 0: r = uu_inputs[0].host[0].mk_opt(r)
     r
 
 uu_union_inst = (ms: int[]) -> int:
