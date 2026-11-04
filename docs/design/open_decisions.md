@@ -527,6 +527,24 @@ main = () => printl(shout("hi"))          # prints <hi>, not HI
 - **Spellings:** none new.
 - **Reversible:** (a) yes; (b) would change established semantics.
 
+### D25. A value read only on a branch that never runs, during start-up
+- **Today (built 11-04):** top-level code that reaches a module value through a call chain before that value's declaration runs is a compile error naming the chain. The check counts everything a function's code mentions, including branches that don't run for this call, so a program that would run correctly can be rejected.
+
+```dewy
+total = (use_limit:bool):>int => if use_limit limit else 0
+let start = total(false)    # rejected: total may read limit, which is declared below
+let limit:int = 10
+printl"{start}"             # as written it never reads limit, and would print 0
+```
+
+- **Options:**
+  - **a) Keep the conservative error (built).** Move the declaration up, and the program compiles.
+  - **b) Use the facts pass to discard branches it can prove don't run for this call.** More programs compile, at some compile-time cost and with more complex rules for when the error appears.
+  - **c) Check it at run time** when it can't be proven, under `$runtime_checks`.
+- **Rec:** (a). The fix is always one line, and the error names the chain. No repository program hit it.
+- **Spellings:** none new.
+- **Reversible:** yes; loosening later breaks nothing.
+
 ---
 
 ## P4: open-ended
