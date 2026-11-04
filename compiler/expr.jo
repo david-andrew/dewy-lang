@@ -8250,9 +8250,14 @@ call_int_literal = (n: int, ex: int) -> int:
     literal_target = ex
     if ex != 0 and types[ex].kind == .opt: literal_target = prune(int(types[ex].elem))
     if literal_target == 0 or literal_target == T_MATH_INT:
+        # The parser's oversized literal constructor has a literal sign.
+        # Keep that provenance on its packing conversion: the fact domain
+        # can retain the sign without pretending the magnitude fits int64.
+        sign = nodes[unnamed(kid(n, 0))].ival
         nodes[n].aux2 = 0
         check_expr(n, 0)
         coerce(n, T_MATH_INT)
+        if nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.big2math)): nodes[n].aux2 = i32(sign)
         last_checked = n
         return T_MATH_INT
     if not bundled_bigint_type(literal_target):

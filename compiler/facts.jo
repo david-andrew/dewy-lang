@@ -9595,8 +9595,9 @@ fact_literal = (s: mut FactState, n: int) -> int:
     x = ref_encoded(nodes[n].ival, ntype(n))
     # A uint64 constant is biased; its type lets a witness decode it.
     if fact_type(ntype(n)) == T_U64: return fact_new(s, FactBound(x, x, x != 0), FactTerm(origin = n, type = T_U64))
-    # (an `int` literal above int64 keeps its unsigned bits: beyond the host words)
-    if has_flag(n, NF_U64) and x < 0: return fact_new(s, FactBound(FACT_MAX, FACT_MAX, true, wide = true), FactTerm(origin = n, type = ntype(n)))
+    # An `int` literal above int64 is positive, with an open upper end.
+    # Keep its origin for uint64 guards; never claim a finite host endpoint.
+    if has_flag(n, NF_U64) and x < 0: return fact_new(s, FactBound(1, FACT_MAX, true), FactTerm(origin = n, type = T_MATH_INT))
     fact_constant(s, x, n)
 
 fact_capture_value = (n: int, s: mut FactState) -> int:
@@ -10097,6 +10098,11 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         if nodes[n].aux == i32(int(CV.refinement)): fact_covered = fact_refinement_covers(n)
         a = fact_capture(int(nodes[n].a), s)
         fact_covered = outer
+        # Only parser-originated oversized literals carry this sign marker.
+        # O(1) at a demanded conversion; open endpoints are not exact values.
+        if nodes[n].aux == i32(int(CV.big2math)) and nodes[n].aux2 != 0:
+            bound = if nodes[n].aux2 < 0: FactBound(FACT_MIN, -1, true) else: FactBound(1, FACT_MAX, true)
+            return fact_new(s, bound, FactTerm(origin = n, type = T_MATH_INT))
         # Widening a signed word/exact word expression to int is the same
         # mathematical value, even when its interval is unbounded. Reuse its
         # value and provenance; unsigned coordinates still need decoding below.
