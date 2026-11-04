@@ -1,0 +1,75 @@
+# Fail closed: a parameter may only be invoked or forwarded to another proven
+# invocation-only parameter. In-progress summaries are false, closing cycles.
+# Aggregates, escaping captures, rebinding and return values remain excluded.
+$runtime_checks
+from p"ast.jo" import (nodes nkids nkids2 kid kid2 has_flag NF_GENERIC)
+from p"check.jo" import (fns locals modules LF_ASSIGNED LF_ADDR LF_EXPOSED LF_SHARED LF_MUTPARAM)
+from p"copies.jo" import (copy_consumes)
+from p"util.jo" import (files pos_file name_of)
+# Node.aux retains its existing symbol-kind encoding (local 1, global 2).
+CBWord:type=int64<overflow='wrap'>
+let stack_closure_params:dict<int64 bool>=dict<int64 bool>()
+closure_invoked_only=(n:CBWord l:CBWord called:bool=false):>bool=>$unsafe {
+    if n =? 0 {return true}
+    let k=nodes.ptr[n].kind
+    if k =? 'fn_' {return true}
+    if k =? 'lambda' {
+        let f:CBWord=CBWord(nodes.ptr[n].sym)
+        if f <=? 0 or has_flag(n NF_GENERIC) {return false}
+        loop cap in fns.ptr[f].caps {
+            if cap.outer not=? int32(l) {continue}
+            let inn:CBWord=CBWord(cap.inner)
+            if not called or CBWord(locals.ptr[inn].flags) & (LF_ASSIGNED | LF_ADDR | LF_EXPOSED | LF_SHARED) not=? 0 {return false}
+            if not closure_invoked_only(CBWord(fns.ptr[f].body) inn) {return false}
+        }
+        return true
+    }
+    if k =? 'ident' {return called or nodes.ptr[n].aux not=? 1 or nodes.ptr[n].sym not=? int32(l)}
+    let a:CBWord=CBWord(nodes.ptr[n].a)
+    let direct=k =? 'call' and nodes.ptr[n].aux =? 1
+    if not closure_invoked_only(a l direct) {return false}
+    if not closure_invoked_only(CBWord(nodes.ptr[n].b) l) {return false}
+    if k not=? 'for_' {
+        if not closure_invoked_only(CBWord(nodes.ptr[n].c) l) {return false}
+        if k not=? 'partial' and not closure_invoked_only(CBWord(nodes.ptr[n].d) l) {return false}
+    }
+    loop i in [0..nkids(n)) {
+        let arg=kid(n i)
+        let forwarded=k =? 'call' and nodes.ptr[n].aux =? 0 and (nodes.ptr[arg].kind =? 'lambda' or nodes.ptr[arg].kind =? 'ident' and nodes.ptr[arg].aux =? 1 and nodes.ptr[arg].sym =? int32(l)) and closure_borrow_param(CBWord(nodes.ptr[n].sym) i)
+        if not closure_invoked_only(arg l forwarded) {return false}
+    }
+    loop i in [0..nkids2(n)) {
+        if not closure_invoked_only(kid2(n i) l) {return false}
+    }
+    true
+}
+closure_borrow_param=(f:CBWord i:CBWord):>bool=>$unsafe {
+    if f <=? 0 or i >=? fns.ptr[f].params.length or fns.ptr[f].cabi {return false}
+    let d:CBWord=CBWord(fns.ptr[f].decl)
+    if d =? 0 or copy_consumes(f i) {return false}
+    # The fork-join runtime borrows this closure's raw address only until its
+    # scoped join returns. AST address-taking cannot express that contract.
+    if i =? 1 and modules.ptr[CBWord(fns.ptr[f].mod)].is_prelude and name_of(CBWord(nodes.ptr[d].name)) =? "__parallel_run" {return true}
+    let p=fns.ptr[f].params.ptr[i]
+    if stack_closure_params.has(p) {return stack_closure_params[p]}
+    stack_closure_params[p] = false
+    if CBWord(locals.ptr[p].flags) & (LF_MUTPARAM | LF_ASSIGNED | LF_ADDR | LF_EXPOSED) not=? 0 {return false}
+    let body:CBWord=CBWord(fns.ptr[f].body)
+    if not files.ptr[pos_file(nodes.ptr[d].pos)].is_dewy {
+        let ok=closure_invoked_only(body p)
+        stack_closure_params[p] = ok
+        return ok
+    }
+    loop j in [0..nkids(body)) {
+        let s=kid(body j)
+        if nodes.ptr[s].kind not=? 'vardecl' or nodes.ptr[s].aux2 not=? 1 {break}
+        let iv:CBWord=CBWord(nodes.ptr[s].b)
+        if iv =? 0 or nodes.ptr[iv].kind not=? 'ident' or nodes.ptr[iv].aux not=? 1 or nodes.ptr[iv].sym not=? int32(p) {continue}
+        let l:CBWord=CBWord(nodes.ptr[s].sym)
+        if CBWord(locals.ptr[l].flags) & (LF_ASSIGNED | LF_ADDR | LF_EXPOSED | LF_SHARED) not=? 0 {return false}
+        let ok=closure_invoked_only(body l)
+        stack_closure_params[p] = ok
+        return ok
+    }
+    false
+}
