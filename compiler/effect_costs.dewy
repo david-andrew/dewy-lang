@@ -1,7 +1,7 @@
 $runtime_checks
 from p"effect_types.dewy" import (EffectAtom EffectEvent PlaceIdentity)
 from p"effect_library.jo" import (EffectClass effect_class_text)
-from p"effects.jo" import (EffectEdge effect_bound_sites effect_bounds_proven effect_limit effect_oom_frame effect_policy effect_summaries effects_active)
+from p"effects.jo" import (EffectEdge effect_bound_sites effect_bounds_proven effect_limit effect_policy effect_summaries effects_active)
 from p"dewy_reader_types.dewy" import (EffectKind)
 from p"check.jo" import (FK_INIT FK_PARTIAL LF_MUTPARAM fns lib_dir locals)
 from p"expr.jo" import (IN is_fn_type is_map_type ntype)
@@ -16,6 +16,7 @@ from p"ownership.jo" import (ownership_decls)
 from p"ownership_types.dewy" import (ownership_type)
 from p"panic_inventory.dewy" import (panic_format_literal panic_format_spec)
 from p"refine.jo" import (representation_type)
+from p"effect_scan.dewy" import (effect_oom_frame)
 # Effect cost and signature inventory; shared state has one owner in effects.jo.
 EffectCostsWord:type=int64<overflow='wrap'>
 # A reviewed library operation's class (effect_library.jo) as its summary: its

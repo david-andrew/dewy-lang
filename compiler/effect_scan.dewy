@@ -1,0 +1,868 @@
+$runtime_checks
+from p"effect_types.dewy" import (EffectAtom EffectEvent PlaceIdentity)
+from p"effects.jo" import (EffectEdge effect_contracts effect_counters effect_exact_rep effect_footprints_only effect_for_marks effect_limit effect_owner_init effect_policy effect_seen effect_summaries effects_active)
+from p"effect_costs.dewy" import (effect_bounds effect_cleanup effect_failure effect_intrinsic_cost effect_plan_cost)
+from p"dewy_reader_types.dewy" import (EffectKind)
+from p"expr.jo" import (IN is_fn_type ntype)
+from p"isolation.jo" import (IsolationReason isolation_children isolation_effect isolation_intrinsic)
+from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_EXPOSED LF_MUTPARAM LF_PARAM LF_SHARED compound_op fns globals locals readonly_global)
+from p"ast.jo" import (NF_GENERIC NF_GLOBAL NF_INBOUNDS NF_MUT NF_SPREAD NF_STMT NF_U64 RANGE_EXHAUSTION has_flag kid kid2 nkids nkids2 nodes)
+from p"type_layout.dewy" import (TF_BOXED)
+from p"types.jo" import (T_MATH_INT T_NEVER T_VOID fields is_int is_managed is_vec layout prune structs telem tkind type_eq types zonk)
+from p"checked_eval.dewy" import (cx_token_values)
+from p"lower.jo" import (VC_VOID)
+from p"effect_contracts.dewy" import (callable_base callable_contract)
+from p"copies.jo" import (copies_on copy_bindings copy_strict)
+from p"ir.jo" import (dbg_on)
+from p"effect_graph.dewy" import (effect_add effect_opaque)
+from p"effect_values.dewy" import (effect_count_literal effect_float effect_float_op effect_plain effect_scalar effect_share effect_simple_enum effect_value effect_word_op)
+from p"effect_lattice.dewy" import (effect_intern place_base)
+from p"effect_control.dewy" import (effect_name)
+from p"effect_sites.dewy" import (effect_scalar_sites effect_use_sites)
+from p"effect_sources.dewy" import (effect_source_row)
+from p"exact.jo" import (exact_effect_representation exact_local_width exact_raw_value exact_small_math)
+from p"facts.jo" import (fact_comparison fact_fixed_comprehension fact_fixed_comprehension_exact fact_floor_call fact_open_range fact_shift_obliged fact_stepped_loop fact_string_call fn_in_lib)
+from p"nd_contracts.jo" import (fact_nd_reads_only nd_shape_predicates)
+from p"ownership.jo" import (ownership_decls ownership_literal_print)
+from p"ownership_types.dewy" import (ownership_scalar)
+from p"panic_inventory.dewy" import (panic_literal_step)
+from p"places.jo" import (place_append place_project place_route place_scalar_root)
+from p"lower_analysis.dewy" import (raw_view)
+from p"refine.jo" import (ref_predicates representation_type)
+from p"lower_storage.dewy" import (vc)
+# Demanded body and place scanning; shared state has one owner in effects.jo.
+EffectScanWord:type=int64<overflow='wrap'>
+# Locals never cross call edges. Externally visible roots use owner-qualified
+# formal ordinals, global declarations, or conservatively opaque provenance.
+effect_export=(f:EffectScanWord p0:PlaceIdentity):>PlaceIdentity=>$unsafe {
+    let p=place_base(p0)
+    if p.root =? 'local' {
+        let l=p.declaration
+        if l <=? 0 or l >=? locals.length {return PlaceIdentity['local' 0 0]}
+        let fl:EffectScanWord=EffectScanWord(locals.ptr[l].flags)
+        if fl & (LF_CAPTURE | LF_SHARED | LF_CAPTURED) not=? 0 {return PlaceIdentity['local' 0 0]}
+        if fl & LF_MUTPARAM not=? 0 {
+            loop i in [0..fns.ptr[f].params.length) {
+                if fns.ptr[f].params.ptr[i] =? l {return place_append(PlaceIdentity['formal' f i + 1] p0)}
+            }
+            return PlaceIdentity['local' 0 0]
+        }
+    }
+    return p0
+}
+# Identity alone is not a storage proof. Recursive fields can introduce
+# box_unique (allocation/detach) while taking the address of a scalar leaf.
+# Consult the same layout/boxed-field decision as both lowerers.
+effect_place_inventory=(n:EffectScanWord depth:EffectScanWord=0):>bool=>$unsafe {
+    if n =? 0 or depth >? 32 {return false}
+    let k=nodes.ptr[n].kind
+    if k =? 'addr' {return effect_place_inventory(EffectScanWord(nodes.ptr[n].a) depth + 1)}
+    if effect_fixed_index(n) {return effect_place_inventory(EffectScanWord(nodes.ptr[n].a) depth + 1)}
+    if k =? 'field' {
+        let t=prune(ntype(EffectScanWord(nodes.ptr[n].a)))
+        # A swizzle accesses inline lanes of its vector, with no hooks or box.
+        if nodes.ptr[n].aux =? -4 and is_vec(t) {return effect_place_inventory(EffectScanWord(nodes.ptr[n].a) depth + 1)}
+        # (a tuple's element, `a[0]`, is inline storage of the tuple)
+        if nodes.ptr[n].aux =? -2 and tkind(representation_type(t)) =? 'tuple' {return effect_place_inventory(EffectScanWord(nodes.ptr[n].a) depth + 1)}
+        if types.ptr[t].kind not=? 'struct_' or nodes.ptr[n].aux <? 0 {return false}
+        layout(t);
+        let fi:EffectScanWord=EffectScanWord(structs.ptr[EffectScanWord(types.ptr[t].st)].fields) + EffectScanWord(nodes.ptr[n].aux)
+        if fields.ptr[fi].boxed {return false}
+        return effect_place_inventory(EffectScanWord(nodes.ptr[n].a) depth + 1)
+    }
+    if k not=? 'ident' {return false}
+    if nodes.ptr[n].aux =? int32<overflow='wrap'>(2) {return true}
+    if nodes.ptr[n].aux not=? int32<overflow='wrap'>(1) {return false}
+    let l:EffectScanWord=EffectScanWord(nodes.ptr[n].sym)
+    let flags:EffectScanWord=EffectScanWord(locals.ptr[l].flags)
+    if flags & LF_ALIAS not=? 0 {
+        # (a binding narrowed by `is?` names its payload, or the union's
+        # remaining members: the test proved the tag)
+        return effect_place_inventory(effect_narrowed(EffectScanWord(locals.ptr[l].alias)) depth + 1)
+    }
+    return flags & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF | LF_EXPOSED) =? 0
+}
+# `mk(i).x`, `rect(i).w`: a field of a direct call's result reads the
+# temporary only, never a place. Every level is an inline value (no hook,
+# box or owner), so the read adds nothing to the call's own effects. O(depth).
+effect_field_root=(n0:EffectScanWord):>int64=>$unsafe {
+    let n=n0
+    loop depth in [0..32) {
+        if nodes.ptr[n].kind not=? 'field' {return n}
+        n=EffectScanWord(nodes.ptr[n].a)
+    }
+    return 0
+}
+effect_temporary_field=(n0:EffectScanWord):>bool=>$unsafe {
+    let root=effect_field_root(n0)
+    if root =? 0 or nodes.ptr[root].kind not=? 'call' or nodes.ptr[root].aux not=? 0 {return false}
+    let n=n0
+    loop n not=? root {
+        let t=representation_type(ntype(EffectScanWord(nodes.ptr[n].a)))
+        if not effect_value(ntype(n)) or not effect_value(t) {return false}
+        if nodes.ptr[n].aux =? -4 {
+            if not is_vec(t) {return false}
+        }
+        else if nodes.ptr[n].aux =? -2 {
+            if tkind(t) not=? 'tuple' {return false}
+        }
+        else {
+            if tkind(t) not=? 'struct_' or nodes.ptr[n].aux <? 0 {return false}
+            layout(t);
+            if fields.ptr[EffectScanWord(structs.ptr[EffectScanWord(types.ptr[t].st)].fields) + EffectScanWord(nodes.ptr[n].aux)].boxed {return false}
+        }
+        n=EffectScanWord(nodes.ptr[n].a)
+    }
+    return true
+}
+# A refinement whose atoms name only the value itself, literals and type
+# limits: no formal or lexical dependency to read. O(atoms).
+effect_self_contract=(t0:EffectScanWord):>bool=>$unsafe {
+    let t=zonk(t0)
+    if types.ptr[t].kind not=? 'refined' {return false}
+    loop atom in ref_predicates.ptr[EffectScanWord(types.ptr[t].st)] {
+        loop term in [atom.a atom.b] {
+            if term.kind not=? 0 and term.kind not=? 1 and term.kind not=? 4 {return false}
+        }
+    }
+    return true
+}
+# The value a narrowing alias reads: an optional's payload, a union's member,
+# or the union's remaining members re-tagged in place; n itself otherwise.
+effect_narrowed=(n:EffectScanWord):>int64=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if k =? 'unwrap' or k =? 'narrow' or k =? 'conv' and nodes.ptr[n].aux =? int32<overflow='wrap'>(9) and effect_share(ntype(n)) and effect_share(ntype(EffectScanWord(nodes.ptr[n].a))) {return EffectScanWord(nodes.ptr[n].a)}
+    return n
+}
+# `xs[i]`: one index. The checker keeps the written selector as the only kid
+# (a compound update reads a captured copy); scanning both is conservative.
+effect_single_index=(n:EffectScanWord):>bool=>$unsafe {
+    return nodes.ptr[n].kind =? 'index' and nodes.ptr[n].b not=? 0 and nkids(n) <=? 1
+}
+# An element of a fixed array is inline storage of the array: `xs[i]` with a
+# word index. Element routes are coarse (the whole array), never invented.
+effect_fixed_index=(n:EffectScanWord):>bool=>$unsafe {
+    if not effect_single_index(n) {return false}
+    let t=representation_type(ntype(EffectScanWord(nodes.ptr[n].a)))
+    return tkind(t) =? 'fixed' and effect_plain(EffectScanWord(types.ptr[t].elem)) and effect_word(EffectScanWord(nodes.ptr[n].b))
+}
+# A read-only element read: a fixed array's, or an array of shares' (a
+# shared immutable view; reading it neither detaches nor allocates).
+effect_index_read=(n:EffectScanWord):>bool=>$unsafe {
+    if effect_fixed_index(n) {return true}
+    if not effect_single_index(n) {return false}
+    let t=representation_type(ntype(EffectScanWord(nodes.ptr[n].a)))
+    return tkind(t) =? 'array' and effect_share(telem(t)) and effect_word(EffectScanWord(nodes.ptr[n].b))
+}
+effect_route=(n:EffectScanWord depth:EffectScanWord=0):>PlaceIdentity=>$unsafe {
+    if depth >? 32 {return PlaceIdentity['local' 0 0]}
+    let k=nodes.ptr[n].kind
+    if k =? 'addr' or effect_fixed_index(n) {return effect_route(EffectScanWord(nodes.ptr[n].a) depth + 1)}
+    # A write of any lane conservatively writes the whole vector place.
+    if k =? 'field' and nodes.ptr[n].aux =? -4 and is_vec(ntype(EffectScanWord(nodes.ptr[n].a))) {return effect_route(EffectScanWord(nodes.ptr[n].a) depth + 1)}
+    # (and a tuple element's, the whole tuple's)
+    if k =? 'field' and nodes.ptr[n].aux =? -2 and tkind(representation_type(ntype(EffectScanWord(nodes.ptr[n].a)))) =? 'tuple' {return effect_route(EffectScanWord(nodes.ptr[n].a) depth + 1)}
+    if k =? 'field' and tkind(ntype(EffectScanWord(nodes.ptr[n].a))) =? 'struct_' {return place_project(effect_route(EffectScanWord(nodes.ptr[n].a) depth + 1) EffectScanWord(nodes.ptr[n].name))}
+    if k =? 'ident' and nodes.ptr[n].aux =? int32<overflow='wrap'>(1) and EffectScanWord(locals.ptr[EffectScanWord(nodes.ptr[n].sym)].flags) & LF_ALIAS not=? 0 {
+        # (a binding narrowed by `is?` reads the optional's or union's own storage)
+        let alias:EffectScanWord=EffectScanWord(locals.ptr[EffectScanWord(nodes.ptr[n].sym)].alias)
+        if effect_narrowed(alias) not=? alias {return effect_route(effect_narrowed(alias) depth + 1)}
+    }
+    if k =? 'field' or k =? 'ident' and nodes.ptr[n].aux =? int32<overflow='wrap'>(1) and EffectScanWord(locals.ptr[EffectScanWord(nodes.ptr[n].sym)].flags) & LF_ALIAS not=? 0 {return place_route(n depth)}
+    return place_scalar_root(n)
+}
+# The selectors a target place evaluates: element indices and their bounds.
+effect_target_parts=(f:EffectScanWord n:EffectScanWord depth:EffectScanWord=0):>void=>$unsafe {
+    if n =? 0 or depth >? 32 {return}
+    let k=nodes.ptr[n].kind
+    if effect_fixed_index(n) {
+        effect_scan_node(f EffectScanWord(nodes.ptr[n].b));
+        loop i in [0..nkids(n)) {effect_scan_node(f kid(n i));}
+        effect_bounds(f n);
+    }
+    if k =? 'addr' or k =? 'field' or effect_fixed_index(n) {effect_target_parts(f EffectScanWord(nodes.ptr[n].a) depth + 1);}
+}
+# A semantic integer that provably stays a small immediate (no promotion, no
+# check): a nonnegative literal, a small counter, and sums, differences and
+# products of them. Its magnitude bound, or -1.
+effect_small=(n:EffectScanWord depth:EffectScanWord=0):>int64=>$unsafe {
+    if n =? 0 or depth >? 8 {return -1}
+    let bounded=exact_small_math(n)
+    if bounded >=? 0 {return bounded}
+    let k=nodes.ptr[n].kind
+    if k =? 'int_lit' and is_int(ntype(n)) and not has_flag(n NF_U64) and nodes.ptr[n].ival >=? 0 {return if nodes.ptr[n].ival <? (1 << 31) {nodes.ptr[n].ival} else {-1}}
+    if k =? 'ident' and nodes.ptr[n].aux =? int32<overflow='wrap'>(1) and prune(ntype(n)) =? T_MATH_INT {return effect_counters.get(EffectScanWord(nodes.ptr[n].sym)) ?? (-1)}
+    # (a value-preserving integer conversion of a small value)
+    if k =? 'conv' and (nodes.ptr[n].aux =? int32<overflow='wrap'>(1) or nodes.ptr[n].aux =? int32<overflow='wrap'>(0)) and is_int(ntype(n)) {return effect_small(EffectScanWord(nodes.ptr[n].a) depth + 1)}
+    if k not=? 'binary' or nodes.ptr[n].aux not=? 0 or prune(ntype(n)) not=? T_MATH_INT {return -1}
+    let op=cx_token_values.ptr[EffectScanWord(nodes.ptr[n].op)]
+    if op not=? 'plus' and op not=? 'minus' and op not=? 'star' {return -1}
+    let a:EffectScanWord=effect_small(EffectScanWord(nodes.ptr[n].a) depth + 1)
+    let b:EffectScanWord=effect_small(EffectScanWord(nodes.ptr[n].b) depth + 1)
+    if a <? 0 or b <? 0 {return -1}
+    let r=if op =? 'star' {a * b} else {a + b}
+    if r >=? (1 << 40) {return -1}
+    return r
+}
+# A word operand, or a semantic integer that stays a small immediate.
+effect_word=(n:EffectScanWord):>bool=>$unsafe {
+    return effect_scalar(ntype(n)) or effect_small(n) >=? 0
+}
+# An integer: a word or an `int`.
+effect_integer=(n:EffectScanWord):>bool=>$unsafe {
+    let t=representation_type(ntype(n))
+    return t =? T_MATH_INT or effect_scalar(t) and types.ptr[t].kind =? 'int_'
+}
+# The word inside a value-preserving widening of a word to `int`, or n.
+effect_unwidened=(n:EffectScanWord):>int64=>$unsafe {
+    if nodes.ptr[n].kind =? 'conv' and (nodes.ptr[n].aux =? int32<overflow='wrap'>(1) or nodes.ptr[n].aux =? int32<overflow='wrap'>(0)) and prune(ntype(n)) =? T_MATH_INT and effect_scalar(ntype(EffectScanWord(nodes.ptr[n].a))) {return EffectScanWord(nodes.ptr[n].a)}
+    return n
+}
+# A counted loop over a word range: its bounds are evaluated once, and its
+# counter is a private word (or a small semantic integer, recorded).
+effect_range_loop=(n:EffectScanWord):>bool=>$unsafe {
+    let it:EffectScanWord=EffectScanWord(nodes.ptr[n].a)
+    if nodes.ptr[it].kind not=? 'range' or nodes.ptr[n].sym <=? 0 {return false}
+    let l:EffectScanWord=EffectScanWord(nodes.ptr[n].sym)
+    let small=prune(EffectScanWord(locals.ptr[l].type)) =? T_MATH_INT
+    if not small and not effect_scalar(EffectScanWord(locals.ptr[l].type)) {return false}
+    if EffectScanWord(locals.ptr[l].flags) & (LF_ASSIGNED | LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF | LF_ADDR | LF_EXPOSED) not=? 0 {return false}
+    let bound:EffectScanWord=0
+    loop c in [EffectScanWord(nodes.ptr[it].a) EffectScanWord(nodes.ptr[it].b) EffectScanWord(nodes.ptr[it].c)] {
+        if c =? 0 {continue}
+        if small {
+            let m=effect_small(c)
+            if m <? 0 {return false}
+            bound=max(bound m + 1)
+        }
+        else if not effect_scalar(ntype(c)) and not effect_count_literal(c) {return false}
+    }
+    if small {effect_counters[l] = bound;}
+    return true
+}
+# A counted loop over an `int` range whose bounds are not proven small, `loop
+# c in [a[0]..b[0]]`: the same private counter, whose steps and comparisons
+# may make a big integer (an allocation). O(1).
+effect_big_range_loop=(n:EffectScanWord):>bool=>$unsafe {
+    let it:EffectScanWord=EffectScanWord(nodes.ptr[n].a)
+    if nodes.ptr[it].kind not=? 'range' or nodes.ptr[n].sym <=? 0 {return false}
+    let l:EffectScanWord=EffectScanWord(nodes.ptr[n].sym)
+    if prune(EffectScanWord(locals.ptr[l].type)) not=? T_MATH_INT {return false}
+    if EffectScanWord(locals.ptr[l].flags) & (LF_ASSIGNED | LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF | LF_ADDR | LF_EXPOSED) not=? 0 {return false}
+    loop c in [EffectScanWord(nodes.ptr[it].a) EffectScanWord(nodes.ptr[it].b) EffectScanWord(nodes.ptr[it].c)] {
+        if c not=? 0 and prune(ntype(c)) not=? T_MATH_INT and not effect_scalar(ntype(c)) {return false}
+    }
+    return true
+}
+# A fixed array literal is built in place: its elements, or zeros.
+effect_fixed_literal=(n:EffectScanWord):>bool=>$unsafe {
+    let t=representation_type(ntype(n))
+    if nodes.ptr[n].kind not=? 'array' or nodes.ptr[n].b not=? 0 or tkind(t) not=? 'fixed' or not effect_plain(t) {return false}
+    loop i in [0..nkids(n)) {
+        let c=kid(n i)
+        if has_flag(c NF_SPREAD) {return false}
+    }
+    return true
+}
+# Proven immutable startup constants need no external read: a literal word,
+# or a fixed array of literal words.
+effect_const_literal=(g:EffectScanWord):>bool=>$unsafe {
+    if globals.ptr[g].is_const {
+        let init:EffectScanWord=EffectScanWord(globals.ptr[g].init)
+        return init not=? 0 and (nodes.ptr[init].kind =? 'int_lit' or nodes.ptr[init].kind =? 'bool_lit')
+    }
+    if not readonly_global(g) {return false}
+    let init:EffectScanWord=EffectScanWord(nodes.ptr[EffectScanWord(globals.ptr[g].decl)].b)
+    if init =? 0 {return false}
+    if nodes.ptr[init].kind =? 'conv' and nodes.ptr[init].aux =? int32<overflow='wrap'>(0) {init=EffectScanWord(nodes.ptr[init].a)}
+    if nodes.ptr[init].kind not=? 'array' or nodes.ptr[init].b not=? 0 or tkind(representation_type(EffectScanWord(globals.ptr[g].type))) not=? 'fixed' {return false}
+    loop i in [0..nkids(init)) {
+        let c=kid(init i)
+        if nodes.ptr[c].kind not=? 'int_lit' and nodes.ptr[c].kind not=? 'bool_lit' or has_flag(c NF_SPREAD) {return false}
+    }
+    return true
+}
+effect_access=(f:EffectScanWord n:EffectScanWord write:bool):>void=>$unsafe {
+    if not effect_value(ntype(n)) or not effect_place_inventory(n) {effect_opaque(f n);}
+    if write and nodes.ptr[n].kind =? 'field' {
+        let t=representation_type(ntype(EffectScanWord(nodes.ptr[n].a)))
+        layout(t);
+        if EffectScanWord(types.ptr[t].flags) & TF_BOXED not=? 0 {effect_plan_cost(f n 1 << 2);}
+    }
+    let p=effect_export(f effect_route(n))
+    if p.declaration =? 0 {
+        effect_opaque(f n);
+        return
+    }
+    if p.root =? 'local' {return}
+    if p.root =? 'global' and not write and effect_const_literal(p.declaration) {return}
+    let kind=if write {'write'} else {'read'}
+    effect_add(f EffectEvent[EffectAtom[kind p] n]);
+}
+effect_isolation_block=(f:EffectScanWord reason:IsolationReason n:EffectScanWord):>void=>$unsafe {
+    if effect_summaries.ptr[f].isolation =? IsolationReason.none_ {
+        effect_summaries.ptr[f].isolation = reason;
+        effect_summaries.ptr[f].isolation_witness = n;
+    }
+}
+# One full collection even after a blocker. Legacy isolation reuses the
+# conservative blocker and direct edges from this scan, never a row permission.
+# A bounded backward proof for storage costs only. An invocation contract does
+# not prove that copying an arbitrary environment is free. Join every source;
+# lost provenance, recursion or an exposed entry point remains unknown.
+effect_bare=(n:EffectScanWord depth:EffectScanWord=0):>bool=>$unsafe {
+    if n =? 0 or depth >? 16 {return false}
+    let k=nodes.ptr[n].kind
+    if k =? 'conv' {return effect_bare(EffectScanWord(nodes.ptr[n].a) depth + 1)}
+    if k =? 'lambda' and not has_flag(n NF_GENERIC) {return nodes.ptr[n].sym >? 0 and fns.ptr[EffectScanWord(nodes.ptr[n].sym)].caps.length =? 0}
+    if k =? 'fnref' {return nodes.ptr[n].aux not=? 1 and nodes.ptr[n].aux not=? 2 and nodes.ptr[n].sym >? 0 and not fns.ptr[EffectScanWord(nodes.ptr[n].sym)].has_env}
+    if k not=? 'ident' or nodes.ptr[n].aux not=? int32<overflow='wrap'>(1) {return false}
+    let l:EffectScanWord=EffectScanWord(nodes.ptr[n].sym)
+    let flags:EffectScanWord=EffectScanWord(locals.ptr[l].flags)
+    if flags & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_ADDR | LF_EXPOSED) not=? 0 {return false}
+    if flags & LF_PARAM not=? 0 {
+        let owner:EffectScanWord=EffectScanWord(locals.ptr[l].owner)
+        let slot:EffectScanWord=-1
+        loop i in [0..fns.ptr[owner].params.length) {
+            if fns.ptr[owner].params.ptr[i] =? l {slot=i}
+        }
+        if slot <? 0 or fns.ptr[owner].cabi or (fns.ptr[owner].export_name).length not=? 0 {return false}
+        let found=false
+        loop q in effect_use_sites(owner) {
+            if nodes.ptr[q].kind =? 'fnref' and nodes.ptr[q].sym =? int32<overflow='wrap'>(owner) {return false}
+            if nodes.ptr[q].kind not=? 'call' or nodes.ptr[q].aux not=? 0 or nodes.ptr[q].sym not=? int32<overflow='wrap'>(owner) {continue}
+            if slot >=? nkids(q) or not effect_bare(kid(q slot) depth + 1) {return false}
+            found=true
+        }
+        return found
+    }
+    let found=false
+    loop q in effect_scalar_sites(l) {
+        if nodes.ptr[q].kind =? 'vardecl' and not has_flag(q NF_GLOBAL) and nodes.ptr[q].sym =? int32<overflow='wrap'>(l) {
+            if not effect_bare(EffectScanWord(nodes.ptr[q].b) depth + 1) {return false}
+            found=true
+        }
+        if nodes.ptr[q].kind =? 'assign' and place_scalar_root(EffectScanWord(nodes.ptr[q].a)) =? PlaceIdentity['local' EffectScanWord(locals.ptr[l].owner) l] {
+            if not effect_bare(EffectScanWord(nodes.ptr[q].b) depth + 1) {return false}
+        }
+    }
+    return found
+}
+effect_readonly_binding=(n:EffectScanWord):>bool=>$unsafe {
+    if nodes.ptr[n].kind not=? 'vardecl' or nodes.ptr[n].aux2 not=? 1 {return false}
+    if dbg_on and (not copies_on or not copy_strict(n)) {return false}
+    let l:EffectScanWord=EffectScanWord(nodes.ptr[n].sym)
+    let a:EffectScanWord=EffectScanWord(nodes.ptr[n].b)
+    if a =? 0 or nodes.ptr[a].kind not=? 'ident' or nodes.ptr[a].aux not=? int32<overflow='wrap'>(1) {return false}
+    let p:EffectScanWord=EffectScanWord(nodes.ptr[a].sym)
+    if EffectScanWord(locals.ptr[p].flags) & LF_PARAM =? 0 or EffectScanWord(locals.ptr[p].flags) & (LF_MUTPARAM | LF_ADDR | LF_CAPTURE | LF_CAPTURED) not=? 0 {return false}
+    if locals.ptr[p].owner not=? locals.ptr[l].owner or locals.ptr[p].name not=? locals.ptr[l].name or not type_eq(EffectScanWord(locals.ptr[p].type) EffectScanWord(locals.ptr[l].type)) {return false}
+    if copies_on and copy_bindings.has(l) {return false}
+    if EffectScanWord(locals.ptr[l].flags) & (LF_ASSIGNED | LF_ADDR | LF_CAPTURE | LF_CAPTURED | LF_BYREF | LF_ALIAS | LF_EXPOSED | LF_SHARED) not=? 0 {return false}
+    let t=representation_type(EffectScanWord(locals.ptr[l].type))
+    if tkind(t) =? 'array' and effect_scalar(telem(t)) {return true}
+    return is_fn_type(t) and effect_bare(a)
+}
+effect_indirect=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
+    let callee:EffectScanWord=EffectScanWord(nodes.ptr[n].a)
+    let contract=callable_contract(ntype(callee))
+    if contract =? 0 and (effects_active or effect_policy.prohibitions not=? 0) {contract=effect_source_row(callee)}
+    effect_scan_node(f callee);
+    let ft=callable_base(ntype(callee))
+    loop i in [0..nkids(n)) {
+        let a=kid(n i)
+        if EffectScanWord(types.ptr[ft].mutmask) & (1 << i) =? 0 {effect_scan_node(f a);}
+        else if not effect_place_inventory(a) {effect_opaque(f a);}
+    }
+    if contract =? 0 {
+        effect_opaque(f n);
+        return
+    }
+    let row=effect_contracts.ptr[contract]
+    if row.variables.length not=? 0 {effect_opaque(f n);}
+    if row.open {
+        # Preserve proven nonlocal exclusions instead of turning an open bound
+        # into an unconstrained opaque call. Formal exclusions need remapping.
+        let exclusions:array<EffectAtom>=[]
+        loop ex in row.exclusions {
+            if place_base(ex.place).root not=? 'formal' {exclusions.push(ex);}
+        }
+        let remainder=effect_intern([] exclusions [] true)
+        effect_add(f EffectEvent[EffectAtom['remainder' row = remainder] n]);
+    }
+    loop atom0 in row.atoms {
+        let atom=atom0
+        let base=place_base(atom.place)
+        if base.root =? 'formal' {
+            let i:EffectScanWord=EffectScanWord(base.declaration) - 1
+            if i <? 0 or i >=? nkids(n) {atom=EffectAtom['opaque']}
+            else {
+                let actual=effect_export(f place_route(kid(n i)))
+                atom.place = place_append(actual atom.place);
+                if atom.place.declaration =? 0 {atom=EffectAtom['opaque']}
+                else if atom.place.root =? 'local' {continue}
+            }
+        }
+        effect_add(f EffectEvent[atom n]);
+    }
+}
+# A call of the frame compiler/oom.jo wraps an allocating function's body in
+# under `$explicit_allocation_failure` (`__setjmp(__oom_frame())` included).
+effect_oom_frame=(n:EffectScanWord):>bool=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if k =? 'intrinsic' and nodes.ptr[n].aux =? int32<overflow='wrap'>(39) and nkids(n) =? 1 {return effect_oom_frame(kid(n 0))}
+    if k not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 or nkids(n) not=? 0 {return false}
+    let g:EffectScanWord=EffectScanWord(nodes.ptr[n].sym)
+    if g >=? fns.length or fns.ptr[g].decl =? 0 or not fn_in_lib(g) {return false}
+    let name=effect_name(g)
+    return name in? ["__oom_frame" "__oom_caught" "__oom_release" "__oom_unsupported"]
+}
+effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
+    if n =? 0 or effect_footprints_only and effect_summaries.ptr[f].footprint_opaque {return}
+    if effect_seen.ptr[n] =? f {return}
+    effect_seen.ptr[n] = f;
+    let k=nodes.ptr[n].kind
+    let exact_rep=effect_exact_rep
+    if exact_rep and (k =? 'vardecl' or k =? 'assign' or k =? 'binary' or k =? 'conv') {exact_effect_representation(n);}
+    if k =? 'for_' {
+        let marks=effect_for_marks.get(EffectScanWord(nodes.ptr[n].sym)) ?? []
+        if not marks.contains(n) {
+            marks.push(n);
+            effect_for_marks[EffectScanWord(nodes.ptr[n].sym)] = marks;
+    # These shortened place walks omit evaluated-root visits. Keep the legacy
+    # adapter conservative rather than accidentally proving a global/alias pure.
+        }
+    }
+    if k =? 'field' or k =? 'assign' {effect_isolation_block(f IsolationReason.node n);}
+    let hidden:array<int64>=[]
+    let reason=isolation_effect(n @hidden)
+    if reason not=? IsolationReason.none_ {effect_isolation_block(f reason n);}
+    if k =? 'ident' {
+        if nodes.ptr[n].aux =? int32<overflow='wrap'>(2) {effect_isolation_block(f IsolationReason.global_ n);}
+        else if nodes.ptr[n].aux not=? int32<overflow='wrap'>(1) {effect_isolation_block(f IsolationReason.node n);}
+        else if EffectScanWord(locals.ptr[EffectScanWord(nodes.ptr[n].sym)].flags) & (LF_CAPTURE | LF_ADDR) not=? 0 {effect_isolation_block(f IsolationReason.capture n);}
+    }
+    if ownership_decls.length not=? 0 {
+        let source:EffectScanWord=0
+        if k =? 'vardecl' or k =? 'assign' {source=EffectScanWord(nodes.ptr[n].b)}
+        else if k =? 'return_' or k =? 'conv' and nodes.ptr[n].aux =? int32<overflow='wrap'>(13) {source=EffectScanWord(nodes.ptr[n].a)}
+        if source not=? 0 {effect_owner_init(f source n);}
+    # (`$assert` is erased: proven at compile time, its operands never run)
+    }
+    if k =? 'intrinsic' and nodes.ptr[n].aux =? int32<overflow='wrap'>(66) {return}
+    # (an explicit-allocation-failure frame's bookkeeping, compiler/oom.jo: the
+    # frame exists only for a function that may allocate, and its thread-state
+    # words are the allocator's own; it is allocation, not an external effect)
+    if effect_oom_frame(n) {
+        effect_add(f EffectEvent[EffectAtom['alloc'] n]);
+        return
+    }
+    if k =? 'intrinsic' and nodes.ptr[n].aux2 =? int32<overflow='wrap'>(RANGE_EXHAUSTION) {
+        effect_failure(f n);
+        return
+    }
+    if k =? 'intrinsic' {
+        let cost=effect_intrinsic_cost(nodes.ptr[n].aux as IN)
+        effect_plan_cost(f n cost);
+        if nkids(n) >? 0 and cost >? 0 and isolation_intrinsic(nodes.ptr[n].aux as IN) {
+            effect_access(f kid(n 0) true);
+        }
+    }
+    if k =? 'array' and (nkids(n) >? 0 or nodes.ptr[n].b not=? 0) and not effect_fixed_literal(n) {effect_plan_cost(f n 1 << 2);}
+    if k =? 'str_lit' and nkids(n) >? 0 {effect_plan_cost(f n 1 << 2);}
+    # (an interpolated part: its formatter writes the interpolation's own buffer)
+    if k =? 'pair' and nodes.ptr[n].sym >? 0 and nodes.ptr[n].b =? 0 {
+        effect_summaries.ptr[f].edges.push(EffectEdge[EffectScanWord(nodes.ptr[n].sym) n [PlaceIdentity['local' f n]]]);
+        effect_scan_node(f EffectScanWord(nodes.ptr[n].a));
+        return
+    }
+    if k =? 'lambda' and nodes.ptr[n].sym >? 0 and fns.ptr[EffectScanWord(nodes.ptr[n].sym)].caps.length not=? 0 {
+        effect_plan_cost(f n 1 << 2);
+    }
+    if k =? 'partial' {effect_plan_cost(f n 1 << 2);}
+    if k =? 'conv' and (nodes.ptr[n].aux =? int32<overflow='wrap'>(10) or nodes.ptr[n].aux =? int32<overflow='wrap'>(8) or nodes.ptr[n].aux =? int32<overflow='wrap'>(13) and not effect_plain(ntype(n)) and not ownership_scalar(ntype(n))) {
+        effect_plan_cost(f n 1 << 2);
+    }
+    if k =? 'call' and nodes.ptr[n].aux =? 2 {
+        effect_cleanup(f ntype(n) n PlaceIdentity['local' f n]);
+        let t=representation_type(ntype(n))
+        layout(t);
+        if EffectScanWord(types.ptr[t].flags) & TF_BOXED not=? 0 {effect_plan_cost(f n 1 << 2);}
+    }
+    if k =? 'vardecl' and not has_flag(n NF_GLOBAL) and nodes.ptr[n].sym >? 0 {
+        let l:EffectScanWord=EffectScanWord(nodes.ptr[n].sym)
+        effect_cleanup(f EffectScanWord(locals.ptr[l].type) n effect_export(f PlaceIdentity['local' f l]));
+    }
+    if ownership_literal_print(n) {
+        effect_add(f EffectEvent[EffectAtom['io'] n]);
+        effect_isolation_block(f IsolationReason.node n);
+        return
+    }
+    if k =? 'call' and nodes.ptr[n].aux =? 1 {
+        effect_indirect(f n);
+        return
+    # (a comprehension into a fixed array of plain elements fills it in place:
+    # a counted range loop and its element values; a count not proven to be
+    # the length may fail)
+    }
+    if k =? 'conv' and nodes.ptr[n].aux =? int32<overflow='wrap'>(11) and fact_fixed_comprehension(EffectScanWord(nodes.ptr[n].a) ntype(n)) not=? 0 {
+        let b:EffectScanWord=EffectScanWord(nodes.ptr[n].a)
+        let loop_=kid(b 1)
+        let push=fact_fixed_comprehension(b ntype(n))
+        if nodes.ptr[loop_].aux not=? 0 or not effect_range_loop(loop_) {
+            effect_opaque(f n);
+            return
+        }
+        let inner:array<int64>=[]
+        if isolation_effect(loop_ @inner) not=? IsolationReason.none_ {effect_isolation_block(f IsolationReason.node loop_);}
+        loop g in inner {effect_summaries.ptr[f].edges.push(EffectEdge[g loop_ []]);}
+        let it:EffectScanWord=EffectScanWord(nodes.ptr[loop_].a)
+        loop c in [EffectScanWord(nodes.ptr[it].a) EffectScanWord(nodes.ptr[it].b) EffectScanWord(nodes.ptr[it].c)] {effect_scan_node(f c);}
+        let body:EffectScanWord=EffectScanWord(nodes.ptr[loop_].b)
+        loop i in [0..nkids(body) - 1) {effect_scan_node(f kid(body i));}
+        effect_scan_node(f kid(push 1));
+        if not fact_fixed_comprehension_exact(b ntype(n)) {effect_failure(f n);}
+        return
+    # (a builtin floor `//` or `%` on words is the inline word operation; only
+    # a divisor not proven nonzero can fail)
+    }
+    if k =? 'call' and nodes.ptr[n].aux =? 0 and effect_scalar(ntype(n)) and fact_floor_call(n) not=? 0 {
+        loop j in [0..nkids(n)) {effect_scan_node(f kid(n j));}
+        if fact_floor_call(n) <=? 2 {effect_failure(f n);}
+        return
+    }
+    if effect_footprints_only and k =? 'call' and fact_nd_reads_only(n) and effect_value(ntype(kid(n 0))) {
+        loop j in [0..nkids(n)) {effect_scan_node(f kid(n j));}
+        return
+    }
+    if k =? 'call' and nodes.ptr[n].aux =? 0 {
+        let g:EffectScanWord=EffectScanWord(nodes.ptr[n].sym)
+        let routes:array<PlaceIdentity>=[]
+        if g <=? 0 or g >=? effect_limit {
+            effect_opaque(f n);
+            return
+        }
+        loop i in [0..nkids(n)) {
+            let a=kid(n i)
+            let mutable=i <? fns.ptr[g].params.length and EffectScanWord(locals.ptr[fns.ptr[g].params.ptr[i]].flags) & LF_MUTPARAM not=? 0
+            if mutable {
+                effect_isolation_block(f IsolationReason.node a);
+                let p=effect_export(f place_route(a))
+                routes.push(p);
+                if p.declaration =? 0 or not effect_place_inventory(a) {effect_opaque(f a);}
+                # A supported place route has no evaluated selector or helper.
+                # Unsupported actuals must still contribute their own effects.
+                if p.declaration =? 0 {effect_scan_node(f a);}
+            }
+            else {
+                routes.push(PlaceIdentity['local' 0 0]);
+                effect_scan_node(f a);
+                if ownership_decls.length not=? 0 {effect_owner_init(f a n);}
+            }
+        }
+        effect_summaries.ptr[f].edges.push(EffectEdge[g n routes]);
+        if not effect_value(EffectScanWord(fns.ptr[g].ret)) and EffectScanWord(fns.ptr[g].ret) not=? T_VOID {effect_opaque(f n);}
+        # (a string index or slice: in bounds by the caller's facts, or a possible failure)
+        if fact_string_call(n) >=? 2 {effect_failure(f n);}
+        return
+    # A plain array element replacement writes its containing array route (a
+    # field's or a variable's), not sibling record fields. COW may
+    # allocate/detach; indexing may fail. Hooks and unsupported selectors keep
+    # the ordinary opaque fallback.
+    }
+    if k =? 'assign' and nodes.ptr[n].op =? int32<overflow='wrap'>(47) {
+        let target:EffectScanWord=EffectScanWord(nodes.ptr[n].a)
+        if nodes.ptr[target].kind =? 'index' and (nodes.ptr[EffectScanWord(nodes.ptr[target].a)].kind =? 'field' or nodes.ptr[EffectScanWord(nodes.ptr[target].a)].kind =? 'ident') and effect_index_read(target) and tkind(representation_type(ntype(EffectScanWord(nodes.ptr[target].a)))) =? 'array' {
+            effect_target_parts(f EffectScanWord(nodes.ptr[target].a));
+            effect_access(f EffectScanWord(nodes.ptr[target].a) true);
+            effect_scan_node(f EffectScanWord(nodes.ptr[target].b));
+            loop j in [0..nkids(target)) {effect_scan_node(f kid(target j));}
+            effect_bounds(f target);
+            effect_plan_cost(f n (1 << 2) | (1 << 3));
+            effect_scan_node(f EffectScanWord(nodes.ptr[n].b));
+            return
+        }
+    }
+    if k =? 'assign' {
+        effect_target_parts(f EffectScanWord(nodes.ptr[n].a));
+        effect_access(f EffectScanWord(nodes.ptr[n].a) true);
+        if nodes.ptr[n].op not=? int32<overflow='wrap'>(47) {
+            effect_access(f EffectScanWord(nodes.ptr[n].a) false);
+            if not effect_word_op(cx_token_values.ptr[compound_op(EffectScanWord(nodes.ptr[n].op))]) {effect_opaque(f n);}
+            # (an `int` shifted by a signed count fails for a negative one: facts.jo)
+            else if fact_shift_obliged(n) and not effect_count_literal(EffectScanWord(nodes.ptr[n].b)) {effect_failure(f n);}
+        }
+        effect_scan_node(f EffectScanWord(nodes.ptr[n].b));
+        return
+    }
+    if k =? 'ident' and nodes.ptr[n].aux =? int32<overflow='wrap'>(1) {
+        let l:EffectScanWord=EffectScanWord(nodes.ptr[n].sym)
+        if exact_rep and prune(ntype(n)) =? T_MATH_INT and not exact_raw_value(n) and exact_local_width(l) >? 0 and effect_small(n) <? 0 {
+            effect_plan_cost(f n 1 << 2);
+        }
+        if effect_small(n) >=? 0 {return}
+        let t=representation_type(ntype(n))
+        if is_fn_type(t) and effect_bare(n) {return}
+        if tkind(t) =? 'array' and effect_scalar(telem(t)) and EffectScanWord(locals.ptr[l].flags) & LF_PARAM not=? 0 {
+            if EffectScanWord(locals.ptr[l].flags) & LF_MUTPARAM =? 0 {return}
+            # (a mutable parameter's storage is the caller's: reading it is a read of the formal)
+            let p=effect_export(f place_scalar_root(n))
+            if p.declaration not=? 0 and p.root =? 'formal' {
+                effect_add(f EffectEvent[EffectAtom['read' p] n]);
+                return
+            }
+        }
+        if effect_share(t) and EffectScanWord(locals.ptr[l].flags) & LF_BYREF not=? 0 {
+            loop q in (effect_for_marks.get(l) ?? []) {
+                if effect_seen.ptr[q] =? f and nodes.ptr[q].kind =? 'for_' and nodes.ptr[q].sym =? int32<overflow='wrap'>(l) and not has_flag(q NF_MUT) and tkind(ntype(EffectScanWord(nodes.ptr[q].a))) =? 'array' {return}
+            }
+        }
+        let fb:EffectScanWord=EffectScanWord(fns.ptr[f].body)
+        loop qi in [0..nkids(fb)) {
+            let st=kid(fb qi)
+            if nodes.ptr[st].kind =? 'vardecl' and not has_flag(st NF_GLOBAL) and nodes.ptr[st].sym =? int32<overflow='wrap'>(l) and effect_readonly_binding(st) {return}
+        }
+    }
+    if k =? 'field' and effect_temporary_field(n) {
+        effect_scan_node(f effect_field_root(n));
+        return
+    }
+    if k =? 'ident' or k =? 'field' {
+        effect_access(f n false);
+        return
+    }
+    let small_range=k =? 'for_' and effect_range_loop(n)
+    let big_range=k =? 'for_' and not small_range and effect_big_range_loop(n)
+    if small_range or big_range {
+        loop c in [EffectScanWord(nodes.ptr[EffectScanWord(nodes.ptr[n].a)].a) EffectScanWord(nodes.ptr[EffectScanWord(nodes.ptr[n].a)].b) EffectScanWord(nodes.ptr[EffectScanWord(nodes.ptr[n].a)].c) EffectScanWord(nodes.ptr[n].b)] {effect_scan_node(f c);}
+        if big_range {effect_plan_cost(f n 1 << 2);}
+        # (a zero step fails unless the owner's facts show it is not: facts.jo fact_step_check)
+        if fact_open_range(n) or fact_stepped_loop(n) and not panic_literal_step(EffectScanWord(nodes.ptr[n].a)) {effect_failure(f n);}
+        loop g in hidden {effect_summaries.ptr[f].edges.push(EffectEdge[g n []]);}
+        return
+    }
+    if effect_index_read(n) {
+        effect_scan_node(f EffectScanWord(nodes.ptr[n].a));
+        effect_scan_node(f EffectScanWord(nodes.ptr[n].b));
+        loop j in [0..nkids(n)) {effect_scan_node(f kid(n j));}
+        effect_bounds(f n);
+        return
+    }
+    let supported=false
+    if exact_rep and (k =? 'binary' or k =? 'unary' or k =? 'conv') and prune(ntype(n)) =? T_MATH_INT and exact_raw_value(n) {supported=true}
+    else if k =? 'intrinsic' {supported=effect_intrinsic_cost(nodes.ptr[n].aux as IN) >=? 0}
+    else if k =? 'call' and nodes.ptr[n].aux =? 2 {supported=effect_share(ntype(n))}
+    # (a member into a union of shares: `return Oops` from `:>(int64|Oops)`)
+    else if k =? 'call' and nodes.ptr[n].aux =? 3 {supported=effect_share(ntype(n))}
+    # (a literal is static data; an interpolation's allocation is counted above)
+    else if k =? 'str_lit' {supported=true}
+    else if k =? 'fnref' or k =? 'lambda' {supported=effect_bare(n)}
+    else if k =? 'for_' {supported=tkind(ntype(EffectScanWord(nodes.ptr[n].a))) =? 'array' and effect_share(telem(ntype(EffectScanWord(nodes.ptr[n].a)))) and not has_flag(n NF_MUT)}
+    # (an `int` literal is a constant, whatever its sign)
+    else if k =? 'int_lit' or k =? 'bool_lit' {supported=effect_scalar(ntype(n)) or effect_count_literal(n) or effect_small(n) >=? 0 or k =? 'int_lit' and prune(ntype(n)) =? T_MATH_INT and not has_flag(n NF_U64)}
+    else if k =? 'float_lit' {supported=effect_float(ntype(n))}
+    # (a growable array of shares is a fresh allocation, counted above; its
+    # elements, spreads and collected loops answer for their own operations)
+    else if k =? 'array' {supported=effect_fixed_literal(n) or tkind(representation_type(ntype(n))) =? 'array' and effect_share(telem(representation_type(ntype(n))))}
+    # (a conditional loop is visible control flow, not a hidden cost: its
+    # condition and body answer for their own operations)
+    else if k =? 'block' or k =? 'exprstmt' or k =? 'return_' or k =? 'if_' or k =? 'while_' or k =? 'and_' or k =? 'or_' or k =? 'not_' or k =? 'defer_' or k =? 'break_' or k =? 'continue_' {supported=true}
+    else if k =? 'tuple' {supported=effect_share(ntype(n))}
+    else if k =? 'vardecl' and nkids(n) >? 0 {
+        # (unpacking plain components into private locals)
+        supported=effect_plain(ntype(EffectScanWord(nodes.ptr[n].b))) and not has_flag(n NF_GLOBAL)
+        loop j in [0..nkids(n)) {
+            let c=kid(n j)
+            if nodes.ptr[c].kind =? 'hole' {continue}
+            if has_flag(c NF_GLOBAL) or nodes.ptr[c].sym <=? 0 {supported=false}
+            else if EffectScanWord(locals.ptr[EffectScanWord(nodes.ptr[c].sym)].flags) & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF) not=? 0 {supported=false}
+        }
+    }
+    else if k =? 'vardecl' {
+        let l:EffectScanWord=EffectScanWord(nodes.ptr[n].sym)
+        if effect_readonly_binding(n) {return}
+        supported=l >? 0 and (effect_value(EffectScanWord(locals.ptr[l].type)) or is_fn_type(EffectScanWord(locals.ptr[l].type)) and effect_bare(EffectScanWord(nodes.ptr[n].b))) and EffectScanWord(locals.ptr[l].flags) & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF) =? 0
+    }
+    else if k =? 'binary' {
+        let shift=nodes.ptr[n].op =? int32<overflow='wrap'>(67) or nodes.ptr[n].op =? int32<overflow='wrap'>(68)
+        let count_ok=effect_scalar(ntype(EffectScanWord(nodes.ptr[n].b))) or shift and effect_count_literal(EffectScanWord(nodes.ptr[n].b))
+        supported=nodes.ptr[n].aux =? 0 and effect_word_op(cx_token_values.ptr[EffectScanWord(nodes.ptr[n].op)]) and effect_scalar(ntype(EffectScanWord(nodes.ptr[n].a))) and count_ok
+        # (word division and remainder: a zero divisor is a possible failure)
+        if not supported and nodes.ptr[n].aux =? 0 and (nodes.ptr[n].op =? int32<overflow='wrap'>(61) or nodes.ptr[n].op =? int32<overflow='wrap'>(62)) and effect_scalar(ntype(EffectScanWord(nodes.ptr[n].a))) and effect_scalar(ntype(EffectScanWord(nodes.ptr[n].b))) {
+            supported=true
+            let divisor:EffectScanWord=EffectScanWord(nodes.ptr[n].b)
+            if nodes.ptr[divisor].kind not=? 'int_lit' or nodes.ptr[divisor].ival =? 0 {effect_failure(f n);}
+        }
+        if not supported and nodes.ptr[n].aux =? 0 and effect_float_op(cx_token_values.ptr[EffectScanWord(nodes.ptr[n].op)]) and effect_float(ntype(EffectScanWord(nodes.ptr[n].a))) and effect_float(ntype(EffectScanWord(nodes.ptr[n].b))) {supported=true}
+        # (members of one literal union compare as words)
+        if not supported and nodes.ptr[n].aux =? 0 and (nodes.ptr[n].op =? int32<overflow='wrap'>(69) or nodes.ptr[n].op =? int32<overflow='wrap'>(70)) {
+            supported=effect_simple_enum(ntype(EffectScanWord(nodes.ptr[n].a))) and effect_simple_enum(ntype(EffectScanWord(nodes.ptr[n].b)))
+        # (small semantic integers: arithmetic that cannot promote, comparisons)
+        }
+        if not supported and nodes.ptr[n].aux =? 0 and effect_word(EffectScanWord(nodes.ptr[n].a)) and effect_word(EffectScanWord(nodes.ptr[n].b)) {
+            supported=effect_small(n) >=? 0 or (effect_word_op(cx_token_values.ptr[EffectScanWord(nodes.ptr[n].op)]) and effect_scalar(ntype(n)))
+        # (a small counter against a word widened to `int`: compared as two
+        # words, so the widened word is never packed)
+        }
+        if not supported and nodes.ptr[n].aux =? 0 and effect_scalar(ntype(n)) and fact_comparison(cx_token_values.ptr[EffectScanWord(nodes.ptr[n].op)]) {
+            let a=effect_unwidened(EffectScanWord(nodes.ptr[n].a))
+            let b=effect_unwidened(EffectScanWord(nodes.ptr[n].b))
+            if (a not=? EffectScanWord(nodes.ptr[n].a) or b not=? EffectScanWord(nodes.ptr[n].b)) and effect_word(a) and effect_word(b) {
+                loop g in hidden {effect_summaries.ptr[f].edges.push(EffectEdge[g n []]);}
+                effect_scan_node(f a);
+                effect_scan_node(f b);
+                return
+        # (text compares by reading both, and the library's `+` on text
+        # allocates; `int`s compare as words or by reading a big payload, and
+        # `+ - *` on one may grow it into a big integer, which allocates)
+            }
+        }
+        if not supported and nodes.ptr[n].aux =? 2 and types.ptr[representation_type(ntype(EffectScanWord(nodes.ptr[n].a)))].kind =? 'str_' and types.ptr[representation_type(ntype(EffectScanWord(nodes.ptr[n].b)))].kind =? 'str_' {
+            supported=fact_comparison(cx_token_values.ptr[EffectScanWord(nodes.ptr[n].op)]) or nodes.ptr[n].op =? int32<overflow='wrap'>(58)
+            if nodes.ptr[n].op =? int32<overflow='wrap'>(58) {effect_plan_cost(f n 1 << 2);}
+        }
+        if not supported and nodes.ptr[n].aux =? 0 and fact_comparison(cx_token_values.ptr[EffectScanWord(nodes.ptr[n].op)]) and effect_integer(EffectScanWord(nodes.ptr[n].a)) and effect_integer(EffectScanWord(nodes.ptr[n].b)) {supported=true}
+        if not supported and nodes.ptr[n].aux =? 0 and prune(ntype(n)) =? T_MATH_INT and effect_integer(EffectScanWord(nodes.ptr[n].a)) and effect_integer(EffectScanWord(nodes.ptr[n].b)) and (nodes.ptr[n].op =? int32<overflow='wrap'>(58) or nodes.ptr[n].op =? int32<overflow='wrap'>(59) or nodes.ptr[n].op =? int32<overflow='wrap'>(60)) {
+            supported=true
+            effect_plan_cost(f n 1 << 2);
+        # (`int` division and remainder: a big result allocates, and a zero
+        # divisor is a possible failure, as for words)
+        }
+        if not supported and nodes.ptr[n].aux =? 0 and prune(ntype(n)) =? T_MATH_INT and effect_integer(EffectScanWord(nodes.ptr[n].a)) and effect_integer(EffectScanWord(nodes.ptr[n].b)) and (nodes.ptr[n].op =? int32<overflow='wrap'>(61) or nodes.ptr[n].op =? int32<overflow='wrap'>(62)) {
+            supported=true
+            effect_plan_cost(f n 1 << 2);
+            let divisor:EffectScanWord=EffectScanWord(nodes.ptr[n].b)
+            if nodes.ptr[divisor].kind not=? 'int_lit' or nodes.ptr[divisor].ival =? 0 {effect_failure(f n);}
+        # (an `int` shifted may grow into a big integer, which allocates; a
+        # negative signed count fails unless the owner's facts show it is not)
+        }
+        if not supported and shift and nodes.ptr[n].aux =? 0 and prune(ntype(n)) =? T_MATH_INT and effect_integer(EffectScanWord(nodes.ptr[n].a)) and effect_integer(EffectScanWord(nodes.ptr[n].b)) {
+            supported=true
+            effect_plan_cost(f n 1 << 2);
+            if fact_shift_obliged(n) and not effect_count_literal(EffectScanWord(nodes.ptr[n].b)) {effect_failure(f n);}
+    # (a match on a share copies it into a private hidden local and tests that
+    # copy's tag or compares it with literals: reads only. A valued match with
+    # no wildcard arm may find no arm, which fails. Bindings and arm bodies
+    # answer for their own operations)
+        }
+    }
+    else if k =? 'match_' {
+        let subject:EffectScanWord=EffectScanWord(nodes.ptr[n].sym)
+        supported=effect_share(ntype(EffectScanWord(nodes.ptr[n].a))) and (subject <=? 0 or EffectScanWord(locals.ptr[subject].flags) & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF) =? 0)
+        let wild=false
+        loop j in [0..nkids(n)) {
+            let arm=kid(n j)
+            loop q in [0..nkids(arm)) {
+                if nodes.ptr[kid(arm q)].kind =? 'pwild' {wild=true}
+            }
+        }
+        if supported and not wild and not has_flag(n NF_STMT) and vc(ntype(n)) not=? VC_VOID and ntype(n) not=? T_NEVER {effect_failure(f n);}
+    # (an optional's payload, `x!` or a match binding's: an inline read that
+    # fails when the value is none)
+    }
+    else if k =? 'unwrap' {
+        supported=effect_share(ntype(EffectScanWord(nodes.ptr[n].a))) and effect_share(ntype(n))
+        if supported {effect_failure(f n);}
+    }
+    else if k =? 'arm' {supported=nodes.ptr[n].a =? 0 and nodes.ptr[n].c =? 0}
+    else if k =? 'pwild' or k =? 'ptype' or k =? 'plit' or k =? 'prange' {supported=true}
+    else if k =? 'dotname' or k =? 'none_lit' {supported=effect_share(ntype(n))}
+    # (an optional's or union's tag test, payload and fallback are inline reads)
+    else if k =? 'istype' or k =? 'narrow' or k =? 'coalesce' {supported=effect_share(ntype(EffectScanWord(nodes.ptr[n].a))) and (k =? 'istype' or effect_share(ntype(n)))}
+    else if k =? 'unary' {
+        supported=effect_scalar(ntype(n)) and (nodes.ptr[n].op =? int32<overflow='wrap'>(59) or nodes.ptr[n].op =? int32<overflow='wrap'>(58) or nodes.ptr[n].op =? int32<overflow='wrap'>(66))
+        supported=supported or effect_float(ntype(n)) and (nodes.ptr[n].op =? int32<overflow='wrap'>(59) or nodes.ptr[n].op =? int32<overflow='wrap'>(58))
+        # (negating an `int` may grow it: -(-2^63))
+        if not supported and prune(ntype(n)) =? T_MATH_INT and (nodes.ptr[n].op =? int32<overflow='wrap'>(59) or nodes.ptr[n].op =? int32<overflow='wrap'>(58)) {
+            supported=true
+            effect_plan_cost(f n 1 << 2);
+        }
+    }
+    else if k =? 'conv' and nodes.ptr[n].aux =? int32<overflow='wrap'>(13) and ownership_scalar(ntype(n)) {supported=true}
+    else if k =? 'conv' and nodes.ptr[n].aux =? int32<overflow='wrap'>(14) {
+        # A proven refinement check is erased; an unproven one may fail.
+        supported=effect_plain(ntype(n)) or effect_footprints_only and nd_shape_predicates.has(EffectScanWord(types.ptr[zonk(EffectScanWord(nodes.ptr[n].aux2))].st)) and effect_value(ntype(n))
+        # (a self-contained contract on a value, `denominator:int<(>? 0)>`:
+        # its check compares the value, or its length or fields, with
+        # constants; it reads only that value and writes nothing, though an
+        # `int` comparison may make a big constant: an allocation)
+        if not supported and effect_value(ntype(n)) and effect_self_contract(EffectScanWord(nodes.ptr[n].aux2)) {
+            supported=true
+            if not type_eq(ntype(EffectScanWord(nodes.ptr[n].a)) EffectScanWord(nodes.ptr[n].aux2)) {effect_plan_cost(f n 1 << 2);}
+        }
+        if supported and not type_eq(ntype(EffectScanWord(nodes.ptr[n].a)) EffectScanWord(nodes.ptr[n].aux2)) {effect_failure(f n);}
+    # (wrapping a value as an optional, or one union as a wider one, fills the
+    # flag or tag and the payload in place)
+    }
+    else if k =? 'conv' and (nodes.ptr[n].aux =? int32<overflow='wrap'>(5) or nodes.ptr[n].aux =? int32<overflow='wrap'>(9)) {supported=effect_share(ntype(n)) and effect_share(ntype(EffectScanWord(nodes.ptr[n].a)))}
+    else if k =? 'conv' and nodes.ptr[n].aux =? int32<overflow='wrap'>(11) {
+        supported=effect_share(ntype(n))
+        if not has_flag(n NF_INBOUNDS) {effect_failure(f n);}
+    }
+    else if k =? 'conv' and nodes.ptr[n].aux =? int32<overflow='wrap'>(17) {supported=true}
+    # (a word widened to an `int` may need a big payload: an allocation)
+    else if k =? 'conv' and nodes.ptr[n].aux =? int32<overflow='wrap'>(1) and prune(ntype(n)) =? T_MATH_INT and effect_scalar(ntype(EffectScanWord(nodes.ptr[n].a))) {
+        supported=true
+        if effect_small(EffectScanWord(nodes.ptr[n].a)) <? 0 {effect_plan_cost(f n 1 << 2);}
+    # (an `int` narrowed to a fixed width fails unless the owner's facts show it fits)
+    }
+    else if k =? 'conv' and nodes.ptr[n].aux =? int32<overflow='wrap'>(1) and prune(ntype(EffectScanWord(nodes.ptr[n].a))) =? T_MATH_INT and effect_scalar(ntype(n)) and effect_small(EffectScanWord(nodes.ptr[n].a)) <? 0 {
+        supported=true
+        effect_failure(f n);
+    # (an `int` wrapped or saturated to a fixed width is total: a read of its
+    # low limbs, lib/math_runtime.jo __mi_low_word and __mi_clamp_word)
+    }
+    else if k =? 'conv' and (nodes.ptr[n].aux =? int32<overflow='wrap'>(19) or nodes.ptr[n].aux =? int32<overflow='wrap'>(20)) and prune(ntype(EffectScanWord(nodes.ptr[n].a))) =? T_MATH_INT and effect_scalar(ntype(n)) {supported=true}
+    # (a float to an integer fails for NaN, an infinity or a value out of
+    # range unless the owner's float facts show it fits, floats.jo; an `int`
+    # result may need a big payload)
+    else if k =? 'conv' and nodes.ptr[n].aux =? int32<overflow='wrap'>(3) and effect_float(ntype(EffectScanWord(nodes.ptr[n].a))) and (effect_scalar(ntype(n)) or prune(ntype(n)) =? T_MATH_INT) {
+        supported=true
+        if prune(ntype(n)) =? T_MATH_INT {effect_plan_cost(f n 1 << 2);}
+        effect_failure(f n);
+    # (a word to a float, or one float width to another: one instruction; a
+    # float to an integer is checked, and a semantic integer's is a call)
+    }
+    else if k =? 'conv' and (nodes.ptr[n].aux =? int32<overflow='wrap'>(2) and effect_scalar(ntype(EffectScanWord(nodes.ptr[n].a))) or nodes.ptr[n].aux =? int32<overflow='wrap'>(4)) {supported=effect_float(ntype(n))}
+    # (an `int` to a float, `i * 40.0`: a word conversion, or a read of its big
+    # payload that writes nothing (lib/math_runtime.jo __mi_float); that read
+    # keeps a possible allocation and failure)
+    else if k =? 'conv' and nodes.ptr[n].aux =? int32<overflow='wrap'>(2) and prune(ntype(EffectScanWord(nodes.ptr[n].a))) =? T_MATH_INT and effect_float(ntype(n)) {
+        supported=true
+        if effect_small(EffectScanWord(nodes.ptr[n].a)) <? 0 {
+            effect_plan_cost(f n 1 << 2);
+            effect_failure(f n);
+    # (a number's bits read as another number of the same width, as the
+    # library's float `abs` and `min` do: one move, never a pointer. A write
+    # footprint only; full summaries keep it opaque)
+        }
+    }
+    else if k =? 'cast' and effect_footprints_only and not raw_view(n) and (effect_scalar(ntype(n)) or effect_float(ntype(n))) and (effect_scalar(ntype(EffectScanWord(nodes.ptr[n].a))) or effect_float(ntype(EffectScanWord(nodes.ptr[n].a)))) {supported=true}
+    else if k =? 'conv' {
+        supported=(effect_scalar(ntype(n)) and effect_word(EffectScanWord(nodes.ptr[n].a)) or effect_small(n) >=? 0 or is_fn_type(ntype(n)) and effect_bare(EffectScanWord(nodes.ptr[n].a))) and (nodes.ptr[n].aux =? int32<overflow='wrap'>(0) or nodes.ptr[n].aux =? int32<overflow='wrap'>(1) or nodes.ptr[n].aux =? int32<overflow='wrap'>(19) or nodes.ptr[n].aux =? int32<overflow='wrap'>(20) or nodes.ptr[n].aux =? int32<overflow='wrap'>(21))
+    }
+    if not supported {effect_opaque(f n);}
+    # Hidden calls cannot be trusted by annotation or pathname. They remain
+    # explicit dependencies for witnesses and legacy isolation even when this
+    # pilot's cost inventory has already rejected their containing operation.
+    loop g in hidden {effect_summaries.ptr[f].edges.push(EffectEdge[g n []]);}
+    if hidden.length >? 0 and (k =? 'binary' or k =? 'intrinsic') {
+        let operand=if k =? 'binary' {EffectScanWord(nodes.ptr[n].a)} else if nkids(n) >? 0 {kid(n 0)} else {0}
+        if operand not=? 0 and is_managed(representation_type(ntype(operand))) {
+            # Callback snapshots may copy managed values. No uniqueness proof
+            # is available at this boundary yet, so retain the residual cost.
+            effect_plan_cost(f n 1 << 2);
+        }
+    }
+    let mask=isolation_children(k)
+    if mask <? 0 {return}
+    if mask & 1 not=? 0 {effect_scan_node(f EffectScanWord(nodes.ptr[n].a));}
+    if mask & 2 not=? 0 {effect_scan_node(f EffectScanWord(nodes.ptr[n].b));}
+    if mask & 4 not=? 0 {effect_scan_node(f EffectScanWord(nodes.ptr[n].c));}
+    if mask & 16 not=? 0 {
+        loop j in [0..nkids(n)) {effect_scan_node(f kid(n j));}
+    }
+    if mask & 32 not=? 0 {
+        loop j in [0..nkids2(n)) {effect_scan_node(f kid2(n j));}
+    }
+}
