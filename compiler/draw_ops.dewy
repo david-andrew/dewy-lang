@@ -1,0 +1,247 @@
+$runtime_checks
+from p"draw_context.jo" import (DrawEdge draw_answer draw_built draw_context_guard draw_edges draw_in draw_index draw_library draw_low draw_origin draw_out draw_path draw_required draw_root draw_seen draw_serial draw_stack)
+from p"check.jo" import (FK_INIT LF_ALIAS decl_infos draw_fn export_fns fns lib_dir locals main_fn prelude syms update_fn value_equal_fns value_hash_fns)
+from p"directives.jo" import (dir_defer dir_panic_fix)
+from p"effects.jo" import (effect_index_build effect_ix_heads effect_ix_next effect_name effect_shown_name panic_edge_at panic_edge_end panic_edges panic_stack panic_witness)
+from p"util.jo" import (fatal files intern name_known pos_file pos_in_lib)
+from p"facts.jo" import (fact_owner fn_in_lib)
+from p"isolation.jo" import (isolation_children)
+from p"ast.jo" import (kid kids nkids nodes)
+from p"ownership.jo" import (ownership_hooks)
+from p"witness.jo" import (wit_measure)
+# Direct recursive lowering; shared state has one owner in draw_context.jo.
+MoveWord:type=int64<overflow='wrap'>
+draw_context_reset=():>void=>$unsafe {
+    draw_context_guard=0
+    draw_edges=[]
+    draw_in=[]; draw_out=[]
+    draw_required=[]; draw_library=[]; draw_root=[]
+    draw_index=[]; draw_low=[]; draw_answer=[]
+    draw_stack=[]; draw_seen=[]; draw_path=[]; draw_origin=[]
+    draw_serial=0
+    draw_built=false
+}
+draw_edge=(f:MoveWord g:MoveWord n:MoveWord value:bool):>void=>$unsafe {
+    if g <=? 0 or g >=? fns.length or draw_library.ptr[g] {return}
+    let e=draw_edges.length
+    draw_edges.push(DrawEdge[f g n value draw_in.ptr[g] draw_out.ptr[f]]);
+    draw_in.ptr[g] = e;
+    draw_out.ptr[f] = e;
+    if value {draw_root.ptr[g] = 2;}
+    else if g =? draw_fn {draw_root.ptr[g] = 3;}
+}
+draw_scan=(f:MoveWord n:MoveWord):>void=>$unsafe {
+    if n =? 0 or draw_seen.ptr[n] =? f {return}
+    draw_seen.ptr[n] = f;
+    let k=nodes.ptr[n].kind
+    if k =? 'call' and nodes.ptr[n].aux =? 0 and nodes.ptr[n].sym >? 0 {
+        let g:MoveWord=MoveWord(nodes.ptr[n].sym)
+        if nodes.ptr[n].pos =? 0 and effect_name(g) =? "__game_run" and fn_in_lib(g) and nkids(n) =? 2 {
+            # The update callback is still an outside-draw root.
+            draw_scan(f kid(n 0));
+            return
+        }
+        draw_edge(f g n false);
+    }
+    else if (k =? 'fnref' or k =? 'lambda' or k =? 'partial' and nodes.ptr[n].aux =? 0) and nodes.ptr[n].sym >? 0 {
+        draw_edge(f MoveWord(nodes.ptr[n].sym) n true);
+    }
+    else if k =? 'pair' and nodes.ptr[n].sym >? 0 {draw_edge(f MoveWord(nodes.ptr[n].sym) n false);}
+    if k =? 'map_lit' and nkids(n) >? 0 {draw_edge(f MoveWord(nodes.ptr[n].sym) n false);}
+    if (k =? 'binary' and nodes.ptr[n].aux =? 6 or k =? 'istype') and nodes.ptr[n].aux2 >? 0 {draw_edge(f MoveWord(nodes.ptr[n].aux2) n false);}
+    if k =? 'ident' and nodes.ptr[n].aux =? int32<overflow='wrap'>(1) {
+        let l:MoveWord=MoveWord(nodes.ptr[n].sym)
+        if l >? 0 and MoveWord(locals.ptr[l].flags) & LF_ALIAS not=? 0 {draw_scan(f MoveWord(locals.ptr[l].alias));}
+    }
+    if k =? 'parallel_region' {
+        draw_scan(f MoveWord(nodes.ptr[n].a));
+        return
+    }
+    let mask=isolation_children(k)
+    if mask <? 0 {return}
+    if mask & 1 not=? 0 {draw_scan(f MoveWord(nodes.ptr[n].a));}
+    if mask & 2 not=? 0 {draw_scan(f MoveWord(nodes.ptr[n].b));}
+    if mask & 4 not=? 0 {draw_scan(f MoveWord(nodes.ptr[n].c));}
+    if mask & 16 not=? 0 {
+        loop c in kids(n) {draw_scan(f c);}
+    }
+}
+draw_visit=(f:MoveWord):>void=>$unsafe {
+    draw_serial += 1;
+    draw_index.ptr[f] = draw_serial;
+    draw_low.ptr[f] = draw_serial;
+    draw_stack.push(f);
+    let e=draw_in.ptr[f]
+    loop e >=? 0 {
+        let edge=draw_edges.ptr[e]
+        e=edge.next_in
+        let g=edge.caller
+        if edge.value or draw_library.ptr[g] {continue}
+        if draw_index.ptr[g] =? 0 {
+            draw_visit(g);
+            if draw_answer.ptr[g] =? 0 {draw_low.ptr[f] = min(draw_low.ptr[f] draw_low.ptr[g]);}
+        }
+        else if draw_answer.ptr[g] =? 0 {draw_low.ptr[f] = min(draw_low.ptr[f] draw_index.ptr[g]);}
+    }
+    if draw_low.ptr[f] not=? draw_index.ptr[f] {return}
+    let start=draw_stack.length - 1
+    loop draw_stack.ptr[start] not=? f {start -= 1;}
+    let good=false
+    let bad=false
+    loop i in [start..draw_stack.length) {
+        let g=draw_stack.ptr[i]
+        if g =? draw_fn {good=true}
+        if draw_root.ptr[g] not=? 0 {bad=true}
+        e=draw_in.ptr[g]
+        loop e >=? 0 {
+            let edge=draw_edges.ptr[e]
+            e=edge.next_in
+            if edge.value {continue}
+            let h=edge.caller
+            if draw_library.ptr[h] {bad=true}
+            else if draw_answer.ptr[h] =? 1 {good=true}
+            else if draw_answer.ptr[h] =? 2 {bad=true}
+        }
+    }
+    let answer=if good and not bad {1} else {2}
+    loop draw_stack.length >? start {draw_answer.ptr[draw_stack.pop()] = answer;}
+}
+draw_witnesses=():>void=>$unsafe {
+    let todo:array<int64>=[]
+    loop f in [1..fns.length) {
+        if not draw_library.ptr[f] and draw_root.ptr[f] not=? 0 {
+            draw_origin.ptr[f] = f;
+            todo.push(f);
+        }
+    }
+    let i:MoveWord=0
+    loop i <? todo.length {
+        let f=todo.ptr[i]
+        i += 1;
+        let e=draw_out.ptr[f]
+        loop e >=? 0 {
+            let edge=draw_edges.ptr[e]
+            let g=edge.callee
+            if not edge.value and draw_origin.ptr[g] =? 0 {
+                draw_origin.ptr[g] = draw_origin.ptr[f];
+                draw_path.ptr[g] = e;
+                todo.push(g);
+            }
+            e=edge.next_out
+        }
+    }
+}
+draw_reason=(f:MoveWord g:MoveWord):>string=>$unsafe {
+    let chain_names=[effect_shown_name(g) effect_shown_name(f)]
+    let at=f
+    loop draw_path.ptr[at] >=? 0 {
+        at=draw_edges.ptr[draw_path.ptr[at]].caller
+        chain_names.push(effect_shown_name(at));
+    }
+    let text=if draw_root.ptr[at] =? 2 {"function value -> "} else if draw_root.ptr[at] =? 3 {"user call to draw -> "} else if draw_root.ptr[at] =? 4 {"library caller -> "} else {""}
+    loop i in [0..chain_names.length) {
+        if i not=? 0 {text = "{text} -> "}
+        text = "{text}{chain_names[chain_names.length - i - 1]}";
+    }
+    return text
+}
+draw_context_finalize=():>void=>$unsafe {
+    # Probe an optional, already-loaded name; unlike required prelude_known
+    # entries, this must not cause a non-game program to load the guard.
+    let guard_name="__outside_draw"
+    if not name_known(guard_name) {return}
+    let s=prelude.get(intern(guard_name)) ?? 0
+    if s =? 0 {return}
+    let d:MoveWord=MoveWord(syms.ptr[s].decl)
+    if d =? 0 or nodes.ptr[d].sym =? 0 or files.ptr[pos_file(nodes.ptr[d].pos)].path not=? "{lib_dir}/game/draw2d.jo" {return}
+    loop f in decl_infos.ptr[MoveWord(nodes.ptr[d].sym)].insts {
+        if fns.ptr[f].state =? 2 {draw_context_guard=f}
+    }
+    if draw_context_guard =? 0 {return}
+    draw_required=fill(false fns.length)
+}
+draw_context_begin=():>void=>$unsafe {
+    if draw_built {return}
+    draw_built=true
+    let m=fns.length
+    draw_in=fill(-1 m); draw_out=fill(-1 m)
+    draw_library=fill(false m)
+    draw_root=fill(0 m)
+    draw_index=fill(0 m); draw_low=fill(0 m); draw_answer=fill(0 m)
+    draw_path=fill(-1 m); draw_origin=fill(0 m)
+    draw_seen=fill(0 nodes.length)
+    loop f in [1..m) {draw_library.ptr[f] = fn_in_lib(f);}
+    loop f in [1..m) {
+        if not draw_library.ptr[f] and fns.ptr[f].state =? 2 and fns.ptr[f].body not=? 0 {draw_scan(f MoveWord(fns.ptr[f].body));}
+    # A library's generic hash/equality hooks can call user code without a
+    # function-value node. Its source position supplies an unknown caller;
+    # do not infer exclusivity from user bodies alone. Reuse the final index,
+    # visiting only the user functions' sites, O(indexed nodes + use sites).
+    }
+    effect_index_build(2);
+    loop f in [1..m) {
+        if draw_library.ptr[f] or draw_root.ptr[f] not=? 0 or f >=? effect_ix_heads.ptr[2].length {continue}
+        let n=effect_ix_heads.ptr[2][f]
+        loop n not=? 0 {
+            if pos_in_lib(nodes.ptr[n].pos) {
+                draw_root.ptr[f] = 4;
+                break
+            }
+            n=effect_ix_next.ptr[2][n]
+    # Generated aggregate and lifecycle hooks also have implicit callers.
+    # Their entry context is unknown, just as a function value's is.
+        }
+    }
+    loop [_ f] in value_hash_fns {
+        if draw_root.ptr[f] =? 0 {draw_root.ptr[f] = 4;}
+    }
+    loop [_ f] in value_equal_fns {
+        if draw_root.ptr[f] =? 0 {draw_root.ptr[f] = 4;}
+    }
+    loop f in export_fns {draw_root.ptr[f] = 1;}
+    loop f in [1..m) {
+        if draw_library.ptr[f] {continue}
+        if ownership_hooks.has(MoveWord(fns.ptr[f].decl)) and draw_root.ptr[f] =? 0 {draw_root.ptr[f] = 4;}
+        if f =? update_fn or f =? main_fn or fns.ptr[f].kind =? FK_INIT or fns.ptr[f].cabi {draw_root.ptr[f] = 1;}
+        if f not=? draw_fn and draw_in.ptr[f] <? 0 {draw_root.ptr[f] = 1;}
+    }
+    draw_witnesses();
+}
+draw_context_component=(start:int64):>void=>$unsafe {
+    let needs_draw=false
+    loop i in [start..panic_stack.length) {
+        let g=panic_stack.ptr[i]
+        if draw_required.ptr[g] {needs_draw=true}
+        loop j in [0..(panic_edge_end.ptr[g] - panic_edge_at.ptr[g]) // 2) {
+            if draw_required.ptr[panic_edges.ptr[panic_edge_at.ptr[g] + 2 * j]] {needs_draw=true}
+        }
+    }
+    loop i in [start..panic_stack.length) {draw_required.ptr[panic_stack.ptr[i]] = needs_draw;}
+    if not needs_draw {return}
+    loop i in [start..panic_stack.length) {
+        let g=panic_stack.ptr[i]
+        if fn_in_lib(g) {continue}
+        loop j in [0..(panic_edge_end.ptr[g] - panic_edge_at.ptr[g]) // 2) {
+            let e=panic_edge_at.ptr[g] + 2 * j
+            let h=panic_edges.ptr[e]
+            if draw_required.ptr[h] and fn_in_lib(h) {draw_context_check(g h panic_edges.ptr[e + 1]);}
+        }
+    }
+}
+draw_context_check=(f:MoveWord g:MoveWord n:MoveWord):>void=>$unsafe {
+    if nodes.ptr[n].pos <=? 0 or pos_in_lib(nodes.ptr[n].pos) {return}
+    draw_context_begin();
+    if draw_index.ptr[f] =? 0 {draw_visit(f);}
+    let value=nodes.ptr[n].kind =? 'fnref' or nodes.ptr[n].kind =? 'partial' or nodes.ptr[n].kind =? 'lambda'
+    if not value and draw_answer.ptr[f] =? 1 {return}
+    let path=if value {"function value -> {effect_shown_name(g)}"} else {draw_reason(f g)}
+    let what="cannot prove drawing runs only inside runtime-invoked draw (outside path: {path})"
+    let saved=fact_owner
+    fact_owner=f
+    let deferred=dir_defer(n what true)
+    fact_owner=saved
+    if deferred {
+        if panic_witness.ptr[f] =? 0 {panic_witness.ptr[f] = n;}
+    }
+    else if not wit_measure {fatal(nodes.ptr[n].pos "{what}; move the call into draw or a helper called only by draw, or {dir_panic_fix(nodes.ptr[n].pos)}");}
+}
