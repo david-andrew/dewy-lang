@@ -1,0 +1,152 @@
+$runtime_checks
+from p"effect_types.dewy" import (EffectAtom PlaceIdentity)
+from p"effects.jo" import (EffectObligation effect_contracts effect_final effect_obligations)
+from p"check.jo" import (LF_ADDR LF_ALIAS LF_CAPTURE LF_CAPTURED LF_EXPOSED LF_PARAM LF_SHARED check_fn_body fns locals value_leaves)
+from p"ast.jo" import (NF_GENERIC NF_GLOBAL has_flag kid nkids nodes)
+from p"effect_contracts.dewy" import (callable_base callable_contract mk_callable_contract)
+from p"effect_graph.dewy" import (effect_function_row)
+from p"effect_lattice.dewy" import (effect_intern effect_join effect_top place_base)
+from p"effect_sites.dewy" import (effect_returns effect_write_sites)
+from p"types.jo" import (fixed_len mk_array mk_fixed mk_opt telem tkind)
+from p"expr.jo" import (is_fn_type ntype)
+from p"places.jo" import (place_append)
+# Callable provenance and storage inference; shared state has one owner in effects.jo.
+EffectSourcesWord:type=int64<overflow='wrap'>
+# Projection selectors are field ordinals; -1 joins all array elements. Joining
+# every assignment is intentionally flow-insensitive, including later writes.
+effect_source_row=(n:EffectSourcesWord path:array<int64>=[] depth:EffectSourcesWord=0):>int64=>$unsafe {
+    if n =? 0 or depth >? 16 {return effect_top()}
+    let k=nodes.ptr[n].kind
+    if k =? 'conv' {
+        let inner:EffectSourcesWord=EffectSourcesWord(nodes.ptr[n].a)
+        return effect_source_row(inner path depth + 1)
+    }
+    if path.length =? 0 and callable_contract(ntype(n)) not=? 0 {return callable_contract(ntype(n))}
+    if path.length =? 0 and (k =? 'fnref' or k =? 'lambda' and not has_flag(n NF_GENERIC)) {return effect_function_row(EffectSourcesWord(nodes.ptr[n].sym))}
+    if k =? 'field' {return effect_source_row(EffectSourcesWord(nodes.ptr[n].a) [EffectSourcesWord(nodes.ptr[n].aux) path...] depth + 1)}
+    if k =? 'index' {return effect_source_row(EffectSourcesWord(nodes.ptr[n].a) [-1 path...] depth + 1)}
+    if k =? 'ident' and nodes.ptr[n].aux =? int32<overflow='wrap'>(1) {
+        let l:EffectSourcesWord=EffectSourcesWord(nodes.ptr[n].sym)
+        if EffectSourcesWord(locals.ptr[l].flags) & (LF_CAPTURE | LF_CAPTURED | LF_EXPOSED | LF_ADDR | LF_SHARED | LF_ALIAS) not=? 0 {
+            return effect_top()
+        }
+        if EffectSourcesWord(locals.ptr[l].flags) & LF_PARAM not=? 0 {return effect_top()}
+        let row:EffectSourcesWord=0
+        loop q in effect_write_sites(l) {
+            let rhs:EffectSourcesWord=0
+            let rest=path
+            if nodes.ptr[q].kind =? 'vardecl' and not has_flag(q NF_GLOBAL) and nodes.ptr[q].sym =? int32<overflow='wrap'>(l) {rhs=EffectSourcesWord(nodes.ptr[q].b)}
+            if nodes.ptr[q].kind =? 'assign' {
+                let target:EffectSourcesWord=EffectSourcesWord(nodes.ptr[q].a)
+                let selectors:array<int64>=[]
+                loop nodes.ptr[target].kind =? 'field' or nodes.ptr[target].kind =? 'index' {
+                    selectors.insert(0 if nodes.ptr[target].kind =? 'field' {EffectSourcesWord(nodes.ptr[target].aux)} else {-1});
+                    target=EffectSourcesWord(nodes.ptr[target].a)
+                }
+                if nodes.ptr[target].kind =? 'ident' and nodes.ptr[target].aux =? int32<overflow='wrap'>(1) and nodes.ptr[target].sym =? int32<overflow='wrap'>(l) {
+                    let overlap=true
+                    loop i in [0..min(selectors.length path.length)) {
+                        if selectors.ptr[i] not=? path.ptr[i] {overlap=false}
+                    }
+                    if overlap {
+                        if selectors.length >? path.length {return effect_top()}
+                        rhs=EffectSourcesWord(nodes.ptr[q].b)
+                        rest=path[selectors.length..]
+                    }
+                }
+            }
+            if rhs =? 0 {continue}
+            # Unchecked later assignments are covered by the final obligation.
+            if not effect_final and nodes.ptr[rhs].type =? 0 {continue}
+            let r=effect_source_row(rhs rest depth + 1)
+            row=if row =? 0 {r} else {effect_join(row r)}
+        }
+        return if row =? 0 {effect_top()} else {row}
+    }
+    if path.length >? 0 {
+        let rest=path[1..]
+        if k =? 'array' and path.ptr[0] =? -1 {
+            let row:EffectSourcesWord=0
+            loop j in [0..nkids(n)) {
+                let child=kid(n j)
+                let r=effect_source_row(child rest depth + 1)
+                row=if row =? 0 {r} else {effect_join(row r)}
+            }
+            return if row =? 0 {effect_top()} else {row}
+        }
+        if k =? 'call' and nodes.ptr[n].aux =? 2 and path.ptr[0] >=? 0 and path.ptr[0] <? nkids(n) {return effect_source_row(kid(n path.ptr[0]) rest depth + 1)}
+    }
+    if k =? 'call' and nodes.ptr[n].aux =? 0 {
+        let f:EffectSourcesWord=EffectSourcesWord(nodes.ptr[n].sym)
+        if f <=? 0 or f >=? fns.length {return effect_top()}
+        if not effect_final and fns.ptr[f].state =? 0 {check_fn_body(f);}
+        if fns.ptr[f].state not=? 2 {return effect_top()}
+        let leaves:array<int64>=[]
+        effect_returns(EffectSourcesWord(fns.ptr[f].body) @leaves);
+        value_leaves(EffectSourcesWord(fns.ptr[f].body) @leaves);
+        let row:EffectSourcesWord=0
+        loop leaf in leaves {
+            let r=effect_source_row(leaf path depth + 1)
+            row=if row =? 0 {r} else {effect_join(row r)}
+        }
+        return if row =? 0 {effect_top()} else {row}
+    }
+    if path.length =? 0 and k =? 'partial' {
+        let source=if nodes.ptr[n].aux =? 0 {effect_function_row(EffectSourcesWord(nodes.ptr[n].sym))} else {effect_source_row(EffectSourcesWord(nodes.ptr[n].a) [] depth + 1)}
+        let row=effect_contracts.ptr[source]
+        let atoms:array<EffectAtom>=[]
+        loop a0 in row.atoms {
+            let a=a0
+            let base=place_base(a.place)
+            if base.root =? 'formal' {
+                let slot=base.declaration - 1
+                if slot <? 0 or slot >=? nkids(n) {return effect_top()}
+                if nodes.ptr[kid(n slot)].kind not=? 'hole' {return effect_top()}
+                let ordinal:EffectSourcesWord=0
+                loop i in [0..slot + 1) {
+                    if nodes.ptr[kid(n i)].kind =? 'hole' {ordinal += 1;}
+                }
+                a.place = place_append(PlaceIdentity['formal' 0 ordinal] a.place);
+            }
+            atoms.push(a);
+        # Open bounds with bound formal exclusions need a route substitution.
+        }
+        if row.open {return effect_top()}
+        loop exclusion in row.exclusions {
+            if place_base(exclusion.place).root =? 'formal' {return effect_top()}
+        }
+        return effect_intern(atoms row.exclusions)
+    }
+    if k =? 'if_' or k =? 'block' or k =? 'exprstmt' {
+        let leaves:array<int64>=[]
+        value_leaves(n @leaves);
+        if leaves.length =? 1 and leaves.ptr[0] =? n {return effect_top()}
+        let row:EffectSourcesWord=0
+        loop leaf in leaves {
+            let r=effect_source_row(leaf path depth + 1)
+            row=if row =? 0 {r} else {effect_join(row r)}
+        }
+        return if row =? 0 {effect_top()} else {row}
+    }
+    return effect_top()
+}
+# Unannotated mutable storage carries source provenance rather than freezing
+# the initializer's upper bound. Declared fields/signatures keep their bounds.
+effect_storage_type=(t:EffectSourcesWord):>int64=>$unsafe {
+    let k=tkind(t)
+    if k =? 'callable' {return callable_base(t)}
+    if k =? 'array' {return mk_array(effect_storage_type(telem(t)))}
+    if k =? 'opt' {return mk_opt(effect_storage_type(telem(t)))}
+    if k =? 'fixed' {return mk_fixed(effect_storage_type(telem(t)) fixed_len(t))}
+    return t
+}
+effect_infer_callable=(n:int64 expected:int64):>int64=>$unsafe {
+    let t=ntype(n)
+    if callable_contract(expected) =? 0 or callable_contract(t) not=? 0 or not is_fn_type(t) {return t}
+    # Freeze the expression before its checked conversion changes its type.
+    let source=nodes.length
+    nodes.push(nodes.ptr[n]);
+    let row=effect_source_row(source)
+    effect_obligations.push(EffectObligation[source row]);
+    return mk_callable_contract(t row)
+}

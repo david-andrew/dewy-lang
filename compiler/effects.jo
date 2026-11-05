@@ -49,6 +49,7 @@ use 'effect_contracts.dewy'
 use 'effect_sites.dewy'
 use 'effect_control.dewy'
 use 'panic_inventory.dewy'
+use 'effect_sources.dewy'
 
 struct EffectEdge:
     callee: int
@@ -167,123 +168,6 @@ effect_bound_sites: (int, int)[]
 # (parallel bodies ask concurrency.jo directly)
 effect_blocks_demanded = false
 effect_bounds_proven: {int: bool} = {}
-
-# Projection selectors are field ordinals; -1 joins all array elements. Joining
-# every assignment is intentionally flow-insensitive, including later writes.
-effect_source_row = (n: int, path: int[] = [], depth: int = 0) -> int:
-    if n == 0 or depth > 16: return effect_top()
-    k = nodes[n].kind
-    if k == .conv:
-        inner = int(nodes[n].a)
-        return effect_source_row(inner, path, depth + 1)
-    if path.len() == 0 and callable_contract(ntype(n)) != 0: return callable_contract(ntype(n))
-    if path.len() == 0 and (k == .fnref or k == .lambda and not has_flag(n, NF_GENERIC)): return effect_function_row(int(nodes[n].sym))
-    if k == .field: return effect_source_row(int(nodes[n].a), [int(nodes[n].aux)] + path, depth + 1)
-    if k == .index: return effect_source_row(int(nodes[n].a), [-1] + path, depth + 1)
-    if k == .ident and nodes[n].aux == i32(int(SK.local)):
-        l = int(nodes[n].sym)
-        if int(locals[l].flags) & (LF_CAPTURE | LF_CAPTURED | LF_EXPOSED | LF_ADDR | LF_SHARED | LF_ALIAS) != 0:
-            return effect_top()
-        if int(locals[l].flags) & LF_PARAM != 0: return effect_top()
-        row = 0
-        loop q in effect_write_sites(l):
-            rhs = 0
-            rest = path
-            if nodes[q].kind == .vardecl and not has_flag(q, NF_GLOBAL) and nodes[q].sym == i32(l): rhs = int(nodes[q].b)
-            if nodes[q].kind == .assign:
-                target = int(nodes[q].a)
-                selectors: int[]
-                loop nodes[target].kind == .field or nodes[target].kind == .index:
-                    selectors.insert(0, if nodes[target].kind == .field: int(nodes[target].aux) else: -1)
-                    target = int(nodes[target].a)
-                if nodes[target].kind == .ident and nodes[target].aux == i32(int(SK.local)) and nodes[target].sym == i32(l):
-                    overlap = true
-                    loop i in [0..min(selectors.len(), path.len())):
-                        if selectors[i] != path[i]: overlap = false
-                    if overlap:
-                        if selectors.len() > path.len(): return effect_top()
-                        rhs = int(nodes[q].b)
-                        rest = path[selectors.len()..]
-            if rhs == 0: continue
-            # Unchecked later assignments are covered by the final obligation.
-            if not effect_final and nodes[rhs].type == 0: continue
-            r = effect_source_row(rhs, rest, depth + 1)
-            row = if row == 0: r else: effect_join(row, r)
-        return if row == 0: effect_top() else: row
-    if path.len() > 0:
-        rest = path[1..]
-        if k == .array and path[0] == -1:
-            row = 0
-            loop j in [0..nkids(n)):
-                child = kid(n, j)
-                r = effect_source_row(child, rest, depth + 1)
-                row = if row == 0: r else: effect_join(row, r)
-            return if row == 0: effect_top() else: row
-        if k == .call and nodes[n].aux == 2 and path[0] >= 0 and path[0] < nkids(n): return effect_source_row(kid(n, path[0]), rest, depth + 1)
-    if k == .call and nodes[n].aux == 0:
-        f = int(nodes[n].sym)
-        if f <= 0 or f >= fns.len(): return effect_top()
-        if not effect_final and fns[f].state == 0: check_fn_body(f)
-        if fns[f].state != 2: return effect_top()
-        leaves: int[]
-        effect_returns(int(fns[f].body), leaves)
-        value_leaves(int(fns[f].body), leaves)
-        row = 0
-        loop leaf in leaves:
-            r = effect_source_row(leaf, path, depth + 1)
-            row = if row == 0: r else: effect_join(row, r)
-        return if row == 0: effect_top() else: row
-    if path.len() == 0 and k == .partial:
-        source = if nodes[n].aux == 0: effect_function_row(int(nodes[n].sym)) else: effect_source_row(int(nodes[n].a), [], depth + 1)
-        row = effect_contracts[source]
-        atoms: EffectAtom[]
-        loop a0 in row.atoms:
-            a = a0
-            base = place_base(a.place)
-            if base.root == .formal:
-                slot = base.declaration - 1
-                if slot < 0 or slot >= nkids(n): return effect_top()
-                if nodes[kid(n, slot)].kind != .hole: return effect_top()
-                ordinal = 0
-                loop i in [0..slot + 1):
-                    if nodes[kid(n, i)].kind == .hole: ordinal += 1
-                a.place = place_append(PlaceIdentity(.formal, 0, ordinal), a.place)
-            atoms.push(a)
-        # Open bounds with bound formal exclusions need a route substitution.
-        if row.open: return effect_top()
-        loop exclusion in row.exclusions:
-            if place_base(exclusion.place).root == .formal: return effect_top()
-        return effect_intern(atoms, row.exclusions)
-    if k == .if_ or k == .block or k == .exprstmt:
-        leaves: int[]
-        value_leaves(n, leaves)
-        if leaves.len() == 1 and leaves[0] == n: return effect_top()
-        row = 0
-        loop leaf in leaves:
-            r = effect_source_row(leaf, path, depth + 1)
-            row = if row == 0: r else: effect_join(row, r)
-        return if row == 0: effect_top() else: row
-    effect_top()
-
-# Unannotated mutable storage carries source provenance rather than freezing
-# the initializer's upper bound. Declared fields/signatures keep their bounds.
-effect_storage_type = (t: int) -> int:
-    k = tkind(t)
-    if k == .callable: return callable_base(t)
-    if k == .array: return mk_array(effect_storage_type(telem(t)))
-    if k == .opt: return mk_opt(effect_storage_type(telem(t)))
-    if k == .fixed: return mk_fixed(effect_storage_type(telem(t)), fixed_len(t))
-    t
-
-effect_infer_callable = (n: int, expected: int) -> int:
-    t = ntype(n)
-    if callable_contract(expected) == 0 or callable_contract(t) != 0 or not is_fn_type(t): return t
-    # Freeze the expression before its checked conversion changes its type.
-    source = nodes.len()
-    nodes.push(nodes[n])
-    row = effect_source_row(source)
-    effect_obligations.push(EffectObligation(source, row))
-    mk_callable_contract(t, row)
 
 # A reviewed library operation's class (effect_library.jo) as its summary: its
 # residual costs, and a write of each mutable parameter.

@@ -6,7 +6,7 @@ def effect_services(text, modules):
     # Isolated checker drivers instead own only the effect callbacks they use.
     if 'struct EffectSummary:' in modules.get('effects.jo', ''):
         return text
-    for stem in ('effect_contracts', 'effect_control'):
+    for stem in ('effect_contracts', 'effect_control', 'effect_sources'):
         text = text.replace(stem + '.dewy', 'effects.jo').replace(
             stem + '.jo', 'effects.jo')
     return text
