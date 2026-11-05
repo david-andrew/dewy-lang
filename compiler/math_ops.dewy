@@ -19,10 +19,10 @@ from p"lower_group.dewy" import (gen_borrowed gen_expr gen_for gen_loop_body gen
 from p"lower_helpers.dewy" import (helper_params)
 from p"lower_scalars.dewy" import (int_op math_int_guard)
 from p"expr.jo" import (integer_constant mk_ident_local ntype)
-from p"isolation.jo" import (isolation_children)
 from p"math_lower.jo" import (math_decl_depth math_has_mutable math_loop_parent math_loop_sites math_static_regs math_static_widths math_versioning math_word_captures math_word_limits math_word_regs math_word_updates math_write_loop math_writes math_writes_ready)
 from p"lower_views.dewy" import (plain_read)
 from p"refine.jo" import (representation_type)
+from p"isolation_ops.dewy" import (isolation_children)
 # Direct recursive lowering; shared state has one owner in math_lower.jo.
 MathWord:type=int64<overflow='wrap'>
 math_word=(word:MathWord):>Val=>$unsafe {

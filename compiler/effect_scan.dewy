@@ -4,7 +4,7 @@ from p"effects.jo" import (EffectEdge effect_contracts effect_counters effect_ex
 from p"effect_costs.dewy" import (effect_bounds effect_cleanup effect_failure effect_intrinsic_cost effect_plan_cost)
 from p"dewy_reader_types.dewy" import (EffectKind)
 from p"expr.jo" import (IN is_fn_type ntype)
-from p"isolation.jo" import (IsolationReason isolation_children isolation_effect isolation_intrinsic)
+from p"isolation.jo" import (IsolationReason)
 from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_EXPOSED LF_MUTPARAM LF_PARAM LF_SHARED compound_op fns globals locals readonly_global)
 from p"ast.jo" import (NF_GENERIC NF_GLOBAL NF_INBOUNDS NF_MUT NF_SPREAD NF_STMT NF_U64 RANGE_EXHAUSTION has_flag kid kid2 nkids nkids2 nodes)
 from p"type_layout.dewy" import (TF_BOXED)
@@ -31,6 +31,7 @@ from p"lower_analysis.dewy" import (raw_view)
 from p"refine.jo" import (ref_predicates representation_type)
 from p"lower_storage.dewy" import (vc)
 from p"effect_owners.dewy" import (effect_owner_init)
+from p"isolation_ops.dewy" import (isolation_children isolation_effect isolation_intrinsic)
 # Demanded body and place scanning; shared state has one owner in effects.jo.
 EffectScanWord:type=int64<overflow='wrap'>
 # Locals never cross call edges. Externally visible roots use owner-qualified

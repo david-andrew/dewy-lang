@@ -2,6 +2,9 @@
 
 
 def effect_services(text, modules):
+    if 'struct IsolationRow:' not in modules.get('isolation.jo', ''):
+        text = text.replace('isolation_ops.dewy', 'isolation.jo').replace(
+            'isolation_ops.jo', 'isolation.jo')
     # Whole-compiler differentials supply the real state and switch one leaf.
     # Isolated checker drivers instead own only the effect callbacks they use.
     if 'struct EffectSummary:' in modules.get('effects.jo', ''):

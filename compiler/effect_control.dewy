@@ -13,12 +13,12 @@ from p"effect_classifiers.dewy" import (effect_library_reset)
 from p"facts.jo" import (fact_probe_function fact_policy)
 from p"util.jo" import (fatal name_of pos_in_lib pos_str)
 from p"floats.jo" import (ff_probe_function)
-from p"isolation.jo" import (isolation_children)
 from p"places.jo" import (place_append place_parents places_reset)
 from p"concurrency.jo" import (ParSafeVia concurrency_calls concurrency_tasks parsafe_req parsafe_fns parsafe_work concurrency_runtime_needed concurrency_ffi_start concurrency_block_memo)
 from p"directives.jo" import dir_row_origin
 from p"panic_inventory.dewy" import (effect_panics_reset)
 from p"effect_sources.dewy" import (effect_source_row)
+from p"isolation_ops.dewy" import (isolation_children)
 # Effect demand and finalization; shared state has one owner in effects.jo.
 ControlWord:type=int64<overflow='wrap'>
 effects_reset=():>void=>$unsafe {

@@ -1,0 +1,287 @@
+$runtime_checks
+from p"check.jo" import (FK_INIT LF_ADDR LF_CAPTURE fns locals)
+from p"expr.jo" import (IN ntype)
+from p"isolation.jo" import (IsolationReason IsolationRow isolation_limit isolation_node_limit isolation_rows isolation_seen isolation_serial isolation_stack)
+from p"ast.jo" import (NF_EXTERN NF_GLOBAL has_flag kid kid2 nkids nkids2 nodes)
+from p"node_store.dewy" import (NK)
+from p"effect_classifiers.dewy" import (effect_library_class)
+from p"effects.jo" import (effect_summaries)
+from p"effect_library.jo" import EffectClass
+from p"types.jo" import (fields layout prune structs tkind types)
+from p"ownership.jo" import (owner_map_copies ownership_copies ownership_decls ownership_moves)
+from p"ownership_types.dewy" import (ownership_callable_cap ownership_type)
+from p"lower_analysis.dewy" import (raw_view)
+from p"lower_helpers.dewy" import (value_helper_calls)
+# Demanded ambient-isolation proofs; shared state has one owner in isolation.jo.
+IsolationWord:type=int64<overflow='wrap'>
+# Run after check_program's checking/helper fixed point, once per compilation,
+# including watch/repl. Do not publish init bodies, which lowering still edits,
+# or any instances discovered after this boundary. No incremental invalidation.
+isolation_reset=():>void=>$unsafe {
+    isolation_rows=fill(IsolationRow[] fns.length)
+    isolation_seen=fill(0 nodes.length)
+    isolation_stack=[]
+    isolation_serial=0
+    isolation_limit=fns.length
+    isolation_node_limit=nodes.length
+}
+# Runtime child fields only: a=1, b=2, c=4, kids=16, kids2=32.
+# There is deliberately no generic a/b/c/d fallback. In particular for_.c/d
+# are local IDs and partial.d is an instance ID, NOT syntax. Type annotations,
+# call ordering metadata and nested function templates are not evaluated here.
+isolation_children=(k:NK):>int64=>$unsafe {
+    match k {
+        <'int_lit' | 'float_lit' | 'bool_lit' | 'none_lit' | 'null_lit' | 'ident' | 'dotname' | 'hole' | 'break_' | 'continue_' | 'pwild'> => {return 0}
+        <'str_lit' | 'block' | 'tuple' | 'map_lit' | 'matrix'> => {return 16}
+        <'field' | 'unary' | 'not_' | 'unwrap' | 'narrow' | 'cast' | 'conv' | 'addr' | 'exprstmt' | 'return_' | 'defer_' | 'istype' | 'plit'> => {return 1}
+        <'binary' | 'and_' | 'or_' | 'coalesce' | 'assign' | 'while_' | 'for_' | 'prange'> => {return 3}
+        <'if_' | 'iflet' | 'range'> => {return 7}
+        <'vardecl'> => {return 2}
+        <'array'> => {return 2 | 16}
+        <'call' | 'partial' | 'intrinsic' | 'match_'> => {return 1 | 16}
+        <'index' | 'pair'> => {return 3 | 16}
+        <'arm'> => {return 7 | 16}
+        <'pvariant'> => {return 16}
+        <'fnref'> => {return 1}
+        # A closure is conservatively a blocker; never walk its body as this owner.
+        <'lambda'> => {return 0}
+        _ => {return -1}
+    }
+}
+# Closed intrinsic contract set, selected by the checker's resolved IN identity.
+# Ordinary bundled functions get exactly the same body analysis as user code.
+# No blanket runtime or library exemption, and new intrinsic IDs fail closed.
+# These operations only access their operands (plus private allocation/runtime
+# bookkeeping). Equality/hash user hooks are added separately below. Formatting,
+# raw memory, foreign callbacks, concurrency and reflective helpers are opaque.
+isolation_intrinsic=(id:IN):>bool=>$unsafe {
+    return id =? IN.fixed_abs or id =? IN.len or id =? IN.arrcap or id =? IN.sizeof or id =? IN.alignof or id =? IN.sqrt or id =? IN.mul_hi or id =? IN.floor_ or id =? IN.ceil_ or id =? IN.fabs or id =? IN.fmin or id =? IN.fmax or id =? IN.vec_ctor or id =? IN.push or id =? IN.pop or id =? IN.insert or id =? IN.remove or id =? IN.clear or id =? IN.reserve or id =? IN.resize or id =? IN.truncate or id =? IN.extend or id =? IN.fill or id =? IN.slice or id =? IN.hash or id =? IN.unreachable
+}
+# Hidden dependencies of one operation, not its evaluated children. Defaults
+# are already checked actuals; defers remain body children, so all exits count.
+isolation_effect=(n:IsolationWord @edges:array<int64>):>IsolationReason=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if isolation_children(k) <? 0 {return IsolationReason.node}
+    if k =? 'lambda' or k =? 'partial' {return IsolationReason.indirect}
+    if k =? 'addr' {return IsolationReason.raw}
+    if k =? 'cast' or k =? 'conv' {
+        if raw_view(n) {return IsolationReason.raw}
+        if k =? 'conv' and (nodes.ptr[n].aux =? int32(6) or nodes.ptr[n].aux =? int32(7)) {return IsolationReason.raw}
+    }
+    if k =? 'index' or k =? 'field' {
+        let t=prune(ntype(IsolationWord(nodes.ptr[n].a)))
+        if tkind(t) =? 'ptr' {return IsolationReason.raw}
+    }
+    if k =? 'call' {
+        let aux:IsolationWord=IsolationWord(nodes.ptr[n].aux)
+        if aux =? 0 {edges.push(IsolationWord(nodes.ptr[n].sym));}
+        else if aux not=? 2 and aux not=? 3 {return IsolationReason.indirect}
+    }
+    if k =? 'fnref' {
+        if nodes.ptr[n].aux not=? 0 {return IsolationReason.indirect}
+        edges.push(IsolationWord(nodes.ptr[n].sym));
+    }
+    if k =? 'pair' and nodes.ptr[n].sym >? 0 {edges.push(IsolationWord(nodes.ptr[n].sym));}
+    # Map literals invoke the resolved insertion operation. Presence tests may
+    # replace a value-producing lookup with a different checked helper.
+    if k =? 'map_lit' and nkids(n) >? 0 {edges.push(IsolationWord(nodes.ptr[n].sym));}
+    if (k =? 'binary' and nodes.ptr[n].aux =? 6 or k =? 'istype') and nodes.ptr[n].aux2 not=? 0 {
+        edges.push(IsolationWord(nodes.ptr[n].aux2));
+    }
+    if k =? 'binary' and (nodes.ptr[n].aux =? 4 or nodes.ptr[n].aux =? 5) {return IsolationReason.raw}
+    if k =? 'intrinsic' and not isolation_intrinsic(nodes.ptr[n].aux as IN) {return IsolationReason.intrinsic}
+    if k =? 'binary' or k =? 'intrinsic' {
+        loop f in value_helper_calls(n) {edges.push(f);}
+    }
+    return IsolationReason.none_
+}
+isolation_block=(f:IsolationWord reason:IsolationReason witness:IsolationWord):>void=>$unsafe {
+    if isolation_rows.ptr[f].reason =? IsolationReason.none_ {
+        isolation_rows.ptr[f].reason = reason;
+        isolation_rows.ptr[f].witness = witness;
+    }
+}
+# Each demanded instance's body and direct edges are collected just once. A
+# generation-wide stamped array handles shared checked expression nodes without
+# allocating/clearing a nodes-sized bitmap for every function. Edges need not be
+# deduplicated: Tarjan visits a target once, so diamonds remain O(nodes + edges).
+# Lifecycle hooks a value of type t0 can run (drop, copy, move and map-copy
+# hooks, through inline fields and elements) are implicit calls: edges. False
+# when the type cannot be followed, which blocks.
+isolation_hooks=(t0:IsolationWord @edges:array<int64> depth:IsolationWord=0):>bool=>$unsafe {
+    if depth >? 32 {return false}
+    let t=prune(t0)
+    if not ownership_type(t) {return true}
+    if ownership_callable_cap(t) not=? 0 {return false}
+    let k=tkind(t)
+    if k =? 'array' or k =? 'fixed' or k =? 'opt' or k =? 'box' {return isolation_hooks(IsolationWord(types.ptr[t].elem) @edges depth + 1)}
+    if k not=? 'struct_' {return false}
+    let c=owner_map_copies.get(t)
+    if c not=? none {edges.push(c);}
+    let c=ownership_copies.get(t)
+    if c not=? none {edges.push(c);}
+    let m=ownership_moves.get(t)
+    if m not=? none {edges.push(m);}
+    layout(t);
+    let si:IsolationWord=IsolationWord(types.ptr[t].st)
+    if structs.ptr[si].drop_fn not=? 0 {edges.push(IsolationWord(structs.ptr[si].drop_fn));}
+    loop i in [0..IsolationWord(structs.ptr[si].nfields)) {
+        if not isolation_hooks(IsolationWord(fields.ptr[IsolationWord(structs.ptr[si].fields) + i].type) @edges depth + 1) {return false}
+    }
+    return true
+}
+isolation_scan=(f:IsolationWord):>array<int64>=>$unsafe {
+    let edges:array<int64>=[]
+    # (a reviewed library class is a summary of costs, not of the body's
+    # ambient isolation: that body is walked here, as it always was)
+    if f <? effect_summaries.length and effect_summaries.ptr[f].done and not effect_summaries.ptr[f].footprint_only and effect_library_class(f) =? EffectClass.unclassified {
+        let row=effect_summaries.ptr[f]
+        if row.isolation not=? IsolationReason.none_ {isolation_block(f row.isolation row.isolation_witness);}
+        loop edge in row.edges {edges.push(edge.callee);}
+        return edges
+    }
+    let todo=[IsolationWord(fns.ptr[f].body)]
+    loop todo.length >? 0 {
+        let n=todo.pop()
+        if n =? 0 {continue}
+        if n <? 0 or n >=? isolation_node_limit {
+            isolation_block(f IsolationReason.node n);
+            break
+        }
+        if isolation_seen.ptr[n] =? f {continue}
+        isolation_seen.ptr[n] = f;
+        let k=nodes.ptr[n].kind
+        if k =? 'ident' {
+            if nodes.ptr[n].aux =? int32(2) {
+                isolation_block(f IsolationReason.global_ n);
+                break
+            }
+            if nodes.ptr[n].aux not=? int32(1) {
+                isolation_block(f IsolationReason.node n);
+                break
+            }
+            let l:IsolationWord=IsolationWord(nodes.ptr[n].sym)
+            if l <? 0 or l >=? locals.length {
+                isolation_block(f IsolationReason.node n);
+                break
+            }
+            if IsolationWord(locals.ptr[l].flags) & (LF_CAPTURE | LF_ADDR) not=? 0 {
+                isolation_block(f IsolationReason.capture n);
+                break
+            }
+        }
+        let reason=isolation_effect(n @edges)
+        if reason not=? IsolationReason.none_ {
+            isolation_block(f reason n);
+            break
+        # (a value with lifecycle hooks may run them as it is copied, moved or
+        # dropped; a declared local is dropped at its scope's end)
+        }
+        if ownership_decls.length not=? 0 {
+            let held=if k =? 'vardecl' and nodes.ptr[n].sym >? 0 and not has_flag(n NF_GLOBAL) {IsolationWord(locals.ptr[IsolationWord(nodes.ptr[n].sym)].type)} else {ntype(n)}
+            if not isolation_hooks(held @edges) or not isolation_hooks(ntype(n) @edges) {
+                isolation_block(f IsolationReason.node n);
+                break
+            }
+        }
+        let mask=isolation_children(k)
+        if mask & 1 not=? 0 {todo.push(IsolationWord(nodes.ptr[n].a));}
+        if mask & 2 not=? 0 {todo.push(IsolationWord(nodes.ptr[n].b));}
+        if mask & 4 not=? 0 {todo.push(IsolationWord(nodes.ptr[n].c));}
+        if mask & 16 not=? 0 {
+            loop i in [0..nkids(n)) {todo.push(kid(n i));}
+        }
+        if mask & 32 not=? 0 {
+            loop i in [0..nkids2(n)) {todo.push(kid2(n i));}
+        }
+    }
+    return edges
+}
+isolation_visit=(f:IsolationWord):>void=>$unsafe {
+    isolation_serial += 1;
+    isolation_rows.ptr[f].index = isolation_serial;
+    isolation_rows.ptr[f].low = isolation_serial;
+    isolation_stack.push(f);
+    let decl:IsolationWord=IsolationWord(fns.ptr[f].decl)
+    if fns.ptr[f].state not=? 2 or fns.ptr[f].body =? 0 or fns.ptr[f].kind =? FK_INIT {
+        isolation_block(f IsolationReason.unavailable f);
+    }
+    else if fns.ptr[f].has_env or fns.ptr[f].caps.length not=? 0 {
+        isolation_block(f IsolationReason.capture IsolationWord(fns.ptr[f].body));
+    }
+    else if decl not=? 0 and has_flag(decl NF_EXTERN) {
+        isolation_block(f IsolationReason.unavailable f);
+    }
+    else {
+        let edges=isolation_scan(f)
+        loop g in edges {
+            if g <=? 0 or g >=? isolation_limit {
+                isolation_block(f IsolationReason.unavailable g);
+                continue
+            }
+            if isolation_rows.ptr[g].index =? 0 {
+                isolation_visit(g);
+                if not isolation_rows.ptr[g].done {isolation_rows.ptr[f].low = min(isolation_rows.ptr[f].low isolation_rows.ptr[g].low);}
+            }
+            else if not isolation_rows.ptr[g].done {
+                isolation_rows.ptr[f].low = min(isolation_rows.ptr[f].low isolation_rows.ptr[g].index);
+            }
+            if isolation_rows.ptr[g].done and isolation_rows.ptr[g].reason not=? IsolationReason.none_ {
+                isolation_block(f isolation_rows.ptr[g].reason isolation_rows.ptr[g].witness);
+            }
+        }
+    }
+    if isolation_rows.ptr[f].low not=? isolation_rows.ptr[f].index {return}
+    # All members see blockers found even after a recursive backedge. Never
+    # publish an in-progress node as isolated, or accept recursion by assumption.
+    let start:IsolationWord=IsolationWord(isolation_stack.length) - 1
+    loop isolation_stack.ptr[start] not=? f {start -= 1;}
+    let reason=IsolationReason.none_
+    let witness:IsolationWord=0
+    loop i in [start..isolation_stack.length) {
+        let g=isolation_stack.ptr[i]
+        if isolation_rows.ptr[g].reason not=? IsolationReason.none_ {
+            reason=isolation_rows.ptr[g].reason
+            witness=isolation_rows.ptr[g].witness
+        }
+    }
+    loop isolation_stack.length >? start {
+        let g=isolation_stack.pop()
+        isolation_rows.ptr[g].reason = reason;
+        isolation_rows.ptr[g].witness = witness;
+        isolation_rows.ptr[g].done = true;
+    }
+}
+instance_isolated=(f:IsolationWord):>bool=>$unsafe {
+    if f <=? 0 or f >=? isolation_limit {return false}
+    if isolation_rows.ptr[f].index =? 0 {isolation_visit(f);}
+    return isolation_rows.ptr[f].done and isolation_rows.ptr[f].reason =? IsolationReason.none_
+}
+# A node-level query for loop consumers: only hidden/ambient call effects.
+# Their existing walkers still account for actual arguments, direct operations,
+# escaping values and aliases. A global identifier itself is handled by those
+# walkers; it is an ambient blocker in a callee's full summary above.
+isolation_operation=(n:IsolationWord):>bool=>$unsafe {
+    # Lowering may synthesize a counted loop/block around already checked
+    # expressions. Classify those operations normally, but calls still demand
+    # instances from the frozen checking generation (never late helpers).
+    if n <=? 0 or n >=? nodes.length {return false}
+    let edges:array<int64>=[]
+    if isolation_effect(n @edges) not=? IsolationReason.none_ {return false}
+    loop f in edges {
+        if not instance_isolated(f) {return false}
+    }
+    return true
+}
+# Explicit consumer contracts. Isolation discharges ONLY ambient interference:
+# fixed_array_local must still reject local resize/alias flags; fp_scan must
+# still kill reserve/data/mutable actuals; uq_scan must still reject escapes.
+ambient_length_stable=(f:IsolationWord):>bool=>$unsafe {
+    return instance_isolated(f)
+}
+ambient_storage_stable=(n:IsolationWord):>bool=>$unsafe {
+    return isolation_operation(n)
+}
+ambient_sharing_stable=(n:IsolationWord):>bool=>$unsafe {
+    return isolation_operation(n)
+}
