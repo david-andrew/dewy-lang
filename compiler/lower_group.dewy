@@ -28,7 +28,7 @@ from p"exact_loop.jo" import (exact_map_active exact_map_for exact_map_stores ex
 from p"exact_reset_loop.jo" import (exr_call_target exr_loop)
 from p"floats.jo" import (ff_checks_any float_check float_int_guard float_key_check float_keys_any float_to_u64)
 from p"fused.jo" import (fused_on fz_note)
-from p"math_lower.jo" import (gen_math_for math_accumulator_for math_binary math_call math_compare math_count math_default_formatter math_float_binary math_local_is math_pack_word math_proven_word math_reset_local_decl math_shift math_shift_count math_signed math_static_bits math_static_local_decl math_static_narrow math_static_regs math_static_value math_sum_compare math_word math_word_captures math_word_expr math_word_helper math_word_local_decl math_word_range math_word_regs)
+from p"math_lower.jo" import (math_static_regs math_word_captures math_word_regs)
 from p"scanloops.jo" import (gen_scan_loop)
 from p"member_lowering.jo" import (member_lower_active member_lower_block member_lower_text)
 from p"member_replay.jo" import (member_scopes)
@@ -47,6 +47,7 @@ from p"lower_intrinsics.dewy" import (gen_intrinsic_argv gen_intrinsic_compute_s
 from p"lower_races.dewy" import (in_lib parallel_direct race_check type_as_value)
 from p"ir_builders.dewy" import (e_addi e_bin e_brtable e_call e_call0 e_call1 e_call2 e_call3 e_call4 e_calli e_copy e_fconst e_iconst e_load e_mov e_ret e_slot e_store e_un e_vop e_zero emit ir_set_pos new_slot vreg)
 from p"arena_ops.dewy" import (arena_gen_promote)
+from p"math_ops.dewy" import (gen_math_for math_accumulator_for math_binary math_call math_compare math_count math_default_formatter math_float_binary math_local_is math_pack_word math_proven_word math_reset_local_decl math_shift math_shift_count math_signed math_static_bits math_static_local_decl math_static_narrow math_static_value math_sum_compare math_word math_word_expr math_word_helper math_word_local_decl math_word_range)
 # Direct recursive lowering; shared state has one owner in lower.jo.
 LGWord:type=int64<overflow='wrap'>
 LGUWord:type=uint64<overflow='wrap'>

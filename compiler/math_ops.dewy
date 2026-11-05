@@ -1,0 +1,1203 @@
+$runtime_checks
+from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_ELEMALIAS LF_EXPOSED LF_MUTPARAM LF_OWNERBORROW LF_PARAM LF_PARTBORROW LF_QUIET LF_SHARED LF_SOAELEM LF_VALUECAP block_value fns lib_dir locals runtime_fn target_wasm watch_build)
+from p"checker_state.dewy" import (Local)
+from p"lower.jo" import (LoopInfo VC_AGG Val building ctl cur_block cur_block_i cur_fn loops scope_locals tl_items)
+from p"ast.jo" import (NF_GLOBAL NF_INCLUSIVE NF_STEP NF_U64 has_flag kid kid2 kids kids2 nkids nkids2 nodes)
+from p"ir_types.dewy" import (Op)
+from p"types.jo" import (T_FLOAT T_INT T_MATH_INT is_int mk_array prune telem tsize types)
+from p"checker_tokens.dewy" import (Tok)
+from p"checked_eval.dewy" import (cx_token_values)
+from p"lower_storage.dewy" import (V blk borrow br_to brif_to drop_at els endc freeze_scalar iff lop new_temp norm read_place release retain scope_add_local scope_push stmt_begin stmt_end vc vt_of write_place)
+from p"ir.jo" import (VF VI VS dbg_on ir ir_cold)
+from p"ir_builders.dewy" import (e_addi e_bin e_call e_iconst e_load e_mov e_ret e_slot e_store e_un e_zero emit is_kv kv_of vreg)
+from p"lower_primitives.dewy" import (e_call_nr e_daddr lf_of_inst rt str_data)
+from p"exact.jo" import (exact_add exact_bits exact_count_bound exact_extend exact_has_node exact_local_width exact_mul exact_neg exact_ranges exact_shift_literal exact_small_math exact_type_width exact_value)
+from p"exact_reset_loop.jo" import (exr_fast exr_locals)
+from p"facts.jo" import (fact_domain fact_floor_call fact_progress_strip positive_bound positive_bounds positive_bounds_fn positive_collecting_writes positive_write stable_loop_index word_integer_value)
+from p"util.jo" import (files name_of pos_file)
+from p"lower_group.dewy" import (gen_borrowed gen_expr gen_for gen_loop_body gen_owned gen_stmt local_place scope_pop)
+from p"lower_helpers.dewy" import (helper_params)
+from p"lower_scalars.dewy" import (int_op math_int_guard)
+from p"expr.jo" import (integer_constant mk_ident_local ntype)
+from p"isolation.jo" import (isolation_children)
+from p"math_lower.jo" import (math_decl_depth math_has_mutable math_loop_parent math_loop_sites math_static_regs math_static_widths math_versioning math_word_captures math_word_limits math_word_regs math_word_updates math_write_loop math_writes math_writes_ready)
+from p"lower_views.dewy" import (plain_read)
+from p"refine.jo" import (representation_type)
+# Direct recursive lowering; shared state has one owner in math_lower.jo.
+MathWord:type=int64<overflow='wrap'>
+math_word=(word:MathWord):>Val=>$unsafe {
+    if is_kv(word) {
+        let value=kv_of(word)
+        if value >=? -4611686018427387904 and value <=? 4611686018427387903 {
+            return V(e_iconst(value << 1) false)
+        }
+        return math_call("__mi_word" [word])
+    }
+    let out=vreg(VI)
+    let tagged=e_bin('shl' VI word e_iconst(1))
+    iff(e_bin('eq' VI e_bin('shrs' VI tagged e_iconst(1)) word));
+    e_mov(out tagged);
+    els();
+    let old=ir_cold
+    ir_cold=true
+    e_mov(out e_call(rt("__mi_word") [word] VI));
+    ir_cold=old
+    endc();
+    return V(out true)
+}
+math_pack_word=(e:MathWord word:MathWord):>Val=>$unsafe {
+    if exact_small_math(e) >=? 0 {return V(e_bin('shl' VI word e_iconst(1)) false)}
+    let t=representation_type(ntype(e))
+    if t not=? T_MATH_INT and is_int(t) and types.ptr[t].bits <? 63 {
+        let bound=fact_domain(t)
+        if bound.lo >=? -4611686018427387904 and bound.hi <=? 4611686018427387903 {
+            return V(e_bin('shl' VI word e_iconst(1)) false)
+        }
+    }
+    let limit=positive_bound(e true)
+    if limit >=? 0 and limit <=? 4611686018427387903 {return V(e_bin('shl' VI word e_iconst(1)) false)}
+    return math_word(word)
+}
+math_call=(name:string args:array<int64> result:MathWord=0):>Val=>$unsafe {
+    let t=if result =? 0 {T_MATH_INT} else {result}
+    if vc(t) not=? VC_AGG {return V(e_call(rt(name) args vt_of(t)) true)}
+    let s=new_temp(t)
+    let a=e_slot(s)
+    e_zero(a tsize(t));
+    e_call(rt(name) [a args...] -1);
+    return Val[a true s]
+}
+math_payload_type=():>int64=>$unsafe {
+    let f=runtime_fn("__mi_payload")
+    return mk_array(telem(prune(MathWord(fns.ptr[f].ret))))
+}
+math_tag=(a:MathWord):>int64=>$unsafe {
+    return e_bin('and_' VI a e_iconst(1))
+}
+math_untag=(a:MathWord):>int64=>$unsafe {
+    return e_bin('shrs' VI a e_iconst(1))
+}
+math_signed=(a:MathWord):>int64=>$unsafe {
+    let result=vreg(VI)
+    e_mov(result math_untag(a));
+    iff(math_tag(a));
+    let old=ir_cold
+    ir_cold=true
+    e_mov(result e_call(rt("__mi_signed") [a] VI));
+    ir_cold=old
+    endc();
+    return result
+}
+math_count=(e:MathWord):>int64=>$unsafe {
+    if prune(ntype(e)) =? T_MATH_INT and math_proven_word(e) {return math_word_expr(e)}
+    let value=gen_expr(e)
+    borrow(value ntype(e));
+    if prune(ntype(e)) =? T_MATH_INT {return math_signed(value.v)}
+    return value.v
+}
+math_compare=(op:Tok a:MathWord b:MathWord):>int64=>$unsafe {
+    let result=vreg(VI)
+    let tag=math_tag(e_bin('or_' VI a b))
+    iff(e_bin('eq' VI tag e_iconst(0)));
+    e_mov(result e_bin(int_op(op true) VI a b));
+    els();
+    let old=ir_cold
+    ir_cold=true
+    let comparison=e_call(rt("__mi_compare") [a b] VI)
+    e_mov(result e_bin(int_op(op true) VI comparison e_iconst(0)));
+    ir_cold=old
+    endc();
+    return result
+}
+math_binary=(op:Tok a:MathWord b:MathWord):>Val=>$unsafe {
+    let out=vreg(VI)
+    e_mov(out e_iconst(0));
+    let tag=math_tag(e_bin('or_' VI a b))
+    let operation=if op =? 'plus' {0} else if op =? 'minus' {1} else if op =? 'star' {2} else if op =? 'slash' {3} else if op =? 'percent' {4} else if op =? 'amp' {5} else if op =? 'pipe' {6} else {7}
+    blk();
+    let done=ctl
+    iff(e_bin('eq' VI tag e_iconst(0)));
+    let x=a
+    let y=b
+    if op =? 'star' {x=math_untag(a)}
+    if op =? 'slash' or op =? 'percent' {
+        x=math_untag(a)
+        y=math_untag(b)
+    }
+    let result:MathWord=0
+    let bad=e_iconst(0)
+    if op =? 'plus' or op =? 'minus' {
+        result=e_bin(int_op(op true) VI x y)
+        if not target_wasm {
+            bad=e_bin((if op =? 'plus' {Op.overflow_add} else {Op.overflow_sub}) VI x y)
+        }
+        else {
+            let left=e_bin('xor' VI x result)
+            let right=e_bin('xor' VI (if op =? 'plus' {y} else {x}) (if op =? 'plus' {result} else {y}))
+            bad=e_bin('lts' VI e_bin('and_' VI left right) e_iconst(0))
+        }
+    }
+    else if op =? 'star' {
+        result=e_bin('mul' VI x y)
+        if not target_wasm {
+            bad=e_bin('overflow_mul' VI x y)
+        }
+        else {
+            bad=vreg(VI)
+            e_mov(bad e_iconst(0));
+            iff(e_bin('eq' VI x e_iconst(-1)));
+            e_mov(bad e_bin('eq' VI y e_iconst(-9223372036854775807 - 1)));
+            els();
+            iff(e_bin('ne' VI x e_iconst(0)));
+            e_mov(bad e_bin('ne' VI e_bin('divs' VI result x) y));
+            endc();
+            endc();
+        }
+    }
+    else if op =? 'slash' or op =? 'percent' {
+        bad=e_bin('or_' VI e_bin('eq' VI y e_iconst(0)) e_bin('and_' VI e_bin('eq' VI x e_iconst(-4611686018427387904)) e_bin('eq' VI y e_iconst(-1))))
+        # The hardware division must remain inside the proven-safe arm.
+    }
+    else {result=e_bin(int_op(op true) VI x y)}
+    iff(e_bin('eq' VI bad e_iconst(0)));
+    if op =? 'slash' or op =? 'percent' {result=e_bin(int_op(op true) VI x y)}
+    if op =? 'slash' or op =? 'percent' {result=e_bin('shl' VI result e_iconst(1))}
+    e_mov(out result);
+    br_to(done);
+    endc();
+    endc();
+    # Both source values are still live here, including their original words.
+    let old=ir_cold
+    ir_cold=true
+    e_mov(out e_call(rt("__mi_slow") [a b e_iconst(operation)] VI));
+    ir_cold=old
+    endc();
+    return V(out true)
+}
+math_shift=(op:Tok a:MathWord count:MathWord signed_count:bool):>Val=>$unsafe {
+    if signed_count {math_int_guard(e_bin('lts' VI count e_iconst(0)));}
+    let out=vreg(VI)
+    e_mov(out e_iconst(0));
+    blk();
+    let done=ctl
+    iff(e_bin('eq' VI math_tag(a) e_iconst(0)));
+    let x=a
+    iff(e_bin('geu' VI count e_iconst(64)));
+    if op =? 'shr' {
+        e_mov(out e_bin('and_' VI e_bin('shrs' VI x e_iconst(63)) e_iconst(-2)));
+        br_to(done);
+    }
+    else {
+        brif_to(e_bin('eq' VI x e_iconst(0)) done);
+    }
+    els();
+    let result=e_bin(int_op(op true) VI x count)
+    if op =? 'shl' {iff(e_bin('eq' VI e_bin('shrs' VI result count) x));}
+    if op =? 'shr' {result=e_bin('and_' VI result e_iconst(-2))}
+    e_mov(out result);
+    br_to(done);
+    if op =? 'shl' {endc();}
+    endc();
+    endc();
+    let old=ir_cold
+    ir_cold=true
+    e_mov(out e_call(rt("__mi_shift") [a count e_iconst(int64(op =? 'shr'))] VI));
+    ir_cold=old
+    endc();
+    return V(out true)
+}
+math_main=(f:MathWord):>int64=>$unsafe {
+    helper_params(0);
+    ir.ret = VI;
+    let a=e_call(lf_of_inst(f) [] VI)
+    let result=math_signed(a)
+    release(a T_MATH_INT);
+    return e_ret(result)
+}
+math_word_bound=(e:MathWord):>bool=>$unsafe {
+    if e =? 0 {return false}
+    if e <? exact_ranges.length and exact_ranges.ptr[e] >? 0 and exact_ranges.ptr[e] <=? 64 {return true}
+    # An expanded fixed-width expression keeps its storage type in the AST.
+    # That type cannot justify discarding its high words at an int boundary.
+    if exact_has_node(e) {
+        if exact_bits(e) <=? 64 {return true}
+        return not exact_count_bound(e).wide
+    }
+    let t=prune(ntype(e))
+    if t not=? T_MATH_INT {return is_int(t) and (types.ptr[t].sign or MathWord(types.ptr[t].bits) <? 64)}
+    if nodes.ptr[e].kind =? 'int_lit' {return not has_flag(e NF_U64) or nodes.ptr[e].ival >=? 0}
+    if not exact_count_bound(e).wide {return true}
+    if nodes.ptr[e].kind =? 'conv' and nodes.ptr[e].aux =? int32<overflow='wrap'>(1) {return math_word_bound(MathWord(nodes.ptr[e].a))}
+    return false
+}
+math_word_range=(s:MathWord):>bool=>$unsafe {
+    let it:MathWord=MathWord(nodes.ptr[s].a)
+    if not math_proven_word(MathWord(nodes.ptr[it].a)) or not math_proven_word(MathWord(nodes.ptr[it].b)) {return false}
+    if has_flag(it NF_STEP) {return math_proven_word(MathWord(nodes.ptr[it].c))}
+    return true
+}
+math_loop_slot=():>int64=>$unsafe {
+    let slot=new_temp(T_MATH_INT)
+    let l=locals.length
+    locals.push(Local[type = int32<overflow='wrap'>(T_MATH_INT) owner = int32<overflow='wrap'>(cur_fn) offset = int32<overflow='wrap'>(slot)]);
+    scope_add_local(l);
+    let address=e_slot(slot)
+    e_zero(address 8);
+    return address
+}
+gen_math_for=(s:MathWord):>void=>$unsafe {
+    let it:MathWord=MathWord(nodes.ptr[s].a)
+    let l:MathWord=MathWord(nodes.ptr[s].sym)
+    # Scope ownership also releases promoted bounds on return and outer break.
+    let ctr=math_loop_slot()
+    let endv=math_loop_slot()
+    let step=math_loop_slot()
+    stmt_begin();
+    e_store(ctr 0 gen_owned(MathWord(nodes.ptr[it].a)).v 8);
+    let open_end=nodes.ptr[it].b =? 0
+    if not open_end {e_store(endv 0 gen_owned(MathWord(nodes.ptr[it].b)).v 8);}
+    if has_flag(it NF_STEP) {
+        let second=gen_borrowed(MathWord(nodes.ptr[it].c)).v
+        e_store(step 0 math_binary('minus' second e_load(VI ctr 0 8)).v 8);
+    }
+    else {e_store(step 0 math_word(e_iconst(1)).v 8);}
+    let zero=math_word(e_iconst(0)).v
+    iff(math_compare('eq' e_load(VI step 0 8) zero));
+    e_call_nr(rt("__panic") [e_daddr(str_data("range step must be nonzero"))] -1);
+    endc();
+    let up=math_compare('gt' e_load(VI step 0 8) zero)
+    stmt_end();
+    scope_add_local(l);
+    blk();
+    let brk=ctl
+    lop();
+    let top=ctl
+    if not open_end {
+        let inclusive=has_flag(it NF_INCLUSIVE)
+        iff(up);
+        brif_to(math_compare((if inclusive {Tok.gt} else {Tok.ge}) e_load(VI ctr 0 8) e_load(VI endv 0 8)) brk);
+        els();
+        brif_to(math_compare((if inclusive {Tok.lt} else {Tok.le}) e_load(VI ctr 0 8) e_load(VI endv 0 8)) brk);
+        endc();
+    }
+    let target=local_place(l true)
+    release(read_place(target T_MATH_INT) T_MATH_INT);
+    let value=e_load(VI ctr 0 8)
+    retain(value T_MATH_INT);
+    write_place(target T_MATH_INT value);
+    blk();
+    let cont=ctl
+    loops.push(LoopInfo[brk cont scope_locals.length tl_items.length building.length]);
+    gen_loop_body(MathWord(nodes.ptr[s].b));
+    loops.pop();
+    endc();
+    let next=math_binary('plus' e_load(VI ctr 0 8) e_load(VI step 0 8))
+    drop_at(ctr T_MATH_INT);
+    e_store(ctr 0 next.v 8);
+    br_to(top);
+    endc();
+    endc();
+}
+math_prepare_capture=(l:MathWord):>void=>$unsafe {
+    if prune(MathWord(locals.ptr[l].type)) not=? T_MATH_INT or dbg_on or watch_build {return}
+    let fl:MathWord=MathWord(locals.ptr[l].flags)
+    if fl & (LF_CAPTURE | LF_VALUECAP) not=? LF_CAPTURE | LF_VALUECAP or fl & (LF_ASSIGNED | LF_ADDR | LF_EXPOSED | LF_SHARED | LF_ALIAS | LF_BYREF | LF_OWNERBORROW | LF_PARTBORROW) not=? 0 {return}
+    let n=mk_ident_local(l locals.ptr[l].pos)
+    if not exact_count_bound(n).wide {math_word_captures[l] = true;}
+}
+math_static_bits=(n:MathWord depth:MathWord=0):>int64=>$unsafe {
+    if n =? 0 or depth >? 32 {return 0}
+    if math_proven_word(n) {return 64}
+    if math_local_is(n MathWord(nodes.ptr[n].sym)) {
+        let cached_width=math_static_widths.get(MathWord(nodes.ptr[n].sym))
+    if cached_width not=? none {let width=cached_width;return width}
+    }
+    if exact_has_node(n) {return exact_bits(n)}
+    if is_int(ntype(n)) and prune(ntype(n)) not=? T_MATH_INT {return exact_bits(n)}
+    let k=nodes.ptr[n].kind
+    if k =? 'int_lit' {return if has_flag(n NF_U64) and nodes.ptr[n].ival <? 0 {65} else {64}}
+    if k =? 'conv' and (nodes.ptr[n].aux =? int32<overflow='wrap'>(1) or nodes.ptr[n].aux =? int32<overflow='wrap'>(0)) {return math_static_bits(MathWord(nodes.ptr[n].a) depth + 1)}
+    if k =? 'binary' and nodes.ptr[n].aux =? 0 {
+        let a=math_static_bits(MathWord(nodes.ptr[n].a) depth + 1)
+        let b=math_static_bits(MathWord(nodes.ptr[n].b) depth + 1)
+        if a =? 0 or b =? 0 {return 0}
+        let op=cx_token_values.ptr[MathWord(nodes.ptr[n].op)]
+        if op =? 'plus' or op =? 'minus' {return max(a b) + 1}
+        if op =? 'star' {return a + b}
+        if op =? 'amp' or op =? 'pipe' or op =? 'caret' {return max(a b)}
+    }
+    if k =? 'call' and nodes.ptr[n].aux =? 0 {
+        let helper=fact_floor_call(n)
+        if helper =? 3 or helper =? 4 {
+            let a=math_static_bits(kid(n 0) depth + 1)
+            let [known amount]=integer_constant(kid(n 1))
+            if a >? 0 and known and amount >=? 0 {
+                if helper =? 3 {return max(1 a - amount)}
+                return min(a exact_type_width(kid(n 1)) // 2)
+            }
+        }
+    }
+    if k =? 'unary' {
+        let a=math_static_bits(MathWord(nodes.ptr[n].a) depth + 1)
+        return if a >? 0 {a + int64(nodes.ptr[n].op =? int32<overflow='wrap'>(59))} else {0}
+    }
+    if k =? 'block' and nodes.ptr[n].aux not=? 0 {return math_static_bits(block_value(n) depth + 1)}
+    if k =? 'if_' {
+        let a=math_static_bits(MathWord(nodes.ptr[n].b) depth + 1)
+        let b=math_static_bits(MathWord(nodes.ptr[n].c) depth + 1)
+        return if a >? 0 and b >? 0 {max(a b)} else {0}
+    }
+    return 0
+}
+math_static_value=(n:MathWord):>array<int64>=>$unsafe {
+    if math_local_is(n MathWord(nodes.ptr[n].sym)) {
+        let cached_words=math_static_regs.get(MathWord(nodes.ptr[n].sym))
+    if cached_words not=? none {let words=cached_words;
+            let out:array<int64>=[]
+            loop word in words {out.push(freeze_scalar(word T_INT));}
+            return out
+        }
+    }
+    if math_proven_word(n) {return [freeze_scalar(math_word_expr(n) T_INT)]}
+    if exact_has_node(n) or prune(ntype(n)) not=? T_MATH_INT {return exact_value(n)}
+    let k=nodes.ptr[n].kind
+    if k =? 'int_lit' {return [e_iconst(nodes.ptr[n].ival) e_iconst(0)]}
+    if k =? 'conv' {return math_static_value(MathWord(nodes.ptr[n].a))}
+    let count=(math_static_bits(n) + 63) // 64
+    if k =? 'unary' {
+        let words=math_static_value(MathWord(nodes.ptr[n].a))
+        if nodes.ptr[n].op =? int32<overflow='wrap'>(59) {return exact_neg(words count)}
+        if nodes.ptr[n].op =? int32<overflow='wrap'>(66) {
+            loop i in [0..words.length) {words.ptr[i] = e_un('not_' VI words.ptr[i]);}
+        }
+        return words
+    }
+    if k =? 'binary' {
+        let a=math_static_value(MathWord(nodes.ptr[n].a)); let b=math_static_value(MathWord(nodes.ptr[n].b))
+        let op=cx_token_values.ptr[MathWord(nodes.ptr[n].op)]
+        if op =? 'plus' or op =? 'minus' {return exact_add(a b count op =? 'minus')}
+        if op =? 'star' {return exact_mul(a b count)}
+        a=exact_extend(a count); b=exact_extend(b count)
+        let out:array<int64>=[]
+        loop i in [0..count) {out.push(e_bin(int_op(op true) VI a.ptr[i] b.ptr[i]));}
+        return out
+    }
+    if k =? 'call' {
+        let a=math_static_value(kid(n 0))
+        let [known amount]=integer_constant(kid(n 1))
+        if fact_floor_call(n) =? 4 {return [e_bin('and_' VI a.ptr[0] e_iconst(amount))]}
+        return exact_extend(exact_shift_literal(a amount a.length true) count)
+    }
+    if k =? 'block' {
+        scope_push();
+        let out:array<int64>=[]
+        loop i in [0..nkids(n)) {
+            let statement=kid(n i)
+            if i =? nkids(n) - 1 {
+                stmt_begin();
+                loop word in math_static_value(MathWord(nodes.ptr[statement].a)) {out.push(freeze_scalar(word T_INT));}
+                stmt_end();
+            }
+            else {gen_stmt(statement);}
+        }
+        scope_pop();
+        return out
+    }
+    let out:array<int64>=[]
+    loop i in [0..count) {out.push(vreg(VI));}
+    iff(gen_expr(MathWord(nodes.ptr[n].a)).v);
+    let yes=exact_extend(math_static_value(MathWord(nodes.ptr[n].b)) count)
+    loop i in [0..count) {e_mov(out.ptr[i] yes[i]);}
+    els();
+    let no=exact_extend(math_static_value(MathWord(nodes.ptr[n].c)) count)
+    loop i in [0..count) {e_mov(out.ptr[i] no[i]);}
+    endc();
+    return out
+}
+math_reset_unused=(n:MathWord l:MathWord @budget:MathWord):>bool=>$unsafe {
+    if n =? 0 {return true}
+    budget -= 1;
+    if budget <? 0 {return false}
+    let k=nodes.ptr[n].kind
+    if math_local_is(n l) {return false}
+    if k =? 'lambda' or k =? 'fn_' or k =? 'defer_' or k =? 'return_' or k =? 'break_' or k =? 'continue_' or k =? 'for_' or k =? 'while_' {return false}
+    let mask=isolation_children(k)
+    if mask <? 0 {return false}
+    if mask & 1 not=? 0 and not math_reset_unused(MathWord(nodes.ptr[n].a) l @budget) {return false}
+    if mask & 2 not=? 0 and not math_reset_unused(MathWord(nodes.ptr[n].b) l @budget) {return false}
+    if mask & 4 not=? 0 and not math_reset_unused(MathWord(nodes.ptr[n].c) l @budget) {return false}
+    if mask & 16 not=? 0 {
+        loop child in kids(n) {
+            if not math_reset_unused(child l @budget) {return false}
+        }
+    }
+    if mask & 32 not=? 0 {
+        loop child in kids2(n) {
+            if not math_reset_unused(child l @budget) {return false}
+        }
+    }
+    return true
+}
+math_reset_interval=(n:MathWord l:MathWord):>[bool int64]=>$unsafe {
+    if nodes.ptr[n].kind not=? 'or_' {return [false 0]}
+    let left:MathWord=MathWord(nodes.ptr[n].a); let right:MathWord=MathWord(nodes.ptr[n].b)
+    if nodes.ptr[left].kind not=? 'binary' or nodes.ptr[right].kind not=? 'binary' or nodes.ptr[left].aux not=? 0 or nodes.ptr[right].aux not=? 0 {return [false 0]}
+    if nodes.ptr[left].op not=? int32<overflow='wrap'>(71) or nodes.ptr[right].op not=? int32<overflow='wrap'>(74) {return [false 0]}
+    if not math_local_is(word_integer_value(MathWord(nodes.ptr[left].a)) l) or not math_local_is(word_integer_value(MathWord(nodes.ptr[right].a)) l) {return [false 0]}
+    let [known_lo lo]=integer_constant(MathWord(nodes.ptr[left].b))
+    let [known_hi hi]=integer_constant(MathWord(nodes.ptr[right].b))
+    if not known_lo or not known_hi or lo >=? hi or has_flag(MathWord(nodes.ptr[left].b) NF_U64) or has_flag(MathWord(nodes.ptr[right].b) NF_U64) {return [false 0]}
+    if exact_count_bound(MathWord(nodes.ptr[left].b)).wide or exact_count_bound(MathWord(nodes.ptr[right].b)).wide {return [false 0]}
+    return [true hi]
+}
+math_reset_local_decl=(s:MathWord):>bool=>$unsafe {
+    let l:MathWord=MathWord(nodes.ptr[s].sym)
+    if prune(MathWord(locals.ptr[l].type)) not=? T_MATH_INT or dbg_on or target_wasm or cur_block =? 0 or kid(cur_block cur_block_i) not=? s {return false}
+    let fl:MathWord=MathWord(locals.ptr[l].flags)
+    if fl & LF_ASSIGNED =? 0 or fl & (LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_QUIET | LF_EXPOSED | LF_SOAELEM | LF_ELEMALIAS) not=? 0 {return false}
+    let init=word_integer_value(MathWord(nodes.ptr[s].b))
+    if nodes.ptr[init].kind not=? 'binary' or nodes.ptr[init].aux not=? 0 {return false}
+    let op=cx_token_values.ptr[MathWord(nodes.ptr[init].op)]
+    if op not=? 'plus' and op not=? 'minus' and op not=? 'star' {return false}
+    let a:MathWord=MathWord(nodes.ptr[init].a); let b:MathWord=MathWord(nodes.ptr[init].b)
+    if not math_proven_word(a) or not math_proven_word(b) {return false}
+    math_prepare_writes();
+    let writes=math_writes.get(l) ?? []
+    if writes.length not=? 1 or writes.ptr[0][1] not=? 0 {return false}
+    let reset=writes.ptr[0][0]
+    if nodes.ptr[reset].op not=? int32<overflow='wrap'>(47) or nodes.ptr[reset].aux not=? 0 or not math_proven_word(MathWord(nodes.ptr[reset].b)) {return false}
+    let budget:MathWord=128
+    loop i in [cur_block_i + 1..min(nkids(cur_block) cur_block_i + 9)) {
+        let next=kid(cur_block i)
+        if nodes.ptr[next].kind =? 'exprstmt' {next=MathWord(nodes.ptr[next].a)}
+        if nodes.ptr[next].kind =? 'if_' {
+            let [known replacement]=math_reset_interval(MathWord(nodes.ptr[next].a) l)
+            if known {
+                let otherwise:MathWord=MathWord(nodes.ptr[next].c)
+                if otherwise not=? 0 and (nodes.ptr[otherwise].kind not=? 'block' or nkids(otherwise) not=? 0) {return false}
+                let body:MathWord=MathWord(nodes.ptr[next].b)
+                if nodes.ptr[body].kind not=? 'block' or nkids(body) =? 0 or kid(body nkids(body) - 1) not=? reset {return false}
+                loop j in [0..nkids(body) - 1) {
+                    if not math_reset_unused(kid(body j) l @budget) {return false}
+                }
+                let av=freeze_scalar(math_word_expr(a) T_INT)
+                let bv=freeze_scalar(math_word_expr(b) T_INT)
+                let word=vreg(VI)
+                e_mov(word e_bin((if op =? 'plus' {Op.add} else if op =? 'minus' {Op.sub} else {Op.mul}) VI av bv));
+                if not exr_fast or not exr_locals.contains(l) {
+                    iff(e_bin((if op =? 'plus' {Op.overflow_add} else if op =? 'minus' {Op.overflow_sub} else {Op.overflow_mul}) VI av bv));
+                    e_mov(word e_iconst(replacement));
+                    endc();
+                }
+                math_word_regs[l] = word;
+                return true
+            }
+        }
+        if not math_reset_unused(next l @budget) {return false}
+    }
+    return false
+}
+math_static_local_decl=(s:MathWord):>bool=>$unsafe {
+    let l:MathWord=MathWord(nodes.ptr[s].sym)
+    if prune(MathWord(locals.ptr[l].type)) not=? T_MATH_INT or dbg_on and exact_local_width(l) =? 0 {return false}
+    let fl:MathWord=MathWord(locals.ptr[l].flags)
+    if fl & (LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_QUIET | LF_EXPOSED | LF_SOAELEM | LF_ELEMALIAS) not=? 0 {return false}
+    let init:MathWord=MathWord(nodes.ptr[s].b)
+    let width=math_static_bits(init)
+    if width <=? 0 or width >? 256 {return false}
+    math_static_widths[l] = width;
+    if fl & LF_ASSIGNED not=? 0 {
+        math_prepare_writes();
+        let writes=math_writes.get(l) ?? []
+        if writes.length =? 0 {
+            math_static_widths.remove(l);
+            return false
+        }
+        loop pair in writes {
+            let w=math_static_bits(MathWord(nodes.ptr[pair[0]].b))
+            if nodes.ptr[pair[0]].op not=? int32<overflow='wrap'>(47) or nodes.ptr[pair[0]].aux not=? 0 or w <=? 0 or w >? width {
+                math_static_widths.remove(l);
+                return false
+            }
+        }
+    }
+    let words=exact_extend(math_static_value(init) (width + 63) // 64)
+    let regs:array<int64>=[]
+    loop word in words {
+        let r=vreg(VI)
+        e_mov(r word);
+        regs.push(r);
+    }
+    math_static_regs[l] = regs;
+    return true
+}
+math_static_narrow=(n:MathWord to:MathWord):>Val=>$unsafe {
+    if to =? T_INT and math_proven_word(n) {return V(math_word_expr(n) false)}
+    # A direct word operation narrowed to int64 has the same checked IR as
+    # fixed storage. Loop guards can discharge that boundary without tagging.
+    if to =? T_INT and nodes.ptr[n].kind =? 'binary' and nodes.ptr[n].aux =? 0 {
+        let op=cx_token_values.ptr[MathWord(nodes.ptr[n].op)]
+        let a:MathWord=MathWord(nodes.ptr[n].a); let b:MathWord=MathWord(nodes.ptr[n].b)
+        if (op =? 'plus' or op =? 'minus' or op =? 'star') and math_proven_word(a) and math_proven_word(b) {
+            let av=freeze_scalar(math_word_expr(a) T_INT); let bv=math_word_expr(b)
+            let result=vreg(VI)
+            emit((if op =? 'plus' {Op.checked_add} else if op =? 'minus' {Op.checked_sub} else {Op.checked_mul}) VI result av bv 0 rt("__int_overflow"));
+            return V(result false)
+        }
+    }
+    let words=math_static_value(n)
+    let normalized=norm(words.ptr[0] to)
+    let bad=e_bin('ne' VI normalized words.ptr[0])
+    let sign=if types.ptr[to].sign {e_bin('shrs' VI normalized e_iconst(63))} else {e_iconst(0)}
+    loop i in [1..words.length) {bad=e_bin('or_' VI bad e_bin('ne' VI words.ptr[i] sign))}
+    if not types.ptr[to].sign and words.length =? 1 {bad=e_bin('or_' VI bad e_bin('lts' VI words.ptr[0] e_iconst(0)))}
+    math_int_guard(bad);
+    return V(normalized false)
+}
+math_proven_word=(e:MathWord):>bool=>$unsafe {
+    if math_word_updates.has(e) {return true}
+    if math_word_bound(e) {return true}
+    if nodes.ptr[e].kind =? 'ident' and nodes.ptr[e].aux =? int32<overflow='wrap'>(1) and math_word_regs.has(MathWord(nodes.ptr[e].sym)) {return true}
+    if positive_bound(e true) >=? 0 {return true}
+    if math_word_helper(e) >? 0 {return true}
+    if nodes.ptr[e].kind =? 'binary' and nodes.ptr[e].aux =? 0 {
+        let op=cx_token_values.ptr[MathWord(nodes.ptr[e].op)]
+        if op =? 'amp' or op =? 'pipe' or op =? 'caret' {
+            return math_proven_word(MathWord(nodes.ptr[e].a)) and math_proven_word(MathWord(nodes.ptr[e].b))
+        # (a difference of two values in [0, 2^63): within (-2^63, 2^63))
+        }
+        if op =? 'minus' {return positive_bound(MathWord(nodes.ptr[e].a) true) >=? 0 and positive_bound(MathWord(nodes.ptr[e].b) true) >=? 0}
+    }
+    return false
+}
+math_sum_compare=(e:MathWord):>int64=>$unsafe {
+    let op=cx_token_values.ptr[MathWord(nodes.ptr[e].op)]
+    let x:MathWord=MathWord(nodes.ptr[e].a)
+    let y:MathWord=MathWord(nodes.ptr[e].b)
+    let flipped=false
+    if not math_sum_shape(x) {
+        if not math_sum_shape(y) {return -1}
+        let swap=x
+        x=y
+        y=swap
+        flipped=true
+    }
+    if not math_proven_word(y) {return -1}
+    let a=math_word_expr(MathWord(nodes.ptr[x].a))
+    let k=math_word_expr(MathWord(nodes.ptr[x].b))
+    let sum=e_bin('add' VI a k)
+    let over=e_bin('lts' VI e_bin('and_' VI e_bin('xor' VI a sum) e_bin('xor' VI k sum)) e_iconst(0))
+    let w=math_word_expr(y)
+    let exact=if flipped {e_bin(int_op(op true) VI w sum)} else {e_bin(int_op(op true) VI sum w)}
+    # (on overflow the sum is past the end_ its wrapped sign does not show)
+    let above=e_bin('lts' VI sum e_iconst(0))
+    let beyond:MathWord=0
+    if op =? 'eq' {beyond=e_iconst(0)}
+    else if op =? 'ne' {beyond=e_iconst(1)}
+    else {
+        let sum_greater=(op =? 'gt' or op =? 'ge') not=? flipped
+        beyond=if sum_greater {above} else {e_bin('eq' VI above e_iconst(0))}
+    }
+    let r=vreg(VI)
+    e_mov(r exact);
+    iff(over);
+    e_mov(r beyond);
+    endc();
+    return r
+}
+math_sum_shape=(x:MathWord):>bool=>$unsafe {
+    return nodes.ptr[x].kind =? 'binary' and nodes.ptr[x].aux =? 0 and nodes.ptr[x].op =? int32<overflow='wrap'>(58) and prune(ntype(x)) =? T_MATH_INT and math_proven_word(MathWord(nodes.ptr[x].a)) and math_proven_word(MathWord(nodes.ptr[x].b))
+}
+math_word_expr=(e:MathWord):>int64=>$unsafe {
+    if prune(ntype(e)) not=? T_MATH_INT {return gen_expr(e).v}
+    let k=nodes.ptr[e].kind
+    if k =? 'int_lit' {return e_iconst(nodes.ptr[e].ival)}
+    if k =? 'ident' and nodes.ptr[e].aux =? int32<overflow='wrap'>(1) {
+        let l:MathWord=MathWord(nodes.ptr[e].sym)
+        let cached_word=math_word_regs.get(l)
+    if cached_word not=? none {let word=cached_word;return word}
+        let cached_words=math_static_regs.get(l)
+    if cached_words not=? none {let words=cached_words;return words.ptr[0]}
+        if math_word_captures.has(l) {return read_place(local_place(l false) T_INT)}
+    }
+    if k =? 'conv' and nodes.ptr[e].aux =? int32<overflow='wrap'>(1) {return math_word_expr(MathWord(nodes.ptr[e].a))}
+    if k =? 'unary' and nodes.ptr[e].op =? int32<overflow='wrap'>(59) {return e_un('neg' VI math_word_expr(MathWord(nodes.ptr[e].a)))}
+    if k =? 'if_' {
+        let result=vreg(VI)
+        iff(gen_expr(MathWord(nodes.ptr[e].a)).v);
+        e_mov(result math_word_expr(math_value_arm(MathWord(nodes.ptr[e].b))));
+        els();
+        e_mov(result math_word_expr(math_value_arm(MathWord(nodes.ptr[e].c))));
+        endc();
+        return result
+    }
+    let helper=math_word_helper(e)
+    if helper >? 0 {
+        let a=if helper =? 1 {math_low_word(kid(e 0))} else {math_word_expr(kid(e 0))}
+        let b=e_iconst(nodes.ptr[kid(e 1)].ival)
+        if helper =? 1 {return e_bin('and_' VI a b)}
+        if helper =? 2 {return e_bin('shrs' VI a b)}
+        if positive_bound(kid(e 0) true) >=? 0 {
+            return e_bin((if helper =? 3 {Op.remu} else {Op.divu}) VI a b)
+        }
+        let r=e_bin('rems' VI a b)
+        if helper =? 3 {
+            let result=vreg(VI)
+            e_mov(result r);
+            iff(e_bin('lts' VI r e_iconst(0)));
+            e_mov(result e_bin('add' VI r b));
+            endc();
+            return result
+        }
+        let result=vreg(VI)
+        e_mov(result e_bin('divs' VI a b));
+        iff(e_bin('lts' VI r e_iconst(0)));
+        e_mov(result e_addi(result -1));
+        endc();
+        return result
+    }
+    if k =? 'binary' and nodes.ptr[e].aux =? 0 {
+        if nodes.ptr[e].op =? int32<overflow='wrap'>(63) {
+            let a=freeze_scalar(math_low_word(MathWord(nodes.ptr[e].a)) T_INT)
+            return e_bin('and_' VI a math_low_word(MathWord(nodes.ptr[e].b)))
+        }
+        let a=freeze_scalar(math_word_expr(MathWord(nodes.ptr[e].a)) T_INT)
+        let b=math_word_expr(MathWord(nodes.ptr[e].b))
+        return e_bin(int_op(cx_token_values.ptr[MathWord(nodes.ptr[e].op)] true) VI a b)
+    }
+    let value=gen_borrowed(e).v
+    if exact_small_math(e) >=? 0 {return math_untag(value)}
+    return math_signed(value)
+}
+math_word_helper=(e:MathWord):>int64=>$unsafe {
+    if nodes.ptr[e].kind not=? 'call' or nodes.ptr[e].aux not=? 0 or nkids(e) not=? 2 {return 0}
+    let f:MathWord=MathWord(nodes.ptr[e].sym)
+    if f <=? 0 or prune(MathWord(fns.ptr[f].ret)) not=? T_MATH_INT {return 0}
+    let d:MathWord=MathWord(fns.ptr[f].decl)
+    if d =? 0 or files.ptr[pos_file(nodes.ptr[d].pos)].path not=? "{lib_dir}/math_int.jo" {return 0}
+    let b=kid(e 1)
+    if nodes.ptr[b].kind not=? 'int_lit' or nodes.ptr[b].ival <? 0 or has_flag(b NF_U64) {return 0}
+    let name=name_of(MathWord(nodes.ptr[d].name))
+    if name =? "__floor_mod_pow2" {return 1}
+    if not math_proven_word(kid(e 0)) {return 0}
+    if name =? "__floor_div_pow2" {return 2}
+    if nodes.ptr[b].ival =? 0 {return 0}
+    if name =? "__floor_mod" {return 3}
+    if name =? "__floor_div" {return 4}
+    return 0
+}
+math_low_word=(e:MathWord):>int64=>$unsafe {
+    if math_proven_word(e) {return math_word_expr(e)}
+    let value=gen_borrowed(e).v
+    let result=vreg(VI)
+    e_mov(result math_untag(value));
+    iff(math_tag(value));
+    let old=ir_cold
+    ir_cold=true
+    e_mov(result e_call(rt("__mi_low_word") [value] VI));
+    ir_cold=old
+    endc();
+    return result
+}
+math_shift_count=(e:MathWord):>int64=>$unsafe {
+    if prune(ntype(e)) not=? T_MATH_INT or math_proven_word(e) {return math_count(e)}
+    return e_call(rt("__mi_count") [gen_borrowed(e).v] VI)
+}
+math_local_is=(n:MathWord l:MathWord):>bool=>$unsafe {
+    return nodes.ptr[n].kind =? 'ident' and nodes.ptr[n].aux =? int32<overflow='wrap'>(1) and nodes.ptr[n].sym =? int32<overflow='wrap'>(l)
+}
+math_prepare_writes=():>void=>$unsafe {
+    if math_writes_ready {return}
+    math_writes_ready=true
+    positive_bounds_fn=cur_fn
+    positive_bounds.clear();
+    let enclosing:array<int64>=[]
+    positive_collecting_writes=true
+    # Finalization already visited these bodies. Replay only writes and
+    # control boundaries, evaluating bounds with the current lowering state.
+    if fns.ptr[cur_fn].writes_ready {
+        loop n in fns.ptr[cur_fn].write_sites {
+            if n <? 0 {enclosing.pop();}
+            else {math_index_site(n @enclosing);}
+        }
+    }
+    else {math_index_writes(MathWord(fns.ptr[cur_fn].body) @enclosing);}
+    positive_collecting_writes=false
+}
+math_index_writes=(n:MathWord @enclosing:array<int64>):>void=>$unsafe {
+    if n =? 0 {return}
+    let k=nodes.ptr[n].kind
+    let is_loop=k =? 'for_' or k =? 'while_'
+    math_index_site(n @enclosing);
+    if k =? 'lambda' or k =? 'fn_' {return}
+    math_index_writes(MathWord(nodes.ptr[n].a) @enclosing);
+    math_index_writes(MathWord(nodes.ptr[n].b) @enclosing);
+    if k not=? 'for_' {
+        math_index_writes(MathWord(nodes.ptr[n].c) @enclosing);
+        if k not=? 'partial' {math_index_writes(MathWord(nodes.ptr[n].d) @enclosing);}
+    }
+    loop i in [0..nkids(n)) {math_index_writes(kid(n i) @enclosing);}
+    loop i in [0..nkids2(n)) {math_index_writes(kid2(n i) @enclosing);}
+    if is_loop {enclosing.pop();}
+}
+math_index_site=(n:MathWord @enclosing:array<int64>):>void=>$unsafe {
+    let k=nodes.ptr[n].kind
+    let is_loop=k =? 'for_' or k =? 'while_'
+    if enclosing.length >? 0 and (is_loop or k =? 'lambda' or k =? 'fn_' or k =? 'return_' or k =? 'break_' or k =? 'continue_') {
+        math_loop_sites[enclosing.ptr[enclosing.length - 1]] = -1;
+    }
+    if k =? 'lambda' or k =? 'fn_' {return}
+    positive_write(n);
+    if k =? 'vardecl' and nkids(n) =? 0 and not has_flag(n NF_GLOBAL) {
+        let l:MathWord=MathWord(nodes.ptr[n].sym)
+        if l >? 0 and (prune(MathWord(locals.ptr[l].type)) =? T_MATH_INT or prune(MathWord(locals.ptr[l].type)) =? T_INT) {math_decl_depth[l] = enclosing.length;}
+    }
+    if k =? 'assign' {
+        let a:MathWord=MathWord(nodes.ptr[n].a)
+        # Tuple writes use the ordinary place ABI. Record them as unsupported
+        # writes so a direct assignment elsewhere cannot hide the mutation.
+        if nodes.ptr[a].kind =? 'tuple' {
+            loop target in kids(a) {
+                if nodes.ptr[target].kind =? 'ident' and nodes.ptr[target].aux =? int32<overflow='wrap'>(1) {
+                    let l:MathWord=MathWord(nodes.ptr[target].sym)
+                    let writes=math_writes.get(l) ?? []
+                    writes.push([n -2]);
+                    math_writes[l] = writes;
+                }
+            }
+        }
+        if nodes.ptr[a].kind =? 'ident' and nodes.ptr[a].aux =? int32<overflow='wrap'>(1) {
+            let l:MathWord=MathWord(nodes.ptr[a].sym)
+            if enclosing.length >? 0 and prune(ntype(a)) =? T_MATH_INT {
+                let loop_=enclosing.ptr[enclosing.length - 1]
+                let old=math_loop_sites.get(loop_) ?? 0
+                math_loop_sites[loop_] = if old =? 0 {n} else {-1};
+            }
+            let cached_depth=math_decl_depth.get(l)
+    if cached_depth not=? none {let depth=cached_depth;
+                let loop_=if enclosing.length =? depth {0} else if enclosing.length =? depth + 1 {enclosing.ptr[depth]} else {-1}
+                math_write_loop[n] = if enclosing.length >? depth {enclosing.ptr[enclosing.length - 1]} else {0};
+                let writes=math_writes.get(l) ?? []
+                writes.push([n loop_]);
+                math_writes[l] = writes;
+            }
+        }
+    }
+    if is_loop {
+        math_loop_parent[n] = if enclosing.length >? 0 {enclosing.ptr[enclosing.length - 1]} else {0};
+        enclosing.push(n);
+    }
+}
+math_update_value=(s:MathWord l:MathWord):>int64=>$unsafe {
+    if nodes.ptr[s].op not=? int32<overflow='wrap'>(47) or nodes.ptr[s].aux not=? 0 {return 0}
+    let e:MathWord=MathWord(nodes.ptr[s].b)
+    loop nodes.ptr[e].kind =? 'conv' and (nodes.ptr[e].aux =? int32<overflow='wrap'>(21) or nodes.ptr[e].aux =? int32<overflow='wrap'>(0) or nodes.ptr[e].aux =? int32<overflow='wrap'>(1)) {e=MathWord(nodes.ptr[e].a)}
+    if nodes.ptr[e].kind not=? 'binary' or nodes.ptr[e].aux not=? 0 or not math_local_is(MathWord(nodes.ptr[e].a) l) {return 0}
+    return e
+}
+math_counter_limit=(s:MathWord writes:array<[int64 int64]>):>int64=>$unsafe {
+    let l:MathWord=MathWord(nodes.ptr[s].sym)
+    let init:MathWord=MathWord(nodes.ptr[s].b)
+    if nodes.ptr[init].kind not=? 'int_lit' or nodes.ptr[init].ival not=? 0 {return -1}
+    let increased=false
+    let limit:MathWord=0
+    loop pair in writes {
+        let update=math_update_value(pair[0] l)
+        let loop_=pair[1]
+        if update =? 0 or loop_ <=? 0 {return -1}
+        let rhs:MathWord=MathWord(nodes.ptr[update].b)
+        if nodes.ptr[rhs].kind not=? 'int_lit' or has_flag(rhs NF_U64) {return -1}
+        let amount=nodes.ptr[rhs].ival
+        if nodes.ptr[update].op =? int32<overflow='wrap'>(58) {
+            if increased or amount not=? 1 or nodes.ptr[loop_].kind not=? 'for_' or nodes.ptr[loop_].aux not=? 0 {return -1}
+            let it:MathWord=MathWord(nodes.ptr[loop_].a)
+            let start:MathWord=MathWord(nodes.ptr[it].a)
+            if nodes.ptr[start].kind not=? 'int_lit' or nodes.ptr[start].ival not=? 0 or has_flag(it NF_STEP) or has_flag(it NF_INCLUSIVE) or not math_word_range(loop_) {return -1}
+            limit=positive_bound(MathWord(nodes.ptr[it].b) true)
+            if limit <? 0 {limit=9223372036854775807}
+            increased=true
+        }
+        else if nodes.ptr[update].op =? int32<overflow='wrap'>(59) {
+            if amount <? 0 or nodes.ptr[loop_].kind not=? 'while_' {return -1}
+            let cond:MathWord=MathWord(nodes.ptr[loop_].a)
+            if nodes.ptr[cond].kind not=? 'binary' or nodes.ptr[cond].aux not=? 0 or not math_local_is(MathWord(nodes.ptr[cond].a) l) {return -1}
+            let bound:MathWord=MathWord(nodes.ptr[cond].b)
+            if nodes.ptr[bound].kind not=? 'int_lit' or has_flag(bound NF_U64) or nodes.ptr[bound].ival <? 0 {return -1}
+            let floor=nodes.ptr[bound].ival
+            if nodes.ptr[cond].op =? int32<overflow='wrap'>(73) and floor <? 9223372036854775807 {floor += 1;}
+            else if nodes.ptr[cond].op not=? int32<overflow='wrap'>(74) {return -1}
+            if amount >? floor {return -1}
+            # The guard only protects one update in each iteration.
+            loop other in writes {
+                if other[1] =? loop_ and other[0] not=? pair[0] {return -1}
+            }
+        }
+        else {return -1}
+    }
+    if increased {return limit}
+    return -1
+}
+math_length_counter_limit=(s:MathWord writes:array<[int64 int64]>):>int64=>$unsafe {
+    let l:MathWord=MathWord(nodes.ptr[s].sym)
+    let limit=positive_bound(MathWord(nodes.ptr[s].b) true)
+    if limit <? 0 {return -1}
+    let guarded:array<int64>=[]
+    loop pair in writes {
+        let update=math_update_value(pair[0] l)
+        let loop_=math_write_loop.get(pair[0]) ?? 0
+        if update =? 0 or pair[1] =? 0 or loop_ <=? 0 or nodes.ptr[loop_].kind not=? 'while_' or nodes.ptr[loop_].aux =? 1 or nodes.ptr[update].op not=? int32<overflow='wrap'>(58) {return -1}
+        if guarded.contains(loop_) {return -1}
+        guarded.push(loop_);
+    }
+    loop pair in writes {
+        let after=math_counter_after(pair[0] l writes)
+        if after <? 0 {return -1}
+        limit=max(limit after)
+    }
+    return limit
+}
+math_counter_after=(w:MathWord l:MathWord writes:array<[int64 int64]>):>int64=>$unsafe {
+    let loop_=math_write_loop[w]
+    let before=math_guard_limit(MathWord(nodes.ptr[loop_].a) l)
+    if before <? 0 {return -1}
+    loop pair in writes {
+        if pair[0] =? w or not math_loop_within(math_write_loop[pair[0]] loop_) {continue}
+        let inner=math_counter_after(pair[0] l writes)
+        if inner <? 0 {return -1}
+        before=max(before inner)
+    }
+    let step=positive_bound(MathWord(nodes.ptr[math_update_value(w l)].b) true)
+    if step <? 0 or step >? 9223372036854775807 - before {return -1}
+    return before + step
+}
+math_loop_within=(a:MathWord b:MathWord):>bool=>$unsafe {
+    let x=math_loop_parent.get(a) ?? 0
+    loop x >? 0 {
+        if x =? b {return true}
+        x=math_loop_parent.get(x) ?? 0
+    }
+    return false
+}
+math_type_max=(t:MathWord):>int64=>$unsafe {
+    if types.ptr[t].kind not=? 'int_' or t =? T_MATH_INT {return -1}
+    let bits:MathWord=MathWord(types.ptr[t].bits)
+    if types.ptr[t].sign {bits -= 1;}
+    if bits >? 63 {return -1}
+    if bits =? 63 {return 9223372036854775807}
+    return (1 << bits) - 1
+}
+math_guard_limit=(c:MathWord l:MathWord):>int64=>$unsafe {
+    if nodes.ptr[c].kind =? 'and_' {
+        let a=math_guard_limit(MathWord(nodes.ptr[c].a) l)
+        let b=math_guard_limit(MathWord(nodes.ptr[c].b) l)
+        if a >=? 0 and b >=? 0 {return min(a b)}
+        return max(a b)
+    }
+    if nodes.ptr[c].kind not=? 'binary' or nodes.ptr[c].aux not=? 0 {return -1}
+    let op=cx_token_values.ptr[MathWord(nodes.ptr[c].op)]
+    if op not=? 'lt' and op not=? 'le' {return -1}
+    let x:MathWord=MathWord(nodes.ptr[c].a)
+    let k:MathWord=0
+    if nodes.ptr[x].kind =? 'binary' and nodes.ptr[x].aux =? 0 and nodes.ptr[x].op =? int32<overflow='wrap'>(58) {
+        let y:MathWord=MathWord(nodes.ptr[x].b)
+        if nodes.ptr[y].kind not=? 'int_lit' or has_flag(y NF_U64) or nodes.ptr[y].ival <? 0 {return -1}
+        k=nodes.ptr[y].ival
+        x=MathWord(nodes.ptr[x].a)
+    }
+    if not math_local_is(x l) {return -1}
+    let e:MathWord=MathWord(nodes.ptr[c].b)
+    let end_=positive_bound(e true)
+    # (a fixed-width bound is at most its type's largest value)
+    loop end_ <? 0 and nodes.ptr[e].kind =? 'conv' and nodes.ptr[e].aux =? int32<overflow='wrap'>(1) {e=MathWord(nodes.ptr[e].a)}
+    if end_ <? 0 and prune(ntype(e)) not=? T_MATH_INT and not exact_has_node(e) {end_=math_type_max(prune(ntype(e)))}
+    if end_ <? 0 {return -1}
+    end_ -= k;
+    if op =? 'lt' {end_ -= 1;}
+    return max(end_ 0)
+}
+math_guarded_word=(n0:MathWord l:MathWord condition:MathWord=0 holds:bool=true depth:MathWord=0):>bool=>$unsafe {
+    if depth >? 32 {return false}
+    let n=n0
+    loop nodes.ptr[n].kind =? 'conv' and nodes.ptr[n].aux =? int32<overflow='wrap'>(1) {n=MathWord(nodes.ptr[n].a)}
+    if nodes.ptr[n].kind =? 'block' and nodes.ptr[n].aux not=? 0 {
+        # Statements before the value may change the guarded local.
+        if nkids(n) not=? 1 {return false}
+        return math_guarded_word(block_value(n) l condition holds depth + 1)
+    }
+    if math_local_is(n l) {return true}
+    if nodes.ptr[n].kind =? 'if_' {
+        return math_guarded_word(MathWord(nodes.ptr[n].b) l MathWord(nodes.ptr[n].a) true depth + 1) and math_guarded_word(MathWord(nodes.ptr[n].c) l MathWord(nodes.ptr[n].a) false depth + 1)
+    }
+    if math_proven_word(n) {return true}
+    if condition =? 0 or nodes.ptr[n].kind not=? 'binary' or nodes.ptr[n].aux not=? 0 {return false}
+    let op=cx_token_values.ptr[MathWord(nodes.ptr[n].op)]
+    if op not=? 'plus' and op not=? 'minus' or not math_local_is(fact_progress_strip(MathWord(nodes.ptr[n].a)) l) {return false}
+    let [known step]=integer_constant(MathWord(nodes.ptr[n].b))
+    if not known or step not=? 1 {return false}
+    if nodes.ptr[condition].kind not=? 'binary' or nodes.ptr[condition].aux not=? 0 {return false}
+    let cmp=cx_token_values.ptr[MathWord(nodes.ptr[condition].op)]
+    let a=fact_progress_strip(MathWord(nodes.ptr[condition].a)); let b:MathWord=MathWord(nodes.ptr[condition].b)
+    if not math_local_is(a l) {return false}
+    if not plain_read(b) or not math_proven_word(b) {return false}
+    if op =? 'plus' {return holds and cmp =? 'lt' or not holds and cmp =? 'ge'}
+    return holds and cmp =? 'gt' or not holds and cmp =? 'le'
+}
+math_recurrence_bound=(n:MathWord l:MathWord limit:MathWord loop_:MathWord depth:MathWord=0):>int64=>$unsafe {
+    if n =? 0 or depth >? 32 {return -1}
+    if math_local_is(n l) {return limit}
+    let k=nodes.ptr[n].kind
+    if k =? 'conv' and nodes.ptr[n].aux =? int32<overflow='wrap'>(1) {
+        return math_recurrence_bound(MathWord(nodes.ptr[n].a) l limit loop_ depth + 1)
+    }
+    if k =? 'ident' and nodes.ptr[n].aux =? int32<overflow='wrap'>(1) {
+        let at=loop_
+        loop at >? 0 {
+            if nodes.ptr[at].kind =? 'for_' and nodes.ptr[at].aux =? 0 and nodes.ptr[at].sym =? nodes.ptr[n].sym and stable_loop_index(MathWord(nodes.ptr[n].sym)) {
+                let it:MathWord=MathWord(nodes.ptr[at].a)
+                if nodes.ptr[it].kind not=? 'range' {return -1}
+                let start:MathWord=MathWord(nodes.ptr[it].a)
+                let end_=exact_count_bound(MathWord(nodes.ptr[it].b))
+                if nodes.ptr[start].kind =? 'int_lit' and nodes.ptr[start].ival =? 0 and not has_flag(it NF_STEP) and not end_.wide and end_.lo >=? 0 {return end_.hi}
+            }
+            at=math_loop_parent.get(at) ?? 0
+        }
+    }
+    let bound=exact_count_bound(n)
+    if not bound.wide and bound.lo >=? 0 {return bound.hi}
+    if k =? 'binary' and nodes.ptr[n].aux =? 0 and nodes.ptr[n].op =? int32<overflow='wrap'>(58) {
+        let a=math_recurrence_bound(MathWord(nodes.ptr[n].a) l limit loop_ depth + 1)
+        let b=math_recurrence_bound(MathWord(nodes.ptr[n].b) l limit loop_ depth + 1)
+        if a >=? 0 and b >=? 0 and a <=? 9223372036854775807 - b {return a + b}
+    }
+    if k =? 'call' and nodes.ptr[n].aux =? 0 and nkids(n) =? 2 {
+        let f:MathWord=MathWord(nodes.ptr[n].sym)
+        if f <=? 0 {return -1}
+        let d:MathWord=MathWord(fns.ptr[f].decl)
+        if d =? 0 or files.ptr[pos_file(nodes.ptr[d].pos)].path not=? "{lib_dir}/math_int.jo" or name_of(MathWord(nodes.ptr[d].name)) not=? "__floor_div" {return -1}
+        let [known divisor]=integer_constant(kid(n 1))
+        if not known or divisor <=? 0 {return -1}
+        let a=math_recurrence_bound(kid(n 0) l limit loop_ depth + 1)
+        if a >=? 0 {return a // divisor}
+    }
+    return -1
+}
+math_recurrence_limit=(s:MathWord writes:array<[int64 int64]>):>int64=>$unsafe {
+    let initial=exact_count_bound(MathWord(nodes.ptr[s].b))
+    if initial.wide or initial.lo <? 0 {return -1}
+    let l:MathWord=MathWord(nodes.ptr[s].sym)
+    loop pair in writes {
+        let w=pair[0]
+        if nodes.ptr[w].op not=? int32<overflow='wrap'>(47) or nodes.ptr[w].aux not=? 0 {return -1}
+        let bound=math_recurrence_bound(MathWord(nodes.ptr[w].b) l initial.hi math_write_loop.get(w) ?? 0)
+        if bound <? 0 or bound >? initial.hi {return -1}
+    }
+    return initial.hi
+}
+math_word_local_decl=(s:MathWord):>bool=>$unsafe {
+    let l:MathWord=MathWord(nodes.ptr[s].sym)
+    if prune(MathWord(locals.ptr[l].type)) not=? T_MATH_INT or dbg_on {return false}
+    let fl:MathWord=MathWord(locals.ptr[l].flags)
+    if fl & (LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_EXPOSED | LF_SOAELEM | LF_ELEMALIAS) not=? 0 {return false}
+    # Generated loop bindings are ordinary immutable copies. Mutable quiet
+    # bindings can have implicit writes absent from the assignment index.
+    if fl & (LF_QUIET | LF_ASSIGNED) =? LF_QUIET | LF_ASSIGNED {return false}
+    let init:MathWord=MathWord(nodes.ptr[s].b)
+    if init =? 0 or not math_proven_word(init) {return false}
+    let limit=positive_bound(init true)
+    let writes:array<[int64 int64]>=[]
+    if fl & LF_ASSIGNED not=? 0 {
+        if cur_block =? 0 or kid(cur_block cur_block_i) not=? s {return false}
+        math_prepare_writes();
+        writes=math_writes.get(l) ?? []
+        if writes.length =? 0 {return false}
+        limit=math_counter_limit(s writes)
+        if limit <? 0 {limit=math_length_counter_limit(s writes)}
+        if limit <? 0 {limit=math_recurrence_limit(s writes)}
+        if limit <? 0 and not math_decrement_counter(s writes) {
+            loop pair in writes {
+                if nodes.ptr[pair[0]].op not=? int32<overflow='wrap'>(47) or nodes.ptr[pair[0]].aux not=? 0 {return false}
+                if not math_guarded_word(MathWord(nodes.ptr[pair[0]].b) l) {return false}
+            }
+        }
+    }
+    let word=vreg(VI)
+    e_mov(word math_word_expr(init));
+    math_word_regs[l] = word;
+    if limit >=? 0 {math_word_limits[l] = limit;}
+    loop pair in writes {math_word_updates[MathWord(nodes.ptr[pair[0]].b)] = true;}
+    return true
+}
+math_decrement_counter=(s:MathWord writes:array<[int64 int64]>):>bool=>$unsafe {
+    if writes.length not=? 1 {return false}
+    let l:MathWord=MathWord(nodes.ptr[s].sym)
+    let update=math_update_value(writes.ptr[0][0] l)
+    let loop_=writes.ptr[0][1]
+    if update =? 0 or loop_ <=? 0 or nodes.ptr[loop_].kind not=? 'while_' or nodes.ptr[update].op not=? int32<overflow='wrap'>(59) {return false}
+    let step:MathWord=MathWord(nodes.ptr[update].b)
+    if nodes.ptr[step].kind not=? 'int_lit' or nodes.ptr[step].ival not=? 1 {return false}
+    return math_decrement_guard(MathWord(nodes.ptr[loop_].a) l)
+}
+math_decrement_guard=(cond:MathWord l:MathWord depth:MathWord=0):>bool=>$unsafe {
+    if depth >? 32 {return false}
+    if nodes.ptr[cond].kind =? 'and_' {
+        return math_decrement_guard(MathWord(nodes.ptr[cond].a) l depth + 1) or math_decrement_guard(MathWord(nodes.ptr[cond].b) l depth + 1)
+    }
+    if nodes.ptr[cond].kind not=? 'binary' or nodes.ptr[cond].aux not=? 0 {return false}
+    let a=word_integer_value(MathWord(nodes.ptr[cond].a))
+    let b=word_integer_value(MathWord(nodes.ptr[cond].b))
+    if nodes.ptr[cond].op =? int32<overflow='wrap'>(73) {return math_local_is(a l) and math_proven_word(b)}
+    if nodes.ptr[cond].op =? int32<overflow='wrap'>(71) {return math_local_is(b l) and math_proven_word(a)}
+    return false
+}
+math_float_binary=(e:MathWord to:MathWord):>int64=>$unsafe {
+    if nodes.ptr[e].kind not=? 'binary' or nodes.ptr[e].aux not=? 0 or target_wasm {return -1}
+    let op=cx_token_values.ptr[MathWord(nodes.ptr[e].op)]
+    if op not=? 'plus' and op not=? 'minus' and op not=? 'star' {return -1}
+    let a:MathWord=MathWord(nodes.ptr[e].a)
+    let b:MathWord=MathWord(nodes.ptr[e].b)
+    if not math_proven_word(a) or not math_proven_word(b) {return -1}
+    let x=freeze_scalar(math_word_expr(a) T_INT)
+    let y=math_word_expr(b)
+    let value=e_bin(int_op(op true) VI x y)
+    let bad:MathWord=0
+    if op =? 'star' {
+        bad=e_bin('ne' VI e_bin('mulhs' VI x y) e_bin('shrs' VI value e_iconst(63)))
+    }
+    else {
+        let left=e_bin('xor' VI x value)
+        let right=e_bin('xor' VI (if op =? 'plus' {y} else {x}) (if op =? 'plus' {value} else {y}))
+        bad=e_bin('lts' VI e_bin('and_' VI left right) e_iconst(0))
+    }
+    let out=vreg(VF)
+    iff(e_bin('eq' VI bad e_iconst(0)));
+    e_mov(out e_un('i2f' VF value));
+    els();
+    let old=ir_cold
+    ir_cold=true
+    let operation=if op =? 'plus' {0} else if op =? 'minus' {1} else {2}
+    e_mov(out e_call(rt("__mi_word_float") [x y e_iconst(operation)] VF));
+    ir_cold=old
+    endc();
+    if to =? T_FLOAT {return out}
+    return e_un('f2f' VS out)
+}
+math_value_arm=(b:MathWord):>int64=>$unsafe {
+    if nodes.ptr[b].kind not=? 'block' or nodes.ptr[b].aux =? 0 or nkids(b) not=? 1 {return 0}
+    let s=kid(b 0)
+    if nodes.ptr[s].kind not=? 'exprstmt' {return 0}
+    return MathWord(nodes.ptr[s].a)
+}
+math_addend_bound=(e0:MathWord index:MathWord bound:MathWord):>int64=>$unsafe {
+    let e=word_integer_value(e0)
+    if e =? 0 {return -1}
+    if math_local_is(e index) {return bound}
+    if nodes.ptr[e].kind =? 'int_lit' and not has_flag(e NF_U64) and nodes.ptr[e].ival not=? -9223372036854775807 - 1 {return abs(nodes.ptr[e].ival)}
+    if nodes.ptr[e].kind =? 'unary' and nodes.ptr[e].op =? int32<overflow='wrap'>(59) {return math_addend_bound(MathWord(nodes.ptr[e].a) index bound)}
+    if nodes.ptr[e].kind =? 'if_' {
+        let a=math_addend_bound(math_value_arm(MathWord(nodes.ptr[e].b)) index bound)
+        let b=math_addend_bound(math_value_arm(MathWord(nodes.ptr[e].c)) index bound)
+        if a >=? 0 and b >=? 0 {return max(a b)}
+    }
+    return -1
+}
+math_accumulator_for=(s:MathWord):>bool=>$unsafe {
+    if not math_has_mutable or math_versioning or dbg_on or nodes.ptr[s].aux not=? 0 {return false}
+    let it:MathWord=MathWord(nodes.ptr[s].a)
+    let start:MathWord=MathWord(nodes.ptr[it].a)
+    let end_:MathWord=MathWord(nodes.ptr[it].b)
+    let index:MathWord=MathWord(nodes.ptr[s].sym)
+    if nodes.ptr[start].kind not=? 'int_lit' or nodes.ptr[start].ival not=? 0 or end_ =? 0 or has_flag(it NF_STEP) or has_flag(it NF_INCLUSIVE) {return false}
+    if not stable_loop_index(index) or not math_word_bound(end_) or not plain_read(word_integer_value(end_)) {return false}
+    math_prepare_writes();
+    let site=math_loop_sites.get(s) ?? 0
+    if site <=? 0 {return false}
+    let l:MathWord=MathWord(nodes.ptr[MathWord(nodes.ptr[site].a)].sym)
+    let active=false
+    loop scope in scope_locals {
+        if scope.contains(l) {active=true}
+    }
+    if math_word_regs.has(l) or not active {return false}
+    let flags:MathWord=MathWord(locals.ptr[l].flags)
+    if flags & (LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_EXPOSED) not=? 0 {return false}
+    let update=math_update_value(site l)
+    if update =? 0 or nodes.ptr[update].op not=? int32<overflow='wrap'>(58) {return false}
+    # This inexpensive guard permits over two billion trips. Larger ranges,
+    # existing big values, and sums too close to a word boundary stay exact.
+    let cap:MathWord=2147483647
+    let addend:MathWord=MathWord(nodes.ptr[update].b)
+    let bound=math_addend_bound(addend index cap)
+    if bound <? 0 or bound >? 9223372036854775807 // cap {return false}
+    let room=9223372036854775807 - cap * bound
+    let place=local_place(l true)
+    let initial=read_place(place T_MATH_INT)
+    let word=math_untag(initial)
+    let guard=e_bin('eq' VI math_tag(initial) e_iconst(0))
+    guard=e_bin('and_' VI guard e_bin('les' VI math_count(end_) e_iconst(cap)))
+    guard=e_bin('and_' VI guard e_bin('and_' VI e_bin('ges' VI word e_iconst(-room)) e_bin('les' VI word e_iconst(room))))
+    let saved_regs=math_word_regs
+    let saved_limits=math_word_limits
+    let saved_updates=math_word_updates
+    iff(guard);
+    let acc=vreg(VI)
+    e_mov(acc word);
+    math_word_regs[l] = acc;
+    math_word_updates[update] = true;
+    math_word_updates[addend] = true;
+    math_versioning=true
+    math_fresh_loop_regs(s);
+    gen_for(s);
+    write_place(place T_MATH_INT math_word(acc).v);
+    math_word_regs=saved_regs
+    math_word_limits=saved_limits
+    math_word_updates=saved_updates
+    els();
+    let was_cold=ir_cold
+    ir_cold=true
+    math_fresh_loop_regs(s);
+    gen_for(s);
+    ir_cold=was_cold
+    math_versioning=false
+    math_word_regs=saved_regs
+    math_word_limits=saved_limits
+    math_word_updates=saved_updates
+    endc();
+    return true
+}
+math_fresh_loop_regs=(n:MathWord):>void=>$unsafe {
+    if n =? 0 {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' or k =? 'fn_' {return}
+    if k =? 'vardecl' or k =? 'for_' {
+        let l:MathWord=MathWord(nodes.ptr[n].sym)
+        if l >? 0 and MathWord(locals.ptr[l].owner) =? cur_fn and locals.ptr[l].offset <? 0 and MathWord(locals.ptr[l].flags) & (LF_ALIAS | LF_BYREF | LF_CAPTURE | LF_PARAM) =? 0 {
+            locals.ptr[l].vreg = int32<overflow='wrap'>(vreg(vt_of(MathWord(locals.ptr[l].type))));
+        }
+    }
+    math_fresh_loop_regs(MathWord(nodes.ptr[n].a));
+    math_fresh_loop_regs(MathWord(nodes.ptr[n].b));
+    if k not=? 'for_' {
+        math_fresh_loop_regs(MathWord(nodes.ptr[n].c));
+        if k not=? 'partial' {math_fresh_loop_regs(MathWord(nodes.ptr[n].d));}
+    }
+    loop i in [0..nkids(n)) {math_fresh_loop_regs(kid(n i));}
+    loop i in [0..nkids2(n)) {math_fresh_loop_regs(kid2(n i));}
+}
+math_default_formatter=(f0:MathWord):>bool=>$unsafe {
+    let f=f0
+    loop _ in [0..4) {
+        if f <=? 0 or fns.ptr[f].decl =? 0 {return false}
+        let d:MathWord=MathWord(fns.ptr[f].decl)
+        let path=files.ptr[pos_file(nodes.ptr[d].pos)].path
+        let name=name_of(MathWord(nodes.ptr[d].name))
+        if path =? "{lib_dir}/math_int.jo" and name =? "__fmt" {return true}
+        if path not=? "{lib_dir}/core/fmt.jo" or name not=? "__dewy_fmt" {return false}
+        let body:MathWord=MathWord(fns.ptr[f].body)
+        if nodes.ptr[body].kind not=? 'block' or nkids(body) not=? 1 {return false}
+        let statement=kid(body 0)
+        if nodes.ptr[statement].kind not=? 'exprstmt' {return false}
+        let call:MathWord=MathWord(nodes.ptr[statement].a)
+        if nodes.ptr[call].kind not=? 'call' or nodes.ptr[call].aux not=? 0 {return false}
+        f=MathWord(nodes.ptr[call].sym)
+    }
+    return false
+}

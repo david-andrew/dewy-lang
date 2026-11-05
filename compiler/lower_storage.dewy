@@ -14,13 +14,14 @@ from p"util.jo" import (fatal ice intern name_of)
 from p"lower_helpers.dewy" import (field_list)
 from p"fused.jo" import (fused_on fz_note fz_r0)
 from p"expr.jo" import (is_map_type ntype)
-from p"math_lower.jo" import (math_payload_type math_tag math_word_captures)
+from p"math_lower.jo" import (math_word_captures)
 from p"ast.jo" import (nodes)
 from p"ownership.jo" import (owner_drop owner_element_live owner_forget_slot owner_hook_result owner_map_copies owner_register owner_stride owner_value owner_values ownership_copies)
 from p"ownership_types.dewy" import (ownership_copyable ownership_type)
 from p"facts.jo" import (positive_epoch)
 from p"units.jo" import (quantity_base)
 from p"ir_builders.dewy" import (e_addi e_bin e_block e_br e_brif e_call0 e_call1 e_call2 e_call3 e_copy e_else e_end e_fconst e_iconst e_if e_load e_loop e_mov e_slot e_store e_un e_zero emit is_kv kv_of new_slot vreg)
+from p"math_ops.dewy" import (math_payload_type math_tag)
 # Value storage, lifetime and structured control; state stays in lower.jo.
 LSWord:type=int64<overflow='wrap'>
 hdr_load=(p:LSWord off:LSWord):>int64=>$unsafe {
