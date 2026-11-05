@@ -1,0 +1,133 @@
+$runtime_checks
+from p"effect_library.jo" import (EffectClass effect_class_cache effect_class_text)
+from p"check.jo" import (LF_MUTPARAM fns locals)
+from p"types.jo" import (T_MATH_INT T_STR T_U8 T_VOID prune struct_targ types)
+from p"effects.jo" import (effect_scalar effect_share effect_value)
+from p"util.jo" import (files lib_root name_of pos_file)
+from p"expr.jo" import (is_fn_type is_map_type is_nd nd_elem)
+from p"ast.jo" import (nodes)
+from p"refine.jo" import (representation_type)
+# Demanded library classification; shared state has one owner in effect_library.jo.
+ClassWord:type=int64<overflow='wrap'>
+effect_library_reset=():>void=>$unsafe {
+    effect_class_cache=dict<int64 EffectClass>()
+    effect_class_text=dict<int64 bool>()
+}
+effect_library_class=(g:ClassWord):>EffectClass=>$unsafe {
+    let known=effect_class_cache.get(g)
+    if known not=? none {return known}
+    let c=effect_library_classify(g)
+    effect_class_cache[g] = c;
+    return c
+}
+# What a formatting leaf writes without a hook: text, a flag, a number or `int`.
+effect_library_leaf=(t0:ClassWord):>bool=>$unsafe {
+    let t=prune(t0)
+    if t =? T_STR or t =? T_MATH_INT {return true}
+    let k=types.ptr[t].kind
+    return k =? 'int_' or k =? 'float_' or k =? 'bool_'
+}
+# The buffer is a mutable byte array; the remaining parameters are leaves.
+effect_library_formatter=(g:ClassWord):>bool=>$unsafe {
+    let params=fns.ptr[g].params
+    if params.length <? 2 {return false}
+    let b=prune(ClassWord(locals.ptr[params.ptr[0]].type))
+    if ClassWord(locals.ptr[params.ptr[0]].flags) & LF_MUTPARAM =? 0 or types.ptr[b].kind not=? 'array' or prune(ClassWord(types.ptr[b].elem)) not=? T_U8 {return false}
+    loop i in [1..params.length) {
+        if not effect_library_leaf(ClassWord(locals.ptr[params.ptr[i]].type)) {return false}
+    }
+    return true
+}
+effect_library_classify=(g:ClassWord):>EffectClass=>$unsafe {
+    if g <=? 0 or g >=? fns.length {return EffectClass.unclassified}
+    let d:ClassWord=ClassWord(fns.ptr[g].decl)
+    if d =? 0 or nodes.ptr[d].kind not=? 'fn_' or (lib_root as array<uint8>).length =? 0 {return EffectClass.unclassified}
+    let path=files.ptr[pos_file(nodes.ptr[d].pos)].path
+    if not starts_with(path lib_root) {return EffectClass.unclassified}
+    let file=remove_prefix(path lib_root)
+    if file =? "/core/str.jo" or file =? "/std/graphemes.jo" or file =? "/std/dewy.jo" {effect_class_text[g] = true;}
+    let name=name_of(ClassWord(nodes.ptr[d].name))
+    # Exact builtin declarations: these return shape/data snapshots or their
+    # lengths, without element hooks or shape assertions.
+    if file =? "/std/nd.jo" and name in? ["__nd_length" "ndim" "size" "flatten"] and fns.ptr[g].params.length =? 1 {
+        let t=representation_type(ClassWord(locals.ptr[fns.ptr[g].params.ptr[0]].type))
+        if is_nd(t) and effect_share(nd_elem(t)) {return EffectClass.reads}
+    }
+    if file =? "/core/fmt.jo" or file =? "/math_int.jo" {
+        if name in? ["__fmt" "__dewy_fmt" "__fmt_elem" "__dewy_fmt_elem" "__fmt_u64" "__fmt_hex" "__fmt_float" "__fmt_fixed"] {
+            # (an interpolation's writer, `"{name}{row}"`: it appends a leaf to
+            # its own buffer, so a helper that formats keeps its caller's roots)
+            if not effect_library_formatter(g) {return EffectClass.unclassified}
+            effect_class_text[g] = true;
+            return EffectClass.allocates
+        }
+        if name =? "__fmt_spec" {
+            if not effect_library_formatter(g) {return EffectClass.unclassified}
+            effect_class_text[g] = true;
+            return EffectClass.allocates_panics
+        }
+        if name =? "format" and fns.ptr[g].params.length =? 2 and effect_library_leaf(ClassWord(locals.ptr[fns.ptr[g].params.ptr[0]].type)) {return EffectClass.allocates_panics}
+        return EffectClass.unclassified
+    }
+    if file =? "/core/rt.jo" {
+        if name in? ["__str_eq" "__str_cmp" "__mem_eq" "__str_hash" "__str_khash" "__hash_bytes"] {return EffectClass.reads}
+        # (not __str_append or __buf_finish: they write through a raw pointer)
+        if name in? ["__str_concat" "__str_from_bytes" "__str_new" "__buf_append_str" "__buf_append_raw" "__buf_byte" "__buf_reserve"] {return EffectClass.allocates}
+        return EffectClass.unclassified
+    }
+    if file =? "/core/str.jo" {
+        if name in? ["find" "rfind" "find_byte" "contains" "starts_with" "ends_with" "count" "hash" "__has_byte" "__has_char" "__memchr"] {return EffectClass.reads}
+        if name in? ["trim" "trim_start" "trim_end" "split" "words" "lines" "join" "replace" "upper" "lower" "__str_from" "__buf_finish_val" "__case_text"] {return EffectClass.allocates}
+        return EffectClass.unclassified
+    }
+    if file =? "/math_runtime.jo" {
+        if name =? "__mi_parse_word" {return EffectClass.reads}
+        if name in? ["__mi_parse" "__mi_parse_limited" "__mi_parse_slow"] {return EffectClass.allocates}
+        return EffectClass.unclassified
+    }
+    if file =? "/std/graphemes.jo" {
+        if name =? "__dewy_string_length" {return EffectClass.reads}
+        # (a search from a grapheme position fails for a negative one)
+        if name =? "__dewy_find" or name =? "__dewy_rfind" {return if fns.ptr[g].params.length =? 2 {EffectClass.allocates} else {EffectClass.allocates_panics}}
+        if name =? "__dewy_string_index" or name =? "__dewy_string_slice" {return EffectClass.allocates_panics}
+        return EffectClass.unclassified
+    }
+    if file =? "/std/dewy.jo" {
+        if name =? "is_empty" and fns.ptr[g].params.length =? 1 and prune(ClassWord(locals.ptr[fns.ptr[g].params.ptr[0]].type)) =? T_STR {return EffectClass.reads}
+        # (a character class collects the text's graphemes and reads the
+        # embedded Unicode table)
+        if name in? ["is_alpha" "is_digit" "is_space" "is_alnum"] and fns.ptr[g].params.length =? 1 and prune(ClassWord(locals.ptr[fns.ptr[g].params.ptr[0]].type)) =? T_STR {return EffectClass.allocates}
+        if name =? "remove_prefix" or name =? "remove_suffix" {return EffectClass.allocates}
+        if name =? "__dewy_byte_slice" {return EffectClass.allocates_panics}
+    # (a dictionary lookup by a word or text key hashes and compares the key
+    # with builtin operations and reads the table; `[]` panics on a missing
+    # key. As facts' fact_map_reads_only: a const table read in a helper)
+    }
+    if file =? "/core/map.jo" and name in? ["get" "contains" "has" "[]"] and fns.ptr[g].params.length =? 2 {
+        let m=representation_type(ClassWord(locals.ptr[fns.ptr[g].params.ptr[0]].type))
+        let k=representation_type(ClassWord(locals.ptr[fns.ptr[g].params.ptr[1]].type))
+        if is_map_type(m) and (effect_scalar(k) or k =? T_STR) and effect_share(struct_targ(ClassWord(types.ptr[m].st) 1)) {
+            return if name =? "[]" {EffectClass.allocates_panics} else {EffectClass.reads}
+    # (the exact numbers' Dewy library: value code over word arrays that calls
+    # only arithmetic, text and math builtins and `panic`, with no global
+    # state. Reviewed, it allocates, may fail and writes only its own `@`
+    # parameters, so rational arithmetic in a helper keeps its caller's roots)
+        }
+    }
+    if file =? "/bigint.dewy" or file =? "/rational.dewy" {
+        loop l in fns.ptr[g].params {
+            let t=representation_type(ClassWord(locals.ptr[l].type))
+            if is_fn_type(t) or ClassWord(locals.ptr[l].flags) & LF_MUTPARAM =? 0 and not effect_value(t) {return EffectClass.unclassified}
+        }
+        if not effect_value(ClassWord(fns.ptr[g].ret)) and ClassWord(fns.ptr[g].ret) not=? T_VOID {return EffectClass.unclassified}
+        effect_class_text[g] = true;
+        return EffectClass.allocates_panics
+    # (`set"..."`: a fresh set of the text's graphemes, as a character class
+    # collects them; it writes only its own result)
+    }
+    if file =? "/std/dewy_sets.jo" and name =? "set" and fns.ptr[g].params.length =? 1 and prune(ClassWord(locals.ptr[fns.ptr[g].params.ptr[0]].type)) =? T_STR {
+        effect_class_text[g] = true;
+        return EffectClass.allocates
+    }
+    return EffectClass.unclassified
+}
