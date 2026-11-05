@@ -1,6 +1,6 @@
 $runtime_checks
 from p"effect_types.dewy" import (EffectAtom EffectContract EffectEvent PlaceIdentity)
-from p"effects.jo" import (EffectBody EffectEventKey EffectPolicy EffectSummary effect_bodies effect_body_cache effect_body_owner effect_body_panics effect_bound_sites effect_bounds_proven effect_contracts effect_declared effect_event_index effect_final effect_footprints_only effect_for_marks effect_inference_busy effect_ix_locals effect_ix_nodes effect_limit effect_obligations effect_panics_reset effect_plain_cache effect_policy effect_seen effect_serial effect_share_cache effect_solving effect_source_row effect_stack effect_summaries effect_syntax effect_value_cache effects_active loan_owners)
+from p"effects.jo" import (EffectBody EffectEventKey EffectPolicy EffectSummary effect_bodies effect_body_cache effect_body_owner effect_body_panics effect_bound_sites effect_bounds_proven effect_contracts effect_declared effect_event_index effect_final effect_footprints_only effect_for_marks effect_inference_busy effect_ix_locals effect_ix_nodes effect_limit effect_obligations effect_plain_cache effect_policy effect_seen effect_serial effect_share_cache effect_solving effect_source_row effect_stack effect_summaries effect_syntax effect_value_cache effects_active loan_owners)
 from p"check.jo" import (FK_LAMBDA check_fn_body decl_info decl_infos fns globals main_fn)
 from p"icount.jo" import (IC_EFFECTS ic_phase ic_restore)
 from p"ast.jo" import (NF_GENERIC has_flag kid nkids nodes)
@@ -17,6 +17,7 @@ from p"isolation.jo" import (isolation_children)
 from p"places.jo" import (place_append place_parents places_reset)
 from p"concurrency.jo" import (ParSafeVia concurrency_calls concurrency_tasks parsafe_req parsafe_fns parsafe_work concurrency_runtime_needed concurrency_ffi_start concurrency_block_memo)
 from p"directives.jo" import dir_row_origin
+from p"panic_inventory.dewy" import (effect_panics_reset)
 # Effect demand and finalization; shared state has one owner in effects.jo.
 ControlWord:type=int64<overflow='wrap'>
 effects_reset=():>void=>$unsafe {
