@@ -1,0 +1,226 @@
+$runtime_checks
+from p"effect_types.dewy" import (EffectAtom EffectEvent PlaceIdentity)
+from p"effect_library.jo" import (EffectClass effect_class_text)
+from p"effects.jo" import (EffectEdge effect_bound_sites effect_bounds_proven effect_limit effect_oom_frame effect_policy effect_summaries effects_active)
+from p"dewy_reader_types.dewy" import (EffectKind)
+from p"check.jo" import (FK_INIT FK_PARTIAL LF_MUTPARAM fns lib_dir locals)
+from p"expr.jo" import (IN is_fn_type is_map_type ntype)
+from p"ast.jo" import (NF_EXTERN NF_INBOUNDS NF_U64 RANGE_EXHAUSTION has_flag nodes)
+from p"types.jo" import (T_MATH_INT T_STR T_VOID fields fixed_len layout prune struct_targ structs telem tkind types)
+from p"effect_graph.dewy" import (effect_add effect_declared_row effect_opaque)
+from p"effect_classifiers.dewy" import (effect_library_class)
+from p"effect_values.dewy" import (effect_scalar effect_signature_value effect_value)
+from p"facts.jo" import (fact_pure_intrinsic fact_range_assumed fact_string_call fn_in_lib)
+from p"util.jo" import (fatal files name_of pos_file)
+from p"ownership.jo" import (ownership_decls)
+from p"ownership_types.dewy" import (ownership_type)
+from p"panic_inventory.dewy" import (panic_format_literal panic_format_spec)
+from p"refine.jo" import (representation_type)
+# Effect cost and signature inventory; shared state has one owner in effects.jo.
+EffectCostsWord:type=int64<overflow='wrap'>
+# A reviewed library operation's class (effect_library.jo) as its summary: its
+# residual costs, and a write of each mutable parameter.
+effect_library_summary=(f:EffectCostsWord c:EffectClass d:EffectCostsWord):>void=>$unsafe {
+    if c =? EffectClass.allocates or c =? EffectClass.allocates_panics {effect_add(f EffectEvent[EffectAtom['alloc'] d]);}
+    if c =? EffectClass.allocates_panics {effect_add(f EffectEvent[EffectAtom['panic'] d]);}
+    loop i in [0..fns.ptr[f].params.length) {
+        if EffectCostsWord(locals.ptr[fns.ptr[f].params.ptr[i]].flags) & LF_MUTPARAM not=? 0 {effect_add(f EffectEvent[EffectAtom['write' PlaceIdentity['formal' f i + 1]] d]);}
+    }
+}
+# A site that answers for its callee's one failure: a string index or slice
+# (the caller's obligation where the library states it: its facts discharge
+# it), or a format specification the library accepts for the value, written
+# as a literal (`{x:.2f}`, `format(x ".2f")`).
+effect_caller_obligation=(n:EffectCostsWord):>bool=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if k =? 'call' {return fact_string_call(n) >=? 2 or nodes.ptr[n].aux =? 0 and nodes.ptr[n].sym >? 0 and panic_format_literal(n)}
+    return k =? 'pair' and nodes.ptr[n].sval >=? 0 and panic_format_spec(name_of(EffectCostsWord(nodes.ptr[n].sval)) representation_type(ntype(EffectCostsWord(nodes.ptr[n].a))))
+}
+# Reviewed intrinsic identities, assigned by name resolution, never filenames
+# or user spelling. -1 means unclassified. Bits are residual may-costs, not
+# authority to mutate the actual; place access is collected independently.
+effect_intrinsic_cost=(id:IN):>int64=>$unsafe {
+    if fact_pure_intrinsic(id) {return 0}
+    if id =? IN.fixed_abs {return 0}
+    if id =? IN.len or id =? IN.arrcap or id =? IN.sizeof or id =? IN.alignof or id =? IN.zeroed or id =? IN.mul_hi {return 0}
+    if id =? IN.hash {return 0}
+    if id =? IN.static_assert {return 0}
+    if id =? IN.push or id =? IN.insert or id =? IN.reserve or id =? IN.resize or id =? IN.extend or id =? IN.fill {
+        return (1 << 2) | (1 << 3) | (1 << 5)
+    }
+    if id =? IN.pop or id =? IN.remove or id =? IN.clear or id =? IN.truncate {
+        return (1 << 2) | (1 << 3) | (1 << 5)
+    }
+    if id =? IN.fmt_struct or id =? IN.json_fields or id =? IN.fmt_elem or id =? IN.dewy_fmt or id =? IN.dewy_fmt_elem {
+        return (1 << 2) | (1 << 10)
+    }
+    if id =? IN.panic or id =? IN.assert or id =? IN.runtime_assert or id =? IN.unreachable {return 1 << 5}
+    return -1
+}
+# One reporting seam for implementation plans. This deliberately records may
+# costs before optimizations; later planners may only discharge them with
+# shared placement/ownership evidence, never a hoped-for lowering choice.
+effect_plan_cost=(f:EffectCostsWord n:EffectCostsWord mask:EffectCostsWord):>void=>$unsafe {
+    if mask <? 0 {
+        effect_opaque(f n);
+        return
+    }
+    loop i in [2..10 + 1) {
+        if mask & (1 << i) not=? 0 {
+            let kind:EffectKind=match i {
+                <2> => 'alloc'
+                <3> => 'detach'
+                <4> => 'costly_copy'
+                <5> => 'panic'
+                <6> => 'io'
+                <7> => 'block'
+                <8> => 'spawn'
+                <9> => 'escape'
+                <10> => 'opaque'
+                _ => 'opaque'
+            }
+            effect_add(f EffectEvent[EffectAtom[kind] n]);
+        }
+    }
+}
+# Lowering may introduce checked intrinsics after helper discovery. A demanded
+# summary must already cover their costs; otherwise fail closed before emission.
+# Ordinary compilation does not consult or allocate effect state here.
+effect_lower_intrinsic=(f:EffectCostsWord n:EffectCostsWord):>void=>$unsafe {
+    if not effects_active and effect_policy.prohibitions =? 0 {return}
+    if f <=? 0 or f >=? effect_limit or not effect_summaries.ptr[f].done {return}
+    # (a reviewed library class stands for its whole body)
+    if effect_library_class(f) not=? EffectClass.unclassified {return}
+    # (an explicit-allocation-failure frame: counted as allocation by its scan)
+    if effect_oom_frame(n) {return}
+    if nodes.ptr[n].aux2 =? int32<overflow='wrap'>(RANGE_EXHAUSTION) and (effect_bounds_proven.has(n) or fact_range_assumed(n)) {return}
+    let mask=effect_intrinsic_cost(nodes.ptr[n].aux as IN)
+    let covered:EffectCostsWord=0
+    loop event in effect_summaries.ptr[f].events {
+        if event.atom.kind =? 'opaque' {return}
+        covered |= match event.atom.kind {
+            <'read'> => 1
+            <'write'> => 2
+            <'alloc'> => 4
+            <'detach'> => 8
+            <'costly_copy'> => 16
+            <'panic'> => 32
+            <'io'> => 64
+            <'block'> => 128
+            <'spawn'> => 256
+            <'escape'> => 512
+            <'opaque'> => 1024
+            <'remainder'> => 2048
+        };
+    }
+    if mask <? 0 or mask & ~covered not=? 0 {
+        fatal(nodes.ptr[n].pos "effect implementation plan introduced an unclassified intrinsic cost after verification");
+    }
+}
+# Drop authority belongs to the owner even on early exits or failed later
+# construction. Inline components contribute their own hook edges; unproved
+# indirect layouts remain blocked by the ownership planner.
+effect_cleanup=(f:EffectCostsWord t0:EffectCostsWord n:EffectCostsWord p:PlaceIdentity depth:EffectCostsWord=0):>void=>$unsafe {
+    let t=representation_type(t0)
+    if depth >? 32 {
+        effect_opaque(f n);
+        return
+    }
+    if tkind(t) =? 'array' or tkind(t) =? 'fixed' {
+        effect_cleanup(f telem(t) n p depth + 1);
+        return
+    }
+    if tkind(t) not=? 'struct_' {return}
+    layout(t);
+    let si:EffectCostsWord=EffectCostsWord(types.ptr[t].st)
+    let g:EffectCostsWord=EffectCostsWord(structs.ptr[si].drop_fn)
+    if g not=? 0 {effect_summaries.ptr[f].edges.push(EffectEdge[g n [p]]);}
+    if ownership_decls.length =? 0 {return}
+    if depth >? 32 {
+        effect_opaque(f n);
+        return
+    }
+    loop i in [0..EffectCostsWord(structs.ptr[si].nfields)) {
+        let ft:EffectCostsWord=EffectCostsWord(fields.ptr[EffectCostsWord(structs.ptr[si].fields) + i].type)
+        if ownership_type(ft) {effect_cleanup(f ft n p depth + 1);}
+    }
+}
+# An element access can fail unless its index is proven in bounds: by the
+# checker (a constant into a fixed array, a generated in-bounds index), by an
+# unsigned index type covering a fixed array, or by the owner body's facts.
+effect_bounds=(f:EffectCostsWord n:EffectCostsWord):>void=>$unsafe {
+    if has_flag(n NF_INBOUNDS) or effect_bounds_proven.has(n) {return}
+    let ix:EffectCostsWord=EffectCostsWord(nodes.ptr[n].b)
+    let t=representation_type(ntype(EffectCostsWord(nodes.ptr[n].a)))
+    if tkind(t) =? 'fixed' {
+        if nodes.ptr[ix].kind =? 'int_lit' and not has_flag(ix NF_U64) and nodes.ptr[ix].ival >=? 0 and nodes.ptr[ix].ival <? fixed_len(t) {return}
+        let it=prune(ntype(ix))
+        if types.ptr[it].kind =? 'int_' and not types.ptr[it].sign and EffectCostsWord(types.ptr[it].bits) <? 32 and (1 << EffectCostsWord(types.ptr[it].bits)) <=? fixed_len(t) {return}
+    }
+    effect_failure(f n);
+}
+# A possible failure at n (an index, a divisor, a refinement check) unless the
+# owner body's facts discharge it; the facts probe answers each site.
+effect_failure=(f:EffectCostsWord n:EffectCostsWord):>void=>$unsafe {
+    if effect_bounds_proven.has(n) or fact_range_assumed(n) {return}
+    effect_bound_sites.push([f n]);
+    effect_add(f EffectEvent[EffectAtom['panic'] n]);
+}
+# Whether facts may treat a call of f as opaque by its signature alone, without
+# visiting its call tree: f takes or returns a value that is not plain. A
+# superset of effect_visit's signature checks, which accept shares
+# (effect_share) and reviewed library classes: forgetting more is sound.
+# Bundled dictionary removal hashes/compares a builtin key and retires an
+# entry in its own mutable receiver. This is a write footprint only; the
+# full cost/panic inventory still reads the body. With hook-free values, no callback or
+# cleanup can write a sibling/global. The library owns its slot bookkeeping.
+# O(1) identity tests and the existing cached share-type query, on demand.
+effect_map_remove=(f:EffectCostsWord):>bool=>$unsafe {
+    let d:EffectCostsWord=EffectCostsWord(fns.ptr[f].decl)
+    if d =? 0 or name_of(EffectCostsWord(nodes.ptr[d].name)) not=? "remove" or fns.ptr[f].params.length not=? 2 {return false}
+    if files.ptr[pos_file(nodes.ptr[d].pos)].path not=? "{lib_dir}/core/map.jo" {return false}
+    let m=representation_type(EffectCostsWord(locals.ptr[fns.ptr[f].params.ptr[0]].type))
+    if not is_map_type(m) or EffectCostsWord(locals.ptr[fns.ptr[f].params.ptr[0]].flags) & LF_MUTPARAM =? 0 {return false}
+    let key=representation_type(EffectCostsWord(locals.ptr[fns.ptr[f].params.ptr[1]].type))
+    if not effect_scalar(key) and key not=? T_MATH_INT and key not=? T_STR {return false}
+    return effect_value(struct_targ(EffectCostsWord(types.ptr[m].st) 1))
+}
+# Bundled array readers whose bodies only read their arguments: visited like
+# the program's own functions (effect_visit's value checks still apply), so a
+# `T?` result or an array of records does not forget the caller's roots.
+effect_array_reader=(f:EffectCostsWord):>bool=>$unsafe {
+    let d:EffectCostsWord=EffectCostsWord(fns.ptr[f].decl)
+    if d =? 0 or not (name_of(EffectCostsWord(nodes.ptr[d].name)) in? ["get" "contains" "index_of" "is_empty" "first" "last"]) {return false}
+    return files.ptr[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/core/array.jo"
+}
+# (a reviewed text operation's class is its summary: it writes only its own
+# mutable parameters, so its callers keep their roots. Asked only of a library
+# function its signature would make opaque: a reader, or a text member a
+# program calls; the runtime's and formatting's helpers stay opaque, which
+# keeps their library callers from walking whole call trees)
+effect_signature_opaque=(f:EffectCostsWord):>bool=>$unsafe {
+    if not effect_signature_opaque_by_type(f) {return false}
+    if not fn_in_lib(f) {return true}
+    let c=effect_library_class(f)
+    return c =? EffectClass.unclassified or c not=? EffectClass.reads and not effect_class_text.has(f)
+}
+effect_signature_opaque_by_type=(f:EffectCostsWord):>bool=>$unsafe {
+    if effect_map_remove(f) {return false}
+    let d:EffectCostsWord=EffectCostsWord(fns.ptr[f].decl)
+    if fns.ptr[f].state not=? 2 or fns.ptr[f].body =? 0 or fns.ptr[f].kind =? FK_INIT or (d not=? 0 and has_flag(d NF_EXTERN)) {
+        return not (d not=? 0 and has_flag(d NF_EXTERN) and effect_declared_row(f) not=? 0)
+    }
+    if fns.ptr[f].caps.length not=? 0 or fns.ptr[f].kind =? FK_PARTIAL or fns.ptr[f].cabi {return true}
+    # (`int`s and arrays of words or `int`s are shares effect_visit accepts;
+    # text and records of them stay opaque rather than walk the library's
+    # formatting and text trees)
+    # (a program's own function with text in its signature, a method returning
+    # `void | Error[message=...]`, is visited: its summary is the program's)
+    let own=not fn_in_lib(f) or effect_array_reader(f)
+    if not effect_signature_value(EffectCostsWord(fns.ptr[f].ret)) and EffectCostsWord(fns.ptr[f].ret) not=? T_VOID and not (own and effect_value(EffectCostsWord(fns.ptr[f].ret))) {return true}
+    loop l in fns.ptr[f].params {
+        let t=representation_type(EffectCostsWord(locals.ptr[l].type))
+        if EffectCostsWord(locals.ptr[l].flags) & LF_MUTPARAM =? 0 and not effect_signature_value(t) and not is_fn_type(t) and not (own and effect_value(t)) {return true}
+    }
+    return false
+}

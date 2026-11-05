@@ -50,6 +50,7 @@ use 'effect_sites.dewy'
 use 'effect_control.dewy'
 use 'panic_inventory.dewy'
 use 'effect_sources.dewy'
+use 'effect_costs.dewy'
 
 struct EffectEdge:
     callee: int
@@ -168,94 +169,6 @@ effect_bound_sites: (int, int)[]
 # (parallel bodies ask concurrency.jo directly)
 effect_blocks_demanded = false
 effect_bounds_proven: {int: bool} = {}
-
-# A reviewed library operation's class (effect_library.jo) as its summary: its
-# residual costs, and a write of each mutable parameter.
-effect_library_summary = (f: int, c: EffectClass, d: int):
-    if c == .allocates or c == .allocates_panics: effect_add(f, EffectEvent(EffectAtom(.alloc), d))
-    if c == .allocates_panics: effect_add(f, EffectEvent(EffectAtom(.panic), d))
-    loop i in [0..fns[f].params.len()):
-        if int(locals[fns[f].params[i]].flags) & LF_MUTPARAM != 0: effect_add(f, EffectEvent(EffectAtom(.write, PlaceIdentity(.formal, f, i + 1)), d))
-
-# A site that answers for its callee's one failure: a string index or slice
-# (the caller's obligation where the library states it: its facts discharge
-# it), or a format specification the library accepts for the value, written
-# as a literal (`{x:.2f}`, `format(x ".2f")`).
-effect_caller_obligation = (n: int) -> bool:
-    k = nodes[n].kind
-    if k == .call: return fact_string_call(n) >= 2 or nodes[n].aux == 0 and nodes[n].sym > 0 and panic_format_literal(n)
-    k == .pair and nodes[n].sval >= 0 and panic_format_spec(name_of(int(nodes[n].sval)), representation_type(ntype(int(nodes[n].a))))
-
-# Reviewed intrinsic identities, assigned by name resolution, never filenames
-# or user spelling. -1 means unclassified. Bits are residual may-costs, not
-# authority to mutate the actual; place access is collected independently.
-effect_intrinsic_cost = (id: IN) -> int:
-    if fact_pure_intrinsic(id): return 0
-    if id == .fixed_abs: return 0
-    if id == .len or id == .arrcap or id == .sizeof or id == .alignof or id == .zeroed or id == .mul_hi: return 0
-    if id == .hash: return 0 # resolved value hooks are separate call edges
-    if id == .static_assert: return 0 # erased
-    if id == .push or id == .insert or id == .reserve or id == .resize or id == .extend or id == .fill:
-        return (1 << int(EffectKind.alloc)) | (1 << int(EffectKind.detach)) | (1 << int(EffectKind.panic))
-    if id == .pop or id == .remove or id == .clear or id == .truncate:
-        return (1 << int(EffectKind.alloc)) | (1 << int(EffectKind.detach)) | (1 << int(EffectKind.panic))
-    if id == .fmt_struct or id == .json_fields or id == .fmt_elem or id == .dewy_fmt or id == .dewy_fmt_elem:
-        return (1 << int(EffectKind.alloc)) | (1 << int(EffectKind.opaque))
-    if id == .panic or id == .assert or id == .runtime_assert or id == .unreachable: return 1 << int(EffectKind.panic)
-    -1
-
-# One reporting seam for implementation plans. This deliberately records may
-# costs before optimizations; later planners may only discharge them with
-# shared placement/ownership evidence, never a hoped-for lowering choice.
-effect_plan_cost = (f: int, n: int, mask: int):
-    if mask < 0:
-        effect_opaque(f, n)
-        return
-    loop i in [int(EffectKind.alloc)..int(EffectKind.opaque) + 1):
-        if mask & (1 << i) != 0: effect_add(f, EffectEvent(EffectAtom(i as EffectKind), n))
-
-# Lowering may introduce checked intrinsics after helper discovery. A demanded
-# summary must already cover their costs; otherwise fail closed before emission.
-# Ordinary compilation does not consult or allocate effect state here.
-effect_lower_intrinsic = (f: int, n: int):
-    if not effects_active and effect_policy.prohibitions == 0: return
-    if f <= 0 or f >= effect_limit or not effect_summaries[f].done: return
-    # (a reviewed library class stands for its whole body)
-    if effect_library_class(f) != .unclassified: return
-    # (an explicit-allocation-failure frame: counted as allocation by its scan)
-    if effect_oom_frame(n): return
-    if nodes[n].aux2 == i32(RANGE_EXHAUSTION) and (effect_bounds_proven.has(n) or fact_range_assumed(n)): return
-    mask = effect_intrinsic_cost(nodes[n].aux as IN)
-    covered = 0
-    loop event in effect_summaries[f].events:
-        if event.atom.kind == .opaque: return
-        covered |= 1 << int(event.atom.kind)
-    if mask < 0 or mask & ~covered != 0:
-        fatal(nodes[n].pos, "effect implementation plan introduced an unclassified intrinsic cost after verification")
-
-# Drop authority belongs to the owner even on early exits or failed later
-# construction. Inline components contribute their own hook edges; unproved
-# indirect layouts remain blocked by the ownership planner.
-effect_cleanup = (f: int, t0: int, n: int, p: PlaceIdentity, depth: int = 0):
-    t = representation_type(t0)
-    if depth > 32:
-        effect_opaque(f, n)
-        return
-    if tkind(t) == .array or tkind(t) == .fixed:
-        effect_cleanup(f, telem(t), n, p, depth + 1)
-        return
-    if tkind(t) != .struct_: return
-    layout(t)
-    si = int(types[t].st)
-    g = int(structs[si].drop_fn)
-    if g != 0: effect_summaries[f].edges.push(EffectEdge(g, n, [p]))
-    if ownership_decls.len() == 0: return
-    if depth > 32:
-        effect_opaque(f, n)
-        return
-    loop i in [0..int(structs[si].nfields)):
-        ft = int(fields[int(structs[si].fields) + i].type)
-        if ownership_type(ft): effect_cleanup(f, ft, n, p, depth + 1)
 
 # Locals never cross call edges. Externally visible roots use owner-qualified
 # formal ordinals, global declarations, or conservatively opaque provenance.
@@ -382,26 +295,6 @@ effect_route = (n: int, depth: int = 0) -> PlaceIdentity:
         if effect_narrowed(alias) != alias: return effect_route(effect_narrowed(alias), depth + 1)
     if k == .field or k == .ident and nodes[n].aux == i32(int(SK.local)) and int(locals[int(nodes[n].sym)].flags) & LF_ALIAS != 0: return place_route(n, depth)
     place_scalar_root(n)
-
-# An element access can fail unless its index is proven in bounds: by the
-# checker (a constant into a fixed array, a generated in-bounds index), by an
-# unsigned index type covering a fixed array, or by the owner body's facts.
-effect_bounds = (f: int, n: int):
-    if has_flag(n, NF_INBOUNDS) or effect_bounds_proven.has(n): return
-    ix = int(nodes[n].b)
-    t = representation_type(ntype(int(nodes[n].a)))
-    if tkind(t) == .fixed:
-        if nodes[ix].kind == .int_lit and not has_flag(ix, NF_U64) and nodes[ix].ival >= 0 and nodes[ix].ival < fixed_len(t): return
-        it = prune(ntype(ix))
-        if types[it].kind == .int_ and not types[it].sign and int(types[it].bits) < 32 and (1 << int(types[it].bits)) <= fixed_len(t): return
-    effect_failure(f, n)
-
-# A possible failure at n (an index, a divisor, a refinement check) unless the
-# owner body's facts discharge it; the facts probe answers each site.
-effect_failure = (f: int, n: int):
-    if effect_bounds_proven.has(n) or fact_range_assumed(n): return
-    effect_bound_sites.push((f, n))
-    effect_add(f, EffectEvent(EffectAtom(.panic), n))
 
 # The selectors a target place evaluates: element indices and their bounds.
 effect_target_parts = (f: int, n: int, depth: int = 0):
@@ -1009,62 +902,6 @@ effect_scan_node = (f: int, n: int):
         loop j in [0..nkids(n)): effect_scan_node(f, kid(n, j))
     if mask & 32 != 0:
         loop j in [0..nkids2(n)): effect_scan_node(f, kid2(n, j))
-
-# Whether facts may treat a call of f as opaque by its signature alone, without
-# visiting its call tree: f takes or returns a value that is not plain. A
-# superset of effect_visit's signature checks, which accept shares
-# (effect_share) and reviewed library classes: forgetting more is sound.
-# Bundled dictionary removal hashes/compares a builtin key and retires an
-# entry in its own mutable receiver. This is a write footprint only; the
-# full cost/panic inventory still reads the body. With hook-free values, no callback or
-# cleanup can write a sibling/global. The library owns its slot bookkeeping.
-# O(1) identity tests and the existing cached share-type query, on demand.
-effect_map_remove = (f: int) -> bool:
-    d = int(fns[f].decl)
-    if d == 0 or name_of(int(nodes[d].name)) != "remove" or fns[f].params.len() != 2: return false
-    if files[pos_file(nodes[d].pos)].path != lib_dir + "/core/map.jo": return false
-    m = representation_type(int(locals[fns[f].params[0]].type))
-    if not is_map_type(m) or int(locals[fns[f].params[0]].flags) & LF_MUTPARAM == 0: return false
-    key = representation_type(int(locals[fns[f].params[1]].type))
-    if not effect_scalar(key) and key != T_MATH_INT and key != T_STR: return false
-    effect_value(struct_targ(int(types[m].st), 1))
-
-# Bundled array readers whose bodies only read their arguments: visited like
-# the program's own functions (effect_visit's value checks still apply), so a
-# `T?` result or an array of records does not forget the caller's roots.
-effect_array_reader = (f: int) -> bool:
-    d = int(fns[f].decl)
-    if d == 0 or not (name_of(int(nodes[d].name)) in ["get", "contains", "index_of", "is_empty", "first", "last"]): return false
-    files[pos_file(nodes[d].pos)].path == lib_dir + "/core/array.jo"
-
-# (a reviewed text operation's class is its summary: it writes only its own
-# mutable parameters, so its callers keep their roots. Asked only of a library
-# function its signature would make opaque: a reader, or a text member a
-# program calls; the runtime's and formatting's helpers stay opaque, which
-# keeps their library callers from walking whole call trees)
-effect_signature_opaque = (f: int) -> bool:
-    if not effect_signature_opaque_by_type(f): return false
-    if not fn_in_lib(f): return true
-    c = effect_library_class(f)
-    c == .unclassified or c != .reads and not effect_class_text.has(f)
-
-effect_signature_opaque_by_type = (f: int) -> bool:
-    if effect_map_remove(f): return false
-    d = int(fns[f].decl)
-    if fns[f].state != 2 or fns[f].body == 0 or fns[f].kind == FK_INIT or (d != 0 and has_flag(d, NF_EXTERN)):
-        return not (d != 0 and has_flag(d, NF_EXTERN) and effect_declared_row(f) != 0)
-    if fns[f].caps.len() != 0 or fns[f].kind == FK_PARTIAL or fns[f].cabi: return true
-    # (`int`s and arrays of words or `int`s are shares effect_visit accepts;
-    # text and records of them stay opaque rather than walk the library's
-    # formatting and text trees)
-    # (a program's own function with text in its signature, a method returning
-    # `void | Error[message=...]`, is visited: its summary is the program's)
-    own = not fn_in_lib(f) or effect_array_reader(f)
-    if not effect_signature_value(int(fns[f].ret)) and int(fns[f].ret) != T_VOID and not (own and effect_value(int(fns[f].ret))): return true
-    loop l in fns[f].params:
-        t = representation_type(int(locals[l].type))
-        if int(locals[l].flags) & LF_MUTPARAM == 0 and not effect_signature_value(t) and not is_fn_type(t) and not (own and effect_value(t)): return true
-    false
 
 # ---------------- panics ----------------
 # `panics` (docs/design/decisions.md, 2026-10-23): a function may fail a runtime
