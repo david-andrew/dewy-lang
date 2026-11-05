@@ -1,6 +1,6 @@
 $runtime_checks
 from p"ast.jo" import (NF_EXTERN has_flag kid nodes)
-from p"types.jo" import (T_MATH_INT T_VOID dt fields prune structs tkind types)
+from p"types.jo" import (T_MATH_INT T_VOID dt fields prune structs targ tkind types)
 from p"check.jo" import (check_struct_fields fns)
 from p"directives.jo" import (dir_scopes dir_value)
 from p"util.jo" import (fatal files intern name_of pos_file)
@@ -35,15 +35,31 @@ ffi_check_signature=(f:MoveWord decl:MoveWord):>void=>$unsafe {
     if MoveWord(fns.ptr[f].ret) not=? T_VOID {ffi_check_type(MoveWord(fns.ptr[f].ret) nodes.ptr[decl].pos extern_ false);}
 }
 ffi_check_type=(t0:MoveWord pos:MoveWord extern_:bool param:bool):>void=>$unsafe {
+    let seen:dict<int64 bool>=dict<int64 bool>()
+    ffi_check_nested_type(t0 pos extern_ param false @seen);
+}
+# Visit each callback signature once, including recursive function-pointer types.
+# Boundary checks remain demand-driven; work is linear in the signature graph.
+ffi_check_nested_type=(t0:MoveWord pos:MoveWord extern_:bool param:bool nested:bool @seen:dict<int64 bool>):>void=>$unsafe {
     let t=prune(t0)
     let k=types.ptr[t].kind
-    let side=if extern_ {"a `$extern` function"} else {"a `$export` function"}
+    let side=if nested {"a C function pointer"} else if extern_ {"a `$extern` function"} else {"a `$export` function"}
     if t =? T_MATH_INT {fatal(pos "`int` cannot cross the C boundary (its size is not fixed): {side} uses int32, int64, uint8, … instead");}
     if k =? 'ptr' {
         ffi_check_pointee(MoveWord(types.ptr[t].elem) pos);
         return
     }
-    if k =? 'int_' or k =? 'float_' or k =? 'bool_' or k =? 'cfn' {return}
+    if k =? 'cfn' {
+        if seen.has(t) {return}
+        seen[t]=true;
+        loop i in [0..MoveWord(types.ptr[t].nargs)) {
+            ffi_check_nested_type(targ(t i) pos extern_ true true @seen);
+        }
+        let ret=MoveWord(types.ptr[t].elem)
+        if prune(ret) not=? T_VOID {ffi_check_nested_type(ret pos extern_ false true @seen);}
+        return
+    }
+    if k =? 'int_' or k =? 'float_' or k =? 'bool_' {return}
     if k =? 'opt' and tkind(MoveWord(types.ptr[t].elem)) =? 'ptr' {
         ffi_check_pointee(MoveWord(types.ptr[prune(MoveWord(types.ptr[t].elem))].elem) pos);
         if extern_ {return}
