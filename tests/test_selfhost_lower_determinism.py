@@ -29,6 +29,8 @@ JO['lower.jo'] += 'in_lib = (p: int) -> bool: p >= 100000\nplace_var = (n: int) 
 JO['lower_analysis.dewy'] += r'''from p"lower.jo" import (place_var as stub_place_var)
 place_var=(n:int64):>int64=>stub_place_var(n)
 '''
+JO['lower_races.dewy'] = 'from p"lower.jo" import (in_lib as stub_in_lib)\nin_lib=(p:int64):>bool=>stub_in_lib(p)\n'
+JO['lower_races.jo'] = "use 'lower.jo'\n"
 JO['types.jo'] += 'prune = (t: int) -> int: t\ntype_str = (t: int) -> str: if types[t].bits == 42: "Rng" else: "Other"\n'
 DRIVER = BASE.split('lp_reset =')[0] + r'''
 use 'util.jo'

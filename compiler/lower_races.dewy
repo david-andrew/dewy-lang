@@ -1,0 +1,111 @@
+from p"concurrency.jo" import (parsafe_vouched)
+$runtime_checks
+from p"expr.jo" import (IN ntype)
+from p"check.jo" import (LF_CAPTURE fns lib_dir locals)
+from p"ast.jo" import (NF_MUT has_flag kid kid2 nkids nkids2 nodes)
+from p"lower_analysis.dewy" import (checked_call_mutmask place_var)
+from p"util.jo" import (fatal files name_of pos_file)
+from p"lower.jo" import (race_done)
+from p"types.jo" import (tkind)
+from p"lower_helpers.dewy" import (value_helper_calls)
+# Direct recursive lowering; shared state has one owner in lower.jo.
+LRWord:type=int64<overflow='wrap'>
+race_check=(callee:LRWord args:array<int64> pos:LRWord):>void=>$unsafe {
+    # (the library's own calls take care of threads themselves)
+    if in_lib(pos) {return}
+    let who=name_of(LRWord(nodes.ptr[LRWord(fns.ptr[callee].decl)].name))
+    loop a in args {
+        if tkind(ntype(a)) =? 'fn_' and not parsafe_vouched(a) {race_arg(a who);}
+    }
+}
+race_arg=(a:LRWord who:string):>void=>$unsafe {
+    let k=nodes.ptr[a].kind
+    if k =? 'conv' {race_arg(LRWord(nodes.ptr[a].a) who);}
+    else if k =? 'lambda' {race_scan(LRWord(fns.ptr[LRWord(nodes.ptr[a].sym)].body) LRWord(nodes.ptr[a].sym) who true);}
+    else if k =? 'fnref' {
+        let f:LRWord=LRWord(nodes.ptr[a].sym)
+        if nodes.ptr[a].aux =? 2 {race_scan(LRWord(fns.ptr[f].body) f who true);}
+        else {race_named(f who);}
+    }
+    else if k =? 'partial' {
+        if nodes.ptr[a].aux =? 1 {race_arg(LRWord(nodes.ptr[a].a) who);}
+        else {race_named(LRWord(nodes.ptr[a].sym) who);}
+    }
+    else {fatal(nodes.ptr[a].pos "{who} runs this function on many threads at once, so the compiler checks it for data races, which it can only do for a function it can see: pass a function by name or a lambda");}
+}
+parallel_direct=(f:LRWord pos:LRWord):>void=>$unsafe {
+    if f >? 0 and fns.ptr[f].parallel_api and not in_lib(pos) {
+        fatal(pos "'{name_of(LRWord(nodes.ptr[LRWord(fns.ptr[f].decl)].name))}' runs the function it is given on many threads at once, so it can only be called directly (where the compiler checks that function), not used as a value or partially applied");
+    }
+}
+type_as_value=(e:LRWord):>void=>$unsafe {
+    let what="a type"
+    if tkind(ntype(e)) =? 'module' {what="a module"}
+    fatal(nodes.ptr[e].pos "this is {what}, not a value (a value of a type is made by calling it: `T()`)");
+}
+in_lib=(pos:LRWord):>bool=>$unsafe {
+    let fi=pos_file(pos)
+    return fi >=? 0 and fi <? files.length and starts_with(files.ptr[fi].path "{lib_dir}/")
+}
+race_named=(f:LRWord who:string):>void=>$unsafe {
+    if race_done.has(f) or fns.ptr[f].body =? 0 {return}
+    race_done[f] = true;
+    # (the core and standard libraries take care of threads themselves)
+    if fns.ptr[f].decl not=? 0 {
+        let fi=pos_file(LRWord(nodes.ptr[LRWord(fns.ptr[f].decl)].pos))
+        if fi >=? 0 and fi <? files.length and starts_with(files.ptr[fi].path "{lib_dir}/") and ((find(files.ptr[fi].path "/core/") ?? -1) >=? 0 or (find(files.ptr[fi].path "/std/") ?? -1) >=? 0) {return}
+    }
+    race_scan(LRWord(fns.ptr[f].body) f who false);
+}
+race_target=(t:LRWord f:LRWord who:string captures:bool pos:LRWord):>void=>$unsafe {
+    # (writing through a pointer changes memory the program manages itself, not the variable)
+    let n=place_var(t)
+    if n =? 0 {return}
+    let nm=name_of(LRWord(nodes.ptr[n].name))
+    if nodes.ptr[n].aux =? int32<overflow='wrap'>(2) {
+        fatal(pos "{who} runs this function on many threads at once, so it must not change the global '{nm}' (a data race): return values instead");
+    }
+    if captures and nodes.ptr[n].aux =? int32<overflow='wrap'>(1) {
+        let l:LRWord=LRWord(nodes.ptr[n].sym)
+        if LRWord(locals.ptr[l].owner) not=? f or LRWord(locals.ptr[l].flags) & LF_CAPTURE not=? 0 {
+            fatal(pos "{who} runs this function on many threads at once, so it must not change '{nm}', a variable it captured (a data race): return values instead");
+        }
+    }
+}
+race_scan=(n:LRWord f:LRWord who:string captures:bool):>void=>$unsafe {
+    if n =? 0 {return}
+    loop called in value_helper_calls(n) {race_named(called who);}
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' {return}
+    if k =? 'assign' {race_target(LRWord(nodes.ptr[n].a) f who captures nodes.ptr[n].pos);}
+    else if k =? 'intrinsic' and nkids(n) >? 0 {
+        let id:LRWord=LRWord(nodes.ptr[n].aux)
+        if id =? int64(IN.push) or id =? int64(IN.pop) or id =? int64(IN.insert) or id =? int64(IN.remove) or id =? int64(IN.clear) or id =? int64(IN.reserve) or id =? int64(IN.resize) or id =? int64(IN.truncate) or id =? int64(IN.extend) {
+            race_target(kid(n 0) f who captures nodes.ptr[n].pos);
+        }
+    }
+    else if k =? 'call' {
+        let mm=checked_call_mutmask(n)
+        loop i in [0..nkids(n)) {
+            if mm & (1 << i) not=? 0 {race_target(kid(n i) f who captures nodes.ptr[kid(n i)].pos);}
+        }
+        let aux:LRWord=LRWord(nodes.ptr[n].aux)
+        if aux =? 0 and nodes.ptr[n].sym >? 0 {race_named(LRWord(nodes.ptr[n].sym) who);}
+        # (calling a function value: which one, the compiler cannot tell; the library's are its own,
+        # and a callback parameter's are its function's callers' to check)
+        else if aux =? 1 and not in_lib(nodes.ptr[n].pos) and not parsafe_vouched(LRWord(nodes.ptr[n].a)) {
+            fatal(nodes.ptr[n].pos "{who} runs this code on many threads at once, so the compiler checks it for data races, which it cannot do through a call of a function value: call a function by name");
+        }
+    }
+    else if k =? 'for_' and has_flag(n NF_MUT) {race_target(LRWord(nodes.ptr[n].a) f who captures nodes.ptr[n].pos);}
+    # (a part of "...{x}...": formatted by a __fmt function, which may be the program's)
+    else if k =? 'pair' and nodes.ptr[n].sym >? 0 {race_named(LRWord(nodes.ptr[n].sym) who);}
+    race_scan(LRWord(nodes.ptr[n].a) f who captures);
+    race_scan(LRWord(nodes.ptr[n].b) f who captures);
+    if k not=? 'for_' {
+        race_scan(LRWord(nodes.ptr[n].c) f who captures);
+        if k not=? 'partial' {race_scan(LRWord(nodes.ptr[n].d) f who captures);}
+    }
+    loop i in [0..nkids(n)) {race_scan(kid(n i) f who captures);}
+    loop i in [0..nkids2(n)) {race_scan(kid2(n i) f who captures);}
+}
