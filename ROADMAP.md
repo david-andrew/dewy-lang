@@ -7,15 +7,15 @@ day; keep it under 150 lines. Accepted designs live in [docs/design](docs/design
 
 ## North star
 
-| Measure | Now (2026-11-02) | Goal |
+| Measure | Now (2026-11-05) | Goal |
 |---|---|---|
-| Acceptance ladder, design surface | 122/122 (saturated; new rungs needed) | all |
+| Acceptance ladder, design surface | 130/130 | all |
 | Tier-4 flagship programs (1–5k lines each) | 7/7 pass | all pass |
-| No traps by default | census 2,580 sites in 1,008 of 2,252 programs (10-31: 2,604), down from 3,600 on 10-26 | ordinary code proves without opt-ins |
-| Compile throughput, single thread, default build, every processed line | flagships 160.2k lines/s (min 100_rtos_kernel 127.2k, 99_dewy_frontend 130.8k) | 200–250k on every flagship |
+| No traps by default | census 2,557 sites in 1,032 of 2,252 programs, down from 3,600 on 10-26 | ordinary code proves without opt-ins |
+| Compile throughput, single thread, default build, every processed line | flagships 162.9k lines/s (min 100_rtos_kernel 129.5k, 99_dewy_frontend 133.1k) | 200–250k on every flagship |
 | Hello-world compile | 7.5 ms (instruction-derived) | ≤20 ms |
 | Kernels vs C -O2 (time, default) | broadcast 0.75×, Jacobi 0.59×, arena 3.2×; mergesort 0.62× OpenMP | ≤1.2× |
-| Quick / full suite | 34 s quiet / 4:56 median loaded (nightly tier) | ≤30 s / ≤5 min |
+| Quick / full suite | 30–34 s / about 3:40–5:45 loaded (nightly tier) | ≤30 s / ≤5 min |
 
 Ladder: `python3 -m tools.core ladder` (`tests/ladder/ladder.json`). Compile:
 `speed` (single-thread instructions; the gate) and `speed --cycles` for layout
@@ -24,26 +24,23 @@ changes. Wall clock only on a quiet pinned machine or a CI runner. Kernels:
 
 ## Next
 
-1. **No traps: ordinary code proves** (top capability). #95, #96, #98 and #106
-   are implemented. Remaining families: index bounds and integer fit on inputs
-   without stated contracts (diagnostics name the contract), loop-carried
-   selector lengths. Stepped ranges measured zero corpus demand. Dogfood rounds
-   alternate discovery and fix.
-2. **Compile speed** (200–250k lines/s on every flagship). 99_dewy_frontend
-   needs ~44% fewer instructions per line. Of the four strategy programs,
-   register allocation, isel and dense storage measured ≤1.6% each; the facts
-   representation gave 1–2% on 99/100 and is the only lever with exposure left.
-   A strategy decision is open (see the pending questions).
-3. **Self-hosting** ([readiness](docs/design/self_hosting.md)): the front end, the
-   checker state, the optimizer, the shared backend analysis, and the wasm, arm64
-   and x64 emitters run in Dewy, with the statement layer, the expression
-   dispatcher, binary and coercion checking, and the ownership and loans
-   passes, module collection and intrinsics. Import cycles are now allowed
-   (#140), so next: give the call group's ~15 small helpers Dewy homes and move
-   the group, then check.jo's value machinery, lowering
-   and facts/effects; close milestone 1 (Dewy owns all subsystem
-   execution), then milestone 3 (a pinned C-reproducible seed that retires the
-   frozen twins).
+1. **No traps: ordinary code proves** (top capability). Most remaining census
+   sites truly lack program evidence, so diagnostics must name what to write.
+   Dogfood rounds alternate discovery and fix. Coverage rounds on value layouts,
+   refinements and concurrency found 23 bug causes, all fixed; run more on
+   untested areas (FFI, GPU/packed/SOA layouts, other native architectures).
+2. **Compile speed** (200–250k lines/s on every flagship). 99 and 100 need
+   33–35% fewer instructions. GCC O3+LTO on the compiler would give about 23%;
+   they would still need about 8–11% less compiler work. Allocator, isel, dense
+   storage, frames, optimizer structure, normalization and non-leaf inlining all
+   bounded under 1%, and profile-driven work cuts have nothing left bounded at
+   0.5%. The next round needs a new structural idea to test, not another profile.
+3. **Self-hosting** ([readiness](docs/design/self_hosting.md)): the front end,
+   checker state, statement and expression layers, call group, ownership and
+   loans, the optimizer, the emitters and nearly all of lower.jo run in Dewy.
+   Next: lower.jo's last functions and ir.jo, then the rest of expr.jo, check.jo
+   and facts/effects; close milestone 1 (Dewy owns all subsystem execution), then
+   milestone 3 (a pinned C-reproducible seed that retires the frozen twins).
 4. **Runtime speed vs C:** `push` and `arena` growth bookkeeping is bounded
    below 1.5× (closed); the rest of their gap is arithmetic and reference
    cleanup. Fork-join one-worker overhead ≤1.03×; mergesort's gap to OpenMP
