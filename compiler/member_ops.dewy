@@ -1,0 +1,269 @@
+$runtime_checks
+from p"ir_operands.dewy" import (IR_ARGS IR_DEF IR_INDIRECT)
+from p"member_lowering.jo" import (MemberLiteral MemberLowered MemberMatch member_lower_active member_lower_literals)
+from p"ir.jo" import (M_INDEX VI dbg_on ir ir_operand_layout ir_positions)
+from p"lower.jo" import (building cur_block cur_block_i lower_zeros ro_starts rodata tl_items)
+from p"main.jo" import (debug_vars)
+from p"ir_builders.dewy" import (e_addi e_bin e_brif e_end e_load e_loop e_mov is_kv k_vreg_new kv_of vreg)
+from p"lower_primitives.dewy" import (e_daddr)
+from p"fused.jo" import (fused_on fz_note_raw)
+from p"lower_group.dewy" import (gen_stmt)
+from p"ast.jo" import (kid kids nkids nodes)
+from p"check.jo" import (locals target_macos target_windows)
+from p"member_replay.jo" import (member_scope_locals member_scopes member_templates member_trace)
+from p"util.jo" import (name_of pos_str)
+from p"lower_scalars.dewy" import (push_i64)
+# Direct recursive lowering; shared state has one owner in member_lowering.jo.
+MoveWord:type=int64<overflow='wrap'>
+member_lower_text=(e:MoveWord reg:MoveWord):>void=>$unsafe {
+    if not member_templates.ptr[member_lower_active].positions.has(nodes.ptr[e].pos) {return}
+    member_lower_literals.push(MemberLiteral[reg nodes.ptr[e].pos 1 MoveWord(nodes.ptr[e].sval)]);
+}
+member_lower_word=(e:MoveWord value:MoveWord):>int64=>$unsafe {
+    # A private constant distinguishes this use from unrelated equal constants.
+    # It remains constant during lowering, so all ordinary decisions still apply.
+    let reg=k_vreg_new(value)
+    member_lower_literals.push(MemberLiteral[reg nodes.ptr[e].pos 0 value]);
+    return reg
+}
+member_match_reg=(@m:MemberMatch a:MoveWord b:MoveWord):>bool=>$unsafe {
+    if a <? 0 or b <? 0 {return a =? b}
+    let la=m.literal.ptr[a]
+    let lb=m.next_literal.ptr[b]
+    if la >=? 0 or lb >=? 0 {return la =? lb}
+    if is_kv(a) or is_kv(b) {return is_kv(a) and is_kv(b) and kv_of(a) =? kv_of(b)}
+    if a <? m.first.regs or a >=? m.first.reg_end {
+        let mapped=m.regs.ptr[a]
+        if mapped >=? 0 {return mapped =? b}
+        return a =? b
+    }
+    if b <? m.next.regs or b >=? m.next.reg_end or ir.vtypes.ptr[a] not=? ir.vtypes.ptr[b] {return false}
+    if m.regs.ptr[a] >=? 0 {return m.regs.ptr[a] =? b}
+    if m.reverse.ptr[b] >=? 0 {return false}
+    m.regs.ptr[a] = b;
+    m.reverse.ptr[b] = a;
+    return true
+}
+member_match_slot=(@m:MemberMatch a:MoveWord b:MoveWord):>bool=>$unsafe {
+    if a <? m.first.slots or a >=? m.first.slot_end {
+        let mapped=m.slots.ptr[a]
+        if mapped >=? 0 {return mapped =? b}
+        return a =? b
+    }
+    if b <? m.next.slots or b >=? m.next.slot_end or ir.slot_size.ptr[a] not=? ir.slot_size.ptr[b] or ir.slot_align.ptr[a] not=? ir.slot_align.ptr[b] {return false}
+    if m.slots.ptr[a] >=? 0 {return m.slots.ptr[a] =? b}
+    if m.slot_reverse.ptr[b] >=? 0 {return false}
+    m.slots.ptr[a] = b;
+    m.slot_reverse.ptr[b] = a;
+    return true
+}
+member_match_body=(@m:MemberMatch):>bool=>$unsafe {
+    let a=m.first
+    let b=m.next
+    if a.end - a.start not=? b.end - b.start or a.zero_end - a.zeros not=? b.zero_end - b.zeros or a.literals.length not=? b.literals.length {return false}
+    loop i in [0..a.literals.length) {
+        let x=a.literals.ptr[i]
+        let y=b.literals.ptr[i]
+        if x.kind not=? y.kind or x.pos not=? y.pos {return false}
+        m.literal.ptr[x.reg] = i;
+        m.next_literal.ptr[y.reg] = i;
+    }
+    let aa=member_scope_locals[a.scope]
+    let bb=member_scope_locals[b.scope]
+    if aa.length not=? bb.length {return false}
+    loop i in [0..aa.length) {
+        let x=locals.ptr[aa[i]]
+        let y=locals.ptr[bb[i]]
+        if x.type not=? y.type or x.flags not=? y.flags or (x.offset >=? 0) not=? (y.offset >=? 0) {return false}
+        if x.offset >=? 0 {
+            m.slots.ptr[MoveWord(x.offset)] = MoveWord(y.offset);
+        }
+        else {
+            m.regs.ptr[MoveWord(x.vreg)] = MoveWord(y.vreg);
+        }
+    }
+    let depth:MoveWord=0
+    loop i in [0..a.end - a.start) {
+        let x=ir.code.ptr[a.start + i]
+        let y=ir.code.ptr[b.start + i]
+        let op=x.op
+        if op not=? y.op or x.ty not=? y.ty or ir_positions.ptr[MoveWord(x.pos)] not=? ir_positions.ptr[MoveWord(y.pos)] {return false}
+        if op =? 'nop' {continue}
+        if op =? 'ret' or op =? 'brtable' or op =? 'zeroslots' {return false}
+        if (op =? 'load' or op =? 'store') and MoveWord(x.c) & M_INDEX not=? 0 {return false}
+        if op =? 'br' or op =? 'brif' {
+            if x.imm >=? depth {return false}
+        }
+        if op =? 'block' or op =? 'loop' or op =? 'if_' {depth += 1;}
+        if op =? 'end' {
+            depth -= 1;
+            if depth <? 0 {return false}
+        }
+        let mode=ir_operand_layout.ptr[MoveWord(((ir.code.ptr + a.start + i) as ptr<int32>)[0])]
+        if mode & IR_DEF not=? 0 {
+            if not member_match_reg(@m MoveWord(x.dst) MoveWord(y.dst)) {return false}
+        }
+        else if x.dst not=? y.dst {return false}
+        if op =? 'slot' {
+            if x.b not=? y.b or x.c not=? y.c {return false}
+            if not member_match_slot(@m MoveWord(x.a) MoveWord(y.a)) {return false}
+        }
+        else if mode & IR_ARGS not=? 0 {
+            if x.b not=? y.b {return false}
+            loop j in [0..MoveWord(x.b)) {
+                if not member_match_reg(@m MoveWord(ir.args.ptr[MoveWord(x.a) + j]) MoveWord(ir.args.ptr[MoveWord(y.a) + j])) {return false}
+            }
+            if mode & IR_INDIRECT not=? 0 {
+                if not member_match_reg(@m MoveWord(x.c) MoveWord(y.c)) {return false}
+            }
+            else if x.c not=? y.c {return false}
+        }
+        else {
+            let count=mode & 7
+            if count >? 0 {
+                if not member_match_reg(@m MoveWord(x.a) MoveWord(y.a)) {return false}
+            }
+            else if x.a not=? y.a {return false}
+            if count >? 1 {
+                if not member_match_reg(@m MoveWord(x.b) MoveWord(y.b)) {return false}
+            }
+            else if x.b not=? y.b {return false}
+            if count >? 2 {
+                if not member_match_reg(@m MoveWord(x.c) MoveWord(y.c)) {return false}
+            }
+            else if x.c not=? y.c {return false}
+        }
+        if op =? 'daddr' and m.literal.ptr[MoveWord(x.dst)] >=? 0 {continue}
+        if x.imm not=? y.imm {return false}
+    }
+    if depth not=? 0 {return false}
+    loop i in [0..a.zero_end - a.zeros) {
+        let x=lower_zeros.ptr[a.zeros + i]
+        let y=lower_zeros.ptr[b.zeros + i]
+        if x.mark >> 32 <? a.start or y.mark >> 32 <? b.start {return false}
+        if (x.mark >> 32) - a.start not=? (y.mark >> 32) - b.start or x.count not=? y.count {return false}
+        loop j in [0..x.count) {
+            let xx:MoveWord=MoveWord(ir.args.ptr[x.start + j])
+            let yy:MoveWord=MoveWord(ir.args.ptr[y.start + j])
+            if xx & 1 not=? yy & 1 {return false}
+            if xx & 1 not=? 0 {
+                if not member_match_reg(@m xx // 2 yy // 2) {return false}
+            }
+            else if not member_match_slot(@m xx // 2 yy // 2) {return false}
+        }
+    }
+    return true
+}
+member_lower_table=(parts:array<MemberLowered>):>int64=>$unsafe {
+    loop rodata.length % 8 not=? 0 {rodata.push(0);}
+    let base=rodata.length
+    ro_starts.push(base);
+    let width=parts.ptr[0].literals.length
+    # Relative offsets refer only within this block, including fused workers.
+    let text_at=width * parts.length * 8
+    let strings:array<string>=[]
+    loop part in parts {
+        loop literal in part.literals {
+            if literal.kind =? 0 {push_i64(@rodata literal.value);}
+            else {
+                let text=name_of(literal.value)
+                push_i64(@rodata text_at);
+                strings.push(text);
+                text_at += (24 + (text as array<uint8>).length + 1 + 7) // 8 * 8;
+            }
+        }
+    }
+    loop text in strings {
+        push_i64(@rodata -1);
+        push_i64(@rodata (text as array<uint8>).length);
+        push_i64(@rodata (text as array<uint8>).length + 1);
+        loop byte in (text as array<uint8>) {rodata.push(byte);}
+        rodata.push(0);
+        loop rodata.length % 8 not=? 0 {rodata.push(0);}
+    }
+    if fused_on {fz_note_raw(base 8);}
+    return base
+}
+member_lower_emit=(parts:array<MemberLowered>):>int64=>$unsafe {
+    let first=parts.ptr[0]
+    let body=ir.code[first.start..first.end)
+    ir.code.truncate(first.start);
+    lower_zeros.truncate(first.zero_end);
+    let table=e_daddr(member_lower_table(parts))
+    let row=vreg(VI)
+    e_mov(row table);
+    let limit=e_addi(table parts.length * first.literals.length * 8)
+    e_loop();
+    let values:dict<int64 int64>=dict<int64 int64>()
+    loop i in [0..first.literals.length) {
+        let literal=first.literals.ptr[i]
+        let value=e_load(VI row i * 8 8)
+        if literal.kind =? 1 {value=e_bin('add' VI table value)}
+        else {
+            ir.vtypes.ptr[literal.reg] = int8<overflow='wrap'>(VI);
+            e_mov(literal.reg value);
+        }
+        values[literal.reg] = value;
+    }
+    let shift=ir.code.length - first.start
+    loop i in [first.zeros..first.zero_end) {lower_zeros.ptr[i].mark += shift << 32;}
+    loop original in body {
+        let ins=original
+        if ins.op =? 'daddr' {
+            let cached_value=values.get(MoveWord(ins.dst))
+    if cached_value not=? none {let value=cached_value;
+                ins.op = 'mov';
+                ins.a = int32<overflow='wrap'>(value);
+                ins.imm = 0;
+            }
+        }
+        ir.code.push(ins);
+    }
+    e_mov(row e_addi(row first.literals.length * 8));
+    e_brif(e_bin('ltu' VI row limit) 0);
+    return e_end()
+}
+member_lower_block=(b:MoveWord):>bool=>$unsafe {
+    # Foreign OS formats keep byte identity until their runtime is exercised.
+    if target_windows or target_macos {return false}
+    if member_lower_active >=? 0 or dbg_on or debug_vars or tl_items.length not=? 0 or building.length not=? 0 {return false}
+    let index=member_scopes.get(kid(b 0)) ?? (-1)
+    if index <? 0 or not member_templates.ptr[index].okay or nkids(b) not=? member_templates.ptr[index].texts.length {return false}
+    # A checking-only mode is also a byte-identity oracle for fallback lowering.
+    if (env("DEWY_MEMBERS") ?? "") =? "checked" {return false}
+    loop scope in kids(b) {
+        if (member_scopes.get(scope) ?? (-1)) not=? index or not member_scope_locals.has(scope) {return false}
+    }
+    let parts:array<MemberLowered>=[]
+    loop i in [0..nkids(b)) {
+        let scope=kid(b i)
+        let part=MemberLowered[start = ir.code.length regs = ir.vtypes.length slots = ir.slot_size.length zeros = lower_zeros.length scope = scope]
+        member_lower_active=index
+        member_lower_literals=[]
+        cur_block=b
+        cur_block_i=i
+        gen_stmt(scope);
+        member_lower_active=-1
+        part.end = ir.code.length;
+        part.reg_end = ir.vtypes.length;
+        part.slot_end = ir.slot_size.length;
+        part.zero_end = lower_zeros.length;
+        part.literals = member_lower_literals;
+        parts.push(part);
+    }
+    let first=parts.ptr[0]
+    let okay=first.literals.length >? 0
+    let m=MemberMatch[first = first regs = fill(-1 ir.vtypes.length) reverse = fill(-1 ir.vtypes.length) slots = fill(-1 ir.slot_size.length) slot_reverse = fill(-1 ir.slot_size.length) literal = fill(-1 ir.vtypes.length) next_literal = fill(-1 ir.vtypes.length)]
+    loop i in [1..parts.length) {
+        if not okay {break}
+        m.next = parts.ptr[i];
+        okay=member_match_body(@m)
+        # Only template keys are reused. Candidate ranges never overlap, so
+        # reverse maps and literal indices need no clearing between members.
+        loop v in [first.regs..first.reg_end) {m.regs.ptr[v] = -1;}
+        loop s in [first.slots..first.slot_end) {m.slots.ptr[s] = -1;}
+    }
+    if member_trace {print("member lowering {pos_str(nodes.ptr[b].pos)}: {okay}, {parts.length} members, {first.end - first.start} instructions\n" file=stderr);}
+    if okay {member_lower_emit(parts);}
+    return true
+}
